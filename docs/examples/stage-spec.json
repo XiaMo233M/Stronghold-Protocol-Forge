@@ -1,0 +1,49 @@
+{
+  "_comment": "创意工坊地图模板 spec。作者的职责只有三样：rows（19 行 × 21 字符的网格）、tiles（字符→地形图例）、devices（装置）。",
+  "_comment_rows": "**row 0 是最下面一行**（引擎约定）。每行必须正好 21 个字符。S = 敌方入口，E = 保护目标。",
+  "_comment_derived": "deployTiles / groundPaths / groundPathsWithDevices 全部由工具推导（server/sim/grid.js 的寻路），绝对不要手写——手写会让寻路与地图不一致。",
+  "_comment_glyphs": "常用字符见 shared/stageAuthoring.js 的 TILE_PALETTE：r 道路 f 地面 p 可部署地面 # 高台 X 阻隔 a 高台(不可部署) b 围栏 S 入口 E 目标 I/O 传送 m 沼泽 g 毒雾 d 深水区 i 源石污染",
+  "_comment_modes": "modes 决定这张图能被哪些模式选中：a stage enters a match only when the mode's stage list names it，加载器会把这张图追加进去（config 本身不允许工坊改写）。留空则永远选不中。",
+
+  "id": "ws_demo_map",
+  "name": "工坊示例图",
+  "weight": 50,
+  "modes": ["mode_single_normal", "mode_multi_normal"],
+
+  "rows": [
+    "rrrrrrrrrrrrrrrrrrrrr",
+    "rrrrrrrrrrrrrrrrrrrrr",
+    "rrrrrrrrrrrrrrrrrrrrr",
+    "rrrrrrrrrrrrrrrrrrrrr",
+    "rrrrrrrrrrrrrrrrrrrrr",
+    "rrrrrrrrrrrrrrrrrrrrr",
+    "rrrrrrrrrrrrrrrrrrrrr",
+    "rrrrrrrrrrrrrrrrrrrrr",
+    "rrrrrrrrrrrrrrrrrrrrr",
+    "SrrrrrrrrrrrrrrrrrrrE",
+    "rrrrrrrrrrrrrrrrrrrrr",
+    "rrrrrrrrrrrrrrrrrrrrr",
+    "rrrrrrrrrrrrrrrrrrrrr",
+    "rrrr#####rrrrr#####rr",
+    "rrrrrrrrrrrrrrrrrrrrr",
+    "rrrrrrrrrrrrrrrrrrrrr",
+    "rrrrrrrrrrrrrrrrrrrrr",
+    "rrrrrrrrrrrrrrrrrrrrr",
+    "rrrrrrrrrrrrrrrrrrrrr"
+  ],
+
+  "tiles": {
+    "r": { "tileKey": "tile_road", "height": "LOW", "buildable": "ALL", "passable": "ALL", "groundPassable": true, "flyPassable": true, "special": null, "bb": {} },
+    "#": { "tileKey": "tile_wall", "height": "HIGH", "buildable": "RANGED", "passable": "FLY_ONLY", "groundPassable": false, "flyPassable": true, "special": null, "bb": {} },
+    "X": { "tileKey": "tile_forbidden", "height": "HIGH", "buildable": "NONE", "passable": "NONE", "groundPassable": false, "flyPassable": false, "special": null, "bb": {} },
+    "f": { "tileKey": "tile_floor", "height": "LOW", "buildable": "NONE", "passable": "ALL", "groundPassable": true, "flyPassable": true, "special": null, "bb": {} },
+    "S": { "tileKey": "tile_start", "height": "LOW", "buildable": "NONE", "passable": "ALL", "groundPassable": true, "flyPassable": true, "special": "start", "bb": {} },
+    "E": { "tileKey": "tile_end", "height": "LOW", "buildable": "NONE", "passable": "ALL", "groundPassable": true, "flyPassable": true, "special": "end", "bb": {} }
+  },
+
+  "devices": [
+    { "key": "trap_1105_accrate", "name": "阻隔工事", "alias": null, "pos": [11, 10], "dir": "UP", "hidden": false, "role": "crate" }
+  ],
+
+  "options": { "characterLimit": 8, "moveMultiplier": 0.5 }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "kit-demo",
+  "name": "深渊猎手（含行为层示例）",
+  "version": "0.1.0",
+  "author": "Stronghold Protocol workshop example",
+  "license": "CC0-1.0",
+  "description": "演示行为层的工坊包：chess.json 只用声明式黑板书（通用 kit 即可战斗），kits/chess_ws_abyss_hunter_a.js 额外挂了一个「常驻 +25% 攻击力」的天赋——这是黑板书表达不了、必须写代码的部分。复制到 workshop/kit-demo/ 即生效。",
+  "gameVersion": "0.1.3",
+  "content": [
+    "chess"
+  ],
+  "overrides": []
+}

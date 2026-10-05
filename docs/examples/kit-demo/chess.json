@@ -1,0 +1,424 @@
+{
+  "chess_ws_abyss_hunter_a": {
+    "tier": 5,
+    "isHidden": false,
+    "isDiy": false,
+    "visible": true,
+    "chessType": "NORMAL",
+    "name": "深渊猎手",
+    "appellation": "Abyss Hunter",
+    "charId": null,
+    "profession": "SNIPER",
+    "subProfessionId": "fastshot",
+    "subProfessionName": "fastshot",
+    "position": "RANGED",
+    "nationId": null,
+    "bonds": [],
+    "garrisonIds": [],
+    "price": 4,
+    "sellPrice": 1,
+    "immunities": {
+      "stun": false,
+      "silence": false,
+      "sleep": false,
+      "frozen": false,
+      "levitate": false
+    },
+    "rangeId": null,
+    "rangeGrid": [
+      [
+        1,
+        0
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ],
+      [
+        0,
+        2
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        -1,
+        0
+      ],
+      [
+        -1,
+        1
+      ],
+      [
+        -1,
+        2
+      ]
+    ],
+    "dmgType": "phys",
+    "attackKind": "ranged",
+    "projectile": "arrow",
+    "canHitFly": true,
+    "targetPriority": null,
+    "trait": {
+      "desc": "优先攻击空中单位",
+      "descRaw": "优先攻击空中单位",
+      "bb": {},
+      "bbStr": {},
+      "rangeGrid": null
+    },
+    "tokens": [],
+    "module": null,
+    "assets": {
+      "avatar": "char_1038_whitw2",
+      "portrait": "char_1038_whitw2",
+      "spine": "char_1038_whitw2",
+      "skillIcon": null,
+      "subProfIcon": null
+    },
+    "workshop": {
+      "schema": 1,
+      "id": "abyss_hunter"
+    },
+    "chessId": "chess_ws_abyss_hunter_a",
+    "baseId": "chess_ws_abyss_hunter_a",
+    "goldenId": "chess_ws_abyss_hunter_b",
+    "isGolden": false,
+    "rarity": 5,
+    "upgradeNum": 3,
+    "upgradeChessId": "chess_ws_abyss_hunter_b",
+    "status": {
+      "phase": 2,
+      "level": 1,
+      "skillLevel": 4,
+      "equipLevel": 0
+    },
+    "stats": {
+      "maxHp": 1500,
+      "atk": 480,
+      "def": 140,
+      "res": 0,
+      "cost": 18,
+      "blockCnt": 1,
+      "bat": 1,
+      "aspd": 100,
+      "respawnTime": 70,
+      "spRecovery": 1,
+      "hpRecoveryPerSec": 0,
+      "moveSpeed": 1,
+      "tauntLevel": 0,
+      "massLevel": 0,
+      "deployLimit": 1,
+      "deckStack": 0
+    },
+    "skill": {
+      "skillId": "skchr_ws_abyss_hunter",
+      "iconId": null,
+      "name": "贯穿射击",
+      "level": 4,
+      "desc": "攻击力+60%，攻击速度+40，攻击装有8发弹药，打完后技能结束（可充能1次）",
+      "descRaw": "攻击力+60%，攻击速度+40，攻击装有8发弹药，打完后技能结束（可充能1次）",
+      "skillType": "MANUAL",
+      "durationType": "AMMO",
+      "duration": 0,
+      "spType": "INCREASE_WITH_TIME",
+      "spCost": 30,
+      "initSp": 10,
+      "maxChargeTime": 1,
+      "increment": 1,
+      "bb": {
+        "atk": 0.6,
+        "attack_speed": 40,
+        "atk_scale": 1.6,
+        "trigger_time": 8
+      },
+      "bbStr": {},
+      "rangeId": null,
+      "rangeGrid": null,
+      "prefabId": null,
+      "overrideTokenKey": null,
+      "trigger": {
+        "rule": "DEFAULT",
+        "rawRule": "DEFAULT",
+        "customRangeGrid": null
+      },
+      "index": 0,
+      "isDefault": true
+    },
+    "skills": [
+      {
+        "skillId": "skchr_ws_abyss_hunter",
+        "iconId": null,
+        "name": "贯穿射击",
+        "level": 4,
+        "desc": "攻击力+60%，攻击速度+40，攻击装有8发弹药，打完后技能结束（可充能1次）",
+        "descRaw": "攻击力+60%，攻击速度+40，攻击装有8发弹药，打完后技能结束（可充能1次）",
+        "skillType": "MANUAL",
+        "durationType": "AMMO",
+        "duration": 0,
+        "spType": "INCREASE_WITH_TIME",
+        "spCost": 30,
+        "initSp": 10,
+        "maxChargeTime": 1,
+        "increment": 1,
+        "bb": {
+          "atk": 0.6,
+          "attack_speed": 40,
+          "atk_scale": 1.6,
+          "trigger_time": 8
+        },
+        "bbStr": {},
+        "rangeId": null,
+        "rangeGrid": null,
+        "prefabId": null,
+        "overrideTokenKey": null,
+        "trigger": {
+          "rule": "DEFAULT",
+          "rawRule": "DEFAULT",
+          "customRangeGrid": null
+        },
+        "index": 0,
+        "isDefault": true
+      }
+    ],
+    "talents": [
+      {
+        "index": 0,
+        "name": "猎手嗅觉",
+        "desc": "攻击空中单位时攻击力提升至115%",
+        "descRaw": "攻击空中单位时攻击力提升至115%",
+        "bb": {
+          "atk_scale": 1.15
+        },
+        "bbStr": {},
+        "rangeGrid": null,
+        "tokenKey": null,
+        "hidden": false,
+        "fromModule": false
+      }
+    ]
+  },
+  "chess_ws_abyss_hunter_b": {
+    "tier": 5,
+    "isHidden": false,
+    "isDiy": false,
+    "visible": true,
+    "chessType": "NORMAL",
+    "name": "深渊猎手",
+    "appellation": "Abyss Hunter",
+    "charId": null,
+    "profession": "SNIPER",
+    "subProfessionId": "fastshot",
+    "subProfessionName": "fastshot",
+    "position": "RANGED",
+    "nationId": null,
+    "bonds": [],
+    "garrisonIds": [],
+    "price": 4,
+    "sellPrice": 1,
+    "immunities": {
+      "stun": false,
+      "silence": false,
+      "sleep": false,
+      "frozen": false,
+      "levitate": false
+    },
+    "rangeId": null,
+    "rangeGrid": [
+      [
+        1,
+        0
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ],
+      [
+        0,
+        2
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        -1,
+        0
+      ],
+      [
+        -1,
+        1
+      ],
+      [
+        -1,
+        2
+      ]
+    ],
+    "dmgType": "phys",
+    "attackKind": "ranged",
+    "projectile": "arrow",
+    "canHitFly": true,
+    "targetPriority": null,
+    "trait": {
+      "desc": "优先攻击空中单位",
+      "descRaw": "优先攻击空中单位",
+      "bb": {},
+      "bbStr": {},
+      "rangeGrid": null
+    },
+    "tokens": [],
+    "module": null,
+    "assets": {
+      "avatar": "char_1038_whitw2",
+      "portrait": "char_1038_whitw2",
+      "spine": "char_1038_whitw2",
+      "skillIcon": null,
+      "subProfIcon": null
+    },
+    "workshop": {
+      "schema": 1,
+      "id": "abyss_hunter"
+    },
+    "chessId": "chess_ws_abyss_hunter_b",
+    "baseId": "chess_ws_abyss_hunter_a",
+    "goldenId": "chess_ws_abyss_hunter_b",
+    "isGolden": true,
+    "rarity": 5,
+    "upgradeNum": 0,
+    "upgradeChessId": null,
+    "status": {
+      "phase": 2,
+      "level": 60,
+      "skillLevel": 7,
+      "equipLevel": 0
+    },
+    "stats": {
+      "maxHp": 1900,
+      "atk": 620,
+      "def": 180,
+      "res": 0,
+      "cost": 18,
+      "blockCnt": 1,
+      "bat": 1,
+      "aspd": 100,
+      "respawnTime": 70,
+      "spRecovery": 1,
+      "hpRecoveryPerSec": 0,
+      "moveSpeed": 1,
+      "tauntLevel": 0,
+      "massLevel": 0,
+      "deployLimit": 1,
+      "deckStack": 0
+    },
+    "skill": {
+      "skillId": "skchr_ws_abyss_hunter",
+      "iconId": null,
+      "name": "贯穿射击",
+      "level": 7,
+      "desc": "攻击力+60%，攻击速度+40，攻击装有8发弹药，打完后技能结束（可充能1次）",
+      "descRaw": "攻击力+60%，攻击速度+40，攻击装有8发弹药，打完后技能结束（可充能1次）",
+      "skillType": "MANUAL",
+      "durationType": "AMMO",
+      "duration": 0,
+      "spType": "INCREASE_WITH_TIME",
+      "spCost": 30,
+      "initSp": 10,
+      "maxChargeTime": 1,
+      "increment": 1,
+      "bb": {
+        "atk": 0.6,
+        "attack_speed": 40,
+        "atk_scale": 1.6,
+        "trigger_time": 8
+      },
+      "bbStr": {},
+      "rangeId": null,
+      "rangeGrid": null,
+      "prefabId": null,
+      "overrideTokenKey": null,
+      "trigger": {
+        "rule": "DEFAULT",
+        "rawRule": "DEFAULT",
+        "customRangeGrid": null
+      },
+      "index": 0,
+      "isDefault": true
+    },
+    "skills": [
+      {
+        "skillId": "skchr_ws_abyss_hunter",
+        "iconId": null,
+        "name": "贯穿射击",
+        "level": 7,
+        "desc": "攻击力+60%，攻击速度+40，攻击装有8发弹药，打完后技能结束（可充能1次）",
+        "descRaw": "攻击力+60%，攻击速度+40，攻击装有8发弹药，打完后技能结束（可充能1次）",
+        "skillType": "MANUAL",
+        "durationType": "AMMO",
+        "duration": 0,
+        "spType": "INCREASE_WITH_TIME",
+        "spCost": 30,
+        "initSp": 10,
+        "maxChargeTime": 1,
+        "increment": 1,
+        "bb": {
+          "atk": 0.6,
+          "attack_speed": 40,
+          "atk_scale": 1.6,
+          "trigger_time": 8
+        },
+        "bbStr": {},
+        "rangeId": null,
+        "rangeGrid": null,
+        "prefabId": null,
+        "overrideTokenKey": null,
+        "trigger": {
+          "rule": "DEFAULT",
+          "rawRule": "DEFAULT",
+          "customRangeGrid": null
+        },
+        "index": 0,
+        "isDefault": true
+      }
+    ],
+    "talents": [
+      {
+        "index": 0,
+        "name": "猎手嗅觉",
+        "desc": "攻击空中单位时攻击力提升至115%",
+        "descRaw": "攻击空中单位时攻击力提升至115%",
+        "bb": {
+          "atk_scale": 1.15
+        },
+        "bbStr": {},
+        "rangeGrid": null,
+        "tokenKey": null,
+        "hidden": false,
+        "fromModule": false
+      }
+    ]
+  }
+}

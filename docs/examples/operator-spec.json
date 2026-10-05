@@ -1,0 +1,38 @@
+{
+  "_comment": "创意工坊干员模板 spec（docs/WORKSHOP.md §AI 生成）。把这份文件连同干员的技能文字描述与普通/精锐两套数值交给任意 AI，让它照此填好，然后运行：node tools/workshop-scaffold.mjs docs/examples/operator-spec.json --pack my-pack",
+  "_comment_stats": "stats.normal / stats.golden 就是你说的「普通和精锐两个状态的数值」。atk/def/res/maxHp 是面板值；bat 是攻击间隔（秒）；cost 是部署费用；blockCnt 是阻挡数。",
+  "_comment_skill": "skill.desc 直接放官方技能文字描述。bb 只允许用 docs/prompts/operator-pack.md 里列出的通用 kit 键——用了别的键，技能不会报错，但也不会有任何效果（校验器会警告）。",
+
+  "id": "abyss_hunter",
+  "name": "深渊猎手",
+  "appellation": "Abyss Hunter",
+  "tier": 5,
+  "profession": "SNIPER",
+  "subProfessionId": "fastshot",
+  "position": "RANGED",
+  "traitDesc": "优先攻击空中单位",
+  "assetsSpine": "char_1038_whitw2",
+  "stats": {
+    "normal": { "maxHp": 1500, "atk": 480, "def": 140, "res": 0, "cost": 18, "blockCnt": 1, "bat": 1.0, "respawnTime": 70 },
+    "golden": { "maxHp": 1900, "atk": 620, "def": 180, "res": 0, "cost": 18, "blockCnt": 1, "bat": 1.0, "respawnTime": 70 }
+  },
+  "skill": {
+    "name": "贯穿射击",
+    "desc": "攻击力+60%，攻击速度+40，攻击装有8发弹药，打完后技能结束（可充能1次）",
+    "skillType": "MANUAL",
+    "durationType": "AMMO",
+    "spType": "INCREASE_WITH_TIME",
+    "spCost": 30,
+    "initSp": 10,
+    "maxChargeTime": 1,
+    "bb": {
+      "atk": 0.6,
+      "attack_speed": 40,
+      "atk_scale": 1.6,
+      "trigger_time": 8
+    }
+  },
+  "talents": [
+    { "name": "猎手嗅觉", "desc": "攻击空中单位时攻击力提升至115%", "bb": { "atk_scale": 1.15 } }
+  ]
+}

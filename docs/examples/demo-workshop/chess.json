@@ -1,0 +1,819 @@
+{
+  "chess_char_ws_demo_01_a": {
+    "chessId": "chess_char_ws_demo_01_a",
+    "baseId": "chess_char_ws_demo_01_a",
+    "goldenId": "chess_char_ws_demo_01_b",
+    "isGolden": false,
+    "tier": 5,
+    "identifier": 86,
+    "isHidden": false,
+    "isDiy": false,
+    "visible": true,
+    "chessType": "NORMAL",
+    "shopSortId": 1,
+    "charId": "char_1032_excu2",
+    "name": "守望者·示例",
+    "appellation": "Executor the Ex Foedere (workshop demo)",
+    "rarity": 6,
+    "profession": "WARRIOR",
+    "subProfessionId": "reaper",
+    "subProfessionName": "收割者",
+    "position": "MELEE",
+    "nationId": "laterano",
+    "bonds": [
+      "lateranoShip",
+      "visiShip"
+    ],
+    "garrisonIds": [
+      "garrison_23_a",
+      "garrison_55_a"
+    ],
+    "price": 4,
+    "sellPrice": 1,
+    "upgradeNum": 3,
+    "upgradeChessId": "chess_char_ws_demo_01_b",
+    "status": {
+      "phase": 2,
+      "level": 1,
+      "skillLevel": 4,
+      "equipLevel": 0
+    },
+    "stats": {
+      "maxHp": 2067,
+      "atk": 596,
+      "def": 396,
+      "res": 0,
+      "cost": 23,
+      "blockCnt": 2,
+      "bat": 1.3,
+      "aspd": 100,
+      "respawnTime": 70,
+      "spRecovery": 1,
+      "hpRecoveryPerSec": 0,
+      "moveSpeed": 1,
+      "tauntLevel": 0,
+      "massLevel": 0,
+      "deployLimit": 1,
+      "deckStack": 0
+    },
+    "immunities": {
+      "stun": false,
+      "silence": false,
+      "sleep": false,
+      "frozen": false,
+      "levitate": false
+    },
+    "rangeId": "1-3",
+    "rangeGrid": [
+      [
+        1,
+        1
+      ],
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ],
+      [
+        -1,
+        1
+      ]
+    ],
+    "dmgType": "phys",
+    "attackKind": "melee",
+    "projectile": "none",
+    "canHitFly": false,
+    "targetPriority": null,
+    "trait": {
+      "desc": "无法被友方角色治疗，攻击造成群体伤害，每攻击到一个敌人回复自身50生命，最大生效数等于阻挡数",
+      "descRaw": "无法被友方角色治疗，攻击造成<@ba.kw>群体伤害</>，每攻击到一个敌人回复自身<@ba.kw>50</>生命，最大生效数等于阻挡数",
+      "bb": {
+        "value": 50
+      },
+      "bbStr": {},
+      "rangeGrid": null
+    },
+    "skill": {
+      "skillId": "skchr_excu2_2",
+      "iconId": "skchr_excu2_2",
+      "name": "近身铳斗",
+      "level": 4,
+      "desc": "攻击力+45%，防御力+45%，阻挡数+1，受到敌人的近战攻击时有20%几率闪避并补充1颗弹药\n攻击装有12发弹药，打完后结束（可随时停止技能）",
+      "descRaw": "攻击力<@ba.vup>+45%</>，防御力<@ba.vup>+45%</>，阻挡数<@ba.vup>+1</>，受到敌人的近战攻击时有<@ba.vup>20%</>几率闪避并补充<@ba.vup>1</>颗弹药\n<@ba.rem>攻击装有12发弹药，打完后结束（可随时停止技能）</>",
+      "skillType": "MANUAL",
+      "durationType": "AMMO",
+      "duration": 0,
+      "spType": "INCREASE_WHEN_ATTACK",
+      "spCost": 15,
+      "initSp": 3,
+      "maxChargeTime": 1,
+      "increment": 1,
+      "bb": {
+        "atk": 0.45,
+        "def": 0.45,
+        "block_cnt": 1,
+        "prob": 0.2,
+        "recover_cnt": 1,
+        "attack@trigger_time": 12
+      },
+      "bbStr": {},
+      "rangeId": null,
+      "rangeGrid": null,
+      "prefabId": "skchr_excu2_2",
+      "trigger": {
+        "rule": "DEFAULT",
+        "rawRule": "DEFAULT",
+        "customRangeGrid": null
+      },
+      "index": 1,
+      "overrideTokenKey": null
+    },
+    "talents": [
+      {
+        "index": 0,
+        "name": "受选之人",
+        "desc": "攻击时有20%几率额外攻击一次，技能期间每消耗1颗弹药这个几率提升5%，技能结束时重置",
+        "descRaw": "攻击时有20%几率额外攻击一次，技能期间每消耗1颗弹药这个几率提升5%，技能结束时重置",
+        "bb": {
+          "prob": 0.2,
+          "prob_add": 0.05
+        },
+        "bbStr": {},
+        "rangeGrid": null,
+        "tokenKey": null,
+        "hidden": false,
+        "fromModule": false
+      },
+      {
+        "index": 1,
+        "name": "铳弹共感",
+        "desc": "每有一个【拉特兰】干员在场，自身的弹药类技能弹药上限+1（最多4层）",
+        "descRaw": "每有一个【拉特兰】干员在场，自身的弹药类技能弹药上限+1（最多4层）",
+        "bb": {
+          "add_count": 1,
+          "add_count_max_stack": 4
+        },
+        "bbStr": {},
+        "rangeGrid": null,
+        "tokenKey": null,
+        "hidden": false,
+        "fromModule": false
+      }
+    ],
+    "tokens": [],
+    "module": {
+      "id": "uniequip_002_excu2",
+      "name": "待解答",
+      "type": "REA-X",
+      "level": 0,
+      "active": false
+    },
+    "assets": {
+      "avatar": "char_1032_excu2",
+      "portrait": "char_1032_excu2_1",
+      "spine": "char_1032_excu2",
+      "skillIcon": "skchr_excu2_2",
+      "subProfIcon": "sub_reaper_icon"
+    },
+    "skills": [
+      {
+        "skillId": "skchr_excu2_1",
+        "iconId": "skchr_excu2_1",
+        "name": "遗嘱执行",
+        "level": 4,
+        "desc": "攻击范围扩大，攻击力+20%，攻击时无视目标190的防御力\n攻击装有8发弹药，打完后结束（可随时停止技能）",
+        "descRaw": "攻击范围<@ba.vup>扩大</>，攻击力<@ba.vup>+20%</>，攻击时无视目标<@ba.vup>190</>的防御力\n<@ba.rem>攻击装有8发弹药，打完后结束（可随时停止技能）</>",
+        "skillType": "AUTO",
+        "durationType": "AMMO",
+        "duration": 0,
+        "spType": "INCREASE_WHEN_ATTACK",
+        "spCost": 9,
+        "initSp": 0,
+        "maxChargeTime": 1,
+        "increment": 1,
+        "bb": {
+          "atk": 0.2,
+          "def_penetrate_fixed": 190,
+          "attack@trigger_time": 8
+        },
+        "bbStr": {},
+        "rangeId": "2-5",
+        "rangeGrid": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            1
+          ],
+          [
+            0,
+            2
+          ],
+          [
+            -1,
+            1
+          ],
+          [
+            -1,
+            2
+          ]
+        ],
+        "prefabId": "skchr_excu2_1",
+        "trigger": {
+          "rule": "DEFAULT",
+          "rawRule": "DEFAULT",
+          "customRangeGrid": null
+        },
+        "index": 0,
+        "overrideTokenKey": null,
+        "isDefault": false
+      },
+      {
+        "skillId": "skchr_excu2_2",
+        "iconId": "skchr_excu2_2",
+        "name": "近身铳斗",
+        "level": 4,
+        "desc": "攻击力+45%，防御力+45%，阻挡数+1，受到敌人的近战攻击时有20%几率闪避并补充1颗弹药\n攻击装有12发弹药，打完后结束（可随时停止技能）",
+        "descRaw": "攻击力<@ba.vup>+45%</>，防御力<@ba.vup>+45%</>，阻挡数<@ba.vup>+1</>，受到敌人的近战攻击时有<@ba.vup>20%</>几率闪避并补充<@ba.vup>1</>颗弹药\n<@ba.rem>攻击装有12发弹药，打完后结束（可随时停止技能）</>",
+        "skillType": "MANUAL",
+        "durationType": "AMMO",
+        "duration": 0,
+        "spType": "INCREASE_WHEN_ATTACK",
+        "spCost": 15,
+        "initSp": 3,
+        "maxChargeTime": 1,
+        "increment": 1,
+        "bb": {
+          "atk": 0.45,
+          "def": 0.45,
+          "block_cnt": 1,
+          "prob": 0.2,
+          "recover_cnt": 1,
+          "attack@trigger_time": 12
+        },
+        "bbStr": {},
+        "rangeId": null,
+        "rangeGrid": null,
+        "prefabId": "skchr_excu2_2",
+        "trigger": {
+          "rule": "DEFAULT",
+          "rawRule": "DEFAULT",
+          "customRangeGrid": null
+        },
+        "index": 1,
+        "overrideTokenKey": null,
+        "isDefault": true
+      },
+      {
+        "skillId": "skchr_excu2_3",
+        "iconId": "skchr_excu2_3",
+        "name": "圣约决裁",
+        "level": 4,
+        "desc": "攻击间隔略微增大，攻击范围扩大，攻击力+120%，每消耗1颗弹药攻击力额外+4%（最多30层），特性的回复生命效果提高至2倍；技能结束时，对技能期间攻击过的目标造成相当于攻击力200%的物理伤害\n攻击装有16发弹药，打完后结束（可随时停止技能）",
+        "descRaw": "攻击间隔<@ba.vdown>略微增大</>，攻击范围<@ba.vup>扩大</>，攻击力<@ba.vup>+120%</>，每消耗1颗弹药攻击力额外<@ba.vup>+4%</>（最多30层），特性的回复生命效果提高至<@ba.vup>2</>倍；技能结束时，对技能期间攻击过的目标造成相当于攻击力<@ba.vup>200%</>的物理伤害\n<@ba.rem>攻击装有16发弹药，打完后结束（可随时停止技能）</>",
+        "skillType": "MANUAL",
+        "durationType": "AMMO",
+        "duration": 0,
+        "spType": "INCREASE_WHEN_ATTACK",
+        "spCost": 33,
+        "initSp": 6,
+        "maxChargeTime": 1,
+        "increment": 1,
+        "bb": {
+          "atk": 1.2,
+          "attack@atk": 0.04,
+          "trait_ratio": 2,
+          "attack@final_atk_scale": 2,
+          "base_attack_time": 0.5,
+          "attack@trigger_time": 16,
+          "attack@max_stack_cnt": 30
+        },
+        "bbStr": {},
+        "rangeId": "2-5",
+        "rangeGrid": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            1
+          ],
+          [
+            0,
+            2
+          ],
+          [
+            -1,
+            1
+          ],
+          [
+            -1,
+            2
+          ]
+        ],
+        "prefabId": "skchr_excu2_3",
+        "trigger": {
+          "rule": "DEFAULT",
+          "rawRule": "DEFAULT",
+          "customRangeGrid": null
+        },
+        "index": 2,
+        "overrideTokenKey": null,
+        "isDefault": false
+      }
+    ]
+  },
+  "chess_char_ws_demo_01_b": {
+    "chessId": "chess_char_ws_demo_01_b",
+    "baseId": "chess_char_ws_demo_01_a",
+    "goldenId": "chess_char_ws_demo_01_b",
+    "isGolden": true,
+    "tier": 5,
+    "identifier": 219,
+    "isHidden": false,
+    "isDiy": false,
+    "visible": true,
+    "chessType": "NORMAL",
+    "shopSortId": 1,
+    "charId": "char_1032_excu2",
+    "name": "守望者·示例",
+    "appellation": "Executor the Ex Foedere (workshop demo)",
+    "rarity": 6,
+    "profession": "WARRIOR",
+    "subProfessionId": "reaper",
+    "subProfessionName": "收割者",
+    "position": "MELEE",
+    "nationId": "laterano",
+    "bonds": [
+      "lateranoShip",
+      "visiShip"
+    ],
+    "garrisonIds": [
+      "garrison_23_b",
+      "garrison_55_b"
+    ],
+    "price": 4,
+    "sellPrice": 1,
+    "upgradeNum": 0,
+    "upgradeChessId": null,
+    "status": {
+      "phase": 2,
+      "level": 60,
+      "skillLevel": 7,
+      "equipLevel": 1
+    },
+    "stats": {
+      "maxHp": 2464,
+      "atk": 721,
+      "def": 463,
+      "res": 0,
+      "cost": 23,
+      "blockCnt": 2,
+      "bat": 1.3,
+      "aspd": 105,
+      "respawnTime": 70,
+      "spRecovery": 1,
+      "hpRecoveryPerSec": 0,
+      "moveSpeed": 1,
+      "tauntLevel": 0,
+      "massLevel": 0,
+      "deployLimit": 1,
+      "deckStack": 0
+    },
+    "immunities": {
+      "stun": false,
+      "silence": false,
+      "sleep": false,
+      "frozen": false,
+      "levitate": false
+    },
+    "rangeId": "1-3",
+    "rangeGrid": [
+      [
+        1,
+        1
+      ],
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ],
+      [
+        -1,
+        1
+      ]
+    ],
+    "dmgType": "phys",
+    "attackKind": "melee",
+    "projectile": "none",
+    "canHitFly": false,
+    "targetPriority": null,
+    "trait": {
+      "desc": "无法被友方角色治疗，攻击造成群体伤害，每攻击到一个敌人回复自身60生命，最大生效数等于阻挡数",
+      "descRaw": "无法被友方角色治疗，攻击造成<@ba.kw>群体伤害</>，每攻击到一个敌人回复自身<@ba.kw>60</>生命，最大生效数等于阻挡数",
+      "bb": {
+        "value": 60
+      },
+      "bbStr": {},
+      "rangeGrid": null
+    },
+    "skill": {
+      "skillId": "skchr_excu2_2",
+      "iconId": "skchr_excu2_2",
+      "name": "近身铳斗",
+      "level": 7,
+      "desc": "攻击力+60%，防御力+60%，阻挡数+1，受到敌人的近战攻击时有30%几率闪避并补充1颗弹药\n攻击装有12发弹药，打完后结束（可随时停止技能）",
+      "descRaw": "攻击力<@ba.vup>+60%</>，防御力<@ba.vup>+60%</>，阻挡数<@ba.vup>+1</>，受到敌人的近战攻击时有<@ba.vup>30%</>几率闪避并补充<@ba.vup>1</>颗弹药\n<@ba.rem>攻击装有12发弹药，打完后结束（可随时停止技能）</>",
+      "skillType": "MANUAL",
+      "durationType": "AMMO",
+      "duration": 0,
+      "spType": "INCREASE_WHEN_ATTACK",
+      "spCost": 15,
+      "initSp": 6,
+      "maxChargeTime": 1,
+      "increment": 1,
+      "bb": {
+        "atk": 0.6,
+        "def": 0.6,
+        "block_cnt": 1,
+        "prob": 0.3,
+        "recover_cnt": 1,
+        "attack@trigger_time": 12
+      },
+      "bbStr": {},
+      "rangeId": null,
+      "rangeGrid": null,
+      "prefabId": "skchr_excu2_2",
+      "trigger": {
+        "rule": "DEFAULT",
+        "rawRule": "DEFAULT",
+        "customRangeGrid": null
+      },
+      "index": 1,
+      "overrideTokenKey": null
+    },
+    "talents": [
+      {
+        "index": 0,
+        "name": "受选之人",
+        "desc": "攻击时有20%几率额外攻击一次，技能期间每消耗1颗弹药这个几率提升5%，技能结束时重置",
+        "descRaw": "攻击时有20%几率额外攻击一次，技能期间每消耗1颗弹药这个几率提升5%，技能结束时重置",
+        "bb": {
+          "prob": 0.2,
+          "prob_add": 0.05
+        },
+        "bbStr": {},
+        "rangeGrid": null,
+        "tokenKey": null,
+        "hidden": false,
+        "fromModule": false
+      },
+      {
+        "index": 1,
+        "name": "铳弹共感",
+        "desc": "每有一个【拉特兰】干员在场，自身的弹药类技能弹药上限+1（最多4层）",
+        "descRaw": "每有一个【拉特兰】干员在场，自身的弹药类技能弹药上限+1（最多4层）",
+        "bb": {
+          "add_count": 1,
+          "add_count_max_stack": 4
+        },
+        "bbStr": {},
+        "rangeGrid": null,
+        "tokenKey": null,
+        "hidden": false,
+        "fromModule": false
+      }
+    ],
+    "tokens": [],
+    "module": {
+      "id": "uniequip_002_excu2",
+      "name": "待解答",
+      "type": "REA-X",
+      "level": 1,
+      "active": true
+    },
+    "assets": {
+      "avatar": "char_1032_excu2_2",
+      "portrait": "char_1032_excu2_2",
+      "spine": "char_1032_excu2",
+      "skillIcon": "skchr_excu2_2",
+      "subProfIcon": "sub_reaper_icon"
+    },
+    "skills": [
+      {
+        "skillId": "skchr_excu2_1",
+        "iconId": "skchr_excu2_1",
+        "name": "遗嘱执行",
+        "level": 7,
+        "desc": "攻击范围扩大，攻击力+30%，攻击时无视目标280的防御力\n攻击装有8发弹药，打完后结束（可随时停止技能）",
+        "descRaw": "攻击范围<@ba.vup>扩大</>，攻击力<@ba.vup>+30%</>，攻击时无视目标<@ba.vup>280</>的防御力\n<@ba.rem>攻击装有8发弹药，打完后结束（可随时停止技能）</>",
+        "skillType": "AUTO",
+        "durationType": "AMMO",
+        "duration": 0,
+        "spType": "INCREASE_WHEN_ATTACK",
+        "spCost": 8,
+        "initSp": 0,
+        "maxChargeTime": 1,
+        "increment": 1,
+        "bb": {
+          "atk": 0.3,
+          "def_penetrate_fixed": 280,
+          "attack@trigger_time": 8
+        },
+        "bbStr": {},
+        "rangeId": "2-5",
+        "rangeGrid": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            1
+          ],
+          [
+            0,
+            2
+          ],
+          [
+            -1,
+            1
+          ],
+          [
+            -1,
+            2
+          ]
+        ],
+        "prefabId": "skchr_excu2_1",
+        "trigger": {
+          "rule": "DEFAULT",
+          "rawRule": "DEFAULT",
+          "customRangeGrid": null
+        },
+        "index": 0,
+        "overrideTokenKey": null,
+        "isDefault": false
+      },
+      {
+        "skillId": "skchr_excu2_2",
+        "iconId": "skchr_excu2_2",
+        "name": "近身铳斗",
+        "level": 7,
+        "desc": "攻击力+60%，防御力+60%，阻挡数+1，受到敌人的近战攻击时有30%几率闪避并补充1颗弹药\n攻击装有12发弹药，打完后结束（可随时停止技能）",
+        "descRaw": "攻击力<@ba.vup>+60%</>，防御力<@ba.vup>+60%</>，阻挡数<@ba.vup>+1</>，受到敌人的近战攻击时有<@ba.vup>30%</>几率闪避并补充<@ba.vup>1</>颗弹药\n<@ba.rem>攻击装有12发弹药，打完后结束（可随时停止技能）</>",
+        "skillType": "MANUAL",
+        "durationType": "AMMO",
+        "duration": 0,
+        "spType": "INCREASE_WHEN_ATTACK",
+        "spCost": 15,
+        "initSp": 6,
+        "maxChargeTime": 1,
+        "increment": 1,
+        "bb": {
+          "atk": 0.6,
+          "def": 0.6,
+          "block_cnt": 1,
+          "prob": 0.3,
+          "recover_cnt": 1,
+          "attack@trigger_time": 12
+        },
+        "bbStr": {},
+        "rangeId": null,
+        "rangeGrid": null,
+        "prefabId": "skchr_excu2_2",
+        "trigger": {
+          "rule": "DEFAULT",
+          "rawRule": "DEFAULT",
+          "customRangeGrid": null
+        },
+        "index": 1,
+        "overrideTokenKey": null,
+        "isDefault": true
+      },
+      {
+        "skillId": "skchr_excu2_3",
+        "iconId": "skchr_excu2_3",
+        "name": "圣约决裁",
+        "level": 7,
+        "desc": "攻击间隔略微增大，攻击范围扩大，攻击力+150%，每消耗1颗弹药攻击力额外+5%（最多30层），特性的回复生命效果提高至2倍；技能结束时，对技能期间攻击过的目标造成相当于攻击力200%的物理伤害\n攻击装有16发弹药，打完后结束（可随时停止技能）",
+        "descRaw": "攻击间隔<@ba.vdown>略微增大</>，攻击范围<@ba.vup>扩大</>，攻击力<@ba.vup>+150%</>，每消耗1颗弹药攻击力额外<@ba.vup>+5%</>（最多30层），特性的回复生命效果提高至<@ba.vup>2</>倍；技能结束时，对技能期间攻击过的目标造成相当于攻击力<@ba.vup>200%</>的物理伤害\n<@ba.rem>攻击装有16发弹药，打完后结束（可随时停止技能）</>",
+        "skillType": "MANUAL",
+        "durationType": "AMMO",
+        "duration": 0,
+        "spType": "INCREASE_WHEN_ATTACK",
+        "spCost": 30,
+        "initSp": 12,
+        "maxChargeTime": 1,
+        "increment": 1,
+        "bb": {
+          "atk": 1.5,
+          "attack@atk": 0.05,
+          "trait_ratio": 2,
+          "attack@final_atk_scale": 2,
+          "base_attack_time": 0.5,
+          "attack@trigger_time": 16,
+          "attack@max_stack_cnt": 30
+        },
+        "bbStr": {},
+        "rangeId": "2-5",
+        "rangeGrid": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            1
+          ],
+          [
+            0,
+            2
+          ],
+          [
+            -1,
+            1
+          ],
+          [
+            -1,
+            2
+          ]
+        ],
+        "prefabId": "skchr_excu2_3",
+        "trigger": {
+          "rule": "DEFAULT",
+          "rawRule": "DEFAULT",
+          "customRangeGrid": null
+        },
+        "index": 2,
+        "overrideTokenKey": null,
+        "isDefault": false
+      }
+    ],
+    "statsBase": {
+      "maxHp": 2314,
+      "atk": 666,
+      "def": 439,
+      "res": 0,
+      "cost": 23,
+      "blockCnt": 2,
+      "bat": 1.3,
+      "aspd": 100,
+      "respawnTime": 70,
+      "spRecovery": 1,
+      "hpRecoveryPerSec": 0,
+      "moveSpeed": 1,
+      "tauntLevel": 0,
+      "massLevel": 0,
+      "deployLimit": 1,
+      "deckStack": 0
+    },
+    "traitBase": {
+      "desc": "无法被友方角色治疗，攻击造成群体伤害，每攻击到一个敌人回复自身50生命，最大生效数等于阻挡数",
+      "descRaw": "无法被友方角色治疗，攻击造成<@ba.kw>群体伤害</>，每攻击到一个敌人回复自身<@ba.kw>50</>生命，最大生效数等于阻挡数",
+      "bb": {
+        "value": 50
+      },
+      "bbStr": {},
+      "rangeGrid": null
+    },
+    "talentsBase": [
+      {
+        "index": 0,
+        "name": "受选之人",
+        "desc": "攻击时有20%几率额外攻击一次，技能期间每消耗1颗弹药这个几率提升5%，技能结束时重置",
+        "descRaw": "攻击时有20%几率额外攻击一次，技能期间每消耗1颗弹药这个几率提升5%，技能结束时重置",
+        "bb": {
+          "prob": 0.2,
+          "prob_add": 0.05
+        },
+        "bbStr": {},
+        "rangeGrid": null,
+        "tokenKey": null,
+        "hidden": false,
+        "fromModule": false
+      },
+      {
+        "index": 1,
+        "name": "铳弹共感",
+        "desc": "每有一个【拉特兰】干员在场，自身的弹药类技能弹药上限+1（最多4层）",
+        "descRaw": "每有一个【拉特兰】干员在场，自身的弹药类技能弹药上限+1（最多4层）",
+        "bb": {
+          "add_count": 1,
+          "add_count_max_stack": 4
+        },
+        "bbStr": {},
+        "rangeGrid": null,
+        "tokenKey": null,
+        "hidden": false,
+        "fromModule": false
+      }
+    ],
+    "modules": [
+      {
+        "uniEquipId": "uniequip_002_excu2",
+        "name": "待解答",
+        "typeName": "REA-X",
+        "typeIcon": "rea-x",
+        "icon": "uniequip_002_excu2",
+        "isDefault": true,
+        "level": 1,
+        "attr": {
+          "atk": 40,
+          "def": 24,
+          "aspd": 5
+        },
+        "traitOverride": {
+          "desc": "无法被友方角色治疗，攻击造成群体伤害，每攻击到一个敌人回复自身60生命，最大生效数等于阻挡数",
+          "descRaw": "无法被友方角色治疗，攻击造成<@ba.kw>群体伤害</>，每攻击到一个敌人回复自身<@ba.kw>60</>生命，最大生效数等于阻挡数",
+          "bb": {
+            "value": 60
+          },
+          "bbStr": {},
+          "rangeGrid": null
+        },
+        "talentChanges": []
+      },
+      {
+        "uniEquipId": "uniequip_003_excu2",
+        "name": "已知悉",
+        "typeName": "REA-Y",
+        "typeIcon": "rea-y",
+        "icon": "uniequip_003_excu2",
+        "isDefault": false,
+        "level": 1,
+        "attr": {
+          "maxHp": 280,
+          "atk": 45
+        },
+        "traitOverride": {
+          "desc": "无法被友方角色治疗，攻击造成群体伤害，每攻击到一个敌人回复自身12生命，最大生效数等于阻挡数",
+          "descRaw": "无法被友方角色治疗，攻击造成<@ba.kw>群体伤害</>，每攻击到一个敌人回复自身<@ba.kw>12</>生命，最大生效数等于阻挡数",
+          "bb": {
+            "value": 12
+          },
+          "bbStr": {},
+          "rangeGrid": null,
+          "moduleDesc": "攻击范围内存在2名及以上敌人时攻击速度+12",
+          "moduleDescRaw": "攻击范围内存在2名及以上敌人时攻击速度<@ba.kw>+12</>"
+        },
+        "talentChanges": [
+          {
+            "talentIndex": -1,
+            "name": null,
+            "desc": null,
+            "descRaw": null,
+            "bb": {
+              "attack_speed": 12,
+              "trigger_cnt[equip]": 2
+            },
+            "bbStr": {},
+            "rangeGrid": null,
+            "tokenKey": null,
+            "hidden": false
+          }
+        ]
+      }
+    ]
+  }
+}
