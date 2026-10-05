@@ -356,9 +356,41 @@ function entriesView(gd, pick) {
  * @returns {{ templateId: string|null, spawns: object[], routes: object[], extraRoutes: object[], timeLimit: number,
  *   overrides: object, pick: object|null, entries: { ground: object|null, fly: object|null }, actions: object[] }}
  */
-export function buildNormalWave(gd, rng, factions, round) {
+/**
+ * The round template a STAGE declares for itself, when it declares one (`stage.rounds`).
+ *
+ * Why this exists: the engine picks the stage (setupMatchWaves, by weight from `mode.stages`) and the round's template
+ * (`mode.rounds[r].template`) INDEPENDENTLY — the template never knows which map it will run on. An official template's
+ * routes were authored for official geometry, so a workshop map that inherited one would send its enemies down paths its
+ * terrain does not have. A stage may therefore carry its own per-round templates; the mode's remain the fallback, and an
+ * official stage has no `rounds` field at all, so its behaviour is unchanged.
+ *
+ * Accepted shapes: `{ "3": "wave_id" }` (or an array indexed by round), and `{ "3": { template: "wave_id" } }`.
+ * @returns {string|null} a template id that EXISTS, else null (so a typo falls back instead of breaking the round)
+ */
+function stageTemplateId(gd, stageId, round) {
+  if (!stageId) return null;
+  const stage = gd.stage(stageId);
+  const rounds = stage && stage.rounds;
+  if (!rounds) return null;
+  const v = Array.isArray(rounds) ? rounds[round] : (typeof rounds === 'object' ? rounds[String(round)] : null);
+  const id = typeof v === 'string' ? v : (v && typeof v === 'object' && typeof v.template === 'string' ? v.template : null);
+  return typeof id === 'string' && gd.wave(id) ? id : null;
+}
+
+/** The stage's own boss-round templates (`stage.bossRounds[round][bossId]`), else null. */
+function stageBossTemplateId(gd, stageId, round, bossId) {
+  if (!stageId) return null;
+  const stage = gd.stage(stageId);
+  const perRound = stage && stage.bossRounds && typeof stage.bossRounds === 'object' ? stage.bossRounds[String(round)] : null;
+  if (!perRound || typeof perRound !== 'object') return null;
+  const id = typeof perRound[bossId] === 'string' ? perRound[bossId] : Object.values(perRound).find((v) => typeof v === 'string');
+  return typeof id === 'string' && gd.wave(id) ? id : null;
+}
+
+export function buildNormalWave(gd, rng, factions, round, stageId = null) {
   const rc = gd.roundCfg(round);
-  const templateId = rc && typeof rc.template === 'string' ? rc.template : null;
+  const templateId = stageTemplateId(gd, stageId, round) ?? (rc && typeof rc.template === 'string' ? rc.template : null);
   const tpl = templateId ? gd.wave(templateId) : null;
   const timeLimit = gd.combatTimeLimit(round);
   if (!tpl) return { templateId, spawns: [], routes: [], extraRoutes: [], timeLimit, overrides: {}, pick: null, entries: { ground: null, fly: null }, actions: [] };
@@ -381,10 +413,10 @@ export function buildNormalWave(gd, rng, factions, round) {
  * Boss / hidden round template for one boss field; escorts follow the pick of the round's own slot.
  * @param {{ bossId: string, solo: boolean }} opts solo → `_s` template (lone player or solo mode)
  */
-export function buildBossWave(gd, rng, factions, round, { bossId, solo }) {
+export function buildBossWave(gd, rng, factions, round, { bossId, solo }, stageId = null) {
   const rc = gd.roundCfg(round);
   const map = rc && rc.bossTemplates && typeof rc.bossTemplates === 'object' ? rc.bossTemplates : {};
-  let templateId = typeof map[bossId] === 'string' ? map[bossId] : null;
+  let templateId = stageBossTemplateId(gd, stageId, round, bossId) || (typeof map[bossId] === 'string' ? map[bossId] : null);
   if (!templateId) {
     const first = Object.values(map).find((v) => typeof v === 'string');
     templateId = first || null;

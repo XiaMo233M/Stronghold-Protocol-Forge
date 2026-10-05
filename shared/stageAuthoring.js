@@ -260,6 +260,30 @@ export function validateStage(stage, opts = {}) {
   if (!isPlain(stage.tiles)) err('tiles', 'MISSING', 'the tiles legend is required');
   // authored routes live in the SPEC (the stage RECORD has no routes field — the engine reads them from the wave)
   for (const issue of validateRoutes(stage.routes, rows || [], stage.tiles)) out.push(issue);
+  // The stage's OWN per-round templates (workshop maps only; official stages have neither field). The engine reads them
+  // before the mode's, because the stage and the round's template are otherwise chosen independently — see
+  // server/match/waves.js stageTemplateId.
+  for (const field of ['rounds', 'bossRounds']) {
+    const map = stage[field];
+    if (map === undefined) continue;
+    if (!isPlain(map)) { err(field, 'BAD_ROUNDS', `${field} must be an object keyed by round number`); continue; }
+    for (const [key, value] of Object.entries(map)) {
+      const r = Number(key);
+      if (!Number.isInteger(r) || r < 1 || r > 15) err(`${field}[${key}]`, 'BAD_ROUND', `${field} keys must be round numbers 1..15`);
+      const isId = (v) => typeof v === 'string' && v.length > 0;
+      if (field === 'rounds') {
+        if (!isId(value) && !(isPlain(value) && isId(value.template))) {
+          err(`${field}[${key}]`, 'BAD_TEMPLATE', 'a round must name a wave id (or { template: id })', 'the id is a waves.json key from this pack, or an official one');
+        }
+      } else if (!isPlain(value)) {
+        err(`${field}[${key}]`, 'BAD_TEMPLATE', 'bossRounds[round] must map a boss id to a wave id');
+      } else {
+        for (const [bossId, waveId] of Object.entries(value)) {
+          if (!isId(waveId)) err(`${field}[${key}].${bossId}`, 'BAD_TEMPLATE', 'a boss round must name a wave id');
+        }
+      }
+    }
+  }
   return out;
 }
 

@@ -80,7 +80,7 @@
 import { randomBytes, randomInt } from 'node:crypto';
 import { ERR, MAX_SEATS, MAX_SPECTATORS, ROOM_CODE_LEN, modeIdFor } from '../shared/constants.js';
 import { checkLoadout } from '../shared/protocol.js';
-import { normalizeSupportConfig, checkSupport } from '../shared/support.js';
+import { normalizeSupportConfig, checkSupport, supportPicker, supportCapacity, supportTiers } from '../shared/support.js';
 import { encode, isDroppable, isErrCode, sendRaw, sendSession } from './net.js';
 import { getData as defaultGetData, lookup } from './data.js';
 import { Match as DefaultMatch } from './match/Match.js';
@@ -174,8 +174,12 @@ export class Room {
   /** Humans that have not departed, in seat order. @returns {Seat[]} */
   activeHumans() { return this.seats.filter((s) => s && !s.isBot && !s.left); }
 
-  /** `room.state` frame (DESIGN §8.1) plus `inMatch`. */
-  toState() {
+  /**
+   * `room.state` frame (DESIGN §8.1) plus `inMatch`.
+   * @param {object|null} [support] the SERVER's 助战 catalog (Lobby.supportView): the client cannot derive the pool, so
+   *   the picker is only ever able to offer what the server declares.
+   */
+  toState(support = null) {
     return {
       t: 'room.state',
       code: this.code,
@@ -187,6 +191,7 @@ export class Room {
         ? { seat: s.seat, playerId: s.playerId, name: s.name, isBot: s.isBot, ready: s.ready, connected: s.connected && !s.left }
         : null)),
       spectators: this.spectators.map((s) => ({ playerId: s.playerId, name: s.name, connected: s.connected })),
+      ...(support ? { support } : {}),
     };
   }
 }
@@ -1035,12 +1040,28 @@ export class Lobby {
 
   broadcastState(room) {
     if (room.disposed) return;
-    const data = encode(room.toState());
+    const data = encode(room.toState(this.supportView()));
     for (const session of this.memberSessions(room)) sendRaw(session.ws, data);
   }
 
   sendState(room, session) {
-    sendSession(session, room.toState());
+    sendSession(session, room.toState(this.supportView()));
+  }
+
+  /**
+   * The 助战 catalog a client may show (`supportPicker` names this as its purpose), plus the player's own current picks.
+   * An operator the pool does not list is DISABLED — the picker must not be able to offer it, and the server refuses a
+   * request that names it (shared/support.js checkSupport) — so this is the only way the client learns the pool.
+   */
+  supportView() {
+    const cfg = normalizeSupportConfig(this.safeData() && this.safeData().support);
+    return {
+      enabled: cfg.enabled,
+      label: cfg.label,
+      tiers: supportPicker(cfg),
+      capacity: supportCapacity(cfg),
+      slots: supportTiers(cfg).reduce((o, t) => ({ ...o, [t]: cfg.slots[t] }), {}),
+    };
   }
 
   /** Match broadcast: encode once, send to every connected member. @returns {string | null} the encoded frame */

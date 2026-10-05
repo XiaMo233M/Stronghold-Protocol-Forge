@@ -150,6 +150,11 @@ export function deriveStage(spec) {
     deployTiles: deriveDeployTiles(rows, tiles, devices),
     groundPaths: paths.groundPaths,
     groundPathsWithDevices: paths.groundPathsWithDevices,
+    // a workshop map may name the wave template EACH round runs (server/match/waves.js stageTemplateId), because the
+    // engine otherwise picks the stage and the round's template independently. Omitted when not declared, so an
+    // official-shaped record stays exactly as it was.
+    ...(isPlain(spec.rounds) ? { rounds: { ...spec.rounds } } : {}),
+    ...(isPlain(spec.bossRounds) ? { bossRounds: { ...spec.bossRounds } } : {}),
     options: {
       characterLimit: Number.isFinite(options.characterLimit) ? options.characterLimit : 8,
       moveMultiplier: Number.isFinite(options.moveMultiplier) ? options.moveMultiplier : 0.5,
