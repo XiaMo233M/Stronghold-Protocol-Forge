@@ -24,6 +24,7 @@ import { validateChessRecord, formatIssues } from '../shared/chessAuthoring.js';
 import { loadWorkshop, loadWorkshopKits, WORKSHOP_DIR } from '../server/workshop.js';
 import { validateStageRecord } from '../server/stageAuthoring.js';
 import { validateEnemy } from '../shared/enemyAuthoring.js';
+import { validateWave } from '../shared/waveAuthoring.js';
 import { loadData } from '../server/data.js';
 import { GameData } from '../server/match/gamedata.js';
 import { toDataSource } from '../server/sim/simdata.js';
@@ -191,6 +192,23 @@ async function main() {
     for (const i of enemyIssues) (i.severity === 'error' ? report.errors++ : report.warnings++);
   }
 
+  // ---- layer 7: waves (每关出怪). totalCount/slotCounts are DERIVED and re-derived here; the checks that matter most are
+  // the cross-file ones — a spawn whose enemy nothing defines, or a routeIndex past the wave's own routes — because both
+  // fail SILENTLY in game (the key spawns nothing; the sim falls back to route 0 and enemies walk a different path).
+  if (loaded.packs.length && packs.some((p) => Object.keys(p.files.waves || {}).length)) {
+    const officialWaves = new Set(Object.keys(JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'waves.json'), 'utf8'))));
+    // the merged enemy keys, so a pack may spawn its own monsters as well as official ones
+    const knownEnemyKeys = new Set(Object.keys(loadData(DATA_DIR, { log: quiet, workshopDir: root }).enemies || {}));
+    const waveIssues = [];
+    for (const pack of packs) {
+      for (const [id, rec] of Object.entries(pack.files.waves || {})) {
+        waveIssues.push(...validateWave(rec, { id, officialIds: officialWaves, knownEnemyKeys }));
+      }
+    }
+    report.waves = waveIssues;
+    for (const i of waveIssues) (i.severity === 'error' ? report.errors++ : report.warnings++);
+  }
+
   if (args.json) {
     console.log(JSON.stringify(report, null, 2));
   } else {
@@ -218,6 +236,10 @@ async function main() {
     if (report.enemies) {
       console.log('\nenemies (monsters):');
       console.log(report.enemies.length ? formatIssues(report.enemies).split('\n').map((l) => `  ${l}`).join('\n') : '  OK');
+    }
+    if (report.waves) {
+      console.log('\nwaves (每关出怪):');
+      console.log(report.waves.length ? formatIssues(report.waves).split('\n').map((l) => `  ${l}`).join('\n') : '  OK');
     }
     console.log(`\n${report.errors} error(s), ${report.warnings} warning(s)`);
     if (report.errors === 0) console.log('VALID: the engine accepts this content.');

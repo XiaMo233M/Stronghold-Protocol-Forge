@@ -97,6 +97,9 @@ export function validateRoutes(routes, rows, legend) {
     return out;
   }
   const leg = isPlain(legend) ? legend : {};
+  // `rows` is optional: a WAVE's routes are validated on their own (a wave is not tied to one grid here), and the
+  // gate/objective warnings only make sense when the stage's grid is known. The wave editor passes it when it has it.
+  const hasGrid = Array.isArray(rows) && rows.length > 0;
   const specialAt = (p) => {
     const line = Array.isArray(rows) ? rows[p[0]] : undefined;
     if (typeof line !== 'string') return null;
@@ -121,10 +124,10 @@ export function validateRoutes(routes, rows, legend) {
       const pos = isPlain(cp) ? cp.pos : cp;
       if (!inGrid(pos)) out.push({ field: `${at}.checkpoints[${k}]`, code: 'BAD_POS', severity: 'error', message: 'a checkpoint must be [row, col] inside the grid' });
     });
-    if (inGrid(route.start) && specialAt(route.start) !== 'start') {
+    if (hasGrid && inGrid(route.start) && specialAt(route.start) !== 'start') {
       out.push({ field: `${at}.start`, code: 'START_NOT_ON_GATE', severity: 'warning', message: `the route starts at ${JSON.stringify(route.start)}, which is not an enemy gate tile`, hint: "paint an 'S' tile there, or accept that enemies appear mid-map" });
     }
-    if (inGrid(route.end) && specialAt(route.end) !== 'end') {
+    if (hasGrid && inGrid(route.end) && specialAt(route.end) !== 'end') {
       out.push({ field: `${at}.end`, code: 'END_NOT_ON_GOAL', severity: 'warning', message: `the route ends at ${JSON.stringify(route.end)}, which is not a protection-objective tile`, hint: "paint an 'E' tile there (the tile enemies leak to)" });
     }
   });
