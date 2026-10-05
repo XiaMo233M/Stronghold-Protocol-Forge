@@ -1,0 +1,73 @@
+/* ==========================================================================================
+   screens/support.css — 助战 (support picker; js/screens/support.js): an overlay opened from the lobby, the room and the
+   briefing, listing the SERVER's pool tier by tier with a per-tier counter. Same shell and tokens as loadout.css (the
+   twin screen); no official sprites of its own — avatars and profession icons come from the shared asset helpers and
+   every one of them degrades to text.
+   ========================================================================================== */
+
+.sp-overlay {
+  position: fixed; inset: 0; z-index: 55; /* the loadout's layer: above screens (1) and in-match banners (40) */
+  display: flex; flex-direction: column;
+  padding: var(--sa-t, 0px) var(--sa-r, 0px) var(--sa-b, 0px) var(--sa-l, 0px);
+  background: var(--bg-0);
+  color: var(--text-hi);
+  animation: sp-in 200ms var(--ease-out) backwards;
+  overscroll-behavior: contain;
+}
+@keyframes sp-in { from { opacity: 0; } }
+
+.sp-panel {
+  flex: 1; min-height: 0; overflow: auto;
+  padding: .4rem .5rem 1.2rem;
+  display: flex; flex-direction: column; gap: .3rem;
+}
+
+.sp-head {
+  flex: none; display: flex; align-items: center; gap: .18rem; flex-wrap: wrap;
+  padding: .1rem 0 .3rem; border-bottom: 1px solid var(--line);
+}
+.sp-head__spacer { flex: 1; }
+.sp-usage { font-size: max(.13rem, 12px); color: var(--text-hi); }
+.sp-sync { font-size: max(.12rem, 11px); color: var(--text-lo); }
+.sp-sync--synced { color: var(--ok, #4ed8af); }
+.sp-sync--error, .sp-sync--waiting { color: var(--warn, #e0b357); }
+.sp-loading { padding: .6rem; color: var(--text-lo); }
+
+/* ---- one tier ---------------------------------------------------------------------------------------------------- */
+.sp-tier { margin-top: .28rem; }
+.sp-tier__head { display: flex; align-items: center; gap: .16rem; margin-bottom: .14rem; }
+.sp-tier__n { font-size: max(.13rem, 12px); color: var(--text-lo); }
+
+.sp-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(max(.9rem, 200px), 1fr)); gap: .12rem;
+}
+
+/* ---- one operator ------------------------------------------------------------------------------------------------ */
+.sp-row {
+  display: flex; align-items: center; gap: .12rem; width: 100%; text-align: left;
+  padding: .1rem .12rem; border: 1px solid var(--line); border-radius: var(--r-sm, 4px);
+  background: var(--bg-1); color: var(--text-hi); cursor: pointer;
+  font: inherit; min-height: max(.6rem, 52px);
+}
+.sp-row:hover:not(:disabled) { border-color: var(--accent, #4ed8af); }
+.sp-row.on { border-color: var(--accent, #4ed8af); background: rgba(78, 216, 175, .12); }
+.sp-row.full, .sp-row:disabled { opacity: .45; cursor: not-allowed; }
+.sp-row__img, .sp-row__ph {
+  flex: none; width: max(.42rem, 40px); height: max(.42rem, 40px);
+  border-radius: var(--r-sm, 4px); object-fit: cover; background: var(--bg-2);
+  display: flex; align-items: center; justify-content: center; font-weight: 600;
+}
+.sp-row__txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.sp-row__name { font-size: max(.14rem, 13px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-row__meta { display: flex; align-items: center; gap: .08rem; font-size: max(.12rem, 11px); }
+.sp-row__prof { width: max(.16rem, 15px); height: max(.16rem, 15px); object-fit: contain; }
+.sp-row__mark { flex: none; font-size: max(.12rem, 11px); color: var(--accent, #4ed8af); }
+.sp-row.full .sp-row__mark { color: var(--text-lo); }
+
+/* ---- the entry button -------------------------------------------------------------------------------------------- */
+.sp-entry__n {
+  margin-left: .08rem; padding: 0 .06rem; border-radius: 999px;
+  background: var(--accent, #4ed8af); color: var(--bg-0);
+  font-size: max(.11rem, 10px); font-weight: 700; line-height: max(.16rem, 16px);
+}
+.sp-entry:disabled { opacity: .5; cursor: not-allowed; }

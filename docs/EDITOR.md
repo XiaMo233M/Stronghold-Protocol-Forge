@@ -110,10 +110,13 @@ node tools/workshop-validate.mjs workshop     # enemies 层：重算 be/attrPowe
 助战的选择由**服务端**声明并强制：卡池之外的干员是**禁用**的，请求会被整条拒绝，**没有回退**（回退会让一个被禁用的干员变成已发放）。
 
 - 服务端在 `room.state` 里下发卡池目录（`enabled` / `label` / `tiers` / `capacity` / `slots`）—— 客户端无法自行得知卡池
+- **界面**：`js/screens/support.js`（房间 / 大厅 / 简报室左下角「助战」按钮）—— 按阶列出卡池，每阶显示「已选 n/m」，
+  顶部显示同步状态。**卡池没到就显示「等待服务器下发」而不是猜**；服务器没开助战就显示「本服务器未开启助战」
 - 客户端 `ui/supportModel.js` + `ui/supportSync.js`：卡池未知时**等待不发**；被拒绝时**报错并保留玩家选择**
 - 对局开始后 `room.state` 的助战会锁定，改动在下一局生效
 - **随机禁用的干员不禁用助战**：随机禁用只影响商店抽卡（`server/match/pool.js`），被禁的干员作为助战照样发放
   （以 0 份入库，与"效果发放"同一规则；`test/support.test.js` 锁住了这条）
+- 局内 `m.private.support` 回显 `{ selected, granted }`：卡池在开局前变化导致「选了但没发到」时客户端能解释
 
 ## 出怪设计器（时间轴）
 
@@ -167,9 +170,7 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 
 - **行为层脚本**（`kits/<chessId>.js`）的编辑——kit 目前手写文件
 - **装备（items）**的编辑页签（数据层叠加已就绪；作者层与界面待做）
-- 助战**选择界面**（`ui/supportModel.js` + `ui/supportSync.js` 与卡池下发已就绪且已测，只差界面）
-- 地图的 **3D 视图**（项目自带 `public/js/render/board3d/`；2D 为先，接口预留）
-- 助战**名额**（`slots`）的编辑——目前改 `data/support.json` 的 `slots` 字段
+- 助战**名额**（`slots`）的编辑——改 `data/support.json` 的 `slots` 字段或编辑器里的「是否助战」开关
 - 任何鉴权
 
 ## 与其它工具的关系

@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { checkSupport } from '../../shared/support.js';
+import { PHASE } from '../../shared/constants.js';
 import {
   readCatalog, parseStored, toStored, tierOf, usedOf, tierUsage, sanitizeSupport, toggleSupport,
   checkSelection, usageLine, SUPPORT_PREF, SUPPORT_STORED_VERSION,
@@ -295,4 +296,54 @@ test('sync: closing the picker sends a pending edit at once', async () => {
 
 test('the pref key is the one the store persists under', () => {
   assert.equal(SUPPORT_PREF, 'support');
+});
+
+// ---- the picker screen ------------------------------------------------------------------------------------------
+
+const read = (rel) => readFileSync(path.join(ROOT, rel), 'utf8');
+const strip = (css) => css.replace(/\/\*[\s\S]*?\*\//g, '');
+
+test('the overlay closes exactly where the loadout does (a match left the briefing, or one started)', async () => {
+  const { shouldAutoClose } = await import('../../public/js/screens/support.js');
+  assert.equal(shouldAutoClose({ open: false, from: 'briefing' }, 'X', false, false), false, 'a closed picker never auto-closes');
+  assert.equal(shouldAutoClose({ open: true, from: 'briefing' }, PHASE.INFO_CHECK, false, false), false, 'still in the briefing');
+  assert.equal(shouldAutoClose({ open: true, from: 'briefing' }, PHASE.PREP, false, false), true, 'the briefing ended');
+  assert.equal(shouldAutoClose({ open: true, from: 'room' }, null, false, false), false);
+  assert.equal(shouldAutoClose({ open: true, from: 'room' }, null, true, false), true, 'a match started');
+  assert.equal(shouldAutoClose({ open: true, from: 'room' }, null, true, true), false, 'already in a match');
+});
+
+test('the picker is reachable from the lobby, the room and the briefing, and only from the client shell', () => {
+  for (const file of ['public/js/screens/lobby.js', 'public/js/screens/room.js', 'public/js/screens/briefing.js']) {
+    const src = read(file);
+    assert.match(src, /import \{ SupportButton \} from '\.\/support\.js'/, `${file} must import the entry button`);
+    assert.match(src, /<\$\{SupportButton\} from="(lobby|room|briefing)"/, `${file} must render it`);
+  }
+  // mounted once by the shell, and the sync wired next to the loadout's
+  const main = read('public/js/main.js');
+  assert.match(main, /<\$\{SupportHost\} \/>/, 'main.js must mount the host');
+  assert.match(main, /installSupportSync\(\{ net \}\)/, 'main.js must install the sync');
+  // and the game server must not serve the editor: the picker is client content, the editor is not
+  assert.doesNotMatch(read('public/js/screens/support.js'), /editor\//, 'the picker must not reach for the editor');
+});
+
+test('the picker stylesheet is registered, and its rules use the shared tokens', () => {
+  const html = read('public/index.html');
+  assert.match(html, /<link rel="stylesheet" href="\/css\/screens\/support\.css" \/>/, 'the stylesheet must be linked');
+  const css = strip(read('public/css/screens/support.css'));
+  assert.match(css, /\.sp-overlay\s*\{/, 'the overlay class the screen renders must exist');
+  assert.match(css, /position:\s*fixed/, 'the overlay must cover the screen');
+  // a disabled row must look disabled: the picker refuses to ADD beyond a tier's slots, so that state is reachable
+  assert.match(css, /\.sp-row\.full[^{]*\{[^}]*opacity/, 'a full-tier row needs a disabled look');
+});
+
+test('the picker never invents a pool: it renders what the catalog says, and says so when there is none', () => {
+  const src = read('public/js/screens/support.js');
+  // no hard-coded tier list: the tiers come from the server catalog
+  assert.doesNotMatch(src, /\[\s*5\s*,\s*6\s*\]|\btier:\s*[56]\b/, 'the screen must not hard-code a tier');
+  assert.doesNotMatch(src, /slots\s*:\s*\{\s*[56]\s*:/, 'nor a slot count');
+  // and both "no catalog yet" and "support off" are rendered as such rather than as an empty list
+  assert.match(src, /support-waiting/, 'a missing catalog needs its own message');
+  assert.match(src, /support-disabled/, 'a disabled server needs its own message');
+  assert.match(src, /sanitizeSupport/, 'the button badge must ignore a selection the pool no longer allows');
 });

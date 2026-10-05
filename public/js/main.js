@@ -45,6 +45,8 @@ import { GuideHost } from './ui/guide.js';
 import { installDeviceSupport } from './ui/device.js';
 import { LoadoutHost } from './screens/loadout.js';
 import { installLoadoutSync } from './ui/loadoutSync.js';
+import { SupportHost } from './screens/support.js';
+import { installSupportSync } from './ui/supportSync.js';
 import { startBuildGuard } from './ui/buildGuard.js';
 
 const RESTORE_GRACE_MS = 1500;
@@ -276,6 +278,7 @@ function App() {
     <${UiHosts} />
     <${GuideHost} />
     <${LoadoutHost} />
+    <${SupportHost} />
   </div>`;
 }
 
@@ -329,6 +332,7 @@ async function boot() {
 
   wireNet();
   installLoadoutSync({ net });
+  installSupportSync({ net });
   net.attachBrowserHooks();
   // Audio: unlock on first gesture, BGM follows the route / match phase (js/audio.js).
   installAudio({ getManifest: () => data.get('assets'), subscribe: store.subscribe, getState: store.get, selectRoute, settings: settingsStore.get() });
