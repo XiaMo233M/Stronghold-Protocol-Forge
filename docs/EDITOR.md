@@ -39,6 +39,17 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
 
 ## 界面
 
+编辑器共四个页面，右上角可互相跳转：
+
+| 页面 | 用途 |
+|---|---|
+| `/` | **干员**编辑器（下栏详述） |
+| `/stage.html` | **地图**设计器（2D 摆放器 + 路线） |
+| `/enemy.html` | **怪物**编辑器（数值 + 特殊机制） |
+| `/wave.html` | **出怪**设计器（时间轴 + 明细表） |
+
+### 干员编辑器（首页）
+
 - **左栏**：工坊包列表 → 该包的干员列表。可编辑的干员（有 spec）与「非编辑器管理」的记录分开显示。
 - **表单**：身份（id/名称/阶/职业/分支/位置）、外观（复用已有 Spine id）、**普通与精锐两套数值**、技能（含黑板书键值编辑器）、以及**「是否助战」开关**（直接写入服务端助战卡池）。
 - **实时校验**：每次改动都会调用 `/api/preview`，用与 CLI、AI 完全相同的 `shared/chessAuthoring.js` 规则给出错误与警告，并显示**将要生成的记录**。
@@ -102,6 +113,29 @@ node tools/workshop-validate.mjs workshop     # enemies 层：重算 be/attrPowe
 - **随机禁用的干员不禁用助战**：随机禁用只影响商店抽卡（`server/match/pool.js`），被禁的干员作为助战照样发放
   （以 0 份入库，与"效果发放"同一规则；`test/support.test.js` 锁住了这条）
 
+## 出怪设计器（时间轴）
+
+第四个页面：**`/wave.html`**。它有两半，因为两半都必要：
+
+- **时间轴**：每次出怪一条泳道，横轴是秒，方块宽度 = 这次出怪从第一只到最后一只能持续多久
+  （`time + (count-1) × interval`）。颜色按排期槽位（N/E/S/T 系）区分，`不计入总数` 的出怪画成虚线半透明。
+  哪一次先出、出多久、隔多久，一眼就能看出来。
+- **明细表**：数值真正在这里输入 —— 时间 / 敌人 / 数量 / 间隔 / 路线 / 槽位 / 不计入。画布拖动是锦上添花，精确的输入框不是。
+- **敌人是下拉选择**，选项来自合并后的敌人表（官方 249 只 + 工坊自己写的怪物），不用手打键名
+- **路线**：这张出怪表自己带的路线列表（起点/终点/检查点）。地图只做参照 —— 上方选了哪张地图就画它的路线，并标出 `#序号`，
+  因为 `spawns[].routeIndex` 索引的正是这个序号
+- **绑定到回合**：记录意图（哪个模式的第几回合）。真正生效是在**地图设计器**里给地图写 `rounds` 指向它（方案 B）——
+  这样官方地图完全不受影响
+- **推导量只读**：`totalCount` 与 `slotCounts` 由服务端算。注意两者**不对称**：`slotCounts` 计入 `unharmful` 的出怪，
+  `totalCount` 不计入 —— 这是 `build-data` 的原样行为
+
+命令行等价路径：
+
+```powershell
+node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/slotCounts，
+                                              # 并检查每只敌人的键是否存在、routeIndex 是否越界
+```
+
 ## API（供二次开发）
 
 | 方法 | 路径 | 说明 |
@@ -121,11 +155,17 @@ node tools/workshop-validate.mjs workshop     # enemies 层：重算 be/attrPowe
 | POST | `/api/enemies/preview` | `{ spec }` → 推导 `attrPower`/`be` 并校验，**不写盘** |
 | POST | `/api/packs/:pack/enemies` | `{ spec }` → 写 `enemy-specs/` 并重新生成 `enemies.json` |
 | DELETE | `/api/packs/:pack/enemies/:key` | 删除该怪物的 spec 及它拥有的记录 |
+| GET | `/api/waves` | 工坊出怪表列表 + 词表 + **可选敌人键** + 模式 + 地图（含各自带的回合） |
+| GET | `/api/waves/:pack/:id` | 该出怪表的**可编辑 spec**（源）与生成的记录 |
+| POST | `/api/waves/preview` | `{ spec }` → 推导 `totalCount`/`slotCounts` 并校验，**不写盘** |
+| POST | `/api/packs/:pack/waves` | `{ spec }` → 写 `wave-specs/` 并重新生成 `waves.json` |
+| DELETE | `/api/packs/:pack/waves/:id` | 删除该出怪表的 spec 及它拥有的记录 |
 
 ## 当前不包含
 
 - **行为层脚本**（`kits/<chessId>.js`）的编辑——kit 目前手写文件
-- **怪物 / 出怪表 / 装备**的编辑页签（数据层叠加已就绪；作者层与界面待做，见 [WORKSHOP.md](WORKSHOP.md)）
+- **装备（items）**的编辑页签（数据层叠加已就绪；作者层与界面待做）
+- 助战**选择界面**（`ui/supportModel.js` + `ui/supportSync.js` 与卡池下发已就绪且已测，只差界面）
 - 地图的 **3D 视图**（项目自带 `public/js/render/board3d/`；2D 为先，接口预留）
 - 助战**名额**（`slots`）的编辑——目前改 `data/support.json` 的 `slots` 字段
 - 任何鉴权

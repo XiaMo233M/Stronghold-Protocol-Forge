@@ -378,3 +378,83 @@ describe('workshop editor: monsters (the enemy form API)', () => {
     assert.equal((await fetch(`${editor.url}/enemy.js`)).status, 200);
   });
 });
+
+describe('workshop editor: waves (the timeline API)', () => {
+  const waveSpec = () => ({
+    id: 'round_two_hounds', kind: 'normal', characterLimit: 8,
+    routes: [{ motion: 'WALK', start: [9, 0], end: [9, 20], checkpoints: [] }],
+    spawns: [
+      { time: 3, key: 'enemy_1007_slime', count: 2, interval: 5, routeIndex: 0, slot: 'N' },
+      { time: 20, key: 'enemy_1007_slime', count: 1, interval: 0, routeIndex: 0, slot: 'NF', unharmful: true },
+      { time: 30, key: 'enemy_1007_slime', count: 3, interval: 4, routeIndex: 0, slot: 'E' },
+    ],
+    usedBy: [{ modeId: 'mode_multi_normal', round: 2 }],
+  });
+
+  test('GET /api/waves exposes the vocabularies, the enemy keys, the modes and the maps', async () => {
+    const r = await fetch(`${editor.url}/api/waves`).then((x) => x.json());
+    assert.ok(r.vocab.kinds.includes('normal'));
+    assert.ok(r.vocab.slots.includes('N') && r.vocab.slots.includes('EF'));
+    assert.ok(r.vocab.spawnFields.includes('routeIndex'), 'the form must know the engine-readable spawn fields');
+    assert.equal(r.vocab.roundsPerMode, 15);
+    assert.ok(r.enemies.length > 100, 'the enemy picker needs every spawnable key');
+    assert.ok(r.modes.length > 0);
+    assert.ok(r.stages.some((s) => s.official) && r.stages.every((s) => s.id && s.name), 'the map picker needs id + name');
+  });
+
+  test('preview derives totalCount and slotCounts without writing', async () => {
+    const r = await post(`${editor.url}/api/waves/preview`, { spec: waveSpec() }).then((x) => x.json());
+    assert.equal(r.ok, true, JSON.stringify(r.errors));
+    assert.equal(r.record.id, 'wave_ws_round_two_hounds');
+    assert.equal(r.record.totalCount, 5, 'the unharmful spawn does not count toward the total');
+    assert.deepEqual(r.record.slotCounts, { N: 2, NF: 1, E: 3 }, 'but it DOES count into its slot');
+    assert.equal(fs.existsSync(join(wsRoot, 'wave-pack')), false, 'a preview must not write');
+  });
+
+  test('saving writes the spec and the generated record; deleting removes them', async () => {
+    const saved = await post(`${editor.url}/api/packs/wave-pack/waves`, { spec: waveSpec() }).then((x) => x.json());
+    assert.equal(saved.ok, true, JSON.stringify(saved));
+    assert.equal(saved.id, 'wave_ws_round_two_hounds');
+    const packDir = join(wsRoot, 'wave-pack');
+    assert.deepEqual(JSON.parse(fs.readFileSync(join(packDir, 'pack.json'), 'utf8')).content, ['waves']);
+    assert.equal(fs.existsSync(join(packDir, 'wave-specs/round_two_hounds.json')), true, 'the spec is the editable source');
+    const records = JSON.parse(fs.readFileSync(join(packDir, 'waves.json'), 'utf8'));
+    assert.equal(records.wave_ws_round_two_hounds.totalCount, 5);
+
+    const listed = await fetch(`${editor.url}/api/waves`).then((x) => x.json());
+    const found = listed.waves.find((w) => w.id === 'wave_ws_round_two_hounds');
+    assert.ok(found && found.managed, 'the timeline must be able to reopen what it wrote');
+    assert.equal(found.spawns, 3);
+    assert.equal(found.routes, 1);
+    assert.deepEqual(found.issues.filter((i) => i.severity === 'error'), []);
+    assert.deepEqual(found.modeRounds, ['mode_multi_normal#2']);
+
+    const del = await fetch(`${editor.url}/api/packs/wave-pack/waves/wave_ws_round_two_hounds`, { method: 'DELETE' }).then((x) => x.json());
+    assert.equal(del.ok, true);
+    assert.equal(JSON.parse(fs.readFileSync(join(packDir, 'waves.json'), 'utf8')).wave_ws_round_two_hounds, undefined);
+  });
+
+  test('a spawn naming an enemy nothing defines is refused (it would silently spawn nothing)', async () => {
+    const bad = await post(`${editor.url}/api/packs/wave-pack/waves`, { spec: { ...waveSpec(), spawns: [{ time: 1, key: 'enemy_typo', count: 1, interval: 0, routeIndex: 0 }] } });
+    assert.equal(bad.status, 400);
+    assert.ok((await bad.json()).errors.some((e) => e.code === 'UNKNOWN_ENEMY'));
+  });
+
+  test('a routeIndex past the wave routes is refused (the sim would silently walk route 0)', async () => {
+    const bad = await post(`${editor.url}/api/packs/wave-pack/waves`, { spec: { ...waveSpec(), spawns: [{ time: 1, key: 'enemy_1007_slime', count: 1, interval: 0, routeIndex: 7 }] } });
+    assert.equal(bad.status, 400);
+    assert.ok((await bad.json()).errors.some((e) => e.code === 'ROUTE_MISSING'));
+  });
+
+  test('a typo in a spawn field is refused rather than silently dropped', async () => {
+    const bad = await post(`${editor.url}/api/waves/preview`, { spec: { ...waveSpec(), spawns: [{ time: 1, key: 'enemy_1007_slime', count: 1, interval: 0, sleot: 'N' }] } }).then((x) => x.json());
+    assert.equal(bad.ok, false);
+    assert.ok(bad.errors.some((e) => e.code === 'UNKNOWN_FIELD' && e.field === 'spawns[0].sleot'), JSON.stringify(bad.errors));
+  });
+
+  test('the timeline page is part of the editor, and only of the editor', async () => {
+    const html = await fetch(`${editor.url}/wave.html`).then((r) => r.text());
+    assert.match(html, /工坊出怪设计器/);
+    assert.equal((await fetch(`${editor.url}/wave.js`)).status, 200);
+  });
+});

@@ -28,6 +28,10 @@ import {
   deriveEnemy, validateEnemy, enemyErrors, enemyKey as enemyKeyOf, ENEMY_RANKS, ENEMY_MOTIONS, ENEMY_DMG_TYPES, ENEMY_APPLY_WAYS,
   ENEMY_AC_TYPES, ENEMY_IMMUNITIES, ENEMY_STAT_DEFAULTS,
 } from '../shared/enemyAuthoring.js';
+import {
+  deriveWave, validateWave, waveErrors, waveId as waveIdOf, waveSummaryLine,
+  WAVE_KINDS, SPAWN_SLOTS, SPAWN_FIELDS, ROUNDS_PER_MODE,
+} from '../shared/waveAuthoring.js';
 import { normalizeSupportConfig } from '../shared/support.js';
 import { loadWorkshop, WORKSHOP_DIR } from '../server/workshop.js';
 
@@ -184,6 +188,85 @@ const ENEMY_VOCAB = () => ({
   acTypes: [...ENEMY_AC_TYPES], immunities: [...ENEMY_IMMUNITIES], statDefaults: { ...ENEMY_STAT_DEFAULTS },
 });
 
+// ---- 出怪 (waves) ----------------------------------------------------------------------------------
+//
+// Same file model a third time: `<pack>/wave-specs/<id>.json` is the editable SOURCE (what the timeline writes) and
+// `<pack>/waves.json` is the GENERATED artifact. `totalCount` and `slotCounts` are DERIVED from the spawns on every
+// save, with build-data's exact asymmetry (slotCounts counts `unharmful` spawns, totalCount does not).
+//
+// A wave's ROUTES are the map paths it walks. The timeline shows them over the map the wave runs on, and validation
+// checks that every spawn's `routeIndex` addresses one of them — the sim silently falls back to route 0 otherwise.
+
+const WAVE_SPEC_DIR = 'wave-specs';
+
+/** A pack's wave specs, in a stable order. */
+function packWaveSpecs(packDir) {
+  const out = [];
+  const dir = path.join(packDir, WAVE_SPEC_DIR);
+  if (!fs.existsSync(dir)) return out;
+  for (const name of fs.readdirSync(dir).sort()) {
+    if (!name.endsWith('.json')) continue;
+    const spec = readJson(path.join(dir, name), null);
+    if (spec) out.push(spec);
+  }
+  return out;
+}
+
+/** Write a pack's `waves.json` from its wave specs, preserving every record no spec owns. */
+function regenerateWaves(packDir, officialWaves, knownEnemyKeys, dropIds = []) {
+  const existing = readJson(path.join(packDir, 'waves.json'), {}) || {};
+  const owned = new Set(Array.isArray(dropIds) ? dropIds : []);
+  const fresh = {};
+  const errors = [];
+  for (const spec of packWaveSpecs(packDir)) {
+    const derived = deriveWave(spec);
+    if (!derived.ok) {
+      // a spec that cannot derive owns nothing: claiming its id would delete the previous record on an unrelated save
+      errors.push({ id: spec && spec.id, issues: derived.errors.map((e) => ({ ...e, severity: 'error' })) });
+      continue;
+    }
+    owned.add(derived.wave.id);
+    const issues = waveErrors(validateWave(derived.wave, { id: derived.wave.id, officialIds: officialWaves, knownEnemyKeys }));
+    if (issues.length) errors.push({ id: derived.wave.id, issues });
+    fresh[derived.wave.id] = derived.wave;
+  }
+  const records = {};
+  for (const [id, rec] of Object.entries(existing)) if (!owned.has(id)) records[id] = rec;
+  Object.assign(records, fresh);
+  return { records, generated: Object.keys(fresh), errors };
+}
+
+/** The enemy keys a wave may spawn: the merged official set plus every pack's own monsters. */
+function knownEnemyKeysFor(root, dataDir) {
+  const keys = new Set(Object.keys(readJson(path.join(dataDir, 'enemies.json'), {}) || {}));
+  if (!root || !fs.existsSync(root)) return keys;
+  for (const packId of fs.readdirSync(root)) {
+    if (!PACK_ID_RE.test(packId)) continue;
+    for (const key of Object.keys(readJson(path.join(root, packId, 'enemies.json'), {}) || {})) keys.add(key);
+  }
+  return keys;
+}
+
+/**
+ * The maps a wave can be shown over: the official ones (id + name + their S/E tiles for the route preview) and the
+ * packs' own stages, whose `rounds`/`bossRounds` are what actually bind a wave to a round (server/match/waves.js).
+ */
+function stageChoices(root, dataDir) {
+  const out = [];
+  for (const [id, rec] of Object.entries(readJson(path.join(dataDir, 'stages.json'), {}) || {})) {
+    out.push({ id, name: rec.name ?? id, official: true, rounds: rec.rounds ?? null });
+  }
+  if (root && fs.existsSync(root)) {
+    for (const packId of fs.readdirSync(root)) {
+      if (!PACK_ID_RE.test(packId)) continue;
+      for (const [id, rec] of Object.entries(readJson(path.join(root, packId, 'stages.json'), {}) || {})) {
+        out.push({ id, name: rec.name ?? id, pack: packId, official: false, rounds: rec.rounds ?? null, bossRounds: rec.bossRounds ?? null });
+      }
+    }
+  }
+  return out;
+}
+
 /** Everything the UI renders for one pack: its specs (editable) plus every record and its issues. */
 function packState(root, packId, officialIds) {
   const packDir = path.join(root, packId);
@@ -306,6 +389,7 @@ export async function createEditorServer(opts = {}) {
   const officialIds = new Set(Object.keys(readJson(path.join(dataDir, 'chess.json'), {}) || {}));
   const officialStages = new Set(Object.keys(readJson(path.join(dataDir, 'stages.json'), {}) || {}));
   const officialEnemies = new Set(Object.keys(readJson(path.join(dataDir, 'enemies.json'), {}) || {}));
+  const officialWaves = new Set(Object.keys(readJson(path.join(dataDir, 'waves.json'), {}) || {}));
   const official = officialChess(dataDir);
 
   const server = http.createServer((req, res) => {
@@ -609,6 +693,111 @@ export async function createEditorServer(opts = {}) {
       return sendJson(res, 200, {
         spec: ids ? readJson(path.join(packDir, ENEMY_SPEC_DIR, `${ids.slug}.json`), null) : null,
         record: (readJson(path.join(packDir, 'enemies.json'), {}) || {})[key] ?? null,
+      });
+    }
+
+    // ---- 出怪 (waves): the timeline's data and its save path ----------------------------------------
+    if (p === '/api/waves' && method === 'GET') {
+      const waves = [];
+      for (const packId of fs.existsSync(root) ? fs.readdirSync(root).sort() : []) {
+        if (!PACK_ID_RE.test(packId) || !fs.existsSync(path.join(root, packId, 'pack.json'))) continue;
+        const packDir = path.join(root, packId);
+        const managed = new Set(packWaveSpecs(packDir).map((s) => {
+          const ids = s && s.id ? waveIdOf(s.id) : null;
+          return ids ? ids.id : null;
+        }).filter(Boolean));
+        const records = readJson(path.join(packDir, 'waves.json'), {}) || {};
+        for (const [id, rec] of Object.entries(records)) {
+          waves.push({
+            pack: packId, id, kind: rec.kind ?? null, solo: rec.solo === true,
+            routes: Array.isArray(rec.routes) ? rec.routes.length : 0,
+            spawns: Array.isArray(rec.spawns) ? rec.spawns.length : 0,
+            totalCount: rec.totalCount ?? null, slotCounts: rec.slotCounts ?? {},
+            summary: waveSummaryLine(rec),
+            modeRounds: Array.isArray(rec.usedBy) ? rec.usedBy.map((u) => `${u.modeId}#${u.round}`) : [],
+            managed: managed.has(id),
+            issues: validateWave(rec, { id, officialIds: officialWaves, knownEnemyKeys: knownEnemyKeysFor(root, dataDir) }),
+          });
+        }
+      }
+      return sendJson(res, 200, {
+        waves,
+        vocab: { kinds: [...WAVE_KINDS], slots: [...SPAWN_SLOTS], spawnFields: [...SPAWN_FIELDS], roundsPerMode: ROUNDS_PER_MODE },
+        officialWaves: [...officialWaves].sort(),
+        modes: inScopeModes(dataDir),
+        // every spawnable enemy (official + the packs' own), so the timeline can offer a picker instead of a text field
+        enemies: [...knownEnemyKeysFor(root, dataDir)].sort(),
+        stages: stageChoices(root, dataDir),
+      });
+    }
+
+    // derive + validate a wave WITHOUT writing: the timeline's live feedback
+    if (p === '/api/waves/preview' && method === 'POST') {
+      const { spec } = await readBody(req);
+      const derived = deriveWave(spec);
+      if (!derived.ok) return sendJson(res, 200, { ok: false, errors: derived.errors, warnings: [] });
+      const issues = validateWave(derived.wave, { id: derived.wave.id, officialIds: officialWaves, knownEnemyKeys: knownEnemyKeysFor(root, dataDir) });
+      return sendJson(res, 200, {
+        ok: waveErrors(issues).length === 0,
+        errors: issues.filter((i) => i.severity === 'error'),
+        warnings: [...derived.warnings, ...issues.filter((i) => i.severity === 'warning').map((i) => i.message)],
+        record: derived.wave,
+      });
+    }
+
+    if (p.startsWith('/api/packs/') && p.endsWith('/waves') && method === 'POST') {
+      const packId = p.slice('/api/packs/'.length, -'/waves'.length);
+      if (!PACK_ID_RE.test(packId)) throw Object.assign(new Error('bad pack id'), { status: 400 });
+      const { spec } = await readBody(req);
+      const ids = waveIdOf(spec && spec.id);
+      if (!ids) throw Object.assign(new Error('spec.id must be a slug (letters, digits, _ - . :)'), { status: 400 });
+      const derived = deriveWave(spec);
+      if (!derived.ok) return sendJson(res, 400, { error: 'the wave spec is invalid', errors: derived.errors });
+      const blocking = waveErrors(validateWave(derived.wave, { id: derived.wave.id, officialIds: officialWaves, knownEnemyKeys: knownEnemyKeysFor(root, dataDir) }));
+      if (blocking.length) return sendJson(res, 400, { error: 'the wave did not validate', errors: blocking });
+
+      const packDir = path.join(root, packId);
+      const manifestPath = path.join(packDir, 'pack.json');
+      const existingManifest = readJson(manifestPath, null);
+      const content = new Set(Array.isArray(existingManifest?.content) ? existingManifest.content : []);
+      content.add('waves');
+      await writeJson(manifestPath, existingManifest
+        ? { ...existingManifest, content: [...content].sort() }
+        : { id: packId, name: spec.name || packId, version: '0.1.0', author: null, license: null, description: null, gameVersion: '0.1.3', content: [...content], overrides: [] });
+      await writeJson(path.join(packDir, WAVE_SPEC_DIR, `${ids.slug}.json`), spec);
+      const regen = regenerateWaves(packDir, officialWaves, knownEnemyKeysFor(root, dataDir));
+      if (regen.errors.length) {
+        return sendJson(res, 400, { error: 'another wave in this pack no longer derives — fix it before saving', errors: regen.errors });
+      }
+      await writeJson(path.join(packDir, 'waves.json'), regen.records);
+      return sendJson(res, 200, { ok: true, id: derived.wave.id, generated: regen.generated, warnings: derived.warnings });
+    }
+
+    if (p.startsWith('/api/packs/') && p.includes('/waves/') && method === 'DELETE') {
+      const rest = p.slice('/api/packs/'.length);
+      const cut = rest.indexOf('/waves/');
+      const packId = rest.slice(0, cut);
+      const waveId = rest.slice(cut + '/waves/'.length);
+      if (!PACK_ID_RE.test(packId) || !/^[A-Za-z0-9_\-.:]{1,64}$/.test(waveId)) throw Object.assign(new Error('bad id'), { status: 400 });
+      const ids = waveIdOf(waveId);
+      const specPath = path.join(root, packId, WAVE_SPEC_DIR, `${ids.slug}.json`);
+      if (fs.existsSync(specPath)) await fsp.rm(specPath);
+      const regen = regenerateWaves(path.join(root, packId), officialWaves, knownEnemyKeysFor(root, dataDir), [waveId]);
+      await writeJson(path.join(root, packId, 'waves.json'), regen.records);
+      return sendJson(res, 200, { ok: true, removed: waveId, generated: regen.generated, errors: regen.errors });
+    }
+
+    // the stored SPEC the timeline edits (the source of truth), plus the generated record for reference
+    if (p.startsWith('/api/waves/') && method === 'GET') {
+      const rest = p.slice('/api/waves/'.length).split('/');
+      if (rest.length !== 2) throw Object.assign(new Error('not found'), { status: 404 });
+      const [packId, waveId] = rest;
+      if (!PACK_ID_RE.test(packId) || !/^[A-Za-z0-9_\-.:]{1,64}$/.test(waveId)) throw Object.assign(new Error('bad id'), { status: 400 });
+      const ids = waveIdOf(waveId);
+      const packDir = path.join(root, packId);
+      return sendJson(res, 200, {
+        spec: ids ? readJson(path.join(packDir, WAVE_SPEC_DIR, `${ids.slug}.json`), null) : null,
+        record: (readJson(path.join(packDir, 'waves.json'), {}) || {})[waveId] ?? null,
       });
     }
 

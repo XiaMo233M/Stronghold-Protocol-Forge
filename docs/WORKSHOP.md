@@ -118,8 +118,9 @@ node tools/workshop-validate.mjs my-pack
 | 合并数据送达浏览器（HTTP） | ✅ 已实现 |
 | 新干员进入商店池、被购买、部署、真实战斗、精英/模组解析 | ✅ 已验证（`test/workshop.test.js`） |
 | **地图（stages）**：推导 + 校验 + 2D 摆放器 | ✅ 已完成（`test/stageAuthoring.test.js`、`editor/ui/stage.html`、`tools/workshop-scaffold.mjs`） |
-| **怪物（enemies）**：`be`/`attrPower` 推导 + 校验 | ✅ 作者层已完成（`test/enemyAuthoring.test.js`）；**编辑器表单待做** |
-| **出怪表（waves）**、**装备（items）** | ⚠️ 数据层可叠加，但**无推导、无校验、无界面**（见 §5 roadmap） |
+| **怪物（enemies）**：`be`/`attrPower` 推导 + 校验 + 编辑器表单 | ✅ 已完成（`test/enemyAuthoring.test.js`、`editor/ui/enemy.html`） |
+| **出怪表（waves）**：`totalCount`/`slotCounts` 推导 + 校验 + 时间轴 | ✅ 已完成（`test/waveAuthoring.test.js`、`editor/ui/wave.html`） |
+| **装备（items）** | ⚠️ 数据层可叠加，但**无推导、无校验、无界面**（见 §5 roadmap） |
 | **作者接口**：spec → 合法记录、机器可读校验、模板 prompt、校验 CLI | ✅ 已实现（`test/chessAuthoring.test.js`） |
 | **行为层**：包内 `kits/<chessId>.js` 接入 `battle.on(...)` 钩子总线 | ✅ 已实现（见 §4） |
 | **局外编辑器 UI**（创建/编辑干员、装备、怪物、地图） | ⛔ **未实现**（目前用 spec + CLI） |
