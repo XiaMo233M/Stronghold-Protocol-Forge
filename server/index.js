@@ -400,7 +400,48 @@ export function workshopKitFilesFor(modules, workshopDir) {
   return out;
 }
 
-export function createStaticHandler({ publicDir, dataDir, sharedDir, simDir = path.join(ROOT, 'server', 'sim'), log = noopLog, workshopJson = null, workshopKitFiles = null }) {
+/** The URL prefix a pack's own art is served under (`<prefix><pack>/<path inside assets/>`). */
+export const WORKSHOP_ASSET_PREFIX = '/workshop-assets/';
+
+/**
+ * The file types a pack's `assets/` folder may serve. Deliberately an allowlist: this route is reachable by any client,
+ * and a `.js` or `.html` there would be code the page could be talked into executing (the kit route exists for code, and
+ * it serves only modules the loader registered).
+ */
+export const WORKSHOP_ASSET_TYPES = Object.freeze(new Map([
+  ['.png', 'image/png'], ['.jpg', 'image/jpeg'], ['.jpeg', 'image/jpeg'], ['.webp', 'image/webp'],
+  ['.gif', 'image/gif'], ['.svg', 'image/svg+xml'], ['.avif', 'image/avif'], ['.ico', 'image/x-icon'],
+  ['.mp3', 'audio/mpeg'], ['.ogg', 'audio/ogg'], ['.wav', 'audio/wav'], ['.m4a', 'audio/mp4'],
+  ['.woff', 'font/woff'], ['.woff2', 'font/woff2'], ['.ttf', 'font/ttf'], ['.otf', 'font/otf'],
+  ['.json', 'application/json; charset=utf-8'], ['.atlas', 'text/plain; charset=utf-8'], ['.skel', 'application/octet-stream'],
+]));
+
+/**
+ * The packs that have an `assets/` folder, keyed by pack id → the pack's directory.
+ *
+ * A pack's own art is the one thing the repo cannot ship (the game assets are (c) Hypergryph / Yostar and are never
+ * committed), so a pack that needs a custom sprite carries it and the client fetches it from here. `license` is REQUIRED
+ * for such a pack (shared/workshop.js): the redistributor of the art is the pack's author, and the manifest has to say
+ * under what terms — the same stance as docs/WORKSHOP.md §5.
+ *
+ * @param {{ packs?: Array<{ id: string, dir?: string }> }} loaded `loadWorkshop(...)`
+ * @param {string|null} workshopDir
+ */
+export function workshopAssetsFor(loaded, workshopDir) {
+  /** @type {Map<string, string>} */
+  const out = new Map();
+  if (typeof workshopDir !== 'string' || workshopDir === '') return out;
+  const root = path.resolve(workshopDir);
+  for (const p of (loaded && Array.isArray(loaded.packs)) ? loaded.packs : []) {
+    if (!p || typeof p.id !== 'string' || !p.id) continue;
+    const dir = p.dir ? path.resolve(p.dir) : path.join(root, p.id);
+    if (dir !== root && !dir.startsWith(root + path.sep)) continue;
+    if (fs.existsSync(path.join(dir, 'assets'))) out.set(p.id, dir);
+  }
+  return out;
+}
+
+export function createStaticHandler({ publicDir, dataDir, sharedDir, simDir = path.join(ROOT, 'server', 'sim'), log = noopLog, workshopJson = null, workshopKitFiles = null, workshopAssets = null }) {
   const mounts = [
     { prefix: '/data/', name: 'data', dir: path.resolve(dataDir) },
     { prefix: '/shared/', name: 'shared', dir: path.resolve(sharedDir) },
@@ -455,6 +496,37 @@ export function createStaticHandler({ publicDir, dataDir, sharedDir, simDir = pa
         return;
       }
       res.writeHead(200, { 'Content-Type': MIME['.js'], 'Content-Length': body.length, 'Cache-Control': 'no-cache' });
+      res.end(req.method === 'HEAD' ? undefined : body);
+      return;
+    }
+    // 工坊素材 (docs/WORKSHOP.md §5): a pack's OWN art, served read-only from `<pack>/assets/**`. This is the one hole
+    // in "the repo ships no game assets": a pack may carry its own (a licence-cleared sprite, a custom icon, a voice
+    // line), and the CLIENT has to be able to fetch it or the content cannot render. It is deliberately narrow:
+    //   * only the registered packs, and only their `assets/` subtree — never the pack's data, kits or manifest;
+    //   * an extension allowlist, so the folder can never serve a script the page would then execute;
+    //   * no directory listing, and `..` / dot-segments are refused before the path is built.
+    if (workshopAssets && workshopAssets.size && decoded.startsWith(WORKSHOP_ASSET_PREFIX)) {
+      const rel = decoded.slice(WORKSHOP_ASSET_PREFIX.length);
+      const segments = rel.split('/').filter((s) => s.length > 0);
+      const pack = segments.shift();
+      const bad = !pack || !workshopAssets.has(pack) || !segments.length
+        || segments.some((s) => s === '..' || s === '.' || s.startsWith('.'));
+      const ext = bad ? '' : path.extname(segments[segments.length - 1]).toLowerCase();
+      if (bad || !WORKSHOP_ASSET_TYPES.has(ext)) { sendError(req, res, 404, '页面不存在 · Not found'); return; }
+      const dir = path.join(workshopAssets.get(pack), 'assets');
+      const abs = path.join(dir, ...segments);
+      if (abs !== dir && !abs.startsWith(dir + path.sep)) { sendError(req, res, 403, '禁止访问 · Forbidden'); return; }
+      let body;
+      try {
+        const st = await fsp.stat(abs);
+        if (!st.isFile()) throw new Error('not a file');
+        body = await fsp.readFile(abs);
+      } catch { sendError(req, res, 404, '页面不存在 · Not found'); return; }
+      // a pack's art is immutable in practice (a repack ships a new version) and can be large: cache it like /assets/
+      res.writeHead(200, {
+        'Content-Type': WORKSHOP_ASSET_TYPES.get(ext), 'Content-Length': body.length,
+        'Cache-Control': 'public, max-age=86400',
+      });
       res.end(req.method === 'HEAD' ? undefined : body);
       return;
     }
@@ -724,12 +796,13 @@ export async function startServer(opts = {}) {
   const workshopJson = buildWorkshopDataFiles(data, workshopLoaded);
   const workshopKits = await loadWorkshopKits(workshopLoaded, { log, knownIds: new Set(Object.keys(data.chess || {})) });
   const workshopKitFiles = workshopKitFilesFor(workshopKits.modules, workshopDir);
+  const workshopAssets = workshopAssetsFor(workshopLoaded, workshopDir);
   const lobby = new Lobby({
     registry, log, MatchClass: opts.MatchClass, getData: () => data, seedFn: opts.seedFn, options: lobbyOptions,
     workshop: { kits: workshopKits.kits, modules: workshopKits.modules },
   });
   const network = new Network({ registry, handler: lobby, log, options: netOptions });
-  const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, log, workshopJson, workshopKitFiles });
+  const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, log, workshopJson, workshopKitFiles, workshopAssets });
   const startedAt = Date.now();
   // The tag is per process (see buildTag): read the browser runtime once, here, not on every /healthz.
   resetBuildTag();

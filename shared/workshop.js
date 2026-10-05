@@ -51,7 +51,7 @@ const fail = (error, detail) => ({ ok: false, error, detail });
  *   description: string|null, gameVersion: string|null, content: string[], overrides: string[] } }
  *   | { ok: false, error: string, detail: string }}
  */
-export function normalizePackManifest(raw, dirName = '') {
+export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (!isPlainObj(raw)) return fail('BAD_MANIFEST', 'pack.json must be a JSON object');
   const id = typeof raw.id === 'string' && raw.id ? raw.id : dirName;
   if (!PACK_ID_RE.test(id)) return fail('BAD_PACK_ID', `"${id}" is not a valid pack id (letters, digits, _ and - only)`);
@@ -67,6 +67,15 @@ export function normalizePackManifest(raw, dirName = '') {
   const overrides = Array.isArray(raw.overrides)
     ? [...new Set(raw.overrides.filter((o) => typeof o === 'string' && /^[a-z]+:[A-Za-z0-9_\-.:]{1,64}$/.test(o)))].sort()
     : [];
+  const license = typeof raw.license === 'string' && raw.license ? raw.license : null;
+  // A pack that SHIPS ITS OWN ART must say under what terms (`hasAssets` = it has an assets/ folder; the loader passes
+  // it, since this function only sees the manifest). The repo ships no game assets, so a pack's art is the pack author's
+  // to license — and the redistributor carries the risk, which is why the manifest has to name the licence rather than
+  // leave it to a README nobody reads (docs/WORKSHOP.md §5).
+  if (opts.hasAssets === true && !license) {
+    return fail('ASSETS_NEED_LICENSE',
+      'this pack has an assets/ folder, so pack.json must declare a license (e.g. "CC0-1.0", "CC-BY-4.0", or "see assets/LICENSE.txt")');
+  }
   return {
     ok: true,
     pack: {
@@ -74,7 +83,8 @@ export function normalizePackManifest(raw, dirName = '') {
       name: typeof raw.name === 'string' && raw.name ? raw.name : id,
       version: typeof raw.version === 'string' && raw.version ? raw.version : '0.0.0',
       author: typeof raw.author === 'string' && raw.author ? raw.author : null,
-      license: typeof raw.license === 'string' && raw.license ? raw.license : null,
+      license,
+      hasAssets: opts.hasAssets === true,
       description: typeof raw.description === 'string' && raw.description ? raw.description : null,
       gameVersion: typeof raw.gameVersion === 'string' && raw.gameVersion ? raw.gameVersion : null,
       content,

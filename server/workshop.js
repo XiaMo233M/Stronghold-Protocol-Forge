@@ -47,7 +47,9 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null } = {}) {
       errors.push({ pack: name, reason: e && e.code === 'ENOENT' ? 'pack.json is missing' : `pack.json is unreadable: ${e.message}` });
       continue;
     }
-    const manifest = normalizePackManifest(rawManifest, name);
+    // a pack that ships its own art must declare a licence (shared/workshop.js ASSETS_NEED_LICENSE)
+    const hasAssets = fs.existsSync(path.join(packDir, 'assets'));
+    const manifest = normalizePackManifest(rawManifest, name, { hasAssets });
     if (!manifest.ok) {
       errors.push({ pack: name, reason: `${manifest.error}: ${manifest.detail}` });
       continue;
