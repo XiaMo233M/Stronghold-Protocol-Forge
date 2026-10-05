@@ -17,6 +17,7 @@ import { loadData } from '../server/data.js';
 import { GameData } from '../server/match/gamedata.js';
 import { checkSupport, normalizeSupportConfig } from '../shared/support.js';
 import { TILE_PALETTE } from '../shared/stageAuthoring.js';
+import { attrPowerOf, battleEffectivenessOf } from '../shared/enemyAuthoring.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DATA_DIR = join(ROOT, 'data');
@@ -312,5 +313,68 @@ describe('workshop editor: maps (the 2D placer API)', () => {
     const blocked = await post(`${editor.url}/api/stages/preview`, { spec: walled }).then((x) => x.json());
     assert.equal(blocked.ok, false);
     assert.ok(blocked.errors.some((e) => e.code === 'ROUTE_NOPATH'), JSON.stringify(blocked.errors));
+  });
+});
+
+describe('workshop editor: monsters (the enemy form API)', () => {
+  const enemySpec = () => ({
+    id: 'frost_hound', name: '霜牙猎犬', rank: 'ELITE', applyWay: 'MELEE', motion: 'WALK', dmgType: 'phys',
+    desc: '被源石侵蚀的猎犬。',
+    stats: { maxHp: 4200, atk: 620, def: 180, res: 20, moveSpeed: 1.6, bat: 1.3, blockCnt: 1, massLevel: 2 },
+    abilities: [{ text: '无法被阻挡' }, { text: '被击倒时使周围减速' }],
+    talents: { bb: { move_speed: 0.3 } }, skills: [], tags: ['origen'],
+    immunities: { silence: true, frozen: true }, spine: 'enemy_1007_slime', beFactor: 1,
+  });
+
+  test('GET /api/enemies exposes the vocabularies the form renders and the official keys', async () => {
+    const r = await fetch(`${editor.url}/api/enemies`).then((x) => x.json());
+    for (const k of ['ranks', 'motions', 'dmgTypes', 'applyWays', 'acTypes', 'immunities', 'statDefaults']) {
+      assert.ok(r.vocab[k] && (Array.isArray(r.vocab[k]) ? r.vocab[k].length : Object.keys(r.vocab[k]).length), `vocab.${k} is empty`);
+    }
+    assert.ok(r.officialEnemies.length > 100, 'the official roster must be listed for the collision check');
+  });
+
+  test('preview derives attrPower and be without writing', async () => {
+    const r = await post(`${editor.url}/api/enemies/preview`, { spec: enemySpec() }).then((x) => x.json());
+    assert.equal(r.ok, true, JSON.stringify(r.errors));
+    assert.equal(r.record.key, 'enemy_ws_frost_hound');
+    assert.equal(r.record.attrPower, attrPowerOf(r.record.stats));
+    assert.equal(r.record.be, battleEffectivenessOf(r.record.stats, 1));
+    assert.equal(r.record.tokenOnly, false, 'a workshop monster is spawned by a wave, not only by a token');
+    assert.equal(fs.existsSync(join(wsRoot, 'monster-pack')), false, 'a preview must not write');
+  });
+
+  test('saving writes the spec and the generated record; deleting removes them', async () => {
+    const saved = await post(`${editor.url}/api/packs/monster-pack/enemies`, { spec: enemySpec() }).then((x) => x.json());
+    assert.equal(saved.ok, true, JSON.stringify(saved));
+    assert.equal(saved.key, 'enemy_ws_frost_hound');
+    const packDir = join(wsRoot, 'monster-pack');
+    assert.deepEqual(JSON.parse(fs.readFileSync(join(packDir, 'pack.json'), 'utf8')).content, ['enemies']);
+    assert.equal(fs.existsSync(join(packDir, 'enemy-specs/frost_hound.json')), true, 'the spec is the editable source');
+    const records = JSON.parse(fs.readFileSync(join(packDir, 'enemies.json'), 'utf8'));
+    assert.ok(records['enemy_ws_frost_hound'].attrPower, 'the generated record carries the derived metrics');
+
+    const listed = await fetch(`${editor.url}/api/enemies`).then((x) => x.json());
+    const found = listed.enemies.find((e) => e.key === 'enemy_ws_frost_hound');
+    assert.ok(found && found.managed);
+    assert.deepEqual(found.issues.filter((i) => i.severity === 'error'), []);
+    assert.equal(found.abilities, 2);
+
+    const del = await fetch(`${editor.url}/api/packs/monster-pack/enemies/enemy_ws_frost_hound`, { method: 'DELETE' }).then((x) => x.json());
+    assert.equal(del.ok, true);
+    assert.equal(JSON.parse(fs.readFileSync(join(packDir, 'enemies.json'), 'utf8'))['enemy_ws_frost_hound'], undefined);
+  });
+
+  test('an invalid monster is refused with the reason', async () => {
+    const bad = await post(`${editor.url}/api/packs/monster-pack/enemies`, { spec: { ...enemySpec(), stats: { maxHp: -1 } } });
+    assert.equal(bad.status, 400);
+    assert.ok((await bad.json()).errors.some((e) => e.code === 'BAD_NUMBER'), 'the number error must be reported');
+    assert.equal((await post(`${editor.url}/api/packs/monster-pack/enemies`, { spec: { ...enemySpec(), id: '!!!' } })).status, 400);
+  });
+
+  test('the monster page is part of the editor, and only of the editor', async () => {
+    const html = await fetch(`${editor.url}/enemy.html`).then((r) => r.text());
+    assert.match(html, /工坊怪物编辑器/);
+    assert.equal((await fetch(`${editor.url}/enemy.js`)).status, 200);
   });
 });

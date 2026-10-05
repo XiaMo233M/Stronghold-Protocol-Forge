@@ -73,6 +73,35 @@ node tools/workshop-scaffold.mjs docs/examples/stage-spec.json --pack map-demo  
 node tools/workshop-validate.mjs workshop                                        # 含 stages 层：重算并比对路径表
 ```
 
+## 怪物编辑器
+
+第三个页面：**`/enemy.html`**。同样是"只编辑人能给的东西，机械字段一律推导"。
+
+- **身份**：id（生成 `enemy_ws_<id>`）、名称、rank、攻击方式、伤害类型、移动方式、描述
+- **数值**：17 项 stats（生命/攻击/防御/法抗/移速/攻击间隔/攻速/射程/阻挡/重量/回复…）
+- **特殊机制**：`abilities`（游戏里显示的能力说明，一行一条）、`talents.bb`（天赋黑板键值）、`skills`（JSON，
+  形如 `{ prefabKey, priority, cooldown, bb }`）、`acType`、`tags`、五项免疫
+- **美术与非数据表字段**：这些**不在游戏数据表里**（来自客户端清单），必须手填 —— `spine`（复用现有 prefab 键才有真美术）、
+  `modelScale`、`hitArea`（受击框）、`attackAnim`
+- **派生量只读显示**：`attrPower` 与 `be` 由服务端按数值实时算出。**`be` 决定阵营换怪时替换多少只**，所以它必须算，不能手填
+- 保存写 `<pack>/enemy-specs/<slug>.json`（源）并重新生成 `<pack>/enemies.json`（产物）
+
+命令行等价路径：
+
+```powershell
+node tools/workshop-validate.mjs workshop     # enemies 层：重算 be/attrPower 并比对
+```
+
+## 助战（客户端）
+
+助战的选择由**服务端**声明并强制：卡池之外的干员是**禁用**的，请求会被整条拒绝，**没有回退**（回退会让一个被禁用的干员变成已发放）。
+
+- 服务端在 `room.state` 里下发卡池目录（`enabled` / `label` / `tiers` / `capacity` / `slots`）—— 客户端无法自行得知卡池
+- 客户端 `ui/supportModel.js` + `ui/supportSync.js`：卡池未知时**等待不发**；被拒绝时**报错并保留玩家选择**
+- 对局开始后 `room.state` 的助战会锁定，改动在下一局生效
+- **随机禁用的干员不禁用助战**：随机禁用只影响商店抽卡（`server/match/pool.js`），被禁的干员作为助战照样发放
+  （以 0 份入库，与"效果发放"同一规则；`test/support.test.js` 锁住了这条）
+
 ## API（供二次开发）
 
 | 方法 | 路径 | 说明 |
@@ -87,6 +116,11 @@ node tools/workshop-validate.mjs workshop                                       
 | POST | `/api/stages/preview` | `{ spec }` → 推导路径与部署区并校验，**不写盘** |
 | POST | `/api/packs/:pack/stages` | `{ spec }` → 写 `stage-specs/` 并重新生成 `stages.json` |
 | DELETE | `/api/packs/:pack/stages/:id` | 删除该地图的 spec 及它拥有的记录 |
+| GET | `/api/enemies` | 工坊怪物列表 + **枚举词表** + 官方怪物键 |
+| GET | `/api/enemies/:pack/:key` | 该怪物的**可编辑 spec**（源）与生成的记录 |
+| POST | `/api/enemies/preview` | `{ spec }` → 推导 `attrPower`/`be` 并校验，**不写盘** |
+| POST | `/api/packs/:pack/enemies` | `{ spec }` → 写 `enemy-specs/` 并重新生成 `enemies.json` |
+| DELETE | `/api/packs/:pack/enemies/:key` | 删除该怪物的 spec 及它拥有的记录 |
 
 ## 当前不包含
 

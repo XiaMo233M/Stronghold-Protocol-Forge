@@ -194,6 +194,56 @@ describe('助战: granted into the 整备区 at round 1 (match engine)', () => {
     assert.ok(h.sent.some(([, msg]) => msg.t === 'm.toast'), 'the player must be told');
   });
 
+  test('a support whose operator this match BANNED is STILL granted (bans only affect shop rolls)', () => {
+    // A visible chess is banned iff every one of its bonds is in the match's disabled set (server/match/pool.js:25-43),
+    // and a banned chess simply has no pool copies. Forcing that statically (through the mode's inactiveBondIds) makes
+    // this deterministic instead of hunting for a seed that happens to ban the support.
+    const banned = TIER5.find((id) => Array.isArray(DATA.chess[id]?.bonds) && DATA.chess[id].bonds.length > 0);
+    assert.ok(banned, 'the shipped support pool must contain a tier-5 operator with bonds for this test to mean anything');
+    // learn the mode id from the engine rather than guessing its spelling
+    const probe = makeMatch({ mode: 'coop', difficulty: 'NORMAL', seed: 5, fake: true, seats: seatsWith([banned]) });
+    probe.start();
+    const modeId = probe.m.gd.modeId;
+    const data = structuredClone(DATA);
+    const mode = data.config.modes[modeId];
+    assert.ok(mode, `mode ${modeId} must be in config.modes`);
+    mode.inactiveBondIds = [...new Set([...(mode.inactiveBondIds || []), ...data.chess[banned].bonds])];
+
+    const h = makeMatch({ mode: 'coop', difficulty: 'NORMAL', seed: 5, fake: true, seats: seatsWith([banned]), data });
+    h.start();
+    // the ban is real: the operator is out of this match's pool, so the shop can never offer it
+    assert.ok(h.m.bannedChess.includes(banned), `expected ${banned} to be banned, got ${JSON.stringify(h.m.bannedChess)}`);
+    assert.equal(h.m.pool.has(banned), false);
+    assert.equal(h.m.pool.left(banned), 0, 'a banned chess holds no pool copies');
+    h.toPrep(1);
+    const ps = h.ps('p_0');
+    const piece = ps.hand.find((p) => p && p.id === banned);
+    assert.ok(piece, '禁用抽卡不等于禁用助战：the support must still be granted');
+    assert.equal(piece.poolCopies, 0, 'it holds 0 copies, like any effect-granted piece while the pool is empty');
+    assert.deepEqual(ps.supportGranted, [banned]);
+    h.invariants();
+  });
+
+  test('m.private echoes the support: selected vs actually granted', () => {
+    const h = makeMatch({ mode: 'coop', difficulty: 'NORMAL', humans: 1, seed: 5, fake: true, seats: seatsWith([S5, S6]) });
+    h.start();
+    const ps = h.ps('p_0');
+    assert.deepEqual(ps.privateView().support, { selected: [S5, S6], granted: [] }, 'nothing is granted before the first round');
+    h.toPrep(1);
+    assert.deepEqual(ps.privateView().support, { selected: [S5, S6], granted: [S5, S6] });
+    // a support the pool drops between the lobby and the grant shows up as selected-but-not-granted, which is what lets
+    // the client explain it instead of silently fighting with one fewer operator
+    const h2 = makeMatch({ mode: 'coop', difficulty: 'NORMAL', humans: 1, seed: 5, fake: true, seats: seatsWith([S5]) });
+    h2.start();
+    const ps2 = h2.ps('p_0');
+    h2.m.gd.support = normalizeSupportConfig({ enabled: false });
+    h2.toPrep(1);
+    const view = ps2.privateView().support;
+    assert.deepEqual(view.selected, [S5]);
+    assert.deepEqual(view.granted, []);
+    h2.invariants();
+  });
+
   test('bots never carry supports', () => {
     const h = makeMatch({
       mode: 'coop', difficulty: 'NORMAL', seed: 9, fake: true,

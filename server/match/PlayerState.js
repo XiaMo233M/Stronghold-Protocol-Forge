@@ -269,7 +269,7 @@ export class PlayerState {
    * @returns {string[]} the ids actually granted
    */
   grantSupports() {
-    if (this.isBot || !Array.isArray(this.support) || this.support.length === 0) return [];
+    if (this.isBot || !Array.isArray(this.support) || this.support.length === 0) { this.supportGranted = []; return []; }
     const granted = [];
     for (const id of this.support) {
       if (!this.gd.isSupportChess(id)) {
@@ -280,6 +280,8 @@ export class PlayerState {
       // acquireChess reports a full 整备区 itself (and returns the copies); null = not granted
       if (this.acquireChess(id, { source: 'support' })) granted.push(id);
     }
+    // what actually landed, so m.private can show it next to what was selected (they differ when the pool changed)
+    this.supportGranted = granted;
     return granted;
   }
 
@@ -1707,6 +1709,10 @@ export class PlayerState {
       bonds: bondList(this.gd, this.bondsView(), { full: true, off: offBondCounts(this.gd, this) }),
       effects: this.effectsView(),
       nextEnemies: this.m.nextEnemiesFor(this),
+      // 助战 (shared/support.js): what this player brought AND what was actually granted at round 1. They differ when
+      // the server's pool changed between the lobby's check and the grant (grantSupports re-checks), and when a granted
+      // piece is sold or merged away — so the client can say which supports it is actually fighting with.
+      support: { selected: Array.isArray(this.support) ? [...this.support] : [], granted: Array.isArray(this.supportGranted) ? [...this.supportGranted] : [] },
       // DESIGN §16: the effective operator loadout ({ [baseChessId]: { skill, module } }; chess not listed use defaults)
       loadout: this.loadout,
       stats: {

@@ -24,6 +24,10 @@ import { fileURLToPath } from 'node:url';
 import { deriveChessRecord, validateChessRecord, chessIds, formatIssues, authoringErrors } from '../shared/chessAuthoring.js';
 import { TILE_PALETTE, DEPLOY_RECTS, STAGE_ROWS, STAGE_COLS, stageErrors } from '../shared/stageAuthoring.js';
 import { deriveStage, validateStageRecord } from '../server/stageAuthoring.js';
+import {
+  deriveEnemy, validateEnemy, enemyErrors, enemyKey as enemyKeyOf, ENEMY_RANKS, ENEMY_MOTIONS, ENEMY_DMG_TYPES, ENEMY_APPLY_WAYS,
+  ENEMY_AC_TYPES, ENEMY_IMMUNITIES, ENEMY_STAT_DEFAULTS,
+} from '../shared/enemyAuthoring.js';
 import { normalizeSupportConfig } from '../shared/support.js';
 import { loadWorkshop, WORKSHOP_DIR } from '../server/workshop.js';
 
@@ -128,6 +132,57 @@ function regenerateStages(packDir, officialStages, dropIds = []) {
   Object.assign(records, fresh);
   return { records, generated: Object.keys(fresh), errors };
 }
+
+// ---- 怪物 (enemies) --------------------------------------------------------------------------------
+//
+// Same file model again: `<pack>/enemy-specs/<key>.json` is the editable SOURCE (what the form writes) and
+// `<pack>/enemies.json` is the GENERATED artifact. `attrPower` and `be` are DERIVED from the stats on every save — a
+// hand-typed value would swap the wrong number of enemies in a faction replacement, silently.
+
+const ENEMY_SPEC_DIR = 'enemy-specs';
+
+/** A pack's enemy specs, in a stable order. */
+function packEnemySpecs(packDir) {
+  const out = [];
+  const dir = path.join(packDir, ENEMY_SPEC_DIR);
+  if (!fs.existsSync(dir)) return out;
+  for (const name of fs.readdirSync(dir).sort()) {
+    if (!name.endsWith('.json')) continue;
+    const spec = readJson(path.join(dir, name), null);
+    if (spec) out.push(spec);
+  }
+  return out;
+}
+
+/** Write a pack's `enemies.json` from its enemy specs, preserving every record no spec owns. */
+function regenerateEnemies(packDir, officialEnemies, dropIds = []) {
+  const existing = readJson(path.join(packDir, 'enemies.json'), {}) || {};
+  const owned = new Set(Array.isArray(dropIds) ? dropIds : []);
+  const fresh = {};
+  const errors = [];
+  for (const spec of packEnemySpecs(packDir)) {
+    const derived = deriveEnemy(spec);
+    if (!derived.ok) {
+      // a spec that cannot derive owns nothing: claiming its key would delete the previous record on an unrelated save
+      errors.push({ key: spec && spec.id, issues: derived.errors.map((e) => ({ ...e, severity: 'error' })) });
+      continue;
+    }
+    owned.add(derived.enemy.key);
+    const issues = enemyErrors(validateEnemy(derived.enemy, { key: derived.enemy.key, officialIds: officialEnemies }));
+    if (issues.length) errors.push({ key: derived.enemy.key, issues });
+    fresh[derived.enemy.key] = derived.enemy;
+  }
+  const records = {};
+  for (const [key, rec] of Object.entries(existing)) if (!owned.has(key)) records[key] = rec;
+  Object.assign(records, fresh);
+  return { records, generated: Object.keys(fresh), errors };
+}
+
+/** The enum vocabularies the monster form renders, so the UI never invents one. */
+const ENEMY_VOCAB = () => ({
+  ranks: [...ENEMY_RANKS], motions: [...ENEMY_MOTIONS], dmgTypes: [...ENEMY_DMG_TYPES], applyWays: [...ENEMY_APPLY_WAYS],
+  acTypes: [...ENEMY_AC_TYPES], immunities: [...ENEMY_IMMUNITIES], statDefaults: { ...ENEMY_STAT_DEFAULTS },
+});
 
 /** Everything the UI renders for one pack: its specs (editable) plus every record and its issues. */
 function packState(root, packId, officialIds) {
@@ -250,6 +305,7 @@ export async function createEditorServer(opts = {}) {
   const log = opts.log ?? quietLog;
   const officialIds = new Set(Object.keys(readJson(path.join(dataDir, 'chess.json'), {}) || {}));
   const officialStages = new Set(Object.keys(readJson(path.join(dataDir, 'stages.json'), {}) || {}));
+  const officialEnemies = new Set(Object.keys(readJson(path.join(dataDir, 'enemies.json'), {}) || {}));
   const official = officialChess(dataDir);
 
   const server = http.createServer((req, res) => {
@@ -456,6 +512,103 @@ export async function createEditorServer(opts = {}) {
       return sendJson(res, 200, {
         spec: readJson(path.join(packDir, STAGE_SPEC_DIR, `${stageId}.json`), null),
         record: (readJson(path.join(packDir, 'stages.json'), {}) || {})[stageId] ?? null,
+      });
+    }
+
+    // ---- 怪物 (enemies): the form's data and its save path ------------------------------------------
+    if (p === '/api/enemies' && method === 'GET') {
+      const enemies = [];
+      for (const packId of fs.existsSync(root) ? fs.readdirSync(root).sort() : []) {
+        if (!PACK_ID_RE.test(packId) || !fs.existsSync(path.join(root, packId, 'pack.json'))) continue;
+        const packDir = path.join(root, packId);
+        const managed = new Set(packEnemySpecs(packDir).map((s) => {
+          const ids = s && s.id ? enemyKeyOf(s.id) : null;
+          return ids ? ids.key : null;
+        }).filter(Boolean));
+        const records = readJson(path.join(packDir, 'enemies.json'), {}) || {};
+        for (const [key, rec] of Object.entries(records)) {
+          enemies.push({
+            pack: packId, key, name: rec.name ?? key, rank: rec.rank ?? null, applyWay: rec.applyWay ?? null,
+            motion: rec.stats?.motion ?? null, dmgType: rec.stats?.dmgType ?? null,
+            isFlyEnemy: rec.isFlyEnemy === true, tokenOnly: rec.tokenOnly === true,
+            attrPower: rec.attrPower ?? null, be: rec.be ?? null,
+            abilities: Array.isArray(rec.abilities) ? rec.abilities.length : 0,
+            skills: Array.isArray(rec.skills) ? rec.skills.length : 0,
+            managed: managed.has(key),
+            issues: validateEnemy(rec, { key, officialIds: officialEnemies }),
+          });
+        }
+      }
+      return sendJson(res, 200, { enemies, vocab: ENEMY_VOCAB(), officialEnemies: [...officialEnemies].sort() });
+    }
+
+    // derive + validate a monster WITHOUT writing: the form's live feedback
+    if (p === '/api/enemies/preview' && method === 'POST') {
+      const { spec } = await readBody(req);
+      const derived = deriveEnemy(spec);
+      if (!derived.ok) return sendJson(res, 200, { ok: false, errors: derived.errors, warnings: [] });
+      const issues = validateEnemy(derived.enemy, { key: derived.enemy.key, officialIds: officialEnemies });
+      return sendJson(res, 200, {
+        ok: enemyErrors(issues).length === 0,
+        errors: issues.filter((i) => i.severity === 'error'),
+        warnings: [...derived.warnings, ...issues.filter((i) => i.severity === 'warning').map((i) => i.message)],
+        record: derived.enemy,
+      });
+    }
+
+    if (p.startsWith('/api/packs/') && p.endsWith('/enemies') && method === 'POST') {
+      const packId = p.slice('/api/packs/'.length, -'/enemies'.length);
+      if (!PACK_ID_RE.test(packId)) throw Object.assign(new Error('bad pack id'), { status: 400 });
+      const { spec } = await readBody(req);
+      const ids = enemyKeyOf(spec && spec.id);
+      if (!ids) throw Object.assign(new Error('spec.id must be a slug (letters, digits, _ - . :)'), { status: 400 });
+      const derived = deriveEnemy(spec);
+      if (!derived.ok) return sendJson(res, 400, { error: 'the monster spec is invalid', errors: derived.errors });
+      const blocking = enemyErrors(validateEnemy(derived.enemy, { key: derived.enemy.key, officialIds: officialEnemies }));
+      if (blocking.length) return sendJson(res, 400, { error: 'the monster did not validate', errors: blocking });
+
+      const packDir = path.join(root, packId);
+      const manifestPath = path.join(packDir, 'pack.json');
+      const existingManifest = readJson(manifestPath, null);
+      const content = new Set(Array.isArray(existingManifest?.content) ? existingManifest.content : []);
+      content.add('enemies');
+      await writeJson(manifestPath, existingManifest
+        ? { ...existingManifest, content: [...content].sort() }
+        : { id: packId, name: spec.name || packId, version: '0.1.0', author: null, license: null, description: null, gameVersion: '0.1.3', content: [...content], overrides: [] });
+      await writeJson(path.join(packDir, ENEMY_SPEC_DIR, `${ids.slug}.json`), spec);
+      const regen = regenerateEnemies(packDir, officialEnemies);
+      if (regen.errors.length) {
+        return sendJson(res, 400, { error: 'another monster in this pack no longer derives — fix it before saving', errors: regen.errors });
+      }
+      await writeJson(path.join(packDir, 'enemies.json'), regen.records);
+      return sendJson(res, 200, { ok: true, key: derived.enemy.key, generated: regen.generated, warnings: derived.warnings });
+    }
+
+    if (p.startsWith('/api/packs/') && p.includes('/enemies/') && method === 'DELETE') {
+      const rest = p.slice('/api/packs/'.length);
+      const cut = rest.indexOf('/enemies/');
+      const packId = rest.slice(0, cut);
+      const key = decodeURIComponent(rest.slice(cut + '/enemies/'.length));
+      if (!PACK_ID_RE.test(packId) || !/^[A-Za-z0-9_\-.:]{1,64}$/.test(key)) throw Object.assign(new Error('bad id'), { status: 400 });
+      const ids = enemyKeyOf(key);
+      const specPath = path.join(root, packId, ENEMY_SPEC_DIR, `${ids.slug}.json`);
+      if (fs.existsSync(specPath)) await fsp.rm(specPath);
+      const regen = regenerateEnemies(path.join(root, packId), officialEnemies, [key]);
+      await writeJson(path.join(root, packId, 'enemies.json'), regen.records);
+      return sendJson(res, 200, { ok: true, removed: key, generated: regen.generated, errors: regen.errors });
+    }
+
+    // the stored SPEC the form edits (the source of truth), plus the generated record for reference
+    if (p.startsWith('/api/enemies/') && method === 'GET') {
+      const rest = p.slice('/api/enemies/'.length).split('/');
+      if (rest.length !== 2) throw Object.assign(new Error('not found'), { status: 404 });
+      const [packId, key] = rest;
+      if (!PACK_ID_RE.test(packId) || !/^[A-Za-z0-9_\-.:]{1,64}$/.test(key)) throw Object.assign(new Error('bad id'), { status: 400 });
+      const ids = enemyKeyOf(key);
+      const packDir = path.join(root, packId);
+      return sendJson(res, 200, {
+        spec: ids ? readJson(path.join(packDir, ENEMY_SPEC_DIR, `${ids.slug}.json`), null) : null,
+        record: (readJson(path.join(packDir, 'enemies.json'), {}) || {})[key] ?? null,
       });
     }
 
