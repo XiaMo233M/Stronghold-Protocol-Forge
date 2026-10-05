@@ -109,6 +109,29 @@ describe('workshop editor: the API', () => {
     assert.equal(fs.existsSync(join(wsRoot, 'editor_made')), false, 'a preview must not write');
   });
 
+  test('the talents the form edits reach the record, and a talent with no desc is marked hidden', async () => {
+    const spec = {
+      ...SPEC,
+      talents: [
+        { name: '有说明的天赋', desc: '攻击力提升', bb: { atk_scale: 1.2 } },
+        { name: '没有说明的天赋', bb: { def: 0.1 } },
+      ],
+    };
+    const r = await post(`${editor.url}/api/preview`, { spec }).then((x) => x.json());
+    assert.equal(r.ok, true, JSON.stringify(r.errors));
+    assert.equal(r.base.talents.length, 2, 'both talents must reach the record');
+    assert.equal(r.base.talents[0].name, '有说明的天赋');
+    assert.deepEqual(r.base.talents[0].bb, { atk_scale: 1.2 }, 'the blackboard is carried verbatim');
+    assert.equal(r.base.talents[0].hidden, false, 'a talent with a description is visible');
+    assert.equal(r.base.talents[1].hidden, true, 'a talent with no description is hidden — the form hint promises this');
+    // the golden form is a separate record and carries its own copy (the form edits them once, the derive duplicates)
+    assert.equal(r.golden.talents.length, 2);
+    // and a spec with no talents is still valid (an operator without a talent is legal)
+    const none = await post(`${editor.url}/api/preview`, { spec: { ...SPEC, talents: [] } }).then((x) => x.json());
+    assert.equal(none.ok, true, JSON.stringify(none.errors));
+    assert.deepEqual(none.base.talents, []);
+  });
+
   test('a spec with an unreadable blackboard key warns but still passes', async () => {
     const r = await post(`${editor.url}/api/preview`, { spec: { ...SPEC, skill: { ...SPEC.skill, bb: { atk: 0.5, nonsense_key: 1 } } } }).then((x) => x.json());
     assert.equal(r.ok, true);

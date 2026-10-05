@@ -200,6 +200,51 @@ function renderEditor() {
     bbBox,
     h('button', { class: 'ghost', onclick: () => { sk.bb = sk.bb || {}; sk.bb.new_key = 0; drawBb(); } }, '＋ 加一个键')));
 
+  // talents (天赋): the authoring layer already turns spec.talents into the record's talents[] (name/desc/bb), so this
+  // is purely the missing form. A talent with no desc is emitted `hidden: true` by the derive layer, which is why the
+  // hint below insists on the description — a talent nothing can read is a talent that does nothing.
+  s.talents = Array.isArray(s.talents) ? s.talents : [];
+  const talBox = h('div', {});
+  const drawTalents = () => {
+    talBox.replaceChildren();
+    s.talents.forEach((t, i) => {
+      const bbBox2 = h('div', {});
+      const drawTb = () => {
+        bbBox2.replaceChildren();
+        for (const [key, val] of Object.entries(t.bb || {})) {
+          bbBox2.append(h('div', { class: 'kv' },
+            h('input', { value: key, onchange: (e) => { const old = key; const v = t.bb[old]; delete t.bb[old]; t.bb[e.target.value] = v; schedulePreview(); drawTb(); } }),
+            h('input', { type: 'number', step: 'any', value: val, oninput: (e) => { t.bb[key] = Number(e.target.value); schedulePreview(); } }),
+            h('button', { class: 'ghost', onclick: () => { delete t.bb[key]; schedulePreview(); drawTb(); } }, '×')));
+        }
+        bbBox2.append(h('button', { class: 'ghost', onclick: () => { t.bb = t.bb || {}; t.bb.new_key = 0; drawTb(); } }, '＋ 加一个键'));
+      };
+      drawTb();
+      talBox.append(h('div', { class: 'panel' },
+        h('div', { class: 'row', style: 'margin-bottom:6px' },
+          h('strong', {}, `天赋 ${i + 1}`),
+          h('span', { style: 'flex:1' }),
+          h('button', { class: 'ghost', onclick: () => { s.talents.splice(i, 1); schedulePreview(); drawTalents(); } }, '× 删除')),
+        h('div', { class: 'grid' },
+          field('天赋名', textInput(() => t.name, (v) => { t.name = v; })),
+          field('说明（必填，否则该天赋被视为隐藏）', textInput(() => t.desc, (v) => { t.desc = v; }))),
+        h('h2', {}, '天赋黑板 bb'),
+        bbBox2));
+    });
+  };
+  drawTalents();
+  box.append(h('div', { class: 'panel' },
+    h('h2', { style: 'margin-top:0' }, '天赋 tactics（0~2 条，建议 2 条：普通/精锐共用）'),
+    h('p', { class: 'hint' }, '说明（desc）是必须的：没有说明的天赋在记录里会被标记为 hidden。黑板键同样是通用 kit 认识的键，写错只会警告、不会有任何效果。'),
+    talBox,
+    h('button', {
+      class: 'ghost',
+      onclick: () => {
+        s.talents.push({ name: `天赋${s.talents.length + 1}`, desc: '', bb: {} });
+        schedulePreview(); drawTalents();
+      },
+    }, '＋ 添加一条天赋')));
+
   // support switch (the 是否助战 toggle)
   if (state.slug) {
     const baseId = `chess_ws_${state.slug}_a`;
