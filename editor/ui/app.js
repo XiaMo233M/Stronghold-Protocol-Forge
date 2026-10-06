@@ -210,6 +210,33 @@ function setText(obj, key, value) {
   if (rawKey in obj) obj[rawKey] = value;
 }
 
+/** 一个复选框（勾选框的样式在两处都要写成 width:auto，否则会被表单的 input 规则拉满行）。 */
+function checkInput(checked, onchange) {
+  return h('input', { type: 'checkbox', checked: !!checked, style: 'width:auto', onchange: (e) => onchange(!!e.target.checked) });
+}
+
+/**
+ * 范围形状下拉：写 `setGrid(grid)`，或 `setGrid(null)` 表示「回到推导」。
+ * 普通范围与精锐范围（`rangeGridGolden`）共用这一份实现，只是默认项的文字不同。
+ * @param {() => number[][]|undefined} getGrid
+ * @param {(grid: number[][]|null) => void} setGrid
+ * @param {string} [defaultLabel] 空选项的文字（普通那份是「按职业与分支推导」）
+ */
+function rangeShapeSelect(getGrid, setGrid, defaultLabel) {
+  const presets = rangePresets(state.data.officialChess);
+  const cur = getGrid();
+  const curKey = Array.isArray(cur) ? gridKey(cur) : '';
+  const el = h('select', {
+    onchange: (e) => {
+      const p = presets.find((x) => x.key === e.target.value);
+      setGrid(p ? p.grid.map((c) => [...c]) : null);
+      schedulePreview(); renderEditorKeepingFocus();
+    },
+  }, h('option', { value: '', selected: !curKey }, defaultLabel || t('（默认：按职业与分支推导）')));
+  for (const p of presets) el.append(h('option', { value: p.key, selected: curKey === p.key }, t('{0} 格 · 例：{1}', p.count, p.sample.name)));
+  return el;
+}
+
 /**
  * 黑板书式的键值行：键名可改、值是数字、`×` 删掉、最后一行按钮加一个。
  * 技能 bb、天赋 bb、模组特性覆盖 bb、模组天赋改写 bb 四处都是同一个东西，所以只写一遍。
@@ -342,17 +369,7 @@ function renderEditor() {
     canHitFly: typeof s.canHitFly === 'boolean' ? s.canHitFly : derived.canHitFly,
   };
   const effGrid = Array.isArray(s.rangeGrid) ? s.rangeGrid : defaultGrid(eff.attackKind);
-  const presets = rangePresets(state.data.officialChess);
-  const curKey = Array.isArray(s.rangeGrid) ? gridKey(s.rangeGrid) : '';
-  const rangeSel = h('select', {
-    onchange: (e) => {
-      const p = presets.find((x) => x.key === e.target.value);
-      if (p) s.rangeGrid = p.grid.map((c) => [...c]);
-      else delete s.rangeGrid;
-      schedulePreview(); renderEditorKeepingFocus();
-    },
-  }, h('option', { value: '', selected: !curKey }, t('（默认：按职业与分支推导）')));
-  for (const p of presets) rangeSel.append(h('option', { value: p.key, selected: curKey === p.key }, t('{0} 格 · 例：{1}', p.count, p.sample.name)));
+  const rangeSel = rangeShapeSelect(() => s.rangeGrid, (g) => { if (g) s.rangeGrid = g; else delete s.rangeGrid; });
   // 覆盖下拉：留空写回的是「删掉这个键」，而不是写一个空串 —— 空串在 pick() 里等于没写，但留个空键会让记录变脏
   const setOverride = (key, v) => { if (v) s[key] = v; else delete s[key]; };
   box.append(h('div', { class: 'panel' },
@@ -420,36 +437,66 @@ function renderEditor() {
   // is purely the missing form. A talent with no desc is emitted `hidden: true` by the derive layer, which is why the
   // hint below insists on the description — a talent nothing can read is a talent that does nothing.
   s.talents = Array.isArray(s.talents) ? s.talents : [];
-  const talBox = h('div', {});
-  const drawTalents = () => {
-    talBox.replaceChildren();
-    s.talents.forEach((t_, i) => {
-      if (!t_.bb) t_.bb = {};
-      talBox.append(h('div', { class: 'panel' },
-        h('div', { class: 'row', style: 'margin-bottom:6px' },
-          h('strong', {}, t('天赋 {0}', i + 1)),
-          h('span', { style: 'flex:1' }),
-          h('button', { class: 'ghost', onclick: () => { s.talents.splice(i, 1); schedulePreview(); drawTalents(); } }, t('× 删除'))),
-        h('div', { class: 'grid' },
-          field(t('天赋名'), textInput(() => t_.name, (v) => { t_.name = v; })),
-          // 说明走 setText：记录里优先读 descRaw（官方的富文本原文），只改 desc 会静默无效
-          field(t('说明（必填，否则该天赋被视为隐藏）'), textInput(() => t_.desc, (v) => setText(t_, 'desc', v)))),
-        h('h2', {}, t('天赋黑板 bb')),
-        bbEditor(t_.bb)));
-    });
+  box.append(talentEditor(s.talents, t('天赋 tactics（普通态，0~2 条，建议 2 条）')));
+
+  // ---- 精锐（精英 2）与普通不同的那一份 -----------------------------------------------------------------------------
+  // 数值一直是两套；特性、天赋、攻击范围在 spec 里是**可选**的第二份，而官方数据里确实有差别：
+  // 可见的 112 位干员中 33 位精锐天赋不同、2 位精锐特性不同、2 位精锐攻击范围不同（`specFromChessRecord` 的口径）。
+  // 所以这里的原则是「不勾＝两态共用一份」：勾上时以普通那一份为起点，取消就把字段删掉。
+  // 留一个与普通一模一样的副本会让 spec 变脏，也让「精锐到底改了什么」看不出来。
+  // 位置在「天赋」之后：这一块里除了特性与范围，还有一整份精锐天赋列表。
+  const goldenPanel = h('div', { class: 'panel' });
+  const drawGoldenParts = () => {
+    goldenPanel.replaceChildren();
+    goldenPanel.append(h('h2', { style: 'margin-top:0' }, t('精锐（精英 2）与普通不同时')));
+    goldenPanel.append(h('p', { class: 'hint' }, t('数值本来就是两套（上面）。特性、天赋、攻击范围这三样默认两态共用一份；要不一样就在这里勾出来，勾上时以普通那一份为起点，取消勾选＝回到共用。')));
+
+    // 特性
+    const traitOn = !!s.traitGolden;
+    goldenPanel.append(h('div', { style: 'margin-top:8px' },
+      h('label', { class: 'row', style: 'gap:8px;align-items:center;color:var(--fg)' },
+        checkInput(traitOn, (on) => {
+          if (on) s.traitGolden = { desc: typeof s.traitDesc === 'string' ? s.traitDesc : '' };
+          else delete s.traitGolden;
+          schedulePreview(); drawGoldenParts();
+        }),
+        t('精锐特性不同')),
+      traitOn
+        ? h('div', {},
+          field(t('精锐特性文字'), textInput(() => s.traitGolden.desc, (v) => setText(s.traitGolden, 'desc', v))),
+          h('p', { class: 'hint' }, t('精锐特性的黑板与自带范围（`bb` / `rangeGrid`）不在这一页编辑；以模板新建时它们会原样带过来。')))
+        : h('p', { class: 'hint' }, t('（没勾：精锐沿用上面那份特性）'))));
+
+    // 攻击范围
+    const rangeOn = Array.isArray(s.rangeGridGolden);
+    goldenPanel.append(h('div', { class: 'row', style: 'align-items:flex-start;gap:16px;margin-top:8px' },
+      h('div', { style: 'flex:0 0 230px' },
+        h('label', { class: 'row', style: 'gap:8px;align-items:center;color:var(--fg)' },
+          checkInput(rangeOn, (on) => {
+            if (on) s.rangeGridGolden = (Array.isArray(s.rangeGrid) ? s.rangeGrid : defaultGrid(eff.attackKind)).map((c) => [...c]);
+            else delete s.rangeGridGolden;
+            schedulePreview(); drawGoldenParts();
+          }),
+          t('精锐攻击范围不同')),
+        rangeOn
+          ? field(t('精锐范围形状'), rangeShapeSelect(() => s.rangeGridGolden, (g) => { if (g) s.rangeGridGolden = g; else delete s.rangeGridGolden; }, t('（与普通同一个范围）')))
+          : h('p', { class: 'hint' }, t('（没勾：精锐沿用上面那个范围）'))),
+      rangeOn ? h('div', {}, gridPreview(s.rangeGridGolden), h('div', { class: 'hint' }, t('（这是精锐自己的范围）'))) : null));
+
+    // 天赋
+    const talentsOn = Array.isArray(s.talentsGolden);
+    goldenPanel.append(h('div', { style: 'margin-top:8px' },
+      h('label', { class: 'row', style: 'gap:8px;align-items:center;color:var(--fg)' },
+        checkInput(talentsOn, (on) => {
+          if (on) s.talentsGolden = JSON.parse(JSON.stringify(s.talents ?? []));
+          else delete s.talentsGolden;
+          schedulePreview(); drawGoldenParts();
+        }),
+        t('精锐天赋不同（官方常见：弹药上限 +2 → +3）'))));
+    if (talentsOn) goldenPanel.append(talentEditor(s.talentsGolden, t('精锐天赋（精英 2）')));
   };
-  drawTalents();
-  box.append(h('div', { class: 'panel' },
-    h('h2', { style: 'margin-top:0' }, t('天赋 tactics（0~2 条，建议 2 条：普通/精锐共用）')),
-    h('p', { class: 'hint' }, t('说明（desc）是必须的：没有说明的天赋在记录里会被标记为 hidden。黑板键同样是通用 kit 认识的键，写错只会警告、不会有任何效果。')),
-    talBox,
-    h('button', {
-      class: 'ghost',
-      onclick: () => {
-        s.talents.push({ name: t('天赋 {0}', s.talents.length + 1), desc: '', bb: {} });
-        schedulePreview(); drawTalents();
-      },
-    }, t('＋ 添加一条天赋'))));
+  drawGoldenParts();
+  box.append(goldenPanel);
 
   // ---- 模组（只有精锐记录会读 `modules[]`）------------------------------------------------------------------------
   // 官方 184 个模组就是这个形状。要紧的一条：勾了 `isDefault` 的那一个会被**烘进**精锐记录 ——
@@ -568,6 +615,42 @@ function renderEditor() {
   box.append(h('h2', {}, t('校验结果')), panel);
 }
 
+// ---- 天赋列表编辑器（普通态与精锐态共用一个实现） -------------------------------------------------------------------
+
+/**
+ * 一个完整的天赋列表编辑器。传进来的是**数组本身**，增删都改它 —— 所以 `s.talents` 与 `s.talentsGolden` 都能用。
+ * @param {Array} list @param {string} title
+ */
+function talentEditor(list, title) {
+  const box = h('div', {});
+  const draw = () => {
+    box.replaceChildren();
+    list.forEach((t_, i) => {
+      if (!t_.bb) t_.bb = {};
+      box.append(h('div', { class: 'panel' },
+        h('div', { class: 'row', style: 'margin-bottom:6px' },
+          h('strong', {}, t('天赋 {0}', i + 1)),
+          h('span', { style: 'flex:1' }),
+          h('button', { class: 'ghost', onclick: () => { list.splice(i, 1); schedulePreview(); draw(); } }, t('× 删除'))),
+        h('div', { class: 'grid' },
+          field(t('天赋名'), textInput(() => t_.name, (v) => { t_.name = v; })),
+          // 说明走 setText：记录里优先读 descRaw（官方的富文本原文），只改 desc 会静默无效
+          field(t('说明（必填，否则该天赋被视为隐藏）'), textInput(() => t_.desc, (v) => setText(t_, 'desc', v)))),
+        h('h2', {}, t('天赋黑板 bb')),
+        bbEditor(t_.bb)));
+    });
+  };
+  draw();
+  return h('div', { class: 'panel' },
+    h('h2', { style: 'margin-top:0' }, title),
+    h('p', { class: 'hint' }, t('说明（desc）是必须的：没有说明的天赋在记录里会被标记为 hidden。黑板键同样是通用 kit 认识的键，写错只会警告、不会有任何效果。')),
+    box,
+    h('button', {
+      class: 'ghost',
+      onclick: () => { list.push({ name: t('天赋 {0}', list.length + 1), desc: '', bb: {} }); schedulePreview(); draw(); },
+    }, t('＋ 添加一条天赋')));
+}
+
 // ---- 模组卡（干员页的模组块） ---------------------------------------------------------------------------------------
 
 /** 模组 `attr` 的显示名（「加了模组之后变成多少」那一行用它）。 */
@@ -637,10 +720,13 @@ function moduleCard(s, m, i, redraw) {
           field(t('改哪一条'), idxSel),
           field(t('天赋名（留空＝用原来那个）'), textInput(() => ch.name, (v) => { ch.name = v || null; })),
           field(t('说明（留空＝用原来那个）'), textInput(() => ch.desc, (v) => setText(ch, 'desc', v || null))),
-          field(t('隐藏这条天赋'), h('input', {
-            type: 'checkbox', checked: ch.hidden === true, style: 'width:auto',
-            onchange: (e) => { ch.hidden = e.target.checked; schedulePreview(); },
-          }))),
+          field(t('隐藏这条天赋'), checkInput(ch.hidden === true, (on) => { ch.hidden = on; schedulePreview(); }))),
+        // 这条改写自带的范围：官方那些「攻击范围扩大」的模组就是靠它（`talentIndex: -1` 的那条 + rangeGrid，
+        // 见 shared/loadoutRecord.js 的 attackRangeGrid）。不写＝这条天赋改写不带范围。
+        h('h2', {}, t('这条改写自带的范围')),
+        h('div', { class: 'row', style: 'align-items:flex-start;gap:16px' },
+          h('div', { style: 'flex:0 0 230px' }, rangeShapeSelect(() => ch.rangeGrid, (g) => { if (g) ch.rangeGrid = g; else delete ch.rangeGrid; }, t('（不改范围）'))),
+          Array.isArray(ch.rangeGrid) ? h('div', {}, gridPreview(ch.rangeGrid), h('div', { class: 'hint' }, t('（这是这条改写自带的范围）'))) : null),
         h('h2', {}, t('改写的黑板 bb')),
         bbEditor(ch.bb)));
     });
@@ -655,11 +741,8 @@ function moduleCard(s, m, i, redraw) {
     h('div', { class: 'row', style: 'margin-bottom:6px' },
       h('strong', {}, t('模组 {0}', i + 1)),
       h('label', { style: 'display:flex;gap:6px;align-items:center;color:var(--fg)' },
-        h('input', {
-          type: 'checkbox', checked: !!m.isDefault, style: 'width:auto',
-          // 默认模组只能有一个：勾上它就先把别人全部取消，免得撞 MULTIPLE_DEFAULTS 那条校验错误
-          onchange: (e) => { const on = !!e.target.checked; s.modules.forEach((x) => { x.isDefault = false; }); m.isDefault = on; schedulePreview(); redraw(); },
-        }),
+        // 默认模组只能有一个：勾上它就先把别人全部取消，免得撞 MULTIPLE_DEFAULTS 那条校验错误
+        checkInput(!!m.isDefault, (on) => { s.modules.forEach((x) => { x.isDefault = false; }); m.isDefault = on; schedulePreview(); redraw(); }),
         t('默认（精锐记录带的就是它）')),
       h('span', { style: 'flex:1' }),
       h('button', { class: 'ghost', onclick: () => { s.modules.splice(i, 1); schedulePreview(); redraw(); } }, t('× 删除'))),
@@ -677,6 +760,13 @@ function moduleCard(s, m, i, redraw) {
     h('div', { class: 'grid' },
       field(t('特性文字'), textInput(() => m.traitDesc, (v) => setText(m, 'traitDesc', v))),
       field(t('模组说明（官方那段「装备后…」）'), textInput(() => m.moduleDesc, (v) => setText(m, 'moduleDesc', v)))),
+    // 特性自带范围：官方有 4 位干员的特性、6 个模组的特性覆盖带这个字段。引擎里它定义「特性自己那片范围」
+    // （例：散射手 def.raw.trait.rangeGrid 就是它的正面加宽区，见 server/sim/professions.js），不写＝用干员原本的范围。
+    h('h2', {}, t('特性自带范围 rangeGrid')),
+    h('p', { class: 'hint' }, t('特性自己带的那片范围（不是干员的攻击范围）。留空＝这个模组不改范围。')),
+    h('div', { class: 'row', style: 'align-items:flex-start;gap:16px' },
+      h('div', { style: 'flex:0 0 230px' }, rangeShapeSelect(() => m.rangeGrid, (g) => { if (g) m.rangeGrid = g; else delete m.rangeGrid; }, t('（没有自带范围）'))),
+      Array.isArray(m.rangeGrid) ? h('div', {}, gridPreview(m.rangeGrid), h('div', { class: 'hint' }, t('（这是特性自带的范围）'))) : null),
     h('h2', {}, t('特性黑板 bb')),
     bbEditor(m.traitBb),
     h('h2', {}, t('天赋改写（模组带来的天赋变化）')),

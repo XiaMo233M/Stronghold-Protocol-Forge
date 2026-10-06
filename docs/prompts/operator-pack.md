@@ -69,7 +69,7 @@ node tools/workshop-validate.mjs <packId 或 workshop 根>          # 三层校�
 | `bonds` | ⬜ | 这个干员算在哪些盟约里（id 数组），见第四节 |
 | `dmgType` / `attackKind` / `projectile` / `canHitFly` | ⬜ | 攻击分类的**覆盖**，见第四节。平时不要写 |
 | `subProfessionName` | ⬜ | 分支的中文名（显示用）。写了照抄，不写就退回 `subProfessionId` |
-| `traitGolden` / `talentsGolden` / `rangeGridGolden` | ⬜ | 精锐（精英 2）与普通**不同**时的那一份。官方有 38 位干员两态天赋数值不同、26 位特性不同、5 位攻击范围不同；不写就两态共用一份 |
+| `traitGolden` / `talentsGolden` / `rangeGridGolden` | ⬜ | 精锐（精英 2）与普通**不同**时的那一份。可见的 112 位官方干员里有 33 位两态天赋不同（如弹药上限 +2 → +3）、2 位精锐特性不同、2 位精锐攻击范围不同；不写就两态共用一份。编辑器干员页的「精锐（精英 2）与普通不同时」就是这三个开关 |
 
 ### 不要自己写的字段（工具会推导，写了也会被覆盖）
 
@@ -175,8 +175,9 @@ node tools/workshop-validate.mjs <packId 或 workshop 根>          # 三层校�
 | `level` | 1–3（官方只有 1 或 3） |
 | `attr` | 数值加成。**只有这 8 个键**：`maxHp` `atk` `def` `res` `aspd` `cost` `blockCnt` `respawnTime` |
 | `traitDesc` / `traitBb` | 换掉干员原本的特性（文字 + 黑板） |
+| `rangeGrid` | **特性自带的那片范围**（不是干员的攻击范围）。官方 4 位干员的特性、6 个模组的特性覆盖用到它（例：散射手用它定义正面那一圈） |
 | `moduleDesc` | 官方那段「装备后…」的说明 |
-| `talentChanges[]` | 改写天赋：`talentIndex`（`-1` = 新加一条，否则是**记录里天赋的 `index`**，官方是稀疏的 0/1/3）、`name` / `desc`（留空＝用原来那个）、`bb`、`hidden`、`skillIndex` |
+| `talentChanges[]` | 改写天赋：`talentIndex`（`-1` = 新加一条，否则是**记录里天赋的 `index`**，官方是稀疏的 0/1/3）、`name` / `desc`（留空＝用原来那个）、`bb`、`hidden`、`skillIndex`、**`rangeGrid`**（这条改写自带的范围 —— 官方「攻击范围扩大」的模组就是靠 `talentIndex: -1` 的那条 + 它，见 `shared/loadoutRecord.js` 的 `attackRangeGrid`） |
 
 两条最容易静默失败的地方：
 
@@ -188,7 +189,7 @@ node tools/workshop-validate.mjs <packId 或 workshop 根>          # 三层校�
 
 ---
 
-## 四、攻击分类的覆盖 与 盟约成员
+## 四、攻击分类、精锐那一份 与 盟约成员
 
 ### 攻击分类（`dmgType` / `attackKind` / `projectile` / `canHitFly`）
 
@@ -205,6 +206,27 @@ node tools/workshop-validate.mjs <packId 或 workshop 根>          # 三层校�
 > ⚠️ **四项互不牵连**：覆盖只影响它自己那一项。只写 `dmgType: "arts"` 时，`projectile` 仍按**推导出来的**伤害类型算
 > （也就是 `arrow`），不会跟着变成 `bolt` —— 想一起改就一起写。编辑器上的「记录里会写：…」那一行显示的是生效值，
 > 所以在保存前就能看见这个组合长什么样。
+
+### 精锐（精英 2）单独的那一份：`traitGolden` / `talentsGolden` / `rangeGridGolden`
+
+数值本来就是两套（`stats.normal` / `stats.golden`），而**特性、天赋、攻击范围**默认两态共用一份。
+要不一样就写这三个可选字段（形状与普通的 `traitDesc` / `talents` / `rangeGrid` 相同）：
+
+```json
+{
+  "traitDesc": "普通那条特性",
+  "traitGolden": { "desc": "精锐才有的特性文字" },
+  "talents":       [{ "name": "弹药改良", "desc": "弹药上限+2", "bb": {} }],
+  "talentsGolden": [{ "name": "弹药改良", "desc": "弹药上限+3", "bb": {} }],
+  "rangeGrid":       [[0, 0], [1, 0]],
+  "rangeGridGolden": [[0, 0], [1, 0], [2, 0]]
+}
+```
+
+- `traitGolden` 只写你要改的字段：没写的（黑板 `bb` / `bbStr` / 特性自带范围）从普通那一份继承。
+- `talentsGolden` 是**整份**天赋列表（不是差异），条数也可以与普通不同；两态不同时校验会给一条提醒（官方就有）。
+- 只在真的不同时才写：写一份与普通一模一样的副本不会报错，但 spec 会变脏，别人也看不出精锐到底改了什么。
+  编辑器干员页的「精锐（精英 2）与普通不同时」就是这三个开关（勾上以普通那份为起点，取消＝删掉字段、回到共用）。
 
 ### 盟约成员（`bonds`）
 

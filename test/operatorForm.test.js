@@ -61,6 +61,12 @@ const checkboxInRow = (root, needle) => {
   const row = findAll(root, (n) => n.tagName === 'DIV' && String(n.className).includes('row') && textOf(n).includes(needle))[0];
   return row ? findAll(row, (n) => n.tagName === 'INPUT' && n.attrs.type === 'checkbox')[0] : null;
 };
+/** 更宽松的一版：文字与控件可以在 <label> 里（精锐三件套那三个开关），取最内层那个容器。 */
+const checkboxNear = (root, needle) => {
+  const holders = findAll(root, (n) => (n.children || []).some((c) => c.tagName === 'INPUT' && c.attrs && c.attrs.type === 'checkbox') && textOf(n).includes(needle));
+  const holder = holders[holders.length - 1];
+  return holder ? findAll(holder, (n) => n.tagName === 'INPUT' && n.attrs && n.attrs.type === 'checkbox')[0] : null;
+};
 
 const doc = makeEl('html');
 doc.documentElement = makeEl('html');
@@ -357,5 +363,97 @@ describe('干员表单：真跑一遍（最小 DOM 桩）', () => {
     fire(official, 'change');
     await waitPreview();
     assert.deepEqual([...lastPreviewSpec().bonds].sort(), ['bond_missing', 'bond_ws_demo']);
+  });
+
+  test('精锐三件套：不勾＝两态共用，勾上时以普通那份为起点、取消就删掉', async () => {
+    // 面板在，三个开关默认都没勾（模板没带精锐那一份）
+    assert.match(textOf(editorBox), /精锐（精英 2）与普通不同时/);
+    const traitCb = checkboxNear(editorBox, '精锐特性不同');
+    const rangeCb = checkboxNear(editorBox, '精锐攻击范围不同');
+    const talentsCb = checkboxNear(editorBox, '精锐天赋不同');
+    assert.ok(traitCb && rangeCb && talentsCb, '三个开关都要在');
+    assert.equal(traitCb.checked, false);
+    assert.equal(rangeCb.checked, false);
+    assert.equal(talentsCb.checked, false);
+    assert.match(textOf(editorBox), /（没勾：精锐沿用上面那份特性）/);
+
+    // 特性：勾上 → spec 里出现 traitGolden，且起点是普通那份的文字
+    calls.length = 0;
+    traitCb.checked = true;
+    fire(traitCb, 'change');
+    await waitPreview();
+    assert.equal(lastPreviewSpec().traitGolden.desc, '', '模板的普通特性文字是空的，精锐那份也就从空开始');
+    // 改精锐特性文字：取「最内层那个含这个标签的容器」，否则会命中整页而拿到别的输入框
+    const holders = findAll(editorBox, (n) => (n.children || []).length && textOf(n).includes('精锐特性文字'));
+    const traitInput = findAll(holders[holders.length - 1], (n) => n.tagName === 'INPUT').pop();
+    fire(traitInput, 'input', '精锐才有的一句话');
+    await waitPreview();
+    assert.equal(lastPreviewSpec().traitGolden.desc, '精锐才有的一句话');
+    assert.notEqual(lastPreviewSpec().traitDesc, '精锐才有的一句话', '普通那份不能被动到');
+
+    // 攻击范围：勾上 → rangeGridGolden 是普通范围的副本
+    rangeCb.checked = true;
+    fire(rangeCb, 'change');
+    await waitPreview();
+    assert.deepEqual(lastPreviewSpec().rangeGridGolden, [[1, 0], [0, 0], [0, 1], [0, 2]]);
+
+    // 天赋：勾上 → talentsGolden 是天赋列表的深拷贝，改精锐那份不动普通那份
+    talentsCb.checked = true;
+    fire(talentsCb, 'change');
+    await waitPreview();
+    assert.equal(lastPreviewSpec().talentsGolden[0].name, '快速弹匣');
+    const eliteTalents = inputsOf(editorBox).filter((i) => i.value === '快速弹匣');
+    assert.equal(eliteTalents.length, 2, '普通与精锐各一个天赋名输入框');
+    fire(eliteTalents[1], 'input', '精英弹匣');
+    await waitPreview();
+    assert.equal(lastPreviewSpec().talentsGolden[0].name, '精英弹匣');
+    assert.equal(lastPreviewSpec().talents[0].name, '快速弹匣', '普通那份必须原样不动');
+
+    // 取消勾选＝回到共用（字段删掉，而不是留一份与普通一样的数据）
+    const off = (needle) => { const box = checkboxNear(editorBox, needle); box.checked = false; fire(box, 'change'); };
+    off('精锐特性不同');
+    await waitPreview();
+    assert.equal('traitGolden' in lastPreviewSpec(), false);
+    off('精锐攻击范围不同');
+    await waitPreview();
+    assert.equal('rangeGridGolden' in lastPreviewSpec(), false);
+    off('精锐天赋不同');
+    await waitPreview();
+    assert.equal('talentsGolden' in lastPreviewSpec(), false);
+  });
+
+  test('模组的特性自带范围与天赋改写的范围都能编', async () => {
+    fire(findAll(editorBox, (n) => n.tagName === 'BUTTON' && textOf(n).includes('＋ 添加一个模组'))[0], 'click');
+    await waitPreview();
+    // 特性自带范围：默认项写明「没有自带范围」，选一个真实形状后写进 modules[0].rangeGrid
+    const traitRangeSel = findAll(editorBox, (n) => n.tagName === 'SELECT' && textOf(n).includes('（没有自带范围）'))[0];
+    assert.ok(traitRangeSel, '模组的特性自带范围要有下拉');
+    // 第一项是空值（没有自带范围），第二项就是官方形状的键
+    const shape = traitRangeSel.children.find((c) => c.value)?.value;
+    assert.ok(shape, '下拉里要有官方形状');
+    fire(traitRangeSel, 'change', shape);
+    await waitPreview();
+    assert.ok(Array.isArray(lastPreviewSpec().modules[0].rangeGrid), '选中的形状要写进模组的 traitOverride');
+    assert.ok(lastPreviewSpec().modules[0].rangeGrid.length > 0);
+    // 清空＝删掉这个字段
+    fire(findAll(editorBox, (n) => n.tagName === 'SELECT' && textOf(n).includes('（没有自带范围）'))[0], 'change', '');
+    await waitPreview();
+    assert.equal('rangeGrid' in lastPreviewSpec().modules[0], false);
+
+    // 天赋改写那条自带的范围（官方「攻击范围扩大」模组靠它）
+    fire(findAll(editorBox, (n) => n.tagName === 'BUTTON' && textOf(n).includes('＋ 添加一条天赋改写'))[0], 'click');
+    await waitPreview();
+    const chRangeSel = findAll(editorBox, (n) => n.tagName === 'SELECT' && textOf(n).includes('（不改范围）'))[0];
+    assert.ok(chRangeSel, '天赋改写也要有自带范围的下拉');
+    const shape2 = chRangeSel.children.find((c) => c.value)?.value;
+    fire(chRangeSel, 'change', shape2);
+    await waitPreview();
+    assert.ok(Array.isArray(lastPreviewSpec().modules[0].talentChanges[0].rangeGrid));
+
+    // 收尾：把这个模组删掉，别把状态留给后面的测试
+    const row = findAll(editorBox, (n) => n.tagName === 'DIV' && String(n.className).includes('row') && textOf(n).includes('默认（精锐记录带的就是它）'))[0];
+    fire(findAll(row, (n) => n.tagName === 'BUTTON')[0], 'click');
+    await waitPreview();
+    assert.deepEqual(lastPreviewSpec().modules, []);
   });
 });

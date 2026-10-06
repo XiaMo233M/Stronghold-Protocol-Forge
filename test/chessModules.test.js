@@ -303,3 +303,48 @@ describe('干员创作层：模组', () => {
     assert.equal(validateChessRecord(odd.base, { id: odd.base.chessId }).some((i) => i.code === 'TRIGGER_CUSTOM'), true);
   });
 });
+
+describe('干员创作层：精锐（精英 2）与普通不同的那一份', () => {
+  test('traitGolden / talentsGolden / rangeGridGolden 只写进精锐记录', () => {
+    const out = deriveChessRecord(base({
+      talents: [{ name: '普通天赋', desc: '普通说明', bb: {} }],
+      talentsGolden: [{ name: '精锐天赋', desc: '精锐说明', bb: {} }],
+      traitGolden: { desc: '精锐特性' },
+      rangeGridGolden: [[0, 0], [1, 0], [2, 0]],
+    }));
+    assert.equal(out.ok, true, JSON.stringify(out.errors));
+    assert.equal(out.base.talents[0].desc, '普通说明');
+    assert.equal(out.golden.talentsBase[0].desc, '精锐说明');
+    assert.equal(out.base.trait.desc, '');
+    assert.equal(out.golden.traitBase.desc, '精锐特性');
+    assert.deepEqual(out.golden.rangeGrid, [[0, 0], [1, 0], [2, 0]]);
+    assert.notDeepEqual(out.base.rangeGrid, out.golden.rangeGrid, '普通范围仍然是推导出来的那一片');
+    assert.equal(out.warnings.some((w) => /talentsGolden/.test(w)), true, '两态天赋不同时给一条提醒（官方有这种干员，不是错）');
+  });
+
+  test('不写这三个字段时两态共用一份（精锐拿到的就是普通那一份）', () => {
+    const out = deriveChessRecord(base({ talents: [{ name: 'A', desc: 'D', bb: {} }] }));
+    assert.deepEqual(out.golden.talentsBase, out.base.talents);
+    assert.equal(out.golden.traitBase.desc, out.base.trait.desc);
+    assert.deepEqual(out.golden.rangeGrid, out.base.rangeGrid);
+    assert.equal(out.warnings.some((w) => /talentsGolden/.test(w)), false);
+  });
+
+  test('可见干员里「精锐与普通不同」的数目（编辑器提示与文档写的就是这个口径，漂移守卫）', () => {
+    const n = { trait: 0, talents: 0, range: 0 };
+    let visible = 0;
+    for (const [id, rec] of Object.entries(CHESS)) {
+      if (!rec || rec.isGolden || !rec.visible || rec.isHidden || rec.isDiy) continue;
+      visible++;
+      const spec = specFromChessRecord(rec, rec.goldenId ? CHESS[rec.goldenId] : null);
+      assert.ok(spec, id);
+      if (spec.traitGolden) n.trait++;
+      if (spec.talentsGolden) n.talents++;
+      if (spec.rangeGridGolden) n.range++;
+    }
+    // 上游 0.1.3：112 位可见干员里 2 位精锐特性不同、33 位两态天赋不同、2 位精锐攻击范围不同。
+    // 数据一变就要同时改 editor/ui/app.js 的提示文字与 docs/prompts/operator-pack.md。
+    assert.equal(visible, 112);
+    assert.deepEqual(n, { trait: 2, talents: 33, range: 2 });
+  });
+});
