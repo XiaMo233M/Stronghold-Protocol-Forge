@@ -102,6 +102,9 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
   面板上有一行「当前默认模组 → 精锐记录里写下去的数值」，用的是引擎自己的 `composeStats()`（`shared/loadoutRecord.js`），
   所以「加了模组之后是多少」和游戏里算出来的必然一致。`attr` 的键是下拉（`MODULE_ATTR_KEYS` 的 8 个真键，有数据漂移守卫）——
   写错键名不会报错，但一个数值也不加。
+- **特性自带范围**：特性自己那片范围（不是干员的攻击范围，引擎里由特性定义 —— 例：散射手用它定义正面那一圈）。
+  身份面板里有一个「特性自带范围」下拉，留空＝没有；精锐那一份要不一样就在「精锐特性不同」勾上之后再设一个。
+  官方 4 位干员的特性、6 个模组的特性覆盖用到它，与模组卡里的同名字段是同一套实现。
 - **盟约（`bonds`）**：官方的 23 条 + 本包自己写出来的盟约（标「本包」），可搜索、可勾选；
   模板带过来的官方盟约默认勾着，取消即退出。查不到的 id 会当场警告（能保存，但游戏里不会有任何效果）。
 - **精锐（精英 2）与普通不同时**：数值一直是两套（上面那两个面板），而**特性、天赋、攻击范围**在 spec 里是
@@ -233,6 +236,10 @@ node tools/workshop-validate.mjs workshop     # items 层：重算 params/mergea
 **本身就是代码**的内容：`workshop/<pack>/kits/<chessId>.js` 既是可编辑的源、也是游戏加载的产物，没有「spec → 产物」
 这一对，也就没有可推导的字段。所以中间那一栏是一个 `<textarea>`，装的就是**整份文件**（连文件名里的干员 id 也
 由你定）—— 代码要高亮才看得懂的话，那是编辑器的口味；这里刻意不做高亮、不引依赖、不加构建步骤。
+
+**要写第一份 kit 就从 [docs/prompts/kit.md](prompts/kit.md) 开始**：它把 Kit 形状、四条硬规则、32 个钩子与
+`battle`/`unit` 常用接口写在一处，并带一个**被测试真的跑过**的完整示例 —— 那份示例既是范本，也是这一页静态校验的
+活样本（`test/kitPrompt.test.js` 会从 markdown 里抽出来注入真实战斗）。
 
 - **左栏**：所有包的 `kits/*.js` —— id、所属包、字节数、注册的钩子、错误/警告数，以及是否已带署名头。
 - **右栏**：静态校验（错误 / 警告，每条带 `field`+`code`+`message`+`hint`）、它注册的钩子、文件头状态、
@@ -436,8 +443,11 @@ node scripts/launch.mjs --port 3001     # 换个端口
 - **成员不是盟约自己说了算**：`members` 由**干员的 `bonds` 列表**推导（引擎按干员记录数人，弹窗列的就是它）。
   所以成员那一段勾选等于去改那些干员的 spec —— **只有本包自有的干员能改**；要改官方干员的盟约归属，
   得先把它覆盖/新建进本包（那是另一个明确动作，不该在盟约页顺手做掉）。
-- **图标只能复用本机已装好的**：客户端按**盟约 id**从 `data/assets.json` 的 `bonds` 取图（`bondIconUrl`），
-  一个包无法给 `assets.json` 加条目 —— 新增的盟约在盟约条上显示一个圆点，覆盖官方则沿用官方图标。页面会说出来。
+- **图标**：客户端按**盟约 id** 从 `data/assets.json` 的 `bonds` 取图（`bondIconUrl`），所以「图标 iconId」那个字段只是记录上的名字。
+  页面上的「**本包自带的图标**」一段才是真的能改的那一处：它让你从本包 `assets/` 里**真的存在**的图片里挑一张，
+  写进 `pack.json` 的 `bondIcons`（`POST /api/packs/:pack/bond-icons`），装载时叠加层把它并进 `assets.bonds`，
+  客户端不需要任何改动。覆盖官方盟约时这张图会替换官方图标；官方清单里没有、本包也没配，就是盟约条上的一个圆点 ——
+  页面会当场说明当前是哪一种。要删掉声明就把下拉选回「（不用本包图标）」。
 - **保存写两处**：`bond-specs/<bondId>.json`（可编辑的源）与 `bonds.json`（游戏读的产物），
   并保证 `pack.json` 的 `content` 声明了 `bonds`（否则加载器**完全不读**这个包的 `bonds.json`，
   与干员那条同一个坑）、覆盖官方时 `overrides` 里有 `bonds:<id>`。派生失败的保存会**还原**刚写的 spec，
@@ -525,6 +535,7 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 | DELETE | `/api/packs/:pack/kits/:id` | 删除该 kit 文件 |
 | GET | `/api/voices`（可选 `?pack=`） | 各包的语音状态 + **槽位词表** + **允许的扩展名** + 可选干员 id + 包内 `assets/` 真实存在的文件 |
 | POST | `/api/packs/:pack/voices` | `{ charId, slot, paths }` → 设置**一个槽位**（空数组即删除），就地更新 `pack.json` 的 `voices` |
+| POST | `/api/packs/:pack/bond-icons` | `{ bondId, path }` → 设置本包自带的**盟约图标**（`path` 空即删除），就地更新 `pack.json` 的 `bondIcons`；文件必须真的在 `assets/` 下 |
 | DELETE | `/api/packs/:pack/voices/:charId/:slot` | 删除一个干员的一个槽位（不存在则报告 `removed: false`，不重写文件） |
 | GET | `/api/packs/:id/export` | 该包的 `.zip`（`application/zip` + `Content-Disposition: attachment`）；包不存在 → 404 |
 | POST | `/api/packs/import`（可选 `?force=1`） | **原始 zip 字节**（`application/octet-stream`）→ 解压到临时目录、校验、搬进 `workshop/<包id>/`；返回装好的包摘要 |

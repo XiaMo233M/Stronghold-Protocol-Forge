@@ -232,6 +232,65 @@ describe('盟约页：覆盖官方盟约，官方那条的数值真的变了', (
   });
 });
 
+describe('盟约页：本包自带的图标（pack.json 的 bondIcons）', () => {
+  const ICON_PNG = Buffer.from('89504e470d0a1a0a0000000d49484452STANDIN', 'latin1');
+  let pngPath;
+
+  before(async () => {
+    // 重新建一条本包的盟约（前面的用例把它删掉了），并把一张图放进 assets/
+    const r = await post(`${editor.url}/api/packs/ws-pack/bonds`, { spec: BOND_SPEC }).then((x) => x.json());
+    assert.equal(r.ok, true, JSON.stringify(r));
+    // 有 assets/ 的包必须声明 license（shared/workshop.js 的 ASSETS_NEED_LICENSE），先补上再放文件
+    const man = manifestOf('ws-pack');
+    fs.writeFileSync(join(packDir('ws-pack'), 'pack.json'), `${JSON.stringify({ ...man, license: 'CC0-1.0' }, null, 2)}\n`);
+    pngPath = join(packDir('ws-pack'), 'assets', 'bond', 'wsBondShip.png');
+    fs.mkdirSync(join(packDir('ws-pack'), 'assets', 'bond'), { recursive: true });
+    fs.writeFileSync(pngPath, ICON_PNG);
+  });
+
+  test('GET /api/bonds 把本包的图片列出来，并带上当前声明', async () => {
+    const r = await fetch(`${editor.url}/api/bonds`).then((x) => x.json());
+    const pb = r.packBonds.find((p) => p.id === 'ws-pack');
+    assert.deepEqual(pb.iconFiles, ['bond/wsBondShip.png'], '只列真的能当图标画的文件');
+    assert.deepEqual(pb.bondIcons, {}, '还没配');
+  });
+
+  test('保存图标：写进 pack.json 的 bondIcons，加载器把它并进 assets.bonds', async () => {
+    const r = await post(`${editor.url}/api/packs/ws-pack/bond-icons`, { bondId: 'wsBondShip', path: 'bond/wsBondShip.png' }).then((x) => x.json());
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(r.path, 'bond/wsBondShip.png');
+    assert.deepEqual(manifestOf('ws-pack').bondIcons, { wsBondShip: 'bond/wsBondShip.png' });
+    const data = merged();
+    assert.equal(data.assets.bonds.wsBondShip, '/workshop-assets/ws-pack/bond/wsBondShip.png');
+    assert.equal(data.assets.bonds.yanShip, '/assets/bond/yanShip.png', '官方图标照旧');
+  });
+
+  test('清空（path 为空）＝删掉这条声明，assets.bonds 里那一条也回去', async () => {
+    const r = await post(`${editor.url}/api/packs/ws-pack/bond-icons`, { bondId: 'wsBondShip', path: '' }).then((x) => x.json());
+    assert.equal(r.ok, true);
+    assert.equal(r.path, null);
+    assert.equal('bondIcons' in manifestOf('ws-pack'), false, '空对象不留在 pack.json 里');
+    assert.equal('wsBondShip' in merged().assets.bonds, false);
+  });
+
+  test('每一种坏请求都是 400，而且一个字节都不写', async () => {
+    const before = JSON.stringify(manifestOf('ws-pack'));
+    const cases = [
+      [{ bondId: 'wsBondShip', path: '../secret.png' }, '路径穿越'],
+      [{ bondId: 'wsBondShip', path: '/abs.png' }, '绝对路径'],
+      [{ bondId: 'wsBondShip', path: 'bond/nope.png' }, '文件不存在'],
+      [{ bondId: 'wsBondShip', path: 'bond/wsBondShip.txt' }, '不是图片'],
+      [{ bondId: 'bad id!', path: 'bond/wsBondShip.png' }, '坏 id'],
+      [{ bondId: 'notInPack', path: 'bond/wsBondShip.png' }, '这个包没有这条盟约'],
+    ];
+    for (const [body, why] of cases) {
+      const res = await post(`${editor.url}/api/packs/ws-pack/bond-icons`, body);
+      assert.equal(res.status, 400, `${why} 应该被拒`);
+    }
+    assert.equal(JSON.stringify(manifestOf('ws-pack')), before, '被拒之后 pack.json 必须一个字节都没变');
+  });
+});
+
 describe('盟约页：手写的记录不会被毁掉', () => {
   test('没有 spec 的记录在保存别的盟约时原样保留', async () => {
     const dir = packDir('hand-written');

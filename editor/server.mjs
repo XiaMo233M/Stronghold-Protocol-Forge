@@ -89,6 +89,11 @@ const ART_MIME = new Map([
 /** …and from `docs/`: the documentation the editor's own pages link to, markdown only (so `docs/examples/*.js` stays out). */
 const DOC_TYPES = new Set(['.md']);
 
+/** 图片扩展名（盟约图标挑选用：只列真的能当图标画出来的文件）。 */
+const IMAGE_EXT_RE = /\.(png|jpe?g|webp|gif)$/i;
+/** 盟约 id 的字符集（与 shared/workshop.js 的 `BOND_ICON_BAD_ID` 同一份规则，避免两处漂移）。 */
+const BOND_ICON_ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
+
 const readJson = (p, fallback = null) => {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return fallback; }
 };
@@ -797,6 +802,13 @@ function bondPackState(root, packId, officialBondIds) {
     bonds,
     content: Array.isArray(manifest?.content) ? manifest.content : [],
     declaredOverrides: [...declared].sort(),
+    // 本包自带的盟约图标：`bondIcons[<bondId>]` 是**包内相对 assets/ 的路径**（schema 在 shared/workshop.js）。
+    // `iconFiles` 是这台机器上这个包 assets/ 里真的有的图片 —— 页面只让作者从里面挑，选不到不存在的文件。
+    bondIcons: (manifest?.bondIcons && typeof manifest.bondIcons === 'object' && !Array.isArray(manifest.bondIcons)) ? { ...manifest.bondIcons } : {},
+    iconFiles: packAssetFiles(root, packId)
+      .filter((f) => f.serveable && IMAGE_EXT_RE.test(f.path))
+      .map((f) => f.path)
+      .sort(),
   };
 }
 
@@ -2281,6 +2293,56 @@ export async function createEditorServer(opts = {}) {
         ok: true, pack: packId, charId, slot,
         paths: [...new Set(lines)].sort(),
         voices: (next.voices && typeof next.voices === 'object') ? next.voices : {},
+        warnings: checked.ok ? [] : [`pack.json 现在会被加载器拒绝（${checked.error}）：${checked.detail}`],
+      });
+    }
+
+    // 盟约图标：`pack.json` 的 `bondIcons` 一个字段（与语音同一套写法）。空 path = 删掉这条声明。
+    //
+    // 为什么值得一个接口：客户端按**盟约 id** 从 `data/assets.json` 的 `bonds` 取图，一个包没法给 assets.json 加条目，
+    // 所以新增盟约在盟约条上只能是一个圆点。这里让包自带的图走 /workshop-assets 那条路由发出去
+    // （叠加逻辑在 shared/workshop.js 的 mergeWorkshopBondIcons），并把「文件必须真的存在」挡在保存前。
+    if (p.startsWith('/api/packs/') && p.endsWith('/bond-icons') && method === 'POST') {
+      const packId = p.slice('/api/packs/'.length, -'/bond-icons'.length);
+      if (!PACK_ID_RE.test(packId)) throw refuse(400, '工坊包 id 不合法（只能是字母、数字、下划线和短横线）');
+      const packDir = path.join(root, packId);
+      const manifestPath = path.join(packDir, 'pack.json');
+      const manifest = readJson(manifestPath, null);
+      if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) throw refuse(400, `工坊包 "${packId}" 不存在（没有可读的 pack.json）`);
+      const { bondId, path: filePath } = await readBody(req);
+      if (typeof bondId !== 'string' || !BOND_ICON_ID_RE.test(bondId)) {
+        throw refuse(400, '盟约 id 不合法（只能是字母、数字、下划线、短横线、点、冒号，1–64 位）');
+      }
+      // 只允许给「这个包真的有的盟约」配图：给一个不存在的 id 配图不会报错，但那张图永远不会被用到
+      const records = readJson(path.join(packDir, 'bonds.json'), {}) || {};
+      if (!Object.hasOwn(records, bondId)) {
+        throw refuse(400, `本包的 bonds.json 里没有盟约 "${bondId}"：先把它写进这个包（覆盖官方或新增），再配图`);
+      }
+      const clearing = filePath === null || filePath === undefined || filePath === '';
+      /** @type {string} */
+      let stored = '';
+      if (!clearing) {
+        const problem = voicePathProblem(filePath);
+        if (problem) throw refuse(400, `"${String(filePath)}" 不能作为图标路径：${problem}`);
+        if (!IMAGE_EXT_RE.test(filePath)) throw refuse(400, `"${filePath}" 不是图片（可用 png / jpg / jpeg / webp / gif）`);
+        const abs = path.join(packDir, VOICE_ASSETS_DIR, ...String(filePath).split('/'));
+        if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
+          throw refuse(400, `"${filePath}" 在 ${packId}/assets/ 下不存在（请先自己把文件放进去，编辑器不上传素材）`);
+        }
+        stored = String(filePath);
+      }
+      const next = { ...manifest };
+      const icons = manifest.bondIcons && typeof manifest.bondIcons === 'object' && !Array.isArray(manifest.bondIcons)
+        ? { ...manifest.bondIcons } : {};
+      if (stored) icons[bondId] = stored; else delete icons[bondId];
+      if (Object.keys(icons).length) next.bondIcons = Object.fromEntries(Object.keys(icons).sort().map((k) => [k, icons[k]]));
+      else delete next.bondIcons;
+      const checked = normalizePackManifest(next, packId, { hasAssets: true });
+      if (!checked.ok && !clearing) throw refuse(400, `保存后 pack.json 会被加载器拒绝（${checked.error}）：${checked.detail}`);
+      await writeJson(manifestPath, next);
+      return sendJson(res, 200, {
+        ok: true, pack: packId, bondId, path: stored || null,
+        bondIcons: next.bondIcons ?? {},
         warnings: checked.ok ? [] : [`pack.json 现在会被加载器拒绝（${checked.error}）：${checked.detail}`],
       });
     }

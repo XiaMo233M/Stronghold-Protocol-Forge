@@ -14,6 +14,7 @@
 | 叠加层接入数据加载（冻结之前） | `server/data.js` |
 | 把合并后的 `/data/*.json` 发给浏览器 | `server/index.js`（`buildWorkshopDataFiles`） |
 | 包语音汇总进 `assets.audio.voice` | `shared/workshop.js`（`workshopVoiceIndex` / `mergeWorkshopVoices`） |
+| 包自带盟约图标并进 `assets.bonds` | `shared/workshop.js`（`workshopBondIconIndex` / `mergeWorkshopBondIcons`） |
 | 助战配置与校验（纯函数，前后端共用） | `shared/support.js` |
 | 助战卡池的服务端声明 | `data/support.json` |
 | 助战的引擎侧视图 | `server/match/gamedata.js` |
@@ -46,15 +47,17 @@ workshop/<packId>/
 | `version` | 否 | 默认 `0.0.0` |
 | `author` / `license` / `description` | 否 | 元信息；`license` 用于声明素材授权 |
 | `gameVersion` | 否 | 作者针对的游戏版本，便于排查 |
-| `content` | 二选一 | 这个包提供哪些数据文件（上表的名字，含 `bonds`） |
-| `voices` | 二选一 | 这个包为哪些干员提供语音，见 §1.4；`content` 与 `voices` 至少有一个非空 |
+| `content` | 三选一 | 这个包提供哪些数据文件（上表的名字，含 `bonds`） |
+| `voices` | 三选一 | 这个包为哪些干员提供语音，见 §1.4；`content` / `voices` / `bondIcons` 至少有一个非空 |
+| `bondIcons` | 三选一 | 这个包为哪些盟约提供图标，见 §1.4 与 §1.8：`{ "<bondId>": "<包内相对 assets/ 的路径>" }` |
 | `support` | 否 | 这个包自己新增的、应当进助战卡池的干员 id 列表，见 §2.1；阶由记录推导 |
 | `overrides` | 否 | 允许覆盖的官方记录，格式 `"<file>:<id>"`，例如 `"chess:chess_char_1_01_a"`、`"bonds:yanShip"` |
 
 `content` 只接受上表列出的文件。**`config` 被刻意排除**：一个能改写经济、回合表或难度参数的包改的是规则而不是内容，那需要另一套审查机制，不在本功能范围内。
 
-**只带语音的包是合法的包**：`content: []` + `voices`（见 §1.4）。一个只给助战干员配语音的包不需要提供任何数据文件；
-反过来，`content` 与 `voices` 都为空才会被拒（`EMPTY_PACK`）。
+**只带语音（或只带盟约图标）的包是合法的包**：`content: []` + `voices` / `bondIcons`（见 §1.4）。
+一个只给助战干员配语音、或只给盟约配一张图的包不需要提供任何数据文件；
+反过来，三者都为空才会被拒（`EMPTY_PACK`）。
 
 ### 1.2 叠加规则
 - **默认叠加（additive）**：新 id 直接加入。
@@ -123,6 +126,30 @@ workshop/*/ ──┘        （冻结之前）              └─→ /data/<fi
 而不是静默丢弃。
 
 玩家侧仍然是**双重开关**：`npm run assets -- --voices` 决定这个安装有没有官方语音，设置里的「干员语音 VOICE」默认 0（关闭）决定这一局有没有语音。两点都满足时才听得到包里的语音。
+
+#### 盟约图标（`bondIcons`）
+
+客户端按**盟约 id** 从 `data/assets.json` 的 `bonds` 取图，而一个包没法往 `assets.json` 里加条目 —— 于是**新增**的盟约
+在盟约条与详情面板上只能是一个圆点。这个字段把这个口子开在 `pack.json` 上（与语音同一套做法）：
+
+```json
+{
+  "id": "my-icons", "license": "CC0-1.0", "content": [],
+  "bondIcons": { "myShip": "bond/myShip.png", "yanShip": "bond/my-yan.png" }
+}
+```
+
+| 规则 | 说明 |
+|---|---|
+| 路径相对 `assets/` | 与语音逐字相同（绝对路径、`..`、`.`、反斜杠、盘符都会被拒：`BOND_ICON_PATH_UNSAFE`）；图片同样受 §1.4 的授权闸门约束 |
+| id 必须是盟约 id | 字符集 `[A-Za-z0-9_.:-]`（`BOND_ICON_BAD_ID`）。写一个不存在的 id 不会报错，但那张图永远不会被用到 —— 编辑器只允许给**本包真的有的盟约**配图 |
+| 覆盖官方 = 换掉官方图标 | 同一个 id 出现在官方 `bonds` 里时这张图**替换**它；新增的 id 直接加进去 |
+| 两张图抢同一个 id | 按**包 id 排序**第一个赢，后一个包会在启动日志里得到一条错误（静默覆盖会变成「换个包顺序图标就变了」） |
+
+**送达方式与语音完全一致**：`applyWorkshop()` 把它们并进 `assets.bonds`（`workshopBondIconIndex` /
+`mergeWorkshopBondIcons`），`assets.json` 因此进入「被触及的数据文件」集合，URL 走同一条
+`/workshop-assets/<pack>/<路径>`（分段百分号编码）。**写这个字段的图形入口是编辑器盟约页的「本包自带的图标」一段**：
+它只让你从本包 `assets/` 里**真的存在**的图片里挑，并在保存前就挡掉不存在的文件。
 
 **写这个字段的图形入口是编辑器的第七个页面 `/voice.html`**（`docs/EDITOR.md` §语音）：它就地改 `pack.json` 的 `voices`，
 其余字段、键序与缩进原样保留，并且只接受**包内 `assets/` 下真实存在、且扩展名在服务端媒体白名单里**的文件；
@@ -204,9 +231,12 @@ node tools/workshop-validate.mjs my-pack
 | **装备（items）**：`params`/`mergeable`/`shopExcluded` 推导 + 校验 + 编辑器表单 | ✅ 已完成（`test/itemAuthoring.test.js`、`editor/ui/item.html`） |
 | **盟约（bonds）**：新增一条盟约、或覆盖官方 23 条的阈值 / 计数 / 说明 / 黑板数值；成员由干员的 `bonds` 推导 | ✅ 已完成（`shared/bondAuthoring.js`、`test/bondAuthoring.test.js`、`test/bondEditor.test.js`、`editor/ui/bond.html`） |
 | **盟约的通用加成（`genericBuffs`）**：新增盟约在战斗里按黑板数值给成员加百分比 | ✅ 已完成（`server/sim/content/bonds/dataDriven.js`、`test/content/workshopBond.test.js`） |
+| **盟约图标（`pack.json.bondIcons`）**：包自带图标并进 `assets.bonds`，走 `/workshop-assets` 送达客户端 | ✅ 已完成（`shared/workshop.js`、`test/workshopBondIcons.test.js`） |
+| **行为层 kit 的创作 prompt**：`docs/prompts/kit.md`（钩子词表 + 可跑示例，示例被测试真的执行） | ✅ 已完成（`test/kitPrompt.test.js`） |
 | **作者接口**：spec → 合法记录、机器可读校验、模板 prompt、校验 CLI | ✅ 已实现（`test/chessAuthoring.test.js`） |
 | **行为层**：包内 `kits/<chessId>.js` 接入 `battle.on(...)` 钩子总线 | ✅ 已实现（见 §4） |
 | **语音包（`voices`）**：汇总进 `assets.audio.voice`、随合并的 `assets.json` 送达客户端 | ✅ 已实现（`test/workshopVoices.test.js`） |
+| **盟约图标（`bondIcons`）**：汇总进 `assets.bonds`、随合并的 `assets.json` 送达客户端（只带图标的包也合法） | ✅ 已实现（`test/workshopBondIcons.test.js`） |
 | **包自带助战（`support`）**：按记录推导阶并入 `data/support.json` 的卡池、随合并的 `support.json` 送达客户端 | ✅ 已实现（`test/workshopSupport.test.js`） |
 | **分享与安装（`.zip`）**：导出/导入/列出，CLI 与编辑器第八页共用同一批函数 | ✅ 已实现（`shared/zip.js`、`tools/workshop-pack.mjs`、`test/workshopPack.test.js`） |
 | **局外编辑器 UI**：干员 / 地图 / 怪物 / 出怪 / 装备 / **盟约** / 行为层 kit / **语音** / **包管理** 九个页面 | ✅ 已实现（`editor/`，见 `docs/EDITOR.md`） |
@@ -231,8 +261,12 @@ node tools/workshop-validate.mjs my-pack
   引擎计数、盟约弹窗的成员列表都读这个列表；一份「盟约说自己是这群人、干员却不认」的记录会安静地少人。
   **干员页也有盟约勾选**（`docs/EDITOR.md` 的「干员编辑器（首页）」一节）：官方 23 条 + 本包自己写的盟约都在那里，
   勾选即写进该干员的 `bonds`，模板带过来的官方盟约默认勾着 —— 查不到的 id 界面会当场指出来（能保存，但游戏里不会有任何效果）。
-- **图标**：客户端按**盟约 id** 从 `data/assets.json` 的 `bonds` 取图（`public/js/assets.js bondIconUrl`），
-  一个包无法给 `assets.json` 加条目，所以新增盟约在盟约条上是一个圆点；覆盖官方则沿用官方图标。
+- **图标**：客户端按**盟约 id** 从 `data/assets.json` 的 `bonds` 取图（`public/js/assets.js bondIconUrl`）。
+  新增盟约原本只能是一个圆点，现在**包可以自带图标**：`pack.json` 写
+  `"bondIcons": { "<bondId>": "<包内相对 assets/ 的路径>" }`，装载时叠加层把它并进 `assets.bonds`，
+  URL 走 `/workshop-assets` 那条包素材路由（与语音同一条路，客户端不需要任何改动）。覆盖官方盟约时这张图会
+  **替换**官方图标；两张图抢同一个 id 时按包 id 排序第一个赢，并给后一个包报一条错误。
+  写这个字段的图形入口是编辑器的盟约页（§「本包自带的图标」一段）。
 
 ---
 

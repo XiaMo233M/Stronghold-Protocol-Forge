@@ -422,13 +422,48 @@ describe('干员表单：真跑一遍（最小 DOM 桩）', () => {
     assert.equal('talentsGolden' in lastPreviewSpec(), false);
   });
 
+  test('干员自己的特性自带范围：普通与精锐各一个（精锐那个在「精锐特性不同」勾上之后）', async () => {
+    // 普通那份：身份面板里的「特性自带范围」
+    const plainSel = findAll(editorBox, (n) => n.tagName === 'SELECT' && textOf(n).includes('（没有自带范围）'))[0];
+    assert.ok(plainSel, '普通特性的自带范围下拉');
+    const shape = plainSel.children.find((c) => c.value)?.value;
+    fire(plainSel, 'change', shape);
+    await waitPreview();
+    assert.ok(Array.isArray(lastPreviewSpec().traitRangeGrid), '选中的形状写进 traitRangeGrid');
+    assert.equal(lastPreviewSpec().traitRangeGrid.length > 0, true);
+
+    // 精锐那份：勾上「精锐特性不同」之后才出现，默认继承普通（empty ＝ 与普通同一片）
+    const traitCb = checkboxNear(editorBox, '精锐特性不同');
+    traitCb.checked = true;
+    fire(traitCb, 'change');
+    await waitPreview();
+    const eliteSel = findAll(editorBox, (n) => n.tagName === 'SELECT' && textOf(n).includes('（与普通那份特性同一个范围）'))[0];
+    assert.ok(eliteSel, '精锐特性的自带范围下拉');
+    fire(eliteSel, 'change', eliteSel.children.find((c) => c.value)?.value);
+    await waitPreview();
+    assert.ok(Array.isArray(lastPreviewSpec().traitGolden.rangeGrid), '选中的形状写进 traitGolden.rangeGrid');
+    fire(findAll(editorBox, (n) => n.tagName === 'SELECT' && textOf(n).includes('（与普通那份特性同一个范围）'))[0], 'change', '');
+    await waitPreview();
+    assert.equal('rangeGrid' in lastPreviewSpec().traitGolden, false, '清空＝精锐特性沿用普通那片范围');
+
+    // 收尾：取消精锐特性、清掉普通那份的范围，别把状态留给后面的测试
+    const cb = checkboxNear(editorBox, '精锐特性不同');
+    cb.checked = false;
+    fire(cb, 'change');
+    await waitPreview();
+    fire(findAll(editorBox, (n) => n.tagName === 'SELECT' && textOf(n).includes('（没有自带范围）'))[0], 'change', '');
+    await waitPreview();
+    assert.equal('traitRangeGrid' in lastPreviewSpec(), false);
+  });
+
   test('模组的特性自带范围与天赋改写的范围都能编', async () => {
     fire(findAll(editorBox, (n) => n.tagName === 'BUTTON' && textOf(n).includes('＋ 添加一个模组'))[0], 'click');
     await waitPreview();
     // 特性自带范围：默认项写明「没有自带范围」，选一个真实形状后写进 modules[0].rangeGrid
-    const traitRangeSel = findAll(editorBox, (n) => n.tagName === 'SELECT' && textOf(n).includes('（没有自带范围）'))[0];
-    assert.ok(traitRangeSel, '模组的特性自带范围要有下拉');
-    // 第一项是空值（没有自带范围），第二项就是官方形状的键
+    // （干员自己的特性也有一个同名下拉，且在它前面 —— 所以取最后一个，模组面板在页面最下面）
+    const rangeSelects = () => findAll(editorBox, (n) => n.tagName === 'SELECT' && textOf(n).includes('（没有自带范围）'));
+    assert.ok(rangeSelects().length >= 2, '干员特性与模组特性各有一个「自带范围」下拉');
+    const traitRangeSel = rangeSelects().pop();
     const shape = traitRangeSel.children.find((c) => c.value)?.value;
     assert.ok(shape, '下拉里要有官方形状');
     fire(traitRangeSel, 'change', shape);
@@ -436,7 +471,7 @@ describe('干员表单：真跑一遍（最小 DOM 桩）', () => {
     assert.ok(Array.isArray(lastPreviewSpec().modules[0].rangeGrid), '选中的形状要写进模组的 traitOverride');
     assert.ok(lastPreviewSpec().modules[0].rangeGrid.length > 0);
     // 清空＝删掉这个字段
-    fire(findAll(editorBox, (n) => n.tagName === 'SELECT' && textOf(n).includes('（没有自带范围）'))[0], 'change', '');
+    fire(rangeSelects().pop(), 'change', '');
     await waitPreview();
     assert.equal('rangeGrid' in lastPreviewSpec().modules[0], false);
 

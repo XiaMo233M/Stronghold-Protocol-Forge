@@ -61,6 +61,7 @@ node tools/workshop-validate.mjs <packId 或 workshop 根>          # 三层校�
 | `subProfessionId` | ⬜ | 决定职业特性行为，例如 `fastshot`（速射手）`fortress`（要塞）`bard`（吟游者）。留空则按 `position` 取通用行为 |
 | `position` | ✅ | `MELEE` 或 `RANGED` |
 | `traitDesc` | ⬜ | 特性文字（**只影响分类推导**：含「法术伤害」会被判为法术伤害） |
+| `traitRangeGrid` / `traitGolden.rangeGrid` | ⬜ | **特性自带的那片范围**（不是干员的攻击范围）：普通态用 `traitRangeGrid`，精锐态在 `traitGolden` 里。官方 4 位干员的特性带它（例：散射手用它定义正面那一圈） |
 | `assetsSpine` | ⬜ | 复用一个**已有**干员的 Spine id。仓库不含素材，所以这是让新干员有立绘的唯一方式；留空则用替代外观 |
 | `stats.normal` / `stats.golden` | ✅ | 就是**普通 / 精锐两套数值**。`maxHp` `atk` `def` `res` `cost` `blockCnt` `bat` 必填；`aspd` `respawnTime` `spRecovery` `moveSpeed` 可省（默认 100 / 70 / 1 / 1） |
 | `skill` | ⬜ | 见下节。不需要技能就留空（`null`） |

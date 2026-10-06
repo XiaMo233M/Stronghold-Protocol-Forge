@@ -118,9 +118,30 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     }
     if (Object.keys(clean).length) voiceLines[charId] = clean;
   }
-  // A pack may bring data files, voice lines, or both — never neither (docs/WORKSHOP.md §1.4).
-  if (!content.length && !Object.keys(voiceLines).length) {
-    return fail('EMPTY_PACK', `content must name at least one of: ${WORKSHOP_CONTENT_FILES.join(', ')} — or the pack must declare voices`);
+  // 盟约图标（这个包自带的 art）：`bondIcons: { "<bondId>": "<path inside assets/>" }`。
+  //
+  // 为什么需要它：客户端按**盟约 id** 从 `data/assets.json` 的 `bonds` 取图标（public/js/assets.js bondIconUrl），
+  // 而一个包没法往 `assets.json` 里加条目 —— 于是新增盟约在盟约条上只能是一个圆点。这里把这个口子开在
+  // **pack.json 的一个字段**上（和一个包的语音是同一个做法），装载时叠加进 `assets.bonds`，URL 走同一条
+  // /workshop-assets 路由。路径安全规则与语音逐字相同（相对 assets/、无穿越）。
+  const bondIcons = raw.bondIcons === undefined ? {} : raw.bondIcons;
+  if (!isPlainObj(bondIcons)) return fail('BOND_ICON_BAD_SHAPE', 'bondIcons must be an object: { "<bondId>": "<path inside assets/>" }');
+  if (Object.keys(bondIcons).length && opts.hasAssets !== true) {
+    return fail('BOND_ICON_NEEDS_ASSETS', 'a pack that declares bondIcons must put the image in its assets/ folder');
+  }
+  /** @type {Record<string, string>} */
+  const bondIconFiles = {};
+  for (const [bondId, file] of Object.entries(bondIcons)) {
+    if (!/^[A-Za-z0-9_\-.:]{1,64}$/.test(bondId)) return fail('BOND_ICON_BAD_ID', `"${bondId}" is not a valid bond id`);
+    if (typeof file !== 'string' || !file) return fail('BOND_ICON_BAD_SHAPE', `bondIcons["${bondId}"] must be a path inside assets/`);
+    if (file.startsWith('/') || file.includes('\\') || file.split('/').some((seg) => seg === '..' || seg === '.') || /^[A-Za-z]:/.test(file)) {
+      return fail('BOND_ICON_PATH_UNSAFE', `"${file}" must be a relative path inside assets/ (no absolute paths, no "..")`);
+    }
+    bondIconFiles[bondId] = file;
+  }
+  // A pack may bring data files, voice lines, 盟约图标, 助战声明 — never none of them (docs/WORKSHOP.md §1.4).
+  if (!content.length && !Object.keys(voiceLines).length && !Object.keys(bondIconFiles).length) {
+    return fail('EMPTY_PACK', `content must name at least one of: ${WORKSHOP_CONTENT_FILES.join(', ')} — or the pack must declare voices / bondIcons`);
   }
   // 助战卡池贡献 (docs/WORKSHOP.md §2): the operators of THIS pack that should be selectable as 助战. The tier is NOT
   // written here — it is derived from the pack's own chess record, exactly like every other derived field, so a tier can
@@ -151,6 +172,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
       content,
       overrides,
       voices: voiceLines,
+      bondIcons: bondIconFiles,
       support: supportIds,
     },
   };
@@ -350,6 +372,7 @@ export function applyWorkshop(base, packs) {
   }
   linkWorkshopStages(out, report);
   mergeWorkshopVoices(out, packs, report);
+  mergeWorkshopBondIcons(out, packs, report);
   mergeWorkshopSupport(out, packs, report);
   report.looks = chessLookIssues(out, looked);
   for (const list of Object.values(report.added)) list.sort();
@@ -439,6 +462,75 @@ function mergeWorkshopVoices(data, packs, report) {
 }
 
 /**
+ * 包自带盟约图标的 URL 表：`{ <bondId>: '/workshop-assets/<pack>/<path>' }`。
+ * 与 `workshopVoiceIndex` 同一套：URL 指向 /workshop-assets 那条唯一的包素材路由，客户端不需要任何新通道。
+ * 同一个 bondId 被两个包声明时**第一个赢**，并记一条错误 —— 两个包抢同一个盟约的图标是作者要自己解决的事，
+ * 静默让后加载的那个覆盖掉，会变成「换个包顺序图标就变了」这种没人能查的问题。
+ * @param {Array<object>} packs @param {{ prefix?: string }} [opts]
+ */
+export function workshopBondIconIndex(packs, { prefix = WORKSHOP_MEDIA_PREFIX } = {}) {
+  /** @type {Record<string, string>} */
+  const out = {};
+  // 按包 id 排序再处理（与 workshopVoiceIndex 同一条规则）：谁赢只取决于包 id，不取决于加载顺序。
+  for (const pack of [...(Array.isArray(packs) ? packs : [])].sort(byPackId)) {
+    const icons = isPlainObj(pack?.bondIcons) ? pack.bondIcons : null;
+    if (!icons) continue;
+    for (const [bondId, file] of Object.entries(icons)) {
+      if (Object.hasOwn(out, bondId)) continue;
+      // 逐段百分号编码：文件名里的 `#` / 空格 / 中文在 URL 里必须编码，否则 `#` 会把 URL 从此截断
+      const path = String(file).split('/').map(encodeURIComponent).join('/');
+      out[bondId] = `${prefix}${pack.id}/${path}`;
+    }
+  }
+  return out;
+}
+
+/**
+ * Publish every pack's 盟约图标 by extending `assets.bonds` — the map the client resolves a bond's icon in
+ * (`public/js/assets.js bondIconUrl`), served merged like every other workshop overlay.
+ *
+ * REPLACE for a bond the official data already has (that is how a pack gives its **override** of an official bond a
+ * custom icon), APPEND for a new one. Mutates `data` (a fresh copy) and records the ids in `report.bondIcons`.
+ */
+function mergeWorkshopBondIcons(data, packs, report) {
+  const index = workshopBondIconIndex(packs);
+  const ids = Object.keys(index);
+  if (!ids.length) return;
+  const list = [...(Array.isArray(packs) ? packs : [])].sort(byPackId);
+  // 谁跟谁抢了同一个 id：按包 id 排序后第一个赢，后面的写进 report.errors（不阻断，但作者必须知道）
+  const claimed = new Map();
+  for (const pack of list) {
+    for (const bondId of Object.keys(isPlainObj(pack?.bondIcons) ? pack.bondIcons : {})) {
+      if (claimed.has(bondId)) {
+        report.errors.push({
+          pack: pack.id, file: 'assets', id: `bonds.${bondId}`,
+          reason: `another pack (${claimed.get(bondId)}) already ships an icon for this bond; keep only one`,
+        });
+      } else claimed.set(bondId, pack.id);
+    }
+  }
+  const assets = isPlainObj(data.assets) ? data.assets : null;
+  if (!assets) {
+    for (const pack of list) {
+      if (!isPlainObj(pack?.bondIcons) || !Object.keys(pack.bondIcons).length) continue;
+      report.errors.push({
+        pack: pack.id, file: 'assets', id: 'bonds',
+        reason: 'this pack ships a bond icon, but data/assets.json is missing — run `npm run assets` so the client has a manifest to extend',
+      });
+    }
+    return;
+  }
+  const bonds = isPlainObj(assets.bonds) ? { ...assets.bonds } : {};
+  for (const id of ids) bonds[id] = index[id];
+  data.assets = { ...assets, bonds };
+  /** @type {Record<string, string[]>} */
+  const counts = {};
+  for (const [bondId, packId] of claimed) (counts[packId] ??= []).push(bondId);
+  for (const list of Object.values(counts)) list.sort();
+  report.bondIcons = counts;
+}
+
+/**
  * Make newly added STAGES selectable.
  *
  * A stage only enters a match when the mode's `stages` list names it (server/match/waves.js picks among those by
@@ -484,6 +576,8 @@ export function workshopSummary(report) {
     if (files.length) bits.push(files.join(', '));
     const voices = report.voices && report.voices[p.id];
     if (voices) bits.push(`${voices} voice line${voices === 1 ? '' : 's'}`);
+    const icons = report.bondIcons && report.bondIcons[p.id];
+    if (icons) bits.push(`${icons.length} bond icon${icons.length === 1 ? '' : 's'}`);
     const support = report.support && report.support[p.id];
     if (support) bits.push(`助战 +${support.length}`);
     const looks = (report.looks || []).filter((l) => l.pack === p.id);

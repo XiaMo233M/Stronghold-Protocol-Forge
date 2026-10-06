@@ -335,7 +335,12 @@ function renderEditor() {
         h('datalist', { id: 'subProfOptions' }, subProfessionChoices(state.data.officialChess).map((v) => h('option', { value: v })))),
       h('p', { class: 'hint' }, t('数据里只有分支的中文名（{0} 个），英文界面显示的是 id 本身。', subOpts.length)))),
     field(t('位置'), select(['MELEE', 'RANGED'], () => s.position, (v) => { s.position = v; }, (v) => nameLabel(POSITION_NAMES, v))),
-    field(t('特性文字（只影响伤害类型推导）'), textInput(() => s.traitDesc, (v) => setText(s, 'traitDesc', v))))));
+    field(t('特性文字（只影响伤害类型推导）'), textInput(() => s.traitDesc, (v) => setText(s, 'traitDesc', v))),
+    // 特性自带的那片范围（不是干员的攻击范围）：引擎里由特性自己定义（例：散射手用它定义正面那一圈，
+    // server/sim/professions.js），官方 4 位干员的特性带它。留空＝这个干员的特性没有自带范围。
+    field(t('特性自带范围'), h('div', {},
+      rangeShapeSelect(() => s.traitRangeGrid, (g) => { if (g) s.traitRangeGrid = g; else delete s.traitRangeGrid; }, t('（没有自带范围）')),
+      Array.isArray(s.traitRangeGrid) ? h('div', { style: 'margin-top:6px' }, gridPreview(s.traitRangeGrid)) : null)))));
 
   // appearance — the repo ships no assets, so reuse an existing spine.
   // 候选来自服务端的 `spineChoices`（本机已装好的干员模型清单），只有在旧服务端没给时才退回官方干员列表。
@@ -464,7 +469,10 @@ function renderEditor() {
       traitOn
         ? h('div', {},
           field(t('精锐特性文字'), textInput(() => s.traitGolden.desc, (v) => setText(s.traitGolden, 'desc', v))),
-          h('p', { class: 'hint' }, t('精锐特性的黑板与自带范围（`bb` / `rangeGrid`）不在这一页编辑；以模板新建时它们会原样带过来。')))
+          h('div', { class: 'row', style: 'align-items:flex-start;gap:16px' },
+            field(t('精锐特性自带范围'), rangeShapeSelect(() => s.traitGolden.rangeGrid, (g) => { if (g) s.traitGolden.rangeGrid = g; else delete s.traitGolden.rangeGrid; }, t('（与普通那份特性同一个范围）'))),
+            s.traitGolden.rangeGrid ? gridPreview(s.traitGolden.rangeGrid) : null),
+          h('p', { class: 'hint' }, t('精锐特性的黑板（`bb` / `bbStr`）不在这一页编辑；以模板新建时它们会原样带过来。')))
         : h('p', { class: 'hint' }, t('（没勾：精锐沿用上面那份特性）'))));
 
     // 攻击范围

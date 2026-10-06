@@ -195,6 +195,41 @@ function renderForm() {
   idBox.append(checks);
   box.append(idBox);
 
+  // ---- 本包自带的图标 ---------------------------------------------------------------------------------------------
+  // pack.json 的 `bondIcons` 一个字段（与语音同一套写法）。客户端按**盟约 id** 从 `data/assets.json` 的 `bonds` 取图
+  // （public/js/assets.js bondIconUrl），一个包没法给 assets.json 加条目 —— 于是新增盟约在盟约条上只能是一个圆点。
+  // 这里把包自带的图接上：装载时叠加层把它写进 `assets.bonds`，URL 走 /workshop-assets 那条唯一路由。
+  const packState = (state.data?.packBonds ?? []).find((p) => p.id === state.packId);
+  const inPack = !!packState?.bonds?.some((b) => b.bondId === s.id);
+  const iconFiles = packState?.iconFiles ?? [];
+  const currentIcon = (packState?.bondIcons ?? {})[s.id] ?? '';
+  const hasOfficialIcon = (state.data?.iconChoices ?? []).includes(s.iconId);
+  const iconBox = document.createElement('div'); iconBox.className = 'panel';
+  iconBox.append(h('h2', { text: t('本包自带的图标（可选）') }));
+  iconBox.append(h('p', { className: 'hint', text: t('客户端按**盟约 id** 取图：先用本包这张（走 /workshop-assets），没有就看官方清单里有没有这个 id 的图，都没有就是盟约条上的一个圆点。图片要自己先放进 `{0}/assets/`，编辑器不上传素材。', state.packId ?? '（工坊包）') }));
+  if (!inPack) {
+    iconBox.append(h('p', { className: 'hint', text: t('这个盟约还不在本包里：先保存一次（覆盖官方或新增），再回来给它配图。') }));
+  } else {
+    const sel = selectInput(() => currentIcon, async (v) => {
+      try {
+        const r = await api(`/api/packs/${encodeURIComponent(state.packId)}/bond-icons`, { method: 'POST', body: { bondId: s.id, path: v ?? '' } });
+        state.message = { kind: 'ok', text: v
+          ? t('已把 {0} 的图标设为本包的 {1}', s.id, v)
+          : t('已取消 {0} 的自带图标', s.id) };
+        await load();
+        void r;
+      } catch (e) { state.message = { kind: 'error', text: t(e?.message ?? String(e)) }; renderForm(); }
+    }, ['', ...iconFiles], { labels: { '': t('（不用本包图标）') } });
+    iconBox.append(field(t('图标文件（本包 assets/ 下的图片）'), sel));
+    if (!iconFiles.length) {
+      iconBox.append(h('p', { className: 'hint', text: t('本包的 `assets/` 里还没有图片：把图标文件放进去（如 assets/bond/{0}.png），再回到这一页挑。', s.id || 'myShip') }));
+    }
+  }
+  iconBox.append(h('p', { className: 'hint', text: hasOfficialIcon
+    ? t('官方清单里有 `{0}` 这张图：不配本包图标时，客户端会用它。', s.iconId)
+    : t('官方清单里没有 `{0}` 这张图，而客户端**不看** `iconId`、只看盟约 id —— 不配本包图标时这条盟约就是一个圆点。', s.iconId || t('（空）')) }));
+  box.append(iconBox);
+
   box.append(h('h2', { text: t('计数与阈值（谁算成员、几个才算激活）') }));
   const cnt = document.createElement('div'); cnt.className = 'panel grid';
   cnt.append(
