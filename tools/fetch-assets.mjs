@@ -26,16 +26,18 @@
 //
 // Usage: node tools/fetch-assets.mjs [--concurrency=16] [--force] [--offline]
 //                                    [--dry-run] [--refresh-index] [--prune]
-//                                    [--allow-shrink] [--local-spines] [--help]
+//                                    [--allow-shrink] [--local-spines] [--voices] [--help]
 
 import { readFile, writeFile, mkdir, rename, readdir, unlink } from 'node:fs/promises';
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Downloader } from './assets/downloader.mjs';
-import { loadIndexes } from './assets/cache.mjs';
+import { loadIndexes, loadCharword } from './assets/cache.mjs';
 import { indexAudio } from './assets/audio.mjs';
-import { buildPlan } from './assets/plan.mjs';
+import { buildPlan, alt, leaf } from './assets/plan.mjs';
+import { planVoices } from './assets/voices.mjs';
+import { RAW } from './assets/sources.mjs';
 import { processModels, findLocalEnemyModels, localEnemySpineMeta, loadLocalEnemySpines, LOCAL_ENEMY_SPINES_FILE } from './assets/spine.mjs';
 import { collectLeaves, downloadLeaves, resolveTemplate, totalBytes, contentHash, droppedEntries, MANIFEST_VERSION } from './assets/manifest.mjs';
 import { fontJobs, buildFonts } from './assets/fonts.mjs';
@@ -61,15 +63,19 @@ const HELP = `Usage: node tools/fetch-assets.mjs [options]
                     (without it such a run keeps the current manifest, lists the entries and exits 1)
   --local-spines    rewrite ${LOCAL_ENEMY_SPINES_FILE} from the enemy models extracted
                     by tools/local-extract/extract.py (public/assets/local/spine/enemy/)
+  --voices          also fetch the operators' VOICE LINES (角色语音台词, ~1 MB per operator, OFF by default):
+                    needs the 11 MB charword_table index, adds audio.voice to the manifest and downloads to
+                    public/assets/audio/voice_cn/; the client plays them via audio.voice(charId, slot) when the
+                    player turns the 语音 volume up (docs/ASSETS.md "Voice lines")
   --help            this text`;
 
 /**
  * Parse CLI flags.
  * @param {string[]} argv
- * @returns {{concurrency:number, force:boolean, offline:boolean, dryRun:boolean, refreshIndex:boolean, prune:boolean, allowShrink:boolean, localSpines:boolean, help:boolean}}
+ * @returns {{concurrency:number, force:boolean, offline:boolean, dryRun:boolean, refreshIndex:boolean, prune:boolean, allowShrink:boolean, localSpines:boolean, voices:boolean, help:boolean}}
  */
 export function parseArgs(argv) {
-  const o = { concurrency: 16, force: false, offline: false, dryRun: false, refreshIndex: false, prune: false, allowShrink: false, localSpines: false, help: false };
+  const o = { concurrency: 16, force: false, offline: false, dryRun: false, refreshIndex: false, prune: false, allowShrink: false, localSpines: false, voices: false, help: false };
   for (const a of argv) {
     const [k, v] = a.split('=');
     if (k === '--concurrency') o.concurrency = Math.max(1, Math.min(64, parseInt(v, 10) || 16));
@@ -80,6 +86,7 @@ export function parseArgs(argv) {
     else if (k === '--prune') o.prune = true;
     else if (k === '--allow-shrink') o.allowShrink = true;
     else if (k === '--local-spines') o.localSpines = true;
+else if (k === '--voices') o.voices = true;
     else if (k === '--help' || k === '-h') o.help = true;
     else throw new Error(`unknown option ${a}\n${HELP}`);
   }
@@ -95,13 +102,20 @@ export function parseArgs(argv) {
  * @param {{allowShrink?:boolean, prune?:boolean}} opts
  * @returns {{dropped:string[], write:boolean}}
  */
-export function shrinkGuard(prev, next, { allowShrink = false, prune = false } = {}) {
+export function shrinkGuard(prev, next, { allowShrink = false, prune = false, optIn = OPT_IN_SECTIONS } = {}) {
   const dropped = prev ? droppedEntries(prev, next) : [];
-  return { dropped, write: dropped.length === 0 || !!allowShrink || !!prune };
+  // The guard exists to catch an ACCIDENTAL loss (a failed download, a changed mapping). A section that only exists
+  // when the run asks for it is not one: `audio.voice` is written by `--voices`, so a plain `npm run assets` after a
+  // voice run drops it on purpose. The full list still goes into the report.
+  const lost = dropped.filter((p) => !optIn.some((s) => p === s || p.startsWith(`${s}.`)));
+  return { dropped, lost, write: lost.length === 0 || !!allowShrink || !!prune };
 }
 
 const mb = (n) => `${(n / 1048576).toFixed(1)} MB`;
 const log = (m) => console.log(m);
+
+/** Manifest sections that exist only when the run asked for them, so their absence is not a loss (see shrinkGuard). */
+export const OPT_IN_SECTIONS = Object.freeze(['audio.voice']);
 
 async function readJson(rel) {
   const p = join(ROOT, rel);
@@ -234,9 +248,25 @@ async function main() {
     extraHandbook,
     localEnemySpines,
   });
+  // Opt-in voice lines (角色语音台词, --voices): the manifest gains `audio.voice[charId][slot] = [url, …]` and the
+  // download list its files. WITHOUT the flag nothing changes at all — no 11 MB index download, no manifest key, no
+  // files on disk — which is why the section may also disappear again without tripping the shrink guard.
+  if (opts.voices) {
+    const charword = await loadCharword(ROOT, { refresh: opts.refreshIndex && !opts.offline, offline: opts.offline, log });
+    const vp = planVoices({ charIds: Object.keys(assets07.operators || {}), charword, aa2voice: RAW.aa2voice });
+    const voiceLeaves = {};
+    for (const [charId, slots] of Object.entries(vp.voice)) {
+      const perChar = {};
+      for (const [slot, pairs] of Object.entries(slots)) {
+        perChar[slot] = pairs.map((p) => leaf(alt(p.rel, p.url))).filter(Boolean);
+      }
+      voiceLeaves[charId] = perChar;
+    }
+    (plan.template.audio ??= {}).voice = voiceLeaves;
+    log(`[voices] ${vp.files.length} files for ${vp.chars} operators`);
+  }
   const leaves = collectLeaves(plan.template);
-  log(`[plan] ${leaves.length} files + ${plan.models.size} Spine models ` +
-    `(${Object.keys(plan.template.chars).length} chars, ${Object.keys(plan.template.enemies).length} enemies, ` +
+  log(`[plan] ${leaves.length} files + ${plan.models.size} Spine models ` +    `(${Object.keys(plan.template.chars).length} chars, ${Object.keys(plan.template.enemies).length} enemies, ` +
     `${Object.keys(plan.template.tokens).length} tokens, ${Object.keys(plan.template.ui).length} UI sprites, ` +
     `${Object.keys(plan.template.audio.sfx.units).length} units with SFX)`);
   if (opts.dryRun) {
@@ -288,6 +318,8 @@ async function main() {
     try { current = JSON.parse(await readFile(MANIFEST, 'utf8')); } catch (e) { log(`[manifest] the current ${relative(ROOT, MANIFEST)} is unreadable (${e.message}): replaced`); }
   }
   const guard = shrinkGuard(current, manifest, opts);
+  if (guard.lost?.length) log(`[manifest] ${guard.lost.length} entries would be dropped (see droppedEntries below)`);
+  else if (guard.dropped.length && opts.voices !== true) log(`[manifest] only the opt-in voice section is absent (${guard.dropped.length} paths) — not a loss`);
   if (guard.write) await writeJsonAtomic(MANIFEST, manifest);
 
   // Orphans: files on disk that the manifest does not reference (e.g. after a mapping change). public/assets/local/**

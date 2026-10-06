@@ -23,6 +23,7 @@ npm run assets       # = node tools/vendor.mjs && node tools/fetch-assets.mjs
 | `--prune` | Delete files under `public/assets/` that the manifest no longer references, for example after a mapping change. Without this flag they are only listed in the report. `public/assets/local/` (written by `tools/local-extract`) is never pruned. Implies `--allow-shrink`. |
 | `--allow-shrink` | Write `data/assets.json` even when it loses entries the current one has (see "The manifest never shrinks by accident" below). |
 | `--local-spines` | Rewrite `tools/assets/local-enemy-spines.json` (the metadata of the enemy models only the local client has, see "Enemy aliases") from the models `tools/local-extract/extract.py` extracted to `public/assets/local/spine/enemy/`. Run it after a game update changed them; without it the committed file is used and a differing extraction only gets a warning. |
+| `--voices` | Also fetch the operators' **voice lines** (角色语音台词, ~1 MB per operator, ~138 MB in total): needs the 11 MB `charword_table.json` index, adds `audio.voice` to the manifest and downloads to `public/assets/audio/voice_cn/`. Off by default — see "Voice lines" below. |
 
 **The manifest never shrinks by accident.** An entry whose files are missing on this machine is left out of a rebuilt
 manifest, so a run where some downloads failed (or whose upstream audio / model index lost them) would drop entries that
@@ -86,6 +87,7 @@ The research JSONs in `docs/research/` (03, 05, 07) define **which** ids are nee
 | Enemy Spine that no dump carries (灼热源石虫 / 炽焰源石虫) | the local client only (`tools/local-extract/extract.py ENEMY_SPINES`, optional); never downloaded and never required: an overlay of the web alias (`enemies[id].spineLocal`) | `local/spine/enemy/{enemyId}/{stem}.*` (listed in `data/local-assets.json`) |
 | BGM | AA2 `voice` branch `audio/sound_beta_2/music/**` | `audio/bgm/{file}.mp3` |
 | SFX (UI, battle, per unit) | AA2 `voice` `audio/sound_beta_2/**`, mapped from `audio_data.json` banks | `audio/sfx/{same sub-path}.mp3` |
+| Voice lines (optional, `--voices`) | AA2 `voice` `audio/sound_beta_2/voice_cn/**`, indexed by `charword_table.json` | `audio/voice_cn/{charId}/{cn_NNN}.mp3` |
 | Fonts: Bender Regular and Light, Novecento Wide | TimWangZi/The-font-of-Arknights | `public/fonts/*.{otf,ttf,woff2}`, `public/fonts/fonts.css` |
 
 The `stem` of a Spine model is the upstream file name. Two examples: `char_107_liskam` has the stem `char_107_liskarm`, and `enemy_9032_aclionk` uses `enemy_1559_vtlionk`. The skel and atlas of a model always share one stem. pixi-spine locates the atlas by swapping the extension, so this matters.
@@ -286,6 +288,50 @@ Other renderer rules from research 07 §5.4–5.5:
     round. A 2026-10-03 audit of every enemy of `data/enemies.json` (249) against the client's battle prefabs (the
     skeleton each prefab's Spine renderer draws) found no other enemy drawn with another enemy's model; 伊利昂的木驮兽
     (`enemy_10159_mntrjn`) starts on its `Full` skin (five passengers) in the game and is drawn with the `default` one.
+
+### Voice lines (角色语音台词, `--voices`)
+
+The operators' spoken lines are the one audio class that is **opt-in twice over**, and the interface is deliberately
+larger than the feature: a source install, a release bundle and a running game all work exactly as before until someone
+asks for them.
+
+```bash
+node tools/fetch-assets.mjs --voices            # ~2000 files / ~138 MB, cached index .cache/gamedata/excel/charword_table.json
+npm run start                                   # then turn 设置 → 干员语音 (VOICE) up in the game
+```
+
+- **Nothing changes without the flag**: no 11 MB index download, no `audio.voice` key in the manifest, no files under
+  `public/assets/audio/voice_cn/`. `tools/assets/voices.mjs` is the whole mapping layer.
+- The manifest shape is `audio.voice[charId][slot] = [url, …]` — an **array**, because the official data has several
+  recordings of the same moment (选中干员1/2, 部署1/2, 作战中1–4 …) and the client picks one, never the same twice in a row.
+
+| Slot | Official line | `voiceTitle` (and the id it sits on) |
+|---|---|---|
+| `start` | before the battle | 行动出发 (CN_019), 行动开始 (CN_020) |
+| `select` | the player taps the unit | 选中干员1/2 (CN_021, CN_022) |
+| `deploy` | the unit is placed | 部署1/2 (CN_023, CN_024) |
+| `battle` | during the fight | 作战中1–4 (CN_025–CN_028) |
+| `win` | the battle went well | 完成高难行动 (CN_029), 3星结束行动 (CN_030), 非3星结束行动 (CN_031) |
+| `lose` | the battle was lost | 行动失败 (CN_032) |
+
+The mapping is keyed by `voiceTitle`, not by `voiceType`: in the real index (`charword_table.json`, 18 237 entries)
+**every** `voiceType` is `ONLY_TEXT`, so it carries no grouping at all. The ids above are stable, and research 07 §6.4's
+`[ASSUMED]` note (cn_021/022 选中干员, cn_023/024 部署, cn_025–028 作战中) is confirmed by these titles. Lines that are
+not a battle moment (交谈 / 闲置 / 干员报到 / 任命助理 / 戳一下 …) are deliberately **not** put in the manifest.
+
+Two data details that are easy to get wrong (both are tested):
+
+- **`#` in an asset name.** 673 assets are skin variants (`char_113_cqbw_epoque#7/CN_019`). Upstream really has the `#`,
+  and a raw `#` in a URL is a fragment delimiter — measured: `…/char_113_cqbw_epoque%237/cn_019.mp3` → 200,
+  `…/char_113_cqbw_epoque#7/cn_019.mp3` → 404. So the **URL is percent-encoded** (`encodePath`) while the **local name is
+  sanitised** (`safeName` → `…_epoque_7`), which keeps the manifest's `/assets/…` URL free of escapes.
+- **Coverage.** 120 of the 138 pool operators have in-battle lines; the 18 without (backup operators such as
+  `char_616_pithst`) simply get no entry. Nothing falls back to another operator — a wrong voice is worse than silence.
+
+Client side (`public/js/audio.js`): `audio.voice(charId, slot)` plays one line through its own `voice` channel
+(`settings.voice`, **default 0 = off**, separate from SFX so muting one keeps the other), at most `VOICE_MAX` at once and
+at most one line per unit per `VOICE_GAP_MS`. It is a silent `false` when the channel is down, the context is still
+locked, the operator has no line or the unit is still on its gap — and it never throws, like the rest of the manager.
 
 ### Other fallbacks
 

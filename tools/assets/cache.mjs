@@ -1,6 +1,7 @@
 // Cached upstream JSON indexes needed by the asset pipeline:
-//   .cache/gamedata/excel/audio_data.json  (Kengxxiao/ArknightsGameData, zh_CN)
-//   .cache/ark-models/models_data.json      (isHarryh/Ark-Models enemy Spine index)
+//   .cache/gamedata/excel/audio_data.json      (Kengxxiao/ArknightsGameData, zh_CN)
+//   .cache/ark-models/models_data.json         (isHarryh/Ark-Models enemy Spine index)
+//   .cache/gamedata/excel/charword_table.json  (voice lines — only with fetch-assets --voices, see loadCharword)
 // Downloaded once when missing (or with --refresh-index), then reused.
 
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
@@ -67,4 +68,23 @@ export async function loadIndexes(root, opts = {}) {
     log: opts.log,
   });
   return { audioData, modelsData };
+}
+
+/**
+ * Load charword_table.json — the official voice-line index (11 MB, one entry per recorded line).
+ *
+ * Deliberately NOT part of `loadIndexes`: only the opt-in voice pipeline (`fetch-assets --voices`) needs it, and every
+ * other run would otherwise pay 11 MB of download for nothing.
+ * @param {string} root project root
+ * @param {{refresh?:boolean, offline?:boolean, log?:(m:string)=>void}} [opts]
+ * @returns {Promise<any>}
+ */
+export async function loadCharword(root, opts = {}) {
+  return cachedJson({
+    cacheFile: join(root, '.cache', 'gamedata', 'excel', 'charword_table.json'),
+    url: RAW.gamedata + 'excel/charword_table.json',
+    refresh: opts.refresh,
+    offline: opts.offline,
+    log: opts.log,
+  });
 }

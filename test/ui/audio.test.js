@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bgmKeyFor, resolveBgm, SfxLimiter, AudioManager, normalAttackSfx } from '../../public/js/audio.js';
+import { bgmKeyFor, resolveBgm, SfxLimiter, AudioManager, normalAttackSfx, pickVoiceLine } from '../../public/js/audio.js';
 import { mediaUrl } from '../../public/js/media.js';
 import { PHASE } from '../../shared/constants.js';
 
@@ -122,7 +122,7 @@ describe('AudioManager', () => {
     assert.equal(a.unit('char_x', 'attack', 1), false);
     a.handleBattleEvents([['atk', 1, 2, 'arrow'], 'junk', null]);
     a.setVolumes({ bgm: 5, sfx: -1, muted: true });
-    assert.deepEqual(a.volumes, { bgm: 1, sfx: 0, muted: true });
+    assert.deepEqual(a.volumes, { bgm: 1, sfx: 0, voice: 0, muted: true });
     assert.equal(a.unlocked, false);
   });
   test('unlocks on the first gesture, then plays BGM and SFX from the manifest', async () => {
@@ -291,6 +291,68 @@ describe('AudioManager', () => {
 // user playtest #4 item 6: 纯烬艾雅法拉's skill sound rang outside her skill — her manifest `hit` is her S3 impact
 // (p_imp_gtshpbrnch_s, the audio bank ON_ABILITY_HIT.attack.2) and every damage on an ally she had just healed was
 // attributed to her ('atk' healer → ally), so ordinary enemy hits on healed allies played it.
+describe('voice lines (角色语音台词): opt-in, quiet by default, never throws', () => {
+  test('pickVoiceLine: deterministic, and never the same line twice in a row', () => {
+    const l = ['a', 'b', 'c', 'd'];
+    assert.equal(pickVoiceLine(['only'], null, 0.9), 'only', 'a single recording always plays');
+    assert.equal(pickVoiceLine(l, null, 0), 'a');
+    assert.equal(pickVoiceLine(l, null, 0.5), 'c');
+    assert.equal(pickVoiceLine(l, null, 0.9999), 'd');
+    assert.equal(pickVoiceLine(l, 'c', 0.5), 'd', 'the same line steps aside');
+    assert.equal(pickVoiceLine(l, 'd', 0.9999), 'a', '…and wraps');
+    assert.equal(pickVoiceLine([], null, 0.5), null);
+    assert.equal(pickVoiceLine(null, null, 0.5), null);
+    assert.equal(pickVoiceLine(l, null, Number.NaN), 'a', 'a broken roll still yields a line');
+    assert.equal(pickVoiceLine(l, null, -3), 'a', 'out-of-range rolls clamp');
+  });
+
+  test('off by default: volume 0, no manifest entry, no context — all silent, all false', () => {
+    const a = new AudioManager({ win: null, getManifest: () => null });
+    assert.equal(a.volumes.voice, 0, 'the voice channel starts at 0 (the lines are opt-in)');
+    assert.equal(a.voice('char_1012_skadi2', 'deploy'), false, 'no manifest at all');
+    const b = new AudioManager({ win: null, getManifest: () => ({ audio: { voice: { char_x: { deploy: ['/assets/audio/voice_cn/char_x/cn_023.mp3'] } } } }) });
+    assert.equal(b.voice('char_x', 'deploy'), false, 'volume still 0 → silent');
+    b.setVolumes({ voice: 0.5 });
+    assert.equal(b.voice('char_x', 'deploy'), false, 'no AudioContext yet (no gesture) → dropped, and it says so');
+    assert.equal(b.voice('char_missing', 'deploy'), false, 'unknown operator');
+    assert.equal(b.voice('char_x', 'lose'), false, 'slot the manifest does not have');
+    assert.equal(b.voice(null, 'deploy'), false);
+    b.setVolumes({ muted: true });
+    assert.equal(b.voice('char_x', 'deploy'), false, 'muted');
+  });
+
+  test('with the channel up and a line in the manifest it starts, plays at most one per unit gap, and fetches the file', async () => {
+    const fw = fakeWindow();
+    const origFetch = globalThis.fetch;
+    const urls = [];
+    globalThis.fetch = async (u) => { urls.push(u); return { ok: true, arrayBuffer: async () => new ArrayBuffer(8) }; };
+    try {
+      const list = ['/assets/audio/voice_cn/char_x/cn_023.mp3', '/assets/audio/voice_cn/char_x/cn_024.mp3'];
+      const a = new AudioManager({ win: fw.win, getManifest: () => ({ audio: { voice: { char_x: { deploy: list } } } }) });
+      a.install();
+      a.setVolumes({ voice: 0.8, sfx: 0 });
+      assert.equal(a.voice('char_x', 'deploy'), false, 'locked context: still nothing');
+      fw.fire('pointerdown');
+      assert.equal(a.unlocked, true);
+      assert.equal(a.voice('char_x', 'deploy'), true, 'starts now');
+      await new Promise((r) => setTimeout(r, 10));
+      assert.ok(asked(urls, list[0]) || asked(urls, list[1]), `fetched a line: ${urls.join(', ')}`);
+      assert.equal(a.voice('char_y', 'deploy'), false, 'a different unit has no line');
+      // the per-unit gap: the same unit cannot talk again immediately (it would stack over itself)
+      assert.equal(a.voice('char_x', 'deploy'), false, 'still on its gap');
+      // SFX volume 0 must not silence the voice channel — they are separate gains
+      assert.equal(a.volumes.sfx, 0);
+      assert.ok(a.voiceGain, 'the voice channel has its own gain node');
+      // and it never throws on nonsense
+      a.voice('char_x', 42);
+      a.voice({}, 'deploy');
+      a.voice('char_x', null);
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+});
+
 describe('impact sounds (user playtest #4 item 6)', () => {
   const AGOAT2 = 'char_1016_agoat2';
   async function rig(units) {

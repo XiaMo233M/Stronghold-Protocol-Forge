@@ -38,6 +38,9 @@ import { PHASE } from '../../shared/constants.js';
 import { mediaUrl } from './media.js';
 
 const MAX_VOICES = 8;
+/** Voice lines (角色语音台词): at most this many play at once, and one unit speaks at most once per gap. */
+const VOICE_MAX = 3;
+const VOICE_GAP_MS = 900;
 const UNIT_COOLDOWN_MS = 160;
 const URL_GAP_MS = 45;
 const MAX_PER_URL = 2;
@@ -54,6 +57,27 @@ const IMPACT_WINDOW_MS = 2500;
 const SKILL_MODE_FILE = /_(d|h|s)\d*\.mp3$/i;
 
 // ---- pure helpers (unit-tested) -----------------------------------------------------------------------
+
+/**
+ * Pick one line out of a slot's list, never the same one twice in a row (`last` is the URL played before).
+ *
+ * A slot usually holds 2–8 recordings of the same moment (选中干员1/2, 作战中1–4, 部署1/2 …): the official data has
+ * several takes for one moment, and hearing the same one every time a unit is tapped is the tell of a cheap port.
+ * @param {string[]} list non-empty list of URLs
+ * @param {string|null|undefined} last URL played for this unit last time
+ * @param {number} r a 0..1 roll (the manager's `random`); 0 is a valid value
+ * @returns {string|null}
+ */
+export function pickVoiceLine(list, last, r) {
+  if (!Array.isArray(list) || !list.length) return null;
+  if (list.length === 1) return list[0];
+  const roll = Number.isFinite(r) ? Math.min(0.999999, Math.max(0, r)) : 0;
+  const i = Math.floor(roll * list.length);
+  const picked = list[i];
+  // The same line twice in a row: step to the next one (still deterministic from `r`, so it is testable).
+  if (picked === last) return list[(i + 1) % list.length];
+  return picked;
+}
 
 /**
  * BGM key for a route + match phase.
@@ -266,11 +290,15 @@ export class AudioManager {
     this.master = null;
     this.bgmGain = null;
     this.sfxGain = null;
-    this.volumes = { bgm: 0.6, sfx: 0.8, muted: false };
+    this.voiceGain = null;
+    this.volumes = { bgm: 0.6, sfx: 0.8, voice: 0, muted: false };   // voice 0 = the voice lines are OFF
     this.buffers = new Map(); // url → Promise<AudioBuffer|null> (insertion order = LRU)
     this.warned = new Set();
     this.limiter = new SfxLimiter();
     this.uiVoices = 0;
+    this.voiceVoices = 0;     // voice lines playing right now (VOICE_MAX)
+    this.voiceAt = new Map(); // charId → performance.now() of its last line (VOICE_GAP_MS)
+    this.voiceLast = new Map(); // charId → the URL it said last (do not repeat it)
     this.wantBgm = null;      // desired key (kept while locked)
     this.bgm = null;          // { key, loopUrl, nodes: [{src, gain}], gain }
     this.bgmToken = 0;
@@ -322,8 +350,10 @@ export class AudioManager {
       this.master = this.ctx.createGain();
       this.bgmGain = this.ctx.createGain();
       this.sfxGain = this.ctx.createGain();
+      this.voiceGain = this.ctx.createGain();
       this.bgmGain.connect(this.master);
       this.sfxGain.connect(this.master);
+      this.voiceGain.connect(this.master);
       this.master.connect(this.ctx.destination);
       // iOS / iPadOS: a call, Siri or another app's audio moves a running context to 'interrupted' (or 'suspended');
       // a resume without a gesture may then be refused — listen for the next gesture again (dropped once it runs)
@@ -392,12 +422,17 @@ export class AudioManager {
   }
 
   /**
-   * Set channel volumes (0..1) and mute.
-   * @param {{ bgm?: number, sfx?: number, muted?: boolean }} v
+   * Set channel volumes (0..1) and mute. `voice` 0 keeps the voice lines silent (they are opt-in, docs/ASSETS.md).
+   * @param {{ bgm?: number, sfx?: number, voice?: number, muted?: boolean }} v
    */
   setVolumes(v) {
     const n = (x, d) => (Number.isFinite(x) ? Math.max(0, Math.min(1, x)) : d);
-    this.volumes = { bgm: n(v?.bgm, this.volumes.bgm), sfx: n(v?.sfx, this.volumes.sfx), muted: typeof v?.muted === 'boolean' ? v.muted : this.volumes.muted };
+    this.volumes = {
+      bgm: n(v?.bgm, this.volumes.bgm),
+      sfx: n(v?.sfx, this.volumes.sfx),
+      voice: n(v?.voice, this.volumes.voice),
+      muted: typeof v?.muted === 'boolean' ? v.muted : this.volumes.muted,
+    };
     this._applyVolumes();
   }
 
@@ -409,6 +444,7 @@ export class AudioManager {
       // perceptual curve
       this.bgmGain.gain.setTargetAtTime(this.volumes.bgm ** 2 * 0.55, t, 0.05);
       this.sfxGain.gain.setTargetAtTime(this.volumes.sfx ** 2 * 0.9, t, 0.03);
+      this.voiceGain?.gain.setTargetAtTime(this.volumes.voice ** 2 * 1.1, t, 0.03);
     } catch { /* ignore */ }
   }
 
@@ -535,13 +571,22 @@ export class AudioManager {
 
   // ---- SFX ------------------------------------------------------------------------------------------------
 
-  _play(url, { volume = 1, rate = 1, limited = false, unitKey = null } = {}) {
-    if (!this.ctx || !url || this.volumes.muted || this.volumes.sfx <= 0) return;
+  _play(url, { volume = 1, rate = 1, limited = false, unitKey = null, channel = 'sfx' } = {}) {
+    const voice = channel === 'voice';
+    const chan = voice ? this.volumes.voice : this.volumes.sfx;
+    if (!this.ctx || !url || this.volumes.muted || !(chan > 0)) return;
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    if (limited) { if (!this.limiter.tryAcquire(now, unitKey, url)) return; }
+    if (voice) {
+      if (this.voiceVoices >= VOICE_MAX) return;
+      this.voiceVoices += 1;
+    } else if (limited) { if (!this.limiter.tryAcquire(now, unitKey, url)) return; }
     else if (this.uiVoices >= 12) return;
     else this.uiVoices += 1;
-    const release = () => { if (limited) this.limiter.release(url); else this.uiVoices = Math.max(0, this.uiVoices - 1); };
+    const release = () => {
+      if (voice) this.voiceVoices = Math.max(0, this.voiceVoices - 1);
+      else if (limited) this.limiter.release(url);
+      else this.uiVoices = Math.max(0, this.uiVoices - 1);
+    };
     this._buffer(url).then((buf) => {
       if (!buf || !this.ctx) { release(); return; }
       try {
@@ -550,7 +595,7 @@ export class AudioManager {
         s.playbackRate.value = rate;
         const g = this.ctx.createGain();
         g.gain.value = Math.max(0, Math.min(1.5, volume));
-        s.connect(g); g.connect(this.sfxGain);
+        s.connect(g); g.connect(voice ? this.voiceGain : this.sfxGain);
         let done = false;
         const end = () => { if (!done) { done = true; release(); try { g.disconnect(); } catch { /* ignore */ } } };
         s.onended = end;
@@ -558,6 +603,39 @@ export class AudioManager {
         s.start();
       } catch { release(); }
     }, release);
+  }
+
+  /**
+   * An operator's voice line for an in-battle moment (角色语音台词 — docs/ASSETS.md "Voice lines").
+   *
+   * OPT-IN, twice over, and a no-op when either gate is shut:
+   *   * the install has to have fetched them (`npm run assets -- --voices`) — without the manifest's `audio.voice`
+   *     entry every call returns false immediately and the game is exactly as before;
+   *   * the player has to have the 语音 volume above 0 (settings `voice`, default 0 = OFF).
+   *
+   * A slot holds every recording of that moment, and `pickVoiceLine` avoids playing the same one twice in a row. One
+   * unit speaks at most once per VOICE_GAP_MS, at most VOICE_MAX speak at once, and a line that arrives while the
+   * AudioContext is still locked (no gesture yet) is dropped like the SFX are. Never throws.
+   * @param {string} charId operator id, e.g. `char_1012_skadi2`
+   * @param {'start'|'select'|'deploy'|'battle'|'win'|'lose'} slot when it is said
+   * @returns {boolean} whether a line started
+   */
+  voice(charId, slot) {
+    try {
+      if (!(this.volumes.voice > 0) || this.volumes.muted) return false;
+      if (!this.ctx) return false;   // no gesture yet: a voice line is dropped (like SFX), so say so
+      if (typeof charId !== 'string' || !charId) return false;
+      const list = this.getManifest()?.audio?.voice?.[charId]?.[slot];
+      if (!Array.isArray(list) || !list.length) return false;
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (now - (this.voiceAt.get(charId) ?? -Infinity) < VOICE_GAP_MS) return false;
+      const url = pickVoiceLine(list, this.voiceLast.get(charId) ?? null, this.random());
+      if (!url) return false;
+      this.voiceAt.set(charId, now);
+      this.voiceLast.set(charId, url);
+      this._play(url, { volume: 1, channel: 'voice' });
+      return true;
+    } catch { return false; }
   }
 
   /**

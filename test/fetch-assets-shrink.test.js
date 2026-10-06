@@ -64,8 +64,22 @@ test('fetch-assets shrink guard: the committed manifest minus some audio entries
   const grown = JSON.parse(JSON.stringify(prev));
   grown.chars.char_new_test = { avatar: '/x.png' };
   grown.stats.files += 1;
-  assert.deepEqual(shrinkGuard(prev, grown, parseArgs([])), { dropped: [], write: true }, 'a manifest that only grows is written');
-  assert.deepEqual(shrinkGuard(null, next, parseArgs([])), { dropped: [], write: true }, 'no current manifest: written');
+  assert.deepEqual(shrinkGuard(prev, grown, parseArgs([])), { dropped: [], lost: [], write: true }, 'a manifest that only grows is written');
+  assert.deepEqual(shrinkGuard(null, next, parseArgs([])), { dropped: [], lost: [], write: true }, 'no current manifest: written');
+  // The opt-in voice section (`--voices`) is NOT a loss when a plain run leaves it out: it stays in the report, but it
+  // must not block the write — otherwise every `npm run assets` after a voice run would exit 1 (docs/ASSETS.md).
+  const withVoice = JSON.parse(JSON.stringify(grown));
+  withVoice.audio = { ...withVoice.audio, voice: { char_test_1: { deploy: ['/assets/audio/voice_cn/char_test_1/cn_023.mp3'] } } };
+  const off = shrinkGuard(withVoice, grown, parseArgs([]));
+  assert.deepEqual(off.dropped, ['audio.voice.char_test_1.deploy'], 'the report still names what is gone');
+  assert.deepEqual(off.lost, [], 'but nothing blocks the write');
+  assert.equal(off.write, true, 'a plain run after --voices writes the manifest');
+  // A real asset is still guarded: dropping it must block, even next to the opt-in section.
+  const reallyLost = JSON.parse(JSON.stringify(withVoice));
+  delete reallyLost.chars[Object.keys(reallyLost.chars)[0]];
+  const blocked = shrinkGuard(withVoice, reallyLost, parseArgs([]));
+  assert.ok(blocked.lost.length > 0, `a real loss still blocks: ${blocked.lost.join(', ')}`);
+  assert.equal(blocked.write, false);
   assert.equal(parseArgs(['--allow-shrink']).allowShrink, true);
   assert.throws(() => parseArgs(['--allow-shrinks']), /unknown option/);
   assert.equal(statSync(MANIFEST).mtimeMs, before, 'importing the tool runs nothing');
