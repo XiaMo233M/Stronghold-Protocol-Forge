@@ -161,6 +161,65 @@ describe('make-windows-bundle.mjs: PowerShell 单引号转义', () => {
   });
 });
 
+describe('make-windows-bundle.mjs: 包根的两个双击入口（游戏 + 编辑器）', () => {
+  test('两个 .bat 都在，且各自指向正确的入口', async () => {
+    const { bundleLaunchers } = await mod('scripts/make-windows-bundle.mjs');
+    const l = bundleLaunchers();
+    assert.deepEqual(Object.keys(l).sort(), ['启动编辑器.bat', '启动游戏.bat'].sort(), '本仓库是 Forge：编辑器必须有它自己的入口');
+    assert.match(l['启动游戏.bat'], /app\\scripts\\launch\.mjs/, '游戏走 scripts/launch.mjs');
+    assert.match(l['启动游戏.bat'], /--no-setup/, '素材已在包内，不再跑 setup');
+    assert.match(l['启动编辑器.bat'], /app\\tools\\workshop-editor\.mjs/, '编辑器走 tools/workshop-editor.mjs');
+    assert.match(l['启动编辑器.bat'], /--open\b/, '双击就该看见界面');
+    assert.ok(!/--no-setup/.test(l['启动编辑器.bat']), '编辑器不碰素材，没有 setup 这回事');
+  });
+
+  test('两个入口都优先用包内便携 Node，并带上命令行参数，结束码非 0 时暂停', async () => {
+    const { bundleLaunchers, bat } = await mod('scripts/make-windows-bundle.mjs');
+    const text = Object.values(bundleLaunchers()).map((body) => bat(body)).join('\n');
+    assert.match(text, /%HERE%node\\node\.exe/, '先找包内 node.exe');
+    assert.match(text, /set "NODE=node"/, '没有便携 Node 时退回 PATH 上的 node');
+    assert.match(text, /%\*/, '透传参数（换端口 / 换工坊目录）');
+    assert.match(text, /if not "%CODE%"=="0" pause/, '失败时停住窗口，双击的人能看见错误');
+  });
+
+  test('包内说明写明编辑器入口、端口与「保存后要重启服务器」', async () => {
+    const { bundleReadme } = await mod('scripts/make-windows-bundle.mjs');
+    for (const withNode of [true, false]) {
+      const r = bundleReadme({ version: 'v22.23.3', withNode });
+      assert.match(r, /启动编辑器\.bat/, `withNode=${withNode}: 说明要给出编辑器入口`);
+      assert.match(r, /127\.0\.0\.1:3311/, `withNode=${withNode}: 要写明默认地址`);
+      assert.match(r, /重启游戏服务器/, `withNode=${withNode}: 保存后需重启服务器才生效`);
+      assert.match(r, /app\\docs\\prompts/, `withNode=${withNode}: 官方 prompt 的位置`);
+      assert.match(r, /app\\workshop/, `withNode=${withNode}: 只写 workshop/ 与 data/support.json`);
+      assert.match(r, /启动编辑器\.bat --port 3400/, `withNode=${withNode}: 换端口的方式`);
+    }
+  });
+});
+
+describe('仓库里的启动脚本：编辑器与游戏各一份，一键可用', () => {
+  test('编辑器脚本（Windows / POSIX）都存在并调用 workshop-editor + --open', () => {
+    const win = fs.readFileSync(path.join(ROOT, 'scripts/start-editor-windows.bat'), 'utf8');
+    const sh = fs.readFileSync(path.join(ROOT, 'scripts/start-editor.sh'), 'utf8');
+    for (const [name, t] of [['start-editor-windows.bat', win], ['start-editor.sh', sh]]) {
+      assert.match(t, /tools[\\/]workshop-editor\.mjs/, `${name}: 调用编辑器入口`);
+      assert.match(t, /--open/, `${name}: 打开浏览器`);
+      assert.match(t, /node_modules[\\/]ws[\\/]package\.json/, `${name}: 首次运行装依赖`);
+      assert.match(t, /%22|22/, `${name}: 检查 Node 版本`);
+      assert.ok(!/launch\.mjs/.test(t), `${name}: 不该去启动游戏服务器`);
+    }
+    assert.match(win, /--port 3400/, '端口被占用时给出换端口的提示');
+  });
+
+  test('游戏脚本仍然是「一键开服」，两个脚本互不冒充', () => {
+    const win = fs.readFileSync(path.join(ROOT, 'scripts/start-windows.bat'), 'utf8');
+    const sh = fs.readFileSync(path.join(ROOT, 'scripts/start.sh'), 'utf8');
+    for (const [name, t] of [['start-windows.bat', win], ['start.sh', sh]]) {
+      assert.match(t, /scripts[\\/]launch\.mjs/, `${name}: 走游戏启动器`);
+      assert.ok(!/workshop-editor/.test(t), `${name}: 不是编辑器脚本`);
+    }
+  });
+});
+
 describe('make-windows-bundle.mjs: 素材整树复制', () => {
   test('copyDir 跳过点开头的条目（打包机器自己的 .DS_Store）与符号链接', async () => {
     const { copyDir } = await mod('scripts/make-windows-bundle.mjs');

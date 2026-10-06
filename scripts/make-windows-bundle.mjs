@@ -8,10 +8,11 @@
 //   node\LICENSE-node.txt    Node 自己的许可证（和 node.exe 一起从官方 zip 里取出来）
 //   app\                     游戏本体：**只收 git 跟踪的文件** + 生产依赖 + 素材，离线可玩
 //   启动游戏.bat             app\scripts\launch.mjs --no-setup
+//   启动编辑器.bat           app\tools\workshop-editor.mjs --open（工坊编辑器 = 本仓库存在的理由）
 //   README-开箱即用.md       给玩家看的说明（含非官方 / 严禁盈利 / 素材版权声明）
 //   LICENSE / NOTICE.md / THIRD-PARTY-NOTICES.md
 //
-// 目标机器什么都不用装：解压 → 双击 启动游戏.bat。素材约 330 MB 是硬成本，包因此较大。
+// 目标机器什么都不用装：解压 → 双击 启动游戏.bat（或 启动编辑器.bat）。素材约 330 MB 是硬成本，包因此较大。
 //
 // 三条硬规则（都是踩过的坑）：
 //   1. app\ 的文件清单来自 `git ls-files`，不是手写的跳过表 —— `.env` / `.venv` / `.claude` /
@@ -387,9 +388,24 @@ async function extractPortableNode(bundleNodeDir, version, zipPath) {
   }
 }
 
-/** 启动 .bat（内容保持纯 ASCII，中文只出现在文件名里）。 */
-function bat(body) {
+/** 启动 .bat（内容保持纯 ASCII，中文只出现在文件名里）。导出是为了让测试盯住 `%NODE%` 的解析。 */
+export function bat(body) {
   return `@echo off\r\nchcp 65001 >nul\r\nsetlocal\r\nset "HERE=%~dp0"\r\nset "NODE="\r\nif exist "%HERE%node\\node.exe" set "NODE=%HERE%node\\node.exe"\r\nif not defined NODE set "NODE=node"\r\n${body}\r\nset "CODE=%ERRORLEVEL%"\r\nif not "%CODE%"=="0" pause\r\nexit /b %CODE%\r\n`;
+}
+
+/**
+ * 包根那两个双击入口：文件名 → `bat()` 里的命令体。
+ *
+ * **两个都要有，因为本仓库是 Forge**：编辑器就是产品，只给 `启动游戏.bat` 等于把仓库存在的理由留在包里没人看得见。
+ * 游戏那份带 `--no-setup`（素材已经在包里，不需要联网准备）；编辑器那份带 `--open`（双击就该看见界面），
+ * 它不碰素材，所以没有 setup 这一步。两份都用包内便携 Node（`%NODE%` 由 `bat()` 解析）。
+ * @returns {Record<string, string>}
+ */
+export function bundleLaunchers() {
+  return {
+    '启动游戏.bat': '"%NODE%" "%HERE%app\\scripts\\launch.mjs" --no-setup %*',
+    '启动编辑器.bat': '"%NODE%" "%HERE%app\\tools\\workshop-editor.mjs" --open %*',
+  };
 }
 
 /**
@@ -404,12 +420,14 @@ export function bundleReadme({ version, withNode }) {
   const tree = withNode
     ? `node\\node.exe            便携版 Node ${version}（官方 x64，已经 sha256 校验）
 node\\LICENSE-node.txt    Node 自己的许可证（MIT）
-app\\                    游戏本体：server / shared / public（全部素材）/ data / scripts / tools
-启动游戏.bat             app\\scripts\\launch.mjs --no-setup
+app\\                    游戏本体：server / shared / public（全部素材）/ data / editor / scripts / tools
+启动游戏.bat             app\\scripts\\launch.mjs --no-setup（开服，浏览器自动打开）
+启动编辑器.bat           app\\tools\\workshop-editor.mjs --open（工坊编辑器，127.0.0.1:3311）
 README-开箱即用.md       本文件
 LICENSE / NOTICE.md / THIRD-PARTY-NOTICES.md`
-    : `app\\                    游戏本体：server / shared / public（全部素材）/ data / scripts / tools
-启动游戏.bat             app\\scripts\\launch.mjs --no-setup
+    : `app\\                    游戏本体：server / shared / public（全部素材）/ data / editor / scripts / tools
+启动游戏.bat             app\\scripts\\launch.mjs --no-setup（开服，浏览器自动打开）
+启动编辑器.bat           app\\tools\\workshop-editor.mjs --open（工坊编辑器，127.0.0.1:3311）
 README-开箱即用.md       本文件
 LICENSE / NOTICE.md / THIRD-PARTY-NOTICES.md
 
@@ -417,7 +435,8 @@ LICENSE / NOTICE.md / THIRD-PARTY-NOTICES.md
 
   return `# 卫戍协议：盟约 · Windows 开箱即用包
 
-解压后**双击 \`启动游戏.bat\`** 即可，素材与依赖都在包里，不需要再下载任何东西。
+解压后**双击 \`启动游戏.bat\`** 即可开服（素材与依赖都在包里，不需要再下载任何东西）；
+双击 **\`启动编辑器.bat\`** 打开工坊编辑器（本仓库的主角）。
 ${nodeNeed}
 
 **不联网也能玩**：美术 / 音频 / 依赖 / 字体全部在包内，断网时用自带的 \`app\\public\\fonts\`
@@ -448,6 +467,18 @@ Noto Sans SC 这类网页字体（\`index.html\` 里那条外链这次没有改�
 
 第一次开服时 Windows 防火墙可能弹窗，勾选**允许专用网络**（否则朋友连不上）。
 建房后把 4 位「同盟密钥」或「复制链接」（\`…/?room=密钥\`）发给朋友即可。
+
+## 工坊编辑器（本仓库的主角）
+
+双击 **\`启动编辑器.bat\`**：打开工坊编辑器 <http://127.0.0.1:3311>，在里面新建 / 编辑工坊包 ——
+干员、地图、怪物、出怪、装备、行为层 kit 六个页面。给 AI 用的官方 prompt 在 \`app\\docs\\prompts\\\`。
+
+- **默认只绑本机**（编辑器可以写文件，没有登录与权限控制），端口 3311；换端口：\`启动编辑器.bat --port 3400\`。
+- 它只写两处：\`app\\workshop\\**\`（工坊源文件与生成产物）与 \`app\\data\\support.json\`（只在你动「是否助战」开关时）；
+  \`tools/build-data.mjs\` 生成的其它 \`data\\*.json\` 永不改动。
+- **保存后要重启游戏服务器**（关掉 \`启动游戏.bat\` 的窗口，再双击一次）才会出现在游戏里。
+- **不用开游戏服务器也能用编辑器**，它不需要素材也不需要联网。
+- 编辑器不在 \`public\\\` 下，游戏服务器结构上无法把它发给网页端 —— 它纯粹是你本机的工具。
 
 ## 目录结构
 
@@ -565,12 +596,14 @@ async function main() {
     await fsp.copyFile(src, path.join(out, f));
   }
 
-  await fsp.writeFile(path.join(out, '启动游戏.bat'), bat('"%NODE%" "%HERE%app\\scripts\\launch.mjs" --no-setup %*'), 'latin1');
+  for (const [name, body] of Object.entries(bundleLaunchers())) {
+    await fsp.writeFile(path.join(out, name), bat(body), 'latin1');
+  }
   await fsp.writeFile(path.join(out, 'README-开箱即用.md'), bundleReadme({ version: nodeVersion, withNode: !!o.node }), 'utf8');
 
   const total = await dirSize(out);
   console.log(`\n✔ 便携包已生成：${out}\n  ${total.files} 个文件 / ${MB(total.bytes)}`);
-  console.log('  双击「启动游戏.bat」即可（本机开服，浏览器自动打开）。');
+  console.log('  双击「启动游戏.bat」开服；双击「启动编辑器.bat」开工坊编辑器。');
   return 0;
 }
 

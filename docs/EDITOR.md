@@ -14,6 +14,15 @@
 
 ## 运行
 
+**一键**（双击 / 直接跑脚本，首次自动装依赖，然后打开浏览器）：
+
+```
+scripts\start-editor-windows.bat          # Windows：双击，或加上参数  --port 3400
+./scripts/start-editor.sh                 # macOS / Linux
+```
+
+用发行页的零安装整合包时是包根的 `启动编辑器.bat`（游戏是 `启动游戏.bat`）。手动启动：
+
 ```powershell
 node tools/workshop-editor.mjs                    # 打开 http://127.0.0.1:3311
 node tools/workshop-editor.mjs --port 3400 --open # 换端口并自动打开浏览器
