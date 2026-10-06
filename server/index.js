@@ -43,6 +43,7 @@ import { Network, SessionRegistry, NET_DEFAULTS } from './net.js';
 import { Lobby } from './lobby.js';
 import { getData, loadData } from './data.js';
 import { loadWorkshop, loadWorkshopKits, workshopTouchedFiles, WORKSHOP_DIR } from './workshop.js';
+import { WORKSHOP_MEDIA_PREFIX } from '../shared/workshop.js';
 import { PROTOCOL_VERSION, APP_VERSION } from '../shared/constants.js';
 import { MEDIA_PREFIX, AUDIO_EXTS } from '../shared/media.js';
 
@@ -400,8 +401,9 @@ export function workshopKitFilesFor(modules, workshopDir) {
   return out;
 }
 
-/** The URL prefix a pack's own art is served under (`<prefix><pack>/<path inside assets/>`). */
-export const WORKSHOP_ASSET_PREFIX = '/workshop-assets/';
+/** The URL prefix a pack's own art is served under (`<prefix><pack>/<path inside assets/>`). Shared with the overlay,
+ * which writes the identical URLs for a pack's voice lines into the data the client reads. */
+export const WORKSHOP_ASSET_PREFIX = WORKSHOP_MEDIA_PREFIX;
 
 /**
  * The file types a pack's `assets/` folder may serve. Deliberately an allowlist: this route is reachable by any client,

@@ -13,12 +13,13 @@
 | 包的文件系统加载 | `server/workshop.js` |
 | 叠加层接入数据加载（冻结之前） | `server/data.js` |
 | 把合并后的 `/data/*.json` 发给浏览器 | `server/index.js`（`buildWorkshopDataFiles`） |
+| 包语音汇总进 `assets.audio.voice` | `shared/workshop.js`（`workshopVoiceIndex` / `mergeWorkshopVoices`） |
 | 助战配置与校验（纯函数，前后端共用） | `shared/support.js` |
 | 助战卡池的服务端声明 | `data/support.json` |
 | 助战的引擎侧视图 | `server/match/gamedata.js` |
 | 助战消息与落库 | `shared/protocol.js`、`server/lobby.js` |
 | 助战的对局内生效 | `server/match/Match.js`、`server/match/PlayerState.js` |
-| 测试 | `test/workshop.test.js`、`test/support.test.js` |
+| 测试 | `test/workshop.test.js`、`test/workshopVoices.test.js`、`test/workshopAssets.test.js`、`test/support.test.js` |
 
 ---
 
@@ -43,10 +44,14 @@ workshop/<packId>/
 | `version` | 否 | 默认 `0.0.0` |
 | `author` / `license` / `description` | 否 | 元信息；`license` 用于声明素材授权 |
 | `gameVersion` | 否 | 作者针对的游戏版本，便于排查 |
-| `content` | **是** | 这个包提供哪些数据文件（上表的名字），至少一个 |
+| `content` | 二选一 | 这个包提供哪些数据文件（上表的名字） |
+| `voices` | 二选一 | 这个包为哪些干员提供语音，见 §1.4；`content` 与 `voices` 至少有一个非空 |
 | `overrides` | 否 | 允许覆盖的官方记录，格式 `"<file>:<id>"`，例如 `"chess:chess_char_1_01_a"` |
 
 `content` 只接受上表列出的文件。**`config` 被刻意排除**：一个能改写经济、回合表或难度参数的包改的是规则而不是内容，那需要另一套审查机制，不在本功能范围内。
+
+**只带语音的包是合法的包**：`content: []` + `voices`（见 §1.4）。一个只给助战干员配语音的包不需要提供任何数据文件；
+反过来，`content` 与 `voices` 都为空才会被拒（`EMPTY_PACK`）。
 
 ### 1.2 叠加规则
 
@@ -88,6 +93,34 @@ workshop/*/ ──┘        （冻结之前）              └─→ /data/<fi
   要分发代码请走 `kits/`（那条路由只服务加载器登记过的模块）。
 
 示例包的作法仍值得参考：它**不含素材**，而是复用已有干员的美术 id，只改身份与数值。这也是目前唯一无需分发素材就能让新内容正常渲染的方式（Spine 小人需要 `.skel` + `.atlas` 二进制对）。
+
+#### 语音包（`voices`）
+
+包可以给干员配语音 —— 主要是给**自己新增的助战干员**配，也可以给官方干员补几条：
+
+```json
+{
+  "id": "my-voice", "license": "CC0-1.0", "content": [],
+  "voices": { "char_ws_my_op": { "select": ["voice/select1.mp3", "voice/select2.mp3"], "deploy": ["voice/deploy.mp3"] } }
+}
+```
+
+| 规则 | 说明 |
+|---|---|
+| 槽位固定 | `start`（行动出发/开始）`select`（选中）`deploy`（部署）`battle`（作战中）`win`（胜利结算）`lose`（失败结算）—— 即 `shared/constants.js` 的 `VOICE_SLOTS`，客户端、资产管线与校验器共用同一份词表；写别的槽位会被拒（`VOICE_SLOT_UNKNOWN`） |
+| 路径相对 `assets/` | 必须放在该包自己的 `assets/` 里（音频同样受 §1.4 的授权闸门约束：有 `assets/` 就必须声明 `license`）。绝对路径、`..`、`.`、反斜杠与盘符都会被拒（`VOICE_PATH_UNSAFE`） |
+| 一个槽位可以多条 | 客户端每次随机挑一条，并避免连续重复 |
+| 与官方语音**并存** | 同一干员同一槽位，官方台词在前、包台词在后，一起参与随机；不会替换官方语音 |
+
+**送达方式（不需要新的客户端通道）**：加载时 `applyWorkshop()` 把各包的语音汇成 `assets.audio.voice` 并写入合并后的
+`data/assets.json`（`shared/workshop.js` 的 `workshopVoiceIndex` / `mergeWorkshopVoices`），HTTP 层再把该文件**合并后**发给浏览器
+——也就是 `public/js/audio.js` 本来就在读的那份清单（`installAudio({ getManifest: () => data.get('assets') })`）。
+因此：只要有包带语音，`assets.json` 就进入「被触及的数据文件」集合（`workshopTouchedFiles`），否则浏览器拿到的还是磁盘上的原版。
+生成的 URL 就是 §1.4 那条素材通道（`/workshop-assets/<pack>/<路径>`，路径分段做百分号编码，
+所以文件名里的 `#`、空格都能正常播放）。安装里没有 `data/assets.json`（没跑过素材管线）时，加载器会在启动日志里报告这件事，
+而不是静默丢弃。
+
+玩家侧仍然是**双重开关**：`npm run assets -- --voices` 决定这个安装有没有官方语音，设置里的「干员语音 VOICE」默认 0（关闭）决定这一局有没有语音。两点都满足时才听得到包里的语音。
 
 ### 1.5 作者接口（面向人，也面向 AI）
 
@@ -133,6 +166,7 @@ node tools/workshop-validate.mjs my-pack
 | **装备（items）**：`params`/`mergeable`/`shopExcluded` 推导 + 校验 + 编辑器表单 | ✅ 已完成（`test/itemAuthoring.test.js`、`editor/ui/item.html`） |
 | **作者接口**：spec → 合法记录、机器可读校验、模板 prompt、校验 CLI | ✅ 已实现（`test/chessAuthoring.test.js`） |
 | **行为层**：包内 `kits/<chessId>.js` 接入 `battle.on(...)` 钩子总线 | ✅ 已实现（见 §4） |
+| **语音包（`voices`）**：汇总进 `assets.audio.voice`、随合并的 `assets.json` 送达客户端 | ✅ 已实现（`test/workshopVoices.test.js`） |
 | **局外编辑器 UI**：干员 / 地图 / 怪物 / 出怪 / 装备 / 行为层 kit 六个页面 | ✅ 已实现（`editor/`，见 `docs/EDITOR.md`） |
 | 工坊包的版本对齐、依赖声明、内容寻址 | ⛔ 未实现（`gameVersion` 目前只是元信息） |
 

@@ -333,6 +333,15 @@ Client side (`public/js/audio.js`): `audio.voice(charId, slot)` plays one line t
 at most one line per unit per `VOICE_GAP_MS`. It is a silent `false` when the channel is down, the context is still
 locked, the operator has no line or the unit is still on its gap — and it never throws, like the rest of the manager.
 
+**The 创意工坊 half.** A pack may bring its own lines with `pack.json.voices` (docs/WORKSHOP.md §1.4) and the client needs
+no second channel to hear them: the overlay merges every pack's lines into the same `assets.audio.voice` map before the
+data is frozen (`shared/workshop.js` `workshopVoiceIndex` / `mergeWorkshopVoices`), the game server serves
+`/data/assets.json` **merged** when any pack declares voices (`workshopTouchedFiles` adds `assets`), and `audio.voice()`
+reads exactly that object — official lines first, the pack's appended, so both are played. Pack media is fetched from the
+one pack-media route, `/workshop-assets/<pack>/<path>` (percent-encoded per segment), which is why a pack filename may
+contain a `#` or a space. This is the reserved path for a pack that adds a 助战 operator and fills in its voice lines
+itself; `test/workshopVoices.test.js` pins the URL the index writes against the URL that route answers.
+
 ### Other fallbacks
 
 - **Emotes and 玩法说明 pages** (`public/js/data.js artUrls / nextArtUrl`, `ui/guide.js guideStage`): the local-client picture (`data/local-assets.json`) first, then the mirror copy (`ui['emoticon/…']`, `ui['guide/…']`), each tried in turn when one fails to load; when none is left — none listed, or every copy failed (for example data/assets.json lists the downloaded pages but the files are not on disk yet: a `git pull` and restart without setup) — the neutral emote glyph, and for a page the official tips text (`config.tips`). The rest of the local-client art (the 3D board, the official HUD sprites, module type icons, the two enemy models above) is not downloaded: the client looks it up in `data/local-assets.json` only (most of the HUD sprites are on the mirror too, DESIGN §22.5); docs/DEPLOY.md §6 lists what falls back without it.

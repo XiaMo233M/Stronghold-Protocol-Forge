@@ -25,6 +25,7 @@ import { validateWave } from '../shared/waveAuthoring.js';
 import { validateItem } from '../shared/itemAuthoring.js';
 import { validateKit } from '../shared/kitAuthoring.js';
 import { loadData } from '../server/data.js';
+import { WORKSHOP_ASSET_TYPES } from '../server/index.js';
 import { GameData } from '../server/match/gamedata.js';
 import { toDataSource, isShopItem } from '../server/sim/simdata.js';
 
@@ -104,6 +105,50 @@ async function main() {
       issues.push(...pairIssues(records, file));
     }
     report.packs.push({ pack: pack.id, name: pack.name, files: Object.keys(pack.files), issues });
+  }
+
+  // ---- the voice pack layer (docs/WORKSHOP.md §1.4). `voices` is validated by the loader already (slots, char ids,
+  // path shape); what only the FILESYSTEM can answer is whether the named files are really there and servable — a
+  // typo'd name passes every shape check and would simply be a line that never plays.
+  for (const pack of packs) {
+    const voices = pack.voices || {};
+    if (!Object.keys(voices).length) continue;
+    const entry = report.packs.find((p) => p.pack === pack.id);
+    let lines = 0;
+    for (const [charId, slots] of Object.entries(voices)) {
+      for (const [slot, files] of Object.entries(slots)) {
+        lines += files.length;
+        for (const rel of files) {
+          const abs = path.join(pack.dir, 'assets', rel);
+          const ext = path.extname(rel).toLowerCase();
+          if (!WORKSHOP_ASSET_TYPES.has(ext)) {
+            entry.issues.push({
+              field: `${charId}.${slot}`, code: 'VOICE_TYPE_UNSERVABLE', severity: 'error',
+              message: `"${rel}" (${ext || 'no extension'}) is not a media type the pack route serves`,
+              hint: 'the route allowlists images / audio / fonts / atlas / skel — an .mp3, .ogg or .wav plays',
+            });
+          } else if (!fs.existsSync(abs)) {
+            entry.issues.push({
+              field: `${charId}.${slot}`, code: 'VOICE_FILE_MISSING', severity: 'error',
+              message: `"${rel}" is declared in pack.json but not on disk at ${abs}`,
+              hint: 'files must live inside the pack: <pack>/assets/<path>',
+            });
+          }
+        }
+      }
+      // A line nobody can hear: the operator is neither official nor added by this pack (the client looks the id up in
+      // the merged chess data, so an unknown id is silently dead content).
+      const known = OFFICIAL_IDS.has(charId) || Object.keys(pack.files.chess || {}).includes(charId);
+      if (!known) {
+        entry.issues.push({
+          field: charId, code: 'VOICE_UNKNOWN_OPERATOR', severity: 'warning',
+          message: `${charId} is neither an official operator nor one this pack adds — these lines can never play`,
+          hint: 'add the operator to this pack\'s chess.json, or ignore this if another installed pack adds it',
+        });
+      }
+    }
+    entry.voices = { operators: Object.keys(voices).length, lines };
+    report.voiceLines = (report.voiceLines || 0) + lines;
   }
 
   // ---- layer 3: the engine. Load the merged data exactly as the server does and interrogate it.
@@ -277,7 +322,10 @@ async function main() {
     if (!loaded.present) console.log('  (the directory does not exist — nothing to validate)');
     if (!loaded.packs.length && !report.packs.length) console.log('  no packs found');
     for (const p of report.packs) {
-      console.log(`\npack ${p.pack}${p.name ? ` (${p.name})` : ''}${p.files ? ` — ${p.files.join(', ')}` : ''}`);
+      const bits = [];
+      if (p.files && p.files.length) bits.push(p.files.join(', '));
+      if (p.voices) bits.push(`${p.voices.lines} voice line(s) for ${p.voices.operators} operator(s)`);
+      console.log(`\npack ${p.pack}${p.name ? ` (${p.name})` : ''}${bits.length ? ` — ${bits.join(' + ')}` : ''}`);
       if (!p.issues.length) console.log('  OK');
       else console.log(formatIssues(p.issues).split('\n').map((l) => `  ${l}`).join('\n'));
     }

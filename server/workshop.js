@@ -75,8 +75,12 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null } = {}) {
       files[file] = content.records;
     }
     // A pack whose every declared file failed to load contributes nothing: its errors are already reported, so it is
-    // not listed as a loaded pack (an empty pack in the boot summary would only be noise).
-    if (Object.keys(files).length) packs.push({ ...manifest.pack, dir: packDir, files });
+    // not listed as a loaded pack (an empty pack in the boot summary would only be noise). A pack that ships NO data
+    // file at all is a different thing and IS loaded: the reserved 助战 voice pack carries only `voices`, which the
+    // overlay publishes through assets.json (shared/workshop.js mergeWorkshopVoices).
+    if (Object.keys(files).length || Object.keys(manifest.pack.voices || {}).length) {
+      packs.push({ ...manifest.pack, dir: packDir, files });
+    }
   }
   for (const e of errors) log?.warn?.(`[workshop] ${e.pack}: ${e.reason}`);
   return { dir, present: true, packs, errors };
@@ -90,7 +94,13 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null } = {}) {
  */
 export function workshopTouchedFiles(loaded) {
   const out = new Set();
-  for (const p of (loaded && loaded.packs) || []) for (const f of Object.keys(p.files || {})) out.add(f);
+  for (const p of (loaded && loaded.packs) || []) {
+    for (const f of Object.keys(p.files || {})) out.add(f);
+    // Voice lines are merged into `assets` (shared/workshop.js mergeWorkshopVoices), so that file must be served merged
+    // as well — a pack that only brings voices touches nothing else, and without this the browser would fetch the
+    // on-disk assets.json and never hear the pack.
+    if (p.voices && Object.keys(p.voices).length) out.add('assets');
+  }
   return out;
 }
 

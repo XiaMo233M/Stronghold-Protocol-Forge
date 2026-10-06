@@ -37,6 +37,13 @@ const ID_FIELD_BY_FILE = Object.freeze({
 
 /** Pack ids: a short filesystem- and URL-safe slug (it names the directory under workshop/). */
 export const PACK_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
+
+/**
+ * The URL prefix a pack's own media is served under: `<prefix><packId>/<path inside that pack's assets/>`
+ * (server/index.js serves the route, docs/WORKSHOP.md §5). One source of truth, because the voice URLs this module
+ * writes into the data must be exactly the ones that route answers.
+ */
+export const WORKSHOP_MEDIA_PREFIX = '/workshop-assets/';
 /** Record ids follow the wire-id charset (shared/protocol.js isId) so an id can travel in a message. */
 const RECORD_ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
 
@@ -63,9 +70,8 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   const content = Array.isArray(raw.content)
     ? [...new Set(raw.content.filter((f) => typeof f === 'string' && WORKSHOP_CONTENT_FILES.includes(f)))].sort()
     : [];
-  if (!content.length) {
-    return fail('EMPTY_PACK', `content must name at least one of: ${WORKSHOP_CONTENT_FILES.join(', ')}`);
-  }
+  // (EMPTY_PACK is checked after `voices` below: a pack whose whole contribution is a 助战 operator's voice lines has no
+  // data file at all, and refusing it here would make the reserved voice pack impossible to write.)
   const overrides = Array.isArray(raw.overrides)
     ? [...new Set(raw.overrides.filter((o) => typeof o === 'string' && /^[a-z]+:[A-Za-z0-9_\-.:]{1,64}$/.test(o)))].sort()
     : [];
@@ -101,14 +107,19 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
       const list = (Array.isArray(files) ? files : [files]).filter((f) => typeof f === 'string' && f);
       if (!list.length) return fail('VOICE_EMPTY', `voices["${charId}"]["${slot}"] names no file`);
       for (const f of list) {
-        // relative, inside assets/, no traversal — the same rule the /workshop-assets route enforces
-        if (f.startsWith('/') || f.includes('\\') || f.split('/').includes('..') || /^[A-Za-z]:/.test(f)) {
+        // relative, inside assets/, no traversal — the same rule the /workshop-assets route enforces (that route refuses
+        // `.` and `..` segments, so a `.` here would only ever produce a URL that 404s)
+        if (f.startsWith('/') || f.includes('\\') || f.split('/').some((seg) => seg === '..' || seg === '.') || /^[A-Za-z]:/.test(f)) {
           return fail('VOICE_PATH_UNSAFE', `"${f}" must be a relative path inside assets/ (no absolute paths, no "..")`);
         }
       }
       clean[slot] = [...new Set(list)].sort();
     }
     if (Object.keys(clean).length) voiceLines[charId] = clean;
+  }
+  // A pack may bring data files, voice lines, or both — never neither (docs/WORKSHOP.md §1.4).
+  if (!content.length && !Object.keys(voiceLines).length) {
+    return fail('EMPTY_PACK', `content must name at least one of: ${WORKSHOP_CONTENT_FILES.join(', ')} — or the pack must declare voices`);
   }
   return {
     ok: true,
@@ -153,6 +164,43 @@ export function normalizeContentFile(file, json) {
 }
 
 /**
+ * The voice lines every pack contributes, keyed exactly like the manifest the client looks them up in:
+ * `{ <charId>: { <slot>: [url, …] } }` (docs/ASSETS.md "Voice lines").
+ *
+ * The URLs point into the pack media route (`WORKSHOP_MEDIA_PREFIX`), so the client needs no new channel: the overlay
+ * merges this map into `assets.audio.voice` and the game server serves `/data/assets.json` merged, which is the object
+ * public/js/audio.js already reads (`installAudio({ getManifest: () => data.get('assets') })`).
+ *
+ * Every path segment is percent-encoded: a pack filename may legitimately hold a `#`, a space or a `+`, and the route
+ * decodes the path before it resolves it (`/workshop-assets/<pack>/voice/a%23b.mp3`).
+ *
+ * @param {Array<{ id: string, voices?: Record<string, Record<string, string[]>> }>} packs loaded packs (server/workshop.js)
+ * @param {{ prefix?: string }} [opts]
+ * @returns {Record<string, Record<string, string[]>>}
+ */
+export function workshopVoiceIndex(packs, { prefix = WORKSHOP_MEDIA_PREFIX } = {}) {
+  /** @type {Record<string, Record<string, string[]>>} */
+  const out = {};
+  const list = (Array.isArray(packs) ? packs : []).filter((p) => p && typeof p.id === 'string' && p.id && isPlainObj(p.voices));
+  // sorted by pack id: the merged line list must not depend on the order the filesystem handed the packs over
+  for (const pack of [...list].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
+    for (const [charId, slots] of Object.entries(pack.voices)) {
+      if (!isPlainObj(slots)) continue;
+      for (const [slot, files] of Object.entries(slots)) {
+        if (!Array.isArray(files) || !files.length) continue;
+        const bySlot = (out[charId] ||= {});
+        const urls = (bySlot[slot] ||= []);
+        for (const f of files) {
+          if (typeof f !== 'string' || !f) continue;
+          urls.push(prefix + pack.id + '/' + f.split('/').map(encodeURIComponent).join('/'));
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Apply every pack's content on top of the official data and return a NEW top-level object (the input is never
  * mutated; the caller freezes the result). Official ids are only replaced when the pack declared them in `overrides`;
  * a collision that was not declared is a reported error and the official record is kept.
@@ -193,9 +241,60 @@ export function applyWorkshop(base, packs) {
     report.packs.push(entry);
   }
   linkWorkshopStages(out, report);
+  mergeWorkshopVoices(out, packs, report);
   for (const list of Object.values(report.added)) list.sort();
   for (const list of Object.values(report.overridden)) list.sort();
   return { data: out, report };
+}
+
+/**
+ * Publish every pack's voice lines to the client by extending `assets.audio.voice` — the manifest the client looks an
+ * operator's line up in (public/js/audio.js `voice()`), which the HTTP layer then serves merged
+ * (server/index.js `buildWorkshopDataFiles` + `workshopTouchedFiles`).
+ *
+ * APPEND, never replace: a pack that adds lines to an operator the official data already has keeps both, and
+ * `pickVoiceLine` picks among them. Mutates `data` (a fresh copy) and records the counts in `report.voices`.
+ *
+ * An install without `data/assets.json` (the asset pipeline was never run) has no audio at all, so there is nowhere to
+ * publish to: that is reported rather than silently dropped.
+ */
+function mergeWorkshopVoices(data, packs, report) {
+  const index = workshopVoiceIndex(packs);
+  const chars = Object.keys(index);
+  if (!chars.length) return;
+  const assets = isPlainObj(data.assets) ? data.assets : null;
+  if (!assets) {
+    for (const pack of Array.isArray(packs) ? packs : []) {
+      if (!isPlainObj(pack?.voices) || !Object.keys(pack.voices).length) continue;
+      report.errors.push({
+        pack: pack.id, file: 'assets', id: 'audio.voice',
+        reason: 'this pack declares voice lines, but data/assets.json is missing — run `npm run assets` so the client has an audio manifest to extend',
+      });
+    }
+    return;
+  }
+  const audio = isPlainObj(assets.audio) ? { ...assets.audio } : {};
+  const voice = isPlainObj(audio.voice) ? { ...audio.voice } : {};
+  /** @type {Record<string, number>} */
+  const counts = {};
+  for (const [charId, slots] of Object.entries(index)) {
+    const lines = isPlainObj(voice[charId]) ? { ...voice[charId] } : {};
+    for (const [slot, urls] of Object.entries(slots)) {
+      const official = Array.isArray(lines[slot]) ? lines[slot] : [];
+      lines[slot] = [...new Set([...official, ...urls])];
+    }
+    voice[charId] = lines;
+  }
+  // per pack, so the boot log says WHICH pack brought lines (and a pack that adds none is not credited)
+  for (const pack of Array.isArray(packs) ? packs : []) {
+    let n = 0;
+    for (const slots of Object.values(isPlainObj(pack?.voices) ? pack.voices : {})) {
+      for (const files of Object.values(isPlainObj(slots) ? slots : {})) if (Array.isArray(files)) n += files.length;
+    }
+    if (n) counts[pack.id] = n;
+  }
+  data.assets = { ...assets, audio: { ...audio, voice } };
+  report.voices = counts;
 }
 
 /**
@@ -238,9 +337,13 @@ function linkWorkshopStages(data, report) {
 export function workshopSummary(report) {
   if (!report || !Array.isArray(report.packs) || !report.packs.length) return 'no workshop packs';
   const parts = report.packs.map((p) => {
+    const bits = [];
     const files = Object.entries(p.files).filter(([, n]) => n.added || n.overridden)
       .map(([f, n]) => `${f} +${n.added}${n.overridden ? ` ~${n.overridden}` : ''}`);
-    return `${p.name}(${p.id}): ${files.length ? files.join(', ') : 'nothing'}`;
+    if (files.length) bits.push(files.join(', '));
+    const voices = report.voices && report.voices[p.id];
+    if (voices) bits.push(`${voices} voice line${voices === 1 ? '' : 's'}`);
+    return `${p.name}(${p.id}): ${bits.length ? bits.join(', ') : 'nothing'}`;
   });
   if (report.errors.length) parts.push(`${report.errors.length} rejected record(s)`);
   return parts.join('; ');
