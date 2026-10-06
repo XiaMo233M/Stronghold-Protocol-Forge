@@ -7,7 +7,7 @@
 | Prompt | 用于 | 状态 |
 |---|---|---|
 | [operator-pack.md](operator-pack.md) | 干员（含技能黑板、天赋、普通/精锐两套数值） | ✅ 完整（含黑板书键表） |
-| 本文档的「各内容种类的 spec 形状」一节 | 地图 / 怪物 / 出怪 / 装备 / 行为层 kit | ✅ 形状与推导规则在此，配合校验器闭环 |
+| 本文档的「各内容种类的 spec 形状」一节 | 地图 / 怪物 / 出怪 / 装备 / 语音 / 行为层 kit | ✅ 形状与推导规则在此，配合校验器闭环 |
 
 > 为什么只有一个独立的 prompt 文件：干员的黑板书有 **60 多个键**、每个键的含义与拼写例外都必须写清楚，
 > 那是唯一需要一整份文档的内容种类。其余几种的 spec 形状很短，且都能用同一条闭环
@@ -25,7 +25,7 @@
    `params` 之类的字段算出来。手写它们不会更准，只会和引擎不一致 —— 校验器会重算并比对，报 `STALE_DERIVED`。
 2. **校验器复用真实引擎。** `tools/workshop-validate.mjs` 的分层是：格式 → 记录语义 → **真实引擎**
    （能否进商店池、精锐是否互指、模拟器能否构建 unit def、物品商店抽不抽得到）→ 每种内容一层
-   （kits / 地图 / 怪物 / 出怪 / 装备）。所以「把它写成一个好记录」和「让引擎接受它」是同一件事。
+   （kits / 地图 / 怪物 / 出怪 / 装备 / 语音 / 助战）。所以「把它写成一个好记录」和「让引擎接受它」是同一件事。
 
 **闭环（务必执行，别只看代码）**：
 
@@ -39,6 +39,7 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
 （`chess` `items` `enemies` `stages` `waves`）。`<kind>-specs/<slug>.json` 是**可编辑的源**，
 `<kind>.json` 是**推导产物** —— 产物不要手改，改源再推导。行为层 kit 是唯一的例外：它在 `kits/<干员 id>.js`，
 **不进 `content`**（`content` 只列数据文件），也没有推导产物 —— 文件本身就是游戏加载的东西。
+语音是第二个例外：它写在 `pack.json.voices` 里，音频文件放在包的 `assets/` 下（见下面「语音」一节）。
 
 ---
 
@@ -125,6 +126,56 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
 - `trapId` 复用现有装备图标（仓库不含素材）；可用的 trap id 由 `GET /api/items` 的 `icons` 列出。
 - 图形化等价物：编辑器 `/item.html`。
 
+### 语音（`pack.json.voices`）
+
+语音**没有 spec 文件、也没有推导产物**：它直接写在包自己的 `pack.json` 里，音频文件放在包的 `assets/` 下。
+（这也是唯一一种能独立成包的内容 —— 一个只配语音的包可以 `content: []`。）
+
+```json
+{
+  "id": "my-voice", "name": "助战语音", "version": "1.0.0", "license": "CC0-1.0",
+  "content": [],
+  "voices": {
+    "char_ws_my_op": {
+      "start":  ["voice/start.mp3"],
+      "select": ["voice/select1.mp3", "voice/select2.mp3"],
+      "deploy": ["voice/deploy.mp3"],
+      "battle": ["voice/battle1.mp3", "voice/battle2.mp3"],
+      "win":    ["voice/win.mp3"],
+      "lose":   ["voice/lose.mp3"]
+    }
+  }
+}
+```
+
+| 规则 | 说明 |
+|---|---|
+| **槽位只有六个** | `start`（行动出发/开始）`select`（选中）`deploy`（部署）`battle`（作战中）`win`（胜利结算）`lose`（失败结算），即 `shared/constants.js` 的 `VOICE_SLOTS`。写别的槽位整包被拒（`VOICE_SLOT_UNKNOWN`） |
+| **一个槽位可以多条** | 客户端每次随机一条，且不会连续重复；同一个词给几段不同语气是正常用法 |
+| **路径相对 `assets/`** | 例如 `voice/select1.mp3` 指 `<pack>/assets/voice/select1.mp3`。绝对路径、`..`、`.`、反斜杠、盘符都会被拒 |
+| **有 `assets/` 就必须有 `license`** | 音频也是素材，授权由包作者承担（`ASSETS_NEED_LICENSE`） |
+| **可以只给官方干员补几条** | 同一槽位官方台词在前、包台词在后，一起参与随机；不会替换官方语音 |
+
+**你能做与不能做**：你把音频文件放进 `<pack>/assets/voice/`，然后按上面的形状声明路径 —— 剩下的（编码成 URL、
+送达客户端、何时播放）由加载器和游戏负责。**不要**去改 `data/assets.json`：那是生成物，包语音由叠加层合进去。
+`node tools/workshop-validate.mjs` 的语音层会检查每条台词的文件在不在、扩展名是不是可播放的媒体类型
+（`VOICE_FILE_MISSING` / `VOICE_TYPE_UNSERVABLE` 是错误），以及这个干员 id 是不是真的存在
+（`VOICE_UNKNOWN_OPERATOR` 是警告 —— 这种台词永远不会播）。图形化等价物：编辑器 `/voice.html`。
+
+### 自己的干员进助战卡池（`pack.json.support`）
+
+新增的干员默认**不能**被选为助战：助战卡池只有 `data/support.json` 一个来源。让这个包自足的办法是在清单里声明：
+
+```json
+{ "id": "my-ally", "content": ["chess"], "support": ["chess_char_ws_my_ally_01_a"] }
+```
+
+- **只写本包自己新增的干员 id**。写官方干员会被拒（`SUPPORT_FOREIGN_OPERATOR`）—— 卡池是安装方的规则决定，
+  内容包不能改它。
+- **不要写阶**：装载时按记录自己的 `tier` 决定进哪一阶。手写阶就会出现「写错了没人报错、该干员静默不可选」
+  （记录没有 1–6 的整数 `tier` 记 `SUPPORT_TIER_UNKNOWN`）。
+- 安装方可以在 `data/support.json` 写 `"workshop": false` 忽略所有包的助战声明。
+
 ### 行为层 kit（`kits/<chessId>.js`）
 
 ```js
@@ -178,6 +229,6 @@ AI 或手写 spec 时不必自己造这个字段，走编辑器保存即可获�
 
 ```powershell
 node tools/workshop-scaffold.mjs <spec.json> --pack <packId> [--workshop <root>] [--dry-run] [--json]
-node tools/workshop-validate.mjs <包目录> [--json]     # 分层校验，含真实引擎
-npm run editor                                        # 图形化等价物（只绑 127.0.0.1）
+node tools/workshop-validate.mjs <包目录> [--json]     # 分层校验，含真实引擎与语音文件
+npm run editor                                        # 图形化等价物（只绑 127.0.0.1）；语音页 /voice.html
 ```

@@ -9,8 +9,9 @@
 //   node tools/workshop-validate.mjs --json               # machine-readable report
 //
 // It checks the layers cheapest-first: pack format → record semantics → the real engine → then one layer per content
-// kind (kits, stages/maps, enemies/monsters, waves, items/equipment), each re-deriving what the engine derives.
-// Layer 3 is what catches a record that is syntactically valid but silently unplayable.
+// kind (kits, stages/maps, enemies/monsters, waves, items, a pack's voice lines and its 助战 declarations), each
+// re-deriving what the engine derives. Layer 3 is what catches a record that is syntactically valid but silently
+// unplayable.
 //
 // Exit codes: 0 = no errors (warnings allowed), 1 = errors found, 2 = bad usage.
 
@@ -26,6 +27,7 @@ import { validateItem } from '../shared/itemAuthoring.js';
 import { validateKit } from '../shared/kitAuthoring.js';
 import { loadData } from '../server/data.js';
 import { WORKSHOP_ASSET_TYPES } from '../server/index.js';
+import { workshopSupportEntries } from '../shared/workshop.js';
 import { GameData } from '../server/match/gamedata.js';
 import { toDataSource, isShopItem } from '../server/sim/simdata.js';
 
@@ -149,6 +151,22 @@ async function main() {
     }
     entry.voices = { operators: Object.keys(voices).length, lines };
     report.voiceLines = (report.voiceLines || 0) + lines;
+  }
+
+  // ---- the 助战 layer (docs/WORKSHOP.md §2). `pack.json.support` names the operators of THIS pack that should be
+  // pickable as 助战; the overlay derives each one's tier from its record and adds it to data/support.json's pool. The
+  // rule itself is shared with the overlay (`workshopSupportEntries`) so an author sees exactly what the loader does.
+  for (const pack of packs) {
+    if (!Array.isArray(pack.support) || !pack.support.length) continue;
+    const entry = report.packs.find((p) => p.pack === pack.id);
+    const { entries, errors } = workshopSupportEntries({ chess: pack.files.chess || {} }, [pack]);
+    for (const e of errors) {
+      entry.issues.push({ field: 'support', code: e.code, severity: 'error', message: e.reason });
+    }
+    if (entries.length) {
+      entry.support = entries.map((e) => `${e.id} → 阶 ${e.tier}`);
+      report.supportEntries = (report.supportEntries || 0) + entries.length;
+    }
   }
 
   // ---- layer 3: the engine. Load the merged data exactly as the server does and interrogate it.
@@ -325,6 +343,7 @@ async function main() {
       const bits = [];
       if (p.files && p.files.length) bits.push(p.files.join(', '));
       if (p.voices) bits.push(`${p.voices.lines} voice line(s) for ${p.voices.operators} operator(s)`);
+      if (p.support) bits.push(`助战: ${p.support.join(', ')}`);
       console.log(`\npack ${p.pack}${p.name ? ` (${p.name})` : ''}${bits.length ? ` — ${bits.join(' + ')}` : ''}`);
       if (!p.issues.length) console.log('  OK');
       else console.log(formatIssues(p.issues).split('\n').map((l) => `  ${l}`).join('\n'));

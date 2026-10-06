@@ -100,6 +100,8 @@ export function workshopTouchedFiles(loaded) {
     // as well — a pack that only brings voices touches nothing else, and without this the browser would fetch the
     // on-disk assets.json and never hear the pack.
     if (p.voices && Object.keys(p.voices).length) out.add('assets');
+    // 助战 pool entries are merged into `support` (mergeWorkshopSupport) — the browser picks 助战 from that file.
+    if (p.support && p.support.length) out.add('support');
   }
   return out;
 }

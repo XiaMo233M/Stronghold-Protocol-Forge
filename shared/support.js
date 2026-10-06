@@ -21,6 +21,8 @@
 export const SUPPORT_LIMITS = Object.freeze({ entries: 16, idLen: 64 });
 
 const isTier = (t) => Number.isInteger(t) && t >= 1 && t <= 6;
+/** The same predicate, exported for the workshop overlay (a pack's 助战 tier must be one of these): one rule, one place. */
+export const isSupportTier = isTier;
 const isPlainObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const isChessId = (v) => typeof v === 'string' && v.length > 0 && v.length <= SUPPORT_LIMITS.idLen && /^[A-Za-z0-9_\-.:]+$/.test(v);
 

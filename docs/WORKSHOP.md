@@ -46,6 +46,7 @@ workshop/<packId>/
 | `gameVersion` | 否 | 作者针对的游戏版本，便于排查 |
 | `content` | 二选一 | 这个包提供哪些数据文件（上表的名字） |
 | `voices` | 二选一 | 这个包为哪些干员提供语音，见 §1.4；`content` 与 `voices` 至少有一个非空 |
+| `support` | 否 | 这个包自己新增的、应当进助战卡池的干员 id 列表，见 §2.1；阶由记录推导 |
 | `overrides` | 否 | 允许覆盖的官方记录，格式 `"<file>:<id>"`，例如 `"chess:chess_char_1_01_a"` |
 
 `content` 只接受上表列出的文件。**`config` 被刻意排除**：一个能改写经济、回合表或难度参数的包改的是规则而不是内容，那需要另一套审查机制，不在本功能范围内。
@@ -122,6 +123,10 @@ workshop/*/ ──┘        （冻结之前）              └─→ /data/<fi
 
 玩家侧仍然是**双重开关**：`npm run assets -- --voices` 决定这个安装有没有官方语音，设置里的「干员语音 VOICE」默认 0（关闭）决定这一局有没有语音。两点都满足时才听得到包里的语音。
 
+**写这个字段的图形入口是编辑器的第七个页面 `/voice.html`**（`docs/EDITOR.md` §语音）：它就地改 `pack.json` 的 `voices`，
+其余字段、键序与缩进原样保留，并且只接受**包内 `assets/` 下真实存在、且扩展名在服务端媒体白名单里**的文件；
+它在编辑器里就能试听 —— 用的就是客户端会请求的那个 URL。
+
 ### 1.5 作者接口（面向人，也面向 AI）
 
 手写 `data/chess.json` 形状的记录需要约 30 个字段，其中大部分是机械的。作者层把这部分推导掉：
@@ -167,7 +172,8 @@ node tools/workshop-validate.mjs my-pack
 | **作者接口**：spec → 合法记录、机器可读校验、模板 prompt、校验 CLI | ✅ 已实现（`test/chessAuthoring.test.js`） |
 | **行为层**：包内 `kits/<chessId>.js` 接入 `battle.on(...)` 钩子总线 | ✅ 已实现（见 §4） |
 | **语音包（`voices`）**：汇总进 `assets.audio.voice`、随合并的 `assets.json` 送达客户端 | ✅ 已实现（`test/workshopVoices.test.js`） |
-| **局外编辑器 UI**：干员 / 地图 / 怪物 / 出怪 / 装备 / 行为层 kit 六个页面 | ✅ 已实现（`editor/`，见 `docs/EDITOR.md`） |
+| **包自带助战（`support`）**：按记录推导阶并入 `data/support.json` 的卡池、随合并的 `support.json` 送达客户端 | ✅ 已实现（`test/workshopSupport.test.js`） |
+| **局外编辑器 UI**：干员 / 地图 / 怪物 / 出怪 / 装备 / 行为层 kit / **语音** 七个页面 | ✅ 已实现（`editor/`，见 `docs/EDITOR.md`） |
 | 工坊包的版本对齐、依赖声明、内容寻址 | ⛔ 未实现（`gameVersion` 目前只是元信息） |
 
 > 行为层是用户的明确选择（「完全开放 battle 钩子 API」）。它与一体化整合包的冲突按**分渠道**解决：官方整合包保持纯净、不含工坊内容；工坊包单独分发，玩家主动安装并知情。**注意：脚本会在客户端执行**（默认 `SP_COMBAT=client`），服务端 `SP_VERIFY` 只能复算结果、不能阻止脚本本身 — 这正是必须分渠道的原因。
@@ -199,6 +205,25 @@ node tools/workshop-validate.mjs my-pack
 | `denyUnknown` | 卡池外一律拒绝（默认 `true`） |
 
 这个文件由服务器维护、**不参与 `build-data`**，改完重启即生效，无需重建 `data/`。
+
+#### 工坊包自带助战（`pack.json.support`）
+
+`data/support.json` 是**这个安装**的决定；工坊包可以**建议**自己新增的哪些干员该进池：
+
+```json
+{ "id": "my-ally", "content": ["chess"], "support": ["chess_char_ws_my_ally_01_a"] }
+```
+
+装载时叠加层把每个 id 按**记录自己的阶**加进 `pool`（`shared/workshop.js` 的 `workshopSupportEntries` / `mergeWorkshopSupport`），
+于是「装包即可选」——不必再手工改 `data/support.json`。两条硬规则：
+
+| 规则 | 为什么 |
+|---|---|
+| **只能声明本包自己新增的干员** | 卡池是安装方的规则决定；允许包把官方干员塞进/移出卡池就等于让内容包改规则。违反记 `SUPPORT_FOREIGN_OPERATOR`（整条被拒，其余照常生效） |
+| **阶由记录推导，清单里不写** | `isSupportChess()` 要求 id 出现在**它自己那一阶**的池子里；清单里手写阶就会出现「写错了但没人报错、该干员静默不可选」。记录没有 1–6 的整数 `tier` 时记 `SUPPORT_TIER_UNKNOWN` |
+
+安装方保留最终决定权：`data/support.json` 里写 `"workshop": false` 即忽略所有包的助战声明（启动日志会写出来）。
+被触及的 `support.json` 会**合并后**发给浏览器（`workshopTouchedFiles`），客户端从那里渲染助战选择界面 —— 与其它工坊内容同一条路径。
 
 ### 2.2 「没有即禁用」的三层含义
 

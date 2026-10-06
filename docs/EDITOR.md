@@ -39,7 +39,7 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
 | `workshop/<pack>/specs/<slug>.json` | **编辑器的源文件**：你填的那份 spec，可反复编辑 |
 | `workshop/<pack>/chess.json` | **生成产物**：由 specs 推导出来，游戏读的是它。请不要手改（和 `data/*.json` 同样的态度） |
 | `workshop/<pack>/kits/<chessId>.js` | **行为层 kit**：它既是源、也是游戏加载的产物（见下面「kit 编辑器」），保存时会在文件开头补写署名头 |
-| `workshop/<pack>/pack.json` | 首次保存时自动创建（`id` 必须等于目录名） |
+| `workshop/<pack>/pack.json` | 首次保存时自动创建（`id` 必须等于目录名）；**语音编辑器就地更新它的 `voices` 字段**，其余字段、键序与缩进原样保留 |
 | `data/support.json` | 只在动「是否助战」开关时修改——它是**手工维护的服务端配置**，不是 `build-data` 的产物 |
 
 `data/` 下由 `tools/build-data.mjs` 生成的其它文件**永不改动**。
@@ -49,7 +49,7 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
 
 ## 界面
 
-编辑器共六个页面，右上角可互相跳转：
+编辑器共七个页面，右上角可互相跳转：
 
 | 页面 | 用途 |
 |---|---|
@@ -59,6 +59,7 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
 | `/wave.html` | **出怪**设计器（时间轴 + 明细表） |
 | `/item.html` | **装备**编辑器（一件装备 = 一个 spec = 两条记录） |
 | `/kit.html` | **kit（行为层）**编辑器（直接编辑 `kits/<chessId>.js` 的代码，静态校验） |
+| `/voice.html` | **语音**编辑器（`pack.json` 的 `voices` 字段：干员 × 槽位 × 文件） |
 
 ### 干员编辑器（首页）
 
@@ -206,6 +207,46 @@ node tools/workshop-validate.mjs workshop     # kits 层：静态检查 + 真实
 也绝不会动你自己写在文件里的注释。完整规则见下面的「Option 署名」一节，实现在 `shared/forgeNotice.js` 的
 `forgeHeader` / `parseForgeHeader` / `stampForgeHeader` 三个纯函数里。
 
+## 语音（voice lines）编辑器
+
+第七个页面：**`/voice.html`**。它和前六页都不一样：`voices` **不是单独的文件**，而是 `pack.json` 里的一个字段
+（`{ <干员id>: { <槽位>: ["<assets/ 内的相对路径>", …] } }`，见 `docs/WORKSHOP.md` §1.4），而 `pack.json` 本身就是
+游戏读的清单 —— 加载时 `shared/workshop.js` 把它并进 `assets.audio.voice`，客户端从 `/workshop-assets/<包>/<路径>`
+取文件。所以这一页**没有 spec、没有可推导的字段**，它就地编辑那份清单。
+
+- **左栏**：每个工坊包一条 —— 名称、包 id、已有多少条语音、有没有 `assets/`、清单能不能被加载器接受
+  （不能就直接显示校验器给的 code，例如 `ASSETS_NEED_LICENSE`）。
+- **中栏**：这个包已经配了哪些语音。每个干员一张卡，每个槽位一段，每条语音一行；**文件不存在**、
+  **扩展名不在允许的类型里**、**不是音频**、**槽位不属于 `VOICE_SLOTS`** 都在行上标出来 ——
+  这四种在游戏里都是**无声失败**。每条可以**试听**或**删除本行**，每个槽位可以**清空**。
+- **右栏**：加一条 —— **干员 id**（下拉列出官方干员 + 这个包 `chess.json` 里自己新增的干员，不必背 id）、
+  **槽位**（下拉，来自 `/api/voices` 的 `slots`）、**文件**（下拉列出该包 `assets/` 下真实存在的文件，并标明哪些是音频）。
+  下面还列出该包 `assets/` 的全部文件，点一下就填进输入框。
+- **试听走的就是客户端那条通路**：编辑器提供一条**只读、只服务音频**的 `/workshop-assets/<包>/<路径>`
+  （与游戏服务器同前缀，扩展名取 `server/index.js` 白名单的音频部分），所以**试听用的 URL 就是游戏里会播的那个 URL**。
+  没有目录列表，`..`、点开头的段一律拒绝，`pack.json` 本身不在那条通路上。素材仍然由作者自己拷进 `<pack>/assets/`：
+  **编辑器没有上传接口**（那会是另一类攻击面）。
+- **写入规则**（全部在服务端强制；拒绝时 **400，且一个字节都不写**）：包 id 合法；干员 id 匹配 `[A-Za-z0-9_-]{1,64}`；
+  槽位 ∈ `VOICE_SLOTS`（`shared/constants.js`，**不复制**）；路径是包内 `assets/` 的相对路径（不得以 `/`、反斜杠、
+  盘符开头，不得含 `.` / `..` / 空段 / 点开头的隐藏段）；**文件必须真的存在**；扩展名必须在 `server/index.js` 的
+  `WORKSHOP_ASSET_TYPES` 里（**引用同一份表**）；包没有 `assets/` 文件夹时直接拒绝 ——
+  否则写出的清单会被 `VOICE_NEEDS_ASSETS` 整包丢掉。
+- **其余字段原样保留**：写回用的是编辑器自己的 `writeJson`，所以 `id` / `name` / `version` / `author` / `license` /
+  `description` / `gameVersion` / `content` / `overrides` 的**值、键序与两空格缩进**都不变；
+  新出现的 `voices` 键追加在末尾；**绝不会给包补一条它没有声明过的 `content`**。
+- **空数组 = 删除**：给一个槽位传空数组就删除它；一个干员没有槽位了，它的 key 一并删除（空 key 回答不了
+  「这个包给谁配了音」）；最后一个也没有时 `voices` 整个删除。只有「清空」这一类写入允许把包变成加载器会拒绝的
+  形态（例如 `content: []` 的助战语音包被清空后就是 `EMPTY_PACK`），这时响应里给 `warnings` ——
+  **一条删不掉的语音，比一个被校验器报告的包更糟**。
+- **手工写坏的槽位只能手工改**：`pack.json` 里若写着 `VOICE_SLOTS` 之外的槽位，两个接口都会按规则拒绝，
+  页面会把该槽位的按钮禁用并说明原因。
+
+命令行等价路径：
+
+```powershell
+node tools/workshop-validate.mjs workshop     # 语音层：文件是否存在、扩展名是否可服务、槽位与干员 id 是否合法
+```
+
 ## 助战（客户端）
 
 助战的选择由**服务端**声明并强制：卡池之外的干员是**禁用**的，请求会被整条拒绝，**没有回退**（回退会让一个被禁用的干员变成已发放）。
@@ -276,6 +317,9 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 | POST | `/api/kits/preview` | `{ pack, id, source }` → **仅静态**校验（不写盘，**不 import / 不执行**你的文件） |
 | POST | `/api/packs/:pack/kits` | `{ id, source }` → 写 `kits/<id>.js`，并在缺少署名头时补写 |
 | DELETE | `/api/packs/:pack/kits/:id` | 删除该 kit 文件 |
+| GET | `/api/voices`（可选 `?pack=`） | 各包的语音状态 + **槽位词表** + **允许的扩展名** + 可选干员 id + 包内 `assets/` 真实存在的文件 |
+| POST | `/api/packs/:pack/voices` | `{ charId, slot, paths }` → 设置**一个槽位**（空数组即删除），就地更新 `pack.json` 的 `voices` |
+| DELETE | `/api/packs/:pack/voices/:charId/:slot` | 删除一个干员的一个槽位（不存在则报告 `removed: false`，不重写文件） |
 
 ## Option 署名（`_meta`）
 
@@ -320,6 +364,7 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 ## 当前不包含
 
 - 助战**名额**（`slots`）的编辑——改 `data/support.json` 的 `slots` 字段或编辑器里的「是否助战」开关
+- 语音**素材的上传**——编辑器只写路径，音频文件由作者自己放进 `<pack>/assets/`（没有二进制上传接口）
 - kit 的**真实导入检查**——编辑器只做静态校验（见上），把文件真的 `import` 一遍是 `tools/workshop-validate.mjs` 的事
 - kit 的**沙箱与审查**——按分渠道策略不做（脚本会在客户端执行，见 `docs/WORKSHOP.md` §4）
 - 任何鉴权
@@ -330,7 +375,7 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 |---|---|---|
 | `editor/`（本文件） | 人，图形界面 | 写 spec，生成记录 |
 | `tools/workshop-scaffold.mjs` | 人 / 脚本 / AI | 同样的 spec → 同样的记录（无界面） |
-| `tools/workshop-validate.mjs` | 人 / CI / AI | 分层校验：格式 → 语义 → 真实引擎 → 每种内容一层（kits / 地图 / 怪物 / 出怪 / 装备） |
+| `tools/workshop-validate.mjs` | 人 / CI / AI | 分层校验：格式 → 语义 → 真实引擎 → 每种内容一层（kits / 地图 / 怪物 / 出怪 / 装备 / 语音） |
 | `docs/prompts/operator-pack.md` | 任意 AI | 模板 prompt，让 AI 产出 spec |
 
 编辑器与 CLI 共用同一批 `shared/*Authoring.js`（干员 / 地图 / 怪物 / 出怪 / 装备 / kit），所以**规则不会漂移** ——

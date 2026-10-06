@@ -48,6 +48,7 @@ export const WORKSHOP_MEDIA_PREFIX = '/workshop-assets/';
 const RECORD_ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
 
 import { VOICE_SLOTS } from './constants.js';
+import { isSupportTier } from './support.js';
 
 const isPlainObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const fail = (error, detail) => ({ ok: false, error, detail });
@@ -121,6 +122,21 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (!content.length && !Object.keys(voiceLines).length) {
     return fail('EMPTY_PACK', `content must name at least one of: ${WORKSHOP_CONTENT_FILES.join(', ')} — or the pack must declare voices`);
   }
+  // 助战卡池贡献 (docs/WORKSHOP.md §2): the operators of THIS pack that should be selectable as 助战. The tier is NOT
+  // written here — it is derived from the pack's own chess record, exactly like every other derived field, so a tier can
+  // never disagree with the record (a mismatch would silently disable the operator: shared/support.js isSupportChess
+  // requires the id to sit under its own tier).
+  const support = raw.support === undefined ? [] : raw.support;
+  if (!Array.isArray(support)) {
+    return fail('SUPPORT_BAD_SHAPE', 'support must be an array of operator ids this pack adds, e.g. ["chess_char_ws_my_op_a"]');
+  }
+  const supportIds = [];
+  for (const id of support) {
+    if (typeof id !== 'string' || !RECORD_ID_RE.test(id)) {
+      return fail('SUPPORT_BAD_ID', `"${String(id)}" is not a valid operator id`);
+    }
+    if (!supportIds.includes(id)) supportIds.push(id);
+  }
   return {
     ok: true,
     pack: {
@@ -135,6 +151,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
       content,
       overrides,
       voices: voiceLines,
+      support: supportIds,
     },
   };
 }
@@ -200,6 +217,94 @@ export function workshopVoiceIndex(packs, { prefix = WORKSHOP_MEDIA_PREFIX } = {
   return out;
 }
 
+/** Pack ids are slugs, so a plain code-unit compare is a stable, locale-independent order. */
+const byPackId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+/**
+ * Resolve every pack's 助战 declaration (`pack.json.support`) into the pool entries it asks for, plus the reasons a
+ * declaration is refused (docs/WORKSHOP.md §2).
+ *
+ * ONE rule, two callers: the overlay (`mergeWorkshopSupport`, which actually publishes them) and
+ * `tools/workshop-validate.mjs` (which reports them to the author). Two restrictions, both deliberate:
+ *   * only an operator THIS pack adds may enter the pool — a pack must not change which OFFICIAL operators are
+ *     available as 助战 (that is a rules decision, and the pool belongs to the install);
+ *   * the TIER is derived from the record, never written in the manifest, so it cannot disagree with it — a mismatch
+ *     would silently disable the operator, because shared/support.js `isSupportChess` requires an id to sit under the
+ *     tier its record declares.
+ *
+ * @param {Readonly<Record<string, any>>} data merged game data (the tier is read from the MERGED chess record)
+ * @param {Array<{ id: string, support?: string[], files?: Record<string, Record<string, object>> }>} packs
+ * @returns {{ entries: Array<{ pack: string, id: string, tier: number }>, errors: Array<{ pack: string, id: string, code: string, reason: string }> }}
+ */
+export function workshopSupportEntries(data, packs) {
+  const entries = [];
+  const errors = [];
+  const chess = isPlainObj(data) && isPlainObj(data.chess) ? data.chess : {};
+  for (const pack of (Array.isArray(packs) ? packs : []).filter((p) => p && typeof p.id === 'string' && p.id).sort(byPackId)) {
+    const own = isPlainObj(pack.files) && isPlainObj(pack.files.chess) ? pack.files.chess : {};
+    for (const id of Array.isArray(pack.support) ? pack.support : []) {
+      if (!Object.hasOwn(own, id)) {
+        errors.push({
+          pack: pack.id, id, code: 'SUPPORT_FOREIGN_OPERATOR',
+          reason: `"${id}" is not an operator this pack adds — only a pack's OWN operators may enter the 助战 pool`,
+        });
+        continue;
+      }
+      const rec = isPlainObj(chess[id]) ? chess[id] : own[id];
+      const tier = rec ? rec.tier : null;
+      if (!isSupportTier(tier)) {
+        errors.push({
+          pack: pack.id, id, code: 'SUPPORT_TIER_UNKNOWN',
+          reason: `"${id}" has no integer tier 1–6 (got ${JSON.stringify(tier)}), so it can never be a 助战`,
+        });
+        continue;
+      }
+      entries.push({ pack: pack.id, id, tier });
+    }
+  }
+  return { entries, errors };
+}
+
+/**
+ * Publish the 助战 pool entries the packs ask for into `data/support.json` (docs/WORKSHOP.md §2) — this is what makes a
+ * distributed pack SELF-CONTAINED: without it, a player who installs a pack that adds a 助战 operator would also have to
+ * hand-edit `data/support.json` before the operator could be picked.
+ *
+ * The installer keeps the last word: `"workshop": false` in `data/support.json` turns every pack contribution off.
+ */
+function mergeWorkshopSupport(data, packs, report) {
+  const { entries, errors } = workshopSupportEntries(data, packs);
+  for (const e of errors) report.errors.push({ pack: e.pack, file: 'support', id: e.id, reason: e.reason });
+  if (!entries.length) return;
+  const support = isPlainObj(data.support) ? data.support : null;
+  if (!support) {
+    const seen = new Set();
+    for (const e of entries) {
+      if (seen.has(e.pack)) continue;
+      seen.add(e.pack);
+      report.errors.push({
+        pack: e.pack, file: 'support', id: e.id,
+        reason: 'this pack declares 助战 operators, but data/support.json is missing — 助战 is off for this install',
+      });
+    }
+    return;
+  }
+  if (support.workshop === false) { report.supportOff = true; return; }
+  const pool = { ...(isPlainObj(support.pool) ? support.pool : {}) };
+  /** @type {Record<string, string[]>} */
+  const added = {};
+  for (const { pack, id, tier } of entries) {
+    const key = String(tier);
+    const list = Array.isArray(pool[key]) ? pool[key].slice() : [];
+    if (!list.includes(id)) list.push(id);
+    list.sort();
+    pool[key] = list;
+    (added[pack] ||= []).push(id);
+  }
+  data.support = { ...support, pool };
+  report.support = added;
+}
+
 /**
  * Apply every pack's content on top of the official data and return a NEW top-level object (the input is never
  * mutated; the caller freezes the result). Official ids are only replaced when the pack declared them in `overrides`;
@@ -242,6 +347,7 @@ export function applyWorkshop(base, packs) {
   }
   linkWorkshopStages(out, report);
   mergeWorkshopVoices(out, packs, report);
+  mergeWorkshopSupport(out, packs, report);
   for (const list of Object.values(report.added)) list.sort();
   for (const list of Object.values(report.overridden)) list.sort();
   return { data: out, report };
@@ -343,8 +449,11 @@ export function workshopSummary(report) {
     if (files.length) bits.push(files.join(', '));
     const voices = report.voices && report.voices[p.id];
     if (voices) bits.push(`${voices} voice line${voices === 1 ? '' : 's'}`);
+    const support = report.support && report.support[p.id];
+    if (support) bits.push(`助战 +${support.length}`);
     return `${p.name}(${p.id}): ${bits.length ? bits.join(', ') : 'nothing'}`;
   });
+  if (report.supportOff) parts.push('助战 pool contributions off (support.json "workshop": false)');
   if (report.errors.length) parts.push(`${report.errors.length} rejected record(s)`);
   return parts.join('; ');
 }

@@ -38,6 +38,11 @@ import {
   ITEM_TYPES, ITEM_CATEGORIES, COUNT_TYPES, ITEM_DURATIONS, UPGRADE_NUMS,
 } from '../shared/itemAuthoring.js';
 import { loadWorkshop, WORKSHOP_DIR } from '../server/workshop.js';
+// The pack-media allowlist lives with the route that serves it (server/index.js). The voice page must not keep a second
+// copy: a file the editor accepts but that route refuses is a line that 404s in the game with nothing reporting it.
+import { WORKSHOP_ASSET_TYPES } from '../server/index.js';
+import { normalizePackManifest, WORKSHOP_MEDIA_PREFIX } from '../shared/workshop.js';
+import { VOICE_SLOTS } from '../shared/constants.js';
 import { withForgeMeta, stampForgeHeader, parseForgeHeader } from '../shared/forgeNotice.js';
 import {
   HOOK_EVENTS, KIT_FORBIDDEN_GLOBALS, validateKit, kitErrors, hookNamesInSource,
@@ -525,6 +530,132 @@ async function toggleSupport(supportFile, chessId, tier, enabled) {
   list.sort();
   await writeJson(supportFile, raw);
   return normalizeSupportConfig(raw);
+}
+
+// ---- 语音 (voices) -----------------------------------------------------------------------------------
+//
+// The one layer that is not a file of its own: `voices` is a FIELD of `pack.json`
+// (`{ <charId>: { <slot>: ["<path inside assets/>", …] } }`, docs/WORKSHOP.md §1.4) and the manifest IS the artifact —
+// shared/workshop.js merges it into `assets.audio.voice` at load time, so there is nothing to derive and no spec/artifact
+// pair to keep apart. The page therefore edits `pack.json` IN PLACE through the module's own `writeJson`, which keeps
+// the file's key order and 2-space indentation: saving a voice line must not reformat, reorder or drop `content`,
+// `overrides` or the metadata.
+//
+// Two rules exist because their failure is silent: a line must be a file that really sits under the pack's `assets/`
+// (the client would 404 on it and nothing in the game reports that), and its extension must be in the pack-media
+// allowlist of server/index.js — reused, never copied.
+
+const VOICE_ASSETS_DIR = 'assets';
+/** The charset shared/workshop.js enforces on a `voices` key (`VOICE_BAD_CHAR_ID`) — the same one, so no drift. */
+const VOICE_CHAR_ID_RE = /^[A-Za-z0-9_\-]{1,64}$/;
+/** A pack's art folder is browsed only to OFFER files; a huge one must not become a huge response. */
+const MAX_VOICE_ASSET_FILES = 500;
+/** The audio half of the pack-media allowlist: what the editor's own preview route may serve (the game serves all of it). */
+const AUDIO_TYPES = new Set([...WORKSHOP_ASSET_TYPES].filter(([, type]) => type.startsWith('audio/')).map(([ext]) => ext));
+
+/** A status-carrying refusal; the handler renders its `message` as the response body. The page shows it verbatim. */
+const refuse = (status, message) => Object.assign(new Error(message), { status });
+
+/**
+ * Why a string may not be used as a voice line, in Chinese for the form — or null when it is acceptable.
+ * The same rule the /workshop-assets route (and `VOICE_PATH_UNSAFE`) applies: relative, inside `assets/`, no traversal.
+ */
+function voicePathProblem(p) {
+  if (typeof p !== 'string' || !p) return '必须是非空字符串';
+  if (p.startsWith('/')) return '不能以 / 开头（路径相对包的 assets/ 文件夹）';
+  if (p.includes('\\')) return '不能含反斜杠（请用 / 分隔）';
+  if (/^[A-Za-z]:/.test(p)) return '不能以盘符开头';
+  if (p.includes('\0')) return '不能含空字符';
+  const segments = p.split('/');
+  if (segments.some((s) => s === '..' || s === '.')) return '不能含 . 或 .. 路径段';
+  if (segments.some((s) => s === '')) return '不能含空路径段（不能以 / 结尾或出现 //）';
+  // 服务端的素材路由会拒绝以点开头的段，所以这种文件存在也播放不了 —— 在这里就说清楚，而不是让作者去猜
+  if (segments.some((s) => s.startsWith('.'))) return '不能有以点开头的隐藏文件或文件夹';
+  return null;
+}
+
+/**
+ * Every file under `<pack>/assets/**`, with what the two routes would do with it. Read-only and bounded; a folder the
+ * process cannot read yields an empty list, because this list is only a hint — the writing path re-checks existence.
+ */
+function packAssetFiles(root, packId) {
+  const dir = path.join(root, packId, VOICE_ASSETS_DIR);
+  const out = [];
+  const walk = (current, rel, depth) => {
+    if (depth > 8 || out.length >= MAX_VOICE_ASSET_FILES) return;
+    for (const name of fs.readdirSync(current).sort()) {
+      if (out.length >= MAX_VOICE_ASSET_FILES) return;
+      if (name.startsWith('.')) continue; // the media route refuses dot-segments, so they can never be played
+      const abs = path.join(current, name);
+      const relPath = rel ? `${rel}/${name}` : name;
+      const st = fs.statSync(abs);
+      if (st.isDirectory()) { walk(abs, relPath, depth + 1); continue; }
+      if (!st.isFile()) continue;
+      const ext = path.extname(name).toLowerCase();
+      out.push({
+        path: relPath, ext, bytes: st.size,
+        audio: AUDIO_TYPES.has(ext), serveable: WORKSHOP_ASSET_TYPES.has(ext),
+      });
+    }
+  };
+  try {
+    if (fs.existsSync(dir)) walk(dir, '', 0);
+  } catch { /* unreadable folder: the picker just offers nothing */ }
+  return out;
+}
+
+/**
+ * The operator ids a line may name without being typed: the official operators plus the ones the pack itself adds in
+ * its `chess.json` (a 助战 operator usually exists nowhere else — the author should not have to remember its id).
+ */
+function voiceOperatorChoices(root, official, packId = null) {
+  /** @type {Map<string, { id: string, name: string, tier: number|null, from: string }>} */
+  const out = new Map();
+  for (const op of official) out.set(op.id, { id: op.id, name: op.name ?? op.id, tier: op.tier ?? null, from: 'official' });
+  const packs = packId
+    ? [packId]
+    : (fs.existsSync(root) ? fs.readdirSync(root).sort().filter((d) => PACK_ID_RE.test(d)) : []);
+  for (const p of packs) {
+    for (const [id, rec] of Object.entries(readJson(path.join(root, p, 'chess.json'), {}) || {})) {
+      if (!out.has(id)) out.set(id, { id, name: rec?.name ?? id, tier: rec?.tier ?? null, from: p });
+    }
+  }
+  return [...out.values()].sort((a, b) => ((a.tier ?? 99) - (b.tier ?? 99)) || a.id.localeCompare(b.id));
+}
+
+/**
+ * One pack's voice state: the declaration as WRITTEN (so the page can remove a line the validator refuses), the files
+ * that really exist, and the manifest validator's own verdict — the page never re-implements the format rules.
+ */
+function voicePackState(root, packId) {
+  const packDir = path.join(root, packId);
+  const manifest = readJson(path.join(packDir, 'pack.json'), null);
+  const hasAssets = fs.existsSync(path.join(packDir, VOICE_ASSETS_DIR));
+  const checked = manifest === null ? null : normalizePackManifest(manifest, packId, { hasAssets });
+  const rawVoices = manifest && manifest.voices && typeof manifest.voices === 'object' && !Array.isArray(manifest.voices)
+    ? manifest.voices : {};
+  /** @type {Record<string, Record<string, string[]>>} */
+  const voices = {};
+  for (const [charId, slots] of Object.entries(rawVoices)) {
+    if (!slots || typeof slots !== 'object' || Array.isArray(slots)) continue;
+    const clean = {};
+    for (const [slot, files] of Object.entries(slots)) {
+      // the single-string shorthand is legal in the manifest; it is shown as a list because that is what the page edits
+      clean[slot] = (Array.isArray(files) ? files : [files]).filter((f) => typeof f === 'string');
+    }
+    voices[charId] = clean;
+  }
+  return {
+    id: packId,
+    name: (manifest && manifest.name) || packId,
+    license: (manifest && manifest.license) || null,
+    content: Array.isArray(manifest && manifest.content) ? manifest.content : [],
+    hasAssets,
+    voices,
+    files: packAssetFiles(root, packId),
+    ok: checked ? checked.ok === true : false,
+    issue: checked && !checked.ok ? { code: checked.error, detail: checked.detail } : null,
+  };
 }
 
 async function readBody(req) {
@@ -1220,6 +1351,125 @@ export async function createEditorServer(opts = {}) {
       return sendJson(res, 200, { source, id: kitId, pack: packId });
     }
 
+    // ---- 语音 (voices): the manifest field itself, plus the files that make it playable -----------------
+    //
+    // `?pack=<id>` narrows the answer to one pack (and to that pack's own operator ids); without it the page gets every
+    // pack, so its left column can list them all.
+    if (p === '/api/voices' && method === 'GET') {
+      const asked = url.searchParams.get('pack');
+      if (asked !== null && !PACK_ID_RE.test(asked)) throw refuse(400, '工坊包 id 不合法（只能是字母、数字、下划线和短横线）');
+      if (asked !== null && !fs.existsSync(path.join(root, asked, 'pack.json'))) throw refuse(404, `工坊包 "${asked}" 不存在`);
+      const packIds = asked !== null
+        ? [asked]
+        : (fs.existsSync(root) ? fs.readdirSync(root).sort().filter((d) => PACK_ID_RE.test(d) && fs.existsSync(path.join(root, d, 'pack.json'))) : []);
+      return sendJson(res, 200, {
+        // the page builds a preview URL from this prefix, so a preview is the identical URL the game client will ask for
+        mediaPrefix: WORKSHOP_MEDIA_PREFIX,
+        // the ONE slot vocabulary (shared/constants.js) and the ONE media allowlist (server/index.js): never a copy
+        slots: [...VOICE_SLOTS],
+        extensions: [...WORKSHOP_ASSET_TYPES.keys()],
+        audioExtensions: [...AUDIO_TYPES],
+        operators: voiceOperatorChoices(root, official, asked),
+        packs: packIds.map((id) => voicePackState(root, id)),
+      });
+    }
+
+    // set ONE slot of ONE operator. An empty `paths` clears the slot; an operator left without slots loses its key.
+    if (p.startsWith('/api/packs/') && p.endsWith('/voices') && method === 'POST') {
+      const packId = p.slice('/api/packs/'.length, -'/voices'.length);
+      if (!PACK_ID_RE.test(packId)) throw refuse(400, '工坊包 id 不合法（只能是字母、数字、下划线和短横线）');
+      const packDir = path.join(root, packId);
+      const manifestPath = path.join(packDir, 'pack.json');
+      const manifest = readJson(manifestPath, null);
+      if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) throw refuse(400, `工坊包 "${packId}" 不存在（没有可读的 pack.json）`);
+      const { charId, slot, paths } = await readBody(req);
+      if (typeof charId !== 'string' || !VOICE_CHAR_ID_RE.test(charId)) {
+        throw refuse(400, '干员 id 不合法（只能是字母、数字、下划线、短横线，1–64 位）');
+      }
+      if (typeof slot !== 'string' || !VOICE_SLOTS.includes(slot)) {
+        throw refuse(400, `槽位不合法（可用槽位：${VOICE_SLOTS.join('、')}）`);
+      }
+      if (!Array.isArray(paths)) throw refuse(400, 'paths 必须是数组（清空一个槽位请传空数组）');
+      // 有 voices 就必须有 assets/（shared/workshop.js VOICE_NEEDS_ASSETS）；先拒，别写出一个会被加载器整包丢掉的清单
+      if (!fs.existsSync(path.join(packDir, VOICE_ASSETS_DIR))) {
+        throw refuse(400, `这个包还没有 assets/ 文件夹：语音文件必须先放进 ${packId}/assets/，否则 pack.json 会被 VOICE_NEEDS_ASSETS 拒绝`);
+      }
+      /** @type {string[]} */
+      const lines = [];
+      for (const raw of paths) {
+        const problem = voicePathProblem(raw);
+        if (problem) throw refuse(400, `"${String(raw)}" 不能作为语音路径：${problem}`);
+        const ext = path.extname(raw).toLowerCase();
+        if (!WORKSHOP_ASSET_TYPES.has(ext)) {
+          throw refuse(400, `"${raw}" 不是包内媒体允许的类型（可用扩展名：${[...WORKSHOP_ASSET_TYPES.keys()].join(' ')}）`);
+        }
+        const abs = path.join(packDir, VOICE_ASSETS_DIR, ...raw.split('/'));
+        if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
+          throw refuse(400, `"${raw}" 在 ${packId}/assets/ 下不存在（请先自己把文件放进去，编辑器不上传素材）`);
+        }
+        lines.push(raw);
+      }
+
+      const next = { ...manifest };
+      const voices = manifest.voices && typeof manifest.voices === 'object' && !Array.isArray(manifest.voices)
+        ? { ...manifest.voices } : {};
+      if (lines.length) {
+        const slots = voices[charId] && typeof voices[charId] === 'object' && !Array.isArray(voices[charId]) ? { ...voices[charId] } : {};
+        slots[slot] = [...new Set(lines)].sort();
+        voices[charId] = slots;
+      } else if (voices[charId] && typeof voices[charId] === 'object' && !Array.isArray(voices[charId])) {
+        const slots = { ...voices[charId] };
+        delete slots[slot];
+        // 一个干员没有槽位了就不该留下空对象：空 key 会让「这个包给谁配了音」这个问题没有答案
+        if (Object.keys(slots).length) voices[charId] = slots; else delete voices[charId];
+      }
+      if (Object.keys(voices).length) next.voices = voices; else delete next.voices;
+
+      // Validate the manifest we are ABOUT to write, so a save that would make the pack unloadable is refused with
+      // nothing written. An edit that only REMOVES is never blocked on this: a line the author cannot delete is worse
+      // than a pack the loader reports (see the response `warnings`), and a removal is exactly how one fixes a broken
+      // manifest.
+      const checked = normalizePackManifest(next, packId, { hasAssets: true });
+      const clearing = lines.length === 0;
+      if (!checked.ok && !clearing) {
+        throw refuse(400, `保存后 pack.json 会被加载器拒绝（${checked.error}）：${checked.detail}`);
+      }
+      await writeJson(manifestPath, next);
+      return sendJson(res, 200, {
+        ok: true, pack: packId, charId, slot,
+        paths: [...new Set(lines)].sort(),
+        voices: (next.voices && typeof next.voices === 'object') ? next.voices : {},
+        warnings: checked.ok ? [] : [`pack.json 现在会被加载器拒绝（${checked.error}）：${checked.detail}`],
+      });
+    }
+
+    // remove one slot of one operator (idempotent: a slot that is not there is reported, not rewritten)
+    if (p.startsWith('/api/packs/') && p.includes('/voices/') && method === 'DELETE') {
+      const rest = p.slice('/api/packs/'.length);
+      const cut = rest.indexOf('/voices/');
+      const packId = rest.slice(0, cut);
+      const parts = rest.slice(cut + '/voices/'.length).split('/').map((s) => decodeURIComponent(s));
+      if (!PACK_ID_RE.test(packId) || parts.length !== 2) throw refuse(400, '路径必须是 /api/packs/<包>/voices/<干员id>/<槽位>');
+      const [charId, slot] = parts;
+      if (!VOICE_CHAR_ID_RE.test(charId)) throw refuse(400, '干员 id 不合法（只能是字母、数字、下划线、短横线，1–64 位）');
+      if (!VOICE_SLOTS.includes(slot)) throw refuse(400, `槽位不合法（可用槽位：${VOICE_SLOTS.join('、')}）`);
+      const manifestPath = path.join(root, packId, 'pack.json');
+      const manifest = readJson(manifestPath, null);
+      if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) throw refuse(400, `工坊包 "${packId}" 不存在（没有可读的 pack.json）`);
+      const voices = manifest.voices && typeof manifest.voices === 'object' && !Array.isArray(manifest.voices)
+        ? { ...manifest.voices } : {};
+      const slots = voices[charId] && typeof voices[charId] === 'object' && !Array.isArray(voices[charId]) ? { ...voices[charId] } : {};
+      const removed = Object.hasOwn(slots, slot);
+      if (removed) {
+        delete slots[slot];
+        if (Object.keys(slots).length) voices[charId] = slots; else delete voices[charId];
+        const next = { ...manifest };
+        if (Object.keys(voices).length) next.voices = voices; else delete next.voices;
+        await writeJson(manifestPath, next);
+      }
+      return sendJson(res, 200, { ok: true, pack: packId, charId, slot, removed, voices });
+    }
+
     // ---- 3D 预览的只读素材通路 ----------------------------------------------------------------------
     //
     // The map editor can show a map in the game's OWN 3D renderer (public/js/render/board3d). That is the whole point:
@@ -1235,6 +1485,31 @@ export async function createEditorServer(opts = {}) {
     // Nothing is writable, nothing is listed, and `..`/dot-segments are refused.
     // When the art is absent the probe fails and the editor stays on the 2D canvas — the game client's own fallback.
     if (method === 'GET' || method === 'HEAD') {
+      // 语音试听 (docs/EDITOR.md §语音): a map or an item previews the GAME's art through the mounts below, but a voice
+      // line lives in the pack's OWN assets/ — which the game serves from /workshop-assets/<pack>/<path> (server/index.js)
+      // and the editor served nowhere, so the page could list lines it could not play. This is that route, narrowed on
+      // purpose: the SAME prefix the client will really use (a preview URL is the production URL), read-only, no
+      // directory listing, no traversal and no dot-segments — and only the AUDIO half of the one allowlist the game
+      // route uses, so the editor cannot serve a pack's `.js`/`.png` either.
+      if (p.startsWith(WORKSHOP_MEDIA_PREFIX)) {
+        const segments = p.slice(WORKSHOP_MEDIA_PREFIX.length).split('/').filter((s) => s.length > 0);
+        const packId = segments.shift();
+        const ext = segments.length ? path.extname(segments[segments.length - 1]).toLowerCase() : '';
+        const bad = !packId || !PACK_ID_RE.test(packId) || !segments.length
+          || segments.some((s) => s === '..' || s === '.' || s.startsWith('.')) || !AUDIO_TYPES.has(ext);
+        if (bad) throw Object.assign(new Error('not found'), { status: 404 });
+        const dir = path.join(root, packId, VOICE_ASSETS_DIR);
+        const abs = path.join(dir, ...segments);
+        if (!abs.startsWith(dir + path.sep)) throw Object.assign(new Error('forbidden'), { status: 403 });
+        let body;
+        try {
+          if (!fs.statSync(abs).isFile()) throw new Error('not a file');
+          body = await fsp.readFile(abs);
+        } catch { throw Object.assign(new Error('not found'), { status: 404 }); }
+        res.writeHead(200, { 'Content-Type': WORKSHOP_ASSET_TYPES.get(ext), 'Content-Length': body.length, 'Cache-Control': 'no-cache' });
+        res.end(method === 'HEAD' ? undefined : body);
+        return;
+      }
       const previewMounts = [
         { prefix: '/client/', root: path.join(REPO_ROOT, 'public'), only: CLIENT_PREVIEW_TYPES },
         { prefix: '/vendor/', root: path.join(REPO_ROOT, 'public', 'vendor'), only: CLIENT_PREVIEW_TYPES },
