@@ -65,6 +65,53 @@ export function subProfessionChoices(officialChess) {
 }
 
 /**
+ * 分支下拉的候选：每个分支 id 配上它的官方中文名（记录里的 `subProfessionName`）。
+ *
+ * 数据里**只有中文名**（57 个分支一个不缺），英文名不存在，所以英文界面只显示 id ——
+ * id 才是记录里真正写下去的那个值，猜一个英文名反而会让人以为自己填错了。按中文名排（`localeCompare('zh')`），
+ * 职业页面上「速射手」紧挨着「速射手」的分支，比按 id 字母序好找。
+ *
+ * @param {Array<{subProfessionId?:string, subProfessionName?:string}>} officialChess
+ * @returns {Array<{id:string, name:string}>} name 为空串表示这个分支在数据里没写中文名
+ */
+export function subProfessionOptions(officialChess) {
+  const byId = new Map();
+  for (const o of Array.isArray(officialChess) ? officialChess : []) {
+    const id = o && typeof o.subProfessionId === 'string' ? o.subProfessionId.trim() : '';
+    if (!id) continue;
+    const name = o && typeof o.subProfessionName === 'string' ? o.subProfessionName.trim() : '';
+    // 同一个分支出现在多位干员上：谁带了中文名就用谁，第二个没名字的不要把它盖回空
+    if (name || !byId.has(id)) byId.set(id, name || byId.get(id) || '');
+  }
+  return [...byId.entries()]
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id, 'zh') || a.id.localeCompare(b.id));
+}
+
+/**
+ * 干员能声明的盟约清单：官方盟约 + 这个包自己写出来的盟约。
+ *
+ * 顺序有意义（官方清单已经按「核心 → 编号」排好，界面照抄），所以这里**不排序**：同 id 时用包里那份的名字，
+ * 但位置留在官方那一条上 —— 覆盖官方盟约正是工坊的主要用法，不该让它跳到清单末尾。
+ *
+ * @param {Array<{bondId?:string,id?:string,name?:string}>} officialBonds `/api/state` 的 officialBonds
+ * @param {Array<{id:string,name?:string}>} packBonds 当前包的 bonds.json 清单
+ * @returns {Array<{id:string, name:string, from:'official'|'pack'}>}
+ */
+export function bondChoicesOf(officialBonds, packBonds) {
+  const byId = new Map();
+  for (const b of Array.isArray(officialBonds) ? officialBonds : []) {
+    const id = typeof b?.bondId === 'string' ? b.bondId.trim() : (typeof b?.id === 'string' ? b.id.trim() : '');
+    if (id) byId.set(id, { id, name: typeof b?.name === 'string' && b.name ? b.name : id, from: 'official' });
+  }
+  for (const b of Array.isArray(packBonds) ? packBonds : []) {
+    const id = typeof b?.id === 'string' ? b.id.trim() : '';
+    if (id) byId.set(id, { id, name: typeof b?.name === 'string' && b.name ? b.name : id, from: 'pack' });
+  }
+  return [...byId.values()];
+}
+
+/**
  * 攻击范围预设：官方数据里出现过的 rangeGrid 去重，每种形状配一个「用过它的干员」当例子。
  *
  * 表单此前完全没有范围的入口，作者只能吃默认的近战 2 格 / 远程 10 格。识别形状最省事的办法不是画坐标，

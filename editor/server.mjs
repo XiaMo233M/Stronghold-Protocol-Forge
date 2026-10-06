@@ -110,6 +110,8 @@ function officialChess(dataDir) {
     const st = rec.stats || {};
     out.push({
       id, name: rec.name, tier: rec.tier, profession: rec.profession, subProfessionId: rec.subProfessionId,
+      // 分支的中文名（数据里只有中文名，57 个分支全都有）：干员页的分支下拉按它显示，不再让人手打英文 id
+      subProfessionName: typeof rec.subProfessionName === 'string' ? rec.subProfessionName : null,
       position: rec.position, spine: rec.assets?.spine ?? null,
       // 数值参照用：作者填表时旁边要有一把尺子（shared/statReference.js 按职业算区间）
       stats: {
@@ -597,7 +599,15 @@ function packState(root, packId, officialIds) {
       issues,
     });
   }
-  return { id: packId, manifest, specs, operators, dir: packDir };
+  return {
+    id: packId, manifest, specs, operators, dir: packDir,
+    // 这个包自己写出来的盟约（`bonds.json`）：干员页的「盟约」勾选要把它们一起列出来 ——
+    // 手写的、由 CLI 生成的记录也在这个文件里，所以这里直接读产物，不去看有没有 bond-specs 源。
+    bonds: Object.entries(readJson(path.join(packDir, 'bonds.json'), {}) || {})
+      .filter(([bondId, rec]) => bondId && rec && typeof rec === 'object')
+      .map(([bondId, rec]) => ({ id: bondId, name: typeof rec.name === 'string' && rec.name ? rec.name : bondId }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+  };
 }
 
 /**
@@ -1160,6 +1170,8 @@ export async function createEditorServer(opts = {}) {
         loadErrors: loaded.errors,
         support: normalizeSupportConfig(readJson(supportFile, null)),
         officialChess: official,
+        // 官方盟约清单：干员页的「盟约」勾选用它（作者要看的是名字，记录里写的是 bondId）
+        officialBonds: officialBondList,
         // 外观候选：本机已装好的干员模型（data/assets.json 的 chars 键）。页面的 spine 判定与下拉都用它，
         // 与「不指定就是一张贴图」这条规则同源。
         spineChoices: operatorSpineChoices,

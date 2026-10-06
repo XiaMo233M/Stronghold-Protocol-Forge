@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 
 import {
   matchOperators, idConflict, renameNotice,
-  subProfessionChoices, rangePresets, gridKey, sameGrid, gridMatrix,
+  subProfessionChoices, subProfessionOptions, bondChoicesOf, rangePresets, gridKey, sameGrid, gridMatrix,
 } from '../editor/ui/operatorWizard.js';
 
 const OFFICIAL = [
@@ -54,10 +54,52 @@ describe('新建干员：模板挑选与 id 检查', () => {
 });
 
 describe('新建干员：分支候选与攻击范围', () => {
+  test('subProfessionOptions 给每个分支配上中文名（同一个分支取有名字的那一份）', () => {
+    const list = [
+      { subProfessionId: 'fastshot' },                                   // 没名字的先遇到
+      { subProfessionId: 'fastshot', subProfessionName: '速射手' },       // 有名字的在后面：不能被前一条盖成空
+      { subProfessionId: 'caster', subProfessionName: '术师' },
+      { subProfessionId: 'bard', subProfessionName: '吟游者' },
+      { subProfessionId: '  ' },                                          // 空 id 丢掉
+      { subProfessionId: 'mystic' },                                      // 数据里没写名字：name 是空串，界面退回显示 id
+    ];
+    // 顺序按中文名（`localeCompare('zh')`，也就是拼音序）：作者在长长的分支清单里找的是「速射手」三个字，
+    // 不是 `fastshot` 这个 id。没有中文名的排到最后（按 id 比）。
+    assert.deepEqual(subProfessionOptions(list), [
+      { id: 'caster', name: '术师' },
+      { id: 'fastshot', name: '速射手' },
+      { id: 'bard', name: '吟游者' },
+      { id: 'mystic', name: '' },
+    ]);
+    assert.deepEqual(subProfessionOptions(null), []);
+  });
+
   test('subProfessionChoices 去重、排序、丢掉空值', () => {
     assert.deepEqual(subProfessionChoices(OFFICIAL), ['caster', 'fastshot']);
     assert.deepEqual(subProfessionChoices(null), []);
     assert.deepEqual(subProfessionChoices([{ subProfessionId: '  ' }, { subProfessionId: 'bard' }]), ['bard']);
+  });
+
+  test('bondChoicesOf 合并官方与本包的盟约：同 id 用包里的名字，位置留在官方那一条', () => {
+    const official = [
+      { bondId: 'bond_apostle', name: '使徒', isCore: true },
+      { bondId: 'bond_karlan', name: '卡西米尔' },
+    ];
+    const pack = [
+      { id: 'bond_apostle', name: '使徒（本包改过）' },
+      { id: 'bond_ws_demo', name: '演示盟约' },
+    ];
+    assert.deepEqual(bondChoicesOf(official, pack), [
+      { id: 'bond_apostle', name: '使徒（本包改过）', from: 'pack' },
+      { id: 'bond_karlan', name: '卡西米尔', from: 'official' },
+      { id: 'bond_ws_demo', name: '演示盟约', from: 'pack' },
+    ]);
+    assert.deepEqual(bondChoicesOf(null, null), []);
+    // 只有 id 没有名字时用 id 顶上（界面上不能出现空白的一行）
+    assert.deepEqual(bondChoicesOf([{ bondId: 'bond_x' }], [{ id: 'bond_y' }]), [
+      { id: 'bond_x', name: 'bond_x', from: 'official' },
+      { id: 'bond_y', name: 'bond_y', from: 'pack' },
+    ]);
   });
 
   test('rangePresets 按形状去重，并配一个用过它的干员当例子', () => {

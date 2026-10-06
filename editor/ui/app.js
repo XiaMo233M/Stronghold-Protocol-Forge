@@ -4,13 +4,19 @@
 //
 // 界面文案走 i18n：t('中文原文') 查英文词典，查不到就原样返回中文（editor/ui/i18n.js 说明了这个取舍）。
 
-import { t, mountI18n } from './i18n.js';
+import { t, mountI18n, currentLang } from './i18n.js';
 // 服务端把 /shared/ 也挂给了编辑器界面，所以这几个模块在浏览器与 node 下是同一个文件：
 // 范围与伤害分类的推导规则只有一份（shared/chessAuthoring.js），界面显示的就是引擎真正会用的那份。
-import { classify, DEFAULT_MELEE_RANGE, DEFAULT_RANGED_RANGE } from '../../shared/chessAuthoring.js';
+import {
+  classify, DEFAULT_MELEE_RANGE, DEFAULT_RANGED_RANGE,
+  PROFESSION_NAMES, POSITION_NAMES, DMG_TYPES, ATTACK_KINDS, PROJECTILES, MODULE_ATTR_KEYS,
+} from '../../shared/chessAuthoring.js';
+// 精锐数值 = 不带模组的数值 + 默认模组的 attr —— 这句算术也只有一份（shared/loadoutRecord.js），
+// 所以界面上「加了模组之后是多少」的提示与引擎算出来的必然一致。
+import { composeStats } from '../../shared/loadoutRecord.js';
 import {
   matchOperators, idConflict, renameNotice,
-  subProfessionChoices, rangePresets, gridKey, gridMatrix,
+  subProfessionChoices, subProfessionOptions, bondChoicesOf, rangePresets, gridKey, gridMatrix,
 } from './operatorWizard.js';
 import { fmtNum, makeStatBar } from './statScale.js';
 import { renderKeepingFocus } from './focusKeep.js';
@@ -52,6 +58,8 @@ const state = {
   data: null, packId: null, slug: null, spec: null, preview: null, message: null, busy: false,
   // 「以模板新建」的选择器是否打开，以及搜索串
   picking: false, pickQuery: '',
+  // 盟约清单的搜索串（只重画清单那一块，别整页重画）
+  bondQuery: '',
 };
 
 // ---- the spec model ----------------------------------------------------------------------------------------------
@@ -150,10 +158,87 @@ function textInput(get, set, attrs = {}) {
 function numInput(get, set) {
   return h('input', { type: 'number', step: 'any', value: get() ?? 0, oninput: (e) => { const v = Number(e.target.value); set(Number.isFinite(v) ? v : 0); schedulePreview(); } });
 }
-function select(list, get, set) {
+function select(list, get, set, labelOf) {
   const el = h('select', { onchange: (e) => { set(e.target.value); schedulePreview(); } });
-  for (const v of list) el.append(h('option', { value: v, selected: get() === v }, v));
+  for (const v of list) el.append(h('option', { value: v, selected: get() === v }, labelOf ? labelOf(v) : v));
   return el;
+}
+
+/** 职业与位置名：界面上显示「近卫 WARRIOR」/「Guard WARRIOR」，记录里写的永远是后面那个大写枚举。 */
+function nameLabel(table, v) {
+  const n = table && table[v];
+  return n ? `${currentLang() === 'en' ? n.en : n.zh} ${v}` : v;
+}
+
+/**
+ * 覆盖型下拉：第一项永远是「用推导值」，其余才是显式覆盖。
+ *
+ * 攻击分类平时是按职业与分支推出来的，覆盖只是给「同分支但就是不一样」的特殊情况留的接口。所以默认项要在，
+ * 而且必须写清推导成了什么 —— 否则作者只会看到一个空下拉，不知道自己放弃了什么。
+ */
+function overrideSelect(list, get, set, derived, labelOf) {
+  const lab = labelOf || ((v) => v);
+  const cur = get();
+  const el = h('select', { onchange: (e) => { set(e.target.value || null); schedulePreview(); } });
+  el.append(h('option', { value: '', selected: cur === undefined || cur === null }, t('（推导：{0}）', lab(derived))));
+  for (const v of list) el.append(h('option', { value: v, selected: cur === v }, lab(v)));
+  return el;
+}
+
+/** `canHitFly` 是布尔：空串与 false 分不开，所以三态用字符串 value 表示。 */
+function overrideBoolSelect(get, set, derived) {
+  const cur = get();
+  const val = cur === undefined || cur === null ? '' : (cur ? 'true' : 'false');
+  const el = h('select', { onchange: (e) => { const v = e.target.value; set(v === '' ? null : v === 'true'); schedulePreview(); } });
+  el.append(
+    h('option', { value: '', selected: val === '' }, t('（推导：{0}）', derived ? t('是') : t('否'))),
+    h('option', { value: 'true', selected: val === 'true' }, t('能打空中')),
+    h('option', { value: 'false', selected: val === 'false' }, t('不能打空中')));
+  return el;
+}
+
+/**
+ * 改纯文本字段时，把同一个对象上的富文本原文（`descRaw`）一起改掉。
+ *
+ * 官方记录的 `descRaw` 与 `desc` 常常不同（`<$ba.stun>晕眩</>` 这类标记：数据里 199 条天赋有 56 条不一样），
+ * 而派生层**优先读 `descRaw`** —— 只改 `desc` 的话，作者在界面上改了字，记录里一个字都没变（静默失败）。
+ * 代价是官方那点富文本标记会被纯文本顶掉，这与「我就是要改这句话」本来就是同一个意思。
+ */
+function setText(obj, key, value) {
+  obj[key] = value;
+  const rawKey = `${key}Raw`;
+  if (rawKey in obj) obj[rawKey] = value;
+}
+
+/**
+ * 黑板书式的键值行：键名可改、值是数字、`×` 删掉、最后一行按钮加一个。
+ * 技能 bb、天赋 bb、模组特性覆盖 bb、模组天赋改写 bb 四处都是同一个东西，所以只写一遍。
+ * 给了 `keys` 就把键名做成下拉（模组的 `attr` 只认那 8 个键：写错不报错，但数值一点不加）。
+ */
+function bbRows(holder, obj, redraw, { keys = null, addLabel } = {}) {
+  holder.replaceChildren();
+  const known = keys ? [...new Set([...keys, ...Object.keys(obj)])] : null;
+  for (const [key, val] of Object.entries(obj)) {
+    const rename = (to) => { const v = obj[key]; delete obj[key]; obj[to] = v; schedulePreview(); redraw(); };
+    // 下拉里不列「别的行已经占了的键」：选重了会把那一行的数值直接顶掉，而界面上看不出发生过什么
+    const options = known ? known.filter((k) => k === key || !(k in obj)) : null;
+    holder.append(h('div', { class: 'kv' },
+      options
+        ? h('select', { onchange: (e) => rename(e.target.value) }, options.map((k) => h('option', { value: k, selected: k === key }, k)))
+        : h('input', { value: key, onchange: (e) => rename(e.target.value) }),
+      h('input', { type: 'number', step: 'any', value: val, oninput: (e) => { obj[key] = Number(e.target.value); schedulePreview(); } }),
+      h('button', { class: 'ghost', onclick: () => { delete obj[key]; schedulePreview(); redraw(); } }, '×')));
+  }
+  const fresh = known ? (known.find((k) => !(k in obj)) ?? known[0]) : 'new_key';
+  holder.append(h('button', { class: 'ghost', onclick: () => { obj[fresh] = 0; schedulePreview(); redraw(); } }, addLabel || t('＋ 加一个键')));
+}
+
+/** 一个现成的键值行编辑器（返回元素；内部重画只换自己的内容）。 */
+function bbEditor(obj, opts) {
+  const holder = h('div', {});
+  const redraw = () => bbRows(holder, obj, redraw, opts);
+  redraw();
+  return holder;
 }
 
 /** 小格阵预览：亮格 = 能打到，深色那一格 = 干员自己站的位置。 */
@@ -172,13 +257,12 @@ function gridPreview(grid) {
   return wrap;
 }
 
-/** 表单没给 rangeGrid 时引擎实际会用的形状（规则与 shared/chessAuthoring.js 完全一致）。 */
-function defaultGrid(s) {
-  const cls = classify({ profession: s.profession, subProfessionId: s.subProfessionId, position: s.position, traitDesc: s.traitDesc });
-  return (cls.attackKind === 'melee' || cls.attackKind === 'none') ? DEFAULT_MELEE_RANGE : DEFAULT_RANGED_RANGE;
+/** 表单没给 rangeGrid 时引擎实际会用的形状（规则与 shared/chessAuthoring.js 完全一致：看**生效的**攻击方式）。 */
+function defaultGrid(attackKind) {
+  return (attackKind === 'melee' || attackKind === 'none') ? DEFAULT_MELEE_RANGE : DEFAULT_RANGED_RANGE;
 }
 
-const dmgLabel = (v) => (v === 'arts' ? t('法术') : (v === 'heal' ? t('治疗') : t('物理')));
+const dmgLabel = (v) => (v === 'arts' ? t('法术') : (v === 'heal' ? t('治疗') : (v === 'true' ? t('真实') : (v === 'element' ? t('元素') : t('物理')))));
 const kindLabel = (v) => (v === 'ranged' ? t('远程') : (v === 'none' ? t('不攻击') : (v === 'heal' ? t('治疗') : t('近战'))));
 
 function renderEditor() {
@@ -197,6 +281,12 @@ function renderEditor() {
   const pack = state.data.packs.find((p) => p.id === state.packId);
   const conflict = idConflict(s.id, { packSlugs: pack ? pack.specs.map((x) => x.id) : [], officialIds: state.officialIdSet });
   const rename = renameNotice(state.slug, s.id);
+  // 分支下拉：官方数据里只有中文名（57 个分支一个不缺），英文名并不存在，所以英文界面只显示 id ——
+  // id 就是记录里写下去的那个值。当前值不在官方清单里时（手填的自定义分支）也要插进去，否则下拉会显示成别的分支。
+  const subOpts = subProfessionOptions(state.data.officialChess);
+  const subCur = String(s.subProfessionId ?? '').trim();
+  if (subCur && !subOpts.some((o) => o.id === subCur)) subOpts.unshift({ id: subCur, name: '' });
+  const subLabel = (o) => (currentLang() === 'en' || !o.name ? o.id : `${o.name} · ${o.id}`);
   box.append(h('div', { class: 'panel' }, h('div', { class: 'grid' },
     field(t('id（slug，决定 chess_ws_<id>_a/_b）'), h('div', {},
       textInput(() => s.id, (v) => { s.id = v; }),
@@ -207,13 +297,18 @@ function renderEditor() {
     field(t('名称'), textInput(() => s.name, (v) => { s.name = v; })),
     field(t('英文代号'), textInput(() => s.appellation, (v) => { s.appellation = v; })),
     field(t('阶（tier）'), numInput(() => s.tier, (v) => { s.tier = v; })),
-    field(t('职业'), select(PROFESSIONS, () => s.profession, (v) => { s.profession = v; })),
-    // 分支决定攻击方式、伤害类型与能否打空 —— 以前只能手打英文，还给不出候选
+    field(t('职业'), select(PROFESSIONS, () => s.profession, (v) => { s.profession = v; }, (v) => nameLabel(PROFESSION_NAMES, v))),
+    // 分支决定攻击方式、伤害类型与能否打空 —— 以前只能手打英文，现在先给一份带中文名的清单，再留一条手填的路
     field(t('分支 subProfessionId'), h('div', {},
-      textInput(() => s.subProfessionId, (v) => { s.subProfessionId = v; }, { placeholder: t('如 fastshot / fortress / bard'), list: 'subProfOptions' }),
-      h('datalist', { id: 'subProfOptions' }, subProfessionChoices(state.data.officialChess).map((v) => h('option', { value: v }))))),
-    field(t('位置'), select(['MELEE', 'RANGED'], () => s.position, (v) => { s.position = v; })),
-    field(t('特性文字（只影响伤害类型推导）'), textInput(() => s.traitDesc, (v) => { s.traitDesc = v; })))));
+      h('select', { onchange: (e) => { s.subProfessionId = e.target.value; schedulePreview(); renderEditorKeepingFocus(); } },
+        h('option', { value: '', selected: !subCur }, t('（不填：攻击方式与伤害类型只按职业推导）')),
+        subOpts.map((o) => h('option', { value: o.id, selected: subCur === o.id }, subLabel(o)))),
+      h('div', { style: 'margin-top:4px' },
+        textInput(() => s.subProfessionId, (v) => { s.subProfessionId = v; }, { placeholder: t('如 fastshot / fortress / bard'), list: 'subProfOptions' }),
+        h('datalist', { id: 'subProfOptions' }, subProfessionChoices(state.data.officialChess).map((v) => h('option', { value: v })))),
+      h('p', { class: 'hint' }, t('数据里只有分支的中文名（{0} 个），英文界面显示的是 id 本身。', subOpts.length)))),
+    field(t('位置'), select(['MELEE', 'RANGED'], () => s.position, (v) => { s.position = v; }, (v) => nameLabel(POSITION_NAMES, v))),
+    field(t('特性文字（只影响伤害类型推导）'), textInput(() => s.traitDesc, (v) => setText(s, 'traitDesc', v))))));
 
   // appearance — the repo ships no assets, so reuse an existing spine.
   // 候选来自服务端的 `spineChoices`（本机已装好的干员模型清单），只有在旧服务端没给时才退回官方干员列表。
@@ -236,8 +331,17 @@ function renderEditor() {
     spineHint));
 
   // 攻击范围与伤害分类：表单以前完全没有范围的入口（连默认值是多少都看不到），现在能挑官方形状并直接看小格阵
-  const cls = classify({ profession: s.profession, subProfessionId: s.subProfessionId, position: s.position, traitDesc: s.traitDesc });
-  const effGrid = Array.isArray(s.rangeGrid) ? s.rangeGrid : defaultGrid(s);
+  const derived = classify({ profession: s.profession, subProfessionId: s.subProfessionId, position: s.position, traitDesc: s.traitDesc });
+  // 生效值 = 覆盖值（写了就用写的）或推导值。deriveChessRecord 的 pick() 就是这条规则，
+  // 所以界面上的「记录里会写」与默认范围形状都必须按生效值算，否则作者会看到一个假的默认范围。
+  const ov = (key, list) => (typeof s[key] === 'string' && list.includes(s[key].toLowerCase()) ? s[key].toLowerCase() : null);
+  const eff = {
+    dmgType: ov('dmgType', DMG_TYPES) || derived.dmgType,
+    attackKind: ov('attackKind', ATTACK_KINDS) || derived.attackKind,
+    projectile: ov('projectile', PROJECTILES) || derived.projectile,
+    canHitFly: typeof s.canHitFly === 'boolean' ? s.canHitFly : derived.canHitFly,
+  };
+  const effGrid = Array.isArray(s.rangeGrid) ? s.rangeGrid : defaultGrid(eff.attackKind);
   const presets = rangePresets(state.data.officialChess);
   const curKey = Array.isArray(s.rangeGrid) ? gridKey(s.rangeGrid) : '';
   const rangeSel = h('select', {
@@ -249,12 +353,27 @@ function renderEditor() {
     },
   }, h('option', { value: '', selected: !curKey }, t('（默认：按职业与分支推导）')));
   for (const p of presets) rangeSel.append(h('option', { value: p.key, selected: curKey === p.key }, t('{0} 格 · 例：{1}', p.count, p.sample.name)));
+  // 覆盖下拉：留空写回的是「删掉这个键」，而不是写一个空串 —— 空串在 pick() 里等于没写，但留个空键会让记录变脏
+  const setOverride = (key, v) => { if (v) s[key] = v; else delete s[key]; };
   box.append(h('div', { class: 'panel' },
     h('h2', { style: 'margin-top:0' }, t('攻击范围与伤害分类')),
     h('div', { class: 'row', style: 'align-items:flex-start;gap:16px' },
       h('div', { style: 'flex:0 0 230px' }, field(t('范围形状'), rangeSel)),
       h('div', {}, gridPreview(effGrid), Array.isArray(s.rangeGrid) ? null : h('div', { class: 'hint' }, t('（这是推导出的默认形状）'))),
-      h('p', { class: 'hint', style: 'flex:1' }, t('伤害类型 {0} · 攻击方式 {1} · 可打空中 {2}', dmgLabel(cls.dmgType), kindLabel(cls.attackKind), cls.canHitFly ? t('是') : t('否'))))));
+      h('p', { class: 'hint', style: 'flex:1' },
+        t('伤害类型 {0} · 攻击方式 {1} · 可打空中 {2}', dmgLabel(derived.dmgType), kindLabel(derived.attackKind), derived.canHitFly ? t('是') : t('否')),
+        h('br'), t('（这一行是按职业与分支推导出来的）'))),
+    // 「有特殊情况」时用的接口：攻击范围与伤害分类基本由职业与分支决定，但同分支的干员确实可能不一样，
+    // 所以四个字段都能在这里钉住；钉住后校验会给一条「覆盖了推导值」的警告。
+    h('h2', {}, t('攻击分类的覆盖（特殊情况才用）')),
+    h('p', { class: 'hint' }, t('平时这四项由职业与分支推导（就是上面那一行）。同分支的干员因为天赋或官方特例而不同时，在这里钉住它；留空＝用推导值。')),
+    h('div', { class: 'grid' },
+      field(t('伤害类型 dmgType'), overrideSelect(DMG_TYPES, () => s.dmgType, (v) => { setOverride('dmgType', v); renderEditorKeepingFocus(); }, derived.dmgType, dmgLabel)),
+      field(t('攻击方式 attackKind'), overrideSelect(ATTACK_KINDS, () => s.attackKind, (v) => { setOverride('attackKind', v); renderEditorKeepingFocus(); }, derived.attackKind, kindLabel)),
+      field(t('投射物 projectile'), overrideSelect(PROJECTILES, () => s.projectile, (v) => { setOverride('projectile', v); renderEditorKeepingFocus(); }, derived.projectile)),
+      field(t('能否打空中 canHitFly'), overrideBoolSelect(() => s.canHitFly, (v) => { if (v === null) delete s.canHitFly; else s.canHitFly = v; }, derived.canHitFly))),
+    h('p', { class: 'hint' }, t('记录里会写：伤害类型 {0} · 攻击方式 {1} · 投射物 {2} · 可打空中 {3}',
+      dmgLabel(eff.dmgType), kindLabel(eff.attackKind), eff.projectile, eff.canHitFly ? t('是') : t('否')))));
 
   // the two states
   const refs = state.data.statRanges?.[s.profession] ?? {};
@@ -280,17 +399,7 @@ function renderEditor() {
 
   // skill
   const sk = s.skill ?? (s.skill = blankSpec().skill);
-  const bbBox = h('div', {});
-  const drawBb = () => {
-    bbBox.replaceChildren();
-    for (const [key, val] of Object.entries(sk.bb || {})) {
-      bbBox.append(h('div', { class: 'kv' },
-        h('input', { value: key, onchange: (e) => { const old = key; const v = sk.bb[old]; delete sk.bb[old]; sk.bb[e.target.value] = v; schedulePreview(); drawBb(); } }),
-        h('input', { type: 'number', step: 'any', value: val, oninput: (e) => { sk.bb[key] = Number(e.target.value); schedulePreview(); } }),
-        h('button', { class: 'ghost', onclick: () => { delete sk.bb[key]; schedulePreview(); drawBb(); } }, '×')));
-    }
-  };
-  drawBb();
+  if (!sk.bb) sk.bb = {};
   box.append(h('div', { class: 'panel' },
     h('h2', { style: 'margin-top:0' }, t('技能（黑板书键不需要写 JavaScript）')),
     h('div', { class: 'grid' },
@@ -305,8 +414,7 @@ function renderEditor() {
     field(t('技能描述（官方文字）'), h('textarea', { value: sk.desc ?? '', oninput: (e) => { sk.desc = e.target.value; schedulePreview(); } })),
     h('h2', {}, t('黑板书 bb')),
     h('p', { class: 'hint' }, t('键必须是通用 kit 认识的（见 docs/prompts/operator-pack.md 的表格）。写了不认的键不会报错，但也不会有任何效果——校验会警告。')),
-    bbBox,
-    h('button', { class: 'ghost', onclick: () => { sk.bb = sk.bb || {}; sk.bb.new_key = 0; drawBb(); } }, t('＋ 加一个键'))));
+    bbEditor(sk.bb)));
 
   // talents (天赋): the authoring layer already turns spec.talents into the record's talents[] (name/desc/bb), so this
   // is purely the missing form. A talent with no desc is emitted `hidden: true` by the derive layer, which is why the
@@ -316,18 +424,7 @@ function renderEditor() {
   const drawTalents = () => {
     talBox.replaceChildren();
     s.talents.forEach((t_, i) => {
-      const bbBox2 = h('div', {});
-      const drawTb = () => {
-        bbBox2.replaceChildren();
-        for (const [key, val] of Object.entries(t_.bb || {})) {
-          bbBox2.append(h('div', { class: 'kv' },
-            h('input', { value: key, onchange: (e) => { const old = key; const v = t_.bb[old]; delete t_.bb[old]; t_.bb[e.target.value] = v; schedulePreview(); drawTb(); } }),
-            h('input', { type: 'number', step: 'any', value: val, oninput: (e) => { t_.bb[key] = Number(e.target.value); schedulePreview(); } }),
-            h('button', { class: 'ghost', onclick: () => { delete t_.bb[key]; schedulePreview(); drawTb(); } }, '×')));
-        }
-        bbBox2.append(h('button', { class: 'ghost', onclick: () => { t_.bb = t_.bb || {}; t_.bb.new_key = 0; drawTb(); } }, t('＋ 加一个键')));
-      };
-      drawTb();
+      if (!t_.bb) t_.bb = {};
       talBox.append(h('div', { class: 'panel' },
         h('div', { class: 'row', style: 'margin-bottom:6px' },
           h('strong', {}, t('天赋 {0}', i + 1)),
@@ -335,9 +432,10 @@ function renderEditor() {
           h('button', { class: 'ghost', onclick: () => { s.talents.splice(i, 1); schedulePreview(); drawTalents(); } }, t('× 删除'))),
         h('div', { class: 'grid' },
           field(t('天赋名'), textInput(() => t_.name, (v) => { t_.name = v; })),
-          field(t('说明（必填，否则该天赋被视为隐藏）'), textInput(() => t_.desc, (v) => { t_.desc = v; }))),
+          // 说明走 setText：记录里优先读 descRaw（官方的富文本原文），只改 desc 会静默无效
+          field(t('说明（必填，否则该天赋被视为隐藏）'), textInput(() => t_.desc, (v) => setText(t_, 'desc', v)))),
         h('h2', {}, t('天赋黑板 bb')),
-        bbBox2));
+        bbEditor(t_.bb)));
     });
   };
   drawTalents();
@@ -352,6 +450,69 @@ function renderEditor() {
         schedulePreview(); drawTalents();
       },
     }, t('＋ 添加一条天赋'))));
+
+  // ---- 模组（只有精锐记录会读 `modules[]`）------------------------------------------------------------------------
+  // 官方 184 个模组就是这个形状。要紧的一条：勾了 `isDefault` 的那一个会被**烘进**精锐记录 ——
+  // `stats = 表单精锐数值 + attr`、`trait` 被它的特性覆盖换掉、`talents` 被它的天赋改写改掉
+  // （shared/loadoutRecord.js 的 composeStats / composeTalents，与引擎同一份实现）。
+  s.modules = Array.isArray(s.modules) ? s.modules : [];
+  const modBox = h('div', {});
+  const drawModules = () => {
+    modBox.replaceChildren();
+    if (!s.modules.length) modBox.append(h('p', { class: 'hint' }, t('（一个模组都没有：精锐记录不带模组，玩家在载入界面也挑不到任何模组）')));
+    s.modules.forEach((m, i) => modBox.append(moduleCard(s, m, i, drawModules)));
+  };
+  drawModules();
+  const defMod = s.modules.find((m) => m && m.isDefault) ?? null;
+  const composed = defMod ? composeStats(s.stats.golden ?? {}, defMod.attr ?? {}) : null;
+  box.append(h('div', { class: 'panel' },
+    h('h2', { style: 'margin-top:0' }, t('模组 modules（只有精锐记录会读）')),
+    h('p', { class: 'hint' }, t('勾了「默认」的那一个会被烘进精锐记录：数值＝上面的精锐数值＋它的数值加成，特性覆盖与天赋改写也一起生效。其它模组照样发给游戏，玩家在载入界面能选。')),
+    defMod
+      ? h('p', { class: 'hint' }, t('当前默认模组「{0}」→ 精锐记录里写下去的数值：{1}', defMod.name || defMod.id || t('未命名'), statDiff(s.stats.golden ?? {}, composed)))
+      : (s.modules.length ? h('p', { class: 'hint warn' }, t('没有勾「默认」：精锐记录会按不带模组生成（校验会警告），玩家仍然能选这些模组。')) : null),
+    modBox,
+    h('button', {
+      class: 'ghost',
+      onclick: () => { s.modules.push(blankModule(s.modules.length, s.id)); schedulePreview(); drawModules(); },
+    }, t('＋ 添加一个模组'))));
+
+  // ---- 盟约 bonds -------------------------------------------------------------------------------------------------
+  // 干员算在哪些盟约里。记录里写的就是 id：官方那 23 条盟约由引擎按 id 实现（阈值/数值全从盟约记录读），
+  // 工坊包的盟约由包自己声明 —— 两边都只是 id，所以这里给一份清单而不是自由输入框。
+  // 模板带过来的官方盟约也在清单里（勾着），取消就能退出这个盟约。
+  s.bonds = Array.isArray(s.bonds) ? s.bonds : [];
+  const bondIndex = bondChoicesOf(state.data.officialBonds, pack?.bonds);
+  const unknownBonds = s.bonds.filter((b) => !bondIndex.some((x) => x.id === b));
+  const bondListBox = h('div', {});
+  const drawBonds = () => {
+    bondListBox.replaceChildren();
+    const q = state.bondQuery.trim().toLowerCase();
+    const shown = bondIndex.filter((x) => !q || x.id.toLowerCase().includes(q) || x.name.toLowerCase().includes(q));
+    if (!shown.length) bondListBox.append(h('p', { class: 'hint' }, t('（没有匹配的盟约）')));
+    for (const b of shown) {
+      bondListBox.append(h('label', { style: 'display:flex;gap:6px;align-items:center;color:var(--fg)' },
+        h('input', {
+          type: 'checkbox', checked: s.bonds.includes(b.id), style: 'width:auto',
+          onchange: (e) => {
+            if (e.target.checked) { if (!s.bonds.includes(b.id)) s.bonds.push(b.id); }
+            else s.bonds = s.bonds.filter((x) => x !== b.id);
+            schedulePreview();
+          },
+        }),
+        t('{0}（{1}）', b.name, b.id),
+        b.from === 'pack' ? h('span', { class: 'tag' }, t('本包')) : null));
+    }
+  };
+  drawBonds();
+  box.append(h('div', { class: 'panel' },
+    h('h2', { style: 'margin-top:0' }, t('盟约 bonds（这个干员算在哪些盟约里）')),
+    h('p', { class: 'hint' }, t('官方盟约 {0} 条、本包 {1} 条。两边都有记录时，试玩里才会真的生效。', state.data.officialBonds?.length ?? 0, (pack?.bonds ?? []).length)),
+    textInput(() => state.bondQuery, (v) => { state.bondQuery = v; drawBonds(); }, { placeholder: t('按名称或 id 搜索盟约') }),
+    bondListBox,
+    unknownBonds.length
+      ? h('p', { class: 'hint warn' }, t('这些 id 查不到对应的盟约（保存没问题，但游戏里不会有任何效果）：{0}', unknownBonds.join('、')))
+      : null));
 
   // support switch (the 是否助战 toggle)
   if (state.slug) {
@@ -405,6 +566,121 @@ function renderEditor() {
     panel.append(h('pre', { text: JSON.stringify({ base: pv.base, golden: pv.golden }, null, 1).slice(0, 4000) }));
   }
   box.append(h('h2', {}, t('校验结果')), panel);
+}
+
+// ---- 模组卡（干员页的模组块） ---------------------------------------------------------------------------------------
+
+/** 模组 `attr` 的显示名（「加了模组之后变成多少」那一行用它）。 */
+function attrLabels() {
+  return {
+    maxHp: t('生命上限 maxHp'), atk: t('攻击 atk'), def: t('防御 def'), res: t('法抗 res'),
+    aspd: t('攻速 aspd'), cost: t('费用 cost'), blockCnt: t('阻挡 blockCnt'), respawnTime: t('再部署 respawnTime'),
+  };
+}
+
+/** 引擎把 attr 加进基础数值时保留 6 位小数（shared/loadoutRecord.js 的 clean6）。 */
+const round6 = (v) => Math.round(Number(v || 0) * 1e6) / 1e6;
+
+/** 「表单里的精锐数值 → 加上默认模组之后的数值」：只列真的变了的字段，没变就不占地方。 */
+function statDiff(base, composed) {
+  const lab = attrLabels();
+  const parts = [];
+  for (const k of MODULE_ATTR_KEYS) {
+    const from = round6(base[k]), to = round6(composed[k]);
+    if (from === to) continue;
+    parts.push(`${lab[k] ?? k} ${from} → ${to}`);
+  }
+  return parts.length ? parts.join(' · ') : t('（数值没有变化：这个默认模组只改特性或天赋）');
+}
+
+/**
+ * 一个空模组。id 直接给一个合法值：空 id 会是**校验错误**，而作者刚点「添加」时还没想好名字，
+ * 不该先被骂一句（id 可以让它一直是自动生成的那个，游戏的载入界面只把它当键用）。
+ */
+function blankModule(i, slug) {
+  return {
+    id: `uniequip_ws_${slug || 'mod'}_${i + 1}`,
+    name: '', type: `WS-${'XYZ'[i] ?? 'Z'}`, isDefault: i === 0, level: 1,
+    attr: { atk: 0 }, traitDesc: '', traitBb: {}, talentChanges: [],
+  };
+}
+
+/**
+ * 一个模组的编辑卡。字段与 `deriveChessRecord` 读的 spec 形状一一对应（见 shared/chessAuthoring.js 的 modules 段）。
+ * 界面上不编辑的字段（特性自带的 rangeGrid、富文本原文、天赋改写的 skillIndex）一律**原样留着**：
+ * 以模板新建时它们是官方的真实数据，界面看不见不等于可以丢掉。
+ */
+function moduleCard(s, m, i, redraw) {
+  if (!m.attr) m.attr = {};
+  if (!m.traitBb) m.traitBb = {};
+  m.talentChanges = Array.isArray(m.talentChanges) ? m.talentChanges : [];
+
+  const chBox = h('div', {});
+  const drawChanges = () => {
+    chBox.replaceChildren();
+    if (!m.talentChanges.length) chBox.append(h('p', { class: 'hint' }, t('（不改编任何天赋）')));
+    m.talentChanges.forEach((ch, ci) => {
+      if (!ch.bb) ch.bb = {};
+      // talentIndex 对的是记录里天赋的 `index`（官方是稀疏的：0、1、3 —— 中间那个位置没有天赋），不是数组下标
+      const recIndexes = s.talents.map((t_, ti) => (Number.isInteger(t_.index) ? t_.index : ti));
+      const idxSel = h('select', { onchange: (e) => { ch.talentIndex = Number(e.target.value); schedulePreview(); drawChanges(); } });
+      idxSel.append(h('option', { value: '-1', selected: !(ch.talentIndex >= 0) }, t('（新加一条天赋，不覆盖已有的）')));
+      recIndexes.forEach((idx, ti) => idxSel.append(h('option', {
+        value: String(idx), selected: ch.talentIndex === idx,
+      }, t('改写天赋 {0}：{1}', idx, s.talents[ti].name || t('（无名）')))));
+      chBox.append(h('div', { class: 'panel' },
+        h('div', { class: 'row', style: 'margin-bottom:6px' },
+          h('strong', {}, t('天赋改写 {0}', ci + 1)),
+          h('span', { style: 'flex:1' }),
+          h('button', { class: 'ghost', onclick: () => { m.talentChanges.splice(ci, 1); schedulePreview(); drawChanges(); } }, t('× 删除'))),
+        h('div', { class: 'grid' },
+          field(t('改哪一条'), idxSel),
+          field(t('天赋名（留空＝用原来那个）'), textInput(() => ch.name, (v) => { ch.name = v || null; })),
+          field(t('说明（留空＝用原来那个）'), textInput(() => ch.desc, (v) => setText(ch, 'desc', v || null))),
+          field(t('隐藏这条天赋'), h('input', {
+            type: 'checkbox', checked: ch.hidden === true, style: 'width:auto',
+            onchange: (e) => { ch.hidden = e.target.checked; schedulePreview(); },
+          }))),
+        h('h2', {}, t('改写的黑板 bb')),
+        bbEditor(ch.bb)));
+    });
+    chBox.append(h('button', {
+      class: 'ghost',
+      onclick: () => { m.talentChanges.push({ talentIndex: -1, name: null, desc: null, bb: {}, hidden: false }); schedulePreview(); drawChanges(); },
+    }, t('＋ 添加一条天赋改写')));
+  };
+  drawChanges();
+
+  return h('div', { class: 'panel' },
+    h('div', { class: 'row', style: 'margin-bottom:6px' },
+      h('strong', {}, t('模组 {0}', i + 1)),
+      h('label', { style: 'display:flex;gap:6px;align-items:center;color:var(--fg)' },
+        h('input', {
+          type: 'checkbox', checked: !!m.isDefault, style: 'width:auto',
+          // 默认模组只能有一个：勾上它就先把别人全部取消，免得撞 MULTIPLE_DEFAULTS 那条校验错误
+          onchange: (e) => { const on = !!e.target.checked; s.modules.forEach((x) => { x.isDefault = false; }); m.isDefault = on; schedulePreview(); redraw(); },
+        }),
+        t('默认（精锐记录带的就是它）')),
+      h('span', { style: 'flex:1' }),
+      h('button', { class: 'ghost', onclick: () => { s.modules.splice(i, 1); schedulePreview(); redraw(); } }, t('× 删除'))),
+    h('div', { class: 'grid' },
+      field(t('模组 id uniEquipId'), textInput(() => m.id, (v) => { m.id = v; })),
+      field(t('模组名（留空就显示 id）'), textInput(() => m.name, (v) => { m.name = v; })),
+      field(t('类型 typeName（决定载入界面那个小图标）'), textInput(() => m.type, (v) => { m.type = v; })),
+      field(t('图标 typeIcon（只有和类型名不一致时才填）'), textInput(() => m.typeIcon, (v) => { if (v) m.typeIcon = v; else delete m.typeIcon; }, { placeholder: t('如 DEC-X → dec-X') })),
+      field(t('等级 level（1~3，官方是 1 或 3）'), numInput(() => m.level ?? 1, (v) => { m.level = v; }))),
+    h('p', { class: 'hint' }, t('类型名不在官方清单里时，载入界面画的是字母牌而不是官方图标 —— 功能不受影响。')),
+    h('h2', {}, t('数值加成 attr（精锐数值＝上面的精锐数值＋这里）')),
+    h('p', { class: 'hint' }, t('只有这几个键会被读：{0}。写别的键不会报错，但一个数值也不加。', MODULE_ATTR_KEYS.join(' / '))),
+    bbEditor(m.attr, { keys: MODULE_ATTR_KEYS, addLabel: t('＋ 加一条数值') }),
+    h('h2', {}, t('特性覆盖（换掉这个干员原本的特性）')),
+    h('div', { class: 'grid' },
+      field(t('特性文字'), textInput(() => m.traitDesc, (v) => setText(m, 'traitDesc', v))),
+      field(t('模组说明（官方那段「装备后…」）'), textInput(() => m.moduleDesc, (v) => setText(m, 'moduleDesc', v)))),
+    h('h2', {}, t('特性黑板 bb')),
+    bbEditor(m.traitBb),
+    h('h2', {}, t('天赋改写（模组带来的天赋变化）')),
+    chBox);
 }
 
 // ---- 「以模板新建」的选择器 -----------------------------------------------------------------------------------------

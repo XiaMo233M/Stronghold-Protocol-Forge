@@ -66,12 +66,21 @@ export const DMG_TYPES = Object.freeze(['phys', 'arts', 'heal', 'true', 'element
 export const ATTACK_KINDS = Object.freeze(['melee', 'ranged', 'none', 'heal']);
 export const PROJECTILES = Object.freeze(['none', 'arrow', 'bolt', 'orb']);
 
+/**
+ * 模组 `attr` 读的数值键（精锐数值 = 不带模组的 `statsBase` + 默认模组的 `attr`，见 shared/loadoutRecord.js 的
+ * `composeStats`）。官方 184 个模组只用到这 8 个键。
+ *
+ * 为什么要列一份：写错键名（`atkScale`、`attack`）不会报任何错，模组看起来配好了、数值一点没变 —— 编辑器把它
+ * 做成下拉，作者只能在真键里挑。少一个键就少一种模组，所以 test/chessModules.test.js 拿真实数据核对这张表。
+ */
+export const MODULE_ATTR_KEYS = Object.freeze(['maxHp', 'atk', 'def', 'res', 'aspd', 'cost', 'blockCnt', 'respawnTime']);
+
 /** Sub-professions with a behaviour that changes combat classification or the normal attack. Everything else is fine. */
 export const SUBPROF_ATTACK_KIND = Object.freeze({
   bard: 'none', phalanx: 'none', librator: 'none',
   lord: 'ranged', fortress: 'ranged', shotprotector: 'ranged', agent: 'ranged', hookmaster: 'ranged',
 });
-/** Sub-professions whose ranged attack cannot hit air units (投掷手 / 要塞 — docs/DATA.md §2.1). */
+/** Sub-professions whose ranged attack cannot hit air units (要塞 fortress / 巡空者 skywalker — docs/DATA.md §2.1). */
 export const NO_HIT_FLY = Object.freeze(['fortress', 'skywalker']);
 
 /**

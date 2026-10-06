@@ -163,7 +163,7 @@ node tools/workshop-pack.mjs list                           # 每个包一行：
 
 | 组件 | 作用 |
 |---|---|
-| `shared/chessAuthoring.js` | `deriveChessRecord(spec)`：从「名字 / 阶 / 职业 / 普通与精锐两套数值 / 技能文字」推导出合法的普通+精锐记录对；`validateChessRecord(rec)` 返回**机器可读**的 `{ field, code, message, hint }[]`（不抛异常、不半途停止） |
+| `shared/chessAuthoring.js` | `deriveChessRecord(spec)`：从「名字 / 阶 / 职业 / 普通与精锐两套数值 / 技能文字 / 模组」推导出合法的普通+精锐记录对；`validateChessRecord(rec)` 返回**机器可读**的 `{ field, code, message, hint }[]`（不抛异常、不半途停止） |
 | `tools/workshop-scaffold.mjs` | `spec.json` → 写入 `<pack>/chess.json`（合并已有内容，必要时补 `pack.json`） |
 | `tools/workshop-validate.mjs` | 分层校验：**格式 → 记录语义 → 真实引擎**（是否进商店池、能否解析出精英、模拟器能否构建 unit def），再按内容种类各一层（kits / 地图 / 怪物 / 出怪 / 装备）。`--json` 输出机器可读报告 |
 | `docs/prompts/operator-pack.md` | **模板 prompt**：连同技能文字描述与普通/精锐数值一起丢给任意 AI，即可产出可用干员 |
@@ -195,6 +195,9 @@ node tools/workshop-validate.mjs my-pack
 | 包发现、格式校验、叠加合并、失败关闭 | ✅ 已实现 |
 | 合并数据送达浏览器（HTTP） | ✅ 已实现 |
 | 新干员进入商店池、被购买、部署、真实战斗、精英/模组解析 | ✅ 已验证（`test/workshop.test.js`） |
+| **干员模组（`modules`）**：spec → 精锐记录的 `modules[]`（数值加成 / 特性覆盖 / 天赋改写），且模板往返逐字节保真 | ✅ 已完成（`shared/chessAuthoring.js`、`test/chessModules.test.js`、编辑器干员页的模组块） |
+| **攻击分类的覆盖**：`dmgType` / `attackKind` / `projectile` / `canHitFly` 可显式钉住（默认仍按职业与分支推导，覆盖时校验给 `CLASS_OVERRIDE` 警告） | ✅ 已完成（`shared/chessAuthoring.js`） |
+| **干员的盟约归属**：干员页勾选官方 23 条与本包自写的盟约，写进该干员记录的 `bonds`（成员由此推导） | ✅ 已完成（`editor/ui/app.js`） |
 | **地图（stages）**：推导 + 校验 + 2D 摆放器 | ✅ 已完成（`test/stageAuthoring.test.js`、`editor/ui/stage.html`、`tools/workshop-scaffold.mjs`） |
 | **怪物（enemies）**：`be`/`attrPower` 推导 + 校验 + 编辑器表单 | ✅ 已完成（`test/enemyAuthoring.test.js`、`editor/ui/enemy.html`） |
 | **出怪表（waves）**：`totalCount`/`slotCounts` 推导 + 校验 + 时间轴 | ✅ 已完成（`test/waveAuthoring.test.js`、`editor/ui/wave.html`） |
@@ -226,6 +229,8 @@ node tools/workshop-validate.mjs my-pack
   报错，只会让平衡悄悄歪掉。
 - **成员是干员说了算**：`members` 由干员的 `bonds` 列表推导（`bondEditor` 的成员那一段改的就是那些干员的 spec）。
   引擎计数、盟约弹窗的成员列表都读这个列表；一份「盟约说自己是这群人、干员却不认」的记录会安静地少人。
+  **干员页也有盟约勾选**（`docs/EDITOR.md` 的「干员编辑器（首页）」一节）：官方 23 条 + 本包自己写的盟约都在那里，
+  勾选即写进该干员的 `bonds`，模板带过来的官方盟约默认勾着 —— 查不到的 id 界面会当场指出来（能保存，但游戏里不会有任何效果）。
 - **图标**：客户端按**盟约 id** 从 `data/assets.json` 的 `bonds` 取图（`public/js/assets.js bondIconUrl`），
   一个包无法给 `assets.json` 加条目，所以新增盟约在盟约条上是一个圆点；覆盖官方则沿用官方图标。
 
@@ -254,6 +259,7 @@ node tools/workshop-validate.mjs my-pack
 | `slots` | 每阶每名玩家可带的助战数量；`0` 表示该阶关闭 |
 | `pool` | 该阶允许的干员 id。**必须与 `data/chess.json` 里该干员的 `tier` 一致**：把 6 阶干员写进 `"5"` 里不会被提升，而是被禁用 |
 | `denyUnknown` | 卡池外一律拒绝（默认 `true`） |
+| `prices` | `{ "<chessId>": 3 }`：**带上这名助战的玩家**商店里的标价（0–99 整数，只认卡池里真有的 id）。留空 = 阶级价；关掉该助战时这条价目会被清掉（见 §2.3） |
 | `workshop` | 写 `false` 即忽略**所有**工坊包的助战声明（安装方保留最终决定权，启动日志会写出来） |
 
 这个文件由服务器维护、**不参与 `build-data`**，改完重启即生效，无需重建 `data/`。

@@ -6,6 +6,8 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { MODULE_ATTR_KEYS } from '../shared/chessAuthoring.js';
+
 /** 一个够用的元素：记孩子、记属性、记文本，并真的记住事件监听（否则「点一下」这个测试就是假的）。 */
 function makeEl(tag) {
   const el = {
@@ -54,6 +56,11 @@ const findAll = (node, pred, out = []) => {
 const clickableWith = (root, needle) => findAll(root, (n) => (n.children || []).length && String(n.className).includes('item') && textOf(n).includes(needle))[0]
   || findAll(root, (n) => n.tagName === 'BUTTON' && textOf(n).includes(needle))[0];
 const inputsOf = (root) => findAll(root, (n) => ['INPUT', 'SELECT', 'TEXTAREA'].includes(n.tagName));
+/** 同一行里的复选框（模组卡的「默认」那种：文字在行上，控件在行里）。 */
+const checkboxInRow = (root, needle) => {
+  const row = findAll(root, (n) => n.tagName === 'DIV' && String(n.className).includes('row') && textOf(n).includes(needle))[0];
+  return row ? findAll(row, (n) => n.tagName === 'INPUT' && n.attrs.type === 'checkbox')[0] : null;
+};
 
 const doc = makeEl('html');
 doc.documentElement = makeEl('html');
@@ -90,13 +97,19 @@ const STATE = {
     id: 'demo-pack', manifest: { name: '演示包' },
     specs: [{ id: 'my_op', name: '我的干员', tier: 4, profession: 'SNIPER' }],
     operators: [{ chessId: 'chess_ws_my_op_a', name: '我的干员', isGolden: false, managed: true, issues: [] }],
+    // 这个包自己写出来的盟约：干员页的盟约清单要把它一起列出来（并标上「本包」）
+    bonds: [{ id: 'bond_ws_demo', name: '演示盟约' }],
   }],
   loadErrors: [],
   support: { pool: { 4: [] } },
   officialCount: 2,
+  officialBonds: [
+    { bondId: 'bond_apostle', name: '使徒', isCore: true },
+    { bondId: 'bond_karlan', name: '卡西米尔', isCore: false },
+  ],
   officialChess: [
-    { id: 'chess_char_1_1_a', name: '阿米娅', appellation: 'Amiya', tier: 5, profession: 'CASTER', subProfessionId: 'caster', position: 'RANGED', spine: 'char_002_amiya', rangeGrid: [[1, 0], [0, 0], [0, 1]], stats: { maxHp: 1500, atk: 480, def: 120, res: 10, cost: 18, blockCnt: 1, bat: 1.6 } },
-    { id: 'chess_char_2_1_a', name: '能天使', appellation: 'Exusiai', tier: 6, profession: 'SNIPER', subProfessionId: 'fastshot', position: 'RANGED', spine: 'char_1035_wisdel', rangeGrid: [[1, 0], [0, 0], [0, 1], [0, 2]], stats: { maxHp: 1200, atk: 520, def: 100, res: 0, cost: 14, blockCnt: 1, bat: 1.0 } },
+    { id: 'chess_char_1_1_a', name: '阿米娅', appellation: 'Amiya', tier: 5, profession: 'CASTER', subProfessionId: 'caster', subProfessionName: '术师', position: 'RANGED', spine: 'char_002_amiya', rangeGrid: [[1, 0], [0, 0], [0, 1]], stats: { maxHp: 1500, atk: 480, def: 120, res: 10, cost: 18, blockCnt: 1, bat: 1.6 } },
+    { id: 'chess_char_2_1_a', name: '能天使', appellation: 'Exusiai', tier: 6, profession: 'SNIPER', subProfessionId: 'fastshot', subProfessionName: '速射手', position: 'RANGED', spine: 'char_1035_wisdel', rangeGrid: [[1, 0], [0, 0], [0, 1], [0, 2]], stats: { maxHp: 1200, atk: 520, def: 100, res: 0, cost: 14, blockCnt: 1, bat: 1.0 } },
   ],
   statRanges: {
     SNIPER: {
@@ -127,12 +140,16 @@ globalThis.fetch = async (url, opts) => {
           id: '', name: '能天使', appellation: 'Exusiai', tier: 6, profession: 'SNIPER', subProfessionId: 'fastshot',
           position: 'RANGED', traitDesc: '', assetsSpine: 'char_1035_wisdel',
           rangeGrid: [[1, 0], [0, 0], [0, 1], [0, 2]],
+          // 模板带过来的盟约（官方记录里真的写着 bonds）：一条查得到，一条查不到（手写记录才会出现）
+          bonds: ['bond_apostle', 'bond_missing'],
           stats: {
             normal: { maxHp: 1200, atk: 520, def: 100, res: 0, cost: 14, blockCnt: 1, bat: 1 },
             golden: { maxHp: 1560, atk: 676, def: 130, res: 0, cost: 14, blockCnt: 1, bat: 1 },
           },
           skill: { name: '扫射', desc: '', skillType: 'MANUAL', durationType: 'AMMO', duration: 0, spType: 'INCREASE_WITH_TIME', spCost: 30, initSp: 10, maxChargeTime: 1, triggerRule: 'DEFAULT', bb: { atk: 0.5 } },
-          talents: [{ name: '快速弹匣', desc: '攻速提升', bb: {} }],
+          // descRaw 与 desc 不同：官方数据里 199 条天赋有 56 条是这样（富文本标记），
+          // 记录里优先读 descRaw，所以「改了说明却没生效」这条陷阱必须靠界面同步两个字段来堵
+          talents: [{ name: '快速弹匣', desc: '攻速提升', descRaw: '攻速<$ba.stun>提升</>', bb: {} }],
         },
       }),
     };
@@ -215,5 +232,130 @@ describe('干员表单：真跑一遍（最小 DOM 桩）', () => {
     assert.match(form, /Attack range and damage class/);
     assert.match(form, /Official 900–1800 \(median 1200\)/);
     assert.doesNotMatch(form, /攻击范围与伤害分类/);
+  });
+
+  // 上面一条把界面留在了英文。下面每条都以「点一下语言按钮」开头/结尾，把语言摆回它需要的那一侧。
+  const langBtn = () => findAll(headerRow, (n) => n.id === 'btnLang')[0];
+  const selectWith = (needle) => findAll(editorBox, (n) => n.tagName === 'SELECT' && textOf(n).includes(needle))[0];
+  const waitPreview = () => new Promise((r) => setTimeout(r, 400));
+  const lastPreviewSpec = () => calls.filter((c) => c.url === '/api/preview').pop().body.spec;
+
+  test('职业 / 位置 / 分支都是中文下拉（英文界面换成英文名，分支退回 id）', () => {
+    fire(langBtn(), 'click'); // 切回中文
+    const prof = findAll(editorBox, (n) => n.tagName === 'SELECT' && textOf(n).includes('PIONEER') && textOf(n).includes('WARRIOR'))[0];
+    assert.ok(prof, '职业下拉');
+    assert.match(textOf(prof), /近卫 WARRIOR/);
+    assert.match(textOf(prof), /重装 TANK/);
+    assert.match(textOf(prof), /先锋 PIONEER/);
+    const pos = findAll(editorBox, (n) => n.tagName === 'SELECT' && textOf(n).includes('MELEE') && textOf(n).includes('RANGED'))[0];
+    assert.match(textOf(pos), /近战 MELEE/);
+    assert.match(textOf(pos), /远程 RANGED/);
+    // 分支下拉：中文名 · id —— 名字是给人看的，id 才是记录里写下去的那个值
+    const sub = selectWith('速射手 · fastshot');
+    assert.ok(sub, '分支要有中文名下拉');
+    assert.match(textOf(sub), /术师 · caster/);
+    assert.match(textOf(sub), /（不填：攻击方式与伤害类型只按职业推导）/);
+
+    // 英文界面：数据里没有英文分支名，所以只列 id（猜一个英文名只会让人以为自己填错了）
+    fire(langBtn(), 'click');
+    const enSub = findAll(editorBox, (n) => n.tagName === 'SELECT' && textOf(n).includes('fastshot'))[0];
+    assert.ok(enSub, '英文界面下分支下拉仍然在');
+    assert.doesNotMatch(textOf(enSub), /速射手|术师/);
+    assert.match(textOf(enSub), /empty: attack kind and damage type come from the profession alone/);
+    fire(langBtn(), 'click'); // 后面按中文断言
+    assert.ok(selectWith('速射手 · fastshot'), '切回中文后分支名也回来了');
+  });
+
+  test('攻击分类的覆盖：钉住一项会写进记录，清空就回到推导', async () => {
+    const ovSel = selectWith('（推导：物理）');
+    assert.ok(ovSel, '覆盖下拉的第一项要写明推导成了什么');
+    calls.length = 0;
+    fire(ovSel, 'change', 'arts');
+    await waitPreview();
+    assert.equal(lastPreviewSpec().dmgType, 'arts', '钉住的值要出现在发给服务端的 spec 里');
+    assert.match(textOf(editorBox), /记录里会写：伤害类型 法术/, '要能看见真正会写进记录的值');
+    // 清空＝把这个键从 spec 里删掉（留个空串会让记录变脏）
+    calls.length = 0;
+    fire(selectWith('（推导：物理）'), 'change', '');
+    await waitPreview();
+    assert.equal('dmgType' in lastPreviewSpec(), false);
+    assert.match(textOf(editorBox), /记录里会写：伤害类型 物理/);
+  });
+
+  test('模组：加一个会默认勾上，attr 的键只能从真键里挑，数值提示按引擎的算术算', async () => {
+    fire(findAll(editorBox, (n) => n.tagName === 'BUTTON' && textOf(n).includes('＋ 添加一个模组'))[0], 'click');
+    await waitPreview(); // 「当前默认模组 → 写下去是多少」那一行是整页重画时算的（防抖 250ms）
+    const form = textOf(editorBox);
+    assert.match(form, /模组 modules（只有精锐记录会读）/);
+    assert.match(form, /当前默认模组/, '默认模组要有一行「精锐记录里写下去是多少」');
+    // attr 的键是下拉：写错键名不会报错，但一个数值也不加，所以只能从真键里挑
+    const attrSel = findAll(editorBox, (n) => n.tagName === 'SELECT' && MODULE_ATTR_KEYS.every((k) => textOf(n).includes(k)))[0];
+    assert.ok(attrSel, 'attr 的键名要做成下拉');
+    const attrRow = findAll(editorBox, (n) => String(n.className).includes('kv') && (n.children || []).some((c) => c === attrSel))[0];
+    assert.ok(attrRow, 'attr 要有键值行');
+    fire(attrRow.children[1], 'input', '100');
+    await waitPreview();
+    // 精锐 atk 676（模板值）+ 模组 100 = 776：这一行必须与引擎的 composeStats 一致
+    assert.match(textOf(editorBox), /攻击 atk 676 → 776/);
+    const spec = lastPreviewSpec();
+    assert.equal(spec.modules.length, 1);
+    assert.match(spec.modules[0].id, /^uniequip_ws_/);
+    assert.equal(spec.modules[0].isDefault, true);
+    assert.deepEqual(spec.modules[0].attr, { atk: 100 });
+  });
+
+  test('模组：取消默认会提示精锐按「不带模组」生成，删掉之后列表是空的', async () => {
+    const cb = checkboxInRow(editorBox, '默认（精锐记录带的就是它）');
+    assert.ok(cb, '默认模组的勾选框');
+    assert.equal(cb.checked, true);
+    cb.checked = false;
+    fire(cb, 'change');
+    await waitPreview();
+    assert.match(textOf(editorBox), /没有勾「默认」/);
+    assert.equal(lastPreviewSpec().modules[0].isDefault, false);
+
+    const row = findAll(editorBox, (n) => n.tagName === 'DIV' && String(n.className).includes('row') && textOf(n).includes('默认（精锐记录带的就是它）'))[0];
+    fire(findAll(row, (n) => n.tagName === 'BUTTON')[0], 'click');
+    await waitPreview();
+    assert.deepEqual(lastPreviewSpec().modules, []);
+    assert.match(textOf(editorBox), /（一个模组都没有/);
+  });
+
+  test('改天赋说明会连 descRaw 一起改（否则记录里读的是原文，作者的修改静默无效）', async () => {
+    const desc = inputsOf(editorBox).find((i) => i.value === '攻速提升');
+    assert.ok(desc, '模板带过来的天赋说明');
+    calls.length = 0;
+    fire(desc, 'input', '攻速大幅提升');
+    await waitPreview();
+    const tal = lastPreviewSpec().talents[0];
+    assert.equal(tal.desc, '攻速大幅提升');
+    assert.equal(tal.descRaw, '攻速大幅提升', 'descRaw 必须跟着走：记录里优先读它');
+  });
+
+  test('盟约：模板带过来的是勾着的，勾选写进记录，查不到的 id 会警告', async () => {
+    const cbOf = (needle) => {
+      const label = findAll(editorBox, (n) => n.tagName === 'LABEL' && textOf(n).includes(needle))[0];
+      return label ? findAll(label, (n) => n.tagName === 'INPUT')[0] : null;
+    };
+    assert.match(textOf(editorBox), /盟约 bonds（这个干员算在哪些盟约里）/);
+    assert.equal(cbOf('使徒（bond_apostle）').checked, true, '模板带过来的官方盟约要勾着');
+    assert.equal(cbOf('卡西米尔（bond_karlan）').checked, false);
+    assert.match(textOf(editorBox), /本包/, '本包的盟约要标出来');
+    assert.match(textOf(editorBox), /这些 id 查不到对应的盟约/, '查不到的 id 要当场说，不能等试玩才发现');
+    assert.match(textOf(editorBox), /bond_missing/);
+
+    calls.length = 0;
+    const packBond = cbOf('演示盟约（bond_ws_demo）');
+    packBond.checked = true;
+    fire(packBond, 'change');
+    await waitPreview();
+    assert.deepEqual([...lastPreviewSpec().bonds].sort(), ['bond_apostle', 'bond_missing', 'bond_ws_demo']);
+
+    // 取消勾选会把它从记录里去掉（模板带来的官方盟约也是这么退出的）
+    const official = cbOf('使徒（bond_apostle）');
+    official.checked = false;
+    fire(official, 'change');
+    await waitPreview();
+    assert.deepEqual([...lastPreviewSpec().bonds].sort(), ['bond_missing', 'bond_ws_demo']);
   });
 });

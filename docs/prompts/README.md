@@ -6,8 +6,8 @@
 
 | Prompt | 用于 | 状态 |
 |---|---|---|
-| [operator-pack.md](operator-pack.md) | 干员（含技能黑板、天赋、普通/精锐两套数值） | ✅ 完整（含黑板书键表） |
-| 本文档的「各内容种类的 spec 形状」一节 | 地图 / 怪物 / 出怪 / 装备 / 语音 / 行为层 kit | ✅ 形状与推导规则在此，配合校验器闭环 |
+| [operator-pack.md](operator-pack.md) | 干员（含技能黑板、天赋、普通/精锐两套数值、**模组**、**攻击分类覆盖**、**盟约成员**） | ✅ 完整（含黑板书键表） |
+| 本文档的「各内容种类的 spec 形状」一节 | 地图 / 怪物 / 出怪 / 装备 / **盟约** / 语音 / 行为层 kit | ✅ 形状与推导规则在此，配合校验器闭环 |
 
 > 为什么只有一个独立的 prompt 文件：干员的黑板书有 **60 多个键**、每个键的含义与拼写例外都必须写清楚，
 > 那是唯一需要一整份文档的内容种类。其余几种的 spec 形状很短，且都能用同一条闭环
@@ -36,10 +36,11 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
 `0 error(s)` 即 `VALID: the engine accepts this content.`。按 `code` 改，再跑一次。
 
 **工作目录约定**：一个包就是 `workshop/<packId>/`，`pack.json` 里 `content` 列出这个包贡献哪些文件
-（`chess` `items` `enemies` `stages` `waves`）。`<kind>-specs/<slug>.json` 是**可编辑的源**，
+（`chess` `items` `enemies` `stages` `waves` `bonds`）。`<kind>-specs/<slug>.json` 是**可编辑的源**，
 `<kind>.json` 是**推导产物** —— 产物不要手改，改源再推导。行为层 kit 是唯一的例外：它在 `kits/<干员 id>.js`，
 **不进 `content`**（`content` 只列数据文件），也没有推导产物 —— 文件本身就是游戏加载的东西。
 语音是第二个例外：它写在 `pack.json.voices` 里，音频文件放在包的 `assets/` 下（见下面「语音」一节）。
+盟约的源目录是 `bond-specs/`（不是 `specs/`），因为盟约 id 是它自己的键，不和干员共用一个目录。
 
 ---
 
@@ -126,6 +127,40 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
 - `trapId` 复用现有装备图标（仓库不含素材）；可用的 trap id 由 `GET /api/items` 的 `icons` 列出。
 - 图形化等价物：编辑器 `/item.html`。
 
+### 盟约（`bond-specs/<bondId>.json`）
+
+盟约（羁绊）有**三层**，写 spec 时要分清哪一层是你能改的：
+
+| 层 | 字段 | 改了会怎样 |
+|---|---|---|
+| 计数与激活 | `countMode` `thresholds` `countsHand` `countsGoldenOnly` | 谁算成员、几个才算激活 |
+| 数据面 | `weight` `isCore` `desc` `iconId` `members` | 本局禁用抽签、界面显示、盟约弹窗列谁 |
+| 战斗加成 | 引擎实现（官方 23 条按 id 写死）+ `genericBuffs` | 见下面两条 |
+
+```json
+{
+  "id": "bond_ws_my_bond", "name": "示例盟约", "isCore": false, "bondType": "SEASON",
+  "identifier": 99, "weight": 10, "countMode": "BOARD", "thresholds": [3, 6, 9],
+  "activeType": "BATTLE", "desc": "【示例盟约】干员攻击力提升（受层数影响）",
+  "bb": { "base_atk": 0.15, "atk_per_stack": 0.05 },
+  "genericBuffs": true
+}
+```
+
+- **覆盖官方盟约 = 真正修改盟约**：官方 23 条的效果在 `server/sim/content/bonds/*` 里按 id 实现，但阈值、计数模式、
+  说明、黑板数值全部从 `data/bonds.json` 的记录读。所以用官方 id 写一份记录、并在 `pack.json` 的
+  `overrides` 里写 `"bonds:<id>"`，改的数字**立刻生效**。此时**不要**打开 `genericBuffs` —— 会和官方处理器叠加两次。
+- **新增盟约必须打开 `genericBuffs`** 才能在战斗里加东西：`server/sim/content/bonds/dataDriven.js` 按 `bb` 的
+  `base_atk` / `atk_per_stack`（防御 `base_def` / `def_per_stack`、生命 `base_max_hp` / `max_hp_per_stack`）
+  给成员加百分比，与官方盟约同一个「直接乘算」桶。**不打开**时这条盟约只有数据面：计数、阈值、层数、
+  详情与盟约条都正常，但战斗里不加任何东西。
+- **`members` 不是盟约说了算**：它由**干员的 `bonds` 列表**推导（见 [operator-pack.md](operator-pack.md) 第四节）。
+  手写 `members` 不会有用 —— 引擎按干员记录数人。
+- **图标只能复用本机已装好的**：客户端按**盟约 id** 从 `data/assets.json` 的 `bonds` 取图，一个包无法给
+  `assets.json` 加条目 —— 新增盟约在盟约条上是一个圆点，覆盖官方则沿用官方图标。
+- `content` 里要声明 `bonds`，否则加载器**完全不读**这个包的 `bonds.json`（与干员同一个坑）。
+- 图形化等价物：编辑器 `/bond.html`（左栏清单 / 中间表单 / 右侧「战斗里会加什么」的实时结论）。
+
 ### 语音（`pack.json.voices`）
 
 语音**没有 spec 文件、也没有推导产物**：它直接写在包自己的 `pack.json` 里，音频文件放在包的 `assets/` 下。
@@ -175,6 +210,9 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
 - **不要写阶**：装载时按记录自己的 `tier` 决定进哪一阶。手写阶就会出现「写错了没人报错、该干员静默不可选」
   （记录没有 1–6 的整数 `tier` 记 `SUPPORT_TIER_UNKNOWN`）。
 - 安装方可以在 `data/support.json` 写 `"workshop": false` 忽略所有包的助战声明。
+- **助战的价格也是安装方的事**：`data/support.json` 的 `"prices": { "<chessId>": 3 }` 改的是带这名助战的玩家商店里的标价
+  （0–99 的整数，只认卡池里真有的 id）；没配的用它的阶级价，出售价一律走普通棋子的 `sellPrice`。
+  助战仍然受阶级店铺等级门限限制（六阶助战要商店等级 6 才摇得到）。
 
 ### 行为层 kit（`kits/<chessId>.js`）
 

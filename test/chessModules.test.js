@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import {
   deriveChessRecord, specFromChessRecord, validateChessRecord, authoringErrors, classify,
   PROFESSIONS, PROFESSION_NAMES, POSITION_NAMES, DMG_TYPES, ATTACK_KINDS, PROJECTILES,
-  TRIGGER_RULES, KNOWN_CUSTOM_TRIGGER_RULES,
+  MODULE_ATTR_KEYS, TRIGGER_RULES, KNOWN_CUSTOM_TRIGGER_RULES,
 } from '../shared/chessAuthoring.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -183,6 +183,19 @@ describe('干员创作层：模组', () => {
     assert.equal(g.talents.find((t) => t.index === 0).desc, '模组改过的天赋');
     assert.equal(g.talents.find((t) => t.index === 0).bb.atk, 0.2);
     assert.equal(g.talentsBase.find((t) => t.index === 0).desc, '说明');
+  });
+
+  test('模组 attr 的键表与官方数据一致（写错一个键就是数值一点不加）', () => {
+    const used = new Set();
+    for (const rec of Object.values(CHESS)) {
+      for (const m of (rec.modules || [])) for (const k of Object.keys(m.attr || {})) used.add(k);
+    }
+    assert.ok(used.size >= 5, `官方数据里应该有真的模组数值，实际 ${used.size} 个键`);
+    assert.deepEqual([...used].filter((k) => !MODULE_ATTR_KEYS.includes(k)), [], '官方用到的 attr 键必须在表里（编辑器只让它挑这些）');
+    // 表里的每个键都必须是记录里真实存在的数值字段：`composeStats` 是「按同名键相加」，
+    // 表里写一个记录没有的键，界面上加得进去、引擎那边就是一个凭空多出来的字段。
+    const anyRec = Object.values(CHESS).find((r) => r.stats);
+    assert.deepEqual(MODULE_ATTR_KEYS.filter((k) => !(k in anyRec.stats)), []);
   });
 
   test('没有 isDefault 时警告，并说明精锐按「不带模组」生成', () => {
