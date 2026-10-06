@@ -214,6 +214,38 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 | POST | `/api/packs/:pack/items` | `{ spec }` → 写 `item-specs/` 并重新生成 `items.json`（一对记录） |
 | DELETE | `/api/packs/:pack/items/:id` | 删除该装备的 spec **及它的一对记录** |
 
+## Option 署名（`_meta`）
+
+编辑器保存的**每一个 Option**（干员、地图、怪物、出怪、装备的 spec）都会自动带上一个 `_meta` 字段，把
+[README 的著作权声明](../README.md#著作权声明)随文件一起带走 —— 声明写在 README 里不会跟着文件走，而一份
+被拷到别处的关卡文件必须自己说明它是谁做的：
+
+```json
+"_meta": {
+  "schema": 1,
+  "source": "Stronghold-Protocol-Forge",
+  "author": "水沫沐沐",
+  "pack": "my-pack",
+  "created": "2026-10-06T06:30:26.000Z",
+  "modified": "2026-10-06T07:12:03.000Z",
+  "copyright": { "zh": "…著作权归创建它的作者本人所有…", "en": "…" },
+  "antiResale": { "zh": "…禁止打包、转售或批量分发…", "en": "…" },
+  "scope": "本声明只针对 Option 创作内容，不改变本项目代码的 GPL-3.0-or-later 授权，也不附加任何限制。"
+}
+```
+
+- **`created` 只写一次。** 之后再保存只更新 `modified` —— 作者改一下地图不该把创建日期重置。
+- **作者名的来源**，按优先级：`createEditorServer({ forgeAuthor })` → 环境变量 `SP_FORGE_AUTHOR` →
+  该包 `pack.json` 的 `author`。都没有就写 `未署名 (anonymous)`，不猜。
+  ```powershell
+  $env:SP_FORGE_AUTHOR = "你的名字"; npm run editor
+  ```
+- **`_meta` 只存在于 spec（源文件）里，绝不会进入游戏读的产物。** 每个 `derive*` 都是逐字段构造记录，
+  所以 `_meta` 天然不会漏进 `stages.json` / `chess.json` —— `test/forgeNotice.test.js` 把这条钉住了
+  （否则署名声明会顺着合并数据上到网络里）。
+- **它不是对代码的附加限制。** `_meta` 描述的是 Option 这一创作内容；代码仍然是 GPL-3.0-or-later，
+  这条声明不改变也不缩减任何人在 GPL 下的权利。这条边界是它能与 GPL 共存的原因。
+
 ## 当前不包含
 
 - **行为层脚本**（`kits/<chessId>.js`）的编辑——kit 目前手写文件

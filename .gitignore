@@ -29,6 +29,14 @@ scripts/service.env.cmd
 .env
 .env.*
 
+# --- build outputs & secrets ----------------------------------------------------------------------
+# this project has no bundler; listed so a stray one never lands in the repository
+dist/
+build/
+*.pem
+*.key
+*.p12
+
 # --- OS / editor clutter ---------------------------------------------------------------------------
 .DS_Store
 Thumbs.db

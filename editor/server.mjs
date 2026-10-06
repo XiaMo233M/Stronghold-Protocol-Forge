@@ -38,6 +38,7 @@ import {
   ITEM_TYPES, ITEM_CATEGORIES, COUNT_TYPES, ITEM_DURATIONS, UPGRADE_NUMS,
 } from '../shared/itemAuthoring.js';
 import { loadWorkshop, WORKSHOP_DIR } from '../server/workshop.js';
+import { withForgeMeta } from '../shared/forgeNotice.js';
 
 export const EDITOR_ROOT = path.dirname(fileURLToPath(import.meta.url));
 export const UI_DIR = path.join(EDITOR_ROOT, 'ui');
@@ -299,6 +300,17 @@ function regenerateItems(packDir, officialItems, dropIds = []) {
 }
 
 /**
+ * The author name an Option's `_meta` records: the editor's `forgeAuthor` option (or `SP_FORGE_AUTHOR`), else the pack's
+ * own `pack.json` author, else null — and the stamp then says "未署名 (anonymous)" rather than inventing a name.
+ */
+function authorFor(packDir, explicit = null) {
+  if (typeof explicit === 'string' && explicit.trim()) return explicit.trim();
+  const manifest = readJson(path.join(packDir, 'pack.json'), null);
+  const author = manifest && typeof manifest.author === 'string' ? manifest.author.trim() : '';
+  return author || null;
+}
+
+/**
  * The `trapId` values an item may reuse. A workshop pack ships no art, so borrowing an existing equip icon is the only
  * way an item gets a real picture — exactly like an enemy borrowing a `spine`. Deduplicated, because many items share
  * one trap id, and labelled with the item it came from so the picker reads as names rather than keys.
@@ -467,6 +479,11 @@ export async function createEditorServer(opts = {}) {
   const officialEnemies = new Set(Object.keys(readJson(path.join(dataDir, 'enemies.json'), {}) || {}));
   const officialWaves = new Set(Object.keys(readJson(path.join(dataDir, 'waves.json'), {}) || {}));
   const officialItems = new Set(Object.keys(readJson(path.join(dataDir, 'items.json'), {}) || {}));
+  // The name stamped into every Option's `_meta` (shared/forgeNotice.js): the explicit option first, then the
+  // environment, then the pack's own `pack.json` author — resolved per save by `authorFor` below.
+  const forgeAuthor = typeof opts.forgeAuthor === 'string' && opts.forgeAuthor.trim()
+    ? opts.forgeAuthor.trim()
+    : (typeof process.env.SP_FORGE_AUTHOR === 'string' && process.env.SP_FORGE_AUTHOR.trim() ? process.env.SP_FORGE_AUTHOR.trim() : null);
   const official = officialChess(dataDir);
 
   const server = http.createServer((req, res) => {
@@ -534,11 +551,13 @@ export async function createEditorServer(opts = {}) {
       const manifestPath = path.join(packDir, 'pack.json');
       if (!fs.existsSync(manifestPath)) {
         await writeJson(manifestPath, {
-          id: packId, name: spec.name || packId, version: '0.1.0', author: null, license: null,
+          id: packId, name: spec.name || packId, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null,
           description: null, gameVersion: '0.1.3', content: ['chess'], overrides: [],
         });
       }
-      await writeJson(path.join(packDir, 'specs', `${ids.slug}.json`), spec);
+      const specPath = path.join(packDir, 'specs', `${ids.slug}.json`);
+      const previousSpec = readJson(specPath, null);
+      await writeJson(specPath, withForgeMeta(spec, { author: authorFor(packDir, forgeAuthor), packId, now: new Date().toISOString(), previous: previousSpec }));
       const regen = regeneratePack(root, packId, officialIds);
       if (regen.errors.length) {
         // another spec in this pack no longer derives: report it rather than silently writing a pack that lost records
@@ -640,8 +659,10 @@ export async function createEditorServer(opts = {}) {
       content.add('stages');
       await writeJson(manifestPath, existingManifest
         ? { ...existingManifest, content: [...content].sort() }
-        : { id: packId, name: spec.name || packId, version: '0.1.0', author: null, license: null, description: null, gameVersion: '0.1.3', content: [...content], overrides: [] });
-      await writeJson(path.join(packDir, STAGE_SPEC_DIR, `${derived.stage.id}.json`), spec);
+        : { id: packId, name: spec.name || packId, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null, description: null, gameVersion: '0.1.3', content: [...content], overrides: [] });
+      const specPath = path.join(packDir, STAGE_SPEC_DIR, `${derived.stage.id}.json`);
+      const previousSpec = readJson(specPath, null);
+      await writeJson(specPath, withForgeMeta(spec, { author: authorFor(packDir, forgeAuthor), packId, now: new Date().toISOString(), previous: previousSpec }));
       const regen = regenerateStages(packDir, officialStages);
       if (regen.errors.length) {
         return sendJson(res, 400, { error: 'another map in this pack no longer derives — fix it before saving', errors: regen.errors });
@@ -735,8 +756,10 @@ export async function createEditorServer(opts = {}) {
       content.add('enemies');
       await writeJson(manifestPath, existingManifest
         ? { ...existingManifest, content: [...content].sort() }
-        : { id: packId, name: spec.name || packId, version: '0.1.0', author: null, license: null, description: null, gameVersion: '0.1.3', content: [...content], overrides: [] });
-      await writeJson(path.join(packDir, ENEMY_SPEC_DIR, `${ids.slug}.json`), spec);
+        : { id: packId, name: spec.name || packId, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null, description: null, gameVersion: '0.1.3', content: [...content], overrides: [] });
+      const specPath = path.join(packDir, ENEMY_SPEC_DIR, `${ids.slug}.json`);
+      const previousSpec = readJson(specPath, null);
+      await writeJson(specPath, withForgeMeta(spec, { author: authorFor(packDir, forgeAuthor), packId, now: new Date().toISOString(), previous: previousSpec }));
       const regen = regenerateEnemies(packDir, officialEnemies);
       if (regen.errors.length) {
         return sendJson(res, 400, { error: 'another monster in this pack no longer derives — fix it before saving', errors: regen.errors });
@@ -840,8 +863,10 @@ export async function createEditorServer(opts = {}) {
       content.add('waves');
       await writeJson(manifestPath, existingManifest
         ? { ...existingManifest, content: [...content].sort() }
-        : { id: packId, name: spec.name || packId, version: '0.1.0', author: null, license: null, description: null, gameVersion: '0.1.3', content: [...content], overrides: [] });
-      await writeJson(path.join(packDir, WAVE_SPEC_DIR, `${ids.slug}.json`), spec);
+        : { id: packId, name: spec.name || packId, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null, description: null, gameVersion: '0.1.3', content: [...content], overrides: [] });
+      const specPath = path.join(packDir, WAVE_SPEC_DIR, `${ids.slug}.json`);
+      const previousSpec = readJson(specPath, null);
+      await writeJson(specPath, withForgeMeta(spec, { author: authorFor(packDir, forgeAuthor), packId, now: new Date().toISOString(), previous: previousSpec }));
       const regen = regenerateWaves(packDir, officialWaves, knownEnemyKeysFor(root, dataDir));
       if (regen.errors.length) {
         return sendJson(res, 400, { error: 'another wave in this pack no longer derives — fix it before saving', errors: regen.errors });
@@ -949,8 +974,10 @@ export async function createEditorServer(opts = {}) {
       content.add('items');
       await writeJson(manifestPath, existingManifest
         ? { ...existingManifest, content: [...content].sort() }
-        : { id: packId, name: spec.name || packId, version: '0.1.0', author: null, license: null, description: null, gameVersion: '0.1.3', content: [...content], overrides: [] });
-      await writeJson(path.join(packDir, ITEM_SPEC_DIR, `${ids.slug}.json`), spec);
+        : { id: packId, name: spec.name || packId, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null, description: null, gameVersion: '0.1.3', content: [...content], overrides: [] });
+      const specPath = path.join(packDir, ITEM_SPEC_DIR, `${ids.slug}.json`);
+      const previousSpec = readJson(specPath, null);
+      await writeJson(specPath, withForgeMeta(spec, { author: authorFor(packDir, forgeAuthor), packId, now: new Date().toISOString(), previous: previousSpec }));
       const regen = regenerateItems(packDir, officialItems);
       if (regen.errors.length) {
         return sendJson(res, 400, { error: 'another item in this pack no longer derives — fix it before saving', errors: regen.errors });

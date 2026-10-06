@@ -29,7 +29,7 @@ English summary: [below](#english).
 - [声明](#声明) · [简介](#简介) · [功能一览](#功能一览)
 - [快速开始](#快速开始)：[整合包](#方式一整合包推荐) · [从源码运行](#方式二从源码运行) · [系统要求](#系统要求) · [端口与配置](#端口与配置) · [局域网联机](#和朋友一起玩局域网)
 - [联机方式](#联机方式) · [操作](#操作) · [文档](#文档) · [开发与测试](#开发与测试) · [项目结构](#项目结构)
-- [许可证](#许可证) · [致谢与数据来源](#致谢与数据来源) · [贡献](#贡献)
+- [上游来源与修改说明](#上游来源与修改说明) · [许可证](#许可证) · [著作权声明](#著作权声明) · [致谢与数据来源](#致谢与数据来源) · [贡献](#贡献)
 
 ## 简介
 
@@ -239,11 +239,107 @@ RENDER_E2E=1 node --test 'test/render/*.browser.test.js'   # 渲染测试，部�
 | `docs/` | 文档与调研 |
 | `test/` | `node:test` 测试 |
 
+## 上游来源与修改说明
+
+本仓库（**Stronghold-Protocol-Forge**）是独立托管的**派生作品**：它不是 GitHub fork 网络中的一员，也没有关联任何上游 remote。它基于下列上游项目，并**整体按 GPL-3.0-or-later 分发**。
+
+| 项 | 内容 |
+|---|---|
+| 上游项目 | **Stronghold-Protocol**（卫戍协议：盟约 · 非官方同人复刻） |
+| 上游地址 | <https://github.com/sganggs/Stronghold-Protocol> |
+| 本项目基于 | 上游 **v0.1.3** 的 Release 整合包（解压得到，不是 `git clone`）。因此**没有可对应的上游 commit hash 或 tag** —— 这是事实，不做推测。 |
+| 改动时间 | 2026 年 10 月起，逐次提交见 `git log` 的提交日期 |
+| 许可 | 整体 **GPL-3.0-or-later**，全文见 [LICENSE](LICENSE)；上游的版权与许可声明原样保留（[NOTICE.md](NOTICE.md)、[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)） |
+
+### 取证方法与它的边界
+
+本工作区是「解压整合包 → `git init`」，而且 `git init` 时本项目的工坊与编辑器**已经写完**。所以第一个提交（根提交）里同时装着上游原文和本项目成果，**git 历史无法把它们分开**。下面的清单由两类**可核实**的证据合成，并明确标出哪些是推断：
+
+| 分类 | 依据 | 强度 |
+|---|---|---|
+| **A 本项目新增** | 不存在于根提交，由本仓库的提交创建 | 可核实（git） |
+| **B 本项目修改** | 存在于根提交，且被本仓库的提交改动 | 可核实（git） |
+| **C 工坊/编辑器功能区** | 路径与内容属于本项目新增的功能，但其中一部分在本仓库建立前就已完成，因而混在根提交里 | **推断**：无法逐字节比对（没有上游 checkout） |
+| **D 其余** | 根提交中除 A/B/C 之外的文件 | **推断**：视为上游原文 |
+
+### A. 本项目新增的文件
+
+| 目录 | 文件 |
+|---|---|
+| `editor/ui/` | `enemy.html` `enemy.js` `item.html` `item.js` `wave.html` `wave.js` `stage3d.js` |
+| `shared/` | `itemAuthoring.js` `kitAuthoring.js` `waveAuthoring.js` `forgeNotice.js` |
+| `public/` | `css/screens/support.css` `js/screens/support.js` `js/ui/supportModel.js` `js/ui/supportSync.js` |
+| `test/` | `itemAuthoring.test.js` `itemEditor.test.js` `kitAuthoring.test.js` `forgeNotice.test.js` `waveAuthoring.test.js` `support.test.js` `workshopAssets.test.js` `workshopStageRounds.test.js` |
+
+### B. 本项目修改的上游文件
+
+| 目录 | 文件 |
+|---|---|
+| 根目录 | `README.md` |
+| `server/` | `index.js` `lobby.js` `stageAuthoring.js` `workshop.js` `match/Match.js` `match/PlayerState.js` `match/waves.js` |
+| `shared/` | `stageAuthoring.js` `workshop.js` |
+| `editor/` | `server.mjs` `ui/app.js` `ui/index.html` `ui/stage.html` `ui/stage.js` |
+| `public/` | `index.html` `js/main.js` `js/screens/briefing.js` `js/screens/lobby.js` `js/screens/room.js` |
+| `tools/` | `workshop-validate.mjs` |
+| `docs/` | `EDITOR.md` `WORKSHOP.md` |
+| `test/` | `docs-consistency.test.js` `editor.test.js` `support.test.js` `ui/mock.e2e.test.js` `ui/devices.e2e.test.js` `ui/emotes.e2e.test.js` `ui/leftovers.e2e.test.js` `ui/playtest2.e2e.test.js` `ui/playtest5-ui.e2e.test.js` `ui/playtest6-ui.e2e.test.js` `ui/feedback1-gaps.e2e.test.js` `ui/feedback1-secret-shop.e2e.test.js` `ui/feedback1-tactic.e2e.test.js` `render/flash.browser.test.js` `render/models.browser.test.js` |
+
+改动内容以**工坊与助战**为主：内容叠加层的加载与合并（`server/workshop.js`、`server/data.js` 的注入点）、工坊内容的只读分发路由（`server/index.js`）、地图的回合作用域（`server/match/waves.js`）、助战卡池的服务端下发与客户端同步（`server/lobby.js`、`server/match/PlayerState.js`、`public/js/screens/support.js`、`public/js/ui/support*.js`），以及编辑器五个页面。**游戏规则本身没有被改动**：战斗模拟、经济与回合流程保持上游行为，工坊只做内容叠加。
+
+### C. 工坊与编辑器功能区（推断为新增）
+
+这些路径承载本项目新增的功能；其中 `editor/`、`shared/chessAuthoring.js`、`shared/enemyAuthoring.js`、`shared/stageAuthoring.js`、`shared/workshop.js`、`server/workshop.js`、`server/stageAuthoring.js`、`tools/workshop-*.mjs`、`docs/WORKSHOP.md`、`docs/EDITOR.md`、`docs/prompts/operator-pack.md`、`docs/examples/**`、`workshop/README.md`、`test/{chess,enemy,stage}Authoring.test.js`、`test/workshop*.test.js` 属于本项目功能，但**它们在本仓库建立之前就已完成**，所以与上游原文一起落在根提交里 —— 本仓库无法逐字节证明这一点。
+
+同理，根提交里的 `shared/support.js`、`data/support.json`、`server/sim/content/support/**`、`test/content/bonds_support.test.js` 涉及**助战**。本项目新增的是「卡池由服务端控制、客户端同步」这一层；上游是否已有同名/同路径的支援机制，本仓库无法逐字节判定，故不在此断言归属。
+
+### D. 未改动的部分
+
+上述 A/B/C 之外，`server/`、`public/`、`data/`、`test/`、`tools/`、`docs/`、`scripts/` 下的其余文件均视为**上游原文**，未作修改，版权与许可声明原样保留。
+
+### 源码获取
+
+**本仓库即为完整对应源码**（Corresponding Source）：编辑器、工坊叠加层、校验工具与其测试都在这里，构建与运行方式见 [快速开始](#快速开始)。游戏素材与 `data/*.json` 的获取方式见 [NOTICE.md](NOTICE.md) 与 [docs/DEPLOY.md](docs/DEPLOY.md)。
+
 ## 许可证
 
 - **代码**：本项目自己编写的代码以 **GPL-3.0-or-later** 发布，全文见 [LICENSE](LICENSE)；另附一条 GPL 第 7 条的附加许可，允许与 pixi-spine 中的 Spine Runtimes 组合分发（见 [NOTICE.md](NOTICE.md)）。
 - **游戏素材不在许可范围内**：《明日方舟》相关的美术、音乐、音效、文本与数据等版权归原权利人所有，不适用 GPL，使用限制见上方的[声明](#声明)和 [NOTICE.md](NOTICE.md)。
 - **第三方组件**各自遵循其许可证：通过 npm 安装的库（整合包的 `node_modules` 中附带各自的许可证文件）、`tools/local-extract/aklz4.py` 的算法（BSD-3-Clause），以及字体等，清单与许可证全文见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+
+## 著作权声明
+
+> [!NOTE]
+> 本声明针对**用本编辑器创作的 Option（关卡、配置及其他创作内容）**，不改变本项目**代码**的 GPL-3.0-or-later 授权，也不附加任何限制 —— 代码部分只适用 GPL-3.0-or-later，见上一节。
+>
+> 编辑器在每份保存的 Option 里自动写入 `_meta` 字段，把下列声明随文件一起带走（作者、创建时间、来源、著作权声明、反打包转售声明）；详见 [docs/EDITOR.md](docs/EDITOR.md)。
+
+本编辑器（Stronghold-Protocol-Forge）生成的关卡文件、配置及其他创作内容（以下统称 “Option”），
+其著作权归 **创建该 Option 的作者本人** 所有。
+
+- 创作者可使用自己创作的 Option 进行分享、分发，并可通过其获得合理回报。
+- 任何人不得未经授权，从公开渠道收集他人创作的 Option 并打包、转售、批量分发。
+- 转载、整合或二次分发他人 Option，必须保留原作者署名与来源信息。
+- 违反上述约定者，视为侵犯原作者著作权，原作者有权依法追究。
+
+本声明不限制 Option 的自由分享与社区共创，仅禁止剽窃他人劳动成果并直接牟利的行为。
+
+### Copyright Notice
+
+All levels, configurations, and other creative content (collectively, "Options")
+generated by this editor (Stronghold-Protocol-Forge) are the property of
+**the respective author who created them**.
+
+- Creators may share, distribute, and reasonably profit from their own Options.
+- No one may, without authorization, collect Options created by others from
+  public sources and package, resell, or bulk-distribute them.
+- Any redistribution of another author's Option must retain the original
+  author's attribution and source information.
+- Violation of the above constitutes copyright infringement, and the original
+  author reserves the right to pursue legal remedies.
+
+This notice does not restrict the free sharing and community co-creation of
+Options. It only prohibits the unauthorized packaging and resale of others'
+work for direct profit.
 
 ## 致谢与数据来源
 
