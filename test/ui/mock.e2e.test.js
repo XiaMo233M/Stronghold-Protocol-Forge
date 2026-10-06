@@ -64,9 +64,23 @@ describe('in-match UI (mock harness, headless Chrome)', { skip: !ENABLED && 'set
     page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
     page.on('requestfailed', (r) => problems.push(`requestfailed: ${r.url()} ${r.failure()?.errorText}`));
     page.on('response', (r) => { if (r.status() >= 400) problems.push(`http ${r.status()}: ${r.url()}`); });
-    await page.goto(`${base}/dev/game-mock.html?shot=1&render=${render}&${query}`, { waitUntil: 'networkidle0' });
+    // Wait for `load` plus a real semantic condition — NOT `networkidle0`. Puppeteer discourages that heuristic, and
+    // here it is actively wrong: `phase=HIDDEN_CORE` reaches `readyState === 'complete'` in ~230 ms with zero failed
+    // requests and an empty in-flight set, yet its connection counter never settles, so navigation burned the full
+    // 30 s timeout and took the two screenshot sweeps down with it (the other 28 shots reach idle fine).
+    //
+    // The guarantee networkidle0 was standing in for — "nothing is left hanging" — is asserted explicitly below, and
+    // more precisely: an HTTP request still open seconds after the screen is up is a finding, while an open WebSocket
+    // is not (a live connection is exactly what a match client should hold).
+    const inflight = new Map();
+    page.on('request', (r) => { if (r.resourceType() !== 'websocket') inflight.set(r.url(), Date.now()); });
+    page.on('requestfinished', (r) => inflight.delete(r.url()));
+    page.on('requestfailed', (r) => inflight.delete(r.url()));
+    await page.goto(`${base}/dev/game-mock.html?shot=1&render=${render}&${query}`, { waitUntil: 'load', timeout: 30000 });
     await page.waitForFunction(() => !!document.querySelector('.screen:not(.gload)'), { timeout: 15000 });
     await new Promise((r) => setTimeout(r, 900));
+    const stuck = [...inflight.entries()].filter(([, at]) => Date.now() - at > 3000).map(([url]) => url);
+    if (stuck.length) problems.push(`still in flight after the screen settled: ${stuck.join(', ')}`);
     return { page, problems };
   }
   const mockState = (page) => page.evaluate(() => JSON.parse(JSON.stringify(globalThis.__MOCK__.S().priv)));
