@@ -423,8 +423,9 @@ export function bundleReadme({ version, withNode, withVoices = false }) {
     ? `目标机器**不需要安装 Node**：包内的 \`node\\node.exe\` 就是便携版 Node ${version}。`
     : '这个包**没有带便携版 Node**，请先在这台机器上安装 Node 22 或 24（LTS）。';
   const nodeLicence = withNode ? ' 与 `node\\LICENSE-node.txt`（Node 自己的 MIT 许可证）' : '';
-  // The voice lines are opt-in to FETCH (`node tools/fetch-assets.mjs --voices`, ~138 MB), so whether this bundle
-  // carries them is a build-time fact — a README that promises them from a checkout without them would be a lie.
+  // The voice lines are opt-in to FETCH (`node tools/fetch-assets.mjs --voices`, measured: 1848 files / 45.8 MB), so
+  // whether this bundle carries them is a build-time fact — a README that promises them from a checkout without them
+  // would be a lie.
   const voiceNote = withVoices
     ? `
 **角色语音台词已经在包里**（行动出发 / 选中 / 部署 / 作战中，以及结算时各自队伍 MVP 的那一句）。
@@ -584,7 +585,7 @@ async function main() {
   const withVoices = fs.existsSync(path.join(ROOT, 'public', 'assets', 'audio', 'voice_cn'));
   console.log(withVoices
     ? '    带上角色语音台词（public/assets/audio/voice_cn；游戏里「设置 → 干员语音」默认 0 = 关闭）'
-    : '    未包含角色语音台词（想打进包里先运行 node tools/fetch-assets.mjs --voices，约 138 MB）');
+    : '    未包含角色语音台词（想打进包里先运行 node tools/fetch-assets.mjs --voices，实测 1848 个文件 / 45.8 MB）');
 
   // 2c) 3D 棋盘贴图的清单（本机提取过才有）：贴图在 public/assets/local 里，靠这份 JSON 才会被游戏采用。
   const localManifest = path.join(ROOT, LOCAL_ASSET_MANIFEST);

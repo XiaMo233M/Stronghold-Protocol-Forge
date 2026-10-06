@@ -54,8 +54,8 @@ LICENSE / NOTICE.md / THIRD-PARTY-NOTICES.md
 素材已经在包里，跳过联网准备，直接起服务器并打开浏览器）。想开工坊编辑器就双击 `启动编辑器.bat`；
 拿到一个工坊包 `.zip` 就把它**拖到 `安装工坊包.bat` 上**（等于 `app\tools\workshop-pack.mjs import`，装到 `app\workshop\<包id>\`，
 重启游戏服务器后生效 —— 没拖文件时 CLI 自己会说用法，窗口因为非 0 退出码停住）。
-卸载＝删除文件夹（不写注册表、不放系统目录）。素材约 330 MB（**再算上角色语音台词约 470 MB**）是硬成本，
-包因此比较大。
+卸载＝删除文件夹（不写注册表、不放系统目录）。素材约 **380 MB**（其中角色语音台词约 46 MB；实测包体
+13 600 个文件 / 554.7 MB）是硬成本，包因此比较大。
 
 ## 3. 包里放了什么、没放什么
 
@@ -70,7 +70,7 @@ LICENSE / NOTICE.md / THIRD-PARTY-NOTICES.md
 * `data/local-assets.json`（本机提取过 3D 棋盘贴图时才有）：贴图本体在 `public/assets/local`（约 68 MB，会随
   `public/assets` 进包），但游戏是靠这份 JSON 才知道有哪些贴图可用 —— 只带贴图不带清单，玩家拿到的是 68 MB
   用不上的文件。清单不存在时会提示先跑 `node tools/setup.mjs --local`。
-* **角色语音台词（v0.3.0 起随包发）**：`public/assets/audio/voice_cn`（约 138 MB，由
+* **角色语音台词（v0.3.0 起随包发）**：`public/assets/audio/voice_cn`（**实测 1848 个文件 / 45.8 MB**，由
   `node tools/fetch-assets.mjs --voices` 抓取）与 `data/assets.json` 里对应的 `audio.voice` 映射**必须一起进包** ——
   只带文件不带映射，客户端根本不会请求它们。打包脚本会据此在包内说明里写明「语音已在包里」，
   反过来（没抓语音的 checkout）说明里不会出现这句话，因为这属于事实陈述，不能无条件写。游戏里语音

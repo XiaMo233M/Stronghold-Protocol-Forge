@@ -23,7 +23,7 @@ npm run assets       # = node tools/vendor.mjs && node tools/fetch-assets.mjs
 | `--prune` | Delete files under `public/assets/` that the manifest no longer references, for example after a mapping change. Without this flag they are only listed in the report. `public/assets/local/` (written by `tools/local-extract`) is never pruned. Implies `--allow-shrink`. |
 | `--allow-shrink` | Write `data/assets.json` even when it loses entries the current one has (see "The manifest never shrinks by accident" below). |
 | `--local-spines` | Rewrite `tools/assets/local-enemy-spines.json` (the metadata of the enemy models only the local client has, see "Enemy aliases") from the models `tools/local-extract/extract.py` extracted to `public/assets/local/spine/enemy/`. Run it after a game update changed them; without it the committed file is used and a differing extraction only gets a warning. |
-| `--voices` | Also fetch the operators' **voice lines** (角色语音台词, ~1 MB per operator, ~138 MB in total): needs the 11 MB `charword_table.json` index, adds `audio.voice` to the manifest and downloads to `public/assets/audio/voice_cn/`. Off by default — see "Voice lines" below. |
+| `--voices` | Also fetch the operators' **voice lines** (角色语音台词, ~0.4 MB per operator, **~46 MB in total** — measured: 1848 files): needs the 11 MB `charword_table.json` index, adds `audio.voice` to the manifest and downloads to `public/assets/audio/voice_cn/`. Off by default — see "Voice lines" below. |
 
 **The manifest never shrinks by accident.** An entry whose files are missing on this machine is left out of a rebuilt
 manifest, so a run where some downloads failed (or whose upstream audio / model index lost them) would drop entries that
@@ -296,7 +296,7 @@ larger than the feature: a source install, a release bundle and a running game a
 asks for them.
 
 ```bash
-node tools/fetch-assets.mjs --voices            # ~2000 files / ~138 MB, cached index .cache/gamedata/excel/charword_table.json
+node tools/fetch-assets.mjs --voices            # 1848 files / ~46 MB (measured), cached index .cache/gamedata/excel/charword_table.json
 npm run start                                   # then turn 设置 → 干员语音 (VOICE) up in the game
 ```
 
