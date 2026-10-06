@@ -87,6 +87,34 @@ function rewardFor(gd, roundsPassed) {
  * @param {import('./Match.js').Match} m
  * @param {{ victory: boolean, hiddenReached: boolean, hiddenCleared: boolean, reason: string }} outcome
  */
+/**
+ * The player's MVP — the unit the settlement screen speaks with (owner's rule 2026-10-06: 「结算页用 MVP 干员语音说一句，
+ * 每个玩家不一样（各自队伍里的 MVP）」). Ranked by damage dealt, then kills; only units still in the lineup qualify (a
+ * sold operator is not this team's MVP), and the lineup's own order breaks the remaining ties.
+ *
+ * The numbers come from `ps.stats.unitStats`, accumulated per battle by Match.js out of the VERIFIED battle report
+ * (server/match/fields.js), so a client cannot name its own MVP.
+ * @param {any} ps PlayerState
+ * @param {Array<{ id?: string }>} lineup the result's lineup (a chess id is the char id of an operator)
+ * @returns {string|null} the chess id, or null when no unit of this lineup did anything
+ */
+export function mvpOf(ps, lineup) {
+  const by = ps?.stats?.unitStats;
+  if (!by || typeof by.get !== 'function' || !Array.isArray(lineup)) return null;
+  let best = null;
+  for (const u of lineup) {
+    const id = typeof u?.id === 'string' && u.id ? u.id : null;
+    if (!id) continue;
+    const s = by.get(id);
+    if (!s) continue;
+    const dmg = Number(s.dmg) || 0;
+    const kills = Number(s.kills) || 0;
+    if (dmg <= 0 && kills <= 0) continue;               // a unit that did nothing is never the MVP
+    if (!best || dmg > best.dmg || (dmg === best.dmg && kills > best.kills)) best = { id, dmg, kills };
+  }
+  return best ? best.id : null;
+}
+
 export function buildResult(m, outcome) {
   const gd = m.gd;
   const { victory, hiddenReached, hiddenCleared } = outcome;
@@ -113,6 +141,9 @@ export function buildResult(m, outcome) {
       lp: Math.max(0, ps.lp),
       bandId: ps.bandId,
       lineup,
+      // The player's MVP — the unit the settlement screen speaks with (owner's rule 2026-10-06: 「结算页用 MVP 干员语音
+      // 说一句，每个玩家不一样（各自队伍里的 MVP）」). Null when no unit of this lineup has a damage number.
+      mvp: mvpOf(ps, lineup),
       bonds: bondList(gd, ps.bonds).filter((b) => b.active || b.layers > 0),
       stats: {
         dmgDealt: Math.round(ps.stats.dmgDealt), kills: ps.stats.kills, leaks: ps.stats.leaks, gold: ps.stats.gold,

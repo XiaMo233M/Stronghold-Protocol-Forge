@@ -83,6 +83,15 @@ export function ResultScreen() {
     if (top && r.players.length > 1) best[k] = top.id;
   }
   useEffect(() => { audio.sfx(r.victory ? 'settlementSucceed' : 'settlementFail'); }, []);
+  // 角色语音台词 (opt-in, OFF by default): the reporting player's OWN MVP says the result line — each client hears its
+  // own team's MVP (owner's rule 2026-10-06: 「结算页用 MVP 干员语音说一句，每个玩家不一样（各自队伍里的 MVP）」).
+  // Read from the raw payload (not the normalised view) so the server's field is used as sent; `audio.voice` stays
+  // silent without the manifest entry or with the 语音 volume at 0, and does nothing when the player has no MVP.
+  useEffect(() => {
+    const myId = store.get().me.playerId;
+    const mine = (Array.isArray(res?.players) ? res.players : []).find((p) => p && p.playerId === myId) || null;
+    if (mine && mine.mvp) audio.voice(mine.mvp, r.victory ? 'win' : 'lose');
+  }, []);
   const back = () => store.set({ match: emptyMatch() });
   const boss = r.bossId ? gd.boss(r.bossId) : null;
   // the Hidden Core medal (and its corrupted leader) only once R15 was actually fought
