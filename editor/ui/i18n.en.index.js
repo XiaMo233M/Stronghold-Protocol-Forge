@@ -77,7 +77,7 @@ export const EN_INDEX = Object.freeze({
   '将要生成的记录（普通 / 精锐由工具推导）': 'Records to be generated (base / elite are derived)',
   '校验结果': 'Validation',
   '先选择一个工坊包（或点「新建工坊包」）': 'Pick a workshop pack first (or click “New workshop pack”)',
-  '新工坊包的 id（字母数字下划线短横线，≤32）：': 'New workshop pack id (letters, digits, underscore, hyphen, ≤32):',
+  // 「新工坊包的 id（…）」是五个页面共用的（保存目标的下拉），已放 shared
   '保存第一个干员时会创建工坊包 {0}（目录名必须等于 pack.json 的 id）。': 'Saving the first operator creates the pack {0} (the directory name must equal the id in pack.json).',
   '删除 {0}？（同时删除它生成的普通与精锐记录）': 'Delete {0}? (its generated base and elite records go too)',
 

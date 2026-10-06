@@ -470,6 +470,50 @@ function stageChoices(root, dataDir) {
   return out;
 }
 
+/**
+ * 回合绑定要的两样东西（地图页的「回合绑定」面板用）：
+ *   1. `waves`：能选的出怪表 —— 官方的 38 张 + 每个包自己做的（官方表没有 name，只有 id）；
+ *   2. `modes`：每个模式的回合表 —— 每回合的默认模板与「是不是首领回合」，外加该模式会抽哪些首领。
+ * 之所以要给模式这一层：作者要能看见「不指定的话这一回合本来会打哪张表」，否则他无法判断该不该覆盖。
+ * 引擎最终怎么选见 server/match/waves.js 的 stageTemplateId（先看这张图，再看模式的模板）。
+ */
+function roundBindData(root, dataDir) {
+  const waves = [];
+  for (const [id, rec] of Object.entries(readJson(path.join(dataDir, 'waves.json'), {}) || {})) {
+    waves.push({ id, name: rec?.name ?? null, pack: null });
+  }
+  if (root && fs.existsSync(root)) {
+    for (const packId of fs.readdirSync(root).sort()) {
+      if (!PACK_ID_RE.test(packId)) continue;
+      for (const [id, rec] of Object.entries(readJson(path.join(root, packId, 'waves.json'), {}) || {})) {
+        waves.push({ id, name: rec?.name ?? null, pack: packId });
+      }
+    }
+  }
+  const modes = {};
+  for (const [modeId, m] of Object.entries(readJson(path.join(dataDir, 'config.json'), {})?.modes ?? {})) {
+    const rounds = Object.keys(m?.rounds ?? {})
+      .map(Number).filter(Number.isInteger).sort((a, b) => a - b)
+      .map((n) => ({ round: n, template: typeof m.rounds[n]?.template === 'string' ? m.rounds[n].template : null, isBoss: m.rounds[n]?.isBoss === true }));
+    modes[modeId] = { name: m?.name ?? modeId, rounds, bosses: Object.keys(m?.bossWeights ?? {}).sort() };
+  }
+  return { waves, modes };
+}
+
+/**
+ * 阵营占位符：键 → 槽位。权威来源是 `data/factions.json` 的 `templateSlots`（引擎 placeholderMap 读的同一份），
+ * 编辑器**不另抄一份规则表** —— 抄一份就等着两边慢慢跑偏。
+ *
+ * 为什么出怪页需要它：选了这些键，实际出的是阵营随机怪、数量按战力重算；抽到的怪与它移动方式不同时，
+ * 这一次**一只都不出**（server/match/waves.js 的 valid:false 分支），而校验器一个字都不说。
+ */
+function placeholderEnemyMap(dataDir) {
+  const slots = readJson(path.join(dataDir, 'factions.json'), {})?.templateSlots;
+  const out = {};
+  for (const [slot, key] of Object.entries(slots ?? {})) if (typeof key === 'string' && key) out[key] = slot;
+  return out;
+}
+
 /** Everything the UI renders for one pack: its specs (editable) plus every record and its issues. */
 function packState(root, packId, officialIds) {
   const packDir = path.join(root, packId);
@@ -606,6 +650,11 @@ function supportStateFor(root, packId, supportFile) {
  */
 function packIdsFor(root) {
   return listPackIds(root).filter((id) => fs.existsSync(path.join(root, id, 'pack.json')));
+}
+
+/** 可当作保存目标的工坊包（id + 名字）：各页「保存到哪个包」的下拉用（editor/ui/packPicker.js）。 */
+function packChoices(root) {
+  return packIdsFor(root).map((id) => ({ id, name: readJson(path.join(root, id, 'pack.json'), {})?.name ?? id }));
 }
 
 /**
@@ -1114,6 +1163,10 @@ export async function createEditorServer(opts = {}) {
         stages, palette: TILE_PALETTE, rects: DEPLOY_RECTS, size: [STAGE_ROWS, STAGE_COLS],
         officialStages: [...officialStages].sort(),
         modes: inScopeModes(dataDir),
+        // 「回合绑定」面板要的东西（可选的出怪表 + 每个模式的回合表与首领）
+        roundBind: roundBindData(root, dataDir),
+        // 「保存到哪个包」的下拉（editor/ui/packPicker.js）
+        packs: packChoices(root),
       });
     }
 
@@ -1218,10 +1271,11 @@ export async function createEditorServer(opts = {}) {
         enemies,
         vocab: ENEMY_VOCAB(),
         officialEnemies: [...officialEnemies].sort(),
-        // 下面三样都是「让新建更容易」用的：模板选择列表、spine 候选、以及表单旁边的数值尺子
+        // 模板清单 / spine 候选 / 按档位的数值参照 / 「保存到哪个包」的下拉
         officialTemplates: officialEnemyList,
         spineChoices: enemySpineChoices,
         statRanges: enemyStatRanges,
+        packs: packChoices(root),
       });
     }
 
@@ -1339,6 +1393,10 @@ export async function createEditorServer(opts = {}) {
         // every spawnable enemy (official + the packs' own), so the timeline can offer a picker instead of a text field
         enemies: [...knownEnemyKeysFor(root, dataDir)].sort(),
         stages: stageChoices(root, dataDir),
+        // 阵营占位符（键 → 槽位）：选了它们实际出的是阵营随机怪，界面要标出来
+        placeholderEnemies: placeholderEnemyMap(dataDir),
+        // 「保存到哪个包」的下拉（editor/ui/packPicker.js）
+        packs: packChoices(root),
       });
     }
 
@@ -1447,6 +1505,8 @@ export async function createEditorServer(opts = {}) {
         officialItems: [...officialItems].sort(),
         // the art an item can borrow, since a pack ships none
         icons: itemIconChoices(dataDir),
+        // 「保存到哪个包」的下拉（editor/ui/packPicker.js）
+        packs: packChoices(root),
       });
     }
 

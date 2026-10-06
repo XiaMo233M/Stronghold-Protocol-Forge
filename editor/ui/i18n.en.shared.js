@@ -66,7 +66,11 @@ export const EN_SHARED = Object.freeze({
   '派生量（只读，服务端算）': 'Derived values (read-only, computed by the server)',
   '先填 id 才能保存。': 'Fill in an id before saving.',
   '＋ 加一个键': '+ Add a key',
-  '保存到哪个工坊包？（id：字母数字下划线短横线）': 'Which workshop pack? (id: letters, digits, underscore, hyphen)',
+  // 保存目标（五个页面共用同一个下拉，editor/ui/packPicker.js）
+  '保存到': 'Save to',
+  '＋ 新建一个包…': '+ New pack…',
+  '先在右边选一个工坊包（或点「＋ 新建一个包…」）。': 'Pick a workshop pack on the right (or click “+ New pack…”).',
+  '新工坊包的 id（字母数字下划线短横线，≤32）：': 'New workshop pack id (letters, digits, underscore, hyphen, ≤32):',
   '{0} 阶': 'tier {0}',
   '{0} 条': '{0} entries',
   '干员 id': 'operator id',
@@ -84,6 +88,7 @@ export const EN_SHARED = Object.freeze({
   '返回': 'Back',
   '以模板新建': 'New from a template',
   '⧉ 以模板新建': '⧉ New from a template',
+  '第 {0} 回合': 'Round {0}',
   '已按「{0}」生成模板：请填一个新的 id 与名字（改完会自动校验）。': 'Template built from “{0}”: give it a new id and name (validation runs as you type).',
   '已复制「{0}」：填一个新的 id 再保存（改完会自动校验）。': 'Copied “{0}”: give it a new id before saving (validation runs as you type).',
 });

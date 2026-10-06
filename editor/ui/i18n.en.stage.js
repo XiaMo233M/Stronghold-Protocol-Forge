@@ -86,4 +86,18 @@ export const EN_STAGE = Object.freeze({
   '这台设备没有可用的 WebGL2，已退回 2D': 'This device has no usable WebGL2 — stayed on 2D',
   'three.js 没加载成功，已退回 2D': 'three.js failed to load — stayed on 2D',
   '棋盘素材包不完整，已退回 2D': 'The board art pack is incomplete — stayed on 2D',
+
+  // ---- 回合绑定（这张图自己的出怪表） ----
+  '回合绑定（这张图自己的出怪表）': 'Round bindings (this map’s own wave tables)',
+  '不指定就用模式的默认出怪表。引擎先看这张图、再看模式的模板，所以这里绑过的回合会走你自己的表。': 'Leave a round alone and it uses the mode’s default wave table. The engine looks at this map first and at the mode’s template second, so a round bound here runs your own table.',
+  '（服务端没有给出回合表）': '(the server sent no round table)',
+  '{0}（这张表不存在）': '{0} (this table does not exist)',
+  // 「第 {0} 回合」与出怪页共用，已放 shared 分片
+  '默认 {0}': 'default {0}',
+  '首领模板': 'boss template',
+  '首领回合': 'boss round',
+  '（用模式的模板）': '(use the mode’s template)',
+  '首领回合的出怪表（该模式的首领都会用它）': 'Wave table for the boss round (every boss of this mode uses it)',
+  '（用模式的首领模板）': '(use the mode’s boss template)',
+  '这些绑定的出怪表不存在，引擎会静默回落到模式的模板：{0}': 'These bound wave tables do not exist — the engine silently falls back to the mode’s template: {0}',
 });

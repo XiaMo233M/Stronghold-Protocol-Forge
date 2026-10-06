@@ -363,9 +363,10 @@ async function openKit(packId, id) {
 
 async function saveKit() {
   if (!state.packId) {
-    const id = prompt(t('保存到哪个工坊包？（id：字母数字下划线短横线）'), 'my-kit-pack');
-    if (!id) return;
-    state.packId = id.trim();
+    // 这一页本就有「保存到哪个包」的下拉（编辑器里第一处，后来才推广到其它页），所以这里只提示、不再弹对话框
+    state.message = { kind: 'error', key: '先在右边选一个工坊包（或点「＋ 新建一个包…」）。' };
+    renderSide();
+    return;
   }
   if (!state.id) { state.message = { kind: 'error', key: '先填 id：kit 的文件名就是它服务的干员 id。' }; renderSide(); return; }
   state.busy = true;

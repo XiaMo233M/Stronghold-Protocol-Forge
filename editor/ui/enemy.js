@@ -11,6 +11,7 @@ import { t, mountI18n } from './i18n.js';
 import { matchEnemies, sortTemplates, spineIsKnown } from './enemyWizard.js';
 import { makeStatBar } from './statScale.js';
 import { renderKeepingFocus } from './focusKeep.js';
+import { packSelect } from './packPicker.js';
 
 const $ = (s) => document.querySelector(s);
 
@@ -466,6 +467,17 @@ function renderSide() {
     actions.append(del);
   }
   box.append(actions);
+  // 保存目标：以前每次保存都要在对话框里手打 id，打错就存进别的包
+  box.append(h(t('保存到')));
+  const packBox = document.createElement('div'); packBox.className = 'panel';
+  packBox.append(packSelect({
+    packs: state.data?.packs ?? [],
+    current: state.packId,
+    newLabel: t('＋ 新建一个包…'),
+    onPick: (id) => { state.packId = id; renderSide(); },
+    askNewId: () => prompt(t('新工坊包的 id（字母数字下划线短横线，≤32）：'), 'my-monster-pack'),
+  }));
+  box.append(packBox);
   if (!state.spec.id) box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('先填 id 才能保存。') }));
 
   box.append(h(t('校验')));
@@ -489,9 +501,9 @@ function renderSide() {
 
 async function saveEnemy() {
   if (!state.packId) {
-    const id = prompt(t('保存到哪个工坊包？（id：字母数字下划线短横线）'), 'my-monster-pack');
-    if (!id) return;
-    state.packId = id.trim();
+    state.message = { kind: 'error', text: t('先在右边选一个工坊包（或点「＋ 新建一个包…」）。') };
+    renderSide();
+    return;
   }
   state.busy = true; renderSide();
   try {

@@ -9,6 +9,9 @@
 
 // 界面文案走 i18n：t('中文原文') 查英文词典，查不到就原样返回中文（editor/ui/i18n.js 说明了这个取舍）。
 import { t, mountI18n } from './i18n.js';
+// 回合绑定：引擎真正读的是这张图自己的 rounds（先看它、再看模式的模板），逻辑在 stageRounds.js（纯函数，单独测）。
+import { roundRows, waveOptions, missingBindings, setRoundBinding, setBossRoundBinding } from './stageRounds.js';
+import { packSelect } from './packPicker.js';
 import { createStageView3d } from './stage3d.js';
 
 const $ = (s) => document.querySelector(s);
@@ -83,6 +86,10 @@ function currentSpec() {
     // the authored ROUTES (出生点 → 防守点). They live in the spec, not in the stage record: the engine reads routes
     // from the wave template, and the wave layer binds the map's routes to rounds.
     routes: Array.isArray(state.spec.routes) ? state.spec.routes : [],
+    // 回合绑定：这张图自己的出怪表（引擎真正读的那份，server/match/waves.js 的 stageTemplateId）。
+    // 这里是显式拼字段的，**必须原样带上** —— 漏掉就等于「打开一张绑好回合的地图、随手保存一下，绑定全没了」。
+    ...(state.spec.rounds ? { rounds: state.spec.rounds } : {}),
+    ...(state.spec.bossRounds ? { bossRounds: state.spec.bossRounds } : {}),
   };
 }
 
@@ -405,6 +412,58 @@ function renderSide() {
   if (!(state.data?.modes ?? []).length) modesBox.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('（没有可选模式）') }));
   box.append(modesBox);
 
+  // ---- 回合绑定：把出怪表绑到这张图的回合上（引擎真正读的那份） --------------------------------------------
+  box.append(h(t('回合绑定（这张图自己的出怪表）')));
+  const roundsBox = document.createElement('div'); roundsBox.className = 'panel';
+  const bind = state.data?.roundBind;
+  roundsBox.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('不指定就用模式的默认出怪表。引擎先看这张图、再看模式的模板，所以这里绑过的回合会走你自己的表。'),
+  }));
+  const rows = roundRows(spec, bind);
+  const options = waveOptions(bind);
+  if (!rows.length) {
+    roundsBox.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('（服务端没有给出回合表）') }));
+  }
+  const waveSelect = (current, onPick, emptyLabel) => {
+    const s = document.createElement('select');
+    const none = document.createElement('option'); none.value = ''; none.textContent = emptyLabel; s.append(none);
+    // 绑了一个不存在的 id 时，把它作为一个带警告的选项摆出来 —— 直接消失会让作者以为自己没绑过
+    if (current && !options.some((o) => o.id === current)) {
+      const stale = document.createElement('option'); stale.value = current; stale.textContent = t('{0}（这张表不存在）', current); s.append(stale);
+    }
+    for (const o of options) { const el = document.createElement('option'); el.value = o.id; el.textContent = o.label; s.append(el); }
+    s.value = current ?? '';
+    s.addEventListener('change', () => { onPick(s.value); schedulePreview(); renderSide(); });
+    return s;
+  };
+  for (const row of rows) {
+    const line = document.createElement('div');
+    line.style.marginBottom = '8px';
+    const title = document.createElement('div');
+    title.className = 'hint';
+    const defaults = row.defaults.map((d) => d.template ?? t('首领模板')).join(' / ');
+    title.textContent = `${t('第 {0} 回合', row.round)} · ${t('默认 {0}', defaults)}${row.isBoss ? ` · ${t('首领回合')}` : ''}`;
+    line.append(title);
+    line.append(waveSelect(row.bound, (v) => { spec.rounds = setRoundBinding(spec.rounds, row.round, v); }, t('（用模式的模板）')));
+    if (row.isBoss) {
+      const sub = document.createElement('div');
+      sub.className = 'hint';
+      sub.textContent = t('首领回合的出怪表（该模式的首领都会用它）');
+      line.append(sub);
+      line.append(waveSelect(row.bossBound, (v) => { spec.bossRounds = setBossRoundBinding(spec.bossRounds, row.round, v, row.bossKeys); }, t('（用模式的首领模板）')));
+    }
+    roundsBox.append(line);
+  }
+  const missing = missingBindings(spec, bind);
+  if (missing.length) {
+    const bad = document.createElement('div');
+    bad.className = 'err';
+    bad.textContent = t('这些绑定的出怪表不存在，引擎会静默回落到模式的模板：{0}', missing.map((m) => `${t('第 {0} 回合', m.round)} → ${m.id}`).join('、'));
+    roundsBox.append(bad);
+  }
+  box.append(roundsBox);
+
   box.append(h(t('装置')));
   const devBox = document.createElement('div'); devBox.className = 'panel';
   if (spec.devices.length) {
@@ -492,6 +551,17 @@ function renderSide() {
     actions.append(del);
   }
   box.append(actions);
+  // 保存目标：以前每次保存都要在对话框里手打 id，打错就存进别的包
+  box.append(h(t('保存到')));
+  const packBox = document.createElement('div'); packBox.className = 'panel';
+  packBox.append(packSelect({
+    packs: state.data?.packs ?? [],
+    current: state.packId,
+    newLabel: t('＋ 新建一个包…'),
+    onPick: (id) => { state.packId = id; renderSide(); },
+    askNewId: () => prompt(t('新工坊包的 id（字母数字下划线短横线，≤32）：'), 'my-map-pack'),
+  }));
+  box.append(packBox);
   if (!spec.id) box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('先填一个 id 才能保存。') }));
 
   box.append(h(t('校验与推导结果')));
@@ -561,9 +631,9 @@ function syncTools() {
 
 async function saveStage() {
   if (!state.packId) {
-    const id = prompt(t('保存到哪个工坊包？（id：字母数字下划线短横线）'), state.packId ?? 'my-map-pack');
-    if (!id) return;
-    state.packId = id.trim();
+    state.message = { kind: 'error', text: t('先在右边选一个工坊包（或点「＋ 新建一个包…」）。') };
+    renderSide();
+    return;
   }
   state.busy = true; renderSide();
   try {

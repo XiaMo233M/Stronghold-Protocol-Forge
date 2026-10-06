@@ -55,7 +55,15 @@ export const EN_WAVE = Object.freeze({
   '绑定只记录意图：真正让这张表生效，是在「地图设计器」里给地图写 rounds 指向它（方案 B）。': 'A binding only records the intent: to make this table take effect, point the map’s rounds at it in the stage designer (option B).',
 
   // ---- 保存、删除与校验 ----
-  '保存到哪个工坊包？': 'Save to which workshop pack?',
   '删除出怪表 {0}？': 'Delete spawn table {0}?',
   '推导与校验': 'Derivation and validation',
+
+  // ---- 阵营占位符与「真正在用这张表的地图」 ----
+  // （「第 {0} 回合」与地图页共用，已放 shared 分片）
+  '（阵营占位符）': '(faction placeholder)',
+  '这张表用了阵营占位符：{0}。实际出的是阵营随机怪、数量按战力重算；抽到的怪与它移动方式不同时，这一次会一只都不出。': 'This table uses faction placeholders: {0}. What actually spawns is a random enemy from the faction, with the count recomputed from its power — and if the enemy drawn has a different movement class, that spawn drops the whole batch.',
+  '真正在用这张表的地图': 'Maps that actually use this table',
+  '（这张表还没保存过，保存后再看这里）': '(not saved yet — save it and look here again)',
+  '（还没有地图把这张表绑到回合上：去「地图设计器」的回合绑定面板里选它）': '(no map binds this table to a round yet: pick it in the round bindings panel of the stage designer)',
+  '首领回合 {0}': 'boss rounds {0}',
 });

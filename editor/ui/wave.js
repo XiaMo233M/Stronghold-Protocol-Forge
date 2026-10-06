@@ -14,6 +14,9 @@
 // 表头、按钮、提示这些给作者看的才进。
 
 import { t, mountI18n } from './i18n.js';
+// 出怪页的两处「把话说清楚」：阵营占位符提示、以及这张表真正在哪张图的哪几个回合生效（纯逻辑，单独测）。
+import { isPlaceholderEnemy, placeholderSpawns, mapsUsingWave } from './waveHints.js';
+import { packSelect } from './packPicker.js';
 
 const $ = (s) => document.querySelector(s);
 const CELL = 32;
@@ -168,9 +171,14 @@ function renderTable() {
     };
     tr.append(td(num('time')), td((() => {
       const sel = document.createElement('select');
-      for (const k of state.data.enemies) { const o = document.createElement('option'); o.value = k; o.textContent = k; sel.append(o); }
+      for (const k of state.data.enemies) {
+        const o = document.createElement('option'); o.value = k;
+        // 占位符在选项里就标出来：它出的不是这只怪，而是阵营随机怪
+        o.textContent = isPlaceholderEnemy(k, state.data.placeholderEnemies) ? `${k} ${t('（阵营占位符）')}` : k;
+        sel.append(o);
+      }
       sel.value = sp.key;
-      sel.addEventListener('change', () => { sp.key = sel.value; renderTimeline(); schedule(); });
+      sel.addEventListener('change', () => { sp.key = sel.value; renderSide(); renderTimeline(); schedule(); });
       return sel;
     })()), td(num('count', 1)), td(num('interval')), td((() => {
       const sel = document.createElement('select');
@@ -213,6 +221,15 @@ function renderSide() {
   }
   const spec = state.spec;
   if (!spec) { box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('左边选一张出怪表，或点「新建出怪表」。') })); return; }
+
+  // 阵营占位符：选了它们，实际出的是阵营随机怪，移动方式不匹配时这一波可能一只都不出，而校验器不会说话
+  const placeholders = placeholderSpawns(spec.spawns, state.data.placeholderEnemies);
+  if (placeholders.length) {
+    const warn = document.createElement('div');
+    warn.className = 'banner bad';
+    warn.textContent = t('这张表用了阵营占位符：{0}。实际出的是阵营随机怪、数量按战力重算；抽到的怪与它移动方式不同时，这一次会一只都不出。', placeholders.join('、'));
+    box.append(warn);
+  }
 
   box.append(h(t('出怪表')));
   const idBox = document.createElement('div'); idBox.className = 'panel';
@@ -279,6 +296,28 @@ function renderSide() {
   }));
   box.append(bindBox);
 
+  // 真正生效的地方：地图自己的 rounds/bossRounds（引擎先看这张图、再看模式的模板）。
+  // 上面那份是「意图」，这一份是从地图数据里读出来的「事实」—— 两边对不上时作者能当场看出来。
+  box.append(h(t('真正在用这张表的地图')));
+  const realBox = document.createElement('div'); realBox.className = 'panel';
+  const used = mapsUsingWave(spec.id, state.data.stages);
+  if (!state.waveId) {
+    realBox.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('（这张表还没保存过，保存后再看这里）') }));
+  } else if (!used.length) {
+    realBox.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('（还没有地图把这张表绑到回合上：去「地图设计器」的回合绑定面板里选它）') }));
+  } else {
+    for (const u of used) {
+      const line = document.createElement('div');
+      line.className = 'hint';
+      const parts = [];
+      if (u.rounds.length) parts.push(t('第 {0} 回合', u.rounds.join('、')));
+      if (u.bossRounds.length) parts.push(t('首领回合 {0}', u.bossRounds.join('、')));
+      line.textContent = `${u.official ? t('官方地图') : t('工坊地图')} ${u.name} (${u.id}) · ${parts.join(' · ')}`;
+      realBox.append(line);
+    }
+  }
+  box.append(realBox);
+
   const actions = document.createElement('div'); actions.className = 'row'; actions.style.margin = '12px 0';
   const save = document.createElement('button'); save.className = 'primary'; save.textContent = state.busy ? t('保存中…') : t('保存');
   save.disabled = state.busy || !spec.id;
@@ -290,6 +329,17 @@ function renderSide() {
     actions.append(del);
   }
   box.append(actions);
+  // 保存目标：以前每次保存都要在对话框里手打 id，打错就存进别的包
+  box.append(h(t('保存到')));
+  const packBox = document.createElement('div'); packBox.className = 'panel';
+  packBox.append(packSelect({
+    packs: state.data?.packs ?? [],
+    current: state.packId,
+    newLabel: t('＋ 新建一个包…'),
+    onPick: (id) => { state.packId = id; renderSide(); },
+    askNewId: () => prompt(t('新工坊包的 id（字母数字下划线短横线，≤32）：'), 'my-wave-pack'),
+  }));
+  box.append(packBox);
 
   box.append(h(t('推导与校验')));
   const pv = document.createElement('div'); pv.className = 'panel';
@@ -332,9 +382,9 @@ async function preview() {
 
 async function saveWave() {
   if (!state.packId) {
-    const id = prompt(t('保存到哪个工坊包？'), 'my-wave-pack');
-    if (!id) return;
-    state.packId = id.trim();
+    state.message = { kind: 'error', text: t('先在右边选一个工坊包（或点「＋ 新建一个包…」）。') };
+    renderSide();
+    return;
   }
   state.busy = true; renderSide();
   try {
