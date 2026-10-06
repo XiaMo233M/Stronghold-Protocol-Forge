@@ -23,7 +23,7 @@ async function api(path, opts) {
   return data;
 }
 
-const state = { data: null, packs: [], packId: null, message: null, busy: false, picked: new Set() };
+const state = { data: null, packs: [], packId: null, message: null, busy: false, picked: new Set(), playtest: null, playtestDifficulty: null };
 
 const packOf = (id = state.packId) => state.packs.find((p) => p.id === id) ?? null;
 const isChinese = (s) => /[\u4e00-\u9fa5]/.test(String(s));
@@ -276,6 +276,60 @@ function renderSide() {
   }));
   box.append(im);
 
+  box.append(h('试玩这一版'));
+  const pt = document.createElement('div'); pt.className = 'panel';
+  const running = !!(state.playtest && state.playtest.running);
+  pt.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: running
+      ? `游戏服务器正在跑：${state.playtest.url}`
+      : '起一个游戏服务器（子进程，绑 127.0.0.1 的随机空闲端口），把当前工坊根交给它，然后打开浏览器直接进一局独立模拟。'
+        + '改完包再点一次「重启试玩」就能看到新内容 —— 编辑器自己不会重载数据。',
+  }));
+  const dRow = document.createElement('div'); dRow.className = 'row'; dRow.style.margin = '6px 0';
+  const dLab = document.createElement('label'); dLab.textContent = '难度'; dLab.style.margin = '0';
+  const dSel = document.createElement('select');
+  dSel.style.width = 'auto';
+  for (const d of state.playtest?.difficulties ?? []) {
+    const o = document.createElement('option'); o.value = d; o.textContent = d;
+    dSel.append(o);
+  }
+  if (state.playtestDifficulty) dSel.value = state.playtestDifficulty;
+  dSel.addEventListener('change', () => { state.playtestDifficulty = dSel.value; });
+  dRow.append(dLab, dSel);
+  pt.append(dRow);
+  const pRow = document.createElement('div'); pRow.className = 'row';
+  const go = document.createElement('button');
+  go.className = 'primary';
+  go.textContent = state.busy ? '启动中…' : (running ? '重启试玩' : '启动试玩');
+  go.disabled = state.busy;
+  go.addEventListener('click', () => startPlaytest(running));
+  pRow.append(go);
+  if (running) {
+    const stop = document.createElement('button');
+    stop.textContent = '停止';
+    stop.disabled = state.busy;
+    stop.addEventListener('click', stopPlaytest);
+    pRow.append(stop);
+  }
+  pt.append(pRow);
+  if (running) {
+    const link = document.createElement('p');
+    link.className = 'hint';
+    const a = document.createElement('a');
+    a.href = state.playtest.url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = '在新标签页打开这一局';
+    link.append(a);
+    pt.append(link);
+  }
+  pt.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: '命令行等价：node scripts/launch.mjs（游戏服务器）；试玩用的是 SP_WORKSHOP，所以这里选的工坊目录就是它读的目录。',
+  }));
+  box.append(pt);
+
   box.append(h('说明'));
   const help = document.createElement('div'); help.className = 'panel';
   help.append(Object.assign(document.createElement('p'), {
@@ -369,11 +423,54 @@ async function importPack(file, force) {
   }
 }
 
+// ---- 试玩 ---------------------------------------------------------------------------------------------------------
+
+/** 起（或重启）试玩：先停掉旧的，再起新的 —— 作者点这个按钮的意图就是「加载我刚写的内容」。 */
+async function startPlaytest(wasRunning) {
+  state.busy = true; renderSide();
+  try {
+    if (wasRunning) await api('/api/playtest/stop', { method: 'POST' });
+    const r = await api('/api/playtest/start', { method: 'POST', body: { difficulty: state.playtestDifficulty } });
+    state.message = { kind: 'ok', text: `试玩服务器已就绪：${r.url}` };
+    // 不在编辑器里嵌游戏：用一个新标签页打开（编辑器是工具，游戏是另一个窗口）
+    window.open(r.url, '_blank', 'noopener');
+  } catch (e) {
+    state.message = { kind: 'error', text: e.message };
+  } finally {
+    state.busy = false;
+    await loadPlaytest();
+  }
+}
+
+async function stopPlaytest() {
+  state.busy = true; renderSide();
+  try {
+    const r = await api('/api/playtest/stop', { method: 'POST' });
+    state.message = { kind: r.stopped ? 'ok' : 'warn', text: r.stopped ? '试玩服务器已停止。' : '试玩服务器本来就没在跑。' };
+  } catch (e) {
+    state.message = { kind: 'error', text: e.message };
+  } finally {
+    state.busy = false;
+    await loadPlaytest();
+  }
+}
+
+/** 试玩状态是另一条查询（与包列表无关），失败也不该让整页崩掉 —— 它只是一个附加功能。 */
+async function loadPlaytest() {
+  try {
+    state.playtest = await api('/api/playtest');
+  } catch {
+    state.playtest = { running: false, url: null, difficulties: [] };
+  }
+  renderSide();
+}
+
 // ---- 载入 ---------------------------------------------------------------------------------------------------------
 
 async function load(keepId = null) {
   state.data = await api('/api/packs/support');
   state.packs = state.data.packs ?? [];
+  await loadPlaytest();
   const wanted = keepId ?? state.packId;
   if (!state.packs.some((p) => p.id === wanted)) {
     state.packId = state.packs[0]?.id ?? null;

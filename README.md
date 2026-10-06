@@ -45,7 +45,7 @@
 | **装备** | `/item.html` | 一件装备 = 一个 spec = **两条记录（普通 + 精英）**、buffs 黑板（`bb` / `bbStr`）、图标复用 |
 | **kit（行为层）** | `/kit.html` | 包里的 `kits/<干员 id>.js` —— **代码本体**（整份文件），配上**静态校验**（钩子词表、三条硬规则）与保存时自动写入的署名头 |
 | **语音** | `/voice.html` | `pack.json` 的 `voices` 字段：干员 × 槽位 × 文件，**就地编辑**（其余字段原样保留）、按包内 `assets/` 真实文件挑选、可试听 |
-| **包管理** | `/pack.html` | 整包的收发：**导出成 `.zip`**、**导入别人的 `.zip`**、勾选本包自己的干员进**助战卡池**（阶由记录推导）、看每个包的加载器结论 |
+| **包管理** | `/pack.html` | 整包的收发：**导出成 `.zip`**、**导入别人的 `.zip`**、勾选本包自己的干员进**助战卡池**（阶由记录推导）、看每个包的加载器结论、**一键试玩**（编辑器自己起游戏服务器并直接进一局） |
 
 除上述表单，编辑器还有实时校验（与 CLI 完全相同的规则）与「将生成的记录」预览；地图页额外有**部署区覆盖层**与**寻路覆盖层**（12 条路线的流场），出怪页有按排期槽位配色的时间轴泳道，kit 页有钩子清单、合法 id 与静态校验（它**只读文本、不执行你的文件**）。
 
@@ -69,7 +69,7 @@ node tools/workshop-pack.mjs import ~/Downloads/my-pack.zip   # 把别人的包�
 - **默认只绑 127.0.0.1**（编辑器可以写文件）；要绑局域网需要显式 `--host`，此时会打印警告。**没有登录、没有权限控制**，不要暴露到公网。
 - **无构建步骤、无新依赖**：纯 Node `http` + 原生 ES 模块 UI。**不需要改游戏服务器**。
 - 它只写这些路径：`workshop/**`（spec 源文件与生成产物）与 `data/support.json`（只在动「是否助战」开关时）；`tools/build-data.mjs` 生成的其它 `data/*.json` **永不改动**。
-- 保存后需**重启游戏服务器**才会出现在游戏里。
+- 保存后需**重启游戏服务器**才会出现在游戏里；**包管理页的「启动试玩」会替你做这件事**——它起一个游戏服务器子进程（绑本机随机空闲端口、读你当前的工坊根），并打开浏览器直接进一局独立模拟。改完包再点一次（「重启试玩」）即可。
 
 ## 设计上的两条硬规矩
 
@@ -466,7 +466,7 @@ work for direct profit.
 
 This repository is **Stronghold-Protocol-Forge**: a standalone, out-of-game **graphical authoring tool (the Forge editor)** for the content of the fan remake of Arknights' seasonal auto-chess tower-defense mode *Stronghold Protocol: Alliance* — plus that bundled upstream game itself.
 
-- **The Forge editor (what this repo is for):** run `npm run editor` and open <http://127.0.0.1:3311> — no build step, no game-server change, bound to loopback by default. Eight pages author operators (`/`), maps (`/stage.html`, 19×21 grid with 2D placement and a 3D preview), enemies (`/enemy.html`), spawn waves (`/wave.html`), items (`/item.html`), behaviour-layer kits (`/kit.html`), a pack's voice lines (`/voice.html`) and the pack itself (`/pack.html`: export to a `.zip`, import someone else's, tick which of the pack's own operators enter the 助战 pool). Mechanical fields are always derived from the real engine rather than typed by hand, and `tools/workshop-validate.mjs` re-checks every pack in layers (format → semantics → the real engine → kits / maps / enemies / waves / items / voice lines / 助战) through the same `shared/*Authoring.js` rules the editor and CLI use, so the rules cannot drift. Saved Options carry a `_meta` attribution block. See [docs/EDITOR.md](docs/EDITOR.md) and [docs/WORKSHOP.md](docs/WORKSHOP.md).
+- **The Forge editor (what this repo is for):** run `npm run editor` and open <http://127.0.0.1:3311> — no build step, no game-server change, bound to loopback by default. Eight pages author operators (`/`), maps (`/stage.html`, 19×21 grid with 2D placement and a 3D preview), enemies (`/enemy.html`), spawn waves (`/wave.html`), items (`/item.html`), behaviour-layer kits (`/kit.html`), a pack's voice lines (`/voice.html`) and the pack itself (`/pack.html`: export to a `.zip`, import someone else's, tick which of the pack's own operators enter the 助战 pool, and start a playtest server that opens straight into a solo run). Mechanical fields are always derived from the real engine rather than typed by hand, and `tools/workshop-validate.mjs` re-checks every pack in layers (format → semantics → the real engine → kits / maps / enemies / waves / items / voice lines / 助战) through the same `shared/*Authoring.js` rules the editor and CLI use, so the rules cannot drift. Saved Options carry a `_meta` attribution block. See [docs/EDITOR.md](docs/EDITOR.md) and [docs/WORKSHOP.md](docs/WORKSHOP.md).
 - **The bundled game:** an **unofficial, non-commercial fan remake** played in the browser: solo, or 1–4 player co-op (AI teammates can fill seats). Combat is simulated in each player's browser, so a low-power PC can host. Download the all-in-one bundle from [Releases](../../releases/latest), install Node.js 22 or 24, then double-click `scripts\start-windows.bat` (Windows) or run `./scripts/start.sh` (macOS / Linux) and open <http://localhost:3000>. From source: `npm install && npm run setup && npm start` (setup downloads ~270 MB of art from public mirrors, the emotes and the how-to-play pages included; the official 3D board, some official HUD icons and two enemy models are extracted from a local Arknights client — without one the game uses the 2D board and look-alike stand-ins, and a server can copy `public/assets/local/` and `data/local-assets.json` from the release bundle of the same version). Create a co-op room and share the 4-letter key or the `?room=KEY` link; on a LAN use the address printed at start, otherwise a virtual-LAN tool, a tunnel or a VPS — see [docs/DEPLOY.md](docs/DEPLOY.md).
 - **Disclaimer:** not affiliated with or endorsed by Hypergryph or Yostar. All Arknights names, art, audio, text and data are © their respective owners and are **not** covered by this project's GPL licence. For study and personal non-commercial use only — no selling, paid distribution, paid servers or monetisation of any kind. Content will be removed on request of the rights holders. Provided "as is", without warranty.
 - **License:** code GPL-3.0-or-later ([LICENSE](LICENSE)); game assets excluded.

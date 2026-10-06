@@ -927,7 +927,10 @@ async function main() {
   process.on('uncaughtException', (e) => console.error('[process] uncaught exception', e));
   let srv;
   try {
-    srv = await startServer();
+    // 工坊目录可以由环境变量指定。编辑器的「一键试玩」就是这样把**作者当前那个工坊根**交给游戏服务器的：
+    // 编辑器可以用 `--workshop <目录>` 指向别处，而游戏服务器默认只认仓库的 `workshop/` —— 不传这一项，
+    // 试玩里就看不到自己正在编辑的包。
+    srv = await startServer(process.env.SP_WORKSHOP ? { workshopDir: path.resolve(process.env.SP_WORKSHOP) } : {});
   } catch (e) {
     if (e && e.code === 'EADDRINUSE') console.error(`端口已被占用 / port in use: ${e.port ?? process.env.PORT ?? 3000}. Try PORT=3001 npm start`);
     else console.error('[boot] failed to start', e);

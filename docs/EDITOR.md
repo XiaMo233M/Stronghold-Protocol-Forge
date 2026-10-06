@@ -61,7 +61,7 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
 | `/item.html` | **装备**编辑器（一件装备 = 一个 spec = 两条记录） |
 | `/kit.html` | **kit（行为层）**编辑器（直接编辑 `kits/<chessId>.js` 的代码，静态校验） |
 | `/voice.html` | **语音**编辑器（`pack.json` 的 `voices` 字段：干员 × 槽位 × 文件） |
-| `/pack.html` | **包管理**（导出/导入 `.zip`，以及 `pack.json` 的 `support` 助战声明） |
+| `/pack.html` | **包管理**（导出/导入 `.zip`、`pack.json` 的 `support` 助战声明、**一键试玩**） |
 
 ### 干员编辑器（首页）
 
@@ -303,6 +303,40 @@ node tools/workshop-pack.mjs import my-pack.zip [--force] [--json]
 node tools/workshop-pack.mjs list [--json]     # id / 名称 / 版本 / 内容 / 语音 / 助战，每个包一行
 ```
 
+## 试玩（一键开一局）
+
+包管理页右下角有 **「启动试玩」**：编辑器起一个**游戏服务器子进程**，等它 `/healthz` 就绪，然后打开浏览器
+直接进一局独立模拟 —— 不用再开终端、不用手敲 `npm start`，而且**不用先想清楚工坊目录是哪一个**。
+
+```
+编辑器（127.0.0.1:3311） ──spawn──→ node server/index.js（127.0.0.1:随机空闲端口）
+        │                                   ▲
+        └─ 浏览器打开 http://127.0.0.1:<port>/?playtest=1&difficulty=…
+                                            │
+        SP_WORKSHOP=<编辑器的工坊根> ──────────┘（所以试玩读的就是你正在编辑的那些包）
+```
+
+| 关注点 | 行为 |
+|---|---|
+| 端口 | 每次挑一个当前空闲的本机端口（绑 0 号端口问内核要一个再释放），**不固定 3000** —— 作者自己的服务器常常就占着 3000 |
+| 绑定地址 | 只绑 `127.0.0.1`：这是给自己看的窗口，不是给局域网用的服务器 |
+| 工坊目录 | 以 `SP_WORKSHOP` 交给子进程，即**编辑器当前的工坊根**（`--workshop <目录>` 的那个）。不传这一项，试玩里就看不到你正在编辑的包 |
+| `?playtest=1` | 客户端深链：进入并联网后自动建一个**独立模拟**房间并开局（`room.create {mode:'solo'}` → `room.start`），参数用完即从地址栏抹掉，刷新不会又开一局。见 `public/js/screens/lobby.js` 的 `parsePlaytestParam` |
+| 难度 | 页面上选，作为 `&difficulty=<键>` 传给深链；键表来自 `shared/constants.js` 的 `DIFFICULTIES`，页面不自己写一份 |
+| 改完包要生效 | 再点一次（按钮变成「重启试玩」）：先停旧进程再起新的。**编辑器自己不会重载数据**，这是刻意的 —— `server/data.js` 的 `getData()` 是进程级单例，同一个进程里「重启」也只会拿到第一次加载的数据，所以试玩必须是子进程 |
+| 收尸 | 停止 / 关编辑器 / 编辑器进程退出（含 Ctrl+C）都会杀掉子进程。留一个占端口的孤儿 `node.exe`，下次试玩会以「端口被占用」失败，而用户不知道是谁占的 |
+| 失败 | 起不来就是 500 + 原话（入口不存在 / 端口被占 / 30 s 内没就绪），并且**先把进程杀掉再抛错**，绝不返回一个「看起来在跑」的实例 |
+
+命令行等价（编辑器做的事就是这一条，只是它自己挑端口并带上深链）：
+
+```powershell
+node scripts/launch.mjs                 # 开游戏服务器（默认 3000，浏览器自动打开）
+node scripts/launch.mjs --port 3001     # 换个端口
+```
+
+> [!NOTE]
+> 试玩**不是**打包器：它跑的是这个仓库当前的工作树。要让别人也能玩到你写的内容，用「包管理」页导出 `.zip`。
+
 ## 助战（客户端）
 
 助战的选择由**服务端**声明并强制：卡池之外的干员是**禁用**的，请求会被整条拒绝，**没有回退**（回退会让一个被禁用的干员变成已发放）。
@@ -380,6 +414,9 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 | POST | `/api/packs/import`（可选 `?force=1`） | **原始 zip 字节**（`application/octet-stream`）→ 解压到临时目录、校验、搬进 `workshop/<包id>/`；返回装好的包摘要 |
 | GET | `/api/packs/support` | 各包的助战状态 + 每个包的**自有干员与推导阶** + `data/support.json` 的卡池与总开关 |
 | POST | `/api/packs/:id/support` | `{ ids }` → 就地更新 `pack.json` 的 `support`（只动这一个字段，绝不补 `content`） |
+| GET | `/api/playtest` | 试玩状态（`running` / `port` / `url` / `pid`）+ 难度键表 + 当前工坊根 |
+| POST | `/api/playtest/start` | `{ difficulty? }` → 起（或复用）一个游戏服务器子进程并等 `/healthz`；起不来 → 500 + 原话，且进程已被收尸 |
+| POST | `/api/playtest/stop` | 停掉试玩（没在跑时 `stopped: false`，幂等） |
 
 ## Option 署名（`_meta`）
 
@@ -430,12 +467,15 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 - kit 的**真实导入检查**——编辑器只做静态校验（见上），把文件真的 `import` 一遍是 `tools/workshop-validate.mjs` 的事
 - kit 的**沙箱与审查**——按分渠道策略不做（脚本会在客户端执行，见 `docs/WORKSHOP.md` §4）
 - 任何鉴权
+- 试玩的**热重载**——改完包要自己点一次「重启试玩」；编辑器不会替你重载游戏数据（见上面「试玩」一节的理由）
 
 ## 与其它工具的关系
 
 | 工具 | 面向 | 关系 |
 |---|---|---|
-| `editor/`（本文件） | 人，图形界面 | 写 spec，生成记录；导出/导入 `.zip`，改 `pack.json` 的 `voices` / `support` |
+| `editor/`（本文件） | 人，图形界面 | 写 spec，生成记录；导出/导入 `.zip`，改 `pack.json` 的 `voices` / `support`；一键起试玩服务器 |
+| `editor/playtest.mjs` | 编辑器内部 | 起 / 停游戏服务器子进程（挑空闲端口、`SP_WORKSHOP`、等 `/healthz`、退出收尸） |
+| `scripts/launch.mjs` | 人 / 脚本 | 同样的服务器，由人来起（试玩的命令行等价物） |
 | `tools/workshop-scaffold.mjs` | 人 / 脚本 / AI | 同样的 spec → 同样的记录（无界面） |
 | `tools/workshop-pack.mjs` | 人 / 脚本 / CI | 导出 / 导入 / 列出包，读写 `pack.json.support` —— 编辑器第八页调用的就是它 |
 | `tools/workshop-validate.mjs` | 人 / CI / AI | 分层校验：格式 → 语义 → 真实引擎 → 每种内容一层（kits / 地图 / 怪物 / 出怪 / 装备 / 语音 / 助战） |

@@ -44,11 +44,13 @@ import {
   exportPack, installZip, readPackSupport, writePackSupport, packSummary, listPackIds,
 } from '../tools/workshop-pack.mjs';
 import { ZIP_MAX_TOTAL_BYTES } from '../shared/zip.js';
+// 一键试玩：编辑器起一个游戏服务器**子进程**，并把当前的工坊根交给它（为什么是子进程见 editor/playtest.mjs）
+import { createPlaytest } from './playtest.mjs';
 // The pack-media allowlist lives with the route that serves it (server/index.js). The voice page must not keep a second
 // copy: a file the editor accepts but that route refuses is a line that 404s in the game with nothing reporting it.
 import { WORKSHOP_ASSET_TYPES } from '../server/index.js';
 import { normalizePackManifest, WORKSHOP_MEDIA_PREFIX } from '../shared/workshop.js';
-import { VOICE_SLOTS } from '../shared/constants.js';
+import { VOICE_SLOTS, DIFFICULTIES } from '../shared/constants.js';
 import { withForgeMeta, stampForgeHeader, parseForgeHeader } from '../shared/forgeNotice.js';
 import {
   HOOK_EVENTS, KIT_FORBIDDEN_GLOBALS, validateKit, kitErrors, hookNamesInSource,
@@ -752,6 +754,9 @@ export async function createEditorServer(opts = {}) {
   const dataDir = path.resolve(opts.dataDir ?? DATA_DIR);
   const supportFile = path.resolve(opts.supportFile ?? path.join(dataDir, 'support.json'));
   const log = opts.log ?? quietLog;
+  // 一键试玩（docs/EDITOR.md §试玩）。控制器建在这里，是因为它要知道**这个编辑器实例**的工坊根；
+  // 测试可以注入 `opts.playtest` 换成假的，免得每个编辑器测试都真的起一个游戏服务器。
+  const playtest = opts.playtest ?? createPlaytest({ root, log });
   const officialIds = new Set(Object.keys(readJson(path.join(dataDir, 'chess.json'), {}) || {}));
   const officialStages = new Set(Object.keys(readJson(path.join(dataDir, 'stages.json'), {}) || {}));
   const officialEnemies = new Set(Object.keys(readJson(path.join(dataDir, 'enemies.json'), {}) || {}));
@@ -873,6 +878,40 @@ export async function createEditorServer(opts = {}) {
       if (actual !== tier) throw Object.assign(new Error(`tier ${tier} does not match the record's tier ${actual}`), { status: 400 });
       const cfg = await toggleSupport(supportFile, chessId, tier, enabled === true);
       return sendJson(res, 200, { ok: true, enabled: enabled === true, support: cfg });
+    }
+
+    // ---- 一键试玩 (playtest): 起一个游戏服务器子进程，让作者立刻进一局 -------------------------------
+    //
+    // 为什么是子进程而不是在编辑器进程里 startServer()：`server/data.js` 的 `getData()` 是进程级单例，
+    // 同一个进程里「重启」也只会拿到第一次加载的数据，而作者要的正是「改完包 → 重启 → 看到新内容」。
+    // 细节（收尸、端口、健康检查）都在 editor/playtest.mjs。
+    if (p === '/api/playtest' && method === 'GET') {
+      return sendJson(res, 200, {
+        ...playtest.status(),
+        // 客户端的深链参数认这几个难度键（shared/constants.js 的 DIFFICULTIES），页面不该自己写一份
+        difficulties: [...DIFFICULTIES],
+        workshopRoot: root,
+      });
+    }
+
+    if (p === '/api/playtest/start' && method === 'POST') {
+      const body = await readBody(req);
+      const difficulty = body && typeof body.difficulty === 'string' && body.difficulty ? body.difficulty : null;
+      if (difficulty !== null && !DIFFICULTIES.includes(difficulty)) {
+        throw refuse(400, `难度不合法（可用：${DIFFICULTIES.join('、')}）`);
+      }
+      try {
+        const started = await playtest.start({ difficulty });
+        return sendJson(res, 200, { ok: true, ...started, difficulties: [...DIFFICULTIES] });
+      } catch (e) {
+        // 起不来就是 500：这不是用户的输入错误，而是环境问题，页面要把原话显示出来（端口/入口/超时都在里面）
+        throw refuse(500, `试玩服务器启动失败：${e && e.message ? e.message : String(e)}`);
+      }
+    }
+
+    if (p === '/api/playtest/stop' && method === 'POST') {
+      const stopped = await playtest.stop();
+      return sendJson(res, 200, { ok: true, ...stopped, ...playtest.status() });
     }
 
     // ---- 包管理 (packs): 导出 / 导入 / 助战声明 --------------------------------------------------------
@@ -1724,7 +1763,12 @@ export async function createEditorServer(opts = {}) {
     host,
     url: `http://${host === '0.0.0.0' ? 'localhost' : host}:${actual}`,
     server,
-    close: () => new Promise((resolve) => { server.close(() => resolve()); server.closeAllConnections?.(); }),
+    // 关编辑器时也要把试玩的子进程带走：留一个占着端口的孤儿 node.exe，下次试玩会以「端口被占用」失败，
+    // 而用户完全不知道是谁占的。先停试玩再关 HTTP，顺序反了会让请求落在一个已经没人管的进程上。
+    close: async () => {
+      await playtest.stop();
+      await new Promise((resolve) => { server.close(() => resolve()); server.closeAllConnections?.(); });
+    },
   };
 }
 
