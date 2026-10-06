@@ -53,8 +53,7 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
 编辑器共八个页面，右上角可互相跳转：
 
 | 页面 | 用途 |
-|---|---|
-| `/` | **干员**编辑器（下栏详述） |
+|---|---|| `/` | **干员**编辑器（下栏详述） |
 | `/stage.html` | **地图**设计器（2D 摆放器 + 路线） |
 | `/enemy.html` | **怪物**编辑器（数值 + 特殊机制） |
 | `/wave.html` | **出怪**设计器（时间轴 + 明细表） |
@@ -62,6 +61,10 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
 | `/kit.html` | **kit（行为层）**编辑器（直接编辑 `kits/<chessId>.js` 的代码，静态校验） |
 | `/voice.html` | **语音**编辑器（`pack.json` 的 `voices` 字段：干员 × 槽位 × 文件） |
 | `/pack.html` | **包管理**（导出/导入 `.zip`、`pack.json` 的 `support` 助战声明、**一键试玩**） |
+
+五个内容页（地图 / 怪物 / 出怪 / 装备 / kit）的侧栏都有一个**保存目标**下拉：列出所有工坊包（id 与 `pack.json` 里的名字），
+选好再保存。以前每次保存都要在对话框里手打一次包 id —— 打错就是存进别的包，或者凭空建一个空包。
+只有选「＋ 新建一个包…」时才问一次新包的 id（那一步确实只能问）。
 
 ### 界面语言（中英双语）
 
@@ -114,6 +117,10 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
   寻路不通时会标红「无路可走」并在校验里给 `ROUTE_NOPATH`。起点不在城门、终点不在保护目标只给**警告**（传送门与领袖出生点合法）。
   路线存在**工坊包的 spec** 里；引擎的 `routes` 属于出怪表（`data/waves.json`，由 `spawns[].routeIndex` 选中），
   下一步的出怪编辑器会把这张图的路线绑定到回合上。
+- **回合绑定**（侧栏）：把出怪表绑到这张图的回合上。这是**引擎真正读的那份**（`stage.rounds` / `stage.bossRounds`）——
+  引擎先看这张图、再看模式的模板，所以在这里绑过的回合会走你自己的表，官方地图完全不受影响。
+  每一行都显示「不指定的话本来会打哪张表」（不显示这个就没法判断该不该覆盖），首领回合再多一行。
+  **绑了不存在的 id 会静默回落到模式的模板**，所以面板自己查存在性并把失效的绑定列出来。
 - **`row 0` 是最下面一行**（与引擎存储一致），画布上已标注行号。
 - **3D 预览是默认视图**：打开一张地图时，它直接放进**游戏自己的 3D 渲染器**（`public/js/render/board3d`）——
   官方棋盘贴图才让一张地图看得懂，2D 网格留着当编辑面。工具栏的「3D 预览」按钮随时切回 2D，切回去之后
@@ -395,11 +402,16 @@ node scripts/launch.mjs --port 3001     # 换个端口
   （`time + (count-1) × interval`）。颜色按排期槽位（N/E/S/T 系）区分，`不计入总数` 的出怪画成虚线半透明。
   哪一次先出、出多久、隔多久，一眼就能看出来。
 - **明细表**：数值真正在这里输入 —— 时间 / 敌人 / 数量 / 间隔 / 路线 / 槽位 / 不计入。画布拖动是锦上添花，精确的输入框不是。
-- **敌人是下拉选择**，选项来自合并后的敌人表（官方 249 只 + 工坊自己写的怪物），不用手打键名
+- **敌人是下拉选择**，选项来自合并后的敌人表（官方 249 只 + 工坊自己写的怪物），不用手打键名。
+  **阵营占位符会标出来**：官方数据里有 8 个键（`data/factions.json` 的 `templateSlots`）是阵营随机生成的占位符，
+  选了它们实际出的是阵营随机怪、数量按战力重算；抽到的怪与它移动方式不同时，这一次**一只都不出**
+  （`server/match/waves.js` 的 `valid:false` 分支），而校验器一个字不说。所以选项里带「（阵营占位符）」，
+  右栏也会给一条警告。
 - **路线**：这张出怪表自己带的路线列表（起点/终点/检查点）。地图只做参照 —— 上方选了哪张地图就画它的路线，并标出 `#序号`，
   因为 `spawns[].routeIndex` 索引的正是这个序号
-- **绑定到回合**：记录意图（哪个模式的第几回合）。真正生效是在**地图设计器**里给地图写 `rounds` 指向它（方案 B）——
-  这样官方地图完全不受影响
+- **绑定到回合**：这一栏只记录**意图**（哪个模式的第几回合）。真正生效的是**地图自己的 `rounds`**，
+  在地图设计器的「回合绑定」面板里选这张表 —— 所以下面的「真正在用这张表的地图」会把权威答案列出来，
+  两栏对不上时一眼就能看见
 - **推导量只读**：`totalCount` 与 `slotCounts` 由服务端算。注意两者**不对称**：`slotCounts` 计入 `unharmful` 的出怪，
   `totalCount` 不计入 —— 这是 `build-data` 的原样行为
 
@@ -420,7 +432,7 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 | POST | `/api/packs/:pack/operators` | `{ spec }` → 写 specs 并重新生成 `chess.json` |
 | DELETE | `/api/packs/:pack/operators/:slug` | 删除 spec 及其拥有的记录 |
 | POST | `/api/support/toggle` | `{ chessId, tier, enabled }` → 增删 `data/support.json` 的卡池 |
-| GET | `/api/stages` | 工坊地图列表 + 调色板 + 网格尺寸 + **可指派的模式列表** |
+| GET | `/api/stages` | 工坊地图列表 + 调色板 + 网格尺寸 + **可指派的模式列表** + **回合绑定要的出怪表与模式回合表 `roundBind`** + **保存目标包 `packs`** |
 | GET | `/api/stages/:pack/:id` | 该地图的**可编辑 spec**（源）与生成的记录 |
 | POST | `/api/stages/preview` | `{ spec }` → 推导路径与部署区并校验，**不写盘** |
 | POST | `/api/packs/:pack/stages` | `{ spec }` → 写 `stage-specs/` 并重新生成 `stages.json` |
@@ -431,7 +443,7 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 | POST | `/api/enemies/preview` | `{ spec }` → 推导 `attrPower`/`be` 并校验，**不写盘** |
 | POST | `/api/packs/:pack/enemies` | `{ spec }` → 写 `enemy-specs/` 并重新生成 `enemies.json` |
 | DELETE | `/api/packs/:pack/enemies/:key` | 删除该怪物的 spec 及它拥有的记录 |
-| GET | `/api/waves` | 工坊出怪表列表 + 词表 + **可选敌人键** + 模式 + 地图（含各自带的回合） |
+| GET | `/api/waves` | 工坊出怪表列表 + 词表 + **可选敌人键** + 模式 + 地图（含各自带的回合）+ **阵营占位符清单** + 保存目标包 |
 | GET | `/api/waves/:pack/:id` | 该出怪表的**可编辑 spec**（源）与生成的记录 |
 | POST | `/api/waves/preview` | `{ spec }` → 推导 `totalCount`/`slotCounts` 并校验，**不写盘** |
 | POST | `/api/packs/:pack/waves` | `{ spec }` → 写 `wave-specs/` 并重新生成 `waves.json` |
