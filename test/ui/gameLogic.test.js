@@ -509,9 +509,15 @@ describe('keyboard & settings', () => {
   test('sanitizeSettings', () => {
     assert.deepEqual(sanitizeSettings(null), { ...DEFAULT_SETTINGS });
     assert.deepEqual(sanitizeSettings({ bgm: 3, sfx: -1, muted: 'yes', damageNumbers: false, quality: 'ultra' }),
-      { bgm: 1, sfx: 0, muted: false, damageNumbers: false, quality: 'high' });
+      { bgm: 1, sfx: 0, voice: 0, muted: false, damageNumbers: false, quality: 'high' });
     assert.equal(sanitizeSettings({ bgm: 0.333 }).bgm, 0.33);
     assert.equal(sanitizeSettings({ quality: 'low' }).quality, 'low');
+    // 干员语音台词 are opt-in (docs/ASSETS.md "Voice lines"): a fresh install, and one whose stored settings predate
+    // the field, must both stay silent.
+    assert.equal(DEFAULT_SETTINGS.voice, 0);
+    assert.equal(sanitizeSettings({}).voice, 0, 'missing → off');
+    assert.equal(sanitizeSettings({ voice: 2 }).voice, 1, 'clamped like the other volumes');
+    assert.equal(sanitizeSettings({ voice: 'loud' }).voice, 0, 'nonsense → off, not NaN');
   });
 });
 
