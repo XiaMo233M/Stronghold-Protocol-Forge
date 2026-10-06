@@ -12,6 +12,7 @@ import { t, mountI18n } from './i18n.js';
 // 回合绑定：引擎真正读的是这张图自己的 rounds（先看它、再看模式的模板），逻辑在 stageRounds.js（纯函数，单独测）。
 import { roundRows, waveOptions, missingBindings, setRoundBinding, setBossRoundBinding } from './stageRounds.js';
 import { packSelect } from './packPicker.js';
+import { colorOfGlyph } from './terrain.js';
 import { createStageView3d } from './stage3d.js';
 
 const $ = (s) => document.querySelector(s);
@@ -109,7 +110,8 @@ function loadSpec(spec) {
 
 // ---- drawing -----------------------------------------------------------------------------------------------------
 
-const colorOf = (glyph) => (state.data?.palette ?? []).find((t) => t.glyph === glyph)?.color ?? '#2a2d33';
+// 取色实现与出怪页的底图共用一份（editor/ui/terrain.js）
+const colorOf = (glyph) => colorOfGlyph(state.data?.palette, glyph, state.spec?.tiles);
 const cellAt = (ev) => {
   const rect = canvas.getBoundingClientRect();
   const c = Math.floor(((ev.clientX - rect.left) / rect.width) * COLS);

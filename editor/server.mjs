@@ -457,13 +457,16 @@ function knownEnemyKeysFor(root, dataDir) {
 function stageChoices(root, dataDir) {
   const out = [];
   for (const [id, rec] of Object.entries(readJson(path.join(dataDir, 'stages.json'), {}) || {})) {
-    out.push({ id, name: rec.name ?? id, official: true, rounds: rec.rounds ?? null });
+    out.push({ id, name: rec.name ?? id, official: true, rounds: rec.rounds ?? null, rows: rec.rows ?? null, tiles: rec.tiles ?? null });
   }
   if (root && fs.existsSync(root)) {
     for (const packId of fs.readdirSync(root)) {
       if (!PACK_ID_RE.test(packId)) continue;
       for (const [id, rec] of Object.entries(readJson(path.join(root, packId, 'stages.json'), {}) || {})) {
-        out.push({ id, name: rec.name ?? id, pack: packId, official: false, rounds: rec.rounds ?? null, bossRounds: rec.bossRounds ?? null });
+        out.push({
+          id, name: rec.name ?? id, pack: packId, official: false,
+          rounds: rec.rounds ?? null, bossRounds: rec.bossRounds ?? null, rows: rec.rows ?? null, tiles: rec.tiles ?? null,
+        });
       }
     }
   }
@@ -1397,6 +1400,8 @@ export async function createEditorServer(opts = {}) {
         placeholderEnemies: placeholderEnemyMap(dataDir),
         // 「保存到哪个包」的下拉（editor/ui/packPicker.js）
         packs: packChoices(root),
+        // 地形调色板：出怪页把 `stages[].rows` 画成底图（editor/ui/terrain.js）
+        palette: TILE_PALETTE,
       });
     }
 

@@ -66,4 +66,8 @@ export const EN_WAVE = Object.freeze({
   '（这张表还没保存过，保存后再看这里）': '(not saved yet — save it and look here again)',
   '（还没有地图把这张表绑到回合上：去「地图设计器」的回合绑定面板里选它）': '(no map binds this table to a round yet: pick it in the round bindings panel of the stage designer)',
   '首领回合 {0}': 'boss rounds {0}',
+
+  // ---- 路线画布上的底图 ----
+  '底图：{0}': 'base map: {0}',
+  '这张地图没有地形数据，只画网格': 'this map has no terrain data — only the grid is drawn',
 });

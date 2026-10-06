@@ -17,6 +17,8 @@ import { t, mountI18n } from './i18n.js';
 // 出怪页的两处「把话说清楚」：阵营占位符提示、以及这张表真正在哪张图的哪几个回合生效（纯逻辑，单独测）。
 import { isPlaceholderEnemy, placeholderSpawns, mapsUsingWave } from './waveHints.js';
 import { packSelect } from './packPicker.js';
+// 底图：把选中地图的地形画到路线画布上（纯逻辑在 terrain.js，单独测）
+import { terrainGrid, colorOfGlyph, stageById } from './terrain.js';
 
 const $ = (s) => document.querySelector(s);
 const CELL = 32;
@@ -56,9 +58,27 @@ function drawMap() {
   const canvas = $('#board');
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  // a plain grid stands in for the map: the routes are what the author needs to see here
-  ctx.strokeStyle = '#ffffff0d';
+  // 底图：画选中的那张地图的真实地形。路线定义在地图页、引用在这里，没有底图就只能靠肉眼对着抄坐标，
+  // 抄错一格就是「怪从墙里出来」这种极难查的问题。地图没有地形数据时退回空网格。
+  const map = stageById(state.data?.stages, state.mapId);
+  const terrain = terrainGrid(map, { rows: ROWS, cols: COLS });
+  if (terrain) {
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        ctx.fillStyle = colorOfGlyph(state.data?.palette, terrain[r][c], map?.tiles);
+        ctx.fillRect(px(c), py(r), CELL, CELL);
+      }
+    }
+  }
+  ctx.strokeStyle = terrain ? '#00000033' : '#ffffff0d';
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) ctx.strokeRect(px(c) + .5, py(r) + .5, CELL, CELL);
+  // 地图自己画的装置也标一下：路线会不会被装置挡住是作者要判断的事
+  for (const d of (map?.devices ?? [])) {
+    const [r, c] = Array.isArray(d?.pos) ? d.pos : [];
+    if (!Number.isInteger(r) || !Number.isInteger(c)) continue;
+    ctx.fillStyle = '#e0b357cc';
+    ctx.fillRect(px(c) + 2, py(r) + 2, CELL - 4, CELL - 4);
+  }
   if (state.showPaths) {
     ctx.lineWidth = 4;
     for (const [i, route] of (state.spec?.routes ?? []).entries()) {
@@ -478,10 +498,14 @@ async function load() {
 function paintLabels() {
   if (!state.data) return;
   $('#rootPath').textContent = state.data.waves.length ? t('{0} 张工坊出怪表', state.data.waves.length) : t('还没有工坊出怪表');
-  $('#mapInfo').textContent = state.data.stages.find((s) => s.id === state.mapId)?.official ? t('官方地图') : t('工坊地图');
+  const map = stageById(state.data.stages, state.mapId);
+  // 连底图状态一起说清楚：画布上看到的到底是真地形，还是「这张图没有地形数据」的兜底网格
+  const kind = map?.official ? t('官方地图') : t('工坊地图');
+  const terrain = terrainGrid(map, { rows: ROWS, cols: COLS }) ? t('底图：{0}', map.name ?? map.id) : t('这张地图没有地形数据，只画网格');
+  $('#mapInfo').textContent = `${kind} · ${terrain}`;
 }
 
-$('#mapPick').addEventListener('change', () => { state.mapId = $('#mapPick').value; drawMap(); });
+$('#mapPick').addEventListener('change', () => { state.mapId = $('#mapPick').value; paintLabels(); drawMap(); });
 $('#ovPaths').addEventListener('click', () => { state.showPaths = !state.showPaths; drawMap(); });
 $('#btnReload').addEventListener('click', () => load().catch((e) => { state.message = { kind: 'error', text: e.message }; renderSide(); }));
 $('#btnNew').addEventListener('click', () => { state.waveId = null; state.spec = blankSpec(); state.preview = null; state.sel = 0; renderList(); renderTimeline(); renderTable(); renderSide(); drawMap(); schedule(true); });
