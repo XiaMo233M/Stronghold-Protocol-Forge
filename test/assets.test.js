@@ -17,7 +17,7 @@ import { normalizeAtlas, atlasInfo, parseAtlas } from '../tools/assets/atlas.mjs
 import { pngSize, isCompletePng, isMp3, validate } from '../tools/assets/formats.mjs';
 import { encodeWoff2, decodeWoff2Tables, readSfnt, uintBase128 } from '../tools/assets/woff2.mjs';
 import { assetToPath, pickUnitSfx, indexAudio } from '../tools/assets/audio.mjs';
-import { mirrorUrl, safeName, encodePath } from '../tools/assets/sources.mjs';
+import { mirrorUrl, safeName, encodePath, RAW } from '../tools/assets/sources.mjs';
 import { collectEnemyIds, skillIndicesByChar, buildPlan, GUIDE_PAGES, UI_EXTRAS } from '../tools/assets/plan.mjs';
 import { resolveTemplate, collectLeaves } from '../tools/assets/manifest.mjs';
 import { planVoices, voiceEntries, voiceSlotOf, voiceRelPath, voiceUrl, VOICE_SLOTS, VOICE_TITLE_SLOTS } from '../tools/assets/voices.mjs';
@@ -538,24 +538,32 @@ describe('emotes and 玩法说明 pages from the public mirror (GitHub issue #42
 // not downloaded by the test suite.
 
 describe('voice lines (角色语音台词): URL shape and slot mapping', () => {
-  const AA2VOICE = 'https://raw.githubusercontent.com/ArknightsAssets/ArknightsAssets2/voice/assets/dyn/audio';
+  // 用**真实的** base（RAW.aa2voice），不要自己拼一个：这个 base 已经以 `…/audio/sound_beta_2/` 结尾，
+  // 而这里原来自己写了一个到 `…/audio` 为止的 base，于是 `voiceUrl` 多拼的那一层 `sound_beta_2/` 恰好被
+  // 「期望值」一起复制了 —— 2002 条语音全部 404，而测试是绿的。带上真实 base 才不会再有这种事。
+  const AA2VOICE = RAW.aa2voice;
+  /** `sound_beta_2/` 在这条 URL 里只能出现一次（base 一次），这是那次静默失败的直接形状。 */
+  const onceSoundBeta2 = (url) => assert.equal((url.match(/sound_beta_2\//g) || []).length, 1, `sound_beta_2/ 重复了：${url}`);
 
   test('the URL sits under sound_beta_2/voice_cn/ — not under audio/voice_cn (404) and not in voice/ (404)', () => {
     assert.equal(voiceRelPath('char_002_amiya/CN_021'), 'voice_cn/char_002_amiya/cn_021.mp3', 'lower-cased, .mp3 appended');
     assert.equal(voiceRelPath('/char_1012_skadi2/CN_023'), 'voice_cn/char_1012_skadi2/cn_023.mp3', 'leading slash tolerated');
     assert.equal(voiceRelPath('char_002_amiya/CN_021.mp3'), 'voice_cn/char_002_amiya/cn_021.mp3', 'a file suffix is not doubled');
+    // 与实测过的生产 URL 逐字相同（2026-10-06：这条 URL HTTP 200）
     assert.equal(voiceUrl('char_002_amiya/CN_021', AA2VOICE),
-      `${AA2VOICE}/sound_beta_2/voice_cn/char_002_amiya/cn_021.mp3`);
+      'https://raw.githubusercontent.com/ArknightsAssets/ArknightsAssets2/voice/assets/dyn/audio/sound_beta_2/voice_cn/char_002_amiya/cn_021.mp3');
+    onceSoundBeta2(voiceUrl('char_002_amiya/CN_021', AA2VOICE));
     assert.equal(voiceUrl('char_002_amiya/CN_021', AA2VOICE + '/'),
-      `${AA2VOICE}/sound_beta_2/voice_cn/char_002_amiya/cn_021.mp3`, 'a trailing slash on the base is fine');
+      voiceUrl('char_002_amiya/CN_021', AA2VOICE), 'a trailing slash on the base is fine');
   });
 
   test('a skin variant\'s "#" is encoded in the URL and dropped from the local name (673 assets)', () => {
     // 673 of the index's assets look like this. Upstream really has the `#`: a raw one makes the request stop at the
     // fragment (measured 200 vs 404), so the URL must be percent-encoded …
     const asset = 'char_113_cqbw_epoque#7/CN_019';
-    assert.equal(voiceUrl(asset, AA2VOICE), `${AA2VOICE}/sound_beta_2/voice_cn/char_113_cqbw_epoque%237/cn_019.mp3`);
+    assert.equal(voiceUrl(asset, AA2VOICE), `${AA2VOICE}voice_cn/char_113_cqbw_epoque%237/cn_019.mp3`);
     assert.ok(!/#/.test(voiceUrl(asset, AA2VOICE)), 'no raw # survives into the URL');
+    onceSoundBeta2(voiceUrl(asset, AA2VOICE));
     // … while the local path (and therefore the manifest URL) sanitises it away instead of escaping it.
     assert.equal(voiceRelPath(asset), 'voice_cn/char_113_cqbw_epoque_7/cn_019.mp3');
     assert.ok(!/#/.test(voiceRelPath(asset)));
@@ -601,7 +609,8 @@ describe('voice lines (角色语音台词): URL shape and slot mapping', () => {
 });
 
 describe('voice lines: the plan covers the pool and stays deterministic', () => {
-  const AA2VOICE = 'https://raw.githubusercontent.com/ArknightsAssets/ArknightsAssets2/voice/assets/dyn/audio';
+  // 真实 base（见上面那段注释）：自己拼一个「少了 sound_beta_2/」的 base 会让期望值跟着错的实现一起错。
+  const AA2VOICE = RAW.aa2voice;
   /** A tiny fake index: one wanted operator with every slot, one unwanted, one row per non-battle title. */
   const fakeIndex = () => ({
     charWords: {
@@ -631,6 +640,8 @@ describe('voice lines: the plan covers the pool and stays deterministic', () => 
     for (const f of p.files) {
       assert.match(f.rel, /^audio\/voice_cn\//, f.rel);
       assert.match(f.url, /\/sound_beta_2\/voice_cn\//, f.url);
+      // 真实 base 已经带着 `sound_beta_2/`：这条 URL 里它只能出现一次（曾经多拼一层 → 2002 条全部 404）
+      assert.equal((f.url.match(/sound_beta_2\//g) || []).length, 1, f.url);
     }
     assert.equal(p.lines, 8, 'the 8 battle-moment rows of the wanted operator (char_b and 任命助理 are not)');
   });

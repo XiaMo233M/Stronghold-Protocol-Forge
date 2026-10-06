@@ -15,9 +15,12 @@
 //   * `voiceType` is `ONLY_TEXT` for ALL 18 237 entries, so it carries no grouping: the slot mapping below is keyed by
 //     `voiceTitle` (and pinned to the `CN_0NN` ids, which are stable). This also settles the research 07 §6.4 note that
 //     was marked [ASSUMED]: cn_021/022 选中干员, cn_023/024 部署, cn_025–028 作战中 — all confirmed.
-//   * URL: `{RAW.aa2voice}/sound_beta_2/voice_cn/<voiceAsset lowercased>.mp3`, e.g.
-//     `…/voice/assets/dyn/audio/sound_beta_2/voice_cn/char_002_amiya/cn_021.mp3` (HTTP 200, checked).
-//     NOTE the nesting: NOT `…/audio/voice_cn/…` (404) and not the `voice/` folder (404).
+//   * URL: `{RAW.aa2voice}voice_cn/<voiceAsset lowercased>.mp3` —— base 自己已经以 `…/audio/sound_beta_2/` 结尾，
+//     所以只接 `voice_cn/`，例如 `…/voice/assets/dyn/audio/sound_beta_2/voice_cn/char_002_amiya/cn_021.mp3`（HTTP 200，已实测）。
+//     NOTE the nesting: NOT `…/audio/voice_cn/…` (404) and not the `voice/` folder (404)。
+//     2026-10-06 修掉一个安静的 bug：这里曾多拼一层 `sound_beta_2/`，于是 2002 条语音**全部** 404，
+//     而失败是无声的（清单照生成、客户端照请求、游戏里就是没人说话）。test/assets.test.js 现在钉住
+//     「URL 里 `sound_beta_2/` 恰好出现一次」，这类重复不能再混过去。
 //     The path is percent-encoded, and the LOCAL name is sanitised — 673 assets carry a `#` (skin variants such as
 //     `char_113_cqbw_epoque#7`); see voiceRelPath / voiceUrl below.
 
@@ -106,7 +109,11 @@ export function voiceRelPath(voiceAsset) {
  */
 export function voiceUrl(voiceAsset, aa2voice) {
   const a = String(voiceAsset).replace(/^\/+/, '').replace(/\.mp3$/i, '').toLowerCase();
-  return `${String(aa2voice).replace(/\/+$/, '')}/sound_beta_2/voice_cn/${encodePath(a)}.mp3`;
+  // 注意：`aa2voice` 这个 base 自己就以 `…/audio/sound_beta_2/` 结尾，所以这里只接 `voice_cn/…`。
+  // 再多写一层 `sound_beta_2/` 会让**每一条**语音 URL 都 404（`…/sound_beta_2/sound_beta_2/voice_cn/…`），
+  // 而这条链路的失败是彻底安静的：清单照样生成、客户端照常请求、游戏里只是没有人说话。
+  // 实测（2026-10-06）：`…/audio/sound_beta_2/voice_cn/char_002_amiya/cn_021.mp3` → 200。
+  return `${String(aa2voice).replace(/\/+$/, '')}/voice_cn/${encodePath(a)}.mp3`;
 }
 
 /**
