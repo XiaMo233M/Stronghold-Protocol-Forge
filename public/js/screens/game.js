@@ -86,7 +86,7 @@ import { ExitModal, AwayOverlay, awayStore } from '../ui/matchChrome.js';
 import { openGuide } from '../ui/guide.js';
 import { actions } from '../ui/gameActions.js';
 import { FacingWheel, holdPiece, setPieceDir, syncPieceDirs, showRange, useTileScreen } from '../ui/facingWheel.js';
-import { Underframe, underframeRect, TempRowNotice } from '../ui/underframe.js';
+import { Underframe, underframeRect, TempRowNotice, warmPlateMasks } from '../ui/underframe.js';
 import { needsFacing, facingIntent, previewGrid, pieceDir, underframeActions, retreatSlot, itemDestroyable } from '../ui/facing.js';
 import { EquipReplaceDialog, replaceRequest, replaceIntent } from '../ui/equipReplace.js';
 import { pauseAvailable, isPaused, frozenNow } from '../ui/matchStatus.js';
@@ -363,6 +363,10 @@ function MatchScreen() {
     const st = ownView ? ownStage : baseStage;
     if (st) view.setStage(st);
   }, [view, ownView, ownStage, baseStage]);
+  // The underframe's 出售 / 销毁 plates are tinted through their official sprite as a CSS mask, and a mask image that
+  // has not loaded paints nothing (the plate would show its dark backing on the first tap). Warm the ~1 KB sprites as
+  // soon as the local-art manifest is in — gd.ready is false until then, and this effect re-runs when it flips.
+  useEffect(() => { warmPlateMasks(); }, [gd.ready]);
   const staleFieldRef = useRef(null);
   const enteredFieldRef = useRef(null);
   const pressSel = useRef(null);                         // the selected piece when the current field press began

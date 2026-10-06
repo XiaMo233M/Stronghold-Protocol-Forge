@@ -96,6 +96,47 @@ describe('user playtest #2 — UI fixes (mock harness, headless Chrome)', { skip
   }, uid);
 
   /**
+   * Deselect by pressing the field itself. A fixed point is not safe at every viewport: at 844×390 the old
+   * `click(5, h/2)` lands on a teammate button (`.team__btn`), which switches the watched field — the camera becomes
+   * `normal`, where bench pieces are not drawn at all, so the next `pieceScreenRect` is null (item 8's safe-area case
+   * failed there with "piece 118 on screen"). Press an EMPTY board tile whose centre is over the canvas instead.
+   */
+  async function pressField(page) {
+    const pt = await page.evaluate(() => {
+      const S = globalThis.__MOCK__.S().priv;
+      const occ = new Set(S.board.map((p) => `${p.row},${p.col}`));
+      const g = globalThis.__SP_VIEW__.raw;
+      const overCanvas = (x, y) => x >= 4 && y >= 4 && x <= innerWidth - 4 && y <= innerHeight - 4
+        && document.elementFromPoint(x, y)?.tagName === 'CANVAS';
+      if (typeof g?.tileScreen === 'function') {
+        for (let row = 13; row >= 8; row--) {
+          for (let col = 1; col <= 11; col++) {
+            if (occ.has(`${row},${col}`)) continue;
+            const t = g.tileScreen(row, col);
+            if (!t) continue;
+            const x = Math.round(t.x); const y = Math.round(t.y);
+            if (overCanvas(x, y)) return { x, y };
+          }
+        }
+      }
+      // no tile geometry: any canvas point that is not under a HUD control
+      const c = document.querySelector('canvas');
+      if (c) {
+        const r = c.getBoundingClientRect();
+        for (const fx of [0.5, 0.4, 0.6]) {
+          for (const fy of [0.3, 0.45, 0.6]) {
+            const x = Math.round(r.left + r.width * fx); const y = Math.round(r.top + r.height * fy);
+            if (overCanvas(x, y)) return { x, y };
+          }
+        }
+      }
+      return null;
+    });
+    if (pt) await page.mouse.click(pt.x, pt.y);
+    await sleep(150);
+  }
+
+  /**
    * Tap an own prep piece (real mouse) until ITS underframe shows (a unit standing in front can take a low tap: the
    * next try is higher up the sprite). Pieces without an underframe (bench summons) just get one tap.
    */
@@ -108,10 +149,21 @@ describe('user playtest #2 — UI fixes (mock harness, headless Chrome)', { skip
       if (!underframe) return true;
       if (await page.$(`.uframe[data-uid="${uid}"]`)) return true;
       await page.keyboard.press('Escape');
-      await page.mouse.click(5, Math.round((await page.evaluate(() => innerHeight)) / 2)); // deselect (field press)
-      await sleep(150);
+      await pressField(page);   // deselect (a field press — never a HUD control)
     }
     return false;
+  }
+
+  /**
+   * Wait for the phase-entry banner to leave. `PhaseBanner` (components.js) is `position: fixed`, full width, centred on
+   * the screen at `z-index: var(--z-banner)`, and `pointer-events: none` — so it is invisible to `elementFromPoint`, but
+   * it does cover the board's middle band, underframe plates included, for its duration + 260 ms. A colour sample taken
+   * before it unmounts reads the banner instead of the plate (test 7 tapped at ~1 s and read the banner's dark band:
+   * rgb(19.0, 18.4, 12.3) instead of the amber plate's rgb(146.6, 101.3, 26.6)).
+   */
+  async function waitPhaseBannerGone(page) {
+    await page.waitForFunction(() => !document.querySelector('.pbanner'), { timeout: 15000 });
+    await sleep(80);   // the band's 240 ms close animation has already finished by the unmount
   }
 
   /** Every underframe button: centre, topmost-ness, overlap with the detail card. */
@@ -134,6 +186,7 @@ describe('user playtest #2 — UI fixes (mock harness, headless Chrome)', { skip
   for (const render of ['engine', 'fallback']) {
     test(`7: 出售 / 销毁 are amber / red plates, not a white block (${render})`, { skip: skipUnless('sell') }, async () => {
       const { page, problems } = await open('phase=PREP', { render });
+      await waitPhaseBannerGone(page);   // the phase band lies over the plates (see the helper)
       const uids = await page.evaluate(() => {
         const p = globalThis.__MOCK__.S().priv;
         return { chess: p.hand.find((x) => x && x.kind === 'chess')?.uid, item: p.hand.find((x) => x && x.kind === 'item')?.uid };
@@ -244,8 +297,7 @@ describe('user playtest #2 — UI fixes (mock harness, headless Chrome)', { skip
       await sleep(350);
       assert.ok(await page.$(`.uframe[data-uid="${top.uid}"]`), `${name}: a tap on the row-12 unit's tile selects it`);
       await page.keyboard.press('Escape');
-      await page.mouse.click(5, Math.round(h / 2));
-      await sleep(150);
+      await pressField(page);
       // notched phone in landscape: the HUD layer sits inside the safe-area insets (css/devices.css)
       await page.evaluate(() => { const s = document.documentElement.style; s.setProperty('--sa-l', '47px'); s.setProperty('--sa-r', '47px'); s.setProperty('--sa-t', '12px'); s.setProperty('--sa-b', '21px'); });
       await sleep(300);
@@ -264,8 +316,7 @@ describe('user playtest #2 — UI fixes (mock harness, headless Chrome)', { skip
           assert.ok(!b.overlap, `${name} (safe area): hand${pc.i} ${b.cls} not under the detail card (${s2.side})`);
         }
         await page.keyboard.press('Escape');
-        await page.mouse.click(5, Math.round(h / 2)); // deselect (a field press)
-        await sleep(150);
+        await pressField(page);   // deselect (a field press)
       }
       if (name === '16x9') await page.screenshot({ path: path.join(OUT, 'fix-reach-safearea.png') });
       assert.deepEqual(problems, [], name);
