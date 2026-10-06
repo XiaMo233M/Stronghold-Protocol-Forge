@@ -90,14 +90,16 @@ describe('ui/compat.js polyfills (Safari 15.0–15.3 / Firefox ESR)', () => {
 
 describe('ui/device.js feature detection', () => {
   test('touch / coarse / hover / fullscreen / reduced motion from media queries and APIs (no UA sniffing)', () => {
-    const phone = detectFeatures(fakeWindow({ media: { '(any-pointer: coarse)': true, '(prefers-reduced-motion: reduce)': true }, touchPoints: 5 }).win);
+    const phone = detectFeatures(fakeWindow({ media: { '(any-pointer: coarse)': true, '(pointer: coarse)': true, '(prefers-reduced-motion: reduce)': true }, touchPoints: 5 }).win);
     assert.equal(phone.touch, true);
     assert.equal(phone.coarse, true);
+    assert.equal(phone.coarsePrimary, true, 'a phone: the primary pointer IS coarse');
     assert.equal(phone.hover, false);
     assert.equal(phone.reducedMotion, true);
     assert.equal(phone.fullscreen, true);
     const desk = detectFeatures(fakeWindow({ media: { '(any-hover: hover)': true, '(any-pointer: fine)': true }, fs: false }).win);
     assert.deepEqual({ touch: desk.touch, coarse: desk.coarse, hover: desk.hover, fullscreen: desk.fullscreen }, { touch: false, coarse: false, hover: true, fullscreen: false });
+    assert.equal(desk.coarsePrimary, false);
     assert.deepEqual(featureClasses(phone), {
       'sp-touch': true, 'sp-coarse': true, 'sp-hover': false, 'sp-no-hover': true, 'sp-fs': true, 'sp-standalone': false, 'sp-reduced-motion': true,
       'sp-rotatable': true,
@@ -105,8 +107,10 @@ describe('ui/device.js feature detection', () => {
   });
   test('review regression: the rotate hint is for devices that can turn — not a narrow desktop window, not split view', () => {
     const w = (media, screen, orientation) => { const f = fakeWindow({ media, touchPoints: media['(any-pointer: coarse)'] ? 5 : 0 }).win; f.screen = screen; if (orientation !== undefined) f.orientation = orientation; return f; };
-    const coarse = { '(any-pointer: coarse)': true };
-    const fine = { '(any-pointer: fine)': true, '(any-hover: hover)': true };
+    const coarse = { '(any-pointer: coarse)': true, '(pointer: coarse)': true };            // a phone / tablet
+    const fine = { '(any-pointer: fine)': true, '(any-hover: hover)': true };               // desktop, mouse only
+    // a touchscreen laptop: a coarse pointer EXISTS, but the primary input is still a mouse and the machine cannot turn
+    const touchLaptop = { '(any-pointer: coarse)': true, '(any-pointer: fine)': true, '(any-hover: hover)': true };
     assert.equal(screenLandscape(w(coarse, { orientation: { type: 'landscape-primary' } })), true);
     assert.equal(screenLandscape(w(coarse, {}, 0)), false, 'old iOS: window.orientation');
     assert.equal(screenLandscape(w(coarse, {}, -90)), true);
@@ -116,6 +120,8 @@ describe('ui/device.js feature detection', () => {
     assert.equal(cls(w(coarse, {}, undefined)), true, 'unknown screen orientation on a touch device: the hint may show');
     assert.equal(cls(w(coarse, { orientation: { type: 'landscape-primary' } })), false, 'split-view iPad: the screen is landscape');
     assert.equal(cls(w(fine, { orientation: { type: 'portrait-primary' } })), false, 'a desktop window (even on a portrait monitor)');
+    assert.equal(cls(w(touchLaptop, { orientation: { type: 'portrait-primary' } })), false,
+      'a touchscreen laptop: a coarse pointer exists, but the primary input is a mouse and the machine cannot be turned');
   });
   test('fullscreen: standard API, and unsupported (iPhone Safari) → false', async () => {
     const f = fakeWindow();

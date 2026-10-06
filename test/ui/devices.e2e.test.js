@@ -379,7 +379,11 @@ describe('multi-device (Chrome device emulation)', { skip: !ENABLED && 'set SP_E
     const page = await browser.newPage();
     await page.emulate({ viewport: { width: 390, height: 844, deviceScaleFactor: 3, isMobile: true, hasTouch: true }, userAgent: IOS_UA });
     await page.goto(`${base}/`, { waitUntil: 'load' });
-    await sleep(400);
+    // `.rotate-hint` visibility is decided by the app AFTER load (touch / UA detection against the viewport shape), so
+    // wait for that decision instead of sleeping and hoping. Each wait is best-effort: the assert after it still runs, so
+    // a genuine regression reports as "desktop keeps the game" rather than a bare timeout.
+    await page.waitForFunction(() => document.querySelector('.rotate-hint') && getComputedStyle(document.querySelector('.rotate-hint')).display === 'grid', { timeout: 8000, polling: 100 })
+      .catch(() => {});
     assert.equal(await page.$eval('.rotate-hint', (el) => getComputedStyle(el).display), 'grid');
     await page.screenshot({ path: path.join(OUT, 'device-portrait-rotate.png') });
     await page.close();
@@ -388,6 +392,8 @@ describe('multi-device (Chrome device emulation)', { skip: !ENABLED && 'set SP_E
     await desk.setViewport({ width: 900, height: 1000 });
     await desk.goto(`${base}/`, { waitUntil: 'load' });
     await desk.waitForSelector('.title-screen', { timeout: 10000 });
+    await desk.waitForFunction(() => document.querySelector('.rotate-hint') && getComputedStyle(document.querySelector('.rotate-hint')).display === 'none', { timeout: 8000, polling: 100 })
+      .catch(() => {});
     assert.equal(await desk.$eval('.rotate-hint', (el) => getComputedStyle(el).display), 'none', 'desktop keeps the game');
     await desk.close();
   });

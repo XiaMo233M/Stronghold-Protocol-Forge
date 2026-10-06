@@ -1,10 +1,18 @@
-# 卫戍协议：盟约 · Stronghold Protocol: Alliance
-
-《明日方舟》季节性自走棋塔防玩法「卫戍协议：盟约」的**非官方同人复刻**：浏览器即开即玩，单人或 1–4 人联机合作。
+# Stronghold-Protocol-Forge · 卫戍协议工坊编辑器
 
 ![version](https://img.shields.io/badge/version-0.1.3-2ea44f)
 ![license](https://img.shields.io/badge/code%20license-GPL--3.0--or--later-blue)
 ![node](https://img.shields.io/badge/node-22%20%7C%2024-339933)
+
+本仓库 = **上游同人游戏**（卫戍协议：盟约 · Stronghold Protocol: Alliance）+ **一套图形化的内容创作工具「Forge 工坊编辑器」**。
+
+代码以 **GPL-3.0-or-later** 发布；与上海鹰角网络科技有限公司（Hypergryph）、Yostar 及其关联方**没有任何关系**。
+
+## 目录
+
+- **编辑器（本仓库的主角）**：[这是什么](#这是什么) · [能做什么](#能做什么) · [快速开始（编辑器）](#快速开始编辑器) · [两条硬规矩](#设计上的两条硬规矩) · [Option 署名](#option-署名) · [工坊与助战](#工坊与助战)
+- **上游游戏本体**：[本仓库完整包含上游游戏](#本仓库完整包含上游游戏) · [功能一览](#功能一览) · [快速开始（游戏）](#快速开始游戏) · [联机方式](#联机方式) · [操作](#操作)
+- **文档与法律**：[文档](#文档) · [开发与测试](#开发与测试) · [项目结构](#项目结构) · [著作权声明](#著作权声明) · [上游来源与修改说明](#上游来源与修改说明) · [许可证](#许可证) · [致谢与数据来源](#致谢与数据来源) · [贡献](#贡献) · [English](#english)
 
 ## 声明
 
@@ -16,22 +24,95 @@
 > - 权利人如认为本项目侵犯其权益，请通过 Issue 联系，我们会**立即删除**相关内容。
 > - 本项目按「现状」提供，**不提供任何担保**，使用风险自负。
 
-English summary: [below](#english).
+## 这是什么
 
-| 同盟房间 | 策略轮选 | 休整期（商店 / 盟约） |
+**Forge 工坊编辑器**（`editor/`）是一个**游戏之外的独立工具**，用来创作这个游戏的内容：干员、地图、怪物、出怪表、装备。它在你本机的浏览器里打开，改的是你仓库里的工坊包。
+
+- 它是**可选工具**：不运行就不存在。可以单独分发、单独使用（[docs/EDITOR.md](docs/EDITOR.md)）。
+- **游戏客户端不含编辑器**：`editor/` 不在 `public/` 下，服务器结构上无法把它发给网页端或后续打包的 APK（`test/editor.test.js` 锁住了这条）。
+- 编辑器、命令行工具与 AI 走**同一套创作规则**（`shared/*Authoring.js`），产出的工坊包完全一样。
+
+## 能做什么
+
+五个页面，右上角可互相跳转：
+
+| 页面 | 路由 | 能编辑什么 |
 |---|---|---|
-| ![房间](docs/img/room.jpg) | ![策略](docs/img/band-draft.jpg) | ![休整期](docs/img/prep.jpg) |
-| **部署方向轮盘** | **作战** | **最终攻势** |
-| ![方向](docs/img/facing-wheel.jpg) | ![作战](docs/img/combat.jpg) | ![最终攻势](docs/img/final-assault.jpg) |
+| **干员** | `/` | id / 名称 / 阶 / 职业 / 分支 / 位置、**普通与精锐两套数值**、技能（含技能黑板）、天赋（0~2 条，每条含说明与黑板）、是否助战 |
+| **地图** | `/stage.html` | **19×21 网格**、地形图例（调色板）、装置、路线（出生点 → 防守点）、**2D 摆放 + 3D 预览**（用游戏自己的渲染器） |
+| **怪物** | `/enemy.html` | **17 项数值**、能力说明、天赋黑板、技能、五项免疫、复用现有美术（`spine`） |
+| **出怪** | `/wave.html` | **时间轴 + 明细表**：每次出怪的时间 / 敌人 / 数量 / 间隔 / 路线 / 槽位、绑定到回合 |
+| **装备** | `/item.html` | 一件装备 = 一个 spec = **两条记录（普通 + 精英）**、buffs 黑板（`bb` / `bbStr`）、图标复用 |
 
-## 目录
+除上述表单，编辑器还有实时校验（与 CLI 完全相同的规则）与「将生成的记录」预览；地图页额外有**部署区覆盖层**与**寻路覆盖层**（12 条路线的流场），出怪页有按排期槽位配色的时间轴泳道。
 
-- [声明](#声明) · [简介](#简介) · [功能一览](#功能一览)
-- [快速开始](#快速开始)：[整合包](#方式一整合包推荐) · [从源码运行](#方式二从源码运行) · [系统要求](#系统要求) · [端口与配置](#端口与配置) · [局域网联机](#和朋友一起玩局域网)
-- [联机方式](#联机方式) · [操作](#操作) · [文档](#文档) · [开发与测试](#开发与测试) · [项目结构](#项目结构)
-- [上游来源与修改说明](#上游来源与修改说明) · [许可证](#许可证) · [著作权声明](#著作权声明) · [致谢与数据来源](#致谢与数据来源) · [贡献](#贡献)
+## 快速开始（编辑器）
 
-## 简介
+```bash
+npm run editor                       # 打开工坊编辑器（独立工具，默认只绑 127.0.0.1）
+node tools/workshop-validate.mjs workshop                     # 分层校验整个工坊目录
+node tools/workshop-scaffold.mjs docs/examples/operator-spec.json --pack my-pack   # spec → 合法工坊包
+```
+
+- 也可以直接 `node tools/workshop-editor.mjs --port 3400 --open`，或用 `--workshop <目录>` 指定其它工坊目录。
+- **默认只绑 127.0.0.1**（编辑器可以写文件）；要绑局域网需要显式 `--host`，此时会打印警告。**没有登录、没有权限控制**，不要暴露到公网。
+- **无构建步骤、无新依赖**：纯 Node `http` + 原生 ES 模块 UI。**不需要改游戏服务器**。
+- 它只写这些路径：`workshop/**`（spec 源文件与生成产物）与 `data/support.json`（只在动「是否助战」开关时）；`tools/build-data.mjs` 生成的其它 `data/*.json` **永不改动**。
+- 保存后需**重启游戏服务器**才会出现在游戏里。
+
+## 设计上的两条硬规矩
+
+### 一、只编辑人能给的，机械字段一律推导
+
+手写派生字段会让数据与引擎不一致，而且游戏里不会报错。所以编辑器只让人填「人能决定的东西」，其余全部由服务端按真实引擎推导：
+
+| 内容 | 作者填 | 一律推导（绝不手写） |
+|---|---|---|
+| 干员 | 身份、两套数值、技能、天赋 | **精锐一对**：`chess_ws_<slug>_a`（普通）+ `_b`（精锐），两条记录成对生成、成对删除 |
+| 地图 | `rows`（网格）、`tiles`（字符 → 地形图例）、`devices`（装置）、路线 | `groundPaths` / `groundPathsWithDevices` / `deployTiles` —— 由 `server/stageAuthoring.js` 复用 `server/sim/grid.js` **模拟器自己的寻路**算出（路线本身也按引擎的流场寻路，画的是实际走法） |
+| 怪物 | 17 项数值、能力说明、天赋黑板、技能、免疫、复用美术 | `attrPower` 与 `be`（`be` 决定阵营换怪时替换多少只，所以必须算，不能手填） |
+| 出怪 | 时间 / 敌人 / 数量 / 间隔 / 路线 / 槽位 / 不计入 | `totalCount` 与 `slotCounts`（两者**不对称**：`slotCounts` 计入 `unharmful` 的出怪，`totalCount` 不计入） |
+| 装备 | 身份、buffs 黑板、复用的图标 `trapId` | `params`、`mergeable`、`shopExcluded` —— 三条推导精确复现官方全部 115 条装备（`test/itemAuthoring.test.js`） |
+| kit（行为层，手写文件） | 代码 | 钩子词表 + 三条硬规则（`shared/kitAuthoring.js`）：**必须自己给 `skill`**、**自包含不 import 引擎模块**、**会在玩家浏览器里执行** |
+
+### 二、校验器复用真实引擎
+
+`tools/workshop-validate.mjs` 是**分层校验**：格式 → 语义 → 真实引擎 → 每种内容一层（`kits` / 地图 / 怪物 / 出怪 / 装备）。地图层会**重算并比对路径表**，怪物层重算 `be` / `attrPower`，出怪层重算 `totalCount` / `slotCounts` 并检查每只敌人的键与 `routeIndex`，装备层重算 `params` / `mergeable` / `shopExcluded`。
+
+编辑器、CLI 与 AI 共用同一批 `shared/*Authoring.js`（干员 / 地图 / 怪物 / 出怪 / 装备 / kit），所以**规则不会漂移**：编辑器里能保存的内容，校验器一定也接受，反之亦然。
+
+## Option 署名
+
+编辑器保存的**每一个 Option**（干员、地图、怪物、出怪、装备的 spec）都会自动带一个 `_meta`：作者、创建时间、来源、著作权声明、反打包转售声明 —— 声明写在 README 里不会跟着文件走，而一份被拷到别处的关卡文件必须自己说明它是谁做的。
+
+- **`created` 只写一次**，之后再保存只更新 `modified`。
+- **`_meta` 只存在于 spec（源文件）里，绝不会进入游戏读的产物**（`test/forgeNotice.test.js` 钉住了这条）。
+- 作者名按 `createEditorServer({ forgeAuthor })` → `SP_FORGE_AUTHOR` → 该包 `pack.json` 的 `author` 取；都没有就写「未署名 (anonymous)」，不猜。
+
+字段结构与边界详见 [docs/EDITOR.md](docs/EDITOR.md)，法律文本见 [著作权声明](#著作权声明)。
+
+## 工坊与助战
+
+> [!NOTE]
+> 以下是**本项目自行新增**的功能，不是官方内容，也不在 `tools/build-data.mjs` 的生成范围内。它不修改 `data/*.json`。
+
+- **助战**：每名玩家每阶可选 n 个助战干员，**卡池由服务端控制**（`data/support.json`），不在卡池中的即禁用。
+- **创意工坊**：把工坊包放进 `workshop/<包>/`，即可新增/覆盖干员等内容。官方数据保持字节不变。
+
+```bash
+node tools/workshop-scaffold.mjs docs/examples/operator-spec.json --pack my-pack   # spec → 合法工坊包
+node tools/workshop-validate.mjs workshop                                          # 分层校验（含真实引擎）
+npm run editor                                                                     # 打开工坊编辑器（独立工具）
+```
+
+**客户端不需要、也不会包含编辑器**：`editor/` 不在 `public/` 下，游戏服务器无法把它发给网页端或后续打包的 APK。
+详见 [docs/WORKSHOP.md](docs/WORKSHOP.md) 与 [docs/EDITOR.md](docs/EDITOR.md)。
+
+## 本仓库完整包含上游游戏
+
+下面是本仓库**一并附带**的上游游戏：**卫戍协议：盟约 · Stronghold Protocol: Alliance**（非官方同人复刻）。它是这套编辑器的创作对象 —— 编辑器写出的内容，最终在这里跑起来。
+
+### 简介
 
 「卫戍协议：盟约」是自走棋 + 塔防：休整期在调度中心招募干员、摆阵、配装备，作战期干员自动部署，迎击从红门涌来的敌人，漏过去的敌人扣目标生命值。本项目在浏览器里复刻了这一玩法，规则和数值尽量对照官方数据表与 PRTS 核对。
 
@@ -39,7 +120,15 @@ English summary: [below](#english).
 - 服务器是一个 Node.js 程序，**战斗在各玩家的浏览器里模拟**（和官方一样），服务器只管经济与回合，一台低功耗小主机就能开服。
 - 当前版本 0.1.3：修复了 0.1.2 发布后玩家和 GitHub 上反馈的问题，详见 [CHANGELOG.md](CHANGELOG.md)。仍有少数规则按推断实现，与官方不一致的地方欢迎在 Issue 里反馈。
 
-## 功能一览
+下面是给作者做参照的游戏画面。
+
+| 同盟房间 | 策略轮选 | 休整期（商店 / 盟约） |
+|---|---|---|
+| ![房间](docs/img/room.jpg) | ![策略](docs/img/band-draft.jpg) | ![休整期](docs/img/prep.jpg) |
+| **部署方向轮盘** | **作战** | **最终攻势** |
+| ![方向](docs/img/facing-wheel.jpg) | ![作战](docs/img/combat.jpg) | ![最终攻势](docs/img/final-assault.jpg) |
+
+### 功能一览
 
 - **完整的一局**：确认本局信息 → 策略轮选（40 名策略）→ 14 回合 → 结算称号；险境及以上满足条件时进入第 15 回合「隐秘核心」。
 - **4 种难度**：标准 / 险境 / 绝境 / 终极，独立与同盟各一套参数，均取自官方数据。
@@ -58,9 +147,9 @@ English summary: [below](#english).
 - **画面与声音**：真实 Spine 小人、官方 BGM 与音效、表情（6 套 × 6 个）、作战特效；可选的官方 3D 棋盘（需要从本机客户端提取贴图）。
 - **手机与电脑**：触摸拖拽、长按查看详情，推荐横屏；设置里可以调低画质。
 
-## 快速开始
+### 快速开始（游戏）
 
-### 方式一：整合包（推荐）
+#### 方式一：整合包（推荐）
 
 整合包里已经包含代码、运行依赖和全部美术 / 音频（含官方 3D 棋盘贴图），解压就能玩，不需要再下载任何东西。
 
@@ -74,7 +163,7 @@ English summary: [below](#english).
    - macOS / Linux：在解压出的文件夹里运行 `./scripts/start.sh`（或 `bash scripts/start.sh`）。
 4. 浏览器会自动打开 `http://localhost:3000`。窗口里列出的局域网地址可以直接发给同一网络的朋友。关闭窗口（或按 `Ctrl+C`）即停止服务器。
 
-### 方式二：从源码运行
+#### 方式二：从源码运行
 
 ```bash
 git clone https://github.com/sganggs/Stronghold-Protocol.git
@@ -90,7 +179,7 @@ npm start          # 启动服务器：http://localhost:3000
 - 素材下载优先使用 GitHub，失败时自动改用 jsDelivr 镜像。
 - `npm run doctor`（即 `node tools/doctor.mjs`）可以随时诊断：Node 版本、素材是否完整、端口占用、局域网地址和防火墙。
 
-### 系统要求
+#### 系统要求
 
 | 项目 | 要求 |
 |---|---|
@@ -100,7 +189,7 @@ npm start          # 启动服务器：http://localhost:3000
 
 显卡较弱时可以在「设置」里调低画质，或在网址后加 `?board=2d`（强制 2D 棋盘）/ `?render=fallback`（不用 WebGL 的简化画面）。
 
-### 端口与配置
+#### 端口与配置
 
 默认监听 **TCP 3000**。换端口：启动脚本加 `--port 3001`，或设置环境变量 `PORT`。
 
@@ -116,7 +205,7 @@ npm start          # 启动服务器：http://localhost:3000
 
 设置方式：macOS / Linux `PORT=8080 npm start`；PowerShell `$env:PORT=8080; npm start`；cmd `set "PORT=8080" && npm start`。健康检查：`GET /healthz`。
 
-### 和朋友一起玩（局域网）
+#### 和朋友一起玩（局域网）
 
 1. 打开页面 → 输入昵称 → **同盟模拟** → 创建房间。房主选择难度，可以添加 / 移除 AI 队友；开始前也可以把其他博士移出房间（对方可凭密钥重新加入）。
 2. 把 4 位字母的**同盟密钥**，或「复制链接」得到的 `http://<地址>:3000/?room=密钥` 发给朋友。
@@ -125,7 +214,7 @@ npm start          # 启动服务器：http://localhost:3000
 
 刷新页面或断线后，同盟模拟 10 分钟内、独立模拟 24 小时内重新打开即可回到原座位。服务器把房间和对局都保存在内存里，**重启服务器会结束所有对局**。
 
-## 联机方式
+### 联机方式
 
 朋友不在同一个局域网时，下面是几类常见做法，按自己的情况选一种即可。这里只做简单介绍，提到的工具和服务只是举例，本项目与它们没有任何关系，也不做推荐；具体的安装、费用和使用规则请以各自的官方说明为准。部署细节（防火墙、开机自启、反向代理与 HTTPS、Docker）见 **[docs/DEPLOY.md](docs/DEPLOY.md)**。
 
@@ -142,7 +231,7 @@ npm start          # 启动服务器：http://localhost:3000
 - 游戏没有账号系统，**知道地址的人都能进来**。请只把地址发给朋友，不要公开发布，也不要搭建公开大厅；这同时能降低素材版权方面的风险。
 - 有公网 IPv4 时也可以在路由器上做端口转发，但这会把家里的电脑直接暴露在公网上，优先考虑上面的方式。
 
-## 操作
+### 操作
 
 | 操作 | 方法 |
 |---|---|
@@ -165,6 +254,9 @@ npm start          # 启动服务器：http://localhost:3000
 | 文档 | 内容 |
 |---|---|
 | [CHANGELOG.md](CHANGELOG.md) | 更新记录：每个版本修复了什么、哪些反馈经核实不是问题 |
+| [docs/EDITOR.md](docs/EDITOR.md) | **工坊编辑器**（可选、独立分发，游戏客户端不含它）：运行方式、界面、API、会写哪些文件 |
+| [docs/WORKSHOP.md](docs/WORKSHOP.md) | **创意工坊与助战**（本项目新增）：工坊包格式与叠加规则、助战卡池与名额、作者接口、当前状态 |
+| [docs/prompts/operator-pack.md](docs/prompts/operator-pack.md) | 干员生成**模板 prompt**：连同技能文字描述与普通/精锐数值丢给任意 AI 即可 |
 | [docs/PLAYING.md](docs/PLAYING.md) | 玩法指南：流程、经济、招募与晋升、摆阵、联防、盟约、最终攻势、结算称号 |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | 部署指南：Windows 开服与开机自启、防火墙、组网 / 隧道、反向代理与 HTTPS、Docker、systemd、排错 |
 | [docs/WINDOWS.md](docs/WINDOWS.md) | Windows 便携包：怎么打一份「零安装」包（`scripts/make-windows-bundle.mjs`）、包里放了什么、授权注意事项 |
@@ -174,27 +266,7 @@ npm start          # 启动服务器：http://localhost:3000
 | [docs/DATA.md](docs/DATA.md) | 由官方数据表生成的游戏数据（英文） |
 | [docs/ASSETS.md](docs/ASSETS.md) | 素材来源、目录结构与清单（英文） |
 | [docs/BALANCE.md](docs/BALANCE.md) | 难度模型与测量（英文） |
-| [docs/WORKSHOP.md](docs/WORKSHOP.md) | **创意工坊与助战**（本项目新增）：工坊包格式与叠加规则、助战卡池与名额、作者接口、当前状态 |
-| [docs/EDITOR.md](docs/EDITOR.md) | **工坊编辑器**（可选、独立分发，游戏客户端不含它）：运行方式、界面、API、会写哪些文件 |
-| [docs/prompts/operator-pack.md](docs/prompts/operator-pack.md) | 干员生成**模板 prompt**：连同技能文字描述与普通/精锐数值丢给任意 AI 即可 |
 | [docs/research/](docs/research/00-INDEX.md) | 官方规则、数据与界面的调研记录 |
-
-## 创意工坊与助战（本项目新增）
-
-> [!NOTE]
-> 以下是**本项目自行新增**的功能，不是官方内容，也不在 `tools/build-data.mjs` 的生成范围内。它不修改 `data/*.json`。
-
-- **助战**：每名玩家每阶可选 n 个助战干员，**卡池由服务端控制**（`data/support.json`），不在卡池中的即禁用。
-- **创意工坊**：把工坊包放进 `workshop/<包>/`，即可新增/覆盖干员等内容。官方数据保持字节不变。
-
-```bash
-node tools/workshop-scaffold.mjs docs/examples/operator-spec.json --pack my-pack   # spec → 合法工坊包
-node tools/workshop-validate.mjs workshop                                          # 分层校验（含真实引擎）
-npm run editor                                                                     # 打开工坊编辑器（独立工具）
-```
-
-**客户端不需要、也不会包含编辑器**：`editor/` 不在 `public/` 下，游戏服务器无法把它发给网页端或后续打包的 APK。
-详见 [docs/WORKSHOP.md](docs/WORKSHOP.md) 与 [docs/EDITOR.md](docs/EDITOR.md)。
 
 ## 开发与测试
 
@@ -230,14 +302,51 @@ RENDER_E2E=1 node --test 'test/render/*.browser.test.js'   # 渲染测试，部�
 
 | 路径 | 内容 |
 |---|---|
+| `editor/` | **工坊编辑器**（独立工具，不在 `public/` 下，客户端拿不到） |
+| `shared/` | 前后端共用的常量、网络协议与创作规则 `*Authoring.js` |
+| `workshop/` | 工坊包（内容叠加层）；编辑器与 `workshop-scaffold.mjs` 写这里 |
+| `tools/` | `setup.mjs` / `doctor.mjs`、素材下载 `fetch-assets.mjs`、数据构建、`workshop-editor.mjs` / `workshop-validate.mjs` / `workshop-scaffold.mjs`、本地提取 `local-extract/` |
 | `server/` | Node HTTP 静态服务 + WebSocket（`/ws`）、大厅、对局引擎（`match/`）、战斗模拟（`sim/`，浏览器与服务器共用） |
-| `shared/` | 前后端共用的常量与网络协议 |
 | `public/` | 浏览器客户端（原生 ES 模块，PixiJS + pixi-spine、three.js 3D 棋盘、Preact + htm UI） |
-| `data/` | 由官方数据表生成的游戏数据与素材清单 `assets.json` |
-| `tools/` | `setup.mjs` / `doctor.mjs`、素材下载 `fetch-assets.mjs`、数据构建、本地提取 `local-extract/` |
+| `data/` | 由官方数据表生成的游戏数据与素材清单 `assets.json`（以及助战卡池 `support.json`） |
 | `scripts/` | 启动脚本（Windows / macOS / Linux）、Windows 开机自启 |
 | `docs/` | 文档与调研 |
 | `test/` | `node:test` 测试 |
+
+## 著作权声明
+
+> [!NOTE]
+> 本声明针对**用本编辑器创作的 Option（关卡、配置及其他创作内容）**，不改变本项目**代码**的 GPL-3.0-or-later 授权，也不附加任何限制 —— 代码部分只适用 GPL-3.0-or-later，见[许可证](#许可证)。
+>
+> 编辑器在每份保存的 Option 里自动写入 `_meta` 字段，把下列声明随文件一起带走（作者、创建时间、来源、著作权声明、反打包转售声明）；详见 [docs/EDITOR.md](docs/EDITOR.md)。
+
+本编辑器（Stronghold-Protocol-Forge）生成的关卡文件、配置及其他创作内容（以下统称 “Option”），
+其著作权归 **创建该 Option 的作者本人** 所有。
+
+- 创作者可使用自己创作的 Option 进行分享、分发，并可通过其获得合理回报。
+- 任何人不得未经授权，从公开渠道收集他人创作的 Option 并打包、转售、批量分发。
+- 转载、整合或二次分发他人 Option，必须保留原作者署名与来源信息。
+- 违反上述约定者，视为侵犯原作者著作权，原作者有权依法追究。
+
+本声明不限制 Option 的自由分享与社区共创，仅禁止剽窃他人劳动成果并直接牟利的行为。
+
+### Copyright Notice
+
+All levels, configurations, and other creative content (collectively, "Options")
+generated by this editor (Stronghold-Protocol-Forge) are the property of
+**the respective author who created them**.
+
+- Creators may share, distribute, and reasonably profit from their own Options.
+- No one may, without authorization, collect Options created by others from
+  public sources and package, resell, or bulk-distribute them.
+- Any redistribution of another author's Option must retain the original
+  author's attribution and source information.
+- Violation of the above constitutes copyright infringement, and the original
+  author reserves the right to pursue legal remedies.
+
+This notice does not restrict the free sharing and community co-creation of
+Options. It only prohibits the unauthorized packaging and resale of others'
+work for direct profit.
 
 ## 上游来源与修改说明
 
@@ -298,48 +407,13 @@ RENDER_E2E=1 node --test 'test/render/*.browser.test.js'   # 渲染测试，部�
 
 ### 源码获取
 
-**本仓库即为完整对应源码**（Corresponding Source）：编辑器、工坊叠加层、校验工具与其测试都在这里，构建与运行方式见 [快速开始](#快速开始)。游戏素材与 `data/*.json` 的获取方式见 [NOTICE.md](NOTICE.md) 与 [docs/DEPLOY.md](docs/DEPLOY.md)。
+**本仓库即为完整对应源码**（Corresponding Source）：编辑器、工坊叠加层、校验工具与其测试都在这里，构建与运行方式见[快速开始（编辑器）](#快速开始编辑器)。游戏素材与 `data/*.json` 的获取方式见 [NOTICE.md](NOTICE.md) 与 [docs/DEPLOY.md](docs/DEPLOY.md)。
 
 ## 许可证
 
 - **代码**：本项目自己编写的代码以 **GPL-3.0-or-later** 发布，全文见 [LICENSE](LICENSE)；另附一条 GPL 第 7 条的附加许可，允许与 pixi-spine 中的 Spine Runtimes 组合分发（见 [NOTICE.md](NOTICE.md)）。
 - **游戏素材不在许可范围内**：《明日方舟》相关的美术、音乐、音效、文本与数据等版权归原权利人所有，不适用 GPL，使用限制见上方的[声明](#声明)和 [NOTICE.md](NOTICE.md)。
 - **第三方组件**各自遵循其许可证：通过 npm 安装的库（整合包的 `node_modules` 中附带各自的许可证文件）、`tools/local-extract/aklz4.py` 的算法（BSD-3-Clause），以及字体等，清单与许可证全文见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
-
-## 著作权声明
-
-> [!NOTE]
-> 本声明针对**用本编辑器创作的 Option（关卡、配置及其他创作内容）**，不改变本项目**代码**的 GPL-3.0-or-later 授权，也不附加任何限制 —— 代码部分只适用 GPL-3.0-or-later，见上一节。
->
-> 编辑器在每份保存的 Option 里自动写入 `_meta` 字段，把下列声明随文件一起带走（作者、创建时间、来源、著作权声明、反打包转售声明）；详见 [docs/EDITOR.md](docs/EDITOR.md)。
-
-本编辑器（Stronghold-Protocol-Forge）生成的关卡文件、配置及其他创作内容（以下统称 “Option”），
-其著作权归 **创建该 Option 的作者本人** 所有。
-
-- 创作者可使用自己创作的 Option 进行分享、分发，并可通过其获得合理回报。
-- 任何人不得未经授权，从公开渠道收集他人创作的 Option 并打包、转售、批量分发。
-- 转载、整合或二次分发他人 Option，必须保留原作者署名与来源信息。
-- 违反上述约定者，视为侵犯原作者著作权，原作者有权依法追究。
-
-本声明不限制 Option 的自由分享与社区共创，仅禁止剽窃他人劳动成果并直接牟利的行为。
-
-### Copyright Notice
-
-All levels, configurations, and other creative content (collectively, "Options")
-generated by this editor (Stronghold-Protocol-Forge) are the property of
-**the respective author who created them**.
-
-- Creators may share, distribute, and reasonably profit from their own Options.
-- No one may, without authorization, collect Options created by others from
-  public sources and package, resell, or bulk-distribute them.
-- Any redistribution of another author's Option must retain the original
-  author's attribution and source information.
-- Violation of the above constitutes copyright infringement, and the original
-  author reserves the right to pursue legal remedies.
-
-This notice does not restrict the free sharing and community co-creation of
-Options. It only prohibits the unauthorized packaging and resale of others'
-work for direct profit.
 
 ## 致谢与数据来源
 
@@ -364,9 +438,9 @@ work for direct profit.
 
 ## English
 
-An **unofficial, non-commercial fan remake** of Arknights' seasonal auto-chess tower-defense mode *Stronghold Protocol: Alliance*, played in the browser: solo, or 1–4 player co-op (AI teammates can fill seats). Combat is simulated in each player's browser, so a low-power PC can host.
+This repository is **Stronghold-Protocol-Forge**: a standalone, out-of-game **graphical authoring tool (the Forge editor)** for the content of the fan remake of Arknights' seasonal auto-chess tower-defense mode *Stronghold Protocol: Alliance* — plus that bundled upstream game itself.
 
-- **Run:** download the all-in-one bundle from [Releases](../../releases/latest), install Node.js 22 or 24, then double-click `scripts\start-windows.bat` (Windows) or run `./scripts/start.sh` (macOS / Linux) and open <http://localhost:3000>. From source: `npm install && npm run setup && npm start` (setup downloads ~270 MB of art from public mirrors, the emotes and the how-to-play pages included; the official 3D board, some official HUD icons and two enemy models are extracted from a local Arknights client — without one the game uses the 2D board and look-alike stand-ins, and a server can copy `public/assets/local/` and `data/local-assets.json` from the release bundle of the same version).
-- **Play with friends:** create a co-op room and share the 4-letter key or the `?room=KEY` link. On a LAN, use the address printed at start; otherwise use a virtual-LAN tool, a tunnel or a VPS — see [docs/DEPLOY.md](docs/DEPLOY.md).
+- **The Forge editor (what this repo is for):** run `npm run editor` and open <http://127.0.0.1:3311> — no build step, no game-server change, bound to loopback by default. Five pages author operators (`/`), maps (`/stage.html`, 19×21 grid with 2D placement and a 3D preview), enemies (`/enemy.html`), spawn waves (`/wave.html`) and items (`/item.html`). Mechanical fields are always derived from the real engine rather than typed by hand, and `tools/workshop-validate.mjs` re-checks every pack in layers (format → semantics → the real engine → kits / maps / enemies / waves / items) through the same `shared/*Authoring.js` rules the editor and CLI use, so the rules cannot drift. Saved Options carry a `_meta` attribution block. See [docs/EDITOR.md](docs/EDITOR.md) and [docs/WORKSHOP.md](docs/WORKSHOP.md).
+- **The bundled game:** an **unofficial, non-commercial fan remake** played in the browser: solo, or 1–4 player co-op (AI teammates can fill seats). Combat is simulated in each player's browser, so a low-power PC can host. Download the all-in-one bundle from [Releases](../../releases/latest), install Node.js 22 or 24, then double-click `scripts\start-windows.bat` (Windows) or run `./scripts/start.sh` (macOS / Linux) and open <http://localhost:3000>. From source: `npm install && npm run setup && npm start` (setup downloads ~270 MB of art from public mirrors, the emotes and the how-to-play pages included; the official 3D board, some official HUD icons and two enemy models are extracted from a local Arknights client — without one the game uses the 2D board and look-alike stand-ins, and a server can copy `public/assets/local/` and `data/local-assets.json` from the release bundle of the same version). Create a co-op room and share the 4-letter key or the `?room=KEY` link; on a LAN use the address printed at start, otherwise a virtual-LAN tool, a tunnel or a VPS — see [docs/DEPLOY.md](docs/DEPLOY.md).
 - **Disclaimer:** not affiliated with or endorsed by Hypergryph or Yostar. All Arknights names, art, audio, text and data are © their respective owners and are **not** covered by this project's GPL licence. For study and personal non-commercial use only — no selling, paid distribution, paid servers or monetisation of any kind. Content will be removed on request of the rights holders. Provided "as is", without warranty.
 - **License:** code GPL-3.0-or-later ([LICENSE](LICENSE)); game assets excluded.

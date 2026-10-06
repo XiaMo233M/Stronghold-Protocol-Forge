@@ -45,7 +45,11 @@ test('the English title is the official one: Stronghold Protocol: Alliance (as i
   // EN client data, activity_table basicInfo.act2autochess.name = "Stronghold Protocol: Alliance" (CN 卫戍协议:盟约);
   // the project used to call it "Covenant". The Chinese title stays 卫戍协议：盟约; the repository keeps its name.
   const readme = read('README.md');
-  assert.match(readme.split('\n')[0], /^# 卫戍协议：盟约 · Stronghold Protocol: Alliance$/, 'README title');
+  // The README's H1 leads with THIS project — the Forge editor — because that is what the repository is. What this test
+  // is really about is that the upstream game's official English title is spelled correctly (the project used to call
+  // it "Covenant"), so that is asserted directly instead of via the H1.
+  assert.match(readme.split('\n')[0], /^# Stronghold-Protocol-Forge · 卫戍协议工坊编辑器$/, 'README title leads with the Forge editor');
+  assert.match(readme, /卫戍协议：盟约 · Stronghold Protocol: Alliance/, 'the bundled upstream game is named in full');
   assert.match(readme, /mode \*Stronghold Protocol: Alliance\*/, 'README English summary');
   assert.match(read('server/index.js'), /卫戍协议：盟约 · Stronghold Protocol: Alliance v/, 'boot banner');
   assert.equal(pkg.name, 'stronghold-protocol-alliance');
