@@ -351,6 +351,37 @@ describe('voice lines (角色语音台词): opt-in, quiet by default, never thro
       globalThis.fetch = origFetch;
     }
   });
+  test('a skill start says the 作战中 line — and nothing happens without the voice channel', async () => {
+    const fw = fakeWindow();
+    const origFetch = globalThis.fetch;
+    const urls = [];
+    globalThis.fetch = async (u) => { urls.push(u); return { ok: true, arrayBuffer: async () => new ArrayBuffer(8) }; };
+    try {
+      const line = '/assets/audio/voice_cn/char_x/cn_025.mp3';
+      const m = {
+        audio: {
+          sfx: { units: { char_x: { attack: '/a.mp3', skill: '/s.mp3' } }, battle: {} },
+          voice: { char_x: { battle: [line] } },
+        },
+      };
+      const a = new AudioManager({ win: fw.win, getManifest: () => m });
+      a.install();
+      fw.fire('pointerdown');
+      a.setFieldUnits([{ id: 7, defId: 'char_x', side: 'ally', kind: 'op' }]);
+      // with the 语音 volume at 0 (the default) a skill must NOT fetch a voice line
+      a.handleBattleEvents([['skill', 7, 1]]);
+      await new Promise((r) => setTimeout(r, 10));
+      assert.ok(!asked(urls, line), `no voice line at volume 0: ${urls.join(', ')}`);
+      assert.ok(asked(urls, '/s.mp3'), 'the skill SFX still plays');
+      // raise the channel: the same event now says it
+      a.setVolumes({ voice: 0.8 });
+      a.handleBattleEvents([['skill', 7, 1]]);
+      await new Promise((r) => setTimeout(r, 10));
+      assert.ok(asked(urls, line), `the skill said a 作战中 line: ${urls.join(', ')}`);
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
 });
 
 describe('impact sounds (user playtest #4 item 6)', () => {

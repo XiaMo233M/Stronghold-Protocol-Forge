@@ -734,7 +734,12 @@ export class AudioManager {
           this.battle('heal', { unitKey: `heal:${e[1]}`, volume: 0.35 });
         } else if (kind === 'skill' && e[2]) {
           const u = this.units.get(e[1]);
-          if (u) this.unit(u.def, 'skill', e[1], u.skillIndex ?? undefined);
+          if (u) {
+            this.unit(u.def, 'skill', e[1], u.skillIndex ?? undefined);
+            // 角色语音台词 (opt-in, OFF by default): a skill is this remake's 作战中 moment. Silent unless the install
+            // fetched the lines and the player raised 设置 → 干员语音; enemies have no entry, so nothing happens there.
+            this.voice(u.def, 'battle');
+          }
         } else if (kind === 'die') {
           const u = this.units.get(e[1]);
           if (!u) continue;

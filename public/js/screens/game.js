@@ -976,6 +976,10 @@ function MatchScreen() {
   }, [editable, placeCtx, facing]);
   // the selected piece: gone / not editable → deselect; on the board its range tiles show (rotated to its facing)
   const selEntry = sel ? placeCtx.pieces.get(sel.uid) || null : null;
+  // 角色语音台词 (opt-in, OFF by default): the tapped operator says its 选中干员 line. `audio.voice` returns false
+  // without the manifest entry or with the 语音 volume at 0, so for every install that did not run `--voices` this is
+  // a no-op. The chess id is the char id for operators (a token/Art has no entry and stays silent).
+  useEffect(() => { if (sel && selEntry) audio.voice(selEntry.piece.id, 'select'); }, [sel?.uid]);
   useEffect(() => { if (sel && (!selEntry || !editable || !showPrep)) setSel(null); }, [sel, selEntry, editable, showPrep]);
   const selRangeKey = selEntry && selEntry.area === 'board' ? `${selEntry.piece.uid}:${selEntry.row},${selEntry.col}:${pieceDir(selEntry.piece)}` : '';
   useEffect(() => {
