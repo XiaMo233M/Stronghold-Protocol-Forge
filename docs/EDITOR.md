@@ -229,4 +229,5 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 | `tools/workshop-validate.mjs` | 人 / CI / AI | 分层校验：格式 → 语义 → 真实引擎 → 每种内容一层（kits / 地图 / 怪物 / 出怪 / 装备） |
 | `docs/prompts/operator-pack.md` | 任意 AI | 模板 prompt，让 AI 产出 spec |
 
-四者共用 `shared/chessAuthoring.js`，所以**规则不会漂移**。
+编辑器与 CLI 共用同一批 `shared/*Authoring.js`（干员 / 地图 / 怪物 / 出怪 / 装备 / kit），所以**规则不会漂移** ——
+编辑器里能保存的内容，`tools/workshop-validate.mjs` 一定也接受，反之亦然。

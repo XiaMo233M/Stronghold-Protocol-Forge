@@ -253,6 +253,21 @@ export default function kit(bb, chess, def) {
 - 服务端启动时加载（`server/workshop.js loadWorkshopKits()`）。导入失败、没有默认导出、干员 id 不存在的 kit 会被
   **报告并跳过**，绝不影响启动。
 - `tools/workshop-validate.mjs` 把 `kits/` 作为**第四层**一并校验并列出已加载的 kit。
+
+**静态检查（`shared/kitAuthoring.js`）**：导入只能证明「文件能解析、默认导出了函数」，对**在游戏里静默失效**的那几类
+问题一无所知。所以除了导入，还会静态扫一遍源码，全部给机器可读的 `{ field, code, message, hint }`：
+
+| code | 严重度 | 抓的是什么 |
+|---|---|---|
+| `HOOK_UNKNOWN_EVENT` | warn | `battle.on('beforeAttck', …)` —— `on()` 接受**任意**字符串（`Battle.js:583`），而 `emit()` 只触发真正被 emit 的名字（`:623`）。写错的钩子**永远不会触发，且没有任何地方会报错**。引擎真实的 emit 词表在 `HOOK_EVENTS`，由漂移守卫钉在源码上，所以能给出「你是想写 beforeAttack 吗」。命名空间事件（`mypack:ready`）只要**同一文件自己 emit 过**就合法 —— 官方内容就是这么扩展总线的（`nearl2:knockdown`） |
+| `HOOK_DYNAMIC_NAME` | warn | 用变量当事件名（`battle.on(name, …)`）—— 查不了，所以要说一声 |
+| `KIT_NONDETERMINISTIC` | warn | `Math.random` / `Date.now` / `fetch` / `document` / `setTimeout` … —— 服务端用同一份文件**复算**对局，不一致就**拒绝玩家的结果**，而报错信息看上去和「你用了 Math.random」毫无关系 |
+| `KIT_IMPORT` | error | `import` / `require` —— 违反 §4.1 第二条（服务端按路径、浏览器按 URL，相对路径不可能同时对） |
+| `NO_DEFAULT_EXPORT` | error | 没有默认导出（加载器读的是 `mod.default`） |
+| `KIT_NO_TARGET` | error | 包内没有这个干员 id，也没在 `pack.json overrides` 里声明 `chess:<id>` |
+
+注释与字符串会先被剥掉再检查 —— 示例 kit 的头注释本来就在**讲解**这些规则，文字不该被当成代码。
+
 - 可运行示例：**[docs/examples/kit-demo/](examples/kit-demo/README.md)**（含「常驻 +25% 攻击力」天赋，并演示上述三条规则）。
 
 ### 4.4 当前状态
@@ -260,7 +275,8 @@ export default function kit(bb, chess, def) {
 | 部分 | 状态 |
 |---|---|
 | 服务端加载 + 校验 + 注入 `opts.kits` | ✅ 已用**真实战斗**验证（kit 的 `install` 在对局中确实执行） |
+| kit **静态校验**（钩子词表 + 三条硬规则），机器可读 | ✅ 已完成（`shared/kitAuthoring.js`、`test/kitAuthoring.test.js`，词表有漂移守卫） |
 | 浏览器分发（spec 携带 URL + runner 重建同一张表） | ✅ 已实现并测试（模块可按 URL 取得、装配路径有断言） |
 | 浏览器端**真机端到端**（Chrome 跑一场带 kit 的对局） | ⛔ 未做（需 `SP_E2E=1` + Chrome） |
-| 编辑器里的 kit 编辑页签 | ⛔ 未做（kit 目前手写文件） |
+| 编辑器里的 kit 编辑页签 | ⛔ 未做（kit 是代码，手写文件 + 上面的静态校验） |
 | 包之间 kit id 冲突、kit 的沙箱与审查 | ⛔ 未做（冲突会被报告并跳过；沙箱按分渠道策略不做） |

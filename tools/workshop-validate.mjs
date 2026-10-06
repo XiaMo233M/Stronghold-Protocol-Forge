@@ -23,6 +23,7 @@ import { validateStageRecord } from '../server/stageAuthoring.js';
 import { validateEnemy } from '../shared/enemyAuthoring.js';
 import { validateWave } from '../shared/waveAuthoring.js';
 import { validateItem } from '../shared/itemAuthoring.js';
+import { validateKit } from '../shared/kitAuthoring.js';
 import { loadData } from '../server/data.js';
 import { GameData } from '../server/match/gamedata.js';
 import { toDataSource, isShopItem } from '../server/sim/simdata.js';
@@ -136,17 +137,42 @@ async function main() {
 
   // ---- layer 4: the behaviour layer (a pack's kits/<chessId>.js). Loading it here means a broken kit is caught BEFORE
   // the server boots, and an AI gets the same field/code/hint shape it already uses for the data layer.
+  //
+  // The IMPORT is only half the check. Importing proves the file parses and default-exports a function; it says nothing
+  // about the failures that are SILENT in play — a hook name nothing emits (so the handler never runs), a Math.random()
+  // or Date.now() that makes the server's recomputation reject the player's result, or a relative import that resolves
+  // for the server and not for the browser. Those are static, so they are scanned for here (shared/kitAuthoring.js).
   if (loaded.packs.length) {
     const kitInfo = await loadWorkshopKits(loaded, {
       log: quiet,
       knownIds: new Set(Object.keys(loadData(DATA_DIR, { log: quiet, workshopDir: root }).chess || {})),
     });
+    const staticIssues = [];
+    // a kit the static layer already explained is not reported a second time by the loader, whose message is blunter
+    const explained = new Set();
+    for (const pack of loaded.packs) {
+      const kitDir = path.join(pack.dir, 'kits');
+      if (!fs.existsSync(kitDir)) continue;
+      const ownChessIds = Object.keys((pack.files && pack.files.chess) || {});
+      for (const name of fs.readdirSync(kitDir).sort()) {
+        if (!name.endsWith('.js')) continue;
+        const id = name.slice(0, -'.js'.length);
+        const issues = validateKit(fs.readFileSync(path.join(kitDir, name), 'utf8'), { id, ownChessIds, overrides: pack.overrides })
+          .map((i) => ({ ...i, field: `kits/${pack.id}/${name}${i.field && i.field !== 'source' ? ` · ${i.field}` : ''}` }));
+        if (issues.some((i) => i.severity === 'error')) explained.add(`${pack.id}/${id}`);
+        staticIssues.push(...issues);
+      }
+    }
     report.kits = {
       loaded: kitInfo.modules.map((m) => m.id),
       modules: kitInfo.modules,
-      errors: kitInfo.errors.map((e) => ({ field: `kits/${e.id}.js`, code: 'KIT', severity: 'error', message: `${e.pack}: ${e.reason}` })),
+      issues: staticIssues,
+      errors: kitInfo.errors
+        .filter((e) => !explained.has(`${e.pack}/${e.id}`))
+        .map((e) => ({ field: `kits/${e.id}.js`, code: 'KIT', severity: 'error', message: `${e.pack}: ${e.reason}` })),
     };
     for (const e of report.kits.errors) report.errors++;
+    for (const i of staticIssues) (i.severity === 'error' ? report.errors++ : report.warnings++);
   }
 
   // ---- layer 5: stages (maps). groundPaths / groundPathsWithDevices / deployTiles are DERIVED from the grid, so they
@@ -263,6 +289,7 @@ async function main() {
       console.log(`\nbehaviour layer (kits/):`);
       console.log(report.kits.loaded.length ? `  loaded: ${report.kits.loaded.join(', ')}` : '  (no kits)');
       if (report.kits.errors.length) console.log(formatIssues(report.kits.errors).split('\n').map((l) => `  ${l}`).join('\n'));
+      if (report.kits.issues && report.kits.issues.length) console.log(formatIssues(report.kits.issues).split('\n').map((l) => `  ${l}`).join('\n'));
     }
     if (report.stages) {
       console.log('\nstages (maps):');
