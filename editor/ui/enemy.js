@@ -7,8 +7,27 @@
 // 界面文案走 i18n.js：t('中文原文') 查 editor/ui/i18n.en.enemy.js 的英文词典，查不到就原样退回中文。
 
 import { t, mountI18n } from './i18n.js';
+// 新建更容易的三样：模板挑选与 spine 校验（纯逻辑，单测在 test/enemyWizard.test.js）、数值尺子（与干员页共用）。
+import { matchEnemies, sortTemplates, spineIsKnown } from './enemyWizard.js';
+import { makeStatBar } from './statScale.js';
+import { renderKeepingFocus } from './focusKeep.js';
 
 const $ = (s) => document.querySelector(s);
+
+/** 最简元素构造助手：数值尺子是干员页与怪物页共用的，它按 h(tag, attrs, …kids) 的形式要元素。 */
+const h = (tag, attrs = {}, ...kids) => {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === undefined || v === null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid !== null && kid !== undefined) el.append(kid);
+  return el;
+};
+
+/** 数值尺子：按档位（NORMAL/ELITE/BOSS）给官方区间。 */
+const statBar = makeStatBar(h, t);
 
 async function api(path, opts) {
   const res = await fetch(path, opts && { ...opts, headers: { 'Content-Type': 'application/json' }, body: opts.body ? JSON.stringify(opts.body) : undefined });
@@ -17,7 +36,11 @@ async function api(path, opts) {
   return data;
 }
 
-const state = { data: null, packId: null, key: null, spec: null, preview: null, message: null, busy: false };
+const state = {
+  data: null, packId: null, key: null, spec: null, preview: null, message: null, busy: false,
+  // 「以模板新建」的选择器：是否打开、搜索串
+  picking: false, pickQuery: '',
+};
 
 /** The stat fields, with the label and the unit the form shows. Order matters: it is the order on screen.
  *  A function rather than a constant: the labels are translated per render, so they follow the language switch. */
@@ -86,6 +109,7 @@ function checkInput(get, set, label) {
 function renderForm() {
   const box = $('#form');
   box.replaceChildren();
+  if (state.picking) { renderPicker(box); return; }
   const spec = state.spec;
   if (!spec) {
     box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('左边选一只怪物，或点「新建怪物」。') }));
@@ -121,8 +145,19 @@ function renderForm() {
   box.append(h(t('数值 stats')));
   const statBox = document.createElement('div'); statBox.className = 'panel';
   const grid = document.createElement('div'); grid.className = 'grid';
-  for (const [k, label] of STAT_FIELDS()) grid.append(field(label, numInput(() => spec.stats[k], (v) => { spec.stats[k] = v; })));
+  // 每个数值下面一根尺子：官方同档位（普通/精英/领袖）的区间。以前这些数字全是拍出来的。
+  const refs = state.data?.statRanges?.[spec.rank] ?? {};
+  for (const [k, label] of STAT_FIELDS()) {
+    const cell = document.createElement('div');
+    cell.append(numInput(() => spec.stats[k], (v) => { spec.stats[k] = v; }));
+    const bar = statBar(spec.stats[k], refs[k]);
+    if (bar) cell.append(bar);
+    grid.append(field(label, cell));
+  }
   statBox.append(grid);
+  if (refs.maxHp) statBox.append(Object.assign(document.createElement('p'), {
+    className: 'hint', textContent: t('细线上的刻度是官方同档位怪物的区间（共 {0} 只），只作参照，不是上限。', refs.maxHp.count),
+  }));
   statBox.append(desc());
   box.append(statBox);
 
@@ -183,7 +218,7 @@ function renderForm() {
   artBox.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('这些字段不在游戏数据表里（来自客户端清单），所以必须手填。spine 复用现有怪物的 prefab 键才有真美术。') }));
   const artGrid = document.createElement('div'); artGrid.className = 'grid wide';
   artGrid.append(
-    field(t('spine（复用现有 prefab，如 enemy_1007_slime）'), textInput(() => spec.spine, (v) => { spec.spine = v; })),
+    field(t('spine（复用现有 prefab，如 enemy_1007_slime）'), spineField()),
     field(t('模型缩放 modelScale'), numInput(() => spec.modelScale, (v) => { spec.modelScale = v; })),
     field(t('beFactor（战力系数，默认 1）'), numInput(() => spec.beFactor, (v) => { spec.beFactor = v; })),
   );
@@ -226,11 +261,133 @@ async function preview() {
 
 // ---- panels -----------------------------------------------------------------------------------------------------
 
+/**
+ * spine 输入框：带官方 prefab 候选，并**当场**说清填错会怎样。
+ *
+ * 这是全表单唯一一个「填错不报错」的字段：`assets.spineEntry()` 查不到就画个占位菱形，游戏照跑。
+ * 官方 249 只怪共用 200 多个 prefab 键，作者不可能背下来，所以候选与校验都得给。
+ */
+function spineField() {
+  const wrap = document.createElement('div');
+  const i = document.createElement('input');
+  i.value = state.spec?.spine ?? '';
+  i.setAttribute('list', 'spineOptions');
+  const hint = document.createElement('div');
+  hint.className = 'hint';
+  const paint = () => {
+    const verdict = spineIsKnown(state.spec?.spine, state.data?.spineChoices);
+    hint.className = verdict === 'unknown' ? 'hint warn' : 'hint';
+    hint.textContent = verdict === 'unknown' ? t('这个 prefab 键不在官方清单里：游戏里会显示成占位模型（不会报错）。')
+      : verdict === 'empty' ? t('留空则用占位模型；想要真美术就填一个官方 prefab 键。')
+        : verdict === 'no-data' ? '' : t('是官方 prefab 键，游戏里用这套美术。');
+  };
+  paint();
+  i.addEventListener('input', () => { state.spec.spine = i.value; paint(); schedule(); });
+  wrap.append(i, hint);
+  const dl = document.createElement('datalist');
+  dl.id = 'spineOptions';
+  for (const c of state.data?.spineChoices ?? []) {
+    const o = document.createElement('option');
+    o.value = c.id; o.textContent = c.name;
+    dl.append(o);
+  }
+  wrap.append(dl);
+  return wrap;
+}
+
+// ---- 「以模板新建」的选择器 ---------------------------------------------------------------------------------------
+
+/** 模板来源：官方 249 只怪（全新记录）或本包已有怪物（复制一份，改 id 即可）。 */
+function renderPicker(box) {
+  const title = document.createElement('h2'); title.textContent = t('以模板新建');
+  box.append(title);
+  box.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('选一只怪物当底子：数值、档位、攻击方式、能力文字、技能、免疫与 spine 都会带过来，之后填一个新 id 与名字就能保存。'),
+  }));
+
+  const search = document.createElement('input');
+  search.value = state.pickQuery;
+  search.placeholder = t('搜索怪物（名称 / key）');
+  search.addEventListener('input', () => {
+    state.pickQuery = search.value;
+    renderKeepingFocus($('#form'), renderForm);
+  });
+  const back = document.createElement('button');
+  back.className = 'ghost'; back.textContent = t('返回');
+  back.addEventListener('click', () => { state.picking = false; state.pickQuery = ''; renderList(); renderForm(); renderSide(); });
+  const row = document.createElement('div'); row.className = 'row'; row.style.margin = '10px 0';
+  row.append(search, back);
+  box.append(row);
+
+  // 本包已有怪物：同一份 spec 复制一份最省事
+  const own = state.data?.enemies ?? [];
+  if (own.length) {
+    const t2 = document.createElement('h2'); t2.textContent = t('复制本包的怪物（{0} 只）', own.length);
+    box.append(t2);
+    for (const e of own) {
+      const item = document.createElement('div'); item.className = 'item';
+      item.innerHTML = `<div class="n">${e.name}</div><div class="m">${e.pack} · ${e.key}</div>`;
+      item.addEventListener('click', () => openEnemy(e).then(() => duplicateCurrent()));
+      box.append(item);
+    }
+  }
+
+  // 官方怪物
+  const matched = sortTemplates(matchEnemies(state.data?.officialTemplates ?? [], state.pickQuery));
+  const head = document.createElement('h2');
+  head.textContent = t('官方怪物（匹配 {0} / 共 {1}）', matched.length, (state.data?.officialTemplates ?? []).length);
+  box.append(head);
+  if (!matched.length) box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('（没有匹配的怪物）') }));
+  const LIMIT = 60;
+  for (const e of matched.slice(0, LIMIT)) {
+    const item = document.createElement('div'); item.className = 'item'; item.title = e.key;
+    item.innerHTML = `<div class="n">${e.name}</div>`
+      + `<div class="m">${e.rank ?? '?'} · ${e.applyWay ?? '?'} · ${e.motion ?? '?'} · ${e.key}</div>`;
+    item.addEventListener('click', () => loadEnemyTemplate(e.key));
+    box.append(item);
+  }
+  if (matched.length > LIMIT) box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('只显示了前 {0} 只，用上面的搜索框缩小范围。', LIMIT) }));
+}
+
+/** 用官方怪物当模板：服务端把记录转成 spec（shared/enemyAuthoring.js 的 specFromEnemyRecord）。 */
+async function loadEnemyTemplate(key) {
+  try {
+    const r = await api(`/api/enemies/template?key=${encodeURIComponent(key)}`);
+    state.spec = r.spec;
+    state.key = null;
+    state.picking = false;
+    state.preview = null;
+    state.message = { kind: 'ok', text: t('已按「{0}」生成模板：请填一个新的 id 与名字（改完会自动校验）。', r.spec.name || key) };
+    renderList(); renderForm(); renderSide(); schedule(true);
+  } catch (e) {
+    state.message = { kind: 'error', text: e.message };
+    renderSide();
+  }
+}
+
+/** 复制当前打开的怪物：只清空 id（那一个必须重填，否则会覆盖原来那只）。 */
+function duplicateCurrent() {
+  if (!state.spec) return;
+  const name = state.spec.name;
+  state.spec = { ...state.spec, id: '' };
+  state.key = null;
+  state.picking = false;
+  state.preview = null;
+  state.message = { kind: 'ok', text: t('已复制「{0}」：填一个新的 id 再保存（改完会自动校验）。', name) };
+  renderList(); renderForm(); renderSide(); schedule(true);
+}
+
 function renderList() {
   const box = $('#list');
   box.replaceChildren();
   const mk = (text, cls, onClick) => { const d = document.createElement('div'); d.className = cls; d.textContent = text; d.addEventListener('click', onClick); return d; };
-  box.append(mk(t('＋ 新建怪物'), 'item', () => { state.key = null; state.spec = blankSpec(); state.preview = null; renderList(); renderForm(); renderSide(); schedule(true); }));
+  box.append(mk(t('＋ 新建怪物'), 'item', () => { state.key = null; state.spec = blankSpec(); state.preview = null; state.picking = false; renderList(); renderForm(); renderSide(); schedule(true); }));
+  // 「以模板新建」：官方 249 只怪随便挑一只当底子，spine 与数值都不用自己摸
+  box.append(mk(t('⧉ 以模板新建'), `item${state.picking ? ' on' : ''}`, () => {
+    state.key = null; state.spec = null; state.preview = null; state.picking = true; state.pickQuery = '';
+    renderList(); renderForm(); renderSide();
+  }));
   for (const e of state.data?.enemies ?? []) {
     const errs = (e.issues ?? []).filter((i) => i.severity === 'error').length;
     const el = document.createElement('div');
@@ -246,6 +403,7 @@ function renderList() {
 async function openEnemy(e) {
   state.packId = e.pack;
   state.key = e.key;
+  state.picking = false;
   state.message = null;
   try {
     const r = await api(`/api/enemies/${encodeURIComponent(e.pack)}/${encodeURIComponent(e.key)}`);
@@ -371,7 +529,7 @@ async function load() {
 }
 
 $('#btnReload').addEventListener('click', () => load().catch((e) => { state.message = { kind: 'error', text: e.message }; renderSide(); }));
-$('#btnNew').addEventListener('click', () => { state.key = null; state.spec = blankSpec(); state.preview = null; renderList(); renderForm(); renderSide(); schedule(true); });
+$('#btnNew').addEventListener('click', () => { state.key = null; state.spec = blankSpec(); state.preview = null; state.picking = false; renderList(); renderForm(); renderSide(); schedule(true); });
 
 /** Redraw every part that carries text, so a language switch updates the whole page. */
 function renderAll() {

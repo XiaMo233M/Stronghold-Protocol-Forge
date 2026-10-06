@@ -1,12 +1,8 @@
-// editor/ui/operatorWizard.js — 首页「新建干员」的纯逻辑：模板挑选、id 冲突、数值参照、范围格。
+// editor/ui/operatorWizard.js — 首页「新建干员」的纯逻辑：模板挑选、id 冲突、分支候选、范围格。
 //
 // 刻意不碰 DOM：这些判断都要能单独测（新建是最容易出错的一步——错了就是保存出一份不该存在的记录）。
 // 界面部分留在 app.js 里，只负责把这里的结果画出来。
-//
-// 数值刻度换算直接复用服务端那份 shared/statReference.js：编辑器服务端把 /shared/ 也挂给了界面，
-// 所以浏览器里写 `../../shared/…` 与 node 下解析到的是同一个文件，不必在浏览器里再抄一遍。
-
-import { statPosition } from '../../shared/statReference.js';
+// 数值尺子（干员与怪物共用）在 editor/ui/statScale.js。
 
 /**
  * 按查询串挑官方干员。名称、英文代号、id 三者任一命中即算（大小写不敏感；中文按原样匹配）。
@@ -56,22 +52,6 @@ export function renameNotice(currentSlug, typedSlug) {
   const to = String(typedSlug ?? '').trim();
   if (!from || !to || from === to) return null;
   return { from, to };
-}
-
-/**
- * 数值参照的一行：当前值落在官方同类区间的哪里。
- * @param {number} value
- * @param {{min:number,p50:number,max:number}} [ref]
- * @returns {{ratio:number, where:'below'|'in'|'above', ref:{min:number,p50:number,max:number}}|null}
- */
-export function statRefView(value, ref) {
-  const pos = statPosition(value, ref);
-  if (!pos) return null;
-  return {
-    ratio: pos.ratio,
-    where: pos.belowMin ? 'below' : (pos.aboveMax ? 'above' : 'in'),
-    ref: { min: ref.min, p50: ref.p50, max: ref.max },
-  };
 }
 
 /** 官方数据里出现过的分支 id（去重、排序），给输入框当候选。 */

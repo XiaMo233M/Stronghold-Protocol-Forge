@@ -9,9 +9,11 @@ import { t, mountI18n } from './i18n.js';
 // 范围与伤害分类的推导规则只有一份（shared/chessAuthoring.js），界面显示的就是引擎真正会用的那份。
 import { classify, DEFAULT_MELEE_RANGE, DEFAULT_RANGED_RANGE } from '../../shared/chessAuthoring.js';
 import {
-  matchOperators, idConflict, renameNotice, statRefView,
+  matchOperators, idConflict, renameNotice,
   subProfessionChoices, rangePresets, gridKey, gridMatrix,
 } from './operatorWizard.js';
+import { fmtNum, makeStatBar } from './statScale.js';
+import { renderKeepingFocus } from './focusKeep.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -41,8 +43,8 @@ async function api(path, opts) {
 /** 服务端的报错文案是中文，命中词典就翻（带插值的原文命中不了，原样显示）。 */
 const errText = (e) => t(e?.message ?? String(e));
 
-/** 数值显示：整数不带小数点，小数最多一位（尺子上不需要更多精度）。 */
-const fmtNum = (n) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 10) / 10));
+/** 数值尺子（干员与怪物共用同一份实现，见 statScale.js）。 */
+const statBar = makeStatBar(h, t);
 
 const state = {
   data: null, packId: null, slug: null, spec: null, preview: null, message: null, busy: false,
@@ -150,22 +152,6 @@ function select(list, get, set) {
   const el = h('select', { onchange: (e) => { set(e.target.value); schedulePreview(); } });
   for (const v of list) el.append(h('option', { value: v, selected: get() === v }, v));
   return el;
-}
-
-/**
- * 数值参照条：官方同职业的 min～max（以及中位），加一根当前值的落点。
- * 作者填 1400 生命、450 攻击时本来没有任何参照；这把尺子让他一眼看出自己是不是捏了个超模干员。
- */
-function statBar(value, ref) {
-  const view = statRefView(value, ref);
-  if (!view) return null;
-  const beyond = view.where !== 'in';
-  return h('div', { style: 'margin-top:3px' },
-    h('div', { style: 'position:relative;height:4px;background:#12141a;border:1px solid var(--line);border-radius:3px' },
-      h('div', { style: `position:absolute;left:${(view.ratio * 100).toFixed(1)}%;top:-3px;width:2px;height:8px;background:${beyond ? 'var(--warn)' : 'var(--acc)'}` })),
-    h('div', { class: `hint${beyond ? ' warn' : ''}`, style: 'font-size:11px' },
-      t('官方区间 {0}–{1}（中位 {2}）', fmtNum(view.ref.min), fmtNum(view.ref.max), fmtNum(view.ref.p50)),
-      view.where === 'above' ? ` · ${t('高于官方上限')}` : view.where === 'below' ? ` · ${t('低于官方下限')}` : ''));
 }
 
 /** 小格阵预览：亮格 = 能打到，深色那一格 = 干员自己站的位置。 */
@@ -484,25 +470,12 @@ function schedulePreview() { clearTimeout(previewTimer); previewTimer = setTimeo
 function previewSoon() { schedulePreview(); }
 
 /**
- * 重画表单但把焦点与光标留原处。
+ * 重画表单但把焦点与光标留原处（实现见 editor/ui/focusKeep.js：怪物页的重画也要用同一条）。
  * 校验是防抖自动跑的，每跑一次就重画一次表单；不还原焦点的话，用户打一半停下来看一眼、再打字，
- * 光标已经不在输入框里了（每次都要重新点）。按「第几个输入框」还原，够用且不必给每个控件起名字。
+ * 光标已经不在输入框里了。
  */
 function renderEditorKeepingFocus() {
-  const before = [...document.querySelectorAll('#editor input, #editor select, #editor textarea')];
-  const active = document.activeElement;
-  const idx = before.indexOf(active);
-  const start = active && typeof active.selectionStart === 'number' ? active.selectionStart : null;
-  const end = active && typeof active.selectionEnd === 'number' ? active.selectionEnd : null;
-  renderEditor();
-  if (idx < 0) return;
-  const after = [...document.querySelectorAll('#editor input, #editor select, #editor textarea')];
-  const next = after[idx];
-  if (!next || typeof next.focus !== 'function') return;
-  next.focus();
-  if (start !== null && typeof next.setSelectionRange === 'function') {
-    try { next.setSelectionRange(start, end); } catch { /* number 输入框不支持选区，忽略 */ }
-  }
+  renderKeepingFocus($('#editor'), renderEditor);
 }
 
 async function preview() {

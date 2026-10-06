@@ -79,4 +79,16 @@ export const EN_ENEMY = Object.freeze({
   'be 决定阵营换怪时替换多少只，所以它必须由数值算出来，不能手填。': 'be decides how many enemies a faction swap replaces, so it must be computed from the stats — never typed by hand.',
   'skills 不是合法 JSON，暂不校验': 'skills is not valid JSON — validation is skipped',
   '删除怪物 {0}？': 'Delete enemy {0}?',
+
+  // ---- 模板新建与数值参照（本页专属；「返回 / 以模板新建 / 已复制…」等与干员页共用的在 shared） ----
+  '选一只怪物当底子：数值、档位、攻击方式、能力文字、技能、免疫与 spine 都会带过来，之后填一个新 id 与名字就能保存。': 'Pick an enemy as the base: stats, rank, attack way, ability text, skills, immunities and spine all come along — then give it a new id and name and save.',
+  '搜索怪物（名称 / key）': 'Search enemies (name / key)',
+  '复制本包的怪物（{0} 只）': 'Copy an enemy from this pack ({0})',
+  '官方怪物（匹配 {0} / 共 {1}）': 'Official enemies ({0} of {1} match)',
+  '（没有匹配的怪物）': '(no enemy matches)',
+  '只显示了前 {0} 只，用上面的搜索框缩小范围。': 'Only the first {0} are shown — narrow it down with the search box above.',
+  '细线上的刻度是官方同档位怪物的区间（共 {0} 只），只作参照，不是上限。': 'The tick on the line is the official range for this rank ({0} enemies) — a reference, not a cap.',
+  '这个 prefab 键不在官方清单里：游戏里会显示成占位模型（不会报错）。': 'This prefab key is not in the official list: the game shows a placeholder model instead (and reports nothing).',
+  '留空则用占位模型；想要真美术就填一个官方 prefab 键。': 'Leave it empty for the placeholder model; type an official prefab key to get real art.',
+  '是官方 prefab 键，游戏里用这套美术。': 'A real official prefab key — the game uses this art.',
 });

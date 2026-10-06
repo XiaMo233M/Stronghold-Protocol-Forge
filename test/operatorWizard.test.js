@@ -8,7 +8,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  matchOperators, idConflict, renameNotice, statRefView,
+  matchOperators, idConflict, renameNotice,
   subProfessionChoices, rangePresets, gridKey, sameGrid, gridMatrix,
 } from '../editor/ui/operatorWizard.js';
 
@@ -50,25 +50,6 @@ describe('新建干员：模板挑选与 id 检查', () => {
     assert.equal(renameNotice(null, 'new'), null, '新建时没有「原记录」可提醒');
     assert.equal(renameNotice('old', ''), null, 'id 被清空时不该说「改了 id」');
     assert.deepEqual(renameNotice(' old ', ' new '), { from: 'old', to: 'new' });
-  });
-});
-
-describe('新建干员：数值参照', () => {
-  test('statRefView 给出刻度与「低于/在区间内/超出」', () => {
-    const ref = { min: 100, p50: 200, max: 300, count: 12 };
-    assert.equal(statRefView(200, ref).where, 'in');
-    assert.equal(statRefView(200, ref).ratio, 0.5);
-    assert.equal(statRefView(999, ref).where, 'above');
-    assert.equal(statRefView(999, ref).ratio, 1);
-    assert.equal(statRefView(1, ref).where, 'below');
-    assert.equal(statRefView(1, ref).ratio, 0);
-    assert.deepEqual(statRefView(200, ref).ref, { min: 100, p50: 200, max: 300 });
-  });
-
-  test('没有参照（或值不是数字）时返回 null，界面就不画尺子', () => {
-    assert.equal(statRefView(10, null), null);
-    assert.equal(statRefView(10, undefined), null);
-    assert.equal(statRefView(NaN, { min: 1, p50: 2, max: 3 }), null);
   });
 });
 

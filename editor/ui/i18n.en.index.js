@@ -82,20 +82,16 @@ export const EN_INDEX = Object.freeze({
   '删除 {0}？（同时删除它生成的普通与精锐记录）': 'Delete {0}? (its generated base and elite records go too)',
 
   // ---- 新建：模板选择器 ----
+  // 「返回」「以模板新建」「已按…生成模板」「已复制…」这几条与怪物页共用，已搬进 shared。
   '从空白表单开始': 'Start from an empty form',
-  '⧉ 以模板新建': '⧉ New from a template',
   '复制一个现成干员的数值、范围、技能与外观': 'Copy an existing operator’s stats, range, skills and looks',
-  '以模板新建': 'New from a template',
   '选一个干员当底子：数值、分支、攻击范围、技能、天赋与外观都会带过来，之后填一个新 id 与名字就能保存。': 'Pick an operator as the base: stats, branch, attack range, skills, talents and looks all come along — then give it a new id and name and save.',
   '搜索干员（名称 / 代号 / id）': 'Search operators (name / code name / id)',
-  '返回': 'Back',
   '复制本包的干员（{0} 个）': 'Copy an operator from this pack ({0})',
   '官方干员（匹配 {0} / 共 {1}）': 'Official operators ({0} of {1} match)',
   '（没有匹配的干员）': '(no operator matches)',
   '{0} 阶 · {1}{2}': 'tier {0} · {1}{2}',
   '只显示了前 {0} 个，用上面的搜索框缩小范围。': 'Only the first {0} are shown — narrow it down with the search box above.',
-  '已按「{0}」生成模板：请填一个新的 id 与名字（改完会自动校验）。': 'Template built from “{0}”: give it a new id and name (validation runs as you type).',
-  '已复制「{0}」：填一个新的 id 再保存（改完会自动校验）。': 'Copied “{0}”: give it a new id before saving (validation runs as you type).',
   '这个 id 已被本包占用：{0}': 'This id is already used in this pack: {0}',
   '这个 id 与官方记录相同，不进 overrides 的话会被丢弃：{0}': 'This id equals an official record and is dropped unless the pack lists it in overrides: {0}',
   '改了 id：保存会新建一份记录，原来的 {0} 仍留在包里（要自己删）': 'Id changed: saving creates a NEW record, and the old {0} stays in the pack (delete it yourself)',
@@ -117,8 +113,6 @@ export const EN_INDEX = Object.freeze({
   '否': 'no',
 
   // ---- 数值参照 ----
-  '官方区间 {0}–{1}（中位 {2}）': 'Official {0}–{1} (median {2})',
-  '高于官方上限': 'above the official maximum',
-  '低于官方下限': 'below the official minimum',
+  // 尺子本身的三条文案在 shared 里：那根尺子是两个页面共用的模块（editor/ui/statScale.js）画的。
   '细线上的刻度是官方同类干员的区间（按职业统计，共 {0} 名），不是硬性上限。': 'The tick on the line is the official range for this profession ({0} operators) — a reference, not a hard cap.',
 });

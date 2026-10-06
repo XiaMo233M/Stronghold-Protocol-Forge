@@ -74,4 +74,16 @@ export const EN_SHARED = Object.freeze({
   '；⚠ {0}': '; ⚠ {0}',
   '显示路线': 'Show routes',
   '官方': 'official',
+
+  // ---- 数值尺子（editor/ui/statScale.js；干员页与怪物页共用） ----
+  '官方区间 {0}–{1}（中位 {2}）': 'Official {0}–{1} (median {2})',
+  '高于官方上限': 'above the official maximum',
+  '低于官方下限': 'below the official minimum',
+
+  // ---- 「以模板新建」选择器（干员页与怪物页共用同一套说法） ----
+  '返回': 'Back',
+  '以模板新建': 'New from a template',
+  '⧉ 以模板新建': '⧉ New from a template',
+  '已按「{0}」生成模板：请填一个新的 id 与名字（改完会自动校验）。': 'Template built from “{0}”: give it a new id and name (validation runs as you type).',
+  '已复制「{0}」：填一个新的 id 再保存（改完会自动校验）。': 'Copied “{0}”: give it a new id before saving (validation runs as you type).',
 });
