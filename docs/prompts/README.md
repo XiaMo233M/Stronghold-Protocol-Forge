@@ -1,0 +1,165 @@
+# 官方 Prompt（创作模板）
+
+把一个 prompt 文件**全文**作为 prompt，连同你的**事实**（数值、文字描述、想要的效果）交给任意 AI，它就能产出
+本仓库能直接使用的工坊内容。这些文件是本项目的官方创作接口 —— 它们和编辑器、CLI、校验器共用同一批
+`shared/*Authoring.js` 规则，所以**AI 写出来的东西与人在编辑器里点出来的东西完全一样**。
+
+| Prompt | 用于 | 状态 |
+|---|---|---|
+| [operator-pack.md](operator-pack.md) | 干员（含技能黑板、天赋、普通/精锐两套数值） | ✅ 完整（含黑板书键表） |
+| 本文档的「各内容种类的 spec 形状」一节 | 地图 / 怪物 / 出怪 / 装备 / 行为层 kit | ✅ 形状与推导规则在此，配合校验器闭环 |
+
+> 为什么只有一个独立的 prompt 文件：干员的黑板书有 **60 多个键**、每个键的含义与拼写例外都必须写清楚，
+> 那是唯一需要一整份文档的内容种类。其余四种的 spec 形状很短，且都能用同一条闭环
+> （推导 → 校验 → 按 `code` 改）收敛，所以它们放在下面。
+
+---
+
+## 一、所有内容共用的两条硬规矩
+
+这两条不是风格建议，是**结构性**的。编辑器、CLI、校验器和本 prompt 都建立在它们之上。
+
+1. **只写你知道的，机械字段一律推导。** 每个 `derive*` 都会把价格、稀有度、寻路、攻击分类、`attrPower`、
+   `params` 之类的字段算出来。手写它们不会更准，只会和引擎不一致 —— 校验器会重算并比对，报 `STALE_DERIVED`。
+2. **校验器复用真实引擎。** `tools/workshop-validate.mjs` 的分层是：格式 → 记录语义 → **真实引擎**
+   （能否进商店池、精锐是否互指、模拟器能否构建 unit def、物品商店抽不抽得到）→ 每种内容一层
+   （kits / 地图 / 怪物 / 出怪 / 装备）。所以「把它写成一个好记录」和「让引擎接受它」是同一件事。
+
+**闭环（务必执行，别只看代码）**：
+
+```powershell
+node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条带 field / code / message / hint
+```
+
+`0 error(s)` 即 `VALID: the engine accepts this content.`。按 `code` 改，再跑一次。
+
+**工作目录约定**：一个包就是 `workshop/<packId>/`，`pack.json` 里 `content` 列出这个包贡献哪些文件
+（`chess` `items` `enemies` `stages` `waves`）。`<kind>-specs/<slug>.json` 是**可编辑的源**，
+`<kind>.json` 是**推导产物** —— 产物不要手改，改源再推导。
+
+---
+
+## 二、各内容种类的 spec 形状
+
+### 地图（`stage-specs/<slug>.json`）
+
+```json
+{
+  "id": "my_map", "name": "示例地图", "weight": 40, "modes": ["mode_multi_normal"],
+  "rows": ["SrrrrrrrrrrrrrrrrrrrE", "…19 行 × 21 列，row 0 是最下面一行…"],
+  "tiles": { "r": { "tileKey": "tile_road", "height": "LOW", "buildable": "ALL", "passable": "ALL",
+                    "groundPassable": true, "flyPassable": true, "special": null, "bb": {} } },
+  "devices": [{ "key": "trap_1105_accrate", "pos": [11, 10], "dir": "UP", "hidden": false, "role": "crate" }],
+  "options": { "characterLimit": 8, "moveMultiplier": 0.5 },
+  "routes": [{ "motion": "WALK", "start": [9, 0], "end": [9, 20], "checkpoints": [[9, 10]] }],
+  "rounds": { "2": { "template": "my_wave_id" } }
+}
+```
+
+- **`rows` 是 19 行 × 21 列**，字符取自 `TILE_PALETTE`（`shared/stageAuthoring.js`）；`S` 敌方入口、
+  `E` 保护目标。`row 0` 是最下面一行（与引擎存储一致）。
+- **不要写** `groundPaths` / `groundPathsWithDevices` / `deployTiles`：它们由 `server/stageAuthoring.js`
+  调用**引擎自己的寻路**（`server/sim/grid.js`）推导。工坊地图的 `routes` 存在 spec 里，不进入记录。
+- `modes` 必须至少写一个；加载器只把这些模式追加进 `config.modes[].stages`，不改 config 其他字段。
+- 图形化等价物：编辑器 `/stage.html`（2D 摆放器 + 路线 + 3D 预览）。
+
+### 怪物（`enemy-specs/<slug>.json`）
+
+```json
+{
+  "id": "my_hound", "name": "示例猎犬", "rank": "ELITE", "applyWay": "MELEE", "motion": "WALK",
+  "dmgType": "phys", "desc": "一句话说明。",
+  "stats": { "maxHp": 4200, "atk": 620, "def": 180, "res": 20, "moveSpeed": 1.6, "bat": 1.3,
+             "blockCnt": 1, "massLevel": 2, "rangeRadius": 0.8 },
+  "abilities": [{ "text": "无法被阻挡" }], "talents": { "bb": { "move_speed": 0.3 }, "bbStr": {} },
+  "skills": [], "tags": ["origen"], "immunities": { "silence": true, "frozen": true },
+  "spine": "enemy_1007_slime", "beFactor": 1
+}
+```
+
+- 最终 key 是 `enemy_ws_<slug>`。**`attrPower` 与 `be` 由数值推导**：`be` 决定阵营换怪时替换多少只，
+  手写它会静默换错数量，所以校验器会重算并比对。
+- `spine` 复用现有 prefab 键才有真美术（仓库不含素材）。图形化等价物：编辑器 `/enemy.html`。
+
+### 出怪表（`wave-specs/<slug>.json`）
+
+```json
+{
+  "id": "my_round2", "kind": "normal", "characterLimit": 8,
+  "routes": [{ "motion": "WALK", "start": [9, 0], "end": [9, 20], "checkpoints": [] }],
+  "spawns": [
+    { "time": 3,  "key": "enemy_1007_slime", "count": 2, "interval": 5, "routeIndex": 0, "slot": "N" },
+    { "time": 20, "key": "enemy_1007_slime", "count": 1, "interval": 0, "routeIndex": 0, "slot": "NF", "unharmful": true }
+  ],
+  "usedBy": [{ "modeId": "mode_multi_normal", "round": 2 }]
+}
+```
+
+- **`totalCount` 与 `slotCounts` 由 `spawns` 推导**，且两者**不对称**：`slotCounts` 计入 `unharmful`，
+  `totalCount` 不计入（`build-data` 的原样行为）。
+- 两条最容易静默失败的检查：`spawns[].key` 必须是**存在**的敌人键（不存在则这一项什么都不刷）；`routeIndex`
+  必须指向本表 `routes` 里的下标（越界时模拟器会**悄悄退回 route 0**，敌人走另一条路）。
+- **绑定到回合**：记录哪个模式的第几回合用它（`usedBy`）。真正生效是在**地图**里写 `rounds` 指向它
+  （方案 B），这样官方地图完全不受影响。图形化等价物：编辑器 `/wave.html`（时间轴 + 明细表）。
+
+### 装备（`item-specs/<slug>.json`）
+
+```json
+{
+  "id": "my_charm", "name": "示例护符", "desc": "攻击时使目标减速。",
+  "itemType": "EQUIP", "category": "ON_HIT", "tier": 3, "price": 12,
+  "upgradeNum": 2, "duration": -1, "trapId": "trap_1013_lhp",
+  "buffs": [
+    { "key": "equip_frost", "countType": "NONE", "bb": { "atk": 0.15, "attack_speed": 12 }, "bbStr": {} }
+  ]
+}
+```
+
+- **一件装备 = 一个 spec = 两条记录**（`chess_item_ws_<slug>_a` 普通 + `_b` 精英）。`mergeable` 本来就是
+  「不是精英、`upgradeNum` 在 0 和 100 之间、**并且有一个能合进去的对象**」，所以只写一条的可合成装备点不动。
+- **`params` 由 buffs 的黑板推导**（`{...bb, ...bbStr}` 依次摊平，先出现的键先赢）。引擎读的是 `params`，
+  **不是 buffs** —— 改了 buffs 忘了重推，会做出一件「卡面写得很好、进游戏什么都不干」的装备。
+- `trapId` 复用现有装备图标（仓库不含素材）；可用的 trap id 由 `GET /api/items` 的 `icons` 列出。
+- 图形化等价物：编辑器 `/item.html`。
+
+### 行为层 kit（`kits/<chessId>.js`）
+
+```js
+export default function kit(bb, chess, def) {
+  return {
+    skill: { kind: 'ammo', ammo: nb(bb.trigger_time, 8), mods: { atkPct: nb(bb.atk, 0) } },
+    talents: [{ name: '天赋名', description: '说明', install(battle, unit) { battle.addBuff(unit, { key: 'p:t', duration: Infinity, mods: { atkPct: 0.25 } }); } }],
+  };
+}
+```
+
+三条硬规则（**都会静默失败**，所以校验器逐条检查）：
+
+1. **返回了 kit 就必须自己给出 `skill`** —— 否则这名干员没有技能，缺省技能不会回退到通用 kit。
+2. **必须自包含，不能 import** —— 同一份文件服务端按路径加载、浏览器按 URL 加载，相对路径不可能同时对。
+3. **它会跑在玩家浏览器里** —— 服务端用同一份文件复算，所以不要有环境依赖（随机用 `battle.rng`，不要碰
+   DOM / 网络 / 墙钟时间）。
+
+外加一条：钩子名必须是引擎**真正会 emit** 的名字。`battle.on('x')` 接受任意字符串，而写错的名字**永远不会
+触发**；校验器会给出 `HOOK_UNKNOWN_EVENT` 和「你是想写 … 吗」的建议（词表见 `shared/kitAuthoring.js` 的
+`HOOK_EVENTS`，由漂移守卫钉在引擎源码上）。
+
+---
+
+## 三、Option 署名（自动，不需要你写）
+
+用编辑器保存的每一份 spec 都会带上 `_meta`：作者、创建时间、来源、著作权声明、反打包转售声明。
+`created` 只写一次，之后保存只更新 `modified`。它**只存在于源文件**，不会进入游戏读的产物 —— 所以
+AI 或手写 spec 时不必自己造这个字段，走编辑器保存即可获得；直接写文件的话可以留空。
+
+声明全文见 [README 的著作权声明](../../README.md#著作权声明)。
+
+---
+
+## 四、成套的自查命令
+
+```powershell
+node tools/workshop-scaffold.mjs <spec.json> --pack <packId> [--workshop <root>] [--dry-run] [--json]
+node tools/workshop-validate.mjs <包目录> [--json]     # 分层校验，含真实引擎
+npm run editor                                        # 图形化等价物（只绑 127.0.0.1）
+```
