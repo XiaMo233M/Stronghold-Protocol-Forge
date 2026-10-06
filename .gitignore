@@ -7,6 +7,9 @@ public/vendor/
 # tools/fetch-assets.mjs → public/assets/** (~270 MB) and public/fonts/** (+ fonts.css)
 public/assets/
 public/fonts/
+# tools/export-third-party.mjs → third-party/bundle/**, the uploadable copy of everything that is NOT
+# GPL-covered (assets + generated data + research). Publish it separately; see third-party/README.md
+third-party/bundle/
 # tools/local-extract/extract.py → public/assets/local/** and this per-machine manifest
 # (optional: the client and the tests work without it; docs/DEPLOY.md §6 lists what falls back)
 data/local-assets.json
