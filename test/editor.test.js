@@ -577,4 +577,23 @@ describe('workshop editor: the 3D preview mounts (read-only, and narrow)', () =>
     // and the framing is derived from what the board actually built, never from assumed tile coordinates
     assert.match(src, /board\?\.bounds/, 'must frame from the built board\'s bounds');
   });
+
+  test('the 3D view exposes named framings, and the page renders a button for each', async () => {
+    const src = await fetch(`${editor.url}/stage3d.js`).then((r) => r.text());
+    // a known view is just (tilt, dist) + target, so it is data — and the UI must build its buttons from that data
+    assert.match(src, /preset\(name\)/, 'the view exposes preset(name)');
+    assert.match(src, /presets:\s*\(\)\s*=>/, 'and lists them for the UI to render');
+    for (const id of ['overview', 'top', 'game', 'low', 'close']) {
+      assert.match(src, new RegExp(`id: '${id}'`), `the ${id} framing must exist`);
+    }
+    // "the framing players actually get" must come from the project's own optics, not a restated number that can drift
+    assert.match(src, /DEFAULT_OPTICS/, 'the game framing must use the project\'s DEFAULT_OPTICS');
+    assert.doesNotMatch(src, /id: 'game', tilt: \d/, 'the game framing must not hardcode a tilt');
+    // the page has somewhere to put them, and stage.js fills it from the view rather than a duplicated list
+    const html = await fetch(`${editor.url}/stage.html`).then((r) => r.text());
+    assert.match(html, /id="presets3d"/, 'stage.html needs the preset row');
+    const page = await fetch(`${editor.url}/stage.js`).then((r) => r.text());
+    assert.match(page, /presets3d/, 'stage.js must fill the preset row');
+    assert.match(page, /view\.presets\(\)/, 'from view.presets(), so the buttons cannot list a framing that does not exist');
+  });
 });

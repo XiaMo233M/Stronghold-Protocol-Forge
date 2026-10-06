@@ -38,7 +38,10 @@ import {
   ITEM_TYPES, ITEM_CATEGORIES, COUNT_TYPES, ITEM_DURATIONS, UPGRADE_NUMS,
 } from '../shared/itemAuthoring.js';
 import { loadWorkshop, WORKSHOP_DIR } from '../server/workshop.js';
-import { withForgeMeta } from '../shared/forgeNotice.js';
+import { withForgeMeta, stampForgeHeader, parseForgeHeader } from '../shared/forgeNotice.js';
+import {
+  HOOK_EVENTS, KIT_FORBIDDEN_GLOBALS, validateKit, kitErrors, hookNamesInSource,
+} from '../shared/kitAuthoring.js';
 
 export const EDITOR_ROOT = path.dirname(fileURLToPath(import.meta.url));
 export const UI_DIR = path.join(EDITOR_ROOT, 'ui');
@@ -50,7 +53,7 @@ const PACK_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
 const SLUG_RE = /^[a-z0-9][a-z0-9_]{0,31}$/;
 const BODY_LIMIT = 1 << 20; // 1 MB is far beyond any spec
 const quietLog = { info() {}, warn() {}, error() {}, debug() {} };
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.md': 'text/markdown; charset=utf-8' };
 
 /** What the 3D preview may pull from `public/` (modules and their data) — never an arbitrary client file. */
 const CLIENT_PREVIEW_TYPES = new Set(['.js', '.mjs', '.json', '.css']);
@@ -61,6 +64,8 @@ const ART_MIME = new Map([
   ['.json', 'application/json; charset=utf-8'], ['.obj', 'text/plain; charset=utf-8'], ['.bin', 'application/octet-stream'],
   ['.js', 'text/javascript; charset=utf-8'], ['.mjs', 'text/javascript; charset=utf-8'], ['.css', 'text/css; charset=utf-8'],
 ]);
+/** …and from `docs/`: the documentation the editor's own pages link to, markdown only (so `docs/examples/*.js` stays out). */
+const DOC_TYPES = new Set(['.md']);
 
 const readJson = (p, fallback = null) => {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return fallback; }
@@ -322,6 +327,86 @@ function itemIconChoices(dataDir) {
     byTrap.set(rec.trapId, { trapId: rec.trapId, from: id, name: rec.name ?? id });
   }
   return [...byTrap.values()].sort((a, b) => a.trapId.localeCompare(b.trapId));
+}
+
+// ---- 行为层 kit (kits) -------------------------------------------------------------------------------
+//
+// The one content kind that is CODE, and therefore the only one with no spec/artifact pair and no derive step:
+// `<pack>/kits/<chessId>.js` is the source AND the artifact at once, so the editor edits the file's TEXT.
+//
+// Validation here is STATIC ONLY (shared/kitAuthoring.js). Importing the file is deliberately NOT done: an HTTP
+// endpoint that evaluates whatever text a caller posts is a code-execution surface, and the one check import can add
+// ("does the module load? does it default-export a function?") already has a home off the request path —
+// `tools/workshop-validate.mjs`. The page says so too (editor/ui/kit.js).
+
+const KIT_DIR = 'kits';
+const KIT_ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
+
+/** A pack's kit files in the loader's own order. The file name (without `.js`) IS the chess id it belongs to. */
+function packKits(packDir) {
+  const out = [];
+  const dir = path.join(packDir, KIT_DIR);
+  if (!fs.existsSync(dir)) return out;
+  for (const name of fs.readdirSync(dir).sort()) {
+    if (name.endsWith('.js')) out.push({ id: name.slice(0, -'.js'.length), name, file: path.join(dir, name) });
+  }
+  return out;
+}
+
+/**
+ * What a kit in this pack may target, reproducing loadWorkshopKits' ownership rule: the chess ids THIS pack ships,
+ * plus the official ones it declared it may replace (`pack.json.overrides`).
+ */
+function kitTargets(packDir) {
+  const manifest = readJson(path.join(packDir, 'pack.json'), null);
+  const ownChessIds = Object.keys(readJson(path.join(packDir, 'chess.json'), {}) || {}).sort();
+  const overrides = Array.isArray(manifest && manifest.overrides) ? manifest.overrides : [];
+  const declared = overrides.filter((o) => typeof o === 'string' && o.startsWith('chess:')).map((o) => o.slice('chess:'.length));
+  return { manifest, ownChessIds, overrides, legalIds: [...new Set([...ownChessIds, ...declared])].sort() };
+}
+
+/** The same static check `/api/items` runs, with this pack's own ids — one place, so preview and save cannot drift. */
+function kitIssues(source, id, targets) {
+  return validateKit(source, { id, ownChessIds: targets.ownChessIds, overrides: targets.overrides });
+}
+
+/** id → the packs that ship a kit with that id. loadWorkshopKits keeps the first and reports the rest. */
+function kitIdOwners(root) {
+  const owners = new Map();
+  for (const packId of fs.existsSync(root) ? fs.readdirSync(root).sort() : []) {
+    if (!PACK_ID_RE.test(packId) || !fs.existsSync(path.join(root, packId, 'pack.json'))) continue;
+    for (const kit of packKits(path.join(root, packId))) {
+      if (!owners.has(kit.id)) owners.set(kit.id, []);
+      owners.get(kit.id).push(packId);
+    }
+  }
+  return owners;
+}
+
+/** A kit id two packs share — a warning, because the loader's answer is to skip one of them, not to fail. */
+const duplicateKitIssue = (others) => ({
+  field: 'id', code: 'KIT_DUPLICATE_ID', severity: 'warning',
+  message: `另外 ${others.length} 个包也定义了同名 kit：${others.join('、')}`,
+  hint: 'loadWorkshopKits 只保留先读到的那个，另一个会被报告并跳过',
+});
+
+/**
+ * A warning that is true of the PACK rather than of the source, and silent otherwise: a pack that declares no data file
+ * contributes nothing, so `loadWorkshop` never lists it and its kits are never imported — the file would sit there
+ * looking perfectly correct. (The other cross-file warning, a kit id two packs share, needs `root` and is raised next to
+ * the ownership scan that already walks every pack.)
+ */
+function kitAdvisories(targets) {
+  const out = [];
+  const content = Array.isArray(targets.manifest && targets.manifest.content) ? targets.manifest.content : [];
+  if (!content.length) {
+    out.push({
+      field: 'pack', code: 'PACK_NOT_LOADED', severity: 'warning',
+      message: '这个包还没有声明任何数据文件（pack.json 的 content 为空），加载器不会把它算作已加载的包，kit 也就不会被导入',
+      hint: '先用干员编辑器在这个包里保存一个干员，或给这个包一个数据文件',
+    });
+  }
+  return out;
 }
 
 /** The enemy keys a wave may spawn: the merged official set plus every pack's own monsters. */
@@ -1018,6 +1103,123 @@ export async function createEditorServer(opts = {}) {
       });
     }
 
+    // ---- 行为层 kit (kits): the file IS the source, and it is code -----------------------------------
+    //
+    // Same shape as the four data layers, minus the generated half: the list reports every `kits/*.js` with its static
+    // issues, and the arrow points at the FILE's text rather than at a spec. See the helper section above for why
+    // nothing here imports the author's file.
+    if (p === '/api/kits' && method === 'GET') {
+      const kits = [];
+      const packs = [];
+      const owners = kitIdOwners(root);
+      for (const packId of fs.existsSync(root) ? fs.readdirSync(root).sort() : []) {
+        if (!PACK_ID_RE.test(packId) || !fs.existsSync(path.join(root, packId, 'pack.json'))) continue;
+        const packDir = path.join(root, packId);
+        const targets = kitTargets(packDir);
+        const files = packKits(packDir);
+        packs.push({
+          id: packId, name: targets.manifest?.name ?? packId, author: targets.manifest?.author ?? null,
+          ownChessIds: targets.ownChessIds, overrides: targets.overrides, legalIds: targets.legalIds,
+          kitIds: files.map((f) => f.id),
+        });
+        for (const kit of files) {
+          const source = await fsp.readFile(kit.file, 'utf8');
+          const issues = kitIssues(source, kit.id, targets);
+          const others = (owners.get(kit.id) || []).filter((x) => x !== packId);
+          if (others.length) issues.push(duplicateKitIssue(others));
+          kits.push({
+            pack: packId, id: kit.id, bytes: Buffer.byteLength(source, 'utf8'),
+            // the file IS the editable source: unlike the data layers there is no generated half to tell apart
+            managed: true,
+            hooks: [...new Set(hookNamesInSource(source).on)],
+            issues,
+            hasNotice: parseForgeHeader(source) !== null,
+          });
+        }
+      }
+      return sendJson(res, 200, {
+        kits,
+        packs,
+        // the two vocabularies the page renders, straight from shared/kitAuthoring.js, so the UI cannot invent one
+        // (`forbidden` stays as name/reason PAIRS: the reason is what makes the entry useful)
+        vocab: { events: [...HOOK_EVENTS], forbidden: KIT_FORBIDDEN_GLOBALS.map(([name, why]) => [name, why]) },
+      });
+    }
+
+    // static validate WITHOUT writing: the page's live feedback, and the only validation the editor can honestly do
+    if (p === '/api/kits/preview' && method === 'POST') {
+      const { pack, id, source } = await readBody(req);
+      const targets = kitTargets(path.join(root, typeof pack === 'string' ? pack : ''));
+      const issues = kitIssues(source, id, targets);
+      const others = (kitIdOwners(root).get(id) || []).filter((x) => x !== pack);
+      if (others.length) issues.push(duplicateKitIssue(others));
+      return sendJson(res, 200, {
+        ok: kitErrors(issues).length === 0,
+        errors: issues.filter((i) => i.severity === 'error'),
+        warnings: issues.filter((i) => i.severity === 'warning'),
+        hooks: [...new Set(hookNamesInSource(source).on)],
+        // what the text's header says TODAY: the save path keeps its `created`, so the author can see it before saving
+        notice: parseForgeHeader(source),
+      });
+    }
+
+    // create/update one kit: the file itself, with the authorship header prepended on its first save
+    if (p.startsWith('/api/packs/') && p.endsWith('/kits') && method === 'POST') {
+      const packId = p.slice('/api/packs/'.length, -'/kits'.length);
+      if (!PACK_ID_RE.test(packId)) throw Object.assign(new Error('bad pack id'), { status: 400 });
+      const { id, source } = await readBody(req);
+      if (typeof id !== 'string' || !KIT_ID_RE.test(id)) {
+        throw Object.assign(new Error('id must be the chess id this kit belongs to (letters, digits, _ - . :, up to 64)'), { status: 400 });
+      }
+      if (typeof source !== 'string') throw Object.assign(new Error('source must be the file text'), { status: 400 });
+      const packDir = path.join(root, packId);
+      const targets = kitTargets(packDir);
+      const issues = kitIssues(source, id, targets);
+      const blocking = kitErrors(issues);
+      if (blocking.length) return sendJson(res, 400, { error: 'the kit did not validate', errors: blocking });
+
+      // the pack's own directory is created on demand (writing pack.json is the OPERATOR page's job — `kits` is not a
+      // content file, so it must never be added to `pack.json.content`: a pack is loaded for its DATA files)
+      const file = path.join(packDir, KIT_DIR, `${id}.js`);
+      await fsp.mkdir(path.dirname(file), { recursive: true });
+      const previous = fs.existsSync(file) ? await fsp.readFile(file, 'utf8') : '';
+      // the page edits the WHOLE file, so the submitted text usually still carries the previous header and `created` is
+      // read straight back out of it; `stampForgeHeader` never adds a second header and never rewrites the notice
+      const stamped = stampForgeHeader(source, { author: authorFor(packDir, forgeAuthor), packId, now: new Date().toISOString(), previous });
+      await fsp.writeFile(file, stamped);
+      const others = (kitIdOwners(root).get(id) || []).filter((x) => x !== packId);
+      const warnings = issues.filter((i) => i.severity === 'warning');
+      if (others.length) warnings.push(duplicateKitIssue(others));
+      warnings.push(...kitAdvisories(targets));
+      return sendJson(res, 200, { ok: true, id, warnings, notice: parseForgeHeader(stamped) });
+    }
+
+    // delete one kit: the file is the whole artifact, so removing it is the whole delete
+    if (p.startsWith('/api/packs/') && p.includes('/kits/') && method === 'DELETE') {
+      const rest = p.slice('/api/packs/'.length);
+      const cut = rest.indexOf('/kits/');
+      const packId = rest.slice(0, cut);
+      const kitId = decodeURIComponent(rest.slice(cut + '/kits/'.length));
+      if (!PACK_ID_RE.test(packId) || !KIT_ID_RE.test(kitId)) throw Object.assign(new Error('bad id'), { status: 400 });
+      const file = path.join(root, packId, KIT_DIR, `${kitId}.js`);
+      if (fs.existsSync(file)) await fsp.rm(file);
+      return sendJson(res, 200, { ok: true, removed: kitId });
+    }
+
+    // the stored file the page edits (the source of truth), exactly like the other GET-by-id routes
+    if (p.startsWith('/api/kits/') && method === 'GET') {
+      const rest = p.slice('/api/kits/'.length).split('/');
+      if (rest.length !== 2) throw Object.assign(new Error('not found'), { status: 404 });
+      const [packId, kitId] = rest;
+      if (!PACK_ID_RE.test(packId) || !KIT_ID_RE.test(kitId)) throw Object.assign(new Error('bad id'), { status: 400 });
+      let source = null;
+      try {
+        const file = path.join(root, packId, KIT_DIR, `${kitId}.js`);
+        if (fs.statSync(file).isFile()) source = await fsp.readFile(file, 'utf8');
+      } catch { source = null; }
+      return sendJson(res, 200, { source, id: kitId, pack: packId });
+    }
+
     // ---- 3D 预览的只读素材通路 ----------------------------------------------------------------------
     //
     // The map editor can show a map in the game's OWN 3D renderer (public/js/render/board3d). That is the whole point:
@@ -1028,13 +1230,16 @@ export async function createEditorServer(opts = {}) {
     //   /client/**        the client modules the 3D stack imports (relative imports resolve inside this tree)
     //   /vendor/**        the vendored three.js build (tools/vendor.mjs)
     //   /assets/local/**  the board art the local-client manifest points at
-    // plus /data/local-assets.json itself. Nothing is writable, nothing is listed, and `..`/dot-segments are refused.
+    // plus /data/local-assets.json itself, and `/docs/**.md` so a page can link to the documentation it is quoting
+    // (the kit page's cheat sheet points at docs/prompts/README.md — markdown only, so docs/examples/*.js stays out).
+    // Nothing is writable, nothing is listed, and `..`/dot-segments are refused.
     // When the art is absent the probe fails and the editor stays on the 2D canvas — the game client's own fallback.
     if (method === 'GET' || method === 'HEAD') {
       const previewMounts = [
         { prefix: '/client/', root: path.join(REPO_ROOT, 'public'), only: CLIENT_PREVIEW_TYPES },
         { prefix: '/vendor/', root: path.join(REPO_ROOT, 'public', 'vendor'), only: CLIENT_PREVIEW_TYPES },
         { prefix: '/assets/', root: path.join(REPO_ROOT, 'public', 'assets'), only: ART_TYPES },
+        { prefix: '/docs/', root: path.join(REPO_ROOT, 'docs'), only: DOC_TYPES },
       ];
       const mount = previewMounts.find((m) => p.startsWith(m.prefix));
       if (mount) {
@@ -1049,7 +1254,7 @@ export async function createEditorServer(opts = {}) {
           if (!fs.statSync(abs).isFile()) throw new Error('not a file');
           body = await fsp.readFile(abs);
         } catch { throw Object.assign(new Error('not found'), { status: 404 }); }
-        res.writeHead(200, { 'Content-Type': ART_MIME.get(ext) ?? 'application/octet-stream', 'Content-Length': body.length, 'Cache-Control': 'no-cache' });
+        res.writeHead(200, { 'Content-Type': ART_MIME.get(ext) ?? MIME[ext] ?? 'application/octet-stream', 'Content-Length': body.length, 'Cache-Control': 'no-cache' });
         res.end(method === 'HEAD' ? undefined : body);
         return;
       }

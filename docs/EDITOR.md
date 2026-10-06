@@ -29,6 +29,7 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
 |---|---|
 | `workshop/<pack>/specs/<slug>.json` | **编辑器的源文件**：你填的那份 spec，可反复编辑 |
 | `workshop/<pack>/chess.json` | **生成产物**：由 specs 推导出来，游戏读的是它。请不要手改（和 `data/*.json` 同样的态度） |
+| `workshop/<pack>/kits/<chessId>.js` | **行为层 kit**：它既是源、也是游戏加载的产物（见下面「kit 编辑器」），保存时会在文件开头补写署名头 |
 | `workshop/<pack>/pack.json` | 首次保存时自动创建（`id` 必须等于目录名） |
 | `data/support.json` | 只在动「是否助战」开关时修改——它是**手工维护的服务端配置**，不是 `build-data` 的产物 |
 
@@ -39,7 +40,7 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
 
 ## 界面
 
-编辑器共五个页面，右上角可互相跳转：
+编辑器共六个页面，右上角可互相跳转：
 
 | 页面 | 用途 |
 |---|---|
@@ -48,6 +49,7 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
 | `/enemy.html` | **怪物**编辑器（数值 + 特殊机制） |
 | `/wave.html` | **出怪**设计器（时间轴 + 明细表） |
 | `/item.html` | **装备**编辑器（一件装备 = 一个 spec = 两条记录） |
+| `/kit.html` | **kit（行为层）**编辑器（直接编辑 `kits/<chessId>.js` 的代码，静态校验） |
 
 ### 干员编辑器（首页）
 
@@ -148,6 +150,53 @@ node tools/workshop-validate.mjs workshop     # items 层：重算 params/mergea
                                               # 并检查合成目标是否存在、商店抽得到抽不到
 ```
 
+## kit（行为层）编辑器
+
+第六个页面：**`/kit.html`**（`shared/kitAuthoring.js`）。这是唯一一页**编辑代码**的编辑器，因为 kit 是唯一一种
+**本身就是代码**的内容：`workshop/<pack>/kits/<chessId>.js` 既是可编辑的源、也是游戏加载的产物，没有「spec → 产物」
+这一对，也就没有可推导的字段。所以中间那一栏是一个 `<textarea>`，装的就是**整份文件**（连文件名里的干员 id 也
+由你定）—— 代码要高亮才看得懂的话，那是编辑器的口味；这里刻意不做高亮、不引依赖、不加构建步骤。
+
+- **左栏**：所有包的 `kits/*.js` —— id、所属包、字节数、注册的钩子、错误/警告数，以及是否已带署名头。
+- **右栏**：静态校验（错误 / 警告，每条带 `field`+`code`+`message`+`hint`）、它注册的钩子、文件头状态、
+  这个包**合法的 kit id**（点一下就填进文件名），以及三条硬规则的速查与 [docs/prompts/README.md](prompts/README.md) 的链接。
+  那个链接指向本仓库的文档，编辑器为此提供一条**只读**通路 `/docs/**.md`：只服务 markdown，`..` 与点开头的段一律拒绝
+  （所以 `docs/examples/kit-demo/kits/*.js` 读不到，它也不改变 `/data/**`、`/client/**` 那几条通路的范围）。
+- **文件名就是干员 id**：`kits/chess_ws_xxx_a.js`。加载器（`server/workshop.js loadWorkshopKits()`）只接受
+  **本包真的提供了这个干员 id**（`<pack>/chess.json` 里有），或者你在 `pack.json` 的 `overrides` 里声明了
+  `chess:<id>`（那是「替换官方干员的 kit」，属于声明过的行为）。两者都不满足就是 `KIT_NO_TARGET`：kit 永远不会被使用。
+- **kit 所在的包必须贡献至少一个数据文件**（例如 `chess`）。空包不会被 `loadWorkshop` 列为已加载的包，它的 kit 自然
+  也不会被导入 —— 保存时页面会给一条 `PACK_NOT_LOADED` 警告，因为文件看上去完全正常，失败是无声的。
+
+三条硬规则（都来自引擎源码，都会**静默失败**，所以静态校验逐条检查）：
+
+1. **返回了 kit 就必须自己给出 `skill`** —— `Battle._setupUnit` 用 `u.kit.skill || null` 取技能：返回了 kit 却省略
+   `skill`，这名干员就**没有技能**，缺省技能**不会**回退到通用 kit。
+2. **必须自包含，不能 `import`** —— 同一份文件服务端按真实路径加载、浏览器按 URL 加载，`../../sim/…` 对前者成立、
+   对后者不成立，所以没有任何相对路径能同时成立。
+3. **它会跑在玩家浏览器里，服务端用同一份文件复算这场战斗** —— 默认 `SP_COMBAT=client`，服务端 `SP_VERIFY` 会重算并
+   比对，不一致就**拒绝玩家的结果**，而报错信息看上去和「你用了 `Math.random()`」毫无关系。随机请用 `battle.rng`，
+   时间请用战斗自己的时钟（`battle.after` / `battle.every`），DOM、网络、墙钟一律不要碰。
+
+外加一条属于钩子总线的：`battle.on(name, fn)` 接受**任意**字符串，而 `emit()` 只触发真正被 emit 的名字。所以
+`battle.on('beforeAttck', …)` 注册得很干净、永不触发、也没有任何地方会报错 —— 校验器会给出 `HOOK_UNKNOWN_EVENT`
+和「你是想写 `beforeAttack` 吗」的建议（词表在 `shared/kitAuthoring.js` 的 `HOOK_EVENTS`，由漂移守卫钉在引擎源码上）。
+命名空间事件（`mypack:ready`）只要**同一文件自己 emit 过**就合法。
+
+**编辑器里的校验只是静态的。** 它只读文本、不 `import`、不执行你的文件 —— 一个会把调用者提交的文本拿去求值的 HTTP
+接口就是代码执行面，编辑器不该在无意中变成那种东西。真正把文件导入一遍（能不能加载、有没有默认导出、钩子词表、
+三条硬规则）是 `tools/workshop-validate.mjs` 的 kits 层，它不在请求路径上：
+
+```powershell
+node tools/workshop-validate.mjs workshop     # kits 层：静态检查 + 真实导入，并列出已加载的 kit
+```
+
+**署名头（`.js` 文件没有 `_meta` 可挂）。** 保存时服务端会在文件开头补写一段注释头：一行机器可读的
+`// @forge created=… modified=… pack=… source=Stronghold-Protocol-Forge author=…`，下面是著作权与反打包转售声明全文。
+它只在文件还没有署名头时补写；已有的一行**只更新 `modified`** —— `created` 永远保留，且绝不会重复写第二个头、
+也绝不会动你自己写在文件里的注释。完整规则见下面的「Option 署名」一节，实现在 `shared/forgeNotice.js` 的
+`forgeHeader` / `parseForgeHeader` / `stampForgeHeader` 三个纯函数里。
+
 ## 助战（客户端）
 
 助战的选择由**服务端**声明并强制：卡池之外的干员是**禁用**的，请求会被整条拒绝，**没有回退**（回退会让一个被禁用的干员变成已发放）。
@@ -213,6 +262,11 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 | POST | `/api/items/preview` | `{ spec }` → 推导 `params`/`mergeable`/`shopExcluded` 并校验，**不写盘** |
 | POST | `/api/packs/:pack/items` | `{ spec }` → 写 `item-specs/` 并重新生成 `items.json`（一对记录） |
 | DELETE | `/api/packs/:pack/items/:id` | 删除该装备的 spec **及它的一对记录** |
+| GET | `/api/kits` | 工坊 kit 列表（含静态 `issues`）+ **钩子词表** + **禁用词及其原因** + 每个包合法的 kit id 与 `overrides` |
+| GET | `/api/kits/:pack/:id` | 该 kit 的**文件原文**（文件不存在时 `source: null`） |
+| POST | `/api/kits/preview` | `{ pack, id, source }` → **仅静态**校验（不写盘，**不 import / 不执行**你的文件） |
+| POST | `/api/packs/:pack/kits` | `{ id, source }` → 写 `kits/<id>.js`，并在缺少署名头时补写 |
+| DELETE | `/api/packs/:pack/kits/:id` | 删除该 kit 文件 |
 
 ## Option 署名（`_meta`）
 
@@ -243,13 +297,22 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 - **`_meta` 只存在于 spec（源文件）里，绝不会进入游戏读的产物。** 每个 `derive*` 都是逐字段构造记录，
   所以 `_meta` 天然不会漏进 `stages.json` / `chess.json` —— `test/forgeNotice.test.js` 把这条钉住了
   （否则署名声明会顺着合并数据上到网络里）。
+- **kit（`.js`）写的是文件头注释，不是 `_meta`。** 一份 JavaScript 里没有「数据对象」可以挂 `_meta`（那会变成要执行
+  的代码），所以同一份声明写成注释头。格式只有一行是机器可读的，`created` 从它里面读回来：
+  ```js
+  // @forge created=2026-10-06T06:30:26.000Z modified=2026-10-06T07:12:03.000Z pack=my-pack source=Stronghold-Protocol-Forge author=水沫沐沐
+  ```
+  `author` 放在**最后**并吃掉整行剩余部分 —— 名字里可以有空格。规则同上：`created` 只写一次、之后只更新
+  `modified`；只补写缺失的头，绝不写第二个，也绝不动作者自己的注释（`shared/forgeNotice.js` 的三个纯函数，
+  见 `test/kitEditor.test.js`）。
 - **它不是对代码的附加限制。** `_meta` 描述的是 Option 这一创作内容；代码仍然是 GPL-3.0-or-later，
   这条声明不改变也不缩减任何人在 GPL 下的权利。这条边界是它能与 GPL 共存的原因。
 
 ## 当前不包含
 
-- **行为层脚本**（`kits/<chessId>.js`）的编辑——kit 目前手写文件
 - 助战**名额**（`slots`）的编辑——改 `data/support.json` 的 `slots` 字段或编辑器里的「是否助战」开关
+- kit 的**真实导入检查**——编辑器只做静态校验（见上），把文件真的 `import` 一遍是 `tools/workshop-validate.mjs` 的事
+- kit 的**沙箱与审查**——按分渠道策略不做（脚本会在客户端执行，见 `docs/WORKSHOP.md` §4）
 - 任何鉴权
 
 ## 与其它工具的关系

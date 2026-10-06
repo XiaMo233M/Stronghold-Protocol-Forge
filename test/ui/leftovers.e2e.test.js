@@ -339,7 +339,7 @@ describe('client leftovers — real server', { skip: !ENABLED && 'set SP_E2E=1 (
     }
   });
 
-  test('3. server restart while a match is on screen: toast + back to the lobby', { timeout: 3 * 60 * 1000 }, async () => {
+  test('3. server restart while a match is on screen: toast + back to the lobby', { timeout: 3 * 60 * 1000 }, async (t) => {
     let srv = await startRealServer();
     const port = srv.port;
     const P = (await import('puppeteer-core')).default;
@@ -382,6 +382,18 @@ describe('client leftovers — real server', { skip: !ENABLED && 'set SP_E2E=1 (
       await c.waitFor((x) => !!x.room, 'a new solo room on the restarted server');
       if (!(await c.st()).phase) await c.click('.room-bar__right button', '开始模拟', { timeout: 20000 });
       await c.waitFor((x) => x.phase === 'INFO_CHECK', 'briefing on the restarted server', 30000);
+      // The crash half above is the platform-independent part, and it has already run and asserted by now.
+      //
+      // The graceful half needs the server to RECEIVE a signal: the harness stops it with `child.kill('SIGTERM')`
+      // (test/e2e/client.mjs), and on Windows that terminates the child instead of delivering a catchable SIGTERM — so
+      // `server/index.js`'s handler never runs, no `room.closed {reason:'shutdown'}` is sent, and the 维护中 toast cannot
+      // appear. That is a property of the platform's signal delivery, not of the product: the server half is covered by
+      // test/lobby.test.js ('close() notifies rooms (room.closed shutdown) and closes sockets with 1001'), and the client
+      // half (CLOSE_REASON.shutdown → 「服务器维护中，同盟已关闭」) is reachable only where SIGTERM is deliverable.
+      if (process.platform === 'win32') {
+        t.skip('Windows cannot deliver a catchable SIGTERM to a spawned child, so the graceful-shutdown path is unreachable here (the crash half above ran and passed)');
+        return;
+      }
       // a graceful stop (Ctrl+C / SIGTERM): room.closed 'shutdown' says so first, the same clean way back — and only once
       const resetToast = () => c.page.evaluate(() => [...document.querySelectorAll('.toast')].some((t) => t.textContent.includes('服务器会话已重置')));
       await c.page.waitForFunction(() => ![...document.querySelectorAll('.toast')].some((t) => t.textContent.includes('服务器会话已重置')), { timeout: 20000 });

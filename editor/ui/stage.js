@@ -517,6 +517,22 @@ function syncTools() {
       : '');
     hint.className = state.reason3d ? 'hint warn' : 'hint';
   }
+  // View presets for the 3D preview. The button set is built from the view itself (`presets()`), so it can never list a
+  // framing the view does not implement. Deliberately no "active" highlight: once the author drags or zooms, the framing
+  // is no longer the preset, and marking one would be a lie.
+  const row = $('#presets3d');
+  if (row) {
+    const view = state.mode3d ? state.view3d : null;
+    row.hidden = !view;
+    row.replaceChildren();
+    for (const p of view ? view.presets() : []) {
+      const b = document.createElement('button');
+      b.className = 'ghost';
+      b.textContent = p.label;
+      b.addEventListener('click', () => view.preset(p.id));
+      row.append(b);
+    }
+  }
 }
 
 async function saveStage() {

@@ -71,7 +71,7 @@ export async function createStageView3d({ canvas, getStage, onError } = {}) {
     if (!pack) return { ok: false, reason: '棋盘素材包不完整，已退回 2D' };
 
     const { BoardScene } = await import('/client/js/render/board3d/scene.js');
-    const { Camera } = await import('/client/js/render/projection.js');
+    const { Camera, DEFAULT_OPTICS } = await import('/client/js/render/projection.js');
     const { AREAS } = await import('/client/js/render/board3d/layout.js');
 
     // preserveDrawingBuffer: a preview is something you want to capture (and that a test can read pixels from). The game
@@ -105,6 +105,24 @@ export async function createStageView3d({ canvas, getStage, onError } = {}) {
     const COLS = 21, ROWS = 19;
     const home = { tx: COLS / 2, ty: ROWS / 2, tz: 0, tilt: 52, dist: 30, scale: 24 };
     const cam = new Camera(home);
+    /**
+     * Named camera framings, so an author does not have to find a useful angle with the mouse every time.
+     *
+     * The camera is a fixed-orientation projection camera: a "view" is just (tilt, dist) plus what it is aimed at.
+     * `tilt` is measured from straight DOWN (projection.js: `C = T + dist·(0, −sin tilt, cos tilt)`), so tilt 0 is a plan
+     * view and a larger tilt swings the camera south towards eye level.
+     *
+     * `refit: true` re-aims at the whole board first, so the preset is an absolute framing; `close` deliberately keeps the
+     * author's current target and only moves the camera in. The game preset takes the project's OWN DEFAULT_OPTICS rather
+     * than restating its numbers — its whole point is "the framing players actually get", so it must not drift from it.
+     */
+    const PRESETS = [
+      { id: 'overview', label: '全图', tilt: home.tilt, dist: home.dist, refit: true },
+      { id: 'top', label: '俯视', tilt: 0, dist: 30, refit: true },
+      { id: 'game', label: '游戏视角', tilt: DEFAULT_OPTICS.tilt, dist: DEFAULT_OPTICS.dist, refit: true },
+      { id: 'low', label: '侧视', tilt: 74, dist: 22, refit: true },
+      { id: 'close', label: '近景', tilt: 52, dist: 12, refit: false },
+    ];
     let cssW = 672, cssH = 608;
     let framedKey = null;
     /**
@@ -205,6 +223,20 @@ export async function createStageView3d({ canvas, getStage, onError } = {}) {
         };
       },
       reset() { Object.assign(cam, home); view.resize(); view.update(); },
+      /** Apply a named framing (see PRESETS). An unknown id returns false rather than throwing. */
+      preset(name) {
+        const p = PRESETS.find((x) => x.id === name);
+        if (!p) return false;
+        // `home` is kept current by frameBoard(), so it is the board's real centre and scale — refitting through it
+        // means a preset never depends on numbers restated here.
+        if (p.refit) Object.assign(cam, home);
+        cam.tilt = p.tilt;
+        cam.dist = p.dist;
+        cam.update();
+        view.update();
+        return true;
+      },
+      presets: () => PRESETS.map(({ id, label }) => ({ id, label })),
       stats: () => ({ frames, dist: Math.round(cam.dist), tilt: Math.round(cam.tilt), board3d: scene.stats?.() ?? null }),
       /** The live scene, for the devtools console (`__spEditor3d.stats()`) and for automated checks. */
       scene: () => scene,

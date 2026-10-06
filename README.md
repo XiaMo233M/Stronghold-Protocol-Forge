@@ -26,7 +26,7 @@
 
 ## 这是什么
 
-**Forge 工坊编辑器**（`editor/`）是一个**游戏之外的独立工具**，用来创作这个游戏的内容：干员、地图、怪物、出怪表、装备。它在你本机的浏览器里打开，改的是你仓库里的工坊包。
+**Forge 工坊编辑器**（`editor/`）是一个**游戏之外的独立工具**，用来创作这个游戏的内容：干员、地图、怪物、出怪表、装备、行为层 kit。它在你本机的浏览器里打开，改的是你仓库里的工坊包。
 
 - 它是**可选工具**：不运行就不存在。可以单独分发、单独使用（[docs/EDITOR.md](docs/EDITOR.md)）。
 - **游戏客户端不含编辑器**：`editor/` 不在 `public/` 下，服务器结构上无法把它发给网页端或后续打包的 APK（`test/editor.test.js` 锁住了这条）。
@@ -34,7 +34,7 @@
 
 ## 能做什么
 
-五个页面，右上角可互相跳转：
+六个页面，右上角可互相跳转：
 
 | 页面 | 路由 | 能编辑什么 |
 |---|---|---|
@@ -43,8 +43,9 @@
 | **怪物** | `/enemy.html` | **17 项数值**、能力说明、天赋黑板、技能、五项免疫、复用现有美术（`spine`） |
 | **出怪** | `/wave.html` | **时间轴 + 明细表**：每次出怪的时间 / 敌人 / 数量 / 间隔 / 路线 / 槽位、绑定到回合 |
 | **装备** | `/item.html` | 一件装备 = 一个 spec = **两条记录（普通 + 精英）**、buffs 黑板（`bb` / `bbStr`）、图标复用 |
+| **kit（行为层）** | `/kit.html` | 包里的 `kits/<干员 id>.js` —— **代码本体**（整份文件），配上**静态校验**（钩子词表、三条硬规则）与保存时自动写入的署名头 |
 
-除上述表单，编辑器还有实时校验（与 CLI 完全相同的规则）与「将生成的记录」预览；地图页额外有**部署区覆盖层**与**寻路覆盖层**（12 条路线的流场），出怪页有按排期槽位配色的时间轴泳道。
+除上述表单，编辑器还有实时校验（与 CLI 完全相同的规则）与「将生成的记录」预览；地图页额外有**部署区覆盖层**与**寻路覆盖层**（12 条路线的流场），出怪页有按排期槽位配色的时间轴泳道，kit 页有钩子清单、合法 id 与静态校验（它**只读文本、不执行你的文件**）。
 
 ## 快速开始（编辑器）
 
@@ -87,6 +88,7 @@ node tools/workshop-scaffold.mjs docs/examples/operator-spec.json --pack my-pack
 
 - **`created` 只写一次**，之后再保存只更新 `modified`。
 - **`_meta` 只存在于 spec（源文件）里，绝不会进入游戏读的产物**（`test/forgeNotice.test.js` 钉住了这条）。
+- **行为层 kit 是 `.js`，写的是一行注释头**（`// @forge created=… author=…` + 声明全文）：JavaScript 里没有可以挂 `_meta` 的数据对象。规则相同 —— `created` 只写一次、只补写缺失的头、不动你自己写的注释（`test/kitEditor.test.js` 钉住了这条）。
 - 作者名按 `createEditorServer({ forgeAuthor })` → `SP_FORGE_AUTHOR` → 该包 `pack.json` 的 `author` 取；都没有就写「未署名 (anonymous)」，不猜。
 
 字段结构与边界详见 [docs/EDITOR.md](docs/EDITOR.md)，法律文本见 [著作权声明](#著作权声明)。
@@ -393,7 +395,7 @@ work for direct profit.
 | `docs/` | `EDITOR.md` `WORKSHOP.md` |
 | `test/` | `docs-consistency.test.js` `editor.test.js` `support.test.js` `ui/mock.e2e.test.js` `ui/devices.e2e.test.js` `ui/emotes.e2e.test.js` `ui/leftovers.e2e.test.js` `ui/playtest2.e2e.test.js` `ui/playtest5-ui.e2e.test.js` `ui/playtest6-ui.e2e.test.js` `ui/feedback1-gaps.e2e.test.js` `ui/feedback1-secret-shop.e2e.test.js` `ui/feedback1-tactic.e2e.test.js` `render/flash.browser.test.js` `render/models.browser.test.js` |
 
-改动内容以**工坊与助战**为主：内容叠加层的加载与合并（`server/workshop.js`、`server/data.js` 的注入点）、工坊内容的只读分发路由（`server/index.js`）、地图的回合作用域（`server/match/waves.js`）、助战卡池的服务端下发与客户端同步（`server/lobby.js`、`server/match/PlayerState.js`、`public/js/screens/support.js`、`public/js/ui/support*.js`），以及编辑器五个页面。**游戏规则本身没有被改动**：战斗模拟、经济与回合流程保持上游行为，工坊只做内容叠加。
+改动内容以**工坊与助战**为主：内容叠加层的加载与合并（`server/workshop.js`、`server/data.js` 的注入点）、工坊内容的只读分发路由（`server/index.js`）、地图的回合作用域（`server/match/waves.js`）、助战卡池的服务端下发与客户端同步（`server/lobby.js`、`server/match/PlayerState.js`、`public/js/screens/support.js`、`public/js/ui/support*.js`），以及编辑器的六个页面。**游戏规则本身没有被改动**：战斗模拟、经济与回合流程保持上游行为，工坊只做内容叠加。
 
 ### C. 工坊与编辑器功能区（推断为新增）
 

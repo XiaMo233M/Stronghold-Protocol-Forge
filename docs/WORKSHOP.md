@@ -133,7 +133,7 @@ node tools/workshop-validate.mjs my-pack
 | **装备（items）**：`params`/`mergeable`/`shopExcluded` 推导 + 校验 + 编辑器表单 | ✅ 已完成（`test/itemAuthoring.test.js`、`editor/ui/item.html`） |
 | **作者接口**：spec → 合法记录、机器可读校验、模板 prompt、校验 CLI | ✅ 已实现（`test/chessAuthoring.test.js`） |
 | **行为层**：包内 `kits/<chessId>.js` 接入 `battle.on(...)` 钩子总线 | ✅ 已实现（见 §4） |
-| **局外编辑器 UI**：干员 / 地图 / 怪物 / 出怪 / 装备 五个页面 | ✅ 已实现（`editor/`，见 `docs/EDITOR.md`；`kits/*.js` 仍手写） |
+| **局外编辑器 UI**：干员 / 地图 / 怪物 / 出怪 / 装备 / 行为层 kit 六个页面 | ✅ 已实现（`editor/`，见 `docs/EDITOR.md`） |
 | 工坊包的版本对齐、依赖声明、内容寻址 | ⛔ 未实现（`gameVersion` 目前只是元信息） |
 
 > 行为层是用户的明确选择（「完全开放 battle 钩子 API」）。它与一体化整合包的冲突按**分渠道**解决：官方整合包保持纯净、不含工坊内容；工坊包单独分发，玩家主动安装并知情。**注意：脚本会在客户端执行**（默认 `SP_COMBAT=client`），服务端 `SP_VERIFY` 只能复算结果、不能阻止脚本本身 — 这正是必须分渠道的原因。
@@ -269,6 +269,8 @@ export default function kit(bb, chess, def) {
 注释与字符串会先被剥掉再检查 —— 示例 kit 的头注释本来就在**讲解**这些规则，文字不该被当成代码。
 
 - 可运行示例：**[docs/examples/kit-demo/](examples/kit-demo/README.md)**（含「常驻 +25% 攻击力」天赋，并演示上述三条规则）。
+- 编辑器页面：**`/kit.html`**（`docs/EDITOR.md` §kit）—— 直接编辑这个文件，用上面的静态检查当实时反馈，保存时在文件开头写署名头。
+  它**不**执行你的文件（那会让一个 HTTP 接口变成代码执行面），真正导入一遍仍是 `tools/workshop-validate.mjs` 的 kits 层。
 
 ### 4.4 当前状态
 
@@ -278,5 +280,5 @@ export default function kit(bb, chess, def) {
 | kit **静态校验**（钩子词表 + 三条硬规则），机器可读 | ✅ 已完成（`shared/kitAuthoring.js`、`test/kitAuthoring.test.js`，词表有漂移守卫） |
 | 浏览器分发（spec 携带 URL + runner 重建同一张表） | ✅ 已实现并测试（模块可按 URL 取得、装配路径有断言） |
 | 浏览器端**真机端到端**（Chrome 跑一场带 kit 的对局） | ⛔ 未做（需 `SP_E2E=1` + Chrome） |
-| 编辑器里的 kit 编辑页签 | ⛔ 未做（kit 是代码，手写文件 + 上面的静态校验） |
+| 编辑器里的 kit 编辑页签（`editor/ui/kit.html`） | ✅ 已完成（编辑文件本体 + 上面的静态校验 + 保存时写署名头；真正 `import` 一遍仍由 `tools/workshop-validate.mjs` 做，编辑器不执行作者的文件） |
 | 包之间 kit id 冲突、kit 的沙箱与审查 | ⛔ 未做（冲突会被报告并跳过；沙箱按分渠道策略不做） |

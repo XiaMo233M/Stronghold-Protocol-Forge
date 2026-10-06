@@ -12,6 +12,11 @@
 //
 // `_meta` lives only in the SOURCE spec (`<pack>/*-specs/*.json`). Every derive* function builds its output record
 // field by field, so `_meta` can never reach the generated artifact the game reads — pinned by test.
+//
+// A kit (`<pack>/kits/<chessId>.js`) is the one Option that is a file of CODE rather than a JSON object, so it cannot
+// carry a `_meta` field — an object literal in a module is code to evaluate, not data to read. It carries the same
+// notice in a comment HEADER instead (`forgeHeader` / `parseForgeHeader` / `stampForgeHeader` at the bottom of this
+// file): one machine-readable marker line, then the identical prose. Same requirement, different container.
 
 /** Written into `_meta.source`, so a file found in the wild can be traced back to this editor. */
 export const FORGE_SOURCE = 'Stronghold-Protocol-Forge';
@@ -76,6 +81,106 @@ export function forgeMeta(opts = {}) {
 export function withForgeMeta(spec, opts = {}) {
   if (!isPlain(spec)) return spec;
   return { ...spec, _meta: forgeMeta({ ...opts, previous: opts.previous ?? spec._meta ?? null }) };
+}
+
+// ---- the FILE HEADER (a kit is a `.js` file, so its stamp is a comment) -----------------------------
+//
+// The marker is ONE documented line, because `created` has to be read back on every later save and guessing at prose is
+// exactly how a creation date gets silently reset:
+//
+//     // @forge created=<iso> modified=<iso> pack=<packId> source=Stronghold-Protocol-Forge author=<name>
+//
+// `author` comes LAST and takes the rest of the line, so a name containing a space ("John Doe") round-trips whole.
+
+/** The marker that identifies a Forge-written file header. */
+export const FORGE_HEADER_TAG = '@forge';
+
+/** The marker line itself: a WHOLE `//` comment line, CRLF-safe. */
+const FORGE_HEADER_LINE_RE = /^\/\/[ \t]*@forge[ \t]+[^\r\n]*/m;
+
+/** The marker line for this save, honouring the `created` an earlier save wrote. */
+function forgeHeaderLine(previous, opts = {}) {
+  const prev = parseForgeHeader(previous);
+  const now = isIso(opts.now) ? opts.now : new Date().toISOString();
+  const author = clean(opts.author) ?? clean(prev && prev.author) ?? '未署名 (anonymous)';
+  const pack = clean(opts.packId) ?? clean(prev && prev.pack) ?? null;
+  // the author's own creation instant survives every later save — the same rule `forgeMeta` follows
+  const created = prev && isIso(prev.created) ? prev.created : now;
+  const fields = [`created=${created}`, `modified=${now}`];
+  if (pack) fields.push(`pack=${pack}`);
+  fields.push(`source=${FORGE_SOURCE}`, `author=${author}`);
+  return `// ${FORGE_HEADER_TAG} ${fields.join(' ')}`;
+}
+
+/**
+ * Read the Forge header out of a file's text, or null when it has none.
+ * A hand-edited `created`/`modified` that is not an instant reads as absent, so it cannot poison the next save.
+ * @param {string} source
+ * @returns {{ created: string|null, modified: string|null, pack: string|null, source: string|null, author: string|null }|null}
+ */
+export function parseForgeHeader(source) {
+  const text = typeof source === 'string' ? source : '';
+  const line = FORGE_HEADER_LINE_RE.exec(text);
+  if (!line) return null;
+  const rest = line[0].replace(/^\/\/[ \t]*/, '').slice(FORGE_HEADER_TAG.length).trim();
+  // every field but `author` is space-free, so it can be pulled by name; `author` ends the line and keeps its spaces
+  const named = /(?:^|\s)author=([\s\S]*)$/.exec(rest);
+  const head = named && typeof named.index === 'number' ? rest.slice(0, named.index) : rest;
+  const field = (key) => {
+    const hit = new RegExp(`(?:^|\\s)${key}=([^\\s]+)`).exec(head);
+    return hit ? hit[1] : null;
+  };
+  const created = field('created');
+  const modified = field('modified');
+  return {
+    created: isIso(created) ? created : null,
+    modified: isIso(modified) ? modified : null,
+    pack: field('pack'),
+    source: field('source'),
+    author: named && named[1].trim() ? named[1].trim() : null,
+  };
+}
+
+/**
+ * The complete header block for `previous`: the marker line, then the notice as `//` comments. Ends with a newline, so
+ * it can be prepended to a file's text directly.
+ * @param {string} previous the text to read an earlier `created`/`author` out of (usually the file being re-saved)
+ * @param {{ author?: string|null, packId?: string|null, now?: string }} [opts]
+ */
+export function forgeHeader(previous, opts = {}) {
+  const prose = forgeNoticeText().split('\n').map((line) => (line.trim() ? `// ${line}` : '//'));
+  return [
+    forgeHeaderLine(previous, opts),
+    '//',
+    '// 本文件由 Forge 工坊编辑器保存：署名与使用声明随文件一起分发（著作权声明见 README「著作权声明」）。',
+    '//',
+    ...prose,
+    '',
+  ].join('\n');
+}
+
+/**
+ * Stamp a file's text with the Forge header, idempotently.
+ *
+ * Two rules the caller relies on, so they are enforced here rather than at each call site:
+ *   * NEVER double-stamp — a text that already carries a marker gets that one line refreshed (`modified` moves,
+ *     `created` stays), so the notice below it cannot stack up;
+ *   * NEVER strip what the author wrote — the prepend path puts our block ABOVE the author's own leading comment, and
+ *     the refresh path rewrites exactly one line, so no other byte of their file is touched.
+ *
+ * @param {string} source the text to write (a freshly typed one, or the previous revision read back from disk)
+ * @param {{ author?: string|null, packId?: string|null, now?: string, previous?: string }} [opts] `previous` is only
+ *   consulted when `source` itself carries no marker — a caller that posts bare code must not reset `created`.
+ * @returns {string}
+ */
+export function stampForgeHeader(source, opts = {}) {
+  const text = typeof source === 'string' ? source : '';
+  const onDisk = typeof opts.previous === 'string' ? opts.previous : '';
+  const anchor = parseForgeHeader(text) ? text : onDisk;
+  // a blank line keeps the author's own comment visibly theirs rather than glued to the notice prose
+  if (!parseForgeHeader(text)) return forgeHeader(anchor, opts) + (text ? `\n${text}` : '');
+  // a function replacement: an author name containing `$&` must not be read as a substitution pattern
+  return text.replace(FORGE_HEADER_LINE_RE, () => forgeHeaderLine(anchor, opts));
 }
 
 /** The readout the editor shows: who made this Option, and when. */
