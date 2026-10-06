@@ -55,10 +55,15 @@ const ASSET_DIRS = ['public/assets', 'public/fonts', 'public/vendor'];
 
 /**
  * 版本库里有、但便携包不要的。
- * `test/` 是测试代码（省体积）；`editor/` 是**工坊编辑器**——它是给服务器/内容作者的独立工具，玩家客户端永远不需要
- * （网页端与打包端都拿不到它，见 docs/EDITOR.md）。编辑器照旧从仓库单独获取。
+ *
+ * `test/` 是测试代码（省体积，玩家用不到）。
+ *
+ * `editor/` **要带上**：在本仓库（Stronghold-Protocol-Forge）里，工坊编辑器就是产品本身 —— 一个把编辑器
+ * 排除在外的发行包，等于发了游戏却把仓库存在的理由留下了。它仍然只是本机工具：默认只绑 127.0.0.1，
+ * 而且 `editor/` 不在 `public/` 下，所以游戏服务器结构上无法把它发给网页端（docs/EDITOR.md）。
+ * （上游那个「只给玩家的整合包」除外，那种包确实不需要它。）
  */
-const SKIP_TRACKED = ['test/', 'editor/'];
+const SKIP_TRACKED = ['test/'];
 
 /** 包根要带的许可证 / 声明。 */
 const LEGAL_FILES = ['LICENSE', 'NOTICE.md', 'THIRD-PARTY-NOTICES.md'];
