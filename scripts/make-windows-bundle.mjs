@@ -412,11 +412,21 @@ export function bundleLaunchers() {
  * 包内说明。带不带便携版 Node 会影响三处措辞（是否需要预装 Node、许可证在哪、目录结构），
  * 所以先算好片段再拼，别在模板里嵌套引号。
  */
-export function bundleReadme({ version, withNode }) {
+export function bundleReadme({ version, withNode, withVoices = false }) {
   const nodeNeed = withNode
     ? `目标机器**不需要安装 Node**：包内的 \`node\\node.exe\` 就是便携版 Node ${version}。`
     : '这个包**没有带便携版 Node**，请先在这台机器上安装 Node 22 或 24（LTS）。';
   const nodeLicence = withNode ? ' 与 `node\\LICENSE-node.txt`（Node 自己的 MIT 许可证）' : '';
+  // The voice lines are opt-in to FETCH (`node tools/fetch-assets.mjs --voices`, ~138 MB), so whether this bundle
+  // carries them is a build-time fact — a README that promises them from a checkout without them would be a lie.
+  const voiceNote = withVoices
+    ? `
+**角色语音台词已经在包里**（行动出发 / 选中 / 部署 / 作战中，以及结算时各自队伍 MVP 的那一句）。
+它是**默认关闭**的：进游戏后在 **设置 → 干员语音（VOICE）** 把音量调上去才听得见 ——
+音效与语音是两条独立通道，调一个不会影响另一个。工坊包也能自带语音（助战干员的配音），
+装包后走同一条链路，见 \`app\\docs\\WORKSHOP.md\`。
+`
+    : '';
   const tree = withNode
     ? `node\\node.exe            便携版 Node ${version}（官方 x64，已经 sha256 校验）
 node\\LICENSE-node.txt    Node 自己的许可证（MIT）
@@ -443,7 +453,7 @@ ${nodeNeed}
 （Bender / Novecento Wide）和系统黑体，玩法不受影响。**联网时**页面还会去 Google Fonts 加载
 Noto Sans SC 这类网页字体（\`index.html\` 里那条外链这次没有改，它也不阻塞渲染），
 只是让中文更接近原版观感 —— 断网不会因此卡住或报错。
-
+${voiceNote}
 ## 声明
 
 > [!IMPORTANT]
@@ -560,7 +570,14 @@ async function main() {
   }
   console.log(`    完成：${assetFiles} 个文件 / ${MB(assetBytes)}`);
 
-  // 2b) 3D 棋盘贴图的清单（本机提取过才有）：贴图在 public/assets/local 里，靠这份 JSON 才会被游戏采用。
+  // 2b) 角色语音台词（可选下载；v0.3.0 起随包发）：文件在 public/assets/audio/voice_cn，靠 data/assets.json 的
+  // audio.voice 映射才会被客户端采用 —— 两者要么一起进包，要么都不进，所以这里明说一下。
+  const withVoices = fs.existsSync(path.join(ROOT, 'public', 'assets', 'audio', 'voice_cn'));
+  console.log(withVoices
+    ? '    带上角色语音台词（public/assets/audio/voice_cn；游戏里「设置 → 干员语音」默认 0 = 关闭）'
+    : '    未包含角色语音台词（想打进包里先运行 node tools/fetch-assets.mjs --voices，约 138 MB）');
+
+  // 2c) 3D 棋盘贴图的清单（本机提取过才有）：贴图在 public/assets/local 里，靠这份 JSON 才会被游戏采用。
   const localManifest = path.join(ROOT, LOCAL_ASSET_MANIFEST);
   const localTextures = path.join(ROOT, 'public', 'assets', 'local');
   if (fs.existsSync(localManifest)) {
@@ -599,7 +616,9 @@ async function main() {
   for (const [name, body] of Object.entries(bundleLaunchers())) {
     await fsp.writeFile(path.join(out, name), bat(body), 'latin1');
   }
-  await fsp.writeFile(path.join(out, 'README-开箱即用.md'), bundleReadme({ version: nodeVersion, withNode: !!o.node }), 'utf8');
+  // The voice lines are copied as part of `public/assets` above; the README says so only when they are really there
+  // (v0.3.0 ships them — see docs/WINDOWS.md), so a checkout without them produces an honest bundle.
+  await fsp.writeFile(path.join(out, 'README-开箱即用.md'), bundleReadme({ version: nodeVersion, withNode: !!o.node, withVoices }), 'utf8');
 
   const total = await dirSize(out);
   console.log(`\n✔ 便携包已生成：${out}\n  ${total.files} 个文件 / ${MB(total.bytes)}`);

@@ -50,7 +50,8 @@ LICENSE / NOTICE.md / THIRD-PARTY-NOTICES.md
 
 把整个文件夹拷到目标电脑 —— **什么都不用安装**，双击 `启动游戏.bat` 即可（等于 `app\scripts\launch.mjs --no-setup`：
 素材已经在包里，跳过联网准备，直接起服务器并打开浏览器）。
-卸载＝删除文件夹（不写注册表、不放系统目录）。素材约 330 MB 是硬成本，包因此比较大。
+卸载＝删除文件夹（不写注册表、不放系统目录）。素材约 330 MB（**再算上角色语音台词约 470 MB**）是硬成本，
+包因此比较大。
 
 ## 3. 包里放了什么、没放什么
 
@@ -65,6 +66,11 @@ LICENSE / NOTICE.md / THIRD-PARTY-NOTICES.md
 * `data/local-assets.json`（本机提取过 3D 棋盘贴图时才有）：贴图本体在 `public/assets/local`（约 68 MB，会随
   `public/assets` 进包），但游戏是靠这份 JSON 才知道有哪些贴图可用 —— 只带贴图不带清单，玩家拿到的是 68 MB
   用不上的文件。清单不存在时会提示先跑 `node tools/setup.mjs --local`。
+* **角色语音台词（v0.3.0 起随包发）**：`public/assets/audio/voice_cn`（约 138 MB，由
+  `node tools/fetch-assets.mjs --voices` 抓取）与 `data/assets.json` 里对应的 `audio.voice` 映射**必须一起进包** ——
+  只带文件不带映射，客户端根本不会请求它们。打包脚本会据此在包内说明里写明「语音已在包里」，
+  反过来（没抓语音的 checkout）说明里不会出现这句话，因为这属于事实陈述，不能无条件写。游戏里语音
+  **默认关闭**（设置 → 干员语音 = 0），玩家自己调高才听得见。
 * `test/` 一律不进包（省体积）。
 
 整树复制时会跳过符号链接与**点开头的条目**：打包机器的 `.DS_Store` 既不属于项目，也不该出现在别人下载的包里。
