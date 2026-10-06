@@ -6,6 +6,14 @@ export const PROTOCOL_VERSION = 1;
  * out — `v<this>-<upstream>` (README 「版本号」) — because this one has to stay a plain three-part semver. */
 export const APP_VERSION = '0.2.1';
 
+/**
+ * The moments a voice line can be played for (角色语音台词) — the ONE copy of this vocabulary: the client
+ * (`public/js/audio.js`), the asset pipeline (`tools/assets/voices.mjs`, which maps the official `voiceTitle`s onto
+ * these) and the workshop validator (`shared/workshop.js`, which only accepts these in a pack's `voices`) all read it
+ * from here, so a typo cannot silently produce a line that never plays.
+ */
+export const VOICE_SLOTS = Object.freeze(['start', 'select', 'deploy', 'battle', 'win', 'lose']);
+
 export const MAX_SEATS = 4;
 /**
  * Spectator seats of a co-op room (community report #26, owner's decision 2026-10-04) — a remake feature: the official

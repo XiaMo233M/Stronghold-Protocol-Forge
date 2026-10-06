@@ -382,6 +382,59 @@ describe('voice lines (角色语音台词): opt-in, quiet by default, never thro
       globalThis.fetch = origFetch;
     }
   });
+  test('deployments: the FIRST one announces the battle, the opening wave stays quiet, a later one (revive) says 部署', async () => {
+    const fw = fakeWindow();
+    const origFetch = globalThis.fetch;
+    const urls = [];
+    globalThis.fetch = async (u) => { urls.push(u); return { ok: true, arrayBuffer: async () => new ArrayBuffer(8) }; };
+    try {
+      const start = '/assets/audio/voice_cn/char_a/cn_019.mp3';
+      const deploy = '/assets/audio/voice_cn/char_b/cn_023.mp3';
+      const cStart = '/assets/audio/voice_cn/char_c/cn_019.mp3';
+      const m = {
+        audio: {
+          sfx: { units: { char_a: { born: '/ba.mp3' }, char_b: { born: '/bb.mp3' }, char_c: { born: '/bc.mp3' } }, battle: {} },
+          voice: {
+            char_a: { start: [start], deploy: [start] },
+            char_b: { start: [deploy], deploy: [deploy] },
+            char_c: { start: [cStart] },
+          },
+        },
+      };
+      const a = new AudioManager({ win: fw.win, getManifest: () => m });
+      a.install();
+      fw.fire('pointerdown');
+      a.setVolumes({ voice: 0.8 });
+      // the opening wave: three units deploy together (the sim fires them in one batch)
+      a.setFieldUnits([
+        { id: 1, defId: 'char_a', side: 'ally', kind: 'op' },
+        { id: 2, defId: 'char_b', side: 'ally', kind: 'op' },
+        { id: 3, defId: 'char_b', side: 'ally', kind: 'op' },
+      ]);
+      a.handleBattleEvents([['deploy', 1], ['deploy', 2], ['deploy', 3]]);
+      await new Promise((r) => setTimeout(r, 10));
+      assert.ok(asked(urls, start), 'the first deployed operator announces the battle');
+      assert.ok(!asked(urls, deploy), `the rest of the wave says nothing: ${urls.join(', ')}`);
+      // The window is a knob (see the constructor): shrink it instead of sleeping 1.5 s. A later deployment — a
+      // mid-battle placement or a revive — then speaks.
+      a.initialDeployWindowMs = 0;
+      a.handleBattleEvents([['deploy', 2]]);
+      await new Promise((r) => setTimeout(r, 10));
+      assert.ok(asked(urls, deploy), 'a later deployment says 部署');
+      // the same unit cannot say it twice within its gap
+      const before = askedCount(urls, deploy);
+      a.handleBattleEvents([['deploy', 2]]);
+      await new Promise((r) => setTimeout(r, 10));
+      assert.equal(askedCount(urls, deploy), before, 'per-unit gap still applies');
+      // a new battle resets the "who announced it" state (a fresh unit, so its own gap plays no part)
+      a.setFieldUnits([{ id: 9, defId: 'char_c', side: 'ally', kind: 'op' }]);
+      a.handleBattleEvents([['deploy', 9]]);
+      await new Promise((r) => setTimeout(r, 10));
+      assert.ok(asked(urls, cStart), `the new battle's first deployment speaks again: ${urls.join(', ')}`);
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
 });
 
 describe('impact sounds (user playtest #4 item 6)', () => {

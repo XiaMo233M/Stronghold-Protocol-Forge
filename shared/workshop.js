@@ -40,6 +40,8 @@ export const PACK_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
 /** Record ids follow the wire-id charset (shared/protocol.js isId) so an id can travel in a message. */
 const RECORD_ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
 
+import { VOICE_SLOTS } from './constants.js';
+
 const isPlainObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const fail = (error, detail) => ({ ok: false, error, detail });
 
@@ -76,6 +78,38 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     return fail('ASSETS_NEED_LICENSE',
       'this pack has an assets/ folder, so pack.json must declare a license (e.g. "CC0-1.0", "CC-BY-4.0", or "see assets/LICENSE.txt")');
   }
+  // Voice lines of a pack's own (or its 助战) operators — the RESERVED workshop half of the voice interface
+  // (docs/WORKSHOP.md §1.4, docs/ASSETS.md "Voice lines"): `voices: { <charId>: { <slot>: ["<path inside assets/>", …] } }`.
+  // The files live under the pack's assets/, so the licence gate above already applies to them, and the client reads
+  // them from /workshop-assets/<pack>/<path> — the one route that serves pack media. Only the fixed slot vocabulary is
+  // accepted, so a typo cannot silently produce a line that never plays.
+  const voices = raw.voices === undefined ? {} : raw.voices;
+  if (!isPlainObj(voices)) return fail('VOICE_BAD_SHAPE', 'voices must be an object: { "<charId>": { "<slot>": ["<path>"] } }');
+  if (Object.keys(voices).length && opts.hasAssets !== true) {
+    return fail('VOICE_NEEDS_ASSETS', 'a pack that declares voices must put the files in its assets/ folder (e.g. assets/voice/…)');
+  }
+  /** @type {Record<string, Record<string, string[]>>} */
+  const voiceLines = {};
+  for (const [charId, slots] of Object.entries(voices)) {
+    if (!/^[A-Za-z0-9_\-]{1,64}$/.test(charId)) return fail('VOICE_BAD_CHAR_ID', `"${charId}" is not a valid operator id`);
+    if (!isPlainObj(slots)) return fail('VOICE_BAD_SHAPE', `voices["${charId}"] must map slots to file lists`);
+    const clean = {};
+    for (const [slot, files] of Object.entries(slots)) {
+      if (!VOICE_SLOTS.includes(slot)) {
+        return fail('VOICE_SLOT_UNKNOWN', `"${slot}" is not a voice slot (one of: ${VOICE_SLOTS.join(', ')})`);
+      }
+      const list = (Array.isArray(files) ? files : [files]).filter((f) => typeof f === 'string' && f);
+      if (!list.length) return fail('VOICE_EMPTY', `voices["${charId}"]["${slot}"] names no file`);
+      for (const f of list) {
+        // relative, inside assets/, no traversal — the same rule the /workshop-assets route enforces
+        if (f.startsWith('/') || f.includes('\\') || f.split('/').includes('..') || /^[A-Za-z]:/.test(f)) {
+          return fail('VOICE_PATH_UNSAFE', `"${f}" must be a relative path inside assets/ (no absolute paths, no "..")`);
+        }
+      }
+      clean[slot] = [...new Set(list)].sort();
+    }
+    if (Object.keys(clean).length) voiceLines[charId] = clean;
+  }
   return {
     ok: true,
     pack: {
@@ -89,6 +123,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
       gameVersion: typeof raw.gameVersion === 'string' && raw.gameVersion ? raw.gameVersion : null,
       content,
       overrides,
+      voices: voiceLines,
     },
   };
 }

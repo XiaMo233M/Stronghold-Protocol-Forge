@@ -41,6 +41,12 @@ const MAX_VOICES = 8;
 /** Voice lines (角色语音台词): at most this many play at once, and one unit speaks at most once per gap. */
 const VOICE_MAX = 3;
 const VOICE_GAP_MS = 900;
+/**
+ * The opening wave of a battle (owner's rule 2026-10-06: 「用第一个部署的，不要一下子八句；中途复活的也可以说一句」):
+ * every unit of the initial deployment fires a `deploy` event at once, so only the FIRST one speaks (its 行动开始 line)
+ * and the rest of this window stays quiet. Anything deployed after it — a mid-battle placement or a revive — says 部署.
+ */
+const INITIAL_DEPLOY_WINDOW_MS = 1500;
 const UNIT_COOLDOWN_MS = 160;
 const URL_GAP_MS = 45;
 const MAX_PER_URL = 2;
@@ -299,6 +305,10 @@ export class AudioManager {
     this.voiceVoices = 0;     // voice lines playing right now (VOICE_MAX)
     this.voiceAt = new Map(); // charId → performance.now() of its last line (VOICE_GAP_MS)
     this.voiceLast = new Map(); // charId → the URL it said last (do not repeat it)
+    this.firstDeployAt = null;  // performance.now() of a battle's first deployment (see _voiceOnDeploy)
+    // the opening-wave window (owner's rule): injectable so a test does not have to wait 1.5 s for it to pass
+    this.initialDeployWindowMs = Number.isFinite(opts.initialDeployWindowMs)
+      ? Math.max(0, opts.initialDeployWindowMs) : INITIAL_DEPLOY_WINDOW_MS;
     this.wantBgm = null;      // desired key (kept while locked)
     this.bgm = null;          // { key, loopUrl, nodes: [{src, gain}], gain }
     this.bgmToken = 0;
@@ -639,6 +649,22 @@ export class AudioManager {
   }
 
   /**
+   * The 行动开始 / 部署 split of a deployment event (owner's rule: the first one deployed announces the battle, the rest
+   * of the opening wave stays quiet, and anything deployed later — a mid-battle placement or a revive — says 部署).
+   * @param {string} defId the unit's charId (its manifest key)
+   * @param {number} now performance.now() of the event
+   * @returns {boolean} whether a line started
+   */
+  _voiceOnDeploy(defId, now) {
+    if (this.firstDeployAt == null) {
+      this.firstDeployAt = now;
+      return this.voice(defId, 'start');
+    }
+    if (now - this.firstDeployAt < this.initialDeployWindowMs) return false;   // one voice, not eight
+    return this.voice(defId, 'deploy');
+  }
+
+  /**
    * UI sound by name (sfx.ui keys). Unknown names are ignored.
    * @param {string} name
    * @param {{ volume?: number }} [o]
@@ -688,6 +714,7 @@ export class AudioManager {
     this.units.clear();
     this.lastAttacker.clear();
     this.consumed.clear();
+    this.firstDeployAt = null;   // a new battle: its next deployment is the one that announces it
     for (const u of Array.isArray(units) ? units : []) this._track(u);
   }
 
@@ -754,6 +781,8 @@ export class AudioManager {
         } else if (kind === 'deploy') {
           const u = this.units.get(e[1]);
           if (!u || u.side === 'enemy') continue;
+          // 角色语音 (opt-in): independent of the deployment SFX, so it comes BEFORE the `url` / silence-roll exits.
+          this._voiceOnDeploy(u.def, now);
           const m = this.getManifest();
           const url = deploySfxUrl(m, u);
           if (!url) continue;

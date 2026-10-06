@@ -22,20 +22,17 @@
 //     `char_113_cqbw_epoque#7`); see voiceRelPath / voiceUrl below.
 
 import { safeName, encodePath } from './sources.mjs';
+import { VOICE_SLOTS } from '../../shared/constants.js';
+
+export { VOICE_SLOTS };
 //
 // One (charId, voiceId) pair can appear several times with different `voiceAsset` (阿米娅's lines are also filed under
 // her other forms, e.g. `char_1037_amiya3/CN_007`). The file name therefore follows the ASSET path, and a slot collects
 // every distinct URL — the client picks one at random.
 
-/** In-battle moments the remake plays a line for, in the game's own words (docs/ASSETS.md). */
-export const VOICE_SLOTS = Object.freeze([
-  'start',    // 行动出发 / 行动开始 — the battle begins
-  'select',   // 选中干员 — the player taps the unit
-  'deploy',   // 部署 — the unit is placed on the board
-  'battle',   // 作战中 — chatter during the fight (attacks / skills)
-  'win',      // 完成高难行动 / 3星结束行动
-  'lose',     // 行动失败
-]);
+// The slot vocabulary lives in `shared/constants.js` (the client, this pipeline and the workshop validator share it);
+// in the game's own words: start = 行动出发/行动开始, select = 选中干员, deploy = 部署, battle = 作战中,
+// win = 完成高难行动/3星结束行动, lose = 行动失败.
 
 /**
  * Official `voiceTitle` → slot. The ids in brackets are what the titles sit on (they are stable across the dump; the
