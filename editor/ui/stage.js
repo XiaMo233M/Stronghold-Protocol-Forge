@@ -1,8 +1,13 @@
-// editor/ui/stage.js — the 2D map placer (docs/EDITOR.md). Plain DOM + Canvas, no build step, no game-client import.
+// editor/ui/stage.js — the 2D map placer (docs/EDITOR.md). Plain DOM + Canvas, no build step.
 //
 // The placer only edits the SPEC (rows / tiles / devices); every mechanical field — the two path tables and the deploy
 // tiles — is DERIVED server-side by the sim (server/stageAuthoring.js) and shown back through /api/stages/preview, so
 // what you see on the overlays is what the engine will actually compute. Painting never invents those tables.
+//
+// It also offers a 3D preview (stage3d.js) built on the GAME's own renderer; when the local board art, WebGL2 or
+// three.js is missing it says why and stays on this 2D canvas — the same fallback the game client uses.
+
+import { createStageView3d } from './stage3d.js';
 
 const $ = (s) => document.querySelector(s);
 const CELL = 32;                 // 21 × 32 = 672 wide, 19 × 32 = 608 tall (the canvas size)
@@ -23,6 +28,10 @@ const state = {
   showDeploy: true, showPaths: true, showRoutes: true,
   routeMotion: 'WALK', draft: [],
   message: null, busy: false,
+  // 3D 预览: the game's own renderer over this map, or a documented reason to stay 2D (no local art / no WebGL2 / …)
+  mode3d: false, view3d: null, reason3d: null,
+  // `?board=3d` (the game client's convention) opens the first map straight into the 3D preview
+  auto3d: typeof location !== 'undefined' && new URLSearchParams(location.search).get('board') === '3d',
 };
 
 const canvas = $('#board');
@@ -240,6 +249,51 @@ async function preview() {
     state.preview = { ok: false, errors: [{ field: '', code: 'REQUEST', message: e.message }], warnings: [] };
   }
   draw();
+  // the 3D preview follows every edit too (setStage no-ops when the grid is unchanged, so this is cheap)
+  if (state.mode3d && state.view3d) state.view3d.update();
+  renderSide();
+}
+
+// ---- 3D 预览 (the game's own renderer) ---------------------------------------------------------------------------
+
+/**
+ * Turn the 3D preview on or off. The first switch lazily probes availability; ANY failure keeps the 2D canvas and
+ * states the reason rather than breaking the placer.
+ */
+async function toggle3d() {
+  if (state.mode3d) {
+    state.mode3d = false;
+    $('#board').hidden = false;
+    $('#board3d').hidden = true;
+    syncTools();
+    return;
+  }
+  if (!state.view3d) {
+    state.reason3d = '正在准备 3D 预览…';
+    renderSide();
+    const view = await createStageView3d({
+      canvas: $('#board3d'),
+      getStage: () => state.preview?.record ?? null,
+      onError: (e) => console.warn('[stage3d]', e),
+    });
+    if (!view.ok) {
+      state.reason3d = view.reason;
+      state.mode3d = false;
+      syncTools();
+      renderSide();
+      return;
+    }
+    state.view3d = view;
+    state.reason3d = null;
+    // a small dev handle: `__spEditor3d.stats()` / `.snapshot()` from the devtools console
+    globalThis.__spEditor3d = view;
+  }
+  state.mode3d = true;
+  $('#board').hidden = true;
+  $('#board3d').hidden = false;
+  state.view3d.resize();
+  state.view3d.update();
+  syncTools();
   renderSide();
 }
 
@@ -283,6 +337,9 @@ async function openStage(s) {
     const r = await api(`/api/stages/${encodeURIComponent(s.pack)}/${encodeURIComponent(s.id)}`);
     loadSpec(r.spec ?? { ...blankSpec(), id: s.id, name: s.name });
     renderList(); renderSide();
+    // `?board=3d` opens straight into the 3D preview (the game client's own convention, public/js/app.js); the probe
+    // still decides — on a machine without the local art or WebGL2 this stays 2D and says why.
+    if (state.auto3d && !state.mode3d) await toggle3d();
   } catch (e) { state.message = { kind: 'error', text: e.message }; renderSide(); }
 }
 
@@ -448,6 +505,18 @@ function syncTools() {
   $('#ovDeploy').className = state.showDeploy ? 'on' : '';
   $('#ovPaths').className = state.showPaths ? 'on' : '';
   $('#ovRoutes').className = state.showRoutes ? 'on' : '';
+  const b3 = $('#ov3d');
+  if (b3) {
+    b3.className = state.mode3d ? 'on' : '';
+    b3.textContent = state.mode3d ? '3D 预览（点回 2D）' : '3D 预览';
+  }
+  const hint = $('#hint3d');
+  if (hint) {
+    hint.textContent = state.reason3d ?? (state.mode3d
+      ? '拖动平移 · 滚轮缩放 · Shift+拖动（或右键拖动）调俯角。这一层是游戏自己的 3D 渲染器跑你这张地图。'
+      : '');
+    hint.className = state.reason3d ? 'hint warn' : 'hint';
+  }
 }
 
 async function saveStage() {
@@ -493,6 +562,7 @@ $('#toolDevice').addEventListener('click', () => { state.tool = 'device'; syncTo
 $('#toolErase').addEventListener('click', () => { state.tool = 'erase'; syncTools(); });
 $('#toolRoute').addEventListener('click', () => { state.tool = 'route'; syncTools(); renderSide(); });
 $('#ovRoutes').addEventListener('click', () => { state.showRoutes = !state.showRoutes; syncTools(); draw(); });
+$('#ov3d').addEventListener('click', () => { void toggle3d(); });
 $('#ovDeploy').addEventListener('click', () => { state.showDeploy = !state.showDeploy; syncTools(); draw(); });
 $('#ovPaths').addEventListener('click', () => { state.showPaths = !state.showPaths; syncTools(); draw(); });
 

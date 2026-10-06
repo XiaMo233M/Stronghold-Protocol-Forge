@@ -47,6 +47,16 @@ const BODY_LIMIT = 1 << 20; // 1 MB is far beyond any spec
 const quietLog = { info() {}, warn() {}, error() {}, debug() {} };
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml' };
 
+/** What the 3D preview may pull from `public/` (modules and their data) — never an arbitrary client file. */
+const CLIENT_PREVIEW_TYPES = new Set(['.js', '.mjs', '.json', '.css']);
+/** …and from `public/assets/`: the board art the local-client manifest points at. */
+const ART_TYPES = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.json', '.obj', '.bin', '.atlas', '.skel']);
+const ART_MIME = new Map([
+  ['.png', 'image/png'], ['.jpg', 'image/jpeg'], ['.jpeg', 'image/jpeg'], ['.webp', 'image/webp'], ['.gif', 'image/gif'],
+  ['.json', 'application/json; charset=utf-8'], ['.obj', 'text/plain; charset=utf-8'], ['.bin', 'application/octet-stream'],
+  ['.js', 'text/javascript; charset=utf-8'], ['.mjs', 'text/javascript; charset=utf-8'], ['.css', 'text/css; charset=utf-8'],
+]);
+
 const readJson = (p, fallback = null) => {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return fallback; }
 };
@@ -799,6 +809,51 @@ export async function createEditorServer(opts = {}) {
         spec: ids ? readJson(path.join(packDir, WAVE_SPEC_DIR, `${ids.slug}.json`), null) : null,
         record: (readJson(path.join(packDir, 'waves.json'), {}) || {})[waveId] ?? null,
       });
+    }
+
+    // ---- 3D 预览的只读素材通路 ----------------------------------------------------------------------
+    //
+    // The map editor can show a map in the game's OWN 3D renderer (public/js/render/board3d). That is the whole point:
+    // the preview is the game's code over the map's data, so it cannot drift from what players will see — the same
+    // reason the path tables come from server/sim/grid.js instead of being re-implemented here.
+    //
+    // Three read-only mounts, all inside this repo and all localhost-only (the editor binds 127.0.0.1 by default):
+    //   /client/**        the client modules the 3D stack imports (relative imports resolve inside this tree)
+    //   /vendor/**        the vendored three.js build (tools/vendor.mjs)
+    //   /assets/local/**  the board art the local-client manifest points at
+    // plus /data/local-assets.json itself. Nothing is writable, nothing is listed, and `..`/dot-segments are refused.
+    // When the art is absent the probe fails and the editor stays on the 2D canvas — the game client's own fallback.
+    if (method === 'GET' || method === 'HEAD') {
+      const previewMounts = [
+        { prefix: '/client/', root: path.join(REPO_ROOT, 'public'), only: CLIENT_PREVIEW_TYPES },
+        { prefix: '/vendor/', root: path.join(REPO_ROOT, 'public', 'vendor'), only: CLIENT_PREVIEW_TYPES },
+        { prefix: '/assets/', root: path.join(REPO_ROOT, 'public', 'assets'), only: ART_TYPES },
+      ];
+      const mount = previewMounts.find((m) => p.startsWith(m.prefix));
+      if (mount) {
+        const segments = p.slice(mount.prefix.length).split('/').filter((s) => s.length > 0);
+        const ext = segments.length ? path.extname(segments[segments.length - 1]).toLowerCase() : '';
+        const bad = !segments.length || segments.some((s) => s === '..' || s === '.' || s.startsWith('.')) || !mount.only.has(ext);
+        if (bad) throw Object.assign(new Error('not found'), { status: 404 });
+        const abs = path.join(mount.root, ...segments);
+        if (!abs.startsWith(mount.root + path.sep)) throw Object.assign(new Error('forbidden'), { status: 403 });
+        let body;
+        try {
+          if (!fs.statSync(abs).isFile()) throw new Error('not a file');
+          body = await fsp.readFile(abs);
+        } catch { throw Object.assign(new Error('not found'), { status: 404 }); }
+        res.writeHead(200, { 'Content-Type': ART_MIME.get(ext) ?? 'application/octet-stream', 'Content-Length': body.length, 'Cache-Control': 'no-cache' });
+        res.end(method === 'HEAD' ? undefined : body);
+        return;
+      }
+      // the local-art manifest itself; its `path` fields are absolute `/assets/local/...` URLs, served by the mount above
+      if (p === '/data/local-assets.json') {
+        let body;
+        try { body = await fsp.readFile(path.join(DATA_DIR, 'local-assets.json')); } catch { throw Object.assign(new Error('not found'), { status: 404 }); }
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': body.length, 'Cache-Control': 'no-cache' });
+        res.end(method === 'HEAD' ? undefined : body);
+        return;
+      }
     }
 
     // ---- the editor's own UI (never the game's) -----------------------------------------------------

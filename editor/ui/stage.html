@@ -76,8 +76,11 @@
       <button id="ovRoutes" class="on">显示路线</button>
       <button id="ovDeploy" class="on">显示部署区</button>
       <button id="ovPaths" class="on">显示寻路</button>
+      <button id="ov3d">3D 预览</button>
     </div>
     <canvas id="board" width="672" height="608"></canvas>
+    <canvas id="board3d" width="672" height="608" hidden style="width:100%;max-width:672px;height:608px"></canvas>
+    <p class="hint" id="hint3d"></p>
     <p class="hint" id="cursor">把鼠标移到网格上看坐标。**row 0 在最下面一行**（和引擎一致）。</p>
     <div class="panel">
       <h2 style="margin-top:0">地形调色板</h2>

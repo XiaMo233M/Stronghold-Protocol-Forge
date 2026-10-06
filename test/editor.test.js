@@ -481,3 +481,100 @@ describe('workshop editor: waves (the timeline API)', () => {
     assert.equal((await fetch(`${editor.url}/wave.js`)).status, 200);
   });
 });
+
+describe('workshop editor: the 3D preview mounts (read-only, and narrow)', () => {
+  test('the game modules, three.js, the manifest and the board art are served', async () => {
+    for (const [p, type] of [
+      ['/client/js/render/board3d/load.js', /javascript/],
+      ['/client/js/render/board3d/scene.js', /javascript/],
+      ['/client/js/render/projection.js', /javascript/],
+      ['/vendor/three.module.js', /javascript/],
+      ['/data/local-assets.json', /application\/json/],
+    ]) {
+      const r = await fetch(`${editor.url}${p}`);
+      assert.equal(r.status, 200, p);
+      assert.match(r.headers.get('content-type') || '', type, p);
+    }
+    // the client module must be the real one, not a stub: the preview imports this exact file
+    const load = await fetch(`${editor.url}/client/js/render/board3d/load.js`).then((r) => r.text());
+    assert.match(load, /export function loadBoardPack/);
+    assert.match(load, /export function webgl2Available/);
+  });
+
+  test('the board art is served when this machine has it, and its absence is not an error', async () => {
+    // the manifest is the source of truth for whether the 3D preview can work at all; on a host with no local-client
+    // extraction the file is simply absent and the editor stays on the 2D canvas
+    const manifestRes = await fetch(`${editor.url}/data/local-assets.json`);
+    const manifest = manifestRes.status === 200 ? await manifestRes.json() : null;
+    if (!manifest) {
+      // no art on this machine: the editor must still serve its own pages (the fallback path)
+      assert.equal((await fetch(`${editor.url}/stage.html`)).status, 200);
+      return;
+    }
+    const entry = manifest.groups?.['map/autochess']?.TX_autochessi_D;
+    if (!entry?.path) return; // listed differently: nothing to assert about the art itself
+    const art = await fetch(`${editor.url}${entry.path}`);
+    assert.equal(art.status, 200, entry.path);
+    assert.match(art.headers.get('content-type') || '', /image\/png/);
+    assert.ok(Number(art.headers.get('content-length')) > 1000, 'the atlas must be real bytes');
+  });
+
+  test('it is not a file server: escapes, foreign extensions and other data files are refused', async () => {
+    const attempts = [
+      '/client/js/render/board3d/evil.exe',
+      '/client/js/render/board3d/../../../../package.json',
+      '/client/../data/chess.json',
+      '/assets/local/../../server/index.js',
+      '/assets/local/map/autochess/tiles.js',   // a .js under assets/ is not in the art allowlist
+      '/assets/local/map/autochess/.hidden.png',
+      '/data/chess.json',                        // only local-assets.json is exposed, not the whole data dir
+      '/data/waves.json',
+      '/vendor/../server/index.js',
+    ];
+    for (const p of attempts) {
+      const r = await fetch(`${editor.url}${p}`);
+      assert.ok(r.status === 404 || r.status === 403, `${p} -> ${r.status}`);
+    }
+  });
+
+  test('the 3D mounts do not shadow the editor\'s own pages', async () => {
+    // `/` still serves the operator editor, and adding /client/, /vendor/, /assets/ changed nothing about it
+    assert.match(await fetch(`${editor.url}/`).then((r) => r.text()), /创意工坊编辑器/);
+    assert.equal((await fetch(`${editor.url}/stage.js`)).status, 200);
+    assert.equal((await fetch(`${editor.url}/stage3d.js`)).status, 200);
+    const html = await fetch(`${editor.url}/stage.html`).then((r) => r.text());
+    assert.match(html, /id="ov3d"/, 'the placer must offer the 3D toggle');
+    assert.match(html, /id="board3d"/, 'and the canvas the preview draws into');
+  });
+
+  test('the 3D module states its four availability checks and falls back instead of throwing', async () => {
+    const src = await fetch(`${editor.url}/stage3d.js`).then((r) => r.text());
+    for (const probe of ['boardArtListed', 'webgl2Available', 'loadThree', 'loadBoardPack']) {
+      assert.match(src, new RegExp(probe), `stage3d.js must check ${probe}`);
+    }
+    assert.match(src, /ok: false, reason/, 'every failure must produce a reason, not an exception');
+    assert.match(src, /已退回 2D/, 'and the reason must say it stayed on 2D');
+    // it reuses the game's renderer rather than re-drawing the board
+    assert.match(src, /board3d\/scene\.js/, 'must use the game BoardScene');
+    assert.match(src, /render\/projection\.js/, 'must use the game camera');
+    assert.doesNotMatch(src, /new THREE\.BoxGeometry|buildBoard\(/, 'must not re-implement the board geometry');
+  });
+
+  test('the four scene settings that each silently render a broken preview are present', async () => {
+    // Every one of these was found by rendering a real map and reading the frame back. Each failure mode is silent
+    // (the canvas just looks black or half-empty), so they are asserted rather than left to the next reader to rediscover.
+    const src = await fetch(`${editor.url}/stage3d.js`).then((r) => r.text());
+    // 1. BoardScene builds only the tiles inside its current `area`; the default is a PARTIAL map (137 of 399 tiles)
+    assert.match(src, /setArea\(AREAS\.all\)/, 'must build the whole board (AREAS.all), not the default partial area');
+    // 2. everything outside the focus rect is dimmed to 28% — without this the board is nearly black
+    assert.match(src, /setFocus\(null\)/, 'must light the whole board (setFocus(null) = everything lit)');
+    // 3. the scene fogs 17→36 into a near-black colour, tuned for the game\'s ~16-unit camera
+    assert.match(src, /fog\.near\s*=/, 'must push the battle fog past the overview distance');
+    // 4. cx/cy are the camera\'s screen centre in px; leaving them at 0 shifts the view half a screen and the board
+    //    ends up in a corner of an otherwise empty canvas
+    assert.match(src, /cam\.cx\s*=\s*cssW\s*\/\s*2/, 'must centre the view offset (cx) on the canvas');
+    assert.match(src, /cam\.cy\s*=\s*cssH\s*\/\s*2/, 'must centre the view offset (cy) on the canvas');
+    // and the framing is derived from what the board actually built, never from assumed tile coordinates
+    assert.match(src, /board\?\.bounds/, 'must frame from the built board\'s bounds');
+  });
+});
