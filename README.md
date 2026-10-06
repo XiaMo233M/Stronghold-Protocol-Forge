@@ -1,6 +1,6 @@
 # Stronghold-Protocol-Forge · 卫戍协议工坊编辑器
 
-![version](https://img.shields.io/badge/version-0.2.1-2ea44f)
+![version](https://img.shields.io/badge/version-0.3.0-2ea44f)
 ![license](https://img.shields.io/badge/code%20license-GPL--3.0--or--later-blue)
 ![node](https://img.shields.io/badge/node-22%20%7C%2024-339933)
 
