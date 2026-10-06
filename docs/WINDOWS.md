@@ -44,12 +44,16 @@ node\node.exe            官方 Windows x64 便携版 Node（版本与 sha256 �
 node\LICENSE-node.txt    Node 自己的许可证（MIT，与 node.exe 出自同一个官方归档）
 app\                     游戏本体：代码 + 生产依赖 + public（全部素材）+ data，完全离线
 启动游戏.bat             app\scripts\launch.mjs --no-setup
+启动编辑器.bat           app\tools\workshop-editor.mjs --open（工坊编辑器 = 本仓库存在的理由）
+安装工坊包.bat           把一个包 .zip 拖到这个文件上即装好（app\tools\workshop-pack.mjs import）
 README-开箱即用.md       给玩家看的说明（含非官方 / 严禁盈利 / 素材版权声明）
 LICENSE / NOTICE.md / THIRD-PARTY-NOTICES.md
 ```
 
 把整个文件夹拷到目标电脑 —— **什么都不用安装**，双击 `启动游戏.bat` 即可（等于 `app\scripts\launch.mjs --no-setup`：
-素材已经在包里，跳过联网准备，直接起服务器并打开浏览器）。
+素材已经在包里，跳过联网准备，直接起服务器并打开浏览器）。想开工坊编辑器就双击 `启动编辑器.bat`；
+拿到一个工坊包 `.zip` 就把它**拖到 `安装工坊包.bat` 上**（等于 `app\tools\workshop-pack.mjs import`，装到 `app\workshop\<包id>\`，
+重启游戏服务器后生效 —— 没拖文件时 CLI 自己会说用法，窗口因为非 0 退出码停住）。
 卸载＝删除文件夹（不写注册表、不放系统目录）。素材约 330 MB（**再算上角色语音台词约 470 MB**）是硬成本，
 包因此比较大。
 

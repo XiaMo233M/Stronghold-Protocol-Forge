@@ -394,17 +394,23 @@ export function bat(body) {
 }
 
 /**
- * 包根那两个双击入口：文件名 → `bat()` 里的命令体。
+ * 包根那几个双击入口：文件名 → `bat()` 里的命令体。
  *
- * **两个都要有，因为本仓库是 Forge**：编辑器就是产品，只给 `启动游戏.bat` 等于把仓库存在的理由留在包里没人看得见。
+ * **游戏与编辑器都要有，因为本仓库是 Forge**：编辑器就是产品，只给 `启动游戏.bat` 等于把仓库存在的理由留在包里没人看得见。
  * 游戏那份带 `--no-setup`（素材已经在包里，不需要联网准备）；编辑器那份带 `--open`（双击就该看见界面），
- * 它不碰素材，所以没有 setup 这一步。两份都用包内便携 Node（`%NODE%` 由 `bat()` 解析）。
+ * 它不碰素材，所以没有 setup 这一步。三份都用包内便携 Node（`%NODE%` 由 `bat()` 解析）。
+ *
+ * `安装工坊包.bat` 是给**没有编辑器**的玩家用的：把一个包 `.zip` 拖到这个 .bat 上即装好
+ * （`tools/workshop-pack.mjs import`）。作者那边用编辑器的「包管理」页，两条路走的是同一批函数，
+ * 所以「装完之后包长什么样」不可能不一样。没拖文件时透传空参数，CLI 自己会用中文说明用法并以 2 退出，
+ * 于是 `bat()` 的「非 0 就暂停」把窗口停住 —— 不用在这里塞中文，命令体保持纯 ASCII。
  * @returns {Record<string, string>}
  */
 export function bundleLaunchers() {
   return {
     '启动游戏.bat': '"%NODE%" "%HERE%app\\scripts\\launch.mjs" --no-setup %*',
     '启动编辑器.bat': '"%NODE%" "%HERE%app\\tools\\workshop-editor.mjs" --open %*',
+    '安装工坊包.bat': '"%NODE%" "%HERE%app\\tools\\workshop-pack.mjs" import %*',
   };
 }
 
@@ -433,11 +439,13 @@ node\\LICENSE-node.txt    Node 自己的许可证（MIT）
 app\\                    游戏本体：server / shared / public（全部素材）/ data / editor / scripts / tools
 启动游戏.bat             app\\scripts\\launch.mjs --no-setup（开服，浏览器自动打开）
 启动编辑器.bat           app\\tools\\workshop-editor.mjs --open（工坊编辑器，127.0.0.1:3311）
+安装工坊包.bat           把一个工坊包 .zip 拖到这个文件上即装好
 README-开箱即用.md       本文件
 LICENSE / NOTICE.md / THIRD-PARTY-NOTICES.md`
     : `app\\                    游戏本体：server / shared / public（全部素材）/ data / editor / scripts / tools
 启动游戏.bat             app\\scripts\\launch.mjs --no-setup（开服，浏览器自动打开）
 启动编辑器.bat           app\\tools\\workshop-editor.mjs --open（工坊编辑器，127.0.0.1:3311）
+安装工坊包.bat           把一个工坊包 .zip 拖到这个文件上即装好
 README-开箱即用.md       本文件
 LICENSE / NOTICE.md / THIRD-PARTY-NOTICES.md
 
@@ -446,7 +454,8 @@ LICENSE / NOTICE.md / THIRD-PARTY-NOTICES.md
   return `# 卫戍协议：盟约 · Windows 开箱即用包
 
 解压后**双击 \`启动游戏.bat\`** 即可开服（素材与依赖都在包里，不需要再下载任何东西）；
-双击 **\`启动编辑器.bat\`** 打开工坊编辑器（本仓库的主角）。
+双击 **\`启动编辑器.bat\`** 打开工坊编辑器（本仓库的主角）；
+拿到别人做的工坊包就把那个 \`.zip\` **拖到 \`安装工坊包.bat\`** 上松开（装进 \`app\\workshop\\\`，重启游戏服务器后生效）。
 ${nodeNeed}
 
 **不联网也能玩**：美术 / 音频 / 依赖 / 字体全部在包内，断网时用自带的 \`app\\public\\fonts\`

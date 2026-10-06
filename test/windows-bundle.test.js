@@ -173,25 +173,31 @@ describe('make-windows-bundle.mjs: PowerShell 单引号转义', () => {
   });
 });
 
-describe('make-windows-bundle.mjs: 包根的两个双击入口（游戏 + 编辑器）', () => {
-  test('两个 .bat 都在，且各自指向正确的入口', async () => {
+describe('make-windows-bundle.mjs: 包根的双击入口（游戏 + 编辑器 + 安装工坊包）', () => {
+  test('三个 .bat 都在，且各自指向正确的入口', async () => {
     const { bundleLaunchers } = await mod('scripts/make-windows-bundle.mjs');
     const l = bundleLaunchers();
-    assert.deepEqual(Object.keys(l).sort(), ['启动编辑器.bat', '启动游戏.bat'].sort(), '本仓库是 Forge：编辑器必须有它自己的入口');
+    assert.deepEqual(Object.keys(l).sort(), ['安装工坊包.bat', '启动编辑器.bat', '启动游戏.bat'].sort(),
+      '本仓库是 Forge：编辑器必须有它自己的入口；没有编辑器的玩家也要能装包');
     assert.match(l['启动游戏.bat'], /app\\scripts\\launch\.mjs/, '游戏走 scripts/launch.mjs');
     assert.match(l['启动游戏.bat'], /--no-setup/, '素材已在包内，不再跑 setup');
     assert.match(l['启动编辑器.bat'], /app\\tools\\workshop-editor\.mjs/, '编辑器走 tools/workshop-editor.mjs');
     assert.match(l['启动编辑器.bat'], /--open\b/, '双击就该看见界面');
     assert.ok(!/--no-setup/.test(l['启动编辑器.bat']), '编辑器不碰素材，没有 setup 这回事');
+    assert.match(l['安装工坊包.bat'], /app\\tools\\workshop-pack\.mjs"? import %\*/, '安装包走 CLI 的 import，参数透传（拖进来的 .zip）');
   });
 
-  test('两个入口都优先用包内便携 Node，并带上命令行参数，结束码非 0 时暂停', async () => {
+  test('三个入口都优先用包内便携 Node，并带上命令行参数，结束码非 0 时暂停', async () => {
     const { bundleLaunchers, bat } = await mod('scripts/make-windows-bundle.mjs');
     const text = Object.values(bundleLaunchers()).map((body) => bat(body)).join('\n');
     assert.match(text, /%HERE%node\\node\.exe/, '先找包内 node.exe');
     assert.match(text, /set "NODE=node"/, '没有便携 Node 时退回 PATH 上的 node');
-    assert.match(text, /%\*/, '透传参数（换端口 / 换工坊目录）');
+    assert.match(text, /%\*/, '透传参数（换端口 / 换工坊目录 / 拖进来的 .zip 路径）');
     assert.match(text, /if not "%CODE%"=="0" pause/, '失败时停住窗口，双击的人能看见错误');
+    // 命令体保持纯 ASCII（中文只在文件名与 CLI 自己的输出里）：.bat 的编码随代码页走，混中文最容易变成乱码
+    for (const [name, body] of Object.entries(bundleLaunchers())) {
+      assert.ok(!/[\u4e00-\u9fff]/.test(body), `${name} 的命令体不该含中文`);
+    }
   });
 
   test('包内说明写明编辑器入口、端口与「保存后要重启服务器」', async () => {
@@ -204,6 +210,8 @@ describe('make-windows-bundle.mjs: 包根的两个双击入口（游戏 + 编辑
       assert.match(r, /app\\docs\\prompts/, `withNode=${withNode}: 官方 prompt 的位置`);
       assert.match(r, /app\\workshop/, `withNode=${withNode}: 只写 workshop/ 与 data/support.json`);
       assert.match(r, /启动编辑器\.bat --port 3400/, `withNode=${withNode}: 换端口的方式`);
+      assert.match(r, /安装工坊包\.bat/, `withNode=${withNode}: 装包入口（拖放 .zip）`);
+      assert.match(r, /app\\workshop\\/, `withNode=${withNode}: 要说明装到哪里`);
     }
   });
 });
@@ -228,6 +236,30 @@ describe('仓库里的启动脚本：编辑器与游戏各一份，一键可用'
     for (const [name, t] of [['start-windows.bat', win], ['start.sh', sh]]) {
       assert.match(t, /scripts[\\/]launch\.mjs/, `${name}: 走游戏启动器`);
       assert.ok(!/workshop-editor/.test(t), `${name}: 不是编辑器脚本`);
+    }
+  });
+
+  test('安装工坊包的脚本（Windows 拖放 / POSIX 命令行）都在，且都在用同一个 CLI', () => {
+    const winPath = path.join(ROOT, 'scripts/install-workshop-pack.bat');
+    const shPath = path.join(ROOT, 'scripts/install-workshop-pack.sh');
+    assert.ok(fs.existsSync(winPath) && fs.existsSync(shPath), '两个平台各一份');
+    const win = fs.readFileSync(winPath, 'utf8');
+    const sh = fs.readFileSync(shPath, 'utf8');
+    for (const [name, t] of [['install-workshop-pack.bat', win], ['install-workshop-pack.sh', sh]]) {
+      assert.match(t, /tools[\\/]workshop-pack\.mjs/, `${name}: 走包管理 CLI（与编辑器的包管理页共用同一批函数）`);
+      assert.match(t, /import/, `${name}: 装包就是 import`);
+      // 装包只读 zip、只写 workshop/<packId>/，不需要 node_modules —— 别顺手加一步 npm ci 让人以为要装依赖
+      assert.ok(!/npm (ci|install)/.test(t), `${name}: 不该要求安装依赖`);
+      assert.ok(!/launch\.mjs|workshop-editor\.mjs/.test(t), `${name}: 不是开服 / 开编辑器的脚本`);
+    }
+    assert.match(win, /chcp 65001/, 'Windows 脚本要设代码页，中文提示才不会乱码');
+    assert.match(win, /%~1|%\*/, '拖进来的 .zip 路径必须传下去');
+    assert.match(sh, /"\$@"/, 'POSIX 侧参数原样传下去');
+    // .bat 必须是 CRLF（LF 的 .bat 在 cmd 里对 goto/label 不可靠）；两者都不能有 BOM
+    for (const [name, p] of [['.bat', winPath], ['.sh', shPath]]) {
+      const buf = fs.readFileSync(p);
+      assert.ok(!(buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf), `${name}: 不能有 BOM`);
+      if (name === '.bat') assert.ok(buf.includes(Buffer.from('\r\n')), '.bat 必须是 CRLF');
     }
   });
 });
