@@ -43,7 +43,7 @@ describe('user playtest #4 item 13: no screen-sized UI flash (mock battle, headl
       const problems = [];
       page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
       await page.setViewport({ width: w, height: h });
-      await page.goto(`http://127.0.0.1:${srv.port}/dev/game-mock.html?shot=1&render=engine&phase=COMBAT`, { waitUntil: 'networkidle0' });
+      await page.goto(`http://127.0.0.1:${srv.port}/dev/game-mock.html?shot=1&render=engine&phase=COMBAT`, { waitUntil: 'load' });
       await page.waitForFunction(() => !!document.querySelector('.screen:not(.gload)') && globalThis.__SP_VIEW__?.raw?.mode === 'battle', { timeout: 30000 });
       await sleep(1500);
       const r = await page.evaluate(async () => {

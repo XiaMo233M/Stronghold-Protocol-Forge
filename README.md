@@ -189,7 +189,7 @@ npm start          # 启动服务器：http://localhost:3000
 
 ```bash
 node tools/workshop-scaffold.mjs docs/examples/operator-spec.json --pack my-pack   # spec → 合法工坊包
-node tools/workshop-validate.mjs workshop                                          # 三层校验（含真实引擎）
+node tools/workshop-validate.mjs workshop                                          # 分层校验（含真实引擎）
 npm run editor                                                                     # 打开工坊编辑器（独立工具）
 ```
 
@@ -200,11 +200,28 @@ npm run editor                                                                  
 
 ```bash
 npm run dev                 # node --watch：改动服务器代码后自动重启
-node --test                 # 单元 + 集成测试（约 3170 项；缺少素材 / 浏览器的用例会自动跳过）
+node --test                 # 单元 + 集成测试（约 3870 项；缺少素材 / 浏览器的用例会自动跳过）
 SP_E2E=1 node --test test/ui/mock.e2e.test.js        # 浏览器端到端测试，需要本机 Chrome（CHROME_PATH 可指定路径）
 SP_REAL_E2E=1 node --test test/ui/real.e2e.test.js   # 需要 Chrome + 已下载的素材
 RENDER_E2E=1 node --test 'test/render/*.browser.test.js'   # 渲染测试，部分需要本地提取的棋盘贴图
 ```
+
+浏览器用例的两个前提（缺一个就整批静默 skip，看起来像「通过了」）：
+
+- **`puppeteer-core`** 是 devDependency，`npm ci` / `npm install` 会装上；只 `npm ci --omit=dev` 就没有。
+- **`CHROME_PATH`**：默认值写的是 macOS 的 Chrome 路径，所以 Windows/Linux 上必须显式指定，否则
+  `existsSync(CHROME)` 为假，套件直接跳过。Windows 上系统自带 Edge 就能用：
+
+  ```powershell
+  $env:CHROME_PATH = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
+  $env:SP_E2E = "1"; $env:RENDER_E2E = "1"
+  node --test test/ui/mock.e2e.test.js
+  ```
+
+**等待约定**：浏览器用例一律用「导航到 `load` + 等一个语义条件」（`waitForSelector` / `waitForFunction`），
+**不要用 `waitUntil: 'networkidle0'`** —— 它是个靠连接计数器收尾的启发式，Puppeteer 官方也不推荐，实测会让
+某些页面（`phase=HIDDEN_CORE`）在 `readyState === 'complete'`、零失败请求、飞行中请求为空的情况下仍然等到超时。
+需要「没有东西挂住」这条保证时，改成导航后显式断言「还有没有 HTTP 请求在飞」，并排除 WebSocket（长连接是正常的）。
 
 - 游戏数据由 `npm run build-data`（`tools/build-data.mjs`）从官方数据表生成，不要手工修改 `data/*.json`。
 - GitHub Actions（[.github/workflows/ci.yml](.github/workflows/ci.yml)）在 Ubuntu 与 Windows、Node 22 / 24 上运行 `npm ci`、`node --test` 和服务器冒烟测试。

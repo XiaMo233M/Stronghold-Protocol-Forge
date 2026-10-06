@@ -112,7 +112,7 @@ describe('user playtest #3 items 1 and 7 (mock match, headless Chrome)', { skip 
     page.on('console', (m) => { if (m.type() === 'error') problems.push(`console: ${m.text()}`); });
     page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
     await page.setViewport({ width: w, height: h });
-    await page.goto(`http://127.0.0.1:${srv.port}/dev/game-mock.html?shot=1&render=engine&${query}`, { waitUntil: 'networkidle0' });
+    await page.goto(`http://127.0.0.1:${srv.port}/dev/game-mock.html?shot=1&render=engine&${query}`, { waitUntil: 'load' });
     await page.waitForFunction(() => !!document.querySelector('.screen:not(.gload)') && !!globalThis.__SP_VIEW__?.raw?.debug, { timeout: 30000 });
     await page.evaluate(installHelpers);
     await sleep(2000); // Spine models
@@ -410,7 +410,7 @@ describe('user playtest #3 items 1 and 7 (mock match, headless Chrome)', { skip 
     const problems = [];
     page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
     await page.setViewport({ width: 844, height: 390, deviceScaleFactor: 2, isMobile: true, hasTouch: true, isLandscape: true });
-    await page.goto(`http://127.0.0.1:${srv.port}/dev/game-mock.html?shot=1&render=engine&phase=PREP`, { waitUntil: 'networkidle0' });
+    await page.goto(`http://127.0.0.1:${srv.port}/dev/game-mock.html?shot=1&render=engine&phase=PREP`, { waitUntil: 'load' });
     await page.waitForFunction(() => !!document.querySelector('.screen:not(.gload)') && !!globalThis.__SP_VIEW__?.raw?.debug, { timeout: 30000 });
     await page.evaluate(installHelpers);
     await page.evaluate(() => globalThis.__MOCK__.mutate((S) => { S.priv.hand[5] = null; }));
