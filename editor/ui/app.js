@@ -5,6 +5,13 @@
 // 界面文案走 i18n：t('中文原文') 查英文词典，查不到就原样返回中文（editor/ui/i18n.js 说明了这个取舍）。
 
 import { t, mountI18n } from './i18n.js';
+// 服务端把 /shared/ 也挂给了编辑器界面，所以这几个模块在浏览器与 node 下是同一个文件：
+// 范围与伤害分类的推导规则只有一份（shared/chessAuthoring.js），界面显示的就是引擎真正会用的那份。
+import { classify, DEFAULT_MELEE_RANGE, DEFAULT_RANGED_RANGE } from '../../shared/chessAuthoring.js';
+import {
+  matchOperators, idConflict, renameNotice, statRefView,
+  subProfessionChoices, rangePresets, gridKey, gridMatrix,
+} from './operatorWizard.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -34,7 +41,14 @@ async function api(path, opts) {
 /** 服务端的报错文案是中文，命中词典就翻（带插值的原文命中不了，原样显示）。 */
 const errText = (e) => t(e?.message ?? String(e));
 
-const state = { data: null, packId: null, slug: null, spec: null, preview: null, message: null, busy: false };
+/** 数值显示：整数不带小数点，小数最多一位（尺子上不需要更多精度）。 */
+const fmtNum = (n) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 10) / 10));
+
+const state = {
+  data: null, packId: null, slug: null, spec: null, preview: null, message: null, busy: false,
+  // 「以模板新建」的选择器是否打开，以及搜索串
+  picking: false, pickQuery: '',
+};
 
 // ---- the spec model ----------------------------------------------------------------------------------------------
 
@@ -98,8 +112,15 @@ function renderOps() {
   box.replaceChildren();
   const pack = state.data?.packs.find((p) => p.id === state.packId);
   if (!pack) { box.append(h('div', { class: 'item' }, h('div', { class: 'm' }, t('先在左边选一个工坊包')))); return; }
-  box.append(h('div', { class: 'item', onclick: () => { state.slug = null; state.spec = blankSpec(); state.preview = null; renderShell(); } },
-    h('div', { class: 'n ok' }, t('＋ 新建干员'))));
+  box.append(h('div', {
+    class: 'item',
+    onclick: () => { state.slug = null; state.spec = blankSpec(); state.preview = null; state.picking = false; renderShell(); },
+  }, h('div', { class: 'n ok' }, t('＋ 新建干员')), h('div', { class: 'm' }, t('从空白表单开始'))));
+  // 「以模板新建」是省事的那条路：官方的数值、分支、攻击范围、技能、天赋与外观一次填好，改个 id 与名字就能用。
+  box.append(h('div', {
+    class: `item${state.picking ? ' on' : ''}`,
+    onclick: () => { state.slug = null; state.spec = null; state.preview = null; state.picking = true; state.pickQuery = ''; renderShell(); },
+  }, h('div', { class: 'n ok' }, t('⧉ 以模板新建')), h('div', { class: 'm' }, t('复制一个现成干员的数值、范围、技能与外观'))));
   for (const spec of pack.specs) {
     const base = pack.operators.find((o) => o.name && !o.isGolden && o.chessId.endsWith('_a') && o.chessId.includes(spec.id));
     const errs = pack.operators.filter((o) => o.chessId.includes(spec.id)).reduce((n, o) => n + o.issues.filter((i) => i.severity === 'error').length, 0);
@@ -131,11 +152,53 @@ function select(list, get, set) {
   return el;
 }
 
+/**
+ * 数值参照条：官方同职业的 min～max（以及中位），加一根当前值的落点。
+ * 作者填 1400 生命、450 攻击时本来没有任何参照；这把尺子让他一眼看出自己是不是捏了个超模干员。
+ */
+function statBar(value, ref) {
+  const view = statRefView(value, ref);
+  if (!view) return null;
+  const beyond = view.where !== 'in';
+  return h('div', { style: 'margin-top:3px' },
+    h('div', { style: 'position:relative;height:4px;background:#12141a;border:1px solid var(--line);border-radius:3px' },
+      h('div', { style: `position:absolute;left:${(view.ratio * 100).toFixed(1)}%;top:-3px;width:2px;height:8px;background:${beyond ? 'var(--warn)' : 'var(--acc)'}` })),
+    h('div', { class: `hint${beyond ? ' warn' : ''}`, style: 'font-size:11px' },
+      t('官方区间 {0}–{1}（中位 {2}）', fmtNum(view.ref.min), fmtNum(view.ref.max), fmtNum(view.ref.p50)),
+      view.where === 'above' ? ` · ${t('高于官方上限')}` : view.where === 'below' ? ` · ${t('低于官方下限')}` : ''));
+}
+
+/** 小格阵预览：亮格 = 能打到，深色那一格 = 干员自己站的位置。 */
+function gridPreview(grid) {
+  const m = gridMatrix(grid);
+  if (!m) return null;
+  const wrap = h('div', { style: `display:grid;grid-template-columns:repeat(${m.cols},14px);gap:2px` });
+  for (let r = 0; r < m.rows; r++) {
+    for (let c = 0; c < m.cols; c++) {
+      const on = m.cells[r][c];
+      const here = r === m.origin.y && c === m.origin.x;
+      const bg = here ? '#5b9dff' : (on ? '#2b4a7a' : 'transparent');
+      wrap.append(h('div', { style: `width:14px;height:14px;border-radius:2px;border:1px solid var(--line);background:${bg}` }));
+    }
+  }
+  return wrap;
+}
+
+/** 表单没给 rangeGrid 时引擎实际会用的形状（规则与 shared/chessAuthoring.js 完全一致）。 */
+function defaultGrid(s) {
+  const cls = classify({ profession: s.profession, subProfessionId: s.subProfessionId, position: s.position, traitDesc: s.traitDesc });
+  return (cls.attackKind === 'melee' || cls.attackKind === 'none') ? DEFAULT_MELEE_RANGE : DEFAULT_RANGED_RANGE;
+}
+
+const dmgLabel = (v) => (v === 'arts' ? t('法术') : (v === 'heal' ? t('治疗') : t('物理')));
+const kindLabel = (v) => (v === 'ranged' ? t('远程') : (v === 'none' ? t('不攻击') : (v === 'heal' ? t('治疗') : t('近战'))));
+
 function renderEditor() {
   const box = $('#editor');
   box.replaceChildren();
   if (!state.data) { box.append(h('p', { class: 'hint' }, t('正在载入…'))); return; }
   if (state.message) box.append(h('div', { class: `banner ${state.message.kind === 'error' ? 'bad' : 'good'}` }, state.message.text));
+  if (state.picking) { renderPicker(box); return; }
   if (!state.spec) { box.append(h('p', { class: 'hint' }, t('左边的列表中选一个工坊包，或新建一个干员。'))); return; }
 
   const s = state.spec;
@@ -143,13 +206,24 @@ function renderEditor() {
   box.append(h('h2', {}, t('干员 · {0} · 包 {1}', s.name || s.id || t('未命名'), packId)));
 
   // identity
+  const pack = state.data.packs.find((p) => p.id === state.packId);
+  const conflict = idConflict(s.id, { packSlugs: pack ? pack.specs.map((x) => x.id) : [], officialIds: state.officialIdSet });
+  const rename = renameNotice(state.slug, s.id);
   box.append(h('div', { class: 'panel' }, h('div', { class: 'grid' },
-    field(t('id（slug，决定 chess_ws_<id>_a/_b）'), textInput(() => s.id, (v) => { s.id = v; })),
+    field(t('id（slug，决定 chess_ws_<id>_a/_b）'), h('div', {},
+      textInput(() => s.id, (v) => { s.id = v; }),
+      conflict ? h('div', { class: 'hint err' }, conflict.kind === 'pack'
+        ? t('这个 id 已被本包占用：{0}', conflict.id)
+        : t('这个 id 与官方记录相同，不进 overrides 的话会被丢弃：{0}', conflict.id)) : null,
+      rename ? h('div', { class: 'hint warn' }, t('改了 id：保存会新建一份记录，原来的 {0} 仍留在包里（要自己删）', rename.from)) : null)),
     field(t('名称'), textInput(() => s.name, (v) => { s.name = v; })),
     field(t('英文代号'), textInput(() => s.appellation, (v) => { s.appellation = v; })),
     field(t('阶（tier）'), numInput(() => s.tier, (v) => { s.tier = v; })),
     field(t('职业'), select(PROFESSIONS, () => s.profession, (v) => { s.profession = v; })),
-    field(t('分支 subProfessionId'), textInput(() => s.subProfessionId, (v) => { s.subProfessionId = v; }, { placeholder: t('如 fastshot / fortress / bard') })),
+    // 分支决定攻击方式、伤害类型与能否打空 —— 以前只能手打英文，还给不出候选
+    field(t('分支 subProfessionId'), h('div', {},
+      textInput(() => s.subProfessionId, (v) => { s.subProfessionId = v; }, { placeholder: t('如 fastshot / fortress / bard'), list: 'subProfOptions' }),
+      h('datalist', { id: 'subProfOptions' }, subProfessionChoices(state.data.officialChess).map((v) => h('option', { value: v }))))),
     field(t('位置'), select(['MELEE', 'RANGED'], () => s.position, (v) => { s.position = v; })),
     field(t('特性文字（只影响伤害类型推导）'), textInput(() => s.traitDesc, (v) => { s.traitDesc = v; })))));
 
@@ -163,22 +237,48 @@ function renderEditor() {
     h('h2', { style: 'margin-top:0' }, t('外观（仓库不含素材，只能复用已有 Spine id）')),
     h('div', { class: 'grid' }, field('assetsSpine', spineSel), field(t('或直接填 id'), textInput(() => s.assetsSpine, (v) => { s.assetsSpine = v; })))));
 
+  // 攻击范围与伤害分类：表单以前完全没有范围的入口（连默认值是多少都看不到），现在能挑官方形状并直接看小格阵
+  const cls = classify({ profession: s.profession, subProfessionId: s.subProfessionId, position: s.position, traitDesc: s.traitDesc });
+  const effGrid = Array.isArray(s.rangeGrid) ? s.rangeGrid : defaultGrid(s);
+  const presets = rangePresets(state.data.officialChess);
+  const curKey = Array.isArray(s.rangeGrid) ? gridKey(s.rangeGrid) : '';
+  const rangeSel = h('select', {
+    onchange: (e) => {
+      const p = presets.find((x) => x.key === e.target.value);
+      if (p) s.rangeGrid = p.grid.map((c) => [...c]);
+      else delete s.rangeGrid;
+      schedulePreview(); renderEditorKeepingFocus();
+    },
+  }, h('option', { value: '', selected: !curKey }, t('（默认：按职业与分支推导）')));
+  for (const p of presets) rangeSel.append(h('option', { value: p.key, selected: curKey === p.key }, t('{0} 格 · 例：{1}', p.count, p.sample.name)));
+  box.append(h('div', { class: 'panel' },
+    h('h2', { style: 'margin-top:0' }, t('攻击范围与伤害分类')),
+    h('div', { class: 'row', style: 'align-items:flex-start;gap:16px' },
+      h('div', { style: 'flex:0 0 230px' }, field(t('范围形状'), rangeSel)),
+      h('div', {}, gridPreview(effGrid), Array.isArray(s.rangeGrid) ? null : h('div', { class: 'hint' }, t('（这是推导出的默认形状）'))),
+      h('p', { class: 'hint', style: 'flex:1' }, t('伤害类型 {0} · 攻击方式 {1} · 可打空中 {2}', dmgLabel(cls.dmgType), kindLabel(cls.attackKind), cls.canHitFly ? t('是') : t('否'))))));
+
   // the two states
+  const refs = state.data.statRanges?.[s.profession] ?? {};
+  const statField = (label, key, st) => field(label, h('div', {},
+    numInput(() => st[key], (v) => { st[key] = v; }),
+    statBar(st[key], refs[key])));
   const statBlock = (key, title) => {
     const st = s.stats[key];
     return h('div', { class: 'panel' },
       h('h2', { style: 'margin-top:0' }, title),
       h('div', { class: 'grid' },
-        field(t('生命上限 maxHp'), numInput(() => st.maxHp, (v) => { st.maxHp = v; })),
-        field(t('攻击 atk'), numInput(() => st.atk, (v) => { st.atk = v; })),
-        field(t('防御 def'), numInput(() => st.def, (v) => { st.def = v; })),
-        field(t('法抗 res'), numInput(() => st.res, (v) => { st.res = v; })),
-        field(t('费用 cost'), numInput(() => st.cost, (v) => { st.cost = v; })),
-        field(t('阻挡 blockCnt'), numInput(() => st.blockCnt, (v) => { st.blockCnt = v; })),
-        field(t('攻击间隔 bat（秒）'), numInput(() => st.bat, (v) => { st.bat = v; })),
+        statField(t('生命上限 maxHp'), 'maxHp', st),
+        statField(t('攻击 atk'), 'atk', st),
+        statField(t('防御 def'), 'def', st),
+        statField(t('法抗 res'), 'res', st),
+        statField(t('费用 cost'), 'cost', st),
+        statField(t('阻挡 blockCnt'), 'blockCnt', st),
+        statField(t('攻击间隔 bat（秒）'), 'bat', st),
         field(t('再部署 respawnTime'), numInput(() => st.respawnTime ?? 70, (v) => { st.respawnTime = v; }))));
   };
   box.append(h('div', { class: 'split' }, statBlock('normal', t('普通状态数值')), statBlock('golden', t('精锐状态数值'))));
+  if (refs.maxHp) box.append(h('p', { class: 'hint' }, t('细线上的刻度是官方同类干员的区间（按职业统计，共 {0} 名），不是硬性上限。', refs.maxHp.count)));
 
   // skill
   const sk = s.skill ?? (s.skill = blankSpec().skill);
@@ -309,11 +409,101 @@ function renderEditor() {
   box.append(h('h2', {}, t('校验结果')), panel);
 }
 
+// ---- 「以模板新建」的选择器 -----------------------------------------------------------------------------------------
+
+/** 模板来源：官方干员（全新的一对记录）或本包已有干员（复制一份，改 id 即可）。 */
+function renderPicker(box) {
+  const pack = state.data.packs.find((p) => p.id === state.packId);
+  box.append(h('h2', {}, t('以模板新建')));
+  box.append(h('p', { class: 'hint' }, t('选一个干员当底子：数值、分支、攻击范围、技能、天赋与外观都会带过来，之后填一个新 id 与名字就能保存。')));
+  box.append(h('div', { class: 'row', style: 'margin:10px 0' },
+    textInput(() => state.pickQuery, (v) => { state.pickQuery = v; renderEditorKeepingFocus(); }, { placeholder: t('搜索干员（名称 / 代号 / id）') }),
+    h('button', { class: 'ghost', onclick: () => { state.picking = false; state.pickQuery = ''; renderShell(); } }, t('返回'))));
+
+  // 本包已有干员：同一份 spec 复制一份，最省事（分支、技能、天赋、外观全是自己刚调好的）
+  const own = pack ? pack.specs : [];
+  if (own.length) {
+    box.append(h('h2', {}, t('复制本包的干员（{0} 个）', own.length)));
+    for (const spec of own) {
+      box.append(h('div', { class: 'item', onclick: () => duplicateSpec(spec) },
+        h('div', { class: 'n' }, spec.name || spec.id),
+        h('div', { class: 'm' }, t('id {0} · {1} 阶 · {2}', spec.id, spec.tier, spec.profession))));
+    }
+  }
+
+  // 官方干员
+  const matched = matchOperators(state.data.officialChess, state.pickQuery);
+  const LIMIT = 60;
+  box.append(h('h2', {}, t('官方干员（匹配 {0} / 共 {1}）', matched.length, state.data.officialChess.length)));
+  if (!matched.length) box.append(h('p', { class: 'hint' }, t('（没有匹配的干员）')));
+  for (const o of matched.slice(0, LIMIT)) {
+    box.append(h('div', {
+      class: 'item', title: `${o.id}${o.spine ? ` · ${o.spine}` : ''}`,
+      onclick: () => { loadOperatorTemplate(o.id); },
+    },
+    h('div', { class: 'n' }, o.name || o.id),
+    h('div', { class: 'm' }, t('{0} 阶 · {1}{2}', o.tier, o.profession, o.subProfessionId ? ` · ${o.subProfessionId}` : ''))));
+  }
+  if (matched.length > LIMIT) box.append(h('p', { class: 'hint' }, t('只显示了前 {0} 个，用上面的搜索框缩小范围。', LIMIT)));
+}
+
+/** 用官方干员当模板：服务端把一对记录转成 spec（shared/chessAuthoring.js 的 specFromChessRecord）。 */
+async function loadOperatorTemplate(chessId) {
+  try {
+    const r = await api(`/api/operators/template?chessId=${encodeURIComponent(chessId)}`);
+    state.spec = r.spec;
+    state.slug = null;
+    state.picking = false;
+    state.preview = null;
+    state.message = { kind: 'ok', text: t('已按「{0}」生成模板：请填一个新的 id 与名字（改完会自动校验）。', r.spec.name || chessId) };
+    renderShell();
+    preview();
+  } catch (e) {
+    state.message = { kind: 'error', text: errText(e) };
+    renderEditor();
+  }
+}
+
+/** 复制本包的一个已有干员：只清空 id（那一个必须重填，否则会覆盖原来那份）。 */
+function duplicateSpec(spec) {
+  const copy = JSON.parse(JSON.stringify(spec));
+  copy.id = '';
+  state.spec = copy;
+  state.slug = null;
+  state.picking = false;
+  state.preview = null;
+  state.message = { kind: 'ok', text: t('已复制「{0}」：填一个新的 id 再保存（改完会自动校验）。', spec.id) };
+  renderShell();
+  preview();
+}
+
 // ---- behaviour ---------------------------------------------------------------------------------------------------
 
 let previewTimer = null;
 function schedulePreview() { clearTimeout(previewTimer); previewTimer = setTimeout(preview, 250); }
 function previewSoon() { schedulePreview(); }
+
+/**
+ * 重画表单但把焦点与光标留原处。
+ * 校验是防抖自动跑的，每跑一次就重画一次表单；不还原焦点的话，用户打一半停下来看一眼、再打字，
+ * 光标已经不在输入框里了（每次都要重新点）。按「第几个输入框」还原，够用且不必给每个控件起名字。
+ */
+function renderEditorKeepingFocus() {
+  const before = [...document.querySelectorAll('#editor input, #editor select, #editor textarea')];
+  const active = document.activeElement;
+  const idx = before.indexOf(active);
+  const start = active && typeof active.selectionStart === 'number' ? active.selectionStart : null;
+  const end = active && typeof active.selectionEnd === 'number' ? active.selectionEnd : null;
+  renderEditor();
+  if (idx < 0) return;
+  const after = [...document.querySelectorAll('#editor input, #editor select, #editor textarea')];
+  const next = after[idx];
+  if (!next || typeof next.focus !== 'function') return;
+  next.focus();
+  if (start !== null && typeof next.setSelectionRange === 'function') {
+    try { next.setSelectionRange(start, end); } catch { /* number 输入框不支持选区，忽略 */ }
+  }
+}
 
 async function preview() {
   try {
@@ -321,7 +511,7 @@ async function preview() {
   } catch (e) {
     state.preview = { ok: false, errors: [{ field: '', code: 'REQUEST', message: errText(e) }], warnings: [] };
   }
-  renderEditor();
+  renderEditorKeepingFocus();
 }
 
 async function save() {
@@ -352,6 +542,8 @@ async function remove() {
 async function load() {
   state.data = await api('/api/state');
   if (!state.packId && state.data.packs.length) state.packId = state.data.packs[0].id;
+  // 官方 id 集合用于「id 撞官方」的即时提示，每次载入算一次就够
+  state.officialIdSet = new Set((state.data.officialChess ?? []).map((o) => o.id));
   renderShell();
   if (state.spec) preview();
 }

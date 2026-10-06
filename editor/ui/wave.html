@@ -72,26 +72,26 @@
     <a href="./voice.html" data-i18n="语音编辑器">语音编辑器</a>
     <a href="./pack.html" data-i18n="包管理">包管理</a>
     <button id="btnReload" class="ghost" data-i18n="重新载入">重新载入</button>
-    <button id="btnNew" class="ghost">新建出怪表</button>
+    <button id="btnNew" class="ghost" data-i18n="新建出怪表">新建出怪表</button>
   </span>
 </header>
 <main>
   <aside>
-    <div class="item" style="cursor:default"><div class="m">工坊包 / 出怪表</div></div>
+    <div class="item" style="cursor:default"><div class="m" data-i18n="工坊包 / 出怪表">工坊包 / 出怪表</div></div>
     <div id="list"></div>
   </aside>
   <div class="center">
     <div class="row" style="margin-bottom:8px">
-      <label style="margin:0">看哪张地图的路线</label>
+      <label style="margin:0" data-i18n="看哪张地图的路线">看哪张地图的路线</label>
       <select id="mapPick" style="width:auto;min-width:220px"></select>
-      <button id="ovPaths" class="ghost">显示路线</button>
+      <button id="ovPaths" class="ghost" data-i18n="显示路线">显示路线</button>
       <span class="dim" id="mapInfo"></span>
     </div>
     <canvas id="board" width="672" height="340"></canvas>
-    <h2>时间轴（横轴 = 秒）</h2>
+    <h2 data-i18n="时间轴（横轴 = 秒）">时间轴（横轴 = 秒）</h2>
     <div class="tl" id="tl"></div>
-    <p class="hint">每条泳道 = 一次出怪。点击方块选中后可改时间/数量/间隔/路线；拖动不改数值，用右侧表格精确编辑。</p>
-    <h2>出怪明细</h2>
+    <p class="hint" data-i18n="每条泳道 = 一次出怪。点击方块选中后可改时间/数量/间隔/路线；拖动不改数值，用右侧表格精确编辑。">每条泳道 = 一次出怪。点击方块选中后可改时间/数量/间隔/路线；拖动不改数值，用右侧表格精确编辑。</p>
+    <h2 data-i18n="出怪明细">出怪明细</h2>
     <div id="table"></div>
   </div>
   <div class="side" id="side"></div>

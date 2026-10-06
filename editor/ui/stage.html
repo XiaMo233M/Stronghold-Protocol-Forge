@@ -62,33 +62,33 @@
     <a href="./voice.html" data-i18n="语音编辑器">语音编辑器</a>
     <a href="./pack.html" data-i18n="包管理">包管理</a>
     <button id="btnReload" class="ghost" data-i18n="重新载入">重新载入</button>
-    <button id="btnNew" class="ghost">新建地图</button>
+    <button id="btnNew" class="ghost" data-i18n="新建地图">新建地图</button>
   </span>
 </header>
 <main>
   <aside>
-    <div class="item" style="cursor:default"><div class="m">工坊包 / 地图</div></div>
+    <div class="item" style="cursor:default"><div class="m" data-i18n="工坊包 / 地图">工坊包 / 地图</div></div>
     <div id="list"></div>
   </aside>
   <div class="center">
     <div class="row" style="margin-bottom:8px">
-      <button id="toolBrush" class="on">画笔</button>
-      <button id="toolDevice">放装置</button>
-      <button id="toolErase">擦除</button>
-      <button id="toolRoute">画路线</button>
+      <button id="toolBrush" class="on" data-i18n="画笔">画笔</button>
+      <button id="toolDevice" data-i18n="放装置">放装置</button>
+      <button id="toolErase" data-i18n="擦除">擦除</button>
+      <button id="toolRoute" data-i18n="画路线">画路线</button>
       <span style="flex:1"></span>
-      <button id="ovRoutes" class="on">显示路线</button>
-      <button id="ovDeploy" class="on">显示部署区</button>
-      <button id="ovPaths" class="on">显示寻路</button>
-      <button id="ov3d">3D 预览</button>
+      <button id="ovRoutes" class="on" data-i18n="显示路线">显示路线</button>
+      <button id="ovDeploy" class="on" data-i18n="显示部署区">显示部署区</button>
+      <button id="ovPaths" class="on" data-i18n="显示寻路">显示寻路</button>
+      <button id="ov3d" data-i18n="3D 预览">3D 预览</button>
     </div>
     <canvas id="board" width="672" height="608"></canvas>
     <canvas id="board3d" width="672" height="608" hidden style="width:100%;max-width:672px;height:608px"></canvas>
     <div class="row" id="presets3d" hidden style="margin:6px 0 0"></div>
     <p class="hint" id="hint3d"></p>
-    <p class="hint" id="cursor">把鼠标移到网格上看坐标。**row 0 在最下面一行**（和引擎一致）。</p>
+    <p class="hint" id="cursor" data-i18n="把鼠标移到网格上看坐标。row 0 在最下面一行（和引擎一致）。">把鼠标移到网格上看坐标。row 0 在最下面一行（和引擎一致）。</p>
     <div class="panel">
-      <h2 style="margin-top:0">地形调色板</h2>
+      <h2 style="margin-top:0" data-i18n="地形调色板">地形调色板</h2>
       <div class="palette" id="palette"></div>
     </div>
   </div>

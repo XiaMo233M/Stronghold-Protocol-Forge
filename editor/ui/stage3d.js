@@ -14,6 +14,10 @@
 // The asset store is ~20 lines instead of importing public/js/assets.js: `loadBoardPack` only ever calls
 // `local()`, `localUrl(group, name)` and `image(url)`, so this supplies exactly those three and nothing else pulls the
 // whole client dependency graph into the editor.
+//
+// 界面文案（3D 不可用的原因、视角名）走 i18n：t('中文原文') 查英文词典（editor/ui/i18n.js 说明了这个取舍）。
+
+import { t } from './i18n.js';
 
 const MANIFEST_URL = '/data/local-assets.json';
 const THREE_URL = '/vendor/three.module.js';
@@ -62,13 +66,13 @@ export async function createStageView3d({ canvas, getStage, onError } = {}) {
   try {
     const { boardArtListed, loadBoardPack, loadThree, webgl2Available } = await import('/client/js/render/board3d/load.js');
     if (!(await boardArtListed(assets))) {
-      return { ok: false, reason: '本机没有官方棋盘素材（data/local-assets.json 未列出棋盘图集），已退回 2D' };
+      return { ok: false, reason: t('本机没有官方棋盘素材（data/local-assets.json 未列出棋盘图集），已退回 2D') };
     }
-    if (!webgl2Available()) return { ok: false, reason: '这台设备没有可用的 WebGL2，已退回 2D' };
+    if (!webgl2Available()) return { ok: false, reason: t('这台设备没有可用的 WebGL2，已退回 2D') };
     const THREE = await loadThree(THREE_URL);
-    if (!THREE) return { ok: false, reason: 'three.js 没加载成功，已退回 2D' };
+    if (!THREE) return { ok: false, reason: t('three.js 没加载成功，已退回 2D') };
     const pack = await loadBoardPack(assets);
-    if (!pack) return { ok: false, reason: '棋盘素材包不完整，已退回 2D' };
+    if (!pack) return { ok: false, reason: t('棋盘素材包不完整，已退回 2D') };
 
     const { BoardScene } = await import('/client/js/render/board3d/scene.js');
     const { Camera, DEFAULT_OPTICS } = await import('/client/js/render/projection.js');
@@ -115,13 +119,16 @@ export async function createStageView3d({ canvas, getStage, onError } = {}) {
      * `refit: true` re-aims at the whole board first, so the preset is an absolute framing; `close` deliberately keeps the
      * author's current target and only moves the camera in. The game preset takes the project's OWN DEFAULT_OPTICS rather
      * than restating its numbers — its whole point is "the framing players actually get", so it must not drift from it.
+     *
+     * `label` is a FUNCTION rather than a string: the button text is looked up in the i18n dictionary when `presets()` is
+     * read, so switching the interface language re-renders the same PRESETS in the new language.
      */
     const PRESETS = [
-      { id: 'overview', label: '全图', tilt: home.tilt, dist: home.dist, refit: true },
-      { id: 'top', label: '俯视', tilt: 0, dist: 30, refit: true },
-      { id: 'game', label: '游戏视角', tilt: DEFAULT_OPTICS.tilt, dist: DEFAULT_OPTICS.dist, refit: true },
-      { id: 'low', label: '侧视', tilt: 74, dist: 22, refit: true },
-      { id: 'close', label: '近景', tilt: 52, dist: 12, refit: false },
+      { id: 'overview', label: () => t('全图'), tilt: home.tilt, dist: home.dist, refit: true },
+      { id: 'top', label: () => t('俯视'), tilt: 0, dist: 30, refit: true },
+      { id: 'game', label: () => t('游戏视角'), tilt: DEFAULT_OPTICS.tilt, dist: DEFAULT_OPTICS.dist, refit: true },
+      { id: 'low', label: () => t('侧视'), tilt: 74, dist: 22, refit: true },
+      { id: 'close', label: () => t('近景'), tilt: 52, dist: 12, refit: false },
     ];
     let cssW = 672, cssH = 608;
     let framedKey = null;
@@ -236,7 +243,7 @@ export async function createStageView3d({ canvas, getStage, onError } = {}) {
         view.update();
         return true;
       },
-      presets: () => PRESETS.map(({ id, label }) => ({ id, label })),
+      presets: () => PRESETS.map(({ id, label }) => ({ id, label: label() })),
       stats: () => ({ frames, dist: Math.round(cam.dist), tilt: Math.round(cam.tilt), board3d: scene.stats?.() ?? null }),
       /** The live scene, for the devtools console (`__spEditor3d.stats()`) and for automated checks. */
       scene: () => scene,
@@ -254,6 +261,6 @@ export async function createStageView3d({ canvas, getStage, onError } = {}) {
     return { ok: true, ...view };
   } catch (e) {
     onError?.(e);
-    return { ok: false, reason: `3D 预览不可用：${e && e.message ? e.message : e}` };
+    return { ok: false, reason: t('3D 预览不可用：{0}', e && e.message ? e.message : e) };
   }
 }

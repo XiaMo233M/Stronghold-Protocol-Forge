@@ -7,6 +7,13 @@
 // The MAP panel draws the routes of whichever map is chosen, using the same `deriveRoutePaths` the map editor uses, so
 // the author sees which route each spawn walks. Routes live in the wave (the engine reads them from there); the map is
 // only a reference for their geometry.
+//
+// 界面文案走 i18n：t('中文原文') 查英文词典，查不到就原样返回中文（editor/ui/i18n.js 说明了这个取舍）。
+//
+// 本页的文案与游戏数据在同一段代码里：`${m.name} (${m.id})` 这类是数据（干员/怪物名字与 id），不进 t()；
+// 表头、按钮、提示这些给作者看的才进。
+
+import { t, mountI18n } from './i18n.js';
 
 const $ = (s) => document.querySelector(s);
 const CELL = 32;
@@ -78,7 +85,7 @@ function renderTimeline() {
   box.replaceChildren();
   const spawns = state.spec?.spawns ?? [];
   if (!spawns.length) {
-    box.append(Object.assign(document.createElement('p'), { className: 'hint', style: 'padding:10px 12px', textContent: '还没有出怪。用下面的「添加一次出怪」开始。' }));
+    box.append(Object.assign(document.createElement('p'), { className: 'hint', style: 'padding:10px 12px', textContent: t('还没有出怪。用下面的「添加一次出怪」开始。') }));
     return;
   }
   const maxT = Math.max(20, ...spawns.map(endOf)) * 1.08;
@@ -105,8 +112,9 @@ function renderTimeline() {
     const col = SLOT_COLORS[sp.slot] || '#5b9dff';
     blk.style.background = `${col}55`;
     blk.style.borderColor = col;
-    blk.textContent = `${sp.key ?? '?'} ×${sp.count ?? 1}${sp.unharmful ? ' (不计)' : ''}`;
-    blk.title = `${sp.key} ×${sp.count} @${sp.time}s 间隔 ${sp.interval}s · route #${sp.routeIndex ?? 0} · slot ${sp.slot ?? '—'}`;
+    blk.textContent = `${sp.key ?? '?'} ×${sp.count ?? 1}${sp.unharmful ? ' ' + t('（不计）') : ''}`;
+    blk.title = t('{0} ×{1} @{2}s 间隔 {3}s · route #{4} · slot {5}',
+      sp.key ?? '?', sp.count ?? 1, sp.time ?? 0, sp.interval ?? 0, sp.routeIndex ?? 0, sp.slot ?? '—');
     blk.addEventListener('click', () => { state.sel = i; renderTimeline(); renderTable(); });
     lane.append(blk);
     // the lane label sits above the block so the block stays clickable across its whole width
@@ -126,7 +134,7 @@ function renderTable() {
   const spawns = state.spec?.spawns ?? [];
   const add = document.createElement('button');
   add.className = 'ghost';
-  add.textContent = '＋ 添加一次出怪';
+  add.textContent = t('＋ 添加一次出怪');
   add.addEventListener('click', () => {
     const last = spawns[spawns.length - 1];
     spawns.push({
@@ -140,8 +148,9 @@ function renderTable() {
   if (!spawns.length) return;
   const table = document.createElement('table');
   const head = document.createElement('tr');
-  for (const t of ['#', '时间(s)', '敌人', '数量', '间隔(s)', '路线', '槽位 slot', '不计入', '']) {
-    const th = document.createElement('th'); th.textContent = t; head.append(th);
+  // 表头逐条查词典；本地变量不叫 t，免得把 i18n 的 t 遮住
+  for (const label of ['#', t('时间(s)'), t('敌人'), t('数量'), t('间隔(s)'), t('路线'), t('槽位 slot'), t('不计入'), '']) {
+    const th = document.createElement('th'); th.textContent = label; head.append(th);
   }
   table.append(head);
   spawns.forEach((sp, i) => {
@@ -171,7 +180,7 @@ function renderTable() {
       return sel;
     })()), td((() => {
       const sel = document.createElement('select');
-      const o0 = document.createElement('option'); o0.value = ''; o0.textContent = '（无）'; sel.append(o0);
+      const o0 = document.createElement('option'); o0.value = ''; o0.textContent = t('（无）'); sel.append(o0);
       for (const s of state.data.vocab.slots) { const o = document.createElement('option'); o.value = s; o.textContent = s; sel.append(o); }
       sel.value = sp.slot ?? '';
       sel.addEventListener('change', () => { if (sel.value) sp.slot = sel.value; else delete sp.slot; renderTimeline(); schedule(); });
@@ -195,7 +204,7 @@ function renderTable() {
 function renderSide() {
   const box = $('#side');
   box.replaceChildren();
-  const h = (t) => { const e = document.createElement('h2'); e.textContent = t; return e; };
+  const h = (text) => { const e = document.createElement('h2'); e.textContent = text; return e; };
   if (state.message) {
     const b = document.createElement('div');
     b.className = `banner ${state.message.kind === 'error' ? 'bad' : 'good'}`;
@@ -203,22 +212,22 @@ function renderSide() {
     box.append(b);
   }
   const spec = state.spec;
-  if (!spec) { box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: '左边选一张出怪表，或点「新建出怪表」。' })); return; }
+  if (!spec) { box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('左边选一张出怪表，或点「新建出怪表」。') })); return; }
 
-  box.append(h('出怪表'));
+  box.append(h(t('出怪表')));
   const idBox = document.createElement('div'); idBox.className = 'panel';
   const field = (label, node) => { const d = document.createElement('div'); const l = document.createElement('label'); l.textContent = label; d.append(l, node); return d; };
   const idIn = document.createElement('input'); idIn.value = spec.id ?? '';
   idIn.addEventListener('input', () => { spec.id = idIn.value; schedule(); });
-  idBox.append(field('id（slug）', idIn));
+  idBox.append(field(t('id（slug）'), idIn));
   const kindSel = document.createElement('select');
   for (const k of state.data.vocab.kinds) { const o = document.createElement('option'); o.value = k; o.textContent = k; kindSel.append(o); }
   kindSel.value = spec.kind ?? 'normal';
   kindSel.addEventListener('change', () => { spec.kind = kindSel.value; schedule(); });
-  idBox.append(field('类型 kind', kindSel));
+  idBox.append(field(t('类型 kind'), kindSel));
   box.append(idBox);
 
-  box.append(h('路线（这张表自己带的）'));
+  box.append(h(t('路线（这张表自己带的）')));
   const rtBox = document.createElement('div'); rtBox.className = 'panel';
   (spec.routes ?? []).forEach((r, i) => {
     const row = document.createElement('div'); row.className = 'row';
@@ -231,17 +240,17 @@ function renderSide() {
     row.append(lbl, del);
     rtBox.append(row);
   });
-  const addR = document.createElement('button'); addR.className = 'ghost'; addR.textContent = '＋ 复制上一条路线';
+  const addR = document.createElement('button'); addR.className = 'ghost'; addR.textContent = t('＋ 复制上一条路线');
   addR.addEventListener('click', () => {
     const last = spec.routes[spec.routes.length - 1] ?? { motion: 'WALK', start: [9, 0], end: [9, 20], checkpoints: [] };
     spec.routes.push(JSON.parse(JSON.stringify(last)));
     drawMap(); renderTimeline(); renderTable(); schedule();
   });
   rtBox.append(addR);
-  rtBox.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: '路线的起点/终点坐标请在「地图设计器」里画好，这里只引用。' }));
+  rtBox.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('路线的起点/终点坐标请在「地图设计器」里画好，这里只引用。') }));
   box.append(rtBox);
 
-  box.append(h('绑定到回合（方案 B）'));
+  box.append(h(t('绑定到回合（方案 B）')));
   const bindBox = document.createElement('div'); bindBox.className = 'panel';
   (spec.usedBy ?? []).forEach((u, i) => {
     const row = document.createElement('div'); row.className = 'row'; row.style.marginBottom = '4px';
@@ -258,7 +267,7 @@ function renderSide() {
     row.append(mode, round, del);
     bindBox.append(row);
   });
-  const addB = document.createElement('button'); addB.className = 'ghost'; addB.textContent = '＋ 加一条绑定';
+  const addB = document.createElement('button'); addB.className = 'ghost'; addB.textContent = t('＋ 加一条绑定');
   addB.addEventListener('click', () => {
     spec.usedBy.push({ modeId: (state.data.modes[0] ?? {}).id ?? 'mode_multi_normal', round: 1 });
     renderSide(); schedule();
@@ -266,23 +275,23 @@ function renderSide() {
   bindBox.append(addB);
   bindBox.append(Object.assign(document.createElement('p'), {
     className: 'hint',
-    textContent: '绑定只记录意图：真正让这张表生效，是在「地图设计器」里给地图写 rounds 指向它（方案 B）。',
+    textContent: t('绑定只记录意图：真正让这张表生效，是在「地图设计器」里给地图写 rounds 指向它（方案 B）。'),
   }));
   box.append(bindBox);
 
   const actions = document.createElement('div'); actions.className = 'row'; actions.style.margin = '12px 0';
-  const save = document.createElement('button'); save.className = 'primary'; save.textContent = state.busy ? '保存中…' : '保存';
+  const save = document.createElement('button'); save.className = 'primary'; save.textContent = state.busy ? t('保存中…') : t('保存');
   save.disabled = state.busy || !spec.id;
   save.addEventListener('click', saveWave);
   actions.append(save);
   if (state.waveId) {
-    const del = document.createElement('button'); del.textContent = '删除';
+    const del = document.createElement('button'); del.textContent = t('删除');
     del.addEventListener('click', deleteWave);
     actions.append(del);
   }
   box.append(actions);
 
-  box.append(h('推导与校验'));
+  box.append(h(t('推导与校验')));
   const pv = document.createElement('div'); pv.className = 'panel';
   const rec = state.preview?.record;
   if (rec) {
@@ -291,10 +300,10 @@ function renderSide() {
       textContent: `totalCount ${rec.totalCount} · slotCounts ${JSON.stringify(rec.slotCounts)}`,
     }));
   }
-  if (state.preview?.ok && !(state.preview.warnings ?? []).length) pv.append(Object.assign(document.createElement('div'), { className: 'ok', textContent: '✔ 校验通过' }));
+  if (state.preview?.ok && !(state.preview.warnings ?? []).length) pv.append(Object.assign(document.createElement('div'), { className: 'ok', textContent: t('✔ 校验通过') }));
   for (const e of state.preview?.errors ?? []) {
     const d = document.createElement('div'); d.className = 'err';
-    d.textContent = `${e.field || '(记录)'} [${e.code}] ${e.message}${e.hint ? ` — ${e.hint}` : ''}`;
+    d.textContent = `${e.field || t('（记录）')} [${e.code}] ${e.message}${e.hint ? ` — ${e.hint}` : ''}`;
     pv.append(d);
   }
   for (const w of state.preview?.warnings ?? []) {
@@ -323,7 +332,7 @@ async function preview() {
 
 async function saveWave() {
   if (!state.packId) {
-    const id = prompt('保存到哪个工坊包？', 'my-wave-pack');
+    const id = prompt(t('保存到哪个工坊包？'), 'my-wave-pack');
     if (!id) return;
     state.packId = id.trim();
   }
@@ -331,17 +340,17 @@ async function saveWave() {
   try {
     const r = await api(`/api/packs/${encodeURIComponent(state.packId)}/waves`, { method: 'POST', body: { spec: currentSpec() } });
     state.waveId = r.id;
-    state.message = { kind: 'ok', text: `已保存 ${r.id}，生成 ${r.generated.join(', ')}。` };
+    state.message = { kind: 'ok', text: t('已保存 {0}，生成 {1}。', r.id, r.generated.join(', ')) };
     await load();
   } catch (e) { state.message = { kind: 'error', text: e.message }; }
   finally { state.busy = false; renderSide(); }
 }
 
 async function deleteWave() {
-  if (!state.waveId || !confirm(`删除出怪表 ${state.waveId}？`)) return;
+  if (!state.waveId || !confirm(t('删除出怪表 {0}？', state.waveId))) return;
   try {
     await api(`/api/packs/${encodeURIComponent(state.packId)}/waves/${encodeURIComponent(state.waveId)}`, { method: 'DELETE' });
-    state.message = { kind: 'ok', text: `已删除 ${state.waveId}` };
+    state.message = { kind: 'ok', text: t('已删除 {0}', state.waveId) };
     state.waveId = null; state.spec = null; state.preview = null;
     await load();
   } catch (e) { state.message = { kind: 'error', text: e.message }; renderSide(); }
@@ -353,15 +362,15 @@ function renderList() {
   const box = $('#list');
   box.replaceChildren();
   const mk = (text, cls, onClick) => { const d = document.createElement('div'); d.className = cls; d.textContent = text; d.addEventListener('click', onClick); return d; };
-  box.append(mk('＋ 新建出怪表', 'item', () => { state.waveId = null; state.spec = blankSpec(); state.preview = null; state.sel = 0; renderList(); renderTimeline(); renderTable(); renderSide(); drawMap(); schedule(true); }));
+  box.append(mk(t('＋ 新建出怪表'), 'item', () => { state.waveId = null; state.spec = blankSpec(); state.preview = null; state.sel = 0; renderList(); renderTimeline(); renderTable(); renderSide(); drawMap(); schedule(true); }));
   for (const w of state.data?.waves ?? []) {
     const errs = (w.issues ?? []).filter((i) => i.severity === 'error').length;
     const el = document.createElement('div');
     el.className = `item${w.id === state.waveId ? ' on' : ''}`;
     el.innerHTML = `<div class="n">${w.id}${errs ? ` <span class="tag err">${errs}</span>` : ''}</div>`
       + `<div class="m">${w.pack} · ${w.kind ?? '?'}</div>`
-      + `<div class="m">${w.spawns} 次 · ${w.totalCount} 只 · 路线 ${w.routes}</div>`
-      + `<div class="m">${w.modeRounds.length ? w.modeRounds.join(' ') : '未绑定回合'}${w.managed ? ' · 可编辑' : ' · 非编辑器管理'}</div>`;
+      + `<div class="m">${t('{0} 次 · {1} 只 · 路线 {2}', w.spawns, w.totalCount, w.routes)}</div>`
+      + `<div class="m">${w.modeRounds.length ? w.modeRounds.join(' ') : t('未绑定回合')}${w.managed ? ' · ' + t('可编辑') : ' · ' + t('非编辑器管理')}</div>`;
     el.addEventListener('click', () => openWave(w));
     box.append(el);
   }
@@ -397,23 +406,29 @@ function specFromRecord(rec) {
 
 async function load() {
   state.data = await api('/api/waves');
-  $('#rootPath').textContent = state.data.waves.length ? `${state.data.waves.length} 张工坊出怪表` : '还没有工坊出怪表';
   if (!state.packId) state.packId = state.data.waves[0]?.pack ?? null;
   // the map picker: the routes a wave walks are shown over whichever map is chosen
   const pick = $('#mapPick');
   pick.replaceChildren();
   for (const s of state.data.stages) {
     const o = document.createElement('option'); o.value = s.id;
-    o.textContent = `${s.official ? '官方' : s.pack} · ${s.name}${s.rounds ? ' （自带回合）' : ''}`;
+    o.textContent = `${s.official ? t('官方') : s.pack} · ${s.name}${s.rounds ? ' ' + t('（自带回合）') : ''}`;
     pick.append(o);
   }
   if (!state.mapId && state.data.stages.length) state.mapId = state.data.stages[0].id;
   pick.value = state.mapId ?? '';
-  $('#mapInfo').textContent = (state.data.stages.find((s) => s.id === state.mapId)?.official ? '官方地图' : '工坊地图') ?? '';
+  paintLabels();
   renderList();
   if (!state.spec) renderTimeline(), renderTable();
   renderSide();
   drawMap();
+}
+
+/** 页头的「N 张工坊出怪表」与地图归属：换语言时要跟着重画，所以从 load() 里抽出来。 */
+function paintLabels() {
+  if (!state.data) return;
+  $('#rootPath').textContent = state.data.waves.length ? t('{0} 张工坊出怪表', state.data.waves.length) : t('还没有工坊出怪表');
+  $('#mapInfo').textContent = state.data.stages.find((s) => s.id === state.mapId)?.official ? t('官方地图') : t('工坊地图');
 }
 
 $('#mapPick').addEventListener('change', () => { state.mapId = $('#mapPick').value; drawMap(); });
@@ -421,4 +436,8 @@ $('#ovPaths').addEventListener('click', () => { state.showPaths = !state.showPat
 $('#btnReload').addEventListener('click', () => load().catch((e) => { state.message = { kind: 'error', text: e.message }; renderSide(); }));
 $('#btnNew').addEventListener('click', () => { state.waveId = null; state.spec = blankSpec(); state.preview = null; state.sel = 0; renderList(); renderTimeline(); renderTable(); renderSide(); drawMap(); schedule(true); });
 
-load().catch((e) => { $('#side').replaceChildren(Object.assign(document.createElement('p'), { className: 'err', textContent: `载入失败：${e.message}` })); });
+// 换语言时把本页动态生成的文案重画一遍（HTML 里的静态文案由 mountI18n 换掉）；要在初次 load 之前挂上。
+mountI18n(() => { paintLabels(); renderList(); renderTimeline(); renderTable(); renderSide(); });
+
+// 载入失败也走 state.message：换语言会重画右栏，错误得留在页面上而不是被重画抹掉。
+load().catch((e) => { state.message = { kind: 'error', text: t('载入失败：{0}', e.message) }; renderSide(); });

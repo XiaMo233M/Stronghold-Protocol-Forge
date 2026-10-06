@@ -101,4 +101,17 @@ describe('模板新建：服务端接口', () => {
     assert.equal((await get('/api/enemies/template?key=enemy_nope')).status, 404);
     assert.equal((await get('/api/enemies/template')).status, 404);
   });
+
+  test('编辑器界面能读到 /shared/*.js（界面与服务端共用同一份实现）', async () => {
+    const r = await get('/shared/statReference.js');
+    assert.equal(r.status, 200);
+    assert.match(r.headers.get('content-type') || '', /javascript/);
+    const src = await r.text();
+    assert.match(src, /export function statPosition/, '拿到的必须是真文件，不是界面兜底路由的 404');
+
+    // 同一套路径校验照旧：点开头的段、穿越、非脚本类型一律 404
+    assert.equal((await get('/shared/.env')).status, 404);
+    assert.equal((await get('/shared/../package.json')).status, 404);
+    assert.equal((await get('/shared/../editor/server.mjs')).status, 404);
+  });
 });

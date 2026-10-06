@@ -1813,6 +1813,9 @@ export async function createEditorServer(opts = {}) {
         { prefix: '/vendor/', root: path.join(REPO_ROOT, 'public', 'vendor'), only: CLIENT_PREVIEW_TYPES },
         { prefix: '/assets/', root: path.join(REPO_ROOT, 'public', 'assets'), only: ART_TYPES },
         { prefix: '/docs/', root: path.join(REPO_ROOT, 'docs'), only: DOC_TYPES },
+        // shared/ 也开放给编辑器界面：界面与编辑器服务端因此可以用**同一份** shared 模块（例如数值参照的刻度换算），
+        // 不必在浏览器里再抄一份。编辑界面里写 `../../shared/x.js` 在浏览器与 node 下解析到同一个文件。
+        { prefix: '/shared/', root: path.join(REPO_ROOT, 'shared'), only: CLIENT_PREVIEW_TYPES },
       ];
       const mount = previewMounts.find((m) => p.startsWith(m.prefix));
       if (mount) {

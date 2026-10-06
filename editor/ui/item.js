@@ -11,6 +11,8 @@
 // One spec is TWO records: `_a` (normal) and `_b` (golden twin). The pair is what makes an item mergeable, so the form
 // always shows both ids it will write and never lets the author think in terms of a single record.
 
+import { t, mountI18n } from './i18n.js';
+
 const $ = (s) => document.querySelector(s);
 
 async function api(path, opts) {
@@ -73,7 +75,7 @@ function numInput(get, set, attrs = {}) {
 }
 function selectInput(get, set, values, { labels = {}, allowEmpty = false } = {}) {
   const s = document.createElement('select');
-  if (allowEmpty) { const o = document.createElement('option'); o.value = ''; o.textContent = '（无）'; s.append(o); }
+  if (allowEmpty) { const o = document.createElement('option'); o.value = ''; o.textContent = t('（无）'); s.append(o); }
   for (const v of values) { const o = document.createElement('option'); o.value = String(v); o.textContent = labels[v] || String(v); s.append(o); }
   s.value = get() == null ? (allowEmpty ? '' : String(values[0])) : String(get());
   s.addEventListener('change', () => { set(s.value === '' ? null : (values.includes(Number(s.value)) ? Number(s.value) : s.value)); schedule(); });
@@ -98,7 +100,7 @@ function kvEditor(get, set, { asString = false } = {}) {
   const wrap = document.createElement('div');
   for (const [k, v] of Object.entries(get() || {})) {
     const row = document.createElement('div'); row.className = 'kv';
-    const ki = document.createElement('input'); ki.value = k; ki.placeholder = '键';
+    const ki = document.createElement('input'); ki.value = k; ki.placeholder = t('键');
     const vi = document.createElement('input'); vi.value = v ?? '';
     if (!asString) { vi.type = 'number'; vi.step = 'any'; }
     ki.addEventListener('change', () => {
@@ -111,7 +113,7 @@ function kvEditor(get, set, { asString = false } = {}) {
     row.append(ki, vi, del);
     wrap.append(row);
   }
-  const add = document.createElement('button'); add.className = 'ghost'; add.textContent = '＋ 加一个键';
+  const add = document.createElement('button'); add.className = 'ghost'; add.textContent = t('＋ 加一个键');
   add.addEventListener('click', () => { set({ ...(get() || {}), '': asString ? '' : 0 }); renderForm(); });
   wrap.append(add);
   return wrap;
@@ -122,28 +124,28 @@ function renderForm() {
   box.replaceChildren();
   const spec = state.spec;
   if (!spec) {
-    box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: '左边选一件装备，或点「新建装备」。' }));
+    box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('左边选一件装备，或点「新建装备」。') }));
     return;
   }
   const v = state.data.vocab;
   const h = (t) => { const e = document.createElement('h2'); e.textContent = t; return e; };
   const ids = pairIds(spec.id);
 
-  box.append(h('身份'));
+  box.append(h(t('身份')));
   const idBox = document.createElement('div'); idBox.className = 'panel';
   const idGrid = document.createElement('div'); idGrid.className = 'grid wide';
   idGrid.append(
-    field('id（slug）', textInput(() => spec.id, (x) => { spec.id = x; renderSide(); }), '写入 chess_item_ws_<id>_a 与 _b'),
-    field('名称', textInput(() => spec.name, (x) => { spec.name = x; })),
-    field('类型 itemType', selectInput(() => spec.itemType, (x) => { spec.itemType = x; }, v.types)),
-    field('分类 category', selectInput(() => spec.category, (x) => { spec.category = x; }, v.categories, { allowEmpty: true })),
-    field('阶级 tier（1-6）', numInput(() => spec.tier, (x) => { spec.tier = x; }, { min: 1, max: 6 })),
-    field('价格 price', numInput(() => spec.price, (x) => { spec.price = x; }, { min: 0 })),
-    field('持续 duration', selectInput(() => spec.duration, (x) => { spec.duration = x; }, v.durations,
-      { labels: { '-1': '-1 整场有效', 0: '0 立即结算' } })),
+    field(t('id（slug）'), textInput(() => spec.id, (x) => { spec.id = x; renderSide(); }), t('写入 chess_item_ws_<id>_a 与 _b')),
+    field(t('名称'), textInput(() => spec.name, (x) => { spec.name = x; })),
+    field(t('类型 itemType'), selectInput(() => spec.itemType, (x) => { spec.itemType = x; }, v.types)),
+    field(t('分类 category'), selectInput(() => spec.category, (x) => { spec.category = x; }, v.categories, { allowEmpty: true })),
+    field(t('阶级 tier（1-6）'), numInput(() => spec.tier, (x) => { spec.tier = x; }, { min: 1, max: 6 })),
+    field(t('价格 price'), numInput(() => spec.price, (x) => { spec.price = x; }, { min: 0 })),
+    field(t('持续 duration'), selectInput(() => spec.duration, (x) => { spec.duration = x; }, v.durations,
+      { labels: { '-1': t('-1 整场有效'), 0: t('0 立即结算') } })),
     // upgradeNum is the author's choice; it decides whether a golden twin exists at all
-    field('合成数 upgradeNum', selectInput(() => spec.upgradeNum, (x) => { spec.upgradeNum = x; }, v.upgradeNums,
-      { labels: { 0: '0 独立（不可合成）', 2: '2 可合成（需要 _b）', 100: '100 特殊（不可合成）' } })),
+    field(t('合成数 upgradeNum'), selectInput(() => spec.upgradeNum, (x) => { spec.upgradeNum = x; }, v.upgradeNums,
+      { labels: { 0: t('0 独立（不可合成）'), 2: t('2 可合成（需要 _b）'), 100: t('100 特殊（不可合成）') } })),
   );
   idBox.append(idGrid);
 
@@ -151,7 +153,7 @@ function renderForm() {
   const iconInput = document.createElement('input');
   iconInput.setAttribute('list', 'iconChoices');
   iconInput.value = spec.trapId ?? '';
-  iconInput.placeholder = '例如 trap_1013_lhp';
+  iconInput.placeholder = t('例如 trap_1013_lhp');
   iconInput.addEventListener('input', () => { spec.trapId = iconInput.value; schedule(); });
   const dl = document.createElement('datalist'); dl.id = 'iconChoices';
   for (const o of state.data.icons ?? []) {
@@ -162,24 +164,24 @@ function renderForm() {
   idBox.append(dl);
   const artGrid = document.createElement('div'); artGrid.className = 'grid wide';
   artGrid.append(
-    field('图标 trapId（复用现有装备图标，否则用兜底图）', iconInput),
-    field('identifier（数值表 id，可留空）', textInput(() => spec.identifier ?? '', (x) => { spec.identifier = x === '' ? null : Number(x); })),
+    field(t('图标 trapId（复用现有装备图标，否则用兜底图）'), iconInput),
+    field(t('identifier（数值表 id，可留空）'), textInput(() => spec.identifier ?? '', (x) => { spec.identifier = x === '' ? null : Number(x); })),
   );
   idBox.append(artGrid);
   const flags = document.createElement('div'); flags.className = 'row'; flags.style.marginTop = '8px';
   flags.append(
-    checkInput(() => spec.hideInShop, (x) => { spec.hideInShop = x; }, '商店不显示 hideInShop'),
-    checkInput(() => spec.canGiveBond, (x) => { spec.canGiveBond = x; }, '可授予羁绊 canGiveBond'),
+    checkInput(() => spec.hideInShop, (x) => { spec.hideInShop = x; }, t('商店不显示 hideInShop')),
+    checkInput(() => spec.canGiveBond, (x) => { spec.canGiveBond = x; }, t('可授予羁绊 canGiveBond')),
   );
   idBox.append(flags);
-  idBox.append(field('卡面描述 desc', areaInput(() => spec.desc, (x) => { spec.desc = x; })));
+  idBox.append(field(t('卡面描述 desc'), areaInput(() => spec.desc, (x) => { spec.desc = x; })));
   box.append(idBox);
 
-  box.append(h('效果 buffs（引擎真正读的是它们摊平出来的 params）'));
+  box.append(h(t('效果 buffs（引擎真正读的是它们摊平出来的 params）')));
   const buffBox = document.createElement('div'); buffBox.className = 'panel';
   buffBox.append(Object.assign(document.createElement('p'), {
     className: 'hint',
-    textContent: 'buff 的 key 是技能/触发器的模板键；bb 是数值黑板，bbStr 是字符串黑板。同名键先出现的先赢。',
+    textContent: t('buff 的 key 是技能/触发器的模板键；bb 是数值黑板，bbStr 是字符串黑板。同名键先出现的先赢。'),
   }));
   (spec.buffs || []).forEach((b, i) => {
     const card = document.createElement('div'); card.className = 'buff';
@@ -195,42 +197,42 @@ function renderForm() {
     card.append(head);
     const bbWrap = document.createElement('div'); bbWrap.className = 'bb';
     const bbCol = document.createElement('div');
-    bbCol.append(Object.assign(document.createElement('label'), { textContent: 'bb（数值）' }));
+    bbCol.append(Object.assign(document.createElement('label'), { textContent: t('bb（数值）') }));
     bbCol.append(kvEditor(() => b.bb, (x) => { b.bb = x; }));
     const strCol = document.createElement('div');
-    strCol.append(Object.assign(document.createElement('label'), { textContent: 'bbStr（字符串）' }));
+    strCol.append(Object.assign(document.createElement('label'), { textContent: t('bbStr（字符串）') }));
     strCol.append(kvEditor(() => b.bbStr, (x) => { b.bbStr = x; }, { asString: true }));
     bbWrap.append(bbCol, strCol);
     card.append(bbWrap);
     buffBox.append(card);
   });
-  const addBuff = document.createElement('button'); addBuff.className = 'ghost'; addBuff.textContent = '＋ 加一个 buff';
+  const addBuff = document.createElement('button'); addBuff.className = 'ghost'; addBuff.textContent = t('＋ 加一个 buff');
   addBuff.addEventListener('click', () => { spec.buffs = [...(spec.buffs || []), { key: '', countType: 'NONE', bb: {}, bbStr: {} }]; renderForm(); schedule(); });
   buffBox.append(addBuff);
   box.append(buffBox);
 
-  box.append(h('其余文案与联动'));
+  box.append(h(t('其余文案与联动')));
   const textBox = document.createElement('div'); textBox.className = 'panel';
   const tGrid = document.createElement('div'); tGrid.className = 'grid wide';
   tGrid.append(
-    field('effectId（留空则自动生成 eff_ws_<id>）', textInput(() => spec.effectId, (x) => { spec.effectId = x; })),
-    field('effectName（留空则用名称）', textInput(() => spec.effectName, (x) => { spec.effectName = x; })),
-    field('requiresBondId（需要哪个羁绊）', textInput(() => spec.requiresBondId, (x) => { spec.requiresBondId = x || null; })),
-    field('giveBondId（授予哪个羁绊）', textInput(() => spec.giveBondId, (x) => { spec.giveBondId = x || null; })),
-    field('shopExcludedBy（填了就等于商店排除）', textInput(() => spec.shopExcludedBy, (x) => { spec.shopExcludedBy = x || null; })),
+    field(t('effectId（留空则自动生成 eff_ws_<id>）'), textInput(() => spec.effectId, (x) => { spec.effectId = x; })),
+    field(t('effectName（留空则用名称）'), textInput(() => spec.effectName, (x) => { spec.effectName = x; })),
+    field(t('requiresBondId（需要哪个羁绊）'), textInput(() => spec.requiresBondId, (x) => { spec.requiresBondId = x || null; })),
+    field(t('giveBondId（授予哪个羁绊）'), textInput(() => spec.giveBondId, (x) => { spec.giveBondId = x || null; })),
+    field(t('shopExcludedBy（填了就等于商店排除）'), textInput(() => spec.shopExcludedBy, (x) => { spec.shopExcludedBy = x || null; })),
     field('family', textInput(() => spec.family, (x) => { spec.family = x || null; })),
   );
   textBox.append(tGrid);
   textBox.append(
-    field('note（备注）', textInput(() => spec.note, (x) => { spec.note = x || null; })),
-    field('implFormula（实现公式，给人看的）', textInput(() => spec.implFormula, (x) => { spec.implFormula = x || null; })),
-    field('flavor（风味文本）', textInput(() => spec.flavor, (x) => { spec.flavor = x || null; })),
+    field(t('note（备注）'), textInput(() => spec.note, (x) => { spec.note = x || null; })),
+    field(t('implFormula（实现公式，给人看的）'), textInput(() => spec.implFormula, (x) => { spec.implFormula = x || null; })),
+    field(t('flavor（风味文本）'), textInput(() => spec.flavor, (x) => { spec.flavor = x || null; })),
   );
   box.append(textBox);
 
-  box.append(h('覆盖范围 rangeGrid'));
+  box.append(h(t('覆盖范围 rangeGrid')));
   const rgBox = document.createElement('div'); rgBox.className = 'panel';
-  rgBox.append(field('rangeGrid（JSON，[[行,列],…]）', areaInput(
+  rgBox.append(field(t('rangeGrid（JSON，[[行,列],…]）'), areaInput(
     () => JSON.stringify(spec.rangeGrid ?? [[0, 0]]),
     (x) => { try { const p = JSON.parse(x); if (Array.isArray(p)) { spec.rangeGrid = p; spec._rangeBad = false; } else spec._rangeBad = true; } catch { spec._rangeBad = true; } renderSide(); },
   )));
@@ -261,7 +263,7 @@ function renderList() {
   const box = $('#list');
   box.replaceChildren();
   const mk = (text, cls, onClick) => { const d = document.createElement('div'); d.className = cls; d.textContent = text; d.addEventListener('click', onClick); return d; };
-  box.append(mk('＋ 新建装备', 'item', () => {
+  box.append(mk(t('＋ 新建装备'), 'item', () => {
     state.id = null; state.spec = blankSpec(); state.preview = null; renderList(); renderForm(); renderSide(); schedule(true);
   }));
   // pairs collapse into ONE row: the author thinks in items, not in `_a`/`_b` records
@@ -275,9 +277,9 @@ function renderList() {
     const el = document.createElement('div');
     el.className = `item${slug === state.id ? ' on' : ''}`;
     el.innerHTML = `<div class="n">${it.name}${errs ? ` <span class="tag err">${errs}</span>` : ''}`
-      + `${it.mergeable ? ' <span class="tag gold">可合成</span>' : ''}</div>`
+      + `${it.mergeable ? ` <span class="tag gold">${t('可合成')}</span>` : ''}</div>`
       + `<div class="m">${it.pack} · ${slug}</div>`
-      + `<div class="m">${it.itemType} · ${it.tier ?? '?'} 阶 · ${it.price ?? '?'} 金 · ${it.managed ? '可编辑' : '非编辑器管理'}</div>`;
+      + `<div class="m">${it.itemType} · ${t('{0} 阶', it.tier ?? '?')} · ${t('{0} 金', it.price ?? '?')} · ${it.managed ? t('可编辑') : t('非编辑器管理')}</div>`;
     el.addEventListener('click', () => openItem(it));
     box.append(el);
   }
@@ -324,49 +326,49 @@ function renderSide() {
   }
   if (!state.spec) return;
 
-  box.append(h('会写出的两个记录'));
+  box.append(h(t('会写出的两个记录')));
   const idBox = document.createElement('div'); idBox.className = 'panel derived';
   const ids = pairIds(state.spec.id);
-  idBox.textContent = ids ? `${ids.base}\n${ids.golden}` : '（先填 id）';
+  idBox.textContent = ids ? `${ids.base}\n${ids.golden}` : t('（先填 id）');
   box.append(idBox);
   box.append(Object.assign(document.createElement('p'), {
     className: 'hint',
-    textContent: '一件装备 = 一个 spec = 普通记录 + 精英记录。没有 _b 就不能合成，所以可合成项必须成对写出。',
+    textContent: t('一件装备 = 一个 spec = 普通记录 + 精英记录。没有 _b 就不能合成，所以可合成项必须成对写出。'),
   }));
 
-  box.append(h('派生量（只读，服务端算）'));
+  box.append(h(t('派生量（只读，服务端算）')));
   const dbox = document.createElement('div'); dbox.className = 'panel derived';
   const rec = state.preview?.record;
   dbox.textContent = rec
     ? `params ${JSON.stringify(rec.params)}\nmergeable ${rec.mergeable}\nshopExcluded ${rec.shopExcluded}  (shopExcludedBy ${JSON.stringify(rec.shopExcludedBy)})\nupgradeChessId ${JSON.stringify(rec.upgradeChessId)}`
-    : '（改动后自动推导）';
+    : t('（改动后自动推导）');
   box.append(dbox);
   box.append(Object.assign(document.createElement('p'), {
     className: 'hint',
-    textContent: '引擎读的是 params，不是 buffs。手写 params 只会让卡面说谎，所以它每次都由 buffs 重算。',
+    textContent: t('引擎读的是 params，不是 buffs。手写 params 只会让卡面说谎，所以它每次都由 buffs 重算。'),
   }));
 
   const actions = document.createElement('div'); actions.className = 'row'; actions.style.margin = '12px 0';
-  const save = document.createElement('button'); save.className = 'primary'; save.textContent = state.busy ? '保存中…' : '保存';
+  const save = document.createElement('button'); save.className = 'primary'; save.textContent = state.busy ? t('保存中…') : t('保存');
   save.disabled = state.busy || !state.spec.id;
   save.addEventListener('click', saveItem);
   actions.append(save);
   if (state.id) {
-    const del = document.createElement('button'); del.textContent = '删除';
+    const del = document.createElement('button'); del.textContent = t('删除');
     del.addEventListener('click', deleteItem);
     actions.append(del);
   }
   box.append(actions);
-  if (!state.spec.id) box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: '先填 id 才能保存。' }));
+  if (!state.spec.id) box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('先填 id 才能保存。') }));
 
-  box.append(h('校验'));
+  box.append(h(t('校验')));
   const pv = document.createElement('div'); pv.className = 'panel';
-  if (!state.preview) pv.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: '（改动后自动校验）' }));
+  if (!state.preview) pv.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('（改动后自动校验）') }));
   else {
-    if (state.preview.ok && !(state.preview.warnings ?? []).length) pv.append(Object.assign(document.createElement('div'), { className: 'ok', textContent: '✔ 校验通过' }));
+    if (state.preview.ok && !(state.preview.warnings ?? []).length) pv.append(Object.assign(document.createElement('div'), { className: 'ok', textContent: t('✔ 校验通过') }));
     for (const e of state.preview.errors ?? []) {
       const d = document.createElement('div'); d.className = 'err';
-      d.textContent = `${e.field || '(记录)'} [${e.code}] ${e.message}${e.hint ? ` — ${e.hint}` : ''}`;
+      d.textContent = `${e.field || t('（记录）')} [${e.code}] ${e.message}${e.hint ? ` — ${e.hint}` : ''}`;
       pv.append(d);
     }
     for (const w of state.preview.warnings ?? []) {
@@ -374,13 +376,13 @@ function renderSide() {
       pv.append(d);
     }
   }
-  if (state.spec._rangeBad) pv.append(Object.assign(document.createElement('div'), { className: 'err', textContent: 'rangeGrid 不是合法 JSON，暂不校验' }));
+  if (state.spec._rangeBad) pv.append(Object.assign(document.createElement('div'), { className: 'err', textContent: t('rangeGrid 不是合法 JSON，暂不校验') }));
   box.append(pv);
 }
 
 async function saveItem() {
   if (!state.packId) {
-    const id = prompt('保存到哪个工坊包？（id：字母数字下划线短横线）', 'my-item-pack');
+    const id = prompt(t('保存到哪个工坊包？（id：字母数字下划线短横线）'), 'my-item-pack');
     if (!id) return;
     state.packId = id.trim();
   }
@@ -388,18 +390,18 @@ async function saveItem() {
   try {
     const r = await api(`/api/packs/${encodeURIComponent(state.packId)}/items`, { method: 'POST', body: { spec: cleanSpec() } });
     state.id = pairIds(r.id)?.slug ?? state.id;
-    state.message = { kind: 'ok', text: `已保存 ${r.id}${r.goldenId ? ` + ${r.goldenId}` : ''}，生成 ${r.generated.join(', ')}。` };
+    state.message = { kind: 'ok', text: t('已保存 {0}，生成 {1}。', r.id + (r.goldenId ? ` + ${r.goldenId}` : ''), r.generated.join(', ')) };
     await load();
   } catch (e) { state.message = { kind: 'error', text: e.message }; }
   finally { state.busy = false; renderSide(); }
 }
 
 async function deleteItem() {
-  if (!state.id || !confirm(`删除装备 ${state.id}（连同它的精英记录）？`)) return;
+  if (!state.id || !confirm(t('删除装备 {0}（连同它的精英记录）？', state.id))) return;
   const ids = pairIds(state.id);
   try {
     await api(`/api/packs/${encodeURIComponent(state.packId)}/items/${encodeURIComponent(ids ? ids.base : state.id)}`, { method: 'DELETE' });
-    state.message = { kind: 'ok', text: `已删除 ${state.id}` };
+    state.message = { kind: 'ok', text: t('已删除 {0}', state.id) };
     state.id = null; state.spec = null; state.preview = null;
     await load();
   } catch (e) { state.message = { kind: 'error', text: e.message }; renderSide(); }
@@ -408,7 +410,7 @@ async function deleteItem() {
 async function load() {
   state.data = await api('/api/items');
   const n = new Set((state.data.items ?? []).map((i) => pairIds(i.id)?.slug ?? i.id)).size;
-  $('#rootPath').textContent = n ? `${n} 件工坊装备（${state.data.items.length} 条记录）` : '还没有工坊装备';
+  $('#rootPath').textContent = n ? t('{0} 件工坊装备（{1} 条记录）', n, state.data.items.length) : t('还没有工坊装备');
   if (!state.packId) state.packId = state.data.items[0]?.pack ?? null;
   renderList();
   if (!state.spec) renderForm();
@@ -418,4 +420,7 @@ async function load() {
 $('#btnReload').addEventListener('click', () => load().catch((e) => { state.message = { kind: 'error', text: e.message }; renderSide(); }));
 $('#btnNew').addEventListener('click', () => { state.id = null; state.spec = blankSpec(); state.preview = null; renderList(); renderForm(); renderSide(); schedule(true); });
 
-load().catch((e) => { $('#side').replaceChildren(Object.assign(document.createElement('p'), { className: 'err', textContent: `载入失败：${e.message}` })); });
+// 语言切换后要重画：列表、表单与右侧面板的文案都是 JS 生成的，只换静态 HTML 不够。
+mountI18n(() => { renderList(); renderForm(); renderSide(); });
+
+load().catch((e) => { $('#side').replaceChildren(Object.assign(document.createElement('p'), { className: 'err', textContent: t('载入失败：{0}', e.message) })); });

@@ -7,6 +7,8 @@
 // 3D 预览是**默认视图**（`?board=2d` 强制 2D，按钮可随时切回）：它用 GAME 自己的渲染器（stage3d.js），
 // 没有本机棋盘素材 / WebGL2 / three.js 时写明原因并留在上面这块 2D 画布 —— 与游戏客户端同一套回退。
 
+// 界面文案走 i18n：t('中文原文') 查英文词典，查不到就原样返回中文（editor/ui/i18n.js 说明了这个取舍）。
+import { t, mountI18n } from './i18n.js';
 import { createStageView3d } from './stage3d.js';
 
 const $ = (s) => document.querySelector(s);
@@ -230,7 +232,10 @@ canvas.addEventListener('mousedown', (ev) => {
 });
 canvas.addEventListener('mousemove', (ev) => {
   const cell = cellAt(ev);
-  $('#cursor').textContent = cell ? `row ${cell.r}, col ${cell.c} · 字符 ${state.cells?.[cell.r]?.[cell.c] ?? '?'}` : '把鼠标移到网格上看坐标。';
+  // 坐标提示与 HTML 里那句静态提示是同一条词条：鼠标离开网格时回到它，换语言时也由 applyI18n 重写。
+  $('#cursor').textContent = cell
+    ? t('row {0}, col {1} · 字符 {2}', cell.r, cell.c, state.cells?.[cell.r]?.[cell.c] ?? '?')
+    : t('把鼠标移到网格上看坐标。row 0 在最下面一行（和引擎一致）。');
   if (painting && cell && paintAt(cell)) { draw(); schedulePreview(); }
 });
 window.addEventListener('mouseup', () => { painting = false; });
@@ -278,7 +283,7 @@ async function toggle3d() {
     return;
   }
   if (!state.view3d) {
-    state.reason3d = '正在准备 3D 预览…';
+    state.reason3d = t('正在准备 3D 预览…');
     renderSide();
     const view = await createStageView3d({
       canvas: $('#board3d'),
@@ -325,14 +330,14 @@ function renderList() {
   const box = $('#list');
   box.replaceChildren();
   const mk = (text, cls, onClick) => { const d = document.createElement('div'); d.className = cls; d.textContent = text; d.addEventListener('click', onClick); return d; };
-  box.append(mk('＋ 新建地图', 'item', () => { state.stageId = null; loadSpec(blankSpec()); renderList(); renderSide(); draw(); }));
+  box.append(mk(t('＋ 新建地图'), 'item', () => { state.stageId = null; loadSpec(blankSpec()); renderList(); renderSide(); draw(); }));
   for (const s of state.data?.stages ?? []) {
     const errs = (s.issues ?? []).filter((i) => i.severity === 'error').length;
     const el = document.createElement('div');
     el.className = `item${s.id === state.stageId ? ' on' : ''}`;
     el.innerHTML = `<div class="n">${s.name}${errs ? ` <span class="tag err">${errs}</span>` : ''}</div>`
       + `<div class="m">${s.pack} · ${s.id}</div>`
-      + `<div class="m">寻路 ${s.groundPaths} 条 · 部署 ${s.deployMelee} 格${s.managed ? ' · 可编辑' : ' · 非编辑器管理'}</div>`;
+      + `<div class="m">${t('寻路 {0} 条 · 部署 {1} 格', s.groundPaths, s.deployMelee)} · ${s.managed ? t('可编辑') : t('非编辑器管理')}</div>`;
     el.addEventListener('click', () => openStage(s));
     box.append(el);
   }
@@ -366,23 +371,23 @@ function renderSide() {
     b.textContent = state.message.text;
     box.append(b);
   }
-  if (!spec) { const p = document.createElement('p'); p.className = 'hint'; p.textContent = '左边选一张地图，或点「新建地图」。'; box.append(p); return; }
+  if (!spec) { const p = document.createElement('p'); p.className = 'hint'; p.textContent = t('左边选一张地图，或点「新建地图」。'); box.append(p); return; }
 
-  const h = (t) => { const e = document.createElement('h2'); e.textContent = t; return e; };
+  const h = (text) => { const e = document.createElement('h2'); e.textContent = text; return e; };
   const field = (label, input) => { const d = document.createElement('div'); const l = document.createElement('label'); l.textContent = label; d.append(l, input); return d; };
   const text = (get, set, attrs = {}) => { const i = document.createElement('input'); i.value = get() ?? ''; Object.assign(i, attrs); i.addEventListener('input', () => { set(i.value); schedulePreview(); }); return i; };
   const num = (get, set) => { const i = document.createElement('input'); i.type = 'number'; i.step = 'any'; i.value = get() ?? 0; i.addEventListener('input', () => { set(Number(i.value)); schedulePreview(); }); return i; };
 
-  box.append(h('地图'));
+  box.append(h(t('地图')));
   const identity = document.createElement('div'); identity.className = 'panel';
   identity.append(
-    field('id（slug）', text(() => spec.id, (v) => { spec.id = v; })),
-    field('名称', text(() => spec.name, (v) => { spec.name = v; })),
-    field('权重 weight', num(() => spec.weight, (v) => { spec.weight = v; })),
+    field(t('id（slug）'), text(() => spec.id, (v) => { spec.id = v; })),
+    field(t('名称'), text(() => spec.name, (v) => { spec.name = v; })),
+    field(t('权重 weight'), num(() => spec.weight, (v) => { spec.weight = v; })),
   );
   box.append(identity);
 
-  box.append(h('可选中的模式（必须至少选一个）'));
+  box.append(h(t('可选中的模式（必须至少选一个）')));
   const modesBox = document.createElement('div'); modesBox.className = 'panel';
   for (const m of state.data?.modes ?? []) {
     const lab = document.createElement('label');
@@ -397,48 +402,52 @@ function renderSide() {
     lab.append(cb, document.createTextNode(`${m.name} (${m.id})`));
     modesBox.append(lab);
   }
-  if (!(state.data?.modes ?? []).length) modesBox.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: '（没有可选模式）' }));
+  if (!(state.data?.modes ?? []).length) modesBox.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('（没有可选模式）') }));
   box.append(modesBox);
 
-  box.append(h('装置'));
+  box.append(h(t('装置')));
   const devBox = document.createElement('div'); devBox.className = 'panel';
   if (spec.devices.length) {
     spec.devices.forEach((d, i) => {
       const row = document.createElement('div'); row.className = 'dev';
       const label = document.createElement('span'); label.textContent = `${d.role ?? '?'} @ [${(d.pos ?? []).join(', ')}]`;
-      const hidden = document.createElement('button'); hidden.className = 'ghost'; hidden.textContent = d.active === false ? '隐藏' : '激活';
-      hidden.title = '隐藏的装置在对局开始时不存在（由效果打开）';
+      const hidden = document.createElement('button'); hidden.className = 'ghost'; hidden.textContent = d.active === false ? t('隐藏') : t('激活');
+      hidden.title = t('隐藏的装置在对局开始时不存在（由效果打开）');
       hidden.addEventListener('click', () => { d.active = d.active === false; schedulePreview(); });
       const del = document.createElement('button'); del.className = 'ghost'; del.textContent = '×';
       del.addEventListener('click', () => { spec.devices.splice(i, 1); schedulePreview(); });
       row.append(label, hidden, del);
       devBox.append(row);
     });
-  } else devBox.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: '（还没有装置）' }));
+  } else devBox.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('（还没有装置）') }));
   const roleSel = document.createElement('select');
   for (const r of ['crate', 'platform', 'mound', 'blower', 'mireController', 'turret']) {
     const o = document.createElement('option'); o.value = r; o.textContent = r; roleSel.append(o);
   }
   roleSel.value = state.deviceRole;
   roleSel.addEventListener('change', () => { state.deviceRole = roleSel.value; state.tool = 'device'; syncTools(); });
-  devBox.append(field('要摆放的装置类型', roleSel));
-  devBox.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: '选「放装置」工具后点网格放置。' }));
+  devBox.append(field(t('要摆放的装置类型'), roleSel));
+  devBox.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('选「放装置」工具后点网格放置。') }));
   box.append(devBox);
 
-  box.append(h('路线（出生点 → 防守点）'));
+  box.append(h(t('路线（出生点 → 防守点）')));
   const routeBox = document.createElement('div'); routeBox.className = 'panel';
   const draftInfo = document.createElement('p'); draftInfo.className = 'hint';
   draftInfo.textContent = state.draft.length
-    ? `正在画：${state.draft.length} 个点，起点 ${state.draft[0].join(',')}。继续点网格加检查点，然后按「完成路线」。`
-    : '选「画路线」工具后依次点击：第一下是起点（城门 S），中间是检查点，最后按「完成路线」收尾。WALK 走地面寻路，FLY 直线飞。';
+    ? t('正在画：{0} 个点，起点 {1}。继续点网格加检查点，然后按「完成路线」。', state.draft.length, state.draft[0].join(','))
+    : t('选「画路线」工具后依次点击：第一下是起点（城门 S），中间是检查点，最后按「完成路线」收尾。WALK 走地面寻路，FLY 直线飞。');
   routeBox.append(draftInfo);
   const motionSel = document.createElement('select');
-  for (const m of ['WALK', 'FLY']) { const o = document.createElement('option'); o.value = m; o.textContent = m === 'WALK' ? 'WALK（地面，按寻路走）' : 'FLY（飞行，直线）'; motionSel.append(o); }
+  for (const m of ['WALK', 'FLY']) {
+    const o = document.createElement('option'); o.value = m;
+    o.textContent = m === 'WALK' ? t('WALK（地面，按寻路走）') : t('FLY（飞行，直线）');
+    motionSel.append(o);
+  }
   motionSel.value = state.routeMotion;
   motionSel.addEventListener('change', () => { state.routeMotion = motionSel.value; });
-  routeBox.append(field('新路线的运动方式', motionSel));
+  routeBox.append(field(t('新路线的运动方式'), motionSel));
   const rrow = document.createElement('div'); rrow.className = 'row';
-  const finish = document.createElement('button'); finish.className = 'primary'; finish.textContent = '完成路线';
+  const finish = document.createElement('button'); finish.className = 'primary'; finish.textContent = t('完成路线');
   finish.disabled = state.draft.length < 2;
   finish.addEventListener('click', () => {
     const d = state.draft;
@@ -446,20 +455,20 @@ function renderSide() {
     state.draft = [];
     schedulePreview(true);
   });
-  const cancel = document.createElement('button'); cancel.className = 'ghost'; cancel.textContent = '取消当前路线';
+  const cancel = document.createElement('button'); cancel.className = 'ghost'; cancel.textContent = t('取消当前路线');
   cancel.disabled = !state.draft.length;
   cancel.addEventListener('click', () => { state.draft = []; draw(); renderSide(); });
   rrow.append(finish, cancel);
   routeBox.append(rrow);
   if (!(state.spec.routes ?? []).length) {
-    routeBox.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: '（还没有路线：这张图上的敌人目前没有从出生点到防守点的走法）' }));
+    routeBox.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('（还没有路线：这张图上的敌人目前没有从出生点到防守点的走法）') }));
   }
   (state.spec.routes ?? []).forEach((route, i) => {
     const row = document.createElement('div'); row.className = 'dev';
     const label = document.createElement('span');
     const rp = state.preview?.routePaths?.[i];
     const bad = rp && !rp.path;
-    label.textContent = `${route.motion} ${(route.start ?? []).join(',')} → ${(route.end ?? []).join(',')}${(route.checkpoints ?? []).length ? ` (+${route.checkpoints.length})` : ''}${bad ? ' ⚠ 无路可走' : ''}`;
+    label.textContent = `${route.motion} ${(route.start ?? []).join(',')} → ${(route.end ?? []).join(',')}${(route.checkpoints ?? []).length ? ` (+${route.checkpoints.length})` : ''}${bad ? ` ⚠ ${t('无路可走')}` : ''}`;
     if (bad) label.className = 'err';
     const del = document.createElement('button'); del.className = 'ghost'; del.textContent = '×';
     del.addEventListener('click', () => { state.spec.routes.splice(i, 1); schedulePreview(true); });
@@ -468,38 +477,40 @@ function renderSide() {
   });
   routeBox.append(Object.assign(document.createElement('p'), {
     className: 'hint',
-    textContent: '路线存在工坊包的 spec 里（引擎的 routes 属于出怪表，由下一步的出怪编辑器绑定到回合）。',
+    textContent: t('路线存在工坊包的 spec 里（引擎的 routes 属于出怪表，由下一步的出怪编辑器绑定到回合）。'),
   }));
   box.append(routeBox);
 
   const actions = document.createElement('div'); actions.className = 'row'; actions.style.margin = '12px 0';
-  const save = document.createElement('button'); save.className = 'primary'; save.textContent = state.busy ? '保存中…' : '保存并推导';
+  const save = document.createElement('button'); save.className = 'primary'; save.textContent = state.busy ? t('保存中…') : t('保存并推导');
   save.disabled = state.busy || !spec.id;
   save.addEventListener('click', saveStage);
   actions.append(save);
   if (state.stageId) {
-    const del = document.createElement('button'); del.textContent = '删除该地图';
+    const del = document.createElement('button'); del.textContent = t('删除该地图');
     del.addEventListener('click', deleteStage);
     actions.append(del);
   }
   box.append(actions);
-  if (!spec.id) box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: '先填一个 id 才能保存。' }));
+  if (!spec.id) box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('先填一个 id 才能保存。') }));
 
-  box.append(h('校验与推导结果'));
+  box.append(h(t('校验与推导结果')));
   const pv = document.createElement('div'); pv.className = 'panel';
   const rec = state.preview?.record;
-  if (!state.preview) pv.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: '（改动后会自动推导）' }));
+  if (!state.preview) pv.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('（改动后会自动推导）') }));
   else {
     if (rec) {
       const info = document.createElement('p');
       info.className = 'hint';
-      info.textContent = `推导：寻路 ${Object.keys(rec.groundPaths).length} 条（含装置 ${Object.keys(rec.groundPathsWithDevices).length} 条）· 部署 ${rec.deployTiles.normal.melee.length} 近战 / ${rec.deployTiles.normal.rangedOnly.length} 远程`;
+      info.textContent = t('推导：寻路 {0} 条（含装置 {1} 条）· 部署 {2} 近战 / {3} 远程',
+        Object.keys(rec.groundPaths).length, Object.keys(rec.groundPathsWithDevices).length,
+        rec.deployTiles.normal.melee.length, rec.deployTiles.normal.rangedOnly.length);
       pv.append(info);
     }
-    if (state.preview.ok && !(state.preview.warnings ?? []).length) pv.append(Object.assign(document.createElement('div'), { className: 'ok', textContent: '✔ 校验通过' }));
+    if (state.preview.ok && !(state.preview.warnings ?? []).length) pv.append(Object.assign(document.createElement('div'), { className: 'ok', textContent: t('✔ 校验通过') }));
     for (const e of state.preview.errors ?? []) {
       const d = document.createElement('div'); d.className = 'err';
-      d.textContent = `${e.field || '(记录)'} [${e.code}] ${e.message}${e.hint ? ` — ${e.hint}` : ''}`;
+      d.textContent = `${e.field || t('（记录）')} [${e.code}] ${e.message}${e.hint ? ` — ${e.hint}` : ''}`;
       pv.append(d);
     }
     for (const w of state.preview.warnings ?? []) {
@@ -521,12 +532,12 @@ function syncTools() {
   const b3 = $('#ov3d');
   if (b3) {
     b3.className = state.mode3d ? 'on' : '';
-    b3.textContent = state.mode3d ? '3D 预览（点回 2D）' : '3D 预览';
+    b3.textContent = state.mode3d ? t('3D 预览（点回 2D）') : t('3D 预览');
   }
   const hint = $('#hint3d');
   if (hint) {
     hint.textContent = state.reason3d ?? (state.mode3d
-      ? '拖动平移 · 滚轮缩放 · Shift+拖动（或右键拖动）调俯角。这一层是游戏自己的 3D 渲染器跑你这张地图。'
+      ? t('拖动平移 · 滚轮缩放 · Shift+拖动（或右键拖动）调俯角。这一层是游戏自己的 3D 渲染器跑你这张地图。')
       : '');
     hint.className = state.reason3d ? 'hint warn' : 'hint';
   }
@@ -550,7 +561,7 @@ function syncTools() {
 
 async function saveStage() {
   if (!state.packId) {
-    const id = prompt('保存到哪个工坊包？（id：字母数字下划线短横线）', state.packId ?? 'my-map-pack');
+    const id = prompt(t('保存到哪个工坊包？（id：字母数字下划线短横线）'), state.packId ?? 'my-map-pack');
     if (!id) return;
     state.packId = id.trim();
   }
@@ -558,17 +569,17 @@ async function saveStage() {
   try {
     const r = await api(`/api/packs/${encodeURIComponent(state.packId)}/stages`, { method: 'POST', body: { spec: currentSpec() } });
     state.stageId = r.id;
-    state.message = { kind: 'ok', text: `已保存 ${r.id}，生成 ${r.generated.join(', ')}。重启游戏服务器后生效。` };
+    state.message = { kind: 'ok', text: t('已保存 {0}，生成 {1}。重启游戏服务器后生效。', r.id, r.generated.join(', ')) };
     await load();
   } catch (e) { state.message = { kind: 'error', text: e.message }; }
   finally { state.busy = false; renderSide(); }
 }
 
 async function deleteStage() {
-  if (!state.stageId || !confirm(`删除地图 ${state.stageId}？`)) return;
+  if (!state.stageId || !confirm(t('删除地图 {0}？', state.stageId))) return;
   try {
     await api(`/api/packs/${encodeURIComponent(state.packId)}/stages/${encodeURIComponent(state.stageId)}`, { method: 'DELETE' });
-    state.message = { kind: 'ok', text: `已删除 ${state.stageId}` };
+    state.message = { kind: 'ok', text: t('已删除 {0}', state.stageId) };
     state.stageId = null; state.spec = null; state.cells = null; state.preview = null;
     await load();
   } catch (e) { state.message = { kind: 'error', text: e.message }; renderSide(); }
@@ -576,12 +587,29 @@ async function deleteStage() {
 
 async function load() {
   state.data = await api('/api/stages');
-  $('#rootPath').textContent = state.data.stages.length ? `${state.data.stages.length} 张工坊地图` : '还没有工坊地图';
+  renderRootPath();
   if (!state.packId) state.packId = state.data.stages[0]?.pack ?? null;
   renderList();
   renderPalette();
   renderSide();
   draw();
+}
+
+// ---- 语言 --------------------------------------------------------------------------------------------------------
+
+/** 左栏顶部的「N 张工坊地图」。地图列表还没到（首屏 load 之前）时不动它，免得闪一句错的。 */
+function renderRootPath() {
+  if (!state.data) return;
+  $('#rootPath').textContent = state.data.stages.length ? t('{0} 张工坊地图', state.data.stages.length) : t('还没有工坊地图');
+}
+
+/** 换语言后重画由 JS 生成的那些文案（HTML 里的静态文案由 mountI18n 自己换）。 */
+function renderAll() {
+  renderList();
+  renderPalette();
+  renderRootPath();
+  syncTools();
+  renderSide();
 }
 
 $('#btnReload').addEventListener('click', () => load().catch((e) => { state.message = { kind: 'error', text: e.message }; renderSide(); }));
@@ -596,4 +624,6 @@ $('#ovDeploy').addEventListener('click', () => { state.showDeploy = !state.showD
 $('#ovPaths').addEventListener('click', () => { state.showPaths = !state.showPaths; syncTools(); draw(); });
 
 syncTools();
-load().catch((e) => { $('#side').replaceChildren(Object.assign(document.createElement('p'), { className: 'err', textContent: `载入失败：${e.message}` })); });
+// 界面语言：换掉 HTML 里的静态文案、插入右上角语言按钮，换语言后连 JS 生成的那些文案一起重画。
+mountI18n(renderAll);
+load().catch((e) => { $('#side').replaceChildren(Object.assign(document.createElement('p'), { className: 'err', textContent: t('载入失败：{0}', e.message) })); });
