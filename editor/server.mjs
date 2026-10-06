@@ -21,13 +21,15 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { deriveChessRecord, validateChessRecord, chessIds, formatIssues, authoringErrors } from '../shared/chessAuthoring.js';
+import { deriveChessRecord, validateChessRecord, chessIds, formatIssues, authoringErrors, specFromChessRecord } from '../shared/chessAuthoring.js';
 import { TILE_PALETTE, DEPLOY_RECTS, STAGE_ROWS, STAGE_COLS, stageErrors } from '../shared/stageAuthoring.js';
 import { deriveStage, validateStageRecord } from '../server/stageAuthoring.js';
 import {
-  deriveEnemy, validateEnemy, enemyErrors, enemyKey as enemyKeyOf, ENEMY_RANKS, ENEMY_MOTIONS, ENEMY_DMG_TYPES, ENEMY_APPLY_WAYS,
+  deriveEnemy, validateEnemy, enemyErrors, enemyKey as enemyKeyOf, specFromEnemyRecord,
+  ENEMY_RANKS, ENEMY_MOTIONS, ENEMY_DMG_TYPES, ENEMY_APPLY_WAYS,
   ENEMY_AC_TYPES, ENEMY_IMMUNITIES, ENEMY_STAT_DEFAULTS,
 } from '../shared/enemyAuthoring.js';
+import { statReference } from '../shared/statReference.js';
 import {
   deriveWave, validateWave, waveErrors, waveId as waveIdOf, waveSummaryLine,
   WAVE_KINDS, SPAWN_SLOTS, SPAWN_FIELDS, ROUNDS_PER_MODE,
@@ -90,13 +92,26 @@ const writeJson = async (p, obj) => {
   await fsp.writeFile(p, `${JSON.stringify(obj, null, 2)}\n`);
 };
 
-/** Official chess, reduced to what the editor needs (the spine picker: the repo ships no assets). */
+/** 数值参照统计哪些字段（顺序就是页面上显示的次序）。 */
+const CHESS_STAT_FIELDS = Object.freeze(['maxHp', 'atk', 'def', 'res', 'cost', 'blockCnt', 'bat']);
+const ENEMY_STAT_FIELDS = Object.freeze(['maxHp', 'atk', 'def', 'res', 'moveSpeed', 'bat']);
+
+/** Official chess, reduced to what the editor needs (the spine picker + the stat reference). */
 function officialChess(dataDir) {
   const data = readJson(path.join(dataDir, 'chess.json'), {}) || {};
   const out = [];
   for (const [id, rec] of Object.entries(data)) {
     if (!rec || rec.isGolden || !rec.visible || rec.isHidden || rec.isDiy) continue;
-    out.push({ id, name: rec.name, tier: rec.tier, profession: rec.profession, subProfessionId: rec.subProfessionId, position: rec.position, spine: rec.assets?.spine ?? null });
+    const st = rec.stats || {};
+    out.push({
+      id, name: rec.name, tier: rec.tier, profession: rec.profession, subProfessionId: rec.subProfessionId,
+      position: rec.position, spine: rec.assets?.spine ?? null,
+      // 数值参照用：作者填表时旁边要有一把尺子（shared/statReference.js 按职业算区间）
+      stats: {
+        maxHp: st.maxHp, atk: st.atk, def: st.def, res: st.res,
+        cost: st.cost, blockCnt: st.blockCnt, bat: st.bat,
+      },
+    });
   }
   return out.sort((a, b) => (a.tier - b.tier) || a.id.localeCompare(b.id));
 }
@@ -781,9 +796,11 @@ export async function createEditorServer(opts = {}) {
   // 一键试玩（docs/EDITOR.md §试玩）。控制器建在这里，是因为它要知道**这个编辑器实例**的工坊根；
   // 测试可以注入 `opts.playtest` 换成假的，免得每个编辑器测试都真的起一个游戏服务器。
   const playtest = opts.playtest ?? createPlaytest({ root, log });
-  const officialIds = new Set(Object.keys(readJson(path.join(dataDir, 'chess.json'), {}) || {}));
+  const chessData = readJson(path.join(dataDir, 'chess.json'), {}) || {};
+  const enemyData = readJson(path.join(dataDir, 'enemies.json'), {}) || {};
+  const officialIds = new Set(Object.keys(chessData));
   const officialStages = new Set(Object.keys(readJson(path.join(dataDir, 'stages.json'), {}) || {}));
-  const officialEnemies = new Set(Object.keys(readJson(path.join(dataDir, 'enemies.json'), {}) || {}));
+  const officialEnemies = new Set(Object.keys(enemyData));
   const officialWaves = new Set(Object.keys(readJson(path.join(dataDir, 'waves.json'), {}) || {}));
   const officialItems = new Set(Object.keys(readJson(path.join(dataDir, 'items.json'), {}) || {}));
   // The name stamped into every Option's `_meta` (shared/forgeNotice.js): the explicit option first, then the
@@ -792,6 +809,30 @@ export async function createEditorServer(opts = {}) {
     ? opts.forgeAuthor.trim()
     : (typeof process.env.SP_FORGE_AUTHOR === 'string' && process.env.SP_FORGE_AUTHOR.trim() ? process.env.SP_FORGE_AUTHOR.trim() : null);
   const official = officialChess(dataDir);
+
+  // 数值参照（表单旁边那把尺子）：干员按职业分组、怪物按档位分组，算法在 shared/statReference.js 里（纯函数，单独测）。
+  const chessStatRanges = statReference(official, {
+    groupOf: (o) => o.profession, valueOf: (o, f) => o.stats?.[f], fields: CHESS_STAT_FIELDS,
+  });
+  // 官方怪物的一份紧凑清单：既是「以现成怪物为模板」的选择列表，也是数值参照的数据源。
+  const officialEnemyList = Object.entries(enemyData).map(([key, rec]) => ({
+    key, name: rec?.name ?? key, rank: rec?.rank ?? null,
+    applyWay: rec?.applyWay ?? null, motion: rec?.stats?.motion ?? null, dmgType: rec?.stats?.dmgType ?? null,
+    spine: rec?.spine ?? null,
+    stats: {
+      maxHp: rec?.stats?.maxHp, atk: rec?.stats?.atk, def: rec?.stats?.def, res: rec?.stats?.res,
+      moveSpeed: rec?.stats?.moveSpeed, bat: rec?.stats?.bat,
+    },
+  })).sort((a, b) => a.key.localeCompare(b.key));
+  const enemyStatRanges = statReference(officialEnemyList, {
+    groupOf: (e) => e.rank, valueOf: (e, f) => e.stats?.[f], fields: ENEMY_STAT_FIELDS,
+  });
+  // spine 候选：同一个 prefab 被多只怪复用时取先遇到的名字（清单已按 key 排序，所以结果是稳定的）。
+  const enemySpineChoices = (() => {
+    const seen = new Map();
+    for (const e of officialEnemyList) if (e.spine && !seen.has(e.spine)) seen.set(e.spine, e.name);
+    return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.id.localeCompare(b.id));
+  })();
 
   const server = http.createServer((req, res) => {
     handle(req, res).catch((e) => {
@@ -821,7 +862,22 @@ export async function createEditorServer(opts = {}) {
         support: normalizeSupportConfig(readJson(supportFile, null)),
         officialChess: official,
         officialCount: officialIds.size,
+        // 表单旁边的尺子：职业 → 字段 → {min, p50, max, count}
+        statRanges: chessStatRanges,
       });
+    }
+
+    // 以现成干员为模板新建：把一对官方记录转成一份可继续编辑的 spec
+    // （转换本身在 shared/chessAuthoring.js 的 specFromChessRecord，纯函数，往返一致性有专门测试）
+    if (p === '/api/operators/template' && method === 'GET') {
+      const chessId = url.searchParams.get('chessId') || '';
+      const rec = chessData[chessId];
+      if (!rec || typeof rec !== 'object') throw refuse(404, `找不到干员记录 ${chessId}`);
+      const base = rec.isGolden ? (chessData[rec.baseId] || rec) : rec;
+      const golden = base.goldenId ? chessData[base.goldenId] : null;
+      const spec = specFromChessRecord(base, golden);
+      if (!spec) throw refuse(400, `干员记录 ${chessId} 不是对象`);
+      return sendJson(res, 200, { ok: true, chessId: base.chessId ?? chessId, baseId: base.chessId, goldenId: golden?.chessId ?? null, spec });
     }
 
     // derive + validate WITHOUT writing: the live preview of the form
@@ -1158,7 +1214,25 @@ export async function createEditorServer(opts = {}) {
           });
         }
       }
-      return sendJson(res, 200, { enemies, vocab: ENEMY_VOCAB(), officialEnemies: [...officialEnemies].sort() });
+      return sendJson(res, 200, {
+        enemies,
+        vocab: ENEMY_VOCAB(),
+        officialEnemies: [...officialEnemies].sort(),
+        // 下面三样都是「让新建更容易」用的：模板选择列表、spine 候选、以及表单旁边的数值尺子
+        officialTemplates: officialEnemyList,
+        spineChoices: enemySpineChoices,
+        statRanges: enemyStatRanges,
+      });
+    }
+
+    // 以现成怪物为模板新建（官方 249 只也行）：转换在 shared/enemyAuthoring.js 的 specFromEnemyRecord。
+    if (p === '/api/enemies/template' && method === 'GET') {
+      const key = url.searchParams.get('key') || '';
+      const rec = enemyData[key];
+      if (!rec || typeof rec !== 'object') throw refuse(404, `找不到怪物记录 ${key}`);
+      const spec = specFromEnemyRecord(rec);
+      if (!spec) throw refuse(400, `怪物记录 ${key} 不是对象`);
+      return sendJson(res, 200, { ok: true, key, spec });
     }
 
     // derive + validate a monster WITHOUT writing: the form's live feedback

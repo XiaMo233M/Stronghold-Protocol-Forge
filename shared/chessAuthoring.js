@@ -302,6 +302,77 @@ export function deriveChessRecord(spec) {
 }
 
 /**
+ * `deriveChessRecord` 的反方向：把一对已发布的记录（普通 `_a` + 精锐 `_b`）变成一份可继续编辑的 spec。
+ *
+ * 用途是「以现成干员为模板新建」：工坊作者最省事的起点不是一张空表单，而是一个已经能进游戏的干员——
+ * 数值、职业、分支、攻击范围、技能与天赋全都填好，只需要改 id、名字与要改的那几个数字。
+ *
+ * 只搬 spec 真正拥有的字段（其余都是 derive 会重算的推导量，搬过来反而会互相矛盾）：
+ * 身份、两态数值、攻击范围 `rangeGrid`、技能（含 `bb` 与技能范围）、天赋、羁绊、价格/稀有度。
+ * `id` 一律留空——模板不能顺手把原干员的 id 也复制了，那会直接撞 `OFFICIAL_ID_COLLISION`。
+ *
+ * @param {object} base 普通形态记录（必填）
+ * @param {object} [golden] 精锐形态记录；缺省时两态数值取同一份
+ * @returns {object|null} 一份 spec（可直接交给 `deriveChessRecord`），输入不是对象时返回 null
+ */
+export function specFromChessRecord(base, golden) {
+  if (!isPlainObj(base)) return null;
+  const g = isPlainObj(golden) ? golden : base;
+  const num = (v, fallback) => (isFin(v) ? v : fallback);
+  const statsOf = (rec) => {
+    const st = isPlainObj(rec.stats) ? rec.stats : {};
+    const out = {
+      maxHp: num(st.maxHp, 1400), atk: num(st.atk, 450), def: num(st.def, 140),
+      res: num(st.res, 0), cost: num(st.cost, 18), blockCnt: num(st.blockCnt, 1), bat: num(st.bat, 1.2),
+    };
+    // 这几个不是必填，但作者通常调过：原样带上，省得模板与原件在再部署/攻速上悄悄不一致
+    for (const k of ['aspd', 'respawnTime', 'spRecovery', 'hpRecoveryPerSec', 'moveSpeed']) {
+      if (isFin(st[k])) out[k] = st[k];
+    }
+    return out;
+  };
+  const grid = (v) => (isPairGrid(v) ? v.map((p) => [...p]) : undefined);
+  const skillOf = (sk) => {
+    if (!isPlainObj(sk)) return undefined;
+    const out = {
+      name: typeof sk.name === 'string' ? sk.name : '',
+      desc: typeof sk.desc === 'string' ? sk.desc : '',
+      skillType: typeof sk.skillType === 'string' ? sk.skillType : 'MANUAL',
+      durationType: typeof sk.durationType === 'string' ? sk.durationType : 'NONE',
+      duration: num(sk.duration, 0),
+      spType: typeof sk.spType === 'string' ? sk.spType : 'INCREASE_WITH_TIME',
+      spCost: num(sk.spCost, 0), initSp: num(sk.initSp, 0), maxChargeTime: num(sk.maxChargeTime, 1),
+      triggerRule: (isPlainObj(sk.trigger) && typeof sk.trigger.rule === 'string') ? sk.trigger.rule : 'DEFAULT',
+      bb: isPlainObj(sk.bb) ? { ...sk.bb } : {},
+    };
+    const rg = grid(sk.rangeGrid);
+    if (rg) out.rangeGrid = rg;
+    return out;
+  };
+  const spec = {
+    id: '', name: typeof base.name === 'string' ? base.name : '',
+    appellation: typeof base.appellation === 'string' ? base.appellation : '',
+    tier: base.tier, profession: base.profession,
+    subProfessionId: typeof base.subProfessionId === 'string' ? base.subProfessionId : '',
+    position: base.position,
+    traitDesc: (isPlainObj(base.trait) && typeof base.trait.desc === 'string') ? base.trait.desc : '',
+    assetsSpine: (isPlainObj(base.assets) && typeof base.assets.spine === 'string') ? base.assets.spine : '',
+    stats: { normal: statsOf(base), golden: statsOf(g) },
+    talents: Array.isArray(base.talents)
+      ? base.talents.map((t) => ({ name: (t && t.name) || '', desc: (t && t.desc) || '', bb: (t && isPlainObj(t.bb)) ? { ...t.bb } : {} }))
+      : [],
+  };
+  const rg = grid(base.rangeGrid);
+  if (rg) spec.rangeGrid = rg;
+  const sk = skillOf(base.skill);
+  if (sk) spec.skill = sk;
+  if (Array.isArray(base.bonds) && base.bonds.length) spec.bonds = [...base.bonds];
+  if (isFin(base.price)) spec.price = base.price;
+  if (isFin(base.rarity)) spec.rarity = base.rarity;
+  return spec;
+}
+
+/**
  * Validate one (workshop or official) chess record. Returns every problem THIS layer can see; `[]` means it found none —
  * which is not a proof of correctness. It cannot see cross-record problems (the base/elite pair), whether the record is
  * shop-eligible, or what the sim does at runtime: tools/workshop-validate.mjs runs those extra layers.

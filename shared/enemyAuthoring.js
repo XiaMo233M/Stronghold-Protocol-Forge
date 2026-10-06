@@ -124,8 +124,14 @@ export function deriveEnemy(spec) {
   const applyWay = spec.applyWay ?? 'MELEE';
   const stats = {};
   for (const [k, d] of Object.entries(ENEMY_STAT_DEFAULTS)) stats[k] = fin(st[k], d);
+  // 官方数据里有 13 只怪同时打两种伤害（`stats.dmgTypes = ['phys','arts']`），而 spec 的 `dmgType` 只是单个枚举。
+  // 于是 spec 允许给一个**显式覆盖** `dmgTypes`：以现成怪物为模板新建时它会被原样带过来，这样「复制」不会把
+  // 双属性怪悄悄变成单属性。不给 `dmgTypes` 时行为与以前完全一样（由 `dmgType` 推导）。
+  const dmgTypes = Array.isArray(spec.dmgTypes) && spec.dmgTypes.length
+    ? spec.dmgTypes.filter((v) => ENEMY_DMG_TYPES.includes(v))
+    : [];
   stats.dmgType = dmgType;
-  stats.dmgTypes = dmgType === 'none' ? [] : [dmgType];
+  stats.dmgTypes = dmgTypes.length ? dmgTypes : (dmgType === 'none' ? [] : [dmgType]);
   stats.motion = motion;
   stats.rangeRadius = fin(st.rangeRadius, applyWay === 'RANGED' ? 1.5 : 0);
   stats.rawRangeRadius = fin(st.rawRangeRadius, stats.rangeRadius);
@@ -176,6 +182,65 @@ export function deriveEnemy(spec) {
   if (isPlain(spec.hitArea)) enemy.hitArea = { w: spec.hitArea.w, h: spec.hitArea.h, dx: fin(spec.hitArea.dx, 0), dy: fin(spec.hitArea.dy, 0) };
   if (isPlain(spec.sp)) enemy.sp = { type: spec.sp.type ?? null, maxSp: fin(spec.sp.maxSp, 0), initSp: fin(spec.sp.initSp, 0), increment: fin(spec.sp.increment, 0) };
   return { ok: true, enemy, warnings };
+}
+
+/**
+ * `deriveEnemy` 的反方向：把一份已发布的怪物记录变成可继续编辑的 spec（「以现成怪物为模板新建」）。
+ *
+ * 对工坊作者来说，最难的从来不是填数值，而是**外观**：`spine` 必须是一个官方 prefab 键，填错了不会报错，
+ * 只是在游戏里静默变成占位模型。以现成怪物为模板，这一项就自动是对的。
+ *
+ * 只搬 spec 真正拥有的字段；`key`/`level`/`be`/`attrPower`/`iconId`/`templateSlot` 这些推导量一律不搬
+ * （搬过去反而会被 `validateEnemy` 当成手改推导量而报 STALE_DERIVED）。`id` 留空，避免撞官方 key。
+ *
+ * @param {object} rec 一份怪物记录（官方或工坊的都行）
+ * @returns {object|null} 一份 spec（可直接交给 `deriveEnemy`），输入不是对象时返回 null
+ */
+export function specFromEnemyRecord(rec) {
+  if (!isPlain(rec)) return null;
+  const st = isPlain(rec.stats) ? rec.stats : {};
+  const motion = ENEMY_MOTIONS.includes(st.motion) ? st.motion : (ENEMY_MOTIONS.includes(rec.motion) ? rec.motion : 'WALK');
+  const dmgType = ENEMY_DMG_TYPES.includes(st.dmgType) ? st.dmgType : (ENEMY_DMG_TYPES.includes(rec.dmgType) ? rec.dmgType : 'phys');
+  const spec = {
+    id: '',
+    name: typeof rec.name === 'string' ? rec.name : '',
+    rank: ENEMY_RANKS.includes(rec.rank) ? rec.rank : 'NORMAL',
+    applyWay: ENEMY_APPLY_WAYS.includes(rec.applyWay) ? rec.applyWay : 'MELEE',
+    motion,
+    dmgType,
+    desc: typeof rec.desc === 'string' ? rec.desc : '',
+    stats: {},
+    abilities: (Array.isArray(rec.abilities) ? rec.abilities : []).map((a) => ({
+      text: typeof a === 'string' ? a : String((a && a.text) || ''),
+      format: (a && a.format) || 'NORMAL',
+    })),
+    talents: { bb: (isPlain(rec.talents) && isPlain(rec.talents.bb)) ? { ...rec.talents.bb } : {} },
+    skills: Array.isArray(rec.skills) ? rec.skills.map((s) => ({ ...s })) : [],
+    tags: Array.isArray(rec.tags) ? rec.tags.filter((v) => typeof v === 'string') : [],
+    immunities: Object.fromEntries(ENEMY_IMMUNITIES.map((k) => [k, isPlain(st.immunities) ? st.immunities[k] === true : false])),
+    otherImmunities: Array.isArray(st.otherImmunities) ? st.otherImmunities.filter((v) => typeof v === 'string') : [],
+  };
+  // 数值一律补全到 ENEMY_STAT_DEFAULTS：模板必须是「拿去就能派生」的，缺项会让 derive 直接报 BAD_NUMBER。
+  for (const [k, d] of Object.entries(ENEMY_STAT_DEFAULTS)) spec.stats[k] = fin(st[k], d);
+  // 两种伤害只在**与推导结果不一致**时显式带上：多属性（`['phys','arts']`）与官方的 `['none']` 都算不一致。
+  const derivedTypes = dmgType === 'none' ? [] : [dmgType];
+  if (Array.isArray(st.dmgTypes) && JSON.stringify(st.dmgTypes) !== JSON.stringify(derivedTypes)) {
+    spec.dmgTypes = st.dmgTypes.filter((v) => ENEMY_DMG_TYPES.includes(v));
+  }
+  // rawRangeRadius 不在默认值表里，但 derive 会读它：官方数据里它与 rangeRadius 未必相等（首领常有），
+  // 不原样带上就等于模板悄悄改了人家的射程。
+  if (isFin(st.rawRangeRadius)) spec.stats.rawRangeRadius = st.rawRangeRadius;
+  if (typeof rec.spine === 'string' && rec.spine) spec.spine = rec.spine;
+  if (isFin(rec.modelScale)) spec.modelScale = rec.modelScale;
+  if (isFin(rec.beFactor)) spec.beFactor = rec.beFactor;
+  if (isPlain(rec.hitArea)) spec.hitArea = { w: rec.hitArea.w, h: rec.hitArea.h, dx: fin(rec.hitArea.dx, 0), dy: fin(rec.hitArea.dy, 0) };
+  if (isPlain(rec.attackAnim)) spec.attackAnim = { ...rec.attackAnim };
+  if (ENEMY_AC_TYPES.includes(rec.acType)) spec.acType = rec.acType;
+  if (Array.isArray(rec.acTypes)) spec.acTypes = rec.acTypes.filter((v) => ENEMY_AC_TYPES.includes(v));
+  if (isPlain(rec.sp)) spec.sp = { type: rec.sp.type ?? null, maxSp: fin(rec.sp.maxSp, 0), initSp: fin(rec.sp.initSp, 0), increment: fin(rec.sp.increment, 0) };
+  if (rec.notCountInTotal === true) spec.notCountInTotal = true;
+  if (rec.isFlyEnemy !== undefined) spec.isFlyEnemy = rec.isFlyEnemy === true;
+  return spec;
 }
 
 /**
