@@ -63,10 +63,33 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
 | `/voice.html` | **语音**编辑器（`pack.json` 的 `voices` 字段：干员 × 槽位 × 文件） |
 | `/pack.html` | **包管理**（导出/导入 `.zip`、`pack.json` 的 `support` 助战声明、**一键试玩**） |
 
+### 界面语言（中英双语）
+
+右上角有一个 `EN` / `中文` 按钮，**默认中文**。选择记在 `localStorage`，也可以用 `?lang=en` 直接把链接发给别人。
+
+- 词典以**中文原文为键**（`editor/ui/i18n.en.*.js`）：中文界面不需要维护任何对照表，英文只写「中文 → 英文」。
+  **缺译文时退回中文**，而不是显示 `pack.newOperator` 这种 key 名或一片空白。
+- HTML 里的静态文案用 `data-i18n`，元素里保留中文原文当兜底：脚本没跑起来时页面是中文。
+- 词条按页分片；**两个以上页面共用的词条放 `i18n.en.shared.js`** —— 放在某一页里，那一页收尾删词条时
+  会把别的页面悄悄退回中文，而当场没有测试会发现。
+- `kit` 页的页面脚本有一条「不许 import 任何东西」的安全断言（那一页直接编辑并展示作者的 kit 源码），
+  所以它通过 `i18n.global.js` 从 `globalThis` 取接口，保持零 import。
+- 加了文案就要补译文：`test/editorI18n.test.js` 会扫源码，**漏一条、多一个死键、分片之间重复键**都会失败。
+
 ### 干员编辑器（首页）
 
 - **左栏**：工坊包列表 → 该包的干员列表。可编辑的干员（有 spec）与「非编辑器管理」的记录分开显示。
+- **新建有两条路**：`＋ 新建干员` 从空白表单开始；**`⧉ 以模板新建`** 从官方干员（266 个，可搜名称/代号/id）
+  或本包已有干员复制一份底子 —— 数值、职业、分支、**攻击范围**、技能（含黑板）、天赋、外观一次填好，
+  只需填新 id 与名字。**模板不会带 id**：顺手复制原 id 会直接撞官方 id，记录会被引擎丢弃。
+- **数值参照尺子**：每个数值下面一条细线，标出官方同职业的 min–中位–max 与当前值落点，越界时变色并写明。
+  它是参照不是上限 —— `/api/state` 的 `statRanges` 按职业统计，页面只负责画。
+- **攻击范围与伤害分类**：可以挑官方形状（每种形状标一个用过它的干员当例子，例如「10 格 · 例：能天使」），
+  并把当前生效的形状画成小格阵（高亮干员自己那一格）。没有显式范围时画的是**推导出来的默认值**，
+  推导用的就是 `shared/chessAuthoring.js` 的 `classify()` —— 界面显示的和引擎真正用的是同一份。
 - **表单**：身份（id/名称/阶/职业/分支/位置）、外观（复用已有 Spine id）、**普通与精锐两套数值**、**技能**（技能名/类型/持续类型/技力消耗/初始技力/持续时间/技力回复/自动释放触发/官方技能描述，外加**黑板书键值编辑器**）、**天赋**（0~2 条，每条含天赋名、说明、黑板书）、以及**「是否助战」开关**（直接写入服务端助战卡池）。
+- **id 在输入时就检查**：撞本包已有干员、或撞官方 id（除非在 `pack.json` 里声明 `overrides`，否则记录会被丢弃）
+  分别提示。已有干员**改了 id 再保存只会新建一份记录**，原来那份仍留在包里 —— 表单会当场提醒这一条。
 - 天赋的**说明是必填的**：没有说明的天赋在生成的记录里会被标记为 `hidden` —— 也就是说它什么都不做。编辑器会在提示里写明，`test/editor.test.js` 锁住了这条。
 - 黑板书键必须是通用 kit 认识的键（见 `docs/prompts/operator-pack.md` 的表格）。写了不认的键**不会报错，但也不会有任何效果**——校验只给警告。
 - **实时校验**：每次改动都会调用 `/api/preview`，用与 CLI、AI 完全相同的 `shared/chessAuthoring.js` 规则给出错误与警告，并显示**将要生成的记录**。
@@ -101,7 +124,9 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
   - **没有本地素材就自动退回 2D**，并说明原因（没装官方棋盘图集 / 没有 WebGL2 / three.js 没加载 / 素材包不完整），
     与游戏客户端的探测链一致（`board3d/load.js`）。「默认 3D」因此不会让谁卡在一块空白画布上。
   - 它需要三条**只读**通路：`/client/**`（客户端模块）、`/vendor/**`（three.js）、`/assets/**`（棋盘素材），
-    外加 `/data/local-assets.json`。编辑器默认只绑 127.0.0.1；只服务白名单扩展名，`..` 与点开头段一律拒绝，
+    外加 `/data/local-assets.json`。界面自己还会读 `/shared/**`（只读，只给 `.js`/`.mjs`/`.json`/`.css`）——
+    这样数值尺子的刻度换算、伤害分类这些规则在浏览器与服务端是**同一份文件**，不会各写一套慢慢跑偏。
+    编辑器默认只绑 127.0.0.1；只服务白名单扩展名，`..` 与点开头段一律拒绝，
     而且**不会**变成通用文件服务器（`/data/chess.json` 仍是 404）。
   - 素材名里的方括号、空格、`#` 会以 percent-encoding 发过来（官方棋盘里就有 `map/fx/[opt]merged_textures.png`
     这样的文件），编辑器**先解码、再按同一套规则检查段** —— 顺序反了会让 `%2e%2e` 绕过 `..` 的判断，
@@ -119,6 +144,13 @@ node tools/workshop-validate.mjs workshop                                       
 
 第三个页面：**`/enemy.html`**。同样是"只编辑人能给的东西，机械字段一律推导"。
 
+- **新建有两条路**：`＋ 新建怪物` 从空白表单开始；**`⧉ 以模板新建`** 从官方 249 只怪（可搜名称/key，按档位排序）
+  或本包已有怪物复制一份底子 —— 数值、档位、攻击方式、能力文字、技能、免疫、spine 一次带过来。
+- **数值参照尺子**：每个数值下面一条细线，标出官方**同档位**（普通/精英/领袖）的 min–中位–max；
+  切到精英怪时尺子跟着换。参照不是上限。
+- **`spine` 有候选、也有存在性校验**：这是整张表单里**唯一一个填错不报错**的字段 —— prefab 键查不到时
+  `assets.spineEntry()` 直接画个占位菱形，游戏照跑、日志干净。输入框挂了官方 prefab 候选（datalist），
+  并在下面当场说清三种情况：留空 → 占位模型；填错 → 静默变占位模型；填对 → 用官方美术。
 - **身份**：id（生成 `enemy_ws_<id>`）、名称、rank、攻击方式、伤害类型、移动方式、描述
 - **数值**：17 项 stats（生命/攻击/防御/法抗/移速/攻击间隔/攻速/射程/阻挡/重量/回复…）
 - **特殊机制**：`abilities`（游戏里显示的能力说明，一行一条）、`talents.bb`（天赋黑板键值）、`skills`（JSON，
@@ -382,7 +414,8 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/state` | 工坊包、干员、校验问题、助战配置、可选用的官方 Spine 列表 |
+| GET | `/api/state` | 工坊包、干员、校验问题、助战配置、可选用的官方 Spine 列表、**按职业的数值参照 `statRanges`** |
+| GET | `/api/operators/template?chessId=` | 把一对已发布的干员记录转成一份**可继续编辑的 spec**（模板新建用；id 留空） |
 | POST | `/api/preview` | `{ spec }` → 推导并校验，**不写盘** |
 | POST | `/api/packs/:pack/operators` | `{ spec }` → 写 specs 并重新生成 `chess.json` |
 | DELETE | `/api/packs/:pack/operators/:slug` | 删除 spec 及其拥有的记录 |
@@ -392,7 +425,8 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 | POST | `/api/stages/preview` | `{ spec }` → 推导路径与部署区并校验，**不写盘** |
 | POST | `/api/packs/:pack/stages` | `{ spec }` → 写 `stage-specs/` 并重新生成 `stages.json` |
 | DELETE | `/api/packs/:pack/stages/:id` | 删除该地图的 spec 及它拥有的记录 |
-| GET | `/api/enemies` | 工坊怪物列表 + **枚举词表** + 官方怪物键 |
+| GET | `/api/enemies` | 工坊怪物列表 + **枚举词表** + 官方怪物键 + **模板清单 / spine 候选 / 按档位的数值参照** |
+| GET | `/api/enemies/template?key=` | 把一只已发布的怪物记录转成一份**可继续编辑的 spec**（模板新建用；id 留空） |
 | GET | `/api/enemies/:pack/:key` | 该怪物的**可编辑 spec**（源）与生成的记录 |
 | POST | `/api/enemies/preview` | `{ spec }` → 推导 `attrPower`/`be` 并校验，**不写盘** |
 | POST | `/api/packs/:pack/enemies` | `{ spec }` → 写 `enemy-specs/` 并重新生成 `enemies.json` |
