@@ -87,6 +87,8 @@ doc.querySelectorAll = () => [];
 
 globalThis.document = doc;
 globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+// 从出怪页的「＋ 新建怪物…」跳过来时会带 ?pack=：它要压过「默认选第一个包」的行为
+globalThis.location = { search: '?pack=other-pack' };
 
 const VOCAB = {
   ranks: ['NORMAL', 'ELITE', 'BOSS'],
@@ -106,6 +108,8 @@ const STATE = {
     managed: true, issues: [],
   }],
   vocab: VOCAB,
+  // 保存目标的两个包：?pack= 要能压过「默认取第一个怪所在的包」
+  packs: [{ id: 'demo-pack', name: '演示包' }, { id: 'other-pack', name: '另一个包' }],
   officialEnemies: [SPINE_OK, 'enemy_1045_hammer'],
   officialTemplates: [
     { key: SPINE_OK, name: '源石虫', rank: 'NORMAL', applyWay: 'MELEE', motion: 'WALK', dmgType: 'phys', spine: SPINE_OK, stats: { maxHp: 1000, atk: 100, def: 0, res: 0, moveSpeed: 1, bat: 1 } },
@@ -218,5 +222,13 @@ describe('怪物表单：真跑一遍（最小 DOM 桩）', () => {
     assert.match(form, /Art and off-datatable fields/);
     assert.match(form, /A real official prefab key/);
     assert.doesNotMatch(form, /美术与非数据表字段/);
+  });
+
+  test('?pack= 把保存目标定在跳过来时指定的包上（出怪页的「＋ 新建怪物…」走这条路）', () => {
+    // 没有 ?pack= 时默认取第一个怪所在的包（demo-pack），这里必须是 other-pack
+    const packSel = findAll(sideBox, (n) => n.tagName === 'SELECT')
+      .find((s) => s.children.some((o) => String(o.textContent).includes('另一个包')));
+    assert.ok(packSel, '右栏要有保存目标下拉');
+    assert.equal(packSel.value, 'other-pack');
   });
 });

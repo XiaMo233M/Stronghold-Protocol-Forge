@@ -70,4 +70,9 @@ export const EN_WAVE = Object.freeze({
   // ---- 路线画布上的底图 ----
   '底图：{0}': 'base map: {0}',
   '这张地图没有地形数据，只画网格': 'this map has no terrain data — only the grid is drawn',
+
+  // ---- 敌人下拉的分组（「官方」与地图页共用，已在 shared） ----
+  '本包：{0}': 'this pack: {0}',
+  '＋ 新建怪物…（新标签页打开）': '+ New enemy… (opens in a new tab)',
+  '浏览器拦下了新标签页：请手动打开「怪物编辑器」新建一只怪，回来点「重新载入」就能选到它。': 'The browser blocked the new tab: open the enemy editor yourself, create the enemy, then hit “Reload” here and it will be selectable.',
 });

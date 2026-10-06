@@ -191,14 +191,46 @@ function renderTable() {
     };
     tr.append(td(num('time')), td((() => {
       const sel = document.createElement('select');
-      for (const k of state.data.enemies) {
-        const o = document.createElement('option'); o.value = k;
+      // 按官方 / 本包分组，并显示中文名 —— 官方 249 只怪的键名作者记不住，
+      // 一个 250 项、只有键名的平铺下拉基本没法用。名字缺了就退回键名。
+      const label = (o) => (o.name && o.name !== o.key ? `${o.name} (${o.key})` : o.key);
+      const options = state.data.enemyOptions?.length
+        ? state.data.enemyOptions
+        : (state.data.enemies ?? []).map((key) => ({ key, name: null, pack: null }));
+      const groups = new Map();
+      for (const o of options) {
+        const g = o.pack ? t('本包：{0}', o.pack) : t('官方');
+        if (!groups.has(g)) {
+          const og = document.createElement('optgroup');
+          og.label = g;
+          sel.append(og);
+          groups.set(g, og);
+        }
+        const opt = document.createElement('option');
+        opt.value = o.key;
         // 占位符在选项里就标出来：它出的不是这只怪，而是阵营随机怪
-        o.textContent = isPlaceholderEnemy(k, state.data.placeholderEnemies) ? `${k} ${t('（阵营占位符）')}` : k;
-        sel.append(o);
+        opt.textContent = isPlaceholderEnemy(o.key, state.data.placeholderEnemies) ? `${label(o)} ${t('（阵营占位符）')}` : label(o);
+        groups.get(g).append(opt);
       }
       sel.value = sp.key;
-      sel.addEventListener('change', () => { sp.key = sel.value; renderSide(); renderTimeline(); schedule(); });
+      sel.addEventListener('change', () => {
+        // 「去新建一只怪」：新标签页打开怪物编辑器（当前这张出怪表还没保存，绝不能把本页顶掉），
+        // 顺手把当前包带过去，省得对方页面还要再选一次。
+        if (sel.value === '__new_enemy__') {
+          const pack = state.packId ? `?pack=${encodeURIComponent(state.packId)}` : '';
+          const opened = window.open(`./enemy.html${pack}`, '_blank');
+          if (!opened) state.message = { kind: 'error', text: t('浏览器拦下了新标签页：请手动打开「怪物编辑器」新建一只怪，回来点「重新载入」就能选到它。') };
+          sel.value = sp.key ?? '';
+          renderSide();
+          return;
+        }
+        sp.key = sel.value; renderSide(); renderTimeline(); schedule();
+      });
+      // 单独一项放在最前面：作者做到一半发现缺怪时不用切页、不用记住回来要选哪只
+      const newOpt = document.createElement('option');
+      newOpt.value = '__new_enemy__';
+      newOpt.textContent = t('＋ 新建怪物…（新标签页打开）');
+      sel.prepend(newOpt);
       return sel;
     })()), td(num('count', 1)), td(num('interval')), td((() => {
       const sel = document.createElement('select');

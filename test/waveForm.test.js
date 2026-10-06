@@ -35,6 +35,7 @@ function makeEl(tag) {
     setAttribute(k, v) { this.attrs[k] = v; if (k === 'id') this.id = v; },
     getAttribute(k) { return this.attrs[k] ?? null; },
     append(...kids) { for (const k of kids) el.children.push(typeof k === 'string' ? { nodeType: 3, text: k } : k); },
+    prepend(...kids) { el.children.unshift(...kids.map((k) => (typeof k === 'string' ? { nodeType: 3, text: k } : k))); },
     replaceChildren(...kids) { el.children = [...kids]; },
     addEventListener(type, fn) { (el.listeners[type] ??= []).push(fn); },
     getContext: () => ctx,
@@ -110,6 +111,12 @@ const DATA = {
   vocab: { kinds: ['normal', 'boss'], slots: ['N', 'E', 'S'], spawnFields: [], roundsPerMode: 15 },
   officialWaves: ['act1autochess_01'],
   enemies: ['enemy_normal', 'enemy_ph'],
+  // 带中文名与来源包：下拉据此分组并显示名字
+  enemyOptions: [
+    { key: 'enemy_normal', name: '源石虫', pack: null },
+    { key: 'enemy_ph', name: '模板怪', pack: null },
+    { key: 'enemy_ws_mine', name: '我的怪', pack: 'demo-pack' },
+  ],
   modes: [{ id: MODE, name: '单人·欢乐' }],
   stages: [MAP, { id: 'ws_map', name: '我的图', pack: 'demo-pack', official: false, rows: ['rfrf'], tiles: {} }],
   placeholderEnemies: { enemy_ph: 'N' },
@@ -172,11 +179,15 @@ describe('出怪设计器：真跑一遍（最小 DOM 桩）', () => {
 
   test('加一次出怪、并选成阵营占位符：选项标注 + 右栏警告', () => {
     fire(clickableWith(table, '＋ 添加一次出怪'), 'click');
-    const enemySel = selectsOf(table).find((s) => s.children.some((o) => o.value === 'enemy_ph'));
+    const enemySel = selectsOf(table).find((s) => findAll(s, (o) => o.value === 'enemy_ph').length);
     assert.ok(enemySel, '敌人下拉应该在明细表里');
-    const phOption = enemySel.children.find((o) => o.value === 'enemy_ph');
+    // 按官方 / 本包分组，并显示中文名（只有键名的 250 项平铺下拉没法用）
+    const groups = enemySel.children.filter((c) => c.tagName === 'OPTGROUP');
+    assert.deepEqual(groups.map((g) => g.label), ['官方', '本包：demo-pack']);
+    assert.ok(groups[0].children.some((o) => o.value === 'enemy_normal' && /源石虫 \(enemy_normal\)/.test(String(o.textContent))), '官方组的选项要带中文名');
+    const phOption = findAll(enemySel, (o) => o.value === 'enemy_ph')[0];
     assert.match(String(phOption.textContent), /（阵营占位符）/, '占位符要在选项里标出来');
-    assert.doesNotMatch(String(enemySel.children.find((o) => o.value === 'enemy_normal').textContent), /阵营占位符/);
+    assert.doesNotMatch(String(findAll(enemySel, (o) => o.value === 'enemy_normal')[0].textContent), /阵营占位符/);
 
     fire(enemySel, 'change', 'enemy_ph');
     assert.match(textOf(side), /这张表用了阵营占位符/, '用了占位符就要在右栏说清后果');
@@ -187,5 +198,26 @@ describe('出怪设计器：真跑一遍（最小 DOM 桩）', () => {
     const all = textOf(side) + textOf(list) + mapInfo.textContent;
     assert.match(all, /Save to|Maps that actually use this table|base map:/);
     assert.doesNotMatch(textOf(side), /保存到/);
+  });
+
+  test('下拉第一项是「去新建一只怪」：新标签页打开怪物编辑器并带上当前包', () => {
+    // 上一条测试把界面切成英文了，这里先切回中文再断言文案
+    fire(findAll(headerRow, (n) => n.id === 'btnLang')[0], 'click');
+    const opened = [];
+    globalThis.window = { ...(globalThis.window ?? {}), open: (url, target) => { opened.push([url, target]); return {}; } };
+    try {
+      // 先在「保存到」里选一个包（真实流程也是这样），跳转时才会把它带过去
+      const packSel = selectsOf(side).find((s) => s.children.some((o) => String(o.textContent).includes('演示包')));
+      fire(packSel, 'change', 'demo-pack');
+      const enemySel = selectsOf(table).find((s) => findAll(s, (o) => o.value === 'enemy_ph').length);
+      const first = enemySel.children[0];
+      assert.equal(first.value, '__new_enemy__');
+      assert.match(String(first.textContent), /新建怪物/);
+      fire(enemySel, 'change', '__new_enemy__');
+      assert.deepEqual(opened, [['./enemy.html?pack=demo-pack', '_blank']], '必须新标签页打开：这张出怪表还没保存，不能被顶掉');
+      assert.notEqual(enemySel.value, '__new_enemy__', '选完要退回原来那只，别停在一个假选项上');
+    } finally {
+      delete globalThis.window.open;
+    }
   });
 });

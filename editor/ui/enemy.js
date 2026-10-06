@@ -534,10 +534,22 @@ function renderPath() {
 async function load() {
   state.data = await api('/api/enemies');
   renderPath();
+  // 别的页面可能带 ?pack=<包> 跳过来（例如出怪页的「＋ 新建怪物…」），优先用它
+  const asked = readPackParam();
+  if (asked && state.data.packs?.some((p) => p.id === asked)) state.packId = asked;
   if (!state.packId) state.packId = state.data.enemies[0]?.pack ?? null;
   renderList();
   if (!state.spec) renderForm();
   renderSide();
+}
+
+/** `?pack=<包 id>`：从别的页面跳过来时先选中那个包（只认确实存在的包）。 */
+function readPackParam() {
+  try {
+    return new URLSearchParams(location.search).get('pack');
+  } catch {
+    return null;
+  }
 }
 
 $('#btnReload').addEventListener('click', () => load().catch((e) => { state.message = { kind: 'error', text: e.message }; renderSide(); }));

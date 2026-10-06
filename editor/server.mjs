@@ -451,6 +451,28 @@ function knownEnemyKeysFor(root, dataDir) {
 }
 
 /**
+ * 可出怪的敌人，带**中文名**与来源包（出怪页的下拉要按官方/本包分组并显示名字）。
+ *
+ * 为什么不能只给键：官方 249 只怪共用一堆 `enemy_10xx_yyyy` 这种键，作者记不住；
+ * 而一个 250 项、只有键名的原生下拉基本没法用（中文还得靠输入法逐字匹配）。
+ */
+function enemyChoicesFor(root, dataDir) {
+  const out = [];
+  for (const [key, rec] of Object.entries(readJson(path.join(dataDir, 'enemies.json'), {}) || {})) {
+    out.push({ key, name: (rec && typeof rec.name === 'string' && rec.name) || null, pack: null });
+  }
+  if (root && fs.existsSync(root)) {
+    for (const packId of fs.readdirSync(root).sort()) {
+      if (!PACK_ID_RE.test(packId)) continue;
+      for (const [key, rec] of Object.entries(readJson(path.join(root, packId, 'enemies.json'), {}) || {})) {
+        out.push({ key, name: (rec && typeof rec.name === 'string' && rec.name) || null, pack: packId });
+      }
+    }
+  }
+  return out.sort((a, b) => (Number(!!a.pack) - Number(!!b.pack)) || String(a.pack ?? '').localeCompare(String(b.pack ?? '')) || a.key.localeCompare(b.key));
+}
+
+/**
  * The maps a wave can be shown over: the official ones (id + name + their S/E tiles for the route preview) and the
  * packs' own stages, whose `rounds`/`bossRounds` are what actually bind a wave to a round (server/match/waves.js).
  */
@@ -1395,6 +1417,8 @@ export async function createEditorServer(opts = {}) {
         modes: inScopeModes(dataDir),
         // every spawnable enemy (official + the packs' own), so the timeline can offer a picker instead of a text field
         enemies: [...knownEnemyKeysFor(root, dataDir)].sort(),
+        // 同一批敌人，带中文名与来源包：下拉按官方/本包分组并显示名字（键名作者记不住）
+        enemyOptions: enemyChoicesFor(root, dataDir),
         stages: stageChoices(root, dataDir),
         // 阵营占位符（键 → 槽位）：选了它们实际出的是阵营随机怪，界面要标出来
         placeholderEnemies: placeholderEnemyMap(dataDir),
