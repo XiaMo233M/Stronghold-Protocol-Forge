@@ -594,6 +594,30 @@ function packIdsFor(root) {
 }
 
 /**
+ * 把 percent-encoded 的路径段解回真实文件名，并顺手挡掉「解码后才出现的危险形状」。
+ *
+ * 为什么必须解码：编辑器自己发出去的 URL 就是逐段 `encodeURIComponent` 的（语音试听、`/assets/**` 的棋盘贴图），
+ * 而 `url.pathname` 保留着 `%5B`／`%20`／`%23` 这样的编码。不解码就会拿 `%5Bopt%5Dmerged_textures.png` 去查文件，
+ * 结果是 404 —— 官方棋盘图集里正好有两张这样的贴图（`map/fx/[opt]merged_textures.png`、
+ * `map/water/[ucp]TX_water_normal.png`），于是 **3D 预览整块画布全黑**，而且不报任何错。
+ *
+ * 顺序不能反：**先解码、再检查**。反过来（先检查后解码）会让 `%2e%2e` 这类编码绕过 `..` 的判断。
+ * 解码后出现 `/`、`\`、空字符，说明这一段想冒充路径分隔符 —— 一律拒绝，返回 null 由调用方按 404 处理。
+ * @param {string[]} segments 原始（仍带百分号编码）的路径段
+ * @returns {string[]|null}
+ */
+function decodePathSegments(segments) {
+  const out = [];
+  for (const s of segments) {
+    let d;
+    try { d = decodeURIComponent(s); } catch { return null; }   // 畸形编码（半个 %、非法 UTF-8 序列）
+    if (!d || d.includes('/') || d.includes('\\') || d.includes('\0')) return null;
+    out.push(d);
+  }
+  return out;
+}
+
+/**
  * Why a string may not be used as a voice line, in Chinese for the form — or null when it is acceptable.
  * The same rule the /workshop-assets route (and `VOICE_PATH_UNSAFE`) applies: relative, inside `assets/`, no traversal.
  */
@@ -1689,10 +1713,13 @@ export async function createEditorServer(opts = {}) {
       // directory listing, no traversal and no dot-segments — and only the AUDIO half of the one allowlist the game
       // route uses, so the editor cannot serve a pack's `.js`/`.png` either.
       if (p.startsWith(WORKSHOP_MEDIA_PREFIX)) {
-        const segments = p.slice(WORKSHOP_MEDIA_PREFIX.length).split('/').filter((s) => s.length > 0);
-        const packId = segments.shift();
-        const ext = segments.length ? path.extname(segments[segments.length - 1]).toLowerCase() : '';
-        const bad = !packId || !PACK_ID_RE.test(packId) || !segments.length
+        // 解码（编辑器页面自己发出去的试听 URL 就是逐段 encodeURIComponent 的：包文件名里可以有空格或 `#`），
+        // 解完再按同一套段规则检查 —— 顺序反了 `%2e%2e` 就能绕过 `..`。
+        const raw = p.slice(WORKSHOP_MEDIA_PREFIX.length).split('/').filter((s) => s.length > 0);
+        const segments = decodePathSegments(raw);
+        const packId = segments ? segments.shift() : null;
+        const ext = segments && segments.length ? path.extname(segments[segments.length - 1]).toLowerCase() : '';
+        const bad = !segments || !packId || !PACK_ID_RE.test(packId) || !segments.length
           || segments.some((s) => s === '..' || s === '.' || s.startsWith('.')) || !AUDIO_TYPES.has(ext);
         if (bad) throw Object.assign(new Error('not found'), { status: 404 });
         const dir = path.join(root, packId, VOICE_ASSETS_DIR);
@@ -1715,9 +1742,12 @@ export async function createEditorServer(opts = {}) {
       ];
       const mount = previewMounts.find((m) => p.startsWith(m.prefix));
       if (mount) {
-        const segments = p.slice(mount.prefix.length).split('/').filter((s) => s.length > 0);
-        const ext = segments.length ? path.extname(segments[segments.length - 1]).toLowerCase() : '';
-        const bad = !segments.length || segments.some((s) => s === '..' || s === '.' || s.startsWith('.')) || !mount.only.has(ext);
+        // 同样先解码再检查：官方棋盘图集里有 `[opt]merged_textures.png`、`[ucp]TX_water_normal.png` 这种文件名，
+        // 浏览器发过来是 `%5Bopt%5D…`。不解码就 404，而 3D 预览少了这两张贴图会**整块全黑且不报错**。
+        const raw = p.slice(mount.prefix.length).split('/').filter((s) => s.length > 0);
+        const segments = decodePathSegments(raw);
+        const ext = segments && segments.length ? path.extname(segments[segments.length - 1]).toLowerCase() : '';
+        const bad = !segments || !segments.length || segments.some((s) => s === '..' || s === '.' || s.startsWith('.')) || !mount.only.has(ext);
         if (bad) throw Object.assign(new Error('not found'), { status: 404 });
         const abs = path.join(mount.root, ...segments);
         if (!abs.startsWith(mount.root + path.sep)) throw Object.assign(new Error('forbidden'), { status: 403 });

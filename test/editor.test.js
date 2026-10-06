@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 
 import { createEditorServer, UI_DIR } from '../editor/server.mjs';
-import { startServer } from '../server/index.js';
+import { startServer, WORKSHOP_ASSET_PREFIX } from '../server/index.js';
 import { loadData } from '../server/data.js';
 import { GameData } from '../server/match/gamedata.js';
 import { checkSupport, normalizeSupportConfig } from '../shared/support.js';
@@ -519,6 +519,55 @@ describe('workshop editor: the 3D preview mounts (read-only, and narrow)', () =>
     assert.ok(Number(art.headers.get('content-length')) > 1000, 'the atlas must be real bytes');
   });
 
+  test('percent-encoded 贴图名必须解码（否则 3D 预览静默全黑）', async () => {
+    // 业主实测「点 3D 全黑」的根因就在这条：官方棋盘图集里有两张文件名带方括号的贴图，浏览器发的是
+    // `%5Bopt%5D…`，而编辑器过去拿这段编码直接去查文件 → 404 → 棋盘建不出来 → 画布全黑且不报错。
+    // 这两条断言就是那两张贴图；换机器上没有本机素材时它们不存在，跳过（此时 3D 本来就退回 2D）。
+    const withBrackets = [
+      '/assets/local/map/fx/%5Bopt%5Dmerged_textures.png',
+      '/assets/local/map/water/%5Bucp%5DTX_water_normal.png',
+    ];
+    let checked = 0;
+    for (const url of withBrackets) {
+      const res = await fetch(`${editor.url}${url}`);
+      if (res.status === 404) continue;                    // 本机没提取过这两张素材
+      assert.equal(res.status, 200, `${url} 必须能取到（编码后的文件名要解码）`);
+      assert.match(res.headers.get('content-type') || '', /image\/png/);
+      const bytes = Buffer.from(await res.arrayBuffer());
+      const onDisk = join(ROOT, 'public', decodeURIComponent(url.replace('/assets/', 'assets/')));
+      assert.ok(bytes.length > 1000, `${url} 要是真字节`);
+      if (fs.existsSync(onDisk)) assert.deepEqual(bytes, fs.readFileSync(onDisk), '取到的必须就是磁盘上那个文件');
+      checked++;
+    }
+    if (!checked) return; // 这台机器没有本机素材：上面的遍历已经全部跳过
+  });
+
+  test('解码之后仍然挡住路径穿越（先检查后解码就会漏）', async () => {
+    // 顺序：**先解码、再检查**。这几条如果按「先检查后解码」写，%2e%2e 就会骗过 `..` 的判断。
+    for (const url of ['/assets/%2e%2e/package.json', '/assets/local/%2e%2e/%2e%2e/package.json',
+      '/client/..%2f..%2fpackage.json', '/assets/local%2Fmap/autochess/tiles.json',
+      '/assets/local/map/%2e%2e%2f%2e%2e%2fpackage.json', '/docs/%2e%2e%2fpackage.json']) {
+      const res = await fetch(`${editor.url}${url}`);
+      assert.ok(res.status === 404 || res.status === 403, `${url} -> ${res.status}`);
+      const body = await res.text();
+      assert.doesNotMatch(body, /"scripts"|"dependencies"/, `${url} 泄漏了 package.json`);
+    }
+  });
+
+  test('语音试听的文件名带空格/井号也能取到（同一处解码）', async () => {
+    // 编辑器页面自己发的试听 URL 就是逐段 encodeURIComponent 的：包作者的文件名里可以有空格或 `#`。
+    // 不解码的话「页面上列得出来、点了播不了」，与 3D 全黑是同一类静默失败。
+    const dir = join(wsRoot, 'diag-voice-pack');
+    fs.mkdirSync(join(dir, 'assets', 'voice'), { recursive: true });
+    fs.writeFileSync(join(dir, 'pack.json'), JSON.stringify({ id: 'diag-voice-pack', name: '试听诊断', version: '1.0.0', license: 'CC0-1.0', content: [], voices: { char_x: { win: ['voice/a b#c.mp3'] } } }));
+    fs.writeFileSync(join(dir, 'assets', 'voice', 'a b#c.mp3'), Buffer.from('ID3-diagnostic'));
+    const url = `${WORKSHOP_ASSET_PREFIX}diag-voice-pack/voice/${encodeURIComponent('a b#c.mp3')}`;
+    const res = await fetch(`${editor.url}${url}`);
+    assert.equal(res.status, 200, url);
+    assert.deepEqual(Buffer.from(await res.arrayBuffer()).toString('latin1'), 'ID3-diagnostic');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
   test('it is not a file server: escapes, foreign extensions and other data files are refused', async () => {
     const attempts = [
       '/client/js/render/board3d/evil.exe',
@@ -545,6 +594,21 @@ describe('workshop editor: the 3D preview mounts (read-only, and narrow)', () =>
     const html = await fetch(`${editor.url}/stage.html`).then((r) => r.text());
     assert.match(html, /id="ov3d"/, 'the placer must offer the 3D toggle');
     assert.match(html, /id="board3d"/, 'and the canvas the preview draws into');
+  });
+
+  test('3D 是地图页的默认视图（2D 地图不直观），但按钮/参数仍能退回 2D', async () => {
+    const src = await fetch(`${editor.url}/stage.js`).then((r) => r.text());
+    // 默认打开：`auto3d` 初始为 true，且只有 `?board=2d` 才拦住它 —— 这三种写法缺一样都会悄悄变回「要点一下才有 3D」
+    assert.match(src, /auto3d: true/, '默认就要允许自动打开 3D');
+    assert.match(src, /state\.board !== '2d'/, '只有 ?board=2d 能强制留在 2D');
+    assert.match(src, /if \(state\.auto3d && state\.board !== '2d' && !state\.mode3d\) await toggle3d\(\)/,
+      '进地图页时就自动挂上 3D 预览');
+    // 作者手动切回 2D 是明确选择：自动流程不能再把它扳回 3D（否则按钮和自动逻辑互相打架）
+    assert.match(src, /state\.auto3d = false/, '切回 2D 要关掉自动打开');
+    // 第一帧就要有内容：先等这张地图的推导结果，再挂 3D 预览
+    assert.match(src, /await preview\(\);/, '挂 3D 之前先把 preview 拿到手，否则第一帧是空棋盘');
+    // `?board=3d` 的旧约定仍然有效（与 `2d` 同一个参数解析），并且不再需要特殊分支
+    assert.match(src, /new URLSearchParams\(location\.search\)\.get\('board'\)/, '沿用游戏客户端的 ?board= 约定');
   });
 
   test('the 3D module states its four availability checks and falls back instead of throwing', async () => {

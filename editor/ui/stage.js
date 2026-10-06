@@ -4,8 +4,8 @@
 // tiles — is DERIVED server-side by the sim (server/stageAuthoring.js) and shown back through /api/stages/preview, so
 // what you see on the overlays is what the engine will actually compute. Painting never invents those tables.
 //
-// It also offers a 3D preview (stage3d.js) built on the GAME's own renderer; when the local board art, WebGL2 or
-// three.js is missing it says why and stays on this 2D canvas — the same fallback the game client uses.
+// 3D 预览是**默认视图**（`?board=2d` 强制 2D，按钮可随时切回）：它用 GAME 自己的渲染器（stage3d.js），
+// 没有本机棋盘素材 / WebGL2 / three.js 时写明原因并留在上面这块 2D 画布 —— 与游戏客户端同一套回退。
 
 import { createStageView3d } from './stage3d.js';
 
@@ -30,8 +30,14 @@ const state = {
   message: null, busy: false,
   // 3D 预览: the game's own renderer over this map, or a documented reason to stay 2D (no local art / no WebGL2 / …)
   mode3d: false, view3d: null, reason3d: null,
-  // `?board=3d` (the game client's convention) opens the first map straight into the 3D preview
-  auto3d: typeof location !== 'undefined' && new URLSearchParams(location.search).get('board') === '3d',
+  // `?board=`（游戏客户端自己的约定，public/js/render/app.js）：`2d` 强制 2D 画布，`3d` 立刻打开 3D。
+  // **不带参数时也打开 3D** —— 官方棋盘贴图才是让作者看懂一张地图的东西，而任何失败都留在 2D 并写明原因
+  // （没有本机素材 / 没有 WebGL2 / 渲染器抛错），所以「默认 3D」不会让谁卡在一块空白画布上。
+  board: (() => {
+    try { return new URLSearchParams(location.search).get('board'); } catch { return null; }
+  })(),
+  // 还能不能「自动打开」：作者手动切回 2D 之后就不该再被自动流程扳回 3D（按钮会跟它打架）。
+  auto3d: true,
 };
 
 const canvas = $('#board');
@@ -259,10 +265,13 @@ async function preview() {
 /**
  * Turn the 3D preview on or off. The first switch lazily probes availability; ANY failure keeps the 2D canvas and
  * states the reason rather than breaking the placer.
+ *
+ * 切回 2D 时把 `auto3d` 关掉：这是**作者的明确选择**，之后的自动流程（换地图、重载）不该再把它扳回 3D。
  */
 async function toggle3d() {
   if (state.mode3d) {
     state.mode3d = false;
+    state.auto3d = false;
     $('#board').hidden = false;
     $('#board3d').hidden = true;
     syncTools();
@@ -337,9 +346,13 @@ async function openStage(s) {
     const r = await api(`/api/stages/${encodeURIComponent(s.pack)}/${encodeURIComponent(s.id)}`);
     loadSpec(r.spec ?? { ...blankSpec(), id: s.id, name: s.name });
     renderList(); renderSide();
-    // `?board=3d` opens straight into the 3D preview (the game client's own convention, public/js/app.js); the probe
-    // still decides — on a machine without the local art or WebGL2 this stays 2D and says why.
-    if (state.auto3d && !state.mode3d) await toggle3d();
+    // 先把这张地图的推导结果（寻路 / 部署位）拿到手：3D 预览第一帧画的就是 state.preview.record，
+    // 否则默认打开 3D 时会先看到一块空棋盘、几十毫秒后才填上；loadSpec 里排的那次也就没意义了，取消掉。
+    clearTimeout(previewTimer);
+    await preview();
+    // 3D 预览是**默认视图**（`?board=2d` 才强制 2D）：官方棋盘贴图才让一张地图看得懂，而 stage3d.js 的探测
+    // 仍然说了算 —— 没有本机素材或没有 WebGL2 时留在 2D 并写明原因。作者手动切回 2D 后 `auto3d` 为 false，这里不再动手。
+    if (state.auto3d && state.board !== '2d' && !state.mode3d) await toggle3d();
   } catch (e) { state.message = { kind: 'error', text: e.message }; renderSide(); }
 }
 
