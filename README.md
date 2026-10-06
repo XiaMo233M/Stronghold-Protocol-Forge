@@ -26,7 +26,7 @@
 
 ## 这是什么
 
-**Forge 工坊编辑器**（`editor/`）是一个**游戏之外的独立工具**，用来创作这个游戏的内容：干员、地图、怪物、出怪表、装备、行为层 kit、语音。它在你本机的浏览器里打开，改的是你仓库里的工坊包。
+**Forge 工坊编辑器**（`editor/`）是一个**游戏之外的独立工具**，用来创作这个游戏的内容：干员、地图、怪物、出怪表、装备、行为层 kit、语音，以及把做好的包**导出成一个 `.zip` 交给别人**（或把别人的包装回来）。它在你本机的浏览器里打开，改的是你仓库里的工坊包。
 
 - 它是**可选工具**：不运行就不存在。可以单独分发、单独使用（[docs/EDITOR.md](docs/EDITOR.md)）。
 - **游戏客户端不含编辑器**：`editor/` 不在 `public/` 下，服务器结构上无法把它发给网页端或后续打包的 APK（`test/editor.test.js` 锁住了这条）。
@@ -34,7 +34,7 @@
 
 ## 能做什么
 
-七个页面，右上角可互相跳转：
+八个页面，右上角可互相跳转：
 
 | 页面 | 路由 | 能编辑什么 |
 |---|---|---|
@@ -45,6 +45,7 @@
 | **装备** | `/item.html` | 一件装备 = 一个 spec = **两条记录（普通 + 精英）**、buffs 黑板（`bb` / `bbStr`）、图标复用 |
 | **kit（行为层）** | `/kit.html` | 包里的 `kits/<干员 id>.js` —— **代码本体**（整份文件），配上**静态校验**（钩子词表、三条硬规则）与保存时自动写入的署名头 |
 | **语音** | `/voice.html` | `pack.json` 的 `voices` 字段：干员 × 槽位 × 文件，**就地编辑**（其余字段原样保留）、按包内 `assets/` 真实文件挑选、可试听 |
+| **包管理** | `/pack.html` | 整包的收发：**导出成 `.zip`**、**导入别人的 `.zip`**、勾选本包自己的干员进**助战卡池**（阶由记录推导）、看每个包的加载器结论 |
 
 除上述表单，编辑器还有实时校验（与 CLI 完全相同的规则）与「将生成的记录」预览；地图页额外有**部署区覆盖层**与**寻路覆盖层**（12 条路线的流场），出怪页有按排期槽位配色的时间轴泳道，kit 页有钩子清单、合法 id 与静态校验（它**只读文本、不执行你的文件**）。
 
@@ -60,6 +61,8 @@
 npm run editor                       # 打开工坊编辑器（独立工具，默认只绑 127.0.0.1）
 node tools/workshop-validate.mjs workshop                     # 分层校验整个工坊目录
 node tools/workshop-scaffold.mjs docs/examples/operator-spec.json --pack my-pack   # spec → 合法工坊包
+node tools/workshop-pack.mjs export my-pack                   # 把包导出成一个可分享的 .zip
+node tools/workshop-pack.mjs import ~/Downloads/my-pack.zip   # 把别人的包装回来（--force 覆盖同名包）
 ```
 
 - 也可以直接 `node tools/workshop-editor.mjs --port 3400 --open`，或用 `--workshop <目录>` 指定其它工坊目录。
@@ -109,10 +112,13 @@ node tools/workshop-scaffold.mjs docs/examples/operator-spec.json --pack my-pack
 - **创意工坊**：把工坊包放进 `workshop/<包>/`，即可新增/覆盖干员等内容。官方数据保持字节不变。
 - **工坊语音包**：包可以在 `pack.json.voices` 里给自己的（或助战的）干员配语音，音频放在包自己的 `assets/` 下；客户端不需要任何新通道就能听到——叠加层把台词并进它本来就在读的 `assets.audio.voice`。只带语音、不含任何数据文件的包是合法的。见 [docs/WORKSHOP.md](docs/WORKSHOP.md) §1.4。
 - **包自带助战**：`pack.json.support` 列出本包自己新增、应当进助战卡池的干员 —— 装包即可选，不必再手工改 `data/support.json`（阶由记录推导；安装方可用 `"workshop": false` 关掉一切包的声明）。见 [docs/WORKSHOP.md](docs/WORKSHOP.md) §2.1。
+- **把包交给别人 / 装别人的包**：`node tools/workshop-pack.mjs export <包>` 打成一个 `.zip`，对方 `import` 即装；整合包里更简单——**把 `.zip` 拖到 `安装工坊包.bat` 上**。装包只写 `workshop/<包>/`，不碰 `data/*.json`。见 [docs/WORKSHOP.md](docs/WORKSHOP.md) §1.5。
 
 ```bash
 node tools/workshop-scaffold.mjs docs/examples/operator-spec.json --pack my-pack   # spec → 合法工坊包
 node tools/workshop-validate.mjs workshop                                          # 分层校验（含真实引擎）
+node tools/workshop-pack.mjs export my-pack                                        # 包 → 可分享的 .zip
+node tools/workshop-pack.mjs import ~/Downloads/my-pack.zip                        # .zip → workshop/my-pack/
 npm run editor                                                                     # 打开工坊编辑器（独立工具）
 ```
 
@@ -395,10 +401,10 @@ work for direct profit.
 
 | 目录 | 文件 |
 |---|---|
-| `editor/ui/` | `enemy.html` `enemy.js` `item.html` `item.js` `wave.html` `wave.js` `voice.html` `voice.js` `stage3d.js` |
-| `shared/` | `itemAuthoring.js` `kitAuthoring.js` `waveAuthoring.js` `forgeNotice.js` |
+| `editor/ui/` | `enemy.html` `enemy.js` `item.html` `item.js` `pack.html` `pack.js` `wave.html` `wave.js` `voice.html` `voice.js` `stage3d.js` |
+| `shared/` | `itemAuthoring.js` `kitAuthoring.js` `waveAuthoring.js` `forgeNotice.js` `zip.js` |
 | `public/` | `css/screens/support.css` `js/screens/support.js` `js/ui/supportModel.js` `js/ui/supportSync.js` |
-| `test/` | `itemAuthoring.test.js` `itemEditor.test.js` `kitAuthoring.test.js` `forgeNotice.test.js` `waveAuthoring.test.js` `support.test.js` `workshopAssets.test.js` `workshopStageRounds.test.js` `voiceEditor.test.js` |
+| `test/` | `itemAuthoring.test.js` `itemEditor.test.js` `kitAuthoring.test.js` `forgeNotice.test.js` `waveAuthoring.test.js` `support.test.js` `workshopAssets.test.js` `workshopStageRounds.test.js` `voiceEditor.test.js` `workshopVoices.test.js` `workshopSupport.test.js` `workshopPack.test.js` `packManager.test.js` `zip.test.js` |
 
 ### B. 本项目修改的上游文件
 
@@ -460,7 +466,7 @@ work for direct profit.
 
 This repository is **Stronghold-Protocol-Forge**: a standalone, out-of-game **graphical authoring tool (the Forge editor)** for the content of the fan remake of Arknights' seasonal auto-chess tower-defense mode *Stronghold Protocol: Alliance* — plus that bundled upstream game itself.
 
-- **The Forge editor (what this repo is for):** run `npm run editor` and open <http://127.0.0.1:3311> — no build step, no game-server change, bound to loopback by default. Seven pages author operators (`/`), maps (`/stage.html`, 19×21 grid with 2D placement and a 3D preview), enemies (`/enemy.html`), spawn waves (`/wave.html`), items (`/item.html`), behaviour-layer kits (`/kit.html`) and a pack's voice lines (`/voice.html`). Mechanical fields are always derived from the real engine rather than typed by hand, and `tools/workshop-validate.mjs` re-checks every pack in layers (format → semantics → the real engine → kits / maps / enemies / waves / items / voice lines / 助战) through the same `shared/*Authoring.js` rules the editor and CLI use, so the rules cannot drift. Saved Options carry a `_meta` attribution block. See [docs/EDITOR.md](docs/EDITOR.md) and [docs/WORKSHOP.md](docs/WORKSHOP.md).
+- **The Forge editor (what this repo is for):** run `npm run editor` and open <http://127.0.0.1:3311> — no build step, no game-server change, bound to loopback by default. Eight pages author operators (`/`), maps (`/stage.html`, 19×21 grid with 2D placement and a 3D preview), enemies (`/enemy.html`), spawn waves (`/wave.html`), items (`/item.html`), behaviour-layer kits (`/kit.html`), a pack's voice lines (`/voice.html`) and the pack itself (`/pack.html`: export to a `.zip`, import someone else's, tick which of the pack's own operators enter the 助战 pool). Mechanical fields are always derived from the real engine rather than typed by hand, and `tools/workshop-validate.mjs` re-checks every pack in layers (format → semantics → the real engine → kits / maps / enemies / waves / items / voice lines / 助战) through the same `shared/*Authoring.js` rules the editor and CLI use, so the rules cannot drift. Saved Options carry a `_meta` attribution block. See [docs/EDITOR.md](docs/EDITOR.md) and [docs/WORKSHOP.md](docs/WORKSHOP.md).
 - **The bundled game:** an **unofficial, non-commercial fan remake** played in the browser: solo, or 1–4 player co-op (AI teammates can fill seats). Combat is simulated in each player's browser, so a low-power PC can host. Download the all-in-one bundle from [Releases](../../releases/latest), install Node.js 22 or 24, then double-click `scripts\start-windows.bat` (Windows) or run `./scripts/start.sh` (macOS / Linux) and open <http://localhost:3000>. From source: `npm install && npm run setup && npm start` (setup downloads ~270 MB of art from public mirrors, the emotes and the how-to-play pages included; the official 3D board, some official HUD icons and two enemy models are extracted from a local Arknights client — without one the game uses the 2D board and look-alike stand-ins, and a server can copy `public/assets/local/` and `data/local-assets.json` from the release bundle of the same version). Create a co-op room and share the 4-letter key or the `?room=KEY` link; on a LAN use the address printed at start, otherwise a virtual-LAN tool, a tunnel or a VPS — see [docs/DEPLOY.md](docs/DEPLOY.md).
 - **Disclaimer:** not affiliated with or endorsed by Hypergryph or Yostar. All Arknights names, art, audio, text and data are © their respective owners and are **not** covered by this project's GPL licence. For study and personal non-commercial use only — no selling, paid distribution, paid servers or monetisation of any kind. Content will be removed on request of the rights holders. Provided "as is", without warranty.
 - **License:** code GPL-3.0-or-later ([LICENSE](LICENSE)); game assets excluded.

@@ -19,7 +19,9 @@
 | 助战的引擎侧视图 | `server/match/gamedata.js` |
 | 助战消息与落库 | `shared/protocol.js`、`server/lobby.js` |
 | 助战的对局内生效 | `server/match/Match.js`、`server/match/PlayerState.js` |
-| 测试 | `test/workshop.test.js`、`test/workshopVoices.test.js`、`test/workshopAssets.test.js`、`test/support.test.js` |
+| 一个包的 `.zip` 读写（零依赖，确定性且拒绝优先） | `shared/zip.js` |
+| 导出 / 导入 / 列出与 `pack.json.support` 的读写（CLI 与编辑器共用） | `tools/workshop-pack.mjs` |
+| 测试 | `test/workshop.test.js`、`test/workshopVoices.test.js`、`test/workshopAssets.test.js`、`test/support.test.js`、`test/zip.test.js`、`test/workshopPack.test.js` |
 
 ---
 
@@ -127,7 +129,36 @@ workshop/*/ ──┘        （冻结之前）              └─→ /data/<fi
 其余字段、键序与缩进原样保留，并且只接受**包内 `assets/` 下真实存在、且扩展名在服务端媒体白名单里**的文件；
 它在编辑器里就能试听 —— 用的就是客户端会请求的那个 URL。
 
-### 1.5 作者接口（面向人，也面向 AI）
+### 1.5 分享与安装一个包
+
+在此之前，一个包**只能靠手抄目录**交给别人。现在有一个 `.zip` 通道，CLI 与编辑器第八页
+（`/pack.html`，见 `docs/EDITOR.md` §包管理）用的是同一批函数（`tools/workshop-pack.mjs`）：
+
+```powershell
+node tools/workshop-pack.mjs export my-pack                 # → ./my-pack.zip
+node tools/workshop-pack.mjs export my-pack --out D:\share\my-pack.zip
+node tools/workshop-pack.mjs import D:\share\my-pack.zip    # 装到 workshop/my-pack/
+node tools/workshop-pack.mjs import other.zip --force       # 覆盖同名包（默认拒绝）
+node tools/workshop-pack.mjs list                           # 每个包一行：id/名称/版本/内容/语音/助战
+```
+
+**zip 布局**：`pack.json` 与包内其它文件（**包括 `assets/**`**）都在 **zip 根**，一个目录层级都不多 ——
+也就是「这个 zip 就是这个包」。导入时也接受常见的那一种变体：整个包在一个**唯一的顶层目录**里
+（`my-pack-1.0.0/pack.json`），那层目录会被去掉。
+
+| 规则 | 为什么 |
+|---|---|
+| 条目按名字排序、DOS 时间戳固定、deflate（压不动就退回 store） | 同样的内容永远得到同样的字节：作者能核对哈希，分发物可复现 |
+| 导入先解压到**临时目录**、校验清单、再整个搬进 `workshop/<packId>/` | 坏归档、恶意归档、校验不过的包都**不会**在 `workshop/` 里留下半个包 |
+| 清单用 `shared/workshop.js` 的 `normalizePackManifest` 校验（与加载器同一个函数） | 「装得上」就等于「加载器会接受它的格式」，不会有第二套判断 |
+| 一切写入都在 `workshop/<packId>/` 之内，**绝无例外** | 归档是别人给的文件：zip 读取器先拒一次遍历名，解压路径再拒一次 |
+| 默认**拒绝**覆盖已存在的包（`--force` / `?force=1` 才覆盖） | 一个误点不该毁掉作者自己的包 |
+| 读取器拒绝 ZIP64、加密、非 0/8 压缩方法、多卷、重名、CRC 不符、超上限的条目 | 猜一个畸形归档的结构比拒绝它更危险 |
+
+装好的包要**重启游戏服务器**才会出现在游戏里。`pack.json.support`（§2.1）在编辑器第八页有图形入口：
+勾选本包自己新增的干员，阶由记录推导，页面不接受手输的阶。
+
+### 1.6 作者接口（面向人，也面向 AI）
 
 手写 `data/chess.json` 形状的记录需要约 30 个字段，其中大部分是机械的。作者层把这部分推导掉：
 
@@ -158,7 +189,7 @@ node tools/workshop-scaffold.mjs docs/examples/operator-spec.json --pack my-pack
 node tools/workshop-validate.mjs my-pack
 ```
 
-### 1.6 当前状态
+### 1.7 当前状态
 
 | 部分 | 状态 |
 |---|---|
@@ -173,7 +204,8 @@ node tools/workshop-validate.mjs my-pack
 | **行为层**：包内 `kits/<chessId>.js` 接入 `battle.on(...)` 钩子总线 | ✅ 已实现（见 §4） |
 | **语音包（`voices`）**：汇总进 `assets.audio.voice`、随合并的 `assets.json` 送达客户端 | ✅ 已实现（`test/workshopVoices.test.js`） |
 | **包自带助战（`support`）**：按记录推导阶并入 `data/support.json` 的卡池、随合并的 `support.json` 送达客户端 | ✅ 已实现（`test/workshopSupport.test.js`） |
-| **局外编辑器 UI**：干员 / 地图 / 怪物 / 出怪 / 装备 / 行为层 kit / **语音** 七个页面 | ✅ 已实现（`editor/`，见 `docs/EDITOR.md`） |
+| **分享与安装（`.zip`）**：导出/导入/列出，CLI 与编辑器第八页共用同一批函数 | ✅ 已实现（`shared/zip.js`、`tools/workshop-pack.mjs`、`test/workshopPack.test.js`） |
+| **局外编辑器 UI**：干员 / 地图 / 怪物 / 出怪 / 装备 / 行为层 kit / **语音** / **包管理** 八个页面 | ✅ 已实现（`editor/`，见 `docs/EDITOR.md`） |
 | 工坊包的版本对齐、依赖声明、内容寻址 | ⛔ 未实现（`gameVersion` 目前只是元信息） |
 
 > 行为层是用户的明确选择（「完全开放 battle 钩子 API」）。它与一体化整合包的冲突按**分渠道**解决：官方整合包保持纯净、不含工坊内容；工坊包单独分发，玩家主动安装并知情。**注意：脚本会在客户端执行**（默认 `SP_COMBAT=client`），服务端 `SP_VERIFY` 只能复算结果、不能阻止脚本本身 — 这正是必须分渠道的原因。
@@ -203,6 +235,7 @@ node tools/workshop-validate.mjs my-pack
 | `slots` | 每阶每名玩家可带的助战数量；`0` 表示该阶关闭 |
 | `pool` | 该阶允许的干员 id。**必须与 `data/chess.json` 里该干员的 `tier` 一致**：把 6 阶干员写进 `"5"` 里不会被提升，而是被禁用 |
 | `denyUnknown` | 卡池外一律拒绝（默认 `true`） |
+| `workshop` | 写 `false` 即忽略**所有**工坊包的助战声明（安装方保留最终决定权，启动日志会写出来） |
 
 这个文件由服务器维护、**不参与 `build-data`**，改完重启即生效，无需重建 `data/`。
 
@@ -224,6 +257,10 @@ node tools/workshop-validate.mjs my-pack
 
 安装方保留最终决定权：`data/support.json` 里写 `"workshop": false` 即忽略所有包的助战声明（启动日志会写出来）。
 被触及的 `support.json` 会**合并后**发给浏览器（`workshopTouchedFiles`），客户端从那里渲染助战选择界面 —— 与其它工坊内容同一条路径。
+
+**写这个字段的图形入口是编辑器的第八个页面 `/pack.html`**（`docs/EDITOR.md` §包管理）：它勾选本包自己新增的干员进池，
+界面上显示的阶**由记录推导**（`workshopSupportEntries`，与加载器/校验器同一份规则，手输的阶会让该干员静默不可选），
+就地改 `pack.json` 的 `support` 一个字段，并说明卡池本身在 `data/support.json`、可用 `"workshop": false` 整体关掉。
 
 ### 2.2 「没有即禁用」的三层含义
 

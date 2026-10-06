@@ -39,7 +39,8 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
 | `workshop/<pack>/specs/<slug>.json` | **编辑器的源文件**：你填的那份 spec，可反复编辑 |
 | `workshop/<pack>/chess.json` | **生成产物**：由 specs 推导出来，游戏读的是它。请不要手改（和 `data/*.json` 同样的态度） |
 | `workshop/<pack>/kits/<chessId>.js` | **行为层 kit**：它既是源、也是游戏加载的产物（见下面「kit 编辑器」），保存时会在文件开头补写署名头 |
-| `workshop/<pack>/pack.json` | 首次保存时自动创建（`id` 必须等于目录名）；**语音编辑器就地更新它的 `voices` 字段**，其余字段、键序与缩进原样保留 |
+| `workshop/<pack>/pack.json` | 首次保存时自动创建（`id` 必须等于目录名）；**语音编辑器就地更新它的 `voices` 字段**，**包管理页就地更新它的 `support` 字段**，其余字段、键序与缩进原样保留 |
+| `workshop/<pack>/**` | **导入一个 `.zip`** 时整包写入（新建目录；覆盖同名包需要显式 `--force`/`?force=1`，且写入全部在这个目录之内） |
 | `data/support.json` | 只在动「是否助战」开关时修改——它是**手工维护的服务端配置**，不是 `build-data` 的产物 |
 
 `data/` 下由 `tools/build-data.mjs` 生成的其它文件**永不改动**。
@@ -49,7 +50,7 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
 
 ## 界面
 
-编辑器共七个页面，右上角可互相跳转：
+编辑器共八个页面，右上角可互相跳转：
 
 | 页面 | 用途 |
 |---|---|
@@ -60,6 +61,7 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
 | `/item.html` | **装备**编辑器（一件装备 = 一个 spec = 两条记录） |
 | `/kit.html` | **kit（行为层）**编辑器（直接编辑 `kits/<chessId>.js` 的代码，静态校验） |
 | `/voice.html` | **语音**编辑器（`pack.json` 的 `voices` 字段：干员 × 槽位 × 文件） |
+| `/pack.html` | **包管理**（导出/导入 `.zip`，以及 `pack.json` 的 `support` 助战声明） |
 
 ### 干员编辑器（首页）
 
@@ -247,6 +249,60 @@ node tools/workshop-validate.mjs workshop     # kits 层：静态检查 + 真实
 node tools/workshop-validate.mjs workshop     # 语音层：文件是否存在、扩展名是否可服务、槽位与干员 id 是否合法
 ```
 
+## 包管理（导出 / 导入 / 助战声明）
+
+第八个页面：**`/pack.html`**。它补上两件一直缺失的事：一个包**没法交给别人**（只能手抄目录），
+而 `pack.json.support`（助战声明，见 `docs/WORKSHOP.md` §2.1）**没有图形入口**。
+
+**归档规则只有一份实现**：这一页与 `node tools/workshop-pack.mjs …` 调用的是
+`tools/workshop-pack.mjs` 里的同一批函数（zip 的字节由 `shared/zip.js` 负责），所以图形界面与命令行
+不可能给出不同结论。这与其它页面的立场一致：规则由服务端/共享模块持有，页面只渲染它。
+
+- **左栏**：每个工坊包一条 —— 名称、包 id、版本、license、内容文件、语音条数、助战个数，以及**加载器的结论**
+  （`loadWorkshop` 接受的显示「加载器接受」，否则显示它拒绝的码，例如 `EMPTY_PACK`、`ASSETS_NEED_LICENSE`）。
+- **中栏**：这个包的详情（id / 版本 / 作者 / license / 内容 / 语音 / 是否有 `assets/`）+ 校验结论 +
+  **助战声明编辑器** + 「卡池在哪里」的说明。
+- **右栏**：**导出**（下载 `<包id>.zip`）与**导入**（选一个 `.zip`，可选覆盖同名包），各自都写明命令行等价路径。
+
+**导出**：`pack.json` 与包内所有文件（**包括 `assets/**`**）都在 **zip 根** —— 这个 zip 就是这个包。
+条目按名字排序、DOS 时间戳固定，所以同样的内容永远得到同样的字节；响应是 `application/zip`，带
+`Content-Disposition: attachment; filename="<包id>.zip"`。一个加载器会整包丢掉的包**拒绝导出**：
+把一个坏包发给别人不是「分享」。
+
+**导入**：上传的是原始字节（`application/octet-stream`，不走 JSON —— 那条 1 MB 的 `readBody` 上限不适用，
+这条路由用 `shared/zip.js` 的总量常量做独立上限，超了先 413）。装上之前过三道关：
+
+1. **读归档**：ZIP64、加密、非 0/8 压缩方法、多卷、重名、CRC 不符、超上限的条目、以及遍历名
+   （`../x`、`/abs`、`a\b`、`./x`）全部**拒绝而不是猜**；
+2. **解压到临时目录** `<workshop>/.pack-import-XXXX/`（点开头，加载器不会把它当成包），在这里校验清单 ——
+   用 `shared/workshop.js` 的 `normalizePackManifest`，**与加载器同一个函数**，所以「装得上」就等于「加载器会接受它的格式」；
+3. **整个搬进** `workshop/<包id>/`（同一个卷 → rename）。
+
+所以一个坏归档、恶意归档、校验不过的包**永远不会在 `workshop/` 里留下半个包**。
+清单可以在 zip 根，也可以在一个**唯一的顶层目录**里（`my-pack-1.0.0/pack.json`，两种归档都很常见），后者那层目录会被去掉。
+默认**拒绝**覆盖已存在的包，勾上「覆盖同名包」才覆盖（`?force=1`）—— 覆盖时旧目录先改名挪开、新包搬进去之后才清理，
+所以失败的覆盖不会留下半个包，也不会把原来的包弄丢。安装的写入**全部在 `workshop/` 之内**。
+
+**助战声明**（`pack.json` 的 `support`）：
+
+- 只能勾选**这个包自己新增**的干员（来自它的 `chess.json`）。卡池是安装方的规则：允许包把官方干员塞进或移出卡池，
+  就等于让内容包改规则。违反会被加载器记 `SUPPORT_FOREIGN_OPERATOR` 并整条丢掉，编辑器**直接拒绝写入**并说明原因。
+- **阶由记录推导**（`workshopSupportEntries`，与加载器/校验器同一份规则），页面上**没有任何可以手输阶的地方** ——
+  手写的阶一旦与记录不一致，`isSupportChess` 会让该干员静默不可选。记录没有 1–6 的整数 `tier` 时
+  （`SUPPORT_TIER_UNKNOWN`）勾选框被禁用并说明原因，而不是让作者勾一个不会生效的选项。
+- **写入只动 `support` 一个字段**：其余字段、键序与两空格缩进原样保留，新键追加在末尾，
+  而且**绝不会**给包补一条它没声明过的 `content`（写助战不是声明数据文件）。内容没变就不写盘。
+- 页面明说卡池本身在服务端的 `data/support.json`，而且安装方在那里写 `"workshop": false` 就会忽略所有包的声明 ——
+  否则作者会把「没生效」当成编辑器的 bug。
+
+命令行等价路径（同一批函数，所以结果逐字节相同）：
+
+```powershell
+node tools/workshop-pack.mjs export my-pack [--out D:\share\my-pack.zip]
+node tools/workshop-pack.mjs import my-pack.zip [--force] [--json]
+node tools/workshop-pack.mjs list [--json]     # id / 名称 / 版本 / 内容 / 语音 / 助战，每个包一行
+```
+
 ## 助战（客户端）
 
 助战的选择由**服务端**声明并强制：卡池之外的干员是**禁用**的，请求会被整条拒绝，**没有回退**（回退会让一个被禁用的干员变成已发放）。
@@ -320,6 +376,10 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 | GET | `/api/voices`（可选 `?pack=`） | 各包的语音状态 + **槽位词表** + **允许的扩展名** + 可选干员 id + 包内 `assets/` 真实存在的文件 |
 | POST | `/api/packs/:pack/voices` | `{ charId, slot, paths }` → 设置**一个槽位**（空数组即删除），就地更新 `pack.json` 的 `voices` |
 | DELETE | `/api/packs/:pack/voices/:charId/:slot` | 删除一个干员的一个槽位（不存在则报告 `removed: false`，不重写文件） |
+| GET | `/api/packs/:id/export` | 该包的 `.zip`（`application/zip` + `Content-Disposition: attachment`）；包不存在 → 404 |
+| POST | `/api/packs/import`（可选 `?force=1`） | **原始 zip 字节**（`application/octet-stream`）→ 解压到临时目录、校验、搬进 `workshop/<包id>/`；返回装好的包摘要 |
+| GET | `/api/packs/support` | 各包的助战状态 + 每个包的**自有干员与推导阶** + `data/support.json` 的卡池与总开关 |
+| POST | `/api/packs/:id/support` | `{ ids }` → 就地更新 `pack.json` 的 `support`（只动这一个字段，绝不补 `content`） |
 
 ## Option 署名（`_meta`）
 
@@ -365,6 +425,8 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 
 - 助战**名额**（`slots`）的编辑——改 `data/support.json` 的 `slots` 字段或编辑器里的「是否助战」开关
 - 语音**素材的上传**——编辑器只写路径，音频文件由作者自己放进 `<pack>/assets/`（没有二进制上传接口）
+- 包的**签名与来源校验**——导入只保证「归档结构合法、清单能被加载器接受」，不证明这个包是谁做的
+- 包的**版本对齐与依赖声明**——一个包里没有「需要另一个包」的字段（见 `docs/WORKSHOP.md` §1.7）
 - kit 的**真实导入检查**——编辑器只做静态校验（见上），把文件真的 `import` 一遍是 `tools/workshop-validate.mjs` 的事
 - kit 的**沙箱与审查**——按分渠道策略不做（脚本会在客户端执行，见 `docs/WORKSHOP.md` §4）
 - 任何鉴权
@@ -373,10 +435,13 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 
 | 工具 | 面向 | 关系 |
 |---|---|---|
-| `editor/`（本文件） | 人，图形界面 | 写 spec，生成记录 |
+| `editor/`（本文件） | 人，图形界面 | 写 spec，生成记录；导出/导入 `.zip`，改 `pack.json` 的 `voices` / `support` |
 | `tools/workshop-scaffold.mjs` | 人 / 脚本 / AI | 同样的 spec → 同样的记录（无界面） |
-| `tools/workshop-validate.mjs` | 人 / CI / AI | 分层校验：格式 → 语义 → 真实引擎 → 每种内容一层（kits / 地图 / 怪物 / 出怪 / 装备 / 语音） |
+| `tools/workshop-pack.mjs` | 人 / 脚本 / CI | 导出 / 导入 / 列出包，读写 `pack.json.support` —— 编辑器第八页调用的就是它 |
+| `tools/workshop-validate.mjs` | 人 / CI / AI | 分层校验：格式 → 语义 → 真实引擎 → 每种内容一层（kits / 地图 / 怪物 / 出怪 / 装备 / 语音 / 助战） |
 | `docs/prompts/operator-pack.md` | 任意 AI | 模板 prompt，让 AI 产出 spec |
 
 编辑器与 CLI 共用同一批 `shared/*Authoring.js`（干员 / 地图 / 怪物 / 出怪 / 装备 / kit），所以**规则不会漂移** ——
 编辑器里能保存的内容，`tools/workshop-validate.mjs` 一定也接受，反之亦然。
+包管理这一页更进一步：它**直接 import** `tools/workshop-pack.mjs`（而不是复制一份逻辑），
+所以「编辑器能导出/导入/写 support」与「命令行能导出/导入/写 support」不是两条实现。

@@ -38,6 +38,12 @@ import {
   ITEM_TYPES, ITEM_CATEGORIES, COUNT_TYPES, ITEM_DURATIONS, UPGRADE_NUMS,
 } from '../shared/itemAuthoring.js';
 import { loadWorkshop, WORKSHOP_DIR } from '../server/workshop.js';
+// 包管理（第八页）与 CLI 共用同一批函数：导出/导入/读写 pack.json.support 只有一份实现，
+// 所以 `tools/workshop-pack.mjs` 与编辑器不可能给出不同结论（docs/EDITOR.md §包管理）。
+import {
+  exportPack, installZip, readPackSupport, writePackSupport, packSummary, listPackIds,
+} from '../tools/workshop-pack.mjs';
+import { ZIP_MAX_TOTAL_BYTES } from '../shared/zip.js';
 // The pack-media allowlist lives with the route that serves it (server/index.js). The voice page must not keep a second
 // copy: a file the editor accepts but that route refuses is a line that 404s in the game with nothing reporting it.
 import { WORKSHOP_ASSET_TYPES } from '../server/index.js';
@@ -57,6 +63,8 @@ export const SUPPORT_FILE = path.join(DATA_DIR, 'support.json');
 const PACK_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
 const SLUG_RE = /^[a-z0-9][a-z0-9_]{0,31}$/;
 const BODY_LIMIT = 1 << 20; // 1 MB is far beyond any spec
+/** 导入一个 .zip 的上限：就是 shared/zip.js 的总量上限（压缩包不可能比它解开后的内容还大）。 */
+const ZIP_BODY_LIMIT = ZIP_MAX_TOTAL_BYTES;
 const quietLog = { info() {}, warn() {}, error() {}, debug() {} };
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.md': 'text/markdown; charset=utf-8' };
 
@@ -557,6 +565,33 @@ const AUDIO_TYPES = new Set([...WORKSHOP_ASSET_TYPES].filter(([, type]) => type.
 const refuse = (status, message) => Object.assign(new Error(message), { status });
 
 /**
+ * Translate a refusal from `tools/workshop-pack.mjs` into the HTTP shape this module answers with: the CLI tool's
+ * messages are the AUTHOR-facing ones (they name the code the loader would report, e.g. SUPPORT_FOREIGN_OPERATOR), so
+ * they are passed through verbatim with the status the tool intended — 404 for "no such pack", 400 for everything else.
+ * One install path, one set of rules: the editor does not re-decide what the CLI already decided.
+ */
+const packRefusal = (e) => Object.assign(new Error(e.message), { status: e && e.status === 404 ? 404 : 400 });
+
+/**
+ * Everything the 包管理 page renders for ONE pack: the summary the list shows plus its 助战 state (which of its OWN
+ * operators are declared, and the tier the loader derives for each). `readPackSupport` is the same call the CLI makes,
+ * so the page cannot show a tier the loader disagrees with.
+ */
+function supportStateFor(root, packId, supportFile) {
+  const state = readPackSupport(root, packId, { supportFile });
+  return { ...packSummary(root, packId, loadWorkshop(root, { log: quietLog }), { supportFile }), ...state };
+}
+
+/**
+ * The pack ids the 包管理 page lists: the real packs under the workshop root. A directory with no `pack.json` (a
+ * half-deleted pack, or a folder someone dropped in) is NOT one — `readPackSupport` requires a manifest, and offering
+ * a row whose every action would fail is worse than not offering it. Same rule as the voice page's `?pack=` lookup.
+ */
+function packIdsFor(root) {
+  return listPackIds(root).filter((id) => fs.existsSync(path.join(root, id, 'pack.json')));
+}
+
+/**
  * Why a string may not be used as a voice line, in Chinese for the form — or null when it is acceptable.
  * The same rule the /workshop-assets route (and `VOICE_PATH_UNSAFE`) applies: relative, inside `assets/`, no traversal.
  */
@@ -672,6 +707,33 @@ async function readBody(req) {
   } catch {
     throw Object.assign(new Error('request body is not valid JSON'), { status: 400 });
   }
+}
+
+/**
+ * Read a request body as raw bytes with a hard cap — the reader the zip-import route uses.
+ *
+ * Two reasons this is not `readBody`: the body is a binary archive (JSON.parse would only fail), and the cap is the
+ * zip module's own total-bytes constant rather than the 1 MB spec limit. The `Content-Length` pre-check refuses an
+ * oversized upload BEFORE a single chunk is buffered; the streaming check is the one that actually protects us,
+ * because a client may simply not send a `Content-Length`.
+ * @param {import('node:http').IncomingMessage} req
+ * @param {number} limit bytes
+ * @returns {Promise<Buffer>}
+ */
+async function readRawBody(req, limit) {
+  const declared = Number(req.headers['content-length']);
+  if (Number.isFinite(declared) && declared > limit) {
+    throw refuse(413, `上传的 zip 太大了（${declared} 字节，上限 ${limit} 字节）`);
+  }
+  const chunks = [];
+  let size = 0;
+  for await (const c of req) {
+    size += c.length;
+    if (size > limit) throw refuse(413, `上传的 zip 太大了（超过 ${limit} 字节），拒绝继续接收`);
+    chunks.push(c);
+  }
+  if (!chunks.length) throw refuse(400, '请求体是空的（这里要上传一个 .zip 的原始字节）');
+  return Buffer.concat(chunks);
 }
 
 const sendJson = (res, status, obj) => {
@@ -811,6 +873,102 @@ export async function createEditorServer(opts = {}) {
       if (actual !== tier) throw Object.assign(new Error(`tier ${tier} does not match the record's tier ${actual}`), { status: 400 });
       const cfg = await toggleSupport(supportFile, chessId, tier, enabled === true);
       return sendJson(res, 200, { ok: true, enabled: enabled === true, support: cfg });
+    }
+
+    // ---- 包管理 (packs): 导出 / 导入 / 助战声明 --------------------------------------------------------
+    //
+    // 第八页（/pack.html）的三件事，全部走 tools/workshop-pack.mjs 的同一批函数 —— 这一页与
+    // `node tools/workshop-pack.mjs …` 必须表现一致，所以逻辑不在这里复制第二份。
+    if (p === '/api/packs/support' && method === 'GET') {
+      const loaded = loadWorkshop(root, { log: quietLog });
+      const cfg = normalizeSupportConfig(readJson(supportFile, null));
+      const packs = packIdsFor(root).map((id) => supportStateFor(root, id, supportFile));
+      return sendJson(res, 200, {
+        workshopRoot: root,
+        // 卡池的最终归属地：`data/support.json` 的 `"workshop": false` 会忽略所有包的助战声明
+        supportFile: SUPPORT_FILE,
+        enabled: cfg.enabled,
+        pool: cfg.pool,
+        loadedErrors: loaded.errors,
+        packs,
+      });
+    }
+
+    // set ONE pack's 助战 declaration (`pack.json.support` only — never a `content` entry)
+    if (p.startsWith('/api/packs/') && p.endsWith('/support') && method === 'POST') {
+      const packId = p.slice('/api/packs/'.length, -'/support'.length);
+      if (!PACK_ID_RE.test(packId)) throw refuse(400, '工坊包 id 不合法（只能是字母、数字、下划线和短横线）');
+      if (!fs.existsSync(path.join(root, packId, 'pack.json'))) throw refuse(404, `工坊包 "${packId}" 不存在（没有可读的 pack.json）`);
+      const body = await readBody(req);
+      const ids = Array.isArray(body) ? body : body.ids;
+      let written;
+      try {
+        written = await writePackSupport(root, packId, ids);
+      } catch (e) {
+        // SUPPORT_BAD_SHAPE / SUPPORT_BAD_ID / SUPPORT_FOREIGN_OPERATOR —— 与加载器同一个码字，原因原样带出
+        throw packRefusal(e);
+      }
+      const enabled = normalizeSupportConfig(readJson(supportFile, null)).enabled;
+      return sendJson(res, 200, {
+        ok: true,
+        pack: packId,
+        support: written.support,
+        changed: written.changed,
+        derived: written.derived,
+        // 安装方关掉了工坊助战：写入仍然成功（文件是作者的），但要说清楚它这一局不会进卡池
+        warnings: enabled ? [] : ['data/support.json 没有开启助战（或 `"workshop": false`），这些声明现在不会进卡池'],
+      });
+    }
+
+    // 导出一个包：<packId>.zip，内容就是「这个包」（pack.json 与 assets/** 都在 zip 根）
+    if (p.startsWith('/api/packs/') && p.endsWith('/export') && method === 'GET') {
+      const packId = p.slice('/api/packs/'.length, -'/export'.length);
+      if (!PACK_ID_RE.test(packId)) throw refuse(400, '工坊包 id 不合法（只能是字母、数字、下划线和短横线）');
+      if (!fs.existsSync(path.join(root, packId, 'pack.json'))) throw refuse(404, `工坊包 "${packId}" 不存在（没有可读的 pack.json）`);
+      // 一个加载器会整包丢掉的包不导出：把一个坏包发给别人不是「分享」（CLI 的 exportPack 是同一条规则）
+      const checked = normalizePackManifest(readJson(path.join(root, packId, 'pack.json'), null), packId, {
+        hasAssets: fs.existsSync(path.join(root, packId, 'assets')),
+      });
+      if (!checked.ok) throw refuse(400, `这个包的 pack.json 不合法（${checked.error}）：${checked.detail} —— 修好再导出`);
+      let zip;
+      try {
+        zip = exportPack(root, packId);
+      } catch (e) {
+        throw packRefusal(e);
+      }
+      res.writeHead(200, {
+        'Content-Type': 'application/zip',
+        'Content-Length': zip.buffer.length,
+        'Content-Disposition': `attachment; filename="${packId}.zip"`,
+        'Cache-Control': 'no-store',
+      });
+      res.end(zip.buffer);
+      return;
+    }
+
+    // 导入一个 .zip：原始字节（页面用 application/octet-stream 上传），先装到临时目录再搬进 workshop/
+    if (p === '/api/packs/import' && method === 'POST') {
+      // 独立的、有上限的读取器：模块的 readBody 是 1 MB 的 JSON 体，一个带素材的包可以大得多。
+      // 上限就是 shared/zip.js 的总量常量，而且**在缓冲整个请求之前**就按 Content-Length 先拒一次。
+      const buffer = await readRawBody(req, ZIP_BODY_LIMIT);
+      const force = ['1', 'true', 'yes'].includes(String(url.searchParams.get('force') ?? '').toLowerCase());
+      let installed;
+      try {
+        installed = installZip({ root, buffer, force });
+      } catch (e) {
+        throw packRefusal(e);
+      }
+      return sendJson(res, 200, {
+        ok: true,
+        pack: installed.id,
+        dir: installed.dir,
+        files: installed.files,
+        bytes: installed.bytes,
+        content: installed.content,
+        voiceLines: installed.voiceLines,
+        support: installed.support,
+        summary: packSummary(root, installed.id, loadWorkshop(root, { log: quietLog }), { supportFile }),
+      });
     }
 
     // ---- 地图 (stages): what the placer needs, and its save path -------------------------------------

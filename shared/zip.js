@@ -90,21 +90,6 @@ function nameFor(name) {
   return { bytes, utf8: /[^\x20-\x7e]/.test(name) };
 }
 
-/** 中央目录的一项。data 为空时只算长度（先把布局算清楚，再一次性分配缓冲区）。 */
-function centralRecord(entry) {
-  const { bytes, utf8 } = nameFor(entry.name);
-  return {
-    name: bytes,
-    utf8,
-    method: entry.method,
-    crc: entry.crc,
-    compSize: entry.compSize,
-    rawSize: entry.rawSize,
-    localOffset: 0, // 布局阶段填
-    localExtra: 0,
-  };
-}
-
 /**
  * 写一个 ZIP 归档。条目按名字排序、时间戳固定、deflate（方法 8）—— 只有当 deflate 真的更小才用它，
  * 否则退回 store（方法 0）：对一段随机字节或一个已经很小的文件，deflate 反而更大，而「压缩」不该让包变大。
@@ -120,12 +105,13 @@ export function zipWrite(entries) {
   const prepared = [];
   for (const entry of sorted) {
     const raw = toBuffer(entry.data ?? Buffer.alloc(0));
+    const named = nameFor(entry.name);
     // deflateRawSync（不是 deflateSync）：ZIP 的本地记录自己就是容器，再套一层 zlib 头尾会让所有解压器认不出
     const deflated = deflateRawSync(raw, { level: DEFLATE_LEVEL });
     const useDeflate = deflated.length < raw.length;
     prepared.push({
-      name: nameFor(entry.name).bytes,
-      utf8: nameFor(entry.name).utf8,
+      name: named.bytes,
+      utf8: named.utf8,
       method: useDeflate ? METHOD_DEFLATE : METHOD_STORE,
       crc: crc32(raw),
       compSize: useDeflate ? deflated.length : raw.length,
@@ -299,7 +285,15 @@ export function zipRead(buffer, limits = {}) {
     } catch {
       return refusal('ZIP_BAD_NAME', `entry ${i}'s name is not valid UTF-8`);
     }
-    if (name.endsWith('/')) { skippedDirs.push(name); at += 46 + nameLen + extraLen + commentAt; continue; }
+    if (name.endsWith('/')) {
+      // 目录条目：跳过，但**名字规则照样过一遍** —— 删掉尾部斜杠之后 `../` 就是 `..`，
+      // 跳过不等于免检。目录名里带一个空段（`a//b/`）在这里也会被拒。
+      const badDir = nameProblem(name.slice(0, -1));
+      if (badDir) return refusal('ZIP_BAD_NAME', `entry ${i} directory "${name}": ${badDir}`);
+      skippedDirs.push(name);
+      at += 46 + nameLen + extraLen + commentAt;
+      continue;
+    }
     const bad = nameProblem(name);
     if (bad) return refusal('ZIP_BAD_NAME', `entry ${i} "${name}": ${bad}`);
     if (seen.has(name)) return refusal('ZIP_DUPLICATE_NAME', `"${name}" appears twice — the second would silently win`);
@@ -311,7 +305,7 @@ export function zipRead(buffer, limits = {}) {
       return refusal('ZIP_TOTAL_TOO_LARGE', `"${name}" would take the archive past the ${maxTotalBytes} byte total cap`);
     }
 
-    const data = readEntry(buf, localOffset, method, compSize, rawSize);
+    const data = readEntry(buf, localOffset, method, compSize, rawSize, name);
     if (!data.ok) return data;
     if (data.data.length !== rawSize) return truncated(`"${name}" decoded to ${data.data.length} byte(s) but declares ${rawSize}`);
     if (crc32(data.data) !== crc) return refusal('ZIP_CRC_MISMATCH', `"${name}" does not match its CRC-32 record (corrupted or tampered with)`);
@@ -320,6 +314,10 @@ export function zipRead(buffer, limits = {}) {
     if (totalBytes > maxTotalBytes) return refusal('ZIP_TOTAL_TOO_LARGE', `the archive expands past the ${maxTotalBytes} byte total cap`);
     entries.push({ name, data: data.data });
     at += 46 + nameLen + extraLen + commentAt;
+  }
+  // 走完申报的条目数之后，指针必须正好落在中央目录的末尾：多了说明 EOCD 的 size/count 与内容不符
+  if (at !== centralOffset + centralSize) {
+    return refusal('ZIP_BAD_CENTRAL', 'the central directory is not the size its end record declares');
   }
   // 压缩包本身的上限是另一件事：中央目录可能只声明了很小的条目，而本地记录里塞着巨大的数据块
   if (totalCompressed > maxTotalBytes) {
@@ -342,13 +340,23 @@ function nameProblem(name) {
   return null;
 }
 
-/** 读一条本地记录并解压 payload。偏移与长度都在这里对着缓冲区做边界检查。 */
-function readEntry(buf, localOffset, method, compSize, rawSize) {
+/**
+ * 读一条本地记录并解压 payload。偏移与长度都在这里对着缓冲区做边界检查。
+ *
+ * `expectedName` 是中央目录里的名字：本地记录**也**写着这个名字，两者必须一致。不一致说明归档被改过
+ * （只改本地头就能让正文与中央目录指向的东西不同），而接下来要解压的正是本地头说的那些字节 —— 所以这不是
+ * 形式检查，是「你要解压的东西到底是谁」。
+ */
+function readEntry(buf, localOffset, method, compSize, rawSize, expectedName) {
   if (!has(buf, localOffset, 30)) return truncated(`a local header at offset ${localOffset} lies outside the file`);
   if (buf.readUInt32LE(localOffset) !== LOCAL_SIG) return refusal('ZIP_BAD_LOCAL', `no local file header at offset ${localOffset}`);
   if (buf.readUInt16LE(localOffset + 6) & 0x0001) return refusal('ZIP_ENCRYPTED', 'a local header is marked encrypted');
   const nameLen = buf.readUInt16LE(localOffset + 26);
   const extraLen = buf.readUInt16LE(localOffset + 28);
+  if (!has(buf, localOffset + 30, nameLen)) return truncated('a local header\'s name runs past the end of the file');
+  if (buf.subarray(localOffset + 30, localOffset + 30 + nameLen).toString('utf8') !== expectedName) {
+    return refusal('ZIP_NAME_MISMATCH', `the local header for "${expectedName}" carries a different name`);
+  }
   const dataStart = localOffset + 30 + nameLen + extraLen;
   if (!has(buf, dataStart, compSize)) return truncated('an entry\'s compressed data runs past the end of the file');
   const raw = buf.subarray(dataStart, dataStart + compSize);

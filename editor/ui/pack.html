@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>卫戍协议 · 工坊地图设计器</title>
+<title>卫戍协议 · 工坊包管理</title>
 <style>
   :root { color-scheme: dark; --bg:#16181d; --panel:#1e2128; --line:#2e333d; --fg:#e8eaf0; --dim:#9aa3b2; --acc:#5b9dff; --ok:#4ec98a; --warn:#e0b357; --err:#f0736b; }
   * { box-sizing: border-box; }
@@ -11,20 +11,23 @@
   header { display:flex; align-items:center; gap:12px; padding:10px 16px; background:var(--panel); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; flex-wrap:wrap; }
   header h1 { font-size:14px; margin:0; font-weight:600; }
   a { color:var(--acc); }
-  main { display:grid; grid-template-columns:210px 1fr 320px; gap:0; height:calc(100vh - 47px); }
-  aside, .side { overflow:auto; }
+  main { display:grid; grid-template-columns:300px 1fr 340px; height:calc(100vh - 47px); }
+  aside, .side, .center { overflow:auto; }
   aside { border-right:1px solid var(--line); }
   .side { border-left:1px solid var(--line); padding:12px 14px 60px; }
-  .center { overflow:auto; padding:14px 16px 60px; }
+  .center { padding:14px 16px 60px; }
   h2 { font-size:12px; margin:16px 0 8px; color:var(--dim); font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+  h2:first-child { margin-top:0; }
   .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
   label { display:block; font-size:12px; color:var(--dim); margin-bottom:2px; }
-  input, select, button { font:inherit; color:var(--fg); background:#12141a; border:1px solid var(--line); border-radius:5px; padding:4px 7px; width:100%; }
+  input, select, textarea, button { font:inherit; color:var(--fg); background:#12141a; border:1px solid var(--line); border-radius:5px; padding:4px 7px; width:100%; }
+  textarea { min-height:56px; font-family:ui-monospace, monospace; font-size:12px; }
   button { width:auto; cursor:pointer; background:#262b34; }
   button:hover { border-color:var(--acc); }
   button.primary { background:var(--acc); border-color:var(--acc); color:#08111f; font-weight:600; }
   button.ghost { background:transparent; }
-  button.on { border-color:var(--acc); background:#22304a; }
+  button.tiny { padding:1px 6px; font-size:11px; }
+  button:disabled { opacity:.5; cursor:default; }
   .item { padding:7px 12px; border-bottom:1px solid var(--line); cursor:pointer; }
   .item:hover { background:#232833; }
   .item.on { background:#22304a; }
@@ -32,68 +35,51 @@
   .item .m { color:var(--dim); font-size:12px; }
   .tag { display:inline-block; font-size:11px; padding:0 6px; border-radius:9px; border:1px solid var(--line); color:var(--dim); }
   .tag.err { color:var(--err); border-color:#5f312e; }
+  .tag.warn { color:var(--warn); border-color:#5a4a22; }
   .tag.ok { color:var(--ok); border-color:#2c5a44; }
   .panel { background:var(--panel); border:1px solid var(--line); border-radius:7px; padding:10px 12px; margin:10px 0; }
-  .palette { display:grid; grid-template-columns:repeat(auto-fill,minmax(84px,1fr)); gap:6px; }
-  .sw { display:flex; align-items:center; gap:6px; padding:4px 6px; border:1px solid var(--line); border-radius:5px; cursor:pointer; font-size:12px; }
-  .sw.on { border-color:var(--acc); background:#22304a; }
-  .sw i { width:14px; height:14px; border-radius:3px; display:inline-block; border:1px solid #00000055; }
-  canvas { background:#0f1116; border:1px solid var(--line); border-radius:6px; cursor:crosshair; image-rendering:pixelated; }
-  .issues { margin:0; padding-left:18px; } .issues li { margin:2px 0; }
+  .kv { display:grid; grid-template-columns:120px 1fr; gap:4px 10px; font-size:12px; }
+  .kv .k { color:var(--dim); }
+  .kv .v { font-family:ui-monospace, monospace; word-break:break-all; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:3px 6px; border-bottom:1px solid var(--line); font-size:12px; }
+  th { color:var(--dim); font-weight:600; }
+  td.pick { width:26px; }
+  td.pick input { width:auto; }
+  td.id { font-family:ui-monospace, monospace; word-break:break-all; }
   .err { color:var(--err); } .warn { color:var(--warn); } .ok { color:var(--ok); } .dim { color:var(--dim); }
   .banner { padding:7px 11px; border-radius:6px; margin-bottom:8px; }
   .banner.bad { background:#3a1f1e; border:1px solid #5f312e; }
   .banner.good { background:#1c3229; border:1px solid #2c5a44; }
+  .banner.warn { background:#332c17; border:1px solid #5a4a22; }
   .hint { color:var(--dim); font-size:12px; }
-  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-  .dev { display:grid; grid-template-columns:1fr 64px 26px; gap:5px; margin-bottom:5px; align-items:center; }
+  ul.issues { margin:4px 0 0; padding-left:18px; }
+  ul.issues li { font-size:12px; word-break:break-all; }
 </style>
 </head>
 <body>
 <header>
-  <h1>工坊地图设计器</h1>
+  <h1>工坊包管理</h1>
   <span class="dim" id="rootPath"></span>
   <span class="row" style="margin-left:auto">
-    <a href="./index.html">← 干员编辑器</a>
+    <a href="./index.html">干员编辑器</a>
+    <a href="./stage.html">地图设计器</a>
     <a href="./enemy.html">怪物编辑器</a>
     <a href="./wave.html">出怪设计器</a>
     <a href="./item.html">装备编辑器</a>
     <a href="./kit.html">kit 编辑器</a>
     <a href="./voice.html">语音编辑器</a>
-    <a href="./pack.html">包管理</a>
     <button id="btnReload" class="ghost">重新载入</button>
-    <button id="btnNew" class="ghost">新建地图</button>
   </span>
 </header>
 <main>
   <aside>
-    <div class="item" style="cursor:default"><div class="m">工坊包 / 地图</div></div>
-    <div id="list"></div>
+    <div class="item" style="cursor:default"><div class="m">工坊包</div></div>
+    <div id="packList"></div>
   </aside>
-  <div class="center">
-    <div class="row" style="margin-bottom:8px">
-      <button id="toolBrush" class="on">画笔</button>
-      <button id="toolDevice">放装置</button>
-      <button id="toolErase">擦除</button>
-      <button id="toolRoute">画路线</button>
-      <span style="flex:1"></span>
-      <button id="ovRoutes" class="on">显示路线</button>
-      <button id="ovDeploy" class="on">显示部署区</button>
-      <button id="ovPaths" class="on">显示寻路</button>
-      <button id="ov3d">3D 预览</button>
-    </div>
-    <canvas id="board" width="672" height="608"></canvas>
-    <canvas id="board3d" width="672" height="608" hidden style="width:100%;max-width:672px;height:608px"></canvas>
-    <div class="row" id="presets3d" hidden style="margin:6px 0 0"></div>
-    <p class="hint" id="hint3d"></p>
-    <p class="hint" id="cursor">把鼠标移到网格上看坐标。**row 0 在最下面一行**（和引擎一致）。</p>
-    <div class="panel">
-      <h2 style="margin-top:0">地形调色板</h2>
-      <div class="palette" id="palette"></div>
-    </div>
-  </div>
+  <div class="center" id="detail"></div>
   <div class="side" id="side"></div>
 </main>
-<script type="module" src="./stage.js"></script>
+<script type="module" src="./pack.js"></script>
 </body>
 </html>
