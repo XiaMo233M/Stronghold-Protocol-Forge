@@ -14,7 +14,16 @@
 // 卡池的最终归属地是服务端的 `data/support.json`：`"workshop": false` 会让所有包的助战声明失效，
 // 页面必须把这件事说清楚，否则作者会以为勾选没生效是编辑器的 bug。
 
+// 界面文案走 i18n：t('中文原文') 查英文词典，查不到就原样返回中文（editor/ui/i18n.js 说明了这个取舍）。
+import { t, mountI18n } from './i18n.js';
+
 const $ = (s) => document.querySelector(s);
+
+/** 服务端经 data.error 回传的中文（第二战场）：命中词典才翻，带插值的原文原样显示。 */
+const errText = (e) => t(e?.message ?? String(e));
+
+/** 只有两项以上才插分隔符：一项时不留一个孤零零的顿号（英文那边也一样）。 */
+const listJoin = (items) => (items.length > 1 ? items.join(t('、')) : (items[0] ?? ''));
 
 async function api(path, opts) {
   const res = await fetch(path, opts && { ...opts, headers: { 'Content-Type': 'application/json' }, body: opts.body ? JSON.stringify(opts.body) : undefined });
@@ -48,7 +57,7 @@ function renderPackList() {
   const box = $('#packList');
   box.replaceChildren();
   if (!state.packs.length) {
-    box.append(Object.assign(document.createElement('div'), { className: 'item dim', textContent: '还没有工坊包（先用干员编辑器建一个，或导入一个 .zip）' }));
+    box.append(Object.assign(document.createElement('div'), { className: 'item dim', textContent: t('还没有工坊包（先用干员编辑器建一个，或导入一个 .zip）') }));
     return;
   }
   for (const p of state.packs) {
@@ -56,14 +65,14 @@ function renderPackList() {
     el.className = `item${p.id === state.packId ? ' on' : ''}`;
     const bits = [`v${p.version}`];
     if (p.license) bits.push(p.license);
-    bits.push(`内容 ${p.content.length ? p.content.join('/') : '（无）'}`);
-    if (p.voiceLines) bits.push(`语音 ${p.voiceLines} 条`);
-    if (p.support.length) bits.push(`助战 ${p.support.length} 个`);
+    bits.push(p.content.length ? t('内容 {0}', p.content.join('/')) : t('内容（无）'));
+    if (p.voiceLines) bits.push(t('语音 {0}', t('{0} 条', p.voiceLines)));
+    if (p.support.length) bits.push(t('助战 {0}', t('{0} 个', p.support.length)));
     const name = document.createElement('div'); name.className = 'n'; name.textContent = p.name || p.id;
     const meta = document.createElement('div'); meta.className = 'm'; meta.textContent = `${p.id} · ${bits.join(' · ')}`;
     const verdict = document.createElement('div'); verdict.className = 'm';
     const tag = document.createElement('span');
-    if (p.status === 'loaded') { tag.className = 'tag ok'; tag.textContent = '加载器接受'; }
+    if (p.status === 'loaded') { tag.className = 'tag ok'; tag.textContent = t('加载器接受'); }
     else { tag.className = 'tag err'; tag.textContent = p.syntaxError?.code ?? p.reason?.split(':')[0] ?? 'REFUSED'; }
     verdict.append(tag);
     el.append(name, meta, verdict);
@@ -90,52 +99,50 @@ function renderDetail() {
   const h = (t) => { const e = document.createElement('h2'); e.textContent = t; return e; };
   const p = packOf();
   if (!p) {
-    box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: '左边选一个工坊包，或在右边导入一个 .zip。' }));
+    box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('左边选一个工坊包，或在右边导入一个 .zip。') }));
     return;
   }
 
-  box.append(h(`「${p.name}」`));
+  box.append(h(t('「{0}」', p.name)));
   const info = document.createElement('div'); info.className = 'panel kv';
-  info.append(kv('包 id', p.id));
-  info.append(kv('版本', p.version));
-  info.append(kv('作者', p.author ?? '（未声明）'));
-  info.append(kv('授权 license', p.license ?? '（未声明）'));
-  info.append(kv('内容文件', p.content.length ? p.content.join('、') : '（无 —— 只带语音/助战也是合法的包）'));
-  info.append(kv('语音', p.voiceLines ? `${p.voiceLines} 条` : '（无）'));
-  info.append(kv('自带素材', p.hasAssets ? '有 assets/（必须有 license）' : '没有 assets/'));
+  info.append(kv(t('包 id'), p.id));
+  info.append(kv(t('版本'), p.version));
+  info.append(kv(t('作者'), p.author ?? t('（未声明）')));
+  info.append(kv(t('授权 license'), p.license ?? t('（未声明）')));
+  info.append(kv(t('内容文件'), p.content.length ? p.content.join(t('、')) : t('（无 —— 只带语音/助战也是合法的包）')));
+  info.append(kv(t('语音'), p.voiceLines ? t('{0} 条', p.voiceLines) : t('（无）')));
+  info.append(kv(t('自带素材'), p.hasAssets ? t('有 assets/（必须有 license）') : t('没有 assets/')));
   box.append(info);
 
   // 校验结论：加载器自己的答案（/api/packs/support 的 status/reason 来自 loadWorkshop）
   const verdict = document.createElement('div');
   if (p.status === 'loaded') {
     verdict.className = 'banner good';
-    verdict.textContent = '✔ 加载器接受这个包（格式与 content 声明都对得上）。改完要重启游戏服务器才会生效。';
+    verdict.textContent = t('✔ 加载器接受这个包（格式与 content 声明都对得上）。改完要重启游戏服务器才会生效。');
   } else {
     verdict.className = 'banner bad';
-    verdict.textContent = `✘ 加载器不会使用这个包：${p.reason ?? '（未知原因）'}`
-      + (p.syntaxError ? `；pack.json 本身：${p.syntaxError.code} — ${p.syntaxError.detail}` : '');
+    verdict.textContent = t('✘ 加载器不会使用这个包：{0}', p.reason ?? t('（未知原因）'))
+      + (p.syntaxError ? t('；pack.json 本身：{0} — {1}', p.syntaxError.code, p.syntaxError.detail) : '');
   }
   box.append(verdict);
 
   // ---- 助战声明 ----
-  box.append(h('助战声明（pack.json 的 support）'));
+  box.append(h(t('助战声明（pack.json 的 support）')));
   const note = document.createElement('div'); note.className = 'panel';
   note.append(Object.assign(document.createElement('p'), {
     className: 'hint',
-    textContent: '只勾选**这个包自己新增**的干员：卡池是安装方的规则，包不能把官方干员塞进或移出卡池'
-      + '（违反会被加载器记 SUPPORT_FOREIGN_OPERATOR 并整条丢掉）。阶由记录推导，这里不接受手输的阶 ——'
-      + '手写的阶一旦与记录不一致，该干员会静默不可选（isSupportChess 要求 id 出现在它自己那一阶的池子里）。',
+    textContent: t('只勾选**这个包自己新增**的干员：卡池是安装方的规则，包不能把官方干员塞进或移出卡池（违反会被加载器记 SUPPORT_FOREIGN_OPERATOR 并整条丢掉）。阶由记录推导，这里不接受手输的阶 —— 手写的阶一旦与记录不一致，该干员会静默不可选（isSupportChess 要求 id 出现在它自己那一阶的池子里）。'),
   }));
 
   if (!p.operators.length) {
     note.append(Object.assign(document.createElement('p'), {
       className: 'hint',
-      textContent: '这个包还没有自己的 chess.json —— 先在干员编辑器里保存一个干员，助战声明才有对象。',
+      textContent: t('这个包还没有自己的 chess.json —— 先在干员编辑器里保存一个干员，助战声明才有对象。'),
     }));
   } else {
     const table = document.createElement('table');
     const head = document.createElement('tr');
-    for (const t of ['', '干员 id', '名称', '阶（推导）', '会不会进卡池']) head.append(Object.assign(document.createElement('th'), { textContent: t }));
+    for (const th of ['', t('干员 id'), t('名称'), t('阶（推导）'), t('会不会进卡池')]) head.append(Object.assign(document.createElement('th'), { textContent: th }));
     table.append(head);
     for (const op of p.operators) {
       const tr = document.createElement('tr');
@@ -144,7 +151,7 @@ function renderDetail() {
       cb.type = 'checkbox';
       // 记录没有 1–6 的整数阶时（SUPPORT_TIER_UNKNOWN）不给勾：勾了也进不了池，那是「看起来配好了但没生效」
       cb.disabled = !op.tier;
-      if (!op.tier) cb.title = '这条记录没有 1–6 的整数 tier，进不了卡池';
+      if (!op.tier) cb.title = t('这条记录没有 1–6 的整数 tier，进不了卡池');
       cb.checked = op.selected;
       cb.addEventListener('change', () => {
         if (cb.checked) state.picked.add(op.id); else state.picked.delete(op.id);
@@ -154,11 +161,11 @@ function renderDetail() {
       tr.append(pick);
       tr.append(Object.assign(document.createElement('td'), { className: 'id', textContent: op.id }));
       tr.append(Object.assign(document.createElement('td'), { textContent: op.name }));
-      tr.append(Object.assign(document.createElement('td'), { textContent: op.tier ? String(op.tier) : '（无整数 tier）' }));
+      tr.append(Object.assign(document.createElement('td'), { textContent: op.tier ? String(op.tier) : t('（无整数 tier）') }));
       const why = document.createElement('td');
-      if (op.selected && op.entry) why.append(Object.assign(document.createElement('span'), { className: 'tag ok', textContent: `会进 ${op.entry.tier} 阶卡池` }));
-      else if (op.selected) why.append(Object.assign(document.createElement('span'), { className: 'tag err', textContent: '阶梯未知，进不了池' }));
-      else why.append(Object.assign(document.createElement('span'), { className: 'tag', textContent: '未声明' }));
+      if (op.selected && op.entry) why.append(Object.assign(document.createElement('span'), { className: 'tag ok', textContent: t('会进 {0} 阶卡池', op.entry.tier) }));
+      else if (op.selected) why.append(Object.assign(document.createElement('span'), { className: 'tag err', textContent: t('阶梯未知，进不了池') }));
+      else why.append(Object.assign(document.createElement('span'), { className: 'tag', textContent: t('未声明') }));
       tr.append(why);
       table.append(tr);
     }
@@ -166,46 +173,45 @@ function renderDetail() {
     const actions = document.createElement('div'); actions.className = 'row'; actions.style.marginTop = '10px';
     const save = document.createElement('button');
     save.className = 'primary';
-    save.textContent = state.busy ? '保存中…' : '保存助战声明';
+    save.textContent = state.busy ? t('保存中…') : t('保存助战声明');
     save.disabled = state.busy;
     save.addEventListener('click', saveSupport);
     const reset = document.createElement('button');
     reset.className = 'ghost';
-    reset.textContent = '还原';
+    reset.textContent = t('还原');
     reset.addEventListener('click', () => { state.picked = new Set(p.support); renderDetail(); });
     actions.append(save, reset);
     note.append(actions);
     note.append(Object.assign(document.createElement('p'), {
       className: 'hint',
-      textContent: '保存只改 pack.json 的 support 字段：其余字段、键序与两空格缩进原样保留，也不会给包补一条它没声明过的 content。',
+      textContent: t('保存只改 pack.json 的 support 字段：其余字段、键序与两空格缩进原样保留，也不会给包补一条它没声明过的 content。'),
     }));
   }
 
   // 已经写着的声明里，哪些是加载器会拒绝的（别人的干员 id、坏 id）
   if (p.errors?.length) {
     const box2 = document.createElement('div'); box2.className = 'panel';
-    box2.append(Object.assign(document.createElement('div'), { className: 'err', textContent: `${p.errors.length} 条声明会被拒绝` }));
+    box2.append(Object.assign(document.createElement('div'), { className: 'err', textContent: t('{0} 条声明会被拒绝', p.errors.length) }));
     const ul = document.createElement('ul'); ul.className = 'issues';
-    for (const e of p.errors) ul.append(Object.assign(document.createElement('li'), { className: 'err', textContent: `[${e.code}] ${e.id}：${e.reason}` }));
+    for (const e of p.errors) ul.append(Object.assign(document.createElement('li'), { className: 'err', textContent: t('[{0}] {1}：{2}', e.code, e.id, t(e.reason)) }));
     box2.append(ul);
     note.append(box2);
   }
   box.append(note);
 
   // 卡池的归属地：说清楚 support 只是「建议」，真正的池子在服务端
-  box.append(h('卡池在哪里'));
+  box.append(h(t('卡池在哪里')));
   const pool = document.createElement('div'); pool.className = 'panel';
   if (p.workshop && Object.keys(p.workshop).length) {
-    const lines = Object.entries(p.workshop).map(([tier, ids]) => `${tier} 阶：${ids.length} 个`).join(' · ');
-    pool.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: `当前 data/support.json 的卡池：${lines}` }));
+    const lines = Object.entries(p.workshop).map(([tier, ids]) => t('{0} 阶：{1}', tier, t('{0} 个', ids.length))).join(' · ');
+    pool.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('当前 data/support.json 的卡池：{0}', lines) }));
   } else {
-    pool.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: 'data/support.json 里没有可用的卡池（没有这个文件，或没有「名额 + 卡池」的组合）。' }));
+    pool.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('data/support.json 里没有可用的卡池（没有这个文件，或没有「名额 + 卡池」的组合）。') }));
   }
   pool.append(Object.assign(document.createElement('p'), {
     className: 'hint',
-    textContent: '助战卡池本身由服务端的 data/support.json 决定：这个页面只写包的「建议」。'
-      + '安装方在那里写 "workshop": false 就会忽略所有包的助战声明（启动日志会写出来）。'
-      + (state.data?.enabled === false ? ' ⚠ 这个安装现在没有开启助战，保存后这些声明不会进卡池。' : ''),
+    textContent: t('助战卡池本身由服务端的 data/support.json 决定：这个页面只写包的「建议」。安装方在那里写 "workshop": false 就会忽略所有包的助战声明（启动日志会写出来）。')
+      + (state.data?.enabled === false ? ' ' + t('⚠ 这个安装现在没有开启助战，保存后这些声明不会进卡池。') : ''),
   }));
   box.append(pool);
 }
@@ -224,26 +230,26 @@ function renderSide() {
   }
 
   const p = packOf();
-  box.append(h('导出一个包'));
+  box.append(h(t('导出一个包')));
   const ex = document.createElement('div'); ex.className = 'panel';
   ex.append(Object.assign(document.createElement('p'), {
     className: 'hint',
-    textContent: '下载 <包id>.zip：pack.json 与包内所有文件（含 assets/**）都在 zip 根，所以这个 zip 就是这个包。'
-      + '条目按名字排序、时间戳固定，同样的内容永远得到同样的字节。',
+    // 词条里不能出现 assets 路径紧跟两个星号：注释剥离会把它当成块注释开头，整句就没法作为 key
+    textContent: t('下载 <包id>.zip：pack.json 与包内所有文件（含 assets/ 整个目录）都在 zip 根，所以这个 zip 就是这个包。条目按名字排序、时间戳固定，同样的内容永远得到同样的字节。'),
   }));
   const dl = document.createElement('button');
   dl.className = 'primary';
-  dl.textContent = `导出 ${p ? p.id : '（先选一个包）'}.zip`;
+  dl.textContent = state.busy ? t('导出中…') : t('导出 {0}.zip', p ? p.id : t('（先选一个包）'));
   dl.disabled = !p || state.busy;
   dl.addEventListener('click', exportPack);
   ex.append(dl);
   ex.append(Object.assign(document.createElement('p'), {
     className: 'hint',
-    textContent: '命令行等价：node tools/workshop-pack.mjs export <包id>',
+    textContent: t('命令行等价：node tools/workshop-pack.mjs export <包id>'),
   }));
   box.append(ex);
 
-  box.append(h('导入一个包'));
+  box.append(h(t('导入一个包')));
   const im = document.createElement('div'); im.className = 'panel';
   const file = document.createElement('input');
   file.type = 'file';
@@ -255,39 +261,37 @@ function renderSide() {
   forceLabel.className = 'chk';
   forceLabel.style.display = 'flex';
   forceLabel.style.gap = '6px';
-  forceLabel.append(force, document.createTextNode('覆盖同名包（--force）'));
+  forceLabel.append(force, document.createTextNode(t('覆盖同名包（--force）')));
   const up = document.createElement('button');
   up.className = 'primary';
-  up.textContent = state.busy ? '导入中…' : '导入这个 .zip';
+  up.textContent = state.busy ? t('导入中…') : t('导入这个 .zip');
   up.disabled = state.busy;
   up.addEventListener('click', () => importPack(file.files?.[0] ?? null, force.checked));
-  im.append(Object.assign(document.createElement('label'), { textContent: '.zip 文件' }), file, forceLabel);
+  im.append(Object.assign(document.createElement('label'), { textContent: t('.zip 文件') }), file, forceLabel);
   const row = document.createElement('div'); row.className = 'row'; row.style.marginTop = '8px';
   row.append(up);
   im.append(row);
   im.append(Object.assign(document.createElement('p'), {
     className: 'hint',
-    textContent: '先解压到临时目录、校验 pack.json（用加载器自己的规则），再整个搬进 workshop/<包id>/。'
-      + '坏归档、恶意归档、校验不过的包都不会在 workshop/ 里留下半个包；同名包默认拒绝覆盖。',
+    textContent: t('先解压到临时目录、校验 pack.json（用加载器自己的规则），再整个搬进 workshop/<包id>/。坏归档、恶意归档、校验不过的包都不会在 workshop/ 里留下半个包；同名包默认拒绝覆盖。'),
   }));
   im.append(Object.assign(document.createElement('p'), {
     className: 'hint',
-    textContent: '命令行等价：node tools/workshop-pack.mjs import <文件.zip> [--force]',
+    textContent: t('命令行等价：node tools/workshop-pack.mjs import <文件.zip> [--force]'),
   }));
   box.append(im);
 
-  box.append(h('试玩这一版'));
+  box.append(h(t('试玩这一版')));
   const pt = document.createElement('div'); pt.className = 'panel';
   const running = !!(state.playtest && state.playtest.running);
   pt.append(Object.assign(document.createElement('p'), {
     className: 'hint',
     textContent: running
-      ? `游戏服务器正在跑：${state.playtest.url}`
-      : '起一个游戏服务器（子进程，绑 127.0.0.1 的随机空闲端口），把当前工坊根交给它，然后打开浏览器直接进一局独立模拟。'
-        + '改完包再点一次「重启试玩」就能看到新内容 —— 编辑器自己不会重载数据。',
+      ? t('游戏服务器正在跑：{0}', state.playtest.url)
+      : t('起一个游戏服务器（子进程，绑 127.0.0.1 的随机空闲端口），把当前工坊根交给它，然后打开浏览器直接进一局独立模拟。改完包再点一次「重启试玩」就能看到新内容 —— 编辑器自己不会重载数据。'),
   }));
   const dRow = document.createElement('div'); dRow.className = 'row'; dRow.style.margin = '6px 0';
-  const dLab = document.createElement('label'); dLab.textContent = '难度'; dLab.style.margin = '0';
+  const dLab = document.createElement('label'); dLab.textContent = t('难度'); dLab.style.margin = '0';
   const dSel = document.createElement('select');
   dSel.style.width = 'auto';
   for (const d of state.playtest?.difficulties ?? []) {
@@ -301,13 +305,13 @@ function renderSide() {
   const pRow = document.createElement('div'); pRow.className = 'row';
   const go = document.createElement('button');
   go.className = 'primary';
-  go.textContent = state.busy ? '启动中…' : (running ? '重启试玩' : '启动试玩');
+  go.textContent = state.busy ? t('启动中…') : (running ? t('重启试玩') : t('启动试玩'));
   go.disabled = state.busy;
   go.addEventListener('click', () => startPlaytest(running));
   pRow.append(go);
   if (running) {
     const stop = document.createElement('button');
-    stop.textContent = '停止';
+    stop.textContent = t('停止');
     stop.disabled = state.busy;
     stop.addEventListener('click', stopPlaytest);
     pRow.append(stop);
@@ -320,26 +324,25 @@ function renderSide() {
     a.href = state.playtest.url;
     a.target = '_blank';
     a.rel = 'noopener';
-    a.textContent = '在新标签页打开这一局';
+    a.textContent = t('在新标签页打开这一局');
     link.append(a);
     pt.append(link);
   }
   pt.append(Object.assign(document.createElement('p'), {
     className: 'hint',
-    textContent: '命令行等价：node scripts/launch.mjs（游戏服务器）；试玩用的是 SP_WORKSHOP，所以这里选的工坊目录就是它读的目录。',
+    textContent: t('命令行等价：node scripts/launch.mjs（游戏服务器）；试玩用的是 SP_WORKSHOP，所以这里选的工坊目录就是它读的目录。'),
   }));
   box.append(pt);
 
-  box.append(h('说明'));
+  box.append(h(t('说明')));
   const help = document.createElement('div'); help.className = 'panel';
   help.append(Object.assign(document.createElement('p'), {
     className: 'hint',
-    textContent: '导入的包必须自带 pack.json（在 zip 根，或包在一个唯一的顶层目录里 —— 两种归档都很常见）。'
-      + '校验用 shared/workshop.js 的 normalizePackManifest，与游戏加载器同一个函数，所以「装得上」就是「加载器会接受」。',
+    textContent: t('导入的包必须自带 pack.json（在 zip 根，或包在一个唯一的顶层目录里 —— 两种归档都很常见）。校验用 shared/workshop.js 的 normalizePackManifest，与游戏加载器同一个函数，所以「装得上」就是「加载器会接受」。'),
   }));
   help.append(Object.assign(document.createElement('p'), {
     className: 'hint',
-    textContent: '装好的包要重启游戏服务器才会出现在游戏里。这里只写 workshop/<包id>/ 与 pack.json 的 support 字段。',
+    textContent: t('装好的包要重启游戏服务器才会出现在游戏里。这里只写 workshop/<包id>/ 与 pack.json 的 support 字段。'),
   }));
   box.append(help);
 }
@@ -352,17 +355,18 @@ async function saveSupport() {
   state.busy = true; renderDetail(); renderSide();
   try {
     const r = await api(`/api/packs/${encodeURIComponent(p.id)}/support`, { method: 'POST', body: { ids: [...state.picked] } });
-    const derived = r.derived.map((e) => `${e.id}→${e.tier} 阶`).join('、');
-    const warn = Array.isArray(r.warnings) && r.warnings.length ? `；⚠ ${r.warnings.join('；')}` : '';
+    const derived = r.derived.map((e) => t('{0}→{1} 阶', e.id, e.tier)).join(t('、'));
+    const warn = Array.isArray(r.warnings) && r.warnings.length ? ' ' + t('；⚠ {0}', r.warnings.join(' ' + t('；') + ' ')) : '';
+    const detail = derived ? ' ' + t('（{0}）', derived) : '';
     state.message = {
       kind: r.changed ? 'ok' : 'warn',
       text: r.changed
-        ? `已写入 ${r.pack} 的 support：${r.support.length} 个${derived ? `（${derived}）` : ''}${warn}`
-        : `${r.pack} 的 support 没有变化，文件未被改写${warn}`,
+        ? t('已写入 {0} 的 support：{1} 个{2}{3}', r.pack, r.support.length, detail, warn)
+        : t('{0} 的 support 没有变化，文件未被改写{1}', r.pack, warn),
     };
     await load(p.id);
   } catch (e) {
-    state.message = { kind: 'error', text: e.message };
+    state.message = { kind: 'error', text: errText(e) };
   } finally {
     state.busy = false; renderAll();
   }
@@ -388,16 +392,16 @@ async function exportPack() {
     a.remove();
     // 立刻 revoke 在部分浏览器里会取消下载：留一拍再释放
     setTimeout(() => URL.revokeObjectURL(url), 10000);
-    state.message = { kind: 'ok', text: `已导出 ${p.id}.zip（${blob.size} 字节）` };
+    state.message = { kind: 'ok', text: t('已导出 {0}.zip（{1} 字节）', p.id, blob.size) };
   } catch (e) {
-    state.message = { kind: 'error', text: e.message };
+    state.message = { kind: 'error', text: errText(e) };
   } finally {
     state.busy = false; renderSide();
   }
 }
 
 async function importPack(file, force) {
-  if (!file) return setMessage('error', '先选一个 .zip 文件。');
+  if (!file) return setMessage('error', t('先选一个 .zip 文件。'));
   state.busy = true; renderSide();
   try {
     // 上传的是原始字节（application/octet-stream）：zip 不该被 JSON 包一层
@@ -408,16 +412,16 @@ async function importPack(file, force) {
     });
     const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-    const bits = [`${data.files} 个文件`, `${data.bytes} 字节`];
-    if (data.content.length) bits.push(`内容 ${data.content.join('/')}`);
-    if (data.voiceLines) bits.push(`语音 ${data.voiceLines} 条`);
-    if (data.support.length) bits.push(`助战 ${data.support.length} 个`);
-    state.message = { kind: 'ok', text: `已安装 ${data.pack}：${bits.join('，')}。重启游戏服务器后生效。` };
+    const bits = [t('{0} 个文件', data.files), t('{0} 字节', data.bytes)];
+    if (data.content.length) bits.push(t('内容 {0}', data.content.join('/')));
+    if (data.voiceLines) bits.push(t('语音 {0}', t('{0} 条', data.voiceLines)));
+    if (data.support.length) bits.push(t('助战 {0}', t('{0} 个', data.support.length)));
+    state.message = { kind: 'ok', text: t('已安装 {0}：{1}。重启游戏服务器后生效。', data.pack, listJoin(bits)) };
     state.packId = data.pack;
     await load(data.pack);
   } catch (e) {
     // 拒绝要原样显示原因（哪一条规则、哪一个字段），否则作者只能瞎猜
-    state.message = { kind: 'error', text: `导入被拒绝：${e.message}` };
+    state.message = { kind: 'error', text: t('导入被拒绝：{0}', errText(e)) };
   } finally {
     state.busy = false; renderAll();
   }
@@ -431,11 +435,11 @@ async function startPlaytest(wasRunning) {
   try {
     if (wasRunning) await api('/api/playtest/stop', { method: 'POST' });
     const r = await api('/api/playtest/start', { method: 'POST', body: { difficulty: state.playtestDifficulty } });
-    state.message = { kind: 'ok', text: `试玩服务器已就绪：${r.url}` };
+    state.message = { kind: 'ok', text: t('试玩服务器已就绪：{0}', r.url) };
     // 不在编辑器里嵌游戏：用一个新标签页打开（编辑器是工具，游戏是另一个窗口）
     window.open(r.url, '_blank', 'noopener');
   } catch (e) {
-    state.message = { kind: 'error', text: e.message };
+    state.message = { kind: 'error', text: errText(e) };
   } finally {
     state.busy = false;
     await loadPlaytest();
@@ -446,9 +450,9 @@ async function stopPlaytest() {
   state.busy = true; renderSide();
   try {
     const r = await api('/api/playtest/stop', { method: 'POST' });
-    state.message = { kind: r.stopped ? 'ok' : 'warn', text: r.stopped ? '试玩服务器已停止。' : '试玩服务器本来就没在跑。' };
+    state.message = { kind: r.stopped ? 'ok' : 'warn', text: r.stopped ? t('试玩服务器已停止。') : t('试玩服务器本来就没在跑。') };
   } catch (e) {
-    state.message = { kind: 'error', text: e.message };
+    state.message = { kind: 'error', text: errText(e) };
   } finally {
     state.busy = false;
     await loadPlaytest();
@@ -479,15 +483,18 @@ async function load(keepId = null) {
   }
   state.picked = new Set(packOf()?.support ?? []);
   $('#rootPath').textContent = state.packs.length
-    ? `${state.data.workshopRoot} · ${state.packs.length} 个包`
-    : `${state.data.workshopRoot} · 还没有包`;
+    ? `${state.data.workshopRoot} · ${t('{0} 个包', state.packs.length)}`
+    : `${state.data.workshopRoot} · ${t('还没有包')}`;
   renderAll();
 }
 
 $('#btnReload').addEventListener('click', () => {
-  load().catch((e) => setMessage('error', `载入失败：${e.message}`));
+  load().catch((e) => setMessage('error', t('载入失败：{0}', errText(e))));
 });
 
+// 界面语言：换掉 HTML 里的静态文案、插入右上角切换按钮，换语言后重画一遍（动态文案也要跟着换）。
+mountI18n(renderAll);
+
 load().catch((e) => {
-  $('#detail').replaceChildren(Object.assign(document.createElement('p'), { className: 'err', textContent: `载入失败：${e.message}` }));
+  $('#detail').replaceChildren(Object.assign(document.createElement('p'), { className: 'err', textContent: t('载入失败：{0}', errText(e)) }));
 });
