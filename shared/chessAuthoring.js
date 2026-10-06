@@ -11,8 +11,12 @@
 //     AI can call it in a loop and fix what it reports, and the editor can show the same errors on the same rules.
 //
 // The most valuable check is `BB_UNKNOWN_KEY`: the generic kit (server/sim/content/generic.js) is what makes an operator
-// fight with NO JavaScript at all, and it reads a fixed set of blackboard keys. An invented key silently does nothing —
-// so it is reported as a warning. GENERIC_BB_KEYS mirrors that file; test/chessAuthoring.test.js guards the mirror.
+// fight with NO JavaScript at all, and it reads a fixed set of blackboard keys. An invented key silently does nothing —// so it is reported as a warning. GENERIC_BB_KEYS mirrors that file; test/chessAuthoring.test.js guards the mirror.
+
+// 模组的「选了模组之后长什么样」只有一份实现（shared/loadoutRecord.js 的 composeStats / composeTalents，
+// tools/build-data.mjs 与引擎都用它）：派生的精锐记录必须按同一套算术把默认模组烘进去，否则玩家选「不装备」
+// 会得到带模组的数值 —— 这一类不一致不会报错，只会让作者的模组在游戏里表现不对。
+import { composeStats, composeTalents } from './loadoutRecord.js';
 
 /**
  * The professions THIS project's data uses — which are NOT the global Arknights class names. The mapping that bit us
@@ -26,6 +30,41 @@
  * the engine does not use is accepted by the format layer yet silently loses every `profession === '…'` aura and talent.
  */
 export const PROFESSIONS = Object.freeze(['WARRIOR', 'SNIPER', 'CASTER', 'MEDIC', 'SUPPORT', 'TANK', 'SPECIAL', 'PIONEER']);
+
+/**
+ * 职业与位置的中英名（编辑器显示用；**引擎读的永远是上表里的大写枚举**）。
+ *
+ * 为什么单独列一份：职业枚举是数据里的英文缩写，而作者（以及任何看界面的人）认的是中文名。
+ * 中文名按官方职业名（近卫 / 狙击 / …），英文名按官方英文版（Guard / Sniper / …）。界面显示成「近卫 WARRIOR」，
+ * 这样作者既知道自己在选哪个职业，也看得见记录里真正写下去的字符串是什么。
+ */
+export const PROFESSION_NAMES = Object.freeze({
+  WARRIOR: Object.freeze({ zh: '近卫', en: 'Guard' }),
+  SNIPER: Object.freeze({ zh: '狙击', en: 'Sniper' }),
+  CASTER: Object.freeze({ zh: '术师', en: 'Caster' }),
+  MEDIC: Object.freeze({ zh: '医疗', en: 'Medic' }),
+  SUPPORT: Object.freeze({ zh: '辅助', en: 'Supporter' }),
+  TANK: Object.freeze({ zh: '重装', en: 'Defender' }),
+  SPECIAL: Object.freeze({ zh: '特种', en: 'Specialist' }),
+  PIONEER: Object.freeze({ zh: '先锋', en: 'Vanguard' }),
+});
+
+/** 部署位置的名称（`position` 只有两个取值；引擎按它决定干员能站哪些格）。 */
+export const POSITION_NAMES = Object.freeze({
+  MELEE: Object.freeze({ zh: '近战', en: 'Melee' }),
+  RANGED: Object.freeze({ zh: '远程', en: 'Ranged' }),
+});
+
+/**
+ * 攻击分类的三个字段（记录里的 `dmgType` / `attackKind` / `projectile`）＋ `canHitFly`。
+ *
+ * 平时它们由 `classify()` 按职业与分支推导（见下面），但**有特殊情况**：同分支的干员可能因为天赋、
+ * 特性文字或官方特例而得到不同的分类。所以 spec 里可以显式覆盖这四个字段，覆盖优先于推导
+ * （`deriveChessRecord` 的 `spec.dmgType` 等）—— 界面把「推导值 / 覆盖值」分开显示，避免作者以为改不掉。
+ */
+export const DMG_TYPES = Object.freeze(['phys', 'arts', 'heal', 'true', 'element']);
+export const ATTACK_KINDS = Object.freeze(['melee', 'ranged', 'none', 'heal']);
+export const PROJECTILES = Object.freeze(['none', 'arrow', 'bolt', 'orb']);
 
 /** Sub-professions with a behaviour that changes combat classification or the normal attack. Everything else is fine. */
 export const SUBPROF_ATTACK_KIND = Object.freeze({
@@ -104,7 +143,17 @@ export const DURATION_TYPES = Object.freeze(['NONE', 'AMMO']);
 export const SP_TYPES = Object.freeze([
   'INCREASE_WITH_TIME', 'INCREASE_WHEN_ATTACK', 'INCREASE_WHEN_TAKEN_DAMAGE', 'ON_DEPLOY',
 ]);
+/**
+ * 自动释放的触发规则：**引擎里真的有分支**的那几条（server/sim/skills.js 的 TICK_RULES / rule 判断）。
+ * 除此之外官方数据里还出现了两条自定义规则（`GDGLOW_SKILL_2` = 全场存在可选目标时释放，`MLYSS_WTRMAN` = 流形那类，
+ * 由 kits 自己 activate）。它们不在这个表里，但**是合法的**（引擎的 normTriggerRule 原样放行任何字符串），
+ * 所以校验层不能拒绝 —— 否则那三位官方干员连「以模板新建」都做不了。见下面的 KNOWN_CUSTOM_TRIGGER_RULES。
+ */
 export const TRIGGER_RULES = Object.freeze(['DEFAULT', 'SKILL_RANGE', 'TAKE_DAMAGE', 'SP_FULL', 'SEARCH', 'CUSTOM_RANGE']);
+/** 引擎没有通用分支、但官方数据真的在用的自定义触发规则（写了不报错，但要知道它靠手写 kit 才动）。 */
+export const KNOWN_CUSTOM_TRIGGER_RULES = Object.freeze(['GDGLOW_SKILL_2', 'MLYSS_WTRMAN']);
+/** 触发规则的整体形状：大写字母数字下划线（引擎的 normTriggerRule 放行任何字符串，这里只挡明显的错别字）。 */
+export const TRIGGER_RULE_RE = /^[A-Z][A-Z0-9_]{0,47}$/;
 
 /** Default attack grids (facing RIGHT). `melee` and the real rangeId "3-1" grid; longer ranges must be given explicitly. */
 export const DEFAULT_MELEE_RANGE = Object.freeze([[0, 0], [0, 1]]);
@@ -188,7 +237,7 @@ export function deriveChessRecord(spec) {
   if (sk) {
     if (sk.skillType !== undefined) req(SKILL_TYPES.includes(String(sk.skillType).toUpperCase()), 'skill.skillType', 'BAD_ENUM', `skillType must be one of ${SKILL_TYPES.join(', ')}`);
     if (sk.spType !== undefined) req(SP_TYPES.includes(String(sk.spType).toUpperCase()), 'skill.spType', 'BAD_ENUM', `spType must be one of ${SP_TYPES.join(', ')}`);
-    if (sk.triggerRule !== undefined) req(TRIGGER_RULES.includes(String(sk.triggerRule).toUpperCase()), 'skill.triggerRule', 'BAD_ENUM', `triggerRule must be one of ${TRIGGER_RULES.join(', ')}`);
+    if (sk.triggerRule !== undefined) req(TRIGGER_RULE_RE.test(String(sk.triggerRule).toUpperCase()), 'skill.triggerRule', 'BAD_ENUM', 'triggerRule must be UPPER_SNAKE (e.g. DEFAULT, SP_FULL, GDGLOW_SKILL_2)');
     if (isPlainObj(sk.bb)) {
       for (const key of Object.keys(sk.bb)) {
         const problem = bbKeyProblem(key);
@@ -208,7 +257,31 @@ export function deriveChessRecord(spec) {
   const prof = String(spec.profession).toUpperCase();
   const position = String(spec.position).toUpperCase();
   const sub = typeof spec.subProfessionId === 'string' ? spec.subProfessionId : null;
-  const cls = classify({ profession: prof, subProfessionId: sub, position, traitDesc: spec.traitDesc || '' });
+  const clsRaw = classify({ profession: prof, subProfessionId: sub, position, traitDesc: spec.traitDesc || '' });
+  // 分类的**显式覆盖**：平时按职业与分支推导，但同分支的干员可能因为天赋/特性文字/官方特例而不同
+  // （例如「要塞」默认打不到空中，可有的干员就是能打）。写了就用写的，并在 warnings 里说明覆盖了推导值。
+  const pick = (v, allowed, derived, field) => {
+    if (v === undefined || v === null || v === '') return derived;
+    const want = String(v).toLowerCase();
+    if (!allowed.includes(want)) {
+      errors.push({ field, code: 'BAD_ENUM', message: `${field} must be one of ${allowed.join(', ')}` });
+      return derived;
+    }
+    if (want !== derived) warnings.push(`${field} 覆盖了按职业与分支推导的值（${derived} → ${want}）`);
+    return want;
+  };
+  const forceFly = spec.canHitFly === undefined || spec.canHitFly === null ? null : spec.canHitFly === true;
+  if (forceFly !== null && forceFly !== clsRaw.canHitFly) {
+    warnings.push(`canHitFly 覆盖了按职业与分支推导的值（${clsRaw.canHitFly} → ${forceFly}）`);
+  }
+  const cls = {
+    dmgType: pick(spec.dmgType, DMG_TYPES, clsRaw.dmgType, 'dmgType'),
+    attackKind: pick(spec.attackKind, ATTACK_KINDS, clsRaw.attackKind, 'attackKind'),
+    projectile: pick(spec.projectile, PROJECTILES, clsRaw.projectile, 'projectile'),
+    canHitFly: forceFly === null ? clsRaw.canHitFly : forceFly,
+  };
+  // 分类覆盖可能刚刚报了错（枚举外的值），所以这里要再挡一次 —— 上面的 errors 检查在它之前
+  if (errors.length) return { ok: false, errors };
   const rangeGrid = isPairGrid(spec.rangeGrid) ? spec.rangeGrid
     : (cls.attackKind === 'melee' || cls.attackKind === 'none' ? DEFAULT_MELEE_RANGE : DEFAULT_RANGED_RANGE);
   const td = TIER_DEFAULTS[tier];
@@ -229,6 +302,8 @@ export function deriveChessRecord(spec) {
     tauntLevel: isFin(st.tauntLevel) ? st.tauntLevel : 0,
     massLevel: isFin(st.massLevel) ? st.massLevel : 0,
     deployLimit: 1, deckStack: 0,
+    tauntLevel: isFin(st.tauntLevel) ? st.tauntLevel : 0,
+    massLevel: isFin(st.massLevel) ? st.massLevel : 0,
   });
   const skillRecord = (golden) => {
     if (!sk) return null;
@@ -258,28 +333,127 @@ export function deriveChessRecord(spec) {
     rec.isDefault = true;
     return rec;
   };
-  const talentsOf = (golden) => (Array.isArray(spec.talents) ? spec.talents : []).map((t, i) => ({
-    index: i, name: t && t.name ? t.name : null,
-    desc: t && t.desc ? t.desc : null, descRaw: t && t.desc ? t.desc : null,
-    bb: t && isPlainObj(t.bb) ? { ...t.bb } : {}, bbStr: {},
-    rangeGrid: null, tokenKey: null, hidden: !(t && t.desc), fromModule: false,
-  }));
+  const talentList = (list) => (Array.isArray(list) ? list : []).map((t, i) => ({
+    // `index` 官方是**稀疏**的（例：0、1、3 —— 中间那个位置没有天赋），所以照抄它，别按数组位置重排
+    index: t && Number.isInteger(t.index) ? t.index : i, name: t && t.name ? t.name : null,
+    desc: t && t.desc ? t.desc : null,
+    // 天赋的富文本与自带范围官方也会写（`descRaw` 里的 `<$ba.stun>` 这类标记、范围型天赋的 rangeGrid），
+    // 所以 spec 里都是可选字段：写了照抄（模板不丢格式），没写就退回纯文本 / null。
+    descRaw: t && typeof t.descRaw === 'string' && t.descRaw ? t.descRaw : (t && t.desc ? t.desc : null),
+    bb: t && isPlainObj(t.bb) ? { ...t.bb } : {}, bbStr: t && isPlainObj(t.bbStr) ? { ...t.bbStr } : {},
+    rangeGrid: t && isPairGrid(t.rangeGrid) ? t.rangeGrid.map((p) => [...p]) : null,
+    tokenKey: t && typeof t.tokenKey === 'string' && t.tokenKey ? t.tokenKey : null,
+    // `hidden` 官方对占位天赋（desc 是 `-`）两种写法都有，所以照抄记录里的布尔值，别自己推
+    hidden: t && typeof t.hidden === 'boolean' ? t.hidden : !(t && t.desc), fromModule: false,
+  }));  const talentsOf = (golden) => talentList(golden && Array.isArray(spec.talentsGolden) ? spec.talentsGolden : spec.talents);
+
+  // 模组（`data/chess.json` 精锐记录的 `modules[]`）：官方那 184 个模组就是长这个形状，引擎按它算
+  // 「选了这个模组之后干员的数值/特性/天赋长什么样」（shared/loadoutRecord.js composeStats / composeTalents）。
+  // 只有精锐记录带模组（普通记录只有一个 `module` 指针，`active:false`）。
+  const modules = (Array.isArray(spec.modules) ? spec.modules : []).map((m, i) => {
+    const mid = m && typeof m.id === 'string' ? m.id.trim() : '';
+    const typeNameRaw = m && typeof m.type === 'string' && m.type.trim() ? m.type.trim() : `WS-${'XYZ'[i] ?? 'Z'}`;
+    const attrSrc = m && isPlainObj(m.attr) ? m.attr : {};
+    const attr = {};
+    for (const [k, v] of Object.entries(attrSrc)) if (isFin(v) && v !== 0) attr[k] = v;
+    const traitBb = m && isPlainObj(m.traitBb) ? { ...m.traitBb } : {};
+    const traitBbStr = m && isPlainObj(m.traitBbStr) ? { ...m.traitBbStr } : {};
+    const hasTrait = !!(m && (typeof m.traitDesc === 'string' && m.traitDesc.trim() || typeof m.moduleDesc === 'string' && m.moduleDesc.trim() || Object.keys(traitBb).length || Object.keys(traitBbStr).length || isPairGrid(m.rangeGrid)));
+    const traitOverride = hasTrait ? {
+      desc: typeof m.traitDesc === 'string' ? m.traitDesc : '',
+      // 原始富文本（`<@ba.kw>…</>` 这类标记）：官方记录里有，spec 里是可选的 `traitDescRaw`。
+      // 写了就用它（覆盖官方/以模板新建时不丢格式），没写就与纯文本一致。
+      descRaw: typeof m.traitDescRaw === 'string' && m.traitDescRaw ? m.traitDescRaw : (typeof m.traitDesc === 'string' ? m.traitDesc : ''),
+      bb: { ...traitBb }, bbStr: { ...traitBbStr },
+      rangeGrid: isPairGrid(m.rangeGrid) ? m.rangeGrid.map((p) => [...p]) : null,
+      // 官方只有**有话说**的模组才带这两个键（空串的模组不带），所以这里也只在非空时写
+      ...(typeof m.moduleDesc === 'string' && m.moduleDesc ? {
+        moduleDesc: m.moduleDesc,
+        moduleDescRaw: typeof m.moduleDescRaw === 'string' && m.moduleDescRaw ? m.moduleDescRaw : m.moduleDesc,
+      } : {}),
+    } : null;
+    const talentChanges = (m && Array.isArray(m.talentChanges) ? m.talentChanges : []).map((ch, ci) => ({
+      talentIndex: Number.isInteger(ch && ch.talentIndex) ? ch.talentIndex : -1,
+      name: ch && typeof ch.name === 'string' && ch.name ? ch.name : null,
+      desc: ch && typeof ch.desc === 'string' && ch.desc ? ch.desc : null,
+      descRaw: ch && typeof ch.descRaw === 'string' && ch.descRaw ? ch.descRaw : (ch && typeof ch.desc === 'string' && ch.desc ? ch.desc : null),
+      bb: ch && isPlainObj(ch.bb) ? { ...ch.bb } : {}, bbStr: {},
+      rangeGrid: ch && isPairGrid(ch.rangeGrid) ? ch.rangeGrid.map((p) => [...p]) : null,
+      tokenKey: ch && typeof ch.tokenKey === 'string' && ch.tokenKey ? ch.tokenKey : null,
+      hidden: ch ? ch.hidden !== false : true,
+      ...(Number.isInteger(ch && ch.skillIndex) ? { skillIndex: ch.skillIndex } : {}),
+      _ci: ci,
+    }));
+    for (const ch of talentChanges) delete ch._ci;
+    return {
+      uniEquipId: mid, name: m && typeof m.name === 'string' && m.name ? m.name : mid,
+      // `typeIcon` 在官方数据里**不是**总等于小写的 typeName（例：DEC-X 那组写的是 `dec-X`），
+      // 所以 spec 里可以显式给一个；没给才按 typeName 推。
+      typeName: typeNameRaw,
+      typeIcon: m && typeof m.typeIcon === 'string' && m.typeIcon ? m.typeIcon : typeNameRaw.toLowerCase(),
+      icon: mid,
+      isDefault: !!(m && m.isDefault === true),
+      level: isIntIn(m && m.level, 1, 3) ? m.level : 1,
+      attr, traitOverride, talentChanges,
+    };
+  });
+  // 默认模组：官方每个精锐恰好一个 `isDefault`。没有默认时精英就是「不带模组」的原样。
+  const defaultModule = modules.find((m) => m.isDefault) ?? null;
+  if (modules.length && !defaultModule) {
+    warnings.push('模组列表里没有 isDefault: true 的那一个：精锐记录会按「不带模组」生成，玩家在载入界面仍能选这些模组。');
+  }
+  const modulePointer = (golden) => ({
+    id: defaultModule ? defaultModule.uniEquipId : null,
+    name: defaultModule ? defaultModule.name : null,
+    type: defaultModule ? defaultModule.typeName : null,
+    // 官方形状：普通记录 level 0 / active false（没有模组时官方写的是 1），精锐记录是默认模组的 level（没有模组时 1）
+    level: defaultModule ? (golden ? defaultModule.level : 0) : 1,
+    active: golden && !!defaultModule,
+  });
+
   const commons = () => ({
     tier, isHidden: false, isDiy: false, visible: true, chessType: 'NORMAL',
     name: spec.name,
     appellation: typeof spec.appellation === 'string' && spec.appellation ? spec.appellation : spec.name,
-    charId: null, profession: prof, subProfessionId: sub, subProfessionName: sub,
+    charId: null, profession: prof, subProfessionId: sub,
+    // 分支的中文名：官方记录里是 `subProfessionName`（如 reaper → 收割者），界面与图鉴都显示它
+    subProfessionName: typeof spec.subProfessionName === 'string' && spec.subProfessionName ? spec.subProfessionName : (sub ?? null),
     position, nationId: null,
     bonds: Array.isArray(spec.bonds) ? [...spec.bonds] : [],
     garrisonIds: [], price: isFin(spec.price) ? spec.price : td.price, sellPrice: 1,
     immunities: { stun: false, silence: false, sleep: false, frozen: false, levitate: false },
     rangeId: null, rangeGrid, dmgType: cls.dmgType, attackKind: cls.attackKind, projectile: cls.projectile,
     canHitFly: cls.canHitFly, targetPriority: null,
-    trait: { desc: spec.traitDesc || '', descRaw: spec.traitDesc || '', bb: {}, bbStr: {}, rangeGrid: null },
-    tokens: [], module: null,
+    trait: { ...traitBaseObj },
+    tokens: [],
     assets: spine ? { avatar: spec.assetsAvatar || spine, portrait: spec.assetsAvatar || spine, spine, skillIcon: null, subProfIcon: null } : null,
     workshop: { schema: 1, id: ids.slug },
   });
+  // 精锐的数值/特性/天赋分两套：`*Base` 是**不带模组**的原样，`stats`/`trait`/`talents` 是**带默认模组**的样子。
+  // 官方数据就是这么生成的（tools/build-data.mjs 的 composeStats / composeTalents），玩家换成别的模组时
+  // 引擎从 `*Base` 重算 —— 少了这一半，选「不装备」会得到带模组的数值。
+  const goldenStatsBase = normStats(spec.stats.golden);
+  // 精锐（精英 2）的特性与普通不同时（官方 26 位干员如此，例：链术师 3 → 4 个跳跃目标），spec 里用
+  // `traitGolden` 单独给一份；没给就是与普通一份。少了它，模板出来的干员精锐特性会退回普通那一档。
+  const traitFrom = (o, fallback) => ({
+    desc: typeof o.desc === 'string' ? o.desc : (fallback.desc || ''),
+    descRaw: typeof o.descRaw === 'string' && o.descRaw ? o.descRaw : (typeof o.desc === 'string' ? o.desc : (fallback.descRaw || '')),
+    bb: isPlainObj(o.bb) ? { ...o.bb } : { ...fallback.bb },
+    bbStr: isPlainObj(o.bbStr) ? { ...o.bbStr } : { ...fallback.bbStr },
+    rangeGrid: isPairGrid(o.rangeGrid) ? o.rangeGrid.map((p) => [...p]) : (fallback.rangeGrid ?? null),
+  });
+  const traitBaseObj = {
+    desc: spec.traitDesc || '',
+    descRaw: typeof spec.traitDescRaw === 'string' && spec.traitDescRaw ? spec.traitDescRaw : (spec.traitDesc || ''),
+    bb: isPlainObj(spec.traitBb) ? { ...spec.traitBb } : {},
+    bbStr: isPlainObj(spec.traitBbStr) ? { ...spec.traitBbStr } : {},
+    rangeGrid: isPairGrid(spec.traitRangeGrid) ? spec.traitRangeGrid.map((p) => [...p]) : null,
+  };
+  const goldenTraitBase = isPlainObj(spec.traitGolden) ? traitFrom(spec.traitGolden, traitBaseObj) : { ...traitBaseObj };
+  const goldenTalentsBase = talentsOf(true);
+  if (Array.isArray(spec.talentsGolden) && JSON.stringify(spec.talentsGolden) !== JSON.stringify(spec.talents ?? [])) {
+    warnings.push('spec.talentsGolden 与 spec.talents 不同：精锐记录用的是精锐那一份（官方有 38 位干员两态天赋数值不同）');
+  }
   const base = {
     ...commons(),
     chessId: ids.base, baseId: ids.base, goldenId: ids.golden, isGolden: false,
@@ -288,16 +462,25 @@ export function deriveChessRecord(spec) {
     status: statusOf(false), stats: normStats(spec.stats.normal),
     skill: skillRecord(false), skills: sk ? [skillRecord(false)] : [],
     talents: talentsOf(false),
+    module: modulePointer(false),
   };
   const golden = {
     ...commons(),
     chessId: ids.golden, baseId: ids.base, goldenId: ids.golden, isGolden: true,
     rarity: isFin(spec.rarity) ? spec.rarity : td.rarity,
     upgradeNum: 0, upgradeChessId: null,
-    status: statusOf(true), stats: normStats(spec.stats.golden),
+    status: statusOf(true),
+    // 精锐自己的范围（官方少数干员精英扩范围）：没写就与普通一份
+    ...(isPairGrid(spec.rangeGridGolden) ? { rangeGrid: spec.rangeGridGolden.map((p) => [...p]) } : {}),
+    statsBase: goldenStatsBase, traitBase: goldenTraitBase, talentsBase: goldenTalentsBase,
+    stats: defaultModule ? composeStats(goldenStatsBase, defaultModule.attr) : goldenStatsBase,
+    trait: defaultModule && defaultModule.traitOverride ? { ...defaultModule.traitOverride } : goldenTraitBase,
+    talents: defaultModule ? composeTalents(goldenTalentsBase, defaultModule.talentChanges) : goldenTalentsBase,
+    modules: Array.isArray(spec.modules) ? modules.map((m) => ({ ...m })) : undefined,
+    module: modulePointer(true),
     skill: skillRecord(true), skills: sk ? [skillRecord(true)] : [],
-    talents: talentsOf(true),
   };
+  if (!Array.isArray(spec.modules)) delete golden.modules;
   return { ok: true, base, golden, warnings };
 }
 
@@ -326,7 +509,7 @@ export function specFromChessRecord(base, golden) {
       res: num(st.res, 0), cost: num(st.cost, 18), blockCnt: num(st.blockCnt, 1), bat: num(st.bat, 1.2),
     };
     // 这几个不是必填，但作者通常调过：原样带上，省得模板与原件在再部署/攻速上悄悄不一致
-    for (const k of ['aspd', 'respawnTime', 'spRecovery', 'hpRecoveryPerSec', 'moveSpeed']) {
+    for (const k of ['aspd', 'respawnTime', 'spRecovery', 'hpRecoveryPerSec', 'moveSpeed', 'tauntLevel', 'massLevel']) {
       if (isFin(st[k])) out[k] = st[k];
     }
     return out;
@@ -349,26 +532,123 @@ export function specFromChessRecord(base, golden) {
     if (rg) out.rangeGrid = rg;
     return out;
   };
+  /** 天赋的紧凑 spec 形状（可选字段只在「与默认不同」时才写，免得每个模板都带一大堆 null）。 */
+  const slimTalents = (list) => (Array.isArray(list) ? list : []).map((t, i) => {
+    const out = { name: (t && t.name) || '', desc: (t && t.desc) || '', bb: (t && isPlainObj(t.bb)) ? { ...t.bb } : {} };
+    if (t && Number.isInteger(t.index) && t.index !== i) out.index = t.index;
+    if (t && typeof t.descRaw === 'string' && t.descRaw && t.descRaw !== t.desc) out.descRaw = t.descRaw;
+    if (t && isPlainObj(t.bbStr) && Object.keys(t.bbStr).length) out.bbStr = { ...t.bbStr };
+    if (t && isPairGrid(t.rangeGrid)) out.rangeGrid = t.rangeGrid.map((p) => [...p]);
+    if (t && typeof t.tokenKey === 'string' && t.tokenKey) out.tokenKey = t.tokenKey;
+    if (t && typeof t.hidden === 'boolean') out.hidden = t.hidden;
+    return out;
+  });
   const spec = {
     id: '', name: typeof base.name === 'string' ? base.name : '',
     appellation: typeof base.appellation === 'string' ? base.appellation : '',
     tier: base.tier, profession: base.profession,
     subProfessionId: typeof base.subProfessionId === 'string' ? base.subProfessionId : '',
+    subProfessionName: typeof base.subProfessionName === 'string' ? base.subProfessionName : '',
     position: base.position,
     traitDesc: (isPlainObj(base.trait) && typeof base.trait.desc === 'string') ? base.trait.desc : '',
+    ...(isPlainObj(base.trait) && typeof base.trait.descRaw === 'string' && base.trait.descRaw && base.trait.descRaw !== base.trait.desc
+      ? { traitDescRaw: base.trait.descRaw } : {}),
+    ...(isPlainObj(base.trait) && isPlainObj(base.trait.bb) && Object.keys(base.trait.bb).length ? { traitBb: { ...base.trait.bb } } : {}),
+    ...(isPlainObj(base.trait) && isPlainObj(base.trait.bbStr) && Object.keys(base.trait.bbStr).length ? { traitBbStr: { ...base.trait.bbStr } } : {}),
+    ...(isPlainObj(base.trait) && isPairGrid(base.trait.rangeGrid) ? { traitRangeGrid: base.trait.rangeGrid.map((p) => [...p]) } : {}),
     assetsSpine: (isPlainObj(base.assets) && typeof base.assets.spine === 'string') ? base.assets.spine : '',
-    stats: { normal: statsOf(base), golden: statsOf(g) },
-    talents: Array.isArray(base.talents)
-      ? base.talents.map((t) => ({ name: (t && t.name) || '', desc: (t && t.desc) || '', bb: (t && isPlainObj(t.bb)) ? { ...t.bb } : {} }))
-      : [],
+    stats: {
+      normal: statsOf(base),
+      // **必须读 `statsBase`**：精锐记录的 `stats` 已经把默认模组的 attr 烘进去了，直接用它会和 spec.modules
+      // 里的 attr 叠加两次（一次是搬过来的数值、一次是派生的默认模组）。官方记录两个字段都在，工坊记录也可能只有 stats。
+      golden: statsOf(isPlainObj(g.statsBase) ? { ...g, stats: g.statsBase } : g),
+    },
+    talents: slimTalents(base.talents),
   };
+  // 精锐（Lv7）的天赋与普通（Lv4）不同时（官方 38 位干员如此，例如弹药上限 +2 → +3），把精锐那一份单独带进 spec：
+  // 少了它，「以模板新建」出来的干员精锐态会退回普通态的数值 —— 而模组的 talentChanges 正是改在精锐那一份上。
+  const talentsBaseOf = Array.isArray(g.talentsBase) ? g.talentsBase : null;
+  // 精锐特性与普通特性不同（精英 2 那一档）时带上精锐那一份
+  if (isPlainObj(g.traitBase) && JSON.stringify(g.traitBase) !== JSON.stringify(isPlainObj(base.trait) ? base.trait : null)) {
+    spec.traitGolden = {
+      desc: typeof g.traitBase.desc === 'string' ? g.traitBase.desc : '',
+      ...(typeof g.traitBase.descRaw === 'string' && g.traitBase.descRaw && g.traitBase.descRaw !== g.traitBase.desc ? { descRaw: g.traitBase.descRaw } : {}),
+      ...(isPlainObj(g.traitBase.bb) && Object.keys(g.traitBase.bb).length ? { bb: { ...g.traitBase.bb } } : {}),
+      ...(isPlainObj(g.traitBase.bbStr) && Object.keys(g.traitBase.bbStr).length ? { bbStr: { ...g.traitBase.bbStr } } : {}),
+      ...(isPairGrid(g.traitBase.rangeGrid) ? { rangeGrid: g.traitBase.rangeGrid.map((p) => [...p]) } : {}),
+    };
+  }
+  if (talentsBaseOf) {
+    const slim = slimTalents(talentsBaseOf);
+    if (JSON.stringify(slim) !== JSON.stringify(spec.talents)) spec.talentsGolden = slim;
+  }
   const rg = grid(base.rangeGrid);
   if (rg) spec.rangeGrid = rg;
+  // 精锐自己的攻击范围可能与普通不同（官方有少数干员精英扩范围），所以单独留一个可选字段
+  if (isPairGrid(g.rangeGrid) && JSON.stringify(g.rangeGrid) !== JSON.stringify(base.rangeGrid)) spec.rangeGridGolden = g.rangeGrid.map((p) => [...p]);
   const sk = skillOf(base.skill);
   if (sk) spec.skill = sk;
   if (Array.isArray(base.bonds) && base.bonds.length) spec.bonds = [...base.bonds];
   if (isFin(base.price)) spec.price = base.price;
   if (isFin(base.rarity)) spec.rarity = base.rarity;
+  // 分类的显式覆盖：只有与原记录**推导值不同**时才写进 spec，否则每个模板都会带上一份冗余的覆盖，
+  // 作者照着改一个职业之后发现分类还钉在旧值上（这正是「留出接口」最容易被误用的地方）。
+  const derived = classify({
+    profession: base.profession, subProfessionId: base.subProfessionId, position: base.position,
+    traitDesc: (isPlainObj(base.trait) && typeof base.trait.desc === 'string') ? base.trait.desc : '',
+  });
+  for (const k of ['dmgType', 'attackKind', 'projectile']) {
+    if (typeof base[k] === 'string' && base[k] && base[k] !== derived[k]) spec[k] = base[k];
+  }
+  if (typeof base.canHitFly === 'boolean' && base.canHitFly !== derived.canHitFly) spec.canHitFly = base.canHitFly;
+  // 模组：整套搬过来（精锐记录的 modules[]；普通记录没有）。以模板新建时模组是可继续编辑的底子，
+  // 不是「原件专属」—— 这正是作者最想要的部分。
+  const mods = Array.isArray(g.modules) ? g.modules : (Array.isArray(base.modules) ? base.modules : null);
+  // 官方对「有模组概念但一个都没配」的干员写的是 `modules: []`（而不是缺字段），所以模板也照抄这个空数组
+  if (mods && !mods.length) spec.modules = [];
+  if (mods && mods.length) {
+    spec.modules = mods.filter(isPlainObj).map((m) => {
+      const out = {
+        id: typeof m.uniEquipId === 'string' ? m.uniEquipId : '',
+        name: typeof m.name === 'string' ? m.name : '',
+        type: typeof m.typeName === 'string' ? m.typeName : '',
+        // 只在 typeIcon 与「typeName 的小写」不一致时才写进 spec（官方有这种例外；一致时写了只是噪音）
+        ...(typeof m.typeIcon === 'string' && m.typeIcon && m.typeIcon !== String(m.typeName || '').toLowerCase() ? { typeIcon: m.typeIcon } : {}),
+        isDefault: m.isDefault === true,
+        level: isIntIn(m.level, 1, 3) ? m.level : 1,
+        attr: isPlainObj(m.attr) ? { ...m.attr } : {},
+      };
+      const to = isPlainObj(m.traitOverride) ? m.traitOverride : null;
+      if (to) {
+        if (typeof to.desc === 'string') out.traitDesc = to.desc;
+        if (typeof to.descRaw === 'string' && to.descRaw && to.descRaw !== to.desc) out.traitDescRaw = to.descRaw;
+        if (isPlainObj(to.bb)) out.traitBb = { ...to.bb };
+        if (typeof to.moduleDesc === 'string' && to.moduleDesc) out.moduleDesc = to.moduleDesc;
+        if (typeof to.moduleDescRaw === 'string' && to.moduleDescRaw && to.moduleDescRaw !== to.moduleDesc) out.moduleDescRaw = to.moduleDescRaw;
+        if (isPlainObj(to.bbStr) && Object.keys(to.bbStr).length) out.traitBbStr = { ...to.bbStr };
+        const mg = grid(to.rangeGrid);
+        if (mg) out.rangeGrid = mg;
+      }
+      if (Array.isArray(m.talentChanges) && m.talentChanges.length) {
+        out.talentChanges = m.talentChanges.filter(isPlainObj).map((ch) => {
+          const c = {
+            talentIndex: Number.isInteger(ch.talentIndex) ? ch.talentIndex : -1,
+            name: typeof ch.name === 'string' ? ch.name : null,
+            desc: typeof ch.desc === 'string' ? ch.desc : null,
+            bb: isPlainObj(ch.bb) ? { ...ch.bb } : {},
+          };
+          if (typeof ch.descRaw === 'string' && ch.descRaw && ch.descRaw !== ch.desc) c.descRaw = ch.descRaw;
+          if (isPlainObj(ch.bbStr) && Object.keys(ch.bbStr).length) c.bbStr = { ...ch.bbStr };
+          if (typeof ch.tokenKey === 'string' && ch.tokenKey) c.tokenKey = ch.tokenKey;
+          if (ch.hidden === false) c.hidden = false;
+          const cg = grid(ch.rangeGrid);
+          if (cg) c.rangeGrid = cg;
+          return c;
+        });
+      }
+      return out;
+    });
+  }
   return spec;
 }
 
@@ -403,6 +683,59 @@ export function validateChessRecord(rec, opts = {}) {
   if (!['MELEE', 'RANGED'].includes(String(rec.position || '').toUpperCase())) err('position', 'BAD_POSITION', 'position must be MELEE or RANGED');
   if (!isPairGrid(rec.rangeGrid)) err('rangeGrid', 'BAD_RANGE', 'rangeGrid must be a non-empty array of [dRow, dCol] integer pairs');
   if (rec.visible === false) warn('visible', 'NOT_VISIBLE', 'visible is false: the operator never enters the shop pool');
+  // 攻击分类（引擎直接读这三个字段 + canHitFly）：值必须在枚举里，否则引擎会拿它去比对却永远不相等
+  if (!DMG_TYPES.includes(String(rec.dmgType))) err('dmgType', 'BAD_ENUM', `dmgType must be one of ${DMG_TYPES.join(', ')}`);
+  if (!ATTACK_KINDS.includes(String(rec.attackKind))) err('attackKind', 'BAD_ENUM', `attackKind must be one of ${ATTACK_KINDS.join(', ')}`);
+  if (rec.projectile !== undefined && rec.projectile !== null && !PROJECTILES.includes(String(rec.projectile))) {
+    err('projectile', 'BAD_ENUM', `projectile must be one of ${PROJECTILES.join(', ')}`);
+  }
+  if (typeof rec.canHitFly !== 'boolean') warn('canHitFly', 'MISSING', 'canHitFly is not a boolean: the engine treats it as falsy');
+  // 分类是不是「推导值」：不是的话说明作者显式覆盖了它 —— 这不是错，但要在界面上说得出来
+  const clsDerived = classify({ profession: rec.profession, subProfessionId: rec.subProfessionId, position: rec.position, traitDesc: isPlainObj(rec.trait) ? rec.trait.desc : '' });
+  const overridden = ['dmgType', 'attackKind', 'projectile'].filter((k) => typeof rec[k] === 'string' && rec[k] !== clsDerived[k]);
+  if (typeof rec.canHitFly === 'boolean' && rec.canHitFly !== clsDerived.canHitFly) overridden.push('canHitFly');
+  if (overridden.length) {
+    warn('dmgType', 'CLASS_OVERRIDE', `this operator overrides the derived attack class (${overridden.join(', ')}): 职业与分支推导的是 ${clsDerived.dmgType}/${clsDerived.attackKind}，记录里写的是 ${rec.dmgType}/${rec.attackKind}`);
+  }
+  // 模组：只有精锐能带；每个模组必须有 id / 唯一、一个默认、attr 是数字、traitOverride.bb 的键通用 kit 认识
+  if (rec.modules !== undefined) {
+    const mods = rec.modules;
+    if (!Array.isArray(mods)) err('modules', 'BAD_MODULES', 'modules must be an array of module records');
+    else if (!rec.isGolden && mods.length) warn('modules', 'MODULES_ON_NORMAL', 'modules are only read on the elite (_b) record: the normal record\'s modules are ignored');
+    else {
+      const seen = new Set();
+      let defaults = 0;
+      mods.forEach((m, i) => {
+        const at = `modules[${i}]`;
+        if (!isPlainObj(m)) { err(at, 'BAD_MODULE', 'a module must be an object'); return; }
+        if (typeof m.uniEquipId !== 'string' || !/^[A-Za-z0-9_\-.:]{1,64}$/.test(m.uniEquipId)) err(`${at}.uniEquipId`, 'BAD_ID', 'uniEquipId must be a usable id');
+        else if (seen.has(m.uniEquipId)) err(`${at}.uniEquipId`, 'DUPLICATE', `"${m.uniEquipId}" is listed twice`);
+        else seen.add(m.uniEquipId);
+        if (typeof m.name !== 'string' || !m.name) warn(`${at}.name`, 'MISSING', 'a module without a name shows its id in the loadout screen');
+        if (m.isDefault === true) defaults++;
+        if (m.level !== undefined && !isIntIn(m.level, 1, 3)) warn(`${at}.level`, 'BAD_LEVEL', 'module level should be 1..3 (officially 1 or 3)');
+        if (m.attr !== undefined) {
+          if (!isPlainObj(m.attr)) err(`${at}.attr`, 'BAD_ATTR', 'attr must be an object of flat stat bonuses');
+          else for (const [k, v] of Object.entries(m.attr)) if (!isFin(v)) err(`${at}.attr.${k}`, 'BAD_NUMBER', `attr["${k}"] must be a number`);
+        }
+        const to = m.traitOverride;
+        if (to !== undefined && to !== null) {
+          if (!isPlainObj(to)) err(`${at}.traitOverride`, 'BAD_OVERRIDE', 'traitOverride must be an object');
+          else if (isPlainObj(to.bb)) {
+            for (const key of Object.keys(to.bb)) {
+              if (bbKeyProblem(key) === 'unknown') warn(`${at}.traitOverride.bb["${key}"]`, 'BB_UNKNOWN_KEY', `"${key}" is not read by the generic kit`);
+            }
+          }
+        }
+        for (const [ci, ch] of (Array.isArray(m.talentChanges) ? m.talentChanges : []).entries()) {
+          if (!isPlainObj(ch)) { err(`${at}.talentChanges[${ci}]`, 'BAD_TALENT_CHANGE', 'a talent change must be an object'); continue; }
+          if (!Number.isInteger(ch.talentIndex)) err(`${at}.talentChanges[${ci}].talentIndex`, 'BAD_INDEX', 'talentIndex must be an integer (-1 = a hidden module talent)');
+        }
+      });
+      if (defaults > 1) err('modules', 'MULTIPLE_DEFAULTS', `${defaults} modules are marked isDefault: the loadout screen has exactly one default`);
+      if (mods.length && !defaults) warn('modules', 'NO_DEFAULT', 'no module is marked isDefault: the elite record is generated without a module (players can still pick one)');
+    }
+  }
   const st = rec.stats;
   if (!isPlainObj(st)) err('stats', 'MISSING', 'stats is required');
   else {
@@ -417,6 +750,11 @@ export function validateChessRecord(rec, opts = {}) {
     if (!isPlainObj(sk)) err('skill', 'BAD_SKILL', 'skill must be an object or null');
     else {
       if (!SKILL_TYPES.includes(String(sk.skillType || '').toUpperCase())) err('skill.skillType', 'BAD_ENUM', `skillType must be one of ${SKILL_TYPES.join(', ')}`);
+      // 记录里的字段是 `skill.trigger.rule`，spec 里叫 `triggerRule` —— 两处都要看，否则这条提醒对派生记录永不触发
+      const triggerRule = isPlainObj(sk.trigger) && typeof sk.trigger.rule === 'string' ? sk.trigger.rule : sk.triggerRule;
+      if (triggerRule !== undefined && !TRIGGER_RULES.includes(String(triggerRule).toUpperCase()) && !KNOWN_CUSTOM_TRIGGER_RULES.includes(String(triggerRule).toUpperCase())) {
+        warn('skill.triggerRule', 'TRIGGER_CUSTOM', `"${triggerRule}" is not one of the engine's trigger rules (${TRIGGER_RULES.join(', ')}): 它不会自动释放，除非有手写 kit 自己 activate`);
+      }
       if (sk.durationType !== undefined && !DURATION_TYPES.includes(String(sk.durationType).toUpperCase())) err('skill.durationType', 'BAD_ENUM', `durationType must be one of ${DURATION_TYPES.join(', ')}`);
       if (!SP_TYPES.includes(String(sk.spType || '').toUpperCase())) err('skill.spType', 'BAD_ENUM', `spType must be one of ${SP_TYPES.join(', ')}`);
       if (!(isFin(sk.spCost) && sk.spCost >= 0)) err('skill.spCost', 'BAD_NUMBER', 'spCost must be a number >= 0');
