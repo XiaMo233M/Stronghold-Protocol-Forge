@@ -39,7 +39,7 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
 
 ## 界面
 
-编辑器共四个页面，右上角可互相跳转：
+编辑器共五个页面，右上角可互相跳转：
 
 | 页面 | 用途 |
 |---|---|
@@ -47,6 +47,7 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
 | `/stage.html` | **地图**设计器（2D 摆放器 + 路线） |
 | `/enemy.html` | **怪物**编辑器（数值 + 特殊机制） |
 | `/wave.html` | **出怪**设计器（时间轴 + 明细表） |
+| `/item.html` | **装备**编辑器（一件装备 = 一个 spec = 两条记录） |
 
 ### 干员编辑器（首页）
 
@@ -114,6 +115,39 @@ node tools/workshop-validate.mjs workshop                                       
 node tools/workshop-validate.mjs workshop     # enemies 层：重算 be/attrPower 并比对
 ```
 
+## 装备编辑器
+
+第五个页面：**`/item.html`**（`shared/itemAuthoring.js`）。规则和前四个页面一样：人填人能填的，机器字段一律推导。
+
+**一件装备 = 一个 spec = 两条记录**（`chess_item_ws_<id>_a` 普通 + `_b` 精英）。这不是冗余：`mergeable` 本来就是
+「不是精英、`upgradeNum` 在 0 和 100 之间、**并且有一个能合进去的对象**」，所以只写一条记录的可合成装备是点不动的。
+编辑器始终显示它将写出的**两个 id**，删除时也**整对删除**（留下 `_b` 会得到一个指向幽灵的合成目标）。
+
+- **身份**：id（生成 `_a`/`_b` 两个 id）、名称、`itemType`、`category`、`tier`(1-6)、`price`、
+  `duration`（-1 整场 / 0 立即）、`upgradeNum`（0 独立 / 2 可合成 / 100 特殊）
+- **buffs**：每个 buff 有 `key`、`countType`，以及两块黑板 —— `bb`（数值）与 `bbStr`（字符串）
+- **图标 `trapId`**：工坊包不含素材，所以**复用现有装备图标**是唯一能拿到真图的办法（和怪物的 `spine` 同理）。
+  表单用 `datalist` 列出官方全部 trap id 及其来源装备；留空则用兜底图并给警告
+- **派生量只读显示**：`params`、`mergeable`、`shopExcluded`、`upgradeChessId`
+
+三条推导不是猜的，每一条都**精确复现全部 115 条官方装备**（`test/itemAuthoring.test.js`）：
+
+| 派生字段 | 规则 | 出处 |
+|---|---|---|
+| `params` | 各 buff 的黑板 `{ ...bb, ...bbStr }` 依次摊平，**先出现的键先赢** | `tools/build-data.mjs` `effectParams` |
+| `mergeable` | `!isGolden && 0 < upgradeNum < 100`（且必须存在 `goldenId`） | `tools/build-data.mjs:1465` |
+| `shopExcluded` | 就是 `shopExcludedBy != null` | `tools/build-data.mjs:1464` |
+
+**`params` 是最凶的一个**：引擎读的是 `params`，**不是 buffs**。所以手写 `params`（或改了 buffs 忘了重推）会做出
+一件「卡面写得很好、进了游戏什么都不干」的装备，而且游戏里不会报任何错。校验器会重算并比对，给出 `STALE_DERIVED`。
+
+命令行等价路径：
+
+```powershell
+node tools/workshop-validate.mjs workshop     # items 层：重算 params/mergeable/shopExcluded 并比对，
+                                              # 并检查合成目标是否存在、商店抽得到抽不到
+```
+
 ## 助战（客户端）
 
 助战的选择由**服务端**声明并强制：卡池之外的干员是**禁用**的，请求会被整条拒绝，**没有回退**（回退会让一个被禁用的干员变成已发放）。
@@ -174,11 +208,15 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 | POST | `/api/waves/preview` | `{ spec }` → 推导 `totalCount`/`slotCounts` 并校验，**不写盘** |
 | POST | `/api/packs/:pack/waves` | `{ spec }` → 写 `wave-specs/` 并重新生成 `waves.json` |
 | DELETE | `/api/packs/:pack/waves/:id` | 删除该出怪表的 spec 及它拥有的记录 |
+| GET | `/api/items` | 工坊装备列表 + 词表 + 官方 id + **可复用的图标 trap id** |
+| GET | `/api/items/:pack/:id` | 该装备的**可编辑 spec**（源）与生成的两条记录 |
+| POST | `/api/items/preview` | `{ spec }` → 推导 `params`/`mergeable`/`shopExcluded` 并校验，**不写盘** |
+| POST | `/api/packs/:pack/items` | `{ spec }` → 写 `item-specs/` 并重新生成 `items.json`（一对记录） |
+| DELETE | `/api/packs/:pack/items/:id` | 删除该装备的 spec **及它的一对记录** |
 
 ## 当前不包含
 
 - **行为层脚本**（`kits/<chessId>.js`）的编辑——kit 目前手写文件
-- **装备（items）**的编辑页签（数据层叠加已就绪；作者层与界面待做）
 - 助战**名额**（`slots`）的编辑——改 `data/support.json` 的 `slots` 字段或编辑器里的「是否助战」开关
 - 任何鉴权
 
@@ -188,7 +226,7 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 |---|---|---|
 | `editor/`（本文件） | 人，图形界面 | 写 spec，生成记录 |
 | `tools/workshop-scaffold.mjs` | 人 / 脚本 / AI | 同样的 spec → 同样的记录（无界面） |
-| `tools/workshop-validate.mjs` | 人 / CI / AI | 三层校验（格式 → 语义 → 真实引擎） |
+| `tools/workshop-validate.mjs` | 人 / CI / AI | 分层校验：格式 → 语义 → 真实引擎 → 每种内容一层（kits / 地图 / 怪物 / 出怪 / 装备） |
 | `docs/prompts/operator-pack.md` | 任意 AI | 模板 prompt，让 AI 产出 spec |
 
 四者共用 `shared/chessAuthoring.js`，所以**规则不会漂移**。

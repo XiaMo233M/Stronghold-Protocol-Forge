@@ -37,7 +37,7 @@ function blankSpec() {
 }
 
 /** The spec sent to the server, built from the spec object (numeric fields already numbers). */
-const currentSpec = () => state.spec;
+const currentSpec = () => Object.fromEntries(Object.entries(state.spec || {}).filter(([k]) => !k.startsWith('_')));
 
 // ---- form -------------------------------------------------------------------------------------------------------
 

@@ -8,12 +8,9 @@
 //   node tools/workshop-validate.mjs --workshop <root>    # explicit pack root
 //   node tools/workshop-validate.mjs --json               # machine-readable report
 //
-// It checks three layers, cheapest first:
-//   1. the pack format       — pack.json, content file shapes, per-record schema (shared/chessAuthoring.js)
-//   2. the record semantics  — validateChessRecord: stats, ranges, skill enums, generic-kit blackboard keys
-//   3. the ENGINE            — load the merged data and ask it: is the operator shop-eligible, does the sim build a
-//                              def for it, does its elite resolve? Layer 3 is what catches a record that is
-//                              syntactically valid but silently unplayable.
+// It checks the layers cheapest-first: pack format → record semantics → the real engine → then one layer per content
+// kind (kits, stages/maps, enemies/monsters, waves, items/equipment), each re-deriving what the engine derives.
+// Layer 3 is what catches a record that is syntactically valid but silently unplayable.
 //
 // Exit codes: 0 = no errors (warnings allowed), 1 = errors found, 2 = bad usage.
 
@@ -25,9 +22,10 @@ import { loadWorkshop, loadWorkshopKits, WORKSHOP_DIR } from '../server/workshop
 import { validateStageRecord } from '../server/stageAuthoring.js';
 import { validateEnemy } from '../shared/enemyAuthoring.js';
 import { validateWave } from '../shared/waveAuthoring.js';
+import { validateItem } from '../shared/itemAuthoring.js';
 import { loadData } from '../server/data.js';
 import { GameData } from '../server/match/gamedata.js';
-import { toDataSource } from '../server/sim/simdata.js';
+import { toDataSource, isShopItem } from '../server/sim/simdata.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATA_DIR = path.join(ROOT, 'data');
@@ -209,6 +207,43 @@ async function main() {
     for (const i of waveIssues) (i.severity === 'error' ? report.errors++ : report.warnings++);
   }
 
+  // ---- layer 8: items (装备). `params` is DERIVED from the buffs' blackboards, and `mergeable` / `shopExcluded` from the
+  // merge pair and the exclusion field. The engine reads `params`, NOT the buffs — so a hand-typed params block leaves an
+  // item that looks right on its card and does nothing in play. All three are re-derived and compared. The cross-record
+  // checks are the other silent ones: a merge target nothing defines (the merge goes nowhere) and an item no shop slot
+  // can ever offer.
+  if (loaded.packs.length && packs.some((p) => Object.keys(p.files.items || {}).length)) {
+    const officialItems = new Set(Object.keys(JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'items.json'), 'utf8'))));
+    const merged = loadData(DATA_DIR, { log: quiet, workshopDir: root });
+    const itemIssues = [];
+    for (const pack of packs) {
+      for (const [id, rec] of Object.entries(pack.files.items || {})) {
+        itemIssues.push(...validateItem(rec, { id, officialIds: officialItems }));
+        const m = (merged.items || {})[id];
+        if (!m) {
+          itemIssues.push({ field: id, code: 'NOT_MERGED', severity: 'error', message: 'the record did not reach the merged data' });
+          continue;
+        }
+        if (!m.isGolden && m.goldenId && !(merged.items || {})[m.goldenId]) {
+          itemIssues.push({
+            field: `${id}.goldenId`, code: 'GOLDEN_MISSING', severity: 'error',
+            message: `the merge target "${m.goldenId}" is neither in this pack nor in the official data`,
+            hint: 'emit the elite record too, or set upgradeNum 0 for a standalone item',
+          });
+        }
+        if (!m.isGolden && !isShopItem(m)) {
+          itemIssues.push({
+            field: id, code: 'NOT_SHOP_ELIGIBLE', severity: 'warning',
+            message: 'not shop-eligible: no shop slot and no item card can ever offer it',
+            hint: 'keep itemType EQUIP, hideInShop false, shopExcludedBy null and an integer tier — or accept it as effect-only',
+          });
+        }
+      }
+    }
+    report.items = itemIssues;
+    for (const i of itemIssues) (i.severity === 'error' ? report.errors++ : report.warnings++);
+  }
+
   if (args.json) {
     console.log(JSON.stringify(report, null, 2));
   } else {
@@ -240,6 +275,10 @@ async function main() {
     if (report.waves) {
       console.log('\nwaves (每关出怪):');
       console.log(report.waves.length ? formatIssues(report.waves).split('\n').map((l) => `  ${l}`).join('\n') : '  OK');
+    }
+    if (report.items) {
+      console.log('\nitems (装备):');
+      console.log(report.items.length ? formatIssues(report.items).split('\n').map((l) => `  ${l}`).join('\n') : '  OK');
     }
     console.log(`\n${report.errors} error(s), ${report.warnings} warning(s)`);
     if (report.errors === 0) console.log('VALID: the engine accepts this content.');

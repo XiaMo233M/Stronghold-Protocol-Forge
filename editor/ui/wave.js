@@ -34,7 +34,8 @@ function blankSpec() {
     spawns: [], usedBy: [], branches: {}, overrides: {}, devices: [],
   };
 }
-const currentSpec = () => state.spec;
+// the form's own scratch flags (a `_`-prefixed key) must never reach the stored spec file
+const currentSpec = () => Object.fromEntries(Object.entries(state.spec || {}).filter(([k]) => !k.startsWith('_')));
 
 // ---- map panel --------------------------------------------------------------------------------------------------
 

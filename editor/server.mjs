@@ -33,6 +33,10 @@ import {
   WAVE_KINDS, SPAWN_SLOTS, SPAWN_FIELDS, ROUNDS_PER_MODE,
 } from '../shared/waveAuthoring.js';
 import { normalizeSupportConfig } from '../shared/support.js';
+import {
+  deriveItem, validateItem, itemErrors, itemIds as itemIdsOf, itemSummaryLine,
+  ITEM_TYPES, ITEM_CATEGORIES, COUNT_TYPES, ITEM_DURATIONS, UPGRADE_NUMS,
+} from '../shared/itemAuthoring.js';
 import { loadWorkshop, WORKSHOP_DIR } from '../server/workshop.js';
 
 export const EDITOR_ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -246,6 +250,68 @@ function regenerateWaves(packDir, officialWaves, knownEnemyKeys, dropIds = []) {
   return { records, generated: Object.keys(fresh), errors };
 }
 
+// ---- 装备 (items) ----------------------------------------------------------------------------------
+//
+// The same file model a fourth time: `<pack>/item-specs/<slug>.json` is the editable SOURCE (what the form writes) and
+// `<pack>/items.json` is the GENERATED artifact. An item is AUTHORED AS A PAIR: one spec derives the normal record and
+// its golden twin, because `mergeable` is meaningless without a twin to merge into. `params` is re-derived from the
+// buffs on every save — the engine reads `params`, so a stale one is an item whose card lies about what it does.
+
+const ITEM_SPEC_DIR = 'item-specs';
+
+/** A pack's item specs, in a stable order. */
+function packItemSpecs(packDir) {
+  const out = [];
+  const dir = path.join(packDir, ITEM_SPEC_DIR);
+  if (!fs.existsSync(dir)) return out;
+  for (const name of fs.readdirSync(dir).sort()) {
+    if (!name.endsWith('.json')) continue;
+    const spec = readJson(path.join(dir, name), null);
+    if (spec) out.push(spec);
+  }
+  return out;
+}
+
+/** Write a pack's `items.json` from its item specs, preserving every record no spec owns. */
+function regenerateItems(packDir, officialItems, dropIds = []) {
+  const existing = readJson(path.join(packDir, 'items.json'), {}) || {};
+  const owned = new Set(Array.isArray(dropIds) ? dropIds : []);
+  const fresh = {};
+  const errors = [];
+  for (const spec of packItemSpecs(packDir)) {
+    const derived = deriveItem(spec);
+    if (!derived.ok) {
+      // a spec that cannot derive owns nothing: claiming its ids would delete the previous records on an unrelated save
+      errors.push({ id: spec && spec.id, issues: derived.errors.map((e) => ({ ...e, severity: 'error' })) });
+      continue;
+    }
+    for (const rec of [derived.base, derived.golden].filter(Boolean)) {
+      owned.add(rec.id);
+      const issues = itemErrors(validateItem(rec, { id: rec.id, officialIds: officialItems }));
+      if (issues.length) errors.push({ id: rec.id, issues });
+      fresh[rec.id] = rec;
+    }
+  }
+  const records = {};
+  for (const [id, rec] of Object.entries(existing)) if (!owned.has(id)) records[id] = rec;
+  Object.assign(records, fresh);
+  return { records, generated: Object.keys(fresh), errors };
+}
+
+/**
+ * The `trapId` values an item may reuse. A workshop pack ships no art, so borrowing an existing equip icon is the only
+ * way an item gets a real picture — exactly like an enemy borrowing a `spine`. Deduplicated, because many items share
+ * one trap id, and labelled with the item it came from so the picker reads as names rather than keys.
+ */
+function itemIconChoices(dataDir) {
+  const byTrap = new Map();
+  for (const [id, rec] of Object.entries(readJson(path.join(dataDir, 'items.json'), {}) || {})) {
+    if (!rec || rec.isGolden || !rec.trapId || byTrap.has(rec.trapId)) continue;
+    byTrap.set(rec.trapId, { trapId: rec.trapId, from: id, name: rec.name ?? id });
+  }
+  return [...byTrap.values()].sort((a, b) => a.trapId.localeCompare(b.trapId));
+}
+
 /** The enemy keys a wave may spawn: the merged official set plus every pack's own monsters. */
 function knownEnemyKeysFor(root, dataDir) {
   const keys = new Set(Object.keys(readJson(path.join(dataDir, 'enemies.json'), {}) || {}));
@@ -400,6 +466,7 @@ export async function createEditorServer(opts = {}) {
   const officialStages = new Set(Object.keys(readJson(path.join(dataDir, 'stages.json'), {}) || {}));
   const officialEnemies = new Set(Object.keys(readJson(path.join(dataDir, 'enemies.json'), {}) || {}));
   const officialWaves = new Set(Object.keys(readJson(path.join(dataDir, 'waves.json'), {}) || {}));
+  const officialItems = new Set(Object.keys(readJson(path.join(dataDir, 'items.json'), {}) || {}));
   const official = officialChess(dataDir);
 
   const server = http.createServer((req, res) => {
@@ -808,6 +875,119 @@ export async function createEditorServer(opts = {}) {
       return sendJson(res, 200, {
         spec: ids ? readJson(path.join(packDir, WAVE_SPEC_DIR, `${ids.slug}.json`), null) : null,
         record: (readJson(path.join(packDir, 'waves.json'), {}) || {})[waveId] ?? null,
+      });
+    }
+
+    // ---- 装备 (items): the form's data and its save path --------------------------------------------
+    if (p === '/api/items' && method === 'GET') {
+      const items = [];
+      for (const packId of fs.existsSync(root) ? fs.readdirSync(root).sort() : []) {
+        if (!PACK_ID_RE.test(packId) || !fs.existsSync(path.join(root, packId, 'pack.json'))) continue;
+        const packDir = path.join(root, packId);
+        const managed = new Set(packItemSpecs(packDir).map((s) => {
+          const ids = s && s.id ? itemIdsOf(s.id) : null;
+          return ids ? ids.slug : null;
+        }).filter(Boolean));
+        const records = readJson(path.join(packDir, 'items.json'), {}) || {};
+        for (const [id, rec] of Object.entries(records)) {
+          const ids = itemIdsOf(id);
+          items.push({
+            pack: packId, id, name: rec.name ?? id, itemType: rec.itemType ?? null, category: rec.category ?? null,
+            tier: rec.tier ?? null, price: rec.price ?? null, isGolden: rec.isGolden === true,
+            mergeable: rec.mergeable === true, duration: rec.duration ?? null, trapId: rec.trapId ?? null,
+            buffs: Array.isArray(rec.buffs) ? rec.buffs.length : 0, params: rec.params ?? {},
+            summary: itemSummaryLine(rec),
+            managed: ids ? managed.has(ids.slug) : false,
+            issues: validateItem(rec, { id, officialIds: officialItems }),
+          });
+        }
+      }
+      return sendJson(res, 200, {
+        items,
+        vocab: {
+          types: [...ITEM_TYPES], categories: [...ITEM_CATEGORIES], countTypes: [...COUNT_TYPES],
+          durations: [...ITEM_DURATIONS], upgradeNums: [...UPGRADE_NUMS],
+        },
+        officialItems: [...officialItems].sort(),
+        // the art an item can borrow, since a pack ships none
+        icons: itemIconChoices(dataDir),
+      });
+    }
+
+    // derive + validate an item WITHOUT writing: the form's live feedback
+    if (p === '/api/items/preview' && method === 'POST') {
+      const { spec } = await readBody(req);
+      const derived = deriveItem(spec);
+      if (!derived.ok) return sendJson(res, 200, { ok: false, errors: derived.errors, warnings: [] });
+      const records = [derived.base, derived.golden].filter(Boolean);
+      const issues = records.flatMap((rec) => validateItem(rec, { id: rec.id, officialIds: officialItems }));
+      return sendJson(res, 200, {
+        ok: itemErrors(issues).length === 0,
+        errors: issues.filter((i) => i.severity === 'error'),
+        warnings: [...derived.warnings, ...issues.filter((i) => i.severity === 'warning').map((i) => i.message)],
+        record: derived.base,
+        golden: derived.golden,
+      });
+    }
+
+    if (p.startsWith('/api/packs/') && p.endsWith('/items') && method === 'POST') {
+      const packId = p.slice('/api/packs/'.length, -'/items'.length);
+      if (!PACK_ID_RE.test(packId)) throw Object.assign(new Error('bad pack id'), { status: 400 });
+      const { spec } = await readBody(req);
+      const ids = itemIdsOf(spec && spec.id);
+      if (!ids) throw Object.assign(new Error('spec.id must be a slug (letters, digits, _ - . :)'), { status: 400 });
+      const derived = deriveItem(spec);
+      if (!derived.ok) return sendJson(res, 400, { error: 'the item spec is invalid', errors: derived.errors });
+      const blocking = [derived.base, derived.golden].filter(Boolean)
+        .flatMap((rec) => itemErrors(validateItem(rec, { id: rec.id, officialIds: officialItems })));
+      if (blocking.length) return sendJson(res, 400, { error: 'the item did not validate', errors: blocking });
+
+      const packDir = path.join(root, packId);
+      const manifestPath = path.join(packDir, 'pack.json');
+      const existingManifest = readJson(manifestPath, null);
+      const content = new Set(Array.isArray(existingManifest?.content) ? existingManifest.content : []);
+      content.add('items');
+      await writeJson(manifestPath, existingManifest
+        ? { ...existingManifest, content: [...content].sort() }
+        : { id: packId, name: spec.name || packId, version: '0.1.0', author: null, license: null, description: null, gameVersion: '0.1.3', content: [...content], overrides: [] });
+      await writeJson(path.join(packDir, ITEM_SPEC_DIR, `${ids.slug}.json`), spec);
+      const regen = regenerateItems(packDir, officialItems);
+      if (regen.errors.length) {
+        return sendJson(res, 400, { error: 'another item in this pack no longer derives — fix it before saving', errors: regen.errors });
+      }
+      await writeJson(path.join(packDir, 'items.json'), regen.records);
+      return sendJson(res, 200, { ok: true, id: derived.base.id, goldenId: derived.golden ? derived.golden.id : null, generated: regen.generated, warnings: derived.warnings });
+    }
+
+    // Deleting drops the WHOLE pair: a base whose golden twin survives would be a merge target pointing at a ghost.
+    if (p.startsWith('/api/packs/') && p.includes('/items/') && method === 'DELETE') {
+      const rest = p.slice('/api/packs/'.length);
+      const cut = rest.indexOf('/items/');
+      const packId = rest.slice(0, cut);
+      const itemId = decodeURIComponent(rest.slice(cut + '/items/'.length));
+      if (!PACK_ID_RE.test(packId) || !/^[A-Za-z0-9_\-.:]{1,64}$/.test(itemId)) throw Object.assign(new Error('bad id'), { status: 400 });
+      const ids = itemIdsOf(itemId);
+      if (!ids) throw Object.assign(new Error('bad id'), { status: 400 });
+      const specPath = path.join(root, packId, ITEM_SPEC_DIR, `${ids.slug}.json`);
+      if (fs.existsSync(specPath)) await fsp.rm(specPath);
+      const regen = regenerateItems(path.join(root, packId), officialItems, [ids.base, ids.golden]);
+      await writeJson(path.join(root, packId, 'items.json'), regen.records);
+      return sendJson(res, 200, { ok: true, removed: [ids.base, ids.golden], generated: regen.generated, errors: regen.errors });
+    }
+
+    // the stored SPEC the form edits (the source of truth), plus the generated pair for reference
+    if (p.startsWith('/api/items/') && method === 'GET') {
+      const rest = p.slice('/api/items/'.length).split('/');
+      if (rest.length !== 2) throw Object.assign(new Error('not found'), { status: 404 });
+      const [packId, itemId] = rest;
+      if (!PACK_ID_RE.test(packId) || !/^[A-Za-z0-9_\-.:]{1,64}$/.test(itemId)) throw Object.assign(new Error('bad id'), { status: 400 });
+      const ids = itemIdsOf(itemId);
+      const packDir = path.join(root, packId);
+      const records = readJson(path.join(packDir, 'items.json'), {}) || {};
+      return sendJson(res, 200, {
+        spec: ids ? readJson(path.join(packDir, ITEM_SPEC_DIR, `${ids.slug}.json`), null) : null,
+        record: records[itemId] ?? (ids ? records[ids.base] ?? null : null),
+        golden: ids ? records[ids.golden] ?? null : null,
       });
     }
 
