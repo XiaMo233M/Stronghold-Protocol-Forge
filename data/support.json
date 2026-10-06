@@ -1,7 +1,7 @@
 {
   "enabled": true,
   "label": "助战",
-  "note": "服务端控制的助战卡池（remake extension, not official data）。这个文件由服务器维护：客户端只能选择这里声明过的干员，未声明的即禁用（不出现、也不能被请求）。slots = 每名玩家每阶可携带的助战数量；pool = 该阶允许的干员 id，必须与 data/chess.json 里该干员的 tier 一致。改这个文件后重启服务器即生效，不需要重新构建 data/。",
+  "note": "服务端控制的助战卡池（remake extension, not official data）。这个文件由服务器维护：客户端只能选择这里声明过的干员，未声明的即禁用（不出现、也不能被请求）。slots = 每名玩家每阶可携带的助战数量；pool = 该阶允许的干员 id，必须与 data/chess.json 里该干员的 tier 一致。助战干员会**进商店**：带上的干员在共享池里多一份拷贝，按阶级价买到、按普通棋子卖掉（不白送）；prices = 可选，给某个助战干员单独定商店售价（0–99，只认卡池里真有的 id），没写的用它的阶级价。改这个文件后重启服务器即生效，不需要重新构建 data/。",
   "slots": {
     "5": 2,
     "6": 1
@@ -28,5 +28,6 @@
       "chess_char_6_08_a"
     ]
   },
+  "prices": {},
   "denyUnknown": true
 }

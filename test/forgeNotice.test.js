@@ -25,6 +25,11 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DATA_DIR = join(ROOT, 'data');
 const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
+/** 一个真的存在于本机模型清单里的 spine id：编辑器现在会拒绝没有模型的干员（那在试玩里是一张贴图）。 */
+const SOME_SPINE = (() => {
+  try { return Object.keys(JSON.parse(fs.readFileSync(join(DATA_DIR, 'assets.json'), 'utf8')).chars || {})[0] ?? ''; } catch { return ''; }
+})();
+
 /** A known-good map spec: 19 rows × 21 columns, glyphs from the real palette (the editor's own fixture shape). */
 const STAGE = {
   id: 'forge_map', name: '署名测试图', weight: 40, modes: ['mode_multi_normal'],
@@ -157,14 +162,17 @@ describe('forge notice: the editor writes it, and only into the source spec', ()
     const item = { id: 'forge_charm', name: 'x', tier: 2, price: 5, upgradeNum: 0, buffs: [{ key: 'k', bb: { atk: 0.1 } }] };
     const operator = {
       id: 'forge_op', name: 'x', tier: 4, profession: 'SNIPER', subProfessionId: 'fastshot', position: 'RANGED',
+      assetsSpine: SOME_SPINE,
       stats: { normal: { maxHp: 1000, atk: 300, def: 100, res: 0, cost: 15, blockCnt: 1, bat: 1 }, golden: { maxHp: 1300, atk: 400, def: 130, res: 0, cost: 15, blockCnt: 1, bat: 1 } },
       skill: { name: 's', desc: 'd', skillType: 'MANUAL', durationType: 'NONE', spType: 'INCREASE_WITH_TIME', spCost: 20, initSp: 5, duration: 10, bb: { atk: 0.3 } },
     };
+    const bond = { id: 'forgeShip', name: '署名测试盟约', desc: 'd', thresholds: [2, 4], countMode: 'BOARD', weight: 10, genericBuffs: true, bb: { base_atk: 0.1 } };
     const cases = [
       ['enemies', 'enemy-specs/forge_hound.json', enemy],
       ['waves', 'wave-specs/forge_wave.json', wave],
       ['items', 'item-specs/forge_charm.json', item],
       ['operators', 'specs/forge_op.json', operator],
+      ['bonds', 'bond-specs/forgeShip.json', bond],
     ];
     for (const [endpoint, rel, spec] of cases) {
       const r = await post(`${editor.url}/api/packs/forge-pack/${endpoint}`, { spec }).then((x) => x.json());
@@ -174,8 +182,8 @@ describe('forge notice: the editor writes it, and only into the source spec', ()
       assert.equal(written._meta.author, '水沫沐沐', endpoint);
       assert.equal(written._meta.source, FORGE_SOURCE, endpoint);
     }
-    // and none of the four artifacts may carry it
-    for (const file of ['enemies.json', 'waves.json', 'items.json', 'chess.json']) {
+    // and none of the artifacts may carry it
+    for (const file of ['enemies.json', 'waves.json', 'items.json', 'chess.json', 'bonds.json']) {
       const text = fs.readFileSync(join(wsRoot, 'forge-pack', file), 'utf8');
       assert.equal(text.includes('antiResale'), false, `${file} must not carry the notice`);
     }

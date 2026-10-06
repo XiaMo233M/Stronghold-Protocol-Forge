@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   normalizeSupportConfig, checkSupport, isSupportChess, supportTierOf, supportPicker,
-  supportSlotsFor, supportCapacity, supportTiers, isSupportEntries, SUPPORT_LIMITS,
+  supportSlotsFor, supportCapacity, supportTiers, isSupportEntries, SUPPORT_LIMITS, supportPriceOf, supportPrices,
 } from '../shared/support.js';
 import { getData } from '../server/data.js';
 import { GameData } from '../server/match/gamedata.js';
@@ -128,7 +128,27 @@ describe('助战: configuration (shared/support.js)', () => {
     assert.deepEqual(p.map((x) => x.tier), [5, 6]);
     assert.equal(p[0].slots, SLOTS5);
     assert.deepEqual(p[0].ids, [...CFG.pool[5]]);
+    assert.deepEqual(p[0].prices, {}, '没有配 prices 时，每个干员都用它自己的阶级价');
     assert.deepEqual(supportPicker(normalizeSupportConfig(undefined)), []);
+  });
+
+  // 「助战干员的商店售价能否修改」：能，写 data/support.json 的 prices 即可；没写的仍然是阶级价。
+  test('prices 只接受卡池里真有的 id，且只接受 0–99 的整数', () => {
+    const cfg = normalizeSupportConfig({
+      enabled: true, slots: { 5: 1 }, pool: { 5: [S5] },
+      prices: { [S5]: 1, chess_not_in_pool: 3, [S6]: -1, some_other: 2.5, chess_char_5_02_a: 200 },
+    });
+    assert.deepEqual(supportPrices(cfg), { [S5]: 1 }, '卡池外的 id、负数、小数、超上限一律丢掉');
+    assert.equal(supportPriceOf(cfg, S5), 1);
+    assert.equal(supportPriceOf(cfg, S6), null, '没配 = null（调用方用阶级价）');
+    assert.equal(supportPriceOf(normalizeSupportConfig(undefined), S5), null);
+    assert.deepEqual(supportPicker(cfg)[0].prices, { [S5]: 1 });
+    assert.equal(new GameData({ ...DATA, support: { enabled: true, slots: { 5: 1 }, pool: { 5: [S5] }, prices: { [S5]: 1 } } }, 'mode_multi_hard').supportPrice(S5), 1);
+  });
+
+  test('prices 为 0 是合法的（0 金买一个助战），不是「没配」', () => {
+    const cfg = normalizeSupportConfig({ enabled: true, slots: { 5: 1 }, pool: { 5: [S5] }, prices: { [S5]: 0 } });
+    assert.equal(supportPriceOf(cfg, S5), 0);
   });
 });
 
@@ -151,56 +171,91 @@ describe('助战: the GameData view', () => {
   });
 });
 
-describe('助战: granted into the 整备区 at round 1 (match engine)', () => {
+// 助战的定义（业主 2026-10-07 定下）：「助战干员就应该加入商店，按阶级像普通棋子一样购买出售」。
+// 所以这里断言的不再是「开局白送进整备区」，而是**商店通道**：带上的干员一定在这次对局的池子里（连本局随机禁用
+// 也盖过去），可以像普通棋子一样摇到、按阶级价买到、按普通价卖掉。
+describe('助战: 进商店，按阶级像普通棋子一样买与卖 (match engine)', () => {
   const seatsWith = (support) => [{ seat: 0, playerId: 'p_0', name: 'P0', isBot: false, connected: true, support }];
+  const T5 = 5;
+  const priceOfTier = (h, id) => h.m.gd.chessPrice(id);
 
-  test('the selection travels seat → PlayerState and becomes real pieces at PREP R1', () => {
+  test('带上的助战进池并多一份拷贝，但**不白送**任何棋子', () => {
     const h = makeMatch({ mode: 'coop', difficulty: 'NORMAL', humans: 1, seed: 5, fake: true, seats: seatsWith([S5, S6]) });
     h.start();
     const ps = h.ps('p_0');
     assert.deepEqual([...ps.support], [S5, S6]);
-    assert.equal(ps.hand.filter(Boolean).length, 0, 'nothing is granted before the first round starts');
+    assert.deepEqual(h.m.supportSupply, [S5, S6].sort(), '对局的助战供给要能从 Match 上看出来');
+    const base = h.m.gd.poolCopies(S5);
+    assert.equal(h.m.pool.cap(S5), base + 1, '助战那份拷贝加在 cap 上（恒等式因此仍然成立）');
+    assert.equal(h.m.pool.left(S5), base + 1);
+    assert.equal(h.m.pool.isSupport(S5), true);
+    assert.equal(h.m.pool.isSupport(h.m.gd.visibleChess.find((id) => id !== S5 && id !== S6)), false, '别人不带就不是助战供给');
+    // 关键的一条：没有任何东西被送进手里 —— 想要就得在商店里买
+    assert.equal(ps.hand.filter(Boolean).length, 0, 'nothing may be handed out');
     h.toPrep(1);
-    const ids = ps.hand.filter(Boolean).map((p) => p.id);
-    assert.ok(ids.includes(S5), `tier-5 support missing: ${JSON.stringify(ids)}`);
-    assert.ok(ids.includes(S6), `tier-6 support missing: ${JSON.stringify(ids)}`);
-    const piece = ps.hand.find((p) => p && p.id === S5);
-    assert.equal(piece.poolCopies, 1, 'a granted support takes a pool copy like a bought piece');
-    assert.equal(piece.boughtRound, 1);
-    h.invariants(); // the shared pool's accounting must still hold
-  });
-
-  test('a granted support is an ordinary piece: selling it returns its pool copy', () => {
-    const h = makeMatch({ mode: 'coop', difficulty: 'NORMAL', humans: 1, seed: 15, fake: true, seats: seatsWith([S5]) });
-    h.start();
-    h.toPrep(1);
-    const ps = h.ps('p_0');
-    const before = h.m.pool.left(S5);
-    const piece = ps.hand.find((p) => p && p.id === S5);
-    h.m.handle('p_0', { t: 'g.sell', uid: piece.uid });
-    assert.equal(ps.hand.filter((p) => p && p.id === S5).length, 0, 'the piece left the hand');
-    assert.equal(h.m.pool.left(S5), Math.min(8, before + 1), 'the copy went back to the pool');
+    assert.equal(ps.hand.filter(Boolean).length, 0, '休整期开始后手里依然是空的（旧版在这里白送两个）');
+    assert.deepEqual(ps.supportGranted, [S5, S6], 'granted = 本局商店里真的买得到的那几个');
     h.invariants();
   });
 
-  test('a selection the pool no longer allows is skipped at grant time, with a warning', () => {
-    const h = makeMatch({ mode: 'coop', difficulty: 'NORMAL', humans: 1, seed: 8, fake: true, seats: seatsWith([S5]) });
+  test('商店摇得到它，买它花的是阶级价，卖掉按普通棋子结算', () => {
+    const h = makeMatch({ mode: 'coop', difficulty: 'NORMAL', humans: 1, seed: 5, fake: true, seats: seatsWith([S5]) });
     h.start();
+    h.toPrep(1);
     const ps = h.ps('p_0');
-    // the server switched the operator off between the lobby check and the round start
-    h.m.gd.support = normalizeSupportConfig({ enabled: false });
-    assert.deepEqual(ps.grantSupports(), []);
-    assert.equal(ps.hand.filter(Boolean).length, 0);
-    assert.ok(h.sent.some(([, msg]) => msg.t === 'm.toast'), 'the player must be told');
+    ps.shop.level = T5;                       // 五阶干员只在店铺五级才摇得到（阶级门没有为助战破例）
+    ps.funds = 100;
+    let slot = -1;
+    for (let i = 0; i < 400 && slot < 0; i++) {
+      ps.rollShop();
+      slot = ps.shop.slots.findIndex((s) => s && s.kind === 'chess' && s.id === S5);
+    }
+    assert.ok(slot >= 0, `商店摇了 400 次都没摇到带上的助战 ${S5}`);
+    assert.equal(ps.shop.slots[slot].support, true, '助战摇出来的格子要标出来（客户端可以给它加个标）');
+    assert.equal(ps.priceOf(ps.shop.slots[slot]), priceOfTier(h, S5), '没配 prices 时就是它的阶级价');
+    const before = ps.funds;
+    assert.deepEqual(h.m.handle('p_0', { t: 'g.buy', slot }), { ok: true });
+    assert.equal(ps.funds, before - priceOfTier(h, S5));
+    const piece = ps.hand.filter(Boolean).find((p) => p.id === S5);
+    assert.ok(piece, '买到的就是普通棋子');
+    assert.equal(piece.poolCopies, 1);
+    // 卖掉：回到普通规则（sellPrice），拷贝还回共享池
+    const left = h.m.pool.left(S5);
+    assert.deepEqual(h.m.handle('p_0', { t: 'g.sell', uid: piece.uid }), { ok: true });
+    assert.equal(h.m.pool.left(S5), Math.min(h.m.pool.cap(S5), left + 1));
+    h.invariants();
   });
 
-  test('a support whose operator this match BANNED is STILL granted (bans only affect shop rolls)', () => {
+  test('prices 能改助战的标价（没配的仍用阶级价）', () => {
+    const data = structuredClone(DATA);
+    data.support = { ...data.support, prices: { [S5]: 1 } };
+    const h = makeMatch({ mode: 'coop', difficulty: 'NORMAL', humans: 1, seed: 5, fake: true, seats: seatsWith([S5]), data });
+    assert.equal(h.m.gd.supportPrice(S5), 1);
+    assert.equal(h.m.gd.supportPrice(S6), null, '没配的没有专属价 → 用阶级价');
+    h.start();
+    h.toPrep(1);
+    const ps = h.ps('p_0');
+    ps.shop.level = T5;
+    ps.funds = 100;
+    let slot = -1;
+    for (let i = 0; i < 400 && slot < 0; i++) {
+      ps.rollShop();
+      slot = ps.shop.slots.findIndex((s) => s && s.kind === 'chess' && s.id === S5);
+    }
+    assert.ok(slot >= 0);
+    assert.equal(ps.priceOf(ps.shop.slots[slot]), 1, 'prices 覆盖了阶级价');
+    const before = ps.funds;
+    h.m.handle('p_0', { t: 'g.buy', slot });
+    assert.equal(before - ps.funds, 1, '实付 1');
+    h.invariants();
+  });
+
+  test('本局被随机禁用的干员，作为助战照样进池（禁用抽卡 ≠ 禁用助战）', () => {
     // A visible chess is banned iff every one of its bonds is in the match's disabled set (server/match/pool.js:25-43),
     // and a banned chess simply has no pool copies. Forcing that statically (through the mode's inactiveBondIds) makes
     // this deterministic instead of hunting for a seed that happens to ban the support.
     const banned = TIER5.find((id) => Array.isArray(DATA.chess[id]?.bonds) && DATA.chess[id].bonds.length > 0);
     assert.ok(banned, 'the shipped support pool must contain a tier-5 operator with bonds for this test to mean anything');
-    // learn the mode id from the engine rather than guessing its spelling
     const probe = makeMatch({ mode: 'coop', difficulty: 'NORMAL', seed: 5, fake: true, seats: seatsWith([banned]) });
     probe.start();
     const modeId = probe.m.gd.modeId;
@@ -209,30 +264,41 @@ describe('助战: granted into the 整备区 at round 1 (match engine)', () => {
     assert.ok(mode, `mode ${modeId} must be in config.modes`);
     mode.inactiveBondIds = [...new Set([...(mode.inactiveBondIds || []), ...data.chess[banned].bonds])];
 
+    // 不带它：它真的被禁掉了，商店永远摇不到
+    const without = makeMatch({ mode: 'coop', difficulty: 'NORMAL', seed: 5, fake: true, data });
+    without.start();
+    assert.ok(without.m.bannedChess.includes(banned), `expected ${banned} to be banned`);
+    assert.equal(without.m.pool.has(banned), false);
+
+    // 带上它：池子里有且只有那份助战拷贝，摇得到、买得起
     const h = makeMatch({ mode: 'coop', difficulty: 'NORMAL', seed: 5, fake: true, seats: seatsWith([banned]), data });
     h.start();
-    // the ban is real: the operator is out of this match's pool, so the shop can never offer it
-    assert.ok(h.m.bannedChess.includes(banned), `expected ${banned} to be banned, got ${JSON.stringify(h.m.bannedChess)}`);
-    assert.equal(h.m.pool.has(banned), false);
-    assert.equal(h.m.pool.left(banned), 0, 'a banned chess holds no pool copies');
+    assert.ok(h.m.bannedChess.includes(banned), '本局的禁用名单不变（它仍然不算普通抽卡内容）');
+    assert.equal(h.m.pool.has(banned), true, '助战必须能买到');
+    assert.equal(h.m.pool.left(banned), 1, '禁用之后只剩助战那一份拷贝');
+    assert.equal(h.m.pool.isSupport(banned), true);
     h.toPrep(1);
     const ps = h.ps('p_0');
-    const piece = ps.hand.find((p) => p && p.id === banned);
-    assert.ok(piece, '禁用抽卡不等于禁用助战：the support must still be granted');
-    assert.equal(piece.poolCopies, 0, 'it holds 0 copies, like any effect-granted piece while the pool is empty');
+    ps.shop.level = T5;
+    let slot = -1;
+    for (let i = 0; i < 400 && slot < 0; i++) {
+      ps.rollShop();
+      slot = ps.shop.slots.findIndex((s) => s && s.kind === 'chess' && s.id === banned);
+    }
+    assert.ok(slot >= 0, '被禁用但带上的助战必须能从商店摇到');
     assert.deepEqual(ps.supportGranted, [banned]);
     h.invariants();
   });
 
-  test('m.private echoes the support: selected vs actually granted', () => {
+  test('m.private echoes the support: selected vs really in the shop', () => {
     const h = makeMatch({ mode: 'coop', difficulty: 'NORMAL', humans: 1, seed: 5, fake: true, seats: seatsWith([S5, S6]) });
     h.start();
     const ps = h.ps('p_0');
-    assert.deepEqual(ps.privateView().support, { selected: [S5, S6], granted: [] }, 'nothing is granted before the first round');
+    assert.deepEqual(ps.privateView().support, { selected: [S5, S6], granted: [] }, 'nothing is decided before the first round');
     h.toPrep(1);
     assert.deepEqual(ps.privateView().support, { selected: [S5, S6], granted: [S5, S6] });
-    // a support the pool drops between the lobby and the grant shows up as selected-but-not-granted, which is what lets
-    // the client explain it instead of silently fighting with one fewer operator
+    // a support the pool drops between the lobby and the round start shows up as selected-but-not-granted, which is what
+    // lets the client explain it instead of leaving the player wondering why it never shows up in the shop
     const h2 = makeMatch({ mode: 'coop', difficulty: 'NORMAL', humans: 1, seed: 5, fake: true, seats: seatsWith([S5]) });
     h2.start();
     const ps2 = h2.ps('p_0');
@@ -244,7 +310,17 @@ describe('助战: granted into the 整备区 at round 1 (match engine)', () => {
     h2.invariants();
   });
 
-  test('bots never carry supports', () => {
+  test('a selection the pool no longer allows is dropped at round 1, with a warning', () => {
+    const h = makeMatch({ mode: 'coop', difficulty: 'NORMAL', humans: 1, seed: 8, fake: true, seats: seatsWith([S5]) });
+    h.start();
+    const ps = h.ps('p_0');
+    // the server switched the operator off between the lobby check and the round start
+    h.m.gd.support = normalizeSupportConfig({ enabled: false });
+    assert.deepEqual(ps.prepareSupports(), []);
+    assert.ok(h.sent.some(([, msg]) => msg.t === 'm.toast'), 'the player must be told');
+  });
+
+  test('bots never carry supports (and get no support copy)', () => {
     const h = makeMatch({
       mode: 'coop', difficulty: 'NORMAL', seed: 9, fake: true,
       seats: [
@@ -256,7 +332,8 @@ describe('助战: granted into the 整备区 at round 1 (match engine)', () => {
     h.toPrep(1);
     assert.deepEqual([...h.ps('ai_0').support], []);
     assert.equal(h.ps('ai_0').hand.filter(Boolean).length, 0);
-    assert.ok(h.ps('p_0').hand.some((p) => p && p.id === S5));
+    assert.deepEqual(h.m.supportSupply, [S5], '机器人的助战不进供给（席位上的 support 也不该被当真）');
+    assert.equal(h.m.pool.isSupport(S6), false);
     h.invariants();
   });
 

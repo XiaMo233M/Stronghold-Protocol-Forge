@@ -106,6 +106,34 @@ describe('workshop: the overlay', () => {
     assert.equal(loadWorkshop(WORKSHOP_DIR, { log: quiet }).packs.length, 0, 'the repo ships no active pack');
   });
 
+  // 「试玩里是一张贴图而不是模型」的数据侧安全网：手写包、CLI 写出来的包、编辑器写出来的包走的是同一层，
+  // 所以这条判定放在 overlay 里 —— 没有任何报错的字段，必须有人替作者看一眼。
+  test('an operator with no resolvable model is reported (it renders as a flat portrait)', () => {
+    const base = loadData(DATA_DIR, { log: quiet, workshopDir: null });
+    const source = base.chess[SOURCE];
+    // 客户端取模型 = rec.assets?.spine || rec.charId：两者都空才是真的没有模型（编辑器写出来的记录就是这种）
+    const noSpine = { ...source, chessId: 'chess_ws_noface_a', baseId: 'chess_ws_noface_a', goldenId: null, name: '没外观', charId: null };
+    delete noSpine.assets;
+    const badSpine = { ...source, chessId: 'chess_ws_badface_a', baseId: 'chess_ws_badface_a', goldenId: null, name: '错外观', assets: { ...source.assets, spine: 'char_not_installed' } };
+    const goodSpine = { ...source, chessId: 'chess_ws_goodface_a', baseId: 'chess_ws_goodface_a', goldenId: null, name: '正常外观' };
+    const byCharId = { ...source, chessId: 'chess_ws_charid_a', baseId: 'chess_ws_charid_a', goldenId: null, name: '靠 charId 渲染' };
+    delete byCharId.assets;
+    const r = applyWorkshop({ ...base }, [{
+      id: 'p', name: 'P',
+      files: { chess: { 'chess_ws_noface_a': noSpine, 'chess_ws_badface_a': badSpine, 'chess_ws_goodface_a': goodSpine, 'chess_ws_charid_a': byCharId } },
+    }]);
+    const looks = r.report.looks;
+    assert.equal(looks.length, 2, JSON.stringify(looks));
+    assert.deepEqual(looks.map((l) => l.id).sort(), ['chess_ws_badface_a', 'chess_ws_noface_a']);
+    assert.equal(looks.find((l) => l.id === 'chess_ws_noface_a').code, 'MODEL_MISSING');
+    assert.equal(looks.find((l) => l.id === 'chess_ws_badface_a').code, 'MODEL_UNKNOWN');
+    // 报的是「会画成贴图」，并且说清该怎么办
+    assert.match(looks[0].reason, /flat portrait/);
+    // 复用已装好模型 / 靠 charId 取到模型的干员必须安静（这条规则只抓真的没模型的）
+    assert.equal(looks.some((l) => l.id === 'chess_ws_goodface_a' || l.id === 'chess_ws_charid_a'), false);
+    assert.match(workshopSummary(r.report), /2 个干员没有模型/);
+  });
+
   test('a collision with an official id is rejected unless the pack declares the override', () => {
     const officialId = 'chess_char_1_01_a';
     const official = loadData(DATA_DIR, { log: quiet, workshopDir: null }).chess[officialId];

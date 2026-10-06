@@ -340,7 +340,19 @@ export class Match {
     this.disabledBonds = bans.drawn;
     this.staticInactiveBonds = bans.staticOff;
     this.bannedChess = bans.banned;
-    this.pool = new SharedPool(this.gd, { banned: bans.banned });
+    /**
+     * 助战供给 (shared/support.js): the operators the HUMAN seats brought. Each gets one extra pool copy for this match
+     * and is in the pool even when the random bans took it out — a brought operator must be purchasable, because that is
+     * what borrowing it means here (the owner's call 2026-10-07: 助战干员进商店，按阶级像普通棋子一样购买出售).
+     * Bots never bring supports (PlayerState.setSupport refuses them), so their seats are ignored. Read from the seats
+     * because the pool is built before any player state exists; `PlayerState.setSupport` re-checks the same rule later.
+     */
+    this.supportSupply = [...new Set(opts.seats
+      .filter((s) => s && !s.isBot && Array.isArray(s.support))
+      .flatMap((s) => s.support.map((id) => String(id || ''))))]
+      .filter((id) => id && this.gd.isSupportChess(id))
+      .sort();
+    this.pool = new SharedPool(this.gd, { banned: bans.banned, support: this.supportSupply });
 
     this.phase = PHASE.LOBBY;
     this.round = 0;
@@ -1496,10 +1508,11 @@ export class Match {
       this.wave = buildNormalWave(this.gd, this.rngWaves, this.factions, r, this.stageId);
     }
     for (const ps of alive) ps.startRound(r);
-    // 助战 (shared/support.js): the supports a player brought are granted into the 整备区 once, at the first round's
-    // start. After PlayerState.startRound (so they are not counted as shop activity / this round's buys) and before
-    // onRoundStart (so <进入休整期时> effects see them as ordinary owned chess).
-    if (r === 1) for (const ps of alive) ps.grantSupports();
+    // 助战 (shared/support.js): re-check what each player brought against the pool ONE more time at the first round's
+    // start and record what it really got (data/support.json can change between the lobby check and here). Nothing is
+    // handed out: the operators are in the shop (Match.supportSupply puts them in the pool), priced like any other
+    // piece — `granted` is what the player can actually buy, which is what the client echoes back.
+    if (r === 1) for (const ps of alive) ps.prepareSupports();
     for (const ps of alive) this.dispatch(ps, 'onRoundStart', { round: r });
     // an eliminated player's pending 信标 gift still goes to its teammate (effects flagged afterElimination; GitHub #86)
     for (const ps of this.order) {

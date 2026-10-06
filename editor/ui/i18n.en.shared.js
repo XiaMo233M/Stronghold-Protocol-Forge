@@ -12,6 +12,7 @@ export const EN_SHARED = Object.freeze({
   'kit 编辑器': 'Kit editor',
   '语音编辑器': 'Voice editor',
   '包管理': 'Pack manager',
+  '盟约编辑器': 'Bond editor',
   '干员编辑器': 'Operator editor',
 
   // ---- 各页 <title> ----

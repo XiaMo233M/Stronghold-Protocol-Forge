@@ -14,7 +14,7 @@
 import { getConfig, getMode } from '../data.js';
 import { isShopItem } from '../sim/simdata.js';
 import {
-  normalizeSupportConfig, supportSlotsFor, supportCapacity, supportPicker, isSupportChess, supportTierOf,
+  normalizeSupportConfig, supportSlotsFor, supportCapacity, supportPicker, isSupportChess, supportTierOf, supportPriceOf,
   checkSupport as checkSupportSelection,
 } from '../../shared/support.js';
 
@@ -220,6 +220,12 @@ export class GameData {
   isSupportChess(id) { return isSupportChess(this.support, id, (x) => this.chess(x)); }
   /** The tier this operator counts against, or null when the pool does not allow it. */
   supportTierOf(id) { return supportTierOf(this.support, id, (x) => this.chess(x)); }
+  /**
+   * 助战干员在**带上它的那名玩家**商店里的标价（`data/support.json` 的 `prices`），没配就是 null。
+   * 没配时用它的阶级价（`chessPrice`）—— 助战是普通棋子，价格规则不另开一套。
+   * @param {string} id base chess id
+   */
+  supportPrice(id) { return supportPriceOf(this.support, id); }
   /**
    * Semantic check of a `room.support` selection against the pool (shared/support.js checkSupport — the same call the
    * client makes before sending, so the picker and the match agree).

@@ -261,16 +261,18 @@ export class PlayerState {
   }
 
   /**
-   * Grant this player's 助战 into the 整备区 (remake extension; Match.startRound calls it once, at round 1). From then on
-   * they are ordinary owned chess: sellable, mergeable, equippable and deployable, and each one takes a copy from the
-   * shared pool exactly like a bought piece — so a support whose chess has no pool copies left is held with 0 copies
-   * (the documented behaviour of an effect-granted piece) instead of breaking the pool invariant.
+   * Record what this player's 助战 selection really gets in this match (remake extension; Match.startRound calls it once,
+   * at round 1). **Nothing is handed out**: the operators a player brings are in the SHARED POOL (Match.supportSupply
+   * gives each one an extra copy, even when the random bans removed it), so they can be rolled and bought in the shop at
+   * their tier price and sold like any other piece — the owner's call 2026-10-07. `supportGranted` therefore means
+   * 「本局商店里真的能买到这些」, which is what `m.private` echoes back so the client can explain a selection that the
+   * server dropped.
    *
    * The pool is re-checked here because data/support.json may have changed between the lobby's check and the match's
-   * start: an operator the server no longer allows is skipped with a warning, never granted.
-   * @returns {string[]} the ids actually granted
+   * start: an operator the server no longer allows is skipped with a warning.
+   * @returns {string[]} the ids the shop really has for this player
    */
-  grantSupports() {
+  prepareSupports() {
     if (this.isBot || !Array.isArray(this.support) || this.support.length === 0) { this.supportGranted = []; return []; }
     const granted = [];
     for (const id of this.support) {
@@ -279,10 +281,8 @@ export class PlayerState {
         this.m.toast(this, 'warn', `${(rec && rec.name) || id} 已不在服务端助战卡池中，本次禁用`);
         continue;
       }
-      // acquireChess reports a full 整备区 itself (and returns the copies); null = not granted
-      if (this.acquireChess(id, { source: 'support' })) granted.push(id);
+      granted.push(id);
     }
-    // what actually landed, so m.private can show it next to what was selected (they differ when the pool changed)
     this.supportGranted = granted;
     return granted;
   }
@@ -888,7 +888,13 @@ export class PlayerState {
 
   _rollChessSlot() {
     const id = this.m.pool.roll(this.m.rngShop, { maxTier: this.shop.level });
-    return id ? { kind: 'chess', id, basePrice: this.gd.chessPrice(id), frozen: false, sold: false } : null;
+    if (!id) return null;
+    // 助战：自己带上场的干员在商店里按 `data/support.json` 的 prices 标价（没配就是它的阶级价），
+    // 卖掉仍按普通棋子的 sellPrice —— 它就是普通棋子，只是「我的商店池里一定有它」（连本局禁用也盖过去）。
+    // 阶级门照旧：六阶助战仍要商店等级 6 才摇得到。
+    const support = this.support.includes(id);
+    const price = support ? (this.gd.supportPrice(id) ?? this.gd.chessPrice(id)) : this.gd.chessPrice(id);
+    return { kind: 'chess', id, basePrice: price, frozen: false, sold: false, ...(support ? { support: true } : {}) };
   }
 
   _rollItemSlot() {
@@ -1675,7 +1681,12 @@ export class PlayerState {
   }
 
   privateView() {
-    const slots = this.shop.slots.map((s) => (s ? { kind: s.kind, id: s.id, price: this.priceOf(s), basePrice: s.basePrice, sold: !!s.sold, frozen: !!s.frozen } : null));
+    // `support: true` marks a slot rolled from an operator THIS player brought as 助战 (shared/support.js) — additive,
+    // so a client that does not know the field still reads the slot exactly as before.
+    const slots = this.shop.slots.map((s) => (s ? {
+      kind: s.kind, id: s.id, price: this.priceOf(s), basePrice: s.basePrice, sold: !!s.sold, frozen: !!s.frozen,
+      ...(s.support ? { support: true } : {}),
+    } : null));
     const offer = this.offers[0] || null;
     const free = this.shop.freeRefreshes > 0;
     const board = [];

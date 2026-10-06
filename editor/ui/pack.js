@@ -126,6 +126,15 @@ function renderDetail() {
   }
   box.append(verdict);
 
+  // 盘上有、content 没声明的数据文件：加载器只按 content 读，这些文件会被静默忽略（干员进不了商店、地图进不了轮换）。
+  // 这一类没有任何报错，所以必须在这里点出来 —— 「保存一次对应内容」就会自动补上声明。
+  if (Array.isArray(p.undeclared) && p.undeclared.length) {
+    const stray = document.createElement('div');
+    stray.className = 'banner bad';
+    stray.textContent = t('⚠ 这个包里有 {0}，但 pack.json 的 content 没声明它们 —— 加载器**不会读**这些文件：里面的干员不会进商店、也不会出现在试玩里。修法：去对应页面重新保存一次（会自动补声明），或手工在 content 里加上。', p.undeclared.map((f) => t('{0}.json', f)).join(t('、')));
+    box.append(stray);
+  }
+
   // ---- 助战声明 ----
   box.append(h(t('助战声明（pack.json 的 support）')));
   const note = document.createElement('div'); note.className = 'panel';
@@ -142,7 +151,7 @@ function renderDetail() {
   } else {
     const table = document.createElement('table');
     const head = document.createElement('tr');
-    for (const th of ['', t('干员 id'), t('名称'), t('阶（推导）'), t('会不会进卡池')]) head.append(Object.assign(document.createElement('th'), { textContent: th }));
+    for (const th of ['', t('干员 id'), t('名称'), t('阶（推导）'), t('会不会进卡池'), t('商店售价')]) head.append(Object.assign(document.createElement('th'), { textContent: th }));
     table.append(head);
     for (const op of p.operators) {
       const tr = document.createElement('tr');
@@ -167,6 +176,7 @@ function renderDetail() {
       else if (op.selected) why.append(Object.assign(document.createElement('span'), { className: 'tag err', textContent: t('阶梯未知，进不了池') }));
       else why.append(Object.assign(document.createElement('span'), { className: 'tag', textContent: t('未声明') }));
       tr.append(why);
+      tr.append(priceCell(p, op));
       table.append(tr);
     }
     note.append(table);
@@ -185,6 +195,10 @@ function renderDetail() {
     note.append(Object.assign(document.createElement('p'), {
       className: 'hint',
       textContent: t('保存只改 pack.json 的 support 字段：其余字段、键序与两空格缩进原样保留，也不会给包补一条它没声明过的 content。'),
+    }));
+    note.append(Object.assign(document.createElement('p'), {
+      className: 'hint',
+      textContent: t('商店售价写的是 **data/support.json 的 prices**（不是这个包的清单）：助战干员进商店后按这个价买，留空就用它的阶级价。0 表示不花钱。'),
     }));
   }
 
@@ -348,6 +362,51 @@ function renderSide() {
 }
 
 // ---- 动作 ---------------------------------------------------------------------------------------------------------
+
+/**
+ * 一个干员的「商店售价」格子：留空 = 用它的阶级价（写 `data/support.json` 的 `prices`）。
+ *
+ * 为什么放在这张表里：助战干员现在是**进商店**的（按阶级价买、按普通棋子卖），所以「它卖多少钱」与「它是不是助战」
+ * 是同一个决定的两半 —— 分开两个页面只会让作者忘掉另一半。没被勾成助战时不给改（服务端也会拒绝）。
+ */
+function priceCell(p, op) {
+  const td = document.createElement('td');
+  const declared = (p.support || []).includes(op.id);
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.min = '0';
+  input.max = '99';
+  input.style.width = '84px';
+  const current = state.data?.prices ? state.data.prices[op.id] : undefined;
+  input.value = Number.isInteger(current) ? String(current) : '';
+  input.placeholder = t('阶级价');
+  input.disabled = !declared || state.busy;
+  if (!declared) input.title = t('先勾上「助战」再定价：不在卡池里的价目没人会用到');
+  const commit = async () => {
+    const raw = input.value.trim();
+    const price = raw === '' ? null : Number(raw);
+    if (price !== null && (!Number.isInteger(price) || price < 0 || price > 99)) {
+      state.message = { kind: 'error', text: t('商店售价必须是 0–99 的整数（留空表示用它的阶级价）') };
+      renderDetail();
+      return;
+    }
+    state.busy = true; renderDetail();
+    try {
+      const r = await api('/api/support/price', { method: 'POST', body: { chessId: op.id, price } });
+      const shown = r.prices && Number.isInteger(r.prices[op.id]) ? t('{0} 金', r.prices[op.id]) : t('阶级价');
+      state.message = { kind: 'ok', text: t('{0} 的商店售价已改为 {1}', op.id, shown) };
+      await load(p.id);
+    } catch (e) {
+      state.message = { kind: 'error', text: errText(e) };
+    } finally {
+      state.busy = false; renderDetail(); renderSide();
+    }
+  };
+  input.addEventListener('change', commit);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') commit(); });
+  td.append(input);
+  return td;
+}
 
 async function saveSupport() {
   const p = packOf();

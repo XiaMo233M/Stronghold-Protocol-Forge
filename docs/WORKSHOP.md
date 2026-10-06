@@ -46,10 +46,10 @@ workshop/<packId>/
 | `version` | 否 | 默认 `0.0.0` |
 | `author` / `license` / `description` | 否 | 元信息；`license` 用于声明素材授权 |
 | `gameVersion` | 否 | 作者针对的游戏版本，便于排查 |
-| `content` | 二选一 | 这个包提供哪些数据文件（上表的名字） |
+| `content` | 二选一 | 这个包提供哪些数据文件（上表的名字，含 `bonds`） |
 | `voices` | 二选一 | 这个包为哪些干员提供语音，见 §1.4；`content` 与 `voices` 至少有一个非空 |
 | `support` | 否 | 这个包自己新增的、应当进助战卡池的干员 id 列表，见 §2.1；阶由记录推导 |
-| `overrides` | 否 | 允许覆盖的官方记录，格式 `"<file>:<id>"`，例如 `"chess:chess_char_1_01_a"` |
+| `overrides` | 否 | 允许覆盖的官方记录，格式 `"<file>:<id>"`，例如 `"chess:chess_char_1_01_a"`、`"bonds:yanShip"` |
 
 `content` 只接受上表列出的文件。**`config` 被刻意排除**：一个能改写经济、回合表或难度参数的包改的是规则而不是内容，那需要另一套审查机制，不在本功能范围内。
 
@@ -57,7 +57,6 @@ workshop/<packId>/
 反过来，`content` 与 `voices` 都为空才会被拒（`EMPTY_PACK`）。
 
 ### 1.2 叠加规则
-
 - **默认叠加（additive）**：新 id 直接加入。
 - **覆盖需要显式声明**：官方已有的 id 只有在 `overrides` 里列出时才被替换；否则该记录**被拒绝并记入报告**，官方记录保留。这条规则存在的理由是：静默替换一名官方干员会污染服务器上的每一局。
 - **记录自检**：内容文件必须是 `{ id: record }` 对象；当记录自带 id 字段（如 `chess.chessId`）而它与键不一致时，整条被拒绝。
@@ -200,15 +199,35 @@ node tools/workshop-validate.mjs my-pack
 | **怪物（enemies）**：`be`/`attrPower` 推导 + 校验 + 编辑器表单 | ✅ 已完成（`test/enemyAuthoring.test.js`、`editor/ui/enemy.html`） |
 | **出怪表（waves）**：`totalCount`/`slotCounts` 推导 + 校验 + 时间轴 | ✅ 已完成（`test/waveAuthoring.test.js`、`editor/ui/wave.html`） |
 | **装备（items）**：`params`/`mergeable`/`shopExcluded` 推导 + 校验 + 编辑器表单 | ✅ 已完成（`test/itemAuthoring.test.js`、`editor/ui/item.html`） |
+| **盟约（bonds）**：新增一条盟约、或覆盖官方 23 条的阈值 / 计数 / 说明 / 黑板数值；成员由干员的 `bonds` 推导 | ✅ 已完成（`shared/bondAuthoring.js`、`test/bondAuthoring.test.js`、`test/bondEditor.test.js`、`editor/ui/bond.html`） |
+| **盟约的通用加成（`genericBuffs`）**：新增盟约在战斗里按黑板数值给成员加百分比 | ✅ 已完成（`server/sim/content/bonds/dataDriven.js`、`test/content/workshopBond.test.js`） |
 | **作者接口**：spec → 合法记录、机器可读校验、模板 prompt、校验 CLI | ✅ 已实现（`test/chessAuthoring.test.js`） |
 | **行为层**：包内 `kits/<chessId>.js` 接入 `battle.on(...)` 钩子总线 | ✅ 已实现（见 §4） |
 | **语音包（`voices`）**：汇总进 `assets.audio.voice`、随合并的 `assets.json` 送达客户端 | ✅ 已实现（`test/workshopVoices.test.js`） |
 | **包自带助战（`support`）**：按记录推导阶并入 `data/support.json` 的卡池、随合并的 `support.json` 送达客户端 | ✅ 已实现（`test/workshopSupport.test.js`） |
 | **分享与安装（`.zip`）**：导出/导入/列出，CLI 与编辑器第八页共用同一批函数 | ✅ 已实现（`shared/zip.js`、`tools/workshop-pack.mjs`、`test/workshopPack.test.js`） |
-| **局外编辑器 UI**：干员 / 地图 / 怪物 / 出怪 / 装备 / 行为层 kit / **语音** / **包管理** 八个页面 | ✅ 已实现（`editor/`，见 `docs/EDITOR.md`） |
+| **局外编辑器 UI**：干员 / 地图 / 怪物 / 出怪 / 装备 / **盟约** / 行为层 kit / **语音** / **包管理** 九个页面 | ✅ 已实现（`editor/`，见 `docs/EDITOR.md`） |
 | 工坊包的版本对齐、依赖声明、内容寻址 | ⛔ 未实现（`gameVersion` 目前只是元信息） |
 
 > 行为层是用户的明确选择（「完全开放 battle 钩子 API」）。它与一体化整合包的冲突按**分渠道**解决：官方整合包保持纯净、不含工坊内容；工坊包单独分发，玩家主动安装并知情。**注意：脚本会在客户端执行**（默认 `SP_COMBAT=client`），服务端 `SP_VERIFY` 只能复算结果、不能阻止脚本本身 — 这正是必须分渠道的原因。
+
+### 1.8 盟约（`bonds`）与「通用加成」
+
+盟约是可以被工坊贡献的数据文件之一（`content: ["bonds"]`），编辑器第六页（`/bond.html`）是它的图形入口。两件事必须说清：
+
+- **覆盖官方盟约是主要用法**：官方 23 条盟约的效果在 `server/sim/content/bonds/*` 里**按 id 写死**，但它们的数值全部从
+  `data/bonds.json` 的记录里读（阈值、`bb` 黑板、`countMode`…）。所以把 `yanShip` 写进 `overrides` 并给出自己的记录，
+  改的就是**真实生效**的数值 —— 这正是「修改盟约」的落地方式，编辑器保存时自动补 `overrides` 声明。
+- **新增盟约需要打开 `genericBuffs`**：新 id 没有处理器，记录里写 `"genericBuffs": true` 才会走
+  `server/sim/content/bonds/dataDriven.js`，按 `bb` 的 `base_atk` / `atk_per_stack`（防御 `base_def` / `def_per_stack`、
+  生命 `base_max_hp` / `max_hp_per_stack`）给成员加百分比，与官方盟约同一个「直接乘算」桶（相加而非相乘）。
+  不打开时这条盟约只有数据面：计数、阈值、层数、本局禁用抽签、干员详情与盟约条都正常，但战斗里不加任何东西。
+  用记录上的开关而不是「不在官方 23 条里就自动生效」，是因为后者会把**覆盖**官方盟约的黑板叠加两次 —— 双倍加成不会
+  报错，只会让平衡悄悄歪掉。
+- **成员是干员说了算**：`members` 由干员的 `bonds` 列表推导（`bondEditor` 的成员那一段改的就是那些干员的 spec）。
+  引擎计数、盟约弹窗的成员列表都读这个列表；一份「盟约说自己是这群人、干员却不认」的记录会安静地少人。
+- **图标**：客户端按**盟约 id** 从 `data/assets.json` 的 `bonds` 取图（`public/js/assets.js bondIconUrl`），
+  一个包无法给 `assets.json` 加条目，所以新增盟约在盟约条上是一个圆点；覆盖官方则沿用官方图标。
 
 ---
 
@@ -266,22 +285,31 @@ node tools/workshop-validate.mjs my-pack
 
 1. **客户端看不到**：客户端只能通过 `gd.supportPicker()` 拿卡池；服务端是唯一来源。
 2. **请求被整条拒绝**：`checkSupport()`（`shared/support.js`）对卡池外的 id、重复 id、超出该阶名额的请求返回 `BAD_TARGET`，**不做静默降级** — 静默降级会把「被禁用的干员」悄悄变成「已发放的干员」。空选择永远合法，表示不带助战。
-3. **发放时再查一次**：`PlayerState.grantSupports()` 会重新核对卡池。因为 `data/support.json` 可能在 `lobby` 校验之后、对局开始之前被改掉；此时该干员被跳过并给玩家一条提示。
+3. **开局时再查一次**：`PlayerState.prepareSupports()` 会重新核对卡池，并把「本局商店里真的买得到的那几个」记进
+   `supportGranted`。因为 `data/support.json` 可能在 `lobby` 校验之后、对局开始之前被改掉；此时该干员被跳过并给玩家一条提示。
 
 ### 2.3 生命周期
 
 ```
 房间席位 seat.support ─→ Match 构造 opts.seats[].support ─→ PlayerState.setSupport()（再校验）
-                                                                    │
-        INFO_CHECK 期间仍可改（与 room.loadout 一样，之后锁定）      │
-                                                                    ▼
-                                      ROUND 1 开始时 grantSupports() → acquireChess() → 整备区
+        │                                                            │
+        │  构造时：Match.supportSupply = 人（非机器人）带上的助战        │
+        │  → SharedPool 给每人一份额外拷贝（连本局禁用也盖过去）          │
+        │                                                             │
+        INFO_CHECK 期间仍可改（与 room.loadout 一样，之后锁定）          │
+                                                                     ▼
+                            ROUND 1 开始时 prepareSupports() → 只记录「买得到的那几个」
 ```
 
-- 实现方式刻意复用现有的 `acquireChess()`（买入/奖励/效果发放走的就是它）：助战干员从共享池**取走一份拷贝**，因此 `poolCopies` 与共享池恒等式（`left + Σ held == cap`）自动成立；卖出时会照常归还。
-- 助战因此就是**普通棋子**：可卖、可合成精锐、可装备、可部署。
-- 整备区满时由 `acquireChess()` 自行报告并返还拷贝。
-- 机器人不带助战。
+- **助战干员进商店，不白送**（业主 2026-10-07 定下：「助战干员就应该加入商店，按阶级像普通棋子一样购买出售」）。
+  实现方式是共享池里**多一份拷贝**：`cap` 与 `left` 同时 +1，所以共享池恒等式（`left + Σ held == cap`）自动成立；
+  这份拷贝属于**这场对局**（池是共享的，合作模式里队友也能买到它）。
+- 助战因此就是**普通棋子**：可以在商店里摇到、按阶级价买到、可合成精锐、可装备、可部署、卖掉按普通规则归还拷贝。
+- **价格可以改**：`data/support.json` 的 `prices: { "<chessId>": 3 }` 是**带上它的那名玩家**商店里的标价（0–99，
+  只接受卡池里真有的 id）；没配的用它的阶级价（`GameData.chessPrice`）。出售价不分助战，一律走 `sellPrice`。
+- **阶级门照旧**：六阶助战仍要商店等级 6 才摇得到。
+- **随机禁用不禁用助战**：本局禁用名单照旧生成，但带上的助战仍然有一份拷贝 —— 「禁用抽卡」不是「禁用助战」。
+- 机器人不带助战（`PlayerState.setSupport` 直接拒绝，`Match.supportSupply` 也不看机器人的席位）。
 
 ### 2.4 消息
 
@@ -293,7 +321,7 @@ node tools/workshop-validate.mjs my-pack
 |---|---|
 | 服务端卡池、名额、全部失败关闭路径 | ✅ 已实现并测试 |
 | `room.support` 消息、会话/席位存储、对局内再校验 | ✅ 已实现并测试 |
-| ROUND 1 发放进整备区、共享池记账恒等式 | ✅ 已实现并测试 |
+| ROUND 1 记录「本局商店里买得到哪些助战」、共享池记账恒等式 | ✅ 已实现并测试 |
 | 客户端**助战选择 UI** | ⛔ **未实现**（服务端已就绪，`m.private` 里也还没有回显 `support`） |
 
 ---

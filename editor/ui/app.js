@@ -14,6 +14,8 @@ import {
 } from './operatorWizard.js';
 import { fmtNum, makeStatBar } from './statScale.js';
 import { renderKeepingFocus } from './focusKeep.js';
+// spine 判定的同一条规则：出怪页与干员页共用一个纯函数（填错不会报错的字段，两页都要当场说话）
+import { spineIsKnown } from './enemyWizard.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -213,15 +215,25 @@ function renderEditor() {
     field(t('位置'), select(['MELEE', 'RANGED'], () => s.position, (v) => { s.position = v; })),
     field(t('特性文字（只影响伤害类型推导）'), textInput(() => s.traitDesc, (v) => { s.traitDesc = v; })))));
 
-  // appearance — the repo ships no assets, so reuse an existing spine
-  const spineList = state.data.officialChess.map((c) => c.spine).filter(Boolean);
+  // appearance — the repo ships no assets, so reuse an existing spine.
+  // 候选来自服务端的 `spineChoices`（本机已装好的干员模型清单），只有在旧服务端没给时才退回官方干员列表。
+  const spineList = state.data.spineChoices?.length
+    ? state.data.spineChoices.map((c) => c.id)
+    : state.data.officialChess.map((c) => c.spine).filter(Boolean);
   const spines = [...new Set(spineList)].sort();
   const spineSel = h('select', { onchange: (e) => { s.assetsSpine = e.target.value; schedulePreview(); renderEditor(); } },
-    h('option', { value: '', selected: !s.assetsSpine }, t('（不指定 → 替代外观）')));
+    h('option', { value: '', selected: !s.assetsSpine }, t('（不指定 → 试玩里是一张贴图，不是模型）')));
   for (const sp of spines) spineSel.append(h('option', { value: sp, selected: s.assetsSpine === sp }, sp));
+  // **当场判定**：这是全表单第二贵的字段 —— 查不到就画一张头像菱形贴图，游戏照跑、没有任何报错，
+  // 于是作者只会觉得「模型怎么没渲染出来」。这里直接说清会画成什么，而不是等他去试玩里发现。
+  const spineVerdict = spineIsKnown(s.assetsSpine, spines);
+  const spineHint = h('p', { class: spineVerdict === 'ok' ? 'hint' : 'hint warn' },
+    spineVerdict === 'ok' ? t('✔ 会渲染成模型：复用 {0} 这套 Spine。', s.assetsSpine)
+      : t('✘ 不会渲染成模型：试玩里这个干员是一张**头像贴图**（菱形底），不是会动的模型。这个仓库不携带干员美术，只能复用已装好的 Spine id —— 从上面下拉里挑一个，或按模板新建（模板会把外观一起带过来）。'));
   box.append(h('div', { class: 'panel' },
     h('h2', { style: 'margin-top:0' }, t('外观（仓库不含素材，只能复用已有 Spine id）')),
-    h('div', { class: 'grid' }, field('assetsSpine', spineSel), field(t('或直接填 id'), textInput(() => s.assetsSpine, (v) => { s.assetsSpine = v; })))));
+    h('div', { class: 'grid' }, field('assetsSpine', spineSel), field(t('或直接填 id'), textInput(() => s.assetsSpine, (v) => { s.assetsSpine = v; }))),
+    spineHint));
 
   // 攻击范围与伤害分类：表单以前完全没有范围的入口（连默认值是多少都看不到），现在能挑官方形状并直接看小格阵
   const cls = classify({ profession: s.profession, subProfessionId: s.subProfessionId, position: s.position, traitDesc: s.traitDesc });

@@ -120,7 +120,8 @@ function SupportScreen({ st }) {
       </div>
       <p class="hint">
         每阶可以带的名额由服务器控制；卡池之外的干员不会出现在这里，也不会被服务器接受。
-        本局的助战在开局后锁定，改动在下一局生效。
+        带上的干员会进你的商店：像普通棋子一样摇得到、按阶级价买到、卖掉也按普通规则结算
+        （服务端可以在 data/support.json 的 prices 里给它单独定价）。本局的助战在开局后锁定，改动在下一局生效。
       </p>
       ${usage.map((u) => html`
         <div class="sp-tier" key=${u.tier}>

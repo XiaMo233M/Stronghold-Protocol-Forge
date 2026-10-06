@@ -50,7 +50,7 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
 
 ## 界面
 
-编辑器共八个页面，右上角可互相跳转：
+编辑器共九个页面，右上角可互相跳转：
 
 | 页面 | 用途 |
 |---|---|| `/` | **干员**编辑器（下栏详述） |
@@ -58,11 +58,12 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
 | `/enemy.html` | **怪物**编辑器（数值 + 特殊机制） |
 | `/wave.html` | **出怪**设计器（时间轴 + 明细表） |
 | `/item.html` | **装备**编辑器（一件装备 = 一个 spec = 两条记录） |
+| `/bond.html` | **盟约（羁绊）**编辑器（新增盟约，或**覆盖官方 23 条**的阈值 / 计数 / 说明 / 黑板数值 + 成员） |
 | `/kit.html` | **kit（行为层）**编辑器（直接编辑 `kits/<chessId>.js` 的代码，静态校验） |
 | `/voice.html` | **语音**编辑器（`pack.json` 的 `voices` 字段：干员 × 槽位 × 文件） |
 | `/pack.html` | **包管理**（导出/导入 `.zip`、`pack.json` 的 `support` 助战声明、**一键试玩**） |
 
-五个内容页（地图 / 怪物 / 出怪 / 装备 / kit）的侧栏都有一个**保存目标**下拉：列出所有工坊包（id 与 `pack.json` 里的名字），
+五个内容页（地图 / 怪物 / 出怪 / 装备 / 盟约）的侧栏或右栏都有一个**保存目标**下拉：列出所有工坊包（id 与 `pack.json` 里的名字），
 选好再保存。以前每次保存都要在对话框里手打一次包 id —— 打错就是存进别的包，或者凭空建一个空包。
 只有选「＋ 新建一个包…」时才问一次新包的 id（那一步确实只能问）。
 
@@ -390,9 +391,40 @@ node scripts/launch.mjs --port 3001     # 换个端口
   顶部显示同步状态。**卡池没到就显示「等待服务器下发」而不是猜**；服务器没开助战就显示「本服务器未开启助战」
 - 客户端 `ui/supportModel.js` + `ui/supportSync.js`：卡池未知时**等待不发**；被拒绝时**报错并保留玩家选择**
 - 对局开始后 `room.state` 的助战会锁定，改动在下一局生效
-- **随机禁用的干员不禁用助战**：随机禁用只影响商店抽卡（`server/match/pool.js`），被禁的干员作为助战照样发放
-  （以 0 份入库，与"效果发放"同一规则；`test/support.test.js` 锁住了这条）
-- 局内 `m.private.support` 回显 `{ selected, granted }`：卡池在开局前变化导致「选了但没发到」时客户端能解释
+- **助战干员进商店，不白送**（业主 2026-10-07 定下）：带上的干员在共享池里多一份拷贝，因此像普通棋子一样被摇到、
+  按阶级价买到、按普通规则卖掉。价格可以用 `data/support.json` 的 `prices`（`{ "<chessId>": 3 }`）单独定，
+  没配就用它的阶级价；助战摇出来的格子带 `support: true`，客户端可以据此加个标
+- **随机禁用的干员不禁用助战**：随机禁用只影响商店抽卡（`server/match/pool.js`），带上的助战照样进池
+  —— 哪怕它整条都在本局禁用名单里，池中仍有且仅有那一份助战拷贝（`test/support.test.js` 锁住了这条）
+- 局内 `m.private.support` 回显 `{ selected, granted }`：`granted` = 本局商店里真的买得到的那几个，
+  卡池在开局前变化导致「选了但买不到」时客户端能解释
+
+## 盟约（羁绊）编辑器
+
+第六个页面：**`/bond.html`**。盟约在引擎里分成三层，页面按这三层画，因为「改了就生效」只在其中两层成立：
+
+| 层 | 谁决定 | 改了会怎样 |
+|---|---|---|
+| **计数与激活** | `countMode` / `thresholds` / `countsHand` / `countsGoldenOnly` | 谁算成员、几个才算激活 —— 改阈值立刻改变商店里能不能凑出它 |
+| **数据面** | `weight` / `isCore` / `desc` / 图标 / `members` | 本局禁用抽签会不会抽到它、界面怎么显示、盟约弹窗列出哪些成员 |
+| **战斗加成** | 引擎里的实现 | **官方 23 条**的效果按 id 写在 `server/sim/content/bonds/*`，数值从记录读 → 覆盖官方 = 改数值立刻生效；**新增盟约**没有处理器，必须打开 `genericBuffs`（`server/sim/content/bonds/dataDriven.js` 按 `base_atk` / `atk_per_stack`（防御、生命同理）给成员加百分比） |
+
+- **新增 / 覆盖是同一件事的两种结果**：id 撞官方 23 条就是**覆盖**（保存时自动写进 `pack.json.overrides` 的 `bonds:<id>`，
+  页面顶上有一条红字说明），新 id 就是**新增**。覆盖官方时**不要**打开通用加成 —— 那会和官方处理器叠加两次。
+- **以模板新建**：官方 23 条或任何包里已有的盟约都能当底子（阈值、计数模式、说明、黑板数值一次带过来），
+  `spec.id` 一律留空：顺手复制 id 会直接变成「覆盖官方」。
+- **成员不是盟约自己说了算**：`members` 由**干员的 `bonds` 列表**推导（引擎按干员记录数人，弹窗列的就是它）。
+  所以成员那一段勾选等于去改那些干员的 spec —— **只有本包自有的干员能改**；要改官方干员的盟约归属，
+  得先把它覆盖/新建进本包（那是另一个明确动作，不该在盟约页顺手做掉）。
+- **图标只能复用本机已装好的**：客户端按**盟约 id**从 `data/assets.json` 的 `bonds` 取图（`bondIconUrl`），
+  一个包无法给 `assets.json` 加条目 —— 新增的盟约在盟约条上显示一个圆点，覆盖官方则沿用官方图标。页面会说出来。
+- **保存写两处**：`bond-specs/<bondId>.json`（可编辑的源）与 `bonds.json`（游戏读的产物），
+  并保证 `pack.json` 的 `content` 声明了 `bonds`（否则加载器**完全不读**这个包的 `bonds.json`，
+  与干员那条同一个坑）、覆盖官方时 `overrides` 里有 `bonds:<id>`。派生失败的保存会**还原**刚写的 spec，
+  一个字节都不留。
+- **手写的记录不会被毁掉**：没有 spec 的盟约记录在保存别的盟约时原样保留（与干员/地图/装备同一条规则）。
+- 相关测试：`test/bondAuthoring.test.js`（往返与校验）、`test/bondEditor.test.js`（接口 + 加载器/引擎端到端）、
+  `test/content/workshopBond.test.js`（通用加成在真实战斗里生效）。
 
 ## 出怪设计器（时间轴）
 
@@ -437,7 +469,14 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 | POST | `/api/preview` | `{ spec }` → 推导并校验，**不写盘** |
 | POST | `/api/packs/:pack/operators` | `{ spec }` → 写 specs 并重新生成 `chess.json` |
 | DELETE | `/api/packs/:pack/operators/:slug` | 删除 spec 及其拥有的记录 |
-| POST | `/api/support/toggle` | `{ chessId, tier, enabled }` → 增删 `data/support.json` 的卡池 |
+| POST | `/api/support/toggle` | `{ chessId, tier, enabled }` → 增删 `data/support.json` 的卡池（取消助战时顺手删掉它的专属售价） |
+| POST | `/api/support/price` | `{ chessId, price }` → 写 `data/support.json` 的 `prices`（`price: null`/空串即删除，回到阶级价） |
+| GET | `/api/bonds` | 官方 23 条盟约 + 各包的盟约状态（specs/记录/校验）+ 枚举候选 + 图标与效果清单 + **成员勾选用的干员表** |
+| GET | `/api/bonds/template?bondId=` | 把一条已有的盟约转成一份**可继续编辑的 spec**（模板新建用；id 留空） |
+| POST | `/api/bonds/preview` | `{ spec }` → 推导并校验，**不写盘**（与保存同一条路：撞官方 id 不报错，因为保存会自动声明覆盖） |
+| POST | `/api/packs/:pack/bonds` | `{ spec }` → 写 `bond-specs/` 并重新生成 `bonds.json`；补 `content: bonds`，覆盖官方时补 `overrides: bonds:<id>` |
+| POST | `/api/packs/:pack/bonds/:bondId/members` | `{ add?, remove? }` → 改**本包自有**干员的 `bonds`（成员由此推导），并重算盟约记录的 `members` |
+| DELETE | `/api/packs/:pack/bonds/:bondId` | 删除该盟约的 spec 及它拥有的记录（覆盖官方时同时收掉那条 `overrides` 声明） |
 | GET | `/api/stages` | 工坊地图列表 + 调色板 + 网格尺寸 + **可指派的模式列表** + **回合绑定要的出怪表与模式回合表 `roundBind`** + **保存目标包 `packs`** |
 | GET | `/api/stages/:pack/:id` | 该地图的**可编辑 spec**（源）与生成的记录 |
 | POST | `/api/stages/preview` | `{ spec }` → 推导路径与部署区并校验，**不写盘** |

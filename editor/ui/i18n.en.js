@@ -13,6 +13,7 @@ import { EN_ITEM } from './i18n.en.item.js';
 import { EN_KIT } from './i18n.en.kit.js';
 import { EN_VOICE } from './i18n.en.voice.js';
 import { EN_PACK } from './i18n.en.pack.js';
+import { EN_BOND } from './i18n.en.bond.js';
 
 /** 分片表：键是分片名（测试报告重复键时会指出是哪个分片），值是该分片的词条。 */
 export const EN_CHUNKS = Object.freeze({
@@ -25,6 +26,7 @@ export const EN_CHUNKS = Object.freeze({
   kit: EN_KIT,
   voice: EN_VOICE,
   pack: EN_PACK,
+  bond: EN_BOND,
 });
 
 export const EN = Object.freeze(Object.assign({}, ...Object.values(EN_CHUNKS)));

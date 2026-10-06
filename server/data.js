@@ -93,6 +93,8 @@ export function loadData(dir = DATA_DIR, { log = console, expected = DATA_FILES,
       for (const [k, v] of Object.entries(merged)) out[k] = v;
       log.info?.(`[workshop] applied ${loaded.packs.length} pack(s): ${workshopSummary(report)}`);
       for (const e of report.errors) log.warn?.(`[workshop] ${e.pack}: ${e.reason}`);
+      // 干员没有模型 = 试玩里画成一张头像贴图（游戏自己不会报错，所以这行日志往往是唯一的线索）
+      for (const l of report.looks || []) log.warn?.(`[workshop] ${l.pack}: ${l.reason}`);
     }
   }
   return deepFreeze(out);

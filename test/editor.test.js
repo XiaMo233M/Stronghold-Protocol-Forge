@@ -15,12 +15,19 @@ import { createEditorServer, UI_DIR } from '../editor/server.mjs';
 import { startServer, WORKSHOP_ASSET_PREFIX } from '../server/index.js';
 import { loadData } from '../server/data.js';
 import { GameData } from '../server/match/gamedata.js';
+import { SharedPool } from '../server/match/pool.js';
 import { checkSupport, normalizeSupportConfig } from '../shared/support.js';
 import { TILE_PALETTE } from '../shared/stageAuthoring.js';
 import { attrPowerOf, battleEffectivenessOf } from '../shared/enemyAuthoring.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DATA_DIR = join(ROOT, 'data');
+
+// 一个真的存在于本机模型清单里的 spine id：不指定外观的话，试玩里这个干员是一张头像贴图，编辑器现在会**拒绝**保存
+// （见 editor/server.mjs assetSpineIssues）。清单缺失时留空 —— 那种环境下编辑器不判定，测试也不必假装有模型。
+const SOME_SPINE = (() => {
+  try { return Object.keys(JSON.parse(fs.readFileSync(join(DATA_DIR, 'assets.json'), 'utf8')).chars || {})[0] ?? ''; } catch { return ''; }
+})();
 
 const SPEC = {
   id: 'editor_made',
@@ -29,6 +36,7 @@ const SPEC = {
   profession: 'SNIPER',
   subProfessionId: 'fastshot',
   position: 'RANGED',
+  assetsSpine: SOME_SPINE,
   stats: {
     normal: { maxHp: 1400, atk: 460, def: 130, res: 0, cost: 18, blockCnt: 1, bat: 1.0 },
     golden: { maxHp: 1800, atk: 600, def: 170, res: 0, cost: 18, blockCnt: 1, bat: 1.0 },
@@ -258,6 +266,85 @@ describe('workshop editor: the API', () => {
     assert.equal((await post(`${editor.url}/api/support/toggle`, { chessId: 'chess_char_5_01_a', tier: 5, enabled: true })).status, 200);
     assert.ok(JSON.parse(fs.readFileSync(supportFile, 'utf8')).pool['5'].includes('chess_char_5_01_a'));
     await post(`${editor.url}/api/support/toggle`, { chessId: 'chess_char_5_01_a', tier: 5, enabled: false });
+  });
+});
+
+// 「试玩里摇不到我的自定义干员」的根因就在这里：一个包可能先被别的页面建出来（content: ["stages"]…），
+// 之后往它里面存干员时，如果 `content` 不补上 "chess"，加载器就**完全不读这个包的 chess.json** ——
+// 干员在编辑器里、在磁盘上、语法都对，却永远进不了游戏，而且没有任何报错。
+describe('workshop editor: 保存干员必须补上 content 里的 chess', () => {
+  const PACK = 'stages-first';
+  const localApi = (p, opts) => fetch(editor.url + p, opts);
+  const manifestOf = () => JSON.parse(fs.readFileSync(join(wsRoot, PACK, 'pack.json'), 'utf8'));
+  const quietLog = { info() {}, warn() {}, error() {}, debug() {} };
+
+  test('先在别的页面建的包（content: ["stages"]）会在这里补上 chess', async () => {
+    const dir = join(wsRoot, PACK);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(join(dir, 'pack.json'), `${JSON.stringify({ id: PACK, name: '先做了地图的包', version: '0.1.0', content: ['stages'] }, null, 2)}\n`);
+    fs.writeFileSync(join(dir, 'stages.json'), `${JSON.stringify({ ws_first_map: { stageId: 'ws_first_map' } }, null, 2)}\n`);
+
+    const r = await post(`${editor.url}/api/packs/${PACK}/operators`, { spec: { ...SPEC, id: 'late_op', name: '后来加的干员' } }).then((x) => x.json());
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.deepEqual(manifestOf().content, ['chess', 'stages'], 'content 必须同时声明 chess 与原有的 stages，且按字典序');
+    assert.equal(manifestOf().name, '先做了地图的包', '补 content 不能顺手改掉别的字段');
+  });
+
+  test('这个干员真的进了加载器的数据，并且进得了商店池', async () => {
+    const data = loadData(DATA_DIR, { log: quietLog, workshopDir: wsRoot });
+    assert.ok(data.chess['chess_ws_late_op_a'], '加载器必须读到这个干员（这正是「摇不到」的反面）');
+    const gd = new GameData(data, 'mode_multi_hard');
+    assert.ok(gd.visibleChess.includes('chess_ws_late_op_a'), '它必须是商店可选干员');
+    assert.equal(gd.tierOf('chess_ws_late_op_a'), 5);
+    const pool = new SharedPool(gd, { banned: [] });
+    assert.equal(pool.has('chess_ws_late_op_a'), true, '共享池里必须有它的拷贝，否则商店摇不到');
+    assert.ok(pool.cap('chess_ws_late_op_a') > 0);
+  });
+
+  test('包管理页会点出「盘上有、content 没声明」的文件（手工编辑也躲不掉）', async () => {
+    // 手工把 chess 从 content 里删掉：文件还在盘上，加载器却不会读它 —— 这一类必须被报出来
+    fs.writeFileSync(join(wsRoot, PACK, 'pack.json'), `${JSON.stringify({ ...manifestOf(), content: ['stages'] }, null, 2)}\n`);
+    const r = await localApi('/api/packs/support').then((x) => x.json());
+    const summary = r.packs.find((p) => p.id === PACK);
+    assert.ok(summary, '这个包必须出现在包管理页的列表里');
+    assert.deepEqual(summary.undeclared, ['chess'], 'undeclared 要指出被忽略的那个文件');
+    assert.equal(summary.status, 'loaded', '加载器仍然说这个包没问题 —— 所以这条提示是唯一的线索');
+    // 再存一次干员就自动修好
+    await post(`${editor.url}/api/packs/${PACK}/operators`, { spec: { ...SPEC, id: 'late_op', name: '后来加的干员' } });
+    const after = await localApi('/api/packs/support').then((x) => x.json());
+    assert.deepEqual(after.packs.find((p) => p.id === PACK).undeclared, []);
+  });
+
+  // 「试玩里是一张贴图而不是模型」的第二半：编辑器不能再让一个没有模型的干员被存下去。
+  test('没有模型的干员会被拒绝保存，并说清试玩里会画成什么', { skip: SOME_SPINE ? false : '本机没有 data/assets.json（模型清单），编辑器不判定外观' }, async () => {
+    const noSpine = { ...SPEC, id: 'no_face', name: '没外观的干员' };
+    delete noSpine.assetsSpine;
+    const res = await post(`${editor.url}/api/packs/${PACK}/operators`, { spec: noSpine });
+    assert.equal(res.status, 400, '没有外观的干员不该被存下来');
+    const body = await res.json();
+    const issue = (body.errors || []).find((e) => e.code === 'NO_MODEL');
+    assert.ok(issue, JSON.stringify(body));
+    assert.match(issue.message, /贴图/, '错误必须说清会被画成贴图，而不是一句「缺少字段」');
+    assert.equal(fs.existsSync(join(wsRoot, PACK, 'specs/no_face.json')), false, '被拒绝时不能留下半份 spec');
+    // 空白外观与填错 id 是同一条规则
+    assert.equal((await post(`${editor.url}/api/packs/${PACK}/operators`, { spec: { ...SPEC, id: 'no_face2', assetsSpine: '' } })).status, 400);
+    assert.equal((await post(`${editor.url}/api/packs/${PACK}/operators`, { spec: { ...SPEC, id: 'no_face3', assetsSpine: 'char_does_not_exist' } })).status, 400);
+    // 填表时就该看见：/api/preview 也报同一条
+    const pv = await post(`${editor.url}/api/preview`, { spec: { ...SPEC, id: 'no_face4', assetsSpine: '' } }).then((r) => r.json());
+    assert.equal(pv.ok, false);
+    assert.ok(pv.errors.some((e) => e.code === 'NO_MODEL'));
+    // 挑一个已装好的模型就能存
+    const choices = (await localApi('/api/state').then((r) => r.json())).spineChoices;
+    assert.ok(choices.length > 0);
+    assert.equal((await post(`${editor.url}/api/packs/${PACK}/operators`, { spec: { ...SPEC, id: 'no_face5', assetsSpine: choices[0].id } })).status, 200);
+  });
+
+  test('外观候选来自本机的模型清单（chars 的键），不是随便一份列表', async () => {
+    const st = await localApi('/api/state').then((r) => r.json());
+    const ids = st.spineChoices.map((c) => c.id);
+    assert.ok(ids.includes(SOME_SPINE), '清单里必须有真实存在的模型 id');
+    assert.ok(ids.length >= 100, `本机装了 ${ids.length} 个干员模型`);
+    assert.equal(new Set(ids).size, ids.length, '候选不能重复');
   });
 });
 

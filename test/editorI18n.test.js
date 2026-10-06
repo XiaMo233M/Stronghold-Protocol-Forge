@@ -320,7 +320,7 @@ describe('编辑器双语：源码与词典一致', () => {
   });
 
   test('每页都有词条分片，且分片文件本身不被当成页面源码扫描', () => {
-    for (const page of ['shared', 'index', 'stage', 'enemy', 'wave', 'item', 'kit', 'voice', 'pack']) {
+    for (const page of ['shared', 'index', 'stage', 'enemy', 'wave', 'item', 'kit', 'voice', 'pack', 'bond']) {
       assert.ok(EN_CHUNKS[page], `缺少 ${page} 分片`);
     }
     assert.ok(UI_FILES.every((f) => !f.startsWith('i18n')), 'i18n*.js 不该被当成页面源码');

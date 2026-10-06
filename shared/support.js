@@ -12,7 +12,15 @@
 // Shape of the config (data/support.json):
 //   { enabled: bool, label: string, denyUnknown: bool,
 //     slots: { [tier]: n },            // how many supports of that tier one player may bring (tier 1–6)
-//     pool:  { [tier]: [chessId, …] } } // the base chess ids allowed at that tier (must match the record's own tier)
+//     pool:  { [tier]: [chessId, …] }, // the base chess ids allowed at that tier (must match the record's own tier)
+//     prices: { [chessId]: n } }       // OPTIONAL: what one of those operators costs in the shop of the player who
+//                                      // brought it (absent ⇒ its ordinary tier price). Selling stays ordinary.
+//
+// What a support IS (settled by the owner 2026-10-07): the operators a player brings are **in that player's shop** —
+// bought and sold like any other piece, at their tier price unless `prices` overrides it. They are NOT handed out for
+// free: the official mode's 助战 borrows an operator so it can be picked up, which is a shop channel, not a gift. A
+// brought operator therefore always gets at least one pool copy for the match (even when the match randomly banned it),
+// which is the one promise the docs make about 助战 vs the ban list.
 //
 // One implementation for both sides (the convention of shared/loadoutRecord.js): the server checks an incoming selection
 // with `checkSupport` and the client pre-checks with the same function, so the picker and the match never disagree.
@@ -60,6 +68,17 @@ export function normalizeSupportConfig(raw) {
     }
   }
   const usableTiers = Object.keys(slots).map(Number).filter((t) => slots[t] > 0 && Array.isArray(pool[t]) && pool[t].length > 0);
+  // 助战干员在自己商店里的标价（可选）。只接受**卡池里真的有**的 id：一条永远用不到的价目只会让安装方以为配好了。
+  // 没写的 id 用它的阶级价（GameData.chessPrice），所以「价格表」是覆盖而不是唯一来源。
+  /** @type {Record<string, number>} */
+  const prices = {};
+  if (isPlainObj(src.prices)) {
+    const inPool = new Set(Object.values(pool).flat());
+    for (const [id, v] of Object.entries(src.prices)) {
+      if (!isChessId(id) || !inPool.has(id)) continue;
+      if (Number.isInteger(v) && v >= 0 && v <= 99) prices[id] = v;
+    }
+  }
   return Object.freeze({
     enabled: src.enabled === true && usableTiers.length > 0,
     label: typeof src.label === 'string' && src.label ? src.label : '助战',
@@ -68,7 +87,29 @@ export function normalizeSupportConfig(raw) {
     strict: src.denyUnknown !== false,
     slots: Object.freeze(slots),
     pool: Object.freeze(pool),
+    prices: Object.freeze(prices),
   });
+}
+
+/**
+ * 一名玩家带上场的助战干员在**他自己商店**里的标价：`data/support.json` 的 `prices[id]`，没配就是 null（用阶级价）。
+ * @param {any} cfg normalizeSupportConfig(…) output
+ * @param {unknown} id base chess id
+ * @returns {number|null}
+ */
+export function supportPriceOf(cfg, id) {
+  if (!cfg || typeof id !== 'string' || !id) return null;
+  const v = cfg.prices ? cfg.prices[id] : undefined;
+  return Number.isInteger(v) ? v : null;
+}
+
+/** 卡池里配了专属标价的 id（编辑器的「助战」面板要显示它们）。 `{ [chessId]: price }`，按 id 排序。 */
+export function supportPrices(cfg, only = null) {
+  const out = {};
+  const prices = cfg && isPlainObj(cfg.prices) ? cfg.prices : {};
+  const ids = Array.isArray(only) ? [...only].sort() : Object.keys(prices).sort();
+  for (const id of ids) if (Number.isInteger(prices[id])) out[id] = prices[id];
+  return out;
 }
 
 /** Tiers a player may actually pick from, ascending (slots > 0 and a non-empty pool). */
@@ -116,11 +157,18 @@ export function supportTierOf(cfg, id, getChess) {
 }
 
 /**
- * The pool a client may show, grouped by tier — the shape the 助战 picker renders. `{ tier, slots, ids }` per usable
- * tier, ascending; `[]` while support is off. Sorted so the payload is deterministic (and diffable in tests).
+ * The pool a client may show, grouped by tier — the shape the 助战 picker renders. `{ tier, slots, ids, prices }` per
+ * usable tier, ascending; `[]` while support is off. `prices` carries only the ids `data/support.json` gives a shop
+ * price of their own (the rest cost their ordinary tier price, which the client already knows). Sorted so the payload is
+ * deterministic (and diffable in tests).
  */
 export function supportPicker(cfg) {
-  return supportTiers(cfg).map((tier) => ({ tier, slots: cfg.slots[tier], ids: [...cfg.pool[tier]] }));
+  return supportTiers(cfg).map((tier) => ({
+    tier,
+    slots: cfg.slots[tier],
+    ids: [...cfg.pool[tier]],
+    prices: supportPrices(cfg, cfg.pool[tier]),
+  }));
 }
 
 /**

@@ -411,6 +411,10 @@ export function packSummary(root, packId, loaded = null, { supportFile = null } 
     supportDerived = workshopSupportEntries({ chess: pack.files.chess }, [{ id: packId, files: pack.files, support }]).entries.map((e) => ({ id: e.id, tier: e.tier }));
   }
   const cfg = supportFile && fs.existsSync(supportFile) ? normalizeSupportConfig(JSON.parse(fs.readFileSync(supportFile, 'utf8'))) : null;
+  // 磁盘上有、`content` 却没声明的数据文件：`loadWorkshop()` 严格按 `content` 读，所以这些文件会被**静默忽略**
+  // —— 干员进不了商店、地图进不了轮换，而加载器还会说这个包「没问题」。`readPackDir` 故意读全盘（见它的注释），
+  // 正是为了让这里能把这份差异报出来，而不是靠作者自己发现。
+  const undeclared = Object.keys(pack.files).filter((f) => !content.includes(f)).sort();
   return {
     id: packId,
     name: typeof manifest.name === 'string' && manifest.name ? manifest.name : packId,
@@ -420,6 +424,7 @@ export function packSummary(root, packId, loaded = null, { supportFile = null } 
     hasAssets: pack.hasAssets,
     content,
     contentFiles: content.length,
+    undeclared,
     voiceLines,
     support,
     supportDerived,
@@ -462,6 +467,10 @@ function cliList(root, { json }) {
       bits.push(`助战 ${p.support.length} 个${derived ? `（${derived}）` : ''}`);
     }
     line(`pack ${p.id}`, `"${p.name}"`, `v${p.version}`, `·`, bits.join(' · '), `·`, p.status === 'loaded' ? 'VALID' : `REFUSED（${p.reason}）`);
+    if (p.undeclared.length) {
+      line(`  ! 盘上有 ${p.undeclared.map((f) => `${f}.json`).join('、')}，但 pack.json 的 content 没声明 —— 加载器会忽略这些文件`);
+      line(`    修法：在 pack.json 的 content 里补上 ${p.undeclared.join('、')}（编辑器里重新保存一次对应内容也会自动补）`);
+    }
   }
   line(`\n${packs.length} 个包`);
 }

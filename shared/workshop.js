@@ -318,6 +318,8 @@ export function applyWorkshop(base, packs) {
   const out = { ...(isPlainObj(base) ? base : {}) };
   const report = { packs: [], added: {}, overridden: {}, errors: [] };
   const push = (bag, file, id) => { (bag[file] ||= []).push(id); };
+  /** 工坊新增/覆盖的每一条干员记录（供 `chessLookIssues` 事后判断它有没有模型）。 */
+  const looked = [];
 
   for (const pack of Array.isArray(packs) ? packs : []) {
     if (!pack || typeof pack !== 'object' || !pack.id) continue;
@@ -338,6 +340,7 @@ export function applyWorkshop(base, packs) {
           continue;
         }
         merged[id] = rec;
+        if (file === 'chess') looked.push({ pack: pack.id, id, rec });
         if (exists) { overridden++; push(report.overridden, file, id); } else { added++; push(report.added, file, id); }
       }
       out[file] = merged;
@@ -348,9 +351,41 @@ export function applyWorkshop(base, packs) {
   linkWorkshopStages(out, report);
   mergeWorkshopVoices(out, packs, report);
   mergeWorkshopSupport(out, packs, report);
+  report.looks = chessLookIssues(out, looked);
   for (const list of Object.values(report.added)) list.sort();
   for (const list of Object.values(report.overridden)) list.sort();
   return { data: out, report };
+}
+
+/**
+ * 工坊干员的**外观能不能真的渲染成模型**：`assets.spine`（或 `charId`）必须是本机素材清单 `assets.chars` 里的键。
+ *
+ * 为什么单独查这一条：查不到时游戏**不会报错** —— `assets.spineEntry()` 返回 null，单位就画成一张头像菱形贴图，
+ * 于是作者只会觉得「模型没加载出来」。这个仓库不携带干员美术、一个包也无法自带（`assets.json` 不是可贡献的
+ * 数据文件），所以「复用已装好的 spine id」是唯一的路；这一层把它说出来，让手写包与编辑器写出来的包一样能被发现。
+ *
+ * 没有清单（素材流程没跑）时不判断：宁可不说，也不要乱说。
+ *
+ * @param {Readonly<Record<string, any>>} data 合并后的数据
+ * @param {Array<{ pack: string, id: string, rec: object }>} looked 工坊贡献的干员记录
+ * @returns {Array<{ pack: string, id: string, spine: string|null, code: string, reason: string }>}
+ */
+function chessLookIssues(data, looked) {
+  const chars = isPlainObj(data.assets) && isPlainObj(data.assets.chars) ? data.assets.chars : null;
+  if (!chars || !Object.keys(chars).length) return [];
+  const out = [];
+  for (const { pack, id, rec } of looked) {
+    const spine = isPlainObj(rec) && isPlainObj(rec.assets) && typeof rec.assets.spine === 'string' ? rec.assets.spine
+      : (isPlainObj(rec) && typeof rec.charId === 'string' ? rec.charId : null);
+    if (spine && Object.hasOwn(chars, spine)) continue;
+    out.push({
+      pack, id, spine, code: spine ? 'MODEL_UNKNOWN' : 'MODEL_MISSING',
+      reason: spine
+        ? `${id}: assets.spine "${spine}" is not in this install's model list (data/assets.json chars) — it renders as a flat portrait, not a model`
+        : `${id}: no assets.spine — it renders as a flat portrait, not a model. Reuse an installed spine id (an existing operator's) instead`,
+    });
+  }
+  return out;
 }
 
 /**
@@ -451,6 +486,8 @@ export function workshopSummary(report) {
     if (voices) bits.push(`${voices} voice line${voices === 1 ? '' : 's'}`);
     const support = report.support && report.support[p.id];
     if (support) bits.push(`助战 +${support.length}`);
+    const looks = (report.looks || []).filter((l) => l.pack === p.id);
+    if (looks.length) bits.push(`${looks.length} 个干员没有模型（会画成贴图）`);
     return `${p.name}(${p.id}): ${bits.length ? bits.join(', ') : 'nothing'}`;
   });
   if (report.supportOff) parts.push('助战 pool contributions off (support.json "workshop": false)');

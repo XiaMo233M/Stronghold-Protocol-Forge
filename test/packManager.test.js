@@ -21,6 +21,8 @@ import { loadData } from '../server/data.js';
 import { applyWorkshop } from '../shared/workshop.js';
 import { zipRead, zipWrite } from '../shared/zip.js';
 import { normalizePackManifest } from '../shared/workshop.js';
+import { normalizeSupportConfig } from '../shared/support.js';
+import { GameData } from '../server/match/gamedata.js';
 
 /** The manifest validator the loader uses: a written `pack.json` must still pass it (no boolean is trusted here). */
 const normalizeCheck = (raw) => normalizePackManifest(raw, raw && raw.id, { hasAssets: true }).ok === true;
@@ -413,6 +415,64 @@ describe('包管理：助战声明（GET /api/packs/support, POST /api/packs/<id
     assert.equal(p.operators[0].tier, null, 'the page shows the missing tier instead of inventing one');
     fs.rmSync(packDir('no-tier'), { recursive: true, force: true });
   });
+
+  // 「助战干员的商店售价能否修改」：能。写的是 data/support.json 的 prices，助战干员进商店后按它标价。
+  const P5 = 'chess_char_5_01_a';
+  /** 这几条要一个已知的卡池：前面的用例会改注入的 supportFile，所以自己写一份干净的。 */
+  const resetSupport = () => fs.writeFileSync(supportFile, `${JSON.stringify({
+    enabled: true, label: '助战', note: '测试用', slots: { 5: 1, 6: 1 }, pool: { 5: [P5], 6: ['chess_char_6_01_a'] }, denyUnknown: true,
+  }, null, 2)}\n`);
+
+  test('POST /api/support/price 给助战干员定价、改价、以及留空回到阶级价', async () => {
+    resetSupport();
+    assert.equal(JSON.parse(fs.readFileSync(supportFile, 'utf8')).prices, undefined, '起始没有 prices');
+
+    const r = await post(`${editor.url}/api/support/price`, { chessId: P5, price: 1 }).then((x) => x.json());
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(r.prices[P5], 1);
+    const written = JSON.parse(fs.readFileSync(supportFile, 'utf8'));
+    assert.equal(written.prices[P5], 1, '要写进 data/support.json 的 prices');
+    assert.deepEqual(written.pool, { 5: [P5], 6: ['chess_char_6_01_a'] }, '定价不能顺手改卡池');
+    assert.equal(written.note, '测试用', '未知字段原样保留');
+
+    // 引擎真的按它标价
+    const data = loadData(DATA_DIR, { log: quiet, workshopDir: null });
+    assert.equal(normalizeSupportConfig(written).prices[P5], 1);
+    assert.equal(new GameData({ ...data, support: written }, 'mode_multi_hard').supportPrice(P5), 1);
+
+    // 改价：0 是合法的（0 金）
+    const zero = await post(`${editor.url}/api/support/price`, { chessId: P5, price: 0 }).then((x) => x.json());
+    assert.equal(zero.prices[P5], 0);
+    // 留空 = 删掉，回到阶级价
+    const cleared = await post(`${editor.url}/api/support/price`, { chessId: P5, price: '' }).then((x) => x.json());
+    assert.equal(cleared.prices[P5], undefined);
+    assert.deepEqual(JSON.parse(fs.readFileSync(supportFile, 'utf8')).prices, {});
+  });
+
+  test('POST /api/support/price 拒绝卡池外的 id 与越界/非整数的价（并一字不写）', async () => {
+    resetSupport();
+    // 不在卡池里：先勾成助战再定价（否则那是一条永远用不到的价目）
+    const notInPool = await post(`${editor.url}/api/support/price`, { chessId: 'chess_char_1_01_a', price: 2 });
+    assert.equal(notInPool.status, 400);
+    assert.match((await notInPool.json()).error, /卡池/);
+    const before = fs.readFileSync(supportFile, 'utf8');
+    for (const price of [-1, 100, 1.5, 'abc']) {
+      const res = await post(`${editor.url}/api/support/price`, { chessId: P5, price });
+      assert.equal(res.status, 400, `price ${JSON.stringify(price)} 必须被拒`);
+    }
+    assert.equal(fs.readFileSync(supportFile, 'utf8'), before, '被拒时一个字节都不能变');
+  });
+
+  test('取消助战时顺手删掉它的专属售价（免得留下一条没人会读的价目）', async () => {
+    resetSupport();
+    await post(`${editor.url}/api/support/price`, { chessId: P5, price: 3 });
+    assert.equal(JSON.parse(fs.readFileSync(supportFile, 'utf8')).prices[P5], 3);
+    await post(`${editor.url}/api/support/toggle`, { chessId: P5, tier: 5, enabled: false });
+    const after = JSON.parse(fs.readFileSync(supportFile, 'utf8'));
+    assert.equal((after.prices || {})[P5], undefined);
+    assert.equal(after.pool['5'].includes(P5), false);
+    await post(`${editor.url}/api/support/toggle`, { chessId: P5, tier: 5, enabled: true });
+  });
 });
 
 // ---- 页面本身 -----------------------------------------------------------------------------------------------------
@@ -422,12 +482,12 @@ describe('包管理：页面（第八页）', () => {
     const html = await fetch(`${editor.url}/pack.html`).then((r) => r.text());
     assert.match(html, /工坊包管理/);
     assert.equal((await fetch(`${editor.url}/pack.js`)).status, 200);
-    for (const page of ['index.html', 'stage.html', 'enemy.html', 'wave.html', 'item.html', 'kit.html', 'voice.html']) {
+    for (const page of ['index.html', 'stage.html', 'enemy.html', 'wave.html', 'item.html', 'kit.html', 'voice.html', 'bond.html']) {
       const other = await fetch(`${editor.url}/${page}`).then((r) => r.text());
       assert.match(other, /pack\.html/, `${page} must link to the pack page`);
     }
-    // …and the new page links back to all seven, so the nav is symmetric
-    for (const page of ['index.html', 'stage.html', 'enemy.html', 'wave.html', 'item.html', 'kit.html', 'voice.html']) {
+    // …and the new page links back to all eight, so the nav is symmetric
+    for (const page of ['index.html', 'stage.html', 'enemy.html', 'wave.html', 'item.html', 'kit.html', 'voice.html', 'bond.html']) {
       assert.match(html, new RegExp(`\\./${page.replace('.', '\\.')}`), `pack.html must link to ${page}`);
     }
   });

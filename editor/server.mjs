@@ -34,7 +34,12 @@ import {
   deriveWave, validateWave, waveErrors, waveId as waveIdOf, waveSummaryLine,
   WAVE_KINDS, SPAWN_SLOTS, SPAWN_FIELDS, ROUNDS_PER_MODE,
 } from '../shared/waveAuthoring.js';
-import { normalizeSupportConfig } from '../shared/support.js';
+import { normalizeSupportConfig, supportPrices } from '../shared/support.js';
+// 盟约（羁绊）的创作层：spec → 记录、记录 → spec、校验。与干员/装备/地图共用同一条思路（纯函数在 shared/）。
+import {
+  deriveBondRecord, specFromBondRecord, validateBondRecord, bondErrors, looksLikeBondId,
+  BOND_COUNT_MODES, BOND_THRESHOLD_TEMPLATES, BOND_ACTIVE_TYPES, BOND_TYPES, GENERIC_BB_KEYS,
+} from '../shared/bondAuthoring.js';
 import {
   deriveItem, validateItem, itemErrors, itemIds as itemIdsOf, itemSummaryLine,
   ITEM_TYPES, ITEM_CATEGORIES, COUNT_TYPES, ITEM_DURATIONS, UPGRADE_NUMS,
@@ -116,8 +121,32 @@ function officialChess(dataDir) {
   return out.sort((a, b) => (a.tier - b.tier) || a.id.localeCompare(b.id));
 }
 
-/** id → tier for every chess id the server can see: the official data plus every pack's chess.json (support toggle). */
-function chessTierLookup(root, dataDir) {
+/**
+ * 「外观能不能渲染成模型」的判定。
+ *
+ * 为什么在编辑器里是**阻断性错误**、而在 `validateChessRecord` 里只是 warning：手写包可以故意用替代外观，那条
+ * 警告是给它们的；但编辑器是绝大多数作者的入口，而这一条**没有任何别的报错**——试玩里只会画一张头像菱形贴图，
+ * 作者基本会理解成「模型没加载出来」。`knownSpines` 为 null（本机没有 assets.json 清单）时不判断，绝不乱报错。
+ *
+ * @param {object} rec 普通形态记录 @param {{ knownSpines: Set<string>|null }} opts
+ */
+function assetSpineIssues(rec, { knownSpines }) {
+  if (!knownSpines) return [];
+  // 客户端取模型的方式就是这一句（public/js/render/app.js: rec.assets?.spine || rec.charId），
+  // 所以这里必须用同一个式子：只看 assets.spine 会把一个靠 charId 正常渲染的干员误判成贴图。
+  const fromAssets = rec && rec.assets && typeof rec.assets.spine === 'string' ? rec.assets.spine.trim() : '';
+  const spine = fromAssets || (rec && typeof rec.charId === 'string' ? rec.charId.trim() : '');
+  if (spine && knownSpines.has(spine)) return [];
+  return [{
+    field: 'assets.spine', code: 'NO_MODEL', severity: 'error',
+    message: spine
+      ? `assets.spine "${spine}" 不在本机模型清单里：游戏不会报错，试玩里这个干员会画成一张**头像贴图**（菱形底），不是模型`
+      : '没有指定外观（assets.spine 与 charId 都空）：游戏不会报错，试玩里这个干员会画成一张**头像贴图**（菱形底），不是模型',
+    hint: `从「外观」下拉里挑一个已装好的模型（本机共 ${knownSpines.size} 个），或者用「以模板新建」——模板会把外观一起带过来`,
+  }];
+}
+
+/** id → tier for every chess id the server can see: the official data plus every pack's chess.json (support toggle). */function chessTierLookup(root, dataDir) {
   /** @type {Map<string, number>} */
   const out = new Map();
   const official = readJson(path.join(dataDir, 'chess.json'), {}) || {};
@@ -622,8 +651,176 @@ async function toggleSupport(supportFile, chessId, tier, enabled) {
   if (enabled && at < 0) list.push(chessId);
   if (!enabled && at >= 0) list.splice(at, 1);
   list.sort();
+  // 取消助战时顺手删掉它的专属售价：留着就是一条永远用不到的价目（normalizeSupportConfig 也会丢掉它），
+  // 只会让安装方以为「这里配了东西」。
+  if (!enabled && raw.prices && typeof raw.prices === 'object' && !Array.isArray(raw.prices) && chessId in raw.prices) {
+    const prices = { ...raw.prices };
+    delete prices[chessId];
+    raw.prices = prices;
+  }
   await writeJson(supportFile, raw);
   return normalizeSupportConfig(raw);
+}
+
+/**
+ * 给一个助战干员定它在自己商店里的售价（`data/support.json` 的 `prices`）。`price === null` 就是删掉（回到阶级价）。 *
+ * 只接受**卡池里真有**的 id：一条永远用不到的价目只会让安装方以为配好了（`normalizeSupportConfig` 也会丢掉它），
+ * 所以宁可在这里拒绝并说清该先做什么。键序按 id 排序写回，免得文件在每次保存后抖动。
+ */
+async function setSupportPrice(supportFile, chessId, price) {
+  const raw = readJson(supportFile, null);
+  if (!raw || typeof raw !== 'object') throw refuse(500, 'data/support.json 不存在或读不出来');
+  const cfg = normalizeSupportConfig(raw);
+  if (!Object.values(cfg.pool).some((list) => list.includes(chessId))) {
+    throw refuse(400, `「${chessId}」不在助战卡池里：先在左边把它勾成助战，再来定它的商店售价`);
+  }
+  if (price !== null && (!Number.isInteger(price) || price < 0 || price > 99)) {
+    throw refuse(400, '商店售价必须是 0–99 的整数（0 表示不花钱，留空表示用它的阶级价）');
+  }
+  const current = raw.prices && typeof raw.prices === 'object' && !Array.isArray(raw.prices) ? raw.prices : {};
+  const next = { ...current };
+  if (price === null) delete next[chessId]; else next[chessId] = price;
+  raw.prices = Object.fromEntries(Object.keys(next).sort().map((k) => [k, next[k]]));
+  await writeJson(supportFile, raw);
+  return normalizeSupportConfig(raw);
+}
+
+// ---- 盟约 (bonds) ---------------------------------------------------------------------------------------------------
+//
+// 与干员/地图/怪物同一套约定：`<pack>/bond-specs/<bondId>.json` 是可编辑的源，`<pack>/bonds.json` 是产物。
+// 覆盖官方盟约是主要用法（官方效果按 id 实现、数值从记录读），所以判定冲突时要把本包**已声明覆盖**的那条排除掉。
+
+/** 盟约 spec 的目录名（与干员的 `specs/`、地图的 `stage-specs/` 同一套约定）。 */
+const BOND_SPEC_DIR = 'bond-specs';
+
+/** 官方盟约的精简清单：左栏、模板挑选与「这是覆盖官方还是新增」的判定都用它。 */
+function officialBondListOf(bondData) {
+  return Object.entries(bondData || {}).map(([bondId, rec]) => ({
+    bondId,
+    name: rec?.name ?? bondId,
+    isCore: !!rec?.isCore,
+    identifier: Number.isFinite(rec?.identifier) ? rec.identifier : 99,
+    weight: Number.isFinite(rec?.weight) ? rec.weight : 0,
+    countMode: rec?.countMode ?? null,
+    thresholds: Array.isArray(rec?.thresholds) ? rec.thresholds : [],
+    genericBuffs: rec?.genericBuffs === true,
+    memberCount: Array.isArray(rec?.members) ? rec.members.length : 0,
+    desc: typeof rec?.desc === 'string' ? rec.desc : '',
+  })).sort((a, b) => (a.isCore === b.isCore ? 0 : a.isCore ? -1 : 1) || (a.identifier - b.identifier) || a.bondId.localeCompare(b.bondId));
+}
+
+/** 每个非精锐干员（官方 + 每个包的 chess.json）与它携带的盟约：成员推导与「加谁进这个盟约」都用它。 */
+function allOperators(root, dataDir) {
+  /** @type {Map<string, {id: string, name: string, tier: number|null, from: string, bonds: string[]}>} */
+  const out = new Map();
+  const add = (from, recs) => {
+    for (const [id, rec] of Object.entries(recs || {})) {
+      if (!rec || rec.isGolden || out.has(id)) continue;
+      out.set(id, {
+        id, name: rec.name ?? id, tier: Number.isInteger(rec.tier) ? rec.tier : null, from,
+        bonds: Array.isArray(rec.bonds) ? rec.bonds.filter((b) => typeof b === 'string') : [],
+      });
+    }
+  };
+  add('official', readJson(path.join(dataDir, 'chess.json'), {}) || {});
+  for (const packId of packIdsFor(root)) add(packId, readJson(path.join(root, packId, 'chess.json'), {}) || {});
+  return [...out.values()].sort((a, b) => ((a.tier ?? 99) - (b.tier ?? 99)) || a.id.localeCompare(b.id));
+}
+
+/** 携带某个盟约的干员 id（官方记录的 `members` 就是这个列表，非精锐）。 */
+function memberIdsFor(root, dataDir, bondId) {
+  if (!bondId) return [];
+  return allOperators(root, dataDir).filter((o) => o.bonds.includes(bondId)).map((o) => o.id).sort();
+}
+
+/** 读任何包里的那条盟约记录（以模板新建时用；调用方先看官方）。 */
+function readPackBond(root, bondId) {
+  for (const packId of packIdsFor(root)) {
+    const recs = readJson(path.join(root, packId, 'bonds.json'), {}) || {};
+    if (Object.hasOwn(recs, bondId)) return recs[bondId];
+  }
+  return null;
+}
+
+/**
+ * 一个包的盟约状态：specs（可编辑的源）、记录（游戏读的产物）与每条的校验结论。
+ * 覆盖官方的 id 必须写进 `pack.json.overrides`，所以校验时把**本包已声明的那一条**从冲突里排除。
+ */
+function bondPackState(root, packId, officialBondIds) {
+  const packDir = path.join(root, packId);
+  const manifest = readJson(path.join(packDir, 'pack.json'), null);
+  const records = readJson(path.join(packDir, 'bonds.json'), {}) || {};
+  const specDir = path.join(packDir, BOND_SPEC_DIR);
+  const specs = [];
+  if (fs.existsSync(specDir)) {
+    for (const name of fs.readdirSync(specDir).sort()) {
+      if (!name.endsWith('.json')) continue;
+      const spec = readJson(path.join(specDir, name), null);
+      if (spec) specs.push(spec);
+    }
+  }
+  const managed = new Set(specs.map((s) => s.id).filter((v) => typeof v === 'string' && v));
+  const overrides = new Set(Array.isArray(manifest?.overrides) ? manifest.overrides : []);
+  const declared = new Set([...overrides].filter((o) => o.startsWith('bonds:')).map((o) => o.slice('bonds:'.length)));
+  const bonds = [];
+  for (const [bondId, rec] of Object.entries(records)) {
+    const blockers = new Set([...officialBondIds].filter((id) => id !== bondId || !declared.has(bondId)));
+    bonds.push({
+      bondId,
+      name: rec?.name ?? bondId,
+      isCore: !!rec?.isCore,
+      weight: Number.isFinite(rec?.weight) ? rec.weight : null,
+      thresholds: Array.isArray(rec?.thresholds) ? rec.thresholds : [],
+      genericBuffs: rec?.genericBuffs === true,
+      memberCount: Array.isArray(rec?.members) ? rec.members.length : 0,
+      official: officialBondIds.has(bondId),
+      declared: declared.has(bondId),
+      managed: managed.has(bondId),
+      issues: validateBondRecord(rec, { id: bondId, officialIds: blockers, engineIds: officialBondIds }),
+    });
+  }
+  bonds.sort((a, b) => (a.official === b.official ? 0 : a.official ? -1 : 1) || a.bondId.localeCompare(b.bondId));
+  return {
+    id: packId,
+    manifest,
+    specs,
+    bonds,
+    content: Array.isArray(manifest?.content) ? manifest.content : [],
+    declaredOverrides: [...declared].sort(),
+  };
+}
+
+/**
+ * 从一个包的 `bond-specs/` 重新生成 `bonds.json`，**保留没有 spec 拥有的记录**（手写或 CLI 写的不会被毁掉）。
+ * 一条无法派生的 spec 不拥有任何记录（与干员那条同一个理由：否则一次无关的保存会删掉别人的数据）。
+ */
+function regenerateBonds(root, packId, dataDir, dropIds = [], ctx = {}) {
+  const packDir = path.join(root, packId);
+  const existing = readJson(path.join(packDir, 'bonds.json'), {}) || {};
+  const specDir = path.join(packDir, BOND_SPEC_DIR);
+  const owned = new Set(Array.isArray(dropIds) ? dropIds : []);
+  const fresh = {};
+  const errors = [];
+  if (fs.existsSync(specDir)) {
+    for (const name of fs.readdirSync(specDir).sort()) {
+      if (!name.endsWith('.json')) continue;
+      const spec = readJson(path.join(specDir, name), null);
+      if (!spec) continue;
+      const bondId = typeof spec.id === 'string' ? spec.id.trim() : '';
+      const derived = deriveBondRecord(spec, {
+        memberIds: memberIdsFor(root, dataDir, bondId),
+        iconIds: ctx.iconIds ?? null,
+        effectIds: ctx.effectIds ?? null,
+      });
+      if (!derived.ok) { errors.push({ bondId: bondId || name, errors: derived.errors }); continue; }
+      owned.add(bondId);
+      fresh[bondId] = derived.bond;
+    }
+  }
+  const records = {};
+  for (const [id, rec] of Object.entries(existing)) if (!owned.has(id)) records[id] = rec;
+  Object.assign(records, fresh);
+  return { records, generated: Object.keys(fresh), errors };
 }
 
 // ---- 语音 (voices) -----------------------------------------------------------------------------------
@@ -884,6 +1081,15 @@ export async function createEditorServer(opts = {}) {
     : (typeof process.env.SP_FORGE_AUTHOR === 'string' && process.env.SP_FORGE_AUTHOR.trim() ? process.env.SP_FORGE_AUTHOR.trim() : null);
   const official = officialChess(dataDir);
 
+  // 盟约（羁绊）：官方 23 条是「覆盖」的对象，图标只能复用本机已装好的那些（一个包无法自带盟约图标），
+  // 效果 id 只要在 data/effects.json 里就有效（新盟约的战斗加成不靠它 —— 靠记录上的 genericBuffs）。
+  const bondData = readJson(path.join(dataDir, 'bonds.json'), {}) || {};
+  const officialBondIds = new Set(Object.keys(bondData));
+  const officialBondList = officialBondListOf(bondData);
+  const bondIconIds = new Set(Object.keys(readJson(path.join(dataDir, 'assets.json'), {})?.bonds ?? {}));
+  const bondEffectIds = new Set(Object.keys(readJson(path.join(dataDir, 'effects.json'), {}) || {}));
+  const bondEffectChoices = [...bondEffectIds].filter((id) => id.startsWith('bondeffect_')).sort();
+
   // 数值参照（表单旁边那把尺子）：干员按职业分组、怪物按档位分组，算法在 shared/statReference.js 里（纯函数，单独测）。
   const chessStatRanges = statReference(official, {
     groupOf: (o) => o.profession, valueOf: (o, f) => o.stats?.[f], fields: CHESS_STAT_FIELDS,
@@ -906,6 +1112,25 @@ export async function createEditorServer(opts = {}) {
     const seen = new Map();
     for (const e of officialEnemyList) if (e.spine && !seen.has(e.spine)) seen.set(e.spine, e.name);
     return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.id.localeCompare(b.id));
+  })();
+
+  // 干员外观的**唯一真凭据**是 `data/assets.json` 的 `chars`（键就是 spine id）：它由素材流程从本机客户端生成，
+  // 一个包无法自带干员模型。所以「填错/留空 = 试玩里画一张头像贴图」这件事能在这里被判定，而不是等作者去发现。
+  const modelSpines = (() => {
+    const chars = readJson(path.join(dataDir, 'assets.json'), {})?.chars;
+    if (!chars || typeof chars !== 'object' || Array.isArray(chars)) return null; // 没有清单就不判断（别乱报错）
+    const ids = new Set(Object.keys(chars));
+    return ids.size ? ids : null;
+  })();
+  /** spine 候选：id + 谁在用（多个干员复用一个模型时取第一个，清单按 id 排序所以结果稳定）。 */
+  const operatorSpineChoices = (() => {
+    if (!modelSpines) return [];
+    const named = new Map();
+    for (const c of Object.values(readJson(path.join(dataDir, 'chess.json'), {}) || {})) {
+      const sp = c && c.assets && typeof c.assets.spine === 'string' ? c.assets.spine : null;
+      if (sp && !named.has(sp)) named.set(sp, c.name ?? sp);
+    }
+    return [...modelSpines].map((id) => ({ id, name: named.get(id) ?? id })).sort((a, b) => a.id.localeCompare(b.id));
   })();
 
   const server = http.createServer((req, res) => {
@@ -935,6 +1160,9 @@ export async function createEditorServer(opts = {}) {
         loadErrors: loaded.errors,
         support: normalizeSupportConfig(readJson(supportFile, null)),
         officialChess: official,
+        // 外观候选：本机已装好的干员模型（data/assets.json 的 chars 键）。页面的 spine 判定与下拉都用它，
+        // 与「不指定就是一张贴图」这条规则同源。
+        spineChoices: operatorSpineChoices,
         officialCount: officialIds.size,
         // 表单旁边的尺子：职业 → 字段 → {min, p50, max, count}
         statRanges: chessStatRanges,
@@ -963,6 +1191,7 @@ export async function createEditorServer(opts = {}) {
       for (const [id, rec] of [[derived.base.chessId, derived.base], [derived.golden.chessId, derived.golden]]) {
         issues.push(...validateChessRecord(rec, { id, officialIds }));
       }
+      issues.push(...assetSpineIssues(derived.base, { knownSpines: modelSpines }));
       return sendJson(res, 200, {
         ok: authoringErrors(issues).length === 0,
         errors: issues.filter((i) => i.severity === 'error'),
@@ -980,17 +1209,32 @@ export async function createEditorServer(opts = {}) {
       if (!derived.ok) return sendJson(res, 400, { error: 'the spec is invalid', errors: derived.errors });
       const ids = chessIds(spec.id);
       if (!SLUG_RE.test(ids.slug)) throw Object.assign(new Error('bad operator id'), { status: 400 });
-      const errs = [...validateChessRecord(derived.base, { id: derived.base.chessId, officialIds }), ...validateChessRecord(derived.golden, { id: derived.golden.chessId, officialIds })];
+      const errs = [
+        ...validateChessRecord(derived.base, { id: derived.base.chessId, officialIds }),
+        ...validateChessRecord(derived.golden, { id: derived.golden.chessId, officialIds }),
+        // 没有模型 = 试玩里是一张贴图：宁可在这里拒绝，也不要让作者去试玩里猜
+        ...assetSpineIssues(derived.base, { knownSpines: modelSpines }),
+      ];
       const blocking = authoringErrors(errs);
       if (blocking.length) return sendJson(res, 400, { error: 'the operator did not validate', errors: blocking });
 
       const packDir = path.join(root, packId);
       const manifestPath = path.join(packDir, 'pack.json');
-      if (!fs.existsSync(manifestPath)) {
-        await writeJson(manifestPath, {
+      // `content` 必须声明 chess，否则加载器**完全不读这个包的 chess.json**：干员在编辑器里存在、在磁盘上存在、
+      // 语法也没问题，却永远进不了游戏（商店摇不到、试玩里没有）——一条没有任何报错的静默失败。
+      // 这个包可能是别的页面建的（content: ['stages'] …），所以这里补一条，而不是只在「包不存在」时才写。
+      const existingManifest = readJson(manifestPath, null);
+      const content = new Set(Array.isArray(existingManifest?.content) ? existingManifest.content : []);
+      content.add('chess');
+      const nextManifest = existingManifest
+        ? { ...existingManifest, content: [...content].sort() }
+        : {
           id: packId, name: spec.name || packId, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null,
-          description: null, gameVersion: '0.1.3', content: ['chess'], overrides: [],
-        });
+          description: null, gameVersion: '0.1.3', content: [...content].sort(), overrides: [],
+        };
+      const declared = Array.isArray(existingManifest?.content) ? existingManifest.content : [];
+      if (!existingManifest || declared.length !== content.size || declared.some((f) => !content.has(f))) {
+        await writeJson(manifestPath, nextManifest);
       }
       const specPath = path.join(packDir, 'specs', `${ids.slug}.json`);
       const previousSpec = readJson(specPath, null);
@@ -1021,6 +1265,194 @@ export async function createEditorServer(opts = {}) {
       return sendJson(res, 200, { ok: true, removed: slug, generated: regen.generated, errors: regen.errors });
     }
 
+    // ---- 盟约 (bonds) -----------------------------------------------------------------------------------
+    //
+    // 与干员/地图/怪物同一套文件模型：`<pack>/bond-specs/<bondId>.json` 是可编辑的**源**，
+    // `<pack>/bonds.json` 是游戏读的**产物**。没有 spec 的记录原样保留（手写或 CLI 写的包不会被毁掉）。
+    //
+    // 与干员不同的一点：**覆盖官方盟约是主要用法**（官方 23 条的效果由引擎里按 id 实现，数值全从记录读，
+    // 所以改一条官方盟约的阈值/黑板立刻生效）。因此这里按包声明的 `bonds:<id>` 放行官方 id。
+    if (p === '/api/bonds' && method === 'GET') {
+      return sendJson(res, 200, {
+        workshopRoot: root,
+        packs: packChoices(root),
+        officialCount: officialBondIds.size,
+        officialBonds: officialBondList,
+        packBonds: packIdsFor(root).map((id) => bondPackState(root, id, officialBondIds)),
+        countModes: [...BOND_COUNT_MODES],
+        thresholdTemplates: [...BOND_THRESHOLD_TEMPLATES],
+        activeTypes: [...BOND_ACTIVE_TYPES],
+        bondTypes: [...BOND_TYPES],
+        genericKeys: [...GENERIC_BB_KEYS],
+        // 图标与效果候选：**只列本机真的有的**，界面因此能当场说清「这个图标/效果查不到」
+        iconChoices: [...bondIconIds].sort(),
+        effectChoices: bondEffectChoices,
+        operators: allOperators(root, dataDir),
+      });
+    }
+
+    // 以现成盟约（官方 23 条或任何包里的）为模板：转成一份可继续编辑的 spec
+    if (p === '/api/bonds/template' && method === 'GET') {
+      const bondId = url.searchParams.get('bondId') || '';
+      const rec = bondData[bondId] ?? readPackBond(root, bondId);
+      if (!rec) throw refuse(404, `找不到盟约记录 ${bondId}`);
+      const spec = specFromBondRecord(rec);
+      if (!spec) throw refuse(400, `盟约记录 ${bondId} 不是对象`);
+      return sendJson(res, 200, { ok: true, bondId, official: Object.hasOwn(bondData, bondId), spec });
+    }
+
+    // 不写盘的校验（表单旁边的实时结论）：与保存走同一个 derive + validate，所以页面看到的错就是保存会遇到的错。
+    // 注意这里**不**因为「id 撞官方」报错：保存时会自动把 `bonds:<id>` 写进 overrides（那是这一页的主要用法），
+    // 所以预览也必须按同一条路走 —— 否则作者在保存前会看到一条保存时不会发生的错。
+    if (p === '/api/bonds/preview' && method === 'POST') {
+      const { spec } = await readBody(req);
+      const bondId = typeof spec?.id === 'string' ? spec.id.trim() : '';
+      const overriding = officialBondIds.has(bondId);
+      const blockers = new Set([...officialBondIds].filter((id) => id !== bondId));
+      const derived = deriveBondRecord(spec, {
+        memberIds: memberIdsFor(root, dataDir, bondId),
+        iconIds: bondIconIds,
+        effectIds: bondEffectIds,
+      });
+      if (!derived.ok) return sendJson(res, 200, { ok: false, errors: derived.errors, warnings: [], overriding });
+      const issues = validateBondRecord(derived.bond, { id: bondId, officialIds: blockers, engineIds: officialBondIds });
+      return sendJson(res, 200, {
+        ok: bondErrors(issues).length === 0,
+        overriding,
+        errors: issues.filter((i) => i.severity === 'error'),
+        warnings: [...derived.warnings, ...issues.filter((i) => i.severity === 'warning').map((i) => i.message)],
+        bond: derived.bond,
+      });
+    }
+
+    // 新增/修改一条盟约：spec → bond-specs/<bondId>.json，然后重新生成这个包的 bonds.json
+    if (p.startsWith('/api/packs/') && p.endsWith('/bonds') && method === 'POST') {
+      const packId = p.slice('/api/packs/'.length, -'/bonds'.length);
+      if (!PACK_ID_RE.test(packId)) throw refuse(400, '工坊包 id 不合法（只能是字母、数字、下划线和短横线）');
+      const { spec } = await readBody(req);
+      const packDir = path.join(root, packId);
+      const manifestPath = path.join(packDir, 'pack.json');
+      const existingManifest = readJson(manifestPath, null);
+      const declaredOverrides = new Set(Array.isArray(existingManifest?.overrides) ? existingManifest.overrides : []);
+      const bondId = typeof spec?.id === 'string' ? spec.id.trim() : '';
+      const overriding = officialBondIds.has(bondId);
+      const blockers = new Set([...officialBondIds].filter((id) => id !== bondId)); // 本包要覆盖的那条不算冲突
+      const derived = deriveBondRecord(spec, {
+        memberIds: memberIdsFor(root, dataDir, bondId),
+        iconIds: bondIconIds,
+        effectIds: bondEffectIds,
+      });
+      if (!derived.ok) return sendJson(res, 400, { error: '盟约 spec 不合法', errors: derived.errors });
+      const issues = validateBondRecord(derived.bond, { id: bondId, officialIds: blockers, engineIds: officialBondIds });
+      const blocking = bondErrors(issues);
+      if (blocking.length) return sendJson(res, 400, { error: '这条盟约没通过校验', errors: blocking });
+
+      // content 必须声明 bonds，否则加载器完全不读这个包的 bonds.json（与干员那条同一个坑）。
+      // 顺序很重要：**先**把 spec 写盘、再派生、派生失败就把 spec 还原 —— 否则一次失败的保存会留下一个
+      // 声明了 bonds 却没有 bonds.json 的包（加载器会警告「declared but missing」）。
+      const content = new Set(Array.isArray(existingManifest?.content) ? existingManifest.content : []);
+      content.add('bonds');
+      const overrides = new Set(declaredOverrides);
+      if (overriding) overrides.add(`bonds:${bondId}`);
+      const nextManifest = existingManifest
+        ? { ...existingManifest, content: [...content].sort(), overrides: [...overrides].sort() }
+        : {
+          id: packId, name: spec.name || packId, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null,
+          description: null, gameVersion: '0.1.3', content: [...content].sort(), overrides: [...overrides].sort(),
+        };
+      const specPath = path.join(packDir, BOND_SPEC_DIR, `${bondId}.json`);
+      const previousSpec = readJson(specPath, null);
+      await writeJson(specPath, withForgeMeta(spec, { author: authorFor(packDir, forgeAuthor), packId, now: new Date().toISOString(), previous: previousSpec }));
+      const regen = regenerateBonds(root, packId, dataDir, [], { iconIds: bondIconIds, effectIds: bondEffectIds });
+      if (regen.errors.length) {
+        // 还原这一次写的 spec（第一次保存就删掉），保证「失败的保存一个字节都不留」
+        if (previousSpec) await writeJson(specPath, previousSpec);
+        else await fsp.rm(specPath, { force: true });
+        return sendJson(res, 400, { error: '这个包里还有一条盟约 spec 无法派生 —— 先修好它再保存', errors: regen.errors });
+      }
+      await writeJson(manifestPath, nextManifest);
+      await writeJson(path.join(packDir, 'bonds.json'), regen.records);
+      return sendJson(res, 200, {
+        ok: true, bondId, overriding, generated: regen.generated,
+        warnings: [...derived.warnings, ...issues.filter((i) => i.severity === 'warning').map((i) => i.message)],
+      });
+    }
+
+    // 删除一条盟约（它的 spec 与它拥有的记录）
+    if (p.startsWith('/api/packs/') && p.includes('/bonds/') && method === 'DELETE') {
+      const rest = p.slice('/api/packs/'.length);
+      const cut = rest.indexOf('/bonds/');
+      const packId = rest.slice(0, cut);
+      const bondId = rest.slice(cut + '/bonds/'.length);
+      if (!PACK_ID_RE.test(packId) || !looksLikeBondId(bondId)) throw refuse(400, '路径不合法');
+      const specPath = path.join(root, packId, BOND_SPEC_DIR, `${bondId}.json`);
+      if (fs.existsSync(specPath)) await fsp.rm(specPath);
+      const regen = regenerateBonds(root, packId, dataDir, [bondId], { iconIds: bondIconIds, effectIds: bondEffectIds });
+      await writeJson(path.join(root, packId, 'bonds.json'), regen.records);
+      // 覆盖官方的那条记录被删掉后，overrides 里那条声明也一起收掉 —— 留着一个没对象的覆盖声明只会让人困惑
+      const manifestPath = path.join(root, packId, 'pack.json');
+      const manifest = readJson(manifestPath, null);
+      if (manifest && Array.isArray(manifest.overrides) && manifest.overrides.includes(`bonds:${bondId}`)) {
+        await writeJson(manifestPath, { ...manifest, overrides: manifest.overrides.filter((o) => o !== `bonds:${bondId}`) });
+      }
+      return sendJson(res, 200, { ok: true, removed: bondId, generated: regen.generated, errors: regen.errors });
+    }
+
+    // 谁属于这个盟约：`members` 是由**干员记录**的 `bonds` 推导的，所以这里改的是那些干员的 spec。
+    // 只动本包自有的干员（有 spec 才归这个包管）—— 官方干员的盟约归属要改，得先把这个干员覆盖进包里，
+    // 那是「覆盖官方记录」这个明确动作，不该在盟约页顺手做掉。
+    if (p.startsWith('/api/packs/') && p.includes('/bonds/') && p.endsWith('/members') && method === 'POST') {
+      const rest = p.slice('/api/packs/'.length);
+      const cut = rest.indexOf('/bonds/');
+      const packId = rest.slice(0, cut);
+      const bondId = rest.slice(cut + '/bonds/'.length, -'/members'.length);
+      if (!PACK_ID_RE.test(packId) || !looksLikeBondId(bondId)) throw refuse(400, '路径不合法');
+      const body = await readBody(req);
+      const ids = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x) : []);
+      const add = ids(body.add);
+      const remove = ids(body.remove);
+      if (!add.length && !remove.length) throw refuse(400, '没有要改的干员（add / remove 都是空的）');
+      const packDir = path.join(root, packId);
+      const specDir = path.join(packDir, 'specs');
+      const specs = new Map(); // chessId(普通或精锐) → { path, spec }
+      if (fs.existsSync(specDir)) {
+        for (const name of fs.readdirSync(specDir).sort()) {
+          if (!name.endsWith('.json')) continue;
+          const spec = readJson(path.join(specDir, name), null);
+          const pair = spec ? chessIds(spec.id) : null;
+          if (!pair) continue;
+          specs.set(pair.base, { path: path.join(specDir, name), spec });
+          specs.set(pair.golden, { path: path.join(specDir, name), spec });
+        }
+      }
+      const changed = [];
+      const unknown = [];
+      for (const [list, want] of [[add, true], [remove, false]]) {
+        for (const chessId of list) {
+          const hit = specs.get(chessId);
+          if (!hit) { unknown.push(chessId); continue; }
+          const cur = Array.isArray(hit.spec.bonds) ? hit.spec.bonds : [];
+          const has = cur.includes(bondId);
+          if (want === has) continue;
+          hit.spec.bonds = want ? [...cur, bondId] : cur.filter((b) => b !== bondId);
+          await writeJson(hit.path, hit.spec);
+          changed.push({ chessId, added: want });
+        }
+      }
+      if (unknown.length) {
+        throw refuse(400, `这些干员不归这个包管：${unknown.join('、')}。先把它覆盖/新建进这个包，再改它的盟约归属`);
+      }
+      const regen = regeneratePack(root, packId, officialIds);
+      if (regen.errors.length) throw refuse(400, `这个包里还有干员 spec 无法派生：${JSON.stringify(regen.errors)}`);
+      await writeJson(path.join(packDir, 'chess.json'), regen.records);
+      // 成员的变动会改变盟约记录的 `members`（弹窗里列的就是它），所以顺手把盟约重新生成一次
+      const bondRegen = regenerateBonds(root, packId, dataDir, [], { iconIds: bondIconIds, effectIds: bondEffectIds });
+      if (!bondRegen.errors.length && Object.keys(bondRegen.records).length) {
+        await writeJson(path.join(packDir, 'bonds.json'), bondRegen.records);
+      }
+      return sendJson(res, 200, { ok: true, changed, members: memberIdsFor(root, dataDir, bondId) });
+    }
+
     // 是否助战: add/remove the id in data/support.json's pool for its tier
     if (p === '/api/support/toggle' && method === 'POST') {
       const { chessId, tier, enabled } = await readBody(req);
@@ -1032,6 +1464,18 @@ export async function createEditorServer(opts = {}) {
       if (actual !== tier) throw Object.assign(new Error(`tier ${tier} does not match the record's tier ${actual}`), { status: 400 });
       const cfg = await toggleSupport(supportFile, chessId, tier, enabled === true);
       return sendJson(res, 200, { ok: true, enabled: enabled === true, support: cfg });
+    }
+
+    // 助战干员的商店售价（data/support.json 的 prices）：留空/空串 = 回到阶级价
+    if (p === '/api/support/price' && method === 'POST') {
+      const { chessId, price } = await readBody(req);
+      if (typeof chessId !== 'string' || !chessId) throw refuse(400, 'chessId is required');
+      const blank = price === null || price === undefined || price === '';
+      const value = blank ? null : Number(price);
+      if (!blank && !Number.isFinite(value)) throw refuse(400, '商店售价要填数字（留空表示用它的阶级价）');
+      // 不做四舍五入：1.5 金是作者填错了，拒绝比悄悄变成 1 金好
+      const cfg = await setSupportPrice(supportFile, chessId, blank ? null : value);
+      return sendJson(res, 200, { ok: true, prices: supportPrices(cfg) });
     }
 
     // ---- 一键试玩 (playtest): 起一个游戏服务器子进程，让作者立刻进一局 -------------------------------
@@ -1082,6 +1526,8 @@ export async function createEditorServer(opts = {}) {
         supportFile: SUPPORT_FILE,
         enabled: cfg.enabled,
         pool: cfg.pool,
+        // 助战干员在自己商店里的标价（`prices`）：没配的用阶级价，所以这是「覆盖表」而不是唯一来源
+        prices: supportPrices(cfg),
         loadedErrors: loaded.errors,
         packs,
       });
