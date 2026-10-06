@@ -2,8 +2,9 @@
 
 export const PROTOCOL_VERSION = 1;
 /** Release version shown to players (title screen, server banner, /healthz). Kept equal to package.json "version"
- * (test/version.test.js); PROTOCOL_VERSION above is the separate wire-format number. */
-export const APP_VERSION = '0.1.3';
+ * (test/version.test.js); PROTOCOL_VERSION above is the separate wire-format number. The release TAG spells both halves
+ * out — `v<this>-<upstream>` (README 「版本号」) — because this one has to stay a plain three-part semver. */
+export const APP_VERSION = '0.2.0';
 
 export const MAX_SEATS = 4;
 /**

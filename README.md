@@ -1,6 +1,6 @@
 # Stronghold-Protocol-Forge · 卫戍协议工坊编辑器
 
-![version](https://img.shields.io/badge/version-0.1.3-2ea44f)
+![version](https://img.shields.io/badge/version-0.2.0-2ea44f)
 ![license](https://img.shields.io/badge/code%20license-GPL--3.0--or--later-blue)
 ![node](https://img.shields.io/badge/node-22%20%7C%2024-339933)
 
@@ -120,7 +120,7 @@ npm run editor                                                                  
 
 - **独立模拟**（单人）与**同盟模拟**（1–4 人**合作**，没有 PvP；空位可以加 AI 队友）。
 - 服务器是一个 Node.js 程序，**战斗在各玩家的浏览器里模拟**（和官方一样），服务器只管经济与回合，一台低功耗小主机就能开服。
-- 当前版本 0.1.3：修复了 0.1.2 发布后玩家和 GitHub 上反馈的问题，详见 [CHANGELOG.md](CHANGELOG.md)。仍有少数规则按推断实现，与官方不一致的地方欢迎在 Issue 里反馈。
+- **本仓库打包的上游游戏本体为 0.1.3**（本仓库自己的版本是 0.2.0，两者的读法见[版本号怎么读](#版本号怎么读)）：修复了 0.1.2 发布后玩家和 GitHub 上反馈的问题，详见 [CHANGELOG.md](CHANGELOG.md)。仍有少数规则按推断实现，与官方不一致的地方欢迎在 Issue 里反馈。
 
 下面是给作者做参照的游戏画面。
 
@@ -151,24 +151,27 @@ npm run editor                                                                  
 
 ### 快速开始（游戏）
 
-#### 方式一：整合包（推荐）
+发行页上的两个包对应下面两种方式，按需选一个即可。
 
-整合包里已经包含代码、运行依赖和全部美术 / 音频（含官方 3D 棋盘贴图），解压就能玩，不需要再下载任何东西。
+#### 方式一：零安装整合包（Windows x64，推荐）
 
-1. **安装 Node.js 22 或 24（LTS）**
-   - Windows：在 PowerShell 里运行 `winget install OpenJS.NodeJS.LTS`，或到 <https://nodejs.org/zh-cn/download> 下载安装包。
-   - macOS：`brew install node@22`，或到官网下载安装包。
-   - Linux：发行版的包管理器、nvm 或 fnm。
-2. **下载**：在 [Releases](../../releases/latest) 页面下载最新版本（v0.1.3）的整合包（zip），解压到一个路径较短的文件夹（Windows 上建议不要放在 OneDrive 同步的目录里）。
-3. **启动**
-   - Windows：双击 **`scripts\start-windows.bat`**。如果弹出「安全警告」，点「运行」；Windows 防火墙弹窗请勾选「专用网络」并允许。
-   - macOS / Linux：在解压出的文件夹里运行 `./scripts/start.sh`（或 `bash scripts/start.sh`）。
-4. 浏览器会自动打开 `http://localhost:3000`。窗口里列出的局域网地址可以直接发给同一网络的朋友。关闭窗口（或按 `Ctrl+C`）即停止服务器。
+**不需要装 Node、也不需要再下载素材**：包里自带便携 Node 22，解压后双击 `启动游戏.bat` 就会启动服务器并打开浏览器。
 
-#### 方式二：从源码运行
+1. **下载**：在 [Releases](../../releases/latest) 页面下载最新版本的 **`…-win-x64.zip`**（约 500 MB）。
+2. **解压**到一个路径较短、**不在 OneDrive 同步范围内**的文件夹，例如 `C:\Stronghold-Protocol`。
+3. **双击包根目录里的 `启动游戏.bat`**。Windows 防火墙弹窗请勾选「专用网络」并允许；关闭窗口即停止服务器。
+4. 浏览器会自动打开 `http://localhost:3000`。窗口里列出的局域网地址可以直接发给同一网络的朋友。
+
+包内含编辑器、`docs/prompts/` 官方 prompt、全部公开镜像素材，以及从本机客户端提取的官方素材：**官方 3D 棋盘**、官方界面底板、灼热 / 炽焰源石虫的官方模型。素材版权归上海鹰角网络 / Yostar，**仅限非商业使用**，包内附 `NOTICE.md` 与 `THIRD-PARTY-NOTICES.md`。**不含**角色配音台词（`voice_cn/*`，客户端没有播放路径，设计上默认关闭）；每个干员的战斗音效（攻击 / 受击 / 技能）是齐的。
+
+macOS / Linux 请用方式二。
+
+#### 方式二：源码包 / 从源码运行（不含素材）
+
+包里只有代码，素材在首次运行时从公开镜像下载（约 270 MB，可中断续传）。
 
 ```bash
-git clone https://github.com/sganggs/Stronghold-Protocol.git
+unzip Stronghold-Protocol-Forge-*-src.zip     # 或 git clone 本仓库
 cd Stronghold-Protocol
 npm install        # 安装依赖（postinstall 会把 pixi / preact / three 复制到 public/vendor）
 npm run setup      # 检查环境，并从公开镜像下载约 270 MB 美术 / 音频（可中断，再次运行会续传）
@@ -181,11 +184,15 @@ npm start          # 启动服务器：http://localhost:3000
 - 素材下载优先使用 GitHub，失败时自动改用 jsDelivr 镜像。
 - `npm run doctor`（即 `node tools/doctor.mjs`）可以随时诊断：Node 版本、素材是否完整、端口占用、局域网地址和防火墙。
 
+#### 版本号怎么读
+
+发行 tag 写成 **`v<forge>-<上游>`**：`v0.2.0-0.1.3` = 本仓库（Forge 工坊编辑器）**0.2.0** + 上游游戏（[sganggs/Stronghold-Protocol](https://github.com/sganggs/Stronghold-Protocol)）**0.1.3**。程序里显示的版本（标题页、启动横幅、`/healthz`）只是前半部分，因为仓库自己的元数据检查要求它是三段普通 semver —— 详见 [CHANGELOG.md](CHANGELOG.md) 与 `test/version.test.js`。
+
 #### 系统要求
 
 | 项目 | 要求 |
 |---|---|
-| 开服的电脑 | Windows / macOS / Linux，Node.js 22 或 24（LTS）；磁盘约 400–500 MB（素材、依赖与可选的本地提取贴图）；内存空闲约 100 MB，每局再加几 MB |
+| 开服的电脑 | **方式一**：Windows 10/11 x64，不需要装任何东西（自带 Node）。**方式二**：Windows / macOS / Linux + Node.js 22 或 24（LTS）。磁盘约 400–500 MB（素材、依赖与可选的本地提取贴图），整合包解压后更多；内存空闲约 100 MB，每局再加几 MB |
 | 玩家 | 支持 WebGL 的现代浏览器（Chrome / Edge / Firefox / Safari 最新版），电脑、手机或平板（横屏） |
 | 网络 | 首次进入游戏时，每位玩家要从开服的电脑下载几十 MB 素材（之后走浏览器缓存）；对局中流量很小 |
 
@@ -391,10 +398,10 @@ work for direct profit.
 | `server/` | `index.js` `lobby.js` `stageAuthoring.js` `workshop.js` `match/Match.js` `match/PlayerState.js` `match/waves.js` |
 | `shared/` | `stageAuthoring.js` `workshop.js` |
 | `editor/` | `server.mjs` `ui/app.js` `ui/index.html` `ui/stage.html` `ui/stage.js` |
-| `public/` | `index.html` `js/main.js` `js/screens/briefing.js` `js/screens/lobby.js` `js/screens/room.js` |
+| `public/` | `index.html` `js/main.js` `js/screens/briefing.js` `js/screens/lobby.js` `js/screens/room.js` `js/screens/game.js` `js/ui/underframe.js` |
 | `tools/` | `workshop-validate.mjs` |
 | `docs/` | `EDITOR.md` `WORKSHOP.md` |
-| `test/` | `docs-consistency.test.js` `editor.test.js` `support.test.js` `ui/mock.e2e.test.js` `ui/devices.e2e.test.js` `ui/emotes.e2e.test.js` `ui/leftovers.e2e.test.js` `ui/playtest2.e2e.test.js` `ui/playtest5-ui.e2e.test.js` `ui/playtest6-ui.e2e.test.js` `ui/feedback1-gaps.e2e.test.js` `ui/feedback1-secret-shop.e2e.test.js` `ui/feedback1-tactic.e2e.test.js` `render/flash.browser.test.js` `render/models.browser.test.js` |
+| `test/` | `docs-consistency.test.js` `editor.test.js` `support.test.js` `ui/mock.e2e.test.js` `ui/devices.e2e.test.js` `ui/emotes.e2e.test.js` `ui/leftovers.e2e.test.js` `ui/playtest2.test.js` `ui/playtest2.e2e.test.js` `ui/playtest5-ui.e2e.test.js` `ui/playtest6-ui.e2e.test.js` `ui/feedback1-gaps.e2e.test.js` `ui/feedback1-secret-shop.e2e.test.js` `ui/feedback1-tactic.e2e.test.js` `render/flash.browser.test.js` `render/models.browser.test.js` |
 
 改动内容以**工坊与助战**为主：内容叠加层的加载与合并（`server/workshop.js`、`server/data.js` 的注入点）、工坊内容的只读分发路由（`server/index.js`）、地图的回合作用域（`server/match/waves.js`）、助战卡池的服务端下发与客户端同步（`server/lobby.js`、`server/match/PlayerState.js`、`public/js/screens/support.js`、`public/js/ui/support*.js`），以及编辑器的六个页面。**游戏规则本身没有被改动**：战斗模拟、经济与回合流程保持上游行为，工坊只做内容叠加。
 
