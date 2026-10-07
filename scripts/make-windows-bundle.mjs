@@ -609,11 +609,15 @@ async function main() {
   // 多语言配音 (v0.7.2): the bundle carries the manifest's DEFAULT dub only (≈66 MB); the other dubs are published as a
   // separate voice pack (scripts/make-voice-pack.mjs, attached to the same release) because four dubs are ≈262 MB.
   // 一个都不带的情况不存在：清单里 voice 那套必须与文件同进同出（见 2b）。
+  const voiceDir = path.join(ROOT, 'public', 'assets', 'audio', 'voice');
+  const allDubs = !!o.allDubs;
+  const withVoices = fs.existsSync(voiceDir);
   const defaultDub = readDefaultDub();
   const extraDubs = listVoiceDubs().filter((l) => l !== defaultDub);
   const skipDir = allDubs || !extraDubs.length
     ? null
-    : (rel, name) => (rel === 'assets/audio/voice' && extraDubs.includes(name));
+    // `rel` is relative to the copied root (public/assets), so the voice folders are `audio/voice/<lang>`
+    : (rel, name) => (/(^|\/)audio\/voice$/.test(rel) && extraDubs.includes(name));
   let assetFiles = 0; let assetBytes = 0;
   for (const d of ASSET_DIRS) {
     // eslint-disable-next-line no-await-in-loop
@@ -625,9 +629,6 @@ async function main() {
   // 2b) 角色语音台词：0.2.0 的布局是 public/assets/audio/voice/<语言>/<干员>/*.mp3（上游 0.1.x 那套 voice_cn/
   // 目录已经废弃）。靠 data/assets.json 的 audio.voice / audio.voiceLangs 映射才会被客户端采用 —— 两者要么一起进包，
   // 要么都不进。多语言配音：这里报出包里真有哪几种语言，免得说明书吹了包里没有的东西。
-  const voiceDir = path.join(ROOT, 'public', 'assets', 'audio', 'voice');
-  const allDubs = !!o.allDubs;
-  const withVoices = fs.existsSync(voiceDir);
   const voiceDubs = withVoices ? listVoiceDubs().filter((l) => allDubs || !extraDubs.includes(l)) : [];
   console.log(withVoices
     ? `    带上角色语音台词（public/assets/audio/voice/{{${voiceDubs.join(',')}}}；游戏里「设置 → 干员语音」默认 0.8 = 开，「配音语言」逐干员可换）`
