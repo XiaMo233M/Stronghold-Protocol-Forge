@@ -57,6 +57,32 @@ LICENSE / NOTICE.md / THIRD-PARTY-NOTICES.md
 卸载＝删除文件夹（不写注册表、不放系统目录）。素材是硬成本（0.7.2 起主包只带**默认配音**，其余配音走 release 的
 语音包，见 §3），包因此还是不小。
 
+### 2.1 增量更新包（0.8.2 起每个版本都提供）
+
+完整包 468 MB、其中素材 536 MB 是硬成本，而版本之间的改动通常只有几 MB —— 所以从 0.8.2 起，每个版本的 release
+里除了完整包 / 配音包 / 源码包，还有一个 **`…-update.zip`**（这一版是 3.6 MB）：
+
+```powershell
+# 玩家侧：停掉游戏 → 解压覆盖到安装文件夹（就是那个含 启动游戏.bat 的目录）→ 照常启动
+tar -xf Stronghold-Protocol-Forge-0.8.2-0.2.1-update.zip -C C:\Stronghold-Protocol
+```
+
+启动时服务端会先跑一遍 `server/update.js` 的检查：按包里的 `app\MANIFEST.json`（每个程序文件的大小与 sha256）
+核对整份安装，**不一致就不启动**并告诉你下完整包 —— 而不是带着半个坏包跑起来；核对通过才应用更新、按
+`UPDATE.json` 的清单删掉「旧版本原样、新版本已移除」的文件（**玩家自己改过或加过的文件不在删除清单里**），
+最后把 `UPDATE.json` 改名成 `.update-applied.json`（下次启动不再重复检查）。`npm run doctor` 也能随时查这件事。
+
+维护者侧打这个包（`app\MANIFEST.json` 由打包脚本写出，更新包再拿它当新版本的清单）：
+
+```powershell
+node scripts/make-windows-bundle.mjs --out E:\destop\Stronghold-Protocol-Forge-0.8.2-0.2.1-win-x64 --force
+node scripts/make-update-package.mjs --bundle <上面那个目录> --from <上一版的 win-x64.zip> --out <update.zip>
+```
+
+两条路径约定来自服务端（`server/update.js` 在 `app\` 里运行）：`MANIFEST.json` 与 `UPDATE.json` 都在 `app\` 下，
+里面的路径都是 **app 相对的**；所以更新包里改动的文件放在 `app\<app 相对路径>`，包根与 `node\` 下的文件机制管不到
+（它们照常随包覆盖，但新版本若**删掉**这类文件，生成器会直接拒绝出包 —— 那种情况只能换完整包）。
+
 ## 3. 包里放了什么、没放什么
 
 `app\` 的文件清单来自 **`git ls-files`**，不是手写的跳过表。因此被 `.gitignore` 挡在版本库外的本机文件
