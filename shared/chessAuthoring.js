@@ -1,4 +1,5 @@
 // shared/chessAuthoring.js — turn the handful of facts a human (or an AI) actually knows into a VALID workshop chess
+// (i18n-ignore-file: 工坊作者层的校验与推导文本 —— 给作者、编辑器与 AI 读的规则说明（编辑器有自己的中英词典，见 docs/EDITOR.md），不是客户端界面文案)
 // record pair, and validate a record with precise, machine-readable errors (docs/WORKSHOP.md, docs/prompts/).
 //
 // Why this module exists (the "one interface" rule): a data/chess.json record has ~30 fields, most of them mechanical
@@ -160,7 +161,7 @@ export const SP_TYPES = Object.freeze([
  */
 export const TRIGGER_RULES = Object.freeze(['DEFAULT', 'SKILL_RANGE', 'TAKE_DAMAGE', 'SP_FULL', 'SEARCH', 'CUSTOM_RANGE']);
 /** 引擎没有通用分支、但官方数据真的在用的自定义触发规则（写了不报错，但要知道它靠手写 kit 才动）。 */
-export const KNOWN_CUSTOM_TRIGGER_RULES = Object.freeze(['GDGLOW_SKILL_2', 'MLYSS_WTRMAN']);
+export const KNOWN_CUSTOM_TRIGGER_RULES = Object.freeze(['GDGLOW_SKILL_2', 'MLYSS_WTRMAN', 'ACTIVE_RANGE']);
 /** 触发规则的整体形状：大写字母数字下划线（引擎的 normTriggerRule 放行任何字符串，这里只挡明显的错别字）。 */
 export const TRIGGER_RULE_RE = /^[A-Z][A-Z0-9_]{0,47}$/;
 
@@ -311,8 +312,6 @@ export function deriveChessRecord(spec) {
     tauntLevel: isFin(st.tauntLevel) ? st.tauntLevel : 0,
     massLevel: isFin(st.massLevel) ? st.massLevel : 0,
     deployLimit: 1, deckStack: 0,
-    tauntLevel: isFin(st.tauntLevel) ? st.tauntLevel : 0,
-    massLevel: isFin(st.massLevel) ? st.massLevel : 0,
   });
   const skillRecord = (golden) => {
     if (!sk) return null;

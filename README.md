@@ -1,6 +1,6 @@
 # Stronghold-Protocol-Forge · 卫戍协议工坊编辑器
 
-![version](https://img.shields.io/badge/version-0.6.4-2ea44f)
+![version](https://img.shields.io/badge/version-0.7.0-2ea44f)
 ![license](https://img.shields.io/badge/code%20license-GPL--3.0--or--later-blue)
 ![node](https://img.shields.io/badge/node-22%20%7C%2024-339933)
 
@@ -172,7 +172,7 @@ npm run editor                                                                  
 
 - **独立模拟**（单人）与**同盟模拟**（1–4 人**合作**，没有 PvP；空位可以加 AI 队友）。
 - 服务器是一个 Node.js 程序，**战斗在各玩家的浏览器里模拟**（和官方一样），服务器只管经济与回合，一台低功耗小主机就能开服。
-- **本仓库打包的上游游戏本体为 0.1.3**（本仓库自己的版本是 0.2.0，两者的读法见[版本号怎么读](#版本号怎么读)）：修复了 0.1.2 发布后玩家和 GitHub 上反馈的问题，详见 [CHANGELOG.md](CHANGELOG.md)。仍有少数规则按推断实现，与官方不一致的地方欢迎在 Issue 里反馈。
+- **本仓库打包的上游游戏本体为 0.2.0**（本仓库自己的版本是 0.7.0，两者的读法见[版本号怎么读](#版本号怎么读)）：补位、自选编队、中英日韩四语言、自定义快捷键与精简包，以及一批按官方数据与 PRTS 修正的规则，详见 [CHANGELOG.md](CHANGELOG.md)。仍有少数规则按推断实现，与官方不一致的地方欢迎在 Issue 里反馈。
 
 下面是给作者做参照的游戏画面。
 
@@ -189,6 +189,10 @@ npm run editor                                                                  
 - **休整期**：招募、刷新、冻结、升级调度中心；整备区与临时整备区；从整备区拖到棋盘部署，用**方向轮盘**选择朝向。同盟模拟的卡池共用。
 - **晋升精锐**：3 名同名干员自动合成精锐，并获得一次高一阶的免费招募。
 - **干员与调配**：112 名可招募干员（+ 精锐）及其技能、天赋和特质；开局前可以为每名干员选择携带的技能（283 个技能全部手工实现）和精锐的模组。
+- **补位（0.2.0）**：在「干员调配」标出自己没有的干员，开局后这些干员由官方的**补位干员**上场（8 名预备干员，以及郁金香、Sharp、Mechanist、Stormeye、Pith、Touch、Raidian、Misery、领主·Sharp），盟约、特质、阶级、价格与合成都仍按原干员；商店、手牌、棋盘与详情卡上带一个「替补」标记，作战中用自己的语音。
+- **自选编队（0.2.0）**：5 阶、6 阶各选 2 名自己拥有的 6★（71 名可选，三个技能任选、精锐可选模组），调度中心升到 5 / 6 级后这些干员只出现在你自己的商店里（每人单独的库存，不进公共卡池），带召唤物的干员放下后召唤物按官方数量进手牌。
+- **多语言（0.2.0）**：标题页与「设置」里切换中文 / English / 日本語 / 한국어 / 繁體中文；干员、技能、敌人、盟约等游戏文本用各服官方数据，界面译文另有语言包机制（`packs/<lang>/`，[docs/I18N.md](docs/I18N.md)）。
+- **自定义快捷键（0.2.0）**：「设置 → 快捷键」里改刷新、冻结、升级、撤退、出售与准备就绪的按键，冲突时两者互换，可恢复默认。
 - **盟约与层数**：23 个盟约（8 个势力核心盟约 + 附加盟约），层数整局保留，每个盟约最多 999 层。
 - **装备与机变**：装备与法术，同名装备合成、特定组合赋予盟约效果；已配发的装备锁定在干员身上。部分回合开始前有机变选卡（装备、资金、干员、层数、悬赏等）。
 - **自动作战**：技能按官方「技能策略」自动释放；按接触半径阻挡，阻挡者倒下时由接触的干员接替；元素损伤与元素爆发；召唤物由玩家手动摆放；推开 / 拉拽按力度与重量计算；被击倒的干员留在原地显示再部署倒计时。
@@ -239,7 +243,7 @@ npm start          # 启动服务器：http://localhost:3000
 
 #### 版本号怎么读
 
-发行 tag 写成 **`v<forge>-<上游>`**：`v0.2.0-0.1.3` = 本仓库（Forge 工坊编辑器）**0.2.0** + 上游游戏（[sganggs/Stronghold-Protocol](https://github.com/sganggs/Stronghold-Protocol)）**0.1.3**。程序里显示的版本（标题页、启动横幅、`/healthz`）只是前半部分，因为仓库自己的元数据检查要求它是三段普通 semver —— 详见 [CHANGELOG.md](CHANGELOG.md) 与 `test/version.test.js`。
+发行 tag 写成 **`v<forge>-<上游>`**：`v0.7.0-0.2.0` = 本仓库（Forge 工坊编辑器）**0.7.0** + 上游游戏（[sganggs/Stronghold-Protocol](https://github.com/sganggs/Stronghold-Protocol)）**0.2.0**。程序里显示的版本（标题页、启动横幅、`/healthz`）只是前半部分，因为仓库自己的元数据检查要求它是三段普通 semver —— 详见 [CHANGELOG.md](CHANGELOG.md) 与 `test/version.test.js`。
 
 #### 系统要求
 
@@ -323,6 +327,9 @@ npm start          # 启动服务器：http://localhost:3000
 | [docs/DEPLOY.md](docs/DEPLOY.md) | 部署指南：Windows 开服与开机自启、防火墙、组网 / 隧道、反向代理与 HTTPS、Docker、systemd、排错 |
 | [docs/WINDOWS.md](docs/WINDOWS.md) | Windows 便携包：怎么打一份「零安装」包（`scripts/make-windows-bundle.mjs`）、包里放了什么、授权注意事项 |
 | [docs/DESIGN.md](docs/DESIGN.md) | 架构与契约（英文）：技术栈、目录分工、网络协议、渲染与 UI、各次试玩后的规则修订 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 上游 0.2.0 的目录与模块地图（英文）：拆分后每个文件负责什么 |
+| [docs/I18N.md](docs/I18N.md) | 界面与游戏文本的多语言（英文）：语言包格式、msgid 约定、怎么加一种语言 |
+| [docs/PACKS.md](docs/PACKS.md) | 上游的内容包（`packs/`，目前只装语言包）与本项目**工坊包**（`workshop/`）的区别 |
 | [docs/SIM.md](docs/SIM.md) | 战斗模拟引擎参考（英文）：钩子、技能描述格式、职业默认行为 |
 | [docs/META.md](docs/META.md) | 对局与经济引擎（英文）：回合流程、商店、联防、最终攻势的实现细节 |
 | [docs/DATA.md](docs/DATA.md) | 由官方数据表生成的游戏数据（英文） |
@@ -334,7 +341,7 @@ npm start          # 启动服务器：http://localhost:3000
 
 ```bash
 npm run dev                 # node --watch：改动服务器代码后自动重启
-node --test                 # 单元 + 集成测试（约 3870 项；缺少素材 / 浏览器的用例会自动跳过）
+node --test                 # 单元 + 集成测试（约 5800 项；缺少素材 / 浏览器的用例会自动跳过）
 SP_E2E=1 node --test test/ui/mock.e2e.test.js        # 浏览器端到端测试，需要本机 Chrome（CHROME_PATH 可指定路径）
 SP_REAL_E2E=1 node --test test/ui/real.e2e.test.js   # 需要 Chrome + 已下载的素材
 RENDER_E2E=1 node --test 'test/render/*.browser.test.js'   # 渲染测试，部分需要本地提取的棋盘贴图
@@ -419,54 +426,51 @@ work for direct profit.
 |---|---|
 | 上游项目 | **Stronghold-Protocol**（卫戍协议：盟约 · 非官方同人复刻） |
 | 上游地址 | <https://github.com/sganggs/Stronghold-Protocol> |
-| 本项目基于 | 上游 **v0.1.3** 的 Release 整合包（解压得到，不是 `git clone`）。因此**没有可对应的上游 commit hash 或 tag** —— 这是事实，不做推测。 |
+| 本仓库当前的底座 | 上游 **v0.2.0** 的源码树（tag `v0.2.0` = commit `1303321`）。0.7.0 起按该 tag 逐文件移植；此前的 0.1.x–0.6.x 基于上游 **v0.1.3** 的 Release 整合包（解压得到，不是 `git clone`）。 |
 | 改动时间 | 2026 年 10 月起，逐次提交见 `git log` 的提交日期 |
 | 许可 | 整体 **GPL-3.0-or-later**，全文见 [LICENSE](LICENSE)；上游的版权与许可声明原样保留（[NOTICE.md](NOTICE.md)、[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)） |
 
-### 取证方法与它的边界
+### 归属是怎么定的（0.7.0 起可逐字节核实）
 
-本工作区是「解压整合包 → `git init`」，而且 `git init` 时本项目的工坊与编辑器**已经写完**。所以第一个提交（根提交）里同时装着上游原文和本项目成果，**git 历史无法把它们分开**。下面的清单由两类**可核实**的证据合成，并明确标出哪些是推断：
+本工作区是「解压整合包 → `git init`」，而 `git init` 时本项目的工坊与编辑器**已经写完**，所以第一个提交（根提交）里同时装着上游原文和本项目成果。0.7.0 的移植把这件事变成可核实的，方法是三步比对：
+
+| 步骤 | 做法 | 结论 |
+|---|---|---|
+| 1 | 本仓库的**根提交**（`11aa45c6`）与上游 **v0.1.3** 的 tag 逐字节比对 | 上游那 583 个文件**一个不缺**：558 个逐字节相同，25 个是我们在 `git init` 之前就改过的（工坊与助战的钩子），0 个缺失 —— 所以「0.1.3 + 我们的改动」这个说法是准确的 |
+| 2 | 0.7.0 的移植以**上游 v0.2.0 的源码树**为底座 | 863 个文件直接取自上游（含 `server/sim` 的拆分、`server/http/`、i18n、`packs/` 与上游那 519 个测试文件）；290 个「上游没改动过」的文件保留我们的版本；6 个按上游删除 |
+| 3 | 我们自己的功能层与补丁重贴 | 我们的自研文件原样保留；我们相对上游的运行时改动约 **1100 行**、散在 63 个文件，用三方合并（ours=0.6.4 / base=上游 v0.1.3 / theirs=上游 v0.2.0）逐文件重贴；上游拆开的 4 个文件（`server/index.js`、`match/Match.js`、`match/PlayerState.js`、`ui/gameLogic.js`）按新结构重写钩子 |
 
 | 分类 | 依据 | 强度 |
 |---|---|---|
-| **A 本项目新增** | 不存在于根提交，由本仓库的提交创建 | 可核实（git） |
-| **B 本项目修改** | 存在于根提交，且被本仓库的提交改动 | 可核实（git） |
-| **C 工坊/编辑器功能区** | 路径与内容属于本项目新增的功能，但其中一部分在本仓库建立前就已完成，因而混在根提交里 | **推断**：无法逐字节比对（没有上游 checkout） |
-| **D 其余** | 根提交中除 A/B/C 之外的文件 | **推断**：视为上游原文 |
+| **A 本项目新增** | 上游 v0.2.0 的树里**没有**这个路径 | 可核实（与上游 tag 比对） |
+| **B 本项目修改** | 路径在上游树里存在，但内容与上游 v0.2.0 不同 | 可核实（逐文件 diff） |
+| **C 上游原文** | 与上游 v0.2.0 逐字节相同 | 可核实 |
 
-### A. 本项目新增的文件
+### A. 本项目新增（上游 v0.2.0 里没有）
 
-| 目录 | 文件 |
+| 目录 | 内容 |
 |---|---|
-| `editor/ui/` | `enemy.html` `enemy.js` `item.html` `item.js` `pack.html` `pack.js` `wave.html` `wave.js` `voice.html` `voice.js` `stage3d.js` |
-| `shared/` | `itemAuthoring.js` `kitAuthoring.js` `waveAuthoring.js` `forgeNotice.js` `zip.js` |
-| `public/` | `css/screens/support.css` `js/screens/support.js` `js/ui/supportModel.js` `js/ui/supportSync.js` |
-| `test/` | `itemAuthoring.test.js` `itemEditor.test.js` `kitAuthoring.test.js` `forgeNotice.test.js` `waveAuthoring.test.js` `support.test.js` `workshopAssets.test.js` `workshopStageRounds.test.js` `voiceEditor.test.js` `workshopVoices.test.js` `workshopSupport.test.js` `workshopPack.test.js` `packManager.test.js` `zip.test.js` |
+| `editor/` | 整个**工坊编辑器**（九个页面、`server.mjs`、`playtest.mjs`、`ui/**`） |
+| `shared/` | `chessAuthoring.js` `enemyAuthoring.js` `stageAuthoring.js` `itemAuthoring.js` `waveAuthoring.js` `bondAuthoring.js` `kitAuthoring.js` `statReference.js` `support.js` `forgeNotice.js` `zip.js` `workshop.js` |
+| `server/` | `workshop.js` `stageAuthoring.js` |
+| `tools/` | `workshop-editor.mjs` `workshop-validate.mjs` `workshop-scaffold.mjs` `workshop-pack.mjs` `export-third-party.mjs` |
+| `scripts/` | `start-editor-windows.bat` `start-editor.sh` `install-workshop-pack.bat` `install-workshop-pack.sh` `make-windows-bundle.mjs` |
+| `public/` | `js/screens/support.js` `js/ui/supportModel.js` `js/ui/supportSync.js` `js/playtestLink.js` `css/screens/support.css` |
+| `docs/` | `EDITOR.md` `WORKSHOP.md` `prompts/**` `examples/**` `img/intro/**` |
+| 其他 | `workshop/README.md` `data/support.json` `third-party/README.md` |
 
-### B. 本项目修改的上游文件
+### B. 本项目修改的上游文件（相对上游 v0.2.0）
 
-| 目录 | 文件 |
+| 目录 | 内容与改动 |
 |---|---|
-| 根目录 | `README.md` |
-| `server/` | `index.js` `lobby.js` `stageAuthoring.js` `workshop.js` `match/Match.js` `match/PlayerState.js` `match/waves.js` |
-| `shared/` | `stageAuthoring.js` `workshop.js` |
-| `editor/` | `server.mjs` `ui/app.js` `ui/index.html` `ui/stage.html` `ui/stage.js` |
-| `public/` | `index.html` `js/main.js` `js/screens/briefing.js` `js/screens/lobby.js` `js/screens/room.js` `js/screens/game.js` `js/ui/underframe.js` |
-| `tools/` | `workshop-validate.mjs` |
-| `docs/` | `ASSETS.md` `EDITOR.md` `WORKSHOP.md` |
-| `test/` | `docs-consistency.test.js` `editor.test.js` `support.test.js` `ui/mock.e2e.test.js` `ui/devices.e2e.test.js` `ui/emotes.e2e.test.js` `ui/leftovers.e2e.test.js` `ui/playtest2.test.js` `ui/playtest2.e2e.test.js` `ui/playtest5-ui.e2e.test.js` `ui/playtest6-ui.e2e.test.js` `ui/feedback1-gaps.e2e.test.js` `ui/feedback1-secret-shop.e2e.test.js` `ui/feedback1-tactic.e2e.test.js` `render/flash.browser.test.js` `render/models.browser.test.js` |
+| `server/` | `index.js`（工坊加载与路由装配、`SP_WORKSHOP`）、`http/workshop.js`（新增：工坊 HTTP 层）、`http/static.js`（三条工坊路由）、`http/websocket.js`（把工坊交给 Lobby）、`lobby.js`（`room.support`、助战席位、工坊 kits 传给 Match）、`net.js`（session 的 support 字段）、`data.js`（叠加层注入点）、`match/gamedata.js`（助战池）、`match/invariants.js`（助战是「禁用不进货架」的唯一例外）、`match/Match.js`、`match/platform.js`、`match/phases.js`、`match/combat.js`、`match/clientCombat.js`、`match/settle.js`、`match/bossRounds.js`、`match/player/support.js`（新增：助战方法）、`match/player/economy.js`、`match/player/views.js` |
+| `shared/` | `constants.js`（`VOICE_SLOTS` 词表 + 版本号）、`protocol.js`（`room.support`）、`workshop.js`（包自带语音的合并修正） |
+| `public/` | `index.html` `js/main.js`（一键试玩深链、助战宿主）`js/screens/lobby.js`（`parsePlaytestParam`、助战按钮）`js/screens/room.js` `js/screens/game.js` `js/screens/result.js`（结算页各队 MVP 语音）`js/battle/runner.js`（工坊 kit）`js/ui/underframe.js` |
+| `tools/` | `assets/plan.mjs`（工坊素材计划） |
+| `docs/` | `ASSETS.md`（工坊包自带语音一段） |
+| `test/` | 上游测试里被我们的接口影响到的用例（语音槽位、助战、版本、i18n） |
 
-改动内容以**工坊与助战**为主：内容叠加层的加载与合并（`server/workshop.js`、`server/data.js` 的注入点）、工坊内容的只读分发路由（`server/index.js`）、地图的回合作用域（`server/match/waves.js`）、助战卡池的服务端下发与客户端同步（`server/lobby.js`、`server/match/PlayerState.js`、`public/js/screens/support.js`、`public/js/ui/support*.js`），以及编辑器的六个页面。**游戏规则本身没有被改动**：战斗模拟、经济与回合流程保持上游行为，工坊只做内容叠加。
-
-### C. 工坊与编辑器功能区（推断为新增）
-
-这些路径承载本项目新增的功能；其中 `editor/`、`shared/chessAuthoring.js`、`shared/enemyAuthoring.js`、`shared/stageAuthoring.js`、`shared/workshop.js`、`server/workshop.js`、`server/stageAuthoring.js`、`tools/workshop-*.mjs`、`docs/WORKSHOP.md`、`docs/EDITOR.md`、`docs/prompts/operator-pack.md`、`docs/examples/**`、`workshop/README.md`、`test/{chess,enemy,stage}Authoring.test.js`、`test/workshop*.test.js` 属于本项目功能，但**它们在本仓库建立之前就已完成**，所以与上游原文一起落在根提交里 —— 本仓库无法逐字节证明这一点。
-
-同理，根提交里的 `shared/support.js`、`data/support.json`、`server/sim/content/support/**`、`test/content/bonds_support.test.js` 涉及**助战**。本项目新增的是「卡池由服务端控制、客户端同步」这一层；上游是否已有同名/同路径的支援机制，本仓库无法逐字节判定，故不在此断言归属。
-
-### D. 未改动的部分
-
-上述 A/B/C 之外，`server/`、`public/`、`data/`、`test/`、`tools/`、`docs/`、`scripts/` 下的其余文件均视为**上游原文**，未作修改，版权与许可声明原样保留。
+**游戏规则本身没有被改动**：战斗模拟、经济与回合流程保持上游 0.2.0 的行为，工坊只做内容叠加，助战只做「服务端卡池 + 进商店」。
 
 ### 源码获取
 
@@ -504,6 +508,6 @@ work for direct profit.
 This repository is **Stronghold-Protocol-Forge**: a standalone, out-of-game **graphical authoring tool (the Forge editor)** for the content of the fan remake of Arknights' seasonal auto-chess tower-defense mode *Stronghold Protocol: Alliance* — plus that bundled upstream game itself.
 
 - **The Forge editor (what this repo is for):** run `npm run editor` and open <http://127.0.0.1:3311> — no build step, no game-server change, bound to loopback by default. Nine pages author operators (`/`), maps (`/stage.html`, 19×21 grid with 2D placement and a 3D preview), enemies (`/enemy.html`), spawn waves (`/wave.html`), items (`/item.html`), bonds (`/bond.html`: add a bond, or override one of the official 23), behaviour-layer kits (`/kit.html`), a pack's voice lines (`/voice.html`) and the pack itself (`/pack.html`: export to a `.zip`, import someone else's, tick which of the pack's own operators enter the 助战 pool, and start a playtest server that opens straight into a solo run). Mechanical fields are always derived from the real engine rather than typed by hand, and `tools/workshop-validate.mjs` re-checks every pack in layers (format → semantics → the real engine → kits / maps / enemies / waves / items / voice lines / 助战) through the same `shared/*Authoring.js` rules the editor and CLI use, so the rules cannot drift. Saved Options carry a `_meta` attribution block. See [docs/EDITOR.md](docs/EDITOR.md) and [docs/WORKSHOP.md](docs/WORKSHOP.md).
-- **The bundled game:** an **unofficial, non-commercial fan remake** played in the browser: solo, or 1–4 player co-op (AI teammates can fill seats). Combat is simulated in each player's browser, so a low-power PC can host. Download the all-in-one bundle from [Releases](../../releases/latest), install Node.js 22 or 24, then double-click `scripts\start-windows.bat` (Windows) or run `./scripts/start.sh` (macOS / Linux) and open <http://localhost:3000>. From source: `npm install && npm run setup && npm start` (setup downloads ~270 MB of art from public mirrors, the emotes and the how-to-play pages included; the official 3D board, some official HUD icons and two enemy models are extracted from a local Arknights client — without one the game uses the 2D board and look-alike stand-ins, and a server can copy `public/assets/local/` and `data/local-assets.json` from the release bundle of the same version). Create a co-op room and share the 4-letter key or the `?room=KEY` link; on a LAN use the address printed at start, otherwise a virtual-LAN tool, a tunnel or a VPS — see [docs/DEPLOY.md](docs/DEPLOY.md).
+- **The bundled game:** an **unofficial, non-commercial fan remake** played in the browser: solo, or 1–4 player co-op (AI teammates can fill seats). Combat is simulated in each player's browser, so a low-power PC can host. The bundled upstream game is **0.2.0** (this repo's own version is **0.7.0**; the release tag spells both halves, `v0.7.0-0.2.0`): it adds stand-ins for operators you do not own (补位), a custom squad (自选编队), Chinese / English / Japanese / Korean / Traditional Chinese, configurable hotkeys and a ~22 MB lite bundle, plus a batch of rule fixes checked against the official data and PRTS. Download the all-in-one bundle from [Releases](../../releases/latest), install Node.js 22 or 24, then double-click `scripts\start-windows.bat` (Windows) or run `./scripts/start.sh` (macOS / Linux) and open <http://localhost:3000>. From source: `npm install && npm run setup && npm start` (setup downloads ~300 MB of art from public mirrors, the emotes, the how-to-play pages and the twelve battle-voice slots per operator included; the official 3D board, some official HUD icons and two enemy models are extracted from a local Arknights client — without one the game uses the 2D board and look-alike stand-ins, and a server can copy `public/assets/local/` and `data/local-assets.json` from the release bundle of the same version). Create a co-op room and share the 4-letter key or the `?room=KEY` link; on a LAN use the address printed at start, otherwise a virtual-LAN tool, a tunnel or a VPS — see [docs/DEPLOY.md](docs/DEPLOY.md).
 - **Disclaimer:** not affiliated with or endorsed by Hypergryph or Yostar. All Arknights names, art, audio, text and data are © their respective owners and are **not** covered by this project's GPL licence. For study and personal non-commercial use only — no selling, paid distribution, paid servers or monetisation of any kind. Content will be removed on request of the rights holders. Provided "as is", without warranty.
 - **License:** code GPL-3.0-or-later ([LICENSE](LICENSE)); game assets excluded.

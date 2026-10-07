@@ -20,6 +20,7 @@
 import { createStore, loadPref, savePref } from '../store.js';
 import { SUPPORT_PREF, parseStored, toStored, readCatalog, sanitizeSupport } from './supportModel.js';
 import { toast } from './toasts.js';
+import { t } from '../../../shared/i18n.js';
 
 export const SYNC_DEBOUNCE_MS = 500;
 export const RETRY_MS = 1500;
@@ -94,7 +95,7 @@ export function installSupportSync({ net, timers, target = supportStore, notify 
     const { entries, dropped } = sanitizeSupport(catalog, target.get().entries);
     if (dropped.length) {
       // the pool shrank since this browser stored its selection: tell the player, do not shrink it silently
-      tell(`助战卡池已变化，${dropped.length} 个已选干员不再可用`);
+      tell(t('助战卡池已变化，{n} 个已选干员不再可用', { n: dropped.length }));
       apply(entries);
       return; // the setter reschedules
     }
@@ -112,7 +113,7 @@ export function installSupportSync({ net, timers, target = supportStore, notify 
       pendingJson = null;
       lastSent = json;
       setState('synced');
-      if (wasEdit && !entries.length) tell('已取消全部助战');
+      if (wasEdit && !entries.length) tell(t('已取消全部助战'));
     } catch (err) {
       if (my !== seq) return;
       pendingJson = null;
@@ -121,7 +122,7 @@ export function installSupportSync({ net, timers, target = supportStore, notify 
         // the server stored it for the next match; the running one keeps the supports it granted
         lastSent = json;
         setState('locked');
-        if (wasEdit) tell('本局的助战已锁定，修改将在下一局生效');
+        if (wasEdit) tell(t('本局的助战已锁定，修改将在下一局生效'));
       } else if (code === 'RATE' || code === 'TIMEOUT' || code === 'OFFLINE') {
         edited = edited || wasEdit;
         schedule(RETRY_MS);
@@ -129,7 +130,7 @@ export function installSupportSync({ net, timers, target = supportStore, notify 
         // Rule 2: report it and keep the local selection — never fall back to something the player did not choose
         console.warn('[support] room.support refused', code, err && err.detail);
         setState('error');
-        tell('助战选择被服务器拒绝：' + ((err && err.detail) || code));
+        tell(t('助战选择被服务器拒绝：') + ((err && err.detail) || code));
       } else {
         console.warn('[support] room.support refused', code, err && err.detail);
         setState('error');
@@ -157,7 +158,7 @@ export function installSupportSync({ net, timers, target = supportStore, notify 
       // a freshly arrived catalog may invalidate the stored selection: sanitise and resend (sanitizeSupport is applied
       // in flush as well; doing it here means the UI shows the drop immediately, before the request)
       const { entries, dropped } = sanitizeSupport(catalog, prev.entries);
-      if (dropped.length) { tell(`助战卡池里没有 ${dropped.length} 个已选干员，已移除`); apply(entries); }
+      if (dropped.length) { tell(t('助战卡池里没有 {n} 个已选干员，已移除', { n: dropped.length })); apply(entries); }
       else schedule(50);
     } else if (patch.sync === 'pending') {
       // the match that had locked the selection is over, but the catalog is the one we already had: nothing above

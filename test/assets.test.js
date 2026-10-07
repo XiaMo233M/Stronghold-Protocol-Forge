@@ -2,7 +2,7 @@
 // data/assets.json. The pure helpers (animation-role resolver, atlas
 // normalizer, PNG/WOFF2/audio helpers, plan id sets) are always tested; the
 // on-disk checks run only when public/assets exists (it is git-ignored and
-// produced by `npm run assets`); the optional local-client enemy models
+// produced by `npm run assets`); the optional local-client enemy and token models
 // (spineLocal, tools/local-extract) only when data/local-assets.json lists them.
 
 import { test, describe } from 'node:test';
@@ -17,11 +17,9 @@ import { normalizeAtlas, atlasInfo, parseAtlas } from '../tools/assets/atlas.mjs
 import { pngSize, isCompletePng, isMp3, validate } from '../tools/assets/formats.mjs';
 import { encodeWoff2, decodeWoff2Tables, readSfnt, uintBase128 } from '../tools/assets/woff2.mjs';
 import { assetToPath, pickUnitSfx, indexAudio } from '../tools/assets/audio.mjs';
-import { mirrorUrl, safeName, encodePath, RAW } from '../tools/assets/sources.mjs';
+import { mirrorUrl, safeName, encodePath } from '../tools/assets/sources.mjs';
 import { collectEnemyIds, skillIndicesByChar, buildPlan, GUIDE_PAGES, UI_EXTRAS } from '../tools/assets/plan.mjs';
 import { resolveTemplate, collectLeaves } from '../tools/assets/manifest.mjs';
-import { planVoices, voiceEntries, voiceSlotOf, voiceRelPath, voiceUrl, VOICE_SLOTS, VOICE_TITLE_SLOTS } from '../tools/assets/voices.mjs';
-import { alt, leaf } from '../tools/assets/plan.mjs';
 import { spineEntry } from '../public/js/assets.js';
 import { EMOTE_CATALOG, emoteArtGroup } from '../shared/constants.js';
 
@@ -364,6 +362,21 @@ describe('audio banks and plan id sets', () => {
     assert.equal(ok.value.p, '/assets/package.json');
     assert.equal(ok.fallbacks.length, 1);
   });
+
+  test('an array whose lines are all missing is dropped, with the entry it empties (a voice slot never downloaded)', () => {
+    const line = (rel) => ({ alts: [{ rel, urls: ['u'] }] });
+    const tpl = {
+      voice: {
+        a: { select: [line('nope/1.mp3'), line('nope/2.mp3')], place: [line('nope/3.mp3')] },
+        b: { select: [line('nope/4.mp3'), line('package.json')] },
+      },
+      empty: [],
+    };
+    const r = resolveTemplate(tpl, { root: ROOT, spine: new Map() });
+    assert.deepEqual(r.value.voice, { b: { select: ['/assets/package.json'] } }, 'operator a has no line on disk: no entry at all');
+    assert.deepEqual(r.value.empty, [], 'an array that was empty in the template stays');
+    assert.deepEqual(r.misses.sort(), ['voice.a.place[0]', 'voice.a.select[0]', 'voice.a.select[1]', 'voice.b.select[0]']);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -532,166 +545,6 @@ describe('emotes and 玩法说明 pages from the public mirror (GitHub issue #42
 });
 
 // ---------------------------------------------------------------------------
-// Voice lines (角色语音台词) — the opt-in half of the audio pipeline (tools/assets/voices.mjs, `--voices`).
-// The interface is what is tested here: the URL shape (verified against the real branch), the voiceTitle → slot
-// mapping, and that the manifest leaves resolve to `/assets/…` URLs the client can play. The 138 MB of audio itself is
-// not downloaded by the test suite.
-
-describe('voice lines (角色语音台词): URL shape and slot mapping', () => {
-  // 用**真实的** base（RAW.aa2voice），不要自己拼一个：这个 base 已经以 `…/audio/sound_beta_2/` 结尾，
-  // 而这里原来自己写了一个到 `…/audio` 为止的 base，于是 `voiceUrl` 多拼的那一层 `sound_beta_2/` 恰好被
-  // 「期望值」一起复制了 —— 2002 条语音全部 404，而测试是绿的。带上真实 base 才不会再有这种事。
-  const AA2VOICE = RAW.aa2voice;
-  /** `sound_beta_2/` 在这条 URL 里只能出现一次（base 一次），这是那次静默失败的直接形状。 */
-  const onceSoundBeta2 = (url) => assert.equal((url.match(/sound_beta_2\//g) || []).length, 1, `sound_beta_2/ 重复了：${url}`);
-
-  test('the URL sits under sound_beta_2/voice_cn/ — not under audio/voice_cn (404) and not in voice/ (404)', () => {
-    assert.equal(voiceRelPath('char_002_amiya/CN_021'), 'voice_cn/char_002_amiya/cn_021.mp3', 'lower-cased, .mp3 appended');
-    assert.equal(voiceRelPath('/char_1012_skadi2/CN_023'), 'voice_cn/char_1012_skadi2/cn_023.mp3', 'leading slash tolerated');
-    assert.equal(voiceRelPath('char_002_amiya/CN_021.mp3'), 'voice_cn/char_002_amiya/cn_021.mp3', 'a file suffix is not doubled');
-    // 与实测过的生产 URL 逐字相同（2026-10-06：这条 URL HTTP 200）
-    assert.equal(voiceUrl('char_002_amiya/CN_021', AA2VOICE),
-      'https://raw.githubusercontent.com/ArknightsAssets/ArknightsAssets2/voice/assets/dyn/audio/sound_beta_2/voice_cn/char_002_amiya/cn_021.mp3');
-    onceSoundBeta2(voiceUrl('char_002_amiya/CN_021', AA2VOICE));
-    assert.equal(voiceUrl('char_002_amiya/CN_021', AA2VOICE + '/'),
-      voiceUrl('char_002_amiya/CN_021', AA2VOICE), 'a trailing slash on the base is fine');
-  });
-
-  test('a skin variant\'s "#" is encoded in the URL and dropped from the local name (673 assets)', () => {
-    // 673 of the index's assets look like this. Upstream really has the `#`: a raw one makes the request stop at the
-    // fragment (measured 200 vs 404), so the URL must be percent-encoded …
-    const asset = 'char_113_cqbw_epoque#7/CN_019';
-    assert.equal(voiceUrl(asset, AA2VOICE), `${AA2VOICE}voice_cn/char_113_cqbw_epoque%237/cn_019.mp3`);
-    assert.ok(!/#/.test(voiceUrl(asset, AA2VOICE)), 'no raw # survives into the URL');
-    onceSoundBeta2(voiceUrl(asset, AA2VOICE));
-    // … while the local path (and therefore the manifest URL) sanitises it away instead of escaping it.
-    assert.equal(voiceRelPath(asset), 'voice_cn/char_113_cqbw_epoque_7/cn_019.mp3');
-    assert.ok(!/#/.test(voiceRelPath(asset)));
-    assert.equal(voiceRelPath(asset).split('/').length, 3, 'still one folder + one file');
-  });
-
-  test('every in-battle moment has a slot, and the mapping is the verified one (research 07 §6.4 [ASSUMED] → confirmed)', () => {
-    // cn_021/022 选中干员, cn_023/024 部署, cn_025–028 作战中 were marked [ASSUMED] in the research notes; the index's
-    // voiceTitle confirms them, and 019/020 (行动出发/行动开始) + 029–032 (结束/失败) are the same family.
-    assert.equal(voiceSlotOf({ voiceTitle: '行动出发' }), 'start');
-    assert.equal(voiceSlotOf({ voiceTitle: '行动开始' }), 'start');
-    assert.equal(voiceSlotOf({ voiceTitle: '选中干员1' }), 'select');
-    assert.equal(voiceSlotOf({ voiceTitle: '选中干员2' }), 'select');
-    assert.equal(voiceSlotOf({ voiceTitle: '部署1' }), 'deploy');
-    assert.equal(voiceSlotOf({ voiceTitle: '部署2' }), 'deploy');
-    for (const n of [1, 2, 3, 4]) assert.equal(voiceSlotOf({ voiceTitle: `作战中${n}` }), 'battle', `作战中${n}`);
-    for (const t of ['完成高难行动', '3星结束行动', '非3星结束行动']) assert.equal(voiceSlotOf({ voiceTitle: t }), 'win', t);
-    assert.equal(voiceSlotOf({ voiceTitle: '行动失败' }), 'lose');
-    // Everything else is not a battle moment: it must stay out of the manifest.
-    for (const t of ['交谈1', '闲置', '干员报到', '任命助理', '戳一下', '信赖触摸', '标题', '问候', '生日', '周年庆典', '进驻设施', '观看作战记录', '编入队伍', '任命队长', '精英化晋升1']) {
-      assert.equal(voiceSlotOf({ voiceTitle: t }), null, t);
-    }
-    assert.equal(voiceSlotOf({}), null);
-    assert.equal(voiceSlotOf(null), null);
-    // Slots are declared, and every mapped title points at one of them.
-    for (const slot of Object.values(VOICE_TITLE_SLOTS)) assert.ok(VOICE_SLOTS.includes(slot), slot);
-    assert.deepEqual([...VOICE_SLOTS].sort(), ['battle', 'deploy', 'lose', 'select', 'start', 'win']);
-  });
-
-  test('voiceEntries tolerates the dump wrapper and skips incomplete rows', () => {
-    const rows = voiceEntries({ charWords: {
-      a: { charId: 'char_x', voiceId: 'CN_023', voiceTitle: '部署1', voiceAsset: 'char_x/CN_023' },
-      b: { charId: 'char_x', voiceTitle: '部署1', voiceAsset: 'char_x/CN_024' },            // no voiceId
-      c: { charId: 'char_x', voiceId: 'CN_025', voiceTitle: '作战中1' },                    // no asset
-      d: null,
-      e: 'nope',
-    } });
-    assert.equal(rows.length, 1);
-    assert.deepEqual(rows[0], { charId: 'char_x', voiceId: 'CN_023', voiceTitle: '部署1', voiceAsset: 'char_x/CN_023' });
-    assert.deepEqual(voiceEntries(null), []);
-    assert.deepEqual(voiceEntries({}), []);
-  });
-});
-
-describe('voice lines: the plan covers the pool and stays deterministic', () => {
-  // 真实 base（见上面那段注释）：自己拼一个「少了 sound_beta_2/」的 base 会让期望值跟着错的实现一起错。
-  const AA2VOICE = RAW.aa2voice;
-  /** A tiny fake index: one wanted operator with every slot, one unwanted, one row per non-battle title. */
-  const fakeIndex = () => ({
-    charWords: {
-      '1': { charId: 'char_a', voiceId: 'CN_019', voiceTitle: '行动出发', voiceAsset: 'char_a/CN_019' },
-      '2': { charId: 'char_a', voiceId: 'CN_021', voiceTitle: '选中干员1', voiceAsset: 'char_a/CN_021' },
-      '3': { charId: 'char_a', voiceId: 'CN_022', voiceTitle: '选中干员2', voiceAsset: 'char_a/CN_022' },
-      '4': { charId: 'char_a', voiceId: 'CN_023', voiceTitle: '部署1', voiceAsset: 'char_a/CN_023' },
-      '5': { charId: 'char_a', voiceId: 'CN_025', voiceTitle: '作战中1', voiceAsset: 'char_a/CN_025' },
-      '6': { charId: 'char_a', voiceId: 'CN_030', voiceTitle: '3星结束行动', voiceAsset: 'char_a/CN_030' },
-      '7': { charId: 'char_a', voiceId: 'CN_032', voiceTitle: '行动失败', voiceAsset: 'char_a/CN_032' },
-      // the same line filed under another form (阿米娅's lines live under char_1037_amiya3 too) — a distinct file
-      '8': { charId: 'char_a', voiceId: 'CN_023', voiceTitle: '部署1', voiceAsset: 'char_a_alt/CN_023' },
-      '9': { charId: 'char_b', voiceId: 'CN_023', voiceTitle: '部署1', voiceAsset: 'char_b/CN_023' },
-      a: { charId: 'char_a', voiceId: 'CN_001', voiceTitle: '任命助理', voiceAsset: 'char_a/CN_001' },
-    },
-  });
-
-  test('only the requested operators, only in-battle lines, one entry per slot line', () => {
-    const p = planVoices({ charIds: ['char_a'], charword: fakeIndex(), aa2voice: AA2VOICE });
-    assert.deepEqual(Object.keys(p.voice), ['char_a'], 'char_b was not asked for');
-    assert.deepEqual(Object.keys(p.voice.char_a).sort(), ['battle', 'deploy', 'lose', 'select', 'start', 'win']);
-    assert.equal(p.voice.char_a.select.length, 2, '选中干员1 + 2');
-    assert.equal(p.voice.char_a.deploy.length, 2, 'two assets for the same voiceId (char_a + char_a_alt)');
-    assert.equal(p.voice.char_a.start.length, 1);
-    assert.equal(p.files.length, 8, 'one file per distinct asset path');
-    assert.deepEqual(p.files.map((f) => f.rel), [...p.files.map((f) => f.rel)].sort(), 'sorted for a stable manifest hash');
-    for (const f of p.files) {
-      assert.match(f.rel, /^audio\/voice_cn\//, f.rel);
-      assert.match(f.url, /\/sound_beta_2\/voice_cn\//, f.url);
-      // 真实 base 已经带着 `sound_beta_2/`：这条 URL 里它只能出现一次（曾经多拼一层 → 2002 条全部 404）
-      assert.equal((f.url.match(/sound_beta_2\//g) || []).length, 1, f.url);
-    }
-    assert.equal(p.lines, 8, 'the 8 battle-moment rows of the wanted operator (char_b and 任命助理 are not)');
-  });
-
-  test('an operator with no in-battle line contributes nothing (the 18 voice-less pool operators)', () => {
-    const p = planVoices({ charIds: ['char_b'], charword: { charWords: { a: { charId: 'char_b', voiceId: 'CN_001', voiceTitle: '任命助理', voiceAsset: 'char_b/CN_001' } } }, aa2voice: AA2VOICE });
-    assert.deepEqual(p.voice, {});
-    assert.equal(p.files.length, 0);
-    assert.match(p.notes.join(' '), /no in-battle line/, 'the dry run says so instead of staying silent');
-  });
-
-  test('the manifest leaves resolve to /assets/… URLs (what the client plays)', () => {
-    const p = planVoices({ charIds: ['char_a'], charword: fakeIndex(), aa2voice: AA2VOICE });
-    const template = { audio: { voice: {} } };
-    for (const [charId, slots] of Object.entries(p.voice)) {
-      template.audio.voice[charId] = {};
-      for (const [slot, pairs] of Object.entries(slots)) template.audio.voice[charId][slot] = pairs.map((x) => leaf(alt(x.rel, x.url)));
-    }
-    // Resolve against a root where exactly one voice file exists: a missing file must vanish from the manifest
-    // (the client then stays silent), not appear as a broken URL.
-    const root = join(ROOT, 'public', 'assets');
-    const have = p.files[0];
-    const only = { audio: { voice: { char_a: { deploy: [leaf(alt(have.rel, have.url))] } } } };
-    const fakeRoot = join(ROOT, '.cache');   // exists; the rel inside is not there
-    const miss = resolveTemplate(only, { root: fakeRoot, spine: new Map() });
-    assert.deepEqual(miss.value.audio.voice.char_a.deploy, [], 'nothing on disk → the slot empties out');
-    assert.ok(miss.misses.some((m) => m.includes('audio.voice.char_a.deploy')), `misses: ${miss.misses.join(', ')}`);
-    if (existsSync(join(root, have.rel))) {
-      const got = resolveTemplate(only, { root, spine: new Map() });
-      assert.deepEqual(got.value.audio.voice.char_a.deploy, [`/assets/${have.rel}`], 'a file on disk becomes its URL');
-    }
-    assert.equal(collectLeaves(template).length, Object.values(p.voice).reduce((n, slots) => n + Object.values(slots).reduce((m, list) => m + list.length, 0), 0),
-      'every voice line is a leaf the downloader will fetch');
-  });
-
-  test('the real index (when its cache is present) covers the pool and names the voice-less operators', () => {
-    const cache = join(ROOT, '.cache', 'gamedata', 'excel', 'charword_table.json');
-    if (!existsSync(cache)) return;   // the index is downloaded by `--voices`; without it this check is skipped
-    const charword = readJson('.cache/gamedata/excel/charword_table.json');
-    const pool = Object.keys(readJson('docs/research/07-assets.json').operators || {});
-    const p = planVoices({ charIds: pool, charword, aa2voice: AA2VOICE });
-    assert.ok(p.chars > 100, `${p.chars} of ${pool.length} pool operators have in-battle lines`);
-    assert.ok(p.files.length > 1000, `${p.files.length} voice files planned`);
-    for (const f of p.files) assert.match(f.rel, /^audio\/voice_cn\/[a-z0-9_]+\/cn_\d{3}\.mp3$/, f.rel);
-    const slotsSeen = new Set(Object.values(p.voice).flatMap((s) => Object.keys(s)));
-    assert.deepEqual([...slotsSeen].sort(), [...VOICE_SLOTS].sort(), 'the live index fills every slot');
-  });
-});
-
-// ---------------------------------------------------------------------------
 describe('generated manifest data/assets.json', () => {
   const haveManifest = existsSync(MANIFEST);
   const haveAssets = existsSync(ASSETS);
@@ -808,10 +661,10 @@ describe('generated manifest data/assets.json', () => {
     for (const e of Object.values(manifest.enemies)) if (e.spine) models.set(e.spine.skel, e.spine);
     for (const t of Object.values(manifest.tokens)) if (t.spine) models.set(t.spine.skel, t.spine);
     assert.ok(models.size > 400);
-    // the official enemy models of the local client, as the client resolves them (DESIGN §13: only when listed)
+    // the official enemy and token models of the local client, as the client resolves them (DESIGN §13: only when listed)
     const localPath = join(ROOT, 'data', 'local-assets.json');
     const local = existsSync(localPath) ? JSON.parse(readFileSync(localPath, 'utf8')) : null;
-    for (const id of Object.keys(manifest.enemies)) {
+    for (const id of [...Object.keys(manifest.enemies), ...Object.keys(manifest.tokens)]) {
       const s = local ? spineEntry(manifest, id, { local }) : null;
       if (s?.local && [s.skel, s.atlas, ...s.textures].every((u) => existsSync(join(PUBLIC, u)))) models.set(s.skel, s);
     }

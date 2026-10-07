@@ -23,18 +23,19 @@ import {
   tierUsage, toggleSupport, usageLine, sanitizeSupport, SUPPORT_PREF,
 } from '../ui/supportModel.js';
 import { supportStore, openSupport, closeSupport, setSupportEntries, clearSupport } from '../ui/supportSync.js';
+import { t, N_ } from '../../../shared/i18n.js';
 
 export { openSupport, closeSupport };
 
 /** The sync states the top bar explains (ui/supportSync.js sets them). */
 const SYNC_TEXT = {
-  idle: '离线：连上服务器后会自动提交',
-  waiting: '等待服务器下发助战卡池…',
-  pending: '待提交…',
-  sending: '提交中…',
-  synced: '已提交',
-  locked: '本局已锁定，改动下一局生效',
-  error: '服务器拒绝了这次选择（已保留你的选择）',
+  idle: N_('离线：连上服务器后会自动提交'),
+  waiting: N_('等待服务器下发助战卡池…'),
+  pending: N_('待提交…'),
+  sending: N_('提交中…'),
+  synced: N_('已提交'),
+  locked: N_('本局已锁定，改动下一局生效'),
+  error: N_('服务器拒绝了这次选择（已保留你的选择）'),
 };
 
 /** Whether the overlay must close by itself (a match left the briefing, or one started). */
@@ -53,17 +54,17 @@ function SupportRow({ id, picked, full, onToggle }) {
   const disabled = !picked && full;
   return html`<button type="button" class=${`sp-row${picked ? ' on' : ''}${disabled ? ' full' : ''}`}
       data-testid=${`support-${id}`} disabled=${disabled}
-      title=${disabled ? '该阶助战名额已满' : (picked ? '点击移出本次助战' : '点击加入本次助战')}
+      title=${disabled ? t('该阶助战名额已满') : (picked ? t('点击移出本次助战') : t('点击加入本次助战'))}
       onClick=${() => onToggle(id)}>
     <${Img} src=${chessAvatarUrl(m, rec)} class="sp-row__img" fallback=${html`<span class="sp-row__ph">${name.slice(0, 1)}</span>`} />
     <span class="sp-row__txt">
       <span class="sp-row__name">${name}</span>
       <span class="sp-row__meta">
         ${prof ? html`<${Img} src=${profIconUrl(m, prof)} class="sp-row__prof" fallback=${null} />` : null}
-        <span class="dim">${rec?.tier ? `${rec.tier} 阶` : ''}${rec?.subProfessionName ? ` · ${rec.subProfessionName}` : ''}</span>
+        <span class="dim">${rec?.tier ? t('{tier} 阶', { tier: rec.tier }) : ''}${rec?.subProfessionName ? ` · ${rec.subProfessionName}` : ''}</span>
       </span>
     </span>
-    <span class="sp-row__mark">${picked ? '已选' : (disabled ? '名额已满' : '')}</span>
+    <span class="sp-row__mark">${picked ? t('已选') : (disabled ? t('名额已满') : '')}</span>
   </button>`;
 }
 
@@ -73,19 +74,18 @@ function SupportScreen({ st }) {
   const entries = st.entries;
   const ready = data.status('chess') === 'ready';
   if (!ready) {
-    return html`<div class="sp-overlay"><div class="sp-panel"><div class="sp-loading">正在载入干员数据…</div></div></div>`;
+    return html`<div class="sp-overlay"><div class="sp-panel"><div class="sp-loading">${t('正在载入干员数据…')}</div></div></div>`;
   }
   if (!catalog) {
     return html`<div class="sp-overlay" data-testid="support-overlay">
       <div class="sp-panel">
         <div class="sp-head">
-          <${MicroLabel}>助战<//>
+          <${MicroLabel}>${t('助战')}<//>
           <span class="sp-head__spacer"></span>
-          <${Button} variant="ghost" size="sm" onClick=${closeSupport}>关闭<//>
+          <${Button} variant="ghost" size="sm" onClick=${closeSupport}>${t('关闭')}<//>
         </div>
         <p class="hint" data-testid="support-waiting">
-          这个服务器还没有下发助战卡池。助战卡池由服务端声明，客户端不会自行猜测 ——
-          进入房间后（或服务器尚未开启助战时）这里会保持为空。
+          ${t('这个服务器还没有下发助战卡池。助战卡池由服务端声明，客户端不会自行猜测 —— 进入房间后（或服务器尚未开启助战时）这里会保持为空。')}
         </p>
       </div>
     </div>`;
@@ -94,11 +94,11 @@ function SupportScreen({ st }) {
     return html`<div class="sp-overlay" data-testid="support-overlay">
       <div class="sp-panel">
         <div class="sp-head">
-          <${MicroLabel}>助战<//>
+          <${MicroLabel}>${t('助战')}<//>
           <span class="sp-head__spacer"></span>
-          <${Button} variant="ghost" size="sm" onClick=${closeSupport}>关闭<//>
+          <${Button} variant="ghost" size="sm" onClick=${closeSupport}>${t('关闭')}<//>
         </div>
-        <p class="hint" data-testid="support-disabled">本服务器未开启助战。</p>
+        <p class="hint" data-testid="support-disabled">${t('本服务器未开启助战。')}</p>
       </div>
     </div>`;
   }
@@ -111,23 +111,21 @@ function SupportScreen({ st }) {
   return html`<div class="sp-overlay" data-testid="support-overlay">
     <div class="sp-panel">
       <div class="sp-head">
-        <${MicroLabel}>${catalog.label || '助战'}<//>
+        <${MicroLabel}>${catalog.label || t('助战')}<//>
         <span class="sp-head__spacer"></span>
         <span class="sp-usage" data-testid="support-usage">${usageLine(catalog, entries)}</span>
         <span class=${`sp-sync sp-sync--${st.sync}`} data-testid="support-sync">${SYNC_TEXT[st.sync] || st.sync}</span>
-        <${Button} variant="ghost" size="sm" disabled=${!entries.length} onClick=${() => clearSupport()}>清空<//>
-        <${Button} variant="ghost" size="sm" onClick=${closeSupport}>关闭<//>
+        <${Button} variant="ghost" size="sm" disabled=${!entries.length} onClick=${() => clearSupport()}>${t('清空')}<//>
+        <${Button} variant="ghost" size="sm" onClick=${closeSupport}>${t('关闭')}<//>
       </div>
       <p class="hint">
-        每阶可以带的名额由服务器控制；卡池之外的干员不会出现在这里，也不会被服务器接受。
-        带上的干员会进你的商店：像普通棋子一样摇得到、按阶级价买到、卖掉也按普通规则结算
-        （服务端可以在 data/support.json 的 prices 里给它单独定价）。本局的助战在开局后锁定，改动在下一局生效。
+        ${t('每阶可以带的名额由服务器控制；卡池之外的干员不会出现在这里，也不会被服务器接受。带上的干员会进你的商店：像普通棋子一样摇得到、按阶级价买到、卖掉也按普通规则结算（服务端可以在 data/support.json 的 prices 里给它单独定价）。本局的助战在开局后锁定，改动在下一局生效。')}
       </p>
       ${usage.map((u) => html`
         <div class="sp-tier" key=${u.tier}>
           <div class="sp-tier__head">
             <${TierChip} tier=${u.tier} />
-            <span class="sp-tier__n" data-testid=${`support-count-${u.tier}`}>已选 ${u.used}/${u.slots}</span>
+            <span class="sp-tier__n" data-testid=${`support-count-${u.tier}`}>${t('已选 {used}/{slots}', { used: u.used, slots: u.slots })}</span>
           </div>
           <div class="sp-grid">
             ${u.ids.map((id) => html`<${SupportRow} key=${id} id=${id} picked=${entries.includes(id)} full=${u.full} onToggle=${onToggle} />`)}
@@ -155,7 +153,7 @@ export function SupportHost() {
  * Entry button (lobby / room / briefing). The badge is how many supports are selected.
  * @param {{ from: 'lobby'|'room'|'briefing', size?: string, variant?: string, class?: string, label?: string }} props
  */
-export function SupportButton({ from, size = 'md', variant = 'secondary', class: cls, label = '助战' }) {
+export function SupportButton({ from, size = 'md', variant = 'secondary', class: cls, label = t('助战') }) {
   useData('chess', 'assets');
   const entries = useStore((s) => s.entries, Object.is, supportStore);
   const catalog = useStore((s) => s.catalog, Object.is, supportStore);
@@ -164,10 +162,10 @@ export function SupportButton({ from, size = 'md', variant = 'secondary', class:
   const disabled = catalog ? !catalog.enabled : false;
   return html`<button type="button" class=${`btn btn--${variant} btn--${size} sp-entry ${cls || ''}`}
       data-testid="support-open" disabled=${disabled}
-      title=${catalog ? (catalog.enabled ? '选择本次携带的助战干员' : '本服务器未开启助战') : '助战卡池由服务端下发'}
+      title=${catalog ? (catalog.enabled ? t('选择本次携带的助战干员') : t('本服务器未开启助战')) : t('助战卡池由服务端下发')}
       onClick=${() => openSupport(from)}>
     <${Icon} name="users" class="btn__icon" />
     <span class="btn__label">${label}</span>
-    ${n ? html`<span class="sp-entry__n num" aria-label=${`已选 ${n} 名助战`}>${n}</span>` : null}
+    ${n ? html`<span class="sp-entry__n num" aria-label=${t('已选 {n} 名助战', { n })}>${n}</span>` : null}
   </button>`;
 }

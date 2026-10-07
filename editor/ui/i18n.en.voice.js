@@ -11,12 +11,18 @@
 
 export const EN_VOICE = Object.freeze({
   // ---- 槽位名（仅展示；槽位清单本身来自服务端） ----
-  '行动开始（行动出发）': 'Operation start (sortie)',
+  '行动出发（开战）': 'Sortie (battle start)',
+  '行动开始（首次接敌）': 'Engagement (first contact)',
   '选中干员': 'Operator selected',
   '部署': 'Deployment',
-  '作战中': 'In battle',
-  '胜利结算': 'Victory result',
-  '失败结算': 'Defeat result',
+  '作战中1': 'In battle 1',
+  '作战中2': 'In battle 2',
+  '作战中3': 'In battle 3',
+  '作战中4': 'In battle 4',
+  '完成高难行动': 'Hard operation cleared',
+  '3 星结束行动（完美作战）': '3-star clear (perfect run)',
+  '非 3 星结束行动': 'Under 3-star clear',
+  '行动失败': 'Operation failed',
 
   // ---- 左栏：包 ----
   '还没有工坊包（先用干员编辑器建一个）': 'No workshop pack yet (create one in the operator editor first)',

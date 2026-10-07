@@ -1,4 +1,5 @@
 // shared/workshop.js — 创意工坊 (community workshop) pack format and the overlay merge, pure ESM shared by the server
+// (i18n-ignore-file: 工坊作者层的校验与推导文本 —— 给作者、编辑器与 AI 读的规则说明（编辑器有自己的中英词典，见 docs/EDITOR.md），不是客户端界面文案)
 // (the loader, the match data) and the browser (which reads the same merged /data/*.json).
 //
 // A workshop pack is DATA ONLY at this layer. It never edits `data/*.json` — the loader applies an additive overlay on
@@ -444,7 +445,11 @@ function mergeWorkshopVoices(data, packs, report) {
   for (const [charId, slots] of Object.entries(index)) {
     const lines = isPlainObj(voice[charId]) ? { ...voice[charId] } : {};
     for (const [slot, urls] of Object.entries(slots)) {
-      const official = Array.isArray(lines[slot]) ? lines[slot] : [];
+      // The official manifest writes a slot with ONE line as a bare string and several as an array (0.2.0's
+      // tools/assets/audio.mjs); the client accepts both. Normalize before appending, or a pack line would silently
+      // REPLACE that single official line instead of joining it.
+      const cur = lines[slot];
+      const official = Array.isArray(cur) ? cur : (typeof cur === 'string' && cur ? [cur] : []);
       lines[slot] = [...new Set([...official, ...urls])];
     }
     voice[charId] = lines;

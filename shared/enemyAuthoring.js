@@ -1,4 +1,5 @@
 // shared/enemyAuthoring.js — authoring a workshop ENEMY: values + special mechanics, with the derived metrics computed
+// (i18n-ignore-file: 工坊作者层的校验与推导文本 —— 给作者、编辑器与 AI 读的规则说明（编辑器有自己的中英词典，见 docs/EDITOR.md），不是客户端界面文案)
 // rather than typed in.
 //
 // An enemies.json record has ~30 fields, and three of them are DERIVED from the stats (tools/build-data.mjs):

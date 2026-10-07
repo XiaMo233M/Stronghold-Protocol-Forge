@@ -611,7 +611,8 @@ describe('workshop editor: the 3D preview mounts (read-only, and narrow)', () =>
     if (!entry?.path) return; // listed differently: nothing to assert about the art itself
     const art = await fetch(`${editor.url}${entry.path}`);
     assert.equal(art.status, 200, entry.path);
-    assert.match(art.headers.get('content-type') || '', /image\/png/);
+    // 本机素材里的棋盘图集可能是 png，也可能是官方 0.2.0 压过的 webp（data/local-assets.json 的 path 说了算）
+    assert.match(art.headers.get('content-type') || '', /image\/(png|webp)/);
     assert.ok(Number(art.headers.get('content-length')) > 1000, 'the atlas must be real bytes');
   });
 

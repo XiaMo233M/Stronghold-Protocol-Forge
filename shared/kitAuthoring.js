@@ -1,4 +1,5 @@
 // shared/kitAuthoring.js — checking a workshop BEHAVIOUR-LAYER kit (`<pack>/kits/<chessId>.js`).
+// (i18n-ignore-file: 工坊作者层的校验与推导文本 —— 给作者、编辑器与 AI 读的规则说明（编辑器有自己的中英词典，见 docs/EDITOR.md），不是客户端界面文案)
 //
 // A kit is code, not data, so it cannot be "derived". But most of the ways a kit goes wrong are STATIC, and every one of
 // them fails SILENTLY in game — which is exactly the class of bug the rest of this project's authoring layer exists to
@@ -29,10 +30,11 @@
  * Drift-guarded against the real sources; see the test.
  */
 export const HOOK_EVENTS = Object.freeze([
-  'ammoUsed', 'attack', 'battleEnd', 'battleStart', 'beforeAttack', 'beforeStatus', 'blocked', 'damaged', 'death',
-  'deploy', 'dodge', 'dollSwap', 'dollSwitch', 'elementBurst', 'elementHit', 'enemyLeak', 'enemySpawn', 'fatal', 'heal',
-  'hit', 'kill', 'layerGain', 'lpLoss', 'merchantPay', 'nearl2:knockdown', 'skillEnd', 'skillStart', 'spGain',
-  'statusApplied', 'summonKill', 'tick',
+  'ammoUsed', 'attack', 'bardRegen', 'battleEnd', 'battleStart', 'beforeAttack', 'beforeStatus', 'blocked',
+  'boomerangCaught', 'damaged', 'death', 'deploy', 'dodge', 'dollSwap', 'dollSwitch', 'elementBurst', 'elementHit',
+  'enemyAttackStart', 'enemyLeak', 'enemySpawn', 'fatal', 'heal', 'hit', 'hpDamage', 'kill', 'layerGain', 'lpLoss',
+  'merchantPay', 'nearl2:knockdown', 'palsyTrigger', 'skillEnd', 'skillStart', 'spGain', 'statusApplied', 'summonKill',
+  'tick',
 ]);
 
 /** Names that make a kit non-deterministic or environment-bound (rule 3), with why each one is a problem. */

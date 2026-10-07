@@ -30,12 +30,20 @@ async function api(path, opts) {
  */
 function slotLabelText(slot) {
   switch (slot) {
-    case 'start': return t('行动开始（行动出发）');
+    // The vocabulary is the upstream 0.2.0 client's (public/js/audio.js VOICE_PRIORITY): the slot names below are the
+    // official 明日方舟 voice categories (行动出发 / 首次接敌 / 选中干员 / 部署 / 作战中1-4 / 各种结算).
+    case 'start': return t('行动出发（开战）');
+    case 'faceEnemy': return t('行动开始（首次接敌）');
     case 'select': return t('选中干员');
-    case 'deploy': return t('部署');
-    case 'battle': return t('作战中');
-    case 'win': return t('胜利结算');
-    case 'lose': return t('失败结算');
+    case 'place': return t('部署');
+    case 'skill1': return t('作战中1');
+    case 'skill2': return t('作战中2');
+    case 'skill3': return t('作战中3');
+    case 'skill4': return t('作战中4');
+    case 'resultFour': return t('完成高难行动');
+    case 'resultThree': return t('3 星结束行动（完美作战）');
+    case 'resultTwo': return t('非 3 星结束行动');
+    case 'resultLose': return t('行动失败');
     default: return '';
   }
 }

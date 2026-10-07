@@ -317,11 +317,14 @@ node tools/workshop-validate.mjs workshop     # kits 层：静态检查 + 真实
   **槽位**（下拉，来自 `/api/voices` 的 `slots`）、**文件**（下拉列出该包 `assets/` 下真实存在的文件，并标明哪些是音频）。
   下面还列出该包 `assets/` 的全部文件，点一下就填进输入框。
 - **试听走的就是客户端那条通路**：编辑器提供一条**只读、只服务音频**的 `/workshop-assets/<包>/<路径>`
-  （与游戏服务器同前缀，扩展名取 `server/index.js` 白名单的音频部分），所以**试听用的 URL 就是游戏里会播的那个 URL**。
+  （与游戏服务器同前缀，扩展名取 `server/http/workshop.js` 的 `WORKSHOP_ASSET_TYPES` —— `server/index.js` 再导出它 —— 的音频部分），
+  所以**试听用的 URL 就是游戏里会播的那个 URL**。
   没有目录列表，`..`、点开头的段一律拒绝，`pack.json` 本身不在那条通路上。素材仍然由作者自己拷进 `<pack>/assets/`：
   **编辑器没有上传接口**（那会是另一类攻击面）。
 - **写入规则**（全部在服务端强制；拒绝时 **400，且一个字节都不写**）：包 id 合法；干员 id 匹配 `[A-Za-z0-9_-]{1,64}`；
-  槽位 ∈ `VOICE_SLOTS`（`shared/constants.js`，**不复制**）；路径是包内 `assets/` 的相对路径（不得以 `/`、反斜杠、
+  槽位 ∈ `VOICE_SLOTS`（`shared/constants.js`，**不复制** —— 0.7.0 起是上游客户端真正会播的 12 个战斗槽位：
+  `start` / `faceEnemy` / `select` / `place` / `skill1-4` / `resultFour` / `resultThree` / `resultTwo` / `resultLose`）；
+  路径是包内 `assets/` 的相对路径（不得以 `/`、反斜杠、
   盘符开头，不得含 `.` / `..` / 空段 / 点开头的隐藏段）；**文件必须真的存在**；扩展名必须在 `server/index.js` 的
   `WORKSHOP_ASSET_TYPES` 里（**引用同一份表**）；包没有 `assets/` 文件夹时直接拒绝 ——
   否则写出的清单会被 `VOICE_NEEDS_ASSETS` 整包丢掉。

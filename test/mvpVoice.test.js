@@ -51,12 +51,15 @@ describe('settlement MVP (mvpOf): the unit the result screen speaks with', () =>
     const server = read('server/match/results.js');
     assert.match(server, /export function mvpOf\(/, 'results.js exports the picker');
     assert.match(server, /mvp: mvpOf\(ps, lineup\)/, 'every player entry carries its own MVP');
-    const match = read('server/match/Match.js');
-    assert.match(match, /ps\.stats\.unitStats\.set\(/, 'Match.js accumulates the per-unit numbers');
-    assert.match(match, /mergeUnits\(r\.unitStats\)/, 'from the verified battle report');
+    // upstream 0.2.0 split Match.js: the per-battle accumulator now lives in match/settle.js
+    const settle = read('server/match/match/settle.js');
+    assert.match(settle, /ps\.stats\.unitStats\.set\(/, 'settle.js accumulates the per-unit numbers');
+    assert.match(settle, /mergeUnits\(r\.unitStats\)/, 'from the verified battle report');
+    assert.match(settle, /mergeUnits\(up\.unitStats\)/, 'and from the 联防 half too');
     const screen = read('public/js/screens/result.js');
     assert.match(screen, /mine\.mvp/, 'the result screen reads the local player\'s MVP');
-    assert.match(screen, /audio\.voice\(mine\.mvp, r\.victory \? 'win' : 'lose'\)/, 'and says the win / lose line with it');
+    // the slot vocabulary is the upstream client's (shared/constants.js VOICE_SLOTS): 高难 / 3 星 / 失败
+    assert.match(screen, /audio\.voice\(mine\.mvp, r\.victory \? \(hard \? 'resultFour' : 'resultThree'\) : 'resultLose'\)/, 'and says the result line with it');
     const state = read('server/match/PlayerState.js');
     assert.match(state, /unitStats: new Map\(\)/, 'PlayerState starts the accumulator');
   });

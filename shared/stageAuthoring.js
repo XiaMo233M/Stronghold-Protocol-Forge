@@ -1,4 +1,5 @@
 // shared/stageAuthoring.js — authoring a workshop STAGE (map): the pure half.
+// (i18n-ignore-file: 工坊作者层的校验与推导文本 —— 给作者、编辑器与 AI 读的规则说明（编辑器有自己的中英词典，见 docs/EDITOR.md），不是客户端界面文案)
 //
 // A stage record (data/stages.json) is NOT hand-writable, because three of its fields are DERIVED from the grid and
 // getting them wrong breaks movement silently. The reference implementation is tools/build-data.mjs:2294-2327; this
