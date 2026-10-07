@@ -1102,9 +1102,30 @@ export async function createEditorServer(opts = {}) {
     ? opts.forgeAuthor.trim()
     : (typeof process.env.SP_FORGE_AUTHOR === 'string' && process.env.SP_FORGE_AUTHOR.trim() ? process.env.SP_FORGE_AUTHOR.trim() : null);
   const official = officialChess(dataDir);
+  // 分支按职业联动用的表：**从全部非精锐记录**算出来，而不是从 officialChess（只含可见干员）——
+  // 可见数据里少一个分支（`pusher` 推击手只在一条不可见记录上），而作者仍然应该能选到它。
+  // 官方数据里没有任何分支跨职业（57 个分支各归一个职业），但仍然按集合给，界面可以据此说清「它属于哪个职业」。
+  const subProfessionList = (() => {
+    /** @type {Map<string, {id: string, name: string, professions: Set<string>}>} */
+    const byId = new Map();
+    for (const rec of Object.values(chessData)) {
+      if (!rec || rec.isGolden) continue;
+      const id = typeof rec.subProfessionId === 'string' ? rec.subProfessionId.trim() : '';
+      const prof = typeof rec.profession === 'string' ? rec.profession.trim() : '';
+      if (!id || !prof) continue;
+      let entry = byId.get(id);
+      if (!entry) { entry = { id, name: '', professions: new Set() }; byId.set(id, entry); }
+      if (!entry.name && typeof rec.subProfessionName === 'string' && rec.subProfessionName) entry.name = rec.subProfessionName;
+      entry.professions.add(prof);
+    }
+    return [...byId.values()]
+      .map((e) => ({ id: e.id, name: e.name, professions: [...e.professions].sort() }))
+      .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id, 'zh') || a.id.localeCompare(b.id));
+  })();
 
-  // 盟约（羁绊）：官方 23 条是「覆盖」的对象，图标只能复用本机已装好的那些（一个包无法自带盟约图标），
-  // 效果 id 只要在 data/effects.json 里就有效（新盟约的战斗加成不靠它 —— 靠记录上的 genericBuffs）。
+  // 盟约（羁绊）：官方 23 条是「覆盖」的对象；图标除了本机已装好的那些（`assets.bonds`），
+  // 包也可以自带（`pack.json` 的 `bondIcons`，见 shared/workshop.js）；效果 id 只要在 data/effects.json 里就有效
+  // （新盟约的战斗加成不靠它 —— 靠记录上的 genericBuffs）。
   const bondData = readJson(path.join(dataDir, 'bonds.json'), {}) || {};
   const officialBondIds = new Set(Object.keys(bondData));
   const officialBondList = officialBondListOf(bondData);
@@ -1182,6 +1203,8 @@ export async function createEditorServer(opts = {}) {
         loadErrors: loaded.errors,
         support: normalizeSupportConfig(readJson(supportFile, null)),
         officialChess: official,
+        // 职业 → 分支的联动表（干员页的分支下拉按它过滤），以及每个分支属于哪些职业
+        subProfessions: subProfessionList,
         // 官方盟约清单：干员页的「盟约」勾选用它（作者要看的是名字，记录里写的是 bondId）
         officialBonds: officialBondList,
         // 外观候选：本机已装好的干员模型（data/assets.json 的 chars 键）。页面的 spine 判定与下拉都用它，

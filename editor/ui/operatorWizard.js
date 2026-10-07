@@ -112,6 +112,110 @@ export function bondChoicesOf(officialBonds, packBonds) {
 }
 
 /**
+ * 分支下拉的候选，**按职业过滤**：官方数据里每个分支只属于一个职业（57 个分支各归一个职业），
+ * 所以唯一说得通的顺序是「先选职业，再从这个职业允许的分支里挑」。
+ *
+ * `list` 是服务端 `/api/state.subProfessions` 的形状（`{ id, name, professions }`），它从**全部**记录算出，
+ * 所以可见数据里没出现过的分支（`pusher` 推击手）也在候选里 —— 从 `officialChess` 推就会漏掉它。
+ *
+ * @param {Array<{id:string,name?:string,professions?:string[]}>} list
+ * @param {string} [profession] 不给就是全部（职业还没填时）
+ * @returns {Array<{id:string, name:string}>}
+ */
+export function subProfessionOptionsFor(list, profession) {
+  const want = typeof profession === 'string' ? profession.trim().toUpperCase() : '';
+  const out = [];
+  for (const b of Array.isArray(list) ? list : []) {
+    const id = b && typeof b.id === 'string' ? b.id.trim() : '';
+    if (!id) continue;
+    const profs = Array.isArray(b.professions) ? b.professions : [];
+    // 职业不详的分支（数据里没有）不因为过滤而消失：它可能是作者自定义的
+    if (want && profs.length && !profs.includes(want)) continue;
+    out.push({ id, name: typeof b.name === 'string' ? b.name : '' });
+  }
+  return out;
+}
+
+/**
+ * 一个分支属于哪些职业 —— 用来解释「这个分支不属于当前职业」。未知分支返回空数组（不做判断，也不吓人）。
+ * @param {Array<{id:string,professions?:string[]}>} list @param {string} subProfessionId
+ * @returns {string[]}
+ */
+export function professionsOfSub(list, subProfessionId) {
+  const id = typeof subProfessionId === 'string' ? subProfessionId.trim() : '';
+  if (!id) return [];
+  const hit = (Array.isArray(list) ? list : []).find((b) => b && b.id === id);
+  return hit && Array.isArray(hit.professions) ? [...hit.professions] : [];
+}
+
+// ---- 自己画攻击范围（干员页的范围画板） ---------------------------------------------------------------------------
+//
+// 攻击范围 = 「以干员自己那一格为原点」的相对格集合（`[dRow, dCol]` 朝右，见 shared/chessAuthoring.js）。
+// 官方 258 条带范围的记录都落在 x∈[-2,2]、y∈[-2,5]；画板给一点余量：x∈[-3,3]、y∈[-2,6]，原点在 (3,2)。
+// 这一半是纯函数（画板本身在 app.js 里只负责把坐标画成格子），所以可以单独测。
+
+/** 画板列数：x 从 -3 到 3。 */
+export const PAINTER_COLS = 7;
+/** 画板行数：y 从 -2 到 6。 */
+export const PAINTER_ROWS = 9;
+/** (0,0) 在画板上的位置 —— 干员自己站的那一格。 */
+export const PAINTER_ORIGIN = Object.freeze({ col: 3, row: 2 });
+
+/** 画板上第 (col,row) 格对应的记录坐标；越界返回 null。 */
+export function painterCellAt(col, row) {
+  if (!Number.isInteger(col) || !Number.isInteger(row)) return null;
+  if (col < 0 || col >= PAINTER_COLS || row < 0 || row >= PAINTER_ROWS) return null;
+  return { x: col - PAINTER_ORIGIN.col, y: row - PAINTER_ORIGIN.row };
+}
+
+/** 记录坐标落在画板哪一格；画板外返回 null（作者手写的超大范围不会丢，只是画不出来）。 */
+export function painterPositionOf(x, y) {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  const col = x + PAINTER_ORIGIN.col;
+  const row = y + PAINTER_ORIGIN.row;
+  if (col < 0 || col >= PAINTER_COLS || row < 0 || row >= PAINTER_ROWS) return null;
+  return { col, row };
+}
+
+/** 一组范围格 → 便于查表的键集合（`"x,y"`）。 */
+export function gridKeySet(grid) {
+  const out = new Set();
+  for (const c of Array.isArray(grid) ? grid : []) {
+    if (Array.isArray(c) && c.length === 2 && Number.isInteger(c[0]) && Number.isInteger(c[1])) out.add(`${c[0]},${c[1]}`);
+  }
+  return out;
+}
+
+/** 排序 + 去重（落盘前统一形状：同一片范围不该因为顺序不同而被判成「改过了」）。 */
+export function sortGrid(grid) {
+  return [...gridKeySet(grid)].map((k) => k.split(',').map(Number)).sort((a, b) => (a[1] - b[1]) || (a[0] - b[0]));
+}
+
+/**
+ * 点一下某一格：在就删掉、不在就加上，返回**新**数组。
+ * 原点那一格删不掉：干员必须站在自己的范围内（空范围 = 谁都打不到，而引擎不会为此报错）。
+ */
+export function toggleGridCell(grid, x, y) {
+  const have = gridKeySet(grid);
+  const key = `${x},${y}`;
+  if (have.has(key)) {
+    if (x === 0 && y === 0) return sortGrid(grid);
+    have.delete(key);
+  } else have.add(key);
+  return sortGrid([...have].map((k) => k.split(',').map(Number)));
+}
+
+/** 画板外还有多少格（模板带来或手写的超大范围）：画板只画得下 x∈[-3,3]、y∈[-2,6]。 */
+export function outsidePainterCount(grid) {
+  let n = 0;
+  for (const c of Array.isArray(grid) ? grid : []) {
+    if (!Array.isArray(c) || c.length !== 2) continue;
+    if (!painterPositionOf(c[0], c[1])) n++;
+  }
+  return n;
+}
+
+/**
  * 攻击范围预设：官方数据里出现过的 rangeGrid 去重，每种形状配一个「用过它的干员」当例子。
  *
  * 表单此前完全没有范围的入口，作者只能吃默认的近战 2 格 / 远程 10 格。识别形状最省事的办法不是画坐标，

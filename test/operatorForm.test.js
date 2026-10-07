@@ -109,6 +109,12 @@ const STATE = {
   loadErrors: [],
   support: { pool: { 4: [] } },
   officialCount: 2,
+  // 服务端的职业→分支联动表（`/api/state.subProfessions`）：干员页的分支下拉按它过滤
+  subProfessions: [
+    { id: 'caster', name: '术师', professions: ['CASTER'] },
+    { id: 'fastshot', name: '速射手', professions: ['SNIPER'] },
+    { id: 'bard', name: '吟游者', professions: ['SUPPORT'] },
+  ],
   officialBonds: [
     { bondId: 'bond_apostle', name: '使徒', isCore: true },
     { bondId: 'bond_karlan', name: '卡西米尔', isCore: false },
@@ -130,10 +136,13 @@ const STATE = {
   },
 };
 
-const calls = [];
+  const calls = [];
 globalThis.fetch = async (url, opts) => {
   calls.push({ url: String(url), body: opts && opts.body ? JSON.parse(opts.body) : null });
   if (String(url) === '/api/state') return { ok: true, json: async () => STATE };
+  // 试玩：GET 报「没在跑」，POST start 给一个 URL（真服务端就是这两个形状）
+  if (String(url) === '/api/playtest') return { ok: true, json: async () => ({ running: false, url: null }) };
+  if (String(url) === '/api/playtest/start') return { ok: true, json: async () => ({ running: true, port: 3312, url: 'http://127.0.0.1:3312/?sp_difficulty=normal' }) };
   if (String(url).startsWith('/api/operators/template')) {
     return {
       ok: true,
@@ -256,10 +265,11 @@ describe('干员表单：真跑一遍（最小 DOM 桩）', () => {
     const pos = findAll(editorBox, (n) => n.tagName === 'SELECT' && textOf(n).includes('MELEE') && textOf(n).includes('RANGED'))[0];
     assert.match(textOf(pos), /近战 MELEE/);
     assert.match(textOf(pos), /远程 RANGED/);
-    // 分支下拉：中文名 · id —— 名字是给人看的，id 才是记录里写下去的那个值
+    // 分支下拉：中文名 · id —— 名字是给人看的，id 才是记录里写下去的那个值。
+    // 模板是狙击职业，所以清单里**只有**狙击的分支（职业联动见后面那条用例）。
     const sub = selectWith('速射手 · fastshot');
     assert.ok(sub, '分支要有中文名下拉');
-    assert.match(textOf(sub), /术师 · caster/);
+    assert.doesNotMatch(textOf(sub), /术师 · caster/, '别的职业的分支不该出现在清单里');
     assert.match(textOf(sub), /（不填：攻击方式与伤害类型只按职业推导）/);
 
     // 英文界面：数据里没有英文分支名，所以只列 id（猜一个英文名只会让人以为自己填错了）
@@ -292,7 +302,7 @@ describe('干员表单：真跑一遍（最小 DOM 桩）', () => {
     fire(findAll(editorBox, (n) => n.tagName === 'BUTTON' && textOf(n).includes('＋ 添加一个模组'))[0], 'click');
     await waitPreview(); // 「当前默认模组 → 写下去是多少」那一行是整页重画时算的（防抖 250ms）
     const form = textOf(editorBox);
-    assert.match(form, /模组 modules（只有精锐记录会读）/);
+    assert.match(form, /模组 modules/);
     assert.match(form, /当前默认模组/, '默认模组要有一行「精锐记录里写下去是多少」');
     // attr 的键是下拉：写错键名不会报错，但一个数值也不加，所以只能从真键里挑
     const attrSel = findAll(editorBox, (n) => n.tagName === 'SELECT' && MODULE_ATTR_KEYS.every((k) => textOf(n).includes(k)))[0];
@@ -343,7 +353,7 @@ describe('干员表单：真跑一遍（最小 DOM 桩）', () => {
       const label = findAll(editorBox, (n) => n.tagName === 'LABEL' && textOf(n).includes(needle))[0];
       return label ? findAll(label, (n) => n.tagName === 'INPUT')[0] : null;
     };
-    assert.match(textOf(editorBox), /盟约 bonds（这个干员算在哪些盟约里）/);
+    assert.match(textOf(editorBox), /盟约 bonds/);
     assert.equal(cbOf('使徒（bond_apostle）').checked, true, '模板带过来的官方盟约要勾着');
     assert.equal(cbOf('卡西米尔（bond_karlan）').checked, false);
     assert.match(textOf(editorBox), /本包/, '本包的盟约要标出来');
@@ -490,5 +500,115 @@ describe('干员表单：真跑一遍（最小 DOM 桩）', () => {
     fire(findAll(row, (n) => n.tagName === 'BUTTON')[0], 'click');
     await waitPreview();
     assert.deepEqual(lastPreviewSpec().modules, []);
+  });
+
+  test('分支按职业联动：换职业就换清单，值不属于新职业时当场说明（不静默清空）', async () => {
+    const profSel = () => findAll(editorBox, (n) => n.tagName === 'SELECT' && textOf(n).includes('NEAR') === false && textOf(n).includes('WARRIOR') && textOf(n).includes('PIONEER'))[0];
+    const branchSel = () => findAll(editorBox, (n) => n.tagName === 'SELECT' && textOf(n).includes('（不填：攻击方式与伤害类型只按职业推导）'))[0];
+    // 模板是狙击（fastshot）：清单里只有狙击的分支
+    assert.match(textOf(branchSel()), /速射手 · fastshot/);
+    assert.doesNotMatch(textOf(branchSel()), /术师 · caster/, '别的职业的分支不该出现在清单里');
+    assert.match(textOf(editorBox), /只列「狙击」这个职业的分支（共 1 个）/);
+
+    // 换成术师：清单立刻变成术师的分支，而旧值（fastshot）仍然留着并给出解释
+    fire(profSel(), 'change', 'CASTER');
+    await waitPreview();
+    assert.match(textOf(branchSel()), /术师 · caster/);
+    assert.doesNotMatch(textOf(branchSel()), /吟游者 · bard/, '别的职业的分支不该出现在清单里');
+    assert.match(textOf(branchSel()), /速射手 · fastshot/, '但当前值要留在下拉里（不能静默清空）');
+    assert.match(textOf(editorBox), /这个分支不属于「术师」，它属于 狙击/);
+    assert.equal(lastPreviewSpec().subProfessionId, 'fastshot', '换职业不会动记录里的分支');
+
+    // 选一个属于本职业的分支 → 警告消失
+    fire(branchSel(), 'change', 'caster');
+    await waitPreview();
+    assert.doesNotMatch(textOf(editorBox), /这个分支不属于/);
+    assert.equal(lastPreviewSpec().subProfessionId, 'caster');
+
+    // 回到模板的状态，别把状态留给后面的测试
+    fire(profSel(), 'change', 'SNIPER');
+    await waitPreview();
+    fire(branchSel(), 'change', 'fastshot');
+    await waitPreview();
+    assert.equal(lastPreviewSpec().subProfessionId, 'fastshot');
+  });
+
+  test('自己画攻击范围：画板点格子写进记录，原点删不掉，「回到推导」清掉自定义', async () => {
+    // 注意：特性自带范围那一段也有「✎ 自己画」，所以这里必须**限定在「范围/分类」这一段里**找
+    const rangeSec = () => findAll(editorBox, (n) => n.tagName === 'DETAILS' && n.id === 'sec-range')[0];
+    const openBtn = () => findAll(rangeSec(), (n) => n.tagName === 'BUTTON' && textOf(n).includes('✎ 自己画'))[0];
+    assert.ok(openBtn(), '要有「自己画」的入口');
+    fire(openBtn(), 'click');
+    const cells = () => findAll(rangeSec(), (n) => String(n.className).includes('pcell'));
+    assert.equal(cells().length, 7 * 9, '画板是 7×9 格（x∈[-3,3]、y∈[-2,6]）');
+    assert.match(textOf(rangeSec()), /已点亮 4 格/, '模板带来的范围已经在板上');
+
+    // 点一个当前不在范围里的格子：x=2,y=0 → 第 2 行第 6 列（0 基）
+    calls.length = 0;
+    fire(cells()[2 * 7 + 5], 'click');
+    await waitPreview();
+    const spec = lastPreviewSpec();
+    assert.equal(spec.rangeGrid.length, 5);
+    assert.ok(spec.rangeGrid.some((c) => c[0] === 2 && c[1] === 0), '点亮的格子要写进 rangeGrid');
+
+    // 原点（自己那一格）去不掉：点了还是 5 格
+    fire(cells()[2 * 7 + 3], 'click');
+    await waitPreview();
+    assert.equal(lastPreviewSpec().rangeGrid.length, 5);
+
+    // 再点一次刚才那一格 → 取消，回到 4 格
+    fire(cells()[2 * 7 + 5], 'click');
+    await waitPreview();
+    assert.equal(lastPreviewSpec().rangeGrid.length, 4);
+
+    // 回到推导：字段删掉，界面回到「推导/预设」
+    fire(findAll(rangeSec(), (n) => n.tagName === 'BUTTON' && textOf(n).includes('回到推导'))[0], 'click');
+    await waitPreview();
+    assert.equal('rangeGrid' in lastPreviewSpec(), false);
+    assert.match(textOf(rangeSec()), /当前是推导\/预设/);
+  });
+
+  test('长表单：顶部有「跳到」，不常改的段落默认收起（身份是展开的）', () => {
+    assert.match(textOf(editorBox), /跳到：/);
+    const det = (id) => findAll(editorBox, (n) => n.tagName === 'DETAILS' && n.id === `sec-${id}`)[0];
+    assert.equal(det('identity').attrs.open, true, '身份默认展开');
+    assert.equal(det('range').attrs.open, true, '范围/分类默认展开');
+    for (const id of ['elite', 'modules', 'bonds']) {
+      assert.ok(det(id), `要有 ${id} 这一段`);
+      assert.equal(det(id).attrs.open, undefined, `${id} 默认收起（渐进披露）`);
+    }
+    assert.ok(findAll(editorBox, (n) => n.tagName === 'BUTTON' && textOf(n).includes('模组')).length >= 1, '「跳到」条上要能点过去');
+  });
+
+  test('数值一键按官方中位填入（白纸起手时最省事的一步）', async () => {
+    const btns = () => findAll(editorBox, (n) => n.tagName === 'BUTTON' && textOf(n).includes('按官方中位填入'));
+    assert.equal(btns().length, 2, '普通与精锐各有自己的「按官方中位填入」');
+    calls.length = 0;
+    fire(btns()[0], 'click');
+    await waitPreview();
+    // 尺子里的中位：maxHp 1200 / atk 520 / def 100 / res 0 / cost 14 / blockCnt 1 / bat 1
+    const pick = (st) => ({ maxHp: st.maxHp, atk: st.atk, def: st.def, res: st.res, cost: st.cost, blockCnt: st.blockCnt, bat: st.bat });
+    assert.deepEqual(pick(lastPreviewSpec().stats.normal),
+      { maxHp: 1200, atk: 520, def: 100, res: 0, cost: 14, blockCnt: 1, bat: 1 });
+    assert.equal(lastPreviewSpec().stats.golden.maxHp, 1560, '第一颗按钮只填「普通状态数值」那一栏');
+    // 精锐那一栏有它自己的按钮
+    fire(findAll(editorBox, (n) => n.tagName === 'BUTTON' && textOf(n).includes('按官方中位填入'))[1], 'click');
+    await waitPreview();
+    assert.equal(lastPreviewSpec().stats.golden.atk, 520);
+  });
+
+  test('保存旁边就能起一局试玩（省掉「切到包管理页」那两步）', async () => {
+    const opened = [];
+    globalThis.window = { open: (u) => { opened.push(u); } };
+    try {
+      calls.length = 0;
+      fire(findAll(editorBox, (n) => n.tagName === 'BUTTON' && textOf(n).includes('▶ 试玩'))[0], 'click');
+      await new Promise((r) => setTimeout(r, 50));
+      assert.ok(calls.some((c) => c.url === '/api/playtest/start'), '要真的去起服务器');
+      assert.deepEqual(opened, ['http://127.0.0.1:3312/?sp_difficulty=normal'], '在浏览器里打开它');
+      assert.match(textOf(editorBox), /试玩服务器已就绪/);
+    } finally {
+      delete globalThis.window;
+    }
   });
 });

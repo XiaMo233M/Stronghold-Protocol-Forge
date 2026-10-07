@@ -16,7 +16,9 @@ import {
 import { composeStats } from '../../shared/loadoutRecord.js';
 import {
   matchOperators, idConflict, renameNotice,
-  subProfessionChoices, subProfessionOptions, bondChoicesOf, rangePresets, gridKey, gridMatrix,
+  subProfessionChoices, subProfessionOptions, subProfessionOptionsFor, professionsOfSub, bondChoicesOf,
+  rangePresets, gridKey, gridMatrix, gridKeySet, sortGrid, toggleGridCell, outsidePainterCount,
+  PAINTER_COLS, PAINTER_ROWS, painterCellAt,
 } from './operatorWizard.js';
 import { fmtNum, makeStatBar } from './statScale.js';
 import { renderKeepingFocus } from './focusKeep.js';
@@ -60,6 +62,11 @@ const state = {
   picking: false, pickQuery: '',
   // 盟约清单的搜索串（只重画清单那一块，别整页重画）
   bondQuery: '',
+  // 哪些「自己画范围」的画板是打开的（key → true）。它是界面状态，不进 spec，但必须留在重画之外 ——
+  // 否则每 250ms 一次自动校验就会把刚展开的画板收回去。
+  painters: {},
+  // 折叠的分段（见 section()）：只记「作者手动改过」的那些，没记过的用该分段的默认值。
+  sections: {},
 };
 
 // ---- the spec model ----------------------------------------------------------------------------------------------
@@ -268,6 +275,124 @@ function bbEditor(obj, opts) {
   return holder;
 }
 
+/**
+ * 一个可折叠的分段（`<details>`）。
+ *
+ * 干员表单已经长到十段，**「找不到」是它的第一号可用性问题**。做法是标准的那两条：把不常改的段落默认收起
+ * （渐进披露，https://webaim.org/techniques/disclosures/），再给每段一个 id 供顶部的「跳到」条使用。
+ * 折叠状态记在 `state.sections` 里 —— 表单每 250ms 自动校验重画一次，状态放在 DOM 上会被抹掉。
+ *
+ * 注意 `open` 不能传 `false`：`h()` 会把 false 当「不设置这个属性」跳过（那正好是 HTML 默认的「展开」）。
+ */
+function section(id, title, kids, { open = true, note = null } = {}) {
+  const isOpen = Object.hasOwn(state.sections, id) ? state.sections[id] : open;
+  return h('details', {
+    class: 'panel sec', id: `sec-${id}`,
+    ...(isOpen ? { open: true } : {}),
+    ontoggle: (e) => { state.sections[id] = !!e.target.open; },
+  },
+  h('summary', {}, h('span', { class: 'sec-title' }, title), note ? h('span', { class: 'hint sec-note' }, note) : null),
+  h('div', { class: 'sec-body' }, kids));
+}
+
+/** 顶部的「跳到」条：让长表单可以一眼定位（每一段都对应一个 section id）。 */
+function sectionJumpBar(items) {
+  const bar = h('div', { class: 'jumpbar' }, h('span', { class: 'hint' }, t('跳到：')));
+  for (const [id, label] of items) {
+    bar.append(h('button', {
+      class: 'ghost',
+      onclick: () => {
+        // 收起的分段先展开再滚过去（不然滚到的是一个标题条）。重画后 DOM 才存在，所以滚动放在下一帧。
+        state.sections[id] = true;
+        renderEditorKeepingFocus();
+        const el = document.getElementById(`sec-${id}`);
+        if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      },
+    }, label));
+  }
+  return bar;
+}
+
+/**
+ * 「自己画攻击范围」的画板。
+ *
+ * 为什么需要它：范围预设只列官方出现过的形状（能覆盖大多数情况），但**特殊情况**（同分支却不一样、
+ * 官方没有的形状）以前只能去手改 JSON。画板让作者直接点亮/点灭格子，画出来的就是记录里那个
+ * `rangeGrid`（相对坐标，原点是自己那一格）。
+ *
+ * 画板用 `<button>` 而不是 `<div>`：键盘可达、点得到、读屏读得出来（63 个格子，键盘走一遍也就几秒）。
+ * 底纹显示「推导出来的形状」，所以作者一眼看得见自己改动了哪几格。
+ */
+function rangePainterBox(key, getGrid, setGrid, derived) {
+  const box = h('div', {});
+  const draw = () => {
+    box.replaceChildren();
+    const grid = Array.isArray(getGrid()) ? getGrid() : [];
+    const have = gridKeySet(grid);
+    const base = gridKeySet(derived);
+    const cells = h('div', { class: 'painter', style: `grid-template-columns:repeat(${PAINTER_COLS},22px)` });
+    for (let row = 0; row < PAINTER_ROWS; row++) {
+      for (let col = 0; col < PAINTER_COLS; col++) {
+        const at = painterCellAt(col, row);
+        const on = have.has(`${at.x},${at.y}`);
+        const origin = at.x === 0 && at.y === 0;
+        cells.append(h('button', {
+          type: 'button',
+          class: `pcell${on ? ' on' : ''}${base.has(`${at.x},${at.y}`) && !on ? ' base' : ''}${origin ? ' origin' : ''}`,
+          title: t('{0} 行 · {1} 列（相对干员自己那一格）', at.y, at.x),
+          onclick: () => {
+            setGrid(toggleGridCell(getGrid(), at.x, at.y));
+            schedulePreview(); draw();
+          },
+        }));
+      }
+    }
+    const outside = outsidePainterCount(grid);
+    box.append(cells);
+    box.append(h('div', { class: 'row', style: 'align-items:center;gap:8px;margin-top:6px' },
+      h('span', { class: 'hint' }, t('已点亮 {0} 格（原点那一格去不掉：干员必须站在自己的范围内）', sortGrid(grid).length)),
+      h('button', { class: 'ghost', onclick: () => { setGrid(sortGrid(derived && derived.length ? derived : grid)); schedulePreview(); draw(); } }, t('用上面的形状起手')),
+      h('button', { class: 'ghost', onclick: () => { setGrid([[0, 0]]); schedulePreview(); draw(); } }, t('清空（只留自己那一格）'))));
+    if (outside) box.append(h('p', { class: 'hint warn' }, t('还有 {0} 格在画板之外（模板带来或手写的超大范围）：它们照原样保留，画板只画得出 x∈[-3,3]、y∈[-2,6]。', outside)));
+  };
+  draw();
+  return box;
+}
+
+/**
+ * 一个范围字段：预设下拉 + 小格阵预览 + 「自己画」。
+ * 干员范围、干员特性范围、精锐特性范围、模组特性范围、天赋改写范围五处共用同一份实现 ——
+ * 所以「特殊形状」在哪儿都能自己画，而不是只有主范围能改。
+ */
+function rangeField(key, getGrid, setGrid, { defaultLabel, derived = null } = {}) {
+  const box = h('div', {});
+  const draw = () => {
+    box.replaceChildren();
+    const cur = getGrid();
+    const explicit = Array.isArray(cur);
+    const effective = explicit ? cur : (derived ?? null);
+    box.append(rangeShapeSelect(getGrid, setGrid, defaultLabel));
+    box.append(h('div', { class: 'row', style: 'align-items:center;gap:8px;margin-top:6px' },
+      h('button', {
+        class: 'ghost',
+        onclick: () => { state.painters[key] = !state.painters[key]; draw(); },
+      }, state.painters[key] ? t('收起画板') : t('✎ 自己画')),
+      explicit
+        ? h('button', { class: 'ghost', onclick: () => { setGrid(null); schedulePreview(); renderEditorKeepingFocus(); } }, t('回到推导'))
+        : null,
+      h('span', { class: 'hint' }, explicit
+        ? t('当前是**自定义**范围 · {0} 格', sortGrid(cur).length)
+        : t('当前是推导/预设 · {0} 格', sortGrid(effective ?? []).length))));
+    if (state.painters[key]) box.append(rangePainterBox(key, getGrid, setGrid, derived));
+    else {
+      const pv = gridPreview(effective);
+      if (pv) box.append(pv);
+    }
+  };
+  draw();
+  return box;
+}
+
 /** 小格阵预览：亮格 = 能打到，深色那一格 = 干员自己站的位置。 */
 function gridPreview(grid) {
   const m = gridMatrix(grid);
@@ -303,18 +428,34 @@ function renderEditor() {
   const s = state.spec;
   const packId = state.packId || t('（先选择工坊包）');
   box.append(h('h2', {}, t('干员 · {0} · 包 {1}', s.name || s.id || t('未命名'), packId)));
+  // 十段的长表单：先给一条「跳到」，再让不常改的段落默认收起（见 section()）。
+  box.append(sectionJumpBar([
+    ['identity', t('身份')], ['look', t('外观')], ['range', t('范围/分类')], ['stats', t('数值')],
+    ['skill', t('技能')], ['talents', t('天赋')], ['elite', t('精锐')], ['modules', t('模组')],
+    ['bonds', t('盟约')], ['check', t('校验')],
+  ]));
 
   // identity
   const pack = state.data.packs.find((p) => p.id === state.packId);
   const conflict = idConflict(s.id, { packSlugs: pack ? pack.specs.map((x) => x.id) : [], officialIds: state.officialIdSet });
   const rename = renameNotice(state.slug, s.id);
-  // 分支下拉：官方数据里只有中文名（57 个分支一个不缺），英文名并不存在，所以英文界面只显示 id ——
-  // id 就是记录里写下去的那个值。当前值不在官方清单里时（手填的自定义分支）也要插进去，否则下拉会显示成别的分支。
-  const subOpts = subProfessionOptions(state.data.officialChess);
+  // 分支按职业联动：官方 57 个分支各归一个职业，所以先选职业、再从这个职业允许的分支里挑。
+  // 服务端给的 `subProfessions` 从**全部**记录算出（可见数据里少一个 `pusher`），旧服务端没这个字段时退回
+  // 从 officialChess 现推一份（会少几个分支，但不会报错）。
+  const branchIndex = Array.isArray(state.data.subProfessions) && state.data.subProfessions.length
+    ? state.data.subProfessions
+    : subProfessionOptions(state.data.officialChess).map((b) => ({ id: b.id, name: b.name, professions: [] }));
+  const subOpts = subProfessionOptionsFor(branchIndex, s.profession);
   const subCur = String(s.subProfessionId ?? '').trim();
-  if (subCur && !subOpts.some((o) => o.id === subCur)) subOpts.unshift({ id: subCur, name: '' });
+  // 当前值不属于这个职业时：**不静默清空**（那是一次无声的数据丢失），而是把它留在下拉里并当场说明。
+  const subOwners = professionsOfSub(branchIndex, subCur);
+  const subMismatch = !!subCur && subOwners.length > 0 && !!s.profession && !subOwners.includes(String(s.profession).toUpperCase());
+  if (subCur && !subOpts.some((o) => o.id === subCur)) {
+    subOpts.unshift({ id: subCur, name: (branchIndex.find((b) => b.id === subCur)?.name) ?? '' });
+  }
   const subLabel = (o) => (currentLang() === 'en' || !o.name ? o.id : `${o.name} · ${o.id}`);
-  box.append(h('div', { class: 'panel' }, h('div', { class: 'grid' },
+  const profLabel = (p) => PROFESSION_NAMES[p]?.[currentLang() === 'en' ? 'en' : 'zh'] ?? p;
+  box.append(section('identity', t('身份'), h('div', { class: 'grid' },
     field(t('id（slug，决定 chess_ws_<id>_a/_b）'), h('div', {},
       textInput(() => s.id, (v) => { s.id = v; }),
       conflict ? h('div', { class: 'hint err' }, conflict.kind === 'pack'
@@ -324,23 +465,27 @@ function renderEditor() {
     field(t('名称'), textInput(() => s.name, (v) => { s.name = v; })),
     field(t('英文代号'), textInput(() => s.appellation, (v) => { s.appellation = v; })),
     field(t('阶（tier）'), numInput(() => s.tier, (v) => { s.tier = v; })),
-    field(t('职业'), select(PROFESSIONS, () => s.profession, (v) => { s.profession = v; }, (v) => nameLabel(PROFESSION_NAMES, v))),
-    // 分支决定攻击方式、伤害类型与能否打空 —— 以前只能手打英文，现在先给一份带中文名的清单，再留一条手填的路
+    field(t('职业'), select(PROFESSIONS, () => s.profession, (v) => { s.profession = v; renderEditorKeepingFocus(); }, (v) => nameLabel(PROFESSION_NAMES, v))),
+    // 分支决定攻击方式、伤害类型与能否打空。它**只列当前职业允许的分支**（改职业会立刻重算这张清单），
+    // 仍然留一条手填的路：作者要写一个官方没有的分支时不该被挡住。
     field(t('分支 subProfessionId'), h('div', {},
       h('select', { onchange: (e) => { s.subProfessionId = e.target.value; schedulePreview(); renderEditorKeepingFocus(); } },
         h('option', { value: '', selected: !subCur }, t('（不填：攻击方式与伤害类型只按职业推导）')),
         subOpts.map((o) => h('option', { value: o.id, selected: subCur === o.id }, subLabel(o)))),
+      h('p', { class: 'hint' }, t('只列「{0}」这个职业的分支（共 {1} 个）。', profLabel(s.profession), subOpts.length)),
+      subMismatch
+        ? h('div', { class: 'hint warn' }, t('这个分支不属于「{0}」，它属于 {1}：能保存，但职业光环与分支行为可能对不上（改职业，或把分支改成这个职业的）。',
+          profLabel(s.profession), subOwners.map(profLabel).join('、')))
+        : null,
       h('div', { style: 'margin-top:4px' },
         textInput(() => s.subProfessionId, (v) => { s.subProfessionId = v; }, { placeholder: t('如 fastshot / fortress / bard'), list: 'subProfOptions' }),
-        h('datalist', { id: 'subProfOptions' }, subProfessionChoices(state.data.officialChess).map((v) => h('option', { value: v })))),
-      h('p', { class: 'hint' }, t('数据里只有分支的中文名（{0} 个），英文界面显示的是 id 本身。', subOpts.length)))),
+        h('datalist', { id: 'subProfOptions' }, subProfessionChoices(state.data.officialChess).map((v) => h('option', { value: v }))),
+        h('div', { class: 'hint' }, t('手填一个官方没有的分支 id 也可以（不填则按职业推导）。'))))),
     field(t('位置'), select(['MELEE', 'RANGED'], () => s.position, (v) => { s.position = v; }, (v) => nameLabel(POSITION_NAMES, v))),
     field(t('特性文字（只影响伤害类型推导）'), textInput(() => s.traitDesc, (v) => setText(s, 'traitDesc', v))),
     // 特性自带的那片范围（不是干员的攻击范围）：引擎里由特性自己定义（例：散射手用它定义正面那一圈，
     // server/sim/professions.js），官方 4 位干员的特性带它。留空＝这个干员的特性没有自带范围。
-    field(t('特性自带范围'), h('div', {},
-      rangeShapeSelect(() => s.traitRangeGrid, (g) => { if (g) s.traitRangeGrid = g; else delete s.traitRangeGrid; }, t('（没有自带范围）')),
-      Array.isArray(s.traitRangeGrid) ? h('div', { style: 'margin-top:6px' }, gridPreview(s.traitRangeGrid)) : null)))));
+    field(t('特性自带范围'), rangeField('trait', () => s.traitRangeGrid, (g) => { if (g) s.traitRangeGrid = g; else delete s.traitRangeGrid; }, { defaultLabel: t('（没有自带范围）') })))));
 
   // appearance — the repo ships no assets, so reuse an existing spine.
   // 候选来自服务端的 `spineChoices`（本机已装好的干员模型清单），只有在旧服务端没给时才退回官方干员列表。
@@ -357,10 +502,11 @@ function renderEditor() {
   const spineHint = h('p', { class: spineVerdict === 'ok' ? 'hint' : 'hint warn' },
     spineVerdict === 'ok' ? t('✔ 会渲染成模型：复用 {0} 这套 Spine。', s.assetsSpine)
       : t('✘ 不会渲染成模型：试玩里这个干员是一张**头像贴图**（菱形底），不是会动的模型。这个仓库不携带干员美术，只能复用已装好的 Spine id —— 从上面下拉里挑一个，或按模板新建（模板会把外观一起带过来）。'));
-  box.append(h('div', { class: 'panel' },
-    h('h2', { style: 'margin-top:0' }, t('外观（仓库不含素材，只能复用已有 Spine id）')),
+  box.append(section('look', t('外观'), [
+    h('p', { class: 'hint' }, t('仓库不含素材，只能复用已装好的 Spine id。')),
     h('div', { class: 'grid' }, field('assetsSpine', spineSel), field(t('或直接填 id'), textInput(() => s.assetsSpine, (v) => { s.assetsSpine = v; }))),
-    spineHint));
+    spineHint,
+  ], { note: t('能不能渲染成模型，看这一段的结论') }));
 
   // 攻击范围与伤害分类：表单以前完全没有范围的入口（连默认值是多少都看不到），现在能挑官方形状并直接看小格阵
   const derived = classify({ profession: s.profession, subProfessionId: s.subProfessionId, position: s.position, traitDesc: s.traitDesc });
@@ -374,28 +520,28 @@ function renderEditor() {
     canHitFly: typeof s.canHitFly === 'boolean' ? s.canHitFly : derived.canHitFly,
   };
   const effGrid = Array.isArray(s.rangeGrid) ? s.rangeGrid : defaultGrid(eff.attackKind);
-  const rangeSel = rangeShapeSelect(() => s.rangeGrid, (g) => { if (g) s.rangeGrid = g; else delete s.rangeGrid; });
   // 覆盖下拉：留空写回的是「删掉这个键」，而不是写一个空串 —— 空串在 pick() 里等于没写，但留个空键会让记录变脏
   const setOverride = (key, v) => { if (v) s[key] = v; else delete s[key]; };
-  box.append(h('div', { class: 'panel' },
-    h('h2', { style: 'margin-top:0' }, t('攻击范围与伤害分类')),
+  box.append(section('range', t('攻击范围与伤害分类'), [
     h('div', { class: 'row', style: 'align-items:flex-start;gap:16px' },
-      h('div', { style: 'flex:0 0 230px' }, field(t('范围形状'), rangeSel)),
-      h('div', {}, gridPreview(effGrid), Array.isArray(s.rangeGrid) ? null : h('div', { class: 'hint' }, t('（这是推导出的默认形状）'))),
+      h('div', { style: 'flex:0 0 250px' }, field(t('范围形状'), rangeField('op', () => s.rangeGrid, (g) => { if (g) s.rangeGrid = g; else delete s.rangeGrid; }, { derived: defaultGrid(eff.attackKind) }))),
+      h('div', {}, Array.isArray(s.rangeGrid) ? null : h('div', { class: 'hint' }, t('（左边这份是推导出的默认形状）')),
+        h('div', { class: 'hint' }, t('都是官方出现过的形状；没有你要的那一种就点「✎ 自己画」。'))),
       h('p', { class: 'hint', style: 'flex:1' },
         t('伤害类型 {0} · 攻击方式 {1} · 可打空中 {2}', dmgLabel(derived.dmgType), kindLabel(derived.attackKind), derived.canHitFly ? t('是') : t('否')),
         h('br'), t('（这一行是按职业与分支推导出来的）'))),
     // 「有特殊情况」时用的接口：攻击范围与伤害分类基本由职业与分支决定，但同分支的干员确实可能不一样，
     // 所以四个字段都能在这里钉住；钉住后校验会给一条「覆盖了推导值」的警告。
     h('h2', {}, t('攻击分类的覆盖（特殊情况才用）')),
-    h('p', { class: 'hint' }, t('平时这四项由职业与分支推导（就是上面那一行）。同分支的干员因为天赋或官方特例而不同时，在这里钉住它；留空＝用推导值。')),
+    h('p', { class: 'hint' }, t('平时这四项由职业与分支推导（就是上面那一行）。同分支的干员因为天赋或官方特例而不同时，在这里钉住它；留空＝用推导值。下面每个下拉列的是**引擎认识的全部取值**。')),
     h('div', { class: 'grid' },
       field(t('伤害类型 dmgType'), overrideSelect(DMG_TYPES, () => s.dmgType, (v) => { setOverride('dmgType', v); renderEditorKeepingFocus(); }, derived.dmgType, dmgLabel)),
       field(t('攻击方式 attackKind'), overrideSelect(ATTACK_KINDS, () => s.attackKind, (v) => { setOverride('attackKind', v); renderEditorKeepingFocus(); }, derived.attackKind, kindLabel)),
       field(t('投射物 projectile'), overrideSelect(PROJECTILES, () => s.projectile, (v) => { setOverride('projectile', v); renderEditorKeepingFocus(); }, derived.projectile)),
       field(t('能否打空中 canHitFly'), overrideBoolSelect(() => s.canHitFly, (v) => { if (v === null) delete s.canHitFly; else s.canHitFly = v; }, derived.canHitFly))),
     h('p', { class: 'hint' }, t('记录里会写：伤害类型 {0} · 攻击方式 {1} · 投射物 {2} · 可打空中 {3}',
-      dmgLabel(eff.dmgType), kindLabel(eff.attackKind), eff.projectile, eff.canHitFly ? t('是') : t('否')))));
+      dmgLabel(eff.dmgType), kindLabel(eff.attackKind), eff.projectile, eff.canHitFly ? t('是') : t('否'))),
+  ], { note: t('范围形状 / 伤害类型 / 攻击方式 / 投射物 / 打不打空中') }));
 
   // the two states
   const refs = state.data.statRanges?.[s.profession] ?? {};
@@ -414,16 +560,31 @@ function renderEditor() {
         statField(t('费用 cost'), 'cost', st),
         statField(t('阻挡 blockCnt'), 'blockCnt', st),
         statField(t('攻击间隔 bat（秒）'), 'bat', st),
-        field(t('再部署 respawnTime'), numInput(() => st.respawnTime ?? 70, (v) => { st.respawnTime = v; }))));
+        field(t('再部署 respawnTime'), numInput(() => st.respawnTime ?? 70, (v) => { st.respawnTime = v; }))),
+      // 一张白纸最劝退的地方是「这八个数字该填多少」。尺子上有官方中位，那就让它一键落进去 ——
+      // 起手就有一份官方量级的数值，改起来比从 1400/450/140 猜要容易得多。
+      refs.maxHp
+        ? h('button', {
+          class: 'ghost', style: 'margin-top:8px',
+          onclick: () => {
+            for (const k of Object.keys(refs)) {
+              const v = refs[k]?.p50;
+              if (Number.isFinite(v)) st[k] = k === 'bat' ? Math.round(v * 100) / 100 : Math.round(v);
+            }
+            schedulePreview(); renderEditorKeepingFocus();
+          },
+        }, t('按官方中位填入（{0} 名同类干员）', refs.maxHp.count))
+        : null);
   };
-  box.append(h('div', { class: 'split' }, statBlock('normal', t('普通状态数值')), statBlock('golden', t('精锐状态数值'))));
-  if (refs.maxHp) box.append(h('p', { class: 'hint' }, t('细线上的刻度是官方同类干员的区间（按职业统计，共 {0} 名），不是硬性上限。', refs.maxHp.count)));
+  box.append(section('stats', t('数值（普通 / 精锐两套）'), [
+    h('div', { class: 'split' }, statBlock('normal', t('普通状态数值')), statBlock('golden', t('精锐状态数值'))),
+    refs.maxHp ? h('p', { class: 'hint' }, t('细线上的刻度是官方同类干员的区间（按职业统计，共 {0} 名），不是硬性上限。', refs.maxHp.count)) : null,
+  ], { note: t('两套数值 + 官方区间尺子 + 一键按中位填入') }));
 
   // skill
   const sk = s.skill ?? (s.skill = blankSpec().skill);
   if (!sk.bb) sk.bb = {};
-  box.append(h('div', { class: 'panel' },
-    h('h2', { style: 'margin-top:0' }, t('技能（黑板书键不需要写 JavaScript）')),
+  box.append(section('skill', t('技能'), [
     h('div', { class: 'grid' },
       field(t('技能名'), textInput(() => sk.name, (v) => { sk.name = v; })),
       field(t('类型'), select(SKILL_TYPES, () => sk.skillType, (v) => { sk.skillType = v; })),
@@ -436,13 +597,14 @@ function renderEditor() {
     field(t('技能描述（官方文字）'), h('textarea', { value: sk.desc ?? '', oninput: (e) => { sk.desc = e.target.value; schedulePreview(); } })),
     h('h2', {}, t('黑板书 bb')),
     h('p', { class: 'hint' }, t('键必须是通用 kit 认识的（见 docs/prompts/operator-pack.md 的表格）。写了不认的键不会报错，但也不会有任何效果——校验会警告。')),
-    bbEditor(sk.bb)));
+    bbEditor(sk.bb)], { note: t('技能名 / 类型 / 技力 / 黑板键值') }));
 
   // talents (天赋): the authoring layer already turns spec.talents into the record's talents[] (name/desc/bb), so this
   // is purely the missing form. A talent with no desc is emitted `hidden: true` by the derive layer, which is why the
   // hint below insists on the description — a talent nothing can read is a talent that does nothing.
   s.talents = Array.isArray(s.talents) ? s.talents : [];
-  box.append(talentEditor(s.talents, t('天赋 tactics（普通态，0~2 条，建议 2 条）')));
+  box.append(section('talents', t('天赋（普通态）'), talentEditor(s.talents, '', { bare: true }),
+    { note: t('0~2 条，每条含天赋名 / 说明 / 黑板键值') }));
 
   // ---- 精锐（精英 2）与普通不同的那一份 -----------------------------------------------------------------------------
   // 数值一直是两套；特性、天赋、攻击范围在 spec 里是**可选**的第二份，而官方数据里确实有差别：
@@ -450,10 +612,9 @@ function renderEditor() {
   // 所以这里的原则是「不勾＝两态共用一份」：勾上时以普通那一份为起点，取消就把字段删掉。
   // 留一个与普通一模一样的副本会让 spec 变脏，也让「精锐到底改了什么」看不出来。
   // 位置在「天赋」之后：这一块里除了特性与范围，还有一整份精锐天赋列表。
-  const goldenPanel = h('div', { class: 'panel' });
+  const goldenPanel = h('div', {});
   const drawGoldenParts = () => {
     goldenPanel.replaceChildren();
-    goldenPanel.append(h('h2', { style: 'margin-top:0' }, t('精锐（精英 2）与普通不同时')));
     goldenPanel.append(h('p', { class: 'hint' }, t('数值本来就是两套（上面）。特性、天赋、攻击范围这三样默认两态共用一份；要不一样就在这里勾出来，勾上时以普通那一份为起点，取消勾选＝回到共用。')));
 
     // 特性
@@ -504,7 +665,8 @@ function renderEditor() {
     if (talentsOn) goldenPanel.append(talentEditor(s.talentsGolden, t('精锐天赋（精英 2）')));
   };
   drawGoldenParts();
-  box.append(goldenPanel);
+  box.append(section('elite', t('精锐（精英 2）与普通不同时'), goldenPanel,
+    { open: false, note: t('不勾就是两态共用一份（官方 112 位里有 33 位精锐天赋不同）') }));
 
   // ---- 模组（只有精锐记录会读 `modules[]`）------------------------------------------------------------------------
   // 官方 184 个模组就是这个形状。要紧的一条：勾了 `isDefault` 的那一个会被**烘进**精锐记录 ——
@@ -520,9 +682,8 @@ function renderEditor() {
   drawModules();
   const defMod = s.modules.find((m) => m && m.isDefault) ?? null;
   const composed = defMod ? composeStats(s.stats.golden ?? {}, defMod.attr ?? {}) : null;
-  box.append(h('div', { class: 'panel' },
-    h('h2', { style: 'margin-top:0' }, t('模组 modules（只有精锐记录会读）')),
-    h('p', { class: 'hint' }, t('勾了「默认」的那一个会被烘进精锐记录：数值＝上面的精锐数值＋它的数值加成，特性覆盖与天赋改写也一起生效。其它模组照样发给游戏，玩家在载入界面能选。')),
+  box.append(section('modules', t('模组 modules'), [
+    h('p', { class: 'hint' }, t('只有精锐记录会读它。勾了「默认」的那一个会被烘进精锐记录：数值＝上面的精锐数值＋它的数值加成，特性覆盖与天赋改写也一起生效。其它模组照样发给游戏，玩家在载入界面能选。')),
     defMod
       ? h('p', { class: 'hint' }, t('当前默认模组「{0}」→ 精锐记录里写下去的数值：{1}', defMod.name || defMod.id || t('未命名'), statDiff(s.stats.golden ?? {}, composed)))
       : (s.modules.length ? h('p', { class: 'hint warn' }, t('没有勾「默认」：精锐记录会按不带模组生成（校验会警告），玩家仍然能选这些模组。')) : null),
@@ -530,7 +691,8 @@ function renderEditor() {
     h('button', {
       class: 'ghost',
       onclick: () => { s.modules.push(blankModule(s.modules.length, s.id)); schedulePreview(); drawModules(); },
-    }, t('＋ 添加一个模组'))));
+    }, t('＋ 添加一个模组')),
+  ], { open: false, note: t('数值加成 / 特性覆盖 / 天赋改写（官方 184 个模组的形状）') }));
 
   // ---- 盟约 bonds -------------------------------------------------------------------------------------------------
   // 干员算在哪些盟约里。记录里写的就是 id：官方那 23 条盟约由引擎按 id 实现（阈值/数值全从盟约记录读），
@@ -560,14 +722,14 @@ function renderEditor() {
     }
   };
   drawBonds();
-  box.append(h('div', { class: 'panel' },
-    h('h2', { style: 'margin-top:0' }, t('盟约 bonds（这个干员算在哪些盟约里）')),
+  box.append(section('bonds', t('盟约 bonds'), [
     h('p', { class: 'hint' }, t('官方盟约 {0} 条、本包 {1} 条。两边都有记录时，试玩里才会真的生效。', state.data.officialBonds?.length ?? 0, (pack?.bonds ?? []).length)),
     textInput(() => state.bondQuery, (v) => { state.bondQuery = v; drawBonds(); }, { placeholder: t('按名称或 id 搜索盟约') }),
     bondListBox,
     unknownBonds.length
       ? h('p', { class: 'hint warn' }, t('这些 id 查不到对应的盟约（保存没问题，但游戏里不会有任何效果）：{0}', unknownBonds.join('、')))
-      : null));
+      : null,
+  ], { open: false, note: t('这个干员算在哪些盟约里（模板带过来的默认已勾上）') }));
 
   // support switch (the 是否助战 toggle)
   if (state.slug) {
@@ -575,35 +737,35 @@ function renderEditor() {
     const tier = s.tier;
     const pool = state.data.support.pool[tier] || [];
     const isSupport = pool.includes(baseId);
-    box.append(h('div', { class: 'panel' },
-      h('h2', { style: 'margin-top:0' }, t('助战（写入 data/support.json 的服务端卡池）')),
+    box.append(section('support', t('助战'), [
+      h('p', { class: 'hint' }, t('勾上＝把这份记录写进 data/support.json 的服务端卡池（重启游戏服务器后生效）。')),
       h('label', { style: 'display:flex;gap:8px;align-items:center;color:var(--fg)' },
-        h('input', {
-          type: 'checkbox', checked: isSupport, style: 'width:auto',
-          onchange: async (e) => {
-            try {
-              await api('/api/support/toggle', { method: 'POST', body: { chessId: baseId, tier, enabled: e.target.checked } });
-              state.message = { kind: 'ok', text: e.target.checked
-                ? t('{0} 已加入 {1} 阶助战卡池（重启游戏服务器后生效）', s.name || baseId, tier)
-                : t('{0} 已移出 {1} 阶助战卡池（重启游戏服务器后生效）', s.name || baseId, tier) };
-              await load();
-            } catch (err) { state.message = { kind: 'error', text: errText(err) }; renderEditor(); }
-          },
+        checkInput(isSupport, async (on) => {
+          try {
+            await api('/api/support/toggle', { method: 'POST', body: { chessId: baseId, tier, enabled: on } });
+            state.message = { kind: 'ok', text: on
+              ? t('{0} 已加入 {1} 阶助战卡池（重启游戏服务器后生效）', s.name || baseId, tier)
+              : t('{0} 已移出 {1} 阶助战卡池（重启游戏服务器后生效）', s.name || baseId, tier) };
+            await load();
+          } catch (err) { state.message = { kind: 'error', text: errText(err) }; renderEditor(); }
         }),
         t('把 {0} 加入 {1} 阶助战卡池', baseId, tier)),
-      h('p', { class: 'hint' }, t('当前 {0} 阶卡池：{1}', tier, pool.length ? pool.join(', ') : t('（空）')))));
+      h('p', { class: 'hint' }, t('当前 {0} 阶卡池：{1}', tier, pool.length ? pool.join(', ') : t('（空）'))),
+    ], { note: t('可选：让这张卡出现在助战卡池里') }));
   }
 
   // actions + validation
   const actions = h('div', { class: 'row', style: 'margin:14px 0' },
     h('button', { class: 'primary', disabled: state.busy || !state.packId, onclick: save }, state.busy ? t('保存中…') : t('保存并生成')),
     state.slug ? h('button', { onclick: remove }, t('删除该干员')) : null,
-    h('button', { class: 'ghost', onclick: () => { state.spec = blankSpec(); state.slug = null; schedulePreview(); renderShell(); } }, t('清空表单')));
+    h('button', { class: 'ghost', onclick: () => { state.spec = blankSpec(); state.slug = null; schedulePreview(); renderShell(); } }, t('清空表单')),
+    // 保存之后最想做的事是「看一眼它在游戏里长什么样」：这里直接起试玩，省掉「切到包管理页 → 点试玩」那两步。
+    h('button', { class: 'ghost', onclick: (e) => playtest(e.target) }, t('▶ 试玩（起一局看它）')));
   box.append(actions);
   if (!state.packId) box.append(h('p', { class: 'hint' }, t('先在上方选择一个工坊包（或点「新建工坊包」），才能保存。')));
 
   const pv = state.preview;
-  const panel = h('div', { class: 'panel' });
+  const panel = h('div', {});
   if (!pv) panel.append(h('p', { class: 'hint' }, t('（改动后会自动校验）')));
   else if (pv.ok && !pv.warnings.length) panel.append(h('div', { class: 'ok' }, t('✔ 校验通过：引擎接受这份记录')));
   else {
@@ -620,7 +782,8 @@ function renderEditor() {
     panel.append(h('h2', {}, t('将要生成的记录（普通 / 精锐由工具推导）')));
     panel.append(h('pre', { text: JSON.stringify({ base: pv.base, golden: pv.golden }, null, 1).slice(0, 4000) }));
   }
-  box.append(h('h2', {}, t('校验结果')), panel);
+  box.append(section('check', t('校验结果'), panel,
+    { note: pv && pv.ok && !pv.warnings?.length ? t('✔ 通过') : t('实时校验（与 CLI、AI 同一套规则）') }));
 }
 
 // ---- 天赋列表编辑器（普通态与精锐态共用一个实现） -------------------------------------------------------------------
@@ -629,7 +792,7 @@ function renderEditor() {
  * 一个完整的天赋列表编辑器。传进来的是**数组本身**，增删都改它 —— 所以 `s.talents` 与 `s.talentsGolden` 都能用。
  * @param {Array} list @param {string} title
  */
-function talentEditor(list, title) {
+function talentEditor(list, title, { bare = false } = {}) {
   const box = h('div', {});
   const draw = () => {
     box.replaceChildren();
@@ -649,14 +812,16 @@ function talentEditor(list, title) {
     });
   };
   draw();
-  return h('div', { class: 'panel' },
-    h('h2', { style: 'margin-top:0' }, title),
+  const inner = [
+    title ? h('h2', { style: 'margin-top:0' }, title) : null,
     h('p', { class: 'hint' }, t('说明（desc）是必须的：没有说明的天赋在记录里会被标记为 hidden。黑板键同样是通用 kit 认识的键，写错只会警告、不会有任何效果。')),
     box,
     h('button', {
       class: 'ghost',
       onclick: () => { list.push({ name: t('天赋 {0}', list.length + 1), desc: '', bb: {} }); schedulePreview(); draw(); },
-    }, t('＋ 添加一条天赋')));
+    }, t('＋ 添加一条天赋')),
+  ];
+  return bare ? h('div', {}, inner) : h('div', { class: 'panel' }, inner);
 }
 
 // ---- 模组卡（干员页的模组块） ---------------------------------------------------------------------------------------
@@ -885,6 +1050,31 @@ async function save() {
     state.message = { kind: 'error', text: errText(e) };
   } finally {
     state.busy = false; renderShell();
+  }
+}
+
+/**
+ * 一键试玩（与包管理页同一个接口）。
+ * 保存完最想做的事是「看它在游戏里长什么样」—— 放在干员页就地起一局，省掉「切到包管理页再点」那两步。
+ * 已经在跑就先停掉：作者点这个按钮的意思就是「把我刚写的内容加载进去」。
+ */
+async function playtest(btn) {
+  if (state.busy) return;
+  state.busy = true;
+  const label = btn?.textContent;
+  if (btn) btn.textContent = t('正在起…');
+  try {
+    const cur = await api('/api/playtest').catch(() => null);
+    if (cur?.running) await api('/api/playtest/stop', { method: 'POST' });
+    const r = await api('/api/playtest/start', { method: 'POST', body: {} });
+    state.message = { kind: 'ok', text: t('试玩服务器已就绪（新标签页已打开）：{0}', r.url) };
+    if (typeof window !== 'undefined' && typeof window.open === 'function') window.open(r.url, '_blank', 'noopener');
+  } catch (e) {
+    state.message = { kind: 'error', text: errText(e) };
+  } finally {
+    state.busy = false;
+    if (btn && label) btn.textContent = label;
+    renderEditor();
   }
 }
 

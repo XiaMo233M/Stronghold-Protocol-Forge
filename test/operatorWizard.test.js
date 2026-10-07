@@ -9,7 +9,10 @@ import assert from 'node:assert/strict';
 
 import {
   matchOperators, idConflict, renameNotice,
-  subProfessionChoices, subProfessionOptions, bondChoicesOf, rangePresets, gridKey, sameGrid, gridMatrix,
+  subProfessionChoices, subProfessionOptions, subProfessionOptionsFor, professionsOfSub, bondChoicesOf,
+  rangePresets, gridKey, sameGrid, gridMatrix,
+  PAINTER_COLS, PAINTER_ROWS, PAINTER_ORIGIN, painterCellAt, painterPositionOf, gridKeySet, sortGrid,
+  toggleGridCell, outsidePainterCount,
 } from '../editor/ui/operatorWizard.js';
 
 const OFFICIAL = [
@@ -139,5 +142,87 @@ describe('新建干员：分支候选与攻击范围', () => {
     assert.equal(gridMatrix([]), null);
     assert.equal(gridMatrix(null), null);
     assert.equal(gridMatrix([['a', 'b']]), null);
+  });
+});
+
+describe('新建干员：分支按职业联动（服务端的 subProfessions 形状）', () => {
+  // 服务端 /api/state.subProfessions 的形状：从**全部**记录算出来，所以可见数据里没出现过的
+  // `pusher`（推击手，只在一条不可见记录上）也在里面。
+  const LIST = [
+    { id: 'fastshot', name: '速射手', professions: ['SNIPER'] },
+    { id: 'closerange', name: '重射手', professions: ['SNIPER'] },
+    { id: 'bard', name: '吟游者', professions: ['SUPPORT'] },
+    { id: 'pusher', name: '推击手', professions: ['SPECIAL'] },
+    { id: 'caster', name: '术师', professions: ['CASTER'] },
+    { id: 'weird', name: '', professions: [] },
+  ];
+
+  test('subProfessionOptionsFor 只留这个职业的分支，顺序照抄服务端（按中文名）', () => {
+    // `weird` 的 professions 是空的（数据里没有它）—— 它**不**因为过滤而消失，所以断言时先把它摘掉
+    const idsFor = (prof) => subProfessionOptionsFor(LIST, prof).map((o) => o.id).filter((id) => id !== 'weird');
+    assert.deepEqual(idsFor('SNIPER'), ['fastshot', 'closerange']);
+    assert.deepEqual(idsFor('SUPPORT'), ['bard']);
+    assert.deepEqual(idsFor('SPECIAL'), ['pusher'], '可见数据里没有的分支（推击手）也要能选到');
+    assert.deepEqual(idsFor('CASTER'), ['caster']);
+    assert.deepEqual(idsFor('WARRIOR'), [], '这个职业没有分支时给空清单，而不是把别人的分支端上来');
+    assert.deepEqual(subProfessionOptionsFor(LIST, 'SNIPER').find((o) => o.id === 'weird'), { id: 'weird', name: '' });
+    // 不给职业 = 全部（职业还没填时）
+    assert.equal(subProfessionOptionsFor(LIST, '').length, 6);
+    assert.equal(subProfessionOptionsFor(LIST, undefined).length, 6);
+    // 大小写与空白照旧容忍（记录里是大写枚举）
+    assert.deepEqual(idsFor(' sniper '), ['fastshot', 'closerange']);
+    assert.deepEqual(subProfessionOptionsFor(null, 'SNIPER'), []);
+  });
+
+  test('professionsOfSub 说明「这个分支属于哪个职业」（用来解释职业与分支对不上）', () => {
+    assert.deepEqual(professionsOfSub(LIST, 'bard'), ['SUPPORT']);
+    assert.deepEqual(professionsOfSub(LIST, 'pusher'), ['SPECIAL']);
+    assert.deepEqual(professionsOfSub(LIST, 'nope'), [], '未知分支不做判断');
+    assert.deepEqual(professionsOfSub(LIST, ''), []);
+    assert.deepEqual(professionsOfSub(null, 'bard'), []);
+  });
+});
+
+describe('新建干员：自己画攻击范围（画板坐标）', () => {
+  test('画板尺寸与原点：x∈[-3,3]、y∈[-2,6]，(0,0) 在 (3,2)', () => {
+    assert.equal(PAINTER_COLS, 7);
+    assert.equal(PAINTER_ROWS, 9);
+    assert.deepEqual(PAINTER_ORIGIN, { col: 3, row: 2 });
+    assert.deepEqual(painterCellAt(3, 2), { x: 0, y: 0 });
+    assert.deepEqual(painterCellAt(0, 0), { x: -3, y: -2 });
+    assert.deepEqual(painterCellAt(6, 8), { x: 3, y: 6 });
+    assert.equal(painterCellAt(7, 0), null, '越界不给坐标');
+    assert.equal(painterCellAt(-1, 0), null);
+    assert.equal(painterCellAt(1.5, 0), null);
+    // 反查：坐标 → 格子
+    assert.deepEqual(painterPositionOf(0, 0), { col: 3, row: 2 });
+    assert.deepEqual(painterPositionOf(-3, -2), { col: 0, row: 0 });
+    assert.equal(painterPositionOf(4, 0), null, '画板外（手写的超大范围）');
+    assert.equal(painterPositionOf(NaN, 0), null);
+    // 官方数据里的范围都画得下：x∈[-2,2]、y∈[-2,5] 落在板内
+    for (const [x, y] of [[-2, -2], [2, 5], [0, 5], [-2, 5]]) assert.ok(painterPositionOf(x, y), `${x},${y} 应该在画板内`);
+  });
+
+  test('toggleGridCell 点亮/点灭，并保持排序去重', () => {
+    assert.deepEqual(toggleGridCell([], 0, 0), [[0, 0]]);
+    assert.deepEqual(toggleGridCell([[0, 0]], 0, 1), [[0, 0], [0, 1]]);
+    assert.deepEqual(toggleGridCell([[0, 0], [0, 1]], 0, 1), [[0, 0]]);
+    // 原点删不掉：干员必须站在自己的范围内（空范围谁都打不到，而引擎不会为此报错）
+    assert.deepEqual(toggleGridCell([[0, 0]], 0, 0), [[0, 0]]);
+    // 乱序输入 → 稳定输出，且重复格不会变成两条
+    assert.deepEqual(toggleGridCell([[0, 2], [-1, 0], [0, 2]], 0, 2), [[-1, 0]]);
+    assert.deepEqual(sortGrid([[1, 0], [-1, 2], [1, 0]]), [[1, 0], [-1, 2]]);
+    assert.deepEqual(sortGrid(null), []);
+    // 非法格子被丢掉，而不是写进记录
+    assert.deepEqual(sortGrid([[0, 0], ['a', 1], [1]]), [[0, 0]]);
+  });
+
+  test('gridKeySet / outsidePainterCount 认得画板外的格子', () => {
+    const set = gridKeySet([[0, 0], [1, 2]]);
+    assert.equal(set.has('0,0'), true);
+    assert.equal(set.has('2,1'), false, '键是 x,y（不是 y,x）');
+    assert.equal(outsidePainterCount([[0, 0], [1, 1]]), 0);
+    assert.equal(outsidePainterCount([[0, 0], [9, 9], [-9, 0]]), 2);
+    assert.equal(outsidePainterCount(null), 0);
   });
 });

@@ -103,6 +103,15 @@ describe('workshop editor: the API', () => {
     assert.ok(r.officialChess.length > 100, 'the spine picker needs the official operators');
     assert.equal(r.support.enabled, true);
     assert.ok(r.officialChess.every((c) => c.id && c.name && Number.isInteger(c.tier)));
+    // 分支按职业联动：`subProfessions` 从**全部**非精锐记录算出来（不是只从可见干员），所以只在一条
+    // 不可见记录上出现的 `pusher`（推击手）也在 —— 作者仍然应该能选到它。
+    assert.ok(Array.isArray(r.subProfessions) && r.subProfessions.length >= 50, `官方 57 个分支都要在，实际 ${r.subProfessions?.length}`);
+    assert.ok(r.subProfessions.every((b) => b.id && Array.isArray(b.professions)));
+    assert.deepEqual(r.subProfessions.find((b) => b.id === 'pusher'), { id: 'pusher', name: '推击手', professions: ['SPECIAL'] });
+    const sniper = r.subProfessions.filter((b) => b.professions.includes('SNIPER'));
+    assert.ok(sniper.length >= 5, `狙击职业要有它的分支，实际 ${sniper.length}`);
+    assert.ok(sniper.every((b) => b.professions.length === 1), '官方数据里没有分支跨职业');
+    assert.ok(r.subProfessions.every((b) => typeof b.name === 'string' && b.name), '每个分支都有中文名（界面显示它）');
   });
 
   test('POST /api/preview derives and validates without writing anything', async () => {

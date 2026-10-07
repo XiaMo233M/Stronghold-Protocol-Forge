@@ -60,6 +60,7 @@ node tools/workshop-validate.mjs <packId 或 workshop 根>          # 三层校�
 | `profession` | ✅ | 必须是 `WARRIOR` `SNIPER` `CASTER` `MEDIC` `SUPPORT` `TANK` `SPECIAL` `PIONEER` 之一。**注意：这是本项目数据里的名字，不是通用职业名** —— 重装是 `TANK`（不是 DEFENDER）、先锋是 `PIONEER`（不是 VANGUARD）、特种是 `SPECIAL`（不是 SPECIALIST）。写错会被拒绝；若写成通用名而被接受，该干员的职业加成就全部失效 |
 | `subProfessionId` | ⬜ | 决定职业特性行为，例如 `fastshot`（速射手）`fortress`（要塞）`bard`（吟游者）。留空则按 `position` 取通用行为 |
 | `position` | ✅ | `MELEE` 或 `RANGED` |
+| `rangeGrid` | ⬜ | 攻击范围（`[[dRow,dCol],…]`，朝向右，原点是自己那一格）；不写则按职业与分支推导。官方出现过的形状可以照抄，**自己画**也行 —— 编辑器干员页的「✎ 自己画」就是画这个字段（7×9 格，x∈[-3,3]、y∈[-2,6]） |
 | `traitDesc` | ⬜ | 特性文字（**只影响分类推导**：含「法术伤害」会被判为法术伤害） |
 | `traitRangeGrid` / `traitGolden.rangeGrid` | ⬜ | **特性自带的那片范围**（不是干员的攻击范围）：普通态用 `traitRangeGrid`，精锐态在 `traitGolden` 里。官方 4 位干员的特性带它（例：散射手用它定义正面那一圈） |
 | `assetsSpine` | ⬜ | 复用一个**已有**干员的 Spine id。仓库不含素材，所以这是让新干员有立绘的唯一方式；留空则用替代外观 |
