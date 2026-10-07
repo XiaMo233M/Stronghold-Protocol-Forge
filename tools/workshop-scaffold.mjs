@@ -79,7 +79,7 @@ function ensurePackManifest(packDir, packId, spec, file) {
   fs.writeFileSync(manifestPath, `${JSON.stringify({
     id: packId,
     name: typeof spec.name === 'string' && spec.name ? spec.name : packId,
-    version: '0.1.0', author: null, license: null, description: null, gameVersion: '0.1.3',
+    version: '0.1.0', author: null, license: null, description: null, gameVersion: '0.2.1',
     content: [file], overrides: [],
   }, null, 2)}\n`);
 }
@@ -171,7 +171,7 @@ function main() {
         author: null,
         license: null,
         description: null,
-        gameVersion: '0.1.3',
+        gameVersion: '0.2.1',
         content: ['chess'],
         overrides: [],
       };

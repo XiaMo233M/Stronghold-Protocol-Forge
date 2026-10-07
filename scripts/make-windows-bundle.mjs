@@ -31,6 +31,13 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+import { APP_VERSION } from '../shared/constants.js';
+// 更新包机制：MANIFEST / UPDATE 的读写、程序文件的判定与摘要，全部复用服务端自己那一份实现
+// （server/update.js 启动时按同一份规则校验，写与读不可能漂移），文本格式由 tools/package-update.mjs 生成。
+import { MANIFEST_FILE, digestFile, inManifest } from '../server/update.js';
+import { manifestText } from '../tools/package-update.mjs';
+import { listTree } from '../tools/package.mjs';
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const IS_WIN = process.platform === 'win32';
 const MB = (n) => `${(n / (1024 * 1024)).toFixed(1)} MB`;
@@ -685,6 +692,21 @@ async function main() {
   voiceLangs: voiceDubs,
   voicePackLangs: withVoices && !allDubs ? listVoiceDubs().filter((l) => !voiceDubs.includes(l)) : [],
 }), 'utf8');
+
+  // 6) MANIFEST.json —— 上游 0.2.1 起的更新包机制（docs/DEPLOY.md §1.5）：
+  //    app/ 下每个程序文件的大小与 sha256。启动时 server/update.js 按它校验（不一致就不带着半个坏包启动），
+  //    维护者侧的 tools/package-update.mjs 也按它算「比上一版变了哪些文件」。选择规则与上游同一份实现
+  //    （`inManifest`：排除 MANIFEST/UPDATE 这类元文件，以及素材与字体——那些由更新流程按警告处理）。
+  {
+    const files = new Map();
+    for (const rel of listTree(appDir, '', { junk: false })) {
+      if (!inManifest(rel)) continue;
+      const digest = digestFile(path.join(appDir, rel));
+      if (digest) files.set(rel, digest);
+    }
+    await fsp.writeFile(path.join(appDir, MANIFEST_FILE), manifestText({ app: APP_VERSION, files }), 'utf8');
+    console.log(`  · 写出 ${MANIFEST_FILE}（${files.size} 个程序文件的大小与 sha256，供启动校验与增量更新包）`);
+  }
 
   const total = await dirSize(out);
   console.log(`\n✔ 便携包已生成：${out}\n  ${total.files} 个文件 / ${MB(total.bytes)}`);

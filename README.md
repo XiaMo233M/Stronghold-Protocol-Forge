@@ -1,6 +1,6 @@
 # Stronghold-Protocol-Forge · 卫戍协议工坊编辑器
 
-![version](https://img.shields.io/badge/version-0.8.1-2ea44f)
+![version](https://img.shields.io/badge/version-0.8.2-2ea44f)
 ![license](https://img.shields.io/badge/code%20license-GPL--3.0--or--later-blue)
 ![node](https://img.shields.io/badge/node-22%20%7C%2024-339933)
 
@@ -174,7 +174,7 @@ npm run editor                                                                  
 
 - **独立模拟**（单人）与**同盟模拟**（1–4 人**合作**，没有 PvP；空位可以加 AI 队友）。
 - 服务器是一个 Node.js 程序，**战斗在各玩家的浏览器里模拟**（和官方一样），服务器只管经济与回合，一台低功耗小主机就能开服。
-- **本仓库打包的上游游戏本体为 0.2.0**（本仓库自己的版本是 0.8.1，两者的读法见[版本号怎么读](#版本号怎么读)）：补位、自选编队、中英日韩四语言、自定义快捷键与精简包，以及一批按官方数据与 PRTS 修正的规则，详见 [CHANGELOG.md](CHANGELOG.md)。仍有少数规则按推断实现，与官方不一致的地方欢迎在 Issue 里反馈。
+- **本仓库打包的上游游戏本体为 0.2.1**（本仓库自己的版本是 0.8.2，两者的读法见[版本号怎么读](#版本号怎么读)）：0.2.0 带来补位、自选编队、中英日韩四语言、自定义快捷键与精简包；0.2.1 把联防改回在本回合的战场上打（0.2.0 那张空马路是所有波次模板共用的占位地图）、**干员按满潜能计算**、装备栏满时再装一次性道具会弹「替换装备」窗，并修掉凋亡扣技力、频次器物、飞行敌人高度、盟约栏与详情卡等一批问题，详见 [CHANGELOG.md](CHANGELOG.md) 与 [docs/history/0.2.1.md](docs/history/0.2.1.md)。仍有少数规则按推断实现，与官方不一致的地方欢迎在 Issue 里反馈。
 - **多语言配音**（0.7.1 起）：干员战斗语音有中文 / 日文 / 英文 / 韩文四种，**设置 → 配音语言** 选全局默认，
   任何干员还能在 **干员详情 → 配音** 里单独换一种（点一下当场试听）。某种配音缺一句时自动退回默认配音。
   **发行包只带默认配音**，其余语言在同一个 release 的 `…-voices-*.zip` 里（解压覆盖到 `app/public/assets/audio/voice/` 即可，不用改配置）。
@@ -227,6 +227,8 @@ npm run editor                                                                  
 
 包内含编辑器、`docs/prompts/` 官方 prompt、全部公开镜像素材，以及从本机客户端提取的官方素材：**官方 3D 棋盘**、官方界面底板、灼热 / 炽焰源石虫的官方模型。素材版权归上海鹰角网络 / Yostar，**仅限非商业使用**，包内附 `NOTICE.md` 与 `THIRD-PARTY-NOTICES.md`。**角色语音台词也在包里**：191 名干员的 2674 条战斗语音（行动出发 / 行动开始 / 选中 / 部署 / 作战中 1-4 / 四种结算），游戏里**默认就能听见**（设置 → 干员语音 = 0.8）；每个干员的战斗音效（攻击 / 受击 / 技能）同样齐备。
 
+**已经装好上一个版本的话，不用重下整包**：每个版本还会附一个 **`…-update.zip`**（0.8.2 起），只含比上一版改动过的文件。停止游戏、把它解压覆盖到安装目录、再照常启动即可 —— 启动时服务端会先按 `MANIFEST.json` 校验程序文件、把新版本不再需要的旧文件删掉（**你自己改过的文件不会被删**），校验不过会提示去下完整包而不是带着半个坏包装起来。用法与边界见 [docs/DEPLOY.md](docs/DEPLOY.md)。
+
 macOS / Linux 请用方式二。
 
 #### 方式二：源码包 / 从源码运行（不含素材）
@@ -250,7 +252,7 @@ npm start          # 启动服务器：http://localhost:3000
 
 #### 版本号怎么读
 
-发行 tag 写成 **`v<forge>-<上游>`**：`v0.8.0-0.2.0` = 本仓库（Forge 工坊编辑器）**0.8.0** + 上游游戏（[sganggs/Stronghold-Protocol](https://github.com/sganggs/Stronghold-Protocol)）**0.2.0**。程序里显示的版本（标题页、启动横幅、`/healthz`）只是前半部分，因为仓库自己的元数据检查要求它是三段普通 semver —— 详见 [CHANGELOG.md](CHANGELOG.md) 与 `test/version.test.js`。
+发行 tag 写成 **`v<forge>-<上游>`**：`v0.8.2-0.2.1` = 本仓库（Forge 工坊编辑器）**0.8.2** + 上游游戏（[sganggs/Stronghold-Protocol](https://github.com/sganggs/Stronghold-Protocol)）**0.2.1**。程序里显示的版本（标题页、启动横幅、`/healthz`）只是前半部分，因为仓库自己的元数据检查要求它是三段普通 semver —— 详见 [CHANGELOG.md](CHANGELOG.md) 与 `test/version.test.js`。
 
 #### 系统要求
 
@@ -443,7 +445,7 @@ work for direct profit.
 |---|---|
 | 上游项目 | **Stronghold-Protocol**（卫戍协议：盟约 · 非官方同人复刻） |
 | 上游地址 | <https://github.com/sganggs/Stronghold-Protocol> |
-| 本仓库当前的底座 | 上游 **v0.2.0** 的源码树（tag `v0.2.0` = commit `1303321`）。0.7.0 起按该 tag 逐文件移植；此前的 0.1.x–0.6.x 基于上游 **v0.1.3** 的 Release 整合包（解压得到，不是 `git clone`）。 |
+| 本仓库当前的底座 | 上游 **v0.2.1** 的源码树（tag `v0.2.1` = commit `c2a2ef7`）。0.8.2 把底座从 v0.2.0（commit `1303321`）抬到 v0.2.1（含增量包没带上的开发侧改动）；0.7.0 起按上游 tag 逐文件移植；此前的 0.1.x–0.6.x 基于上游 **v0.1.3** 的 Release 整合包（解压得到，不是 `git clone`）。 |
 | 改动时间 | 2026 年 10 月起，逐次提交见 `git log` 的提交日期 |
 | 许可 | 整体 **GPL-3.0-or-later**，全文见 [LICENSE](LICENSE)；上游的版权与许可声明原样保留（[NOTICE.md](NOTICE.md)、[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)） |
 
@@ -456,14 +458,17 @@ work for direct profit.
 | 1 | 本仓库的**根提交**（`11aa45c6`）与上游 **v0.1.3** 的 tag 逐字节比对 | 上游那 583 个文件**一个不缺**：558 个逐字节相同，25 个是我们在 `git init` 之前就改过的（工坊与助战的钩子），0 个缺失 —— 所以「0.1.3 + 我们的改动」这个说法是准确的 |
 | 2 | 0.7.0 的移植以**上游 v0.2.0 的源码树**为底座 | 863 个文件直接取自上游（含 `server/sim` 的拆分、`server/http/`、i18n、`packs/` 与上游那 519 个测试文件）；290 个「上游没改动过」的文件保留我们的版本；6 个按上游删除 |
 | 3 | 我们自己的功能层与补丁重贴 | 我们的自研文件原样保留；我们相对上游的运行时改动约 **1100 行**、散在 63 个文件，用三方合并（ours=0.6.4 / base=上游 v0.1.3 / theirs=上游 v0.2.0）逐文件重贴；上游拆开的 4 个文件（`server/index.js`、`match/Match.js`、`match/PlayerState.js`、`ui/gameLogic.js`）按新结构重写钩子 |
+| 4 | 0.8.2 的移植以**上游 v0.2.1** 为新底座 | 逐文件用 sha256 判定（不看时间戳）：我们与 v0.2.0 逐字节相同的 **116 个文件直接采纳** v0.2.1；双方都改过的做三方合并；上游新增的 `server/update.js`、`tools/package-update.mjs` 等一并带入。**上游的增量包只含 MANIFEST 里的发行文件（138 个），开发侧的 148 个改动（`tools/**`、`test/**`、`docs/**`）是用上游 tag 的全树比对补齐的** |
 
 | 分类 | 依据 | 强度 |
 |---|---|---|
-| **A 本项目新增** | 上游 v0.2.0 的树里**没有**这个路径 | 可核实（与上游 tag 比对） |
-| **B 本项目修改** | 路径在上游树里存在，但内容与上游 v0.2.0 不同 | 可核实（逐文件 diff） |
-| **C 上游原文** | 与上游 v0.2.0 逐字节相同 | 可核实 |
+| **A 本项目新增** | 上游 v0.2.1 的树里**没有**这个路径 | 可核实（与上游 tag 比对） |
+| **B 本项目修改** | 路径在上游树里存在，但内容与上游 v0.2.1 不同 | 可核实（逐文件 diff） |
+| **C 上游原文** | 与上游 v0.2.1 逐字节相同 | 可核实 |
 
-### A. 本项目新增（上游 v0.2.0 里没有）
+**移植正确性怎么证明的**：0.8.2 的黄金值（`test/golden/*.json`）里，**roster / bonds / fields / standins / diy 五个家族重新生成后与上游 v0.2.1 的存值逐字节相同**（283 / 300 个场景）—— 战斗内核与规则层与上游完全一致。只有 `matches` 家族不同，原因是我们**刻意保留的两处分歧**：调度中心升级只多一个空位（0.7.2 起，见 [docs/META.md](docs/META.md)）与助战干员进商店的定价（0.5.0 起）。用上游的 `server/match/player/economy.js` 做对照实验，matches 的差异场景会从 7 个降到 1 个，而那 1 个是同一处分歧的下游影响（补位清单按时序随之调整）。
+
+### A. 本项目新增（上游 v0.2.1 里没有）
 
 | 目录 | 内容 |
 |---|---|
@@ -476,7 +481,7 @@ work for direct profit.
 | `docs/` | `EDITOR.md` `WORKSHOP.md` `prompts/**` `examples/**` `img/intro/**` |
 | 其他 | `workshop/README.md` `data/support.json` `third-party/README.md` |
 
-### B. 本项目修改的上游文件（相对上游 v0.2.0）
+### B. 本项目修改的上游文件（相对上游 v0.2.1）
 
 | 目录 | 内容与改动 |
 |---|---|

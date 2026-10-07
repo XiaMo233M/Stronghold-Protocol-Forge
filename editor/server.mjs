@@ -1723,7 +1723,7 @@ export async function createEditorServer(opts = {}) {
         ? { ...existingManifest, content: [...content].sort() }
         : {
           id: packId, name: spec.name || packId, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null,
-          description: null, gameVersion: '0.1.3', content: [...content].sort(), overrides: [],
+          description: null, gameVersion: '0.2.1', content: [...content].sort(), overrides: [],
         };
       const declared = Array.isArray(existingManifest?.content) ? existingManifest.content : [];
       if (!existingManifest || declared.length !== content.size || declared.some((f) => !content.has(f))) {
@@ -1851,7 +1851,7 @@ export async function createEditorServer(opts = {}) {
         ? { ...existingManifest, content: [...content].sort(), overrides: [...overrides].sort() }
         : {
           id: packId, name: spec.name || packId, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null,
-          description: null, gameVersion: '0.1.3', content: [...content].sort(), overrides: [...overrides].sort(),
+          description: null, gameVersion: '0.2.1', content: [...content].sort(), overrides: [...overrides].sort(),
         };
       const specPath = path.join(packDir, BOND_SPEC_DIR, `${bondId}.json`);
       const previousSpec = readJson(specPath, null);
@@ -2209,7 +2209,7 @@ export async function createEditorServer(opts = {}) {
       content.add('stages');
       await writeJson(manifestPath, existingManifest
         ? { ...existingManifest, content: [...content].sort() }
-        : { id: packId, name: spec.name || packId, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null, description: null, gameVersion: '0.1.3', content: [...content], overrides: [] });
+        : { id: packId, name: spec.name || packId, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null, description: null, gameVersion: '0.2.1', content: [...content], overrides: [] });
       const specPath = path.join(packDir, STAGE_SPEC_DIR, `${derived.stage.id}.json`);
       const previousSpec = readJson(specPath, null);
       await writeJson(specPath, withForgeMeta(spec, { author: authorFor(packDir, forgeAuthor), packId, now: new Date().toISOString(), previous: previousSpec }));
@@ -2330,7 +2330,7 @@ export async function createEditorServer(opts = {}) {
       content.add('enemies');
       await writeJson(manifestPath, existingManifest
         ? { ...existingManifest, content: [...content].sort() }
-        : { id: packId, name: spec.name || packId, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null, description: null, gameVersion: '0.1.3', content: [...content], overrides: [] });
+        : { id: packId, name: spec.name || packId, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null, description: null, gameVersion: '0.2.1', content: [...content], overrides: [] });
       const specPath = path.join(packDir, ENEMY_SPEC_DIR, `${ids.slug}.json`);
       const previousSpec = readJson(specPath, null);
       await writeJson(specPath, withForgeMeta(spec, { author: authorFor(packDir, forgeAuthor), packId, now: new Date().toISOString(), previous: previousSpec }));
@@ -2445,7 +2445,7 @@ export async function createEditorServer(opts = {}) {
       content.add('waves');
       await writeJson(manifestPath, existingManifest
         ? { ...existingManifest, content: [...content].sort() }
-        : { id: packId, name: spec.name || packId, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null, description: null, gameVersion: '0.1.3', content: [...content], overrides: [] });
+        : { id: packId, name: spec.name || packId, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null, description: null, gameVersion: '0.2.1', content: [...content], overrides: [] });
       const specPath = path.join(packDir, WAVE_SPEC_DIR, `${ids.slug}.json`);
       const previousSpec = readJson(specPath, null);
       await writeJson(specPath, withForgeMeta(spec, { author: authorFor(packDir, forgeAuthor), packId, now: new Date().toISOString(), previous: previousSpec }));
@@ -2565,7 +2565,7 @@ export async function createEditorServer(opts = {}) {
       content.add('items');
       await writeJson(manifestPath, existingManifest
         ? { ...existingManifest, content: [...content].sort() }
-        : { id: packId, name: spec.name || packId, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null, description: null, gameVersion: '0.1.3', content: [...content], overrides: [] });
+        : { id: packId, name: spec.name || packId, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null, description: null, gameVersion: '0.2.1', content: [...content], overrides: [] });
       const specPath = path.join(packDir, ITEM_SPEC_DIR, `${ids.slug}.json`);
       const previousSpec = readJson(specPath, null);
       await writeJson(specPath, withForgeMeta(spec, { author: authorFor(packDir, forgeAuthor), packId, now: new Date().toISOString(), previous: previousSpec }));
