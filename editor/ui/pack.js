@@ -32,9 +32,16 @@ async function api(path, opts) {
   return data;
 }
 
-const state = { data: null, packs: [], packId: null, message: null, busy: false, picked: new Set(), playtest: null, playtestDifficulty: null };
+const state = {
+  data: null, packs: [], packId: null, message: null, busy: false, picked: new Set(), playtest: null, playtestDifficulty: null,
+  // 「包元数据」那六个输入框的草稿（`{ name: '…', license: '…' }`）与 overrides 添加行里的两个选择：
+  // 输入框在每次重画时从草稿重建，所以勾一个助战、删一条声明都不会把作者正在打的字弄丢。
+  metaDraft: {}, ovFile: '', ovId: '',
+};
 
 const packOf = (id = state.packId) => state.packs.find((p) => p.id === id) ?? null;
+/** 一个包的元数据/overrides 状态：`/api/packs/support` 的 `meta[<包id>]`，两条写盘路由的 200 回话也是同一个形状。 */
+const metaOf = (id = state.packId) => state.data?.meta?.[id] ?? null;
 const isChinese = (s) => /[\u4e00-\u9fa5]/.test(String(s));
 
 function setMessage(kind, text) {
@@ -49,6 +56,65 @@ function kv(k, v) {
   row.append(Object.assign(document.createElement('div'), { className: 'k', textContent: k }));
   row.append(Object.assign(document.createElement('div'), { className: 'v', textContent: v }));
   return row;
+}
+
+// ---- 包元数据与 overrides 的界面文字 ------------------------------------------------------------------------------
+
+/**
+ * 六个可写字段的兜底清单：**权威来源是服务端回话里的 `metaFields`**（它由 tools/workshop-pack.mjs 的
+ * `PACK_META_FIELDS` 给出），这里只用在「服务端没给」这一种情况 —— 页面不复制第二份规则。
+ */
+const META_FALLBACK_FIELDS = ['name', 'version', 'author', 'license', 'description', 'gameVersion'];
+
+/** 一个字段的标签。在画的时候才取 t()：语言一切换 mountI18n 就重画，模块级缓存会把中文钉死（同 voice.js 的 slotLabel）。 */
+function metaLabel(field) {
+  switch (field) {
+    case 'name': return t('包名（name）');
+    case 'version': return t('版本（version）');
+    case 'author': return t('作者（author）');
+    case 'license': return t('授权（license）');
+    case 'description': return t('简介（description）');
+    case 'gameVersion': return t('游戏版本（gameVersion）');
+    default: return field;
+  }
+}
+
+/** 输入框里的示例值：示例本身是数据（原样显示），只翻「例如」这一层界面文字（与语音页同一个写法）。 */
+function metaExample(field) {
+  switch (field) {
+    case 'name': return t('例如 {0}', 'my-awesome-pack');
+    case 'version': return t('例如 {0}', '1.0.0');
+    case 'author': return t('例如 {0}', 'Example Author');
+    case 'license': return t('例如 {0}', 'CC0-1.0');
+    case 'description': return t('例如 {0}', 'a pack that ships one new map');
+    case 'gameVersion': return t('例如 {0}', '0.2.0');
+    default: return '';
+  }
+}
+
+/** 把服务端回话里的那一份状态抄进草稿（服务端会 trim，草稿必须与磁盘一致）。 */
+function syncMetaDraftFrom(m) {
+  const next = {};
+  for (const field of m?.metaFields ?? META_FALLBACK_FIELDS) next[field] = m?.meta?.[field] ?? '';
+  state.metaDraft = next;
+}
+
+/** 切包或重新载入时把草稿重置成磁盘上的值（未保存的改动会被丢弃，和这一页别的草稿一样）。 */
+function resetMetaDraft(id = state.packId) {
+  syncMetaDraftFrom(metaOf(id));
+}
+
+/** 某个数据文件的 id 候选（datalist：value = id，展示 `id · 名字`）。返回值只是条数，用于提示。 */
+function fillIdChoices(listEl, file) {
+  listEl.replaceChildren();
+  const rows = (state.data?.overrideCandidates ?? {})[file] ?? [];
+  for (const [id, name] of rows) {
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.label = name ? `${id} · ${name}` : id;
+    listEl.append(opt);
+  }
+  return rows.length;
 }
 
 // ---- 左栏：包列表 -------------------------------------------------------------------------------------------------
@@ -86,12 +152,176 @@ function selectPack(id) {
   state.packId = id;
   state.message = null;
   state.picked = new Set(packOf(id)?.support ?? []);
+  state.ovId = '';
+  resetMetaDraft(id);
   renderAll();
 }
 
 function renderAll() { renderPackList(); renderDetail(); renderSide(); }
 
-// ---- 中栏：包的详情 + 助战声明 -----------------------------------------------------------------------------------
+// ---- 中栏：包的详情 + 包元数据 + overrides + 助战声明 --------------------------------------------------------------
+
+/**
+ * 「包元数据」这一块：六个输入框 + 一个保存按钮。此前这几个字段在这一页只是**只读显示**，作者要改只能手改 pack.json；
+ * 而缺 `license` 会让加载器整包拒绝（ASSETS_NEED_LICENSE），语音/图标/外观三个页面在这种状态下还全都拒绝写入 ——
+ * 所以缺 license 时在这一块顶部给一条警告和一个一键填上的按钮，那就是这一版存在的理由。
+ */
+function renderMetaPanel(m) {
+  const panel = document.createElement('div');
+  panel.className = 'panel metaPanel';
+
+  // 横幅看的是**磁盘上的** license（不是草稿）：清空 license 会被服务端拒绝（400 ASSETS_NEED_LICENSE），
+  // 所以「填上一个再保存」才是它消失的那一刻；输入框每敲一下都重画会把焦点弄丢。
+  if (m.hasAssets && !m.meta?.license) {
+    panel.append(Object.assign(document.createElement('div'), {
+      className: 'banner bad metaBanner',
+      textContent: t('⚠ 这个包有 assets/，却没有声明 license —— 加载器会整包拒绝它（ASSETS_NEED_LICENSE），语音/图标/外观三个页面也会拒绝写入。下面填一个 license 就能解封这三页。'),
+    }));
+    const quick = document.createElement('div'); quick.className = 'row'; quick.style.marginBottom = '8px';
+    const fill = document.createElement('button');
+    fill.className = 'primary metaQuickLicense';
+    fill.textContent = t('用 CC0-1.0 填上并保存');
+    fill.disabled = state.busy;
+    fill.addEventListener('click', () => fillLicense('CC0-1.0'));
+    quick.append(fill);
+    panel.append(quick);
+  }
+
+  const grid = document.createElement('div');
+  grid.style.display = 'grid';
+  grid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(220px, 1fr))';
+  grid.style.gap = '8px 12px';
+  grid.style.marginTop = '8px';
+  for (const field of m.metaFields ?? META_FALLBACK_FIELDS) {
+    const input = document.createElement('input');
+    input.className = 'metaInput';
+    input.dataset.field = field;
+    input.id = `meta_${field}`;
+    input.maxLength = 200;                 // 服务端上限 200 字符（META_MAX_LEN）：这里直接不让输超
+    input.value = state.metaDraft[field] ?? '';
+    input.placeholder = metaExample(field);
+    input.disabled = state.busy;
+    if (field === 'license') input.setAttribute('list', 'licenseChoices');
+    // 只记草稿、不重画：重画会把输入框换掉，正在打的字会掉焦点
+    input.addEventListener('input', () => { state.metaDraft[field] = input.value; });
+    const cell = document.createElement('div');
+    if (field === 'description') cell.style.gridColumn = '1 / -1';
+    cell.append(Object.assign(document.createElement('label'), { htmlFor: `meta_${field}`, textContent: metaLabel(field) }), input);
+    grid.append(cell);
+  }
+  panel.append(grid);
+
+  const lic = document.createElement('datalist'); lic.id = 'licenseChoices';
+  for (const choice of m.licenseChoices ?? []) {
+    const opt = document.createElement('option'); opt.value = choice; lic.append(opt);
+  }
+  panel.append(lic);
+
+  const actions = document.createElement('div'); actions.className = 'row'; actions.style.marginTop = '10px';
+  const save = document.createElement('button');
+  save.className = 'primary metaSave';
+  save.textContent = state.busy ? t('保存中…') : t('保存元数据');
+  save.disabled = state.busy;
+  save.addEventListener('click', () => saveMeta());
+  const reset = document.createElement('button');
+  reset.className = 'ghost metaReset';
+  reset.textContent = t('还原');
+  reset.disabled = state.busy;
+  reset.addEventListener('click', () => { resetMetaDraft(); renderDetail(); });
+  actions.append(save, reset);
+  panel.append(actions);
+
+  panel.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('留空就删掉这个字段（这里不会写一个空字符串进去）：加载器对这六个字段各有默认值。'),
+  }));
+  panel.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('有 assets/ 的包不能清空 license —— 那是唯一一个「清空」会让加载器整包拒绝的字段（ASSETS_NEED_LICENSE）。'),
+  }));
+  panel.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('保存只改上面这几个字段：pack.json 的其余字段、键序与两空格缩进原样保留。'),
+  }));
+  return panel;
+}
+
+/**
+ * 「覆盖官方记录」（`pack.json` 的 overrides）这一块：列出**全部**已声明条目（含官方没有这个 id、以及本包没带那条记录的
+ * 那些）、逐条删除，外加一行添加。
+ *
+ * 删除与添加都是**整表替换、立刻 POST**：与图标清单同一条规矩 —— 写进 pack.json 的东西必须能在这里删掉，而没生效的
+ * 声明不是错误（它只是永远不会起作用），保留它只会让作者以为自己配好了。
+ */
+function renderOverridesPanel(m) {
+  const panel = document.createElement('div');
+  panel.className = 'panel ovPanel';
+  const tag = (cls, text) => Object.assign(document.createElement('span'), { className: `tag ${cls}`, textContent: text });
+  for (const text of [
+    t('包带了一条与官方同 id 的记录时，只有在这里声明了 `<文件>:<id>`，加载器才会用包的那条替换官方的；否则整条被丢掉，一条日志都不打。'),
+    t('没生效的声明不是错误（官方没有这个 id，或本包没有带那条记录），但留着它这条声明永远不会起作用 —— 所以能删。'),
+  ]) panel.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: text }));
+
+  const list = document.createElement('div'); list.className = 'ovList'; list.style.marginTop = '8px';
+  if (!m.overrides.length) {
+    list.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('还没有声明。') }));
+  }
+  for (const o of m.overrides) {
+    const row = document.createElement('div'); row.className = 'row ovRow';
+    row.dataset.entry = o.entry;
+    row.append(Object.assign(document.createElement('code'), { className: 'ovEntry', textContent: o.entry }));
+    row.append(o.inUse ? tag('ok', t('在用')) : tag('warn', t('陈旧，不生效')));
+    if (o.official === false) row.append(tag('err', t('官方没有这个 id')));
+    if (o.isContentFile === false) row.append(tag('err', t('不是包能声明的数据文件')));
+    const del = document.createElement('button');
+    del.className = 'ghost tiny ovDel';
+    del.textContent = t('删除');
+    del.disabled = state.busy;
+    del.addEventListener('click', () => removeOverride(o.entry));
+    row.append(del);
+    list.append(row);
+  }
+  panel.append(list);
+
+  // 添加一行：文件下拉（官方那 13 张数据表，值就是文件名）+ 该表的 id 候选 + 一个按钮。
+  // 候选只是提示：输入框**必须能手输**（新声明的 id 可能官方根本没有，服务端也只查形状）。
+  const files = Object.keys(state.data?.overrideCandidates ?? {});
+  if (!state.ovFile || !files.includes(state.ovFile)) state.ovFile = files[0] ?? '';
+  const addRow = document.createElement('div'); addRow.className = 'row ovAddRow'; addRow.style.marginTop = '10px';
+  const fileSel = document.createElement('select');
+  fileSel.className = 'ovAddFile';
+  fileSel.style.width = 'auto';
+  fileSel.disabled = state.busy || !files.length;
+  for (const file of files) {
+    const opt = document.createElement('option'); opt.value = file; opt.textContent = file; fileSel.append(opt);
+  }
+  fileSel.value = state.ovFile;
+
+  const idInput = document.createElement('input');
+  idInput.className = 'ovAddId';
+  idInput.style.flex = '1';
+  idInput.setAttribute('list', 'ovIdChoices');
+  idInput.placeholder = t('例如 {0}', 'chess_char_1_01_a');
+  idInput.value = state.ovId ?? '';
+  idInput.disabled = state.busy;
+  idInput.addEventListener('input', () => { state.ovId = idInput.value; });
+  const idList = document.createElement('datalist'); idList.id = 'ovIdChoices';
+  fillIdChoices(idList, state.ovFile);
+  fileSel.addEventListener('change', () => { state.ovFile = fileSel.value; fillIdChoices(idList, state.ovFile); });
+
+  const addBtn = document.createElement('button');
+  addBtn.className = 'primary ovAdd';
+  addBtn.textContent = t('添加');
+  addBtn.disabled = state.busy || !files.length;
+  addBtn.addEventListener('click', () => addOverride());
+  addRow.append(fileSel, idInput, idList, addBtn);
+  panel.append(addRow);
+  panel.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('候选只是提示，不是白名单：可以直接手输任何 `<文件>:<id>`（官方没有的 id 也能声明，只是不会生效）。'),
+  }));
+  return panel;
+}
 
 function renderDetail() {
   const box = $('#detail');
@@ -106,9 +336,6 @@ function renderDetail() {
   box.append(h(t('「{0}」', p.name)));
   const info = document.createElement('div'); info.className = 'panel kv';
   info.append(kv(t('包 id'), p.id));
-  info.append(kv(t('版本'), p.version));
-  info.append(kv(t('作者'), p.author ?? t('（未声明）')));
-  info.append(kv(t('授权 license'), p.license ?? t('（未声明）')));
   info.append(kv(t('内容文件'), p.content.length ? p.content.join(t('、')) : t('（无 —— 只带语音/助战也是合法的包）')));
   info.append(kv(t('语音'), p.voiceLines ? t('{0} 条', p.voiceLines) : t('（无）')));
   info.append(kv(t('自带素材'), p.hasAssets ? t('有 assets/（必须有 license）') : t('没有 assets/')));
@@ -133,6 +360,16 @@ function renderDetail() {
     stray.className = 'banner bad';
     stray.textContent = t('⚠ 这个包里有 {0}，但 pack.json 的 content 没声明它们 —— 加载器**不会读**这些文件：里面的干员不会进商店、也不会出现在试玩里。修法：去对应页面重新保存一次（会自动补声明），或手工在 content 里加上。', p.undeclared.map((f) => t('{0}.json', f)).join(t('、')));
     box.append(stray);
+  }
+
+  // ---- 包元数据与 overrides（都是 pack.json 的顶层字段，都在这一页可增删改）----
+  // 字段清单与候选都来自服务端（metaFields / licenseChoices / overrideCandidates）：页面不复制第二份规则。
+  const meta = metaOf();
+  if (meta) {
+    box.append(h(t('包元数据')));
+    box.append(renderMetaPanel(meta));
+    box.append(h(t('覆盖官方记录（pack.json 的 overrides）')));
+    box.append(renderOverridesPanel(meta));
   }
 
   // ---- 助战声明 ----
@@ -356,7 +593,7 @@ function renderSide() {
   }));
   help.append(Object.assign(document.createElement('p'), {
     className: 'hint',
-    textContent: t('装好的包要重启游戏服务器才会出现在游戏里。这里只写 workshop/<包id>/ 与 pack.json 的 support 字段。'),
+    textContent: t('装好的包要重启游戏服务器才会出现在游戏里。这里写 workshop/<包id>/，以及 pack.json 的 support、包元数据与 overrides 字段。'),
   }));
   box.append(help);
 }
@@ -431,6 +668,105 @@ async function saveSupport() {
   }
 }
 
+/**
+ * 保存那六个元数据字段。正文里**只带真的改了的键**（留空 = `null` = 让服务端删掉这个键），两个理由：
+ *
+ *   1. 服务端只动传进来的键，没传的字段与键序一字不动 —— 只发改了的那几个，写盘最小；
+ *   2. 它**只在 patch 里带 license 时**才检查「有 assets/ 不许清空 license」。要是把六个字段一股脑全发过去，
+ *      一个还没填 license 的包（正是这一版要修的那种包）连作者名都改不了：license 那一项会以 `null` 一起送出去，
+ *      换回一句「不能清空它」。上面那条缺 license 的横幅本来就在催作者填 license，不该顺手把别的事一起拦住。
+ *
+ * 唯一会被服务端拒绝的是「真的把 license 清空」（有 assets/ 的包），那句中文原样显示给作者。
+ */
+async function saveMeta() {
+  const p = packOf();
+  const m = metaOf();
+  if (!p || !m) return;
+  const fields = m.metaFields ?? META_FALLBACK_FIELDS;
+  const body = {};
+  for (const field of fields) {
+    const value = (state.metaDraft[field] ?? '').trim() || null;
+    if (value !== (m.meta?.[field] ?? null)) body[field] = value;
+  }
+  if (!Object.keys(body).length) {
+    state.message = { kind: 'warn', text: t('{0} 的包元数据没有变化，文件没有被改写。', p.id) };
+    return renderAll();
+  }
+  state.busy = true; renderAll();
+  let written = null;
+  try {
+    written = await api(`/api/packs/${encodeURIComponent(p.id)}/meta`, { method: 'POST', body });
+    // 回话就是新的 meta：先抄回草稿（服务端会 trim），再整页重取（左栏的版本/作者也来自另一份形状）
+    syncMetaDraftFrom(written);
+    state.message = {
+      kind: written.changed ? 'ok' : 'warn',
+      text: written.changed
+        ? t('已保存 {0} 的包元数据。', written.pack)
+        : t('{0} 的包元数据没有变化，文件没有被改写。', written.pack),
+    };
+  } catch (e) {
+    // 失败文本直接用服务端给的中文：ASSETS_NEED_LICENSE 那句必须原样看到（这一点不能翻、也不能改写）
+    state.message = { kind: 'error', text: errText(e) };
+  } finally {
+    state.busy = false;
+  }
+  if (written) await reloadAfterWrite(p.id); else renderAll();
+}
+
+/** 缺 license 横幅上的快捷按钮：填上 CC0-1.0 并立刻保存 —— 作者来这一页往往要做的正是这件事。 */
+function fillLicense(value) {
+  state.metaDraft.license = value;
+  renderDetail();
+  return saveMeta();
+}
+
+/** 整表替换 `overrides` 并立刻写盘：加一条与删一条都是「把新表发过来」（服务端去重并排序）。 */
+async function writeOverrides(list, okText) {
+  const p = packOf();
+  if (!p) return;
+  state.busy = true; renderAll();
+  let written = null;
+  try {
+    written = await api(`/api/packs/${encodeURIComponent(p.id)}/overrides`, { method: 'POST', body: { overrides: list } });
+    state.message = {
+      kind: written.changed ? 'ok' : 'warn',
+      text: written.changed ? okText : t('overrides 没有变化，文件没有被改写。'),
+    };
+  } catch (e) {
+    state.message = { kind: 'error', text: errText(e) };
+  } finally {
+    state.busy = false;
+  }
+  if (written) await reloadAfterWrite(p.id); else renderAll();
+}
+
+/** 加一条覆盖声明：文件下拉 + 手输的 id（候选只是提示，服务端只查 `<文件>:<id>` 的形状与文件那一段）。 */
+function addOverride() {
+  const m = metaOf();
+  if (!m) return;
+  const file = state.ovFile;
+  const id = (state.ovId ?? '').trim();
+  if (!file) return setMessage('error', t('先选一个数据文件。'));
+  if (!id) return setMessage('error', t('先填要覆盖的记录 id。'));
+  const entry = `${file}:${id}`;
+  const current = m.overrides.map((o) => o.entry);
+  if (current.includes(entry)) return setMessage('error', t('overrides 里已经有 {0} 了。', entry));
+  return writeOverrides([...current, entry], t('已声明覆盖 {0}。', entry));
+}
+
+/** 删一条覆盖声明：清单里**全部**条目都要能删（含官方没有这个 id、以及本包没带那条记录的）。 */
+function removeOverride(entry) {
+  const m = metaOf();
+  if (!m) return;
+  if (!confirm(t('删掉这条覆盖声明 {0}？', entry))) return;
+  return writeOverrides(m.overrides.map((o) => o.entry).filter((e) => e !== entry), t('已删掉覆盖声明 {0}。', entry));
+}
+
+/** 写完一次就整页重取：左栏的版本/作者/license 来自另一份形状（supportStateFor），只补 meta 会让它过期。 */
+async function reloadAfterWrite(packId) {
+  try { await load(packId); } catch { renderAll(); }
+}
+
 async function exportPack() {
   const p = packOf();
   if (!p) return;
@@ -477,7 +813,8 @@ async function importPack(file, force) {
     if (data.support.length) bits.push(t('助战 {0}', t('{0} 个', data.support.length)));
     state.message = { kind: 'ok', text: t('已安装 {0}：{1}。重启游戏服务器后生效。', data.pack, listJoin(bits)) };
     state.packId = data.pack;
-    await load(data.pack);
+    // 刚装进来的包：元数据草稿要换成它的（state.packId 已经等于 data.pack，靠 id 比较认不出这一次切换）
+    await load(data.pack, { resetDraft: true });
   } catch (e) {
     // 拒绝要原样显示原因（哪一条规则、哪一个字段），否则作者只能瞎猜
     state.message = { kind: 'error', text: t('导入被拒绝：{0}', errText(e)) };
@@ -530,16 +867,19 @@ async function loadPlaytest() {
 
 // ---- 载入 ---------------------------------------------------------------------------------------------------------
 
-async function load(keepId = null) {
+async function load(keepId = null, { resetDraft = false } = {}) {
   state.data = await api('/api/packs/support');
   state.packs = state.data.packs ?? [];
   await loadPlaytest();
   const wanted = keepId ?? state.packId;
+  const before = state.packId;
   if (!state.packs.some((p) => p.id === wanted)) {
     state.packId = state.packs[0]?.id ?? null;
   } else {
     state.packId = wanted;
   }
+  // 换了一个包才重置元数据草稿：overrides 的写盘会重新载入这一页，不该顺手丢掉作者正在改的 license
+  if (resetDraft || state.packId !== before) resetMetaDraft();
   state.picked = new Set(packOf()?.support ?? []);
   $('#rootPath').textContent = state.packs.length
     ? `${state.data.workshopRoot} · ${t('{0} 个包', state.packs.length)}`
@@ -548,7 +888,8 @@ async function load(keepId = null) {
 }
 
 $('#btnReload').addEventListener('click', () => {
-  load().catch((e) => setMessage('error', t('载入失败：{0}', errText(e))));
+  // 「重新载入」= 回到磁盘上的样子：元数据草稿也一起丢掉（与切包同一个取舍）
+  load(null, { resetDraft: true }).catch((e) => setMessage('error', t('载入失败：{0}', errText(e))));
 });
 
 // 界面语言：换掉 HTML 里的静态文案、插入右上角切换按钮，换语言后重画一遍（动态文案也要跟着换）。

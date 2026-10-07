@@ -40,6 +40,13 @@ const ID_FIELD_BY_FILE = Object.freeze({
 export const PACK_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
 
 /**
+ * 一条 `pack.json.overrides` 声明的形状：`"<文件>:<id>"`（例 `chess:chess_char_1_01_a`）。**只此一份**：
+ * `normalizePackManifest` 下面用它过滤，编辑器的写入端与校验器用它拒绝（两处正则不一致的话，界面会写出一个
+ * 加载器悄悄丢掉的声明 —— 那正是「写了等于没写」这一类静默失败）。
+ */
+export const OVERRIDE_ENTRY_RE = /^([a-z]+):([A-Za-z0-9_\-.:]{1,64})$/;
+
+/**
  * The URL prefix a pack's own media is served under: `<prefix><packId>/<path inside that pack's assets/>`
  * (server/index.js serves the route, docs/WORKSHOP.md §5). One source of truth, because the voice URLs this module
  * writes into the data must be exactly the ones that route answers.
@@ -193,7 +200,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // (EMPTY_PACK is checked after `voices` below: a pack whose whole contribution is a 助战 operator's voice lines has no
   // data file at all, and refusing it here would make the reserved voice pack impossible to write.)
   const overrides = Array.isArray(raw.overrides)
-    ? [...new Set(raw.overrides.filter((o) => typeof o === 'string' && /^[a-z]+:[A-Za-z0-9_\-.:]{1,64}$/.test(o)))].sort()
+    ? [...new Set(raw.overrides.filter((o) => typeof o === 'string' && OVERRIDE_ENTRY_RE.test(o)))].sort()
     : [];
   const license = typeof raw.license === 'string' && raw.license ? raw.license : null;
   // A pack that SHIPS ITS OWN ART must say under what terms (`hasAssets` = it has an assets/ folder; the loader passes

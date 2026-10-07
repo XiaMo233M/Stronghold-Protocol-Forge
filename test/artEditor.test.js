@@ -182,6 +182,8 @@ describe('外观素材：状态接口（art + 真实文件 + 骨架/图谱解析
     const art = data.packArt.find((p) => p.id === PACK);
     assert.ok(art);
     assert.deepEqual(art.skels['art/op.skel'].animations, ['Idle', 'Attack']);
+    // 怪物页的外观面板里也有 token 那一段，所以这份候选跟着一起给（与干员页同一份）
+    assert.ok(data.tokenChoices.some((t) => t.id === 'token_10000_silent_healrb'));
   });
 
   test('GET /api/packs/<包>/art/inspect：还没写进 pack.json 的文件也能问一次候选', async () => {
@@ -194,6 +196,33 @@ describe('外观素材：状态接口（art + 真实文件 + 骨架/图谱解析
     const missing = await fetch(`${editor.url}/api/packs/${PACK}/art/inspect?skel=${encodeURIComponent('art/nope.skel')}`).then((x) => x.json());
     assert.deepEqual(missing.skel.animations, []);
     assert.match(missing.skel.note, /不在包的 assets\//);
+  });
+
+  // `art.tokens` 的键（tokenId）不像干员/怪物那样能靠「本包已有记录」列出来：新包这里恒为空，而 token 基本是给
+  // 一个已有的召唤物换模型。候选表因此是跨来源的 —— 官方 tokens.json ∪ 官方与各包 chess.json 的 tokens 数组 ∪
+  // 各包 tokens.json。这条测试把四个来源各钉一个，并确认排序与去重（下拉的读法）。
+  test('GET /api/state 带上 tokenChoices：官方 tokens.json ∪ chess 的 tokens ∪ 各包的 tokens.json', async () => {
+    // 一个只作候选来源的包：tokens.json 声明一个、chess.json 只「引用」一个（后者证明 chess 那条路也真的收了）
+    const srcPack = join(wsRoot, 'token-src-pack');
+    fs.mkdirSync(srcPack, { recursive: true });
+    fs.writeFileSync(join(srcPack, 'pack.json'), `${JSON.stringify({ id: 'token-src-pack', name: '候选来源', version: '1.0.0' }, null, 2)}\n`);
+    fs.writeFileSync(join(srcPack, 'tokens.json'), `${JSON.stringify({ token_ws_pack: { tokenId: 'token_ws_pack', name: '包里的召唤物' } }, null, 2)}\n`);
+    fs.writeFileSync(join(srcPack, 'chess.json'), `${JSON.stringify({ char_ws_caller: { chessId: 'char_ws_caller', tokens: ['token_ws_chess'] } }, null, 2)}\n`);
+    try {
+      const state = await fetch(`${editor.url}/api/state`).then((r) => r.json());
+      assert.ok(Array.isArray(state.tokenChoices) && state.tokenChoices.length, '/api/state 必须带上 tokenChoices');
+      // 官方 tokens.json 的键：带名字、from 为空（不是任何包声明的）
+      assert.deepEqual(state.tokenChoices.find((t) => t.id === 'token_10000_silent_healrb'), { id: 'token_10000_silent_healrb', name: '医疗探机', from: '' });
+      // 包自己的 tokens.json：名字与 from 都跟着来
+      assert.deepEqual(state.tokenChoices.find((t) => t.id === 'token_ws_pack'), { id: 'token_ws_pack', name: '包里的召唤物', from: 'token-src-pack' });
+      // 只在 chess 记录的 tokens 数组里出现过的 id：也必须收（name 为空，因为没有任何表给它名字）
+      assert.deepEqual(state.tokenChoices.find((t) => t.id === 'token_ws_chess'), { id: 'token_ws_chess', name: '', from: 'token-src-pack' });
+      const ids = state.tokenChoices.map((t) => t.id);
+      assert.deepEqual(ids, [...ids].sort(), '按 id 排序（下拉读起来才稳定）');
+      assert.equal(new Set(ids).size, ids.length, '同一个 id 不能被收两次');
+    } finally {
+      fs.rmSync(srcPack, { recursive: true, force: true });
+    }
   });
 
   test('解析按 mtime 缓存：文件没改不重读，改了立刻重解析', async () => {
@@ -214,6 +243,7 @@ describe('外观素材：状态接口（art + 真实文件 + 骨架/图谱解析
     assert.deepEqual(r.skel.animations, []);
     assert.match(r.skel.note, /解析上限/);
     assert.ok(r.skel.bytes > (8 << 20));
+    assert.equal(r.skel.kind, 'toolarge', '调用方要能区分「我们没解析」与「解析了但坏了」（见保存那一组）');
   });
 });
 
@@ -433,6 +463,33 @@ describe('外观素材：保存前必须挡住的东西', () => {
   test('上一组用例写进去的那条声明还在（拒绝不留半成品，成功不留垃圾）', async () => {
     assert.deepEqual(Object.keys(manifest().art).sort(), ['chars']);
     assert.ok(manifest().art.chars.char_ws_x);
+  });
+
+  // 「解析不出来」此前只给一条警告就放行，而命令行校验器对同一件事报 ART_SPINE_VERSION / error ——
+  // 编辑器比它松的话，作者会得到一个「编辑器让你存了、命令行说你错了」的包，而客户端两边都只是**静默**不画。
+  test('骨架字节不是 3.8 骨架时是硬错误；只有「超过我们自己的解析上限」才留警告', async () => {
+    put('art/broken.skel', Buffer.from('this is not a skeleton, not even close'));
+    put('art/broken.atlas', atlasText('broken.png'));
+    put('art/broken.png', PNG_1PX);
+    const bad = await save('chars', 'char_ws_broken', {
+      spine: { front: { skel: 'art/broken.skel', atlas: 'art/broken.atlas', textures: ['art/broken.png'] } },
+    });
+    assert.equal(bad.status, 400);
+    assert.match((await bad.json()).error, /骨架解析失败/);
+    assert.ok(!manifest().art.chars.char_ws_broken, '拒绝不留半成品');
+
+    // 对照：同一个形状，只是文件大过解析上限 —— 骨架可能是好的（我们只是没读），所以照旧能存
+    put('art/huge.skel', Buffer.alloc((9 << 20), 0));
+    put('art/huge.atlas', atlasText('huge.png'));
+    put('art/huge.png', PNG_1PX);
+    const ok = await save('chars', 'char_ws_huge', {
+      spine: { front: { skel: 'art/huge.skel', atlas: 'art/huge.atlas', textures: ['art/huge.png'] } },
+    });
+    assert.equal(ok.status, 200);
+    const body = await ok.json();
+    assert.equal(body.ok, true);
+    assert.match(body.warnings.join('\n'), /解析上限/);
+    assert.equal(manifest().art.chars.char_ws_huge.spine.front.skel, 'art/huge.skel');
   });
 });
 

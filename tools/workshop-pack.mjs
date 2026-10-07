@@ -21,7 +21,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import { normalizePackManifest, normalizeContentFile, workshopSupportEntries, WORKSHOP_CONTENT_FILES } from '../shared/workshop.js';
+import { normalizePackManifest, normalizeContentFile, workshopSupportEntries, WORKSHOP_CONTENT_FILES, OVERRIDE_ENTRY_RE } from '../shared/workshop.js';
 import { loadWorkshop, WORKSHOP_DIR } from '../server/workshop.js';
 import { normalizeSupportConfig } from '../shared/support.js';
 import { zipWrite, zipRead, ZIP_LIMITS } from '../shared/zip.js';
@@ -392,6 +392,165 @@ export async function writePackSupport(root, packId, ids) {
   if (changed) await fsp.writeFile(path.join(dir, 'pack.json'), `${JSON.stringify(next, null, 2)}\n`);
   const state = readPackSupport(root, packId, { supportFile: null });
   return { pack: packId, support: state.support, changed, derived: state.derived, errors: state.errors };
+}
+
+// ---- 元数据 (pack.json 的标量字段 + overrides) --------------------------------------------------------------------
+//
+// 这一块补的是**唯一一处仍然要求作者手改 pack.json 的地方**。`license` 最要命：一个有 `assets/` 的包（语音、图标、
+// 外观素材都要它）不声明 license 就会被加载器整包拒绝（ASSETS_NEED_LICENSE），而编辑器的三个素材端点都会拒绝写入
+// —— 页面上却只能告诉作者「去 pack.json 里声明一个」。`overrides` 同理：它是覆盖官方记录的唯一开关（除盟约那页
+// 会自动写 `bonds:`），作者想覆盖一个官方干员/装备/怪物时只能手写。业主的硬约束是**任何写进 pack.json 的东西都要
+// 能在界面上增删改**，这一块就是那条约束的出口。
+
+/** 界面上可以编辑的元数据字段。`id` **不在**里面：它必须等于目录名，改它等于换一个包。 */
+export const PACK_META_FIELDS = Object.freeze(['name', 'version', 'author', 'license', 'description', 'gameVersion']);
+
+/** license 的常见取值（输入框的候选）：加载器只要求非空字符串，所以作者也可以填任何别的东西。 */
+export const LICENSE_CHOICES = Object.freeze(['CC0-1.0', 'CC-BY-4.0', 'CC-BY-SA-4.0', 'MIT', 'see assets/LICENSE.txt']);
+
+/** 一个元数据字段的长度上限。没有这条规则，一个 10 万字的 name 能让整页包列表没法看。 */
+const META_MAX_LEN = 200;
+
+const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * 一个包的元数据与 `overrides` 状态。**「在用」与「官方有没有这条」的判断只有这一份**：写入端写完就调它，
+ * 所以回给页面的结论与页面上看到的永远是同一套。
+ *
+ * `inUse` = 本包真的带了一条同 id 的记录（`overrides` 声明**只在**包带了那条记录时才有作用：加载器是在
+ * 「官方已有这个 id、包又带了一条同 id 记录」这一步才去查 `overrides`）。`official` = 官方数据里有这个 id。
+ * 两者都不是「错误」：没人用的声明只是永远不生效，界面把它标出来并提供删除，从不阻止写入 —— 业主的规则是
+ * **任何写进 pack.json 的条目都要能删掉**，而不是「只让你删在用的那条」。
+ *
+ * @param {string} root 工坊根
+ * @param {string} packId
+ * @param {{ isOfficial?: ((file: string, id: string) => boolean)|null }} [opts] `isOfficial` 由调用方给（编辑器有
+ *   官方数据表；CLI 不判断官方那一半，`official` 就是 null）
+ */
+export function readPackMeta(root, packId, { isOfficial = null } = {}) {
+  const dir = findPackDir(root, packId);
+  const pack = readPackDir(dir, packId);
+  const manifest = isPlainObject(pack.manifest) ? pack.manifest : {};
+  /** @type {Record<string, string|null>} */
+  const meta = {};
+  for (const field of PACK_META_FIELDS) {
+    meta[field] = typeof manifest[field] === 'string' && manifest[field] ? manifest[field] : null;
+  }
+  const declared = Array.isArray(manifest.overrides) ? manifest.overrides : [];
+  const overrides = [];
+  for (const raw of declared) {
+    if (typeof raw !== 'string') continue;
+    const m = OVERRIDE_ENTRY_RE.exec(raw);
+    // 形状不合法的声明加载器直接丢掉（normalizePackManifest 的过滤）。这里也不把它当成一条能删的声明 ——
+    // 删不掉的那条正是「只能手改」的老问题，所以写入端宁可拒绝写进去，也不留下它。
+    if (!m) continue;
+    const [, file, id] = m;
+    overrides.push({
+      entry: raw,
+      file,
+      id,
+      isContentFile: WORKSHOP_CONTENT_FILES.includes(file),
+      inUse: Object.hasOwn(pack.files[file] ?? {}, id),
+      official: isOfficial ? !!isOfficial(file, id) : null,
+    });
+  }
+  return {
+    pack: packId,
+    meta,
+    hasAssets: pack.hasAssets,
+    overrides,
+    // 加载器会不会接受这个包（页面的横幅用；`issue` 是它拒绝时的码与原因）
+    ok: pack.checked ? pack.checked.ok === true : false,
+    issue: pack.checked && !pack.checked.ok ? { code: pack.checked.error, detail: pack.checked.detail } : null,
+  };
+}
+
+/**
+ * 写一个包的元数据（`PACK_META_FIELDS` 那几个）—— **只动传进来的键**。与 `writePackSupport` 同一条规则：其余字段、
+ * 键序与两空格缩进原样保留，新键追加在末尾；`null` 或空串 = **删掉这个键**（加载器对这几个字段各有默认值，
+ * 所以删掉是合法的，不是「清空成一个空字符串」）。
+ *
+ * 唯一被提前拒绝的是**清空一个有 `assets/` 的包的 license**：那会让加载器整包拒绝，而作者多半只是想把输入框清空
+ * 再重填。与其写下一个坏包，不如当场说清为什么不行。（默认值缺失不是问题：`name`/`version` 删掉会退回 id 与
+ * `0.0.0`，`author`/`license`/`description`/`gameVersion` 删掉就是「没声明」。）
+ *
+ * @returns {Promise<ReturnType<typeof readPackMeta> & { changed: boolean, applied: Record<string, string|null> }>}
+ */
+export async function writePackMeta(root, packId, patch, { isOfficial = null } = {}) {
+  if (!isPlainObject(patch)) throw refuse('元数据必须是一个对象：{ name?, version?, author?, license?, description?, gameVersion? }');
+  const keys = Object.keys(patch);
+  if (!keys.length) throw refuse('没有要改的元数据字段');
+  const unknown = keys.filter((k) => !PACK_META_FIELDS.includes(k));
+  if (unknown.length) {
+    throw refuse(`PACK_META_UNKNOWN_FIELD：${unknown.join('、')} 不是可编辑的元数据字段（可改的是 ${PACK_META_FIELDS.join('、')}）`);
+  }
+  const dir = findPackDir(root, packId);
+  const pack = readPackDir(dir, packId);
+  const manifest = pack.manifest;
+  if (!isPlainObject(manifest)) throw refuse(`工坊包 "${packId}" 的 pack.json 不可读`);
+
+  const next = { ...manifest };
+  /** @type {Record<string, string|null>} */
+  const applied = {};
+  for (const key of keys) {
+    const raw = patch[key];
+    if (raw === null || raw === undefined || (typeof raw === 'string' && !raw.trim())) {
+      delete next[key];
+      applied[key] = null;
+      continue;
+    }
+    if (typeof raw !== 'string') throw refuse(`META_BAD_VALUE：${key} 必须是字符串（或留空以删掉这个字段）`);
+    const value = raw.trim();
+    if (value.length > META_MAX_LEN) throw refuse(`META_BAD_VALUE：${key} 太长了（上限 ${META_MAX_LEN} 字符）`);
+    next[key] = value;
+    applied[key] = value;
+  }
+  // 只有「这一次改动把一个有 assets/ 的包的 license 清空」才拒绝：那是加载器的硬规则（ASSETS_NEED_LICENSE），
+  // 而作者多半只是想把输入框清空再重填。**别的字段照写** —— 一个还没填 license 的包不该连名字都改不了。
+  if (Object.hasOwn(patch, 'license') && !next.license && pack.hasAssets) {
+    throw refuse('ASSETS_NEED_LICENSE：这个包有 assets/（语音/图标/外观素材），必须声明一个 license —— 不能清空它');
+  }
+  const changed = keys.some((k) => (typeof manifest[k] === 'string' && manifest[k] ? manifest[k] : null) !== (applied[k] ?? null));
+  if (changed) await fsp.writeFile(path.join(dir, 'pack.json'), `${JSON.stringify(next, null, 2)}\n`);
+  return { ...readPackMeta(root, packId, { isOfficial }), changed, applied };
+}
+
+/**
+ * 写一个包的 `pack.json.overrides`（**整表替换**）—— 只动这一个字段，其余字段、键序与缩进原样保留。
+ *
+ * 允许任何形状合法的 `<文件>:<id>`，包括官方根本没有的 id、以及本包没有那条记录的 id：它们只是**不生效**，
+ * 不是错误，而界面必须能删掉它们（否则作者又被自己写坏的一行锁在门外 —— 与图标清单同一条规矩）。
+ * 真正会被拒绝的只有形状：正则与加载器同一份（`OVERRIDE_ENTRY_RE`），文件那一段必须是包能声明的数据文件。
+ *
+ * @param {unknown} list `"<文件>:<id>"` 的数组
+ */
+export async function writePackOverrides(root, packId, list, { isOfficial = null } = {}) {
+  if (!Array.isArray(list)) throw refuse('overrides 必须是数组，每一项形如 "chess:chess_char_1_01_a"');
+  /** @type {string[]} */
+  const clean = [];
+  for (const raw of list) {
+    if (typeof raw !== 'string') throw refuse(`OVERRIDE_BAD_SHAPE：${JSON.stringify(raw)} 不是字符串`);
+    const entry = raw.trim();
+    const m = OVERRIDE_ENTRY_RE.exec(entry);
+    if (!m) throw refuse(`OVERRIDE_BAD_SHAPE："${entry}" 不是 "<文件>:<id>" 的形状（例：chess:chess_char_1_01_a）`);
+    if (!WORKSHOP_CONTENT_FILES.includes(m[1])) {
+      throw refuse(`OVERRIDE_BAD_FILE："${m[1]}" 不是包能声明的数据文件（可用的是 ${WORKSHOP_CONTENT_FILES.join('、')}）`);
+    }
+    if (!clean.includes(entry)) clean.push(entry);
+  }
+  clean.sort();
+  const dir = findPackDir(root, packId);
+  const pack = readPackDir(dir, packId);
+  const manifest = pack.manifest;
+  if (!isPlainObject(manifest)) throw refuse(`工坊包 "${packId}" 的 pack.json 不可读`);
+  const previous = Array.isArray(manifest.overrides) ? manifest.overrides : [];
+  const next = { ...manifest };
+  if (clean.length) next.overrides = clean; else delete next.overrides;
+  // 与 writePackSupport 同一条：内容没变就不写盘（写一次会按 2 空格重新排版，作者可能有自己的排版）
+  const sameKey = Object.hasOwn(manifest, 'overrides');
+  const changed = clean.length !== previous.length || !clean.every((e, i) => previous[i] === e) || (clean.length > 0) !== sameKey;
+  if (changed) await fsp.writeFile(path.join(dir, 'pack.json'), `${JSON.stringify(next, null, 2)}\n`);
+  return { ...readPackMeta(root, packId, { isOfficial }), changed };
 }
 
 // ---- 列出 ---------------------------------------------------------------------------------------------------------

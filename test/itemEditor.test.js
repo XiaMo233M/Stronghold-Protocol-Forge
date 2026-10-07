@@ -350,3 +350,84 @@ describe('装备页：本包已声明的图标清单（含陈旧条目，逐条�
     assert.match(fn.slice(0, 1200), /path: ''/, '空 path 才是「删掉这条声明」');
   });
 });
+
+// 一个包**删光装备之后**只剩旧声明的边界：`items.json` 里一条记录都没有时页面 `state.packId` 以前是 null，整块清单
+// 根本不渲染 —— 那条 `itemIcons` 声明又回到「只能手改 pack.json」。这组用例钉住两件事：清单赖以工作的那份状态在
+// 没有装备时照样拿得到（`packItemIcons` 对每个有 pack.json 的包都给一条，`packs` 让页面能默认选中一个包），
+// 以及它唯一的动作（空 path 的删除）在没有装备的情况下也被服务端放行。
+describe('装备页：本包一件装备都没有时，声明清单照样常在（包只留下旧 itemIcons）', () => {
+  const PACK = 'empty-item-pack';
+  const ITEM = 'orphan_item';
+  const TRAP = 'trap_ws_orphan';
+  // 复用上一组用例放进 item-pack/assets 的那张图（内容无所谓，路径与声明才是这里要证的东西）
+  const ICON_PATH = 'item/trap_ws_icon_item.png';
+  const packJson = (id = PACK) => JSON.parse(fs.readFileSync(join(wsRoot, id, 'pack.json'), 'utf8'));
+  const itemsJson = (id = PACK) => JSON.parse(fs.readFileSync(join(wsRoot, id, 'items.json'), 'utf8'));
+  const itemsApi = () => fetch(`${editor.url}/api/items`).then((x) => x.json());
+  const packState = (r, id = PACK) => r.packItemIcons.find((p) => p.id === id);
+
+  before(async () => {
+    const saved = await post(`${editor.url}/api/packs/${PACK}/items`, { spec: { ...itemSpec(), id: ITEM, trapId: TRAP } }).then((x) => x.json());
+    assert.equal(saved.ok, true, JSON.stringify(saved));
+    // 一个声明为 ASSETS_NEED_LICENSE 的包必须先有 license 才放得进素材（照上一组的做法）
+    fs.mkdirSync(join(wsRoot, PACK, 'assets', 'item'), { recursive: true });
+    fs.writeFileSync(join(wsRoot, PACK, 'pack.json'), `${JSON.stringify({ ...packJson(), license: 'CC0-1.0' }, null, 2)}\n`);
+    fs.copyFileSync(join(wsRoot, 'item-pack', 'assets', ICON_PATH), join(wsRoot, PACK, 'assets', ICON_PATH));
+    const declared = await post(`${editor.url}/api/packs/${PACK}/item-icons`, { itemId: TRAP, path: ICON_PATH }).then((x) => x.json());
+    assert.equal(declared.ok, true, JSON.stringify(declared));
+    assert.equal(packJson().itemIcons[TRAP], ICON_PATH, '先有一条真的声明，才谈得上「装备删光之后它还在」');
+    // 作者删掉最后一件装备（页面上的「删除」走的就是这条 DELETE，普通与精英两条记录一起走）
+    const del = await fetch(`${editor.url}/api/packs/${PACK}/items/chess_item_ws_${ITEM}_a`, { method: 'DELETE' }).then((x) => x.json());
+    assert.equal(del.ok, true, JSON.stringify(del));
+  });
+
+  test('装备删光之后：本包一条记录都没有，旧的 itemIcons 声明原样留在 pack.json 里', async () => {
+    assert.deepEqual(itemsJson(), {}, 'items.json 里一条记录都不剩');
+    const r = await itemsApi();
+    assert.equal(r.items.some((i) => i.pack === PACK), false, '这一页拿到的 items 里没有本包的任何记录');
+    // 这正是「只能手改清单」的那条边界：没有记录，声明却还在
+    assert.equal(packState(r).itemIcons[TRAP], ICON_PATH, '声明必须原样给页面（清单列的就是这一份）');
+    // 页面上「本包已声明的装备图标」这一块的包来源是 state.packId；以前它是 items[0]?.pack ?? null，
+    // 于是这种包里 state.packId === null、清单整块不画。因此默认选中必须退到 packs（有 pack.json 的包）。
+    assert.match(
+      fs.readFileSync(join(ROOT, 'editor/ui/item.js'), 'utf8'),
+      /state\.packId = state\.data\.items\[0\]\?\.pack \?\? state\.data\.packs/,
+      '没有装备时也要有一个当前包，否则那块清单列不出来',
+    );
+    const packIds = r.packs.map((p) => p.id);
+    assert.ok(packIds.includes(PACK), '这个包在「保存到」的包清单里，页面因此有包可默认选中');
+    assert.equal('' in packState(r).itemIcons, false, '清单读的是真的那条声明');
+  });
+
+  test('这一页仍然能删掉它：清空不受「只收本包在用的 id」限制，pack.json 里那条真的没了', async () => {
+    // 先确认拦的是**配图**：本包一件装备都没有，没有任何记录用这个 id → 配图 400（那正是「陈旧」的含义）
+    assert.equal((await post(`${editor.url}/api/packs/${PACK}/item-icons`, { itemId: TRAP, path: ICON_PATH })).status, 400);
+    // 而清空是例外，也正是清单那个删除按钮发出的请求
+    const r = await post(`${editor.url}/api/packs/${PACK}/item-icons`, { itemId: TRAP, path: '' }).then((x) => x.json());
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(r.path, null);
+    assert.equal(TRAP in (packJson().itemIcons ?? {}), false, 'pack.json 里那条声明真的没了（不用手改清单）');
+    assert.equal((await itemsApi()).items.some((i) => i.pack === PACK), false, '删声明不会凭空造出装备记录');
+  });
+
+  test('没有装备时画的那块清单与有装备时是同一块（同一个函数、同一套「有人在用」判断）', () => {
+    const src = fs.readFileSync(join(ROOT, 'editor/ui/item.js'), 'utf8');
+    const form = src.slice(src.indexOf('function renderForm'), src.indexOf('// ---- 本包已声明的装备图标'));
+    // 无 spec 分支：先选中包，再画清单 —— 不能只画一句「左边选一件装备」就返回
+    assert.match(form, /if \(!spec\) \{[\s\S]*?box\.append\(declaredIconsBox\(currentPackIcons\(\), iconIdsInUse\(\)\)\);\s*\n\s*return;/,
+      '没有 spec 时也要画那块清单');
+    // 有 spec 时走的是同一个 declaredIconsBox（行为不能变）
+    assert.equal((form.match(/declaredIconsBox\(/g) ?? []).length, 2, '有/无 spec 两条路径都用这一块，不再各画一份');
+    // 「有人在用」只有一份实现：本包 items.json 记录的 iconId / trapId
+    const helper = src.slice(src.indexOf('function iconIdsInUse'), src.indexOf('function currentPackIcons'));
+    assert.match(helper, /\[it\.iconId, it\.trapId\]/, '判定「有人在用」要看记录的 iconId 与 trapId');
+    assert.equal((src.match(/\[it\.iconId, it\.trapId\]/g) ?? []).length, 1, '这段判断不许抄第二份');
+  });
+
+  test('没有装备时这一页不碰别的包：右栏与本包清单都还是原样', async () => {
+    const r = await itemsApi();
+    const other = packState(r, 'item-pack');
+    assert.ok(other, 'item-pack 的状态还在');
+    assert.equal(r.items.some((i) => i.pack === 'item-pack'), true, '别的包的记录不受影响');
+  });
+});

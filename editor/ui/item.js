@@ -121,12 +121,59 @@ function kvEditor(get, set, { asString = false } = {}) {
   return wrap;
 }
 
+/**
+ * 「本包有没有记录在用某个图标 id」：客户端是拿**道具记录的 iconId / trapId** 去查 assets.items 的
+ * （public/js/assets.js itemIconUrl），所以本包 items.json 里任何一条记录的 iconId / trapId 等于它就算有人用。
+ * `/api/items` 现在给的是 trapId（shared/itemAuthoring.js 的 deriveItem 把 iconId 写成 trapId），iconId 一并读上
+ * 是为了手写记录。**只有这一份实现**：清单里那几条判断与有 spec 时那段配图用的是同一个函数。
+ */
+function iconIdsInUse() {
+  const used = new Set();
+  for (const it of state.data?.items ?? []) {
+    if (it.pack !== state.packId) continue;
+    for (const id of [it.iconId, it.trapId]) if (typeof id === 'string' && id) used.add(id);
+  }
+  return used;
+}
+
+/** 本包在 `/api/items` 里那份 `itemIcons` 状态（`pack.json` 里**原样**读出的全部声明）。没有当前包时是 undefined。 */
+function currentPackIcons() {
+  return (state.data?.packItemIcons ?? []).find((p) => p.id === state.packId);
+}
+
+/** 给一个控件套一层容器：没有选中装备时表单里放的是下拉/清单这些块，不是 field() 生成的 label+input。 */
+function boxOf(el) {
+  const d = document.createElement('div');
+  d.append(el);
+  return d;
+}
+
 function renderForm() {
   const box = $('#form');
   box.replaceChildren();
   const spec = state.spec;
   if (!spec) {
+    // 没有打开装备时这一页也要能删「本包已声明的装备图标」（见下面 declaredIconsBox）：一个包删掉最后一件装备之后
+    // items.json 是空的，此前整块清单根本不渲染 —— 那条陈旧声明又回到「只能手改 pack.json」。所以清单在这里也画，
+    // 包的来源与右栏同一个：`state.packId`（load() 已经默认选中第一个包，右栏那个下拉换包也会改它）。
     box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('左边选一件装备，或点「新建装备」。') }));
+    // 一个包都没有时右栏那个下拉也选不出东西来，所以这里先给一个选择；选过之后它就不再出现（包的来源只有 state.packId 一个）
+    if (!state.packId) {
+      box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('还没有工坊包：先在下面选一个包（或点「＋ 新建一个包…」）。') }));
+      box.append(boxOf(packSelect({
+        packs: state.data?.packs ?? [],
+        current: state.packId,
+        newLabel: t('＋ 新建一个包…'),
+        newDefault: 'my-item-pack',
+        onPick: (id) => { state.packId = id; renderForm(); renderSide(); },
+      })));
+    } else {
+      box.append(Object.assign(document.createElement('p'), {
+        className: 'hint',
+        textContent: t('下面列的是 {0} 这个包在 pack.json 里声明的装备图标：想看别的包，用右边「保存到」那里的包下拉换。', state.packId),
+      }));
+    }
+    box.append(declaredIconsBox(currentPackIcons(), iconIdsInUse()));
     return;
   }
   const v = state.data.vocab;
@@ -185,15 +232,8 @@ function renderForm() {
   // `item.trapId`，然后查 `m.items[id]`），而一个包没法给 assets.json 加条目 —— 于是包新增的装备在界面上没有图标。
   // 这里把包自带的图接上：装载时叠加层把它写进 `assets.items`，URL 走 /workshop-assets 那条唯一路由 —— 客户端
   // 因此零改动（它读的还是同一份合并后的 assets.json）。图片要自己先放进包里的 assets/，编辑器不上传素材。
-  const packIcons = (state.data?.packItemIcons ?? []).find((p) => p.id === state.packId);
-  // 一个图标 id 现在还有没有用到：客户端是拿**道具记录的 iconId / trapId** 去查 assets.items 的，所以本包
-  // items.json 里任何一条记录的 iconId / trapId 等于它就算有人用。`/api/items` 现在给的是 trapId
-  // （shared/itemAuthoring.js 的 deriveItem 把 iconId 写成 trapId），iconId 一并读上是为了手写记录。
-  const usedIconIds = new Set();
-  for (const it of state.data?.items ?? []) {
-    if (it.pack !== state.packId) continue;
-    for (const id of [it.iconId, it.trapId]) if (typeof id === 'string' && id) usedIconIds.add(id);
-  }
+  const packIcons = currentPackIcons();
+  const usedIcons = iconIdsInUse();
   const iconKey = String(spec.trapId ?? '').trim();
   const iconFiles = packIcons?.iconFiles ?? [];
   const currentIcon = (packIcons?.itemIcons ?? {})[iconKey] ?? '';
@@ -227,7 +267,7 @@ function renderForm() {
   box.append(iconBox);
 
   // 全部声明（含陈旧条目）：上面那一段只认当前 trapId，改掉 trapId 之后旧声明在页面上就再也看不到 —— 这一块是它的出口
-  box.append(declaredIconsBox(packIcons, usedIconIds));
+  box.append(declaredIconsBox(packIcons, usedIcons));
 
   box.append(h(t('效果 buffs（引擎真正读的是它们摊平出来的 params）')));
   const buffBox = document.createElement('div'); buffBox.className = 'panel';
@@ -299,8 +339,10 @@ function renderForm() {
  *
  * 为什么需要它：上面那段「本包自带的图标（可选）」的键取自当前 `spec.trapId`，所以作者改掉某件装备的 `trapId`
  * 之后，`itemIcons[旧 id]` 那条声明在页面上再也看不到、也删不掉 —— 只能手改清单。这一块是那条声明的唯一出口。
- * 「有人在用」按 `usedIconIds` 判断（本包 items.json 里记录的 iconId / trapId），没人用**不是错误**：它不违反
- * 任何规则，只是这张图永远不会显示出来。
+ * 因此它**没有装备打开时也要画**（`renderForm` 的无 spec 分支）：一个包删掉最后一件装备之后 `items.json` 是空的，
+ * `state.packId` 若还为 null 就整块不渲染，那条陈旧的 `itemIcons` 声明同样只能手改。
+ * 「有人在用」按 `iconIdsInUse()` 判断（本包 items.json 里记录的 iconId / trapId，**只有那一份实现**），没人用
+ * **不是错误**：它不违反任何规则，只是这张图永远不会显示出来。
  */
 function declaredIconsBox(packIcons, usedIconIds) {
   const box = document.createElement('div'); box.className = 'panel';
@@ -551,7 +593,9 @@ async function load() {
   state.data = await api('/api/items');
   const n = new Set((state.data.items ?? []).map((i) => pairIds(i.id)?.slug ?? i.id)).size;
   $('#rootPath').textContent = n ? t('{0} 件工坊装备（{1} 条记录）', n, state.data.items.length) : t('还没有工坊装备');
-  if (!state.packId) state.packId = state.data.items[0]?.pack ?? null;
+  // 一个包都没有装备时也要先选中一个包：上面那块「本包已声明的装备图标」清单是按包列的，没有当前包它就什么都列不出来
+  // （而那个包留下了声明却删光了装备，正是它必须能被删掉的情形）。与右栏那个包下拉是同一个值。
+  if (!state.packId) state.packId = state.data.items[0]?.pack ?? state.data.packs?.[0]?.id ?? null;
   renderList();
   if (!state.spec) renderForm();
   renderSide();

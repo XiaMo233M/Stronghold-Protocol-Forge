@@ -222,7 +222,9 @@ node tools/workshop-validate.mjs workshop                                       
     （`@pixi-spine/runtime-3.8`）读出来的**骨架真实动画名**；动画名写错同样静默（模型能出来但不动）；
   - `textures` / `pma` 按图谱内容在保存前补上；保存是**整条条目**一次提交（`POST /api/packs/:pack/art`），保存前服务端
     挡住：路径穿越、文件不存在、类型不可服务、**atlas 与 skel 不同名**、**图谱里某一页 png 缺失**、**skel 版本不是 3.8.x**、
-    **动画名不在骨架里**、有 `assets/` 却没声明 license；
+    **骨架/图谱解析不出来**（客户端同样解析不出来，而它**一条日志都不打** —— 命令行校验器对同一件事报
+    `ART_SPINE_VERSION`/error，编辑器不比它松）、**动画名不在骨架里**、有 `assets/` 却没声明 license；
+    唯一只给**警告**的是「超过编辑器自己的 8 MB 解析上限」：那只是我们没去读，骨架本身可能是好的，动画名可以手填。
   - 下面还有一块「**本包已声明的**外观」清单：列 `pack.json.art` 里**全部**声明（含陈旧条目），逐条可删 —— 与图标那两块
     同一条规矩：**任何写进 `pack.json` 的东西都要能在界面上删掉**。
 - **派生量只读显示**：`attrPower` 与 `be` 由服务端按数值实时算出。**`be` 决定阵营换怪时替换多少只**，所以它必须算，不能手填
@@ -253,7 +255,10 @@ node tools/workshop-validate.mjs workshop     # enemies 层：重算 be/attrPowe
   先 `iconId` 再 `trapId`），所以**客户端零改动**。这一段只在 `spec.trapId` 非空时才有意义 —— 键就是它。
   要删掉声明就把下拉选回「（不用本包图标）」。**0.8.0 起这一段下面还有一块「本包已声明的装备图标」清单**：把 `pack.json`
   里**全部**声明列出来（包括当前这件装备用不到的、陈旧的条目），标出「有人在用 / 陈旧没人用」，每条都能直接删 ——
-  因为业主的硬约束是**不许要求作者手改 `pack.json`**。
+  因为业主的硬约束是**不许要求作者手改 `pack.json`**。**0.8.1 起这块清单在没有打开任何装备时也照样在**（左边
+  「新建一件装备」下面）：清单属于**包**而不是属于某一件装备，所以「刚把最后一件装备删掉、只剩一条陈旧图标声明」
+  这种最需要清理的时刻，反而是它以前整块消失的时刻。清单里的包跟右栏「保存到」那个下拉同一个来源；一个包都还没有时，
+  这一段会就地给一个包选择器（与包管理页同一套交互）。
 - **派生量只读显示**：`params`、`mergeable`、`shopExcluded`、`upgradeChessId`
 
 三条推导不是猜的，每一条都**精确复现全部 115 条官方装备**（`test/itemAuthoring.test.js`）：
@@ -381,10 +386,11 @@ node tools/workshop-validate.mjs workshop     # kits 层：静态检查 + 真实
 node tools/workshop-validate.mjs workshop     # 语音层：文件是否存在、扩展名是否可服务、槽位与干员 id 是否合法
 ```
 
-## 包管理（导出 / 导入 / 助战声明）
+## 包管理（元数据 / overrides / 导出 / 导入 / 助战声明）
 
-第八个页面：**`/pack.html`**。它补上两件一直缺失的事：一个包**没法交给别人**（只能手抄目录），
-而 `pack.json.support`（助战声明，见 `docs/WORKSHOP.md` §2.1）**没有图形入口**。
+第八个页面：**`/pack.html`**。它补上几件一直缺失的事：一个包**没法交给别人**（只能手抄目录）、
+`pack.json.support`（助战声明，见 `docs/WORKSHOP.md` §2.1）**没有图形入口**，以及
+**元数据与 `overrides` 此前只能手改 `pack.json`**。
 
 **归档规则只有一份实现**：这一页与 `node tools/workshop-pack.mjs …` 调用的是
 `tools/workshop-pack.mjs` 里的同一批函数（zip 的字节由 `shared/zip.js` 负责），所以图形界面与命令行
@@ -393,8 +399,43 @@ node tools/workshop-validate.mjs workshop     # 语音层：文件是否存在�
 - **左栏**：每个工坊包一条 —— 名称、包 id、版本、license、内容文件、语音条数、助战个数，以及**加载器的结论**
   （`loadWorkshop` 接受的显示「加载器接受」，否则显示它拒绝的码，例如 `EMPTY_PACK`、`ASSETS_NEED_LICENSE`）。
 - **中栏**：这个包的详情（id / 版本 / 作者 / license / 内容 / 语音 / 是否有 `assets/`）+ 校验结论 +
-  **助战声明编辑器** + 「卡池在哪里」的说明。
+  **包元数据表单** + **overrides 清单** + **助战声明编辑器** + 「卡池在哪里」的说明。
 - **右栏**：**导出**（下载 `<包id>.zip`）与**导入**（选一个 `.zip`，可选覆盖同名包），各自都写明命令行等价路径。
+
+### 包元数据（`name` / `version` / `author` / `license` / `description` / `gameVersion`）
+
+**0.8.1 起这一块有图形入口**（`POST /api/packs/:pack/meta`，实现在 `tools/workshop-pack.mjs` 的
+`writePackMeta`）。此前它只有一个创建时的默认值，之后**只能手改**；而 `license` 的缺失是**会挡住其它页面**的：
+
+> 一个包只要有 `assets/`（语音、装备图标、外观素材都要它），`pack.json` 就必须声明 license，否则**整个包**会被
+> 加载器拒绝（`ASSETS_NEED_LICENSE`），而语音页、装备页、外观素材那三个写入端点在那种状态下**一律拒绝写入**。
+> 以前它们只能告诉作者「去 `pack.json` 里声明一个」—— 这正是业主禁掉的「必须手改清单」。
+
+- 六个字段各自一个输入框，license 有候选（`CC0-1.0` / `CC-BY-4.0` / `CC-BY-SA-4.0` / `MIT` /
+  `see assets/LICENSE.txt`）也可以手填任何非空字符串。**留空 = 删掉这个字段**（加载器对它们各有默认值：
+  `name` 退回包 id、`version` 退回 `0.0.0`，其余就是「没声明」），不是写成一个空字符串。
+- **唯一被拒绝的清空是 license**：`hasAssets && !license` 时保存会被当场拒（400 `ASSETS_NEED_LICENSE`），
+  因为那只会写出一个整包被拒的包；其它字段照写 —— 一个还没填 license 的包不该连名字都改不了。
+  **这条检查只在请求里真的带了 `license` 时才做**，所以调用方（页面、脚本）应当只发改动的键：
+  把六个字段连同一个空的 `license` 一起回传，会被合理地理解成「把 license 清空」而拒绝。
+- **写入只动传进来的键**：其余字段与键序原样保留，新键追加在末尾，内容没变就一个字节都不写。
+- `id` **不在**可编辑字段里：它必须等于目录名（`PACK_ID_MISMATCH`），改它等于换一个包。
+- 有 `assets/` 却没 license 时，这一块顶部有一条明显的横幅（语音页那条警告也指向这里）。
+
+### `overrides`（覆盖官方记录）
+
+`pack.json.overrides` 是**覆盖官方记录的唯一开关**：包带了一条 id 与官方相同的记录时，只有在这里声明了
+`"<文件>:<id>"`，加载器才会用包的那条替换官方的；**没声明的冲突会整条被丢掉，而且一条日志都不打**
+（`applyWorkshop` 把它记成 load error）。除盟约页会自动写 `bonds:<id>` 之外，此前只能手写。
+
+- 候选就是**官方每张表的 id + 名字**（`overrideCandidates`，13 张表约 1399 条）：作者要覆盖的记录通常知道是哪一个，
+  但 id 是 `chess_char_1_01_a` 这种记不住的形状，所以下拉里带名字。**也允许手输** —— 候选是提示不是白名单。
+- 每条声明标出两件事，**两者都不是错误**：**在用**（本包真的带了这条 id 的记录，声明才会生效）与
+  **官方有没有这个 id**（官方没有的话这条声明永远不起作用）。
+- **删除永远不被「有没有在用」挡住**：加一条、删一条都是把新的整表发回来（`POST /api/packs/:pack/overrides`），
+  形状不合法的条目会被拒（与加载器同一份正则 `OVERRIDE_ENTRY_RE`、同一份数据文件白名单），
+  而官方没有的 id 照收 —— 写进去的东西必须能删掉。
+- 写入只动 `overrides` 这一个字段，规则与 `support` 相同（键序保留、内容没变不写盘）。
 
 **导出**：`pack.json` 与包内所有文件（**包括 `assets/**`**）都在 **zip 根** —— 这个 zip 就是这个包。
 条目按名字排序、DOS 时间戳固定，所以同样的内容永远得到同样的字节；响应是 `application/zip`，带
@@ -606,8 +647,10 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 | DELETE | `/api/packs/:pack/voices/:charId/:slot`（可选 `?lang=`） | 删除一个干员的一个槽位（不存在则报告 `removed: false`，不重写文件）；`?lang=jp` 删的是 `voiceLangs.jp` 那一份 |
 | GET | `/api/packs/:id/export` | 该包的 `.zip`（`application/zip` + `Content-Disposition: attachment`）；包不存在 → 404 |
 | POST | `/api/packs/import`（可选 `?force=1`） | **原始 zip 字节**（`application/octet-stream`）→ 解压到临时目录、校验、搬进 `workshop/<包id>/`；返回装好的包摘要 |
-| GET | `/api/packs/support` | 各包的助战状态 + 每个包的**自有干员与推导阶** + `data/support.json` 的卡池与总开关 |
+| GET | `/api/packs/support` | 各包的助战状态 + 每个包的**自有干员与推导阶** + `data/support.json` 的卡池与总开关 + `meta`（每个包的元数据与 `overrides` 状态）+ `overrideCandidates`（官方每张表的 id + 名字） |
 | POST | `/api/packs/:id/support` | `{ ids }` → 就地更新 `pack.json` 的 `support`（只动这一个字段，绝不补 `content`） |
+| POST | `/api/packs/:id/meta` | `{ name?, version?, author?, license?, description?, gameVersion? }` → 就地更新 `pack.json` 的元数据（只动传进来的键；空串/null = 删掉那个键；清空一个有 `assets/` 的包的 license → 400 `ASSETS_NEED_LICENSE`） |
+| POST | `/api/packs/:id/overrides` | `{ overrides }` → 整表替换 `pack.json` 的 `overrides`（`"<文件>:<id>"`；形状与文件白名单由 `OVERRIDE_ENTRY_RE` 判，官方没有的 id 照收 —— 写进去的要能删掉） |
 | GET | `/api/playtest` | 试玩状态（`running` / `port` / `url` / `pid`）+ 难度键表 + 当前工坊根 |
 | POST | `/api/playtest/start` | `{ difficulty? }` → 起（或复用）一个游戏服务器子进程并等 `/healthz`；起不来 → 500 + 原话，且进程已被收尸 |
 | POST | `/api/playtest/stop` | 停掉试玩（没在跑时 `stopped: false`，幂等） |

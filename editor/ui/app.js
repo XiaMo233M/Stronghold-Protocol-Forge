@@ -72,6 +72,9 @@ const state = {
   // 「本包自带的外观素材」那一块的草稿（整页每 250ms 重画一次，草稿不能放在 DOM 上）、它的目标 key、
   // 上一次保存/删除的回话，以及现场问来的骨架/图谱解析结论（见 artDraftFor / artParsedStore）。
   artDraft: null, artDraftKey: '', artMessage: null, artParsed: null,
+  // 召唤物（`art.tokens`）那一块的草稿与正在编辑的 token id：**与干员草稿分开一份**，因为它编辑的是另一张表
+  // （同一页上两块的 id 完全无关，共用一份草稿会让「切干员」把 token 的编辑内容一起抹掉，见 artTokenEditor）。
+  tokenDraft: null, tokenDraftId: '',
 };
 
 // ---- the spec model ----------------------------------------------------------------------------------------------
@@ -557,15 +560,25 @@ function artRoleSetter(cur) {
 }
 
 /**
- * 一侧模型（干员页的 `spine.front` / `spine.back`）：skel / atlas / textures / pma / 各个动画角色。
- * 改动直接写进草稿（`draft.spine[side]`），保存时整条发出去。
+ * 一侧模型的编辑器：skel / atlas / textures / pma / 各个动画角色。改动直接写进草稿，保存时整条发出去。
+ *
+ * 两种形状由 `flat` 决定（与加载器的 ART_TABLES 一致）：
+ *   * `flat=false`（chars）：草稿是 `spine.front` / `spine.back`，`side` 就是 `'front'` / `'back'`；
+ *   * `flat=true`（enemies / tokens）：草稿的 `spine` **本身就是那个 spine 对象**，必须传 `side = ''`。
+ *
+ * 扁平那张表的 `side` 不能写成 `'spine'`（会写出 `spine.spine`，而 `artSpineObjectsUi` 与 shared/workshop.js 的
+ * parseArtSpine 都把 `spine` 当成那个对象本身，于是它被当成不认识的字段 → ART_UNKNOWN_FIELD）。`side = ''` 时
+ * 所有读写都落在 `draft.spine` 自己身上，形状天然是对的。
  */
-function artSideEditor(draft, side, title) {
+function artSideEditor(draft, side, title, flat = false) {
   const wrap = h('div', {});
   wrap.append(h('h2', {}, title));
   if (!isRec(draft.spine)) draft.spine = {};
-  const cur = isRec(draft.spine[side]) ? draft.spine[side] : {};
-  const commit = () => { if (Object.keys(cur).length) draft.spine[side] = cur; else delete draft.spine[side]; };
+  const cur = flat ? draft.spine : (isRec(draft.spine[side]) ? draft.spine[side] : {});
+  const commit = () => {
+    if (flat) { if (Object.keys(cur).length) draft.spine = cur; else delete draft.spine; return; }
+    if (Object.keys(cur).length) draft.spine[side] = cur; else delete draft.spine[side];
+  };
   const skelFiles = packArtState().files.filter((f) => /\.skel$/i.test(f));
   const atlasFiles = packArtState().files.filter((f) => /\.atlas$/i.test(f));
   const skelInfo = skelParse(cur.skel);
@@ -712,20 +725,148 @@ function artMessageBox() {
 }
 
 /**
- * 干员页「外观」段里的那一块：`chars` 表的四个图片字段 + `front`/`back` 两侧模型，外加全部声明的清单。
- * 表的 id 就是这个干员的 `assetsSpine` —— 客户端是拿它去 `chars` 表查外观的（填错就画成一张贴图）。
+ * 干员页「外观」段里的第三块：**召唤物**（`art.tokens`）。
+ *
+ * 为什么放在干员页：召唤物属于某个干员（`tokens.owner` 指向它的干员 id），这一页才看得见「这个干员的召唤物」。
+ * 形状与另外两张表有两处不同（服务端 ART_TABLES 的 `tokens` 那一行，editor/server.mjs:864）：路径字段只有
+ * `avatar`，`owner` 是**原样抄过去的 id**（不查文件、不查存在性），`spine` 与 enemies 一样是**扁平**的
+ * —— 所以 `artSideEditor` 要带上 `flat = true`，否则会写出 `spine.spine`。
+ *
+ * id 的候选来自服务端的 `state.tokenChoices`（官方与各包的 tokens.json / chess.json 里的 tokenId）；
+ * 本包 `pack.json.art.tokens` 里已声明的那几条（含陈旧没人用的）也一起列出来。手输那条路同样必须在：
+ * 一个**新** token 在写进 pack.json 之前不可能出现在任何清单里（干员页的新干员也是先手填 id）。
+ * 保存 / 删除走与 chars、enemies 同一条路（`postArtEntry` / `deleteArtDeclaration`），进服务端前去掉 `__id`。
+ */
+function artTokenEditor() {
+  const box = h('div', { class: 'artTokens' });
+  box.append(h('h2', {}, t('召唤物 token（这一页的干员召唤的东西）')));
+  const artState = packArtState();
+  const declared = isRec(artState.art?.tokens) ? artState.art.tokens : {};
+  const declaredIds = Object.keys(declared).sort();
+  // 没在编辑任何一条时，自动打开这个包里第一条已声明的（否则作者得先把 id 打一遍才能看见它）
+  if (state.tokenDraftId === '' && !isRec(state.tokenDraft)) state.tokenDraftId = declaredIds[0] ?? '';
+  const id = String(state.tokenDraftId ?? '');
+  // 换目标才从 pack.json 里已声明的那条重新起一份草稿（整页每 250ms 重画一次，草稿不能放在 DOM 上）。
+  // `__id` 只是「这份草稿是给谁的」这个标记，**不许**把它删掉：删了它下一次重画就认不出这份草稿（`__id !== id`），
+  // 于是每次重画都重新起一份、编辑内容全丢。它在保存前被去掉（见 saveTokenArt），绝不会进 pack.json。
+  if (state.tokenDraft?.__id !== id) {
+    const cur = isRec(declared[id]) ? JSON.parse(JSON.stringify(declared[id])) : {};
+    cur.__id = id;
+    state.tokenDraft = cur;
+  }
+  const draft = state.tokenDraft;
+  const ids = [...new Set([id, ...declaredIds].filter(Boolean))].sort();
+  box.append(h('p', { class: 'hint' }, t('客户端画一个召唤物时读的是合并后的 `data/assets.json` 的 `tokens`：这里声明的东西会被并进那一条（素材走 /workshop-assets），客户端零改动。路径都相对包的 `assets/`。')));
+  box.append(h('div', { class: 'grid wide' },
+    field(t('召唤物 id'), h('div', {},
+      // 候选来自服务端的 `tokenChoices`（官方 tokens.json 与官方/各包的 chess.json 记录里的 tokens 数组 ∪ 各包
+      // tokens.json 的键）——绝大多数情况是给一个**已有的**召唤物换模型，所以候选是提示不是白名单：新 token
+      // 的 id 照样手输（合法性由校验器判）。
+      tokenIdInput(ids),
+      h('div', { class: 'hint' }, tokenChoicesHint())))));
+  if (!id) {
+    box.append(h('p', { class: 'hint' }, t('先填一个召唤物的 id（`assets.tokens` 的键，也就是这个包给它的名字），再给它配素材。')));
+    return box;
+  }
+  const setField = (key, value) => { if (value) draft[key] = value; else delete draft[key]; };
+  const images = artState.files.filter((f) => /\.(png|jpe?g|webp|gif)$/i.test(f));
+  const owner = String(draft.owner ?? '');
+  const ownerIds = [...new Set([owner, ...declaredIds.map((x) => (isRec(declared[x]) ? declared[x].owner : ''))])]
+    .filter((x) => typeof x === 'string' && x).sort();
+  box.append(h('div', { class: 'grid wide' },
+    field(t('头像 avatar'), artFileSelect(images, () => draft.avatar, (v) => setField('avatar', v), t('（不声明）'))),
+    // `owner` 与敌人的 `spineAliasOf` 同类：原样抄过去的 id，不指向包里的文件，所以给 datalist + 一个按钮
+    field(t('主人 owner（原样抄的 id，不查文件）'), h('div', { class: 'row' },
+      h('input', {
+        class: 'artOwner', value: owner, list: 'artOwnerChoices',
+        oninput: (e) => { setField('owner', e.target.value); },
+      }),
+      h('datalist', { id: 'artOwnerChoices' }, ownerIds.map((x) => h('option', { value: x }))),
+      h('button', {
+        class: 'ghost artUseOwner', type: 'button',
+        onclick: () => { draft.owner = tokenOwnerId(); renderEditorKeepingFocus(); },
+      }, t('用当前干员'))))));
+  // 扁平 spine（`tokens` 那张表）：side 传空串，读写都落在 draft.spine 自己身上
+  box.append(artSideEditor(draft, '', t('模型（扁平 spine，与怪物那一块同一套）'), true));
+  // 保存 / 删除的回话由 lookArtPanel 在最上面画一次（chars 与 tokens 共用一条 `state.artMessage`），这里不重复
+  box.append(h('div', { class: 'row', style: 'margin-top:10px' },
+    h('button', { class: 'primary artSave', onclick: () => saveTokenArt() }, t('保存这条外观')),
+    h('button', { class: 'ghost artDel', onclick: () => deleteArtDeclaration('tokens', id) }, t('删除这条声明')),
+    !artState.files.length ? h('span', { class: 'hint warn' }, t('本包的 `assets/` 里还没有素材：把文件放进去，再回到这一页挑。')) : null));
+  return box;
+}
+
+/** 当前干员的基础记录 id（`chess_ws_<slug>_a`）：召唤物的 `owner` 一般是它，所以给一个「用当前干员」按钮。 */
+function tokenOwnerId() {
+  const slug = String(state.spec?.id ?? '').trim();
+  return slug ? `chess_ws_${slug}_a` : '';
+}
+
+/**
+ * 召唤物 id 的输入框：**可手输**（新 token 写进 pack.json 之前不可能出现在任何候选里），候选用 datalist 提示。
+ * 候选 = 本包已声明的 id（含陈旧的那条，排在最前）+ `state.tokenChoices`（服务端给的官方与各包 tokenId）。
+ * 去重时以先到的那条为准：本包声明的 id 后面跟的提示为空，官方的跟 ` · 名字`（Chrome/Edge 的 datalist 会显示它）。
+ */
+function tokenIdInput(declaredIds) {
+  const id = String(state.tokenDraftId ?? '');
+  const choices = Array.isArray(state.data?.tokenChoices) ? state.data.tokenChoices : [];
+  const opts = [];
+  const seen = new Set();
+  for (const [value, hint] of [...declaredIds.map((x) => [x, '']), ...choices.map((c) => [c?.id, c?.name])]) {
+    if (typeof value !== 'string' || !value || seen.has(value)) continue;
+    seen.add(value);
+    opts.push(h('option', { value }, typeof hint === 'string' && hint ? `${value} · ${hint}` : null));
+  }
+  return h('div', {},
+    h('input', {
+      class: 'tokenId', value: id, list: 'tokenIdChoices', placeholder: t('如 token_10000_silent_healrb（可手输）'),
+      oninput: (e) => { state.tokenDraftId = e.target.value; renderEditorKeepingFocus(); },
+    }),
+    h('datalist', { id: 'tokenIdChoices' }, opts));
+}
+
+/** 候选那一行提示：说清候选是从哪来的、为什么还能手输（而不是让人以为「没有候选＝不能写」）。 */
+function tokenChoicesHint() {
+  return t('候选来自官方与各包的 summon id（tokens.json 与 chess.json 的 tokens 数组）：这一块多数时候是给一个已有的召唤物换模型。候选是提示不是白名单 —— 新召唤物的 id 直接手输。');
+}
+
+/** 保存这一条召唤物外观（整条一次性 POST，与 chars / enemies 同一套自动补全）。 */
+async function saveTokenArt() {
+  const id = String(state.tokenDraftId ?? '');
+  if (!state.packId || !id) return;
+  const draft = JSON.parse(JSON.stringify(state.tokenDraft ?? {}));
+  delete draft.__id;   // 界面专用的「正在编辑谁」，不是这一条外观的字段（留着会被服务端按 ART_UNKNOWN_FIELD 拒掉）
+  await postArtEntry('tokens', id, draft, () => { state.tokenDraftId = ''; state.tokenDraft = null; });
+}
+
+/**
+ * 干员页「外观」段里的那一块：`chars` 表的四个图片字段 + `front`/`back` 两侧模型，加上第三块**召唤物**
+ * （`art.tokens`），最后是全部声明的清单。
+ *
+ * 只有 `chars` 那张表用这个干员的 `assetsSpine` 当 id（客户端拿它去 `chars` 表查外观，填错就画成一张贴图）；
+ * 召唤物是**另一张表、另一个 id**，与 `assetsSpine` 无关 —— 所以那一块在没填 spine 时也要在（见下面那段）。
  */
 function lookArtPanel() {
   const box = h('div', { class: 'panel artPanel' });
   box.append(h('h2', {}, t('本包自带的外观素材（可选）')));
   box.append(h('p', { class: 'hint' }, t('客户端画一个干员时读的是合并后的 `data/assets.json` 的 `chars`：这里声明的东西会被并进那一条（素材走 /workshop-assets），客户端零改动。路径都相对包的 `assets/`，文件要自己先放进去 —— 编辑器不上传素材。')));
+  // 保存 / 删除的回话只在这里画一次：chars 与 tokens 两块用的是同一个 `state.artMessage`，两块各画一次
+  // 会让同一条回话在面板里出现两遍（上面 chars 的按钮、下面召唤物的按钮，谁出错都看得见这一条）。
+  const msg = artMessageBox();
+  if (msg) box.append(msg);
   const id = String(state.spec?.assetsSpine ?? '').trim();
   if (!state.packId) {
     box.append(h('p', { class: 'hint' }, t('先在上面选一个工坊包。')));
     return box;
   }
+  // 第三块：召唤物（`art.tokens`）。它是另一个 id、另一张表，与这个干员的 `assetsSpine` **没有关系** ——
+  // 一个用官方模型（`assetsSpine` 留空）的干员照样可以给自己召唤出来的东西换图。所以它必须在下面那个
+  // 「还没填 assetsSpine」的提前返回**之前**：挂在那之后等于把「加一条 art.tokens」系在了另一张表的字段上，
+  // 而业主的硬约束是「写进 pack.json 的东西都要能在这里增删改」（删得掉、加不了，正是这一版要消除的）。
+  const tokens = artTokenEditor();
   if (!id) {
     box.append(h('p', { class: 'hint' }, t('先在「assetsSpine」里填这个干员的模型 id（客户端就是拿它去 `chars` 表查外观），再回来给它配素材。')));
+    box.append(tokens);
     box.append(artDeclaredList());
     return box;
   }
@@ -742,12 +883,11 @@ function lookArtPanel() {
     artSideEditor(draft, 'front', t('模型 front（正面）')),
     artSideEditor(draft, 'back', t('模型 back（背面）')));
   box.append(sides);
+  box.append(tokens);   // 召唤物那一块在上面就画好了（它不依赖 assetsSpine，所以不能只在这一条路上挂）
   box.append(h('div', { class: 'row', style: 'margin-top:10px' },
     h('button', { class: 'primary artSave', onclick: () => saveArtDraft('chars', id) }, t('保存这条外观')),
     h('button', { class: 'ghost artDel', onclick: () => deleteArtDeclaration('chars', id) }, t('删除这条声明')),
     !packArtState().files.length ? h('span', { class: 'hint warn' }, t('本包的 `assets/` 里还没有素材：把文件放进去，再回到这一页挑。')) : null));
-  const msg = artMessageBox();
-  if (msg) box.append(msg);
   box.append(artDeclaredList());
   return box;
 }
@@ -1383,13 +1523,14 @@ async function preview() {
 }
 
 /**
- * 保存「这条外观」：把整条条目一次性 POST 出去（正文是**整条**而不是一个字段，见 artSideEditor 的注释）。
- * 保存前把两处「按图谱自动填」补进草稿：`textures`（默认按图谱页名）与 `pma`（图谱声明了预乘就写 true）——
- * 这两条都是客户端会读、而作者没法凭空知道的东西。
+ * 保存一条外观（**整条**一次性 POST）：保存前把两处「按图谱自动填」补进草稿 —— `textures`（默认按图谱页名）与
+ * `pma`（图谱声明了预乘就写 true）。这两条都是客户端会读、而作者没法凭空知道的东西。
+ * 干员页的三块（chars / tokens）与怪物页那块共用同一套规则（怪物页那份在 editor/ui/enemy.js）。
+ * `afterOk` 只给调用方清自己的草稿：光清 `state.artDraftKey` 管不到召唤物那份草稿（见 artTokenEditor）。
  */
-async function saveArtDraft(table, id) {
+async function postArtEntry(table, id, entry, afterOk = () => { state.artDraftKey = ''; }) {
   if (!state.packId) return;
-  const draft = JSON.parse(JSON.stringify(state.artDraft ?? {}));
+  const draft = JSON.parse(JSON.stringify(entry ?? {}));
   for (const spine of artSpineObjectsUi(draft)) {
     const atlas = typeof spine.atlas === 'string' ? atlasParse(spine.atlas) : null;
     if (!atlas || atlas.note || !atlas.pages?.length) continue;
@@ -1399,13 +1540,18 @@ async function saveArtDraft(table, id) {
   }
   try {
     const r = await api(`/api/packs/${encodeURIComponent(state.packId)}/art`, { method: 'POST', body: { table, id, art: draft } });
-    state.artDraftKey = '';   // 下一次重画从刚写进去的那一条重新起一份草稿
+    afterOk();   // 下一次重画从刚写进去的那一条重新起一份草稿
     state.artMessage = { kind: 'ok', text: t('已保存 {0} 的外观', `${table}.${id}`), warnings: r.warnings ?? [] };
     await load();
   } catch (e) {
     state.artMessage = { kind: 'error', text: errText(e), warnings: [] };
     renderEditorKeepingFocus();
   }
+}
+
+/** 保存「干员这一条外观」（chars）：正文是**整条**而不是一个字段（见 postArtEntry 的注释）。 */
+async function saveArtDraft(table, id) {
+  await postArtEntry(table, id, state.artDraft ?? {});
 }
 
 /** 删掉一条外观声明（`art` 为 null = 删；空对象逐级清理在服务端做）。任何声明都必须能在这里删掉。 */

@@ -53,6 +53,10 @@ export const EN_ITEM = Object.freeze({
   // 而 i18n.en.shared.js 不在这次改动范围内，所以按「只留一份」的规则归属这里，两页的原文刻意逐字相同。
   '本包已声明的装备图标': 'Item icons this pack declares',
   'pack.json 的 `itemIcons` 里声明的每一条都列在下面，含已经没人用的那条：不用手改清单，在这一页删掉就行。': 'Every entry declared in pack.json’s `itemIcons` is listed below, including the ones nothing uses any more: no hand-editing the manifest — delete it right here.',
+  // ---- 中栏：没有打开任何装备时的清单（包删光装备之后只剩旧声明的那条边界） ----
+  // 这一块要常驻，所以它的包来源必须写在页面上（`state.packId` 与右栏「保存到」是同一个值）。
+  '下面列的是 {0} 这个包在 pack.json 里声明的装备图标：想看别的包，用右边「保存到」那里的包下拉换。': 'Listed below are the item icons this pack ({0}) declares in pack.json: to look at another pack, switch it with the pack dropdown under “Save to” on the right.',
+  '还没有工坊包：先在下面选一个包（或点「＋ 新建一个包…」）。': 'No workshop pack yet: pick one below first (or click “+ New pack…”).',
   '「有人在用」= 本包 items.json 里有记录的 iconId / trapId 等于它。': '“In use” = a record in this pack’s items.json has this id as its iconId / trapId.',
   '有人在用': 'in use',
   '陈旧 / 没人用': 'stale / unused',

@@ -1,6 +1,6 @@
 # Stronghold-Protocol-Forge · 卫戍协议工坊编辑器
 
-![version](https://img.shields.io/badge/version-0.8.0-2ea44f)
+![version](https://img.shields.io/badge/version-0.8.1-2ea44f)
 ![license](https://img.shields.io/badge/code%20license-GPL--3.0--or--later-blue)
 ![node](https://img.shields.io/badge/node-22%20%7C%2024-339933)
 
@@ -46,7 +46,7 @@
 | **盟约（羁绊）** | `/bond.html` | **新增盟约**或**覆盖官方 23 条**（阈值 / 计数模式 / 说明 / 战斗黑板）、成员勾选、**本包自带的盟约图标**、**「战斗里会加什么」的实时结论** |
 | **kit（行为层）** | `/kit.html` | 包里的 `kits/<干员 id>.js` —— **代码本体**（整份文件），配上**静态校验**（钩子词表、三条硬规则）与保存时自动写入的署名头 |
 | **语音** | `/voice.html` | `pack.json` 的语音字段：干员 × 槽位 × 文件，**就地编辑**（其余字段原样保留）、按包内 `assets/` 真实文件挑选、可试听；顶部**语言选择**在默认配音（`voices`）与 jp / en / kr（`voiceLangs`）之间切换，一个包可以逐语种各配一份 |
-| **包管理** | `/pack.html` | 整包的收发：**导出成 `.zip`**、**导入别人的 `.zip`**、勾选本包自己的干员进**助战卡池**（阶由记录推导）、改助战在商店里的**标价**、看每个包的加载器结论、**一键试玩**（编辑器自己起游戏服务器并直接进一局） |
+| **包管理** | `/pack.html` | 整包的收发：**导出成 `.zip`**、**导入别人的 `.zip`**、**包元数据**（`name` / `version` / `author` / **`license`** / `description` / `gameVersion` —— 0.8.1 起有图形入口，此前只能手改 `pack.json`，而缺 `license` 会让整个包被加载器拒绝）、**`overrides`**（覆盖官方记录的声明，带官方 id 候选与「在用 / 陈旧」标记、逐条可删）、勾选本包自己的干员进**助战卡池**（阶由记录推导）、改助战在商店里的**标价**、看每个包的加载器结论、**一键试玩**（编辑器自己起游戏服务器并直接进一局） |
 
 除上述表单，编辑器还有实时校验（与 CLI 完全相同的规则）与「将生成的记录」预览；地图页额外有**部署区覆盖层**与**寻路覆盖层**（12 条路线的流场），出怪页有按排期槽位配色的时间轴泳道，kit 页有钩子清单、合法 id 与静态校验（它**只读文本、不执行你的文件**）。
 
@@ -174,7 +174,7 @@ npm run editor                                                                  
 
 - **独立模拟**（单人）与**同盟模拟**（1–4 人**合作**，没有 PvP；空位可以加 AI 队友）。
 - 服务器是一个 Node.js 程序，**战斗在各玩家的浏览器里模拟**（和官方一样），服务器只管经济与回合，一台低功耗小主机就能开服。
-- **本仓库打包的上游游戏本体为 0.2.0**（本仓库自己的版本是 0.8.0，两者的读法见[版本号怎么读](#版本号怎么读)）：补位、自选编队、中英日韩四语言、自定义快捷键与精简包，以及一批按官方数据与 PRTS 修正的规则，详见 [CHANGELOG.md](CHANGELOG.md)。仍有少数规则按推断实现，与官方不一致的地方欢迎在 Issue 里反馈。
+- **本仓库打包的上游游戏本体为 0.2.0**（本仓库自己的版本是 0.8.1，两者的读法见[版本号怎么读](#版本号怎么读)）：补位、自选编队、中英日韩四语言、自定义快捷键与精简包，以及一批按官方数据与 PRTS 修正的规则，详见 [CHANGELOG.md](CHANGELOG.md)。仍有少数规则按推断实现，与官方不一致的地方欢迎在 Issue 里反馈。
 - **多语言配音**（0.7.1 起）：干员战斗语音有中文 / 日文 / 英文 / 韩文四种，**设置 → 配音语言** 选全局默认，
   任何干员还能在 **干员详情 → 配音** 里单独换一种（点一下当场试听）。某种配音缺一句时自动退回默认配音。
   **发行包只带默认配音**，其余语言在同一个 release 的 `…-voices-*.zip` 里（解压覆盖到 `app/public/assets/audio/voice/` 即可，不用改配置）。
@@ -348,11 +348,21 @@ npm start          # 启动服务器：http://localhost:3000
 
 ```bash
 npm run dev                 # node --watch：改动服务器代码后自动重启
-node --test                 # 单元 + 集成测试（约 5800 项；缺少素材 / 浏览器的用例会自动跳过）
+node --test                 # 单元 + 集成测试（约 6000 项；缺少素材 / 浏览器的用例会自动跳过）
 SP_E2E=1 node --test test/ui/mock.e2e.test.js        # 浏览器端到端测试，需要本机 Chrome（CHROME_PATH 可指定路径）
 SP_REAL_E2E=1 node --test test/ui/real.e2e.test.js   # 需要 Chrome + 已下载的素材
 RENDER_E2E=1 node --test 'test/render/*.browser.test.js'   # 渲染测试，部分需要本地提取的棋盘贴图
 ```
+
+**工坊编辑器**那批页面用例（第 0.8.1 版起五个文件）用**同一个 `EDITOR_E2E` 开关**，**建议串行跑**：
+
+```powershell
+$env:EDITOR_E2E = "1"
+node --test --test-concurrency=1 test/editorPackPicker.e2e.test.js test/editorVoicePage.e2e.test.js test/artEditorPage.e2e.test.js test/artEditorEnemyPage.e2e.test.js test/packMetaPage.e2e.test.js
+```
+
+`--test-concurrency=1` 不是可有可无的：每个文件各自起一个浏览器 + 一个编辑器服务器，并发跑时（实测 5 个
+Chromium 同时开）见过 `waitForSelector` 偶发超时 —— 那是机器在抢资源，不是页面坏了；串行跑稳定全绿。
 
 浏览器用例的两个前提（缺一个就整批静默 skip，看起来像「通过了」）：
 

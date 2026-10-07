@@ -257,4 +257,15 @@ export const EN_INDEX = Object.freeze({
   '模型 front（正面）': 'Model — front',
   '模型 back（背面）': 'Model — back',
   '还没选骨架：这一侧不会被声明（想给某个角色只换头像/立绘也可以，那样就不填模型）。': 'No skeleton picked yet: this side stays undeclared (replacing only the avatar/portrait is fine — just leave the model empty).',
+
+  // ---- 召唤物（`art.tokens`）：与 chars/enemies 同一块控件，但表的 id 是召唤物自己的 id ----
+  '召唤物 token（这一页的干员召唤的东西）': 'Summons (tokens) — what this operator summons',
+  '客户端画一个召唤物时读的是合并后的 `data/assets.json` 的 `tokens`：这里声明的东西会被并进那一条（素材走 /workshop-assets），客户端零改动。路径都相对包的 `assets/`。': 'To draw a summon the client reads the merged data/assets.json tokens table: what you declare here is merged into that entry (the files are served from /workshop-assets), so the client needs no change. Every path is relative to the pack’s assets/.',
+  '召唤物 id': 'Summon id',
+  '如 token_10000_silent_healrb（可手输）': 'e.g. token_10000_silent_healrb (you can type it)',
+  '候选来自官方与各包的 summon id（tokens.json 与 chess.json 的 tokens 数组）：这一块多数时候是给一个已有的召唤物换模型。候选是提示不是白名单 —— 新召唤物的 id 直接手输。': 'The candidates are the summon ids the official data and the packs ship (tokens.json, plus the tokens arrays in chess.json): most of the time this block reskins a summon that already exists. They are a hint, not a whitelist — type a brand-new summon’s id by hand.',
+  '先填一个召唤物的 id（`assets.tokens` 的键，也就是这个包给它的名字），再给它配素材。': 'Fill in a summon id first (the key in assets.tokens — the name this pack gives it), then give it art.',
+  '主人 owner（原样抄的 id，不查文件）': 'Owner (a copied-through id, not a file)',
+  '用当前干员': 'Use the current operator',
+  '模型（扁平 spine，与怪物那一块同一套）': 'Model (a flat spine — the same block the enemy page uses)',
 });

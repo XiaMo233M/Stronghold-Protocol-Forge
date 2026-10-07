@@ -45,7 +45,8 @@ export const EN_VOICE = Object.freeze({
   '这个包还没有「{0}」配音。右边选干员、槽位和文件，加一条就声明了这个语种。': 'This pack has no “{0}” dub yet. Pick an operator, a slot and a file on the right — adding one line declares this language.',
   '当前配音': 'Current dub',
   '这个包还没有 assets/ 文件夹，所以还不能写 voices：先建 workshop/{0}/assets/ 并把音频文件放进去。': 'This pack has no assets/ folder yet, so voices cannot be written: create workshop/{0}/assets/ and put the audio files there.',
-  '有 assets/ 就必须在 pack.json 里声明 license，否则整个包会被加载器拒绝（ASSETS_NEED_LICENSE）。': 'With an assets/ folder the pack must declare a license in pack.json, or the loader rejects the whole pack (ASSETS_NEED_LICENSE).',
+  '有 assets/ 就必须声明 license，否则整个包会被加载器拒绝（ASSETS_NEED_LICENSE）—— 去「包管理」页的「包元数据」里填一个（0.8.1 起，不必再手改 pack.json）。':
+    'With an assets/ folder the pack must declare a license, or the loader rejects the whole pack (ASSETS_NEED_LICENSE) — fill one in under “Pack metadata” on the Pack manager page (since 0.8.1 you no longer have to hand-edit pack.json).',
   'pack.json 现在会被加载器拒绝：[{0}] {1}': 'pack.json is currently rejected by the loader: [{0}] {1}',
   '这个包还没有语音。右边选干员、槽位和文件，就能加一条。': 'This pack has no voice lines yet. Pick an operator, a slot and a file on the right to add one.',
   '不是已知干员 id': 'Unknown operator id',

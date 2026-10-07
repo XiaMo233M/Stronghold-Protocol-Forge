@@ -194,7 +194,7 @@ function renderLines() {
   if (!p.license && p.hasAssets) {
     box.append(Object.assign(document.createElement('div'), {
       className: 'banner bad',
-      textContent: t('有 assets/ 就必须在 pack.json 里声明 license，否则整个包会被加载器拒绝（ASSETS_NEED_LICENSE）。'),
+      textContent: t('有 assets/ 就必须声明 license，否则整个包会被加载器拒绝（ASSETS_NEED_LICENSE）—— 去「包管理」页的「包元数据」里填一个（0.8.1 起，不必再手改 pack.json）。'),
     }));
   }
   if (p.issue) {

@@ -49,6 +49,7 @@ import { loadWorkshop, WORKSHOP_DIR } from '../server/workshop.js';
 // 所以 `tools/workshop-pack.mjs` 与编辑器不可能给出不同结论（docs/EDITOR.md §包管理）。
 import {
   exportPack, installZip, readPackSupport, writePackSupport, packSummary, listPackIds,
+  readPackMeta, writePackMeta, writePackOverrides, PACK_META_FIELDS, LICENSE_CHOICES,
 } from '../tools/workshop-pack.mjs';
 import { ZIP_MAX_TOTAL_BYTES } from '../shared/zip.js';
 // 外观素材（pack.json.art）的「文件系统 + 骨架/图谱」体检要用与客户端**同一个** Spine 解析器与图谱阅读器：
@@ -61,7 +62,7 @@ import { createPlaytest } from './playtest.mjs';
 // The pack-media allowlist lives with the route that serves it (server/index.js). The voice page must not keep a second
 // copy: a file the editor accepts but that route refuses is a line that 404s in the game with nothing reporting it.
 import { WORKSHOP_ASSET_TYPES } from '../server/index.js';
-import { normalizePackManifest, WORKSHOP_MEDIA_PREFIX } from '../shared/workshop.js';
+import { normalizePackManifest, WORKSHOP_MEDIA_PREFIX, WORKSHOP_CONTENT_FILES } from '../shared/workshop.js';
 import { VOICE_SLOTS, DIFFICULTIES, VOICE_LANGS, DEFAULT_VOICE_LANG } from '../shared/constants.js';
 import { withForgeMeta, stampForgeHeader, parseForgeHeader } from '../shared/forgeNotice.js';
 import {
@@ -891,47 +892,58 @@ function artParsed(key, st, parse) {
 }
 
 /**
+ * 哪些「解析不出来」只是**我们自己的解析上限**、哪些是**真的坏**。
+ *
+ * 超过 `ART_PARSE_MAX_BYTES` 就不解析，骨架/图谱本身可能是好的（那只是编辑器的取舍），所以只警告、让作者手填；
+ * 其余结论（文件读不到、字节根本不是 3.8 骨架）都是**硬错误**：客户端随后同样解析不出来，而它**一条日志都不打**，
+ * 模型直接不出现 —— 那正是这一页存在的理由。`tools/workshop-validate.mjs` 对同一件事报的是
+ * `ART_SPINE_VERSION` / error，编辑器不能比它松（否则「编辑器让你存了，命令行说你错了」）。
+ */
+const SOFT_PARSE_KINDS = new Set(['toolarge']);
+
+/**
  * 一个包内 `.skel` 的解析结论：动画名 + 版本，或一条 note（文件不在 / 太大 / 解析失败）。
- * **永远返回对象**，调用方不必区分「没声明」和「解析不到」—— 页面显示的是同一条 note。
+ * **永远返回对象**，调用方不必区分「没声明」和「解析不到」—— 页面显示的是同一条 note；`kind` 让调用方区分
+ * 「我们没解析」与「解析了但坏了」（见 `SOFT_PARSE_KINDS`）。
  * 用的是客户端自己那个解析器（@pixi-spine/runtime-3.8，经 tools/assets/skel.mjs），所以下拉里的候选就是真能播的名字。
  */
 function artSkelInfo(root, packId, rel) {
   const abs = artAssetAbs(root, packId, rel);
-  if (!abs) return { animations: [], version: null, bytes: null, note: '这个 .skel 不在包的 assets/ 里（或路径不合法）' };
+  if (!abs) return { animations: [], version: null, bytes: null, kind: 'missing', note: '这个 .skel 不在包的 assets/ 里（或路径不合法）' };
   let st;
-  try { st = fs.statSync(abs); } catch { return { animations: [], version: null, bytes: null, note: '这个 .skel 读不到' }; }
+  try { st = fs.statSync(abs); } catch { return { animations: [], version: null, bytes: null, kind: 'unreadable', note: '这个 .skel 读不到' }; }
   return artParsed(`skel:${abs}`, st, () => {
     if (st.size > ART_PARSE_MAX_BYTES) {
       return {
-        animations: [], version: null, bytes: st.size,
+        animations: [], version: null, bytes: st.size, kind: 'toolarge',
         note: `这个 .skel 有 ${Math.round(st.size / 1048576)} MB，超过 ${ART_PARSE_MAX_BYTES >> 20} MB 的解析上限：动画名候选为空，可以手填`,
       };
     }
     try {
       const info = parseSkel(new Uint8Array(fs.readFileSync(abs)));
-      return { animations: info.animations, version: info.version ?? null, bytes: st.size, note: null };
+      return { animations: info.animations, version: info.version ?? null, bytes: st.size, kind: null, note: null };
     } catch (e) {
-      return { animations: [], version: null, bytes: st.size, note: `骨架解析失败：${e && e.message ? e.message : e}` };
+      return { animations: [], version: null, bytes: st.size, kind: 'parse', note: `骨架解析失败：${e && e.message ? e.message : e}` };
     }
   });
 }
 
 /**
- * 一个包内 `.atlas` 的解析结论：页名 + pma / size，或一条 note（同上，永远返回对象）。
+ * 一个包内 `.atlas` 的解析结论：页名 + pma / size，或一条 note（同上，永远返回对象，带 `kind`）。
  * 页名以图谱文本为准 —— 清单里的 `textures` 只用于内存回收，不参与加载。
  */
 function artAtlasInfo(root, packId, rel) {
   const abs = artAssetAbs(root, packId, rel);
-  if (!abs) return { pages: [], hasPma: false, hasSize: false, note: '这个 .atlas 不在包的 assets/ 里（或路径不合法）' };
+  if (!abs) return { pages: [], hasPma: false, hasSize: false, kind: 'missing', note: '这个 .atlas 不在包的 assets/ 里（或路径不合法）' };
   let st;
-  try { st = fs.statSync(abs); } catch { return { pages: [], hasPma: false, hasSize: false, note: '这个 .atlas 读不到' }; }
+  try { st = fs.statSync(abs); } catch { return { pages: [], hasPma: false, hasSize: false, kind: 'unreadable', note: '这个 .atlas 读不到' }; }
   return artParsed(`atlas:${abs}`, st, () => {
-    if (st.size > ART_PARSE_MAX_BYTES) return { pages: [], hasPma: false, hasSize: false, note: '这个 .atlas 太大，没有解析' };
+    if (st.size > ART_PARSE_MAX_BYTES) return { pages: [], hasPma: false, hasSize: false, kind: 'toolarge', note: '这个 .atlas 太大，没有解析' };
     try {
       const info = atlasInfo(fs.readFileSync(abs, 'utf8'));
-      return { pages: info.pages, hasPma: info.hasPma, hasSize: info.hasSize, note: null };
+      return { pages: info.pages, hasPma: info.hasPma, hasSize: info.hasSize, kind: null, note: null };
     } catch (e) {
-      return { pages: [], hasPma: false, hasSize: false, note: `图谱解析失败：${e && e.message ? e.message : e}` };
+      return { pages: [], hasPma: false, hasSize: false, kind: 'parse', note: `图谱解析失败：${e && e.message ? e.message : e}` };
     }
   });
 }
@@ -1009,8 +1021,12 @@ function checkArtEntry(root, packId, table, entry) {
         return { error: `${where}.atlas：图谱里写的页“${page}”不存在（${dir === '.' ? 'assets 根目录' : dir}/ 下要真的有这个文件）` };
       }
     }
-    if (info.note) warnings.push(`${where}.atlas：${info.note}`);
-    else if (!info.hasSize) {
+    if (info.note) {
+      // 「太大没解析」只是我们自己的上限（图谱本身可能是好的），保留警告；其余是硬错误：客户端解析不出来时
+      // 一条日志都没有，模型直接不出现。
+      if (!SOFT_PARSE_KINDS.has(info.kind)) return { error: `${where}.atlas：${info.note}` };
+      warnings.push(`${where}.atlas：${info.note}`);
+    } else if (!info.hasSize) {
       warnings.push(`${where}.atlas：至少有一页没有 “size: W,H” 这一行 —— pixi-spine 拿页尺寸做除法（tools/assets/atlas.mjs 会补上它）`);
     }
     if (typeof spine.pma === 'boolean' && !info.note && spine.pma !== info.hasPma) {
@@ -1024,7 +1040,13 @@ function checkArtEntry(root, packId, table, entry) {
       }
     }
     const skel = artSkelInfo(root, packId, spine.skel);
-    if (skel.note) { warnings.push(`${where}.skel：${skel.note}`); continue; }
+    if (skel.note) {
+      // 同上：解析不出来就是硬错误（命令行校验器对同一件事报 ART_SPINE_VERSION / error），
+      // 只有「超过我们自己的解析上限」才留着警告让作者手填。
+      if (!SOFT_PARSE_KINDS.has(skel.kind)) return { error: `${where}.skel：${skel.note}` };
+      warnings.push(`${where}.skel：${skel.note}`);
+      continue;
+    }
     if (!/^3\.8\./.test(String(skel.version ?? ''))) {
       return {
         error: `${where}.skel：骨架版本是“${skel.version}”，只收 3.8.x —— 客户端用 @pixi-spine/runtime-3.8 解析，`
@@ -1049,6 +1071,55 @@ function checkArtEntry(root, packId, table, entry) {
     }
   }
   return { error: null, warnings };
+}
+
+/**
+ * `art.tokens` 的键（tokenId）候选：官方 `tokens.json` 的键，加上官方与各包 `chess.json` 里每条记录的 `tokens`
+ * 数组，加上各包自己 `tokens.json` 的键。
+ *
+ * 为什么候选要跨包收：token 是唯一一种作者基本不会整条新写的外观 —— `art.tokens` 绝大多数时候是给一个已有的
+ * 召唤物换模型。只列「本包声明的 id」等于几乎没列（新包这里恒为空），而手打 id 正是「必须手改清单」那条硬约束
+ * 要消掉的东西。返回的是 id 而不是记录：包里那份 `tokens.json` 可能根本不存在，名字只当提示用。合法性照旧由
+ * 校验器（ART_UNKNOWN_ID）判，手输的 id 一律照收 —— 候选是提示，不是白名单。
+ */
+function tokenChoices(root, dataDir) {
+  /** @type {Map<string, { id: string, name: string, from: string }>} */
+  const byId = new Map();
+  const add = (rawId, name, from) => {
+    if (typeof rawId !== 'string') return;
+    const id = rawId.trim();
+    if (!id) return;
+    const known = byId.get(id);
+    if (!known) {
+      byId.set(id, { id, name: typeof name === 'string' ? name : '', from });
+      return;
+    }
+    // 官方先收、包后收：先到的那条不被覆盖，只把还空着的名字补上。
+    if (!known.name && typeof name === 'string') known.name = name;
+  };
+  const addTokenTable = (file, from) => {
+    const table = readJson(file, {});
+    if (!isPlainObj(table)) return;
+    for (const [key, rec] of Object.entries(table)) {
+      if (!isPlainObj(rec)) continue;
+      add(rec.tokenId ?? key, rec.name, from);
+    }
+  };
+  const addChessTokens = (file, from) => {
+    const table = readJson(file, {});
+    if (!isPlainObj(table)) return;
+    for (const rec of Object.values(table)) {
+      if (!isPlainObj(rec) || !Array.isArray(rec.tokens)) continue;
+      for (const id of rec.tokens) add(id, '', from);
+    }
+  };
+  addTokenTable(path.join(dataDir, 'tokens.json'), '');
+  addChessTokens(path.join(dataDir, 'chess.json'), '');
+  for (const packId of packIdsFor(root)) {
+    addTokenTable(path.join(root, packId, 'tokens.json'), packId);
+    addChessTokens(path.join(root, packId, 'chess.json'), packId);
+  }
+  return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /**
@@ -1360,6 +1431,42 @@ function voicePackState(root, packId) {
   };
 }
 
+/**
+ * 官方每张数据表原样读出（`{ <file>: <记录表> }`）。`overrides` 的候选与「这个 id 官方有没有」两个问题都从这一份
+ * 回答：覆盖官方记录是 `overrides` 唯一的用途（加载器只在「官方已有这个 id」时才查它），所以候选就是官方 id 本身。
+ * 一次请求读一次（13 个文件、几毫秒），不给跨请求缓存 —— 那会让「刚改完 data/ 的 id」在编辑器里过期。
+ */
+function officialIdTables(dataDir) {
+  const out = {};
+  for (const file of WORKSHOP_CONTENT_FILES) {
+    const table = readJson(path.join(dataDir, `${file}.json`), null);
+    if (isPlainObj(table)) out[file] = table;
+  }
+  return out;
+}
+
+/**
+ * 候选的线上形状：`{ <file>: [[id, name], …] }`。id 是 `chess_char_1_01_a` 这种记不住的字符串，所以每项带上官方
+ * 名字；13 张表共约 1400 条、37 KB —— 比 `/api/state` 顺手带的 266 条完整干员记录小得多。
+ */
+function overrideCandidates(tables) {
+  const out = {};
+  for (const [file, table] of Object.entries(tables)) {
+    const rows = Object.entries(table).map(([id, rec]) => [id, (isPlainObj(rec) && (rec.name ?? rec.appellation)) || '']);
+    if (rows.length) out[file] = rows;
+  }
+  return out;
+}
+
+/** 一个包的元数据 + overrides 状态，连同「官方有没有这个 id」那一半（从上面那份表回答，不再读一次磁盘）。 */
+function packMetaState(root, packId, tables) {
+  return {
+    ...readPackMeta(root, packId, { isOfficial: (file, id) => Object.hasOwn(tables[file] ?? {}, id) }),
+    metaFields: [...PACK_META_FIELDS],
+    licenseChoices: [...LICENSE_CHOICES],
+  };
+}
+
 async function readBody(req) {
   const chunks = [];
   let size = 0;
@@ -1546,6 +1653,9 @@ export async function createEditorServer(opts = {}) {
         // 本包自带的外观素材（pack.json 的 `art`）与「这个包 assets/ 里真的有的素材文件 + 每条已声明 spine 的
         // 动画名/图谱页名」：干员页「本包自带的外观素材」那一段要用的两个输入（照 packItemIcons 的做法）。
         packArt: packIdsFor(root).map((id) => artPackState(root, id)),
+        // `art.tokens` 的键候选（tokenId → 官方 tokens.json + 官方/各包 chess.json 的 tokens 数组 + 各包 tokens.json）。
+        // 与外观素材同一段面板用，所以跟着 packArt 一起给。
+        tokenChoices: tokenChoices(root, dataDir),
         officialCount: officialIds.size,
         // 表单旁边的尺子：职业 → 字段 → {min, p50, max, count}
         statRanges: chessStatRanges,
@@ -1903,6 +2013,10 @@ export async function createEditorServer(opts = {}) {
       const loaded = loadWorkshop(root, { log: quietLog });
       const cfg = normalizeSupportConfig(readJson(supportFile, null));
       const packs = packIdsFor(root).map((id) => supportStateFor(root, id, supportFile));
+      // 元数据与 overrides：同一个 GET 一起给（这一页是同一个页面，多一轮请求只会多一个「半加载」状态）。
+      // `officialTables` 只读一次，候选表与「官方有没有这个 id」都从它回答。
+      const officialTables = officialIdTables(dataDir);
+      const meta = Object.fromEntries(packIdsFor(root).map((id) => [id, packMetaState(root, id, officialTables)]));
       return sendJson(res, 200, {
         workshopRoot: root,
         // 卡池的最终归属地：`data/support.json` 的 `"workshop": false` 会忽略所有包的助战声明
@@ -1913,7 +2027,43 @@ export async function createEditorServer(opts = {}) {
         prices: supportPrices(cfg),
         loadedErrors: loaded.errors,
         packs,
+        // `overrides` 的候选（官方每张表的 id + 名字）与每个包的元数据状态
+        overrideCandidates: overrideCandidates(officialTables),
+        meta,
       });
+    }
+
+    // 写一个包的元数据（`pack.json` 的 name/version/author/license/description/gameVersion）——只动传进来的键
+    if (p.startsWith('/api/packs/') && p.endsWith('/meta') && method === 'POST') {
+      const packId = p.slice('/api/packs/'.length, -'/meta'.length);
+      if (!PACK_ID_RE.test(packId)) throw refuse(400, '工坊包 id 不合法（只能是字母、数字、下划线和短横线）');
+      const body = await readBody(req);
+      const officialTables = officialIdTables(dataDir);
+      let written;
+      try {
+        written = await writePackMeta(root, packId, body, { isOfficial: (f, id) => Object.hasOwn(officialTables[f] ?? {}, id) });
+      } catch (e) {
+        // PACK_META_UNKNOWN_FIELD / META_BAD_VALUE / ASSETS_NEED_LICENSE —— 原因原样带出（与 CLI 同一条规则）
+        throw packRefusal(e);
+      }
+      return sendJson(res, 200, { ok: true, pack: packId, ...packMetaState(root, packId, officialTables), changed: written.changed });
+    }
+
+    // 写一个包的 `pack.json.overrides`（整表替换：加一条与删一条都是「把新表发过来」）
+    if (p.startsWith('/api/packs/') && p.endsWith('/overrides') && method === 'POST') {
+      const packId = p.slice('/api/packs/'.length, -'/overrides'.length);
+      if (!PACK_ID_RE.test(packId)) throw refuse(400, '工坊包 id 不合法（只能是字母、数字、下划线和短横线）');
+      const body = await readBody(req);
+      const list = Array.isArray(body) ? body : body.overrides;
+      const officialTables = officialIdTables(dataDir);
+      let written;
+      try {
+        written = await writePackOverrides(root, packId, list, { isOfficial: (f, id) => Object.hasOwn(officialTables[f] ?? {}, id) });
+      } catch (e) {
+        // OVERRIDE_BAD_SHAPE / OVERRIDE_BAD_FILE / 404 包不存在
+        throw packRefusal(e);
+      }
+      return sendJson(res, 200, { ok: true, pack: packId, ...packMetaState(root, packId, officialTables), changed: written.changed });
     }
 
     // set ONE pack's 助战 declaration (`pack.json.support` only — never a `content` entry)
@@ -2133,6 +2283,8 @@ export async function createEditorServer(opts = {}) {
         // 本包自带的外观素材（pack.json 的 `art`，怪物用的是扁平的 spine）：怪物页那一段要用的两个输入，
         // 与干员页同一份（artPackState），免得多一轮请求。
         packArt: packIdsFor(root).map((id) => artPackState(root, id)),
+        // 与干员页同一份 tokenId 候选（`art.tokens` 的键）：怪物页的外观面板里也有 token 那一段。
+        tokenChoices: tokenChoices(root, dataDir),
       });
     }
 

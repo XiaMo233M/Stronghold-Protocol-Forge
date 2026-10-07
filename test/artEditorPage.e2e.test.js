@@ -166,6 +166,80 @@ describe('外观素材那一块：真浏览器（干员页 + 怪物页）', { sk
     }
   });
 
+  // 干员页的第三块：召唤物（`art.tokens`）。表的 id 是**召唤物自己的 id**（`assets.tokens` 的键），不是干员的
+  // `assetsSpine`；`owner` 是原样抄过去的 id。与上面那条同一个包，所以这一条跑完只该留下 `art.tokens`。
+  //
+  // 这一条**故意不填 `assetsSpine`**：召唤物是另一张表、另一个 id，一个用官方模型的干员照样要能给自己召唤
+  // 出来的东西换图。少了这条断言，把那块挂回 `assetsSpine` 的提前返回之后也能全绿（就是「删得掉、加不了」）。
+  test('干员页：召唤物那一块（自己的 id、扁平 spine、owner、保存与删除；不填 assetsSpine 也要在）', async () => {
+    const page = await openPage('index.html');
+    try {
+      await page.waitForSelector('#packList .item', { timeout: 20000 });
+      await page.click('#packList .item');
+      await page.waitForSelector('#opList .item', { timeout: 10000 });
+      await page.click('#opList .item');                           // 「＋ 新建干员」
+      await page.waitForSelector('#sec-look', { timeout: 10000 });
+      // 干员的 id 要真的填上：`owner` 这个按钮写的是 `chess_ws_<slug>_a`，slug 就是它
+      await page.type('#sec-identity input', 'char_ws_hero');
+      // assetsSpine 留空：chars 那一块的提示还在，但召唤物那一块必须照样在
+      await page.waitForSelector('#sec-look .artTokens .tokenId', { timeout: 10000 });
+      assert.equal(await page.evaluate(() => document.querySelector('#sec-look').textContent.includes('先在「assetsSpine」里填')), true,
+        '没填 assetsSpine 时那句提示仍要说清');
+      assert.equal(await page.$('#sec-look .artPanel .artSkel'), null, 'chars 那一侧这时候还不该有骨架下拉');
+
+      // 候选来自服务端（官方 tokens.json 与官方/各包 chess.json 里的 tokens 数组）：`data/tokens.json` 里那些
+      // 官方召唤物 id 必须在里面 —— 这一块绝大多数时候是给一个**已有的**召唤物换模型。
+      const choices = await page.$$eval('#sec-look .artTokens #tokenIdChoices option', (els) => els.map((o) => o.value));
+      assert.ok(choices.includes('token_10000_silent_healrb'), `召唤物候选里该有官方 token id（实际 ${choices.length} 条）`);
+
+      // 填一个新的召唤物 id（手输这条路必须在：新 token 写进 pack.json 之前不在任何清单里）
+      await page.$eval('#sec-look .artTokens .tokenId', (e, v) => {
+        e.value = v;
+        e.dispatchEvent(new Event('input', { bubbles: true }));
+      }, 'token_ws_hero');
+      await page.waitForSelector('#sec-look .artTokens .artSkel', { timeout: 10000 });
+      // owner 是原样抄的 id，界面给一个「用当前干员」按钮（写 `chess_ws_<slug>_a`）
+      await page.click('#sec-look .artTokens .artUseOwner');
+      assert.equal(await page.$eval('#sec-look .artTokens .artOwner', (e) => e.value), 'chess_ws_char_ws_hero_a');
+
+      // 选完 skel 自动填同目录同名的 atlas（与 chars / enemies 同一条硬约束）
+      await page.select('#sec-look .artTokens .artSkel', 'art/op.skel');
+      assert.equal(await page.$eval('#sec-look .artTokens .artAtlas', (e) => e.value), 'art/op.atlas');
+      assert.equal(await page.$eval('#sec-look .artTokens .artTextures', (e) => e.value), 'art/op.png');
+      // anims 只能从骨架里真的有的名字里挑
+      await page.waitForFunction(() => [...document.querySelectorAll('#sec-look .artTokens select')]
+        .some((s) => [...s.options].some((o) => o.value === 'Attack')), { timeout: 10000 });
+      const idle = await page.evaluateHandle(() => [...document.querySelectorAll('#sec-look .artTokens label')]
+        .find((l) => l.textContent === 'idle')?.parentElement.querySelector('select'));
+      await idle.asElement().select('Idle');
+
+      await page.click('#sec-look .artTokens .artSave');
+      const saved = await waitManifest((m) => m.art?.tokens?.token_ws_hero?.spine?.skel === 'art/op.skel');
+      const token = saved.art.tokens.token_ws_hero;
+      assert.equal(token.owner, 'chess_ws_char_ws_hero_a');
+      assert.equal(token.spine.atlas, 'art/op.atlas');
+      assert.deepEqual(token.spine.textures, ['art/op.png']);
+      assert.equal(token.spine.pma, false);
+      assert.equal(token.spine.anims.idle, 'Idle');
+      // `__id`（界面用的「草稿是给谁的」标记）绝不能写进清单
+      assert.equal('__id' in token, false);
+      // 只该多出 tokens 这张表：上面那条测试跑完已经把 chars 删干净了，这里不该又冒出来
+      assert.deepEqual(Object.keys(saved.art), ['tokens']);
+      assert.equal(await page.evaluate((key) => document.querySelector('#sec-look .artDeclared').textContent.includes(key), 'token_ws_hero'), true);
+
+      // 删掉这一条：清单里按文本找到那一行（别拿第一个 `.artDel`，将来多一条声明就会删错人）
+      const delBtn = await page.evaluateHandle((key) => [...document.querySelectorAll('#sec-look .artDeclared .row')]
+        .find((row) => row.querySelector('.n')?.textContent === `tokens.${key}`)?.querySelector('.artDel'), 'token_ws_hero');
+      assert.ok(delBtn.asElement(), '召唤物那条声明在清单里要有一个删除按钮');
+      await delBtn.asElement().click();
+      await waitManifest((m) => !m.art?.tokens?.token_ws_hero);
+      assert.ok(dialogs.some((d) => d.includes('tokens.token_ws_hero')), '删除前要问一次');
+      assert.deepEqual(problems, [], '整段流程里页面不该报任何错');
+    } finally {
+      await page.close();
+    }
+  });
+
   test('怪物页：同一块控件用扁平的 spine（id 就是记录键 enemy_ws_<id>）', async () => {
     const page = await openPage('enemy.html');
     try {
