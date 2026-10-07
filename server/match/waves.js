@@ -378,14 +378,35 @@ function stageTemplateId(gd, stageId, round) {
   return typeof id === 'string' && gd.wave(id) ? id : null;
 }
 
-/** The stage's own boss-round templates (`stage.bossRounds[round][bossId]`), else null. */
+/**
+ * The stage's own boss-round template for the leader this round DREW (`stage.bossRounds[round][bossId]`), else null.
+ *
+ * Only the drawn leader's own entry counts (the owner's report 「协防 boss 战不能正常刷新」). Until 0.7.1 a missing
+ * entry fell back to the first string in the map, so a stage that lists fewer leaders than `mode.bossWeights` has
+ * (hand-written or imported packs; the editor writes all of them) fought a DIFFERENT leader than the round drew: the
+ * shared pool is built from the drawn bossId's bloodPoint (finalAssault.js), so the leader never matched its own HP
+ * bar, and an entry pointing at a normal wave left the round with no leader at all — the pool could never drain and
+ * the round could only end by LP loss / overtime. A missing entry now means "no stage override", i.e. the OFFICIAL
+ * wave for the drawn leader (buildBossWave's `rc.bossTemplates`), which is what the author of a partial map expects.
+ */
 function stageBossTemplateId(gd, stageId, round, bossId) {
   if (!stageId) return null;
   const stage = gd.stage(stageId);
   const perRound = stage && stage.bossRounds && typeof stage.bossRounds === 'object' ? stage.bossRounds[String(round)] : null;
   if (!perRound || typeof perRound !== 'object') return null;
-  const id = typeof perRound[bossId] === 'string' ? perRound[bossId] : Object.values(perRound).find((v) => typeof v === 'string');
+  const id = typeof perRound[bossId] === 'string' ? perRound[bossId] : null;
   return typeof id === 'string' && gd.wave(id) ? id : null;
+}
+
+/**
+ * The leaders a stage's `bossRounds[round]` should list: every bossId the mode can draw for that round. Used by the
+ * workshop validator to warn about a partial map (which now silently uses the official wave for the rest).
+ * @returns {string[]} drawn-capable bossIds (empty when the round is not a leader round)
+ */
+export function stageBossIdsFor(gd, round) {
+  if (!gd || !Number.isInteger(round)) return [];
+  const hidden = gd.hiddenRound != null && round === gd.hiddenRound && round !== gd.bossRound;
+  return Object.keys((hidden ? gd.mode.hiddenBossWeights : gd.mode.bossWeights) || {}).sort();
 }
 
 export function buildNormalWave(gd, rng, factions, round, stageId = null) {
@@ -418,6 +439,9 @@ export function buildBossWave(gd, rng, factions, round, { bossId, solo }, stageI
   const map = rc && rc.bossTemplates && typeof rc.bossTemplates === 'object' ? rc.bossTemplates : {};
   let templateId = stageBossTemplateId(gd, stageId, round, bossId) || (typeof map[bossId] === 'string' ? map[bossId] : null);
   if (!templateId) {
+    // Last resort for data that has no entry for the DRAWN leader at all (the official tables cover every drawable
+    // bossId, so this only fires on a stage whose override names a wave that does not exist — see stageBossTemplateId,
+    // which deliberately never borrows another leader's wave). Some leader beats none: the round still has enemies.
     const first = Object.values(map).find((v) => typeof v === 'string');
     templateId = first || null;
   }

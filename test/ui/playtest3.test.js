@@ -281,7 +281,8 @@ describe('8: 特质 right under the detail card\'s header', () => {
   });
 
   test('the block order', () => {
-    assert.deepEqual(CHESS_SECTIONS, ['head', 'garrison', 'trait', 'stats', 'skill', 'module', 'equip', 'talents', 'actions']);
+    // 'voice' (配音语言, v0.7.1) sits between the talents and the actions: a settings-ish row at the bottom of the card
+    assert.deepEqual(CHESS_SECTIONS, ['head', 'garrison', 'trait', 'stats', 'skill', 'module', 'equip', 'talents', 'voice', 'actions']);
   });
 
   test('a rendered operator card: header, then 特质 (trigger + description), then the rest in CHESS_SECTIONS order', async () => {
@@ -292,7 +293,7 @@ describe('8: 特质 right under the detail card\'s header', () => {
     assert.equal(g.eventType, 'SERVER_PREP_FIN');
     const blocks = ChessDetail({ chess: c, piece: { uid: 7, kind: 'chess', id: c.chessId, golden: true, items: [] }, editable: false, onSell() {}, bonds: [], loadout: null, onBond: null });
     const keys = blocks.map((b) => b.key);
-    assert.deepEqual(keys, ['head', 'garrison', 'trait', 'stats', 'skill', 'module', 'equip', 'talents']);
+    assert.deepEqual(keys, ['head', 'garrison', 'trait', 'stats', 'skill', 'module', 'equip', 'talents', 'voice']);
     assert.equal(blocks[1].props.garrison, g, 'the operator\'s own garrison');
     // the garrison block itself: the 特质 label, the trigger chip and the description
     const gb = blocks[1].type(blocks[1].props);
@@ -303,7 +304,7 @@ describe('8: 特质 right under the detail card\'s header', () => {
     assert.equal(rich.props.text, g.descRaw || g.desc);
     // an operator without a garrison (a summon's chess record may have none) simply starts with the trait
     const bare = ChessDetail({ chess: { ...c, garrisonIds: [] }, piece: null, editable: false, bonds: [], loadout: null });
-    assert.deepEqual(bare.map((b) => b.key), ['head', 'trait', 'stats', 'skill', 'module', 'talents']);
+    assert.deepEqual(bare.map((b) => b.key), ['head', 'trait', 'stats', 'skill', 'module', 'talents', 'voice']);
   });
 
   test('the 特质 chip carries the garrison\'s official type icon (eventTypeIcon) — the spoked 特异化 glyph only on 特异化', async () => {

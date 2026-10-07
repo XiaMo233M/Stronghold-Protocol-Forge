@@ -54,6 +54,7 @@ import { RoomScreen } from './screens/room.js';
 import { GameScreen } from './screens/game.js';
 import { installAudio } from './audio.js';
 import { settingsStore } from './ui/settings.js';
+import { voiceLangFor } from './ui/gameLogic/settings.js';
 import { GuideHost } from './ui/guide.js';
 import { installDeviceSupport } from './ui/device.js';
 import { LoadoutHost } from './screens/loadout.js';
@@ -374,7 +375,12 @@ async function boot() {
   installDiySync({ net });
   net.attachBrowserHooks();
   // Audio: unlock on first gesture, BGM follows the route / match phase (js/audio.js).
-  installAudio({ getManifest: () => data.get('assets'), subscribe: store.subscribe, getState: store.get, selectRoute, settings: settingsStore.get() });
+  // 配音语言 (v0.7.1): read at every line, so switching a dub in 设置 / 干员详情 takes effect on the next line.
+  installAudio({
+    getManifest: () => data.get('assets'), subscribe: store.subscribe, getState: store.get, selectRoute,
+    settings: settingsStore.get(),
+    voiceLangOf: (charId) => voiceLangFor(settingsStore.get(), charId),
+  });
   data.load('assets').catch(() => {});
   // Warm the data cache in the background (missing files are tolerated).
   data.loadAll('config').catch(() => {});

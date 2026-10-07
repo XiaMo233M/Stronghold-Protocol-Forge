@@ -38,6 +38,7 @@ export class BattlePlayers {
       input: p,
     };
     this.players.push(ps);
+    this._teamBoardKeys = null;   // onTeamBoard's cache covers every player: a late one invalidates it
     this._perPlayer[ps.playerId] = {
       killed: 0, total: 0, leaked: [], perfect: true, layerGains: {}, coins: 0,
       damageDealt: 0, bossDamage: 0, healingDone: 0, deaths: 0, unitsEnd: [], unitStats: [],
@@ -89,6 +90,31 @@ export class BattlePlayers {
       keys = ps._boardKeys = new Set();
       for (let br = GEO.FIELD.r0; br <= GEO.FIELD.r1; br++) {
         for (let bc = GEO.FIELD.c0; bc <= GEO.FIELD.c1; bc++) { const [fr, fc] = this._boardTile(ps, br, bc); keys.add(fr * COLS + fc); }
+      }
+    }
+    return keys.has(r * COLS + c);
+  }
+
+  /**
+   * Whether field tile (r, c) lies on the board of ANY player of this battle — the 联防 / boss pair partner's half
+   * included. With a single player this is exactly `onOwnBoard`.
+   *
+   * 突袭's landing reads this (the owner's decision of 2026-10-07, community report 「协防时候突袭干员不能跳到队友的棋盘上」):
+   * on a shared field the leaked enemies are routed ACROSS both halves (escaped_multi enters at col 18 and walks left),
+   * so a member of the left-hand player must be able to redeploy next to an enemy that is still on the partner's half.
+   * What stays forbidden is exactly what no player's board covers: a boss field's hand row 0 / 临时整备区 row 1
+   * (§25.18.1 item 40) and the right half of the ONE-helper 联防 map (item 16.3, escaped_single — nobody's board
+   * reaches it). 乌尔比安's S3 【移动】 keeps `onOwnBoard`: it needs no enemy, so the same relaxation would let it park
+   * on the partner's gate line (§25.17.2).
+   */
+  onTeamBoard(r, c) {
+    let keys = this._teamBoardKeys;
+    if (!keys) {
+      keys = this._teamBoardKeys = new Set();
+      for (const ps of this.players) {
+        for (let br = GEO.FIELD.r0; br <= GEO.FIELD.r1; br++) {
+          for (let bc = GEO.FIELD.c0; bc <= GEO.FIELD.c1; bc++) { const [fr, fc] = this._boardTile(ps, br, bc); keys.add(fr * COLS + fc); }
+        }
       }
     }
     return keys.has(r * COLS + c);

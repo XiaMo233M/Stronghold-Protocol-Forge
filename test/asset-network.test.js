@@ -343,6 +343,13 @@ test('CLI source defaults to direct and retains the 0.1.1 shrink/local-spine fla
     assert.equal(opts.localSpines, true);
     assert.equal(opts.voiceLang, 'jp');
     assert.equal(opts.voiceAll, true);
+    // 多语言配音 (v0.7.1): --voice-langs lists the EXTRA dubs beside the default one, deduplicated and validated
+    assert.deepEqual(parseArgs([]).voiceLangs, [], 'off by default: the four dubs are ~262 MB');
+    assert.deepEqual(parseArgs(['--voice-langs=cn,jp,en,kr']).voiceLangs, ['cn', 'jp', 'en', 'kr']);
+    assert.deepEqual(parseArgs(['--voice-langs=jp,jp,kr']).voiceLangs, ['jp', 'kr'], 'deduplicated');
+    assert.deepEqual(parseArgs(['--voice-langs=cn']).voiceLangs, ['cn'], 'cn may be listed: it is the default one');
+    assert.throws(() => parseArgs(['--voice-langs=de']), /unknown --voice-langs entry de/);
+    assert.throws(() => parseArgs(['--voice-langs=']), /comma separated list/);
   } finally {
     if (old === undefined) delete process.env.SP_ASSET_SOURCE;
     else process.env.SP_ASSET_SOURCE = old;

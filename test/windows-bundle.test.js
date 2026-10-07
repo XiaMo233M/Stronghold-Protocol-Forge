@@ -161,6 +161,12 @@ describe('make-windows-bundle.mjs: 包内说明的措辞', () => {
     assert.match(withVoices, /干员语音（VOICE）/, '要告诉玩家去哪里调');
     assert.match(withVoices, /默认 0\.8/, '0.2.0 起干员语音默认 0.8 = 开，这一点必须写对');
     assert.match(withVoices, /WORKSHOP\.md/, '工坊包自带语音走同一条链路，指一下文档');
+    // 多语言配音 (v0.7.1): a bundle that carries several dubs says so (and where to switch); one dub must not
+    assert.ok(!/配音语言/.test(withVoices), '一种配音时不吹多语言');
+    const multi = bundleReadme({ version: 'v22.23.3', withNode: true, withVoices: true, voiceLangs: ['cn', 'jp', 'en', 'kr'] });
+    assert.match(multi, /4 种配音都在包里/);
+    assert.match(multi, /设置 → 配音语言/);
+    assert.match(multi, /干员详情 → 配音/);
   });
 });
 

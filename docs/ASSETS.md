@@ -20,7 +20,8 @@ npm run assets       # = node tools/vendor.mjs && node tools/fetch-assets.mjs
 | `--offline` | No network. Re-runs post-processing (atlas fixes, skeleton parsing, WOFF2) on what is already on disk, then rebuilds `data/assets.json`. |
 | `--dry-run` | Print the plan (file and model counts, alias notes) and exit. |
 | `--refresh-index` | Re-download the upstream indexes: `audio_data.json`, `charword_table.json` (the 干员战斗语音 slots) and `models_data.json`. |
-| `--voice-lang=cn` | 干员战斗语音 language: `cn` (default) | `jp` | `en` | `kr` — the same file names under `voice_cn/`, `voice/`, `voice_en/`, `voice_kr/`. |
+| `--voice-lang=cn` | The manifest's DEFAULT 干员战斗语音 dub: `cn` (default) | `jp` | `en` | `kr` — these are the CDN's own folder names (`voice_cn/`, `voice/`, `voice_en/`, `voice_kr/`); the local layout is always `audio/voice/<lang>/<charId>/cn_<n>.mp3` (the same file names in every dump, only the folder differs). |
+| `--voice-langs=cn,jp,en,kr` | Download MORE dubs beside the default one (`cn` \| `jp` \| `en` \| `kr`, comma separated). They land in `audio/voiceLangs[lang]` and the game's 设置 → 配音语言 / 干员详情 → 配音 let a player pick one per operator (v0.7.1). About **2,674 files / 66 MB per dub** — the four dubs are ≈ 262 MB. |
 | `--voice-all` | Plan every official voice slot, including the prep-only lines no battle plays (干员报到 / 编入队伍 / 任命队长 — 360 files, one per operator and slot). Off by default: nothing requests them, so planning them only makes every run download more. |
 | `--prune` | Delete files under `public/assets/` that the manifest no longer references, for example after a mapping change. Without this flag they are only listed in the report. `public/assets/local/` (written by `tools/local-extract`) is never pruned. Implies `--allow-shrink`. |
 | `--allow-shrink` | Write `data/assets.json` even when it loses entries the current one has (see "The manifest never shrinks by accident" below). |
@@ -50,6 +51,9 @@ How downloads are fetched:
 - Each source gets 3 attempts with exponential backoff.
 - If `raw.githubusercontent.com` fails, the jsDelivr mirror (`cdn.jsdelivr.net/gh/…`) is tried.
 - There is no mirror for the ArknightsAssets2 `voice` branch, because jsDelivr returns 404 for it.
+- Behind an HTTP proxy, Node's `fetch` ignores the usual environment variables unless `NODE_USE_ENV_PROXY=1` is set:
+  `NODE_USE_ENV_PROXY=1 HTTPS_PROXY=http://127.0.0.1:8080 npm run assets` (otherwise every GitHub download fails with the
+  `[network] GitHub 下载失败` hint and `--asset-source=mirror` is the other way out).
 - A manifest entry with fallbacks (for example an enemy icon that falls back to its base enemy's icon) only moves on to the next alternative after a **definitive 404**. When the primary fails transiently (network error, 5xx or an invalid payload after all retries), no fallback is fetched. The path is listed under `downloadErrors` in the report, and the next run retries the primary.
 - A skeleton that fails to parse is deleted and removed from the ledger, so the next online run downloads it again.
 
@@ -186,12 +190,21 @@ All paths are URL paths relative to the site root, for example `/assets/char/ava
                            // prep-only slots 干员报到 / 编入队伍 / 任命队长 are left out of the plan by default —
                            // nothing requests them and they cost 360 files (19.3 MB) per run — and `--voice-all` adds
                            // them (audio.mjs VOICE_PREP_SLOTS) for the complete official set.
-                           // 创意工坊 packs may ship their own lines for these same slots (pack.json `voices`,
-                           // docs/WORKSHOP.md §1.4): the overlay APPENDS them to the official entry, so a slot whose
-                           // official line is a bare string is normalised to an array first — never replaced. The pack's
-                           // files are served under /workshop-assets/<pack>/… and only `shared/constants.js VOICE_SLOTS`
-                           // (the same twelve) is accepted, so neither the editor nor a hand-written pack can file a
-                           // line that never plays.
+                           // THIS table is the manifest's DEFAULT dub (`voiceLang`, cn unless --voice-lang says
+                           // otherwise). The 创意工坊 overlay merges a pack's own lines in here
+                           // (pack.json `voices`, docs/WORKSHOP.md §1.4): it APPENDS them to the official entry, so a
+                           // slot whose official line is a bare string is normalised to an array first — never replaced.
+                           // The pack's files are served under /workshop-assets/<pack>/… and only
+                           // `shared/constants.js VOICE_SLOTS` (the same twelve) is accepted, so neither the editor nor
+                           // a hand-written pack can file a line that never plays.
+    voiceLang: 'cn',                                       // which dub `voice` holds (shared/constants.js VOICE_LANGS)
+    voiceLangs: { [lang]: { [charId]: { …same slots… } } }, // the OTHER dubs, one table per language, decided by the
+                           // player (设置 → 配音语言, 干员详情 → 配音 overrides it per operator; v0.7.1). Planned with
+                           // `--voice-langs=cn,jp,en,kr`: every dub carries the same file names under its own folder
+                           // (audio/voice/<lang>/<charId>/cn_<n>.mp3), so a language is a folder swap. A dub this
+                           // machine did not download — or a single line the official dump lacks for that dub — is
+                           // simply absent, and public/js/audio.js voiceLinesFor falls back to the default table:
+                           // a player never goes silent because a dub is incomplete.
     sfx: {
       ui:     { click, back, confirm, tab, pick, drop, error, buy, sell, income, refresh, freeze, levelup,
                 merge, equip, itemMerge, bondUp, artPlace, ready, timer, draft, yourTurn, yourTurnCircle,

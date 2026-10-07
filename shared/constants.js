@@ -6,7 +6,7 @@ export const PROTOCOL_VERSION = 1;
 /** Release version shown to players (title screen, server banner, /healthz). Kept equal to package.json "version"
  * (test/version.test.js); PROTOCOL_VERSION above is the separate wire-format number. The release TAG spells both halves
  * out — `v<this>-<upstream>` (README 「版本号」) — because this one has to stay a plain three-part semver. */
-export const APP_VERSION = '0.7.0';
+export const APP_VERSION = '0.7.1';
 /** A development build (the public `dev` branch): the title screen, the boot banner and the README say so, and
  * tools/package.mjs refuses to build a release zip from it without --allow-dev. */
 export const DEV_BUILD = /-dev$/.test(APP_VERSION);
@@ -23,6 +23,18 @@ export const DEV_BUILD = /-dev$/.test(APP_VERSION);
  */
 export const VOICE_SLOTS = Object.freeze(['start', 'faceEnemy', 'select', 'place',
   'skill1', 'skill2', 'skill3', 'skill4', 'resultFour', 'resultThree', 'resultTwo', 'resultLose']);
+
+/**
+ * 配音语言 (v0.7.1, owner's request 「不同干员可以切换不同的配音语言」): the dubs the official voice dump ships, in the order
+ * the UI shows them. The manifest's `audio.voice` holds the default dub and `audio.voiceLangs[lang]` the others
+ * (`tools/assets/plan.mjs`); a player picks one for the whole game in 设置 → 干员语音, and any operator may override it
+ * (`settings.voiceLangByChar`, 干员详情 → 配音). `cn` is the default: it is the dub the game shipped before this
+ * feature and the one every manifest has.
+ */
+export const VOICE_LANGS = Object.freeze(['cn', 'jp', 'en', 'kr']);
+export const DEFAULT_VOICE_LANG = 'cn';
+/** Language names in their own language — never translated (that is how a language picker is read). */
+export const VOICE_LANG_NAMES = Object.freeze({ cn: '中文', jp: '日本語', en: 'English', kr: '한국어' }); // i18n-ignore: 语言名按母语写法显示
 
 export const MAX_SEATS = 4;
 /**

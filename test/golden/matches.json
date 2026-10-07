@@ -1142,7 +1142,7 @@
           "title": {"id":"comment_6","name":"挥金如土","picId":"comment_icon_6","text":"消耗资金最多"},
           "trophies": 1,
           "reward": 170,
-          "stats": {"activatedLayers":0,"bossDamage":0,"dmgDealt":1207746,"gold":75,"itemsEquipped":9,"kills":77,"leaks":39,"lpLost":35,"merges":1,"perfectRounds":5,"refreshes":12},
+          "stats": {"activatedLayers":0,"bossDamage":0,"dmgDealt":1199483,"gold":75,"itemsEquipped":9,"kills":77,"leaks":39,"lpLost":35,"merges":1,"perfectRounds":5,"refreshes":12},
           "lineup": [],
           "bonds": ["arcaneShip 0/4","kazimierzShip 0/21","kjeragShip 0/2","preciShip 0/30","sargonShip 0/4","steadShip 0/20","swiftShip 0/18"]
         },
@@ -1156,7 +1156,7 @@
           "title": {"id":"comment_5","name":"万事俱备","picId":"comment_icon_5","text":"装备配发数量最多"},
           "trophies": 2,
           "reward": 213,
-          "stats": {"activatedLayers":0,"bossDamage":0,"dmgDealt":2771253,"gold":102,"itemsEquipped":11,"kills":137,"leaks":31,"lpLost":31,"merges":3,"perfectRounds":5,"refreshes":7},
+          "stats": {"activatedLayers":0,"bossDamage":0,"dmgDealt":2779516,"gold":102,"itemsEquipped":11,"kills":137,"leaks":31,"lpLost":31,"merges":3,"perfectRounds":5,"refreshes":7},
           "lineup": [],
           "bonds": ["deputShip 0/48","emptyShip 0/2","investShip 0/2","kazimierzShip 0/4","kjeragShip 0/72","preciShip 0/16","raidShip 0/14","skillfulShip 0/21","soloShip 0/14","steadShip 0/22","suntShip 0/18","swiftShip 0/18","victoriaShip 0/64","visiShip 0/4","yanShip 0/12"]
         },

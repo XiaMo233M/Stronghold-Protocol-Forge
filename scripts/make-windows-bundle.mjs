@@ -418,19 +418,26 @@ export function bundleLaunchers() {
  * 包内说明。带不带便携版 Node 会影响三处措辞（是否需要预装 Node、许可证在哪、目录结构），
  * 所以先算好片段再拼，别在模板里嵌套引号。
  */
-export function bundleReadme({ version, withNode, withVoices = false }) {
+export function bundleReadme({ version, withNode, withVoices = false, voiceLangs = [] }) {
   const nodeNeed = withNode
     ? `目标机器**不需要安装 Node**：包内的 \`node\\node.exe\` 就是便携版 Node ${version}。`
     : '这个包**没有带便携版 Node**，请先在这台机器上安装 Node 22 或 24（LTS）。';
   const nodeLicence = withNode ? ' 与 `node\\LICENSE-node.txt`（Node 自己的 MIT 许可证）' : '';
   // The voice lines ship with the assets (`public/assets/audio/voice/**`), so whether this bundle carries them is a
-  // build-time fact — a README that promises them from a checkout without them would be a lie.
+  // build-time fact — a README that promises them from a checkout without them would be a lie. `voiceLangs` is the same
+  // kind of fact for 多语言配音 (v0.7.1): a bundle with one dub must not advertise a language switch.
+  const dubLine = (Array.isArray(voiceLangs) ? voiceLangs : []).length > 1
+    ? `
+**${voiceLangs.length} 种配音都在包里**（${voiceLangs.join(' / ')}）：**设置 → 配音语言** 选全局默认，任何干员的
+**干员详情 → 配音** 还能单独换一种（例如中文界面配日文语音），试听就在按钮上。
+`
+    : '';
   const voiceNote = withVoices
     ? `
 **角色语音台词已经在包里**（行动出发 / 行动开始 / 选中 / 部署 / 作战中 1-4，以及结算时各自队伍 MVP 的那一句）。
 **默认就能听见**：音量在 **设置 → 干员语音（VOICE）**（默认 0.8）—— 音效与语音是两条独立通道，调一个不会影响另一个。
 工坊包也能自带语音（助战干员的配音），装包后走同一条链路，见 \`app\\docs\\WORKSHOP.md\`。
-`
+${dubLine}`
     : '';
   const tree = withNode
     ? `node\\node.exe            便携版 Node ${version}（官方 x64，已经 sha256 校验）
@@ -579,11 +586,15 @@ async function main() {
   console.log(`    完成：${assetFiles} 个文件 / ${MB(assetBytes)}`);
 
   // 2b) 角色语音台词：0.2.0 的布局是 public/assets/audio/voice/<语言>/<干员>/*.mp3（上游 0.1.x 那套 voice_cn/
-  // 目录已经废弃）。靠 data/assets.json 的 audio.voice 映射才会被客户端采用 —— 两者要么一起进包，要么都不进。
+  // 目录已经废弃）。靠 data/assets.json 的 audio.voice / audio.voiceLangs 映射才会被客户端采用 —— 两者要么一起进包，
+  // 要么都不进。多语言配音 (v0.7.1)：这里报出包里真有哪几种语言，免得说明书吹了包里没有的东西。
   const voiceDir = path.join(ROOT, 'public', 'assets', 'audio', 'voice');
   const withVoices = fs.existsSync(voiceDir);
+  const voiceDubs = withVoices
+    ? fs.readdirSync(voiceDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort()
+    : [];
   console.log(withVoices
-    ? '    带上角色语音台词（public/assets/audio/voice/**；游戏里「设置 → 干员语音」默认 0.8 = 开）'
+    ? `    带上角色语音台词（public/assets/audio/voice/{{${voiceDubs.join(',')}}}；游戏里「设置 → 干员语音」默认 0.8 = 开，「配音语言」逐干员可换）`
     : '    未包含角色语音台词（想打进包里先运行 node tools/fetch-assets.mjs）');
 
   // 2c) 3D 棋盘贴图的清单（本机提取过才有）：贴图在 public/assets/local 里，靠这份 JSON 才会被游戏采用。
@@ -627,7 +638,7 @@ async function main() {
   }
   // The voice lines are copied as part of `public/assets` above; the README says so only when they are really there
   // (v0.3.0 ships them — see docs/WINDOWS.md), so a checkout without them produces an honest bundle.
-  await fsp.writeFile(path.join(out, 'README-开箱即用.md'), bundleReadme({ version: nodeVersion, withNode: !!o.node, withVoices }), 'utf8');
+  await fsp.writeFile(path.join(out, 'README-开箱即用.md'), bundleReadme({ version: nodeVersion, withNode: !!o.node, withVoices, voiceLangs: voiceDubs }), 'utf8');
 
   const total = await dirSize(out);
   console.log(`\n✔ 便携包已生成：${out}\n  ${total.files} 个文件 / ${MB(total.bytes)}`);

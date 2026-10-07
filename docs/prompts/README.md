@@ -185,7 +185,7 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
 
 | 规则 | 说明 |
 |---|---|
-| **槽位只有六个** | `start`（行动出发/开始）`select`（选中）`deploy`（部署）`battle`（作战中）`win`（胜利结算）`lose`（失败结算），即 `shared/constants.js` 的 `VOICE_SLOTS`。写别的槽位整包被拒（`VOICE_SLOT_UNKNOWN`） |
+| **槽位只有十二个** | `start`（行动出发）`faceEnemy`（行动开始）`select`（选中）`place`（部署）`skill1`–`skill4`（作战中 1-4）`resultFour` / `resultThree` / `resultTwo` / `resultLose`（四种结算），即 `shared/constants.js` 的 `VOICE_SLOTS`。写别的槽位整包被拒（`VOICE_SLOT_UNKNOWN`） |
 | **一个槽位可以多条** | 客户端每次随机一条，且不会连续重复；同一个词给几段不同语气是正常用法 |
 | **路径相对 `assets/`** | 例如 `voice/select1.mp3` 指 `<pack>/assets/voice/select1.mp3`。绝对路径、`..`、`.`、反斜杠、盘符都会被拒 |
 | **有 `assets/` 就必须有 `license`** | 音频也是素材，授权由包作者承担（`ASSETS_NEED_LICENSE`） |

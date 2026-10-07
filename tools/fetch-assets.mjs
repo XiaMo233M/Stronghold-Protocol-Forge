@@ -92,7 +92,11 @@ const HELP = `Usage: node tools/fetch-assets.mjs [options]
   --offline         no network: post-process what is on disk and rebuild data/assets.json
   --dry-run         print the plan and exit
   --refresh-index   re-download the audio_data.json / charword_table.json / models_data.json indexes
-  --voice-lang=cn   operator battle voice language: cn (default) | jp | en | kr
+  --voice-lang=cn   the manifest's default operator battle voice dub: cn (default) | jp | en | kr
+  --voice-langs=cn,jp,en,kr
+                    download MORE dubs beside the default one (comma separated, cn | jp | en | kr). They land in
+                    audio.voiceLangs[lang][charId][slot] and the game's 干员语音 setting lets each operator pick one.
+                    Every dub is the same file names under its own folder: ≈ 2674 files / 66 MB per dub.
   --voice-all       plan every official voice slot, including the prep-only lines no battle plays
                     (干员报到 / 编入队伍 / 任命队长; 360 files / 19.3 MB more per run — off by default)
   --prune           delete files under public/assets that the manifest no longer references
@@ -113,10 +117,10 @@ failures. Only explicitly enabled GitHub downloads use the third-party proxy.`;
 /**
  * Parse CLI flags.
  * @param {string[]} argv
- * @returns {{concurrency:number, force:boolean, offline:boolean, dryRun:boolean, refreshIndex:boolean, prune:boolean, allowShrink:boolean, addOnly:boolean, localSpines:boolean, voiceLang:string, voiceAll:boolean, help:boolean, source:string}}
+ * @returns {{concurrency:number, force:boolean, offline:boolean, dryRun:boolean, refreshIndex:boolean, prune:boolean, allowShrink:boolean, addOnly:boolean, localSpines:boolean, voiceLang:string, voiceLangs:string[], voiceAll:boolean, help:boolean, source:string}}
  */
 export function parseArgs(argv) {
-  const o = { concurrency: 16, force: false, offline: false, dryRun: false, refreshIndex: false, prune: false, allowShrink: false, addOnly: false, localSpines: false, voiceLang: 'cn', voiceAll: false, help: false, source: process.env.SP_ASSET_SOURCE || 'direct' };
+  const o = { concurrency: 16, force: false, offline: false, dryRun: false, refreshIndex: false, prune: false, allowShrink: false, addOnly: false, localSpines: false, voiceLang: 'cn', voiceLangs: [], voiceAll: false, help: false, source: process.env.SP_ASSET_SOURCE || 'direct' };
   for (const a of argv) {
     const [k, v] = a.split('=');
     if (k === '--concurrency') o.concurrency = Math.max(1, Math.min(64, parseInt(v, 10) || 16));
@@ -130,6 +134,12 @@ export function parseArgs(argv) {
     else if (k === '--add-only') o.addOnly = true;
     else if (k === '--local-spines') o.localSpines = true;
     else if (k === '--voice-lang') { if (!VOICE_DIRS[v]) throw new Error(`unknown --voice-lang ${v} (cn | jp | en | kr)`); o.voiceLang = v; }
+    else if (k === '--voice-langs') {
+      const list = String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
+      if (!list.length) throw new Error('--voice-langs needs a comma separated list (cn | jp | en | kr)');
+      for (const l of list) if (!VOICE_DIRS[l]) throw new Error(`unknown --voice-langs entry ${l} (cn | jp | en | kr)`);
+      o.voiceLangs = [...new Set(list)];
+    }
     else if (k === '--voice-all') o.voiceAll = true;
     else if (k === '--help' || k === '-h') o.help = true;
     else throw new Error(`unknown option ${a}\n${HELP}`);
@@ -253,6 +263,7 @@ function countStats(m, bytes, files) {
     ui: Object.keys(m.ui || {}).length,
     sfxUnits: Object.keys(m.audio?.sfx?.units || {}).length,
     voiceChars: Object.keys(m.audio?.voice || {}).length,
+    voiceLangs: Object.fromEntries(Object.entries(m.audio?.voiceLangs || {}).map(([l, t]) => [l, Object.keys(t || {}).length])),
   };
 }
 
@@ -329,6 +340,7 @@ async function main() {
   const localTokenSpines = await syncLocalSpines(opts, 'token');
   const plan = buildPlan({
     assets07, ops03, enemies05, maps05, audio, modelsData, charword, voiceLang: opts.voiceLang,
+    voiceLangs: opts.voiceLangs,
     // default: only the slots a battle can play (plan.mjs VOICE_BATTLE_SLOTS); --voice-all takes the whole official set
     voiceSlots: opts.voiceAll ? null : undefined,
     extraEnemyIds: Object.keys(dataEnemies || {}),
@@ -344,7 +356,8 @@ async function main() {
     `(${Object.keys(plan.template.chars).length} chars, ${Object.keys(plan.template.enemies).length} enemies, ` +
     `${Object.keys(plan.template.tokens).length} tokens, ${Object.keys(plan.template.ui).length} UI sprites, ` +
     `${Object.keys(plan.template.audio.sfx.units).length} units with SFX, ` +
-    `${Object.keys(plan.template.audio.voice).length} operators with ${opts.voiceLang.toUpperCase()} voice)`);
+    `${Object.keys(plan.template.audio.voice).length} operators with ${opts.voiceLang.toUpperCase()} voice` +
+    `${opts.voiceLangs.length ? ` + dubs ${opts.voiceLangs.filter((l) => l !== opts.voiceLang).map((l) => l.toUpperCase()).join('/')}` : ''})`);
   if (opts.dryRun) {
     for (const n of plan.notes) log(`  note: ${n}`);
     return 0;
@@ -434,7 +447,8 @@ async function main() {
   log(`bonds ${s.bonds} · items ${s.items} · bands ${s.bands} · skill icons ${s.skills} · UI ${s.ui} · units with SFX ${s.sfxUnits}`);
   const overlays = (o) => Object.values(o || {}).filter((e) => e?.spineLocal).length;
   log(`local-client models (spineLocal, drawn when extracted): enemies ${overlays(manifest.enemies)} · tokens ${overlays(manifest.tokens)}`);
-  log(`operator battle voice: ${s.voiceChars} charIds (--voice-lang=${opts.voiceLang})`);
+  log(`operator battle voice: ${s.voiceChars} charIds, dub ${opts.voiceLang}` +
+    `${Object.keys(s.voiceLangs || {}).length ? ` (+${Object.entries(s.voiceLangs).map(([l, n]) => `${l} ${n}`).join(', ')})` : ''}`);
   log(`fonts: ${Object.values(fonts.files).map((f) => f.woff2 || f.original).join(', ') || 'none'}`);
   if (resolved.fallbacks.length) { log(`fallbacks used (${resolved.fallbacks.length}):`); for (const f of resolved.fallbacks.slice(0, 20)) log(`  ${f}`); }
   if (downloadErrors.length) log(`download errors (${downloadErrors.length}, re-run to retry): ${downloadErrors.slice(0, 10).join(', ')}`);

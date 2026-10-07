@@ -295,7 +295,10 @@ export function collectEnemyIds({ assets07, enemies05, maps05, ops03 }) {
  * @param {ReturnType<import('./audio.mjs').indexAudio>} p.audio indexed audio_data.json
  * @param {any} p.modelsData Ark-Models models_data.json
  * @param {any} [p.charword] parsed excel/charword_table.json — the operators' official voice slots (voice)
- * @param {string} [p.voiceLang] voice dump to plan: cn (default) | jp | en | kr
+ * @param {string} [p.voiceLang] the default voice dub to plan: cn (default) | jp | en | kr → `audio.voice`
+ * @param {string[]} [p.voiceLangs] further dubs to download into the parallel `audio.voiceLangs[lang][charId][slot]`.
+ *   Every dub uses the CN file names under its own folder (voiceAlt); `voiceLang` is never planned twice, and a dub
+ *   whose files are missing on this machine is dropped by resolveTemplate, so a partial download degrades gracefully.
  * @param {Iterable<string>|null} [p.voiceSlots] which voice slots to plan: VOICE_BATTLE_SLOTS (default) plans only the
  *   lines a battle can play, null plans every slot of audio.mjs VOICE_SLOTS (`--voice-all`). The prep-only slots
  *   (干员报到 / 编入队伍 / 任命队长) are never requested by the client and cost 360 files / 19.3 MB of downloads.
@@ -316,7 +319,7 @@ export function collectEnemyIds({ assets07, enemies05, maps05, ops03 }) {
  * @returns {{ template: any, models: Map<string, any>, notes: string[] }}
  */
 export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsData, charword = null, voiceLang = 'cn',
-  voiceSlots = VOICE_BATTLE_SLOTS,
+  voiceLangs = null, voiceSlots = VOICE_BATTLE_SLOTS,
   extraEnemyIds = [], extraTokenIds = [], extraHandbook = {}, localEnemySpines = {}, localTokenSpines = {}, extraOperators = {},
   moduleTypes = [] }) {
   const notes = [];
@@ -612,7 +615,7 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
     modules[t] = leaf(alt(`module/${safeName(t).toLowerCase()}.png`, [...new Set([t, t.toLowerCase()])].map((n) => joinUrl(RAW.aa2, `arts/ui/uniequiptype/${n}.png`))));
   }
 
-  // --- 干员战斗语音 (excel/charword_table.json → audio.voice) ---------------------------------------------
+  // --- 干员战斗语音 (excel/charword_table.json → audio.voice / audio.voiceLangs) --------------------------
   // The official lines of every operator the mode can field, for the slots a battle can actually play: 行动出发 start /
   // 行动开始 faceEnemy / 选中干员 select / 部署 place / 作战中1-4 skillN / 结算 result* (charword `placeType`,
   // audio.mjs VOICE_BATTLE_SLOTS). A slot with several lines stays an array — the client draws one at random
@@ -621,20 +624,43 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
   // The three prep-only slots (干员报到 gacha / 编入队伍 squad / 任命队长 squadFirst) are NOT planned by default: the
   // client never requests them, and downloading them adds 360 files / 19.3 MB to every `npm run assets` — pass --voice-all for
   // the complete official set (`voiceSlots: null`, reviewer note on the voice PR).
-  const voice = {};
-  for (const [charId, slots] of indexVoice(charword, VOICE_ID_LANG, voiceSlots)) {
-    if (!chars[charId]) continue;            // only the operators this game can field (`chars`: the 138 pool charIds and the 自选 picks)
-    const v = {};
-    for (const [slot, assets] of Object.entries(slots)) {
-      // one leaf per line (部署1 / 部署2 …): an array stays an array so the client can draw one — chaining them as
-      // alternatives of a single leaf would keep only the first line that landed on disk.
-      const lines = assets.map((a) => leaf(voiceAlt(a, voiceLang))).filter(Boolean);
-      if (!lines.length) continue;
-      v[slot] = lines.length === 1 ? lines[0] : lines;
+  //
+  // 多语言 (v0.7.1): every dub has the SAME file names under its own folder — the slot numbering is always read from the
+  // zh_CN table (`VOICE_ID_LANG`) and voiceAlt only swaps the folder (`audio/voice/<lang>/…`, CDN `VOICE_DIRS[lang]`).
+  // `voiceLang` is the manifest's default dub and lands in `audio.voice` (the shape every older consumer knows);
+  // `voiceLangs` plans the OTHER dubs into the parallel `audio.voiceLangs[lang][charId][slot]`. A dub whose files are
+  // missing on this machine resolves to nothing and is dropped (`resolveTemplate`), so a partial download degrades —
+  // the client then falls back to the default dub.
+  const voiceTables = new Map();
+  const voiceTable = (lang) => {
+    if (voiceTables.has(lang)) return voiceTables.get(lang);
+    const table = {};
+    for (const [charId, slots] of indexVoice(charword, VOICE_ID_LANG, voiceSlots)) {
+      if (!chars[charId]) continue;            // only the operators this game can field (`chars`: the 138 pool charIds and the 自选 picks)
+      const v = {};
+      for (const [slot, assets] of Object.entries(slots)) {
+        // one leaf per line (部署1 / 部署2 …): an array stays an array so the client can draw one — chaining them as
+        // alternatives of a single leaf would keep only the first line that landed on disk.
+        const lines = assets.map((a) => leaf(voiceAlt(a, lang))).filter(Boolean);
+        if (!lines.length) continue;
+        v[slot] = lines.length === 1 ? lines[0] : lines;
+      }
+      if (Object.keys(v).length) table[charId] = v;
     }
-    if (Object.keys(v).length) voice[charId] = v;
-  }
+    voiceTables.set(lang, table);
+    return table;
+  };
+  const voice = voiceTable(voiceLang);
   if (!Object.keys(voice).length) notes.push('battle voice: charword_table.json has no slots (index missing?)');
+  const extraLangs = [...new Set((Array.isArray(voiceLangs) ? voiceLangs : [])
+    .filter((l) => typeof l === 'string' && l in VOICE_DIRS && l !== voiceLang))].sort();
+  const voiceLangsTable = {};
+  for (const lang of extraLangs) {
+    const t = voiceTable(lang);
+    // planned either way (the files are what the client needs); resolveTemplate drops the dub when nothing landed
+    voiceLangsTable[lang] = t;
+    if (!Object.keys(t).length) notes.push(`battle voice: ${lang} has no slots (index missing?)`);
+  }
 
   const template = {
     chars, enemies, tokens, bonds, items, bands, skills, skillsById, modules, ui, prof,
@@ -642,6 +668,9 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
       bgm,
       bossBgm: Object.fromEntries(Object.entries(bossBgm).sort(([a], [b]) => a.localeCompare(b, 'en', { numeric: true }))),
       voice,
+      // which dub `voice` holds (the client's fallback reads it) and the other dubs beside it
+      voiceLang,
+      voiceLangs: voiceLangsTable,
       sfx: { ui: sfxUi, battle: sfxBattle, units: unitsSfx },
     },
   };

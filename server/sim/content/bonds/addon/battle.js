@@ -33,9 +33,11 @@
 //   助力 deputShip     all operators DEF +(base + per·L), redeploy time ×(1 + respawn_time)
 //   突袭 raidShip      member idle ≥ no_attack_duration s (or skill ready — a passive skill that is on counts, GitHub
 //                      #49, and so does a deploy-timed skill while it runs, #109) with no enemy in range → "保留技力立即再部署"
-//                      next to the most advanced ground enemy it can reach: on a free tile of its own board (Battle.onOwnBoard:
-//                      never a boss field's hand / 临时整备区 rows, never the other half of a 联防 or boss field — community
-//                      reports of 2026-10-06, items 40 and 16.3) its position may be deployed
+//                      next to the most advanced ground enemy it can reach: on a free tile of a board of this battle
+//                      (Battle.onTeamBoard: never a boss field's hand / 临时整备区 rows, never the half of a ONE-helper
+//                     联防 map nobody's board covers — community reports of 2026-10-06, items 40 and 16.3 — but the
+//                     PARTNER's half of a co-op field yes, owner's decision of 2026-10-07: the enemies walk across both
+//                      halves) its position may be deployed
 //                      on from which its range covers that enemy (GitHub issue #51 [ASSUMED]: the first of the 8 most
 //                      advanced that has such a tile; none → it stays and the next poll looks again, never a jump that
 //                      hits nothing) — for a melee member that blocks, a tile where its block applies first (ground
@@ -271,12 +273,14 @@ function raidReach(u) {
 /**
  * Landing tile [row, col] of a jump to enemy `e`, or null: a tile from which the member's range (`reach`, raidReach)
  * covers the enemy's body (a huge enemy: any tile it occupies — body.js), within RAID_SEARCH tiles (Chebyshev) of the
- * enemy, inside the field rect and on the member's own board (Battle.onOwnBoard — "再部署" goes where its player deploys:
- * never a boss field's hand row 0 or 临时整备区 row 1, both inside BOSS_RECT and buildable high ground, nor the half of the
- * 联防 or boss field that is not its player's; community reports of 2026-10-06, items 40 and 16.3: a ranged member landed
- * on the 临时整备区 row of a solo leader round, and on the right half of the one-helper 联防 map), that the member's
- * position may be deployed on (grid.canStand: never the 深水区 —
- * player report #3 after 0.1.0 —, and for a melee member low ground only, never a 高台: GitHub #148) and that is free
+ * enemy, inside the field rect and on a board of this battle (Battle.onTeamBoard — "再部署" goes where a player deploys,
+ * so a boss field's hand row 0 and 临时整备区 row 1, both inside BOSS_RECT and buildable high ground, are never a
+ * landing tile, nor is the half of the ONE-helper 联防 map nobody's board covers: community reports of 2026-10-06,
+ * items 40 and 16.3). The PARTNER's half of a co-op field IS a landing tile (owner's decision of 2026-10-07): the leaked
+ * enemies walk across both halves, so the left-hand member of a 联防 or paired boss round must be able to jump after
+ * them; a member of a lone-helper field has no other board and stays where it did. The tile must also be one the
+ * member's position may be deployed on (grid.canStand: never the 深水区 —
+ * player report #3 after 0.1.0 —, and for a melee member low ground only, never a 高台: GitHub #148) and be free
  * (Battle.isReservedTile: no living unit, no knocked-out operator's body — player report F5 —, no waiting piece's tile).
  * A melee member that blocks takes a tile where its block applies first — ground units pass it (not a 围墙 / 围栏 tile,
  * where a unit blocks no ground enemy: Battle._blockerFor) and an enemy ground path runs through it
@@ -299,7 +303,7 @@ function raidTile(battle, u, e, reach) {
     for (let i = 0; i < reach.length; i += 2) {
       const r = br - reach[i], c = bc - reach[i + 1], dr = r - er, dc = c - ec;
       if (Math.abs(dr) > RAID_SEARCH || Math.abs(dc) > RAID_SEARCH) continue;
-      if (!battle.grid.inRect(r, c) || !battle.onOwnBoard(u.player, r, c) || !battle.grid.canStand(r, c, { ranged }) || battle.isReservedTile(r, c)) continue;
+      if (!battle.grid.inRect(r, c) || !battle.onTeamBoard(r, c) || !battle.grid.canStand(r, c, { ranged }) || battle.isReservedTile(r, c)) continue;
       const t = r * COLS + c;
       const p = path && battle.grid.tile(r, c).pass === 'ALL' && (path.has(t) || body.includes(t)) ? 0 : 1;   // its block applies
       const d = Math.max(Math.abs(dr), Math.abs(dc)) + 0.01 * (Math.abs(dr) + Math.abs(dc));

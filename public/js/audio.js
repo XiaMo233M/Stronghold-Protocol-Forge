@@ -312,6 +312,27 @@ export function resultSpeaker(pp, random = Math.random, charOf = null) {
   return pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))].id;
 }
 
+/**
+ * The lines of one slot in the dub a unit should speak (v0.7.1, 多语言配音): the chosen dub's own entry when the
+ * manifest carries it, else the manifest's default dub — `audio.voice`, whose language `audio.voiceLang` names
+ * (`tools/assets/plan.mjs`; every dub has the same file names under `audio/voice/<lang>/`). A dub that was never
+ * downloaded is simply absent, so the game falls back to the default voice instead of going silent (the owner's rule:
+ * never silently drop a sound). Pure: the caller draws one line out of an array.
+ * @param {any} manifest data/assets.json
+ * @param {string} charId e.g. 'char_263_skadi'
+ * @param {string} slot one of VOICE_SLOTS
+ * @param {'cn'|'jp'|'en'|'kr'|null} [lang] the unit's dub (null/absent = the manifest's default one)
+ * @returns {string|string[]|null} a URL, the slot's lines, or null when neither table has the slot
+ */
+export function voiceLinesFor(manifest, charId, slot, lang = null) {
+  const a = manifest?.audio;
+  if (!a || typeof charId !== 'string' || typeof slot !== 'string') return null;
+  const own = lang ? a.voiceLangs?.[lang]?.[charId]?.[slot] : undefined;
+  const line = own !== undefined ? own : a.voice?.[charId]?.[slot];
+  if (typeof line === 'string' && line) return line;
+  return Array.isArray(line) && line.length ? line : null;
+}
+
 /** Concurrency + cooldown gate for battle SFX. Pure (time is passed in). */
 /** Gestures that may unlock audio: iOS Safari only accepts touchend / click / keydown; pointerdown covers the rest. */
 const UNLOCK_EVENTS = ['pointerdown', 'touchend', 'click', 'keydown'];
@@ -442,6 +463,8 @@ export class AudioManager {
    */
   constructor(opts = {}) {
     this.getManifest = typeof opts.getManifest === 'function' ? opts.getManifest : () => null;
+    /** The dub a unit speaks (settings 配音语言, per-operator overrides included): injected by main.js; null ⇒ default. */
+    this.voiceLangOf = typeof opts.voiceLangOf === 'function' ? opts.voiceLangOf : () => null;
     this.random = typeof opts.random === 'function' ? opts.random : Math.random;   // a unit sound's chance (mix.p)
     this.win = opts.win ?? (typeof window !== 'undefined' ? window : null);
     this.ctx = null;
@@ -826,17 +849,20 @@ export class AudioManager {
    * Play an operator's battle line (`audio.voice[charId][slot]`; a slot with several lines draws one at random).
    * Only in battle: every caller is a running battle's own event stream or its settlement (user request — the 休整期
    * is silent). The line must pass VoiceGate: one at a time, a global gap, a per-unit cooldown, higher priority wins.
+   * The dub is the unit's own (`this.voiceLangOf`, settings 配音语言) with the manifest's default as fallback.
    * @param {string} charId e.g. 'char_263_skadi'
    * @param {'start'|'faceEnemy'|'select'|'place'|'skill1'|'skill2'|'skill3'|'skill4'|'squad'|'squadFirst'
    *   |'resultFour'|'resultThree'|'resultTwo'|'resultLose'|'gacha'} slot
-   * @param {{ unitKey?: string|number|null, volume?: number }} [o] `unitKey` = the cooldown key (a battle unit id)
+   * @param {{ unitKey?: string|number|null, volume?: number, lang?: string }} [o] `unitKey` = the cooldown key (a battle
+   *   unit id); `lang` overrides the injected setting (the editor's audition uses it)
    * @returns {boolean} whether such a line exists and started
    */
   voice(charId, slot, o = {}) {
     try {
       if (!this.ctx || !this.voiceGain || this.volumes.muted || this.volumes.voice <= 0) return false;
       if (typeof charId !== 'string' || typeof slot !== 'string') return false;
-      const line = this.getManifest()?.audio?.voice?.[charId]?.[slot];
+      const lang = typeof o.lang === 'string' && o.lang ? o.lang : this.voiceLangOf(charId);
+      const line = voiceLinesFor(this.getManifest(), charId, slot, lang);
       const url = Array.isArray(line) ? line[Math.floor(Math.random() * line.length)] : line;
       if (typeof url !== 'string' || !url) return false;
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -1039,11 +1065,14 @@ export const audio = new AudioManager({ getManifest: () => manifestGetter() });
 /**
  * Wire the singleton to the app (called once by main.js): manifest source, settings and store-driven BGM.
  * @param {{ getManifest: () => any, subscribe: (fn: (s:any, prev:any) => void) => () => void, getState: () => any,
- *   selectRoute: (s:any) => string, settings?: { bgm:number, sfx:number, voice:number, muted:boolean } }} deps
+ *   selectRoute: (s:any) => string, settings?: { bgm:number, sfx:number, voice:number, muted:boolean },
+ *   voiceLangOf?: (charId: string) => (string|null) }} deps `voiceLangOf` reads the player's 配音语言 setting
+ *   (ui/gameLogic/settings.js voiceLangFor) at play time — a settings change needs no re-install
  */
 export function installAudio(deps) {
   try {
     manifestGetter = typeof deps?.getManifest === 'function' ? deps.getManifest : manifestGetter;
+    if (typeof deps?.voiceLangOf === 'function') audio.voiceLangOf = deps.voiceLangOf;
     audio.install();
     if (deps?.settings) audio.setVolumes(deps.settings);
     if (typeof deps?.subscribe === 'function' && typeof deps?.getState === 'function') {

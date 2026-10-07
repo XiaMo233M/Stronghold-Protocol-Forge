@@ -125,6 +125,22 @@ describe('option B: rounds scoped to the map', () => {
     assert.notEqual(official.templateId, 'wave_ws_ws_round_boss');
   });
 
+  test("a map that lists only SOME leaders never borrows another one's wave (协防 boss 战不能正常刷新)", () => {
+    // The pack above declares `{ boss_any: … }` only. A leader the map does not name must NOT get that wave: until
+    // 0.7.1 the lookup fell back to "the first entry in the map", so the round fought a DIFFERENT leader than the one it
+    // drew — the shared pool is built from the drawn bossId's bloodPoint, so the leader never matched its own HP bar,
+    // and an override pointing at a normal wave left the round without a leader at all (pool never drains → the round
+    // can only end by LP / overtime). Games on a workshop map in a co-op room are exactly where players hit this.
+    const drawn = 'boss_2';
+    const official = MODE_CFG.rounds[String(BOSS_ROUND)].bossTemplates[drawn];
+    assert.ok(official, `the mode lists ${drawn} (the fixture must draw a real leader)`);
+    for (const stageId of ['ws_rounds_map', OFFICIAL_STAGE, null]) {
+      const w = buildBossWave(gd, createRng(1), FACTION_TYPES, BOSS_ROUND, { bossId: drawn, solo: false }, stageId);
+      assert.notEqual(w.templateId, 'wave_ws_ws_round_boss', `${stageId}: another leader's override must not be borrowed`);
+      assert.equal(w.templateId, official, `${stageId}: the drawn leader's official wave`);
+    }
+  });
+
   test('a template id nothing defines falls back to the mode (a typo must not break the round)', () => {
     const typo = stageSpec({ rounds: { 3: 'wave_does_not_exist' } });
     assert.equal(deriveStage(typo).ok, true, 'a missing target is not a derive error — the engine falls back');

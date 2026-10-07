@@ -34,7 +34,9 @@
 import { useEffect } from '../../vendor/hooks.module.js';
 import { html, Icon, TierChip, MicroLabel, Button, confirmDialog, useTicker } from './components.js';
 import { Img, RichText, UnitThumb, BondGlyph, GIcon, diyToken } from './gameComponents.js';
-import { attackInterval, rangeGridBox, fmtNum, tileKey, chessLoadout, nextThreshold, bondTier, briefingBondTip, pieceBondIds, grantedBonds, morphPairings, ownStandIn, standInOf, standInLoadout, standInLabel, standInTip, standInForText, ownDiyRecord, ownDiyPick, diyRecordFor, pickGetter } from './gameLogic.js';
+import { attackInterval, rangeGridBox, fmtNum, tileKey, chessLoadout, nextThreshold, bondTier, briefingBondTip, pieceBondIds, grantedBonds, morphPairings, ownStandIn, standInOf, standInLoadout, standInLabel, standInTip, standInForText, ownDiyRecord, ownDiyPick, diyRecordFor, pickGetter, availableVoiceLangs } from './gameLogic.js';
+import { updateSettings, settingsStore, useSettings } from './settings.js';
+import { VOICE_LANG_NAMES } from '../../../shared/constants.js';
 import { chessPortraitUrl, skillIconUrl, skillRecordIconUrl, profIconUrl, subProfIconUrl, itemIconUrl, enemyIconUrl, tokenAvatarUrl, factionIconUrl, uiUrl, moduleTypeIconUrl } from './assetUrls.js';
 import { abilityRows } from './abilityLines.js';
 import { data } from '../data.js';
@@ -289,7 +291,20 @@ export function traitText(c, golden, lo) {
  * such as 休整期结束时 and what it does) right under the header, visible without scrolling; the class trait (特性) and
  * the stats next; then the skill, the elite's module, the equipped items (the player's own build) and the talents.
  */
-export const CHESS_SECTIONS = Object.freeze(['head', 'garrison', 'trait', 'stats', 'skill', 'module', 'equip', 'talents', 'actions']);
+export const CHESS_SECTIONS = Object.freeze(['head', 'garrison', 'trait', 'stats', 'skill', 'module', 'equip', 'talents', 'voice', 'actions']);
+
+/**
+ * Set (or clear, with `lang` null) one operator's 配音语言 override. The global setting stays untouched — this is the
+ * per-operator half of 「不同干员可以切换不同的配音语言」 (shared/constants.js VOICE_LANGS).
+ * @param {string} charId
+ * @param {'cn'|'jp'|'en'|'kr'|null} lang
+ */
+export function setVoiceLang(charId, lang) {
+  if (typeof charId !== 'string' || !charId) return;
+  const next = { ...(settingsStore.get().voiceLangByChar || {}) };
+  if (lang) next[charId] = lang; else delete next[charId];
+  updateSettings({ voiceLangByChar: next });
+}
 
 /**
  * Sprite key (ui `garrisonTypeIcon/…`, small variant) of a 特质's type chip: the garrison's own official
@@ -357,7 +372,7 @@ export function chessStatsBlock({ rec, chess, live = null }) {
     </div>`;
 }
 
-export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bonds, offBonds = null, loadout, onBond, live = null, hint = null, unitItems = null, standIn = null, diy = null }) {
+export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bonds, offBonds = null, loadout, onBond, live = null, hint = null, unitItems = null, standIn = null, diy = null, voiceSettings = null }) {
   const m = data.get('assets');
   const hp = hpOf(live, snapHp);
   // 0.2.0 自选编队: `chess` is then the composed 自选 record (the operator, the slot's tier / price); its skill and module are
@@ -459,6 +474,23 @@ export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bond
   blocks.actions = piece && editable && piece.kind !== 'item' ? html`<div key="actions" class="dactions">
       <${Button} variant="amber" icon="close" class="dpanel__sell" onClick=${() => onSell(piece, si || c)}>${t('出售')}<span class="dsell num">+${sell}</span><//>
     </div>` : null;
+  // 配音语言 (v0.7.1): this operator's own dub, overriding 设置 → 配音语言. Only when the build downloaded more than one
+  // dub (a lone button that cannot change what you hear is worse than no button) and only for a real operator — a
+  // summon / device has no voice bank of its own. Picking one auditions it at once (选中干员 line), so the choice is
+  // heard where it is made. `voiceSettings` is passed by DetailPanel (which subscribes to the settings store): this
+  // function is also called directly as a plain function by many tests, so it must not read a hook itself.
+  const voiceChar = body?.charId || c.charId || null;
+  const voiceLangs = availableVoiceLangs(m);
+  const ownVoice = (voiceSettings?.voiceLangByChar || {})[voiceChar] || null;
+  blocks.voice = voiceChar && voiceLangs.length > 1 ? html`<${Section} key="voice" title=${t('配音')} micro="VOICE" class="dsec--voice">
+      <div class="dvoice set-seg" role="radiogroup" aria-label=${t('配音语言')}>
+        <button type="button" role="radio" aria-checked=${ownVoice ? 'false' : 'true'} class=${ownVoice ? '' : 'is-on'}
+          onClick=${() => setVoiceLang(voiceChar, null)}>${t('跟随默认')}</button>
+        ${voiceLangs.map((l) => html`<button key=${l} type="button" role="radio" aria-checked=${ownVoice === l ? 'true' : 'false'}
+          class=${ownVoice === l ? 'is-on' : ''}
+          onClick=${() => { setVoiceLang(voiceChar, l); audio.voice(voiceChar, 'select', { lang: l }); }}>${VOICE_LANG_NAMES[l] || l}</button>`)}
+      </div>
+    <//>` : null;
   const out = CHESS_SECTIONS.map((k) => blocks[k]).filter(Boolean);
   // a merge-completing shop / reward card: where the elite goes (shopBar mergeHint), right under the header
   if (hint) out.splice(1, 0, html`<p key="merge" class="dhint dhint--merge"><${Icon} name="info" />${t('可晋升：{hint}', { hint })}</p>`);
@@ -726,6 +758,9 @@ export function resolveDetail(target, pieces, { priv = null, backups = data.get(
 export function DetailPanel({ detail, editable, snapHp, onClose, onSell, onDestroy, bonds = [], offBonds = null, loadout = null, onBond = null, side = 'left', shopOpen = false, live = null, voice = false }) {
   const getter = typeof live === 'function' ? live : null;
   useTicker(detail && getter ? 250 : 0);
+  // 配音语言 (v0.7.1): the panel is the component that subscribes to the settings store, so picking a dub in the card
+  // re-renders it at once (ChessDetail itself is also called directly by tests and must stay hook-free).
+  const voiceSettings = useSettings();
   // 选中干员 voice (audio.voice 'select'): once per opened operator — the panel stays mounted while the target changes,
   // so the key carries what identifies it (its chess record and its piece / battle unit id)
   const selectKey = voice && detail?.type === 'chess' ? `${detail.chess?.chessId || ''}:${detail.unitId ?? detail.piece?.uid ?? ''}` : null;
@@ -756,7 +791,7 @@ export function DetailPanel({ detail, editable, snapHp, onClose, onSell, onDestr
     <div class="dpanel__scroll">
       ${detail.type === 'chess' ? html`<${ChessDetail} chess=${detail.chess} piece=${detail.piece} snapHp=${snapHp} editable=${editable} onSell=${sellIt}
         bonds=${bonds} offBonds=${offBonds} loadout=${loadout} onBond=${onBond} live=${liveNow} hint=${detail.hint || null} unitItems=${detail.unitItems || null}
-        standIn=${detail.standIn || null} diy=${detail.diy || null} />` : null}
+        standIn=${detail.standIn || null} diy=${detail.diy || null} voiceSettings=${voiceSettings} />` : null}
       ${detail.type === 'item' ? html`<${ItemDetail} item=${detail.item} piece=${detail.piece} editable=${editable} onDestroy=${destroyIt} offBonds=${offBonds} />` : null}
       ${detail.type === 'enemy' ? html`<${EnemyDetail} enemy=${detail.enemy} snapHp=${snapHp} count=${detail.count} live=${liveNow} />` : null}
       ${detail.type === 'token' ? html`<${TokenDetail} token=${detail.token} piece=${detail.piece} ownerId=${detail.ownerId ?? null} snapHp=${snapHp} live=${liveNow} />` : null}

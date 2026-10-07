@@ -8,7 +8,9 @@
 import { useLayoutEffect, useState } from '../../vendor/hooks.module.js';
 import { html, Modal, Button, Icon, MicroLabel } from './components.js';
 import { createStore, useStore, loadPref, savePref } from '../store.js';
-import { sanitizeSettings, HOTKEY_ACTIONS, DEFAULT_HOTKEYS, hotkeyLabel, rebindHotkey, isDefaultHotkeys, captureHotkey } from './gameLogic.js';
+import { sanitizeSettings, HOTKEY_ACTIONS, DEFAULT_HOTKEYS, hotkeyLabel, rebindHotkey, isDefaultHotkeys, captureHotkey, availableVoiceLangs } from './gameLogic.js';
+import { VOICE_LANG_NAMES } from '../../../shared/constants.js';
+import { data, useData } from '../data.js';
 import { audio } from '../audio.js';
 import { openGuide } from './guide.js';
 import { detectFeatures } from './device.js';
@@ -145,6 +147,33 @@ function HotkeySection({ keys, touchUi }) {
 }
 
 /**
+ * 配音语言 (v0.7.1): the dub every operator speaks unless 干员详情 → 配音 overrides it for one of them.
+ *
+ * Only the dubs this build actually downloaded are offered (audio.voiceLangs beside the default audio.voice) — a
+ * checkout with Chinese only shows the row as a note instead of buttons that could never make a sound. 混搭 is the
+ * point (owner's request 「不同干员可以切换不同的配音语言」), so the row is a radiogroup and never a 全部 hero.
+ * @param {{ value: string }} props the settings' voiceLang
+ */
+function VoiceLangRow({ value }) {
+  useData('assets');
+  const langs = availableVoiceLangs(data.get('assets'));
+  if (langs.length <= 1) {
+    return html`<div class="set-row">
+      <span class="set-row__label">${t('配音语言')}<${MicroLabel}>VOICE LANGUAGE<//></span>
+      <span class="set-hint set-voice-lang__only">${t('本机只装了默认配音（{lang}）。想要多语言配音，先运行：node tools/fetch-assets.mjs --voice-langs=cn,jp,en,kr', { lang: VOICE_LANG_NAMES[langs[0]] || langs[0] })}</span>
+    </div>`;
+  }
+  return html`<div class="set-row">
+    <span class="set-row__label">${t('配音语言')}<${MicroLabel}>VOICE LANGUAGE<//></span>
+    <div class="set-seg" role="radiogroup" aria-label=${t('配音语言')}>
+      ${langs.map((l) => html`<button key=${l} type="button" role="radio" aria-checked=${value === l ? 'true' : 'false'}
+        class=${value === l ? 'is-on' : ''} onClick=${() => updateSettings({ voiceLang: l })}>${VOICE_LANG_NAMES[l] || l}</button>`)}
+    </div>
+  </div>
+  <p class="set-hint">${t('单个干员可以在「干员详情 → 配音」里改成别的语言。')}</p>`;
+}
+
+/**
  * Settings modal.
  * @param {{ open: boolean, onClose: Function }} props
  */
@@ -164,6 +193,7 @@ export function SettingsModal({ open, onClose }) {
       ${mtNote ? html`<p class="set-hint set-lang-note" data-testid="lang-mt-note">${mtNote}</p>` : null}
       <${Slider} label=${t('背景音乐')} micro="BGM" icon="play" value=${s.bgm} onInput=${(v) => updateSettings({ bgm: v })} />
       <${Slider} label=${t('干员语音')} micro="VOICE" icon="mic" value=${s.voice} onInput=${(v) => updateSettings({ voice: v })} />
+      <${VoiceLangRow} value=${s.voiceLang} />
       <${Slider} label=${t('音效')} micro="SFX" icon="signal" value=${s.sfx}
         onInput=${(v) => { updateSettings({ sfx: v }); if (!tested) { setTested(true); setTimeout(() => setTested(false), 400); audio.sfx('click'); } }} />
       <${Toggle} label=${t('静音')} micro="MUTE" value=${s.muted} onChange=${(v) => updateSettings({ muted: v })} />

@@ -897,7 +897,32 @@ test('干员战斗语音 (DESIGN §21.30): the manifest data, the official prior
   }
   // a battle slot usually carries several lines (选中干员 / 部署 have two), so the battle set alone stays well above 10 each
   assert.ok(lines.length >= charIds.length * 10, `${lines.length} voice lines for ${charIds.length} operators`);
+  // `audio.voice` is the manifest's DEFAULT dub (plan.mjs voiceLang, cn out of the box) …
+  assert.equal(manifest.audio.voiceLang, 'cn', 'the manifest names its default dub');
   for (const u of lines) assert.match(u, /^\/assets\/audio\/voice\/cn\/char_[^/]+\/cn_\d+\.mp3$/);
+  // … and `audio.voiceLangs[lang]` the other dubs, each with the SAME file names under `audio/voice/<lang>/` (v0.7.1,
+  // owner's request 「不同干员可以切换不同的配音语言」). A build that downloaded no extra dub simply has no table.
+  for (const [lang, table] of Object.entries(manifest.audio.voiceLangs ?? {})) {
+    assert.match(lang, /^(jp|en|kr)$/, `${lang} is a real dub beside the default`);
+    assert.ok(manifest.stats.voiceLangs[lang] >= 1, `stats.voiceLangs counts ${lang}`);
+    // measured 2026-10-07: jp carries all 191 operators, en and kr 182 each (the 9 newest have no EN/KR dub yet — the
+    // planner drops what upstream does not have, and audio.js voiceLinesFor falls back to the default dub for them)
+    assert.ok(Object.keys(table).length >= charIds.length * 0.9, `${lang}: ${Object.keys(table).length}/${charIds.length} operators`);
+    const urls = [];
+    const collect = (x) => {
+      if (typeof x === 'string') urls.push(x);
+      else if (Array.isArray(x)) x.forEach(collect);
+      else if (x && typeof x === 'object') Object.values(x).forEach(collect);
+    };
+    for (const id of Object.keys(table)) {
+      assert.match(id, /^char_[A-Za-z0-9_]+$/, id);
+      for (const s of slots) assert.ok(table[id][s], `${lang}: ${id}.${s}`);
+      for (const s of prepOnly) assert.equal(table[id][s], undefined, `${lang}: ${id}.${s} is not planned by default`);
+      collect(table[id]);
+    }
+    assert.ok(urls.length >= Object.keys(table).length * 10, `${lang}: ${urls.length} lines`);
+    for (const u of urls) assert.match(u, new RegExp(`^/assets/audio/voice/${lang}/char_[^/]+/cn_\\d+\\.mp3$`), `${lang}: ${u}`);
+  }
   // the official scheduling numbers (audio_data.json battleVoice.voiceTypeOptions)
   assert.equal(VOICE_PRIORITY.start, 100);
   assert.equal(VOICE_PRIORITY.faceEnemy, 90);

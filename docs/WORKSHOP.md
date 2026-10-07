@@ -112,7 +112,7 @@ workshop/*/ ──┘        （冻结之前）              └─→ /data/<fi
 
 | 规则 | 说明 |
 |---|---|
-| 槽位固定 | `start`（行动出发/开始）`select`（选中）`deploy`（部署）`battle`（作战中）`win`（胜利结算）`lose`（失败结算）—— 即 `shared/constants.js` 的 `VOICE_SLOTS`，客户端、资产管线与校验器共用同一份词表；写别的槽位会被拒（`VOICE_SLOT_UNKNOWN`） |
+| 槽位固定 | `start`（行动出发）`faceEnemy`（行动开始）`select`（选中）`place`（部署）`skill1`–`skill4`（作战中 1-4）`resultFour` / `resultThree` / `resultTwo` / `resultLose`（四种结算）—— 即 `shared/constants.js` 的 `VOICE_SLOTS`，客户端、资产管线与校验器共用同一份词表；写别的槽位会被拒（`VOICE_SLOT_UNKNOWN`） |
 | 路径相对 `assets/` | 必须放在该包自己的 `assets/` 里（音频同样受 §1.4 的授权闸门约束：有 `assets/` 就必须声明 `license`）。绝对路径、`..`、`.`、反斜杠与盘符都会被拒（`VOICE_PATH_UNSAFE`） |
 | 一个槽位可以多条 | 客户端每次随机挑一条，并避免连续重复 |
 | 与官方语音**并存** | 同一干员同一槽位，官方台词在前、包台词在后，一起参与随机；不会替换官方语音 |
@@ -125,7 +125,9 @@ workshop/*/ ──┘        （冻结之前）              └─→ /data/<fi
 所以文件名里的 `#`、空格都能正常播放）。安装里没有 `data/assets.json`（没跑过素材管线）时，加载器会在启动日志里报告这件事，
 而不是静默丢弃。
 
-玩家侧仍然是**双重开关**：`npm run assets -- --voices` 决定这个安装有没有官方语音，设置里的「干员语音 VOICE」默认 0（关闭）决定这一局有没有语音。两点都满足时才听得到包里的语音。
+玩家侧：官方语音自 0.7.0 起随素材一起下载（`node tools/fetch-assets.mjs`；想要多语言配音加
+`--voice-langs=cn,jp,en,kr`），设置里的「干员语音 VOICE」**默认 0.8 = 开** —— 只有玩家把音量调到 0 或勾了静音才听不到。
+包的语音进的是**默认配音**那一档（合并进 `assets.audio.voice`）；「给某个干员单独配一种语言」留到后续版本。
 
 #### 盟约图标（`bondIcons`）
 
