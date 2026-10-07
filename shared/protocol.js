@@ -4,6 +4,7 @@
 import { DIFFICULTIES, NAME_MAX_LEN, ROOM_CODE_LEN, MAX_SEATS, EMOTES, GEO } from './constants.js';
 import { isDroppableChess } from './standIn.js';
 import { diySlotIds, validateDiyPicks } from './diy.js';
+import { isSupportEntries } from './support.js';
 
 // ---- tiny validators -------------------------------------------------------
 const isInt = (v, lo = -Infinity, hi = Infinity) => Number.isInteger(v) && v >= lo && v <= hi;
@@ -333,6 +334,10 @@ export const C2S = {
   'room.start': {},
   // operator loadout (DESIGN §16): stored per session/seat; accepted until the match leaves INFO_CHECK
   'room.loadout': { entries: isLoadoutEntries },
+  // 助战 (support operators, remake extension — shared/support.js, docs/WORKSHOP.md): `entries` = the base chess ids the
+  // player brings as supports, stored per session/seat like the loadout. The pool is the SERVER's (data/support.json):
+  // an operator it does not list is DISABLED and refuses the whole message — there is deliberately no fallback.
+  'room.support': { entries: isSupportEntries },
   // operator ownership (干员持有, 0.2.0 补位): stored per session / seat; a match takes the list its seat had when it
   // started (an out-of-match setting — during a match it is stored for the next one: ROOM_STARTED)
   'room.ownership': { notOwned: isNotOwnedList },

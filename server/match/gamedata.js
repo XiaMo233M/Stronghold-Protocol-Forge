@@ -14,6 +14,10 @@
 import { getConfig, getMode } from '../data.js';
 import { isShopItem } from '../sim/simdata.js';
 import { standInRecord } from '../../shared/standIn.js';
+import {
+  normalizeSupportConfig, supportSlotsFor, supportCapacity, supportPicker, isSupportChess, supportTierOf, supportPriceOf,
+  checkSupport as checkSupportSelection,
+} from '../../shared/support.js';
 
 const own = (map, id) => (map && typeof map === 'object' && typeof id === 'string' && Object.hasOwn(map, id) && map[id] && typeof map[id] === 'object' ? map[id] : null);
 const numOr = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
@@ -126,6 +130,12 @@ export class GameData {
     this.tuning = this.raw.tuning && typeof this.raw.tuning === 'object' ? this.raw.tuning : {};
     /** standIn memo: chess id → composed 补位 record | null */
     this._standIns = new Map();
+    /**
+     * 助战 (support operators, shared/support.js): the server-controlled pool declared by data/support.json. Disabled —
+     * and then refusing every non-empty selection — when the file is missing, malformed or has no usable tier, so a
+     * server without support.json behaves exactly as it did before this feature.
+     */
+    this.support = normalizeSupportConfig(this.raw.support);
   }
 
   /**

@@ -20,6 +20,7 @@ import { toast, toastError } from '../ui/toasts.js';
 import { copyText } from '../ui/clipboard.js';
 import { GuideButton } from '../ui/guide.js';
 import { LoadoutButton } from './loadout.js';
+import { SupportButton } from './support.js';
 import { net } from '../net.js';
 import { store, useStore, shallowEqual, emptyMatch, isSpectating } from '../store.js';
 import { difficultyInfo } from './lobby.js';
@@ -321,6 +322,7 @@ export function RoomScreen() {
       </div>
       <div class="room-bar__right">
         <${LoadoutButton} from="room" size="lg" class="room-loadout" label=${t('干员调配')} />
+        <${SupportButton} from="room" size="lg" class="room-support" />
         ${facts.isHost
           ? html`<${Tooltip} text=${facts.canStart ? null : t('仍有博士未准备就绪')}>
               <${Button} variant="primary" size="xl" icon="play" loading=${busy === 'start'} disabled=${!facts.canStart || !online} onClick=${start}>${t('开始模拟')}<//>
