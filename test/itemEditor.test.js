@@ -19,7 +19,24 @@ import { effectParams } from '../shared/itemAuthoring.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DATA_DIR = join(ROOT, 'data');
-const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+/**
+ * POST helper for the editor's own API.
+ *
+ * A full `node --test` run drives ~100 test processes at once; a loopback connection can then be reset before the
+ * request is even written (`fetch failed` / `ECONNRESET`, no response at all). That is the transport, not the
+ * handler — the editor answers 4xx/5xx as a normal response — so the request is sent one more time. A real HTTP
+ * answer (any status) is returned as it is and never retried.
+ */
+async function post(url, body) {
+  const init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    const code = err?.cause?.code || err?.code;
+    if (code !== 'ECONNRESET') throw err;
+    return fetch(url, init);
+  }
+}
 
 let tmp;
 let wsRoot;
