@@ -123,6 +123,11 @@ skill: {
 | `merchantPay` | `{ unit, cost, cancel }` | 行商付钱（可取消） |
 | `summonKill` | `{ token, owner, victim }` | **召唤物**击杀（给召唤流干员用） |
 | `dollSwap` / `dollSwitch` | `{ unit, form }` / `{ unit, reason, done }` | 傀儡替身切换 |
+| `enemyAttackStart` | `{ enemy, target }` | 敌人攻击动作**起手**（伤害帧之前）：这时晕眩/冻结/浮空能打断这一下 |
+| `hpDamage` | `{ unit, amount, source }` | 按**最大生命值比例**结算的掉血（与 `damaged` 的固定值分开） |
+| `bardRegen` | `{ unit, amount }` | 吟游者一类的**生命回复**（不算治疗，禁疗也照样生效） |
+| `palsyTrigger` | `{ unit, source }` | 麻痹累积到阈值触发的那一下 |
+| `boomerangCaught` | `{ unit, weapon }` | 回环射手的回旋镖被接住（回环流干员用） |
 | `nearl2:knockdown` | `{ unit }` | 官方内容自定义的**命名空间**事件：只要同一份文件里 `battle.emit` 了它，就可以 `on` |
 
 约定：**`{ owner: unit }` 一定要写** —— 单位退场/死亡时引擎会 `offOwner(unit)` 摘掉它的钩子；不写就是永久钩子
