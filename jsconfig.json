@@ -24,6 +24,17 @@
   ],
   "exclude": [
     "shared/protocol.js",
-    "shared/bandBonds.js"
+    "shared/bandBonds.js",
+    // Forge 独有的 8 个文件：它们落在 `shared/**` 里，所以被 include 扫到，但从来不属于上游那份「已经能过
+    // tsc 的封闭集合」。报错全是这一批（没有 node 类型导致 Buffer/process 认不出，外加几处联合返回值的
+    // JSDoc 推断），与玩法无关；等这个切片按 types/README.md 的规矩扩到它们时再逐个修。
+    "shared/zip.js",
+    "shared/workshop.js",
+    "shared/chessAuthoring.js",
+    "shared/support.js",
+    "shared/enemyAuthoring.js",
+    "shared/statReference.js",
+    "shared/stageAuthoring.js",
+    "shared/waveAuthoring.js"
   ]
 }

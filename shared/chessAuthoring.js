@@ -312,8 +312,6 @@ export function deriveChessRecord(spec) {
     tauntLevel: isFin(st.tauntLevel) ? st.tauntLevel : 0,
     massLevel: isFin(st.massLevel) ? st.massLevel : 0,
     deployLimit: 1, deckStack: 0,
-    tauntLevel: isFin(st.tauntLevel) ? st.tauntLevel : 0,
-    massLevel: isFin(st.massLevel) ? st.massLevel : 0,
   });
   const skillRecord = (golden) => {
     if (!sk) return null;
