@@ -44,6 +44,20 @@ export class MatchSettle {
       ps.stats.kills += Number(r.killed) || 0;
       ps.stats.dmgDealt += Number(r.damageDealt) || 0;
       ps.stats.healing += Number(r.healingDone) || 0;
+      // Per-unit totals for the settlement's MVP (results.js mvpOf; owner's rule 2026-10-06: the result screen speaks
+      // with each player's OWN team MVP). The verified battle report (fields.js `unitStats`) is the only place per-unit
+      // damage/kills exist, so they are summed per defId here — and never leave the server except as the chosen MVP.
+      const mergeUnits = (list) => {
+        for (const u of Array.isArray(list) ? list : []) {
+          if (!u || typeof u.defId !== 'string') continue;
+          const cur = ps.stats.unitStats.get(u.defId) || { dmg: 0, kills: 0, heal: 0 };
+          cur.dmg += Math.max(0, Number(u.dmg) || 0);
+          cur.kills += Math.max(0, Math.trunc(Number(u.kills) || 0));
+          cur.heal += Math.max(0, Number(u.heal) || 0);
+          ps.stats.unitStats.set(u.defId, cur);
+        }
+      };
+      mergeUnits(r.unitStats);
       if (r.perfect !== false && counted === 0) ps.stats.perfectRounds++;
       // bounty coins (own battle + unite kills) are credited to the next prep
       let coins = Math.max(0, Math.trunc(Number(r.coins) || 0));
@@ -52,6 +66,7 @@ export class MatchSettle {
         coins += Math.max(0, Math.trunc(Number(up.coins) || 0));
         ps.stats.dmgDealt += Number(up.damageDealt) || 0;
         ps.stats.kills += Number(up.killed) || 0;
+        mergeUnits(up.unitStats);   // 联防 kills count for the MVP too
       }
       // perfect-payout bounties (战术特训): own phase perfect
       for (const b of ps.bounties) if (b.card.payout === 'perfect' && counted === 0 && r.perfect !== false) coins += b.card.coin;

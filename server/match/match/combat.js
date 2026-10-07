@@ -14,6 +14,9 @@ export class MatchCombat {
   /** Construct a battle; a constructor failure yields a finished stand-in (clean result) and is logged. */
   newBattle(opts) {
     const full = { data: this.ds, content: this.battleContent, logger: this.log, ...opts };
+    // 工坊行为层 (docs/WORKSHOP.md §4): the pack's kits are the real functions on the server (the browser rebuilds them
+    // from `workshopKitModules`); an explicit opts.kits always wins.
+    if (this.workshopKits && !full.kits) full.kits = this.workshopKits;
     try {
       return new this.BattleClass(full);
     } catch (e) {

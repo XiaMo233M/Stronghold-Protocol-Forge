@@ -242,6 +242,14 @@ export class Match {
     this.dispatcher = new EffectDispatcher(this, this.registry);
     this.BattleClass = typeof opts.BattleClass === 'function' ? opts.BattleClass : Battle;
     this.battleContent = opts.battleContent || 'full';
+    /**
+     * 工坊行为层 (docs/WORKSHOP.md §4): the per-battle kit map loaded from `workshop/<pack>/kits/`, plus the JSON-safe
+     * module list the browser needs to rebuild the same map. Both empty for a plain install.
+     * @type {Record<string, Function>|null}
+     */
+    this.workshopKits = opts.workshopKits && typeof opts.workshopKits === 'object' ? opts.workshopKits : null;
+    /** @type {Array<{ id: string, pack: string, url: string }>} */
+    this.workshopKitModules = Array.isArray(opts.workshopKitModules) ? opts.workshopKitModules : [];
     this.timerScale = Number.isFinite(opts.timerScale) && opts.timerScale >= 0 ? opts.timerScale : 1;
     this.gameSpeed = Number.isFinite(opts.combatSpeed) && opts.combatSpeed > 0 ? Math.min(opts.combatSpeed, 200) : GAME_SPEED;
     /** layouts a bot rehearses per prep with the real simulation (bot.js; 0 = heuristic placement only) */
@@ -320,7 +328,19 @@ export class Match {
     this.disabledBonds = bans.drawn;
     this.staticInactiveBonds = bans.staticOff;
     this.bannedChess = bans.banned;
-    this.pool = new SharedPool(this.gd, { banned: bans.banned });
+    /**
+     * 助战供给 (shared/support.js): the operators the HUMAN seats brought. Each gets one extra pool copy for this match
+     * and is in the pool even when the random bans took it out — a brought operator must be purchasable, because that is
+     * what borrowing it means here (the owner's call 2026-10-07: 助战干员进商店，按阶级像普通棋子一样购买出售).
+     * Bots never bring supports (PlayerState.setSupport refuses them), so their seats are ignored. Read from the seats
+     * because the pool is built before any player state exists; `PlayerState.setSupport` re-checks the same rule later.
+     */
+    this.supportSupply = [...new Set(opts.seats
+      .filter((s) => s && !s.isBot && Array.isArray(s.support))
+      .flatMap((s) => s.support.map((id) => String(id || ''))))]
+      .filter((id) => id && this.gd.isSupportChess(id))
+      .sort();
+    this.pool = new SharedPool(this.gd, { banned: bans.banned, support: this.supportSupply });
     // 自选编队 (0.2.0): each human's slotted DIY pieces get their own stock — none for one whose bonds are all off this
     // match (player/diy.js initDiyStock); no randomness is drawn here
     const off = new Set([...bans.drawn, ...bans.staticOff]);

@@ -242,9 +242,15 @@ export class MatchPhases {
     if (isBoss) {
       this._planBossWaves();
     } else {
-      this.wave = buildNormalWave(this.gd, this.rngWaves, this.factions, r);
+      // stageId: a workshop stage may bind its own wave table to a round (shared/waveAuthoring.js; waves.js buildNormalWave)
+      this.wave = buildNormalWave(this.gd, this.rngWaves, this.factions, r, this.stageId);
     }
     for (const ps of alive) ps.startRound(r);
+    // 助战 (shared/support.js): re-check what each player brought against the pool ONE more time at the first round's
+    // start and record what it really got (data/support.json can change between the lobby check and here). Nothing is
+    // handed out: the operators are in the shop (Match.supportSupply puts them in the pool), priced like any other
+    // piece — `granted` is what the player can actually buy, which is what the client echoes back.
+    if (r === 1) for (const ps of alive) ps.prepareSupports();
     for (const ps of alive) this.dispatch(ps, 'onRoundStart', { round: r });
     // an eliminated player's pending 信标 gift still goes to its teammate (effects flagged afterElimination; GitHub #86)
     for (const ps of this.order) {
@@ -265,7 +271,7 @@ export class MatchPhases {
     const bossId = r === this.gd.hiddenRound && r !== this.gd.bossRound ? this.hiddenBossId : this.bossId;
     this.bossWaves = pairPlayers(this.alivePlayers()).map((g) => ({
       players: g.map((p) => p.playerId),
-      wave: buildBossWave(this.gd, this.rngWaves, this.factions, r, { bossId, solo: this.isSolo || g.length === 1 }),
+      wave: buildBossWave(this.gd, this.rngWaves, this.factions, r, { bossId, solo: this.isSolo || g.length === 1 }, this.stageId),
     }));
   }
 
