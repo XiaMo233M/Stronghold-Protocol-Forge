@@ -97,6 +97,7 @@
 import { randomBytes, randomInt } from 'node:crypto';
 import { ERR, MAX_SEATS, MAX_SPECTATORS, ROOM_CODE_LEN, modeIdFor } from '../shared/constants.js';
 import { checkLoadout, checkNotOwned, checkDiyPicks } from '../shared/protocol.js';
+import { normalizeSupportConfig, checkSupport, supportPicker, supportCapacity, supportTiers } from '../shared/support.js';
 import { encode, isDroppable, isErrCode, sendRaw, sendSession } from './net.js';
 import { getData as defaultGetData, lookup } from './data.js';
 import { Match as DefaultMatch } from './match/Match.js';
@@ -139,9 +140,13 @@ function freezeLoadout(loadout) {
   return Object.freeze(out);
 }
 
+/** Deep-frozen copy of a checked 助战 selection (shared by the session, the seat and the match's PlayerState). */
+function freezeSupport(entries) {
+  return Object.freeze([...(entries || [])]);
+}
+
 /** Deep-frozen copy of checked 自选 picks (shared by the session, the seat and the match's PlayerState). */
-function freezeDiy(picks) {
-  const out = {};
+function freezeDiy(picks) {  const out = {};
   for (const [id, p] of Object.entries(picks || {})) out[id] = Object.freeze({ charId: p.charId, skillIndex: p.skillIndex, uniEquipId: p.uniEquipId ?? null });
   return Object.freeze(out);
 }
@@ -194,8 +199,12 @@ export class Room {
   /** Humans that have not departed, in seat order. @returns {Seat[]} */
   activeHumans() { return this.seats.filter((s) => s && !s.isBot && !s.left); }
 
-  /** `room.state` frame (DESIGN §8.1) plus `inMatch`. */
-  toState() {
+  /**
+   * `room.state` frame (DESIGN §8.1) plus `inMatch`.
+   * @param {object|null} [support] the SERVER's 助战 catalog (Lobby.supportView): the client cannot derive the pool, so
+   *   the picker is only ever able to offer what the server declares.
+   */
+  toState(support = null) {
     return {
       t: 'room.state',
       code: this.code,
@@ -207,6 +216,7 @@ export class Room {
         ? { seat: s.seat, playerId: s.playerId, name: s.name, isBot: s.isBot, ready: s.ready, connected: s.connected && !s.left }
         : null)),
       spectators: this.spectators.map((s) => ({ playerId: s.playerId, name: s.name, connected: s.connected })),
+      ...(support ? { support } : {}),
     };
   }
 }
@@ -224,7 +234,7 @@ export class Lobby {
    *   options?: Partial<typeof LOBBY_DEFAULTS>,
    * }} opts
    */
-  constructor({ registry, log = noopLog, MatchClass = DefaultMatch, getData = defaultGetData, now = Date.now, seedFn, options = {} }) {
+  constructor({ registry, log = noopLog, MatchClass = DefaultMatch, getData = defaultGetData, now = Date.now, seedFn, options = {}, workshop = null }) {
     this.registry = registry;
     this.log = log;
     this.MatchClass = MatchClass;
@@ -232,6 +242,12 @@ export class Lobby {
     this.now = now;
     this.seedFn = seedFn || (() => randomInt(2 ** 32));
     this.opts = { ...LOBBY_DEFAULTS, ...options };
+    /**
+     * 工坊行为层 (docs/WORKSHOP.md §4): `{ kits, modules }` from server/workshop.js loadWorkshopKits — the per-battle
+     * kit map (server-run battles) and the JSON-safe module list a client-simulated battle needs. null for a plain
+     * install, in which case nothing is injected at all.
+     */
+    this.workshop = workshop && typeof workshop === 'object' ? workshop : null;
     /** @type {Map<string, Room>} */
     this.rooms = new Map();
     /** @type {Map<string, NodeJS.Timeout>} lobby grace timers by playerId */
@@ -316,6 +332,7 @@ export class Lobby {
       case 'room.kick': return this.kick(session, msg);
       case 'room.start': return this.start(session);
       case 'room.loadout': return this.loadout(session, msg);
+      case 'room.support': return this.support(session, msg);
       case 'room.ownership': return this.ownership(session, msg);
       case 'room.diy': return this.diy(session, msg);
       case 'room.spectate': return this.spectate(session, msg);
@@ -605,6 +622,38 @@ export class Lobby {
   }
 
   /**
+   * room.support (助战, shared/support.js): check the selection against the SERVER's pool (data/support.json), store it
+   * on the session and the seat, and — while a match runs — hand it to the match (accepted until the match leaves
+   * INFO_CHECK, exactly like the loadout). An operator the pool does not list rejects the whole message: unlike the
+   * loadout there is deliberately no fallback, because falling back would silently grant a disabled operator.
+   */
+  support(session, { entries }) {
+    const data = this.safeData();
+    const cfg = normalizeSupportConfig(data && data.support);
+    const res = checkSupport(entries, cfg, (id) => lookup('chess', id, data));
+    if (!res || res.error) return fail(res && isErrCode(res.error) ? res.error : ERR.BAD_MSG, res && res.detail);
+    const support = freezeSupport(res.entries);
+    session.support = support;
+    const room = this.roomOf(session);
+    if (!room) return OK;
+    const seat = room.seatOf(session.playerId);
+    if (seat) seat.support = support;
+    if (!room.match || !seat) return OK; // a spectator's selection stays on its session, never reaching the match
+    if (typeof room.match.setSupport !== 'function') return fail(ERR.ROOM_STARTED, 'stored for the next match');
+    let r;
+    try {
+      r = room.match.setSupport(session.playerId, support);
+    } catch (e) {
+      this.log.error(`[lobby] ${room.code} match.setSupport threw`, e);
+      return fail(ERR.INTERNAL);
+    }
+    if (r && typeof r === 'object' && r.error) {
+      return fail(isErrCode(r.error) ? r.error : ERR.INTERNAL, typeof r.detail === 'string' ? r.detail : undefined);
+    }
+    return OK;
+  }
+
+  /**
    * room.ownership (0.2.0 补位): keep the droppable chess of the not-owned list, store it on the session and the seat
    * (see the header). A running match never takes it: it keeps the list its seat had at its start.
    */
@@ -661,6 +710,9 @@ export class Lobby {
       notOwned: s.isBot ? null : s.notOwned || null,
       // 0.2.0 自选编队: the human's checked DIY picks (bots field no 自选 piece [ASSUMED])
       diy: s.isBot ? null : s.diy || null,
+      // 助战 (shared/support.js): the human's checked support selection — only ids the server pool allows (bots: none).
+      // Passed through as the frozen array the seat holds (the loadout's stance), never re-copied into a mutable one.
+      support: s.isBot ? null : (Array.isArray(s.support) ? s.support : null),
     }));
     // lastPublic / results: the latest m.public broadcast and the m.result frames (encoded), kept for the replay.
     const ctx = { live: true, ended: false, disposed: false, match: null, lastPublic: null, sharedResult: null, results: new Map() };
@@ -679,6 +731,9 @@ export class Lobby {
         // the room's match number: with the seed it keeps battleIds unique across the room's matches (DESIGN §14)
         matchNo: room.matchCount + 1,
         data: this.safeData(),
+        // 工坊行为层: the same kits must reach the battles the server runs AND the browser's (see the Lobby constructor)
+        workshopKits: this.workshop && this.workshop.kits ? this.workshop.kits : null,
+        workshopKitModules: this.workshop && Array.isArray(this.workshop.modules) ? this.workshop.modules : [],
         log: this.log,
         now: this.now,
         send: (playerId, msg) => (ctx.live ? this.matchSend(room, ctx, playerId, msg) : false),
@@ -919,6 +974,7 @@ export class Lobby {
     return {
       seat: idx, playerId: session.playerId, name: session.name, isBot: false, ready: false, connected: session.connected, left: false,
       loadout: session.loadout || null,
+      support: session.support || null,
       notOwned: session.notOwned || null,
       diy: session.diy || null,
     };
@@ -1058,12 +1114,28 @@ export class Lobby {
 
   broadcastState(room) {
     if (room.disposed) return;
-    const data = encode(room.toState());
+    const data = encode(room.toState(this.supportView()));
     for (const session of this.memberSessions(room)) sendRaw(session.ws, data);
   }
 
+  /**
+   * The 助战 catalog a client may show (`supportPicker` names this as its purpose), plus the player's own current picks.
+   * An operator the pool does not list is DISABLED — the picker must not be able to offer it, and the server refuses a
+   * request that names it (shared/support.js checkSupport) — so this is the only way the client learns the pool.
+   */
+  supportView() {
+    const cfg = normalizeSupportConfig(this.safeData() && this.safeData().support);
+    return {
+      enabled: cfg.enabled,
+      label: cfg.label,
+      tiers: supportPicker(cfg),
+      capacity: supportCapacity(cfg),
+      slots: supportTiers(cfg).reduce((o, t) => ({ ...o, [t]: cfg.slots[t] }), {}),
+    };
+  }
+
   sendState(room, session) {
-    sendSession(session, room.toState());
+    sendSession(session, room.toState(this.supportView()));
   }
 
   /** Match broadcast: encode once, send to every connected member. @returns {string | null} the encoded frame */

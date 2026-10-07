@@ -22,6 +22,8 @@
 
 import http from 'node:http';
 import { getData, loadData } from './data.js';
+import { loadWorkshop, loadWorkshopKits, WORKSHOP_DIR } from './workshop.js';
+import { buildWorkshopDataFiles, workshopKitFilesFor, workshopAssetsFor, WORKSHOP_ASSET_PREFIX, WORKSHOP_ASSET_TYPES } from './http/workshop.js';
 import { ROOT, listenAddress, serveDirs, makeLogger, parseTrustProxy } from './http/config.js';
 import { WS_MAX_PAYLOAD, createSessionStack, attachWebSocket } from './http/websocket.js';
 import { DATA_SHIM_JS, createStaticHandler } from './http/static.js';
@@ -36,6 +38,8 @@ import { lanUrls, isProcessEntry, runMain } from './http/boot.js';
 export {
   ROOT, WS_MAX_PAYLOAD, DATA_SHIM_JS, MIME, COMPRESSIBLE, BUILD_INPUTS, computeBuildTag, buildTag, resetBuildTag,
   acceptsGzip, parseRange, createStaticHandler, lanUrls, parseTrustProxy,
+  // 创意工坊 (docs/WORKSHOP.md): the HTTP helpers live in ./http/workshop.js but stay part of this module's API
+  buildWorkshopDataFiles, workshopKitFilesFor, workshopAssetsFor, WORKSHOP_ASSET_PREFIX, WORKSHOP_ASSET_TYPES,
 };
 
 /**
@@ -59,13 +63,30 @@ export async function startServer(opts = {}) {
   const log = opts.log || makeLogger(!!opts.quiet);
   const { publicDir, dataDir, sharedDir, packsDir } = serveDirs(opts);
 
-  // The process-wide singleton serves the default data dir; a custom dir (tests) gets its own copy.
-  const data = opts.dataDir ? loadData(dataDir, { log }) : getData({ dir: dataDir, log });
-  const { registry, lobby, network } = createSessionStack(opts, { data, log });
+  // The process-wide singleton serves the default data dir; a custom dir (tests) gets its own copy. The 创意工坊 overlay
+  // is applied inside the loader (server/data.js), i.e. whichever way the data is obtained, it is already merged.
+  const workshopDir = opts.workshopDir === undefined ? WORKSHOP_DIR : opts.workshopDir;
+  const data = opts.dataDir || opts.workshopDir !== undefined
+    ? loadData(dataDir, { log, workshopDir })
+    : getData({ dir: dataDir, log, workshopDir });
+  // 创意工坊 (docs/WORKSHOP.md): load the packs ONCE and derive the three things the runtime needs —
+  //   * workshopJson      the /data files the browser must receive merged instead of the on-disk originals;
+  //   * workshopKits.kits the behaviour layer (a per-battle kit map) for battles the server itself runs;
+  //   * workshopKitFiles  the URLs serving those same kit modules to the browser, which must rebuild the identical map,
+  //                       or its client-simulated battle would disagree with the server's verification.
+  const workshopLoaded = loadWorkshop(workshopDir, { log });
+  const workshopJson = buildWorkshopDataFiles(data, workshopLoaded);
+  const workshopKits = await loadWorkshopKits(workshopLoaded, { log, knownIds: new Set(Object.keys(data.chess || {})) });
+  const workshopKitFiles = workshopKitFilesFor(workshopKits.modules, workshopDir);
+  const workshopAssets = workshopAssetsFor(workshopLoaded, workshopDir);
+  const { registry, lobby, network } = createSessionStack(
+    { ...opts, workshop: { kits: workshopKits.kits, modules: workshopKits.modules } },
+    { data, log },
+  );
   // content packs (docs/PACKS.md): scanned now — the start log names them — and again whenever their folders change
   const packs = createPackRegistry({ publicDir, dataDir, packsDir }, { log });
   packs.refresh(true);
-  const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, packsDir, packs, log });
+  const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, packsDir, packs, log, workshopJson, workshopKitFiles, workshopAssets });
   const startedAt = Date.now();
   // The tag is per process (see buildTag): read the browser runtime once, here, not on every /healthz.
   resetBuildTag();
