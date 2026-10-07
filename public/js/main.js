@@ -8,6 +8,13 @@
 //   otherwise              → Lobby
 // Deep link `?room=CODE`: remembered at boot, auto-joined once the player has entered and the
 // session is online (after a short grace period in case the server restores a room on resume).
+// Deep link `?playtest=1[&difficulty=KEY]` (the Forge 一键试玩 button): the same gate, but it creates its own
+// solo room and starts the match straight away — solo rooms hold exactly one human and no AI, so room.start
+// needs nobody else ready (server/lobby.js start()). An unknown / missing difficulty falls back to the lobby
+// default. Both deep links are implemented in playtestLink.js (the parser stands beside parseRoomParam in
+// screens/lobby.js) so the sequence can be unit-tested without booting this module.
+// A consumed deep link is stripped from the URL (history.replaceState), so a reload cannot re-trigger it;
+// without any parameter the client behaves exactly as it did before.
 // Reloading a tab that already passed the title re-enters automatically (sessionStorage flag) and
 // resumes the server session with the saved token; stale room/match state is dropped if the
 // server does not re-push it within RESTORE_GRACE_MS after `welcome`. Boot waits for
@@ -41,7 +48,8 @@ import { store, useStore, emptyMatch, selectRoute, sessionResetNotice, isSpectat
 import { data } from './data.js';
 import { GAME_FILES } from './ui/gameComponents.js';
 import { TitleScreen, sanitizeName } from './screens/title.js';
-import { LobbyScreen, rememberRoom, parseRoomParam } from './screens/lobby.js';
+import { LobbyScreen, rememberRoom } from './screens/lobby.js';
+import { deepLinkSeeds, stripDeepLinkParams, runSoloPlaytest } from './playtestLink.js';
 import { RoomScreen } from './screens/room.js';
 import { GameScreen } from './screens/game.js';
 import { installAudio } from './audio.js';
@@ -49,7 +57,9 @@ import { settingsStore } from './ui/settings.js';
 import { GuideHost } from './ui/guide.js';
 import { installDeviceSupport } from './ui/device.js';
 import { LoadoutHost } from './screens/loadout.js';
+import { SupportHost } from './screens/support.js';
 import { installLoadoutSync, installOwnershipSync, installDiySync } from './ui/loadoutSync.js';
+import { installSupportSync } from './ui/supportSync.js';
 import { startBuildGuard } from './ui/buildGuard.js';
 import { initLang, useLang, tickerText } from './ui/lang.js';
 import { t, N_, translateWire } from '../../shared/i18n.js';
@@ -67,13 +77,9 @@ function payload(msg) {
   return rest;
 }
 
-function clearRoomParam() {
-  try {
-    const url = new URL(location.href);
-    if (!url.searchParams.has('room')) return;
-    url.searchParams.delete('room');
-    history.replaceState(history.state, '', url.pathname + (url.search || '') + url.hash);
-  } catch { /* ignore */ }
+/** Mutating wrapper of stripDeepLinkParams for the live page: a consumed deep link must never fire twice. */
+function clearDeepLinkParams() {
+  stripDeepLinkParams(location, history);
 }
 
 // ---- net → store wiring ---------------------------------------------------------------------------
@@ -85,10 +91,31 @@ let matchAt = 0;
 let restoreTimer = null;
 let joinTimer = null;
 let joinInFlight = false;
+let playtestTimer = null;
 
 function clearPendingJoin() {
   store.patch('ui', { pendingJoin: null });
-  clearRoomParam();
+  clearDeepLinkParams();
+}
+
+function clearPendingPlaytest() {
+  store.patch('ui', { pendingPlaytest: null });
+  clearDeepLinkParams();
+}
+
+/** One-click playtest once entered + online (idempotent): the `?playtest=` deep link, consumed here. */
+function schedulePendingPlaytest() {
+  clearTimeout(playtestTimer);
+  playtestTimer = setTimeout(() => {
+    const s = store.get();
+    if (!s.ui.pendingPlaytest || !s.session.entered || net.status !== 'online') return;
+    // The deep link is spent either way: consumed when the match starts, abandoned when it was refused.
+    runSoloPlaytest(net, store, {
+      difficulty: s.ui.pendingPlaytest.difficulty,
+      notify: (text, kind) => toast(text, kind || 'info'),
+      notifyError: toastError,
+    }).finally(clearPendingPlaytest);
+  }, JOIN_DELAY_MS);
 }
 
 /** Auto-join the deep-linked room once entered + online (idempotent). */
@@ -168,6 +195,7 @@ function onWelcome(msg) {
     }, RESTORE_GRACE_MS);
   }
   schedulePendingJoin();
+  schedulePendingPlaytest();
 }
 
 function onRoomState(msg) {
@@ -242,7 +270,7 @@ function wireNet() {
 
   // Entering (title → lobby) while already online also needs the deep-link join.
   store.subscribe((s, prev) => {
-    if (s.session.entered && !prev.session.entered) schedulePendingJoin();
+    if (s.session.entered && !prev.session.entered) { schedulePendingJoin(); schedulePendingPlaytest(); }
     // in a room (co-op or solo, also a resumed one) a match is near: its data starts downloading
     if (s.room && !prev.room) warmGameData();
   });
@@ -287,6 +315,7 @@ function App() {
     <${UiHosts} />
     <${GuideHost} />
     <${LoadoutHost} />
+    <${SupportHost} />
   </div>`;
 }
 
@@ -329,17 +358,18 @@ async function boot() {
   // Pick this tab's reconnect token (asks other live tabs; ≤150 ms) while fonts load.
   const identityReady = identity.init();
 
-  const pendingJoin = parseRoomParam(location.search);
+  const { pendingJoin, pendingPlaytest } = deepLinkSeeds(location.search);
   const savedName = sanitizeName(identity.loadName());
   const entered = identity.wasEntered() && !!savedName;
   store.set((s) => ({
     me: { ...s.me, name: savedName },
     session: { entered },
-    ui: { ...s.ui, pendingJoin },
+    ui: { ...s.ui, pendingJoin, pendingPlaytest },
   }));
 
   wireNet();
   installLoadoutSync({ net });
+  installSupportSync({ net });
   installOwnershipSync({ net });
   installDiySync({ net });
   net.attachBrowserHooks();
