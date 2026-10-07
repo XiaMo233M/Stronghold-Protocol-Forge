@@ -20,7 +20,8 @@
 //   boss_1/8 假想敌：胄      random arts beam (range 8); 灭顶之灾 one 刺胄之弹 at the highest-ATK operator in range (8-hit
 //                            flying shell, 3×3 stun + phys DoT on arrival); <20 %: damage ×0.5 (no extra shell: PRTS
 //                            能力修正); 死亡集群 drones — a drone that dies costs the leader 2 % of its max HP = the shared
-//                            pool's (DRONE_LINK_BASE, [ASSUMED] reading). boss_8 adds 斩胄之剑 / 破胄之锤.
+//                            pool's (DRONE_LINK_BASE, [ASSUMED] reading), past 限伤 (a share, no hit). boss_8 adds 斩胄之剑 /
+//                            破胄之锤.
 //   斩胄之剑 / 破胄之锤      初始模式: hover invulnerable next to 胄, AoE attacks (锤 150 % ATK). 出击模式: blink to the
 //                            level's blink route, fly at the lowest-ATK operator (3×3 stun + DoT); 15 hits shoot it
 //                            down (瘫痪: stun 10 s, ground unit, damage ×1.3). Either way a new 初始模式 copy with its HP
@@ -58,7 +59,7 @@
 // 掷锤 pick their operator "（无视无法选择）"), the 盲信之誓 chains ("无视无法选择"), the 法术护盾 counter on its attacker
 // (a direct pick) and the ticks of a debuff already on it (【自然涌动】: a tick selects nobody).
 // Every area effect of a leader or part — pulses, strikes around an echo, blasts, charges and tramples, crosses, columns,
-// whole-field skills — selects with enemies.js areaAllies / areaAlliesInTiles / fieldAllies (targeting.js
+// whole-field skills — selects with enemies/helpers.js areaAllies / areaAlliesInTiles / fieldAllies (targeting.js
 // areaSelectable): no 隐匿 operator, the one blocking the unit included (GitHub #97), no untargetable or sleeping one, no 起飞 one for a
 // ground unit; 迷彩 is not checked (splash-type, 中点判定 / 格子判定 or "无视迷彩" on PRTS; the rest [ASSUMED], DESIGN
 // §22.12). Only 【盲信之誓】 ("无视无法选择、迷彩") takes everyone on its lines.
@@ -110,8 +111,12 @@ const BLADE_HAND = Object.freeze({ enemy_9014_acstma: 'left_hand', enemy_9015_ac
  *   'unit': the in-battle unit's data max HP (600 000 / hidden 1 200 000, 不死) — 12 000 / 24 000 per drone at every
  *          difficulty: 0.33 % of the 终极 bar but 19 % of the solo 标准 bar (61 875), so drones decide solo fights.
  * Round 2 of the boss-HP review tried 'unit'; the review measured the solo regression, so the default is back to 'pool'.
- * 限伤 (shared/constants.js BOSS_HIT_LIMIT): the loss is one hit through Battle.loseHp — it lands up to the largest pool
- * today (boss_8 终极 7 200 000 → 144 000) and would be cancelled above a 14 999 950 pool (ceil(0.02 × pool) ≥ 300000).
+ * 限伤 (shared/constants.js BOSS_HIT_LIMIT): the share is no hit and passes the limit (Battle.loseHp `noHitLimit`).
+ * Since the pool counts every player alive at the fight's start (DESIGN §25.13.4, the owner's decision of 2026-10-06),
+ * the hidden 胄 终极 pool reaches 21 600 000 / 28 800 000 with 3 / 4 players — a drone 432 000 / 576 000, which the
+ * limit (ceil ≥ 300000) would cancel, so drones would stop counting exactly in the largest fights. [ASSUMED]: the
+ * official client checks every damage modifier on a leader (research 11 §2.1) and PRTS calls the drone's 2 % 真实伤害,
+ * but which max HP it reads is not documented; the remake reads the pool and keeps the 2 % share.
  */
 export const DRONE_LINK_BASE = 'pool';
 /** 卢西恩 / 不祥幻影 AoE radius (PRTS "半径2"). */
@@ -403,7 +408,7 @@ function kitHelm(ab, e, b, tpl) {
             if (c.reason !== 'killed' || !(ratio > 0)) return;                 // a leak is no death
             const boss = e2.alive ? e2 : b3.aliveEnemies().find((o) => o.isBoss && o.defId === e2.defId);
             const by = c.killer && c.killer.side === 'ally' ? c.killer : null;  // credited to the killing operator
-            if (boss) { b3.loseHp(boss, droneLinkBase(boss) * ratio, { source: by }); b3.fx('beam', { x: d.x, y: d.y, from: d.id, to: boss.id, kind: 'droneLink' }); }
+            if (boss) { b3.loseHp(boss, droneLinkBase(boss) * ratio, { source: by, noHitLimit: true }); b3.fx('beam', { x: d.x, y: d.y, from: d.id, to: boss.id, kind: 'droneLink' }); }
           },
         }]);
       },

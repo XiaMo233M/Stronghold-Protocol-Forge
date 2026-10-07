@@ -55,9 +55,9 @@
 //                           0.1.0). Read-only: it takes the stats the sim computed last (`unit._s`) and the range grid it
 //                           keeps, and never makes the unit recompute them, so looking never changes the battle's floats.
 //   battleRunner.unitIdOf(uid, ownerId, fieldId?) → the id of an own board piece's unit in that battle | null
-//   battleRunner.ownerOps(ownerId, fieldId?) → [{ kind: 'op', ownerId, defId, items? }] that player's operators in the
-//                           battle on screen with their equipment (a teammate's bond popup: the members in play, DESIGN
-//                           §20.15, 变形同构体 wearers included) | []
+//   battleRunner.ownerOps(ownerId, fieldId?) → [{ kind: 'op', ownerId, defId, items?, standInFor? }] that player's
+//                           operators in the battle on screen with their equipment (a teammate's bond popup: the members in
+//                           play, DESIGN §20.15, 变形同构体 wearers included; a 补位 stand-in names the replaced charId) | []
 //
 // createBattleRunner(deps) builds an instance with injectable net / store / clock / frame scheduler / sim loader
 // (test/match/runner.test.js drives it under Node).
@@ -65,6 +65,7 @@
 import { net as appNet } from '../net.js';
 import { store as appStore } from '../store.js';
 import { unitStatsEntry, fxForm } from '../../../shared/protocol.js';
+import { spectateEffects } from './observe.js';
 
 const TICK = 1 / 30;
 /** Fast-forward budget per frame (ticks) when far behind. */
@@ -104,38 +105,7 @@ export function compactHeld(list) {
   return list.filter((x, i) => (x[0] === 'status' ? last.get(`s:${x[1]}:${x[2]}`) === i : x[0] === 'skill' ? last.get(`k:${x[1]}`) === i : true));
 }
 /** Data files the simulation reads (DataSource + content/support gameData()). */
-export const SIM_DATA_FILES = Object.freeze(['chess', 'enemies', 'tokens', 'stages', 'waves', 'bonds', 'items', 'garrisons', 'bands', 'effects']);
-
-/**
- * 工坊行为层 (docs/WORKSHOP.md §4): build the per-battle kit map from `spec.workshopKits` — the JSON-safe module list the
- * server puts in the spec, because a function cannot cross the wire. The map is handed to createBattleFromSpec
- * (`opts.kits`), which server/sim/content/index.js setupUnitKit consults BEFORE the built-in registry.
- *
- * This function is the reason the behaviour layer cannot be server-only: the server re-computes a client's battle result
- * with the SAME kits, so a browser that silently fell back to the generic kit would produce a result the server rejects.
- * A module that fails to load is reported and skipped rather than hidden.
- * @param {{ workshopKits?: Array<{ id: string, url: string }> }|null} spec
- * @returns {Promise<Record<string, Function>|undefined>} undefined when the field needs no workshop kits
- */
-export async function loadSpecKits(spec) {
-  const list = Array.isArray(spec && spec.workshopKits) ? spec.workshopKits : [];
-  if (!list.length) return undefined;
-  /** @type {Record<string, Function>} */
-  const kits = {};
-  for (const m of list) {
-    // only a same-origin, root-relative URL is ever imported (the server built this list itself)
-    if (!m || typeof m.id !== 'string' || typeof m.url !== 'string' || !m.url.startsWith('/')) continue;
-    try {
-      const mod = await import(/* @vite-ignore */ m.url);
-      const fn = typeof mod.default === 'function' ? mod.default : (typeof mod.kit === 'function' ? mod.kit : null);
-      if (typeof fn === 'function') kits[m.id] = fn;
-      else console.warn('[runner] workshop kit has no exported kit function', m.id);
-    } catch (err) {
-      console.warn('[runner] workshop kit failed to load', m.id, err);
-    }
-  }
-  return kits;
-}
+export const SIM_DATA_FILES = Object.freeze(['chess', 'enemies', 'tokens', 'stages', 'waves', 'bonds', 'items', 'garrisons', 'bands', 'effects', 'backups']);
 
 /** Request failures after which a b.result counts as never delivered (re-sent on resume / b.start). */
 export const LOST_RESULT_CODES = Object.freeze(['DISCONNECTED', 'OFFLINE', 'TIMEOUT']);
@@ -482,6 +452,9 @@ export function createBattleRunner(deps) {
       } catch (err) { console.warn('[runner] result failed', err); }
       if (result) {
         e.result = result;
+        // the view answers with the settlement voice of this battle (screens/game.js → audio.voice result*): the
+        // compact result carries the leaks and the kill count the slot is picked from
+        emit('result', { fieldId: e.fieldId, battleId: e.battleId, own: !!e.own, result });
         deliver(e);
       }
     }
@@ -592,6 +565,8 @@ export function createBattleRunner(deps) {
     const field = {
       t: 'm.field', ...meta, fieldId: e.fieldId, kind: e.kind, rect: meta.rect ?? e.spec.rect, stageId: meta.stageId ?? e.spec.stageId,
       live: !e.done, battleId: e.battleId, players: e.members.slice(), local: true, speed: e.speed,
+      // the watched player's effects column (user playtest #2; undefined for 联防 / boss pairs and server-run fields)
+      effects: spectateEffects(e.spec, e.members),
       // which half each player holds (联防: the first helper takes the right half; boss pairs: L / R)
       sides: Object.fromEntries((e.spec.players || []).filter((p) => p && p.playerId).map((p) => [p.playerId, p.side === 'R' || Number(p.colOffset) >= 8 ? 'R' : 'L'])),
     };
@@ -649,9 +624,7 @@ export function createBattleRunner(deps) {
     if (seq !== startSeq) return; // superseded by a newer b.start
     let battle;
     try {
-      // 工坊行为层: rebuild the very kits the server verifies this field with (see loadSpecKits)
-      const kits = await loadSpecKits(msg.spec);
-      battle = sim.spec.createBattleFromSpec(msg.spec, sim.ds, { logger, kits });
+      battle = sim.spec.createBattleFromSpec(msg.spec, sim.ds, { logger });
     } catch (err) {
       console.warn('[runner] battle construction failed', err);
       loading = null;
@@ -823,7 +796,11 @@ export function createBattleRunner(deps) {
       if (!e || typeof ownerId !== 'string' || !ownerId || (fieldId != null && e.fieldId !== fieldId)) return [];
       const list = Array.isArray(e.battle.allyUnits) ? e.battle.allyUnits : [];
       return list.filter((u) => u && u.kind === 'op' && u.ownerId === ownerId && typeof u.defId === 'string')
-        .map((u) => (Array.isArray(u.items) && u.items.length ? { kind: 'op', ownerId, defId: u.defId, items: [...u.items] } : { kind: 'op', ownerId, defId: u.defId }));
+        .map((u) => {
+          const o = Array.isArray(u.items) && u.items.length ? { kind: 'op', ownerId, defId: u.defId, items: [...u.items] } : { kind: 'op', ownerId, defId: u.defId };
+          const si = u.def && typeof u.def.standInFor === 'string' ? u.def.standInFor : null;
+          return si ? { ...o, standInFor: si } : o;
+        });
     },
     /** Re-show the current battle (the game screen remounted). */
     reshow() { if (cur) show(cur); },

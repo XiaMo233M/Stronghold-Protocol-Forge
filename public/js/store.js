@@ -13,8 +13,7 @@
 //                 is published by the runner (the m.field shape of the battle on screen, `local: true`).
 //   ticker      – recent `m.ticker` lines, emotes – recent `m.emote` events
 //   clock       – { offset, rtt } server clock correction: serverNow ≈ Date.now() + offset
-//   ui          – small bits of local UI state shared between screens (pendingJoin / pendingPlaytest: the
-//                 `?room=` / `?playtest=` deep links, consumed by main.js once entered + online)
+//   ui          – small bits of local UI state shared between screens
 //
 // The store is framework-agnostic (get/set/subscribe); `useStore(selector)` binds it to Preact.
 // Updates are immutable at the top level: `set` shallow-merges a patch object, `patch(key, obj)`
@@ -22,6 +21,7 @@
 
 import { useLayoutEffect, useReducer, useRef } from '../vendor/hooks.module.js';
 import { PHASE } from '../../shared/constants.js';
+import { t } from '../../shared/i18n.js';
 
 /**
  * Create an observable store.
@@ -83,7 +83,7 @@ export const initialState = Object.freeze({
   ticker: [],
   emotes: [],
   clock: { offset: 0, rtt: null, synced: false },
-  ui: { pendingJoin: null, pendingPlaytest: null, restoring: false, buildStale: false },
+  ui: { pendingJoin: null, restoring: false, buildStale: false },
 });
 
 /** The app-wide store singleton. */
@@ -126,8 +126,8 @@ export function isSpectating(room, playerId) {
 export function sessionResetNotice(prev, playerId) {
   const prevId = prev?.me?.playerId;
   if (prevId == null || prevId === playerId) return null;
-  if (prev?.match?.public || prev?.room?.inMatch) return '服务器会话已重置，上一局模拟已结束';
-  if (prev?.room) return '服务器会话已重置，已返回大厅';
+  if (prev?.match?.public || prev?.room?.inMatch) return t('服务器会话已重置，上一局模拟已结束');
+  if (prev?.room) return t('服务器会话已重置，已返回大厅');
   return null;
 }
 

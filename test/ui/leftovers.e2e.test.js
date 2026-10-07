@@ -10,7 +10,8 @@
 //   4. solo battle: the pause button sends g.pause {on}, m.public.paused shows the overlay and freezes the countdown,
 //      Space resumes; no pause control in co-op or in prep.
 // Real server (test/e2e/fastServer.mjs, real clicks and canvas drags):
-//   1+4. a solo run: equip two items on an operator, drop a third → dialog → 取消 (nothing sent) → pick the OLDER item →
+//   1+4. a solo run: equip two items on an operator, drop a third → dialog → 取消 (nothing sent, the item drawn back on its
+//        bench slot) → pick the OLDER item →
 //        the real engine destroys exactly that one; then ready → the real local battle → pause (the battle clock and the
 //        countdown stand still) → 继续作战;
 //   3. the server restarts while the briefing is on screen → 「服务器会话已重置，上一局模拟已结束」 and the lobby.
@@ -55,7 +56,7 @@ describe('client leftovers — mock harness', { skip: !ENABLED && 'set SP_E2E=1 
     page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
     page.on('requestfailed', (r) => problems.push(`requestfailed: ${r.url()} ${r.failure()?.errorText}`));
     page.on('response', (r) => { if (r.status() >= 400) problems.push(`http ${r.status()}: ${r.url()}`); });
-    await page.goto(`${base}/dev/game-mock.html?shot=1&${query}`, { waitUntil: 'load' });
+    await page.goto(`${base}/dev/game-mock.html?shot=1&${query}`, { waitUntil: 'networkidle0' });
     await page.waitForFunction(() => !!document.querySelector('.screen:not(.gload)'), { timeout: 15000 });
     await sleep(900);
     return { page, problems };
@@ -275,6 +276,7 @@ describe('client leftovers — real server', { skip: !ENABLED && 'set SP_E2E=1 (
       const equipped = await itemsOf();
       assert.deepEqual(equipped.map((x) => x.id), KIT_ITEMS.slice(0, 2));
       const third = await handItem(KIT_ITEMS[2]);
+      const benchSlot = await c.piecePoint(third.uid, 0.5); // where the view draws it in the hand
 
       // the third: dialog → 取消 → nothing sent / changed
       await dropItem(third);
@@ -289,6 +291,15 @@ describe('client leftovers — real server', { skip: !ENABLED && 'set SP_E2E=1 (
       assert.equal((await c.requests('g.equip')).length, sentBefore, '取消: no g.equip');
       assert.deepEqual(await itemsOf(), equipped, '取消: unchanged');
       assert.ok(await handItem(KIT_ITEMS[2]), '取消: the item stays in the hand');
+      // ... and is drawn back on its bench slot before it is picked up again. The view keeps a dropped piece on the drop
+      // tile for 1.3 s (render/app/tune.js DROP_PENDING_MS), then flies it back in a frame-timed tween: with few frames
+      // (software-rendered headless Chrome on a loaded machine) the drag aimed where it stood a moment before grabbed the
+      // operator under it, whose direction wheel then swallowed the retry (the 0.2.0 candidate's full pass).
+      const back = await c.page.waitForFunction((uid, x, y) => {
+        const r = globalThis.__SP_VIEW__?.pieceScreenRect(uid);
+        return !!r && Math.abs(r.left + r.width / 2 - x) < 2 && Math.abs(r.top + r.height / 2 - y) < 2;
+      }, { timeout: 15000, polling: 100 }, third.uid, benchSlot.x, benchSlot.y).then(() => true, () => false);
+      assert.ok(back, '取消: the item is drawn back on its bench slot');
 
       // again → pick the OLDER item (not the server's default either way: explicit replaceUid) → 确认替换
       await dropItem(third);
@@ -339,7 +350,7 @@ describe('client leftovers — real server', { skip: !ENABLED && 'set SP_E2E=1 (
     }
   });
 
-  test('3. server restart while a match is on screen: toast + back to the lobby', { timeout: 3 * 60 * 1000 }, async (t) => {
+  test('3. server restart while a match is on screen: toast + back to the lobby', { timeout: 3 * 60 * 1000 }, async () => {
     let srv = await startRealServer();
     const port = srv.port;
     const P = (await import('puppeteer-core')).default;
@@ -382,18 +393,6 @@ describe('client leftovers — real server', { skip: !ENABLED && 'set SP_E2E=1 (
       await c.waitFor((x) => !!x.room, 'a new solo room on the restarted server');
       if (!(await c.st()).phase) await c.click('.room-bar__right button', '开始模拟', { timeout: 20000 });
       await c.waitFor((x) => x.phase === 'INFO_CHECK', 'briefing on the restarted server', 30000);
-      // The crash half above is the platform-independent part, and it has already run and asserted by now.
-      //
-      // The graceful half needs the server to RECEIVE a signal: the harness stops it with `child.kill('SIGTERM')`
-      // (test/e2e/client.mjs), and on Windows that terminates the child instead of delivering a catchable SIGTERM — so
-      // `server/index.js`'s handler never runs, no `room.closed {reason:'shutdown'}` is sent, and the 维护中 toast cannot
-      // appear. That is a property of the platform's signal delivery, not of the product: the server half is covered by
-      // test/lobby.test.js ('close() notifies rooms (room.closed shutdown) and closes sockets with 1001'), and the client
-      // half (CLOSE_REASON.shutdown → 「服务器维护中，同盟已关闭」) is reachable only where SIGTERM is deliverable.
-      if (process.platform === 'win32') {
-        t.skip('Windows cannot deliver a catchable SIGTERM to a spawned child, so the graceful-shutdown path is unreachable here (the crash half above ran and passed)');
-        return;
-      }
       // a graceful stop (Ctrl+C / SIGTERM): room.closed 'shutdown' says so first, the same clean way back — and only once
       const resetToast = () => c.page.evaluate(() => [...document.querySelectorAll('.toast')].some((t) => t.textContent.includes('服务器会话已重置')));
       await c.page.waitForFunction(() => ![...document.querySelectorAll('.toast')].some((t) => t.textContent.includes('服务器会话已重置')), { timeout: 20000 });

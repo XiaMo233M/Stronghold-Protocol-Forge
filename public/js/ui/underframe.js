@@ -16,8 +16,7 @@
 // the glyph cut out — tinted in the client. Drawn as is they read as a plain white block, so each button is a coloured
 // octagon plate: the sprite is used as a CSS mask over the plate colour (出售 amber like every money action, 销毁 /
 // 撤退 red) on a dark backing that shows through the glyph cut-out. Without the local sprites the same plate carries
-// the built-in glyph. A CSS mask whose image has not loaded yet paints nothing, which would show that dark backing
-// alone — so the sprites are fetched ahead of the first tap (warmPlateMasks, called by the battle screen).
+// the built-in glyph.
 //
 // TempRowNotice (user playtest #3 item 3) — the other board-anchored overlay of the prep: while the temp overflow row
 // (临时整备区, row 8, the 5 pads in front of the bench) holds pieces, a dashed red frame around that row and a label at
@@ -28,8 +27,10 @@
 import { html, HexBadge, Icon } from './components.js';
 import { GIcon } from './gameComponents.js';
 import { useTileScreen } from './facingWheel.js';
+import { hotkeyLabelOf } from './settings.js';
 import { localAsset } from '../data.js';
 import { GEO } from '../../../shared/constants.js';
+import { t, tParts } from '../../../shared/i18n.js';
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
 
@@ -52,38 +53,6 @@ export function PlateIcon({ sprite, glyph, tone }) {
       style=${url ? `--uf-mask:url("${url}")` : ''} data-sprite=${url ? sprite : null} aria-hidden="true">
     ${url ? null : html`<${GIcon} name=${glyph} class="uframe__pglyph" />`}
   </span>`;
-}
-
-/** The plate sprites of this module (local-client art, group `ui/battle`). */
-const PLATE_SPRITES = Object.freeze(['icon_sell', 'icon_destory']);
-/** URLs warmed by warmPlateMasks (one fetch per page). */
-const warmedMasks = new Set();
-
-/**
- * Fetch the plate sprites ahead of the first 出售 / 销毁. The tone colour is painted through the sprite as a CSS mask,
- * and a mask image that has not loaded yet paints NOTHING — the plate shows its dark `--uf-ink` backing instead (with
- * the sprite's response held back 3 s the plate reads rgb(33, 24, 0) the whole time, then rgb(147, 101, 27)). The URL
- * lives in an inline `--uf-mask`, so the browser asks for it only once the first plate paints; warming the ~1 KB
- * sprites when the battle screen mounts gets them into the cache before the player's first tap.
- *
- * Idempotent, and a no-op until the local-art manifest is loaded — call it again when it arrives (`localAsset` reads
- * `data.get('local')`).
- * @returns {string[]} the URLs fetched by this call (empty when already warm, or without a DOM)
- */
-export function warmPlateMasks() {
-  const out = [];
-  if (typeof Image === 'undefined') return out;      // no DOM (Node tests): nothing to warm
-  for (const sprite of PLATE_SPRITES) {
-    const url = localAsset('ui/battle', sprite);
-    if (!url || warmedMasks.has(url)) continue;
-    warmedMasks.add(url);
-    // Asking for the image is the whole point: a mask whose image is still in flight paints nothing.
-    const img = new Image();
-    img.decoding = 'async';
-    img.src = url;
-    out.push(url);
-  }
-  return out;
 }
 
 /**
@@ -117,26 +86,27 @@ export function Underframe({ view, uid = null, row, col, actions, name = '', bus
   const s = g.s > 0 ? g.s : 64;
   const half = s * 1.05;
   const stop = (e) => e.stopPropagation();
+  const keys = { retreat: hotkeyLabelOf('retreat'), sell: hotkeyLabelOf('sell') }; // the player's keys (设置 → 快捷键)
   return html`<div class="uframe" data-uid=${uid} style=${`left:${g.x}px;top:${g.y}px;width:${half * 2}px;height:${half * 2}px`} role="group"
-      aria-label=${`${name || '单位'} 操作`}>
+      aria-label=${t('{name} 操作', { name: name || t('单位') })}>
     <svg class="uframe__dia" viewBox="-110 -110 220 220" aria-hidden="true">
       <path class="uframe__outer" d="M0 -100 L100 0 L0 100 L-100 0 Z" />
       <path class="uframe__corner" d="M-100 0 L-86 -14 M-100 0 L-86 14 M100 0 L86 -14 M100 0 L86 14 M0 -100 L-14 -86 M0 -100 L14 -86 M0 100 L-14 86 M0 100 L14 86" />
     </svg>
     ${actions.retreat ? html`<button type="button" class="uframe__btn uframe__btn--retreat" disabled=${busy} onPointerDown=${stop}
-        onClick=${(e) => { stop(e); onRetreat?.(); }} title="撤退至整备区" aria-label="撤退">
-      <${RetreatGlyph} /><span class="uframe__label">撤退</span>
+        onClick=${(e) => { stop(e); onRetreat?.(); }} title=${actions.sell != null ? t('撤退至整备区（{key}）', { key: keys.retreat }) : t('撤退至整备区')} aria-label=${t('撤退')} aria-keyshortcuts=${actions.sell != null ? keys.retreat : undefined}>
+      <${RetreatGlyph} /><span class="uframe__label">${actions.sell != null ? t('撤退[{key}]', { key: keys.retreat }) : t('撤退')}</span>
     </button>` : null}
     ${actions.sell != null ? html`<button type="button" class="uframe__btn uframe__btn--sell" disabled=${busy} onPointerDown=${stop}
-        onClick=${(e) => { stop(e); onSell?.(); }} title=${`出售（+${actions.sell} 资金）`} aria-label=${`出售，获得 ${actions.sell} 资金`}>
+        onClick=${(e) => { stop(e); onSell?.(); }} title=${t('出售（+{sell} 资金，{key}）', { sell: actions.sell, key: keys.sell })} aria-label=${t('出售，获得 {sell} 资金', { sell: actions.sell })} aria-keyshortcuts=${keys.sell}>
       <${PlateIcon} sprite="icon_sell" glyph="sell" tone="sell" />
-      <span class="uframe__label">出售</span>
+      <span class="uframe__label">${t('出售[{key}]', { key: keys.sell })}</span>
       <${HexBadge} value=${`+${actions.sell}`} tone="gold" size="sm" class="uframe__price" />
     </button>` : null}
     ${actions.destroy ? html`<button type="button" class=${cx('uframe__btn', 'uframe__btn--destroy')} disabled=${busy} onPointerDown=${stop}
-        onClick=${(e) => { stop(e); onDestroy?.(); }} title="销毁道具" aria-label="销毁">
+        onClick=${(e) => { stop(e); onDestroy?.(); }} title=${t('销毁道具')} aria-label=${t('销毁')}>
       <${PlateIcon} sprite="icon_destory" glyph="trash" tone="destroy" />
-      <span class="uframe__label">销毁</span>
+      <span class="uframe__label">${t('销毁')}</span>
     </button>` : null}
   </div>`;
 }
@@ -168,7 +138,7 @@ export function tempRowFrame(a, b, { labelW = 0, gap = 8, vw = Infinity } = {}) 
 }
 
 /**
- * What the temp row's label says will happen to its pieces (server/match/PlayerState.js tempDue): a piece is resolved
+ * What the temp row's label says will happen to its pieces (server/match/player/basics.js tempDue): a piece is resolved
  * at the end of the first prep in which the player can act on it. Not ready (or outside PREP): at the end of this / the
  * coming prep, and 准备就绪 waits for the row to be cleared. Ready in PREP: Ready is refused while the row holds pieces,
  * so whatever lies there arrived after it — kept through the NEXT prep (cancelling Ready makes it due at this one).
@@ -176,8 +146,8 @@ export function tempRowFrame(a, b, { labelW = 0, gap = 8, vw = Infinity } = {}) 
  */
 export function tempRowRule(ready) {
   return ready
-    ? '已准备就绪后进入的单位保留到下个休整期，届时仍在此处的将被销毁（取消准备则在本休整期结束时销毁）'
-    : '放入整备区或战场、配发或使用后才能准备；休整期结束时仍在此处的将被销毁';
+    ? t('已准备就绪后进入的单位保留到下个休整期，届时仍在此处的将被销毁（取消准备则在本休整期结束时销毁）')
+    : t('放入整备区或战场、配发或使用后才能准备；休整期结束时仍在此处的将被销毁');
 }
 
 /**
@@ -196,11 +166,12 @@ export function TempRowNotice({ view, count, items = 0, label = true, ready = fa
   const pts = f.quad.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
   const pad = rem * 0.1;
   const style = f.side === 'left' ? `left:${(f.left - pad).toFixed(1)}px;top:${f.y.toFixed(1)}px` : `left:${(f.right + pad).toFixed(1)}px;top:${f.y.toFixed(1)}px`;
-  const what = items > 0 && items === count ? '件道具' : '个单位';
   return html`<div class="tempnote" aria-hidden="false" data-testid="temp-notice">
     <svg class="tempnote__frame" aria-hidden="true"><polygon points=${pts} /></svg>
     ${label ? html`<div class=${`tempnote__label is-${f.side}`} style=${style} role="status">
-      <b class="tempnote__title"><${Icon} name="warn" />临时整备区 <span class="num">${count}</span> ${what}待处理</b>
+      <b class="tempnote__title"><${Icon} name="warn" />${items > 0 && items === count
+        ? tParts('临时整备区 {n} 件道具待处理', { n: html`<span class="num">${count}</span>`, count })
+        : tParts('临时整备区 {n} 个单位待处理', { n: html`<span class="num">${count}</span>`, count })}</b>
       <span class="tempnote__rule">${tempRowRule(ready)}</span>
     </div>` : null}
   </div>`;

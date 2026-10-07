@@ -87,34 +87,6 @@ function rewardFor(gd, roundsPassed) {
  * @param {import('./Match.js').Match} m
  * @param {{ victory: boolean, hiddenReached: boolean, hiddenCleared: boolean, reason: string }} outcome
  */
-/**
- * The player's MVP — the unit the settlement screen speaks with (owner's rule 2026-10-06: 「结算页用 MVP 干员语音说一句，
- * 每个玩家不一样（各自队伍里的 MVP）」). Ranked by damage dealt, then kills; only units still in the lineup qualify (a
- * sold operator is not this team's MVP), and the lineup's own order breaks the remaining ties.
- *
- * The numbers come from `ps.stats.unitStats`, accumulated per battle by Match.js out of the VERIFIED battle report
- * (server/match/fields.js), so a client cannot name its own MVP.
- * @param {any} ps PlayerState
- * @param {Array<{ id?: string }>} lineup the result's lineup (a chess id is the char id of an operator)
- * @returns {string|null} the chess id, or null when no unit of this lineup did anything
- */
-export function mvpOf(ps, lineup) {
-  const by = ps?.stats?.unitStats;
-  if (!by || typeof by.get !== 'function' || !Array.isArray(lineup)) return null;
-  let best = null;
-  for (const u of lineup) {
-    const id = typeof u?.id === 'string' && u.id ? u.id : null;
-    if (!id) continue;
-    const s = by.get(id);
-    if (!s) continue;
-    const dmg = Number(s.dmg) || 0;
-    const kills = Number(s.kills) || 0;
-    if (dmg <= 0 && kills <= 0) continue;               // a unit that did nothing is never the MVP
-    if (!best || dmg > best.dmg || (dmg === best.dmg && kills > best.kills)) best = { id, dmg, kills };
-  }
-  return best ? best.id : null;
-}
-
 export function buildResult(m, outcome) {
   const gd = m.gd;
   const { victory, hiddenReached, hiddenCleared } = outcome;
@@ -123,9 +95,17 @@ export function buildResult(m, outcome) {
   const teamRounds = victory ? gd.bossRound + (hiddenCleared ? 1 : 0) : Math.max(0, Math.min(m.round, gd.bossRound) - 1);
   const rows = players.map((ps) => {
     const roundsPassed = !ps.alive && ps.eliminatedRound != null ? Math.max(0, ps.eliminatedRound - 1) : teamRounds;
-    const lineup = boardOrder(ps.board).filter((x) => x.piece.kind === 'chess').map(({ r, c, piece }) => ({
-      id: piece.id, golden: gd.isGolden(piece.id), tier: gd.tierOf(piece.id), row: r, col: c, items: (piece.items || []).map((i) => i.id),
-    }));
+    const lineup = boardOrder(ps.board).filter((x) => x.piece.kind === 'chess').map(({ r, c, piece }) => {
+      const e = { id: piece.id, golden: gd.isGolden(piece.id), tier: gd.tierOf(piece.id), row: r, col: c, items: (piece.items || []).map((i) => i.id) };
+      // 0.2.0 自选编队: a DIY slot's pick — the result screen names and draws the operator (shared/diy.js diyRecord)
+      const pick = typeof ps.diyPickOf === 'function' ? ps.diyPickOf(piece.id) : null;
+      if (pick) e.diy = { charId: pick.charId, skillIndex: pick.skillIndex, uniEquipId: pick.uniEquipId };
+      // 0.2.0 补位: a chess this player fielded as its stand-in — the result screen draws the stand-in (the owner's recall
+      // of the official mode, 2026-10-06); `standInFor` = the replaced operator's charId, like the sim's UnitInfo
+      const si = typeof ps.fieldsStandIn === 'function' && ps.fieldsStandIn(piece.id) ? gd.standIn(piece.id) : null;
+      if (si && si.standInFor) e.standInFor = si.standInFor;
+      return e;
+    });
     // the team's clear counts for the players still in; an eliminated / departed teammate did not pass the boss round
     const cleared = victory && ps.alive;
     return {
@@ -141,9 +121,6 @@ export function buildResult(m, outcome) {
       lp: Math.max(0, ps.lp),
       bandId: ps.bandId,
       lineup,
-      // The player's MVP — the unit the settlement screen speaks with (owner's rule 2026-10-06: 「结算页用 MVP 干员语音
-      // 说一句，每个玩家不一样（各自队伍里的 MVP）」). Null when no unit of this lineup has a damage number.
-      mvp: mvpOf(ps, lineup),
       bonds: bondList(gd, ps.bonds).filter((b) => b.active || b.layers > 0),
       stats: {
         dmgDealt: Math.round(ps.stats.dmgDealt), kills: ps.stats.kills, leaks: ps.stats.leaks, gold: ps.stats.gold,

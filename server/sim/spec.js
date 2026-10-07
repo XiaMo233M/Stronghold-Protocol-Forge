@@ -20,6 +20,11 @@
 // the default). createBattleFromSpec hands the Battle a per-battle data view (withUnitLoadouts) that resolves each
 // operator def — and its summons — for the loadout of its chess (simdata getChess(id, loadout) / getToken(id, owner,
 // ownerLoadout)); an explicit loadout argument always wins over the view's per-chess lookup.
+// 补位 (DATA.md §18): an operator entry with `standIn: true` (kept only when exactly `true`) is fielded as its chess's
+// stand-in (simdata getChess(id, { standIn: true }); its skill / module are the chess's backup selection).
+// 自选 (DATA.md §18): an operator entry of a DIY slot (`chessId` its `_a` / `_b` id) carries `diy: { charId, skillIndex?,
+// uniEquipId? }` (kept when well-formed; the data layer checks legality — shared/diy.js checkDiyPick) and is fielded as
+// simdata getChess(id, { diy }).
 
 import { Battle } from './Battle.js';
 import { toDataSource, withUnitLoadouts } from './simdata.js';
@@ -68,12 +73,6 @@ export function buildBattleSpec(o = {}) {
     bossId: o.bossId ?? null,
     content: o.content ?? 'full',
     boss: bossLike && o.boss ? { poolHp: Number(o.boss.poolHp) || 0, poolMax: Number(o.boss.poolMax) || 1 } : null,
-    // 工坊行为层 (docs/WORKSHOP.md §4): the kit MODULES this field needs, as JSON-safe { id, pack, url } records. A
-    // function cannot cross the wire, so a client-simulated battle imports these URLs and rebuilds the same kit map the
-    // server uses for verification (public/js/battle/runner.js loadSpecKits). Empty for a plain install.
-    workshopKits: (Array.isArray(o.workshopKits) ? o.workshopKits : [])
-      .filter((m) => m && typeof m.id === 'string' && typeof m.url === 'string')
-      .map((m) => ({ id: m.id, pack: typeof m.pack === 'string' ? m.pack : null, url: m.url })),
   };
   const out = JSON.parse(JSON.stringify(spec, specReplacer));
   for (const p of out.players) for (const u of (p && Array.isArray(p.units) ? p.units : [])) if (u && typeof u === 'object') sanitizeUnitLoadout(u);
@@ -82,11 +81,34 @@ export function buildBattleSpec(o = {}) {
 
 const LOADOUT_ID = /^[A-Za-z0-9_\-]{1,64}$/;
 
-/** Keep a unit's `skillIndex` / `moduleId` only when well-formed (the data layer checks legality). Mutates `u`. */
+/**
+ * A well-formed 自选 pick `{ charId, skillIndex?, uniEquipId? }` reduced to those fields (skill 0–9 or null, module a
+ * loadout id or null), or null.
+ */
+function cleanDiyPick(d) {
+  if (!d || typeof d !== 'object' || Array.isArray(d) || typeof d.charId !== 'string' || !LOADOUT_ID.test(d.charId)) return null;
+  const out = { charId: d.charId };
+  if (d.skillIndex != null) {
+    if (!(Number.isInteger(d.skillIndex) && d.skillIndex >= 0 && d.skillIndex <= 9)) return null;
+    out.skillIndex = d.skillIndex;
+  }
+  if (d.uniEquipId != null) {
+    if (!(typeof d.uniEquipId === 'string' && LOADOUT_ID.test(d.uniEquipId))) return null;
+    out.uniEquipId = d.uniEquipId;
+  }
+  return out;
+}
+
+/**
+ * Keep a unit's `skillIndex` / `moduleId` only when well-formed (the data layer checks legality), `standIn` only when
+ * exactly `true` (补位) and `diy` only as a well-formed pick (自选). Mutates `u`.
+ */
 export function sanitizeUnitLoadout(u) {
   if ('skillIndex' in u && !(Number.isInteger(u.skillIndex) && u.skillIndex >= 0 && u.skillIndex <= 9)) delete u.skillIndex;
   if ('moduleId' in u && !(typeof u.moduleId === 'string' && LOADOUT_ID.test(u.moduleId))) delete u.moduleId;
-  if (u.kind === 'token') { delete u.skillIndex; delete u.moduleId; }
+  if ('standIn' in u && u.standIn !== true) delete u.standIn;
+  if ('diy' in u) { const d = cleanDiyPick(u.diy); if (d) u.diy = d; else delete u.diy; }
+  if (u.kind === 'token') { delete u.skillIndex; delete u.moduleId; delete u.standIn; delete u.diy; }
   return u;
 }
 
@@ -132,10 +154,6 @@ export function createBattleFromSpec(spec, dataSource, opts = {}) {
   if (opts.logger) battleOpts.logger = opts.logger;
   if (opts.recordEvents === false) battleOpts.recordEvents = false;
   if (opts.quiet) battleOpts.quiet = true;
-  // 工坊行为层 (docs/WORKSHOP.md §4): a per-battle kit map injected through the sanctioned hook — `Battle opts.kits`
-  // takes precedence over the built-in registry (server/sim/content/index.js setupUnitKit). The server passes the map it
-  // loaded from the packs; the browser passes the map it built from `spec.workshopKits`.
-  if (opts.kits && typeof opts.kits === 'object') battleOpts.kits = opts.kits;
   const b = new BattleClass(battleOpts);
   b.battleId = s.battleId ?? null;
   return b;

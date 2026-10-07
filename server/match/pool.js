@@ -12,7 +12,9 @@
 //
 // Rolls: each chess slot draws ONE copy uniformly from all remaining copies of eligible chess with tier ≤ shop level
 // ("copy-weighted"; duplicates within a roll allowed). The item slot picks a tier with the same tier shares, then a
-// uniform shop-eligible item of that tier (falling back to lower tiers).
+// uniform shop-eligible item of that tier (falling back to lower tiers). A roll may add entries outside the pool
+// (`extra`, after its own): one player's 自选 stock (0.2.0, player/diy.js diyRollEntries) — weighted by its copies like
+// any chess, drawn by that player's shop only.
 
 /**
  * Per-match disabled bond set D and banned chess (research 01 A2): D = uniform sample of `core` core bonds and `addon`
@@ -51,16 +53,12 @@ function sample(arr, n, rng) {
 export class SharedPool {
   /**
    * @param {import('./gamedata.js').GameData} gd
-   * @param {{ banned?: Iterable<string>, support?: Iterable<string> }} [opts] `support` = the operators the players
-   *   brought as 助战 (shared/support.js): each one gets ONE extra copy for this match, and is added even when the
-   *   match's random bans took it out of the pool — a brought operator must be purchasable, which is the whole point of
-   *   borrowing it. The extra copy belongs to the MATCH, not to the player who brought it (the pool is shared; in co-op
-   *   a teammate may buy it too). `cap` and `left` both grow, so the pool invariant (`left + Σ held == cap`) holds.
+   * @param {{ banned?: Iterable<string> }} [opts]
    */
-  constructor(gd, { banned = [], support = [] } = {}) {
+  constructor(gd, { banned = [] } = {}) {
     this.gd = gd;
     const ban = new Set(banned);
-    /** @type {Map<string, { cap: number, left: number, tier: number, support?: boolean }>} */
+    /** @type {Map<string, { cap: number, left: number, tier: number }>} */
     this.entries = new Map();
     for (const id of gd.visibleChess) {
       if (ban.has(id)) continue;
@@ -68,22 +66,11 @@ export class SharedPool {
       if (cap <= 0) continue;
       this.entries.set(id, { cap, left: cap, tier: gd.tierOf(id) });
     }
-    /** 本局带进来的助战干员（去重、排序；只留真的能当助战的那些）。 */
-    this.support = [];
-    for (const id of [...new Set(support)].sort()) {
-      if (typeof id !== 'string' || !id || !gd.chess(id)) continue;
-      this.support.push(id);
-      const e = this.entries.get(id);
-      if (e) { e.cap += 1; e.left += 1; e.support = true; }
-      else this.entries.set(id, { cap: 1, left: 1, tier: gd.tierOf(id), support: true });
-    }
     this.banned = [...ban].sort();
   }
 
-  /** Whether a base chess is part of this match's pool (visible, not banned — or brought as 助战). */
+  /** Whether a base chess is part of this match's pool (visible, not banned). */
   has(baseId) { return this.entries.has(baseId); }
-  /** Whether this chess is in the pool because somebody brought it as 助战. */
-  isSupport(baseId) { return this.entries.get(baseId)?.support === true; }
   cap(baseId) { return this.entries.get(baseId)?.cap ?? 0; }
   left(baseId) { return this.entries.get(baseId)?.left ?? 0; }
 
@@ -105,22 +92,30 @@ export class SharedPool {
     return k;
   }
 
-  /** Remaining copies of eligible chess (tier ≤ maxTier, or exactly `tier`). */
-  _eligible({ maxTier = 6, tier = null, filter = null } = {}) {
+  /**
+   * Remaining copies of eligible chess (tier ≤ maxTier, or exactly `tier`): the pool's entries, then `extra` ([id, entry]
+   * pairs of the same shape — a player's 自选 stock) under the same filters.
+   */
+  _eligible({ maxTier = 6, tier = null, filter = null, extra = null } = {}) {
     const out = [];
-    for (const [id, e] of this.entries) {
-      if (e.left <= 0) continue;
-      if (tier != null ? e.tier !== tier : e.tier > maxTier) continue;
-      if (filter && !filter(id, e)) continue;
-      out.push([id, e.left]);
-    }
+    const scan = (list) => {
+      for (const [id, e] of list) {
+        if (e.left <= 0) continue;
+        if (tier != null ? e.tier !== tier : e.tier > maxTier) continue;
+        if (filter && !filter(id, e)) continue;
+        out.push([id, e.left]);
+      }
+    };
+    scan(this.entries);
+    if (extra) scan(extra);
     return out;
   }
 
   /**
    * Copy-weighted roll: one copy uniformly among remaining copies of eligible chess. Returns a base id or null.
    * @param {Function} rng
-   * @param {{ maxTier?: number, tier?: number|null, filter?: (id: string, e: object) => boolean }} [opts]
+   * @param {{ maxTier?: number, tier?: number|null, filter?: (id: string, e: object) => boolean,
+   *   extra?: Iterable<[string, { left: number, tier: number }]>|null }} [opts]
    */
   roll(rng, opts = {}) {
     const el = this._eligible(opts);

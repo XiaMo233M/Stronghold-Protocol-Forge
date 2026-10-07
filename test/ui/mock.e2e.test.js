@@ -64,23 +64,9 @@ describe('in-match UI (mock harness, headless Chrome)', { skip: !ENABLED && 'set
     page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
     page.on('requestfailed', (r) => problems.push(`requestfailed: ${r.url()} ${r.failure()?.errorText}`));
     page.on('response', (r) => { if (r.status() >= 400) problems.push(`http ${r.status()}: ${r.url()}`); });
-    // Wait for `load` plus a real semantic condition — NOT `networkidle0`. Puppeteer discourages that heuristic, and
-    // here it is actively wrong: `phase=HIDDEN_CORE` reaches `readyState === 'complete'` in ~230 ms with zero failed
-    // requests and an empty in-flight set, yet its connection counter never settles, so navigation burned the full
-    // 30 s timeout and took the two screenshot sweeps down with it (the other 28 shots reach idle fine).
-    //
-    // The guarantee networkidle0 was standing in for — "nothing is left hanging" — is asserted explicitly below, and
-    // more precisely: an HTTP request still open seconds after the screen is up is a finding, while an open WebSocket
-    // is not (a live connection is exactly what a match client should hold).
-    const inflight = new Map();
-    page.on('request', (r) => { if (r.resourceType() !== 'websocket') inflight.set(r.url(), Date.now()); });
-    page.on('requestfinished', (r) => inflight.delete(r.url()));
-    page.on('requestfailed', (r) => inflight.delete(r.url()));
-    await page.goto(`${base}/dev/game-mock.html?shot=1&render=${render}&${query}`, { waitUntil: 'load', timeout: 30000 });
+    await page.goto(`${base}/dev/game-mock.html?shot=1&render=${render}&${query}`, { waitUntil: 'networkidle0' });
     await page.waitForFunction(() => !!document.querySelector('.screen:not(.gload)'), { timeout: 15000 });
     await new Promise((r) => setTimeout(r, 900));
-    const stuck = [...inflight.entries()].filter(([, at]) => Date.now() - at > 3000).map(([url]) => url);
-    if (stuck.length) problems.push(`still in flight after the screen settled: ${stuck.join(', ')}`);
     return { page, problems };
   }
   const mockState = (page) => page.evaluate(() => JSON.parse(JSON.stringify(globalThis.__MOCK__.S().priv)));
@@ -159,6 +145,48 @@ describe('in-match UI (mock harness, headless Chrome)', { skip: !ENABLED && 'set
     await page.keyboard.press('Escape');
     await sleep(200);
     assert.equal(await page.$('.dpanel'), null, 'Esc closes the detail panel');
+    assert.deepEqual(problems, []);
+    await page.close();
+  });
+
+  test('prep: Q retreats and X sells only the selected operator', async () => {
+    const { page, problems } = await open('phase=PREP', { render: 'fallback' });
+    const initial = await mockState(page);
+    await page.keyboard.press('KeyQ');
+    await page.keyboard.press('KeyX');
+    assert.deepEqual(await mockState(page), initial, 'no selection means no action');
+    const unit = initial.board.find((piece) => piece.kind === 'chess' && !piece.golden);
+    await page.click(`.ff-piece[data-uid="${unit.uid}"]`);
+    await page.waitForSelector('.uframe__btn--retreat');
+    await page.evaluate(() => {
+      const input = document.createElement('input');
+      input.id = 'shortcut-test-input';
+      document.body.append(input);
+      input.focus();
+    });
+    await page.keyboard.press('KeyQ');
+    await page.keyboard.press('KeyX');
+    assert.deepEqual(await mockState(page), initial, 'typing must not retreat or sell');
+    await page.evaluate(() => document.getElementById('shortcut-test-input').remove());
+    await page.keyboard.press('KeyQ');
+    await page.waitForFunction((uid) => globalThis.__MOCK__.S().priv.hand.some((piece) => piece?.uid === uid), {}, unit.uid);
+    const retreated = await mockState(page);
+    assert.ok(!retreated.board.some((piece) => piece.uid === unit.uid));
+    assert.equal(retreated.funds, initial.funds, 'retreat does not sell');
+    await page.click(`.ff-piece[data-uid="${unit.uid}"]`);
+    await page.waitForSelector('.uframe__btn--sell');
+    assert.equal(await page.$('.uframe__btn--retreat'), null, 'bench operator cannot retreat');
+    await page.keyboard.press('KeyQ');
+    assert.deepEqual(await mockState(page), retreated, 'Q on the bench does nothing');
+    await page.keyboard.press('KeyX');
+    await page.waitForFunction((uid) => !globalThis.__MOCK__.S().priv.hand.some((piece) => piece?.uid === uid), {}, unit.uid);
+    assert.ok((await mockState(page)).funds > retreated.funds, 'X sells the selected operator');
+    const item = (await mockState(page)).hand.find((piece) => piece?.kind === 'item');
+    await page.click(`.ff-piece[data-uid="${item.uid}"]`);
+    await page.waitForSelector('.uframe__btn--destroy');
+    await page.keyboard.press('KeyX');
+    assert.ok((await mockState(page)).hand.some((piece) => piece?.uid === item.uid), 'X must not destroy an item');
+    assert.equal(await page.$('.modal'), null, 'no destroy confirmation');
     assert.deepEqual(problems, []);
     await page.close();
   });
@@ -498,7 +526,8 @@ describe('in-match UI (mock harness, headless Chrome)', { skip: !ENABLED && 'set
       assert.deepEqual([...new Set(shown.map((x) => x[0]))].sort(), [...new Set(theirs.map((e) => e.enemyKey))].sort());
       if (render === 'engine') assert.ok(shown.every((x) => x[1] >= 17), 'their upper-gate enemies stand in rows 17–18');
       await page.click('.gtop__iconbtn');
-      await page.waitForFunction(() => document.querySelector('.gm')?.dataset.camera === 'normal', { timeout: 3000 });
+      // a scouted prep board frames like the own prep with the shop folded (PR #129), so the pen returns to 'prep'
+      await page.waitForFunction(() => document.querySelector('.gm')?.dataset.camera === 'prep', { timeout: 3000 });
       assert.ok(await page.$('.gm__watching'), 'still scouting the teammate');
       await page.click('.gm__watching button');
       await page.waitForFunction(() => document.querySelector('.gm')?.dataset.camera === 'prep', { timeout: 3000 });

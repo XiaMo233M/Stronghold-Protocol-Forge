@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { presetCamera, OFFICIAL_PARAMS, parseCameraParam } from '../../public/js/render/projection.js';
 import { bandFor, boardArea, penShown, viewKind } from '../../public/js/render/app.js';
 import { AREAS } from '../../public/js/render/board3d/layout.js';
-import { underframeRect, warmPlateMasks } from '../../public/js/ui/underframe.js';
+import { underframeRect } from '../../public/js/ui/underframe.js';
 import { panelSide, panelSlots, chessLoadout, prepCamera, bondPopupPlace, BPOP } from '../../public/js/ui/gameLogic.js';
 import { checkButtons } from '../../public/js/ui/hud.js';
 import { DATA } from '../match/harness.js';
@@ -115,6 +115,19 @@ describe('8: the detail card never covers the selected unit\'s underframe', () =
     assert.doesNotMatch(css, /\.gm__bonds > \* \{ pointer-events: auto; \}/);
     const dev = readFileSync(new URL('../../public/css/devices.css', import.meta.url), 'utf8');
     assert.match(dev, /\.gm__hud > \.uframe \{ margin-left: calc\(-1 \* var\(--sa-l\)\); margin-top: calc\(-1 \* var\(--sa-t\)\); \}/);
+    const panels = readFileSync(new URL('../../public/css/screens/game-panels.css', import.meta.url), 'utf8');
+    assert.match(panels, /\.uframe__label\s*\{[^}]*white-space:\s*nowrap\s*;/, 'shortcut labels stay on one line');
+  });
+
+  // a finger's tap near a disc: the browser's touch adjustment moved it onto the nearest element that responds to clicks
+  // (the canvas's pointer listeners do not count), so with PR #149's 收起 toggle pushing the discs over the back row a tap
+  // on the row-12 unit at 844×390 opened the bond popup (test/render/models.browser.test.js #4.1 touch)
+  test('the field canvas is a click target of its own, so a tap on the board stays on the tile under the finger', async () => {
+    const { readFileSync } = await import('node:fs');
+    const app = readFileSync(new URL('../../public/js/render/app.js', import.meta.url), 'utf8');
+    assert.match(app, /\n {2}canvas\.addEventListener\('click', onTapTarget\);\n/, 'registered with the other canvas listeners');
+    assert.match(app, /\n {6}canvas\.removeEventListener\('click', onTapTarget\);\n/, 'dropped on destroy');
+    assert.match(app, /const onTapTarget = \(\) => \{\};/, 'a no-op: the press itself stays with the pointer events');
   });
 
   test('underframeRect covers the diamond and its buttons', () => {
@@ -342,48 +355,5 @@ describe('§16: chessLoadout (m.private.loadout → skill / module shown)', () =
       }
     }
     assert.ok(changed >= 4, `${changed} module choices change the range (莫斯提马 SPC-X, 莱恩哈特 / 白面鸮 / 夕 defaults)`);
-  });
-});
-
-// ---- 7 (the tone layer's mask image) -------------------------------------------------------------------------------
-// The 出售 / 销毁 plate paints its tone colour through the official sprite as a CSS mask. A mask image that has not
-// loaded yet paints nothing, so before the warm-up the plate showed only its dark backing — the fallback variant of the
-// browser regression (test/ui/playtest2.e2e.test.js test 7) read rgb(18.8, 18.2, 12.2) instead of amber. This case pins
-// the warm-up: each sprite is fetched exactly once, and only once the local-art manifest lists it. One sequential case
-// because the warm set lives in the module (a URL is fetched once per page, which is the behaviour under test).
-describe('7: the plate sprites are fetched before the first tap', () => {
-  const SELL = '/assets/local/ui/battle/icon_sell.png';
-  const DESTROY = '/assets/local/ui/battle/icon_destory.png';
-
-  test('each sprite is fetched once, and only once the manifest lists it', async () => {
-    const { data } = await import('../../public/js/data.js');
-    const realFetch = globalThis.fetch;
-    const realImage = globalThis.Image;
-    const manifest = { groups: {} };
-    const srcs = [];
-    const load = async (groups) => { manifest.groups = groups; await data.invalidate('local'); await data.load('local'); };
-    try {
-      globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => manifest });
-      globalThis.Image = class { constructor() { this.decoding = ''; } set src(v) { srcs.push(v); } get src() { return ''; } };
-
-      await load({});
-      assert.deepEqual(warmPlateMasks(), [], 'no local-art manifest → a no-op (the plate keeps its built-in glyph)');
-      assert.deepEqual(srcs, []);
-
-      await load({ 'ui/battle': { icon_sell: { path: SELL } } });
-      assert.deepEqual(warmPlateMasks(), [SELL], 'the listed sprite is fetched');
-      assert.deepEqual(srcs, [SELL]);
-      assert.deepEqual(warmPlateMasks(), [], 'a second call refetches nothing');
-
-      await load({ 'ui/battle': { icon_sell: { path: SELL }, icon_destory: { path: DESTROY } } });
-      assert.deepEqual(warmPlateMasks(), [DESTROY], 'only the sprite that is not warm yet');
-      assert.deepEqual(srcs, [SELL, DESTROY], 'each URL reaches an Image exactly once');
-    } finally {
-      // Drop the fake manifest while the stub still answers (invalidate refetches, and the real fetch cannot resolve a
-      // relative URL outside the browser) — then put the real globals back.
-      await data.invalidate('local');
-      globalThis.fetch = realFetch;
-      globalThis.Image = realImage;
-    }
   });
 });
