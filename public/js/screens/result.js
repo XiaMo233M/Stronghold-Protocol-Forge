@@ -123,10 +123,15 @@ export function ResultScreen() {
   // own team's MVP (owner's rule 2026-10-06: 「结算页用 MVP 干员语音说一句，每个玩家不一样（各自队伍里的 MVP）」).
   // Read from the raw payload (not the normalised view) so the server's field is used as sent; `audio.voice` stays
   // silent without the manifest entry or with the 语音 volume at 0, and does nothing when the player has no MVP.
+  // The slot names are the upstream 0.2.0 client's (public/js/audio.js VOICE_PRIORITY, shared/constants.js VOICE_SLOTS):
+  // 完成高难行动 on 险境/终极, 3星结束行动 otherwise, 行动失败 when the match was lost.
   useEffect(() => {
     const myId = store.get().me.playerId;
     const mine = (Array.isArray(res?.players) ? res.players : []).find((p) => p && p.playerId === myId) || null;
-    if (mine && mine.mvp) audio.voice(mine.mvp, r.victory ? 'win' : 'lose');
+    if (!mine || !mine.mvp) return;
+    const diff = store.get().match?.public?.difficulty;
+    const hard = diff === 'HARD' || diff === 'ABYSS';
+    audio.voice(mine.mvp, r.victory ? (hard ? 'resultFour' : 'resultThree') : 'resultLose');
   }, []);
   const back = () => store.set({ match: emptyMatch() });
   const boss = r.bossId ? gd.boss(r.bossId) : null;

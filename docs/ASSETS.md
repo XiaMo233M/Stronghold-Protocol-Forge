@@ -185,7 +185,13 @@ All paths are URL paths relative to the site root, for example `/assets/char/ava
                            // out (an operator with none has no entry), never an empty array. Only these twelve ever play (DESIGN §21.30): the
                            // prep-only slots 干员报到 / 编入队伍 / 任命队长 are left out of the plan by default —
                            // nothing requests them and they cost 360 files (19.3 MB) per run — and `--voice-all` adds
-                           // them (audio.mjs VOICE_PREP_SLOTS) for the complete official set
+                           // them (audio.mjs VOICE_PREP_SLOTS) for the complete official set.
+                           // 创意工坊 packs may ship their own lines for these same slots (pack.json `voices`,
+                           // docs/WORKSHOP.md §1.4): the overlay APPENDS them to the official entry, so a slot whose
+                           // official line is a bare string is normalised to an array first — never replaced. The pack's
+                           // files are served under /workshop-assets/<pack>/… and only `shared/constants.js VOICE_SLOTS`
+                           // (the same twelve) is accepted, so neither the editor nor a hand-written pack can file a
+                           // line that never plays.
     sfx: {
       ui:     { click, back, confirm, tab, pick, drop, error, buy, sell, income, refresh, freeze, levelup,
                 merge, equip, itemMerge, bondUp, artPlace, ready, timer, draft, yourTurn, yourTurnCircle,
