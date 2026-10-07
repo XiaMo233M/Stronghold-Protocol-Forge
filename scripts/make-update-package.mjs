@@ -130,6 +130,10 @@ function main(argv) {
   fs.writeFileSync(path.join(stage, 'app', UPDATE_FILE), updateText({
     app: version, from: bases.map((b) => b.version), files: appShip, removed: diff.removed,
   }));
+  // 新版本的 MANIFEST.json 必须随包带上：启动检查读的就是它（用新版本的清单校验整份安装有没有解压完整，
+  // 并核对它属于哪个版本）。上游的 buildUpdate 同样会把 MANIFEST 放进更新包 —— 少了它，玩家一启动就被
+  // 告知「更新包没有完整解压」，而文件其实都对。
+  fs.copyFileSync(manifestPath, path.join(stage, 'app', MANIFEST_FILE));
   parseUpdate(fs.readFileSync(path.join(stage, 'app', UPDATE_FILE), 'utf8'));   // 自己的产物先按服务端的读法验一遍
 
   const zip = spawnSync('tar', ['-c', '--format', 'zip', '-f', out, '-C', stage, '.'], { stdio: 'inherit' });
