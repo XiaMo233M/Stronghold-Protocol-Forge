@@ -4,13 +4,16 @@
 本仓库能直接使用的工坊内容。这些文件是本项目的官方创作接口 —— 它们和编辑器、CLI、校验器共用同一批
 `shared/*Authoring.js` 规则，所以**AI 写出来的东西与人在编辑器里点出来的东西完全一样**。
 
+> **本版基线**：本仓库 **0.8.2** / 打包的上游游戏本体 **0.2.1**。下面写的字段、枚举与推导规则都是这一版的引擎
+> 实际在跑的那一套；上游换了基线而这几份 prompt 没跟上，就会出现「文档对、引擎不接受」的情况。
+
 | Prompt | 用于 | 状态 |
 |---|---|---|
 | [operator-pack.md](operator-pack.md) | 干员（含技能黑板、天赋、普通/精锐两套数值、**模组**、**攻击分类覆盖**、**盟约成员**） | ✅ 完整（含黑板书键表） |
 | [kit.md](kit.md) | **行为层 kit**（`kits/<chessId>.js`）：Kit 形状、四条硬规则、钩子词表、可跑的完整示例，外加 §八「常见效果怎么做」配方手册（数值 / 附伤 / 钩子时机 / 召唤物 / 范围改写 / 治疗护盾 / 层数 / 索敌 / 盟约与天赋边界 / 反例 / 引擎不提供清单） | ✅ 完整（示例被 `test/kitPrompt.test.js` 真的跑过一遍） |
 | 本文档的「各内容种类的 spec 形状」一节 | 地图 / 怪物 / 出怪 / 装备 / **盟约** / 语音（含**多语言配音**）/ 助战 | ✅ 形状与推导规则在此，配合校验器闭环 |
 
-> 为什么只有两个独立的 prompt 文件：干员的黑板书有 **60 多个键**，行为层 kit 则有 **32 个钩子**与三条「写错就静默失效」的
+> 为什么只有两个独立的 prompt 文件：干员的黑板书有 **60 多个键**，行为层 kit 则有 **36 个钩子**与四条「写错就静默失效」的
 > 硬规则 —— 这两样都必须把细节写全，才可能让 AI 或人一次写对。其余几种的 spec 形状很短，且都能用同一条闭环
 > （推导 → 校验 → 按 `code` 改）收敛，所以它们放在下面。行为层 kit 与其它种类的区别在于**它没有推导产物**：
 > `kits/<chessId>.js` 就是游戏加载的东西，编辑器里有专门的 `/kit.html` 页签直接编辑这个文件并实时做静态检查。
@@ -42,6 +45,10 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
 语音是第二个例外：默认语种写在 `pack.json.voices` 里、其它语种写在 `pack.json.voiceLangs` 里（见下面「语音」一节），
 音频文件都放在包的 `assets/` 下。
 盟约的源目录是 `bond-specs/`（不是 `specs/`），因为盟约 id 是它自己的键，不和干员共用一个目录。
+
+**升级不会动你的包**：0.8.2 起的增量更新只校验、只删除**发行时就在的程序文件**（`app/MANIFEST.json` 里那些；
+它连 `workshop/` 里也只列了随包自带的 `README.md`）。你自己放进 `workshop/<packId>/` 的东西既不在校验范围内，
+也不会被「新版本不再需要的旧文件」清掉 —— 升级完接着用，不用先备份。
 
 ---
 
@@ -126,6 +133,12 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
 - **`params` 由 buffs 的黑板推导**（`{...bb, ...bbStr}` 依次摊平，先出现的键先赢）。引擎读的是 `params`，
   **不是 buffs** —— 改了 buffs 忘了重推，会做出一件「卡面写得很好、进游戏什么都不干」的装备。
 - `trapId` 复用现有装备图标（仓库不含素材）；可用的 trap id 由 `GET /api/items` 的 `icons` 列出。
+- **`kind` 决定「装上之后这件装备怎么了」**，可省（省略 = 纯加成）。官方数据里出现过的值：
+  `passive`（常驻）、`passive_player`（对玩家生效）、`passive_counter`、`consume_on_equip`（装上就消耗）、
+  `consume_on_equip_or_delayed`、`post_battle_transform`、`art_instant`。
+- **装备栏满时再装「一次性」道具会先替换**（上游 0.2.1 起，与官方一致）：对 `consume_on_equip*` 的道具，
+  引擎先把被替换的那件（你在界面上选中的，没选就取最早的）从干员身上摘掉，**再**结算这件的效果 ——
+  所以满栏位时它不会白装，干员会留下一个空栏位。
 - 图形化等价物：编辑器 `/item.html`。
 
 ### 盟约（`bond-specs/<bondId>.json`）
@@ -202,7 +215,7 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
 
 `voices` 是**默认语种**那一档（清单的 `audio.voiceLang`，默认 `cn`：`shared/constants.js:35`）。要让某个干员在别的语种下
 换一批台词，就写 `voiceLangs`：**一个语种一张表**，除最外层的语种键之外，形状、槽位词表与路径安全规则与 `voices`
-**完全相同** —— 两者共用同一个解析函数（`shared/workshop.js:109`，由 `:134` 与 `:158` 各调一次）。
+**完全相同** —— 两者共用同一个解析函数（`shared/workshop.js:106`，由 `:155` 与 `:164` 各调一次）。
 
 ```json
 {
@@ -220,15 +233,15 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
 
 | 规则 | 说明 |
 |---|---|
-| **语言只有四个** | `cn` `jp` `en` `kr`（`shared/constants.js:34` 的 `VOICE_LANGS`）。写别的整包被拒：`VOICE_LANG_UNKNOWN`（`shared/workshop.js:153`） |
-| **默认语种 `cn` 不能写进 `voiceLangs`** | 默认语种那批台词写在 `voices` 里；写进 `voiceLangs["cn"]` 会被拒：`VOICE_LANG_DEFAULT`（`shared/workshop.js:156`）。理由是同一批台词有两个写法的话，「客户端到底读哪一份」就成了作者猜不出来的事 |
-| **一个语种至少要有一个干员** | 空表被拒：`VOICE_LANG_EMPTY`（`shared/workshop.js:160`）；整个 `voiceLangs` 不是对象是 `VOICE_LANG_BAD_SHAPE`（`shared/workshop.js:144`） |
-| **路径与授权规则同 `voices`** | 相对 `assets/`、不许绝对路径 / `..` / `.` / 反斜杠 / 盘符（`VOICE_PATH_UNSAFE`，`shared/workshop.js:125`）；有 `assets/` 就必须有 `license`（`VOICE_NEEDS_ASSETS`，`shared/workshop.js:147`） |
-| **只配一种语言也合法** | `voiceLangs` 本身就算「这个包贡献了什么」（`shared/workshop.js:190`、`:537`），所以 `content: []` + 只写 `voiceLangs` 不会被当成空包 |
-| **写法顺序不影响产物** | 合并前按 `VOICE_LANGS` 的固定顺序重排（`shared/workshop.js:165`），`pack.json` 里先写 `jp` 还是 `en` 都一样 |
+| **语言只有四个** | `cn` `jp` `en` `kr`（`shared/constants.js:34` 的 `VOICE_LANGS`）。写别的整包被拒：`VOICE_LANG_UNKNOWN`（`shared/workshop.js:276`） |
+| **默认语种 `cn` 不能写进 `voiceLangs`** | 默认语种那批台词写在 `voices` 里；写进 `voiceLangs["cn"]` 会被拒：`VOICE_LANG_DEFAULT`（`shared/workshop.js:279`）。理由是同一批台词有两个写法的话，「客户端到底读哪一份」就成了作者猜不出来的事 |
+| **一个语种至少要有一个干员** | 空表被拒：`VOICE_LANG_EMPTY`（`shared/workshop.js:283`）；整个 `voiceLangs` 不是对象是 `VOICE_LANG_BAD_SHAPE`（`shared/workshop.js:267`） |
+| **路径与授权规则同 `voices`** | 相对 `assets/`、不许绝对路径 / `..` / `.` / 反斜杠 / 盘符（`VOICE_PATH_UNSAFE`，`shared/workshop.js:248`）；有 `assets/` 就必须有 `license`（`VOICE_NEEDS_ASSETS`，`shared/workshop.js:270`） |
+| **只配一种语言也合法** | `voiceLangs` 本身就算「这个包贡献了什么」（`shared/workshop.js:371`、`:774`），所以 `content: []` + 只写 `voiceLangs` 不会被当成空包 |
+| **写法顺序不影响产物** | 合并前按 `VOICE_LANGS` 的固定顺序重排（`shared/workshop.js:288`），`pack.json` 里先写 `jp` 还是 `en` 都一样 |
 
 **送达与回退**：默认语种的台词并进 `assets.audio.voice`，其它语种并进 `assets.audio.voiceLangs[<lang>]`
-（`shared/workshop.js:497`；是**追加**，不替换官方已有的台词，客户端仍在这些台词里随机）。播放侧按玩家选的配音语言取
+（`shared/workshop.js:743` 的 `appendVoiceLines`，两处调用在 `:793` 与 `:809`；是**追加**，不替换官方已有的台词，客户端仍在这些台词里随机）。播放侧按玩家选的配音语言取
 台词 —— `public/js/audio.js:327` 的 `voiceLinesFor(manifest, charId, slot, lang)`：先看
 `audio.voiceLangs[lang][charId][slot]`，**该语种没有这个干员的这个槽位时回退到默认配音那一档**（`audio.voice`），
 两者都没有才算没台词。所以「给某个干员单独配一种语言」是正常用法：其它干员在那个语种下照旧播默认那一档。
