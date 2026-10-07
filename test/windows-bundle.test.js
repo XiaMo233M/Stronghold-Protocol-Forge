@@ -151,15 +151,15 @@ describe('make-windows-bundle.mjs: 包内说明的措辞', () => {
     assert.ok(!/LICENSE-node\.txt/.test(r), '也不该提 node\\LICENSE-node.txt');
   });
 
-  test('角色语音：只有真的打进包里才说，并且一定说明它默认关闭', async () => {
+  test('角色语音：只有真的打进包里才说，并且说明音量在哪里调', async () => {
     const { bundleReadme } = await mod('scripts/make-windows-bundle.mjs');
-    // 语音是可选下载（--voices，约 138 MB），所以「包里有语音」是打包时的事实，不能无条件写
+    // 0.2.0 起语音随素材一起抓（tools/assets/audio.mjs 默认就规划），所以「包里有语音」仍是打包时的事实，不能无条件写
     const without = bundleReadme({ version: 'v22.23.3', withNode: true });
     assert.ok(!/角色语音台词/.test(without), '没抓语音的 checkout 不能声称包里带语音');
     const withVoices = bundleReadme({ version: 'v22.23.3', withNode: true, withVoices: true });
     assert.match(withVoices, /角色语音台词已经在包里/);
-    assert.match(withVoices, /干员语音（VOICE）/, '要告诉玩家去哪里打开');
-    assert.match(withVoices, /默认关闭/, '默认 0 = 关闭是玩法事实，必须写出来');
+    assert.match(withVoices, /干员语音（VOICE）/, '要告诉玩家去哪里调');
+    assert.match(withVoices, /默认 0\.8/, '0.2.0 起干员语音默认 0.8 = 开，这一点必须写对');
     assert.match(withVoices, /WORKSHOP\.md/, '工坊包自带语音走同一条链路，指一下文档');
   });
 });
