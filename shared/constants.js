@@ -12,12 +12,17 @@ export const APP_VERSION = '0.7.0';
 export const DEV_BUILD = /-dev$/.test(APP_VERSION);
 
 /**
- * The moments a voice line can be played for (角色语音台词) — the ONE copy of this vocabulary: the client
- * (`public/js/audio.js`), the asset pipeline (`tools/assets/voices.mjs`, which maps the official `voiceTitle`s onto
- * these) and the workshop validator (`shared/workshop.js`, which only accepts these in a pack's `voices`) all read it
+ * The voice slots a pack may ship lines for (角色语音台词) — the ONE copy of this vocabulary: the workshop validator
+ * (`shared/workshop.js`, which only accepts these in a pack's `voices`), the editor's voice page and the CLI all read it
  * from here, so a typo cannot silently produce a line that never plays.
+ *
+ * The list follows the UPSTREAM 0.2.0 client: `public/js/audio.js` (VOICE_PRIORITY) plays
+ * `audio.voice[charId][slot]`, and `tools/assets/audio.mjs` (VOICE_BATTLE_SLOTS) plans exactly these 12 — the slots a
+ * running battle can request. The three prep-only UI slots (gacha / squad / squadFirst) are deliberately absent: no
+ * battle asks for them, so a pack file filed under one would never be heard.
  */
-export const VOICE_SLOTS = Object.freeze(['start', 'select', 'deploy', 'battle', 'win', 'lose']);
+export const VOICE_SLOTS = Object.freeze(['start', 'faceEnemy', 'select', 'place',
+  'skill1', 'skill2', 'skill3', 'skill4', 'resultFour', 'resultThree', 'resultTwo', 'resultLose']);
 
 export const MAX_SEATS = 4;
 /**

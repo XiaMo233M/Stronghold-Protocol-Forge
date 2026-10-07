@@ -444,7 +444,11 @@ function mergeWorkshopVoices(data, packs, report) {
   for (const [charId, slots] of Object.entries(index)) {
     const lines = isPlainObj(voice[charId]) ? { ...voice[charId] } : {};
     for (const [slot, urls] of Object.entries(slots)) {
-      const official = Array.isArray(lines[slot]) ? lines[slot] : [];
+      // The official manifest writes a slot with ONE line as a bare string and several as an array (0.2.0's
+      // tools/assets/audio.mjs); the client accepts both. Normalize before appending, or a pack line would silently
+      // REPLACE that single official line instead of joining it.
+      const cur = lines[slot];
+      const official = Array.isArray(cur) ? cur : (typeof cur === 'string' && cur ? [cur] : []);
       lines[slot] = [...new Set([...official, ...urls])];
     }
     voice[charId] = lines;
