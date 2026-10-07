@@ -29,7 +29,7 @@ Copyright (C) 2026 Stronghold-Protocol contributors
 
 - Release 完整包中的 `public/assets/**`（含从官方客户端本地提取的 3D 棋盘模型与贴图 `public/assets/local/**`）和 `public/fonts/**`（字体归各自作者）；
 - 由官方数据表生成的 `data/*.json`，以及含有或派生自游戏数据的 `docs/research/*.json`、`test/fixtures/official-waves.json`、`public/dev/recordings/*.json`；
-- `docs/img/` 中的游戏截图；
+- `docs/img/` 中的游戏截图与介绍图（`docs/img/intro/**`，含官方原画、界面截图与游戏画面）；
 - `docs/` 中引用的 PRTS、BWIKI、NGA、巴哈姆特等社区页面的文字（仍按其来源的许可，维基文本为 CC BY-NC-SA）。
 
 这些内容**不在 GPL-3.0 授权范围内**，本项目也无权就它们向任何人授予任何权利。

@@ -447,10 +447,14 @@ function renderEditor() {
     : subProfessionOptions(state.data.officialChess).map((b) => ({ id: b.id, name: b.name, professions: [] }));
   const subOpts = subProfessionOptionsFor(branchIndex, s.profession);
   const subCur = String(s.subProfessionId ?? '').trim();
+  // 「共 N 个」报的是**这个职业真实的分支数**。下面会把不属于本职业的当前值塞回清单（不静默清空），
+  // 要是把那一项也算进去，这句话就会写成「只列「狙击」的分支（共 8 个）」，而狙击其实只有 7 个。
+  const subOwnCount = subOpts.length;
   // 当前值不属于这个职业时：**不静默清空**（那是一次无声的数据丢失），而是把它留在下拉里并当场说明。
   const subOwners = professionsOfSub(branchIndex, subCur);
   const subMismatch = !!subCur && subOwners.length > 0 && !!s.profession && !subOwners.includes(String(s.profession).toUpperCase());
-  if (subCur && !subOpts.some((o) => o.id === subCur)) {
+  const subCarried = !!subCur && !subOpts.some((o) => o.id === subCur);
+  if (subCarried) {
     subOpts.unshift({ id: subCur, name: (branchIndex.find((b) => b.id === subCur)?.name) ?? '' });
   }
   const subLabel = (o) => (currentLang() === 'en' || !o.name ? o.id : `${o.name} · ${o.id}`);
@@ -472,10 +476,13 @@ function renderEditor() {
       h('select', { onchange: (e) => { s.subProfessionId = e.target.value; schedulePreview(); renderEditorKeepingFocus(); } },
         h('option', { value: '', selected: !subCur }, t('（不填：攻击方式与伤害类型只按职业推导）')),
         subOpts.map((o) => h('option', { value: o.id, selected: subCur === o.id }, subLabel(o)))),
-      h('p', { class: 'hint' }, t('只列「{0}」这个职业的分支（共 {1} 个）。', profLabel(s.profession), subOpts.length)),
+      h('p', { class: 'hint' }, t('只列「{0}」这个职业的分支（共 {1} 个）。', profLabel(s.profession), subOwnCount)),
       subMismatch
-        ? h('div', { class: 'hint warn' }, t('这个分支不属于「{0}」，它属于 {1}：能保存，但职业光环与分支行为可能对不上（改职业，或把分支改成这个职业的）。',
+        ? h('div', { class: 'hint warn' }, t('这个分支不属于「{0}」，它属于 {1}：能保存，但职业光环与分支行为可能对不上（改职业，或把分支改成这个职业的）。它留在下拉里，不会被自动清掉。',
           profLabel(s.profession), subOwners.map(profLabel).join('、')))
+        : null,
+      subCarried && !subMismatch
+        ? h('div', { class: 'hint warn' }, t('当前值「{0}」不在官方分支表里，仍留在下拉里（不静默清空）。', subCur))
         : null,
       h('div', { style: 'margin-top:4px' },
         textInput(() => s.subProfessionId, (v) => { s.subProfessionId = v; }, { placeholder: t('如 fastshot / fortress / bard'), list: 'subProfOptions' }),

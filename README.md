@@ -1,6 +1,6 @@
 # Stronghold-Protocol-Forge · 卫戍协议工坊编辑器
 
-![version](https://img.shields.io/badge/version-0.6.3-2ea44f)
+![version](https://img.shields.io/badge/version-0.6.4-2ea44f)
 ![license](https://img.shields.io/badge/code%20license-GPL--3.0--or--later-blue)
 ![node](https://img.shields.io/badge/node-22%20%7C%2024-339933)
 
@@ -10,7 +10,7 @@
 
 ## 目录
 
-- **编辑器（本仓库的主角）**：[这是什么](#这是什么) · [能做什么](#能做什么) · [快速开始（编辑器）](#快速开始编辑器) · [两条硬规矩](#设计上的两条硬规矩) · [Option 署名](#option-署名) · [工坊与助战](#工坊与助战)
+- **编辑器（本仓库的主角）**：[这是什么](#这是什么) · [能做什么](#能做什么) · [介绍图](#介绍图) · [快速开始（编辑器）](#快速开始编辑器) · [两条硬规矩](#设计上的两条硬规矩) · [Option 署名](#option-署名) · [工坊与助战](#工坊与助战)
 - **上游游戏本体**：[本仓库完整包含上游游戏](#本仓库完整包含上游游戏) · [功能一览](#功能一览) · [快速开始（游戏）](#快速开始游戏) · [联机方式](#联机方式) · [操作](#操作)
 - **文档与法律**：[文档](#文档) · [开发与测试](#开发与测试) · [项目结构](#项目结构) · [著作权声明](#著作权声明) · [上游来源与修改说明](#上游来源与修改说明) · [许可证](#许可证) · [致谢与数据来源](#致谢与数据来源) · [贡献](#贡献) · [English](#english)
 
@@ -54,6 +54,37 @@
 数值、分支、攻击范围、技能、天赋、外观、spine 一次带过来，改个 id 与名字就能保存；填数值时每个输入框下面
 有一条**官方同类区间**的尺子（干员按职业、怪物按档位），越界会变色 —— 它不是上限，只是让「我是不是捏超模了」
 这个问题有一个当场能看到的答案。`spine` 与干员 `id` 这两个**填错不报错**的字段都会当场提示后果。
+
+## 介绍图
+
+`docs/img/intro/` 下是一组可以直接拿去分享的介绍图。图里的界面、数值与分支清单都是**真实截图**（临时起一个工坊包跑出来的），
+不是示意图；底图与游戏画面来自本仓库的 `public/assets/` 与 `docs/img/`，版权与使用限制同下方声明 —— **不适用 GPL，仅供非商业展示**。
+
+<p align="center">
+  <img src="docs/img/intro/01-cover.jpg" alt="卫戍协议 · Forge 创意工坊编辑器" width="380">
+</p>
+
+| 从一行描述到别人进游戏 | 仓库里还有完整的游戏本体 |
+|---|---|
+| [<img src="docs/img/intro/04-workflow.png" alt="工作流：spec → 编辑器 → 试玩 → 导出 .zip">](docs/img/intro/04-workflow.png) | [<img src="docs/img/intro/05-upstream-game.jpg" alt="上游游戏本体的战斗、备战、朝向与盟约画面">](docs/img/intro/05-upstream-game.jpg) |
+
+<details>
+<summary><b>长图一：九个页面，把一局游戏拆开给人改</b>（点开看，1600×3260）</summary>
+
+<br>
+
+[![九个页面：干员 / 地图 / 怪物 / 出怪 / 装备 / 盟约 / kit / 语音 / 包管理](docs/img/intro/02-nine-pages.png)](docs/img/intro/02-nine-pages.png)
+
+</details>
+
+<details>
+<summary><b>长图二：干员编辑器 —— 分支跟着职业走、攻击范围自己画、数值一键按官方中位填入、保存旁一键试玩</b>（点开看，1600×3240）</summary>
+
+<br>
+
+[![干员编辑器的四处改动，每一处都配真实界面截图](docs/img/intro/03-operator-editor.png)](docs/img/intro/03-operator-editor.png)
+
+</details>
 
 ## 快速开始（编辑器）
 

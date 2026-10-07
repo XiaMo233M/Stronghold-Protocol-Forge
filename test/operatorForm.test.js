@@ -517,7 +517,21 @@ describe('干员表单：真跑一遍（最小 DOM 桩）', () => {
     assert.doesNotMatch(textOf(branchSel()), /吟游者 · bard/, '别的职业的分支不该出现在清单里');
     assert.match(textOf(branchSel()), /速射手 · fastshot/, '但当前值要留在下拉里（不能静默清空）');
     assert.match(textOf(editorBox), /这个分支不属于「术师」，它属于 狙击/);
+    // 「共 N 个」报的是**本职业真实的分支数**：留在清单里的旧值不算进去（旧值另有单独一句说明）；
+    // 这条断言就是当初把 7 个分支写成「共 8 个」的那个错。
+    assert.match(textOf(editorBox), /只列「术师」这个职业的分支（共 1 个）/);
+    assert.match(textOf(editorBox), /它留在下拉里，不会被自动清掉/);
+    assert.equal(findAll(branchSel(), (n) => n.tagName === 'OPTION').length, 3, '两个分支 + 「不填」那一项');
     assert.equal(lastPreviewSpec().subProfessionId, 'fastshot', '换职业不会动记录里的分支');
+
+    // 手填一个官方分支表里没有的值：同一句「不静默清空」也要出现（这时没有「它属于谁」可说）
+    const subInput = findAll(editorBox, (n) => n.tagName === 'INPUT' && n.attrs?.placeholder === '如 fastshot / fortress / bard')[0];
+    fire(subInput, 'input', 'ghostbranch');
+    await waitPreview();
+    assert.match(textOf(branchSel()), /ghostbranch/, '手写的分支也要留在下拉里');
+    assert.match(textOf(editorBox), /当前值「ghostbranch」不在官方分支表里，仍留在下拉里（不静默清空）/);
+    assert.doesNotMatch(textOf(editorBox), /这个分支不属于/, '官方表里没有这个 id，就不该说它属于哪个职业');
+    assert.equal(lastPreviewSpec().subProfessionId, 'ghostbranch');
 
     // 选一个属于本职业的分支 → 警告消失
     fire(branchSel(), 'change', 'caster');
