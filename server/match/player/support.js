@@ -1,4 +1,6 @@
-import { t } from '../../../shared/i18n.js';
+// 玩家看得见的提示要走 msg()（客户端按 msgid 查表），不能走 t()：服务端从不 setLang，t() 在这里恒等于返回中文原文，
+// 非中文玩家看到的就是一条中文警告（tools/i18n.mjs 的扫描器也刻意不把 server 下的 t() 当成 msgid）。
+import { msg, dn } from '../../../shared/i18n.js';
 // 助战 (support operators) — the remake extension the match carries on top of upstream 0.2.0's player split.
 //
 // The pool belongs to the INSTALL (data/support.json → Gamedata.support, shared/support.js), never to a pack: a pack
@@ -48,7 +50,7 @@ export class PlayerSupport {
     for (const id of this.support) {
       if (!this.gd.isSupportChess(id)) {
         const rec = this.gd.chess(id);
-        this.m.toast(this, 'warn', t('{0} 已不在服务端助战卡池中，本次禁用', { 0: (rec && rec.name) || id }));
+        this.m.toast(this, 'warn', msg('{0} 已不在服务端助战卡池中，本次禁用', { 0: dn((rec && rec.name) || id) }));
         continue;
       }
       granted.push(id);

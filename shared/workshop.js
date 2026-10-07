@@ -54,6 +54,121 @@ import { isSupportTier } from './support.js';
 const isPlainObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const fail = (error, detail) => ({ ok: false, error, detail });
 
+/** 包内素材路径：相对、在包自己的 `assets/` 下、无穿越。语音、各类图标、外观素材共用这一条规则。 */
+const isSafeAssetPath = (p) =>
+  typeof p === 'string' && !!p && !p.startsWith('/') && !p.includes('\\')
+  && !p.split('/').some((seg) => seg === '..' || seg === '.') && !/^[A-Za-z]:/.test(p);
+
+/**
+ * 外观素材的三张表，以及每张表的条目允许带什么。
+ *
+ * 形状与 `data/assets.json` 里对应条目**1:1**，作者可以照抄官方条目（tools/assets 计划的产物）再改路径，所以这里
+ * 只描述「哪些字段是路径、spine 在哪一层」，不重新发明一套 schema：
+ *   * `urls`   —— 这个条目上直接是路径的字段（头像/立绘/图标）；
+ *   * `strings`—— 原样抄过去的字符串字段（`enemies.spineAliasOf` 指向另一个怪物的模型、`tokens.owner` 是它属于谁）；
+ *   * `spine`  —— `'sides'`：spine 在 `spine.front` / `spine.back` 两层下（chars）；`'flat'`：spine 就是条目上的
+ *                 `spine` 字段（enemies / tokens）。
+ */
+export const ART_TABLES = {
+  chars: { urls: ['avatar', 'avatarE2', 'portrait', 'portraitE2'], strings: [], spine: 'sides' },
+  enemies: { urls: ['icon'], strings: ['spineAliasOf'], spine: 'flat' },
+  tokens: { urls: ['avatar'], strings: ['owner'], spine: 'flat' },
+};
+/**
+ * 一个 spine 对象里的路径字段、路径数组字段，以及原样抄过去但要查类型的字段。
+ *
+ * 这些类型**不是我们定的**，是 `data/assets.json` 里官方条目的实际类型（工具链产物，0.8.0 实测）：
+ * `anims` 与 `animations` 都是**对象**（前者是"角色 → 动画名"的映射，后者是"动画名 → 时长"），
+ * `events` 是**数组**（事件名列表，例如 `["OnAttack","OnStart"]`），`pma` 是布尔、`hits`/`bounds` 是对象。
+ * 文档教作者「照官方条目抄」，所以这里必须与官方一致 —— 类型写反，一个正确的条目会被我们拒掉。
+ */
+export const ART_SPINE_URLS = ['skel', 'atlas'];
+export const ART_SPINE_LISTS = ['textures'];
+export const ART_SPINE_PASSTHROUGH = {
+  pma: ['boolean'],
+  anims: ['object'],
+  animations: ['object'],
+  events: ['array'],
+  hits: ['object'],
+  bounds: ['object', 'array'],
+};
+const ART_SPINE_FIELDS = [...ART_SPINE_URLS, ...ART_SPINE_LISTS, ...Object.keys(ART_SPINE_PASSTHROUGH)];
+
+/** 一个 spine 对象（`{ skel, atlas, textures?, pma?, anims?, … }`）。`skel` 与 `atlas` 缺一不可：加载器是从 skel
+ * 的路径**推出** atlas 的，清单里的 atlas 只用来做内存回收，写错不会报错 —— 所以形状这一层就要求它必须在。 */
+function parseArtSpine(spine, where) {
+  if (!isPlainObj(spine)) return { error: 'ART_BAD_SHAPE', detail: `${where} must be a spine object { skel, atlas, … }` };
+  const out = {};
+  for (const [key, value] of Object.entries(spine)) {
+    if (!ART_SPINE_FIELDS.includes(key)) {
+      return { error: 'ART_UNKNOWN_FIELD', detail: `${where}: "${key}" is not a spine field (${ART_SPINE_FIELDS.join(', ')})` };
+    }
+    if (ART_SPINE_URLS.includes(key)) {
+      if (!isSafeAssetPath(value)) return { error: 'ART_PATH_UNSAFE', detail: `${where}.${key}: "${String(value)}" must be a relative path inside assets/` };
+      out[key] = value;
+      continue;
+    }
+    if (ART_SPINE_LISTS.includes(key)) {
+      if (!Array.isArray(value) || !value.length) return { error: 'ART_BAD_SHAPE', detail: `${where}.${key} must be a non-empty array of paths` };
+      for (const p of value) {
+        if (!isSafeAssetPath(p)) return { error: 'ART_PATH_UNSAFE', detail: `${where}.${key}: "${String(p)}" must be a relative path inside assets/` };
+      }
+      out[key] = [...new Set(value)];
+      continue;
+    }
+    const got = Array.isArray(value) ? 'array' : (value && typeof value === 'object' ? 'object' : typeof value);
+    if (!ART_SPINE_PASSTHROUGH[key].includes(got)) {
+      return { error: 'ART_BAD_SHAPE', detail: `${where}.${key} must be a ${ART_SPINE_PASSTHROUGH[key].join(' or ')}` };
+    }
+    out[key] = value;
+  }
+  for (const need of ART_SPINE_URLS) {
+    if (!out[need]) return { error: 'ART_SPINE_INCOMPLETE', detail: `${where} needs both "skel" and "atlas"` };
+  }
+  return { spine: out, error: null };
+}
+
+/** 一张外观表里的一个条目：路径字段、原样字符串、以及（按表）嵌套或扁平的 spine。 */
+function parseArtEntry(entry, where, shape) {
+  if (!isPlainObj(entry)) return { error: 'ART_BAD_SHAPE', detail: `${where} must be an object` };
+  const out = {};
+  for (const [key, value] of Object.entries(entry)) {
+    if (shape.urls.includes(key)) {
+      if (!isSafeAssetPath(value)) return { error: 'ART_PATH_UNSAFE', detail: `${where}.${key}: "${String(value)}" must be a relative path inside assets/` };
+      out[key] = value;
+      continue;
+    }
+    if (shape.strings.includes(key)) {
+      if (typeof value !== 'string' || !value) return { error: 'ART_BAD_SHAPE', detail: `${where}.${key} must be a non-empty string` };
+      out[key] = value;
+      continue;
+    }
+    if (key === 'spine') {
+      if (shape.spine === 'flat') {
+        const parsed = parseArtSpine(value, `${where}.spine`);
+        if (parsed.error) return parsed;
+        out.spine = parsed.spine;
+        continue;
+      }
+      if (!isPlainObj(value)) return { error: 'ART_BAD_SHAPE', detail: `${where}.spine must map sides to a spine object ({ front: {…}, back: {…} })` };
+      const sides = {};
+      for (const [side, obj] of Object.entries(value)) {
+        if (side !== 'front' && side !== 'back') return { error: 'ART_UNKNOWN_FIELD', detail: `${where}.spine: "${side}" is not a side (front, back)` };
+        const parsed = parseArtSpine(obj, `${where}.spine.${side}`);
+        if (parsed.error) return parsed;
+        sides[side] = parsed.spine;
+      }
+      if (Object.keys(sides).length) out.spine = sides;
+      continue;
+    }
+    return {
+      error: 'ART_UNKNOWN_FIELD',
+      detail: `${where}: "${key}" is not a field of this art entry (${[...shape.urls, ...shape.strings, 'spine'].join(', ')})`,
+    };
+  }
+  return { entry: out, error: null };
+}
+
 /**
  * Validate and normalise one pack's `pack.json`.
  * @param {any} raw parsed pack.json
@@ -61,7 +176,8 @@ const fail = (error, detail) => ({ ok: false, error, detail });
  * @returns {{ ok: true, pack: { id: string, name: string, version: string, author: string|null, license: string|null,
  *   description: string|null, gameVersion: string|null, content: string[], overrides: string[],
  *   voices: Record<string, Record<string, string[]>>, voiceLangs: Record<string, Record<string, Record<string, string[]>>>,
- *   bondIcons: Record<string, string>, itemIcons: Record<string, string>, support: string[] } }
+ *   bondIcons: Record<string, string>, itemIcons: Record<string, string>,
+ *   art: Record<string, Record<string, object>>, support: string[] } }
  *   | { ok: false, error: string, detail: string }}
  */
 export function normalizePackManifest(raw, dirName = '', opts = {}) {
@@ -206,11 +322,46 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     }
     itemIconFiles[itemId] = file;
   }
-  // A pack may bring data files, voice lines (either table), 盟约图标, 装备图标, 助战声明 — never none of them
+  // 包自带的外观素材：`art: { chars | enemies | tokens: { "<id>": <该条目在 assets.json 里的形状的子集> } }`。
+  //
+  // 为什么需要它：客户端画一个单位时，模型与头像都从 `data/assets.json` 取 —— `public/js/assets.js spineEntry()` 读
+  // `chars[id].spine.front/back`（嵌套）或 `tokens[id].spine` / `enemies[id].spine`（扁平），头像读
+  // `chars[id].avatar/portrait`、`enemies[id].icon`。包没法往 assets.json 加条目，于是**新干员/新怪物只能画成
+  // 一张菱形贴图**（shared/workshop.js chessLookIssues 会在启动日志里警告这件事）。这个字段把口子开在 pack.json 上：
+  // 装载时叠加进 `assets.<表>`（mergeWorkshopArt），路径变成 /workshop-assets 的绝对 URL —— 客户端零改动
+  // （validSpine 只要求 skel 是 `/` 开头的路径，包素材路由天然满足）。
+  //
+  // 两条**包改不了**的硬约束（由 vendor 里的 pixi-spine 决定，校验器会逐条查，见 tools/workshop-validate.mjs）：
+  //   * `.atlas` 必须与 `.skel` **同目录同名** —— 加载器是从 skel 的路径推出 atlas 的，清单里的 `atlas` 字段我方代码
+  //     只是用来做内存回收（assets.js forgetPendingSpine），写错不会报错，只会画不出来；
+  //   * `.atlas` 里写的每一页 png 必须与它**同目录同名**。
+  // 形状按表驱动（ART_TABLES）：哪几个字段是路径、spine 是嵌套（chars 的 front/back）还是扁平（enemies/tokens），
+  // 都写在那一张表里，校验、索引与并表三处共用，不会各自漂移。
+  const art = raw.art === undefined ? {} : raw.art;
+  if (!isPlainObj(art)) return fail('ART_BAD_SHAPE', 'art must be an object: { chars|enemies|tokens: { "<id>": { … } } }');
+  if (Object.keys(art).length && opts.hasAssets !== true) {
+    return fail('ART_NEEDS_ASSETS', 'a pack that declares art must put the files in its assets/ folder (e.g. assets/art/…)');
+  }
+  /** @type {Record<string, Record<string, object>>} */
+  const artEntries = {};
+  for (const [table, entries] of Object.entries(art)) {
+    const shape = ART_TABLES[table];
+    if (!shape) return fail('ART_UNKNOWN_TABLE', `"${table}" is not an art table (one of: ${Object.keys(ART_TABLES).join(', ')})`);
+    if (!isPlainObj(entries)) return fail('ART_BAD_SHAPE', `art.${table} must be an object: { "<id>": { … } }`);
+    const clean = {};
+    for (const [id, entry] of Object.entries(entries)) {
+      if (!RECORD_ID_RE.test(id)) return fail('ART_BAD_ID', `art.${table}: "${id}" is not a valid id`);
+      const parsed = parseArtEntry(entry, `art.${table}["${id}"]`, shape);
+      if (parsed.error) return fail(parsed.error, parsed.detail);
+      if (Object.keys(parsed.entry).length) clean[id] = parsed.entry;
+    }
+    if (Object.keys(clean).length) artEntries[table] = clean;
+  }
+  // A pack may bring data files, voice lines (either table), 盟约图标, 装备图标, 外观素材, 助战声明 — never none of them
   // (docs/WORKSHOP.md §1.4).
   if (!content.length && !Object.keys(voiceLines).length && !Object.keys(orderedLangLines).length
-    && !Object.keys(bondIconFiles).length && !Object.keys(itemIconFiles).length) {
-    return fail('EMPTY_PACK', `content must name at least one of: ${WORKSHOP_CONTENT_FILES.join(', ')} — or the pack must declare voices / voiceLangs / bondIcons / itemIcons`);
+    && !Object.keys(bondIconFiles).length && !Object.keys(itemIconFiles).length && !Object.keys(artEntries).length) {
+    return fail('EMPTY_PACK', `content must name at least one of: ${WORKSHOP_CONTENT_FILES.join(', ')} — or the pack must declare voices / voiceLangs / bondIcons / itemIcons / art`);
   }
   // 助战卡池贡献 (docs/WORKSHOP.md §2): the operators of THIS pack that should be selectable as 助战. The tier is NOT
   // written here — it is derived from the pack's own chess record, exactly like every other derived field, so a tier can
@@ -244,6 +395,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
       voiceLangs: orderedLangLines,
       bondIcons: bondIconFiles,
       itemIcons: itemIconFiles,
+      art: artEntries,
       support: supportIds,
     },
   };
@@ -443,6 +595,8 @@ export function applyWorkshop(base, packs) {
   const push = (bag, file, id) => { (bag[file] ||= []).push(id); };
   /** 工坊新增/覆盖的每一条干员记录（供 `chessLookIssues` 事后判断它有没有模型）。 */
   const looked = [];
+  /** 同上，怪物记录（`enemies`）：包自带怪物模型这条路本来没有任何启动保护，见 `enemyLookIssues`。 */
+  const lookedEnemies = [];
 
   for (const pack of Array.isArray(packs) ? packs : []) {
     if (!pack || typeof pack !== 'object' || !pack.id) continue;
@@ -464,6 +618,7 @@ export function applyWorkshop(base, packs) {
         }
         merged[id] = rec;
         if (file === 'chess') looked.push({ pack: pack.id, id, rec });
+        if (file === 'enemies') lookedEnemies.push({ pack: pack.id, id, rec });
         if (exists) { overridden++; push(report.overridden, file, id); } else { added++; push(report.added, file, id); }
       }
       out[file] = merged;
@@ -475,8 +630,11 @@ export function applyWorkshop(base, packs) {
   mergeWorkshopVoices(out, packs, report);
   mergeWorkshopBondIcons(out, packs, report);
   mergeWorkshopItemIcons(out, packs, report);
+  // 必须在 chessLookIssues 之前：那条检查读的是**合并后**的 assets.chars，包自带模型到位之后
+  // 「这个干员没有模型（会画成贴图）」的警告就该消失（反过来放在后面，日志会一直报一条已经解决的问题）。
+  mergeWorkshopArt(out, packs, report);
   mergeWorkshopSupport(out, packs, report);
-  report.looks = chessLookIssues(out, looked);
+  report.looks = [...chessLookIssues(out, looked), ...enemyLookIssues(out, lookedEnemies)];
   for (const list of Object.values(report.added)) list.sort();
   for (const list of Object.values(report.overridden)) list.sort();
   return { data: out, report };
@@ -486,8 +644,12 @@ export function applyWorkshop(base, packs) {
  * 工坊干员的**外观能不能真的渲染成模型**：`assets.spine`（或 `charId`）必须是本机素材清单 `assets.chars` 里的键。
  *
  * 为什么单独查这一条：查不到时游戏**不会报错** —— `assets.spineEntry()` 返回 null，单位就画成一张头像菱形贴图，
- * 于是作者只会觉得「模型没加载出来」。这个仓库不携带干员美术、一个包也无法自带（`assets.json` 不是可贡献的
- * 数据文件），所以「复用已装好的 spine id」是唯一的路；这一层把它说出来，让手写包与编辑器写出来的包一样能被发现。
+ * 于是作者只会觉得「模型没加载出来」。这个仓库不携带干员美术，但**包可以自带**（`pack.json.art.chars` 里的
+ * `spine`，0.8.0 起）：所以这条检查读的是**合并后**的 `assets.chars` —— 包把自己的模型接上去之后，警告自然消失
+ * （applyWorkshop 里必须在写 `report.looks` 之前先合并 art，否则日志会一直报一条已经解决的问题）。
+ * 没带模型时，「复用已装好的 spine id」仍是唯一的路；手写包与编辑器写出来的包在这一层同样能被发现。
+ *
+ * 只查干员、不查怪物：怪物那条在 `enemyLookIssues`（同一个 `report.looks`，条目上带 `kind: 'enemy'`）。
  *
  * 没有清单（素材流程没跑）时不判断：宁可不说，也不要乱说。
  *
@@ -508,6 +670,47 @@ function chessLookIssues(data, looked) {
       reason: spine
         ? `${id}: assets.spine "${spine}" is not in this install's model list (data/assets.json chars) — it renders as a flat portrait, not a model`
         : `${id}: no assets.spine — it renders as a flat portrait, not a model. Reuse an installed spine id (an existing operator's) instead`,
+    });
+  }
+  return out;
+}
+
+/**
+ * 包自带的**怪物**模型有没有着落 —— `chessLookIssues` 的怪物版（同一条 `report.looks`，条目带 `kind: 'enemy'`）。
+ *
+ * 为什么要有它：干员那条检查只由 `chess` 记录填（`looked`），而怪物走 `enemies.json` —— 包新增的怪物如果把 `spine`
+ * 写成一个本机没有的模型 id，客户端**同样一条日志都不打**：`assets.spineEntry()` 返回 null，那只怪物画成一张图标
+ * 贴图。判定链与客户端逐字一致（`server/sim/simdata.js` 取 `rec.spine ?? key`；`public/js/assets.js spineEntry` 读
+ * `enemies[key].spine`，条目里的 `spineAliasOf` 指向另一个模型），所以别名链要跟着走（官方有 8 个敌人是这样）。
+ *
+ * `assets.json` 里没有 `enemies` 表（没跑过素材管线）时不判断：宁可不说，也不要乱说。
+ * @param {Readonly<Record<string, any>>} data 合并后的数据
+ * @param {Array<{ pack: string, id: string, rec: object }>} looked 工坊贡献的怪物记录
+ * @returns {Array<{ pack: string, id: string, spine: string, kind: string, code: string, reason: string }>}
+ */
+function enemyLookIssues(data, looked) {
+  if (!looked.length) return [];
+  const enemies = isPlainObj(data.assets) && isPlainObj(data.assets.enemies) ? data.assets.enemies : null;
+  if (!enemies || !Object.keys(enemies).length) return [];
+  const out = [];
+  for (const { pack, id, rec } of looked) {
+    const want = isPlainObj(rec) && typeof rec.spine === 'string' && rec.spine ? rec.spine : id;
+    let cur = want;
+    let ok = false;
+    // 跟着 spineAliasOf 走：别名链是有向的、官方数据里不会成环，但这里仍然限深，坏数据不能把启动卡住
+    for (let hop = 0; hop < 8 && cur; hop++) {
+      const entry = enemies[cur];
+      if (!isPlainObj(entry)) break;
+      if (isPlainObj(entry.spine)) { ok = true; break; }
+      cur = typeof entry.spineAliasOf === 'string' && entry.spineAliasOf ? entry.spineAliasOf : '';
+    }
+    if (ok) continue;
+    const known = Object.hasOwn(enemies, want);
+    out.push({
+      pack, id, spine: want, kind: 'enemy', code: known ? 'MODEL_MISSING' : 'MODEL_UNKNOWN',
+      reason: known
+        ? `${id}: assets.enemies "${want}" carries no model of its own (no spine, and no spineAliasOf to borrow one) — it renders as a flat icon, not a model`
+        : `${id}: assets.spine "${want}" is not in this install's model list (data/assets.json enemies) — it renders as a flat icon, not a model`,
     });
   }
   return out;
@@ -752,6 +955,130 @@ function mergeWorkshopItemIcons(data, packs, report) {
 }
 
 /**
+ * 把包自带的外观素材变成合并后清单里的那几条：`{ <表>: { <id>: <条目，路径已换成 /workshop-assets 的绝对 URL> } }`。
+ *
+ * 与 `workshopVoiceIndex` / `workshopBondIconIndex` 同一套：URL 指向 /workshop-assets 那条唯一的包素材路由，客户端
+ * 不需要任何新通道（`public/js/assets.js validSpine` 只要求 skel 是 `/` 开头的路径，包素材 URL 天然满足）。
+ * 同一个 `<表>.<id>` 被两个包声明时**第一个赢**（按包 id 排序），后一个包在启动日志里得到一条错误。
+ * @param {Array<object>} packs @param {{ prefix?: string }} [opts]
+ */
+export function workshopArtIndex(packs, { prefix = WORKSHOP_MEDIA_PREFIX } = {}) {
+  /** @type {Record<string, Record<string, object>>} */
+  const out = {};
+  const toUrl = (packId, p) => `${prefix}${packId}/${String(p).split('/').map(encodeURIComponent).join('/')}`;
+  // 按包 id 排序再处理：谁赢只取决于包 id，不取决于加载顺序（与既有的三条素材通道同一条规则）
+  for (const pack of [...(Array.isArray(packs) ? packs : [])].sort(byPackId)) {
+    const art = isPlainObj(pack?.art) ? pack.art : null;
+    if (!art) continue;
+    for (const [table, entries] of Object.entries(art)) {
+      const shape = ART_TABLES[table];
+      if (!shape || !isPlainObj(entries)) continue;
+      const bucket = (out[table] ||= {});
+      for (const [id, entry] of Object.entries(entries)) {
+        if (Object.hasOwn(bucket, id) || !isPlainObj(entry)) continue;
+        bucket[id] = artEntryUrls(entry, shape, (p) => toUrl(pack.id, p));
+      }
+    }
+  }
+  return out;
+}
+
+/** 一个条目里路径字段换成 URL 之后的副本；`spine` 按表嵌套（chars 的 front/back）或扁平（enemies/tokens）。 */
+function artEntryUrls(entry, shape, toUrl) {
+  const out = {};
+  for (const [key, value] of Object.entries(entry)) {
+    if (shape.urls.includes(key)) out[key] = toUrl(value);
+    else if (shape.strings.includes(key)) out[key] = value;
+    else if (key === 'spine' && isPlainObj(value)) {
+      out.spine = shape.spine === 'flat'
+        ? spineUrls(value, toUrl)
+        : Object.fromEntries(Object.entries(value).map(([side, s]) => [side, spineUrls(s, toUrl)]));
+    }
+  }
+  return out;
+}
+
+/** 一个 spine 对象里的路径字段换成 URL，其余（`anims`/`events`/`pma`…）原样抄。 */
+function spineUrls(spine, toUrl) {
+  const out = {};
+  for (const [key, value] of Object.entries(spine)) {
+    if (ART_SPINE_URLS.includes(key)) out[key] = toUrl(value);
+    else if (ART_SPINE_LISTS.includes(key)) out[key] = value.map(toUrl);
+    else out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * 把包自带的外观并进 `assets.chars` / `assets.enemies` / `assets.tokens` —— 客户端画单位与头像时读的那三张表。
+ *
+ * **字段级合并**，不是整条替换：包只给头像时官方模型照旧；包给 `spine.front` 的 `skel`/`atlas` 时，官方那一侧的
+ * `anims`/`events` 等字段留着（整侧替换会让一个官方模型变成「能出来但不动」，而且一条日志都没有）。官方没有这个
+ * id 时就是新增。`assets.json` 本身不存在（没跑过素材管线）时报告出来，不凭空造一份。
+ */
+function mergeWorkshopArt(data, packs, report) {
+  const index = workshopArtIndex(packs);
+  const tables = Object.keys(index);
+  if (!tables.length) return;
+  const list = [...(Array.isArray(packs) ? packs : [])].sort(byPackId);
+  // 谁跟谁抢了同一个 <表>.<id>：按包 id 排序后第一个赢，后面的写进 report.errors
+  /** @type {Map<string, string>} */
+  const claimed = new Map();
+  for (const pack of list) {
+    for (const [table, entries] of Object.entries(isPlainObj(pack?.art) ? pack.art : {})) {
+      for (const id of Object.keys(isPlainObj(entries) ? entries : {})) {
+        const key = `${table}.${id}`;
+        if (claimed.has(key)) {
+          report.errors.push({
+            pack: pack.id, file: 'assets', id: key,
+            reason: `another pack (${claimed.get(key)}) already ships art for this entry; keep only one`,
+          });
+        } else claimed.set(key, pack.id);
+      }
+    }
+  }
+  const assets = isPlainObj(data.assets) ? data.assets : null;
+  if (!assets) {
+    for (const pack of list) {
+      if (!isPlainObj(pack?.art) || !Object.keys(pack.art).length) continue;
+      report.errors.push({
+        pack: pack.id, file: 'assets', id: 'art',
+        reason: 'this pack ships art (avatars / portraits / spine models), but data/assets.json is missing — run `npm run assets` so the client has a manifest to extend',
+      });
+    }
+    return;
+  }
+  const next = { ...assets };
+  for (const table of tables) {
+    const entries = isPlainObj(next[table]) ? { ...next[table] } : {};
+    for (const [id, patch] of Object.entries(index[table])) {
+      entries[id] = mergeArtEntry(isPlainObj(entries[id]) ? entries[id] : {}, patch);
+    }
+    next[table] = entries;
+  }
+  /** @type {Record<string, string[]>} */
+  const counts = {};
+  for (const [key, packId] of claimed) (counts[packId] ??= []).push(key);
+  for (const arr of Object.values(counts)) arr.sort();
+  data.assets = next;
+  report.art = counts;
+}
+
+/** 一个条目按字段合并；`spine` 再往里一层（一侧之内的字段逐项合并，见 mergeWorkshopArt 的注释）。 */
+function mergeArtEntry(cur, patch) {
+  const out = { ...cur };
+  for (const [key, value] of Object.entries(patch)) {
+    if (key !== 'spine' || !isPlainObj(value)) { out[key] = value; continue; }
+    const spine = isPlainObj(cur.spine) ? { ...cur.spine } : {};
+    for (const [k, v] of Object.entries(value)) {
+      spine[k] = isPlainObj(v) && isPlainObj(spine[k]) ? { ...spine[k], ...v } : v;
+    }
+    out.spine = spine;
+  }
+  return out;
+}
+
+/**
  * Make newly added STAGES selectable.
  *
  * A stage only enters a match when the mode's `stages` list names it (server/match/waves.js picks among those by
@@ -807,10 +1134,16 @@ export function workshopSummary(report) {
     if (icons) bits.push(`${icons.length} bond icon${icons.length === 1 ? '' : 's'}`);
     const itemIcons = report.itemIcons && report.itemIcons[p.id];
     if (itemIcons) bits.push(`${itemIcons.length} item icon${itemIcons.length === 1 ? '' : 's'}`);
+    const art = report.art && report.art[p.id];
+    if (art) bits.push(`${art.length} art entr${art.length === 1 ? 'y' : 'ies'} (${art.join(', ')})`);
     const support = report.support && report.support[p.id];
     if (support) bits.push(`助战 +${support.length}`);
     const looks = (report.looks || []).filter((l) => l.pack === p.id);
-    if (looks.length) bits.push(`${looks.length} 个干员没有模型（会画成贴图）`);
+    // 干员与怪物分开数：一句话里混着「3 个干员」而其中两个是怪物，读日志的人会去找错对象
+    const lookOperators = looks.filter((l) => l.kind !== 'enemy').length;
+    const lookEnemies = looks.length - lookOperators;
+    if (lookOperators) bits.push(`${lookOperators} 个干员没有模型（会画成贴图）`);
+    if (lookEnemies) bits.push(`${lookEnemies} 个怪物没有模型（会画成贴图）`);
     return `${p.name}(${p.id}): ${bits.length ? bits.join(', ') : 'nothing'}`;
   });
   if (report.supportOff) parts.push('助战 pool contributions off (support.json "workshop": false)');

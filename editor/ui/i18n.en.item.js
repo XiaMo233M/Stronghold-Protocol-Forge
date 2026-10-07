@@ -47,6 +47,18 @@ export const EN_ITEM = Object.freeze({
   '这件装备还没有图标 id：先在「图标 trapId」里填一个（如 trap_ws_my_item）并保存，再回来给它配图。': 'This item has no icon id yet: fill in “Icon (trapId)” (e.g. trap_ws_my_item), save, then come back to give it an icon.',
   '本包的 `assets/` 里还没有图片：把图标文件放进去（如 assets/item/{0}.png），再回到这一页挑。': 'This pack’s `assets/` has no images yet: put the icon file there (e.g. assets/item/{0}.png) and come back to pick it.',
   '官方清单里没有 `{0}` 这张图：不配本包图标时，这件装备显示兜底图。': 'The official manifest has no `{0}`: without a pack icon this item shows the fallback art.',
+  // ---- 表单：本包已声明的装备图标（pack.json 的 itemIcons，含陈旧条目） ----
+  // 上面那一段只认当前 trapId；这一块把**全部**声明列出来，好让作者删掉改过 trapId 之后遗留下来的那条。
+  // `有人在用` 与 `陈旧 / 没人用` 两条与盟约页共用：一个键只准出现在一个分片里（test/editorI18n.test.js 查重复键），
+  // 而 i18n.en.shared.js 不在这次改动范围内，所以按「只留一份」的规则归属这里，两页的原文刻意逐字相同。
+  '本包已声明的装备图标': 'Item icons this pack declares',
+  'pack.json 的 `itemIcons` 里声明的每一条都列在下面，含已经没人用的那条：不用手改清单，在这一页删掉就行。': 'Every entry declared in pack.json’s `itemIcons` is listed below, including the ones nothing uses any more: no hand-editing the manifest — delete it right here.',
+  '「有人在用」= 本包 items.json 里有记录的 iconId / trapId 等于它。': '“In use” = a record in this pack’s items.json has this id as its iconId / trapId.',
+  '有人在用': 'in use',
+  '陈旧 / 没人用': 'stale / unused',
+  '本包还没有声明任何自带装备图标。': 'This pack declares no icon of its own yet.',
+  '「陈旧 / 没人用」不是错误：它不违反规则，只是本包没有记录再用这个 id 当图标 —— 留着它这张图也永远不会显示。': '“Stale / unused” is not an error: it breaks no rule — it only means no record of this pack uses this id as an item icon any more, so the image never shows while the entry stays.',
+  '删掉本包图标 {0} 的声明？（图片文件本身不会删）': 'Delete this pack’s icon declaration for {0}? (The image file itself is not deleted)',
 
   // ---- 表单：效果 buffs ----
   '效果 buffs（引擎真正读的是它们摊平出来的 params）': 'Effects — buffs (what the engine really reads is the params they flatten into)',

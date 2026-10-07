@@ -25,8 +25,16 @@ function makeEl(tag) {
     title: '',
     setAttribute(k, v) { this.attrs[k] = v; if (k === 'id') this.id = v; },
     getAttribute(k) { return this.attrs[k] ?? null; },
-    append(...kids) { for (const k of kids) el.children.push(k); },
-    replaceChildren(...kids) { el.children = [...kids]; },
+    append(...kids) { for (const k of kids) { if (k && typeof k === 'object') k.parent = el; el.children.push(k); } },
+    replaceChildren(...kids) { for (const k of kids) if (k && typeof k === 'object') k.parent = el; el.children = [...kids]; },
+    /** `ChildNode.after`（标准 DOM）：app.js 把「新建工坊包」面板插在 `header` 之后，桩 DOM 也得支持，否则一 import 就抛。 */
+    after(...kids) {
+      const p = el.parent;
+      if (!p) return;
+      const at = p.children.indexOf(el);
+      for (const k of kids) if (k && typeof k === 'object') k.parent = p;
+      p.children.splice(at < 0 ? p.children.length : at + 1, 0, ...kids);
+    },
     addEventListener(type, fn) { (el.listeners[type] ??= []).push(fn); },
     focus() { doc.activeElement = el; },
     setSelectionRange() {},

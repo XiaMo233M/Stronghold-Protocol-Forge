@@ -388,8 +388,8 @@ function renderSide() {
     packs: state.data?.packs ?? [],
     current: state.packId,
     newLabel: t('＋ 新建一个包…'),
+    newDefault: 'my-wave-pack',
     onPick: (id) => { state.packId = id; renderSide(); },
-    askNewId: () => prompt(t('新工坊包的 id（字母数字下划线短横线，≤32）：'), 'my-wave-pack'),
   }));
   box.append(packBox);
 

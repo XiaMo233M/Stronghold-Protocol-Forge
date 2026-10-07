@@ -134,7 +134,7 @@ export const EN_INDEX = Object.freeze({
   '将要生成的记录（普通 / 精锐由工具推导）': 'Records to be generated (base / elite are derived)',
   '校验结果': 'Validation',
   '先选择一个工坊包（或点「新建工坊包」）': 'Pick a workshop pack first (or click “New workshop pack”)',
-  // 「新工坊包的 id（…）」是五个页面共用的（保存目标的下拉），已放 shared
+  // 「新工坊包 id」那一套（内联输入框与它的校验文案）七个页面共用，已放 shared
   '保存第一个干员时会创建工坊包 {0}（目录名必须等于 pack.json 的 id）。': 'Saving the first operator creates the pack {0} (the directory name must equal the id in pack.json).',
   '删除 {0}？（同时删除它生成的普通与精锐记录）': 'Delete {0}? (its generated base and elite records go too)',
 
@@ -244,4 +244,17 @@ export const EN_INDEX = Object.freeze({
   // ---- 数值参照 ----
   // 尺子本身的三条文案在 shared 里：那根尺子是两个页面共用的模块（editor/ui/statScale.js）画的。
   '细线上的刻度是官方同类干员的区间（按职业统计，共 {0} 名），不是硬性上限。': 'The tick on the line is the official range for this profession ({0} operators) — a reference, not a hard cap.',
+
+  // ---- 本包自带的外观素材（pack.json 的 art；干员页是 chars 表，怪物页那段共用的词条在 shared） ----
+  '客户端画一个干员时读的是合并后的 `data/assets.json` 的 `chars`：这里声明的东西会被并进那一条（素材走 /workshop-assets），客户端零改动。路径都相对包的 `assets/`，文件要自己先放进去 —— 编辑器不上传素材。': 'To draw an operator the client reads the merged data/assets.json chars table: what you declare here is merged into that entry (the files are served from /workshop-assets), so the client needs no change. Every path is relative to the pack’s assets/ — put the files there yourself, the editor does not upload assets.',
+  '先在上面选一个工坊包。': 'Pick a workshop pack above first.',
+  '先在「assetsSpine」里填这个干员的模型 id（客户端就是拿它去 `chars` 表查外观），再回来给它配素材。': 'First fill in this operator’s model id under “assetsSpine” (that is the key the client looks up in the chars table), then come back to give it art.',
+  '头像 avatar': 'Avatar',
+  '精英头像 avatarE2': 'Elite avatar (avatarE2)',
+  '立绘 portrait': 'Portrait',
+  '精英立绘 portraitE2': 'Elite portrait (portraitE2)',
+  '只换头像/立绘也可以：那一侧的模型不填，官方模型照旧（叠加层按字段合并，不会把没写的字段顶掉）。': 'Replacing only the avatar/portrait is fine: leave that side’s model empty and the official model stays (the overlay merges field by field, so what you do not write is never overwritten).',
+  '模型 front（正面）': 'Model — front',
+  '模型 back（背面）': 'Model — back',
+  '还没选骨架：这一侧不会被声明（想给某个角色只换头像/立绘也可以，那样就不填模型）。': 'No skeleton picked yet: this side stays undeclared (replacing only the avatar/portrait is fine — just leave the model empty).',
 });

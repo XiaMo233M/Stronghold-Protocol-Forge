@@ -65,7 +65,11 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
 
 五个内容页（地图 / 怪物 / 出怪 / 装备 / 盟约）的侧栏或右栏都有一个**保存目标**下拉：列出所有工坊包（id 与 `pack.json` 里的名字），
 选好再保存。以前每次保存都要在对话框里手打一次包 id —— 打错就是存进别的包，或者凭空建一个空包。
-只有选「＋ 新建一个包…」时才问一次新包的 id（那一步确实只能问）。
+
+选「＋ 新建一个包…」时**不再弹浏览器原生对话框**（0.8.0 起，`editor/ui/packPicker.js`）：就在下拉**原地**展开一个输入框
+（自动聚焦、Enter 确认、Esc 取消），空值 / 形状不对 / 与已有包重名都在表单里就地报错，校验规则与加载器同一套
+（`^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$`）。**包仍然由第一次保存创建**：确认后这个新 id 立刻成为当前保存目标，落盘发生在你按保存时。
+干员页头部那个「新建工坊包」按钮走的是同一个控件。
 
 ### 界面语言（中英双语）
 
@@ -202,12 +206,25 @@ node tools/workshop-validate.mjs workshop                                       
 - **`spine` 有候选、也有存在性校验**：这是整张表单里**唯一一个填错不报错**的字段 —— prefab 键查不到时
   `assets.spineEntry()` 直接画个占位菱形，游戏照跑、日志干净。输入框挂了官方 prefab 候选（datalist），
   并在下面当场说清三种情况：留空 → 占位模型；填错 → 静默变占位模型；填对 → 用官方美术。
+  **0.8.0 起还可以让包自带模型**：「本包自带的外观素材（可选）」一块（见下面那条）。
 - **身份**：id（生成 `enemy_ws_<id>`）、名称、rank、攻击方式、伤害类型、移动方式、描述
 - **数值**：17 项 stats（生命/攻击/防御/法抗/移速/攻击间隔/攻速/射程/阻挡/重量/回复…）
 - **特殊机制**：`abilities`（游戏里显示的能力说明，一行一条）、`talents.bb`（天赋黑板键值）、`skills`（JSON，
   形如 `{ prefabKey, priority, cooldown, bb }`）、`acType`、`tags`、五项免疫
 - **美术与非数据表字段**：这些**不在游戏数据表里**（来自客户端清单），必须手填 —— `spine`（复用现有 prefab 键才有真美术）、
   `modelScale`、`hitArea`（受击框）、`attackAnim`
+- **本包自带的外观素材（可选）**（0.8.0 起，干员页的「外观」段与怪物页这一段各有一块）：包可以把头像/立绘/模型放进自己的
+  `assets/` 并声明进 `pack.json.art`，装载时叠加层把它并进 `data/assets.json` 的 `chars` / `enemies` / `tokens`
+  —— **客户端零改动**，而且包新增的干员/怪物不再是「一张菱形贴图」。这一块做的事：
+  - 文件从**本包 `assets/` 里真实存在的**素材里挑（编辑器不上传素材）；**选完 `.skel` 会自动填同目录同名的 `.atlas`**
+    —— 这不是体贴，是硬约束：加载器是从 skel 的路径**推出** atlas 的，名字不一致在客户端**一条日志都不打**，只退回贴图；
+  - `anims` 按角色（idle / move / attack / skill / die / born…）各一个**下拉**，候选来自服务端用客户端同一个解析器
+    （`@pixi-spine/runtime-3.8`）读出来的**骨架真实动画名**；动画名写错同样静默（模型能出来但不动）；
+  - `textures` / `pma` 按图谱内容在保存前补上；保存是**整条条目**一次提交（`POST /api/packs/:pack/art`），保存前服务端
+    挡住：路径穿越、文件不存在、类型不可服务、**atlas 与 skel 不同名**、**图谱里某一页 png 缺失**、**skel 版本不是 3.8.x**、
+    **动画名不在骨架里**、有 `assets/` 却没声明 license；
+  - 下面还有一块「**本包已声明的**外观」清单：列 `pack.json.art` 里**全部**声明（含陈旧条目），逐条可删 —— 与图标那两块
+    同一条规矩：**任何写进 `pack.json` 的东西都要能在界面上删掉**。
 - **派生量只读显示**：`attrPower` 与 `be` 由服务端按数值实时算出。**`be` 决定阵营换怪时替换多少只**，所以它必须算，不能手填
 - 保存写 `<pack>/enemy-specs/<slug>.json`（源）并重新生成 `<pack>/enemies.json`（产物）
 
@@ -234,8 +251,9 @@ node tools/workshop-validate.mjs workshop     # enemies 层：重算 be/attrPowe
   且扩展名能当图片发的文件里挑一张，写进 `pack.json` 的 `itemIcons`（`POST /api/packs/:pack/item-icons`），
   装载时叠加层把它并进 `assets.items`；客户端按**道具的图标 id** 从那张表取图（`public/js/assets.js itemIconUrl`：
   先 `iconId` 再 `trapId`），所以**客户端零改动**。这一段只在 `spec.trapId` 非空时才有意义 —— 键就是它。
-  要删掉声明就把下拉选回「（不用本包图标）」。已知取舍（与盟约页一致）：声明留着、但 `items.json` 里那条记录的
-  `trapId` 被改掉之后，页面不再显示这条陈旧声明，需要手改 `pack.json`。
+  要删掉声明就把下拉选回「（不用本包图标）」。**0.8.0 起这一段下面还有一块「本包已声明的装备图标」清单**：把 `pack.json`
+  里**全部**声明列出来（包括当前这件装备用不到的、陈旧的条目），标出「有人在用 / 陈旧没人用」，每条都能直接删 ——
+  因为业主的硬约束是**不许要求作者手改 `pack.json`**。
 - **派生量只读显示**：`params`、`mergeable`、`shopExcluded`、`upgradeChessId`
 
 三条推导不是猜的，每一条都**精确复现全部 115 条官方装备**（`test/itemAuthoring.test.js`）：
@@ -490,6 +508,10 @@ node scripts/launch.mjs --port 3001     # 换个端口
   写进 `pack.json` 的 `bondIcons`（`POST /api/packs/:pack/bond-icons`），装载时叠加层把它并进 `assets.bonds`，
   客户端不需要任何改动。覆盖官方盟约时这张图会替换官方图标；官方清单里没有、本包也没配，就是盟约条上的一个圆点 ——
   页面会当场说明当前是哪一种。要删掉声明就把下拉选回「（不用本包图标）」。
+  **0.8.0 起这一段下面还有一块「本包已声明的盟约图标」清单**：把 `pack.json` 里**全部**声明列出来（包括当前这条盟约
+  用不到的、陈旧的条目），标出「有人在用 / 陈旧没人用」，每条都能直接删 —— 一条盟约被删掉或改名之后，它的旧图标声明
+  就是靠这里清掉的（服务端也为此把「本包有没有这条盟约」的检查只留给**配图**：清空永远是放行的，否则那种条目会
+  「看得见、删不掉」，又回到手改清单）。
 - **保存写两处**：`bond-specs/<bondId>.json`（可编辑的源）与 `bonds.json`（游戏读的产物），
   并保证 `pack.json` 的 `content` 声明了 `bonds`（否则加载器**完全不读**这个包的 `bonds.json`，
   与干员那条同一个坑）、覆盖官方时 `overrides` 里有 `bonds:<id>`。派生失败的保存会**还原**刚写的 spec，
@@ -536,7 +558,7 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/state` | 工坊包（含每个包 `bonds.json` 里的盟约清单 `bonds`）、干员、校验问题、助战配置、可选用的官方 Spine 列表、**按职业的数值参照 `statRanges`**、**官方盟约清单 `officialBonds`**（干员页的盟约勾选）；官方干员条目带 `subProfessionName`（分支中文名） |
+| GET | `/api/state` | 工坊包（含每个包 `bonds.json` 里的盟约清单 `bonds`，以及各包的 `packArt` —— `art` 声明 + 本包真实素材 + 已声明 spine 的骨架动画名/版本、图谱页名）、干员、校验问题、助战配置、可选用的官方 Spine 列表、**按职业的数值参照 `statRanges`**、**官方盟约清单 `officialBonds`**（干员页的盟约勾选）；官方干员条目带 `subProfessionName`（分支中文名） |
 | GET | `/api/operators/template?chessId=` | 把一对已发布的干员记录转成一份**可继续编辑的 spec**（模板新建用；id 留空） |
 | POST | `/api/preview` | `{ spec }` → 推导并校验，**不写盘** |
 | POST | `/api/packs/:pack/operators` | `{ spec }` → 写 specs 并重新生成 `chess.json` |
@@ -554,7 +576,7 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 | POST | `/api/stages/preview` | `{ spec }` → 推导路径与部署区并校验，**不写盘** |
 | POST | `/api/packs/:pack/stages` | `{ spec }` → 写 `stage-specs/` 并重新生成 `stages.json` |
 | DELETE | `/api/packs/:pack/stages/:id` | 删除该地图的 spec 及它拥有的记录 |
-| GET | `/api/enemies` | 工坊怪物列表 + **枚举词表** + 官方怪物键 + **模板清单 / spine 候选 / 按档位的数值参照** |
+| GET | `/api/enemies` | 工坊怪物列表 + **枚举词表** + 官方怪物键 + **模板清单 / spine 候选 / 按档位的数值参照** + 各包的 `packArt`（`art` 声明与本包真实素材） |
 | GET | `/api/enemies/template?key=` | 把一只已发布的怪物记录转成一份**可继续编辑的 spec**（模板新建用；id 留空） |
 | GET | `/api/enemies/:pack/:key` | 该怪物的**可编辑 spec**（源）与生成的记录 |
 | POST | `/api/enemies/preview` | `{ spec }` → 推导 `attrPower`/`be` 并校验，**不写盘** |
@@ -579,6 +601,8 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 | POST | `/api/packs/:pack/voices` | `{ charId, slot, paths, lang }` → 设置**一个槽位**（空数组即删除）；`lang` 省略或默认配音 → 就地更新 `pack.json` 的 `voices`，`jp`/`en`/`kr` → 更新 `voiceLangs[<语种>]`；回话带回两份表 |
 | POST | `/api/packs/:pack/bond-icons` | `{ bondId, path }` → 设置本包自带的**盟约图标**（`path` 空即删除），就地更新 `pack.json` 的 `bondIcons`；文件必须真的在 `assets/` 下 |
 | POST | `/api/packs/:pack/item-icons` | `{ itemId, path }` → 设置本包自带的**装备图标**（`path` 空即删除），就地更新 `pack.json` 的 `itemIcons`；文件必须真的在 `assets/` 下，且 `itemId` 要被本包 `items.json` 里某条记录的 `iconId`/`trapId` 用到 |
+| POST | `/api/packs/:pack/art` | `{ table, id, art }`（`table ∈ chars\|enemies\|tokens`）→ 覆盖式写入本包自带**外观素材**的一条（`art` 为 `null`/`{}` 即删除，空对象逐级清理）；保存前挡住路径穿越、文件不存在、类型不可服务、atlas 与 skel 不同名、图谱页 png 缺失、skel 版本非 3.8.x、动画名不在骨架里、有 `assets/` 却没 license |
+| GET | `/api/packs/:pack/art/inspect?skel=&atlas=` | **只读**：读一个**还没写进 `pack.json`** 的 skel/atlas，回骨架版本、动画名、图谱页名与 `size:`/`pma` —— 页面的动画名下拉靠它（否则首次声明时只能靠猜） |
 | DELETE | `/api/packs/:pack/voices/:charId/:slot`（可选 `?lang=`） | 删除一个干员的一个槽位（不存在则报告 `removed: false`，不重写文件）；`?lang=jp` 删的是 `voiceLangs.jp` 那一份 |
 | GET | `/api/packs/:id/export` | 该包的 `.zip`（`application/zip` + `Content-Disposition: attachment`）；包不存在 → 404 |
 | POST | `/api/packs/import`（可选 `?force=1`） | **原始 zip 字节**（`application/octet-stream`）→ 解压到临时目录、校验、搬进 `workshop/<包id>/`；返回装好的包摘要 |

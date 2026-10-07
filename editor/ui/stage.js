@@ -560,8 +560,8 @@ function renderSide() {
     packs: state.data?.packs ?? [],
     current: state.packId,
     newLabel: t('＋ 新建一个包…'),
+    newDefault: 'my-map-pack',
     onPick: (id) => { state.packId = id; renderSide(); },
-    askNewId: () => prompt(t('新工坊包的 id（字母数字下划线短横线，≤32）：'), 'my-map-pack'),
   }));
   box.append(packBox);
   if (!spec.id) box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('先填一个 id 才能保存。') }));

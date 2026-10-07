@@ -13,6 +13,7 @@
 
 import { t, mountI18n } from './i18n.js';
 import { packSelect } from './packPicker.js';
+import { renderKeepingFocus } from './focusKeep.js';
 
 const $ = (s) => document.querySelector(s);
 
@@ -185,6 +186,14 @@ function renderForm() {
   // 这里把包自带的图接上：装载时叠加层把它写进 `assets.items`，URL 走 /workshop-assets 那条唯一路由 —— 客户端
   // 因此零改动（它读的还是同一份合并后的 assets.json）。图片要自己先放进包里的 assets/，编辑器不上传素材。
   const packIcons = (state.data?.packItemIcons ?? []).find((p) => p.id === state.packId);
+  // 一个图标 id 现在还有没有用到：客户端是拿**道具记录的 iconId / trapId** 去查 assets.items 的，所以本包
+  // items.json 里任何一条记录的 iconId / trapId 等于它就算有人用。`/api/items` 现在给的是 trapId
+  // （shared/itemAuthoring.js 的 deriveItem 把 iconId 写成 trapId），iconId 一并读上是为了手写记录。
+  const usedIconIds = new Set();
+  for (const it of state.data?.items ?? []) {
+    if (it.pack !== state.packId) continue;
+    for (const id of [it.iconId, it.trapId]) if (typeof id === 'string' && id) usedIconIds.add(id);
+  }
   const iconKey = String(spec.trapId ?? '').trim();
   const iconFiles = packIcons?.iconFiles ?? [];
   const currentIcon = (packIcons?.itemIcons ?? {})[iconKey] ?? '';
@@ -216,6 +225,9 @@ function renderForm() {
     ? t('官方清单里有 `{0}` 这张图：不配本包图标时，客户端会用它。', iconKey)
     : t('官方清单里没有 `{0}` 这张图：不配本包图标时，这件装备显示兜底图。', iconKey || t('（空）')) }));
   box.append(iconBox);
+
+  // 全部声明（含陈旧条目）：上面那一段只认当前 trapId，改掉 trapId 之后旧声明在页面上就再也看不到 —— 这一块是它的出口
+  box.append(declaredIconsBox(packIcons, usedIconIds));
 
   box.append(h(t('效果 buffs（引擎真正读的是它们摊平出来的 params）')));
   const buffBox = document.createElement('div'); buffBox.className = 'panel';
@@ -277,6 +289,83 @@ function renderForm() {
     (x) => { try { const p = JSON.parse(x); if (Array.isArray(p)) { spec.rangeGrid = p; spec._rangeBad = false; } else spec._rangeBad = true; } catch { spec._rangeBad = true; } renderSide(); },
   )));
   box.append(rgBox);
+}
+
+// ---- 本包已声明的装备图标（pack.json 的 itemIcons，含陈旧条目） ---------------------------------------------------
+
+/**
+ * 「本包已声明的装备图标」清单：`packItemIcons[].itemIcons` 就是 `pack.json` 里**原样**读出的那一份，所以在
+ * 这里把全部声明都列出来（含没人用的陈旧条目），每条一个删除按钮。
+ *
+ * 为什么需要它：上面那段「本包自带的图标（可选）」的键取自当前 `spec.trapId`，所以作者改掉某件装备的 `trapId`
+ * 之后，`itemIcons[旧 id]` 那条声明在页面上再也看不到、也删不掉 —— 只能手改清单。这一块是那条声明的唯一出口。
+ * 「有人在用」按 `usedIconIds` 判断（本包 items.json 里记录的 iconId / trapId），没人用**不是错误**：它不违反
+ * 任何规则，只是这张图永远不会显示出来。
+ */
+function declaredIconsBox(packIcons, usedIconIds) {
+  const box = document.createElement('div'); box.className = 'panel';
+  box.append(Object.assign(document.createElement('h2'), { textContent: t('本包已声明的装备图标') }));
+  box.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('pack.json 的 `itemIcons` 里声明的每一条都列在下面，含已经没人用的那条：不用手改清单，在这一页删掉就行。'),
+  }));
+  const entries = Object.entries(packIcons?.itemIcons ?? {});
+  if (!entries.length) {
+    box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('本包还没有声明任何自带装备图标。') }));
+    return box;
+  }
+  box.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('「有人在用」= 本包 items.json 里有记录的 iconId / trapId 等于它。'),
+  }));
+  let stale = 0;
+  for (const [iconId, relPath] of entries) {
+    const used = usedIconIds.has(iconId);
+    if (!used) stale++;
+    const row = document.createElement('div'); row.className = 'row'; row.style.margin = '4px 0';
+    row.append(
+      Object.assign(document.createElement('span'), { textContent: iconId }),
+      Object.assign(document.createElement('span'), { className: 'dim', textContent: `→ ${String(relPath ?? '')}` }),
+      Object.assign(document.createElement('span'), {
+        className: used ? 'tag ok' : 'tag gold',
+        textContent: used ? t('有人在用') : t('陈旧 / 没人用'),
+      }),
+    );
+    const del = document.createElement('button'); del.className = 'ghost'; del.textContent = t('删除');
+    del.addEventListener('click', () => { deleteDeclaredIcon(iconId); });
+    row.append(del);
+    box.append(row);
+  }
+  if (stale) {
+    box.append(Object.assign(document.createElement('p'), {
+      className: 'hint',
+      textContent: t('「陈旧 / 没人用」不是错误：它不违反规则，只是本包没有记录再用这个 id 当图标 —— 留着它这张图也永远不会显示。'),
+    }));
+  }
+  return box;
+}
+
+/**
+ * 删掉本包图标清单里的一条声明：空 path 就是「删掉这条声明」（服务端把「只收本包在用的 id」那条限制放在
+ * **配图**上，清空不受它管），所以这个 id 已经不在任何下拉里也能删掉。删完重画表单，清单与下拉都是新的。
+ */
+async function deleteDeclaredIcon(iconId) {
+  if (!state.packId) {
+    state.message = { kind: 'error', text: t('先在右边选一个工坊包（或点「＋ 新建一个包…」）。') };
+    renderSide();
+    return;
+  }
+  if (!confirm(t('删掉本包图标 {0} 的声明？（图片文件本身不会删）', iconId))) return;
+  try {
+    await api(`/api/packs/${encodeURIComponent(state.packId)}/item-icons`, { method: 'POST', body: { itemId: iconId, path: '' } });
+    state.message = { kind: 'ok', text: t('已取消 {0} 的自带图标', iconId) };
+    await load();
+    renderKeepingFocus($('#form'), renderForm);
+  } catch (e) {
+    state.message = { kind: 'error', text: t(e?.message ?? String(e)) };
+    renderKeepingFocus($('#form'), renderForm);
+    renderSide();   // 回执在右栏，失败了也要看得见（照 saveItem / deleteItem 的写法）
+  }
 }
 
 // ---- preview ----------------------------------------------------------------------------------------------------
@@ -406,8 +495,8 @@ function renderSide() {
     packs: state.data?.packs ?? [],
     current: state.packId,
     newLabel: t('＋ 新建一个包…'),
-    onPick: (id) => { state.packId = id; renderSide(); },
-    askNewId: () => prompt(t('新工坊包的 id（字母数字下划线短横线，≤32）：'), 'my-item-pack'),
+    newDefault: 'my-item-pack',
+    onPick: (id) => { state.packId = id; renderKeepingFocus($('#form'), renderForm); renderSide(); },   // 换包要连表单一起重画：图标那两块是按包读的
   }));
   box.append(packBox);
   if (!state.spec.id) box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('先填 id 才能保存。') }));

@@ -24,8 +24,6 @@ export const EN_KIT = Object.freeze({
     'A kit is JavaScript in a pack (<pack>/kits/<operator id>.js), not a data table: the default-exported function is the kit implementation the simulator calls.',
   '它既是可编辑的源、也是游戏真正加载的产物，所以这里编辑的是文件本体（左栏没有「非编辑器管理」的记录可区分）。':
     'It is both the editable source and the artifact the game really loads, so what you edit here is the file itself (the left column has no "not editor-managed" record to tell them apart).',
-  '＋ 新建 / 其它工坊包…': '+ New / another workshop pack…',
-  '工坊包 id（字母数字下划线短横线，≤32）：': 'Workshop pack id (letters, digits, underscore, hyphen, ≤32):',
   'kit id（= 它服务的干员 id，文件名就是它）': 'kit id (= the id of the operator it serves; that is the file name)',
   '文件内容（整份文件，含开头的署名注释）：保存时服务端只在缺少署名头时补写，已有的一行只更新 modified —— created 永远保留。':
     'File contents (the whole file, credit header included): on save the server only adds a header when one is missing, and an existing line only gets its modified updated — created is always kept.',

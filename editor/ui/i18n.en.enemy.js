@@ -91,4 +91,12 @@ export const EN_ENEMY = Object.freeze({
   '这个 prefab 键不在官方清单里：游戏里会显示成占位模型（不会报错）。': 'This prefab key is not in the official list: the game shows a placeholder model instead (and reports nothing).',
   '留空则用占位模型；想要真美术就填一个官方 prefab 键。': 'Leave it empty for the placeholder model; type an official prefab key to get real art.',
   '是官方 prefab 键，游戏里用这套美术。': 'A real official prefab key — the game uses this art.',
+
+  // ---- 本包自带的外观素材（pack.json 的 art；这一页是 enemies 表、扁平的 spine） ----
+  '客户端画一只怪物时读的是合并后的 `data/assets.json` 的 `enemies`：这里声明的东西会被并进那一条（素材走 /workshop-assets），客户端零改动。路径都相对包的 `assets/`，文件要自己先放进去 —— 编辑器不上传素材。': 'To draw an enemy the client reads the merged data/assets.json enemies table: what you declare here is merged into that entry (the files are served from /workshop-assets), so the client needs no change. Every path is relative to the pack’s assets/ — put the files there yourself, the editor does not upload assets.',
+  '先在右边选一个工坊包。': 'Pick a workshop pack on the right first.',
+  '先填 id（记录键是 enemy_ws_<id>，客户端就是拿它去 `enemies` 表查外观），再回来给它配素材。': 'Fill in an id first (the record key is enemy_ws_<id>, which is what the client looks up in the enemies table), then come back to give it art.',
+  '图标 icon': 'Icon',
+  '别人的模型 spineAliasOf（可留空）': 'Another enemy’s model (spineAliasOf — may be empty)',
+  '还没选骨架：这一条就不会带模型（只换图标/头像也可以）。': 'No skeleton picked yet: this entry ships no model (replacing only the icon is fine).',
 });

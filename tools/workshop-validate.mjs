@@ -9,8 +9,8 @@
 //   node tools/workshop-validate.mjs --json               # machine-readable report
 //
 // It checks the layers cheapest-first: pack format → record semantics → the real engine → then one layer per content
-// kind (kits, stages/maps, enemies/monsters, waves, items, a pack's voice lines, its item icons and its 助战
-// declarations), each
+// kind (kits, stages/maps, enemies/monsters, waves, items, a pack's voice lines, its item icons, its 外观素材
+// (avatars / portraits / spine models) and its 助战 declarations), each
 // re-deriving what the engine derives. Layer 3 is what catches a record that is syntactically valid but silently
 // unplayable.
 //
@@ -28,7 +28,10 @@ import { validateItem } from '../shared/itemAuthoring.js';
 import { validateKit } from '../shared/kitAuthoring.js';
 import { loadData } from '../server/data.js';
 import { WORKSHOP_ASSET_TYPES } from '../server/index.js';
-import { workshopSupportEntries } from '../shared/workshop.js';
+import { workshopSupportEntries, ART_TABLES } from '../shared/workshop.js';
+import { atlasInfo } from './assets/atlas.mjs';
+import { parseSkel } from './assets/skel.mjs';
+import { roleAnimationNames } from './assets/anim-roles.mjs';
 import { GameData } from '../server/match/gamedata.js';
 import { toDataSource, isShopItem } from '../server/sim/simdata.js';
 
@@ -77,6 +80,51 @@ const OFFICIAL_ITEM_ICON_IDS = new Set(
     .flatMap((rec) => (rec ? [rec.iconId, rec.trapId] : []))
     .filter((id) => typeof id === 'string' && id),
 );
+
+/**
+ * 「官方已有的外观条目 id」= 官方素材清单 `data/assets.json` 那三张表的键（chars / enemies / tokens）。
+ *
+ * 与装备图标那条同一种做法：客户端是**按 id 查表**的 —— 干员读 `chars[chess 记录的 assets.spine]`，怪物与召唤物
+ * 读 `enemies[key]` / `tokens[key]`。所以一个两边都没有的 id 不会报错，那张头像/模型只会永远不被用到。
+ * assets.json 不存在（没跑过素材管线）时三张表都是空的：这一层只检查包自己写下的东西，不因此报错。
+ */
+const OFFICIAL_ASSETS = (() => {
+  try { return JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'assets.json'), 'utf8')); }
+  catch { return {}; }
+})();
+const artTableIds = (table) => new Set(Object.keys((OFFICIAL_ASSETS && OFFICIAL_ASSETS[table]) || {}));
+const OFFICIAL_ART_IDS = { chars: artTableIds('chars'), enemies: artTableIds('enemies'), tokens: artTableIds('tokens') };
+
+/**
+ * 一个 art 条目上**直接是路径**的字段，与 spine 在哪一层 —— 两者都直接读 `shared/workshop.js` 导出的 `ART_TABLES`，
+ * 不在这里抄第二份（抄一份的下场是两处漂移：加载器开始收的字段校验器不查，或者反过来）。
+ * `enemies.spineAliasOf` 与 `tokens.owner` 是原样抄的 id，不是路径，所以只取 `urls`。
+ */
+const ART_ENTRY_PATH_FIELDS = Object.fromEntries(Object.entries(ART_TABLES).map(([table, shape]) => [table, shape.urls]));
+/** spine 在哪一层：chars 是 `spine.front` / `spine.back`，enemies / tokens 是扁平的 `spine`。 */
+const ART_SPINE_NESTED_TABLES = new Set(Object.entries(ART_TABLES).filter(([, shape]) => shape.spine === 'sides').map(([table]) => table));
+
+/** 一个包自己新增的干员 char id：本包 chess 记录自己的 `assets.spine` / `charId`（客户端就是按这个查 chars 的）。 */
+function ownCharIds(pack) {
+  const out = new Set();
+  for (const rec of Object.values(pack.files.chess || {})) {
+    if (!rec || typeof rec !== 'object') continue;
+    const spine = rec.assets && typeof rec.assets === 'object' ? rec.assets.spine : null;
+    if (typeof spine === 'string' && spine) out.add(spine);
+    if (typeof rec.charId === 'string' && rec.charId) out.add(rec.charId);
+  }
+  return out;
+}
+
+/** 一个包自己新增的召唤物 token id：本包 chess 记录里的 `tokens` 数组，以及本包 tokens.json 的键。 */
+function ownTokenIds(pack) {
+  const out = new Set(Object.keys(pack.files.tokens || {}));
+  for (const rec of Object.values(pack.files.chess || {})) {
+    if (!rec || typeof rec !== 'object' || !Array.isArray(rec.tokens)) continue;
+    for (const t of rec.tokens) if (typeof t === 'string' && t) out.add(t);
+  }
+  return out;
+}
 
 /** Cross-record checks the per-record validator cannot see (the base/elite pair). */
 function pairIssues(records, file) {
@@ -222,6 +270,197 @@ async function main() {
     }
     entry.itemIcons = iconIds.length;
     report.itemIcons = (report.itemIcons || 0) + iconIds.length;
+  }
+
+  // ---- 包自带的外观素材（pack.json 的 art，docs/WORKSHOP.md §1.4「外观素材」）。这是这条通道最关键的一层：
+  // 客户端在这些情况下**一条日志都不打** —— 退回一张菱形贴图，或者模型出来了但不动。形状（三张表、id 字符集、
+  // 路径形状、skel/atlas 缺一不可）由加载器已经校验过；只有文件系统与骨架/图谱本身能回答的，全在这里逐条体检：
+  //
+  //   * 声明的文件真的在不在、扩展名能不能发（ART_FILE_MISSING / ART_TYPE_UNSERVABLE）；
+  //   * `.atlas` 是否与 `.skel` **同目录同名**（ART_ATLAS_NAME_MISMATCH）—— 加载器是从 skel 路径推 atlas 的，
+  //     清单里那个字段我方代码只用来做内存回收，写错在客户端毫无反应；
+  //   * `.atlas` 里写的每一页 png 是否与它同目录、且真的存在（ART_ATLAS_PAGE_MISSING；712 个官方模型里有 2 个是双页，
+  //     不能假设一页一 png），以及有没有 `size:` 行（ART_ATLAS_NO_SIZE，pixi-spine 可能除 0）；
+  //   * `.skel` 的版本是不是 3.8.x（ART_SPINE_VERSION）—— vendor 是 uni 构建，3.7/4.0/4.1 理论上能跑，只放行 3.8 才稳；
+  //   * `anims` 缺不缺（ART_SPINE_NO_ANIMS：客户端 validSpine 要求它是个对象），以及里面写的动画名在骨架里存不存在
+  //     （ART_ANIM_UNKNOWN，把骨架真的有的名字列出来给作者对照）；
+  //   * 清单的 `pma` 与 atlas 页声明的 `pma` 是否一致（ART_PMA_HINT：png 本身是不是预乘读不出来，所以只提示）；
+  //   * id 两边都没有（ART_UNKNOWN_ID）：客户端按 id 查表，没人用的那条素材永远不会显示 —— 与
+  //     ITEM_ICON_UNKNOWN_ITEM / VOICE_UNKNOWN_OPERATOR 同一类，所以也只是 warning。
+  for (const pack of packs) {
+    const art = pack.art || {};
+    const tables = Object.keys(art);
+    if (!tables.length) continue;
+    const entry = report.packs.find((p) => p.pack === pack.id);
+    const assetsDir = path.join(pack.dir, 'assets');
+    const push = (issue) => entry.issues.push(issue);
+
+    // 文件在不在、类型能不能发：与语音、装备图标两层同一套（只是错误码前缀不同）
+    const checkFile = (field, rel) => {
+      const abs = path.join(assetsDir, rel);
+      const ext = path.extname(rel).toLowerCase();
+      if (!WORKSHOP_ASSET_TYPES.has(ext)) {
+        push({
+          field, code: 'ART_TYPE_UNSERVABLE', severity: 'error',
+          message: `"${rel}" (${ext || 'no extension'}) is not a media type the pack route serves`,
+          hint: 'the route allowlists images / audio / fonts / atlas / skel — 外观素材要的是 .png / .atlas / .skel',
+        });
+        return false;
+      }
+      if (!fs.existsSync(abs)) {
+        push({
+          field, code: 'ART_FILE_MISSING', severity: 'error',
+          message: `"${rel}" is declared in pack.json but not on disk at ${abs}`,
+          hint: 'files must live inside the pack: <pack>/assets/<path>',
+        });
+        return false;
+      }
+      return true;
+    };
+
+    /**
+     * 一个 spine 对象要过的全部体检。`field` 是它在 pack.json 里的写法（如 art.chars["c"].spine.front）；
+     * `inheritsAnims` 表示这个 id 在官方清单里已经有条目 —— 叠加层是**字段级合并**，官方那条的 `anims` 会留下来。
+     */
+    const checkSpine = (spine, field, inheritsAnims = false) => {
+      const skelRel = spine.skel;
+      const atlasRel = spine.atlas;
+      const skelOk = checkFile(`${field}.skel`, skelRel);
+      checkFile(`${field}.atlas`, atlasRel);
+      // 加载器是从 skel 的路径**推出** atlas 的（dirname + basename + .atlas），清单里的 atlas 它不读
+      const derivedAtlas = skelRel.replace(/\.skel$/i, '.atlas');
+      if (atlasRel !== derivedAtlas) {
+        push({
+          field: `${field}.atlas`, code: 'ART_ATLAS_NAME_MISMATCH', severity: 'error',
+          message: `the loader derives the atlas from the skeleton ("${derivedAtlas}") but pack.json names "${atlasRel}"`,
+          hint: 'put the atlas beside the skeleton under the same name: <name>.skel + <name>.atlas',
+        });
+      }
+      // atlas 的内容：页名以 .atlas 文本为准（清单里的 textures 只是内存回收用的清单，不参与加载）
+      const atlasAbs = path.join(assetsDir, atlasRel);
+      let atlasText = null;
+      if (fs.existsSync(atlasAbs)) {
+        try { atlasText = fs.readFileSync(atlasAbs, 'utf8'); } catch { atlasText = null; }
+      }
+      const info = atlasText === null ? null : atlasInfo(atlasText);
+      if (info) {
+        for (const page of info.pages) {
+          if (!fs.existsSync(path.join(path.dirname(atlasAbs), page))) {
+            push({
+              field: `${field}.atlas`, code: 'ART_ATLAS_PAGE_MISSING', severity: 'error',
+              message: `the atlas lists the page "${page}" but it is not beside it (${path.join(path.dirname(atlasAbs), page)})`,
+              hint: 'every page name in the .atlas is a png in the same folder — one model may have more than one page',
+            });
+          }
+        }
+        if (!info.hasSize) {
+          push({
+            field: `${field}.atlas`, code: 'ART_ATLAS_NO_SIZE', severity: 'warning',
+            message: 'at least one page of this atlas has no "size: W,H" line',
+            hint: 'pixi-spine divides by the page size — add `size: <w>,<h>` under the page name (tools/assets/atlas.mjs writes it)',
+          });
+        }
+        // pma：清单里的 pma 与 atlas 页声明的 pma 不一致 —— 客户端信清单那一份，画出来就是错的。
+        // png 自己是不是预乘读不出来（那要解像素），所以这条只能提示，不能判死。
+        if (typeof spine.pma === 'boolean' && spine.pma !== info.hasPma) {
+          push({
+            field: `${field}.pma`, code: 'ART_PMA_HINT', severity: 'warning',
+            message: `the manifest says pma: ${spine.pma} but the atlas ${info.hasPma ? 'declares' : 'does not declare'} "pma: true"`,
+            hint: 'the client premultiplies exactly when the manifest says pma: true — make both sides agree',
+          });
+        }
+      }
+      // anims 是清单自己的声明：缺了/空了报一次（与骨架能不能解析无关）
+      const declaredAnims = roleAnimationNames(spine.anims);
+      if (!declaredAnims.length) {
+        push({
+          field: `${field}.anims`, code: 'ART_SPINE_NO_ANIMS',
+          // 官方已有这个 id 时字段级合并会把官方那条的 anims 留着，所以只是警告；**新 id 没有可继承的 anims** ——
+          // 而客户端的 validSpine 要求 anims 是对象，缺了它这个模型根本不会被采用，只会画成一张贴图。
+          severity: inheritsAnims ? 'warning' : 'error',
+          message: inheritsAnims
+            ? 'this spine declares no animation role (`anims`) — the official entry\'s own anims are kept, so the model will still animate'
+            : 'this spine declares no animation role (`anims`), and there is no official entry to inherit one from',
+          hint: 'the client\'s validSpine requires an anims object and plays the roles it names — without it the unit falls back to a flat portrait',
+        });
+      }
+      // 骨架：版本 + 动画名（用客户端同一个解析器读，喂进去的必须是**从 0 开始的** Uint8Array）
+      if (!skelOk) return;
+      let skelInfo;
+      try {
+        skelInfo = parseSkel(new Uint8Array(fs.readFileSync(path.join(assetsDir, skelRel))));
+      } catch (e) {
+        push({
+          field: `${field}.skel`, code: 'ART_SPINE_VERSION', severity: 'error',
+          message: `this .skel cannot be read as a Spine 3.8 skeleton (${e && e.message ? e.message : e})`,
+          hint: 'export the model as Spine 3.8.x binary — the client parses it with @pixi-spine/runtime-3.8 and stays silent on failure',
+        });
+        return;
+      }
+      if (!/^3\.8\./.test(skelInfo.version)) {
+        push({
+          field: `${field}.skel`, code: 'ART_SPINE_VERSION', severity: 'error',
+          message: `the skeleton's version is "${skelInfo.version}" — only 3.8.x is accepted`,
+          hint: 're-export as 3.8.x: the shipped parser may also read 3.7 / 4.0 / 4.1, but every official model is 3.8 (709 × 3.8.99 + 3 × 3.8.84)',
+        });
+      }
+      if (declaredAnims.length) {
+        const known = new Set(skelInfo.animations);
+        const unknown = declaredAnims.filter((n) => !known.has(n));
+        if (unknown.length) {
+          const list = skelInfo.animations.length > 12 ? `${skelInfo.animations.slice(0, 12).join(', ')}, …` : skelInfo.animations.join(', ');
+          push({
+            field: `${field}.anims`, code: 'ART_ANIM_UNKNOWN', severity: 'error',
+            message: `these animation names are not in the skeleton: ${unknown.join(', ')}`,
+            hint: skelInfo.animations.length ? `the skeleton has ${skelInfo.animations.length}: ${list}` : 'the skeleton has no animations at all',
+          });
+        }
+      }
+    };
+
+    let count = 0;
+    for (const [table, entries] of Object.entries(art)) {
+      for (const [id, a] of Object.entries(entries)) {
+        count++;
+        for (const f of ART_ENTRY_PATH_FIELDS[table] || []) {
+          if (typeof a[f] === 'string') checkFile(`art.${table}.${id}.${f}`, a[f]);
+        }
+        if (!a.spine) continue;
+        // 官方已有这个 id 时，叠加层是字段级合并：官方那条的 anims/events 会留下来（所以缺 anims 只是警告）
+        const inherits = OFFICIAL_ART_IDS[table] ? OFFICIAL_ART_IDS[table].has(id) : false;
+        if (ART_SPINE_NESTED_TABLES.has(table)) {
+          for (const [side, spine] of Object.entries(a.spine)) checkSpine(spine, `art.${table}.${id}.spine.${side}`, inherits);
+        } else {
+          checkSpine(a.spine, `art.${table}.${id}.spine`, inherits);
+        }
+      }
+    }
+
+    // id 有没有人用：客户端按 id 查表（干员读 chess 记录的 assets.spine / charId，怪物读自己的键，召唤物读 tokens）。
+    // 「本包的数据文件」指本包 chess.json / enemies.json / tokens.json 自己贡献的那些 id。
+    const ownIds = {
+      chars: ownCharIds(pack),
+      enemies: new Set(Object.keys(pack.files.enemies || {})),
+      tokens: ownTokenIds(pack),
+    };
+    const unknownHint = {
+      chars: 'point a chess record of this pack at it (assets.spine = "<id>"), or ignore this if another installed pack adds that operator',
+      enemies: 'name it in this pack\'s waves / enemies.json, or ignore this if another installed pack adds that monster',
+      tokens: 'list it in a chess record of this pack (`tokens`), or ignore this if another installed pack adds that summon',
+    };
+    for (const [table, entries] of Object.entries(art)) {
+      for (const id of Object.keys(entries)) {
+        if (OFFICIAL_ART_IDS[table].has(id) || ownIds[table].has(id)) continue;
+        push({
+          field: `art.${table}.${id}`, code: 'ART_UNKNOWN_ID', severity: 'warning',
+          message: `${id} is neither in the official assets.json "${table}" table nor contributed by this pack — nothing can ever use this art`,
+          hint: unknownHint[table],
+        });
+      }
+    }
+
+    entry.art = count;
+    report.art = (report.art || 0) + count;
   }
 
   // ---- the 助战 layer (docs/WORKSHOP.md §2). `pack.json.support` names the operators of THIS pack that should be
@@ -416,6 +655,7 @@ async function main() {
       if (p.voices) bits.push(`${p.voices.lines} voice line(s) for ${p.voices.operators} operator(s)`);
       if (p.voiceLangs) bits.push(`${p.voiceLangs.lines} line(s) in ${p.voiceLangs.langs.join('/')}`);
       if (p.itemIcons) bits.push(`${p.itemIcons} item icon(s)`);
+      if (p.art) bits.push(`${p.art} art entr${p.art === 1 ? 'y' : 'ies'}`);
       if (p.support) bits.push(`助战: ${p.support.join(', ')}`);
       console.log(`\npack ${p.pack}${p.name ? ` (${p.name})` : ''}${bits.length ? ` — ${bits.join(' + ')}` : ''}`);
       if (!p.issues.length) console.log('  OK');

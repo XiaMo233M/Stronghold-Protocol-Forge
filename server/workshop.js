@@ -77,15 +77,17 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null } = {}) {
     // A pack whose every declared file failed to load contributes nothing: its errors are already reported, so it is
     // not listed as a loaded pack (an empty pack in the boot summary would only be noise). A pack that ships NO data
     // file at all is a different thing and IS loaded: the reserved 助战 voice pack carries only `voices` (or only
-    // `voiceLangs`, for a dub other than the default one), and a pack may also bring only 盟约图标 (`bondIcons`) or only
-    // 装备图标 (`itemIcons`) — all of them are published through assets.json by the overlay (shared/workshop.js
-    // mergeWorkshopVoices / mergeWorkshopBondIcons / mergeWorkshopItemIcons). Forgetting one of them here would make
-    // that kind of pack load "successfully" and contribute nothing.
+    // `voiceLangs`, for a dub other than the default one), and a pack may also bring only 盟约/装备图标 (`bondIcons` /
+    // `itemIcons`) or only 外观素材 (`art`: avatars, portraits, spine models) — all of them are published through
+    // assets.json by the overlay (shared/workshop.js mergeWorkshopVoices / mergeWorkshopBondIcons /
+    // mergeWorkshopItemIcons / mergeWorkshopArt). Forgetting one of them here would make that kind of pack load
+    // "successfully" and contribute nothing.
     if (Object.keys(files).length
       || Object.keys(manifest.pack.voices || {}).length
       || Object.keys(manifest.pack.voiceLangs || {}).length
       || Object.keys(manifest.pack.bondIcons || {}).length
-      || Object.keys(manifest.pack.itemIcons || {}).length) {
+      || Object.keys(manifest.pack.itemIcons || {}).length
+      || Object.keys(manifest.pack.art || {}).length) {
       packs.push({ ...manifest.pack, dir: packDir, files });
     }
   }
@@ -114,6 +116,9 @@ export function workshopTouchedFiles(loaded) {
     // 装备图标同样并进 `assets`（mergeWorkshopItemIcons，写的是 `assets.items`）—— 漏了这一步，浏览器会拿到磁盘上
     // 那份 assets.json，这件装备就永远是兜底图（而作者在编辑器里看到的是「已设置」）。
     if (p.itemIcons && Object.keys(p.itemIcons).length) out.add('assets');
+    // 外观素材（mergeWorkshopArt：`assets.chars` / `assets.enemies` / `assets.tokens`）理由逐字相同 —— 这一行漏掉，
+    // 服务端会说「包已加载」，而浏览器永远拿不到模型与头像（画出来还是一张菱形贴图）。
+    if (p.art && Object.keys(p.art).length) out.add('assets');
     // 助战 pool entries are merged into `support` (mergeWorkshopSupport) — the browser picks 助战 from that file.
     if (p.support && p.support.length) out.add('support');
   }

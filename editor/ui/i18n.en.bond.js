@@ -21,6 +21,15 @@ export const EN_BOND = Object.freeze({
   '已取消 {0} 的自带图标': 'Removed the pack icon of {0}',
   '官方清单里有 `{0}` 这张图：不配本包图标时，客户端会用它。': 'The official manifest has `{0}`: without a pack icon the client uses it.',
   '官方清单里没有 `{0}` 这张图，而客户端**不看** `iconId`、只看盟约 id —— 不配本包图标时这条盟约就是一个圆点。': 'The official manifest has no `{0}`, and the client ignores `iconId` — it looks the bond id up. Without a pack icon this bond is a plain dot.',
+  // ---- 本包已声明的盟约图标（pack.json 的 bondIcons，含陈旧条目） ----
+  // 上面那一段只认当前盟约 id；这一块把**全部**声明列出来，好让作者删掉「那条盟约已经不在了」的残留声明。
+  // `有人在用` 与 `陈旧 / 没人用` 两条与装备页共用，按「一个键只出现一次」的规则归属 i18n.en.item.js（见那里的说明）。
+  '本包已声明的盟约图标': 'Bond icons this pack declares',
+  'pack.json 的 `bondIcons` 里声明的每一条都列在下面，含已经没人用的那条：不用手改清单，在这一页删掉就行。': 'Every entry declared in pack.json’s `bondIcons` is listed below, including the ones nothing uses any more: no hand-editing the manifest — delete it right here.',
+  '「有人在用」= 本包 bonds.json 里还有这条盟约。': '“In use” = this pack’s bonds.json still has this bond.',
+  '本包还没有声明任何自带盟约图标。': 'This pack declares no bond icon of its own yet.',
+  '「陈旧 / 没人用」不是错误：它不违反规则，只是本包已经没有这条盟约 —— 留着它这张图也永远不会显示。': '“Stale / unused” is not an error: it breaks no rule — it only means this pack no longer has this bond, so the image never shows while the entry stays.',
+  '删掉本包盟约图标 {0} 的声明？（图片文件本身不会删）': 'Delete this pack’s bond-icon declaration for {0}? (The image file itself is not deleted)',
   '官方盟约（以它为准修改 / 覆盖）': 'Official bonds (edit / override these)',
   '这个工坊根下还没有盟约 —— 用「新建盟约」或「以模板新建」': 'No bond under this workshop root yet — use “New bond” or “New from template”',
   '还没有工坊包：先新建一个（保存时会创建）': 'No workshop pack yet: create one first (saving creates it)',

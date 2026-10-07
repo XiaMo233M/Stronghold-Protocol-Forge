@@ -1,6 +1,6 @@
 # Stronghold-Protocol-Forge · 卫戍协议工坊编辑器
 
-![version](https://img.shields.io/badge/version-0.7.3-2ea44f)
+![version](https://img.shields.io/badge/version-0.8.0-2ea44f)
 ![license](https://img.shields.io/badge/code%20license-GPL--3.0--or--later-blue)
 ![node](https://img.shields.io/badge/node-22%20%7C%2024-339933)
 
@@ -149,7 +149,8 @@ node tools/workshop-pack.mjs import ~/Downloads/my-pack.zip   # 把别人的包�
 - **创意工坊**：把工坊包放进 `workshop/<包>/`，即可新增/覆盖干员等内容。官方数据保持字节不变。
 - **工坊语音包**：包可以在 `pack.json.voices` 里给自己的（或助战的）干员配语音，音频放在包自己的 `assets/` 下；客户端不需要任何新通道就能听到——叠加层把台词并进它本来就在读的 `assets.audio.voice`。**0.7.3 起还能逐语种各配一份**（`pack.json.voiceLangs` → `assets.audio.voiceLangs[<语言>]`）：玩家在设置里选了日文，就听这个包的日文那一条，缺这一句时照旧退回默认配音。只带语音、不含任何数据文件的包是合法的。见 [docs/WORKSHOP.md](docs/WORKSHOP.md) §1.4。
 - **包自带助战**：`pack.json.support` 列出本包自己新增、应当进助战卡池的干员 —— 装包即可选，不必再手工改 `data/support.json`（阶由记录推导；安装方可用 `"workshop": false` 关掉一切包的声明）。见 [docs/WORKSHOP.md](docs/WORKSHOP.md) §2.1。
-- **包自带图标**：`pack.json.bondIcons` 给盟约配图、**0.7.3 起 `pack.json.itemIcons` 给装备/道具配图**（包新增的盟约与装备原本只能显示圆点/兜底图）；图放在包自己的 `assets/` 下，加载时并进合并后的 `assets.json`（`bonds` / `items` 两张表），客户端不需要任何新通道。只带图标的包同样合法。见 [docs/WORKSHOP.md](docs/WORKSHOP.md) §1.4。
+- **包自带图标**：`pack.json.bondIcons` 给盟约配图、`pack.json.itemIcons` 给装备/道具配图（包新增的盟约与装备原本只能显示圆点/兜底图）；图放在包自己的 `assets/` 下，加载时并进合并后的 `assets.json`（`bonds` / `items` 两张表），客户端不需要任何新通道。只带图标的包同样合法。见 [docs/WORKSHOP.md](docs/WORKSHOP.md) §1.4。
+- **包自带外观素材**（0.8.0 起）：`pack.json.art` 让包带上**头像 / 立绘 / spine 模型**（`chars` / `enemies` / `tokens` 三张表，形状照官方条目抄），加载时并进 `assets.chars` / `assets.enemies` / `assets.tokens` —— 于是**包新增的干员/怪物不再是一张菱形贴图**，客户端同样零改动。干员页与怪物页各有一块图形入口：从本包真实素材里挑、**选完 `.skel` 自动填同目录同名的 `.atlas`**（这条是硬约束：加载器是从 skel 路径推 atlas 的）、动画名从骨架里真实存在的名字里选。见 [docs/WORKSHOP.md](docs/WORKSHOP.md) §1.4。
 - **把包交给别人 / 装别人的包**：`node tools/workshop-pack.mjs export <包>` 打成一个 `.zip`，对方 `import` 即装；整合包里更简单——**把 `.zip` 拖到 `安装工坊包.bat` 上**。装包只写 `workshop/<包>/`，不碰 `data/*.json`。见 [docs/WORKSHOP.md](docs/WORKSHOP.md) §1.5。
 
 ```bash
@@ -173,7 +174,7 @@ npm run editor                                                                  
 
 - **独立模拟**（单人）与**同盟模拟**（1–4 人**合作**，没有 PvP；空位可以加 AI 队友）。
 - 服务器是一个 Node.js 程序，**战斗在各玩家的浏览器里模拟**（和官方一样），服务器只管经济与回合，一台低功耗小主机就能开服。
-- **本仓库打包的上游游戏本体为 0.2.0**（本仓库自己的版本是 0.7.3，两者的读法见[版本号怎么读](#版本号怎么读)）：补位、自选编队、中英日韩四语言、自定义快捷键与精简包，以及一批按官方数据与 PRTS 修正的规则，详见 [CHANGELOG.md](CHANGELOG.md)。仍有少数规则按推断实现，与官方不一致的地方欢迎在 Issue 里反馈。
+- **本仓库打包的上游游戏本体为 0.2.0**（本仓库自己的版本是 0.8.0，两者的读法见[版本号怎么读](#版本号怎么读)）：补位、自选编队、中英日韩四语言、自定义快捷键与精简包，以及一批按官方数据与 PRTS 修正的规则，详见 [CHANGELOG.md](CHANGELOG.md)。仍有少数规则按推断实现，与官方不一致的地方欢迎在 Issue 里反馈。
 - **多语言配音**（0.7.1 起）：干员战斗语音有中文 / 日文 / 英文 / 韩文四种，**设置 → 配音语言** 选全局默认，
   任何干员还能在 **干员详情 → 配音** 里单独换一种（点一下当场试听）。某种配音缺一句时自动退回默认配音。
   **发行包只带默认配音**，其余语言在同一个 release 的 `…-voices-*.zip` 里（解压覆盖到 `app/public/assets/audio/voice/` 即可，不用改配置）。
@@ -249,7 +250,7 @@ npm start          # 启动服务器：http://localhost:3000
 
 #### 版本号怎么读
 
-发行 tag 写成 **`v<forge>-<上游>`**：`v0.7.3-0.2.0` = 本仓库（Forge 工坊编辑器）**0.7.3** + 上游游戏（[sganggs/Stronghold-Protocol](https://github.com/sganggs/Stronghold-Protocol)）**0.2.0**。程序里显示的版本（标题页、启动横幅、`/healthz`）只是前半部分，因为仓库自己的元数据检查要求它是三段普通 semver —— 详见 [CHANGELOG.md](CHANGELOG.md) 与 `test/version.test.js`。
+发行 tag 写成 **`v<forge>-<上游>`**：`v0.8.0-0.2.0` = 本仓库（Forge 工坊编辑器）**0.8.0** + 上游游戏（[sganggs/Stronghold-Protocol](https://github.com/sganggs/Stronghold-Protocol)）**0.2.0**。程序里显示的版本（标题页、启动横幅、`/healthz`）只是前半部分，因为仓库自己的元数据检查要求它是三段普通 semver —— 详见 [CHANGELOG.md](CHANGELOG.md) 与 `test/version.test.js`。
 
 #### 系统要求
 

@@ -134,6 +134,53 @@ describe('workshop: the overlay', () => {
     assert.match(workshopSummary(r.report), /2 个干员没有模型/);
   });
 
+  test('an enemy with no resolvable model is reported too (the monster half of the same safety net)', () => {
+    // 干员那条检查只看 chess 记录；怪物走 enemies.json，而客户端在拿不到模型时同样一条日志都不打
+    // （simdata 取 rec.spine ?? key，assets.spineEntry 读 enemies[key].spine，条目里的 spineAliasOf 可以借别人的模型）。
+    const base = {
+      assets: {
+        enemies: {
+          enemy_ok: { icon: '/assets/enemy/ok.png', spine: { skel: '/assets/spine/e/ok.skel', atlas: '/assets/spine/e/ok.atlas' } },
+          enemy_alias: { icon: '/assets/enemy/a.png', spineAliasOf: 'enemy_ok' },
+          enemy_nomodel: { icon: '/assets/enemy/n.png' },
+        },
+      },
+    };
+    const enemies = {
+      enemy_ws_good: { key: 'enemy_ws_good', name: '正常', spine: 'enemy_ok' },
+      enemy_ws_alias: { key: 'enemy_ws_alias', name: '借模型', spine: 'enemy_alias' },
+      enemy_ws_bad: { key: 'enemy_ws_bad', name: '错模型', spine: 'enemy_missing' },
+      enemy_ws_nomodel: { key: 'enemy_ws_nomodel', name: '无模型', spine: 'enemy_nomodel' },
+      enemy_ws_selfkey: { key: 'enemy_selfkey', name: '自己就是模型名' },
+    };
+    const r = applyWorkshop({ ...base }, [{ id: 'p', name: 'P', files: { enemies } }]);
+    const looks = r.report.looks;
+    assert.deepEqual(looks.map((l) => l.id).sort(), ['enemy_ws_bad', 'enemy_ws_nomodel', 'enemy_ws_selfkey']);
+    assert.equal(looks.every((l) => l.kind === 'enemy'), true, '怪物条目要能被认出来（summary 分开数）');
+    assert.equal(looks.find((l) => l.id === 'enemy_ws_bad').code, 'MODEL_UNKNOWN');
+    assert.equal(looks.find((l) => l.id === 'enemy_ws_nomodel').code, 'MODEL_MISSING');
+    assert.equal(looks.find((l) => l.id === 'enemy_ws_selfkey').code, 'MODEL_UNKNOWN', '没写 spine 时用 key 当模型名');
+    // 借到模型的（enemy_alias → enemy_ok）与直接指向真模型的必须安静
+    assert.equal(looks.some((l) => l.id === 'enemy_ws_good' || l.id === 'enemy_ws_alias'), false);
+    assert.match(workshopSummary(r.report), /3 个怪物没有模型/);
+    assert.doesNotMatch(workshopSummary(r.report), /个干员没有模型/);
+    // 包把模型自带进来（art）之后，这条警告就该消失 —— 注意 art 的键是**客户端会查的那个模型 id**：
+    // enemy_ws_bad 的 spine 写了 enemy_missing，所以模型要声明在 art.enemies.enemy_missing 上；
+    // 而没写 spine 的怪物，客户端拿它的 key 当模型名（rec.spine ?? key），所以 art 就按那个 key 声明。
+    const withArt = applyWorkshop({ ...base }, [{
+      id: 'p', name: 'P',
+      files: { enemies: { enemy_ws_bad: enemies.enemy_ws_bad, enemy_ws_selfkey: enemies.enemy_ws_selfkey } },
+      art: {
+        enemies: {
+          enemy_missing: { spine: { skel: 'art/bad.skel', atlas: 'art/bad.atlas' } },
+          enemy_ws_selfkey: { icon: 'art/self.png', spine: { skel: 'art/self.skel', atlas: 'art/self.atlas' } },
+        },
+      },
+    }]);
+    assert.deepEqual(withArt.report.looks, []);
+    assert.match(workshopSummary(withArt.report), /2 art entr/);
+  });
+
   test('a collision with an official id is rejected unless the pack declares the override', () => {
     const officialId = 'chess_char_1_01_a';
     const official = loadData(DATA_DIR, { log: quiet, workshopDir: null }).chess[officialId];

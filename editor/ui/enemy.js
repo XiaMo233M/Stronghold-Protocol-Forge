@@ -12,6 +12,9 @@ import { matchEnemies, sortTemplates, spineIsKnown } from './enemyWizard.js';
 import { makeStatBar } from './statScale.js';
 import { renderKeepingFocus } from './focusKeep.js';
 import { packSelect } from './packPicker.js';
+// 记录键的推导只有一份（`enemy_ws_<slug>`，shared/enemyAuthoring.js 的 enemyKey）：外观声明的 id 必须与它一致，
+// 否则客户端按记录键查 `assets.enemies` 时查不到这套素材。
+import { enemyKey } from '../../shared/enemyAuthoring.js';
 
 const $ = (s) => document.querySelector(s);
 
@@ -41,6 +44,8 @@ const state = {
   data: null, packId: null, key: null, spec: null, preview: null, message: null, busy: false,
   // 「以模板新建」的选择器：是否打开、搜索串
   picking: false, pickQuery: '',
+  // 本包自带的外观素材那一块：草稿、它的目标 key、上一次保存/删除的回话，以及现场问来的骨架/图谱解析结论
+  artDraft: null, artDraftKey: '', artMessage: null, artParsed: null,
 };
 
 /** The stat fields, with the label and the unit the form shows. Order matters: it is the order on screen.
@@ -107,6 +112,401 @@ function checkInput(get, set, label) {
   return lab;
 }
 
+// ---- 本包自带的外观素材（pack.json 的 art）------------------------------------------------------------------------
+//
+// 第四条素材通道（前三条：语音、盟约图标、装备图标）：包自带的图标/模型由叠加层并进合并后的 `data/assets.json`，
+// 客户端零改动。与干员页那块是同一套，只有两处不同：表是 `enemies`（id 就是怪物的记录键 `enemy_ws_<id>`），
+// 而 spine 是**扁平**的（直接挂在条目上，没有 front/back 两层）。为什么正文是**整条条目**、以及保存前服务端会逐条
+// 查的三条硬约束（`.atlas` 必须与 `.skel` 同目录同名、图谱里每一页 png 必须与它同目录且存在、`.skel` 只收 3.8.x
+// 且 `anims` 的动画名必须真在骨架里），见 editor/ui/app.js 里同一段的注释。
+
+/** 外观角色名：就是 `assets.json` 的 `anims` 里那几个键（客户端 render/spine.js 逐个读），不要自己发明。 */
+const ART_ROLES = ['idle', 'deploy', 'attack', 'attackDown', 'skill', 'die', 'move', 'stun'];
+/** 其中哪几个是「剪辑」（`{ begin, loop, end }`）；其余的是一个名字（idle / deploy / die）。 */
+const ART_CLIP_ROLES = ['attack', 'attackDown', 'skill', 'move', 'stun'];
+const isRec = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+/** 包内相对路径的目录 / 拼接（清单里的路径一律是 `/` 分隔的 POSIX 相对路径）。 */
+const relDirOf = (p) => { const s = String(p ?? ''); const i = s.lastIndexOf('/'); return i < 0 ? '' : s.slice(0, i); };
+const relJoin = (dir, name) => (dir ? `${dir}/${name}` : name);
+
+/** 本包的外观状态：art 原文 + assets/ 里真的有的文件 + 每条已声明 spine 的解析结论。 */
+const packArtState = () => (state.data?.packArt ?? []).find((p) => p.id === state.packId)
+  ?? { id: state.packId, art: {}, files: [], skels: {}, atlases: {} };
+
+/** 现场解析结果的缓存（刚挑好、还没写进 pack.json 的文件得问一次服务端）；换包就整份丢掉（键是包内相对路径）。 */
+function artParsedStore() {
+  if (state.artParsed?.packId !== state.packId) state.artParsed = { packId: state.packId, skels: {}, atlases: {} };
+  return state.artParsed;
+}
+const skelParse = (rel) => (rel ? (artParsedStore().skels[rel] ?? packArtState().skels?.[rel] ?? null) : null);
+const atlasParse = (rel) => (rel ? (artParsedStore().atlases[rel] ?? packArtState().atlases?.[rel] ?? null) : null);
+/** 重画表单（怪物页的重画约定：见 editor/ui/focusKeep.js）。 */
+const redrawForm = () => renderKeepingFocus($('#form'), renderForm);
+
+/**
+ * id 变了就把表单重画一次（防抖）。这一页平时只重画右栏，而「本包自带的外观素材」那一段是按**记录键**
+ * `enemy_ws_<id>` 渲染的 —— 不重画的话，作者敲完 id 会看到那句「先填 id」一直留在原地。
+ * 用 renderKeepingFocus，所以光标与选区留在原处（与干员页每次校验重画同一条路）。
+ */
+let formRedrawTimer = null;
+function scheduleFormRedraw() { clearTimeout(formRedrawTimer); formRedrawTimer = setTimeout(redrawForm, 250); }
+
+/** 问一次服务端：这个 `.skel` / `.atlas` 里有什么（候选要真的来自骨架与图谱，不然作者只能猜）。 */
+async function askArtParse(rel, kind) {
+  const known = kind === 'skel' ? skelParse(rel) : atlasParse(rel);
+  if (!rel || !state.packId || known) return;
+  try {
+    const q = kind === 'skel' ? `skel=${encodeURIComponent(rel)}` : `atlas=${encodeURIComponent(rel)}`;
+    const r = await api(`/api/packs/${encodeURIComponent(state.packId)}/art/inspect?${q}`);
+    if (kind === 'skel' && r.skel) artParsedStore().skels[rel] = r.skel;
+    if (kind === 'atlas' && r.atlas) artParsedStore().atlases[rel] = r.atlas;
+  } catch { /* 问不到就不给候选：手输那条路还在，保存时服务端仍会核对 */ }
+}
+
+/** 一条外观条目里的全部 spine 对象（怪物是扁平的 `spine`，干员是 front/back 两层）。 */
+function artSpineObjectsUi(entry) {
+  const spine = isRec(entry) ? entry.spine : null;
+  if (!isRec(spine)) return [];
+  if (typeof spine.skel === 'string') return [spine];
+  return Object.values(spine).filter(isRec);
+}
+
+/** 正编辑的那一条外观（草稿）：表单每次重画都要能拿回同一份，换目标时才从 pack.json 重新起一份。 */
+function artDraftFor(table, id) {
+  const key = `${table}.${id}`;
+  if (state.artDraftKey !== key) {
+    const prev = state.artDraftKey;
+    state.artDraftKey = key;
+    const declared = packArtState().art?.[table]?.[id];
+    state.artDraft = isRec(declared) ? JSON.parse(JSON.stringify(declared)) : {};
+    if (prev) state.artMessage = null;
+  }
+  return state.artDraft;
+}
+
+/**
+ * 「只列本包真的有的文件」的下拉；当前值不在清单里也留着并标出来（不静默改掉草稿）。
+ * `extraClass` 是给测试/样式用的一个稳定的钩子（DOM 结构会变，这个类不会）。
+ */
+function artFileSelect(files, get, set, emptyLabel, extraClass = '') {
+  const cur = String(get() ?? '');
+  const sel = document.createElement('select');
+  if (extraClass) sel.className = extraClass;
+  const add = (value, text, on) => {
+    const o = document.createElement('option');
+    o.value = value; o.textContent = text; o.selected = on;
+    sel.append(o);
+  };
+  add('', emptyLabel, !cur);
+  for (const f of (!cur || files.includes(cur) ? files : [cur, ...files])) {
+    add(f, files.includes(f) ? f : t('{0}（本包没有这个文件）', f), f === cur);
+  }
+  sel.addEventListener('change', () => { set(sel.value); redrawForm(); });
+  return sel;
+}
+
+/** 动画名下拉：候选只来自服务端从**这个骨架**里解析出的名字；解析不到时退回可手输 + 提示。 */
+function artAnimInput(names, get, set, emptyLabel) {
+  const cur = String(get() ?? '');
+  if (!names.length) {
+    const box = document.createElement('div');
+    const i = document.createElement('input');
+    i.value = cur;
+    i.placeholder = t('骨架没解析出来，可以手填动画名');
+    i.addEventListener('input', () => set(i.value));
+    box.append(i, Object.assign(document.createElement('div'), {
+      className: 'hint warn',
+      textContent: t('这个骨架的动画名没解析出来（文件不在、太大或不是 3.8 骨架）：手填的名字保存时服务端仍会去骨架里核对。'),
+    }));
+    return box;
+  }
+  const sel = document.createElement('select');
+  const add = (value, text, on) => {
+    const o = document.createElement('option');
+    o.value = value; o.textContent = text; o.selected = on;
+    sel.append(o);
+  };
+  add('', emptyLabel, !cur);
+  for (const n of (!cur || names.includes(cur) ? names : [cur, ...names])) {
+    add(n, names.includes(n) ? n : t('{0}（骨架里没有这个名字）', n), n === cur);
+  }
+  sel.addEventListener('change', () => { set(sel.value); redrawForm(); });
+  return sel;
+}
+
+/** 显示用：一条声明引用到的字符串（图片/图标字段、spine 的 skel/atlas/textures，以及原样抄过去的 id）。 */
+function artEntryStrings(entry) {
+  const out = [];
+  if (!isRec(entry)) return out;
+  for (const [k, v] of Object.entries(entry)) if (k !== 'spine' && typeof v === 'string') out.push(`${k}=${v}`);
+  for (const spine of artSpineObjectsUi(entry)) {
+    if (typeof spine.skel === 'string') out.push(spine.skel);
+    if (typeof spine.atlas === 'string') out.push(spine.atlas);
+    if (Array.isArray(spine.textures)) out.push(...spine.textures.filter((x) => typeof x === 'string'));
+  }
+  return out;
+}
+
+/**
+ * 「本包已声明的外观」：`pack.json.art` 里的**全部**声明（包括这只怪物用不到的、陈旧的），每条都能删 ——
+ * 任何写进 pack.json 的东西都必须能在这里删掉，包括一条**会被加载器拒绝**的陈年声明。
+ */
+function artDeclaredList() {
+  const box = document.createElement('div'); box.className = 'panel artDeclared';
+  const title = document.createElement('h2'); title.textContent = t('本包已声明的外观');
+  box.append(title);
+  const rows = [];
+  const art = packArtState().art;
+  if (art !== undefined && !isRec(art)) {
+    // `art` 整个不是一个对象（加载器会拒绝的形状）：也要有一个能去掉它的入口。清任何一条都会把这份坏值整个丢掉，
+    // 所以这里借本页自己的表名发一次删除（服务端那条路只认「删」这个意图，不看 id 存不存在）。
+    rows.push({ table: 'enemies', id: 'x', label: t('art（不是一个对象）'), refs: [JSON.stringify(art)] });
+  } else {
+    for (const [table, entries] of Object.entries(art ?? {})) {
+      if (!isRec(entries)) { rows.push({ table, id: null, label: t('{0}（不是一个对象）', table), refs: [JSON.stringify(entries)] }); continue; }
+      for (const [id, entry] of Object.entries(entries)) rows.push({ table, id, label: `${table}.${id}`, refs: artEntryStrings(entry) });
+    }
+  }
+  if (!rows.length) {
+    box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('这个包的 pack.json 里还没有 art 声明。') }));
+    return box;
+  }
+  for (const row of rows) {
+    const line = document.createElement('div'); line.className = 'row';
+    line.style.cssText = 'align-items:flex-start;justify-content:space-between;border-bottom:1px solid var(--line);padding:4px 0';
+    const text = document.createElement('div'); text.style.flex = '1';
+    const n = document.createElement('div'); n.className = 'n'; n.textContent = row.label;
+    const m = document.createElement('div'); m.className = 'hint';
+    m.textContent = row.refs.length ? row.refs.join(' · ') : t('（没有引用任何文件）');
+    text.append(n, m);
+    const del = document.createElement('button'); del.className = 'ghost artDel'; del.textContent = t('删除');
+    del.addEventListener('click', () => { deleteArtDeclaration(row.table, row.id); });
+    line.append(text, del);
+    box.append(line);
+  }
+  return box;
+}
+
+/** 保存 / 删除的回话（带 warnings）：表单每次重画都要还在，所以存在 state 里而不是 DOM 上。 */
+function artMessageBox() {
+  if (!state.artMessage) return null;
+  const box = document.createElement('div');
+  box.className = `banner ${state.artMessage.kind === 'error' ? 'bad' : 'good'}`;
+  box.textContent = state.artMessage.text;
+  for (const w of state.artMessage.warnings ?? []) {
+    box.append(Object.assign(document.createElement('div'), { className: 'hint warn', textContent: String(w) }));
+  }
+  return box;
+}
+
+/**
+ * 怪物页「美术与非数据表字段」里那块「本包自带的外观素材」：`icon` + 扁平的 spine（skel / atlas / textures / pma /
+ * anims）+ 原样抄的 `spineAliasOf`，以及全部声明的清单。
+ * @param {string|null} key 这只怪物的记录键（客户端就是拿它去 `enemies` 表查外观）
+ */
+function enemyArtBox(key) {
+  const box = document.createElement('div'); box.className = 'panel artPanel';
+  const title = document.createElement('h2'); title.textContent = t('本包自带的外观素材（可选）');
+  box.append(title);
+  box.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('客户端画一只怪物时读的是合并后的 `data/assets.json` 的 `enemies`：这里声明的东西会被并进那一条（素材走 /workshop-assets），客户端零改动。路径都相对包的 `assets/`，文件要自己先放进去 —— 编辑器不上传素材。'),
+  }));
+  if (!state.packId) {
+    box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('先在右边选一个工坊包。') }));
+    return box;
+  }
+  if (!key) {
+    box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('先填 id（记录键是 enemy_ws_<id>，客户端就是拿它去 `enemies` 表查外观），再回来给它配素材。') }));
+    box.append(artDeclaredList());
+    return box;
+  }
+  const draft = artDraftFor('enemies', key);
+  const art = packArtState();
+  const images = art.files.filter((f) => /\.(png|jpe?g|webp|gif)$/i.test(f));
+  const skelFiles = art.files.filter((f) => /\.skel$/i.test(f));
+  const atlasFiles = art.files.filter((f) => /\.atlas$/i.test(f));
+  const setField = (k, v) => { if (v) draft[k] = v; else delete draft[k]; };
+  const iconRow = document.createElement('div'); iconRow.className = 'grid wide';
+  iconRow.append(
+    field(t('图标 icon'), artFileSelect(images, () => draft.icon, (v) => setField('icon', v), t('（不声明）'))),
+    // spineAliasOf 是原样抄的 id（指向另一只怪物的模型），不是文件路径，所以候选用官方 prefab 键
+    field(t('别人的模型 spineAliasOf（可留空）'), spineAliasField(draft)),
+  );
+  box.append(iconRow);
+
+  const spine = isRec(draft.spine) ? draft.spine : {};
+  const commitSpine = () => { if (Object.keys(spine).length) draft.spine = spine; else delete draft.spine; };
+  const skelInfo = skelParse(spine.skel);
+  const atlasInfo = atlasParse(spine.atlas);
+  // 硬约束 1：atlas 必须与 skel 同目录同名 —— 选完 skel 自动填上，别让作者手打（手打必错，而且错了不报错）
+  const setSkel = (v) => {
+    if (v) {
+      spine.skel = v;
+      spine.atlas = v.replace(/\.skel$/i, '.atlas');
+      // atlas 也要问一次：textures 与 pma 的默认值都从图谱里读（清单里没声明时它们根本不在 /api/state 里）
+      askArtParse(v, 'skel').then(() => askArtParse(spine.atlas, 'atlas')).then(redrawForm);
+    } else { delete spine.skel; delete spine.atlas; }
+    commitSpine();
+  };
+  const setAtlas = (v) => {
+    if (v) { spine.atlas = v; askArtParse(v, 'atlas').then(redrawForm); } else delete spine.atlas;
+    commitSpine();
+  };
+  const modelRow = document.createElement('div'); modelRow.className = 'grid wide';
+  modelRow.append(
+    field(t('骨架 skel'), artFileSelect(skelFiles, () => spine.skel, setSkel, t('（不用本包模型）'), 'artSkel')),
+    field(t('图谱 atlas（选完 skel 自动填同名，别手打）'), artFileSelect(atlasFiles, () => spine.atlas, setAtlas, t('（随 skel 自动填）'), 'artAtlas')),
+  );
+  box.append(modelRow);
+  if (spine.atlas && !atlasFiles.includes(spine.atlas)) {
+    box.append(Object.assign(document.createElement('div'), { className: 'hint warn', textContent: t('按同名推出来的 {0} 不在本包的 assets/ 里：把这个文件放进去 —— 加载器只读同目录同名的那个 .atlas，找不到就画不出来，而且不报错。', spine.atlas) }));
+  }
+  if (skelInfo?.note) box.append(Object.assign(document.createElement('div'), { className: 'hint warn', textContent: skelInfo.note }));
+  if (atlasInfo?.note) box.append(Object.assign(document.createElement('div'), { className: 'hint warn', textContent: atlasInfo.note }));
+  // textures：默认按图谱页名自动填（客户端只在清单里没有 textures 时才退回 `<skel>.png`，而图谱那一页可能叫别的名字）
+  const derivedTextures = () => {
+    const pages = atlasInfo?.pages ?? [];
+    if (!pages.length) return [];
+    const dir = relDirOf(spine.atlas);
+    return pages.map((p) => relJoin(dir, p));
+  };
+  const textures = Array.isArray(spine.textures) && spine.textures.length ? spine.textures : derivedTextures();
+  const texInput = document.createElement('input');
+  texInput.className = 'artTextures';
+  texInput.value = textures.join(', ');
+  texInput.placeholder = t('默认按图谱页名自动填');
+  texInput.addEventListener('input', () => {
+    const list = texInput.value.split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
+    if (list.length) spine.textures = [...new Set(list)]; else delete spine.textures;
+    commitSpine();
+  });
+  const pmaValue = typeof spine.pma === 'boolean' ? spine.pma : (atlasInfo?.hasPma ?? false);
+  const pmaRow = document.createElement('div'); pmaRow.className = 'grid wide';
+  pmaRow.append(
+    field(t('贴图 textures（留空＝按 atlas 里的页名自动填）'), texInput),
+    field(t('预乘 alpha pma'), checkInput(() => pmaValue, (v) => { spine.pma = v; commitSpine(); }, '')),
+  );
+  box.append(pmaRow);
+  if (atlasInfo && atlasInfo.hasPma !== pmaValue) {
+    box.append(Object.assign(document.createElement('div'), { className: 'hint warn', textContent: t('图谱里写的是 pma: {0}，与这里不一致 —— 客户端信清单这一份，画出来就是错的。', String(atlasInfo.hasPma)) }));
+  }
+  if (!spine.skel) {
+    box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('还没选骨架：这一条就不会带模型（只换图标/头像也可以）。') }));
+  } else {
+    const names = skelInfo?.animations ?? [];
+    if (!skelInfo || skelInfo.note) {
+      box.append(Object.assign(document.createElement('p'), { className: 'hint warn', textContent: t('这个骨架的动画名还没解析出来：下面是手输框，填的名字保存时服务端会去骨架里核对。') }));
+    }
+    const roleTitle = document.createElement('h2'); roleTitle.textContent = t('动画 anims（角色名就是客户端读的那几个）');
+    box.append(roleTitle);
+    const roles = document.createElement('div'); roles.className = 'grid wide';
+    const animsOf = () => (isRec(spine.anims) ? spine.anims : {});
+    const writeAnims = (next) => { if (Object.keys(next).length) spine.anims = next; else delete spine.anims; commitSpine(); };
+    const setName = (role, v) => { const next = { ...animsOf() }; if (v) next[role] = v; else delete next[role]; writeAnims(next); };
+    const setClip = (role, field2, v) => {
+      const next = { ...animsOf() };
+      const clip = { ...(isRec(next[role]) ? next[role] : {}) };
+      if (field2 === 'loop' && !v) delete next[role];
+      else { if (v) clip[field2] = v; else delete clip[field2]; next[role] = clip; }
+      writeAnims(next);
+    };
+    for (const role of ART_ROLES) {
+      if (ART_CLIP_ROLES.includes(role)) {
+        const clip = isRec(animsOf()[role]) ? animsOf()[role] : null;
+        roles.append(field(`${role} · loop`, artAnimInput(names, () => clip?.loop ?? '', (v) => setClip(role, 'loop', v), t('（不声明这个角色）'))));
+      } else {
+        const value = animsOf()[role];
+        roles.append(field(role, artAnimInput(names, () => (typeof value === 'string' ? value : ''), (v) => setName(role, v), t('（不声明这个角色）'))));
+      }
+    }
+    box.append(roles);
+    const advanced = document.createElement('details');
+    const sum = document.createElement('summary'); sum.className = 'hint'; sum.textContent = t('进阶：起手 / 收尾（可选）');
+    advanced.append(sum);
+    for (const role of ART_CLIP_ROLES) {
+      const clip = isRec(animsOf()[role]) ? animsOf()[role] : null;
+      if (!clip) continue;
+      const row = document.createElement('div'); row.className = 'grid wide';
+      row.append(
+        field(`${role} · begin`, artAnimInput(names, () => clip.begin ?? '', (v) => setClip(role, 'begin', v), t('（不要起手）'))),
+        field(`${role} · end`, artAnimInput(names, () => clip.end ?? '', (v) => setClip(role, 'end', v), t('（不要收尾）'))),
+      );
+      advanced.append(row);
+    }
+    if (advanced.children.length > 1) box.append(advanced);
+  }
+  const actions = document.createElement('div'); actions.className = 'row'; actions.style.marginTop = '10px';
+  const saveBtn = document.createElement('button'); saveBtn.className = 'primary artSave'; saveBtn.textContent = t('保存这条外观');
+  saveBtn.addEventListener('click', () => { saveEnemyArt(key); });
+  const delBtn = document.createElement('button'); delBtn.className = 'ghost artDel'; delBtn.textContent = t('删除这条声明');
+  delBtn.addEventListener('click', () => { deleteArtDeclaration('enemies', key); });
+  actions.append(saveBtn, delBtn);
+  if (!art.files.length) {
+    actions.append(Object.assign(document.createElement('span'), { className: 'hint warn', textContent: t('本包的 `assets/` 里还没有素材：把文件放进去，再回到这一页挑。') }));
+  }
+  box.append(actions);
+  const msg = artMessageBox();
+  if (msg) box.append(msg);
+  box.append(artDeclaredList());
+  return box;
+}
+
+/** `spineAliasOf`：原样抄过去的 id（指向另一只怪物的模型），所以候选是官方 prefab 键 + 手填。 */
+function spineAliasField(draft) {
+  const wrap = document.createElement('div');
+  const i = document.createElement('input');
+  i.value = typeof draft.spineAliasOf === 'string' ? draft.spineAliasOf : '';
+  i.setAttribute('list', 'spineAliasOptions');
+  i.addEventListener('input', () => { if (i.value) draft.spineAliasOf = i.value; else delete draft.spineAliasOf; });
+  const dl = document.createElement('datalist'); dl.id = 'spineAliasOptions';
+  for (const c of state.data?.spineChoices ?? []) {
+    const o = document.createElement('option');
+    o.value = c.id; o.textContent = c.name;
+    dl.append(o);
+  }
+  wrap.append(i, dl);
+  return wrap;
+}
+
+/** 保存「这条外观」：整条条目一次性 POST（服务端会把三条硬约束逐条查一遍再写）。 */
+async function saveEnemyArt(key) {
+  if (!state.packId || !key) return;
+  const draft = JSON.parse(JSON.stringify(state.artDraft ?? {}));
+  for (const spine of artSpineObjectsUi(draft)) {
+    const atlas = typeof spine.atlas === 'string' ? atlasParse(spine.atlas) : null;
+    if (!atlas || atlas.note || !atlas.pages?.length) continue;
+    const dir = relDirOf(spine.atlas);
+    if (!Array.isArray(spine.textures) || !spine.textures.length) spine.textures = atlas.pages.map((p) => relJoin(dir, p));
+    if (typeof spine.pma !== 'boolean') spine.pma = atlas.hasPma;
+  }
+  try {
+    const r = await api(`/api/packs/${encodeURIComponent(state.packId)}/art`, { method: 'POST', body: { table: 'enemies', id: key, art: draft } });
+    state.artDraftKey = '';
+    state.artMessage = { kind: 'ok', text: t('已保存 {0} 的外观', `enemies.${key}`), warnings: r.warnings ?? [] };
+    await load();
+  } catch (e) {
+    state.artMessage = { kind: 'error', text: e.message, warnings: [] };
+    redrawForm();
+  }
+}
+
+/** 删掉一条外观声明（`art` 为 null = 删；空对象逐级清理在服务端做）。任何声明都必须能在这里删掉。 */
+async function deleteArtDeclaration(table, id) {
+  if (!state.packId) return;
+  const label = id ? `${table}.${id}` : table;
+  if (!confirm(t('删除 {0} 这条外观声明？（只删 pack.json 里的这一条，素材文件不动）', label))) return;
+  try {
+    const r = await api(`/api/packs/${encodeURIComponent(state.packId)}/art`, { method: 'POST', body: { table, id: id ?? 'x', art: null } });
+    if (state.artDraftKey === `${table}.${id}`) state.artDraftKey = '';
+    state.artMessage = { kind: 'ok', text: t('已删掉 {0} 的外观声明', label), warnings: r.warnings ?? [] };
+    await load();
+  } catch (e) {
+    state.artMessage = { kind: 'error', text: e.message, warnings: [] };
+    redrawForm();
+  }
+}
+
 function renderForm() {
   const box = $('#form');
   box.replaceChildren();
@@ -123,7 +523,7 @@ function renderForm() {
   const idBox = document.createElement('div'); idBox.className = 'panel';
   const idGrid = document.createElement('div'); idGrid.className = 'grid wide';
   idGrid.append(
-    field(t('id（slug）'), textInput(() => spec.id, (v) => { spec.id = v; }), t('会生成 enemy_ws_<id>，例如 frost_hound')),
+    field(t('id（slug）'), textInput(() => spec.id, (v) => { spec.id = v; scheduleFormRedraw(); }), t('会生成 enemy_ws_<id>，例如 frost_hound')),
     field(t('名称'), textInput(() => spec.name, (v) => { spec.name = v; })),
     field(t('等级 rank'), selectInput(() => spec.rank, (v) => { spec.rank = v; }, state.data.vocab.ranks,
       { labels: { NORMAL: t('NORMAL 普通'), ELITE: t('ELITE 精英'), BOSS: t('BOSS 领袖') } })),
@@ -232,6 +632,8 @@ function renderForm() {
     field(t('偏移 dy'), numInput(() => spec.hitArea?.dy ?? 0, (v) => { spec.hitArea = { ...(spec.hitArea || { w: 0, h: 0, dx: 0, dy: 0 }), dy: v }; })),
   );
   artBox.append(hit);
+  // 本包自带的外观素材（图标 + 扁平的 spine）：id 就是这一只会生成/已保存的记录键（客户端按它查 enemies 表）
+  artBox.append(enemyArtBox(enemyKey(spec.id)?.key ?? null));
   box.append(artBox);
 }
 
@@ -474,8 +876,9 @@ function renderSide() {
     packs: state.data?.packs ?? [],
     current: state.packId,
     newLabel: t('＋ 新建一个包…'),
-    onPick: (id) => { state.packId = id; renderSide(); },
-    askNewId: () => prompt(t('新工坊包的 id（字母数字下划线短横线，≤32）：'), 'my-monster-pack'),
+    newDefault: 'my-monster-pack',
+    // 换包要把表单也重画一次：表单里的「本包自带的外观素材」列的是**这个包** assets/ 里真的有的文件
+    onPick: (id) => { state.packId = id; renderSide(); redrawForm(); },
   }));
   box.append(packBox);
   if (!state.spec.id) box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('先填 id 才能保存。') }));
@@ -539,7 +942,9 @@ async function load() {
   if (asked && state.data.packs?.some((p) => p.id === asked)) state.packId = asked;
   if (!state.packId) state.packId = state.data.enemies[0]?.pack ?? null;
   renderList();
-  if (!state.spec) renderForm();
+  // 每次都重画表单：这一页的表单里有一块依赖**包**与**pack.json 本身**（本包自带的外观素材，见 enemyArtBox），
+  // 而 spec 才是唯一的数据源 —— 重画不丢任何东西（保存/删除/换包之后那一段也要跟着更新）。
+  renderForm();
   renderSide();
 }
 

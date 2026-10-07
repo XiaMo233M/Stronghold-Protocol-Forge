@@ -51,6 +51,11 @@ import {
   exportPack, installZip, readPackSupport, writePackSupport, packSummary, listPackIds,
 } from '../tools/workshop-pack.mjs';
 import { ZIP_MAX_TOTAL_BYTES } from '../shared/zip.js';
+// 外观素材（pack.json.art）的「文件系统 + 骨架/图谱」体检要用与客户端**同一个** Spine 解析器与图谱阅读器：
+// 这两份实现本来就是素材管线用的（tools/assets/），抄一遍必然漂移，所以直接复用。
+import { parseSkel } from '../tools/assets/skel.mjs';
+import { atlasInfo } from '../tools/assets/atlas.mjs';
+import { roleAnimationNames } from '../tools/assets/anim-roles.mjs';
 // 一键试玩：编辑器起一个游戏服务器**子进程**，并把当前的工坊根交给它（为什么是子进程见 editor/playtest.mjs）
 import { createPlaytest } from './playtest.mjs';
 // The pack-media allowlist lives with the route that serves it (server/index.js). The voice page must not keep a second
@@ -95,6 +100,10 @@ const IMAGE_EXT_RE = /\.(png|jpe?g|webp|gif)$/i;
 const BOND_ICON_ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
 /** 装备图标 id 的字符集（与 shared/workshop.js 的 `RECORD_ID_RE` / `ITEM_ICON_BAD_ID` 同一份规则，避免两处漂移）。 */
 const ITEM_ICON_ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
+/** 外观条目的 id 字符集：与 shared/workshop.js 的 `RECORD_ID_RE`（`ART_BAD_ID`）同一份规则。 */
+const ART_ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
+/** `{…}` 这种朴素对象（外观表、条目都是它）——数组与 null 都不算。 */
+const isPlainObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 
 const readJson = (p, fallback = null) => {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return fallback; }
@@ -831,6 +840,253 @@ function itemIconPackState(root, packId) {
   };
 }
 
+// ---- 外观素材 (pack.json.art) ------------------------------------------------------------------------------------
+//
+// 第四条「包自带的素材」通道（前三条：voices / bondIcons / itemIcons，docs/WORKSHOP.md §1.4）。与装备图标同一套写法，
+// 但重得多：一条 art 条目就是**一个完整的 assets.json 条目**（头像/立绘/图标 + 一个 spine），而 spine 带着三条
+// **包改不了、写错就静默失效**的硬约束 —— 加载器从 `.skel` 的路径推出 `.atlas`（清单里的 atlas 只用于内存回收，
+// 写错不会报错，只会画不出来）、`.atlas` 里写的每一页 png 必须与它同目录同名、`.skel` 只认 3.8.x；另外 `anims` 里的
+// 动画名必须真的在骨架里（名字错 → 模型能出来但不动，**一条日志都没有**）。所以这个接口不只是「把路径存进 pack.json」：
+// 保存前把文件系统、骨架与图谱能回答的全部查一遍，解析不到骨架时退回 `warnings`，绝不静默假装通过。
+//
+// 解析必须缓存：动画名与 atlas 页名只有读二进制/文本才知道，而 /api/state 是每次按钮都要拉的。缓存键 = 绝对路径 +
+// mtime + size（文件一改就重解析，没改就一行都不读），并且**只解析 pack.json.art 里真的声明了的文件**，不扫全包。
+
+/**
+ * 外观素材的三张表与每张表的形状：与 shared/workshop.js 的 `ART_TABLES` 逐字对应（那边没导出这张表，
+ * tools/workshop-validate.mjs 也抄了一份）。`urls` 是条目上直接是文件的字段，`strings` 是原样抄过去的 id，
+ * `spine` 说明 spine 在 `spine.front/back` 两层下（chars）还是扁平的（enemies/tokens）。test/artEditor.test.js
+ * 用「每个 url 字段真的会被当文件查」把这份表钉在加载器的形状上，免得两边漂移。
+ */
+const ART_TABLES = {
+  chars: { urls: ['avatar', 'avatarE2', 'portrait', 'portraitE2'], strings: [], spine: 'sides' },
+  enemies: { urls: ['icon'], strings: ['spineAliasOf'], spine: 'flat' },
+  tokens: { urls: ['avatar'], strings: ['owner'], spine: 'flat' },
+};
+
+/** 解析一个 .skel / .atlas 的字节上限：超了就不解析（给一条 note）—— 一个巨大的文件不该拖垮整页状态接口。 */
+const ART_PARSE_MAX_BYTES = 8 << 20;
+/** 解析缓存的条数上限（键是绝对路径 + mtime + size），超了整体丢掉重来：它只是加速，不是档案。 */
+const ART_PARSE_CACHE_MAX = 128;
+/** @type {Map<string, { mtimeMs: number, size: number, value: object }>} */
+const artParseCache = new Map();
+
+/** 一个包内素材文件的绝对路径；不存在 / 路径不安全 / 是目录时返回 null（路径规则与语音、图标共用）。 */
+function artAssetAbs(root, packId, rel) {
+  if (packAssetPathProblem(rel)) return null;
+  try {
+    const abs = path.join(root, packId, VOICE_ASSETS_DIR, ...String(rel).split('/'));
+    return fs.statSync(abs).isFile() ? abs : null;
+  } catch { return null; }   // 不存在、权限、断链：一律当「没有这个文件」
+}
+
+/** 读文件 + 解析的缓存外壳：mtime 与 size 一变就重解析，否则复用上一次的结论。 */
+function artParsed(key, st, parse) {
+  const hit = artParseCache.get(key);
+  if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.value;
+  const value = parse();
+  if (artParseCache.size >= ART_PARSE_CACHE_MAX) artParseCache.clear();
+  artParseCache.set(key, { mtimeMs: st.mtimeMs, size: st.size, value });
+  return value;
+}
+
+/**
+ * 一个包内 `.skel` 的解析结论：动画名 + 版本，或一条 note（文件不在 / 太大 / 解析失败）。
+ * **永远返回对象**，调用方不必区分「没声明」和「解析不到」—— 页面显示的是同一条 note。
+ * 用的是客户端自己那个解析器（@pixi-spine/runtime-3.8，经 tools/assets/skel.mjs），所以下拉里的候选就是真能播的名字。
+ */
+function artSkelInfo(root, packId, rel) {
+  const abs = artAssetAbs(root, packId, rel);
+  if (!abs) return { animations: [], version: null, bytes: null, note: '这个 .skel 不在包的 assets/ 里（或路径不合法）' };
+  let st;
+  try { st = fs.statSync(abs); } catch { return { animations: [], version: null, bytes: null, note: '这个 .skel 读不到' }; }
+  return artParsed(`skel:${abs}`, st, () => {
+    if (st.size > ART_PARSE_MAX_BYTES) {
+      return {
+        animations: [], version: null, bytes: st.size,
+        note: `这个 .skel 有 ${Math.round(st.size / 1048576)} MB，超过 ${ART_PARSE_MAX_BYTES >> 20} MB 的解析上限：动画名候选为空，可以手填`,
+      };
+    }
+    try {
+      const info = parseSkel(new Uint8Array(fs.readFileSync(abs)));
+      return { animations: info.animations, version: info.version ?? null, bytes: st.size, note: null };
+    } catch (e) {
+      return { animations: [], version: null, bytes: st.size, note: `骨架解析失败：${e && e.message ? e.message : e}` };
+    }
+  });
+}
+
+/**
+ * 一个包内 `.atlas` 的解析结论：页名 + pma / size，或一条 note（同上，永远返回对象）。
+ * 页名以图谱文本为准 —— 清单里的 `textures` 只用于内存回收，不参与加载。
+ */
+function artAtlasInfo(root, packId, rel) {
+  const abs = artAssetAbs(root, packId, rel);
+  if (!abs) return { pages: [], hasPma: false, hasSize: false, note: '这个 .atlas 不在包的 assets/ 里（或路径不合法）' };
+  let st;
+  try { st = fs.statSync(abs); } catch { return { pages: [], hasPma: false, hasSize: false, note: '这个 .atlas 读不到' }; }
+  return artParsed(`atlas:${abs}`, st, () => {
+    if (st.size > ART_PARSE_MAX_BYTES) return { pages: [], hasPma: false, hasSize: false, note: '这个 .atlas 太大，没有解析' };
+    try {
+      const info = atlasInfo(fs.readFileSync(abs, 'utf8'));
+      return { pages: info.pages, hasPma: info.hasPma, hasSize: info.hasSize, note: null };
+    } catch (e) {
+      return { pages: [], hasPma: false, hasSize: false, note: `图谱解析失败：${e && e.message ? e.message : e}` };
+    }
+  });
+}
+
+/**
+ * 一条 art 条目里的全部 spine 对象：chars 是 `spine.{front,back}`，enemies/tokens 是扁平的 `spine`。
+ * 不查形状表（有 `skel` 就是扁平的那一个，否则看每个值），所以表改动也不会让这里漏掉一侧。
+ * @returns {Array<{ where: string, spine: object }>}
+ */
+function artSpineObjects(entry) {
+  const spine = isPlainObj(entry) ? entry.spine : null;
+  if (!isPlainObj(spine)) return [];
+  if (typeof spine.skel === 'string') return [{ where: 'spine', spine }];
+  return Object.entries(spine)
+    .filter(([, s]) => isPlainObj(s))
+    .map(([side, s]) => ({ where: `spine.${side}`, spine: s }));
+}
+
+/** 一条 art 条目里「必须是文件」的路径，以及它在 pack.json 里的写法（保存前逐个查存在性与扩展名）。 */
+function artFileRefs(table, entry) {
+  const shape = ART_TABLES[table];
+  const out = [];
+  for (const [key, value] of Object.entries(isPlainObj(entry) ? entry : {})) {
+    if (shape && shape.urls.includes(key)) out.push({ where: key, rel: value, kind: 'image' });
+  }
+  for (const { where, spine } of artSpineObjects(entry)) {
+    out.push({ where: `${where}.skel`, rel: spine.skel, kind: 'skel' });
+    out.push({ where: `${where}.atlas`, rel: spine.atlas, kind: 'atlas' });
+    if (Array.isArray(spine.textures)) for (const t of spine.textures) out.push({ where: `${where}.textures`, rel: t, kind: 'image' });
+  }
+  return out;
+}
+
+/**
+ * 一条 art 条目的「文件系统 + 骨架/图谱」体检。返回 `{ error }` 时**拒绝保存**（形状与路径安全已由
+ * `normalizePackManifest` 先查过，这里只查只有文件系统能回答的那些）；`warnings` 里的照写，但在回话里说清。
+ *
+ * 三条硬约束逐条查：atlas 与 skel 同目录同名、atlas 里的每一页 png 与它同目录且真的存在、skel 是 3.8.x；
+ * 再加 `anims` 里的动画名必须在骨架里。**解析不到骨架/图谱时只给 warning，不拒绝** —— 一个读不出来的文件不可能
+ * 被「保存前的检查」修好，而拒绝会让作者连保存都做不到（CLI 校验器会对同一件事报错，docs/WORKSHOP.md 里有它）。
+ */
+function checkArtEntry(root, packId, table, entry) {
+  const warnings = [];
+  for (const { where, rel, kind } of artFileRefs(table, entry)) {
+    const problem = packAssetPathProblem(rel);
+    if (problem) return { error: `${where}：“${String(rel)}”不能作为素材路径：${problem}` };
+    const ext = path.extname(String(rel)).toLowerCase();
+    if (!WORKSHOP_ASSET_TYPES.has(ext)) {
+      return { error: `${where}：“${String(rel)}”的类型不在包素材白名单里（可用：${[...WORKSHOP_ASSET_TYPES.keys()].join(' ')}）` };
+    }
+    if (kind === 'skel' && ext !== '.skel') return { error: `${where}：“${String(rel)}”不是 .skel` };
+    if (kind === 'atlas' && ext !== '.atlas') return { error: `${where}：“${String(rel)}”不是 .atlas` };
+    if (kind === 'image' && !IMAGE_EXT_RE.test(String(rel))) {
+      return { error: `${where}：“${String(rel)}”不是图片（可用 png / jpg / jpeg / webp / gif）` };
+    }
+    if (!artAssetAbs(root, packId, rel)) {
+      return { error: `${where}：“${String(rel)}”在 ${packId}/assets/ 下不存在（请先自己把文件放进去，编辑器不上传素材）` };
+    }
+  }
+  for (const { where, spine } of artSpineObjects(entry)) {
+    // 加载器是从 skel 的路径推 atlas 的；清单里那个字段我方代码只用来做内存回收，写错不会报错，只会画不出来
+    const derived = String(spine.skel).replace(/\.skel$/i, '.atlas');
+    if (spine.atlas !== derived) {
+      return {
+        error: `${where}.atlas：“${spine.atlas}”与加载器从 skel 推出来的“${derived}”不一致 —— 加载器不读清单里的这个字段，`
+          + '只读同目录同名的那个 .atlas（写错不会报错，模型就是画不出来）',
+      };
+    }
+    const info = artAtlasInfo(root, packId, spine.atlas);
+    const dir = path.posix.dirname(String(spine.atlas));
+    // 不能假设一图一模型：官方 712 个里有 2 个是双页，所以页是**逐个**查的
+    for (const page of info.pages) {
+      const pageRel = dir === '.' ? page : `${dir}/${page}`;
+      if (!artAssetAbs(root, packId, pageRel)) {
+        return { error: `${where}.atlas：图谱里写的页“${page}”不存在（${dir === '.' ? 'assets 根目录' : dir}/ 下要真的有这个文件）` };
+      }
+    }
+    if (info.note) warnings.push(`${where}.atlas：${info.note}`);
+    else if (!info.hasSize) {
+      warnings.push(`${where}.atlas：至少有一页没有 “size: W,H” 这一行 —— pixi-spine 拿页尺寸做除法（tools/assets/atlas.mjs 会补上它）`);
+    }
+    if (typeof spine.pma === 'boolean' && !info.note && spine.pma !== info.hasPma) {
+      warnings.push(`${where}.pma：清单写的是 ${spine.pma}，图谱${info.hasPma ? '声明了' : '没有声明'} “pma: true” —— 客户端信清单那一份，画出来就是错的`);
+    }
+    if (Array.isArray(spine.textures) && !info.note && info.pages.length) {
+      const declared = spine.textures.map((t) => path.posix.normalize(String(t))).sort();
+      const expected = info.pages.map((p) => (dir === '.' ? p : `${dir}/${p}`)).sort();
+      if (declared.join('|') !== expected.join('|')) {
+        warnings.push(`${where}.textures：与图谱里的页对不上（图谱说 ${expected.join('、')}）—— 这份清单只用于内存回收，对不上会漏掉那几页`);
+      }
+    }
+    const skel = artSkelInfo(root, packId, spine.skel);
+    if (skel.note) { warnings.push(`${where}.skel：${skel.note}`); continue; }
+    if (!/^3\.8\./.test(String(skel.version ?? ''))) {
+      return {
+        error: `${where}.skel：骨架版本是“${skel.version}”，只收 3.8.x —— 客户端用 @pixi-spine/runtime-3.8 解析，`
+          + '别的版本解析失败时一条日志都没有（模型直接不出现）',
+      };
+    }
+    const declaredAnims = roleAnimationNames(spine.anims);
+    if (!declaredAnims.length) {
+      if (!isPlainObj(spine.anims) || !Object.keys(spine.anims).length) {
+        warnings.push(`${where}.anims：没有声明任何动画角色 —— 客户端要求 anims 是个对象，缺了它这个单位可能退回一张贴图、或站着不动`);
+      }
+      continue;
+    }
+    const known = new Set(skel.animations);
+    const unknown = declaredAnims.filter((n) => !known.has(n));
+    if (unknown.length) {
+      const list = skel.animations.length > 12 ? `${skel.animations.slice(0, 12).join('、')} …` : skel.animations.join('、');
+      return {
+        error: `${where}.anims：这些动画名不在骨架里：${unknown.join('、')}（骨架里 ${skel.animations.length} 个：${list}）`
+          + ' —— 名字写错模型能出来但不会动，而且一条日志都没有',
+      };
+    }
+  }
+  return { error: null, warnings };
+}
+
+/**
+ * 一个包的外观素材状态：`art` 原样读出（页面要能把校验器拒绝的那条也显示出来，好让作者删掉它）、这个包 `assets/`
+ * 里真的有的素材文件，以及**每一条已声明的 spine** 的解析结论（骨架的动画名、图谱的页名）。
+ * 只解析 pack.json.art 里真的声明了的文件 —— 一个包的 assets/ 可能很大，而状态接口每次按钮都要拉。
+ */
+function artPackState(root, packId) {
+  const manifest = readJson(path.join(root, packId, 'pack.json'), null);
+  // `art` **原样**读出：一个不是对象的 art（手改出来的坏形状）加载器会拒绝，页面也要能看见并一键去掉它，
+  // 所以这里不把坏值悄悄换成 `{}`（那会让那一条在界面上彻底消失，作者只能去手改清单）。
+  const art = manifest?.art === undefined ? {} : manifest.art;
+  /** @type {Record<string, object>} */
+  const skels = {};
+  /** @type {Record<string, object>} */
+  const atlases = {};
+  for (const entries of Object.values(isPlainObj(art) ? art : {})) {
+    if (!isPlainObj(entries)) continue;
+    for (const entry of Object.values(entries)) {
+      for (const { where, spine } of artSpineObjects(entry)) {
+        if (typeof spine.skel === 'string' && !Object.hasOwn(skels, spine.skel)) {
+          skels[spine.skel] = { ...artSkelInfo(root, packId, spine.skel), where };
+        }
+        if (typeof spine.atlas === 'string' && !Object.hasOwn(atlases, spine.atlas)) {
+          atlases[spine.atlas] = { ...artAtlasInfo(root, packId, spine.atlas), where };
+        }
+      }
+    }
+  }
+  return {
+    id: packId,
+    art,
+    files: packAssetFiles(root, packId).filter((f) => f.serveable).map((f) => f.path).sort(),
+    skels,
+    atlases,
+  };
+}
+
 /**
  * 从一个包的 `bond-specs/` 重新生成 `bonds.json`，**保留没有 spec 拥有的记录**（手写或 CLI 写的不会被毁掉）。
  * 一条无法派生的 spec 不拥有任何记录（与干员那条同一个理由：否则一次无关的保存会删掉别人的数据）。
@@ -1287,6 +1543,9 @@ export async function createEditorServer(opts = {}) {
         // 外观候选：本机已装好的干员模型（data/assets.json 的 chars 键）。页面的 spine 判定与下拉都用它，
         // 与「不指定就是一张贴图」这条规则同源。
         spineChoices: operatorSpineChoices,
+        // 本包自带的外观素材（pack.json 的 `art`）与「这个包 assets/ 里真的有的素材文件 + 每条已声明 spine 的
+        // 动画名/图谱页名」：干员页「本包自带的外观素材」那一段要用的两个输入（照 packItemIcons 的做法）。
+        packArt: packIdsFor(root).map((id) => artPackState(root, id)),
         officialCount: officialIds.size,
         // 表单旁边的尺子：职业 → 字段 → {min, p50, max, count}
         statRanges: chessStatRanges,
@@ -1871,6 +2130,9 @@ export async function createEditorServer(opts = {}) {
         spineChoices: enemySpineChoices,
         statRanges: enemyStatRanges,
         packs: packChoices(root),
+        // 本包自带的外观素材（pack.json 的 `art`，怪物用的是扁平的 spine）：怪物页那一段要用的两个输入，
+        // 与干员页同一份（artPackState），免得多一轮请求。
+        packArt: packIdsFor(root).map((id) => artPackState(root, id)),
       });
     }
 
@@ -2088,6 +2350,10 @@ export async function createEditorServer(opts = {}) {
             pack: packId, id, name: rec.name ?? id, itemType: rec.itemType ?? null, category: rec.category ?? null,
             tier: rec.tier ?? null, price: rec.price ?? null, isGolden: rec.isGolden === true,
             mergeable: rec.mergeable === true, duration: rec.duration ?? null, trapId: rec.trapId ?? null,
+            // 客户端取图用的是 `item.iconId || item.trapId`（public/js/assets.js itemIconUrl），所以「本包已声明的装备图标」
+            // 那块清单要靠这两个字段判断一条声明还有没有人在用。两处都给：编辑器写出来的记录两者相同（deriveItem 把
+            // iconId 写成 trapId），手写记录可能不同 —— 只回 trapId 会把「其实还在用」的 id 误标成陈旧。
+            iconId: rec.iconId ?? null,
             buffs: Array.isArray(rec.buffs) ? rec.buffs.length : 0, params: rec.params ?? {},
             summary: itemSummaryLine(rec),
             managed: ids ? managed.has(ids.slug) : false,
@@ -2438,15 +2704,18 @@ export async function createEditorServer(opts = {}) {
       if (typeof bondId !== 'string' || !BOND_ICON_ID_RE.test(bondId)) {
         throw refuse(400, '盟约 id 不合法（只能是字母、数字、下划线、短横线、点、冒号，1–64 位）');
       }
-      // 只允许给「这个包真的有的盟约」配图：给一个不存在的 id 配图不会报错，但那张图永远不会被用到
-      const records = readJson(path.join(packDir, 'bonds.json'), {}) || {};
-      if (!Object.hasOwn(records, bondId)) {
-        throw refuse(400, `本包的 bonds.json 里没有盟约 "${bondId}"：先把它写进这个包（覆盖官方或新增），再配图`);
-      }
+      // 配图时只允许给「这个包真的有的盟约」：给一个不存在的 id 配图不会报错，但那张图永远不会被用到。
+      // **清空不受这条限制**（`clearing` 先算）：一条盟约被删掉/改名之后，它的 bondIcons 声明就成了陈旧条目，
+      // 而删掉它正是作者修清单的唯一出路 —— 把存在性检查放在 clearing 之前，那种条目会「看得见、删不掉」，
+      // 又回到手改 pack.json（装备图标与 art 两个端点一直是先算 clearing 的顺序，这里只是跟上）。
       const clearing = filePath === null || filePath === undefined || filePath === '';
       /** @type {string} */
       let stored = '';
       if (!clearing) {
+        const records = readJson(path.join(packDir, 'bonds.json'), {}) || {};
+        if (!Object.hasOwn(records, bondId)) {
+          throw refuse(400, `本包的 bonds.json 里没有盟约 "${bondId}"：先把它写进这个包（覆盖官方或新增），再配图`);
+        }
         const problem = packAssetPathProblem(filePath);
         if (problem) throw refuse(400, `"${String(filePath)}" 不能作为图标路径：${problem}`);
         if (!IMAGE_EXT_RE.test(filePath)) throw refuse(400, `"${filePath}" 不是图片（可用 png / jpg / jpeg / webp / gif）`);
@@ -2523,6 +2792,82 @@ export async function createEditorServer(opts = {}) {
         ok: true, pack: packId, itemId, path: stored || null,
         itemIcons: next.itemIcons ?? {},
         warnings: checked.ok ? [] : [`pack.json 现在会被加载器拒绝（${checked.error}）：${checked.detail}`],
+      });
+    }
+
+    // 外观素材（`pack.json.art` 的一条）：与装备图标、盟约图标、语音同一套写法，但正文是**整条条目**而不是一个路径。
+    //
+    // 为什么是整条：一条 art 条目就是 `data/assets.json` 里那个条目的子集（头像/立绘/图标 + 一个 spine），字段之间
+    // 互相牵连（atlas 必须与 skel 同目录同名、anims 的动画名必须在骨架里），一个字段一个字段地写反而更容易存进
+    // 自相矛盾的中间态。所以页面把整条发上来，这里**覆盖式**写进 `art[table][id]`；`art` 为 null / {} 表示删掉这条。
+    //
+    // 空对象逐级清理：条目空了删 id、表空了删表、art 空了删 art（留下一个空表会被加载器拒绝，而作者的本意只是
+    // 「删掉这一条」）。**删声明永远不被形状挡住** —— 那正是作者修好一份坏清单的方式（与语音那条同一个取舍）。
+    // 写入用模块自己的 writeJson：其余字段、键序、两空格缩进与结尾换行原样保留，只动 `art` 这一处。
+    if (p.startsWith('/api/packs/') && p.endsWith('/art') && method === 'POST') {
+      const packId = p.slice('/api/packs/'.length, -'/art'.length);
+      if (!PACK_ID_RE.test(packId)) throw refuse(400, '工坊包 id 不合法（只能是字母、数字、下划线和短横线）');
+      const packDir = path.join(root, packId);
+      const manifestPath = path.join(packDir, 'pack.json');
+      const manifest = readJson(manifestPath, null);
+      if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) throw refuse(400, `工坊包 "${packId}" 不存在（没有可读的 pack.json）`);
+      const { table, id, art } = await readBody(req);
+      const shape = typeof table === 'string' && Object.hasOwn(ART_TABLES, table) ? ART_TABLES[table] : null;
+      if (!shape) throw refuse(400, `"${String(table)}" 不是外观表（可用：${Object.keys(ART_TABLES).join('、')}）`);
+      if (typeof id !== 'string' || !ART_ID_RE.test(id)) {
+        throw refuse(400, '外观 id 不合法（只能是字母、数字、下划线、短横线、点、冒号，1–64 位）');
+      }
+      const clearing = art === null || art === undefined || (isPlainObj(art) && !Object.keys(art).length);
+      if (!clearing && !isPlainObj(art)) {
+        throw refuse(400, 'art 必须是这一条外观的完整内容（一个对象），或者 null / {} 表示删掉这条声明');
+      }
+      const warnings = [];
+      const next = { ...manifest };
+      const artTables = isPlainObj(manifest.art) ? { ...manifest.art } : {};
+      if (manifest.art !== undefined && !isPlainObj(manifest.art)) {
+        // 一个不是对象的 art 本来就会被加载器拒绝，用这次写入的内容顶掉它，但仍然在回话里说清楚
+        warnings.push('pack.json 里原来的 art 不是一个对象，已按这次写入的内容重写（它本来就会被加载器拒绝）');
+      }
+      const entries = isPlainObj(artTables[table]) ? { ...artTables[table] } : {};
+      if (clearing) delete entries[id];
+      else entries[id] = art;
+      if (Object.keys(entries).length) artTables[table] = entries; else delete artTables[table];
+      if (Object.keys(artTables).length) next.art = artTables; else delete next.art;
+      // 形状先复核：与加载器**同一个函数**，所以形状类的拒绝带着加载器自己的错误码与 detail 原样回给作者
+      // （ART_BAD_SHAPE / ART_UNKNOWN_FIELD / ART_PATH_UNSAFE / ART_SPINE_INCOMPLETE / ART_BAD_ID …）。
+      // 放在文件检查之前，是为了让「atlas 缺了」这种错报 ART_SPINE_INCOMPLETE，而不是编辑器自己的一句兜底文案。
+      const checked = normalizePackManifest(next, packId, { hasAssets: fs.existsSync(path.join(packDir, VOICE_ASSETS_DIR)) });
+      if (!checked.ok && !clearing) throw refuse(400, `保存后 pack.json 会被加载器拒绝（${checked.error}）：${checked.detail}`);
+      // 再问文件系统、骨架与图谱（只有它们能回答的那几条）：形状已经过了，所以这里的路径都是字符串
+      if (!clearing) {
+        const onDisk = checkArtEntry(root, packId, table, art);
+        if (onDisk.error) throw refuse(400, `这条外观存不进去：${onDisk.error}`);
+        warnings.push(...onDisk.warnings);
+      }
+      if (!checked.ok) warnings.push(`pack.json 现在会被加载器拒绝（${checked.error}）：${checked.detail}`);
+      await writeJson(manifestPath, next);
+      return sendJson(res, 200, {
+        ok: true, pack: packId, table, id,
+        entry: isPlainObj(next.art) && isPlainObj(next.art[table]) ? (next.art[table][id] ?? null) : null,
+        art: isPlainObj(next.art) ? next.art : {},
+        warnings,
+      });
+    }
+
+    // 外观素材的**单个文件**体检（GET）：页面刚挑好一个 .skel / .atlas、它还没写进 pack.json 时，动画名与图谱页名
+    // 的候选只能现场问一次。没有这条接口，作者第一次声明某个模型时下拉里永远是空的（要先保存一次才看得见候选，
+    // 而保存又会因为动画名猜错被拒）。只认包内 `assets/` 下真的存在的文件，与状态接口共用同一份 mtime 缓存。
+    if (p.startsWith('/api/packs/') && p.endsWith('/art/inspect') && method === 'GET') {
+      const packId = p.slice('/api/packs/'.length, -'/art/inspect'.length);
+      if (!PACK_ID_RE.test(packId)) throw refuse(400, '工坊包 id 不合法（只能是字母、数字、下划线和短横线）');
+      if (!fs.existsSync(path.join(root, packId, 'pack.json'))) throw refuse(400, `工坊包 "${packId}" 不存在（没有可读的 pack.json）`);
+      const skelRel = url.searchParams.get('skel') || '';
+      const atlasRel = url.searchParams.get('atlas') || '';
+      if (!skelRel && !atlasRel) throw refuse(400, '要带上 skel 或 atlas 的路径（包内 assets/ 下的相对路径）');
+      return sendJson(res, 200, {
+        ok: true, pack: packId,
+        skel: skelRel ? artSkelInfo(root, packId, skelRel) : null,
+        atlas: atlasRel ? artAtlasInfo(root, packId, atlasRel) : null,
       });
     }
 

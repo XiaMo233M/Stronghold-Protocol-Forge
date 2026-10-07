@@ -281,3 +281,72 @@ describe('装备页：本包自带的图标（pack.json 的 itemIcons）', () =>
     assert.equal(JSON.stringify(packManifest()), before, '被拒之后 pack.json 必须一个字节都没变');
   });
 });
+
+// 「本包已声明的图标」清单：上面那一段只认当前 `spec.trapId`，所以作者把 `trapId` 改掉之后，`pack.json` 里
+// `itemIcons[旧 id]` 那条声明在页面上再也看不到、也删不掉 —— 只能手改清单。这组用例钉住清单赖以工作的那份状态
+// （**原样读出**的全部声明，含陈旧条目）与它唯一的动作（空 path 的删除）。
+describe('装备页：本包已声明的图标清单（含陈旧条目，逐条可删）', () => {
+  // 图标文件用上一组用例已经放进 assets/ 的那张图（内容无所谓，路径与声明才是这里要证的东西）
+  const ICON_PATH = 'item/trap_ws_icon_item.png';
+  const DECLARED = 'trap_ws_listed';
+  const RENAMED = 'trap_ws_listed_new';
+  const packManifest = () => JSON.parse(fs.readFileSync(join(wsRoot, 'item-pack', 'pack.json'), 'utf8'));
+  const merged = () => loadData(DATA_DIR, { log: { info() {}, warn() {}, error() {}, debug() {} }, workshopDir: wsRoot });
+  const listed = () => fetch(`${editor.url}/api/items`).then((x) => x.json()).then((r) => r.packItemIcons.find((p) => p.id === 'item-pack'));
+  const setIcon = (itemId, path) => post(`${editor.url}/api/packs/item-pack/item-icons`, { itemId, path });
+  // 一件自带图标 id 的装备
+  const spec = (trapId) => ({ ...itemSpec(), id: 'listed_item', trapId });
+
+  before(async () => {
+    const saved = await post(`${editor.url}/api/packs/item-pack/items`, { spec: spec(DECLARED) }).then((x) => x.json());
+    assert.equal(saved.ok, true, JSON.stringify(saved));
+    const declared = await setIcon(DECLARED, ICON_PATH).then((x) => x.json());
+    assert.equal(declared.ok, true, JSON.stringify(declared));
+  });
+
+  test('改掉 trapId 之后，这条声明还在状态里：页面拿到的就是含陈旧条目的那一份', async () => {
+    // 作者改掉这件装备的图标 id —— 从此那段下拉里再也点不到旧声明，只剩下面这块清单能删它
+    const saved = await post(`${editor.url}/api/packs/item-pack/items`, { spec: spec(RENAMED) }).then((x) => x.json());
+    assert.equal(saved.ok, true, JSON.stringify(saved));
+    const pi = await listed();
+    assert.equal(pi.itemIcons[DECLARED], ICON_PATH, '陈旧声明必须原样给页面（清单列的就是这一份）');
+    const all = await fetch(`${editor.url}/api/items`).then((x) => x.json());
+    assert.equal(
+      all.items.some((i) => i.pack === 'item-pack' && i.trapId === DECLARED), false,
+      '本包已经没有记录用这个 id —— 页面据此把它标成「陈旧 / 没人用」',
+    );
+    assert.equal(merged().assets.items[DECLARED], `/workshop-assets/item-pack/${ICON_PATH}`,
+      '没删之前这条声明仍然生效（那正是它必须能被删掉的理由）');
+  });
+
+  test('删掉陈旧声明：配图被拒、清空放行，pack.json 与 assets.items 里那条一起回去', async () => {
+    // 「只收本包在用的 id」拦的是配图 —— 给一条陈旧声明重新配图是 400，而清空是例外：它正是修掉陈旧声明的方式
+    assert.equal((await setIcon(DECLARED, ICON_PATH)).status, 400, '没人用的 id 不能再配图');
+    const r = await setIcon(DECLARED, '').then((x) => x.json());
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(r.path, null);
+    assert.equal(DECLARED in (packManifest().itemIcons ?? {}), false, 'pack.json 里那条声明真的没了');
+    assert.equal(DECLARED in merged().assets.items, false, '合并后的 assets.items 里那条也回去了');
+  });
+
+  test('删除一个还在用的 id 同样能删（清空不受「只收本包在用的 id」限制）', async () => {
+    const declared = await setIcon(RENAMED, ICON_PATH).then((x) => x.json());
+    assert.equal(declared.ok, true, JSON.stringify(declared));
+    assert.equal(merged().assets.items[RENAMED], `/workshop-assets/item-pack/${ICON_PATH}`);
+    // 页面上它显示为「有人在用」（本包 items.json 里有记录的 trapId 等于它），删除走的是同一条空 path
+    const r = await setIcon(RENAMED, '').then((x) => x.json());
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(RENAMED in (packManifest().itemIcons ?? {}), false);
+    assert.equal(RENAMED in merged().assets.items, false);
+  });
+
+  test('页面：清单遍历的是全部声明，每条一个走空 path 的删除入口（源码层面钉住这条出口）', async () => {
+    const src = fs.readFileSync(join(ROOT, 'editor/ui/item.js'), 'utf8');
+    assert.match(src, /本包已声明的装备图标/, '清单要有标题');
+    assert.match(src, /Object\.entries\(packIcons\?\.itemIcons \?\? \{\}\)/, '要遍历全部声明，不是只列当前 trapId 那一条');
+    const fn = src.slice(src.indexOf('async function deleteDeclaredIcon'));
+    assert.ok(fn, '清单的删除要有自己的入口');
+    assert.match(fn.slice(0, 1200), /\/item-icons`/, '删除走 item-icons');
+    assert.match(fn.slice(0, 1200), /path: ''/, '空 path 才是「删掉这条声明」');
+  });
+});

@@ -47,19 +47,20 @@ workshop/<packId>/
 | `version` | 否 | 默认 `0.0.0` |
 | `author` / `license` / `description` | 否 | 元信息；`license` 用于声明素材授权 |
 | `gameVersion` | 否 | 作者针对的游戏版本，便于排查 |
-| `content` | 三选一 | 这个包提供哪些数据文件（上表的名字，含 `bonds`） |
-| `voices` | 三选一 | 这个包为哪些干员提供**默认配音**的语音，见 §1.4；`content` / `voices` / `voiceLangs` / `bondIcons` 至少有一个非空 |
-| `voiceLangs` | 三选一 | 同一个包给**其它配音语言**（jp/en/kr）各配一份，见 §1.4；形状与 `voices` 相同，多一层语种 |
-| `bondIcons` | 三选一 | 这个包为哪些盟约提供图标，见 §1.4 与 §1.8：`{ "<bondId>": "<包内相对 assets/ 的路径>" }` |
-| `itemIcons` | 三选一 | 这个包为哪些装备/道具提供图标，见 §1.4：`{ "<图标 id>": "<包内相对 assets/ 的路径>" }` |
+| `content` | 贡献项之一 | 这个包提供哪些数据文件（上表的名字，含 `bonds`） |
+| `voices` | 贡献项之一 | 这个包为哪些干员提供**默认配音**的语音，见 §1.4 |
+| `voiceLangs` | 贡献项之一 | 同一个包给**其它配音语言**（jp/en/kr）各配一份，见 §1.4；形状与 `voices` 相同，多一层语种 |
+| `bondIcons` | 贡献项之一 | 这个包为哪些盟约提供图标，见 §1.4 与 §1.8：`{ "<bondId>": "<包内相对 assets/ 的路径>" }` |
+| `itemIcons` | 贡献项之一 | 这个包为哪些装备/道具提供图标，见 §1.4：`{ "<图标 id>": "<包内相对 assets/ 的路径>" }` |
+| `art` | 贡献项之一 | 这个包自带的外观素材（头像 / 立绘 / 模型），见 §1.4：`{ chars / enemies / tokens: { "<id>": <官方条目形状的子集> } }` |
 | `support` | 否 | 这个包自己新增的、应当进助战卡池的干员 id 列表，见 §2.1；阶由记录推导 |
 | `overrides` | 否 | 允许覆盖的官方记录，格式 `"<file>:<id>"`，例如 `"chess:chess_char_1_01_a"`、`"bonds:yanShip"` |
 
 `content` 只接受上表列出的文件。**`config` 被刻意排除**：一个能改写经济、回合表或难度参数的包改的是规则而不是内容，那需要另一套审查机制，不在本功能范围内。
 
-**只带语音（或只带图标）的包是合法的包**：`content: []` + `voices` / `voiceLangs` / `bondIcons` / `itemIcons`（见 §1.4）。
-一个只给助战干员配语音、或只给盟约/装备配一张图的包不需要提供任何数据文件；
-反过来，这些字段全空才会被拒（`EMPTY_PACK`）。
+**只带素材的包是合法的包**：`content: []` + `voices` / `voiceLangs` / `bondIcons` / `itemIcons` / `art` 里任意一项（见 §1.4）。
+一个只给助战干员配语音、只给盟约/装备配一张图、或只给某个干员配一张立绘的包，不需要提供任何数据文件；
+反过来，这些贡献项**全空**才会被拒（`EMPTY_PACK`）。
 
 ### 1.2 叠加规则
 - **默认叠加（additive）**：新 id 直接加入。
@@ -210,12 +211,65 @@ workshop/*/ ──┘        （冻结之前）              └─→ /data/<fi
 | 路径相对 `assets/` | 与语音、盟约图标逐字相同（`ITEM_ICON_PATH_UNSAFE`）；图片同样受 §1.4 的授权闸门约束 |
 | 覆盖官方 = 换掉官方图 | id 已经在官方 `items` 里时这张图**替换**它；新增的 id 直接加进去 |
 | 两张图抢同一个 id | 按**包 id 排序**第一个赢，后一个包在启动日志里得到一条错误（与盟约图标同一条规则） |
-| 编辑器只让你给**本包真的有的**图标 id 配图 | 键取自当前装备的 `trapId`；这也意味着改掉某个道具的 `trapId` 后，留在 `pack.json` 里的旧声明页面不再显示，要手删 |
+| 编辑器只让你给**本包真的有的**图标 id 配图 | 键取自当前装备的 `trapId`；改掉某个道具的 `trapId` 之后，留在 `pack.json` 里的旧声明会出现在装备页的「本包已声明的装备图标」清单里（标成「陈旧 / 没人用」）并可以逐条删除 —— **不需要手改清单** |
 
 **送达方式**：`applyWorkshop()` 把它们并进 `assets.items`（`workshopItemIconIndex` / `mergeWorkshopItemIcons`），
 URL 走同一条 `/workshop-assets/<pack>/<路径>`，**客户端零改动**（`itemIconUrl` 本来就读那张表）。`assets.json` 里
 **没有 `items` 表**时（没跑过素材管线）不凭空造一个，而是在启动日志里报告。图形入口是编辑器装备页的
 「本包自带的图标（可选）」一段。
+
+#### 外观素材（`art`）：头像 / 立绘 / 模型
+
+第三条素材通道，也是**唯一能让包新增的干员不再是"一张菱形贴图"**的那条。客户端画单位时，头像与模型都从
+`data/assets.json` 取（`public/js/assets.js` 的 `spineEntry` / `avatarUrl` / `portraitUrl`），而包加不了条目 ——
+所以新干员/新怪物以前只能复用官方已装好的模型 id。现在可以把文件放进包自己的 `assets/`，按 `assets.json` 里
+**对应条目的形状**声明出来：
+
+```json
+{
+  "id": "my-art", "license": "CC0-1.0", "content": [],
+  "art": {
+    "chars": {
+      "char_ws_my_op": {
+        "avatar": "art/my_op_avatar.png",
+        "portrait": "art/my_op_portrait.png",
+        "spine": { "front": {
+          "skel": "art/my_op/my_op.skel", "atlas": "art/my_op/my_op.atlas",
+          "textures": ["art/my_op/my_op.png"], "pma": false,
+          "anims": { "idle": "Idle", "move": "Move", "attack": "Attack", "skill": "Skill", "die": "Die", "born": "Start" }
+        } }
+      }
+    },
+    "enemies": { "enemy_ws_my_thing": { "icon": "art/thing_icon.png", "spine": { "skel": "…", "atlas": "…", "anims": {…} } } },
+    "tokens":  { "token_ws_my_thing":  { "avatar": "art/token.png", "owner": "char_ws_my_op" } }
+  }
+}
+```
+
+| 规则 | 说明 |
+|---|---|
+| 三张表，形状照抄官方条目 | `chars` 的 `spine` 是**嵌套**的 `{ front: …, back: … }`；`enemies` / `tokens` 的 `spine` 是**扁平**的。可用的字段就是官方条目里的那几个：`chars` 用 `avatar`/`avatarE2`/`portrait`/`portraitE2`，`enemies` 用 `icon`（另有 `spineAliasOf` 指向别的模型），`tokens` 用 `avatar`（另有 `owner`）。写别的字段会被拒（`ART_UNKNOWN_FIELD`） |
+| 路径相对 `assets/` | 与语音、各类图标逐字相同（`ART_PATH_UNSAFE`）；**受 §1.4 的授权闸门约束**（有 `assets/` 就必须声明 `license`） |
+| `skel` 与 `atlas` 缺一不可 | `ART_SPINE_INCOMPLETE`。清单里的 `atlas` 我方代码只用来做内存回收，但形状这一层就要求它必须在 —— 见下面第一条硬约束 |
+| **字段级合并，不是整条替换** | 官方已有这个 id 时，包只给头像就保留官方模型、只给 `spine.front` 的 `skel`/`atlas` 就保留官方那一侧的 `anims`/`events`（整侧替换会让一个官方模型变成「能出来但不动」，而且一条日志都没有） |
+| 两个包抢同一个 `<表>.<id>` | 按**包 id 排序**第一个赢，后一个包在启动日志里得到一条错误（与盟约/装备图标同一条规则） |
+| **只带 `art` 的包合法** | `content: []` + `art` 就是一个包：只给某个干员配一张立绘也算 |
+
+**两条包改不了的硬约束**（由 vendor 里的 pixi-spine 决定，写错在客户端**完全不报错**）：
+
+1. **`.atlas` 必须与 `.skel` 同目录同名** —— 加载器是从 `.skel` 的路径推出 `.atlas` 的（`dirname(src) + basename(src, '.skel') + '.atlas'`），清单里的 `atlas` 字段它不读。不同名 → 客户端静默退回菱形贴图。
+2. **`.atlas` 里写的每一页 png 必须与它同目录同名** —— 官方 712 个模型里有 2 个是双页（`char_1052_kalts2`），所以不能假设"一个模型一张 png"。
+
+`.skel` 的版本请用 **3.8.x**（本机 712 个模型实测 709 个 `3.8.99` + 3 个 `3.8.84`）。vendor 里的解析器是 uni 构建、理论上也认 3.7/4.0/4.1，但作者侧校验只放行 3.8.x —— 放行别的收益为零、风险最高。
+
+**作者侧校验（`node tools/workshop-validate.mjs workshop`）是这条通道的安全网**：文件在不在、扩展名能不能服务、atlas 是否与 skel 同名同目录、atlas 里每一页 png 是否真的存在、skel 版本、`anims` 缺不缺、动画名在骨架里是否存在、atlas 有没有 `size:` 行 —— 客户端在这些情况下一律静默，只有校验器会说话。
+其中「缺 `anims`」**分两种严重度**：给一个**新 id** 配模型时缺 `anims` 是**错误**（客户端的 `validSpine` 要求 `anims` 是个对象，缺了它这个模型根本不会被采用，只会画成贴图）；覆盖**官方已有** id 时只是**警告**（字段级合并会把官方那条的 `anims`/`events` 留着，模型照常会动）。
+
+**送达方式**：`applyWorkshop()` 把它们并进 `assets.chars` / `assets.enemies` / `assets.tokens`
+（`workshopArtIndex` / `mergeWorkshopArt`），URL 走同一条 `/workshop-assets/<pack>/<路径>`，**客户端零改动**
+（`validSpine` 只要求 skel 是 `/` 开头的路径，包素材 URL 天然满足）。`assets.json` 不存在时报告出来，不凭空造。
+一个附带好处：包把模型接上之后，启动日志里那条「这个干员没有模型（会画成贴图）」的警告会**自动消失**
+（`mergeWorkshopArt` 必须排在 `chessLookIssues` 之前，否则日志会一直报一条已经解决的问题）。
 
 ### 1.5 分享与安装一个包
 
@@ -301,6 +355,7 @@ node tools/workshop-validate.mjs my-pack
 | **多语言语音包（`voiceLangs`）**：其它语种汇总进 `assets.audio.voiceLangs[<lang>]`，玩家选的配音语言直接生效 | ✅ 已实现（`test/workshopVoices.test.js`） |
 | **盟约图标（`bondIcons`）**：汇总进 `assets.bonds`、随合并的 `assets.json` 送达客户端（只带图标的包也合法） | ✅ 已实现（`test/workshopBondIcons.test.js`） |
 | **装备图标（`itemIcons`）**：汇总进 `assets.items`、随合并的 `assets.json` 送达客户端（客户端零改动） | ✅ 已实现（`test/workshopItemIcons.test.js`） |
+| **外观素材（`art`）**：头像 / 立绘 / spine 模型汇总进 `assets.chars` / `assets.enemies` / `assets.tokens`，包新增的干员不再是菱形贴图 | ✅ 已实现（`test/workshopArt.test.js`） |
 | **包自带助战（`support`）**：按记录推导阶并入 `data/support.json` 的卡池、随合并的 `support.json` 送达客户端 | ✅ 已实现（`test/workshopSupport.test.js`） |
 | **分享与安装（`.zip`）**：导出/导入/列出，CLI 与编辑器第八页共用同一批函数 | ✅ 已实现（`shared/zip.js`、`tools/workshop-pack.mjs`、`test/workshopPack.test.js`） |
 | **局外编辑器 UI**：干员 / 地图 / 怪物 / 出怪 / 装备 / **盟约** / 行为层 kit / **语音** / **包管理** 九个页面 | ✅ 已实现（`editor/`，见 `docs/EDITOR.md`） |

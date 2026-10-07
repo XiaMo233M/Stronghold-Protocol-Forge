@@ -14,7 +14,8 @@
 
 // 界面文案的双语入口。**这一页不许出现 `import`**（test/kitEditor.test.js 钉着这条安全属性：本页直接编辑并展示
 // 作者写的 kit 源码），所以接口由 kit.html 先加载的 ./i18n.global.js 挂到 globalThis.spI18n 上，这里只取用。
-const { t, mountI18n } = globalThis.spI18n;
+// packSelect 同理走这个桥（它是其它五个页面共用的「保存到哪个工坊包」下拉，见 editor/ui/packPicker.js）。
+const { t, mountI18n, packSelect } = globalThis.spI18n;
 
 const $ = (s) => document.querySelector(s);
 
@@ -104,27 +105,17 @@ function renderEditor() {
   const packWrap = document.createElement('div');
   packWrap.style.minWidth = '220px';
   packWrap.append(Object.assign(document.createElement('label'), { textContent: t('工坊包') }));
-  const packSel = document.createElement('select');
-  for (const p of packs) {
-    const o = document.createElement('option');
-    o.value = p.id; o.textContent = `${p.name}（${p.id}）`;
-    packSel.append(o);
-  }
-  if (state.packId && !packs.some((p) => p.id === state.packId)) {
-    const o = document.createElement('option'); o.value = state.packId; o.textContent = state.packId; packSel.append(o);
-  }
-  const other = document.createElement('option'); other.value = ''; other.textContent = t('＋ 新建 / 其它工坊包…');
-  packSel.append(other);
-  packSel.value = state.packId ?? '';
-  packSel.addEventListener('change', () => {
-    // the legal-id list is per pack, so the row is rebuilt (the textarea is rebuilt from `state.source`, so no edit is lost)
-    if (packSel.value) { state.packId = packSel.value; renderEditor(); renderSide(); schedule(true); return; }
-    const typed = prompt(t('工坊包 id（字母数字下划线短横线，≤32）：'), state.packId ?? 'my-kit-pack');
-    if (!typed || !typed.trim()) { packSel.value = state.packId ?? ''; return; }
-    state.packId = typed.trim();
-    renderEditor(); renderSide(); schedule(true);
-  });
-  packWrap.append(packSel);
+  // 和其它五个页面同一个下拉：选「新建」时在原地展开输入框（以前这里是手写的一份，要多弹一次原生 prompt）
+  packWrap.append(packSelect({
+    packs,
+    current: state.packId,
+    newLabel: t('＋ 新建一个包…'),
+    newDefault: 'my-kit-pack',
+    onPick: (id) => {
+      // the legal-id list is per pack, so the row is rebuilt (the textarea is rebuilt from `state.source`, so no edit is lost)
+      state.packId = id; renderEditor(); renderSide(); schedule(true);
+    },
+  }));
 
   const idWrap = document.createElement('div');
   idWrap.style.minWidth = '280px';
@@ -363,7 +354,7 @@ async function openKit(packId, id) {
 
 async function saveKit() {
   if (!state.packId) {
-    // 这一页本就有「保存到哪个包」的下拉（编辑器里第一处，后来才推广到其它页），所以这里只提示、不再弹对话框
+    // 中栏的「工坊包」下拉（editor/ui/packPicker.js，与其它五页同一个）里就能选、也能新建，所以这里只提示
     state.message = { kind: 'error', key: '先在右边选一个工坊包（或点「＋ 新建一个包…」）。' };
     renderSide();
     return;

@@ -163,6 +163,37 @@ test('the whole client, shared and the server messages: no Chinese literal left 
   assert.deepEqual(missing, []);
 });
 
+test('服务端不许用 t() 翻文案：服务端从不 setLang，t() 在那里恒等于中文原文', () => {
+  // 为什么值得一条测试：`t()` 在没人调用 setLang 的进程里直接返回 msgid（shared/i18n.js），而 server/ 里
+  // setLang/addMessages 零调用 —— 于是一条 `this.m.toast(ps, 'warn', t('…'))` 在英文客户端上照样显示中文。
+  // 更隐蔽的是：tools/i18n.mjs 的扫描器**刻意不看** server/ 下的 t()（那里的 t 常是黑板查询之类的同名助手，
+  // 见 tools/i18n.mjs 的 "server code never translates"），所以这条错谁都不会报。玩家可见的文案必须走
+  // msg()（客户端 translateWire 按 msgid 查表），数据名走 dn()。
+  const files = [];
+  const visit = (rel) => {
+    for (const name of readdirSync(path.join(ROOT, rel)).sort()) {
+      if (name.startsWith('.')) continue;
+      const r = `${rel}/${name}`;
+      if (statSync(path.join(ROOT, r)).isDirectory()) visit(r);
+      else if (/\.m?js$/.test(name)) files.push(r);
+    }
+  };
+  visit('server');
+  assert.ok(files.length > 150, `${files.length} server files`);
+  const offenders = [];
+  for (const f of files) {
+    const src = readFileSync(path.join(ROOT, f), 'utf8');
+    const named = src.match(/import\s*\{([^}]*)\}\s*from\s*['"][^'"]*shared\/i18n\.js['"]/);
+    // `t` / `tc` / `tParts`（`tName`、`dn`、`msg`、`wireMessage`… 都是服务端该用的）
+    if (named && /(^|[\s,{])(t|tc|tParts)([\s,}]|$)/.test(named[1])) offenders.push(`${f}: ${named[1].trim().replace(/\s+/g, ' ')}`);
+    if (/import\s*\*\s*as\s+(\w+)\s*from\s*['"][^'"]*shared\/i18n\.js['"]/.test(src)) {
+      const ns = src.match(/import\s*\*\s*as\s+(\w+)\s*from\s*['"][^'"]*shared\/i18n\.js['"]/)[1];
+      if (new RegExp(`\\b${ns}\\.(t|tc|tParts)\\(`).test(src)) offenders.push(`${f}: ${ns}.t()`);
+    }
+  }
+  assert.deepEqual(offenders, [], 'server code must send msg()/dn(), never translate with t()');
+});
+
 test('tools/i18n.mjs: msgids of template literals name their params; the codemod wraps text, attributes and nested strings', async () => {
   assert.equal(paramName('poolN', 0), 'poolN');
   assert.equal(paramName('info.rounds', 1), 'rounds');

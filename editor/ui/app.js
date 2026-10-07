@@ -22,6 +22,8 @@ import {
 } from './operatorWizard.js';
 import { fmtNum, makeStatBar } from './statScale.js';
 import { renderKeepingFocus } from './focusKeep.js';
+// 「新建工坊包」按钮的内联输入框：与各页「保存到」下拉里的「＋ 新建一个包…」共用同一份校验与控件
+import { packIdForm } from './packPicker.js';
 // spine 判定的同一条规则：出怪页与干员页共用一个纯函数（填错不会报错的字段，两页都要当场说话）
 import { spineIsKnown } from './enemyWizard.js';
 
@@ -67,6 +69,9 @@ const state = {
   painters: {},
   // 折叠的分段（见 section()）：只记「作者手动改过」的那些，没记过的用该分段的默认值。
   sections: {},
+  // 「本包自带的外观素材」那一块的草稿（整页每 250ms 重画一次，草稿不能放在 DOM 上）、它的目标 key、
+  // 上一次保存/删除的回话，以及现场问来的骨架/图谱解析结论（见 artDraftFor / artParsedStore）。
+  artDraft: null, artDraftKey: '', artMessage: null, artParsed: null,
 };
 
 // ---- the spec model ----------------------------------------------------------------------------------------------
@@ -417,6 +422,336 @@ function defaultGrid(attackKind) {
 const dmgLabel = (v) => (v === 'arts' ? t('法术') : (v === 'heal' ? t('治疗') : (v === 'true' ? t('真实') : (v === 'element' ? t('元素') : t('物理')))));
 const kindLabel = (v) => (v === 'ranged' ? t('远程') : (v === 'none' ? t('不攻击') : (v === 'heal' ? t('治疗') : t('近战'))));
 
+// ---- 本包自带的外观素材（pack.json 的 art）------------------------------------------------------------------------
+//
+// 第四条素材通道（前三条：语音、盟约图标、装备图标）：包自带的头像/立绘/spine 由叠加层并进合并后的
+// `data/assets.json`（chars / enemies / tokens），客户端零改动。与装备图标那块的区别在正文 —— 那里一次只写一个
+// 路径，这里写的是**整条条目**（头像 + 一个 spine），所以页面先把这一条拼好、再一次性 POST；服务端保存前会把
+// 三条硬约束逐条查一遍（docs/WORKSHOP.md §1.4「外观素材」）：
+//   * `.atlas` 必须与 `.skel` 同目录同名 —— 加载器从 skel 的路径推 atlas，清单里的 atlas 只做内存回收，写错不报错；
+//   * `.atlas` 里写的每一页 png 必须与它同目录且真的存在（官方 712 个模型里有 2 个双页，不能假设一图一模型）；
+//   * `.skel` 只收 3.8.x，且 `anims` 里的动画名必须真的在骨架里（名字错 → 模型能出来但不动，一条日志都没有）。
+// 界面替作者做掉两件最容易做错的事：选完 skel **自动填同目录同名的 atlas**，动画名与 textures 只从服务端解析出的
+// 骨架/图谱里挑。解析不出来时退回可手输 + 一句提示（服务端保存时仍会核对，不会静默放过去）。
+
+/** 外观角色名：就是 `assets.json` 的 `anims` 里那几个键（客户端 render/spine.js 逐个读），不要自己发明。 */
+const ART_ROLES = ['idle', 'deploy', 'attack', 'attackDown', 'skill', 'die', 'move', 'stun'];
+/** 其中哪几个是「剪辑」（`{ begin, loop, end }`）；其余的是一个名字（idle / deploy / die）。 */
+const ART_CLIP_ROLES = ['attack', 'attackDown', 'skill', 'move', 'stun'];
+/** 朴素对象（外观表与外观条目都是它）。 */
+const isRec = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+/** 包内相对路径的目录 / 拼接（清单里的路径一律是 `/` 分隔的 POSIX 相对路径）。 */
+const relDirOf = (p) => { const s = String(p ?? ''); const i = s.lastIndexOf('/'); return i < 0 ? '' : s.slice(0, i); };
+const relJoin = (dir, name) => (dir ? `${dir}/${name}` : name);
+
+/** 本包的外观状态：art 原文 + assets/ 里真的有的文件 + 每条已声明 spine 的解析结论。 */
+const packArtState = () => (state.data?.packArt ?? []).find((p) => p.id === state.packId)
+  ?? { id: state.packId, art: {}, files: [], skels: {}, atlases: {} };
+
+/**
+ * 现场解析结果的缓存（刚挑好、还没写进 pack.json 的文件得问一次服务端）。键是包内相对路径，所以**换包就整份丢掉**：
+ * 路径是包内相对的，串了包只会显示错的候选。
+ */
+function artParsedStore() {
+  if (state.artParsed?.packId !== state.packId) state.artParsed = { packId: state.packId, skels: {}, atlases: {} };
+  return state.artParsed;
+}
+
+/** 一个 `.skel` 的解析结论（先看现场问来的，再看 /api/state 里已经声明的那份）。 */
+const skelParse = (rel) => (rel ? (artParsedStore().skels[rel] ?? packArtState().skels?.[rel] ?? null) : null);
+/** 一个 `.atlas` 的解析结论（同上）。 */
+const atlasParse = (rel) => (rel ? (artParsedStore().atlases[rel] ?? packArtState().atlases?.[rel] ?? null) : null);
+
+/** 问一次服务端：这个 `.skel` / `.atlas` 里有什么（候选要真的来自骨架与图谱，不然作者只能猜）。 */
+async function askArtParse(rel, kind) {
+  const known = kind === 'skel' ? skelParse(rel) : atlasParse(rel);
+  if (!rel || !state.packId || known) return;
+  try {
+    const q = kind === 'skel' ? `skel=${encodeURIComponent(rel)}` : `atlas=${encodeURIComponent(rel)}`;
+    const r = await api(`/api/packs/${encodeURIComponent(state.packId)}/art/inspect?${q}`);
+    if (kind === 'skel' && r.skel) artParsedStore().skels[rel] = r.skel;
+    if (kind === 'atlas' && r.atlas) artParsedStore().atlases[rel] = r.atlas;
+  } catch { /* 问不到就不给候选：手输那条路还在，保存时服务端仍会核对 */ }
+}
+
+/** 一条外观条目里的全部 spine 对象（chars 是 `spine.front/back`，enemies/tokens 是扁平的 `spine`）。 */
+function artSpineObjectsUi(entry) {
+  const spine = isRec(entry) ? entry.spine : null;
+  if (!isRec(spine)) return [];
+  if (typeof spine.skel === 'string') return [spine];
+  return Object.values(spine).filter(isRec);
+}
+
+/**
+ * 正编辑的那一条外观（草稿）。整页每 250ms 重画一次，所以草稿必须留在 DOM 之外 —— 否则刚挑好的路径就被抹掉。
+ * 换目标（换干员 / 换包）时才从 pack.json 里已声明的那一条重新起一份；保存成功后由调用方清空 key 强制重读。
+ */
+function artDraftFor(table, id) {
+  const key = `${table}.${id}`;
+  if (state.artDraftKey !== key) {
+    const prev = state.artDraftKey;
+    state.artDraftKey = key;
+    const declared = packArtState().art?.[table]?.[id];
+    state.artDraft = isRec(declared) ? JSON.parse(JSON.stringify(declared)) : {};
+    if (prev) state.artMessage = null;   // 换了目标才清上一次的回话（保存后强制重读时 prev 是空串）
+  }
+  return state.artDraft;
+}
+
+/**
+ * 一个「只列本包真的有的文件」的下拉。空选项 = 这个字段不声明。当前值不在清单里时**也留着并标出来**：
+ * 那条声明可能是手写的，也可能文件刚被挪走 —— 静默把它改掉才是真正的坏行为（与「不静默清空」同一条）。
+ * `extraClass` 是给测试/样式用的一个稳定的钩子（DOM 结构会变，这个类不会）。
+ */
+function artFileSelect(files, get, set, emptyLabel, extraClass = '') {
+  const cur = String(get() ?? '');
+  const opts = !cur || files.includes(cur) ? files : [cur, ...files];
+  return h('select', { class: extraClass, onchange: (e) => { set(e.target.value); renderEditorKeepingFocus(); } },
+    h('option', { value: '', selected: !cur }, emptyLabel),
+    ...opts.map((f) => h('option', { value: f, selected: f === cur }, files.includes(f) ? f : t('{0}（本包没有这个文件）', f))));
+}
+
+/**
+ * 动画名下拉：候选只来自服务端从**这个骨架**里解析出的动画名（名字写错 → 模型能出来但不动，而且一条日志都没有，
+ * 所以宁可只让作者挑）。解析不到骨架时退回可手输 + 提示。
+ */
+function artAnimInput(names, get, set, emptyLabel) {
+  const cur = String(get() ?? '');
+  if (!names.length) {
+    return h('div', {},
+      h('input', { value: cur, placeholder: t('骨架没解析出来，可以手填动画名'), oninput: (e) => set(e.target.value) }),
+      h('div', { class: 'hint warn' }, t('这个骨架的动画名没解析出来（文件不在、太大或不是 3.8 骨架）：手填的名字保存时服务端仍会去骨架里核对。')));
+  }
+  const opts = !cur || names.includes(cur) ? names : [cur, ...names];
+  return h('select', { onchange: (e) => { set(e.target.value); renderEditorKeepingFocus(); } },
+    h('option', { value: '', selected: !cur }, emptyLabel),
+    ...opts.map((n) => h('option', { value: n, selected: n === cur }, names.includes(n) ? n : t('{0}（骨架里没有这个名字）', n))));
+}
+
+/**
+ * 一个角色的名字 / 剪辑里某个字段的读写。改完直接写回草稿（重画由调用方 `artAnimInput` 负责）。
+ * 空对象一律删掉那个键：`anims: {}` 在客户端等于「没有动画」，留着只会让作者以为写了什么。
+ */
+function artRoleSetter(cur) {
+  const animsOf = () => (isRec(cur.anims) ? cur.anims : {});
+  const write = (next) => { if (Object.keys(next).length) cur.anims = next; else delete cur.anims; };
+  return {
+    /** idle / deploy / die：一个名字，或者不声明。 */
+    name(role, value) {
+      const next = { ...animsOf() };
+      if (value) next[role] = value; else delete next[role];
+      write(next);
+    },
+    /** 剪辑（attack / move / skill…）的 begin / loop / end：没有 loop 的剪辑没有意义，所以清掉 loop 就整块删掉。 */
+    clip(role, field, value) {
+      const next = { ...animsOf() };
+      const clip = { ...(isRec(next[role]) ? next[role] : {}) };
+      if (field === 'loop' && !value) delete next[role];
+      else {
+        if (value) clip[field] = value; else delete clip[field];
+        next[role] = clip;
+      }
+      write(next);
+    },
+  };
+}
+
+/**
+ * 一侧模型（干员页的 `spine.front` / `spine.back`）：skel / atlas / textures / pma / 各个动画角色。
+ * 改动直接写进草稿（`draft.spine[side]`），保存时整条发出去。
+ */
+function artSideEditor(draft, side, title) {
+  const wrap = h('div', {});
+  wrap.append(h('h2', {}, title));
+  if (!isRec(draft.spine)) draft.spine = {};
+  const cur = isRec(draft.spine[side]) ? draft.spine[side] : {};
+  const commit = () => { if (Object.keys(cur).length) draft.spine[side] = cur; else delete draft.spine[side]; };
+  const skelFiles = packArtState().files.filter((f) => /\.skel$/i.test(f));
+  const atlasFiles = packArtState().files.filter((f) => /\.atlas$/i.test(f));
+  const skelInfo = skelParse(cur.skel);
+  const atlasInfo = atlasParse(cur.atlas);
+  // 硬约束 1：atlas 必须与 skel 同目录同名 —— 选完 skel 就自动填上，别让作者手打（手打必错，而且错了不报错）
+  const setSkel = (v) => {
+    if (v) {
+      cur.skel = v;
+      cur.atlas = v.replace(/\.skel$/i, '.atlas');
+      // atlas 也要问一次：textures 与 pma 的默认值都从图谱里读（清单里没声明时它们根本不在 /api/state 里）
+      askArtParse(v, 'skel').then(() => askArtParse(cur.atlas, 'atlas')).then(renderEditorKeepingFocus);
+    } else { delete cur.skel; delete cur.atlas; }
+    commit();
+  };
+  const setAtlas = (v) => {
+    if (v) { cur.atlas = v; askArtParse(v, 'atlas').then(renderEditorKeepingFocus); } else delete cur.atlas;
+    commit();
+  };
+  wrap.append(h('div', { class: 'grid wide' },
+    field(t('骨架 skel'), artFileSelect(skelFiles, () => cur.skel, setSkel, t('（不用本包模型）'), 'artSkel')),
+    field(t('图谱 atlas（选完 skel 自动填同名，别手打）'), artFileSelect(atlasFiles, () => cur.atlas, setAtlas, t('（随 skel 自动填）'), 'artAtlas'))));
+  if (cur.atlas && !atlasFiles.includes(cur.atlas)) {
+    wrap.append(h('div', { class: 'hint warn' }, t('按同名推出来的 {0} 不在本包的 assets/ 里：把这个文件放进去 —— 加载器只读同目录同名的那个 .atlas，找不到就画不出来，而且不报错。', cur.atlas)));
+  }
+  if (skelInfo?.note) wrap.append(h('div', { class: 'hint warn' }, skelInfo.note));
+  if (atlasInfo?.note) wrap.append(h('div', { class: 'hint warn' }, atlasInfo.note));
+  // textures：默认按图谱页名自动填（客户端只在清单里没有 textures 时才退回 `<skel>.png`，而图谱那一页可能叫别的名字）
+  const derivedTextures = () => {
+    const pages = atlasInfo?.pages ?? [];
+    if (!pages.length) return [];
+    const dir = relDirOf(cur.atlas);
+    return pages.map((p) => relJoin(dir, p));
+  };
+  const textures = Array.isArray(cur.textures) && cur.textures.length ? cur.textures : derivedTextures();
+  const texInput = h('input', {
+    class: 'artTextures',
+    value: textures.join(', '),
+    placeholder: t('默认按图谱页名自动填'),
+    oninput: (e) => {
+      const list = e.target.value.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+      if (list.length) cur.textures = [...new Set(list)]; else delete cur.textures;
+      commit();
+    },
+  });
+  const pmaValue = typeof cur.pma === 'boolean' ? cur.pma : (atlasInfo?.hasPma ?? false);
+  wrap.append(h('div', { class: 'grid wide' },
+    field(t('贴图 textures（留空＝按 atlas 里的页名自动填）'), texInput),
+    field(t('预乘 alpha pma'), h('div', { class: 'row' },
+      checkInput(pmaValue, (v) => { cur.pma = v; commit(); }),
+      h('span', { class: 'hint' }, atlasInfo && atlasInfo.hasPma !== pmaValue ? t('图谱里写的是 pma: {0}，与这里不一致 —— 客户端信清单这一份，画出来就是错的。', String(atlasInfo.hasPma)) : '')))));
+  if (!cur.skel) {
+    wrap.append(h('p', { class: 'hint' }, t('还没选骨架：这一侧不会被声明（想给某个角色只换头像/立绘也可以，那样就不填模型）。')));
+    return wrap;
+  }
+  const names = skelInfo?.animations ?? [];
+  if (!skelInfo || skelInfo.note) {
+    wrap.append(h('p', { class: 'hint warn' }, t('这个骨架的动画名还没解析出来：下面是手输框，填的名字保存时服务端会去骨架里核对。')));
+  }
+  const set = artRoleSetter(cur);
+  const roles = h('div', { class: 'grid wide' });
+  for (const role of ART_ROLES) {
+    if (ART_CLIP_ROLES.includes(role)) {
+      const clip = isRec(cur.anims) && isRec(cur.anims[role]) ? cur.anims[role] : null;
+      roles.append(field(`${role} · loop`, artAnimInput(names, () => clip?.loop ?? '', (v) => set.clip(role, 'loop', v), t('（不声明这个角色）'))));
+    } else {
+      const value = isRec(cur.anims) ? cur.anims[role] : '';
+      roles.append(field(role, artAnimInput(names, () => (typeof value === 'string' ? value : ''), (v) => set.name(role, v), t('（不声明这个角色）'))));
+    }
+  }
+  wrap.append(h('h2', {}, t('动画 anims（角色名就是客户端读的那几个）')));
+  wrap.append(roles);
+  // 起手 / 收尾：只有已经把某个剪辑的 loop 挑出来之后才谈得上（没有 loop 的剪辑没有意义），所以收在「进阶」里
+  const advanced = h('details', {}, h('summary', { class: 'hint' }, t('进阶：起手 / 收尾（可选）')));
+  for (const role of ART_CLIP_ROLES) {
+    const clip = isRec(cur.anims) && isRec(cur.anims[role]) ? cur.anims[role] : null;
+    if (!clip) continue;
+    advanced.append(h('div', { class: 'grid wide' },
+      field(`${role} · begin`, artAnimInput(names, () => clip.begin ?? '', (v) => set.clip(role, 'begin', v), t('（不要起手）'))),
+      field(`${role} · end`, artAnimInput(names, () => clip.end ?? '', (v) => set.clip(role, 'end', v), t('（不要收尾）')))));
+  }
+  if (advanced.children.length > 1) wrap.append(advanced);
+  return wrap;
+}
+
+/** 显示用：一条声明引用到的字符串（图片/图标字段、spine 的 skel/atlas/textures，以及原样抄过去的 id）。 */
+function artEntryStrings(entry) {
+  const out = [];
+  if (!isRec(entry)) return out;
+  for (const [k, v] of Object.entries(entry)) if (k !== 'spine' && typeof v === 'string') out.push(`${k}=${v}`);
+  for (const spine of artSpineObjectsUi(entry)) {
+    if (typeof spine.skel === 'string') out.push(spine.skel);
+    if (typeof spine.atlas === 'string') out.push(spine.atlas);
+    if (Array.isArray(spine.textures)) out.push(...spine.textures.filter((t2) => typeof t2 === 'string'));
+  }
+  return out;
+}
+
+/**
+ * 「本包已声明的外观」：`pack.json.art` 里的**全部**声明（包括当前干员用不到的、陈旧的），每条都能删。
+ * 业主的硬要求：任何写进 pack.json 的东西都必须能在界面上删掉，不许要求手改清单 —— 包括一条**会被加载器拒绝**的
+ * 陈年声明（它正是靠这个按钮才删得掉）。
+ */
+function artDeclaredList() {
+  const box = h('div', { class: 'panel artDeclared' });
+  box.append(h('h2', {}, t('本包已声明的外观')));
+  const art = packArtState().art;
+  const rows = [];
+  if (art !== undefined && !isRec(art)) {
+    // `art` 整个不是一个对象（加载器会拒绝的形状）：也要有一个能去掉它的入口。清任何一条都会把这份坏值整个丢掉，
+    // 所以这里随便借一个合法的表名/id 发一次删除（服务端那条路只认「删」这个意图，不看 id 存不存在）。
+    rows.push({ table: 'chars', id: 'x', label: t('art（不是一个对象）'), refs: [JSON.stringify(art)] });
+  } else {
+    for (const [table, entries] of Object.entries(art ?? {})) {
+      if (!isRec(entries)) {
+        // 整张表都不是对象：那也是加载器会拒绝的东西，同样要能一键去掉
+        rows.push({ table, id: null, label: t('{0}（不是一个对象）', table), refs: [JSON.stringify(entries)] });
+        continue;
+      }
+      for (const [id, entry] of Object.entries(entries)) {
+        rows.push({ table, id, label: `${table}.${id}`, refs: artEntryStrings(entry) });
+      }
+    }
+  }
+  if (!rows.length) {
+    box.append(h('p', { class: 'hint' }, t('这个包的 pack.json 里还没有 art 声明。')));
+    return box;
+  }
+  for (const row of rows) {
+    box.append(h('div', { class: 'row', style: 'align-items:flex-start;justify-content:space-between;border-bottom:1px solid var(--line);padding:4px 0' },
+      h('div', { style: 'flex:1' },
+        h('div', { class: 'n' }, row.label),
+        h('div', { class: 'hint' }, row.refs.length ? row.refs.join(' · ') : t('（没有引用任何文件）'))),
+      h('button', { class: 'ghost artDel', onclick: () => deleteArtDeclaration(row.table, row.id) }, t('删除'))));
+  }
+  return box;
+}
+
+/** 保存 / 删除的回话（带 warnings）：整块重画后它还在，所以存在 state 里而不是 DOM 上。 */
+function artMessageBox() {
+  if (!state.artMessage) return null;
+  return h('div', { class: `banner ${state.artMessage.kind === 'error' ? 'bad' : 'good'}` },
+    h('div', {}, state.artMessage.text),
+    ...(state.artMessage.warnings ?? []).map((w) => h('div', { class: 'hint warn' }, String(w))));
+}
+
+/**
+ * 干员页「外观」段里的那一块：`chars` 表的四个图片字段 + `front`/`back` 两侧模型，外加全部声明的清单。
+ * 表的 id 就是这个干员的 `assetsSpine` —— 客户端是拿它去 `chars` 表查外观的（填错就画成一张贴图）。
+ */
+function lookArtPanel() {
+  const box = h('div', { class: 'panel artPanel' });
+  box.append(h('h2', {}, t('本包自带的外观素材（可选）')));
+  box.append(h('p', { class: 'hint' }, t('客户端画一个干员时读的是合并后的 `data/assets.json` 的 `chars`：这里声明的东西会被并进那一条（素材走 /workshop-assets），客户端零改动。路径都相对包的 `assets/`，文件要自己先放进去 —— 编辑器不上传素材。')));
+  const id = String(state.spec?.assetsSpine ?? '').trim();
+  if (!state.packId) {
+    box.append(h('p', { class: 'hint' }, t('先在上面选一个工坊包。')));
+    return box;
+  }
+  if (!id) {
+    box.append(h('p', { class: 'hint' }, t('先在「assetsSpine」里填这个干员的模型 id（客户端就是拿它去 `chars` 表查外观），再回来给它配素材。')));
+    box.append(artDeclaredList());
+    return box;
+  }
+  const draft = artDraftFor('chars', id);
+  const images = packArtState().files.filter((f) => /\.(png|jpe?g|webp|gif)$/i.test(f));
+  const setField = (key, v) => { if (v) draft[key] = v; else delete draft[key]; };
+  box.append(h('div', { class: 'grid wide' },
+    field(t('头像 avatar'), artFileSelect(images, () => draft.avatar, (v) => setField('avatar', v), t('（不声明）'))),
+    field(t('精英头像 avatarE2'), artFileSelect(images, () => draft.avatarE2, (v) => setField('avatarE2', v), t('（不声明）'))),
+    field(t('立绘 portrait'), artFileSelect(images, () => draft.portrait, (v) => setField('portrait', v), t('（不声明）'))),
+    field(t('精英立绘 portraitE2'), artFileSelect(images, () => draft.portraitE2, (v) => setField('portraitE2', v), t('（不声明）')))));
+  box.append(h('p', { class: 'hint' }, t('只换头像/立绘也可以：那一侧的模型不填，官方模型照旧（叠加层按字段合并，不会把没写的字段顶掉）。')));
+  const sides = h('div', { class: 'split' },
+    artSideEditor(draft, 'front', t('模型 front（正面）')),
+    artSideEditor(draft, 'back', t('模型 back（背面）')));
+  box.append(sides);
+  box.append(h('div', { class: 'row', style: 'margin-top:10px' },
+    h('button', { class: 'primary artSave', onclick: () => saveArtDraft('chars', id) }, t('保存这条外观')),
+    h('button', { class: 'ghost artDel', onclick: () => deleteArtDeclaration('chars', id) }, t('删除这条声明')),
+    !packArtState().files.length ? h('span', { class: 'hint warn' }, t('本包的 `assets/` 里还没有素材：把文件放进去，再回到这一页挑。')) : null));
+  const msg = artMessageBox();
+  if (msg) box.append(msg);
+  box.append(artDeclaredList());
+  return box;
+}
+
 function renderEditor() {
   const box = $('#editor');
   box.replaceChildren();
@@ -513,6 +848,8 @@ function renderEditor() {
     h('p', { class: 'hint' }, t('仓库不含素材，只能复用已装好的 Spine id。')),
     h('div', { class: 'grid' }, field('assetsSpine', spineSel), field(t('或直接填 id'), textInput(() => s.assetsSpine, (v) => { s.assetsSpine = v; }))),
     spineHint,
+    // 本包自带的外观素材（头像/立绘/spine 模型）：与上面那个「复用官方模型」是两条互补的路
+    lookArtPanel(),
   ], { note: t('能不能渲染成模型，看这一段的结论') }));
 
   // 攻击范围与伤害分类：表单以前完全没有范围的入口（连默认值是多少都看不到），现在能挑官方形状并直接看小格阵
@@ -1045,6 +1382,49 @@ async function preview() {
   renderEditorKeepingFocus();
 }
 
+/**
+ * 保存「这条外观」：把整条条目一次性 POST 出去（正文是**整条**而不是一个字段，见 artSideEditor 的注释）。
+ * 保存前把两处「按图谱自动填」补进草稿：`textures`（默认按图谱页名）与 `pma`（图谱声明了预乘就写 true）——
+ * 这两条都是客户端会读、而作者没法凭空知道的东西。
+ */
+async function saveArtDraft(table, id) {
+  if (!state.packId) return;
+  const draft = JSON.parse(JSON.stringify(state.artDraft ?? {}));
+  for (const spine of artSpineObjectsUi(draft)) {
+    const atlas = typeof spine.atlas === 'string' ? atlasParse(spine.atlas) : null;
+    if (!atlas || atlas.note || !atlas.pages?.length) continue;
+    const dir = relDirOf(spine.atlas);
+    if (!Array.isArray(spine.textures) || !spine.textures.length) spine.textures = atlas.pages.map((p) => relJoin(dir, p));
+    if (typeof spine.pma !== 'boolean') spine.pma = atlas.hasPma;
+  }
+  try {
+    const r = await api(`/api/packs/${encodeURIComponent(state.packId)}/art`, { method: 'POST', body: { table, id, art: draft } });
+    state.artDraftKey = '';   // 下一次重画从刚写进去的那一条重新起一份草稿
+    state.artMessage = { kind: 'ok', text: t('已保存 {0} 的外观', `${table}.${id}`), warnings: r.warnings ?? [] };
+    await load();
+  } catch (e) {
+    state.artMessage = { kind: 'error', text: errText(e), warnings: [] };
+    renderEditorKeepingFocus();
+  }
+}
+
+/** 删掉一条外观声明（`art` 为 null = 删；空对象逐级清理在服务端做）。任何声明都必须能在这里删掉。 */
+async function deleteArtDeclaration(table, id) {
+  if (!state.packId) return;
+  const label = id ? `${table}.${id}` : table;
+  if (!confirm(t('删除 {0} 这条外观声明？（只删 pack.json 里的这一条，素材文件不动）', label))) return;
+  try {
+    // 整张表都不是对象时（一条会加载失败的声明），id 只是为了让服务端能定位那张表：它会连着那条坏表一起清掉
+    const r = await api(`/api/packs/${encodeURIComponent(state.packId)}/art`, { method: 'POST', body: { table, id: id ?? 'x', art: null } });
+    if (state.artDraftKey === `${table}.${id}`) state.artDraftKey = '';
+    state.artMessage = { kind: 'ok', text: t('已删掉 {0} 的外观声明', label), warnings: r.warnings ?? [] };
+    await load();
+  } catch (e) {
+    state.artMessage = { kind: 'error', text: errText(e), warnings: [] };
+    renderEditorKeepingFocus();
+  }
+}
+
 async function save() {
   if (!state.packId) { state.message = { kind: 'error', text: t('先选择一个工坊包（或点「新建工坊包」）') }; renderEditor(); return; }
   state.busy = true; renderEditor();
@@ -1105,18 +1485,32 @@ async function load() {
 }
 
 $('#btnReload').addEventListener('click', () => load().catch((e) => { state.message = { kind: 'error', text: errText(e) }; renderEditor(); }));
-$('#btnNewPack').addEventListener('click', async () => {
-  const id = prompt(t('新工坊包的 id（字母数字下划线短横线，≤32）：'));
-  if (!id) return;
-  try {
-    // creating a pack happens on the first saved operator; remember the target and open a blank form
-    state.packId = id.trim();
-    state.slug = null;
-    state.spec = blankSpec();
-    state.preview = null;
-    state.message = { kind: 'ok', text: t('保存第一个干员时会创建工坊包 {0}（目录名必须等于 pack.json 的 id）。', state.packId) };
-    renderShell();
-  } catch (e) { state.message = { kind: 'error', text: errText(e) }; renderEditor(); }
+
+// 「新建工坊包」= 在页面里展开一个输入框，而不是弹原生 prompt（三条理由见 editor/ui/packPicker.js 的文件头）。
+// 这块表单挂在 header 与 #editor 之间，**不随重画重建** —— 否则每 250ms 一次的自动校验会把刚敲进去的 id 擦掉。
+// 仍然只问 id、不建包：工坊包由第一次保存干员时创建（目录名必须等于 pack.json 的 id）。
+const newPackPanel = document.createElement('div');
+newPackPanel.id = 'newPackPanel';
+$('header').after(newPackPanel);
+let newPackForm = null;
+const closeNewPack = () => { newPackForm = null; newPackPanel.replaceChildren(); };
+$('#btnNewPack').addEventListener('click', () => {
+  if (newPackForm) { closeNewPack(); return; }   // 再点一次 = 收起（同一颗按钮开着关着都是它）
+  newPackForm = packIdForm({
+    packs: state.data?.packs ?? [],
+    confirmLabel: t('创建'),
+    onConfirm: (id) => {
+      closeNewPack();
+      state.packId = id;
+      state.slug = null;
+      state.spec = blankSpec();
+      state.preview = null;
+      state.message = { kind: 'ok', text: t('保存第一个干员时会创建工坊包 {0}（目录名必须等于 pack.json 的 id）。', id) };
+      renderShell();
+    },
+    onCancel: closeNewPack,
+  });
+  newPackPanel.replaceChildren(newPackForm);
 });
 
 // 界面语言：换掉 HTML 里的静态文案、插入右上角切换按钮，换语言后重画一遍（动态文案也要跟着换）。

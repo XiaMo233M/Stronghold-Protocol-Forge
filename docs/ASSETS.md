@@ -129,7 +129,14 @@ The `stem` of a Spine model is the upstream file name. Two examples: `char_107_l
   - Ark-Models enemy atlases get `pma: true`, because their textures are premultiplied. pixi-spine reads this and sets `ALPHA_MODES.PMA`.
   - Page names are sanitized to safe file names.
   - All of this is idempotent.
-- **Skeletons:** every `.skel` (Spine 3.8.99 binary) is parsed in Node with `@pixi-spine/runtime-3.8`, the parser the client ships.
+- **Skeletons:** every `.skel` (Spine 3.8.99 binary) is parsed in Node with `@pixi-spine/runtime-3.8` — the runtime this
+  pipeline targets. (The bundle the client loads is pixi-spine's **uni** build, which also *accepts* 3.7 / 4.0 / 4.1 — but
+  everything this repo ships and plans is 3.8, and the workshop validator only lets a pack author ship **3.8.x**
+  (`ART_SPINE_VERSION`, docs/WORKSHOP.md §1.4): accepting 4.x would buy nothing and risks the most.)
+  - A pack's own model is served by the pack-media route and read by the same client code — but two path rules are
+    **not** ours to change: the client derives `.atlas` from the `.skel` path (`dirname + basename(…, '.skel') + '.atlas'`,
+    the manifest's `atlas` field is only used for cache eviction), and every page PNG named inside a `.atlas` must sit
+    next to it under that name. `tools/workshop-validate.mjs` checks both, because a mistake there is silent in the client.
   - The parse extracts animation names and durations, event names, `OnAttack` times per animation, and bounds.
   - Attachment paths are checked against the atlas regions.
   - Then the animation-role resolver runs. See `tools/assets/anim-roles.mjs` and research 07 §5.4.

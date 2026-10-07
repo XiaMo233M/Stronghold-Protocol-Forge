@@ -311,3 +311,88 @@ describe('盟约页：手写的记录不会被毁掉', () => {
     assert.deepEqual(man.overrides, []);
   });
 });
+
+// 「本包已声明的图标」清单：上面那一段只认当前盟约 id，所以作者删掉（或改名成新 id）一条盟约之后，`pack.json` 里
+// `bondIcons[旧 id]` 那条声明在页面上再也看不到、也删不掉 —— 只能手改清单。这组用例钉住清单赖以工作的那份状态
+// （**原样读出**的全部声明，含陈旧条目）、能删的那条路（还在用的 id），以及**陈旧声明的清空**那条路
+// （曾经被 `editor/server.mjs` 的 bond-icons 分支挡住：存在性检查在算 `clearing` 之前；现已挪进非清空分支）。
+describe('盟约页：本包已声明的图标清单（含陈旧条目）', () => {
+  // 图标文件用上一组用例已经放进 assets/ 的那张图（内容无所谓，路径与声明才是这里要证的东西）
+  const ICON_PATH = 'bond/wsBondShip.png';
+  const listed = () => fetch(`${editor.url}/api/bonds`).then((x) => x.json()).then((r) => r.packBonds.find((p) => p.id === 'ws-pack'));
+  const setIcon = (bondId, path) => post(`${editor.url}/api/packs/ws-pack/bond-icons`, { bondId, path });
+
+  before(async () => {
+    // 前面的用例把图标清掉了：这里重新声明一条，并保证那条盟约记录在（「有人在用」就是按它算的）
+    const saved = await post(`${editor.url}/api/packs/ws-pack/bonds`, { spec: BOND_SPEC }).then((x) => x.json());
+    assert.equal(saved.ok, true, JSON.stringify(saved));
+    const declared = await setIcon('wsBondShip', ICON_PATH).then((x) => x.json());
+    assert.equal(declared.ok, true, JSON.stringify(declared));
+  });
+
+  test('删掉那条盟约之后，这条声明还在状态里：页面拿到的就是含陈旧条目的那一份', async () => {
+    const del = await fetch(`${editor.url}/api/packs/ws-pack/bonds/wsBondShip`, { method: 'DELETE' }).then((x) => x.json());
+    assert.equal(del.ok, true, JSON.stringify(del));
+    const pb = await listed();
+    assert.equal(pb.bondIcons.wsBondShip, ICON_PATH, '陈旧声明必须原样给页面（清单列的就是这一份）');
+    assert.equal(pb.bonds.some((b) => b.bondId === 'wsBondShip'), false,
+      '本包已经没有这条盟约 —— 页面据此把它标成「陈旧 / 没人用」');
+    assert.equal(merged().assets.bonds.wsBondShip, `/workshop-assets/ws-pack/${ICON_PATH}`,
+      '没删之前这条声明仍然生效（那正是它必须能被删掉的理由）');
+  });
+
+  test('删掉陈旧声明：配图被拒、清空放行，pack.json 与 assets.bonds 里那条一起回去', async () => {
+    // 「只收本包有的盟约」拦的是配图 —— 给一条陈旧声明重新配图是 400，而清空是例外：它正是修掉陈旧声明的方式
+    assert.equal((await setIcon('wsBondShip', ICON_PATH)).status, 400, '本包没有这条盟约就不能再配图');
+    const r = await setIcon('wsBondShip', '').then((x) => x.json());
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(r.path, null);
+    assert.equal('bondIcons' in manifestOf('ws-pack'), false, '空对象不留在 pack.json 里');
+    assert.equal('wsBondShip' in merged().assets.bonds, false, '合并后的 assets.bonds 里那条也回去了');
+  });
+
+  test('删除一个还在用的 id 同样能删（清空不受「只收本包有的盟约」限制）', async () => {
+    const saved = await post(`${editor.url}/api/packs/ws-pack/bonds`, { spec: BOND_SPEC }).then((x) => x.json());
+    assert.equal(saved.ok, true, JSON.stringify(saved));
+    const declared = await setIcon('wsBondShip', ICON_PATH).then((x) => x.json());
+    assert.equal(declared.ok, true, JSON.stringify(declared));
+    assert.equal(merged().assets.bonds.wsBondShip, `/workshop-assets/ws-pack/${ICON_PATH}`);
+    // 页面上它显示为「有人在用」（本包 bonds.json 里还有这条盟约），删除走的是同一条空 path
+    const r = await setIcon('wsBondShip', '').then((x) => x.json());
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal('wsBondShip' in (manifestOf('ws-pack').bondIcons ?? {}), false);
+    assert.equal('wsBondShip' in merged().assets.bonds, false);
+  });
+
+  test('页面：清单遍历的是全部声明，每条一个走空 path 的删除入口（源码层面钉住这条出口）', async () => {
+    const src = fs.readFileSync(join(ROOT, 'editor/ui/bond.js'), 'utf8');
+    assert.match(src, /本包已声明的盟约图标/, '清单要有标题');
+    assert.match(src, /Object\.entries\(packState\?\.bondIcons \?\? \{\}\)/, '要遍历全部声明，不是只列当前盟约 id 那一条');
+    const fn = src.slice(src.indexOf('async function deleteDeclaredBondIcon'));
+    assert.ok(fn, '清单的删除要有自己的入口');
+    assert.match(fn.slice(0, 1200), /\/bond-icons`/, '删除走 bond-icons');
+    assert.match(fn.slice(0, 1200), /path: ''/, '空 path 才是「删掉这条声明」');
+  });
+});
+
+// 顺手修掉的两处旧缺陷，都在本次改动的 editor/ui/bond.js 里，且都会让「本包已声明的图标」那块所在的**那张表单**
+// 或**那条回执**失效，所以值得钉住（真浏览器里都是当场可见的，见报告）：
+//   * `textInput` 把 attrs 整个 `Object.assign` 到 input 上 —— `list` 在 HTMLInputElement 上是只读访问器，会抛
+//     「Cannot set property list」；而它抛在表单绘制的中途：这一行之后的「战斗数值（黑板 bb）」与「成员」两整段
+//     再也不画出来（`Object.assign(i, attrs)` 在 HEAD 里就这么写）。
+//   * `h()` 只认 `class`，可本页的调用大量写的是 `className`（连它的文档注释也这么写）—— 那些类名掉进
+//     `setAttribute`，变成一条叫 "className" 的属性，CSS 不认：横幅、hint、tag 全都没有样式（回执因此看不出是回执）。
+describe('盟约页：表单绘制不被打断（本次顺手修的两处旧缺陷）', () => {
+  const src = () => fs.readFileSync(join(ROOT, 'editor/ui/bond.js'), 'utf8');
+
+  test('datalist 的 list 走 setAttribute，不再被 Object.assign 抛断', () => {
+    const text = src();
+    // `list` 是只读访问器：把整个 attrs Object.assign 到 input 上会抛，而抛点之后的表单就不画了
+    assert.match(text, /const \{ list, \.\.\.rest \} = attrs;/, '`list` 要从 attrs 里摘出来');
+    assert.match(text, /if \(list\) i\.setAttribute\('list', list\);/, '摘出来的 list 走 setAttribute');
+  });
+
+  test('h() 认得本页在用的两种 class 拼法', () => {
+    assert.match(src(), /k === 'class' \|\| k === 'className'/, '横幅 / hint / tag 的样式靠它');
+  });
+});

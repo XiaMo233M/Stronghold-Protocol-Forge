@@ -11,6 +11,7 @@
 
 import { t, mountI18n } from './i18n.js';
 import { packSelect } from './packPicker.js';
+import { renderKeepingFocus } from './focusKeep.js';
 
 const $ = (s) => document.querySelector(s);
 
@@ -19,7 +20,9 @@ const h = (tag, attrs = {}, ...kids) => {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
     if (v === undefined || v === null || v === false) continue;
-    if (k === 'class') el.className = v;
+    // `className` 与 `class` 两种拼法本页都在用（上面那行注释写的是 className）：只认 `class` 的话，另一种会掉进
+    // setAttribute 变成一条叫 "className" 的属性 —— CSS 不认它，于是横幅、hint、tag 全都悄悄没有样式。
+    if (k === 'class' || k === 'className') el.className = v;
     else if (k === 'text') el.textContent = v;
     else el.setAttribute(k, v);
   }
@@ -64,7 +67,12 @@ function field(label, input, hint) {
 function textInput(get, set, attrs = {}) {
   const i = document.createElement('input');
   i.value = get() ?? '';
-  Object.assign(i, attrs);
+  // `list`（把输入框绑到 datalist）在 HTMLInputElement 上是**只读**访问器：`Object.assign(i, { list })` 会抛
+  // 「Cannot set property list」，而它抛在 表单绘制的中途 —— 这一行之后的东西（战斗数值、成员两整段）就再也不画了。
+  // 所以它单独走 setAttribute（与装备页 iconInput 的写法一致），其余属性照旧。
+  const { list, ...rest } = attrs;
+  Object.assign(i, rest);
+  if (list) i.setAttribute('list', list);
   i.addEventListener('input', () => { set(i.value); schedule(); });
   return i;
 }
@@ -230,6 +238,9 @@ function renderForm() {
     : t('官方清单里没有 `{0}` 这张图，而客户端**不看** `iconId`、只看盟约 id —— 不配本包图标时这条盟约就是一个圆点。', s.iconId || t('（空）')) }));
   box.append(iconBox);
 
+  // 全部声明（含陈旧条目）：上面那一段只认当前盟约 id，删掉或改名一条盟约之后旧声明在页面上就再也看不到 —— 这一块是它的出口
+  box.append(declaredBondIconsBox(packState));
+
   box.append(h('h2', { text: t('计数与阈值（谁算成员、几个才算激活）') }));
   const cnt = document.createElement('div'); cnt.className = 'panel grid';
   cnt.append(
@@ -305,6 +316,76 @@ function renderForm() {
   box.append(bb);
 
   renderMembers(box);
+}
+
+// ---- 本包已声明的盟约图标（pack.json 的 bondIcons，含陈旧条目） ---------------------------------------------------
+
+/**
+ * 「本包已声明的盟约图标」清单：`packBonds[].bondIcons` 就是 `pack.json` 里**原样**读出的那一份，所以在这里把
+ * 全部声明都列出来（含没人用的陈旧条目），每条一个删除按钮。
+ *
+ * 为什么需要它：上面那段「本包自带的图标（可选）」的键取自当前盟约 id，所以作者删掉（或改名成新 id）一条盟约
+ * 之后，`bondIcons[旧 id]` 那条声明在页面上再也看不到、也删不掉 —— 只能手改清单。这一块是那条声明的唯一出口。
+ * 「有人在用」＝ 本包 `bonds.json` 里还有这条盟约（`packState.bonds`，与上面那段的 `inPack` 同一个来源）；
+ * 没人用**不是错误**：它不违反任何规则，只是这张图永远不会显示出来。
+ */
+function declaredBondIconsBox(packState) {
+  const declared = new Set((packState?.bonds ?? []).map((b) => b.bondId));
+  const entries = Object.entries(packState?.bondIcons ?? {});
+  const box = h('div', { class: 'panel' });
+  box.append(h('h2', { text: t('本包已声明的盟约图标') }));
+  box.append(h('p', {
+    class: 'hint',
+    text: t('pack.json 的 `bondIcons` 里声明的每一条都列在下面，含已经没人用的那条：不用手改清单，在这一页删掉就行。'),
+  }));
+  if (!entries.length) {
+    box.append(h('p', { class: 'hint', text: t('本包还没有声明任何自带盟约图标。') }));
+    return box;
+  }
+  box.append(h('p', { class: 'hint', text: t('「有人在用」= 本包 bonds.json 里还有这条盟约。') }));
+  let stale = 0;
+  for (const [bondId, relPath] of entries) {
+    const used = declared.has(bondId);
+    if (!used) stale++;
+    const del = h('button', { class: 'ghost', text: t('删除') });
+    del.addEventListener('click', () => { deleteDeclaredBondIcon(bondId); });
+    box.append(h('div', { class: 'row', style: 'margin:4px 0' },
+      h('span', { text: bondId }),
+      h('span', { class: 'dim', text: `→ ${String(relPath ?? '')}` }),
+      h('span', { class: used ? 'tag ok' : 'tag gold', text: used ? t('有人在用') : t('陈旧 / 没人用') }),
+      del,
+    ));
+  }
+  if (stale) {
+    box.append(h('p', {
+      class: 'hint',
+      text: t('「陈旧 / 没人用」不是错误：它不违反规则，只是本包已经没有这条盟约 —— 留着它这张图也永远不会显示。'),
+    }));
+  }
+  return box;
+}
+
+/**
+ * 删掉本包盟约图标清单里的一条声明：空 path 就是「删掉这条声明」（服务端把「只收本包有的盟约」那条限制放在
+ * **配图**上，清空不受它管），所以这个 id 已经不在任何下拉里也能删掉。删完重画表单，清单与下拉都是新的。
+ */
+async function deleteDeclaredBondIcon(bondId) {
+  if (!state.packId) {
+    state.message = { kind: 'error', text: t('先在下面选一个工坊包（或点「＋ 新建一个包…」）。') };
+    renderSide();
+    return;
+  }
+  if (!confirm(t('删掉本包盟约图标 {0} 的声明？（图片文件本身不会删）', bondId))) return;
+  try {
+    await api(`/api/packs/${encodeURIComponent(state.packId)}/bond-icons`, { method: 'POST', body: { bondId, path: '' } });
+    state.message = { kind: 'ok', text: t('已取消 {0} 的自带图标', bondId) };
+    await load();
+    renderKeepingFocus($('#form'), renderForm);
+  } catch (e) {
+    state.message = { kind: 'error', text: t(e?.message ?? String(e)) };
+    renderKeepingFocus($('#form'), renderForm);
+    renderSide();   // 回执在右栏，失败了也要看得见（照 saveBond / deleteBond 的写法）
+  }
 }
 
 /** 成员：`members` 由干员记录的 `bonds` 推导 —— 这里改的就是那些干员的 spec（只限本包自有的）。 */
@@ -522,8 +603,8 @@ function renderSide() {
     packs: state.data?.packs ?? [],
     current: state.packId,
     newLabel: t('＋ 新建一个包…'),
-    onPick: (id) => { state.packId = id; renderSide(); },
-    askNewId: () => prompt(t('新工坊包的 id（字母数字下划线短横线，≤32）：'), 'my-bond-pack'),
+    newDefault: 'my-bond-pack',
+    onPick: (id) => { state.packId = id; renderKeepingFocus($('#form'), renderForm); renderSide(); },   // 换包要连表单一起重画：图标那两块是按包读的
   }));
   rows.push(packBox);
 
