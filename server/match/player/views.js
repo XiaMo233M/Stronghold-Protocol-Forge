@@ -50,7 +50,12 @@ export class PlayerViews {
   }
 
   privateView() {
-    const slots = this.shop.slots.map((s) => (s ? { kind: s.kind, id: s.id, price: this.priceOf(s), basePrice: s.basePrice, sold: !!s.sold, frozen: !!s.frozen } : null));
+    // `support: true` marks a slot rolled from an operator THIS player brought as 助战 (shared/support.js) — additive,
+    // so a client that does not know the field still reads the slot exactly as before.
+    const slots = this.shop.slots.map((s) => (s ? {
+      kind: s.kind, id: s.id, price: this.priceOf(s), basePrice: s.basePrice, sold: !!s.sold, frozen: !!s.frozen,
+      ...(s.support ? { support: true } : {}),
+    } : null));
     const offer = this.offers[0] || null;
     const free = this.shop.freeRefreshes > 0;
     const board = [];
@@ -88,6 +93,10 @@ export class PlayerViews {
       bonds: bondList(this.gd, this.bondsView(), { full: true, off: offBondCounts(this.gd, this) }),
       effects: this.effectsView(),
       nextEnemies: this.m.nextEnemiesFor(this),
+      // 助战 (shared/support.js): what this player brought AND what was actually granted at round 1. They differ when
+      // the server's pool changed between the lobby's check and the grant (prepareSupports re-checks), and when a granted
+      // piece is sold or merged away — so the client can say which supports it is actually fighting with.
+      support: { selected: Array.isArray(this.support) ? [...this.support] : [], granted: Array.isArray(this.supportGranted) ? [...this.supportGranted] : [] },
       // DESIGN §16: the effective operator loadout ({ [baseChessId]: { skill, module } }; chess not listed use defaults)
       loadout: this.loadout,
       // 0.2.0 补位: the base chess ids this player fields as their stand-ins in this match (the not-owned list the seat had

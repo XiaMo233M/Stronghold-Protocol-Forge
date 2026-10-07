@@ -63,7 +63,13 @@ export class PlayerEconomy {
   _rollChessSlot() {
     // the slotted 自选 pieces join the draw once the 调度中心 reaches their slot's level (player/diy.js diyRollEntries)
     const id = this.m.pool.roll(this.m.rngShop, { maxTier: this.shop.level, extra: this.diyRollEntries() });
-    return id ? { kind: 'chess', id, basePrice: this.gd.chessPrice(id), frozen: false, sold: false } : null;
+    if (!id) return null;
+    // 助战：自己带上场的干员在商店里按 `data/support.json` 的 prices 标价（没配就是它的阶级价），
+    // 卖掉仍按普通棋子的 sellPrice —— 它就是普通棋子，只是「我的商店池里一定有它」（连本局禁用也盖过去）。
+    // 阶级门照旧：六阶助战仍要商店等级 6 才摇得到。
+    const support = this.support.includes(id);
+    const price = support ? (this.gd.supportPrice(id) ?? this.gd.chessPrice(id)) : this.gd.chessPrice(id);
+    return { kind: 'chess', id, basePrice: price, frozen: false, sold: false, ...(support ? { support: true } : {}) };
   }
 
   _rollItemSlot() {
