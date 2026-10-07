@@ -1,6 +1,6 @@
 {
   "name": "stronghold-protocol-alliance",
-  "version": "0.6.4",
+  "version": "0.7.0",
   "private": true,
   "description": "明日方舟「卫戍协议：盟约」非官方同人联机网页复刻（1–4 人合作，Node.js 服务器 + 浏览器客户端）",
   "license": "GPL-3.0-or-later",
@@ -26,6 +26,8 @@
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "test": "node --test",
+    "golden": "node tools/golden.mjs",
+    "golden:update": "node tools/golden.mjs --update",
     "vendor": "node tools/vendor.mjs",
     "build-data": "node tools/build-data.mjs",
     "assets": "node tools/vendor.mjs && node tools/fetch-assets.mjs",
@@ -33,6 +35,11 @@
     "setup": "node tools/setup.mjs",
     "doctor": "node tools/doctor.mjs",
     "launch": "node scripts/launch.mjs",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit --checkJs -p jsconfig.json",
+    "check:imports": "node tools/check-imports.mjs",
+    "package": "node tools/package.mjs",
+    "package:lite": "node tools/package.mjs --lite",
     "editor": "node tools/workshop-editor.mjs",
     "workshop:validate": "node tools/workshop-validate.mjs",
     "workshop:scaffold": "node tools/workshop-scaffold.mjs"
@@ -49,6 +56,10 @@
     "ws": "^8.22.0"
   },
   "devDependencies": {
-    "puppeteer-core": "^25.12.0"
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0",
+    "puppeteer-core": "^25.12.0",
+    "typescript": "^5.9.2"
   }
 }
