@@ -53,6 +53,7 @@ import { deepLinkSeeds, stripDeepLinkParams, runSoloPlaytest } from './playtestL
 import { RoomScreen } from './screens/room.js';
 import { GameScreen } from './screens/game.js';
 import { installAudio } from './audio.js';
+import { probeDubs } from './voiceDubs.js';
 import { settingsStore } from './ui/settings.js';
 import { voiceLangFor } from './ui/gameLogic/settings.js';
 import { GuideHost } from './ui/guide.js';
@@ -382,7 +383,9 @@ async function boot() {
     voiceLangOf: (charId) => voiceLangFor(settingsStore.get(), charId),
   });
   data.load('assets').catch(() => {});
-  // Warm the data cache in the background (missing files are tolerated).
+  // 配音语言 (v0.7.1): which dubs this install really has (a release bundle ships the default one; the others come as a
+  // voice pack from the release page). One HEAD per dub; the settings row and 干员详情 read the result.
+  data.load('assets').then(() => probeDubs(data.get('assets'))).catch(() => {});  // Warm the data cache in the background (missing files are tolerated).
   data.loadAll('config').catch(() => {});
   // Optional local-client art manifest (emotes, tutorial pages, official UI sprites; DESIGN §13).
   data.load('local').catch(() => {});

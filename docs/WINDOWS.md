@@ -54,8 +54,8 @@ LICENSE / NOTICE.md / THIRD-PARTY-NOTICES.md
 素材已经在包里，跳过联网准备，直接起服务器并打开浏览器）。想开工坊编辑器就双击 `启动编辑器.bat`；
 拿到一个工坊包 `.zip` 就把它**拖到 `安装工坊包.bat` 上**（等于 `app\tools\workshop-pack.mjs import`，装到 `app\workshop\<包id>\`，
 重启游戏服务器后生效 —— 没拖文件时 CLI 自己会说用法，窗口因为非 0 退出码停住）。
-卸载＝删除文件夹（不写注册表、不放系统目录）。素材约 **380 MB**（其中角色语音台词约 46 MB；实测包体
-13 600 个文件 / 554.7 MB）是硬成本，包因此比较大。
+卸载＝删除文件夹（不写注册表、不放系统目录）。素材是硬成本（0.7.2 起主包只带**默认配音**，其余配音走 release 的
+语音包，见 §3），包因此还是不小。
 
 ## 3. 包里放了什么、没放什么
 
@@ -70,10 +70,17 @@ LICENSE / NOTICE.md / THIRD-PARTY-NOTICES.md
 * `data/local-assets.json`（本机提取过 3D 棋盘贴图时才有）：贴图本体在 `public/assets/local`（约 68 MB，会随
   `public/assets` 进包），但游戏是靠这份 JSON 才知道有哪些贴图可用 —— 只带贴图不带清单，玩家拿到的是 68 MB
   用不上的文件。清单不存在时会提示先跑 `node tools/setup.mjs --local`。
-* **角色语音台词（0.7.0 起随包发）**：`public/assets/audio/voice/<语言>/<干员>/*.mp3`（0.2.0 的布局；上游 0.1.x 那套
-  `audio/voice_cn/` 已废弃）与 `data/assets.json` 里对应的 `audio.voice` 映射**必须一起进包** —— 只带文件不带映射，
-  客户端根本不会请求它们。打包脚本会据此在包内说明里写明「语音已在包里」，反过来（没抓语音的 checkout）说明里不会
-  出现这句话，因为这属于事实陈述，不能无条件写。语音**默认就听得见**（设置 → 干员语音 = 0.8），玩家可以自己调低或静音。
+* **角色语音台词**：`public/assets/audio/voice/<语言>/<干员>/*.mp3`（0.2.0 的布局；上游 0.1.x 那套
+  `audio/voice_cn/` 已废弃并删除）与 `data/assets.json` 里对应的 `audio.voice` / `audio.voiceLangs` 映射**必须一起进包** ——
+  只带文件不带映射，客户端根本不会请求它们。打包脚本会据此在包内说明里写明「语音已在包里」，反过来（没抓语音的
+  checkout）说明里不会出现这句话，因为这属于事实陈述，不能无条件写。语音**默认就听得见**（设置 → 干员语音 = 0.8），
+  玩家可以自己调低或静音。
+* **多语言配音（0.7.2 起拆开）**：主包只带**默认配音**（清单 `audio.voiceLang`，目前是中文，≈66 MB）—— 四种语言全塞
+  进去要多 ≈196 MB。其余语言单独发 `Stronghold-Protocol-Forge-<版本>-voices-*.zip`（同一个 release 的附加资产，
+  由 `node scripts/make-voice-pack.mjs` 生成）：解压后把 `voice\` 覆盖到 `app\public\assets\audio\voice\`，
+  **不需要改任何配置**（清单里本来就列着这些语言）。客户端在选中未安装的配音时会回退到默认配音那一句
+  （`public/js/audio.js`），设置里的「配音语言」也只列真的装了的那几种（`public/js/voiceDubs.js` 每种探一个 HEAD）。
+  想把这几种也打进主包：`--all-dubs`。
 * `test/` 一律不进包（省体积）。
 
 整树复制时会跳过符号链接与**点开头的条目**：打包机器的 `.DS_Store` 既不属于项目，也不该出现在别人下载的包里。

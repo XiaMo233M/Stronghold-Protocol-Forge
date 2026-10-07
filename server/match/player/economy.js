@@ -99,11 +99,16 @@ export class PlayerEconomy {
   }
 
   /**
-   * The 调度中心's upgrade opens the new level's extra slots at once, each with a new card drawn at the new level; the
-   * cards already shown stay where they are (chess slots keep their index, the item slot stays after them). Official: the
-   * tutorial's 休整期 page 「升级：…升级后将出现更多的商品栏位、可调度干员以及新装备」; the community report of 2026-10-06
-   * (item 19) 「升级商店获得新的商店位时用新卡补上，而不是空着」. Until 0.2.0 the extra slots waited for the next roll (a
-   * refresh or the round start). [ASSUMED] the new card follows the freeze toggle, as a manual refresh's cards do.
+   * The 调度中心's upgrade opens the new level's extra slots — as EMPTY slots.
+   *
+   * The owner's decision of 2026-10-07, report 「升级2本会刷新干员池和加入新干员，升级商店等级加槽位应该是只多一个空位而不是直接多
+   * 一个可购买干员」: an upgrade buys a PLACE for a card, not a card. The extra slots appear empty and the next roll fills
+   * them — a manual 刷新 (rollShop) or the round start's own roll (round.js startRound).
+   *
+   * Upstream 0.2.0 drew a card in at once (§25.19.2, community report item 19 「升级商店获得新的商店位时用新卡补上，而不是空着」,
+   * citing the tutorial's 「升级：…升级后将出现更多的商品栏位、可调度干员以及新装备」). That hands the player a free card the
+   * shop never rolled — from level 2 on, a NEW operator to buy on the spot — which is exactly what the owner reports as
+   * wrong; the tutorial line only promises that more slots appear. The cards already shown stay where they are.
    */
   _openLevelSlots() {
     const { chess: nChess, item: nItem } = this.gd.shopSlots(this.shop.level);
@@ -112,9 +117,8 @@ export class PlayerEconomy {
     if (nChess <= layout.chess && nItem <= layout.item) return;
     const chess = old.slice(0, layout.chess);
     const items = old.slice(layout.chess);
-    const fresh = (s) => { if (s) s.frozen = this.shop.frozen; return s; };
-    while (chess.length < nChess) chess.push(fresh(this._rollChessSlot()));
-    while (items.length < nItem) items.push(fresh(this._rollItemSlot()));
+    while (chess.length < nChess) chess.push(null);   // empty: the next roll draws into it
+    while (items.length < nItem) items.push(null);
     this.shop.slots = [...chess, ...items];
     this.shop.layout = { chess: chess.length, item: items.length };
   }

@@ -1,6 +1,6 @@
 # Stronghold-Protocol-Forge · 卫戍协议工坊编辑器
 
-![version](https://img.shields.io/badge/version-0.7.1-2ea44f)
+![version](https://img.shields.io/badge/version-0.7.2-2ea44f)
 ![license](https://img.shields.io/badge/code%20license-GPL--3.0--or--later-blue)
 ![node](https://img.shields.io/badge/node-22%20%7C%2024-339933)
 
@@ -172,9 +172,10 @@ npm run editor                                                                  
 
 - **独立模拟**（单人）与**同盟模拟**（1–4 人**合作**，没有 PvP；空位可以加 AI 队友）。
 - 服务器是一个 Node.js 程序，**战斗在各玩家的浏览器里模拟**（和官方一样），服务器只管经济与回合，一台低功耗小主机就能开服。
-- **本仓库打包的上游游戏本体为 0.2.0**（本仓库自己的版本是 0.7.1，两者的读法见[版本号怎么读](#版本号怎么读)）：补位、自选编队、中英日韩四语言、自定义快捷键与精简包，以及一批按官方数据与 PRTS 修正的规则，详见 [CHANGELOG.md](CHANGELOG.md)。仍有少数规则按推断实现，与官方不一致的地方欢迎在 Issue 里反馈。
-- **多语言配音**（0.7.1 起）：干员战斗语音随包发中文 / 日文 / 英文 / 韩文四种，**设置 → 配音语言** 选全局默认，
+- **本仓库打包的上游游戏本体为 0.2.0**（本仓库自己的版本是 0.7.2，两者的读法见[版本号怎么读](#版本号怎么读)）：补位、自选编队、中英日韩四语言、自定义快捷键与精简包，以及一批按官方数据与 PRTS 修正的规则，详见 [CHANGELOG.md](CHANGELOG.md)。仍有少数规则按推断实现，与官方不一致的地方欢迎在 Issue 里反馈。
+- **多语言配音**（0.7.1 起）：干员战斗语音有中文 / 日文 / 英文 / 韩文四种，**设置 → 配音语言** 选全局默认，
   任何干员还能在 **干员详情 → 配音** 里单独换一种（点一下当场试听）。某种配音缺一句时自动退回默认配音。
+  **发行包只带默认配音**，其余语言在同一个 release 的 `…-voices-*.zip` 里（解压覆盖到 `app/public/assets/audio/voice/` 即可，不用改配置）。
 
 下面是给作者做参照的游戏画面。
 
@@ -245,7 +246,7 @@ npm start          # 启动服务器：http://localhost:3000
 
 #### 版本号怎么读
 
-发行 tag 写成 **`v<forge>-<上游>`**：`v0.7.1-0.2.0` = 本仓库（Forge 工坊编辑器）**0.7.1** + 上游游戏（[sganggs/Stronghold-Protocol](https://github.com/sganggs/Stronghold-Protocol)）**0.2.0**。程序里显示的版本（标题页、启动横幅、`/healthz`）只是前半部分，因为仓库自己的元数据检查要求它是三段普通 semver —— 详见 [CHANGELOG.md](CHANGELOG.md) 与 `test/version.test.js`。
+发行 tag 写成 **`v<forge>-<上游>`**：`v0.7.2-0.2.0` = 本仓库（Forge 工坊编辑器）**0.7.2** + 上游游戏（[sganggs/Stronghold-Protocol](https://github.com/sganggs/Stronghold-Protocol)）**0.2.0**。程序里显示的版本（标题页、启动横幅、`/healthz`）只是前半部分，因为仓库自己的元数据检查要求它是三段普通 semver —— 详见 [CHANGELOG.md](CHANGELOG.md) 与 `test/version.test.js`。
 
 #### 系统要求
 

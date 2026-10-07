@@ -77,8 +77,24 @@ const LEGAL_FILES = ['LICENSE', 'NOTICE.md', 'THIRD-PARTY-NOTICES.md'];
  */
 const LOCAL_ASSET_MANIFEST = path.join('data', 'local-assets.json');
 
+/** The 配音 folders present on this machine (`public/assets/audio/voice/<lang>`), sorted. */
+function listVoiceDubs(root = ROOT) {
+  const dir = path.join(root, 'public', 'assets', 'audio', 'voice');
+  try { return fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort(); }
+  catch { return []; }
+}
+
+/** The manifest's default 配音 (`data/assets.json` audio.voiceLang), `cn` when it names none. */
+function readDefaultDub(root = ROOT) {
+  try {
+    const m = JSON.parse(fs.readFileSync(path.join(root, 'data', 'assets.json'), 'utf8'));
+    const l = m?.audio?.voiceLang;
+    return typeof l === 'string' && l ? l : 'cn';
+  } catch { return 'cn'; }
+}
+
 function parseArgs(argv) {
-  const o = { out: '', node: true, force: false, nodeSpec: '', sha256: '' };
+  const o = { out: '', node: true, force: false, nodeSpec: '', sha256: '', allDubs: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const [k, v] = a.split('=');
@@ -88,6 +104,7 @@ function parseArgs(argv) {
     else if (k === '--sha256') o.sha256 = String(val() || '').toLowerCase();
     else if (a === '--no-node') o.node = false;
     else if (a === '--force') o.force = true;
+    else if (a === '--all-dubs') o.allDubs = true;
     else if (a === '-h' || a === '--help') o.help = true;
   }
   return o;
@@ -97,6 +114,8 @@ const HELP = `node scripts/make-windows-bundle.mjs — 生成 Windows 开箱即�
 
   --out <dir>        产物目录（默认 <仓库上一级>/Stronghold-Protocol-Windows）
   --no-node          不下载便携版 Node（目标机器需自备 Node 22+）
+  --all-dubs         把 public/assets/audio/voice/ 下的**全部**配音都打进包（默认只带清单里的默认配音，
+                     其余走 release 的语音包，见 scripts/make-voice-pack.mjs）
   --force            目录已存在时先删掉（只肯删空目录，或上一次打的便携包；其余情况拒绝）
   --node-version X   换一个 Node 版本（默认 ${NODE_PIN.version}）；换版本必须同时给 --sha256
   --sha256 <hash>    该版本 win-x64.zip 的 sha256（取自官方 SHASUMS256.txt）
@@ -220,19 +239,20 @@ export async function copyFiles(relPaths, dst, root = ROOT) {
  *
  * 点开头的条目一律不要：`public/assets` 里可能躺着打包机器自己的 `.DS_Store`，它既不属于项目也不该发出去。
  */
-export async function copyDir(src, dst) {
+export async function copyDir(src, dst, { skipDir = null } = {}) {
   let files = 0; let bytes = 0;
-  const walk = async (d, out) => {
+  const walk = async (d, out, rel) => {
     await fsp.mkdir(out, { recursive: true });
     const entries = await fsp.readdir(d, { withFileTypes: true });
     for (const e of entries) {
       if (e.name.startsWith('.')) continue;
+      if (skipDir && rel !== '' && skipDir(rel, e.name)) continue;
       const from = path.join(d, e.name);
       const to = path.join(out, e.name);
       if (e.isSymbolicLink()) continue;
       if (e.isDirectory()) {
         // eslint-disable-next-line no-await-in-loop
-        await walk(from, to);
+        await walk(from, to, rel ? `${rel}/${e.name}` : e.name);
         continue;
       }
       if (!e.isFile()) continue;
@@ -245,7 +265,7 @@ export async function copyDir(src, dst) {
       } catch { /* ignore */ }
     }
   };
-  await walk(src, dst);
+  await walk(src, dst, '');
   return { files, bytes };
 }
 
@@ -418,20 +438,29 @@ export function bundleLaunchers() {
  * 包内说明。带不带便携版 Node 会影响三处措辞（是否需要预装 Node、许可证在哪、目录结构），
  * 所以先算好片段再拼，别在模板里嵌套引号。
  */
-export function bundleReadme({ version, withNode, withVoices = false, voiceLangs = [] }) {
+export function bundleReadme({ version, withNode, withVoices = false, voiceLangs = [], voicePackLangs = [] }) {
   const nodeNeed = withNode
     ? `目标机器**不需要安装 Node**：包内的 \`node\\node.exe\` 就是便携版 Node ${version}。`
     : '这个包**没有带便携版 Node**，请先在这台机器上安装 Node 22 或 24（LTS）。';
   const nodeLicence = withNode ? ' 与 `node\\LICENSE-node.txt`（Node 自己的 MIT 许可证）' : '';
   // The voice lines ship with the assets (`public/assets/audio/voice/**`), so whether this bundle carries them is a
-  // build-time fact — a README that promises them from a checkout without them would be a lie. `voiceLangs` is the same
-  // kind of fact for 多语言配音 (v0.7.1): a bundle with one dub must not advertise a language switch.
-  const dubLine = (Array.isArray(voiceLangs) ? voiceLangs : []).length > 1
+  // build-time fact — a README that promises them from a checkout without them would be a lie. `voiceLangs` (shipped)
+  // and `voicePackLangs` (available as a separate release asset, v0.7.2) are the same kind of fact for 多语言配音.
+  const shipped = Array.isArray(voiceLangs) ? voiceLangs : [];
+  const pack = Array.isArray(voicePackLangs) ? voicePackLangs : [];
+  const dubLine = shipped.length > 1
     ? `
-**${voiceLangs.length} 种配音都在包里**（${voiceLangs.join(' / ')}）：**设置 → 配音语言** 选全局默认，任何干员的
+**${shipped.length} 种配音都在包里**（${shipped.join(' / ')}）：**设置 → 配音语言** 选全局默认，任何干员的
 **干员详情 → 配音** 还能单独换一种（例如中文界面配日文语音），试听就在按钮上。
 `
-    : '';
+    : (pack.length
+      ? `
+**包里只有一种配音**（${shipped.join(' / ') || '默认'}）。其余配音（${pack.join(' / ')}）在同一个 release 的
+\`…-voices-*.zip\` 里：解压后把 \`voice\\\` 覆盖到 \`app\\public\\assets\\audio\\voice\\\` 就装好了，**不用改配置**。
+装好后 **设置 → 配音语言** 选全局默认，任何干员的 **干员详情 → 配音** 还能单独换一种。
+没装也能玩：选了没装的配音时会自动用默认配音那一句，设置里也会标明哪几种没装。
+`
+      : '');
   const voiceNote = withVoices
     ? `
 **角色语音台词已经在包里**（行动出发 / 行动开始 / 选中 / 部署 / 作战中 1-4，以及结算时各自队伍 MVP 的那一句）。
@@ -577,25 +606,35 @@ async function main() {
     }
   }
   console.log(`  · 复制素材与前端库（${ASSET_DIRS.join('、')}）…`);
+  // 多语言配音 (v0.7.2): the bundle carries the manifest's DEFAULT dub only (≈66 MB); the other dubs are published as a
+  // separate voice pack (scripts/make-voice-pack.mjs, attached to the same release) because four dubs are ≈262 MB.
+  // 一个都不带的情况不存在：清单里 voice 那套必须与文件同进同出（见 2b）。
+  const defaultDub = readDefaultDub();
+  const extraDubs = listVoiceDubs().filter((l) => l !== defaultDub);
+  const skipDir = allDubs || !extraDubs.length
+    ? null
+    : (rel, name) => (rel === 'assets/audio/voice' && extraDubs.includes(name));
   let assetFiles = 0; let assetBytes = 0;
   for (const d of ASSET_DIRS) {
     // eslint-disable-next-line no-await-in-loop
-    const s = await copyDir(path.join(ROOT, d), path.join(appDir, d));
+    const s = await copyDir(path.join(ROOT, d), path.join(appDir, d), { skipDir });
     assetFiles += s.files; assetBytes += s.bytes;
   }
   console.log(`    完成：${assetFiles} 个文件 / ${MB(assetBytes)}`);
 
   // 2b) 角色语音台词：0.2.0 的布局是 public/assets/audio/voice/<语言>/<干员>/*.mp3（上游 0.1.x 那套 voice_cn/
   // 目录已经废弃）。靠 data/assets.json 的 audio.voice / audio.voiceLangs 映射才会被客户端采用 —— 两者要么一起进包，
-  // 要么都不进。多语言配音 (v0.7.1)：这里报出包里真有哪几种语言，免得说明书吹了包里没有的东西。
+  // 要么都不进。多语言配音：这里报出包里真有哪几种语言，免得说明书吹了包里没有的东西。
   const voiceDir = path.join(ROOT, 'public', 'assets', 'audio', 'voice');
+  const allDubs = !!o.allDubs;
   const withVoices = fs.existsSync(voiceDir);
-  const voiceDubs = withVoices
-    ? fs.readdirSync(voiceDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort()
-    : [];
+  const voiceDubs = withVoices ? listVoiceDubs().filter((l) => allDubs || !extraDubs.includes(l)) : [];
   console.log(withVoices
     ? `    带上角色语音台词（public/assets/audio/voice/{{${voiceDubs.join(',')}}}；游戏里「设置 → 干员语音」默认 0.8 = 开，「配音语言」逐干员可换）`
     : '    未包含角色语音台词（想打进包里先运行 node tools/fetch-assets.mjs）');
+  if (withVoices && !allDubs && extraDubs.length) {
+    console.log(`    其余配音（${extraDubs.join(' / ')}）走 release 的语音包：node scripts/make-voice-pack.mjs（客户端在选中未安装的配音时回退到默认配音）`);
+  }
 
   // 2c) 3D 棋盘贴图的清单（本机提取过才有）：贴图在 public/assets/local 里，靠这份 JSON 才会被游戏采用。
   const localManifest = path.join(ROOT, LOCAL_ASSET_MANIFEST);
@@ -638,7 +677,13 @@ async function main() {
   }
   // The voice lines are copied as part of `public/assets` above; the README says so only when they are really there
   // (v0.3.0 ships them — see docs/WINDOWS.md), so a checkout without them produces an honest bundle.
-  await fsp.writeFile(path.join(out, 'README-开箱即用.md'), bundleReadme({ version: nodeVersion, withNode: !!o.node, withVoices, voiceLangs: voiceDubs }), 'utf8');
+  await fsp.writeFile(path.join(out, 'README-开箱即用.md'), bundleReadme({
+  version: nodeVersion,
+  withNode: !!o.node,
+  withVoices,
+  voiceLangs: voiceDubs,
+  voicePackLangs: withVoices && !allDubs ? listVoiceDubs().filter((l) => !voiceDubs.includes(l)) : [],
+}), 'utf8');
 
   const total = await dirSize(out);
   console.log(`\n✔ 便携包已生成：${out}\n  ${total.files} 个文件 / ${MB(total.bytes)}`);

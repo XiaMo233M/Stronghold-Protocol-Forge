@@ -302,6 +302,42 @@ describe('operator battle voice', () => {
     }
   });
 
+  test('配音语言 (dubs): a line the chosen dub does not have HERE falls back to the default dub — never silence', async () => {
+    // The release bundle ships the default dub only (the others come as a voice pack), and upstream lacks a line for some
+    // dubs: the manifest still names the dub, so the fetch 404s. The operator must still speak (owner's rule: never
+    // silently drop a sound) — the default dub's line for the same slot plays instead.
+    const fw = fakeWindow();
+    const origFetch = globalThis.fetch;
+    const urls = [];
+    globalThis.fetch = async (u) => {
+      urls.push(String(u));
+      if (String(u).includes('/v/jp/')) return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
+      return { ok: true, arrayBuffer: async () => new ArrayBuffer(8) };
+    };
+    try {
+      const vm = { audio: {
+        voiceLang: 'cn',
+        voice: { char_a: { start: '/v/cn/a_start.mp3' } },
+        voiceLangs: { jp: { char_a: { start: '/v/jp/a_start.mp3' } } },
+        sfx: { ui: {}, battle: {}, units: {} },
+      } };
+      const a = new AudioManager({ win: fw.win, getManifest: () => vm, voiceLangOf: () => 'jp' });
+      a.voiceGate = new VoiceGate({ gapMs: 0 });
+      a.install();
+      fw.fire('pointerdown');
+      await new Promise((r) => setTimeout(r, 10));
+      assert.equal(a.voice('char_a', 'start', { unitKey: 1 }), true);
+      await new Promise((r) => setTimeout(r, 60));
+      assert.ok(asked(urls, '/v/jp/a_start.mp3'), 'the chosen dub is tried first');
+      assert.equal(a.voiceNode?.url, '/v/cn/a_start.mp3', 'the default dub plays instead of nothing');
+      // the gate is released with the fallen-back line, so the next line may start
+      a._stopVoice();
+      assert.equal(a.voice('char_a', 'start', { unitKey: 2, lang: 'cn' }), true);
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
   test('settings: 配音语言 per operator (voiceLangFor / sanitize / availableVoiceLangs)', async () => {
     const { sanitizeSettings, voiceLangFor, availableVoiceLangs, sanitizeVoiceLangByChar, DEFAULT_SETTINGS } = await import('../../public/js/ui/gameLogic/settings.js');
     assert.equal(DEFAULT_SETTINGS.voiceLang, 'cn');

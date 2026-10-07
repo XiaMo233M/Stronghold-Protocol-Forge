@@ -11,6 +11,7 @@ import { createStore, useStore, loadPref, savePref } from '../store.js';
 import { sanitizeSettings, HOTKEY_ACTIONS, DEFAULT_HOTKEYS, hotkeyLabel, rebindHotkey, isDefaultHotkeys, captureHotkey, availableVoiceLangs } from './gameLogic.js';
 import { VOICE_LANG_NAMES } from '../../../shared/constants.js';
 import { data, useData } from '../data.js';
+import { dubsInstalled, dubsMissing } from '../voiceDubs.js';
 import { audio } from '../audio.js';
 import { openGuide } from './guide.js';
 import { detectFeatures } from './device.js';
@@ -149,19 +150,25 @@ function HotkeySection({ keys, touchUi }) {
 /**
  * 配音语言 (v0.7.1): the dub every operator speaks unless 干员详情 → 配音 overrides it for one of them.
  *
- * Only the dubs this build actually downloaded are offered (audio.voiceLangs beside the default audio.voice) — a
- * checkout with Chinese only shows the row as a note instead of buttons that could never make a sound. 混搭 is the
- * point (owner's request 「不同干员可以切换不同的配音语言」), so the row is a radiogroup and never a 全部 hero.
+ * The dubs the manifest carries (audio.voiceLangs beside the default audio.voice), minus the ones this install does not
+ * really have (public/js/voiceDubs.js: a release bundle ships the default dub only and the others come as a voice pack
+ * from the release page). 混搭 is the point (owner's request 「不同干员可以切换不同的配音语言」), so the row is a
+ * radiogroup and never a 全部 hero — and a missing dub is named instead of silently offered.
  * @param {{ value: string }} props the settings' voiceLang
  */
 function VoiceLangRow({ value }) {
   useData('assets');
-  const langs = availableVoiceLangs(data.get('assets'));
+  const all = availableVoiceLangs(data.get('assets'));
+  const langs = dubsInstalled(all);
+  const absent = dubsMissing(all);
+  const packHint = absent.length
+    ? html`<p class="set-hint set-voice-lang__pack">${t('未安装的配音：{langs}。从 release 页下载语音包，解压到 app/public/assets/audio/voice/ 即可（清单已经列好，不用改配置）。', { langs: absent.map((l) => VOICE_LANG_NAMES[l] || l).join(' / ') })}</p>`
+    : null;
   if (langs.length <= 1) {
     return html`<div class="set-row">
       <span class="set-row__label">${t('配音语言')}<${MicroLabel}>VOICE LANGUAGE<//></span>
-      <span class="set-hint set-voice-lang__only">${t('本机只装了默认配音（{lang}）。想要多语言配音，先运行：node tools/fetch-assets.mjs --voice-langs=cn,jp,en,kr', { lang: VOICE_LANG_NAMES[langs[0]] || langs[0] })}</span>
-    </div>`;
+      <span class="set-hint set-voice-lang__only">${t('本机只装了默认配音（{lang}）。想要多语言配音，先运行：node tools/fetch-assets.mjs --voice-langs=cn,jp,en,kr，或从 release 页下载语音包', { lang: VOICE_LANG_NAMES[langs[0]] || langs[0] })}</span>
+    </div>${packHint}`;
   }
   return html`<div class="set-row">
     <span class="set-row__label">${t('配音语言')}<${MicroLabel}>VOICE LANGUAGE<//></span>
@@ -170,7 +177,7 @@ function VoiceLangRow({ value }) {
         class=${value === l ? 'is-on' : ''} onClick=${() => updateSettings({ voiceLang: l })}>${VOICE_LANG_NAMES[l] || l}</button>`)}
     </div>
   </div>
-  <p class="set-hint">${t('单个干员可以在「干员详情 → 配音」里改成别的语言。')}</p>`;
+  <p class="set-hint">${t('单个干员可以在「干员详情 → 配音」里改成别的语言。')}</p>${packHint}`;
 }
 
 /**

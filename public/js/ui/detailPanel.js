@@ -36,6 +36,7 @@ import { html, Icon, TierChip, MicroLabel, Button, confirmDialog, useTicker } fr
 import { Img, RichText, UnitThumb, BondGlyph, GIcon, diyToken } from './gameComponents.js';
 import { attackInterval, rangeGridBox, fmtNum, tileKey, chessLoadout, nextThreshold, bondTier, briefingBondTip, pieceBondIds, grantedBonds, morphPairings, ownStandIn, standInOf, standInLoadout, standInLabel, standInTip, standInForText, ownDiyRecord, ownDiyPick, diyRecordFor, pickGetter, availableVoiceLangs } from './gameLogic.js';
 import { updateSettings, settingsStore, useSettings } from './settings.js';
+import { dubsInstalled } from '../voiceDubs.js';
 import { VOICE_LANG_NAMES } from '../../../shared/constants.js';
 import { chessPortraitUrl, skillIconUrl, skillRecordIconUrl, profIconUrl, subProfIconUrl, itemIconUrl, enemyIconUrl, tokenAvatarUrl, factionIconUrl, uiUrl, moduleTypeIconUrl } from './assetUrls.js';
 import { abilityRows } from './abilityLines.js';
@@ -480,7 +481,7 @@ export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bond
   // heard where it is made. `voiceSettings` is passed by DetailPanel (which subscribes to the settings store): this
   // function is also called directly as a plain function by many tests, so it must not read a hook itself.
   const voiceChar = body?.charId || c.charId || null;
-  const voiceLangs = availableVoiceLangs(m);
+  const voiceLangs = dubsInstalled(availableVoiceLangs(m));
   const ownVoice = (voiceSettings?.voiceLangByChar || {})[voiceChar] || null;
   blocks.voice = voiceChar && voiceLangs.length > 1 ? html`<${Section} key="voice" title=${t('配音')} micro="VOICE" class="dsec--voice">
       <div class="dvoice set-seg" role="radiogroup" aria-label=${t('配音语言')}>

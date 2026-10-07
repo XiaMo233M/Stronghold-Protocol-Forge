@@ -865,19 +865,23 @@ export class AudioManager {
       const line = voiceLinesFor(this.getManifest(), charId, slot, lang);
       const url = Array.isArray(line) ? line[Math.floor(Math.random() * line.length)] : line;
       if (typeof url !== 'string' || !url) return false;
+      // The default dub's own line for this slot, played when the chosen dub's file is not on this machine (see
+      // _playVoice): with no extra dub installed, a player who picked 日文 still hears the operator instead of nothing.
+      const fallbackLine = lang ? voiceLinesFor(this.getManifest(), charId, slot, null) : null;
+      const fallback = Array.isArray(fallbackLine) ? fallbackLine[Math.floor(Math.random() * fallbackLine.length)] : fallbackLine;
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
       const verdict = this.voiceGate.request(slot, o.unitKey ?? null, now);
       if (verdict === 'drop') return false;
       if (verdict === 'preempt') this._stopVoice();
       this.voiceGate.start(slot, o.unitKey ?? null, now);
       const token = ++this.voiceToken;
-      this._playVoice(url, token, o.volume);
+      this._playVoice(url, token, o.volume, typeof fallback === 'string' && fallback !== url ? fallback : null);
       return true;
     } catch (err) { this._warn('voice', err); return false; }
   }
 
   /** Fetch/decode and start one voice line through the voice channel. */
-  _playVoice(url, token, volume) {
+  _playVoice(url, token, volume, fallback = null) {
     // `token` is the line's own `voiceToken`. Every deferred step below — the decode, a failed fetch, `onended` and the
     // safety timer — can land AFTER this line was taken over or stopped: `voiceToken` has moved on and the channel then
     // belongs to the line that replaced it. So each step re-checks its token and, when it is stale, touches NOTHING:
@@ -886,7 +890,19 @@ export class AudioManager {
     // on #73).
     this._buffer(url).then((buf) => {
       if (token !== this.voiceToken) return;   // taken over / stopped while it decoded: not ours to release
-      if (!buf || !this.ctx || !this.voiceGain) { this.voiceGate.release(); return; }
+      if (!buf) {
+        // The chosen dub's own file is not on this machine (a bundle that ships only the default dub, a voice pack that
+        // was not installed, or a line upstream lacks for that dub): play the DEFAULT dub's line for the same slot
+        // instead — the owner's rule, never silently drop a sound. The gate is still ours, so release it only after the
+        // fallback had its chance (a stale fallback releases nothing: its token check fails).
+        if (fallback && fallback !== url) {
+          this._playVoice(fallback, token, volume, null);
+          return;
+        }
+        this.voiceGate.release();
+        return;
+      }
+      if (!this.ctx || !this.voiceGain) { this.voiceGate.release(); return; }
       try {
         const src = this.ctx.createBufferSource();
         src.buffer = buf;
