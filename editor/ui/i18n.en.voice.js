@@ -34,6 +34,16 @@ export const EN_VOICE = Object.freeze({
   // ---- 中栏：已配的语音 ----
   '左边选一个工坊包，或先用干员编辑器建一个。': 'Pick a workshop pack on the left, or create one in the operator editor first.',
   '「{0}」的语音': 'Voice lines for “{0}”',
+  // ---- 中栏：配音语言（默认配音 + voiceLangs 里的其它语种） ----
+  // 语言名（中文 / 日本語 / English / 한국어，shared/constants.js VOICE_LANG_NAMES）是 data，按母语写法显示，不翻。
+  '配音语言': 'Voice language',
+  '默认配音': 'default dub',
+  '本包已声明 {0} 种配音语言': '{0} dubbed language(s) declared by this pack',
+  '编辑 {0} 这一份配音（voiceLangs.{1}）': 'Edit the {0} table (voiceLangs.{1})',
+  '默认配音写在同一份 pack.json 的 voices 字段里（清单的 audio.voiceLang 指明它是哪一种）': 'The default dub lives in the voices field of the same pack.json (the manifest’s audio.voiceLang says which one it is)',
+  '这里的语种会写进 pack.json 的 voiceLangs：只写你真的配了台词的语种，默认配音「{0}」照旧写在 voices 里，所以它不能作为 voiceLangs 的键（加载器会报 VOICE_LANG_DEFAULT）。': 'These languages are written to voiceLangs in pack.json: only the ones you really recorded lines for. The default dub “{0}” stays in voices, so it can never be a key of voiceLangs (the loader reports VOICE_LANG_DEFAULT).',
+  '这个包还没有「{0}」配音。右边选干员、槽位和文件，加一条就声明了这个语种。': 'This pack has no “{0}” dub yet. Pick an operator, a slot and a file on the right — adding one line declares this language.',
+  '当前配音': 'Current dub',
   '这个包还没有 assets/ 文件夹，所以还不能写 voices：先建 workshop/{0}/assets/ 并把音频文件放进去。': 'This pack has no assets/ folder yet, so voices cannot be written: create workshop/{0}/assets/ and put the audio files there.',
   '有 assets/ 就必须在 pack.json 里声明 license，否则整个包会被加载器拒绝（ASSETS_NEED_LICENSE）。': 'With an assets/ folder the pack must declare a license in pack.json, or the loader rejects the whole pack (ASSETS_NEED_LICENSE).',
   'pack.json 现在会被加载器拒绝：[{0}] {1}': 'pack.json is currently rejected by the loader: [{0}] {1}',
@@ -71,6 +81,8 @@ export const EN_VOICE = Object.freeze({
   '试听失败：{0}（{1}）': 'Preview failed: {0} ({1})',
   '先填干员 id。': 'Fill in the operator id first.',
   '先选一个槽位。': 'Pick a slot first.',
+  // 页面自己先挡一次「语种不在 VOICE_LANGS 里」（服务端也会挡，文案对齐加载器的错误码）
+  '配音语言不合法（VOICE_LANG_UNKNOWN）：可用配音是 {0}': 'Not a valid voice language (VOICE_LANG_UNKNOWN): the available dubs are {0}',
   '{0} · {1} · {2}：现在 {3} 条': '{0} · {1} · {2}: now {3} line(s)',
   '先选一个文件（assets/ 下的相对路径）。': 'Pick a file first (a relative path under assets/).',
   '这个槽位已经有 "{0}" 了。': 'This slot already has "{0}".',

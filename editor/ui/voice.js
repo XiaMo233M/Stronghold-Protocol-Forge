@@ -10,10 +10,16 @@
 // (VOICE_SLOTS in shared/constants.js), the extension allowlist (WORKSHOP_ASSET_TYPES in server/index.js) and the preview
 // URL prefix. A page-local list would drift — and a drifted list means a line that saves here and never plays in the game.
 //
+// 包内单独配的语种走 `voiceLangs`（多语言配音）：同一套 `<干员id> → <槽位> → [路径]` 表，一个**非默认**配音一份，
+// 保存时经 `/api/packs/<包>/voices` 的 `lang` 字段决定写哪一份。默认配音照旧只认 `voices`（清单的 audio.voiceLang），
+// 所以语言选择里没有它 —— 游戏加载器遇到 voiceLangs 里的默认键会报 VOICE_LANG_DEFAULT，界面不该给作者这个选项。
+//
 // 界面文案走 i18n.js 的 t()（键就是中文原文，词条在 i18n.en.voice.js）。**数据不翻**：干员 id 与文件名、路径、
 // 扩展名、枚举值（start/select/…）与错误码，这些会写进用户的 pack.json，翻了就写错了。
+// 语种码（cn/jp/en/kr）也是数据，显示用的语言名直接取 VOICE_LANG_NAMES（各语言用母语写法，本来就不翻）。
 
 import { t, mountI18n } from './i18n.js';
+import { VOICE_LANGS, DEFAULT_VOICE_LANG, VOICE_LANG_NAMES } from '../../shared/constants.js';
 
 const $ = (s) => document.querySelector(s);
 
@@ -49,7 +55,8 @@ function slotLabelText(slot) {
 }
 const slotLabel = (s) => { const n = slotLabelText(s); return n ? `${s} — ${n}` : s; };
 
-const state = { data: null, packId: null, charId: '', slot: '', file: '', message: null, busy: false };
+/** 作者现在在编辑哪一份配音表：默认配音（`voices`）或 `voiceLangs` 里的某个语种。 */
+const state = { data: null, packId: null, lang: DEFAULT_VOICE_LANG, charId: '', slot: '', file: '', message: null, busy: false };
 
 /** One shared player: 试听 is a click on a line, so a second click replaces whatever was playing. */
 const player = new Audio();
@@ -57,8 +64,28 @@ const player = new Audio();
 const packOf = (id = state.packId) => (state.data?.packs ?? []).find((p) => p.id === id) ?? null;
 /** The URLs in this page are the game client's own: /workshop-assets/<pack>/<assets/ 内的路径>, each segment encoded. */
 const mediaUrl = (packId, p) => `${state.data.mediaPrefix}${packId}/${String(p).split('/').map(encodeURIComponent).join('/')}`;
-/** The declared lines of one slot, as an array — the exact list a save has to send back (POST sets the whole slot). */
-const slotLines = (charId, slot) => (packOf()?.voices?.[charId]?.[slot] ?? []).slice();
+/** 一个语种的显示名：各语言用母语写法（VOICE_LANG_NAMES），默认配音说清楚它是什么。 */
+const langLabel = (lang) => (lang === DEFAULT_VOICE_LANG ? t('默认配音') : VOICE_LANG_NAMES[lang] ?? lang);
+/**
+ * The declared lines of one slot, as an array — the exact list a save has to send back (POST sets the whole slot).
+ * `lang` 是 `state.lang`：默认配音读 `voices`，其它语种读 `voiceLangs[lang]`。
+ */
+const linesIn = (lang, charId, slot) => (lang === DEFAULT_VOICE_LANG
+  ? packOf()?.voices?.[charId]?.[slot]
+  : packOf()?.voiceLangs?.[lang]?.[charId]?.[slot])?.slice() ?? [];
+const slotLines = (charId, slot) => linesIn(state.lang, charId, slot);
+/** 这个包已经声明了哪些非默认配音（服务端已经丢掉空表，所以这里就是「有台词的语种」）。 */
+const declaredLangs = () => Object.keys(packOf()?.voiceLangs ?? {});
+/** 一个包全部语种的台词条数（左栏与右上角的汇总用）。 */
+const linesOfPack = (p) => Object.values(p.voices ?? {}).reduce((a, slots) => a + Object.values(slots).reduce((b, l) => b + l.length, 0), 0)
+  + Object.values(p.voiceLangs ?? {}).reduce((a, chars) => a + Object.values(chars).reduce((b, slots) => b + Object.values(slots).reduce((c, l) => c + l.length, 0), 0), 0);
+/** 当前这一份配音表里的台词条数（右栏「加一条语音」的开头写着它）。 */
+const activeLines = () => {
+  const p = packOf();
+  if (!p) return 0;
+  const table = state.lang === DEFAULT_VOICE_LANG ? p.voices ?? {} : p.voiceLangs?.[state.lang] ?? {};
+  return Object.values(table).reduce((a, slots) => a + Object.values(slots).reduce((b, l) => b + l.length, 0), 0);
+};
 const fileInfo = (p) => (packOf()?.files ?? []).find((f) => f.path === p) ?? null;
 
 function setMessage(kind, text) {
@@ -83,7 +110,7 @@ function renderPackList() {
     return;
   }
   for (const p of packs) {
-    const n = Object.values(p.voices ?? {}).reduce((a, slots) => a + Object.values(slots).reduce((b, l) => b + l.length, 0), 0);
+    const n = linesOfPack(p);
     const el = document.createElement('div');
     el.className = `item${p.id === state.packId ? ' on' : ''}`;
     el.innerHTML = `<div class="n">${p.name}</div>`
@@ -101,6 +128,51 @@ function renderPackList() {
 
 // ---- 中栏：这个包已经配了哪些语音 ---------------------------------------------------------------------------------
 
+/**
+ * 语言选择：默认配音 + `VOICE_LANGS` 里除默认配音之外的每一种。已经声明过的语种带上下文里那几句话的字样，
+ * 所以「哪些语种已经配了」一眼能看出来。返回这一块本身，由 renderLines 决定放在哪。
+ */
+function renderLangPicker(p) {
+  const box = document.createElement('div'); box.className = 'panel langs';
+  const head = document.createElement('div'); head.className = 'row langhead';
+  head.append(Object.assign(document.createElement('span'), { className: 'langtitle', textContent: t('配音语言') }));
+  const declared = declaredLangs();
+  if (declared.length) {
+    head.append(Object.assign(document.createElement('span'), { className: 'dim', textContent: t('本包已声明 {0} 种配音语言', declared.length) }));
+  }
+  box.append(head);
+  const chips = document.createElement('div'); chips.className = 'row';
+  for (const lang of [DEFAULT_VOICE_LANG, ...VOICE_LANGS.filter((l) => l !== DEFAULT_VOICE_LANG)]) {
+    const btn = document.createElement('button');
+    btn.className = `chip${lang === state.lang ? ' on' : ''}`;
+    btn.setAttribute('aria-pressed', String(lang === state.lang));
+    const count = lang === DEFAULT_VOICE_LANG
+      ? Object.values(p.voices ?? {}).reduce((a, slots) => a + Object.values(slots).reduce((b, l) => b + l.length, 0), 0)
+      : Object.values(p.voiceLangs?.[lang] ?? {}).reduce((a, slots) => a + Object.values(slots).reduce((b, l) => b + l.length, 0), 0);
+    const name = document.createElement('span'); name.textContent = langLabel(lang);
+    btn.append(name);
+    if (lang !== DEFAULT_VOICE_LANG) btn.append(Object.assign(document.createElement('code'), { className: 'dim', textContent: lang }));
+    if (count) btn.append(Object.assign(document.createElement('span'), { className: 'dim', textContent: t('{0} 条', count) }));
+    if (lang !== DEFAULT_VOICE_LANG && !declared.includes(lang)) btn.append(Object.assign(document.createElement('span'), { className: 'tag', textContent: t('未声明') }));
+    btn.title = lang === DEFAULT_VOICE_LANG
+      ? t('默认配音写在同一份 pack.json 的 voices 字段里（清单的 audio.voiceLang 指明它是哪一种）')
+      : t('编辑 {0} 这一份配音（voiceLangs.{1}）', langLabel(lang), lang);
+    btn.addEventListener('click', () => {
+      if (state.lang === lang) return;
+      state.lang = lang;
+      state.message = null;
+      renderAll();
+    });
+    chips.append(btn);
+  }
+  box.append(chips);
+  box.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('这里的语种会写进 pack.json 的 voiceLangs：只写你真的配了台词的语种，默认配音「{0}」照旧写在 voices 里，所以它不能作为 voiceLangs 的键（加载器会报 VOICE_LANG_DEFAULT）。', DEFAULT_VOICE_LANG),
+  }));
+  return box;
+}
+
 function renderLines() {
   const box = $('#lines');
   box.replaceChildren();
@@ -111,6 +183,7 @@ function renderLines() {
     return;
   }
   box.append(h(t('「{0}」的语音', p.name)));
+  box.append(renderLangPicker(p));
 
   if (!p.hasAssets) {
     const b = document.createElement('div');
@@ -131,11 +204,15 @@ function renderLines() {
     }));
   }
 
-  const charIds = Object.keys(p.voices ?? {});
+  // 下面显示与编辑的始终是**当前选中的那一份配音表**：默认配音是 `voices`，其它语种是 `voiceLangs[lang]`。
+  const table = state.lang === DEFAULT_VOICE_LANG ? (p.voices ?? {}) : (p.voiceLangs?.[state.lang] ?? {});
+  const charIds = Object.keys(table);
   if (!charIds.length) {
     box.append(Object.assign(document.createElement('p'), {
       className: 'hint',
-      textContent: t('这个包还没有语音。右边选干员、槽位和文件，就能加一条。'),
+      textContent: state.lang === DEFAULT_VOICE_LANG
+        ? t('这个包还没有语音。右边选干员、槽位和文件，就能加一条。')
+        : t('这个包还没有「{0}」配音。右边选干员、槽位和文件，加一条就声明了这个语种。', langLabel(state.lang)),
     }));
   }
   const known = new Set((state.data.operators ?? []).map((o) => o.id));
@@ -147,7 +224,7 @@ function renderLines() {
       head.append(Object.assign(document.createElement('span'), { className: 'tag warn', textContent: t('不是已知干员 id') }));
     }
     card.append(head);
-    for (const [slot, lines] of Object.entries(p.voices[charId])) {
+    for (const [slot, lines] of Object.entries(table[charId])) {
       const s = document.createElement('div'); s.className = 'slot';
       const sh = document.createElement('div'); sh.className = 'slothead';
       const bad = !(state.data.slots ?? []).includes(slot);
@@ -221,6 +298,11 @@ function renderSide() {
     return;
   }
   if (!state.slot) state.slot = state.data.slots[0] ?? '';
+
+  // 右栏改的永远是当前选中的那一份配音表，所以开头先把「现在改的是哪一份」写清楚
+  form.append(Object.assign(document.createElement('label'), {
+    textContent: `${t('当前配音')} — ${langLabel(state.lang)}${state.lang === DEFAULT_VOICE_LANG ? '' : `（voiceLangs.${state.lang}）`} · ${t('{0} 条', activeLines())}`,
+  }));
 
   const opInput = document.createElement('input');
   opInput.setAttribute('list', 'opChoices');
@@ -309,7 +391,7 @@ function renderSide() {
 function renderAll() {
   if (!state.data) return;
   const packs = state.data.packs ?? [];
-  const lines = packs.reduce((a, p) => a + Object.values(p.voices ?? {}).reduce((b, slots) => b + Object.values(slots).reduce((c, l) => c + l.length, 0), 0), 0);
+  const lines = packs.reduce((a, p) => a + linesOfPack(p), 0);
   $('#rootPath').textContent = packs.length ? t('{0} 个工坊包 · {1} 条语音', packs.length, lines) : t('还没有工坊包');
   renderPackList(); renderLines(); renderSide();
 }
@@ -318,14 +400,19 @@ function renderAll() {
 
 async function saveSlot(charId, slot, paths) {
   if (!state.packId) return;
+  // 默认配音（voices）之外只有 VOICE_LANGS 里的语种能写；VOICE_LANGS 里也没有默认配音，所以它不该走到这里
+  if (state.lang !== DEFAULT_VOICE_LANG && !VOICE_LANGS.includes(state.lang)) {
+    return setMessage('error', t('配音语言不合法（VOICE_LANG_UNKNOWN）：可用配音是 {0}', VOICE_LANGS.join('、')));
+  }
   if (!charId) return setMessage('error', t('先填干员 id。'));
   if (!slot) return setMessage('error', t('先选一个槽位。'));
   state.busy = true; renderSide();
   try {
-    const r = await api(`/api/packs/${encodeURIComponent(state.packId)}/voices`, { method: 'POST', body: { charId, slot, paths } });
+    const r = await api(`/api/packs/${encodeURIComponent(state.packId)}/voices`, { method: 'POST', body: { charId, slot, paths, lang: state.lang } });
     state.message = {
       kind: 'ok',
       text: t('{0} · {1} · {2}：现在 {3} 条', r.pack, r.charId, r.slot, r.paths.length)
+        + (state.lang === DEFAULT_VOICE_LANG ? '' : ` · ${langLabel(state.lang)}`)
         + (Array.isArray(r.warnings) && r.warnings.length ? t('；⚠ {0}', r.warnings.join('；')) : ''),
     };
     await load();

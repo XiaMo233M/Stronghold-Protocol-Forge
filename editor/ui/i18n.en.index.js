@@ -184,7 +184,6 @@ export const EN_INDEX = Object.freeze({
   '投射物 projectile': 'Projectile (projectile)',
   '能否打空中 canHitFly': 'Hits flying (canHitFly)',
   '记录里会写：伤害类型 {0} · 攻击方式 {1} · 投射物 {2} · 可打空中 {3}': 'Written into the record: damage {0} · attack {1} · projectile {2} · hits flying {3}',
-  '（不填：攻击方式与伤害类型只按职业推导）': '(empty: attack kind and damage type come from the profession alone)',
 
   // ---- 模组 ----
   '（一个模组都没有：精锐记录不带模组，玩家在载入界面也挑不到任何模组）': '(No modules at all: the elite record carries none, and the loadout screen offers none)',

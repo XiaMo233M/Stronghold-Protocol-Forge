@@ -57,7 +57,7 @@ import { createPlaytest } from './playtest.mjs';
 // copy: a file the editor accepts but that route refuses is a line that 404s in the game with nothing reporting it.
 import { WORKSHOP_ASSET_TYPES } from '../server/index.js';
 import { normalizePackManifest, WORKSHOP_MEDIA_PREFIX } from '../shared/workshop.js';
-import { VOICE_SLOTS, DIFFICULTIES } from '../shared/constants.js';
+import { VOICE_SLOTS, DIFFICULTIES, VOICE_LANGS, DEFAULT_VOICE_LANG } from '../shared/constants.js';
 import { withForgeMeta, stampForgeHeader, parseForgeHeader } from '../shared/forgeNotice.js';
 import {
   HOOK_EVENTS, KIT_FORBIDDEN_GLOBALS, validateKit, kitErrors, hookNamesInSource,
@@ -93,6 +93,8 @@ const DOC_TYPES = new Set(['.md']);
 const IMAGE_EXT_RE = /\.(png|jpe?g|webp|gif)$/i;
 /** 盟约 id 的字符集（与 shared/workshop.js 的 `BOND_ICON_BAD_ID` 同一份规则，避免两处漂移）。 */
 const BOND_ICON_ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
+/** 装备图标 id 的字符集（与 shared/workshop.js 的 `RECORD_ID_RE` / `ITEM_ICON_BAD_ID` 同一份规则，避免两处漂移）。 */
+const ITEM_ICON_ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
 
 const readJson = (p, fallback = null) => {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return fallback; }
@@ -813,6 +815,23 @@ function bondPackState(root, packId, officialBondIds) {
 }
 
 /**
+ * 一个包的装备图标状态（装备页「本包自带的图标」那一段用）：`itemIcons` 原样读出（页面要能把校验器拒绝的那条也
+ * 显示出来，好让作者删掉它），`iconFiles` 是这台机器上这个包 `assets/` 里真的有的图片 —— 与盟约图标那一页同一套
+ * （bondPackState.iconFiles），页面只让作者从里面挑，挑不到不存在的文件。
+ */
+function itemIconPackState(root, packId) {
+  const manifest = readJson(path.join(root, packId, 'pack.json'), null);
+  return {
+    id: packId,
+    itemIcons: (manifest?.itemIcons && typeof manifest.itemIcons === 'object' && !Array.isArray(manifest.itemIcons)) ? { ...manifest.itemIcons } : {},
+    iconFiles: packAssetFiles(root, packId)
+      .filter((f) => f.serveable && IMAGE_EXT_RE.test(f.path))
+      .map((f) => f.path)
+      .sort(),
+  };
+}
+
+/**
  * 从一个包的 `bond-specs/` 重新生成 `bonds.json`，**保留没有 spec 拥有的记录**（手写或 CLI 写的不会被毁掉）。
  * 一条无法派生的 spec 不拥有任何记录（与干员那条同一个理由：否则一次无关的保存会删掉别人的数据）。
  */
@@ -861,6 +880,12 @@ function regenerateBonds(root, packId, dataDir, dropIds = [], ctx = {}) {
 const VOICE_ASSETS_DIR = 'assets';
 /** The charset shared/workshop.js enforces on a `voices` key (`VOICE_BAD_CHAR_ID`) — the same one, so no drift. */
 const VOICE_CHAR_ID_RE = /^[A-Za-z0-9_\-]{1,64}$/;
+/**
+ * 非默认配音（`VOICE_LANGS` 去掉 `DEFAULT_VOICE_LANG`）：`voiceLangs` 里合法的键，也是语音页语言选择里合法的一项。
+ * 默认配音**不在**这张表里 —— 它写的是同一个文件里的 `voices` 字段，而游戏加载器遇到 `voiceLangs` 里的默认键会报
+ * VOICE_LANG_DEFAULT，所以界面不许把默认配音当成一个可声明的语种。
+ */
+const VOICE_OTHER_LANGS = VOICE_LANGS.filter((l) => l !== DEFAULT_VOICE_LANG);
 /** A pack's art folder is browsed only to OFFER files; a huge one must not become a huge response. */
 const MAX_VOICE_ASSET_FILES = 500;
 /** The audio half of the pack-media allowlist: what the editor's own preview route may serve (the game serves all of it). */
@@ -926,10 +951,11 @@ function decodePathSegments(segments) {
 }
 
 /**
- * Why a string may not be used as a voice line, in Chinese for the form — or null when it is acceptable.
- * The same rule the /workshop-assets route (and `VOICE_PATH_UNSAFE`) applies: relative, inside `assets/`, no traversal.
+ * Why a string may not be used as a pack asset path, in Chinese for the form — or null when it is acceptable.
+ * 语音台词与装备图标共用的路径规则（两个端点都只接受包内 `assets/` 下的相对路径），与 /workshop-assets 路由
+ * （以及加载器的 `VOICE_PATH_UNSAFE`）逐条一致：相对路径、位于 `assets/` 内、不许穿越。
  */
-function voicePathProblem(p) {
+function packAssetPathProblem(p) {
   if (typeof p !== 'string' || !p) return '必须是非空字符串';
   if (p.startsWith('/')) return '不能以 / 开头（路径相对包的 assets/ 文件夹）';
   if (p.includes('\\')) return '不能含反斜杠（请用 / 分隔）';
@@ -941,6 +967,68 @@ function voicePathProblem(p) {
   // 服务端的素材路由会拒绝以点开头的段，所以这种文件存在也播放不了 —— 在这里就说清楚，而不是让作者去猜
   if (segments.some((s) => s.startsWith('.'))) return '不能有以点开头的隐藏文件或文件夹';
   return null;
+}
+
+/**
+ * 请求里的配音语言（POST 正文的 `lang`、DELETE 的 `?lang=`）解析成 `voiceLangs` 的键：默认配音（以及省略）写的是
+ * 同一个文件里的 `voices`，所以没有键、返回 null。
+ *
+ * 语言选择的候选就是 `VOICE_LANGS` 原样，这里只是不让绕过界面的请求写出一个会被加载器拒绝的清单：不是
+ * `VOICE_LANGS` 里的一员 → VOICE_LANG_UNKNOWN（同 shared/workshop.js 的错误码）。默认配音**不是**拒绝，而是
+ * 「写 `voices` 那一份」——界面上的「默认配音」这一项就是这么走的；清单里真出现 `voiceLangs["cn"]` 时，加载器
+ * 的 VOICE_LANG_DEFAULT 会照常报给作者（页面显示 pack.json 被拒的那条横幅）。
+ * @param {unknown} value
+ * @returns {string|null}
+ */
+function voiceLangKey(value) {
+  const lang = value === undefined || value === null || value === '' ? DEFAULT_VOICE_LANG : String(value);
+  if (lang === DEFAULT_VOICE_LANG) return null;
+  if (!VOICE_LANGS.includes(lang)) {
+    throw refuse(400, `配音语言不合法（VOICE_LANG_UNKNOWN）：可用配音是 ${VOICE_LANGS.join('、')}`);
+  }
+  return lang;
+}
+
+/**
+ * `voices` / `voiceLangs[lang]` 一句话的阅读器：原样读出 `{ <charId>: { <slot>: [路径…] } }`（不去判断合法性——
+ * 页面的职责正是把校验器会拒绝的那条也显示出来，好让作者能删掉它），只把「单条字符串」这种清单允许的简写
+ * 摊成数组，因为页面编辑的一直是数组。
+ * @param {unknown} table
+ * @returns {Record<string, Record<string, string[]>>}
+ */
+function rawVoiceTable(table) {
+  /** @type {Record<string, Record<string, string[]>>} */
+  const out = {};
+  if (!table || typeof table !== 'object' || Array.isArray(table)) return out;
+  for (const [charId, slots] of Object.entries(table)) {
+    if (!slots || typeof slots !== 'object' || Array.isArray(slots)) continue;
+    const clean = {};
+    for (const [slot, files] of Object.entries(slots)) {
+      // the single-string shorthand is legal in the manifest; it is shown as a list because that is what the page edits
+      clean[slot] = (Array.isArray(files) ? files : [files]).filter((f) => typeof f === 'string');
+    }
+    out[charId] = clean;
+  }
+  return out;
+}
+
+/**
+ * 一个包声明的全部非默认配音：`{ <lang>: { <charId>: { <slot>: [路径…] } } }`。只认 `VOICE_LANGS` 里、且不是默认配音
+ * 的键（`voiceLangs` 的键不允许是默认配音），并且**丢掉空表**——没有台词的 `voiceLangs[lang]` 会被加载器拒绝，
+ * 页面也因此不该显示成「已声明」。
+ */
+function voiceLangTables(manifest) {
+  const raw = manifest && manifest.voiceLangs && typeof manifest.voiceLangs === 'object' && !Array.isArray(manifest.voiceLangs)
+    ? manifest.voiceLangs : {};
+  /** @type {Record<string, Record<string, Record<string, string[]>>>} */
+  const out = {};
+  for (const [lang, table] of Object.entries(raw)) {
+    if (!VOICE_OTHER_LANGS.includes(lang)) continue;
+    const chars = rawVoiceTable(table);
+    const nonEmpty = Object.fromEntries(Object.entries(chars).filter(([, slots]) => Object.keys(slots).length));
+    if (Object.keys(nonEmpty).length) out[lang] = nonEmpty;
+  }
+  return out;
 }
 
 /**
@@ -995,32 +1083,21 @@ function voiceOperatorChoices(root, official, packId = null) {
 /**
  * One pack's voice state: the declaration as WRITTEN (so the page can remove a line the validator refuses), the files
  * that really exist, and the manifest validator's own verdict — the page never re-implements the format rules.
+ * 两种配音都在这里：默认配音是 `voices`，包内单独配的语种是 `voiceLangs`（只列非默认配音）。
  */
 function voicePackState(root, packId) {
   const packDir = path.join(root, packId);
   const manifest = readJson(path.join(packDir, 'pack.json'), null);
   const hasAssets = fs.existsSync(path.join(packDir, VOICE_ASSETS_DIR));
   const checked = manifest === null ? null : normalizePackManifest(manifest, packId, { hasAssets });
-  const rawVoices = manifest && manifest.voices && typeof manifest.voices === 'object' && !Array.isArray(manifest.voices)
-    ? manifest.voices : {};
-  /** @type {Record<string, Record<string, string[]>>} */
-  const voices = {};
-  for (const [charId, slots] of Object.entries(rawVoices)) {
-    if (!slots || typeof slots !== 'object' || Array.isArray(slots)) continue;
-    const clean = {};
-    for (const [slot, files] of Object.entries(slots)) {
-      // the single-string shorthand is legal in the manifest; it is shown as a list because that is what the page edits
-      clean[slot] = (Array.isArray(files) ? files : [files]).filter((f) => typeof f === 'string');
-    }
-    voices[charId] = clean;
-  }
   return {
     id: packId,
     name: (manifest && manifest.name) || packId,
     license: (manifest && manifest.license) || null,
     content: Array.isArray(manifest && manifest.content) ? manifest.content : [],
     hasAssets,
-    voices,
+    voices: rawVoiceTable(manifest && manifest.voices),
+    voiceLangs: voiceLangTables(manifest),
     files: packAssetFiles(root, packId),
     ok: checked ? checked.ok === true : false,
     issue: checked && !checked.ok ? { code: checked.error, detail: checked.detail } : null,
@@ -2027,6 +2104,9 @@ export async function createEditorServer(opts = {}) {
         officialItems: [...officialItems].sort(),
         // the art an item can borrow, since a pack ships none
         icons: itemIconChoices(dataDir),
+        // 本包自带的装备图标（pack.json 的 `itemIcons`）与「这个包 assets/ 里真的有的图片」：装备页那一段要用的
+        // 两个输入。一次全带上（与盟约页的 packBonds 同一个做法），免得多一轮请求。
+        packItemIcons: packIdsFor(root).map((id) => itemIconPackState(root, id)),
         // 「保存到哪个包」的下拉（editor/ui/packPicker.js）
         packs: packChoices(root),
       });
@@ -2246,12 +2326,16 @@ export async function createEditorServer(opts = {}) {
         slots: [...VOICE_SLOTS],
         extensions: [...WORKSHOP_ASSET_TYPES.keys()],
         audioExtensions: [...AUDIO_TYPES],
+        // 配音语言同样只有一份（shared/constants.js）：语言选择里能出现的语种就是加载器认的那些
+        langs: [...VOICE_LANGS],
+        defaultLang: DEFAULT_VOICE_LANG,
         operators: voiceOperatorChoices(root, official, asked),
         packs: packIds.map((id) => voicePackState(root, id)),
       });
     }
 
     // set ONE slot of ONE operator. An empty `paths` clears the slot; an operator left without slots loses its key.
+    // 正文里的 `lang` 选的是哪一份配音表：省略或默认配音 → `voices`，其它语种 → `voiceLangs[lang]`。
     if (p.startsWith('/api/packs/') && p.endsWith('/voices') && method === 'POST') {
       const packId = p.slice('/api/packs/'.length, -'/voices'.length);
       if (!PACK_ID_RE.test(packId)) throw refuse(400, '工坊包 id 不合法（只能是字母、数字、下划线和短横线）');
@@ -2259,7 +2343,8 @@ export async function createEditorServer(opts = {}) {
       const manifestPath = path.join(packDir, 'pack.json');
       const manifest = readJson(manifestPath, null);
       if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) throw refuse(400, `工坊包 "${packId}" 不存在（没有可读的 pack.json）`);
-      const { charId, slot, paths } = await readBody(req);
+      const { charId, slot, paths, lang: rawLang } = await readBody(req);
+      const lang = voiceLangKey(rawLang);
       if (typeof charId !== 'string' || !VOICE_CHAR_ID_RE.test(charId)) {
         throw refuse(400, '干员 id 不合法（只能是字母、数字、下划线、短横线，1–64 位）');
       }
@@ -2274,7 +2359,7 @@ export async function createEditorServer(opts = {}) {
       /** @type {string[]} */
       const lines = [];
       for (const raw of paths) {
-        const problem = voicePathProblem(raw);
+        const problem = packAssetPathProblem(raw);
         if (problem) throw refuse(400, `"${String(raw)}" 不能作为语音路径：${problem}`);
         const ext = path.extname(raw).toLowerCase();
         if (!WORKSHOP_ASSET_TYPES.has(ext)) {
@@ -2288,19 +2373,35 @@ export async function createEditorServer(opts = {}) {
       }
 
       const next = { ...manifest };
-      const voices = manifest.voices && typeof manifest.voices === 'object' && !Array.isArray(manifest.voices)
+      // 两份配音表用的是同一套操作（一个槽位整份覆盖、空清单 = 删掉这个槽位、干员没有槽位了就不留空 key），
+      // 所以这里只挑一次「写哪一份表」，下面两条分支完全一致。
+      const fields = manifest.voices && typeof manifest.voices === 'object' && !Array.isArray(manifest.voices)
         ? { ...manifest.voices } : {};
-      if (lines.length) {
-        const slots = voices[charId] && typeof voices[charId] === 'object' && !Array.isArray(voices[charId]) ? { ...voices[charId] } : {};
-        slots[slot] = [...new Set(lines)].sort();
-        voices[charId] = slots;
-      } else if (voices[charId] && typeof voices[charId] === 'object' && !Array.isArray(voices[charId])) {
-        const slots = { ...voices[charId] };
-        delete slots[slot];
-        // 一个干员没有槽位了就不该留下空对象：空 key 会让「这个包给谁配了音」这个问题没有答案
-        if (Object.keys(slots).length) voices[charId] = slots; else delete voices[charId];
+      const slotsOf = (table, id) => (table[id] && typeof table[id] === 'object' && !Array.isArray(table[id]) ? { ...table[id] } : {});
+      const setSlotIn = (table, id, name, list) => {
+        if (list.length) {
+          const slots = slotsOf(table, id);
+          slots[name] = [...new Set(list)].sort();
+          table[id] = slots;
+        } else if (table[id] && typeof table[id] === 'object' && !Array.isArray(table[id])) {
+          const slots = { ...table[id] };
+          delete slots[name];
+          // 一个干员没有槽位了就不该留下空对象：空 key 会让「这个包给谁配了音」这个问题没有答案
+          if (Object.keys(slots).length) table[id] = slots; else delete table[id];
+        }
+      };
+      if (lang === null) {
+        setSlotIn(fields, charId, slot, lines);
+        if (Object.keys(fields).length) next.voices = fields; else delete next.voices;
+      } else {
+        // 只动作者真正声明的那一份语种表：其它语种（以及空表）原样带过，绝不写出空的 voiceLangs[lang]
+        const langs = manifest.voiceLangs && typeof manifest.voiceLangs === 'object' && !Array.isArray(manifest.voiceLangs)
+          ? { ...manifest.voiceLangs } : {};
+        const table = langs[lang] && typeof langs[lang] === 'object' && !Array.isArray(langs[lang]) ? { ...langs[lang] } : {};
+        setSlotIn(table, charId, slot, lines);
+        if (Object.keys(table).length) langs[lang] = table; else delete langs[lang];
+        if (Object.keys(langs).length) next.voiceLangs = langs; else delete next.voiceLangs;
       }
-      if (Object.keys(voices).length) next.voices = voices; else delete next.voices;
 
       // Validate the manifest we are ABOUT to write, so a save that would make the pack unloadable is refused with
       // nothing written. An edit that only REMOVES is never blocked on this: a line the author cannot delete is worse
@@ -2313,9 +2414,10 @@ export async function createEditorServer(opts = {}) {
       }
       await writeJson(manifestPath, next);
       return sendJson(res, 200, {
-        ok: true, pack: packId, charId, slot,
+        ok: true, pack: packId, charId, slot, lang: lang ?? DEFAULT_VOICE_LANG,
         paths: [...new Set(lines)].sort(),
         voices: (next.voices && typeof next.voices === 'object') ? next.voices : {},
+        voiceLangs: voiceLangTables(next),
         warnings: checked.ok ? [] : [`pack.json 现在会被加载器拒绝（${checked.error}）：${checked.detail}`],
       });
     }
@@ -2345,7 +2447,7 @@ export async function createEditorServer(opts = {}) {
       /** @type {string} */
       let stored = '';
       if (!clearing) {
-        const problem = voicePathProblem(filePath);
+        const problem = packAssetPathProblem(filePath);
         if (problem) throw refuse(400, `"${String(filePath)}" 不能作为图标路径：${problem}`);
         if (!IMAGE_EXT_RE.test(filePath)) throw refuse(400, `"${filePath}" 不是图片（可用 png / jpg / jpeg / webp / gif）`);
         const abs = path.join(packDir, VOICE_ASSETS_DIR, ...String(filePath).split('/'));
@@ -2370,7 +2472,62 @@ export async function createEditorServer(opts = {}) {
       });
     }
 
+    // 装备/道具图标：`pack.json` 的 `itemIcons` 一个字段（与盟约图标、语音同一套写法）。空 path = 删掉这条声明。
+    //
+    // 为什么值得一个接口：客户端按**道具的图标 id** 从 `data/assets.json` 的 `assets.items` 取图
+    // （public/js/assets.js itemIconUrl：先看 `item.iconId`、再看 `item.trapId`，然后查 `m.items[id]`），而一个包
+    // 没法给 assets.json 加条目 —— 于是包新增的装备在界面上没有图标。这里让包自带的图走 /workshop-assets 那条
+    // 唯一路由发出去（叠加逻辑在 shared/workshop.js 的 mergeWorkshopItemIcons），并把「文件必须真的存在」挡在
+    // 保存前。客户端因此零改动：它读的还是同一份合并后的 assets.json。
+    if (p.startsWith('/api/packs/') && p.endsWith('/item-icons') && method === 'POST') {
+      const packId = p.slice('/api/packs/'.length, -'/item-icons'.length);
+      if (!PACK_ID_RE.test(packId)) throw refuse(400, '工坊包 id 不合法（只能是字母、数字、下划线和短横线）');
+      const packDir = path.join(root, packId);
+      const manifestPath = path.join(packDir, 'pack.json');
+      const manifest = readJson(manifestPath, null);
+      if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) throw refuse(400, `工坊包 "${packId}" 不存在（没有可读的 pack.json）`);
+      const { itemId, path: filePath } = await readBody(req);
+      if (typeof itemId !== 'string' || !ITEM_ICON_ID_RE.test(itemId)) {
+        throw refuse(400, '装备图标 id 不合法（只能是字母、数字、下划线、短横线、点、冒号，1–64 位）');
+      }
+      const clearing = filePath === null || filePath === undefined || filePath === '';
+      // 只允许给「这个包真的有的图标 id」配图：客户端是拿道具记录的 iconId / trapId 去查 assets.items 的，给一个
+      // 没有道具用的 id 配图不会报错，但那张图永远不会显示。清空是例外——它正是修掉一条陈旧声明的方式。
+      const records = readJson(path.join(packDir, 'items.json'), {}) || {};
+      const used = Object.values(records).some((rec) => rec && (rec.iconId === itemId || rec.trapId === itemId));
+      if (!clearing && !used) {
+        throw refuse(400, `本包的 items.json 里没有记录用 "${itemId}" 当图标 id：先在装备页把它的「图标 trapId」填成这个 id 并保存，再回来配图`);
+      }
+      /** @type {string} */
+      let stored = '';
+      if (!clearing) {
+        const problem = packAssetPathProblem(filePath);
+        if (problem) throw refuse(400, `"${String(filePath)}" 不能作为图标路径：${problem}`);
+        if (!IMAGE_EXT_RE.test(filePath)) throw refuse(400, `"${filePath}" 不是图片（可用 png / jpg / jpeg / webp / gif）`);
+        const abs = path.join(packDir, VOICE_ASSETS_DIR, ...String(filePath).split('/'));
+        if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
+          throw refuse(400, `"${filePath}" 在 ${packId}/assets/ 下不存在（请先自己把文件放进去，编辑器不上传素材）`);
+        }
+        stored = String(filePath);
+      }
+      const next = { ...manifest };
+      const icons = manifest.itemIcons && typeof manifest.itemIcons === 'object' && !Array.isArray(manifest.itemIcons)
+        ? { ...manifest.itemIcons } : {};
+      if (stored) icons[itemId] = stored; else delete icons[itemId];
+      if (Object.keys(icons).length) next.itemIcons = Object.fromEntries(Object.keys(icons).sort().map((k) => [k, icons[k]]));
+      else delete next.itemIcons;
+      const checked = normalizePackManifest(next, packId, { hasAssets: true });
+      if (!checked.ok && !clearing) throw refuse(400, `保存后 pack.json 会被加载器拒绝（${checked.error}）：${checked.detail}`);
+      await writeJson(manifestPath, next);
+      return sendJson(res, 200, {
+        ok: true, pack: packId, itemId, path: stored || null,
+        itemIcons: next.itemIcons ?? {},
+        warnings: checked.ok ? [] : [`pack.json 现在会被加载器拒绝（${checked.error}）：${checked.detail}`],
+      });
+    }
+
     // remove one slot of one operator (idempotent: a slot that is not there is reported, not rewritten)
+    // `?lang=<语种>` 删的是 `voiceLangs[lang]` 里那一份；省略或给默认配音则删 `voices` 里那一份。
     if (p.startsWith('/api/packs/') && p.includes('/voices/') && method === 'DELETE') {
       const rest = p.slice('/api/packs/'.length);
       const cut = rest.indexOf('/voices/');
@@ -2378,23 +2535,48 @@ export async function createEditorServer(opts = {}) {
       const parts = rest.slice(cut + '/voices/'.length).split('/').map((s) => decodeURIComponent(s));
       if (!PACK_ID_RE.test(packId) || parts.length !== 2) throw refuse(400, '路径必须是 /api/packs/<包>/voices/<干员id>/<槽位>');
       const [charId, slot] = parts;
+      const lang = voiceLangKey(url.searchParams.get('lang'));
       if (!VOICE_CHAR_ID_RE.test(charId)) throw refuse(400, '干员 id 不合法（只能是字母、数字、下划线、短横线，1–64 位）');
       if (!VOICE_SLOTS.includes(slot)) throw refuse(400, `槽位不合法（可用槽位：${VOICE_SLOTS.join('、')}）`);
       const manifestPath = path.join(root, packId, 'pack.json');
       const manifest = readJson(manifestPath, null);
       if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) throw refuse(400, `工坊包 "${packId}" 不存在（没有可读的 pack.json）`);
-      const voices = manifest.voices && typeof manifest.voices === 'object' && !Array.isArray(manifest.voices)
-        ? { ...manifest.voices } : {};
-      const slots = voices[charId] && typeof voices[charId] === 'object' && !Array.isArray(voices[charId]) ? { ...voices[charId] } : {};
-      const removed = Object.hasOwn(slots, slot);
-      if (removed) {
-        delete slots[slot];
-        if (Object.keys(slots).length) voices[charId] = slots; else delete voices[charId];
-        const next = { ...manifest };
-        if (Object.keys(voices).length) next.voices = voices; else delete next.voices;
-        await writeJson(manifestPath, next);
+      const slotsOf = (table, id) => (table[id] && typeof table[id] === 'object' && !Array.isArray(table[id]) ? { ...table[id] } : {});
+      /** 删掉一个槽位，顺手清掉「干员没有槽位了」的空 key；返回这个槽位本来在不在（不在就是无操作）。 */
+      const dropSlotFrom = (table, id, name) => {
+        const slots = slotsOf(table, id);
+        const had = Object.hasOwn(slots, name);
+        if (!had) return false;
+        delete slots[name];
+        if (Object.keys(slots).length) table[id] = slots; else delete table[id];
+        return true;
+      };
+      const next = { ...manifest };
+      let removed;
+      if (lang === null) {
+        const voices = manifest.voices && typeof manifest.voices === 'object' && !Array.isArray(manifest.voices)
+          ? { ...manifest.voices } : {};
+        removed = dropSlotFrom(voices, charId, slot);
+        if (removed) {
+          if (Object.keys(voices).length) next.voices = voices; else delete next.voices;
+        }
+      } else {
+        const langs = manifest.voiceLangs && typeof manifest.voiceLangs === 'object' && !Array.isArray(manifest.voiceLangs)
+          ? { ...manifest.voiceLangs } : {};
+        const table = langs[lang] && typeof langs[lang] === 'object' && !Array.isArray(langs[lang]) ? { ...langs[lang] } : {};
+        removed = dropSlotFrom(table, charId, slot);
+        if (removed) {
+          // 这一份语种表空了就不该留下空对象（空表会被加载器拒绝），整包没有语种表了连 voiceLangs 一起删掉
+          if (Object.keys(table).length) langs[lang] = table; else delete langs[lang];
+          if (Object.keys(langs).length) next.voiceLangs = langs; else delete next.voiceLangs;
+        }
       }
-      return sendJson(res, 200, { ok: true, pack: packId, charId, slot, removed, voices });
+      if (removed) await writeJson(manifestPath, next);
+      return sendJson(res, 200, {
+        ok: true, pack: packId, charId, slot, lang: lang ?? DEFAULT_VOICE_LANG, removed,
+        voices: (next.voices && typeof next.voices === 'object') ? next.voices : {},
+        voiceLangs: voiceLangTables(next),
+      });
     }
 
     // ---- 3D 预览的只读素材通路 ----------------------------------------------------------------------

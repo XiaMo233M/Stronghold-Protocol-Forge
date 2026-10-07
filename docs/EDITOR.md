@@ -39,7 +39,7 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
 | `workshop/<pack>/specs/<slug>.json` | **编辑器的源文件**：你填的那份 spec，可反复编辑 |
 | `workshop/<pack>/chess.json` | **生成产物**：由 specs 推导出来，游戏读的是它。请不要手改（和 `data/*.json` 同样的态度） |
 | `workshop/<pack>/kits/<chessId>.js` | **行为层 kit**：它既是源、也是游戏加载的产物（见下面「kit 编辑器」），保存时会在文件开头补写署名头 |
-| `workshop/<pack>/pack.json` | 首次保存时自动创建（`id` 必须等于目录名）；**语音编辑器就地更新它的 `voices` 字段**，**包管理页就地更新它的 `support` 字段**，其余字段、键序与缩进原样保留 |
+| `workshop/<pack>/pack.json` | 首次保存时自动创建（`id` 必须等于目录名）；**语音编辑器就地更新它的 `voices` / `voiceLangs`**，**盟约页更新 `bondIcons`**，**装备页更新 `itemIcons`**，**包管理页更新 `support`**，其余字段、键序与缩进原样保留 |
 | `workshop/<pack>/**` | **导入一个 `.zip`** 时整包写入（新建目录；覆盖同名包需要显式 `--force`/`?force=1`，且写入全部在这个目录之内） |
 | `data/support.json` | 只在动「是否助战」开关时修改——它是**手工维护的服务端配置**，不是 `build-data` 的产物 |
 
@@ -60,7 +60,7 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
 | `/item.html` | **装备**编辑器（一件装备 = 一个 spec = 两条记录） |
 | `/bond.html` | **盟约（羁绊）**编辑器（新增盟约，或**覆盖官方 23 条**的阈值 / 计数 / 说明 / 黑板数值 + 成员） |
 | `/kit.html` | **kit（行为层）**编辑器（直接编辑 `kits/<chessId>.js` 的代码，静态校验） |
-| `/voice.html` | **语音**编辑器（`pack.json` 的 `voices` 字段：干员 × 槽位 × 文件） |
+| `/voice.html` | **语音**编辑器（`pack.json` 的 `voices` 字段 + 每个语种一份 `voiceLangs`：语言 × 干员 × 槽位 × 文件） |
 | `/pack.html` | **包管理**（导出/导入 `.zip`、`pack.json` 的 `support` 助战声明、**一键试玩**） |
 
 五个内容页（地图 / 怪物 / 出怪 / 装备 / 盟约）的侧栏或右栏都有一个**保存目标**下拉：列出所有工坊包（id 与 `pack.json` 里的名字），
@@ -228,8 +228,14 @@ node tools/workshop-validate.mjs workshop     # enemies 层：重算 be/attrPowe
 - **身份**：id（生成 `_a`/`_b` 两个 id）、名称、`itemType`、`category`、`tier`(1-6)、`price`、
   `duration`（-1 整场 / 0 立即）、`upgradeNum`（0 独立 / 2 可合成 / 100 特殊）
 - **buffs**：每个 buff 有 `key`、`countType`，以及两块黑板 —— `bb`（数值）与 `bbStr`（字符串）
-- **图标 `trapId`**：工坊包不含素材，所以**复用现有装备图标**是唯一能拿到真图的办法（和怪物的 `spine` 同理）。
-  表单用 `datalist` 列出官方全部 trap id 及其来源装备；留空则用兜底图并给警告
+- **图标 `trapId`**：工坊包默认不含素材，所以**复用现有装备图标**是最省事的办法（和怪物的 `spine` 同理）。
+  表单用 `datalist` 列出官方全部 trap id 及其来源装备；留空则用兜底图并给警告。
+  **0.7.3 起包也能带自己的图**：页面上的「**本包自带的图标（可选）**」一段让你从本包 `assets/` 里**真的存在**、
+  且扩展名能当图片发的文件里挑一张，写进 `pack.json` 的 `itemIcons`（`POST /api/packs/:pack/item-icons`），
+  装载时叠加层把它并进 `assets.items`；客户端按**道具的图标 id** 从那张表取图（`public/js/assets.js itemIconUrl`：
+  先 `iconId` 再 `trapId`），所以**客户端零改动**。这一段只在 `spec.trapId` 非空时才有意义 —— 键就是它。
+  要删掉声明就把下拉选回「（不用本包图标）」。已知取舍（与盟约页一致）：声明留着、但 `items.json` 里那条记录的
+  `trapId` 被改掉之后，页面不再显示这条陈旧声明，需要手改 `pack.json`。
 - **派生量只读显示**：`params`、`mergeable`、`shopExcluded`、`upgradeChessId`
 
 三条推导不是猜的，每一条都**精确复现全部 115 条官方装备**（`test/itemAuthoring.test.js`）：
@@ -303,12 +309,21 @@ node tools/workshop-validate.mjs workshop     # kits 层：静态检查 + 真实
 
 ## 语音（voice lines）编辑器
 
-第七个页面：**`/voice.html`**。它和前六页都不一样：`voices` **不是单独的文件**，而是 `pack.json` 里的一个字段
-（`{ <干员id>: { <槽位>: ["<assets/ 内的相对路径>", …] } }`，见 `docs/WORKSHOP.md` §1.4），而 `pack.json` 本身就是
-游戏读的清单 —— 加载时 `shared/workshop.js` 把它并进 `assets.audio.voice`，客户端从 `/workshop-assets/<包>/<路径>`
-取文件。所以这一页**没有 spec、没有可推导的字段**，它就地编辑那份清单。
+第七个页面：**`/voice.html`**。它和前六页都不一样：`voices` / `voiceLangs` **不是单独的文件**，而是 `pack.json` 里的两个字段
+（`{ <干员id>: { <槽位>: ["<assets/ 内的相对路径>", …] } }`，`voiceLangs` 外面再套一层语种，见 `docs/WORKSHOP.md` §1.4），
+而 `pack.json` 本身就是游戏读的清单 —— 加载时 `shared/workshop.js` 把默认配音并进 `assets.audio.voice`、其余语种并进
+`assets.audio.voiceLangs[<语言>]`，客户端从 `/workshop-assets/<包>/<路径>` 取文件。所以这一页**没有 spec、没有可推导的字段**，
+它就地编辑那份清单。
 
-- **左栏**：每个工坊包一条 —— 名称、包 id、已有多少条语音、有没有 `assets/`、清单能不能被加载器接受
+- **配音语言**（中栏顶部，v0.7.3）：一行 chip = `默认配音` + `jp` / `en` / `kr`（语言名取 `VOICE_LANG_NAMES` 的母语写法，
+  语种码单独标出）。chip 上写清这一档**已声明多少条**，一条都没有的显示「未声明」；选中的 chip 高亮
+  （`aria-pressed`）。**点 chip 只切当前编辑的那一份表**：中栏的干员卡片、右栏的表单全部跟着换，右栏开头写着
+  `当前配音 — 日本語（voiceLangs.jp） · N 条`，作者随时知道在改哪一份。默认配音那一档写的是 `voices` 字段，
+  其余语种写 `voiceLangs[<语种>]` —— `jp/en/kr` 之外**没有**别的选项，因为语言词表只有一份（`shared/constants.js`
+  的 `VOICE_LANGS`，服务端 `GET /api/voices` 的 `langs` 原样给出）。默认语种（`cn`）**不作为可声明的语种出现**：
+  它写在 `voices` 里，写进 `voiceLangs` 会被加载器拒（`VOICE_LANG_DEFAULT`）；若清单里真的存在这一条，页面顶部照常
+  显示「pack.json 现在会被加载器拒绝」的横幅，作者按提示删掉即可。
+- **左栏**：每个工坊包一条 —— 名称、包 id、已有多少条语音（**默认配音 + 所有语种合计**）、有没有 `assets/`、清单能不能被加载器接受
   （不能就直接显示校验器给的 code，例如 `ASSETS_NEED_LICENSE`）。
 - **中栏**：这个包已经配了哪些语音。每个干员一张卡，每个槽位一段，每条语音一行；**文件不存在**、
   **扩展名不在允许的类型里**、**不是音频**、**槽位不属于 `VOICE_SLOTS`** 都在行上标出来 ——
@@ -324,15 +339,19 @@ node tools/workshop-validate.mjs workshop     # kits 层：静态检查 + 真实
 - **写入规则**（全部在服务端强制；拒绝时 **400，且一个字节都不写**）：包 id 合法；干员 id 匹配 `[A-Za-z0-9_-]{1,64}`；
   槽位 ∈ `VOICE_SLOTS`（`shared/constants.js`，**不复制** —— 0.7.0 起是上游客户端真正会播的 12 个战斗槽位：
   `start` / `faceEnemy` / `select` / `place` / `skill1-4` / `resultFour` / `resultThree` / `resultTwo` / `resultLose`）；
+  **语种**（`lang` 一项）省略或给默认配音 = 写 `voices`，给 `jp` / `en` / `kr` = 写 `voiceLangs[<语种>]`，
+  给别的语种直接 400（`VOICE_LANG_UNKNOWN`，回话里列出可用语种）；
   路径是包内 `assets/` 的相对路径（不得以 `/`、反斜杠、
   盘符开头，不得含 `.` / `..` / 空段 / 点开头的隐藏段）；**文件必须真的存在**；扩展名必须在 `server/index.js` 的
   `WORKSHOP_ASSET_TYPES` 里（**引用同一份表**）；包没有 `assets/` 文件夹时直接拒绝 ——
   否则写出的清单会被 `VOICE_NEEDS_ASSETS` 整包丢掉。
 - **其余字段原样保留**：写回用的是编辑器自己的 `writeJson`，所以 `id` / `name` / `version` / `author` / `license` /
   `description` / `gameVersion` / `content` / `overrides` 的**值、键序与两空格缩进**都不变；
-  新出现的 `voices` 键追加在末尾；**绝不会给包补一条它没有声明过的 `content`**。
+  新出现的 `voices` / `voiceLangs` 键追加在末尾；**绝不会给包补一条它没有声明过的 `content`**。
 - **空数组 = 删除**：给一个槽位传空数组就删除它；一个干员没有槽位了，它的 key 一并删除（空 key 回答不了
-  「这个包给谁配了音」）；最后一个也没有时 `voices` 整个删除。只有「清空」这一类写入允许把包变成加载器会拒绝的
+  「这个包给谁配了音」）；**这一档语种表空了就把 `voiceLangs[<语种>]` 一起删掉，全部语种都没了连 `voiceLangs` 也删**
+  （空表会被加载器以 `VOICE_LANG_EMPTY` 拒绝）；默认配音那一档最后一个也没有时 `voices` 整个删除。
+  只有「清空」这一类写入允许把包变成加载器会拒绝的
   形态（例如 `content: []` 的助战语音包被清空后就是 `EMPTY_PACK`），这时响应里给 `warnings` ——
   **一条删不掉的语音，比一个被校验器报告的包更糟**。
 - **手工写坏的槽位只能手工改**：`pack.json` 里若写着 `VOICE_SLOTS` 之外的槽位，两个接口都会按规则拒绝，
@@ -546,7 +565,7 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 | POST | `/api/waves/preview` | `{ spec }` → 推导 `totalCount`/`slotCounts` 并校验，**不写盘** |
 | POST | `/api/packs/:pack/waves` | `{ spec }` → 写 `wave-specs/` 并重新生成 `waves.json` |
 | DELETE | `/api/packs/:pack/waves/:id` | 删除该出怪表的 spec 及它拥有的记录 |
-| GET | `/api/items` | 工坊装备列表 + 词表 + 官方 id + **可复用的图标 trap id** |
+| GET | `/api/items` | 工坊装备列表 + 词表 + 官方 id + **可复用的图标 trap id** + 各包的 `itemIcons` 声明与本包真实图片（`packItemIcons`） |
 | GET | `/api/items/:pack/:id` | 该装备的**可编辑 spec**（源）与生成的两条记录 |
 | POST | `/api/items/preview` | `{ spec }` → 推导 `params`/`mergeable`/`shopExcluded` 并校验，**不写盘** |
 | POST | `/api/packs/:pack/items` | `{ spec }` → 写 `item-specs/` 并重新生成 `items.json`（一对记录） |
@@ -556,10 +575,11 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 | POST | `/api/kits/preview` | `{ pack, id, source }` → **仅静态**校验（不写盘，**不 import / 不执行**你的文件） |
 | POST | `/api/packs/:pack/kits` | `{ id, source }` → 写 `kits/<id>.js`，并在缺少署名头时补写 |
 | DELETE | `/api/packs/:pack/kits/:id` | 删除该 kit 文件 |
-| GET | `/api/voices`（可选 `?pack=`） | 各包的语音状态 + **槽位词表** + **允许的扩展名** + 可选干员 id + 包内 `assets/` 真实存在的文件 |
-| POST | `/api/packs/:pack/voices` | `{ charId, slot, paths }` → 设置**一个槽位**（空数组即删除），就地更新 `pack.json` 的 `voices` |
+| GET | `/api/voices`（可选 `?pack=`） | 各包的语音状态（`voices` + 每个非默认语种的 `voiceLangs`）+ **槽位词表** + **语种词表 `langs` 与 `defaultLang`** + **允许的扩展名** + 可选干员 id + 包内 `assets/` 真实存在的文件 |
+| POST | `/api/packs/:pack/voices` | `{ charId, slot, paths, lang }` → 设置**一个槽位**（空数组即删除）；`lang` 省略或默认配音 → 就地更新 `pack.json` 的 `voices`，`jp`/`en`/`kr` → 更新 `voiceLangs[<语种>]`；回话带回两份表 |
 | POST | `/api/packs/:pack/bond-icons` | `{ bondId, path }` → 设置本包自带的**盟约图标**（`path` 空即删除），就地更新 `pack.json` 的 `bondIcons`；文件必须真的在 `assets/` 下 |
-| DELETE | `/api/packs/:pack/voices/:charId/:slot` | 删除一个干员的一个槽位（不存在则报告 `removed: false`，不重写文件） |
+| POST | `/api/packs/:pack/item-icons` | `{ itemId, path }` → 设置本包自带的**装备图标**（`path` 空即删除），就地更新 `pack.json` 的 `itemIcons`；文件必须真的在 `assets/` 下，且 `itemId` 要被本包 `items.json` 里某条记录的 `iconId`/`trapId` 用到 |
+| DELETE | `/api/packs/:pack/voices/:charId/:slot`（可选 `?lang=`） | 删除一个干员的一个槽位（不存在则报告 `removed: false`，不重写文件）；`?lang=jp` 删的是 `voiceLangs.jp` 那一份 |
 | GET | `/api/packs/:id/export` | 该包的 `.zip`（`application/zip` + `Content-Disposition: attachment`）；包不存在 → 404 |
 | POST | `/api/packs/import`（可选 `?force=1`） | **原始 zip 字节**（`application/octet-stream`）→ 解压到临时目录、校验、搬进 `workshop/<包id>/`；返回装好的包摘要 |
 | GET | `/api/packs/support` | 各包的助战状态 + 每个包的**自有干员与推导阶** + `data/support.json` 的卡池与总开关 |

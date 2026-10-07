@@ -40,6 +40,14 @@ export const EN_ITEM = Object.freeze({
   '可授予羁绊 canGiveBond': 'Can grant a bond (canGiveBond)',
   '卡面描述 desc': 'Card description (desc)',
 
+  // ---- 表单：本包自带的图标（pack.json 的 itemIcons） ----
+  // 这一段的按钮/标签文案与盟约页共用（`本包自带的图标（可选）`、`图标文件（本包 assets/ 下的图片）`、
+  // `（不用本包图标）`、`已把 {0} 的图标设为本包的 {1}` 等原文逐字相同），所以那些不在这里重复译。
+  '客户端按**道具的图标 id** 取图：`itemIconUrl` 先看 `item.iconId`、再看 `item.trapId`，都从 `data/assets.json` 的 `items` 里查。配了本包这张图（走 /workshop-assets）就显示它；没配就看官方清单有没有这个 id，都没有就是兜底图。图片要自己先放进 `{0}/assets/`，编辑器不上传素材。': 'The client resolves an item icon by **item icon id**: `itemIconUrl` reads `item.iconId` first, then `item.trapId`, and looks that id up in `data/assets.json`’s `items`. This pack’s image (served from /workshop-assets) is used when set; otherwise the official manifest decides, and with no entry at all the fallback art shows. Put the image into `{0}/assets/` yourself — the editor never uploads assets.',
+  '这件装备还没有图标 id：先在「图标 trapId」里填一个（如 trap_ws_my_item）并保存，再回来给它配图。': 'This item has no icon id yet: fill in “Icon (trapId)” (e.g. trap_ws_my_item), save, then come back to give it an icon.',
+  '本包的 `assets/` 里还没有图片：把图标文件放进去（如 assets/item/{0}.png），再回到这一页挑。': 'This pack’s `assets/` has no images yet: put the icon file there (e.g. assets/item/{0}.png) and come back to pick it.',
+  '官方清单里没有 `{0}` 这张图：不配本包图标时，这件装备显示兜底图。': 'The official manifest has no `{0}`: without a pack icon this item shows the fallback art.',
+
   // ---- 表单：效果 buffs ----
   '效果 buffs（引擎真正读的是它们摊平出来的 params）': 'Effects — buffs (what the engine really reads is the params they flatten into)',
   'buff 的 key 是技能/触发器的模板键；bb 是数值黑板，bbStr 是字符串黑板。同名键先出现的先赢。': 'A buff key is a skill/trigger template key; bb is the numeric blackboard and bbStr the string one. For a duplicate key the first one wins.',

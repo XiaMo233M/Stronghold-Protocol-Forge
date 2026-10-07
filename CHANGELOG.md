@@ -1,5 +1,82 @@
 # 更新记录
 
+## 0.7.3 — 2026-10-08
+
+这一版把**包内多语言配音**补齐 —— 0.7.1 把玩家侧的多语言配音做完了，但工坊包当时只能往默认配音那一档加台词，
+「包内给某干员单独配一种语言」是明说的遗留项。同时给作者手册补了一份「常见效果怎么做」。
+
+### 工坊包可以按语言配音（`pack.json.voiceLangs`）
+
+一个包现在能给同一个干员配多种语言的台词：
+
+```json
+{
+  "content": [],
+  "voices":     { "char_ws_my_op": { "select": ["voice/cn_select.mp3"] } },
+  "voiceLangs": { "jp": { "char_ws_my_op": { "select": ["voice/jp_select.mp3"], "place": ["voice/jp_place.mp3"] } } }
+}
+```
+
+- **形状与 `voices` 逐字相同**（同一份 `parseVoiceTable`）：槽位词表、干员 id、路径安全规则、去重与排序全部共用，
+  错误码也共用（`VOICE_SLOT_UNKNOWN` / `VOICE_PATH_UNSAFE` / `VOICE_BAD_CHAR_ID` / `VOICE_EMPTY`），
+  只是提示里会带上具体是哪张表（`voiceLangs["jp"]["char_ws_my_op"]["place"]`）。
+- 语言键必须是 `shared/constants.js` 的 `VOICE_LANGS`（cn/jp/en/kr，否则 `VOICE_LANG_UNKNOWN`）；
+  **默认语种不能写进 `voiceLangs`**（`VOICE_LANG_DEFAULT`）—— 默认配音就是 `voices` 本身，
+  同一批台词有两个写法只会让作者猜不出客户端到底读哪一份。空语种表是 `VOICE_LANG_EMPTY`。
+- **只带 `voiceLangs` 的包**（`content: []`、一条默认配音都没有）是合法的包：这个包只补某个语种。
+- 送达：默认配音并进 `assets.audio.voice`，其它语种并进 `assets.audio.voiceLangs[<lang>]`
+  （`shared/workshop.js` 的 `workshopVoiceLangIndex` / `mergeWorkshopVoices`）—— 正是客户端
+  `public/js/audio.js voiceLinesFor` 按玩家设置查的那两张表，所以**播放侧一行代码都没改**。该语种没有这个干员的
+  条目时客户端照旧回退到默认配音那一档。只声明 `voices` 的包**不会**让清单长出一个空的 `voiceLangs`。
+- 编辑器第七页 `/voice.html` 多了**语言选择**：默认配音 / jp / en / kr 各一张表，就地编辑、试听、保存，
+  没声明过的语种不会被写出空表；作者侧校验 `tools/workshop-validate.mjs` 同样逐表检查（文件缺失、类型不可服务、
+  干员不存在）。
+
+### 工坊包自带装备图标（`pack.json.itemIcons`）
+
+第三条「包自带素材」通道（前两条是语音与盟约图标），做法逐字照抄，理由也一样：客户端按**道具的图标 id** 从
+`data/assets.json` 的 `items` 取图（`public/js/assets.js itemIconUrl`：先 `iconId`、再 `trapId`），而一个包没法往
+`assets.json` 里加条目 —— 于是包新增的装备只能显示兜底图。
+
+- `"itemIcons": { "<图标 id>": "<包内 assets/ 下的相对路径>" }`；校验规则与 `bondIcons` 同一套
+  （`ITEM_ICON_BAD_SHAPE` / `_NEEDS_ASSETS` / `_BAD_ID` / `_PATH_UNSAFE`），**只带 `itemIcons` 的包也是合法的包**。
+- 并进 `assets.items`（`workshopItemIconIndex` / `mergeWorkshopItemIcons`）：官方已有的 id **替换**、新 id 追加；
+  两个包抢同一个 id 时按包 id 排序第一个赢并记一条错误；`assets.json` 本来没有 `items` 表时不凭空造一个（报告出来）。
+- **客户端零改动** —— 它读的还是同一份合并后的 `assets.json`，图走 `/workshop-assets` 那条唯一路由。
+- 编辑器装备页多一段「本包自带的图标（可选）」：键取自当前装备的 `trapId`，只让你从本包 `assets/` 里真实存在的图片里挑。
+- 作者侧校验器加了 `ITEM_ICON_FILE_MISSING` / `ITEM_ICON_TYPE_UNSERVABLE` / `ITEM_ICON_UNKNOWN_ITEM`（warning）；
+  「官方图标 id」取的是官方道具记录自己的 `iconId`/`trapId`（不是道具记录 id）—— 这一点在测试里专门钉住了。
+
+### 其他
+
+- **ESLint 现在也管 `editor/`**（`eslint.config.js`）：此前 `files` 只覆盖 `server` / `shared` / `tools` / `scripts` /
+  `types` / `public/js` / `test`，编辑器那 30 多个文件**从来没被 lint 过** —— 打开之后立刻抓到一处真错：
+  `editor/ui/i18n.en.index.js` 里 `'（不填：攻击方式与伤害类型只按职业推导）'` 这**同一个键出现了两次**
+  （`no-dupe-keys`）。两条一模一样，所以运行时没人看得出来，但它是死代码，而且下一次改其中一条会静默失效。
+  编辑器页面按浏览器 + `process` 全局（与 `public/js` 同理：同一批文件也被测试在 Node 下 import）。
+- `tools/workshop-validate.mjs` 的报告里，一个包带了哪些语种、各多少条，直接打出来；每张语种表都逐条检查
+  （文件缺失、类型不可服务、干员不存在），只查默认配音那一张会让另外几张的死文件溜过去。
+- 包内语音表的错误提示统一带位置：`voices["c"]["place"]` / `voiceLangs["jp"]["c"]["place"]`，
+  多语言包报错时不用再猜是哪张表。
+- 作者手册 `docs/prompts/kit.md` 新增 **§八「常见效果怎么做（配方手册）」**：12 个小节，从「常驻/一次性数值」
+  「攻击附带效果（附伤 / 溅射 / 真伤 / 眩晕）」「触发时机决策表」到「召唤物」「范围改写」「治疗与护盾」
+  「目标选择」，每条配方都引用仓库里真实的实现（≈90 处 `文件:行号`），另有 **13 条反例** 与
+  **13 条「引擎确实不提供」**（例如工坊 kit 不能 `import` 官方辅助、`releaseSkillSummon` 与 `summonDeck`
+  对工坊不可用、运行时换不掉战斗档案），每条给出替代写法或明说做不到。原有 §一–§七 一行未动。
+- 新增真浏览器测试 `test/editorVoicePage.e2e.test.js`（`EDITOR_E2E=1` 才跑，与 `test/render/*.browser.test.js`
+  同一套 puppeteer-core 套路）：打开语音页、点 `日本語` chip、填表单、存一条，然后读**磁盘上的 `pack.json`** ——
+  钉住「选哪一档就只写哪一份表」这件只在界面上存在、写错了却完全静默的事。
+- 新增 `test/encoding.test.js`（编码卫生门禁）：仓库里 1200+ 个文本文件不许出现替换字符 `U+FFFD` 或 BOM，
+  并且几个中英混排的关键文件里必须还能读到指定的中文片段。起因是一次真实事故：用 PowerShell 的
+  `Get-Content … | Set-Content …` 往返 `editor/server.mjs`，UTF-8 被当成 GBK 读了一遍，整份文件的中文变成乱码、
+  还吃掉了若干换行 —— **编辑器和游戏都不会报错**，只是文案变成看不懂的字。这条测试就是那次事故留下的门。
+
+### 门禁
+
+`npm test` 5875 条 / **5863 通过 / 0 失败 / 12 跳过** · `lint`（现在含 `editor/`）0 错 · `typecheck` 0 错 ·
+`check:imports` 0 断链 · i18n `check en --strict` 1063/1063 · 另加 `EDITOR_E2E=1` 的真浏览器用例 5 条
+（默认跳过，需要本机有 Chromium）。
+
 ## 0.7.2 — 2026-10-08
 
 这一版按业主的反馈修上游 0.2.0 的商店/升级行为，并把**多语言配音拆成单独的发布附件**（主包瘦回一档）。

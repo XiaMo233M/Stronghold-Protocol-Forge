@@ -178,6 +178,45 @@ function renderForm() {
   idBox.append(field(t('卡面描述 desc'), areaInput(() => spec.desc, (x) => { spec.desc = x; })));
   box.append(idBox);
 
+  // ---- 本包自带的图标 ---------------------------------------------------------------------------------------------
+  // pack.json 的 `itemIcons` 一个字段（与盟约图标、语音同一套写法）。客户端按**道具的图标 id** 从
+  // `data/assets.json` 的 `assets.items` 取图（public/js/assets.js itemIconUrl：先看 `item.iconId`、再看
+  // `item.trapId`，然后查 `m.items[id]`），而一个包没法给 assets.json 加条目 —— 于是包新增的装备在界面上没有图标。
+  // 这里把包自带的图接上：装载时叠加层把它写进 `assets.items`，URL 走 /workshop-assets 那条唯一路由 —— 客户端
+  // 因此零改动（它读的还是同一份合并后的 assets.json）。图片要自己先放进包里的 assets/，编辑器不上传素材。
+  const packIcons = (state.data?.packItemIcons ?? []).find((p) => p.id === state.packId);
+  const iconKey = String(spec.trapId ?? '').trim();
+  const iconFiles = packIcons?.iconFiles ?? [];
+  const currentIcon = (packIcons?.itemIcons ?? {})[iconKey] ?? '';
+  const officialIcon = iconKey ? (state.data?.icons ?? []).some((o) => o.trapId === iconKey) : false;
+  const iconBox = document.createElement('div'); iconBox.className = 'panel';
+  iconBox.append(h(t('本包自带的图标（可选）')));
+  iconBox.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('客户端按**道具的图标 id** 取图：`itemIconUrl` 先看 `item.iconId`、再看 `item.trapId`，都从 `data/assets.json` 的 `items` 里查。配了本包这张图（走 /workshop-assets）就显示它；没配就看官方清单有没有这个 id，都没有就是兜底图。图片要自己先放进 `{0}/assets/`，编辑器不上传素材。', state.packId ?? '（工坊包）'),
+  }));
+  if (!iconKey) {
+    iconBox.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('这件装备还没有图标 id：先在「图标 trapId」里填一个（如 trap_ws_my_item）并保存，再回来给它配图。') }));
+  } else {
+    const sel = selectInput(() => currentIcon, async (v) => {
+      try {
+        await api(`/api/packs/${encodeURIComponent(state.packId)}/item-icons`, { method: 'POST', body: { itemId: iconKey, path: v ?? '' } });
+        state.message = { kind: 'ok', text: v
+          ? t('已把 {0} 的图标设为本包的 {1}', iconKey, v)
+          : t('已取消 {0} 的自带图标', iconKey) };
+        await load();
+      } catch (e) { state.message = { kind: 'error', text: t(e?.message ?? String(e)) }; renderForm(); }
+    }, ['', ...iconFiles], { labels: { '': t('（不用本包图标）') } });
+    iconBox.append(field(t('图标文件（本包 assets/ 下的图片）'), sel));
+    if (!iconFiles.length) {
+      iconBox.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('本包的 `assets/` 里还没有图片：把图标文件放进去（如 assets/item/{0}.png），再回到这一页挑。', iconKey) }));
+    }
+  }
+  iconBox.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: officialIcon
+    ? t('官方清单里有 `{0}` 这张图：不配本包图标时，客户端会用它。', iconKey)
+    : t('官方清单里没有 `{0}` 这张图：不配本包图标时，这件装备显示兜底图。', iconKey || t('（空）')) }));
+  box.append(iconBox);
+
   box.append(h(t('效果 buffs（引擎真正读的是它们摊平出来的 params）')));
   const buffBox = document.createElement('div'); buffBox.className = 'panel';
   buffBox.append(Object.assign(document.createElement('p'), {

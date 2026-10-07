@@ -220,3 +220,64 @@ describe('workshop editor: equipment (the item form API)', () => {
     assert.match(src, /startsWith\('_'\)/, 'and the form must strip `_`-prefixed keys before sending');
   });
 });
+
+describe('装备页：本包自带的图标（pack.json 的 itemIcons）', () => {
+  const ICON_PNG = Buffer.from('89504e470d0a1a0a0000000d49484452STANDIN', 'latin1');
+  // 一件自带图标 id 的装备：客户端就是拿 item.iconId / item.trapId 去查 assets.items 的
+  const ICON_SPEC = { ...itemSpec(), id: 'icon_item', trapId: 'trap_ws_icon_item' };
+  const packManifest = () => JSON.parse(fs.readFileSync(join(wsRoot, 'item-pack', 'pack.json'), 'utf8'));
+  const merged = () => loadData(DATA_DIR, { log: { info() {}, warn() {}, error() {}, debug() {} }, workshopDir: wsRoot });
+
+  before(async () => {
+    // 前面的用例把那一对记录删掉了，这里重新保存一件（带一个全新的图标 id）
+    const r = await post(`${editor.url}/api/packs/item-pack/items`, { spec: ICON_SPEC }).then((x) => x.json());
+    assert.equal(r.ok, true, JSON.stringify(r));
+    // 有 assets/ 的包必须声明 license（shared/workshop.js 的 ASSETS_NEED_LICENSE），先补上再放文件
+    fs.mkdirSync(join(wsRoot, 'item-pack', 'assets', 'item'), { recursive: true });
+    fs.writeFileSync(join(wsRoot, 'item-pack', 'pack.json'), `${JSON.stringify({ ...packManifest(), license: 'CC0-1.0' }, null, 2)}\n`);
+    fs.writeFileSync(join(wsRoot, 'item-pack', 'assets', 'item', 'trap_ws_icon_item.png'), ICON_PNG);
+  });
+
+  test('GET /api/items 把本包的图片列出来，并带上当前声明', async () => {
+    const r = await fetch(`${editor.url}/api/items`).then((x) => x.json());
+    const pi = r.packItemIcons.find((p) => p.id === 'item-pack');
+    assert.deepEqual(pi.iconFiles, ['item/trap_ws_icon_item.png'], '只列真的能当图标画的文件');
+    assert.deepEqual(pi.itemIcons, {}, '还没配');
+  });
+
+  test('保存图标：写进 pack.json 的 itemIcons，游戏加载器把它并进 assets.items', async () => {
+    const r = await post(`${editor.url}/api/packs/item-pack/item-icons`, { itemId: 'trap_ws_icon_item', path: 'item/trap_ws_icon_item.png' }).then((x) => x.json());
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(r.path, 'item/trap_ws_icon_item.png');
+    assert.deepEqual(packManifest().itemIcons, { trap_ws_icon_item: 'item/trap_ws_icon_item.png' });
+    const data = merged();
+    // 客户端读的就是这一条（public/js/assets.js itemIconUrl：item.iconId → item.trapId → assets.items[id]）
+    assert.equal(data.assets.items.trap_ws_icon_item, '/workshop-assets/item-pack/item/trap_ws_icon_item.png');
+    assert.equal(data.assets.items.trap_1041_acarm041, '/assets/item/trap_1041_acarm041.png', '官方图标照旧');
+  });
+
+  test('清空（path 为空）＝删掉这条声明，assets.items 里那一条也回去', async () => {
+    const r = await post(`${editor.url}/api/packs/item-pack/item-icons`, { itemId: 'trap_ws_icon_item', path: '' }).then((x) => x.json());
+    assert.equal(r.ok, true);
+    assert.equal(r.path, null);
+    assert.equal('itemIcons' in packManifest(), false, '空对象不留在 pack.json 里');
+    assert.equal('trap_ws_icon_item' in merged().assets.items, false);
+  });
+
+  test('每一种坏请求都是 400，而且一个字节都不写', async () => {
+    const before = JSON.stringify(packManifest());
+    const cases = [
+      [{ itemId: 'trap_ws_icon_item', path: '../secret.png' }, '路径穿越'],
+      [{ itemId: 'trap_ws_icon_item', path: '/abs.png' }, '绝对路径'],
+      [{ itemId: 'trap_ws_icon_item', path: 'item/nope.png' }, '文件不存在'],
+      [{ itemId: 'trap_ws_icon_item', path: 'item/x.txt' }, '不是图片'],
+      [{ itemId: 'bad id!', path: 'item/trap_ws_icon_item.png' }, '坏 id'],
+      [{ itemId: 'trap_not_used', path: 'item/trap_ws_icon_item.png' }, '本包没有道具用这个图标 id'],
+    ];
+    for (const [body, why] of cases) {
+      const res = await post(`${editor.url}/api/packs/item-pack/item-icons`, body);
+      assert.equal(res.status, 400, `${why} 应该被拒`);
+    }
+    assert.equal(JSON.stringify(packManifest()), before, '被拒之后 pack.json 必须一个字节都没变');
+  });
+});

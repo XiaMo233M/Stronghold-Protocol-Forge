@@ -204,7 +204,9 @@ All paths are URL paths relative to the site root, for example `/assets/char/ava
                            // (audio/voice/<lang>/<charId>/cn_<n>.mp3), so a language is a folder swap. A dub this
                            // machine did not download — or a single line the official dump lacks for that dub — is
                            // simply absent, and public/js/audio.js voiceLinesFor falls back to the default table:
-                           // a player never goes silent because a dub is incomplete.
+                           // a player never goes silent because a dub is incomplete. The 创意工坊 overlay appends a
+                           // pack's other-dub lines to these same tables (pack.json `voiceLangs`, docs/WORKSHOP.md
+                           // §1.4, v0.7.3) — the DEFAULT language is the table above, never an entry in here.
     sfx: {
       ui:     { click, back, confirm, tab, pick, drop, error, buy, sell, income, refresh, freeze, levelup,
                 merge, equip, itemMerge, bondUp, artPlace, ready, timer, draft, yourTurn, yourTurnCircle,

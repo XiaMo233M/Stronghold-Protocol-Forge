@@ -48,16 +48,18 @@ workshop/<packId>/
 | `author` / `license` / `description` | 否 | 元信息；`license` 用于声明素材授权 |
 | `gameVersion` | 否 | 作者针对的游戏版本，便于排查 |
 | `content` | 三选一 | 这个包提供哪些数据文件（上表的名字，含 `bonds`） |
-| `voices` | 三选一 | 这个包为哪些干员提供语音，见 §1.4；`content` / `voices` / `bondIcons` 至少有一个非空 |
+| `voices` | 三选一 | 这个包为哪些干员提供**默认配音**的语音，见 §1.4；`content` / `voices` / `voiceLangs` / `bondIcons` 至少有一个非空 |
+| `voiceLangs` | 三选一 | 同一个包给**其它配音语言**（jp/en/kr）各配一份，见 §1.4；形状与 `voices` 相同，多一层语种 |
 | `bondIcons` | 三选一 | 这个包为哪些盟约提供图标，见 §1.4 与 §1.8：`{ "<bondId>": "<包内相对 assets/ 的路径>" }` |
+| `itemIcons` | 三选一 | 这个包为哪些装备/道具提供图标，见 §1.4：`{ "<图标 id>": "<包内相对 assets/ 的路径>" }` |
 | `support` | 否 | 这个包自己新增的、应当进助战卡池的干员 id 列表，见 §2.1；阶由记录推导 |
 | `overrides` | 否 | 允许覆盖的官方记录，格式 `"<file>:<id>"`，例如 `"chess:chess_char_1_01_a"`、`"bonds:yanShip"` |
 
 `content` 只接受上表列出的文件。**`config` 被刻意排除**：一个能改写经济、回合表或难度参数的包改的是规则而不是内容，那需要另一套审查机制，不在本功能范围内。
 
-**只带语音（或只带盟约图标）的包是合法的包**：`content: []` + `voices` / `bondIcons`（见 §1.4）。
-一个只给助战干员配语音、或只给盟约配一张图的包不需要提供任何数据文件；
-反过来，三者都为空才会被拒（`EMPTY_PACK`）。
+**只带语音（或只带图标）的包是合法的包**：`content: []` + `voices` / `voiceLangs` / `bondIcons` / `itemIcons`（见 §1.4）。
+一个只给助战干员配语音、或只给盟约/装备配一张图的包不需要提供任何数据文件；
+反过来，这些字段全空才会被拒（`EMPTY_PACK`）。
 
 ### 1.2 叠加规则
 - **默认叠加（additive）**：新 id 直接加入。
@@ -127,7 +129,43 @@ workshop/*/ ──┘        （冻结之前）              └─→ /data/<fi
 
 玩家侧：官方语音自 0.7.0 起随素材一起下载（`node tools/fetch-assets.mjs`；想要多语言配音加
 `--voice-langs=cn,jp,en,kr`），设置里的「干员语音 VOICE」**默认 0.8 = 开** —— 只有玩家把音量调到 0 或勾了静音才听不到。
-包的语音进的是**默认配音**那一档（合并进 `assets.audio.voice`）；「给某个干员单独配一种语言」留到后续版本。
+以上 `voices` 进的是**默认配音**那一档（合并进 `assets.audio.voice`）；要让这个包在别的配音语言下也发声，用下面的 `voiceLangs`。
+
+#### 多语言配音（`voiceLangs`）
+
+同样的表，一个语种一份。玩家在设置里（或干员详情里逐个干员）选了 jp / en / kr 时，听到的就是这里对应的那一句：
+
+```json
+{
+  "id": "my-voice", "license": "CC0-1.0", "content": [],
+  "voices":     { "char_ws_my_op": { "select": ["voice/cn_select.mp3"] } },
+  "voiceLangs": {
+    "jp": { "char_ws_my_op": { "select": ["voice/jp_select.mp3"], "place": ["voice/jp_place.mp3"] } },
+    "kr": { "char_ws_my_op": { "select": ["voice/kr_select.mp3"] } }
+  }
+}
+```
+
+| 规则 | 说明 |
+|---|---|
+| 语种词表固定 | 键必须是 `shared/constants.js` 的 `VOICE_LANGS`（`cn` / `jp` / `en` / `kr`），写别的会被拒（`VOICE_LANG_UNKNOWN`） |
+| **默认语种不能写在这里** | `cn`（即 `DEFAULT_VOICE_LANG`，也就是清单 `audio.voiceLang` 指的那一档）必须写在 `voices` 里；写进 `voiceLangs` 会被拒（`VOICE_LANG_DEFAULT`）。同一批台词有两个写法，「客户端到底读哪一份」就成了作者猜不出来的事 |
+| 表内规则与 `voices` 完全相同 | 槽位词表、干员 id、路径安全规则逐字相同，错误码也共用（`VOICE_SLOT_UNKNOWN` / `VOICE_PATH_UNSAFE` / `VOICE_BAD_CHAR_ID` / `VOICE_EMPTY`），提示里会带上具体是哪张表（`voiceLangs["jp"]["char_ws_my_op"]["place"]`） |
+| 空表被拒 | `voiceLangs: { "jp": {} }` 是 `VOICE_LANG_EMPTY`：声明了语种却一个干员都没有，多半是写错了 |
+| **可以只带其它语种** | `content: []` + 只写 `voiceLangs` 是合法的包 —— 这个包只补某个语种，默认配音仍用官方那份 |
+| 与官方**并存** | 该语种官方本来就有这个干员的台词时，官方在前、包在后一起参与随机，不替换 |
+
+**送达方式与 `voices` 是同一条路，只差落在哪张表**：`applyWorkshop()` 把默认配音并进 `assets.audio.voice`，
+把其它语种并进 `assets.audio.voiceLangs[<lang>]`（`shared/workshop.js` 的 `workshopVoiceIndex` /
+`workshopVoiceLangIndex` / `mergeWorkshopVoices`）—— 正是客户端 `public/js/audio.js voiceLinesFor` 按玩家选的
+配音语言查的那两张表，所以**播放侧一行代码都不用改**。该语种没有这个干员的条目时，客户端回退到默认配音那一档，
+玩家不会因为某个语种缺文件而突然没声音。任何一边非空，`assets.json` 都进「被触及的数据文件」集合
+（`workshopTouchedFiles`）；一个语种都没有的包**不会**让清单长出一个空的 `voiceLangs`。
+
+**写这两个字段的图形入口是编辑器的第七个页面 `/voice.html`**（`docs/EDITOR.md` §语音）：先在语言下拉里选要编辑哪一档
+（默认配音 = `voices`，或 jp / en / kr = `voiceLangs[<lang>]`），再就地改对应的表；其余字段、键序与缩进原样保留，
+并且只接受**包内 `assets/` 下真实存在、且扩展名在服务端媒体白名单里**的文件；它在编辑器里就能试听 ——
+用的就是客户端会请求的那个 URL。
 
 #### 盟约图标（`bondIcons`）
 
@@ -153,9 +191,31 @@ workshop/*/ ──┘        （冻结之前）              └─→ /data/<fi
 `/workshop-assets/<pack>/<路径>`（分段百分号编码）。**写这个字段的图形入口是编辑器盟约页的「本包自带的图标」一段**：
 它只让你从本包 `assets/` 里**真的存在**的图片里挑，并在保存前就挡掉不存在的文件。
 
-**写这个字段的图形入口是编辑器的第七个页面 `/voice.html`**（`docs/EDITOR.md` §语音）：它就地改 `pack.json` 的 `voices`，
-其余字段、键序与缩进原样保留，并且只接受**包内 `assets/` 下真实存在、且扩展名在服务端媒体白名单里**的文件；
-它在编辑器里就能试听 —— 用的就是客户端会请求的那个 URL。
+#### 装备图标（`itemIcons`）
+
+同一套做法，给**装备/道具**用。客户端取图不看道具记录 id，而是拿**道具记录自己的 `iconId`、没有才用 `trapId`**
+去查 `data/assets.json` 的 `items`（`public/js/assets.js itemIconUrl`）—— 所以一个包新增的装备在商店与手牌上只能
+显示兜底图。这个字段让包把图接上去，**键就是那个 id**：
+
+```json
+{
+  "id": "my-items", "license": "CC0-1.0", "content": ["items"],
+  "itemIcons": { "trap_ws_my_item": "item/my-item.png", "trap_ws_my_second": "item/my-second.png" }
+}
+```
+
+| 规则 | 说明 |
+|---|---|
+| 键 = 客户端会查的那个 id | 也就是道具记录的 `iconId` 或 `trapId`（`iconId` 优先）。官方清单 `data/assets.json` 的 `items` 表用的就是 trap id（本仓库 59 条），而 `shared/itemAuthoring.js` 的派生规则把新装备的 `iconId` 写成它的 `trapId` —— 所以实际上填的就是那个 trap id。字符集 `[A-Za-z0-9_.:-]`（`ITEM_ICON_BAD_ID`） |
+| 路径相对 `assets/` | 与语音、盟约图标逐字相同（`ITEM_ICON_PATH_UNSAFE`）；图片同样受 §1.4 的授权闸门约束 |
+| 覆盖官方 = 换掉官方图 | id 已经在官方 `items` 里时这张图**替换**它；新增的 id 直接加进去 |
+| 两张图抢同一个 id | 按**包 id 排序**第一个赢，后一个包在启动日志里得到一条错误（与盟约图标同一条规则） |
+| 编辑器只让你给**本包真的有的**图标 id 配图 | 键取自当前装备的 `trapId`；这也意味着改掉某个道具的 `trapId` 后，留在 `pack.json` 里的旧声明页面不再显示，要手删 |
+
+**送达方式**：`applyWorkshop()` 把它们并进 `assets.items`（`workshopItemIconIndex` / `mergeWorkshopItemIcons`），
+URL 走同一条 `/workshop-assets/<pack>/<路径>`，**客户端零改动**（`itemIconUrl` 本来就读那张表）。`assets.json` 里
+**没有 `items` 表**时（没跑过素材管线）不凭空造一个，而是在启动日志里报告。图形入口是编辑器装备页的
+「本包自带的图标（可选）」一段。
 
 ### 1.5 分享与安装一个包
 
@@ -238,7 +298,9 @@ node tools/workshop-validate.mjs my-pack
 | **作者接口**：spec → 合法记录、机器可读校验、模板 prompt、校验 CLI | ✅ 已实现（`test/chessAuthoring.test.js`） |
 | **行为层**：包内 `kits/<chessId>.js` 接入 `battle.on(...)` 钩子总线 | ✅ 已实现（见 §4） |
 | **语音包（`voices`）**：汇总进 `assets.audio.voice`、随合并的 `assets.json` 送达客户端 | ✅ 已实现（`test/workshopVoices.test.js`） |
+| **多语言语音包（`voiceLangs`）**：其它语种汇总进 `assets.audio.voiceLangs[<lang>]`，玩家选的配音语言直接生效 | ✅ 已实现（`test/workshopVoices.test.js`） |
 | **盟约图标（`bondIcons`）**：汇总进 `assets.bonds`、随合并的 `assets.json` 送达客户端（只带图标的包也合法） | ✅ 已实现（`test/workshopBondIcons.test.js`） |
+| **装备图标（`itemIcons`）**：汇总进 `assets.items`、随合并的 `assets.json` 送达客户端（客户端零改动） | ✅ 已实现（`test/workshopItemIcons.test.js`） |
 | **包自带助战（`support`）**：按记录推导阶并入 `data/support.json` 的卡池、随合并的 `support.json` 送达客户端 | ✅ 已实现（`test/workshopSupport.test.js`） |
 | **分享与安装（`.zip`）**：导出/导入/列出，CLI 与编辑器第八页共用同一批函数 | ✅ 已实现（`shared/zip.js`、`tools/workshop-pack.mjs`、`test/workshopPack.test.js`） |
 | **局外编辑器 UI**：干员 / 地图 / 怪物 / 出怪 / 装备 / **盟约** / 行为层 kit / **语音** / **包管理** 九个页面 | ✅ 已实现（`editor/`，见 `docs/EDITOR.md`） |

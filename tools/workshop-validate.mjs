@@ -9,7 +9,8 @@
 //   node tools/workshop-validate.mjs --json               # machine-readable report
 //
 // It checks the layers cheapest-first: pack format → record semantics → the real engine → then one layer per content
-// kind (kits, stages/maps, enemies/monsters, waves, items, a pack's voice lines and its 助战 declarations), each
+// kind (kits, stages/maps, enemies/monsters, waves, items, a pack's voice lines, its item icons and its 助战
+// declarations), each
 // re-deriving what the engine derives. Layer 3 is what catches a record that is syntactically valid but silently
 // unplayable.
 //
@@ -62,6 +63,21 @@ function resolveRoots(dir) {
 const officialChess = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'chess.json'), 'utf8'));
 const OFFICIAL_IDS = new Set(Object.keys(officialChess));
 
+/**
+ * 「官方已有的装备图标 id」= 官方道具记录自己的 `iconId` / `trapId`。
+ *
+ * 为什么是这两个字段而不是 `data/items.json` 的键：客户端**不看**道具记录 id，它是拿
+ * `public/js/assets.js itemIconUrl` 的 `item.iconId || item.trapId` 去查 `data/assets.json` 的 `items` 的
+ * （shared/itemAuthoring.js 的 deriveItem 把 `iconId` 写成 `trapId`）。所以 `assets.items` 的键就是这批图标 id ——
+ * 本仓库这份安装里两边逐条相同（59 个），而 `data/items.json` 的键（`chess_item_…`）一个都不在 `assets.items` 里，
+ * 拿它当官方集合会把每一个合法的覆盖都误报成 warning。
+ */
+const OFFICIAL_ITEM_ICON_IDS = new Set(
+  Object.values(JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'items.json'), 'utf8')))
+    .flatMap((rec) => (rec ? [rec.iconId, rec.trapId] : []))
+    .filter((id) => typeof id === 'string' && id),
+);
+
 /** Cross-record checks the per-record validator cannot see (the base/elite pair). */
 function pairIssues(records, file) {
   const out = [];
@@ -109,48 +125,103 @@ async function main() {
     report.packs.push({ pack: pack.id, name: pack.name, files: Object.keys(pack.files), issues });
   }
 
-  // ---- the voice pack layer (docs/WORKSHOP.md §1.4). `voices` is validated by the loader already (slots, char ids,
-  // path shape); what only the FILESYSTEM can answer is whether the named files are really there and servable — a
-  // typo'd name passes every shape check and would simply be a line that never plays.
+  // ---- the voice pack layer (docs/WORKSHOP.md §1.4). The shape is validated by the loader already (slots, char ids,
+  // language keys, path shape); what only the FILESYSTEM can answer is whether the named files are really there and
+  // servable — a typo'd name passes every shape check and would simply be a line that never plays. BOTH tables are
+  // checked: `voices` (the default dub) and every `voiceLangs[<lang>]` (v0.7.3) — a language table with a missing file
+  // is exactly as dead as a default one, and a validator that only looked at `voices` would wave it through.
   for (const pack of packs) {
     const voices = pack.voices || {};
-    if (!Object.keys(voices).length) continue;
+    const voiceLangs = pack.voiceLangs || {};
+    const langs = Object.keys(voiceLangs);
+    if (!Object.keys(voices).length && !langs.length) continue;
     const entry = report.packs.find((p) => p.pack === pack.id);
-    let lines = 0;
-    for (const [charId, slots] of Object.entries(voices)) {
-      for (const [slot, files] of Object.entries(slots)) {
-        lines += files.length;
-        for (const rel of files) {
-          const abs = path.join(pack.dir, 'assets', rel);
-          const ext = path.extname(rel).toLowerCase();
-          if (!WORKSHOP_ASSET_TYPES.has(ext)) {
-            entry.issues.push({
-              field: `${charId}.${slot}`, code: 'VOICE_TYPE_UNSERVABLE', severity: 'error',
-              message: `"${rel}" (${ext || 'no extension'}) is not a media type the pack route serves`,
-              hint: 'the route allowlists images / audio / fonts / atlas / skel — an .mp3, .ogg or .wav plays',
-            });
-          } else if (!fs.existsSync(abs)) {
-            entry.issues.push({
-              field: `${charId}.${slot}`, code: 'VOICE_FILE_MISSING', severity: 'error',
-              message: `"${rel}" is declared in pack.json but not on disk at ${abs}`,
-              hint: 'files must live inside the pack: <pack>/assets/<path>',
-            });
+    const checkTable = (table, lang) => {
+      let n = 0;
+      // `lang` is null for the default table: its field names stay `charId.slot` so every existing message is unchanged
+      const at = (charId, slot) => (lang ? `${lang}:${charId}.${slot}` : `${charId}.${slot}`);
+      for (const [charId, slots] of Object.entries(table)) {
+        for (const [slot, files] of Object.entries(slots)) {
+          n += files.length;
+          for (const rel of files) {
+            const abs = path.join(pack.dir, 'assets', rel);
+            const ext = path.extname(rel).toLowerCase();
+            if (!WORKSHOP_ASSET_TYPES.has(ext)) {
+              entry.issues.push({
+                field: at(charId, slot), code: 'VOICE_TYPE_UNSERVABLE', severity: 'error',
+                message: `"${rel}" (${ext || 'no extension'}) is not a media type the pack route serves`,
+                hint: 'the route allowlists images / audio / fonts / atlas / skel — an .mp3, .ogg or .wav plays',
+              });
+            } else if (!fs.existsSync(abs)) {
+              entry.issues.push({
+                field: at(charId, slot), code: 'VOICE_FILE_MISSING', severity: 'error',
+                message: `"${rel}" is declared in pack.json but not on disk at ${abs}`,
+                hint: 'files must live inside the pack: <pack>/assets/<path>',
+              });
+            }
           }
         }
+        // A line nobody can hear: the operator is neither official nor added by this pack (the client looks the id up in
+        // the merged chess data, so an unknown id is silently dead content). Reported once per operator, not per table.
+        const known = OFFICIAL_IDS.has(charId) || Object.keys(pack.files.chess || {}).includes(charId);
+        if (!known) {
+          entry.issues.push({
+            field: lang ? `${lang}:${charId}` : charId, code: 'VOICE_UNKNOWN_OPERATOR', severity: 'warning',
+            message: `${charId} is neither an official operator nor one this pack adds — these lines can never play`,
+            hint: 'add the operator to this pack\'s chess.json, or ignore this if another installed pack adds it',
+          });
+        }
       }
-      // A line nobody can hear: the operator is neither official nor added by this pack (the client looks the id up in
-      // the merged chess data, so an unknown id is silently dead content).
-      const known = OFFICIAL_IDS.has(charId) || Object.keys(pack.files.chess || {}).includes(charId);
-      if (!known) {
+      return n;
+    };
+    const lines = checkTable(voices, null);
+    // `voices` stays absent for a pack that declares no default-dub line (a 只带其它语种的包), so its report reads the
+    // same as before.
+    if (Object.keys(voices).length) entry.voices = { operators: Object.keys(voices).length, lines };
+    let langLines = 0;
+    for (const lang of langs) langLines += checkTable(voiceLangs[lang], lang);
+    if (langs.length) entry.voiceLangs = { langs, lines: langLines };
+    report.voiceLines = (report.voiceLines || 0) + lines + langLines;
+  }
+
+  // ---- 包自带的装备图标（pack.json 的 itemIcons）。与语音那一层同一个做法：形状（id 字符集、路径形状、必须有
+  // assets/）由加载器已经校验过，只有文件系统能回答「这张图真的在、而且这条路真发得出去」。再加一条加载器看不到
+  // 的静默失败：客户端是拿**道具的图标 id** 去查 `assets.items` 的（itemIconUrl 先看 iconId、再看 trapId），
+  // 所以一个任何道具都不用的 id 只会永远显示兜底图 —— 与 VOICE_UNKNOWN_OPERATOR 同一类（所以也只是 warning）。
+  for (const pack of packs) {
+    const icons = pack.itemIcons || {};
+    const iconIds = Object.keys(icons);
+    if (!iconIds.length) continue;
+    const entry = report.packs.find((p) => p.pack === pack.id);
+    // 本包新增的那部分图标 id：本包 items.json 里各条记录自己的 iconId / trapId
+    const ownIconIds = new Set(Object.values(pack.files.items || {}).flatMap((rec) => (rec ? [rec.iconId, rec.trapId] : []))
+      .filter((id) => typeof id === 'string' && id));
+    for (const [id, rel] of Object.entries(icons)) {
+      const abs = path.join(pack.dir, 'assets', rel);
+      const ext = path.extname(rel).toLowerCase();
+      if (!WORKSHOP_ASSET_TYPES.has(ext)) {
         entry.issues.push({
-          field: charId, code: 'VOICE_UNKNOWN_OPERATOR', severity: 'warning',
-          message: `${charId} is neither an official operator nor one this pack adds — these lines can never play`,
-          hint: 'add the operator to this pack\'s chess.json, or ignore this if another installed pack adds it',
+          field: `itemIcons.${id}`, code: 'ITEM_ICON_TYPE_UNSERVABLE', severity: 'error',
+          message: `"${rel}" (${ext || 'no extension'}) is not a media type the pack route serves`,
+          hint: 'the route allowlists images / audio / fonts / atlas / skel — a .png, .jpg or .webp shows',
+        });
+      } else if (!fs.existsSync(abs)) {
+        entry.issues.push({
+          field: `itemIcons.${id}`, code: 'ITEM_ICON_FILE_MISSING', severity: 'error',
+          message: `"${rel}" is declared in pack.json but not on disk at ${abs}`,
+          hint: 'files must live inside the pack: <pack>/assets/<path>',
+        });
+      }
+      if (!OFFICIAL_ITEM_ICON_IDS.has(id) && !ownIconIds.has(id)) {
+        entry.issues.push({
+          field: `itemIcons.${id}`, code: 'ITEM_ICON_UNKNOWN_ITEM', severity: 'warning',
+          message: `${id} is neither an official item icon nor one this pack adds — this image can never be shown`,
+          hint: 'give an item of this pack this iconId / trapId, or ignore this if another installed pack adds it',
         });
       }
     }
-    entry.voices = { operators: Object.keys(voices).length, lines };
-    report.voiceLines = (report.voiceLines || 0) + lines;
+    entry.itemIcons = iconIds.length;
+    report.itemIcons = (report.itemIcons || 0) + iconIds.length;
   }
 
   // ---- the 助战 layer (docs/WORKSHOP.md §2). `pack.json.support` names the operators of THIS pack that should be
@@ -343,6 +414,8 @@ async function main() {
       const bits = [];
       if (p.files && p.files.length) bits.push(p.files.join(', '));
       if (p.voices) bits.push(`${p.voices.lines} voice line(s) for ${p.voices.operators} operator(s)`);
+      if (p.voiceLangs) bits.push(`${p.voiceLangs.lines} line(s) in ${p.voiceLangs.langs.join('/')}`);
+      if (p.itemIcons) bits.push(`${p.itemIcons} item icon(s)`);
       if (p.support) bits.push(`助战: ${p.support.join(', ')}`);
       console.log(`\npack ${p.pack}${p.name ? ` (${p.name})` : ''}${bits.length ? ` — ${bits.join(' + ')}` : ''}`);
       if (!p.issues.length) console.log('  OK');

@@ -48,7 +48,7 @@ export const WORKSHOP_MEDIA_PREFIX = '/workshop-assets/';
 /** Record ids follow the wire-id charset (shared/protocol.js isId) so an id can travel in a message. */
 const RECORD_ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
 
-import { VOICE_SLOTS } from './constants.js';
+import { VOICE_SLOTS, VOICE_LANGS, DEFAULT_VOICE_LANG } from './constants.js';
 import { isSupportTier } from './support.js';
 
 const isPlainObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -59,7 +59,9 @@ const fail = (error, detail) => ({ ok: false, error, detail });
  * @param {any} raw parsed pack.json
  * @param {string} [dirName] the pack's directory name (authoritative when the manifest omits / contradicts `id`)
  * @returns {{ ok: true, pack: { id: string, name: string, version: string, author: string|null, license: string|null,
- *   description: string|null, gameVersion: string|null, content: string[], overrides: string[] } }
+ *   description: string|null, gameVersion: string|null, content: string[], overrides: string[],
+ *   voices: Record<string, Record<string, string[]>>, voiceLangs: Record<string, Record<string, Record<string, string[]>>>,
+ *   bondIcons: Record<string, string>, itemIcons: Record<string, string>, support: string[] } }
  *   | { ok: false, error: string, detail: string }}
  */
 export function normalizePackManifest(raw, dirName = '', opts = {}) {
@@ -96,29 +98,71 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (Object.keys(voices).length && opts.hasAssets !== true) {
     return fail('VOICE_NEEDS_ASSETS', 'a pack that declares voices must put the files in its assets/ folder (e.g. assets/voice/…)');
   }
-  /** @type {Record<string, Record<string, string[]>>} */
-  const voiceLines = {};
-  for (const [charId, slots] of Object.entries(voices)) {
-    if (!/^[A-Za-z0-9_\-]{1,64}$/.test(charId)) return fail('VOICE_BAD_CHAR_ID', `"${charId}" is not a valid operator id`);
-    if (!isPlainObj(slots)) return fail('VOICE_BAD_SHAPE', `voices["${charId}"] must map slots to file lists`);
-    const clean = {};
-    for (const [slot, files] of Object.entries(slots)) {
-      if (!VOICE_SLOTS.includes(slot)) {
-        return fail('VOICE_SLOT_UNKNOWN', `"${slot}" is not a voice slot (one of: ${VOICE_SLOTS.join(', ')})`);
-      }
-      const list = (Array.isArray(files) ? files : [files]).filter((f) => typeof f === 'string' && f);
-      if (!list.length) return fail('VOICE_EMPTY', `voices["${charId}"]["${slot}"] names no file`);
-      for (const f of list) {
-        // relative, inside assets/, no traversal — the same rule the /workshop-assets route enforces (that route refuses
-        // `.` and `..` segments, so a `.` here would only ever produce a URL that 404s)
-        if (f.startsWith('/') || f.includes('\\') || f.split('/').some((seg) => seg === '..' || seg === '.') || /^[A-Za-z]:/.test(f)) {
-          return fail('VOICE_PATH_UNSAFE', `"${f}" must be a relative path inside assets/ (no absolute paths, no "..")`);
+  /**
+   * Parse ONE `<charId> → <slot> → [path inside assets/]>` table. `voices` (the default dub) and every
+   * `voiceLangs[<lang>]` carry exactly this shape and these rules, so they share one implementation — a rule that held
+   * for one table but not the other would be a silent hole. `where` is how the author wrote the table, so a refusal
+   * points at the exact place in pack.json (`voices["c"]["place"]`, `voiceLangs["jp"]["c"]["place"]`).
+   * Paths are relative and inside assets/, with no traversal — the same rule the /workshop-assets route enforces
+   * (that route refuses `.` and `..` segments, so a `.` here would only ever produce a URL that 404s).
+   */
+  const parseVoiceTable = (table, where) => {
+    if (!isPlainObj(table)) return fail('VOICE_BAD_SHAPE', `${where} must map slots to file lists`);
+    /** @type {Record<string, Record<string, string[]>>} */
+    const out = {};
+    for (const [charId, slots] of Object.entries(table)) {
+      if (!/^[A-Za-z0-9_\-]{1,64}$/.test(charId)) return fail('VOICE_BAD_CHAR_ID', `${where}: "${charId}" is not a valid operator id`);
+      if (!isPlainObj(slots)) return fail('VOICE_BAD_SHAPE', `${where}["${charId}"] must map slots to file lists`);
+      const clean = {};
+      for (const [slot, files] of Object.entries(slots)) {
+        if (!VOICE_SLOTS.includes(slot)) {
+          return fail('VOICE_SLOT_UNKNOWN', `${where}["${charId}"]["${slot}"] is not a voice slot (one of: ${VOICE_SLOTS.join(', ')})`);
         }
+        const list = (Array.isArray(files) ? files : [files]).filter((f) => typeof f === 'string' && f);
+        if (!list.length) return fail('VOICE_EMPTY', `${where}["${charId}"]["${slot}"] names no file`);
+        for (const f of list) {
+          if (f.startsWith('/') || f.includes('\\') || f.split('/').some((seg) => seg === '..' || seg === '.') || /^[A-Za-z]:/.test(f)) {
+            return fail('VOICE_PATH_UNSAFE', `${where}["${charId}"]["${slot}"]: "${f}" must be a relative path inside assets/ (no absolute paths, no "..")`);
+          }
+        }
+        clean[slot] = [...new Set(list)].sort();
       }
-      clean[slot] = [...new Set(list)].sort();
+      if (Object.keys(clean).length) out[charId] = clean;
     }
-    if (Object.keys(clean).length) voiceLines[charId] = clean;
+    return { ok: true, table: out };
+  };
+  const parsedVoices = parseVoiceTable(voices, 'voices');
+  if (!parsedVoices.ok) return parsedVoices;
+  const voiceLines = parsedVoices.table;
+  // 多语言配音：`voiceLangs: { "<lang>": { <charId>: { <slot>: ["<path>"] } } }` —— 一个语种一张表，与上面 `voices`
+  // 同一个形状、同一套路径规则、同一个槽位词表。`voices` 是**默认配音**那一档（清单的 `audio.voiceLang`，
+  // 见 docs/ASSETS.md），所以默认语种键写进 voiceLangs 会被拒（VOICE_LANG_DEFAULT）：同一批台词有两个写法的话，
+  // 「客户端到底读哪一份」就成了作者猜不出来的事。播放侧不需要任何新通道 —— 加载时并进 `assets.audio.voiceLangs`
+  // （mergeWorkshopVoices），客户端 public/js/audio.js voiceLinesFor 本来就在那张表里按语种取台词。
+  const voiceLangs = raw.voiceLangs === undefined ? {} : raw.voiceLangs;
+  if (!isPlainObj(voiceLangs)) {
+    return fail('VOICE_LANG_BAD_SHAPE', 'voiceLangs must be an object: { "<lang>": { "<charId>": { "<slot>": ["<path>"] } } }');
   }
+  if (Object.keys(voiceLangs).length && opts.hasAssets !== true) {
+    return fail('VOICE_NEEDS_ASSETS', 'a pack that declares voices must put the files in its assets/ folder (e.g. assets/voice/…)');
+  }
+  /** @type {Record<string, Record<string, Record<string, string[]>>>} */
+  const voiceLangLines = {};
+  for (const [lang, table] of Object.entries(voiceLangs)) {
+    if (!VOICE_LANGS.includes(lang)) {
+      return fail('VOICE_LANG_UNKNOWN', `"${lang}" is not a dub (one of: ${VOICE_LANGS.join(', ')})`);
+    }
+    if (lang === DEFAULT_VOICE_LANG) {
+      return fail('VOICE_LANG_DEFAULT', `"${lang}" is the default dub — declare its lines in "voices", not in "voiceLangs"`);
+    }
+    const parsed = parseVoiceTable(table, `voiceLangs["${lang}"]`);
+    if (!parsed.ok) return parsed;
+    if (!Object.keys(parsed.table).length) return fail('VOICE_LANG_EMPTY', `voiceLangs["${lang}"] declares no operator`);
+    voiceLangLines[lang] = parsed.table;
+  }
+  // VOICE_LANGS order is the canonical one (same reason workshopVoiceLangIndex sorts): the table this function returns
+  // goes straight into the merged manifest, whose bytes must not depend on how the author happened to write pack.json.
+  const orderedLangLines = Object.fromEntries(VOICE_LANGS.filter((l) => voiceLangLines[l]).map((l) => [l, voiceLangLines[l]]));
   // 盟约图标（这个包自带的 art）：`bondIcons: { "<bondId>": "<path inside assets/>" }`。
   //
   // 为什么需要它：客户端按**盟约 id** 从 `data/assets.json` 的 `bonds` 取图标（public/js/assets.js bondIconUrl），
@@ -140,9 +184,33 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     }
     bondIconFiles[bondId] = file;
   }
-  // A pack may bring data files, voice lines, 盟约图标, 助战声明 — never none of them (docs/WORKSHOP.md §1.4).
-  if (!content.length && !Object.keys(voiceLines).length && !Object.keys(bondIconFiles).length) {
-    return fail('EMPTY_PACK', `content must name at least one of: ${WORKSHOP_CONTENT_FILES.join(', ')} — or the pack must declare voices / bondIcons`);
+  // 装备/道具图标（这个包自带的 art）：`itemIcons: { "<iconId>": "<path inside assets/>" }`。
+  //
+  // 为什么需要它：客户端按**道具 id** 从 `data/assets.json` 的 `assets.items` 取图标（public/js/assets.js
+  // itemIconUrl：先看 `item.iconId`、再看 `item.trapId`，然后查 `m.items[id]`），而一个包没法往 assets.json 里加
+  // 条目 —— 于是包新增的装备在界面上没有图标。做法与 `bondIcons` 逐字相同：口子开在 pack.json 的一个字段上，
+  // 装载时叠加进 `assets.items`（mergeWorkshopItemIcons），URL 走同一条 /workshop-assets 路由 —— 客户端零改动。
+  // 键的字符集与其它 record id 同一套（RECORD_ID_RE），路径安全规则与语音/盟约图标逐字相同。
+  const itemIcons = raw.itemIcons === undefined ? {} : raw.itemIcons;
+  if (!isPlainObj(itemIcons)) return fail('ITEM_ICON_BAD_SHAPE', 'itemIcons must be an object: { "<itemId>": "<path inside assets/>" }');
+  if (Object.keys(itemIcons).length && opts.hasAssets !== true) {
+    return fail('ITEM_ICON_NEEDS_ASSETS', 'a pack that declares itemIcons must put the image in its assets/ folder');
+  }
+  /** @type {Record<string, string>} */
+  const itemIconFiles = {};
+  for (const [itemId, file] of Object.entries(itemIcons)) {
+    if (!RECORD_ID_RE.test(itemId)) return fail('ITEM_ICON_BAD_ID', `"${itemId}" is not a valid item id`);
+    if (typeof file !== 'string' || !file) return fail('ITEM_ICON_BAD_SHAPE', `itemIcons["${itemId}"] must be a path inside assets/`);
+    if (file.startsWith('/') || file.includes('\\') || file.split('/').some((seg) => seg === '..' || seg === '.') || /^[A-Za-z]:/.test(file)) {
+      return fail('ITEM_ICON_PATH_UNSAFE', `"${file}" must be a relative path inside assets/ (no absolute paths, no "..")`);
+    }
+    itemIconFiles[itemId] = file;
+  }
+  // A pack may bring data files, voice lines (either table), 盟约图标, 装备图标, 助战声明 — never none of them
+  // (docs/WORKSHOP.md §1.4).
+  if (!content.length && !Object.keys(voiceLines).length && !Object.keys(orderedLangLines).length
+    && !Object.keys(bondIconFiles).length && !Object.keys(itemIconFiles).length) {
+    return fail('EMPTY_PACK', `content must name at least one of: ${WORKSHOP_CONTENT_FILES.join(', ')} — or the pack must declare voices / voiceLangs / bondIcons / itemIcons`);
   }
   // 助战卡池贡献 (docs/WORKSHOP.md §2): the operators of THIS pack that should be selectable as 助战. The tier is NOT
   // written here — it is derived from the pack's own chess record, exactly like every other derived field, so a tier can
@@ -173,7 +241,9 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
       content,
       overrides,
       voices: voiceLines,
+      voiceLangs: orderedLangLines,
       bondIcons: bondIconFiles,
+      itemIcons: itemIconFiles,
       support: supportIds,
     },
   };
@@ -214,17 +284,22 @@ export function normalizeContentFile(file, json) {
  * Every path segment is percent-encoded: a pack filename may legitimately hold a `#`, a space or a `+`, and the route
  * decodes the path before it resolves it (`/workshop-assets/<pack>/voice/a%23b.mp3`).
  *
- * @param {Array<{ id: string, voices?: Record<string, Record<string, string[]>> }>} packs loaded packs (server/workshop.js)
- * @param {{ prefix?: string }} [opts]
+ * @param {Array<{ id: string, voices?: Record<string, Record<string, string[]>>, voiceLangs?: Record<string, Record<string, Record<string, string[]>>> }>} packs loaded packs (server/workshop.js)
+ * @param {{ prefix?: string, lang?: string|null }} [opts] `lang` selects a dub's table (`voiceLangs[lang]`); the default
+ *   (null) is the pack's default-dub table `voices`.
  * @returns {Record<string, Record<string, string[]>>}
  */
-export function workshopVoiceIndex(packs, { prefix = WORKSHOP_MEDIA_PREFIX } = {}) {
+export function workshopVoiceIndex(packs, { prefix = WORKSHOP_MEDIA_PREFIX, lang = null } = {}) {
   /** @type {Record<string, Record<string, string[]>>} */
   const out = {};
-  const list = (Array.isArray(packs) ? packs : []).filter((p) => p && typeof p.id === 'string' && p.id && isPlainObj(p.voices));
+  const list = (Array.isArray(packs) ? packs : []).filter((p) => p && typeof p.id === 'string' && p.id);
   // sorted by pack id: the merged line list must not depend on the order the filesystem handed the packs over
   for (const pack of [...list].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
-    for (const [charId, slots] of Object.entries(pack.voices)) {
+    const table = lang === null
+      ? (isPlainObj(pack.voices) ? pack.voices : null)
+      : (isPlainObj(pack.voiceLangs) && isPlainObj(pack.voiceLangs[lang]) ? pack.voiceLangs[lang] : null);
+    if (!table) continue;
+    for (const [charId, slots] of Object.entries(table)) {
       if (!isPlainObj(slots)) continue;
       for (const [slot, files] of Object.entries(slots)) {
         if (!Array.isArray(files) || !files.length) continue;
@@ -238,6 +313,31 @@ export function workshopVoiceIndex(packs, { prefix = WORKSHOP_MEDIA_PREFIX } = {
     }
   }
   return out;
+}
+
+/**
+ * Every NON-default dub the packs declare, one index each: `{ <lang>: <workshopVoiceIndex shape> }`.
+ *
+ * The default dub's table is `voices` itself, so it is not repeated here — `normalizePackManifest` refuses a
+ * `voiceLangs[<default>]` outright (VOICE_LANG_DEFAULT). A language no pack declares is simply absent, so the overlay
+ * never writes an empty `voiceLangs` into a manifest that had none.
+ * @param {Array<object>} packs @param {{ prefix?: string }} [opts]
+ * @returns {Record<string, Record<string, Record<string, string[]>>>}
+ */
+export function workshopVoiceLangIndex(packs, { prefix = WORKSHOP_MEDIA_PREFIX } = {}) {
+  /** @type {Record<string, Record<string, Record<string, string[]>>>} */
+  const out = {};
+  for (const pack of Array.isArray(packs) ? packs : []) {
+    if (!pack || !isPlainObj(pack.voiceLangs)) continue;
+    for (const lang of Object.keys(pack.voiceLangs)) {
+      if (out[lang] || !VOICE_LANGS.includes(lang) || lang === DEFAULT_VOICE_LANG) continue;
+      const index = workshopVoiceIndex(packs, { prefix, lang });
+      if (Object.keys(index).length) out[lang] = index;
+    }
+  }
+  // VOICE_LANGS order decides the key order: this object ends up in the merged manifest, and that file must not change
+  // with the order the packs happened to load in.
+  return Object.fromEntries(VOICE_LANGS.filter((l) => out[l]).map((l) => [l, out[l]]));
 }
 
 /** Pack ids are slugs, so a plain code-unit compare is a stable, locale-independent order. */
@@ -374,6 +474,7 @@ export function applyWorkshop(base, packs) {
   linkWorkshopStages(out, report);
   mergeWorkshopVoices(out, packs, report);
   mergeWorkshopBondIcons(out, packs, report);
+  mergeWorkshopItemIcons(out, packs, report);
   mergeWorkshopSupport(out, packs, report);
   report.looks = chessLookIssues(out, looked);
   for (const list of Object.values(report.added)) list.sort();
@@ -418,32 +519,21 @@ function chessLookIssues(data, looked) {
  * (server/index.js `buildWorkshopDataFiles` + `workshopTouchedFiles`).
  *
  * APPEND, never replace: a pack that adds lines to an operator the official data already has keeps both, and
- * `pickVoiceLine` picks among them. Mutates `data` (a fresh copy) and records the counts in `report.voices`.
+ * `pickVoiceLine` picks among them. The DEFAULT dub's lines go into `audio.voice`; a pack's other dubs
+ * (`pack.json.voiceLangs`, v0.7.3) go into `audio.voiceLangs[lang]` — the same two tables the player's 配音语言
+ * setting chooses between (public/js/audio.js voiceLinesFor), so a pack line is heard exactly when the player picks
+ * that dub, and a dub no pack touches is left byte-identical. Mutates `data` (a fresh copy) and records the counts in
+ * `report.voices` / `report.voiceLangs`.
  *
  * An install without `data/assets.json` (the asset pipeline was never run) has no audio at all, so there is nowhere to
  * publish to: that is reported rather than silently dropped.
  */
-function mergeWorkshopVoices(data, packs, report) {
-  const index = workshopVoiceIndex(packs);
-  const chars = Object.keys(index);
-  if (!chars.length) return;
-  const assets = isPlainObj(data.assets) ? data.assets : null;
-  if (!assets) {
-    for (const pack of Array.isArray(packs) ? packs : []) {
-      if (!isPlainObj(pack?.voices) || !Object.keys(pack.voices).length) continue;
-      report.errors.push({
-        pack: pack.id, file: 'assets', id: 'audio.voice',
-        reason: 'this pack declares voice lines, but data/assets.json is missing — run `npm run assets` so the client has an audio manifest to extend',
-      });
-    }
-    return;
-  }
-  const audio = isPlainObj(assets.audio) ? { ...assets.audio } : {};
-  const voice = isPlainObj(audio.voice) ? { ...audio.voice } : {};
-  /** @type {Record<string, number>} */
-  const counts = {};
+
+/** Append every line of ONE index into a `<charId> → <slot> → [url]>` table; the input table is not mutated. */
+function appendVoiceLines(table, index) {
+  const out = { ...table };
   for (const [charId, slots] of Object.entries(index)) {
-    const lines = isPlainObj(voice[charId]) ? { ...voice[charId] } : {};
+    const lines = isPlainObj(out[charId]) ? { ...out[charId] } : {};
     for (const [slot, urls] of Object.entries(slots)) {
       // The official manifest writes a slot with ONE line as a bare string and several as an array (0.2.0's
       // tools/assets/audio.mjs); the client accepts both. Normalize before appending, or a pack line would silently
@@ -452,18 +542,70 @@ function mergeWorkshopVoices(data, packs, report) {
       const official = Array.isArray(cur) ? cur : (typeof cur === 'string' && cur ? [cur] : []);
       lines[slot] = [...new Set([...official, ...urls])];
     }
-    voice[charId] = lines;
+    out[charId] = lines;
   }
-  // per pack, so the boot log says WHICH pack brought lines (and a pack that adds none is not credited)
-  for (const pack of Array.isArray(packs) ? packs : []) {
-    let n = 0;
-    for (const slots of Object.values(isPlainObj(pack?.voices) ? pack.voices : {})) {
-      for (const files of Object.values(isPlainObj(slots) ? slots : {})) if (Array.isArray(files)) n += files.length;
+  return out;
+}
+
+/** Files one `<charId> → <slot> → [paths]>` table declares (the boot log counts, not a validation). */
+function countVoiceLines(table) {
+  let n = 0;
+  if (!isPlainObj(table)) return 0;
+  for (const slots of Object.values(table)) {
+    if (!isPlainObj(slots)) continue;
+    for (const files of Object.values(slots)) if (Array.isArray(files)) n += files.length;
+  }
+  return n;
+}
+
+/** Does this pack declare voice lines at all — in either table? */
+const packDeclaresVoices = (pack) =>
+  (isPlainObj(pack?.voices) && Object.keys(pack.voices).length > 0)
+  || (isPlainObj(pack?.voiceLangs) && Object.keys(pack.voiceLangs).length > 0);
+
+function mergeWorkshopVoices(data, packs, report) {
+  const index = workshopVoiceIndex(packs);
+  const langIndex = workshopVoiceLangIndex(packs);
+  const langs = Object.keys(langIndex);
+  if (!Object.keys(index).length && !langs.length) return;
+  const assets = isPlainObj(data.assets) ? data.assets : null;
+  if (!assets) {
+    for (const pack of Array.isArray(packs) ? packs : []) {
+      if (!packDeclaresVoices(pack)) continue;
+      report.errors.push({
+        pack: pack.id, file: 'assets', id: 'audio.voice',
+        reason: 'this pack declares voice lines, but data/assets.json is missing — run `npm run assets` so the client has an audio manifest to extend',
+      });
     }
+    return;
+  }
+  const audio = isPlainObj(assets.audio) ? { ...assets.audio } : {};
+  const voice = appendVoiceLines(isPlainObj(audio.voice) ? audio.voice : {}, index);
+  /** @type {Record<string, number>} */
+  const counts = {};
+  for (const pack of Array.isArray(packs) ? packs : []) {
+    const n = countVoiceLines(pack?.voices);
     if (n) counts[pack.id] = n;
   }
-  data.assets = { ...assets, audio: { ...audio, voice } };
+  // `undefined` while no pack declares another dub: a manifest that had no `voiceLangs` must not gain an empty one.
+  /** @type {Record<string, Record<string, Record<string, string[]>>>|undefined} */
+  let voiceLangs;
+  /** @type {Record<string, Record<string, number>>|undefined} */
+  let langCounts;
+  if (langs.length) {
+    const base = isPlainObj(audio.voiceLangs) ? audio.voiceLangs : {};
+    voiceLangs = { ...base };
+    for (const [lang, idx] of Object.entries(langIndex)) {
+      voiceLangs[lang] = appendVoiceLines(isPlainObj(base[lang]) ? base[lang] : {}, idx);
+      for (const pack of Array.isArray(packs) ? packs : []) {
+        const n = countVoiceLines(isPlainObj(pack?.voiceLangs) && isPlainObj(pack.voiceLangs[lang]) ? pack.voiceLangs[lang] : null);
+        if (n) ((langCounts ||= {})[pack.id] ||= {})[lang] = n;
+      }
+    }
+  }
+  data.assets = { ...assets, audio: { ...audio, voice, ...(voiceLangs ? { voiceLangs } : {}) } };
   report.voices = counts;
+  if (langCounts) report.voiceLangs = langCounts;
 }
 
 /**
@@ -536,6 +678,80 @@ function mergeWorkshopBondIcons(data, packs, report) {
 }
 
 /**
+ * 包自带装备图标的 URL 表：`{ <iconId>: '/workshop-assets/<pack>/<path>' }`。
+ * 与 `workshopBondIconIndex` / `workshopVoiceIndex` 同一套：URL 指向 /workshop-assets 那条唯一的包素材路由，
+ * 客户端不需要任何新通道 —— public/js/assets.js itemIconUrl 本来就在读 `assets.items`。
+ * 同一个 id 被两个包声明时**第一个赢**，并记一条错误（理由与盟约图标相同：静默让后加载的那个覆盖掉，会变成
+ * 「换个包顺序图标就变了」这种没人能查的问题）。
+ * @param {Array<object>} packs @param {{ prefix?: string }} [opts]
+ */
+export function workshopItemIconIndex(packs, { prefix = WORKSHOP_MEDIA_PREFIX } = {}) {
+  /** @type {Record<string, string>} */
+  const out = {};
+  // 按包 id 排序再处理（与 workshopBondIconIndex 同一条规则）：谁赢只取决于包 id，不取决于加载顺序。
+  for (const pack of [...(Array.isArray(packs) ? packs : [])].sort(byPackId)) {
+    const icons = isPlainObj(pack?.itemIcons) ? pack.itemIcons : null;
+    if (!icons) continue;
+    for (const [itemId, file] of Object.entries(icons)) {
+      if (Object.hasOwn(out, itemId)) continue;
+      // 逐段百分号编码：文件名里的 `#` / 空格 / 中文在 URL 里必须编码，否则 `#` 会把 URL 从此截断
+      const path = String(file).split('/').map(encodeURIComponent).join('/');
+      out[itemId] = `${prefix}${pack.id}/${path}`;
+    }
+  }
+  return out;
+}
+
+/**
+ * Publish every pack's 装备图标 by extending `assets.items` — the map the client resolves an item icon in
+ * (`public/js/assets.js itemIconUrl`, which reads `item.iconId` / `item.trapId` and then looks the id up in it),
+ * served merged like every other workshop overlay. **No client change**: that lookup already existed.
+ *
+ * REPLACE for an id the official data already has (that is how a pack gives an official equip a picture of its own),
+ * APPEND for a new one. Mutates `data` (a fresh copy) and records the ids in `report.itemIcons`.
+ *
+ * `assets.items` that does NOT exist is left alone (the same rule as `voiceLangs`): the pack's icons are reported
+ * instead, because a manifest the asset pipeline never produced is not something this overlay should invent.
+ */
+function mergeWorkshopItemIcons(data, packs, report) {
+  const index = workshopItemIconIndex(packs);
+  const ids = Object.keys(index);
+  if (!ids.length) return;
+  const list = [...(Array.isArray(packs) ? packs : [])].sort(byPackId);
+  // 谁跟谁抢了同一个 id：按包 id 排序后第一个赢，后面的写进 report.errors（不阻断，但作者必须知道）
+  const claimed = new Map();
+  for (const pack of list) {
+    for (const itemId of Object.keys(isPlainObj(pack?.itemIcons) ? pack.itemIcons : {})) {
+      if (claimed.has(itemId)) {
+        report.errors.push({
+          pack: pack.id, file: 'assets', id: `items.${itemId}`,
+          reason: `another pack (${claimed.get(itemId)}) already ships an icon for this item; keep only one`,
+        });
+      } else claimed.set(itemId, pack.id);
+    }
+  }
+  const assets = isPlainObj(data.assets) ? data.assets : null;
+  if (!assets || !isPlainObj(assets.items)) {
+    for (const pack of list) {
+      if (!isPlainObj(pack?.itemIcons) || !Object.keys(pack.itemIcons).length) continue;
+      report.errors.push({
+        pack: pack.id, file: 'assets', id: 'items',
+        reason: 'this pack ships an item icon, but data/assets.json has no "items" map — run `npm run assets` so the client has an icon table to extend',
+      });
+    }
+    return;
+  }
+  const items = { ...assets.items };
+  for (const id of ids) items[id] = index[id];
+  data.assets = { ...assets, items };
+  /** @type {Record<string, string[]>} */
+  const counts = {};
+  for (const [itemId, packId] of claimed) (counts[packId] ??= []).push(itemId);
+  for (const list of Object.values(counts)) list.sort();
+  report.itemIcons = counts;
+}
+
+/**
  * Make newly added STAGES selectable.
  *
  * A stage only enters a match when the mode's `stages` list names it (server/match/waves.js picks among those by
@@ -580,9 +796,17 @@ export function workshopSummary(report) {
       .map(([f, n]) => `${f} +${n.added}${n.overridden ? ` ~${n.overridden}` : ''}`);
     if (files.length) bits.push(files.join(', '));
     const voices = report.voices && report.voices[p.id];
-    if (voices) bits.push(`${voices} voice line${voices === 1 ? '' : 's'}`);
+    const langVoices = report.voiceLangs && report.voiceLangs[p.id];
+    if (voices || langVoices) {
+      // the default dub first, then each extra dub with its own count: `3 voice lines (jp 2, en 1)`
+      const perLang = langVoices ? Object.entries(langVoices).map(([l, n]) => `${l} ${n}`).join(', ') : '';
+      const head = voices ? `${voices} voice line${voices === 1 ? '' : 's'}` : 'voice lines';
+      bits.push(perLang ? `${head} (${perLang})` : head);
+    }
     const icons = report.bondIcons && report.bondIcons[p.id];
     if (icons) bits.push(`${icons.length} bond icon${icons.length === 1 ? '' : 's'}`);
+    const itemIcons = report.itemIcons && report.itemIcons[p.id];
+    if (itemIcons) bits.push(`${itemIcons.length} item icon${itemIcons.length === 1 ? '' : 's'}`);
     const support = report.support && report.support[p.id];
     if (support) bits.push(`助战 +${support.length}`);
     const looks = (report.looks || []).filter((l) => l.pack === p.id);

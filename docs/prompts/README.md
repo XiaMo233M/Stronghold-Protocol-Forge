@@ -7,8 +7,8 @@
 | Prompt | 用于 | 状态 |
 |---|---|---|
 | [operator-pack.md](operator-pack.md) | 干员（含技能黑板、天赋、普通/精锐两套数值、**模组**、**攻击分类覆盖**、**盟约成员**） | ✅ 完整（含黑板书键表） |
-| [kit.md](kit.md) | **行为层 kit**（`kits/<chessId>.js`）：Kit 形状、四条硬规则、钩子词表、可跑的完整示例 | ✅ 完整（示例被 `test/kitPrompt.test.js` 真的跑过一遍） |
-| 本文档的「各内容种类的 spec 形状」一节 | 地图 / 怪物 / 出怪 / 装备 / **盟约** / 语音 / 助战 | ✅ 形状与推导规则在此，配合校验器闭环 |
+| [kit.md](kit.md) | **行为层 kit**（`kits/<chessId>.js`）：Kit 形状、四条硬规则、钩子词表、可跑的完整示例，外加 §八「常见效果怎么做」配方手册（数值 / 附伤 / 钩子时机 / 召唤物 / 范围改写 / 治疗护盾 / 层数 / 索敌 / 盟约与天赋边界 / 反例 / 引擎不提供清单） | ✅ 完整（示例被 `test/kitPrompt.test.js` 真的跑过一遍） |
+| 本文档的「各内容种类的 spec 形状」一节 | 地图 / 怪物 / 出怪 / 装备 / **盟约** / 语音（含**多语言配音**）/ 助战 | ✅ 形状与推导规则在此，配合校验器闭环 |
 
 > 为什么只有两个独立的 prompt 文件：干员的黑板书有 **60 多个键**，行为层 kit 则有 **32 个钩子**与三条「写错就静默失效」的
 > 硬规则 —— 这两样都必须把细节写全，才可能让 AI 或人一次写对。其余几种的 spec 形状很短，且都能用同一条闭环
@@ -39,7 +39,8 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
 （`chess` `items` `enemies` `stages` `waves` `bonds`）。`<kind>-specs/<slug>.json` 是**可编辑的源**，
 `<kind>.json` 是**推导产物** —— 产物不要手改，改源再推导。行为层 kit 是唯一的例外：它在 `kits/<干员 id>.js`，
 **不进 `content`**（`content` 只列数据文件），也没有推导产物 —— 文件本身就是游戏加载的东西。
-语音是第二个例外：它写在 `pack.json.voices` 里，音频文件放在包的 `assets/` 下（见下面「语音」一节）。
+语音是第二个例外：默认语种写在 `pack.json.voices` 里、其它语种写在 `pack.json.voiceLangs` 里（见下面「语音」一节），
+音频文件都放在包的 `assets/` 下。
 盟约的源目录是 `bond-specs/`（不是 `specs/`），因为盟约 id 是它自己的键，不和干员共用一个目录。
 
 ---
@@ -161,7 +162,7 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
 - `content` 里要声明 `bonds`，否则加载器**完全不读**这个包的 `bonds.json`（与干员同一个坑）。
 - 图形化等价物：编辑器 `/bond.html`（左栏清单 / 中间表单 / 右侧「战斗里会加什么」的实时结论）。
 
-### 语音（`pack.json.voices`）
+### 语音（`pack.json.voices` / `pack.json.voiceLangs`）
 
 语音**没有 spec 文件、也没有推导产物**：它直接写在包自己的 `pack.json` 里，音频文件放在包的 `assets/` 下。
 （这也是唯一一种能独立成包的内容 —— 一个只配语音的包可以 `content: []`。）
@@ -196,6 +197,41 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
 `node tools/workshop-validate.mjs` 的语音层会检查每条台词的文件在不在、扩展名是不是可播放的媒体类型
 （`VOICE_FILE_MISSING` / `VOICE_TYPE_UNSERVABLE` 是错误），以及这个干员 id 是不是真的存在
 （`VOICE_UNKNOWN_OPERATOR` 是警告 —— 这种台词永远不会播）。图形化等价物：编辑器 `/voice.html`。
+
+#### 多语言配音（`pack.json.voiceLangs`）
+
+`voices` 是**默认语种**那一档（清单的 `audio.voiceLang`，默认 `cn`：`shared/constants.js:35`）。要让某个干员在别的语种下
+换一批台词，就写 `voiceLangs`：**一个语种一张表**，除最外层的语种键之外，形状、槽位词表与路径安全规则与 `voices`
+**完全相同** —— 两者共用同一个解析函数（`shared/workshop.js:109`，由 `:134` 与 `:158` 各调一次）。
+
+```json
+{
+  "id": "my-voice", "name": "双语助战语音", "version": "1.0.0", "license": "CC0-1.0",
+  "content": [],
+  "voices": {
+    "char_ws_my_op": { "place": ["voice/cn/place.mp3"], "select": ["voice/cn/select1.mp3"] }
+  },
+  "voiceLangs": {
+    "jp": { "char_ws_my_op": { "place": ["voice/jp/place.mp3"], "select": ["voice/jp/select1.mp3"] } },
+    "en": { "char_ws_my_op": { "place": ["voice/en/place.mp3"] } }
+  }
+}
+```
+
+| 规则 | 说明 |
+|---|---|
+| **语言只有四个** | `cn` `jp` `en` `kr`（`shared/constants.js:34` 的 `VOICE_LANGS`）。写别的整包被拒：`VOICE_LANG_UNKNOWN`（`shared/workshop.js:153`） |
+| **默认语种 `cn` 不能写进 `voiceLangs`** | 默认语种那批台词写在 `voices` 里；写进 `voiceLangs["cn"]` 会被拒：`VOICE_LANG_DEFAULT`（`shared/workshop.js:156`）。理由是同一批台词有两个写法的话，「客户端到底读哪一份」就成了作者猜不出来的事 |
+| **一个语种至少要有一个干员** | 空表被拒：`VOICE_LANG_EMPTY`（`shared/workshop.js:160`）；整个 `voiceLangs` 不是对象是 `VOICE_LANG_BAD_SHAPE`（`shared/workshop.js:144`） |
+| **路径与授权规则同 `voices`** | 相对 `assets/`、不许绝对路径 / `..` / `.` / 反斜杠 / 盘符（`VOICE_PATH_UNSAFE`，`shared/workshop.js:125`）；有 `assets/` 就必须有 `license`（`VOICE_NEEDS_ASSETS`，`shared/workshop.js:147`） |
+| **只配一种语言也合法** | `voiceLangs` 本身就算「这个包贡献了什么」（`shared/workshop.js:190`、`:537`），所以 `content: []` + 只写 `voiceLangs` 不会被当成空包 |
+| **写法顺序不影响产物** | 合并前按 `VOICE_LANGS` 的固定顺序重排（`shared/workshop.js:165`），`pack.json` 里先写 `jp` 还是 `en` 都一样 |
+
+**送达与回退**：默认语种的台词并进 `assets.audio.voice`，其它语种并进 `assets.audio.voiceLangs[<lang>]`
+（`shared/workshop.js:497`；是**追加**，不替换官方已有的台词，客户端仍在这些台词里随机）。播放侧按玩家选的配音语言取
+台词 —— `public/js/audio.js:327` 的 `voiceLinesFor(manifest, charId, slot, lang)`：先看
+`audio.voiceLangs[lang][charId][slot]`，**该语种没有这个干员的这个槽位时回退到默认配音那一档**（`audio.voice`），
+两者都没有才算没台词。所以「给某个干员单独配一种语言」是正常用法：其它干员在那个语种下照旧播默认那一档。
 
 ### 自己的干员进助战卡池（`pack.json.support`）
 

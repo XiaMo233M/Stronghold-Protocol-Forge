@@ -80,6 +80,27 @@ export default [
     rules,
   },
   {
+    // 工坊编辑器：`editor/*.mjs` 是 Node 进程（编辑器自己的服务器、试玩服务器）。
+    files: ['editor/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'module',
+      globals: { ...globals.node },
+    },
+    rules,
+  },
+  {
+    // 编辑器页面：`editor/ui/*.js` 是浏览器模块（页面直接 `<script type="module">` 加载），但同一批文件也被
+    // 测试在 Node 下 import（test/stageForm.test.js 等），所以 `process` 与 public/js 一样算已知全局。
+    files: ['editor/ui/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'module',
+      globals: { ...globals.browser, process: 'readonly' },
+    },
+    rules,
+  },
+  {
     // Node test runner, plus browser tests whose page.evaluate callbacks use DOM globals.
     // PIXI is the page global those render tests read inside evaluate().
     files: ['test/**/*.js'],
