@@ -30,6 +30,27 @@ function readAt(fd, pos, len) {
 
 const SIG = { eocd: 0x06054b50, loc64: 0x07064b50, eocd64: 0x06064b50, central: 0x02014b50, local: 0x04034b50 };
 const U32 = 0xffffffff;
+/** General-purpose bit 11: "this name is UTF-8" (APPNOTE 4.4.4). */
+const UTF8_FLAG = 0x0800;
+
+/**
+ * A central-directory name. ZIP has exactly one flag bit for this (`UTF8_FLAG`): when it is set the name is UTF-8.
+ * When it is NOT set the name is in **the creating tool's local codepage**, and that is not a corner case for us:
+ * the Windows release zips are made by `tar`, which writes a Chinese name as CP936 while Windows Explorer unzips it as
+ * CP936 too. Decoding those as UTF-8 gives mojibake paths, and an update diffed against such a base would then ship
+ * the same file twice (once under the mojibake name, once under the real one). So: honour the flag; otherwise try
+ * strict UTF-8 (plenty of tools write UTF-8 without setting it) and fall back to the system codepage, which is what
+ * the user's own unzip will do.
+ */
+function decodeName(raw, flags) {
+  if (flags & UTF8_FLAG) return raw.toString('utf8');
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(raw);
+  } catch {
+    const legacy = process.platform === 'win32' ? 'gbk' : 'utf-8';
+    try { return new TextDecoder(legacy).decode(raw); } catch { return raw.toString('utf8'); }
+  }
+}
 
 /**
  * Call `onFile(name, data)` for every file entry of a zip (directories skipped), in central-directory order.
@@ -73,7 +94,7 @@ export function readZip(zipPath, onFile) {
       const commentLen = cd.readUInt16LE(p + 32);
       const external = cd.readUInt32LE(p + 38);
       let offset = cd.readUInt32LE(p + 42);
-      const name = cd.toString('utf8', p + 46, p + 46 + nameLen);
+      const name = decodeName(cd.subarray(p + 46, p + 46 + nameLen), flags);
       if (packedSize === U32 || rawSize === U32 || offset === U32) {
         // the zip64 extra field carries the values the header marks 0xFFFFFFFF, in this order
         for (let q = p + 46 + nameLen, end = q + extraLen; q + 4 <= end;) {

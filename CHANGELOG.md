@@ -40,10 +40,15 @@
 
 黄金值 `test/golden/*.json` 里 **roster / bonds / fields / standins / diy 五个家族重新生成后与上游 v0.2.1 的存值逐字节相同**（300 个场景中的 283 个）—— 战斗内核与规则层与上游完全一致。只有 `matches` 家族不同，来源正是上面那两处刻意分歧：把 `server/match/player/economy.js` 临时换成上游版本做对照，差异场景从 7 个降到 1 个（剩下那个是同一处分歧的下游影响）。另外，**上游的增量包只含 MANIFEST 里的发行文件（138 个）**，开发侧的 148 个改动（`tools/**`、`test/**`、`docs/**`，含新增的 `tools/package-update.mjs`）是我们用上游 tag 的全树比对补齐的。
 
+### 修掉的真 bug
+
+- **中文文件名的 zip 会被更新机制读错**：`tar` 在 Windows 上写 zip 条目名用的是本地代码页（CP936），而 zip 里那个「这个文件名是 UTF-8」的标志位没设；上游的 zip 读取器只按 UTF-8 解码，于是我们**自己发行的包里** `启动游戏.bat`、`README-开箱即用.md`、`安装工坊包.bat`、`启动编辑器.bat` 四个名字全成了乱码。按它生成的增量更新会把同一个文件当成两条不同路径（一条乱码、一条真名）发下去。现在读取器按规范先看标志位、没设时严格试 UTF-8、再退回系统代码页（Windows 用 GBK）—— 与玩家自己解压时看到的名字一致；实测 0.8.1 的发行包现在解析出 `README-开箱即用.md` / `启动游戏.bat` / `启动编辑器.bat` / `安装工坊包.bat`。
+- 编辑器新建包时写进 `pack.json` 的 `gameVersion` 一直写着 `0.1.3`（0.2.0 移植后没跟着更新），现在写 `0.2.1`。
+
 ### 门禁
 
-`npm test` **__TOTAL__ 条 / __PASS__ 通过 / 0 失败 / __SKIP__ 跳过** · `eslint`（含 `editor/`）0 错 · `tsc --noEmit --checkJs` 0 错 ·
-`check:imports` exit 0 · i18n `check en --strict` __I18N__ · `EDITOR_E2E=1` 的真浏览器用例 **__E2E__**。
+`npm test` **6039 条 / 6025 通过 / 0 失败 / 14 跳过** · `eslint`（含 `editor/`）0 错 · `tsc --noEmit --checkJs` 0 错 ·
+`check:imports` exit 0 · i18n `check en --strict` 1065/1065 · `EDITOR_E2E=1` 的真浏览器用例 **19/19**（串行）。
 
 ## 0.8.1 — 2026-10-08
 

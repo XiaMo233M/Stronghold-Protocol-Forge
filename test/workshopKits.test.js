@@ -213,7 +213,9 @@ describe('行为层: delivery to the browser', () => {
     const src = fs.readFileSync(join(ROOT, 'public/js/battle/runner.js'), 'utf8');
     assert.match(src, /export async function loadSpecKits/);
     assert.match(src, /spec\s*&&\s*spec\.workshopKits|spec\.workshopKits/);
-    assert.match(src, /createBattleFromSpec\(msg\.spec, sim\.ds, \{ logger, kits \}\)/);
+    // 上游 0.2.1 把战斗启动重写成「待处理表 + prepare()」，参数从 `msg` 变成条目 `e`：
+    // 这条断言钉的是**工坊 kits 必须挂在真正构造战斗的那一处**（否则工坊行为层会静默失效）。
+    assert.match(src, /createBattleFromSpec\(e\.spec, sim\.ds, \{ logger, kits \}\)/);
     assert.match(src, /import\(\/\* @vite-ignore \*\/ m\.url\)/);
   });
 });
