@@ -1,4 +1,5 @@
 // shared/bondAuthoring.js — 盟约（羁绊）的创作层：spec → 记录、记录 → spec、以及这个记录能被引擎接受多少。
+// (i18n-ignore-file: 工坊作者层的校验与推导文本 —— 给作者、编辑器与 AI 读的规则说明（编辑器有自己的中英词典，见 docs/EDITOR.md），不是客户端界面文案)
 //
 // 与 shared/chessAuthoring.js 同一条思路：判断留在纯函数里（编辑器、CLI、AI 用的是同一份规则），界面只负责画。
 //

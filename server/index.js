@@ -21,6 +21,7 @@
 // The server only auto-listens when this file is the process entry point.
 
 import http from 'node:http';
+import path from 'node:path';
 import { getData, loadData } from './data.js';
 import { loadWorkshop, loadWorkshopKits, WORKSHOP_DIR } from './workshop.js';
 import { buildWorkshopDataFiles, workshopKitFilesFor, workshopAssetsFor, WORKSHOP_ASSET_PREFIX, WORKSHOP_ASSET_TYPES } from './http/workshop.js';
@@ -65,8 +66,16 @@ export async function startServer(opts = {}) {
 
   // The process-wide singleton serves the default data dir; a custom dir (tests) gets its own copy. The 创意工坊 overlay
   // is applied inside the loader (server/data.js), i.e. whichever way the data is obtained, it is already merged.
-  const workshopDir = opts.workshopDir === undefined ? WORKSHOP_DIR : opts.workshopDir;
-  const data = opts.dataDir || opts.workshopDir !== undefined
+  // SP_WORKSHOP (editor/playtest.mjs) lets the Forge editor's 试玩 subprocess read the workshop root the editor was
+  // started with (`--workshop <dir>`) instead of the repository's own workshop/ — without it the playtest cannot see the
+  // pack being edited (docs/EDITOR.md 「工坊目录」).
+  const envWorkshop = process.env.SP_WORKSHOP ? path.resolve(process.env.SP_WORKSHOP) : null;
+  const workshopDir = opts.workshopDir === undefined ? (envWorkshop || WORKSHOP_DIR) : opts.workshopDir;
+  // A caller that names a data dir OR a workshop root must get a FRESH load: `getData` is a process-wide singleton whose
+  // first caller wins, and something in the import graph may already have created it with the default workshop/ — which
+  // is exactly why SP_WORKSHOP has to take the loadData() branch, or the 试玩 subprocess would silently read the wrong
+  // (empty) pack root.
+  const data = (opts.dataDir || opts.workshopDir !== undefined || envWorkshop)
     ? loadData(dataDir, { log, workshopDir })
     : getData({ dir: dataDir, log, workshopDir });
   // 创意工坊 (docs/WORKSHOP.md): load the packs ONCE and derive the three things the runtime needs —

@@ -105,7 +105,7 @@ before(async () => {
 
   // 6) a manifest with NO `content` key at all — writing voices must not invent one
   fs.mkdirSync(packDir('bare-voice'), { recursive: true });
-  writeManifest('bare-voice', { id: 'bare-voice', license: 'CC0-1.0', voices: { char_ws_bare: { win: ['voice/w.mp3'] } } });
+  writeManifest('bare-voice', { id: 'bare-voice', license: 'CC0-1.0', voices: { char_ws_bare: { resultThree: ['voice/w.mp3'] } } });
   writeAsset('bare-voice', 'voice/w.mp3', MP3);
 
   editor = await createEditorServer({ workshopRoot: wsRoot, port: 0, host: '127.0.0.1', supportFile: join(tmp, 'support.json') });
@@ -185,10 +185,10 @@ describe('workshop editor: 语音 (add → list → remove)', () => {
     assert.deepEqual(manifestOf('voice-pack').voices, { char_ws_vp: { select: ['voice/select1.mp3', 'voice/select2.mp3'] } });
 
     // a second slot on the same operator
-    assert.equal((await setSlot('voice-pack', { charId: 'char_ws_vp', slot: 'deploy', paths: ['voice/deploy1.ogg'] })).status, 200);
+    assert.equal((await setSlot('voice-pack', { charId: 'char_ws_vp', slot: 'place', paths: ['voice/deploy1.ogg'] })).status, 200);
     const listed = await fetch(`${editor.url}/api/voices?pack=voice-pack`).then((x) => x.json());
     assert.deepEqual(listed.packs[0].voices, {
-      char_ws_vp: { deploy: ['voice/deploy1.ogg'], select: ['voice/select1.mp3', 'voice/select2.mp3'] },
+      char_ws_vp: { place: ['voice/deploy1.ogg'], select: ['voice/select1.mp3', 'voice/select2.mp3'] },
     }, 'the page reads its list back from the API, not from what it sent');
 
     // one line of a two-line slot goes: the slot keeps the other, and the operator keys stay
@@ -199,14 +199,14 @@ describe('workshop editor: 语音 (add → list → remove)', () => {
     // DELETE removes the rest of that slot
     const del = await fetch(`${editor.url}/api/packs/voice-pack/voices/char_ws_vp/select`, { method: 'DELETE' }).then((x) => x.json());
     assert.equal(del.removed, true);
-    assert.deepEqual(manifestOf('voice-pack').voices, { char_ws_vp: { deploy: ['voice/deploy1.ogg'] } });
+    assert.deepEqual(manifestOf('voice-pack').voices, { char_ws_vp: { place: ['voice/deploy1.ogg'] } });
 
     // …and the LAST slot takes the operator key with it, because an empty operator key is not an answer to anything
-    assert.equal((await setSlot('voice-pack', { charId: 'char_ws_vp', slot: 'deploy', paths: [] })).status, 200);
+    assert.equal((await setSlot('voice-pack', { charId: 'char_ws_vp', slot: 'place', paths: [] })).status, 200);
     const after = manifestOf('voice-pack');
     assert.equal(Object.hasOwn(after, 'voices'), false, 'the last line drops `voices` entirely rather than leaving {}');
     // an empty list on a slot that does not exist is a no-op, not a rewrite
-    const noop = await fetch(`${editor.url}/api/packs/voice-pack/voices/char_ws_vp/deploy`, { method: 'DELETE' }).then((x) => x.json());
+    const noop = await fetch(`${editor.url}/api/packs/voice-pack/voices/char_ws_vp/skill2`, { method: 'DELETE' }).then((x) => x.json());
     assert.equal(noop.removed, false);
   });
 
@@ -225,7 +225,7 @@ describe('workshop editor: 语音 (add → list → remove)', () => {
   test('editing voices preserves content, overrides, the key order and the 2-space indentation', async () => {
     const before = manifestText('voice-pack');
     const beforeObj = JSON.parse(before);
-    assert.equal((await setSlot('voice-pack', { charId: 'char_ws_vp', slot: 'battle', paths: ['voice/select1.mp3'] })).status, 200);
+    assert.equal((await setSlot('voice-pack', { charId: 'char_ws_vp', slot: 'skill1', paths: ['voice/select1.mp3'] })).status, 200);
     const after = manifestText('voice-pack');
     const afterObj = JSON.parse(after);
     const strip = (obj) => Object.fromEntries(Object.entries(obj).filter(([k]) => k !== 'voices'));
@@ -241,10 +241,10 @@ describe('workshop editor: 语音 (add → list → remove)', () => {
 
   test('never adds a content entry the pack did not declare', async () => {
     // a pack with no `content` key at all
-    assert.equal((await setSlot('bare-voice', { charId: 'char_ws_bare', slot: 'deploy', paths: ['voice/w.mp3'] })).status, 200);
+    assert.equal((await setSlot('bare-voice', { charId: 'char_ws_bare', slot: 'place', paths: ['voice/w.mp3'] })).status, 200);
     const bare = manifestOf('bare-voice');
     assert.equal(Object.hasOwn(bare, 'content'), false, 'the editor must not invent a data file for a voice-only pack');
-    assert.deepEqual(bare.voices.char_ws_bare.deploy, ['voice/w.mp3']);
+    assert.deepEqual(bare.voices.char_ws_bare.place, ['voice/w.mp3']);
 
     // a pack with content keeps exactly what it declared
     assert.equal((await setSlot('spare-pack', { charId: 'char_ws_spare', slot: 'start', paths: ['voice/spare.mp3'] })).status, 200);
@@ -274,7 +274,7 @@ describe('workshop editor: 语音 (every refusal leaves the file untouched)', ()
     await refused('voice-pack', { charId: 'a'.repeat(65), slot: 'select', paths: [] }, /干员 id/, 'operator id length');
     await refused('voice-pack', { charId: 'char_ws_vp', slot: 'chat', paths: [] }, /槽位/, 'unknown slot');
     const slotMsg = await refused('voice-pack', { charId: 'char_ws_vp', slot: 'chat', paths: [] }, /select/, 'the refusal names the slots that work');
-    assert.match(slotMsg, /deploy/);
+    assert.match(slotMsg, /place/);
     await refused('voice-pack', { charId: 'char_ws_vp', slot: 'select', paths: 'voice/select1.mp3' }, /数组/, 'paths must be an array');
     await refused('voice-pack', { charId: 'char_ws_vp', slot: 'select' }, /数组/, 'a missing paths is not an empty slot');
     await refused('voice-pack', { charId: 'char_ws_vp', slot: 'select', paths: [42] }, /不能作为语音路径/, 'a path must be a string');
@@ -363,16 +363,16 @@ describe('workshop editor: 语音 到达客户端 (the editor API → the game c
   });
 
   test('a voice-only pack (content: []) edited this way still loads and still reaches the client', async () => {
-    assert.equal((await setSlot('voice-only', { charId: 'char_ws_vo', slot: 'win', paths: ['voice/select1.mp3'] })).status, 200);
+    assert.equal((await setSlot('voice-only', { charId: 'char_ws_vo', slot: 'resultThree', paths: ['voice/select1.mp3'] })).status, 200);
     const loaded = loadWorkshop(wsRoot, { log: quiet });
     const pack = loaded.packs.find((p) => p.id === 'voice-only');
     assert.ok(pack);
     assert.deepEqual(pack.files, {}, 'it still ships no data file at all');
-    assert.deepEqual(pack.voices, { char_ws_vo: { select: ['voice/select1.mp3'], win: ['voice/select1.mp3'] } });
+    assert.deepEqual(pack.voices, { char_ws_vo: { select: ['voice/select1.mp3'], resultThree: ['voice/select1.mp3'] } });
     assert.deepEqual(loaded.errors.filter((e) => e.pack === 'voice-only'), [], 'editing must not break the pack');
     assert.deepEqual(manifestOf('voice-only').content, [], 'and must not hand it a content entry');
     const data = loadData(DATA_DIR, { log: quiet, workshopDir: wsRoot });
-    assert.deepEqual(data.assets.audio.voice.char_ws_vo.win, ['/workshop-assets/voice-only/voice/select1.mp3']);
+    assert.deepEqual(data.assets.audio.voice.char_ws_vo.resultThree, ['/workshop-assets/voice-only/voice/select1.mp3']);
   });
 });
 

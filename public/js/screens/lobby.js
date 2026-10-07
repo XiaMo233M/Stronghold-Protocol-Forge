@@ -155,6 +155,31 @@ export function parseRoomParam(search) {
   }
 }
 
+/** The lobby's normal default difficulty (no saved preference): what `?playtest=` without a usable key falls back to. */
+export const DEFAULT_DIFFICULTY = 'FUNNY';
+
+/**
+ * One-click playtest from a deep link (`?playtest=1[&difficulty=KEY]`, the Forge 一键试玩 button).
+ * Any non-empty value other than `0` / `false` turns it on, so `?playtest=1`, `?playtest=true` and a bare `?playtest=`
+ * with no value never crash. The difficulty is validated against the shared DIFFICULTIES list: anything unknown
+ * (a stale bookmark, a hand-edited URL) falls back to the lobby's own default — an invalid key must never reach the
+ * server, where `room.create` answers with BAD_MSG instead of a match.
+ * @param {string} search e.g. location.search
+ * @returns {{ mode: 'solo', difficulty: string }|null} null = no playtest requested; `difficulty` is always valid
+ */
+export function parsePlaytestParam(search) {
+  try {
+    const p = new URLSearchParams(search || '');
+    const raw = p.get('playtest');
+    if (raw == null) return null;
+    if (['', '0', 'false'].includes(String(raw).trim().toLowerCase())) return null;
+    const want = String(p.get('difficulty') || '').trim().toUpperCase();
+    return { mode: 'solo', difficulty: DIFFICULTIES.includes(want) ? want : DEFAULT_DIFFICULTY };
+  } catch {
+    return null;
+  }
+}
+
 /** Recently joined/created co-op room codes (most recent first). */
 export function recentRooms() {
   const list = loadPref('recentRooms', []);
@@ -243,8 +268,8 @@ export function LobbyScreen() {
   useData('config');
   const [roomMode, setRoomMode] = useState(() => (loadPref('lobby.mode', 'coop') === 'solo' ? 'solo' : 'coop'));
   const [difficulty, setDifficulty] = useState(() => {
-    const d = loadPref('lobby.difficulty', 'FUNNY');
-    return DIFFICULTIES.includes(d) ? d : 'FUNNY';
+    const d = loadPref('lobby.difficulty', DEFAULT_DIFFICULTY);
+    return DIFFICULTIES.includes(d) ? d : DEFAULT_DIFFICULTY;
   });
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(null);

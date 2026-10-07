@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // shared/support.js — 助战 (support operators) configuration and selection, pure ESM shared by the server (validation,
 // the match's grant at start) and the client (the 助战 picker only offers what the server declares).
 //
@@ -81,7 +82,7 @@ export function normalizeSupportConfig(raw) {
   }
   return Object.freeze({
     enabled: src.enabled === true && usableTiers.length > 0,
-    label: typeof src.label === 'string' && src.label ? src.label : '助战',
+    label: typeof src.label === 'string' && src.label ? src.label : t('助战'),
     // denyUnknown: a selection outside the pool is refused. Only an explicit `false` relaxes it to the same refusal
     // (the pool is the whitelist either way — the flag documents intent and is kept for future group plugins).
     strict: src.denyUnknown !== false,

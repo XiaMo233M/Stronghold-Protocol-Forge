@@ -1,3 +1,4 @@
+import { t } from '../../../shared/i18n.js';
 // 助战 (support operators) — the remake extension the match carries on top of upstream 0.2.0's player split.
 //
 // The pool belongs to the INSTALL (data/support.json → Gamedata.support, shared/support.js), never to a pack: a pack
@@ -47,7 +48,7 @@ export class PlayerSupport {
     for (const id of this.support) {
       if (!this.gd.isSupportChess(id)) {
         const rec = this.gd.chess(id);
-        this.m.toast(this, 'warn', `${(rec && rec.name) || id} 已不在服务端助战卡池中，本次禁用`);
+        this.m.toast(this, 'warn', t('{0} 已不在服务端助战卡池中，本次禁用', { 0: (rec && rec.name) || id }));
         continue;
       }
       granted.push(id);

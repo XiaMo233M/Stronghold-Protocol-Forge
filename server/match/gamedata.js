@@ -205,6 +205,33 @@ export class GameData {
   get choices() { return this.raw.choices && typeof this.raw.choices === 'object' ? this.raw.choices : {}; }
   get factions() { return this.raw.factions && typeof this.raw.factions === 'object' ? this.raw.factions : {}; }
 
+  // ---- 助战 (support operators; the server-controlled pool of data/support.json) -----------------------
+
+  /** Whether this server offers 助战 at all (a usable slot + pool pair exists). */
+  supportEnabled() { return this.support.enabled; }
+  /** How many tier-`tier` supports one player may bring (0 = the tier is off). */
+  supportSlots(tier) { return supportSlotsFor(this.support, tier); }
+  /** Total supports one player may bring. */
+  supportCapacity() { return supportCapacity(this.support); }
+  /** `{ tier, slots, ids }[]` — what a client may show in the picker (the only source of that list; never the client's). */
+  supportPicker() { return supportPicker(this.support); }
+  /** Whether the pool allows this operator as a support (fails closed; see shared/support.js isSupportChess). */
+  isSupportChess(id) { return isSupportChess(this.support, id, (x) => this.chess(x)); }
+  /** The tier this operator counts against, or null when the pool does not allow it. */
+  supportTierOf(id) { return supportTierOf(this.support, id, (x) => this.chess(x)); }
+  /**
+   * 助战干员在**带上它的那名玩家**商店里的标价（`data/support.json` 的 `prices`），没配就是 null。
+   * 没配时用它的阶级价（`chessPrice`）—— 助战是普通棋子，价格规则不另开一套。
+   * @param {string} id base chess id
+   */
+  supportPrice(id) { return supportPriceOf(this.support, id); }
+  /**
+   * Semantic check of a `room.support` selection against the pool (shared/support.js checkSupport — the same call the
+   * client makes before sending, so the picker and the match agree).
+   * @param {unknown} entries
+   */
+  checkSupport(entries) { return checkSupportSelection(entries, this.support, (x) => this.chess(x)); }
+
   /**
    * The 补位 record of chess `id` (normal or elite; DATA.md §18): shared/standIn.js standInRecord over data/backups.json
    * — the chess's identity (ids, tier, bonds, 特质, price, merge) with its official stand-in's body (stats, range, skills

@@ -1,4 +1,5 @@
 // shared/forgeNotice.js — the authorship stamp the Forge editor writes into every Option it saves.
+// (i18n-ignore-file: 工坊作者层的校验与推导文本 —— 给作者、编辑器与 AI 读的规则说明（编辑器有自己的中英词典，见 docs/EDITOR.md），不是客户端界面文案)
 //
 // An "Option" is what an author creates with the editor: a map, a monster, a wave table, an item, an operator. The
 // editor's copyright section (README「著作权声明」) says an Option belongs to the person who created it, and that

@@ -1,4 +1,5 @@
 // shared/waveAuthoring.js — authoring a workshop WAVE (每关出怪): order, time, count, interval and route.
+// (i18n-ignore-file: 工坊作者层的校验与推导文本 —— 给作者、编辑器与 AI 读的规则说明（编辑器有自己的中英词典，见 docs/EDITOR.md），不是客户端界面文案)
 //
 // A waves.json record is what a round actually spawns. Two of its fields are DERIVED from `spawns`
 // (tools/build-data.mjs:2043-2049) and they are NOT symmetric — reproducing that exactly is the point:

@@ -10,6 +10,7 @@
 
 import { parseRoomParam, parsePlaytestParam, DEFAULT_DIFFICULTY } from './screens/lobby.js';
 import { DIFFICULTIES } from '../../shared/constants.js';
+import { t } from '../../shared/i18n.js';
 
 /** Query parameters a deep link owns; all of them are stripped once the action has been consumed. */
 export const DEEP_LINK_PARAMS = ['room', 'playtest', 'difficulty'];
@@ -71,16 +72,16 @@ export async function runSoloPlaytest(netLike, storeLike, opts = {}) {
   const difficulty = DIFFICULTIES.includes(opts.difficulty) ? opts.difficulty : DEFAULT_DIFFICULTY;
   const notify = typeof opts.notify === 'function' ? opts.notify : () => {};
   if (inFlight) {
-    notify('试玩正在启动，请稍候', 'warn');
+    notify(t('试玩正在启动，请稍候'), 'warn');
     return false;
   }
   // Already sat down (a restored session, or a room opened while the grace timer ran): create nothing.
   if (s && (s.room || s.match?.public)) {
-    notify('你已在其他同盟中，请先离开当前同盟', 'warn');
+    notify(t('你已在其他同盟中，请先离开当前同盟'), 'warn');
     return false;
   }
   if (!s || !s.session?.entered || netLike.status !== 'online') {
-    notify('尚未连接到服务器，请稍候', 'warn');
+    notify(t('尚未连接到服务器，请稍候'), 'warn');
     return false;
   }
   inFlight = true;
@@ -93,7 +94,7 @@ export async function runSoloPlaytest(netLike, storeLike, opts = {}) {
   } catch (err) {
     // The refusal text is the toast layer's job (ui/toasts.js describeError) — it is not part of this module.
     if (typeof opts.notifyError === 'function') opts.notifyError(err);
-    else notify(String(err?.message || err || '发生未知错误'), 'error');
+    else notify(String(err?.message || err || t('发生未知错误')), 'error');
     return false;
   } finally {
     inFlight = false;

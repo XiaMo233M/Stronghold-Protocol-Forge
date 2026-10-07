@@ -1,4 +1,5 @@
 // shared/itemAuthoring.js — authoring a workshop EQUIPMENT item.
+// (i18n-ignore-file: 工坊作者层的校验与推导文本 —— 给作者、编辑器与 AI 读的规则说明（编辑器有自己的中英词典，见 docs/EDITOR.md），不是客户端界面文案)
 //
 // An items.json record has ~30 fields, and most of them come from game tables a pack author does not have (the trap
 // table, the shop table, the season's research notes). What an author DOES know is what the item says and does: its

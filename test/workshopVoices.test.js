@@ -32,10 +32,10 @@ const refused = (extra, opts, error) => {
 
 describe('workshop voice packs (预留的助战语音包)', () => {
   test('an operator declares lines per slot; the paths stay relative to assets/', () => {
-    const r = norm({ voices: { char_ws_a: { select: ['voice/char_ws_a/select1.mp3'], deploy: ['voice/char_ws_a/deploy1.mp3', 'voice/char_ws_a/deploy2.mp3'] } } });
+    const r = norm({ voices: { char_ws_a: { select: ['voice/char_ws_a/select1.mp3'], place: ['voice/char_ws_a/place1.mp3', 'voice/char_ws_a/place2.mp3'] } } });
     assert.equal(r.ok, true, r.detail);
     assert.deepEqual(r.pack.voices, {
-      char_ws_a: { select: ['voice/char_ws_a/select1.mp3'], deploy: ['voice/char_ws_a/deploy1.mp3', 'voice/char_ws_a/deploy2.mp3'] },
+      char_ws_a: { select: ['voice/char_ws_a/select1.mp3'], place: ['voice/char_ws_a/place1.mp3', 'voice/char_ws_a/place2.mp3'] },
     });
   });
 
@@ -45,7 +45,7 @@ describe('workshop voice packs (预留的助战语音包)', () => {
   });
 
   test('the slot vocabulary is the ONE shared list (client, asset pipeline and this validator read it)', () => {
-    assert.deepEqual([...VOICE_SLOTS], ['start', 'select', 'deploy', 'battle', 'win', 'lose']);
+    assert.deepEqual([...VOICE_SLOTS], ['start', 'faceEnemy', 'select', 'place', 'skill1', 'skill2', 'skill3', 'skill4', 'resultFour', 'resultThree', 'resultTwo', 'resultLose']);
     for (const slot of VOICE_SLOTS) {
       assert.equal(norm({ voices: { c: { [slot]: ['v.mp3'] } } }).ok, true, slot);
     }
@@ -54,36 +54,36 @@ describe('workshop voice packs (预留的助战语音包)', () => {
   });
 
   test('a single path may be written as a string; duplicates collapse', () => {
-    const r = norm({ voices: { c: { deploy: 'v.mp3' } } });
-    assert.deepEqual(r.pack.voices, { c: { deploy: ['v.mp3'] } });
-    assert.deepEqual(norm({ voices: { c: { deploy: ['a.mp3', 'a.mp3', 'b.mp3'] } } }).pack.voices.c.deploy, ['a.mp3', 'b.mp3']);
+    const r = norm({ voices: { c: { place: 'v.mp3' } } });
+    assert.deepEqual(r.pack.voices, { c: { place: ['v.mp3'] } });
+    assert.deepEqual(norm({ voices: { c: { place: ['a.mp3', 'a.mp3', 'b.mp3'] } } }).pack.voices.c.place, ['a.mp3', 'b.mp3']);
   });
 
   test('every way a declaration is refused', () => {
     const cases = [
-      [{ voices: { c: { deploy: ['../secret.mp3'] } } }, { hasAssets: true }, 'VOICE_PATH_UNSAFE'],
-      [{ voices: { c: { deploy: ['/abs.mp3'] } } }, { hasAssets: true }, 'VOICE_PATH_UNSAFE'],
-      [{ voices: { c: { deploy: ['a\\b.mp3'] } } }, { hasAssets: true }, 'VOICE_PATH_UNSAFE'],
-      [{ voices: { c: { deploy: ['C:/abs.mp3'] } } }, { hasAssets: true }, 'VOICE_PATH_UNSAFE'],
-      [{ voices: { c: { deploy: [] } } }, { hasAssets: true }, 'VOICE_EMPTY'],
-      [{ voices: { c: { deploy: ['./ok.mp3'] } } }, { hasAssets: true }, 'VOICE_PATH_UNSAFE'],
-      [{ voices: { c: { deploy: ['ok.mp3'] } } }, { hasAssets: false }, 'VOICE_NEEDS_ASSETS'],
+      [{ voices: { c: { place: ['../secret.mp3'] } } }, { hasAssets: true }, 'VOICE_PATH_UNSAFE'],
+      [{ voices: { c: { place: ['/abs.mp3'] } } }, { hasAssets: true }, 'VOICE_PATH_UNSAFE'],
+      [{ voices: { c: { place: ['a\\b.mp3'] } } }, { hasAssets: true }, 'VOICE_PATH_UNSAFE'],
+      [{ voices: { c: { place: ['C:/abs.mp3'] } } }, { hasAssets: true }, 'VOICE_PATH_UNSAFE'],
+      [{ voices: { c: { place: [] } } }, { hasAssets: true }, 'VOICE_EMPTY'],
+      [{ voices: { c: { place: ['./ok.mp3'] } } }, { hasAssets: true }, 'VOICE_PATH_UNSAFE'],
+      [{ voices: { c: { place: ['ok.mp3'] } } }, { hasAssets: false }, 'VOICE_NEEDS_ASSETS'],
       [{ voices: [] }, { hasAssets: true }, 'VOICE_BAD_SHAPE'],
-      [{ voices: { 'bad id!': { deploy: ['ok.mp3'] } } }, { hasAssets: true }, 'VOICE_BAD_CHAR_ID'],
-      [{ voices: { c: 'deploy.mp3' } }, { hasAssets: true }, 'VOICE_BAD_SHAPE'],
+      [{ voices: { 'bad id!': { place: ['ok.mp3'] } } }, { hasAssets: true }, 'VOICE_BAD_CHAR_ID'],
+      [{ voices: { c: 'place.mp3' } }, { hasAssets: true }, 'VOICE_BAD_SHAPE'],
     ];
     for (const [extra, opts, error] of cases) refused(extra, opts, error);
   });
 
   test('the licence gate comes first: a pack with art and no licence never reaches the voice check', () => {
-    const r = normalizePackManifest({ id: 'my-pack', content: ['chess'], voices: { c: { deploy: ['ok.mp3'] } } }, 'my-pack', { hasAssets: true });
+    const r = normalizePackManifest({ id: 'my-pack', content: ['chess'], voices: { c: { place: ['ok.mp3'] } } }, 'my-pack', { hasAssets: true });
     assert.equal(r.ok, false);
     assert.equal(r.error, 'ASSETS_NEED_LICENSE', 'pack media — audio included — is the pack author to license');
   });
 
   test('a pack whose ONLY contribution is voice lines is a pack (content may be empty)', () => {
     const r = normalizePackManifest(
-      { id: 'char-voice', content: [], license: 'CC0-1.0', voices: { char_ws_v: { select: ['voice/v/1.mp3'], win: ['voice/v/w.mp3'] } } },
+      { id: 'char-voice', content: [], license: 'CC0-1.0', voices: { char_ws_v: { select: ['voice/v/1.mp3'], resultThree: ['voice/v/w.mp3'] } } },
       'char-voice', { hasAssets: true });
     assert.equal(r.ok, true, r.detail);
     assert.deepEqual(r.pack.content, []);
@@ -109,9 +109,9 @@ describe('工坊语音: 汇总与并表 (the index and the overlay merge)', () =
   };
 
   test('the index holds exactly the URLs the media route answers, percent-encoded', () => {
-    const index = workshopVoiceIndex([pack('a-pack', { char_ws_a: { deploy: ['voice/a#b c.mp3', 'voice/plain.mp3'] } })]);
+    const index = workshopVoiceIndex([pack('a-pack', { char_ws_a: { place: ['voice/a#b c.mp3', 'voice/plain.mp3'] } })]);
     assert.deepEqual(index, {
-      char_ws_a: { deploy: ['/workshop-assets/a-pack/voice/a%23b%20c.mp3', '/workshop-assets/a-pack/voice/plain.mp3'] },
+      char_ws_a: { place: ['/workshop-assets/a-pack/voice/a%23b%20c.mp3', '/workshop-assets/a-pack/voice/plain.mp3'] },
     });
     // no packs / a pack with no voices → an empty map, never null
     assert.deepEqual(workshopVoiceIndex([]), {});
@@ -128,14 +128,14 @@ describe('工坊语音: 汇总与并表 (the index and the overlay merge)', () =
   test('the overlay APPENDS pack lines to the manifest the client reads, and reports them', () => {
     const { data, report } = applyWorkshop(BASE, [pack('v-pack', {
       char_1012_skadi2: { select: ['voice/alt.mp3'] },
-      char_ws_new: { win: ['voice/w.mp3'], lose: ['voice/l.mp3'] },
+      char_ws_new: { resultThree: ['voice/w.mp3'], resultLose: ['voice/l.mp3'] },
     })]);
     assert.deepEqual(data.assets.audio.voice.char_1012_skadi2.select,
       ['/assets/voice/skadi2/select1.mp3', '/workshop-assets/v-pack/voice/alt.mp3'],
       'an operator the official data already has keeps its own lines and gains the pack\'s');
     assert.deepEqual(data.assets.audio.voice.char_ws_new, {
-      win: ['/workshop-assets/v-pack/voice/w.mp3'],
-      lose: ['/workshop-assets/v-pack/voice/l.mp3'],
+      resultThree: ['/workshop-assets/v-pack/voice/w.mp3'],
+      resultLose: ['/workshop-assets/v-pack/voice/l.mp3'],
     }, 'a 助战 operator the pack adds has no official lines to keep');
     // nothing else of assets.json is touched, and the input is never mutated
     assert.deepEqual(data.assets.ui, BASE.assets.ui);
@@ -146,7 +146,7 @@ describe('工坊语音: 汇总与并表 (the index and the overlay merge)', () =
   });
 
   test('an install without an audio manifest is REPORTED, not silently dropped', () => {
-    const { data, report } = applyWorkshop({}, [pack('v-pack', { c: { deploy: ['v.mp3'] } })]);
+    const { data, report } = applyWorkshop({}, [pack('v-pack', { c: { place: ['v.mp3'] } })]);
     assert.equal(data.assets, undefined, 'there is nowhere to publish to');
     assert.equal(report.errors.length, 1);
     assert.equal(report.errors[0].pack, 'v-pack');

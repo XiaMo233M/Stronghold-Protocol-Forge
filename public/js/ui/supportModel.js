@@ -7,6 +7,7 @@
 // server sent (`room.state.support`) and DROPS nothing without reporting it.
 
 import { checkSupport, SUPPORT_LIMITS } from '../../../shared/support.js';
+import { t } from '../../../shared/i18n.js';
 
 /** localStorage pref key (store.js loadPref/savePref). */
 export const SUPPORT_PREF = 'support';
@@ -33,7 +34,7 @@ export function readCatalog(raw) {
   for (const t of tiers) slots[t.tier] = t.slots;
   return {
     enabled: raw.enabled === true && tiers.length > 0,
-    label: typeof raw.label === 'string' && raw.label ? raw.label : '助战',
+    label: typeof raw.label === 'string' && raw.label ? raw.label : t('助战'),
     tiers,
     capacity: tiers.reduce((n, t) => n + t.slots, 0),
     slots,
@@ -134,6 +135,6 @@ export function checkSelection(catalog, entries, getChess) {
 /** A one-line summary for the status area: `5级 1/2 · 6级 0/1`. */
 export function usageLine(catalog, entries) {
   const usage = tierUsage(catalog, entries);
-  if (!usage.length) return '本服务器未开启助战';
-  return usage.map((u) => `${u.tier}级 ${u.used}/${u.slots}`).join(' · ');
+  if (!usage.length) return t('本服务器未开启助战');
+  return usage.map((u) => t('{tier}级 {used}/{slots}', { tier: u.tier, used: u.used, slots: u.slots })).join(' · ');
 }
