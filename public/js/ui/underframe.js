@@ -16,7 +16,8 @@
 // the glyph cut out — tinted in the client. Drawn as is they read as a plain white block, so each button is a coloured
 // octagon plate: the sprite is used as a CSS mask over the plate colour (出售 amber like every money action, 销毁 /
 // 撤退 red) on a dark backing that shows through the glyph cut-out. Without the local sprites the same plate carries
-// the built-in glyph.
+// the built-in glyph. A CSS mask whose image has not loaded yet paints nothing, which would show that dark backing
+// alone — so the sprites are fetched ahead of the first tap (warmPlateMasks, called by the battle screen).
 //
 // TempRowNotice (user playtest #3 item 3) — the other board-anchored overlay of the prep: while the temp overflow row
 // (临时整备区, row 8, the 5 pads in front of the bench) holds pieces, a dashed red frame around that row and a label at
@@ -53,6 +54,38 @@ export function PlateIcon({ sprite, glyph, tone }) {
       style=${url ? `--uf-mask:url("${url}")` : ''} data-sprite=${url ? sprite : null} aria-hidden="true">
     ${url ? null : html`<${GIcon} name=${glyph} class="uframe__pglyph" />`}
   </span>`;
+}
+
+/** The plate sprites of this module (local-client art, group `ui/battle`). */
+const PLATE_SPRITES = Object.freeze(['icon_sell', 'icon_destory']);
+/** URLs warmed by warmPlateMasks (one fetch per page). */
+const warmedMasks = new Set();
+
+/**
+ * Fetch the plate sprites ahead of the first 出售 / 销毁. The tone colour is painted through the sprite as a CSS mask,
+ * and a mask image that has not loaded yet paints NOTHING — the plate shows its dark `--uf-ink` backing instead (with
+ * the sprite's response held back 3 s the plate reads rgb(33, 24, 0) the whole time, then rgb(147, 101, 27)). The URL
+ * lives in an inline `--uf-mask`, so the browser asks for it only once the first plate paints; warming the ~1 KB
+ * sprites when the battle screen mounts gets them into the cache before the player's first tap.
+ *
+ * Idempotent, and a no-op until the local-art manifest is loaded — call it again when it arrives (`localAsset` reads
+ * `data.get('local')`).
+ * @returns {string[]} the URLs fetched by this call (empty when already warm, or without a DOM)
+ */
+export function warmPlateMasks() {
+  const out = [];
+  if (typeof Image === 'undefined') return out;      // no DOM (Node tests): nothing to warm
+  for (const sprite of PLATE_SPRITES) {
+    const url = localAsset('ui/battle', sprite);
+    if (!url || warmedMasks.has(url)) continue;
+    warmedMasks.add(url);
+    // Asking for the image is the whole point: a mask whose image is still in flight paints nothing.
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = url;
+    out.push(url);
+  }
+  return out;
 }
 
 /**

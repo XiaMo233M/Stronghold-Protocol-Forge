@@ -124,14 +124,14 @@ const ARTS_GROUPS = Object.freeze({
  * @param {string|string[]} urls
  * @param {number} [bytes] expected size
  */
-function alt(rel, urls, bytes) {
+export function alt(rel, urls, bytes) {
   const a = { rel, urls: [].concat(urls).filter((u) => typeof u === 'string' && u), kind: kindOf(rel) };
   if (Number.isInteger(bytes) && bytes > 0) a.bytes = bytes;
   return a;
 }
 
-/** A leaf with the given alternatives (null alternatives are dropped). */
-function leaf(...alts) {
+/** A leaf with the given alternatives (null alternatives are dropped). Exported for the opt-in voice pipeline. */
+export function leaf(...alts) {
   const list = alts.flat().filter((a) => a && a.urls && a.urls.length);
   return list.length ? { alts: list } : null;
 }

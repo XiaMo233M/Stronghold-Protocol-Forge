@@ -12,10 +12,17 @@
 // intents (e.g. `g.band {bandId: "constructor"}`) can never resolve to inherited Object.prototype members.
 // Every getter returns null for unknown ids / missing files and takes an optional data object (default:
 // the process-wide getData() singleton).
+//
+// 创意工坊 overlay (docs/WORKSHOP.md): before the result is frozen, every pack under `workshop/` is merged in
+// (shared/workshop.js applyWorkshop) — additive, and an official id is only replaced when the pack declares it in
+// `pack.json.overrides`. `data/*.json` itself is never touched, so the official data stays byte-identical and a plain
+// install (no `workshop/` directory) behaves exactly as it did before the feature.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadWorkshop, WORKSHOP_DIR } from './workshop.js';
+import { applyWorkshop, workshopSummary } from '../shared/workshop.js';
 
 /** Repository root (…/Stronghold-Protocol). */
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -55,7 +62,7 @@ export function deepFreeze(root) {
  * @param {{ log?: { warn: Function, error: Function, info?: Function }, expected?: readonly string[] }} [opts]
  * @returns {Readonly<Record<string, any>>}
  */
-export function loadData(dir = DATA_DIR, { log = console, expected = DATA_FILES } = {}) {
+export function loadData(dir = DATA_DIR, { log = console, expected = DATA_FILES, workshopDir = WORKSHOP_DIR } = {}) {
   /** @type {Record<string, any>} */
   const out = {};
   let names = [];
@@ -77,6 +84,19 @@ export function loadData(dir = DATA_DIR, { log = console, expected = DATA_FILES 
   }
   const missing = expected.filter((k) => !(k in out));
   if (missing.length) log.warn(`[data] missing data files: ${missing.map((k) => k + '.json').join(', ')}`);
+  // 创意工坊 overlay: merged in here, i.e. BEFORE deepFreeze, so every consumer sees one ordinary merged object and no
+  // downstream code has to know workshop content exists. `workshopDir: null` skips the feature entirely (tests).
+  if (workshopDir) {
+    const loaded = loadWorkshop(workshopDir, { log });
+    if (loaded.packs.length) {
+      const { data: merged, report } = applyWorkshop(out, loaded.packs);
+      for (const [k, v] of Object.entries(merged)) out[k] = v;
+      log.info?.(`[workshop] applied ${loaded.packs.length} pack(s): ${workshopSummary(report)}`);
+      for (const e of report.errors) log.warn?.(`[workshop] ${e.pack}: ${e.reason}`);
+      // 干员没有模型 = 试玩里画成一张头像贴图（游戏自己不会报错，所以这行日志往往是唯一的线索）
+      for (const l of report.looks || []) log.warn?.(`[workshop] ${l.pack}: ${l.reason}`);
+    }
+  }
   return deepFreeze(out);
 }
 
@@ -88,8 +108,8 @@ let singleton = null;
  * @param {{ dir?: string, log?: object }} [opts]
  * @returns {Readonly<Record<string, any>>}
  */
-export function getData({ dir = DATA_DIR, log = console } = {}) {
-  if (!singleton) singleton = loadData(dir, { log });
+export function getData({ dir = DATA_DIR, log = console, workshopDir = WORKSHOP_DIR } = {}) {
+  if (!singleton) singleton = loadData(dir, { log, workshopDir });
   return singleton;
 }
 

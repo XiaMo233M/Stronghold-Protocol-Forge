@@ -16,7 +16,9 @@
 //            (where a merge's elite goes — a consumed deployed copy's tile, else the hand — needs the state before the
 //            merge: audit.js checks it per merge)
 //   bonds    ps.bonds equals a fresh computeBonds() (every mutation recomputed them); every bond's layers 0 … BOND_LAYER_CAP
-//   shop     slot count follows the rolled layout; ids known; banned chess never offered by the shop / rewards
+//   shop     slot count follows the rolled layout; ids known; banned chess never offered by the shop / rewards — the
+//            only exception is an operator a player BROUGHT as 助战 (shared/support.js: it keeps one pool copy and is
+//            marked `support` on its slot), because banning a shop roll must not disable a support
 //   elim.    an eliminated player owns nothing (board, hand, temp, shop, offers, bounties, funds)
 //   match    phase known; teamLp / boss pool within range; combat fields match the alive players
 
@@ -164,7 +166,11 @@ export function collectViolations(m, { limit = 25 } = {}) {
         if (!s) return;
         if (s.kind === 'chess' ? !gd.chess(s.id) : !gd.item(s.id)) fail(`${id}: shop slot ${i} unknown ${s.kind} ${s.id}`);
         if (!Number.isInteger(s.basePrice) || s.basePrice < 0) fail(`${id}: shop slot ${i} basePrice ${s.basePrice}`);
-        if (s.kind === 'chess' && banned.has(gd.baseIdOf(s.id))) fail(`${id}: banned chess ${s.id} in the shop`);
+        // 助战是这条规则唯一的例外（shared/support.js）：本局随机禁用的是**抽卡内容**，而带上的助战必须买得到，
+        // 所以它的池子拷贝能出现在商店里 —— 前提是它真的带着那份助战拷贝（pool.isSupport），不是被禁了还漏出来。
+        if (s.kind === 'chess' && banned.has(gd.baseIdOf(s.id)) && !(s.support === true && m.pool.isSupport(gd.baseIdOf(s.id)))) {
+          fail(`${id}: banned chess ${s.id} in the shop`);
+        }
         if (s.kind === 'chess' && gd.chess(s.id)?.isDiy && !(ps.diyStock && ps.diyStock.has(gd.baseIdOf(s.id)))) fail(`${id}: 自选 slot ${s.id} in the shop without its stock`);
       });
       for (const o of ps.offers) {

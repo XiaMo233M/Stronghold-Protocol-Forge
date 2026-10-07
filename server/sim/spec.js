@@ -73,6 +73,12 @@ export function buildBattleSpec(o = {}) {
     bossId: o.bossId ?? null,
     content: o.content ?? 'full',
     boss: bossLike && o.boss ? { poolHp: Number(o.boss.poolHp) || 0, poolMax: Number(o.boss.poolMax) || 1 } : null,
+    // 工坊行为层 (docs/WORKSHOP.md §4): the kit MODULES this field needs, as JSON-safe { id, pack, url } records. A
+    // function cannot cross the wire, so a client-simulated battle imports these URLs and rebuilds the same kit map the
+    // server uses for verification (public/js/battle/runner.js loadSpecKits). Empty for a plain install.
+    workshopKits: (Array.isArray(o.workshopKits) ? o.workshopKits : [])
+      .filter((m) => m && typeof m.id === 'string' && typeof m.url === 'string')
+      .map((m) => ({ id: m.id, pack: typeof m.pack === 'string' ? m.pack : null, url: m.url })),
   };
   const out = JSON.parse(JSON.stringify(spec, specReplacer));
   for (const p of out.players) for (const u of (p && Array.isArray(p.units) ? p.units : [])) if (u && typeof u === 'object') sanitizeUnitLoadout(u);
@@ -154,6 +160,10 @@ export function createBattleFromSpec(spec, dataSource, opts = {}) {
   if (opts.logger) battleOpts.logger = opts.logger;
   if (opts.recordEvents === false) battleOpts.recordEvents = false;
   if (opts.quiet) battleOpts.quiet = true;
+  // 工坊行为层 (docs/WORKSHOP.md §4): a per-battle kit map injected through the sanctioned hook — `Battle opts.kits`
+  // takes precedence over the built-in registry (server/sim/content/index.js setupUnitKit). The server passes the map it
+  // loaded from the packs; the browser passes the map it built from `spec.workshopKits`.
+  if (opts.kits && typeof opts.kits === 'object') battleOpts.kits = opts.kits;
   const b = new BattleClass(battleOpts);
   b.battleId = s.battleId ?? null;
   return b;

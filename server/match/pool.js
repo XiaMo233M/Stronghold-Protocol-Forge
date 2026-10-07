@@ -53,12 +53,16 @@ function sample(arr, n, rng) {
 export class SharedPool {
   /**
    * @param {import('./gamedata.js').GameData} gd
-   * @param {{ banned?: Iterable<string> }} [opts]
+   * @param {{ banned?: Iterable<string>, support?: Iterable<string> }} [opts] `support` = the operators the players
+   *   brought as 助战 (shared/support.js): each one gets ONE extra copy for this match, and is added even when the
+   *   match's random bans took it out of the pool — a brought operator must be purchasable, which is the whole point of
+   *   borrowing it. The extra copy belongs to the MATCH, not to the player who brought it (the pool is shared; in co-op
+   *   a teammate may buy it too). `cap` and `left` both grow, so the pool invariant (`left + Σ held == cap`) holds.
    */
-  constructor(gd, { banned = [] } = {}) {
+  constructor(gd, { banned = [], support = [] } = {}) {
     this.gd = gd;
     const ban = new Set(banned);
-    /** @type {Map<string, { cap: number, left: number, tier: number }>} */
+    /** @type {Map<string, { cap: number, left: number, tier: number, support?: boolean }>} */
     this.entries = new Map();
     for (const id of gd.visibleChess) {
       if (ban.has(id)) continue;
@@ -66,11 +70,22 @@ export class SharedPool {
       if (cap <= 0) continue;
       this.entries.set(id, { cap, left: cap, tier: gd.tierOf(id) });
     }
+    /** 本局带进来的助战干员（去重、排序；只留真的能当助战的那些）。 */
+    this.support = [];
+    for (const id of [...new Set(support)].sort()) {
+      if (typeof id !== 'string' || !id || !gd.chess(id)) continue;
+      this.support.push(id);
+      const e = this.entries.get(id);
+      if (e) { e.cap += 1; e.left += 1; e.support = true; }
+      else this.entries.set(id, { cap: 1, left: 1, tier: gd.tierOf(id), support: true });
+    }
     this.banned = [...ban].sort();
   }
 
-  /** Whether a base chess is part of this match's pool (visible, not banned). */
+  /** Whether a base chess is part of this match's pool (visible, not banned — or brought as 助战). */
   has(baseId) { return this.entries.has(baseId); }
+  /** Whether this chess is in the pool because somebody brought it as 助战. */
+  isSupport(baseId) { return this.entries.get(baseId)?.support === true; }
   cap(baseId) { return this.entries.get(baseId)?.cap ?? 0; }
   left(baseId) { return this.entries.get(baseId)?.left ?? 0; }
 

@@ -68,7 +68,7 @@ describe('official emotes in the browser', { skip: !ENABLED && 'set SP_E2E=1 (an
         return req.continue();
       });
     }
-    await page.goto(`${base}${url}`, { waitUntil: 'networkidle0' });
+    await page.goto(`${base}${url}`, { waitUntil: 'load' });
     return { page, problems };
   }
 
@@ -90,7 +90,7 @@ describe('official emotes in the browser', { skip: !ENABLED && 'set SP_E2E=1 (an
   test('UI kit: pager per theme, picture-only, swipe / keys / dots, cooldown, remembered theme, 3 s bubble', { skip: !HAS_ART && 'no official emote art (neither the local extraction nor the fetched copies)' }, async () => {
     const { page, problems } = await open('/dev/uikit.html');
     await page.evaluate(() => localStorage.removeItem('sp.pref.emoteTheme'));
-    await page.reload({ waitUntil: 'networkidle0' });
+    await page.reload({ waitUntil: 'load' });
     await page.waitForSelector('#emo-stage .ewheel__panel');
     await page.$eval('#emo-stage', (el) => el.closest('section').scrollIntoView());
     await sleep(500);
@@ -155,7 +155,7 @@ describe('official emotes in the browser', { skip: !ENABLED && 'set SP_E2E=1 (an
     await page.click('#emo-stage .ewheel__btn');
     await sleep(200);
     assert.equal((await wheelState(page, '#emo-stage')).theme, EMOTE_THEMES[4].themeId, 'reopens on the last used theme');
-    await page.reload({ waitUntil: 'networkidle0' });
+    await page.reload({ waitUntil: 'load' });
     await page.waitForSelector('#emo-stage .ewheel__panel');
     assert.equal((await wheelState(page, '#emo-stage')).theme, EMOTE_THEMES[4].themeId, 'remembered across reloads');
 
@@ -173,7 +173,7 @@ describe('official emotes in the browser', { skip: !ENABLED && 'set SP_E2E=1 (an
   test('wheel: one trackpad swipe (momentum included) turns one page, a mouse-wheel notch turns one page', { skip: !HAS_ART && 'no official emote art (neither the local extraction nor the fetched copies)' }, async () => {
     const { page, problems } = await open('/dev/uikit.html');
     await page.evaluate(() => localStorage.removeItem('sp.pref.emoteTheme'));
-    await page.reload({ waitUntil: 'networkidle0' });
+    await page.reload({ waitUntil: 'load' });
     await page.waitForSelector('#emo-stage .ewheel__panel');
     await page.$eval('#emo-stage', (el) => el.scrollIntoView({ block: 'center' }));
     await sleep(300);
@@ -272,7 +272,7 @@ describe('official emotes in the browser', { skip: !ENABLED && 'set SP_E2E=1 (an
     const { page, problems } = await open('/dev/uikit.html');
     await page.setViewport({ width: 1280, height: 720, hasTouch: true, isMobile: false });
     await page.evaluate(() => localStorage.removeItem('sp.pref.emoteTheme'));
-    await page.reload({ waitUntil: 'networkidle0' });
+    await page.reload({ waitUntil: 'load' });
     await page.waitForSelector('#emo-stage .ewheel__panel');
     await page.$eval('#emo-stage', (el) => el.scrollIntoView({ block: 'center' }));
     await sleep(300);
@@ -303,7 +303,7 @@ describe('official emotes in the browser', { skip: !ENABLED && 'set SP_E2E=1 (an
       ignore: [/nope_404\.png/, /\/assets\/ui\/emoticon\//, /Failed to load resource/],
     });
     await page.evaluate(() => localStorage.removeItem('sp.pref.emoteTheme'));
-    await page.reload({ waitUntil: 'networkidle0' });
+    await page.reload({ waitUntil: 'load' });
     await page.waitForSelector('#emo-stage .ewheel__panel');
     await sleep(400);
     const s = await wheelState(page, '#emo-stage');

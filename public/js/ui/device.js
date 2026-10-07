@@ -55,6 +55,10 @@ export function detectFeatures(win = globalThis) {
   const nav = win.navigator || {};
   const touchPoints = Number(nav.maxTouchPoints) || 0;
   const coarse = mq(win, '(any-pointer: coarse)') || mq(win, '(pointer: coarse)');
+  // `(pointer: coarse)` is the PRIMARY pointer — a phone or tablet. `(any-pointer: coarse)` only says a coarse pointer
+  // EXISTS, which is also true on a touchscreen laptop whose main input is still a mouse. The rotate hint needs the
+  // former; `coarse` keeps feeding sp-coarse (44 px tap targets), where "touch is available" is the right question.
+  const coarsePrimary = mq(win, '(pointer: coarse)');
   const fine = mq(win, '(any-pointer: fine)');
   const hover = mq(win, '(any-hover: hover)') || mq(win, '(hover: hover)');
   const el = doc?.documentElement;
@@ -65,6 +69,7 @@ export function detectFeatures(win = globalThis) {
   return {
     touch: touchPoints > 0 || coarse || 'ontouchstart' in (win || {}),
     coarse,
+    coarsePrimary,
     fine,
     hover,
     fullscreen: fsEnabled,
@@ -89,9 +94,11 @@ export function featureClasses(f) {
     'sp-fs': !!f.fullscreen,
     'sp-standalone': !!f.standalone,
     'sp-reduced-motion': !!f.reducedMotion,
-    // the rotate hint (css/theme.css) is for a device you can turn: a touch screen whose screen is not in landscape —
-    // never a desktop browser window that happens to be narrow, nor a split-view iPad
-    'sp-rotatable': !!f.coarse && f.screenLandscape !== true,
+    // The rotate hint (css/theme.css) is for a device you can TURN: a touch screen whose screen is not in landscape —
+    // never a desktop browser window that happens to be narrow, nor a split-view iPad. It keys off the PRIMARY pointer,
+    // not `f.coarse`: on a touchscreen laptop `(any-pointer: coarse)` is true while the machine still cannot be rotated,
+    // which is exactly the window the e2e test 'portrait phone: the rotate hint covers the page' guards against.
+    'sp-rotatable': !!f.coarsePrimary && f.screenLandscape !== true,
   };
 }
 

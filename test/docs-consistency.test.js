@@ -502,8 +502,12 @@ test('user playtest #6 (DESIGN §20): summons, skill triggers, blocking, push fo
   // the 机变 card and the card tap (§10 = §18.2 = §20.7)
   assert.match(sec(10), /a tap anywhere on the card, its confirm strip included, is the card's tap/);
   assert.match(sec(18), /Each card shows its full effect text \(§20\.7\)/);
-  // README: the test count stays in the right order of magnitude
-  assert.match(README, /约 31\d0 项/);
+  // README: the test count stays in the right order of magnitude. It is a ROUGH figure, so it is parsed and bounded
+  // rather than pinned to a decade — `约 31\d0 项` was the old form, and it fires the moment the suite grows past it,
+  // leaving only two ways out: let the README lie, or edit this regex. (The count is now ~3870.)
+  const approxTests = Number((README.match(/约 (\d+) 项/) || [])[1]);
+  assert.ok(Number.isFinite(approxTests) && approxTests >= 1000 && approxTests < 20000,
+    `README says 约 ${approxTests} 项, which is not the right order of magnitude for a suite of this size`);
 });
 
 test('user playtest #6 follow-up: a merge consuming a deployed copy puts the elite on that tile (code + research + META / PLAYING / SIM agree)', () => {

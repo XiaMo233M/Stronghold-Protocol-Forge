@@ -74,6 +74,9 @@ export function makeMatch(o = {}) {
     // simulation work of full-match suites; test/match/bot.test.js covers it
     botRehearsal: o.botRehearsal ?? 0,
     botSliceMs: o.botSliceMs,
+    // 工坊行为层 (test/workshopKits.test.js): a pack's kit map / module list, passed through to the battles
+    workshopKits: o.workshopKits,
+    workshopKitModules: o.workshopKitModules,
     clientCombat: o.clientCombat ?? false,
     verify: o.verify ?? 'off',
     headlessSliceMs: o.headlessSliceMs,

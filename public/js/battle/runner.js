@@ -107,6 +107,37 @@ export function compactHeld(list) {
 /** Data files the simulation reads (DataSource + content/support gameData()). */
 export const SIM_DATA_FILES = Object.freeze(['chess', 'enemies', 'tokens', 'stages', 'waves', 'bonds', 'items', 'garrisons', 'bands', 'effects', 'backups']);
 
+/**
+ * 工坊行为层 (docs/WORKSHOP.md §4): build the per-battle kit map from `spec.workshopKits` — the JSON-safe module list the
+ * server puts in the spec, because a function cannot cross the wire. The map is handed to createBattleFromSpec
+ * (`opts.kits`), which server/sim/content/index.js setupUnitKit consults BEFORE the built-in registry.
+ *
+ * This function is the reason the behaviour layer cannot be server-only: the server re-computes a client's battle result
+ * with the SAME kits, so a browser that silently fell back to the generic kit would produce a result the server rejects.
+ * A module that fails to load is reported and skipped rather than hidden.
+ * @param {{ workshopKits?: Array<{ id: string, url: string }> }|null} spec
+ * @returns {Promise<Record<string, Function>|undefined>} undefined when the field needs no workshop kits
+ */
+export async function loadSpecKits(spec) {
+  const list = Array.isArray(spec && spec.workshopKits) ? spec.workshopKits : [];
+  if (!list.length) return undefined;
+  /** @type {Record<string, Function>} */
+  const kits = {};
+  for (const m of list) {
+    // only a same-origin, root-relative URL is ever imported (the server built this list itself)
+    if (!m || typeof m.id !== 'string' || typeof m.url !== 'string' || !m.url.startsWith('/')) continue;
+    try {
+      const mod = await import(/* @vite-ignore */ m.url);
+      const fn = typeof mod.default === 'function' ? mod.default : (typeof mod.kit === 'function' ? mod.kit : null);
+      if (typeof fn === 'function') kits[m.id] = fn;
+      else console.warn('[runner] workshop kit has no exported kit function', m.id);
+    } catch (err) {
+      console.warn('[runner] workshop kit failed to load', m.id, err);
+    }
+  }
+  return kits;
+}
+
 /** Request failures after which a b.result counts as never delivered (re-sent on resume / b.start). */
 export const LOST_RESULT_CODES = Object.freeze(['DISCONNECTED', 'OFFLINE', 'TIMEOUT']);
 
@@ -624,7 +655,9 @@ export function createBattleRunner(deps) {
     if (seq !== startSeq) return; // superseded by a newer b.start
     let battle;
     try {
-      battle = sim.spec.createBattleFromSpec(msg.spec, sim.ds, { logger });
+      // 工坊行为层: rebuild the very kits the server verifies this field with (see loadSpecKits)
+      const kits = await loadSpecKits(msg.spec);
+      battle = sim.spec.createBattleFromSpec(msg.spec, sim.ds, { logger, kits });
     } catch (err) {
       console.warn('[runner] battle construction failed', err);
       loading = null;

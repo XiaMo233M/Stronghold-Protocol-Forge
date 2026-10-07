@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { presetCamera, OFFICIAL_PARAMS, parseCameraParam } from '../../public/js/render/projection.js';
 import { bandFor, boardArea, penShown, viewKind } from '../../public/js/render/app.js';
 import { AREAS } from '../../public/js/render/board3d/layout.js';
-import { underframeRect } from '../../public/js/ui/underframe.js';
+import { underframeRect, warmPlateMasks } from '../../public/js/ui/underframe.js';
 import { panelSide, panelSlots, chessLoadout, prepCamera, bondPopupPlace, BPOP } from '../../public/js/ui/gameLogic.js';
 import { checkButtons } from '../../public/js/ui/hud.js';
 import { DATA } from '../match/harness.js';
@@ -355,5 +355,48 @@ describe('§16: chessLoadout (m.private.loadout → skill / module shown)', () =
       }
     }
     assert.ok(changed >= 4, `${changed} module choices change the range (莫斯提马 SPC-X, 莱恩哈特 / 白面鸮 / 夕 defaults)`);
+  });
+});
+
+// ---- 7 (the tone layer's mask image) -------------------------------------------------------------------------------
+// The 出售 / 销毁 plate paints its tone colour through the official sprite as a CSS mask. A mask image that has not
+// loaded yet paints nothing, so before the warm-up the plate showed only its dark backing — the fallback variant of the
+// browser regression (test/ui/playtest2.e2e.test.js test 7) read rgb(18.8, 18.2, 12.2) instead of amber. This case pins
+// the warm-up: each sprite is fetched exactly once, and only once the local-art manifest lists it. One sequential case
+// because the warm set lives in the module (a URL is fetched once per page, which is the behaviour under test).
+describe('7: the plate sprites are fetched before the first tap', () => {
+  const SELL = '/assets/local/ui/battle/icon_sell.png';
+  const DESTROY = '/assets/local/ui/battle/icon_destory.png';
+
+  test('each sprite is fetched once, and only once the manifest lists it', async () => {
+    const { data } = await import('../../public/js/data.js');
+    const realFetch = globalThis.fetch;
+    const realImage = globalThis.Image;
+    const manifest = { groups: {} };
+    const srcs = [];
+    const load = async (groups) => { manifest.groups = groups; await data.invalidate('local'); await data.load('local'); };
+    try {
+      globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => manifest });
+      globalThis.Image = class { constructor() { this.decoding = ''; } set src(v) { srcs.push(v); } get src() { return ''; } };
+
+      await load({});
+      assert.deepEqual(warmPlateMasks(), [], 'no local-art manifest → a no-op (the plate keeps its built-in glyph)');
+      assert.deepEqual(srcs, []);
+
+      await load({ 'ui/battle': { icon_sell: { path: SELL } } });
+      assert.deepEqual(warmPlateMasks(), [SELL], 'the listed sprite is fetched');
+      assert.deepEqual(srcs, [SELL]);
+      assert.deepEqual(warmPlateMasks(), [], 'a second call refetches nothing');
+
+      await load({ 'ui/battle': { icon_sell: { path: SELL }, icon_destory: { path: DESTROY } } });
+      assert.deepEqual(warmPlateMasks(), [DESTROY], 'only the sprite that is not warm yet');
+      assert.deepEqual(srcs, [SELL, DESTROY], 'each URL reaches an Image exactly once');
+    } finally {
+      // Drop the fake manifest while the stub still answers (invalidate refetches, and the real fetch cannot resolve a
+      // relative URL outside the browser) — then put the real globals back.
+      await data.invalidate('local');
+      globalThis.fetch = realFetch;
+      globalThis.Image = realImage;
+    }
   });
 });
