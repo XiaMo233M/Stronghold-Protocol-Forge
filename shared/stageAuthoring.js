@@ -37,6 +37,80 @@ export const DEPLOY_RECTS = Object.freeze({
   bossRight: Object.freeze([1, 5, 10, 18]),
 });
 
+/**
+ * The three parts one 19×21 stage grid is made of — the owner's 2026-10-08 report 「为什么要把怪物等待区、普通对战、boss
+ * 对战写在一整张大图上，这很难分辨」.
+ *
+ * The grid really is one 19×21 field (that is how the official data and the engine are shaped: server/match/board.js
+ * FIELD + BOSS_ROW_OFFSET, server/match/waves.js PREVIEW pen anchors), so the three parts are **row bands of it**:
+ *
+ * - `pen`    rows 14–18: 怪物等待区（预览围栏）— where the incoming wave stands before it walks in
+ *            (waves.js: anchors (18,7) upper / (15,7) lower, `gateOf` picks the pen of a route start).
+ * - `normal` rows  9–12: 普通对战 —— the normal deployment field (board FIELD = 9–12 × cols 2–10).
+ * - `boss`   rows  1–5: boss 对战 —— the same board shape read from the boss rows (board row = stage row + 7,
+ *            `BOSS_ROW_OFFSET = −7`), split into a left and a right half for 联防 / 最终攻势.
+ * - `all`    the whole grid: kept for 专业检修 (the combined view the editor has always drawn).
+ *
+ * `deployRects` names the DEPLOY_RECTS entries that decide deployment *inside* that band — nothing outside them is
+ * deployable, however much a tile looks like a road (the owner's 「为什么这一行不能部署」 was exactly that).
+ */
+export const STAGE_ZONES = Object.freeze([
+  Object.freeze({ id: 'pen', rows: Object.freeze([14, 18]), deployRects: Object.freeze([]) }),
+  Object.freeze({ id: 'normal', rows: Object.freeze([9, 12]), deployRects: Object.freeze(['normal']) }),
+  Object.freeze({ id: 'boss', rows: Object.freeze([1, 5]), deployRects: Object.freeze(['bossLeft', 'bossRight']) }),
+  Object.freeze({ id: 'all', rows: Object.freeze([0, 18]), deployRects: Object.freeze(['normal', 'bossLeft', 'bossRight']) }),
+]);
+
+/** The zone with that id, or the whole-grid one (never throws: an unknown id is a stale UI state, not an error). */
+export function zoneOf(id) {
+  return STAGE_ZONES.find((z) => z.id === id) ?? STAGE_ZONES[STAGE_ZONES.length - 1];
+}
+
+/**
+ * Which deployment rects (names of DEPLOY_RECTS) contain stage tile (r, c) — `[]` when it is outside all three.
+ * This is the missing half of the deploy readout the editor shows: a tile's own `buildable` says what may stand on it,
+ * but only a rect says whether the field can be deployed on **there at all**.
+ */
+export function deployRectsAt(r, c) {
+  const out = [];
+  for (const [name, [r0, r1, c0, c1]] of Object.entries(DEPLOY_RECTS)) {
+    if (r >= r0 && r <= r1 && c >= c0 && c <= c1) out.push(name);
+  }
+  return out;
+}
+
+/**
+ * Roads (any LOW + buildable ALL/MELEE tile) that sit in a **deployment row** yet outside that row's deployment
+ * columns: enemies walk them, the author paints them as roads, and no operator can ever stand there.
+ *
+ * Only the rows a rect actually covers are reported — rows 14–18 (the 怪物等待区) and the wall/lane rows are simply
+ * never deployable, and flagging every tile of them would be noise rather than news. The official maps do carry a few
+ * such tiles (the mirrored half of the same row, rows 9–12 cols 11–20), so this is a HINT, not an error.
+ * @param {string[]} rows 19 glyph rows
+ * @param {Record<string, object>} legend glyph → { height, buildable, tileKey, … }
+ * @returns {number[][]} [[r, c], …]
+ */
+export function roadsOutsideDeployRects(rows, legend) {
+  const out = [];
+  const leg = isPlain(legend) ? legend : {};
+  const rects = Object.values(DEPLOY_RECTS);
+  for (let r = 0; r < (Array.isArray(rows) ? rows.length : 0); r++) {
+    const line = rows[r];
+    if (typeof line !== 'string') continue;
+    const covering = rects.filter(([r0, r1]) => r >= r0 && r <= r1);
+    if (!covering.length) continue;
+    for (let c = 0; c < line.length; c++) {
+      if (covering.some(([, , c0, c1]) => c >= c0 && c <= c1)) continue;
+      const t = leg[line[c]];
+      if (!t) continue;
+      if (t.height !== 'LOW' || (t.buildable !== 'ALL' && t.buildable !== 'MELEE')) continue;
+      if (DEPLOY_REFUSED_TILES.has(t.tileKey)) continue;
+      out.push([r, c]);
+    }
+  }
+  return out;
+}
+
 /** Device roles that block ground movement while active (tools/build-data.mjs:2147). */
 export const BLOCKING_ROLES = Object.freeze(['crate', 'platform', 'mound']);
 

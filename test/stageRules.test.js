@@ -15,6 +15,8 @@ import { normalizeLegendEntry, DEPLOY_REFUSED_TILES as ENGINE_REFUSED } from '..
 import {
   TILE_PALETTE, DEPLOY_REFUSED_TILES, groundRuleOf, sampleStageSpec, SAMPLE_STAGE_SPEC,
   deriveDeployTiles, validateStage, stageErrors, STAGE_ROWS, STAGE_COLS,
+  // v0.9.0 分区（业主：一张 19×21 里住着三个区，还有「部署矩形外的路放不了干员」这条困惑）
+  STAGE_ZONES, zoneOf, DEPLOY_RECTS, deployRectsAt, roadsOutsideDeployRects,
 } from '../shared/stageAuthoring.js';
 
 const GLYPH_LEGEND = {
@@ -351,5 +353,65 @@ describe('stage rules: the 样板地图 (SAMPLE_STAGE_SPEC)', () => {
     assert.equal(b.options.characterLimit, 8);
     assert.deepEqual(b.routes[0].start, [6, 2]);
     assert.equal(deriveStage(b).ok, true);
+  });
+});
+
+// ---- 分区与部署矩形（v0.9.0 业主的两个实测报告） ------------------------------------------------------------
+//
+// 「为什么要把怪物等待区、普通对战、boss 对战写在一整张大图上」与「怪物出口那一行的路为什么不能部署干员」：
+// 前者是**视图**问题（一张图里三个区，用行带切开），后者是**规则**问题（能不能部署 = 在不在部署矩形里 ×
+// 地块自己的属性）。两者都落在 shared/stageAuthoring.js，这一组测试把它们钉死。
+describe('分区视图: 一张 19×21 里住着三个区', () => {
+  test('三个区按行带切分，各自带着自己的部署矩形', () => {
+    // 三个矩形照抄官方派生（tools/build-data.mjs:2334）：普通 9–12 × 2–10，boss 两半 1–5 行的左右各 9 列。
+    // 注意 boss 那一带比引擎运行时的窗口（board.js 由 BOSS_ROW_OFFSET 读出 2–5 行）多一行 ——
+    // 这是官方派生表自己的口径，编辑器照它画才对得上 data/stages.json 里的 deployTiles。
+    assert.deepEqual(DEPLOY_RECTS.normal, [9, 12, 2, 10]);
+    assert.deepEqual(DEPLOY_RECTS.bossLeft, [1, 5, 2, 10]);
+    assert.deepEqual(DEPLOY_RECTS.bossRight, [1, 5, 10, 18]);
+    assert.deepEqual(STAGE_ZONES.map((z) => z.id), ['pen', 'normal', 'boss', 'all']);
+    assert.deepEqual(zoneOf('pen').rows, [14, 18]);
+    assert.deepEqual(zoneOf('normal').rows, [9, 12]);
+    assert.deepEqual(zoneOf('boss').rows, [1, 5]);
+    assert.deepEqual(zoneOf('all').rows, [0, 18]);
+    assert.deepEqual(zoneOf('normal').deployRects, ['normal']);
+    assert.deepEqual(zoneOf('boss').deployRects, ['bossLeft', 'bossRight']);
+    assert.deepEqual(zoneOf('pen').deployRects, [], '怪物等待区没有任何部署矩形');
+    assert.equal(zoneOf('nope').id, 'all', '不认识的 id 退回整图 —— UI 状态坏了也不该炸');
+  });
+
+  test('怪物等待区不在任何部署矩形里，普通与 boss 那一带在里面', () => {
+    assert.deepEqual(deployRectsAt(16, 7), [], 'row 14–18 是怪物等待区（预览围栏）');
+    assert.deepEqual(deployRectsAt(10, 5), ['normal']);
+    assert.deepEqual(deployRectsAt(3, 5), ['bossLeft']);
+    assert.deepEqual(deployRectsAt(3, 15), ['bossRight']);
+    assert.deepEqual(deployRectsAt(3, 10), ['bossLeft', 'bossRight'], '两半的分界列同时属于左右两半');
+    assert.deepEqual(deployRectsAt(0, 0), [], '裙边/墙那一行不算部署区');
+  });
+
+  test('部署行里落在矩形外的道路会被点出来（业主：那一行的路为什么放不了干员）', () => {
+    const allRoad = Array.from({ length: STAGE_ROWS }, () => 'r'.repeat(STAGE_COLS));
+    const out = roadsOutsideDeployRects(allRoad, GLYPH_LEGEND);
+    const rows = [...new Set(out.map(([r]) => r))].sort((a, b) => a - b);
+    assert.deepEqual(rows, [1, 2, 3, 4, 5, 9, 10, 11, 12], '只报有矩形的那些行');
+    assert.deepEqual(out.filter(([r]) => r === 9).map(([, c]) => c), [0, 1, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+      '普通那一带矩形是 2–10 列，其余都算在外面');
+    assert.deepEqual(out.filter(([r]) => r === 3).map(([, c]) => c), [0, 1, 19, 20],
+      'boss 那一带左右两半合起来是 2–18 列');
+    assert.equal(out.some(([r]) => r >= 14), false, '怪物等待区整片都不该能部署，报它只是噪音');
+  });
+
+  test('本来就不能部署的地块不算「画错的路」', () => {
+    const ground = Array.from({ length: STAGE_ROWS }, () => 'f'.repeat(STAGE_COLS));
+    assert.deepEqual(roadsOutsideDeployRects(ground, GLYPH_LEGEND), [], '普通地面 buildable NONE，不在报告里');
+    const deep = Array.from({ length: STAGE_ROWS }, () => 'x'.repeat(STAGE_COLS));
+    assert.deepEqual(roadsOutsideDeployRects(deep, GLYPH_LEGEND), [], '深水区被引擎拒部署，也不算作者画错的路');
+  });
+
+  test('样板地图自己的报告：它的道路确实跨到了普通矩形外', () => {
+    const spec = sampleStageSpec();
+    const out = roadsOutsideDeployRects(spec.rows, spec.tiles);
+    assert.ok(out.length > 0, '样板图 9–11 行的路伸到了 11 列以后');
+    assert.ok(out.every(([r]) => (r >= 1 && r <= 5) || (r >= 9 && r <= 12)), '报告只落在有矩形的行带上');
   });
 });

@@ -112,6 +112,8 @@
       <!-- 业主口径：绝不自动生成；只有点这一下才算。 -->
       <button id="btnAutoRoute" data-i18n="自动寻路">自动寻路</button>
     </div>
+    <!-- 分区工具条（业主 2026-10-08）：一张 19×21 里住着三个区，先选画哪一块，区外一律压暗。 -->
+    <div class="row" id="zoneBar" style="margin-bottom:8px"></div>
     <div class="stage-view" id="stageView">
       <canvas id="board" width="672" height="608" tabindex="0"></canvas>
       <!-- 3D 画布没有写死的尺寸：它绝对定位铺满这个盒子，由 stage3d.js 按盒子实测尺寸定备位图 -->
@@ -119,6 +121,8 @@
     </div>
     <div class="row" id="presets3d" hidden style="margin:0 0 6px"></div>
     <p class="hint" id="hint3d"></p>
+    <!-- 3D 相机的控制面：为什么没有「绕圈转」（它是游戏自己那台固定朝向的相机） -->
+    <p class="hint" id="hint3dRot" hidden></p>
     <p class="hint" id="cursor" data-i18n="把鼠标移到网格上看坐标。row 0 在最下面一行（和引擎一致）。">把鼠标移到网格上看坐标。row 0 在最下面一行（和引擎一致）。</p>
     <p class="hint" data-i18n="缩放平移：滚轮 / 双指缩放，中键拖或按住空格拖平移，「适应」复位。">缩放平移：滚轮 / 双指缩放，中键拖或按住空格拖平移，「适应」复位。</p>
     <div class="panel">

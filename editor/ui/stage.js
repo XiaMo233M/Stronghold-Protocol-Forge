@@ -11,9 +11,12 @@
 import { t, mountI18n } from './i18n.js';
 // 回合绑定：引擎真正读的是这张图自己的 rounds（先看它、再看模式的模板），逻辑在 stageRounds.js（纯函数，单独测）。
 import { roundRows, waveOptions, missingBindings, setRoundBinding, setBossRoundBinding } from './stageRounds.js';
-import { packSelect } from './packPicker.js';
+import { packSelect, createPack, autoPackId } from './packPicker.js';
 import { colorOfGlyph, deployRuleOf } from './terrain.js';
 import { createStageView3d } from './stage3d.js';
+// 这一张 19×21 的格子里其实住着三个区（业主 2026-10-08：「为什么要把怪物等待区、普通对战、boss 对战写在一整张大图上」）：
+// 分区定义、部署矩形与「道路画在了部署区外」的判定都在 shared/stageAuthoring.js 里，只有一份口径。
+import { STAGE_ZONES, zoneOf, DEPLOY_RECTS, deployRectsAt, roadsOutsideDeployRects } from '../../shared/stageAuthoring.js';
 
 const $ = (s) => document.querySelector(s);
 const CELL = 32;                 // 世界坐标里一格 32 单位：19 行 × 32 = 608 高，21 列 × 32 = 672 宽
@@ -37,6 +40,9 @@ const state = {
   // showPaths 默认 false：业主口径是「不许默认新建地图就有寻路」。它画的是引擎的流场寻路表，
   // 而那张表在没点过「自动寻路」之前根本不该被当成这张图的属性来展示。
   showDeploy: true, showPaths: false, showRoutes: true,
+  // 分区视图（2026-10-08 业主）：一张 19×21 的格子其实是三个区叠在一起（怪物等待区 14–18 / 普通对战 9–12 /
+  // boss 对战 1–5），默认只框住「普通对战」那一带，区外压暗；「整图」保留三合一的老画面给专业检修。
+  zone: 'normal', zoneTemplatePick: false,
   routeMotion: 'WALK', draft: [],
   message: null, busy: false, autorouting: false, playtesting: false,
   // 「以模板新建」的模板清单：点开才去拉（GET /api/stages/templates），失败就地报错。
@@ -44,6 +50,8 @@ const state = {
   // 视图：zoom 是**相对 fit-to-view 的倍数**（1 = 整张图正好塞进容器），panX/panY 是世界坐标的平移量。
   // 这样「缩放百分比」对作者是有意义的数字，而不是一个跟容器大小绑死的比例。
   zoom: 1, panX: 0, panY: 0, panning: false, space: false, boardW: 0, boardH: 0,
+  // 作者还没自己缩放过/平移过时，窗口尺寸变了就自动重新框一次（框当前分区）。他一旦动手，视图就归他。
+  autoFrame: true,
   // 3D 预览: the game's own renderer over this map, or a documented reason to stay 2D (no local art / no WebGL2 / …)
   mode3d: false, view3d: null, reason3d: null,
   // `?board=`（游戏客户端自己的约定，public/js/render/app.js）：`2d` 强制 2D 画布，`3d` 立刻打开 3D。
@@ -178,6 +186,7 @@ const viewScale = () => fitScale() * state.zoom;
 /** 复位成「整张图正好在视野里」：这是「适应」按钮，也是每次换图的起点。 */
 function resetView() {
   state.zoom = 1;
+  state.autoFrame = true;
   centerView();
 }
 function centerView() {
@@ -195,6 +204,56 @@ function clampView() {
   const loY = -overflowY - state.boardH * 0.5, hiY = state.boardH * 0.5;
   state.panX = Math.min(hiX, Math.max(loX, state.panX));
   state.panY = Math.min(hiY, Math.max(loY, state.panY));
+}
+
+/** 当前分区（永远返回一个合法的 zone：state.zone 只是 UI 状态，坏值不该让页面炸）。 */
+const currentZone = () => zoneOf(state.zone);
+
+/** 分区名与部署矩形名（中文原文进 i18n 词典查英文；写成函数是为了让 i18n 门禁在源码里看得见这些字面量）。 */
+const ZONE_LABEL = {
+  pen: () => t('怪物等待区（预览围栏）'),
+  normal: () => t('普通对战'),
+  boss: () => t('boss 对战'),
+  all: () => t('整图（专业检修）'),
+};
+const RECT_LABEL = {
+  normal: () => t('普通对战部署区'),
+  bossLeft: () => t('boss 左半部署区'),
+  bossRight: () => t('boss 右半部署区'),
+};
+const zoneLabel = (id) => (ZONE_LABEL[id] ?? ZONE_LABEL.all)();
+const rectLabel = (name) => (RECT_LABEL[name] ? RECT_LABEL[name]() : name);
+
+/**
+ * 把视口框到某一区。
+ *
+ * 竖直方向正好放下这一带（怪物等待区 5 行 / 普通对战 4 行 / boss 5 行），横向仍然要求整幅 21 列都在视野里 ——
+ * 场地是横着铺开的（普通对战那一带的部署矩形只占 2–10 列，但同一行还有别的区域），只按高度去 fit 会把左右两侧
+ * 推出屏幕，作者反而更看不清。区外照旧画出来，只是压暗。
+ */
+function fitZone(id = state.zone) {
+  const z = zoneOf(id);
+  const [r0, r1] = z.rows;
+  const bandH = (r1 - r0 + 1) * CELL;
+  const m = VIEW_MARGIN * 2;
+  const fit = Math.min((state.boardW - m) / WORLD_W, (state.boardH - m) / bandH);
+  // fitScale() 本身与 state.zoom 无关（它就是「整张图塞进画布」那个比例），所以这里直接拿它当基准。
+  state.zoom = Math.max(0.2, Math.min(8, fit / fitScale()));
+  const s = viewScale();
+  state.panX = (state.boardW - WORLD_W * s) / 2;
+  const bandCenter = (py(r0) + py(r1) + CELL) / 2;
+  state.panY = state.boardH / 2 - bandCenter * s;
+  state.autoFrame = true;
+  clampView();
+}
+
+/** 把某一格摆到视野中央（「跳到第一格」用它）：不动缩放，只平移，然后重画一次。 */
+function focusCell(r, c) {
+  const s = viewScale();
+  state.panX = state.boardW / 2 - (c * CELL + CELL / 2) * s;
+  state.panY = state.boardH / 2 - (py(r) + CELL / 2) * s;
+  clampView();
+  draw();
 }
 
 /** 世界坐标 → 画布 CSS 像素。绘制与命中测试都走这两个函数，所以任何缩放平移下它们都不可能对不上。 */
@@ -285,6 +344,35 @@ function draw() {
   ctx.strokeStyle = '#00000044';
   ctx.lineWidth = 1 / Math.max(0.35, viewScale());
   ctx.stroke();
+  // 分区叠层（业主 2026-10-08）：这一张格子里住着三个区，先把「不在当前区」的那些行压暗，
+  // 再把这一区自己的部署矩形描出来。为什么必须画矩形：能不能部署是**两件事** —— 这一格在不在部署矩形里，
+  // 以及这一格自己的可部署属性；只看地块颜色的话，「是路就能放干员」这个直觉会在矩形外当场失效。
+  const zoneNow = currentZone();
+  const [zr0, zr1] = zoneNow.rows;
+  if (zoneNow.id !== 'all') {
+    ctx.fillStyle = '#05070ad0';
+    const bandTop = py(zr1);
+    const bandBottom = py(zr0) + CELL;
+    if (bandTop > 0) ctx.fillRect(0, 0, WORLD_W, bandTop);
+    if (bandBottom < WORLD_H) ctx.fillRect(0, bandBottom, WORLD_W, WORLD_H - bandBottom);
+  }
+  if (state.showDeploy) {
+    for (const name of zoneNow.deployRects) {
+      const rect = DEPLOY_RECTS[name];
+      if (!rect) continue;
+      const [r0, r1, c0, c1] = rect;
+      const x = c0 * CELL; const y = py(r1); const w = (c1 - c0 + 1) * CELL; const h = (r1 - r0 + 1) * CELL;
+      ctx.strokeStyle = name === 'normal' ? '#4ec98ae0' : '#f0b357e0';
+      ctx.lineWidth = lineWorld(2);
+      // 虚线让矩形读起来像「叠层」而不是地形本身
+      ctx.setLineDash([lineWorld(7), lineWorld(5)]);
+      ctx.strokeRect(x, y, w, h);
+      ctx.setLineDash([]);
+      ctx.fillStyle = name === 'normal' ? '#4ec98a' : '#f0b357';
+      ctx.font = `${textWorld(11)}px sans-serif`;
+      ctx.fillText(rectLabel(name), x + 3 * textWorld(1), y + 12 * textWorld(1));
+    }
+  }
   const rec = state.preview?.record;
   // deploy tiles: what the sim derives, not what the author typed
   if (state.showDeploy && rec?.deployTiles) {
@@ -364,6 +452,11 @@ function draw() {
   ctx.fillStyle = '#9aa3b2';
   ctx.font = `${textWorld(10)}px monospace`;
   for (let r = 0; r < ROWS; r += 3) ctx.fillText(String(r), 2 * textWorld(1), py(r) + textWorld(11));
+  // 分区名贴在这一带的左上角：压暗之后作者一眼就知道自己在画哪一块（「整图」时就是整幅）
+  const zoneLabelNow = currentZone();
+  ctx.fillStyle = '#e8eaf0e6';
+  ctx.font = `bold ${textWorld(12)}px sans-serif`;
+  ctx.fillText(zoneLabel(zoneLabelNow.id), 3 * textWorld(1), py(zoneLabelNow.rows[1]) + 14 * textWorld(1));
 }
 
 /**
@@ -430,8 +523,10 @@ if (canvas) canvas.addEventListener('mousemove', (ev) => {
   if (panning) { movePan(ev.clientX, ev.clientY); return; }
   const cell = cellAt(ev);
   // 坐标提示与 HTML 里那句静态提示是同一条词条：鼠标离开网格时回到它，换语言时也由 applyI18n 重写。
+  // 业主 2026-10-08 的困惑是「这一行有路，为什么放不了干员」：坐标后面接上**这一格在不在部署矩形里**，
+  // 因为能不能部署是「矩形」×「地块属性」两件事，光看地块颜色永远看不出前一半。
   $('#cursor').textContent = cell
-    ? t('row {0}, col {1} · 字符 {2}', cell.r, cell.c, state.cells?.[cell.r]?.[cell.c] ?? '?')
+    ? t('row {0}, col {1} · 字符 {2} · {3}', cell.r, cell.c, state.cells?.[cell.r]?.[cell.c] ?? '?', cellDeployReadout(cell))
     : t('把鼠标移到网格上看坐标。row 0 在最下面一行（和引擎一致）。');
   if (painting && cell && paintAt(cell)) { draw(); schedulePreview(); }
 });
@@ -448,6 +543,7 @@ function zoomAt(px, pyy, factor) {
   const wx = (px - state.panX) / before;
   const wy = (pyy - state.panY) / before;
   state.zoom = nx;
+  state.autoFrame = false;
   const s = viewScale();
   state.panX = px - wx * s;
   state.panY = pyy - wy * s;
@@ -459,6 +555,7 @@ const zoomCenter = (factor) => zoomAt(state.boardW / 2, state.boardH / 2, factor
 function beginPan(x, y) {
   panning = { x, y };
   state.panning = true;
+  state.autoFrame = false;
   canvas.style.cursor = 'grabbing';
 }
 function movePan(x, y) {
@@ -658,6 +755,26 @@ function deployOutcome(entry, options) {
     default: return t('不可部署');
   }
 }
+
+/**
+ * 悬停那一行里「这一格到底能不能部署」的答案。
+ *
+ * 引擎的判定是**两件事相乘**：这一格在不在部署矩形里（DEPLOY_RECTS：普通 9–12×2–10、boss 1–5 左右各半），
+ * 以及地块自己的高度/可部署属性。作者只画道路、只看颜色时，第二件看得见、第一件看不见 —— 于是就有了
+ * 「怪物出口那一行的路为什么放不了干员」。这里把两件事一起说出来。
+ */
+function cellDeployReadout(cell) {
+  const entry = state.spec?.tiles?.[state.cells?.[cell.r]?.[cell.c]];
+  const rule = deployRuleOf(entry, optionsOf());
+  const ruleText = rule === 'air' ? t('地图外（空气）')
+    : rule === 'melee' ? t('可放地面干员（近战位）')
+      : rule === 'rangedOnly' ? t('只能放远程位（高台干员）')
+        : t('地块本身不可部署');
+  const rects = deployRectsAt(cell.r, cell.c);
+  if (!rects.length) return t('不在任何部署区内：敌人会走，但放不了干员');
+  return t('在 {0} 内 · {1}', rects.map((n) => rectLabel(n)).join(' / '), ruleText);
+}
+
 function deployOutcomeClass(entry) {
   const rule = deployRuleOf(entry, optionsOf());
   if (rule === 'air') return 'dim';
@@ -751,16 +868,58 @@ async function loadTemplate(id) {
   } catch (e) { state.message = { kind: 'error', text: e.message }; renderSide(); }
 }
 
+/** 这张图是不是已经存进了**当前工坊包**（存过才谈得上试玩：试玩按 id 去官方数据与各工坊包里找它）。 */
+function stageSavedHere(id) {
+  if (!id || !state.packId) return false;
+  return (state.data?.stages ?? []).some((s) => s.id === id && s.pack === state.packId);
+}
+
+/**
+ * 空 id 时按名字推一个（规则与包 id 同一套 slug）：不让「没编号」把作者堵在门口。
+ * 中文名字过不了 slug（没有 a–z0–9），所以退回 my_map，再按已占用的 id 依次 my_map_2、my_map_3…
+ */
+function autoStageId() {
+  const base = String(state.spec?.name || '').trim() || 'my_map';
+  const slug = base.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 24);
+  const taken = new Set((state.data?.stages ?? []).map((s) => s.id));
+  let id = /[a-z0-9]/.test(slug) ? slug : 'my_map';
+  if (taken.has(id)) { let n = 2; while (taken.has(`${id}_${n}`)) n++; id = `${id}_${n}`; }
+  return id;
+}
+
 /**
  * 试玩这一张图。
  *
  * 与干员页 / 包管理页同一个接口，只是多带一个 `stage`：这一局**强制**打这张图，而不是随机抽一张。
- * 出怪表还没绑的时候先就地警告（不入库也不阻塞）：不绑回合的话，试玩里敌人会按官方模板的路线走，
- * 看起来就是「怪随便乱走」—— 那句话要先说清楚，作者才知道该去哪一页。
+ *
+ * 2026-10-08 业主实测的弯路 ——「新建了一张地图，没有编号不让开图，有编号需要工坊包，下面那个工坊包新建没有用」
+ * —— 就是这一颗按钮的前置条件太多：它以前只判「有没有 id」，没保存过的图会直接被服务端拒掉
+ * （「找不到地图 X：它既不在官方数据里，也不在任何工坊包里」）。现在这一颗按钮把前置条件自己做掉：
+ * 缺 id 就推一个、没存进当前包就先存（没有包就一键建一个），然后才起服务器。
  */
 async function playtestStage(btn) {
   if (state.playtesting) return;
-  if (!state.spec?.id) { state.message = { kind: 'error', text: t('先填一个 id（并保存一次）才能试玩这张图。') }; renderSide(); return; }
+  if (!state.spec) return;
+  if (!state.spec.id) {
+    state.spec.id = autoStageId();
+    state.message = { kind: 'ok', text: t('先自动填了一个 id：{0}', state.spec.id) };
+  }
+  if (!stageSavedHere(state.spec.id)) {
+    try {
+      if (!state.packId) {
+        const id = autoPackId('my-map-pack', state.data?.packs ?? []);
+        await createPack(id);
+        state.packId = id;
+        state.message = { kind: 'ok', text: t('已一键创建工坊包 {0}：这张图先存进去再试玩。', id) };
+      }
+      await saveStage();
+      if (state.message?.kind === 'error') { renderSide(); return; }  // 保存失败就别起服务器
+    } catch (e) {
+      state.message = { kind: 'error', text: e.message };
+      renderSide();
+      return;
+    }
+  }
   const bound = (state.spec.rounds && Object.keys(state.spec.rounds).length) || (state.spec.bossRounds && Object.keys(state.spec.bossRounds).length);
   if (!bound) {
     state.message = { kind: 'error', text: t('这张图还没有绑定出怪表：试玩里敌人会按官方模板的路线走，看起来会乱走。建议在出怪页建一张表并把它绑到回合上。') };
@@ -1123,12 +1282,15 @@ function renderSide() {
 
   const actions = document.createElement('div'); actions.className = 'row'; actions.style.margin = '12px 0';
   const save = document.createElement('button'); save.className = 'primary'; save.textContent = state.busy ? t('保存中…') : t('保存并推导');
-  save.disabled = state.busy || !spec.id;
+  // 不再因为「没填 id」就禁用：点下去会自动起一个 id（见 saveStage），少一堵墙。
+  save.disabled = state.busy;
   save.addEventListener('click', saveStage);
   actions.append(save);
-  // 试玩这张图：与干员页同一个接口，但带上 stage —— 这一局强制打这张图（业主的「需要加一个试玩地图功能」）
+  // 试玩这张图：与干员页同一个接口，但带上 stage —— 这一局强制打这张图（业主的「需要加一个试玩地图功能」）。
+  // 2026-10-08 业主实测「没有编号不让开图，有编号需要工坊包」：现在这一颗按钮自己把这两步做掉 ——
+  // 没 id 就自动起一个、没存过就先存进当前包（没有包就一键建一个），然后才起服务器。
   const play = document.createElement('button');
-  play.textContent = state.playtesting ? t('正在起…') : t('▶ 试玩这张图');
+  play.textContent = state.playtesting ? t('正在起…') : (stageSavedHere(spec.id) ? t('▶ 试玩这张图') : t('▶ 保存并试玩这张图'));
   play.disabled = state.playtesting;
   play.addEventListener('click', () => { void playtestStage(play); });
   actions.append(play);
@@ -1138,7 +1300,9 @@ function renderSide() {
     actions.append(del);
   }
   box.append(actions);
-  // 保存目标：以前每次保存都要在对话框里手打 id，打错就存进别的包
+  // 保存目标：以前每次保存都要在对话框里手打 id，打错就存进别的包。
+  // 2026-10-08 业主实测「下面那个工坊包新建没有用」：这里以前**没有**把 create 交进去，
+  // 所以「＋ 新建一个包…」建不了任何东西。现在与干员页同一套：手输 id 立刻建包，另有一颗一键建的。
   box.append(h(t('保存到')));
   const packBox = document.createElement('div'); packBox.className = 'panel';
   packBox.append(packSelect({
@@ -1146,10 +1310,11 @@ function renderSide() {
     current: state.packId,
     newLabel: t('＋ 新建一个包…'),
     newDefault: 'my-map-pack',
+    create: createPack,
+    oneClick: { idBase: 'my-map-pack' },
     onPick: (id) => { state.packId = id; renderSide(); },
   }));
   box.append(packBox);
-  if (!spec.id) box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('先填一个 id 才能保存。') }));
 
   box.append(h(t('校验与推导结果')));
   const pv = document.createElement('div'); pv.className = 'panel';
@@ -1165,6 +1330,20 @@ function renderSide() {
       const pathPart = ps.known ? t('寻路 {0} 条（含装置 {1} 条）', ps.count, Object.keys(rec.groundPathsWithDevices ?? {}).length) : t('寻路：未生成');
       info.textContent = `${pathPart} · ${t('部署 {0} 近战 / {1} 远程', rec.deployTiles.normal.melee.length, rec.deployTiles.normal.rangedOnly.length)}`;
       pv.append(info);
+      // 业主的困惑就是这一条：同一行里画了路、却放不了干员。道路在部署矩形外时敌人照样走，
+      // 但那里永远部署不了东西 —— 与其让作者猜，不如把这条提示摆在推导结果里，并给一个跳到第一格的按钮。
+      const outside = roadsOutsideDeployRects(rowsFromCells(), spec.tiles ?? {});
+      if (outside.length) {
+        const tip = document.createElement('div');
+        tip.className = 'warn';
+        tip.textContent = t('部署行里有 {0} 格「可放地面干员」的地块落在部署矩形外：敌人会走，但那里部署不了干员（能不能部署由矩形决定）。', outside.length);
+        pv.append(tip);
+        const jump = document.createElement('button');
+        jump.className = 'ghost';
+        jump.textContent = t('跳到第一格 ({0}, {1})', outside[0][0], outside[0][1]);
+        jump.addEventListener('click', () => { focusCell(outside[0][0], outside[0][1]); });
+        pv.append(jump);
+      }
     }
     if (state.preview.ok && !(state.preview.warnings ?? []).length) pv.append(Object.assign(document.createElement('div'), { className: 'ok', textContent: t('✔ 校验通过') }));
     for (const e of state.preview.errors ?? []) {
@@ -1180,6 +1359,122 @@ function renderSide() {
   box.append(pv);
 }
 
+/**
+ * 分区工具条（业主 2026-10-08）：这张 19×21 里住着三个区，先选画哪一块。
+ *
+ * 「整图（专业检修）」就是原来那张三合一画面的样子；其余三个区只框住自己那一带，区外压暗 —— 这样
+ * 「怪物等待区 / 普通对战 / boss 对战」不再互相糊在一起。分区只是**视图**：数据始终是同一张 19×21 的格子。
+ */
+function renderZoneBar() {
+  const bar = $('#zoneBar');
+  if (!bar) return;
+  bar.replaceChildren();
+  const cap = document.createElement('span');
+  cap.className = 'hint';
+  cap.textContent = t('区域');
+  bar.append(cap);
+  for (const z of STAGE_ZONES) {
+    const b = document.createElement('button');
+    b.className = state.zone === z.id ? 'on' : 'ghost';
+    b.textContent = zoneLabel(z.id);
+    b.title = t('只画这一区（区外压暗）；「整图」是三合一的老画面，留给专业检修');
+    b.addEventListener('click', () => {
+      state.zone = z.id;
+      state.zoneTemplatePick = false;
+      fitZone(z.id);
+      renderZoneBar();
+      renderSide();
+      draw();
+    });
+    bar.append(b);
+  }
+  const spacer = document.createElement('span');
+  spacer.style.flex = '1';
+  bar.append(spacer);
+  if (state.zone !== 'all') {
+    const b = document.createElement('button');
+    b.className = state.zoneTemplatePick ? 'on' : 'ghost';
+    b.textContent = t('从官方图取这一区…');
+    b.title = t('把官方图（或样板图）里属于这一区的行抄过来，其它区不动');
+    b.addEventListener('click', () => { state.zoneTemplatePick = !state.zoneTemplatePick; void ensureTemplates(); renderZoneBar(); });
+    bar.append(b);
+  }
+  if (!state.zoneTemplatePick || state.zone === 'all') return;
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.style.flexBasis = '100%';
+  const head = document.createElement('p');
+  head.className = 'hint';
+  head.textContent = t('把「{0}」这一区的行整段换成模板的行；其它区一个字节都不动。', zoneLabel(state.zone));
+  panel.append(head);
+  if (state.templatesError) {
+    const e = document.createElement('div');
+    e.className = 'err';
+    e.textContent = t('拉取模板清单失败：{0}', state.templatesError);
+    panel.append(e);
+  } else if (!state.templates) {
+    const p = document.createElement('p');
+    p.className = 'hint';
+    p.textContent = t('正在载入模板…');
+    panel.append(p);
+  } else if (!state.templates.length) {
+    const p = document.createElement('p');
+    p.className = 'hint';
+    p.textContent = t('（这台机器上没有可用的模板）');
+    panel.append(p);
+  }
+  for (const tpl of state.templates ?? []) {
+    const item = document.createElement('button');
+    item.className = 'ghost';
+    item.textContent = `${tpl.name || tpl.id}`;
+    item.title = [tpl.id, tpl.kind, tpl.note].filter(Boolean).join(' · ');
+    item.addEventListener('click', () => { void applyZoneTemplate(tpl); });
+    panel.append(item);
+  }
+  bar.append(panel);
+}
+
+/** 模板清单只拉一次（官方图与样板图都不常变）；失败就地报错，不弹窗。 */
+async function ensureTemplates() {
+  if (state.templates || state.templatesError) return;
+  try {
+    const r = await api('/api/stages/templates');
+    state.templates = Array.isArray(r.templates) ? r.templates : [];
+    state.templatesError = null;
+  } catch (e) { state.templates = []; state.templatesError = e.message; }
+  renderZoneBar();
+}
+
+/** 把模板里属于**当前区**的那几行抄进这张图（业主：「找几张官方图拆开当模板，允许用户选择」）。 */
+async function applyZoneTemplate(tpl) {
+  if (!state.cells) return;
+  const z = currentZone();
+  try {
+    const r = await api(`/api/stages/template?id=${encodeURIComponent(tpl.id)}`);
+    const rows = Array.isArray(r.spec?.rows) ? r.spec.rows : null;
+    if (!rows || rows.length !== ROWS) throw new Error(t('这个模板没有可用的 rows'));
+    const [r0, r1] = z.rows;
+    let changed = 0;
+    for (let r = r0; r <= r1; r++) {
+      const line = String(rows[r] ?? '');
+      if (line.length !== COLS) continue;
+      for (let c = 0; c < COLS; c++) if (state.cells[r][c] !== line[c]) { state.cells[r][c] = line[c]; changed++; }
+    }
+    // 模板的图例一起并进来：官方图用到的字形不一定在我们的默认图例里，没有条目就会被画成「认不出的地形」。
+    if (r.spec?.tiles && typeof r.spec.tiles === 'object') state.spec.tiles = { ...state.spec.tiles, ...r.spec.tiles };
+    state.zoneTemplatePick = false;
+    state.message = { kind: 'ok', text: t('已把「{0}」换成「{1}」那一区（改了 {2} 格）。', zoneLabel(z.id), tpl.name || tpl.id, changed) };
+    schedulePreview();
+    renderZoneBar();
+    renderSide();
+    draw();
+  } catch (e) {
+    state.message = { kind: 'error', text: e.message };
+    renderZoneBar();
+    renderSide();
+  }
+}
+
 function syncTools() {
   $('#toolBrush').className = state.tool === 'brush' ? 'on' : '';
   $('#toolDevice').className = state.tool === 'device' ? 'on' : '';
@@ -1188,6 +1483,7 @@ function syncTools() {
   $('#ovDeploy').className = state.showDeploy ? 'on' : '';
   $('#ovPaths').className = state.showPaths ? 'on' : '';
   $('#ovRoutes').className = state.showRoutes ? 'on' : '';
+  renderZoneBar();
   // 缩放百分比：zoom 是相对 fit-to-view 的倍数，所以 100% 就等于「整张图正好在视野里」
   const pct = $('#zoomPct');
   if (pct) pct.textContent = `${Math.round(state.zoom * 100)}%`;
@@ -1213,6 +1509,13 @@ function syncTools() {
       : '');
     hint.className = state.reason3d ? 'hint warn' : 'hint';
   }
+  // 「能不能绕圈转」是业主问过的（2026-10-08）：这一层用的是游戏自己那台**固定朝向**的投影相机，
+  // 有俯角、有平移、有远近，就是没有 yaw —— 与其加一个「能转、但转完就不是游戏里的样子」的相机，不如写明。
+  const rotHint = $('#hint3dRot');
+  if (rotHint) {
+    rotHint.hidden = !state.mode3d;
+    if (state.mode3d) rotHint.textContent = t('3D 这一层用的是游戏自己的相机（固定朝向的投影相机），所以没有「绕圈转」：俯角 + 平移 + 远近就是它的全部控制面；想换角度就用上面那五个取景。');
+  }
   // View presets for the 3D preview. The button set is built from the view itself (`presets()`), so it can never list a
   // framing the view does not implement. Deliberately no "active" highlight: once the author drags or zooms, the framing
   // is no longer the preset, and marking one would be a lie.
@@ -1232,6 +1535,12 @@ function syncTools() {
 }
 
 async function saveStage() {
+  if (!state.spec) return;
+  // 没填 id 就先推一个（业主：「没有编号不让开图」）—— 省掉「先起个名再来」那一轮。
+  if (!state.spec.id) {
+    state.spec.id = autoStageId();
+    state.message = { kind: 'ok', text: t('先自动填了一个 id：{0}', state.spec.id) };
+  }
   if (!state.packId) {
     state.message = { kind: 'error', text: t('先在右边选一个工坊包（或点「＋ 新建一个包…」）。') };
     renderSide();
@@ -1243,6 +1552,8 @@ async function saveStage() {
     state.stageId = r.id;
     state.message = { kind: 'ok', text: t('已保存 {0}，生成 {1}。重启游戏服务器后生效。', r.id, r.generated.join(', ')) };
     await load();
+    // 保存之后要重新推导一次：否则右栏还挂着保存前那份预览（例如刚才是空 id，BAD_ID 会一直留在那儿）。
+    schedulePreview();
   } catch (e) { state.message = { kind: 'error', text: e.message }; }
   finally { state.busy = false; renderSide(); }
 }
@@ -1280,8 +1591,9 @@ function handleViewportResize() {
     const before = { w: state.boardW, h: state.boardH };
     resizeBoard();
     const sizeChanged = state.boardW !== before.w || state.boardH !== before.h;
-    // 第一次量到尺寸（before 全是 0）也必须居中，否则整张图会挤在左上角 —— 那正是业主看到的那个问题
-    if (state.zoom === 1 && (sizeChanged || !before.w || !before.h)) centerView();
+    // 第一次量到尺寸（before 全是 0）也必须居中，否则整张图会挤在左上角 —— 那正是业主看到的那个问题。
+    // 作者没自己动过视图时，重框的是**当前分区**（窗口一变高变矮，画的那一带就跟着重新框好）。
+    if (state.autoFrame && (sizeChanged || !before.w || !before.h)) fitZone();
     draw();
     // 3D 那边有自己的 ResizeObserver，这里只需要它把新尺寸读进去
     state.view3d?.onResize?.();
@@ -1327,8 +1639,9 @@ $('#viewOut')?.addEventListener('click', () => zoomCenter(0.8));
 $('#btnAutoRoute')?.addEventListener('click', () => { void autoroute(); });
 
 // 第一次布局：画布还是 0×0（高度由 .stage-view 的 flex 决定），所以先量一次再取景。
+// 取景框的是**当前分区**（默认「普通对战」），量不到尺寸时退回整图居中。
 resizeBoard();
-if (!state.boardW) centerView();
+if (state.boardW) fitZone(); else centerView();
 syncTools();
 // 界面语言：换掉 HTML 里的静态文案、插入右上角语言按钮，换语言后连 JS 生成的那些文案一起重画。
 mountI18n(renderAll);

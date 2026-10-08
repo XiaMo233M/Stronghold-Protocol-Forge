@@ -47,7 +47,7 @@ export const EN_STAGE = Object.freeze({
 
   // ---- 画布提示与地形调色板 ----
   '把鼠标移到网格上看坐标。row 0 在最下面一行（和引擎一致）。': 'Move the mouse over the grid to read coordinates. row 0 is the bottom row (same as the engine).',
-  'row {0}, col {1} · 字符 {2}': 'row {0}, col {1} · char {2}',
+  'row {0}, col {1} · 字符 {2} · {3}': 'row {0}, col {1} · char {2} · {3}',
   '地形调色板': 'Terrain palette',
   '空': 'Air',
   '地图外 · 空气：不可走、不可部署': 'Outside the map · air: not walkable, not deployable',
@@ -104,7 +104,6 @@ export const EN_STAGE = Object.freeze({
   // ---- 右栏：保存、删除与推导结果 ----
   '保存并推导': 'Save and derive',
   '删除该地图': 'Delete this map',
-  '先填一个 id 才能保存。': 'Fill in an id before saving.',
   '删除地图 {0}？': 'Delete map {0}?',
   '校验与推导结果': 'Validation and derivation',
   '（改动后会自动推导）': '(derives automatically after each change)',
@@ -119,7 +118,6 @@ export const EN_STAGE = Object.freeze({
   '拉取模板清单失败：{0}': 'Could not load the template list: {0}',
   '已按「{0}」载入一份新图：请填一个新的 id 与名称。': 'Loaded a new map from “{0}”: fill in a new id and name.',
   '▶ 试玩这张图': '▶ Playtest this map',
-  '先填一个 id（并保存一次）才能试玩这张图。': 'Fill in an id (and save once) before playtesting this map.',
   '这张图还没有绑定出怪表：试玩里敌人会按官方模板的路线走，看起来会乱走。建议在出怪页建一张表并把它绑到回合上。': 'This map binds no wave table yet: in a playtest the enemies walk the official template’s routes and look like they wander. Create a table in the spawn designer and bind it to a round.',
   // 「正在起…」「试玩服务器已就绪（新标签页已打开）：{0}」与干员页共用，已在 index 分片
 
@@ -130,8 +128,7 @@ export const EN_STAGE = Object.freeze({
   '这张图没有可配对的入口与保护目标': 'this map has no gate/objective pair to route between',
 
   // ---- 3D 预览：控制提示、视角名与退回原因 ----
-  '左键拖动调俯角 · 滚轮缩放 · 按住空格拖（或中键拖）平移。这一层是游戏自己的 3D 渲染器跑你这张地图。': "Left-drag tilts · wheel zooms · hold Space and drag (or middle-drag) to pan. This layer is the game's own 3D renderer running your map.",
-  '（页面上没有 3D 画布）': '(there is no 3D canvas on this page)',
+  '左键拖动调俯角 · 滚轮缩放 · 按住空格拖（或中键拖）平移。这一层是游戏自己的 3D 渲染器跑你这张地图。': "Left-drag tilts · wheel zooms · hold Space and drag (or middle-drag) to pan. This layer is the game's own 3D renderer running your map.",  '（页面上没有 3D 画布）': '(there is no 3D canvas on this page)',
   '全图': 'Whole map',
   '俯视': 'Top-down',
   '游戏视角': 'Game view',
@@ -155,4 +152,36 @@ export const EN_STAGE = Object.freeze({
   '首领回合的出怪表（该模式的首领都会用它）': 'Wave table for the boss round (every boss of this mode uses it)',
   '（用模式的首领模板）': '(use the mode’s boss template)',
   '这些绑定的出怪表不存在，引擎会静默回落到模式的模板：{0}': 'These bound wave tables do not exist — the engine silently falls back to the mode’s template: {0}',
+
+  // ---- 分区视图（业主 2026-10-08：一张 19×21 里住着三个区） ----
+  '区域': 'Zone',
+  '怪物等待区（预览围栏）': 'Enemy waiting pen (preview)',
+  '普通对战': 'Normal battle',
+  'boss 对战': 'Boss battle',
+  '整图（专业检修）': 'Whole grid (pro inspection)',
+  '只画这一区（区外压暗）；「整图」是三合一的老画面，留给专业检修': 'Edit only this zone (the rest is dimmed); “Whole grid” is the old three-in-one view, kept for pro inspection',
+  '普通对战部署区': 'Normal deploy field',
+  'boss 左半部署区': 'Boss left-half deploy field',
+  'boss 右半部署区': 'Boss right-half deploy field',
+  '从官方图取这一区…': 'Take this zone from an official map…',
+  '把官方图（或样板图）里属于这一区的行抄过来，其它区不动': 'Copy the rows of this zone from an official map (or the sample) and leave every other zone untouched',
+  '把「{0}」这一区的行整段换成模板的行；其它区一个字节都不动。': 'Replaces the rows of “{0}” with the template’s; every other zone stays byte-for-byte.',
+  '已把「{0}」换成「{1}」那一区（改了 {2} 格）。': 'Replaced “{0}” with the same zone from “{1}” ({2} tiles changed).',
+  '这个模板没有可用的 rows': 'this template has no usable rows',
+
+  // ---- 部署读out（能不能部署 = 在不在部署矩形里 × 地块属性） ----
+  '不在任何部署区内：敌人会走，但放不了干员': 'outside every deploy field: enemies walk it, but no operator can stand there',
+  '在 {0} 内 · {1}': 'inside {0} · {1}',
+  '地图外（空气）': 'outside the map (air)',
+  '地块本身不可部署': 'the tile itself is not deployable',
+  '部署行里有 {0} 格「可放地面干员」的地块落在部署矩形外：敌人会走，但那里部署不了干员（能不能部署由矩形决定）。': '{0} tile(s) in a deployment row take ground operators yet fall outside the deploy field: enemies walk them, but nothing can be deployed there (the rect decides).',
+  '跳到第一格 ({0}, {1})': 'Jump to the first one ({0}, {1})',
+
+  // ---- 新建地图到试玩：把前置条件自己做掉 ----
+  '▶ 保存并试玩这张图': '▶ Save and playtest this map',
+  '先自动填了一个 id：{0}': 'Filled in an id automatically: {0}',
+  '已一键创建工坊包 {0}：这张图先存进去再试玩。': 'Created the workshop pack {0} in one click: this map is saved into it before the playtest.',
+
+  // ---- 3D 相机的控制面（为什么不能绕圈转） ----
+  '3D 这一层用的是游戏自己的相机（固定朝向的投影相机），所以没有「绕圈转」：俯角 + 平移 + 远近就是它的全部控制面；想换角度就用上面那五个取景。': 'This layer uses the game’s own camera (a fixed-orientation projection camera), so there is no orbit: tilt, pan and zoom are all the control it has — use the five framings above for another angle.',
 });
