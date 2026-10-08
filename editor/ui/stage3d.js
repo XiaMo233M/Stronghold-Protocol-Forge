@@ -29,6 +29,37 @@ if (typeof globalThis.addEventListener === 'function') {
   globalThis.addEventListener('keyup', (ev) => { if (ev.code === 'Space') spaceDown = false; });
 }
 
+/** 滚轮每一格的缩放倍率（上下各一格相乘/相除）。 */
+export const ZOOM_STEP = 1.1;
+/**
+ * 滚轮缩放。**这里唯一要紧的事：这台相机「看得多大」由 `scale` 决定，不是 `dist`。**
+ *
+ * `public/js/render/projection.js` 的相机是离轴针孔相机：焦距 `k = scale·dist`（`Camera._k`），
+ * 屏幕上的一点 = 画面中心 + `k·横向偏移 / depth`。在**靶面**（depth = dist）上，比例正好化成 `scale` ——
+ * 所以把 `dist` 拉大、`scale` 不动，等于「相机后退 + 视场角等比放大」，画面里的棋盘**一模一样大**
+ * （业主报的「滚轮转了但 3D 地图没放大」就是这个：只有那点透视差，而预览又把雾推到 400/1000，连深度线索都没了）。
+ *
+ * 所以缩放改 `scale`（真的让棋盘在屏幕上变大），并让 `dist` **反向**走同一个倍率：相机沿视线真的往里推，
+ * 而 `scale·dist`（焦距 → 垂直视场角）不变，透视强弱与缩放前一致 —— 是「推近」，不是「换镜头」。
+ *
+ * @param {import('../../public/js/render/projection.js').Camera} cam
+ * @param {number} deltaY the wheel's deltaY (positive = scroll down = pull back)
+ * @param {{minScale?:number,maxScale?:number,minDist?:number,maxDist?:number}} [limits]
+ * @returns {number} the ratio actually applied to `scale` (after clamping)
+ */
+export function zoomCamera(cam, deltaY, limits = {}) {
+  const f = deltaY > 0 ? 1 / ZOOM_STEP : ZOOM_STEP;
+  const minScale = Number.isFinite(limits.minScale) ? limits.minScale : 0.5;
+  const maxScale = Number.isFinite(limits.maxScale) ? limits.maxScale : 4000;
+  const minDist = Number.isFinite(limits.minDist) ? limits.minDist : 3;
+  const maxDist = Number.isFinite(limits.maxDist) ? limits.maxDist : 400;
+  const next = Math.max(minScale, Math.min(maxScale, cam.scale * f));
+  const applied = next / cam.scale;
+  cam.scale = next;
+  cam.dist = Math.max(minDist, Math.min(maxDist, cam.dist / applied));
+  return applied;
+}
+
 /** The three functions `boardArtListed` / `loadBoardPack` need, over the editor's own manifest route. */
 function miniAssets() {
   let manifest = null;
@@ -211,7 +242,7 @@ export async function createStageView3d({ canvas, getStage, onError } = {}) {
         cam.update();
         scene.render(cam, performance.now() / 1000);
       },
-      /** 左键拖 = 调俯角，中键拖 / 按住空格拖 = 平移，滚轮 = 拉近拉远。
+      /** 左键拖 = 调俯角，中键拖 / 按住空格拖 = 平移，滚轮 = 推近 / 拉远（真改 `scale`，见 zoomCamera）。
        *
        *  为什么把左键让给俯角：编辑器里 2D 画布把左键留给了画笔，3D 若也吃掉左键，两个视图的手感就分家了；
        *  而 stage.js 的空格平移在两张画布上是同一套动作（window 上的 keydown 只管设标记，这里读它）。
@@ -243,7 +274,11 @@ export async function createStageView3d({ canvas, getStage, onError } = {}) {
         const onUp = (ev) => { dragging = null; try { canvas.releasePointerCapture?.(ev.pointerId); } catch { /* 同上 */ } };
         const onWheel = (ev) => {
           ev.preventDefault();
-          cam.dist = Math.max(8, Math.min(90, cam.dist * (ev.deltaY > 0 ? 1.1 : 0.9)));
+          // 缩放改 scale（屏幕上真的变大），dist 反向跟随 → 焦距不变；上下限按「整图取景」的比例给：
+          // 最多缩到整图的 1/12、放到 12 倍，够看清一格，也不会把棋盘缩成一个点。
+          zoomCamera(cam, ev.deltaY, {
+            minScale: home.scale / 12, maxScale: home.scale * 12, minDist: 3, maxDist: 400,
+          });
           cam.update();
           view.update();
         };
@@ -285,7 +320,7 @@ export async function createStageView3d({ canvas, getStage, onError } = {}) {
         return true;
       },
       presets: () => PRESETS.map(({ id, label }) => ({ id, label: label() })),
-      stats: () => ({ frames, dist: Math.round(cam.dist), tilt: Math.round(cam.tilt), board3d: scene.stats?.() ?? null }),
+      stats: () => ({ frames, dist: Math.round(cam.dist), tilt: Math.round(cam.tilt), scale: Math.round(cam.scale), board3d: scene.stats?.() ?? null }),
       /** The live scene, for the devtools console (`__spEditor3d.stats()`) and for automated checks. */
       scene: () => scene,
       /** The current frame as a PNG data URL (needs preserveDrawingBuffer, which this view sets). */
