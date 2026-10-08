@@ -1277,7 +1277,10 @@ function schedulePreview(now = false) {
 async function preview() {
   if (!state.spec) return;
   try {
-    state.preview = await api('/api/stages/preview', { method: 'POST', body: { spec: currentSpec() } });
+    // 「显示寻路」画的就是**推导出来的寻路表**（stage.js 的 draw()：rec.groundPaths），而那张表只有请求时才算
+    // （服务端 opts.paths；官方图自带表，工坊图没有）。所以开关开着才要 —— 否则那一层永远是空的：
+    // 点「自动寻路」时它刚好把开关打开，作者看到的却是一条线都没有。关着时不要，免得每次编辑都多算一遍流场。
+    state.preview = await api('/api/stages/preview', { method: 'POST', body: { spec: currentSpec(), paths: state.showPaths === true } });
   } catch (e) {
     state.preview = { ok: false, errors: [{ field: '', code: 'REQUEST', message: e.message }], warnings: [] };
   }
@@ -2430,7 +2433,12 @@ $('#toolRoute').addEventListener('click', () => { state.tool = 'route'; syncTool
 $('#ovRoutes').addEventListener('click', () => { state.showRoutes = !state.showRoutes; syncTools(); draw(); });
 $('#ov3d').addEventListener('click', () => { void toggle3d(); });
 $('#ovDeploy').addEventListener('click', () => { state.showDeploy = !state.showDeploy; syncTools(); draw(); });
-$('#ovPaths').addEventListener('click', () => { state.showPaths = !state.showPaths; syncTools(); draw(); });
+$('#ovPaths').addEventListener('click', () => {
+  state.showPaths = !state.showPaths;
+  syncTools();
+  // 打开时得把寻路表取回来（preview 只在开关开着时才请求 paths），关掉时直接重画就够
+  if (state.showPaths) void preview(); else draw();
+});
 // 视图工具条：「适应」= 复位 fit-to-view，± 绕画布中心缩放（百分比在 syncTools 里跟）
 $('#viewFit')?.addEventListener('click', () => { resetView(); draw(); syncTools(); });
 $('#viewIn')?.addEventListener('click', () => zoomCenter(1.25));

@@ -762,4 +762,16 @@ describe('workshop editor: the 3D preview mounts (read-only, and narrow)', () =>
     assert.match(page, /presets3d/, 'stage.js must fill the preset row');
     assert.match(page, /view\.presets\(\)/, 'from view.presets(), so the buttons cannot list a framing that does not exist');
   });
+
+  test('「显示寻路」那层要有数据可画：preview 按开关请求寻路表，开关打开时重新取一次', async () => {
+    // 这一层画的是**推导出来的寻路表**（draw() 里的 rec.groundPaths），而那张表只有请求时服务端才算
+    // （opts.paths；官方图自带表，工坊图没有）。此前 preview 从不请求它 ⇒ 开关打开也永远一条线都没有 ——
+    // 业主在 0.9.2 的大图上点「自动寻路」（它顺手把开关打开）看到的就是这个：按钮态正常，画布上没线。
+    const src = await fetch(`${editor.url}/stage.js`).then((r) => r.text());
+    assert.match(src, /paths: state\.showPaths === true/, 'preview 要按「显示寻路」开关请求寻路表');
+    assert.match(src, /#ovPaths'\)\.addEventListener\('click', \(\) => \{[\s\S]{0,240}?if \(state\.showPaths\) void preview\(\); else draw\(\);/,
+      '开关打开时要重新取一次表（表是请求时才有的）');
+    // 关着的时候不要请求：每次编辑都多算一遍流场不值当
+    assert.match(src, /if \(state\.showPaths\) void preview\(\); else draw\(\)/, '关掉时只重画');
+  });
 });
