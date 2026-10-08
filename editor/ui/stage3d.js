@@ -22,6 +22,13 @@ import { t } from './i18n.js';
 const MANIFEST_URL = '/data/local-assets.json';
 const THREE_URL = '/vendor/three.module.js';
 
+/** 空格 = 临时的平移手（与 stage.js 的 2D 画布同一套动作）。模块自己收键盘事件，不去读别的模块的隐藏全局。 */
+let spaceDown = false;
+if (typeof globalThis.addEventListener === 'function') {
+  globalThis.addEventListener('keydown', (ev) => { if (ev.code === 'Space') spaceDown = true; });
+  globalThis.addEventListener('keyup', (ev) => { if (ev.code === 'Space') spaceDown = false; });
+}
+
 /** The three functions `boardArtListed` / `loadBoardPack` need, over the editor's own manifest route. */
 function miniAssets() {
   let manifest = null;
@@ -132,6 +139,7 @@ export async function createStageView3d({ canvas, getStage, onError } = {}) {
     ];
     let cssW = 672, cssH = 608;
     let framedKey = null;
+    let resizeKey = '';
     /**
      * Aim at whatever the board actually built, and fit it to the frame.
      *
@@ -143,7 +151,7 @@ export async function createStageView3d({ canvas, getStage, onError } = {}) {
      */
     function frameBoard() {
       const b = scene.board?.bounds;
-      if (!b) return;
+      if (!b) { framedKey = null; return; }
       const key = `${b.x0},${b.x1},${b.y0},${b.y1},${cssW}x${cssH}`;
       if (key === framedKey) return;
       framedKey = key;
@@ -163,9 +171,9 @@ export async function createStageView3d({ canvas, getStage, onError } = {}) {
       update() {
         if (disposed) return;
         const stage = getStage();
-        if (!stage) return;
-        // setStage() no-ops when the grid is unchanged, so this is cheap to call on every edit
-        scene.setStage({ id: stage.id, rows: stage.rows, devices: stage.devices });
+        // 没有 record 也要能画：第一次推导回来之前，棋盘本身就是要看的东西。
+        // setStage(null) 会清掉几何，所以这里只在真的没有 stage 时才走那一步。
+        scene.setStage(stage ? { id: stage.id, rows: stage.rows, devices: stage.devices } : null);
         view.resize();
         scene.render(cam, performance.now() / 1000);
         frames++;
@@ -173,6 +181,9 @@ export async function createStageView3d({ canvas, getStage, onError } = {}) {
       resize() {
         // Prefer the canvas's own CSS box; fall back to its parent, then to a floor. Never let the backing store collapse
         // to a few pixels (a hidden or not-yet-laid-out element measures 0, and a 2-px render is silently useless).
+        //
+        // 编辑器里这张画布是**绝对定位铺满 .stage-view 的**（画布不再有写死的 608 高），切到 2D 时它 hidden、
+        // 自身盒宽为 0，所以父容器那一路才是常态而不是兜底。
         const box = canvas.getBoundingClientRect();
         const parent = canvas.parentElement?.getBoundingClientRect();
         const w = Math.max(320, Math.round(box.width || parent?.width || 672));
@@ -182,13 +193,36 @@ export async function createStageView3d({ canvas, getStage, onError } = {}) {
         scene.resize(w, h, Math.min(2, globalThis.devicePixelRatio || 1));
         frameBoard();
       },
-      /** Drag to pan, wheel to zoom, shift-drag (or right-drag) to tilt. The game's camera is a fixed-orientation
-       *  projection camera, so there is no yaw to expose — pan/zoom/tilt is the whole control set it has. */
+      /** 容器尺寸变了就重新取景（窗口缩放 / 侧栏折叠）：作者没动过相机时，画布永远保持「整张图在视野里」。 */
+      onResize() {
+        const key = `${Math.round(canvas.getBoundingClientRect().width)}x${Math.round(canvas.getBoundingClientRect().height)}`;
+        if (key === resizeKey) return;
+        resizeKey = key;
+        view.refit();
+      },
+      /** 重新贴回「全图」取景（resize / 首次建好棋盘时用）。 */
+      refit() {
+        const b = scene.board?.bounds;
+        view.resize();
+        if (!b) { framedKey = null; return; }
+        Object.assign(cam, home);
+        framedKey = null;
+        frameBoard();
+        cam.update();
+        scene.render(cam, performance.now() / 1000);
+      },
+      /** 左键拖 = 调俯角，中键拖 / 按住空格拖 = 平移，滚轮 = 拉近拉远。
+       *
+       *  为什么把左键让给俯角：编辑器里 2D 画布把左键留给了画笔，3D 若也吃掉左键，两个视图的手感就分家了；
+       *  而 stage.js 的空格平移在两张画布上是同一套动作（window 上的 keydown 只管设标记，这里读它）。
+       *  游戏那台相机是固定朝向的投影相机，没有 yaw 可转 —— 俯角 + 平移 + 远近就是它全部的控制面。 */
       attach() {
         let dragging = null;
+        const wantsPan = (ev) => ev.button === 1 || spaceDown === true;
         const onDown = (ev) => {
-          dragging = { x: ev.clientX, y: ev.clientY, tilt: ev.shiftKey || ev.button === 2 };
-          canvas.setPointerCapture?.(ev.pointerId);
+          dragging = { x: ev.clientX, y: ev.clientY, pan: wantsPan(ev) };
+          try { canvas.setPointerCapture?.(ev.pointerId); } catch { /* 桩环境里没有这个 API */ }
+          if (dragging.pan) ev.preventDefault?.();
         };
         const onMove = (ev) => {
           if (!dragging) return;
@@ -196,17 +230,17 @@ export async function createStageView3d({ canvas, getStage, onError } = {}) {
           const dy = ev.clientY - dragging.y;
           dragging.x = ev.clientX;
           dragging.y = ev.clientY;
-          if (dragging.tilt) {
-            cam.tilt = Math.max(0, Math.min(80, cam.tilt - dy * 0.4));
-          } else {
+          if (dragging.pan) {
             // pixels → board units: the camera's scale is px per unit at the target depth
             cam.tx -= (dx / cam.scale) * (cam.dist / 20);
             cam.ty += (dy / cam.scale) * (cam.dist / 20) * Math.cos((cam.tilt * Math.PI) / 180);
+          } else {
+            cam.tilt = Math.max(0, Math.min(80, cam.tilt - dy * 0.4));
           }
           cam.update();
           view.update();
         };
-        const onUp = (ev) => { dragging = null; canvas.releasePointerCapture?.(ev.pointerId); };
+        const onUp = (ev) => { dragging = null; try { canvas.releasePointerCapture?.(ev.pointerId); } catch { /* 同上 */ } };
         const onWheel = (ev) => {
           ev.preventDefault();
           cam.dist = Math.max(8, Math.min(90, cam.dist * (ev.deltaY > 0 ? 1.1 : 0.9)));
@@ -220,7 +254,14 @@ export async function createStageView3d({ canvas, getStage, onError } = {}) {
         canvas.addEventListener('pointercancel', onUp);
         canvas.addEventListener('wheel', onWheel, { passive: false });
         canvas.addEventListener('contextmenu', onContext);
+        // 容器尺寸变了（窗口缩放、左栏折起来）就重新取景，免得 3D 里整张棋盘缩到一角
+        let ro = null;
+        if (typeof ResizeObserver === 'function') {
+          ro = new ResizeObserver(() => view.onResize());
+          ro.observe(canvas.parentElement || canvas);
+        }
         return () => {
+          ro?.disconnect();
           canvas.removeEventListener('pointerdown', onDown);
           canvas.removeEventListener('pointermove', onMove);
           canvas.removeEventListener('pointerup', onUp);

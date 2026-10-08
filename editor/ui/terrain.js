@@ -54,6 +54,37 @@ export function terrainGrid(stage, size, filler = ' ') {
 }
 
 /**
+ * 一格地形的**部署结论**（「能放近战 / 只能远程 / 不能部署 / 空气」）。
+ *
+ * 为什么需要它：调色板给的是三个机器字段（height / buildable / passable），作者要自己把它们翻译成
+ * 「这格能不能站人」—— 而引擎的规则是分层看这三个字段的（server/sim/grid.js + shared/stageAuthoring.js
+ * 的 deriveDeployTiles）。把推导放在一处，地图页的图例面板与即时预览就永远不会各说各话。
+ *
+ * 规则（业主口径）：道路与普通地面默认放**地面干员**；高台默认放**远程位**；`buildable: 'NONE'` 不可部署；
+ * `passable: 'NONE'` 就是地图外的空气，连站都站不了。勾上「地面也能放远程位」之后，LOW 且 buildable 不是 NONE
+ * 的地面也接受远程位（高台干员），这正是地图作者要自己定开关的那一条。
+ * 唯一的反直觉一格：`height: 'HIGH'` + `buildable: 'MELEE'` 两边都不收（引擎的 deriveDeployTiles 里
+ * MELEE 只认 LOW、高台只认 RANGED），所以这里如实报「不可部署」，不编一个引擎不会给的结论。
+ *
+ * @param {{height?:string, buildable?:string, passable?:string}} tile
+ * @param {{groundHighGround?:boolean}} [options] 这张图自己的 spec.options
+ * @returns {'air'|'melee'|'rangedOnly'|'none'}
+ */
+export function deployRuleOf(tile, options) {
+  const opts = options && typeof options === 'object' ? options : {};
+  const height = tile?.height;
+  const buildable = tile?.buildable ?? 'NONE';
+  // 空气（地图外）：不可走也不可部署，所以先判它——否则 'NONE' 那支会把空气说成普通阻隔
+  if (tile?.passable === 'NONE') return 'air';
+  if (buildable === 'NONE') return 'none';
+  if (buildable === 'RANGED') return 'rangedOnly';
+  // MELEE 只在低地成立（引擎的 melee 分支带 height === 'LOW'）
+  if (buildable === 'MELEE') return height === 'HIGH' ? 'none' : 'melee';
+  // buildable 'ALL'：高台给远程位，低地给地面干员（勾了开关后低地也给远程位）
+  return height === 'HIGH' ? 'rangedOnly' : (opts.groundHighGround ? 'rangedOnly' : 'melee');
+}
+
+/**
  * 从地图列表里找一张（出怪页按 id 选地图）。找不到返回 null。
  * @param {Array<{id:string}>} stages
  * @param {string|null} id

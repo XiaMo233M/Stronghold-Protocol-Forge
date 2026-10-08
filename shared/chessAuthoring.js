@@ -421,6 +421,10 @@ export function deriveChessRecord(spec) {
 
   const commons = () => ({
     tier, isHidden: false, isDiy: false, visible: true, chessType: 'NORMAL',
+    // 「试玩时直接发到手上」（业主 2026-10-08 的开关）：默认 false，只有作者在干员页勾了才写进记录。
+    // 引擎侧唯一的读者是 Match.grantDirectToHand，而它只在编辑器 spawn 的试玩服务器里发牌（SP_PLAYTEST=1）——
+    // 正式对局即使装了这个包，干员仍然只在商店里被摇到（0.5.0 起「助战不白送」的口径不变）。
+    directToHand: spec.directToHand === true,
     name: spec.name,
     appellation: typeof spec.appellation === 'string' && spec.appellation ? spec.appellation : spec.name,
     charId: null, profession: prof, subProfessionId: sub,
@@ -555,6 +559,8 @@ export function specFromChessRecord(base, golden) {
     id: '', name: typeof base.name === 'string' ? base.name : '',
     appellation: typeof base.appellation === 'string' ? base.appellation : '',
     tier: base.tier, profession: base.profession,
+    // 「试玩时直接发到手上」：只有试玩服务器会读它（Match.grantDirectToHand），正式对局照样只在商店里摇
+    ...(base.directToHand === true ? { directToHand: true } : {}),
     subProfessionId: typeof base.subProfessionId === 'string' ? base.subProfessionId : '',
     subProfessionName: typeof base.subProfessionName === 'string' ? base.subProfessionName : '',
     position: base.position,

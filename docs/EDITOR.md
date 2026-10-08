@@ -613,8 +613,12 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 | POST | `/api/packs/:pack/bonds/:bondId/members` | `{ add?, remove? }` → 改**本包自有**干员的 `bonds`（成员由此推导），并重算盟约记录的 `members` |
 | DELETE | `/api/packs/:pack/bonds/:bondId` | 删除该盟约的 spec 及它拥有的记录（覆盖官方时同时收掉那条 `overrides` 声明） |
 | GET | `/api/stages` | 工坊地图列表 + 调色板 + 网格尺寸 + **可指派的模式列表** + **回合绑定要的出怪表与模式回合表 `roundBind`** + **保存目标包 `packs`** |
+| GET | `/api/stages/templates` | 「以模板新建」的清单：仓库自带的样板地图 + 官方每一张图（模板只回规格，不占 id） |
+| GET | `/api/stages/template?id=` | 把样板图或一张官方图转成**可直接编辑的 spec**（`routes` 留空：路线由作者自己画） |
 | GET | `/api/stages/:pack/:id` | 该地图的**可编辑 spec**（源）与生成的记录 |
-| POST | `/api/stages/preview` | `{ spec }` → 推导路径与部署区并校验，**不写盘** |
+| POST | `/api/stages/preview` | `{ spec, paths? }` → 推导部署区与寻路并校验，**不写盘**；`paths` 缺省 = 「作者画过路线才派生寻路表」（空图默认不带那 12 对官方门路径） |
+| POST | `/api/stages/autoroute` | `{ spec }` → **只算不写**：按本图的 S（入口）配最近的 E（保护目标）在流场上求路，返回可追加进 `spec.routes` 的路线；没有 S/E 就返回 `ok:false` 与原因（业主口径：绝不自动生成路线） |
+| POST | `/api/packs` | `{ id, name? }` → **建一个空的工坊包**（目录 + `pack.json`，`content: []`）。创建与「保存第一条记录」解耦；重名 409、id 非法 400 |
 | POST | `/api/packs/:pack/stages` | `{ spec }` → 写 `stage-specs/` 并重新生成 `stages.json` |
 | DELETE | `/api/packs/:pack/stages/:id` | 删除该地图的 spec 及它拥有的记录 |
 | GET | `/api/enemies` | 工坊怪物列表 + **枚举词表** + 官方怪物键 + **模板清单 / spine 候选 / 按档位的数值参照** + 各包的 `packArt`（`art` 声明与本包真实素材） |
@@ -652,7 +656,7 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 | POST | `/api/packs/:id/meta` | `{ name?, version?, author?, license?, description?, gameVersion? }` → 就地更新 `pack.json` 的元数据（只动传进来的键；空串/null = 删掉那个键；清空一个有 `assets/` 的包的 license → 400 `ASSETS_NEED_LICENSE`） |
 | POST | `/api/packs/:id/overrides` | `{ overrides }` → 整表替换 `pack.json` 的 `overrides`（`"<文件>:<id>"`；形状与文件白名单由 `OVERRIDE_ENTRY_RE` 判，官方没有的 id 照收 —— 写进去的要能删掉） |
 | GET | `/api/playtest` | 试玩状态（`running` / `port` / `url` / `pid`）+ 难度键表 + 当前工坊根 |
-| POST | `/api/playtest/start` | `{ difficulty? }` → 起（或复用）一个游戏服务器子进程并等 `/healthz`；起不来 → 500 + 原话，且进程已被收尸 |
+| POST | `/api/playtest/start` | `{ difficulty?, stage? }` → 起（或复用）一个游戏服务器子进程并等 `/healthz`；`stage` 让**这一局强制打那张图**（子进程带 `SP_STAGE`，`Match` 构造器覆盖抽图并重算部署图；id 不存在直接 400）。子进程同时带 `SP_PLAYTEST=1`，记录里标了 `directToHand` 的干员会在第一回合进手牌。起不来 → 500 + 原话，且进程已被收尸 |
 | POST | `/api/playtest/stop` | 停掉试玩（没在跑时 `stopped: false`，幂等） |
 
 ## Option 署名（`_meta`）

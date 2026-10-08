@@ -71,13 +71,21 @@ export const EN_SHARED = Object.freeze({
   '保存到': 'Save to',
   '＋ 新建一个包…': '+ New pack…',
   '先在右边选一个工坊包（或点「＋ 新建一个包…」）。': 'Pick a workshop pack on the right (or click “+ New pack…”).',
-  // 「新工坊包 id」的内联输入框（packIdForm）：问一次 id，建包交给第一次保存
+  // 「新工坊包 id」的内联输入框（packIdForm）：问一次 id。传了 create（就是 createPack）就顺手把包建出来，
+  // 不传则沿用旧行为（建包交给第一次保存）—— 见 packPicker.js 的文件头。
   '确认': 'OK',
   '取消': 'Cancel',
   '创建': 'Create',
+  '创建中…': 'Creating…',
   '包 id 不能为空。': 'The pack id cannot be empty.',
   '包 id 只能是字母、数字、下划线、短横线，1–32 位，且以字母或数字开头。': 'A pack id may only contain letters, digits, underscores and hyphens, 1–32 characters, starting with a letter or digit.',
   '已经有叫 {0} 的工坊包了：换一个 id，或者取消后在上面的下拉里直接选它。': 'A workshop pack called {0} already exists: pick another id, or cancel and select it in the dropdown above.',
+  // 「一键新建工坊包」：用自动 id（基名重了依次 -2、-3…）立刻建包，全程不碰正在填的内容
+  '＋ 一键新建工坊包': '+ Create a pack in one click',
+  '一键新建试了很多个名字都被占用了，请在上面手填一个 id。': 'One-click creation tried many names and all were taken — type an id in the box above.',
+  '一键新建试了很多个名字都被占用了，请在手输框里填一个 id。': 'One-click creation tried many names and all were taken — type an id in the box.',
+  '用自动生成的 id 建一个包，不动表单': 'Create a pack with an auto-generated id, without touching the form',
+  '已创建工坊包 {0}（目录 workshop/{1}/）：当前表单保持不变，保存时会写进它。': 'Created workshop pack {0} (folder workshop/{1}/). The current form is untouched and will be saved into it.',
   '{0} 阶': 'tier {0}',
   '{0} 条': '{0} entries',
   '干员 id': 'operator id',

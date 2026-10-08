@@ -11,7 +11,7 @@
 import { Grid, normalizeLegendEntry } from './sim/grid.js';
 import {
   GATE_PAIRS, GRID_RECT, BLOCKING_ROLES, STAGE_ROWS, STAGE_COLS,
-  deriveDeployTiles, validateStage, stageErrors, normalizeRows,
+  deriveDeployTiles, groundRuleOf, validateStage, stageErrors, normalizeRows,
 } from '../shared/stageAuthoring.js';
 
 const isPlain = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -105,16 +105,21 @@ export function deriveRoutePaths(stage, routes) {
 
 /**
  * Build a complete, engine-valid stage record from an authoring spec. The author supplies only what can be drawn:
- * `id`, `name`, `rows`, `tiles`, `devices`, and optionally `modes`/`weight`/`options`/`config`.
+ * `id`, `name`, `rows`, `tiles`, `devices`, and optionally `modes`/`weight`/`options`/`config`/`routes`/`kind`/`helpers`.
  *
  * `modes` matters for more than metadata: a stage enters a match only when the mode's `stages` list names it, and the
  * loader appends a workshop stage's id to those entries (shared/workshop.js linkStages) — so a stage with no `modes`
  * would be valid yet never selected.
  *
+ * `opts.paths` decides whether the 12 official gate pairs are walked to produce `groundPaths` /
+ * `groundPathsWithDevices` — see the default below. The record ALWAYS carries both keys; a map with no derived route
+ * gets an empty table rather than a missing field, so every reader can keep iterating it.
+ *
  * @param {object} spec
- * @returns {{ ok: true, stage: object, warnings: string[] } | { ok: false, errors: object[] }}
+ * @param {{ paths?: boolean }} [opts]
+ * @returns {{ ok: true, stage: object, routePaths: object[], warnings: string[] } | { ok: false, errors: object[] }}
  */
-export function deriveStage(spec) {
+export function deriveStage(spec, opts = {}) {
   const errors = stageErrors(validateStage(spec));
   if (errors.length) return { ok: false, errors };
   const warnings = [];
@@ -132,7 +137,13 @@ export function deriveStage(spec) {
     warnings.push('no `modes` given: the stage is valid but no mode will ever select it (the loader appends it to the modes it names).');
   }
   const options = isPlain(spec.options) ? spec.options : {};
-  const paths = deriveGroundPaths({ rows, tiles, devices });
+  // 寻路表默认不派生：自动寻路只能由作者点按钮要（`opts.paths: true`，编辑器把它传进来），或者这张图自己画了
+  // 路线（spec.routes 非空）—— 一条路都没画的新图不该带一堆猜出来的门到门路线。老行为（官方数据、CLI 脚手架）
+  // 靠显式传 { paths: true } 或 spec.routes 保持原样。
+  const derivePaths = opts && opts.paths !== undefined
+    ? opts.paths === true
+    : (Array.isArray(spec.routes) && spec.routes.length > 0);
+  const paths = derivePaths ? deriveGroundPaths({ rows, tiles, devices }) : { groundPaths: {}, groundPathsWithDevices: {} };
   const stage = {
     id: spec.id,
     name: typeof spec.name === 'string' && spec.name ? spec.name : spec.id,
@@ -147,9 +158,12 @@ export function deriveStage(spec) {
     special: isPlain(spec.special) ? spec.special : {},
     runes: Array.isArray(spec.runes) ? spec.runes : [],
     globalBuffs: Array.isArray(spec.globalBuffs) ? spec.globalBuffs : [],
-    deployTiles: deriveDeployTiles(rows, tiles, devices),
+    deployTiles: deriveDeployTiles(rows, tiles, devices, { groundHighGround: groundRuleOf(spec) }),
     groundPaths: paths.groundPaths,
     groundPathsWithDevices: paths.groundPathsWithDevices,
+    // 联防图 (kind 'unite'): validateStage already enforced helpers ∈ 1..2 and rejected kind on anything else
+    ...(spec.kind === 'unite' ? { kind: 'unite' } : {}),
+    ...(spec.kind === 'unite' ? { helpers: spec.helpers === undefined ? 2 : spec.helpers } : {}),
     // a workshop map may name the wave template EACH round runs (server/match/waves.js stageTemplateId), because the
     // engine otherwise picks the stage and the round's template independently. Omitted when not declared, so an
     // official-shaped record stays exactly as it was.
@@ -158,10 +172,15 @@ export function deriveStage(spec) {
     options: {
       characterLimit: Number.isFinite(options.characterLimit) ? options.characterLimit : 8,
       moveMultiplier: Number.isFinite(options.moveMultiplier) ? options.moveMultiplier : 0.5,
+      // the per-map tile rule 3 (shared/stageAuthoring.js groundRuleOf) travels in the record, because the record is
+      // what the editor reads back and what validateStageRecord re-derives deployTiles from
+      ...(options.groundHighGround === true ? { groundHighGround: true } : {}),
     },
     config: isPlain(spec.config) ? spec.config : {},
   };
-  if (!Object.keys(stage.groundPaths).length) {
+  // Only warn when the derivation was actually ASKED for: a map that simply has none of the 12 official gate pairs (or
+  // was deliberately derived without 寻路) is not a broken map.
+  if (derivePaths && !Object.keys(stage.groundPaths).length) {
     warnings.push('no ground route could be derived: check that the "S"/"E" tiles are ground-passable and reachable.');
   }
   // The authored ROUTES (the 出生点 → 防守点 path) are validated by running them through the sim: a route nothing can
@@ -184,6 +203,11 @@ export function deriveStage(spec) {
  * Validate a stored stage record INCLUDING the derived tables: are they present, and do they still match what the sim
  * computes now? A pack whose rows were edited by hand while groundPaths were left behind is the exact failure this
  * catches — the game would walk enemies along a route the map no longer has.
+ *
+ * "Do they still match" is judged per route key. A stored EMPTY table agrees with the grid producing nothing — that is
+ * a map derived with 寻路 off (`opts.paths: false`), or one that has none of the 12 official gate pairs, not a stale
+ * table. Comparing the tables wholesale would report every such map as stale, i.e. the check would call the new default
+ * a defect.
  * @param {object} stage a full stage record
  * @param {{id?: string, officialIds?: Set<string>|string[]}} [opts]
  */
@@ -198,20 +222,27 @@ export function validateStageRecord(stage, opts = {}) {
       continue;
     }
     const want = expect[key];
-    const missing = Object.keys(want).filter((k) => !has[k]);
-    const stale = Object.keys(want).filter((k) => has[k] && JSON.stringify(has[k]) !== JSON.stringify(want[k]));
-    const extra = Object.keys(has).filter((k) => !want[k]);
-    if (stale.length || extra.length) {
+    const absent = (v) => v === undefined || (Array.isArray(v) && v.length === 0);
+    const stale = [];
+    let missing = 0;
+    for (const k of new Set([...Object.keys(has), ...Object.keys(want)])) {
+      // both sides empty → the sim and the stored table agree that the map has no such route
+      if (absent(has[k]) && absent(want[k])) continue;
+      if (absent(has[k])) { missing++; continue; }
+      if (JSON.stringify(has[k]) !== JSON.stringify(want[k])) stale.push(k);
+    }
+    if (stale.length) {
       issues.push({
         field: key, code: 'STALE_DERIVED', severity: 'error',
-        message: `${stale.length ? `${stale.length} route(s) no longer match the grid` : ''}${stale.length && extra.length ? '; ' : ''}${extra.length ? `${extra.length} route(s) the grid no longer produces` : ''}`,
+        message: `${stale.length} route(s) no longer match the grid`,
         hint: 're-derive it: the rows/tiles/devices were edited after the paths were computed',
       });
-    } else if (missing.length) {
-      issues.push({ field: key, code: 'INCOMPLETE_DERIVED', severity: 'warning', message: `${missing.length} route(s) the sim can compute are absent` });
+    }
+    if (missing) {
+      issues.push({ field: key, code: 'INCOMPLETE_DERIVED', severity: 'warning', message: `${missing} route(s) the sim can compute are absent` });
     }
   }
-  const wantDeploy = deriveDeployTiles(normalizeRows(stage.rows), stage.tiles, stage.devices);
+  const wantDeploy = deriveDeployTiles(normalizeRows(stage.rows), stage.tiles, stage.devices, { groundHighGround: groundRuleOf(stage) });
   if (isPlain(stage.deployTiles) && JSON.stringify(stage.deployTiles) !== JSON.stringify(wantDeploy)) {
     issues.push({ field: 'deployTiles', code: 'STALE_DERIVED', severity: 'error', message: 'deployTiles no longer match the legend/devices', hint: 're-derive it' });
   }

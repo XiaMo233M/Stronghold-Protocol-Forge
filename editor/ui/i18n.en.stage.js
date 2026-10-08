@@ -15,8 +15,11 @@ export const EN_STAGE = Object.freeze({
   // ---- 顶部与左栏（stage.html 静态文案 + 列表） ----
   '新建地图': 'New map',
   '＋ 新建地图': '+ New map',
+  '以模板新建…': 'New from a template…',
   '工坊包 / 地图': 'Workshop packs / maps',
-  '寻路 {0} 条 · 部署 {1} 格': '{0} paths · {1} deploy tiles',
+  '寻路 {0} 条': '{0} paths',
+  '寻路：未生成': 'Paths: not generated',
+  '部署 {0} 格': '{0} deploy tiles',
   '还没有工坊地图': 'No workshop map yet',
   '{0} 张工坊地图': '{0} workshop maps',
   '左边选一张地图，或点「新建地图」。': 'Pick a map on the left, or click "New map".',
@@ -33,16 +36,48 @@ export const EN_STAGE = Object.freeze({
   '正在准备 3D 预览…': 'Preparing the 3D preview…',
   '3D 预览不可用：{0}': '3D preview unavailable: {0}',
 
+  // ---- 视图工具条与画布提示（整图适应视野、缩放平移） ----
+  '适应': 'Fit',
+  '把整张 19×21 缩放回视野里（最少留 8px 边距）': 'Scale the whole 19×21 back into view (at least 8px of margin on every side)',
+  '＋': '+',
+  '－': '−',
+  '自动寻路': 'Auto-route',
+  '业主口径：绝不自动生成；只有点这一下才算。按本图的 S（出生点）配最近的 E（防守点）求一条寻路，追加进路线里': 'The owner’s rule: never generated automatically — only this click does it. Pairs every S (spawn) of this map with its nearest E (defense point), then appends the routes.',
+  '缩放平移：滚轮 / 双指缩放，中键拖或按住空格拖平移，「适应」复位。': 'Zoom: wheel / two-finger. Pan: middle-drag or hold Space and drag. “Fit” resets the view.',
+
   // ---- 画布提示与地形调色板 ----
   '把鼠标移到网格上看坐标。row 0 在最下面一行（和引擎一致）。': 'Move the mouse over the grid to read coordinates. row 0 is the bottom row (same as the engine).',
   'row {0}, col {1} · 字符 {2}': 'row {0}, col {1} · char {2}',
   '地形调色板': 'Terrain palette',
+  '空': 'Air',
+  '地图外 · 空气：不可走、不可部署': 'Outside the map · air: not walkable, not deployable',
+  '字符 {0}': 'char {0}',
 
-  // ---- 右栏：地图身份与模式 ----
+  // ---- 右栏：地图身份、地图种类、模式与地块图例 ----
   '地图': 'Map',
   '权重 weight': 'Weight',
+  '地图种类': 'Map kind',
+  '这张图算什么地图': 'What kind of map this is',
+  '单人（默认）': 'Single player (default)',
+  '联防（1 人）': 'Co-op defense (1 helper)',
+  '联防（2 人）': 'Co-op defense (2 helpers)',
+  '首领战（boss）不是地图种类：在下面的「回合绑定」里给某一回合绑上首领出怪表，那一回合就是首领战。': 'A boss fight is not a map kind: bind a boss wave table to a round in “Round bindings” below and that round becomes the boss fight.',
   '可选中的模式（必须至少选一个）': 'Selectable modes (pick at least one)',
   '（没有可选模式）': '(no selectable mode)',
+  '地块图例 / 部署规则': 'Tile legend / deploy rules',
+  '这里改的是这张图的图例：高度 / 可部署 / 通行三个字段直接决定引擎算出来的部署区。': 'What you change here is this map’s legend: height / buildable / passable are the three fields the engine derives the deploy area from.',
+  '高度': 'Height',
+  '可部署': 'Buildable',
+  '通行': 'Passable',
+  '空气：不可走、不可部署': 'Air: not walkable, not deployable',
+  '可放地面干员（近战位）': 'Ground operator (melee tile)',
+  '只能放远程位（高台干员）': 'Ranged tile only (high-ground operator)',
+  '不可部署': 'No deployment',
+  '（没有 tileKey）': '(no tileKey)',
+  '部署规则': 'Deploy rules',
+  '地面也能放远程位（高台干员）': 'The ground also takes ranged tiles (high-ground operators)',
+  '已勾上：普通地面也接受远程位（高台干员），近战位不变。': 'On: plain ground also takes ranged tiles (high-ground operators); melee tiles are unchanged.',
+  '默认不勾：只有道路放地面干员、高台放远程位；普通地面不接受高台干员。这个开关是这张图自己的。': 'Off by default: roads take ground operators and high ground takes ranged tiles; plain ground takes no high-ground operator. The switch belongs to this map.',
 
   // ---- 右栏：装置 ----
   '装置': 'Devices',
@@ -73,10 +108,30 @@ export const EN_STAGE = Object.freeze({
   '删除地图 {0}？': 'Delete map {0}?',
   '校验与推导结果': 'Validation and derivation',
   '（改动后会自动推导）': '(derives automatically after each change)',
-  '推导：寻路 {0} 条（含装置 {1} 条）· 部署 {2} 近战 / {3} 远程': 'Derived: {0} paths ({1} with devices) · deploy {2} melee / {3} ranged',
+  '寻路 {0} 条（含装置 {1} 条）': '{0} paths ({1} with devices)',
+  '部署 {0} 近战 / {1} 远程': 'deploy {0} melee / {1} ranged',
+
+  // ---- 以模板新建 / 试玩这张图 ----
+  '点一个模板就以它为底开一张新图（模板的 id 与名字不会被占用）。': 'Click a template to start a new map from it (the template’s id and name stay its own).',
+  '收起': 'Collapse',
+  '正在载入模板…': 'Loading templates…',
+  '（这台机器上没有可用的模板）': '(no template on this machine)',
+  '拉取模板清单失败：{0}': 'Could not load the template list: {0}',
+  '已按「{0}」载入一份新图：请填一个新的 id 与名称。': 'Loaded a new map from “{0}”: fill in a new id and name.',
+  '▶ 试玩这张图': '▶ Playtest this map',
+  '先填一个 id（并保存一次）才能试玩这张图。': 'Fill in an id (and save once) before playtesting this map.',
+  '这张图还没有绑定出怪表：试玩里敌人会按官方模板的路线走，看起来会乱走。建议在出怪页建一张表并把它绑到回合上。': 'This map binds no wave table yet: in a playtest the enemies walk the official template’s routes and look like they wander. Create a table in the spawn designer and bind it to a round.',
+  // 「正在起…」「试玩服务器已就绪（新标签页已打开）：{0}」与干员页共用，已在 index 分片
+
+  // ---- 自动寻路（唯一会生成寻路表的地方） ----
+  '自动寻路：新增 {0} 条路线（共 {1} 条）。': 'Auto-route: added {0} route(s), {1} in total.',
+  '自动寻路：没有新的路线可加（这张图上同起终点的已经有了）。': 'Auto-route: nothing new to add (this map already has a route with the same start and end).',
+  '自动寻路失败：{0}': 'Auto-route failed: {0}',
+  '这张图没有可配对的入口与保护目标': 'this map has no gate/objective pair to route between',
 
   // ---- 3D 预览：控制提示、视角名与退回原因 ----
-  '拖动平移 · 滚轮缩放 · Shift+拖动（或右键拖动）调俯角。这一层是游戏自己的 3D 渲染器跑你这张地图。': "Drag to pan · wheel to zoom · Shift+drag (or right-drag) to tilt. This layer is the game's own 3D renderer running your map.",
+  '左键拖动调俯角 · 滚轮缩放 · 按住空格拖（或中键拖）平移。这一层是游戏自己的 3D 渲染器跑你这张地图。': "Left-drag tilts · wheel zooms · hold Space and drag (or middle-drag) to pan. This layer is the game's own 3D renderer running your map.",
+  '（页面上没有 3D 画布）': '(there is no 3D canvas on this page)',
   '全图': 'Whole map',
   '俯视': 'Top-down',
   '游戏视角': 'Game view',

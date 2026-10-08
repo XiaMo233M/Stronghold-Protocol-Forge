@@ -377,12 +377,17 @@ describe('workshop editor: maps (the 2D placer API)', () => {
     assert.ok(r.modes.every((m) => m.id && m.name));
   });
 
-  test('POST /api/stages/preview derives the paths without writing', async () => {
+  test('POST /api/stages/preview derives the paths only when they are asked for', async () => {
+    // 新建的地图默认不带寻路：没画路线就不派生门到门路线（业主口径：自动寻路只能点按钮要）
     const r = await post(`${editor.url}/api/stages/preview`, { spec: stageSpec() }).then((x) => x.json());
     assert.equal(r.ok, true, JSON.stringify(r.errors));
-    assert.ok(Object.keys(r.record.groundPaths).length > 0, 'the sim must derive ground routes');
+    assert.equal(Object.keys(r.record.groundPaths).length, 0, 'a map with no drawn route must not carry derived ground routes');
     assert.ok(r.record.deployTiles.normal.melee.length > 0);
     assert.equal(fs.existsSync(join(wsRoot, 'map-pack')), false, 'a preview must not write');
+    // 显式传 paths 时仍然照老样子派生（「自动寻路」按钮走的就是这条路）
+    const asked = await post(`${editor.url}/api/stages/preview`, { spec: stageSpec(), paths: true }).then((x) => x.json());
+    assert.equal(asked.ok, true, JSON.stringify(asked.errors));
+    assert.ok(Object.keys(asked.record.groundPaths).length > 0, 'the sim must derive ground routes when asked');
   });
 
   test('saving writes the spec and the generated record; deleting removes them', async () => {
@@ -391,7 +396,7 @@ describe('workshop editor: maps (the 2D placer API)', () => {
     const packDir = join(wsRoot, 'map-pack');
     assert.deepEqual(JSON.parse(fs.readFileSync(join(packDir, 'pack.json'), 'utf8')).content, ['stages']);
     assert.equal(fs.existsSync(join(packDir, 'stage-specs/ws_editor_map.json')), true, 'the spec is the editable source');
-    assert.ok(JSON.parse(fs.readFileSync(join(packDir, 'stages.json'), 'utf8')).ws_editor_map.groundPaths, 'the generated record carries the derived paths');
+    assert.equal(Object.keys(JSON.parse(fs.readFileSync(join(packDir, 'stages.json'), 'utf8')).ws_editor_map.groundPaths).length, 0, 'no drawn route → no derived paths in the saved record');
 
     const listed = await fetch(`${editor.url}/api/stages`).then((x) => x.json());
     const found = listed.stages.find((s) => s.id === 'ws_editor_map');

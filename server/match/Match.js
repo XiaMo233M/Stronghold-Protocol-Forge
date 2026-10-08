@@ -321,6 +321,26 @@ export class Match {
     const setup = setupMatchWaves(this.gd, this.rngSetup);
     this.stageId = setup.stageId;
     this.stage = this.stageId ? this.gd.stage(this.stageId) : null;
+    /**
+     * 编辑器「▶ 试玩这张图」：让这一局**打指定的那张图**（业主 2026-10-08 的地图编辑器需求）。
+     *
+     * 为什么走环境变量而不是新的协议字段：试玩服务器是编辑器 spawn 的**一次性子进程**（editor/playtest.mjs，一个端口一个
+     * 进程），`SP_STAGE` 只在那一个进程里存在；正式服务器不会带它，所以这条不会成为可以远程触发的玩法开关。
+     * 覆盖发生在 setupMatchWaves 抽完图之后：抽卡本身照常消耗随机数，种子序列与不带 SP_STAGE 时一致。
+     *
+     * 注意这张图**未必绑过出怪表**：`buildNormalWave` 会退到模式模板（官方几何的路线），试玩里看起来就是「怪在乱走」——
+     * 编辑器在点试玩之前会先提示这件事，这里只留一条日志当线索。
+     */
+    const forcedStage = String(process.env.SP_STAGE || '').trim();
+    if (forcedStage && this.gd.stage(forcedStage)) {
+      this.stageId = forcedStage;
+      this.stage = this.gd.stage(forcedStage);
+      // 部署图是按当时那张图算出来的：换了图必须让它重算，否则试玩里能放的位置还是上一张图的
+      for (const ps of this.players.values()) ps.invalidateDeployMap?.();
+      if (!this.stage.rounds || !Object.keys(this.stage.rounds).length) {
+        this.log?.warn?.(`[match] SP_STAGE=${forcedStage}：这张图没有绑定任何出怪表，回合会退回模式模板的路线`);
+      }
+    }
     this.factions = setup.factions;
     this.bossId = setup.bossId;
     this.hiddenBossId = setup.hiddenBossId;

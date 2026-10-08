@@ -53,13 +53,18 @@ export function freePort(host = PLAYTEST_HOST) {
 /**
  * 试玩页面的 URL：带上客户端的深链参数（`?playtest=1`，见 public/js/main.js），
  * 于是打开浏览器就直接进一局独立模拟，而不是停在选单里。
+ *
+ * `stage` 只是**说明性**的（客户端不认识这个参数）：真正决定打哪张图的是子进程的 `SP_STAGE`（见 start()）。
+ * 带上它纯粹是为了让作者在地址栏里也能看出这一局是「试玩某张图」。
  * @param {number} port
  * @param {string|null} [difficulty] 难度键（shared/constants.js 的 DIFFICULTIES）；不认识就不带
+ * @param {string|null} [stage] 强制的地图 id（地图页「▶ 试玩这张图」）
  * @returns {string}
  */
-export function playtestUrl(port, difficulty = null) {
+export function playtestUrl(port, difficulty = null, stage = null) {
   const q = new URLSearchParams({ playtest: '1' });
   if (typeof difficulty === 'string' && difficulty) q.set('difficulty', difficulty);
+  if (typeof stage === 'string' && stage.trim()) q.set('stage', stage.trim());
   return `http://${PLAYTEST_HOST}:${port}/?${q.toString()}`;
 }
 
@@ -125,19 +130,22 @@ export function createPlaytest({ root, repoRoot = REPO_ROOT, node = process.exec
      * @param {{ difficulty?: string|null, port?: number }} [opts]
      * @returns {Promise<{ ok: true, url: string, port: number, pid: number, reused: boolean }>}
      */
-    async start({ difficulty = null, port = null } = {}) {
+    async start({ difficulty = null, port = null, stage = null } = {}) {
       if (stopping) await stopping;
       const now = playtest.status();
-      if (now.running) return { ok: true, url: playtestUrl(now.port, difficulty), port: now.port, pid: now.pid, reused: true };
+      if (now.running) return { ok: true, url: playtestUrl(now.port, difficulty, stage), port: now.port, pid: now.pid, reused: true };
 
       if (!fs.existsSync(entry)) throw new Error(`找不到游戏服务器入口：${entry}`);
       const usePort = Number.isInteger(port) && port > 0 && port < 65536 ? port : await freePort();
       // SP_WORKSHOP：让子进程用**编辑器当前的工坊根**，否则试玩里看不到作者正在编辑的包（server/index.js main）
-      const env = { ...process.env, PORT: String(usePort), HOST: PLAYTEST_HOST };
+      // SP_PLAYTEST：告诉这一局它是试玩（记录里标了「直接发到手上」的干员会进手牌，见 Match.grantDirectToHand）。
+      // SP_STAGE：地图页「▶ 试玩这张图」——这一局强制打指定的那张图（Match 构造器里覆盖抽图结果）。
+      const env = { ...process.env, PORT: String(usePort), HOST: PLAYTEST_HOST, SP_PLAYTEST: '1' };
       if (root) env.SP_WORKSHOP = path.resolve(root);
+      if (typeof stage === 'string' && stage.trim()) env.SP_STAGE = stage.trim();
       // stdio: 'inherit'（默认）让游戏服务器的日志直接出现在编辑器那个终端里 —— 试玩失败时那是唯一的线索
       const child = spawn(node, [entry], { cwd: repoRoot, env, stdio });
-      current = { child, port: usePort, url: playtestUrl(usePort, difficulty), startedAt: Date.now() };
+      current = { child, port: usePort, url: playtestUrl(usePort, difficulty, stage), startedAt: Date.now() };
       const forget = () => { if (current && current.child === child) current = null; };
       child.once('exit', forget);
       // 编辑器自己被 Ctrl+C 或崩溃带走时也要收尸，否则占着端口的孤儿 node.exe 会留到下次试玩才发现。
@@ -153,8 +161,8 @@ export function createPlaytest({ root, repoRoot = REPO_ROOT, node = process.exec
         forget();
         throw e;
       }
-      log.info?.(`[playtest] 游戏服务器已就绪：http://${PLAYTEST_HOST}:${usePort}（工坊根 ${root ?? '(默认)'}）`);
-      return { ok: true, url: playtestUrl(usePort, difficulty), port: usePort, pid: child.pid, reused: false };
+      log.info?.(`[playtest] 游戏服务器已就绪：http://${PLAYTEST_HOST}:${usePort}（工坊根 ${root ?? '(默认)'}${env.SP_STAGE ? `，强制地图 ${env.SP_STAGE}` : ''}）`);
+      return { ok: true, url: playtestUrl(usePort, difficulty, stage), port: usePort, pid: child.pid, reused: false };
     },
 
     /** 停掉试玩（没在跑就是 no-op）。 */

@@ -22,8 +22,9 @@ import {
 } from './operatorWizard.js';
 import { fmtNum, makeStatBar } from './statScale.js';
 import { renderKeepingFocus } from './focusKeep.js';
-// 「新建工坊包」按钮的内联输入框：与各页「保存到」下拉里的「＋ 新建一个包…」共用同一份校验与控件
-import { packIdForm } from './packPicker.js';
+// 「新建工坊包」按钮的内联输入框，以及「一键新建」要用的 id 推演：与各页「保存到」下拉里的「＋ 新建一个包…」
+// 共用同一份校验、建包调用与控件（规则只有一份，页面上说的和服务端做的就是同一件事）
+import { packIdForm, createPack, autoPackId } from './packPicker.js';
 // spine 判定的同一条规则：出怪页与干员页共用一个纯函数（填错不会报错的字段，两页都要当场说话）
 import { spineIsKnown } from './enemyWizard.js';
 
@@ -1223,6 +1224,7 @@ function renderEditor() {
     const isSupport = pool.includes(baseId);
     box.append(section('support', t('助战'), [
       h('p', { class: 'hint' }, t('勾上＝把这份记录写进 data/support.json 的服务端卡池（重启游戏服务器后生效）。')),
+      h('p', { class: 'hint' }, t('助战干员**进商店**：它只比普通棋子多一份池中拷贝，仍然要在自己的商店里**摇到**、按阶级价买到、按普通规则卖掉 —— 不会被直接发到手上。')),
       h('label', { style: 'display:flex;gap:8px;align-items:center;color:var(--fg)' },
         checkInput(isSupport, async (on) => {
           try {
@@ -1235,6 +1237,12 @@ function renderEditor() {
         }),
         t('把 {0} 加入 {1} 阶助战卡池', baseId, tier)),
       h('p', { class: 'hint' }, t('当前 {0} 阶卡池：{1}', tier, pool.length ? pool.join(', ') : t('（空）'))),
+      // 「试玩时直接发到手上」：写进记录（`directToHand`），只有编辑器起的试玩服务器会发牌 —— 这样作者不用为了
+      // 看一眼自己的干员先把调度中心升到它那一阶（六阶要升到 6 级）。正式对局一切照旧（仍然只在商店里摇）。
+      h('label', { style: 'display:flex;gap:8px;align-items:center;color:var(--fg)' },
+        checkInput(s.directToHand === true, (on) => { state.spec.directToHand = on === true; renderEditor(); }),
+        t('试玩时直接发到手上（正式对局不受影响）')),
+      h('p', { class: 'hint' }, t('勾上＝记录里写 `directToHand: true`：只有编辑器「一键试玩」起的那个服务器会在开局把它塞进手牌。正式服务器即使装了这个包也不会发牌，干员照样只在商店里摇到。')),
     ], { note: t('可选：让这张卡出现在助战卡池里') }));
   }
 
@@ -1246,6 +1254,7 @@ function renderEditor() {
     // 保存之后最想做的事是「看一眼它在游戏里长什么样」：这里直接起试玩，省掉「切到包管理页 → 点试玩」那两步。
     h('button', { class: 'ghost', onclick: (e) => playtest(e.target) }, t('▶ 试玩（起一局看它）')));
   box.append(actions);
+  box.append(h('p', { class: 'hint' }, t('试玩起的是**原版服务器**的一局：你保存的干员按阶级进共享池，和官方干员一样**在商店里摇到、买到** —— 编辑器不往你手里塞任何东西（手里一开始是空的，棋盘上每个单位都是花了资金的）。一阶干员在一级商店就摇得到，越高阶越要先把调度中心升上去。')));
   if (!state.packId) box.append(h('p', { class: 'hint' }, t('先在上方选择一个工坊包（或点「新建工坊包」），才能保存。')));
 
   const pv = state.preview;
@@ -1634,29 +1643,76 @@ $('#btnReload').addEventListener('click', () => load().catch((e) => { state.mess
 
 // 「新建工坊包」= 在页面里展开一个输入框，而不是弹原生 prompt（三条理由见 editor/ui/packPicker.js 的文件头）。
 // 这块表单挂在 header 与 #editor 之间，**不随重画重建** —— 否则每 250ms 一次的自动校验会把刚敲进去的 id 擦掉。
-// 仍然只问 id、不建包：工坊包由第一次保存干员时创建（目录名必须等于 pack.json 的 id）。
+// 与从前不同的是：它现在**真的建包**（POST /api/packs），而且**不再动正在填的表单** —— 作者的
+// state.slug / state.spec / state.preview 原样留着。建包与「新建一条内容」本来是两件事，从前把它们绑在一起，
+// 结果就是「想换个包保存」必须先丢掉手里这条干员。
 const newPackPanel = document.createElement('div');
 newPackPanel.id = 'newPackPanel';
 $('header').after(newPackPanel);
 let newPackForm = null;
 const closeNewPack = () => { newPackForm = null; newPackPanel.replaceChildren(); };
-$('#btnNewPack').addEventListener('click', () => {
-  if (newPackForm) { closeNewPack(); return; }   // 再点一次 = 收起（同一颗按钮开着关着都是它）
+
+/** 新建成功后要说的那句话：把「包在哪儿」和「表单没动」一起说清 —— 后者是这颗按钮存在的理由。 */
+function createdPackMessage(res) {
+  const id = res?.id ?? '';
+  return t('已创建工坊包 {0}（目录 workshop/{1}/）：当前表单保持不变，保存时会写进它。', id, id);
+}
+
+/** 把刚建出来的包切为当前包。**一处也不碰 state.slug / state.spec / state.preview**：
+ *  作者点「新建工坊包」的意思通常是「这条干员存到新包去」，不是「不要这条干员了」。
+ *  清单只就地补一条，不整页 load()：load() 回来会 renderShell → renderEditor 重画整张表单。 */
+function adoptCreatedPack(res) {
+  const id = res?.id ?? null;
+  if (!id) return;
+  state.packId = id;
+  if (Array.isArray(state.data?.packs) && !state.data.packs.some((p) => p.id === id)) {
+    // 形状与 /api/state 的包对象一致（renderPacks 会把新包排进左栏）
+    state.data.packs.push({ id, manifest: { name: res.name || id }, operators: [], specs: [] });
+    state.data.packs.sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  }
+  state.message = { kind: 'ok', text: createdPackMessage(res) };
+}
+
+/** 一键新建：id 由 packPicker 推（基名 my-workshop-pack，重了依次 -2、-3…），与「保存到」下拉同一套规则。 */
+async function createPackOneClick() {
+  const id = autoPackId('my-workshop-pack', state.data?.packs ?? []);
+  if (!id) { state.message = { kind: 'error', text: t('一键新建试了很多个名字都被占用了，请在手输框里填一个 id。') }; renderShell(); return; }
+  try {
+    const res = await createPack(id);
+    adoptCreatedPack(res);
+    renderShell();
+    openNewPackPanel();   // 面板留着：刚写的 id 已经用掉了，重画一次好让手输框空出来
+  } catch (e) {
+    state.message = { kind: 'error', text: errText(e) };
+    renderShell();
+  }
+}
+
+/** 展开这块面板：一个手输 id 的表单 + 一颗「一键新建」。
+ *  一键那颗挂在表单**外面**，所以它建完包重画面板时不会牵连作者正在填的页面表单。 */
+function openNewPackPanel() {
   newPackForm = packIdForm({
     packs: state.data?.packs ?? [],
     confirmLabel: t('创建'),
-    onConfirm: (id) => {
+    // 建包交给 packIdForm 里的 create：失败它会把服务端原话写在表单里（不 alert、不静默选中一个不存在的包）。
+    // 这里只负责成功之后的事，所以不再 catch —— 再报一次会把同一句话说出来两遍。
+    create: createPack,
+    onConfirm: async (id) => {
+      adoptCreatedPack({ id });
       closeNewPack();
-      state.packId = id;
-      state.slug = null;
-      state.spec = blankSpec();
-      state.preview = null;
-      state.message = { kind: 'ok', text: t('保存第一个干员时会创建工坊包 {0}（目录名必须等于 pack.json 的 id）。', id) };
       renderShell();
+      // 清单变了，但**不动作者正在填的表单**：只重画编辑器那一块，并把焦点留在原处
+      renderEditorKeepingFocus();
     },
     onCancel: closeNewPack,
   });
-  newPackPanel.replaceChildren(newPackForm);
+  const auto = h('button', { type: 'button', class: 'ghost', title: t('用自动生成的 id 建一个包，不动表单'), onclick: () => { createPackOneClick(); } }, t('＋ 一键新建工坊包'));
+  newPackPanel.replaceChildren(newPackForm, auto);
+}
+
+$('#btnNewPack').addEventListener('click', () => {
+  if (newPackForm) { closeNewPack(); return; }   // 再点一次 = 收起（同一颗按钮开着关着都是它）
+  openNewPackPanel();
 });
 
 // 界面语言：换掉 HTML 里的静态文案、插入右上角切换按钮，换语言后重画一遍（动态文案也要跟着换）。

@@ -22,8 +22,9 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deriveChessRecord, validateChessRecord, chessIds, formatIssues, authoringErrors, specFromChessRecord } from '../shared/chessAuthoring.js';
-import { TILE_PALETTE, DEPLOY_RECTS, STAGE_ROWS, STAGE_COLS, stageErrors } from '../shared/stageAuthoring.js';
-import { deriveStage, validateStageRecord } from '../server/stageAuthoring.js';
+import { TILE_PALETTE, DEPLOY_RECTS, STAGE_ROWS, STAGE_COLS, normalizeRows, stageErrors, SAMPLE_STAGE_SPEC, sampleStageSpec } from '../shared/stageAuthoring.js';
+import { deriveStage, validateStageRecord, deriveRoutePaths } from '../server/stageAuthoring.js';
+import { normalizeLegendEntry } from '../server/sim/grid.js';
 import {
   deriveEnemy, validateEnemy, enemyErrors, enemyKey as enemyKeyOf, specFromEnemyRecord,
   ENEMY_RANKS, ENEMY_MOTIONS, ENEMY_DMG_TYPES, ENEMY_APPLY_WAYS,
@@ -1254,6 +1255,46 @@ function packChoices(root) {
 }
 
 /**
+ * 官方地图记录 → 编辑器表单的 spec（地图页「以模板新建」用）。
+ *
+ * 只搬作者改得动的那部分：`rows`/`tiles`/`devices`/`modes`/`weight`/`options`，以及联防图的 `kind`/`helpers`。
+ * **不带 routes**：官方那几条路线的坐标是按官方几何画的，跟着一张新图走只会让敌人乱走 ——
+ * 业主口径是「路线由作者自己画，自动寻路只在点按钮时执行」。
+ * @param {string} id @param {object} rec 官方记录
+ */
+function specFromStageRecord(id, rec) {
+  return {
+    id, name: (rec && rec.name) ?? id,
+    weight: Number.isInteger(rec?.weight) ? rec.weight : 50,
+    modes: Array.isArray(rec?.modes) ? [...rec.modes] : [],
+    rows: normalizeRows(rec?.rows),
+    tiles: rec?.tiles && typeof rec.tiles === 'object' ? { ...rec.tiles } : null,
+    devices: Array.isArray(rec?.devices) ? rec.devices.map((d) => ({ ...d })) : [],
+    routes: [],
+    options: rec?.options && typeof rec.options === 'object' ? { ...rec.options } : undefined,
+    ...(rec?.kind === 'unite' ? { kind: 'unite', helpers: Number.isInteger(rec.helpers) ? rec.helpers : 2 } : {}),
+  };
+}
+
+/**
+ * 这台机器上有没有这张图：官方 `data/stages.json` 或任一工坊包的 `stages.json`。
+ *
+ * 为什么要有它：地图页的「▶ 试玩这张图」会把 id 交给游戏服务器去强制选图（SP_STAGE）。一个打错的 id
+ * 如果照样把服务器起起来，作者看到的是「试玩里还是官方图」，只会以为是自己画的地图有问题 —— 宁可在这一层挡住。
+ * @param {string} id 地图 id
+ * @param {string} root 工坊根 @param {Set<string>} officialStages 官方地图 id
+ * @returns {boolean}
+ */
+function stageExistsEverywhere(id, root, officialStages) {
+  if (!id) return false;
+  if (officialStages.has(id)) return true;
+  for (const packId of packIdsFor(root)) {
+    if ((readJson(path.join(root, packId, 'stages.json'), {}) || {})[id]) return true;
+  }
+  return false;
+}
+
+/**
  * 把 percent-encoded 的路径段解回真实文件名，并顺手挡掉「解码后才出现的危险形状」。
  *
  * 为什么必须解码：编辑器自己发出去的 URL 就是逐段 `encodeURIComponent` 的（语音试听、`/assets/**` 的棋盘贴图），
@@ -1693,6 +1734,27 @@ export async function createEditorServer(opts = {}) {
       });
     }
 
+    // ---- 建一个空的工坊包（与「保存第一条记录」解耦，业主 2026-10-08 的紧急问题） ----------------------
+    // 此前工坊包只在**保存一条内容**时被顺带创建，于是「新建工坊包」实际是「先做一条内容」：
+    // 干员页点那颗按钮还会把作者正在填的表单清空（必须重填）。创建现在是一个独立动作：目录 + pack.json 立刻落盘，
+    // 当前页面一个字都不动（前端见 editor/ui/packPicker.js 的 createPack）。
+    // `content: []` 是合法的：只带语音/助战的包本来就可以不含数据文件（docs/WORKSHOP.md §1）。
+    if (p === '/api/packs' && method === 'POST') {
+      const body = await readBody(req);
+      const id = String((body && body.id) || '').trim();
+      const wanted = typeof body?.name === 'string' && body.name.trim() ? body.name.trim() : id;
+      if (!PACK_ID_RE.test(id)) throw refuse(400, '包 id 只能是字母、数字、下划线、短横线，1–32 位，且以字母或数字开头。');
+      const packDir = path.join(root, id);
+      if (fs.existsSync(path.join(packDir, 'pack.json'))) throw refuse(409, `已经有叫 ${id} 的工坊包了。`);
+      // 目录已存在但不是包（作者手放的素材）时不动它：盖一个 pack.json 进去会把那里的东西变成「包的一部分」
+      if (fs.existsSync(packDir) && fs.readdirSync(packDir).length > 0) throw refuse(409, `workshop/${id}/ 已经存在而且不是空的。`);
+      await writeJson(path.join(packDir, 'pack.json'), {
+        id, name: wanted, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null,
+        description: null, gameVersion: '0.2.1', content: [], overrides: [],
+      });
+      return sendJson(res, 200, { ok: true, id, name: wanted });
+    }
+
     // create/update one operator: spec → specs/<slug>.json, then regenerate chess.json
     if (p.startsWith('/api/packs/') && p.endsWith('/operators') && method === 'POST') {
       const packId = p.slice('/api/packs/'.length, -'/operators'.length);
@@ -1991,9 +2053,13 @@ export async function createEditorServer(opts = {}) {
       if (difficulty !== null && !DIFFICULTIES.includes(difficulty)) {
         throw refuse(400, `难度不合法（可用：${DIFFICULTIES.join('、')}）`);
       }
+      // 地图页的「▶ 试玩这张图」：带一个 stage id，这一局强制打那张图（引擎侧见 Match 构造器的 SP_STAGE）。
+      // 只接受**这台机器上真有**的地图：打错一个 id 却照样起服务器，作者会以为是自己图的问题。
+      const stage = body && typeof body.stage === 'string' && body.stage.trim() ? body.stage.trim() : null;
+      if (stage !== null && !stageExistsEverywhere(stage, root, officialStages)) throw refuse(400, `找不到地图 ${stage}：它既不在官方数据里，也不在任何工坊包里`);
       try {
-        const started = await playtest.start({ difficulty });
-        return sendJson(res, 200, { ok: true, ...started, difficulties: [...DIFFICULTIES] });
+        const started = await playtest.start({ difficulty, stage });
+        return sendJson(res, 200, { ok: true, ...started, stage, difficulties: [...DIFFICULTIES] });
       } catch (e) {
         // 起不来就是 500：这不是用户的输入错误，而是环境问题，页面要把原话显示出来（端口/入口/超时都在里面）
         throw refuse(500, `试玩服务器启动失败：${e && e.message ? e.message : String(e)}`);
@@ -2174,10 +2240,32 @@ export async function createEditorServer(opts = {}) {
       });
     }
 
+    // ---- 地图模板（「以模板新建」）--------------------------------------------------------------------
+    // 仓库自带一张样板图（shared/stageAuthoring.js 的 SAMPLE_STAGE_SPEC），外加官方数据里的每一张图。
+    // 模板只回**规格**：页面自己决定用哪个 id/名字，所以「以模板新建」不会占用样板图自己的 id。
+    if (p === '/api/stages/templates' && method === 'GET') {
+      const official = Object.entries(readJson(path.join(dataDir, 'stages.json'), {}) || {})
+        .map(([id, rec]) => ({ id, name: rec?.name ?? id, note: rec?.kind === 'unite' ? '官方图 · 联防' : '官方图' }))
+        .sort((a, b) => a.id.localeCompare(b.id));
+      return sendJson(res, 200, {
+        ok: true,
+        templates: [{ id: SAMPLE_STAGE_SPEC.id, name: SAMPLE_STAGE_SPEC.name, note: '仓库自带样板 · 单人视角 · 含 S/E 与一条手画路线', sample: true }, ...official],
+      });
+    }
+
+    if (p === '/api/stages/template' && method === 'GET') {
+      const id = url.searchParams.get('id') || '';
+      if (id === SAMPLE_STAGE_SPEC.id) return sendJson(res, 200, { ok: true, id, name: SAMPLE_STAGE_SPEC.name, spec: sampleStageSpec() });
+      const rec = (readJson(path.join(dataDir, 'stages.json'), {}) || {})[id];
+      if (!rec) throw refuse(404, `找不到地图模板 ${id}`);
+      return sendJson(res, 200, { ok: true, id, name: rec.name ?? id, spec: specFromStageRecord(id, rec) });
+    }
+
     // derive + validate a map WITHOUT writing: the placer's live feedback while painting
     if (p === '/api/stages/preview' && method === 'POST') {
-      const { spec } = await readBody(req);
-      const derived = deriveStage(spec);
+      const { spec, paths } = await readBody(req);
+      // 寻路表只在「作者已经画了路线」或者前端明确要的时候才派生 —— 业主口径：新建一张空图不许自带寻路。
+      const derived = deriveStage(spec, { paths: typeof paths === 'boolean' ? paths : (Array.isArray(spec?.routes) && spec.routes.length > 0) });
       if (!derived.ok) return sendJson(res, 200, { ok: false, errors: derived.errors, warnings: [] });
       const issues = validateStageRecord(derived.stage, { id: derived.stage.id, officialIds: officialStages });
       return sendJson(res, 200, {
@@ -2190,6 +2278,66 @@ export async function createEditorServer(opts = {}) {
       });
     }
 
+    // ---- 自动寻路（**只在作者点了按钮时**执行；业主 2026-10-08：「不许默认新建地图就有寻路，自动寻路必须在
+    //      用户点击后才画，不许乱画寻路」）----------------------------------------------------------------
+    // 只算不写：返回可以追加进 `spec.routes` 的路线（起点/终点取本图自己 special:'start'/'end' 的格子，
+    // 配对用曼哈顿距离最近的那个 E；一张图里没有 S/E 时回落到官方那 12 对门里两端都在本图的）。
+    // 路径本身用**引擎自己那张流场**求（deriveRoutePaths → sim/grid.js），所以画出来的线就是敌人真会走的路。
+    if (p === '/api/stages/autoroute' && method === 'POST') {
+      const { spec } = await readBody(req);
+      const rows = normalizeRows(spec && spec.rows) || [];
+      const legend = spec && typeof spec.tiles === 'object' && spec.tiles ? spec.tiles : {};
+      const starts = [];
+      const ends = [];
+      rows.forEach((line, r) => {
+        for (let c = 0; c < line.length; c += 1) {
+          const e = legend[line[c]];
+          if (!e) continue;
+          const sp = normalizeLegendEntry(line[c], e).special;
+          if (sp === 'start') starts.push([r, c]);
+          else if (sp === 'end') ends.push([r, c]);
+        }
+      });
+      const manhattan = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]);
+      const pairs = [];
+      for (const s of starts) {
+        // 每个入口配它最近的出口：多入口的图上这是唯一不需要作者再选一次的规则
+        let best = null;
+        for (const e of ends) if (!best || manhattan(s, e) < manhattan(s, best)) best = e;
+        if (best) pairs.push([s, best]);
+      }
+      // 没有 S/E 就**什么都不画**：官方那 12 对门是官方几何的坐标，套到作者自己的图上正是「乱画寻路」。
+      // 这里返回一条能照着做的理由，让作者先去调色板里放 S 与 E。
+      if (!pairs.length) {
+        return sendJson(res, 200, {
+          ok: false, routes: [], pairs: [],
+          reason: starts.length || ends.length
+            ? '这张图里只有入口或只有保护目标：两者都放上才能配对'
+            : '这张图里还没有 S（入口）与 E（保护目标）：先在调色板里放几个，再点自动寻路',
+        });
+      }
+      const planned = deriveRoutePaths({ rows, tiles: legend, devices: spec && spec.devices }, pairs.map(([a, b]) => ({ motion: 'WALK', start: a, end: b, checkpoints: [] })));
+      const routes = [];
+      const pairsOut = [];
+      for (const pl of planned) {
+        const path = pl.path;
+        if (!path || path.length < 3) continue;
+        // 抽稀成最多 8 个检查点：画出来是一条跟着道路走的折线，落盘也不会胖得离谱
+        const inner = path.slice(1, -1);
+        const step = Math.max(1, Math.ceil(inner.length / 8));
+        const checkpoints = [];
+        for (let i = step - 1; i < inner.length - 1; i += step) checkpoints.push(inner[i]);
+        routes.push({ motion: 'WALK', start: path[0], end: path[path.length - 1], checkpoints });
+        pairsOut.push({ start: path[0], end: path[path.length - 1], tiles: path.length });
+      }
+      return sendJson(res, 200, {
+        ok: routes.length > 0,
+        routes,
+        pairs: pairsOut,
+        reason: routes.length ? null : (starts.length ? '这些入口在图上走不到任何出口（检查道路是否连通）' : '这张图里没有 S（入口）/E（保护目标）：先在调色板里放几个'),
+      });
+    }
+
     if (p.startsWith('/api/packs/') && p.endsWith('/stages') && method === 'POST') {
       const packId = p.slice('/api/packs/'.length, -'/stages'.length);
       if (!PACK_ID_RE.test(packId)) throw Object.assign(new Error('bad pack id'), { status: 400 });
@@ -2197,7 +2345,7 @@ export async function createEditorServer(opts = {}) {
       if (!spec || typeof spec !== 'object' || !STAGE_ID_RE.test(String(spec.id || ''))) {
         throw Object.assign(new Error('spec.id must be a slug (letters, digits, _ - . :)'), { status: 400 });
       }
-      const derived = deriveStage(spec);
+      const derived = deriveStage(spec, { paths: Array.isArray(spec.routes) && spec.routes.length > 0 });
       if (!derived.ok) return sendJson(res, 400, { error: 'the map spec is invalid', errors: derived.errors });
       const blocking = stageErrors(validateStageRecord(derived.stage, { id: derived.stage.id, officialIds: officialStages }));
       if (blocking.length) return sendJson(res, 400, { error: 'the map did not validate', errors: blocking });

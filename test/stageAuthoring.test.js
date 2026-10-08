@@ -104,7 +104,8 @@ describe('stage authoring: the derivation reproduces the official data', () => {
 
 describe('stage authoring: deriving a new map', () => {
   test('a drawn map derives its paths, deploy tiles and defaults', () => {
-    const r = deriveStage(SPEC);
+    // 寻路表现在默认不派生（新图不许默认有寻路）：这里显式要，才走官方那 12 对门
+    const r = deriveStage(SPEC, { paths: true });
     assert.equal(r.ok, true, JSON.stringify(r.errors));
     const s = r.stage;
     assert.equal(s.id, 'ws_test_map');

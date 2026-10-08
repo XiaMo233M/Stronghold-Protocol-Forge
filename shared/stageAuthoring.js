@@ -60,7 +60,36 @@ export const TILE_PALETTE = Object.freeze([
   { glyph: 'g', label: '毒雾', tileKey: 'tile_smog', height: 'LOW', buildable: 'ALL', passable: 'ALL', color: '#5a4d5a', terrain: 'smog' },
   { glyph: 'd', label: '深水区', tileKey: 'tile_deepsea', height: 'LOW', buildable: 'NONE', passable: 'ALL', color: '#2b3f5c', terrain: 'deepsea' },
   { glyph: 'i', label: '源石污染', tileKey: 'tile_infection', height: 'LOW', buildable: 'ALL', passable: 'ALL', color: '#5c3f2b', terrain: 'infection' },
+  // 空气 (the world OUTSIDE the map). Mechanically it IS 阻隔 (`X`): tile_forbidden is neither walkable nor deployable, so
+  // the engine needs no new concept. The difference is presentation only — `air: true` tells the engine-agnostic editor
+  // and the renderer to draw EMPTY space instead of a wall. normalizeLegendEntry ignores unknown fields, so a legend
+  // entry carrying `air` reaches the engine as a plain forbidden tile.
+  { glyph: '-', label: '空气', tileKey: 'tile_forbidden', height: 'HIGH', buildable: 'NONE', passable: 'NONE', color: '#15171a', air: true },
 ]);
+
+/**
+ * Tile keys whose mechanism refuses deployment however buildable the level says they are. This is 深水区 `tile_deepsea`
+ * alone: PRTS 深水区 "地形机制 拒绝部署（待补充）" and the engine's own server/sim/grid.js DEPLOY_REFUSED_TILES, which
+ * this set is pinned equal to by test/stageRules.test.js.
+ *
+ * 阻隔 / 空气 (tile_forbidden) are deliberately NOT in the set. They are never deployable because their `buildable` is
+ * 'NONE' — the ordinary rule — and a map whose data says otherwise is deployable there, exactly as the engine's
+ * buildDeployMap treats it (`tile_forbidden` is used for 高台 too, and official stages deploy on it).
+ */
+export const DEPLOY_REFUSED_TILES = Object.freeze(new Set(['tile_deepsea']));
+
+/**
+ * Rule 3 of the tile rules — may a GROUND tile of this map host a 高台 operator?
+ *
+ * A stage's `options.groundHighGround` (boolean, default false) is the option; this function is the pure read of it, so
+ * the editor and the forms can ask "这张图的地面能不能放高台" without importing the sim. What it changes on the deploy
+ * side is in deriveDeployTiles (`opts.groundHighGround`).
+ * @param {object} spec an authoring spec or a derived stage record (both carry `options`)
+ * @returns {boolean}
+ */
+export function groundRuleOf(spec) {
+  return !!(isPlain(spec) && isPlain(spec.options) && spec.options.groundHighGround === true);
+}
 
 /**
  * The vocabularies a legend entry may use. These are pinned to the OFFICIAL data by a drift guard in
@@ -147,13 +176,29 @@ export function normalizeRows(rows) {
 }
 
 /**
- * The three deployment maps, derived exactly as tools/build-data.mjs:2294-2308 does.
+ * The three deployment maps, derived exactly as tools/build-data.mjs:2294-2308 does and aligned with the engine's own
+ * server/match/board.js buildDeployMap (:104-107):
+ *
+ *   LOW  + buildable ALL or MELEE                 → melee
+ *   LOW  + buildable RANGED                       → rangedOnly   (a 远程位 painted on the ground; board.js:106)
+ *   HIGH (except tile_achand) + buildable ALL/RANGED → rangedOnly (a 高台)
+ *   a DEPLOY_REFUSED_TILES key (深水区)            → never deployable, whatever the legend claims
+ *
+ * The active device overrides (射击台 platform, 阻隔工事 crate, 特制水上平台) are applied FIRST, exactly as build-data does.
+ *
+ * `opts.groundHighGround` (default false) is the per-map rule 3: when it is true, a **ground** tile that is simply NONE-
+ * buildable (地面 / 沼泽 / 毒雾 / 围栏 / 源石污染 — `height: 'LOW'`, `buildable: 'NONE'`) also counts as a 远程位, i.e.
+ * a 高台 operator may be deployed there. It is equivalent to reading that tile as LOW + RANGED. 阻隔 / 空气 and 深水区
+ * stay undeployable even then — by their `buildable: 'NONE'` and by key respectively.
+ *
  * @param {string[]} rows 19 glyph rows (row 0 = bottom)
  * @param {Record<string, object>} legend glyph → { tileKey, height, buildable, passable, … }
  * @param {Array<{pos:number[], role:string, active?:boolean}>} [devices]
+ * @param {{ groundHighGround?: boolean }} [opts] the map's own tile rule (see groundRuleOf)
  * @returns {{ melee: number[][], rangedOnly: number[][], changedByDevices: number[][] }} per rect
  */
-export function deriveDeployTiles(rows, legend, devices = []) {
+export function deriveDeployTiles(rows, legend, devices = [], opts = {}) {
+  const groundHighGround = !!(isPlain(opts) && opts.groundHighGround === true);
   const active = (devices || []).filter((d) => d && d.active && Array.isArray(d.pos));
   const activeBlocking = active.filter((d) => BLOCKING_ROLES.includes(d.role));
   const blocked = new Set(activeBlocking.map((d) => d.pos.join(',')));
@@ -176,10 +221,16 @@ export function deriveDeployTiles(rows, legend, devices = []) {
         const k = `${r},${c}`;
         const bt = t.buildable;
         const buildable = bt !== 'NONE';
+        // Devices are applied FIRST, exactly as build-data does: a device lands ON the tile, so its override wins over
+        // the tile's own rule. That is the only reason the official 深水区 + 特制水上平台 pair is deployable at all.
         if (platformAt.has(k)) { rangedOnly.push([r, c]); if (buildable) changedByDevices.push([r, c]); continue; }
         if (blocked.has(k)) { if (buildable) changedByDevices.push([r, c]); continue; }
         if (waterPlatformAt.has(k)) { melee.push([r, c]); if (!buildable) changedByDevices.push([r, c]); continue; }
+        // With no device on it, a REFUSED tile key (深水区) refuses deployment however buildable the legend claims — the
+        // engine normalises such a tile to NONE, so it can never be a deploy tile of its own.
+        if (DEPLOY_REFUSED_TILES.has(t.tileKey)) continue;
         if (t.height === 'LOW' && (bt === 'ALL' || bt === 'MELEE')) melee.push([r, c]);
+        else if (t.height === 'LOW' && (bt === 'RANGED' || (groundHighGround && bt === 'NONE'))) rangedOnly.push([r, c]);
         else if (bt === 'RANGED' || (t.height === 'HIGH' && bt === 'ALL' && t.tileKey !== 'tile_achand')) rangedOnly.push([r, c]);
       }
     }
@@ -259,6 +310,20 @@ export function validateStage(stage, opts = {}) {
   }
   if (!isPlain(stage.options)) warn('options', 'MISSING', 'options is missing: characterLimit and moveMultiplier fall back to the engine defaults');
   if (!isPlain(stage.tiles)) err('tiles', 'MISSING', 'the tiles legend is required');
+  // 联防图 (kind 'unite'): the map declares how many players it defends with. helpers exists ONLY there — on any other
+  // map it would be metadata nothing reads, which is the kind of silent drift this validator exists to prevent.
+  if (stage.kind !== undefined && stage.kind !== 'unite') {
+    err('kind', 'BAD_KIND', `kind must be 'unite' or omitted, got ${JSON.stringify(stage.kind)}`, "the only kind a stage declares is 'unite' (联防图)");
+  }
+  const wantedHelpers = stage.kind === 'unite' ? (stage.helpers === undefined ? 2 : stage.helpers) : undefined;
+  if (stage.kind === 'unite' && !(Number.isInteger(wantedHelpers) && wantedHelpers >= 1 && wantedHelpers <= 2)) {
+    err('helpers', 'BAD_HELPERS', `a unite map needs helpers 1..2 (it is how many players defend it), got ${JSON.stringify(stage.helpers)}`);
+  }
+  if (stage.kind !== 'unite' && stage.helpers !== undefined) {
+    err('helpers', 'HELPERS_WITHOUT_KIND', "helpers is only allowed on kind: 'unite'", "a solo map has no 联防 count to declare");
+  }
+  // 空气 (`-`) and 阻隔 (`X`) are the SAME rule (tile_forbidden): the difference is how the editor DRAWS them. Nothing
+  // mechanically separates them, and this validator must not pretend otherwise — so no rule here keys off `air`.
   // authored routes live in the SPEC (the stage RECORD has no routes field — the engine reads them from the wave)
   for (const issue of validateRoutes(stage.routes, rows || [], stage.tiles)) out.push(issue);
   // The stage's OWN per-round templates (workshop maps only; official stages have neither field). The engine reads them
@@ -290,3 +355,98 @@ export function validateStage(stage, opts = {}) {
 
 /** The errors of a validation result. */
 export const stageErrors = (issues) => (Array.isArray(issues) ? issues.filter((i) => i.severity === 'error') : []);
+
+// ---- 样板地图 (the sample map the editor's 「以模板新建」 starts from) -------------------------------------------
+//
+// A complete, LEGAL single-player map an author can open and edit instead of an empty grid: a 敌方入口 ('S'), a 保护目标
+// ('E'), road, plain ground, 高台, 阻隔 and 围栏, all wrapped in a ring of 空气 ('-') so the map visibly ends. It also
+// carries ONE hand-drawn WALK route from the gate to the objective — which is what makes the paths derivation run under
+// the default `opts.paths` (see server/stageAuthoring.js deriveStage).
+//
+// The map is intentionally 单人视角 (one deployment field, the normal 9–12 × 2–10 rect) so it can be derived and played
+// without any 联防 bookkeeping; a 联防图 is made by declaring `kind: 'unite'` (see validateStage).
+
+/** The 19 rows of the sample map, bottom row first (row 6 = the gate lane, row 12 = the objective lane). */
+const SAMPLE_GRID_ROWS = Object.freeze([
+  '---------------------',
+  '---------------------',
+  '---fffffffffffffff---',
+  '---f###########fff---',
+  '---f#fffffffff#fff---',
+  '---f#fffffffff#fff---',
+  '--Sf#fffffffff#fff---',
+  '---fffXfffffffffffff-',
+  '---ffffffffffffff#f--',
+  '---###ffffrrrrrrrf---',
+  '---###ffffrrrrrrrf---',
+  '---aaffffrrrrrrrrr---',
+  '---fffffffff###fEf---',
+  '---fffffffffffffff---',
+  '---fffffffffffffff---',
+  '---------------------',
+  '---------------------',
+  '---------------------',
+  '---------------------',
+]);
+
+/**
+ * The legend of the sample map: EVERY glyph the palette can draw plus 空气 (`-`), each built from TILE_PALETTE so the
+ * template can never disagree with the palette. The entries carry `air` through for 空气, and the engine ignores it.
+ */
+function sampleLegend() {
+  const out = {};
+  for (const t of TILE_PALETTE) {
+    out[t.glyph] = {
+      tileKey: t.tileKey,
+      height: t.height,
+      buildable: t.buildable,
+      passable: t.passable,
+      groundPassable: t.passable === 'ALL',
+      flyPassable: t.passable !== 'NONE',
+      special: t.special ?? null,
+      bb: {},
+      ...(t.terrain ? { terrain: t.terrain } : {}),
+      ...(t.air ? { air: true } : {}),
+    };
+  }
+  return out;
+}
+
+/** The one drawn route: 出生点 → 防守点, the path the enemy walks and the path the editor can re-derive on demand. */
+const SAMPLE_ROUTES = Object.freeze([
+  Object.freeze({ motion: 'WALK', start: Object.freeze([6, 2]), end: Object.freeze([12, 16]), checkpoints: Object.freeze([]) }),
+]);
+
+/**
+ * The sample map, in the shape the editor's 「以模板新建」 writes into its form: `{ id, name, spec }`.
+ *
+ * `spec` is a deep copy on every construction (`sampleStageSpec()`), so a form that edits it cannot corrupt the
+ * template. It validates and derives as-is — `paths` both true and false — see test/stageRules.test.js.
+ */
+export const SAMPLE_STAGE_SPEC = Object.freeze({
+  id: 'ws_sample_map',
+  name: '样板地图·单人小道',
+  spec: Object.freeze({
+    id: 'ws_sample_map',
+    name: '样板地图·单人小道',
+    weight: 40,
+    modes: [],
+    rows: SAMPLE_GRID_ROWS,
+    tiles: null,
+    devices: [],
+    routes: SAMPLE_ROUTES,
+    options: Object.freeze({ characterLimit: 8, moveMultiplier: 0.5 }),
+  }),
+});
+
+/** A fresh, editable copy of the sample map spec (a plain object; the caller owns it). */
+export function sampleStageSpec() {
+  return {
+    ...SAMPLE_STAGE_SPEC.spec,
+    rows: [...SAMPLE_GRID_ROWS],
+    tiles: sampleLegend(),
+    devices: [],
+    routes: SAMPLE_ROUTES.map((r) => ({ ...r, start: [...r.start], end: [...r.end], checkpoints: [] })),
+    options: { ...SAMPLE_STAGE_SPEC.spec.options },
+  };
+}

@@ -5,6 +5,7 @@
 // Installed on Match.prototype by server/match/Match.js (a method container: never instantiated; `this` is the match).
 
 import { PHASE, ERR } from '../../../shared/constants.js';
+import { msg } from '../../../shared/i18n.js';
 import { buildNormalWave, buildBossWave } from '../waves.js';
 import { pairPlayers } from '../finalAssault.js';
 import { botPickBand } from '../bot.js';
@@ -251,6 +252,8 @@ export class MatchPhases {
     // handed out: the operators are in the shop (Match.supportSupply puts them in the pool), priced like any other
     // piece — `granted` is what the player can actually buy, which is what the client echoes back.
     if (r === 1) for (const ps of alive) ps.prepareSupports();
+    // 「试玩时直接发到手上」（记录里的 `directToHand`，业主 2026-10-08）：只有编辑器 spawn 的试玩服务器会发牌
+    if (r === 1) this.grantDirectToHand(alive);
     for (const ps of alive) this.dispatch(ps, 'onRoundStart', { round: r });
     // an eliminated player's pending 信标 gift still goes to its teammate (effects flagged afterElimination; GitHub #86)
     for (const ps of this.order) {
@@ -265,9 +268,51 @@ export class MatchPhases {
     for (const ps of this._viewers()) this._followScout(ps);
   }
 
+  /**
+   * 「试玩时直接发到手上」——记录里 `directToHand: true` 的干员（业主 2026-10-08 提的开关）。
+   *
+   * 为什么只在试玩里生效：工坊/助战干员的正规来路是**商店**（0.5.0 起「不白送」，见 docs/WORKSHOP.md §2.3），
+   * 直接把牌塞进手里会让正式对局的规则变形。作者真正要的是「试玩时立刻拿它开一局」，所以这里读的是编辑器
+   * spawn 出来的那个一次性服务器进程的环境变量（`SP_PLAYTEST=1`，editor/playtest.mjs 设的）：
+   * 正式服务器即使装了一个写了这个键的包，也不会有任何东西被发出去。
+   *
+   * 取牌走的是共享池（`pool.take`），所以「池里那一份」是真的被拿走的 —— 与开局礼包不同，这里不会凭空多出一份拷贝。
+   * @param {Array<object>} players 这一局的人类席位
+   */
+  grantDirectToHand(players) {
+    if (String(process.env.SP_PLAYTEST || '') !== '1') return;
+    const ids = (this.gd.visibleChess || []).filter((id) => {
+      const rec = this.gd.chess(id);
+      return rec && rec.directToHand === true && !rec.isGolden;
+    });
+    if (!ids.length) return;
+    for (const ps of players) {
+      if (!ps || ps.isBot) continue;
+      const got = [];
+      for (const id of ids) {
+        const slot = ps.hand.findIndex((x) => x == null);
+        if (slot < 0) break;
+        try {
+          const rec = this.gd.chess(id);
+          const base = this.gd.baseIdOf(id);
+          const taken = this.pool.take(base, rec && rec.isGolden ? this.gd.goldenCopies : 1);
+          ps.hand[slot] = ps.newPiece('chess', id, { poolCopies: taken });
+          got.push(id);
+        } catch (e) {
+          this.reportError?.(`directToHand ${id}`, e);
+        }
+      }
+      if (got.length) {
+        // 让作者一眼看到「试玩直接发牌」生效了（试玩服务器是编辑器起的，不会有人误解成正式对局）
+        this.toast(ps, 'ok', msg('试玩：记录里标了「直接发到手上」的 {0} 名干员已进手牌', { 0: got.length }));
+      }
+      ps.recompute?.();
+      ps.dirty?.();
+    }
+  }
+
   /** The boss round's fields (seat pairs of the alive players) and their templates, generated for the prep preview. */
-  _planBossWaves() {
-    const r = this.round;
+  _planBossWaves() {    const r = this.round;
     const bossId = r === this.gd.hiddenRound && r !== this.gd.bossRound ? this.hiddenBossId : this.bossId;
     this.bossWaves = pairPlayers(this.alivePlayers()).map((g) => ({
       players: g.map((p) => p.playerId),

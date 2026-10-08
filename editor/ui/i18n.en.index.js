@@ -119,10 +119,14 @@ export const EN_INDEX = Object.freeze({
   '助战': 'Support',
   '可选：让这张卡出现在助战卡池里': 'optional: make this card available in the support pool',
   '勾上＝把这份记录写进 data/support.json 的服务端卡池（重启游戏服务器后生效）。': 'Ticking writes this record into the server pool in data/support.json (restart the game server to take effect).',
+  '助战干员**进商店**：它只比普通棋子多一份池中拷贝，仍然要在自己的商店里**摇到**、按阶级价买到、按普通规则卖掉 —— 不会被直接发到手上。': 'A support operator **enters the shop**: it only gets one extra copy in the pool, and still has to be **rolled** in your own shop, bought at its tier price and sold by the normal rules — it is never handed to your hand.',
+  '试玩起的是**原版服务器**的一局：你保存的干员按阶级进共享池，和官方干员一样**在商店里摇到、买到** —— 编辑器不往你手里塞任何东西（手里一开始是空的，棋盘上每个单位都是花了资金的）。一阶干员在一级商店就摇得到，越高阶越要先把调度中心升上去。': 'Playtest starts a match on the **stock server**: your saved operator joins the shared pool at its tier and is **rolled and bought in the shop** like an official one — the editor puts nothing into your hand (your hand starts empty; every unit on the board was paid for). A tier-1 operator can be rolled in a level-1 shop; higher tiers need the Dispatch Center upgraded first.',
   '把 {0} 加入 {1} 阶助战卡池': 'Add {0} to the tier-{1} support pool',
   '{0} 已加入 {1} 阶助战卡池（重启游戏服务器后生效）': '{0} joined the tier-{1} support pool (restart the game server to take effect)',
   '{0} 已移出 {1} 阶助战卡池（重启游戏服务器后生效）': '{0} left the tier-{1} support pool (restart the game server to take effect)',
   '当前 {0} 阶卡池：{1}': 'Current tier-{0} pool: {1}',
+  '试玩时直接发到手上（正式对局不受影响）': 'Hand it straight to the hand in playtest (real matches are unaffected)',
+  '勾上＝记录里写 `directToHand: true`：只有编辑器「一键试玩」起的那个服务器会在开局把它塞进手牌。正式服务器即使装了这个包也不会发牌，干员照样只在商店里摇到。': 'Ticking writes `directToHand: true` into the record: only the server the editor’s one-click playtest starts will put it into your hand at round 1. A stock server never hands it out even with this pack installed — there it is still rolled in the shop.',
   '保存并生成': 'Save and generate',
   '删除该干员': 'Delete this operator',
   '清空表单': 'Clear the form',
@@ -135,7 +139,7 @@ export const EN_INDEX = Object.freeze({
   '校验结果': 'Validation',
   '先选择一个工坊包（或点「新建工坊包」）': 'Pick a workshop pack first (or click “New workshop pack”)',
   // 「新工坊包 id」那一套（内联输入框与它的校验文案）七个页面共用，已放 shared
-  '保存第一个干员时会创建工坊包 {0}（目录名必须等于 pack.json 的 id）。': 'Saving the first operator creates the pack {0} (the directory name must equal the id in pack.json).',
+  // （原来那条「保存第一个干员时会创建工坊包 …」已经删掉：包不再是第一次保存时才建的）
   '删除 {0}？（同时删除它生成的普通与精锐记录）': 'Delete {0}? (its generated base and elite records go too)',
 
   // ---- 新建：模板选择器 ----
