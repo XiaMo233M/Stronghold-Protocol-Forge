@@ -55,7 +55,7 @@ const writeAsset = (id, rel, bytes) => {
 };
 
 /**
- * 一个已经声明了默认配音 + 两种非默认配音（jp / kr）的包，给「按语种声明」那一段用。
+ * 一个已经声明了默认配音（日文那一档）+ 两种非默认配音（cn / kr）的包，给「按语种声明」那一段用。
  * 写回它自己那份清单：那一段会改 voiceLangs，别的用例不该被上一个用例写下的状态影响。
  */
 function writeMultiLang() {
@@ -63,15 +63,15 @@ function writeMultiLang() {
   writeManifest('multi-lang', {
     id: 'multi-lang', name: '多语言配音', version: '0.2.0', license: 'CC0-1.0',
     content: ['chess'], support: ['char_ws_ml'],
-    voices: { char_ws_ml: { select: ['voice/cn1.mp3'] } },
+    voices: { char_ws_ml: { select: ['voice/jp1.mp3'] } },
     voiceLangs: {
-      jp: { char_ws_ml: { select: ['voice/jp1.mp3'], place: ['voice/jp2.mp3'] } },
+      cn: { char_ws_ml: { select: ['voice/cn1.mp3'], place: ['voice/cn2.mp3'] } },
       kr: { char_ws_ml: { start: ['voice/kr1.mp3'] } },
     },
   });
-  writeAsset('multi-lang', 'voice/cn1.mp3', MP3);
   writeAsset('multi-lang', 'voice/jp1.mp3', MP3);
-  writeAsset('multi-lang', 'voice/jp2.mp3', OGG);
+  writeAsset('multi-lang', 'voice/cn1.mp3', MP3);
+  writeAsset('multi-lang', 'voice/cn2.mp3', OGG);
   writeAsset('multi-lang', 'voice/kr1.mp3', MP3);
 }
 
@@ -129,7 +129,7 @@ before(async () => {
   writeManifest('bare-voice', { id: 'bare-voice', license: 'CC0-1.0', voices: { char_ws_bare: { resultThree: ['voice/w.mp3'] } } });
   writeAsset('bare-voice', 'voice/w.mp3', MP3);
 
-  // 7) 包内按语种声明的配音（`voiceLangs`）：默认配音 cn + jp / kr 两份
+  // 7) 包内按语种声明的配音（`voiceLangs`）：默认配音 jp（voices 那一份）+ cn / kr 两份
   writeMultiLang();
 
   editor = await createEditorServer({ workshopRoot: wsRoot, port: 0, host: '127.0.0.1', supportFile: join(tmp, 'support.json') });
@@ -363,9 +363,9 @@ describe('workshop editor: 语音 按语种声明 (voiceLangs)', () => {
     const r = await fetch(`${editor.url}/api/voices?pack=multi-lang`).then((x) => x.json());
     const p = r.packs[0];
     assert.equal(p.ok, true, JSON.stringify(p.issue));
-    assert.deepEqual(p.voices, { [ML]: { select: ['voice/cn1.mp3'] } }, '默认配音照旧在 voices 里');
+    assert.deepEqual(p.voices, { [ML]: { select: ['voice/jp1.mp3'] } }, '默认配音照旧在 voices 里');
     assert.deepEqual(p.voiceLangs, {
-      jp: { [ML]: { place: ['voice/jp2.mp3'], select: ['voice/jp1.mp3'] } },
+      cn: { [ML]: { place: ['voice/cn2.mp3'], select: ['voice/cn1.mp3'] } },
       kr: { [ML]: { start: ['voice/kr1.mp3'] } },
     }, '打开一个已经有 voiceLangs 的包，这些语种就要显示出来');
     assert.equal(Object.hasOwn(p.voiceLangs, DEFAULT_VOICE_LANG), false, '默认配音不是 voiceLangs 的一个语种');
@@ -373,58 +373,58 @@ describe('workshop editor: 语音 按语种声明 (voiceLangs)', () => {
 
   test('语言选择：非默认语种写进 voiceLangs，默认配音那一路一个字节都不碰', async () => {
     writeMultiLang();
-    const jp = await setSlotLang({ charId: ML, slot: 'skill1', paths: ['voice/jp1.mp3', 'voice/jp1.mp3'], lang: 'jp' });
-    assert.equal(jp.status, 200, JSON.stringify(await jp.clone().json()));
-    const body = await jp.json();
-    assert.equal(body.lang, 'jp');
-    assert.deepEqual(body.paths, ['voice/jp1.mp3'], '跟默认配音一样：同一个槽位存起来是排序去重的');
+    const cn = await setSlotLang({ charId: ML, slot: 'skill1', paths: ['voice/cn1.mp3', 'voice/cn1.mp3'], lang: 'cn' });
+    assert.equal(cn.status, 200, JSON.stringify(await cn.clone().json()));
+    const body = await cn.json();
+    assert.equal(body.lang, 'cn');
+    assert.deepEqual(body.paths, ['voice/cn1.mp3'], '跟默认配音一样：同一个槽位存起来是排序去重的');
     const doc = manifestOfMulti();
-    assert.deepEqual(doc.voiceLangs.jp[ML].skill1, ['voice/jp1.mp3'], '写进的是选中的那份语种表');
+    assert.deepEqual(doc.voiceLangs.cn[ML].skill1, ['voice/cn1.mp3'], '写进的是选中的那份语种表');
     assert.deepEqual(doc.voiceLangs.kr, { [ML]: { start: ['voice/kr1.mp3'] } }, '别的语种原样不动');
-    assert.deepEqual(doc.voices, { [ML]: { select: ['voice/cn1.mp3'] } }, '默认配音（voices）没被这条改动碰到');
+    assert.deepEqual(doc.voices, { [ML]: { select: ['voice/jp1.mp3'] } }, '默认配音（voices）没被这条改动碰到');
     assert.deepEqual(body.voices, doc.voices, '回话里两份表都带回来，页面不必再猜');
 
     // 默认配音那一路（lang 省略、或显式给默认配音）写的还是 voices
-    assert.equal((await setSlotLang({ charId: ML, slot: 'place', paths: ['voice/cn1.mp3'] })).status, 200);
+    assert.equal((await setSlotLang({ charId: ML, slot: 'place', paths: ['voice/jp1.mp3'] })).status, 200);
     assert.equal((await setSlotLang({ charId: ML, slot: 'place', paths: ['voice/kr1.mp3'], lang: DEFAULT_VOICE_LANG })).status, 200);
     const after = manifestOfMulti();
     assert.deepEqual(after.voices[ML].place, ['voice/kr1.mp3']);
-    assert.deepEqual(after.voiceLangs.jp[ML].place, ['voice/jp2.mp3'], '默认那一路不许改动 jp 的 place');
+    assert.deepEqual(after.voiceLangs.cn[ML].place, ['voice/cn2.mp3'], '默认那一路不许改动 cn 的 place');
   });
 
   test('一份语种表空了就整块消失：不留空的 voiceLangs[lang]，也不留空的 voiceLangs', async () => {
     writeMultiLang();
-    // 删掉 jp 的一个槽位：jp 还有别的槽位，所以只掉那一条
-    const one = await fetch(`${editor.url}/api/packs/multi-lang/voices/${ML}/select?lang=jp`, { method: 'DELETE' }).then((x) => x.json());
+    // 删掉 cn 的一个槽位：cn 还有别的槽位，所以只掉那一条
+    const one = await fetch(`${editor.url}/api/packs/multi-lang/voices/${ML}/select?lang=cn`, { method: 'DELETE' }).then((x) => x.json());
     assert.equal(one.removed, true);
-    assert.equal(one.lang, 'jp');
-    assert.equal(Object.hasOwn(manifestOfMulti().voiceLangs.jp[ML], 'select'), false);
-    assert.deepEqual(manifestOfMulti().voiceLangs.jp[ML].place, ['voice/jp2.mp3'], '同一语种别的槽位还在');
+    assert.equal(one.lang, 'cn');
+    assert.equal(Object.hasOwn(manifestOfMulti().voiceLangs.cn[ML], 'select'), false);
+    assert.deepEqual(manifestOfMulti().voiceLangs.cn[ML].place, ['voice/cn2.mp3'], '同一语种别的槽位还在');
 
     // 空清单同样只删那一个槽位，然后整块 kr 消失
     assert.equal((await setSlotLang({ charId: ML, slot: 'start', paths: [], lang: 'kr' })).status, 200);
     assert.equal(Object.hasOwn(manifestOfMulti().voiceLangs, 'kr'), false, '语种表空了就不该留下空对象');
-    assert.equal(Object.hasOwn(manifestOfMulti().voiceLangs, 'jp'), true, '只剩一个语种时 voiceLangs 还在');
+    assert.equal(Object.hasOwn(manifestOfMulti().voiceLangs, 'cn'), true, '只剩一个语种时 voiceLangs 还在');
 
     // 最后一个语种也没了就整块删掉 voiceLangs
-    assert.equal((await setSlotLang({ charId: ML, slot: 'place', paths: [], lang: 'jp' })).status, 200);
+    assert.equal((await setSlotLang({ charId: ML, slot: 'place', paths: [], lang: 'cn' })).status, 200);
     const doc = manifestOfMulti();
     assert.equal(Object.hasOwn(doc, 'voiceLangs'), false, '没有任何语种表了就连 voiceLangs 一起删掉');
-    assert.deepEqual(doc.voices, { [ML]: { select: ['voice/cn1.mp3'] } }, '默认配音完好');
+    assert.deepEqual(doc.voices, { [ML]: { select: ['voice/jp1.mp3'] } }, '默认配音完好');
 
     // 幂等：再删一次不写文件、也不报错
-    const again = await fetch(`${editor.url}/api/packs/multi-lang/voices/${ML}/place?lang=jp`, { method: 'DELETE' }).then((x) => x.json());
+    const again = await fetch(`${editor.url}/api/packs/multi-lang/voices/${ML}/place?lang=cn`, { method: 'DELETE' }).then((x) => x.json());
     assert.equal(again.removed, false);
   });
 
   test('同一个干员在两种语种里各有一条，互不影响；增删只动选中的那一份', async () => {
     writeMultiLang();
-    assert.equal((await setSlotLang({ charId: ML, slot: 'skill2', paths: ['voice/jp1.mp3'], lang: 'jp' })).status, 200);
+    assert.equal((await setSlotLang({ charId: ML, slot: 'skill2', paths: ['voice/cn1.mp3'], lang: 'cn' })).status, 200);
     const doc = manifestOfMulti();
-    assert.deepEqual(doc.voiceLangs.jp[ML].skill2, ['voice/jp1.mp3']);
+    assert.deepEqual(doc.voiceLangs.cn[ML].skill2, ['voice/cn1.mp3']);
     assert.deepEqual(doc.voiceLangs.kr, { [ML]: { start: ['voice/kr1.mp3'] } });
-    assert.deepEqual(doc.voices, { [ML]: { select: ['voice/cn1.mp3'] } });
-    assert.deepEqual(Object.keys(doc.voiceLangs.jp[ML]).sort(), ['place', 'select', 'skill2'], '同一语种里的槽位各自独立');
+    assert.deepEqual(doc.voices, { [ML]: { select: ['voice/jp1.mp3'] } });
+    assert.deepEqual(Object.keys(doc.voiceLangs.cn[ML]).sort(), ['place', 'select', 'skill2'], '同一语种里的槽位各自独立');
   });
 
   test('语种必须是 VOICE_LANGS 里的一员，而且拒绝时一个字节都不写', async () => {
@@ -442,16 +442,16 @@ describe('workshop editor: 语音 按语种声明 (voiceLangs)', () => {
 
   test('默认配音是 voices 那一份，不是 voiceLangs 的一个键', async () => {
     writeMultiLang();
-    // ?lang=cn 与不带 ?lang= 是同一件事：删的、写的是 voices 里那一份，绝不是 voiceLangs["cn"]（加载器会报 VOICE_LANG_DEFAULT）
+    // ?lang=<默认语种> 与不带 ?lang= 是同一件事：删的、写的是 voices 里那一份，绝不是 voiceLangs[默认语种]（加载器会报 VOICE_LANG_DEFAULT）
     const del = await fetch(`${editor.url}/api/packs/multi-lang/voices/${ML}/place?lang=${DEFAULT_VOICE_LANG}`, { method: 'DELETE' }).then((x) => x.json());
     assert.equal(del.removed, false, 'voices 里本来就没有这个槽位');
     assert.equal(del.lang, DEFAULT_VOICE_LANG);
     assert.equal(Object.hasOwn(manifestOfMulti().voiceLangs, DEFAULT_VOICE_LANG), false, '默认配音永远不会长出一个 voiceLangs 键');
 
-    // 与加载器同一条规则：清单里真写了 voiceLangs["cn"]，界面必须看得出来这个包会被拒（VOICE_LANG_DEFAULT）
+    // 与加载器同一条规则：清单里真写了 voiceLangs[默认语种]，界面必须看得出来这个包会被拒（VOICE_LANG_DEFAULT）
     writeMultiLang();
     const doc = manifestOfMulti();
-    doc.voiceLangs[DEFAULT_VOICE_LANG] = { [ML]: { start: ['voice/cn1.mp3'] } };
+    doc.voiceLangs[DEFAULT_VOICE_LANG] = { [ML]: { start: ['voice/jp1.mp3'] } };
     writeManifest('multi-lang', doc);
     const r = await fetch(`${editor.url}/api/voices?pack=multi-lang`).then((x) => x.json());
     assert.equal(r.packs[0].ok, false);
@@ -464,7 +464,7 @@ describe('workshop editor: 语音 按语种声明 (voiceLangs)', () => {
     writeMultiLang();
     const before = manifestText('multi-lang');
     const refused = async (paths, expect, detail) => {
-      const res = await post(`${editor.url}/api/packs/multi-lang/voices`, { charId: ML, slot: 'select', paths, lang: 'jp' });
+      const res = await post(`${editor.url}/api/packs/multi-lang/voices`, { charId: ML, slot: 'select', paths, lang: 'cn' });
       assert.equal(res.status, 400, `${detail}: got ${res.status}`);
       const { error } = await res.json();
       assert.ok(isChinese(error), detail);
@@ -475,12 +475,12 @@ describe('workshop editor: 语音 按语种声明 (voiceLangs)', () => {
     await refused(['voice/nope.mp3'], /不存在/, '文件必须真的存在');
     await refused(['notes.txt'], /允许的类型/, '扩展名要在包内媒体允许的类型里');
     await refused([42], /不能作为语音路径/, '路径必须是字符串');
-    // 空数组不是「空语种表」而是「删掉这个槽位」：jp 里本来没有这个槽位，等于无操作
-    const empty = await setSlotLang({ charId: ML, slot: 'skill3', paths: [], lang: 'jp' });
+    // 空数组不是「空语种表」而是「删掉这个槽位」：cn 里本来没有这个槽位，等于无操作
+    const empty = await setSlotLang({ charId: ML, slot: 'skill3', paths: [], lang: 'cn' });
     assert.equal(empty.status, 200);
-    assert.equal(manifestOfMulti().voiceLangs.jp[ML].skill3, undefined, '空清单不会凭空造出一个槽位');
+    assert.equal(manifestOfMulti().voiceLangs.cn[ML].skill3, undefined, '空清单不会凭空造出一个槽位');
     // 非法槽位在哪一份语种表里都被拒
-    const badSlot = await post(`${editor.url}/api/packs/multi-lang/voices`, { charId: ML, slot: 'chat', paths: ['voice/jp1.mp3'], lang: 'jp' });
+    const badSlot = await post(`${editor.url}/api/packs/multi-lang/voices`, { charId: ML, slot: 'chat', paths: ['voice/cn1.mp3'], lang: 'cn' });
     assert.equal(badSlot.status, 400);
     assert.match((await badSlot.json()).error, /槽位/);
   });
@@ -489,7 +489,7 @@ describe('workshop editor: 语音 按语种声明 (voiceLangs)', () => {
     writeMultiLang();
     const before = manifestText('multi-lang');
     const beforeObj = JSON.parse(before);
-    assert.equal((await setSlotLang({ charId: ML, slot: 'resultThree', paths: ['voice/jp2.mp3'], lang: 'jp' })).status, 200);
+    assert.equal((await setSlotLang({ charId: ML, slot: 'resultThree', paths: ['voice/cn2.mp3'], lang: 'cn' })).status, 200);
     const after = manifestText('multi-lang');
     const afterObj = JSON.parse(after);
     const strip = (o) => Object.fromEntries(Object.entries(o).filter(([k]) => k !== 'voiceLangs'));
@@ -509,7 +509,7 @@ describe('workshop editor: 语音 按语种声明 (voiceLangs)', () => {
     writeMultiLang();
     const r = await fetch(`${editor.url}/api/voices?pack=multi-lang`).then((x) => x.json());
     const p = r.packs[0];
-    assert.deepEqual(Object.keys(p.voiceLangs.jp[ML]).sort(), ['place', 'select']);
+    assert.deepEqual(Object.keys(p.voiceLangs.cn[ML]).sort(), ['place', 'select']);
     assert.deepEqual(Object.keys(p.voices[ML]), ['select']);
     assert.deepEqual(Object.keys(p.voiceLangs.kr[ML]), ['start']);
   });
@@ -571,24 +571,24 @@ describe('workshop editor: 语音 到达客户端 (the editor API → the game c
     writeManifest('multi-lang', {
       id: 'multi-lang', name: '多语言配音', version: '0.2.0', license: 'CC0-1.0',
       content: ['chess'], support: ['char_ws_ml'],
-      voiceLangs: { jp: { char_ws_ml: { select: ['voice/jp1.mp3'] } } },
+      voiceLangs: { cn: { char_ws_ml: { select: ['voice/cn1.mp3'] } } },
     });
-    assert.equal((await post(`${editor.url}/api/packs/multi-lang/voices`, { charId: 'char_ws_ml', slot: 'place', paths: ['voice/jp2.mp3'], lang: 'jp' })).status, 200);
+    assert.equal((await post(`${editor.url}/api/packs/multi-lang/voices`, { charId: 'char_ws_ml', slot: 'place', paths: ['voice/cn2.mp3'], lang: 'cn' })).status, 200);
 
     const loaded = loadWorkshop(wsRoot, { log: quiet });
     const pack = loaded.packs.find((p) => p.id === 'multi-lang');
     assert.ok(pack, `the pack must load: ${JSON.stringify(loaded.errors)}`);
-    assert.deepEqual(pack.voiceLangs, { jp: { char_ws_ml: { place: ['voice/jp2.mp3'], select: ['voice/jp1.mp3'] } } }, '加载器读到的就是编辑器写下的那份表');
+    assert.deepEqual(pack.voiceLangs, { cn: { char_ws_ml: { place: ['voice/cn2.mp3'], select: ['voice/cn1.mp3'] } } }, '加载器读到的就是编辑器写下的那份表');
     // 这个包没有默认配音，所以它只碰 voiceLangs 那一半，`voices` 不该凭空长出来
     assert.deepEqual(pack.voices, {});
 
     const data = loadData(DATA_DIR, { log: quiet, workshopDir: wsRoot });
-    const jpUrl = '/workshop-assets/multi-lang/voice/jp2.mp3';
-    assert.deepEqual(data.assets.audio.voiceLangs.jp.char_ws_ml.place, [jpUrl], '客户端按语种取台词的那张表里有它');
+    const cnUrl = '/workshop-assets/multi-lang/voice/cn2.mp3';
+    assert.deepEqual(data.assets.audio.voiceLangs.cn.char_ws_ml.place, [cnUrl], '客户端按语种取台词的那张表里有它');
     assert.equal(Object.hasOwn(data.assets.audio.voice, 'char_ws_ml'), false, '默认配音那份表没被污染');
 
     // 试听 URL 与客户端读的是同一条通路，而且这些字节真的取得回来
-    const res = await fetch(editor.url + jpUrl);
+    const res = await fetch(editor.url + cnUrl);
     assert.equal(res.status, 200);
     assert.deepEqual(Buffer.from(await res.arrayBuffer()), OGG);
   });

@@ -25,7 +25,7 @@ import { RAW, joinUrl, safeName, urlBase, urlDir } from './sources.mjs';
 import { kindOf } from './formats.mjs';
 import { pickUnitSfx, UI_SFX, BATTLE_SFX, resolveSpec, indexVoice, VOICE_DIRS, VOICE_BATTLE_SLOTS } from './audio.mjs';
 import { literal } from './manifest.mjs';
-import { EMOTE_CATALOG } from '../../shared/constants.js';
+import { EMOTE_CATALOG, DEFAULT_VOICE_LANG } from '../../shared/constants.js';
 
 /**
  * The voice slots are read from the zh_CN charword table, whose voiceIds are always `CN_*`: the other dubs
@@ -295,7 +295,8 @@ export function collectEnemyIds({ assets07, enemies05, maps05, ops03 }) {
  * @param {ReturnType<import('./audio.mjs').indexAudio>} p.audio indexed audio_data.json
  * @param {any} p.modelsData Ark-Models models_data.json
  * @param {any} [p.charword] parsed excel/charword_table.json — the operators' official voice slots (voice)
- * @param {string} [p.voiceLang] the default voice dub to plan: cn (default) | jp | en | kr → `audio.voice`
+ * @param {string} [p.voiceLang] the default voice dub to plan: jp (default, the released bundle's dub since 0.9.0) | cn
+ *   | en | kr → `audio.voice`
  * @param {string[]} [p.voiceLangs] further dubs to download into the parallel `audio.voiceLangs[lang][charId][slot]`.
  *   Every dub uses the CN file names under its own folder (voiceAlt); `voiceLang` is never planned twice, and a dub
  *   whose files are missing on this machine is dropped by resolveTemplate, so a partial download degrades gracefully.
@@ -318,7 +319,7 @@ export function collectEnemyIds({ assets07, enemies05, maps05, ops03 }) {
  *   official type icon (arts/ui/uniequiptype) the 干员调配 / 自选 module tiles draw when the local-client art lacks it
  * @returns {{ template: any, models: Map<string, any>, notes: string[] }}
  */
-export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsData, charword = null, voiceLang = 'cn',
+export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsData, charword = null, voiceLang = DEFAULT_VOICE_LANG,
   voiceLangs = null, voiceSlots = VOICE_BATTLE_SLOTS,
   extraEnemyIds = [], extraTokenIds = [], extraHandbook = {}, localEnemySpines = {}, localTokenSpines = {}, extraOperators = {},
   moduleTypes = [] }) {

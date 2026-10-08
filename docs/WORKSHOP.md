@@ -49,7 +49,7 @@ workshop/<packId>/
 | `gameVersion` | 否 | 作者针对的游戏版本，便于排查 | 包管理 → 包元数据 |
 | `content` | 贡献项之一 | 这个包提供哪些数据文件（上表的名字，含 `bonds`） | 各页保存时自动补 |
 | `voices` | 贡献项之一 | 这个包为哪些干员提供**默认配音**的语音，见 §1.4 | 语音页 |
-| `voiceLangs` | 贡献项之一 | 同一个包给**其它配音语言**（jp/en/kr）各配一份，见 §1.4；形状与 `voices` 相同，多一层语种 | 语音页（语种选择） |
+| `voiceLangs` | 贡献项之一 | 同一个包给**其它配音语言**（cn/en/kr，默认那一档是日文）各配一份，见 §1.4；形状与 `voices` 相同，多一层语种 | 语音页（语种选择） |
 | `bondIcons` | 贡献项之一 | 这个包为哪些盟约提供图标，见 §1.4 与 §1.8：`{ "<bondId>": "<包内相对 assets/ 的路径>" }` | 盟约页 + 该页的「已声明」清单 |
 | `itemIcons` | 贡献项之一 | 这个包为哪些装备/道具提供图标，见 §1.4：`{ "<图标 id>": "<包内相对 assets/ 的路径>" }` | 装备页 + 该页的「已声明」清单 |
 | `art` | 贡献项之一 | 这个包自带的外观素材（头像 / 立绘 / 模型），见 §1.4：`{ chars / enemies / tokens: { "<id>": <官方条目形状的子集> } }` | 干员页 / 怪物页的「本包自带的外观素材」+ 「已声明」清单 |
@@ -137,14 +137,15 @@ workshop/*/ ──┘        （冻结之前）              └─→ /data/<fi
 
 #### 多语言配音（`voiceLangs`）
 
-同样的表，一个语种一份。玩家在设置里（或干员详情里逐个干员）选了 jp / en / kr 时，听到的就是这里对应的那一句：
+同样的表，一个语种一份。玩家在设置里（或干员详情里逐个干员）选了 cn / en / kr 时，听到的就是这里对应的那一句
+（默认那一档是**日文**，所以默认台词写在 `voices` 里、用 `jp_` 的文件名）：
 
 ```json
 {
   "id": "my-voice", "license": "CC0-1.0", "content": [],
-  "voices":     { "char_ws_my_op": { "select": ["voice/cn_select.mp3"] } },
+  "voices":     { "char_ws_my_op": { "select": ["voice/jp_select.mp3"] } },
   "voiceLangs": {
-    "jp": { "char_ws_my_op": { "select": ["voice/jp_select.mp3"], "place": ["voice/jp_place.mp3"] } },
+    "cn": { "char_ws_my_op": { "select": ["voice/cn_select.mp3"], "place": ["voice/cn_place.mp3"] } },
     "kr": { "char_ws_my_op": { "select": ["voice/kr_select.mp3"] } }
   }
 }
@@ -153,9 +154,9 @@ workshop/*/ ──┘        （冻结之前）              └─→ /data/<fi
 | 规则 | 说明 |
 |---|---|
 | 语种词表固定 | 键必须是 `shared/constants.js` 的 `VOICE_LANGS`（`cn` / `jp` / `en` / `kr`），写别的会被拒（`VOICE_LANG_UNKNOWN`） |
-| **默认语种不能写在这里** | `cn`（即 `DEFAULT_VOICE_LANG`，也就是清单 `audio.voiceLang` 指的那一档）必须写在 `voices` 里；写进 `voiceLangs` 会被拒（`VOICE_LANG_DEFAULT`）。同一批台词有两个写法，「客户端到底读哪一份」就成了作者猜不出来的事 |
-| 表内规则与 `voices` 完全相同 | 槽位词表、干员 id、路径安全规则逐字相同，错误码也共用（`VOICE_SLOT_UNKNOWN` / `VOICE_PATH_UNSAFE` / `VOICE_BAD_CHAR_ID` / `VOICE_EMPTY`），提示里会带上具体是哪张表（`voiceLangs["jp"]["char_ws_my_op"]["place"]`） |
-| 空表被拒 | `voiceLangs: { "jp": {} }` 是 `VOICE_LANG_EMPTY`：声明了语种却一个干员都没有，多半是写错了 |
+| **默认语种不能写在这里** | `jp`（即 `DEFAULT_VOICE_LANG`，0.9.0 起就是它，也就是清单 `audio.voiceLang` 指的那一档）必须写在 `voices` 里；写进 `voiceLangs` 会被拒（`VOICE_LANG_DEFAULT`）。同一批台词有两个写法，「客户端到底读哪一份」就成了作者猜不出来的事 |
+| 表内规则与 `voices` 完全相同 | 槽位词表、干员 id、路径安全规则逐字相同，错误码也共用（`VOICE_SLOT_UNKNOWN` / `VOICE_PATH_UNSAFE` / `VOICE_BAD_CHAR_ID` / `VOICE_EMPTY`），提示里会带上具体是哪张表（`voiceLangs["cn"]["char_ws_my_op"]["place"]`） |
+| 空表被拒 | `voiceLangs: { "cn": {} }` 是 `VOICE_LANG_EMPTY`：声明了语种却一个干员都没有，多半是写错了 |
 | **可以只带其它语种** | `content: []` + 只写 `voiceLangs` 是合法的包 —— 这个包只补某个语种，默认配音仍用官方那份 |
 | 与官方**并存** | 该语种官方本来就有这个干员的台词时，官方在前、包在后一起参与随机，不替换 |
 
@@ -167,7 +168,7 @@ workshop/*/ ──┘        （冻结之前）              └─→ /data/<fi
 （`workshopTouchedFiles`）；一个语种都没有的包**不会**让清单长出一个空的 `voiceLangs`。
 
 **写这两个字段的图形入口是编辑器的第七个页面 `/voice.html`**（`docs/EDITOR.md` §语音）：先在语言下拉里选要编辑哪一档
-（默认配音 = `voices`，或 jp / en / kr = `voiceLangs[<lang>]`），再就地改对应的表；其余字段、键序与缩进原样保留，
+（默认配音 = `voices`，或 cn / en / kr = `voiceLangs[<lang>]`），再就地改对应的表；其余字段、键序与缩进原样保留，
 并且只接受**包内 `assets/` 下真实存在、且扩展名在服务端媒体白名单里**的文件；它在编辑器里就能试听 ——
 用的就是客户端会请求的那个 URL。
 

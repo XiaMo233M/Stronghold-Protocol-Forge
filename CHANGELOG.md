@@ -53,9 +53,26 @@
 - `POST /api/playtest/start` 现在会**拒绝不存在的地图 id**（原来会照常起服务器，作者只会以为是自己图的问题）。
 - 地图页的「寻路 N 条 / 部署 N 格」在空图上不再显示成 0 条，避免把「还没画」读成「画了但没有」。
 
+### 五、默认配音改成日文（业主的发行要求）
+
+发行包从这一版起只带**日文**配音，客户端开箱默认就说日文；中文 / 英文 / 韩文三种照旧在同一个 release 的
+`…-voices-cn-en-kr.zip` 里（解压覆盖 `app\public\assets\audio\voice\` 即可）。
+
+- 清单 `data/assets.json`：`audio.voiceLang` 从 `cn` 改成 `jp`，`audio.voiceLangs` 变成 `{cn, en, kr}`
+  （重新跑了 `node tools/fetch-assets.mjs --offline --voice-lang=jp --voice-langs=cn,en,kr --allow-shrink`；
+  **引用的素材路径逐条不变**（15746 条一个不多一个不少），换的只是「哪一份算默认」）。
+- 代码里那把唯一的尺子 `shared/constants.js` 的 `DEFAULT_VOICE_LANG` 同步改成 `jp`。不改它的话，编辑器语音页会出现
+  两个其实指向同一份表的页签，加载器还会把包里的日文台词当成「可以写进 `voiceLangs` 的普通语种」。
+  `tools/fetch-assets.mjs` 与 `tools/assets/plan.mjs` 的默认值也跟着改：裸跑一次 `npm run setup` 得到的默认配音
+  要和版本库里那份清单是同一个。
+- **对工坊包作者的影响**：`pack.json` 的 `voices` 从此代表**日文**那一档，中文台词要写在 `voiceLangs.cn` 里
+  （此前正好相反：`cn` 是被拒的默认键、`jp` 是非默认档）。`docs/WORKSHOP.md` §1.4、`docs/EDITOR.md` 与
+  `docs/prompts/README.md` 的例子都按新语义改过了。
+
 ### 门槛
 
-`npm test` **6046 条 / 6042 通过 / 0 失败 / 4 跳过** · `eslint` 0 错 · `tsc --noEmit --checkJs` 0 错 · i18n `check en --strict` 全绿。
+`npm test` **6066 条 / 6052 通过 / 0 失败 / 14 跳过** · `eslint` 0 错（171 条警告）· `tsc --noEmit --checkJs` 0 错 ·
+`check:imports` exit 0 · i18n `check en --strict` 全绿。
 
 ## 0.8.2 — 2026-10-08
 

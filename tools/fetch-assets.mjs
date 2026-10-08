@@ -92,7 +92,7 @@ const HELP = `Usage: node tools/fetch-assets.mjs [options]
   --offline         no network: post-process what is on disk and rebuild data/assets.json
   --dry-run         print the plan and exit
   --refresh-index   re-download the audio_data.json / charword_table.json / models_data.json indexes
-  --voice-lang=cn   the manifest's default operator battle voice dub: cn (default) | jp | en | kr
+  --voice-lang=jp   the manifest's default operator battle voice dub: jp (default) | cn | en | kr
   --voice-langs=cn,jp,en,kr
                     download MORE dubs beside the default one (comma separated, cn | jp | en | kr). They land in
                     audio.voiceLangs[lang][charId][slot] and the game's 干员语音 setting lets each operator pick one.
@@ -120,7 +120,9 @@ failures. Only explicitly enabled GitHub downloads use the third-party proxy.`;
  * @returns {{concurrency:number, force:boolean, offline:boolean, dryRun:boolean, refreshIndex:boolean, prune:boolean, allowShrink:boolean, addOnly:boolean, localSpines:boolean, voiceLang:string, voiceLangs:string[], voiceAll:boolean, help:boolean, source:string}}
  */
 export function parseArgs(argv) {
-  const o = { concurrency: 16, force: false, offline: false, dryRun: false, refreshIndex: false, prune: false, allowShrink: false, addOnly: false, localSpines: false, voiceLang: 'cn', voiceLangs: [], voiceAll: false, help: false, source: process.env.SP_ASSET_SOURCE || 'direct' };
+  // `jp` is the default dub since 0.9.0 (the released bundle ships Japanese; shared/constants.js DEFAULT_VOICE_LANG):
+  // a plain `npm run setup` must plan the same default the committed manifest names, or the two disagree.
+  const o = { concurrency: 16, force: false, offline: false, dryRun: false, refreshIndex: false, prune: false, allowShrink: false, addOnly: false, localSpines: false, voiceLang: 'jp', voiceLangs: [], voiceAll: false, help: false, source: process.env.SP_ASSET_SOURCE || 'direct' };
   for (const a of argv) {
     const [k, v] = a.split('=');
     if (k === '--concurrency') o.concurrency = Math.max(1, Math.min(64, parseInt(v, 10) || 16));

@@ -102,8 +102,8 @@ node scripts/make-update-package.mjs --bundle <上面那个目录> --from <上�
   只带文件不带映射，客户端根本不会请求它们。打包脚本会据此在包内说明里写明「语音已在包里」，反过来（没抓语音的
   checkout）说明里不会出现这句话，因为这属于事实陈述，不能无条件写。语音**默认就听得见**（设置 → 干员语音 = 0.8），
   玩家可以自己调低或静音。
-* **多语言配音（0.7.2 起拆开）**：主包只带**默认配音**（清单 `audio.voiceLang`，目前是中文，≈66 MB）—— 四种语言全塞
-  进去要多 ≈196 MB。其余语言单独发 `Stronghold-Protocol-Forge-<版本>-voices-*.zip`（同一个 release 的附加资产，
+* **多语言配音（0.7.2 起拆开）**：主包只带**默认配音**（清单 `audio.voiceLang`；**0.9.0 起是日文**，≈85 MB）—— 四种语言全塞
+  进去要多 ≈196 MB。其余三种（中文 / 英文 / 韩文）单独发 `Stronghold-Protocol-Forge-<版本>-voices-*.zip`（同一个 release 的附加资产，
   由 `node scripts/make-voice-pack.mjs` 生成）：解压后把 `voice\` 覆盖到 `app\public\assets\audio\voice\`，
   **不需要改任何配置**（清单里本来就列着这些语言）。客户端在选中未安装的配音时会回退到默认配音那一句
   （`public/js/audio.js`），设置里的「配音语言」也只列真的装了的那几种（`public/js/voiceDubs.js` 每种探一个 HEAD）。

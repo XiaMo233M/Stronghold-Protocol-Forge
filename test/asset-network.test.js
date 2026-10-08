@@ -329,13 +329,16 @@ test('mirror header timeout does not cap a steadily streaming index or asset bod
 
 test('CLI source defaults to direct and retains the 0.1.1 shrink/local-spine flags', async () => {
   const { parseArgs } = await import('../tools/fetch-assets.mjs');
+  const { DEFAULT_VOICE_LANG } = await import('../shared/constants.js');
   const old = process.env.SP_ASSET_SOURCE;
   try {
     delete process.env.SP_ASSET_SOURCE;
     assert.equal(parseArgs([]).source, 'direct');
     process.env.SP_ASSET_SOURCE = 'mirror';
     assert.equal(parseArgs([]).source, 'mirror');
-    assert.equal(parseArgs([]).voiceLang, 'cn');
+    // 默认配音是日文（0.9.0 起：发行包只带日文那一档，其余走配音包）—— 与 shared/constants.js 的 DEFAULT_VOICE_LANG 同源
+    assert.equal(parseArgs([]).voiceLang, DEFAULT_VOICE_LANG);
+    assert.equal(parseArgs([]).voiceLang, 'jp');
     assert.equal(parseArgs([]).voiceAll, false);
     const opts = parseArgs(['--asset-source=direct', '--allow-shrink', '--local-spines', '--voice-lang=jp', '--voice-all']);
     assert.equal(opts.source, 'direct');
@@ -347,7 +350,7 @@ test('CLI source defaults to direct and retains the 0.1.1 shrink/local-spine fla
     assert.deepEqual(parseArgs([]).voiceLangs, [], 'off by default: the four dubs are ~262 MB');
     assert.deepEqual(parseArgs(['--voice-langs=cn,jp,en,kr']).voiceLangs, ['cn', 'jp', 'en', 'kr']);
     assert.deepEqual(parseArgs(['--voice-langs=jp,jp,kr']).voiceLangs, ['jp', 'kr'], 'deduplicated');
-    assert.deepEqual(parseArgs(['--voice-langs=cn']).voiceLangs, ['cn'], 'cn may be listed: it is the default one');
+    assert.deepEqual(parseArgs(['--voice-langs=cn']).voiceLangs, ['cn'], 'cn may be listed: it is NOT the default one any more');
     assert.throws(() => parseArgs(['--voice-langs=de']), /unknown --voice-langs entry de/);
     assert.throws(() => parseArgs(['--voice-langs=']), /comma separated list/);
   } finally {

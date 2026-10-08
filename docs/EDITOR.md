@@ -338,12 +338,12 @@ node tools/workshop-validate.mjs workshop     # kits 层：静态检查 + 真实
 `assets.audio.voiceLangs[<语言>]`，客户端从 `/workshop-assets/<包>/<路径>` 取文件。所以这一页**没有 spec、没有可推导的字段**，
 它就地编辑那份清单。
 
-- **配音语言**（中栏顶部，v0.7.3）：一行 chip = `默认配音` + `jp` / `en` / `kr`（语言名取 `VOICE_LANG_NAMES` 的母语写法，
+- **配音语言**（中栏顶部，v0.7.3）：一行 chip = `默认配音`（0.9.0 起那一档是**日文**）+ `cn` / `en` / `kr`（语言名取 `VOICE_LANG_NAMES` 的母语写法，
   语种码单独标出）。chip 上写清这一档**已声明多少条**，一条都没有的显示「未声明」；选中的 chip 高亮
   （`aria-pressed`）。**点 chip 只切当前编辑的那一份表**：中栏的干员卡片、右栏的表单全部跟着换，右栏开头写着
-  `当前配音 — 日本語（voiceLangs.jp） · N 条`，作者随时知道在改哪一份。默认配音那一档写的是 `voices` 字段，
-  其余语种写 `voiceLangs[<语种>]` —— `jp/en/kr` 之外**没有**别的选项，因为语言词表只有一份（`shared/constants.js`
-  的 `VOICE_LANGS`，服务端 `GET /api/voices` 的 `langs` 原样给出）。默认语种（`cn`）**不作为可声明的语种出现**：
+  `当前配音 — 中文（voiceLangs.cn） · N 条`，作者随时知道在改哪一份。默认配音那一档写的是 `voices` 字段，
+  其余语种写 `voiceLangs[<语种>]` —— `cn/en/kr` 之外**没有**别的选项，因为语言词表只有一份（`shared/constants.js`
+  的 `VOICE_LANGS`，服务端 `GET /api/voices` 的 `langs` 原样给出）。默认语种（`DEFAULT_VOICE_LANG`，现在是 `jp`）**不作为可声明的语种出现**：
   它写在 `voices` 里，写进 `voiceLangs` 会被加载器拒（`VOICE_LANG_DEFAULT`）；若清单里真的存在这一条，页面顶部照常
   显示「pack.json 现在会被加载器拒绝」的横幅，作者按提示删掉即可。
 - **左栏**：每个工坊包一条 —— 名称、包 id、已有多少条语音（**默认配音 + 所有语种合计**）、有没有 `assets/`、清单能不能被加载器接受
@@ -362,7 +362,7 @@ node tools/workshop-validate.mjs workshop     # kits 层：静态检查 + 真实
 - **写入规则**（全部在服务端强制；拒绝时 **400，且一个字节都不写**）：包 id 合法；干员 id 匹配 `[A-Za-z0-9_-]{1,64}`；
   槽位 ∈ `VOICE_SLOTS`（`shared/constants.js`，**不复制** —— 0.7.0 起是上游客户端真正会播的 12 个战斗槽位：
   `start` / `faceEnemy` / `select` / `place` / `skill1-4` / `resultFour` / `resultThree` / `resultTwo` / `resultLose`）；
-  **语种**（`lang` 一项）省略或给默认配音 = 写 `voices`，给 `jp` / `en` / `kr` = 写 `voiceLangs[<语种>]`，
+  **语种**（`lang` 一项）省略或给默认配音 = 写 `voices`，给 `cn` / `en` / `kr` = 写 `voiceLangs[<语种>]`，
   给别的语种直接 400（`VOICE_LANG_UNKNOWN`，回话里列出可用语种）；
   路径是包内 `assets/` 的相对路径（不得以 `/`、反斜杠、
   盘符开头，不得含 `.` / `..` / 空段 / 点开头的隐藏段）；**文件必须真的存在**；扩展名必须在 `server/index.js` 的
@@ -643,12 +643,12 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 | POST | `/api/packs/:pack/kits` | `{ id, source }` → 写 `kits/<id>.js`，并在缺少署名头时补写 |
 | DELETE | `/api/packs/:pack/kits/:id` | 删除该 kit 文件 |
 | GET | `/api/voices`（可选 `?pack=`） | 各包的语音状态（`voices` + 每个非默认语种的 `voiceLangs`）+ **槽位词表** + **语种词表 `langs` 与 `defaultLang`** + **允许的扩展名** + 可选干员 id + 包内 `assets/` 真实存在的文件 |
-| POST | `/api/packs/:pack/voices` | `{ charId, slot, paths, lang }` → 设置**一个槽位**（空数组即删除）；`lang` 省略或默认配音 → 就地更新 `pack.json` 的 `voices`，`jp`/`en`/`kr` → 更新 `voiceLangs[<语种>]`；回话带回两份表 |
+| POST | `/api/packs/:pack/voices` | `{ charId, slot, paths, lang }` → 设置**一个槽位**（空数组即删除）；`lang` 省略或默认配音 → 就地更新 `pack.json` 的 `voices`，`cn`/`en`/`kr` → 更新 `voiceLangs[<语种>]`；回话带回两份表 |
 | POST | `/api/packs/:pack/bond-icons` | `{ bondId, path }` → 设置本包自带的**盟约图标**（`path` 空即删除），就地更新 `pack.json` 的 `bondIcons`；文件必须真的在 `assets/` 下 |
 | POST | `/api/packs/:pack/item-icons` | `{ itemId, path }` → 设置本包自带的**装备图标**（`path` 空即删除），就地更新 `pack.json` 的 `itemIcons`；文件必须真的在 `assets/` 下，且 `itemId` 要被本包 `items.json` 里某条记录的 `iconId`/`trapId` 用到 |
 | POST | `/api/packs/:pack/art` | `{ table, id, art }`（`table ∈ chars\|enemies\|tokens`）→ 覆盖式写入本包自带**外观素材**的一条（`art` 为 `null`/`{}` 即删除，空对象逐级清理）；保存前挡住路径穿越、文件不存在、类型不可服务、atlas 与 skel 不同名、图谱页 png 缺失、skel 版本非 3.8.x、动画名不在骨架里、有 `assets/` 却没 license |
 | GET | `/api/packs/:pack/art/inspect?skel=&atlas=` | **只读**：读一个**还没写进 `pack.json`** 的 skel/atlas，回骨架版本、动画名、图谱页名与 `size:`/`pma` —— 页面的动画名下拉靠它（否则首次声明时只能靠猜） |
-| DELETE | `/api/packs/:pack/voices/:charId/:slot`（可选 `?lang=`） | 删除一个干员的一个槽位（不存在则报告 `removed: false`，不重写文件）；`?lang=jp` 删的是 `voiceLangs.jp` 那一份 |
+| DELETE | `/api/packs/:pack/voices/:charId/:slot`（可选 `?lang=`） | 删除一个干员的一个槽位（不存在则报告 `removed: false`，不重写文件）；`?lang=cn` 删的是 `voiceLangs.cn` 那一份 |
 | GET | `/api/packs/:id/export` | 该包的 `.zip`（`application/zip` + `Content-Disposition: attachment`）；包不存在 → 404 |
 | POST | `/api/packs/import`（可选 `?force=1`） | **原始 zip 字节**（`application/octet-stream`）→ 解压到临时目录、校验、搬进 `workshop/<包id>/`；返回装好的包摘要 |
 | GET | `/api/packs/support` | 各包的助战状态 + 每个包的**自有干员与推导阶** + `data/support.json` 的卡池与总开关 + `meta`（每个包的元数据与 `overrides` 状态）+ `overrideCandidates`（官方每张表的 id + 名字） |

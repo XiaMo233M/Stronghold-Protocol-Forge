@@ -28,11 +28,17 @@ export const VOICE_SLOTS = Object.freeze(['start', 'faceEnemy', 'select', 'place
  * 配音语言 (v0.7.1, owner's request 「不同干员可以切换不同的配音语言」): the dubs the official voice dump ships, in the order
  * the UI shows them. The manifest's `audio.voice` holds the default dub and `audio.voiceLangs[lang]` the others
  * (`tools/assets/plan.mjs`); a player picks one for the whole game in 设置 → 干员语音, and any operator may override it
- * (`settings.voiceLangByChar`, 干员详情 → 配音). `cn` is the default: it is the dub the game shipped before this
- * feature and the one every manifest has.
+ * (`settings.voiceLangByChar`, 干员详情 → 配音).
+ *
+ * `jp` is the default **since 0.9.0** (owner's release decision): the downloadable bundle ships the Japanese dub, so a
+ * fresh install hears Japanese out of the box, and the other three (cn / en / kr) come from the same release's voice
+ * pack. This constant is the ONE place that decides what "the default dub" means, so it has to agree with
+ * `data/assets.json`'s `audio.voiceLang` — a manifest naming another dub would leave the editor's 语音 page showing two
+ * tabs for the same table, and `shared/workshop.js` would reject a pack that files Chinese lines under `voiceLangs.cn`.
+ * Consequence for pack authors: a pack's `voices` table is the DEFAULT dub (now jp); other dubs go in `voiceLangs[lang]`.
  */
 export const VOICE_LANGS = Object.freeze(['cn', 'jp', 'en', 'kr']);
-export const DEFAULT_VOICE_LANG = 'cn';
+export const DEFAULT_VOICE_LANG = 'jp';
 /** Language names in their own language — never translated (that is how a language picker is read). */
 export const VOICE_LANG_NAMES = Object.freeze({ cn: '中文', jp: '日本語', en: 'English', kr: '한국어' }); // i18n-ignore: 语言名按母语写法显示
 

@@ -213,7 +213,7 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
 
 #### 多语言配音（`pack.json.voiceLangs`）
 
-`voices` 是**默认语种**那一档（清单的 `audio.voiceLang`，默认 `cn`：`shared/constants.js:35`）。要让某个干员在别的语种下
+`voices` 是**默认语种**那一档（清单的 `audio.voiceLang`；**0.9.0 起是 `jp`**：`shared/constants.js` 的 `DEFAULT_VOICE_LANG`）。要让某个干员在别的语种下
 换一批台词，就写 `voiceLangs`：**一个语种一张表**，除最外层的语种键之外，形状、槽位词表与路径安全规则与 `voices`
 **完全相同** —— 两者共用同一个解析函数（`shared/workshop.js:106`，由 `:155` 与 `:164` 各调一次）。
 
@@ -222,10 +222,10 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
   "id": "my-voice", "name": "双语助战语音", "version": "1.0.0", "license": "CC0-1.0",
   "content": [],
   "voices": {
-    "char_ws_my_op": { "place": ["voice/cn/place.mp3"], "select": ["voice/cn/select1.mp3"] }
+    "char_ws_my_op": { "place": ["voice/jp/place.mp3"], "select": ["voice/jp/select1.mp3"] }
   },
   "voiceLangs": {
-    "jp": { "char_ws_my_op": { "place": ["voice/jp/place.mp3"], "select": ["voice/jp/select1.mp3"] } },
+    "cn": { "char_ws_my_op": { "place": ["voice/cn/place.mp3"], "select": ["voice/cn/select1.mp3"] } },
     "en": { "char_ws_my_op": { "place": ["voice/en/place.mp3"] } }
   }
 }
@@ -233,12 +233,12 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
 
 | 规则 | 说明 |
 |---|---|
-| **语言只有四个** | `cn` `jp` `en` `kr`（`shared/constants.js:34` 的 `VOICE_LANGS`）。写别的整包被拒：`VOICE_LANG_UNKNOWN`（`shared/workshop.js:276`） |
-| **默认语种 `cn` 不能写进 `voiceLangs`** | 默认语种那批台词写在 `voices` 里；写进 `voiceLangs["cn"]` 会被拒：`VOICE_LANG_DEFAULT`（`shared/workshop.js:279`）。理由是同一批台词有两个写法的话，「客户端到底读哪一份」就成了作者猜不出来的事 |
+| **语言只有四个** | `cn` `jp` `en` `kr`（`shared/constants.js` 的 `VOICE_LANGS`）。写别的整包被拒：`VOICE_LANG_UNKNOWN`（`shared/workshop.js:276`） |
+| **默认语种 `jp` 不能写进 `voiceLangs`** | 默认语种那批台词写在 `voices` 里；写进 `voiceLangs["jp"]` 会被拒：`VOICE_LANG_DEFAULT`（`shared/workshop.js:279`）。理由是同一批台词有两个写法的话，「客户端到底读哪一份」就成了作者猜不出来的事 |
 | **一个语种至少要有一个干员** | 空表被拒：`VOICE_LANG_EMPTY`（`shared/workshop.js:283`）；整个 `voiceLangs` 不是对象是 `VOICE_LANG_BAD_SHAPE`（`shared/workshop.js:267`） |
 | **路径与授权规则同 `voices`** | 相对 `assets/`、不许绝对路径 / `..` / `.` / 反斜杠 / 盘符（`VOICE_PATH_UNSAFE`，`shared/workshop.js:248`）；有 `assets/` 就必须有 `license`（`VOICE_NEEDS_ASSETS`，`shared/workshop.js:270`） |
 | **只配一种语言也合法** | `voiceLangs` 本身就算「这个包贡献了什么」（`shared/workshop.js:371`、`:774`），所以 `content: []` + 只写 `voiceLangs` 不会被当成空包 |
-| **写法顺序不影响产物** | 合并前按 `VOICE_LANGS` 的固定顺序重排（`shared/workshop.js:288`），`pack.json` 里先写 `jp` 还是 `en` 都一样 |
+| **写法顺序不影响产物** | 合并前按 `VOICE_LANGS` 的固定顺序重排（`shared/workshop.js:288`），`pack.json` 里先写 `cn` 还是 `en` 都一样 |
 
 **送达与回退**：默认语种的台词并进 `assets.audio.voice`，其它语种并进 `assets.audio.voiceLangs[<lang>]`
 （`shared/workshop.js:743` 的 `appendVoiceLines`，两处调用在 `:793` 与 `:809`；是**追加**，不替换官方已有的台词，客户端仍在这些台词里随机）。播放侧按玩家选的配音语言取

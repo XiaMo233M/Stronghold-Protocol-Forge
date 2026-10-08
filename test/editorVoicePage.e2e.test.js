@@ -2,7 +2,7 @@
 //
 // 为什么值得一条浏览器测试：语言选择是这一版唯一「只活在界面上」的东西。服务端的形状、合并与拒绝由
 // test/workshopVoices.test.js（叠加层）和 test/voiceEditor.test.js（HTTP 接口）钉住了，但
-// 「点日本語 → 中栏与右栏整块换成 jp 那一档 → 存下去的是 voiceLangs.jp 而不是 voices」这件事，
+// 「点中文 → 中栏与右栏整块换成 cn 那一档 → 存下去的是 voiceLangs.cn 而不是 voices」这件事，
 // 只有把页面真的跑起来才算证明；而它恰恰是最容易写错、错了还静默的一半（选错档位 = 台词写进另一份表，
 // 界面不报错，玩家只是听不到）。所以这条测试点的是真按钮、填的是真表单、读的是磁盘上的 pack.json。
 //
@@ -49,7 +49,7 @@ describe('编辑器语音页：语言选择（真浏览器）', { skip }, () => 
     fs.mkdirSync(join(dir, 'assets', 'voice'), { recursive: true });
     fs.writeFileSync(join(dir, 'pack.json'), `${JSON.stringify({
       id: PACK, name: '界面测试包', version: '1.0.0', license: 'CC0-1.0', content: ['chess'],
-      voices: { [CH]: { select: ['voice/cn1.mp3'] } },
+      voices: { [CH]: { select: ['voice/jp1.mp3'] } },
     }, null, 2)}\n`);
     fs.writeFileSync(join(dir, 'assets', 'voice', 'cn1.mp3'), MP3('CN1'));
     fs.writeFileSync(join(dir, 'assets', 'voice', 'jp1.mp3'), MP3('JP1'));
@@ -125,45 +125,45 @@ describe('编辑器语音页：语言选择（真浏览器）', { skip }, () => 
     }
   };
 
-  test('打开页面就有语言选择：默认配音 + jp/en/kr 三档，默认配音是当前那一档', async () => {
+  test('打开页面就有语言选择：默认配音 + cn/en/kr 三档，默认配音是当前那一档', async () => {
     const list = await chips();
-    assert.deepEqual(list.map((c) => c.lang), [null, 'jp', 'en', 'kr'], '语言词表来自 shared/constants.js 的 VOICE_LANGS');
+    assert.deepEqual(list.map((c) => c.lang), [null, 'cn', 'en', 'kr'], '语言词表来自 shared/constants.js 的 VOICE_LANGS');
     assert.deepEqual(list.filter((c) => c.pressed).map((c) => c.lang), [null], '默认配音是打开时的当前档');
     assert.match(list[0].text, /默认配音/, '第一档说清它就是默认配音');
     assert.match(list[0].text, /1/, '默认配音那一档已有 1 条');
-    assert.match(list[1].text, /未声明/, 'jp 还一条都没有');
+    assert.match(list[1].text, /未声明/, 'cn 还一条都没有');
     const hint = await page.$eval('.langs .hint', (e) => e.textContent);
     assert.match(hint, /voiceLangs/, '页面明说这些语种写进 voiceLangs');
     assert.match(hint, /VOICE_LANG_DEFAULT/, '也明说默认语种不能写进 voiceLangs');
   });
 
-  test('点日本語：中栏与右栏整块换成 voiceLangs.jp 那一档', async () => {
-    await clickChip('jp');
-    await page.waitForFunction(() => document.querySelector('#form')?.textContent?.includes('voiceLangs.jp'));
+  test('点中文：中栏与右栏整块换成 voiceLangs.cn 那一档', async () => {
+    await clickChip('cn');
+    await page.waitForFunction(() => document.querySelector('#form')?.textContent?.includes('voiceLangs.cn'));
     const list = await chips();
-    assert.deepEqual(list.filter((c) => c.pressed).map((c) => c.lang), ['jp']);
+    assert.deepEqual(list.filter((c) => c.pressed).map((c) => c.lang), ['cn']);
     const center = await page.$eval('#lines', (e) => e.textContent);
-    assert.match(center, /日本語/, '中栏说的是当前这一档');
-    assert.match(center, /还没有/, 'jp 这一档还是空的，页面说清楚怎么加');
+    assert.match(center, /中文/, '中栏说的是当前这一档');
+    assert.match(center, /还没有/, 'cn 这一档还是空的，页面说清楚怎么加');
   });
 
-  test('在 jp 那一档存一条 → 只写进 voiceLangs.jp，voices 一个字节没动', async () => {
+  test('在 cn 那一档存一条 → 只写进 voiceLangs.cn，voices 一个字节没动', async () => {
     const before = manifest();
-    const after = await saveLine(CH, 'select', 'voice/jp1.mp3');
-    assert.deepEqual(after.voiceLangs, { jp: { [CH]: { select: ['voice/jp1.mp3'] } } }, '就写进 jp 那一份');
+    const after = await saveLine(CH, 'select', 'voice/cn1.mp3');
+    assert.deepEqual(after.voiceLangs, { cn: { [CH]: { select: ['voice/cn1.mp3'] } } }, '就写进 cn 那一份');
     assert.deepEqual(after.voices, before.voices, '默认配音那一份完全没动');
     assert.equal(after.content.includes('chess'), true, '清单的其余字段照旧');
     // 存过之后 chip 不该再写「未声明」，而是条数
     const list = await chips();
-    assert.doesNotMatch(list.find((c) => c.lang === 'jp').text, /未声明/);
+    assert.doesNotMatch(list.find((c) => c.lang === 'cn').text, /未声明/);
   });
 
   test('回到默认配音那一档存同一位干员的另一个槽位 → 只改 voices', async () => {
     await clickChip(null);
     await page.waitForFunction(() => !document.querySelector('#form')?.textContent?.includes('voiceLangs.'));
-    const after = await saveLine(CH, 'place', 'voice/cn1.mp3');
-    assert.deepEqual(after.voices[CH], { select: ['voice/cn1.mp3'], place: ['voice/cn1.mp3'] }, '默认配音这一份多了一个槽位');
-    assert.deepEqual(after.voiceLangs, { jp: { [CH]: { select: ['voice/jp1.mp3'] } } }, 'jp 那一份原样不动');
+    const after = await saveLine(CH, 'place', 'voice/jp1.mp3');
+    assert.deepEqual(after.voices[CH], { select: ['voice/jp1.mp3'], place: ['voice/jp1.mp3'] }, '默认配音这一份多了一个槽位');
+    assert.deepEqual(after.voiceLangs, { cn: { [CH]: { select: ['voice/cn1.mp3'] } } }, 'cn 那一份原样不动');
   });
 
   test('整个流程没有一条页面错误（console.error / pageerror / /api/ 4xx）', () => {

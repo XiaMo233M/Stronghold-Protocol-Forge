@@ -34,7 +34,7 @@ import { NET_DEFAULTS } from '../server/net.js';
 import { SOLO_RECONNECT_FALLBACK_SEC } from '../server/lobby.js';
 import { moduleTypeIconUrl } from '../public/js/ui/assetUrls.js';
 import { validateC2S } from '../shared/protocol.js';
-import { ERR, PHASE } from '../shared/constants.js';
+import { ERR, PHASE, VOICE_LANGS, DEFAULT_VOICE_LANG } from '../shared/constants.js';
 import { PROJECTILE_SPEEDS, BOOMERANG_RETURN_SPEED, ELEMENT, ELEMENT_ORDER, DOWN_STATE, BLOCK_RADIUS, FORCED_EXIT, ASPD_MIN, BOSS_POOL_MIN_HP, AUTO_OP_COOLDOWN, ALLY_COLLIDER_RADIUS } from '../server/sim/constants.js';
 import { SKILL_SUMMON_START_DEPLOY, BOND_LAYER_CAP, BOSS_HIT_LIMIT, layerGainRoom } from '../shared/constants.js';
 import * as SIM_CONST from '../server/sim/constants.js';
@@ -897,16 +897,18 @@ test('干员战斗语音 (DESIGN §21.30): the manifest data, the official prior
   }
   // a battle slot usually carries several lines (选中干员 / 部署 have two), so the battle set alone stays well above 10 each
   assert.ok(lines.length >= charIds.length * 10, `${lines.length} voice lines for ${charIds.length} operators`);
-  // `audio.voice` is the manifest's DEFAULT dub (plan.mjs voiceLang, cn out of the box) …
-  assert.equal(manifest.audio.voiceLang, 'cn', 'the manifest names its default dub');
-  for (const u of lines) assert.match(u, /^\/assets\/audio\/voice\/cn\/char_[^/]+\/cn_\d+\.mp3$/);
+  // `audio.voice` is the manifest's DEFAULT dub (plan.mjs voiceLang; DEFAULT_VOICE_LANG, jp since 0.9.0) …
+  assert.equal(manifest.audio.voiceLang, DEFAULT_VOICE_LANG, 'the manifest names its default dub');
+  for (const u of lines) assert.match(u, new RegExp(`^/assets/audio/voice/${DEFAULT_VOICE_LANG}/char_[^/]+/cn_\\d+\\.mp3$`));
   // … and `audio.voiceLangs[lang]` the other dubs, each with the SAME file names under `audio/voice/<lang>/` (v0.7.1,
   // owner's request 「不同干员可以切换不同的配音语言」). A build that downloaded no extra dub simply has no table.
+  const otherDubs = VOICE_LANGS.filter((l) => l !== manifest.audio.voiceLang);
   for (const [lang, table] of Object.entries(manifest.audio.voiceLangs ?? {})) {
-    assert.match(lang, /^(jp|en|kr)$/, `${lang} is a real dub beside the default`);
+    assert.ok(otherDubs.includes(lang), `${lang} is a real dub beside the default`);
     assert.ok(manifest.stats.voiceLangs[lang] >= 1, `stats.voiceLangs counts ${lang}`);
-    // measured 2026-10-07: jp carries all 191 operators, en and kr 182 each (the 9 newest have no EN/KR dub yet — the
-    // planner drops what upstream does not have, and audio.js voiceLinesFor falls back to the default dub for them)
+    // cn carries all 191 operators (it was the default until 0.9.0 and now ships as a voice pack), en and kr 182 each
+    // (the 9 newest have no EN/KR dub yet — the planner drops what upstream does not have, and audio.js voiceLinesFor
+    // falls back to the default dub for them)
     assert.ok(Object.keys(table).length >= charIds.length * 0.9, `${lang}: ${Object.keys(table).length}/${charIds.length} operators`);
     const urls = [];
     const collect = (x) => {
