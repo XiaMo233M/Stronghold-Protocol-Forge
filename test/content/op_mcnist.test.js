@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import { makeBattle, enemyRec, checkInvariants } from '../helpers/battleHarness.js';
 import { KITTED_CHARS, OPERATOR_KITS, KITS } from '../../server/sim/content/kits/index.js';
 import { diyPool, validateDiyPicks } from '../../shared/diy.js';
+import { COLS } from '../../server/sim/constants.js';
 
 const load = (f) => JSON.parse(readFileSync(new URL(`../../data/${f}.json`, import.meta.url), 'utf8'));
 const CHESS = load('chess');
@@ -37,7 +38,7 @@ const ENEMIES = {
 };
 const FORMS_ALL = [[5, false, null], [6, false, null], ...[5, 6].flatMap((t) => [null, SOA].map((m) => [t, true, m]))];
 const label = ([tier, elite, mod]) => `T${tier} ${elite ? 'elite' : 'normal'} ${mod ?? 'none'}`;
-const K = (r, c) => r * 21 + c;
+const K = (r, c) => r * COLS + c;
 const sortN = (a) => [...a].sort((x, y) => x - y);
 
 /** A battle with 机械师 as uid 1 at (10, 3) facing RIGHT (`graf`: her 结构性原理 as uid 2 at graf.row / col), plus `others`. */
@@ -265,7 +266,7 @@ test('S3 工程学十字星 (MANUAL, data DEFAULT, 40 s): ATK +160 % / +220 %, i
   const { h, u, t } = field({ skill: 2, graf: { row: 9, col: 7, dir: 'RIGHT' } });
   const w = h.spawn('enemy_walk', { routeIndex: 0 });
   assert.ok(h.runUntil(() => t.blocking.includes(w), 30), 'the walker reaches it');
-  assert.ok(!u.rangeKeySet.has(Math.round(w.y) * 21 + Math.round(w.x)), 'out of her range');
+  assert.ok(!u.rangeKeySet.has(Math.round(w.y) * COLS + Math.round(w.x)), 'out of her range');
   h.run(2);
   assert.equal(h.hooksOf('damaged').filter((c) => c.source === u && c.target === w).length, 0, 'not her target without S3');
   u.skill.gainSp(999);

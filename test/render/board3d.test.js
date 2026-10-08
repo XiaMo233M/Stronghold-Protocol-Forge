@@ -12,8 +12,9 @@ import * as THREE from 'three';
 import { SURFACES, SOURCES, surfaceUV, resolveUvTable, cleanSurface, sideRect, tintRgb } from '../../public/js/render/board3d/atlas.js';
 import { parseObj, mapMesh } from '../../public/js/render/board3d/obj.js';
 import {
-  buildBoard, classifyStage, heightOf, AREAS, areaFor, unionAreas, objToBoard, boxProjectUV, tube, Geom, uvAt, ROWS, COLS,
+  buildBoard, classifyStage, heightOf, AREAS, areaFor, unionAreas, objToBoard, boxProjectUV, tube, Geom, uvAt,
 } from '../../public/js/render/board3d/layout.js';
+import { layoutOf, mapSize } from '../../public/js/render/layout.js';
 import { BoardScene, gatePulse, DIR_TURNS, boxData, LIGHTING } from '../../public/js/render/board3d/scene.js';
 import { loadBoardPack, resetBoardPack, PACK_IMAGES } from '../../public/js/render/board3d/load.js';
 import { parseStage } from '../../public/js/render/tiles.js';
@@ -103,7 +104,9 @@ describe('board geometry (layout.js)', () => {
     for (const st of Object.values(stages)) {
       const G = classifyStage(st, AREAS.all);
       const P = parseStage(st, [0, 18], [0, 18]);
-      for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+      // every data stage is an official 19×21 map: the window is what both grids cover
+      const [R, C] = mapSize(layoutOf(st));
+      for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {
         const a = G[r][c], b = P[r][c];
         assert.equal(a.glyph, b.glyph, `${st.id} ${r},${c}`);
         if (a.drawn) assert.ok(near(a.h, b.h), `${st.id} ${r},${c} h ${a.h} vs ${b.h}`);

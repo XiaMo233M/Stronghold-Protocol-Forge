@@ -114,7 +114,8 @@
 
 import { GEO, ANIM } from '../../../shared/constants.js';
 import { fxForm } from '../../../shared/protocol.js';
-import { Camera, presetCamera, lerpCamera, easeInOutCubic, pickTile, normRect } from './projection.js';
+import { Camera, presetCamera, lerpCamera, easeInOutCubic, pickTile } from './projection.js';
+import { layoutOfStage, rectForKind, normMapRect, mapRectOf } from './layout.js';
 import { SnapshotBuffer, frameTime } from './interp.js';
 import { TileField } from './tiles.js';
 import { UnitView, ItemView, DeviceView, FORMS } from './units.js';
@@ -128,8 +129,7 @@ import { loadThree, loadBoardPack, webgl2Available, boardArtListed } from './boa
 import { BoardScene } from './board3d/scene.js';
 import { unionAreas } from './board3d/layout.js';
 import { layoutPen, penSignature } from './pen.js';
-import { IDENTITY, bossPrepField, tilesToDisp, leaderStand } from './prepfield.js';
-import { pickOnTile, pickBattle, hitTiles } from './pick.js';
+import { IDENTITY, bossPrepField, tilesToDisp, leaderStand } from './prepfield.js';import { pickOnTile, pickBattle, hitTiles } from './pick.js';
 import { promotionsOf } from './promote.js';
 import { ensurePixi } from './app/pixi.js';
 import { pieceDirOf, pickUnitOf } from './app/pick.js';
@@ -325,7 +325,7 @@ export async function createFieldView(host, options = {}) {
   ctx.createBox = () => switchableBox({ board: () => board3d, pixi: () => tiles.createBox() });
   const impostors = new ImpostorAtlas(app.renderer);
   ctx.impostors = impostors;
-  tiles.setView(bandFor('prep'), camRect(), fieldRows('prep'));
+  tiles.setView(bandFor('prep', layout()), camRect(), fieldRows('prep', layout()));
   // the real board art of the local client (optional): wait briefly so the first frame already uses it; a late
   // arrival swaps the atlas in place
   const artPromise = loadBoardArt(assets).then((art) => {
@@ -358,7 +358,7 @@ export async function createFieldView(host, options = {}) {
       board3d = b;
       tiles.setExternal(true);
       backdrop.visible = false;
-      b.setArea(boardArea(viewKind(camKind, camOpts)));
+      b.setArea(boardArea(viewKind(camKind, camOpts, layout()), layout()));
       if (stageRec) b.setStage(stageRec);
       b.setFocus(camRect());
       b.setBattleRect(mode === 'battle' && battleMeta ? battleMeta.rect : null);
@@ -437,6 +437,10 @@ export async function createFieldView(host, options = {}) {
   if (document.fonts?.ready) document.fonts.ready.then(() => { if (!destroyed) refreshTierChips(); }).catch(() => {});
 
   // ---- camera ---------------------------------------------------------------------------------------------
+  // Every rect below is a rect of the MAP's own window (shared/layout.js): the official 19×21 numbers when the stage
+  // declares no size, the map's own bands otherwise. `stageRec` is filled by setStage before any camera is asked for a
+  // rect, so `layout()` is the current map. The server's own rect (m.field `meta.rect`) wins where it is present.
+  const layout = () => layoutOfStage(stageRec);
 
   function defaultPadding(kind, sz) {
     if (typeof opts.padding === 'function') { try { const p = opts.padding(kind, sz); if (p) return p; } catch { /* ignore */ } }
@@ -457,28 +461,24 @@ export async function createFieldView(host, options = {}) {
   }
 
   function camRect() {
-    const k = viewKind(camKind, camOpts);
-    if (k === 'pen') return { r0: 14, r1: 18, c0: 7, c1: 13 };
-    // prep lights the bench (hand row 7 / temp row 8) with the field, like the official prep view
-    if (camOpts.rect) { const r = normRect(camOpts.rect); return k === 'prep' ? { ...r, r0: Math.min(r.r0, GEO.HAND_ROW) } : r; }
-    // the boss round's prep lights the whole boss field: the pair partner's half is shown with its pieces (item 51)
-    if (k === 'bossPrep') return { ...GEO.BOSS_RECT };
-    return k === 'boss' ? { ...GEO.BOSS_RECT } : k === 'unite' ? { ...GEO.UNITE_RECT } : k === 'prep' ? { r0: 7, r1: 12, c0: 0, c1: 10 } : { ...GEO.NORMAL_RECT };
+    const k = viewKind(camKind, camOpts, layout());
+    // the map's own rect for that kind (pen band, boss field, 联防 …); a caller's rect (the server's own) wins, and the
+    // map's own `prep` already includes the bench row (a big map's bench is one row above its own normal band)
+    return rectForKind(k, layout(), camOpts.rect);
   }
 
   function targetCamera(kind, o) {
     const sz = size();
     const k = kind === 'hidden' ? 'boss' : (['prep', 'normal', 'unite', 'boss', 'bossPrep', 'pen'].includes(kind) ? kind : 'normal');
-    let rect = o.rect ? normRect(o.rect) : null;
-    if (k === 'prep') rect = rect ? { ...rect, r0: Math.min(rect.r0, GEO.HAND_ROW) } : null;
+    const rect = rectForKind(k, layout(), o.rect);
     // official configBlackBoard framing (render/projection.js presetCamera); the padding only matters for the
     // fitted fallback (custom rects, portrait viewports); a prep camera keeps the bench and the field clear of the HUD
     // — `shop: false` (the folded shop, public issue #5) = the official shop-collapsed camera, clear of the folded
     // shop's HUD band (re-evaluated on resize: camOpts keep the flag)
-    const vk = viewKind(kind, o); // (a 'prep' camera on the boss rows = the Final Assault prep)
+    const vk = viewKind(kind, o, layout()); // (a 'prep' camera on the boss rows = the Final Assault prep)
     return presetCamera(k, { width: sz.width, height: sz.height, padding: o.padding || defaultPadding(k, sz) }, {
       rect, side: o.side, half: !!o.half, shop: o.shop, fit: !!o.fit, config: stageRec?.config || null,
-      hud: hudBands(vk, sz, { shop: o.shop !== false }),
+      hud: hudBands(vk, sz, { shop: o.shop !== false }), layout: layout(),
     });
   }
 
@@ -487,13 +487,14 @@ export async function createFieldView(host, options = {}) {
   function setCamera(kind, options) {
     if (destroyed) return false;
     let o = options && typeof options === 'object' ? options : {};
-    const prevView = viewKind(camKind, camOpts);
-    const prevBand = bandFor(prevView), prevField = fieldRows(prevView);
+    const L = layout();
+    const prevView = viewKind(camKind, camOpts, L);
+    const prevBand = bandFor(prevView, L), prevField = fieldRows(prevView, L);
     const nextKind = typeof kind === 'string' ? kind : 'normal';
     // the enemy pen is a detour of the prep camera: remember where it came from; the same kind asked again without
     // framing options goes back to exactly that camera (Final Assault half, shop state…)
     const framing = (x) => Object.keys(x).some((k) => k !== 'instant' && k !== 'ms' && x[k] !== undefined);
-    if (viewKind(nextKind, o) === 'pen') {
+    if (viewKind(nextKind, o, L) === 'pen') {
       if (prevView !== 'pen') camBeforePen = { kind: camKind, opts: { ...camOpts, instant: undefined, ms: undefined } };
     } else if (prevView === 'pen' && camBeforePen && nextKind === camBeforePen.kind && !framing(o)) {
       o = { ...camBeforePen.opts, instant: o.instant, ms: o.ms };
@@ -501,17 +502,17 @@ export async function createFieldView(host, options = {}) {
     camKind = nextKind;
     camOpts = { ...o };
     // the field actually shown (a 'prep' camera on the boss rows is the Final Assault prep: boss field built / drawn)
-    const vk = viewKind(camKind, camOpts);
+    const vk = viewKind(camKind, camOpts, L);
     if (vk === 'prep') setPrepField(IDENTITY);
-    else if (vk === 'bossPrep') setPrepField(bossPrepField(camOpts.side === 'R' ? 'R' : 'L'));
+    else if (vk === 'bossPrep') setPrepField(bossPrepField(camOpts.side === 'R' ? 'R' : 'L', L));
     const target = targetCamera(camKind, camOpts);
-    const band = bandFor(vk);
-    const field = fieldRows(vk);
+    const band = bandFor(vk, L);
+    const field = fieldRows(vk, L);
     const focus = camRect();
     board3d?.setFocus(focus);
     camMs = Number.isFinite(o.ms) && o.ms >= 0 ? o.ms : (vk === 'pen' || prevView === 'pen' ? PEN_CAMERA_MS : CAMERA_MS);
     if (o.instant || camMs === 0 || mode === 'idle' && !camTo) {
-      board3d?.setArea(boardArea(vk));
+      board3d?.setArea(boardArea(vk, L));
       cam = target; camFrom = camTo = null;
       tiles.setView(band, focus, field);
       setPenHidden(!penShown(vk));
@@ -523,10 +524,10 @@ export async function createFieldView(host, options = {}) {
       camT0 = performance.now();
       // keep both fields drawn (and lit) while the camera flies between them
       tiles.setView([Math.min(prevBand[0], band[0]), Math.max(prevBand[1], band[1])], focus, [Math.min(prevField[0], field[0]), Math.max(prevField[1], field[1])]);
-      board3d?.setArea(unionAreas(boardArea(prevView), boardArea(vk)));
+      board3d?.setArea(unionAreas(boardArea(prevView, L), boardArea(vk, L)));
       setPenHidden(!penShown(vk, prevView));
       setLeaderHidden(!leaderShown(vk, prevView));
-      pendingView = { band, focus, field, area: boardArea(vk), pen: penShown(vk), leader: leaderShown(vk) };
+      pendingView = { band, focus, field, area: boardArea(vk, L), pen: penShown(vk), leader: leaderShown(vk) };
     }
     return true;
   }
@@ -595,10 +596,18 @@ export async function createFieldView(host, options = {}) {
 
   function setStage(st) {
     if (!st || typeof st !== 'object' || !Array.isArray(st.rows)) return false;
+    const changed = !stageRec || stageRec.id !== st.id || JSON.stringify(stageRec.size || null) !== JSON.stringify(st.size || null);
     stageRec = st;
     tiles.setStage(st);
     tiles.setBattleRect(mode === 'battle' && battleMeta ? battleMeta.rect : null);
     if (board3d) { board3d.setStage(st); board3d.setBattleRect(mode === 'battle' && battleMeta ? battleMeta.rect : null); }
+    // a map that declares its own size moves every band (drawn rows, built areas, lit rect, camera): re-apply the view
+    if (changed) {
+      const vk = viewKind(camKind, camOpts, layout());
+      board3d?.setArea(boardArea(vk, layout()));
+      board3d?.setFocus(camRect());
+      tiles.setView(bandFor(vk, layout()), camRect(), fieldRows(vk, layout()));
+    }
     tiles.project(cam, true);
     // a pen laid out before the stage arrived (setPrep / a scouting board first) used the default zones and the old
     // tile heights: lay it out again on this stage
@@ -663,7 +672,7 @@ export async function createFieldView(host, options = {}) {
   }
   /** The tile under a canvas point in BOARD space (null off-grid; an impossible tile off the player's half). */
   function pickBoardTile(x, y) {
-    const t = pickTile(cam, x, y, heightAt, tiles.levels);
+    const t = pickTile(cam, x, y, heightAt, tiles.levels, tiles.rows, tiles.cols);
     if (!t || prepXf === IDENTITY) return t;
     const b = prepXf.toBoard(t.row, t.col);
     return b ? { ...t, row: b.row, col: b.col } : { row: -1, col: -1, x: t.x, y: t.y };
@@ -849,7 +858,10 @@ export async function createFieldView(host, options = {}) {
     penList = sig ? list : null;
     if (!sig) return;
     // the leader with a spawn tile stands on the boss field (setLeader), not in the pen
-    const stand = leaderStand(list, (k) => data.enemy(k)?.hitArea ?? null, hitTiles);
+    const stand = leaderStand(list, (k) => data.enemy(k)?.hitArea ?? null, (x, y, a) => {
+      const [rows, cols] = layout().size;
+      return hitTiles(x, y, a, rows, cols);
+    });
     setLeader(stand);
     const pen = layoutPen(stand ? list.filter((e) => e !== stand.entry) : list, { stage: stageRec });
     for (const f of pen.figures) {
@@ -960,7 +972,7 @@ export async function createFieldView(host, options = {}) {
 
   /** The display tile under a canvas point (raised tops first) and the point on its top (world x, y), or null. */
   function groundTile(x, y) {
-    const t = pickTile(cam, x, y, heightAt, tiles.levels);
+    const t = pickTile(cam, x, y, heightAt, tiles.levels, tiles.rows, tiles.cols);
     return t ? { row: t.row, col: t.col, x: t.x, y: t.y } : null;
   }
 
@@ -1066,14 +1078,15 @@ export async function createFieldView(host, options = {}) {
     const g = cam.unproject(p.x, p.y, 0);
     const hold = item ? 0 : DRAG_HOLD_TILES;
     const s0 = g ? cam.scaleAt(g.x, g.y, 0) : cam.scale;
-    const t = pickTile(cam, p.x, p.y + hold * s0, heightAt, tiles.levels);
+    const t = pickTile(cam, p.x, p.y + hold * s0, heightAt, tiles.levels, tiles.rows, tiles.cols);
     const z = t ? heightAt(t.row, t.col) : 0;
     const up = item ? z : z + (v.lift || 0) + (v.hover || 0);
     let w = cam.unproject(p.x, p.y + hold * s0, up);
     if (w && hold) w = cam.unproject(p.x, p.y + hold * cam.scaleAt(w.x, w.y, up), up) || w;
     if (w) {
-      v.x = Math.max(-1, Math.min(21, w.x));
-      v.y = Math.max(-1, Math.min(19, w.y));
+      // clamp the dragged ghost to the map's own window (a big map is bigger than the official 19×21)
+      v.x = Math.max(-1, Math.min(tiles.cols, w.x));
+      v.y = Math.max(-1, Math.min(tiles.rows, w.y));
       v.z = z;
     }
     if (p.target && p.target.area !== 'temp') {
@@ -1248,17 +1261,20 @@ export async function createFieldView(host, options = {}) {
     clearHl();
     renderT0Battle = null;
     mode = 'battle';
-    const rect = meta.rect ? normRect(meta.rect) : (meta.kind === 'boss' || meta.kind === 'hidden' ? { ...GEO.BOSS_RECT } : meta.kind === 'unite' ? { ...GEO.UNITE_RECT } : { ...GEO.NORMAL_RECT });
+    // a scouted teammate's board may arrive with the map's own stage: take it first, so the rect below is that map's
+    if (meta.stageId && (!stageRec || stageRec.id !== meta.stageId)) {
+      const st = data.stage(meta.stageId);
+      if (st) setStage(st);
+    }
+    // the server sends the map's own rect in the field meta (`meta.rect`); without one, derive it from this map's layout
+    const kind = meta.kind === 'hidden' ? 'boss' : (meta.kind || 'normal');
+    const rect = meta.rect ? normMapRect(layout(), meta.rect) : rectForKind(kind, layout(), null);
     // prep: true = a read-only scouting board (a teammate's lineup during prep): prep-style pieces, no bars
     battleMeta = { fieldId: meta.fieldId ?? null, kind: meta.kind || 'normal', rect, stageId: meta.stageId ?? null, prep: meta.prep === true };
     // a scouted teammate's board shows THEIR pen (m.field nextEnemies; without it the shared wave composition of the
     // own preview, bounties excluded); a real battle empties the pen (the enemies are about to spawn)
     if (battleMeta.prep) setPenList(Array.isArray(meta.nextEnemies) ? meta.nextEnemies : (ownPen || []).filter((x) => x && x.source !== 'bounty' && x.source !== 'effect'));
     else setPenList(null);
-    if (meta.stageId && (!stageRec || stageRec.id !== meta.stageId)) {
-      const st = data.stage(meta.stageId);
-      if (st) setStage(st);
-    }
     tiles.setBattleRect(rect);
     board3d?.setBattleRect(rect);
     for (const u of Array.isArray(meta.units) ? meta.units : []) addInfo(u);
@@ -1454,7 +1470,7 @@ export async function createFieldView(host, options = {}) {
 
   function leakFlash(x, y) {
     if (!stageRec) return;
-    const R = battleMeta?.rect || GEO.NORMAL_RECT;
+    const R = battleMeta?.rect || mapRectOf(layout(), 'normal');
     let best = null, bd = Infinity;
     for (let r = R.r0; r <= R.r1; r++) for (let c = R.c0; c <= R.c1; c++) {
       if (tiles.tile(r, c).glyph !== 'E') continue;
@@ -1842,7 +1858,8 @@ export async function createFieldView(host, options = {}) {
     get mode() { return mode; },
     /** Dev hooks (demo / tests). */
     debug: {
-      app, get cam() { return cam; }, get board3d() { return board3d; }, tiles, views, penViews, get leader() { return leader; }, interp, fx, ctx, drag, get camKind() { return viewKind(camKind, camOpts); },
+      app, get cam() { return cam; }, get board3d() { return board3d; }, tiles, views, penViews, get leader() { return leader; }, interp, fx, ctx, drag, get camKind() { return viewKind(camKind, camOpts, layout()); },
+      get layout() { return layout(); },
       promotions,
       // picking (render/pick.js) at canvas px: the prep piece / battle view / pen view there, the ground tile under it
       pick: { pieceAt, battleUnitAt, penUnitAt, groundTile },

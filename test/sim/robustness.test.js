@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Battle } from '../../server/sim/Battle.js';
 import { createRng } from '../../server/sim/rng.js';
-import { MAX_HOOK_DEPTH, MAX_ALIVE_ENEMIES } from '../../server/sim/constants.js';
+import { COLS, MAX_HOOK_DEPTH, MAX_ALIVE_ENEMIES  } from '../../server/sim/constants.js';
 import { getDefaultSource, spawnsFromTemplate } from '../../server/sim/simdata.js';
 import { makeBattle, chessRec, enemyRec, flatStage, checkInvariants, hashOf } from '../helpers/battleHarness.js';
 
@@ -343,7 +343,7 @@ test('helpers validate their inputs: spawnDevice / relocate / spawnToken / spawn
   assert.equal(b.relocate(g, 16, 5), false);
   assert.equal(b.relocate(g, NaN, 5), false);
   assert.equal(b.relocate(g, 10, 6), true);
-  assert.ok(g.baseRangeKeys.includes(10 * 21 + 6), 'initial (DEFAULT trigger) range follows the unit');
+  assert.ok(g.baseRangeKeys.includes(10 * COLS + 6), 'initial (DEFAULT trigger) range follows the unit');
   b.kill(g);
   assert.equal(b.relocate(g, 12, 6), false, 'dead units stay put');
   b.redeploy(g); // back on the tile it was knocked out on, (10,6) (PRTS 卫戍协议/帮助: 自动部署至该位置)

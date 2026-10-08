@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { makeBattle, enemyRec, checkInvariants } from '../helpers/battleHarness.js';
 import { KITTED_CHARS, OPERATOR_KITS, KITS } from '../../server/sim/content/kits/index.js';
 import { diyPool, validateDiyPicks } from '../../shared/diy.js';
+import { COLS } from '../../server/sim/constants.js';
 
 const load = (f) => JSON.parse(readFileSync(new URL(`../../data/${f}.json`, import.meta.url), 'utf8'));
 const CHESS = load('chess');
@@ -182,7 +183,7 @@ test('回光黯淡: her and her summons\' damage on an enemy below 60 % HP ×1.4
     const w = h.spawn('enemy_walk', { pos: [11, 13] });
     assert.ok(h.runUntil(() => w.blockedBy === s, 20), `${f}: blocked by her summon`);
     h.step(3);
-    assert.ok(u.extraRangeKeys && u.extraRangeKeys.includes(Math.round(w.y) * 21 + Math.round(w.x)), `${f}: its tile is her target`);
+    assert.ok(u.extraRangeKeys && u.extraRangeKeys.includes(Math.round(w.y) * COLS + Math.round(w.x)), `${f}: its tile is her target`);
     const n0 = h.hooksOf('damaged').filter((c) => c.source === u && c.target === w).length;
     h.run(4);
     const hit = h.hooksOf('damaged').filter((c) => c.source === u && c.target === w && c.dmg.isAttack).slice(n0);

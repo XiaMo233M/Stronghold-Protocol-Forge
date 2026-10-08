@@ -30,10 +30,9 @@
 
 import { SURFACES, surfaceUV, sideRect, tintRgb } from './atlas.js';
 import { GLYPH, TILEKEY_GLYPH, TILE_H } from '../style.js';
-import { parsePenRect, PEN_RECT } from '../pen.js';
+import { penRect } from '../pen.js';
+import { layoutOf, OFFICIAL_LAYOUT, mapSize } from '../layout.js';
 
-export const ROWS = 19;
-export const COLS = 21;
 /** How far the island's cliff faces go down (tiles). */
 export const CLIFF = 0.75;
 /** Top bevel: inset (tiles) and drop (tiles) of low tiles and raised blocks. */
@@ -44,15 +43,19 @@ export const BASIN = 0.14;
 const CONTENT_OF = (g) => g !== '#' && g !== 'X';
 
 /**
- * Areas built per phase (inclusive tile rects; configBlackBoard leftNormal ((6,0),(12,10)), rightNormal
- * ((6,11),(12,20)), leftBoss ((0,0),(6,10)), rightBoss ((0,11),(6,20)); enemy_place_rect ((14,7),(18,13)) + the
- * separator in front of it). The official prep / battle view shows only the player's own field and the preview pen
- * (the island ends under the bench row); 联防 joins both normal halves; the Final Assault builds the boss field.
- * The normal / 联防 field rects also take the separator row 13 above the field (like leftBoss takes row 6 above the
- * boss field): the devices standing on it act on the field — act2 m01's 源石流发生装置 #001/#002 (#101/#102) at (13, 5 /
- * 9 / 13 / 17) blow DOWN into rows 12–10 — and the official normal rounds show those machines at the field's top edge
- * (user playtest #5 item 6: the wind lanes worked but the blowers were missing; the 2D board always drew row 13). The
- * row-6 wall under the bench is built in these views too (in leftNormal), with the boss field's blowers standing on it.
+ * Areas built per phase, in the OFFICIAL 19×21 window (inclusive tile rects; configBlackBoard leftNormal
+ * ((6,0),(12,10)), rightNormal ((6,11),(12,20)), leftBoss ((0,0),(6,10)), rightBoss ((0,11),(6,20));
+ * enemy_place_rect ((14,7),(18,13)) + the separator in front of it). The official prep / battle view shows only the
+ * player's own field and the preview pen (the island ends under the bench row); 联防 joins both normal halves; the Final
+ * Assault builds the boss field. The normal / 联防 field rects also take the separator row 13 above the field (like
+ * leftBoss takes row 6 above the boss field): the devices standing on it act on the field — act2 m01's 源石流发生装置
+ * #001/#002 (#101/#102) at (13, 5 / 9 / 13 / 17) blow DOWN into rows 12–10 — and the official normal rounds show those
+ * machines at the field's top edge (user playtest #5 item 6: the wind lanes worked but the blowers were missing; the 2D
+ * board always drew row 13). The row-6 wall under the bench is built in these views too (in leftNormal), with the boss
+ * field's blowers standing on it.
+ *
+ * These are the OFFICIAL numbers; `areaFor(kind, layout)` shifts them onto a map's own window (big maps grow up and to
+ * the right, so only the top and right edges move) — a 19×21 map keeps exactly these rects.
  */
 export const AREAS = Object.freeze({
   normal: Object.freeze([Object.freeze({ r0: 6, r1: 13, c0: 0, c1: 10 }), Object.freeze({ r0: 13, r1: 18, c0: 6, c1: 14 })]),
@@ -61,11 +64,24 @@ export const AREAS = Object.freeze({
   all: Object.freeze([Object.freeze({ r0: 0, r1: 18, c0: 0, c1: 20 })]),
 });
 
-/** Area set of a camera kind ('prep' | 'normal' | 'pen' | 'unite' | 'boss' | 'hidden' | 'bossPrep'). */
-export function areaFor(kind) {
-  if (kind === 'unite') return AREAS.unite;
-  if (kind === 'boss' || kind === 'hidden' || kind === 'bossPrep') return AREAS.boss;
-  return AREAS.normal;
+const OFFICIAL_ROWS = 19, OFFICIAL_COLS = 21;
+/** How much taller / wider a map's window is than the official one (big maps grow up and to the right). */
+const growOf = (layout) => {
+  const [R, C] = mapSize(layout || OFFICIAL_LAYOUT);
+  return { dr: Math.max(0, R - OFFICIAL_ROWS), dc: Math.max(0, C - OFFICIAL_COLS) };
+};
+
+/**
+ * Shift an official area set onto a map's own window: the normal / 联防 / boss field bands move up with the map's own
+ * battle rects, the pen block with its own pen band. A 19×21 layout returns the official rects themselves (the same
+ * objects), so nothing downstream changes for an official stage. `kind` is a camera kind (see `areaFor`).
+ */
+export function areaFor(kind, layout = null) {
+  const L = layout || OFFICIAL_LAYOUT;
+  const { dr, dc } = growOf(L);
+  const set = kind === 'unite' ? AREAS.unite : kind === 'boss' || kind === 'hidden' || kind === 'bossPrep' ? AREAS.boss : AREAS.normal;
+  if (!dr && !dc) return set;
+  return set.map((a) => ({ r0: a.r0 + dr, r1: a.r1 + dr, c0: a.c0, c1: a.c1 + dc }));
 }
 
 /** Union of area sets (camera transitions show both). */
@@ -146,13 +162,15 @@ export function uvAt(uv, fx, fy) {
  */
 export function classifyStage(stage, area = null) {
   const rows = Array.isArray(stage?.rows) ? stage.rows : [];
-  const pen = parsePenRect(stage?.config?.enemy_place_rect) || PEN_RECT;
+  const L = layoutOf(stage);
+  const [R, C] = mapSize(L);
+  const pen = penRect(stage);
   const legend = stage && typeof stage.tiles === 'object' && stage.tiles ? stage.tiles : {};
   const grid = [];
-  for (let r = 0; r < ROWS; r++) {
+  for (let r = 0; r < R; r++) {
     const line = typeof rows[r] === 'string' ? rows[r] : '';
     const row = [];
-    for (let c = 0; c < COLS; c++) {
+    for (let c = 0; c < C; c++) {
       let g = line[c] || '#';
       if (!GLYPH[g]) g = TILEKEY_GLYPH[legend[g]?.tileKey] || (legend[g]?.height === 'HIGH' ? '#' : 'R');
       const def = GLYPH[g];
@@ -162,7 +180,7 @@ export function classifyStage(stage, area = null) {
     grid.push(row);
   }
   // the island: content tiles + the forbidden / separator ring around them (Chebyshev 1)
-  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+  for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {
     const t = grid[r][c];
     if (t.content) { t.drawn = true; continue; }
     if (!t.inArea) continue;
@@ -318,13 +336,14 @@ export function buildBoard(stage, opts = {}) {
   const uvTable = opts.uv || null;
   const UVT = uvTable || Object.fromEntries(Object.entries(SURFACES).map(([k, v]) => [k, { ...v, rect: [...v.rect] }]));
   const grid = classifyStage(stage, opts.area || null);
+  const [R, C] = mapSize(layoutOf(stage));
   const at = (r, c) => grid[r]?.[c] || null;
   const topZ = (t) => (t.glyph === 'd' ? -BASIN : t.h);
   const board = new Geom(), decal = new Geom(), pipe = new Geom(), glass = new Geom();
   const gates = [], terrain = { water: [], mire: [], smog: [], infection: [] };
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
 
-  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+  for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {
     const t = grid[r][c];
     if (!t.drawn) continue;
     minX = Math.min(minX, c - 0.5); maxX = Math.max(maxX, c + 0.5); minY = Math.min(minY, r - 0.5); maxY = Math.max(maxY, r + 0.5);
@@ -387,7 +406,7 @@ export function buildBoard(stage, opts = {}) {
   const fence = (r, c) => { const n = at(r, c); return !!n && n.drawn && n.glyph === 'b'; };
   const rail = { inset: 0.07, h: 0.26, rad: 0.032, post: 0.038 };
   const posts = new Set();
-  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+  for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {
     if (!fence(r, c)) continue;
     const e = rail.inset;
     const x0 = c - 0.5, x1 = c + 0.5, y0 = r - 0.5, y1 = r + 0.5;
@@ -415,7 +434,7 @@ export function buildBoard(stage, opts = {}) {
   // "outside": undrawn tiles and the forbidden / separator tiles connected to them (interior holes are not)
   const outside = new Set();
   const stack = [];
-  for (let r = -1; r <= ROWS; r++) for (let c = -1; c <= COLS; c++) {
+  for (let r = -1; r <= R; r++) for (let c = -1; c <= C; c++) {
     const t = at(r, c);
     if (!t || !t.drawn) { outside.add(`${r},${c}`); stack.push([r, c]); }
   }
@@ -428,7 +447,7 @@ export function buildBoard(stage, opts = {}) {
       stack.push([rr, cc]);
     }
   }
-  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+  for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {
     const t = grid[r][c];
     if (!zone(t)) continue;
     for (const [dir, dx, dy] of DIRS) {

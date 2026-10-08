@@ -24,6 +24,12 @@
 //     spots) with a seeded jitter.
 // Deterministic for a given preview (the seed is a hash of the entries), so re-sending the same m.private never
 // reshuffles the pen.
+//
+// The pen's own rect: `stage.config.enemy_place_rect` (the official configBlackBoard field) when the stage declares one,
+// else the map's own pen band `layoutOf(stage).pen` (shared/layout.js: the top 5 rows of the map's window, official
+// (14,7)–(18,13) for a 19×21 stage). `PEN_RECT` below is only the official fallback — a big map never sees it.
+
+import { layoutOf } from './layout.js';
 
 export const PEN_RECT = Object.freeze({ r0: 14, r1: 18, c0: 7, c1: 13 });
 export const MAX_PREVIEW = 50;
@@ -68,11 +74,29 @@ export function parsePenRect(v) {
 }
 
 /**
- * The pen's two zones for a stage (defaults when the stage is missing or malformed): `{ rect, lower, upper }`, each
- * zone `{ anchor: [r, c], tiles: [[r, c]…] }` in row-major order (research 08 §4.2: low row first, then col).
+ * The pen rect of a stage: `stage.config.enemy_place_rect` (the official configBlackBoard field — the ONLY thing an
+ * official record declares) when it parses, else the map's own pen band (`layoutOf(stage).pen`, shared/layout.js). A big
+ * map therefore gets its own pen, and an official one keeps `(14,7)–(18,13)` exactly as before.
+ */
+export function penRect(stage) {
+  return parsePenRect(stage?.config?.enemy_place_rect) || layoutOf(stage).pen;
+}
+
+/** Layout of the pen's own band: it is `pen.r1 − pen.r0 + 1` rows deep, its gates in its left column, one unused row. */
+const PEN_SHAPE = Object.freeze({ rows: 5, emptyRow: 2, lowerAnchor: 1, upperAnchor: 4 });
+
+/**
+ * The pen's two zones for a stage: `{ rect, lower, upper, zones }`, each zone `{ anchor: [r, c], tiles: [[r, c]…] }` in
+ * row-major order (research 08 §4.2: low row first, then col).
+ *
+ * The rect is the stage's `enemy_place_rect` when it has one, else the map's own pen band. The zones are re-derived on
+ * the client from that rect: the two `tile_start` anchors of the rect's tiles are the gate anchors (`(15,7)` / `(18,7)`
+ * on the official layout), the `previewNotAlloed` row is not a stand, and every other candidate belongs to the anchor
+ * nearest to it in Manhattan distance. Only when the stage's tiles yield no anchor at all (no stage data, or a pen with
+ * no gate tiles) do the anchors fall back to the rect's own shape: the same 1 / 4 rows down, the left column.
  */
 export function penZones(stage) {
-  const rect = parsePenRect(stage?.config?.enemy_place_rect) || { ...PEN_RECT };
+  const rect = penRect(stage);
   const rows = Array.isArray(stage?.rows) ? stage.rows : null;
   const legend = isObj(stage?.tiles) ? stage.tiles : {};
   const glyph = (r, c) => (rows && typeof rows[r] === 'string' ? rows[r][c] : null);
@@ -89,24 +113,35 @@ export function penZones(stage) {
         if (def.passable && def.passable !== 'ALL') continue;
         cand.push([r, c]);
       } else {
-        // no stage: the official layout ((14,7),(18,13)), anchors (15,7) / (18,7), row 16 not allowed
-        if (c === rect.c0 && (r === rect.r0 + 1 || r === rect.r1)) { anchors.push([r, c]); continue; }
-        if (r === rect.r0 + 2) continue;
         cand.push([r, c]);
       }
     }
   }
-  if (!anchors.length) anchors.push([rect.r0 + 1, rect.c0], [rect.r1, rect.c0]);
+  if (!anchors.length) {
+    // no gate tile to read: the rect's own shape (the official ((14,7),(18,13)) → anchors (15,7) / (18,7), row 16 unused)
+    const depth = rect.r1 - rect.r0;
+    const at = (k) => [Math.min(rect.r1, rect.r0 + Math.round(k * depth / (PEN_SHAPE.rows - 1))), rect.c0];
+    anchors.push(at(PEN_SHAPE.lowerAnchor), at(PEN_SHAPE.upperAnchor));
+  }
   anchors.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
   const zones = anchors.map((a) => ({ anchor: a, tiles: [] }));
+  const cells = new Map();
   const dist = (a, t) => Math.abs(a[0] - t[0]) + Math.abs(a[1] - t[1]);
-  for (const t of cand) {
+  const zoneOf = (t) => {
     let best = zones[0], bd = Infinity;
     for (const z of zones) { const d = dist(z.anchor, t); if (d < bd) { bd = d; best = z; } }
-    best.tiles.push(t);
+    return best;
+  };
+  for (const t of cand) {
+    // the gate tiles are not stands (they were taken as anchors above)
+    if (anchors.some((a) => a[0] === t[0] && a[1] === t[1])) continue;
+    // a stage with no tile legend of its own: the pen's own shape decides (the unused row is no stand either)
+    if (!rows && rect.r1 - rect.r0 >= PEN_SHAPE.rows - 1 && t[0] === rect.r0 + PEN_SHAPE.emptyRow) continue;
+    cells.set(`${t[0]},${t[1]}`, zoneOf(t));
   }
-  // row-major, as the client lists them (the candidates are collected row by row; kept explicit for custom rects)
-  for (const z of zones) z.tiles.sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+  // the gate tiles are not stands, but they are still part of the rect (the client's m_backUpTiles are every pen tile)
+  for (const z of zones) z.tiles = [...cells.keys()].filter((k) => cells.get(k) === z)
+    .map((k) => k.split(',').map(Number)).sort((p, q) => p[0] - q[0] || p[1] - q[1]);
   return { rect, lower: zones[0], upper: zones[zones.length - 1], zones };
 }
 

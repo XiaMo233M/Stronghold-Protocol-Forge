@@ -10,15 +10,29 @@
 //   groundPathsWithDevices  the same, with the active blocking devices applied         → server/stageAuthoring.js
 //
 // The author supplies only what a person can actually draw:
-//   rows     19 strings of 21 glyphs; **row 0 is the BOTTOM row** (the engine's convention, docs/DATA.md §0)
+//   size     [rows, cols] of THIS map (default 19×21 = the official size, shared/layout.js SIZE_PRESETS)
+//   rows     one string per row (size[0] of them, size[1] glyphs each); **row 0 is the BOTTOM row** (docs/DATA.md §0)
 //   tiles    the glyph legend (glyph → tile properties)
 //   devices  stage devices with pos/dir/role; `active` decides whether it blocks at match start
+//   layout   OPTIONAL: the map's own zones (deploy rects / battle rects / pen / mirror axis). Omitted ⇒ the default
+//            layout of `size`, which for 19×21 is exactly the official one (shared/layout.js)
 
-/** Stage grid size (docs/DESIGN.md §3: every stage is 19 rows × 21 cols). */
-export const STAGE_ROWS = 19;
-export const STAGE_COLS = 21;
-/** The full-grid rect the ground paths are computed over (tools/build-data.mjs:2130). */
+import {
+  OFFICIAL_SIZE, SIZE_PRESETS, MIN_ROWS, MIN_COLS, MAX_ROWS, MAX_COLS, FIXED_DEPLOY_COLS,
+  clampSize, isSize, layoutForSize, normalizeLayout, sizeOf, toRectObj, toRectArr,
+} from './layout.js';
+
+/** The OFFICIAL stage grid size (docs/DESIGN.md §3). A map's own size is `spec.size` (default this). */
+export const STAGE_ROWS = OFFICIAL_SIZE[0];
+export const STAGE_COLS = OFFICIAL_SIZE[1];
+/** The full-grid rect the OFFICIAL ground paths are computed over (tools/build-data.mjs:2130). */
 export const GRID_RECT = Object.freeze({ r0: 0, r1: 18, c0: 0, c1: 20 });
+
+/** The whole grid of a `size` map — what a big map's ground paths are computed over. */
+export function gridRectOf(size) {
+  const [R, C] = clampSize(size);
+  return { r0: 0, r1: R - 1, c0: 0, c1: C - 1 };
+}
 
 /**
  * The 12 route pairs whose paths data/stages.json stores, verbatim from tools/build-data.mjs:2314-2317.
@@ -30,7 +44,45 @@ export const GATE_PAIRS = Object.freeze([
   [[2, 10], [2, 18]], [[5, 10], [2, 18]], [[2, 10], [1, 17]], [[5, 10], [1, 17]],
 ]);
 
-/** The three deployment rects, as [r0, r1, c0, c1] (tools/build-data.mjs:2334). */
+/** How many route pairs a derived path table may hold (the official table's own size). */
+const MAX_GATE_PAIRS = GATE_PAIRS.length;
+
+/**
+ * The route pairs whose paths a map's `groundPaths` table holds.
+ *
+ * At the official size this is exactly `GATE_PAIRS` — the 12 pairs tools/build-data.mjs bakes into data/stages.json, so
+ * an official record and a re-derivation agree byte for byte. A BIG map has its own gates at its own coordinates, so
+ * its table is every 敌方入口 → 保护目标 pair of the map (teleporters count as their own), capped at 12 pairs.
+ * @param {string[]} rows glyph rows
+ * @param {Record<string, object>} legend glyph → { special, … }
+ * @param {number[]} [size]
+ * @returns {number[][][]} [[start, end], …]
+ */
+export function gatePairsFor(rows, legend, size = OFFICIAL_SIZE) {
+  if (size[0] === OFFICIAL_SIZE[0] && size[1] === OFFICIAL_SIZE[1]) return GATE_PAIRS;
+  const leg = isPlain(legend) ? legend : {};
+  const starts = [];
+  const ends = [];
+  for (let r = 0; r < (Array.isArray(rows) ? rows.length : 0); r++) {
+    const line = rows[r];
+    if (typeof line !== 'string') continue;
+    for (let c = 0; c < line.length; c++) {
+      const sp = leg[line[c]] && leg[line[c]].special;
+      if (sp === 'start' || sp === 'telin') starts.push([r, c]);
+      else if (sp === 'end' || sp === 'telout') ends.push([r, c]);
+    }
+  }
+  const out = [];
+  for (const s of starts) {
+    for (const e of ends) {
+      out.push([s, e]);
+      if (out.length >= MAX_GATE_PAIRS) return out;
+    }
+  }
+  return out;
+}
+
+/** The OFFICIAL three deployment rects, as [r0, r1, c0, c1] (tools/build-data.mjs:2334). */
 export const DEPLOY_RECTS = Object.freeze({
   normal: Object.freeze([9, 12, 2, 10]),
   bossLeft: Object.freeze([1, 5, 2, 10]),
@@ -38,42 +90,65 @@ export const DEPLOY_RECTS = Object.freeze({
 });
 
 /**
- * The three parts one 19×21 stage grid is made of — the owner's 2026-10-08 report 「为什么要把怪物等待区、普通对战、boss
+ * The deployment rects of a `size` map: the default layout's, i.e. official numbers at 19×21 and the same bands
+ * re-anchored inside a bigger window otherwise (shared/layout.js). A map that declares its own `layout` overrides them.
+ */
+export function deployRectsOf(size) {
+  return layoutForSize(size).deployRects;
+}
+
+/**
+ * The three parts one stage grid is made of — the owner's 2026-10-08 report 「为什么要把怪物等待区、普通对战、boss
  * 对战写在一整张大图上，这很难分辨」.
  *
- * The grid really is one 19×21 field (that is how the official data and the engine are shaped: server/match/board.js
- * FIELD + BOSS_ROW_OFFSET, server/match/waves.js PREVIEW pen anchors), so the three parts are **row bands of it**:
+ * The grid really is one field (that is how the official data and the engine are shaped: server/match/board.js
+ * FIELD + the boss row shift, the pen anchors of server/match/waves.js), so the three parts are **row bands of it**:
  *
- * - `pen`    rows 14–18: 怪物等待区（预览围栏）— where the incoming wave stands before it walks in
- *            (waves.js: anchors (18,7) upper / (15,7) lower, `gateOf` picks the pen of a route start).
- * - `normal` rows  9–12: 普通对战 —— the normal deployment field (board FIELD = 9–12 × cols 2–10).
- * - `boss`   rows  1–5: boss 对战 —— the same board shape read from the boss rows (board row = stage row + 7,
- *            `BOSS_ROW_OFFSET = −7`), split into a left and a right half for 联防 / 最终攻势.
+ * - `pen`    the top 5 rows: 怪物等待区（预览围栏）— where the incoming wave stands before it walks in.
+ * - `normal` the 4 rows that end 6 rows below the top: 普通对战 —— the normal deployment field (board FIELD 9–12×2–10
+ *            sits on the map through the map's `normal` deploy rect).
+ * - `boss`   rows 1–5: boss 对战 —— the same board shape read from the boss rows, split into a left and a right half
+ *            for 联防 / 最终攻势.
  * - `all`    the whole grid: kept for 专业检修 (the combined view the editor has always drawn).
  *
  * `deployRects` names the DEPLOY_RECTS entries that decide deployment *inside* that band — nothing outside them is
  * deployable, however much a tile looks like a road (the owner's 「为什么这一行不能部署」 was exactly that).
+ *
+ * The bands are derived from the map's size, so 19×21 gives exactly the official rows (14–18 / 9–12 / 1–5) and a big
+ * map keeps the same shape with the extra rows falling into the 中间战场 between `normal` and `boss`.
  */
-export const STAGE_ZONES = Object.freeze([
-  Object.freeze({ id: 'pen', rows: Object.freeze([14, 18]), deployRects: Object.freeze([]) }),
-  Object.freeze({ id: 'normal', rows: Object.freeze([9, 12]), deployRects: Object.freeze(['normal']) }),
-  Object.freeze({ id: 'boss', rows: Object.freeze([1, 5]), deployRects: Object.freeze(['bossLeft', 'bossRight']) }),
-  Object.freeze({ id: 'all', rows: Object.freeze([0, 18]), deployRects: Object.freeze(['normal', 'bossLeft', 'bossRight']) }),
-]);
+export function zonesOf(size) {
+  const [R] = clampSize(size);
+  const lay = layoutForSize(size);
+  const [nR0, nR1] = lay.deployRects.normal;
+  const [bR0, bR1] = lay.deployRects.bossLeft;
+  return [
+    { id: 'pen', rows: [lay.pen.r0, lay.pen.r1], deployRects: [] },
+    { id: 'normal', rows: [nR0, nR1], deployRects: ['normal'] },
+    { id: 'boss', rows: [bR0, bR1], deployRects: ['bossLeft', 'bossRight'] },
+    { id: 'all', rows: [0, R - 1], deployRects: ['normal', 'bossLeft', 'bossRight'] },
+  ];
+}
+
+/** The OFFICIAL zones (zonesOf(19×21)) — the shape every editor view starts from. */
+export const STAGE_ZONES = Object.freeze(zonesOf(OFFICIAL_SIZE).map((z) => Object.freeze({
+  id: z.id, rows: Object.freeze(z.rows), deployRects: Object.freeze(z.deployRects),
+})));
 
 /** The zone with that id, or the whole-grid one (never throws: an unknown id is a stale UI state, not an error). */
-export function zoneOf(id) {
-  return STAGE_ZONES.find((z) => z.id === id) ?? STAGE_ZONES[STAGE_ZONES.length - 1];
+export function zoneOf(id, zones = STAGE_ZONES) {
+  return zones.find((z) => z.id === id) ?? zones[zones.length - 1];
 }
 
 /**
- * Which deployment rects (names of DEPLOY_RECTS) contain stage tile (r, c) — `[]` when it is outside all three.
+ * Which deployment rects contain stage tile (r, c) — `[]` when it is outside all of them. `rects` defaults to the
+ * official ones; a big map passes its own (`layout.deployRects`).
  * This is the missing half of the deploy readout the editor shows: a tile's own `buildable` says what may stand on it,
  * but only a rect says whether the field can be deployed on **there at all**.
  */
-export function deployRectsAt(r, c) {
+export function deployRectsAt(r, c, rects = DEPLOY_RECTS) {
   const out = [];
-  for (const [name, [r0, r1, c0, c1]] of Object.entries(DEPLOY_RECTS)) {
+  for (const [name, [r0, r1, c0, c1]] of Object.entries(rects)) {
     if (r >= r0 && r <= r1 && c >= c0 && c <= c1) out.push(name);
   }
   return out;
@@ -83,21 +158,22 @@ export function deployRectsAt(r, c) {
  * Roads (any LOW + buildable ALL/MELEE tile) that sit in a **deployment row** yet outside that row's deployment
  * columns: enemies walk them, the author paints them as roads, and no operator can ever stand there.
  *
- * Only the rows a rect actually covers are reported — rows 14–18 (the 怪物等待区) and the wall/lane rows are simply
- * never deployable, and flagging every tile of them would be noise rather than news. The official maps do carry a few
- * such tiles (the mirrored half of the same row, rows 9–12 cols 11–20), so this is a HINT, not an error.
- * @param {string[]} rows 19 glyph rows
+ * Only the rows a rect actually covers are reported — the 怪物等待区 and the wall/lane rows are simply never
+ * deployable, and flagging every tile of them would be noise rather than news. The official maps do carry a few
+ * such tiles (the mirrored half of the same row), so this is a HINT, not an error.
+ * @param {string[]} rows glyph rows
  * @param {Record<string, object>} legend glyph → { height, buildable, tileKey, … }
+ * @param {Record<string, readonly number[]>} [rects] the map's deploy rects (default: official)
  * @returns {number[][]} [[r, c], …]
  */
-export function roadsOutsideDeployRects(rows, legend) {
+export function roadsOutsideDeployRects(rows, legend, rects = DEPLOY_RECTS) {
   const out = [];
   const leg = isPlain(legend) ? legend : {};
-  const rects = Object.values(DEPLOY_RECTS);
+  const list = Object.values(rects);
   for (let r = 0; r < (Array.isArray(rows) ? rows.length : 0); r++) {
     const line = rows[r];
     if (typeof line !== 'string') continue;
-    const covering = rects.filter(([r0, r1]) => r >= r0 && r <= r1);
+    const covering = list.filter(([r0, r1]) => r >= r0 && r <= r1);
     if (!covering.length) continue;
     for (let c = 0; c < line.length; c++) {
       if (covering.some(([, , c0, c1]) => c >= c0 && c <= c1)) continue;
@@ -180,7 +256,7 @@ export const PASSABLE_VALUES = Object.freeze(['ALL', 'FLY', 'FLY_ONLY', 'NONE'])
 export const ROUTE_MOTIONS = Object.freeze(['WALK', 'FLY']);
 
 const isPair = (p) => Array.isArray(p) && p.length === 2 && Number.isInteger(p[0]) && Number.isInteger(p[1]);
-const inGrid = (p) => isPair(p) && p[0] >= 0 && p[0] < STAGE_ROWS && p[1] >= 0 && p[1] < STAGE_COLS;
+const inGrid = (p, size = OFFICIAL_SIZE) => isPair(p) && p[0] >= 0 && p[0] < size[0] && p[1] >= 0 && p[1] < size[1];
 
 /**
  * Validate the map's authored ROUTES — the 出生点 → 防守点 path that IS the 卫戍协议 flow.
@@ -192,8 +268,10 @@ const inGrid = (p) => isPair(p) && p[0] >= 0 && p[0] < STAGE_ROWS && p[1] >= 0 &
  * `start` should sit on the enemy gate ('S' / a `special: 'start'` tile) and `end` on the protected objective
  * ('E' / `special: 'end'`) — that mismatch is reported as a WARNING, not an error, because teleporters ('I'/'O') and
  * boss spawns legitimately route between other tiles.
+ *
+ * `size` bounds the positions ([rows, cols]; official by default) — a big map's routes may use its whole window.
  */
-export function validateRoutes(routes, rows, legend) {
+export function validateRoutes(routes, rows, legend, size = OFFICIAL_SIZE) {
   const out = [];
   if (routes === undefined) return out;
   if (!Array.isArray(routes)) {
@@ -201,6 +279,7 @@ export function validateRoutes(routes, rows, legend) {
     return out;
   }
   const leg = isPlain(legend) ? legend : {};
+  const within = (p) => inGrid(p, size);
   // `rows` is optional: a WAVE's routes are validated on their own (a wave is not tied to one grid here), and the
   // gate/objective warnings only make sense when the stage's grid is known. The wave editor passes it when it has it.
   const hasGrid = Array.isArray(rows) && rows.length > 0;
@@ -217,8 +296,8 @@ export function validateRoutes(routes, rows, legend) {
       out.push({ field: `${at}.motion`, code: 'BAD_ENUM', severity: 'error', message: `motion must be one of ${ROUTE_MOTIONS.join(', ')}`, hint: 'WALK follows the ground flow field; FLY goes straight between its points' });
     }
     for (const key of ['start', 'end']) {
-      if (!inGrid(route[key])) {
-        out.push({ field: `${at}.${key}`, code: 'BAD_POS', severity: 'error', message: `${key} must be [row, col] inside the ${STAGE_ROWS}×${STAGE_COLS} grid` });
+      if (!within(route[key])) {
+        out.push({ field: `${at}.${key}`, code: 'BAD_POS', severity: 'error', message: `${key} must be [row, col] inside the ${size[0]}×${size[1]} grid` });
       }
     }
     const cps = route.checkpoints === undefined ? [] : route.checkpoints;
@@ -226,12 +305,12 @@ export function validateRoutes(routes, rows, legend) {
     else cps.forEach((cp, k) => {
       // a checkpoint may also be { type: 'MOVE'|'WAIT'|'APPEAR', pos: [r,c] } — the engine accepts both shapes
       const pos = isPlain(cp) ? cp.pos : cp;
-      if (!inGrid(pos)) out.push({ field: `${at}.checkpoints[${k}]`, code: 'BAD_POS', severity: 'error', message: 'a checkpoint must be [row, col] inside the grid' });
+      if (!within(pos)) out.push({ field: `${at}.checkpoints[${k}]`, code: 'BAD_POS', severity: 'error', message: 'a checkpoint must be [row, col] inside the grid' });
     });
-    if (hasGrid && inGrid(route.start) && specialAt(route.start) !== 'start') {
+    if (hasGrid && within(route.start) && specialAt(route.start) !== 'start') {
       out.push({ field: `${at}.start`, code: 'START_NOT_ON_GATE', severity: 'warning', message: `the route starts at ${JSON.stringify(route.start)}, which is not an enemy gate tile`, hint: "paint an 'S' tile there, or accept that enemies appear mid-map" });
     }
-    if (hasGrid && inGrid(route.end) && specialAt(route.end) !== 'end') {
+    if (hasGrid && within(route.end) && specialAt(route.end) !== 'end') {
       out.push({ field: `${at}.end`, code: 'END_NOT_ON_GOAL', severity: 'warning', message: `the route ends at ${JSON.stringify(route.end)}, which is not a protection-objective tile`, hint: "paint an 'E' tile there (the tile enemies leak to)" });
     }
   });
@@ -239,7 +318,7 @@ export function validateRoutes(routes, rows, legend) {
 }
 const isPlain = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 
-/** Accepts either 19 strings or one newline-separated string; returns the 19 rows or null. */
+/** Accepts either the map's rows as strings or one newline-separated string; returns the rows or null. */
 export function normalizeRows(rows) {
   if (typeof rows === 'string') {
     const lines = rows.split('\n').map((l) => l.trim()).filter((l) => l !== '');
@@ -265,14 +344,16 @@ export function normalizeRows(rows) {
  * a 高台 operator may be deployed there. It is equivalent to reading that tile as LOW + RANGED. 阻隔 / 空气 and 深水区
  * stay undeployable even then — by their `buildable: 'NONE'` and by key respectively.
  *
- * @param {string[]} rows 19 glyph rows (row 0 = bottom)
+ * @param {string[]} rows glyph rows (row 0 = bottom)
  * @param {Record<string, object>} legend glyph → { tileKey, height, buildable, passable, … }
  * @param {Array<{pos:number[], role:string, active?:boolean}>} [devices]
- * @param {{ groundHighGround?: boolean }} [opts] the map's own tile rule (see groundRuleOf)
+ * @param {{ groundHighGround?: boolean, rects?: Record<string, readonly number[]> }} [opts] the map's own tile rule
+ *   (see groundRuleOf) and its deployment rects (default: the official three)
  * @returns {{ melee: number[][], rangedOnly: number[][], changedByDevices: number[][] }} per rect
  */
 export function deriveDeployTiles(rows, legend, devices = [], opts = {}) {
   const groundHighGround = !!(isPlain(opts) && opts.groundHighGround === true);
+  const rects = isPlain(opts) && isPlain(opts.rects) ? opts.rects : DEPLOY_RECTS;
   const active = (devices || []).filter((d) => d && d.active && Array.isArray(d.pos));
   const activeBlocking = active.filter((d) => BLOCKING_ROLES.includes(d.role));
   const blocked = new Set(activeBlocking.map((d) => d.pos.join(',')));
@@ -311,7 +392,11 @@ export function deriveDeployTiles(rows, legend, devices = [], opts = {}) {
     return { melee, rangedOnly, changedByDevices };
   };
   const out = {};
-  for (const [name, [r0, r1, c0, c1]] of Object.entries(DEPLOY_RECTS)) out[name] = deployIn(r0, r1, c0, c1);
+  for (const [name, rect] of Object.entries(rects)) {
+    const r = toRectObj(rect);
+    if (r) out[name] = deployIn(r.r0, r.r1, r.c0, r.c1);
+  }
+  if (!Object.keys(out).length) for (const [name, [r0, r1, c0, c1]] of Object.entries(DEPLOY_RECTS)) out[name] = deployIn(r0, r1, c0, c1);
   return out;
 }
 
@@ -327,6 +412,10 @@ export function glyphUsage(rows) {
 /**
  * Validate a stage record at this layer. Like validateChessRecord: reports everything it can see, in a machine-readable
  * shape, and `[]` is not a proof of correctness (the derived fields are checked by server/stageAuthoring.js).
+ *
+ * `size` (default: the official 19×21) is the map's own window; a declared `layout` must fit inside it, and its three
+ * deployment rects must keep the board's shape (4×9 for the normal one, 5×9 for each boss half) — those are the
+ * board's own dimensions, not a matter of taste.
  * @param {object} stage
  * @param {{ officialIds?: Set<string>|string[], id?: string }} [opts]
  * @returns {Array<{ field: string, code: string, message: string, hint?: string, severity: 'error'|'warning' }>}
@@ -343,12 +432,23 @@ export function validateStage(stage, opts = {}) {
     err('id', 'OFFICIAL_ID_COLLISION', `"${id}" already exists in the official data`,
       `replace it only on purpose: add "stages:${id}" to the pack's overrides`);
   }
+  // the map's own size: nothing declared ⇒ the official one; something declared ⇒ it must be usable
+  let size = OFFICIAL_SIZE;
+  if (stage.size !== undefined) {
+    if (isSize(stage.size)) size = clampSize(stage.size);
+    else {
+      err('size', 'BAD_SIZE', `size must be [rows, cols] with rows ${MIN_ROWS}..${MAX_ROWS} and cols ${MIN_COLS}..${MAX_COLS}, got ${JSON.stringify(stage.size)}`,
+        `the official size is ${OFFICIAL_SIZE.join('×')}; a map can only be bigger`);
+    }
+  }
+  const layout = normalizeLayout(stage.layout, size);
+  validateLayout(stage.layout, size, out, err, warn);
   const rows = normalizeRows(stage.rows);
-  if (!rows) err('rows', 'BAD_ROWS', 'rows must be 19 strings of glyphs (or one newline-separated string)');
+  if (!rows) err('rows', 'BAD_ROWS', `rows must be ${size[0]} strings of ${size[1]} glyphs (or one newline-separated string)`);
   else {
-    if (rows.length !== STAGE_ROWS) err('rows', 'BAD_SIZE', `rows must have exactly ${STAGE_ROWS} lines, got ${rows.length}`);
+    if (rows.length !== size[0]) err('rows', 'BAD_SIZE', `rows must have exactly ${size[0]} lines for a ${size[0]}×${size[1]} map, got ${rows.length}`);
     rows.forEach((line, r) => {
-      if (line.length !== STAGE_COLS) err(`rows[${r}]`, 'BAD_SIZE', `row ${r} must be exactly ${STAGE_COLS} glyphs, got ${line.length}`);
+      if (line.length !== size[1]) err(`rows[${r}]`, 'BAD_SIZE', `row ${r} must be exactly ${size[1]} glyphs, got ${line.length}`);
     });
     const legend = isPlain(stage.tiles) ? stage.tiles : {};
     for (const [glyph, count] of glyphUsage(rows)) {
@@ -378,8 +478,8 @@ export function validateStage(stage, opts = {}) {
     if (typeof d.key !== 'string' || !d.key) err(`devices[${i}].key`, 'MISSING', 'device key is required');
     if (!Array.isArray(d.pos) || d.pos.length !== 2 || !d.pos.every((n) => Number.isInteger(n))) {
       err(`devices[${i}].pos`, 'BAD_POS', 'pos must be [row, col] integers');
-    } else if (d.pos[0] < 0 || d.pos[0] >= STAGE_ROWS || d.pos[1] < 0 || d.pos[1] >= STAGE_COLS) {
-      err(`devices[${i}].pos`, 'OUT_OF_BOUNDS', `pos ${JSON.stringify(d.pos)} is outside the ${STAGE_ROWS}×${STAGE_COLS} grid`);
+    } else if (d.pos[0] < 0 || d.pos[0] >= size[0] || d.pos[1] < 0 || d.pos[1] >= size[1]) {
+      err(`devices[${i}].pos`, 'OUT_OF_BOUNDS', `pos ${JSON.stringify(d.pos)} is outside the ${size[0]}×${size[1]} grid`);
     }
   }
   if (!isPlain(stage.options)) warn('options', 'MISSING', 'options is missing: characterLimit and moveMultiplier fall back to the engine defaults');
@@ -399,7 +499,7 @@ export function validateStage(stage, opts = {}) {
   // 空气 (`-`) and 阻隔 (`X`) are the SAME rule (tile_forbidden): the difference is how the editor DRAWS them. Nothing
   // mechanically separates them, and this validator must not pretend otherwise — so no rule here keys off `air`.
   // authored routes live in the SPEC (the stage RECORD has no routes field — the engine reads them from the wave)
-  for (const issue of validateRoutes(stage.routes, rows || [], stage.tiles)) out.push(issue);
+  for (const issue of validateRoutes(stage.routes, rows || [], stage.tiles, size)) out.push(issue);
   // The stage's OWN per-round templates (workshop maps only; official stages have neither field). The engine reads them
   // before the mode's, because the stage and the round's template are otherwise chosen independently — see
   // server/match/waves.js stageTemplateId.
@@ -425,6 +525,55 @@ export function validateStage(stage, opts = {}) {
     }
   }
   return out;
+}
+
+/**
+ * Validate a DECLARED `layout` (or say nothing when the map declares none).
+ *
+ * Three things are reported, and all three are real breakage rather than taste:
+ *   * a rect that does not fit the map's own window — `normalizeLayout` would silently fall back to the default, and
+ *     the author would watch their map play on a field they did not draw;
+ *   * a deployment rect whose SHAPE is wrong. The board is 4 rows × 9 cols (the boss halves 5 × 9, the 整备区 row
+ *     included), so a rect of another size cannot hold it;
+ *   * a deployment rect whose COLUMNS moved. `mirrorCol − c` maps the left half onto the right one, and the board is 9
+ *     wide, so the three rects' columns are forced (2..10 / 2..10 / 10..18) — the freedom a big map opens up is the
+ *     ROWS (shared/layout.js FIXED_DEPLOY_COLS).
+ */
+function validateLayout(declared, size, out, err, warn) {
+  if (declared === undefined || declared === null) return;
+  if (!isPlain(declared)) { warn('layout', 'BAD_LAYOUT', 'layout must be an object; the map will use the default one for its size'); return; }
+  const fits = (r) => r.r0 >= 0 && r.r1 < size[0] && r.c0 >= 0 && r.c1 < size[1] && r.r0 <= r.r1 && r.c0 <= r.c1;
+  const declaredRects = isPlain(declared.deployRects) ? declared.deployRects : {};
+  for (const [name, shape] of [['normal', [4, 9]], ['bossLeft', [5, 9]], ['bossRight', [5, 9]]]) {
+    const raw = declaredRects[name];
+    if (raw === undefined) continue;
+    const r = toRectObj(raw);
+    if (!r) { err(`layout.deployRects.${name}`, 'BAD_LAYOUT', `${name} must be [r0, r1, c0, c1]`, 'four integers'); continue; }
+    if (!fits(r)) err(`layout.deployRects.${name}`, 'OUT_OF_BOUNDS', `${name} ${JSON.stringify([r.r0, r.r1, r.c0, r.c1])} is outside the ${size[0]}×${size[1]} map`);
+    else if (r.r1 - r.r0 + 1 !== shape[0] || r.c1 - r.c0 + 1 !== shape[1]) {
+      err(`layout.deployRects.${name}`, 'BAD_LAYOUT', `${name} must be ${shape[0]} rows × ${shape[1]} cols (the board's own shape), got ${r.r1 - r.r0 + 1}×${r.c1 - r.c0 + 1}`);
+    } else {
+      const cols = FIXED_DEPLOY_COLS[name];
+      if (r.c0 !== cols[0] || r.c1 !== cols[1]) {
+        err(`layout.deployRects.${name}`, 'BAD_LAYOUT', `${name} must keep its columns ${cols[0]}..${cols[1]}, got ${r.c0}..${r.c1}`,
+          'the mirror maps the left half onto the right one and the board is 9 wide, so only the rows may move');
+      }
+    }
+  }
+  for (const [name, rect] of [['battle', declared.battle], ['pen', declared.pen]]) {
+    if (rect === undefined) continue;
+    const list = name === 'battle' ? Object.entries(isPlain(rect) ? rect : {}) : [['pen', rect]];
+    if (name === 'battle' && !isPlain(rect)) { err('layout.battle', 'BAD_LAYOUT', 'battle must be an object of rects'); continue; }
+    for (const [key, raw] of list) {
+      const r = toRectObj(raw);
+      if (!r) { err(`layout.${name}.${key}`, 'BAD_LAYOUT', `${key} must be [r0, r1, c0, c1]`); continue; }
+      if (!fits(r)) err(`layout.${name}.${key}`, 'OUT_OF_BOUNDS', `${key} ${JSON.stringify([r.r0, r.r1, r.c0, r.c1])} is outside the ${size[0]}×${size[1]} map`);
+    }
+  }
+  if (declared.mirrorCol !== undefined && declared.mirrorCol !== FIXED_DEPLOY_COLS.bossLeft[0] + FIXED_DEPLOY_COLS.bossRight[1]) {
+    err('layout.mirrorCol', 'BAD_LAYOUT', `mirrorCol is fixed at ${FIXED_DEPLOY_COLS.bossLeft[0] + FIXED_DEPLOY_COLS.bossRight[1]} (where the two boss halves meet), got ${JSON.stringify(declared.mirrorCol)}`,
+      'it follows from the board being 9 wide');
+  }
 }
 
 /** The errors of a validation result. */

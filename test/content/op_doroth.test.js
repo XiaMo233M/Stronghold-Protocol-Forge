@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { makeBattle, enemyRec, checkInvariants } from '../helpers/battleHarness.js';
 import { KITTED_CHARS, OPERATOR_KITS, KITS } from '../../server/sim/content/kits/index.js';
 import { diyPool, validateDiyPicks } from '../../shared/diy.js';
+import { COLS } from '../../server/sim/constants.js';
 
 const load = (f) => JSON.parse(readFileSync(new URL(`../../data/${f}.json`, import.meta.url), 'utf8'));
 const CHESS = load('chess');
@@ -111,7 +112,7 @@ test('T1 共振装置: at her deployment her stock is cnt (10) and attack@max_cn
       assert.deepEqual([D(u).stock, D(u).limit], [10, lim], `${label(f)}: stock 10, limit ${lim}`);
       const range = new Set(u.rangeKeys), path = h.b.groundPathTiles();
       for (const t of made) {
-        const k = t.tileR * 21 + t.tileC;
+        const k = t.tileR * COLS + t.tileC;
         assert.ok(range.has(k) && path.has(k) && h.b.grid.canStand(t.tileR, t.tileC), `${label(f)}: on a path melee tile of her range`);
         assert.equal(t.uid, null);
       }

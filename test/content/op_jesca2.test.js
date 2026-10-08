@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import { makeBattle, enemyRec, checkInvariants } from '../helpers/battleHarness.js';
 import { KITTED_CHARS, OPERATOR_KITS, KITS } from '../../server/sim/content/kits/index.js';
 import { diyPool, validateDiyPicks } from '../../shared/diy.js';
+import { COLS } from '../../server/sim/constants.js';
 
 const load = (f) => JSON.parse(readFileSync(new URL(`../../data/${f}.json`, import.meta.url), 'utf8'));
 const CHESS = load('chess');
@@ -42,7 +43,7 @@ const ENEMIES = {
 };
 const FORMS_ALL = [[5, false, null], [6, false, null], ...[5, 6].flatMap((t) => [null, SPTX, SPTY].map((m) => [t, true, m]))];
 const label = ([tier, elite, mod]) => `T${tier} ${elite ? 'elite' : 'normal'} ${mod ?? 'none'}`;
-const K = (r, c) => r * 21 + c;
+const K = (r, c) => r * COLS + c;
 const sortN = (a) => [...a].sort((x, y) => x - y);
 /** Her shield above her (she turns UP), beside her (the tile right of her: in front, no turn), behind her (she turns LEFT). */
 const ABOVE = { row: 11, col: 4 }, FRONT = { row: 10, col: 5 }, BEHIND = { row: 10, col: 3 };

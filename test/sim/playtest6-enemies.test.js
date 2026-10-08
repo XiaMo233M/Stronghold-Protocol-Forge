@@ -17,7 +17,7 @@ import * as enemiesMod from '../../server/sim/content/enemies.js';
 import * as bossesMod from '../../server/sim/content/bosses.js';
 import { reachableTiles, FEAR_RADIUS } from '../../server/sim/fear.js';
 import { createRng } from '../../server/sim/rng.js';
-import { ALLY_COLLIDER_RADIUS } from '../../server/sim/constants.js';
+import { COLS, ALLY_COLLIDER_RADIUS  } from '../../server/sim/constants.js';
 
 const E = JSON.parse(fs.readFileSync(new URL('../../data/enemies.json', import.meta.url), 'utf8'));
 const tb = (key, k) => E[key].talents.bb[k];
@@ -108,7 +108,7 @@ describe('#13 恐惧 from an operator: unblockable, flees into the fan away from
     const tiles = reachableTiles(h.b, e, e.findBuff('fear').data.fear);
     assert.ok(tiles.length > 3, `a fan of reachable tiles (${tiles.length})`);
     for (const k of tiles) {
-      const r = Math.floor(k / 21), c = k % 21;
+      const r = Math.floor(k / COLS), c = k % COLS;
       const vx = c - e.x, vy = r - e.y, L = Math.hypot(vx, vy);
       assert.ok(L <= FEAR_RADIUS + 1e-6 && (L < 1e-6 || vx / L >= Math.SQRT1_2 - 1e-6), `(${r},${c}) inside the eastern fan`);
       assert.ok(h.b.grid.walkable(r, c, true) && h.b.grid.tile(r, c).special !== 'end');

@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { makeBattle, enemyRec, checkInvariants } from '../helpers/battleHarness.js';
 import { KITTED_CHARS, OPERATOR_KITS, KITS } from '../../server/sim/content/kits/index.js';
 import { diyPool, validateDiyPicks } from '../../shared/diy.js';
+import { COLS } from '../../server/sim/constants.js';
 
 const load = (f) => JSON.parse(readFileSync(new URL(`../../data/${f}.json`, import.meta.url), 'utf8'));
 const CHESS = load('chess');
@@ -34,7 +35,7 @@ const ENEMIES = {
 /** Every 自选 form: [tier, elite, module]. */
 const FORMS_ALL = [[5, false, null], [6, false, null], ...[5, 6].flatMap((t) => [null, PRPX].map((m) => [t, true, m]))];
 const label = ([tier, elite, mod]) => `T${tier} ${elite ? 'elite' : 'normal'} ${mod ?? 'none'}`;
-const K = (r, c) => r * 21 + c;
+const K = (r, c) => r * COLS + c;
 const sortN = (a) => [...a].sort((x, y) => x - y);
 
 /** A battle with 珊比 as uid 1 at (row, col) facing `dir` (RIGHT), plus `others`. */

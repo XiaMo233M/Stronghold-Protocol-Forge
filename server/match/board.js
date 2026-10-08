@@ -39,10 +39,11 @@
 
 import { GEO } from '../../shared/constants.js';
 import { meleeOnHighGround } from '../../shared/highGround.js';
+import { OFFICIAL_LAYOUT, layoutOf, fieldTileOf as layoutFieldTile, boardTileOf as layoutBoardTile } from '../../shared/layout.js';
 import { DEFAULT_DIR, isDir, rotateOffset } from '../sim/dir.js';
-import { BOSS_ROW_OFFSET, COLS } from '../sim/constants.js';
+import { BOSS_ROW_OFFSET } from '../sim/constants.js';
 
-export const FIELD = GEO.FIELD; // { r0: 9, r1: 12, c0: 2, c1: 10 }
+export const FIELD = GEO.FIELD; // { r0: 9, r1: 12, c0: 2, c1: 10 } — BOARD space, never a stage rect
 export const tileKey = (r, c) => `${r},${c}`;
 export const parseKey = (k) => { const [r, c] = String(k).split(',').map(Number); return [r, c]; };
 /** A board piece's direction (default RIGHT). */
@@ -64,22 +65,22 @@ export const DEPLOY_FIELDS = Object.freeze(['normal', 'bossL', 'bossR']);
  * display row), the opposite direction.
  */
 export const BOARD_ROWS_ABOVE_BOSS = -BOSS_ROW_OFFSET;
-/** Mirror column of the right boss half: board col c ↔ field col 20 − c (sim Battle.mapTile). */
-export const BOSS_MIRROR_COL = COLS - 1;
+/**
+ * Mirror column of the right boss half: board col c ↔ field col 20 − c (sim Battle.mapTile). It is the OFFICIAL
+ * layout's axis; a map that moves its boss halves carries its own in `layout.mirrorCol` (shared/layout.js) and every
+ * stage-aware reader passes it in.
+ */
+export const BOSS_MIRROR_COL = OFFICIAL_LAYOUT.mirrorCol;
 const fieldOf = (f) => (DEPLOY_FIELDS.includes(f) ? f : 'normal');
 
-/** The stage tile [row, col] a board tile (r, c) stands on in deploy field `field`. */
-export function fieldTile(field, r, c) {
-  const f = fieldOf(field);
-  if (f === 'normal') return [r, c];
-  return [r - BOARD_ROWS_ABOVE_BOSS, f === 'bossR' ? BOSS_MIRROR_COL - c : c];
+/** The stage tile [row, col] a board tile (r, c) stands on in deploy field `field` (a map may move the rects). */
+export function fieldTile(field, r, c, layout = OFFICIAL_LAYOUT) {
+  return layoutFieldTile(layout, fieldOf(field), r, c);
 }
 
 /** Inverse of fieldTile: the board tile of stage tile (r, c) in deploy field `field`. */
-export function boardTileOf(field, r, c) {
-  const f = fieldOf(field);
-  if (f === 'normal') return [r, c];
-  return [r + BOARD_ROWS_ABOVE_BOSS, f === 'bossR' ? BOSS_MIRROR_COL - c : c];
+export function boardTileOf(field, r, c, layout = OFFICIAL_LAYOUT) {
+  return layoutBoardTile(layout, fieldOf(field), r, c);
 }
 
 /**
@@ -90,11 +91,12 @@ export function boardTileOf(field, r, c) {
 export function buildDeployMap(stage, { deviceOverrides = {}, tileOverrides = {}, field = 'normal' } = {}) {
   /** @type {Map<string, 'melee'|'ranged'>} */
   const map = new Map();
+  const layout = layoutOf(stage);
   const rows = stage && Array.isArray(stage.rows) ? stage.rows : null;
   const legend = stage && stage.tiles && typeof stage.tiles === 'object' ? stage.tiles : {};
   for (let r = FIELD.r0; r <= FIELD.r1; r++) {
     for (let c = FIELD.c0; c <= FIELD.c1; c++) {
-      const [sr, sc] = fieldTile(field, r, c);
+      const [sr, sc] = fieldTile(field, r, c, layout);
       const line = rows && typeof rows[sr] === 'string' ? rows[sr] : null;
       let cls = null;
       if (line) {
@@ -115,7 +117,7 @@ export function buildDeployMap(stage, { deviceOverrides = {}, tileOverrides = {}
   const devices = stage && Array.isArray(stage.devices) ? stage.devices : [];
   for (const d of devices) {
     if (!d || !Array.isArray(d.pos)) continue;
-    const [r, c] = boardTileOf(field, d.pos[0], d.pos[1]);
+    const [r, c] = boardTileOf(field, d.pos[0], d.pos[1], layout);
     if (!inField(r, c)) continue;
     let active;
     if (d.alias != null && deviceOverrides && Object.hasOwn(deviceOverrides, d.alias)) active = !!deviceOverrides[d.alias];

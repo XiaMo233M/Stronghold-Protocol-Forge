@@ -2,8 +2,9 @@
 // from the PlayerBattleInput, token defs for an owner's loadout, and the kit / profile / skill setup of a unit.
 // Installed on Battle.prototype by server/sim/Battle.js (a method container: never instantiated; `this` is the battle).
 
-import { COLS, BOSS_ROW_OFFSET } from '../constants.js';
+import { COLS } from '../constants.js';
 import { GEO } from '../../../shared/constants.js';
+import { stageRowOfBoard } from '../../../shared/layout.js';
 import { Unit } from '../units.js';
 import { normDir, mirrorDir } from '../dir.js';
 import { SkillRuntime } from '../skills.js';
@@ -113,11 +114,16 @@ export class BattlePlayers {
   }
 
   _boardTile(ps, row, col) {
+    const L = this.layout;
     const bossLike = this.kind === 'boss' || this.kind === 'hidden';
     let r = row;
+    // a board row ≥ the hand row lands on the band this battle fights in: the boss band on a boss field, the normal
+    // band (which the 联防 field widens) otherwise. Officially both are the identity map (normal [9,12], boss +7), but
+    // on a big map the bands sit higher — board row 9 is the map row the map's own `normal` deploy rect starts at.
     if (ps.rowOffset != null) r = row + ps.rowOffset;
-    else if (bossLike && row >= 7) r = row + BOSS_ROW_OFFSET;
-    const c = ps.mirror ? (col <= 10 ? COLS - 1 - col : col) : col + ps.colOffset;
+    else if (row >= GEO.HAND_ROW) r = stageRowOfBoard(L, bossLike ? 'bossL' : 'normal', row);
+    // the mirrored right side: about the map's own axis (always 20, FIXED_DEPLOY_COLS)
+    const c = ps.mirror ? (col <= L.mirrorCol / 2 ? L.mirrorCol - col : col) : col + ps.colOffset;
     return [r, c];
   }
 

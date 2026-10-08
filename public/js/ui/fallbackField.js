@@ -23,7 +23,9 @@ import { render } from '../../vendor/preact.module.js';
 import { html, TierChip } from './components.js';
 import { GEO } from '../../../shared/constants.js';
 import { chessAvatarUrl, itemIconUrl, tokenAvatarUrl, enemyIconUrl } from './assetUrls.js';
-import { tileKey, hasFlag, UF, penPlacement, PEN, fieldTile, ownStandIn, ownDiyRecord } from './gameLogic.js';
+import { layoutOf, mapRectOf } from '../render/layout.js';
+import { penRect } from '../render/pen.js';
+import { tileKey, hasFlag, UF, penPlacement, fieldTile, ownStandIn, ownDiyRecord } from './gameLogic.js';
 import { t } from '../../../shared/i18n.js';
 
 const DRAG_PX = 6;
@@ -74,8 +76,10 @@ export function createFallbackView(host, opts = {}) {
   root.className = 'ff';
   host.appendChild(root);
 
+  // the map's own rects (shared/layout.js; official 19×21 when the stage declares nothing). `st.rect` is the board
+  // drawn (board coordinates, `st.mapRect` the same rect in the map's own coordinates for a boss-prep board)
   const st = {
-    stage: null, camera: 'prep', rect: { ...GEO.NORMAL_RECT }, side: 'L', deployField: 'normal',
+    stage: null, camera: 'prep', rect: mapRectOf(null, 'normal'), mapRect: null, side: 'L', deployField: 'normal',
     mode: 'prep', priv: null, editable: false, canPlace: null,
     field: null, units: new Map(), snapUnits: new Map(), highlight: new Map(), hlGroups: new Map(), held: new Map(), dirs: new Map(),
     drag: null, hoverTarget: null, floats: [], settings: { damageNumbers: true, ...(opts.settings || {}) },
@@ -269,8 +273,10 @@ export function createFallbackView(host, opts = {}) {
     const w = st.size.w || host.clientWidth || 1;
     const h = st.size.h || host.clientHeight || 1;
     const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 100;
-    const cols = PEN.c1 - PEN.c0 + 1;
-    const rows = PEN.r1 - PEN.r0 + 1;
+    // the map's own pen band: `stage.config.enemy_place_rect` when the stage declares it, else `layoutOf(stage).pen`
+    const pen = penRect(st.stage);
+    const cols = pen.c1 - pen.c0 + 1;
+    const rows = pen.r1 - pen.r0 + 1;
     const top0 = rem * 1.3;
     const tile = Math.max(28, Math.floor(Math.min((w * 0.62) / cols, (h - top0 - rem * 0.5) / rows)));
     const bw = tile * cols;
@@ -278,21 +284,21 @@ export function createFallbackView(host, opts = {}) {
     const top = Math.round(top0 + (h - top0 - rem * 0.5 - tile * rows) / 2);
     const models = penPlacement(st.pen, { stage: st.stage });
     const cells = [];
-    for (let r = PEN.r1; r >= PEN.r0; r--) {
-      for (let c = PEN.c0; c <= PEN.c1; c++) {
-        // the pen's own start tiles (15,7) / (18,7) are its gates (research 09 §2.1)
-        const gate = c === PEN.c0 && (r === PEN.anchors.upper[0] || r === PEN.anchors.lower[0]);
-        const cls = gate ? 'gate' : r === PEN.emptyRow ? 'void' : 'floor';
+    for (let r = pen.r1; r >= pen.r0; r--) {
+      for (let c = pen.c0; c <= pen.c1; c++) {
+        // the pen's own two gate tiles are its start anchors (research 09 §2.1): the first row and the last, left column
+        const gate = c === pen.c0 && (r === pen.r1 || r === pen.r0 + 1);
+        const cls = gate ? 'gate' : r === pen.r0 + 2 ? 'void' : 'floor';
         cells.push(html`<div key=${`${r},${c}`} class=${cx('ff-tile', `ff-tile--${cls}`)}
-          style=${`transform:translate(${(c - PEN.c0) * tile}px,${(PEN.r1 - r) * tile}px);width:${tile}px;height:${tile}px`}></div>`);
+          style=${`transform:translate(${(c - pen.c0) * tile}px,${(pen.r1 - r) * tile}px);width:${tile}px;height:${tile}px`}></div>`);
       }
     }
     const size = tile * 0.62;
     const off = [[0, 0], [-0.22, 0.14], [0.22, 0.14], [-0.2, -0.16], [0.2, -0.16]];
     const figs = models.map((mdl) => {
       const o = off[mdl.slot % off.length];
-      const x = (mdl.col - PEN.c0 + 0.5 + o[0]) * tile - size / 2;
-      const y = (PEN.r1 - mdl.row + 0.5 + o[1]) * tile - size / 2;
+      const x = (mdl.col - pen.c0 + 0.5 + o[0]) * tile - size / 2;
+      const y = (pen.r1 - mdl.row + 0.5 + o[1]) * tile - size / 2;
       const src = unitArt(m(), { side: 'enemy', defId: mdl.enemyKey, avatar: mdl.enemyKey });
       const name = lookup('enemies', mdl.enemyKey)?.name || mdl.enemyKey;
       const tap = (e) => { if (e.button == null || e.button === 0) emit('pieceClick', { enemyKey: mdl.enemyKey, preview: true, unit: { side: 'enemy', defId: mdl.enemyKey, name }, button: 0, clientX: e.clientX, clientY: e.clientY }); };
@@ -390,12 +396,12 @@ export function createFallbackView(host, opts = {}) {
     setCamera(kind, o = {}) {
       st.camera = kind || 'prep';
       if (kind === 'pen') { schedule(); return; } // the board keeps its rect for the way back
-      if (o && o.rect && Number.isFinite(o.rect.r0)) st.rect = { ...o.rect };
-      else if (kind === 'prep' || kind === 'bossPrep' || kind === 'normal') st.rect = { ...GEO.NORMAL_RECT };
+      const L = layoutOf(st.stage);
+      // the rect the board draws, in BOARD coordinates: the server's / caller's own rect, else the map's own band of
+      // that kind (shared/layout.js; official 19×21 → the historical GEO rects unchanged)
+      st.rect = o && o.rect && Number.isFinite(o.rect.r0) ? { ...o.rect } : mapRectOf(L, kind);
       st.deployField = kind === 'bossPrep' ? (o?.side === 'R' ? 'bossR' : 'bossL') : 'normal';
-      if (kind === 'bossPrep') st.camera = 'prep';
-      else if (kind === 'unite') st.rect = { ...GEO.UNITE_RECT };
-      else if (kind === 'boss') st.rect = { ...GEO.BOSS_RECT };
+      st.camera = kind === 'bossPrep' ? 'prep' : st.camera;
       st.side = o?.side || 'L';
       schedule();
     },
@@ -405,7 +411,13 @@ export function createFallbackView(host, opts = {}) {
       st.pen = Array.isArray(priv?.nextEnemies) ? priv.nextEnemies : [];
       st.editable = !!o.editable;
       st.canPlace = typeof o.canPlace === 'function' ? o.canPlace : null;
-      if (st.camera !== 'prep' && st.camera !== 'pen') { st.camera = 'prep'; st.rect = { ...GEO.NORMAL_RECT }; }
+      // the own board of a boss round's prep: the map's own boss half, kept as a board-coordinate rect (the field the
+      // highlights and the pieces read is the board either way; the TILES drawn are that half — tilePos / terrainTile)
+      if (st.camera !== 'prep' && st.camera !== 'pen') {
+        st.camera = 'prep';
+        const L = layoutOf(st.stage);
+        st.rect = mapRectOf(L, st.deployField === 'bossL' || st.deployField === 'bossR' ? 'boss' : 'normal');
+      }
       if (!st.editable && st.drag) { endDrag(); st.drag = null; st.hoverTarget = null; }
       schedule();
     },
@@ -417,7 +429,11 @@ export function createFallbackView(host, opts = {}) {
       st.units.clear();
       st.snapUnits.clear();
       st.floats = [];
-      if (field?.rect && Number.isFinite(field.rect.r0)) st.rect = { ...field.rect };
+      // the server sends the map's own rect in the field meta; without one it is this map's band of that kind
+      st.rect = field?.rect && Number.isFinite(field.rect.r0)
+        ? { ...field.rect }
+        : mapRectOf(layoutOf(st.stage), field?.kind === 'hidden' ? 'boss' : (field?.kind || 'normal'));
+      st.deployField = 'normal';
       for (const u of Array.isArray(field?.units) ? field.units : []) if (u && u.id != null) {
         st.units.set(u.id, u);
         st.snapUnits.set(u.id, [u.id, u.x, u.y, u.maxHp, u.maxHp, 0, 0, 0, 0]);

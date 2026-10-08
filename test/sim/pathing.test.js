@@ -6,11 +6,12 @@ import { Grid, OBSTACLE_COST, bresenhamTiles } from '../../server/sim/grid.js';
 import { getDefaultSource, hasGeneratedData } from '../../server/sim/simdata.js';
 import { makeBattle, flatStage, enemyRec } from '../helpers/battleHarness.js';
 import { remainingDistance } from '../../server/sim/ai.js';
+import { COLS } from '../../server/sim/constants.js';
 
 const REAL = { skip: !hasGeneratedData() && 'no generated data' };
 const NORMAL = { r0: 9, r1: 12, c0: 0, c1: 10 };
 const walker = (o = {}) => enemyRec({ key: 'enemy_walker', hp: 1e6, speed: 1, ...o });
-const K = (r, c) => r * 21 + c;
+const K = (r, c) => r * COLS + c;
 
 /** Grid of a real stage with its match-start devices (crates cost 1000, platforms / mounds blocked). */
 function stageGrid(id) {
@@ -35,7 +36,7 @@ test('flow field: 4 directions only, strict-improvement SPFA with the official U
   for (let k = 0; k < f.dist.length; k++) {
     if (f.dist[k] <= 0) continue;
     const p = f.parent[k];
-    assert.equal(Math.abs(((p / 21) | 0) - ((k / 21) | 0)) + Math.abs((p % 21) - (k % 21)), 1);
+    assert.equal(Math.abs(((p / COLS) | 0) - ((k / COLS) | 0)) + Math.abs((p % COLS) - (k % COLS)), 1);
     assert.equal(f.dist[p], f.dist[k] - 1);
   }
   // equal costs: a tile keeps the first parent that reached it — (10,4) is reached from (10,3) (RIGHT of it) before
@@ -67,7 +68,7 @@ test('smoothing: next[] jumps to the farthest ancestor in Bresenham line of sigh
   let k = K(12, 10);
   while (k !== fx.dest) {
     const n = fx.next[k];
-    assert.ok(((n / 21) | 0) === ((k / 21) | 0) || n % 21 === k % 21, 'axis-aligned hop');
+    assert.ok(((n / COLS) | 0) === ((k / COLS) | 0) || n % COLS === k % COLS, 'axis-aligned hop');
     k = n;
   }
 });

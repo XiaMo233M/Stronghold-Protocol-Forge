@@ -46,6 +46,7 @@
 
 import { TICK, ROWS, COLS, DP_DEFAULTS, MAX_HOOK_DEPTH, AUTO_OP_COOLDOWN } from './constants.js';
 import { GEO } from '../../shared/constants.js';
+import { layoutOf } from '../../shared/layout.js';
 import { createRng } from './rng.js';
 import { Grid } from './grid.js';
 import { ProjectileSystem } from './projectiles.js';
@@ -89,11 +90,29 @@ export class Battle {
     if (stage && !stage._norm) stage = normalizeStage(stage.id ?? opts.stageId, stage);
     this.stage = stage || { id: 'empty', rows: [], devices: [] };
     this.stageId = this.stage.id ?? opts.stageId ?? null;
-    this.rect = { ...(opts.rect ?? DEFAULT_RECTS[this.kind] ?? GEO.NORMAL_RECT) };
-    { // a malformed rect (non-integers, inverted, off the stage) falls back to the kind's default field
+    /**
+     * The map's own layout (shared/layout.js): its window size, its three deploy rects, its battle / pen rects and its
+     * boss mirror axis. Official 19×21 records carry no `layout`, so `layoutOf` derives the official numbers — every
+     * reader below can therefore use `this.layout` instead of a hard-coded GEO constant, and an official stage gets
+     * exactly what it always got.
+     */
+    this.layout = layoutOf(this.stage);
+    /**
+     * The field rect this battle fights in: whatever the caller passed, else **the map's own rect for this kind**
+     * (`layoutOf`). On an official 19×21 stage that is `DEFAULT_RECTS[kind]` verbatim (deep-equal, so every caller and
+     * test that passed nothing keeps the rect it always got); on a big map a normal battle defaults to the map's own
+     * normal band, which is where its board sits.
+     */
+    /**
+     * The map's own rect for a battle kind: `normal` / `unite` / `boss` (`hidden` reads the boss one), and the same
+     * numbers the historical `DEFAULT_RECTS` carried when the map is an official 19×21 one.
+     */
+    const kindRect = (kind) => this.layout.battle[kind === 'hidden' ? 'boss' : kind] ?? this.layout.battle.normal;
+    this.rect = { ...(opts.rect ?? kindRect(this.kind)) };
+    { // a malformed rect (non-integers, inverted, off the map) falls back to the kind's default field
       const R = this.rect;
       const ok = [R.r0, R.r1, R.c0, R.c1].every(Number.isInteger) && R.r0 >= 0 && R.c0 >= 0 && R.r1 < ROWS && R.c1 < COLS && R.r0 <= R.r1 && R.c0 <= R.c1;
-      if (!ok) this.rect = { ...(DEFAULT_RECTS[this.kind] ?? GEO.NORMAL_RECT) };
+      if (!ok) this.rect = { ...kindRect(this.kind) };
     }
     this.grid = new Grid(this.stage, this.rect);
     const bossLike = this.kind === 'boss' || this.kind === 'hidden';

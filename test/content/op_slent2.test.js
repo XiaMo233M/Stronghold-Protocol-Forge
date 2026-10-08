@@ -13,6 +13,7 @@ import { KITTED_CHARS, OPERATOR_KITS, KITS } from '../../server/sim/content/kits
 import { diyPool, validateDiyPicks } from '../../shared/diy.js';
 import { holdsUndying } from '../../server/sim/content/items/battle.js';
 import { shelterOf, RHINE } from '../../server/sim/content/kits/ops/op-slent2.js';
+import { COLS } from '../../server/sim/constants.js';
 
 const load = (f) => JSON.parse(readFileSync(new URL(`../../data/${f}.json`, import.meta.url), 'utf8'));
 const CHESS = load('chess');
@@ -353,7 +354,7 @@ test('S3: a summon is no 干员 (no 不死); a lethal hit on an operator already
   const a = h.unit(2), b = h.unit(3);
   // a summon of her range (a 夜灯 spawned for the test) takes no 不死
   const tok = h.b.spawnToken(u, LAMP, 11, 5, { anySource: true });
-  assert.ok(tok && tok.alive && u.rangeKeySet.has(11 * 21 + 5));
+  assert.ok(tok && tok.alive && u.rangeKeySet.has(11 * COLS + 5));
   h.b.dealDamage(e, tok, { amount: 1e6, type: 'true' });
   assert.ok(!tok.alive && !tok.findBuff('slent2:grave'), 'a summon is no 干员');
   h.b.addBuff(a, { key: 'test:undying', flags: { undying: true }, duration: 5 });

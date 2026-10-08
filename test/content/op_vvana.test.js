@@ -12,6 +12,7 @@ import { makeBattle, enemyRec, checkInvariants } from '../helpers/battleHarness.
 import { KITTED_CHARS, OPERATOR_KITS, KITS } from '../../server/sim/content/kits/index.js';
 import { sortEnemyTargets } from '../../server/sim/targeting.js';
 import { diyPool, validateDiyPicks } from '../../shared/diy.js';
+import { COLS } from '../../server/sim/constants.js';
 
 const load = (f) => JSON.parse(readFileSync(new URL(`../../data/${f}.json`, import.meta.url), 'utf8'));
 const CHESS = load('chess');
@@ -57,7 +58,7 @@ function done(h) {
   assert.equal(h.b.errors.length, 0, JSON.stringify(h.b.errors[0]));
 }
 const label = ([tier, elite, mod]) => `T${tier} ${elite ? 'elite' : 'normal'} ${mod ?? 'none'}`;
-const keysOf = (u, grid) => grid.map(([dr, dc]) => (u.tileR + dr) * 21 + u.tileC + dc).sort((a, b) => a - b);
+const keysOf = (u, grid) => grid.map(([dr, dc]) => (u.tileR + dr) * COLS + u.tileC + dc).sort((a, b) => a - b);
 
 test('薇薇安娜 in every 自选 form: her operator kit (all three skills authored), the form\'s stats + module attributes, 1-1 range, blocks 1, melee arts ground-only, 卡西米尔, no 特质', () => {
   assert.equal(OPERATOR_KITS[VVANA], KITS[VVANA]);

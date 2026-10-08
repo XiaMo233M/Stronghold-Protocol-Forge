@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { makeBattle, enemyRec, checkInvariants } from '../helpers/battleHarness.js';
 import { KITTED_CHARS, OPERATOR_KITS, KITS } from '../../server/sim/content/kits/index.js';
 import { diyPool, validateDiyPicks } from '../../shared/diy.js';
+import { COLS } from '../../server/sim/constants.js';
 
 const load = (f) => JSON.parse(readFileSync(new URL(`../../data/${f}.json`, import.meta.url), 'utf8'));
 const CHESS = load('chess');
@@ -287,6 +288,6 @@ test('PLX-Y “情与义” (stages 1 and 3): +3 % damage per enemy on her range
 
 test('the x-1 grid of the tests is her data range (from (10, 5) facing RIGHT)', () => {
   const { h, u } = field({});
-  assert.deepEqual([...u.rangeKeys].sort((a, b) => a - b), X1.map(([r, c]) => r * 21 + c).sort((a, b) => a - b));
+  assert.deepEqual([...u.rangeKeys].sort((a, b) => a - b), X1.map(([r, c]) => r * COLS + c).sort((a, b) => a - b));
   done(h);
 });

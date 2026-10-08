@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { makeBattle, enemyRec, chessRec, checkInvariants } from '../helpers/battleHarness.js';
 import { rotateOffset, toLocal, localOrder, localBefore } from '../../server/sim/dir.js';
+import { COLS } from '../../server/sim/constants.js';
 
 const CHESS = JSON.parse(readFileSync(new URL('../../data/chess.json', import.meta.url), 'utf8'));
 const LIST = Array.isArray(CHESS) ? CHESS : Object.values(CHESS);
@@ -92,7 +93,7 @@ test('rotation invariance: every chess (normal + elite) facing UP / LEFT / DOWN 
 test('localOrder / localBefore: the facing-RIGHT frame tie-break equals the tile-key order for RIGHT and turns with the direction', () => {
   // RIGHT: (row, col) order = tile-key order
   const offs = [[-1, 0], [0, -1], [0, 1], [1, 0], [1, 1], [-1, -1]];
-  const byKey = offs.slice().sort((a, b) => (a[0] * 21 + a[1]) - (b[0] * 21 + b[1]));
+  const byKey = offs.slice().sort((a, b) => (a[0] * COLS + a[1]) - (b[0] * COLS + b[1]));
   const byLocal = offs.slice().sort((a, b) => (localBefore(localOrder(a[0], a[1], 'RIGHT'), localOrder(b[0], b[1], 'RIGHT')) ? -1 : 1));
   assert.deepEqual(byLocal, byKey);
   // the first of the 4 neighbours is the right hand (local (−1, 0)) whatever the direction

@@ -59,6 +59,7 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
 ```json
 {
   "id": "my_map", "name": "示例地图", "weight": 40, "modes": ["mode_multi_normal"],
+  "size": [19, 21],
   "rows": ["SrrrrrrrrrrrrrrrrrrrE", "…19 行 × 21 列，row 0 是最下面一行…"],
   "tiles": { "r": { "tileKey": "tile_road", "height": "LOW", "buildable": "ALL", "passable": "ALL",
                     "groundPassable": true, "flyPassable": true, "special": null, "bb": {} } },
@@ -69,12 +70,19 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
 }
 ```
 
-- **`rows` 是 19 行 × 21 列**，字符取自 `TILE_PALETTE`（`shared/stageAuthoring.js`）；`S` 敌方入口、
-  `E` 保护目标。`row 0` 是最下面一行（与引擎存储一致）。
+- **`rows` 的行数与列数由 `size` 决定**（不写 `size` 就是官方的 19 行 × 21 列），字符取自 `TILE_PALETTE`
+  （`shared/stageAuthoring.js`）；`S` 敌方入口、`E` 保护目标。`row 0` 是最下面一行（与引擎存储一致）。
+- **大图（0.9.2）**：`size` 可以写 `[19,21]`（官方）、`[23,27]`（大）或 `[27,33]`（特大），中间任意尺寸也行，
+  但只能比官方大、不能小（`shared/layout.js` 的 `MIN/MAX_ROWS/COLS`）。大图的行带按同一个锚法重排：等待区贴顶
+  5 行、普通带离顶第 7–10 行、boss 贴底第 1–5 行，多出来的行全进**中间战场**；三块部署矩形的**列**不变
+  （2–10 / 2–10 / 10–18，镜像轴 20 —— 棋盘 9 列，列一挪对战镜像就对不上），只有**行**能挪。
+- **`layout`（可选）**：要自己挪分区就写它（`deployRects` / `battle` / `pen`），形状见 `docs/DATA.md §12`；
+  不写就是这张 `size` 的默认布局。
 - **不要写** `groundPaths` / `groundPathsWithDevices` / `deployTiles`：它们由 `server/stageAuthoring.js`
-  调用**引擎自己的寻路**（`server/sim/grid.js`）推导。工坊地图的 `routes` 存在 spec 里，不进入记录。
+  调用**引擎自己的寻路**（`server/sim/grid.js`）推导（大图走的是它自己的 `S`→`E` 门对与整张图的窗口）。
+  工坊地图的 `routes` 存在 spec 里，不进入记录。
 - `modes` 必须至少写一个；加载器只把这些模式追加进 `config.modes[].stages`，不改 config 其他字段。
-- 图形化等价物：编辑器 `/stage.html`（2D 摆放器 + 路线 + 3D 预览）。
+- 图形化等价物：编辑器 `/stage.html`（2D 摆放器 + 尺寸档 + 分区 + 路线 + 3D 预览）。
 
 ### 怪物（`enemy-specs/<slug>.json`）
 

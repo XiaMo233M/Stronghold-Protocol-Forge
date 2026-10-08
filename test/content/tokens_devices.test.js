@@ -8,6 +8,7 @@ import { genericKit } from '../../server/sim/content/generic.js';
 import { spawnYanyou, spawnMapChar, TOKEN_IDS, wolfShadows, wolfShadowInterval, wolfTacticalPoint, tileFree, findSummonTile, summonToken } from '../../server/sim/content/tokens.js';
 import { startColdWind, kjeragColdWind, activateTurrets, terrainAt, deviceOverridesOf } from '../../server/sim/content/devices.js';
 import { HUSK_REBIRTH } from '../../server/sim/content/enemies.js';
+import { COLS } from '../../server/sim/constants.js';
 
 const REAL = { skip: !hasGeneratedData() };
 const ds = getDefaultSource();
@@ -1223,7 +1224,7 @@ test('tactical point: without a board piece the 援军 (狼群) stands on an ene
   const onPath = new Set();
   for (const rt of h.b.routes.filter((x) => x.motion === 'WALK')) for (const [r, c] of h.b.grid.findPath(rt.start[0], rt.start[1], rt.end[0], rt.end[1]) || []) onPath.add(`${r},${c}`);
   assert.ok(onPath.has(`${w.tileR},${w.tileC}`), `on a path (${w.tileR},${w.tileC})`);
-  assert.ok(vigil.baseRangeKeys.includes(w.tileR * 21 + w.tileC), 'inside the initial range');
+  assert.ok(vigil.baseRangeKeys.includes(w.tileR * COLS + w.tileC), 'inside the initial range');
   // official smoothed lanes (grid.js flow field): the upper gate's route (12,10) → (9,2) runs one straight diagonal
   // through (10,4), so the nearest path tile — same row first — is right beside 伺夜
   assert.deepEqual([w.tileR, w.tileC], [10, 4], 'the path tile nearest to 伺夜 (same row first)');

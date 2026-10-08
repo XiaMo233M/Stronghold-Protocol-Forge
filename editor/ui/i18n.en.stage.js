@@ -38,7 +38,6 @@ export const EN_STAGE = Object.freeze({
 
   // ---- 视图工具条与画布提示（整图适应视野、缩放平移） ----
   '适应': 'Fit',
-  '把整张 19×21 缩放回视野里（最少留 8px 边距）': 'Scale the whole 19×21 back into view (at least 8px of margin on every side)',
   '＋': '+',
   '－': '−',
   '自动寻路': 'Auto-route',
@@ -152,6 +151,44 @@ export const EN_STAGE = Object.freeze({
   '首领回合的出怪表（该模式的首领都会用它）': 'Wave table for the boss round (every boss of this mode uses it)',
   '（用模式的首领模板）': '(use the mode’s boss template)',
   '这些绑定的出怪表不存在，引擎会静默回落到模式的模板：{0}': 'These bound wave tables do not exist — the engine silently falls back to the mode’s template: {0}',
+
+  // ---- 地图尺寸（大图支持：业主 2026-10-08「把地图做得更大些，加入对大图的支持」） ----
+  '尺寸': 'Size',
+  '尺寸 {0}': 'Size {0}',
+  '地图尺寸': 'Map size',
+  '这张图多大': 'How big this map is',
+  '标准': 'Standard',
+  '大': 'Large',
+  '特大': 'Huge',
+  '自定（{0}）': 'Custom ({0})',
+  '放大尺寸会保留左下角已有的地形，多出来的行列填成空气（地图外），分区重置为这个尺寸的默认。': 'Enlarging keeps the terrain already painted in the lower-left corner, fills the added rows and columns with air (outside the map), and resets the zones to this size’s defaults.',
+  '已把地图改成 {0}：多出来的行列填成空气（地图外），分区重置为这个尺寸的默认。': 'Map resized to {0}: the added rows and columns are air (outside the map) and the zones are reset to this size’s defaults.',
+  '把整张 {0} 缩放回视野里（最少留 8px 边距）': 'Scale the whole {0} back into view (at least 8px of margin on every side)',
+
+  // ---- 分区编辑（「分区」模式：拖分区、改数字） ----
+  '分区': 'Zones',
+  '分区编辑': 'Zone editing',
+  '分区编辑：拖白点改这一块的行（部署区的列由棋盘定死），上下左右微调选中的那一条边。': 'Zone editing: drag a white handle to move that side (a deploy field’s columns are fixed by the board); the arrow keys nudge the selected side by one tile.',
+  '拖白点改分区：部署区、战斗矩形、怪物等待区都能上下挪（部署区的列由棋盘定死），镜像轴只作标注': 'Drag the white handles to move the zones: deploy fields, battle rects and the enemy pen all move vertically (a deploy field’s columns are fixed by the board), and the mirror axis is a label only',
+  '这里能改的是「分区」：部署区、战斗矩形、怪物等待区。左右拖只对没定死的那些矩形有效，上下拖都能挪。': 'What you change here are the zones: deploy fields, battle rects and the enemy pen. Dragging left/right only works on rects that are not fixed; up/down always moves them.',
+  '{0}（改这一格就是改分区）': '{0} (changing this number moves the zone)',
+  '{0}（改这一格就是整块棋盘上下挪）': '{0} (changing this number moves the whole board up or down)',
+  '{0} 由棋盘定死（两个半场在 col 10 相接、镜像轴 20），不能改': '{0} is fixed by the board (the two halves meet at col 10, the mirror axis is 20) and cannot be changed',
+  '镜像轴': 'Mirror axis',
+  '镜像轴：boss 右半场就是过第 {0} 列翻过来的（由棋盘定死，只作标注）。': 'Mirror axis: the boss right half is the left half mirrored across column {0} (fixed by the board, a label only).',
+  '重置为尺寸默认': 'Reset to the size’s defaults',
+  '分区已重置为 {0} 的默认布局。': 'Zones reset to the default layout of {0}.',
+  '分区有问题（保存会被拦下）：{0}': 'The zones have a problem (saving will be blocked): {0}',
+  '✔ 分区合法': '✔ Zones are valid',
+  '怪物等待区': 'Enemy waiting pen',
+  '普通战斗矩形': 'Normal battle rect',
+  '整备矩形': 'Prep rect',
+  '联防满宽矩形': 'Co-op full-width rect',
+  'boss 战斗矩形': 'Boss battle rect',
+  'boss 整备矩形': 'Boss prep rect',
+  '普通': 'Normal',
+  'boss 左半': 'Boss left half',
+  'boss 右半': 'Boss right half',
 
   // ---- 分区视图（业主 2026-10-08：一张 19×21 里住着三个区） ----
   '区域': 'Zone',

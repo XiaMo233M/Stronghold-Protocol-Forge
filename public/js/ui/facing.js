@@ -60,7 +60,7 @@ export function rotateOffset(dr, dc, dir) {
  * @param {Array<[number, number]>} grid
  * @returns {Array<[number, number]>}
  */
-export function rangeTiles(grid, row, col, dir, { extend = 0, rows = GEO.ROWS, cols = GEO.COLS } = {}) {
+export function rangeTiles(grid, row, col, dir, { extend = 0, rows = GEO.CANVAS_ROWS, cols = GEO.CANVAS_COLS } = {}) {
   const out = [];
   const seen = new Set();
   const list = Array.isArray(grid) ? grid : [];

@@ -11,7 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeBattle, chessRec, enemyRec, checkInvariants } from '../helpers/battleHarness.js';
-import { BLOCK_RADIUS } from '../../server/sim/constants.js';
+import { COLS, BLOCK_RADIUS  } from '../../server/sim/constants.js';
 import { getDefaultSource } from '../../server/sim/simdata.js';
 
 const FRONT = 'test_front_a', BACK = 'test_back_a';
@@ -163,7 +163,7 @@ test('#4: a blocker attacks the enemy it blocks even when it stands outside its 
   const u = h.unit('t_back');
   const x = () => h.b.enemies[0];
   assert.ok(h.runUntil(() => x()?.blockedBy === u, 30));
-  assert.ok(!u.rangeKeySet.has(Math.round(x().y) * 21 + Math.round(x().x)), 'outside its range');
+  assert.ok(!u.rangeKeySet.has(Math.round(x().y) * COLS + Math.round(x().x)), 'outside its range');
   h.run(3);
   assert.ok(h.hooksOf('damaged').some((c) => c.source === u && c.target === x()), 'it hits its blocked enemy');
 });
@@ -183,7 +183,7 @@ test('#4 (revised by the user after playtest #6): a ranged operator on a melee t
     const u = h.unit(id);
     const x = () => h.b.enemies[0];
     assert.ok(h.runUntil(() => x()?.blockedBy === u, 30), `${profession} blocks`);
-    assert.ok(!u.rangeKeySet.has(Math.round(x().y) * 21 + Math.round(x().x)), 'outside its range');
+    assert.ok(!u.rangeKeySet.has(Math.round(x().y) * COLS + Math.round(x().x)), 'outside its range');
     h.run(3);
     checkInvariants(h.b);
     return { hits: h.hooksOf('damaged').filter((c) => c.source === u && c.target === x()).length, casts: u.skill.activations, still: x().blockedBy === u };
@@ -208,7 +208,7 @@ test('#4: "melee" is the deploy position — a 领主 with a ranged attack (银�
   assert.equal(u.def.position, 'MELEE');
   assert.equal(u.profile.attack, 'ranged', 'a ranged attack profile');
   assert.ok(h.runUntil(() => x()?.blockedBy === u, 30), 'blocks');
-  assert.ok(!u.rangeKeySet.has(Math.round(x().y) * 21 + Math.round(x().x)), 'outside its range (behind it)');
+  assert.ok(!u.rangeKeySet.has(Math.round(x().y) * COLS + Math.round(x().x)), 'outside its range (behind it)');
   h.run(4);
   assert.ok(h.hooksOf('damaged').some((c) => c.source === u && c.target === x()), 'it hits the enemy it blocks');
 });

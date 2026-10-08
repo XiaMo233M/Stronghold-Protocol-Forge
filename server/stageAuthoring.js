@@ -12,16 +12,19 @@ import { Grid, normalizeLegendEntry } from './sim/grid.js';
 import {
   GATE_PAIRS, GRID_RECT, BLOCKING_ROLES, STAGE_ROWS, STAGE_COLS,
   deriveDeployTiles, groundRuleOf, validateStage, stageErrors, normalizeRows,
+  gridRectOf, gatePairsFor, deployRectsOf,
 } from '../shared/stageAuthoring.js';
+import { normalizeLayout, layoutForSize, sizeOf, OFFICIAL_SIZE } from '../shared/layout.js';
 
 const isPlain = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 
 /**
  * One ground route: the sim's flow field over the whole grid, returned as the tiles it crosses.
- * Mirrors tools/build-data.mjs officialPath (2113-2137).
+ * Mirrors tools/build-data.mjs officialPath (2113-2137). `rect` is the grid the field runs over — the official
+ * 0–18/0–20 window for an official record, the map's own window for a bigger one.
  */
-function officialPath(rows, legend, devices, start, end) {
-  const g = new Grid({ rows, legend }, GRID_RECT);
+function officialPath(rows, legend, devices, start, end, rect = GRID_RECT) {
+  const g = new Grid({ rows, legend }, rect);
   for (const d of devices) {
     if (!d.pos) continue;
     if (d.role === 'crate') g.setObstacle(d.pos[0], d.pos[1], true, 'crate');
@@ -41,23 +44,28 @@ function passableAll(rows, legend, r, c) {
 
 /**
  * The two derived path tables of a stage, exactly as data/stages.json stores them.
- * @param {{rows: string[]|string, tiles: object, devices?: object[]}} stage
+ *
+ * The pairs walked are the map's own (`gatePairsFor`): the 12 official gate pairs at the official size, so an official
+ * record re-derives byte for byte, and a big map's own 敌方入口 → 保护目标 pairs otherwise.
+ * @param {{rows: string[]|string, tiles: object, devices?: object[], size?: number[], layout?: object}} stage
  * @returns {{ groundPaths: Record<string, number[][]>, groundPathsWithDevices: Record<string, number[][]> }}
  */
 export function deriveGroundPaths(stage) {
   const rows = normalizeRows(stage && stage.rows) || [];
   const legend = isPlain(stage && stage.tiles) ? stage.tiles : {};
   const devices = Array.isArray(stage && stage.devices) ? stage.devices : [];
+  const size = sizeOf(stage);
+  const rect = size[0] === OFFICIAL_SIZE[0] && size[1] === OFFICIAL_SIZE[1] ? GRID_RECT : gridRectOf(size);
   // only ACTIVE blocking devices reroute the path (build-data:2290) — a hidden crate does not exist yet
   const activeBlocking = devices.filter((d) => d && d.active && BLOCKING_ROLES.includes(d.role));
   const groundPaths = {};
   const groundPathsWithDevices = {};
-  for (const [a, b] of GATE_PAIRS) {
+  for (const [a, b] of gatePairsFor(rows, legend, size)) {
     const k = `${a.join(',')}->${b.join(',')}`;
     if (!passableAll(rows, legend, a[0], a[1]) || !passableAll(rows, legend, b[0], b[1])) continue;
-    const p1 = officialPath(rows, legend, [], a, b);
+    const p1 = officialPath(rows, legend, [], a, b, rect);
     if (p1) groundPaths[k] = p1;
-    const p2 = officialPath(rows, legend, activeBlocking, a, b);
+    const p2 = officialPath(rows, legend, activeBlocking, a, b, rect);
     if (p2) groundPathsWithDevices[k] = p2;
   }
   return { groundPaths, groundPathsWithDevices };
@@ -79,6 +87,8 @@ export function deriveRoutePaths(stage, routes) {
   const legend = isPlain(stage && stage.tiles) ? stage.tiles : {};
   const devices = Array.isArray(stage && stage.devices) ? stage.devices : [];
   const activeBlocking = devices.filter((d) => d && d.active && BLOCKING_ROLES.includes(d.role));
+  const size = sizeOf(stage);
+  const rect = size[0] === OFFICIAL_SIZE[0] && size[1] === OFFICIAL_SIZE[1] ? GRID_RECT : gridRectOf(size);
   const out = [];
   for (const [index, route] of (Array.isArray(routes) ? routes : []).entries()) {
     const motion = route && route.motion === 'FLY' ? 'FLY' : 'WALK';
@@ -94,7 +104,7 @@ export function deriveRoutePaths(stage, routes) {
     let path = null;
     let failed = false;
     for (let k = 0; k + 1 < pts.length; k++) {
-      const seg = officialPath(rows, legend, activeBlocking, pts[k], pts[k + 1]);
+      const seg = officialPath(rows, legend, activeBlocking, pts[k], pts[k + 1], rect);
       if (!seg || !seg.length) { failed = true; break; }
       path = path && path.length ? path.concat(seg.slice(1)) : seg;
     }
@@ -111,9 +121,13 @@ export function deriveRoutePaths(stage, routes) {
  * loader appends a workshop stage's id to those entries (shared/workshop.js linkStages) — so a stage with no `modes`
  * would be valid yet never selected.
  *
- * `opts.paths` decides whether the 12 official gate pairs are walked to produce `groundPaths` /
+ * `opts.paths` decides whether the map's gate pairs are walked to produce `groundPaths` /
  * `groundPathsWithDevices` — see the default below. The record ALWAYS carries both keys; a map with no derived route
  * gets an empty table rather than a missing field, so every reader can keep iterating it.
+ *
+ * The record also carries the map's own `size` and `layout` (shared/layout.js): the engine reads both, so a big map
+ * plays on the zones its author drew. `spec.layout` is optional — omitted, the layout is the one `size` implies, and
+ * for 19×21 that is exactly the official one.
  *
  * @param {object} spec
  * @param {{ paths?: boolean }} [opts]
@@ -123,6 +137,8 @@ export function deriveStage(spec, opts = {}) {
   const errors = stageErrors(validateStage(spec));
   if (errors.length) return { ok: false, errors };
   const warnings = [];
+  const size = sizeOf(spec);
+  const layout = normalizeLayout(spec.layout, size);
   const rows = normalizeRows(spec.rows);
   const tiles = spec.tiles;
   const devices = (Array.isArray(spec.devices) ? spec.devices : []).map((d) => {
@@ -143,14 +159,17 @@ export function deriveStage(spec, opts = {}) {
   const derivePaths = opts && opts.paths !== undefined
     ? opts.paths === true
     : (Array.isArray(spec.routes) && spec.routes.length > 0);
-  const paths = derivePaths ? deriveGroundPaths({ rows, tiles, devices }) : { groundPaths: {}, groundPathsWithDevices: {} };
+  const paths = derivePaths ? deriveGroundPaths({ rows, tiles, devices, size, layout }) : { groundPaths: {}, groundPathsWithDevices: {} };
   const stage = {
     id: spec.id,
     name: typeof spec.name === 'string' && spec.name ? spec.name : spec.id,
     weight,
     active: weight > 0,
     modes,
-    size: [STAGE_ROWS, STAGE_COLS],
+    size: [size[0], size[1]],
+    // 布局只在**与这张 size 的默认布局不同**时才写进记录：官方尺寸下默认布局就是历史常量，于是老样子的小图记录
+    // 与今天逐字节一样，只有真挪过分区（或尺寸大于官方）的图才多出这一项。
+    ...(JSON.stringify(layout) === JSON.stringify(layoutForSize(size)) ? {} : { layout }),
     rows,
     tiles,
     devices,
@@ -158,7 +177,7 @@ export function deriveStage(spec, opts = {}) {
     special: isPlain(spec.special) ? spec.special : {},
     runes: Array.isArray(spec.runes) ? spec.runes : [],
     globalBuffs: Array.isArray(spec.globalBuffs) ? spec.globalBuffs : [],
-    deployTiles: deriveDeployTiles(rows, tiles, devices, { groundHighGround: groundRuleOf(spec) }),
+    deployTiles: deriveDeployTiles(rows, tiles, devices, { groundHighGround: groundRuleOf(spec), rects: layout.deployRects }),
     groundPaths: paths.groundPaths,
     groundPathsWithDevices: paths.groundPathsWithDevices,
     // 联防图 (kind 'unite'): validateStage already enforced helpers ∈ 1..2 and rejected kind on anything else
@@ -185,7 +204,7 @@ export function deriveStage(spec, opts = {}) {
   }
   // The authored ROUTES (the 出生点 → 防守点 path) are validated by running them through the sim: a route nothing can
   // walk is a broken map, and the author must hear about it here rather than watch enemies stand still in game.
-  const routePaths = deriveRoutePaths({ rows, tiles, devices }, spec.routes);
+  const routePaths = deriveRoutePaths({ rows, tiles, devices, size, layout }, spec.routes);
   const broken = routePaths.filter((r) => !r.path);
   if (broken.length) {
     return {
@@ -242,7 +261,8 @@ export function validateStageRecord(stage, opts = {}) {
       issues.push({ field: key, code: 'INCOMPLETE_DERIVED', severity: 'warning', message: `${missing} route(s) the sim can compute are absent` });
     }
   }
-  const wantDeploy = deriveDeployTiles(normalizeRows(stage.rows), stage.tiles, stage.devices, { groundHighGround: groundRuleOf(stage) });
+  const wantDeploy = deriveDeployTiles(normalizeRows(stage.rows), stage.tiles, stage.devices,
+    { groundHighGround: groundRuleOf(stage), rects: normalizeLayout(stage.layout, sizeOf(stage)).deployRects });
   if (isPlain(stage.deployTiles) && JSON.stringify(stage.deployTiles) !== JSON.stringify(wantDeploy)) {
     issues.push({ field: 'deployTiles', code: 'STALE_DERIVED', severity: 'error', message: 'deployTiles no longer match the legend/devices', hint: 're-derive it' });
   }

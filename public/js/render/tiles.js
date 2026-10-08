@@ -32,7 +32,8 @@
 
 import { tileAtlas, fxAtlas, rng, groundTexture } from './textures.js';
 import { GLYPH, TILEKEY_GLYPH, TILE_H, COLORS, ORIGINIUM } from './style.js';
-import { parsePenRect, PEN_RECT } from './pen.js';
+import { parsePenRect } from './pen.js';
+import { layoutOf, mapSize } from './layout.js';
 
 /**
  * Depth-sort key (unit layer zIndex) of block row `row`: the row's far edge. Units use
@@ -44,12 +45,11 @@ export const ROW_KEY = Object.freeze({ blocks: 0, devices: 0.01, surface: 0.02 }
 /** Gate / objective boxes (low tiles) of row `row`: after the row's blocks, before units standing in the box. */
 export const boxDepthKey = (cam, row) => -cam.depthOf(0, row + 0.45, 0) * 100;
 
-const ROWS = 19, COLS = 21;
 const PLAYABLE_DIST = 2;         // margin tiles farther than this from a playable tile are not drawn
 const CLIFF_DEPTH = 0.62;        // how far the island's edge faces go down to the ground plane (tiles)
 /** Brightness of the board meshes (vertex colour above 1 lifts the mid-grey board art a little). */
 const EXPOSURE = 1.12;
-/** Ground plane extent (world tiles) and cell size; contact shadows are baked per vertex. */
+/** Ground plane extent (world tiles) of the OFFICIAL 19×21 window and cell size; contact shadows are baked per vertex. */
 const PLANE = Object.freeze({ x0: -16, x1: 36, y0: -10, y1: 32, cell: 1 });
 
 const VERT = `
@@ -97,26 +97,32 @@ const SIDE_MAT = {
  * Parse a stage record into a per-tile info grid (tolerant of partial/malformed data). `band` = [r0, r1] rows drawn;
  * `field` = [f0, f1] rows of the active field — drawn rows outside it are dim, non-playable scenery (e.g. the enemy
  * preview pen behind the normal field, or the normal field behind the boss field).
+ *
+ * The grid is the **map's own window** (`layout`, shared/layout.js; official 19×21 when omitted): a big map parses
+ * `R`×`C` tiles, never the engine canvas. `band` and `field` are rows of that window.
  */
-export function parseStage(stage, band = [0, ROWS - 1], field = [0, 13]) {
+export function parseStage(stage, band = null, field = [0, 13], layout = null) {
+  const L = layout || layoutOf(stage);
+  const [R, C] = mapSize(L);
+  const b = Array.isArray(band) ? band : [0, R - 1];
   const rows = Array.isArray(stage?.rows) ? stage.rows : [];
   const legend = stage && typeof stage.tiles === 'object' && stage.tiles ? stage.tiles : {};
   const grid = [];
-  for (let r = 0; r < ROWS; r++) {
+  for (let r = 0; r < R; r++) {
     const line = typeof rows[r] === 'string' ? rows[r] : '';
     const row = [];
-    for (let c = 0; c < COLS; c++) {
+    for (let c = 0; c < C; c++) {
       let g = line[c] || '#';
       if (!GLYPH[g]) g = TILEKEY_GLYPH[legend[g]?.tileKey] || (legend[g]?.height === 'HIGH' ? '#' : 'R');
       const def = GLYPH[g];
-      const inBand = r >= band[0] && r <= band[1];
+      const inBand = r >= b[0] && r <= b[1];
       const scenery = r < field[0] || r > field[1];
       row.push({ r, c, glyph: g, mat: def.mat, hClass: def.h, h: def.h ? TILE_H[def.h] : 0, playable: inBand && !scenery && g !== '#' && g !== 'X', inBand, scenery, dist: 0, alpha: 1, drawn: true, focus: true });
     }
     grid.push(row);
   }
-  // the enemy preview pen's floor (enemy_place_rect) is the glass hatch of the official pen, row 16 included
-  const pen = parsePenRect(stage?.config?.enemy_place_rect) || PEN_RECT;
+  // the enemy preview pen's floor (enemy_place_rect, else the map's own pen band) is the glass hatch of the official pen
+  const pen = parsePenRect(stage?.config?.enemy_place_rect) || L.pen;
   for (let r = pen.r0; r <= pen.r1; r++) for (let c = pen.c0; c <= pen.c1; c++) {
     const t = grid[r]?.[c];
     if (t && (t.glyph === 'f' || t.glyph === 'p')) t.mat = 'penGlass';
@@ -125,7 +131,7 @@ export function parseStage(stage, band = [0, ROWS - 1], field = [0, 13]) {
   const INF = 99;
   for (const row of grid) for (const t of row) t.dist = t.playable ? 0 : INF;
   for (let pass = 0; pass < PLAYABLE_DIST + 1; pass++) {
-    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {
       const t = grid[r][c];
       if (t.dist === 0) continue;
       let best = t.dist;
@@ -145,14 +151,22 @@ export function parseStage(stage, band = [0, ROWS - 1], field = [0, 13]) {
   const wall = (r, c) => { const n = grid[r]?.[c]; return !!n && n.drawn && n.glyph === 'h'; };
   for (const row of grid) for (const t of row) {
     if (t.glyph !== 'h' || !t.drawn) continue;
-    const L = wall(t.r, t.c - 1), Rt = wall(t.r, t.c + 1);
-    if (L || Rt) t.top = L && Rt ? 'wallM' : Rt ? 'wallL' : 'wallR';
+    const L2 = wall(t.r, t.c - 1), Rt = wall(t.r, t.c + 1);
+    if (L2 || Rt) t.top = L2 && Rt ? 'wallM' : Rt ? 'wallL' : 'wallR';
     else {
       const near = wall(t.r - 1, t.c), far = wall(t.r + 1, t.c);
       t.top = near && far ? 'wallVM' : far ? 'wallB' : near ? 'wallT' : 'wall';
     }
   }
+  // the window this grid covers (the plane / quad builders read it; `length` stays the window's row count)
+  Object.defineProperty(grid, 'layout', { value: L, enumerable: false });
   return grid;
+}
+
+/** The `[rows, cols]` a parsed grid covers: its `layout` when it has one, else the grid's own shape. */
+export function gridSize(G) {
+  const L = G && G.layout;
+  return L ? mapSize(L) : [(G?.length || 0), (G?.[0]?.length || 0)];
 }
 
 const hash2 = (r, c) => ((r * 73856093) ^ (c * 19349663)) >>> 0;
@@ -235,7 +249,11 @@ export class TileField {
     this.atlas = tileAtlas();
     this.art = null;
     this.stage = null;
-    this.grid = parseStage(null);
+    /** The map's own layout (shared/layout.js): its window, its rects, its pen band — official for a 19×21 stage. */
+    this.layout = layoutOf(null);
+    this.rows = this.layout.size[0];
+    this.cols = this.layout.size[1];
+    this.grid = parseStage(null, null, [0, 13], this.layout);
     this.quads = [];
     this.mesh = null;              // ground mesh (low tops + cliffs)
     this.meshes = [];              // every mesh record { quads, row, buffers…, mesh }
@@ -263,7 +281,7 @@ export class TileField {
     this.flashes = [];             // objective leak flashes { r, c, t }
     this._p = { x: 0, y: 0, s: 0, depth: 0 };
     this.levels = [0];
-    this.band = [0, ROWS - 1];
+    this.band = [0, this.rows - 1];
     this.field = [0, 13];
     this.focus = null;
     this.boxMeshes = new Set();    // live BoxMesh instances (re-textured on art swaps)
@@ -295,10 +313,11 @@ export class TileField {
 
   /**
    * Rows drawn (`band` [r0, r1]) and the focused rect (tiles outside it are dimmed). Rebuilds the geometry only
-   * when something changed.
+   * when something changed. `band` / `field` are rows of the MAP's own window, so they are clamped to it (a stage that
+   * declares a bigger window than the one the caller asked about keeps the caller's rows).
    */
   setView(band, focus, field) {
-    const b = Array.isArray(band) ? [Math.max(0, band[0] | 0), Math.min(ROWS - 1, band[1] | 0)] : [0, ROWS - 1];
+    const b = Array.isArray(band) ? [Math.max(0, band[0] | 0), Math.min(this.rows - 1, band[1] | 0)] : [0, this.rows - 1];
     const fb = Array.isArray(field) ? [field[0] | 0, field[1] | 0] : [b[0], Math.min(b[1], 13)];
     const f = focus ? { r0: focus.r0, r1: focus.r1, c0: focus.c0, c1: focus.c1 } : null;
     const same = b[0] === this.band[0] && b[1] === this.band[1] && fb[0] === this.field[0] && fb[1] === this.field[1] &&
@@ -330,12 +349,16 @@ export class TileField {
 
   setStage(stage) {
     this.stage = stage || null;
+    // the map's own window / rects (official for a 19×21 stage): the grid, the pen band and the plane follow it
+    this.layout = layoutOf(this.stage);
+    this.rows = this.layout.size[0];
+    this.cols = this.layout.size[1];
     this._rebuild();
   }
 
   _rebuild() {
     const stage = this.stage;
-    this.grid = parseStage(stage, this.band, this.field);
+    this.grid = parseStage(stage, this.band, this.field, this.layout);
     const F = this.focus;
     for (const row of this.grid) for (const t of row) {
       t.focus = !F || (t.r >= F.r0 && t.r <= F.r1 && t.c >= F.c0 && t.c <= F.c1);
@@ -371,7 +394,8 @@ export class TileField {
       if (!DEVICE_ROLES.has(d.role)) continue;
       const active = typeof d.active === 'boolean' ? d.active : !d.hidden;
       if (!active) continue;
-      if (d.pos[0] < 0 || d.pos[0] >= ROWS || d.pos[1] < 0 || d.pos[1] >= COLS || d.pos[0] >= 14) continue;
+      // the row above the map's pen band is the last one a device can stand on (official: row 13, the separator wall)
+      if (d.pos[0] < 0 || d.pos[0] >= this.rows || d.pos[1] < 0 || d.pos[1] >= this.cols || d.pos[0] >= this.layout.pen.r0) continue;
       const gt = this.grid[d.pos[0]] && this.grid[d.pos[0]][d.pos[1]];
       // devices stand on the island (playable tiles + the ring around them, dist ≤ 1 — the 3D board's drawn tiles), not
       // on the faded margin. A device on the field's edge wall is drawn like any other (board3d/layout.js stageDevices):
@@ -521,7 +545,7 @@ export class TileField {
     if (Array.isArray(tiles)) {
       for (const t of tiles) {
         const r = Array.isArray(t) ? t[0] : t?.row, c = Array.isArray(t) ? t[1] : t?.col;
-        if (Number.isInteger(r) && Number.isInteger(c) && r >= 0 && r < ROWS && c >= 0 && c < COLS) list.push([r, c]);
+        if (Number.isInteger(r) && Number.isInteger(c) && r >= 0 && r < this.rows && c >= 0 && c < this.cols) list.push([r, c]);
       }
     }
     if (!list.length) this.highlights.delete(key);
@@ -637,9 +661,9 @@ export class TileField {
     const P = this.P;
     const fx = fxAtlas();
     const R = rng(4242);
-    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    for (let r = 0; r < this.rows; r++) for (let c = 0; c < this.cols; c++) {
       const t = this.grid[r][c];
-      if (!t.drawn || t.scenery || r >= 13) continue;
+      if (!t.drawn || t.scenery || r > this.field[1]) continue;
       const add = (kind, tex, blend, tint, n = 1) => {
         for (let i = 0; i < n; i++) {
           const s = new P.Sprite(fx.tex[tex]);
@@ -656,8 +680,8 @@ export class TileField {
         case 'i': add('infect', 'glow', P.BLEND_MODES.ADD, ORIGINIUM.glow, 1); break;
         case 'm': add('mire', 'dot', P.BLEND_MODES.ADD, 0xc8d890, 2); break;
         case 'I': case 'O': add('tel', 'ring', P.BLEND_MODES.ADD, 0xb36bff, 1); break;
-        case 'S': if (r <= 12) add('gateGlow', 'glow', P.BLEND_MODES.ADD, COLORS.gateRed, 1); break;
-        case 'E': if (r <= 12) add('objGlow', 'glow', P.BLEND_MODES.ADD, COLORS.objBlue, 1); break;
+        case 'S': add('gateGlow', 'glow', P.BLEND_MODES.ADD, COLORS.gateRed, 1); break;
+        case 'E': add('objGlow', 'glow', P.BLEND_MODES.ADD, COLORS.objBlue, 1); break;
         default: break;
       }
     }
@@ -720,12 +744,12 @@ export class TileField {
     this.boxes = [];
     // the field's gates / objectives, and the enemy preview pen's two gates (the red cubes behind which the next
     // round's enemies wait, also while the pen is dim scenery behind the prep board)
-    const pen = parsePenRect(this.stage?.config?.enemy_place_rect) || PEN_RECT;
-    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const pen = parsePenRect(this.stage?.config?.enemy_place_rect) || this.layout.pen;
+    for (let r = 0; r < this.rows; r++) for (let c = 0; c < this.cols; c++) {
       const tile = this.grid[r][c];
       if (!tile.drawn || (tile.glyph !== 'S' && tile.glyph !== 'E')) continue;
       const penGate = tile.glyph === 'S' && r >= pen.r0 && r <= pen.r1 && c >= pen.c0 && c <= pen.c1;
-      if ((tile.scenery || r > 12) && !penGate) continue;
+      if ((tile.scenery || r > this.field[1]) && !penGate) continue;
       const g = new this.P.Graphics();
       g.blendMode = this.P.BLEND_MODES.ADD;
       this.layers.props.addChild(g);
@@ -875,9 +899,10 @@ export function buildPlaneQuads(G, tilesPerRepeat = 5) {
   const quads = [];
   const T = Math.max(1, Number(tilesPerRepeat) || 5);
   const z = -CLIFF_DEPTH;
+  const [R, C] = gridSize(G);
   // distance field (tiles) to the nearest drawn tile, sampled at vertices
   const drawn = [];
-  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (G[r]?.[c]?.drawn) drawn.push([c, r]);
+  for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) if (G[r]?.[c]?.drawn) drawn.push([c, r]);
   const occl = (x, y) => {
     if (!drawn.length) return 1;
     let best = Infinity;
@@ -893,7 +918,10 @@ export function buildPlaneQuads(G, tilesPerRepeat = 5) {
   const cache = new Map();
   const ao = (x, y) => { const k = x * 1000 + y; let v = cache.get(k); if (v === undefined) { v = occl(x, y); cache.set(k, v); } return v; };
   const S = PLANE.cell;
-  for (let y = PLANE.y0; y < PLANE.y1; y += S) for (let x = PLANE.x0; x < PLANE.x1; x += S) {
+  // the plane of a map whose window sticks out past the official one (a big map grows up and to the right) is extended
+  // the same way, so the island never reaches a visible edge of the backdrop (test/render/board3d-lifecycle.test.js)
+  const x1p = PLANE.x1 + Math.max(0, C - 21), y1p = PLANE.y1 + Math.max(0, R - 19);
+  for (let y = PLANE.y0; y < y1p; y += S) for (let x = PLANE.x0; x < x1p; x += S) {
     const xa = x - 0.5, xb = x - 0.5 + S, ya = y - 0.5, yb = y - 0.5 + S;
     quads.push({
       kind: 'plane', row: y, col: x, order: 0, faceDir: 0, alpha: 1, shade: 0.62,
@@ -965,13 +993,14 @@ export class BoxMesh {
  */
 export function buildTileQuads(G, uv) {
   const quads = [];
+  const [R, C] = gridSize(G);
   const blank = (uv && uv.blank) || [0, 0, 0, 0];
   const add = (kind, mat, pts, shade, alpha, order, faceDir, tile) => {
     const u = (uv && uv[mat]) || blank;
     const fx = faceDir === 'E' ? tile.c + 0.5 : faceDir === 'W' ? tile.c - 0.5 : tile.c;
     quads.push({ kind, pts, u, shade, alpha, order, faceDir, row: tile.r, col: tile.c, fx });
   };
-  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+  for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {
     const t = G[r][c];
     if (!t.drawn) continue;
     const H = t.h;

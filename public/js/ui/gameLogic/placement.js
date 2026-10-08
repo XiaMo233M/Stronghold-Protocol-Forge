@@ -6,6 +6,7 @@ import { meleeOnHighGround } from '../../../../shared/highGround.js';
 import { pieceDir, rangeTiles } from '../facing.js';
 import { isObj, tileKey } from './shared.js';
 import { boardTileOf, fieldTile } from './camera.js';
+import { layoutOf } from '../../render/layout.js';
 import { deployedRecord, fieldsStandIn, standInOf } from './standIn.js';
 import { t } from '../../../../shared/i18n.js';
 
@@ -36,13 +37,15 @@ export function deploySets(stage, field = 'normal', overrides = {}) {
     for (const t of Array.isArray(dt.rangedOnly) ? dt.rangedOnly : []) if (Array.isArray(t) && inField(t[0], t[1])) ranged.add(tileKey(t[0], t[1]));
     return { melee, ranged };
   }
-  // derive from the tile legend
+  // derive from the tile legend — through the map's own field mapping (`layoutOf(stage)`; official → identity)
+  const L = layoutOf(stage);
   const rows = Array.isArray(stage?.rows) ? stage.rows : [];
   const tiles = isObj(stage?.tiles) ? stage.tiles : {};
   for (let r = GEO.FIELD.r0; r <= GEO.FIELD.r1; r++) {
-    const line = typeof rows[r] === 'string' ? rows[r] : '';
     for (let c = GEO.FIELD.c0; c <= GEO.FIELD.c1; c++) {
-      const t = tiles[line[c]];
+      const [sr, sc] = fieldTile('normal', r, c, L);
+      const line = typeof rows[sr] === 'string' ? rows[sr] : '';
+      const t = tiles[line[sc]];
       if (!isObj(t)) continue;
       const k = tileKey(r, c);
       if (t.height === 'LOW' && (t.buildable === 'ALL' || t.buildable === 'MELEE')) { melee.add(k); ranged.add(k); }
@@ -99,7 +102,8 @@ export function stageOverrides(priv, getEffect = () => null) {
  * @param {{ deviceOverrides?: Record<string, boolean>, tileOverrides?: Record<string, string>, field?: 'normal'|'bossL'|'bossR' }} [o]
  * @returns {Map<string, 'melee'|'ranged'>}
  */
-export function deployMap(stage, { deviceOverrides = {}, tileOverrides = {}, field = 'normal' } = {}) {
+export function deployMap(stage, { deviceOverrides = {}, tileOverrides = {}, field = 'normal', layout = null } = {}) {
+  const L = layout || layoutOf(stage);
   const F = GEO.FIELD;
   const inField = (r, c) => Number.isInteger(r) && Number.isInteger(c) && r >= F.r0 && r <= F.r1 && c >= F.c0 && c <= F.c1;
   const map = new Map();
@@ -107,7 +111,7 @@ export function deployMap(stage, { deviceOverrides = {}, tileOverrides = {}, fie
   const legend = isObj(stage?.tiles) ? stage.tiles : {};
   for (let r = F.r0; r <= F.r1; r++) {
     for (let c = F.c0; c <= F.c1; c++) {
-      const [sr, sc] = fieldTile(field, r, c);
+      const [sr, sc] = fieldTile(field, r, c, L);
       const line = rows && typeof rows[sr] === 'string' ? rows[sr] : null;
       let cls = null;
       if (line) {
@@ -124,7 +128,7 @@ export function deployMap(stage, { deviceOverrides = {}, tileOverrides = {}, fie
   }
   for (const d of Array.isArray(stage?.devices) ? stage.devices : []) {
     if (!isObj(d) || !Array.isArray(d.pos)) continue;
-    const [r, c] = boardTileOf(field, d.pos[0], d.pos[1]);
+    const [r, c] = boardTileOf(field, d.pos[0], d.pos[1], L);
     if (!inField(r, c)) continue;
     let active;
     if (d.alias != null && isObj(deviceOverrides) && Object.hasOwn(deviceOverrides, d.alias)) active = !!deviceOverrides[d.alias];
@@ -151,13 +155,13 @@ export function deployMap(stage, { deviceOverrides = {}, tileOverrides = {}, fie
  * @param {any} stage stages.json record
  * @param {{ deviceOverrides?: Record<string, boolean>, tileOverrides?: Record<string, string> }} [overrides]
  */
-export function effectiveStage(stage, overrides = {}) {
+export function effectiveStage(stage, overrides = {}, layout = null) {
   const dev = isObj(overrides?.deviceOverrides) ? overrides.deviceOverrides : {};
   const tiles = isObj(overrides?.tileOverrides) ? overrides.tileOverrides : {};
   if (!isObj(stage) || (!hasKeys(dev) && !hasKeys(tiles))) return stage;
   const devices = (Array.isArray(stage.devices) ? stage.devices : []).map((d) => (
     isObj(d) && d.alias != null && Object.hasOwn(dev, d.alias) ? { ...d, active: !!dev[d.alias] } : d));
-  const map = deployMap(stage, { deviceOverrides: dev, tileOverrides: tiles });
+  const map = deployMap(stage, { deviceOverrides: dev, tileOverrides: tiles, layout: layout || layoutOf(stage) });
   const melee = [];
   const rangedOnly = [];
   for (const [k, cls] of map) {
@@ -194,7 +198,7 @@ export function indexPieces(priv) {
  * @param {{ priv:any, stage:any, editable:boolean, field?:'normal'|'bossL'|'bossR', getChess?:(id:string)=>any,
  *   getToken?:(id:string)=>any, getItem?:(id:string)=>any, getEffect?:(id:string)=>any }} o
  */
-export function placementContext({ priv, stage, editable, field = 'normal', getChess = () => null, getToken = () => null, getItem = () => null, getEffect = () => null, backups = null }) {
+export function placementContext({ priv, stage, editable, field = 'normal', getChess = () => null, getToken = () => null, getItem = () => null, getEffect = () => null, backups = null, layout = null }) {
   const pieces = indexPieces(priv);
   const boardAt = new Map();
   for (const e of pieces.values()) if (e.area === 'board') boardAt.set(tileKey(e.row, e.col), e);
@@ -207,10 +211,11 @@ export function placementContext({ priv, stage, editable, field = 'normal', getC
   const ov = stageOverrides(priv, getEffect);
   // the own normal board keeps the data's deploy tiles (with the terrain overrides folded in); the boss field of a
   // boss round's prep is read from the legend + its devices under the same overrides (server deploy map, field)
+  const L = layout || layoutOf(stage);
   const deploy = field === 'bossL' || field === 'bossR'
     ? deploySets(stage, field, ov)
-    : deploySets(effectiveStage(stage, ov));
-  return { priv, pieces, boardAt, handAt, deploy, cap, count, field, editable: !!editable, getChess, getToken, getItem, backups };
+    : deploySets(effectiveStage(stage, ov, L));
+  return { priv, pieces, boardAt, handAt, deploy, cap, count, field, editable: !!editable, getChess, getToken, getItem, backups, layout: L };
 }
 
 /**

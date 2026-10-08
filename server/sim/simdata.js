@@ -372,7 +372,7 @@ export function normalizeStage(id, s) {
     stats: d.stats ?? null,
     raw: d,
   }));
-  return { _norm: true, id: s.id ?? s.stageId ?? id, name: s.name ?? id, rows, legend: s.legend ?? s.tiles ?? null, devices, special: s.special ?? null, raw: s };
+  return { _norm: true, id: s.id ?? s.stageId ?? id, name: s.name ?? id, rows, legend: s.legend ?? s.tiles ?? null, devices, special: s.special ?? null, size: s.size ?? null, layout: s.layout ?? null, raw: s };
 }
 
 function pairOf(v) {

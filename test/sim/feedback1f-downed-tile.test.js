@@ -15,6 +15,7 @@ import { makeBattle, chessRec, enemyRec, checkInvariants } from '../helpers/batt
 import { makeMatch } from '../match/harness.js';
 import { buildBattleSpec, createBattleFromSpec } from '../../server/sim/spec.js';
 import { inRange } from '../../server/sim/content/support/index.js';
+import { COLS } from '../../server/sim/constants.js';
 
 const RAID = { raidShip: { count: 2, active: true, tier: 1, layers: 0 } };
 const raider = (id) => chessRec({ id, bonds: ['raidShip'], profession: 'WARRIOR', skill: null });
@@ -154,7 +155,7 @@ test('F5 engine: every ally placement refuses the tile a knocked-out operator li
   assert.equal(b.relocate(C, 9, 8), false, 'moving an operator onto the body is refused');
   assert.deepEqual(tileOf(C), [11, 5]);
   // a tactician at (9,6) whose range holds (9,8) — the nearer tile — and (9,9)
-  assert.equal(b.findTacticalPoint({ baseRangeKeys: [9 * 21 + 8, 9 * 21 + 9], tileR: 9, tileC: 6, dir: 'RIGHT' })?.join(), '9,9', 'no tactical point on the body');
+  assert.equal(b.findTacticalPoint({ baseRangeKeys: [9 * COLS + 8, 9 * COLS + 9], tileR: 9, tileC: 6, dir: 'RIGHT' })?.join(), '9,9', 'no tactical point on the body');
   // its own redeploy comes back there ("自动部署至该位置")
   assert.ok(b.redeploy(A, { free: true }));
   assert.deepEqual(tileOf(A), [9, 8]);

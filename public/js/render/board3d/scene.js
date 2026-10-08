@@ -19,7 +19,8 @@
 // material), cyan field edges, terrain overlays (≤ 4), background plane + its shadow catcher — ~12–16 in total.
 // The key light's shadow map is rendered only when the geometry changes (autoUpdate off).
 
-import { buildBoard, objToBoard, boxProjectUV, ROWS, COLS, DEVICE_H, AREAS } from './layout.js';
+import { buildBoard, objToBoard, boxProjectUV, DEVICE_H, AREAS } from './layout.js';
+import { layoutOf, mapSize } from '../layout.js';
 import { surfaceUV } from './atlas.js';
 import {
   focusUniforms, makeTexture, boardMaterial, glassMaterial, decalMaterial, pipeMaterial, unlitMaterial, gateMaterial, glowMaterial,
@@ -196,6 +197,11 @@ export class BoardScene {
     this.stage = null;
     this.area = AREAS.normal;
     this.areaKey = areaKey(AREAS.normal);
+    /**
+     * How far the background plane is extended about the island's centre: `LIGHTING.bg.tiles` for the official 19×21
+     * window, more for a bigger map whose island reaches farther out (set per stage in `setStage`).
+     */
+    this.bgScale = LIGHTING.bg.tiles;
     this.battleRect = null;
     this.devices = new Set();
     this.flashes = [];
@@ -271,6 +277,9 @@ export class BoardScene {
     if (key === this.stageKey) return;
     this.stageKey = key;
     this.stage = stage || null;
+    // a map whose window is bigger than the official one gets a proportionally bigger backdrop (see `bgScale`)
+    const [R, C] = mapSize(layoutOf(stage));
+    this.bgScale = LIGHTING.bg.tiles * Math.max(1, R / 19, C / 21);
     this._clear();
     if (!stage) return;
     const board = buildBoard(stage, { uv: this.pack?.uv || null, area: this.area });
@@ -408,12 +417,13 @@ export class BoardScene {
   _buildBackground(board) {
     const T = this.THREE;
     const B = LIGHTING.bg;
-    const cx = (COLS - 1) / 2, cy = (ROWS - 1) / 2;
+    // the plane and its shadow sit under the middle of the MAP's own window (a big map's island is bigger)
+    const cx = (board.bounds.x0 + board.bounds.x1) / 2, cy = (board.bounds.y0 + board.bounds.y1) / 2;
     let plane = null;
     const obj = this.pack?.meshes?.bgPlane;
     if (obj) plane = objToBoard(obj, B.size / 100);
     const data = plane || { position: new Float32Array([-B.size / 2, -B.size / 2, 0, B.size / 2, -B.size / 2, 0, B.size / 2, B.size / 2, 0, -B.size / 2, B.size / 2, 0]), normal: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]), uv: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), index: new Uint16Array([0, 1, 2, 0, 2, 3]) };
-    const placed = extendPlane(placeMesh(data, { x: cx, y: cy, z: B.z }), cx, cy, B.tiles);
+    const placed = extendPlane(placeMesh(data, { x: cx, y: cy, z: B.z }), cx, cy, this.bgScale);
     // the plane may face either way after the axis swap: make it face up
     if (placed.normal && placed.normal[2] < 0) {
       for (let i = 0; i < placed.normal.length; i++) placed.normal[i] = -placed.normal[i];
@@ -422,7 +432,7 @@ export class BoardScene {
     }
     this.meshes.bg = this._mesh({ ...placed, color: null }, this.mat.bg, { cast: false, receive: false, order: -2 });
     // the key light's shadow of the island on the ground far below (S_Background_shadow's role)
-    const s = B.size;
+    const s = B.size * Math.max(B.tiles, this.bgScale) / B.tiles;
     const q = { position: new Float32Array([cx - s / 2, cy - s / 2, B.z + 0.02, cx + s / 2, cy - s / 2, B.z + 0.02, cx + s / 2, cy + s / 2, B.z + 0.02, cx - s / 2, cy + s / 2, B.z + 0.02]), normal: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]), uv: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), color: null, index: new Uint16Array([0, 1, 2, 0, 2, 3]) };
     this.meshes.bgShadow = this._mesh(q, this.mat.shadowCatcher, { cast: false, receive: true, order: -1 });
     void T;

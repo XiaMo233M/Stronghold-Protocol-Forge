@@ -10,9 +10,10 @@ import { Grid, segmentTiles } from '../../server/sim/grid.js';
 import { getDefaultSource, hasGeneratedData } from '../../server/sim/simdata.js';
 import { GEO } from '../../shared/constants.js';
 import { makeBattle, chessRec, enemyRec } from '../helpers/battleHarness.js';
+import { COLS } from '../../server/sim/constants.js';
 
 const REAL = { skip: !hasGeneratedData() && 'no generated data' };
-const COLS = 21;
+
 const M04 = 'act1autochess_m04';
 const RECT = { normal: GEO.NORMAL_RECT, unite: GEO.UNITE_RECT, boss: GEO.BOSS_RECT };
 

@@ -58,7 +58,7 @@ export class MatchCombat {
       modeId: this.modeId,
       round: this.round,
       stageId: this.stageId,
-      rect: { ...GEO.NORMAL_RECT },
+      rect: { ...this.layout.battle.normal },
       timeLimit: wave.timeLimit,
       players: [ev.input && typeof ev.input === 'object' ? ev.input : input],
       spawns: this._sanitizeSpawns(Array.isArray(ev.spawns) ? ev.spawns : spawns, ps.playerId),

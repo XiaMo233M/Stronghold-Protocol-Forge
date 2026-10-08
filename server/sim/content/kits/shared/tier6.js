@@ -109,7 +109,7 @@
 // `elementHit` hook (`onElementHit`: × dmg.mul before the gauge fill).
 
 import { absoluteRangeKeys } from '../../../targeting.js';
-import { COLS, ROWS, PULL_STOP_RADIUS } from '../../../constants.js';
+import { COLS, ROWS, FIELD_ROWS, FIELD_COLS, PULL_STOP_RADIUS } from '../../../constants.js';
 import { hasHp } from '../../../damage.js';
 
 // ------------------------------------------------------------------------------------------------------------------
@@ -195,10 +195,10 @@ function cleanseAbnormal(battle, u) {
 }
 const AROUND8 = Object.freeze([[1, -1], [1, 0], [1, 1], [0, -1], [0, 1], [-1, -1], [-1, 0], [-1, 1]]);
 const N4 = Object.freeze([[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]);
-/** Every offset of the 19×21 field: "攻击范围扩大至整个战场". */
+/** Every offset of the official 19×21 field: "攻击范围扩大至整个战场" (FIELD_ROWS/COLS: the field, not the canvas). */
 const WHOLE_FIELD = (() => {
   const g = [];
-  for (let dr = -(ROWS - 1); dr <= ROWS - 1; dr++) for (let dc = -(COLS - 1); dc <= COLS - 1; dc++) g.push([dr, dc]);
+  for (let dr = -(FIELD_ROWS - 1); dr <= FIELD_ROWS - 1; dr++) for (let dc = -(FIELD_COLS - 1); dc <= FIELD_COLS - 1; dc++) g.push([dr, dc]);
   return Object.freeze(g);
 })();
 

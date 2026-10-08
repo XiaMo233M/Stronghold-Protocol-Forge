@@ -53,7 +53,7 @@ export class MatchUnite {
       modeId: this.modeId,
       round: this.round,
       stageId: this.stageId,
-      rect: { ...GEO.UNITE_RECT },
+      rect: { ...this.layout.battle.unite },
       timeLimit: limit,
       players,
       spawns: this._sanitizeSpawns(wave.spawns),

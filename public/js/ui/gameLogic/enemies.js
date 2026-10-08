@@ -1,6 +1,6 @@
 // ui/gameLogic/enemies.js — enemy groups, factions, the preview pen. Re-exported from ../gameLogic.js.
 
-import { layoutPen } from '../../render/pen.js';
+import { layoutPen, penZones } from '../../render/pen.js';
 import { isObj } from './shared.js';
 
 
@@ -34,15 +34,36 @@ export function groupEnemies(list, getEnemy = () => null) {
 
 // ---- enemy preview pen (research 09 §2, research 08 §4.2) ---------------------------------------------------
 
-/** Pen rect and zones: rows 14–18 × cols 7–13, row 16 unused; lower-gate zone rows 14–15, upper-gate zone rows 17–18. */
+/**
+ * The OFFICIAL pen (rows 14–18 × cols 7–13, row 16 unused; lower-gate zone rows 14–15, upper-gate rows 17–18). It is
+ * the fallback constant: the pen a stage actually uses is `penRect(stage)` (render/pen.js — the map's own band,
+ * shared/layout.js), and the zone rows follow that rect's shape.
+ */
 export const PEN = Object.freeze({ r0: 14, r1: 18, c0: 7, c1: 13, emptyRow: 16, cap: 50, anchors: Object.freeze({ lower: [15, 7], upper: [18, 7] }) });
 
-/** Zone tiles in row-major order (low row first, col 7→13), without the zone's anchor (tile_start) — 13 per zone. */
-export function penZoneTiles(gate) {
-  const rows = gate === 'upper' ? [17, 18] : [14, 15];
-  const [ar, ac] = PEN.anchors[gate === 'upper' ? 'upper' : 'lower'];
+/**
+ * Zone tiles in row-major order (low row first, left column → right), without the zone's own gate tile.
+ *
+ * It is the engine's OWN answer (`render/pen.js penZones`), so the DOM fallback view and the render engine can never
+ * drift: with a stage it is that stage's pen (its `tile_start` anchors, its `previewNotAlloed` row); without one it is
+ * the pen's shape — 2 rows per gate around the two anchors, the pen's one unused row between them (the official
+ * `(14,7)–(18,13)` → rows 14–15 / 17–18, 13 tiles each).
+ * @param {'upper'|'lower'} gate
+ * @param {{ stage?: any }} [opts] the stage (its own pen rect / anchors)
+ */
+export function penZoneTiles(gate, opts = {}) {
+  const stage = isObj(opts) ? opts.stage : null;
+  if (stage) {
+    const z = penZones(stage);
+    return (gate === 'upper' ? z.upper : z.lower).tiles;
+  }
+  const rect = { ...PEN };
+  const lower = gate !== 'upper';
+  const anchors = [PEN.anchors.lower, PEN.anchors.upper];
+  const mine = lower ? anchors[0] : anchors[1];
+  const rows = lower ? [rect.r0, rect.r0 + 1] : [rect.r1 - 1, rect.r1];
   const out = [];
-  for (const r of rows) for (let c = PEN.c0; c <= PEN.c1; c++) if (!(r === ar && c === ac)) out.push([r, c]);
+  for (const r of rows) for (let c = rect.c0; c <= rect.c1; c++) if (!(r === mine[0] && c === mine[1])) out.push([r, c]);
   return out;
 }
 

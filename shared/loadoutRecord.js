@@ -162,7 +162,8 @@ export function extendedGrid(grid, extend = 0) {
   if (extend > 0 && Number.isFinite(extend)) {
     const maxByRow = new Map();
     for (const [dr, dc] of cells) maxByRow.set(dr, Math.max(maxByRow.get(dr) ?? -Infinity, dc));
-    for (const [dr, mx] of maxByRow) for (let k = 1; k <= Math.min(extend, GEO.COLS); k++) add(dr, mx + k);
+    // the cap is the canvas' column count, the same bound server/sim/targeting.js absoluteRangeKeys clamps an extend to
+    for (const [dr, mx] of maxByRow) for (let k = 1; k <= Math.min(extend, GEO.CANVAS_COLS); k++) add(dr, mx + k);
   }
   return out;
 }

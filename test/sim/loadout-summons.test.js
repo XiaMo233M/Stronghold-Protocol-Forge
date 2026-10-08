@@ -9,6 +9,7 @@ import { DataSource, getDefaultSource, hasGeneratedData } from '../../server/sim
 import { Battle } from '../../server/sim/Battle.js';
 import { buildBattleSpec, createBattleFromSpec, resultDigest, jsonClone } from '../../server/sim/spec.js';
 import { makeBattle } from '../helpers/battleHarness.js';
+import { COLS } from '../../server/sim/constants.js';
 
 const skip = !hasGeneratedData() && 'no generated data (run node tools/build-data.mjs)';
 const ds = getDefaultSource();
@@ -187,7 +188,7 @@ function assertRosmonS3Gears(b, u) {
   assert.equal(gears.length, 2, '"部署两个战术装备"');
   const range = new Set(u.rangeKeys);
   for (const g of gears) {
-    assert.ok(g.alive && range.has(g.tileR * 21 + g.tileC), 'inside her attack range');
+    assert.ok(g.alive && range.has(g.tileR * COLS + g.tileC), 'inside her attack range');
     assert.ok(b.grid.canStand(g.tileR, g.tileC, { ranged: false }), 'on a melee tile');
     assert.equal(g.def.skill.bb.stun, 2, 'the S3 token skill (stun 2 s)');
   }

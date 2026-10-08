@@ -247,7 +247,7 @@ test('#17 流形\'s melee copy (a summon of no fixed position) attacks the enemy
   const e = () => h.b.enemies.find((x) => x.defId === 'enemy_w');
   assert.ok(h.runUntil(() => e()?.blockedBy === tok(), 30), 'the copy blocks the walker');
   const t = tok();
-  assert.ok(!t.rangeKeySet.has(Math.round(e().y) * 21 + Math.round(e().x)), 'outside its range (behind its facing)');
+  assert.ok(!t.rangeKeySet.has(Math.round(e().y) * COLS + Math.round(e().x)), 'outside its range (behind its facing)');
   const t0 = h.b.time;
   h.run(4);
   assert.ok(h.hooksOf('damaged').some((c) => c.source === t && c.target === e() && c.t > t0), 'it hits the enemy it blocks');

@@ -18,10 +18,11 @@ import { TOKEN_IDS } from '../../server/sim/content/tokens.js';
 import { effectiveProfile } from '../../server/sim/ai.js';
 import { resolveProfile } from '../../server/sim/professions.js';
 import { getData } from '../../server/data.js';
+import { COLS } from '../../server/sim/constants.js';
 
 const ds = getDefaultSource();
 const dummy = (o = {}) => enemyRec({ key: 'enemy_dummy', hp: 1e8, speed: 0, ...o });
-const keyOf = (e) => Math.round(e.y) * 21 + Math.round(e.x);
+const keyOf = (e) => Math.round(e.y) * COLS + Math.round(e.x);
 
 /** attackId → Map(target → damage) of the normal attacks `u` landed. */
 function perAttack(h, u) {

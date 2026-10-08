@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import { makeBattle, chessRec, enemyRec, checkInvariants } from '../helpers/battleHarness.js';
 import { getDefaultSource } from '../../server/sim/simdata.js';
 import { inRange } from '../../server/sim/content/support/index.js';
+import { COLS } from '../../server/sim/constants.js';
 
 const STAGE = 'act2autochess_m04';
 const WATER = [[10, 6], [11, 6], [12, 6]];
@@ -82,6 +83,6 @@ test('#3 the tactical point of a tactician never lies in the water (伺夜 facin
   const wolf = h.allies().find((u) => u.defId === WOLF && u.alive);
   assert.ok(wolf, 'the pack came as her 援军');
   assert.ok(!isWater(h.b, wolf.tileR, wolf.tileC), `the pack stands on ${wolf.tileR},${wolf.tileC}, not in the water`);
-  assert.ok((vigil.baseRangeKeys || []).includes(wolf.tileR * 21 + wolf.tileC), 'inside her attack range');
+  assert.ok((vigil.baseRangeKeys || []).includes(wolf.tileR * COLS + wolf.tileC), 'inside her attack range');
   checkInvariants(h.b);
 });

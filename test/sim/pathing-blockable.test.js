@@ -12,9 +12,10 @@ import { Grid, bresenhamTiles, segmentTiles } from '../../server/sim/grid.js';
 import { getDefaultSource, hasGeneratedData, normalizeRoute } from '../../server/sim/simdata.js';
 import { GEO } from '../../shared/constants.js';
 import { makeBattle, flatStage, chessRec, enemyRec } from '../helpers/battleHarness.js';
+import { COLS } from '../../server/sim/constants.js';
 
 const REAL = { skip: !hasGeneratedData() && 'no generated data' };
-const COLS = 21;
+
 const STAGES = ['act1autochess_m01', 'act1autochess_m02', 'act1autochess_m03', 'act1autochess_m04', 'act2autochess_m01', 'act2autochess_m02', 'act2autochess_m03', 'act2autochess_m04'];
 const walker = (o = {}) => enemyRec({ key: 'enemy_walker', hp: 1e6, speed: 1, ...o });
 const guard = chessRec({ id: 't_guard', profession: 'WARRIOR', stats: { atk: 0, blockCnt: 3, maxHp: 1e6 }, skill: null });

@@ -93,7 +93,7 @@ export class MatchBoss {
         modeId: this.modeId,
         round: this.round,
         stageId: this.stageId,
-        rect: { ...GEO.BOSS_RECT },
+        rect: { ...this.layout.battle.boss },
         timeLimit: Infinity,
         players: inputs,
         spawns: this._sanitizeSpawns(spawns),

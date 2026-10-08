@@ -66,6 +66,14 @@
   .legend .key { color:var(--dim); font:11px/1.4 monospace; word-break:break-all; }
   details.fold { margin:10px 0; }
   details.fold > summary { cursor:pointer; font-size:12px; color:var(--dim); font-weight:600; text-transform:uppercase; letter-spacing:.04em; margin-bottom:8px; }
+  /* 「分区」模式的数字面板：一块分区一行（名字 + 四个数） */
+  .zone-edit .zrect { display:grid; grid-template-columns:1fr; gap:3px; padding:5px 0; border-bottom:1px solid var(--line); }
+  .zone-edit .zrect .zl { color:var(--fg); font-size:12px; }
+  .zone-edit .zrect .zr { display:grid; grid-template-columns:repeat(4,1fr); gap:5px; }
+  .zone-edit .zf { color:var(--dim); font-size:11px; }
+  .zone-edit .zf input { padding:2px 4px; }
+  /* 只读的列（由棋盘定死）：README 上是「看得到、改不了」而不是「不见了」 */
+  .zone-edit .zf input:disabled { color:var(--dim); background:#161920; }
 </style>
 </head>
 <body>
@@ -112,10 +120,14 @@
       <!-- 业主口径：绝不自动生成；只有点这一下才算。 -->
       <button id="btnAutoRoute" data-i18n="自动寻路">自动寻路</button>
     </div>
-    <!-- 分区工具条（业主 2026-10-08）：一张 19×21 里住着三个区，先选画哪一块，区外一律压暗。 -->
+    <!-- 分区工具条（业主 2026-10-08）：一张图里住着三个区，先选画哪一块，区外一律压暗。 -->
     <div class="row" id="zoneBar" style="margin-bottom:8px"></div>
+    <!-- 地图尺寸（大图支持）：档位 + 现在的尺寸。这一条由 JS 填（renderSizeBar），文案走 t()。 -->
+    <div class="row" id="sizeBar" style="margin-bottom:8px"></div>
     <div class="stage-view" id="stageView">
-      <canvas id="board" width="672" height="608" tabindex="0"></canvas>
+      <!-- 画布尺寸由 JS（resizeBoard）按容器实测值定，宽高属性只是首屏的兜底值；
+           格子永远铺满最大档（27×33），一张图自己的窗口（19×21 / 23×27 / 27×33）画在它的左下角。 -->
+      <canvas id="board" width="864" height="1056" tabindex="0"></canvas>
       <!-- 3D 画布没有写死的尺寸：它绝对定位铺满这个盒子，由 stage3d.js 按盒子实测尺寸定备位图 -->
       <canvas id="board3d" hidden></canvas>
     </div>

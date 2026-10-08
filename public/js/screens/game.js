@@ -65,7 +65,7 @@
 // phase). Its pill reads 观战中, never "你已被淘汰"; its exit only leaves the seat (ui/matchChrome.js ExitModal).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from '../../vendor/hooks.module.js';
-import { PHASE, GEO } from '../../../shared/constants.js';
+import { PHASE } from '../../../shared/constants.js';
 import { html, Spinner, PhaseBanner, ResultDialog, Icon, Button, confirmDialog, closeAllDialogs, useTicker } from '../ui/components.js';
 import { useGameData, GIcon } from '../ui/gameComponents.js';
 import { useFieldView } from '../ui/fieldHost.js';
@@ -92,6 +92,7 @@ import { needsFacing, facingIntent, previewGrid, pieceDir, underframeActions, re
 import { EquipReplaceDialog, replaceRequest, replaceIntent } from '../ui/equipReplace.js';
 import { pauseAvailable, isPaused, frozenNow } from '../ui/matchStatus.js';
 import { pieceTile } from '../render/drag.js';
+import { layoutOf, mapRectOf } from '../render/layout.js';
 import {
   phaseMode, phaseBanner, isCombatPhase, showDeadPill, isBossPhase, placementContext, canPlace, boardTargets, dropIntent,
   battleOverSfx, uniteResultBox, battleResultBox,
@@ -256,9 +257,12 @@ function MatchScreen() {
 
   // latest values for event handlers bound once
   const live = useRef({});
+  // the map's own window / rects (shared/layout.js): official 19×21 for an official stage, the map's own bands for a
+  // big one — every rect / band / tile mapping below reads it (render/layout.js)
+  const stageLayout = layoutOf(gd.stage(pub?.stageId));
   // the field the own pieces are deployed on: the own board, or the player's half of the boss field in a boss round's
   // prep (user playtest #5 item 7: legality and the legal-tile highlights read THOSE tiles, like the server)
-  const deployField = deployFieldOf(pub, myId);
+  const deployField = deployFieldOf(pub, myId, stageLayout);
   // the own pieces' records: a DIY slot the player filled is its 自选 operator (0.2.0, m.private.diy — position, range,
   // name; gameLogic/diy.js), every other chess its data record
   const ownChess = (id) => { const c = gd.chess(id); return ownDiyRecord(c, live.current.priv, { chess: data.get('chess'), backups: data.get('backups') }) || c; };
@@ -278,10 +282,10 @@ function MatchScreen() {
   // (research 09 §1.2: the right-hand player's board mirrored; gameLogic prepCamera). The DOM fallback view keeps the
   // own board's layout there (every coordinate the UI handles is a board coordinate either way) and draws the tiles of
   // that half (ui/fallbackField.js: the legal fence tiles are floor, not the normal field's walls; user playtest #5 item 7).
-  const prepCam = prepCamera(pub, myId);
+  const prepCam = prepCamera(pub, myId, stageLayout);
   const prepCamKey = `${prepCam.kind}:${prepCam.opts.side}`;
   const prepCamSeen = useRef(prepCamKey);                // the prep camera last requested
-  const camRef = useRef({ kind: 'prep', opts: { rect: { ...GEO.NORMAL_RECT }, side: 'L' } });
+  const camRef = useRef({ kind: 'prep', opts: { rect: mapRectOf(stageLayout, 'prep'), side: 'L' } });
   const penRef = useRef({ on: false, collapsed: false });
   // the shop bar is shown folded (收起; the pen folds it for itself: the player's own state is the one it returns to) —
   // the own prep board then takes the official shop-collapsed camera (public issue #5, gameLogic prepCameraFor)
@@ -365,12 +369,13 @@ function MatchScreen() {
   }, [view, ownView, ownStage, baseStage]);
   // the stage behind the board ON SCREEN — the own one (机变 overrides applied) or, while watching a teammate, the plain
   // one — and how a tapped BOARD tile maps to it (GitHub issue #184: tileClick → gameLogic.terrainInfo). Everywhere but a
-  // boss-prep board the two spaces are the same: a 最终攻势 / 隐秘核心 battle renders the stage's own rows (GEO.BOSS_RECT),
+  // boss-prep board the two spaces are the same: a 最终攻势 / 隐秘核心 battle renders the stage's own rows (its layout's
+  // boss rect),
   // 联防 / normal rects are stage rows; the boss PREP draws the player's half (stage rows 2–5) as board rows 9–12
   // (render/prepfield.js toDisp), which is exactly gameLogic.fieldTile.
   live.current.terrainStage = ownView ? ownStage : baseStage;
   live.current.terrainTile = showPrep && (deployField === 'bossL' || deployField === 'bossR')
-    ? (row, col) => fieldTile(deployField, row, col)
+    ? (row, col) => fieldTile(deployField, row, col, layoutOf(ownView ? ownStage : baseStage))
     : (row, col) => [row, col];
   // The underframe's 出售 / 销毁 plates are tinted through their official sprite as a CSS mask, and a mask image that
   // has not loaded paints nothing (the plate would show its dark backing on the first tap). Warm the ~1 KB sprites as
@@ -387,7 +392,7 @@ function MatchScreen() {
         // the battle we just left (or whatever was stored before mount) must not be re-entered next combat;
         // an m.field that arrives during prep (the upcoming battle) is a new object and will be entered
         staleFieldRef.current = field;
-        const pc = prepCameraFor(pub, myId, shopFolded);
+        const pc = prepCameraFor(pub, myId, shopFolded, stageLayout);
         setCam(pc.kind, pc.opts);
         prepCamSeen.current = prepCamKey;
         viewModeRef.current = 'prep';
@@ -541,7 +546,7 @@ function MatchScreen() {
     if (!view || viewModeRef.current !== 'prep' || !showPrep) return;
     if (live.current.facing) cancelFacingRef.current();
     setSel(null);
-    const pc = prepCameraFor(pub, myId, shopFolded);
+    const pc = prepCameraFor(pub, myId, shopFolded, stageLayout);
     setCam(pc.kind, pc.opts);
   }, [view, prepCamKey, showPrep]);
 
@@ -553,7 +558,7 @@ function MatchScreen() {
   useEffect(() => {
     const next = foldCamera({
       pub, myId, folded: shopFolded, ownPrep: !!view && viewModeRef.current === 'prep' && showPrep,
-      pen, busy: !!drag || !!facing, current: camRef.current,
+      pen, busy: !!drag || !!facing, current: camRef.current, layout: stageLayout,
     });
     if (next) setCam(next.kind, next.opts);
   }, [view, shopFolded, showPrep, pen, !!drag, !!facing, prepCamKey]);

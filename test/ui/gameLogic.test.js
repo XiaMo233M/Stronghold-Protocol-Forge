@@ -675,7 +675,10 @@ describe('prepCamera (research 09 §1.2: the Final Assault prep on the own half 
   const pub = (round, players) => ({ round, bossRound: 14, hiddenRound: 15, players });
   test('normal rounds: the own board', () => {
     const c = prepCamera(pub(6, [pl('a', 0), pl('b', 1)]), 'b');
-    assert.deepEqual(c, { kind: 'prep', opts: { rect: { ...GEO.NORMAL_RECT }, side: 'L' } });
+    // 大图: the prep camera frames the map's own prep band (shared/layout.js `battle.prep`), which for an official
+    // 19×21 record is the historical GEO.NORMAL_RECT with the bench row above it (render/projection.js prep band)
+    assert.deepEqual(c, { kind: 'prep', opts: { rect: { r0: 7, r1: 12, c0: 0, c1: 10 }, side: 'L' } });
+    assert.deepEqual(c.opts.rect, { ...GEO.NORMAL_RECT, r0: GEO.HAND_ROW });
     assert.equal(prepCamera(null, 'a').kind, 'prep');
     assert.equal(prepCamera({ round: 14, bossRound: null, hiddenRound: null, players: [] }, 'a').kind, 'prep');
   });

@@ -12,6 +12,7 @@ import { makeBattle, enemyRec, checkInvariants } from '../helpers/battleHarness.
 import { KITTED_CHARS, OPERATOR_KITS, KITS } from '../../server/sim/content/kits/index.js';
 import { diyPool, validateDiyPicks } from '../../shared/diy.js';
 import { canTargetAlly } from '../../server/sim/targeting.js';
+import { COLS } from '../../server/sim/constants.js';
 
 const load = (f) => JSON.parse(readFileSync(new URL(`../../data/${f}.json`, import.meta.url), 'utf8'));
 const CHESS = load('chess');
@@ -338,9 +339,9 @@ test('S3 move: blocking nothing, she flies (2 tiles/s, 无敌, disarmed) to the 
     assert.ok(m.s.flags.invulnerable && m.s.flags.untargetable && m.s.flags.isolated && m.s.flags.noBlock, `${label(f)}: 无敌, 孤立, unselectable, blocks nothing`);
     // her range: the 3-9 of (10, 4) facing RIGHT + the 8 around her new tile (11, 7)
     const keys = new Set(u.rangeKeys);
-    assert.ok(keys.has(12 * 21 + 4) && keys.has(9 * 21 + 5), `${label(f)}: the anchored 3-9 ((12, 4), (9, 5))`);
-    assert.ok(keys.has(12 * 21 + 8) && keys.has(11 * 21 + 8), `${label(f)}: the 8 around her ((12, 8), (11, 8))`);
-    assert.ok(!keys.has(11 * 21 + 10), `${label(f)}: no 3-9 around her new tile ((11, 10))`);
+    assert.ok(keys.has(12 * COLS + 4) && keys.has(9 * COLS + 5), `${label(f)}: the anchored 3-9 ((12, 4), (9, 5))`);
+    assert.ok(keys.has(12 * COLS + 8) && keys.has(11 * COLS + 8), `${label(f)}: the 8 around her ((12, 8), (11, 8))`);
+    assert.ok(!keys.has(11 * COLS + 10), `${label(f)}: no 3-9 around her new tile ((11, 10))`);
     u.skill.end('test');
     assert.deepEqual([u.tileR, u.tileC], [10, 4], `${label(f)}: back home at the end`);
     assert.ok(!m.alive, `${label(f)}: the marker left`);

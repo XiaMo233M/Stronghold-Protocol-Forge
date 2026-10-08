@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeBattle, enemyRec, chessRec, checkInvariants } from '../helpers/battleHarness.js';
 import { TIER_KITS } from '../../server/sim/content/kits/index.js';
+import { COLS } from '../../server/sim/constants.js';
 
 const KITS = TIER_KITS[4];
 
@@ -1398,7 +1399,7 @@ test('elite modules: range = the module grid (夕/白面鸮), ASPD +8 unblocking
   // (not a whole +1 column, which also widened skill ranges)
   for (const id of ['chess_char_5_12_b', 'chess_char_5_16_b']) {
     const u = h.unit(id);
-    const rel = u.rangeKeys.map((k) => `${Math.floor(k / 21) - u.tileR},${(k % 21) - u.tileC}`);
+    const rel = u.rangeKeys.map((k) => `${Math.floor(k / COLS) - u.tileR},${(k % COLS) - u.tileC}`);
     assert.equal(u.s.rangeExtend, 0, id);
     assert.equal(rel.length, u.def.raw.rangeGrid.length + 1, `${id}: exactly one tile more`);
     assert.ok(rel.includes('0,3') && !rel.includes('1,3') && !rel.includes('-1,3'), `${id}: ${rel.join(' ')}`);

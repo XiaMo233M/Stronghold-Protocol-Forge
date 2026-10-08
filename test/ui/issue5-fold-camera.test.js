@@ -25,9 +25,12 @@ const pl = (id, seat, alive = true) => ({ playerId: id, seat, alive });
 const pubAt = (round, players = [pl('a', 0), pl('b', 1)]) => ({ round, bossRound: 14, hiddenRound: 15, players });
 
 describe('the camera choice (gameLogic prepCameraFor / foldCamera)', () => {
+  // the own prep camera frames the MAP's prep band (shared/layout.js `battle.prep`): for an official 19×21 record that
+  // is the historical GEO.NORMAL_RECT with the bench row above it (render/projection.js prep band)
+  const PREP_RECT = { r0: GEO.HAND_ROW, r1: GEO.NORMAL_RECT.r1, c0: GEO.NORMAL_RECT.c0, c1: GEO.NORMAL_RECT.c1 };
   test('prepCameraFor: the own prep camera with the shop state — open = shop camera, folded = shop-collapsed', () => {
-    assert.deepEqual(prepCameraFor(pubAt(6), 'a'), { kind: 'prep', opts: { rect: { ...GEO.NORMAL_RECT }, side: 'L', shop: true } });
-    assert.deepEqual(prepCameraFor(pubAt(6), 'a', true), { kind: 'prep', opts: { rect: { ...GEO.NORMAL_RECT }, side: 'L', shop: false } });
+    assert.deepEqual(prepCameraFor(pubAt(6), 'a'), { kind: 'prep', opts: { rect: { ...PREP_RECT }, side: 'L', shop: true } });
+    assert.deepEqual(prepCameraFor(pubAt(6), 'a', true), { kind: 'prep', opts: { rect: { ...PREP_RECT }, side: 'L', shop: false } });
     // the Final Assault prep: the player's half of the boss field, with the same flag
     assert.deepEqual(prepCameraFor(pubAt(14), 'b', true), { kind: 'bossPrep', opts: { side: 'R', shop: false } });
     assert.deepEqual(prepCameraFor(pubAt(14), 'a'), { kind: 'bossPrep', opts: { side: 'L', shop: true } });
@@ -40,8 +43,8 @@ describe('the camera choice (gameLogic prepCameraFor / foldCamera)', () => {
   });
 
   const base = { pub: pubAt(6), myId: 'a', ownPrep: true, pen: false, busy: false };
-  const open = { kind: 'prep', opts: { rect: { ...GEO.NORMAL_RECT }, side: 'L', shop: true } };
-  const folded = { kind: 'prep', opts: { rect: { ...GEO.NORMAL_RECT }, side: 'L', shop: false } };
+  const open = { kind: 'prep', opts: { rect: { ...PREP_RECT }, side: 'L', shop: true } };
+  const folded = { kind: 'prep', opts: { rect: { ...PREP_RECT }, side: 'L', shop: false } };
 
   test('foldCamera: a fold asks for the shop-collapsed camera, an unfold for the shop camera again, else nothing', () => {
     assert.deepEqual(foldCamera({ ...base, folded: true, current: open }), folded);
@@ -206,7 +209,8 @@ describe('wiring', () => {
     const game = read('public/js/screens/game.js');
     assert.match(game, /const shopFolded = showShop && \(pen \? penRef\.current\.collapsed : collapsed\);/);
     // entering prep and the boss-prep re-frame take the fold state; a fold / unfold re-frames through foldCamera
-    assert.equal((game.match(/const pc = prepCameraFor\(pub, myId, shopFolded\);/g) || []).length, 2);
-    assert.match(game, /const next = foldCamera\(\{\n\s+pub, myId, folded: shopFolded, ownPrep: !!view && viewModeRef\.current === 'prep' && showPrep,\n\s+pen, busy: !!drag \|\| !!facing, current: camRef\.current,\n\s+\}\);\n\s+if \(next\) setCam\(next\.kind, next\.opts\);\n\s+\}, \[view, shopFolded, showPrep, pen, !!drag, !!facing, prepCamKey\]\);/);
+    // (大图: the map's own window rides along as the last argument — shared/layout.js `stageLayout`)
+    assert.equal((game.match(/const pc = prepCameraFor\(pub, myId, shopFolded, stageLayout\);/g) || []).length, 2);
+    assert.match(game, /const next = foldCamera\(\{\n\s+pub, myId, folded: shopFolded, ownPrep: !!view && viewModeRef\.current === 'prep' && showPrep,\n\s+pen, busy: !!drag \|\| !!facing, current: camRef\.current, layout: stageLayout,\n\s+\}\);\n\s+if \(next\) setCam\(next\.kind, next\.opts\);\n\s+\}, \[view, shopFolded, showPrep, pen, !!drag, !!facing, prepCamKey\]\);/);
   });
 });

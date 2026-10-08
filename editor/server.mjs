@@ -23,6 +23,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deriveChessRecord, validateChessRecord, chessIds, formatIssues, authoringErrors, specFromChessRecord } from '../shared/chessAuthoring.js';
 import { TILE_PALETTE, DEPLOY_RECTS, STAGE_ROWS, STAGE_COLS, normalizeRows, stageErrors, SAMPLE_STAGE_SPEC, sampleStageSpec } from '../shared/stageAuthoring.js';
+// 一张图自己的尺寸与分区（shared/layout.js）：编者的 spec 读回一张记录时要带上它们，否则大图一保存就缩回官方尺寸。
+import { clampSize } from '../shared/layout.js';
 import { deriveStage, validateStageRecord, deriveRoutePaths } from '../server/stageAuthoring.js';
 import { normalizeLegendEntry } from '../server/sim/grid.js';
 import {
@@ -1267,6 +1269,10 @@ function specFromStageRecord(id, rec) {
     id, name: (rec && rec.name) ?? id,
     weight: Number.isInteger(rec?.weight) ? rec.weight : 50,
     modes: Array.isArray(rec?.modes) ? [...rec.modes] : [],
+    // 这张图自己的尺寸与分区：官方的 19×21 记录没有 layout（也不需要），只有大图/挪过分区的图才有。
+    // 这里是编辑器 spec 的来源，漏掉就等于「打开一张大图，一保存就变回 19×21、分区回到默认」。
+    size: clampSize(rec?.size),
+    ...(rec?.layout ? { layout: rec.layout } : {}),
     rows: normalizeRows(rec?.rows),
     tiles: rec?.tiles && typeof rec.tiles === 'object' ? { ...rec.tiles } : null,
     devices: Array.isArray(rec?.devices) ? rec.devices.map((d) => ({ ...d })) : [],

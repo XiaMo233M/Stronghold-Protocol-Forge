@@ -11,6 +11,7 @@ import { skillSpecSource } from '../../server/sim/content/index.js';
 import { kitCoverage } from '../../tools/kit-coverage.mjs';
 import { canTargetAlly } from '../../server/sim/targeting.js';
 import { aggregateMods } from '../../server/sim/buffs.js';
+import { COLS } from '../../server/sim/constants.js';
 
 const ds = getDefaultSource();
 const C = ds.raw.chess;
@@ -215,7 +216,7 @@ test('莫斯提马 module SPC-X 资深万国信使定制斗篷: 攻击范围扩�
 test('莫斯提马 SPC-X: the range becomes the module grid (only the centre tile [0,3] added, no rangeExtend); S3 keeps its own range', () => {
   const id = 'chess_char_4_02_b';
   const modGrid = C[id].modules.find((m) => m.uniEquipId === 'uniequip_003_mostma').talentChanges.find((t) => t.rangeGrid).rangeGrid;
-  const rel = (u) => u.rangeKeys.map((k) => `${Math.floor(k / 21) - u.tileR},${(k % 21) - u.tileC}`).sort();
+  const rel = (u) => u.rangeKeys.map((k) => `${Math.floor(k / COLS) - u.tileR},${(k % COLS) - u.tileC}`).sort();
   const run = (m) => {
     const h = battle([U(id, 10, 3, null, m)]);
     h.step();

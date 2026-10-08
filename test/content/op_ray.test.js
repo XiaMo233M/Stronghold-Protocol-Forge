@@ -12,7 +12,7 @@ import { makeBattle, enemyRec, checkInvariants } from '../helpers/battleHarness.
 import { KITTED_CHARS, OPERATOR_KITS, KITS } from '../../server/sim/content/kits/index.js';
 import { diyPool, validateDiyPicks } from '../../shared/diy.js';
 import { SANDBEAST, SPECIAL_TAG } from '../../server/sim/content/kits/ops/op-ray.js';
-import { PUSH_TILES } from '../../server/sim/constants.js';
+import { COLS, PUSH_TILES  } from '../../server/sim/constants.js';
 
 const load = (f) => JSON.parse(readFileSync(new URL(`../../data/${f}.json`, import.meta.url), 'utf8'));
 const CHESS = load('chess');
@@ -301,7 +301,7 @@ test('沙地兽 (her placed piece): untargetable, 无敌, 禁疗, no attack; whi
       assert.equal(t.kit.skill, null, 'no skill of its own');
       // its area: in her range (and the trigger range of her skill)
       const away = h.spawn('enemy_dummy', { pos: [11, 7] });   // [1,4] of hers: outside 4-9 (and 3-8), inside its 3×3
-      assert.ok(u.rangeKeySet.has(11 * 21 + 7), 'in her range');
+      assert.ok(u.rangeKeySet.has(11 * COLS + 7), 'in her range');
       u.skill.gainSp(999);
       assert.ok(h.runUntil(() => u.skill.active, 1), `${mod}: S3 cast for an enemy of the area only`);
       u.skill.end('test');
@@ -324,7 +324,7 @@ test('沙地兽 (her placed piece): untargetable, 无敌, 禁疗, no attack; whi
       assert.equal(life, 25);
       assert.ok(h.runUntil(() => !t.alive, 30), 'leaves');
       approx(h.b.time, life + h.b.dt, `${mod}: after ${life} s`, 0.02);
-      assert.ok(!u.rangeKeySet.has(11 * 21 + 7), 'her range back');
+      assert.ok(!u.rangeKeySet.has(11 * COLS + 7), 'her range back');
       // back after its redeploy time, paying 3 DP
       h.b.players[0].dp = 10;
       const left = h.b.time;

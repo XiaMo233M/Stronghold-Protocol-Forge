@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import { makeBattle, enemyRec, checkInvariants } from '../helpers/battleHarness.js';
 import { KITTED_CHARS, OPERATOR_KITS, KITS } from '../../server/sim/content/kits/index.js';
 import { diyPool, validateDiyPicks } from '../../shared/diy.js';
+import { COLS } from '../../server/sim/constants.js';
 
 const load = (f) => JSON.parse(readFileSync(new URL(`../../data/${f}.json`, import.meta.url), 'utf8'));
 const CHESS = load('chess');
@@ -32,7 +33,7 @@ const dummy = (key, o = {}) => enemyRec({ key, hp: 1e9, speed: 0, mass: 0, ...o 
 const ENEMIES = { enemy_dummy: dummy('enemy_dummy'), enemy_fly: dummy('enemy_fly', { motion: 'FLY' }), enemy_hitter: dummy('enemy_hitter', { atk: 500, range: 3, bat: 1 }) };
 const FORMS_ALL = [[5, false, null], [6, false, null], ...[5, 6].flatMap((t) => [null, BLAY].map((m) => [t, true, m]))];
 const label = ([tier, elite, mod]) => `T${tier} ${elite ? 'elite' : 'normal'} ${mod ?? 'none'}`;
-const K = (r, c) => r * 21 + c;
+const K = (r, c) => r * COLS + c;
 const sortN = (a) => [...a].sort((x, y) => x - y);
 /** 谬因 at (9, 2) facing RIGHT; her own line (9, 2) … (9, 7). */
 const OWN = [[9, 2], [9, 3], [9, 4], [9, 5], [9, 6], [9, 7]];

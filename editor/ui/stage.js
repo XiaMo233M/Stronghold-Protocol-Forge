@@ -14,14 +14,21 @@ import { roundRows, waveOptions, missingBindings, setRoundBinding, setBossRoundB
 import { packSelect, createPack, autoPackId } from './packPicker.js';
 import { colorOfGlyph, deployRuleOf } from './terrain.js';
 import { createStageView3d } from './stage3d.js';
-// 这一张 19×21 的格子里其实住着三个区（业主 2026-10-08：「为什么要把怪物等待区、普通对战、boss 对战写在一整张大图上」）：
+// 这一张地图的格子里其实住着三个区（业主 2026-10-08：「为什么要把怪物等待区、普通对战、boss 对战写在一整张大图上」）：
 // 分区定义、部署矩形与「道路画在了部署区外」的判定都在 shared/stageAuthoring.js 里，只有一份口径。
-import { STAGE_ZONES, zoneOf, DEPLOY_RECTS, deployRectsAt, roadsOutsideDeployRects } from '../../shared/stageAuthoring.js';
+import { zonesOf, zoneOf, deployRectsAt, roadsOutsideDeployRects, validateStage } from '../../shared/stageAuthoring.js';
+// 一张图自己的**尺寸与分区**（业主 2026-10-08：「把地图做得更大些，加入对大图的支持」）：只有 shared/layout.js 一份口径。
+// 画布永远是最大档位（引擎世界的步长），作者真正画的是**这张图的窗口**（mapSize()），窗口里怎么切块由 mapLayout() 说了算。
+import {
+  SIZE_PRESETS, MAX_ROWS, MAX_COLS, OFFICIAL_SIZE, FIXED_DEPLOY_COLS,
+  sizeOf, sizePresetOf, layoutForSize, layoutOf, normalizeLayout,
+} from '../../shared/layout.js';
 
 const $ = (s) => document.querySelector(s);
 const CELL = 32;                 // 世界坐标里一格 32 单位：19 行 × 32 = 608 高，21 列 × 32 = 672 宽
-const ROWS = 19;
-const COLS = 21;
+// 画布坐标：**不随地图变**，永远是最大档位（官方 11 张图与所有历史数据都落在它的左下角）
+const ROWS = MAX_ROWS;
+const COLS = MAX_COLS;
 const WORLD_W = COLS * CELL;
 const WORLD_H = ROWS * CELL;
 const VIEW_MARGIN = 8;           // fit-to-view 时四周最少留的边距（业主说「只看见左上角一点」，所以留白要小但要有）
@@ -40,9 +47,11 @@ const state = {
   // showPaths 默认 false：业主口径是「不许默认新建地图就有寻路」。它画的是引擎的流场寻路表，
   // 而那张表在没点过「自动寻路」之前根本不该被当成这张图的属性来展示。
   showDeploy: true, showPaths: false, showRoutes: true,
-  // 分区视图（2026-10-08 业主）：一张 19×21 的格子其实是三个区叠在一起（怪物等待区 14–18 / 普通对战 9–12 /
-  // boss 对战 1–5），默认只框住「普通对战」那一带，区外压暗；「整图」保留三合一的老画面给专业检修。
+  // 分区视图（2026-10-08 业主）：一张图的格子其实是三个区叠在一起（怪物等待区 / 普通对战 / boss 对战），
+  // 默认只框住「普通对战」那一带，区外压暗；「整图」保留三合一的老画面给专业检修。
   zone: 'normal', zoneTemplatePick: false,
+  // 分区编辑（「分区」模式）：选中哪一块的哪一条边 / 哪一个角（{name, edge}），以及画布上只画分区不画地形。
+  editingZones: false, zoneHandle: null,
   routeMotion: 'WALK', draft: [],
   message: null, busy: false, autorouting: false, playtesting: false,
   // 「以模板新建」的模板清单：点开才去拉（GET /api/stages/templates），失败就地报错。
@@ -105,19 +114,75 @@ function blankSpec() {
     rows: cells.map((r) => r.join('')),
     tiles: defaultLegend(),
     devices: [],
+    // 新图的尺寸与分区：**官方**（19×21 + 官方布局）。业主口径是「官方图必须与今天完全一样」，
+    // 所以新建一张图不会先给出一个大图 —— 想放大就在右栏的「地图尺寸」里挑一档。
+    size: [...OFFICIAL_SIZE],
+    layout: cloneLayout(layoutForSize(OFFICIAL_SIZE)),
     // groundHighGround: 普通地面能不能放高台（远程位）干员。默认 false —— 业主口径是
     // 「道路放地面干员、高台放远程位，地面能不能放高台必须由作者自己定」。
     options: { characterLimit: 8, moveMultiplier: 0.5, groundHighGround: false },
   };
 }
 
-const rowsFromCells = () => state.cells.map((r) => r.join(''));
+/** 一份可以随便改的布局副本（布局里全是数字，JSON 就是最省事的深拷贝，不可能有循环）。 */
+const cloneLayout = (layout) => JSON.parse(JSON.stringify(layout));
+
+/** 某个尺寸的**默认**布局（拿规范化自己一遍就是它，不另抄一份锚法）。 */
+const defaultLayoutOf = (size) => normalizeLayout(null, sizeOf({ size }));
+
+/**
+ * 两个布局是不是同一个（比规范化之后的完整布局）。
+ * 引擎与授权层只认「规范化之后」的东西，所以「没挪过」这件事也只能这么判 —— 记录里存着的是规范化后的形状。
+ */
+const sameLayout = (a, b) => JSON.stringify(normalizeLayout(a, sizeOf(a))) === JSON.stringify(normalizeLayout(b, sizeOf(b)));
+
+/**
+ * 这张图要不要把 `layout` 写进自己的 spec。
+ *
+ * 业主口径是**官方图逐字节不变**：19×21 的默认布局就等于历史常量，一张没挪过分区的官方图不该因为
+ * 「打开一下、随手保存」就多出一个 layout 字段。所以**只有与默认不一样时才写**（与服务器 deriveStage 同一条口径）。
+ */
+const layoutDiffersFromDefault = () => state.spec?.layout !== undefined && !sameLayout(state.spec.layout, defaultLayoutOf(mapSize()));
+
+
+/** 这张图的窗口 `[rows, cols]`（没有 spec 时按官方尺寸，让首屏与 stub 环境也拿到一个合法值）。 */
+const mapSize = () => sizeOf(state.spec);
+
+/**
+ * 这张图自己的布局（分区）。
+ *
+ * **只读 `state.spec.layout`**，不读模块级的官方 `DEPLOY_RECTS`：作者把普通部署区挪到哪儿，画布、部署读数与
+ * 分区视图就得跟着去哪儿 —— 那正是「大图能自己画分区」这件事的全部意义。
+ */
+const mapLayout = () => layoutOf(state.spec);
+
+/** 布局的矩形（对象形状）→ 可编辑的 `[r0, r1, c0, c1]`。 */
+const rectArr = (r) => [r.r0, r.r1, r.c0, r.c1];
+
+/**
+ * 交给服务器的 rows：**这张图自己的窗口**，不是整块画布。
+ *
+ * 画布永远铺满最大档位（大图画得下），而记录里的 rows 是这张图的 19×21 / 23×27 / 27×33 —— 两者必须是同一件事，
+ * 否则一张官方图会带着 27×33 的 rows 而没有 size，被校验器判成尺寸不符。
+ */
+const rowsFromCells = () => {
+  const [R, C] = mapSize();
+  const out = [];
+  for (let r = 0; r < R; r++) out.push((state.cells[r] ?? []).slice(0, C).join(''));
+  return out;
+};
 
 /** The spec sent to the server: rows come from the painting, everything else from the form. */
 function currentSpec() {
   return {
     id: state.spec.id, name: state.spec.name, weight: state.spec.weight, modes: [...state.spec.modes],
     rows: rowsFromCells(), tiles: state.spec.tiles, devices: state.spec.devices, options: state.spec.options,
+    // 这张图自己的**尺寸与分区**（引擎读它们：layoutOf / viewRectOf）。两条口径：
+    //   * `size` 与官方不同才写 —— 没写 size 的记录就是官方 19×21（所有历史工坊图与官方图都是这样）；
+    //   * `layout` 与这个尺寸的默认不同才写 —— 官方尺寸 + 默认布局就等于历史常量，多写一个字段只是噪音。
+    // 两样都必须显式带上：漏掉就等于「把一张大图存成官方尺寸、把刚挪过的分区丢回默认」。
+    ...(mapSize()[0] !== OFFICIAL_SIZE[0] || mapSize()[1] !== OFFICIAL_SIZE[1] ? { size: mapSize() } : {}),
+    ...(layoutDiffersFromDefault() ? { layout: mapLayout() } : {}),
     // the authored ROUTES (出生点 → 防守点). They live in the spec, not in the stage record: the engine reads routes
     // from the wave template, and the wave layer binds the map's routes to rounds.
     routes: Array.isArray(state.spec.routes) ? state.spec.routes : [],
@@ -133,16 +198,80 @@ function loadSpec(spec) {
   const legend = spec.tiles && Object.keys(spec.tiles).length ? spec.tiles : defaultLegend();
   state.spec.tiles = legend;
   if (!Array.isArray(state.spec.routes)) state.spec.routes = [];
+  // 尺寸：没有声明 size 的就是**官方尺寸**（11 张官方图与所有历史工坊图走的都是这条）。
+  const size = sizeOf(state.spec);
+  if (!Array.isArray(state.spec.size) || state.spec.size[0] !== size[0] || state.spec.size[1] !== size[1]) state.spec.size = size;
+  // 分区：记录里没声明 layout 的就**保持没声明**，只在编辑时（改尺寸 / 拖分区）才写一份进去 ——
+  // 这样「打开一张官方图、随手保存」写回去的仍然是一条没有 layout 的记录。
+  state.spec.layout = spec.layout === undefined || spec.layout === null ? undefined : normalizeLayout(spec.layout, size);
   state.draft = [];
+  state.zoneHandle = null;
+  // 画布上的格子：**只有这张图的窗口里才有字符**，窗口之外是空白（不是空气字形）。
+  // 为什么不是把窗口外填成 `-`：空气是作者能画的一种地形（斜纹是画布叠层），把「根本没有格子」和
+  // 「作者在这里画了空气」画成同一件事会让大图外面一整片斜纹喧宾夺主 —— 窗口的边界由 draw() 那条蓝线交代。
+  const [mapR, mapC] = size;
   state.cells = Array.from({ length: ROWS }, (_, r) => {
     const line = String((spec.rows ?? [])[r] ?? '');
-    return Array.from({ length: COLS }, (_, c) => line[c] ?? 'f');
+    return Array.from({ length: COLS }, (_, c) => (r < mapR && c < mapC ? (line[c] ?? 'f') : ''));
   });
   state.preview = null;
   // 新建 / 换图之后**立刻**推导一次（now=true 不防抖）：3D 预览（默认视图）画的就是这次推导回来的 record，
   // 否则新建一张空图会先看到一块什么都没有的棋盘 —— 业主问的「为什么要先填 id 才能看 3D」正是这个。
   schedulePreview(true);
+  // 换了一张图，画布上方的尺寸条 / 分区工具条都要跟着新图的尺寸重画（syncTools 是它们唯一的入口）
+  syncTools();
   resetView();
+}
+
+// ---- 地图尺寸（大图支持） -----------------------------------------------------------------------------------------
+
+/** 档位名（中文原文进 i18n 词典；写成函数是为了让 i18n 门禁在源码里看得见这些字面量，与 ZONE_LABEL 同一个写法）。 */
+const SIZE_LABEL = {
+  standard: () => t('标准'),
+  large: () => t('大'),
+  huge: () => t('特大'),
+};
+const sizeLabel = (id) => (SIZE_LABEL[id] ? SIZE_LABEL[id]() : id);
+/** `[19, 21]` → `19×21`：界面上到处在说的那个尺寸。 */
+const sizeText = (size) => `${size[0]}×${size[1]}`;
+
+/**
+ * 改这张图的尺寸（档位下拉）。
+ *
+ * 三件事一起做，缺一件作者就会看到自相矛盾的画面：
+ *   1. **reshape rows**：旧图的字符按左下角对齐搬进新窗口（重叠的部分原样保留），新增的行列填**空气** `-`
+ *      —— 大图多出来的那几行几列默认是「地图外」（引擎里就是 tile_forbidden），要画地形就自己刷；
+ *   2. **布局重置成这个尺寸的默认**：旧矩形是照着旧窗口画的，保留它们只会得到一堆越界值（normalizeLayout 会
+ *      静默退回默认，作者却以为自己刚画的还在）；
+ *   3. 重画网格 / 画布、刷新预览与分区视图。
+ */
+function resizeMap(size) {
+  if (!state.spec) return;
+  const [R, C] = sizeOf({ size });
+  if (R === mapSize()[0] && C === mapSize()[1]) return;
+  // 只有真的在编辑时才有 cells（stub / 极端环境下 loadSpec 之前也可能被调到）
+  if (state.cells) {
+    const next = Array.from({ length: ROWS }, (_, r) => Array.from({ length: COLS }, (_, c) => (
+      // 重叠的部分原样保留；新增的行列是空气（空字符串是「窗口之外」，不属于这张图）
+      r < R && c < C ? (state.cells[r]?.[c] || 'f') : ''
+    )));
+    // 新窗口里、旧窗口之外的那几条带子填空气：作者看到的是「这里还没有地形」，不是「这里已经是能站人的地面」
+    for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {
+      const old = state.cells[r]?.[c];
+      if (!old) next[r][c] = '-';
+    }
+    state.cells = next;
+  }
+  state.spec.size = [R, C];
+  state.spec.layout = cloneLayout(layoutForSize([R, C]));
+  state.zoneHandle = null;
+  state.message = { kind: 'ok', text: t('已把地图改成 {0}：多出来的行列填成空气（地图外），分区重置为这个尺寸的默认。', sizeText([R, C])) };
+  if (state.autoFrame) fitZone(state.zone);
+  schedulePreview(true);
+  renderSizeBar();
+  renderZoneBar();
+  renderSide();
+  draw();
 }
 
 // ---- viewport（整图适应视野 + 缩放平移） ---------------------------------------------------------------------------
@@ -169,7 +298,10 @@ function resizeBoard() {
 }
 
 /**
- * fit-to-view 的比例：整张 19×21 塞进画布，四边各留 VIEW_MARGIN。
+ * fit-to-view 的比例：**这张图的窗口**（大图就是它自己那 23×27 / 27×33）塞进画布，四边各留 VIEW_MARGIN。
+ *
+ * 为什么按窗口而不是画布：作者画的是这张图，而多出来的画布行列只是空气 —— 按画布 fit 会让一张 19×21 的官方图
+ * 在 27×33 的画布里缩到中间一小块。
  *
  * 下限 0.01：画布比网格还小时（或者被压缩到几十像素）不能算出负数比例 —— 那会把整张图推到视野之外，
  * 屏幕上看着就是「什么都没画」。真实页面里 .stage-view 有 min-height:200px，这条只是兜底。
@@ -177,7 +309,8 @@ function resizeBoard() {
 function fitScale() {
   const w = state.boardW || WORLD_W;
   const h = state.boardH || WORLD_H;
-  return Math.max(0.01, Math.min((w - VIEW_MARGIN * 2) / WORLD_W, (h - VIEW_MARGIN * 2) / WORLD_H));
+  const [R, C] = mapSize();
+  return Math.max(0.01, Math.min((w - VIEW_MARGIN * 2) / (C * CELL), (h - VIEW_MARGIN * 2) / (R * CELL)));
 }
 
 /** 当前每世界单位占多少 CSS 像素（fit 比例 × 作者的 zoom）。 */
@@ -189,10 +322,13 @@ function resetView() {
   state.autoFrame = true;
   centerView();
 }
+/** 把**这张图的窗口**居中（官方图仍是整幅画布，大图则是它自己贴左下角的那一块）。 */
 function centerView() {
   const s = viewScale();
-  state.panX = (state.boardW - WORLD_W * s) / 2;
-  state.panY = (state.boardH - WORLD_H * s) / 2;
+  const [R, C] = mapSize();
+  state.panX = (state.boardW - C * CELL * s) / 2;
+  // 窗口占的是画布最下面那几行（row 0 在最底下），所以它自己的中心 = 画布高 − 它的一半高
+  state.panY = state.boardH - (R * CELL * s) / 2;
 }
 
 /** 把视图平移限制在「世界始终有一部分留在画布上」的范围内，免得作者把地图推出屏幕再也找不回来。 */
@@ -208,6 +344,34 @@ function clampView() {
 
 /** 当前分区（永远返回一个合法的 zone：state.zone 只是 UI 状态，坏值不该让页面炸）。 */
 const currentZone = () => zoneOf(state.zone);
+
+/**
+ * 这张图的四个分区**按它自己的布局**算。
+ *
+ * 底子是 `shared/stageAuthoring.js` 的 `zonesOf(size)`（尺寸决定的行带），但作者在「分区」模式里能把部署矩形
+ * 与等待区整块挪走 —— 那时等待区、普通带、boss 带的行号全都要跟着变，否则画布压暗的那一带与他刚画的分区就
+ * 分家了。官方图（没有声明 layout）的布局就是默认布局，于是解出来逐行等于 `zonesOf` 的历史常量。
+ */
+function zonesNow() {
+  const size = mapSize();
+  const lay = mapLayout();
+  const defaults = new Map(zonesOf(size).map((z) => [z.id, z]));
+  const withRows = (id, rows) => {
+    const base = defaults.get(id);
+    return { id, rows, deployRects: base ? [...base.deployRects] : [] };
+  };
+  const [nR0, nR1] = lay.deployRects.normal;
+  const [bR0, bR1] = lay.deployRects.bossLeft;
+  return [
+    withRows('pen', [lay.pen.r0, lay.pen.r1]),
+    withRows('normal', [nR0, nR1]),
+    withRows('boss', [bR0, bR1]),
+    withRows('all', [0, size[0] - 1]),
+  ];
+}
+
+/** 这一区按当前布局的行带（坏 id 退回整图，与 zoneOf 同一条退路）。 */
+const zoneRowsNow = (id) => (zonesNow().find((z) => z.id === id) ?? zonesNow()[3]).rows;
 
 /** 分区名与部署矩形名（中文原文进 i18n 词典查英文；写成函数是为了让 i18n 门禁在源码里看得见这些字面量）。 */
 const ZONE_LABEL = {
@@ -227,20 +391,23 @@ const rectLabel = (name) => (RECT_LABEL[name] ? RECT_LABEL[name]() : name);
 /**
  * 把视口框到某一区。
  *
- * 竖直方向正好放下这一带（怪物等待区 5 行 / 普通对战 4 行 / boss 5 行），横向仍然要求整幅 21 列都在视野里 ——
- * 场地是横着铺开的（普通对战那一带的部署矩形只占 2–10 列，但同一行还有别的区域），只按高度去 fit 会把左右两侧
- * 推出屏幕，作者反而更看不清。区外照旧画出来，只是压暗。
+ * 竖直方向正好放下这一带（怪物等待区 5 行 / 普通对战 4 行 / boss 5 行），横向仍然要求**这张图的整幅宽度**都在
+ * 视野里 —— 场地是横着铺开的（普通对战那一带的部署矩形只占 2–10 列，但同一行还有别的区域），只按高度去 fit
+ * 会把左右两侧推出屏幕，作者反而更看不清。区外照旧画出来，只是压暗。
+ *
+ * 行带与宽度都按**这张图自己的布局**来（zonesNow()）：作者在「分区」模式里把普通带整块挪走之后，
+ * 「框到普通对战」要框的是他挪到的那几行，而不是历史常量那四行。
  */
 function fitZone(id = state.zone) {
-  const z = zoneOf(id);
-  const [r0, r1] = z.rows;
+  const [r0, r1] = zoneRowsNow(id);
+  const C = mapSize()[1];
   const bandH = (r1 - r0 + 1) * CELL;
   const m = VIEW_MARGIN * 2;
-  const fit = Math.min((state.boardW - m) / WORLD_W, (state.boardH - m) / bandH);
+  const fit = Math.min((state.boardW - m) / (C * CELL), (state.boardH - m) / bandH);
   // fitScale() 本身与 state.zoom 无关（它就是「整张图塞进画布」那个比例），所以这里直接拿它当基准。
   state.zoom = Math.max(0.2, Math.min(8, fit / fitScale()));
   const s = viewScale();
-  state.panX = (state.boardW - WORLD_W * s) / 2;
+  state.panX = (state.boardW - C * CELL * s) / 2;
   const bandCenter = (py(r0) + py(r1) + CELL) / 2;
   state.panY = state.boardH / 2 - bandCenter * s;
   state.autoFrame = true;
@@ -266,12 +433,6 @@ function applyWorld() {
   const dpr = Math.min(2, globalThis.devicePixelRatio || 1);
   const s = viewScale() * dpr;
   ctx.setTransform(s, 0, 0, s, state.panX * dpr, state.panY * dpr);
-}
-
-/** 一格在屏幕上的边长（四舍五入到整像素）：整像素才会画出干净的网格线。 */
-function cellScreen() {
-  const dpr = Math.min(2, globalThis.devicePixelRatio || 1);
-  return Math.max(1, Math.round(CELL * viewScale() * dpr)) / dpr;
 }
 
 /**
@@ -301,6 +462,9 @@ const py = (r) => (ROWS - 1 - r) * CELL;
  * 必须走 getBoundingClientRect() + 当前缩放平移反算（不能再用 rect.width/COLS）：画布会跟着容器变尺寸、
  * 还会被 zoom/pan 变换，直接按比例除会在任何缩放平移下落错格 —— 画笔就会画到旁边一格去。
  * 0.5 是画布的 1px 边框（box-sizing:border-box，rect 含边框而内容区不含）。
+ *
+ * 只认**这张图的窗口**（mapSize()）：窗口之外是画布上多出来的格子，采样与画笔都不该落在那儿
+ * （`paintAt` 还会再兜一道空字符串）。
  */
 const cellAt = (ev) => {
   if (!canvas) return null;
@@ -314,7 +478,8 @@ const cellAt = (ev) => {
   const c = Math.floor(wx / CELL);
   const rr = Math.floor(wy / CELL);
   const r = ROWS - 1 - rr;
-  return r >= 0 && r < ROWS && c >= 0 && c < COLS ? { r, c } : null;
+  const [mapR, mapC] = mapSize();
+  return r >= 0 && r < mapR && c >= 0 && c < mapC ? { r, c } : null;
 };
 
 function draw() {
@@ -323,11 +488,13 @@ function draw() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (!state.cells) return;
-  const cs = cellScreen();
   applyWorld();
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       const g = state.cells[r][c];
+      // 窗口之外没有格子（大图旁边多出来的画布）：只上底色，不画斜纹 —— 斜纹是「作者在这里画了空气」
+      // 的意思，整片画布都铺满它会把真正的图淹掉。
+      if (!g) { ctx.fillStyle = '#0b0d11'; ctx.fillRect(c * CELL, py(r), CELL, CELL); continue; }
       const entry = state.spec?.tiles?.[g];
       // 空气（地图外）：暗底色 + 斜纹，不画成实心墙 —— 画成墙会让作者以为那是地形
       const air = isAirTile(g, entry);
@@ -338,17 +505,25 @@ function draw() {
     }
   }
   // 网格线单独走一遍：一条路径比每格一次 strokeRect 快得多
+  const [mapR, mapC] = mapSize();
   ctx.beginPath();
   for (let c = 0; c <= COLS; c++) { ctx.moveTo(c * CELL, 0); ctx.lineTo(c * CELL, WORLD_H); }
   for (let i = 0; i <= ROWS; i++) { ctx.moveTo(0, i * CELL); ctx.lineTo(WORLD_W, i * CELL); }
   ctx.strokeStyle = '#00000044';
   ctx.lineWidth = 1 / Math.max(0.35, viewScale());
   ctx.stroke();
+  // 这张图的**边界**：窗口之外是画布上多出来的格子（空气），画一条界线，大图上才看得出「我的图到哪儿为止」。
+  ctx.strokeStyle = '#5b9dffa0';
+  ctx.lineWidth = lineWorld(2);
+  ctx.strokeRect(-CELL / 2, py(mapR - 1) - CELL / 2, mapC * CELL + CELL, mapR * CELL + CELL);
   // 分区叠层（业主 2026-10-08）：这一张格子里住着三个区，先把「不在当前区」的那些行压暗，
   // 再把这一区自己的部署矩形描出来。为什么必须画矩形：能不能部署是**两件事** —— 这一格在不在部署矩形里，
   // 以及这一格自己的可部署属性；只看地块颜色的话，「是路就能放干员」这个直觉会在矩形外当场失效。
+  //
+  // 矩形读的是**这张图自己的布局**（mapLayout()），不是模块级的官方常量：作者在「分区」模式里把普通部署区
+  // 挪到别处之后，画布上描出来的必须是他刚画的那一块。
   const zoneNow = currentZone();
-  const [zr0, zr1] = zoneNow.rows;
+  const [zr0, zr1] = zoneRowsNow(zoneNow.id);
   if (zoneNow.id !== 'all') {
     ctx.fillStyle = '#05070ad0';
     const bandTop = py(zr1);
@@ -356,9 +531,10 @@ function draw() {
     if (bandTop > 0) ctx.fillRect(0, 0, WORLD_W, bandTop);
     if (bandBottom < WORLD_H) ctx.fillRect(0, bandBottom, WORLD_W, WORLD_H - bandBottom);
   }
-  if (state.showDeploy) {
+  const rectsNow = mapLayout().deployRects;
+  if (state.showDeploy && !state.editingZones) {
     for (const name of zoneNow.deployRects) {
-      const rect = DEPLOY_RECTS[name];
+      const rect = rectsNow[name];
       if (!rect) continue;
       const [r0, r1, c0, c1] = rect;
       const x = c0 * CELL; const y = py(r1); const w = (c1 - c0 + 1) * CELL; const h = (r1 - r0 + 1) * CELL;
@@ -373,6 +549,9 @@ function draw() {
       ctx.fillText(rectLabel(name), x + 3 * textWorld(1), y + 12 * textWorld(1));
     }
   }
+  // 「分区」模式：地形压暗，三块部署区 / 三个战斗矩形 / 等待区与镜像轴画在最上面，带头是可拖的。
+  // 这一模式下**只画分区**（不改地形）：作者进这一模式就是为了把分区摆对，地形与路线叠在上面只会挡住线。
+  if (state.editingZones) { drawZoneEditor(); return; }
   const rec = state.preview?.record;
   // deploy tiles: what the sim derives, not what the author typed
   if (state.showDeploy && rec?.deployTiles) {
@@ -456,7 +635,456 @@ function draw() {
   const zoneLabelNow = currentZone();
   ctx.fillStyle = '#e8eaf0e6';
   ctx.font = `bold ${textWorld(12)}px sans-serif`;
-  ctx.fillText(zoneLabel(zoneLabelNow.id), 3 * textWorld(1), py(zoneLabelNow.rows[1]) + 14 * textWorld(1));
+  ctx.fillText(zoneLabel(zoneLabelNow.id), 3 * textWorld(1), py(zoneRowsNow(zoneLabelNow.id)[1]) + 14 * textWorld(1));
+  // 尺寸贴在这张图窗口的右下角：大图上「我的图到底多大」是每时每刻都要看得见的一件事
+  ctx.fillStyle = '#9aa3b2e6';
+  ctx.font = `${textWorld(11)}px monospace`;
+  ctx.fillText(sizeText(mapSize()), (mapC - 5) * CELL, py(0) - 4 * textWorld(1));
+}
+
+// ---- 「分区」模式的画布叠层（可拖的分区） ---------------------------------------------------------------------------
+
+/**
+ * 分区带头的名字（中文原文进 i18n 词典；写成函数是为了让 i18n 门禁在源码里看得见这些字面量）。
+ * `battle` 的五个矩形各有自己的名字，键就是 layout.battle 的键。
+ */
+const BATTLE_LABEL = {
+  normal: () => t('普通战斗矩形'),
+  prep: () => t('整备矩形'),
+  unite: () => t('联防满宽矩形'),
+  boss: () => t('boss 战斗矩形'),
+  bossPrep: () => t('boss 整备矩形'),
+};
+const battleLabel = (key) => (BATTLE_LABEL[key] ? BATTLE_LABEL[key]() : key);
+const PEN_LABEL = () => t('怪物等待区');
+const MIRROR_LABEL = () => t('镜像轴');
+
+/** 部署场名字（普通 / boss 左半 / boss 右半）—— 与 shared 那边的字段名同一套。 */
+const FIELD_LABEL = {
+  normal: () => t('普通'),
+  bossLeft: () => t('boss 左半'),
+  bossRight: () => t('boss 右半'),
+};
+const fieldLabel = (name) => (FIELD_LABEL[name] ? FIELD_LABEL[name]() : name);
+
+/** 一条边在画布上拖时改哪两个数：左/右改列，上/下改行，四个角各改一个行一个列。 */
+const HANDLE_SPECS = Object.freeze([
+  Object.freeze({ key: 'nw', fx: 1, fy: 1, cursor: 'nwse-resize' }),
+  Object.freeze({ key: 'ne', fx: 0, fy: 1, cursor: 'nesw-resize' }),
+  Object.freeze({ key: 'se', fx: 0, fy: 0, cursor: 'nwse-resize' }),
+  Object.freeze({ key: 'sw', fx: 1, fy: 0, cursor: 'nesw-resize' }),
+  Object.freeze({ key: 'n', fx: 0, fy: 1, cursor: 'ns-resize' }),
+  Object.freeze({ key: 's', fx: 0, fy: 0, cursor: 'ns-resize' }),
+  Object.freeze({ key: 'w', fx: 1, fy: 0, cursor: 'ew-resize' }),
+  Object.freeze({ key: 'e', fx: 0, fy: 0, cursor: 'ew-resize' }),
+]);
+/** 一个带头的 `[x, y]`（世界坐标；x 跟列走，y 跟行走且 row 0 在最下面）。 */
+/* eslint-disable no-unused-vars -- 四条边与四个角共用同一个签名，用不到的那个参数才不用 */
+const HANDLE_XY = {
+  nw: (r0, r1, c0, c1) => [c0 * CELL, py(r1)],
+  ne: (r0, r1, c0, c1) => [(c1 + 1) * CELL, py(r1)],
+  se: (r0, r1, c0, c1) => [(c1 + 1) * CELL, py(r0) + CELL],
+  sw: (r0, r1, c0, c1) => [c0 * CELL, py(r0) + CELL],
+  n: (r0, r1, c0, c1) => [(c0 + (c1 - c0 + 1) / 2) * CELL, py(r1)],
+  s: (r0, r1, c0, c1) => [(c0 + (c1 - c0 + 1) / 2) * CELL, py(r0) + CELL],
+  w: (r0, r1, c0, c1) => [c0 * CELL, py(r0) + CELL / 2],
+  e: (r0, r1, c0, c1) => [(c1 + 1) * CELL, py(r0) + CELL / 2],
+};
+/* eslint-enable no-unused-vars */
+/** 带头在屏幕上的半径（像素），也决定命中范围。 */
+const HANDLE_R = 7;
+
+/** 一个矩形在画布上的标签 —— 由画它的人临时指定（部署区 / 战斗矩形 / 等待区各有各的名字）。 */
+let labelOfRect = () => '';
+const rectLabelOf = (rect) => labelOfRect(rect);
+
+/** 按布局画一个矩形（`[r0, r1, c0, c1]`，画布世界坐标）。 */
+function strokeRectArr(rect, color, dash = true) {
+  const [r0, r1, c0, c1] = rect;
+  const x = c0 * CELL, y = py(r1), w = (c1 - c0 + 1) * CELL, h = (r1 - r0 + 1) * CELL;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWorld(2);
+  ctx.setLineDash(dash ? [lineWorld(6), lineWorld(4)] : []);
+  ctx.strokeRect(x, y, w, h);
+  ctx.setLineDash([]);
+  ctx.fillStyle = color;
+  ctx.font = `${textWorld(11)}px sans-serif`;
+  ctx.fillText(rectLabelOf(rect), x + 3 * textWorld(1), y + 12 * textWorld(1));
+}
+
+/** 一个矩形在画布上的八个带头（选中的那一个更大、更亮）。 */
+function drawHandles(kind, name, rect) {
+  for (const spec of HANDLE_SPECS) {
+    const [x, y] = HANDLE_XY[spec.key](...rect);
+    const on = state.zoneHandle && state.zoneHandle.kind === kind && state.zoneHandle.name === name && state.zoneHandle.edge === spec.key;
+    ctx.beginPath();
+    ctx.arc(x, y, on ? HANDLE_R + 2 : HANDLE_R, 0, Math.PI * 2);
+    ctx.fillStyle = on ? '#ffd166' : '#e8eaf0d0';
+    ctx.fill();
+    ctx.strokeStyle = '#0f1116';
+    ctx.lineWidth = lineWorld(1.5);
+    ctx.stroke();
+  }
+}
+
+/**
+ * 「分区」模式的画布：地形压暗，三块部署区 / 五个战斗矩形 / 等待区与镜像轴画在最上面，每条边与每个角都能拖。
+ *
+ * 为什么地形要压到几乎看不见：这一模式下作者动的是**分区**（棋盘落在哪儿、等待区在哪儿），而不是地形；
+ * 地形留在下面是为了让他看出「我把部署区挪到了哪一片路上」，压暗是为了让线看得清。
+ */
+function drawZoneEditor() {
+  const lay = mapLayout();
+  const [R, C] = mapSize();
+  ctx.fillStyle = '#05070ad8';
+  ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+  // 战场（五个战斗矩形）先画：它们是取景窗口，比部署矩形大
+  const battleColors = { normal: '#5b9dffb0', prep: '#5b9dff70', unite: '#a06bffa0', boss: '#f0b357a0', bossPrep: '#f0b35770' };
+  for (const key of ['normal', 'prep', 'unite', 'boss', 'bossPrep']) {
+    const rect = rectArr(lay.battle[key]);
+    labelOfRect = () => battleLabel(key);
+    strokeRectArr(rect, battleColors[key]);
+    drawHandles('battle', key, rect);
+  }
+  // 怪物等待区
+  const penRect = rectArr(lay.pen);
+  labelOfRect = PEN_LABEL;
+  strokeRectArr(penRect, '#4ec98ab0');
+  drawHandles('pen', 'pen', penRect);
+  // 三块部署矩形：棋盘本身（普通 4×9、boss 半场 5×9），它们决定「哪里能放干员」
+  const rectColors = { normal: '#4ec98af0', bossLeft: '#ff8f3ff0', bossRight: '#ffcf5af0' };
+  for (const name of ['normal', 'bossLeft', 'bossRight']) {
+    const rect = lay.deployRects[name];
+    labelOfRect = () => `${rectLabel(name)} · ${fieldLabel(name)}`;
+    strokeRectArr(rect, rectColors[name], false);
+    drawHandles('deploy', name, rect);
+  }
+  // 镜像轴：boss 右半场就是过它翻过来的那一列，所以它也是一条能拖的线
+  const mx = lay.mirrorCol * CELL + CELL / 2;
+  const on = !!(state.zoneHandle && state.zoneHandle.kind === 'mirror');
+  ctx.strokeStyle = on ? '#ffd166' : '#ffcf5af0';
+  ctx.lineWidth = lineWorld(on ? 3 : 2);
+  ctx.setLineDash([lineWorld(8), lineWorld(5)]);
+  ctx.beginPath();
+  ctx.moveTo(mx, py(R - 1) - CELL / 2);
+  ctx.lineTo(mx, py(0) + CELL * 1.5);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = ctx.strokeStyle;
+  ctx.font = `${textWorld(11)}px sans-serif`;
+  ctx.fillText(MIRROR_LABEL(), mx + 3 * textWorld(1), py(R - 1) + 12 * textWorld(1));
+  // 镜像轴的带头：拖它就是在挑「两个半场相接的那一列」
+  ctx.beginPath();
+  ctx.arc(mx, py(Math.round((R - 1) / 2)) + CELL / 2, on ? HANDLE_R + 2 : HANDLE_R, 0, Math.PI * 2);
+  ctx.fillStyle = on ? '#ffd166' : '#e8eaf0d0';
+  ctx.fill();
+  ctx.strokeStyle = '#0f1116';
+  ctx.lineWidth = lineWorld(1.5);
+  ctx.stroke();
+  // 左上角写明这是哪一模式、以及这张图多大
+  ctx.fillStyle = '#e8eaf0e6';
+  ctx.font = `bold ${textWorld(12)}px sans-serif`;
+  ctx.fillText(`${t('分区编辑')} · ${sizeText([R, C])}`, 3 * textWorld(1), py(R - 1) + 14 * textWorld(1));
+}
+
+// ---- 「分区」模式的编辑（拖 & 数字输入） ---------------------------------------------------------------------------
+
+/** 一块分区的一部分：部署矩形（行可动、列定死）/ 战斗矩形 / 等待区 / 镜像轴。 */
+const DEPLOY_NAMES = Object.freeze(['normal', 'bossLeft', 'bossRight']);
+const BATTLE_NAMES = Object.freeze(['normal', 'prep', 'unite', 'boss', 'bossPrep']);
+
+/** 一个分区在画布上的矩形 `[r0, r1, c0, c1]`（镜像轴没有矩形，返回 null）。 */
+function rectAt(kind, name) {
+  const r = zoneRect(kind, name);
+  return r ? rectArr(r) : null;
+}
+
+/** 一个分区在布局里的那个矩形**对象**（就地改它，就是改这张图的分区）。 */
+function zoneRect(kind, name) {
+  const lay = mapLayout();
+  if (kind === 'deploy' && DEPLOY_NAMES.includes(name)) {
+    const [r0, r1] = lay.deployRects[name];
+    return { r0, r1, c0: FIXED_DEPLOY_COLS[name][0], c1: FIXED_DEPLOY_COLS[name][1] };
+  }
+  if (kind === 'battle' && lay.battle[name]) return lay.battle[name];
+  if (kind === 'pen') return lay.pen;
+  return null;
+}
+
+/** 往布局里写回一个分区矩形（部署矩形是**数组**形状，其余是对象形状；两边的形状都不能混）。 */
+function setZoneRect(kind, name, r) {
+  const lay = mapLayout();
+  if (kind === 'deploy' && DEPLOY_NAMES.includes(name)) lay.deployRects[name] = [r.r0, r.r1, FIXED_DEPLOY_COLS[name][0], FIXED_DEPLOY_COLS[name][1]];
+  else if (kind === 'battle' && lay.battle[name]) lay.battle[name] = { ...r };
+  else if (kind === 'pen') lay.pen = { ...r };
+  state.spec.layout = lay;
+}
+
+/** 一条边能挪到哪儿（行是自由的；列只在没定死的那些矩形上才谈得上）。 */
+function zoneBounds() {
+  const [R, C] = mapSize();
+  return { rMin: 0, rMax: R - 1, cMin: 0, cMax: C - 1 };
+}
+
+/** 一条边 / 一个角拖到画布上哪一格：x → 列，y → 行（row 0 在最下面，所以要翻过来）。 */
+function cellAtWorld(wx, wy) {
+  return { r: ROWS - 1 - Math.floor(wy / CELL), c: Math.floor(wx / CELL) };
+}
+
+/** 部署矩形是**棋盘本身**：上下两条边一拖就是整块棋盘上下挪，4 行 / 5 行的深度一个字都不能变。 */
+function deployRowRange(kind, name) {
+  const [R] = mapSize();
+  const depth = kind === 'deploy' && name === 'normal' ? 4 : 5;
+  return { depth, min: 0, max: R - depth };
+}
+
+/**
+ * 按拖到的那一格改一个分区的一条边 / 一个角。分数被吃掉：格点吸附（一个方块就是一个格子）。
+ *
+ * 三条自我约束，都是「不许**拖**出坏数据」：
+ *   * 上下两条边不能交叉（r0 ≤ r1），左右同理 —— 交叉出来的矩形不是「另一种设计」，是授权层会退回默认的坏数据；
+ *   * **部署矩形整块挪**：它 4 行（普通）/ 5 行（boss 半场）的深度就是棋盘的深度，只拖一条边会把它拉成 5 行 /
+ *     6 行，而 `normalizeLayout` 遇到形状不对的矩形会**静默退回默认** —— 作者看着自己的改动被吃掉；
+ *   * **列只在没被定死的时候才动**：三块部署矩形的列由 `FIXED_DEPLOY_COLS` 定死（棋盘 9 列、两个半场在 col 10
+ *     相接、镜像轴 20 三者互相咬着），左右拖它们不会改变任何东西 —— 界面里那四个输入框也是只读的。
+ */
+function applyHandle(kind, name, edge, cell) {
+  if (kind === 'mirror') return false;
+  const r = zoneRect(kind, name);
+  if (!r) return false;
+  const { rMin, rMax, cMin, cMax } = zoneBounds();
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  if (kind === 'deploy') {
+    const { depth, min, max } = deployRowRange(kind, name);
+    // 北边（画布上更靠上 = 行号更大）拖到哪儿，整块棋盘就跟着到哪儿
+    const want = edge.includes('n') ? cell.r - (depth - 1) : cell.r;
+    r.r0 = clamp(want, min, max);
+    r.r1 = r.r0 + depth - 1;
+    setZoneRect(kind, name, r);
+    return true;
+  }
+  if (edge.includes('n')) r.r1 = clamp(cell.r, r.r0, rMax);
+  else if (edge.includes('s')) r.r0 = clamp(cell.r, rMin, r.r1);
+  if (edge.includes('w')) r.c0 = clamp(cell.c, cMin, r.c1);
+  else if (edge.includes('e')) r.c1 = clamp(cell.c, r.c0, cMax);
+  setZoneRect(kind, name, r);
+  return true;
+}
+
+/** 选中一条边之后按方向键：上下左右各挪一格（部署矩形同样是整块挪一格）。 */
+function nudgeHandle(dr, dc) {
+  const h = state.zoneHandle;
+  if (!h || h.kind === 'mirror') return;
+  const r = zoneRect(h.kind, h.name);
+  if (!r) return;
+  const { rMin, rMax, cMin, cMax } = zoneBounds();
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  if (h.kind === 'deploy') {
+    if (dr) {
+      const { depth, min, max } = deployRowRange(h.kind, h.name);
+      r.r0 = clamp(r.r0 + dr, min, max);
+      r.r1 = r.r0 + depth - 1;
+    }
+  } else {
+    if (dr && h.edge.includes('n')) r.r1 = clamp(r.r1 + dr, r.r0, rMax);
+    else if (dr && h.edge.includes('s')) r.r0 = clamp(r.r0 + dr, rMin, r.r1);
+    if (dc) {
+      if (h.edge.includes('w')) r.c0 = clamp(r.c0 + dc, cMin, r.c1);
+      else if (h.edge.includes('e')) r.c1 = clamp(r.c1 + dc, r.c0, cMax);
+    }
+  }
+  setZoneRect(h.kind, h.name, r);
+  afterZoneEdit();
+}
+
+/** 一个分区在界面上叫什么。 */
+function zoneNameOf(kind, name) {
+  if (kind === 'mirror') return MIRROR_LABEL();
+  if (kind === 'deploy') return `${rectLabel(name)} · ${fieldLabel(name)}`;
+  if (kind === 'battle') return battleLabel(name);
+  return PEN_LABEL();
+}
+
+/** 一次分区改动之后：立刻推导一次（部署图是引擎按这张图的矩形算出来的），重画画布与右栏。 */
+function afterZoneEdit() {
+  draw();
+  schedulePreview(true);
+}
+
+/**
+ * 「分区」模式的数字面板：每块分区四个 `r0 / r1 / c0 / c1`，改数即改分区。
+ *
+ * 两条界面口径：
+ *   * 三块**部署矩形**的列是只读的（棋盘 9 列、两个半场在 col 10 相接、镜像轴 20 三者咬在一起，列一挪
+ *     对战镜像就对不上；`FIXED_DEPLOY_COLS`）—— 摆出来是为了让作者看见它们在哪儿，而不是让他去改；
+ *   * 「重置为尺寸默认」只把分区还原成这张图尺寸的默认布局，不动 rows。
+ */
+function zonePanel() {
+  const box = document.createElement('div');
+  box.className = 'panel zone-edit';
+  const head = document.createElement('p');
+  head.className = 'hint';
+  head.textContent = t('这里能改的是「分区」：部署区、战斗矩形、怪物等待区。左右拖只对没定死的那些矩形有效，上下拖都能挪。');
+  box.append(head);
+
+  const rectInputs = (kind, name, editableCols) => {
+    const rt = zoneRect(kind, name);
+    if (!rt) return null;
+    const isDeploy = kind === 'deploy';
+    const row = document.createElement('div');
+    row.className = 'zrect';
+    const label = document.createElement('span');
+    label.className = 'zl';
+    label.textContent = zoneNameOf(kind, name);
+    const fields = document.createElement('div');
+    fields.className = 'zr';
+    const mk = (key, enabled) => {
+      const wrap = document.createElement('label');
+      wrap.className = 'zf';
+      wrap.append(document.createTextNode(key));
+      const inp = document.createElement('input');
+      inp.type = 'number'; inp.step = '1';
+      inp.value = String(rt[key]);
+      inp.readOnly = !enabled;
+      inp.disabled = !enabled;
+      inp.title = !enabled
+        ? t('{0} 由棋盘定死（两个半场在 col 10 相接、镜像轴 20），不能改', key)
+        : (isDeploy ? t('{0}（改这一格就是整块棋盘上下挪）', key) : t('{0}（改这一格就是改分区）', key));
+      inp.addEventListener('input', () => {
+        const v = Math.round(Number(inp.value));
+        if (!Number.isFinite(v)) return;
+        const cur = zoneRect(kind, name);
+        if (!cur) return;
+        const { rMin, rMax, cMin, cMax } = zoneBounds();
+        const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+        if (isDeploy) {
+          // 部署矩形整块挪：改 r0 就是改棋盘落在哪一行，r1 必须跟着（4 行 / 5 行的深度不许变，
+          // 变了 normalizeLayout 会静默退回默认 —— 作者会以为自己的改动丢了）。
+          const { depth, min, max } = deployRowRange(kind, name);
+          cur.r0 = clamp(v, min, max);
+          cur.r1 = cur.r0 + depth - 1;
+        } else if (key === 'r0') cur.r0 = clamp(v, rMin, cur.r1);
+        else if (key === 'r1') cur.r1 = clamp(v, cur.r0, rMax);
+        else if (key === 'c0') cur.c0 = clamp(v, cMin, cur.c1);
+        else cur.c1 = clamp(v, cur.c0, cMax);
+        setZoneRect(kind, name, cur);
+        // 就地回写四个框（夹过之后作者要看到真值），然后重画 —— **不重建右栏**，否则每敲一位数字就丢焦点。
+        const now = zoneRect(kind, name);
+        for (const el of fields.querySelectorAll('input')) {
+          const kk = el.dataset.k;
+          if (kk && el !== inp) el.value = String(now[kk]);
+        }
+        afterZoneEdit();
+      });
+      inp.dataset.k = key;
+      wrap.append(inp);
+      return wrap;
+    };
+    fields.append(mk('r0', true), mk('r1', true), mk('c0', editableCols), mk('c1', editableCols));
+    row.append(label, fields);
+    return row;
+  };
+
+  for (const name of DEPLOY_NAMES) {
+    const el = rectInputs('deploy', name, false);
+    if (el) box.append(el);
+  }
+  for (const name of BATTLE_NAMES) {
+    const el = rectInputs('battle', name, true);
+    if (el) box.append(el);
+  }
+  const penRow = rectInputs('pen', 'pen', true);
+  if (penRow) box.append(penRow);
+
+  const mirror = document.createElement('p');
+  mirror.className = 'hint';
+  mirror.textContent = t('镜像轴：boss 右半场就是过第 {0} 列翻过来的（由棋盘定死，只作标注）。', mapLayout().mirrorCol);
+  box.append(mirror);
+
+  const actions = document.createElement('div');
+  actions.className = 'row';
+  const reset = document.createElement('button');
+  reset.className = 'ghost';
+  reset.textContent = t('重置为尺寸默认');
+  reset.addEventListener('click', () => {
+    // 重置 = 回到这张图尺寸的默认布局；rows **一个字节都不动**（作者画的地形不是分区的一部分）
+    state.spec.layout = cloneLayout(defaultLayoutOf(mapSize()));
+    state.zoneHandle = null;
+    state.message = { kind: 'ok', text: t('分区已重置为 {0} 的默认布局。', sizeText(mapSize())) };
+    schedulePreview(true);
+    renderZoneBar();
+    renderSide();
+    draw();
+  });
+  actions.append(reset);
+  const live = liveZoneErrors();
+  if (live.length) {
+    const bad = document.createElement('div');
+    bad.className = 'err';
+    bad.textContent = t('分区有问题（保存会被拦下）：{0}', live.map((e) => `${e.field} [${e.code}]`).join('、'));
+    box.append(bad);
+  } else {
+    box.append(Object.assign(document.createElement('p'), { className: 'ok', textContent: t('✔ 分区合法') }));
+  }
+  box.append(actions);
+  return box;
+}
+
+/**
+ * 这张图现在的分区能不能过**客户端那份**校验（`shared/stageAuthoring.js` 的 validateStage）。
+ *
+ * 为什么在编辑器里也查一遍：分区面板是唯一能改动 `spec.layout` 的地方，而 `validateStage` 正是「越界 / 变形 /
+ * 挪了不该挪的列」的判据 —— 面板里当场说出来，作者不用等一次保存才知道。
+ */
+function liveZoneErrors() {
+  try {
+    const issues = validateStage({ ...currentSpec(), id: state.spec?.id || 'map', layout: mapLayout() });
+    return issues.filter((i) => i.severity === 'error' && String(i.field).startsWith('layout'));
+  } catch { return []; }
+}
+
+/** 候选带头：三块部署矩形 + 五个战斗矩形 + 等待区 + 镜像轴。 */
+function handleCandidates() {
+  const out = [];
+  for (const name of DEPLOY_NAMES) out.push({ kind: 'deploy', name });
+  for (const name of BATTLE_NAMES) out.push({ kind: 'battle', name });
+  out.push({ kind: 'pen', name: 'pen' });
+  out.push({ kind: 'mirror', name: 'mirror' });
+  return out;
+}
+
+/** 这个屏幕点上有没有带头（半径是屏幕像素，所以命中范围在任何缩放下都一样大）。 */
+function hitHandle(ev) {
+  if (!canvas) return null;
+  const rect = canvas.getBoundingClientRect();
+  const s = viewScale();
+  if (!(s > 0)) return null;
+  const x = ev.clientX - rect.left;
+  const y = ev.clientY - rect.top;
+  const reach = (HANDLE_R + 5) ** 2;
+  let best = null;
+  let bestD = reach;
+  const consider = (h, wx, wy) => {
+    const dx = screenX(wx) - x;
+    const dy = screenY(wy) - y;
+    const d = dx * dx + dy * dy;
+    if (d <= bestD) { bestD = d; best = h; }
+  };
+  for (const h of handleCandidates()) {
+    // 镜像轴的把手在窗口正中那一行（与 drawZoneEditor 画的那一个同一条公式）
+    if (h.kind === 'mirror') {
+      const [R] = mapSize();
+      const lay = mapLayout();
+      consider({ kind: 'mirror', name: 'mirror', edge: 'axis' }, lay.mirrorCol * CELL + CELL / 2, py(Math.round((R - 1) / 2)) + CELL / 2);
+      continue;
+    }
+    const r = rectAt(h.kind, h.name);
+    for (const spec of HANDLE_SPECS) {
+      const [wx, wy] = HANDLE_XY[spec.key](...r);
+      consider({ kind: h.kind, name: h.name, edge: spec.key }, wx, wy);
+    }
+  }
+  return best;
 }
 
 /**
@@ -488,6 +1116,8 @@ function airStripe(c, r) {
 
 function paintAt(cell) {
   if (!cell || !state.cells) return false;
+  // 窗口之外不是这张图（大图旁边多出来的画布）：画笔在那里什么都不做，而不是画到窗口外面去
+  if (state.cells[cell.r]?.[cell.c] === '') return false;
   if (state.tool === 'erase') { if (state.cells[cell.r][cell.c] === 'f') return false; state.cells[cell.r][cell.c] = 'f'; }
   else if (state.tool === 'brush') { if (state.cells[cell.r][cell.c] === state.brush) return false; state.cells[cell.r][cell.c] = state.brush; }
   else return false;
@@ -496,12 +1126,24 @@ function paintAt(cell) {
 
 let painting = false;
 let panning = null;                // 正在平移：{ x, y } 是上一次的指针位置
+let draggingZone = false;          // 正在拖分区的一条边 / 一个角（「分区」模式）
 if (canvas) canvas.addEventListener('mousedown', (ev) => {
   if (!state.spec) return;
   // 平移优先于一切：中键拖，或按住空格拖（左键画不画由这一条决定，所以它必须排在工具分支前面）。
   // 左键仍然留给「画笔 / 放装置 / 画路线」—— 平移换成左键会把这一页唯一的地图编辑动作挤掉。
   if (ev.button === 1 || state.space) { ev.preventDefault(); beginPan(ev.clientX, ev.clientY); return; }
   if (ev.button !== 0) return;
+  // 「分区」模式：左键只拖分区（地形/装置/路线在这一模式下不动，与画布上只画分区是同一条口径）
+  if (state.editingZones) {
+    ev.preventDefault();
+    const h = hitHandle(ev);
+    if (!h) return;
+    state.zoneHandle = { kind: h.kind, name: h.name, edge: h.edge };
+    draggingZone = true;
+    draw();
+    renderSide();
+    return;
+  }
   const cell = cellAt(ev);
   if (!cell) return;
   // 放装置原来只能靠工具栏切换，结果「想放一个箱子」要来回点两次工具；Shift / Ctrl 点一下就放，切回去也容易。
@@ -521,6 +1163,20 @@ if (canvas) canvas.addEventListener('mousedown', (ev) => {
 });
 if (canvas) canvas.addEventListener('mousemove', (ev) => {
   if (panning) { movePan(ev.clientX, ev.clientY); return; }
+  if (state.editingZones) {
+    if (draggingZone && state.zoneHandle) {
+      const rect = canvas.getBoundingClientRect();
+      const s = viewScale();
+      const wx = (ev.clientX - rect.left - 0.5 - state.panX) / s;
+      const wy = (ev.clientY - rect.top - 0.5 - state.panY) / s;
+      applyHandle(state.zoneHandle.kind, state.zoneHandle.name, state.zoneHandle.edge, cellAtWorld(wx, wy));
+      afterZoneEdit();
+    } else {
+      // 提示语换成「分区」这一模式的：这一模式下左键不画地形
+      $('#cursor').textContent = t('分区编辑：拖白点改这一块的行（部署区的列由棋盘定死），上下左右微调选中的那一条边。');
+    }
+    return;
+  }
   const cell = cellAt(ev);
   // 坐标提示与 HTML 里那句静态提示是同一条词条：鼠标离开网格时回到它，换语言时也由 applyI18n 重写。
   // 业主 2026-10-08 的困惑是「这一行有路，为什么放不了干员」：坐标后面接上**这一格在不在部署矩形里**，
@@ -530,8 +1186,8 @@ if (canvas) canvas.addEventListener('mousemove', (ev) => {
     : t('把鼠标移到网格上看坐标。row 0 在最下面一行（和引擎一致）。');
   if (painting && cell && paintAt(cell)) { draw(); schedulePreview(); }
 });
-window.addEventListener('mouseup', () => { painting = false; endPan(); });
-if (canvas) canvas.addEventListener('mouseleave', () => { painting = false; endPan(); });
+window.addEventListener('mouseup', () => { painting = false; draggingZone = false; endPan(); });
+if (canvas) canvas.addEventListener('mouseleave', () => { painting = false; draggingZone = false; endPan(); });
 
 // ---- 缩放与平移 ---------------------------------------------------------------------------------------------------
 
@@ -588,6 +1244,14 @@ window.addEventListener('keydown', (ev) => {
     if (!state.space) { state.space = true; if (canvas) canvas.style.cursor = 'grab'; }
     return;
   }
+  // 「分区」模式：方向键微调**选中的那一条边**（一格一格挪），而不是平移视野 —— 这一模式下作者动的是分区。
+  // 选中了带头的才吃方向键；没选中时照旧平移，免得「进了分区模式就挪不动视野」。
+  if (state.editingZones && state.zoneHandle) {
+    if (ev.key === 'ArrowUp') { ev.preventDefault(); nudgeHandle(1, 0); return; }
+    if (ev.key === 'ArrowDown') { ev.preventDefault(); nudgeHandle(-1, 0); return; }
+    if (ev.key === 'ArrowLeft') { ev.preventDefault(); nudgeHandle(0, -1); return; }
+    if (ev.key === 'ArrowRight') { ev.preventDefault(); nudgeHandle(0, 1); return; }
+  }
   // 方向键平移：没有三键鼠标的设备也能挪视野
   const step = 48;
   if (ev.key === 'ArrowLeft') { state.panX += step; clampView(); draw(); }
@@ -632,12 +1296,15 @@ async function preview() {
  * 优先用服务端推导回来的 `preview.record`（那是引擎真正会算的东西）；没有它的时候**用本地 spec 现拼一个最小的**
  * `{ id, rows, devices }` —— 新建一张图、还没保存、第一次推导也还没回来时，3D 就是靠它画出第一帧的。
  * 业主问的「为什么要先填上 id 才能看 3D」，根因就是这里以前只认 record，拿不到就 return。
+ *
+ * `size` 一起带上：3D 渲染器按 `rows` 的**实际长度**量棋盘（大图那 23×27 / 27×33 就是这么画的），
+ * 取景也是照它自己那台相机量出来的 bounds 走 —— 所以大图在 3D 里同样整幅在框里，而不是被裁到 19×21。
  */
 function stageFor3d() {
   const rec = state.preview?.record;
   if (rec && Array.isArray(rec.rows)) return rec;
   if (!state.cells) return null;
-  return { id: state.spec?.id || 'unsaved', rows: rowsFromCells(), devices: state.spec?.devices ?? [] };
+  return { id: state.spec?.id || 'unsaved', rows: rowsFromCells(), devices: state.spec?.devices ?? [], size: mapSize() };
 }
 
 /**
@@ -759,9 +1426,9 @@ function deployOutcome(entry, options) {
 /**
  * 悬停那一行里「这一格到底能不能部署」的答案。
  *
- * 引擎的判定是**两件事相乘**：这一格在不在部署矩形里（DEPLOY_RECTS：普通 9–12×2–10、boss 1–5 左右各半），
- * 以及地块自己的高度/可部署属性。作者只画道路、只看颜色时，第二件看得见、第一件看不见 —— 于是就有了
- * 「怪物出口那一行的路为什么放不了干员」。这里把两件事一起说出来。
+ * 引擎的判定是**两件事相乘**：这一格在不在部署矩形里（这张图自己的三块矩形，官方图就是普通 9–12×2–10、
+ * boss 1–5 左右各半），以及地块自己的高度/可部署属性。作者只画道路、只看颜色时，第二件看得见、第一件看不见
+ * —— 于是就有了「怪物出口那一行的路为什么放不了干员」。这里把两件事一起说出来，矩形读的是**这张图的布局**。
  */
 function cellDeployReadout(cell) {
   const entry = state.spec?.tiles?.[state.cells?.[cell.r]?.[cell.c]];
@@ -770,7 +1437,7 @@ function cellDeployReadout(cell) {
     : rule === 'melee' ? t('可放地面干员（近战位）')
       : rule === 'rangedOnly' ? t('只能放远程位（高台干员）')
         : t('地块本身不可部署');
-  const rects = deployRectsAt(cell.r, cell.c);
+  const rects = deployRectsAt(cell.r, cell.c, mapLayout().deployRects);
   if (!rects.length) return t('不在任何部署区内：敌人会走，但放不了干员');
   return t('在 {0} 内 · {1}', rects.map((n) => rectLabel(n)).join(' / '), ruleText);
 }
@@ -1027,6 +1694,62 @@ function renderSide() {
     field(t('权重 weight'), num(() => spec.weight, (v) => { spec.weight = v; })),
   );
   box.append(identity);
+
+  // ---- 地图尺寸（大图支持）：三档 `SIZE_PRESETS`，现在的尺寸写在旁边 -------------------------------
+  //
+  // 这一栏是「大图」这件事在界面上的入口：选定档位之后 rows 会被重新铺一遍（旧字符按左下角对齐保留、
+  // 多出来的行列填空气），布局重置成这个尺寸的默认，画布 / 预览 / 分区视图一起跟上。
+  box.append(h(t('地图尺寸')));
+  const sizeBox = document.createElement('div'); sizeBox.className = 'panel';
+  const sizeSel = document.createElement('select');
+  const nowSize = mapSize();
+  for (const p of SIZE_PRESETS) {
+    const o = document.createElement('option');
+    o.value = p.id;
+    o.textContent = `${sizeLabel(p.id)}（${sizeText(p.size)}）`;
+    sizeSel.append(o);
+  }
+  const presetNow = sizePresetOf(nowSize);
+  if (!presetNow) {
+    // 自定尺寸（声明过的 size 不在三档里）：多摆一项，免得下拉显示成别的一档
+    const o = document.createElement('option');
+    o.value = 'custom';
+    o.textContent = t('自定（{0}）', sizeText(nowSize));
+    sizeSel.append(o);
+  }
+  sizeSel.value = presetNow ?? 'custom';
+  sizeSel.addEventListener('change', () => {
+    const hit = SIZE_PRESETS.find((p) => p.id === sizeSel.value);
+    if (hit) resizeMap(hit.size);
+  });
+  const sizeRow = document.createElement('div'); sizeRow.className = 'row';
+  sizeRow.append(field(t('这张图多大'), sizeSel));
+  const sizeNow = document.createElement('span');
+  sizeNow.className = 'hint';
+  sizeNow.textContent = t('尺寸 {0}', sizeText(nowSize));
+  sizeNow.id = 'sizeNow';
+  sizeRow.append(sizeNow);
+  sizeBox.append(sizeRow);
+  sizeBox.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('放大尺寸会保留左下角已有的地形，多出来的行列填成空气（地图外），分区重置为这个尺寸的默认。'),
+  }));
+  // 「分区」模式这一颗也放这儿：它跟尺寸面板是同一件事的两半（图多大 + 分区在哪儿）
+  const zoneEdit = document.createElement('button');
+  zoneEdit.className = state.editingZones ? 'on' : 'ghost';
+  zoneEdit.textContent = t('分区');
+  zoneEdit.addEventListener('click', () => {
+    state.editingZones = !state.editingZones;
+    state.zoneHandle = null;
+    state.zone = 'all';
+    fitZone('all');
+    renderZoneBar(); renderSide(); draw();
+  });
+  sizeBox.append(zoneEdit);
+  box.append(sizeBox);
+
+  // ---- 「分区」模式的数字面板：每个矩形四个数 + 重置成尺寸默认 --------------------------------------
+  if (state.editingZones) box.append(zonePanel());
 
   // ---- 地图种类（业主口径：初始化的地图就是单人视角，联防是另一个项目，不是同一张图的一个开关） -------------
   box.append(h(t('地图种类')));
@@ -1332,7 +2055,8 @@ function renderSide() {
       pv.append(info);
       // 业主的困惑就是这一条：同一行里画了路、却放不了干员。道路在部署矩形外时敌人照样走，
       // 但那里永远部署不了东西 —— 与其让作者猜，不如把这条提示摆在推导结果里，并给一个跳到第一格的按钮。
-      const outside = roadsOutsideDeployRects(rowsFromCells(), spec.tiles ?? {});
+      // 判据用的是**这张图自己的三块矩形**：作者在「分区」模式里把它们挪到哪儿，这里就按哪儿报。
+      const outside = roadsOutsideDeployRects(rowsFromCells(), spec.tiles ?? {}, mapLayout().deployRects);
       if (outside.length) {
         const tip = document.createElement('div');
         tip.className = 'warn';
@@ -1373,7 +2097,8 @@ function renderZoneBar() {
   cap.className = 'hint';
   cap.textContent = t('区域');
   bar.append(cap);
-  for (const z of STAGE_ZONES) {
+  // 分区视图按**这张图自己的布局**来：作者把普通带整块挪走后，「普通对战」这个视图框的就是他挪到的那几行。
+  for (const z of zonesNow()) {
     const b = document.createElement('button');
     b.className = state.zone === z.id ? 'on' : 'ghost';
     b.textContent = zoneLabel(z.id);
@@ -1381,6 +2106,8 @@ function renderZoneBar() {
     b.addEventListener('click', () => {
       state.zone = z.id;
       state.zoneTemplatePick = false;
+      state.editingZones = false;
+      state.zoneHandle = null;
       fitZone(z.id);
       renderZoneBar();
       renderSide();
@@ -1391,7 +2118,22 @@ function renderZoneBar() {
   const spacer = document.createElement('span');
   spacer.style.flex = '1';
   bar.append(spacer);
-  if (state.zone !== 'all') {
+  // 「分区」模式：这一颗是**编辑**分区（拖矩形、改数），与上面那四颗「只看某一区」是两回事，所以单独一颗。
+  const edit = document.createElement('button');
+  edit.className = state.editingZones ? 'on' : 'ghost';
+  edit.textContent = t('分区');
+  edit.title = t('拖白点改分区：部署区、战斗矩形、怪物等待区都能上下挪（部署区的列由棋盘定死），镜像轴只作标注');
+  edit.addEventListener('click', () => {
+    state.editingZones = !state.editingZones;
+    state.zoneHandle = null;
+    state.zone = 'all';
+    fitZone('all');
+    renderZoneBar();
+    renderSide();
+    draw();
+  });
+  bar.append(edit);
+  if (state.zone !== 'all' && !state.editingZones) {
     const b = document.createElement('button');
     b.className = state.zoneTemplatePick ? 'on' : 'ghost';
     b.textContent = t('从官方图取这一区…');
@@ -1399,7 +2141,7 @@ function renderZoneBar() {
     b.addEventListener('click', () => { state.zoneTemplatePick = !state.zoneTemplatePick; void ensureTemplates(); renderZoneBar(); });
     bar.append(b);
   }
-  if (!state.zoneTemplatePick || state.zone === 'all') return;
+  if (!state.zoneTemplatePick || state.zone === 'all' || state.editingZones) return;
   const panel = document.createElement('div');
   panel.className = 'panel';
   panel.style.flexBasis = '100%';
@@ -1448,22 +2190,25 @@ async function ensureTemplates() {
 /** 把模板里属于**当前区**的那几行抄进这张图（业主：「找几张官方图拆开当模板，允许用户选择」）。 */
 async function applyZoneTemplate(tpl) {
   if (!state.cells) return;
-  const z = currentZone();
+  const [r0, r1] = zoneRowsNow(state.zone);
+  const [mapR, mapC] = mapSize();
   try {
     const r = await api(`/api/stages/template?id=${encodeURIComponent(tpl.id)}`);
     const rows = Array.isArray(r.spec?.rows) ? r.spec.rows : null;
-    if (!rows || rows.length !== ROWS) throw new Error(t('这个模板没有可用的 rows'));
-    const [r0, r1] = z.rows;
+    if (!rows || !rows.length) throw new Error(t('这个模板没有可用的 rows'));
     let changed = 0;
-    for (let r = r0; r <= r1; r++) {
-      const line = String(rows[r] ?? '');
-      if (line.length !== COLS) continue;
-      for (let c = 0; c < COLS; c++) if (state.cells[r][c] !== line[c]) { state.cells[r][c] = line[c]; changed++; }
+    for (let row = r0; row <= r1 && row < mapR; row++) {
+      const line = String(rows[row] ?? '');
+      if (!line.length) continue;
+      // 模板可能是另一个尺寸的图：只抄**两边窗口重叠**的那些格子，越界的模板格直接跳过
+      for (let c = 0; c < Math.min(line.length, mapC); c++) {
+        if (state.cells[row][c] !== line[c]) { state.cells[row][c] = line[c]; changed++; }
+      }
     }
     // 模板的图例一起并进来：官方图用到的字形不一定在我们的默认图例里，没有条目就会被画成「认不出的地形」。
     if (r.spec?.tiles && typeof r.spec.tiles === 'object') state.spec.tiles = { ...state.spec.tiles, ...r.spec.tiles };
     state.zoneTemplatePick = false;
-    state.message = { kind: 'ok', text: t('已把「{0}」换成「{1}」那一区（改了 {2} 格）。', zoneLabel(z.id), tpl.name || tpl.id, changed) };
+    state.message = { kind: 'ok', text: t('已把「{0}」换成「{1}」那一区（改了 {2} 格）。', zoneLabel(state.zone), tpl.name || tpl.id, changed) };
     schedulePreview();
     renderZoneBar();
     renderSide();
@@ -1475,6 +2220,60 @@ async function applyZoneTemplate(tpl) {
   }
 }
 
+/**
+ * 地图尺寸工具条（画布上方）：档位下拉 + 现在的尺寸。
+ *
+ * 与右栏「地图尺寸」面板是同一件事的两个入口 —— 这一条在画布正上方，作者一边看图一边就能改；
+ * 两处都走同一个 `resizeMap()`，所以不会出现「按钮改了、面板没跟」这种分家。
+ */
+function renderSizeBar() {
+  const bar = $('#sizeBar');
+  if (!bar) return;
+  bar.replaceChildren();
+  if (!state.spec) return;
+  const [R, C] = mapSize();
+  const cap = document.createElement('span');
+  cap.className = 'hint';
+  cap.textContent = t('尺寸');
+  const sel = document.createElement('select');
+  sel.id = 'sizePick';
+  sel.style.width = 'auto';
+  for (const p of SIZE_PRESETS) {
+    const o = document.createElement('option');
+    o.value = p.id;
+    o.textContent = `${sizeLabel(p.id)}（${sizeText(p.size)}）`;
+    sel.append(o);
+  }
+  const presetNow = sizePresetOf([R, C]);
+  if (!presetNow) {
+    const o = document.createElement('option');
+    o.value = 'custom';
+    o.textContent = t('自定（{0}）', sizeText([R, C]));
+    sel.append(o);
+  }
+  sel.value = presetNow ?? 'custom';
+  sel.addEventListener('change', () => {
+    const hit = SIZE_PRESETS.find((p) => p.id === sel.value);
+    if (hit) resizeMap(hit.size);
+  });
+  const now = document.createElement('span');
+  now.className = 'hint';
+  now.id = 'sizeNow';
+  now.textContent = t('尺寸 {0}', sizeText([R, C]));
+  const edit = document.createElement('button');
+  edit.className = state.editingZones ? 'on' : 'ghost';
+  edit.textContent = t('分区');
+  edit.title = t('拖白点改分区：部署区、战斗矩形、怪物等待区都能上下挪（部署区的列由棋盘定死），镜像轴只作标注');
+  edit.addEventListener('click', () => {
+    state.editingZones = !state.editingZones;
+    state.zoneHandle = null;
+    state.zone = 'all';
+    fitZone('all');
+    renderZoneBar(); renderSide(); draw();
+  });
+  bar.append(cap, sel, now, edit);
+}
+
 function syncTools() {
   $('#toolBrush').className = state.tool === 'brush' ? 'on' : '';
   $('#toolDevice').className = state.tool === 'device' ? 'on' : '';
@@ -1484,6 +2283,7 @@ function syncTools() {
   $('#ovPaths').className = state.showPaths ? 'on' : '';
   $('#ovRoutes').className = state.showRoutes ? 'on' : '';
   renderZoneBar();
+  renderSizeBar();
   // 缩放百分比：zoom 是相对 fit-to-view 的倍数，所以 100% 就等于「整张图正好在视野里」
   const pct = $('#zoomPct');
   if (pct) pct.textContent = `${Math.round(state.zoom * 100)}%`;
@@ -1496,7 +2296,7 @@ function syncTools() {
     auto.title = t('业主口径：绝不自动生成；只有点这一下才算。按本图的 S（出生点）配最近的 E（防守点）求一条寻路，追加进路线里');
   }
   const fit = $('#viewFit');
-  if (fit) fit.title = t('把整张 19×21 缩放回视野里（最少留 8px 边距）');
+  if (fit) fit.title = t('把整张 {0} 缩放回视野里（最少留 8px 边距）', sizeText(mapSize()));
   const b3 = $('#ov3d');
   if (b3) {
     b3.className = state.mode3d ? 'on' : '';

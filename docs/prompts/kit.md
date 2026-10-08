@@ -455,9 +455,9 @@ battle.addBuff(unit, { key: 'ws:count', refresh: 'stack', maxStacks: 99, duratio
   —— 官方辅助 `once(battle, key, fn)` 就是后者（`server/sim/content/kits/shared/tier1.js:146`）。**不要**用模块级普通变量：
   同一份文件在服务端和浏览器各加载一次，两边的模块变量不是一份（`server/sim/content/kits/README.md:84`）。
 - **盟约层数**：`battle.addLayers(playerId, bondId, n, reason, { source })`（`server/sim/battle/economy.js:22`），
-  上限是 `BOND_LAYER_CAP` 999（`shared/constants.js:120`，`layerGainRoom` 在 `:127` 算真正能加多少），
+  上限是 `BOND_LAYER_CAP` 999（`shared/constants.js:133`，`layerGainRoom` 在 `:140` 算真正能加多少），
   `layerGain` 钩子里 `ctx.n` 可改（`server/sim/battle/economy.js:31`）。**它只在普通战场生效**：`flags.layerGainsEnabled`
-  只有 `kind === 'normal'` 时为 `true`（`server/sim/Battle.js:105`），联防 / boss 战场里是 no-op。官方 kit 一处都没调用
+  只有 `kind === 'normal'` 时为 `true`（`server/sim/Battle.js:113`），联防 / boss 战场里是 no-op。官方 kit 一处都没调用
   它 —— 加层属于盟约/数据层的活，kit 调用它是允许的，但先想清楚你写的是「内容」还是「规则」。
 
 ### 8.6 召唤物
@@ -513,7 +513,7 @@ const def = battle.tokenDef('token_ws_my_drone', unit);
 
 ```js
 install(battle, unit) {
-  const own = unit.rangeGrid;                                  // ★ 初始就是 def.rangeGrid，深度冻结（server/sim/battle/players.js:199、server/sim/simdata.js:518）
+  const own = unit.rangeGrid;                                  // ★ 初始就是 def.rangeGrid，深度冻结（server/sim/battle/players.js:197、server/sim/simdata.js:518）
   const wide = own.map(([r, c]) => [r, c]);                     // 先复制，再改副本
   wide.push([0, 2], [0, 3]);
   const setRange = (g) => {
@@ -530,7 +530,7 @@ install(battle, unit) {
 |---|---|---|
 | 「攻击范围 +1」 | buff 的 `mods.rangeExtend`（永久的那部分进初始范围） | `server/sim/units.js:141`、`server/sim/buffs.js:183`、`server/sim/battle/queries.js:252` |
 | 换掉整个范围形状 | `unit.rangeGrid = 副本` + `battle.refreshRange` | `server/sim/content/kits/ops/chess_char_5_15-thorn2.js:168`、`…/op-cgbird.js:149` |
-| 只多几个「打得到」的格子（不改形状） | `battle.setExtraRange(unit, keys)`，key 是绝对 tile key（`row * 21 + col`，21 列来自 `shared/constants.js:81`） | `server/sim/battle/queries.js:273`、用法 `…/ops/chess_char_6_01-lemuen.js:201` |
+| 只多几个「打得到」的格子（不改形状） | `battle.setExtraRange(unit, keys)`，key 是绝对 tile key（`row * COLS + col`，`COLS` 是**画布**宽度 —— 一张图是画布里的一个窗口，`shared/constants.js:95` 的 `CANVAS_COLS`，`server/sim/constants.js:12`） | `server/sim/battle/queries.js:273`、用法 `…/ops/chess_char_6_01-lemuen.js:201` |
 | 技能范围与自己的范围不同 | `targeting.rangeGrid` | `docs/SIM.md:1025` |
 | 技能范围**不**吃单位的攻击距离加成 | `targeting.noRangeExtend` | `server/sim/battle/queries.js:240` |
 | 范围只用来选目标、不改卡面上的范围 | `targeting.showOwnRange` | `server/sim/battle/queries.js:249` |
@@ -538,7 +538,7 @@ install(battle, unit) {
 | 临时换自动释放规则 | `unit.skill.setTrigger(rule, grid)` | `server/sim/skills.js:130` |
 
 **不要**直接改 `unit.rangeKeys` / `unit.rangeKeySet`（每次 rebuild 都会重建，`server/sim/battle/queries.js:237`），
-也**不要**往 `unit.rangeGrid` 里 `push`：初始那个数组就是冻结的 `def.rangeGrid`（`server/sim/battle/players.js:191`
+也**不要**往 `unit.rangeGrid` 里 `push`：初始那个数组就是冻结的 `def.rangeGrid`（`server/sim/battle/players.js:197`
 + `server/sim/simdata.js:518`），写它会抛异常。官方 kit 一律先复制：`server/sim/content/kits/shared/tier5.js:181`。
 
 ### 8.8 治疗与护盾
@@ -596,7 +596,7 @@ trait: { priority: 'lowDef', maxTargets: 2, splashRadius: 1.2 },
   import，照抄 `server/sim/dir.js:39` 那张表：
 
 ```js
-const COLS = 21;                                                  // shared/constants.js:81（server/sim/constants.js:12）
+const COLS = 33;                                                  // shared/constants.js:95 的 CANVAS_COLS（server/sim/constants.js:12）
 /** 把朝 RIGHT 编写的相对格 [dr, dc] 转到 `dir` 的绝对格（抄 server/sim/dir.js:39 的 rotateOffset）。 */
 const rot = ([dr, dc], dir) => (dir === 'UP' ? [dc, -dr] : dir === 'LEFT' ? [-dr, -dc] : dir === 'DOWN' ? [-dc, dr] : [dr, dc]);
 const gridKeys = (unit, grid) => grid.map(([dr, dc]) => {
@@ -631,9 +631,9 @@ const foes = battle.enemiesInKeys(gridKeys(unit, def.skill.rangeGrid), unit, { c
   合并点 `server/sim/professions.js:698`，键表在 `server/sim/professions.js:11`），也可以带 `install(battle, unit)`
   （与 `talents` 同形：`server/sim/content/kits/ops/chess_char_1_06-vendla.js:27`）。
 - **安装顺序是固定的**：`profile.install`（也就是 `trait.install`）→ `talents[].install` → `kit.install`
-  （`server/sim/battle/players.js:218`–`:226`），都在战斗开始前的构造期跑一次。别指望 `talents` 先跑。
+  （`server/sim/battle/players.js:206`–`:231`），都在战斗开始前的构造期跑一次。别指望 `talents` 先跑。
 - **盟约不是你的事**：官方 23 条的加成在 `server/sim/content/bonds/*` 里按 id 实现，成员由**干员的 `bonds` 列表**推导
-  （`docs/prompts/README.md:171`，那一节从 `:144` 开始）。kit 里再给成员加一遍就是双倍。要动层数用 `battle.addLayers`（§8.5）。
+  （`docs/prompts/README.md:179`，那一节从 `:152` 开始）。kit 里再给成员加一遍就是双倍。要动层数用 `battle.addLayers`（§8.5）。
 - **装备 / 道具的加成也不在 kit 里**（`server/sim/content/items/battle.js`）；kit 只负责「这个干员的技能与天赋」。
 - **元素有两个桶**：`elemTakenMul` 是元素**损伤**（量表）倍率，`elementalTakenMul` 是元素**伤害**（掉血）倍率
   （`server/sim/units.js:162`、`:163`）。改 `dmg.mul` 时不要顺手把这两个也乘上。
@@ -644,7 +644,7 @@ const foes = battle.enemiesInKeys(gridKeys(unit, def.skill.rangeGrid), unit, { c
 
 | 反例 | 会发生什么 | 正确做法 |
 |---|---|---|
-| 在 kit 里改全局状态：`bb.atk = 2`、`def.rangeGrid.push(…)`、`battle.flags.dpPerSec = 5` | `bb` / `def` 深度冻结会当场抛异常（`server/sim/simdata.js:518`）；`battle.flags` 是构造期输入（`server/sim/Battle.js:105`），运行中改它没有文档保证，而且服务端复算与浏览器两头都得改才一致 | `addBuff`（数值）、`unit.rangeGrid` 副本 + `refreshRange`（范围）、`setExtraRange`（补格子） |
+| 在 kit 里改全局状态：`bb.atk = 2`、`def.rangeGrid.push(…)`、`battle.flags.dpPerSec = 5` | `bb` / `def` 深度冻结会当场抛异常（`server/sim/simdata.js:518`）；`battle.flags` 是构造期输入（`server/sim/Battle.js:113`），运行中改它没有文档保证，而且服务端复算与浏览器两头都得改才一致 | `addBuff`（数值）、`unit.rangeGrid` 副本 + `refreshRange`（范围）、`setExtraRange`（补格子） |
 | 依赖执行时序：「我的 `hit` 一定在别人之后 / 之前跑」 | 顺序 = `priority` 降序 + 注册顺序（`server/sim/battle/hooks.js:22`），同一份文件里换个写法就变，而且官方 kit 的 priority 你看不到 | 用自己的标记判断（官方例子：`server/sim/content/kits/ops/op-judge.js:158` 用 `WeakSet` 认自己的那次伤害） |
 | 写死数值：`mods: { atkPct: 0.6 }` | 干员升级、精英、模组换了数值它**永远不变**，还不报错 | 从黑板读：`num(bb.atk, 0)` —— 数字只从黑板来是硬规矩（`server/sim/content/kits/README.md:268`） |
 | `Math.random()` / `Date.now()` / `setTimeout` | 服务端复算结果不同 → 玩家成绩被拒，而报错看起来与随机数无关（`shared/kitAuthoring.js:41`） | `battle.rng()` / `battle.after` / `battle.every`（`server/sim/battle/hooks.js:112`） |
@@ -663,15 +663,15 @@ const foes = battle.enemiesInKeys(gridKeys(unit, def.skill.rangeGrid), unit, { c
 | 想要的效果 | 引擎不提供什么 | 替代写法 |
 |---|---|---|
 | 在工坊 kit 里 `import` 官方辅助 / 引擎模块 | `KIT_IMPORT`（`shared/kitAuthoring.js:195`） | 内联一份（§8.1） |
-| 运行时换掉战斗档案（攻击方式、弹道、治疗模式） | 没有公开接口：`kit.trait` 只在构造期合并一次（`server/sim/battle/players.js:205`、`server/sim/professions.js:698`） | 技能期间用 SkillSpec 的 `attack` / `targeting`（`server/sim/skills.js:567` 是它的生效判定），或改 `ctx.dmg` |
+| 运行时换掉战斗档案（攻击方式、弹道、治疗模式） | 没有公开接口：`kit.trait` 只在构造期合并一次（`server/sim/battle/players.js:211`、`server/sim/professions.js:698`） | 技能期间用 SkillSpec 的 `attack` / `targeting`（`server/sim/skills.js:567` 是它的生效判定），或改 `ctx.dmg` |
 | 直接设操作者的面板属性 | 没有接口（只有召唤物能用 `spawnToken` 的 `opts.stats`：`server/sim/battle/summons.js:60`） | `mods` |
-| 运行时改全局规则 / 经济 / 回合表 | `battle.flags` 是构造期输入（`server/sim/Battle.js:105`）；包也不能贡献 `config`（`docs/WORKSHOP.md:56`） | 改自己的单位、自己 `battle.emit` 命名空间事件 |
+| 运行时改全局规则 / 经济 / 回合表 | `battle.flags` 是构造期输入（`server/sim/Battle.js:113`）；包也不能贡献 `config`（`docs/WORKSHOP.md:56`） | 改自己的单位、自己 `battle.emit` 命名空间事件 |
 | 让敌人改路线 / 换 AI | 没有接口 | 位移 `battle.push` / `pull` / `pullToFront`（`server/sim/battle/displacement.js:41`、`:69`、`:97`）与状态 `fear` / `attract`（`server/sim/buffs.js:84`、`:120`） |
 | 独立的护盾槽 / 多个盾各吸一类伤害 | 没有：盾就是 buff 的 `shield` / `shieldHits`（`server/sim/buffs.js:167`、`:168`） | 一个 key 一个盾，用 `shieldType` 限定吸收类型（`server/sim/damage.js:196`） |
 | 改「治疗落在谁身上」 | `heal` 钩子只能改 `amount`（`server/sim/damage.js:551`） | 自己选目标（`server/sim/battle/queries.js:92`、`:109`） |
-| 读存档 / 准备区 / 商店 / 装备栏 | sim 里没有这些对象 | `battle.getPlayer(playerId)` 给的是战场视图（`docs/SIM.md:843`），`battle.data` 给的是本局数据（`server/sim/Battle.js:87`） |
+| 读存档 / 准备区 / 商店 / 装备栏 | sim 里没有这些对象 | `battle.getPlayer(playerId)` 给的是战场视图（`docs/SIM.md:843`），`battle.data` 给的是本局数据（`server/sim/Battle.js:88`） |
 | 给包加一份 `tokens.json` 之外的新数据种类 | 只有 13 个内容文件可贡献（`shared/workshop.js:29`） | 贡献 `tokens.json`（`shared/workshop.js:34`），或用 `spawnToken` 的 `opts.def` 内联定义（`server/sim/simdata.js:304`） |
-| 在联防 / boss 战场里加盟约层数 | `addLayers` 只在 `flags.layerGainsEnabled` 时生效（`server/sim/battle/economy.js:23`），只有普通战场是 `true`（`server/sim/Battle.js:105`） | 没有替代：那两种战场里加层是 no-op |
+| 在联防 / boss 战场里加盟约层数 | `addLayers` 只在 `flags.layerGainsEnabled` 时生效（`server/sim/battle/economy.js:23`），只有普通战场是 `true`（`server/sim/Battle.js:113`） | 没有替代：那两种战场里加层是 no-op |
 | 我方单位的「攻击前摇开始」事件 | 没有：`beforeAttack` 在目标已选定之后才触发（`server/sim/ai.js:186`） | 用 `beforeAttack` 清 `ctx.targets` 取消这次攻击；敌人的起手另有 `enemyAttackStart`（`server/sim/ai.js:805`） |
 | 「技能召唤物做成手牌」那套现成流程 | `releaseSkillSummon` 在 content 模块里，工坊不能 import（`server/sim/content/tokens.js:381`） | 自己 `battle.spawnToken`；手牌形式要走 `tokens.json` 的 `placeable` |
 | 召唤师牌堆（持有 / 回收 / 随主人消失） | `summonDeck` 是要 import 的辅助（`server/sim/content/kits/shared/summoner.js:99`） | `unit.mem` + `battle.every` + `battle.redeploy` 自己写 |

@@ -15,6 +15,9 @@ import {
 import { placementContext, canPlace, dropIntent } from '../../public/js/ui/gameLogic.js';
 import { resolveDrop, createDragController, pieceSlot } from '../../public/js/render/drag.js';
 import { GEO } from '../../shared/constants.js';
+// the absolute key of a tile is `row * COLS + col` with the SIM's stride (the canvas, server/sim/constants.js — a map
+// is a window inside it, shared/layout.js), not GEO.COLS (the official map width)
+import { COLS as SIM_COLS } from '../../server/sim/constants.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const load = (f) => JSON.parse(readFileSync(path.join(ROOT, 'data', f), 'utf8'));
@@ -273,7 +276,7 @@ describe('client range preview = sim range (every rangeGrid of chess / tokens / 
     assert.ok(grids.size >= 10, `distinct range shapes (${grids.size})`);
     let n = 0;
     for (const g of grids.values()) for (const dir of DIRS) for (const ext of [0, 1, 2, 3]) for (const [r, c] of [[9, 0], [10, 5], [12, 9], [11, 2]]) {
-      const a = rangeTiles(g, r, c, dir, { extend: ext }).map(([rr, cc]) => rr * GEO.COLS + cc).sort((x, y) => x - y);
+      const a = rangeTiles(g, r, c, dir, { extend: ext }).map(([rr, cc]) => rr * SIM_COLS + cc).sort((x, y) => x - y);
       const b = absoluteRangeKeys(g, r, c, dir, ext).slice().sort((x, y) => x - y);
       assert.deepEqual(a, b, `${JSON.stringify(g)} ${dir} +${ext} @${r},${c}`);
       n++;

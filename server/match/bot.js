@@ -77,9 +77,10 @@
 // tools/botbench.mjs.
 
 import { GEO } from '../../shared/constants.js';
+import { layoutOf } from '../../shared/layout.js';
 import { deriveSeed } from '../sim/rng.js';
 import { ASPD_MIN } from '../sim/constants.js';
-import { freeSlot, countFree, legalTiles, canPlace, positionClass, placeClass, basePositionClass, parseKey, tileKey, FIELD, pieceDir, boardTileOf, BOSS_MIRROR_COL } from './board.js';
+import { freeSlot, countFree, legalTiles, canPlace, positionClass, placeClass, basePositionClass, parseKey, tileKey, FIELD, pieceDir, boardTileOf } from './board.js';
 import { rotateOffset, normDir, mirrorDir, oppositeDir } from '../sim/dir.js';
 import { itemKey } from './gamedata.js';
 import { computeBonds } from './bondsMeta.js';
@@ -626,8 +627,7 @@ function traceLine(points) {
   return out;
 }
 
-/** Boss field → own board: board.js boardTileOf (board rows 9–12 are boss rows 2–5; the right side mirrored). */
-const BOSS_MID_COL = 10;
+/** Boss field → own board: board.js boardTileOf (board rows 9–12 are the boss band; the right side mirrored). */
 /** Dwell (s) the planner assumes on a leader's first own tiles (several leaders fight from their spawn point). */
 const BOSS_DWELL = 30;
 /** A leader is modeled as LEADER_WEIGHT enemies of LEADER_HP each (its route draws the damage dealers). */
@@ -657,10 +657,12 @@ export function fieldModel(m, ps = null) {
   if (m._botPath && m._botPath.key === cacheKey) return m._botPath;
   const gd = ps?.gd || m.gd;
   const st = m.stage;
+  const L = layoutOf(st);
+  const midCol = L.mirrorCol / 2;   // 官方布局的左右分界列（10）
   const gpaths = (st && (st.groundPathsWithDevices || st.groundPaths)) || {};
   const routesOut = [];
   const toBoard = boss
-    ? ([r, c]) => boardTileOf(boss.side === 'R' ? 'bossR' : 'bossL', r, c)
+    ? ([r, c]) => boardTileOf(boss.side === 'R' ? 'bossR' : 'bossL', r, c, L)
     : (p) => p;
   const pushRoute = (tilesRC, n, fly, hp, speed, dwell = 0) => {
     const own = tilesRC.map(toBoard).filter(([r, c]) => inRect(r, c)).map(([r, c]) => tileKey(r, c));
@@ -675,12 +677,12 @@ export function fieldModel(m, ps = null) {
   const ownRoute = (rt) => {
     if (!boss || !Array.isArray(rt.end)) return true;
     const endCol = rt.end[1];
-    return boss.side === 'R' ? endCol > BOSS_MID_COL : endCol <= BOSS_MID_COL;
+    return boss.side === 'R' ? endCol > midCol : endCol <= midCol;
   };
   const mirrorRoute = (rt) => {
     // the right player fights the mirror image of the routes that end on the left goal (its own copy of the leader)
-    if (!boss || boss.side !== 'R' || !Array.isArray(rt.end) || rt.end[1] > BOSS_MID_COL) return rt;
-    const mc = ([r, c]) => [r, BOSS_MIRROR_COL - c];
+    if (!boss || boss.side !== 'R' || !Array.isArray(rt.end) || rt.end[1] > midCol) return rt;
+    const mc = ([r, c]) => [r, L.mirrorCol - c];
     return { ...rt, start: mc(rt.start), end: mc(rt.end), checkpoints: Array.isArray(rt.checkpoints) ? rt.checkpoints.map(mc) : [] };
   };
   const foes = new Map(); // DEF|RES → HP share of the round's enemies (effDps)
@@ -1080,7 +1082,7 @@ export function* createRehearsalSteps(m, ps, chosen, plans) {
       const spawns = withBounties(m.gd, m.round, wave, ps.bounties, ps.playerId).map((sp) => ({ ...sp, ownerPlayerId: ps.playerId }));
       battles.push(m.newBattle({
         seed: deriveSeed(m.seed, `rehearse:${m.round}:${ps.seat}`), kind: 'normal', modeId: m.modeId, round: m.round,
-        stageId: m.stageId, rect: { ...GEO.NORMAL_RECT }, timeLimit: wave.timeLimit, players: [ps.battleInput({ side: 'L', colOffset: 0 })],
+        stageId: m.stageId, rect: { ...layoutOf(m.stage).battle.normal }, timeLimit: wave.timeLimit, players: [ps.battleInput({ side: 'L', colOffset: 0 })],
         spawns: m._sanitizeSpawns(spawns, ps.playerId), routes: wave.routes, sharedBoss: null,
         flags: { layerGainsEnabled: false, ...m.gd.dp }, fieldId: `r:${ps.playerId}`, enemyOverrides: wave.overrides, waveId: wave.templateId,
       }));

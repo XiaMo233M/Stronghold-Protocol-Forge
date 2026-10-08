@@ -8,8 +8,23 @@ export const TICK = 1 / 30;
 /** Snapshots are produced every N ticks by the match (20 Hz at 2× real time). */
 export const SNAPSHOT_EVERY = 3;
 
-export const ROWS = GEO.ROWS;
-export const COLS = GEO.COLS;
+/**
+ * The sim's grid stride: the **canvas**, not the official map size. A map is a window inside it (shared/layout.js),
+ * so a big map (up to 27×33) needs no dynamic stride anywhere — every `r * COLS + c` key in the sim stays a constant
+ * multiply, and an official 19×21 stage simply leaves the rest of the canvas impassable and undrawn.
+ * Semantic "the board is 19×21" readers use GEO.ROWS / GEO.COLS instead.
+ */
+export const ROWS = GEO.CANVAS_ROWS;
+export const COLS = GEO.CANVAS_COLS;
+
+/**
+ * The OFFICIAL field extents (19×21): what content means by "the whole field" / "an infinitely long line". A range that
+ * reads *the map* is bounded by the official window, not by the canvas — the canvas is only the stride, so a range
+ * defined over it would show 12 empty columns on every official map (the detail card's 攻击范围 box, 远牙 S3's line).
+ * A big map therefore does not widen these (docs/DESIGN.md §3 notes the limit); the sim's key space uses ROWS×COLS.
+ */
+export const FIELD_ROWS = GEO.ROWS;
+export const FIELD_COLS = GEO.COLS;
 
 /** tilesPerSecond = moveSpeed × MOVE_SCALE (DESIGN §3). */
 export const MOVE_SCALE = 0.5;

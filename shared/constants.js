@@ -6,7 +6,7 @@ export const PROTOCOL_VERSION = 1;
 /** Release version shown to players (title screen, server banner, /healthz). Kept equal to package.json "version"
  * (test/version.test.js); PROTOCOL_VERSION above is the separate wire-format number. The release TAG spells both halves
  * out — `v<this>-<upstream>` (README 「版本号」) — because this one has to stay a plain three-part semver. */
-export const APP_VERSION = '0.9.1';
+export const APP_VERSION = '0.9.2';
 /** A development build (the public `dev` branch): the title screen, the boot banner and the README say so, and
  * tools/package.mjs refuses to build a release zip from it without --allow-dev. */
 export const DEV_BUILD = /-dev$/.test(APP_VERSION);
@@ -83,11 +83,18 @@ export const PHASE_NAMES = {
   SETTLE: N_('结算'), FINAL_ASSAULT: N_('最终攻势'), HIDDEN_CORE: N_('隐秘核心'), RESULT: N_('模拟结束'),
 };
 
-// Board geometry on the 19x21 stage grid (row 0 = bottom). See DESIGN §3.
+// Board geometry on the **official** 19x21 stage grid (row 0 = bottom). See DESIGN §3 and shared/layout.js.
+//
+// ROWS/COLS are the official map size, and the unit every *semantic* measurement uses: board coordinates (FIELD, the
+// hand / temp rows), the protocol's range checks, an attack range's horizontal reach. A **big map**
+// (shared/layout.js, the owner's 2026-10-08 request) is a bigger window inside the engine canvas —
+// CANVAS_ROWS×CANVAS_COLS, which is the sim's stride (server/sim/constants.js) — so the three rects below are the
+// OFFICIAL layout's numbers: the default and the fallback, read per map through `layoutOf(stage)`.
 export const GEO = Object.freeze({
   ROWS: 19, COLS: 21,
-  FIELD: { r0: 9, r1: 12, c0: 2, c1: 10 },        // own deployable board region
-  NORMAL_RECT: { r0: 9, r1: 12, c0: 0, c1: 10 },  // simulation rect for a normal battle
+  CANVAS_ROWS: 27, CANVAS_COLS: 33,
+  FIELD: { r0: 9, r1: 12, c0: 2, c1: 10 },        // own deployable board region (board coordinates)
+  NORMAL_RECT: { r0: 9, r1: 12, c0: 0, c1: 10 },  // simulation rect of a normal battle (official layout)
   UNITE_RECT: { r0: 9, r1: 12, c0: 0, c1: 20 },
   BOSS_RECT: { r0: 0, r1: 5, c0: 0, c1: 20 },
   HAND_ROW: 7, HAND_SIZE: 10,                      // hand slot idx = col 0..9

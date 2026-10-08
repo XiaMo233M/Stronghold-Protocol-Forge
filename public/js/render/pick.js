@@ -20,6 +20,8 @@
 //     ally, then the front-most.
 // (Replaces the drawn-body shapes and the 1-px render probe of v2.2, DESIGN §17.2: the player aims at the grid.)
 
+import { GEO } from '../../../shared/constants.js';
+
 /** Battle enemies are picked within this many tiles of the pointer's ground point or of their drawn body on screen. */
 export const ENEMY_REACH = 0.6;
 /**
@@ -41,9 +43,10 @@ export function hitRectAt(x, y, a) {
 /**
  * Board tiles ([[row, col]]) a unit at (x, y) is hit on — as server/sim/body.js bodyKeys: a huge unit (`hitArea`) every tile
  * its rectangle overlaps (open intervals: a tile only touched along an edge is not), a point unit the tile of its
- * position; clipped to the rows × cols grid (19 × 21). The Final Assault prep draws a leader's (render/app.js, report #12).
+ * position; clipped to the map's own `rows` × `cols` window (shared/layout.js; default the official 19 × 21). The Final
+ * Assault prep draws a leader's (render/app.js, report #12).
  */
-export function hitTiles(x, y, a, rows = 19, cols = 21) {
+export function hitTiles(x, y, a, rows = GEO.ROWS, cols = GEO.COLS) {
   if (!Number.isFinite(x) || !Number.isFinite(y)) return [];
   const R = hitRectAt(x, y, a);
   if (!R) { const r = Math.round(y), c = Math.round(x); return r >= 0 && r < rows && c >= 0 && c < cols ? [[r, c]] : []; }

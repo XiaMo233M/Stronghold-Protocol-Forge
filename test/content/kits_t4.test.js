@@ -6,6 +6,7 @@ import { makeBattle, enemyRec, checkInvariants } from '../helpers/battleHarness.
 import { getDefaultSource } from '../../server/sim/simdata.js';
 import { TIER_KITS } from '../../server/sim/content/kits/index.js';
 import { absoluteRangeKeys } from '../../server/sim/targeting.js';
+import { COLS } from '../../server/sim/constants.js';
 
 const kits = TIER_KITS[3];
 
@@ -211,7 +212,7 @@ test('蜜蜡 S2: obelisk on a melee tile in range, 200 % ATK arts + 1 s stun on 
   const ob = h.b.allyUnits.find((x) => x.defId === 'token_10011_beewax_oblisk' && x.alive);
   assert.ok(ob, 'obelisk summoned');
   assert.ok(h.b.grid.canStand(ob.tileR, ob.tileC), 'melee tile');
-  assert.ok(u.rangeKeys.includes(ob.tileR * 21 + ob.tileC), 'inside her range');
+  assert.ok(u.rangeKeys.includes(ob.tileR * COLS + ob.tileC), 'inside her range');
   const burst = dmgBy(h, u, (c) => c.dmg?.tags?.includes('burst'));
   assert.equal(burst.length, 1);
   approx(burst[0].amount, u.s.atk * bb.atk_scale, 1e-6);
@@ -311,7 +312,7 @@ test('瑰盐 / 白面鸮 / 莱恩哈特 elite modules extend the range — the i
     assert.equal(mod.length, own.length + 1, `${id}: one tile more`);
     assert.deepEqual([...u.baseRangeKeys].sort((x, y) => x - y), [...mod].sort((x, y) => x - y), `${id}: module range = initial range`);
     assert.deepEqual([...u.rangeKeys].sort((x, y) => x - y), [...mod].sort((x, y) => x - y), `${id}: module range = range`);
-    assert.ok(u.rangeKeys.includes(u.tileR * 21 + u.tileC + 3) && !u.rangeKeys.includes((u.tileR - 1) * 21 + u.tileC + 3), `${id}: only the centre row grows`);
+    assert.ok(u.rangeKeys.includes(u.tileR * COLS + u.tileC + 3) && !u.rangeKeys.includes((u.tileR - 1) * COLS + u.tileC + 3), `${id}: only the centre row grows`);
   }
   {
     const id = 'chess_char_4_21_b';
@@ -328,8 +329,8 @@ test('瑰盐 / 白面鸮 / 莱恩哈特 elite modules extend the range — the i
   h.step();
   const u = h.unit(id);
   const own = absoluteRangeKeys(D(id).rangeGrid, u.tileR, u.tileC, u.facing, 0);
-  const extra = u.baseRangeKeys.find((k) => !own.includes(k) && Math.floor(k / 21) === 10);
-  h.spawn('enemy_dummy', { pos: [Math.floor(extra / 21), extra % 21] });
+  const extra = u.baseRangeKeys.find((k) => !own.includes(k) && Math.floor(k / COLS) === 10);
+  h.spawn('enemy_dummy', { pos: [Math.floor(extra / COLS), extra % COLS] });
   assert.ok(h.runUntil(() => u.skill.activations >= 1, 3), 'DEFAULT trigger from the module tile');
   checkInvariants(h.b);
 });
@@ -1066,7 +1067,7 @@ test('瑰盐 S2 only defers damage taken by operators (summons take it in full)'
   h.step();
   const u = h.unit(id);
   const tok = h.b.spawnToken(u, 'test_token', 10, 4, { def: { name: 'tok', stats: { maxHp: 5000, atk: 0, def: 0, magicResistance: 0, blockCnt: 0, baseAttackTime: 1, attackSpeed: 100 }, rangeGrid: [[0, 0]], profession: 'TOKEN' } });
-  assert.ok(tok && u.rangeKeys.includes(tok.tileR * 21 + tok.tileC));
+  assert.ok(tok && u.rangeKeys.includes(tok.tileR * COLS + tok.tileC));
   assert.ok(u.skill.activate('test', { free: true }));
   const n0 = noisy(h, 'damaged').length;
   h.b.dealDamage(null, tok, { amount: 1000, type: 'true' });

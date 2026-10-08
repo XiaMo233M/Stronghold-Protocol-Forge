@@ -38,8 +38,10 @@
 // 800×360: ×0.83): a 2D pan / zoom of the image (principal point and focal length), so the perspective and the
 // three.js camera stay the official ones.
 
-export const DEG = Math.PI / 180;
+import { GEO } from '../../../shared/constants.js';
+import { OFFICIAL_LAYOUT, isOfficialLayout, viewRectOf } from '../../../shared/layout.js';
 
+export const DEG = Math.PI / 180;
 /** Arknights' standard battle camera (see header). */
 export const OFFICIAL = Object.freeze({
   base: Object.freeze([0, -4.81, -7.76]), // standard view position in the centred Unity frame
@@ -297,8 +299,8 @@ export function lerpCamera(a, b, t, out = new Camera()) {
   return out.update();
 }
 
-/** Normalised copy of a rect ({r0,r1,c0,c1} inclusive; swapped bounds fixed; clamped to the 19×21 grid). */
-export function normRect(rect, rows = 19, cols = 21) {
+/** Normalised copy of a rect ({r0,r1,c0,c1} inclusive; swapped bounds fixed; clamped to a `rows`×`cols` window). */
+export function normRect(rect, rows = GEO.ROWS, cols = GEO.COLS) {
   const src = rect && typeof rect === 'object' ? rect : {};
   let r0 = Math.round(finite(src.r0, 0)), r1 = Math.round(finite(src.r1, rows - 1));
   let c0 = Math.round(finite(src.c0, 0)), c1 = Math.round(finite(src.c1, cols - 1));
@@ -311,12 +313,14 @@ export function normRect(rect, rows = 19, cols = 21) {
  * Camera that frames `rect` inside the viewport.
  * @param {{r0,r1,c0,c1}} rect inclusive tile bounds
  * @param {{ width: number, height: number, padding?: { top?, right?, bottom?, left? } }} viewport CSS px
- * @param {{ tilt?, dist?, margin?: number, headroom?: number, maxTilePx?: number, minTilePx?: number }} [opts]
- *   margin (tiles) around the rect; headroom (tiles) of vertical space kept above the far row for units.
+ * @param {{ tilt?, dist?, margin?: number, headroom?: number, maxTilePx?: number, minTilePx?: number,
+ *   rows?: number, cols?: number }} [opts]
+ *   margin (tiles) around the rect; headroom (tiles) of vertical space kept above the far row for units; `rows`/`cols`
+ *   the window the rect is clamped to (a map's own size — shared/layout.js — defaults to the official 19×21).
  */
 export function fitCamera(rect, viewport, options) {
   const opts = options && typeof options === 'object' ? options : {};
-  const R = normRect(rect);
+  const R = normRect(rect, finite(opts.rows, GEO.ROWS), finite(opts.cols, GEO.COLS));
   const W = Math.max(1, finite(viewport?.width, 1));
   const H = Math.max(1, finite(viewport?.height, 1));
   const pad = viewport?.padding || {};
@@ -435,12 +439,18 @@ const sameRect = (a, b) => !!a && !!b && a.r0 === b.r0 && a.r1 === b.r1 && a.c0 
  * `opts.half` frames only that half of a unite/boss field; `opts.shop === false` uses the shop-collapsed prep camera.
  * `opts.hud` = { top, bottom } (CSS px of HUD along the top / bottom edge): the official prep / Final Assault prep
  * camera keeps the bench and the field clear of it (`clearHud`, the preset's `keep` band).
+ * `opts.layout` = the map's own layout (shared/layout.js): the official presets are kept only for
+ * `isOfficialLayout(layout)` — a map that declares its own `size`/`layout` is framed with `fitCamera` on its own rect
+ * (the caller passes that rect, e.g. `render/layout.js rectForKind`), so a big map never gets the optics fitted to the
+ * official grid's centre.
  */
 export function presetCamera(kind, viewport, options) {
   const opts = options && typeof options === 'object' ? options : {};
+  const layout = opts.layout || OFFICIAL_LAYOUT;
+  const [rows, cols] = layout.size;
   let k = kind === 'hidden' ? 'boss' : kind;
   if (!CAMERA_PRESETS[k]) k = 'normal';
-  let rect = opts.rect ? normRect(opts.rect) : null;
+  let rect = opts.rect ? normRect(opts.rect, rows, cols) : null;
   // the Final Assault prep happens on the boss field: a 'prep' camera asked for the boss rows is the boss one
   if (k === 'prep' && rect && rect.r1 <= 6) k = 'bossPrep';
   const preset = CAMERA_PRESETS[k];
@@ -449,21 +459,24 @@ export function presetCamera(kind, viewport, options) {
   const knownRect = !rect || sameRect(rect, preset.rect) || (k === 'prep' && rect.r0 >= 6 && rect.r1 <= 12 && rect.c1 <= 10)
     || (k === 'normal' && rect.r0 >= 6 && rect.r1 <= 13) || (k === 'unite' && rect.r0 >= 6 && rect.r1 <= 13)
     || (k === 'boss' && rect.r1 <= 6) || k === 'bossPrep' || k === 'pen';
-  const useOfficial = !opts.fit && knownRect && W / H >= 4 / 3 - 1e-6;
+  // the official optics are fitted to the official grid's centre: only a map that IS the official one may take them
+  const useOfficial = isOfficialLayout(layout) && !opts.fit && knownRect && W / H >= 4 / 3 - 1e-6;
   if (useOfficial) {
     const table = opts.half && preset.half ? preset.half : opts.shop === false && preset.officialNoShop ? preset.officialNoShop : preset.official;
     const key = table[side];
     const cfg = opts.config && typeof opts.config === 'object' ? opts.config : null;
     const param = (cfg && parseCameraParam(cfg[key])) || parseCameraParam(OFFICIAL_PARAMS[key]);
     const cam = officialCamera(param, { width: W, height: H }, opts);
-    return preset.keep && opts.hud ? clearHud(cam, opts.hud, preset.keep, { width: W, height: H }) : cam;
+    return preset.keep && opts.hud ? clearHud(cam, opts.hud, keepBand(preset, layout), { width: W, height: H }) : cam;
   }
   if (!rect) {
-    rect = { ...preset.rect };
-    // the right-hand Final Assault player prepares on the right boss half (mirrored col c → 20 − c)
-    if (k === 'bossPrep' && side === 'R') rect = { ...rect, c0: 20 - preset.rect.c1, c1: 20 - preset.rect.c0 };
+    // the map's own rect for that kind (official → the preset's own numbers, so nothing moves for an official stage)
+    rect = { ...viewRectOf(layout, k === 'bossPrep' ? 'bossPrep' : k) };
+    if (k === 'prep') rect = { ...viewRectOf(layout, 'prep') };
+    // the right-hand Final Assault player prepares on the right boss half (mirrored col c → mirrorCol − c)
+    if (k === 'bossPrep' && side === 'R') rect = { ...rect, c0: layout.mirrorCol - rect.c1, c1: layout.mirrorCol - rect.c0 };
   }
-  if (k === 'prep') rect = { ...rect, r0: Math.min(rect.r0, 7) };
+  if (k === 'prep') rect = { ...rect, r0: Math.min(rect.r0, viewRectOf(layout, 'prep').r0) };
   if (opts.half && (k === 'boss' || k === 'unite')) {
     const mid = Math.floor((rect.c0 + rect.c1) / 2);
     rect = side === 'R' ? { ...rect, c0: mid } : { ...rect, c1: mid };
@@ -474,8 +487,22 @@ export function presetCamera(kind, viewport, options) {
   return fitCamera(rect, viewport, {
     tilt: finite(opts.tilt, base.tilt), dist: finite(opts.dist, base.dist),
     margin: finite(opts.margin, preset.margin), headroom: finite(opts.headroom, preset.headroom),
-    maxTilePx: opts.maxTilePx, minTilePx: opts.minTilePx,
+    maxTilePx: opts.maxTilePx, minTilePx: opts.minTilePx, rows, cols,
   });
+}
+
+/**
+ * The `keep` band of a prep preset, in the map's own rows: the bench's near edge is one row below the map's own normal
+ * field (`viewRectOf(layout, 'prep').r0`), the field's back edge its own `normal.r1`. The official numbers (6.5 / 12.5)
+ * come out of the official layout unchanged, and a big map keeps its own bench and field clear of the HUD.
+ */
+function keepBand(preset, layout) {
+  const keep = preset.keep;
+  if (!keep) return keep;
+  const prep = viewRectOf(layout, 'prep');
+  const normal = viewRectOf(layout, 'normal');
+  const shift = keep.far - (normal.r1 + 0.5); // official: 12.5 − 12.5 = 0 — the band is anchored on the field's back edge
+  return { ...keep, near: prep.r0 - 0.5 + shift, far: normal.r1 + 0.5 + shift };
 }
 
 /**
@@ -484,8 +511,10 @@ export function presetCamera(kind, viewport, options) {
  * @param {Camera} cam
  * @param {(row:number, col:number) => number} heightAt  tile top height (0 for low / off-grid)
  * @param {number[]} [levels] distinct heights to test (descending), default [heights present…, 0]
+ * @param {number} [rows] the map's own row count (shared/layout.js) — default the official 19
+ * @param {number} [cols] the map's own column count — default the official 21
  */
-export function pickTile(cam, sx, sy, heightAt, levels = [0], rows = 19, cols = 21) {
+export function pickTile(cam, sx, sy, heightAt, levels = [0], rows = GEO.ROWS, cols = GEO.COLS) {
   const p = { x: 0, y: 0 };
   const hs = [...levels].sort((a, b) => b - a);
   if (!hs.includes(0)) hs.push(0);

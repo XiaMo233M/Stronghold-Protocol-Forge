@@ -165,6 +165,7 @@
 //                    fail, BOSS_CLOCK_MS)
 
 import { PHASE, modeIdFor } from '../../shared/constants.js';
+import { layoutOf } from '../../shared/layout.js';
 import { Battle } from '../sim/Battle.js';
 import { DataSource } from '../sim/simdata.js';
 import { createRng, deriveSeed } from '../sim/rng.js';
@@ -321,6 +322,8 @@ export class Match {
     const setup = setupMatchWaves(this.gd, this.rngSetup);
     this.stageId = setup.stageId;
     this.stage = this.stageId ? this.gd.stage(this.stageId) : null;
+    /** The stage's own layout (shared/layout.js): its battle rects, pen band and mirror axis — official for 19×21. */
+    this.layout = layoutOf(this.stage);
     /**
      * 编辑器「▶ 试玩这张图」：让这一局**打指定的那张图**（业主 2026-10-08 的地图编辑器需求）。
      *
@@ -335,6 +338,7 @@ export class Match {
     if (forcedStage && this.gd.stage(forcedStage)) {
       this.stageId = forcedStage;
       this.stage = this.gd.stage(forcedStage);
+      this.layout = layoutOf(this.stage);
       // 部署图是按当时那张图算出来的：换了图必须让它重算，否则试玩里能放的位置还是上一张图的
       for (const ps of this.players.values()) ps.invalidateDeployMap?.();
       if (!this.stage.rounds || !Object.keys(this.stage.rounds).length) {
