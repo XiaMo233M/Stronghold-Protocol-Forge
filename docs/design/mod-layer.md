@@ -2,10 +2,12 @@
 
 Part of [DESIGN.md](../DESIGN.md) (the index; section numbers are global).
 
-This section is the design for the middle layer between "content a pack can add" and "code a pack can run". It is the
-first part of DESIGN that describes something the repository does **not** implement yet: the behaviour layer exists and
-works (§28.1), but identity, load-order arbitration, verification, versioning and the client surface do not. Nothing
-here is implemented by the commit that adds this file; §28.11 lists what is deliberately left out.
+This section is the design for the middle layer between "content a pack can add" and "code a pack can run". It began as
+a proposal and is now partly implemented: identity and its wire-level verification
+(§28.2, §28.6), load-order arbitration with attribution (§28.3), the override surface (§28.5), operator packs
+(§28.10) and the kit import whitelist (§28.12) all carry code and tests behind them. Sections that are still design
+say so in their own text (§28.8 says it outright) — read a section's status from the section, not from this header.
+§28.11 collects what is deliberately left out.
 
 Every `file:line` below was read at the revision this section was written against (`main` `1283050`, `APP_VERSION`
 `0.9.4`, `shared/constants.js:9`). A line number is a **snapshot, not a contract** — where a sentence is load-bearing it
@@ -590,8 +592,9 @@ reach the same content".
   revision section, and it also rewrites the same index table row area in `docs/DESIGN.md`. Whichever lands second
   renumbers; if the port lands first, this section becomes §28 and its subsections renumber with it. Its index row is
   appended at the bottom of that table for exactly this reason.
-- **Nothing here is implemented yet.** The first slice, its files, its verification and its failure modes are in the
-  proposal that accompanies this section; the two attribution/rot defects it fixes are the only code that changed.
+- **Not everything here is implemented.** The gaps that closed (identity, load-order arbitration, the override
+  surface, operator packs, kit import) have code and tests named in their sections; the rest are still design, and
+  each such section says so in its own text.
 
 ### 28.12 The kit import surface (gap ④): a whitelist, resolved on both ends
 
