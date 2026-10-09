@@ -4,9 +4,10 @@
 // `statsBase/traitBase/talentsBase` 是**不带模组**的原样，`stats/trait/talents` 是**带默认模组**的样子。
 // 派生时少烘一半，玩家选「不装备」就会得到带模组的数值；多烘一半，默认模组就会被算两次。
 // 所以这里的核心断言是：**官方 110 位带模组的干员，spec → 记录 的往返一致**（含富文本与 bbStr）。
-// 0.2.2 起口径是「**剥掉潜能注解后**逐字节一致」：官方记录带 `potDown` / `potMin` / `potBelow`，而派生记录
-// 按引擎约定不带（`shared/potential.js` 的 `stripPotential`），所以两边都剥了再比 —— 上游 `test/data.test.js`
-// 也是这个比法。同时补了两条不放宽的守卫：官方带注解的，派生必须不带；剥后的比对样本里带注解的记录数有下限。
+// 0.2.2 起官方记录带 `potDown` / `potMin` / `potBelow` 注解，比对前先两边剥掉（`shared/potential.js` 的
+// `stripPotential`）—— 上游 `test/data.test.js` 也是这个比法。0.10.0 起口径**更严**：**天赋层的潜能链必须原样
+// 保留**（覆盖模式每存一次都从 spec 重派生，派生时丢掉就再也找不回来，见 `test/overrideMode.test.js` 的
+// 「③ 潜能链不许丢」），所以除了剥后逐字节一致，还逐条比对天赋层的注解本身；样本下限守卫保留。
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -18,9 +19,10 @@ import {
   PROFESSIONS, PROFESSION_NAMES, POSITION_NAMES, DMG_TYPES, ATTACK_KINDS, PROJECTILES,
   MODULE_ATTR_KEYS, TRIGGER_RULES, KNOWN_CUSTOM_TRIGGER_RULES,
 } from '../shared/chessAuthoring.js';
-// 0.2.2 把潜能从「烘焙进记录」改成「运行时注解」（`potDown` 记录层 / `potMin`+`potBelow` 天赋层）：官方记录**带**注解，
-// 而 spec 派生出来的记录**不带**（shared/potential.js:146-153 明说这是引擎约定）。所以「往返逐字节一致」的口径要按
-// 上游 test/data.test.js:563 那样改成「**两边都剥掉注解后**逐字节一致」，而不是让创作层把注解脱传（那会违反约定）。
+// 0.2.2 把潜能从「烘焙进记录」改成「运行时注解」（`potDown` 记录层 / `potMin`+`potBelow` 天赋层）：官方记录**带**注解。
+// 0.10.0 起 spec 派生出来的记录**也带天赋层的链条**（覆盖模式不许丢作者数据；记录层的 `potDown` 仍由
+// `stripPotential` / `atRank` 负责，不是派生器的事）。所以「往返逐字节一致」的口径是「**两边都剥掉注解后**逐字节一致」
+// （上游 test/data.test.js:563 同法），**另加**一条更严的：天赋层注解本身也要与官方逐条相同。
 import { stripPotential, hasPotentialData } from '../shared/potential.js';
 
 /** 比对用：剥掉潜能注解（不修改入参）。 */
@@ -240,7 +242,7 @@ describe('干员创作层：模组', () => {
     assert.equal(issues.some((i) => i.code === 'MODULES_ON_NORMAL' && i.severity === 'warning'), true);
   });
 
-  test('官方 110 位带模组的干员：spec → 记录 往返一致（剥潜能注解后逐字节，含富文本与 bbStr）', () => {
+  test('官方 110 位带模组的干员：spec → 记录 往返一致（剥潜能注解后逐字节，且天赋层潜能链逐条保留，含富文本与 bbStr）', () => {
     let checked = 0;
     let potChecked = 0;
     for (const [id, g] of Object.entries(CHESS)) {
@@ -251,12 +253,16 @@ describe('干员创作层：模组', () => {
       spec.id = `rt_${id.replace(/^chess_char_/, '').replace(/_b$/, '')}`;
       const out = deriveChessRecord(spec);
       assert.equal(out.ok, true, `${id}: ${JSON.stringify(out.errors)}`);
-      // 潜能注解按引擎约定处置：官方两态记录里**带注解的**，派生记录必须是**不带注解的**，且剥掉注解后逐字节相同。
-      // 这两条一起守住「模板保真」：既不许把注解漏进派生记录，也不许借剥注解之名把别的字段改坏。
+      // 潜能注解的处置（0.10.0 起）：**天赋层的链条必须与官方逐条相同** —— 官方两态记录里带注解的，派生记录
+      // 也要把 `potMin` / `potBelow` 原样带出来：覆盖模式每存一次都会从 spec 重派生一遍盘上的记录，派生时丢掉
+      // 的注解找不回来（`test/overrideMode.test.js` 的「③ 潜能链不许丢」正是为合流后的真 0.2.2 数据写的）。
+      // 这一条比原来**更严**（原来只查「派生记录不许带注解」，现在查「注解本身逐条相等」），并与下面那些
+      // `bare()` 比对互为补充：剥后一致守住别的字段不被改坏，带注解比对守住注解不被抹掉。
       for (const [label, official, derived] of [['base', rec, out.base], ['golden', g, out.golden]]) {
         if (hasPotentialData(official)) {
           potChecked++;
-          assert.equal(hasPotentialData(derived), false, `${id}: ${label} 派生记录不该带潜能注解（potDown / 链式天赋）`);
+          assert.deepEqual(derived.talents, official.talents, `${id}: ${label} 天赋层潜能链（talents）必须与官方逐条相同`);
+          assert.deepEqual(derived.talentsBase, official.talentsBase, `${id}: ${label} 天赋层潜能链（talentsBase）必须与官方逐条相同`);
         }
         assert.deepEqual(bare(derived.modules), bare(official.modules), `${id}: ${label} modules`);
         assert.deepEqual(bare(derived.trait), bare(official.trait), `${id}: ${label} trait`);

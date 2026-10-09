@@ -18,6 +18,7 @@
 // tools/build-data.mjs 与引擎都用它）：派生的精锐记录必须按同一套算术把默认模组烘进去，否则玩家选「不装备」
 // 会得到带模组的数值 —— 这一类不一致不会报错，只会让作者的模组在游戏里表现不对。
 import { composeStats, composeTalents } from './loadoutRecord.js';
+import { talentAtRank, FULL_RANK } from './potential.js';
 
 /**
  * The professions THIS project's data uses — which are NOT the global Arknights class names. The mapping that bit us
@@ -229,6 +230,71 @@ export function overrideChessIds(rec) {
 }
 
 /**
+ * Value equality for the chain rebuild below (arrays and plain objects deep; key order is irrelevant — a talent entry at
+ * two ranks is the same entry when its values are equal, not when its keys happen to be inserted in the same order).
+ */
+const sameValue = (a, b) => {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => sameValue(x, b[i]));
+  }
+  if (!isPlainObj(a) || !isPlainObj(b)) return Number.isNaN(a) && Number.isNaN(b);
+  const ka = Object.keys(a);
+  return ka.length === Object.keys(b).length
+    && ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && sameValue(a[k], b[k]));
+};
+
+/**
+ * One talent entry as the data build writes its chain (tools/build-data.mjs chainTalent): the rank-`hi` entry, plus
+ * `potMin` (the lowest rank that builds the same entry) and `potBelow` (the entry below it — only the fields it changes,
+ * itself chained) when a lower rank builds something else.
+ */
+function chainTalent(vals, hi) {
+  const node = vals[hi];
+  let m = hi;
+  while (m > 0 && sameValue(vals[m - 1], node)) m--;
+  if (m === 0) return node;
+  const below = chainTalent(vals, m - 1);
+  const part = {};
+  for (const [k, v] of Object.entries(below)) if (k === 'potMin' || k === 'potBelow' || !sameValue(v, node[k])) part[k] = v;
+  return { ...node, potMin: m, potBelow: part };
+}
+
+/**
+ * 带默认模组的精锐天赋，**连同潜能链一起**合并（`deriveChessRecord` 精锐侧的 `talents`）。
+ *
+ * 合并规则与 `composeTalents` **同一套**（覆盖已有 index：模组的值赢、模组没重述的键保留基础值；否则追加；空占位丢弃），
+ * 注解按同一优先级一起合并。做法是逐档合并再链式化，与官方数据的生成方式一致（`tools/build-data.mjs` 的
+ * `withPotentialData` / `chainTalent`）：`shared/potential.js` 的 `talentAtRank` 把基础天赋与每条模组改动解析到该档，
+ * 每档交给 `composeTalents` 合并一次，最后按档位把结果写成 `potMin` / `potBelow`。于是：
+ *   * 改动带了自己的 `potMin` / `potBelow` → **模组的值赢**（`chess_char_6_02_b` 精锐链用它那一份 105% / 100%）；
+ *   * 改动没重述 → 保留基础天赋上那一份（链不会因为过一遍模组就消失）；
+ *   * 追加的条目（`talentIndex` 为负）用它自己带的。
+ * `potBelow` 是**部分条目**（没重述的字段沿用上一档的值），所以「照抄 change 的 potBelow」不够：`chess_char_6_05_b`
+ * 的改动只重述 desc / descRaw，它的低档仍要用改动自己的 bb 与基础的 bb 合并。
+ *
+ * 为什么不直接用 `composeTalents`：它的口径就是「一个潜能档位的结果」，故意剥掉 `potMin` / `potBelow`
+ * （`shared/loadoutRecord.js` 写明，引擎先解析潜能再合并）。而创作层必须把作者的数据原样还回去 —— 覆盖模式每次保存
+ * 都用 spec 重新派生一遍盘上的记录（`regeneratePack`），派生时丢掉的链是找不回来的。逐档复用同一个合并函数，既保住
+ * 「只有一份合并规则」，又让注解按该规则一起落下来。某一档合并出来的列表与满档不同形状（更低潜能下多/少一条天赋）时
+ * 写不成链：此时原样返回满档合并结果（与旧行为一致，不猜）。
+ */
+function composeTalentsWithPotential(base, changes) {
+  const top = composeTalents(base, changes);
+  const base0 = Array.isArray(base) ? base : [];
+  const ch0 = Array.isArray(changes) ? changes : [];
+  const ranks = [];
+  for (let r = 0; r < FULL_RANK; r++) {
+    ranks.push(composeTalents(base0.map((t) => talentAtRank(t, r)), ch0.map((t) => talentAtRank(t, r))));
+  }
+  ranks.push(top);
+  // 链是**按数组位置**写的（官方生成器如此，`index` 可以是 -1 且重复），所以形状必须逐档一致才敢写
+  const shape = (l) => l.map((t) => t.index).join(',');
+  if (!ranks.every((l) => l.length === top.length && shape(l) === shape(top))) return top;
+  return top.map((_, i) => chainTalent(ranks.map((l) => l[i]), FULL_RANK));
+}
+
+/**
  * Build a valid base + elite record pair from an authoring spec.
  *
  * Spec (only `id`, `name`, `tier`, `profession`, `position` and `stats` are required):
@@ -431,6 +497,10 @@ export function deriveChessRecord(spec, overrideIds) {
       tokenKey: ch && typeof ch.tokenKey === 'string' && ch.tokenKey ? ch.tokenKey : null,
       hidden: ch ? ch.hidden !== false : true,
       ...(Number.isInteger(ch && ch.skillIndex) ? { skillIndex: ch.skillIndex } : {}),
+      // 潜能注解（0.2.2）：模组自己也能重述某条天赋的链（官方 `chess_char_6_02` 的默认模组就带），
+      // 这两条同样不许在派生时丢掉 —— `composeTalentsWithPotential` 按「模组的值赢」把它并进精锐侧。
+      ...(Number.isInteger(ch && ch.potMin) ? { potMin: ch.potMin } : {}),
+      ...(isPlainObj(ch && ch.potBelow) ? { potBelow: { ...ch.potBelow } } : {}),
       _ci: ci,
     }));
     for (const ch of talentChanges) delete ch._ci;
@@ -528,7 +598,7 @@ export function deriveChessRecord(spec, overrideIds) {
     statsBase: goldenStatsBase, traitBase: goldenTraitBase, talentsBase: goldenTalentsBase,
     stats: defaultModule ? composeStats(goldenStatsBase, defaultModule.attr) : goldenStatsBase,
     trait: defaultModule && defaultModule.traitOverride ? { ...defaultModule.traitOverride } : goldenTraitBase,
-    talents: defaultModule ? composeTalents(goldenTalentsBase, defaultModule.talentChanges) : goldenTalentsBase,
+    talents: defaultModule ? composeTalentsWithPotential(goldenTalentsBase, defaultModule.talentChanges) : goldenTalentsBase,
     modules: Array.isArray(spec.modules) ? modules.map((m) => ({ ...m })) : undefined,
     module: modulePointer(true),
     skill: skillRecord(true), skills: sk ? [skillRecord(true)] : [],
@@ -701,6 +771,9 @@ export function specFromChessRecord(base, golden) {
           if (isPlainObj(ch.bbStr) && Object.keys(ch.bbStr).length) c.bbStr = { ...ch.bbStr };
           if (typeof ch.tokenKey === 'string' && ch.tokenKey) c.tokenKey = ch.tokenKey;
           if (ch.hidden === false) c.hidden = false;
+          // 潜能注解（0.2.2）：模组改动自带的链要一起搬进 spec，否则「记录 → spec → 记录」这一趟就把它丢了。
+          if (Number.isInteger(ch.potMin)) c.potMin = ch.potMin;
+          if (isPlainObj(ch.potBelow)) c.potBelow = { ...ch.potBelow };
           const cg = grid(ch.rangeGrid);
           if (cg) c.rangeGrid = cg;
           return c;
