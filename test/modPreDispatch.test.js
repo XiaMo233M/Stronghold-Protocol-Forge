@@ -12,6 +12,9 @@
 //      一条既在单元层（假 socket）也在端到端层（真 ws）断言。
 //   4. **隔离与确定性**：工厂**每个连接调用一次**（状态只挂在那条连接上，多局并发不串味）、依赖对象冻结且只有那八个
 //      键（没有 data / lobby / Match —— 注入改不了对局结果）、包 id 次序决定调用次序、不注册第二个 message 监听器。
+//   5. **坏声明拒的是整个包**（B3a 段对齐，DESIGN §28.13.3）：模块/策略文件不在、策略不是 JSON 对象、`intercepts`
+//      里有协议不认识的名字 —— 以前只拒那个钩子、包照旧加载（服务器以为自己被准入闸门保护着），现在整包不进
+//      `loaded.packs`。`loadWorkshopHooks` 的同类拒绝只剩「模块变了 / 没有工厂导出」这一层 import 才知道的后备。
 //
 // Run: node --test test/modPreDispatch.test.js
 import { describe, test, before, after } from 'node:test';
@@ -433,7 +436,7 @@ describe('resource.* 协议面（三个 C2S 类型 + 形状校验）', () => {
 // ---------------------------------------------------------------------------------------------------
 // 5. 装载期：坏声明点名拒绝（拒绝码沿用 A 段）
 // ---------------------------------------------------------------------------------------------------
-describe('loadWorkshopHooks: 坏声明点名拒绝，拒绝码沿用 A 段', () => {
+describe('server.preDispatch: 坏声明 ⇒ 整包被拒（B3a 段对齐，DESIGN §28.13.3）', () => {
   test('合法声明：模块与策略都被读到，intercepts 原样带来', async () => {
     const { hooks, errors } = await loadedOf();
     assert.deepEqual(errors.filter((e) => e.pack === 'guard'), [], '合法的那份声明不该出现在错误里');
@@ -448,31 +451,55 @@ describe('loadWorkshopHooks: 坏声明点名拒绝，拒绝码沿用 A 段', () 
     assert.equal(hookFor(hooks, 'plain'), undefined);
   });
 
-  test('五种坏声明各自给出**具名**拒绝码，且坏的不拖垮好的', async () => {
-    const { hooks, errors } = await loadedOf();
-    const by = (pack) => errors.find((e) => e.pack === pack);
-    assert.equal(by('moduleMissing')?.code, 'PREDISPATCH_BAD_MODULE');
-    assert.match(by('moduleMissing').reason, /not a readable file/);
-    assert.equal(by('policyMissing')?.code, 'PREDISPATCH_BAD_POLICY');
-    assert.equal(by('policyBad')?.code, 'PREDISPATCH_BAD_POLICY');
-    assert.match(by('policyBad').reason, /must be a JSON object/);
-    assert.equal(by('moduleNoFactory')?.code, 'PREDISPATCH_BAD_MODULE');
-    assert.match(by('moduleNoFactory').reason, /createPreDispatch/);
-    for (const e of errors) assert.ok(e.code && e.reason, JSON.stringify(e));
-    assert.deepEqual(hooks.map((h) => h.pack), ['guard'], '坏的那个被拒，好的那个照旧装上');
+  test('三种**可同步判定**的坏声明让整个包不出现，理由里点名拒绝码（B3a 段：不再只拒那个钩子）', () => {
+    const loaded = loadWorkshop(wsRoot, { log: quiet });
+    const listed = loaded.packs.map((p) => p.id);
+    assert.ok(listed.includes('guard'), listed.join(','));
+    assert.ok(listed.includes('plain'), listed.join(','));
+    // 以前这三种是「包照旧加载、只是钩子被拒」，现在整包不进 loaded.packs ——
+    // 「加载了但能力没生效」是最坏的失败形态：服务器以为自己被准入闸门保护着，其实一条消息都没拦。
+    for (const [pack, code] of [
+      ['moduleMissing', 'PREDISPATCH_BAD_MODULE'],
+      ['policyMissing', 'PREDISPATCH_BAD_POLICY'],
+      ['policyBad', 'PREDISPATCH_BAD_POLICY'],
+    ]) {
+      assert.equal(listed.includes(pack), false, `${pack} 不得进 loaded.packs`);
+      const err = loaded.errors.find((e) => e.pack === pack);
+      assert.ok(err, `${pack}: 必须有具名错误（静默丢弃比报错坏得多）`);
+      assert.match(err.reason, new RegExp(`^${code}: `), err.reason);
+    }
+  });
+
+  test('`moduleNoFactory`（文件在、内容没有工厂导出）是唯一留在这层 import 才知道的一条', async () => {
+    const loaded = loadWorkshop(wsRoot, { log: quiet });
+    // 装载期的判据是「module / policy 是不是可读文件、policy 是不是 JSON 对象、intercepts 认不认识」。模块**内容**
+    // 有没有 `createPreDispatch` 导出必须 import 才知道，而 `loadWorkshop` 是同步的（server/data.js 在叠数据时
+    // 也调它），所以这一条留在 `loadWorkshopHooks`：包装上了，钩子没装上，并且有具名警告。
+    // 这是一个**已知的口子**，写在 DESIGN §28.13.3 与 B3a 报告里 —— 不假装它已经被堵上。
+    assert.ok(loaded.packs.some((p) => p.id === 'moduleNoFactory'), '文件层面它合法，所以包照旧加载');
+    assert.equal(loaded.errors.some((e) => e.pack === 'moduleNoFactory'), false);
+    const { hooks, errors } = await loadWorkshopHooks(loaded, { log: quiet });
+    assert.equal(hookFor(hooks, 'moduleNoFactory'), undefined);
+    const err = errors.find((e) => e.pack === 'moduleNoFactory');
+    assert.equal(err?.code, 'PREDISPATCH_BAD_MODULE');
+    assert.match(err.reason, /createPreDispatch/);
+    assert.match(err.reason, /the loader refuses the whole pack for this/, '后备拒绝要说明自己为什么在这层');
+    // 好的那个照旧装上
+    assert.deepEqual(hooks.map((h) => h.pack), ['guard']);
   });
 
   test('intercepts 按**运行时真的装着的协议**再判一次（声明可以比协议活得久）', async () => {
-    // 注入一份少掉 room.create 的目录：包声明的 room.create 就是「协议不认识的名字」
+    // 注入一份少掉 room.create 的目录：包声明的 room.create 就是「协议不认识的名字」——装载期就整包拒绝
     const narrow = { ...C2S };
     delete narrow['room.create'];
-    const { hooks, errors } = await loadedOf(wsRoot, narrow);
-    const bad = errors.find((e) => e.pack === 'guard');
-    assert.equal(bad?.code, 'PREDISPATCH_UNKNOWN_TYPE');
-    assert.match(bad.reason, /room\.create/);
-    assert.equal(hookFor(hooks, 'guard'), undefined, '一个拦不住的名字 = 整个钩子被拒（不静默丢掉那一条）');
+    const rejected = loadWorkshop(wsRoot, { log: quiet, c2s: narrow });
+    assert.equal(rejected.packs.some((p) => p.id === 'guard'), false, '一个拦不住的名字 = 整个包被拒（不静默丢掉那一条）');
+    const err = rejected.errors.find((e) => e.pack === 'guard');
+    assert.ok(err, JSON.stringify(rejected.errors));
+    assert.match(err.reason, /^PREDISPATCH_UNKNOWN_TYPE: /);
+    assert.match(err.reason, /room\.create/);
     // 对照：完整协议下同一个包是合法的
-    assert.ok(hookFor((await loadedOf()).hooks, 'guard'));
+    assert.ok(loadWorkshop(wsRoot, { log: quiet }).packs.some((p) => p.id === 'guard'));
   });
 
   test('没有包 / 目录不存在时是空结果，不是错误（普通安装的正常情形）', async () => {
@@ -481,10 +508,10 @@ describe('loadWorkshopHooks: 坏声明点名拒绝，拒绝码沿用 A 段', () 
     assert.deepEqual(await loadWorkshopHooks(null, { log: quiet }), { hooks: [], errors: [] });
   });
 
-  test('坏声明只报告、不抛（一个坏钩子不该让服务器起不来）', async () => {
+  test('坏声明只报告、不抛（一个坏钩子不该让服务器起不来）', () => {
     const warned = [];
     const log = { info() {}, warn: (...a) => warned.push(a[0]), error() {}, debug() {} };
-    await loadWorkshopHooks(loadWorkshop(wsRoot, { log }), { log });
+    loadWorkshop(wsRoot, { log });
     assert.ok(warned.some((w) => /PREDISPATCH_BAD_MODULE/.test(w)), warned.join('\n'));
     assert.ok(warned.some((w) => /PREDISPATCH_BAD_POLICY/.test(w)), warned.join('\n'));
   });

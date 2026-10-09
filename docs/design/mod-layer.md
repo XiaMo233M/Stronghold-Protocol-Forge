@@ -699,7 +699,7 @@ itself is the browser's job; `test/ui/kitimports.e2e.test.js` is the opt-in chec
 asserts the export-name floor, and asserts a specifier outside the whitelist does not resolve there either), and until
 someone runs it on a machine with Chrome this remains the standing gap recorded in `docs/WORKSHOP.md` §4.4.
 
-### 28.13 The four capability declarations: `assets`, `client`, `server.preDispatch`, `routes` (A 段 + B1 段)
+### 28.13 The four capability declarations: `assets`, `client`, `server.preDispatch`, `routes` (A 段 + B1 段 + B2 段 + B3a 段)
 
 **The gap, stated by its own verdict.** A third-party mod ("full resource pack: import, verify, server admission") was
 rewritten into this repository's pack format and then judged by the REAL validator, on both this branch and the middle
@@ -714,10 +714,12 @@ hash (§28.2), and nothing executed them. **B1 段 is the behaviour of two of th
 registered on the dispatch path and `routes` are served, both wired in `server/index.js` and both documented for
 authors in `docs/WORKSHOP.md` §1.9.1 / §1.9.2. **B2 段 landed the third one**: `client` panels are registered on the
 module route `/workshop-panels/`, mount in the browser from `welcome.modPanels`, and a declared module that is not
-usable refuses the whole pack (§28.13.3). `assets` is still declaration-only — no container is served and the Service
-Worker policy is unchanged (that is B3 段). The split is deliberate: the behaviour half touches the protocol face and
-the runtime, and a declaration that cannot be written is not worth debugging at the same time as one that cannot be
-trusted.
+usable refuses the whole pack (§28.13.3). **B3a 段 landed the fourth and paid off the debt B2 named**: the declared
+container and manifest are served on their own pack-scoped route, `serverPolicy` decides whether `/assets/` and
+`/fonts/` answer at all, `verify` is checked at load time, and `server.preDispatch` was **aligned** to the
+"unusable declaration refuses the whole pack" rule it had been exempt from (§28.13.4). The Service Worker half of
+`assets` — what the client does with the container once it has it — is **not** here: whether a pack may register a
+root-scope worker is a trust ruling the owner has not made yet.
 
 **The shapes, with the one decision each carries.**
 
@@ -832,41 +834,102 @@ file + cache policy, and served from `server/http/static.js` **before** the core
 
 #### 28.13.3 A declaration that cannot be used refuses the whole pack
 
-B1 段 named every bad `server.preDispatch` and refused **that hook**, letting the pack load: its data and its identity
-were untouched, and the server log said what was wrong. B2 段 walks past that stance for the C layer, and the ruling is
-worth stating once because it applies to the remaining behaviour half (`assets`, B3 段) too:
+**One rule, three groups, and it is stated once here because all three are judged by it.** A段 fixed the shapes;
+B1段解下了 `server.preDispatch` 的行为但只拒那个钩子; B2段为 `client` 立了这条纪律; **B3a 段把 `server.preDispatch`
+对齐过来，并把 `assets` 也纳入**:
 
 > **A declaration that cannot be used refuses the entire pack.** "The pack still loads, that capability just did not
 > take effect" is not an accepted outcome.
 
-Why the difference is not a preference. A refused hook leaves the pack's *content* intact and the loss is visible where
-it happens (an entry message is not gated — the player is simply let in). A refused panel does not: the author wrote
-"my pack has an interface", the server hashed that sentence into the pack's identity, the pack still applies its data,
-and the browser shows nothing at all. Author and operator both believe a client interface exists. That is exactly the
-silent-degradation class this whole section exists to remove, and it is worse than a missing pack, because a missing
-pack is a visible absence.
+Why the difference is not a preference. A refused hook leaves the pack's *content* intact and the loss is invisible
+where it happens (an entry message is not gated — the player is simply let in, and the operator believes a gate is
+shut). A refused panel does not: the author wrote "my pack has an interface", the server hashed that sentence into the
+pack's identity, the pack still applies its data, and the browser shows nothing at all. A refused container is the
+same shape of lie one layer down: the pack says "my resources are here", the server serves a 404, and the client's
+import flow fails for a reason no operator can see. All three are exactly the silent-degradation class this whole
+section exists to remove, and all three are worse than a missing pack, because a missing pack is a visible absence.
 
-What is judged, and where:
+What is judged, per group, and where:
 
-* **At load** (`server/workshop.js panelModuleIssues`, called from `loadWorkshop` before the pack is listed): the
-  declared `module` must be a readable file **inside the pack**, must be a `.js`, and must resolve inside its own
-  directory. Failure is `CLIENT_BAD_PANEL_MODULE` and the pack does not appear in `loaded.packs` at all.
-* **At the shape layer** (`shared/workshop.js parseClientDecl`): the same `.js` rule, by name, in the editor — so a pack
-  cannot be *saved* in a state the loader then refuses (§28.12's "the editor cannot pass what the loader refuses").
-* **At the serving side** (`server/http/workshop.js workshopPanelFilesFor` + `static.js`): only a registered URL is
-  answered, and only a `.js` path ever enters that map. Defence in depth, because the serving side may read a hand-built
-  loader object or a pack written against an older schema (the same reason `workshopRoutesFor` re-judges).
+* **`client.panels`** — at load (`server/workshop.js panelModuleIssues`, called from `loadWorkshop` before the pack is
+  listed): the declared `module` must be a readable file **inside the pack**, must be a `.js`, and must resolve inside
+  its own directory. Failure is `CLIENT_BAD_PANEL_MODULE` and the pack does not appear in `loaded.packs` at all.
+* **`server.preDispatch`** — at load (`server/workshop.js preDispatchIssues`, same place): `module` and `policy` must
+  resolve inside the pack and be readable files, `policy` must parse as a JSON object, and every `intercepts` entry must
+  exist in the protocol **this server actually runs**. The codes are B1's own names (`PREDISPATCH_BAD_PATH` /
+  `PREDISPATCH_BAD_MODULE` / `PREDISPATCH_BAD_POLICY` / `PREDISPATCH_UNKNOWN_TYPE`), so an author sees the same word in
+  the editor and in the boot log. **B1 refused only the hook and let the pack load; that is what B3a changed**, and the
+  reason is the one above: "the pack is installed, the admission gate is not" is the exact failure this rule exists to
+  forbid.
+* **`assets`** — at load (`server/workshop.js assetsIssues`, same place): `container` and `manifest` must resolve inside
+  the pack and be readable files. Failure keeps the **shape layer's** names (`ASSETS_BAD_CONTAINER` /
+  `ASSETS_BAD_MANIFEST`) rather than adding a second pair, because all three ways to be wrong there have one repair —
+  point `assets.container` at a `.spresources` that is really in the pack — and because B2 already set that precedent
+  for `.js`. In the editor, for both groups, is where they are named: §28.12's "the editor cannot pass what the loader
+  refuses".
+* **The serving side** (`server/http/workshop.js workshopResourceFilesFor` / `workshopPanelFilesFor` +
+  `static.js`): only a registered URL is answered, and only a declared path ever enters those maps. Defence in depth,
+  because the serving side may read a hand-built loader object or a pack written against an older schema (the same
+  reason `workshopRoutesFor` re-judges).
 * **On the client** (`public/js/ui/extensions.js`): an unknown `slot`, a module without `mount`, a `gate` that names no
   store path, and a required browser capability this browser lacks are each refused **by name**, and the capability case
   is also said out loud to the player. The one judgement the server cannot make is the gate (the client store is the
   client's truth) and the browser's capabilities; those are the client's half of the same rule.
 
-**What this costs an existing pack: nothing.** The rule only fires for a pack that declares `client.panels`, and no pack
-in this repository (nor any of the three community mods) declares it — which is why the three example packs in
-`docs/examples/` keep their hashes and their parse results byte for byte (`test/packAssets.test.js`). The one fixture
-that did declare a panel without shipping the file (`onlyClient`) now ships it: a declaration whose file is missing was
-legal for exactly one commit, while A 段 was declaration-only.
+**The one hole this rule still has, stated rather than hidden.** `loadWorkshop` is **synchronous** —
+`server/data.js` calls it while building the overlay — and `import()` is not. So the two things about
+`server.preDispatch` that only an import can answer stay in `loadWorkshopHooks`, which now runs on packs the loader
+already cleared: a module that fails to import, and a module whose factory export is missing or not a function. Those
+keep their B1 names and their warning, and the pack stays loaded. The window is one `stat` wide (the file changed
+between the two calls) or a hand-built loader object; it is recorded here so the next reader knows it was a decision,
+not an oversight. Everything else about the hook — including "the file it names is not there", the case that actually
+happens — is refused at load.
 
-**What this section does not decide.** The behaviour of `assets` (serving the container, the client cache policy, the
-Service Worker's defaults — B3 段), the editor's graphical entry points for the four fields, and whether `assets` ships
-in a release. Those each change a runtime rather than a schema.
+**What this costs an existing pack: nothing.** The rule only fires for a pack that declares `client.panels`,
+`server.preDispatch` or `assets`, and no pack in this repository (nor any of the three community mods) declares them —
+which is why the three example packs in `docs/examples/` keep their hashes and their parse results byte for byte
+(`test/packAssets.test.js`). The fixtures that did declare one without shipping its files (`onlyAssets`, `assetsA`,
+`assetsB`, `onlyServer`) now ship them: a declaration whose file is missing was legal for exactly one commit per group,
+while that group was declaration-only.
+
+#### 28.13.4 The resource container and the 412 policy (B3a 段)
+
+`pack.json.assets` is resolved once per process into a **two-entry map per pack** and served from
+`server/http/static.js`. The decisions, each with the alternative it rejected:
+
+* **A prefix of its own: `/workshop-resources/<pack>/<declared path>`.** It was tempting to hang the container off
+  `/workshop-assets/`, which already serves a pack's own files — but that route serves a pack's MEDIA under an
+  extension allowlist and knows nothing outside it, while `assets.container` is a `.spresources` at the pack's ROOT and
+  no allowlist covers it. Widening the media route would have traded one narrow rule for two loose ones. The new map
+  holds **two URLs per pack**, built from the loaded packs exactly like `workshopPanelFilesFor`, so traversal is not a
+  check that can be got wrong: `..` cannot build a key that is absent. Unregistered / traversal / not-in-the-declaration
+  are all **404** (`/workshop-panels/` discipline, one route over). The `?v=<hash12>` suffix is the cache key — a
+  repack is a new URL, so `Cache-Control: no-cache` is enough and a deploy still reaches an open tab.
+* **Streamed, never buffered.** A container reaches hundreds of megabytes (the reference pack's own sample is
+  ~791 MiB), so it goes out through `fs.createReadStream` + `pipeline`, and `Content-Length` comes from the `stat` the
+  route already did. `test/modAssets.test.js` pins this by instrumenting `fs.createReadStream`: a `readFile` on that
+  path would put the whole pack in the server's memory, which is the one thing this route must not do. The response
+  also carries `X-SP-Resource-Sha256` — the digest the loader verified, not a second hashing pass.
+* **`verify` is checked at load, and failing it refuses the pack.** The digest comes from the sidecar
+  `<container>.<verify>` (the reference pack's format: `<64 hex><whitespace><name>`), and the container is hashed with
+  the same streaming reader. A mismatch is `ASSETS_VERIFY_FAILED`, a missing or unparsable sidecar is
+  `ASSETS_VERIFY_UNAVAILABLE`, and both refuse the whole pack — a "verified but we served it anyway" resource pack is
+  the failure mode this field exists to prevent. Hashing once at load also means the serving side never hashes at all.
+* **`serverPolicy` is process-wide, and only a pack can turn it on.** `serve` is the default and every pack in this
+  repository declares it (which is the same as not declaring it): with `serve`, `static.js` behaves byte for byte as it
+  did before this section. `cache-only` makes `/assets/` and `/fonts/` answer **412 and never touch the file system** —
+  short-circuited before the mount lookup, because answering from disk once would mean the policy does not exist. There
+  is no environment variable and no global flag: the only thing that can make a deployment cache-only is a `pack.json`.
+  The consequence nobody should discover by accident is that those two trees are **shared by every pack and by the
+  core game**, so one pack declaring it changes what the whole server serves. It is therefore said out loud once at
+  boot, naming the pack(s) that asked for it, and the reference implementation of the mod says the same thing
+  (`_up/mod4-pack`, gap ⑥).
+* **The client half is not here.** What the browser does with a container it has fetched — import it into
+  `CacheStorage`, answer `/assets/…` from it, and prove possession to `server.preDispatch` — is the Service Worker
+  half, and it waits on the owner's ruling about a pack registering a root-scope worker (`_up/mod4-resource-pack-recon.md`
+  §8.2 lists the two models). Serving the bytes and refusing to serve them are decidable on their own, so they landed
+  first.
+
+**What this section does not decide.** The Service Worker's defaults and the client import flow (B4 段, blocked on the
+trust ruling above), the editor's graphical entry points for the four fields, and whether `assets` ships in a release.
+Serving the bytes was the half that could be decided alone; what a browser does with them could not.

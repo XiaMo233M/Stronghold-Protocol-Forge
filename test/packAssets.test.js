@@ -19,6 +19,7 @@
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -55,16 +56,43 @@ const FOUR_KEYS = ['assets', 'client', 'server', 'routes'];
 
 let tmp;
 let wsRoot;
-/** 临时工坊根里的包：`base`（无声明）、四个「只声明一组」的包，以及两组不同写法的 assets 包（键序不同）。 */
+/** 临时工坊根里的包：`base`（无声明）、四个「只声明一组」的包，以及两组不同写法的 assets 包（键序不同）。
+ *
+ * B3a 段之后「声明了却不可用 ⇒ 拒绝整个包」也覆盖 `assets` 与 `server.preDispatch`（DESIGN §28.13.3），所以这份
+ * 夹具里**每一条声明都真的带着它的文件**：容器 + 旁挂 `.sha256` + 清单，或准入模块 + 策略文件。声明与文件之间
+ * 的落差本身就是本刀要消掉的那类静默失败，夹具不能再造一个。 */
+const CONTAINER = 'packs/resources-0.1.0.spresources';
+const ADMISSION_MODULE = 'server/resourceAdmission.mjs';
+/** 演示容器：足够小，内容无所谓 —— 装载期只校验「摘要对得上」。 */
+const CONTAINER_BYTES = Buffer.from('SPRES001 fake demo container for the loader gate\n', 'utf8');
+const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
+const SIDECAR = `${sha256(CONTAINER_BYTES)}  resources-0.1.0.spresources\n`;
 const PACKS = {
   base: { name: 'Base', files: { chess: { chess_ws_base_a: { chessId: 'chess_ws_base_a', name: 'base' } } } },
-  onlyAssets: { name: 'OnlyAssets', assets: VALID.assets },
+  onlyAssets: {
+    name: 'OnlyAssets',
+    assets: VALID.assets,
+    extra: { [CONTAINER]: CONTAINER_BYTES, [`${CONTAINER}.sha256`]: SIDECAR, 'resource-manifest.json': '{ "format": 1, "files": [] }' },
+  },
   // B2 段：一个声明了面板的包必须**真的带着那个模块**（声明了却不可用的声明拒绝整个包），所以夹具把它写进磁盘
   onlyClient: { name: 'OnlyClient', client: VALID.client, extra: { 'resources/preloadModal.js': 'export function mount() {}\n' } },
-  onlyServer: { name: 'OnlyServer', server: VALID.server },
+  // B3a 段：同理，一个声明了准入钩子的包必须真的带着模块与策略文件
+  onlyServer: {
+    name: 'OnlyServer',
+    server: VALID.server,
+    extra: { [ADMISSION_MODULE]: 'export function createPreDispatch() { return { preDispatch() { return false; } }; }\n', 'admission-files.json': '{ "version": "v1", "files": [] }' },
+  },
   onlyRoutes: { name: 'OnlyRoutes', routes: VALID.routes },
-  assetsA: { name: 'AssetsA', assets: { container: 'packs/a.spresources', manifest: 'm.json', serverPolicy: 'cache-only', verify: 'sha256' } },
-  assetsB: { name: 'AssetsB', assets: { verify: 'sha256', serverPolicy: 'cache-only', manifest: 'm.json', container: 'packs/a.spresources' } },
+  assetsA: {
+    name: 'AssetsA',
+    assets: { container: 'packs/a.spresources', manifest: 'm.json', serverPolicy: 'cache-only', verify: 'sha256' },
+    extra: { 'packs/a.spresources': CONTAINER_BYTES, 'packs/a.spresources.sha256': SIDECAR, 'm.json': '{ "format": 1, "files": [] }' },
+  },
+  assetsB: {
+    name: 'AssetsB',
+    assets: { verify: 'sha256', serverPolicy: 'cache-only', manifest: 'm.json', container: 'packs/a.spresources' },
+    extra: { 'packs/a.spresources': CONTAINER_BYTES, 'packs/a.spresources.sha256': SIDECAR, 'm.json': '{ "format": 1, "files": [] }' },
+  },
 };
 
 before(() => {

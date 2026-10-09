@@ -492,7 +492,10 @@ node tools/workshop-validate.mjs my-pack
 一条只读路由。**A 段只做格式**：解析形状、点名拒绝、把声明并进身份哈希；**B1 段把其中两组落成行为** ——
 `server.preDispatch` 的钩子真的挂在分发路径上（§1.9.1），`routes` 的只读路由真的被服务（§1.9.2）；**B2 段把
 `client` 落成行为** —— 包内的面板模块真的被送到浏览器并挂上四个宿主（§1.9.3），而「声明了却用不了的声明」从此
-**拒绝整个包**（§1.9.3 末尾的那条纪律）。`assets` 仍然只有声明：资源容器不被服务、Service Worker 一行没动（那是 B3 段）。
+**拒绝整个包**（§1.9.3 末尾的那条纪律）；**B3a 段把最后那一组 `assets` 落成服务端行为** —— 容器与清单在
+`/workshop-resources/` 上被服务（流式，不整读进内存）、`verify` 按声明校验容器、`serverPolicy` 决定 `/assets` /
+`/fonts` 还回不回（§1.9.4），并且**把 B1 的 `server.preDispatch` 对齐到同一条纪律**（声明不可用 ⇒ 整包拒绝）。
+**Service Worker（客户端读到容器之后做什么）不在本段**：它等业主对「包能不能注册根作用域 SW」的裁决。
 
 **为什么需要它们**：一个第三方「完整资源包导入 / 校验 / 服务端准入」的 mod 改写成本仓库的包格式之后，在 A 层
 **什么都不贡献**（没有干员/装备/怪物/地图/语音/美术），而旧 schema 没有地方表达这四件事，所以真校验器两边都判它
@@ -503,7 +506,7 @@ node tools/workshop-validate.mjs my-pack
 
 | 字段 | 形状 | 要点 |
 |---|---|---|
-| `assets` | `{ container, manifest, serverPolicy?, verify? }` | `container` 是包内相对路径、必须以 `.spresources` 结尾（`tools/make-spresources.mjs` 的产物）；`manifest` 是包内相对路径、必须 `.json`（客户端要验的扁平文件表）；`serverPolicy` 缺省 `"serve"`，可选 `"cache-only"`；`verify` 缺省 `"sha256"` |
+| `assets` | `{ container, manifest, serverPolicy?, verify? }` | `container` 是包内相对路径、必须以 `.spresources` 结尾（`tools/make-spresources.mjs` 的产物）；`manifest` 是包内相对路径、必须 `.json`（客户端要验的扁平文件表）；`serverPolicy` 缺省 `"serve"`，可选 `"cache-only"`（后者让服务器对 `/assets`、`/fonts` 回 412，见 §1.9.4）；`verify` 缺省 `"sha256"`，按旁挂 `<container>.sha256` 校验 |
 | `client` | `{ panels: [{ id, slot, module, order?, gate? }], requires? }` | 面板按 `id` 排序后才进清单；`module` 是包内相对路径，**不是 URL**；`slot` 是闭枚举 `root.overlays` / `root.guide` / `screen.game.aside` / `screen.result.footer`（DESIGN §28.8 已经数得清的那四个宿主）；`requires` 只能取 `serviceWorker` / `cacheStorage` / `webCrypto` —— 缺一即「浏览器不支持」，不是「装了但静默不工作」 |
 | `server` | `{ preDispatch: { module, policy, intercepts } }` | `module` 必须 `.mjs`（服务端加载，浏览器不加载）；`policy` 必须 `.json`；`intercepts` 每一项**必须**存在于 `shared/protocol.js C2S`（从协议反推，不在这里另抄一份名单 —— 抄一份就是第二个会漂移的真相） |
 | `routes` | `[{ path, file, cache? }]` | `path` 是 `/` 开头的绝对 HTTP 路径；`file` 是包内相对路径且必须 `.json`（`.js` / `.html` 一律不在此通道：那是代码执行面）；`cache` 缺省 `"no-cache"`，可选 `"no-store"` / `"public"` |
@@ -549,7 +552,7 @@ node tools/workshop-validate.mjs my-pack
 而区间不含本 build，整个包被拒（`MOD_API_INCOMPATIBLE`，理由里写出声明的区间与本 build 的号）。写成坏区间照旧是
 `BAD_API_RANGE`（先判语法，再判区间）。A 段**只**加了那个常量与这一条判罚，没有别的东西读它。
 
-#### 当前状态（A 段 + B1 段）
+#### 当前状态（A 段 + B1 段 + B2 段 + B3a 段）
 
 | 部分 | 状态 |
 |---|---|
@@ -561,8 +564,12 @@ node tools/workshop-validate.mjs my-pack
 | `resource.*` 三个 `C2S` 类型 | ✅ 已实现（B1：`shared/protocol.js`；`PROTOCOL_VERSION` 仍是 1） |
 | 只读路由被注册、被服务 | ✅ 已实现（B1：`server/http/workshop.js workshopRoutesFor`、`server/http/static.js`；`test/modRoutes.test.js`） |
 | C 层面板被注册、被挂载（模块路由 + `welcome.modPanels` + 四个宿主 + `order`/`gate`/`requires`） | ✅ 已实现（B2：`server/workshop.js loadWorkshopPanels`、`server/http/workshop.js workshopPanelFilesFor`、`public/js/ui/extensions.js`、`server/lobby.js welcomeInfo`；`test/modClientPanels.test.js`） |
+| `assets` 的容器与清单被服务（`/workshop-resources/`，流式、只服务注册过的 URL、`?v=` 缓存键） | ✅ 已实现（B3a：`server/workshop.js assetsIssues`、`server/http/workshop.js workshopResourceFilesFor`、`server/http/static.js`；`test/modAssets.test.js`） |
+| `serverPolicy`：`serve`（缺省）/ `cache-only`（`/assets`、`/fonts` 回 412 且不回源） | ✅ 已实现（B3a：`server/http/workshop.js resourceServerPolicy`、`server/http/static.js`；只在包显式声明时生效） |
+| `verify`：按声明校验容器，失败明示 | ✅ 已实现（B3a：`server/workshop.js assetsIssues` + 旁挂 `<container>.sha256`；`ASSETS_VERIFY_FAILED` / `ASSETS_VERIFY_UNAVAILABLE`） |
 | 目录逃逸 / 非 `.js` / 声明了却没有文件的模块 ⇒ **整包被拒** | ✅ 已实现（B2：`server/workshop.js panelModuleIssues` + `shared/workshop.js` 的 `.js` 判据；DESIGN §28.13.3） |
-| 资源容器被服务、Service Worker 策略 | ⛔ 未做（B3 段，仍是设计稿） |
+| 声明了却没有的容器/清单、摘要对不上、`server.preDispatch` 的文件不在 ⇒ **整包被拒** | ✅ 已实现（B3a：`server/workshop.js assetsIssues` / `preDispatchIssues`，在 `loadWorkshop` 列出包之前；DESIGN §28.13.3） |
+| Service Worker（客户端把容器导入 CacheStorage、由它应答素材） | ⛔ 未做（B4 段：等「包能不能注册根作用域 SW」的信任裁决） |
 | 浏览器里真的 import + 真的渲染（真 Chrome） | ⛔ 本机无 Chrome（`SP_E2E=1` 的可选路径，与 §4.4 同一个 standing gap） |
 
 #### 1.9.1 `server.preDispatch`：分发前的准入钩子（B1 段已实现）
@@ -613,8 +620,14 @@ export function createPreDispatch(deps) {
 **坏声明点名拒绝，拒绝码与形状层同名**（`_up/mod4-pack` 那份声明对不上时作者看到的还是这几个词）：
 `PREDISPATCH_BAD_MODULE`（模块文件不在包里 / 导入失败 / 没有 `createPreDispatch` 导出）、`PREDISPATCH_BAD_POLICY`
 （策略文件不在包里 / 不是 JSON / 不是对象）、`PREDISPATCH_UNKNOWN_TYPE`（`intercepts` 里有一个协议不认识的名字 ——
-**整个钩子**被拒，不是静默丢掉那一条）、`PREDISPATCH_BAD_PATH`（解析到包外）。被拒的只是**那个钩子**：包照旧加载，
-它的数据与身份哈希不受影响，作者在服务器日志里看到一条具名警告。
+**整个钩子**被拒，不是静默丢掉那一条）、`PREDISPATCH_BAD_PATH`（解析到包外）。
+
+**从 B3a 段起，坏声明拒绝的是整个包**（DESIGN §28.13.3，与 §1.9.3 的 `client`、§1.9.4 的 `assets` 同一条纪律）：
+模块/策略文件不在包里、策略不是 JSON 对象、`intercepts` 里有协议不认识的名字 ⇒ 包**整个不加载**，理由进启动日志。
+B1 段当时只拒那个钩子、包照旧加载；那样一来服务器以为自己被准入闸门保护着，其实一条消息都没拦 —— 「加载了但能力
+没生效」是最坏的失败形态，所以这一条被对齐掉了。唯一留在装载期之外的是「模块文件在、但 `import` 失败或模块没有
+`createPreDispatch` 导出」：那要 `import` 才知道，而装载器是同步的，所以它仍由 `loadWorkshopHooks` 具名拒绝
+（包照旧加载，钩子不装，日志里一条具名警告）。
 
 **作者纪律（业主裁决）**：注入的服务端逻辑不得依赖时钟（用 `deps.now()`）、不得依赖 RNG 与无序容器的遍历顺序、
 不得使用进程级可变全局状态；状态一律放连接 / 房间自己的作用域里。**不许**写「开打前设全局、打完恢复」那种代码 ——
@@ -718,6 +731,65 @@ export function mount(ctx) {
 **当前状态**：服务端与纯逻辑部分全部有测试（`test/modClientPanels.test.js`：注册、服务面、`welcome`、
 `order`/`gate`/`requires`、注入面、三处客户端缺口）。**浏览器里真的 `import` 与真的渲染在本机没有 Chrome 上跑不了**
 —— 那是 `SP_E2E=1` 的可选路径，与 §4.4 同一个 standing gap。
+
+#### 1.9.4 `assets`：包自带的资源容器与清单（B3a 段已实现服务端）
+
+一个包可以带一份**资源容器**（`.spresources`，客户端资源包的字节格式）与一份**扁平文件表**（清单 `.json`），
+并声明这两棵树的服务态度：
+
+```jsonc
+"assets": {
+  "container": "packs/resources-0.1.0.spresources",  // 包内相对路径，必须是 .spresources，不能是别的扩展名
+  "manifest":  "resource-manifest.json",             // 包内相对路径，必须是 .json
+  "serverPolicy": "serve",                            // "serve"（缺省）| "cache-only"，见下
+  "verify": "sha256"                                  // 整包摘要的算法；缺省 sha256，今天只有这一种
+}
+```
+
+**容器与清单从哪取**：`/workshop-resources/<包id>/<你声明的那条路径>`。`?v=<内容哈希前 12 位>` 是缓存键
+（重新打包 = 新 URL）。两条纪律：
+
+- **只有装载器注册过的两个 URL 被回答**。别的路径（包自己的 `pack.json`、`assets/**`、旁挂的 `.sha256`、`..` 穿越、
+  另一个包的路径）一律 **404** —— 与 §1.9.3 的模块路由同一条，所以这条通道**不能当文件服务器用**。
+- **容器是流式送出的**（可以到数百 MB：客户端资源包本身就是那么大），响应里带 `Content-Length` 与
+  `X-SP-Resource-Sha256`（装载期校验过的整包摘要）。清单按 `.json` 正常送。
+
+**`serverPolicy` —— 这条是**部署**语义，写之前请读三遍**：
+
+| 值 | 服务器对 `/assets/…` 与 `/fonts/…` 做什么 |
+|---|---|
+| `"serve"`（缺省，等于不写） | 照旧从磁盘服务。本仓库现有的包全是这个值，行为与 B2 之后**逐字节相同** |
+| `"cache-only"` | 回 **412 Precondition Failed**，并且**不回源**（连 `stat` 都不做）：素材只允许从客户端自己的缓存取 |
+
+`cache-only` 覆盖的 `/assets/` 与 `/fonts/` 是**全服务器共用**的两棵树（核心游戏、所有包都用它们），所以它是
+**进程级**的：任何一个包声明它，整个服务器的这两棵树都不再服务。启动日志会点名是哪个包声明的。客户端那半
+（把容器导入 `CacheStorage`、由 Service Worker 应答这两棵树）**不在本段** —— 它等业主对「包能不能注册根作用域
+SW」的裁决。
+
+**`verify` —— 校验失败就是整个包被拒**：装载期读旁挂的 `<container>.sha256`（格式 `<64 位十六进制摘要>`，
+后面可以跟一个文件名，两段之间空白分隔 —— 与 `sha256sum` 的输出一致），再用**流式**读取把容器哈希一遍：
+
+| 情况 | 拒绝码 | 结果 |
+|---|---|---|
+| 摘要对得上 | — | 包正常加载，摘要随响应头出去 |
+| 摘要对不上 | `ASSETS_VERIFY_FAILED` | **整个包不加载**（理由里写出两个摘要值） |
+| 声明了 `verify` 却没有旁挂摘要（或格式不对） | `ASSETS_VERIFY_UNAVAILABLE` | **整个包不加载** |
+| `container` / `manifest` 指的文件不在包里 | `ASSETS_BAD_CONTAINER` / `ASSETS_BAD_MANIFEST` | **整个包不加载** |
+
+「声明了校验、但校验不过还照旧发」这个仓库不接受：客户端会导入一份服务端**已经知道是坏的**字节，而唯一的信号是
+一行没人看的日志。
+
+**纪律：一个用不了的声明拒绝整个包**（DESIGN §28.13.3，与 §1.9.3 逐字同一条）。**`server.preDispatch` 从本刀起
+也是这条**（§1.9.1）：模块或策略文件不在包里、策略不是 JSON 对象、`intercepts` 里有协议不认识的名字 ⇒ 整个包
+不加载。B1 段当时只拒那个钩子、包照旧加载 —— 「服务器以为自己被准入闸门保护着，其实一条消息都没拦」正是这条纪律
+要消灭的失败形态。唯一留在装载期之外的是「模块文件在、但 `import` 失败或没有 `createPreDispatch` 导出」：那要
+`import` 才知道，而装载器是同步的，所以它仍由 `loadWorkshopHooks` 具名拒绝（包照旧加载）。
+
+**对既有包的影响是零**：不声明 `assets` 的包一个字节都不受影响（没有新路由、没有新响应头、没有 412）。
+
+**当前状态**：服务端全部有测试（`test/modAssets.test.js`：不声明 ⇒ 无变化、容器/清单可取、`?v=` 生效、
+穿越/未注册 ⇒ 404、容器走流式、`cache-only` 只对两棵树生效且只在声明时生效、`verify` 失败点名、
+`server.preDispatch` 对齐后的回归）。客户端那半没有。
 
 ---
 

@@ -15,7 +15,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { WORKSHOP_MEDIA_PREFIX, byPackId } from '../../shared/workshop.js';
+import { WORKSHOP_MEDIA_PREFIX, WORKSHOP_RESOURCE_PREFIX, byPackId } from '../../shared/workshop.js';
 import { workshopTouchedFiles } from '../workshop.js';
 
 /**
@@ -220,4 +220,92 @@ export function workshopAssetsFor(loaded, workshopDir) {
     if (fs.existsSync(path.join(dir, 'assets'))) out.set(p.id, dir);
   }
   return out;
+}
+
+/**
+ * The **registered URLs** of a pack's declared resource container and manifest (`pack.json.assets`, DESIGN §28.13,
+ * docs/WORKSHOP.md §1.9.4): `WORKSHOP_RESOURCE_PREFIX + <pack id> + <declared path>`, built from the LOADED packs only
+ * — exactly the stance `workshopPanelFilesFor` and `workshopKitFilesFor` take, and the reason none of these routes can
+ * be walked into a file server.
+ *
+ * Why a map and not a check: a declared path is compared to the request path **as a string**, so `..` cannot build a key
+ * that is not in it. Traversal is not a boundary that can be got wrong here, it is a goal that does not exist.
+ *
+ * Both files are served from the same map and the entry says which is which (`kind`), because the difference matters on
+ * the wire: the container is streamed and carries `X-SP-Resource-Sha256` (the digest the loader verified), the manifest
+ * is an ordinary small `.json` table.
+ *
+ * The digest is NOT recomputed here: `assetsIssues` already hashed the container while gating the pack, and hashing a
+ * few hundred megabytes twice at boot would be the one cost this feature cannot hide.
+ * @param {Array<object>|{ packs?: Array<object> }} packs the loaded packs (`loadWorkshop(...)`) or the array itself
+ * @param {string|null} workshopDir
+ * @param {{ digests?: Map<string, string>|Record<string, string>|null }} [opts] pack id → verified container digest
+ * @returns {Map<string, { kind: 'container'|'manifest', pack: string, file: string, url: string, sha256: string|null }>}
+ */
+export function workshopResourceFilesFor(packs, workshopDir, { digests = null } = {}) {
+  /** @type {Map<string, { kind: 'container'|'manifest', pack: string, file: string, url: string, sha256: string|null }>} */
+  const out = new Map();
+  // `workshopDir: null` switches the whole workshop off (tests, a clean server): never resolve a path from a missing
+  // root — the same rule workshopKitFilesFor / workshopPanelFilesFor / workshopRoutesFor follow.
+  if (typeof workshopDir !== 'string' || workshopDir === '') return out;
+  const root = path.resolve(workshopDir);
+  const list = (packs && Array.isArray(packs.packs)) ? packs.packs : (Array.isArray(packs) ? packs : []);
+  const digestOf = (id) => {
+    if (!digests) return null;
+    return (typeof digests.get === 'function' ? digests.get(id) : digests[id]) || null;
+  };
+  for (const p of list.slice().sort(byPackId)) {
+    if (!p || typeof p.id !== 'string' || !p.id || !p.assets) continue;
+    const dir = p.dir ? path.resolve(p.dir) : path.join(root, p.id);
+    if (dir !== root && !dir.startsWith(root + path.sep)) continue;
+    const hash = typeof p.hash === 'string' ? p.hash : '';
+    for (const [kind, rel] of [['container', p.assets.container], ['manifest', p.assets.manifest]]) {
+      if (typeof rel !== 'string' || !rel) continue;
+      const segments = rel.split('/');
+      // The shape layer refused everything else, but this is the SERVING side and it re-judges (it may read a
+      // hand-built loader object or a pack written against an older schema) — the same second look every pack-scoped
+      // route in this file takes.
+      if (segments.some((s) => !s || s === '..' || s === '.' || s.startsWith('.')) || path.isAbsolute(rel)) continue;
+      const abs = path.join(dir, ...segments);
+      if (abs === dir || !abs.startsWith(dir + path.sep)) continue;
+      const url = `${WORKSHOP_RESOURCE_PREFIX}${encodeURIComponent(p.id)}/${segments.map(encodeURIComponent).join('/')}?v=${hash.slice(0, 12)}`;
+      out.set(url.split('?')[0], { kind, pack: p.id, file: abs, url, sha256: kind === 'container' ? digestOf(p.id) : null });
+    }
+  }
+  return out;
+}
+
+/** `/assets/` 与 `/fonts/` —— `cache-only` 只对这两棵树短路：它们正是 `tools/fetch-assets.mjs` 落到
+ *  `public/assets/**` 与 `public/fonts/**` 的那两个 git-ignored 目录（`.gitignore` 里点名的那两行）。 */
+const CACHE_ONLY_PREFIXES = Object.freeze(['/assets', '/fonts']);
+
+/** 一个请求路径是否落在 `cache-only` 覆盖的两棵树里（`/assets` 与 `/assets/…` 都算，缺尾斜杠的裸挂载也拦）。 */
+export function isCacheOnlyPath(pathname) {
+  const p = typeof pathname === 'string' ? pathname : '';
+  return CACHE_ONLY_PREFIXES.some((prefix) => p === prefix || p.startsWith(`${prefix}/`));
+}
+
+/**
+ * The process-wide **`serverPolicy` verdict**, derived from the load-time `assetsIssues` results.
+ *
+ * Two rules, and both are the whole point of the switch:
+ *   * **`cache-only` only when a pack explicitly declares it.** `serve` — the default, and what every pack in this
+ *     repository declares — leaves the server byte-for-byte unchanged. There is no environment variable and no global
+ *     toggle: the one thing that can turn a deployment into cache-only is a pack's own `pack.json`.
+ *   * **Any single `cache-only` declaration wins process-wide, and it is reported loudly.** The policy is a property of
+ *     `/assets` and `/fonts` — two trees shared by every pack — not of one pack, so it cannot be scoped to the pack that
+ *     asked for it. One pack declaring it therefore changes what every other pack and the core game sees, which is
+ *     exactly the kind of surprise that has to appear in the boot log instead of in a bug report.
+ * @param {Map<string, string>|Record<string, string>|null} policies pack id → declared `serverPolicy`
+ * @param {{ log?: object|null }} [opts]
+ * @returns {'serve'|'cache-only'}
+ */
+export function resourceServerPolicy(policies, { log = null } = {}) {
+  const entries = policies && typeof policies.entries === 'function'
+    ? [...policies.entries()]
+    : Object.entries(policies || {});
+  const cacheOnly = entries.filter(([, policy]) => policy === 'cache-only').map(([id]) => id).sort();
+  if (!cacheOnly.length) return 'serve';
+  log?.info?.(`[workshop] serverPolicy "cache-only" declared by ${cacheOnly.map((id) => `"${id}"`).join(', ')} — /assets/ and /fonts/ now answer 412 for the whole server, and the packs no longer serve them`);
+  return 'cache-only';
 }

@@ -110,6 +110,17 @@ export const WORKSHOP_MEDIA_PREFIX = '/workshop-assets/';
  * be the same string — and because the browser-side guard (`public/js/ui/extensions.js`) accepts exactly this prefix.
  */
 export const WORKSHOP_PANEL_PREFIX = '/workshop-panels/';
+
+/**
+ * The URL prefix a pack's **declared resource container and manifest** are served under
+ * (`pack.json.assets`, DESIGN §28.13, docs/WORKSHOP.md §1.9.4): the twin of `WORKSHOP_PANEL_PREFIX` for the
+ * `assets` declaration, and deliberately a prefix of its own rather than a branch of `/workshop-assets` — that route
+ * serves a pack's MEDIA under an extension allowlist and knows nothing about a pack's ROOT, while this one serves two
+ * files the manifest itself names (a `.spresources` container, which no allowlist covers, and a `.json` table).
+ * Widening `/workshop-assets` would have traded one narrow rule for two looser ones; a separate prefix keeps both
+ * maps "only the URLs the loader registered", which is the discipline every pack-scoped route here follows.
+ */
+export const WORKSHOP_RESOURCE_PREFIX = '/workshop-resources/';
 /** Record ids follow the wire-id charset (shared/protocol.js isId) so an id can travel in a message. */
 const RECORD_ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
 
@@ -168,6 +179,28 @@ export const ASSETS_VERIFY_ALGORITHMS = Object.freeze(['sha256']);
 const ASSETS_FIELDS = Object.freeze(['container', 'manifest', 'serverPolicy', 'verify']);
 /** 资源容器的扩展名：它是 `tools/make-spresources.mjs` 的产物，由格式定义（`SPRES001` 魔数 + 压紧 JSON 头）。 */
 const SPRESOURCES_EXT = '.spresources';
+
+/**
+ * `assets` 在**装载期**（文件真的在不在、摘要对不对）会用的两个拒绝码（DESIGN §28.13.3，B3a 段）。
+ *
+ * 为什么容器/清单的**文件级**失败沿用形状层的两个名字（`ASSETS_BAD_CONTAINER` / `ASSETS_BAD_MANIFEST`）而不是新造一对：
+ * 作者看到的是同一条判据的两半 ——「你声明的那个容器」不相对、不是 `.spresources`、**或者这个文件不在包里**，
+ * 三件事的修法都是「改 `assets.container` 指向一个真的在包里的 `.spresources`」。B2 段对面板模块正是这么做的
+ * （形状层与服务面同名 `CLIENT_BAD_PANEL_MODULE`，理由写在 §28.13.3），本刀照抄那条先例，理由不同不另开码。
+ * 一句话：**拒绝码点名的是「哪个字段坏了」，不是「在哪一层被发现的」。**
+ *
+ * `verify` 的两条是这一刀新增的，因为它们说的是另一件事 —— 容器在，但它的字节**不是**声明所要求的那份：
+ *   * `ASSETS_VERIFY_FAILED` —— 旁挂 `<container>.sha256` 存在且可解析，但摘要对不上（或容器读不动 / 不是文件）；
+ *   * `ASSETS_VERIFY_UNAVAILABLE` —— 声明了 `verify`，却找不到那份摘要（旁挂文件不在 / 格式不对）。
+ * 两条都是**整个包被拒**，绝不静默放行：一个「校验失败但照旧服务」的资源包，会让客户端导入一份服务端已经
+ * 知道是坏的字节，而唯一的信号是一行没人看的日志。
+ */
+export const ASSETS_FILE_CODES = Object.freeze({
+  CONTAINER: 'ASSETS_BAD_CONTAINER',
+  MANIFEST: 'ASSETS_BAD_MANIFEST',
+  VERIFY_FAILED: 'ASSETS_VERIFY_FAILED',
+  VERIFY_UNAVAILABLE: 'ASSETS_VERIFY_UNAVAILABLE',
+});
 
 /**
  * `client.panels[*].slot`（DESIGN §28.8 列出的四个宿主 → §28.13）：**闭枚举**。写成自由字符串的话，
