@@ -89,8 +89,12 @@ const ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
  * Remove comments, keeping string literals intact. A char-wise scan rather than a regex, because a `//` inside a string
  * (`'https://…'`) must not start a comment. The hook scan needs this: the shipped example kit *documents*
  * `battle.on(...)` in its header, and a prose mention must not be read as a registration.
+ *
+ * Exported for `server/match/metaPack.js`: a `server.meta` module is judged by the SAME determinism rules as a kit
+ * (AGENTS.md 「Determinism」), and two copies of this scanner would drift exactly the way the two readers of a rule
+ * always do. `test/packMeta.test.js` pins the shared use.
  */
-function stripComments(src) {
+export function stripComments(src) {
   const text = String(src || '');
   let out = '';
   let quote = null;
@@ -117,8 +121,10 @@ function stripComments(src) {
  *
  * A regex would need a lookbehind for the "part of a longer name" half, and this repo bans lookbehind (older browser
  * engines do not support it), so the check walks the matches instead.
+ *
+ * Exported for `server/match/metaPack.js` — see `stripComments` above.
  */
-function mentionsIdentifier(code, needle) {
+export function mentionsIdentifier(code, needle) {
   for (let at = code.indexOf(needle); at >= 0; at = code.indexOf(needle, at + 1)) {
     const before = at > 0 ? code[at - 1] : '';
     const after = code[at + needle.length] ?? '';
