@@ -22,7 +22,8 @@ import { tmpdir } from 'node:os';
 import { loadWorkshop } from '../server/workshop.js';
 import { loadMetaModules, buildRoomRegistry } from '../server/match/metaPack.js';
 import { resetDefaultRegistry } from '../server/match/effectsMeta.js';
-import { makeMatch } from './match/harness.js';
+import { tileKey } from '../server/match/board.js';
+import { DATA, give, legalTileFor, makeMatch } from './match/harness.js';
 
 const quiet = { info() {}, warn() {}, error() {}, debug() {} };
 const BOND = 'victoriaShip';
@@ -154,5 +155,138 @@ describe('fanpack 的准备阶段逻辑：以包声明的 meta 模块跑起来',
     ps.addLayers(BOND, 24, { requireActive: false });
     h.toPrep(2);
     assert.equal(ps.counters['bondcustom:victoria:paid'], undefined);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// 另一半：**条件触发**（原文件 `bonds/custom.js` 的 battle-side 那一类 —— 「6 名不同成员时全员加攻速」）
+// ---------------------------------------------------------------------------------------------------
+//
+// 这一半要验的不是「引擎能不能加攻速」（那是包自己的 `bonds.json` 记录，A 层的事），而是**条件本身**：包的模块能不能
+// 从引擎读到「我这边场上站着几名**不同**成员」，能不能只触发一次，能不能把结果变成玩家看得见的东西。这正是原文件
+// 那 331 行里最像「引擎不给就写不出来」的部分，所以它值得一条真的摆 6 名干员的验收。
+const PORTED_TEAM_CONDITION = `
+export function registerMeta(registry) {
+  const { bondRecord, buffParams, num } = registry.api;
+  const BOND = ${JSON.stringify(BOND)};
+  const COUNTER = 'bondcustom:victoria:six';
+  const TEAM = 6;
+
+  function check(ctx) {
+    const seen = new Set();
+    for (const p of ctx.board()) {
+      if (!p || p.kind !== 'chess') continue;
+      if (!ctx.pieceBonds(p.uid).includes(BOND)) continue;
+      seen.add(String(p.id).replace(/_b$/, '_a'));   // 精锐与普通是同一名成员
+    }
+    if (seen.size < TEAM) return 0;
+    if (ctx.counter(COUNTER) >= 1) return 0;         // 到过就是到过：第 7 名不再重复结账
+    ctx.setCounter(COUNTER, 1);
+    const p = buffParams(bondRecord(BOND), 'bond_layer_added_reward_equip');
+    const added = ctx.addLayers(BOND, 1, { requireActive: false, reason: 'victoriaTeamSpeed' });
+    ctx.toast('【维多利亚】6 名不同成员：全员攻速 +' + num(p?.count, 1), 'info');
+    return added;
+  }
+
+  const handler = {};
+  for (const hook of ['onRoundStart', 'onPrepStart', 'onPrepEnd', 'onBuy', 'onGain', 'onSold', 'onMerge', 'onBattleStart']) {
+    handler[hook] = function (ctx) { check(ctx); };
+  }
+  registry.global('victoriaTeamSpeed', handler);
+}
+`;
+
+describe('fanpack 的条件触发：6 名**不同**成员才生效，且只结一次账', () => {
+  let tmp;
+  let wsRoot;
+
+  before(() => {
+    tmp = fs.mkdtempSync(path.join(tmpdir(), 'sp-fanmeta2-'));
+    wsRoot = path.join(tmp, 'ws');
+    const dir = path.join(wsRoot, 'fanpack-team');
+    fs.mkdirSync(path.join(dir, 'meta'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'pack.json'), JSON.stringify({
+      id: 'fanpack-team', name: 'fanpack team condition', version: '1.0.0', license: 'CC0-1.0', description: 'x',
+      gameVersion: '0.2.2', combat: true,
+      server: { meta: { module: 'meta/team.mjs', registers: ['global:victoriaTeamSpeed'] } },
+    }));
+    fs.writeFileSync(path.join(dir, 'meta', 'team.mjs'), PORTED_TEAM_CONDITION);
+  });
+  after(() => {
+    resetDefaultRegistry();
+    if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  async function roomRegistry() {
+    const loaded = loadWorkshop(wsRoot, { log: quiet });
+    assert.deepEqual(loaded.errors, []);
+    const { modules, errors } = await loadMetaModules(loaded, { log: quiet });
+    assert.deepEqual(errors, [], '这段移植必须能过静态确定性扫描');
+    const { registry, errors: buildErrors } = buildRoomRegistry({ packs: modules, log: quiet });
+    assert.deepEqual(buildErrors, []);
+    return registry;
+  }
+
+  /** 这个盟约的官方成员（只看普通记录；精锐是同一个人的另一形态）。 */
+  const members = Object.values(DATA.chess)
+    .filter((c) => c && c.visible && !c.isGolden && Array.isArray(c.bonds) && c.bonds.includes(BOND))
+    .map((c) => c.chessId);
+  const toastsOf = (h) => h.sent.filter(([, msg]) => msg.t === 'm.toast').map(([, msg]) => msg.text);
+
+  /** 往场上摆 n 名**不同**成员。 */
+  function field(m, ps, ids) {
+    const skip = new Set();
+    const placed = [];
+    for (const id of ids) {
+      const at = legalTileFor(m, ps, id, skip);
+      assert.ok(at, `${id}: 应当有合法的落脚格子`);
+      skip.add(tileKey(at[0], at[1]));
+      placed.push(give(m, ps, id, 'board', at));
+    }
+    return placed;
+  }
+
+  test('这条判据有牙：官方数据里至少 6 名这个盟约的成员（否则下面那条是空转）', () => {
+    assert.ok(members.length >= 6, `只有 ${members.length} 名：${members.join(', ')}`);
+  });
+
+  test('5 名不触发；摆上第 6 名才触发一次；第 7 名不再重复', async () => {
+    const registry = await roomRegistry();
+    const h = makeMatch({ mode: 'solo', registry }).start();
+    h.toPrep(1);
+    const ps = h.ps('p_0');
+    assert.ok(members.length >= 7, '这一条要用到 7 名成员');
+
+    field(h.m, ps, members.slice(0, 5));
+    h.toPrep(2);
+    assert.equal(ps.counters['bondcustom:victoria:six'], undefined, '5 名不同成员不该触发');
+    assert.equal(toastsOf(h).filter((x) => String(x).startsWith('【维多利亚】6 名')).length, 0);
+
+    const layerBefore = ps.layers[BOND] || 0;
+    field(h.m, ps, members.slice(5, 6));
+    h.toPrep(3);
+    assert.equal(ps.counters['bondcustom:victoria:six'], 1, '第 6 名应当触发一次');
+    const toast = toastsOf(h).filter((x) => String(x).startsWith('【维多利亚】6 名'));
+    assert.equal(toast.length, 1, `提示只该出现一次：${JSON.stringify(toastsOf(h))}`);
+    assert.ok((ps.layers[BOND] || 0) > layerBefore, '触发时确实加了一层（效果是包自己的数据，入口是引擎的）');
+
+    field(h.m, ps, members.slice(6, 7));
+    h.toPrep(4);
+    assert.equal(ps.counters['bondcustom:victoria:six'], 1, '第 7 名不再重复结账');
+    assert.equal(toastsOf(h).filter((x) => String(x).startsWith('【维多利亚】6 名')).length, 1);
+    assert.deepEqual(h.logs.error, []);
+  });
+
+  test('同名成员的精锐不算第二名（按 charId 去重）', async () => {
+    const registry = await roomRegistry();
+    const h = makeMatch({ mode: 'solo', registry }).start();
+    h.toPrep(1);
+    const ps = h.ps('p_0');
+    const base = members[0];
+    const golden = DATA.chess[base].goldenId;
+    assert.ok(golden, '第一名成员必须有精锐形态，这条才有意义');
+    field(h.m, ps, [base, golden, ...members.slice(1, 5)]);
+    h.toPrep(2);
+    assert.equal(ps.counters['bondcustom:victoria:six'], undefined, '同一个人只算一名成员（6 格子里只有 5 名）');
   });
 });

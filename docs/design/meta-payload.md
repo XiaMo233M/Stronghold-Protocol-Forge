@@ -106,15 +106,16 @@ Both cuts are in. **A 段** (`feat/012-meta-payload`) is the declaration; **B �
 | per-pack **trial copy**: a pack that throws part-way is rolled back whole — including the entries it left in the room's ownership map | `server/match/metaPack.js buildRoomRegistry` |
 | two packs claiming one key: the smaller pack id holds it, the loser is named (`META_KEY_TAKEN`) | the same function (DESIGN §28.3's rule, applied to the registry) |
 | the per-room registry reaching the match | `server/lobby.js startMatch` → `Match`'s existing `opts.registry`; **absent when no pack declares `server.meta`**, so a clean install forks nothing |
-| acceptance | `test/packMetaWiring.test.js` (real server + real `Match`: the handler dispatches, the process-wide registry gains no key, an unloadable pack leaves the loaded set) and `test/packMetaFanpack.test.js` (the community mod's prep half ported verbatim — milestone step, once-per-step counter, grant, toast — driven through a real match) |
+| acceptance | `test/packMetaWiring.test.js` (real server + real `Match`: the handler dispatches, the process-wide registry gains no key, an unloadable pack leaves the loaded set), `test/packMetaFanpack.test.js` (the community mod's prep half ported verbatim — milestone step, once-per-step counter, grant, toast — **and its battle-side condition**: 「6 名不同成员」 fires once when the sixth distinct member takes the field, never again for the seventh, and an elite form of a member already present does not count twice) and `test/roomAssets.test.js` (a room that declares a subset assembles only that subset's `server.meta` modules — W-B) |
 
-**Two deliberate softenings against this section's original wording**, both recorded here rather than in a comment:
+**One deliberate softening against this section's original wording**, recorded here rather than in a comment: an
+**assembly-time** failure (a key outside `registers`) rolls that pack back and names it, but the match **still
+starts**. The stricter reading ("that pack's match does not start") was written before the rollback existed: it would
+let one pack make a whole room unplayable for everyone in it. Load-time failures still drop the pack entirely, which
+is where the strict reading belongs.
 
-- The room's declared set (`Room.modSet`, W-A) does **not** yet decide which meta packs run: every loaded `server.meta`
-  pack is assembled into every room, exactly like the content layer, until W-B makes the room's set the one the
-  simulation runs. Half-applying it (meta honours the set, content does not) would make "declared set" mean two
-  different things on two layers.
-- An **assembly-time** failure (a key outside `registers`) rolls that pack back and names it, but the match **still
-  starts**. The stricter reading ("that pack's match does not start") was written before the rollback existed: it would
-  let one pack make a whole room unplayable for everyone in it. Load-time failures still drop the pack entirely, which
-  is where the strict reading belongs.
+**The first draft's other softening is gone.** It said the room's declared set (`Room.modSet`) did not yet decide which
+meta packs run, because content did not honour it either and "declared set" would then mean two different things on two
+layers. W-B (§28.16) makes both layers honour it: `server/roomAssets.js` materialises the subset's data and kits, and
+`Lobby.startMatch` assembles only the room's `server.meta` packs into that room's registry. A room that declares
+nothing still gets every loaded meta pack, exactly as before.
