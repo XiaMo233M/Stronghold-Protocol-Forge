@@ -125,6 +125,21 @@ matters and is the answer for the third file the ruling names:
   reason: a battle must run the same data in the server and every browser). Computing it from the files rather than
   from the manifest is also the answer to `tools/package.mjs:13-14`: an untracked file is not shipped, and a hash taken
   from the manifest would happily describe a file that no player has.
+- **Where the code lives, and the typecheck decision (item 8 of the inventory).** The shape and the hashing helpers are
+  `shared/modIdentity.js` — a NEW file inside the typecheck slice (`jsconfig.json:18-24` includes `shared/**/*.js`) —
+  and `shared/protocol.js` re-exports them (`MOD_LIMITS`, `isModEntry`, `isModList`, `isModDigest`, `modDigest`,
+  `modSetOf`) so the wire contract is still declared in the protocol file. The reason is that `jsconfig.json:26`
+  **excludes `shared/protocol.js` from `tsc`**: a validator written there is never machine-checked, and this is a shape
+  where a single wrong predicate is a security-relevant hole rather than a cosmetic bug. The alternative — widening the
+  slice to include `shared/protocol.js` — was rejected for this step because that file is one of the 76 files the 0.2.2
+  port rewrites, and dragging it into `tsc` would add a second, unrelated reason for it to change.
+  The pure 256-bit hash is in the same file (the browser recomputes the digest of a list, and the client must not need
+  `node:crypto` for that); `server/workshop.js` `identifyPack` builds a pack's manifest list and hashes it with the same
+  function, so there is one implementation of the digest everywhere.
+- **Enforcement today.** `server/lobby.js` `checkModSet` is the gate: on a server that runs packs, `room.create` and
+  `room.join` must echo the digest from `welcome` (`ERR.BAD_MSG` with a `detail` that names the packs otherwise), and
+  the plain-install path is untouched. `lobby.stats()` carries the digest into `/healthz`; `Match.mods` carries it into
+  every spec.
 
 ### 27.3 Loading (gap 2): one rule for "who wins", and attribution that names the pack
 

@@ -88,10 +88,13 @@ export async function startServer(opts = {}) {
   const workshopLoaded = loadWorkshop(workshopDir, { log });
   const workshopJson = buildWorkshopDataFiles(data, workshopLoaded);
   const workshopKits = await loadWorkshopKits(workshopLoaded, { log, knownIds: new Set(Object.keys(data.chess || {})) });
+  // The mod set (DESIGN §27.2): one identity per pack, one digest for the whole set. It travels in `welcome`, in
+  // `/healthz` (lobby.stats) and in every BattleSpec, so the three can never disagree about what is running.
+  const workshopMods = (workshopLoaded.packs || []).map((p) => ({ id: p.id, hash: p.hash, layer: p.layer, combat: p.combat, api: p.api }));
   const workshopKitFiles = workshopKitFilesFor(workshopKits.modules, workshopDir);
   const workshopAssets = workshopAssetsFor(workshopLoaded, workshopDir);
   const { registry, lobby, network } = createSessionStack(
-    { ...opts, workshop: { kits: workshopKits.kits, modules: workshopKits.modules } },
+    { ...opts, workshop: { kits: workshopKits.kits, modules: workshopKits.modules, mods: workshopMods } },
     { data, log },
   );
   // content packs (docs/PACKS.md): scanned now — the start log names them — and again whenever their folders change

@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { normalizePackManifest, normalizeContentFile, byPackId } from '../shared/workshop.js';
+import { sha256Hex, canonicalJson, modManifestDigest } from '../shared/modIdentity.js';
 
 /** Default pack root: `<repo>/workshop`. */
 export const WORKSHOP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'workshop');
@@ -88,11 +89,81 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null } = {}) {
       || Object.keys(manifest.pack.bondIcons || {}).length
       || Object.keys(manifest.pack.itemIcons || {}).length
       || Object.keys(manifest.pack.art || {}).length) {
-      packs.push({ ...manifest.pack, dir: packDir, files });
+      packs.push({ ...manifest.pack, dir: packDir, files, ...identifyPack(packDir, manifest.pack, files) });
     }
   }
   for (const e of errors) log?.warn?.(`[workshop] ${e.pack}: ${e.reason}`);
   return { dir, present: true, packs, errors };
+}
+
+/**
+ * The IDENTITY of one loaded pack (DESIGN §27.2): its content hash, its layer and its declared intent.
+ *
+ * The hash is computed from the pack's OWN bytes, as a sorted list of `[path, sha256]` pairs (the list itself is kept
+ * as `manifest`, so a mismatch can be explained without re-hashing):
+ *   * `pack.json` — the NORMALIZED manifest (`normalizePackManifest`'s output), so two spellings of the same pack hash
+ *     the same and a declaration the loader silently dropped cannot hide behind the hash;
+ *   * every declared content file — its NORMALIZED records (`normalizeContentFile`), the same thing the overlay merges;
+ *   * every `kits/*.js` — the SOURCE TEXT, byte for byte: this is the code the server imports and the browser fetches,
+ *     and a content hash that ignored it would say nothing about the one file that can change a battle;
+ *   * every file under `assets/**` — the media the `/workshop-assets` route serves.
+ * What is NOT in it: the pack's path on this machine, the mtime "version" that currently versions kit URLs, and any
+ * engine code — the engine half of the identity is the declared `api` range (DESIGN §27.5).
+ *
+ * `layer` and `combat` are derived only when the pack did not declare them, and the derivations are deliberately
+ * conservative: shipping `kits/` is layer B and may change a battle result (a kit is code on the battle bus), anything
+ * else that only shapes the client (icons / art / voices) is C, and a plain data pack is A.
+ * @param {string} packDir
+ * @param {object} pack the normalized manifest
+ * @param {Record<string, Record<string, object>>} files the normalized content files
+ * @returns {{ hash: string, manifest: Array<{ path: string, hash: string }>, layer: string, combat: boolean, api: string|null, game: string|null }}
+ */
+export function identifyPack(packDir, pack, files) {
+  /** @type {Array<{ path: string, hash: string }>} */
+  const manifest = [];
+  const addText = (rel, text) => manifest.push({ path: rel, hash: sha256Hex(text) });
+  const addBytes = (rel, buf) => manifest.push({ path: rel, hash: sha256Hex(buf) });
+  // 1. the normalized manifest
+  addText('pack.json', canonicalJson(pack));
+  // 2. the normalized content records
+  for (const [file, records] of Object.entries(files || {})) addText(`${file}.json`, canonicalJson(records));
+  // 3. the kit sources, 4. the pack's own media
+  let kits = 0;
+  const kitDir = path.join(packDir, 'kits');
+  try {
+    for (const name of fs.readdirSync(kitDir).sort()) {
+      if (!name.endsWith('.js')) continue;
+      const buf = fs.readFileSync(path.join(kitDir, name));
+      addBytes(`kits/${name}`, buf);
+      kits++;
+    }
+  } catch { /* no kits/ directory: an ordinary data pack */ }
+  const assetsDir = path.join(packDir, 'assets');
+  for (const rel of listFiles(assetsDir)) addBytes(`assets/${rel}`, fs.readFileSync(path.join(assetsDir, rel)));
+  // the declared layer wins; the derivation is the fallback, and `combat` follows the artifact kind
+  const hasMedia = ['voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art'].some((k) => Object.keys(pack[k] || {}).length > 0);
+  const layer = pack.layer || (kits ? 'B' : hasMedia ? 'C' : 'A');
+  const combat = pack.combat === null || pack.combat === undefined ? kits > 0 : pack.combat;
+  manifest.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return { hash: modManifestDigest(manifest), manifest, layer, combat, api: pack.api || null, game: pack.game || pack.gameVersion || null };
+}
+
+/** Every file under `dir`, as sorted `rel` paths (recursive, '/'-separated); `[]` when the directory is not there. */
+function listFiles(dir, prefix = '') {
+  /** @type {string[]} */
+  const out = [];
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const e of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    const rel = prefix ? `${prefix}/${e.name}` : e.name;
+    if (e.isDirectory()) out.push(...listFiles(path.join(dir, e.name), rel));
+    else if (e.isFile()) out.push(rel);
+  }
+  return out;
 }
 
 /**
@@ -198,7 +269,9 @@ export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/worksho
         }
         kits[id] = fn;
         kitOwner.set(id, pack.id);
-        modules.push({ id, pack: pack.id, url: `${baseUrl}/${pack.id}/${name}?v=${v}` });
+        // `hash` is the pack's content hash (DESIGN §27.2): it rides along with the URL so the spec says WHICH bytes
+        // the browser is supposed to be served, not just where to fetch them from.
+        modules.push({ id, pack: pack.id, hash: pack.hash, url: `${baseUrl}/${pack.id}/${name}?v=${v}` });
       } catch (e) {
         errors.push({ pack: pack.id, id, code: 'KIT_IMPORT_FAILED', reason: `import failed: ${String(e && e.message ? e.message : e)}` });
       }

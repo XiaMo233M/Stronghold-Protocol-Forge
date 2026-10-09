@@ -73,12 +73,23 @@ export function buildBattleSpec(o = {}) {
     bossId: o.bossId ?? null,
     content: o.content ?? 'full',
     boss: bossLike && o.boss ? { poolHp: Number(o.boss.poolHp) || 0, poolMax: Number(o.boss.poolMax) || 1 } : null,
-    // 工坊行为层 (docs/WORKSHOP.md §4): the kit MODULES this field needs, as JSON-safe { id, pack, url } records. A
-    // function cannot cross the wire, so a client-simulated battle imports these URLs and rebuilds the same kit map the
-    // server uses for verification (public/js/battle/runner.js loadSpecKits). Empty for a plain install.
+    // 工坊行为层 (docs/WORKSHOP.md §4): the kit MODULES this field needs, as JSON-safe { id, pack, hash, url } records.
+    // A function cannot cross the wire, so a client-simulated battle imports these URLs and rebuilds the same kit map
+    // the server uses for verification (public/js/battle/runner.js loadSpecKits). Empty for a plain install. `hash` is
+    // the pack's content hash (DESIGN §27.2): the client can tell which bytes the URL is supposed to serve.
     workshopKits: (Array.isArray(o.workshopKits) ? o.workshopKits : [])
       .filter((m) => m && typeof m.id === 'string' && typeof m.url === 'string')
-      .map((m) => ({ id: m.id, pack: typeof m.pack === 'string' ? m.pack : null, url: m.url })),
+      .map((m) => ({
+        id: m.id,
+        pack: typeof m.pack === 'string' ? m.pack : null,
+        url: m.url,
+        ...(typeof m.hash === 'string' ? { hash: m.hash } : {}),
+      })),
+    // The content this field runs with (DESIGN §27.2): `{ digest, packs }`, or null. It is here because the spec is the
+    // only object both execution paths share — and because validateClientResult derives every bound it enforces from
+    // this spec (server/match/fields.js specBounds), so a result computed under a DIFFERENT mod set has to be
+    // distinguishable from one computed under this one.
+    mods: o.mods && typeof o.mods === 'object' ? JSON.parse(JSON.stringify(o.mods)) : null,
   };
   const out = JSON.parse(JSON.stringify(spec, specReplacer));
   for (const p of out.players) for (const u of (p && Array.isArray(p.units) ? p.units : [])) if (u && typeof u === 'object') sanitizeUnitLoadout(u);

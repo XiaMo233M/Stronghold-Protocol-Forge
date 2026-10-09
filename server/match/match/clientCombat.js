@@ -35,7 +35,8 @@ export class MatchClientCombat {
     const battleId = seq.length + 1 + String(fieldId).length <= 64 ? `${seq}.${fieldId}` : seq;
     // workshopKits: the JSON-safe module list the browser imports to rebuild the pack's behaviour layer
     // (public/js/battle/runner.js loadSpecKits) — the server re-computes the same battle, so both sides must load it.
-    const spec = buildBattleSpec({ ...opts, battleId, fieldId, kind, content: this.battleContent, boss, workshopKits: this.workshopKitModules });
+    // mods: the identity of that content (DESIGN §27.2), so the field carries what it ran with.
+    const spec = buildBattleSpec({ ...opts, battleId, fieldId, kind, content: this.battleContent, boss, workshopKits: this.workshopKitModules, mods: this.mods });
     let total = 0;
     for (const x of spec.spawns) if (x && x.tag !== 'boss' && x.tag !== 'part') total += Math.max(1, Math.floor(Number(x.count) || 1));
     return {

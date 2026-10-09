@@ -57,9 +57,13 @@ const RECORD_ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
 
 import { VOICE_SLOTS, VOICE_LANGS, DEFAULT_VOICE_LANG } from './constants.js';
 import { isSupportTier } from './support.js';
+import { isVersionRange } from './packs.js';
+import { MOD_LAYERS } from './modIdentity.js';
 
 const isPlainObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const fail = (error, detail) => ({ ok: false, error, detail });
+/** 一个可选的字符串字段：非空字符串就裁剪，其它一律 null（缺省与写错都读成「没声明」）。 */
+const strField = (v, max) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
 
 /** 包内素材路径：相对、在包自己的 `assets/` 下、无穿越。语音、各类图标、外观素材共用这一条规则。 */
 const isSafeAssetPath = (p) =>
@@ -385,6 +389,17 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     }
     if (!supportIds.includes(id)) supportIds.push(id);
   }
+  // 版本声明（DESIGN §27.5）：`api` 是**模组 API** 的区间（钩子总线与 kit 契约），`game` 是**上游游戏版本**的区间，
+  // 两者都用 shared/packs.js isVersionRange 的语法（`>=0.2.0`、`0.2.x`、`^0.2.0`、`~0.2.1`、`*`、`||`）。
+  // `gameVersion` 保留一代作为 `game` 的别名：编辑器与现成的包都在写它，读的时候优先 `game`。
+  const api = strField(raw.api, 60);
+  if (api && !isVersionRange(api)) return fail('BAD_API_RANGE', `"api": "${api}" is not a version range (">=1 <2", "1.x" …)`);
+  const game = strField(raw.game, 60) ?? strField(raw.gameVersion, 60);
+  if (game && !isVersionRange(game)) return fail('BAD_GAME_RANGE', `"game": "${game}" is not a version range (">=0.2.0", "0.2.x" …)`);
+  // 声明的层（DESIGN §27.1）：A 内容 / B 服务端逻辑 / C 客户端界面。写错了要拒，不能猜。
+  const layer = raw.layer === undefined || raw.layer === null ? null : String(raw.layer).trim().toUpperCase();
+  if (layer !== null && !MOD_LAYERS.includes(layer)) return fail('BAD_LAYER', `"layer": "${raw.layer}" is not one of ${MOD_LAYERS.join(' / ')}`);
+  if (raw.combat !== undefined && typeof raw.combat !== 'boolean') return fail('BAD_COMBAT', '"combat" must be true or false (may this pack change a battle result?)');
   return {
     ok: true,
     pack: {
@@ -396,6 +411,10 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
       hasAssets: opts.hasAssets === true,
       description: typeof raw.description === 'string' && raw.description ? raw.description : null,
       gameVersion: typeof raw.gameVersion === 'string' && raw.gameVersion ? raw.gameVersion : null,
+      api,
+      game,
+      layer,
+      combat: typeof raw.combat === 'boolean' ? raw.combat : null,
       content,
       overrides,
       voices: voiceLines,

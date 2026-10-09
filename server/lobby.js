@@ -97,6 +97,7 @@
 import { randomBytes, randomInt } from 'node:crypto';
 import { ERR, MAX_SEATS, MAX_SPECTATORS, ROOM_CODE_LEN, modeIdFor } from '../shared/constants.js';
 import { checkLoadout, checkNotOwned, checkDiyPicks } from '../shared/protocol.js';
+import { modSetOf } from '../shared/modIdentity.js';
 import { normalizeSupportConfig, checkSupport, supportPicker, supportCapacity, supportTiers } from '../shared/support.js';
 import { encode, isDroppable, isErrCode, sendRaw, sendSession } from './net.js';
 import { getData as defaultGetData, lookup } from './data.js';
@@ -248,6 +249,14 @@ export class Lobby {
      * install, in which case nothing is injected at all.
      */
     this.workshop = workshop && typeof workshop === 'object' ? workshop : null;
+    /**
+     * What this server is running, as one identity (DESIGN §27.2): `{ digest, packs }`, or null for a plain install.
+     * The digest travels in `welcome` and must be echoed in `room.create` / `room.join` before a seat is given in a
+     * room whose content is not vanilla — the client is told what it is joining, and a client too old to answer is
+     * refused rather than let in silently (docs/PACKS.md:135-136).
+     * @type {{ digest: string, packs: Array<object> }|null}
+     */
+    this.modSet = modSetOf(Array.isArray(this.workshop?.mods) ? this.workshop.mods : []);
     /** @type {Map<string, Room>} */
     this.rooms = new Map();
     /** @type {Map<string, NodeJS.Timeout>} lobby grace timers by playerId */
@@ -261,7 +270,8 @@ export class Lobby {
   /** @param {string} code @returns {Room | null} */
   getRoom(code) { return this.rooms.get(String(code).toUpperCase()) || null; }
 
-  /** Counters for /healthz. */
+  /** Counters for /healthz, plus the mod-set digest when this server runs one (DESIGN §27.9: `welcome`, `/healthz` and
+   * the BattleSpec must quote the SAME string, so a bug report can name the content it came from). */
   stats() {
     let matches = 0;
     let humans = 0;
@@ -272,7 +282,7 @@ export class Lobby {
       for (const s of r.seats) if (s && !s.left) (s.isBot ? bots++ : humans++);
       spectators += r.spectators.length;
     }
-    return { rooms: this.rooms.size, matches, humans, bots, spectators };
+    return { rooms: this.rooms.size, matches, humans, bots, spectators, ...(this.modSet ? { mods: this.modSet.digest, modPacks: this.modSet.packs.length } : {}) };
   }
 
   // ---------------------------------------------------------------------------------------------------
@@ -312,6 +322,22 @@ export class Lobby {
     if (changed) this.broadcastState(room);
     else this.sendState(room, session);
     this.resync(session, !resumed);
+  }
+
+  /**
+   * The mod-set gate (DESIGN §27.2): on a server that runs workshop packs, entering a room means running THEIR content,
+   * so the client must say which content it thinks it is joining. A client that does not answer (or answers with what
+   * the server is not running) is refused with a reason it can act on — the alternative is a player silently playing
+   * content the UI never told them about.
+   * @param {any} msg the `room.create` / `room.join` message
+   * @returns {{ ok: true } | { error: string, detail?: string }}
+   */
+  checkModSet(msg) {
+    if (!this.modSet) return OK;
+    if (msg.mods === this.modSet.digest) return OK;
+    return fail(ERR.BAD_MSG, msg.mods
+      ? `this server runs a different mod set (${this.modSet.digest.slice(0, 12)}…) — reload the page`
+      : `this server runs ${this.modSet.packs.length} workshop pack(s) (${this.modSet.packs.map((p) => p.id).join(', ')}); a client must confirm the mod set to enter — reload the page`);
   }
 
   /**
@@ -385,9 +411,11 @@ export class Lobby {
   // room.* handlers
   // ---------------------------------------------------------------------------------------------------
 
-  create(session, { mode, difficulty }) {
+  create(session, { mode, difficulty, mods }) {
     const cur = this.roomOf(session);
     if (cur && cur.match) return fail(ERR.ROOM_STARTED, 'leave your running match first');
+    const gate = this.checkModSet({ mods });
+    if (!gate.ok) return gate;
     if (this.rooms.size >= this.opts.maxRooms) return fail(ERR.INTERNAL, 'too many rooms');
     const key = session.limitKey || null;
     if (key && this.opts.maxRoomsPerAddr > 0) {
@@ -414,7 +442,9 @@ export class Lobby {
     return OK;
   }
 
-  join(session, { code }) {
+  join(session, { code, mods }) {
+    const gate = this.checkModSet({ mods });
+    if (!gate.ok) return gate;
     const norm = String(code).trim().toUpperCase();
     const room = norm.length === ROOM_CODE_LEN ? this.rooms.get(norm) : undefined;
     if (!room) return fail(ERR.ROOM_NOT_FOUND);
@@ -689,9 +719,10 @@ export class Lobby {
     return OK;
   }
 
-  /** Extra fields of every `welcome` (net.js): the operators a 自选 slot may field (shared/diy.js `kitted`). */
+  /** Extra fields of every `welcome` (net.js): the operators a 自选 slot may field (shared/diy.js `kitted`), and what
+   * this server is running (`mods`, DESIGN §27.2) so the client can mark itself modded and echo the digest to enter. */
   welcomeInfo() {
-    return { diyKitted: KITTED_CHARS };
+    return { diyKitted: KITTED_CHARS, ...(this.modSet ? { mods: this.modSet } : {}) };
   }
 
   // ---------------------------------------------------------------------------------------------------
@@ -734,6 +765,8 @@ export class Lobby {
         // 工坊行为层: the same kits must reach the battles the server runs AND the browser's (see the Lobby constructor)
         workshopKits: this.workshop && this.workshop.kits ? this.workshop.kits : null,
         workshopKitModules: this.workshop && Array.isArray(this.workshop.modules) ? this.workshop.modules : [],
+        // …and the identity of that content, which every BattleSpec of this match carries (DESIGN §27.2)
+        mods: this.modSet,
         log: this.log,
         now: this.now,
         send: (playerId, msg) => (ctx.live ? this.matchSend(room, ctx, playerId, msg) : false),
