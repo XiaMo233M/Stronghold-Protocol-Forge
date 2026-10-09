@@ -1282,6 +1282,34 @@ export function registerServer(host) {
 `MODULES_NEED_COMBAT`（以上在形状层）；装载期与运行期另有 `MODULES_NO_REGISTER` / `MODULES_IMPORT_FAILED` /
 `MODULE_USE_UNDECLARED` / `MODULE_IO_BAD_PATH` / `MODULE_BAD_HOOK`。
 
+### 1.13 `notices`：公告与鸣谢（已实现，服务端 + 声明）
+
+**这一类缺的先是载体本身** —— 仓库里原本没有「公告」的任何形态。所以引擎先有了一份：公告**从 `CHANGELOG.md`
+生成**（单一事实源：更新记录写在哪、公告就是什么，不手写第二份），鸣谢来自引擎自己的名单；两者与各包的声明合成
+**一份**合并体，经 `/data/notices.json` 送出（走既有的合并数据通道，没有新路由）。
+
+```jsonc
+"notices": {
+  "announcement": "notice/announcement.json",   // { version, date, summary, sections: [{ name, items: [] }] }
+  "credits": "notice/credits.json"              // [{ name, note?, url? }]，url 只能 https://
+}
+```
+
+**合并语义是「追加」**（与 `i18n` 的逐键覆盖刻意不同）：一个包一条**自己的**公告、一张**自己的**署名表，所以两个包
+不会互相覆盖，引擎的也不会被包顶掉。合并体有上限（8 条公告 / 40 条署名 / 每条最多 12 小节 × 40 项）；挤到上限时丢的
+是**引擎那一端最旧**的那几条 —— 玩家还没看过的一条包公告，比引擎更旧的那几条更该被看到（旧版说明在更新记录里永远
+查得到）。
+
+**形状层判**：`notices` 只认这两个字段、至少写一个、路径必须是包内相对 `.json`（`NOTICES_BAD_SHAPE` /
+`NOTICES_UNKNOWN_FIELD` / `NOTICES_EMPTY` / `NOTICES_BAD_PATH`）。**装载期判**：声明的文件必须在包里、可读、是合法
+JSON，否则**整包被拒**（`NOTICES_BAD_FILE`，与 §1.9 同一条纪律）。**合并期判**：公告缺 `version`/`date`/`summary`、
+署名条目没名字、`url` 不是 `https://` —— **点名跳过那一条**，其余照旧（这里的坏值只影响它自己，不必连坐整包）。
+
+**字节进身份哈希**：声明的两份 `.json` 与 `i18n` 的译文文件走同一条（换了正文就是换了包）。
+
+**今天没有的东西（照实说）**：客户端**还没有**公告 / 鸣谢面板（服务端与声明这一半已就绪，合并体在
+`/data/notices.json` 上能取到）—— 那一半与 `docs/prompts` 里的 GUI 入口是下一刀。
+
 ---
 
 ## 2. 助战

@@ -1213,3 +1213,40 @@ like `kits/`, panel modules and meta modules.
 - **No network hook, and no arbitrary mount points.** The ruling's third requirement (declarative lifecycle mounts)
   is met with four named places; anything else a server-side mod wants today still has to be an engine feature. That is
   a deliberate limit of the first cut, not an oversight: four mounts were what the three files actually needed.
+
+### 28.15 `notices`: plain text as a declaration (implemented, server + declaration)
+
+**The gap was a missing product surface first.** The community pack's `public/js/ui/announcementData.js` and
+`titlePanels.js` (`CREDITS_TOP` / `CREDITS_REFS` / `CREDITS_LINE`) carry a structured announcement and a credits list.
+Neither exists here: there is no announcement carrier at all, no generator, and no panel on the title screen. So the
+first half of this section is not a pack feature — it is the carrier itself.
+
+**The engine's half is generated, not written.** Announcements come from `CHANGELOG.md`: `## <version> — <date>` is a
+release, its first paragraph is the summary, `### <name>` is a section and `- ` lines are items (indented continuations
+join the item above). That is the "one source of truth" stance the pack's own file claimed (`ANNOUNCEMENT_SOURCE =
+'CHANGELOG.md'`) and the reason a release note never has to be written twice. Credits are a small list in
+`server/notices.js` (this repo, the upstream game, and the rights holders).
+
+**The pack's half is `pack.json.notices`** — `{ announcement?, credits? }`, both pack-relative `.json` paths (a body of
+prose belongs in a file that can be hashed and checked, not inline in the manifest):
+
+- `announcement`: `{ version, date, summary, sections: [{ name, items: [string] }] }`;
+- `credits`: `[{ name, note?, url? }]` with `url` limited to `https://` (a page that links out must not be able to
+  reach a local scheme).
+
+**Merging is append, not overwrite** — deliberately unlike `i18n`: a pack's announcement is *its own* news and its
+credits are *its own* attribution, so two packs cannot collide and neither can displace the engine's. The merged body is
+bounded (8 announcements, 40 credits, 12 sections × 40 items each); when the cap is hit, the entries dropped are the
+**oldest engine ones** — a pack's notice is news the player has not seen, while an old release note is permanently
+readable in the changelog.
+
+**Where it is enforced**: shape in `shared/workshop.js parseNoticesDecl`; the files' presence and JSON-ness in the load
+gate (`server/notices.js noticesIssues`, wired into `loadWorkshop`, so a pack that declares a notices file it does not
+ship is refused whole); the values at merge time, where a bad entry is **named and skipped** without taking the rest of
+the pack down (unlike i18n, a bad notice cannot affect anyone else's); the bytes enter the content hash like `i18n`'s
+files. The merged body is served over the **existing** merged-data route (`/data/notices.json`), so there is no new
+route and no new static path.
+
+**What is not done yet**: the client panel. The merged body is on the wire and the declaration is enforced; rendering it
+on the title screen (and the author-side entry in the editor) is the next cut, and this section says so rather than
+implying the feature is finished.

@@ -26,6 +26,9 @@ import { C2S } from '../shared/protocol.js';
 // the kit import whitelist + the narrow rewrite (DESIGN §28.12). shared/ because the VALIDATOR reads the same table —
 // the loader must reach the same verdict the editor did.
 import { kitImportDeclarations, kitImportIssues, rewriteKitImports } from '../shared/kitImports.js';
+// 公告 / 鸣谢的装载期判据（DESIGN §28.15）：声明的 `.json` 在不在、是不是 JSON。合并体在 `server/index.js` 里经
+// 既有的合并数据通道送出 —— 形状与判据只有一份，这个 import 就是那一份。
+import { noticesIssues } from './notices.js';
 
 /** Default pack root: `<repo>/workshop`. */
 export const WORKSHOP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'workshop');
@@ -148,7 +151,7 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
       || Object.keys(manifest.pack.art || {}).length
       || Object.keys(manifest.pack.operators || {}).length
       || !!manifest.pack.assets || !!manifest.pack.client || !!manifest.pack.server || !!manifest.pack.routes
-      || !!manifest.pack.i18n) {
+      || !!manifest.pack.i18n || !!manifest.pack.notices) {
       // 试玩开关的名单必须点名本包真的有的 id：`normalizePackManifest` 只能查形状，成员资格要等 chess.json 读完。
       // 不查这一条，名单里一个写错的 id 就是**静默无效** —— 作者勾了、试玩里什么都没发生（这个缺口的老毛病）。
       const unknown = playtestUnknownIds(manifest.pack.playtest?.directToHand, manifest.pack.overrides, Object.keys(files.chess || {}));
@@ -184,7 +187,9 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
       const metaFileIssues = metaIssues(manifest.pack, packDir);
       // `server.modules`（DESIGN §28.14）：声明的 `.mjs` 必须真的在包里 —— 同一条纪律，同一个裁剪点。
       const moduleFileIssues = serverModuleIssues(manifest.pack, packDir);
-      const gateIssues = [...assetIssues.issues, ...hookIssues, ...langIssues, ...metaFileIssues, ...moduleFileIssues];
+      // `notices`（DESIGN §28.15）：声明的公告 / 鸣谢 `.json` 必须真的在包里、可读、是 JSON —— 同一条纪律。
+      const noticeIssues = noticesIssues(manifest.pack, packDir);
+      const gateIssues = [...assetIssues.issues, ...hookIssues, ...langIssues, ...metaFileIssues, ...moduleFileIssues, ...noticeIssues];
       if (gateIssues.length) {
         errors.push({ pack: name, reason: `${gateIssues[0].code}: ${gateIssues[0].reason}` });
         continue;
@@ -839,7 +844,12 @@ export function identifyPack(packDir, pack, files, { assetsDigest = null } = {})
   //    没声明 `i18n` 的包（今天所有的包）哈希逐字节不变。文件与面板模块共用同一条去重与路径复核。
   const langFiles = [...new Set(Object.values(pack.i18n && typeof pack.i18n === 'object' ? pack.i18n : {})
     .filter((rel) => typeof rel === 'string' && rel))].sort();
-  for (const rel of langFiles) {
+  // 8. 声明的公告 / 鸣谢文件（`pack.json.notices`, DESIGN §28.15）：**字节**进身份哈希。理由与 i18n 逐字相同 ——
+  //    一段展示给玩家看的正文改了、包摘要却不变，那「同一个房间摘要 ⇒ 同一份内容」这句话对它就失效了。
+  const noticeFiles = [...new Set(Object.values(pack.notices && typeof pack.notices === 'object' ? pack.notices : {})
+    .filter((rel) => typeof rel === 'string' && rel))].sort();
+  const declaredTextFiles = [...new Set([...langFiles, ...noticeFiles])].sort();
+  for (const rel of declaredTextFiles) {
     if (manifest.some((m) => m.path === rel)) continue;
     const abs = path.join(packDir, ...rel.split('/'));
     if (abs === packDir || !abs.startsWith(packDir + path.sep)) continue;

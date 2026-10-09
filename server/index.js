@@ -28,6 +28,7 @@ import { getData, loadData } from './data.js';
 import { loadWorkshop, loadWorkshopKits, loadWorkshopHooks, loadWorkshopPanels, workshopThemeFor, dropUnavailablePreDispatchPacks, WORKSHOP_DIR } from './workshop.js';
 import { loadMetaModules } from './match/metaPack.js';
 import { loadServerModules, mountServerModules, stateRootFor } from './modModules.js';
+import { workshopNotices } from './notices.js';
 import { Match as DefaultMatch } from './match/Match.js';
 import {
   buildWorkshopDataFiles, workshopKitFilesFor, workshopPanelFilesFor, workshopAssetsFor, workshopRoutesFor,
@@ -131,6 +132,11 @@ export async function startServer(opts = {}) {
   //                       or its client-simulated battle would disagree with the server's verification.
   const workshopLoaded = { ...loadedOnce, packs: pruned.packs, errors: pruned.errors };
   const workshopJson = buildWorkshopDataFiles(data, workshopLoaded);
+  // 公告 / 鸣谢的合并体（DESIGN §28.15）：引擎那一半**从更新记录生成**（单一事实源，不手写第二份），包那一半按
+  // 包 id 追加。它走**既有的**合并数据通道送出（`/data/notices.json`，map 的键是 `notices`），所以既没有新路由、
+  // 也没有新的静态路径；`data/notices.json` 本来就不存在，所以这纯属新增。
+  const notices = workshopNotices(workshopLoaded, { changelogPath: path.join(ROOT, 'CHANGELOG.md'), log });
+  workshopJson.set('notices', Buffer.from(JSON.stringify(notices.body), 'utf8'));
   const workshopKits = await loadWorkshopKits(workshopLoaded, { log, knownIds: new Set(Object.keys(data.chess || {})) });
   // The mod set (DESIGN §28.2): one identity per pack, one digest for the whole set. It travels in `welcome`, in
   // `/healthz` (lobby.stats) and in every BattleSpec, so the three can never disagree about what is running.

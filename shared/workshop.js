@@ -115,6 +115,8 @@ export const PACK_FIELDS = Object.freeze([
   'content', 'overrides',
   // 素材与声明（贡献项，见 EMPTY_PACK 那一处）
   'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'support', 'operators', 'i18n',
+  // 纯文本声明（公告 / 鸣谢，DESIGN §28.15）：一段**结构化文本**，既不是游戏数据也不是素材
+  'notices',
   // 行为开关（**不是**贡献项）
   'playtest',
   // 中间层四组能力声明（DESIGN §28.13）
@@ -857,6 +859,44 @@ function parseRoutesDecl(raw) {
  *
  * @returns {{ ok: true, decl: Record<string, string> } | { ok: false, error: string, detail: string }}
  */
+/**
+ * `pack.json.notices` —— 包的**纯文本声明**（DESIGN §28.15，业主 2026-10-10：「公告 / 鸣谢这一类非游戏内容的声明」）。
+ *
+ * 两个成员都是**包内相对 `.json` 路径**（不是内联文本）：与 `i18n` 同一条理由 —— 一段要展示给人看的正文属于内容，
+ * 写在 `pack.json` 里会让清单变成一篇文档；落成 `.json` 之后它进身份哈希、能被工具检查、也能被服务面的合并体送达。
+ *
+ * 两份文件的形状（服务面合并时逐条复判，作者侧 `tools/workshop-validate.mjs` 看同一份判据）：
+ *   * `announcement`：`{ version, date, summary, sections: [{ name, items: [string] }] }`；
+ *   * `credits`：`[{ name, note?, url? }]`（`url` 只能是 `https://`）。
+ *
+ * 与 `i18n` 的差别：这里的对象是**这一份声明自己的**（一个包一条公告、一张署名表），所以合并是**追加**而不是逐键
+ * 覆盖 —— 两个包的公告不会互相覆盖，引擎的公告也不会被包顶掉。
+ * @returns {{ ok: true, decl: object } | { ok: false, error: string, detail: string }}
+ */
+function parseNoticesDecl(raw) {
+  if (!isPlainObj(raw)) return fail('NOTICES_BAD_SHAPE', 'notices must be an object: { announcement?, credits? }');
+  const NOTICES_FIELDS = ['announcement', 'credits'];
+  for (const key of Object.keys(raw)) {
+    if (!NOTICES_FIELDS.includes(key)) {
+      return fail('NOTICES_UNKNOWN_FIELD', `notices: "${key}" is not a declared field (${NOTICES_FIELDS.join(', ')})`);
+    }
+  }
+  if (raw.announcement === undefined && raw.credits === undefined) {
+    return fail('NOTICES_EMPTY', `notices must declare at least one of: ${NOTICES_FIELDS.join(', ')} — an empty object says nothing and is refused rather than ignored`);
+  }
+  /** @type {Record<string, string>} */
+  const decl = {};
+  for (const field of NOTICES_FIELDS) {
+    if (raw[field] === undefined) continue;
+    const rel = raw[field];
+    if (!isSafeRelativePath(rel) || !rel.endsWith('.json') || rel.length <= '.json'.length) {
+      return fail('NOTICES_BAD_PATH', `notices.${field} must be a pack-relative ".json" path (e.g. "notice/${field}.json") — the file is hashed into the pack's identity and served inside the merged notice body`);
+    }
+    decl[field] = rel;
+  }
+  return { ok: true, decl };
+}
+
 function parseI18nDecl(raw) {
   if (!isPlainObj(raw)) {
     return fail('I18N_BAD_SHAPE', 'i18n must be an object: { "<lang code>": "<relative path to a .json of msgid → translation>" }');
@@ -1321,6 +1361,10 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // 「只在清单真的写了这个键时才进归一化结果」的纪律 —— 没声明 i18n 的包（今天所有的包）哈希逐字节不变。
   const i18nParsed = raw.i18n === undefined ? null : parseI18nDecl(raw.i18n);
   if (i18nParsed && !i18nParsed.ok) return i18nParsed;
+  // `notices`（DESIGN §28.15）：公告 / 鸣谢这类纯文本声明的形状，见 `parseNoticesDecl`。同一条「写了才进归一化
+  // 结果」的纪律 —— 没声明 notices 的包哈希逐字节不变。
+  const noticesParsed = raw.notices === undefined ? null : parseNoticesDecl(raw.notices);
+  if (noticesParsed && !noticesParsed.ok) return noticesParsed;
   // 一条声明只有在清单里**真的写了这个键**时才进归一化结果。这一条是本刀最容易做坏的地方：无条件写进去会让
   // 每一个已存在的包（它们没有这些键）的归一化清单多出四个键，于是内容哈希全变、`identifyPack` 的
   // `manifest` 与 `hash` 也跟着变 —— 房间的摘要闸门会开始误判（DESIGN §28.2）。
@@ -1331,6 +1375,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (serverParsed) declared.push(['server', serverParsed.decl]);
   if (routesParsed) declared.push(['routes', routesParsed.decl]);
   if (i18nParsed) declared.push(['i18n', i18nParsed.decl]);
+  if (noticesParsed) declared.push(['notices', noticesParsed.decl]);
   /** 一条声明算不算「贡献」：归一化后的值里有没有东西。`routes: []` 与 `client: { panels: [], requires: [] }`
    *  都是**合法但什么都不做**的声明（与 `voices: {}` / `art: { chars: {} }` 同一个语义），照旧不算贡献 ——
    *  所以「一个只写了 `routes: []` 的包」仍然是空包。反向的那条同样载重：`assets` / `client.panels` /
@@ -1352,7 +1397,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     const notContributions = ['support', 'playtest']
       .filter((n) => raw[n] !== undefined);
     const names = [...WORKSHOP_CONTENT_FILES, 'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'operators',
-      'assets', 'client', 'server.preDispatch', 'server.meta', 'routes', 'i18n'];
+      'assets', 'client', 'server.preDispatch', 'server.meta', 'routes', 'i18n', 'notices'];
     const alsoNot = notContributions.length
       ? ` (note: ${notContributions.map((n) => `"${n}"`).join(' and ')} ${notContributions.length === 1 ? 'is' : 'are'} NOT a contribution — a pack that declares ${notContributions.length === 1 ? 'it' : 'them'} alone brings nothing into a match)`
       : '';

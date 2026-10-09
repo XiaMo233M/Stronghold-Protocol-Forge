@@ -439,7 +439,7 @@ const addRage = (battle, unit) => battle.addBuff(unit, {
   key: 'ws:rage', refresh: 'stack', stacks: 1, maxStacks: num(t0.max_stack_cnt, 5),
   duration: Infinity, mods: { atkPct: num(t0.atk) }, visible: true, tags: ['talent'],
 });
-const stacksOf = (unit) => unit.findBuff('ws:rage')?.stacks ?? 0;   // findBuff: server/sim/units.js:231
+const stacksOf = (unit) => unit.findBuff('ws:rage')?.stacks ?? 0;   // findBuff: server/sim/units.js:248
 
 // 纯计数器：不给任何数值也行（只用来记住「发生了几次」）
 battle.addBuff(unit, { key: 'ws:count', refresh: 'stack', maxStacks: 99, duration: Infinity });
