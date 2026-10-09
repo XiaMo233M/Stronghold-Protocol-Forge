@@ -3,6 +3,20 @@
 import { N_ } from './i18n.js';
 
 export const PROTOCOL_VERSION = 1;
+/**
+ * The **mod-layer API** version (DESIGN §28.5, §28.13): the version of the hook bus and the kit contract a workshop pack
+ * may write against. A pack declares `pack.json.api` as a RANGE and this number is what that range is compared against
+ * (`shared/workshop.js normalizePackManifest`), so a pack written for a different bus is refused instead of being run
+ * unverified. It is a whole number, like `PROTOCOL_VERSION`: the bus changes shape, it does not drift by patch.
+ * Bumping it is an owner decision — it stops every pack whose range excludes the new number from loading.
+ *
+ * NOT `APP_VERSION` (which is `'0.10.0'`): the release number moves for reasons a pack's compat does not care about,
+ * and `docs/design/mod-layer.md` §28.5 spells out the two ranges separately. The comparison needs a three-part version
+ * (`shared/packs.js appVersionMatches` reads `v<major>.<minor>.<patch>` and **treats an unparsable one as a match** —
+ * a fallback that would silently accept every pack), so `shared/workshop.js` builds the string from this number rather
+ * than duplicating it here.
+ */
+export const MOD_API_VERSION = 1;
 /** Release version shown to players (title screen, server banner, /healthz). Kept equal to package.json "version"
  * (test/version.test.js); PROTOCOL_VERSION above is the separate wire-format number. The release TAG spells both halves
  * out — `v<this>-<upstream>` (README 「版本号」) — because this one has to stay a plain three-part semver. */

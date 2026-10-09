@@ -5,9 +5,10 @@ Part of [DESIGN.md](../DESIGN.md) (the index; section numbers are global).
 This section is the design for the middle layer between "content a pack can add" and "code a pack can run". It began as
 a proposal and is now partly implemented: identity and its wire-level verification
 (§28.2, §28.6), load-order arbitration with attribution (§28.3), the override surface (§28.5), operator packs
-(§28.10) and the kit import whitelist (§28.12) all carry code and tests behind them. Sections that are still design
-say so in their own text (§28.8 says it outright) — read a section's status from the section, not from this header.
-§28.11 collects what is deliberately left out.
+(§28.10), the kit import whitelist (§28.12) and the four capability declarations of §28.13 (A 段: the schema, its
+refusals and its hash participation — the behaviour is B 段) all carry code and tests behind them. Sections that are
+still design say so in their own text (§28.8 says it outright) — read a section's status from the section, not from
+this header. §28.11 collects what is deliberately left out.
 
 Every `file:line` below was read at the revision this section was written against (`main` `1283050`, `APP_VERSION`
 `0.9.4`, `shared/constants.js:9`). A line number is a **snapshot, not a contract** — where a sentence is load-bearing it
@@ -664,3 +665,71 @@ itself is the browser's job; `test/ui/kitimports.e2e.test.js` is the opt-in chec
 (`SP_E2E=1 node --test test/ui/kitimports.e2e.test.js`: it imports every whitelisted specifier in the page context,
 asserts the export-name floor, and asserts a specifier outside the whitelist does not resolve there either), and until
 someone runs it on a machine with Chrome this remains the standing gap recorded in `docs/WORKSHOP.md` §4.4.
+
+### 28.13 The four capability declarations: `assets`, `client`, `server.preDispatch`, `routes` (A 段)
+
+**The gap, stated by its own verdict.** A third-party mod ("full resource pack: import, verify, server admission") was
+rewritten into this repository's pack format and then judged by the REAL validator, on both this branch and the middle
+layer: `EMPTY_PACK`, twice. It ships no operator, no item, no map, no voice line and no art — its whole payload is
+`.spresources` containers it does not own plus a client-side import flow and a server-side admission hook. The four
+things it needs have no field in `pack.json`, so the pack could not say what it was; the inventory, the field shapes and
+the reasons are in `_up/mod4-pack/pack/README.md` §4, and the two verdicts are in
+`_up/mod4-pack/pack/validator-verdict.json`.
+
+**A 段 is the schema, and only the schema.** The four groups parse, refuse and hash (§28.2). Nothing executes them:
+no hook is registered on the dispatch path (`server/net.js` is untouched), no route is mounted, no panel is mounted and
+the Service Worker policy is unchanged. The split is deliberate — the behaviour half touches the protocol face and the
+runtime, and a declaration that cannot be written is not worth debugging at the same time as one that cannot be trusted.
+
+**The shapes, with the one decision each carries.**
+
+| group | shape | the decision it encodes |
+|---|---|---|
+| `assets` | `{ container, manifest, serverPolicy?, verify? }` | `container` must be a pack-relative `.spresources` path (the container format is defined by `tools/make-spresources.mjs`), `manifest` must be a pack-relative `.json` (the flat file table the client validates), defaults `serverPolicy: 'serve'` / `verify: 'sha256'` |
+| `client` | `{ panels: [{ id, slot, module, order?, gate? }], requires? }` | `slot` is a **closed enum** — the four hosts §28.8 already names (`root.overlays`, `root.guide`, `screen.game.aside`, `screen.result.footer`); `module` is a pack-relative path, never a URL; `requires` is the closed capability list (`serviceWorker`, `cacheStorage`, `webCrypto`), because "the browser does not support it" and "it is installed but silently does nothing" are different answers |
+| `server` | `{ preDispatch: { module, policy, intercepts } }` | `intercepts` must name types that exist in `shared/protocol.js C2S` — the list is derived from the protocol, not copied here, so an author cannot declare an interception the bus never delivers (the original mod's `match.queue` / `queue.join` do not exist in this repository) |
+| `routes` | `[{ path, file, cache? }]` | deliberately narrow: an absolute path, a pack-relative **`.json`** file (never `.js` / `.html`: this channel is data, not code, the same line `/workshop-assets` draws), `cache` one of `no-cache` / `no-store` / `public` |
+
+**One refusal per way to be wrong, and they name the field.** Unknown keys are refused rather than ignored
+(`ASSETS_UNKNOWN_FIELD`, `CLIENT_PANEL_UNKNOWN_FIELD`, `PREDISPATCH_UNKNOWN_FIELD`, `ROUTE_UNKNOWN_FIELD`): a `container`
+misspelled as `containers` must not produce "the pack is valid but the resources never load". Every path must be
+pack-relative (`ASSETS_BAD_CONTAINER`, `CLIENT_BAD_PANEL_MODULE`, `PREDISPATCH_BAD_PATH`, `ROUTE_BAD_FILE`) — a
+declaration is part of the identity, and an absolute path erases which pack the behaviour came from (§28.2). Enums are
+refused by name (`ASSETS_BAD_SERVER_POLICY`, `CLIENT_BAD_PANEL_SLOT`, `CLIENT_UNKNOWN_REQUIRE`, `ROUTE_BAD_CACHE`), and
+`intercepts` is judged against `C2S` (`PREDISPATCH_UNKNOWN_TYPE`). The full list with the exact code for each case is
+pinned by `test/packAssets.test.js`; the author-facing table is `docs/WORKSHOP.md` §1.9.
+
+**Submission order is normalized, so the bytes cannot depend on how the author wrote it.** Panels sort by `id`,
+`intercepts` is de-duplicated and sorted, and `requires` follows the closed enum's order — the same rule §28.2's
+`canonicalJson` already applies to keys, now applied to the lists inside a declaration.
+
+**`EMPTY_PACK` after this change.** The four groups are contributions **when they declare something**; `routes: []` is
+not (it is indistinguishable from not declaring), and neither are `api` and `playtest`, which are declarations about
+behaviour rather than content. The two consequences are both load-bearing and both tested: a pack whose only payload is
+`assets` / `client` / `server.preDispatch` / `routes` is a legal pack, and the existing ruling — a pack carrying only
+`playtest` is still refused (`test/playtestDirectToHand.test.js`) — is untouched. No assertion was relaxed to make a new
+case pass.
+
+**The hash, and the one way this could have gone wrong.** §28.2 says a declaration that can change one end's behaviour
+must be in the content hash, or one digest names two behaviours. `identifyPack` hashes `canonicalJson(pack)` — the
+NORMALIZED manifest — so the declaration is covered for free *if* it is in that object. The trap is the opposite
+direction: adding four keys unconditionally would put them into **every** existing pack's normalized manifest, changing
+every content hash and making the room digest gate (`modSetOf`, `welcome.mods.digest`) misfire on unchanged packs. So
+`normalizePackManifest` adds each key **only when `pack.json` really wrote it**, and the rule is pinned three ways in
+`test/packAssets.test.js`: the normalized manifest of an undeclared pack contains none of the four keys, the three
+shipped example packs still hash to their pre-change digests (`96ebc2d4…` clementia, `15092019…` demo-workshop,
+`77b80c6e…` kit-demo), and a declared pack's hash does change and does move the wire digest.
+
+**`MOD_API_VERSION`, and the comparison §28.5 said was missing.** §28.5 declared `api` as the mod-layer range
+"compared against a new constant in `shared/constants.js` next to `APP_VERSION`", and recorded that the constant did not
+exist yet — so `api` could be written but not judged. It now exists (`MOD_API_VERSION = 1`, a whole number like
+`PROTOCOL_VERSION`, deliberately not `APP_VERSION`), and the comparison is **declaration-only**: a pack that declares no
+`api` is untouched (that is every pack in the tree today), while a declared range that excludes the installed mod API is
+refused by name (`MOD_API_INCOMPATIBLE`). One trap is worth recording: `shared/packs.js appVersionMatches` reads a
+three-part version and **treats an unparsable one as a match**, so the integer constant must never be passed to it
+directly — `shared/workshop.js` builds `'1.0.0'` from the number, and the test asserts that a `'2.x'` range is refused
+with the string and accepted with the bare number, so the fallback cannot come back silently.
+
+**What this section does not decide.** The behaviour of the four declarations (hook registration, route mounting, panel
+mounting, the client cache policy), the editor's graphical entry points for the four fields, whether `assets` ships in a
+release, and the Service Worker's default policy. Those are B 段, and each one changes a runtime rather than a schema.

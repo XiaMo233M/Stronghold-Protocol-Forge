@@ -99,13 +99,19 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null } = {}) {
     // them are published through assets.json / backups.json by the overlay (shared/workshop.js mergeWorkshopVoices /
     // mergeWorkshopBondIcons / mergeWorkshopItemIcons / mergeWorkshopArt / mergeWorkshopOperators). Forgetting one of
     // them here would make that kind of pack load "successfully" and contribute nothing.
+    //
+    // The four middle-layer declarations (DESIGN §28.13) belong on this list for exactly that reason: a pack that
+    // declares only `assets` / `client` / `server.preDispatch` / `routes` is a loaded pack whose identity the room
+    // digest must carry, and `normalizePackManifest` has already refused it as EMPTY_PACK when the declaration is
+    // empty. No behaviour reads them yet (A 段) — this only decides whether the pack EXISTS.
     if (Object.keys(files).length
       || Object.keys(manifest.pack.voices || {}).length
       || Object.keys(manifest.pack.voiceLangs || {}).length
       || Object.keys(manifest.pack.bondIcons || {}).length
       || Object.keys(manifest.pack.itemIcons || {}).length
       || Object.keys(manifest.pack.art || {}).length
-      || Object.keys(manifest.pack.operators || {}).length) {
+      || Object.keys(manifest.pack.operators || {}).length
+      || !!manifest.pack.assets || !!manifest.pack.client || !!manifest.pack.server || !!manifest.pack.routes) {
       // 试玩开关的名单必须点名本包真的有的 id：`normalizePackManifest` 只能查形状，成员资格要等 chess.json 读完。
       // 不查这一条，名单里一个写错的 id 就是**静默无效** —— 作者勾了、试玩里什么都没发生（这个缺口的老毛病）。
       const unknown = playtestUnknownIds(manifest.pack.playtest?.directToHand, manifest.pack.overrides, Object.keys(files.chess || {}));
