@@ -28,6 +28,7 @@ import { store, useStore, shallowEqual, emptyMatch, isSpectating } from '../stor
 import { difficultyInfo, LAYER_TEXT } from './lobby.js';
 import * as roomMods from '../roomMods.js';
 import { roomModsOf, shortDigest } from '../roomMods.js';
+import { loadCatalog, planAlignment, alignRoom, missingPackIds, storeFor } from '../mods/align.js';
 import { t, tc } from '../../../shared/i18n.js';
 
 /**
@@ -223,23 +224,95 @@ function AiLastToggle({ option, busy, onToggle }) {
 }
 
 /**
- * 本房间使用 mod (W-A, DESIGN §28.9): the set THIS room declared, shown to every member and spectator from
- * `room.state.mods`. Absent when the room declared none, in which case this component returns nothing — a room on a
- * plain install (or one whose host ticked nothing) looks exactly as it did before this feature.
+ * 本房间使用 mod (W-A/W-D, DESIGN §28.16): the set THIS room declared, shown to every member and spectator from
+ * `room.state.mods`, ALONG WITH whether this client really holds it. Absent when the room declared none, in which case
+ * this component returns nothing — a room on a plain install (or one whose host ticked nothing) looks exactly as it did
+ * before this feature.
+ *
+ * W-D is the second half: the panel asks `planAlignment` (public/js/mods/align.js) whether the bytes on THIS client
+ * rebuild every pack the room declared, offers to download exactly those (`alignRoom`), draws the progress `sync`
+ * reports, and tells the room screen whether the Ready button may be offered at all. A server that carries packs this
+ * client cannot name is called out by name instead of silently staying 「未就绪」.
+ * @param {{ room: any, onAlignment?: (state: { ok: boolean, needed: boolean, missing: number }|null) => void }} props
  */
-function RoomModsPanel({ room }) {
+function RoomModsPanel({ room, onAlignment = null }) {
   const mods = roomModsOf(room);
+  const [plan, setPlan] = useState(null);
+  const [progress, setProgress] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [checked, setChecked] = useState(false);
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
+  const report = onAlignment || (() => {});
+  const digest = mods ? mods.digest : null;
+
+  // Ask once per room set: the answer decides both what this panel shows and whether Ready is offered. A room without a
+  // declaration reports 「无需对齐」 and the panel disappears.
+  useEffect(() => {
+    if (!digest) { setPlan(null); setChecked(true); report(null); return undefined; }
+    let live = true;
+    setChecked(false);
+    (async () => {
+      const catalog = await loadCatalog();
+      const next = await planAlignment({ catalog, mods, store: storeFor() });
+      if (!live || !alive.current) return;
+      setPlan(next);
+      setChecked(true);
+      report({ ok: next.ok, needed: next.needed, missing: next.missingFiles });
+    })().catch(() => { if (live) { setChecked(true); setPlan(null); report(null); } });
+    return () => { live = false; };
+    // `digest` is the identity of the set: the same packs re-announced must not re-download or re-hash
+  }, [digest]);
+
   if (!mods) return null;
+  const known = plan ? plan.packs : null;
+  const unknown = plan ? plan.unknown : [];
+  const missingFiles = plan ? plan.missingFiles : 0;
+  const ready = !!plan && plan.ok;
+
+  const fill = async () => {
+    if (busy) return;
+    setBusy(true);
+    setProgress({ done: 0, total: 0 });
+    try {
+      const catalog = await loadCatalog();
+      const next = await alignRoom({
+        catalog, mods, store: storeFor(),
+        onProgress: (e) => { if (alive.current && (e.type === 'done' || e.type === 'file-start' || e.type === 'file-done' || e.type === 'file-skipped')) setProgress({ done: e.done ?? 0, total: e.total ?? 0 }); },
+      });
+      if (!alive.current) return;
+      setPlan(next);
+      report({ ok: next.ok, needed: next.needed, missing: next.missingFiles });
+      if (!next.ok) toast(t('模组仍未就绪：{ids}', { ids: missingPackIds(next).join(', ') || '—' }), 'warn');
+    } catch (err) {
+      if (alive.current) toastError(err);
+    } finally {
+      if (alive.current) { setBusy(false); setProgress(null); }
+    }
+  };
+
   return html`<div class="room-mods brackets">
     <${MicroLabel} tone="mint">ROOM MODS<//>
     <span class="room-mods__title">${t('本房间使用模组（{n} 个）', { n: mods.packs.length })}</span>
     <span class="room-mods__digest num" title=${mods.digest}>${shortDigest(mods.digest)}…</span>
+    ${ready ? html`<span class="room-mods__state t-mint">${t('本机已就绪')}</span>` : null}
     <ul class="room-mods__list">
-      ${mods.packs.map((p) => html`<li key=${p.id}>
-        <span class="room-mods__id">${p.id}</span>
-        <span class="room-mods__meta">${t(LAYER_TEXT[p.layer] || p.layer)}${p.combat ? ` · ${t('会改动战斗结果')}` : ''}</span>
-      </li>`)}
+      ${mods.packs.map((p) => {
+        const state = known ? known.find((x) => x.id === p.id) : null;
+        return html`<li key=${p.id}>
+          <span class="room-mods__id">${p.id}</span>
+          <span class="room-mods__meta">${t(LAYER_TEXT[p.layer] || p.layer)}${p.combat ? ` · ${t('会改动战斗结果')}` : ''}</span>
+          ${state && !state.ok ? html`<span class="room-mods__state t-orange">${state.known ? t('本机缺件') : t('本服务器没有这个包')}</span>` : null}
+        </li>`;
+      })}
     </ul>
+    ${checked && plan && !plan.ok
+      ? html`<div class="room-mods__fill">
+          <span class="t-lo">${unknown.length ? t('房间点名了本服务器没有的模组：{ids}', { ids: unknown.join(', ') }) : t('本机还缺 {n} 个模组文件', { n: missingFiles })}</span>
+          <${Button} variant="secondary" size="sm" icon="refresh" loading=${busy} disabled=${busy || unknown.length > 0} onClick=${fill}>
+            ${busy && progress && progress.total ? t('正在补齐 {done}/{total}', { done: progress.done, total: progress.total }) : t('补齐模组')}<//>
+        </div>`
+      : null}
   </div>`;
 }
 
@@ -249,6 +322,9 @@ export function RoomScreen() {
   const me = useStore((s) => s.me, shallowEqual);
   const conn = useStore((s) => s.connection, shallowEqual);
   const [busy, setBusy] = useState(null);
+  // 对齐状态（W-D, DESIGN §28.16）：房间声明了集合而本机还没拿到那几个包时，**不给**准备就绪这个按钮 —— 服务器
+  // 那边「全员就绪才能开始」这条规则不变，这里只是不让玩家点一个注定让房间开不起来的按钮。
+  const [align, setAlign] = useState(null);
   const alive = useRef(true);
   const inFlight = useRef(false); // synchronous guard against double clicks (state updates are async)
   useEffect(() => () => { alive.current = false; }, []);
@@ -359,7 +435,7 @@ export function RoomScreen() {
         </ul>
       </aside>`}
     </main>
-    <${RoomModsPanel} room=${room} />
+    <${RoomModsPanel} room=${room} onAlignment=${setAlign} />
     <${SpectatorBar} facts=${facts} myId=${me.playerId} busy=${busy} onRemove=${removeSpectator} onSit=${sit} />
 
     <footer class="room-bar">
@@ -389,8 +465,10 @@ export function RoomScreen() {
             <//>`
           : facts.spectating
             ? html`<${Button} variant="secondary" size="xl" icon="eye" disabled=${true}>${t('观战中')}<//>`
-          : html`<${Button} variant=${myReady ? 'primary' : 'secondary'} size="xl" icon=${myReady ? 'check' : 'hourglass'} active=${myReady}
-              loading=${busy === 'ready'} disabled=${!online || !facts.mine} onClick=${toggleReady}>${myReady ? t('已就绪') : t('准备就绪')}<//>`}
+          : html`<${Tooltip} text=${align && align.needed && !align.ok ? t('模组未就绪：先补齐本房间的模组文件') : null}>
+              <${Button} variant=${myReady ? 'primary' : 'secondary'} size="xl" icon=${myReady ? 'check' : 'hourglass'} active=${myReady}
+                loading=${busy === 'ready'} disabled=${!online || !facts.mine || !!(align && align.needed && !align.ok)} onClick=${toggleReady}>${myReady ? t('已就绪') : t('准备就绪')}<//>
+            <//>`}
       </div>
     </footer>
   </div>`;

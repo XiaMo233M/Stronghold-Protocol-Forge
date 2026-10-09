@@ -255,9 +255,13 @@ export async function sync({
  * @param {string} packId
  * @param {ReturnType<import('./store.js').createStore>} store
  * @param {{ packs: Array<any> }|null} [catalog] the catalogue entry to read `canonical` from
+ * @param {{ verifyBytes?: boolean }} [opts] `verifyBytes` also hashes every stored file and refuses a pack whose bytes
+ *   do not match the catalogue's `sha256` — what the ALIGNMENT gate wants (「我真的有这个 mod」must not be a claim about
+ *   file names; a corrupted cache entry would otherwise read as complete). Off by default: `sync` has already hashed
+ *   everything it downloaded, so its own verdict needs existence only.
  * @returns {Promise<string|null>} lowercase hex, or null when the pack is incomplete / unknown here
  */
-export async function localPackHash(packId, store, catalog = null) {
+export async function localPackHash(packId, store, catalog = null, { verifyBytes = false } = {}) {
   const pack = (Array.isArray(catalog?.packs) ? catalog.packs : []).find((p) => p && p.id === packId);
   if (!pack) return null;
   /** @type {Array<{ path: string, hash: string }>} */
@@ -266,6 +270,7 @@ export async function localPackHash(packId, store, catalog = null) {
     if (typeof file.canonical !== 'string') return null; // cannot rebuild the pack hash without the contribution
     const stored = await store.read(modKey(packId, file.path));
     if (stored == null) return null; // a missing file means an incomplete pack, not a different one
+    if (verifyBytes && (typeof file.sha256 !== 'string' || await hashBytes(stored) !== file.sha256)) return null;
     pairs.push({ path: file.path, hash: file.canonical });
   }
   return modManifestDigest(pairs);

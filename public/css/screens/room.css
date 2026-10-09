@@ -313,3 +313,16 @@
 .ready-count__icons .icon.is-on { color: var(--mint-400); filter: drop-shadow(0 0 4px var(--mint-glow)); }
 
 .room-bar .btn--xl { min-width: 3.2rem; letter-spacing: .2em; }
+
+/* 本房间使用 mod (W-A/W-D, DESIGN §28.16): the room's declared set, plus whether THIS client holds it and a button that
+   fetches exactly those packs. One row per pack, one line of state per row; the fill line only exists while something
+   is missing. */
+.room-mods { display: flex; flex-wrap: wrap; align-items: center; gap: .1rem .18rem; }
+.room-mods__title { font-size: .18rem; letter-spacing: .04em; }
+.room-mods__digest { font-size: .14rem; color: var(--text-lo); }
+.room-mods__state { font-size: .14rem; letter-spacing: .04em; }
+.room-mods__list { display: flex; flex-wrap: wrap; gap: .06rem .22rem; margin: 0; padding: 0; list-style: none; }
+.room-mods__list li { display: flex; align-items: baseline; gap: .08rem; font-size: .15rem; }
+.room-mods__id { font-family: var(--font-num); letter-spacing: .02em; }
+.room-mods__meta { font-size: .13rem; color: var(--text-lo); }
+.room-mods__fill { display: flex; align-items: center; gap: .12rem; width: 100%; font-size: .14rem; }

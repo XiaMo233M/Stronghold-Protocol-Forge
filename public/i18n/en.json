@@ -1240,5 +1240,14 @@
   "游戏更新": "Game updates",
   "来自 {pack}": "From {pack}",
   "鸣谢": "Credits",
-  "这一版没有要展示的公告。": "There is nothing to announce in this build."
+  "这一版没有要展示的公告。": "There is nothing to announce in this build.",
+  "本机已就绪": "Ready on this device",
+  "本机缺件": "Missing locally",
+  "本服务器没有这个包": "Not on this server",
+  "房间点名了本服务器没有的模组：{ids}": "The room names mods this server does not carry: {ids}",
+  "本机还缺 {n} 个模组文件": "This device is missing {n} mod file(s)",
+  "正在补齐 {done}/{total}": "Downloading {done}/{total}",
+  "补齐模组": "Download mods",
+  "模组仍未就绪：{ids}": "Mods still not ready: {ids}",
+  "模组未就绪：先补齐本房间的模组文件": "Mods not ready: download this room's mod files first"
 }

@@ -73,6 +73,8 @@ import { store as appStore } from '../store.js';
 import { unitStatsEntry, fxForm } from '../../../shared/protocol.js';
 import { spectateEffects } from './observe.js';
 import { recordError, setBattleSource } from '../diag.js';
+import { roomDataBase } from '../mods/align.js';
+import { currentModSet } from '../roomMods.js';
 
 const TICK = 1 / 30;
 /** Fast-forward budget per frame (ticks) when far behind. */
@@ -208,9 +210,13 @@ const SIM_LOGGER = Object.freeze({
 });
 
 /**
- * @param {{ net: any, store: any, loadSim?: () => Promise<{ spec: any, ds: any }>, now?: () => number,
+ * @param {{ net: any, store: any, loadSim?: (dataBase: string) => Promise<{ spec: any, ds: any }>,
+ *   dataBaseFor?: (spec: any) => string, now?: () => number,
  *   raf?: (fn: (t: number) => void) => any, caf?: (h: any) => void, setInterval?: Function, clearInterval?: Function,
  *   doc?: { hidden?: boolean, addEventListener?: Function } | null, logger?: object }} deps
+ *   `dataBaseFor`（W-D, DESIGN §28.16）: which data face a spec must be simulated on — `/data/` unless the room that
+ *   started this battle declared its own set (`public/js/mods/align.js roomDataBase`). The sim is loaded and cached PER
+ *   face, so a page that plays in a subset room and later in a plain one never mixes the two.
  */
 export function createBattleRunner(deps) {
   const net = deps.net;
@@ -221,7 +227,8 @@ export function createBattleRunner(deps) {
   const setIv = deps.setInterval || ((fn, ms) => globalThis.setInterval(fn, ms));
   const clearIv = deps.clearInterval || ((h) => globalThis.clearInterval(h));
   const doc = deps.doc !== undefined ? deps.doc : (typeof document !== 'undefined' ? document : null);
-  const loadSim = deps.loadSim || (() => loadBrowserSim());
+  const loadSim = deps.loadSim || ((dataBase) => loadBrowserSim({ dataBase }));
+  const dataBaseFor = deps.dataBaseFor || (() => '/data/');
   const logger = deps.logger || SIM_LOGGER;
 
   const listeners = new Map();
@@ -238,7 +245,8 @@ export function createBattleRunner(deps) {
   /** @type {Map<string, any>} battleId → entry of a b.start still being prepared (prepare(); `battle` null until built) */
   const pending = new Map();
   let cur = null;              // entry on screen
-  let simP = null;
+  /** data face → the sim loaded for it (W-D: a room's own face, or `/data/`; a page may meet both) */
+  const sims = new Map();
   let startSeq = 0;            // counts the b.starts: the latest one is the view asked for
   let loading = null;          // the pending entry of the latest b.start (shown when prepared)
   let rafH = null;
@@ -257,11 +265,14 @@ export function createBattleRunner(deps) {
   const clock = () => (pausedAt != null ? pausedAt : now());
   const bossLike = (e) => e.kind === 'boss' || e.kind === 'hidden';
 
-  function ensureSim() {
-    if (!simP) {
-      simP = loadSim().catch((err) => { simP = null; throw err; });
+  function ensureSim(spec = null) {
+    const base = dataBaseFor(spec);
+    let p = sims.get(base);
+    if (!p) {
+      p = loadSim(base).catch((err) => { sims.delete(base); throw err; });
+      sims.set(base, p);
     }
-    return simP;
+    return p;
   }
 
   /** Counted leaks so far of every normal field simulated here: { [fieldId]: n } (user playtest #3 item 2). */
@@ -720,7 +731,7 @@ export function createBattleRunner(deps) {
     const wanted = () => pending.get(e.battleId) === e && (e.seq === startSeq || e.authoritative || !!e.endReason);
     try {
       let sim;
-      try { sim = await ensureSim(); } catch (err) {
+      try { sim = await ensureSim(e.spec); } catch (err) {
         console.warn('[runner] simulation unavailable', err);
         recordError('runner', err, 'simulation unavailable');
         return;
@@ -847,7 +858,7 @@ export function createBattleRunner(deps) {
         if (entries.size || pending.size) clear();
       }
       // warm the simulation up as soon as a match runs (the first b.start then starts at once)
-      if (phase && phase !== 'LOBBY' && !simP) ensureSim().catch(() => {});
+      if (phase && phase !== 'LOBBY' && sims.size === 0) ensureSim().catch(() => {});
     }));
   }
   if (doc && typeof doc.addEventListener === 'function') {
@@ -873,7 +884,7 @@ export function createBattleRunner(deps) {
       return { battleId: e.battleId, fieldId: e.fieldId, kind: e.kind, spec: e.spec, time };
     },
     stats() {
-      return { ...stats, avgTickMs: stats.ticks ? stats.stepMs / stats.ticks : 0, entries: entries.size, loadingSim: !!simP };
+      return { ...stats, avgTickMs: stats.ticks ? stats.stepMs / stats.ticks : 0, entries: entries.size, loadingSim: sims.size > 0 };
     },
     /**
      * Live stats of unit `unitId` of the battle on screen (null: no such battle / unit, or `fieldId` names another
@@ -930,9 +941,20 @@ export function createBattleRunner(deps) {
   };
 }
 
+/**
+ * W-D 的那个判据（DESIGN §28.16）：这一局要在哪个数据面上模拟 —— 房间声明了自己的集合就跑它自己那一份
+ * （`/room-data/<摘要>/`），否则是进程那一份（`/data/`）。`currentModSet()` 是 `welcome` 给的进程集合，
+ * 所以没声明集合的房间与干净安装都落在 `/data/`：加载器与从前逐字节相同。
+ * @param {any} spec the BattleSpec of the b.start
+ * @returns {string}
+ */
+function dataBaseForBattle(spec) {
+  return roomDataBase(spec && spec.mods, currentModSet());
+}
+
 /** The browser runner, wired to the app's socket and store (null outside a browser). */
 export const battleRunner = typeof window !== 'undefined' && typeof document !== 'undefined'
-  ? createBattleRunner({ net: appNet, store: appStore })
+  ? createBattleRunner({ net: appNet, store: appStore, dataBaseFor: dataBaseForBattle })
   : null;
 if (battleRunner) globalThis.__SP_RUNNER__ = battleRunner; // dev / E2E introspection
 if (battleRunner) setBattleSource(() => battleRunner.currentBattle());

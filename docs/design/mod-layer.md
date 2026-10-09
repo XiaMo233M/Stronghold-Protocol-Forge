@@ -1288,6 +1288,15 @@ makes the declaration true. `server/roomAssets.js` is the whole mechanism:
   the room, so `room.join` proves "same catalogue, same pack bytes", `room.state.mods` tells members and spectators what
   the room runs, and aligning to that set is the client's job before it readies up (W-D): the room cannot start with an
   unready member, and a spectator is never asked to ready.
+- **W-D, the client's half** (`public/js/mods/align.js`): `planAlignment` answers 「do the bytes on THIS client rebuild
+  every pack the room declared」 by re-hashing the stored files against the catalogue (`localPackHash(...,
+  { verifyBytes: true })` — a corrupted cache entry is not "I have this pack"), `alignRoom` downloads exactly the room's
+  packs (never the others the server carries) and re-asks, and `roomDataBase` is the one rule for which face a battle
+  simulates on: `/room-data/<digest>/` when the spec carries a room set that is not the process set, `/data/` otherwise.
+  `public/js/battle/runner.js` passes its data face through `dataBaseFor(spec)` and caches the sim **per face**, so a
+  page that plays in a subset room and later in a plain one never mixes the two. The room screen shows the set, the
+  per-pack state, a 「补齐模组」 button driven by `sync`'s progress events, and **withholds the Ready button** while the
+  client is not aligned — the server's own rule stays what it was (a room starts only when every human is ready).
 - Asymmetries kept on purpose: `server.modules` stays process-wide (§28.14) and a `matchClass` wrapper still wraps every
   match the process builds. A room's set decides what a **match** runs, not what the **process** boots.
 
