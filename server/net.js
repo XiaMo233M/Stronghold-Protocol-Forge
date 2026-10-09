@@ -5,7 +5,9 @@
 //     SessionRegistry that resolves reconnect tokens and expires sessions after the reconnect window (10 min; the
 //     lobby may extend it per session via `session.resumeWindowMs` — a solo run: 24 h, see server/lobby.js).
 //   * Per-connection pipeline: token-bucket rate limit (40 msg/s) → JSON decode → schema validation
-//     (shared/protocol.js) → `hello`/`ping` handling → dispatch to the lobby handler → `ok`/`error`
+//     (shared/protocol.js) → **the pack's `server.preDispatch` hook, when one is installed** (DESIGN §28.13:
+//     `opts.preDispatch` / `opts.onConnection`, assembled by server/modDispatch.js; with no such pack both are
+//     absent and this stage does not exist) → `hello`/`ping` handling → dispatch to the lobby handler → `ok`/`error`
 //     reply echoing the request id (`rid`). Intents whose answer is a large state resend (`g.watch` →
 //     m.field) also draw from a second, much smaller bucket (2/s, burst 6), so one socket cannot turn
 //     40 tiny requests per second into hundreds of KB/s of downstream traffic.
@@ -566,6 +568,13 @@ export class Network {
     ws.on('pong', () => { conn.alive = true; if (conn.session && conn.session.ws === ws) conn.session.lastSeen = this.now(); });
     ws.on('error', (e) => { this.log.debug?.('[net] socket error', e?.code || e?.message); });
     ws.on('close', () => { try { this.onClose(conn); } catch (e) { this.log.error('[net] close handler crashed', e); } });
+    // 连接建立钩子（同一份 `server.preDispatch` 声明的另一半，DESIGN §28.13）：资源挑战必须在**连接建立时**就发出去
+    // （`_up/mod4-pack/integration/server/resourceAdmission.mjs` 的 onConnect），而不是等客户端 `hello` —— 那一刻
+    // 客户端的 `send()` 还在排队，而这正是 `resource.*` 类型必须在 ping/hello 之前被处理的原因。没有钩子时是 no-op；
+    // 钩子内部的异常由 server/modDispatch.js 兜住，这里再兜一层是因为 handleConnection 跑在 wss 的 connection 事件里。
+    if (typeof this.opts.onConnection === 'function') {
+      try { this.opts.onConnection(conn); } catch (e) { this.log.error('[net] onConnection hook crashed', e); }
+    }
   }
 
   /** @param {Connection} conn @param {object} msg */
@@ -603,6 +612,21 @@ export class Network {
     }
     const reason = validateC2S(msg);
     if (reason) { this.reply(conn, errorMsg(ERR.BAD_MSG, rid, reason)); return; }
+
+    // 包声明的**分发前钩子**（DESIGN §28.13，docs/WORKSHOP.md §1.9；装配在 server/modDispatch.js）。落点是三条约束
+    // 的交点，缺一条就会静默失效：
+    //   * 在 :599 的 `Object.hasOwn(C2S, msg.t)` 与上面这行 `validateC2S` **之后** —— 钩子可以直接信任字段形状，
+    //     而 `resource.*` 这三个类型必须先存在于 shared/protocol.js 的 C2S，否则消息在到达钩子之前就被当非法类型拒了；
+    //   * 在下面的 `ping` / `hello` 分支**之前** —— `resource.*` 不是 `hello`，而服务端的挑战是连接建立时就发出去的，
+    //     客户端的证明因此往往在 `hello` 之前到达；
+    //   * 在 `if (!conn.session)`（下面那行 `hello required`）**之前** —— 放到它后面，hello 之前的证明会被回
+    //     `hello required`，闸门永远关不上。
+    // 返回 true = 这条消息已被钩子消费（钩子自己负责回执，回执必须带上它收到的 `rid`），不再交给大厅。
+    //
+    // 没有包声明 `server.preDispatch` 时 `this.opts.preDispatch` 是 undefined：这个 typeof 判断不进、没有任何对象
+    // 被创建、没有一行日志、也没有第二个 `socket.on('message')`（那是双重分发），onFrame 的行为与没有这段代码时
+    // 逐字节相同。
+    if (typeof this.opts.preDispatch === 'function' && this.opts.preDispatch(conn, msg)) return;
 
     if (msg.t === 'ping') {
       const pong = { t: 'pong', c: msg.c, s: now };

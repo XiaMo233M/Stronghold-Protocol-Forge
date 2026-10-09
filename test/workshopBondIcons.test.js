@@ -18,7 +18,7 @@ import { loadData } from '../server/data.js';
 import { buildWorkshopDataFiles, startServer } from '../server/index.js';
 
 const norm = (extra = {}, opts = { hasAssets: true }) => normalizePackManifest(
-  { id: 'my-pack', content: ['bonds'], hasAssets: true, license: 'CC0-1.0', ...extra }, 'my-pack', opts);
+  { id: 'my-pack', content: ['bonds'], license: 'CC0-1.0', ...extra }, 'my-pack', opts);
 const refused = (extra, opts, error) => {
   const r = norm(extra, opts);
   assert.equal(r.ok, false, `${error}: expected a refusal`);

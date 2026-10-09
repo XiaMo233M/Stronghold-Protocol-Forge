@@ -126,7 +126,39 @@ function ownTokenIds(pack) {
   return out;
 }
 
-/** Cross-record checks the per-record validator cannot see (the base/elite pair). */
+/**
+ * 一条记录该按**哪一份**判。
+ *
+ * 包自己的记录就是它本身。**声明过覆盖的官方 id 不是**：覆盖模式写的是一份**差量补丁**（DESIGN §28.3「逐字段
+ * 补丁」——记录里只写要改的字段，其余字段仍是官方的），拿补丁当一条完整记录喂逐记录校验器，会得到几十条
+ * `MISSING` / `BAD_*` 与 `OFFICIAL_ID_COLLISION`，而引擎实际看到的那一条是完全正常的。判错方向的代价是双向的：
+ * 一份合法的覆盖包被 184 个 error 淹没（作者只能去猜哪些是真的），而真正的 `params` 过期（下面 items 层的那类）
+ * 就混在这片噪声里没人看得见。
+ *
+ * 判据不是偏好，是仓库自己写下的契约 —— `docs/EDITOR.md`：「编辑器里能保存的内容，`tools/workshop-validate.mjs`
+ * 一定也接受，反之亦然」。编辑器正是按**合并后**的记录判的（`editor/server.mjs` 的 `overrideBlockers()` 把已声明的
+ * 覆盖从 officialIds 里去掉，再用 `loadData` 出来的那一份校验），所以这里照同一份判。
+ *
+ * @param {string} file 内容文件名（`chess` / `items` / `stages` / `enemies` / `waves`）
+ * @param {string} id 记录 id
+ * @param {object} rec 包里的那一条（覆盖模式下是差量补丁）
+ * @param {{ declared: Set<string>, merged: Record<string, any>|null, officialIds: Set<string> }} ctx
+ *   `declared` = 本包 `pack.json.overrides`；`merged` = `loadData(DATA_DIR, { workshopDir: root })`；`officialIds` =
+ *   这一张表在官方数据里的 id 集合
+ * @returns {{ rec: object, officialIds: Set<string> }} `officialIds` 已去掉「本包声明要覆盖」的那一条
+ */
+function judgeRecord(file, id, rec, { declared, merged, officialIds }) {
+  if (!declared.has(`${file}:${id}`)) return { rec, officialIds };
+  const table = merged && merged[file] ? merged[file] : null;
+  const ids = new Set(officialIds);
+  ids.delete(id);
+  return { rec: table && table[id] ? table[id] : rec, officialIds: ids };
+}
+
+/**
+ * Cross-record checks the per-record validator cannot see (the base/elite pair). Runs on the **judged** records (see
+ * `judgeRecord`), so an override pair is judged as the merged pair the engine sees.
+ */
 function pairIssues(records, file) {
   const out = [];
   if (file !== 'chess') return out;
@@ -162,13 +194,24 @@ async function main() {
   const packs = only ? loaded.packs.filter((p) => p.id === only) : loaded.packs;
   if (only && packs.length === 0) throw new Error(`no loadable pack named "${only}" under ${root}`);
 
+  // 合并后的数据（引擎看到的那一份）只在真的需要时读一次：覆盖官方记录时逐记录校验必须判这一份，
+  // 「谁读谁不读」见 judgeRecord 的注释（docs/EDITOR.md 的那条契约）。
+  let mergedTables = null;
+  const mergedData = () => (mergedTables ??= loadData(DATA_DIR, { log: quiet, workshopDir: root }));
+
   for (const pack of packs) {
+    const declared = new Set(Array.isArray(pack.overrides) ? pack.overrides : []);
+    const merged = declared.size ? mergedData() : null;
     const issues = [];
     for (const [file, records] of Object.entries(pack.files)) {
+      /** @type {Record<string, object>} 判过之后的那一批：覆盖过的 id 是合并体，其余是包自己的记录。 */
+      const judged = {};
       for (const [id, rec] of Object.entries(records)) {
-        if (file === 'chess') issues.push(...validateChessRecord(rec, { id, officialIds: OFFICIAL_IDS }));
+        const j = judgeRecord(file, id, rec, { declared, merged, officialIds: OFFICIAL_IDS });
+        judged[id] = j.rec;
+        if (file === 'chess') issues.push(...validateChessRecord(j.rec, { id, officialIds: j.officialIds }));
       }
-      issues.push(...pairIssues(records, file));
+      issues.push(...pairIssues(judged, file));
     }
     report.packs.push({ pack: pack.id, name: pack.name, files: Object.keys(pack.files), issues });
   }
@@ -560,8 +603,11 @@ async function main() {
     }
     const stageIssues = [];
     for (const pack of packs) {
+      const declared = new Set(Array.isArray(pack.overrides) ? pack.overrides : []);
+      const merged = declared.size ? mergedData() : null;
       for (const [id, rec] of Object.entries(pack.files.stages || {})) {
-        stageIssues.push(...validateStageRecord(rec, { id, officialIds: officialStages }));
+        const j = judgeRecord('stages', id, rec, { declared, merged, officialIds: officialStages });
+        stageIssues.push(...validateStageRecord(j.rec, { id, officialIds: j.officialIds }));
         if (!listedIn.has(id)) {
           stageIssues.push({
             field: id, code: 'NOT_SELECTABLE', severity: 'warning',
@@ -581,8 +627,11 @@ async function main() {
     const officialEnemies = new Set(Object.keys(JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'enemies.json'), 'utf8'))));
     const enemyIssues = [];
     for (const pack of packs) {
+      const declared = new Set(Array.isArray(pack.overrides) ? pack.overrides : []);
+      const merged = declared.size ? mergedData() : null;
       for (const [key, rec] of Object.entries(pack.files.enemies || {})) {
-        enemyIssues.push(...validateEnemy(rec, { key, officialIds: officialEnemies }));
+        const j = judgeRecord('enemies', key, rec, { declared, merged, officialIds: officialEnemies });
+        enemyIssues.push(...validateEnemy(j.rec, { key, officialIds: j.officialIds }));
       }
     }
     report.enemies = enemyIssues;
@@ -598,8 +647,11 @@ async function main() {
     const knownEnemyKeys = new Set(Object.keys(loadData(DATA_DIR, { log: quiet, workshopDir: root }).enemies || {}));
     const waveIssues = [];
     for (const pack of packs) {
+      const declared = new Set(Array.isArray(pack.overrides) ? pack.overrides : []);
+      const merged = declared.size ? mergedData() : null;
       for (const [id, rec] of Object.entries(pack.files.waves || {})) {
-        waveIssues.push(...validateWave(rec, { id, officialIds: officialWaves, knownEnemyKeys }));
+        const j = judgeRecord('waves', id, rec, { declared, merged, officialIds: officialWaves });
+        waveIssues.push(...validateWave(j.rec, { id, officialIds: j.officialIds, knownEnemyKeys }));
       }
     }
     report.waves = waveIssues;
@@ -613,11 +665,13 @@ async function main() {
   // can ever offer.
   if (loaded.packs.length && packs.some((p) => Object.keys(p.files.items || {}).length)) {
     const officialItems = new Set(Object.keys(JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'items.json'), 'utf8'))));
-    const merged = loadData(DATA_DIR, { log: quiet, workshopDir: root });
+    const merged = mergedData();
     const itemIssues = [];
     for (const pack of packs) {
+      const declared = new Set(Array.isArray(pack.overrides) ? pack.overrides : []);
       for (const [id, rec] of Object.entries(pack.files.items || {})) {
-        itemIssues.push(...validateItem(rec, { id, officialIds: officialItems }));
+        const j = judgeRecord('items', id, rec, { declared, merged, officialIds: officialItems });
+        itemIssues.push(...validateItem(j.rec, { id, officialIds: j.officialIds }));
         const m = (merged.items || {})[id];
         if (!m) {
           itemIssues.push({ field: id, code: 'NOT_MERGED', severity: 'error', message: 'the record did not reach the merged data' });

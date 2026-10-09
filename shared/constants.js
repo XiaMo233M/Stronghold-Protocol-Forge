@@ -3,10 +3,24 @@
 import { N_ } from './i18n.js';
 
 export const PROTOCOL_VERSION = 1;
+/**
+ * The **mod-layer API** version (DESIGN §28.5, §28.13): the version of the hook bus and the kit contract a workshop pack
+ * may write against. A pack declares `pack.json.api` as a RANGE and this number is what that range is compared against
+ * (`shared/workshop.js normalizePackManifest`), so a pack written for a different bus is refused instead of being run
+ * unverified. It is a whole number, like `PROTOCOL_VERSION`: the bus changes shape, it does not drift by patch.
+ * Bumping it is an owner decision — it stops every pack whose range excludes the new number from loading.
+ *
+ * NOT `APP_VERSION` (which is `'0.11.0'`): the release number moves for reasons a pack's compat does not care about,
+ * and `docs/design/mod-layer.md` §28.5 spells out the two ranges separately. The comparison needs a three-part version
+ * (`shared/packs.js appVersionMatches` reads `v<major>.<minor>.<patch>` and **treats an unparsable one as a match** —
+ * a fallback that would silently accept every pack), so `shared/workshop.js` builds the string from this number rather
+ * than duplicating it here.
+ */
+export const MOD_API_VERSION = 1;
 /** Release version shown to players (title screen, server banner, /healthz). Kept equal to package.json "version"
  * (test/version.test.js); PROTOCOL_VERSION above is the separate wire-format number. The release TAG spells both halves
  * out — `v<this>-<upstream>` (README 「版本号」) — because this one has to stay a plain three-part semver. */
-export const APP_VERSION = '0.10.0';
+export const APP_VERSION = '0.11.0';
 /** A development build (the public `dev` branch): the title screen, the boot banner and the README say so, and
  * tools/package.mjs refuses to build a release zip from it without --allow-dev. */
 export const DEV_BUILD = /-dev$/.test(APP_VERSION);
@@ -52,6 +66,12 @@ export const MAX_SEATS = 4;
 export const MAX_SPECTATORS = 2;
 export const ROOM_CODE_LEN = 4;
 export const NAME_MAX_LEN = 12;
+/**
+ * How many workshop packs one room may declare (DESIGN §28.9, W-A). A room picks a SUBSET of the packs the server
+ * already loaded, so the ceiling is the catalogue's own (`shared/modIdentity.js MOD_LIMITS.packs` = 64); a room that
+ * declares more than this is refused as a malformed message rather than silently truncated.
+ */
+export const MAX_ROOM_MODS = 64;
 
 export const DIFFICULTIES = ['FUNNY', 'NORMAL', 'HARD', 'ABYSS'];
 export const DIFFICULTY_NAMES = { FUNNY: N_('标准模拟'), NORMAL: N_('险境模拟'), HARD: N_('绝境模拟'), ABYSS: N_('终极模拟') };
@@ -186,6 +206,7 @@ export const ERR = Object.freeze({
   TEMP_NOT_EMPTY: 'TEMP_NOT_EMPTY',
   ELIMINATED: 'ELIMINATED',
   SPECTATOR: 'SPECTATOR',         // a spectator seat only watches (MAX_SPECTATORS)
+  MOD_UNKNOWN: 'MOD_UNKNOWN',     // room.create named a pack id this server does not have loaded (DESIGN §28.9, W-A)
   INTERNAL: 'INTERNAL',
 });
 
@@ -195,7 +216,7 @@ export const ERR_TEXT = {
   WRONG_PHASE: N_('当前阶段无法进行该操作'), NO_FUNDS: N_('资金不足'), HAND_FULL: N_('整备区已满'), BOARD_FULL: N_('已达到部署上限'),
   BAD_TILE: N_('无法部署在该位置'), BAD_TARGET: N_('无效的目标'), SOLD_OUT: N_('已售出'), MAX_LEVEL: N_('调度中心已达最高等级'),
   NOT_YOUR_TURN: N_('尚未轮到你'), ALREADY: N_('已完成该操作'), TEMP_NOT_EMPTY: N_('临时整备区不为空'), ELIMINATED: N_('你已被淘汰'),
-  SPECTATOR: N_('观战中无法进行该操作'), INTERNAL: N_('服务器内部错误'),
+  SPECTATOR: N_('观战中无法进行该操作'), MOD_UNKNOWN: N_('房间指定了本服务器没有的模组包'), INTERNAL: N_('服务器内部错误'),
 };
 
 // ---- Emotes (交流, research 09 §4) -----------------------------------------------------------------------------

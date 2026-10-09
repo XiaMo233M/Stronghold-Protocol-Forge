@@ -89,6 +89,44 @@ export const UNIT_REQUIRED_FIELDS = Object.freeze([
 export const PACK_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
 
 /**
+ * `pack.json` 的**顶层键闭集** —— 这份格式认识的每一个字段，一个不多一个不少。
+ *
+ * 为什么需要它（本刀最重要的那条纪律）：一个**声明了、而我们不认识的键**如果只是被读过去，作者看到的是
+ * 「pack.json 合法、包加载了、可我写的那件事没发生」。这正是三个社区 mod 反复撞上的那面墙：
+ *   * `variants`（fanpack G-01，口径/变体）—— `normalizePackManifest` 从没读过它，`{content:["chess","variants"]}`
+ *     归一化之后只剩 `["chess"]`，作者以为写了；
+ *   * `skins`（fanpack G-05）—— 与 `variants` 同一个形状：静默丢；
+ *   * `i18n`（fanpack G-04）—— 归一化结果里根本没有这个键。
+ * 三者都是「写了等于没写」，而且失败的方向是**静默**。所以这一层的判据是：任何一个不在下面这张表里的顶层键，
+ * **点名整包拒绝**（`PACK_UNKNOWN_FIELD`），理由里列出这份格式认识的字段 —— 作者一眼能看到自己该写哪个。
+ *
+ * 这不是「不支持新特性」的门：一个我们**故意**不支持的键（`config`，见 `WORKSHOP_CONTENT_FILES` 的注释）与一个
+ * 拼错的键在作者眼里是同一件事（都是「没用」），而拒绝的错误文案会把两种情况都解释清楚（"config" is not a
+ * field of this pack format）。方向也一致：宁可当场说「这张表没有通道」，也不要收下一份没人读的声明。
+ *
+ * 加字段的规矩：新字段进这张表的那一刀，必须同时（a）在 `normalizePackManifest` 里给它一个解析分支、
+ * （b）决定它算不算贡献项、（c）把它的文件并进 `identifyPack` 的哈希清单（能改变一端行为的声明不进哈希，
+ * 同一个摘要下就有两种行为，DESIGN §28.2）。
+ */
+export const PACK_FIELDS = Object.freeze([
+  // 身份与元信息
+  'id', 'name', 'version', 'author', 'license', 'description', 'gameVersion', 'game', 'api', 'layer', 'combat',
+  // 内容与覆盖
+  'content', 'overrides',
+  // 素材与声明（贡献项，见 EMPTY_PACK 那一处）
+  'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'support', 'operators', 'i18n',
+  // 行为开关（**不是**贡献项）
+  'playtest',
+  // 中间层四组能力声明（DESIGN §28.13）
+  'assets', 'client', 'server', 'routes',
+]);
+
+/** 未知顶层键的拒绝码（见 `PACK_FIELDS`）。 */
+export const PACK_UNKNOWN_FIELD_CODE = 'PACK_UNKNOWN_FIELD';
+/** 一个顶层键在错误文案里最多显示多少个字符（一个手写坏掉的 pack.json 可以有几千字符的键）。 */
+const MAX_KEY_SHOWN = 60;
+
+/**
  * 一条 `pack.json.overrides` 声明的形状：`"<文件>:<id>"`（例 `chess:chess_char_1_01_a`）。**只此一份**：
  * `normalizePackManifest` 下面用它过滤，编辑器的写入端与校验器用它拒绝（两处正则不一致的话，界面会写出一个
  * 加载器悄悄丢掉的声明 —— 那正是「写了等于没写」这一类静默失败）。
@@ -101,14 +139,39 @@ export const OVERRIDE_ENTRY_RE = /^([a-z]+):([A-Za-z0-9_\-.:]{1,64})$/;
  * writes into the data must be exactly the ones that route answers.
  */
 export const WORKSHOP_MEDIA_PREFIX = '/workshop-assets/';
+
+/**
+ * The URL prefix a pack's **C-layer panel module** is served under: `<prefix><packId>/<module path inside the pack>`
+ * (DESIGN §28.8, docs/WORKSHOP.md §1.9.3). The twin of `WORKSHOP_MEDIA_PREFIX` on the other side of the line
+ * `/workshop-assets` draws: that route serves a pack's MEDIA and therefore refuses `.js`; this one serves its CODE and
+ * therefore serves nothing else. One source of truth, because a URL the loader builds and a route that answers it must
+ * be the same string — and because the browser-side guard (`public/js/ui/extensions.js`) accepts exactly this prefix.
+ */
+export const WORKSHOP_PANEL_PREFIX = '/workshop-panels/';
+
+/**
+ * The URL prefix a pack's **declared resource container and manifest** are served under
+ * (`pack.json.assets`, DESIGN §28.13, docs/WORKSHOP.md §1.9.4): the twin of `WORKSHOP_PANEL_PREFIX` for the
+ * `assets` declaration, and deliberately a prefix of its own rather than a branch of `/workshop-assets` — that route
+ * serves a pack's MEDIA under an extension allowlist and knows nothing about a pack's ROOT, while this one serves two
+ * files the manifest itself names (a `.spresources` container, which no allowlist covers, and a `.json` table).
+ * Widening `/workshop-assets` would have traded one narrow rule for two looser ones; a separate prefix keeps both
+ * maps "only the URLs the loader registered", which is the discipline every pack-scoped route here follows.
+ */
+export const WORKSHOP_RESOURCE_PREFIX = '/workshop-resources/';
 /** Record ids follow the wire-id charset (shared/protocol.js isId) so an id can travel in a message. */
 const RECORD_ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
 
-import { VOICE_SLOTS, VOICE_LANGS, DEFAULT_VOICE_LANG } from './constants.js';
+import { VOICE_SLOTS, VOICE_LANGS, DEFAULT_VOICE_LANG, MOD_API_VERSION } from './constants.js';
+import { SOURCE_LANG, isLangCode } from './i18nPacks.js';
 import { isSupportTier } from './support.js';
-import { isVersionRange } from './packs.js';
+import { isVersionRange, appVersionMatches } from './packs.js';
 import { MOD_LAYERS } from './modIdentity.js';
 import { requiredUnitForms } from './diy.js';
+// `intercepts` 是「分发前的准入钩子拦哪几个消息类型」，所以它的**唯一真相**必须是 `C2S` 本身（DESIGN §28.13）：
+// 一个写在 `intercepts` 里而协议不认识的类型，只会让作者以为钩子拦住了什么。同一条依赖方向已有先例 ——
+// `shared/modIdentity.js` 的线格式就被 `shared/protocol.js` 反过来 re-export（那两个模块之间的唯一箭头）。
+import { C2S } from './protocol.js';
 
 const isPlainObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const fail = (error, detail) => ({ ok: false, error, detail });
@@ -119,6 +182,343 @@ const strField = (v, max) => (typeof v === 'string' && v.trim() ? v.trim().slice
 const isSafeAssetPath = (p) =>
   typeof p === 'string' && !!p && !p.startsWith('/') && !p.includes('\\')
   && !p.split('/').some((seg) => seg === '..' || seg === '.') && !/^[A-Za-z]:/.test(p);
+
+/** 包内**相对路径**（`assets/` 之外的那些：资源容器、清单、包内模块、策略文件）。同一条安全规则，
+ *  只是不要求它住在 `assets/` 下 —— 一条路径要么相对、要么点名拒绝，绝不静默丢掉。 */
+const isSafeRelativePath = (p, max = 200) =>
+  typeof p === 'string' && p.length > 0 && p.length <= max && isSafeAssetPath(p);
+
+/** 从 `i` 处开始的键序（`JSON.parse` 保留书写顺序），与这个文件里其它「键序是清单字节的一部分」的地方同一做法。 */
+const stableStringList = (v) => (Array.isArray(v) ? [...new Set(v.filter((x) => typeof x === 'string' && x))].sort() : []);
+
+// ---------------------------------------------------------------------------------------------------------------
+// 四组中间层能力声明（DESIGN §28.13，《扩展提案》A 段）
+//
+// 这四组字段是**纯声明**：本轮没有一条行为读它们（分发前钩子、只读路由、C 层注册点与资源容器都是 B 段）。
+// 它们存在的理由是「今天表达不了」：一个完整资源包导入/校验/准入的 mod 在我们的 A 层什么都不贡献，
+// `pack.json` 没有地方说它要什么，于是两边都判它 `EMPTY_PACK`（`_up/mod4-pack/pack/validator-verdict.json`）。
+//
+// 三条载重纪律：
+//   1. **默认缺省 = 今天逐字节不变**。归一化结果里**只在清单真的声明了这个键时**才多出这个键
+//      （`normalizePackManifest` 末尾的 `declared` 循环），否则一个没声明新字段的包的归一化清单与内容哈希
+//      都会变 —— 那会让所有已存在的包摘要改变、房间的摘要闸门误判（DESIGN §28.2）。
+//   2. **声明了就必须进身份哈希**：能改变一端行为的声明不在哈希里，同一个摘要下就有两种行为。这里靠上面那条
+//      实现：声明进了归一化清单，`identifyPack` 哈希的就是归一化清单（`canonicalJson(pack)`）。
+//   3. **形状不对 / 未知键 / 非法值一律点名拒绝**，不静默丢弃。未知键尤其重要：一个把 `"container"` 写成
+//      `"containers"` 的包如果只是被忽略，作者看到的是「包合法、但资源没生效」。
+// ---------------------------------------------------------------------------------------------------------------
+
+/** `assets.serverPolicy`（DESIGN §28.13）：`serve` = 素材照常由 `/workshop-assets` 送；`cache-only` =
+ *  这个包要求 `/assets` / `/fonts` 回 412，只从包自己的缓存取（B 段实现，本轮只认这个值）。 */
+export const ASSETS_SERVER_POLICIES = Object.freeze(['serve', 'cache-only']);
+/** `assets.verify`：整包摘要的算法（旁挂 `<container>.sha256`）。今天只有 sha256 一种，枚举写出来是为了让
+ *  第二个算法出现时**必须**改这里，而不是让校验器悄悄按 sha256 比对一份 md5。 */
+export const ASSETS_VERIFY_ALGORITHMS = Object.freeze(['sha256']);
+/** `assets` 的四个字段，一个不多一个不少。 */
+const ASSETS_FIELDS = Object.freeze(['container', 'manifest', 'serverPolicy', 'verify']);
+/** 资源容器的扩展名：它是 `tools/make-spresources.mjs` 的产物，由格式定义（`SPRES001` 魔数 + 压紧 JSON 头）。 */
+const SPRESOURCES_EXT = '.spresources';
+
+/**
+ * `assets` 在**装载期**（文件真的在不在、摘要对不对）会用的两个拒绝码（DESIGN §28.13.3，B3a 段）。
+ *
+ * 为什么容器/清单的**文件级**失败沿用形状层的两个名字（`ASSETS_BAD_CONTAINER` / `ASSETS_BAD_MANIFEST`）而不是新造一对：
+ * 作者看到的是同一条判据的两半 ——「你声明的那个容器」不相对、不是 `.spresources`、**或者这个文件不在包里**，
+ * 三件事的修法都是「改 `assets.container` 指向一个真的在包里的 `.spresources`」。B2 段对面板模块正是这么做的
+ * （形状层与服务面同名 `CLIENT_BAD_PANEL_MODULE`，理由写在 §28.13.3），本刀照抄那条先例，理由不同不另开码。
+ * 一句话：**拒绝码点名的是「哪个字段坏了」，不是「在哪一层被发现的」。**
+ *
+ * `verify` 的两条是这一刀新增的，因为它们说的是另一件事 —— 容器在，但它的字节**不是**声明所要求的那份：
+ *   * `ASSETS_VERIFY_FAILED` —— 旁挂 `<container>.sha256` 存在且可解析，但摘要对不上（或容器读不动 / 不是文件）；
+ *   * `ASSETS_VERIFY_UNAVAILABLE` —— 声明了 `verify`，却找不到那份摘要（旁挂文件不在 / 格式不对）。
+ * 两条都是**整个包被拒**，绝不静默放行：一个「校验失败但照旧服务」的资源包，会让客户端导入一份服务端已经
+ * 知道是坏的字节，而唯一的信号是一行没人看的日志。
+ */
+export const ASSETS_FILE_CODES = Object.freeze({
+  CONTAINER: 'ASSETS_BAD_CONTAINER',
+  MANIFEST: 'ASSETS_BAD_MANIFEST',
+  VERIFY_FAILED: 'ASSETS_VERIFY_FAILED',
+  VERIFY_UNAVAILABLE: 'ASSETS_VERIFY_UNAVAILABLE',
+});
+
+/**
+ * `client.panels[*].slot`（DESIGN §28.8 列出的四个宿主 → §28.13）：**闭枚举**。写成自由字符串的话，
+ * 一个拼错的挂载点就是一个永远不出现的界面 —— 而挂载点是设计稿里已经数得清的那四个。
+ */
+export const CLIENT_PANEL_SLOTS = Object.freeze(['root.overlays', 'root.guide', 'screen.game.aside', 'screen.result.footer']);
+/** 面板的三个必填字段与两个可选字段。 */
+const CLIENT_PANEL_FIELDS = Object.freeze(['id', 'slot', 'module', 'order', 'gate']);
+/** 一个包能声明它需要哪些浏览器能力；缺一即「浏览器不支持」，不是「装了但静默不工作」（DESIGN §28.13）。 */
+export const CLIENT_REQUIRES = Object.freeze(['serviceWorker', 'cacheStorage', 'webCrypto']);
+
+/** `server.preDispatch`：包内模块、准入策略文件、以及它要拦的消息类型。三件都不能空 —— 少了 `policy`
+ *  的钩子无法判定该放谁进来，那正是「声明了却没人能执行」这一类静默失败。 */
+const PRE_DISPATCH_FIELDS = Object.freeze(['module', 'policy', 'intercepts']);
+/** 分发前钩子只能拦 `shared/protocol.js` 的 `C2S` 里真实存在的类型（DESIGN §28.13）。刻意从协议反推而不是
+ *  在这里抄一份名单：抄一份就是第二个会漂移的真相，而漂移的方向是「作者声明了一个拦不住的类型」。 */
+const PRE_DISPATCH_INTERCEPTS = Object.freeze(Object.keys(C2S).sort());
+/** 准入模块的扩展名：它是**服务端**加载的 ESM，浏览器不加载。 */
+const PRE_DISPATCH_MODULE_EXT = '.mjs';
+
+/** `routes[*].cache`：只读路由允许的三种缓存语义。 */
+export const ROUTE_CACHE_POLICIES = Object.freeze(['no-cache', 'no-store', 'public']);
+/** 只读路由的键，一个不多一个不少。 */
+const ROUTE_FIELDS = Object.freeze(['path', 'file', 'cache']);
+
+/**
+ * `pack.json.assets` —— 客户端资源容器（§28.13）。缺省 `serverPolicy: "serve"` / `verify: "sha256"`；
+ * 形状照扩展提案逐字，**只在键存在时**才写回归一化清单（见上面第 1 条纪律）。
+ * @returns {{ ok: true, decl: object } | { ok: false, error: string, detail: string }}
+ */
+function parseAssetsDecl(raw) {
+  if (!isPlainObj(raw)) {
+    return fail('ASSETS_DECL_BAD_SHAPE', 'assets must be an object: { container, manifest, serverPolicy?, verify? }');
+  }
+  for (const key of Object.keys(raw)) {
+    if (!ASSETS_FIELDS.includes(key)) {
+      return fail('ASSETS_UNKNOWN_FIELD', `assets: "${key}" is not a declared field (${ASSETS_FIELDS.join(', ')})`);
+    }
+  }
+  if (!isSafeRelativePath(raw.container)) {
+    return fail('ASSETS_BAD_CONTAINER', 'assets.container must be a relative path inside the pack (no absolute paths, no "..")');
+  }
+  if (!raw.container.endsWith(SPRESOURCES_EXT) || raw.container.length <= SPRESOURCES_EXT.length) {
+    return fail('ASSETS_BAD_CONTAINER', `assets.container must name a "${SPRESOURCES_EXT}" file (e.g. "packs/resources-0.1.0${SPRESOURCES_EXT}")`);
+  }
+  if (!isSafeRelativePath(raw.manifest)) {
+    return fail('ASSETS_BAD_MANIFEST', 'assets.manifest must be a relative path inside the pack (no absolute paths, no "..")');
+  }
+  if (!raw.manifest.endsWith('.json')) {
+    return fail('ASSETS_BAD_MANIFEST', 'assets.manifest must name a .json file — it is the flat file table the client validates');
+  }
+  const serverPolicy = raw.serverPolicy === undefined ? 'serve' : raw.serverPolicy;
+  if (!ASSETS_SERVER_POLICIES.includes(serverPolicy)) {
+    return fail('ASSETS_BAD_SERVER_POLICY', `assets.serverPolicy must be one of: ${ASSETS_SERVER_POLICIES.join(', ')}`);
+  }
+  const verify = raw.verify === undefined ? 'sha256' : raw.verify;
+  if (!ASSETS_VERIFY_ALGORITHMS.includes(verify)) {
+    return fail('ASSETS_BAD_VERIFY', `assets.verify must be one of: ${ASSETS_VERIFY_ALGORITHMS.join(', ')}`);
+  }
+  return { ok: true, decl: { container: raw.container, manifest: raw.manifest, serverPolicy, verify } };
+}
+
+/** 面板模块的扩展名：这个通道送的是**代码**（浏览器 import 它），所以只有 `.js`。 */
+const CLIENT_PANEL_MODULE_EXT = '.js';
+
+/**
+ * 一个面板的 `module` 必须是**包内相对路径**、不是 URL、且是一个 `.js`：装载器要知道去哪个包的哪一层读它，
+ * 而一条 `https://…` 或 `/…` 会把「代码来自哪个包」这件事从身份里抹掉（DESIGN §28.2）；`.html` / `.json` 之类
+ * 则是这条通道**永远送不出去**的东西（服务面只送 `.js`，与 `/workshop-assets` 拒 `.js` 是同一条线的两侧）。
+ *
+ * `.js` 这一条是 B2 段补的：A 段只判了「相对、不是 URL」，而一条 `module: "x.html"` 在形状层合法、进了身份哈希，
+ * 客户端却永远拿不到它 —— 作者看到的是「包合法、面板不出现」。两次判据（形状层与服务面）现在一致。
+ * 目录段不许以 `.` 开头：与 `/workshop-assets`、核心静态挂载对点文件的处理同一条规则。
+ */
+const isSafeModulePath = (p) =>
+  isSafeRelativePath(p) && p.endsWith(CLIENT_PANEL_MODULE_EXT) && p.length > CLIENT_PANEL_MODULE_EXT.length
+  && !p.split('/').some((seg) => seg.startsWith('.'))
+  && !/^[a-z][a-z0-9+.-]*:/i.test(p);
+
+/**
+ * `pack.json.client` —— C 层注册点（§28.13）。`panels` 按 id 排序（与 `operators` 同一个理由：键序是清单字节的
+ * 一部分，不能随作者书写顺序变）；`requires` 按闭枚举的次序归一化。
+ * @returns {{ ok: true, decl: object } | { ok: false, error: string, detail: string }}
+ */
+function parseClientDecl(raw) {
+  if (!isPlainObj(raw)) {
+    return fail('CLIENT_DECL_BAD_SHAPE', 'client must be an object: { panels: [...], requires: [...] }');
+  }
+  for (const key of Object.keys(raw)) {
+    if (key !== 'panels' && key !== 'requires') {
+      return fail('CLIENT_UNKNOWN_FIELD', `client: "${key}" is not a declared field (panels, requires)`);
+    }
+  }
+  // `panels` 是 `client` 的必填字段，而且**至少要有一个面板**：一个空数组与不声明没有区别，却会让「这个包有
+  // 客户端界面」这句话变成假的；`requires` 是浏览器能力声明，今天没有「只声明能力、不带界面」这种包
+  //（`client: { requires: [...] }` 缺 `panels` 会被下面这一行拒 —— B2 段把这段注释改成与代码一致）。
+  if (!Array.isArray(raw.panels)) return fail('CLIENT_BAD_PANELS', 'client.panels must be an array of panel declarations');
+  if (!raw.panels.length) return fail('CLIENT_BAD_PANELS', 'client.panels must declare at least one panel (drop the key instead of sending [])');
+  const panels = [];
+  const seen = new Set();
+  for (const [i, panel] of raw.panels.entries()) {
+    if (!isPlainObj(panel)) return fail('CLIENT_BAD_PANEL', `client.panels[${i}] must be an object: { id, slot, module, order?, gate? }`);
+    for (const key of Object.keys(panel)) {
+      if (!CLIENT_PANEL_FIELDS.includes(key)) {
+        return fail('CLIENT_PANEL_UNKNOWN_FIELD', `client.panels[${i}]: "${key}" is not a panel field (${CLIENT_PANEL_FIELDS.join(', ')})`);
+      }
+    }
+    if (typeof panel.id !== 'string' || !RECORD_ID_RE.test(panel.id)) {
+      return fail('CLIENT_BAD_PANEL_ID', `client.panels[${i}].id: "${String(panel.id)}" is not a valid panel id`);
+    }
+    if (seen.has(panel.id)) {
+      return fail('CLIENT_PANEL_DUPLICATE_ID', `client.panels: "${panel.id}" is declared twice (one id, one panel: the second would overwrite the first)`);
+    }
+    seen.add(panel.id);
+    if (!CLIENT_PANEL_SLOTS.includes(panel.slot)) {
+      return fail('CLIENT_BAD_PANEL_SLOT', `client.panels["${panel.id}"].slot must be one of: ${CLIENT_PANEL_SLOTS.join(', ')}`);
+    }
+    if (!isSafeModulePath(panel.module)) {
+      return fail('CLIENT_BAD_PANEL_MODULE', `client.panels["${panel.id}"].module must be a relative path inside the pack (e.g. "resources/preloadModal.js")`);
+    }
+    if (panel.order !== undefined && !Number.isInteger(panel.order)) {
+      return fail('CLIENT_BAD_PANEL_ORDER', `client.panels["${panel.id}"].order must be an integer`);
+    }
+    if (panel.gate !== undefined && (typeof panel.gate !== 'string' || !panel.gate)) {
+      return fail('CLIENT_BAD_PANEL_GATE', `client.panels["${panel.id}"].gate must be a non-empty string (e.g. "session.preloadRequired")`);
+    }
+    /** @type {Record<string, unknown>} */
+    const clean = { id: panel.id, slot: panel.slot, module: panel.module };
+    if (panel.order !== undefined) clean.order = panel.order;
+    if (panel.gate !== undefined) clean.gate = panel.gate;
+    panels.push(clean);
+  }
+  const rawRequires = raw.requires === undefined ? [] : raw.requires;
+  if (!Array.isArray(rawRequires)) {
+    return fail('CLIENT_BAD_REQUIRES', `client.requires must be an array (one of: ${CLIENT_REQUIRES.join(', ')})`);
+  }
+  const requires = stableStringList(rawRequires);
+  for (const r of requires) {
+    if (!CLIENT_REQUIRES.includes(r)) {
+      return fail('CLIENT_UNKNOWN_REQUIRE', `client.requires: "${r}" is not a capability this layer knows (one of: ${CLIENT_REQUIRES.join(', ')})`);
+    }
+  }
+  panels.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  // requires 按闭枚举次序，不按作者书写顺序：同一个包两处写法不同的清单必须是同一份字节（DESIGN §28.2）
+  return { ok: true, decl: { panels, requires: CLIENT_REQUIRES.filter((c) => requires.includes(c)) } };
+}
+
+/**
+ * `pack.json.server` —— 消息分发前的准入钩子（§28.13）。本轮**只认形状**：没有钩子被安装、没有模块被加载
+ * （B 段）。三条硬约束里有两条是形状层就能拦住的：`intercepts` 必须是真实存在的 `C2S` 类型，且 `module`
+ * 必须是包内相对路径（一个绝对路径会让「这个钩子来自哪个包」从身份里消失）。
+ * @returns {{ ok: true, decl: object } | { ok: false, error: string, detail: string }}
+ */
+function parseServerDecl(raw) {
+  if (!isPlainObj(raw)) {
+    return fail('SERVER_DECL_BAD_SHAPE', 'server must be an object: { preDispatch: { module, policy, intercepts } }');
+  }
+  for (const key of Object.keys(raw)) {
+    if (key !== 'preDispatch') {
+      return fail('SERVER_UNKNOWN_FIELD', `server: "${key}" is not a declared field (preDispatch)`);
+    }
+  }
+  const pre = raw.preDispatch;
+  if (!isPlainObj(pre)) {
+    return fail('PREDISPATCH_BAD_SHAPE', 'server.preDispatch must be an object: { module, policy, intercepts }');
+  }
+  for (const key of Object.keys(pre)) {
+    if (!PRE_DISPATCH_FIELDS.includes(key)) {
+      return fail('PREDISPATCH_UNKNOWN_FIELD', `server.preDispatch: "${key}" is not a declared field (${PRE_DISPATCH_FIELDS.join(', ')})`);
+    }
+  }
+  for (const key of ['module', 'policy']) {
+    if (!isSafeRelativePath(pre[key])) {
+      return fail('PREDISPATCH_BAD_PATH', `server.preDispatch.${key} must be a relative path inside the pack (no absolute paths, no "..")`);
+    }
+  }
+  if (!pre.module.endsWith(PRE_DISPATCH_MODULE_EXT)) {
+    return fail('PREDISPATCH_BAD_MODULE', `server.preDispatch.module must be a "${PRE_DISPATCH_MODULE_EXT}" module — the server loads it, the browser does not`);
+  }
+  if (!pre.policy.endsWith('.json')) {
+    return fail('PREDISPATCH_BAD_POLICY', 'server.preDispatch.policy must name a .json policy file (the list of files a client must prove it holds)');
+  }
+  if (!Array.isArray(pre.intercepts) || !pre.intercepts.length) {
+    return fail('PREDISPATCH_BAD_INTERCEPTS', 'server.preDispatch.intercepts must be a non-empty array of C2S message types (a hook that intercepts nothing gates nothing)');
+  }
+  for (const t of pre.intercepts) {
+    if (typeof t !== 'string' || !PRE_DISPATCH_INTERCEPTS.includes(t)) {
+      return fail('PREDISPATCH_UNKNOWN_TYPE', `server.preDispatch.intercepts: "${String(t)}" is not a message type of shared/protocol.js C2S (the bus never delivers a name no client sends)`);
+    }
+  }
+  // 与 `client.panels` / `operators` 同一个理由：键序（列表次序也是字节）不能随作者书写顺序变。
+  // 返回值保持提案的形状（外面那一层 `preDispatch` 是包格式的一部分，不在这里拆平）。
+  const intercepts = stableStringList(pre.intercepts);
+  return { ok: true, decl: { preDispatch: { module: pre.module, policy: pre.policy, intercepts } } };
+}
+
+/**
+ * `pack.json.routes` —— 包能声明的**只读** HTTP 路由（§28.13）。刻意窄：绝对路径、包内 `.json`、三种缓存语义。
+ *   * `path` 必须是 `/` 开头的绝对路径：一条相对路径落到哪个前缀上是路由表说了算，作者不该猜；
+ *   * `file` 必须以 `.json` 结尾：`.js` / `.html` 一律不在此通道（那与 `/workshop-assets` 拒绝它们同一个理由
+ *     —— 那是代码执行面，不是数据面）。
+ * @returns {{ ok: true, decl: object[] } | { ok: false, error: string, detail: string }}
+ */
+function parseRoutesDecl(raw) {
+  if (!Array.isArray(raw)) return fail('ROUTES_BAD_SHAPE', 'routes must be an array of { path, file, cache? }');
+  const out = [];
+  const seen = new Set();
+  for (const [i, route] of raw.entries()) {
+    if (!isPlainObj(route)) return fail('ROUTES_BAD_SHAPE', `routes[${i}] must be an object: { path, file, cache? }`);
+    for (const key of Object.keys(route)) {
+      if (!ROUTE_FIELDS.includes(key)) {
+        return fail('ROUTE_UNKNOWN_FIELD', `routes[${i}]: "${key}" is not a route field (${ROUTE_FIELDS.join(', ')})`);
+      }
+    }
+    if (typeof route.path !== 'string' || !route.path.startsWith('/') || route.path.length < 2
+      || route.path.includes('\\') || route.path.split('/').some((seg) => seg === '..' || seg === '.')) {
+      return fail('ROUTE_BAD_PATH', `routes[${i}].path must be an absolute HTTP path (e.g. "/data/resource-manifest.json")`);
+    }
+    if (seen.has(route.path)) return fail('ROUTE_DUPLICATE_PATH', `routes: "${route.path}" is declared twice (one path, one file)`);
+    seen.add(route.path);
+    if (!isSafeRelativePath(route.file)) {
+      return fail('ROUTE_BAD_FILE', `routes["${route.path}"].file must be a relative path inside the pack (no absolute paths, no "..")`);
+    }
+    if (!route.file.endsWith('.json')) {
+      return fail('ROUTE_BAD_FILE', `routes["${route.path}"].file must name a .json file — this channel never serves code or markup`);
+    }
+    const cache = route.cache === undefined ? 'no-cache' : route.cache;
+    if (!ROUTE_CACHE_POLICIES.includes(cache)) {
+      return fail('ROUTE_BAD_CACHE', `routes["${route.path}"].cache must be one of: ${ROUTE_CACHE_POLICIES.join(', ')}`);
+    }
+    out.push({ path: route.path, file: route.file, cache });
+  }
+  return { ok: true, decl: out };
+}
+
+/**
+ * `pack.json.i18n` —— 给**已有语种**补词条的通道（fanpack G-04 / plugin-pack G4，docs/WORKSHOP.md §1.10）。
+ *
+ * 为什么需要它：`packs/` 的 `lang` 类型只能**新增**一个语种 —— 一个包带 `en` / `ja` / `ko` / `zh-TW` 里的任何一个，
+ * 真实的扫描器都会整包跳过，原文是 `the language en is already provided by public/i18n/en.json`。而任何带新界面的
+ * 包（新面板、新按钮、新提示）都需要**给已有语种补键**，所以这是个结构性的缺口，不是配置问题。
+ *
+ * 形状刻意是「语种 → 包内 .json 文件」而不是内联对象：
+ *   * 一个包给四个语种各补 74 键，内联会让 `pack.json` 长出 20 KB，而这份清单是身份哈希的输入（`identifyPack`
+ *     哈希的是归一化后的清单），内联等于把整份译文塞进哈希清单的**一个字符串**里；
+ *   * 文件路径是**可哈希**的：`identifyPack` 对每一个声明的 i18n 文件单独 `sha256`（与 `client.panels` 的模块同一条
+ *     纪律）—— 换一份译文就是换一个包；
+ *   * 形状与语言包本身逐字相同（`{ "<中文 msgid>": "<译文>" }`），作者可以照抄 `public/i18n/<code>.json`。
+ *
+ * 拒绝的三种形状（都点名，不静默）：语种码不是 `shared/i18nPacks.js` 认的常用大小写、语种是源语言 `zh`
+ * （msgid 自己，没有包）、路径不是包内相对 `.json`。至于「这个文件在不在、是不是 JSON 对象」要读磁盘，
+ * 在装载期（`server/workshop.js i18nIssues`）。
+ *
+ * @returns {{ ok: true, decl: Record<string, string> } | { ok: false, error: string, detail: string }}
+ */
+function parseI18nDecl(raw) {
+  if (!isPlainObj(raw)) {
+    return fail('I18N_BAD_SHAPE', 'i18n must be an object: { "<lang code>": "<relative path to a .json of msgid → translation>" }');
+  }
+  /** @type {Record<string, string>} */
+  const out = {};
+  for (const code of Object.keys(raw).sort()) {
+    const file = raw[code];
+    if (!isLangCode(code)) {
+      return fail('I18N_BAD_LANG', `i18n: "${code}" is not a language code in its usual case (en, ja, ko, zh-TW, pt-BR …)`);
+    }
+    if (code === SOURCE_LANG) {
+      return fail('I18N_SOURCE_LANG', `i18n: "${SOURCE_LANG}" is the source language (the msgids themselves) — it has no language file to add to`);
+    }
+    if (!isSafeRelativePath(file) || !file.endsWith('.json')) {
+      return fail('I18N_BAD_FILE', `i18n["${code}"] must be a relative path inside the pack, ending in .json (e.g. "i18n/${code}.json") — the loader reads those bytes, and they are part of this pack's identity`);
+    }
+    out[code] = file;
+  }
+  // 键序不影响 `canonicalJson`（它排键），但**键在不在**影响哈希，所以这里只保证「声明过才有」，
+  // 顺序由 `parseI18nDecl` 的 sort 定死，不随作者书写顺序变。
+  return { ok: true, decl: out };
+}
+
 
 /**
  * `pack.json.operators[<charId>]` 允许的两个列表字段。**只此一份**：形状校验（`normalizePackManifest`）与
@@ -274,11 +674,19 @@ function parseArtEntry(entry, where, shape) {
  *   voices: Record<string, Record<string, string[]>>, voiceLangs: Record<string, Record<string, Record<string, string[]>>>,
  *   bondIcons: Record<string, string>, itemIcons: Record<string, string>,
  *   art: Record<string, Record<string, object>>, support: string[],
- *   operators: Record<string, { powers: string[], bonds: string[] }> } }
+ *   operators: Record<string, { powers: string[], bonds: string[] }>, i18n?: Record<string, string> } }
  *   | { ok: false, error: string, detail: string }}
  */
 export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (!isPlainObj(raw)) return fail('BAD_MANIFEST', 'pack.json must be a JSON object');
+  // 顶层键闭集（`PACK_FIELDS`）：一个我们不认识的键**点名拒绝**，绝不读过去。这是本刀那条共通纪律的落点 ——
+  // 三个社区 mod 里的 `variants` / `skins` / `i18n` 全都是「写了等于没写」的静默丢，而作者从错误文案里
+  // 得不到任何线索。判据放在最前面：一个连键都不认识的清单，后面的字段级判据都是在猜它想说什么。
+  for (const key of Object.keys(raw)) {
+    if (PACK_FIELDS.includes(key)) continue;
+    return fail(PACK_UNKNOWN_FIELD_CODE,
+      `pack.json: "${key.length > MAX_KEY_SHOWN ? `${key.slice(0, MAX_KEY_SHOWN)}…` : key}" is not a field of this pack format (${PACK_FIELDS.join(', ')}). A key this loader does not know is never read: write it as one of the fields above, or drop it — a declaration that is ignored is worse than a refusal`);
+  }
   const id = typeof raw.id === 'string' && raw.id ? raw.id : dirName;
   if (!PACK_ID_RE.test(id)) return fail('BAD_PACK_ID', `"${id}" is not a valid pack id (letters, digits, _ and - only)`);
   if (dirName && typeof raw.id === 'string' && raw.id && raw.id !== dirName) {
@@ -534,21 +942,73 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     }
     directToHand.sort();
   }
+  // 中间层四组能力声明（DESIGN §28.13）：`assets` 客户端资源容器、`client` C 层注册点、`server.preDispatch`
+  // 分发前钩子、`routes` 只读路由。本轮**纯加法**：解析、点名拒绝、并进身份哈希，没有一条行为读它们。
+  //
+  // 这里的四段顺序与 `declared` 收集顺序只影响可读性：返回对象的键序不影响哈希（`canonicalJson` 排序键），
+  // 但**键在不在**影响哈希 —— 所以下面用 `raw[k] !== undefined` 判定「这个包声明了没有」。
+  const assetsParsed = raw.assets === undefined ? null : parseAssetsDecl(raw.assets);
+  if (assetsParsed && !assetsParsed.ok) return assetsParsed;
+  const clientParsed = raw.client === undefined ? null : parseClientDecl(raw.client);
+  if (clientParsed && !clientParsed.ok) return clientParsed;
+  const serverParsed = raw.server === undefined ? null : parseServerDecl(raw.server);
+  if (serverParsed && !serverParsed.ok) return serverParsed;
+  const routesParsed = raw.routes === undefined ? null : parseRoutesDecl(raw.routes);
+  if (routesParsed && !routesParsed.ok) return routesParsed;
+  // `i18n`（fanpack G-04）：给**已有语种**补词条的声明，形状见 `parseI18nDecl`。它同样遵守上面那条
+  // 「只在清单真的写了这个键时才进归一化结果」的纪律 —— 没声明 i18n 的包（今天所有的包）哈希逐字节不变。
+  const i18nParsed = raw.i18n === undefined ? null : parseI18nDecl(raw.i18n);
+  if (i18nParsed && !i18nParsed.ok) return i18nParsed;
+  // 一条声明只有在清单里**真的写了这个键**时才进归一化结果。这一条是本刀最容易做坏的地方：无条件写进去会让
+  // 每一个已存在的包（它们没有这些键）的归一化清单多出四个键，于是内容哈希全变、`identifyPack` 的
+  // `manifest` 与 `hash` 也跟着变 —— 房间的摘要闸门会开始误判（DESIGN §28.2）。
+  /** @type {Array<[string, object]>} */
+  const declared = [];
+  if (assetsParsed) declared.push(['assets', assetsParsed.decl]);
+  if (clientParsed) declared.push(['client', clientParsed.decl]);
+  if (serverParsed) declared.push(['server', serverParsed.decl]);
+  if (routesParsed) declared.push(['routes', routesParsed.decl]);
+  if (i18nParsed) declared.push(['i18n', i18nParsed.decl]);
+  /** 一条声明算不算「贡献」：归一化后的值里有没有东西。`routes: []` 与 `client: { panels: [], requires: [] }`
+   *  都是**合法但什么都不做**的声明（与 `voices: {}` / `art: { chars: {} }` 同一个语义），照旧不算贡献 ——
+   *  所以「一个只写了 `routes: []` 的包」仍然是空包。反向的那条同样载重：`assets` / `client.panels` /
+   *  `server.preDispatch` 的必填字段在形状层就各自非空，所以它们只声明出来就**是**贡献项。 */
+  const contributes = (v) => (Array.isArray(v) ? v.length > 0 : Object.keys(v).length > 0);
   // A pack may bring data files, voice lines (either table), 盟约图标, 装备图标, 外观素材, 助战声明, 自选池声明
   // — never none of them (docs/WORKSHOP.md §1.4). 这条检查必须放在**所有**贡献项都解析完之后：放在前面会出现
   // 「一个只带 `operators` 的包被判成空包」，而在它前面引用后面声明的变量则是 TDZ 报错。
   // `playtest` **不是**贡献项：它是行为开关，一个只带它的包仍然什么都没带来，照旧 EMPTY_PACK
-  // （test/playtestDirectToHand.test.js 有断言钉住这一点）。
+  // （test/playtestDirectToHand.test.js 有断言钉住这一点）。四组新声明的贡献语义见上面 `contributes` 的注释：
+  // A 段把提案的语义落死（B 段实现行为时不用再改），而「只带 `playtest` 照旧被拒」这条既有裁决一字未动。
   if (!content.length && !Object.keys(voiceLines).length && !Object.keys(orderedLangLines).length
     && !Object.keys(bondIconFiles).length && !Object.keys(itemIconFiles).length && !Object.keys(artEntries).length
-    && !Object.keys(orderedOperators).length) {
-    return fail('EMPTY_PACK', `content must name at least one of: ${WORKSHOP_CONTENT_FILES.join(', ')} — or the pack must declare voices / voiceLangs / bondIcons / itemIcons / art / operators`);
+    && !Object.keys(orderedOperators).length && !declared.some(([, v]) => contributes(v))) {
+    // `support` 与 `playtest` 是这份清单里**唯二**「声明了也不算贡献」的字段，所以它们单独出现时必须被点名 ——
+    // 只声明助战的包今天整包被拒（plugin-pack G6：一个 `support: [...]` + `content: []` 的包得到的就是这一条），
+    // 而原来的文案里**没有** `support` 这个词，作者只能对着 `EMPTY_PACK` 猜。`support` 只决定**助战卡池**里放谁，
+    // 干员本体还是由 `content: ["chess"]` 带进来的 —— 所以放宽它不是这一刀的活（那是既有裁决），把话说明白才是。
+    const notContributions = ['support', 'playtest']
+      .filter((n) => raw[n] !== undefined);
+    const names = [...WORKSHOP_CONTENT_FILES, 'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'operators',
+      'assets', 'client', 'server.preDispatch', 'routes', 'i18n'];
+    const alsoNot = notContributions.length
+      ? ` (note: ${notContributions.map((n) => `"${n}"`).join(' and ')} ${notContributions.length === 1 ? 'is' : 'are'} NOT a contribution — a pack that declares ${notContributions.length === 1 ? 'it' : 'them'} alone brings nothing into a match)`
+      : '';
+    return fail('EMPTY_PACK', `content must name at least one of: ${WORKSHOP_CONTENT_FILES.join(', ')} — or the pack must declare ${names.filter((n) => !WORKSHOP_CONTENT_FILES.includes(n)).join(' / ')}${alsoNot}`);
   }
   // 版本声明（DESIGN §28.5）：`api` 是**模组 API** 的区间（钩子总线与 kit 契约），`game` 是**上游游戏版本**的区间，
   // 两者都用 shared/packs.js isVersionRange 的语法（`>=0.2.0`、`0.2.x`、`^0.2.0`、`~0.2.1`、`*`、`||`）。
   // `gameVersion` 保留一代作为 `game` 的别名：编辑器与现成的包都在写它，读的时候优先 `game`。
   const api = strField(raw.api, 60);
   if (api && !isVersionRange(api)) return fail('BAD_API_RANGE', `"api": "${api}" is not a version range (">=1 <2", "1.x" …)`);
+  // `api` 的可比对那一半（DESIGN §28.5 的前置项，本轮补上）：`shared/constants.js MOD_API_VERSION` 是钩子总线与
+  // kit 契约的版本，**只在包自己声明了 `api` 时才比对** —— 没声明的包（今天所有的包）一个字节都不受影响。
+  // 拒绝而不是降级：一个按别的总线写的钩子无法被证明是安全的，而「运行它」正是「有声明、没验证」那一类错误。
+  // 版本串由常量推导（`appVersionMatches` 读三段的 `vM.m.p`，**读不出来时算匹配** —— 那个兜底会让每一次比对
+  // 都通过，所以这里绝不能把整数直接传进去）。
+  if (api && !appVersionMatches(api, `${MOD_API_VERSION}.0.0`)) {
+    return fail('MOD_API_INCOMPATIBLE', `this pack declares "api": "${api}", which excludes the installed mod API ${MOD_API_VERSION} (DESIGN §28.5: write the range this pack was written against, or drop the field)`);
+  }
   const game = strField(raw.game, 60) ?? strField(raw.gameVersion, 60);
   if (game && !isVersionRange(game)) return fail('BAD_GAME_RANGE', `"game": "${game}" is not a version range (">=0.2.0", "0.2.x" …)`);
   // 声明的层（DESIGN §28.1）：A 内容 / B 服务端逻辑 / C 客户端界面。写错了要拒，不能猜。
@@ -580,6 +1040,9 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
       support: supportIds,
       operators: orderedOperators,
       playtest: { directToHand },
+      // 四组新声明：**只在声明过时才存在**（见上面 `declared` 的注释）。哈希覆盖它们靠的就是这一条 ——
+      // `identifyPack` 哈希的是这份归一化清单的 `canonicalJson`（server/workshop.js）。
+      ...Object.fromEntries(declared),
     },
   };
 }
@@ -645,6 +1108,202 @@ export function normalizeContentFile(file, json) {
   }
   if (!Object.keys(records).length) return fail('EMPTY_CONTENT', `${file}.json has no records`);
   return { ok: true, records };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// i18n：给**已有语种**补词条（fanpack G-04 / plugin-pack G4，docs/WORKSHOP.md §1.10）
+//
+// 背景：`packs/` 的 `lang` 类型只能**新增**一个语种 —— 带 `en` / `ja` / `ko` / `zh-TW` 的包会被真实的扫描器整包
+// 跳过，原文是 `the language en is already provided by public/i18n/en.json`。而任何带新界面的包都需要给已有语种
+// 补键，所以这是一个结构性的缺口。补法只有三条规矩，三条都必须有测试钉住：
+//   1. **已有键绝不覆盖**（官方/先到的译文永远赢）；
+//   2. **冲突显式报告**，点名 **键 + 语种 + 包 id**（外加双方的值）—— 只报「值不同」的重叠；
+//   3. **包里的值必须是字符串**，否则整包拒绝（非字符串会让 `t()` 把原文打印到界面上，是查不出源头的那种故障）。
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * 一个包的 `i18n` 声明摊平成 `Map<语种, { pack, file }>`（装载期校验、HTTP 合并体与校验器共用的**唯一**解析）。
+ *
+ * 同一个语种被多个包声明时**按包 id 排序后的第一个赢**（与 `workshopVoiceIndex` / DESIGN §28.3 同一条规则），
+ * 其余的进 `overridden`：输的那个作者必须看到一行字，否则他会以为自己那份译文生效了。
+ *
+ * @param {Array<{ id?: string, i18n?: Record<string, string> }>} packs
+ * @returns {{ langs: Map<string, { pack: string, file: string }>, overridden: Array<{ pack: string, lang: string, definedBy: string, reason: string }> }}
+ */
+export function parsePackI18n(packs) {
+  /** @type {Map<string, { pack: string, file: string }>} */
+  const langs = new Map();
+  /** @type {Array<{ pack: string, lang: string, definedBy: string, reason: string }>} */
+  const overridden = [];
+  for (const pack of (Array.isArray(packs) ? packs : []).filter((p) => p && typeof p === 'object' && p.id).sort(byPackId)) {
+    const decl = isPlainObj(pack.i18n) ? pack.i18n : {};
+    for (const lang of Object.keys(decl).sort()) {
+      const file = decl[lang];
+      if (typeof file !== 'string' || !file) continue;
+      const holder = langs.get(lang);
+      if (holder) {
+        overridden.push({
+          pack: pack.id, lang, definedBy: holder.pack.id,
+          reason: `i18n["${lang}"] is already contributed by pack "${holder.pack.id}" — the pack with the smaller id keeps it (DESIGN §28.3). Drop this file, or let "${holder.pack.id}" drop it`,
+        });
+        continue;
+      }
+      langs.set(lang, { pack, file });
+    }
+  }
+  return { langs, overridden };
+}
+
+/**
+ * 把包带的词条并进一份已存在的语言文件 —— **已有键绝不覆盖**，冲突逐条报告（见上面那一节的三条规矩）。
+ *
+ * `entries` 的形状就是一条 i18n 声明的形状（`{ "<msgid>": "<译文>" }`）。校验与合并共用这一个函数：不可能出现
+ * 「校验器放行的值，合并时被丢掉」。
+ *
+ * @param {Record<string, any>|null|undefined} base 已有的语言文件（`public/i18n/<code>.json` 的解析结果）
+ * @param {Record<string, any>|null|undefined} entries 包声明的词条
+ * @param {{ pack?: string, lang?: string }} [where] 点名信息（拒绝文案与冲突报告都带上）
+ * @returns {{ ok: true, merged: Record<string, any>, added: string[], conflicts: Array<{ pack: string, lang: string, key: string, official: string, packValue: string }>, skippedSame: number }
+ *   | { ok: false, error: string, detail: string }}
+ */
+export function mergeWorkshopI18n(base, entries, { pack = '', lang = '' } = {}) {
+  if (entries !== undefined && !isPlainObj(entries)) {
+    return fail('I18N_BAD_FILE', `i18n["${lang}"] must be a JSON object of { "<msgid>": "<translation>" } (got ${Array.isArray(entries) ? 'an array' : typeof entries})`);
+  }
+  const clean = isPlainObj(entries) ? entries : {};
+  /** @type {string[]} */
+  const added = [];
+  /** @type {Array<{ pack: string, lang: string, key: string, official: string, packValue: string }>} */
+  const conflicts = [];
+  let skippedSame = 0;
+  for (const key of Object.keys(clean).sort()) {
+    const value = clean[key];
+    if (!key || key.startsWith('_')) {
+      return fail('I18N_BAD_KEY', `i18n["${lang}"]: "${key}" is not a valid msgid (a non-empty key that does not start with "_" — the "_"-prefixed keys are a language file's metadata block)`);
+    }
+    if (typeof value !== 'string') {
+      return fail('I18N_BAD_VALUE', `i18n["${lang}"]: "${key}" must map to a string (got ${Array.isArray(value) ? 'an array' : typeof value}) — t() would print the raw value, and the broken interface could never be traced back to this pack`);
+    }
+    const official = isPlainObj(base) ? base[key] : undefined;
+    if (typeof official === 'string') {
+      // 已有键**绝不覆盖**。值相同就什么都不用做（也不是冲突）；值不同就是一条要报出来的冲突。
+      if (official === value) skippedSame++;
+      else conflicts.push({ pack, lang, key, official, packValue: value });
+      continue;
+    }
+    if (!added.includes(key)) added.push(key);
+  }
+  const merged = { ...(isPlainObj(base) ? base : {}) };
+  for (const key of added) merged[key] = clean[key];
+  return { ok: true, merged, added, conflicts, skippedSame };
+}
+
+/**
+ * `parsePackI18n` + `mergeWorkshopI18n` 的一站式版本：遍历每个声明的语种，读出包的文件并合并。
+ *
+ * 读盘由调用方注入（`shared/` 两端共用，浏览器没有 fs）：`readFile(packId, file)` 返回**已解析的对象**，或 `null`
+ * （文件不在 / 不是 JSON）。所以「文件在不在」的判罚点只有调用方一处，而「值合不合法」的判罚点只有这里一个。
+ *
+ * @param {Array<{ id?: string, i18n?: Record<string, string> }>} packs
+ * @param {(pack: string, file: string) => Record<string, any>|null} readFile `(pack id, declared path)` → the parsed file
+ * @param {(lang: string) => Record<string, any>|null} readBase 读官方语言文件（`public/i18n/<code>.json`）
+ * @returns {{ files: Map<string, Record<string, any>>, added: Record<string, string[]>, conflicts: object[], skippedSame: Record<string, number>, errors: Array<{ pack: string, lang: string, code: string, reason: string }> }}
+ */
+export function workshopI18nFiles(packs, readFile, readBase) {
+  const { langs, overridden } = parsePackI18n(packs);
+  /** @type {Map<string, Record<string, any>>} */
+  const files = new Map();
+  /** @type {Record<string, string[]>} */
+  const added = {};
+  /** @type {object[]} */
+  const conflicts = [...overridden];
+  /** @type {Record<string, number>} */
+  const skippedSame = {};
+  /** @type {Array<{ pack: string, lang: string, code: string, reason: string }>} */
+  const errors = [];
+  for (const lang of [...langs.keys()].sort()) {
+    const { pack, file } = langs.get(lang);
+    const entries = readFile(pack.id, file);
+    if (entries === null || entries === undefined) {
+      errors.push({
+        pack: pack.id, lang, code: 'I18N_BAD_FILE',
+        reason: `i18n["${lang}"] names "${file}", which is not a readable JSON object inside the pack`,
+      });
+      continue;
+    }
+    const merged = mergeWorkshopI18n(readBase(lang), entries, { pack: pack.id, lang });
+    if (!merged.ok) {
+      errors.push({ pack: pack.id, lang, code: merged.error, reason: merged.detail });
+      continue;
+    }
+    files.set(lang, merged.merged);
+    if (merged.added.length) (added[pack.id] ||= []).push(...merged.added.map((k) => `${lang}:${k}`));
+    for (const c of merged.conflicts) conflicts.push(c);
+    if (merged.skippedSame) skippedSame[lang] = merged.skippedSame;
+  }
+  for (const list of Object.values(added)) list.sort();
+  return { files, added, conflicts, skippedSame, errors };
+}
+
+/**
+ * `stripPackOperators`（fanpack G-16）：**包把一名官方干员变成棋子**时，他与自选池的关系要**记录下来** ——
+ * 一个被包变成棋子的干员同时躺在自选池里，意味着同一个干员能被上两次（一次作为棋子、一次作为自选槽），
+ * 而且还绕过棋子自己的盟约。原件在它自己的 `shared/customContent.js` 里为此写了一条装载层规则：**把人摘出池**。
+ *
+ * 本刀**只做「记录 + 拒绝重复」这一半**，理由必须说清（业主需要裁决的那一半）：
+ *
+ *   * `diy.ownedPool` 是「自选槽能挑的已拥有干员」这份**名单本身**（`shared/diy.js` 从它出格子，
+ *     `tools/golden.mjs` 给池里每一位配一个精锐场景）。把它摘掉不是「去重」，而是**改对局结果**：
+ *     池子变小、可挑的干员变少、语料里那一位的场景整个消失。实测：fanpack 那份真实数据里 **8 名**
+ *     干员同时在池里（`char_147_shining`、`char_4088_hodrer`、`char_4132_ascln`、`char_1035_wisdel`、
+ *     `char_017_huang`、`char_003_kalts`、`char_4179_monstr`、`char_4133_logos`），摘掉就是 `ownedPool` 71 → 63。
+ *   * 而本刀的验收要求 `test/golden/*.json` 一个字节都不动、六份语料的数字不变 —— 这两件事不可能同时成立。
+ *     按 `AGENTS.md`「Deliberate deviations from the official mode are the maintainer's decision only」，
+ *     这一半是**维护者的决定**，所以它停在这里，写进报告等裁决。
+ *
+ * 「拒绝重复」那一半**今天已经成立**，而且不在这个函数里：`mergeWorkshopOperators` 的 `if (!pool.includes(id))`
+ * 是一条既有的不变量（`test/workshopOperators.test.js` 钉着「一个 id 只进池一次」）。所以一个包把池里已有的
+ * 干员声明进 `operators` 时**不会**让池里出现第二条 —— 但「他本来就在池里、现在又被这个包变成棋子」这件事
+ * 以前**没有任何地方说出来**，这个函数就是那句话。
+ *
+ * @param {Array<{ id?: string, operators?: Record<string, unknown>, files?: Record<string, Record<string, object>> }>} packs
+ * @param {Readonly<Record<string, any>>} data 合并后的数据（`data.backups.units` / `data.backups.diy.ownedPool`）
+ * @returns {{ overlaps: Array<{ pack: string, charId: string, inPoolBefore: boolean, poolEntry: boolean, entryFrom: string, note: string }>, stripped: string[] }}
+ *   `overlaps` 逐条点名（`inPoolBefore` = 官方池里本来就有他，`poolEntry` = 他是这个包声明进池的）；
+ *   `stripped` 是**没有真的被摘掉**的 id（本刀不移除任何东西，所以它列出的就是全部 `inPoolBefore` 的 id ——
+ *   留一个显式的名字，好让将来真的做摘除时改动面一目了然）。
+ */
+export function stripPackOperators(packs, data) {
+  const backups = isPlainObj(data) && isPlainObj(data.backups) ? data.backups : {};
+  const ownedPool = Array.isArray(backups.diy?.ownedPool) ? backups.diy.ownedPool : [];
+  const inPool = new Set(ownedPool);
+  /** @type {Array<{ pack: string, charId: string, inPoolBefore: boolean, poolEntry: boolean, entryFrom: string, note: string }>} */
+  const overlaps = [];
+  /** @type {string[]} */
+  const stripped = [];
+  for (const pack of (Array.isArray(packs) ? packs : []).filter((p) => p && typeof p.id === 'string' && p.id).sort(byPackId)) {
+    /** @type {Map<string, string>} charId → 这个包把它变成棋子的那条记录 id */
+    const chessByChar = new Map();
+    for (const [chessId, rec] of Object.entries(isPlainObj(pack.files?.chess) ? pack.files.chess : {})) {
+      const charId = isPlainObj(rec) && typeof rec.charId === 'string' && rec.charId ? rec.charId : null;
+      if (charId && !chessByChar.has(charId)) chessByChar.set(charId, chessId);
+    }
+    const declared = isPlainObj(pack.operators) ? pack.operators : {};
+    for (const charId of [...chessByChar.keys()].sort()) {
+      const inPoolBefore = inPool.has(charId);
+      const poolEntry = Object.hasOwn(declared, charId);
+      if (!inPoolBefore && !poolEntry) continue;
+      if (inPoolBefore) stripped.push(charId);
+      overlaps.push({
+        pack: pack.id, charId, inPoolBefore, poolEntry,
+        entryFrom: chessByChar.get(charId),
+        note: inPoolBefore
+          ? `"${charId}" is in the 自选 pool (data/backups.json diy.ownedPool) AND this pack turns him into the chess piece "${chessByChar.get(charId)}" — he can be fielded twice, and the 自选 slot bypasses the piece's own bond. Stripping him from the pool changes what the pool offers, so it is the maintainer's call (see the loader report)`
+          : `this pack puts "${charId}" into the 自选 pool through pack.json operators AND ships the chess piece "${chessByChar.get(charId)}" for the same operator — one operator with two ways in`,
+      });
+    }
+  }
+  return { overlaps, stripped };
 }
 
 /**
@@ -1132,6 +1791,11 @@ export function applyWorkshop(base, packs) {
   // 「我明明勾了」和「试玩里没有」之间反复，而日志一句话都不说。
   for (const e of workshopPlaytestIndex(packs).errors) report.errors.push({ pack: e.pack, file: 'playtest', id: e.id, code: e.code, definedBy: e.definedBy, reason: e.reason });
   report.looks = [...chessLookIssues(out, looked), ...enemyLookIssues(out, lookedEnemies)];
+  // `stripPackOperators`（fanpack G-16）：**只记录，不摘除**。一个被包变成棋子的干员同时还在自选池里这件事，
+  // 以前没有任何地方说出来；而「真的把他摘出池」会改变自选槽能挑到的干员（= 改对局结果），
+  // 与「`test/golden/*.json` 一个字节不动」的验收不能同时成立 —— 所以它是一条**待裁决**的记录，
+  // 不是一次静默的行为差异（理由与实测数字见 `stripPackOperators` 的注释）。
+  report.overlaps = stripPackOperators(packs, out).overlaps;
   for (const list of Object.values(report.added)) list.sort();
   for (const list of Object.values(report.overridden)) list.sort();
   return { data: out, report };

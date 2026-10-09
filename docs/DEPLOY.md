@@ -312,6 +312,39 @@ services:
 
 **3D 棋盘贴图的下载量**：每位玩家进入对局时都要从开服的电脑下载 3D 棋盘的 12 张贴图。提取时会给这 12 张各写一份 WebP（颜色贴图有损、质量 95，法线和数据贴图无损），清单里列的是 WebP，同名 PNG 留在旁边给裁切工具和 setup 用。这部分下载量从约 6.7 MB 降到约 2 MB，网速慢的远程联机最明显。只有 PNG 的本地素材（例如在这一改动之前提取的）可以用提取时的 Python 环境运行 `tools/local-extract/extract.py --webp` 就地补上，只需要 Pillow，不需要客户端。
 
+### 6.1 `cache-only`：让服务器不再分发 `/assets` 与 `/fonts`（工坊包声明）
+
+一份在工坊包 `pack.json` 里的 `assets.serverPolicy: "cache-only"` 会让服务器对 `/assets/…` 与 `/fonts/…` 回
+**412 Precondition Failed**，并且**不回源**（连 `stat` 都不做）。用途是「素材只允许从玩家自己的缓存读」：这种部署
+下完整资源包不由服务器分发，页面必须先导入本地资源包。三件事，开之前请确认你都同意：
+
+* **它是进程级、覆盖面是核心游戏的素材树**。`/assets/` 与 `/fonts/` 是核心游戏和**所有**工坊包共用的两棵树，
+  不是一个包的私有目录。**任何一个**已安装的包声明 `cache-only`，整个服务器的这两棵树都不再服务。启动日志
+  会点名是哪个包声明的（`[workshop] serverPolicy "cache-only" declared by "…"`）。
+* **没有环境变量开关，也不由服务器配置决定**。唯一能打开它的是一个工坊包的 `pack.json`。缺省 `serve`（等于
+  不写这个字段）时服务器行为与没有这个字段时**逐字节相同** —— 本仓库自带的包与 `docs/examples/` 三份示例包
+  全是这个值。
+* **客户端那半是引擎自带的 Service Worker**（B4 段，业主裁决：**引擎自带 SW、包只声明**）。服务端对那两棵树回
+  412 且不回源，客户端那半用**同一批本地校验过的字节**回答同一批 URL，命不中也是 **412，绝不回源**。两半合起来
+  才是一份完整的「缓存优先」部署；只开服务器那一半会让页面拿不到这两棵树的素材，除非玩家浏览器里已经缓存过它们。
+
+**客户端那半在部署上要知道的四件事**：
+
+| 事 | 说明 |
+|---|---|
+| SW 脚本在哪 | `/resource-sw.js`（引擎文件，`public/resource-sw.js`），由 `public/js/resources/worker.js` 用 `type:'module'`、`scope:'/'`、`updateViaCache:'none'` 注册。**只有包声明了 `assets` 才会注册**（`welcome.modAssets` 到达时才加载那套流程） |
+| 为什么不需要 `Service-Worker-Allowed` | 脚本落在站点**根**上，它自己的最大作用域就是 `/`。把站点部署在**子路径**下（反代前缀、静态托管的子目录）时脚本会变成 `/<前缀>/resource-sw.js`，那时 `scope:'/'` 会被浏览器拒绝；要么把前缀下的 `/resource-sw.js` 反代到根，要么给这个响应加 `Service-Worker-Allowed: /`，并同步改 `public/js/resources/common.js` 的 `SW_URL` |
+| 容器从哪来 | 玩家本地导入（离线分发），或浏览器自己从 `/workshop-resources/<包id>/<声明路径>` 取一次（`importFromServer`）。两条来路喂的是同一条流程；取回来的字节逐文件核对 `SHA-1[0:12]` 之后才进 `CacheStorage` |
+| 怎么回滚 / 怎么让玩家清掉 | 服务器侧：删掉包或把 `serverPolicy` 改回 `serve` 后重启（不留持久状态）。玩家侧那半**不在服务器上**：`CacheStorage` 里的几百 MB 与已注册的 SW 会一直留着。同一个站点**同源**下换一次部署不会自动清掉它，需要 `navigator.serviceWorker.getRegistrations()` + `registration.unregister()`（或站点数据/清除浏览器数据）才会消失 —— 回滚脚本要自己带上这一步 |
+
+容器是流式的、可以到数百 MB：`cache-only` 的部署里那次下载是**玩家唯一需要的一次网络传输**（此后 `/assets`
+与 `/fonts` 都由 SW 本地回答）。反向代理/前置缓存不需要为 `/workshop-resources/` 配置任何特殊规则（它已经是
+`Cache-Control: no-cache` + `?v=` 缓存键），但要留意代理自身的**响应体大小上限**与**超时**：一个几百 MB 的
+流式响应被代理截断时，`Content-Length` 会让客户端看出「传输不完整」并拒绝导入，而不是装进一半。
+
+装了这样一个包想退回去：删掉那个包（或把 `assets.serverPolicy` 改回 `"serve"`）后重启即可 —— 服务器不在任何地方
+留下持久状态。
+
 ## 7. 打包发布（维护者）
 
 Releases 的 zip（完整包、精简包，0.2.1 起还有更新包）由 `tools/package.mjs` 生成，在**源码仓库**里运行（整合包里没有这个工具）：

@@ -63,15 +63,39 @@ workshop/<packId>/
 | `operators` | 贡献项之一 | 这个包自己新增的、应当进**自选池**（自选编队）的干员，见 §1.2；名字/星级/职业/分支从本包那条 `units` 记录派生 | 包管理 → 自选池声明 |
 | `playtest` | 否 | **试玩行为开关**（不进记录）：`{ "directToHand": ["<chessId>", …] }` —— 这些干员在编辑器「一键试玩」的第一回合直接进手牌，见 §1.2 与 docs/EDITOR.md §试玩 | 干员页的「试玩时直接发到手上」复选框（覆盖官方干员时写在这里；本包新增的干员仍写在记录里）+ 包管理 → 试玩直接发到手上（逐条删除） |
 | `overrides` | 否 | 允许覆盖的官方记录，格式 `"<file>:<id>"`，例如 `"chess:chess_char_1_01_a"`、`"bonds:yanShip"`、`"units:char_4231_clemnt"` | 包管理 → overrides（盟约页覆盖官方时自动补 `bonds:<id>`） |
+| `api` | 否 | 包写它时的**模组 API 区间**（钩子总线与 kit 契约，见 §1.9）：只有声明了才与 `shared/constants.js MOD_API_VERSION` 比对，不含这个 build 就整个包被拒（`MOD_API_INCOMPATIBLE`） | 包管理 → 包元数据（本轮只是可写可读可判，编辑器入口见 §1.9「当前状态」） |
+| `assets` | 贡献项之一 | 客户端资源容器声明（§1.9）：`{ container, manifest, serverPolicy?, verify? }` | ⛔ 本轮无入口（A 段只做格式） |
+| `client` | 贡献项之一 | C 层注册点声明（§1.9）：`{ panels: [{ id, slot, module, order?, gate? }], requires?: […] }`，`slot` 是闭枚举 | ⛔ 本轮无入口 |
+| `server` | 贡献项之一 | 分发前准入钩子声明（§1.9）：`{ preDispatch: { module, policy, intercepts } }`；`intercepts` 必须是 `shared/protocol.js C2S` 里真实存在的类型 | ⛔ 本轮无入口 |
+| `routes` | 贡献项之一 | 只读 HTTP 路由声明（§1.9）：`[{ path, file, cache? }]`，只服务包内 `.json` | ⛔ 本轮无入口 |
+| `i18n` | 贡献项之一 | 给**已有语种**（`en` / `ja` / `ko` / `zh-TW` …）补界面词条：`{ "<语种>": "<包内相对 .json 路径>" }`，见 §1.10 | ⛔ 本轮无入口 |
 
 **每个字段都有图形入口**（0.8.1 起，最后补上的是元数据与 `overrides`；`operators` 的入口见 §1.2）：写进 `pack.json`
 的东西必须能在界面上增删改，包括**陈旧/没人用的条目**（它们只是不生效，不是错误，但要能删掉）。唯一没有入口的是 `id`：它必须等于目录名。
 
+**顶层键是闭集**（`shared/workshop.js PACK_FIELDS`）：上面这张表**就是**这份格式认识的每一个字段。写一个不在这张表里的
+顶层键（打错、或者抄了另一个 mod 格式的字段）**整个包被点名拒绝**：`PACK_UNKNOWN_FIELD`，理由里列出全部合法字段。
+这不是「我们还没做」，是**刻意**的 —— 一个我们不认识的键如果只是被读过去，作者看到的是「包合法、加载了、可我写的那件事
+没发生」。三个社区 mod 里最典型的三个键因此都被当场拒绝而不是静默丢弃：
+
+| 键 | 今天的结果 | 想做的事 | 今天该往哪儿写 |
+|---|---|---|---|
+| `variants` | `PACK_UNKNOWN_FIELD` | 「同一份数据的另一套数值 + 一个开关」（满练度 / 12 部署位这类**可切换口径**） | **没有通道**。可以拿 `overrides` 落**一份**数值进默认口径，但那不是「可切换的变体」，而且会让包改默认规则（比不做更坏）。要做得先在引擎里做出「口径 / 变体」这一层（`data/official.json` + 运行时的练度开关，今天都不存在） |
+| `skins` | `PACK_UNKNOWN_FIELD` | 干员时装（皮肤）与「换装」Tab：皮肤表 + 切换 UI + 包字段**三样都没有** | **走 `art`**（§1.4）—— `art.chars[<charId>]` 收 `avatar` / `portrait` / `spine`，也就是「这个包给这名干员一套外观素材」。**换装界面**是另一件事（C 层，§1.9.3 的 `client.panels` 能挂一个面板，但它读不到 store，换装要写进玩家状态就不在这个口子里）。`skins: {…}` 不是 `art` 的别名，别照抄 |
+| `official` / `config` / `meta` / `shared` / `theme` / `serverModules` | `PACK_UNKNOWN_FIELD` | 官方口径文件 / 规则改写 / match 元注册表 / 共享层补丁 / 主题 / 服务端模块 | **刻意没有通道**（`config` 见下面那一段；其余是引擎特性或 wire 契约，按 `AGENTS.md`「Official first … the maintainer's decision only」） |
+
 `content` 只接受上表列出的文件。**`config` 被刻意排除**：一个能改写经济、回合表或难度参数的包改的是规则而不是内容，那需要另一套审查机制，不在本功能范围内。
 
-**只带素材的包是合法的包**：`content: []` + `voices` / `voiceLangs` / `bondIcons` / `itemIcons` / `art` / `operators`
-里任意一项（见 §1.4）。一个只给助战干员配语音、只给盟约/装备配一张图、只给某个干员配一张立绘的包，不需要提供任何
-数据文件；反过来，这些贡献项**全空**才会被拒（`EMPTY_PACK`）。
+**只带素材的包是合法的包**：`content: []` + `voices` / `voiceLangs` / `bondIcons` / `itemIcons` / `art` / `operators` / `i18n`
+里任意一项（见 §1.4、§1.10）。一个只给助战干员配语音、只给盟约/装备配一张图、只给某个干员配一张立绘、只给已有语种
+补几条界面词条的包，不需要提供任何数据文件；反过来，这些贡献项**全空**才会被拒（`EMPTY_PACK`）。
+
+`support` 与 `playtest` **不是**贡献项：`support` 只决定**助战卡池**里放谁，干员本体还是由 `content: ["chess"]` 带进来的
+—— 所以一个只写 `"support": […]`、`content: []` 的包会被 `EMPTY_PACK` 拒，而理由里会点名 `support`（见 §2.1 的完整例子）。
+
+中间层的四组能力声明（`assets` / `client` / `server` / `routes`，见 §1.9）与 `i18n` 也是贡献项 —— 但只有**声明了内容**
+才算：`routes: []`（空数组）与不声明没有区别，照旧 `EMPTY_PACK`。`api` 与 `playtest` 一样**不是**贡献项：它们是声明
+（前者的区间、后者的行为开关），一个只带它们的包什么都没带来。
 
 ### 1.2 叠加规则
 - **默认叠加（additive）**：新 id 直接加入。
@@ -79,7 +103,28 @@ workshop/<packId>/
 - **记录自检**：内容文件必须是 `{ id: record }` 对象；当记录自带 id 字段（如 `chess.chessId`）而它与键不一致时，整条被拒绝。
 - **两个包抢同一个 id：包 id 字典序小的赢**（DESIGN §28.3，2026-10-09 业主裁定）。这一条**对所有面都一样** —— 数据记录、`kits/<chessId>.js`、`bondIcons`、`itemIcons`、`art`；而且与「包是按什么顺序被扫描到的」**无关**（服务端按目录名读、合并前再按包 id 排序，两处用同一个比较器）。输的一方会得到一条**点名**占位包的报告（`definedBy` + 文案里写出包名），不是静默覆盖。
 - **覆盖官方 id 仍要显式声明**：`overrides` 是唯一能让一个包替换**官方**记录 / 官方干员 kit 的方式，且这份声明会让它同时成为「后来的包」要撞的那一方（上一条规则决定谁赢）。**给维护者的一句话**：编辑器这一侧的判罚必须**同时看 id 与声明**，不能只在校验前把官方 id 从集合里剔掉 —— 后者会让编辑器放行一次保存、而加载器随后因为「没声明」丢掉这条记录（编辑器回 200、游戏里没有），比「编辑器 400 拒绝」更坏。所以放行与记住声明是同一次保存的两半（`editor/server.mjs` 的 `overrideBlockers` 与 `withOverrideDeclarations`），预览与保存也必须算出同一个判罚。
-- **覆盖是「按字段打补丁」，不是整条替换**（DESIGN §28.3，2026-10-09）：只写 `stats.maxHp` 就只改这一个数，官方那条记录的其它 43 个字段（`tier` / `skill` / `talents` / `rangeGrid`…）原样保留；数值与普通对象递归合并，**行为与结构字段整块替换** —— `skill` / `skills` / `trait` / `traitBase` / `traitOverride` / `modules` / `rangeGrid` / `attackRangeGrid` / `assets` / `diy` / `bonds`（清单在 `shared/workshop.js` 的 `OVERRIDE_REPLACE_KEYS`，数组一律整块替换）。**覆盖是闭合世界**：写了记录里没有的字段会被 `UNKNOWN_OVERRIDE_FIELD` 拒绝（要发明新字段就把它作为一个新 id 的新记录）。想「连行为一起接管」的包必须成套补回：给了 kit 就要给 `skill`（§4.1），否则那个干员没有技能。
+- **覆盖是「按字段打补丁」，不是整条替换**（DESIGN §28.3，2026-10-09）：只写 `stats.maxHp` 就只改这一个数，官方那条记录的其它 43 个字段（`tier` / `skill` / `talents` / `rangeGrid`…）原样保留；数值与普通对象递归合并，**行为与结构字段整块替换** —— `skill` / `skills` / `trait` / `traitBase` / `traitOverride` / `modules` / `rangeGrid` / `attackRangeGrid` / `assets` / `diy` / `bonds`（清单在 `shared/workshop.js` 的 `OVERRIDE_REPLACE_KEYS`，数组一律整块替换）。**覆盖是闭合世界**：写了记录里没有的字段会被 `UNKNOWN_OVERRIDE_FIELD` 拒绝（要发明新字段就把它作为一个新 id 的新记录）。想「连行为一起接管」的包必须成套补回：给了 kit 就要给 `skill`（§4.1），否则那个干员没有技能。**作者侧校验判的是合并后的那一条**：`tools/workshop-validate.mjs` 对 `overrides` 里声明过的 id 先取 `loadData` 的合并体再跑逐记录校验（`judgeRecord`），所以一份只写要改的字段的差量补丁不会被报成「缺 `profession` / 缺 `stats`」，也不会再报 `OFFICIAL_ID_COLLISION` —— 与引擎、编辑器同一份判据（`docs/EDITOR.md` 的那条「编辑器接受什么、校验器就接受什么」）。反过来，**没有**声明覆盖的补丁仍按一条完整记录判，缺什么报什么（`test/workshopValidateOverrides.test.js` 把两半都钉住）。
+- **规则字段不靠包引入（`giveBondBiasOnly` 这一类）**。一个社区 mod 给**每一条官方装备**加了一个字段
+  `giveBondBiasOnly`（其中 18 条为 `true`），语义是「商店里那 18 件盟约签名装备的**刷出概率**偏向你叠得最高的
+  盟约，但**不授予**盟约」。它今天的两条路都被挡住，而且是**故意的**：
+  - 写进记录（`overrides`）⇒ `UNKNOWN_OVERRIDE_FIELD`，整条被拒、值一个字节都不落地（闭合世界，上面那一条）；
+  - 写成 `pack.json` 的顶层键 ⇒ `PACK_UNKNOWN_FIELD`（§1.1 的闭集）。
+
+  **为什么不补它**：它改的是**一局的商店出货概率**（= 改对局结果），而按 `AGENTS.md`
+  「Official first … Deliberate deviations from the official mode are the maintainer's decision only」，
+  这类改动是维护者的决定，不该由内容包引入 —— 与 `config` 被排除是同一条理由。**也不能凑合**：只写 `giveBondId`
+  会变成「**授予**盟约」（本引擎的语义），与原作的「只偏置、不授予」**相反** —— 宁可少一个特性，也不制造一个
+  语义相反的假实现。真要这条特性，正确做法是维护者在引擎里做成一个开关（商店池 + `bondsMeta` 的读取点），
+  然后**任何**包都能用。
+- **被包变成棋子的官方干员：记录，不摘除（`stripPackOperators`）**。一个包可以把一名**官方干员**变成棋子
+  （`content: ["chess"]` 里那条记录的 `charId` 指向他）。这时他会**同时**躺在自选池（`data/backups.json` 的
+  `diy.ownedPool`）里 —— 同一个干员能被上两次，而且自选槽绕过棋子自己的盟约。装载层把这件事**逐条记下来**
+  （`applyWorkshop` 报告的 `overlaps`：包 id、干员 id、那条 chess 记录 id、他本来就在池里还是本包声明进池的），
+  但**不把人摘出池**：`diy.ownedPool` 就是「自选槽能挑到谁」这份名单，摘掉它 = 改对局结果 = 改版本语料，
+  那是维护者的决定（实测：一份真实的社区数据里 **8 名**干员同时满足这两个条件，摘掉就是 `ownedPool` 71 → 63）。
+  重复**永远不会发生**：`mergeWorkshopOperators` 的「一个 id 只进池一次」是既有不变量，与这条记录无关。
+  **这一条已经在设计里定过**：DESIGN §28.10.1 明写「包**不给**作者改官方干员在不在池里的能力 —— 池子属于安装方」，
+  并把社区 mod 的 `stripPackOperators` 具名列为**按此条驳回**的行为。所以这里的「只记录」不是「还没做」。
 - **两张天赋表按条目合并，不是整块替换**（DESIGN §28.3，2026-10-09 当天第二次修正）：`talents` / `talentsBase` 按 `index` 逐条合并 —— 你写的那一条里出现的字段生效，**你没写的字段（包括官方那条天赋自带的注释）留着**；`index` 对不上官方任何一条时是「你新增了一条天赋」，追加在后面。模组内部的 `modules[].talentChanges` 同理，按 `talentIndex` 逐条合并。
   **为什么单独开一条规则**：官方记录里的天赋可以带「潜能链」注释（记录层的 `potDown`、天赋层的 `potMin` + `potBelow`），而编辑器派生出来的记录**故意不带**这些注释。整块替换的话，你只是改了一条天赋的文案，官方那条天赋的整条潜能链就没了，而加载器一句错都不报 —— 一条**静默**的数据丢失。裸列表（`bonds` / `immunities` / `rangeGrid` …）仍然是整块替换：按字段合并一个裸列表会造出一条没人写过的记录。
 - **行为开关不进记录：`playtest.directToHand`**（2026-10-09）。这个字段列出的干员在**编辑器「一键试玩」**起的那个服务器里第一回合直接进手牌；正式对局一个都不发。它存在的理由是**覆盖模式**：覆盖官方干员时记录必须与官方**同形**（覆盖的契约就是「按字段打补丁」，多一个官方没有的键会被 `UNKNOWN_OVERRIDE_FIELD` 整条拒掉），所以「试玩直接发牌」这种**行为开关**不能写进记录，只能写在包的行为层。三条规则：
@@ -477,6 +522,500 @@ node tools/workshop-validate.mjs my-pack
   **替换**官方图标；两张图抢同一个 id 时按包 id 排序第一个赢，并给后一个包报一条错误。
   写这个字段的图形入口是编辑器的盟约页（§「本包自带的图标」一段）。
 
+### 1.9 中间层能力声明：`assets` / `client` / `server` / `routes`
+
+这四组字段是给「包不只是数据」这件事开的口子：一个包可以说它要一个客户端资源容器、一个挂载点、一个分发前准入钩子、
+一条只读路由。**A 段只做格式**：解析形状、点名拒绝、把声明并进身份哈希；**B1 段把其中两组落成行为** ——
+`server.preDispatch` 的钩子真的挂在分发路径上（§1.9.1），`routes` 的只读路由真的被服务（§1.9.2）；**B2 段把
+`client` 落成行为** —— 包内的面板模块真的被送到浏览器并挂上四个宿主（§1.9.3），而「声明了却用不了的声明」从此
+**拒绝整个包**（§1.9.3 末尾的那条纪律）；**B3a 段把最后那一组 `assets` 落成服务端行为** —— 容器与清单在
+`/workshop-resources/` 上被服务（流式，不整读进内存）、`verify` 按声明校验容器、`serverPolicy` 决定 `/assets` /
+`/fonts` 还回不回（§1.9.4），并且**把 B1 的 `server.preDispatch` 对齐到同一条纪律**（声明不可用 ⇒ 整包拒绝）。
+**Service Worker（客户端读到容器之后做什么）不在本段**：它等业主对「包能不能注册根作用域 SW」的裁决。
+
+**为什么需要它们**：一个第三方「完整资源包导入 / 校验 / 服务端准入」的 mod 改写成本仓库的包格式之后，在 A 层
+**什么都不贡献**（没有干员/装备/怪物/地图/语音/美术），而旧 schema 没有地方表达这四件事，所以真校验器两边都判它
+`EMPTY_PACK`。缺口与逐字理由写在 `_up/mod4-pack/pack/README.md` §4，实测判罚在
+`_up/mod4-pack/pack/validator-verdict.json`。
+
+#### 四组字段的形状（+ `i18n`，B5 段）
+
+| 字段 | 形状 | 要点 |
+|---|---|---|
+| `assets` | `{ container, manifest, serverPolicy?, verify? }` | `container` 是包内相对路径、必须以 `.spresources` 结尾（`tools/make-spresources.mjs` 的产物）；`manifest` 是包内相对路径、必须 `.json`（客户端要验的扁平文件表）；`serverPolicy` 缺省 `"serve"`，可选 `"cache-only"`（后者让服务器对 `/assets`、`/fonts` 回 412，见 §1.9.4）；`verify` 缺省 `"sha256"`，按旁挂 `<container>.sha256` 校验 |
+| `client` | `{ panels: [{ id, slot, module, order?, gate? }], requires? }` | 面板按 `id` 排序后才进清单；`module` 是包内相对路径，**不是 URL**；`slot` 是闭枚举 `root.overlays` / `root.guide` / `screen.game.aside` / `screen.result.footer`（DESIGN §28.8 已经数得清的那四个宿主）；`requires` 只能取 `serviceWorker` / `cacheStorage` / `webCrypto` —— 缺一即「浏览器不支持」，不是「装了但静默不工作」 |
+| `server` | `{ preDispatch: { module, policy, intercepts } }` | `module` 必须 `.mjs`（服务端加载，浏览器不加载）；`policy` 必须 `.json`；`intercepts` 每一项**必须**存在于 `shared/protocol.js C2S`（从协议反推，不在这里另抄一份名单 —— 抄一份就是第二个会漂移的真相） |
+| `routes` | `[{ path, file, cache? }]` | `path` 是 `/` 开头的绝对 HTTP 路径；`file` 是包内相对路径且必须 `.json`（`.js` / `.html` 一律不在此通道：那是代码执行面）；`cache` 缺省 `"no-cache"`，可选 `"no-store"` / `"public"` |
+| `i18n` | `{ "<语种>": "<包内相对 .json>" }` | 给**已有语种**（`en` / `ja` / `ko` / `zh-TW` …）补界面词条；语种码必须是常用大小写、不能是源语言 `zh`；文件里是 `{ "<中文 msgid>": "<译文>" }`。**已有键绝不覆盖**、冲突点名报告 —— 见 **§1.10** |
+
+四条纪律，与本仓库其它字段逐字相同：
+
+- **未知键一律点名拒绝**，不静默丢弃。一个把 `container` 写成 `containers` 的包如果只是被忽略，作者看到的是
+  「包合法、但资源没生效」—— 这正是这个缺口要修的那类静默失败。
+- **路径必须是包内相对路径**：绝对路径、`..`、盘符一律拒。声明是身份的一部分，一条指向包外的路径会把「这段行为
+  来自哪个包」从身份里抹掉（DESIGN §28.2）。
+- **键序与列表次序归一化**：面板按 `id` 排序、`intercepts` 去重排序、`requires` 按闭枚举次序 —— 键序是清单字节的
+  一部分，不能随作者书写顺序变。
+- **空声明不算贡献**：`routes: []` 与不声明没有区别。反向的那条同样载重：`assets` 与
+  `server.preDispatch` 的必填字段在形状层就各自非空，所以它们只声明出来**就是**贡献项（一个只声明 `assets` 的包
+  不再是 `EMPTY_PACK`）。`api` **不是**贡献项，与 `playtest` 同一类。
+
+#### `EMPTY_PACK` 的语义（本刀落死）
+
+| 声明 | 算贡献项吗 |
+|---|---|
+| `content` 里任一文件 / `voices` / `voiceLangs` / `bondIcons` / `itemIcons` / `art` / `operators` | **算**（旧语义，一字未改） |
+| `assets` / `client`（至少一个面板）/ `server.preDispatch` / `routes`（至少一条） | **算**（A 段新增；一个只声明它们的包是合法包） |
+| `i18n`（至少一个语种） | **算**（B5 段；一个只给已有语种补词条的包是合法包，见 §1.10） |
+| `routes: []`、空的 `client.panels`、空的 `i18n`、`playtest`、`api`、`support` | **不算** —— 什么都没带来，照旧 `EMPTY_PACK` |
+
+`support` 在这一行里是**最容易踩**的一条：它只决定助战**卡池**里放谁，干员本体由 `content: ["chess"]` 带进来。
+一个只写 `"support": ["chess_ws_x"]`、`content: []` 的包会被 `EMPTY_PACK` 拒，理由里会**点名 `support` 不是贡献项**
+（B5 段补的措辞：原来的文案只列了合法贡献项，没有提到 `support`，作者只能对着 `EMPTY_PACK` 猜）。
+`EMPTY_PACK` 的**语义一个字都没放宽** —— 改的只是它把话说清楚。
+
+「只带 `playtest` 的包照旧被拒」是既有裁决（`test/playtestDirectToHand.test.js` 钉着它），本刀**没有**为了让谁的
+测试变绿而放松任何断言 —— `test/packAssets.test.js` 里有同一断言的对照用例。
+
+#### 身份哈希：缺省不变，声明进去（DESIGN §28.2）
+
+能改变一端行为的声明必须在内容哈希里，否则同一个摘要下就有两种行为。做法是**只在清单真的写了这个键时**才把归一化
+后的声明放进归一化清单（`identifyPack` 哈希的就是那份清单的 `canonicalJson`）：
+
+- **没声明这些字段的包**：归一化清单里**不得**多出这四个键，于是内容哈希逐字节不变 —— 否则所有已存在的包摘要都会
+  变，房间的摘要闸门（`modSetOf` / `welcome.mods.digest`）会开始误判。实测：`docs/examples/` 三份示例包在
+  `450e9ea` 与本刀之后的哈希**完全相同**（`96ebc2d4…` clementia / `15092019…` demo-workshop / `77b80c6e…`
+  kit-demo，`test/packAssets.test.js` 钉住这三个值）。
+- **声明了的包**：新哈希随声明改变，并顺着 `modSetOf` 传到线摘要。
+
+#### `api`：声明了才比对
+
+`pack.json.api` 是**模组 API 区间**（钩子总线与 kit 契约的版本），与 `shared/constants.js MOD_API_VERSION` 比对
+（DESIGN §28.5）。规则只有一条：**包声明了 `api` 才比对** —— 没声明的包（今天所有的包）一个字节都不受影响；声明了
+而区间不含本 build，整个包被拒（`MOD_API_INCOMPATIBLE`，理由里写出声明的区间与本 build 的号）。写成坏区间照旧是
+`BAD_API_RANGE`（先判语法，再判区间）。A 段**只**加了那个常量与这一条判罚，没有别的东西读它。
+
+#### 当前状态（A 段 + B1 段 + B2 段 + B3a 段 + B4 段 + B5 段）
+
+| 部分 | 状态 |
+|---|---|
+| 四组字段的形状、点名拒绝、进身份哈希 | ✅ 已实现（`shared/workshop.js`，`test/packAssets.test.js`） |
+| `MOD_API_VERSION` + 「声明了才比对」 | ✅ 已实现（`shared/constants.js`、`shared/workshop.js`） |
+| 作者向字段表与本文档 §1.9 | ✅ 已更新 |
+| 编辑器里的图形入口 | ⛔ 本轮无（与 §1.1 那句「每个字段都有图形入口」的例外就是这四组 + `api`） |
+| 分发前钩子被挂上、能拦消息 | ✅ 已实现（B1：`server/workshop.js loadWorkshopHooks`、`server/modDispatch.js`、`server/net.js`；`test/modPreDispatch.test.js`） |
+| `resource.*` 三个 `C2S` 类型 | ✅ 已实现（B1：`shared/protocol.js`；`PROTOCOL_VERSION` 仍是 1） |
+| 只读路由被注册、被服务 | ✅ 已实现（B1：`server/http/workshop.js workshopRoutesFor`、`server/http/static.js`；`test/modRoutes.test.js`） |
+| C 层面板被注册、被挂载（模块路由 + `welcome.modPanels` + 四个宿主 + `order`/`gate`/`requires`） | ✅ 已实现（B2：`server/workshop.js loadWorkshopPanels`、`server/http/workshop.js workshopPanelFilesFor`、`public/js/ui/extensions.js`、`server/lobby.js welcomeInfo`；`test/modClientPanels.test.js`） |
+| `assets` 的容器与清单被服务（`/workshop-resources/`，流式、只服务注册过的 URL、`?v=` 缓存键） | ✅ 已实现（B3a：`server/workshop.js assetsIssues`、`server/http/workshop.js workshopResourceFilesFor`、`server/http/static.js`；`test/modAssets.test.js`） |
+| `serverPolicy`：`serve`（缺省）/ `cache-only`（`/assets`、`/fonts` 回 412 且不回源） | ✅ 已实现（B3a：`server/http/workshop.js resourceServerPolicy`、`server/http/static.js`；只在包显式声明时生效） |
+| `verify`：按声明校验容器，失败明示 | ✅ 已实现（B3a：`server/workshop.js assetsIssues` + 旁挂 `<container>.sha256`；`ASSETS_VERIFY_FAILED` / `ASSETS_VERIFY_UNAVAILABLE`） |
+| 目录逃逸 / 非 `.js` / 声明了却没有文件的模块 ⇒ **整包被拒** | ✅ 已实现（B2：`server/workshop.js panelModuleIssues` + `shared/workshop.js` 的 `.js` 判据；DESIGN §28.13.3） |
+| 声明了却没有的容器/清单、摘要对不上、`server.preDispatch` 的文件不在 ⇒ **整包被拒** | ✅ 已实现（B3a：`server/workshop.js assetsIssues` / `preDispatchIssues`，在 `loadWorkshop` 列出包之前；DESIGN §28.13.3） |
+| Service Worker（引擎自带、包只声明） | ✅ 已实现（B4：`public/resource-sw.js` + `public/js/resources/**`；注册口径与流程的纯逻辑在 `test/modAssets.test.js` 里钉住） |
+| 客户端资源流程（取清单 → 容器导入 → 逐文件校验 → 写缓存 → 索引/收据 → 深浅校验） | ✅ 已实现（B4：`public/js/resources/{host,bundle,verify,service}.js`；Node 里用假 `CacheStorage` + 真 `Response`/`crypto.subtle` 真跑） |
+| `welcome.modAssets` 的条件性（不声明 ⇒ 无字段、无请求、无 DOM、无全局） | ✅ 已实现（B4：`server/http/workshop.js workshopModAssetsFrom`、`server/lobby.js welcomeInfo`、`public/js/main.js` 的动态 import） |
+| 容器摘要进身份哈希（同一房间摘要 ⇒ 同一份容器） | ✅ 已实现（B4：`server/workshop.js identifyPack` 的 `assets.container.sha256` 那一条；不声明 `assets` 的包逐字节不变） |
+| `server.preDispatch` 的最后一格（import 失败 / 没有工厂导出 / 模块的 `validatePolicy` 拒绝策略 ⇒ 整包移出已加载集合，数据也不并） | ✅ 已实现（B4：`server/workshop.js dropUnavailablePreDispatchPacks` + `server/index.js` 装配路径 + `server/data.js excludePacks`；可选导出 `validatePolicy` 走同一条裁剪） |
+| 浏览器里真的 import + 真的渲染（真 Chrome）、真 SW 的生命周期与作用域 | ⛔ 本机无 Chrome（`SP_E2E=1` 的可选路径，与 §4.4 同一个 standing gap；`test/modAssets.test.js` §10 是**跳过且从未运行**的占位用例） |
+| **顶层键闭集**：不认识的键 ⇒ `PACK_UNKNOWN_FIELD` 整包被拒（不是静默丢） | ✅ 已实现（B5：`shared/workshop.js PACK_FIELDS` + `normalizePackManifest`；`test/workshop.test.js`） |
+| `i18n`：给已有语种补词条，**已有键绝不覆盖** + 冲突点名 | ✅ 已实现（B5：`shared/workshop.js parseI18nDecl` / `mergeWorkshopI18n`、`server/workshop.js i18nIssues`、`server/http/workshop.js buildWorkshopI18nFiles`、`server/http/static.js` 的 `/i18n/<code>.json` 合并体；见 §1.10） |
+
+#### 1.9.1 `server.preDispatch`：分发前的准入钩子（B1 段已实现）
+
+一个包可以声明一个**在消息分发之前**被调用的钩子，用来做「进房间之前先证明你导入了完整资源包」这类准入。
+
+```jsonc
+"server": {
+  "preDispatch": {
+    "module": "server/resourceAdmission.mjs",   // 包内 ESM；服务端加载，浏览器不加载
+    "policy": "admission-files.json",           // 包内 .json，钩子自己的数据（原样注入，不解释）
+    "intercepts": ["room.create", "room.join", "room.spectate", "room.start"]
+  }
+}
+```
+
+**模块契约**（`module` 必须导出其中之一；两者同形）：
+
+```js
+export function createPreDispatch(deps) {
+  return {
+    onConnection(conn) { /* 可选：连接建立时调用一次（挑战就是在这里发出去的） */ },
+    preDispatch(conn, msg) { return false; },   // true = 这条消息已被消费，不再交给大厅
+  };
+}
+
+// 可选：你对自己那份 policy 的**内部形状**的意见（不要写成 `valid:` 之类的键 —— 见下面那一条）
+export function validatePolicy(policy) {
+  return policy.files?.length >= 3 ? { ok: true } : 'policy.files needs at least 3 entries';
+}
+```
+
+- **工厂每条连接调用一次**（`onConnection` 之前）。挑战与「已证明」这类状态就放在工厂的闭包里 —— 那是**连接私有**的，
+  所以两台客户端 / 两个房间并发时不会串味。不要把它放到包的模块顶层：那是进程级共享状态。
+- **`validatePolicy` 是可选的第二道自检，而且它是唯一能判「策略内部形状」的地方。** 装载期只保证 `policy` 能解析成
+  一个 JSON **对象** —— 它不认识**你的**数据格式（`version` / `files` 是你自己的方言）。所以一份形状坏掉的策略，
+  没有这道自检时唯一的信号是工厂在**每条连接**上抛异常，而工厂抛异常的姿态是「这条连接上这个钩子不存在、消息照常
+  分发」—— 也就是「包看着装好了、闸门一条都没拦」。导出它之后，你说「不能用」= 装载器**点名拒绝整个包**，
+  理由带 `PREDISPATCH_BAD_POLICY`：
+  | 你返回 | 判定 |
+  |---|---|
+  | 不导出这个函数 | 不做这道自检，行为与从前**逐字节相同** |
+  | `undefined` / `null` / `true` / `{ ok: true }` | 通过 |
+  | `false`、非空字符串、`{ ok: false, detail }` | **拒绝**，字符串就是给作者看的理由 |
+  | 其它任何值（例如手误写成 `{ valid: false }`） | **拒绝**，理由写「返回了一个不认识的判定」 |
+  | 抛异常 | **拒绝**，理由取异常信息 |
+
+  装载期正是「响亮拒绝」该在的地方（`deps` 里的 `now()` 纪律同理）：一个拿不准的返回值宁可让包不加载，也不要让它
+  看起来装好了。
+- **依赖对象是冻结的，键恰好这八个**：`pack`、`policy`（解析好的 JSON，深冻结）、`policyFile`、`intercepts`、
+  `c2s`（`shared/protocol.js` 的 `C2S` 冻结副本）、`log`、`now`（注入的时钟）、`send`。**没有** `data` / `lobby` /
+  `Match` / 任何对局对象，也**没有** socket：所以钩子能做的只有观察、记录、上报和否决入口消息，它**改不了对局结果**
+  （不声明 `combat: true` 的包更是如此），也**不能**自己注册 `socket.on('message')` —— 那会让同一条消息被处理两次
+  （`room.create` / `g.buy` 这类有副作用的类型是实打实的双执行），框架不给你这个口子。
+- **`send(conn, msg)` 是框架的发送助手**（带背压守卫）。`preDispatch` 返回 `true` 时钩子**自己负责回执**，而回执
+  **必须带上你收到的那条消息的 `rid`**：没有 `rid` 的错误帧在客户端会走 `unhandledError` 弹一条红条
+  （`public/js/main.js`），玩家看到的就是「操作没反应 + 一条看不懂的错误」。
+- **每一条通过协议校验的消息都会到达钩子**，不只是 `intercepts` 里那些：三个 `resource.*` 类型（`resource.proof` /
+  `resource.challenge.request` / `resource.reset`，`shared/protocol.js` 的 `C2S`）**不在**任何 `intercepts` 里 ——
+  它们不是「进入一局」的入口，而是钩子总线自己的类型，必须能到钩子。`intercepts` 是**钩子自己**判断「要不要闸」的
+  名单（框架把它原样注入，并在加载期按协议校验过）。
+- **钩子在 `validateC2S` 之后、`ping`/`hello` 与会话检查之前被调用**。这条位置是被证明流程逼出来的：服务端的挑战是
+  连接建立时就发出去的，客户端的证明因此往往在 `hello` 之前到达 —— 放到会话检查之后，它只会被回 `hello required`。
+- **`intercepts` 里那些类型在被否决时不会进大厅**；钩子放行时（包括它自己 `intercepts` 里的类型）照常分发 ——
+  「声明了拦截」不等于「这条消息永远到不了大厅」。
+- **没有包声明它时，服务器行为与从前逐字节相同**：不装载模块、不建任何对象、不注册任何监听器、没有一行新日志。
+
+**坏声明点名拒绝，拒绝码与形状层同名**（`_up/mod4-pack` 那份声明对不上时作者看到的还是这几个词）：
+`PREDISPATCH_BAD_MODULE`（模块文件不在包里 / 导入失败 / 没有 `createPreDispatch` 导出）、`PREDISPATCH_BAD_POLICY`
+（策略文件不在包里 / 不是 JSON / 不是对象 / **模块自己的 `validatePolicy` 说它不能用**）、`PREDISPATCH_UNKNOWN_TYPE`
+（`intercepts` 里有一个协议不认识的名字 —— 不是静默丢掉那一条）、`PREDISPATCH_BAD_PATH`（解析到包外）。
+
+**从 B3a 段起，坏声明拒绝的是整个包**（DESIGN §28.13.3，与 §1.9.3 的 `client`、§1.9.4 的 `assets` 同一条纪律）：
+模块/策略文件不在包里、策略不是 JSON 对象、`intercepts` 里有协议不认识的名字 ⇒ 包**整个不加载**，理由进启动日志。
+B1 段当时只拒那个钩子、包照旧加载；那样一来服务器以为自己被准入闸门保护着，其实一条消息都没拦 —— 「加载了但能力
+没生效」是最坏的失败形态，所以这一条被对齐掉了。留在装载期之外的是那一格**只有 `import` 才知道**的失败：模块文件在、
+但 `import` 不了 / 没有 `createPreDispatch` 导出 / `validatePolicy` 说策略不能用。装载器是同步的，所以它们由
+`loadWorkshopHooks` 具名拒绝，并**由启动装配路径把整个包移出已加载集合**（`server/index.js` 的
+`dropUnavailablePreDispatchPacks`）—— 结局与上一段那三种**完全一样**，只是判的时刻晚一步。
+
+**作者纪律（业主裁决）**：注入的服务端逻辑不得依赖时钟（用 `deps.now()`）、不得依赖 RNG 与无序容器的遍历顺序、
+不得使用进程级可变全局状态；状态一律放连接 / 房间自己的作用域里。**不许**写「开打前设全局、打完恢复」那种代码 ——
+多局并发会串味。
+
+#### 1.9.2 `routes`：只读 HTTP 路由（B1 段已实现）
+
+```jsonc
+"routes": [ { "path": "/data/resource-manifest.json", "file": "resource-manifest.json", "cache": "no-cache" } ]
+```
+
+- `path` 是**绝对** HTTP 路径，`file` 是包内 `.json`。服务方式刻意窄：**只 GET / HEAD**（别的动词在
+  `server/http/routes.js` 就被 `405 Allow: GET, HEAD` 挡掉）、没有写路径、没有目录列表、不做任何重写。
+- **只有精确等于声明路径的请求被回答**。于是目录穿越不是一个「被检查出来」的边界，而是**没有可穿越的目标**：
+  `..` 永远拼不出一个已声明的 key。声明里带 `..`、或解析后逃出包目录的 `file`，在装载期就被拒（并记一条警告）。
+- `.js` / `.html` **在服务面再拒一次**（与 `/workshop-assets` 同一条线：那是代码执行面，不是数据面）。
+- `cache` 决定 `Cache-Control`：`no-cache`（缺省）→ `no-cache`；`no-store` → `no-store`；`public` →
+  `public, max-age=86400`（与包自己的素材同一条策略）。
+- 声明的路径**先于**核心静态挂载被查找：一条声明过的路径不会因为磁盘上恰好有同名核心文件而变成别的东西。反过来，
+  「声明了但文件不在」是 **404**，不会悄悄回落到那个同名核心文件。
+- 两条路由声明同一个 `path`：包 id 小的赢（DESIGN §28.3），输的那条记一条警告。
+
+#### 1.9.3 `client`：包自带的客户端面板（B2 段已实现）
+
+一条声明就能让包带上一块界面，而且**不用改本仓库一行代码**：
+
+```jsonc
+"client": {
+  "panels": [
+    { "id": "resource-import", "slot": "root.overlays", "module": "resources/preloadModal.js", "order": 10 },
+    { "id": "aside-note", "slot": "screen.game.aside", "module": "resources/aside.js" },
+    // `gate` 只在**别人**替你置真那个路径时才写（见下面那条警告）：
+    { "id": "settle-note", "slot": "screen.result.footer", "module": "resources/settle.js", "gate": "session.entered" }
+  ],
+  "requires": ["cacheStorage", "webCrypto"]
+}
+```
+
+> ⚠️ **不要给「唯一那个会打开 `session.preloadRequired` 的面板」写 `gate: "session.preloadRequired"`。** `gate` 的
+> 语义是「store 里那个路径为真**才**挂载」，而 `session.preloadRequired` 缺省是 `false`、**唯一会把它置真的正是
+> 这个面板自己** —— 于是全新会话里它**永远挂不上**，导入界面永远不出现，而服务器侧的准入闸门照样拦人：一个走不出去
+> 的环。正确写法是**无条件挂载 + 挂载时自己关闸**（`ctx.session.setPreload({ required: true, ready: false })`，
+> 见 §1.9.4 末尾那段客户端示例）。`gate` 适合的是「等某个**别人的**状态成立再出现」的面板，例如
+> `session.entered`（玩家已经进过大厅）。
+
+**模块契约**（`module` 是包内 `.js`；浏览器 `import` 它）：
+
+```js
+export function mount(ctx) {
+  // ctx.host 是一个属于你这次挂载的 <div>，往里画你的界面。
+  return { unmount() { /* 可选：页面卸载 / 引擎 dispose 时收尾 */ } };   // 也可以什么都不返回
+}
+```
+
+`default` 导出同一个函数也行。**模块源码进包的身份哈希**：改了面板的字节就是换了一个包（DESIGN §28.8），所以不
+用担心「摘要一样、界面不一样」。
+
+**四个挂载点**（闭枚举，写别的整包被拒：`CLIENT_BAD_PANEL_SLOT`）：
+
+| `slot` | 位置 |
+|---|---|
+| `root.overlays` | 最上层浮层（模态框、提示条这类东西放这里） |
+| `root.guide` | 说明层之上、浮层之下 |
+| `screen.game.aside` | 屏幕右侧竖条（对局界面旁边） |
+| `screen.result.footer` | 屏幕底部横条（结算界面下方） |
+
+四个宿主都是**固定的浮层容器**，与当前在哪个界面无关 —— 面板挂一次就一直在，不需要自己判断路由。容器的类与
+`data-mod-slot` 属性由注册点在面板真的挂载时创建（没有包声明 `client` 时页面上一个容器都没有）。
+
+**`order` 决定挂载顺序**（整数，缺省 0）：小的先挂；相同则包 id 小的先，再按面板 id。顺序永远不随发现顺序 /
+数组顺序变（DESIGN §28.3 的同一条规则）。**`gate` 是一个客户端 store 点路径**（例如 `session.entered`）：路径为真
+**才**挂，一个面板只挂一次、之后不会被摘掉。写一个 store 里不存在的路径是**具名拒绝**（`CLIENT_PANEL_GATE_UNKNOWN`），
+不是「永远不出现」。**别拿它等自己会置真的那个标志**（`session.preloadRequired`）—— 那是一个挂不上的环，理由与
+正确写法见 §1.9.3 开头那段警告。
+
+**`requires` 是能力声明，不是愿望**：只能取 `serviceWorker` / `cacheStorage` / `webCrypto`（写别的 `CLIENT_UNKNOWN_REQUIRE`）。
+缺一项时这个包的面板**一个都不挂**，并且**明说**「浏览器不支持」（控制台一条具名错误 + 玩家界面一条提示）——
+这个仓库不接受「装了但静默不工作」。
+
+**注入面是冻结的，键恰好这几个**（DESIGN §28.8 的「边界由没给什么决定」）：
+
+| 给 | 说明 |
+|---|---|
+| `id` / `pack` / `slot` / `order` / `gate` | 你声明的那几个值（只读） |
+| `log` | 带 `[mod <包>/<面板>]` 前缀的 `info` / `warn` / `error` |
+| `host` | 属于这次挂载的 `<div>`；往里画界面 |
+| `session.setPreload({ required, ready })` | **唯一**的 store 写口：入口闸门那两个状态位（见下） |
+| `net.on(type, fn)` / `net.sendResourceMessage(msg)` | **唯一**的网络口；见下 |
+
+**没有** store 句柄、没有 `net` 对象本身、没有对局对象、没有 `Match`/`Battle`，也**不能**自己注册
+`socket.on('message')`。所以面板能画错，**改不了对局结果**。
+
+**入口闸门（「素材没就绪不许进」怎么写）**：`session.setPreload({ required: true, ready: false })` 把路由压回标题页，
+预载完成后再 `setPreload({ ready: true })` 放行。两个状态位缺省都是 `false`（不启用 = 今天的行为一个字节不变），
+`selectRoute` 里那条件是 `preloadRequired && !preloadReady`。它**不是安全边界**（真正的边界是 §1.9.1 的服务端准入），
+但它连 `?room=` / `?playtest=` 深链和「localStorage 说我已经进过」那条旁路一起挡住（B2 段把 `main.js` 的
+`wasEntered` 旁路堵了）。
+
+**资源消息（挑战在 `hello` 之前到）**：用 `ctx.net.sendResourceMessage({ t: 'resource.challenge.request' })`、
+`{ t: 'resource.proof', nonce, version, proofs }`、`{ t: 'resource.reset' }`。**不要**用普通的 `send()`：服务端的挑战
+是连接建立时就发出去的，那一刻 `status` 还不是 `online`，`send()` 会**静默丢弃**（这正是社区资源包 mod 踩过的坑）。
+`sendResourceMessage` 走原始发送口（`_sendRaw`），只看这三个类型 + 协议形状。
+
+**模块路由**：`/workshop-panels/<包id>/<module>`。只有装载器注册过的 URL 被服务（没注册的、`..` 穿越的、`.html`
+一律 404），所以**别指望它当文件服务器用**；要送数据请用 §1.9.2 的 `routes`，要送图片/音频请用 `/workshop-assets`。
+
+**纪律：一个用不了的声明拒绝整个包**（DESIGN §28.13.3）。`module` 文件不在包里、不是 `.js`、或解析后跑出包目录，
+包**整个不加载**（拒绝码 `CLIENT_BAD_PANEL_MODULE`，与形状层同名），因为「包照旧加载、只是面板不出现」会让作者与
+服务器都以为自己有客户端界面，而浏览器里什么都没有。对既有包的影响是零：不声明 `client` 的包一个字节都不受影响。
+
+**当前状态**：服务端与纯逻辑部分全部有测试（`test/modClientPanels.test.js`：注册、服务面、`welcome`、
+`order`/`gate`/`requires`、注入面、三处客户端缺口）。**浏览器里真的 `import` 与真的渲染在本机没有 Chrome 上跑不了**
+—— 那是 `SP_E2E=1` 的可选路径，与 §4.4 同一个 standing gap。
+
+#### 1.9.4 `assets`：包自带的资源容器与清单（B3a 段已实现服务端）
+
+一个包可以带一份**资源容器**（`.spresources`，客户端资源包的字节格式）与一份**扁平文件表**（清单 `.json`），
+并声明这两棵树的服务态度：
+
+```jsonc
+"assets": {
+  "container": "packs/resources-0.1.0.spresources",  // 包内相对路径，必须是 .spresources，不能是别的扩展名
+  "manifest":  "resource-manifest.json",             // 包内相对路径，必须是 .json
+  "serverPolicy": "serve",                            // "serve"（缺省）| "cache-only"，见下
+  "verify": "sha256"                                  // 整包摘要的算法；缺省 sha256，今天只有这一种
+}
+```
+
+**容器怎么产**：`node tools/make-spresources.mjs --manifest <清单.json> --public <素材根> --out <你的包目录>` 会写出
+三件东西 —— `<包>/packs/<名字>.spresources`、它的旁挂 `<…>.sha256`、以及 `<包>/resource-manifest.json`（就是
+`assets.manifest` 指向的那份**权威清单**）。**清单必须显式给**：`tier` 是内容判断（首屏必需 / 后台慢慢拉），
+工具不替作者猜，而且它产出的容器字节与参考实现（`_up/mod4-pack/tools/spresources.mjs` 的 `buildPack`）在
+`test/modAssets.test.js` 里被断言为**逐字节相同**。
+
+**容器与清单从哪取**：`/workshop-resources/<包id>/<你声明的那条路径>`。`?v=<内容哈希前 12 位>` 是缓存键
+（重新打包 = 新 URL）。两条纪律：
+
+- **只有装载器注册过的两个 URL 被回答**。别的路径（包自己的 `pack.json`、`assets/**`、旁挂的 `.sha256`、`..` 穿越、
+  另一个包的路径）一律 **404** —— 与 §1.9.3 的模块路由同一条，所以这条通道**不能当文件服务器用**。
+- **容器是流式送出的**（可以到数百 MB：客户端资源包本身就是那么大），响应里带 `Content-Length` 与
+  `X-SP-Resource-Sha256`（装载期校验过的整包摘要）。清单按 `.json` 正常送。
+
+**`serverPolicy` —— 这条是**服务端**语义，写之前请读三遍**：
+
+| 值 | **服务端**对 `/assets/…` 与 `/fonts/…` 做什么 |
+|---|---|
+| `"serve"`（缺省，等于不写） | 照旧从磁盘服务。本仓库现有的包全是这个值，**服务端**行为与 B2 之后**逐字节相同** |
+| `"cache-only"` | 回 **412 Precondition Failed**，并且**不回源**（连 `stat` 都不做）：素材只允许从客户端自己的缓存取 |
+
+> ⚠️ **`serverPolicy` 管的是服务端，不是玩家看到的东西。** 引擎的资源 Service Worker 在**任何**包声明
+> `assets` 时就会注册（它拦 `GET` 且路径落在 `/assets/`、`/fonts/`、`/media/` 的请求），而它**只用本地导入并通过
+> 校验的缓存回答，命不中回 412、绝不回源** —— 这个行为**与 `serverPolicy` 无关**。所以：
+> - `"serve"` **不是**「对玩家没有影响」：对一个还没导入容器的玩家，那三棵树已经是 412 了（服务端本来会正常送出，
+>   但请求根本到不了服务端）；
+> - 一个真实部署里，容器的内容必须覆盖**页面真的会去取**的那三棵树，否则玩家看到的是一页没有素材的界面。
+>
+> 缺省那一行的「逐字节相同」说的是**服务端**；把这一句读成「装了没影响」是这份文档曾经最容易误导人的地方
+> （`_up/mod-compat/README.md` 的交付说明里有实测记述）。
+
+`cache-only` 覆盖的 `/assets/` 与 `/fonts/` 是**全服务器共用**的两棵树（核心游戏、所有包都用它们），所以它是
+**进程级**的：任何一个包声明它，整个服务器的这两棵树都不再服务。启动日志会点名是哪个包声明的。客户端那半
+（把容器导入 `CacheStorage`、由 Service Worker 应答这两棵树）见下面「客户端那半」与
+[DEPLOY.md](DEPLOY.md) 的 `cache-only` 一节。
+
+**`verify` —— 校验失败就是整个包被拒**：装载期读旁挂的 `<container>.sha256`（格式 `<64 位十六进制摘要>`，
+后面可以跟一个文件名，两段之间空白分隔 —— 与 `sha256sum` 的输出一致），再用**流式**读取把容器哈希一遍：
+
+| 情况 | 拒绝码 | 结果 |
+|---|---|---|
+| 摘要对得上 | — | 包正常加载，摘要随响应头出去 |
+| 摘要对不上 | `ASSETS_VERIFY_FAILED` | **整个包不加载**（理由里写出两个摘要值） |
+| 声明了 `verify` 却没有旁挂摘要（或格式不对） | `ASSETS_VERIFY_UNAVAILABLE` | **整个包不加载** |
+| `container` / `manifest` 指的文件不在包里 | `ASSETS_BAD_CONTAINER` / `ASSETS_BAD_MANIFEST` | **整个包不加载** |
+| `i18n[<语种>]` 指的文件不在包里 / 不是 JSON 对象 | `I18N_BAD_FILE` | **整个包不加载**（§1.10） |
+| `i18n` 里语种码不是常用大小写 / 是源语言 `zh` | `I18N_BAD_LANG` / `I18N_SOURCE_LANG` | **整个包不加载**（§1.10） |
+| `i18n` 的某条译文不是字符串 / 键以 `_` 开头 | `I18N_BAD_VALUE` / `I18N_BAD_KEY` | **整个包不加载**（§1.10） |
+| `pack.json` 有一个这份格式不认识的顶层键 | `PACK_UNKNOWN_FIELD` | **整个包不加载**（§1.1 的闭集表） |
+
+「声明了校验、但校验不过还照旧发」这个仓库不接受：客户端会导入一份服务端**已经知道是坏的**字节，而唯一的信号是
+一行没人看的日志。
+
+**纪律：一个用不了的声明拒绝整个包**（DESIGN §28.13.3，与 §1.9.3 逐字同一条）。**`server.preDispatch` 从本刀起
+也是这条**（§1.9.1）：模块或策略文件不在包里、策略不是 JSON 对象、`intercepts` 里有协议不认识的名字 ⇒ 整个包
+不加载。B1 段当时只拒那个钩子、包照旧加载 —— 「服务器以为自己被准入闸门保护着，其实一条消息都没拦」正是这条纪律
+要消灭的失败形态。B4 段把最后剩下的一格也补上：**`import` 失败 / 没有 `createPreDispatch` 导出**这两种只有
+`import` 才知道的失败，由启动装配路径（`loadWorkshopHooks` 之后、其余一切读者之前）**把整个包移出已加载集合**并
+在启动日志里点名（`server/workshop.js dropUnavailablePreDispatchPacks`）。它的数据文件也不再并进游戏数据 ——
+「包不在身份清单里，而它的干员在游戏里」这种半装状态是被明确拒绝的。
+
+**对既有包的影响是零**：不声明 `assets` 的包一个字节都不受影响（没有新路由、没有新响应头、没有 412、没有新字段、
+没有 SW 注册）。
+
+##### 客户端那半：引擎自带 SW，包只声明（B4 段）
+
+**业主裁决（2026-10-10）：Service Worker 由引擎自带，包只声明。** 理由一句话：根作用域的 SW 能拦截该站点**所有**
+请求，让包提供 `.js` 去注册它就等于把客户端控制权交出去。所以：
+
+| 谁 | 提供什么 |
+|---|---|
+| **引擎** | `public/resource-sw.js`（唯一的 SW 脚本）与 `public/js/resources/**`（`common` / `service` / `bundle` / `verify` / `worker` / `host`）。注册口径：`type: 'module'`、`scope: '/'`、`updateViaCache: 'none'` |
+| **包** | 只有那一句 `assets` 声明，加上**容器 / 清单 / 旁挂摘要**三个文件。**不能**提供 SW 脚本，也没有任何字段能指定一个 SW 地址 |
+
+**缺省不启用**：没有任何包声明 `assets` 时，`welcome` 里没有 `modAssets` 字段，浏览器**不加载资源流程、不注册
+SW、不多一个请求、不多一个 DOM、不在 `globalThis` 上留任何名字**（`public/js/main.js` 只在字段真的到达时才
+`import('./resources/host.js')`，所以这条不变量是结构性的）。
+
+**声明之后你会得到什么**：服务器在 `welcome` 里为你的包带一条 `modAssets`（容器 URL、清单 URL、装载期已与字节核对
+过的容器摘要 `digest`、归一化后的 `serverPolicy` / `verify`）。客户端拿到它之后——
+
+```
+① 取清单（你的 assets.manifest）→ 校验形状，并核对 version == sha256(压紧 files)[0:12]
+② 取容器（你的 assets.container，或玩家自己选的文件）→ 解析容器头，核对它与①逐条相同
+③ 逐文件核对 SHA-1[0:12] → 写进 Cache Storage（每个条目带 X-SP-Resource / X-SP-Resource-Hash）
+④ 写索引（URL → 指纹）与收据（这个包是为哪份容器、哪版清单导入的）
+⑤ 浅度校验（条目指纹三处一致）／深度校验（重读字节、重算指纹）→ 都过了才算装好
+```
+
+**入口放行是你（包）的事，不是引擎的事**。什么时候算「装好了」是包的策略（浅度还是深度、允不允许跳过），所以
+引擎只**报告**结果，动那支笔的是你的 C 层面板（§1.9.3）：`ctx.session.setPreload({ required: true, ready: false })`
+在挂载时关闸，导入 + 校验通过之后 `{ ready: true }` 开闸。两个标志缺省都是 `false`，也就是**不声明就完全不挡人**。
+
+你的面板模块可以直接 import 引擎的流程（它们是站点上的模块，不是包里的文件）：
+
+```js
+import { installModAssets, modAssetsFor, importAndVerify, importFromServer, importStateFor } from '/js/resources/host.js';
+
+export function mount(ctx) {
+  const decl = modAssetsFor(ctx.pack);       // 服务器宣告的、属于你这个包的那一条（没声明 assets 时是 null）
+  ctx.session.setPreload({ required: true, ready: false });
+  // …你自己的界面：一个「导入完整资源包」的按钮 + 一个 <input type=file accept=".spresources">…
+  // 两种来路喂的是同一个函数：服务端那条（`decl.container`）与玩家本地的文件。
+  return {
+    async onPick(file) {
+      const report = await importAndVerify(file, ctx.pack, { deep: false });
+      // 或者：const report = await importFromServer(ctx.pack);
+      if (report.valid) ctx.session.setPreload({ ready: true });
+    },
+  };
+}
+```
+
+**两条要记住的后果**：
+
+- **容器摘要进了包的身份哈希。** 装载期已经拿它与字节核对过，所以它和 `pack.json`、内容文件、`kits/`、`assets/**`
+  一样是这份包的属性：**换了容器 = 换了身份** = 房间的摘要闸门（`welcome.mods.digest`）随之改变，客户端也会据此判定
+  旧缓存作废（收据里的 `digest` 与服务器这次宣告的比）。不声明 `assets` 的包哈希逐字节不变（`test/packAssets.test.js`
+  钉着 `docs/examples/` 三份真实包）。
+- **`serverPolicy: "cache-only"` 的两半合起来才成立。** 服务端对 `/assets`、`/fonts` 回 412（不回源），客户端那半
+  由引擎的 SW 用**本地校验过的缓存**回答同一批 URL：命不中也是 **412，绝不回源**。所以 `cache-only` 的部署里，
+  容器从 `/workshop-resources/…` 进来一次是玩家唯一需要的那次网络传输；离线/别人给的文件则是第二条来路。
+
+**当前状态**：服务端与客户端流程的**纯逻辑**都有测试（`test/modAssets.test.js`：不声明 ⇒ 无变化、容器/清单可取、
+`?v=` 生效、穿越/未注册 ⇒ 404、容器走流式、`cache-only` 只对两棵树生效且只在声明时生效、`verify` 失败点名、
+我们的容器写入器与参考写入器**逐字节相同**、容器导入/逐文件校验/索引/收据/深浅校验在 Node 里真跑、SW 的应答选择
+规则（含 `%5B` 编码等价、`/media/` 候选、Range ⇒ 206、命不中 412）、`welcome.modAssets` 的条件性、
+`assetsDigest` 进身份、`server.preDispatch` 装配路径裁剪的回归）。**浏览器路径没有验过**：真 SW 的注册与作用域、
+真 `caches` 的配额行为、`<input type=file>` 的 `File`、面板模块的真 `import()`、渲染与样式叠放 —— 那是
+`SP_E2E=1` + 有 Chrome 的机器上的事（§4.4 同一条 standing gap），本机没有 Chrome，所以这些用例**默认跳过**，
+而且没有跑过。
+
+
+### 1.10 `i18n`：给**已有语种**补界面词条（B5 段已实现）
+
+**它解决的是什么**：`packs/` 的 `lang` 类型只能**新增**一个语种 —— 一个包带 `en` / `ja` / `ko` / `zh-TW` 里的任何一个，
+真实的扫描器都会整包跳过，原文是：
+
+```
+[packs] packs/quickchat-en/ skipped: the language en is already provided by public/i18n/en.json
+```
+
+同一个 fixture 换成全新语种 `pt` 就被正常登记（`quickchat-pt … 1 strings`）。而任何带新界面的包（新面板、新按钮、新提示）
+都需要**给已有语种补键**，所以这是个结构性的缺口 —— 窄路（做成一个全新语种）解决不了它。
+
+```json
+// pack.json
+{
+  "id": "quickchat",
+  "content": ["chess"],
+  "i18n": { "en": "i18n/en.json", "ja": "i18n/ja.json" }
+}
+```
+
+```json
+// i18n/en.json —— 形状与 public/i18n/<code>.json 逐字相同：{ "<中文 msgid>": "<译文>" }
+{ "我玩 {bond}": "I'm playing {bond}", "请给我 {chess}": "Can you send me {chess}?" }
+```
+
+**形状**：`i18n` 是对象，键是**语种码**（`shared/i18nPacks.js` 的常用大小写：`en` / `ja` / `ko` / `zh-TW` / `pt-BR` …），
+值是**包内相对路径**、必须以 `.json` 结尾。源语言 `zh` 被拒（msgid 自己，没有语言文件可补，`I18N_SOURCE_LANG`）；
+路径不是包内相对 `.json` 被拒（`I18N_BAD_FILE`）；语种码写错被拒（`I18N_BAD_LANG`）。**声明的文件必须在包里、必须是
+JSON 对象、每个值必须是字符串** —— 任一不满足**整个包不加载**（与 `assets` / `client` / `server.preDispatch` 同一条
+纪律，DESIGN §28.13.3）：一份读不出来的译文如果只是被跳过，作者看到的是「包加载了、我的词条没生效」。
+
+**合并规则（三条，都有测试钉住）**：
+
+1. **已有键绝不覆盖**。官方（`public/i18n/<code>.json`）里已经有的 msgid，值**原样留着**，你写的那一份只是被记下来。
+   理由：这类补丁的来源常常是机器翻译或某个旧版官方文件，覆盖它等于让一个包**悄悄改掉**已发布的界面文案。
+2. **冲突显式报告**。你的键与已有键**值不同**时，装载期与启动日志各报一条，点名**键 + 语种 + 包 id + 双方的值**：
+
+   ```
+   [workshop] i18n en "语音语言": kept the existing translation (pack "quickchat" wanted "Voice language")
+   ```
+
+   值相同的重叠**不是冲突**（它只是「这一条官方已经有了」），所以不会堆进报告 —— 报告的条数就是真要你处理的那几条。
+3. **值是字符串**。非字符串（数组 / 对象）整包被拒（`I18N_BAD_VALUE`）：`t()` 会把非字符串原样打印到界面上，
+   那是最难查的一类界面故障。
+
+**服务面**：客户端读的一直是 `/i18n/<code>.json`（`public/js/ui/lang.js`），而 `public/i18n/<code>.json` **一个字节都不改**
+（与 `data/*.json` 同一条纪律）。有包声明 `i18n` 的语种，这个 URL 送的是**合并体**（官方文件 + 这个包的新增键，
+`_meta` 原样保留）；没有包声明的语种照旧走普通静态路径，字节不变。
+
+**身份哈希**：声明的每一个 i18n 文件都**逐字节进包的身份哈希**（与 `client.panels[*].module` 同一条：能改变玩家看到的
+东西的字节不该躲在摘要之外）。没声明 `i18n` 的包哈希逐字节不变（`docs/examples/` 三份真实包钉着）。
+
+**今天没有的东西（照实说）**：`data/i18n/<code>.json`（**游戏文本**）不在这个通道里 —— 本字段只补界面词条
+（`public/i18n/`）。要不要让包也给游戏文本补键是下一刀的裁决；`tools/i18n.mjs check` 也不检查包声明了却没被代码用到的键
+（一个写错的键今天不会报错，只是永远不显示）。
+
 ---
 
 ## 2. 助战
@@ -514,6 +1053,10 @@ node tools/workshop-validate.mjs my-pack
 ```json
 { "id": "my-ally", "content": ["chess"], "support": ["chess_char_ws_my_ally_01_a"] }
 ```
+
+> **`support` 本身不是贡献项**（`content` 才是）：上面那个例子里的 `"content": ["chess"]` 是**必需**的，
+> 因为干员本体是 `chess` 记录带进来的。一个只有 `"support": [...]`、`content: []` 的包会被 `EMPTY_PACK` 拒
+> —— 这不是缺陷，是既有裁决（§1.9 的 `EMPTY_PACK` 表）；B5 段把这条**写进了拒绝文案**，理由里会点名 `support`。
 
 装载时叠加层把每个 id 按**记录自己的阶**加进 `pool`（`shared/workshop.js` 的 `workshopSupportEntries` / `mergeWorkshopSupport`），
 于是「装包即可选」——不必再手工改 `data/support.json`。两条硬规则：

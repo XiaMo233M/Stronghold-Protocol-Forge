@@ -113,6 +113,51 @@ describe('包元数据：读（GET /api/packs/support 的 meta 与候选）', ()
     const meta = await metaOf('handmade');
     assert.deepEqual(meta.overrides.map((o) => [o.entry, o.inUse, o.official]), [['items:chess_item_1_01_e_a', false, true]]);
   });
+
+  // 被拒的包必须**在列表里**，并带着可读的理由（B3a §6 第 4 条 / B5 段）。以前的报告说它们会从列表里消失；
+  // 实测是「在列表里，但理由只在一个小标签里，pack.json 读不出来时连标签都只是 REFUSED」—— 这条测试把
+  // 「列出来 + 带理由」两半钉住，好让下一次改动不能再把它变回静默。
+  //
+  // 它用**自己的工坊根与自己的编辑器实例**：往共用的 wsRoot 里塞两个坏包会让别处的 `loadedErrors === []`
+  // 当场变红（那些断言是对的 —— 一个坏包确实会让 loadWorkshop 报错）。
+  test('一个被拒的包仍然在列表里，且列出拒绝码与理由', async () => {
+    const ownRoot = join(tmp, 'refused-workshop');
+    const write = (id, raw, files = {}) => {
+      fs.mkdirSync(join(ownRoot, id), { recursive: true });
+      fs.writeFileSync(join(ownRoot, id, 'pack.json'), raw);
+      for (const [rel, body] of Object.entries(files)) {
+        const abs = join(ownRoot, id, ...rel.split('/'));
+        fs.mkdirSync(dirname(abs), { recursive: true });
+        fs.writeFileSync(abs, body);
+      }
+    };
+    write('refused-unknown-key', `${JSON.stringify({ id: 'refused-unknown-key', name: '被拒的包', content: ['chess'], variants: {} }, null, 2)}\n`,
+      { 'chess.json': `${JSON.stringify({ chess_ws_r: { chessId: 'chess_ws_r', name: 'R', tier: 3 } }, null, 2)}\n` });
+    write('refused-broken-json', '{ "id": "refused-broken-json", ');
+    write('goodone', `${JSON.stringify({ id: 'goodone', content: ['chess'] }, null, 2)}\n`,
+      { 'chess.json': `${JSON.stringify({ chess_ws_g: { chessId: 'chess_ws_g', name: 'G', tier: 3 } }, null, 2)}\n` });
+    const own = await createEditorServer({ workshopRoot: ownRoot, port: 0, host: '127.0.0.1', dataDir: DATA_DIR, supportFile: join(tmp, 'support2.json') });
+    try {
+      const body = await fetch(`${own.url}/api/packs/support`).then((r) => r.json());
+      const ids = body.packs.map((p) => p.id).sort();
+      assert.deepEqual(ids, ['goodone', 'refused-broken-json', 'refused-unknown-key'], '被拒的包不能从列表里消失');
+      for (const id of ['refused-unknown-key', 'refused-broken-json']) {
+        const row = body.packs.find((p) => p.id === id);
+        assert.equal(row.status, 'refused');
+        assert.ok(row.reason, '理由必须带出来（列表行就显示它）');
+        assert.ok(row.refusal && row.refusal.code && row.refusal.detail, `${id}: 拒绝要有机器可读的码 + 理由`);
+      }
+      assert.equal(body.packs.find((p) => p.id === 'refused-unknown-key').refusal.code, 'PACK_UNKNOWN_FIELD');
+      assert.equal(body.packs.find((p) => p.id === 'refused-broken-json').refusal.code, 'PACK_LOAD');
+      // 好包一个都不受影响
+      assert.equal(body.packs.find((p) => p.id === 'goodone').status, 'loaded');
+      // 浏览器那条 500 的路径也不存在：请求是 200，坏包只是列表里的一行
+      const raw = await fetch(`${own.url}/api/packs/support`);
+      assert.equal(raw.status, 200);
+    } finally {
+      await own.close();
+    }
+  });
 });
 
 describe('包元数据：写（POST /api/packs/<id>/meta）', () => {

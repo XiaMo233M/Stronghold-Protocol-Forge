@@ -24,7 +24,7 @@ const DATA_DIR = join(ROOT, 'data');
 const quiet = { info() {}, warn() {}, error() {}, debug() {} };
 
 const norm = (extra = {}, opts = { hasAssets: true }) => normalizePackManifest(
-  { id: 'my-pack', content: ['items'], hasAssets: true, license: 'CC0-1.0', ...extra }, 'my-pack', opts);
+  { id: 'my-pack', content: ['items'], license: 'CC0-1.0', ...extra }, 'my-pack', opts);
 const refused = (extra, opts, error) => {
   const r = norm(extra, opts);
   assert.equal(r.ok, false, `${error}: expected a refusal`);

@@ -2337,11 +2337,41 @@ export async function createEditorServer(opts = {}) {
     if (p === '/api/packs/support' && method === 'GET') {
       const loaded = loadWorkshop(root, { log: quietLog });
       const cfg = normalizeSupportConfig(readJson(supportFile, null));
-      const packs = packIdsFor(root).map((id) => supportStateFor(root, id, supportFile));
+      // 一个包读不出来**不能把整页带走**（B5 段）：这一页是「我的包都在哪儿、哪一个被拒了」那唯一的地方，
+      // 而 `packIdsFor` 列的是**磁盘上**的目录 —— 一个半删的包、一份手写坏掉的 pack.json 都会走到这里。
+      // 以前这里没有兜底：任何一个包抛异常，整个 GET 变 500，页面上**所有**包一起消失（连好的那些也不见了），
+      // 而作者看到的只是「包管理页打不开」。现在坏的那个包自己变成一条 `refused` 记录（带理由），其余照常。
+      const packs = packIdsFor(root).map((id) => {
+        try {
+          return supportStateFor(root, id, supportFile);
+        } catch (e) {
+          return {
+            id, name: id, version: null, author: null, license: null, hasAssets: false,
+            content: [], contentFiles: 0, undeclared: [], voiceLines: 0, support: [], supportDerived: [],
+            status: 'refused', reason: `PACK_READ: ${e && e.message ? e.message : String(e)}`,
+            refusal: { code: 'PACK_READ', detail: e && e.message ? e.message : String(e) },
+            syntaxOk: false, syntaxError: null, supportEnabled: cfg.enabled,
+            pack: id, derived: [], errors: [], operators: [], workshop: cfg.pool, enabled: cfg.enabled,
+            diyOperators: null,
+          };
+        }
+      });
       // 元数据与 overrides：同一个 GET 一起给（这一页是同一个页面，多一轮请求只会多一个「半加载」状态）。
       // `officialTables` 只读一次，候选表与「官方有没有这个 id」都从它回答。
       const officialTables = officialIdTables(dataDir);
-      const meta = Object.fromEntries(packIdsFor(root).map((id) => [id, packMetaState(root, id, officialTables)]));
+      // 同一条兜底用在 `meta` 上：`readPackMeta` 读的是同一批目录，一次抛异常同样会让整页 500。
+      const meta = Object.fromEntries(packIdsFor(root).map((id) => {
+        try {
+          return [id, packMetaState(root, id, officialTables)];
+        } catch (e) {
+          return [id, {
+            pack: id, meta: {}, hasAssets: false, overrides: [],
+            playtest: { directToHand: [], unknown: [] }, ok: false,
+            issue: { code: 'PACK_READ', detail: e && e.message ? e.message : String(e) },
+            metaFields: [...PACK_META_FIELDS], licenseChoices: [...LICENSE_CHOICES],
+          }];
+        }
+      }));
       return sendJson(res, 200, {
         workshopRoot: root,
         // 卡池的最终归属地：`data/support.json` 的 `"workshop": false` 会忽略所有包的助战声明

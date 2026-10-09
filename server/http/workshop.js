@@ -15,8 +15,54 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { WORKSHOP_MEDIA_PREFIX } from '../../shared/workshop.js';
-import { workshopTouchedFiles } from '../workshop.js';
+import { WORKSHOP_MEDIA_PREFIX, WORKSHOP_RESOURCE_PREFIX, byPackId, workshopI18nFiles } from '../../shared/workshop.js';
+import { workshopTouchedFiles, readUiLangFile } from '../workshop.js';
+
+/**
+ * The `/i18n/<code>.json` bodies the HTTP layer must serve MERGED for a 创意工坊 pack (fanpack G-04,
+ * docs/WORKSHOP.md §1.10) — the i18n twin of `buildWorkshopDataFiles`, and deliberately the same shape: one Buffer of
+ * `JSON.stringify(merged)` per language any pack adds to, and an **empty map** when no pack declares `i18n`.
+ *
+ * Why the merge must happen here and not in the pack: the file the client fetches is the language folder's own
+ * (`public/i18n/<code>.json`, `public/js/ui/lang.js` reads `/i18n/<code>.json`), and a pack may not rewrite a folder
+ * file — the same reason `data/*.json` is never rewritten. So the pack's entries are merged ON THE WAY OUT:
+ *   * a key that already exists **keeps the official translation** (`mergeWorkshopI18n`), and the difference is
+ *     reported instead of applied;
+ *   * `_meta` of the on-disk file is preserved untouched (it is the language manifest the client reads).
+ *
+ * A language no pack touches is not in the map at all, so the request falls through to the plain static path and a
+ * normal install serves byte-for-byte what it served before.
+ * @param {ReturnType<import('../workshop.js').loadWorkshop>} workshop
+ * @param {{ readBase?: (lang: string) => Record<string, any>|null, log?: object|null }} [opts]
+ * @returns {Map<string, Buffer>}
+ */
+export function buildWorkshopI18nFiles(workshop, { readBase = readUiLangFile, log = null } = {}) {
+  /** @type {Map<string, Buffer>} */
+  const out = new Map();
+  const packs = (workshop && workshop.packs) || [];
+  if (!packs.length) return out;
+  /** pack id → 它的目录（一份 i18n 文件住在**声明它的那个包**里，不是住在赢家的包里时也一样读自己的）。 */
+  const dirs = new Map(packs.map((p) => [p.id, typeof p.dir === 'string' && p.dir ? path.resolve(p.dir) : null]));
+  const readFile = (pack, rel) => {
+    const dir = dirs.get(pack) || null;
+    if (!dir) return null;
+    const abs = path.join(dir, ...String(rel).split('/'));
+    if (abs === dir || !abs.startsWith(dir + path.sep)) return null;
+    try {
+      const json = JSON.parse(fs.readFileSync(abs, 'utf8'));
+      return json && typeof json === 'object' && !Array.isArray(json) ? json : null;
+    } catch {
+      return null;
+    }
+  };
+  const { files, conflicts, errors } = workshopI18nFiles(packs, readFile, readBase);
+  for (const [lang, merged] of files) out.set(lang, Buffer.from(JSON.stringify(merged), 'utf8'));
+  for (const c of conflicts) {
+    log?.warn?.(`[workshop] i18n ${c.lang} "${c.key}": kept the existing translation (pack "${c.pack}" wanted ${JSON.stringify(c.packValue)})`);
+  }
+  for (const e of errors) log?.warn?.(`[workshop] i18n ${e.pack}/${e.lang}: ${e.code}: ${e.reason}`);
+  return out;
+}
 
 /**
  * The `/data/<file>.json` bodies the HTTP layer must serve MERGED for a 创意工坊 pack (docs/WORKSHOP.md): one Buffer of
@@ -68,6 +114,123 @@ export function workshopKitFilesFor(modules, workshopDir) {
 export const WORKSHOP_ASSET_PREFIX = WORKSHOP_MEDIA_PREFIX;
 
 /**
+ * Map each **C-layer panel module URL** to the file on disk that serves it (`pack.json.client.panels[].module`,
+ * DESIGN §28.8). Built from the LOADED panel list only, exactly like `workshopKitFilesFor`: a request can never name a
+ * path this map does not already hold, so the registration point does not turn the game server into a file server.
+ *
+ * The map key is the DECODED path (the loader percent-encodes each module segment, `server/http/static.js` compares
+ * against `decodeURIComponent(rawPath)`), and a module whose bytes are not a `.js` file never enters it — the same line
+ * `/workshop-assets` draws from the other side (that route serves media and refuses `.js`; this one serves code and
+ * serves nothing else).
+ * @param {Array<{ pack: string, module: string, url: string }>} panels the list `loadWorkshopPanels` built
+ * @param {string} workshopDir
+ * @returns {Map<string, string>}
+ */
+export function workshopPanelFilesFor(panels, workshopDir) {
+  /** @type {Map<string, string>} */
+  const out = new Map();
+  // `workshopDir: null` switches the whole feature off (tests, a clean server): never resolve a path from a missing root.
+  if (typeof workshopDir !== 'string' || workshopDir === '') return out;
+  const root = path.resolve(workshopDir);
+  for (const p of Array.isArray(panels) ? panels : []) {
+    if (!p || typeof p.url !== 'string' || typeof p.pack !== 'string' || typeof p.module !== 'string') continue;
+    const raw = p.url.split('?')[0];
+    if (!raw.endsWith('.js')) continue;
+    let key = raw;
+    try { key = decodeURIComponent(raw); } catch { /* an unencoded "%" in the declaration: key on the raw text */ }
+    const rel = p.module.split('/');
+    const bad = !rel.length || rel.some((s) => !s || s === '..' || s === '.' || s.startsWith('.'))
+      || rel[rel.length - 1].length <= '.js'.length;
+    if (bad) continue;
+    const dir = path.join(root, p.pack);
+    const abs = path.join(dir, ...rel);
+    if (abs !== dir && !abs.startsWith(dir + path.sep)) continue;
+    out.set(key, abs);
+  }
+  return out;
+}
+
+/**
+ * `routes[*].cache` 声明 → 真正的 `Cache-Control` 头。三种语义就是三种，一个不多一个不少（`shared/workshop.js`
+ * `ROUTE_CACHE_POLICIES` 是那份闭枚举的唯一来源）：
+ *   * `no-cache`（缺省）—— 可以存，但每次都要回来问（`/data/*.json` 那一类「随时会变」的东西）；
+ *   * `no-store` —— 根本不存（清单里带凭据 / 一次性数据）；
+ *   * `public` —— 公开可缓存一天，与包自己的素材（`/workshop-assets`）同一条策略：一次重新打包才会换内容。
+ */
+export const ROUTE_CACHE_HEADERS = Object.freeze({
+  'no-cache': 'no-cache',
+  'no-store': 'no-store',
+  'public': 'public, max-age=86400',
+});
+
+/**
+ * The read-only HTTP routes the installed packs declare (`pack.json.routes`, DESIGN §28.13,
+ * docs/WORKSHOP.md §1.9): the declared absolute path → the file inside the pack that serves it.
+ *
+ * The shape layer (`shared/workshop.js parseRoutesDecl`) already refused everything that is not "an absolute path, a
+ * pack-relative `.json`", but this is the **serving** side and it re-judges: the declaration it reads may come from a
+ * hand-built loader object or from a pack written against an older schema. Nothing here ever writes, and traversal is
+ * structurally impossible — only an exact declared path is answered, and the file is resolved by joining the pack
+ * directory with the declared segments and then refusing anything that escapes it. `.js` / `.html` are refused here for
+ * the same reason `/workshop-assets` refuses them: this channel is data, not code.
+ *
+ * Refusals are reported (`errors`) rather than thrown, and a route whose file is missing stays in the map **on
+ * purpose**: serving it answers 404 instead of silently falling through to whatever the core static mount happens to
+ * have at that path. Two packs declaring the same path: the smaller pack id wins (DESIGN §28.3's rule), and the loser
+ * is reported — the same ordering rule the data overlay and the kit loader use.
+ *
+ * @param {{ packs?: Array<{ id: string, dir?: string, routes?: Array<{ path: string, file: string, cache?: string }> }> }} loaded
+ * @param {string|null} workshopDir
+ * @param {{ log?: object|null }} [opts]
+ * @returns {{ routes: Map<string, { file: string, cache: string, pack: string }>, errors: Array<{ pack: string, path: string, reason: string }> }}
+ */
+export function workshopRoutesFor(loaded, workshopDir, { log = null } = {}) {
+  /** @type {Map<string, { file: string, cache: string, pack: string }>} */
+  const routes = new Map();
+  /** @type {Array<{ pack: string, path: string, reason: string }>} */
+  const errors = [];
+  if (typeof workshopDir !== 'string' || workshopDir === '') return { routes, errors };
+  const root = path.resolve(workshopDir);
+  // 包 id 次序（DESIGN §28.3 的同一条规则）：一条路径被两个包声明时，谁赢不随装载器 / 调用方给的数组顺序变。
+  for (const p of ((loaded && Array.isArray(loaded.packs)) ? loaded.packs : []).slice().sort(byPackId)) {
+    if (!p || typeof p.id !== 'string' || !p.id || !Array.isArray(p.routes)) continue;
+    const dir = p.dir ? path.resolve(p.dir) : path.join(root, p.id);
+    if (dir !== root && !dir.startsWith(root + path.sep)) continue;
+    for (const route of p.routes) {
+      const rel = route && typeof route.file === 'string' ? route.file : '';
+      const at = route && typeof route.path === 'string' ? route.path : String(route && route.path);
+      const segments = rel.split('/');
+      const bad = !route || typeof route.path !== 'string' || !route.path.startsWith('/') || route.path.length < 2
+        || route.path.includes('\\') || route.path.split('/').some((s) => s === '..' || s === '.')
+        || path.isAbsolute(rel) || !rel.endsWith('.json') || segments.some((s) => s === '..' || s === '.');
+      if (bad) {
+        errors.push({ pack: p.id, path: at, reason: 'not a servable route: an absolute HTTP path and a pack-relative .json file (this channel never serves code or markup)' });
+        continue;
+      }
+      const abs = path.join(dir, ...segments);
+      if (abs !== dir && !abs.startsWith(dir + path.sep)) {
+        errors.push({ pack: p.id, path: at, reason: `"${rel}" resolves outside the pack` });
+        continue;
+      }
+      if (routes.has(route.path)) {
+        errors.push({ pack: p.id, path: at, reason: `already declared by pack "${routes.get(route.path).pack}" (the smaller pack id wins, DESIGN §28.3)` });
+        continue;
+      }
+      let exists = false;
+      try { if (fs.statSync(abs).isFile()) exists = true; } catch { /* stays false: the route is kept, serving answers 404 */ }
+      if (!exists) errors.push({ pack: p.id, path: at, reason: `"${rel}" is declared in pack.json but missing (the path is still served, as a 404)` });
+      routes.set(route.path, {
+        file: abs,
+        cache: Object.hasOwn(ROUTE_CACHE_HEADERS, route.cache) ? route.cache : 'no-cache',
+        pack: p.id,
+      });
+    }
+  }
+  for (const e of errors) log?.warn?.(`[workshop] route ${e.pack} ${e.path}: ${e.reason}`);
+  return { routes, errors };
+}
+
+/**
  * The file types a pack's `assets/` folder may serve. Deliberately an allowlist: this route is reachable by any client,
  * and a `.js` or `.html` there would be code the page could be talked into executing (the kit route exists for code, and
  * it serves only modules the loader registered).
@@ -103,4 +266,147 @@ export function workshopAssetsFor(loaded, workshopDir) {
     if (fs.existsSync(path.join(dir, 'assets'))) out.set(p.id, dir);
   }
   return out;
+}
+
+/**
+ * The **registered URLs** of a pack's declared resource container and manifest (`pack.json.assets`, DESIGN §28.13,
+ * docs/WORKSHOP.md §1.9.4): `WORKSHOP_RESOURCE_PREFIX + <pack id> + <declared path>`, built from the LOADED packs only
+ * — exactly the stance `workshopPanelFilesFor` and `workshopKitFilesFor` take, and the reason none of these routes can
+ * be walked into a file server.
+ *
+ * Why a map and not a check: a declared path is compared to the request path **as a string**, so `..` cannot build a key
+ * that is not in it. Traversal is not a boundary that can be got wrong here, it is a goal that does not exist.
+ *
+ * Both files are served from the same map and the entry says which is which (`kind`), because the difference matters on
+ * the wire: the container is streamed and carries `X-SP-Resource-Sha256` (the digest the loader verified), the manifest
+ * is an ordinary small `.json` table.
+ *
+ * The digest is NOT recomputed here: `assetsIssues` already hashed the container while gating the pack, and hashing a
+ * few hundred megabytes twice at boot would be the one cost this feature cannot hide.
+ * @param {Array<object>|{ packs?: Array<object> }} packs the loaded packs (`loadWorkshop(...)`) or the array itself
+ * @param {string|null} workshopDir
+ * @param {{ digests?: Map<string, string>|Record<string, string>|null }} [opts] pack id → verified container digest
+ * @returns {Map<string, { kind: 'container'|'manifest', pack: string, file: string, url: string, sha256: string|null }>}
+ */
+export function workshopResourceFilesFor(packs, workshopDir, { digests = null } = {}) {
+  /** @type {Map<string, { kind: 'container'|'manifest', pack: string, file: string, url: string, sha256: string|null }>} */
+  const out = new Map();
+  // `workshopDir: null` switches the whole workshop off (tests, a clean server): never resolve a path from a missing
+  // root — the same rule workshopKitFilesFor / workshopPanelFilesFor / workshopRoutesFor follow.
+  if (typeof workshopDir !== 'string' || workshopDir === '') return out;
+  const root = path.resolve(workshopDir);
+  const list = (packs && Array.isArray(packs.packs)) ? packs.packs : (Array.isArray(packs) ? packs : []);
+  const digestOf = (id) => {
+    if (!digests) return null;
+    return (typeof digests.get === 'function' ? digests.get(id) : digests[id]) || null;
+  };
+  for (const p of list.slice().sort(byPackId)) {
+    if (!p || typeof p.id !== 'string' || !p.id || !p.assets) continue;
+    const dir = p.dir ? path.resolve(p.dir) : path.join(root, p.id);
+    if (dir !== root && !dir.startsWith(root + path.sep)) continue;
+    const hash = typeof p.hash === 'string' ? p.hash : '';
+    for (const [kind, rel] of [['container', p.assets.container], ['manifest', p.assets.manifest]]) {
+      if (typeof rel !== 'string' || !rel) continue;
+      const segments = rel.split('/');
+      // The shape layer refused everything else, but this is the SERVING side and it re-judges (it may read a
+      // hand-built loader object or a pack written against an older schema) — the same second look every pack-scoped
+      // route in this file takes.
+      if (segments.some((s) => !s || s === '..' || s === '.' || s.startsWith('.')) || path.isAbsolute(rel)) continue;
+      const abs = path.join(dir, ...segments);
+      if (abs === dir || !abs.startsWith(dir + path.sep)) continue;
+      const url = `${WORKSHOP_RESOURCE_PREFIX}${encodeURIComponent(p.id)}/${segments.map(encodeURIComponent).join('/')}?v=${hash.slice(0, 12)}`;
+      out.set(url.split('?')[0], { kind, pack: p.id, file: abs, url, sha256: kind === 'container' ? digestOf(p.id) : null });
+    }
+  }
+  return out;
+}
+
+/**
+ * `welcome.modAssets` —— 声明了 `assets` 的包的**声明清单**（DESIGN §28.13.5，docs/WORKSHOP.md §1.9.4）。
+ *
+ * 它是 `modPanels` 的同构物，就同一个理由：客户端要把「哪个包有一份资源容器、去哪儿取、它的字节是哪一份、服务端
+ * 对 `/assets` 是什么策略」搞清楚，而这条信息只有服务端有。字段恰好是**声明的那四个**（`pack` 是身份）：
+ *
+ *   `container` / `manifest`  装载器**注册过**的那两个 URL（带 `?v=<包内容哈希[0:12]>` 缓存键）；
+ *   `digest`                  装载期与容器**字节**核对过的 sha256（`assetsIssues`，不重算）。客户端拿它做两件事：
+ *                             把导入的字节绑到「服务器验过的那份容器」上，以及在换容器之后判旧缓存作废；
+ *   `serverPolicy` / `verify` 归一化后的声明值（缺省已在形状层补成 `"serve"` / `"sha256"`）。
+ *
+ * 三条纪律：
+ *   1. **只有读者才加**：没有任何包声明 `assets` 时返回空数组，`welcome` 里就没有 `modAssets` 这个字段，
+ *      客户端因此不 `import` 资源流程、不注册 SW、不多一个请求（B2/B3a 同一条不变量）。
+ *   2. **从服务表反推，而不是另算一遍 URL**：`container` / `manifest` 就是 `workshopResourceFilesFor` 给出的那两个
+ *      URL。两处各拼一次就是一个会漂移的真相（一个注册了、另一个请求的不是同一个键）。
+ *   3. **两个 URL 都在才成一条声明**。少了哪一个（例如手工拼出来的 `packs` 数组绕过了装载器）就没有可用的声明，
+ *      宁可不出这一条，也不给客户端半个地址。
+ * @param {Map<string, { kind: 'container'|'manifest', pack: string, url: string, sha256: string|null }>|null} files
+ *   `workshopResourceFilesFor(...)` 的输出
+ * @param {Array<{ id: string, assets?: { serverPolicy: string, verify: string }, assetsDigest?: string }>} packs
+ *   `loadWorkshop(...).packs`（只用来读归一化后的两个枚举值与摘要 —— URL 不从这里拼）
+ * @returns {Array<{ pack: string, container: string, manifest: string, digest: string, serverPolicy: string, verify: string }>}
+ */
+export function workshopModAssetsFrom(files, packs) {
+  /** @type {Map<string, { container?: any, manifest?: any }>} */
+  const byPack = new Map();
+  for (const entry of (files && typeof files.values === 'function') ? files.values() : []) {
+    if (!entry || typeof entry.pack !== 'string') continue;
+    const group = byPack.get(entry.pack) || {};
+    group[entry.kind === 'manifest' ? 'manifest' : 'container'] = entry;
+    byPack.set(entry.pack, group);
+  }
+  const byId = new Map(((Array.isArray(packs) ? packs : [])).filter((p) => p && typeof p.id === 'string').map((p) => [p.id, p]));
+  /** @type {Array<any>} */
+  const out = [];
+  // 包 id 次序（DESIGN §28.3 的同一条规则）：列表的顺序不随装载器 / 调用方给的数组顺序变。
+  for (const id of [...byPack.keys()].sort()) {
+    const group = byPack.get(id);
+    const pack = byId.get(id);
+    if (!group.container || !group.manifest || !pack || !pack.assets) continue;
+    // 摘要必须是**装载器交出来的**那一个（`assetsDigest`）。拿不到它就没有「同一份容器」这句话，不出这一条。
+    const digest = typeof group.container.sha256 === 'string' ? group.container.sha256 : (typeof pack.assetsDigest === 'string' ? pack.assetsDigest : '');
+    if (!/^[0-9a-f]{64}$/.test(digest)) continue;
+    out.push({
+      pack: id,
+      container: group.container.url,
+      manifest: group.manifest.url,
+      digest,
+      serverPolicy: pack.assets.serverPolicy,
+      verify: pack.assets.verify,
+    });
+  }
+  return out;
+}
+
+/** `/assets/` 与 `/fonts/` —— `cache-only` 只对这两棵树短路：它们正是 `tools/fetch-assets.mjs` 落到
+ *  `public/assets/**` 与 `public/fonts/**` 的那两个 git-ignored 目录（`.gitignore` 里点名的那两行）。 */
+const CACHE_ONLY_PREFIXES = Object.freeze(['/assets', '/fonts']);
+/** 一个请求路径是否落在 `cache-only` 覆盖的两棵树里（`/assets` 与 `/assets/…` 都算，缺尾斜杠的裸挂载也拦）。 */
+export function isCacheOnlyPath(pathname) {
+  const p = typeof pathname === 'string' ? pathname : '';
+  return CACHE_ONLY_PREFIXES.some((prefix) => p === prefix || p.startsWith(`${prefix}/`));
+}
+
+/**
+ * The process-wide **`serverPolicy` verdict**, derived from the load-time `assetsIssues` results.
+ *
+ * Two rules, and both are the whole point of the switch:
+ *   * **`cache-only` only when a pack explicitly declares it.** `serve` — the default, and what every pack in this
+ *     repository declares — leaves the server byte-for-byte unchanged. There is no environment variable and no global
+ *     toggle: the one thing that can turn a deployment into cache-only is a pack's own `pack.json`.
+ *   * **Any single `cache-only` declaration wins process-wide, and it is reported loudly.** The policy is a property of
+ *     `/assets` and `/fonts` — two trees shared by every pack — not of one pack, so it cannot be scoped to the pack that
+ *     asked for it. One pack declaring it therefore changes what every other pack and the core game sees, which is
+ *     exactly the kind of surprise that has to appear in the boot log instead of in a bug report.
+ * @param {Map<string, string>|Record<string, string>|null} policies pack id → declared `serverPolicy`
+ * @param {{ log?: object|null }} [opts]
+ * @returns {'serve'|'cache-only'}
+ */
+export function resourceServerPolicy(policies, { log = null } = {}) {
+  const entries = policies && typeof policies.entries === 'function'
+    ? [...policies.entries()]
+    : Object.entries(policies || {});
+  const cacheOnly = entries.filter(([, policy]) => policy === 'cache-only').map(([id]) => id).sort();
+  if (!cacheOnly.length) return 'serve';
+  log?.info?.(`[workshop] serverPolicy "cache-only" declared by ${cacheOnly.map((id) => `"${id}"`).join(', ')} — /assets/ and /fonts/ now answer 412 for the whole server, and the packs no longer serve them`);
+  return 'cache-only';
 }

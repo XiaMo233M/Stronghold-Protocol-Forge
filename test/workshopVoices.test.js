@@ -22,7 +22,7 @@ import { loadData } from '../server/data.js';
 import { buildWorkshopDataFiles, startServer } from '../server/index.js';
 
 const norm = (extra = {}, opts = { hasAssets: true }) => normalizePackManifest(
-  { id: 'my-pack', content: ['chess'], hasAssets: true, license: 'CC0-1.0', ...extra }, 'my-pack', opts);
+  { id: 'my-pack', content: ['chess'], license: 'CC0-1.0', ...extra }, 'my-pack', opts);
 /** Refusal assertions read the module's own shape ({ ok: false, error, detail }). */
 const refused = (extra, opts, error) => {
   const r = norm(extra, opts);

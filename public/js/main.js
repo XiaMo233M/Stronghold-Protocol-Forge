@@ -44,12 +44,13 @@ import { html, UiHosts, Button, MicroLabel, closeAllDialogs } from './ui/compone
 import { ConnectionBanner } from './ui/connBanner.js';
 import { ToastHost, toast, toastError, describeError } from './ui/toasts.js';
 import { net, identity, NetError } from './net.js';
-import { store, useStore, emptyMatch, selectRoute, sessionResetNotice, isSpectating } from './store.js';
+import { store, useStore, emptyMatch, selectRoute, entryGateBlocked, sessionResetNotice, isSpectating } from './store.js';
 import { data } from './data.js';
 import { GAME_FILES } from './ui/gameComponents.js';
 import { TitleScreen, sanitizeName } from './screens/title.js';
 import { LobbyScreen, rememberRoom } from './screens/lobby.js';
 import { deepLinkSeeds, stripDeepLinkParams, runSoloPlaytest } from './playtestLink.js';
+import * as roomMods from './roomMods.js';
 import { RoomScreen } from './screens/room.js';
 import { GameScreen } from './screens/game.js';
 import { installAudio } from './audio.js';
@@ -68,6 +69,7 @@ import { startBuildGuard } from './ui/buildGuard.js';
 import { initLang, useLang, tickerText } from './ui/lang.js';
 import { t, N_, translateWire } from '../../shared/i18n.js';
 import { recordError } from './diag.js';
+import { createPanelRegistry } from './ui/extensions.js';
 
 const RESTORE_GRACE_MS = 1500;
 const JOIN_DELAY_MS = 350;
@@ -75,6 +77,19 @@ const TICKER_KEEP = 20;
 const EMOTE_KEEP = 20;
 
 const SCREENS = { title: TitleScreen, lobby: LobbyScreen, room: RoomScreen, game: GameScreen };
+
+/**
+ * C 层注册点 (DESIGN §28.8, docs/WORKSHOP.md §1.9.3): one per page. A pack's panel gets the frozen surface
+ * `public/js/ui/extensions.js` builds — no store handle, no `net`, no engine — and the module list arrives in
+ * `welcome.modPanels` (src of truth: `pack.json.client.panels`, served from `/workshop-panels/`). A server whose packs
+ * declare no `client` never sends the field: nothing here is called, no module is imported and **no DOM is added** —
+ * the four slot containers are created on demand by the registry, not rendered by this shell.
+ */
+const modPanels = createPanelRegistry({
+  store,
+  net,
+  notify: (text, kind) => toast(text, kind || 'warn'),
+});
 
 /** Copy of a server message without transport fields. */
 function payload(msg) {
@@ -108,15 +123,30 @@ function clearPendingPlaytest() {
   clearDeepLinkParams();
 }
 
+/**
+ * Extra fields for a solo quick start (the `?playtest=` deep link): the mod digest this server declared, if any.
+ * `runSoloPlaytest` calls it only for `room.create`, and it returns `{}` on a plain install — the request stays exactly
+ * what it was (public/js/roomMods.js buildCreatePayload).
+ */
+const roomModFields = () => {
+  const { mods } = roomMods.buildCreatePayload('solo', '');
+  return mods ? { mods } : {};
+};
+
 /** One-click playtest once entered + online (idempotent): the `?playtest=` deep link, consumed here. */
 function schedulePendingPlaytest() {
   clearTimeout(playtestTimer);
   playtestTimer = setTimeout(() => {
     const s = store.get();
     if (!s.ui.pendingPlaytest || !s.session.entered || net.status !== 'online') return;
+    // 闸门未就绪时不烧掉深链（缺口 8）：否则这一条会自动发 room.create，然后被服务端准入拒一次、弹一次红条。
+    if (entryGateBlocked(s)) return;
     // The deep link is spent either way: consumed when the match starts, abandoned when it was refused.
+    // `roomFields` is what makes a solo quick start work on a MODDED server too: without the digest the gate refuses
+    // `room.create` with BAD_MSG, and a plain install sends exactly `{ mode, difficulty }` as before (roomMods.js).
     runSoloPlaytest(net, store, {
       difficulty: s.ui.pendingPlaytest.difficulty,
+      roomFields: roomModFields,
       notify: (text, kind) => toast(text, kind || 'info'),
       notifyError: toastError,
     }).finally(clearPendingPlaytest);
@@ -130,6 +160,8 @@ function schedulePendingJoin() {
     const s = store.get();
     const code = s.ui.pendingJoin;
     if (!code || joinInFlight || !s.session.entered || net.status !== 'online') return;
+    // 同上：`?room=` 深链不能绕过闸门（缺口 8）。
+    if (entryGateBlocked(s)) return;
     if (s.room) {
       if (s.room.code !== code) toast(t('你已在其他同盟中，请先离开当前同盟'), 'warn');
       clearPendingJoin();
@@ -137,7 +169,7 @@ function schedulePendingJoin() {
     }
     joinInFlight = true;
     try {
-      await net.request('room.join', { code });
+      await net.request('room.join', roomMods.buildJoinPayload(code));
     } catch (err) {
       toastError(err);
     } finally {
@@ -177,6 +209,16 @@ function onWelcome(msg) {
   const prev = store.get();
   const prevId = prev.me.playerId;
   const name = typeof msg.name === 'string' && msg.name ? msg.name : prev.me.name;
+  // 工坊 mod set (W-A): what this server runs. The client must echo this digest to enter a room, and the lobby renders
+  // its pack list as the room-declaration picker. A server that changed under us (restart, another pack root) must not
+  // leave a pick from the old catalogue selected — setWelcomeMods drops it and returns false (see roomMods.js).
+  const sameMods = roomMods.setWelcomeMods(msg);
+  store.set({
+    roomMods: {
+      available: roomMods.availableMods(),
+      selected: sameMods ? prev.roomMods.selected : roomMods.getSelectedModIds(),
+    },
+  });
   store.set({ me: { playerId: msg.playerId ?? null, name, token: typeof msg.token === 'string' ? msg.token : null } });
   welcomeAt = Date.now();
 
@@ -218,6 +260,12 @@ function onRoomState(msg) {
   // A (new) match starts: forget the previous match's state so stale results never show.
   if (room.inMatch && !(prevRoom && prevRoom.inMatch && prevRoom.code === room.code)) store.set({ match: emptyMatch() });
   store.set({ room });
+  // The picks were made FOR the room we just entered (host) or joined: the next create starts from none, so a pick can
+  // never leak into a room the player did not choose it for (roomMods.js).
+  if (!prevRoom && room) {
+    roomMods.clearSelection();
+    if (store.get().roomMods.selected.length) store.set({ roomMods: { ...store.get().roomMods, selected: [] } });
+  }
   if (room.mode === 'coop' && typeof room.code === 'string') rememberRoom(room.code);
   maybeFinishRestore();
 }
@@ -240,6 +288,27 @@ function wireNet() {
   });
   net.on('clock', (c) => store.set({ clock: { offset: c.offset, rtt: c.rtt, synced: c.synced } }));
   net.on('welcome', onWelcome);
+  // C 层注册点（DESIGN §28.8）：包声明的面板清单随 `welcome` 到达。没有包声明 `client` 时这个字段根本不出现 ——
+  // 于是这次握手、这次订阅之后的行为、以及页面上的一切都与从前逐字节相同（没有新请求、新 DOM、新全局）。
+  net.on('welcome', (msg) => {
+    // 资源声明（DESIGN §28.13.5）：包只**声明**容器与策略，SW 与整条流程是引擎的。这里刻意用 **动态 import** ——
+    // 没有声明时 `public/js/resources/host.js` 及其依赖根本不进浏览器，于是「不声明 ⇒ 无字段、无新请求、无新 DOM、
+    // 无新全局」是结构性的，而不是靠几个 `if` 拦住的。
+    if (Array.isArray(msg && msg.modAssets) && msg.modAssets.length) {
+      import('./resources/host.js')
+        // 引擎自带的 SW 由 host 在**后台**注册（`resources/worker.js`）：入口放行绝不等待它。
+        .then((host) => host.installModAssets(msg.modAssets, { log: console }))
+        // 这条 `.catch` 是 B4 §6 第 6 条补的：资源流程的模块拉不下来时（网络断在部署中间、模块 404、语法错误），
+        // 以前只有一行 `recordError` 进诊断记录，**页面上什么都不说** —— 玩家装了资源包却一直卡在入口闸门上，
+        // 而唯一的信号在一个他看不到的地方。照仓库既有的错误通道（toast + describeError）给他一句话，
+        // 诊断记录照旧留一份。
+        .catch((err) => {
+          recordError('mod-assets', err, 'resource host failed to load');
+          toast(t('加载模组资源模块失败：{error}', { error: describeError(err) }).slice(0, 160), 'error', { ttl: 8000 });
+        });
+    }
+    if (Array.isArray(msg && msg.modPanels) && msg.modPanels.length) modPanels.apply(msg.modPanels);
+  });
   net.on('helloError', (err) => toastError(err));
   net.on('replaced', () => toast(t('该身份已在其他页面登录，本页已断开'), 'warn', { ttl: 6000 }));
   net.on('unhandledError', (err) => toastError(err));
@@ -377,7 +446,10 @@ async function boot() {
   const entered = identity.wasEntered() && !!savedName;
   store.set((s) => ({
     me: { ...s.me, name: savedName },
-    session: { entered },
+    // 整片替换会冲掉闸门状态位（缺口 8）：先摊开现有的 session，再强制 `entered`。不堵这里，`identity.wasEntered()`
+    // （public/js/net.js 读 localStorage / sessionStorage 的 sp.entered）每次开机都会把 `preloadRequired` 重置掉，
+    // 而 `entered` 又因此为真 —— 闸门形同虚设，玩家在素材就绪前照样进大厅。
+    session: { ...s.session, entered },
     ui: { ...s.ui, pendingJoin, pendingPlaytest },
   }));
 

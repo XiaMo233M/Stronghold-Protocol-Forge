@@ -10,9 +10,19 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { normalizePackManifest, normalizeContentFile, byPackId, playtestUnknownIds } from '../shared/workshop.js';
+import {
+  normalizePackManifest, normalizeContentFile, byPackId, playtestUnknownIds, WORKSHOP_PANEL_PREFIX,
+  ASSETS_FILE_CODES,
+  // i18n（fanpack G-04）：**形状**在 shared/workshop.js 判（`parseI18nDecl`），**值**用同一个 `mergeWorkshopI18n` 判
+  // —— 校验与合并是同一个函数，所以不可能出现「校验器放行的值，合并时被丢掉」。
+  mergeWorkshopI18n, parsePackI18n,
+} from '../shared/workshop.js';
 import { sha256Hex, canonicalJson, modManifestDigest } from '../shared/modIdentity.js';
+// `intercepts` 的运行时判据就是**真的装在这个服务器上的那份协议**（DESIGN §28.13）：A 段在形状层判过一次，这里再判
+// 一次 —— 一份包声明可以比协议活得久（协议收窄了、包还是老写法），那时要在加载期点名拒绝，而不是「装了但拦不住」。
+import { C2S } from '../shared/protocol.js';
 // the kit import whitelist + the narrow rewrite (DESIGN §28.12). shared/ because the VALIDATOR reads the same table —
 // the loader must reach the same verdict the editor did.
 import { kitImportDeclarations, kitImportIssues, rewriteKitImports } from '../shared/kitImports.js';
@@ -22,6 +32,12 @@ export const WORKSHOP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.
 
 /** Repository root — the base a whitelisted specifier's workspace-relative file is resolved against. */
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+/**
+ * `identifyPack` 的哈希清单里那一条**合成**路径：容器的 sha256（`pack.json.assets` 的容器，装载期已与字节核对）。
+ * 它不可能与真实文件同名（见 `identifyPack` 里那一段），所以「有没有声明 `assets`」在身份哈希里是可判定的一件事。
+ */
+export const ASSETS_DIGEST_PATH = 'assets.container.sha256';
 
 /**
  * A rewritten kit source as an importable module. `data:` and not a temp file: nothing is written to disk, and the
@@ -34,13 +50,33 @@ const kitDataUrl = (source, v) =>
   `data:text/javascript;charset=utf-8,${encodeURIComponent(`${source}\n//# sourceURL=workshop-kit.js?v=${v}\n`)}`;
 
 /**
+ * 读一份官方语言文件（`public/i18n/<code>.json`）—— 装载期与 HTTP 合并体共用的那一处读盘。
+ * 读不出来一律 `null`（`mergeWorkshopI18n` 把 null base 当作「什么都还没有」，于是包的键全部算新增；
+ * 这只会让冲突少报一条，不会让包被拒 —— 官方文件读不出来是这台机器的事，不是这个包的错）。
+ * @param {string} lang
+ * @returns {Record<string, any>|null}
+ */
+export function readUiLangFile(lang) {
+  if (typeof lang !== 'string' || !/^[A-Za-z][A-Za-z0-9-]{0,15}$/.test(lang)) return null;
+  try {
+    const json = JSON.parse(fs.readFileSync(path.join(ROOT, 'public', 'i18n', `${lang}.json`), 'utf8'));
+    return json && typeof json === 'object' && !Array.isArray(json) ? json : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Load every pack under `dir`.
  * @param {string} [dir] pack root (default WORKSHOP_DIR)
- * @param {{ log?: { warn?: Function, info?: Function } | null }} [opts]
+ * @param {{ log?: { warn?: Function, info?: Function } | null, c2s?: Record<string, any> }} [opts]
+ *   `c2s` defaults to the loaded protocol and only decides whether a declared `server.preDispatch.intercepts`
+ *   entry exists (tests inject a narrower catalogue to prove the load-time judgement is against the protocol
+ *   actually installed, not against a copied list — the same injection `loadWorkshopHooks` takes).
  * @returns {{ dir: string, present: boolean, packs: Array<{ id: string, name: string, version: string, dir: string,
  *   overrides: string[], files: Record<string, Record<string, object>> }>, errors: Array<{ pack: string, reason: string }> }}
  */
-export function loadWorkshop(dir = WORKSHOP_DIR, { log = null } = {}) {
+export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {}) {
   /** @type {any[]} */
   const packs = [];
   /** @type {Array<{ pack: string, reason: string }>} */
@@ -99,13 +135,20 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null } = {}) {
     // them are published through assets.json / backups.json by the overlay (shared/workshop.js mergeWorkshopVoices /
     // mergeWorkshopBondIcons / mergeWorkshopItemIcons / mergeWorkshopArt / mergeWorkshopOperators). Forgetting one of
     // them here would make that kind of pack load "successfully" and contribute nothing.
+    //
+    // The four middle-layer declarations (DESIGN §28.13) belong on this list for exactly that reason: a pack that
+    // declares only `assets` / `client` / `server.preDispatch` / `routes` is a loaded pack whose identity the room
+    // digest must carry, and `normalizePackManifest` has already refused it as EMPTY_PACK when the declaration is
+    // empty. No behaviour reads them yet (A 段) — this only decides whether the pack EXISTS.
     if (Object.keys(files).length
       || Object.keys(manifest.pack.voices || {}).length
       || Object.keys(manifest.pack.voiceLangs || {}).length
       || Object.keys(manifest.pack.bondIcons || {}).length
       || Object.keys(manifest.pack.itemIcons || {}).length
       || Object.keys(manifest.pack.art || {}).length
-      || Object.keys(manifest.pack.operators || {}).length) {
+      || Object.keys(manifest.pack.operators || {}).length
+      || !!manifest.pack.assets || !!manifest.pack.client || !!manifest.pack.server || !!manifest.pack.routes
+      || !!manifest.pack.i18n) {
       // 试玩开关的名单必须点名本包真的有的 id：`normalizePackManifest` 只能查形状，成员资格要等 chess.json 读完。
       // 不查这一条，名单里一个写错的 id 就是**静默无效** —— 作者勾了、试玩里什么都没发生（这个缺口的老毛病）。
       const unknown = playtestUnknownIds(manifest.pack.playtest?.directToHand, manifest.pack.overrides, Object.keys(files.chess || {}));
@@ -116,11 +159,417 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null } = {}) {
         });
         continue;
       }
-      packs.push({ ...manifest.pack, dir: packDir, files, ...identifyPack(packDir, manifest.pack, files) });
+      // C 层面板（`pack.json.client.panels`, DESIGN §28.8/§28.13, docs/WORKSHOP.md §1.9.3）：声明的模块必须**真的
+      // 在包里**、是 `.js`、解析得到包目录里面。这就是本刀的纪律裁决 —— **声明了却不可用的声明拒绝整个包**，
+      // 而不是「包照旧加载、只是那个面板不出现」。后者会让作者与服务端都以为自己有客户端界面，而浏览器里什么都
+      // 没有；B1 段的 `server.preDispatch` 只拒那个钩子，C 层这条线走得比它远，理由写在 DESIGN §28.13.3。
+      const panelIssues = panelModuleIssues(manifest.pack, packDir);
+      if (panelIssues.length) {
+        errors.push({ pack: name, reason: `${panelIssues[0].code}: ${panelIssues[0].reason}` });
+        continue;
+      }
+      // B3a 段把同一条纪律铺到另外两组声明上（DESIGN §28.13.3「一条声明一个不可用的声明拒绝整个包」）：
+      //   * `assets` —— 容器 / 清单 / 声明的摘要必须真的在包里、且容器的字节必须**就是**那份摘要；
+      //   * `server.preDispatch` —— 模块 / 策略文件必须真的在包里、策略必须是 JSON 对象、`intercepts` 必须是
+      //     本服务器真的装着的协议里的类型。
+      // 这一改就是本刀要补的那个口子：B1 的钩子以前只拒钩子、包照旧加载 —— 于是服务器以为自己被准入闸门保护着，
+      // 而实际上一条消息都没拦（「加载了但能力没生效」是最坏的失败形态）。
+      const assetIssues = assetsIssues(manifest.pack, packDir);
+      const hookIssues = preDispatchIssues(manifest.pack, packDir, { c2s });
+      // i18n（fanpack G-04）：声明的译文文件必须真的在包里、是 JSON 对象、每个值都是字符串。
+      // 与上面两组同一个口径：一条用不了的声明拒绝整个包 —— 否则作者看到的是「包加载了、词条没生效」。
+      const langIssues = i18nIssues(manifest.pack, packDir, readUiLangFile);
+      const gateIssues = [...assetIssues.issues, ...hookIssues, ...langIssues];
+      if (gateIssues.length) {
+        errors.push({ pack: name, reason: `${gateIssues[0].code}: ${gateIssues[0].reason}` });
+        continue;
+      }
+      // 容器的 sha256 在这里已经算过（`assetsIssues` 流式读过一遍），所以把它随包带出去：服务面（HTTP 头
+      // `X-SP-Resource-Sha256`、`welcome.modAssets[].digest`）要用同一个值，重启时不该为几百 MB 再算第二遍。
+      // 没声明 `assets` 的包这个键缺席，与 B2 一样「声明了才有」；同时它进**身份哈希**（见 `identifyPack`）：
+      // 「同一个房间摘要 ⇒ 同一份容器」这条对齐就是靠那一步成立的。
+      packs.push({
+        ...manifest.pack, dir: packDir, files,
+        ...identifyPack(packDir, manifest.pack, files, { assetsDigest: assetIssues.digest }),
+        ...(assetIssues.digest ? { assetsDigest: assetIssues.digest } : {}),
+      });
     }
   }
   for (const e of errors) log?.warn?.(`[workshop] ${e.pack}: ${e.reason}`);
   return { dir, present: true, packs, errors };
+}
+
+/**
+ * The **C-layer panels** a pack declares, judged against the pack on disk (`pack.json.client.panels`, DESIGN §28.8).
+ *
+ * This is the load-time half of *"a declaration that cannot be used refuses the whole pack"* (§28.13.3). A panel whose
+ * `module` is missing, is not a `.js`, or resolves outside its own pack is not "a panel that did not show up": it is a
+ * pack whose author believes the client has an interface it does not have. `shared/workshop.js parseClientDecl` judged
+ * the SHAPE (relative, no URL, `.js`); this judges the BYTES on disk, and the two readers must agree — the same
+ * "the editor cannot pass what the loader then refuses" rule §28.12 states for kit imports.
+ *
+ * `packDir` is the second argument (not read from `pack.dir`) so the check runs inside `loadWorkshop` BEFORE the pack is
+ * listed, and so a test can point it at a hand-built pack object.
+ * @param {{ client?: { panels?: Array<{ id: string, module: string }> } }|null} pack normalized manifest
+ * @param {string} packDir the pack's directory on disk
+ * @returns {Array<{ id: string, code: 'CLIENT_BAD_PANEL_MODULE', reason: string }>} one entry per unusable panel
+ */
+export function panelModuleIssues(pack, packDir) {
+  /** @type {Array<{ id: string, code: 'CLIENT_BAD_PANEL_MODULE', reason: string }>} */
+  const out = [];
+  const panels = pack && pack.client && Array.isArray(pack.client.panels) ? pack.client.panels : [];
+  if (!panels.length || typeof packDir !== 'string' || !packDir) return out;
+  const dir = path.resolve(packDir);
+  for (const panel of panels) {
+    const id = panel && typeof panel.id === 'string' ? panel.id : '';
+    const rel = panel && typeof panel.module === 'string' ? panel.module : '';
+    const segments = rel.split('/');
+    const abs = path.join(dir, ...segments);
+    // `..` cannot build a path outside the pack that is also inside it: the join is re-checked, the same way
+    // server/http/workshop.js re-checks a declared route's file.
+    const bad = !rel || path.isAbsolute(rel) || !rel.endsWith('.js')
+      || segments.some((s) => !s || s === '..' || s === '.' || s.startsWith('.'))
+      || (abs !== dir && !abs.startsWith(dir + path.sep));
+    if (bad) {
+      out.push({ id, code: 'CLIENT_BAD_PANEL_MODULE', reason: `client.panels["${id}"].module "${rel}" is not a pack-relative .js file inside the pack (this channel serves code, and only the pack's own)` });
+      continue;
+    }
+    let isFile = false;
+    try { isFile = fs.statSync(abs).isFile(); } catch { /* stays false: no such file */ }
+    if (!isFile) {
+      out.push({ id, code: 'CLIENT_BAD_PANEL_MODULE', reason: `client.panels["${id}"].module "${rel}" is declared in pack.json but is not a readable file inside the pack` });
+    }
+  }
+  return out;
+}
+
+/**
+ * Stream a file through SHA-256 without ever holding it in memory. A resource container reaches hundreds of megabytes
+ * (the reference pack's own sample is ~791 MiB), so the one thing this module must never do is read one into a Buffer —
+ * not to verify it and not to serve it. Node's streaming hash takes 64 KiB (the default high-water mark) at a time.
+ * @param {string} abs
+ * @returns {string} lowercase hex digest
+ */
+export function sha256FileSync(abs) {
+  const hash = createHash('sha256');
+  const fd = fs.openSync(abs, 'r');
+  try {
+    const buf = Buffer.allocUnsafe(1 << 16);
+    for (;;) {
+      const n = fs.readSync(fd, buf, 0, buf.length, null);
+      if (!n) break;
+      hash.update(buf.subarray(0, n));
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return hash.digest('hex');
+}
+
+/** The digest a declared container's sidecar names (the reference pack's format: `<64 hex><whitespace><name>`, one
+ *  line), or `null` when that file is not there / does not start with a hex digest — "declared a verification and
+ *  shipped no digest" is a different refusal from "the digest does not match". */
+export function readSha256Sidecar(containerAbs, verify) {
+  let text;
+  try {
+    text = fs.readFileSync(`${containerAbs}.${verify}`, 'utf8');
+  } catch {
+    return null;
+  }
+  const m = /^\s*([0-9a-fA-F]{64})(\s|$)/.exec(text);
+  return m ? m[1].toLowerCase() : null;
+}
+
+/**
+ * The **load-time half of the `assets` declaration** (`pack.json.assets`, DESIGN §28.13.3, docs/WORKSHOP.md §1.9.4).
+ *
+ * Same stance as `panelModuleIssues`, for the same reason: a declared container or manifest that is not on disk is not
+ * "a resource pack that did not load", it is a server the operator believes is serving a resource pack while every
+ * client gets a 404. So the pack does not enter `loaded.packs` at all.
+ *
+ * What is judged, in this order (the first failure is the one reported):
+ *   1. both declared paths resolve inside the pack (defence in depth — the shape layer already refused `..` / absolute);
+ *   2. `container` is a readable file, `manifest` is a readable file;
+ *   3. the container's bytes ARE the declared digest: the digest is read from the sidecar `<container>.<verify>`, and
+ *      the container is hashed with a streaming reader (never a whole-file Buffer). A missing/garbled sidecar is
+ *      `ASSETS_VERIFY_UNAVAILABLE` and a mismatch is `ASSETS_VERIFY_FAILED` — **neither is a silent pass**.
+ *
+ * The digest is returned so the serving side does not hash the same hundred megabytes a second time at boot.
+ * @param {{ assets?: { container: string, manifest: string, serverPolicy: string, verify: string } }|null} pack normalized manifest
+ * @param {string} packDir the pack's directory on disk
+ * @returns {{ issues: Array<{ code: string, reason: string }>, digest: string|null, containerAbs: string|null, manifestAbs: string|null }}
+ */
+export function assetsIssues(pack, packDir) {
+  /** @type {Array<{ code: string, reason: string }>} */
+  const issues = [];
+  const decl = pack && pack.assets;
+  if (!decl) return { issues, digest: null, containerAbs: null, manifestAbs: null };
+  if (typeof packDir !== 'string' || !packDir) return { issues, digest: null, containerAbs: null, manifestAbs: null };
+  const dir = path.resolve(packDir);
+  /** A declared pack-relative path → its absolute path, or `null` when it resolves outside the pack. */
+  const resolve = (rel) => {
+    const abs = path.join(dir, ...String(rel).split('/'));
+    // `..` cannot build a path that is outside the pack and still inside it: the join is re-checked, the same way
+    // `panelModuleIssues` and `server/http/workshop.js workshopRoutesFor` re-check theirs.
+    return abs === dir || !abs.startsWith(dir + path.sep) ? null : abs;
+  };
+  const containerAbs = resolve(decl.container);
+  const manifestAbs = resolve(decl.manifest);
+  const isFile = (abs) => { try { return !!abs && fs.statSync(abs).isFile(); } catch { return false; } };
+  if (!isFile(containerAbs)) {
+    issues.push({
+      code: ASSETS_FILE_CODES.CONTAINER,
+      reason: `assets.container "${decl.container}" is declared in pack.json but is not a readable file inside the pack`
+        + (containerAbs ? '' : ' (or it resolves outside the pack)'),
+    });
+  }
+  if (!isFile(manifestAbs)) {
+    issues.push({
+      code: ASSETS_FILE_CODES.MANIFEST,
+      reason: `assets.manifest "${decl.manifest}" is declared in pack.json but is not a readable file inside the pack`
+        + (manifestAbs ? '' : ' (or it resolves outside the pack)'),
+    });
+  }
+  if (issues.length) return { issues, digest: null, containerAbs, manifestAbs };
+  const algorithm = decl.verify || 'sha256';
+  const declared = readSha256Sidecar(containerAbs, algorithm);
+  if (!declared) {
+    issues.push({
+      code: ASSETS_FILE_CODES.VERIFY_UNAVAILABLE,
+      reason: `assets.verify "${algorithm}" was declared but "${decl.container}.${algorithm}" is not a readable <${algorithm}> digest next to the container`,
+    });
+    return { issues, digest: null, containerAbs, manifestAbs };
+  }
+  let actual;
+  try {
+    actual = sha256FileSync(containerAbs);
+  } catch (e) {
+    issues.push({
+      code: ASSETS_FILE_CODES.VERIFY_FAILED,
+      reason: `assets.container "${decl.container}" could not be read for ${algorithm} verification: ${e && e.message ? e.message : String(e)}`,
+    });
+    return { issues, digest: null, containerAbs, manifestAbs };
+  }
+  if (actual !== declared) {
+    issues.push({
+      code: ASSETS_FILE_CODES.VERIFY_FAILED,
+      reason: `assets.container "${decl.container}" does not match its declared ${algorithm}: "${decl.container}.${algorithm}" says ${declared}, the file hashes to ${actual}`,
+    });
+    return { issues, digest: null, containerAbs, manifestAbs };
+  }
+  return { issues, digest: declared, containerAbs, manifestAbs };
+}
+
+/**
+ * The **load-time half of the `server.preDispatch` declaration** (DESIGN §28.13.3, docs/WORKSHOP.md §1.9.1).
+ *
+ * B1 段 judged the same things and refused **that hook**, letting the pack load. B3a 段 moved the judgement here, before
+ * the pack is listed, because the two outcomes are not equally loud: a pack that declares an admission hook and loads
+ * without one is a server whose operator believes a gate is shut while every entry message reaches the lobby. Every
+ * failure below is a property of the FILES, so it is decidable at load time:
+ *   * `module` / `policy` must resolve inside the pack and be readable files;
+ *   * `policy` must parse as a JSON object (a hook with no data cannot judge who to let in);
+ *   * `intercepts` must name types of the protocol **actually installed** (`shared/protocol.js C2S` — the same
+ *     derivation the shape layer uses, re-judged here because a declaration can outlive a protocol revision).
+ *
+ * What is deliberately NOT here: importing the module and calling its factory. `loadWorkshop` is synchronous
+ * (`server/data.js` calls it while building the overlay) and a dynamic import is not, so the import stays in
+ * `loadWorkshopHooks` — which now runs on packs this function already cleared, so its own refusals are a backstop for
+ * "the file changed between the two calls", never the first line of defence.
+ * @param {{ server?: { preDispatch?: { module: string, policy: string, intercepts: string[] } } }|null} pack normalized manifest
+ * @param {string} packDir the pack's directory on disk
+ * @param {{ c2s?: Record<string, any> }} [opts] `c2s` defaults to the loaded protocol.
+ * @returns {Array<{ code: string, reason: string }>}
+ */
+export function preDispatchIssues(pack, packDir, { c2s = C2S } = {}) {
+  const decl = pack && pack.server && pack.server.preDispatch;
+  if (!decl || typeof packDir !== 'string' || !packDir) return [];
+  const dir = path.resolve(packDir);
+  const moduleAbs = path.join(dir, ...String(decl.module).split('/'));
+  const policyAbs = path.join(dir, ...String(decl.policy).split('/'));
+  const inside = (abs) => abs === dir || abs.startsWith(dir + path.sep);
+  if (!inside(moduleAbs) || !inside(policyAbs)) {
+    return [{
+      code: 'PREDISPATCH_BAD_PATH',
+      reason: `server.preDispatch paths must resolve inside the pack (module "${decl.module}", policy "${decl.policy}")`,
+    }];
+  }
+  const readable = (abs) => { try { return fs.statSync(abs).isFile(); } catch { return false; } };
+  if (!readable(moduleAbs)) {
+    return [{ code: 'PREDISPATCH_BAD_MODULE', reason: `server.preDispatch.module "${decl.module}" is not a readable file inside the pack` }];
+  }
+  if (!readable(policyAbs)) {
+    return [{ code: 'PREDISPATCH_BAD_POLICY', reason: `server.preDispatch.policy "${decl.policy}" is not a readable file inside the pack` }];
+  }
+  let policy;
+  try {
+    policy = JSON.parse(fs.readFileSync(policyAbs, 'utf8'));
+  } catch (e) {
+    return [{ code: 'PREDISPATCH_BAD_POLICY', reason: `server.preDispatch.policy "${decl.policy}" is not readable JSON: ${e && e.message ? e.message : String(e)}` }];
+  }
+  if (!policy || typeof policy !== 'object' || Array.isArray(policy)) {
+    return [{ code: 'PREDISPATCH_BAD_POLICY', reason: `server.preDispatch.policy "${decl.policy}" must be a JSON object (the hook's own data)` }];
+  }
+  const known = c2s && typeof c2s === 'object' ? c2s : {};
+  // 名单里有协议不认识的名字 → 整个包被点名拒绝（不是静默丢掉那一条 —— 静默丢掉就是一道只拦一部分入口的闸门）。
+  const unknown = (Array.isArray(decl.intercepts) ? decl.intercepts : []).filter((t) => typeof t !== 'string' || !Object.hasOwn(known, t));
+  if (unknown.length) {
+    return [{
+      code: 'PREDISPATCH_UNKNOWN_TYPE',
+      reason: `server.preDispatch.intercepts: ${unknown.map((t) => `"${String(t)}"`).join(', ')} — not a message type of the protocol this server runs (shared/protocol.js C2S)`,
+    }];
+  }
+  return [];
+}
+
+/**
+ * 读一个钩子模块对**自己那份策略**的意见（`module.validatePolicy(policy)`，可选导出）。
+ *
+ * **为什么需要它。** 装载期（`preDispatchIssues`）只保证 `policy` 能解析成一个 JSON **对象** —— 它不认识包自己的
+ * 数据格式（`version` / `files` 是钩子的方言）。所以「策略文件的**内部形状**是坏的」这一格，装载期判不出来。
+ * 没有这道自检时，唯一的信号是工厂在**每个连接**上抛异常，而工厂抛异常的姿态是「这条连接上这个钩子不存在，
+ * 消息照常分发」（`server/modDispatch.js` 文件头）—— 也就是「包看着装好了、闸门其实一条都没拦」，正是
+ * DESIGN §28.13.3 要消灭的那一类失败。
+ *
+ * 有了它，一份用不了的策略与「策略不是 JSON 对象」得到**同一个结局**：点名拒绝（`PREDISPATCH_BAD_POLICY`）并把
+ * 这个包移出已加载集合（`dropUnavailablePreDispatchPacks`）。
+ *
+ * **契约，一个都不含糊**（未列出的返回值一律**拒绝**并说明，而不是当它通过 —— 装载期是响亮拒绝该在的地方）：
+ *
+ * | 模块返回 | 判定 |
+ * |---|---|
+ * | `undefined` / `null` / `true` | 通过 |
+ * | `{ ok: true }` | 通过 |
+ * | `false` | 拒绝 |
+ * | 非空字符串 | 拒绝，字符串就是理由（给作者看的话就写在这里） |
+ * | `{ ok: false, detail? / reason? / error? }` | 拒绝，取其中第一个字符串当理由 |
+ * | 其它任何值 | 拒绝，理由写「返回了一个不认识的判定」 |
+ * | 抛异常 | 拒绝，理由取异常信息 |
+ *
+ * **没有导出 `validatePolicy` 的模块一个字节都不受影响**（返回 `null`，调用方什么都不做）—— 与 §28.13 的 A 段
+ * 同一口径：声明了才生效。
+ *
+ * @param {any} mod `await import()` 出来的模块命名空间
+ * @param {any} policy 已经解析好的策略对象（`JSON.parse` 过、来自包内声明的那个文件）
+ * @returns {string|null} 拒绝的理由；`null` = 通过
+ */
+export function validateHookPolicy(mod, policy) {
+  const fn = mod && typeof mod.validatePolicy === 'function' ? mod.validatePolicy : null;
+  if (!fn) return null;
+  let verdict;
+  try {
+    verdict = fn(policy);
+  } catch (e) {
+    return `validatePolicy threw: ${e && e.message ? e.message : String(e)}`;
+  }
+  if (verdict === undefined || verdict === null || verdict === true) return null;
+  if (verdict === false) return 'validatePolicy returned false';
+  if (typeof verdict === 'string') return verdict.trim() || 'validatePolicy returned an empty string';
+  if (verdict && typeof verdict === 'object' && !Array.isArray(verdict)) {
+    if (verdict.ok === true) return null;
+    if (verdict.ok === false) {
+      const why = [verdict.detail, verdict.reason, verdict.error].find((v) => typeof v === 'string' && v.trim());
+      return why || 'validatePolicy refused the policy (ok: false)';
+    }
+  }
+  return `validatePolicy returned an unrecognised verdict (${JSON.stringify(verdict) ?? String(verdict)}) — return true / a rejection string / { ok: false, detail }`;
+}
+
+/**
+ * `pack.json.i18n` 的**装载期**判据（fanpack G-04 / plugin-pack G4，docs/WORKSHOP.md §1.10）：
+ * 声明的每一个 `.json` 必须真的在包里、必须是 JSON 对象、每一个值必须是**字符串且键不是 `_meta`**。
+ *
+ * 与 B2/B3a 同一条纪律（DESIGN §28.13.3「一条用不了的声明拒绝整个包」）：一份读不出来的译文如果只是被跳过，
+ * 作者看到的是「包加载了、我的界面词条没生效」—— 而 `t()` 会退回中文 msgid 或英文，页面上看不出任何异常。
+ * 值这一层的判据**不是**在这里重写的：`mergeWorkshopI18n` 是合并与校验共用的那一个函数，所以服务面合并时
+ * 不可能遇到「装载期放行、合并时丢掉」的值。
+ *
+ * `readBase` 只为「冲突报告」而读官方语言文件：一份读不出来的官方文件（不该发生）不会让包被拒，
+ * 只会让那一份的冲突报不出来（`mergeWorkshopI18n` 把 null base 当作「什么都还没有」）。
+ *
+ * @param {{ i18n?: Record<string, string> }} pack normalized manifest
+ * @param {string} packDir the pack's directory on disk
+ * @param {(lang: string) => Record<string, any>|null} [readBase] reads `public/i18n/<lang>.json`
+ * @returns {Array<{ code: string, reason: string }>}
+ */
+export function i18nIssues(pack, packDir, readBase = () => null) {
+  const decl = pack && pack.i18n;
+  if (!decl || typeof packDir !== 'string' || !packDir) return [];
+  const dir = path.resolve(packDir);
+  const { langs } = parsePackI18n([{ id: pack.id, i18n: decl }]);
+  for (const lang of [...langs.keys()].sort()) {
+    const rel = langs.get(lang).file;
+    const abs = path.join(dir, ...String(rel).split('/'));
+    if (abs !== dir && !abs.startsWith(dir + path.sep)) {
+      return [{ code: 'I18N_BAD_FILE', reason: `i18n["${lang}"] must resolve inside the pack (got "${rel}")` }];
+    }
+    let json;
+    try {
+      json = JSON.parse(fs.readFileSync(abs, 'utf8'));
+    } catch (e) {
+      return [{
+        code: 'I18N_BAD_FILE',
+        reason: e && e.code === 'ENOENT'
+          ? `i18n["${lang}"] is declared in pack.json but "${rel}" is missing from the pack`
+          : `i18n["${lang}"] ("${rel}") is not readable JSON: ${e && e.message ? e.message : String(e)}`,
+      }];
+    }
+    const merged = mergeWorkshopI18n(readBase(lang), json, { pack: pack.id, lang });
+    if (!merged.ok) return [{ code: merged.error, reason: merged.detail }];
+  }
+  return [];
+}
+
+/**
+ * The **wire list of C-layer panels** (DESIGN §28.8/§28.13, docs/WORKSHOP.md §1.9.3): the JSON-safe module list the
+ * browser turns into mounts. A function cannot cross the wire, and neither can a directory scan — so this list is built
+ * from the LOADED packs only (the same stance `workshopKitFilesFor` takes for kits): a URL that is not in this list is
+ * never servable, and a pack that declares nothing produces an empty list, i.e. a `welcome` without the field.
+ *
+ * Panels are ordered by `order`, then by pack id, then by panel id — DESIGN §28.3's "the smaller pack id wins" applied
+ * to a list, so the mount order never depends on the order the packs were discovered in.
+ *
+ * `hash` rides along (the pack's content hash, §28.2): the URL carries it as `?v=`, so a repack invalidates a cached
+ * module, and the spec says WHICH bytes the browser is supposed to be served.
+ * @param {ReturnType<typeof loadWorkshop>} loaded
+ * @param {{ log?: object|null, baseUrl?: string }} [opts]
+ * @returns {{ panels: Array<{ id: string, pack: string, slot: string, module: string, order: number, gate: string|null, url: string, hash: string, requires: string[] }>, errors: Array<{ pack: string, id: string, code: string, reason: string }> }}
+ */
+export function loadWorkshopPanels(loaded, { log = null, baseUrl = WORKSHOP_PANEL_PREFIX } = {}) {
+  /** @type {Array<any>} */
+  const panels = [];
+  /** @type {Array<{ pack: string, id: string, code: string, reason: string }>} */
+  const errors = [];
+  const base = String(baseUrl).replace(/\/+$/, '');
+  for (const pack of ((loaded && loaded.packs) || []).slice().sort(byPackId)) {
+    const decl = pack && pack.client;
+    const list = decl && Array.isArray(decl.panels) ? decl.panels : [];
+    if (!list.length) continue;
+    const dir = path.resolve(pack.dir || path.join(WORKSHOP_DIR, pack.id));
+    // Defence in depth: loadWorkshop already refused a pack with an unusable panel, but this reader may see a
+    // hand-built loader object or a pack written against an older schema (the same reason workshopRoutesFor re-judges).
+    const issues = panelModuleIssues(pack, dir);
+    if (issues.length) {
+      errors.push({ pack: pack.id, id: issues[0].id, code: issues[0].code, reason: issues[0].reason });
+      continue;
+    }
+    const requires = Object.freeze(Array.isArray(decl.requires) ? [...decl.requires] : []);
+    const hash = typeof pack.hash === 'string' ? pack.hash : '';
+    for (const panel of list) {
+      const url = `${base}/${encodeURIComponent(pack.id)}/${panel.module.split('/').map(encodeURIComponent).join('/')}?v=${hash.slice(0, 12)}`;
+      panels.push({
+        id: panel.id, pack: pack.id, slot: panel.slot, module: panel.module,
+        order: Number.isInteger(panel.order) ? panel.order : 0,
+        gate: typeof panel.gate === 'string' && panel.gate ? panel.gate : null,
+        url, hash, requires,
+      });
+    }
+  }
+  panels.sort((a, b) => (a.order - b.order)
+    || (a.pack < b.pack ? -1 : a.pack > b.pack ? 1 : 0)
+    || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  for (const e of errors) log?.warn?.(`[workshop] panel ${e.pack}/${e.id}: ${e.code}: ${e.reason}`);
+  return { panels, errors };
 }
 
 /**
@@ -143,9 +592,11 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null } = {}) {
  * @param {string} packDir
  * @param {object} pack the normalized manifest
  * @param {Record<string, Record<string, object>>} files the normalized content files
+ * @param {{ assetsDigest?: string|null }} [opts] 装载期已与容器**字节**核对过的 sha256（`assetsIssues`）；只有声明了
+ *   `assets` 的包才有值
  * @returns {{ hash: string, manifest: Array<{ path: string, hash: string }>, layer: string, combat: boolean, api: string|null, game: string|null }}
  */
-export function identifyPack(packDir, pack, files) {
+export function identifyPack(packDir, pack, files, { assetsDigest = null } = {}) {
   /** @type {Array<{ path: string, hash: string }>} */
   const manifest = [];
   const addText = (rel, text) => manifest.push({ path: rel, hash: sha256Hex(text) });
@@ -167,10 +618,49 @@ export function identifyPack(packDir, pack, files) {
   } catch { /* no kits/ directory: an ordinary data pack */ }
   const assetsDir = path.join(packDir, 'assets');
   for (const rel of listFiles(assetsDir)) addBytes(`assets/${rel}`, fs.readFileSync(path.join(assetsDir, rel)));
-  // the declared layer wins; the derivation is the fallback, and `combat` follows the artifact kind
+  // 5. C 层面板的模块源码（`pack.json.client.panels[].module`, DESIGN §28.8）：一条声明能改变客户端行为，模块的
+  //    字节同样能 —— 不把面板源码算进身份，两份不同的面板就会共用同一个摘要（那份摘要将不再描述浏览器真的会
+  //    执行的代码）。两个面板共用同一个文件时只算一次（按声明路径去重），并且只有在包真的声明了面板时才加：
+  //    没声明 `client` 的包（今天所有的包）哈希逐字节不变。
+  const panelFiles = [...new Set(((pack.client && Array.isArray(pack.client.panels)) ? pack.client.panels : [])
+    .map((p) => (p && typeof p.module === 'string' ? p.module : ''))
+    .filter(Boolean))].sort();
+  for (const rel of panelFiles) {
+    // A panel module may live under `assets/` (or be a kit source): then that file is already in the manifest and
+    // adding it twice would list the same bytes under the same path twice.
+    if (manifest.some((m) => m.path === rel)) continue;
+    const abs = path.join(packDir, ...rel.split('/'));
+    if (abs === packDir || !abs.startsWith(packDir + path.sep)) continue;
+    try { addBytes(rel, fs.readFileSync(abs)); } catch { /* unreachable for a LOADED pack: loadWorkshop refuses it first */ }
+  }
+  // the declared layer wins; the derivation is the fallback, and `combat` follows the artifact kind. A pack that only
+  // mounts a panel IS layer C (DESIGN §28.1: "C client UI") — §28.8's "the pack is marked in the UI like any other"
+  // means the layer derivation counts the panels the way it counts media, and `combat` stays "kits only": a panel
+  // cannot change a battle result.
   const hasMedia = ['voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art'].some((k) => Object.keys(pack[k] || {}).length > 0);
-  const layer = pack.layer || (kits ? 'B' : hasMedia ? 'C' : 'A');
+  const layer = pack.layer || (kits ? 'B' : (hasMedia || panelFiles.length) ? 'C' : 'A');
   const combat = pack.combat === null || pack.combat === undefined ? kits > 0 : pack.combat;
+  // 6. 声明的资源容器的 sha256（`pack.json.assets`, DESIGN §28.13.5）。装载期已经拿它与容器的**字节**核对过
+  //    （`assetsIssues` 流式读过一遍），所以它是这份包的一个真实属性，而不是一句声明 —— 这就是「同一个房间摘要
+  //    ⇒ 同一份容器」这条对齐的落点：换了容器、字节不同、摘要不同、包的内容哈希就不同，房间的摘要闸门随之拦下。
+  //    只有声明了 `assets` 的包才有这个条目：没声明的包哈希逐字节不变（`test/packAssets.test.js` 钉了三份真实包）。
+  //
+  //    合成路径 `assets.container.sha256` **不可能被真实文件占用**：进这份清单的路径只有 `pack.json`、
+  //    `<内容文件>.json`（13 个固定名字，没有 `assets`）、`kits/*.js`、`assets/**` 与声明过的面板模块（必须
+  //    `.js`）。这一条的 `hash` 直接就是容器的 sha256（它没有「另一份字节」可以哈希），路径名说的就是这件事。
+  if (typeof assetsDigest === 'string' && assetsDigest) manifest.push({ path: ASSETS_DIGEST_PATH, hash: assetsDigest });
+  // 7. 声明的 i18n 译文文件（`pack.json.i18n`, fanpack G-04）：**字节**进身份哈希。理由与面板模块逐字相同 ——
+  //    一份译文能改变玩家看到的界面，两份不同的译文不该共用同一个摘要；而且这些文件是**声明过的路径**
+  //    （`i18n["en"]: "i18n/en.json"`），不进清单的话「换了译文、包摘要不变」就会让房间的摘要闸门失效。
+  //    没声明 `i18n` 的包（今天所有的包）哈希逐字节不变。文件与面板模块共用同一条去重与路径复核。
+  const langFiles = [...new Set(Object.values(pack.i18n && typeof pack.i18n === 'object' ? pack.i18n : {})
+    .filter((rel) => typeof rel === 'string' && rel))].sort();
+  for (const rel of langFiles) {
+    if (manifest.some((m) => m.path === rel)) continue;
+    const abs = path.join(packDir, ...rel.split('/'));
+    if (abs === packDir || !abs.startsWith(packDir + path.sep)) continue;
+    try { addBytes(rel, fs.readFileSync(abs)); } catch { /* unreachable for a LOADED pack: loadWorkshop refuses it first */ }
+  }
   manifest.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   return { hash: modManifestDigest(manifest), manifest, layer, combat, api: pack.api || null, game: pack.game || pack.gameVersion || null };
 }
@@ -331,4 +821,142 @@ export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/worksho
   }
   for (const e of errors) log?.warn?.(`[workshop] kit ${e.pack}/${e.id}: ${e.reason}`);
   return { kits, modules, errors };
+}
+
+/**
+ * Load the **dispatch-time hook** of every pack that declares one: `pack.json.server.preDispatch`
+ * (DESIGN §28.13, docs/WORKSHOP.md §1.9.1). This is the behaviour half of the declaration A 段 only parsed.
+ *
+ * **Its refusals are a backstop, not the gate.** Since B3a 段 the load-time judgement lives in
+ * `preDispatchIssues`, called by `loadWorkshop` BEFORE the pack is listed: a declaration whose module or policy
+ * file is missing / unparsable, or whose `intercepts` names a type the installed protocol does not know, refuses the
+ * **whole pack** (§28.13.3). What is left for this function is the half that cannot be decided synchronously — the
+ * dynamic import and the factory call:
+ *   * resolve `module` / `policy` inside the pack (checked again: this reader may see a hand-built loader object);
+ *   * parse `policy` as a JSON object (the hook's own data: the reference implementation's `admission-files.json`);
+ *   * re-judge `intercepts` against the `C2S` of the protocol **actually loaded here**;
+ *   * import the module and take its `createPreDispatch(deps)` factory (or a default export of the same shape).
+ *
+ * An import that fails, or a module without the factory, is reported under the same names
+ * (`PREDISPATCH_BAD_MODULE` / `PREDISPATCH_BAD_POLICY` / `PREDISPATCH_UNKNOWN_TYPE` / `PREDISPATCH_BAD_PATH`) and that
+ * hook is not installed. On a tree the loader already accepted the first three cannot fire — the only way in is a pack
+ * that changed on disk between the two calls (or a hand-built `loaded` object in a test).
+ *
+ * The LAST two can only be decided here (a dynamic import is not synchronous), so they are the one remaining hole in
+ * §28.13.3: `loadWorkshop` cannot refuse a module it has not imported yet. `server/index.js` therefore calls
+ * `dropUnavailablePreDispatchPacks` with this function's `errors` on the **startup assembly path**, right after this
+ * call and before anything derived from `loaded.packs` is built — so a pack whose declared gate cannot be installed
+ * does not end up in the data overlay, in `welcome.mods`, in the kit list or in the resource tables either.
+ *
+ * Never throws: one unimportable hook must not stop a server from starting (the same stance as the data layer and
+ * `loadWorkshopKits`).
+ * @param {ReturnType<typeof loadWorkshop>} loaded
+ * @param {{ log?: object|null, c2s?: Record<string, any> }} [opts] `c2s` defaults to the loaded protocol (tests inject a
+ *   narrower catalogue to prove the runtime judgement is against the protocol, not against a copied list).
+ * @returns {{ hooks: Array<{ pack: string, module: string, policyFile: string, policy: object, intercepts: string[], create: Function }>, errors: Array<{ pack: string, code: string, reason: string }> }}
+ */
+export async function loadWorkshopHooks(loaded, { log = null, c2s = C2S } = {}) {
+  /** @type {Array<{ pack: string, module: string, policyFile: string, policy: object, intercepts: string[], create: Function }>} */
+  const hooks = [];
+  /** @type {Array<{ pack: string, code: string, reason: string }>} */
+  const errors = [];
+  const known = c2s && typeof c2s === 'object' ? c2s : {};
+  // 装载期已经拒绝过这几种（`preDispatchIssues` 在 `loadWorkshop` 里跑过一遍）—— 走到这里说明包在两次调用之间
+  // 变了，或者调用方手搓了一个 `loaded` 对象。措辞如实说明这一点，而不是把它说成一条新的判据。
+  const LOADER_BACKSTOP = ' (the loader already refuses the whole pack for this; reaching here means the pack changed on disk after it was listed, or the loader object was hand-built)';
+  for (const pack of ((loaded && loaded.packs) || []).slice().sort(byPackId)) {
+    const decl = pack && pack.server && pack.server.preDispatch;
+    if (!decl) continue;
+    const dir = path.resolve(pack.dir || path.join(WORKSHOP_DIR, pack.id));
+    // One judgement, two callers (DESIGN §28.13.3): the loader's gate and this reader ask the same question here, so a
+    // pack that is rejected before it is listed and a pack this function refuses can never disagree about why.
+    const issues = preDispatchIssues(pack, dir, { c2s: known });
+    if (issues.length) {
+      errors.push({ pack: pack.id, code: issues[0].code, reason: `${issues[0].reason}${LOADER_BACKSTOP}` });
+      continue;
+    }
+    const moduleAbs = path.join(dir, ...String(decl.module).split('/'));
+    const policyAbs = path.join(dir, ...String(decl.policy).split('/'));
+    let policy;
+    try {
+      policy = JSON.parse(fs.readFileSync(policyAbs, 'utf8'));
+    } catch (e) {
+      errors.push({ pack: pack.id, code: 'PREDISPATCH_BAD_POLICY', reason: `server.preDispatch.policy "${decl.policy}" is not readable JSON: ${e && e.message ? e.message : String(e)}` });
+      continue;
+    }
+    let mod;
+    // 这一层只剩「只有 import 才知道」的两件事：模块装了能不能 import、装了有没有工厂导出。它们与上面那些**装载期
+    // 判据**不是一回事（那三种在装载期已经拒绝整个包了），所以这里的措辞说的是**调用方接下来会做什么**。
+    const unavailable = ' (the declared hook cannot be installed, so the startup assembly path drops this pack from the loaded set — a pack that declares a gate it does not have must not look loaded)';
+    try {
+      // mtime 既打败服务端 ESM 缓存，又让两个版本的模块是两个 URL（与 loadWorkshopKits 同一条理由）。
+      const v = Math.round(fs.statSync(moduleAbs).mtimeMs);
+      mod = await import(`${pathToFileURL(moduleAbs).href}?v=${v}`);
+    } catch (e) {
+      errors.push({ pack: pack.id, code: 'PREDISPATCH_BAD_MODULE', reason: `server.preDispatch.module "${decl.module}" failed to import: ${e && e.message ? e.message : String(e)}${unavailable}` });
+      continue;
+    }
+    const create = typeof mod.createPreDispatch === 'function' ? mod.createPreDispatch
+      : (typeof mod.default === 'function' ? mod.default : null);
+    if (!create) {
+      errors.push({ pack: pack.id, code: 'PREDISPATCH_BAD_MODULE', reason: `server.preDispatch.module "${decl.module}" must export createPreDispatch(deps) (or default-export that function)${unavailable}` });
+      continue;
+    }
+    // 模块对自己那份策略的自检（可选导出 `validatePolicy`，见上面那个函数的注释）：判不了内部形状的那一格由包
+    // 自己回答，装载器只负责在它说「不能用」时**点名拒绝整个包**。没有导出的模块走不到这里就返回 null。
+    const policyRefusal = validateHookPolicy(mod, policy);
+    if (policyRefusal) {
+      errors.push({ pack: pack.id, code: 'PREDISPATCH_BAD_POLICY', reason: `server.preDispatch.module "${decl.module}" refused its own policy "${decl.policy}": ${policyRefusal}${unavailable}` });
+      continue;
+    }
+    hooks.push({ pack: pack.id, module: decl.module, policyFile: decl.policy, policy, intercepts: [...decl.intercepts], create });
+  }
+  for (const e of errors) log?.warn?.(`[workshop] hook ${e.pack}: ${e.code}: ${e.reason}`);
+  return { hooks, errors };
+}
+
+/**
+ * 把「声明了 `server.preDispatch` 却装不上」的包移出已加载集合 —— DESIGN §28.13.3 的**最后一格**。
+ *
+ * 为什么需要这一步：`loadWorkshop` 是同步的（`server/data.js` 在装叠加层时调它），而「模块能不能 import、有没有
+ * 工厂导出、模块自己对策略的意见是什么」只有动态 import 之后才知道。于是在装载期这道闸门之外还剩三种结局：
+ *   * `PREDISPATCH_BAD_MODULE`（import 失败 —— 语法错、模块不存在于导入图、依赖缺失）；
+ *   * `PREDISPATCH_BAD_MODULE`（导出了，但没有 `createPreDispatch`）；
+ *   * `PREDISPATCH_BAD_POLICY`（模块导出了 `validatePolicy`，而它对**自己那份策略的内部形状**说了「不能用」——
+ *     装载期的 `preDispatchIssues` 只保证策略能解析成 JSON 对象，它不认识钩子的方言）；
+ * 以及一种「两次调用之间包变了」的兜底（策略文件变得读不动 / `intercepts` 变得不在协议里）。
+ *
+ * 它在 B1 段是「**包照旧加载**，只是那个钩子没装上」—— 那正是本仓反复点名的最坏形态：运维以为自己有一道准入
+ * 闸门，而实际上一条消息都没拦。所以这里与 B2 的 `client`、B3a 的 `assets` 同口径：**声明不可用 ⇒ 该包不进
+ * 已加载集合**，并点名报告（返回的 `removed` 与追加进 `errors` 的那一条都带拒绝码）。
+ *
+ * 为什么放在**启动装配路径**而不是 `loadWorkshop` 里：那需要把 `loadWorkshop` 变成 async，而它的调用方
+ * （`server/data.js` 的 `loadData`、`tools/workshop-validate.mjs`、`tools/workshop-pack.mjs`、十几份测试）全是同步的。
+ * `server/index.js` 因此在装配的最前面（`loadWorkshopHooks` 之后、其余一切之前）调用本函数，**用一个被裁剪过的
+ * `packs` 数组**喂给后面每一个读者（数据叠加层、身份清单、kits、面板、资源表、Lobby/Network），于是
+ * 「不进已加载集合」是**一处裁剪、处处成立**，而不是各读各处地漏。
+ *
+ * 纯函数：不改入参，返回新的数组。
+ * @param {{ packs?: Array<{ id: string }>, errors?: Array<{ pack: string, reason: string }> }} loaded
+ * @param {Array<{ pack: string, code: string, reason: string }>} hookErrors `loadWorkshopHooks(...).errors`
+ * @returns {{ packs: Array<any>, removed: Array<{ pack: string, code: string, reason: string }>,
+ *   errors: Array<{ pack: string, reason: string }> }}
+ */
+export function dropUnavailablePreDispatchPacks(loaded, hookErrors) {
+  /** @type {Map<string, { code: string, reason: string }>} */
+  const failing = new Map();
+  for (const e of Array.isArray(hookErrors) ? hookErrors : []) {
+    if (e && typeof e.pack === 'string' && e.pack && !failing.has(e.pack)) failing.set(e.pack, { code: String(e.code || 'PREDISPATCH_UNAVAILABLE'), reason: String(e.reason || '') });
+  }
+  /** @type {Array<any>} */
+  const packs = [];
+  const removed = [];
+  const errors = Array.isArray(loaded && loaded.errors) ? [...loaded.errors] : [];
+  for (const p of ((loaded && loaded.packs) || [])) {
+    const hit = p && typeof p.id === 'string' ? failing.get(p.id) : null;
+    if (!hit) { packs.push(p); continue; }
+    removed.push({ pack: p.id, code: hit.code, reason: hit.reason });
+    errors.push({ pack: p.id, reason: `${hit.code}: ${hit.reason}` });
+  }
+  return { packs, removed, errors };
 }

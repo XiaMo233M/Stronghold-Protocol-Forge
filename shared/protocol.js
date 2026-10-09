@@ -1,17 +1,20 @@
 // Normative message catalogue (DESIGN §8). Used by server (validation) and client (building requests).
 // Every client→server message is `{ t, rid?, ...fields }`. Unknown `t` or invalid fields ⇒ ERR.BAD_MSG.
 
-import { DIFFICULTIES, NAME_MAX_LEN, ROOM_CODE_LEN, MAX_SEATS, EMOTES, GEO } from './constants.js';
+import { DIFFICULTIES, NAME_MAX_LEN, ROOM_CODE_LEN, MAX_SEATS, MAX_ROOM_MODS, EMOTES, GEO } from './constants.js';
 import { isDroppableChess } from './standIn.js';
 import { diySlotIds, validateDiyPicks } from './diy.js';
 import { isSupportEntries } from './support.js';
 import { cultivatedStats, isPotential, isCultivate, POTENTIAL_DEFAULT, CULTIVATE_DEFAULT } from './potential.js';
-import { isModDigest } from './modIdentity.js';
+import { isModDigest, isModId } from './modIdentity.js';
 
 // Mod identity (DESIGN §28.2): the wire shape of a mod set lives in shared/modIdentity.js, because jsconfig.json
 // excludes THIS file from the typecheck slice and a validator written here is never machine-checked. Re-exported so the
 // protocol contract is still declared in the protocol file.
 export { MOD_LIMITS, isModId, isModEntry, isModList, isModDigest, modDigest, modSetOf } from './modIdentity.js';
+// A room declares a SUBSET of the packs the server already loaded (W-A, DESIGN §28.9): `modIds` is a list of pack ids,
+// not a list of identities — the server owns the hashes, so a client cannot invent one.
+export { MAX_ROOM_MODS } from './constants.js';
 
 // ---- tiny validators -------------------------------------------------------
 const isInt = (v, lo = -Infinity, hi = Infinity) => Number.isInteger(v) && v >= lo && v <= hi;
@@ -387,7 +390,15 @@ export const C2S = {
   // session & lobby
   hello: { name: (v) => isStr(v, NAME_MAX_LEN) && v.trim().length > 0, token: (v) => v == null || isStr(v, 64), version: (v) => v == null || isInt(v, 0, 1e6), $optional: ['token', 'version'] },
   ping: { c: (v) => typeof v === 'number' && Number.isFinite(v) },
-  'room.create': { mode: (v) => v === 'solo' || v === 'coop', difficulty: (v) => DIFFICULTIES.includes(v), mods: (v) => v == null || isModDigest(v), $optional: ['mods'] },
+  'room.create': {
+    mode: (v) => v === 'solo' || v === 'coop',
+    difficulty: (v) => DIFFICULTIES.includes(v),
+    mods: (v) => v == null || isModDigest(v),
+    // the room's own mod set (W-A, DESIGN §28.9): pack ids the server has loaded, sorted+deduped server-side.
+    // Absent or `[]` = the room declares no set (today's behaviour: the room runs whatever the process runs).
+    modIds: (v) => Array.isArray(v) && v.length <= MAX_ROOM_MODS && v.every(isModId),
+    $optional: ['mods', 'modIds'],
+  },
   'room.join': { code: (v) => isStr(v, ROOM_CODE_LEN + 2) && /^[A-Za-z0-9]+$/.test(v), mods: (v) => v == null || isModDigest(v), $optional: ['mods'] },
   'room.leave': {},
   'room.ready': { ready: isBool },
@@ -419,6 +430,25 @@ export const C2S = {
   // room.closed { reason: 'kicked' }). room.leave / g.leave leave a spectator seat like a player seat.
   'room.spectate': { code: (v) => isStr(v, ROOM_CODE_LEN + 2) && /^[A-Za-z0-9]+$/.test(v) },
   'room.removeSpectator': { playerId: isId },
+
+  // 资源包准入（DESIGN §28.13，B1 段；docs/WORKSHOP.md §1.9）。这三个类型属于**钩子总线**：唯一的消费者是包声明的
+  // `server.preDispatch` 钩子（server/net.js onFrame，过了 validateC2S 之后、ping/hello 之前）。它们必须在这里，
+  // 否则消息在 :599 的 C2S 自有属性白名单就被当非法类型拒掉，连钩子都到不了；而钩子在 ping/hello **之前**被调用，
+  // 是因为服务端的挑战是连接建立时发出去的，客户端的证明往往在 `hello` 之前到达（放到会话检查之后就只会被回
+  // `hello required`）。形状在这里判死，钩子因此可以直接信任字段。
+  //
+  // 形状跟客户端的证明算法（`_up/mod4-pack/integration/client/public/js/resources/preload.js` prove()）：
+  // nonce 是服务端 24 随机字节的十六进制（48 位），version 是资源清单版本（12 位十六进制），proofs 是 3 条完整
+  // SHA-256（64 位十六进制）。**没有钩子的服务器**上它们仍然是合法协议类型，会照常落到大厅 —— 大厅对没有处理器
+  // 的类型回 `BAD_MSG`（server/lobby.js onMessage），不会静默吞掉。
+  'resource.challenge.request': {},
+  'resource.reset': {},
+  'resource.proof': {
+    nonce: (v) => typeof v === 'string' && /^[0-9a-f]{48}$/.test(v),
+    version: (v) => typeof v === 'string' && /^[0-9a-f]{12}$/.test(v),
+    proofs: (v) => Array.isArray(v) && v.length === 3
+      && v.every((p) => typeof p === 'string' && /^[0-9a-f]{64}$/.test(p)),
+  },
 
   // match
   'g.infoReady': {},
@@ -478,6 +508,9 @@ export const C2S = {
 // `welcome` also carries `mods: { digest, packs }` when the server runs any workshop pack (DESIGN §28.2, §28.9): the
 // client shows the "modded" mark from it, and echoes `digest` in `room.join` / `room.create` — a client that does not
 // echo it is refused entry to a modded room instead of entering one silently.
+// `room.state` carries its OWN `mods` of the same shape when the room declared a set (W-A, DESIGN §28.9) — absent when
+// the room declared none. It names the set the room asked for; the gate above still judges against the process set
+// until W-B makes the room's set the one the simulation runs.
 export const S2C = [
   'welcome', 'ok', 'error', 'pong',
   'room.state', 'room.closed',

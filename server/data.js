@@ -59,10 +59,12 @@ export function deepFreeze(root) {
  * Read every `*.json` in `dir` into `{ [basename]: parsed }`, deep-frozen.
  * Never throws: an unreadable directory yields `{}`; bad files are skipped with an error log.
  * @param {string} [dir] data directory (default ROOT/data)
- * @param {{ log?: { warn: Function, error: Function, info?: Function }, expected?: readonly string[] }} [opts]
+ * @param {{ log?: { warn: Function, error: Function, info?: Function }, expected?: readonly string[],
+ *   workshopDir?: string|null, excludePacks?: Set<string>|null }} [opts] `excludePacks`: pack ids the **startup
+ *   assembly path** (`server/index.js`) already decided are NOT loaded. See the comment at the overlay below.
  * @returns {Readonly<Record<string, any>>}
  */
-export function loadData(dir = DATA_DIR, { log = console, expected = DATA_FILES, workshopDir = WORKSHOP_DIR } = {}) {
+export function loadData(dir = DATA_DIR, { log = console, expected = DATA_FILES, workshopDir = WORKSHOP_DIR, excludePacks = null } = {}) {
   /** @type {Record<string, any>} */
   const out = {};
   let names = [];
@@ -86,12 +88,18 @@ export function loadData(dir = DATA_DIR, { log = console, expected = DATA_FILES,
   if (missing.length) log.warn(`[data] missing data files: ${missing.map((k) => k + '.json').join(', ')}`);
   // 创意工坊 overlay: merged in here, i.e. BEFORE deepFreeze, so every consumer sees one ordinary merged object and no
   // downstream code has to know workshop content exists. `workshopDir: null` skips the feature entirely (tests).
+  //
+  // `excludePacks`（B4 段）: 一个包声明的 `server.preDispatch` 只有**动态 import** 才知道装不装得上（模块抛错 /
+  // 没有工厂导出），而 `loadWorkshop` 与这里都是同步的。所以启动装配路径先把那一判据跑完，再把「不属于已加载
+  // 集合」的包 id 交给这里 —— 否则会出现最坏的半装状态：包不在 `welcome.mods` 里、kits / 面板 / 资源都不服务，
+  // 而它的 `chess.json` 却已经并进了游戏数据（一个谁都不认识的干员）。名单为空 / 没给 ⇒ 与 B3a 之后逐字节相同。
   if (workshopDir) {
     const loaded = loadWorkshop(workshopDir, { log });
-    if (loaded.packs.length) {
-      const { data: merged, report } = applyWorkshop(out, loaded.packs);
+    const packs = excludePacks && excludePacks.size ? loaded.packs.filter((p) => !excludePacks.has(p.id)) : loaded.packs;
+    if (packs.length) {
+      const { data: merged, report } = applyWorkshop(out, packs);
       for (const [k, v] of Object.entries(merged)) out[k] = v;
-      log.info?.(`[workshop] applied ${loaded.packs.length} pack(s): ${workshopSummary(report)}`);
+      log.info?.(`[workshop] applied ${packs.length} pack(s): ${workshopSummary(report)}`);
       for (const e of report.errors) log.warn?.(`[workshop] ${e.pack}: ${e.reason}`);
       // 干员没有模型 = 试玩里画成一张头像贴图（游戏自己不会报错，所以这行日志往往是唯一的线索）
       for (const l of report.looks || []) log.warn?.(`[workshop] ${l.pack}: ${l.reason}`);
@@ -105,11 +113,11 @@ let singleton = null;
 
 /**
  * Process-wide data singleton; loads on first call (later calls ignore the options).
- * @param {{ dir?: string, log?: object }} [opts]
+ * @param {{ dir?: string, log?: object, workshopDir?: string|null, excludePacks?: Set<string>|null }} [opts]
  * @returns {Readonly<Record<string, any>>}
  */
-export function getData({ dir = DATA_DIR, log = console, workshopDir = WORKSHOP_DIR } = {}) {
-  if (!singleton) singleton = loadData(dir, { log, workshopDir });
+export function getData({ dir = DATA_DIR, log = console, workshopDir = WORKSHOP_DIR, excludePacks = null } = {}) {
+  if (!singleton) singleton = loadData(dir, { log, workshopDir, excludePacks });
   return singleton;
 }
 

@@ -1052,3 +1052,15 @@
   --bk-c: var(--red-premium);
 }
 .crash__box h2 { font-size: .3rem; }
+
+/* ---- C-layer panel slots (DESIGN §28.8, public/js/ui/extensions.js) ------------------------------ */
+/* Created on demand by the registry (only once a panel really mounts — an install whose packs declare no `client`
+   adds no DOM at all) and addressed by [data-mod-slot]. The four are fixed overlay layers: a panel is independent of
+   which screen is on top, so a pack never has to know the route. pointer-events: none on the container and auto on the
+   panel, so an empty slot never eats a click. */
+.mod-slot { position: fixed; pointer-events: none; }
+.mod-slot[data-mod-slot="root.overlays"] { inset: 0; z-index: 60; }
+.mod-slot[data-mod-slot="root.guide"] { inset: 0; z-index: 61; }
+.mod-slot[data-mod-slot="screen.game.aside"] { top: 0; right: 0; bottom: 0; z-index: 62; }
+.mod-slot[data-mod-slot="screen.result.footer"] { right: 0; bottom: 0; left: 0; z-index: 62; }
+.mod-panel { pointer-events: auto; }
