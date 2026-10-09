@@ -172,14 +172,37 @@ test('共享 helper 的具名导出：社区 kit 静态 import 的那 9 个名�
   }
 });
 
-test('kit 的 import 判罚是稳定的（今天一律拒绝：KIT_IMPORT）', () => {
-  // 这条不是「内容」而是「口径」的锚点：将来若为工坊包放开受限 import，这条测试要**有意**改写，
-  // 而不是让口径悄悄变化（业主尚未裁定这一项，见 _up/clementia-mod-recon.md §五 缺口④）。
-  const withImport = "import { num } from '../shared/tier1.js';\nexport default () => ({ ok: true });\n";
-  const issues = validateKit(withImport, { id: 'chess_char_ws_mod_a', ownChessIds: ['chess_char_ws_mod_a'] });
-  assert.ok(kitErrors(issues).some((e) => e.code === 'KIT_IMPORT'), '带 import 的 kit 今天必须被 KIT_IMPORT 拒掉');
+test('kit 的 import 判罚：白名单内放行，白名单外一律 KIT_IMPORT', () => {
+  // 这条是「口径」的锚点，**有意改写**：2026-10-10 业主裁定缺口④，口径从「一律拒绝」改成「白名单内放行」。
+  // 判罚表与加载器共用一个扫描器（shared/kitImports.js），所以编辑器判过的东西加载器不会再拒。
+  const opts = { id: 'chess_char_ws_mod_a', ownChessIds: ['chess_char_ws_mod_a'] };
+  const allowed = [
+    "import { num } from '@kit/tier1.js';",
+    "import { selectedId } from '@kit/tier3.js';",
+    "import { COLS } from '@sim/constants.js';",
+    "export { dirVec } from '@sim/dir.js';",
+  ];
+  for (const line of allowed) {
+    const src = `${line}\nexport default () => ({ ok: true });\n`;
+    assert.deepEqual(kitErrors(validateKit(src, opts)), [], `${line} 必须在白名单里放行`);
+  }
+  const refused = [
+    "import { num } from '../shared/tier1.js';",   // 相对路径：两端不可能同时对（就是这条规则的理由）
+    "import x from '/abs.js';",                    // 绝对路径
+    "import y from '@kit/../../x.js';",            // 路径穿越
+    "import z from '@kit/evil.js';",               // 前缀对、模块名不在白名单
+    "const r = require('./x.js');",                // CommonJS
+    "const p = import('@kit/tier1.js');",          // 动态 import()：不可静态解析
+    "export { a } from '@sim/nope.js';",           // export … from 同样按白名单判
+  ];
+  for (const line of refused) {
+    const src = `${line}\nexport default () => ({ ok: true });\n`;
+    const hit = kitErrors(validateKit(src, opts)).find((e) => e.code === 'KIT_IMPORT');
+    assert.ok(hit, `${line} 今天必须被 KIT_IMPORT 拒掉`);
+    assert.match(hit.message, /白名单/, '拒绝理由要说清允许什么');
+  }
   const plain = "export default () => ({ ok: true });\n";
-  assert.deepEqual(kitErrors(validateKit(plain, { id: 'chess_char_ws_mod_a', ownChessIds: ['chess_char_ws_mod_a'] })), []);
+  assert.deepEqual(kitErrors(validateKit(plain, opts)), []);
 });
 
 // ---------------------------------------------------------------------------------------------------
