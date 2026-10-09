@@ -38,9 +38,9 @@ export const MOD_FILE_PREFIX = '/mods/file/';
 /**
  * Build the route table from the loaded workshop and its catalogue.
  *
- * `packs` is keyed by pack id → the `loadWorkshop()` entry, which carries BOTH `dir` (the directory a path is resolved
- * inside) and `manifest` (the loader's own hash manifest). Using those two together makes "inside the directory" and
- * "in the file list" the same answer the loader gave, instead of a second opinion computed here.
+ * `packs` is keyed by pack id → the `loadWorkshop()` entry, which carries `dir` (the directory a path is resolved
+ * inside). The FILE LIST comes from the catalogue (see `filesOf`), so "inside the directory" is answered by the pack
+ * entry and "is it a file of this pack" by the very list the client was told about — one answer each, no second opinion.
  * @param {ReturnType<import('../workshop.js').loadWorkshop>|null|undefined} loaded
  * @param {{ packs: Array<{ id: string, files: Array<{ path: string }> }> }} catalog `buildModCatalog(loaded)`
  * @returns {ModsRoutes}
