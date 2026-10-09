@@ -25,8 +25,8 @@
 import http from 'node:http';
 import path from 'node:path';
 import { getData, loadData } from './data.js';
-import { loadWorkshop, loadWorkshopKits, WORKSHOP_DIR } from './workshop.js';
-import { buildWorkshopDataFiles, workshopKitFilesFor, workshopAssetsFor, WORKSHOP_ASSET_PREFIX, WORKSHOP_ASSET_TYPES } from './http/workshop.js';
+import { loadWorkshop, loadWorkshopKits, loadWorkshopHooks, WORKSHOP_DIR } from './workshop.js';
+import { buildWorkshopDataFiles, workshopKitFilesFor, workshopAssetsFor, workshopRoutesFor, WORKSHOP_ASSET_PREFIX, WORKSHOP_ASSET_TYPES } from './http/workshop.js';
 import { ROOT, listenAddress, bindCandidates, serveDirs, makeLogger, parseTrustProxy } from './http/config.js';
 import { WS_MAX_PAYLOAD, createSessionStack, attachWebSocket } from './http/websocket.js';
 import { DATA_SHIM_JS, createStaticHandler } from './http/static.js';
@@ -42,7 +42,7 @@ export {
   ROOT, WS_MAX_PAYLOAD, DATA_SHIM_JS, MIME, COMPRESSIBLE, BUILD_INPUTS, computeBuildTag, buildTag, resetBuildTag,
   acceptsGzip, parseRange, createStaticHandler, lanUrls, parseTrustProxy,
   // 创意工坊 (docs/WORKSHOP.md): the HTTP helpers live in ./http/workshop.js but stay part of this module's API
-  buildWorkshopDataFiles, workshopKitFilesFor, workshopAssetsFor, WORKSHOP_ASSET_PREFIX, WORKSHOP_ASSET_TYPES,
+  buildWorkshopDataFiles, workshopKitFilesFor, workshopAssetsFor, workshopRoutesFor, WORKSHOP_ASSET_PREFIX, WORKSHOP_ASSET_TYPES,
 };
 
 /**
@@ -88,19 +88,24 @@ export async function startServer(opts = {}) {
   const workshopLoaded = loadWorkshop(workshopDir, { log });
   const workshopJson = buildWorkshopDataFiles(data, workshopLoaded);
   const workshopKits = await loadWorkshopKits(workshopLoaded, { log, knownIds: new Set(Object.keys(data.chess || {})) });
+  // 分发前钩子（`pack.json.server.preDispatch`, DESIGN §28.13）：同一个加载期，同一条「坏声明点名拒绝、不装钩子」的
+  // 姿态。没有包声明它时 `hooks` 是空数组，装配出来的钩子是 null，Network 的行为与今天逐字节相同。
+  const workshopHooks = await loadWorkshopHooks(workshopLoaded, { log });
   // The mod set (DESIGN §28.2): one identity per pack, one digest for the whole set. It travels in `welcome`, in
   // `/healthz` (lobby.stats) and in every BattleSpec, so the three can never disagree about what is running.
   const workshopMods = (workshopLoaded.packs || []).map((p) => ({ id: p.id, hash: p.hash, layer: p.layer, combat: p.combat, api: p.api }));
   const workshopKitFiles = workshopKitFilesFor(workshopKits.modules, workshopDir);
   const workshopAssets = workshopAssetsFor(workshopLoaded, workshopDir);
+  // 包声明的只读路由（`pack.json.routes`, DESIGN §28.13）：绝对路径 → 包内 `.json`，带声明的 `Cache-Control`。
+  const workshopRoutes = workshopRoutesFor(workshopLoaded, workshopDir, { log }).routes;
   const { registry, lobby, network } = createSessionStack(
-    { ...opts, workshop: { kits: workshopKits.kits, modules: workshopKits.modules, mods: workshopMods } },
+    { ...opts, workshop: { kits: workshopKits.kits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks } },
     { data, log },
   );
   // content packs (docs/PACKS.md): scanned now — the start log names them — and again whenever their folders change
   const packs = createPackRegistry({ publicDir, dataDir, packsDir }, { log });
   packs.refresh(true);
-  const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, packsDir, packs, log, workshopJson, workshopKitFiles, workshopAssets });
+  const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, packsDir, packs, log, workshopJson, workshopKitFiles, workshopAssets, workshopRoutes });
   const startedAt = Date.now();
   // The tag is per process (see buildTag): read the browser runtime once, here, not on every /healthz.
   resetBuildTag();

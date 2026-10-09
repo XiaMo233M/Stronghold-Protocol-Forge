@@ -488,9 +488,10 @@ node tools/workshop-validate.mjs my-pack
 
 ### 1.9 中间层能力声明：`assets` / `client` / `server` / `routes`
 
-这四组字段是**纯声明**，给「包不只是数据」这件事开的口子：一个包可以说它要一个客户端资源容器、一个挂载点、一个
-分发前准入钩子、一条只读路由。**本轮（A 段）只做格式**：解析形状、点名拒绝、把声明并进身份哈希 —— **没有一条行为
-读它们**（钩子没挂、路由没注册、界面没挂载、Service Worker 没动）。行为在 B 段。
+这四组字段是给「包不只是数据」这件事开的口子：一个包可以说它要一个客户端资源容器、一个挂载点、一个分发前准入钩子、
+一条只读路由。**A 段只做格式**：解析形状、点名拒绝、把声明并进身份哈希；**B1 段把其中两组落成行为** ——
+`server.preDispatch` 的钩子真的挂在分发路径上（§1.9.1），`routes` 的只读路由真的被服务（§1.9.2）。`assets` 与
+`client` 此刻**仍然只有声明**：资源容器不被服务、C 层面板不被挂载、Service Worker 一行没动。
 
 **为什么需要它们**：一个第三方「完整资源包导入 / 校验 / 服务端准入」的 mod 改写成本仓库的包格式之后，在 A 层
 **什么都不贡献**（没有干员/装备/怪物/地图/语音/美术），而旧 schema 没有地方表达这四件事，所以真校验器两边都判它
@@ -547,16 +548,90 @@ node tools/workshop-validate.mjs my-pack
 而区间不含本 build，整个包被拒（`MOD_API_INCOMPATIBLE`，理由里写出声明的区间与本 build 的号）。写成坏区间照旧是
 `BAD_API_RANGE`（先判语法，再判区间）。A 段**只**加了那个常量与这一条判罚，没有别的东西读它。
 
-#### 当前状态（A 段结束时）
+#### 当前状态（A 段 + B1 段）
 
 | 部分 | 状态 |
 |---|---|
 | 四组字段的形状、点名拒绝、进身份哈希 | ✅ 已实现（`shared/workshop.js`，`test/packAssets.test.js`） |
 | `MOD_API_VERSION` + 「声明了才比对」 | ✅ 已实现（`shared/constants.js`、`shared/workshop.js`） |
 | 作者向字段表与本文档 §1.9 | ✅ 已更新 |
-| 编辑器里的图形入口 | ⛔ 本轮无（与 §1.1 那句「每个字段都有图形入口」的例外就是这四组 + `api`，B 段补） |
-| 分发前钩子被挂上、`intercepts` 真的拦消息 | ⛔ B 段（本轮 `server/net.js` 的分发路径一字未动） |
-| 只读路由被注册、资源容器被服务、C 层面板被挂载 | ⛔ B 段 |
+| 编辑器里的图形入口 | ⛔ 本轮无（与 §1.1 那句「每个字段都有图形入口」的例外就是这四组 + `api`） |
+| 分发前钩子被挂上、能拦消息 | ✅ 已实现（B1：`server/workshop.js loadWorkshopHooks`、`server/modDispatch.js`、`server/net.js`；`test/modPreDispatch.test.js`） |
+| `resource.*` 三个 `C2S` 类型 | ✅ 已实现（B1：`shared/protocol.js`；`PROTOCOL_VERSION` 仍是 1） |
+| 只读路由被注册、被服务 | ✅ 已实现（B1：`server/http/workshop.js workshopRoutesFor`、`server/http/static.js`；`test/modRoutes.test.js`） |
+| 资源容器被服务、C 层面板被挂载、Service Worker 策略 | ⛔ 未做（仍是设计稿） |
+
+#### 1.9.1 `server.preDispatch`：分发前的准入钩子（B1 段已实现）
+
+一个包可以声明一个**在消息分发之前**被调用的钩子，用来做「进房间之前先证明你导入了完整资源包」这类准入。
+
+```jsonc
+"server": {
+  "preDispatch": {
+    "module": "server/resourceAdmission.mjs",   // 包内 ESM；服务端加载，浏览器不加载
+    "policy": "admission-files.json",           // 包内 .json，钩子自己的数据（原样注入，不解释）
+    "intercepts": ["room.create", "room.join", "room.spectate", "room.start"]
+  }
+}
+```
+
+**模块契约**（`module` 必须导出其中之一；两者同形）：
+
+```js
+export function createPreDispatch(deps) {
+  return {
+    onConnection(conn) { /* 可选：连接建立时调用一次（挑战就是在这里发出去的） */ },
+    preDispatch(conn, msg) { return false; },   // true = 这条消息已被消费，不再交给大厅
+  };
+}
+```
+
+- **工厂每条连接调用一次**（`onConnection` 之前）。挑战与「已证明」这类状态就放在工厂的闭包里 —— 那是**连接私有**的，
+  所以两台客户端 / 两个房间并发时不会串味。不要把它放到包的模块顶层：那是进程级共享状态。
+- **依赖对象是冻结的，键恰好这八个**：`pack`、`policy`（解析好的 JSON，深冻结）、`policyFile`、`intercepts`、
+  `c2s`（`shared/protocol.js` 的 `C2S` 冻结副本）、`log`、`now`（注入的时钟）、`send`。**没有** `data` / `lobby` /
+  `Match` / 任何对局对象，也**没有** socket：所以钩子能做的只有观察、记录、上报和否决入口消息，它**改不了对局结果**
+  （不声明 `combat: true` 的包更是如此），也**不能**自己注册 `socket.on('message')` —— 那会让同一条消息被处理两次
+  （`room.create` / `g.buy` 这类有副作用的类型是实打实的双执行），框架不给你这个口子。
+- **`send(conn, msg)` 是框架的发送助手**（带背压守卫）。`preDispatch` 返回 `true` 时钩子**自己负责回执**，而回执
+  **必须带上你收到的那条消息的 `rid`**：没有 `rid` 的错误帧在客户端会走 `unhandledError` 弹一条红条
+  （`public/js/main.js`），玩家看到的就是「操作没反应 + 一条看不懂的错误」。
+- **每一条通过协议校验的消息都会到达钩子**，不只是 `intercepts` 里那些：三个 `resource.*` 类型（`resource.proof` /
+  `resource.challenge.request` / `resource.reset`，`shared/protocol.js` 的 `C2S`）**不在**任何 `intercepts` 里 ——
+  它们不是「进入一局」的入口，而是钩子总线自己的类型，必须能到钩子。`intercepts` 是**钩子自己**判断「要不要闸」的
+  名单（框架把它原样注入，并在加载期按协议校验过）。
+- **钩子在 `validateC2S` 之后、`ping`/`hello` 与会话检查之前被调用**。这条位置是被证明流程逼出来的：服务端的挑战是
+  连接建立时就发出去的，客户端的证明因此往往在 `hello` 之前到达 —— 放到会话检查之后，它只会被回 `hello required`。
+- **`intercepts` 里那些类型在被否决时不会进大厅**；钩子放行时（包括它自己 `intercepts` 里的类型）照常分发 ——
+  「声明了拦截」不等于「这条消息永远到不了大厅」。
+- **没有包声明它时，服务器行为与从前逐字节相同**：不装载模块、不建任何对象、不注册任何监听器、没有一行新日志。
+
+**坏声明点名拒绝，拒绝码与形状层同名**（`_up/mod4-pack` 那份声明对不上时作者看到的还是这几个词）：
+`PREDISPATCH_BAD_MODULE`（模块文件不在包里 / 导入失败 / 没有 `createPreDispatch` 导出）、`PREDISPATCH_BAD_POLICY`
+（策略文件不在包里 / 不是 JSON / 不是对象）、`PREDISPATCH_UNKNOWN_TYPE`（`intercepts` 里有一个协议不认识的名字 ——
+**整个钩子**被拒，不是静默丢掉那一条）、`PREDISPATCH_BAD_PATH`（解析到包外）。被拒的只是**那个钩子**：包照旧加载，
+它的数据与身份哈希不受影响，作者在服务器日志里看到一条具名警告。
+
+**作者纪律（业主裁决）**：注入的服务端逻辑不得依赖时钟（用 `deps.now()`）、不得依赖 RNG 与无序容器的遍历顺序、
+不得使用进程级可变全局状态；状态一律放连接 / 房间自己的作用域里。**不许**写「开打前设全局、打完恢复」那种代码 ——
+多局并发会串味。
+
+#### 1.9.2 `routes`：只读 HTTP 路由（B1 段已实现）
+
+```jsonc
+"routes": [ { "path": "/data/resource-manifest.json", "file": "resource-manifest.json", "cache": "no-cache" } ]
+```
+
+- `path` 是**绝对** HTTP 路径，`file` 是包内 `.json`。服务方式刻意窄：**只 GET / HEAD**（别的动词在
+  `server/http/routes.js` 就被 `405 Allow: GET, HEAD` 挡掉）、没有写路径、没有目录列表、不做任何重写。
+- **只有精确等于声明路径的请求被回答**。于是目录穿越不是一个「被检查出来」的边界，而是**没有可穿越的目标**：
+  `..` 永远拼不出一个已声明的 key。声明里带 `..`、或解析后逃出包目录的 `file`，在装载期就被拒（并记一条警告）。
+- `.js` / `.html` **在服务面再拒一次**（与 `/workshop-assets` 同一条线：那是代码执行面，不是数据面）。
+- `cache` 决定 `Cache-Control`：`no-cache`（缺省）→ `no-cache`；`no-store` → `no-store`；`public` →
+  `public, max-age=86400`（与包自己的素材同一条策略）。
+- 声明的路径**先于**核心静态挂载被查找：一条声明过的路径不会因为磁盘上恰好有同名核心文件而变成别的东西。反过来，
+  「声明了但文件不在」是 **404**，不会悄悄回落到那个同名核心文件。
+- 两条路由声明同一个 `path`：包 id 小的赢（DESIGN §28.3），输的那条记一条警告。
 
 ---
 

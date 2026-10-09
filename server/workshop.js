@@ -13,6 +13,9 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { normalizePackManifest, normalizeContentFile, byPackId, playtestUnknownIds } from '../shared/workshop.js';
 import { sha256Hex, canonicalJson, modManifestDigest } from '../shared/modIdentity.js';
+// `intercepts` 的运行时判据就是**真的装在这个服务器上的那份协议**（DESIGN §28.13）：A 段在形状层判过一次，这里再判
+// 一次 —— 一份包声明可以比协议活得久（协议收窄了、包还是老写法），那时要在加载期点名拒绝，而不是「装了但拦不住」。
+import { C2S } from '../shared/protocol.js';
 // the kit import whitelist + the narrow rewrite (DESIGN §28.12). shared/ because the VALIDATOR reads the same table —
 // the loader must reach the same verdict the editor did.
 import { kitImportDeclarations, kitImportIssues, rewriteKitImports } from '../shared/kitImports.js';
@@ -337,4 +340,94 @@ export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/worksho
   }
   for (const e of errors) log?.warn?.(`[workshop] kit ${e.pack}/${e.id}: ${e.reason}`);
   return { kits, modules, errors };
+}
+
+/**
+ * Load the **dispatch-time hook** of every pack that declares one: `pack.json.server.preDispatch`
+ * (DESIGN §28.13, docs/WORKSHOP.md §1.9). This is the behaviour half of the declaration A 段 only parsed.
+ *
+ * What it does, per pack, in pack-id order (the DESIGN §28.3 rule, so which hook runs first never depends on the order
+ * the packs were discovered in):
+ *   * resolve `module` / `policy` **inside the pack** and require both files to exist — a declaration whose files are
+ *     gone is a hook that silently does nothing, which is the failure mode this whole layer exists to remove;
+ *   * parse `policy` as a JSON object (the hook's own data: the reference implementation's `admission-files.json`);
+ *   * re-judge `intercepts` against the `C2S` of the protocol **actually loaded here** (A 段 judged the shape);
+ *   * import the module and take its `createPreDispatch(deps)` factory (or a default export of the same shape).
+ *
+ * Every failure is **named** and reported, and that hook is not installed; the pack itself stays loaded (its data and its
+ * identity are unaffected — `identifyPack` hashed the declaration whether or not the module runs). The refusal codes are
+ * the ones A 段 fixed in `shared/workshop.js`, so an author sees the same name in the editor and on the server:
+ * `PREDISPATCH_BAD_MODULE` / `PREDISPATCH_BAD_POLICY` / `PREDISPATCH_UNKNOWN_TYPE` (+ `PREDISPATCH_BAD_PATH` for a
+ * declaration that resolves outside its own pack — defence in depth: the shape layer already refused those).
+ *
+ * Never throws: one unimportable hook must not stop a server from starting (the same stance as the data layer and
+ * `loadWorkshopKits`).
+ * @param {ReturnType<typeof loadWorkshop>} loaded
+ * @param {{ log?: object|null, c2s?: Record<string, any> }} [opts] `c2s` defaults to the loaded protocol (tests inject a
+ *   narrower catalogue to prove the runtime judgement is against the protocol, not against a copied list).
+ * @returns {{ hooks: Array<{ pack: string, module: string, policyFile: string, policy: object, intercepts: string[], create: Function }>, errors: Array<{ pack: string, code: string, reason: string }> }}
+ */
+export async function loadWorkshopHooks(loaded, { log = null, c2s = C2S } = {}) {
+  /** @type {Array<{ pack: string, module: string, policyFile: string, policy: object, intercepts: string[], create: Function }>} */
+  const hooks = [];
+  /** @type {Array<{ pack: string, code: string, reason: string }>} */
+  const errors = [];
+  const known = c2s && typeof c2s === 'object' ? c2s : {};
+  for (const pack of ((loaded && loaded.packs) || []).slice().sort(byPackId)) {
+    const decl = pack && pack.server && pack.server.preDispatch;
+    if (!decl) continue;
+    const dir = path.resolve(pack.dir || path.join(WORKSHOP_DIR, pack.id));
+    const moduleAbs = path.join(dir, ...String(decl.module).split('/'));
+    const policyAbs = path.join(dir, ...String(decl.policy).split('/'));
+    const inside = (abs) => abs === dir || abs.startsWith(dir + path.sep);
+    if (!inside(moduleAbs) || !inside(policyAbs)) {
+      errors.push({ pack: pack.id, code: 'PREDISPATCH_BAD_PATH', reason: `server.preDispatch paths must resolve inside the pack (module "${decl.module}", policy "${decl.policy}")` });
+      continue;
+    }
+    const readable = (abs) => { try { return fs.statSync(abs).isFile(); } catch { return false; } };
+    if (!readable(moduleAbs)) {
+      errors.push({ pack: pack.id, code: 'PREDISPATCH_BAD_MODULE', reason: `server.preDispatch.module "${decl.module}" is not a readable file inside the pack` });
+      continue;
+    }
+    if (!readable(policyAbs)) {
+      errors.push({ pack: pack.id, code: 'PREDISPATCH_BAD_POLICY', reason: `server.preDispatch.policy "${decl.policy}" is not a readable file inside the pack` });
+      continue;
+    }
+    let policy;
+    try {
+      policy = JSON.parse(fs.readFileSync(policyAbs, 'utf8'));
+    } catch (e) {
+      errors.push({ pack: pack.id, code: 'PREDISPATCH_BAD_POLICY', reason: `server.preDispatch.policy "${decl.policy}" is not readable JSON: ${e && e.message ? e.message : String(e)}` });
+      continue;
+    }
+    if (!policy || typeof policy !== 'object' || Array.isArray(policy)) {
+      errors.push({ pack: pack.id, code: 'PREDISPATCH_BAD_POLICY', reason: `server.preDispatch.policy "${decl.policy}" must be a JSON object (the hook's own data)` });
+      continue;
+    }
+    // 运行时那一半：声明可以比协议活得久。名单里有协议不认识的名字 → 整个钩子被点名拒绝（不是静默丢掉那一条 ——
+    // 静默丢掉就是一道只拦一部分入口的闸门，正是这个缺口要修的东西）。
+    const unknown = (Array.isArray(decl.intercepts) ? decl.intercepts : []).filter((t) => typeof t !== 'string' || !Object.hasOwn(known, t));
+    if (unknown.length) {
+      errors.push({ pack: pack.id, code: 'PREDISPATCH_UNKNOWN_TYPE', reason: `server.preDispatch.intercepts: ${unknown.map((t) => `"${String(t)}"`).join(', ')} — not a message type of the protocol this server runs (shared/protocol.js C2S)` });
+      continue;
+    }
+    let mod;
+    try {
+      // mtime 既打败服务端 ESM 缓存，又让两个版本的模块是两个 URL（与 loadWorkshopKits 同一条理由）。
+      const v = Math.round(fs.statSync(moduleAbs).mtimeMs);
+      mod = await import(`${pathToFileURL(moduleAbs).href}?v=${v}`);
+    } catch (e) {
+      errors.push({ pack: pack.id, code: 'PREDISPATCH_BAD_MODULE', reason: `server.preDispatch.module "${decl.module}" failed to import: ${e && e.message ? e.message : String(e)}` });
+      continue;
+    }
+    const create = typeof mod.createPreDispatch === 'function' ? mod.createPreDispatch
+      : (typeof mod.default === 'function' ? mod.default : null);
+    if (!create) {
+      errors.push({ pack: pack.id, code: 'PREDISPATCH_BAD_MODULE', reason: `server.preDispatch.module "${decl.module}" must export createPreDispatch(deps) (or default-export that function)` });
+      continue;
+    }
+    hooks.push({ pack: pack.id, module: decl.module, policyFile: decl.policy, policy, intercepts: [...decl.intercepts], create });
+  }
+  for (const e of errors) log?.warn?.(`[workshop] hook ${e.pack}: ${e.code}: ${e.reason}`);
+  return { hooks, errors };
 }

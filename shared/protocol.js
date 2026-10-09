@@ -420,6 +420,25 @@ export const C2S = {
   'room.spectate': { code: (v) => isStr(v, ROOM_CODE_LEN + 2) && /^[A-Za-z0-9]+$/.test(v) },
   'room.removeSpectator': { playerId: isId },
 
+  // 资源包准入（DESIGN §28.13，B1 段；docs/WORKSHOP.md §1.9）。这三个类型属于**钩子总线**：唯一的消费者是包声明的
+  // `server.preDispatch` 钩子（server/net.js onFrame，过了 validateC2S 之后、ping/hello 之前）。它们必须在这里，
+  // 否则消息在 :599 的 C2S 自有属性白名单就被当非法类型拒掉，连钩子都到不了；而钩子在 ping/hello **之前**被调用，
+  // 是因为服务端的挑战是连接建立时发出去的，客户端的证明往往在 `hello` 之前到达（放到会话检查之后就只会被回
+  // `hello required`）。形状在这里判死，钩子因此可以直接信任字段。
+  //
+  // 形状跟客户端的证明算法（`_up/mod4-pack/integration/client/public/js/resources/preload.js` prove()）：
+  // nonce 是服务端 24 随机字节的十六进制（48 位），version 是资源清单版本（12 位十六进制），proofs 是 3 条完整
+  // SHA-256（64 位十六进制）。**没有钩子的服务器**上它们仍然是合法协议类型，会照常落到大厅 —— 大厅对没有处理器
+  // 的类型回 `BAD_MSG`（server/lobby.js onMessage），不会静默吞掉。
+  'resource.challenge.request': {},
+  'resource.reset': {},
+  'resource.proof': {
+    nonce: (v) => typeof v === 'string' && /^[0-9a-f]{48}$/.test(v),
+    version: (v) => typeof v === 'string' && /^[0-9a-f]{12}$/.test(v),
+    proofs: (v) => Array.isArray(v) && v.length === 3
+      && v.every((p) => typeof p === 'string' && /^[0-9a-f]{64}$/.test(p)),
+  },
+
   // match
   'g.infoReady': {},
   'g.band': { bandId: isId },

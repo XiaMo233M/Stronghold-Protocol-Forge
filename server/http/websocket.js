@@ -9,6 +9,7 @@
 import { WebSocketServer } from 'ws';
 import { Network, SessionRegistry, NET_DEFAULTS } from '../net.js';
 import { Lobby } from '../lobby.js';
+import { createModDispatch } from '../modDispatch.js';
 import { splitUrl } from './common.js';
 import { netOptionsFrom, lobbyOptionsFrom } from './config.js';
 
@@ -30,10 +31,23 @@ export function createSessionStack(opts, { data, log }) {
     // 创意工坊 (docs/WORKSHOP.md): the behaviour layer of the installed packs travels with every match this lobby starts
     workshop: opts.workshop,
   });
-  const network = new Network({ registry, handler: lobby, log, options: netOptions });
+  // 包声明的**分发前钩子**（DESIGN §28.13, server/modDispatch.js）: assembled here, because it needs the framework's
+  // own send helper and the Network it belongs to. `send` is late-bound to `network` on purpose — it must be
+  // `network.reply` (the send path with the backpressure guards), never a second write path on the raw socket.
+  // No pack declares `server.preDispatch` ⇒ `createModDispatch` returns null ⇒ Network gets neither option and its
+  // onFrame behaves byte-for-byte as before.
+  let network;
+  const modDispatch = createModDispatch({
+    hooks: opts.workshop && opts.workshop.hooks,
+    send: (conn, msg) => network.reply(conn, msg),
+    log,
+  });
+  network = new Network({
+    registry, handler: lobby, log,
+    options: modDispatch ? { ...netOptions, preDispatch: modDispatch.preDispatch, onConnection: modDispatch.onConnection } : netOptions,
+  });
   return { registry, lobby, network };
 }
-
 /**
  * Serve the WebSocket endpoint /ws on `server` (its 'upgrade' event).
  * @param {import('node:http').Server} server

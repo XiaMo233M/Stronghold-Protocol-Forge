@@ -666,7 +666,7 @@ itself is the browser's job; `test/ui/kitimports.e2e.test.js` is the opt-in chec
 asserts the export-name floor, and asserts a specifier outside the whitelist does not resolve there either), and until
 someone runs it on a machine with Chrome this remains the standing gap recorded in `docs/WORKSHOP.md` §4.4.
 
-### 28.13 The four capability declarations: `assets`, `client`, `server.preDispatch`, `routes` (A 段)
+### 28.13 The four capability declarations: `assets`, `client`, `server.preDispatch`, `routes` (A 段 + B1 段)
 
 **The gap, stated by its own verdict.** A third-party mod ("full resource pack: import, verify, server admission") was
 rewritten into this repository's pack format and then judged by the REAL validator, on both this branch and the middle
@@ -676,10 +676,13 @@ things it needs have no field in `pack.json`, so the pack could not say what it 
 the reasons are in `_up/mod4-pack/pack/README.md` §4, and the two verdicts are in
 `_up/mod4-pack/pack/validator-verdict.json`.
 
-**A 段 is the schema, and only the schema.** The four groups parse, refuse and hash (§28.2). Nothing executes them:
-no hook is registered on the dispatch path (`server/net.js` is untouched), no route is mounted, no panel is mounted and
-the Service Worker policy is unchanged. The split is deliberate — the behaviour half touches the protocol face and the
-runtime, and a declaration that cannot be written is not worth debugging at the same time as one that cannot be trusted.
+**Two stages, and the line between them.** A 段 is the schema (`shared/workshop.js`): the four groups parse, refuse and
+hash (§28.2), and nothing executed them. **B1 段 is the behaviour of two of them**: the `server.preDispatch` hook is
+registered on the dispatch path and `routes` are served, both wired in `server/index.js` and both documented for
+authors in `docs/WORKSHOP.md` §1.9.1 / §1.9.2. `assets` and `client` are still declaration-only — no container is
+served, no panel is mounted and the Service Worker policy is unchanged. The split is deliberate: the behaviour half
+touches the protocol face and the runtime, and a declaration that cannot be written is not worth debugging at the same
+time as one that cannot be trusted.
 
 **The shapes, with the one decision each carries.**
 
@@ -730,6 +733,69 @@ three-part version and **treats an unparsable one as a match**, so the integer c
 directly — `shared/workshop.js` builds `'1.0.0'` from the number, and the test asserts that a `'2.x'` range is refused
 with the string and accepted with the bare number, so the fallback cannot come back silently.
 
-**What this section does not decide.** The behaviour of the four declarations (hook registration, route mounting, panel
-mounting, the client cache policy), the editor's graphical entry points for the four fields, whether `assets` ships in a
-release, and the Service Worker's default policy. Those are B 段, and each one changes a runtime rather than a schema.
+#### 28.13.1 The dispatch-time hook, and the five decisions B1 had to make
+
+`server.preDispatch` is registered on `server/net.js`'s `onFrame` — **after** the own-property `C2S` check and
+`validateC2S`, and **before** the `ping` / `hello` branches and the `hello required` session check. The position is not
+a preference: the hook bus owns three client messages (`resource.proof` / `resource.challenge.request` /
+`resource.reset`, now in `shared/protocol.js C2S`), the server's challenge goes out when the socket is adopted, and a
+client's proof therefore usually arrives **before** `hello` — anywhere later and it is answered `hello required`, so the
+gate can never close. The three types are a protocol-face addition with no `PROTOCOL_VERSION` bump: an old client never
+sends them.
+
+1. **No second `socket.on('message')`.** The listener belongs to the framework (`handleConnection`); registering another
+   one delivers every game message twice, and `room.create` / `g.buy` are side-effecting. The hook is *called*
+   (`opts.preDispatch(conn, msg) → boolean`), never handed a socket; `test/modPreDispatch.test.js` pins
+   `listenerCount('message') === 1`.
+2. **Per-connection instances.** `server/modDispatch.js` calls the module's `createPreDispatch(deps)` factory **once per
+   connection** and keeps the instance in a `WeakMap` keyed by the connection. State lives in that closure, so two
+   rooms or two sockets cannot mix — the ruling forbids "set a global before the match and restore it after", which
+   concurrent matches would leak through. A second, smaller guarantee comes from the injected surface itself:
+3. **A frozen, minimal dependency object.** Exactly `pack`, `policy` (parsed, deep-frozen), `policyFile`, `intercepts`,
+   `c2s` (a frozen copy of the protocol catalogue, so a pack cannot mutate the protocol other packs see), `log` (a
+   forwarding facade), `now` (the injected clock) and `send` (the framework's own send helper, with its backpressure
+   guards). There is no `data`, no `lobby`, no `Match`, no battle object. **A hook can therefore observe, record,
+   report and veto the entry messages it declared — it cannot change a battle result at all**, which is what "a pack
+   that does not declare `combat: true` must not change a match result" means structurally rather than as a promise.
+4. **Named refusal at load, no consumption at runtime.** A missing module or policy, an unparsable policy, a module
+   without the factory, or an `intercepts` entry the *loaded* protocol does not know
+   (`PREDISPATCH_BAD_MODULE` / `PREDISPATCH_BAD_POLICY` / `PREDISPATCH_UNKNOWN_TYPE` / `PREDISPATCH_BAD_PATH`, the same
+   names A 段 fixed) refuse **that hook** — the pack still loads, its identity is untouched, and a warning names it. A
+   hook that throws *later* is logged and treated as "did not consume": a gate that failed closed on its own bug would
+   lock every player out, and refusing a hook is the load-time job.
+5. **Every validated message reaches the hook, not only `intercepts`.** `intercepts` is the hook's own gate list (the
+   framework validates and injects it); the three `resource.*` types are deliberately not entry messages and would
+   otherwise never reach their only consumer. `intercepts` decides what the hook may *block*: a vetoed message does not
+   go to the lobby, and an allowed one — including a type listed in `intercepts` — does. A veto is only a veto if the
+   client can tell it apart from silence, so the contract requires the hook's reply to carry the request's `rid`; a
+   rid-less error frame becomes an `unhandledError` toast in the browser (`public/js/main.js`).
+
+**No pack declaring the hook means no hook**: `createModDispatch` returns `null`, `Network` receives neither option, and
+`onFrame` behaves byte-for-byte as before (no object built, no listener, no log line). The three real example packs in
+`docs/examples/` are the fixture for that claim — their (empty) hook set is installed and the resulting frame sequence
+is compared against a `Network` with no hook code at all.
+
+#### 28.13.2 The read-only routes, and how narrow they stay
+
+`pack.json.routes` is resolved once per process (`server/http/workshop.js workshopRoutesFor`) into declared path →
+file + cache policy, and served from `server/http/static.js` **before** the core mounts. The decisions:
+
+* **Only an exact declared path is answered.** Traversal is therefore not a check that can be got wrong: `..` cannot
+  build a key that is not in the map. The declaration side is judged twice (shape layer and serving side), because the
+  serving side may read a hand-built loader object or a pack written against an older schema.
+* **`.json` only, and only GET / HEAD.** `.js` / `.html` are refused again here for the same reason `/workshop-assets`
+  refuses them — this channel is data, not code. Other methods never reach this code (`server/http/routes.js` answers
+  405 with `Allow: GET, HEAD`).
+* **`cache` maps to `Cache-Control`**: `no-cache` → `no-cache`, `no-store` → `no-store`, `public` →
+  `public, max-age=86400` (the same policy the pack's own art carries).
+* **A declared path wins over a core file at the same path, on purpose** — the path is part of the pack's identity and
+  an author who declares `/data/resource-manifest.json` means it. The load-bearing half of that decision is the
+  converse: a declared route whose file is missing answers **404** instead of silently falling through to the
+  same-named core file (that is why the route stays in the map, with a warning naming the missing file).
+* **Two packs, one path**: the smaller pack id wins (DESIGN §28.3's rule, the same one the data overlay and the kit
+  loader use) and the loser is reported.
+
+**What this section does not decide.** The behaviour of the two remaining declarations (`assets`: serving the container,
+the client cache policy; `client`: mounting the panels), the editor's graphical entry points for the four fields,
+whether `assets` ships in a release, and the Service Worker's default policy. Those are still B 段, and each one changes
+a runtime rather than a schema.
