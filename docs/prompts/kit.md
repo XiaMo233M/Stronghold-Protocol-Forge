@@ -455,7 +455,7 @@ battle.addBuff(unit, { key: 'ws:count', refresh: 'stack', maxStacks: 99, duratio
   —— 官方辅助 `once(battle, key, fn)` 就是后者（`server/sim/content/kits/shared/tier1.js:146`）。**不要**用模块级普通变量：
   同一份文件在服务端和浏览器各加载一次，两边的模块变量不是一份（`server/sim/content/kits/README.md:84`）。
 - **盟约层数**：`battle.addLayers(playerId, bondId, n, reason, { source })`（`server/sim/battle/economy.js:22`），
-  上限是 `BOND_LAYER_CAP` 999（`shared/constants.js:133`，`layerGainRoom` 在 `:140` 算真正能加多少），
+  上限是 `BOND_LAYER_CAP` 999（`shared/constants.js:153`，`layerGainRoom` 在 `:140` 算真正能加多少），
   `layerGain` 钩子里 `ctx.n` 可改（`server/sim/battle/economy.js:31`）。**它只在普通战场生效**：`flags.layerGainsEnabled`
   只有 `kind === 'normal'` 时为 `true`（`server/sim/Battle.js:124`），联防 / boss 战场里是 no-op。官方 kit 一处都没调用
   它 —— 加层属于盟约/数据层的活，kit 调用它是允许的，但先想清楚你写的是「内容」还是「规则」。
@@ -530,7 +530,7 @@ install(battle, unit) {
 |---|---|---|
 | 「攻击范围 +1」 | buff 的 `mods.rangeExtend`（永久的那部分进初始范围） | `server/sim/units.js:141`、`server/sim/buffs.js:183`、`server/sim/battle/queries.js:252` |
 | 换掉整个范围形状 | `unit.rangeGrid = 副本` + `battle.refreshRange` | `server/sim/content/kits/ops/chess_char_5_15-thorn2.js:168`、`…/op-cgbird.js:149` |
-| 只多几个「打得到」的格子（不改形状） | `battle.setExtraRange(unit, keys)`，key 是绝对 tile key（`row * COLS + col`，`COLS` 是**画布**宽度 —— 一张图是画布里的一个窗口，`shared/constants.js:95` 的 `CANVAS_COLS`，`server/sim/constants.js:12`） | `server/sim/battle/queries.js:273`、用法 `…/ops/chess_char_6_01-lemuen.js:201` |
+| 只多几个「打得到」的格子（不改形状） | `battle.setExtraRange(unit, keys)`，key 是绝对 tile key（`row * COLS + col`，`COLS` 是**画布**宽度 —— 一张图是画布里的一个窗口，`shared/constants.js:114` 的 `CANVAS_COLS`，`server/sim/constants.js:18`） | `server/sim/battle/queries.js:273`、用法 `…/ops/chess_char_6_01-lemuen.js:201` |
 | 技能范围与自己的范围不同 | `targeting.rangeGrid` | `docs/SIM.md:1025` |
 | 技能范围**不**吃单位的攻击距离加成 | `targeting.noRangeExtend` | `server/sim/battle/queries.js:240` |
 | 范围只用来选目标、不改卡面上的范围 | `targeting.showOwnRange` | `server/sim/battle/queries.js:249` |
@@ -596,8 +596,8 @@ trait: { priority: 'lowDef', maxTargets: 2, splashRadius: 1.2 },
   import，照抄 `server/sim/dir.js:39` 那张表：
 
 ```js
-const COLS = 33;                                                  // shared/constants.js:95 的 CANVAS_COLS（server/sim/constants.js:12）
-/** 把朝 RIGHT 编写的相对格 [dr, dc] 转到 `dir` 的绝对格（抄 server/sim/dir.js:39 的 rotateOffset）。 */
+const COLS = 33;                                                  // shared/constants.js:114 的 CANVAS_COLS（server/sim/constants.js:18）
+/** 把朝 RIGHT 编写的相对格 [dr, dc] 转到 `dir` 的绝对格（抄 server/sim/dir.js:17 的 rotateOffset）。 */
 const rot = ([dr, dc], dir) => (dir === 'UP' ? [dc, -dr] : dir === 'LEFT' ? [-dr, -dc] : dir === 'DOWN' ? [-dc, dr] : [dr, dc]);
 const gridKeys = (unit, grid) => grid.map(([dr, dc]) => {
   const [a, b] = rot([dr, dc], unit.dir);

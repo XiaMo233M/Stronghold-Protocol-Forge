@@ -80,14 +80,18 @@ const SCREENS = { title: TitleScreen, lobby: LobbyScreen, room: RoomScreen, game
 
 /**
  * C 层注册点 (DESIGN §28.8, docs/WORKSHOP.md §1.9.3): one per page. A pack's panel gets the frozen surface
- * `public/js/ui/extensions.js` builds — no store handle, no `net`, no engine — and the module list arrives in
- * `welcome.modPanels` (src of truth: `pack.json.client.panels`, served from `/workshop-panels/`). A server whose packs
- * declare no `client` never sends the field: nothing here is called, no module is imported and **no DOM is added** —
- * the four slot containers are created on demand by the registry, not rendered by this shell.
+ * `public/js/ui/extensions.js` builds — no store handle, no `net` object itself (only the two-method facade), no engine
+ * and no match — and the module list arrives in `welcome.modPanels` (src of truth: `pack.json.client.panels`, served
+ * from `/workshop-panels/`). A server whose packs declare no `client` never sends the field: nothing here is called, no
+ * module is imported and **no DOM is added** — the slot containers are created on demand by the registry (the four
+ * overlay ones) or rendered by the components themselves (the five host ones), never by this shell.
  */
 const modPanels = createPanelRegistry({
   store,
   net,
+  // 数据口（业主裁决 2026-10-10）：面板经 `ctx.data.get('<表>')` 读**冻结快照**。注入的是页面本来就在用的那一个
+  // 数据层（`public/js/data.js`），所以读一张表不会多一个请求 —— 它读的就是引擎已经抓过的那份内容。
+  data,
   notify: (text, kind) => toast(text, kind || 'warn'),
 });
 

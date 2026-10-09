@@ -472,7 +472,8 @@ describe('C 层客户端：注册点', () => {
     assert.equal(seen.length, 1);
     const ctx = seen[0];
     // `hostKey` 是业主 2026-10-10 裁决里「可重复宿主」那一半（每张商店卡一个容器）：不可重复的宿主它是 `null`。
-    assert.deepEqual(Object.keys(ctx).sort(), ['gate', 'host', 'hostKey', 'id', 'log', 'net', 'order', 'pack', 'session', 'slot']);
+    // `data` 是同一条裁决里的**数据口**（`ctx.data.get('<表>')` 返回冻结快照）。
+    assert.deepEqual(Object.keys(ctx).sort(), ['data', 'gate', 'host', 'hostKey', 'id', 'log', 'net', 'order', 'pack', 'session', 'slot']);
     assert.equal(ctx.hostKey, null, '不可重复的宿主没有键');
     assert.ok(Object.isFrozen(ctx));
     assert.ok(Object.isFrozen(ctx.session));

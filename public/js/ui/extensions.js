@@ -80,6 +80,33 @@ export function hostKeyOf(el) {
   return typeof k === 'string' && k ? k : null;
 }
 
+/** 一份**只读深拷贝**的缓存（同一份原始对象只造一次快照，整份共享）。 */
+const snapshotCache = new WeakMap();
+
+/**
+ * 造一份冻结的深拷贝 —— `ctx.data.get()` 交给包的东西。
+ *
+ * 为什么不直接把引擎那份冻上：`public/js/data.js` 缓存的对象是引擎自己的家当（语言切换、补位清单都可能再写它），
+ * 冻住它等于让一个包把引擎的缓存变成只读。包拿到的必须是**快照**：它改自己的那份，谁也看不见。
+ * 数组与普通对象照原样深拷，`null` / 标量直接返回（JSON 数据里没有循环引用）。
+ * @param {any} value
+ * @returns {any}
+ */
+export function readonlySnapshot(value) {
+  if (value === null || typeof value !== 'object') return value;
+  const had = snapshotCache.get(value);
+  if (had) return had;
+  /** @type {any} */
+  const copy = Array.isArray(value) ? [] : {};
+  snapshotCache.set(value, copy);
+  if (Array.isArray(value)) {
+    for (const item of value) copy.push(readonlySnapshot(item));
+  } else {
+    for (const [k, v] of Object.entries(value)) copy[k] = readonlySnapshot(v);
+  }
+  return Object.freeze(copy);
+}
+
 /** 组件已经渲染出来的全部该宿主的容器（可重复宿主会有多个）；浏览器里是 `querySelectorAll`。 */
 export function browserSlotHosts(slot) {
   const doc = globalThis.document;
@@ -208,6 +235,11 @@ export function createPanelRegistry(deps) {
   const styleHost = deps.styleHost || browserStyleHost;
   const themeHost = deps.themeHost || browserThemeHost;
   const slotHosts = deps.slotHosts || browserSlotHosts;
+  /** 客户端数据层（`public/js/data.js`）。注入而不是 import：那是浏览器模块（fetch / location），
+   *  extensions.js 必须能在 Node 里整套跑（`test/modClientPanels.test.js` 就是这么跑的）。 */
+  const dataApi = deps.data || null;
+  /** 表名 → 冻结快照（首次读时造一次，之后共享；没声明过的表根本走不到这里）。 */
+  const dataSnapshots = new Map();
 
   /** @type {Array<any>} */
   let panels = [];
@@ -289,6 +321,9 @@ export function createPanelRegistry(deps) {
       gate: typeof raw.gate === 'string' && raw.gate ? raw.gate : null,
       requires: Array.isArray(raw.requires) ? raw.requires.map(String) : [],
       styles,
+      // 数据口：这一版线上形状是数组（形状层已经判过名字在闭枚举里）；客户端是**第二个读者**，所以只认数组，
+      // 别的写法当作「没声明」处理（一个坏字段不该让整个面板挂不上，但读了没声明的表会被点名，见 ctx.data.get）。
+      data: Array.isArray(raw.data) ? raw.data.map(String) : [],
     };
   }
 
@@ -319,9 +354,38 @@ export function createPanelRegistry(deps) {
       on: (type, fn) => (net && typeof net.on === 'function' ? net.on(type, fn) : () => {}),
       sendResourceMessage: (msg) => (net && typeof net.sendResourceMessage === 'function' ? net.sendResourceMessage(msg) : false),
     });
+    /**
+     * 数据口（业主裁决 2026-10-10）：面板**只读**的那几张表。
+     *
+     * 读一张**没在 `client.panels[].data` 里声明过**的表会返回 `null` 并**点名**（`CLIENT_DATA_UNDECLARED`，
+     * 与别处的拒绝同一个出口：控制台一行 + `refusals()`）。不抛异常是有意的：一个包多读一行不该让整个界面消失，
+     * 但这件事必须看得见 —— 「静默拿到 undefined」才是要消灭的那一种。
+     */
+    const dataFacade = Object.freeze({
+      /**
+       * 一张表的**只读快照**（冻结的深拷贝；同一个包多次调用拿到同一份），或 `null`。
+       * @param {string} name e.g. 'chess'
+       * @returns {any}
+       */
+      get(name) {
+        if (typeof name !== 'string' || !name) return null;
+        if (!rec.data.includes(name)) {
+          refuse('CLIENT_DATA_UNDECLARED', `panel "${rec.key}" reads the data table "${name}" without declaring it — add it to client.panels["${rec.id}"].data (declared: ${rec.data.join(', ') || 'none'})`);
+          return null;
+        }
+        if (!dataSnapshots.has(name)) {
+          let raw = null;
+          try { raw = dataApi && typeof dataApi.get === 'function' ? dataApi.get(name) : null; } catch { raw = null; }
+          dataSnapshots.set(name, raw === undefined || raw === null ? null : readonlySnapshot(raw));
+        }
+        return dataSnapshots.get(name);
+      },
+      /** 这个面板声明过、可以读的表名（只读）。 */
+      tables: () => [...rec.data],
+    });
     return Object.freeze({
       id: rec.id, pack: rec.pack, slot: rec.slot, order: rec.order, gate: rec.gate,
-      host, hostKey, session, net: netFacade, log: scoped,
+      host, hostKey, session, net: netFacade, data: dataFacade, log: scoped,
     });
   }
 

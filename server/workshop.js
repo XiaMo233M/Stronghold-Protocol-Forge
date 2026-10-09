@@ -619,6 +619,9 @@ export function loadWorkshopPanels(loaded, { log = null, baseUrl = WORKSHOP_PANE
         gate: typeof panel.gate === 'string' && panel.gate ? panel.gate : null,
         url, hash, requires,
         ...(styles.length ? { styles } : {}),
+        // 数据口（`client.panels[].data`）：面板可以读哪几张表。**不进服务端任何判据** —— 快照是客户端造的
+        //（`extensions.js` 的 `ctx.data.get`），这里只是把声明原样送到浏览器，客户端据此复判。
+        ...(Array.isArray(panel.data) && panel.data.length ? { data: [...panel.data] } : {}),
       });
     }
   }

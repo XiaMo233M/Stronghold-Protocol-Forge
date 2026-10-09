@@ -558,7 +558,7 @@ node tools/workshop-validate.mjs my-pack
 | 字段 | 形状 | 要点 |
 |---|---|---|
 | `assets` | `{ container, manifest, serverPolicy?, verify? }` | `container` 是包内相对路径、必须以 `.spresources` 结尾（`tools/make-spresources.mjs` 的产物）；`manifest` 是包内相对路径、必须 `.json`（客户端要验的扁平文件表）；`serverPolicy` 缺省 `"serve"`，可选 `"cache-only"`（后者让服务器对 `/assets`、`/fonts` 回 412，见 §1.9.4）；`verify` 缺省 `"sha256"`，按旁挂 `<container>.sha256` 校验 |
-| `client` | `{ panels: [{ id, slot, module, order?, gate?, styles? }], requires?, theme? }` | 面板按 `id` 排序后才进清单；`module` 是包内相对路径，**不是 URL**；`slot` 是闭枚举的九个宿主（四个浮层 + 五个既有组件里的宿主，见 §1.9.3）；`styles` 是这个面板自带的 `.css`（见 §1.9.5）；`requires` 只能取 `serviceWorker` / `cacheStorage` / `webCrypto` —— 缺一即「浏览器不支持」，不是「装了但静默不工作」；`theme.vars` 是包写的 CSS 变量（同样见 §1.9.5） |
+| `client` | `{ panels: [{ id, slot, module, order?, gate?, styles?, data? }], requires?, theme? }` | 面板按 `id` 排序后才进清单；`module` 是包内相对路径，**不是 URL**；`slot` 是闭枚举的九个宿主（四个浮层 + 五个既有组件里的宿主，见 §1.9.3）；`styles` 是这个面板自带的 `.css`、`data` 是它要读的数据表（两者见 §1.9.5 / §1.9.3 的数据口）；`requires` 只能取 `serviceWorker` / `cacheStorage` / `webCrypto` —— 缺一即「浏览器不支持」，不是「装了但静默不工作」；`theme.vars` 是包写的 CSS 变量（同样见 §1.9.5） |
 | `server` | `{ preDispatch: { module, policy, intercepts } }` | `module` 必须 `.mjs`（服务端加载，浏览器不加载）；`policy` 必须 `.json`；`intercepts` 每一项**必须**存在于 `shared/protocol.js C2S`（从协议反推，不在这里另抄一份名单 —— 抄一份就是第二个会漂移的真相） |
 | `routes` | `[{ path, file, cache? }]` | `path` 是 `/` 开头的绝对 HTTP 路径；`file` 是包内相对路径且必须 `.json`（`.js` / `.html` 一律不在此通道：那是代码执行面）；`cache` 缺省 `"no-cache"`，可选 `"no-store"` / `"public"` |
 | `i18n` | `{ "<语种>": "<包内相对 .json>" }` | 给**已有语种**（`en` / `ja` / `ko` / `zh-TW` …）补界面词条；语种码必须是常用大小写、不能是源语言 `zh`；文件里是 `{ "<中文 msgid>": "<译文>" }`。**已有键绝不覆盖**、冲突点名报告 —— 见 **§1.10** |
@@ -811,13 +811,31 @@ export function mount(ctx) {
 | 给 | 说明 |
 |---|---|
 | `id` / `pack` / `slot` / `order` / `gate` | 你声明的那几个值（只读） |
+| `hostKey` | 可重复宿主下你是**哪一份**（每张商店卡一个容器，这个键就是棋子 id）；不可重复的宿主是 `null` |
 | `log` | 带 `[mod <包>/<面板>]` 前缀的 `info` / `warn` / `error` |
 | `host` | 属于这次挂载的 `<div>`；往里画界面 |
 | `session.setPreload({ required, ready })` | **唯一**的 store 写口：入口闸门那两个状态位（见下） |
 | `net.on(type, fn)` / `net.sendResourceMessage(msg)` | **唯一**的网络口；见下 |
+| `data.get('<表>')` / `data.tables()` | **只读快照**：你在 `data` 里声明过的那些表（见下） |
 
 **没有** store 句柄、没有 `net` 对象本身、没有对局对象、没有 `Match`/`Battle`，也**不能**自己注册
 `socket.on('message')`。所以面板能画错，**改不了对局结果**。
+
+**数据口（`client.panels[].data`，业主裁决 2026-10-10）**：要在卡上按数据画标记，就声明你要读哪几张表，然后用
+`ctx.data.get('chess')` 拿一份**冻结的深拷贝**：
+
+```json
+{ "id": "marks", "slot": "screen.game.shopCard", "module": "ui/marks.js", "data": ["chess"] }
+```
+
+- 可读的表就是**浏览器本来就抓得到的那几张**（`chess` / `bonds` / `items` / `bands` / `enemies` / `bosses` /
+  `stages` / `tokens` / `choices` / `config` / `assets` / `backups` / `local`）—— 读一张表**不会多一个请求**，你读的
+  是引擎已经抓过的那份内容。名字必须在名单里，写别的整包被拒（`CLIENT_BAD_PANEL_DATA`）。
+- 拿到的是**快照**：冻结的深拷贝，同一个包多次调用拿到同一份。你改自己那份，引擎缓存里那份一个字节不动；反过来，
+  引擎也不会因为你读了就变慢或变只读。
+- 读一张**没声明**的表返回 `null` 并在控制台**点名**（`CLIENT_DATA_UNDECLARED`）—— 不抛异常（多读一行不该让整个
+  界面消失），但这件事必须看得见。
+- 这一格**不是** store 的替代品：这里只有**静态数据表**，没有对局状态。要读对局状态请走服务端（§1.9.1 / §1.11）。
 
 **入口闸门（「素材没就绪不许进」怎么写）**：`session.setPreload({ required: true, ready: false })` 把路由压回标题页，
 预载完成后再 `setPreload({ ready: true })` 放行。两个状态位缺省都是 `false`（不启用 = 今天的行为一个字节不变），

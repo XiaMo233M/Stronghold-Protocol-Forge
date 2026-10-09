@@ -262,8 +262,26 @@ export const CLIENT_PANEL_SLOTS = Object.freeze([
  * 浮层等于让包自己去做「哪张卡在哪」这件事 —— 而那需要 store，正是 §28.8 不给它的东西。
  */
 export const CLIENT_PANEL_REPEATABLE = Object.freeze(['screen.game.shopCard']);
-/** 面板的字段：四个 + `styles`（这个面板自带的样式表，见 `CLIENT_PANEL_STYLES_EXT`）。 */
-const CLIENT_PANEL_FIELDS = Object.freeze(['id', 'slot', 'module', 'order', 'gate', 'styles']);
+/** 面板的字段：四个 + `styles`（这个面板自带的样式表）+ `data`（它要读的数据表）。 */
+const CLIENT_PANEL_FIELDS = Object.freeze(['id', 'slot', 'module', 'order', 'gate', 'styles', 'data']);
+/** 一个面板最多读几张表（今天是 13 张，写着是为了让「全读」这件事有个上限而不是一个通配）。 */
+const CLIENT_MAX_PANEL_DATA_TABLES = 13;
+/**
+ * 一个面板可以**读**的数据表（业主裁决 2026-10-10 的「数据口」那一半，DESIGN §28.8）。
+ *
+ * 为什么是**声明**而不是「客户端有什么就给什么」：`ctx.data.get('chess')` 拿到的是 `data/chess.json` 的**只读快照**
+ * —— 那正是 `cardMarks.js` 需要 `visible` / `isHidden` 的唯一出路（§28.8 不给 store，而 store 里没有这些表）。
+ * 声明的意义与 `registers` 逐字相同：作者写下的东西要能被看见、被审、进身份；一个包偷偷读整本数据而不说，
+ * 下一个版本换了表名谁都不会知道。
+ *
+ * 名单就是**浏览器本来就抓得到的那几张**（`public/js/data.js` 的 `DATA_FILES`）—— 刻意不在这里发明第二份真相，
+ * `test/modClientHosts.test.js` 用**反射**把两者钉在一起：少一个 = 一个合法声明被拒，多一个 = 一条浏览器拿不到的
+ * 承诺。
+ */
+export const CLIENT_PANEL_DATA_TABLES = Object.freeze([
+  'chess', 'bonds', 'items', 'bands', 'enemies', 'bosses',
+  'stages', 'tokens', 'choices', 'config', 'assets', 'backups', 'local',
+]);
 /** 一个包能声明它需要哪些浏览器能力；缺一即「浏览器不支持」，不是「装了但静默不工作」（DESIGN §28.13）。 */
 export const CLIENT_REQUIRES = Object.freeze(['serviceWorker', 'cacheStorage', 'webCrypto']);
 /**
@@ -453,6 +471,26 @@ function parseClientDecl(raw) {
     if (panel.order !== undefined) clean.order = panel.order;
     if (panel.gate !== undefined) clean.gate = panel.gate;
     if (styles.length) clean.styles = styles;
+    // 数据口（`client.panels[].data`）：声明这个面板要读哪几张表。名字必须在闭枚举里（拼错的表名 = 一个永远
+    // 拿不到数据的读取），上限 13、去掉重复、按枚举次序写进清单（清单字节要稳定）。
+    if (panel.data !== undefined) {
+      if (!Array.isArray(panel.data) || !panel.data.length) {
+        return fail('CLIENT_BAD_PANEL_DATA', `client.panels["${panel.id}"].data must be a non-empty array of table names (drop the key instead of sending [])`);
+      }
+      if (panel.data.length > CLIENT_MAX_PANEL_DATA_TABLES) {
+        return fail('CLIENT_BAD_PANEL_DATA', `client.panels["${panel.id}"].data: at most ${CLIENT_MAX_PANEL_DATA_TABLES} tables (that is all of them)`);
+      }
+      for (const table of panel.data) {
+        if (!CLIENT_PANEL_DATA_TABLES.includes(table)) {
+          return fail('CLIENT_BAD_PANEL_DATA', `client.panels["${panel.id}"].data: "${String(table)}" is not a data table this page can read (one of: ${CLIENT_PANEL_DATA_TABLES.join(', ')})`);
+        }
+      }
+      const wanted = CLIENT_PANEL_DATA_TABLES.filter((t) => panel.data.includes(t));
+      if (new Set(panel.data).size !== panel.data.length) {
+        return fail('CLIENT_DUPLICATE_PANEL_DATA', `client.panels["${panel.id}"].data lists the same table twice`);
+      }
+      clean.data = wanted;
+    }
     panels.push(clean);
   }
   const rawRequires = raw.requires === undefined ? [] : raw.requires;
