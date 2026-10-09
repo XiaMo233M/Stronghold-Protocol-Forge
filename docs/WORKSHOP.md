@@ -558,7 +558,7 @@ node tools/workshop-validate.mjs my-pack
 | 字段 | 形状 | 要点 |
 |---|---|---|
 | `assets` | `{ container, manifest, serverPolicy?, verify? }` | `container` 是包内相对路径、必须以 `.spresources` 结尾（`tools/make-spresources.mjs` 的产物）；`manifest` 是包内相对路径、必须 `.json`（客户端要验的扁平文件表）；`serverPolicy` 缺省 `"serve"`，可选 `"cache-only"`（后者让服务器对 `/assets`、`/fonts` 回 412，见 §1.9.4）；`verify` 缺省 `"sha256"`，按旁挂 `<container>.sha256` 校验 |
-| `client` | `{ panels: [{ id, slot, module, order?, gate?, styles?, data? }], requires?, theme? }` | 面板按 `id` 排序后才进清单；`module` 是包内相对路径，**不是 URL**；`slot` 是闭枚举的九个宿主（四个浮层 + 五个既有组件里的宿主，见 §1.9.3）；`styles` 是这个面板自带的 `.css`、`data` 是它要读的数据表（两者见 §1.9.5 / §1.9.3 的数据口）；`requires` 只能取 `serviceWorker` / `cacheStorage` / `webCrypto` —— 缺一即「浏览器不支持」，不是「装了但静默不工作」；`theme.vars` 是包写的 CSS 变量（同样见 §1.9.5） |
+| `client` | `{ panels: [{ id, slot, module, order?, gate?, styles?, data?, messages? }], requires?, theme? }` | 面板按 `id` 排序后才进清单；`module` 是包内相对路径，**不是 URL**；`slot` 是闭枚举的九个宿主（四个浮层 + 五个既有组件里的宿主，见 §1.9.3）；`styles` 是这个面板自带的 `.css`、`data` 是它要读的数据表、`messages` 是它要收发的**包通道**（四者见 §1.9.3 的数据口 / §1.9.5 / §1.9.6）；`requires` 只能取 `serviceWorker` / `cacheStorage` / `webCrypto` —— 缺一即「浏览器不支持」，不是「装了但静默不工作」；`theme.vars` 是包写的 CSS 变量（见 §1.9.5） |
 | `server` | `{ preDispatch: { module, policy, intercepts } }` | `module` 必须 `.mjs`（服务端加载，浏览器不加载）；`policy` 必须 `.json`；`intercepts` 每一项**必须**存在于 `shared/protocol.js C2S`（从协议反推，不在这里另抄一份名单 —— 抄一份就是第二个会漂移的真相） |
 | `routes` | `[{ path, file, cache? }]` | `path` 是 `/` 开头的绝对 HTTP 路径；`file` 是包内相对路径且必须 `.json`（`.js` / `.html` 一律不在此通道：那是代码执行面）；`cache` 缺省 `"no-cache"`，可选 `"no-store"` / `"public"` |
 | `i18n` | `{ "<语种>": "<包内相对 .json>" }` | 给**已有语种**（`en` / `ja` / `ko` / `zh-TW` …）补界面词条；语种码必须是常用大小写、不能是源语言 `zh`；文件里是 `{ "<中文 msgid>": "<译文>" }`。**已有键绝不覆盖**、冲突点名报告 —— 见 **§1.10** |
@@ -1045,6 +1045,41 @@ export function mount(ctx) {
 **当前状态**：形状层、装载期、服务面、`welcome.modTheme`、客户端注入与撤销全部有测试
 （`test/modClientStyles.test.js` 17 条；`test/modClientPanels.test.js` 的 `welcome` 字段集合对照照旧钉着
 「没有包声明就一个字段都不多」）。
+
+#### 1.9.6 包通道：`client.panels[].messages` 与 `pack.msg`
+
+插件包要的**聊天 / 皮肤**这类通道，引擎里没有，而引擎也不该替它发明语义。所以这一格的分工是：
+
+- **类型名由引擎定**：线上只有一种消息 `pack.msg`，它进 `shared/protocol.js` 的 `C2S` / `S2C`。包**不能**定义新的协议
+  类型 —— `b.*` 那条边界（C 层改不了对局结果）**一个字没动**。
+- **通道名由包定**：你在面板里写 `"messages": ["chat", "skins"]`（只写后半段），线上是 `<你的包id>.chat`。
+- **引擎只做三件事**：校验（包装着 + 通道声明过）、限流（每会话令牌桶）、转发（**同一个房间**的成员与旁观者）。
+  载荷 `data` 是**不透明**的：引擎不看、不改、不落库。
+
+```json
+{ "id": "chat", "slot": "root.overlays", "module": "ui/chat.js", "messages": ["chat"] }
+```
+
+```js
+export function mount(ctx) {
+  ctx.net.on('chat', (data, msg) => render(data, msg.from));   // 收：只收自己包、自己声明的那个通道
+  ctx.net.send('chat', { text: '你好' });                        // 发：同一个房间的人都收到
+  return {};
+}
+```
+
+| 判据 | 行为 |
+|---|---|
+| 通道名形状 | 小写字母开头、`[a-z0-9_-]`、≤ 64，每个面板最多 8 条；写别的整包被拒（`CLIENT_BAD_PANEL_CHANNEL`） |
+| 载荷大小 | `data` 序列化后 ≤ 4096（`PACK_MSG_LIMITS.bytes`），超了整条消息按 `BAD_MSG` 拒 |
+| 频率 | 每会话令牌桶：容量 20、每秒补 5（`PACK_MSG_LIMITS`）；超了回 `RATE`（「操作过于频繁」） |
+| 不在房间里 | 回 `NOT_IN_ROOM` —— 通道是**房间内**的，不在大厅里广播全网 |
+| 没声明的通道 | 服务端回 `BAD_MSG` 并**点名**那个通道；客户端 `send` 返回 `false`、`on` 返回一个什么都不做的退订函数，两边都会在控制台点名（`CLIENT_CHANNEL_UNDECLARED`）|
+| 引擎类型 | `ctx.net.on('<引擎类型>')`（`shared/protocol.js S2C` 里的那些）照旧原样透传，不受这一格影响 |
+
+**这一格不提供什么**：没有服务端存档、没有离线消息、没有跨房间广播、没有服务端语义（谁该收到、聊天记录怎么存、
+皮肤怎么同步，都是**包自己**的事 —— 服务端那一半用 §1.9.1 的 `server.preDispatch` 钩子接，它在 `intercepts` 里
+写上 `pack.msg` 就能看到这条消息，并可以用 `send` 回话）。
 
 ### 1.10 `i18n`：给**已有语种**补界面词条（B5 段已实现）
 

@@ -100,7 +100,7 @@
 
 import { randomBytes, randomInt } from 'node:crypto';
 import { ERR, MAX_SEATS, MAX_SPECTATORS, ROOM_CODE_LEN, modeIdFor } from '../shared/constants.js';
-import { checkLoadout, checkLoadoutOps, cultivationCharIds, checkNotOwned, checkDiyPicks } from '../shared/protocol.js';
+import { checkLoadout, checkLoadoutOps, cultivationCharIds, checkNotOwned, checkDiyPicks, PACK_MSG_LIMITS } from '../shared/protocol.js';
 import { modSetOf, isModId } from '../shared/modIdentity.js';
 import { normalizeSupportConfig, checkSupport, supportPicker, supportCapacity, supportTiers } from '../shared/support.js';
 import { encode, isDroppable, isErrCode, sendRaw, sendSession } from './net.js';
@@ -332,6 +332,18 @@ export class Lobby {
      */
     this.workshop = workshop && typeof workshop === 'object' ? workshop : null;
     /**
+     * 包通道白名单（docs/WORKSHOP.md §1.9.6）：`<包id>` → 这个包声明过的通道名集合。由**面板清单**推出来 ——
+     * 面板就是通道的声明人（`client.panels[].messages`），所以这里不存在第二份真相：`welcome.modPanels` 与这一份
+     * 是同一批数据的两个读者。没有包声明 `client` 时它是空表，`pack.msg` 一律回 `BAD_MSG`。
+     * @type {Map<string, Set<string>>}
+     */
+    this.packChannels = new Map();
+    for (const panel of (this.workshop && Array.isArray(this.workshop.panels) ? this.workshop.panels : [])) {
+      if (!panel || typeof panel.pack !== 'string' || !Array.isArray(panel.messages)) continue;
+      if (!this.packChannels.has(panel.pack)) this.packChannels.set(panel.pack, new Set());
+      for (const channel of panel.messages) this.packChannels.get(panel.pack).add(channel);
+    }
+    /**
      * What this server is running, as one identity (DESIGN §28.2): `{ digest, packs }`, or null for a plain install.
      * The digest travels in `welcome` and must be echoed in `room.create` / `room.join` before a seat is given in a
      * room whose content is not vanilla — the client is told what it is joining, and a client too old to answer is
@@ -453,10 +465,59 @@ export class Lobby {
       case 'room.diy': return this.diy(session, msg);
       case 'room.spectate': return this.spectate(session, msg);
       case 'room.removeSpectator': return this.removeSpectator(session, msg);
+      case 'pack.msg': return this.packMsg(session, msg);
       default:
         if (typeof msg.t === 'string' && msg.t.startsWith('g.')) return this.routeGame(session, msg);
         return fail(ERR.BAD_MSG, `unhandled type ${String(msg.t).slice(0, 32)}`);
     }
+  }
+
+  /**
+   * `pack.msg`（docs/WORKSHOP.md §1.9.6，业主裁决 2026-10-10 的「消息额度」那一半）：**包自己的通道**，引擎只当
+   * 不透明载荷转发。四道判据，全部落在「不认识的声明要响亮」那条线上：
+   *   1. 必须**在房间里**（通道是房间内的，不在大厅里广播全网）；
+   *   2. `pack` 必须是这个服务器真的装着的包，且它**声明过**这个通道（`this.packChannels`）—— 一个包说不出另一个
+   *      包的通道，也说不出自己没写进 `client.panels[].messages` 的通道；
+   *   3. 载荷大小由 `validateC2S` 卡过（`PACK_MSG_LIMITS.bytes`），这里再卡**频率**（每会话令牌桶，超了 `ERR.RATE`）；
+   *   4. 送回**同一个房间**的成员与旁观者。引擎不解释 `data`，也不判断谁该收到 —— 客户端只把消息交给声明过这个
+   *      通道的面板，那是「第二个读者」的判据（`extensions.js` 的 `net.on(channel, …)`）。
+   * @param {import('./net.js').Session} session
+   * @param {{ pack: string, channel: string, data?: any }} msg
+   */
+  packMsg(session, msg) {
+    const room = this.roomOf(session);
+    if (!room) return fail(ERR.NOT_IN_ROOM);
+    const declared = this.packChannels.get(msg.pack);
+    if (!declared || !declared.has(msg.channel)) {
+      return fail(ERR.BAD_MSG, `pack "${String(msg.pack).slice(0, 32)}" does not declare the channel "${String(msg.channel).slice(0, 32)}"`);
+    }
+    if (!this.packMsgAllowed(session)) return fail(ERR.RATE);
+    const out = {
+      t: 'pack.msg', pack: msg.pack, channel: msg.channel, from: session.playerId,
+      ...(msg.data === undefined ? {} : { data: msg.data }),
+    };
+    for (const seat of room.seats) {
+      if (!seat || seat.isBot) continue;
+      const target = this.registry.byId(seat.playerId);
+      if (target && target.connected) sendSession(target, out);
+    }
+    for (const seat of room.spectators) {
+      const target = this.registry.byId(seat.playerId);
+      if (target && target.connected) sendSession(target, out);
+    }
+    return OK;
+  }
+
+  /** 包通道的**每会话**令牌桶（`PACK_MSG_LIMITS`）：一个没有限流的聊天通道就是一个刷屏通道，
+   *  而「引擎不解释载荷」不等于「引擎不管频率」。 */
+  packMsgAllowed(session, now = this.now()) {
+    const bucket = session.packMsgBucket || (session.packMsgBucket = { tokens: PACK_MSG_LIMITS.burst, at: now });
+    const elapsed = Math.max(0, now - bucket.at) / 1000;
+    bucket.at = now;
+    bucket.tokens = Math.min(PACK_MSG_LIMITS.burst, bucket.tokens + elapsed * PACK_MSG_LIMITS.perSec);
+    if (bucket.tokens < 1) return false;
+    bucket.tokens -= 1;
+    return true;
   }
 
   /** The session's socket closed. @param {import('./net.js').Session} session */

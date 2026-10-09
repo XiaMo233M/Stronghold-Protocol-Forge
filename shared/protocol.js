@@ -38,6 +38,25 @@ const isList = (v, max, item) => Array.isArray(v) && v.length <= max && v.every(
 
 // ---- client-side combat (DESIGN §14): b.progress / b.result payloads -------------------------------------------
 
+/**
+ * 包命名空间消息的**边界**（docs/WORKSHOP.md §1.9.6）。
+ *   * `bytes`：一条 `pack.msg` 的 `data` 序列化之后的上限（UTF-16 长度，对 ASCII 就是字节数；刻意保守，因为整帧本来
+ *     还有 64 KB 的上限）；
+ *   * `perSec` / `burst`：服务端按**会话**限流（令牌桶），超了回 `ERR.RATE` —— 一个没有限流的聊天通道就是一个
+ *     刷屏通道，而「引擎不解释载荷」不等于「引擎不管频率」。
+ */
+export const PACK_MSG_LIMITS = Object.freeze({ bytes: 4096, perSec: 5, burst: 20 });
+
+/** `JSON.stringify(value)` 的长度；不可序列化（循环引用 / BigInt）时返回 Infinity（= 拒）。 */
+function jsonBytes(value) {
+  try {
+    const text = JSON.stringify(value);
+    return typeof text === 'string' ? text.length : Infinity;
+  } catch {
+    return Infinity;
+  }
+}
+
 /** Size limits of a b.result payload (the whole frame also obeys the 64 KB inbound limit). */
 export const RESULT_LIMITS = Object.freeze({ players: 4, leaked: 400, unitsEnd: 64, unitStats: 160, layerGains: 40, mods: 16, unspawned: 400 });
 const BIG = 1e13;
@@ -450,6 +469,20 @@ export const C2S = {
       && v.every((p) => typeof p === 'string' && /^[0-9a-f]{64}$/.test(p)),
   },
 
+  // 包命名空间消息（docs/WORKSHOP.md §1.9.6；业主裁决 2026-10-10 的「消息额度」那一半）。
+  //
+  // 插件包要的聊天 / 皮肤这类通道，引擎里**没有**，而引擎也不该替它发明语义。所以引擎只做一件事：把一条**不透明**
+  // 载荷从发送者送到同一个房间里、装了同一个包、且声明过这个通道的客户端。**类型名由引擎定**（`pack.msg`），
+  // **通道名由包定**（作者的 `client.panels[].messages` 里只写后半段，线上的 `<包id>.<名字>` 由引擎拼）——
+  // 于是「包能定义新协议类型」这件事没有发生，`b.*` 那条边界一个字没动。
+  'pack.msg': {
+    pack: isModId,
+    channel: (v) => typeof v === 'string' && /^[a-z][a-z0-9_-]{0,63}$/.test(v),
+    // 载荷**有界**：一条消息不该能把房间的内存吃掉。形状之外引擎一概不解释（`data` 的语义属于包自己）。
+    data: (v) => v === undefined || jsonBytes(v) <= PACK_MSG_LIMITS.bytes,
+    $optional: ['data'],
+  },
+
   // match
   'g.infoReady': {},
   'g.band': { bandId: isId },
@@ -523,6 +556,8 @@ export const S2C = [
   'b.start', 'b.pool', 'b.end',
   // server-run combat streaming (legacy / SP_COMBAT=server only)
   'b.snap', 'b.ev',
+  // 包命名空间消息（§1.9.6）：同一个房间里、装了同一个包、声明过这个通道的客户端会收到它。
+  'pack.msg',
 ];
 
 /**

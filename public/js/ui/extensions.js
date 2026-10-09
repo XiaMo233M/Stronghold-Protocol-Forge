@@ -13,6 +13,11 @@
 //     new component (the reference pack's `chat.css` is 21 KB of it) cannot be expressed as variables, which is why
 //     this half exists at all.
 //
+//   * `client.panels[].messages[]` — **包自己的消息通道** (owner's ruling 2026-10-10, docs/WORKSHOP.md §1.9.6):
+//     `ctx.net.send('<channel>', data)` and `ctx.net.on('<channel>', fn)` reach the owner's other clients in the same
+//     room. The ENGINE defines the envelope (`pack.msg`), the PACK defines the channel — so a pack cannot invent a
+//     protocol type, and `b.*` stays out of reach. Engine message types (`S2C`) keep working through `on` unchanged.
+//
 // This module turns that list into mounts. Three properties are load-bearing:
 //
 //   * THE BOUNDARY IS WHAT IS NOT PASSED IN (DESIGN §28.8). A panel's factory gets a frozen object with exactly
@@ -34,6 +39,12 @@
 // the browser half is the opt-in `SP_E2E=1` path, see docs/WORKSHOP.md §4.4 for the same standing gap).
 
 import { t } from '../../../shared/i18n.js';
+// 引擎已经定义好的服务端→客户端类型（`shared/protocol.js S2C`）。**不在这里抄一份**：抄一份就是第二个会漂的真相，
+// 而漂的方向是「一个面板订阅了一个引擎其实不会发的名字」—— 那正是这一层到处在拒绝的形态。
+import { S2C } from '../../../shared/protocol.js';
+
+/** 引擎类型集合（`net.on(type)` 对它们照旧原样透传）。 */
+const S2C_TYPES = new Set(S2C);
 
 /**
  * The mount points (DESIGN §28.8). The first four are 0.11.0's **overlays** — the registry creates their container on
@@ -260,6 +271,8 @@ export function createPanelRegistry(deps) {
   const styleEls = [];
   /** 主题变量被我们改之前的原值（空字符串 = 当时没有这个变量，撤销时 removeProperty）。 */
   const themePrevious = new Map();
+  /** 面板订阅包通道（`net.on('<通道>')`）拿到的退订函数：`dispose` 要一并撤掉。 */
+  const channelOffs = [];
   let subscribed = false;
   let unsubscribe = null;
   let flushing = false;
@@ -324,6 +337,8 @@ export function createPanelRegistry(deps) {
       // 数据口：这一版线上形状是数组（形状层已经判过名字在闭枚举里）；客户端是**第二个读者**，所以只认数组，
       // 别的写法当作「没声明」处理（一个坏字段不该让整个面板挂不上，但读了没声明的表会被点名，见 ctx.data.get）。
       data: Array.isArray(raw.data) ? raw.data.map(String) : [],
+      // 包通道（`client.panels[].messages`）：客户端只把 `pack.msg` 交给**声明过**这个通道的面板。
+      messages: Array.isArray(raw.messages) ? raw.messages.map(String) : [],
     };
   }
 
@@ -351,7 +366,46 @@ export function createPanelRegistry(deps) {
       },
     });
     const netFacade = Object.freeze({
-      on: (type, fn) => (net && typeof net.on === 'function' ? net.on(type, fn) : () => {}),
+      /**
+       * 订阅。**引擎类型**（`shared/protocol.js S2C`）照旧原样透传；其余名字被当作**这个包自己的通道**，必须先在
+       * `client.panels[].messages` 里声明过，否则**点名**（`CLIENT_CHANNEL_UNDECLARED`）并返回一个什么都不做的
+       * 退订函数 —— 一个永远不会响的订阅是这一层最不愿留下的东西（作者会一直等一条不会来的消息）。
+       * @param {string} type 引擎类型，或本包声明过的通道名
+       * @param {Function} fn
+       * @returns {Function} 退订
+       */
+      on(type, fn) {
+        if (typeof type !== 'string' || typeof fn !== 'function') return () => {};
+        if (S2C_TYPES.has(type)) return net && typeof net.on === 'function' ? net.on(type, fn) : () => {};
+        if (!rec.messages.includes(type)) {
+          refuse('CLIENT_CHANNEL_UNDECLARED', `panel "${rec.key}" subscribes to "${type}" without declaring it — add it to client.panels["${rec.id}"].messages (declared: ${rec.messages.join(', ') || 'none'}), or use an engine message type`);
+          return () => {};
+        }
+        if (!net || typeof net.on !== 'function') return () => {};
+        // 引擎把 `pack.msg` 发给整个房间；这里按**包 + 通道**筛自己那一份（第二个读者）。
+        const off = net.on('pack.msg', (msg) => {
+          if (!msg || msg.pack !== rec.pack || msg.channel !== type) return;
+          fn(msg.data, msg);
+        });
+        channelOffs.push(off);
+        return off;
+      },
+      /**
+       * 发一条**自己的**通道消息（§1.9.6）：引擎只当不透明载荷转发，不解释、不落库、不判断谁该收。频率与大小由
+       * 服务端管（`PACK_MSG_LIMITS`），形状由 `shared/protocol.js` 判 —— 客户端这一层只管「你有没有声明这条通道」。
+       * @param {string} channel
+       * @param {any} [data] 不透明 JSON（服务端有一个大小上限）
+       * @returns {boolean} 是否发出去了
+       */
+      send(channel, data) {
+        if (typeof channel !== 'string' || !channel) return false;
+        if (!rec.messages.includes(channel)) {
+          refuse('CLIENT_CHANNEL_UNDECLARED', `panel "${rec.key}" sends on "${channel}" without declaring it — add it to client.panels["${rec.id}"].messages (declared: ${rec.messages.join(', ') || 'none'})`);
+          return false;
+        }
+        if (!net || typeof net.send !== 'function') return false;
+        return net.send({ t: 'pack.msg', pack: rec.pack, channel, ...(data === undefined ? {} : { data }) });
+      },
       sendResourceMessage: (msg) => (net && typeof net.sendResourceMessage === 'function' ? net.sendResourceMessage(msg) : false),
     });
     /**
@@ -622,6 +676,11 @@ export function createPanelRegistry(deps) {
         } catch (err) { log?.error?.(`[mod-panels] theme ${name} restore failed`, err); }
       }
       themePrevious.clear();
+      for (const off of channelOffs) {
+        if (typeof off !== 'function') continue;
+        try { off(); } catch (err) { log?.error?.('[mod-panels] channel unsubscribe failed', err); }
+      }
+      channelOffs.length = 0;
       for (const el of styleEls) {
         if (el && typeof el.remove === 'function') el.remove();
       }

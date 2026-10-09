@@ -262,8 +262,16 @@ export const CLIENT_PANEL_SLOTS = Object.freeze([
  * 浮层等于让包自己去做「哪张卡在哪」这件事 —— 而那需要 store，正是 §28.8 不给它的东西。
  */
 export const CLIENT_PANEL_REPEATABLE = Object.freeze(['screen.game.shopCard']);
-/** 面板的字段：四个 + `styles`（这个面板自带的样式表）+ `data`（它要读的数据表）。 */
-const CLIENT_PANEL_FIELDS = Object.freeze(['id', 'slot', 'module', 'order', 'gate', 'styles', 'data']);
+/** 面板的字段：四个 + `styles`（这个面板自带的样式表）+ `data`（它要读的数据表）+ `messages`（它要收发的通道）。 */
+const CLIENT_PANEL_FIELDS = Object.freeze(['id', 'slot', 'module', 'order', 'gate', 'styles', 'data', 'messages']);
+/** 一个面板最多声明几条包通道（上限让「通道」这件事有界；今天没有一个真包用到两条以上）。 */
+const CLIENT_MAX_PANEL_MESSAGES = 8;
+/**
+ * 一条**包通道**的名字（`client.panels[].messages`，docs/WORKSHOP.md §1.9.6）。作者只写后半段，线上是
+ * `<包id>.<名字>` —— 所以这个名字必须是**小写字母开头的短名**：它会出现在线上、会进 `pack.msg` 的字段、
+ * 要能被 `^[a-z][a-z0-9_-]{0,63}$` 判死（拼错一个名字就是一条永远收不到的消息，那正是这一层到处在拒绝的形态）。
+ */
+const CLIENT_PANEL_CHANNEL_RE = /^[a-z][a-z0-9_-]{0,63}$/;
 /** 一个面板最多读几张表（今天是 13 张，写着是为了让「全读」这件事有个上限而不是一个通配）。 */
 const CLIENT_MAX_PANEL_DATA_TABLES = 13;
 /**
@@ -490,6 +498,25 @@ function parseClientDecl(raw) {
         return fail('CLIENT_DUPLICATE_PANEL_DATA', `client.panels["${panel.id}"].data lists the same table twice`);
       }
       clean.data = wanted;
+    }
+    // 包通道（`client.panels[].messages`，§1.9.6）：这个面板可以收发的**自家**通道名。与 `data` / `registers`
+    // 同一条口径 —— 写下来的要能被看见、被审；名字的字符集在形状层就要判死，否则作者得到一条永远收不到的消息。
+    if (panel.messages !== undefined) {
+      if (!Array.isArray(panel.messages) || !panel.messages.length) {
+        return fail('CLIENT_BAD_PANEL_MESSAGES', `client.panels["${panel.id}"].messages must be a non-empty array of channel names (drop the key instead of sending [])`);
+      }
+      if (panel.messages.length > CLIENT_MAX_PANEL_MESSAGES) {
+        return fail('CLIENT_BAD_PANEL_MESSAGES', `client.panels["${panel.id}"].messages: at most ${CLIENT_MAX_PANEL_MESSAGES} channels per panel`);
+      }
+      for (const channel of panel.messages) {
+        if (typeof channel !== 'string' || !CLIENT_PANEL_CHANNEL_RE.test(channel)) {
+          return fail('CLIENT_BAD_PANEL_CHANNEL', `client.panels["${panel.id}"].messages: "${String(channel)}" is not a channel name (lowercase letter first, then a-z 0-9 _ -, at most 64 — the wire name is "<this pack's id>.<channel>")`);
+        }
+      }
+      if (new Set(panel.messages).size !== panel.messages.length) {
+        return fail('CLIENT_DUPLICATE_PANEL_CHANNEL', `client.panels["${panel.id}"].messages lists the same channel twice`);
+      }
+      clean.messages = stableStringList(panel.messages);
     }
     panels.push(clean);
   }

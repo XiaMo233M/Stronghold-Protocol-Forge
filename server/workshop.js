@@ -622,6 +622,9 @@ export function loadWorkshopPanels(loaded, { log = null, baseUrl = WORKSHOP_PANE
         // 数据口（`client.panels[].data`）：面板可以读哪几张表。**不进服务端任何判据** —— 快照是客户端造的
         //（`extensions.js` 的 `ctx.data.get`），这里只是把声明原样送到浏览器，客户端据此复判。
         ...(Array.isArray(panel.data) && panel.data.length ? { data: [...panel.data] } : {}),
+        // 包通道（`client.panels[].messages`，§1.9.6）：服务端**要用**它 —— `pack.msg` 只放行这个包真的声明过的
+        // 通道（`server/lobby.js` 的 `packChannels`），所以这一份也随清单送到浏览器（客户端是第二个读者）。
+        ...(Array.isArray(panel.messages) && panel.messages.length ? { messages: [...panel.messages] } : {}),
       });
     }
   }
