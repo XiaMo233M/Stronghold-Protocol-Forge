@@ -3,7 +3,10 @@
 // 模组这一段是重点，因为它是「不报错但游戏里表现不对」的高危区：官方数据把精锐记录分成两套 ——
 // `statsBase/traitBase/talentsBase` 是**不带模组**的原样，`stats/trait/talents` 是**带默认模组**的样子。
 // 派生时少烘一半，玩家选「不装备」就会得到带模组的数值；多烘一半，默认模组就会被算两次。
-// 所以这里的核心断言是：**官方 110 位带模组的干员，spec → 记录 的往返逐字节一致**（含富文本与 bbStr）。
+// 所以这里的核心断言是：**官方 110 位带模组的干员，spec → 记录 的往返一致**（含富文本与 bbStr）。
+// 0.2.2 起口径是「**剥掉潜能注解后**逐字节一致」：官方记录带 `potDown` / `potMin` / `potBelow`，而派生记录
+// 按引擎约定不带（`shared/potential.js` 的 `stripPotential`），所以两边都剥了再比 —— 上游 `test/data.test.js`
+// 也是这个比法。同时补了两条不放宽的守卫：官方带注解的，派生必须不带；剥后的比对样本里带注解的记录数有下限。
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -237,7 +240,7 @@ describe('干员创作层：模组', () => {
     assert.equal(issues.some((i) => i.code === 'MODULES_ON_NORMAL' && i.severity === 'warning'), true);
   });
 
-  test('官方 110 位带模组的干员：spec → 记录 逐字节往返一致（含富文本与 bbStr）', () => {
+  test('官方 110 位带模组的干员：spec → 记录 往返一致（剥潜能注解后逐字节，含富文本与 bbStr）', () => {
     let checked = 0;
     let potChecked = 0;
     for (const [id, g] of Object.entries(CHESS)) {
