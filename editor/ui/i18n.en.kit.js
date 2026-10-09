@@ -70,8 +70,10 @@ export const EN_KIT = Object.freeze({
   '三条硬规则': 'Three hard rules',
   '返回了 kit 就必须自己给出 skill —— 引擎用 `u.kit.skill || null` 取技能，缺省技能不会回退到通用 kit。':
     'If you return a kit you must supply its own skill — the engine reads the skill with `u.kit.skill || null`, and the default skill does not fall back to the generic kit.',
-  '必须自包含，不能 import —— 同一份文件服务端按真实路径、浏览器按 URL 各加载一次，相对路径不可能同时对。':
-    'It must be self-contained and must not import — the same file is loaded once on the server by real path and once in the browser by URL, so a relative path can never be right for both.',
+  'import 只允许三种写法：`@kit/…`、`@sim/…` 与 `./…` 开头的本包相对路径（如 ./lib/bonds.js）；`..`、`/` 开头、裸模块名、require、动态导入一律被拒 —— 同一份文件服务端按真实路径、浏览器按 URL 各加载一次，只有这三种两端都对得上。':
+    'Only three import forms are allowed: `@kit/…`, `@sim/…` and this pack\'s own relative paths starting with `./…` (e.g. ./lib/bonds.js). `..`, a leading `/`, bare module names, require and dynamic import are all refused — the same file is loaded once on the server by real path and once in the browser by URL, and only these three forms resolve on both ends.',
+  'kits/ 里哪些文件算 kit：只有**顶层**的 <干员 id>.js。子目录（kits/lib/…）与 `_` 开头的文件（kits/_shared.js）都不是 kit，可以放共享代码让 kit 用 `./…` import。':
+    'Which files under kits/ count as kits: only a **top-level** <operator id>.js. A subdirectory (kits/lib/…) and a file starting with `_` (kits/_shared.js) are not kits — put shared code there and import it with `./…`.',
   '它会跑在玩家浏览器里，服务端用同一份文件复算这场战斗 —— 随机用 battle.rng，不要碰 DOM / 网络 / 墙钟时间。':
     'It runs in the player\'s browser, and the server recomputes the same battle with the same file — use battle.rng for randomness, and never touch the DOM / network / wall-clock time.',
   '另外：kit 所在的包必须贡献至少一个数据文件（例如 chess）—— 空包不会被加载，它的 kit 也就不会被导入。':

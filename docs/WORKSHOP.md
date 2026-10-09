@@ -1526,7 +1526,7 @@ export default function kit(bb, chess, def) {
 | 规则 | 为什么 |
 |---|---|
 | **返回了 kit 就必须自己给出 `skill`** | `Battle._setupUnit` 用 `u.kit.skill \|\| null` 取技能：给了 kit 却省略 `skill`，该干员就**没有技能** —— 缺省技能**不会**回退到通用 kit |
-| **只能 import 白名单里的模块** | 同一份文件服务端按真实路径加载、浏览器按 URL 加载，相对路径不可能同时对。所以作者写 `@kit/…` / `@sim/…` 前缀，两端各自解析（§4.5）；其余一切 import / `require` / 动态 `import()` 仍然是 `KIT_IMPORT` |
+| **import 只有三种写法** | 同一份文件服务端按真实路径加载、浏览器按 URL 加载，向上走的相对路径不可能同时对。所以作者写 `@kit/…` / `@sim/…` 前缀（§4.5），或 `./…` 开头的**本包**相对路径（§4.6）；其余一切 import / `require` / 动态 `import()` 仍然是 `KIT_IMPORT` |
 | **它会在玩家浏览器里执行** | 默认 `SP_COMBAT=client`；服务端用**同一份文件**复算，所以不要有环境依赖（随机用 `battle.rng`，不要碰 DOM/网络/时间） |
 
 ### 4.2 注入点与双通道（关键一致性）
@@ -1552,7 +1552,7 @@ export default function kit(bb, chess, def) {
 | `HOOK_UNKNOWN_EVENT` | warn | `battle.on('beforeAttck', …)` —— `on()` 接受**任意**字符串（总线在 `server/sim/battle/hooks.js`；这个文件与两个方法名钉在 `shared/kitAuthoring.js` 的 `HOOK_BUS` 上，**这里不写行号** —— 从前写的是 `server/sim/Battle.js` 的两个行号，而那个文件早就不含这两个方法，行号烂掉时没有任何东西会报错），而 `emit()` 只触发真正被 emit 的名字（同一文件的方法 `emit`）。写错的钩子**永远不会触发，且没有任何地方会报错**。引擎真实的 emit 词表在 `HOOK_EVENTS`，由漂移守卫钉在源码上，所以能给出「你是想写 beforeAttack 吗」。命名空间事件（`mypack:ready`）只要**同一文件自己 emit 过**就合法 —— 官方内容就是这么扩展总线的（`nearl2:knockdown`） |
 | `HOOK_DYNAMIC_NAME` | warn | 用变量当事件名（`battle.on(name, …)`）—— 查不了，所以要说一声 |
 | `KIT_NONDETERMINISTIC` | warn | `Math.random` / `Date.now` / `fetch` / `document` / `setTimeout` … —— 服务端用同一份文件**复算**对局，不一致就**拒绝玩家的结果**，而报错信息看上去和「你用了 Math.random」毫无关系 |
-| `KIT_IMPORT` | error | 白名单之外的 `import` / `export … from` / `require` / 动态 `import()` —— 违反 §4.1 第二条（服务端按路径、浏览器按 URL，相对路径不可能同时对）。白名单写法见 §4.5，错误 reason 里会直接列出可用的 specifier |
+| `KIT_IMPORT` | error | 白名单之外的 `import` / `export … from` / `require` / 动态 `import()` —— 违反 §4.1 第二条（服务端按路径、浏览器按 URL，向上的相对路径不可能同时对）。可用写法见 §4.5（白名单前缀）与 §4.6（自己包里的 `./…`），错误 reason 里会直接列出可用的 specifier |
 | `NO_DEFAULT_EXPORT` | error | 没有默认导出（加载器读的是 `mod.default`） |
 | `KIT_NO_TARGET` | error | 包内没有这个干员 id，也没在 `pack.json overrides` 里声明 `chess:<id>` |
 
@@ -1580,7 +1580,8 @@ export default function kit(bb, chess, def) {
 
 一个 kit 是**同一份文件被两处加载**：服务端按真实路径 `import()`（`server/workshop.js loadWorkshopKits()`），
 浏览器按 URL `import('/workshop-kits/<pack>/<id>.js?v=…')`（`public/js/battle/runner.js loadSpecKits()`）。
-相对 specifier 对其中一端成立、对另一端必然不成立 —— 所以 kit 的 import 走**前缀白名单**：
+向上走的相对 specifier（`../shared/tier1.js`、`../../../dir.js`）对其中一端成立、对另一端必然不成立 ——
+所以 kit 的 import 走**前缀白名单**（自己包里的**向下**相对路径是另一种，见 §4.6）：
 
 ```js
 import { num, talentBb, traitBb, skillRec, up } from '@kit/tier1.js';
@@ -1617,25 +1618,104 @@ export default function kit(bb, chess, def) { /* … */ }
 
 | 作者写了 | 为什么不行 | reason 里会说的 |
 |---|---|---|
-| `'../shared/tier1.js'` | 相对路径：服务端解析成真实文件、浏览器解析成 `/workshop-kits/…` | 「相对路径无法同时在服务端与浏览器成立」 |
-| `'./x.js'` | 同上 | 同上 |
+| `'../shared/tier1.js'` | 含 `..`：服务端会解析到 `kits/` 之外，而浏览器的 URL 里没有 `kits/` 这一层可以退回来 | 「含 ".." 段」+「路径穿越一律拒绝」 |
 | `'/abs.js'` | 绝对路径：浏览器按站点根、服务端按文件系统根 | 「绝对路径无法同时在服务端与浏览器成立」 |
 | `'@kit/../../x.js'` | 路径穿越，一律拒绝 | 「路径穿越一律拒绝」 |
+| `'./x.mjs'` | 包相对 import 只支持 `.js` | 「包相对 import 只支持 .js」 |
+| `'./%2e%2e/x.js'` | 百分号编码会在解析后变成 `..`，所以 `%` 一律拒绝 | 「包相对路径不得含 "%"」 |
+| `'./x.js?1'` | 查询串不是文件名的一部分 | 「不得带查询串或片段」 |
 | `'@kit/evil.js'` | 前缀合法但模块名没开放 | 「模块名 "evil.js" 未开放」 |
 | `'lodash'` | 裸模块名：两端都没有 node_modules 解析 | 「裸模块名未开放」 |
 | `require('…')` | kit 两端都按 ES 模块加载，没有 CommonJS | 「禁止 require()」 |
 | `import('@kit/tier1.js')` | 动态 import 的 specifier 是表达式，两端都无法静态解析 | 「禁止动态 import()」 |
 | `export { x } from '…'` | 与 `import` 同一张白名单（`export … from` 也是一个模块依赖） | 同 import |
 
-每一条 reason 末尾都会列出**完整白名单**，`hint` 里给可用写法 —— 拒绝的时候必须说清允许什么。
+每一条 reason 末尾都会列出**完整白名单**，并附上「自己包里的 `./…` 也能写」，`hint` 里给可用写法 ——
+拒绝的时候必须说清允许什么（§4.6 就是这条 `./…`）。
 
 #### 4.5.3 哈希与确定性（两条都不受影响）
 
-- **包哈希按作者写的源码算**：`server/workshop.js identifyPack()` 把 `kits/*.js` 的**磁盘字节**放进 `[path, sha256]`
-  清单（DESIGN §28.2）。服务端那次重写只发生在内存里，**不落盘、不进哈希**，所以同一个包在两端摘要一致。
+- **包哈希按作者写的源码算**：`server/workshop.js identifyPack()` 把 `kits/**/*.js`（**递归**，§4.6）的**磁盘字节**
+  放进 `[path, sha256]` 清单（DESIGN §28.2）。服务端那次重写只发生在内存里，**不落盘、不进哈希**，所以同一个包在
+  两端摘要一致。
 - **确定性判罚不变**：`Math.random` / `Date.now` / `fetch` / `document` … 仍然是 `KIT_NONDETERMINISTIC`
   （warning），本次只动 import 口径。
 
 测试：`test/kitImports.test.js`（白名单表与两端解析、校验器口径、服务端真加载并调用 `num`、白名单外仍被拒、
 哈希前后不变、社区 kit 5 条映射、以及每个白名单文件的**导出名下限**守卫 —— 删名/改名会红并点名，
-加导出不会）；真机那半是 `test/ui/kitimports.e2e.test.js`（默认跳过，见 §4.4 的命令）。
+加导出不会）；包相对那半是 `test/packRelativeImports.test.js`（§4.6）；真机那半是
+`test/ui/kitimports.e2e.test.js`（默认跳过，见 §4.4 的命令）。
+
+---
+
+### 4.6 包相对 import：用 `./…` 把一份大文件拆成几个文件
+
+§4.5 的白名单让 kit 够得着**引擎**的模块，但够不着**自己包里**的代码。于是「一个包一份、几百上千行的
+`kits/custom.js`」没法拆：共享的辅助函数只能整段复制进每一个干员文件。而 `@包名/` 这种前缀不存在 ——
+浏览器的 import map 是**每页一张静态表**，写不出「每个包一个前缀」。
+
+所以给了第三种写法：**向下的相对路径**。
+
+```js
+// kits/chess_ws_kazdel_a.js —— 只写这一个干员的事
+import { bondsShared } from './lib/bonds.js';   // 同一个包、同一个 kits/ 目录下的文件
+import { num } from '@kit/tier1.js';            // 引擎的 SDK（§4.5）
+
+export default function kit(bb, chess, def) { /* … bondsShared(…) … */ }
+```
+
+拆分前后（同一份 1138 行的 `kits/custom.js`）：
+
+```
+拆之前                     拆之后
+kits/custom.js             kits/chess_ws_<id>_a.js   ← 一个干员一个文件
+  1138 行                  kits/chess_ws_<id>_b.js
+                           kits/lib/bonds.js          ← 共享的盟约辅助
+                           kits/lib/items.js
+                           kits/_shared.js            ← 也可以直接放在 kits/ 下
+```
+
+`lib/bonds.js` 里还能继续 `./` 到自己旁边的文件 —— **按它自己的位置解**，与服务端一致（两端都是「谁 import
+就按谁的目录/URL 解」）。
+
+#### 为什么 `./…` 两端都对得上，而 `..` 永远不行
+
+kit 在磁盘上是 `<包目录>/kits/<id>.js`，浏览器取的却是 `/workshop-kits/<包>/<id>.js`：**`kits/` 这一段不在 URL 里**。
+于是同一个 `./lib/util.js`：
+
+| 端 | 基准 | 解析结果 | 实际文件 |
+|---|---|---|---|
+| 服务端 | `file:///<包目录>/kits/<id>.js` | `file:///<包目录>/kits/lib/util.js` | `<包目录>/kits/lib/util.js` |
+| 浏览器 | `/workshop-kits/<包>/<id>.js` | `/workshop-kits/<包>/lib/util.js` | 同左（路由把 `<包>/<rel>` 映回 `<包目录>/kits/<rel>`） |
+
+**同一个文件**。而 `../x.js` 做不到：磁盘上它要退到 `kits/` 之外，URL 上却没有 `kits/` 这一层可以退 ——
+退的步数不同，两端必然指向不同文件。所以 `..` 仍然一律拒绝（连带 `/` 开头、裸模块名、`require`、动态 `import()`）。
+
+#### 合法与非法（判据在 `shared/kitImports.js isPackRelativeSpecifier`，编辑器与加载器读同一份）
+
+| 写法 | 结果 |
+|---|---|
+| `./helpers.js`、`./lib/bonds.js` | ✅ 放行（本包 `kits/` 下的 `.js`，逐段可拼） |
+| `../x.js`、`./../x.js`、`./lib/../x.js` | ⛔ 含 `..` 段 |
+| `./%2e%2e/x.js` | ⛔ 含 `%`（百分号编码解析后会变成 `..`，所以 `%` 一律拒绝） |
+| `./x.mjs`、`./x`、`./`、`./x//y.js` | ⛔ 不是「以 `.js` 结尾、没有空段」的包内相对路径 |
+| `./x.js?1`、`./x.js#a`、`./sub\x.js` | ⛔ 查询串/片段/反斜杠都算畸形 |
+| `/abs/x.js`、`x.js` | ⛔ 绝对路径 / 裸模块名（同 §4.5.2） |
+
+#### 哪些文件算 kit
+
+`kits/` 下只有**顶层**的 `<干员 id>.js` 会被当成 kit；子目录里的文件与 `_` 开头的文件（`kits/_shared.js`）
+都不是 kit，可以放共享代码。它们的字节同样进包身份哈希（§4.5.3）—— 辅助文件的字节能改变一场战斗的结果。
+
+#### 两点不对称，都是刻意的
+
+- **`server.battle` 不接受 `./…`**：那类模块在服务端是当 `data:` URL 加载的，`data:` 没有目录，相对说明符
+  无从解析。战斗内容层的辅助函数请走 `@battle/`（DESIGN §28.17）。
+- **`/workshop-battle/` 只服务登记过的 URL**：它没有第二个「按 URL 解出包内相对路径」的消费者，登记表就是它
+  全部的入口（`/workshop-kits/` 服务的是已装载包 `kits/` 子树里的任意 `.js`，仍然只服务**已装载**的包）。
+
+服务端只重写该重写的那几行（白名单 → 真实 `file:` URL，包相对 → 该文件自己目录下的 `file:` URL），磁盘上的字节
+一个都不动，所以包摘要不变。测试见 `test/packRelativeImports.test.js`。
+
+> 可运行示例 `docs/examples/kit-demo/` 仍然**一个 import 都不写**（它演示的是三条硬规则本身）。要看 `./…` 的
+> 完整形态，读 `test/packRelativeImports.test.js`；把一份大文件拆成几个文件，照上面「拆之后」的目录摆法即可。

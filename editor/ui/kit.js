@@ -35,7 +35,9 @@ const currentPack = () => (state.data?.packs ?? []).find((p) => p.id === state.p
 const blankSource = () => [
   '// 行为层 kit（<pack>/kits/<chessId>.js）。三条硬规则都会在游戏里**静默**失败：',
   '//  1. 返回了 kit 就必须自己给出 skill —— 引擎用 `u.kit.skill || null` 取技能，缺省技能不会回退到通用 kit。',
-  '//  2. 必须自包含，不能 import —— 同一份文件服务端按真实路径、浏览器按 URL 各加载一次，相对路径不可能同时对。',
+  '//  2. import 只有三种写法：`@kit/…` / `@sim/…`（引擎给的 SDK 与纯函数模块）、以及 `./…` 开头的**本包**相对',
+  '//     路径（如 ./lib/bonds.js），后者用来把一份大文件拆成几个文件。`..`、`/` 开头、裸模块名、require、',
+  '//     动态导入一律被拒 —— 同一份文件服务端按真实路径、浏览器按 URL 各加载一次，只有这三种两端都对得上。',
   '//  3. 它会跑在玩家浏览器里，服务端用同一份文件复算这场战斗 —— 随机请用 battle.rng，不要碰 DOM / 网络 / 墙钟时间。',
   '',
   'export default function kit(bb, chess, def) {',
@@ -292,7 +294,7 @@ function renderSide() {
   rules.className = 'rules';
   for (const t of [
     t('返回了 kit 就必须自己给出 skill —— 引擎用 `u.kit.skill || null` 取技能，缺省技能不会回退到通用 kit。'),
-    t('必须自包含，不能 import —— 同一份文件服务端按真实路径、浏览器按 URL 各加载一次，相对路径不可能同时对。'),
+    t('import 只允许三种写法：`@kit/…`、`@sim/…` 与 `./…` 开头的本包相对路径（如 ./lib/bonds.js）；`..`、`/` 开头、裸模块名、require、动态导入一律被拒 —— 同一份文件服务端按真实路径、浏览器按 URL 各加载一次，只有这三种两端都对得上。'),
     t('它会跑在玩家浏览器里，服务端用同一份文件复算这场战斗 —— 随机用 battle.rng，不要碰 DOM / 网络 / 墙钟时间。'),
   ]) {
     const li = document.createElement('li');
@@ -300,6 +302,7 @@ function renderSide() {
     rules.append(li);
   }
   rb.append(rules);
+  rb.append(hint(t('kits/ 里哪些文件算 kit：只有**顶层**的 <干员 id>.js。子目录（kits/lib/…）与 `_` 开头的文件（kits/_shared.js）都不是 kit，可以放共享代码让 kit 用 `./…` import。')));
   rb.append(hint(t('另外：kit 所在的包必须贡献至少一个数据文件（例如 chess）—— 空包不会被加载，它的 kit 也就不会被导入。')));
   const doc = document.createElement('p');
   doc.className = 'hint';

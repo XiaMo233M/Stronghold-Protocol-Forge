@@ -33,7 +33,7 @@ import { workshopNotices } from './notices.js';
 import { createRoomAssets } from './roomAssets.js';
 import { Match as DefaultMatch } from './match/Match.js';
 import {
-  buildWorkshopDataFiles, workshopKitFilesFor, workshopPanelFilesFor, workshopAssetsFor, workshopRoutesFor,
+  buildWorkshopDataFiles, workshopKitFilesFor, workshopKitDirsFor, workshopPanelFilesFor, workshopAssetsFor, workshopRoutesFor,
   workshopResourceFilesFor, workshopModAssetsFrom, buildWorkshopI18nFiles, resourceServerPolicy, WORKSHOP_ASSET_PREFIX, WORKSHOP_ASSET_TYPES, workshopBattleFilesFor,
 } from './http/workshop.js';
 import { ROOT, listenAddress, bindCandidates, serveDirs, makeLogger, parseTrustProxy } from './http/config.js';
@@ -53,7 +53,7 @@ export {
   ROOT, WS_MAX_PAYLOAD, DATA_SHIM_JS, MIME, COMPRESSIBLE, BUILD_INPUTS, computeBuildTag, buildTag, resetBuildTag,
   acceptsGzip, parseRange, createStaticHandler, lanUrls, parseTrustProxy,
   // 创意工坊 (docs/WORKSHOP.md): the HTTP helpers live in ./http/workshop.js but stay part of this module's API
-  buildWorkshopDataFiles, workshopKitFilesFor, workshopPanelFilesFor, workshopAssetsFor, workshopRoutesFor,
+  buildWorkshopDataFiles, workshopKitFilesFor, workshopKitDirsFor, workshopPanelFilesFor, workshopAssetsFor, workshopRoutesFor,
   workshopResourceFilesFor, workshopModAssetsFrom, buildWorkshopI18nFiles, resourceServerPolicy, WORKSHOP_ASSET_PREFIX, WORKSHOP_ASSET_TYPES,
   workshopBattleFilesFor,
   // 客户端 mod 本地缓存 (W-C): the catalogue builder and the routes a browser downloads from (server/modCatalog.js,
@@ -151,6 +151,10 @@ export async function startServer(opts = {}) {
   // `/healthz` (lobby.stats) and in every BattleSpec, so the three can never disagree about what is running.
   const workshopMods = (workshopLoaded.packs || []).map((p) => ({ id: p.id, hash: p.hash, layer: p.layer, combat: p.combat, api: p.api }));
   const workshopKitFiles = workshopKitFilesFor(workshopKits.modules, workshopDir);
+  // 行为层相对 import 的服务面（§28.18）：包 id → 它的 `kits/` 目录。`/workshop-kits/` 靠它才服务得了一个 kit
+  // 用 `./lib/util.js` import 的兄弟文件 —— URL 里没有 `kits/` 这一段，所以路由要把这一段加回去（server/http/static.js
+  // resolvePackRelativeKit），而**只有已装载的包**在这张表里，服务范围仍由装载器决定。
+  const workshopKitDirs = workshopKitDirsFor(workshopLoaded);
   // 包声明的战斗逻辑模块送到浏览器（`/workshop-battle/<包>/<模块>`）：与 kits 逐字同一条通道 —— 只服务装载器登记过的
   // URL，客户端战斗必须跑同一段代码（否则浏览器算出的战果与服务端复算的对不上）。
   const workshopBattleFiles = workshopBattleFilesFor(battleModules, workshopDir);
@@ -236,7 +240,7 @@ export async function startServer(opts = {}) {
   // content packs (docs/PACKS.md): scanned now — the start log names them — and again whenever their folders change
   const packs = createPackRegistry({ publicDir, dataDir, packsDir }, { log });
   packs.refresh(true);
-  const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, packsDir, packs, log, workshopJson, workshopKitFiles, workshopPanelFiles, workshopAssets, workshopRoutes, workshopResourceFiles, resourcePolicy, workshopI18n, modsJson, roomData: roomDataFace, workshopBattleFiles });
+  const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, packsDir, packs, log, workshopJson, workshopKitFiles, workshopKitDirs, workshopPanelFiles, workshopAssets, workshopRoutes, workshopResourceFiles, resourcePolicy, workshopI18n, modsJson, roomData: roomDataFace, workshopBattleFiles });
   const startedAt = Date.now();
   // The tag is per process (see buildTag): read the browser runtime once, here, not on every /healthz.
   resetBuildTag();

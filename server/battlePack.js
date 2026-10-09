@@ -49,7 +49,10 @@ export function battleSourceIssues(source, packId = '') {
       out.push({ code: 'BATTLE_BAD_SOURCE', reason: `"${needle}" is not allowed in a server.battle module${packId ? ` ("${packId}")` : ''}: ${why}` });
     }
   }
-  for (const issue of kitImportIssues(text, kitImportDeclarations(text), { targets: BATTLE_IMPORT_TARGETS, allowedText: battleImportAllowedText })) {
+  // `allowRelative: false` 是两类载荷之间**刻意的不对称**（DESIGN §28.18）：kit 可以 import 本包 kits/ 下的兄弟文件
+  // （`./lib/util.js`），而战斗逻辑模块不行 —— 它在服务端是当 `data:` URL 加载的，`data:` 没有目录，相对说明符
+  // 无从解析；浏览器那半虽然能解，但两端必须跑同一段代码，所以只能拒绝。官方内容层的东西走 `@battle/`。
+  for (const issue of kitImportIssues(text, kitImportDeclarations(text), { targets: BATTLE_IMPORT_TARGETS, allowedText: battleImportAllowedText, allowRelative: false })) {
     out.push({ code: 'BATTLE_BAD_IMPORT', reason: `${issue.reason}（server.battle 模块的白名单与 kit 不同：只有 @battle/ 与 @sim/）` });
   }
   return out;

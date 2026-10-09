@@ -16,10 +16,18 @@
 // One table (`KIT_IMPORT_FILES`) feeds both, so the two ends cannot drift — and `test/kitImports.test.js` reads
 // `public/index.html` and requires it to agree with the table.
 //
-// WHAT IS *NOT* ALLOWED, and why the rule is narrow: only the files below. A kit may reach the engine's kit SDK and the
-// three pure helpers that SDK itself is built on. It may not reach the match, the lobby, the HTTP entry, the net layer,
-// the file system, or anything under `public/` — the same boundary `tools/check-imports.mjs` draws for `server/sim`,
-// applied to third-party code.
+// THE SECOND FORM: a kit may import its OWN siblings with a downward relative specifier (`./helpers.js`,
+// `./lib/bonds.js`, `isPackRelativeSpecifier` below — DESIGN §28.18). The geometry is the whole reason this works:
+//   * on disk a kit is `<packDir>/kits/<id>.js`, so `./lib/util.js` is `<packDir>/kits/lib/util.js`;
+//   * the browser fetches it as `/workshop-kits/<pack>/<id>.js` (the `kits/` segment is NOT in the URL), so `./lib/util.js`
+//     is `/workshop-kits/<pack>/lib/util.js` — and `server/http/static.js` maps that URL back to `<packDir>/kits/lib/util.js`.
+// Same file, two native resolutions, no rewriting needed on the browser end. A `..` specifier can never agree the same
+// way (the URL has no `kits/` segment to walk back out of), so `..` stays refused — see `kitImportUnavailableReason`.
+//
+// WHAT IS *NOT* ALLOWED, and why the rule is narrow: only the files below plus the kit's own `kits/` subtree. A kit may
+// reach the engine's kit SDK and the three pure helpers that SDK itself is built on. It may not reach the match, the
+// lobby, the HTTP entry, the net layer, the file system, or anything under `public/` — the same boundary
+// `tools/check-imports.mjs` draws for `server/sim`, applied to third-party code.
 //
 // The scan/parse/rewrite primitives live here, not in `shared/kitAuthoring.js`, because the LOADER must reach the same
 // verdict as the VALIDATOR: `server/workshop.js` imports `kitImportIssues()` from this file, so the editor cannot pass
@@ -80,8 +88,47 @@ export const BATTLE_IMPORT_ALLOWED = Object.freeze(BATTLE_IMPORT_FILES.map((e) =
 /** One line naming every allowed specifier — the "here is what you may write instead" half of an error. */
 export const kitImportAllowedText = () => KIT_IMPORT_ALLOWED.join(', ');
 
+/**
+ * 包**相对**模块那半句话（§28.18）：每个拒绝理由的末尾都要说一遍，作者才知道除了白名单之外**自己包里**的文件也能
+ * import（只说「不行」的理由会让人以为唯一的出路是把代码塞进一个文件 —— 那正是这一刀要修的 1138 行巨石）。
+ */
+export const kitImportRelativeText = '也可以用 ./… 开头的相对路径 import 本包 kits/ 下的文件（如 ./lib/util.js），'
+  + '不得含 ".."、不得带 %、必须 .js';
+
 /** 同上，战斗逻辑模块那份。 */
 export const battleImportAllowedText = () => BATTLE_IMPORT_ALLOWED.join(', ');
+
+/**
+ * 一个 specifier 是不是「向下相对」形式（§28.18）：`./` 开头、`.js` 结尾、没有任何 `..` 段、没有反斜杠、没有 `%`
+ * （`%2e%2e` 就是这样变成 `..` 的，所以整个百分号编码一律拒绝）、没有 NUL、没有 `?` / `#`、没有空段（`./`）。
+ *
+ * 两端各解析成什么，见文件头的几何说明：**它们指向同一个文件**，前提是路由把 `/workshop-kits/<包>/<rel>` 映射到
+ * `<packDir>/kits/<rel>`（server/http/static.js），以及加载器把同一个 specifier 解到 `file:` URL
+ * （server/workshop.js loadWorkshopKits 的 rewriteKitImports 调用）。
+ *
+ * 这个判定函数同时是**编辑器**（shared/kitAuthoring.js validateKit）与**加载器**的判据，所以只写一遍。
+ */
+export function isPackRelativeSpecifier(specifier) {
+  const s = String(specifier ?? '');
+  if (!s.startsWith('./')) return false;
+  if (!s.endsWith('.js')) return false;
+  if (s.length <= 3) return false;                                        // "./" 或 "./.js" 都不是文件
+  if (s.includes('\\') || s.includes('%') || s.includes('\0')) return false;
+  if (s.includes('?') || s.includes('#')) return false;
+  for (const seg of s.split('/')) {
+    // 第一段永远是空串（specifier 以 "./" 开头，`'./x.js'.split('/')` 是 `['', '.', 'x.js']`），所以从第二段开始判：
+    // 剩下的每一段都必须非空、且不是 `.` / `..`（空段 = `./x//y.js`，`..` = 任何形式的向上一级）。
+    if (seg === '.') continue;                                            // 只可能是开头那一段 "./"
+    if (!seg || seg === '..') return false;
+  }
+  return true;
+}
+
+/**
+ * 把一条**已被接受**的包相对 specifier 解成包内相对路径（`./lib/util.js` → `lib/util.js`），供加载器拼真实路径。
+ * 只在这个 specifier 走完 `isPackRelativeSpecifier` 之后调用 —— 它不做任何安全判定。
+ */
+export const packRelativePath = (specifier) => String(specifier ?? '').slice(2);
 
 /**
  * Blank out comments, keeping string literals AND the newlines (so an index into the result is an index into the input).
@@ -179,11 +226,16 @@ export function kitRequireCalls(src) {
  *
  * `decls` is an optional pre-computed `kitImportDeclarations(src)` — the loader already has it (it decides from it
  * whether the source needs rewriting), so passing it in keeps the scan to one per file.
+ *
+ * `allowRelative` is what separates the two payloads (§28.18): a KIT may import its own `kits/` siblings with `./…`,
+ * a **battle module may not** — it is loaded on the server through a `data:` URL, which has no base directory for a
+ * relative specifier to resolve against (see `kitImportUnavailableReason`).
  * @param {string} src
  * @param {ReturnType<typeof kitImportDeclarations>} [decls]
+ * @param {{ targets?: Map<string, string>, allowedText?: () => string, allowRelative?: boolean }} [opts]
  * @returns {Array<{ code: string, reason: string }>}
  */
-export function kitImportIssues(src, decls = null, { targets = KIT_IMPORT_TARGETS, allowedText = kitImportAllowedText } = {}) {
+export function kitImportIssues(src, decls = null, { targets = KIT_IMPORT_TARGETS, allowedText = kitImportAllowedText, allowRelative = true } = {}) {
   const out = [];
   if (kitDynamicImports(src).length) {
     out.push({
@@ -199,29 +251,55 @@ export function kitImportIssues(src, decls = null, { targets = KIT_IMPORT_TARGET
   }
   for (const d of (decls || kitImportDeclarations(src))) {
     if (targets.has(d.specifier)) continue;
-    out.push({ code: 'KIT_IMPORT', reason: `import "${d.specifier}" 不在白名单里：${kitImportUnavailableReason(d.specifier, { allowedText })}` });
+    // 包相对：kit 放行（§28.18），战斗逻辑模块拒绝 —— 两份载荷的装载方式不同，理由见 kitImportUnavailableReason。
+    if (allowRelative && isPackRelativeSpecifier(d.specifier)) continue;
+    out.push({ code: 'KIT_IMPORT', reason: `import "${d.specifier}" 不在白名单里：${kitImportUnavailableReason(d.specifier, { allowedText, allowRelative })}` });
   }
   return out;
 }
 
 /**
  * Why one specifier is refused, with the reason that fits it — a path that escapes, an absolute path, a whitelisted
- * module the author misspelled, or a module that simply is not on the list. Every branch ends by naming the whitelist,
- * because "you may not do this" without "here is what you may do" is what makes an author guess.
+ * module the author misspelled, a malformed pack-relative path, or a module that simply is not on the list. Every
+ * branch ends by naming the whitelist AND the pack-relative form, because "you may not do this" without "here is what
+ * you may do" is what makes an author guess (and, for the reference community mod, what makes one file per operator
+ * impossible: without the relative form the only way to share a helper is to paste it into all of them).
+ *
+ * `allowRelative` mirrors `kitImportIssues`': the battle table passes `false`, so `./x.js` gets the asymmetry reason
+ * (a `data:` module has no base directory) that points at `@battle/` instead of an acceptance it cannot honour.
  */
-export function kitImportUnavailableReason(specifier, { allowedText = kitImportAllowedText } = {}) {
+export function kitImportUnavailableReason(specifier, { allowedText = kitImportAllowedText, allowRelative = true } = {}) {
   const s = String(specifier ?? '');
   const allowed = `白名单：${allowedText()}`;
+  const allowedBoth = `${allowed}；${kitImportRelativeText}`;
   if (s.startsWith('..') || s.includes('/../') || s === '..') {
-    return `相对路径（含 ".."）无法同时在服务端与浏览器成立，且路径穿越一律拒绝；${allowed}`;
+    return `相对路径（含 ".."）无法同时在服务端与浏览器成立，且路径穿越一律拒绝；${allowedBoth}`;
   }
-  if (s.startsWith('.')) return `相对路径无法同时在服务端与浏览器成立；${allowed}`;
-  if (s.startsWith('/')) return `绝对路径无法同时在服务端与浏览器成立；${allowed}`;
+  if (s.startsWith('./')) {
+    // 形式对（向下相对）但这一条不合法：说清是哪一条 —— 「相对路径不行」在 §28.18 之后是**错的**说明。
+    if (!allowRelative) {
+      return `包相对路径 ${JSON.stringify(s)} 在**战斗逻辑模块**里不成立：服务端把这类模块当 data: URL 加载，而 data: 没有目录，相对路径无从解析；`
+        + `战斗内容层的辅助函数请走 @battle/（与官方 content/bonds/*.js 用的同一份）与 @sim/；白名单：${allowedText()}`;
+    }
+    if (s.split('/').some((seg) => seg === '..')) {
+      // "../" 与 "./../" 都落到这里：它会被服务端解成 kits/ 之外的路径，而浏览器的 URL 里没有 "kits/" 这一层可退回，
+      // 两端必然指向不同文件（§28.18 的几何）。所以含 ".." 的包相对路径一律拒绝，不试图「归一化后放行」。
+      return `包相对路径不得含 ".." 段：".." 会走出 kits/，而浏览器的 URL 里没有 "kits/" 这一层可以退回来，两端必然指向不同文件；${allowedBoth}`;
+    }
+    if (s.includes('%')) return `包相对路径不得含 "%"：百分号编码（如 %2e%2e）会在解析后变成 ".."，一律拒绝；${allowedBoth}`;
+    if (s.includes('\\')) return `包相对路径不得用反斜杠（工程路径一律 "/"）；${allowedBoth}`;
+    if (s.includes('?') || s.includes('#')) return `包相对路径不得带查询串或片段（"?" / "#"）：它们不是文件名的一部分；${allowedBoth}`;
+    if (s.endsWith('.mjs') || s.endsWith('.cjs') || s.endsWith('.css') || s.endsWith('.json')) return `包相对 import 只支持 .js（浏览器把那一段 URL 当 ES 模块取）；${allowedBoth}`;
+    if (!s.endsWith('.js')) return `包相对路径必须以 ".js" 结尾（写全扩展名）；${allowedBoth}`;
+    return `不是可用的包相对路径：必须以 "./" 开头、没有空段、逐段可拼成 kits/ 下的一个 .js；${allowedBoth}`;
+  }
+  if (s.startsWith('.')) return `相对路径无法同时在服务端与浏览器成立（只有 "./…" 这种向下的包相对形式可以，见 §28.18）；${allowedBoth}`;
+  if (s.startsWith('/')) return `绝对路径无法同时在服务端与浏览器成立；${allowedBoth}`;
   if (s.startsWith('@kit/') || s.startsWith('@sim/') || s.startsWith('@battle/')) {
-    return `模块名 "${s.slice(s.indexOf('/') + 1)}" 未开放（前缀合法，但这个文件不在白名单里）；${allowed}`;
+    return `模块名 "${s.slice(s.indexOf('/') + 1)}" 未开放（前缀合法，但这个文件不在白名单里）；${allowedBoth}`;
   }
-  if (s.startsWith('@')) return `未知前缀 "${s.slice(0, s.indexOf('/') + 1 || undefined)}"；${allowed}`;
-  return `裸模块名 "${s}" 未开放（只能 import 引擎给出的 SDK 与那几个纯函数模块）；${allowed}`;
+  if (s.startsWith('@')) return `未知前缀 "${s.slice(0, s.indexOf('/') + 1 || undefined)}"；${allowedBoth}`;
+  return `裸模块名 "${s}" 未开放（只能 import 引擎给出的 SDK 与那几个纯函数模块）；${allowedBoth}`;
 }
 
 /** The allowed file for a specifier, or null. */
@@ -264,11 +342,23 @@ export const kitImportBrowserUrl = (file) => `/${String(file).replace(/^server\/
  *
  * Only whitelisted specifiers are touched. A refused specifier is NOT rewritten: the loader reports it instead, so a
  * broken import fails with the reason rather than with a module-resolution stack trace.
+ *
+ * `resolveRelative` (optional) is the §28.18 half: given the package-relative specifier the caller's verdict accepted
+ * (`./lib/util.js`), it returns the URL the specifier must become in this file's own directory. The loader passes a
+ * resolver rooted at the kit file (`pathToFileURL(dirname(file))`), because a `data:` module has no base directory of
+ * its own — without this the accepted relative specifier would resolve nowhere. A caller that omits it (the battle
+ * table, whose verdict refuses the form outright) keeps the pre-§28.18 behaviour byte for byte.
+ *
+ * The resolved URLs depend on the FILE the specifier appears in, not on the file being loaded: a helper that is itself
+ * reached through `./…` may import its own siblings, and both ends resolve those against the helper's own directory
+ * (server: this resolver; browser: the URL of the helper). That is why the loader calls this once per source it loads,
+ * with that source's own directory.
  * @param {string} src
  * @param {(file: string) => string} urlOf workspace-relative file → URL (the loader passes `pathToFileURL`)
+ * @param {{ targets?: Map<string, string>, resolveRelative?: (specifier: string) => string|null }} [opts]
  * @returns {string}
  */
-export function rewriteKitImports(src, urlOf, { targets = KIT_IMPORT_TARGETS } = {}) {
+export function rewriteKitImports(src, urlOf, { targets = KIT_IMPORT_TARGETS, resolveRelative = null } = {}) {
   const text = String(src || '');
   const decls = kitImportDeclarations(text);
   if (!decls.length) return text;
@@ -276,8 +366,11 @@ export function rewriteKitImports(src, urlOf, { targets = KIT_IMPORT_TARGETS } =
   let at = 0;
   for (const d of decls) {
     const file = targets.get(d.specifier);
-    if (!file) continue;                                   // refused: left for the loader to report
-    const url = String(urlOf(file));
+    // 白名单那一半优先：一个 specifier 要么是白名单条目，要么是包相对路径，两种判定互斥（`@` 开头 vs `./` 开头）。
+    const url = file
+      ? String(urlOf(file))
+      : (resolveRelative && isPackRelativeSpecifier(d.specifier) ? resolveRelative(d.specifier) : null);
+    if (!url) continue;                                    // refused: left for the loader to report
     out += text.slice(at, d.specStart) + url;
     at = d.specStart + d.specifier.length;
   }

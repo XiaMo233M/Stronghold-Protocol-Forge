@@ -333,9 +333,10 @@ node tools/workshop-validate.mjs workshop     # items 层：重算 params/mergea
 
 1. **返回了 kit 就必须自己给出 `skill`** —— `Battle._setupUnit` 用 `u.kit.skill || null` 取技能：返回了 kit 却省略
    `skill`，这名干员就**没有技能**，缺省技能**不会**回退到通用 kit。
-2. **只能 `import` 白名单里的模块** —— 同一份文件服务端按真实路径加载、浏览器按 URL 加载，`../../sim/…` 对前者成立、
-   对后者不成立，所以相对路径不可能同时对。作者写 `@kit/…`（kit SDK）或 `@sim/…`（三个纯函数模块），两端各自解析；
-   白名单之外的一切 `import` / `require` / 动态 `import()` 仍然是 `KIT_IMPORT`（见 `docs/WORKSHOP.md` §4.5）。
+2. **`import` 只有三种写法** —— 同一份文件服务端按真实路径加载、浏览器按 URL 加载，`../../sim/…` 这种**向上**走的
+   相对路径对前者成立、对后者不成立。所以作者写 `@kit/…`（kit SDK）或 `@sim/…`（三个纯函数模块），两端各自解析
+   （`docs/WORKSHOP.md` §4.5）；要 import **自己包里**的文件，用 `./…` 开头的**向下**相对路径（如 `./lib/bonds.js`，
+   见 §4.6）。其余一切 `import` / `require` / 动态 `import()` 仍然是 `KIT_IMPORT`。
 3. **它会跑在玩家浏览器里，服务端用同一份文件复算这场战斗** —— 默认 `SP_COMBAT=client`，服务端 `SP_VERIFY` 会重算并
    比对，不一致就**拒绝玩家的结果**，而报错信息看上去和「你用了 `Math.random()`」毫无关系。随机请用 `battle.rng`，
    时间请用战斗自己的时钟（`battle.after` / `battle.every`），DOM、网络、墙钟一律不要碰。

@@ -1351,3 +1351,78 @@ pack-scoped route here follows). W-B applies (§28.16): a room that declares a s
 installers, so "the declared set decides what runs" holds for this payload too.
 
 Tests: `test/packBattle.test.js`.
+
+### 28.18 Pack-relative imports: `./…` inside `kits/`
+
+**The defect §28.12 left behind.** §28.12 opened the engine's library to a pack kit, and that was the half the community
+kit `op-clemnt.js` needed — but it is not the half a real pack needs next. The reference community mod ships **one**
+`kits/custom.js` of 1138 lines covering many operators, and a pack that wants one file per operator cannot have it:
+there is no way to reach a shared helper. The whitelist (`shared/kitImports.js KIT_IMPORT_FILES`) opens engine files
+only, and a `@pack/` prefix is **impossible**, not merely absent — the browser resolves prefixes through
+`public/index.html`'s import map, a static per-page table that cannot express "one prefix per installed pack" (a pack is
+installed after the page was built). So the only form both ends can resolve natively is a **downward relative
+specifier**: `./helpers.js`, `./lib/bonds.js`.
+
+**The geometry is the whole design.** A kit on disk is `<packDir>/kits/<id>.js`; the browser fetches it as
+`/workshop-kits/<pack>/<id>.js` — the `kits/` segment is **not** in the URL.
+
+| end | base | `./lib/util.js` resolves to | file |
+|---|---|---|---|
+| server | `file:///<packDir>/kits/<id>.js` | `file:///<packDir>/kits/lib/util.js` | `<packDir>/kits/lib/util.js` |
+| browser | `/workshop-kits/<pack>/<id>.js` | `/workshop-kits/<pack>/lib/util.js` | the same file, because the route maps `<pack>/<rel>` back to `<packDir>/kits/<rel>` |
+
+That is why the URL form can be legal at all. And it is exactly why `..` can never be: `../x.js` must walk one level
+*out of* `kits/` on disk, while the URL has no `kits/` segment to walk out of — the two ends walk a different number of
+levels and always land on different files. `..` therefore stays refused (`kitImportUnavailableReason` says so, naming
+`kits/`), and the refusal is arithmetic rather than conservatism. The same reason keeps a `kits/lib/../x.js` form out.
+
+**The verdict is extended, not replaced.** `shared/kitImports.js` gains `isPackRelativeSpecifier()`: a specifier that
+starts with `./`, ends with `.js`, has no `..` segment, no backslash, no `%` (any percent-encoding is refused outright —
+that is how `%2e%2e` gets in), no NUL, no `?` / `#`, no empty segment (`./`), and is not a bare `x.js`. It feeds both
+readers unchanged: `loadWorkshopKits` and `shared/kitAuthoring.js validateKit` still call `kitImportIssues()`, so the
+editor cannot pass what the loader refuses (§28.12's property, kept). Every existing refusal keeps its `KIT_IMPORT` code,
+and every refusal now ends by naming **both** the whitelist and the new legal form — a refusal that only says "no" is
+what makes an author collapse everything back into one file.
+
+**The loader rewrites accepted relative specifiers to real `file:` URLs.** §28.12 loads an importing kit from a `data:`
+module, and a `data:` module has no base directory; the same is true of a helper reached *through* a relative specifier,
+so the rewrite is done **once per source the loader loads**, against that source's own directory
+(`rewriteKitImports`'s new `resolveRelative`). A `kits/_shared.js` and a `kits/<id>.js` therefore get different answers
+for the same string — exactly what the browser does (it resolves against the importing module's URL). The rewrite is
+still in-memory only: §28.2 hashes the bytes on disk, so the pack digest is unaffected. A kit with **no** import keeps
+the real-path fast path byte for byte.
+
+**The route is widened, and only as far as `kits/`.** `/workshop-kits/<pack>/<rel>` used to serve exactly the URLs the
+loader registered; it now maps `<pack>/<rel>` to `<packDir>/kits/<rel>`, where `<pack>` must be a **loaded** pack (the
+table comes from `loadWorkshop`'s result, §28.3) and the resolved absolute path must be a `.js` regular file under
+`<packDir>/kits/`. The discipline is unchanged and explicit: exactly one percent-decode (the request path is already
+decoded once before the route sees it, so `%2e%2e` arrives as `..` and is refused as a segment — a second decode is how
+`%252e%252e` becomes `..`); empty / `.` / `..` segments and backslashes refused; containment decided by `path.resolve` +
+`path.relative`, never by string prefix matching (a prefix test accepts `<packDir>/kits-evil/x.js`); and a non-`.js`
+file, an unknown pack, a traversal and a missing file all answer the **same 404 body** — never reveal existence. The
+registered kit URLs keep working unchanged. `/workshop-battle/` deliberately does **not** get this treatment: a battle
+module is loaded on the server from a `data:` URL (§28.17), where a relative specifier cannot resolve, so the form is
+refused for that payload and the route keeps its registration table as the whole of its entry surface (`@battle/` is
+what its authors use).
+
+**The identity hash covers every `.js` under `kits/`, recursively.** A shared helper's bytes decide how a battle plays
+out exactly like the kit file's do, and the digest is what W-D alignment compares (§28.16: the bytes on a client must
+rebuild every pack the room declared). Hashing only `kits/*.js` would let two clients whose `kits/lib/bonds.js` bytes
+differ share one digest — the one thing that digest exists to prevent. The manifest path in a **flat** `kits/` directory
+is still `kits/<name>`, so no existing pack's hash moves (asserted against the three shipped example packs in
+`test/packRelativeImports.test.js`, and cross-checked by `test/packAssets.test.js`'s baseline). `kits/_shared.js` is in
+the hash too, for the same reason, while it does **not** count as a kit.
+
+**What counts as a kit stays a fixed, small rule.** A **top-level** `kits/<id>.js` whose basename does not start with
+`_`. A subdirectory is not a kit (its files are the ones a kit imports with `./…`), and `kits/_shared.js` is a shared
+helper, not an operator called `_shared` — so splitting one large file must not make every fragment a kit. The editor
+reports the same rule (`editor/ui/kit.js`), because a rule the loader enforces and the editor does not is a rule the
+author learns from a silent failure.
+
+**Still refused**, in one list: `..` in any position; a leading `/`; a bare module name; `require()`; dynamic
+`import()`; any `%`, `\`, `?` or `#` inside a relative specifier; a non-`.js` extension; a relative specifier in a
+`server.battle` module. What deliberately did not change: the `@kit/` / `@sim/` / `@battle/` whitelist tables, the
+determinism scan, the ownership rule, and the pack hash of any pack that does not use the new form.
+
+Tests: `test/packRelativeImports.test.js`; the whitelist and its two readers: `test/kitImports.test.js`,
+`test/workshopKits.test.js`.

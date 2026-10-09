@@ -17,7 +17,14 @@
 //     /packs/<id>/<file> → a file of a pack folder — only one its manifest names (server/packs.js servable)
 //     /workshop-assets/<pack>/<path> → a 创意工坊 pack's OWN art (server/http/workshop.js): allowlisted extensions,
 //                only packs with an assets/ folder, no listings — docs/WORKSHOP.md §5
-//     /workshop-kits/<pack>/<id>.js  → a pack's behaviour layer, as an ES module the BROWSER runs (docs/WORKSHOP.md §4)
+//     /workshop-kits/<pack>/<id>.js  → a pack's behaviour layer, as an ES module the BROWSER runs (docs/WORKSHOP.md §4).
+//                Since DESIGN §28.18 the route also serves the pack's OTHER `kits/**/*.js` files (a loaded pack, any
+//                `<rel>` whose resolved path stays under `<packDir>/kits/`, `.js` only), which is what makes a
+//                downward relative import inside a kit resolve on both ends — the `kits/` segment is not in the URL,
+//                so `./lib/util.js` means `<packDir>/kits/lib/util.js` on disk and
+//                `/workshop-kits/<pack>/lib/util.js` on the wire: the same file. `/workshop-battle/` deliberately
+//                stays registered-URLs-only: a battle module is loaded from a `data:` URL on the server, where a
+//                relative specifier cannot resolve, so the form is refused for it (§28.18's asymmetry).
 //     /workshop-panels/<pack>/<module> → a pack's C-layer panel module, likewise an ES module the browser imports
 //                (`pack.json.client.panels`, DESIGN §28.8; only URLs `loadWorkshopPanels` registered, `.js` only —
 //                this is the code side of the line `/workshop-assets` draws on the media side)
@@ -79,16 +86,55 @@ const LOCAL_ART_MANIFEST = 'local-assets.json';
 const EMPTY_LOCAL_ART = Buffer.from(JSON.stringify({ version: 1, source: 'none', count: 0, groups: {} }));
 
 /**
+ * `/workshop-kits/<pack>/<rel>` → `<packDir>/kits/<rel>` (DESIGN §28.18), or null when this URL must not be answered.
+ *
+ * The three-part gate, in the order that keeps every refusal indistinguishable from a file that is simply not there:
+ *   1. the FIRST segment must be a LOADED pack — an uninstalled pack has no directory here at all (the table is built
+ *      from `loadWorkshop`'s result), so "another pack's path" is not a special case, it is a lookup miss;
+ *   2. `decoded` is already percent-decoded **exactly once** by the caller (`decodeURIComponent`), so `%2e%2e` arrives
+ *      here as `..` and is refused as a segment — never re-decoded (a second decode is how `%252e%252e` becomes `..`);
+ *   3. the rest must be non-empty `.js`, with no empty / `.` / `..` segment and no backslash, and the resolved path must
+ *      stay under `<packDir>/kits/` — via `path.resolve` + `path.relative`, never string prefix matching (a prefix test
+ *      accepts `<packDir>/kits-evil/x.js`).
+ *
+ * Whether the file exists is left to the caller's `readFile`: a miss and a traversal must produce the same 404 body.
+ * @param {string} decoded the percent-decoded request path
+ * @param {Map<string, string>|null} kitDirs pack id → `<packDir>/kits` (`workshopKitDirsFor`)
+ * @returns {string|null} the absolute path, or null
+ */
+function resolvePackRelativeKit(decoded, kitDirs) {
+  if (!kitDirs || !kitDirs.size) return null;
+  const rest = decoded.slice('/workshop-kits/'.length);
+  const slash = rest.indexOf('/');
+  if (slash <= 0) return null;                                  // no pack segment, or no file segment
+  const pack = rest.slice(0, slash);
+  const rel = rest.slice(slash + 1);
+  const dir = kitDirs.get(pack);
+  if (!dir) return null;                                        // unknown / not-loaded pack
+  if (!rel.endsWith('.js') || rel.includes('\\')) return null;
+  const segments = rel.split('/');
+  if (segments.some((s) => !s || s === '.' || s === '..')) return null;
+  const abs = path.resolve(dir, ...segments);
+  const back = path.relative(path.resolve(dir), abs);
+  if (!back || back.startsWith('..') || path.isAbsolute(back)) return null;
+  return abs;
+}
+
+/**
  * Create the static request handler.
  * @param {{ publicDir: string, dataDir: string, sharedDir: string, simDir?: string, packsDir?: string,
  *   packs?: ReturnType<typeof createPackRegistry>, log?: object,
  *   workshopJson?: Map<string, Buffer>|null, workshopKitFiles?: Map<string, string>|null,
+ *   workshopKitDirs?: Map<string, string>|null,
  *   workshopPanelFiles?: Map<string, string>|null, workshopAssets?: Map<string, string>|null,
  *   workshopRoutes?: Map<string, object>|null, workshopResourceFiles?: Map<string, object>|null,
  *   resourcePolicy?: 'serve'|'cache-only' }} dirs
  *   packs: the server's pack registry (default: one over publicDir, dataDir and packsDir — ROOT/packs)
  *   workshop*: the 创意工坊 tables `server/index.js` builds once per process (empty maps on a plain install, and every
  *   workshop branch below is skipped then)
+ *   workshopKitDirs: pack id → its `kits/` directory (`workshopKitDirsFor`) — what makes a **relative** kit import
+ *   resolvable in the browser (§28.18). Null on a plain install and on a hand-built handler, and then only the
+ *   registered kit URLs are servable, exactly as before.
  *   resourcePolicy: `/assets/` + `/fonts/` answer 412 and never reach the file system when a pack declared
  *   `assets.serverPolicy: "cache-only"` (DESIGN §28.13). Defaults to `'serve'` — the pre-B3a behaviour, byte for byte.
  * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, rawPath: string, query: string) => Promise<void>}
@@ -100,7 +146,7 @@ export function createStaticHandler({
   // packs with an assets/ folder, the read-only routes the packs declare (`pack.json.routes`) and the URLs serving a
   // pack's declared resource container / manifest (`pack.json.assets`). All of them are empty maps on a plain install,
   // and every route below is skipped then.
-  workshopJson = null, workshopKitFiles = null, workshopAssets = null, workshopRoutes = null, workshopPanelFiles = null,
+  workshopJson = null, workshopKitFiles = null, workshopKitDirs = null, workshopAssets = null, workshopRoutes = null, workshopPanelFiles = null,
   workshopResourceFiles = null, resourcePolicy = 'serve',
   // 包给**已有语种**补的词条（`pack.json.i18n`, fanpack G-04, docs/WORKSHOP.md §1.10）：`Map<语种, Buffer>`，
   // 「官方 <code>.json + 包的新增键」合并后的体。空 map 时 `/i18n/<code>.json` 走下面普通静态路径 ——
@@ -234,9 +280,11 @@ export function createStaticHandler({
         return;
       }
     }
-    // 包声明的**战斗逻辑**模块（`pack.json.server.battle`, DESIGN §28.17）：与 `/workshop-kits/` 逐字同一条通道 ——
-    // 只服务装载器登记过的 URL，按 ES 模块送出（浏览器要 import 它，并在客户端战斗里跑同一段代码）。包内路径可以是
-    // 子目录，所以这里的键是完整 URL 而不是文件名。
+    // 包声明的**战斗逻辑**模块（`pack.json.server.battle`, DESIGN §28.17）：与 `/workshop-kits/` 同一条通道，
+    // 但**只服务装载器登记过的 URL**，不放宽成「包内子树」——这是 §28.18 那份不对称的另一半：kit 可以 import 自己的
+    // 兄弟文件（`./lib/util.js`），战斗逻辑模块不行（服务端把它当 data: URL 加载，data: 没有目录，相对路径无从解析），
+    // 所以它也没有需要「按 URL 解出包内相对路径」的第二个消费者，登记表就是它全部的入口。包内路径可以是子目录，
+    // 所以这里的键是完整 URL 而不是文件名。
     if (workshopBattleFiles && workshopBattleFiles.size && decoded.startsWith(WORKSHOP_BATTLE_PREFIX)) {
       const abs = workshopBattleFiles.get(decoded);
       if (!abs) { sendError(req, res, 404, '页面不存在 · Not found'); return; }
@@ -252,10 +300,20 @@ export function createStaticHandler({
       res.end(req.method === 'HEAD' ? undefined : body);
       return;
     }
-    // 工坊行为层 (docs/WORKSHOP.md §4): serve a pack's kit module as an ES module, so the BROWSER runs the very code the
-    // server runs. Only URLs the loader registered are servable.
+    // 工坊行为层 (docs/WORKSHOP.md §4, DESIGN §28.18): serve a pack's kit module as an ES module, so the BROWSER runs
+    // the very code the server runs. Two halves:
+    //   * a URL the loader registered → the kit file itself, exactly as before;
+    //   * `<包>/<rel>` where `<包>` is a LOADED pack → `<packDir>/kits/<rel>`, so a kit may import its OWN siblings
+    //     with a downward relative specifier (`./lib/util.js` → `/workshop-kits/<pack>/lib/util.js`). This is the
+    //     geometry §28.18 rests on: on disk that specifier means `<packDir>/kits/lib/util.js` and in the URL it means
+    //     `/workshop-kits/<pack>/lib/util.js` — the same file, because the `kits/` segment is not in the URL and this
+    //     branch adds it back. A `..` specifier can never agree (`../x.js` would have to walk out of the URL prefix,
+    //     which is a different amount of walking than on disk), so `..` stays refused by the verdict AND here.
+    // Discipline, unchanged: only a loaded pack, only `.js`, only a regular file, and the resolved path must stay
+    // inside `<packDir>/kits/` (decided with `path.resolve` + `path.relative`, never by string prefix matching).
+    // Unknown pack, traversal, a non-`.js` file and a missing file all answer the SAME 404 — never reveal existence.
     if (workshopKitFiles && workshopKitFiles.size && decoded.startsWith('/workshop-kits/')) {
-      const abs = workshopKitFiles.get(decoded);
+      const abs = workshopKitFiles.get(decoded) ?? resolvePackRelativeKit(decoded, workshopKitDirs);
       if (!abs) { sendError(req, res, 404, '页面不存在 · Not found'); return; }
       let body;
       try {

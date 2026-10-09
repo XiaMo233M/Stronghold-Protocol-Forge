@@ -194,6 +194,26 @@ export function workshopPanelFilesFor(panels, workshopDir) {
 }
 
 /**
+ * 已装载包 → 它的 `kits/` 目录（§28.18 的服务面）。`/workshop-kits/` 从「只服务登记过的那些 URL」放宽成
+ * 「已装载包的 `kits/` 子树里的任意 `.js`」时，路由要拿这张表才知道一个包 id 对应磁盘上的哪个目录。
+ *
+ * 它只收**已经装载**的包（`loadWorkshop` 的返回值），所以一个没装上的包在路由上不存在 —— 这正是纪律本身：
+ * 服务的范围由装载器决定，不由 URL 决定。`dir` 是 `loadWorkshop` 给出的**绝对**路径（`path.resolve` 后再进表，
+ * 路由那半才能用 `path.relative` 判断「有没有留在 kits/ 里」）。
+ * @param {{ packs?: Array<{ id?: string, dir?: string }> }} loaded
+ * @returns {Map<string, string>} 包 id → `<包目录>/kits`（绝对路径）
+ */
+export function workshopKitDirsFor(loaded) {
+  /** @type {Map<string, string>} */
+  const out = new Map();
+  for (const p of (loaded && Array.isArray(loaded.packs)) ? loaded.packs : []) {
+    if (!p || typeof p.id !== 'string' || !p.id || typeof p.dir !== 'string' || !p.dir) continue;
+    out.set(p.id, path.join(path.resolve(p.dir), 'kits'));
+  }
+  return out;
+}
+
+/**
  * `routes[*].cache` 声明 → 真正的 `Cache-Control` 头。三种语义就是三种，一个不多一个不少（`shared/workshop.js`
  * `ROUTE_CACHE_POLICIES` 是那份闭枚举的唯一来源）：
  *   * `no-cache`（缺省）—— 可以存，但每次都要回来问（`/data/*.json` 那一类「随时会变」的东西）；

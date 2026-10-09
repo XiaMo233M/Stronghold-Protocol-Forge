@@ -23,6 +23,7 @@ import {
 } from '../shared/kitImports.js';
 import { validateKit, kitErrors } from '../shared/kitAuthoring.js';
 import { identifyPack, loadWorkshop, loadWorkshopKits } from '../server/workshop.js';
+import { battleSourceIssues } from '../server/battlePack.js';
 import { startServer } from '../server/index.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -278,6 +279,29 @@ describe('kit import：校验器口径', () => {
       assert.match(hit.message, /白名单/, `${spec} 的 reason 必须点名白名单`);
       assert.match(hit.hint, /@kit\/tier1\.js/, `${spec} 的 hint 必须给出可用的写法`);
     }
+  });
+
+  // §28.18 把「相对路径一律不行」改成「**向下**相对（`./…`）可以，用来 import 自己包 kits/ 下的兄弟文件」：
+  // 白名单之外仍然全是 KIT_IMPORT，但 `./…` 这一族里哪些成立、哪些不成立有了明确分界。
+  test('§28.18：./… 放行，其余相对与畸形形式仍被拒，且每条理由都给得出可用的写法', () => {
+    for (const spec of ['./helpers.js', './lib/bonds.js']) {
+      assert.deepEqual(kitErrors(validateKit(kit(`import { x } from '${spec}';`), OPTS)), [], `${spec} 必须放行`);
+    }
+    for (const spec of ['../x.js', './../x.js', '/abs/x.js', 'x.js', './x.mjs', './x', './', './%2e%2e/x.js', './x.js?1', './sub\\x.js', './x//y.js']) {
+      const hit = kitErrors(validateKit(kit(`import { x } from '${spec}';`), OPTS)).find((e) => e.code === 'KIT_IMPORT');
+      assert.ok(hit, `${spec} 必须被拒`);
+      assert.ok(hit.hint.includes(kitImportAllowedText()), `${spec} 的 hint 必须给出白名单写法`);
+      // 每个拒绝理由都要顺带告诉作者「自己包里的 ./… 也能写」—— 否则唯一的出路是把代码塞回一个文件
+      assert.match(hit.message, /\.\/…/, `${spec} 的 reason 必须提到包相对写法`);
+    }
+  });
+
+  test('§28.18：战斗逻辑模块（server.battle）刻意不接受 ./…（data: 没有目录），理由指向 @battle/', () => {
+    const issue = battleSourceIssues("import h from './lib/util.mjs';\nexport function install() { return h; }\n", 'p')[0];
+    assert.ok(issue, '战斗模块里 ./… 必须被拒');
+    assert.equal(issue.code, 'BATTLE_BAD_IMPORT');
+    assert.match(issue.reason, /data:/);
+    assert.match(issue.reason, /@battle\//);
   });
 
   test('require 与动态 import() 都被拒，理由各自说得通', () => {

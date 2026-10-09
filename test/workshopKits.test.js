@@ -19,7 +19,7 @@ import { loadWorkshop, loadWorkshopKits } from '../server/workshop.js';
 import { loadData } from '../server/data.js';
 import { buildBattleSpec } from '../server/sim/spec.js';
 import { setupUnitKit } from '../server/sim/content/index.js';
-import { startServer, workshopKitFilesFor } from '../server/index.js';
+import { startServer, workshopKitFilesFor, workshopKitDirsFor } from '../server/index.js';
 import { makeMatch, give, legalTileFor } from './match/harness.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -241,6 +241,20 @@ describe('行为层: delivery to the browser', () => {
     assert.equal(workshopKitFilesFor(null, wsRoot).size, 0);
   });
 
+  // §28.18 的服务面接线：路由要给「kit 用 ./… import 的兄弟文件」找到目录，靠的是**已装载包**的 id → `<包目录>/kits`。
+  // 这条把两端钉在一起：装载结果里的 dir、这张表、以及磁盘上真的存在那个目录 —— 三者必须一致。
+  test('§28.18：pack id → kits/ 目录的表来自已装载的包，且指向磁盘上真实存在的目录', () => {
+    const dirs = workshopKitDirsFor(loaded);
+    assert.deepEqual([...dirs.keys()], ['probe-pack']);
+    // 同一份装载结果：装载器给出的 dir 与路由那张表必须指向同一个 kits/（两端不能各算一次路径）
+    assert.equal(dirs.get('probe-pack'), join(loaded.packs.find((p) => p.id === 'probe-pack').dir, 'kits'));
+    assert.ok(fs.existsSync(dirs.get('probe-pack')), 'kits/ 目录必须真的存在');
+    // 没装载的包（表里没有）不是「被挡住」，而是根本没有可解析的目标
+    assert.equal(dirs.has('not-loaded'), false);
+    assert.equal(workshopKitDirsFor({ packs: [] }).size, 0);
+    assert.equal(workshopKitDirsFor(null).size, 0);
+  });
+
   test('the runner rebuilds the map from spec.workshopKits (client wiring present)', () => {
     const src = fs.readFileSync(join(ROOT, 'public/js/battle/runner.js'), 'utf8');
     assert.match(src, /export async function loadSpecKits/);
@@ -283,8 +297,15 @@ describe('行为层: the shipped example kit (docs/examples/kit-demo)', () => {
     assert.equal(buffs[0].duration, Infinity);
   });
 
-  test('a pack kit stays self-contained (the same file is loaded from two different roots)', () => {
+  test('§28.18：docs/examples/kit-demo 的 kits/ 只有顶层 <id>.js 会被当成 kit（示例的扁平形态照旧）', () => {
     const src = fs.readFileSync(join(ROOT, 'docs/examples/kit-demo/kits', `${EX_BASE}.js`), 'utf8');
-    assert.equal(/^\s*import\s/m.test(src), false, 'a pack kit must not import engine modules: server and browser resolve them differently');
+    // 示例本身仍然是「不 import 任何东西」的形态（它讲的就是三条硬规则），但这**不是**一条新的禁令：
+    // §28.18 之后 `./…` 与 `@kit/` / `@sim/` 都是合法写法，见 test/packRelativeImports.test.js。
+    assert.equal(/^\s*import\s/m.test(src), false, '示例 kit 保持自包含（示例的形态，不是对作者的禁令）');
+    // 被当成 kit 的文件 = 顶层、`.js`、不以 `_` 开头；示例包里只有那一个
+    const kitFiles = fs.readdirSync(join(ROOT, 'docs/examples/kit-demo/kits'))
+      .filter((f) => f.endsWith('.js') && !f.startsWith('_'))
+      .filter((f) => fs.statSync(join(ROOT, 'docs/examples/kit-demo/kits', f)).isFile());
+    assert.deepEqual(kitFiles, [`${EX_BASE}.js`], '示例包的 kit 清单');
   });
 });

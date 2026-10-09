@@ -25,7 +25,7 @@ import { sha256Hex, canonicalJson, modManifestDigest } from '../shared/modIdenti
 import { C2S } from '../shared/protocol.js';
 // the kit import whitelist + the narrow rewrite (DESIGN §28.12). shared/ because the VALIDATOR reads the same table —
 // the loader must reach the same verdict the editor did.
-import { kitImportDeclarations, kitImportIssues, rewriteKitImports } from '../shared/kitImports.js';
+import { kitImportDeclarations, kitImportIssues, packRelativePath, rewriteKitImports } from '../shared/kitImports.js';
 // 公告 / 鸣谢的装载期判据（DESIGN §28.15）：声明的 `.json` 在不在、是不是 JSON。合并体在 `server/index.js` 里经
 // 既有的合并数据通道送出 —— 形状与判据只有一份，这个 import 就是那一份。
 import { noticesIssues } from './notices.js';
@@ -784,14 +784,23 @@ export function identifyPack(packDir, pack, files, { assetsDigest = null } = {})
   // 3. the kit sources, 4. the pack's own media
   let kits = 0;
   const kitDir = path.join(packDir, 'kits');
+  // RECURSIVE, and that is the point (§28.18): a kit may now split its helper code into `kits/lib/*.js`, and those
+  // bytes decide how a battle plays out exactly like the kit file does. Hashing only the top level would let two
+  // clients whose helper bytes differ share one digest — and that digest is what W-D alignment compares (§28.16).
+  // The manifest path keeps the `kits/` prefix, so a FLAT `kits/` directory produces the same `kits/<name>` entries it
+  // always did and no existing pack's hash moves. `kits` (the count that decides layer B) counts the KITS only:
+  // a subdirectory is not a kit and a `_`-prefixed helper is not a kit (the same two rules `loadWorkshopKits` scans by).
   try {
     for (const name of fs.readdirSync(kitDir).sort()) {
       if (!name.endsWith('.js')) continue;
-      const buf = fs.readFileSync(path.join(kitDir, name));
-      addBytes(`kits/${name}`, buf);
-      kits++;
+      const st = fs.statSync(path.join(kitDir, name));
+      if (!st.isFile()) continue;
+      if (!name.startsWith('_')) kits++;
     }
   } catch { /* no kits/ directory: an ordinary data pack */ }
+  for (const rel of listFiles(kitDir).filter((f) => f.endsWith('.js'))) {
+    addBytes(`kits/${rel}`, fs.readFileSync(path.join(kitDir, rel)));
+  }
   const assetsDir = path.join(packDir, 'assets');
   for (const rel of listFiles(assetsDir)) addBytes(`assets/${rel}`, fs.readFileSync(path.join(assetsDir, rel)));
   // 5. C 层面板的模块源码（`pack.json.client.panels[].module`, DESIGN §28.8）：一条声明能改变客户端行为，模块的
@@ -962,6 +971,25 @@ export function workshopTouchedFiles(loaded) {
 }
 
 /**
+ * 一条**已被接受**的包相对 specifier（`./lib/util.js`）→ 服务端该 import 的 `file:` URL（DESIGN §28.18）。
+ *
+ * `baseDir` 是**出现这条 import 的那个文件**所在的目录（对 kit 与它的辅助文件都是 `kits/`），所以与浏览器的解析
+ * 逐字同构：浏览器按模块自己的 URL 解，这里按模块自己的目录解。specifier 已经过 `isPackRelativeSpecifier`
+ * （`./` 开头、`.js` 结尾、无 `..` / `\` / `%` / `?` / `#` / 空段），所以这里只做拼接 —— 判定只写一遍，写在
+ * `shared/kitImports.js`，编辑器与加载器读的是同一份。带 mtime 的查询串与上面 `?v=` 同一条理由：改过的辅助文件
+ * 必须让 Node 的 ESM 缓存交出新的模块。
+ * @param {string} baseDir 绝对目录
+ * @param {string} specifier
+ * @returns {string}
+ */
+function relativeModuleUrl(baseDir, specifier) {
+  const abs = path.join(baseDir, ...packRelativePath(specifier).split('/'));
+  let v = 0;
+  try { v = Math.round(fs.statSync(abs).mtimeMs); } catch { /* 文件不在：抛给下面那次 import 报出来 */ }
+  return `${pathToFileURL(abs).href}?v=${v}`;
+}
+
+/**
  * Load the BEHAVIOUR layer of every pack: `workshop/<pack>/kits/<chessId>.js` (docs/WORKSHOP.md §4).
  *
  * A kit module's default export is the function the sim calls — `(bb, chess, def) => Kit` — the contract
@@ -976,6 +1004,12 @@ export function workshopTouchedFiles(loaded) {
  *
  * Never throws: a kit that fails to import is reported and skipped. A kit-id collision between two packs is decided by
  * `byPackId` (DESIGN §28.3, the same rule the data overlay uses) and the report names the pack that holds the id.
+ *
+ * **Which files are kits** (§28.18): a top-level `kits/<id>.js` whose name does not start with `_`. A subdirectory is
+ * not a kit (its files are the ones a kit imports with `./…`), and `kits/_shared.js` is a shared helper, not an
+ * operator called `_shared` — so one big kit file can be split into several without every fragment being read as a kit.
+ * A kit's imports: the `@kit/` / `@sim/` whitelist (§28.12) plus its OWN siblings under `kits/` as `./…` (§28.18),
+ * which the browser resolves against the kit's URL and this function rewrites against the kit file's directory.
  * @param {ReturnType<typeof loadWorkshop>} loaded
  * @param {{ log?: object|null, baseUrl?: string, knownIds?: Set<string>|null }} [opts] `knownIds` warns about a kit for
  *   an operator that does not exist (dead code) — pass the merged chess ids.
@@ -999,9 +1033,16 @@ export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/worksho
     const ownChess = new Set(Object.keys((pack.files && pack.files.chess) || {}));
     const declared = new Set(Array.isArray(pack.overrides) ? pack.overrides : []);
     for (const name of fs.readdirSync(kitDir).sort()) {
-      if (!name.endsWith('.js')) continue;
-      const id = name.slice(0, -'.js'.length);
+      // Which files are kits (§28.18): a top-level `<id>.js` is a kit, and only that. A SUBDIRECTORY is not a kit (its
+      // files are the ones a kit reaches with `./…`); a file whose basename starts with `_` is not a kit either, so a
+      // shared helper may sit next to the kits (`kits/_shared.js`) without being read as an operator named "_shared".
+      // A directory entry that is neither a file nor a directory (a socket, a broken symlink) is not a kit either.
+      if (!name.endsWith('.js') || name.startsWith('_')) continue;
       const file = path.join(kitDir, name);
+      let st;
+      try { st = fs.statSync(file); } catch { continue; }
+      if (!st.isFile()) continue;
+      const id = name.slice(0, -'.js'.length);
       if (Object.hasOwn(kits, id)) {
         errors.push({
           pack: pack.id, id, code: 'KIT_ID_COLLISION', definedBy: kitOwner.get(id),
@@ -1041,7 +1082,12 @@ export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/worksho
         // the rewrite never reaches the pack hash — identifyPack() hashes the bytes on disk (§28.2).
         const mod = decls.length === 0
           ? await import(`${pathToFileURL(file).href}?v=${v}`)
-          : await import(kitDataUrl(rewriteKitImports(source, (rel) => pathToFileURL(path.join(ROOT, rel)).href), v));
+          : await import(kitDataUrl(rewriteKitImports(source, (rel) => pathToFileURL(path.join(ROOT, rel)).href, {
+            // §28.18: an ACCEPTED pack-relative specifier (`./lib/util.js`) is resolved against THIS file's own
+            // directory — `kits/<id>.js` and `kits/_shared.js` therefore get different answers for the same string,
+            // which is what the browser does too (it resolves against the importing module's URL).
+            resolveRelative: (spec) => relativeModuleUrl(kitDir, spec),
+          }), v));
         const fn = typeof mod.default === 'function' ? mod.default : (typeof mod.kit === 'function' ? mod.kit : null);
         if (!fn) {
           errors.push({ pack: pack.id, id, code: 'KIT_NO_DEFAULT_EXPORT', reason: 'the module must default-export the kit function (bb, chess, def) => Kit' });

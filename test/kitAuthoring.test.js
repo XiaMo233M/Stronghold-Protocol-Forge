@@ -87,6 +87,8 @@ describe('kit authoring: the shipped example kit is the reference', () => {
 
   test('its own header explains the import rule — and prose must not trip it', () => {
     const source = fs.readFileSync(DEMO_KIT, 'utf8');
+    // 示例 kit 讲的是「三条硬规则」，它的头注释里写着 `import` 这个词并解释相对路径为什么不行：
+    // 这段说明文字**不得**被扫描器当成真的依赖（§28.18 之后 `./…` 是合法形式，示例仍然一个 import 都不写）。
     assert.match(source, /不能 import/, 'the demo kit documents the rule in a comment');
     assert.deepEqual(kitErrors(validateKit(source, { id: 'chess_ws_abyss_hunter_a', ownChessIds: ['chess_ws_abyss_hunter_a'] })), []);
   });
@@ -106,9 +108,18 @@ describe('kit authoring: the three rules that fail silently', () => {
       `import { x } from '../../sim/battle.js';\n${kit('')}`,
       `import x from '/sim/x.js';\n${kit('')}`,
       `const x = require('./x.js');\n${kit('')}`,
-      `export { x } from './x.js';\n${kit('')}`,
+      `export { x } from '../shared/tier1.js';\n${kit('')}`,
+      `import x from './lib/x.mjs';\n${kit('')}`,
     ]) {
       assert.ok(codes(validateKit(src, { id: 'chess_ws_x_a', ownChessIds: ['chess_ws_x_a'] })).includes('KIT_IMPORT'), src);
+    }
+  });
+
+  test('§28.18: a DOWNWARD relative import or re-export of the kit\'s own package is not an error', () => {
+    // `../…` walks up and can never agree on both ends; `./…` means `<packDir>/kits/…` on disk and
+    // `/workshop-kits/<pack>/…` in the browser — the same file (DESIGN §28.18). A re-export is the same dependency.
+    for (const src of [`import { x } from './lib/x.js';\n${kit('')}`, `export { x } from './lib/x.js';\n${kit('')}`]) {
+      assert.deepEqual(kitErrors(validateKit(src, { id: 'chess_ws_x_a', ownChessIds: ['chess_ws_x_a'] })), [], src);
     }
   });
 
