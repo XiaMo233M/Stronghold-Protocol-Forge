@@ -22,13 +22,18 @@ import { applyWorkshop } from '../shared/workshop.js';
 import { zipRead, zipWrite } from '../shared/zip.js';
 import { normalizePackManifest } from '../shared/workshop.js';
 import { normalizeSupportConfig } from '../shared/support.js';
+import { requiredUnitForms } from '../shared/diy.js';
 import { GameData } from '../server/match/gamedata.js';
 
 /** The manifest validator the loader uses: a written `pack.json` must still pass it (no boolean is trusted here). */
-const normalizeCheck = (raw) => normalizePackManifest(raw, raw && raw.id, { hasAssets: true }).ok === true;
+const normalizeCheck = (raw, id = raw && raw.id, hasAssets = fs.existsSync(join(wsRoot, String(id), 'assets'))) =>
+  normalizePackManifest(raw, id, { hasAssets }).ok === true;
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DATA_DIR = join(ROOT, 'data');
+/** 官方两份数据只读一次：形态档位（`requiredUnitForms`）与盟约合法性都从它们派生。 */
+const OFFICIAL_BACKUPS = JSON.parse(fs.readFileSync(join(DATA_DIR, 'backups.json'), 'utf8'));
+const OFFICIAL_CHESS = JSON.parse(fs.readFileSync(join(DATA_DIR, 'chess.json'), 'utf8'));
 const quiet = { info() {}, warn() {}, error() {}, debug() {} };
 const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 /** 每个拒绝都必须是一句中文界面能用的话，而不是英文调试串。 */
@@ -391,6 +396,175 @@ describe('包管理：助战声明（GET /api/packs/support, POST /api/packs/<id
     assert.equal(off.report.supportOff, true);
   });
 
+// ---- 自选池声明（pack.json.operators）------------------------------------------------------------------------------
+
+/**
+ * 一个能进自选池的干员记录：**照抄官方一条**（含全部形态档位），只换身份。形态档位从 `diy.slots` 派生
+ * （`requiredUnitForms`），所以数据加了槽位这条夹具也跟着走。
+ */
+const diyUnit = (charId, extra = {}) => {
+  const official = JSON.parse(fs.readFileSync(join(DATA_DIR, 'backups.json'), 'utf8'));
+  const template = official.units[Object.keys(official.units)[0]];
+  // 形态档位是从 `diy.slots` 指向的**那两条 chess 记录**的 status 派生的，所以两份数据都要喂进去
+  const forms = requiredUnitForms({ chess: OFFICIAL_CHESS, backups: official });
+  return {
+    ...JSON.parse(JSON.stringify(template)),
+    charId, name: '演示自选干员', rarity: 6, profession: 'WARRIOR', subProfessionId: 'primguard',
+    forms: Object.fromEntries(forms.map((k) => [k, { statusKey: k }])),
+    ...extra,
+  };
+};
+
+describe('包管理：自选池声明（GET /api/packs/support 的 diyOperators, POST /api/packs/<id>/diyOperators）', () => {
+  const OP_PACK = 'diy-pack';
+  before(() => {
+    writePack(OP_PACK, {
+      id: OP_PACK, name: '自选包', version: '1.0.0', content: ['units'],
+      operators: { char_ws_diy: { bonds: ['egirShip'], powers: ['egir'] } },
+    }, { 'units.json': `${JSON.stringify({ char_ws_diy: diyUnit('char_ws_diy') }, null, 2)}\n` });
+  });
+  after(() => { fs.rmSync(packDir(OP_PACK), { recursive: true, force: true }); });
+  test('先确认夹具自己是一个加载器接受的包（否则下面每条断言都证明不了什么）', () => {
+    const loaded = loadWorkshop(wsRoot, { log: quiet });
+    assert.deepEqual(loaded.errors, [], 'the fixture pack must load cleanly');
+    const pack = loaded.packs.find((x) => x.id === OP_PACK);
+    assert.deepEqual(Object.keys(pack.files.units), ['char_ws_diy']);
+  });
+
+  test('GET 给出声明、派生字段（名字由记录来）与「能不能进池」的判据', async () => {
+    const r = await fetch(`${editor.url}/api/packs/support`).then((x) => x.json());
+    const p = r.packs.find((x) => x.id === OP_PACK);
+    assert.ok(p, 'the pack must be listed');
+    const op = p.diyOperators;
+    assert.ok(op, 'the page needs its 自选池 state');
+    assert.deepEqual(op.declared, ['char_ws_diy']);
+    assert.deepEqual(op.operators, { char_ws_diy: { powers: ['egir'], bonds: ['egirShip'] } });
+    assert.deepEqual(op.forms, requiredUnitForms({ chess: OFFICIAL_CHESS, backups: OFFICIAL_BACKUPS }),
+      '形态要求从数据派生，页面不硬编码');
+    assert.ok(op.bonds.includes('egirShip'), '盟约候选来自 data/bonds.json');
+    // 名字是**显示用**的：它从本包那条 units 记录来，不进 pack.json
+    assert.deepEqual(op.rows.map((x) => [x.id, x.name, x.unit, x.unitRarity, x.missingForms, x.unknownBonds]),
+      [['char_ws_diy', '演示自选干员', true, 6, [], []]]);
+    assert.deepEqual(op.unknown, []);
+    assert.deepEqual(op.errors, []);
+    // 助战那一栏的 `operators` 仍然是它自己那份（数组）——两个字段不能互相盖掉
+    assert.ok(Array.isArray(p.operators));
+  });
+
+  test('POST 只改 operators 一个字段：其余字段、键序与缩进原样保留', async () => {
+    const beforeText = manifestText(OP_PACK);
+    const beforeObj = JSON.parse(beforeText);
+    const res = await post(`${editor.url}/api/packs/${OP_PACK}/diyOperators`, {
+      operators: { char_ws_diy: { bonds: ['egirShip', 'yanShip'], powers: ['egir', 'iberia'] } },
+    });
+    assert.equal(res.status, 200, JSON.stringify(await res.clone().json()));
+    const body = await res.json();
+    assert.equal(body.changed, true);
+    assert.deepEqual(body.declared, ['char_ws_diy']);
+    assert.deepEqual(body.warnings, []);
+    const afterText = manifestText(OP_PACK);
+    const afterObj = JSON.parse(afterText);
+    assert.deepEqual(afterObj.operators, { char_ws_diy: { bonds: ['egirShip', 'yanShip'], powers: ['egir', 'iberia'] } });
+    assert.deepEqual(Object.keys(afterObj), Object.keys(beforeObj), 'every other key keeps its place');
+    assert.match(afterText, /\n  "content": \[\n    "units"\n  \],/, 'the 2-space indentation is kept');
+    assert.equal(afterText.endsWith('}\n'), true, 'and the trailing newline');
+    assert.equal(normalizeCheck(afterObj), true, 'the written manifest is still one the loader accepts');
+    // 没变就不写盘
+    const again = await post(`${editor.url}/api/packs/${OP_PACK}/diyOperators`, { operators: afterObj.operators });
+    assert.equal((await again.json()).changed, false, '同一份声明再存一次：一个字节都不写');
+    // 清空 = 删掉这个键
+    const cleared = await post(`${editor.url}/api/packs/${OP_PACK}/diyOperators`, { operators: {} });
+    assert.equal(cleared.status, 200);
+    assert.equal(Object.hasOwn(JSON.parse(manifestText(OP_PACK)), 'operators'), false);
+    // 还原来，后面的用例要继续用它
+    await post(`${editor.url}/api/packs/${OP_PACK}/diyOperators`, { operators: { char_ws_diy: { bonds: ['egirShip'], powers: ['egir'] } } });
+  });
+
+  test('三条会被加载器整条拒的声明在这里就被拒，而且**一个字节都没写**', async () => {
+    // 另外两个包：一个只有干员记录（没有声明）、一个的干员记录缺形态档位
+    writePack('diy-noform', {
+      id: 'diy-noform', name: '缺档位', version: '1.0.0', content: ['units'],
+    }, {
+      'units.json': `${JSON.stringify({ char_ws_noform: (() => {
+        const all = diyUnit('char_ws_noform');
+        const keys = Object.keys(all.forms);
+        delete all.forms[keys[keys.length - 1]];
+        return all;
+      })() }, null, 2)}\n`,
+    });
+    const before = manifestText(OP_PACK);
+    const cases = [
+      // 没有同名的 units 记录
+      [{ operators: { char_ws_ghost: {} } }, 'OPERATOR_NO_UNIT'],
+      // 盟约 id 不存在（写错了只会静默失效）
+      [{ operators: { char_ws_diy: { bonds: ['noSuchShip'] } } }, 'OPERATOR_BOND_UNKNOWN'],
+      // 形状不对
+      [{ operators: { char_ws_diy: { bonds: 'egirShip' } } }, 'OPERATOR_BAD_SHAPE'],
+      // 不是在写这个包
+      [{ operators: 42 }, 'OPERATOR_BAD_SHAPE'],
+    ];
+    for (const [body, code] of cases) {
+      const res = await post(`${editor.url}/api/packs/${OP_PACK}/diyOperators`, body);
+      assert.equal(res.status, 400, JSON.stringify(body));
+      const { error } = await res.json();
+      assert.ok(isChinese(error), `${code}: ${error}`);
+      assert.match(error, new RegExp(code), `${code}: got ${error}`);
+      assert.equal(manifestText(OP_PACK), before, `${code}: a refusal must not write`);
+    }
+    // 缺形态档位：拒绝里要点名缺的那一档
+    const res = await post(`${editor.url}/api/packs/diy-noform/diyOperators`, { operators: { char_ws_noform: {} } });
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).error, /OPERATOR_FORM_MISSING/);
+    // 拒绝时**一个字节都没写**：磁盘上还是那份没有 operators 字段的清单
+    assert.deepEqual(Object.keys(JSON.parse(manifestText('diy-noform'))), ['id', 'name', 'version', 'content']);
+    assert.equal(Object.hasOwn(JSON.parse(manifestText('diy-noform')), 'operators'), false, 'a refused write must not add the key');
+    // 未知的包是 404，坏的包 id 是 400
+    assert.equal((await post(`${editor.url}/api/packs/nope/diyOperators`, { operators: {} })).status, 404);
+    assert.equal((await post(`${editor.url}/api/packs/bad%20id!/diyOperators`, { operators: {} })).status, 400);
+    fs.rmSync(packDir('diy-noform'), { recursive: true, force: true });
+  });
+
+  test('非 6★ 只警告、不阻断（记录改对之前作者照样能存），但加载器会拒它', async () => {
+    writePack('diy-five', {
+      id: 'diy-five', name: '五星包', version: '1.0.0', content: ['units'],
+    }, { 'units.json': `${JSON.stringify({ char_ws_five: diyUnit('char_ws_five', { rarity: 5 }) }, null, 2)}\n` });
+    const res = await post(`${editor.url}/api/packs/diy-five/diyOperators`, { operators: { char_ws_five: {} } });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.warnings.length, 1);
+    assert.match(body.warnings[0], /OPERATOR_NOT_SIX/);
+    // 装载器那边：池子里没有他，而且有一条点名报告
+    const loaded = loadWorkshop(wsRoot, { log: quiet });
+    const { data, report } = applyWorkshop(loadData(DATA_DIR, { log: quiet, workshopDir: null }), loaded.packs.filter((p) => p.id === 'diy-five'));
+    assert.equal(data.backups.diy.operators.char_ws_five, undefined);
+    assert.ok(report.errors.some((e) => e.code === 'OPERATOR_NOT_SIX'));
+    fs.rmSync(packDir('diy-five'), { recursive: true, force: true });
+  });
+
+  test('写进去的包能被加载器读到，并让干员真的进自选池（端到端）', async () => {
+    const loaded = loadWorkshop(wsRoot, { log: quiet });
+    const pack = loaded.packs.find((p) => p.id === OP_PACK);
+    assert.ok(pack, `the pack must load: ${JSON.stringify(loaded.errors)}`);
+    assert.deepEqual(Object.keys(pack.operators), ['char_ws_diy']);
+    assert.deepEqual(Object.keys(pack.files.units), ['char_ws_diy'], 'units.json 是干员记录那一层');
+    const base = loadData(DATA_DIR, { log: quiet, workshopDir: null });
+    const poolBefore = base.backups.diy.ownedPool.length;
+    const { data, report } = applyWorkshop(base, [pack]);
+    assert.deepEqual(report.errors, [], JSON.stringify(report.errors));
+    assert.equal(data.backups.diy.ownedPool.length, poolBefore + 1);
+    assert.ok(data.backups.diy.ownedPool.includes('char_ws_diy'));
+    assert.deepEqual(data.backups.diy.operators.char_ws_diy, {
+      name: '演示自选干员', rarity: 6, profession: 'WARRIOR', subProfessionId: 'primguard',
+      obtainable: true, powers: ['egir'], bonds: ['egirShip'],
+    }, '四个字段从记录派生，盟约/权能来自 pack.json');
+    // 磁盘上的生成物一个字都没改
+    const onDisk = JSON.parse(fs.readFileSync(join(DATA_DIR, 'backups.json'), 'utf8'));
+    assert.equal(onDisk.diy.ownedPool.length, poolBefore);
+    assert.equal(onDisk.diy.operators.char_ws_diy, undefined);
+    assert.equal(onDisk.units.char_ws_diy, undefined);
+  });
+});
+
   test('a directory that is not a pack is skipped instead of offering a row whose every action would fail', async () => {
     // a half-deleted pack, or a folder someone dropped into workshop/: no pack.json, so nothing can be exported or edited
     fs.mkdirSync(join(wsRoot, 'not-a-pack'), { recursive: true });
@@ -398,7 +572,8 @@ describe('包管理：助战声明（GET /api/packs/support, POST /api/packs/<id
     const res = await fetch(`${editor.url}/api/packs/support`);
     assert.equal(res.status, 200, 'a stray directory must not turn the list into a 500');
     const r = await res.json();
-    assert.deepEqual(r.packs.map((p) => p.id), ['demo']);
+    assert.ok(r.packs.some((p) => p.id === 'demo'), 'the real packs are listed');
+    assert.ok(!r.packs.some((p) => p.id === 'not-a-pack'), 'the stray directory is not one of them');
     assert.equal((await fetch(`${editor.url}/api/packs/not-a-pack/export`)).status, 404, 'and it is not exportable either');
     fs.rmSync(join(wsRoot, 'not-a-pack'), { recursive: true, force: true });
   });

@@ -53,6 +53,7 @@ import { loadWorkshop, WORKSHOP_DIR } from '../server/workshop.js';
 import {
   exportPack, installZip, readPackSupport, writePackSupport, packSummary, listPackIds,
   readPackMeta, writePackMeta, writePackOverrides, PACK_META_FIELDS, LICENSE_CHOICES,
+  readPackOperators, writePackOperators,
 } from '../tools/workshop-pack.mjs';
 import { ZIP_MAX_TOTAL_BYTES } from '../shared/zip.js';
 // 外观素材（pack.json.art）的「文件系统 + 骨架/图谱」体检要用与客户端**同一个** Spine 解析器与图谱阅读器：
@@ -1259,9 +1260,28 @@ const packRefusal = (e) => Object.assign(new Error(e.message), { status: e && e.
  * operators are declared, and the tier the loader derives for each). `readPackSupport` is the same call the CLI makes,
  * so the page cannot show a tier the loader disagrees with.
  */
+/**
+ * 一个包的自选池声明状态，或者 `null`。读不出来的包（坏 pack.json）由 `packSummary` 报，这一页不需要第二条错误。
+ */
+function diyOperatorsFor(root, packId) {
+  try {
+    return readPackOperators(root, packId);
+  } catch {
+    return null;
+  }
+}
+
 function supportStateFor(root, packId, supportFile) {
   const state = readPackSupport(root, packId, { supportFile });
-  return { ...packSummary(root, packId, loadWorkshop(root, { log: quietLog }), { supportFile }), ...state };
+  // 自选池声明（`pack.json.operators`）与助战同页：同一个 GET 一起给，页面不会出现「一半加载好」的状态。
+  // 读的是 `readPackOperators`（CLI/加载器同一批规则的同一个函数），所以界面上的判罚不可能与加载器不同。
+  // 键名是 **`diyOperators`**（不是 `operators`）：`readPackSupport` 的 `operators` 已经是「助战那一栏的候选行」
+  // （`{ id, name, tier, selected }`），同名会把那份数据盖掉。
+  return {
+    ...packSummary(root, packId, loadWorkshop(root, { log: quietLog }), { supportFile }),
+    ...state,
+    diyOperators: diyOperatorsFor(root, packId),
+  };
 }
 
 /**
@@ -2363,6 +2383,37 @@ export async function createEditorServer(opts = {}) {
         derived: written.derived,
         // 安装方关掉了工坊助战：写入仍然成功（文件是作者的），但要说清楚它这一局不会进卡池
         warnings: enabled ? [] : ['data/support.json 没有开启助战（或 `"workshop": false`），这些声明现在不会进卡池'],
+      });
+    }
+
+    // set ONE pack's 自选池 declaration (`pack.json.operators` only — never a `content` entry, and never the derived
+    // fields name/rarity/profession/subProfessionId: those come from this pack's own `units.json`).
+    //
+    // 路径是 `/diyOperators`，**不是** `/operators`：后者是干员编辑器「把一份 spec 落成干员记录 + chess.json」那条
+    // 既有路由（见上面的 create/update one operator）。两条都写 `pack.json`，但写的是完全不同的字段，共用一个路径
+    // 只会让先注册的那条把后一条吃掉（第一条 `endsWith('/operators')` 会先命中）。
+    if (p.startsWith('/api/packs/') && p.endsWith('/diyOperators') && method === 'POST') {
+      const packId = p.slice('/api/packs/'.length, -'/diyOperators'.length);
+      if (!PACK_ID_RE.test(packId)) throw refuse(400, '工坊包 id 不合法（只能是字母、数字、下划线和短横线）');
+      if (!fs.existsSync(path.join(root, packId, 'pack.json'))) throw refuse(404, `工坊包 "${packId}" 不存在（没有可读的 pack.json）`);
+      const body = await readBody(req);
+      const operators = body && typeof body === 'object' && !Array.isArray(body) && body.operators !== undefined ? body.operators : body;
+      let written;
+      try {
+        written = await writePackOperators(root, packId, operators);
+      } catch (e) {
+        // OPERATOR_BAD_SHAPE / OPERATOR_NO_UNIT / OPERATOR_BOND_UNKNOWN / OPERATOR_FORM_MISSING —— 与加载器同一批码字
+        throw packRefusal(e);
+      }
+      return sendJson(res, 200, {
+        ok: true,
+        pack: packId,
+        diyOperators: written.operators,
+        declared: written.declared,
+        rows: written.rows,
+        unknown: written.unknown,
+        changed: written.changed,
+        warnings: written.warnings,
       });
     }
 

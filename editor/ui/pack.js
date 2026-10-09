@@ -37,6 +37,10 @@ const state = {
   // 「包元数据」那六个输入框的草稿（`{ name: '…', license: '…' }`）与 overrides 添加行里的两个选择：
   // 输入框在每次重画时从草稿重建，所以勾一个助战、删一条声明都不会把作者正在打的字弄丢。
   metaDraft: {}, ovFile: '', ovId: '',
+  // 自选池声明（`pack.json.operators`）的两份草稿：勾了哪些干员，以及每个干员的盟约/权能文本
+  // （`{ '<charId>': { bonds: 'egirShip', powers: 'egir, iberia' } }`，空格与逗号都当分隔符）。
+  // 同样是「重画时从草稿重建」，所以改一个输入框不会把别的行弄丢。
+  opPicked: new Set(), opText: {},
 };
 
 const packOf = (id = state.packId) => state.packs.find((p) => p.id === id) ?? null;
@@ -152,6 +156,8 @@ function selectPack(id) {
   state.packId = id;
   state.message = null;
   state.picked = new Set(packOf(id)?.support ?? []);
+  state.opPicked = new Set(packOf(id)?.diyOperators?.declared ?? []);
+  state.opText = {};
   state.ovId = '';
   resetMetaDraft(id);
   renderAll();
@@ -450,6 +456,12 @@ function renderDetail() {
   }
   box.append(note);
 
+  // ---- 自选池声明（pack.json.operators）----
+  // 这是「一个包新增一个干员」在界面上缺的最后一块：干员记录（units.json）由干员页写入，而**让它出现在自选
+  // 池里**只有这一条路（`diy.ownedPool` 是生成物，包改不了它）。四个派生字段（名字/星级/职业/分支）不在这里
+  // 写：它们从本包那条 units 记录来（服务端 mergeWorkshopOperators 就只有这一个来源）。
+  box.append(renderOperatorsPanel(p));
+
   // 卡池的归属地：说清楚 support 只是「建议」，真正的池子在服务端
   box.append(h(t('卡池在哪里')));
   const pool = document.createElement('div'); pool.className = 'panel';
@@ -643,6 +655,183 @@ function priceCell(p, op) {
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') commit(); });
   td.append(input);
   return td;
+}
+
+/** 「自选池声明」（`pack.json.operators`）的一段：列出本包自己的干员、勾选要进池的、给每个勾了的写盟约与权能。 */
+function renderOperatorsPanel(p) {
+  // 小标题的构造与这一页别处一样（`renderDetail` 里那个 `h` 是它自己的局部函数，这里不共享作用域）
+  const h = (t) => { const e = document.createElement('h2'); e.textContent = t; return e; };
+  const wrap = document.createElement('div');
+  wrap.append(h(t('自选池声明（pack.json 的 operators）')));
+
+  const op = p.diyOperators;
+  if (!op) {
+    const bad = document.createElement('div'); bad.className = 'panel';
+    bad.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('这个包的 pack.json 读不出来，先修好它才能声明自选池。') }));
+    wrap.append(bad);
+    return wrap;
+  }
+  if (!op.candidates.length && !op.declared.length) {
+    // 一个还没有 units.json 的包没有可选对象 —— 说清去哪里建，而不是给一个空表
+    const none = document.createElement('div'); none.className = 'panel';
+    none.append(Object.assign(document.createElement('p'), {
+      className: 'hint',
+      textContent: t('这个包里没有 units.json（干员记录），所以没有可进自选池的干员。先在干员编辑器里建这个包自己的干员记录。'),
+    }));
+    wrap.append(none);
+    return wrap;
+  }
+
+  const note = document.createElement('div'); note.className = 'panel';
+  note.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('勾上＝让这个干员**出现在自选编队里**（服务端把它并进 backups.json 的 diy.ownedPool / diy.operators；data/*.json 本身不改）。只能勾本包自己 units.json 里的干员，而且必须是 6★：自选池就是六星那条路，5★ 及以下请走工坊棋子注册表（content.chess + kits/）。名字、星级、职业、分支**从那条 units 记录派生**，这里不写第二遍。'),
+  }));
+
+  const table = document.createElement('table');
+  const head = document.createElement('tr');
+  for (const th of ['', t('干员 id'), t('名称'), t('能否进池'), t('盟约（data/bonds.json 的 id）'), t('权能')]) {
+    head.append(Object.assign(document.createElement('th'), { textContent: th }));
+  }
+  table.append(head);
+
+  const ids = [...new Set([...op.candidates.map((c) => c.id), ...op.declared])].sort();
+  const byId = new Map(op.candidates.map((c) => [c.id, c]));
+  const rowOf = new Map(op.rows.map((r) => [r.id, r]));
+  for (const id of ids) {
+    const cand = byId.get(id);
+    const row = rowOf.get(id);
+    const tr = document.createElement('tr');
+    // 勾选
+    const pick = document.createElement('td'); pick.className = 'pick';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = state.opPicked.has(id);
+    cb.addEventListener('change', () => {
+      if (cb.checked) {
+        state.opPicked.add(id);
+        // 新勾上的：草稿从磁盘上已有的声明（或空）起步，别把别的行的输入弄丢
+        if (!(id in state.opText)) state.opText[id] = textOf(row);
+      } else state.opPicked.delete(id);
+      renderDetail();
+    });
+    pick.append(cb);
+    tr.append(pick);
+    tr.append(Object.assign(document.createElement('td'), { className: 'id', textContent: id }));
+    tr.append(Object.assign(document.createElement('td'), { textContent: cand?.name ?? t('（不在本包的 units.json 里）') }));
+    // 能不能进池：服务端已经把加载器的三条判据算好了（缺记录 / 不是 6★ / 缺形态档位）
+    const why = document.createElement('td');
+    if (!cand) why.append(Object.assign(document.createElement('span'), { className: 'tag err', textContent: t('缺 units 记录') }));
+    else if (!cand.six) why.append(Object.assign(document.createElement('span'), { className: 'tag err', textContent: t('不是 6★') }));
+    else if (cand.missingForms.length) why.append(Object.assign(document.createElement('span'), { className: 'tag err', textContent: t('缺形态 {0}', cand.missingForms.join(t('、'))) }));
+    else why.append(Object.assign(document.createElement('span'), { className: 'tag ok', textContent: t('可以进池') }));
+    tr.append(why);
+    // 盟约 / 权能（逗号或空格分隔的 id 文本）
+    for (const field of ['bonds', 'powers']) {
+      const td = document.createElement('td');
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = state.opText[id]?.[field] ?? (row ? row[field].join(', ') : '');
+      input.placeholder = field === 'bonds' ? t('例如 egirShip') : t('例如 egir, iberia');
+      if (field === 'bonds') {
+        // 盟约 id 的候选来自服务端（data/bonds.json 的键）：写错一个 id 那条盟约永远不会出现（静默失效）
+        const list = document.createElement('datalist');
+        list.id = `bond-opts-${id}`;
+        for (const b of op.bonds) list.append(Object.assign(document.createElement('option'), { value: b }));
+        input.setAttribute('list', list.id);
+        td.append(list);
+      }
+      input.addEventListener('input', () => {
+        state.opText[id] = { ...(state.opText[id] ?? textOf(row)), [field]: input.value };
+      });
+      td.append(input);
+      tr.append(td);
+    }
+    table.append(tr);
+  }
+  note.append(table);
+
+  // 声明里引用不到的东西：加载器会整条拒，所以在保存前就标出来（这些行不能勾）
+  if (op.unknown.length) {
+    const bad = document.createElement('div'); bad.className = 'banner bad';
+    bad.textContent = t('⚠ {0} 声明了自选池，但本包的 units.json 里没有这条记录 —— 加载器会记 OPERATOR_NO_UNIT 并整条丢掉。取消勾选即可删掉它。', op.unknown.join(t('、')));
+    note.append(bad);
+  }
+  // 会因为在途改动被拒的行：把判据摆出来（服务端保存时也会再判一次，并原样返回原因）
+  const broken = op.rows.filter((r) => !r.unit || r.unitRarity !== 6 || r.missingForms.length || r.unknownBonds.length);
+  if (broken.length) {
+    const ul = document.createElement('ul'); ul.className = 'issues';
+    for (const r of broken) {
+      const why = !r.unit ? t('本包没有这条 units 记录（OPERATOR_NO_UNIT）')
+        : r.unitRarity !== 6 ? t('不是 6★（OPERATOR_NOT_SIX）')
+          : r.missingForms.length ? t('缺形态档位 {0}（OPERATOR_FORM_MISSING）', r.missingForms.join(t('、')))
+            : t('盟约 {0} 不在 data/bonds.json 里（OPERATOR_BOND_UNKNOWN）', r.unknownBonds.join(t('、')));
+      ul.append(Object.assign(document.createElement('li'), { className: 'err', textContent: `${r.id}：${why}` }));
+    }
+    const box2 = document.createElement('div'); box2.className = 'panel';
+    box2.append(Object.assign(document.createElement('div'), { className: 'err', textContent: t('{0} 条声明会被加载器拒绝', broken.length) }));
+    box2.append(ul);
+    note.append(box2);
+  }
+
+  const actions = document.createElement('div'); actions.className = 'row'; actions.style.marginTop = '10px';
+  const save = document.createElement('button');
+  save.className = 'primary';
+  save.textContent = state.busy ? t('保存中…') : t('保存自选池声明');
+  save.disabled = state.busy;
+  save.addEventListener('click', saveOperators);
+  const reset = document.createElement('button');
+  reset.className = 'ghost';
+  reset.textContent = t('还原');
+  reset.addEventListener('click', () => {
+    state.opPicked = new Set(op.declared);
+    state.opText = {};
+    renderDetail();
+  });
+  actions.append(save, reset);
+  note.append(actions);
+  note.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('保存只改 pack.json 的 operators 字段：其余字段、键序与两空格缩进原样保留，也不会给包补一条它没声明过的 content。'),
+  }));
+  note.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('进池的是**自选编队**那一栏（房间里选四名干员），不是助战卡池 —— 两者互不影响。改完要重启游戏服务器才会生效。'),
+  }));
+  wrap.append(note);
+  return wrap;
+}
+
+/** 一行声明在输入框里的文本形态（`{ bonds: 'egirShip', powers: 'egir, iberia' }`）。 */
+const textOf = (row) => ({ bonds: row ? row.bonds.join(', ') : '', powers: row ? row.powers.join(', ') : '' });
+
+/** 「egir, iberia」→ `['egir', 'iberia']`：逗号、中文逗号与空白都当分隔符（作者怎么写都行）。 */
+const splitIds = (s) => String(s ?? '').split(/[,，\s]+/).map((x) => x.trim()).filter(Boolean);
+
+async function saveOperators() {
+  const p = packOf();
+  if (!p) return;
+  state.busy = true; renderDetail(); renderSide();
+  try {
+    const body = {};
+    for (const id of [...state.opPicked].sort()) {
+      const text = state.opText[id] ?? textOf(p.diyOperators?.rows.find((r) => r.id === id));
+      body[id] = { bonds: splitIds(text.bonds), powers: splitIds(text.powers) };
+    }
+    const r = await api(`/api/packs/${encodeURIComponent(p.id)}/diyOperators`, { method: 'POST', body: { operators: body } });
+    const warn = Array.isArray(r.warnings) && r.warnings.length ? ' ' + t('；⚠ {0}', r.warnings.join(' ' + t('；') + ' ')) : '';
+    state.message = {
+      kind: r.changed ? 'ok' : 'warn',
+      text: r.changed
+        ? t('已写入 {0} 的 operators：{1} 个{2}', r.pack, r.declared.length, warn)
+        : t('{0} 的 operators 没有变化，文件未被改写{1}', r.pack, warn),
+    };
+    await load(p.id);
+  } catch (e) {
+    state.message = { kind: 'error', text: errText(e) };
+  } finally {
+    state.busy = false; renderAll();
+  }
 }
 
 async function saveSupport() {
@@ -881,6 +1070,8 @@ async function load(keepId = null, { resetDraft = false } = {}) {
   // 换了一个包才重置元数据草稿：overrides 的写盘会重新载入这一页，不该顺手丢掉作者正在改的 license
   if (resetDraft || state.packId !== before) resetMetaDraft();
   state.picked = new Set(packOf()?.support ?? []);
+  state.opPicked = new Set(packOf()?.diyOperators?.declared ?? []);
+  state.opText = {};
   $('#rootPath').textContent = state.packs.length
     ? `${state.data.workshopRoot} · ${t('{0} 个包', state.packs.length)}`
     : `${state.data.workshopRoot} · ${t('还没有包')}`;

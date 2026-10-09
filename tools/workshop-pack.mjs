@@ -24,6 +24,7 @@ import { parseArgs } from 'node:util';
 import { normalizePackManifest, normalizeContentFile, workshopSupportEntries, WORKSHOP_CONTENT_FILES, OVERRIDE_ENTRY_RE } from '../shared/workshop.js';
 import { loadWorkshop, WORKSHOP_DIR } from '../server/workshop.js';
 import { normalizeSupportConfig } from '../shared/support.js';
+import { requiredUnitForms } from '../shared/diy.js';
 import { zipWrite, zipRead, ZIP_LIMITS } from '../shared/zip.js';
 
 export { WORKSHOP_DIR, ZIP_LIMITS };
@@ -37,6 +38,8 @@ export const SUPPORT_FILE = path.join(DATA_DIR, 'support.json');
 const PACK_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
 /** `pack.json.support` 里 id 的字符集：与 shared/workshop.js 的 RECORD_ID_RE 相同，不另立一份。 */
 const SUPPORT_ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
+/** `pack.json.operators` 的键（干员 id）与 `units.json` 的键用的是同一套字符集。 */
+const OPERATOR_ID_RE = SUPPORT_ID_RE;
 /** 一个包目录里最多读多少个文件（`assets/**` 一起算）。真实包：几百个；失控的目录：不再往下走。 */
 const MAX_PACK_FILES = 20000;
 
@@ -401,6 +404,227 @@ export async function writePackSupport(root, packId, ids) {
 // —— 页面上却只能告诉作者「去 pack.json 里声明一个」。`overrides` 同理：它是覆盖官方记录的唯一开关（除盟约那页
 // 会自动写 `bonds:`），作者想覆盖一个官方干员/装备/怪物时只能手写。业主的硬约束是**任何写进 pack.json 的东西都要
 // 能在界面上增删改**，这一块就是那条约束的出口。
+
+// ---- 自选池声明（pack.json.operators） -----------------------------------------------------------------------------
+//
+// 与 `support` 同一套做法：**加载器会怎么判，这里就怎么判**（读的是 shared/workshop.js / shared/diy.js 的同一个
+// 函数），所以编辑器不可能与加载器给出不同结论。图形入口的硬规矩（docs/WORKSHOP.md §1.1）：写进 pack.json 的
+// 东西必须能在界面上增删改 —— 包括陈旧/没人用的条目（它们只是不生效，不是错误，但要能删掉）。
+//
+// 四个字段（name / rarity / profession / subProfessionId）**不在这份声明里**：它们从本包那条 `units.json`
+// 记录派生（`mergeWorkshopOperators`），清单里再写一遍就是两份会漂移的真相。
+
+/**
+ * 官方数据里与「这个干员能不能进自选池」有关的两个文件：`data/backups.json`（`diy.slots`：形态要求）与
+ * `data/bonds.json`（盟约 id 的合法集合）。按 mtime 缓存 —— 编辑器的每次读盘都走它，而目录扫描一次不便宜。
+ */
+let operatorFormsCache = null;
+function officialOperatorForms() {
+  const statOf = (p) => { try { return fs.statSync(p).mtimeMs; } catch { return 0; } };
+  const backupsPath = path.join(DATA_DIR, 'backups.json');
+  const bondsPath = path.join(DATA_DIR, 'bonds.json');
+  const chessPath = path.join(DATA_DIR, 'chess.json');
+  const stamp = `${statOf(backupsPath)}|${statOf(bondsPath)}|${statOf(chessPath)}`;
+  if (operatorFormsCache && operatorFormsCache.stamp === stamp) return operatorFormsCache;
+  const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
+  const backups = readJson(backupsPath);
+  operatorFormsCache = {
+    stamp,
+    // `requiredUnitForms` 要**两份**数据：`diy.slots` 给出槽位，`chess.json` 的那些记录给出各自的 `status`
+    // （形态档位是从 status 派生的）。只喂 backups 会得到一张空的要求表 —— 校验就静默变成「什么都不要求」。
+    forms: requiredUnitForms({ chess: readJson(chessPath), backups }),
+    bonds: new Set(Object.keys(readJson(bondsPath) ?? {})),
+  };
+  return operatorFormsCache;
+}
+
+/**
+ * 一个包的自选池声明状态。**形态要求与盟约合法性都从官方数据派生**，页面只显示它们。
+ *
+ * `operators` 是页面上真正的改动的对象：每一项给出它引用的事实在不在（`unit` / `unitRarity` / `missingForms` /
+ * `unknownBonds`），因为这些正是加载器会拒的东西 —— 界面必须先把它们标出来，而不是让作者重启服务器才发现。
+ *
+ * @param {string} root 工坊根
+ * @param {string} packId
+ * @returns {{ pack: string, operators: Record<string, { powers: string[], bonds: string[] }>, declared: string[], rows: object[], forms: string[], bonds: string[], errors: object[] }}
+ */
+export function readPackOperators(root, packId) {
+  const dir = findPackDir(root, packId);
+  const pack = readPackDir(dir, packId);
+  const raw = isPlainObject(pack.manifest?.operators) ? pack.manifest.operators : {};
+  const official = officialOperatorForms();
+  /** @type {Record<string, { powers: string[], bonds: string[] }>} */
+  const operators = {};
+  /** @type {object[]} */
+  const errors = [];
+  for (const [charId, decl] of Object.entries(raw)) {
+    if (!OPERATOR_ID_RE.test(charId)) {
+      errors.push({ id: String(charId), code: 'OPERATOR_BAD_SHAPE', reason: `"${String(charId)}" 不是合法的干员 id（字母数字与 _ - . :，≤64）` });
+      continue;
+    }
+    if (!isPlainObject(decl)) {
+      errors.push({ id: charId, code: 'OPERATOR_BAD_SHAPE', reason: `operators["${charId}"] 必须是一个对象：{ bonds, powers }` });
+      continue;
+    }
+    const clean = { powers: [], bonds: [] };
+    let bad = false;
+    for (const field of ['powers', 'bonds']) {
+      const list = decl[field] === undefined ? [] : decl[field];
+      if (!Array.isArray(list)) {
+        errors.push({ id: charId, code: 'OPERATOR_BAD_SHAPE', reason: `operators["${charId}"].${field} 必须是 id 的数组` });
+        bad = true;
+        break;
+      }
+      for (const v of list) {
+        if (typeof v !== 'string' || !v.trim()) {
+          errors.push({ id: charId, code: 'OPERATOR_BAD_SHAPE', reason: `operators["${charId}"].${field}：${JSON.stringify(v)} 不是合法的 id` });
+          bad = true;
+          break;
+        }
+        const id = v.trim();
+        if (!clean[field].includes(id)) clean[field].push(id);
+      }
+      if (bad) break;
+      clean[field].sort();
+    }
+    if (bad) continue;
+    operators[charId] = clean;
+  }
+  const unitIds = new Set(Object.keys(pack.files.units ?? {}));
+  /** 形态的要求对每一个干员都一样（自选槽是全局的四条），所以是**一条**清单，不是每人一份。 */
+  const forms = official.forms;
+  /** @type {object[]} */
+  const rows = Object.entries(operators)
+    .map(([charId, decl]) => {
+      const unit = pack.files.units?.[charId] ?? null;
+      const unitForms = isPlainObject(unit?.forms) ? Object.keys(unit.forms) : [];
+      return {
+        id: charId,
+        // 名字只用于显示：它从本包那条 units 记录来（不进 pack.json）
+        name: typeof unit?.name === 'string' && unit.name ? unit.name : null,
+        powers: decl.powers,
+        bonds: decl.bonds,
+        unit: !!unit,
+        unitRarity: Number.isInteger(unit?.rarity) ? unit.rarity : null,
+        // 缺的档位（加载器会以 OPERATOR_FORM_MISSING 整条拒）—— 空数组 = 齐了
+        missingForms: unit ? forms.filter((f) => !unitForms.includes(f)) : [],
+        // 不在 data/bonds.json 里的盟约 id（加载器会以 OPERATOR_BOND_UNKNOWN 整条拒）
+        unknownBonds: decl.bonds.filter((b) => !official.bonds.has(b)),
+      };
+    })
+    .sort((a, b) => a.id.localeCompare(b.id));
+  /** 本包自己的干员记录：新建一条声明时从这里挑（这是唯一能进池的来源）。 */
+  const candidates = [...unitIds]
+    .map((id) => {
+      const unit = pack.files.units[id];
+      const unitForms = isPlainObject(unit?.forms) ? Object.keys(unit.forms) : [];
+      return {
+        id,
+        name: typeof unit?.name === 'string' && unit.name ? unit.name : id,
+        rarity: Number.isInteger(unit?.rarity) ? unit.rarity : null,
+        selected: Object.hasOwn(operators, id),
+        six: unit?.rarity === 6,
+        missingForms: forms.filter((f) => !unitForms.includes(f)),
+      };
+    })
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const unknown = Object.keys(operators).filter((id) => !unitIds.has(id));
+  return {
+    pack: packId,
+    operators,
+    declared: Object.keys(operators).sort(),
+    rows,
+    candidates,
+    forms,
+    bonds: [...official.bonds].sort(),
+    unknown,
+    errors,
+  };
+}
+
+/**
+ * 写一个包的 `pack.json.operators` —— **只动这一个字段**。与 `writePackSupport` 同一条规则：其余字段、键序与
+ * 两空格缩进原样保留；内容没变就不写盘。
+ *
+ * 三条会让加载器**整条拒**的规则在这里就拒绝（写了等于没写比 400 更坏）：干员 id 不在本包的 `units.json` 里
+ * （`OPERATOR_NO_UNIT`）、盟约 id 不在 `data/bonds.json` 里（`OPERATOR_BOND_UNKNOWN`）、形态不齐
+ * （`OPERATOR_FORM_MISSING`）。`rarity` 不是 6 只**警告**、不阻断：加载器会拒这条声明（`OPERATOR_NOT_SIX`），
+ * 但作者可能正在等他把记录改对，界面把结论摆出来即可。
+ *
+ * @param {string} root 工坊根
+ * @param {string} packId
+ * @param {unknown} operators `{ "<charId>": { bonds: string[], powers: string[] } }`
+ * @returns {Promise<ReturnType<typeof readPackOperators> & { changed: boolean, warnings: string[] }>}
+ */
+export async function writePackOperators(root, packId, operators) {
+  if (!isPlainObject(operators)) {
+    throw refuse('OPERATOR_BAD_SHAPE：operators 必须是一个对象 { "<干员 id>": { bonds, powers } }（每个干员要带自己的盟约）');
+  }
+  const dir = findPackDir(root, packId);
+  const pack = readPackDir(dir, packId);
+  const manifest = pack.manifest;
+  if (!isPlainObject(manifest)) throw refuse(`工坊包 "${packId}" 的 pack.json 不可读`);
+  const official = officialOperatorForms();
+  const unitIds = new Set(Object.keys(pack.files.units ?? {}));
+  /** @type {Record<string, { powers: string[], bonds: string[] }>} */
+  const clean = {};
+  const warnings = [];
+  for (const [charId, decl] of Object.entries(operators).sort(([a], [b]) => a.localeCompare(b))) {
+    if (!OPERATOR_ID_RE.test(charId)) {
+      throw refuse(`OPERATOR_BAD_SHAPE："${String(charId)}" 不是合法的干员 id（字母数字与 _ - . :，≤64）`);
+    }
+    if (!isPlainObject(decl)) throw refuse(`OPERATOR_BAD_SHAPE：operators["${charId}"] 必须是一个对象：{ bonds, powers }`);
+    const out = { powers: [], bonds: [] };
+    for (const field of ['powers', 'bonds']) {
+      const list = decl[field] === undefined ? [] : decl[field];
+      if (!Array.isArray(list)) throw refuse(`OPERATOR_BAD_SHAPE：operators["${charId}"].${field} 必须是 id 的数组`);
+      for (const v of list) {
+        if (typeof v !== 'string' || !v.trim()) throw refuse(`OPERATOR_BAD_SHAPE：operators["${charId}"].${field}：${JSON.stringify(v)} 不是合法的 id`);
+        const id = v.trim();
+        if (!out[field].includes(id)) out[field].push(id);
+      }
+      out[field].sort();
+    }
+    // 加载器会整条拒的三条：在这里就拒绝，并说清是哪一条规则（否则作者会拿到一次 200 和一个不生效的声明）
+    if (!unitIds.has(charId)) {
+      throw refuse(`OPERATOR_NO_UNIT："${charId}" 没有本包的 units.json 记录 —— 自选池的名字/星级/职业只能从那条记录派生，先去干员页把它建出来`);
+    }
+    const unknownBonds = out.bonds.filter((b) => !official.bonds.has(b));
+    if (unknownBonds.length) {
+      throw refuse(`OPERATOR_BOND_UNKNOWN：${unknownBonds.join('、')} 不在 data/bonds.json 里 —— 写错的盟约永远不会出现在对局里（静默失效），请从盟约页挑一个真实的 id`);
+    }
+    const unitForms = new Set(Object.keys(pack.files.units[charId]?.forms ?? {}));
+    const missing = official.forms.filter((f) => !unitForms.has(f));
+    if (missing.length) {
+      throw refuse(`OPERATOR_FORM_MISSING："${charId}" 的 units 记录缺形态档位 ${missing.join('、')} —— 自选槽的普通与精锐记录都要一个，缺了它 node tools/golden.mjs 会抛异常（语料生成给池里每位配一个精锐场景）`);
+    }
+    if (pack.files.units[charId].rarity !== 6) {
+      warnings.push(`OPERATOR_NOT_SIX："${charId}" 不是 6★，加载器会拒掉这条声明（5★ 及以下请走工坊棋子注册表）`);
+    }
+    clean[charId] = out;
+  }
+  const next = { ...manifest };
+  if (Object.keys(clean).length) next.operators = clean; else delete next.operators;
+  const previous = isPlainObject(manifest.operators) ? JSON.stringify(sortOperators(manifest.operators)) : null;
+  const now = Object.keys(clean).length ? JSON.stringify(clean) : null;
+  const changed = previous !== now;
+  if (changed) await fsp.writeFile(path.join(dir, 'pack.json'), `${JSON.stringify(next, null, 2)}\n`);
+  return { ...readPackOperators(root, packId), changed, warnings };
+}
+
+/** 键与列表都排序后的副本 —— 「内容变没变」的比较不能受作者书写顺序影响（写一次会重排整个文件）。 */
+function sortOperators(operators) {
+  const out = {};
+  for (const charId of Object.keys(operators).sort()) {
+    const decl = operators[charId];
+    if (!isPlainObject(decl)) { out[charId] = decl; continue; }
+    out[charId] = {
+      powers: (Array.isArray(decl.powers) ? [...decl.powers] : []).sort(),
+      bonds: (Array.isArray(decl.bonds) ? [...decl.bonds] : []).sort(),
+    };
+  }
+  return out;
+}
 
 /** 界面上可以编辑的元数据字段。`id` **不在**里面：它必须等于目录名，改它等于换一个包。 */
 export const PACK_META_FIELDS = Object.freeze(['name', 'version', 'author', 'license', 'description', 'gameVersion']);
