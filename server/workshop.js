@@ -79,16 +79,17 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null } = {}) {
     // not listed as a loaded pack (an empty pack in the boot summary would only be noise). A pack that ships NO data
     // file at all is a different thing and IS loaded: the reserved 助战 voice pack carries only `voices` (or only
     // `voiceLangs`, for a dub other than the default one), and a pack may also bring only 盟约/装备图标 (`bondIcons` /
-    // `itemIcons`) or only 外观素材 (`art`: avatars, portraits, spine models) — all of them are published through
-    // assets.json by the overlay (shared/workshop.js mergeWorkshopVoices / mergeWorkshopBondIcons /
-    // mergeWorkshopItemIcons / mergeWorkshopArt). Forgetting one of them here would make that kind of pack load
-    // "successfully" and contribute nothing.
+    // `itemIcons`) or only 外观素材 (`art`: avatars, portraits, spine models) or only 自选池声明 (`operators`) — all of
+    // them are published through assets.json / backups.json by the overlay (shared/workshop.js mergeWorkshopVoices /
+    // mergeWorkshopBondIcons / mergeWorkshopItemIcons / mergeWorkshopArt / mergeWorkshopOperators). Forgetting one of
+    // them here would make that kind of pack load "successfully" and contribute nothing.
     if (Object.keys(files).length
       || Object.keys(manifest.pack.voices || {}).length
       || Object.keys(manifest.pack.voiceLangs || {}).length
       || Object.keys(manifest.pack.bondIcons || {}).length
       || Object.keys(manifest.pack.itemIcons || {}).length
-      || Object.keys(manifest.pack.art || {}).length) {
+      || Object.keys(manifest.pack.art || {}).length
+      || Object.keys(manifest.pack.operators || {}).length) {
       packs.push({ ...manifest.pack, dir: packDir, files, ...identifyPack(packDir, manifest.pack, files) });
     }
   }
@@ -175,7 +176,12 @@ function listFiles(dir, prefix = '') {
 export function workshopTouchedFiles(loaded) {
   const out = new Set();
   for (const p of (loaded && loaded.packs) || []) {
-    for (const f of Object.keys(p.files || {})) out.add(f);
+    for (const f of Object.keys(p.files || {})) {
+      // `units` 是一个**例外**：`data/` 里没有顶层 `units.json`，那条干员记录的家是 `data/backups.json` 的
+      // `units[charId]`（shared/workshop.js OVERLAY_TARGET_BY_FILE）。所以浏览器要拿到的**合并后**文件是
+      // `backups.json`，不是 `units.json` —— 后者根本不在磁盘上，加进去只会让 HTTP 层去找一个不存在的文件。
+      out.add(f === 'units' ? 'backups' : f);
+    }
     // Voice lines are merged into `assets` (shared/workshop.js mergeWorkshopVoices — the default dub into
     // `audio.voice`, every other dub into `audio.voiceLangs`), so that file must be served merged as well — a pack that
     // only brings voices touches nothing else, and without this the browser would fetch the on-disk assets.json and
@@ -189,9 +195,14 @@ export function workshopTouchedFiles(loaded) {
     if (p.itemIcons && Object.keys(p.itemIcons).length) out.add('assets');
     // 外观素材（mergeWorkshopArt：`assets.chars` / `assets.enemies` / `assets.tokens`）理由逐字相同 —— 这一行漏掉，
     // 服务端会说「包已加载」，而浏览器永远拿不到模型与头像（画出来还是一张菱形贴图）。
+    // 两张扁平图标表（`art.skills` / `art.profSub` → `assets.skills` / `assets.prof.sub`，mergeWorkshopFlatArt）
+    // 落的是同一个文件，所以它们已经在这次判断里了。
     if (p.art && Object.keys(p.art).length) out.add('assets');
     // 助战 pool entries are merged into `support` (mergeWorkshopSupport) — the browser picks 助战 from that file.
     if (p.support && p.support.length) out.add('support');
+    // 自选池（mergeWorkshopOperators：`backups.diy.ownedPool` / `backups.diy.operators`）写的是 `backups.json`，
+    // 所以那个文件必须合并后发给浏览器 —— 漏掉这一行，作者在编辑器里看到「已声明」，而自选界面上没有这个干员。
+    if (p.operators && Object.keys(p.operators).length) out.add('backups');
   }
   return out;
 }
