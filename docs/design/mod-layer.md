@@ -586,6 +586,17 @@ its `ownedPool` has exactly the 71 operators the generator decided on, and `work
 What this deliberately does NOT give the author is a way to change which OFFICIAL operators are in the pool, or to edit
 `diy.slots` — the same boundary `support` draws for the 助战 pool ("the pool belongs to the install").
 
+**One community behaviour is declined by this paragraph, on purpose.** A real mod (`fanpack`) ships a
+`stripPackOperators` step: when a pack turns an OFFICIAL operator into a chess piece, remove him from `diy.ownedPool`,
+so the same operator cannot be fielded twice (once through the 自选 slot, which would also bypass the chess record's
+own bonds). The observation is right; the remedy crosses the line above. The loader therefore **records** every
+overlap and removes nobody — `applyWorkshop`'s `report.overlaps` names the pack, the operator, the chess record and
+whether he was already in the pool, and `docs/WORKSHOP.md` §1.2 tells authors what that report means. Measured on the
+real pack: **8** operators overlap, and removing them would take `ownedPool` from 71 to 63. Duplication itself never
+happens — `mergeWorkshopOperators`' "an id enters the pool once" invariant predates this section and is untouched by
+it. A maintainer who wants the mod's behaviour gets it as an engine rule with the golden corpus moved deliberately;
+a pack does not get to decide which official operators a player owns.
+
 #### 28.10.2 The refusal set is the interesting half
 
 Each of the four refusals exists because the corresponding mistake is SILENT otherwise (`shared/workshop.js`
@@ -842,9 +853,11 @@ sends them.
 4. **Named refusal at load, no consumption at runtime.** A missing module or policy, an unparsable policy, a module
    without the factory, or an `intercepts` entry the *loaded* protocol does not know
    (`PREDISPATCH_BAD_MODULE` / `PREDISPATCH_BAD_POLICY` / `PREDISPATCH_UNKNOWN_TYPE` / `PREDISPATCH_BAD_PATH`, the same
-   names A 段 fixed) refuse **that hook** — the pack still loads, its identity is untouched, and a warning names it. A
-   hook that throws *later* is logged and treated as "did not consume": a gate that failed closed on its own bug would
-   lock every player out, and refusing a hook is the load-time job.
+   names A 段 fixed) are all named refusals. **What they refuse changed twice and both changes were deliberate**: B1
+   refused only *that hook* and let the pack load; B3a aligned it to §28.13.3's rule (a declaration that cannot be used
+   refuses the whole pack), and B4 closed the last box by running the import-only judgements on the startup assembly
+   path. A hook that throws *later* is still logged and treated as "did not consume": a gate that failed closed on its
+   own bug would lock every player out, and refusing a hook is the load-time job.
 5. **Every validated message reaches the hook, not only `intercepts`.** `intercepts` is the hook's own gate list (the
    framework validates and injects it); the three `resource.*` types are deliberately not entry messages and would
    otherwise never reach their only consumer. `intercepts` decides what the hook may *block*: a vetoed message does not
@@ -927,14 +940,26 @@ What is judged, per group, and where:
   is also said out loud to the player. The one judgement the server cannot make is the gate (the client store is the
   client's truth) and the browser's capabilities; those are the client's half of the same rule.
 
-**The one hole this rule still has, stated rather than hidden.** `loadWorkshop` is **synchronous** —
-`server/data.js` calls it while building the overlay — and `import()` is not. So the two things about
-`server.preDispatch` that only an import can answer stay in `loadWorkshopHooks`, which now runs on packs the loader
-already cleared: a module that fails to import, and a module whose factory export is missing or not a function. Those
-keep their B1 names and their warning, and the pack stays loaded. The window is one `stat` wide (the file changed
-between the two calls) or a hand-built loader object; it is recorded here so the next reader knows it was a decision,
-not an oversight. Everything else about the hook — including "the file it names is not there", the case that actually
-happens — is refused at load.
+**The hole this rule had, and the three things that now live in it.** `loadWorkshop` is **synchronous** —
+`server/data.js` calls it while building the overlay — and `import()` is not. So three judgements about
+`server.preDispatch` stay in `loadWorkshopHooks`, which runs on packs the loader already cleared: a module that fails to
+import, a module whose factory export is missing or not a function, and a module that exports the optional
+`validatePolicy(policy)` and **refuses its own policy**.
+
+The first two kept their B1 names and their warning and the pack stayed loaded — which is exactly the failure this
+section keeps naming, so **B4 closed it**: `server/index.js` feeds `loadWorkshopHooks`' errors to
+`dropUnavailablePreDispatchPacks` **before anything derived runs** (the data overlay, the identity list, kits, panels,
+the resource tables, Lobby and Network all read the trimmed array, and `server/data.js` takes the same trim as
+`excludePacks`), so an unavailable hook now costs the pack its place in the loaded set. The third one is the same
+refusal, one step earlier: the *inner* shape of a policy file is the hook's own dialect (`version`, `files`, …), which
+the loader cannot know, so the module is the only thing that can judge it — and `validatePolicy` is that judgement,
+reaching the same end state (`PREDISPATCH_BAD_POLICY`, pack dropped) as "the policy is not a JSON object" does. A
+verdict the loader does not recognise (a typo like `{ valid: false }`) is a refusal too, never a silent pass: load time
+is where loud refusal belongs.
+
+What remains is only the window, not a judgement: one `stat` wide (the file changed between the two calls), or a
+hand-built loader object. It is recorded here so the next reader knows it was a decision, not an oversight. Everything
+else about the hook — including "the file it names is not there", the case that actually happens — is refused at load.
 
 **What this costs an existing pack: nothing.** The rule only fires for a pack that declares `client.panels`,
 `server.preDispatch` or `assets`, and no pack in this repository (nor any of the three community mods) declares them —

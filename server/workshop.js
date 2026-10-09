@@ -423,6 +423,59 @@ export function preDispatchIssues(pack, packDir, { c2s = C2S } = {}) {
 }
 
 /**
+ * 读一个钩子模块对**自己那份策略**的意见（`module.validatePolicy(policy)`，可选导出）。
+ *
+ * **为什么需要它。** 装载期（`preDispatchIssues`）只保证 `policy` 能解析成一个 JSON **对象** —— 它不认识包自己的
+ * 数据格式（`version` / `files` 是钩子的方言）。所以「策略文件的**内部形状**是坏的」这一格，装载期判不出来。
+ * 没有这道自检时，唯一的信号是工厂在**每个连接**上抛异常，而工厂抛异常的姿态是「这条连接上这个钩子不存在，
+ * 消息照常分发」（`server/modDispatch.js` 文件头）—— 也就是「包看着装好了、闸门其实一条都没拦」，正是
+ * DESIGN §28.13.3 要消灭的那一类失败。
+ *
+ * 有了它，一份用不了的策略与「策略不是 JSON 对象」得到**同一个结局**：点名拒绝（`PREDISPATCH_BAD_POLICY`）并把
+ * 这个包移出已加载集合（`dropUnavailablePreDispatchPacks`）。
+ *
+ * **契约，一个都不含糊**（未列出的返回值一律**拒绝**并说明，而不是当它通过 —— 装载期是响亮拒绝该在的地方）：
+ *
+ * | 模块返回 | 判定 |
+ * |---|---|
+ * | `undefined` / `null` / `true` | 通过 |
+ * | `{ ok: true }` | 通过 |
+ * | `false` | 拒绝 |
+ * | 非空字符串 | 拒绝，字符串就是理由（给作者看的话就写在这里） |
+ * | `{ ok: false, detail? / reason? / error? }` | 拒绝，取其中第一个字符串当理由 |
+ * | 其它任何值 | 拒绝，理由写「返回了一个不认识的判定」 |
+ * | 抛异常 | 拒绝，理由取异常信息 |
+ *
+ * **没有导出 `validatePolicy` 的模块一个字节都不受影响**（返回 `null`，调用方什么都不做）—— 与 §28.13 的 A 段
+ * 同一口径：声明了才生效。
+ *
+ * @param {any} mod `await import()` 出来的模块命名空间
+ * @param {any} policy 已经解析好的策略对象（`JSON.parse` 过、来自包内声明的那个文件）
+ * @returns {string|null} 拒绝的理由；`null` = 通过
+ */
+export function validateHookPolicy(mod, policy) {
+  const fn = mod && typeof mod.validatePolicy === 'function' ? mod.validatePolicy : null;
+  if (!fn) return null;
+  let verdict;
+  try {
+    verdict = fn(policy);
+  } catch (e) {
+    return `validatePolicy threw: ${e && e.message ? e.message : String(e)}`;
+  }
+  if (verdict === undefined || verdict === null || verdict === true) return null;
+  if (verdict === false) return 'validatePolicy returned false';
+  if (typeof verdict === 'string') return verdict.trim() || 'validatePolicy returned an empty string';
+  if (verdict && typeof verdict === 'object' && !Array.isArray(verdict)) {
+    if (verdict.ok === true) return null;
+    if (verdict.ok === false) {
+      const why = [verdict.detail, verdict.reason, verdict.error].find((v) => typeof v === 'string' && v.trim());
+      return why || 'validatePolicy refused the policy (ok: false)';
+    }
+  }
+  return `validatePolicy returned an unrecognised verdict (${JSON.stringify(verdict) ?? String(verdict)}) — return true / a rejection string / { ok: false, detail }`;
+}
+
+/**
  * `pack.json.i18n` 的**装载期**判据（fanpack G-04 / plugin-pack G4，docs/WORKSHOP.md §1.10）：
  * 声明的每一个 `.json` 必须真的在包里、必须是 JSON 对象、每一个值必须是**字符串且键不是 `_meta`**。
  *
@@ -849,6 +902,13 @@ export async function loadWorkshopHooks(loaded, { log = null, c2s = C2S } = {}) 
       errors.push({ pack: pack.id, code: 'PREDISPATCH_BAD_MODULE', reason: `server.preDispatch.module "${decl.module}" must export createPreDispatch(deps) (or default-export that function)${unavailable}` });
       continue;
     }
+    // 模块对自己那份策略的自检（可选导出 `validatePolicy`，见上面那个函数的注释）：判不了内部形状的那一格由包
+    // 自己回答，装载器只负责在它说「不能用」时**点名拒绝整个包**。没有导出的模块走不到这里就返回 null。
+    const policyRefusal = validateHookPolicy(mod, policy);
+    if (policyRefusal) {
+      errors.push({ pack: pack.id, code: 'PREDISPATCH_BAD_POLICY', reason: `server.preDispatch.module "${decl.module}" refused its own policy "${decl.policy}": ${policyRefusal}${unavailable}` });
+      continue;
+    }
     hooks.push({ pack: pack.id, module: decl.module, policyFile: decl.policy, policy, intercepts: [...decl.intercepts], create });
   }
   for (const e of errors) log?.warn?.(`[workshop] hook ${e.pack}: ${e.code}: ${e.reason}`);
@@ -859,9 +919,11 @@ export async function loadWorkshopHooks(loaded, { log = null, c2s = C2S } = {}) 
  * 把「声明了 `server.preDispatch` 却装不上」的包移出已加载集合 —— DESIGN §28.13.3 的**最后一格**。
  *
  * 为什么需要这一步：`loadWorkshop` 是同步的（`server/data.js` 在装叠加层时调它），而「模块能不能 import、有没有
- * 工厂导出」只有动态 import 才知道。于是在装载期这道闸门之外还剩两种结局：
+ * 工厂导出、模块自己对策略的意见是什么」只有动态 import 之后才知道。于是在装载期这道闸门之外还剩三种结局：
  *   * `PREDISPATCH_BAD_MODULE`（import 失败 —— 语法错、模块不存在于导入图、依赖缺失）；
  *   * `PREDISPATCH_BAD_MODULE`（导出了，但没有 `createPreDispatch`）；
+ *   * `PREDISPATCH_BAD_POLICY`（模块导出了 `validatePolicy`，而它对**自己那份策略的内部形状**说了「不能用」——
+ *     装载期的 `preDispatchIssues` 只保证策略能解析成 JSON 对象，它不认识钩子的方言）；
  * 以及一种「两次调用之间包变了」的兜底（策略文件变得读不动 / `intercepts` 变得不在协议里）。
  *
  * 它在 B1 段是「**包照旧加载**，只是那个钩子没装上」—— 那正是本仓反复点名的最坏形态：运维以为自己有一道准入

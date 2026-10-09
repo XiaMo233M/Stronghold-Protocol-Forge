@@ -166,9 +166,32 @@ const PACKS = {
   policyBad: { pack: { name: 'PolicyBad', server: { preDispatch: { module: 'server/guard.mjs', policy: 'admission.json', intercepts: ['room.create'] } } }, files: { 'server/guard.mjs': GUARD_SOURCE, 'admission.json': '[1,2,3]' } },
   // 模块没有工厂导出
   moduleNoFactory: { pack: { name: 'ModuleNoFactory', server: { preDispatch: { module: 'server/guard.mjs', policy: 'admission.json', intercepts: ['room.create'] } } }, files: { 'server/guard.mjs': 'export const nothing = 1;\n', 'admission.json': '{}' } },
+  // ---- 模块自己对**策略内部形状**的自检（B 段的可选导出 `validatePolicy`）-------------------------------
+  // 接受自己的策略 ⇒ 照旧装上
+  policyOk: selfCheck('PolicyOk', 'return policy.version === "v1" ? { ok: true } : "version must be v1";', { version: 'v1' }),
+  // 拒绝自己的策略 ⇒ 与「策略不是 JSON 对象」同一个结局：整包被裁掉
+  policyRefused: selfCheck('PolicyRefused', 'return "files must list at least three urls";', { version: 'v1' }),
+  // 返回一个**不认识的**判定（写成 {valid:false} 这种手误）⇒ 必须响亮拒绝，而不是当它通过
+  policyTypo: selfCheck('PolicyTypo', 'return { valid: false };', { version: 'v1' }),
+  // 抛异常 ⇒ 也算拒绝（装载期正是响亮拒绝该在的地方）
+  policyThrows: selfCheck('PolicyThrows', 'throw new Error("boom");', { version: 'v1' }),
   // 一份普通的数据包（对照组：没有声明，装载器不该为它做任何事）
   plain: { pack: { name: 'Plain', content: ['chess'] }, files: { 'chess.json': JSON.stringify({ chess_ws_mod_a: { chessId: 'chess_ws_mod_a', name: 'x' } }) } },
 };
+
+/**
+ * 一份「带 `validatePolicy` 自检」的准入包：模块 = 能用的准入模块 + 那段自检函数体。
+ * @param {string} name @param {string} body `validatePolicy` 的函数体 @param {object} policy 包内那份策略文件的内容
+ */
+function selfCheck(name, body, policy) {
+  return {
+    pack: { name, server: { preDispatch: { module: 'server/guard.mjs', policy: 'admission.json', intercepts: ['room.create'] } } },
+    files: {
+      'server/guard.mjs': `${GUARD_SOURCE}\nexport function validatePolicy(policy) {\n  ${body}\n}\n`,
+      'admission.json': JSON.stringify(policy),
+    },
+  };
+}
 
 before(() => {
   tmp = fs.mkdtempSync(join(tmpdir(), 'sp-modpredispatch-'));
@@ -488,13 +511,45 @@ describe('server.preDispatch: 坏声明 ⇒ 整包被拒（B3a 段对齐，DESIG
     assert.match(err.reason, /createPreDispatch/);
     assert.match(err.reason, /the startup assembly path drops this pack/, '这条拒绝要说明自己为什么在这层、以及接下来会发生什么');
     const pruned = dropUnavailablePreDispatchPacks(loaded, errors);
-    assert.deepEqual(pruned.removed.map((r) => r.pack), ['moduleNoFactory']);
+    assert.deepEqual(pruned.removed.map((r) => r.pack).sort(),
+      ['moduleNoFactory', 'policyRefused', 'policyThrows', 'policyTypo'],
+      '装配路径要裁掉**每一个**装不上的包：没有工厂导出的那一个，加上三条被模块自己的 validatePolicy 拒掉的');
     assert.equal(pruned.packs.some((p) => p.id === 'moduleNoFactory'), false, '装配路径不得让它留在已加载集合里');
     assert.ok(pruned.errors.some((e) => e.pack === 'moduleNoFactory' && /^PREDISPATCH_BAD_MODULE: /.test(e.reason)),
       '裁剪必须是**点名**的：追加进 errors 的那一条带拒绝码');
-    // 好的那个照旧装上，也照旧留在集合里
-    assert.deepEqual(hooks.map((h) => h.pack), ['guard']);
-    assert.deepEqual(pruned.packs.map((p) => p.id).sort(), ['guard', 'plain']);
+    // 好的那几个照旧装上，也照旧留在集合里
+    assert.deepEqual(hooks.map((h) => h.pack), ['guard', 'policyOk']);
+    assert.deepEqual(pruned.packs.map((p) => p.id).sort(), ['guard', 'plain', 'policyOk']);
+  });
+
+  test('模块可选的 validatePolicy：接受 ⇒ 通过；拒绝 / 返回不认识的判定 / 抛异常 ⇒ 整包被裁掉', async () => {
+    const loaded = loadWorkshop(wsRoot, { log: quiet });
+    // 四种夹具在**文件层面**都合法 —— 这一格只有 `import` 之后才判得出来，所以装载期照旧列出它们
+    for (const id of ['policyOk', 'policyRefused', 'policyTypo', 'policyThrows']) {
+      assert.ok(loaded.packs.some((p) => p.id === id), `${id}: 文件层面合法，装载器照旧列出它`);
+      assert.equal(loaded.errors.some((e) => e.pack === id), false, `${id}: 装载期不该有它的错误`);
+    }
+    const { hooks, errors } = await loadWorkshopHooks(loaded, { log: quiet });
+    assert.ok(hookFor(hooks, 'policyOk'), 'validatePolicy 接受 ⇒ 钩子照旧装上');
+    for (const id of ['policyRefused', 'policyTypo', 'policyThrows']) {
+      assert.equal(hookFor(hooks, id), undefined, `${id} 不得装上`);
+      const err = errors.find((e) => e.pack === id);
+      assert.equal(err?.code, 'PREDISPATCH_BAD_POLICY', `${id}: ${JSON.stringify(errors)}`);
+      assert.match(err.reason, /refused its own policy/);
+      assert.match(err.reason, /the startup assembly path drops this pack/, '这条拒绝也要说明接下来会发生什么');
+    }
+    // 三种拒绝各自的理由都要**如实带出来**：作者看到的不是一句「策略不行」
+    assert.match(errors.find((e) => e.pack === 'policyRefused').reason, /at least three urls/);
+    assert.match(errors.find((e) => e.pack === 'policyTypo').reason, /unrecognised verdict/);
+    assert.match(errors.find((e) => e.pack === 'policyThrows').reason, /validatePolicy threw: boom/);
+  });
+
+  test('没有导出 validatePolicy 的模块一个字节都不受影响（可选导出的 A 段口径：声明了才生效）', async () => {
+    const { hooks, errors } = await loadedOf();
+    const guard = hookFor(hooks, 'guard');
+    assert.ok(guard, 'guard 没有导出 validatePolicy，照旧装上');
+    assert.deepEqual(guard.policy, { version: 'v1', files: ['a', 'b', 'c'] });
+    assert.equal(errors.some((e) => e.pack === 'guard'), false);
   });
 
   test('intercepts 按**运行时真的装着的协议**再判一次（声明可以比协议活得久）', async () => {

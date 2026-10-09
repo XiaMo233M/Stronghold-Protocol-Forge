@@ -123,6 +123,8 @@ workshop/<packId>/
   但**不把人摘出池**：`diy.ownedPool` 就是「自选槽能挑到谁」这份名单，摘掉它 = 改对局结果 = 改版本语料，
   那是维护者的决定（实测：一份真实的社区数据里 **8 名**干员同时满足这两个条件，摘掉就是 `ownedPool` 71 → 63）。
   重复**永远不会发生**：`mergeWorkshopOperators` 的「一个 id 只进池一次」是既有不变量，与这条记录无关。
+  **这一条已经在设计里定过**：DESIGN §28.10.1 明写「包**不给**作者改官方干员在不在池里的能力 —— 池子属于安装方」，
+  并把社区 mod 的 `stripPackOperators` 具名列为**按此条驳回**的行为。所以这里的「只记录」不是「还没做」。
 - **两张天赋表按条目合并，不是整块替换**（DESIGN §28.3，2026-10-09 当天第二次修正）：`talents` / `talentsBase` 按 `index` 逐条合并 —— 你写的那一条里出现的字段生效，**你没写的字段（包括官方那条天赋自带的注释）留着**；`index` 对不上官方任何一条时是「你新增了一条天赋」，追加在后面。模组内部的 `modules[].talentChanges` 同理，按 `talentIndex` 逐条合并。
   **为什么单独开一条规则**：官方记录里的天赋可以带「潜能链」注释（记录层的 `potDown`、天赋层的 `potMin` + `potBelow`），而编辑器派生出来的记录**故意不带**这些注释。整块替换的话，你只是改了一条天赋的文案，官方那条天赋的整条潜能链就没了，而加载器一句错都不报 —— 一条**静默**的数据丢失。裸列表（`bonds` / `immunities` / `rangeGrid` …）仍然是整块替换：按字段合并一个裸列表会造出一条没人写过的记录。
 - **行为开关不进记录：`playtest.directToHand`**（2026-10-09）。这个字段列出的干员在**编辑器「一键试玩」**起的那个服务器里第一回合直接进手牌；正式对局一个都不发。它存在的理由是**覆盖模式**：覆盖官方干员时记录必须与官方**同形**（覆盖的契约就是「按字段打补丁」，多一个官方没有的键会被 `UNKNOWN_OVERRIDE_FIELD` 整条拒掉），所以「试玩直接发牌」这种**行为开关**不能写进记录，只能写在包的行为层。三条规则：
@@ -614,7 +616,7 @@ node tools/workshop-validate.mjs my-pack
 | 客户端资源流程（取清单 → 容器导入 → 逐文件校验 → 写缓存 → 索引/收据 → 深浅校验） | ✅ 已实现（B4：`public/js/resources/{host,bundle,verify,service}.js`；Node 里用假 `CacheStorage` + 真 `Response`/`crypto.subtle` 真跑） |
 | `welcome.modAssets` 的条件性（不声明 ⇒ 无字段、无请求、无 DOM、无全局） | ✅ 已实现（B4：`server/http/workshop.js workshopModAssetsFrom`、`server/lobby.js welcomeInfo`、`public/js/main.js` 的动态 import） |
 | 容器摘要进身份哈希（同一房间摘要 ⇒ 同一份容器） | ✅ 已实现（B4：`server/workshop.js identifyPack` 的 `assets.container.sha256` 那一条；不声明 `assets` 的包逐字节不变） |
-| `server.preDispatch` 的最后一格（import 失败 / 没有工厂导出 ⇒ 整包移出已加载集合，数据也不并） | ✅ 已实现（B4：`server/workshop.js dropUnavailablePreDispatchPacks` + `server/index.js` 装配路径 + `server/data.js excludePacks`） |
+| `server.preDispatch` 的最后一格（import 失败 / 没有工厂导出 / 模块的 `validatePolicy` 拒绝策略 ⇒ 整包移出已加载集合，数据也不并） | ✅ 已实现（B4：`server/workshop.js dropUnavailablePreDispatchPacks` + `server/index.js` 装配路径 + `server/data.js excludePacks`；可选导出 `validatePolicy` 走同一条裁剪） |
 | 浏览器里真的 import + 真的渲染（真 Chrome）、真 SW 的生命周期与作用域 | ⛔ 本机无 Chrome（`SP_E2E=1` 的可选路径，与 §4.4 同一个 standing gap；`test/modAssets.test.js` §10 是**跳过且从未运行**的占位用例） |
 | **顶层键闭集**：不认识的键 ⇒ `PACK_UNKNOWN_FIELD` 整包被拒（不是静默丢） | ✅ 已实现（B5：`shared/workshop.js PACK_FIELDS` + `normalizePackManifest`；`test/workshop.test.js`） |
 | `i18n`：给已有语种补词条，**已有键绝不覆盖** + 冲突点名 | ✅ 已实现（B5：`shared/workshop.js parseI18nDecl` / `mergeWorkshopI18n`、`server/workshop.js i18nIssues`、`server/http/workshop.js buildWorkshopI18nFiles`、`server/http/static.js` 的 `/i18n/<code>.json` 合并体；见 §1.10） |
@@ -642,10 +644,30 @@ export function createPreDispatch(deps) {
     preDispatch(conn, msg) { return false; },   // true = 这条消息已被消费，不再交给大厅
   };
 }
+
+// 可选：你对自己那份 policy 的**内部形状**的意见（不要写成 `valid:` 之类的键 —— 见下面那一条）
+export function validatePolicy(policy) {
+  return policy.files?.length >= 3 ? { ok: true } : 'policy.files needs at least 3 entries';
+}
 ```
 
 - **工厂每条连接调用一次**（`onConnection` 之前）。挑战与「已证明」这类状态就放在工厂的闭包里 —— 那是**连接私有**的，
   所以两台客户端 / 两个房间并发时不会串味。不要把它放到包的模块顶层：那是进程级共享状态。
+- **`validatePolicy` 是可选的第二道自检，而且它是唯一能判「策略内部形状」的地方。** 装载期只保证 `policy` 能解析成
+  一个 JSON **对象** —— 它不认识**你的**数据格式（`version` / `files` 是你自己的方言）。所以一份形状坏掉的策略，
+  没有这道自检时唯一的信号是工厂在**每条连接**上抛异常，而工厂抛异常的姿态是「这条连接上这个钩子不存在、消息照常
+  分发」—— 也就是「包看着装好了、闸门一条都没拦」。导出它之后，你说「不能用」= 装载器**点名拒绝整个包**，
+  理由带 `PREDISPATCH_BAD_POLICY`：
+  | 你返回 | 判定 |
+  |---|---|
+  | 不导出这个函数 | 不做这道自检，行为与从前**逐字节相同** |
+  | `undefined` / `null` / `true` / `{ ok: true }` | 通过 |
+  | `false`、非空字符串、`{ ok: false, detail }` | **拒绝**，字符串就是给作者看的理由 |
+  | 其它任何值（例如手误写成 `{ valid: false }`） | **拒绝**，理由写「返回了一个不认识的判定」 |
+  | 抛异常 | **拒绝**，理由取异常信息 |
+
+  装载期正是「响亮拒绝」该在的地方（`deps` 里的 `now()` 纪律同理）：一个拿不准的返回值宁可让包不加载，也不要让它
+  看起来装好了。
 - **依赖对象是冻结的，键恰好这八个**：`pack`、`policy`（解析好的 JSON，深冻结）、`policyFile`、`intercepts`、
   `c2s`（`shared/protocol.js` 的 `C2S` 冻结副本）、`log`、`now`（注入的时钟）、`send`。**没有** `data` / `lobby` /
   `Match` / 任何对局对象，也**没有** socket：所以钩子能做的只有观察、记录、上报和否决入口消息，它**改不了对局结果**
@@ -666,15 +688,16 @@ export function createPreDispatch(deps) {
 
 **坏声明点名拒绝，拒绝码与形状层同名**（`_up/mod4-pack` 那份声明对不上时作者看到的还是这几个词）：
 `PREDISPATCH_BAD_MODULE`（模块文件不在包里 / 导入失败 / 没有 `createPreDispatch` 导出）、`PREDISPATCH_BAD_POLICY`
-（策略文件不在包里 / 不是 JSON / 不是对象）、`PREDISPATCH_UNKNOWN_TYPE`（`intercepts` 里有一个协议不认识的名字 ——
-**整个钩子**被拒，不是静默丢掉那一条）、`PREDISPATCH_BAD_PATH`（解析到包外）。
+（策略文件不在包里 / 不是 JSON / 不是对象 / **模块自己的 `validatePolicy` 说它不能用**）、`PREDISPATCH_UNKNOWN_TYPE`
+（`intercepts` 里有一个协议不认识的名字 —— 不是静默丢掉那一条）、`PREDISPATCH_BAD_PATH`（解析到包外）。
 
 **从 B3a 段起，坏声明拒绝的是整个包**（DESIGN §28.13.3，与 §1.9.3 的 `client`、§1.9.4 的 `assets` 同一条纪律）：
 模块/策略文件不在包里、策略不是 JSON 对象、`intercepts` 里有协议不认识的名字 ⇒ 包**整个不加载**，理由进启动日志。
 B1 段当时只拒那个钩子、包照旧加载；那样一来服务器以为自己被准入闸门保护着，其实一条消息都没拦 —— 「加载了但能力
-没生效」是最坏的失败形态，所以这一条被对齐掉了。唯一留在装载期之外的是「模块文件在、但 `import` 失败或模块没有
-`createPreDispatch` 导出」：那要 `import` 才知道，而装载器是同步的，所以它仍由 `loadWorkshopHooks` 具名拒绝
-（包照旧加载，钩子不装，日志里一条具名警告）。
+没生效」是最坏的失败形态，所以这一条被对齐掉了。留在装载期之外的是那一格**只有 `import` 才知道**的失败：模块文件在、
+但 `import` 不了 / 没有 `createPreDispatch` 导出 / `validatePolicy` 说策略不能用。装载器是同步的，所以它们由
+`loadWorkshopHooks` 具名拒绝，并**由启动装配路径把整个包移出已加载集合**（`server/index.js` 的
+`dropUnavailablePreDispatchPacks`）—— 结局与上一段那三种**完全一样**，只是判的时刻晚一步。
 
 **作者纪律（业主裁决）**：注入的服务端逻辑不得依赖时钟（用 `deps.now()`）、不得依赖 RNG 与无序容器的遍历顺序、
 不得使用进程级可变全局状态；状态一律放连接 / 房间自己的作用域里。**不许**写「开打前设全局、打完恢复」那种代码 ——
@@ -704,12 +727,21 @@ B1 段当时只拒那个钩子、包照旧加载；那样一来服务器以为�
 ```jsonc
 "client": {
   "panels": [
-    { "id": "resource-import", "slot": "root.overlays", "module": "resources/preloadModal.js", "order": 10, "gate": "session.preloadRequired" },
-    { "id": "aside-note", "slot": "screen.game.aside", "module": "resources/aside.js" }
+    { "id": "resource-import", "slot": "root.overlays", "module": "resources/preloadModal.js", "order": 10 },
+    { "id": "aside-note", "slot": "screen.game.aside", "module": "resources/aside.js" },
+    // `gate` 只在**别人**替你置真那个路径时才写（见下面那条警告）：
+    { "id": "settle-note", "slot": "screen.result.footer", "module": "resources/settle.js", "gate": "session.entered" }
   ],
   "requires": ["cacheStorage", "webCrypto"]
 }
 ```
+
+> ⚠️ **不要给「唯一那个会打开 `session.preloadRequired` 的面板」写 `gate: "session.preloadRequired"`。** `gate` 的
+> 语义是「store 里那个路径为真**才**挂载」，而 `session.preloadRequired` 缺省是 `false`、**唯一会把它置真的正是
+> 这个面板自己** —— 于是全新会话里它**永远挂不上**，导入界面永远不出现，而服务器侧的准入闸门照样拦人：一个走不出去
+> 的环。正确写法是**无条件挂载 + 挂载时自己关闸**（`ctx.session.setPreload({ required: true, ready: false })`，
+> 见 §1.9.4 末尾那段客户端示例）。`gate` 适合的是「等某个**别人的**状态成立再出现」的面板，例如
+> `session.entered`（玩家已经进过大厅）。
 
 **模块契约**（`module` 是包内 `.js`；浏览器 `import` 它）：
 
@@ -736,9 +768,10 @@ export function mount(ctx) {
 `data-mod-slot` 属性由注册点在面板真的挂载时创建（没有包声明 `client` 时页面上一个容器都没有）。
 
 **`order` 决定挂载顺序**（整数，缺省 0）：小的先挂；相同则包 id 小的先，再按面板 id。顺序永远不随发现顺序 /
-数组顺序变（DESIGN §28.3 的同一条规则）。**`gate` 是一个客户端 store 点路径**（例如 `session.preloadRequired`、
-`session.entered`）：路径为真**才**挂，一个面板只挂一次、之后不会被摘掉。写一个 store 里不存在的路径是**具名拒绝**
-（`CLIENT_PANEL_GATE_UNKNOWN`），不是「永远不出现」。
+数组顺序变（DESIGN §28.3 的同一条规则）。**`gate` 是一个客户端 store 点路径**（例如 `session.entered`）：路径为真
+**才**挂，一个面板只挂一次、之后不会被摘掉。写一个 store 里不存在的路径是**具名拒绝**（`CLIENT_PANEL_GATE_UNKNOWN`），
+不是「永远不出现」。**别拿它等自己会置真的那个标志**（`session.preloadRequired`）—— 那是一个挂不上的环，理由与
+正确写法见 §1.9.3 开头那段警告。
 
 **`requires` 是能力声明，不是愿望**：只能取 `serviceWorker` / `cacheStorage` / `webCrypto`（写别的 `CLIENT_UNKNOWN_REQUIRE`）。
 缺一项时这个包的面板**一个都不挂**，并且**明说**「浏览器不支持」（控制台一条具名错误 + 玩家界面一条提示）——
@@ -807,12 +840,22 @@ export function mount(ctx) {
 - **容器是流式送出的**（可以到数百 MB：客户端资源包本身就是那么大），响应里带 `Content-Length` 与
   `X-SP-Resource-Sha256`（装载期校验过的整包摘要）。清单按 `.json` 正常送。
 
-**`serverPolicy` —— 这条是**部署**语义，写之前请读三遍**：
+**`serverPolicy` —— 这条是**服务端**语义，写之前请读三遍**：
 
-| 值 | 服务器对 `/assets/…` 与 `/fonts/…` 做什么 |
+| 值 | **服务端**对 `/assets/…` 与 `/fonts/…` 做什么 |
 |---|---|
-| `"serve"`（缺省，等于不写） | 照旧从磁盘服务。本仓库现有的包全是这个值，行为与 B2 之后**逐字节相同** |
+| `"serve"`（缺省，等于不写） | 照旧从磁盘服务。本仓库现有的包全是这个值，**服务端**行为与 B2 之后**逐字节相同** |
 | `"cache-only"` | 回 **412 Precondition Failed**，并且**不回源**（连 `stat` 都不做）：素材只允许从客户端自己的缓存取 |
+
+> ⚠️ **`serverPolicy` 管的是服务端，不是玩家看到的东西。** 引擎的资源 Service Worker 在**任何**包声明
+> `assets` 时就会注册（它拦 `GET` 且路径落在 `/assets/`、`/fonts/`、`/media/` 的请求），而它**只用本地导入并通过
+> 校验的缓存回答，命不中回 412、绝不回源** —— 这个行为**与 `serverPolicy` 无关**。所以：
+> - `"serve"` **不是**「对玩家没有影响」：对一个还没导入容器的玩家，那三棵树已经是 412 了（服务端本来会正常送出，
+>   但请求根本到不了服务端）；
+> - 一个真实部署里，容器的内容必须覆盖**页面真的会去取**的那三棵树，否则玩家看到的是一页没有素材的界面。
+>
+> 缺省那一行的「逐字节相同」说的是**服务端**；把这一句读成「装了没影响」是这份文档曾经最容易误导人的地方
+> （`_up/mod-compat/README.md` 的交付说明里有实测记述）。
 
 `cache-only` 覆盖的 `/assets/` 与 `/fonts/` 是**全服务器共用**的两棵树（核心游戏、所有包都用它们），所以它是
 **进程级**的：任何一个包声明它，整个服务器的这两棵树都不再服务。启动日志会点名是哪个包声明的。客户端那半
