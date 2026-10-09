@@ -142,13 +142,10 @@ describe('docs/prompts 的代码引用（点进去必须有东西）', () => {
   });
 
   // 上面那条只查「点进去有没有东西」。还差一类：**点进去是别的东西** —— 引用指着 `Battle.js:113`，而作者说的事实
-  // （`battle.flags` 是构造期输入）在 `:124`，于是文档「看起来很具体、点进去是另一行」，没有任何东西会报错。
-  // 2026-10 抓到 3 处（都在 `docs/prompts/kit.md`），而 0.2.2 移植会把 server 侧行号整体挪一遍，这类引用会成片失效
-  // —— 所以这里把「**句子里点名的成员必须真出现在被引的那一行**」变成门禁。
-  //
-  // 这 3 处**故意留给 0.2.2 移植线修**（两条线不改同一个文件，业主 2026-10-09 的协调）：所以这条测试此刻是**红的**，
-  // 报出来正是那 3 处，每一条都带「这个成员真正在哪一行」。移植线改完 `docs/prompts/kit.md` 的 `Battle.js:113` →
-  // `:124` 之后，它会自己转绿 —— 不需要动这里的任何一行。若一条**新**的失效引用出现，同一个失败列表里会出现第 4 条。
+  // （`battle.flags` 是构造期输入）在 `:143`，于是文档「看起来很具体、点进去是另一行」，没有任何东西会报错。
+  // 2026-10 抓到 3 处（都在 `docs/prompts/kit.md`，0.11.0 已修）；0.12.0 的 W-B 把 Battle.js 的构造期挪了十几行，
+  // 同一批引用又一次失效 —— 这正是这条门禁存在的理由，所以这里把「**句子里点名的成员必须真出现在被引的那一行**」
+  // 变成门禁。
   //
   // 判据刻意很窄（宁可漏，不可误报；误报会让这条门禁被关掉）：
   //   * 只判**带点的成员引用**，且根只有 `battle` / `this` / `flags` / `bb` / `ctx` 这五个引擎语境词 —— 裸名字
@@ -166,13 +163,13 @@ describe('docs/prompts 的代码引用（点进去必须有东西）', () => {
       bad.push(...staleMemberClaims(text, name));
     }
     assert.ok(judged >= 8, `只判到 ${judged} 处引用 —— 抽取是不是失效了？`);
-    assert.deepEqual(bad, [], '这些引用点进去是别的东西（`docs/prompts/kit.md` 的 3 处已交给 0.2.2 移植线修，改完即绿）：\n' + bad.join('\n'));
+    assert.deepEqual(bad, [], '这些引用点进去是别的东西：\n' + bad.join('\n'));
   });
 
   test('这条判据本身有牙：指错一行的合成引用会被抓出来', () => {
-    // 拿真实文件当靶子：`:113` 与 `:124` 现在都指向 Battle.js，只有一处写着 flags
-    const stale = '`battle.flags` 是构造期输入（`server/sim/Battle.js:113`）';
-    const right = '`battle.flags` 是构造期输入（`server/sim/Battle.js:124`）';
+    // 拿真实文件当靶子：`:124` 与 `:143` 现在都指向 Battle.js，只有一处写着 flags
+    const stale = '`battle.flags` 是构造期输入（`server/sim/Battle.js:124`）';
+    const right = '`battle.flags` 是构造期输入（`server/sim/Battle.js:143`）';
     assert.equal(staleMemberClaims(stale, 'fixture').length, 1, '指错一行必须报出来');
     assert.deepEqual(staleMemberClaims(right, 'fixture'), [], '指对了不许报');
     // 裸名字不判：`inRect` 的引用常常是在说调用点，不是在说声明（误报会让这条门禁被关掉）

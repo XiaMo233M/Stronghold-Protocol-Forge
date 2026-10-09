@@ -1014,7 +1014,10 @@ export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/worksho
     }
   }
   for (const e of errors) log?.warn?.(`[workshop] kit ${e.pack}/${e.id}: ${e.reason}`);
-  return { kits, modules, errors };
+  // `owners`（kit id → 包 id）随结果一起交出去：**按房间物化**（W-B，DESIGN §28.16）要知道某个 kit 属于哪个包，
+  // 才能给一个只声明了子集的房间只带它那几个包的 kit。没有它，唯一的选择是把进程级那一份整份发下去 ——
+  // 那正是 W-B 要修的事。
+  return { kits, modules, owners: kitOwner, errors };
 }
 
 /**

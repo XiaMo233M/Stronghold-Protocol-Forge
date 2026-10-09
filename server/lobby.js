@@ -596,6 +596,9 @@ export class Lobby {
     // the room's own mod set, resolved above (both stay null when it declared none — the default)
     room.modIds = resolved.modIds.length ? resolved.modIds : null;
     room.modSet = resolved.modSet;
+    // W-B: 声明了就**现在**物化（`server/roomAssets.js`）—— 这一局要用的数据 / kit / 模块清单从此按摘要缓存在服务器上，
+    // `/room-data/<摘要>/…` 那个面也才有东西可答（只有真的被房间声明过的摘要会被登记，所以客户端编不出来）。
+    if (room.modSet && this.workshop && this.workshop.roomAssets) this.workshop.roomAssets.forRoom(room.modSet);
     room.seats[0] = this.humanSeat(0, session);
     room.hostId = session.playerId;
     this.rooms.set(code, room);
@@ -955,7 +958,10 @@ export class Lobby {
     // 包声明的对局元注册表（DESIGN §29，B 段）：**按房间装配** —— 每个包在自己的试用副本上注册，成功后那份才成为
     // 这一局的注册表，而进程级那一份（`getDefaultRegistry()`）一个键都不动（业主裁决的「禁止全局 set/restore」；
     // 多局并发时「开局前设全局、打完恢复」本来就是错的）。逐包失败**不抛**：失败的包整体回滚，其余包照旧生效。
-    const metaModules = this.workshop && Array.isArray(this.workshop.meta) ? this.workshop.meta : [];
+    // W-B：房间声明了集合时，只有**它声明的那几个包**的 meta 模块参与装配（声明了才算数）。
+    const roomIds = room.modSet && Array.isArray(room.modSet.packs) ? new Set(room.modSet.packs.map((p) => p && p.id)) : null;
+    const metaModules = (this.workshop && Array.isArray(this.workshop.meta) ? this.workshop.meta : [])
+      .filter((m) => !roomIds || (m && roomIds.has(m.pack)));
     let roomRegistry = null;
     if (metaModules.length) {
       const built = buildRoomRegistry({ packs: metaModules, base: getDefaultRegistry(), log: this.log });
@@ -964,6 +970,10 @@ export class Lobby {
     }
     let seed = 0;
     try { seed = this.seedFn() >>> 0; } catch { seed = randomInt(2 ** 32); }
+    // 按房间物化（W-B, DESIGN §28.16）：房间声明的集合**真的决定这一局跑什么** —— 这一局拿到的游戏数据、kit 映射与
+    // kit 模块清单都来自 `roomAssets.forRoom`。没声明集合（或声明了全部）时它返回的正是进程级那一份**本体**，所以
+    // 那种房间与从前逐字节相同（`server/roomAssets.js`）；没有装包时 `roomAssets` 根本不存在，走原来的三个字段。
+    const assets = this.workshop && this.workshop.roomAssets ? this.workshop.roomAssets.forRoom(room.modSet) : null;
     try {
       const match = new this.MatchClass({
         roomCode: room.code,
@@ -978,12 +988,13 @@ export class Lobby {
         seed,
         // the room's match number: with the seed it keeps battleIds unique across the room's matches (DESIGN §14)
         matchNo: room.matchCount + 1,
-        data: this.safeData(),
+        data: assets ? assets.data : this.safeData(),
         // 工坊行为层: the same kits must reach the battles the server runs AND the browser's (see the Lobby constructor)
-        workshopKits: this.workshop && this.workshop.kits ? this.workshop.kits : null,
-        workshopKitModules: this.workshop && Array.isArray(this.workshop.modules) ? this.workshop.modules : [],
-        // …and the identity of that content, which every BattleSpec of this match carries (DESIGN §28.2)
-        mods: this.modSet,
+        workshopKits: assets ? assets.kits : (this.workshop && this.workshop.kits ? this.workshop.kits : null),
+        workshopKitModules: assets ? assets.modules : (this.workshop && Array.isArray(this.workshop.modules) ? this.workshop.modules : []),
+        // …and the identity of that content, which every BattleSpec of this match carries (DESIGN §28.2). The room's own
+        // set when it declared one — that IS what this match runs — else the process set, byte for byte as before.
+        mods: room.modSet || this.modSet,
         // 这一局自己的元注册表副本：**没有包声明 `server.meta` 时这个字段根本不出现**，Match 照旧用进程级那一份
         //（`opts.registry` 的缺省）—— 于是干净安装的行为与从前逐字节相同。
         ...(roomRegistry ? { registry: roomRegistry } : {}),

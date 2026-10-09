@@ -1247,6 +1247,48 @@ the pack down (unlike i18n, a bad notice cannot affect anyone else's); the bytes
 files. The merged body is served over the **existing** merged-data route (`/data/notices.json`), so there is no new
 route and no new static path.
 
-**What is not done yet**: the client panel. The merged body is on the wire and the declaration is enforced; rendering it
-on the title screen (and the author-side entry in the editor) is the next cut, and this section says so rather than
-implying the feature is finished.
+**What is not done yet**: the announcement body is single-language (the engine's half is generated from a Chinese
+`CHANGELOG.md`). The panel exists (`public/js/ui/notices.js`, title screen) and reads the merged body through the
+ordinary data layer; translating pack announcements and engine credits is a `data/i18n/` slice of its own.
+
+### 28.16 A room runs its own set (W-B) and aligning to it (W-D)
+
+§28.9 declared a room's set and shipped it to the clients; by its own words it did **not** decide anything — every room
+still ran the process data, the process kits and the process `server.meta` modules, and this section is the cut that
+makes the declaration true. `server/roomAssets.js` is the whole mechanism:
+
+- `createRoomAssets({ official, processData, packs, kits, kitOwners, modules })` → `forRoom(Room.modSet)`:
+  - **No set, an empty set, or the whole set ⇒ object identity** with the process data, the process kit map and the
+    process module list. So "a room that declares nothing is byte-identical to before" is an assertable **identity**, not
+    a promise, and it is the path every room of a plain install takes.
+  - **A subset ⇒ materialised**: `applyWorkshop(official, chosen)` over a **pack-free official load**
+    (`loadData(dir, { workshopDir: null })` — anything else would already carry the other packs), kits filtered by the
+    owner map `loadWorkshopKits` returns, kit modules filtered by pack. The result is deep-frozen (the same rule as
+    `server/data.js`) and cached **per digest**, so two rooms declaring the same set share one materialisation instead of
+    merging per match.
+- `Lobby.create` materialises as soon as a room declares a set (that is also what gives the face below something to
+  answer), and `Lobby.startMatch` takes the room's `data`, `workshopKits` and `workshopKitModules` from it. The
+  `server.meta` modules are filtered to the room's packs too; `Match.mods` — the identity every BattleSpec carries — is
+  the **room's** digest, not the process's.
+- **The two bypass singletons.** `Match opts.data` was already per match and the sim's record layer (`sim/simdata.js`)
+  already took it, but the record tables the content helpers read (bonds / items / bands / garrisons / effects)
+  went through `sim/content/support/index.js gameData()` — on Node, `server/data.js getData()`, i.e. **every installed
+  pack**. Now `DataSource` carries the whole data object it was built from (`source`) and `Battle` pushes it around its
+  SYNCHRONOUS entry points (`withGameData`: construction, `start`, `step`, `runToEnd`, `forceEnd`, `result`). It is a
+  stack rather than a global set/restore for the reason §29 already gives about the meta registry: two matches run
+  concurrently in one process and can only interleave **between** steps, never inside one. Outside a battle the default
+  data is unchanged (identity), and a scoped object is merged **flat** over it, so a partial data object (every test that
+  hands a battle a few tables) behaves exactly as it did for the tables it does not carry. `coreBondIds()` is cached per
+  data object.
+- **The face**: `/room-data/<digest>/<file>.json` serves the materialised data of a digest a room really declared, with
+  `/data/`'s file whitelist. An unregistered digest or file name is a 404 — a client cannot make the server merge a
+  combination no room declared, and the number of caches stays bounded by the number of rooms. `/data/*.json` keeps
+  serving "official + every installed pack", unchanged.
+- **The entry gate is still the process set**, on purpose (§28.9): a joiner cannot know the room's set before it is in
+  the room, so `room.join` proves "same catalogue, same pack bytes", `room.state.mods` tells members and spectators what
+  the room runs, and aligning to that set is the client's job before it readies up (W-D): the room cannot start with an
+  unready member, and a spectator is never asked to ready.
+- Asymmetries kept on purpose: `server.modules` stays process-wide (§28.14) and a `matchClass` wrapper still wraps every
+  match the process builds. A room's set decides what a **match** runs, not what the **process** boots.
+
+Tests: `test/roomAssets.test.js`.

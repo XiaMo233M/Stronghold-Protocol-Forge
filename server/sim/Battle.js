@@ -53,6 +53,7 @@ import { ProjectileSystem } from './projectiles.js';
 import { remainingDistance } from './ai.js';
 import { toDataSource, normalizeRoute, normalizeStage } from './simdata.js';
 import { installContent } from './content/index.js';
+import { withGameData } from './content/support/index.js';
 import { BattlePlayers } from './battle/players.js';
 import { BattleLifecycle } from './battle/lifecycle.js';
 import { BattleHooks } from './battle/hooks.js';
@@ -72,8 +73,26 @@ export { pushTiles } from './battle/displacement.js';
 
 const DEFAULT_RECTS = { normal: GEO.NORMAL_RECT, unite: GEO.UNITE_RECT, boss: GEO.BOSS_RECT, hidden: GEO.BOSS_RECT };
 
+/**
+ * The whole data object behind `Battle opts.data` (W-B): a DataSource / loadout view carries it as `source`, a raw data
+ * object IS it, and anything else (undefined, a stub) means "the process data" — `null` in the data scope.
+ * @param {any} data
+ * @returns {object|null}
+ */
+function dataObjectOf(data) {
+  if (!data || typeof data !== 'object') return null;
+  if (data.source && typeof data.source === 'object') return data.source;
+  return typeof data.getChess === 'function' ? null : data;
+}
+
 export class Battle {
   constructor(opts = {}) {
+    // 对局自己的数据作用域（W-B, DESIGN §28.16）：构造期与每一步都是同步的，而 content/support 的记录读取走
+    // `gameData()` —— 不套这一层，一个只声明了部分包的房间仍会读到进程级那份（装了全部包）的盟约 / 道具 / 策略。
+    withGameData(dataObjectOf(opts.data), () => this._init(opts));
+  }
+
+  _init(opts = {}) {
     this.opts = opts;
     this.seed = (Number(opts.seed) >>> 0) || 1;
     this.rng = createRng(this.seed);
@@ -218,6 +237,20 @@ for (const part of [BattlePlayers, BattleLifecycle, BattleHooks, BattleSpawns, B
     if (Object.prototype.hasOwnProperty.call(Battle.prototype, key)) throw new Error(`Battle.${String(key)} is defined twice`);
     Object.defineProperty(Battle.prototype, key, Object.getOwnPropertyDescriptor(part.prototype, key));
   }
+}
+
+// ---- 对局的数据作用域（W-B, DESIGN §28.16）
+// Every entry point a caller can reach the simulation through is SYNCHRONOUS, so the battle's own data (its DataSource
+// `source`) is pushed around it and popped again. Two matches in one process interleave BETWEEN steps, never inside
+// one, which is why a stack is safe where "set a global before the match" is not (the meta-registry ruling, §29).
+for (const name of ['start', 'step', 'runToEnd', 'forceEnd', 'result']) {
+  const desc = Object.getOwnPropertyDescriptor(Battle.prototype, name);
+  if (!desc || typeof desc.value !== 'function') continue;
+  const inner = desc.value;
+  Object.defineProperty(Battle.prototype, name, {
+    ...desc,
+    value: function scopedEntry(...args) { return withGameData(dataObjectOf(this.data), () => inner.apply(this, args)); },
+  });
 }
 
 export default Battle;

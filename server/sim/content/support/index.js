@@ -35,12 +35,67 @@ const own = (o, k) => (o && typeof o === 'object' && typeof k === 'string' && Ob
 const QUIET = Object.freeze({ warn() {}, error() {}, info() {} });
 
 let DATA = null;
-/** Frozen data/*.json (process singleton of server/data.js). Never mutate. */
-export function gameData() {
+/** The default data: the process singleton of server/data.js (browser: the shim over the injected data). */
+function defaultData() {
   if (!DATA) {
     try { DATA = getData({ log: QUIET }) || {}; } catch { DATA = {}; }
   }
   return DATA;
+}
+
+/**
+ * 对局作用域里的那一份数据 (W-B, DESIGN §28.16). A room that declares a subset of the installed packs runs THAT subset
+ * (server/roomAssets.js), so every record this module hands out must come from the room's merged data — not from the
+ * process-wide singleton, which carries every installed pack.
+ *
+ * Why a stack and not `setGameData`: two matches run CONCURRENTLY in one process (server/lobby.js holds one Match per
+ * room), so "set the global before the match, restore it afterwards" is wrong for exactly the reason the meta registry
+ * ruling gives (DESIGN §29). The stack is pushed and popped around a SYNCHRONOUS region — a Battle's construction and
+ * each `step()` — and two matches can only interleave BETWEEN steps, never inside one. A browser (or a test that calls
+ * setGameData) never pushes anything, so nothing changes there.
+ *
+ * ▸ A scoped object is merged OVER the default data per key (`viewOf`): a caller that passes a partial data object —
+ * every test that hands a battle a handful of tables — keeps today's behaviour for every table it does not carry.
+ * @type {Array<object|null>}
+ */
+const SCOPED = [];
+/** Scoped data → the merged view built for it (one per scoped object, invalidated when the default data changes). */
+const VIEWS = new WeakMap();
+
+/**
+ * Run `fn` with `data` as this module's game data (see SCOPED). Re-entrant and exception-safe; `null` means "the
+ * default data", so a battle built without an explicit data object reads exactly what it read before.
+ * @template T
+ * @param {object|null|undefined} data
+ * @param {() => T} fn
+ * @returns {T}
+ */
+export function withGameData(data, fn) {
+  SCOPED.push(data && typeof data === 'object' ? data : null);
+  try { return fn(); } finally { SCOPED.pop(); }
+}
+
+/** The scoped data merged over the default one (identity when the scoped object IS the default one). */
+function viewOf(scoped) {
+  const base = defaultData();
+  if (!scoped || typeof scoped !== 'object') return base;
+  if (scoped === base) return scoped;
+  const hit = VIEWS.get(scoped);
+  if (hit && hit.base === base) return hit.view;
+  // A FLAT copy, not a prototype chain: every reader here looks a table up with `hasOwnProperty` (`own()` above), so a
+  // table that only lives on the prototype would read as "absent" — a partial data object would silently lose every
+  // table it does not carry (tests hand battles exactly such objects).
+  const view = { ...base };
+  const keys = Object.keys(scoped);
+  for (const k of keys) if (scoped[k] !== undefined) view[k] = scoped[k];
+  Object.freeze(view);
+  VIEWS.set(scoped, { base, view });
+  return view;
+}
+
+/** Frozen data/*.json of this battle (scoped, W-B) or of the process (server/data.js). Never mutate. */
+export function gameData() {
+  return SCOPED.length ? viewOf(SCOPED[SCOPED.length - 1]) : defaultData();
 }
 /** Tests only: swap the data object (null → reload the singleton). Also drops derived caches. */
 export function setGameData(d) { DATA = d ?? null; CORE = null; }
@@ -79,13 +134,22 @@ export function buffParams(rec, key) {
 }
 
 let CORE = null;
-/** Core (核心, isPower) bond ids. */
+/** Per-data-view core bond sets (the scoped half of the cache above; W-B). */
+const CORE_BY = new WeakMap();
+/**
+ * Core (核心, isPower) bond ids — of the data this battle runs on (scoped) or of the process data.
+ * Cached per data object: two rooms running different sets must not share a derived set.
+ */
 export function coreBondIds() {
-  if (!CORE) {
-    CORE = new Set();
-    for (const [id, b] of Object.entries(gameData().bonds || {})) if (b && b.isCore) CORE.add(id);
+  const d = gameData();
+  const isDefault = d === defaultData();
+  let set = isDefault ? CORE : CORE_BY.get(d);
+  if (!set) {
+    set = new Set();
+    for (const [id, b] of Object.entries(d.bonds || {})) if (b && b.isCore) set.add(id);
+    if (isDefault) CORE = set; else CORE_BY.set(d, set);
   }
-  return CORE;
+  return set;
 }
 export const isCoreBond = (id) => coreBondIds().has(id);
 

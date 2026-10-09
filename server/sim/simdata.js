@@ -558,6 +558,13 @@ export function freezeDef(d) {
  */
 export class DataSource {
   constructor(raw = {}, fallback = null) {
+    /**
+     * The whole data object this source was built from (not just the five record tables below). W-B needs it: a
+     * room that declares a subset of the installed packs runs its OWN merged data, and the sim's content helpers
+     * (bonds / items / bands / garrisons — `content/support/index.js`) reach those tables through a data-scope this
+     * source is the carrier of. Null when a caller built a source from nothing.
+     */
+    this.source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null;
     this.raw = {
       chess: asMap(unwrap(raw.chess, 'chess'), 'chessId') ?? {},
       enemies: asMap(unwrap(raw.enemies, 'enemies'), 'key') ?? {},

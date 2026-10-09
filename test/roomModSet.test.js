@@ -444,7 +444,7 @@ describe('the ?playtest=1 quick start carries the digest too, and a plain instal
   });
 });
 
-describe('W-A does not change the gate: room.join still judges the PROCESS set (W-B must rewrite this on purpose)', () => {
+describe('入座门判的是**进程**集合（W-A 定的，W-B 也故意不改：入座前客户端还不知道房间的集合）', () => {
   test('a client that echoes the SERVER digest enters a room whose declared set is a strict subset', async () => {
     const a = await player(modded, 'Host');
     const b = await player(modded, 'Guest');
@@ -454,8 +454,10 @@ describe('W-A does not change the gate: room.join still judges the PROCESS set (
       const created = await a.waitFor('room.state', (s) => s.code && s.mods);
       assert.deepEqual(created.mods.packs.map((p) => p.id), ['alpha-pack']);
       assert.notEqual(created.mods.digest, digest, 'the room set and the process set are already two different strings');
-      // A joiner that confirms the SERVER set is let in. Under W-B the digest a joiner must send becomes the ROOM's
-      // (`created.mods.digest`) — this assertion is the one to rewrite.
+      // A joiner that confirms the SERVER set is let in. W-B keeps this on purpose: a joiner cannot know the room's set
+      // before it is in the room, so the gate proves "same catalogue, same pack bytes" and the ROOM set travels in
+      // `room.state` — what the room really runs is decided per room (server/roomAssets.js) and alignment to it is the
+      // client's job before it readies up (W-D).
       const stateP = b.waitFor('room.state', (s) => s.code === created.code && s.seats.some((x) => x && x.playerId === b.id));
       const joined = await b.request({ t: 'room.join', code: created.code, mods: digest });
       assert.equal(joined.t, 'ok', JSON.stringify(joined));

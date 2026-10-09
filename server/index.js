@@ -29,6 +29,7 @@ import { loadWorkshop, loadWorkshopKits, loadWorkshopHooks, loadWorkshopPanels, 
 import { loadMetaModules } from './match/metaPack.js';
 import { loadServerModules, mountServerModules, stateRootFor } from './modModules.js';
 import { workshopNotices } from './notices.js';
+import { createRoomAssets } from './roomAssets.js';
 import { Match as DefaultMatch } from './match/Match.js';
 import {
   buildWorkshopDataFiles, workshopKitFilesFor, workshopPanelFilesFor, workshopAssetsFor, workshopRoutesFor,
@@ -142,6 +143,21 @@ export async function startServer(opts = {}) {
   // `/healthz` (lobby.stats) and in every BattleSpec, so the three can never disagree about what is running.
   const workshopMods = (workshopLoaded.packs || []).map((p) => ({ id: p.id, hash: p.hash, layer: p.layer, combat: p.combat, api: p.api }));
   const workshopKitFiles = workshopKitFilesFor(workshopKits.modules, workshopDir);
+  // 按房间物化（W-B，DESIGN §28.9）：房间声明的集合要真的决定这一局跑什么。只在**装了包**时建它 ——
+  // 干净安装既不需要官方那一份的第二次读取，也没有任何集合会比「进程级那一份」更小。
+  const roomAssets = (workshopLoaded.packs || []).length
+    ? createRoomAssets({
+      official: loadData(dataDir, { log, workshopDir: null }),
+      processData: data,
+      packs: workshopLoaded.packs,
+      kits: workshopKits.kits,
+      kitOwners: workshopKits.owners,
+      modules: workshopKits.modules,
+      log,
+    })
+    : null;
+  // `/room-data/<摘要>/<文件>.json` 那一面（同一个物化缓存；没有装包时这一面根本不存在）。
+  const roomDataFace = roomAssets ? (digest) => roomAssets.byDigest(digest) : null;
   const workshopAssets = workshopAssetsFor(workshopLoaded, workshopDir);
   // 包声明的只读路由（`pack.json.routes`, DESIGN §28.13）：绝对路径 → 包内 `.json`，带声明的 `Cache-Control`。
   const workshopRoutes = workshopRoutesFor(workshopLoaded, workshopDir, { log }).routes;
@@ -202,14 +218,14 @@ export async function startServer(opts = {}) {
     {
       ...opts,
       ...(matchWrappers.length ? { MatchClass } : {}),
-      workshop: { kits: workshopKits.kits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme, meta: metaModules },
+      workshop: { kits: workshopKits.kits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme, meta: metaModules, roomAssets },
     },
     { data, log },
   );
   // content packs (docs/PACKS.md): scanned now — the start log names them — and again whenever their folders change
   const packs = createPackRegistry({ publicDir, dataDir, packsDir }, { log });
   packs.refresh(true);
-  const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, packsDir, packs, log, workshopJson, workshopKitFiles, workshopPanelFiles, workshopAssets, workshopRoutes, workshopResourceFiles, resourcePolicy, workshopI18n, modsJson });
+  const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, packsDir, packs, log, workshopJson, workshopKitFiles, workshopPanelFiles, workshopAssets, workshopRoutes, workshopResourceFiles, resourcePolicy, workshopI18n, modsJson, roomData: roomDataFace });
   const startedAt = Date.now();
   // The tag is per process (see buildTag): read the browser runtime once, here, not on every /healthz.
   resetBuildTag();
