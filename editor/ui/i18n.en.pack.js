@@ -140,6 +140,17 @@ export const EN_PACK = Object.freeze({
   'overrides 没有变化，文件没有被改写。': 'overrides is unchanged; the file was not rewritten.',
   '删掉这条覆盖声明 {0}？': 'Delete this override declaration {0}?',
   'overrides 里已经有 {0} 了。': 'overrides already contains {0}.',
+
+  // ---- 试玩直接发到手上（pack.json 的 playtest）----
+  '试玩直接发到手上（pack.json 的 playtest）': 'Straight to hand in playtest (pack.json playtest)',
+  '试玩时直接发到手上：只有编辑器「一键试玩」起的那个服务器会在开局把这些干员塞进手牌（正式对局照旧，只在商店里摇到）。': 'Straight to hand in playtest: only the server the editor’s one-click playtest starts will put these operators into your hand at the opening (a real match is unchanged — you still roll them in the shop).',
+  '名单里的 id 必须真的属于这个包（本包的 chess 记录，或本包在 overrides 里声明过的官方 id）；认不出来的 id 会让加载器整包拒绝（PLAYTEST_UNKNOWN_CHESS）。': 'Every id here must really belong to this pack (a chess record of its own, or an official id the pack declares in overrides); an id it cannot place makes the loader refuse the whole pack (PLAYTEST_UNKNOWN_CHESS).',
+  '还没有声明。在干员页勾上「试玩时直接发到手上」就会写到这里。': 'Nothing declared yet. Ticking “straight to hand in playtest” on the operator page writes it here.',
+  '这个包没有这条记录': 'this pack has no such record',
+  '另有 {0} 条记录自己带着这个开关（写 `directToHand: true` 的工坊干员）：{1}。它们跟着记录走，不在这张表里。': '{0} more record(s) carry this switch themselves (workshop operators written with `directToHand: true`): {1}. They travel with the record and are not in this table.',
+  'playtest.directToHand 没有变化，文件没有被改写。': 'playtest.directToHand is unchanged; the file was not rewritten.',
+  '删掉这条试玩发牌声明 {0}？': 'Delete this straight-to-hand declaration {0}?',
+  '已删掉试玩发牌声明 {0}。': 'Deleted the straight-to-hand declaration {0}.',
   '先选一个数据文件。': 'Pick a data file first.',
   '先填要覆盖的记录 id。': 'Type the record id to override first.',
   '试玩服务器已就绪：{0}': 'Playtest server is ready: {0}',

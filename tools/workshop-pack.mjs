@@ -21,7 +21,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import { normalizePackManifest, normalizeContentFile, workshopSupportEntries, WORKSHOP_CONTENT_FILES, OVERRIDE_ENTRY_RE } from '../shared/workshop.js';
+import { normalizePackManifest, normalizeContentFile, workshopSupportEntries, WORKSHOP_CONTENT_FILES, OVERRIDE_ENTRY_RE, playtestUnknownIds } from '../shared/workshop.js';
 import { loadWorkshop, WORKSHOP_DIR } from '../server/workshop.js';
 import { normalizeSupportConfig } from '../shared/support.js';
 import { requiredUnitForms } from '../shared/diy.js';
@@ -137,7 +137,12 @@ export function readPackDir(packDir, id = path.basename(packDir)) {
     if (!content.ok) { loadErrors.push({ file, reason: content.detail }); continue; }
     files[file] = content.records;
   }
-  return { id, dir: packDir, manifest, files, hasAssets, checked, loadErrors };
+  // 试玩开关的名单必须点名本包真的有的 id：形状由 `normalizePackManifest` 判，成员资格只有读完 chess.json 才知道
+  // （与加载器 `server/workshop.js` 同一个 `playtestUnknownIds`）。不查这一条，一个写错的 id 就是静默无效。
+  const playtestUnknown = checked && checked.ok
+    ? playtestUnknownIds(checked.pack.playtest?.directToHand, checked.pack.overrides, Object.keys(files.chess ?? {}))
+    : [];
+  return { id, dir: packDir, manifest, files, hasAssets, checked, loadErrors, playtestUnknown };
 }
 
 /** 一个包目录是否存在（含可读的 pack.json 这个最低要求）。 */
@@ -334,6 +339,9 @@ export function readPackSupport(root, packId, { supportFile = null } = {}) {
       tier: Number.isInteger(pack.files.chess[id]?.tier) ? pack.files.chess[id].tier : null,
       selected: declared.includes(id),
       entry: entries.find((e) => e.id === id) ?? null,
+      // 记录自己带的那个开关（非覆盖模式走这条路：`deriveChessRecord` 写 `directToHand: true`）。
+      // 包页把它和 `pack.json.playtest.directToHand` 分开列 —— 两者在引擎里是并集（见 phases.js）。
+      directToHand: pack.files.chess[id]?.directToHand === true,
     }))
     .sort((a, b) => ((a.tier ?? 99) - (b.tier ?? 99)) || a.id.localeCompare(b.id));
 
@@ -683,6 +691,12 @@ export function readPackMeta(root, packId, { isOfficial = null } = {}) {
     meta,
     hasAssets: pack.hasAssets,
     overrides,
+    // 试玩开关（`pack.json.playtest`）：声明原样给出，加上「这些 id 认不认识」的判罚 —— 界面照 `overrides` 的做法
+    // 把陈旧/写错的条目**显示出来**，而不是让它静默无效（`PLAYTEST_UNKNOWN_CHESS`）。
+    playtest: {
+      directToHand: pack.checked && pack.checked.ok ? [...(pack.checked.pack.playtest?.directToHand ?? [])] : [],
+      unknown: [...(pack.playtestUnknown ?? [])],
+    },
     // 加载器会不会接受这个包（页面的横幅用；`issue` 是它拒绝时的码与原因）
     ok: pack.checked ? pack.checked.ok === true : false,
     issue: pack.checked && !pack.checked.ok ? { code: pack.checked.error, detail: pack.checked.detail } : null,
@@ -777,8 +791,47 @@ export async function writePackOverrides(root, packId, list, { isOfficial = null
   return { ...readPackMeta(root, packId, { isOfficial }), changed };
 }
 
-// ---- 列出 ---------------------------------------------------------------------------------------------------------
+/**
+ * 写一个包的 `pack.json.playtest.directToHand`（**整表替换**）—— 只动这一个字段，其余字段、键序与缩进原样保留。
+ *
+ * 与 `writePackOverrides` 同一条规矩：**形状**错了才拒（元素必须是合法 id、去重后排序），
+ * 「这个 id 是不是真的属于这个包」**不在这里判** —— 那是加载器的事（`PLAYTEST_UNKNOWN_CHESS`）。
+ * 理由是界面必须能把作者写坏/已经陈旧的条目**删掉**：写进 `pack.json` 的东西都要能在界面上删掉，
+ * 否则一个手写的错 id 会让整个包起不来，而作者在界面里找不到任何能改的地方。
+ *
+ * 空名单 = 删掉 `playtest.directToHand` 这个键（与「没声明」同一件事，不留空壳）。
+ *
+ * @param {unknown} list chess 记录 id 的数组
+ */
+export async function writePackPlaytest(root, packId, list) {
+  if (!Array.isArray(list)) throw refuse('playtest.directToHand 必须是数组，每一项是一个 chess 记录 id');
+  /** @type {string[]} */
+  const clean = [];
+  for (const raw of list) {
+    if (typeof raw !== 'string' || !SUPPORT_ID_RE.test(raw)) {
+      throw refuse(`PLAYTEST_BAD_SHAPE：${JSON.stringify(raw)} 不是合法的 chess 记录 id`);
+    }
+    if (!clean.includes(raw)) clean.push(raw);
+  }
+  clean.sort();
+  const dir = findPackDir(root, packId);
+  const pack = readPackDir(dir, packId);
+  const manifest = pack.manifest;
+  if (!isPlainObject(manifest)) throw refuse(`工坊包 "${packId}" 的 pack.json 不可读`);
+  const current = isPlainObject(manifest.playtest) ? manifest.playtest : {};
+  const previous = Array.isArray(current.directToHand) ? current.directToHand : [];
+  const next = { ...manifest };
+  if (clean.length) next.playtest = { ...current, directToHand: clean };
+  else if (Object.keys(current).length > 1) next.playtest = { ...current, directToHand: [] };
+  else delete next.playtest;
+  // 与 writePackSupport 同一条：内容没变就不写盘（写一次会按 2 空格重新排版，作者可能有自己的排版）
+  const malformed = Object.hasOwn(manifest, 'playtest') && !isPlainObject(manifest.playtest);
+  const changed = malformed || clean.length !== previous.length || !clean.every((e, i) => previous[i] === e);
+  if (changed) await fsp.writeFile(path.join(dir, 'pack.json'), `${JSON.stringify(next, null, 2)}\n`);
+  return { ...readPackMeta(root, packId), changed };
+}
 
+// ---- 列出 ---------------------------------------------------------------------------------------------------------
 /** 一个包的摘要行：id / 名称 / 版本 / 内容文件 / 语音条数 / 助战条数，外加它的校验结论。 */
 export function packSummary(root, packId, loaded = null, { supportFile = null } = {}) {
   const pack = readPackDir(path.join(root, packId), packId);

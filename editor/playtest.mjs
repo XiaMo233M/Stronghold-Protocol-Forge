@@ -127,22 +127,32 @@ export function createPlaytest({ root, repoRoot = REPO_ROOT, node = process.exec
 
     /**
      * 起一个游戏服务器（已在跑就直接复用）。失败时不留半死不活的进程。
-     * @param {{ difficulty?: string|null, port?: number }} [opts]
-     * @returns {Promise<{ ok: true, url: string, port: number, pid: number, reused: boolean }>}
+     * @param {{ difficulty?: string|null, port?: number, stage?: string|null, directToHand?: string[] }} [opts]
+     *   `directToHand` 是「试玩时直接发到手上」的干员 id 名单，来自 `pack.json.playtest.directToHand`
+     *   （覆盖官方干员时记录里写不进那个键，见 docs/WORKSHOP.md §1.1）。它经 `SP_DIRECT_TO_HAND` 交给子进程，
+     *   与 `SP_STAGE` 走同一条路；空数组/不传就是「这个包没声明」。
+     * @returns {Promise<{ ok: true, url: string, port: number, pid: number, reused: boolean, directToHand: string[] }>}
      */
-    async start({ difficulty = null, port = null, stage = null } = {}) {
+    async start({ difficulty = null, port = null, stage = null, directToHand = null } = {}) {
+      const ids = Array.isArray(directToHand)
+        ? [...new Set(directToHand.filter((id) => typeof id === 'string' && id))].sort()
+        : [];
       if (stopping) await stopping;
       const now = playtest.status();
-      if (now.running) return { ok: true, url: playtestUrl(now.port, difficulty, stage), port: now.port, pid: now.pid, reused: true };
+      if (now.running) return { ok: true, url: playtestUrl(now.port, difficulty, stage), port: now.port, pid: now.pid, reused: true, directToHand: ids };
 
       if (!fs.existsSync(entry)) throw new Error(`找不到游戏服务器入口：${entry}`);
       const usePort = Number.isInteger(port) && port > 0 && port < 65536 ? port : await freePort();
       // SP_WORKSHOP：让子进程用**编辑器当前的工坊根**，否则试玩里看不到作者正在编辑的包（server/index.js main）
       // SP_PLAYTEST：告诉这一局它是试玩（记录里标了「直接发到手上」的干员会进手牌，见 Match.grantDirectToHand）。
       // SP_STAGE：地图页「▶ 试玩这张图」——这一局强制打指定的那张图（Match 构造器里覆盖抽图结果）。
+      // SP_DIRECT_TO_HAND：`pack.json.playtest.directToHand` 算出来的名单（逗号分隔）—— 覆盖模式那条路，
+      //   因为覆盖时记录必须与官方同形，开关写不进记录（见 phases.js 的 directToHandIds）。
       const env = { ...process.env, PORT: String(usePort), HOST: PLAYTEST_HOST, SP_PLAYTEST: '1' };
       if (root) env.SP_WORKSHOP = path.resolve(root);
       if (typeof stage === 'string' && stage.trim()) env.SP_STAGE = stage.trim();
+      // 名单为空时**不设**这个变量：设一个空串与「没声明」在语义上不同，而 phases.js 读的是「有没有这个 id」
+      if (ids.length) env.SP_DIRECT_TO_HAND = ids.join(',');
       // stdio: 'inherit'（默认）让游戏服务器的日志直接出现在编辑器那个终端里 —— 试玩失败时那是唯一的线索
       const child = spawn(node, [entry], { cwd: repoRoot, env, stdio });
       current = { child, port: usePort, url: playtestUrl(usePort, difficulty, stage), startedAt: Date.now() };
@@ -161,8 +171,8 @@ export function createPlaytest({ root, repoRoot = REPO_ROOT, node = process.exec
         forget();
         throw e;
       }
-      log.info?.(`[playtest] 游戏服务器已就绪：http://${PLAYTEST_HOST}:${usePort}（工坊根 ${root ?? '(默认)'}${env.SP_STAGE ? `，强制地图 ${env.SP_STAGE}` : ''}）`);
-      return { ok: true, url: playtestUrl(usePort, difficulty, stage), port: usePort, pid: child.pid, reused: false };
+      log.info?.(`[playtest] 游戏服务器已就绪：http://${PLAYTEST_HOST}:${usePort}（工坊根 ${root ?? '(默认)'}${env.SP_STAGE ? `，强制地图 ${env.SP_STAGE}` : ''}${ids.length ? `，试玩直接发牌 ${ids.join(', ')}` : ''}）`);
+      return { ok: true, url: playtestUrl(usePort, difficulty, stage), port: usePort, pid: child.pid, reused: false, directToHand: ids };
     },
 
     /** 停掉试玩（没在跑就是 no-op）。 */

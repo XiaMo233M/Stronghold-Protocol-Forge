@@ -52,7 +52,7 @@ import { loadWorkshop, WORKSHOP_DIR } from '../server/workshop.js';
 // 所以 `tools/workshop-pack.mjs` 与编辑器不可能给出不同结论（docs/EDITOR.md §包管理）。
 import {
   exportPack, installZip, readPackSupport, writePackSupport, packSummary, listPackIds,
-  readPackMeta, writePackMeta, writePackOverrides, PACK_META_FIELDS, LICENSE_CHOICES,
+  readPackMeta, writePackMeta, writePackOverrides, writePackPlaytest, PACK_META_FIELDS, LICENSE_CHOICES,
   readPackOperators, writePackOperators,
 } from '../tools/workshop-pack.mjs';
 import { ZIP_MAX_TOTAL_BYTES } from '../shared/zip.js';
@@ -66,7 +66,7 @@ import { createPlaytest } from './playtest.mjs';
 // The pack-media allowlist lives with the route that serves it (server/index.js). The voice page must not keep a second
 // copy: a file the editor accepts but that route refuses is a line that 404s in the game with nothing reporting it.
 import { WORKSHOP_ASSET_TYPES } from '../server/index.js';
-import { normalizePackManifest, WORKSHOP_MEDIA_PREFIX, WORKSHOP_CONTENT_FILES } from '../shared/workshop.js';
+import { normalizePackManifest, WORKSHOP_MEDIA_PREFIX, WORKSHOP_CONTENT_FILES, workshopPlaytestIndex } from '../shared/workshop.js';
 import { VOICE_SLOTS, DIFFICULTIES, VOICE_LANGS, DEFAULT_VOICE_LANG } from '../shared/constants.js';
 import { withForgeMeta, stampForgeHeader, parseForgeHeader } from '../shared/forgeNotice.js';
 import {
@@ -1678,6 +1678,35 @@ function overridePair(derived) {
 }
 
 /**
+ * 覆盖模式下「试玩时直接发到手上」开关的落点：`pack.json` 的 `playtest.directToHand`（行为层，不进记录）。
+ *
+ * 为什么不能在记录里：覆盖必须与官方**同形**（官方记录没有 `directToHand`，见 `stripEditorOnlyKeys`），
+ * 所以那个键在覆盖模式下写不进记录 —— 今天它就是在那里静默失效的。行为开关住在行为层，记录保持同形。
+ * 名单是**幂等**的：勾上加、取消删，其它干员与其它包的声明原样保留（只动 `playtest` 这一个键，别的一律不动）。
+ *
+ * @param {object|null} manifest 磁盘上的 `pack.json`
+ * @param {string[]} ids 这次保存属于这条覆盖的 chess id（普通 + 精锐）
+ * @param {boolean} on 作者在界面上勾的是「开」还是「关」
+ * @returns {object} 要写回去的清单
+ */
+function withPlaytestDeclarations(manifest, ids, on) {
+  const next = { ...(manifest && typeof manifest === 'object' && !Array.isArray(manifest) ? manifest : {}) };
+  const current = next.playtest && typeof next.playtest === 'object' && !Array.isArray(next.playtest) ? next.playtest : {};
+  const list = new Set(Array.isArray(current.directToHand) ? current.directToHand.filter((id) => typeof id === 'string' && id) : []);
+  for (const id of Array.isArray(ids) ? ids : []) {
+    if (typeof id !== 'string' || !id) continue;
+    if (on) list.add(id); else list.delete(id);
+  }
+  const directToHand = [...list].sort();
+  // 空名单不留一个空壳：`playtest: { directToHand: [] }` 与「没声明」在加载器眼里是同一件事，写它只是多一行噪音。
+  // 但作者写在 `playtest` 里的**别的**键（未来会有）不能因为这一次勾选被抹掉 —— 所以只在这个键是唯一内容时才删掉整块。
+  if (directToHand.length) next.playtest = { ...current, directToHand };
+  else if (Object.keys(current).length > 1) next.playtest = { ...current, directToHand: [] };
+  else delete next.playtest;
+  return next;
+}
+
+/**
  * 某一次保存**将要**补上的 `"<file>:<id>"` 声明（A3 的自动补声明）。
  *
  * 为什么判罚不能只看磁盘上那份 `pack.json`：第一次覆盖一条官方记录时，文件里**还没有**这条声明 —— 而补声明正是
@@ -1947,9 +1976,32 @@ export async function createEditorServer(opts = {}) {
       const manifestPath = path.join(root, packId, 'pack.json');
       const existingManifest = readJson(manifestPath, null);
       const savedIds = [derived.base.chessId, derived.golden.chessId];
+      const packDir = path.join(root, packId);
+      // `content` 必须声明 chess，否则加载器**完全不读这个包的 chess.json**：干员在编辑器里存在、在磁盘上存在、
+      // 语法也没问题，却永远进不了游戏（商店摇不到、试玩里没有）——一条没有任何报错的静默失败。
+      // 这个包可能是别的页面建的（content: ['stages'] …），所以这里补一条，而不是只在「包不存在」时才写。
+      const content = new Set(Array.isArray(existingManifest?.content) ? existingManifest.content : []);
+      content.add('chess');
+      // A3 的另一半：本次保存的 id 里哪些是官方 id ⇒ 自动补 `"chess:<id>"` 声明。作者不该在两页之间手抄 id。
+      const overrides = withOverrideDeclarations(existingManifest, savedIds.filter((id) => officialIds.has(id)).map((id) => `chess:${id}`));
+      // 「试玩时直接发到手上」在覆盖模式下落在**行为层**（`pack.json.playtest.directToHand`）：覆盖的记录必须与官方
+      // 同形，`directToHand` 那个键进不去（`stripEditorOnlyKeys`），所以这条声明是那个开关在覆盖模式下唯一的落点。
+      // 非覆盖模式一个字都不改：开关仍然写在记录里（`deriveChessRecord`），向后兼容。
+      const playtestIds = overIds ? [overIds.base, overIds.golden].filter((id) => typeof id === 'string' && id) : [];
+      // 先把「这次要写的 pack.json」整个建出来（含新建包那一档），再只动它的 `playtest` 键 —— 少了这一步，
+      // 一个没有 pack.json 的包目录在覆盖模式下会被写成**只有 playtest** 的清单（id/content 全丢，加载器整包拒绝）。
+      const baseManifest = existingManifest
+        ? { ...existingManifest, content: [...content].sort(), overrides }
+        : {
+          id: packId, name: spec.name || packId, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null,
+          description: null, gameVersion: '0.2.1', content: [...content].sort(), overrides,
+        };
+      const nextManifest = playtestIds.length
+        ? withPlaytestDeclarations(baseManifest, playtestIds, spec.directToHand === true)
+        : baseManifest;
       // B 段：判罚看的是「这次保存之后清单会是什么样」—— 第一次覆盖一条官方记录时，声明正是这次保存要补上的，
       // 只看磁盘上那份 pack.json 就会把这次保存自己拒掉（作者看到「already exists」却无事可做）。
-      const willDeclare = [...(Array.isArray(existingManifest?.overrides) ? existingManifest.overrides : []), ...declarationsFor('chess', [spec], chessData)];
+      const willDeclare = nextManifest.overrides ?? [];
       const blockers = overrideBlockers(officialIds, savedIds, willDeclare, 'chess');
       const errs = [
         ...validateChessRecord(derived.base, { id: derived.base.chessId, officialIds: blockers }),
@@ -1960,20 +2012,6 @@ export async function createEditorServer(opts = {}) {
       const blocking = authoringErrors(errs);
       if (blocking.length) return sendJson(res, 400, { error: 'the operator did not validate', errors: blocking });
 
-      const packDir = path.join(root, packId);
-      // `content` 必须声明 chess，否则加载器**完全不读这个包的 chess.json**：干员在编辑器里存在、在磁盘上存在、
-      // 语法也没问题，却永远进不了游戏（商店摇不到、试玩里没有）——一条没有任何报错的静默失败。
-      // 这个包可能是别的页面建的（content: ['stages'] …），所以这里补一条，而不是只在「包不存在」时才写。
-      const content = new Set(Array.isArray(existingManifest?.content) ? existingManifest.content : []);
-      content.add('chess');
-      // A3 的另一半：本次保存的 id 里哪些是官方 id ⇒ 自动补 `"chess:<id>"` 声明。作者不该在两页之间手抄 id。
-      const overrides = withOverrideDeclarations(existingManifest, savedIds.filter((id) => officialIds.has(id)).map((id) => `chess:${id}`));
-      const nextManifest = existingManifest
-        ? { ...existingManifest, content: [...content].sort(), overrides }
-        : {
-          id: packId, name: spec.name || packId, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null,
-          description: null, gameVersion: '0.2.1', content: [...content].sort(), overrides,
-        };
       // 无条件写：`overrides` 可能刚刚被自动补上，而 `content` 一个字都没变 —— 今天那个「content 变了才写」的条件
       // 正好漏掉这个场景（声明补不上 ⇒ 加载器丢掉这条记录，而编辑器已经回了 200）。
       await writeJson(manifestPath, nextManifest);
@@ -1986,7 +2024,14 @@ export async function createEditorServer(opts = {}) {
         return sendJson(res, 400, { error: 'another operator in this pack no longer derives — fix it before saving', errors: regen.errors });
       }
       await writeJson(path.join(packDir, 'chess.json'), regen.records);
-      return sendJson(res, 200, { ok: true, slug: ids.slug, generated: regen.generated, warnings: derived.warnings });
+      return sendJson(res, 200, {
+        ok: true, slug: ids.slug, generated: regen.generated, warnings: derived.warnings,
+        // 覆盖模式下开关落在哪里，回话里说清楚（界面把它显示出来）：`record` = 记录里的 `directToHand`，
+        // `pack` = `pack.json.playtest.directToHand`（覆盖模式唯一写得进去的地方）
+        directToHand: playtestIds.length
+          ? { where: 'pack', ids: nextManifest.playtest?.directToHand ?? [] }
+          : { where: 'record', ids: spec.directToHand === true ? savedIds : [] },
+      });
     }
 
     // delete one operator (its spec AND the records it owned)
@@ -1997,6 +2042,9 @@ export async function createEditorServer(opts = {}) {
       const slug = rest.slice(cut + '/operators/'.length);
       if (!PACK_ID_RE.test(packId) || !SLUG_RE.test(slug)) throw Object.assign(new Error('bad id'), { status: 400 });
       const specPath = path.join(root, packId, 'specs', `${slug}.json`);
+      // 删之前先读一眼 spec：覆盖模式下「这条覆盖是哪两个记录」只能从 spec 认出来（`chessIds(slug)` 推的是工坊
+      // 前缀那一对，而覆盖的记录 id **就是**官方 id）。下面清 `pack.json` 的试玩声明要用它。
+      const removedSpec = readJson(specPath, null);
       if (fs.existsSync(specPath)) await fsp.rm(specPath);
       // the spec is gone, so ownership cannot be derived any more: name the records it owned explicitly.
       // 覆盖模式不用在这里特判：它的记录 id **就是** `slug` 自己（官方 id 原样），而 spec 文件刚被删掉 ⇒
@@ -2004,6 +2052,21 @@ export async function createEditorServer(opts = {}) {
       const ids = chessIds(slug);
       const regen = regeneratePack(root, packId, officialIds, ids ? [ids.base, ids.golden] : [], chessData);
       await writeJson(path.join(root, packId, 'chess.json'), regen.records);
+      // 这个开关住在 pack.json 里，记录被删掉之后它就成了**陈旧声明**：不清掉的话，加载器会以
+      // `PLAYTEST_UNKNOWN_CHESS` 整包拒绝（一个删不掉的声明让整个包起不来），而作者找不到原因。
+      // 覆盖用**官方 id 那一对**（只能从刚删掉的 spec 认出来），本包新增的干员用 `chessIds(slug)` 推出来的那一对。
+      const overPair = removedSpec?.override === true ? overrideChessIds(chessData?.[removedSpec.id] ?? null) : null;
+      const staleIds = overPair
+        ? [overPair.base, overPair.golden].filter((id) => typeof id === 'string' && id)
+        : (ids ? [ids.base, ids.golden] : []);
+      if (staleIds.length) {
+        const manifestPath = path.join(root, packId, 'pack.json');
+        const manifest = readJson(manifestPath, null);
+        const declared = Array.isArray(manifest?.playtest?.directToHand) ? manifest.playtest.directToHand : [];
+        if (staleIds.some((id) => declared.includes(id))) {
+          await writeJson(manifestPath, withPlaytestDeclarations(manifest, staleIds, false));
+        }
+      }
       // a broken sibling spec is reported, not hidden (its records are preserved — see regeneratePack)
       return sendJson(res, 200, { ok: true, removed: slug, generated: regen.generated, errors: regen.errors });
     }
@@ -2227,11 +2290,15 @@ export async function createEditorServer(opts = {}) {
     // 同一个进程里「重启」也只会拿到第一次加载的数据，而作者要的正是「改完包 → 重启 → 看到新内容」。
     // 细节（收尸、端口、健康检查）都在 editor/playtest.mjs。
     if (p === '/api/playtest' && method === 'GET') {
+      // 「试玩时直接发到手上」的名单（`pack.json.playtest.directToHand`）跟着状态一起给：页面不必自己再算一遍，
+      // 而作者点「试玩」之前就能看见这一局会往手里塞谁（记录里自带 `directToHand: true` 的那一半由引擎侧并进来）。
+      const { ids: directToHand } = workshopPlaytestIndex(loadWorkshop(root, { log: quietLog }).packs);
       return sendJson(res, 200, {
         ...playtest.status(),
         // 客户端的深链参数认这几个难度键（shared/constants.js 的 DIFFICULTIES），页面不该自己写一份
         difficulties: [...DIFFICULTIES],
         workshopRoot: root,
+        directToHand,
       });
     }
 
@@ -2245,9 +2312,13 @@ export async function createEditorServer(opts = {}) {
       // 只接受**这台机器上真有**的地图：打错一个 id 却照样起服务器，作者会以为是自己图的问题。
       const stage = body && typeof body.stage === 'string' && body.stage.trim() ? body.stage.trim() : null;
       if (stage !== null && !stageExistsEverywhere(stage, root, officialStages)) throw refuse(400, `找不到地图 ${stage}：它既不在官方数据里，也不在任何工坊包里`);
+      // 「试玩时直接发到手上」的名单：`pack.json.playtest.directToHand`（覆盖模式那条路 —— 覆盖时记录必须与官方
+      // 同形，开关写不进记录）。谁赢沿用 §1.2 的包 id 字典序规则（`workshopPlaytestIndex`）。记录里自带
+      // `directToHand: true` 的那一半在引擎侧并进来（phases.js 的 directToHandIds），这里不重复算。
+      const { ids: directToHand } = workshopPlaytestIndex(loadWorkshop(root, { log: quietLog }).packs);
       try {
-        const started = await playtest.start({ difficulty, stage });
-        return sendJson(res, 200, { ok: true, ...started, stage, difficulties: [...DIFFICULTIES] });
+        const started = await playtest.start({ difficulty, stage, directToHand });
+        return sendJson(res, 200, { ok: true, ...started, stage, directToHand, difficulties: [...DIFFICULTIES] });
       } catch (e) {
         // 起不来就是 500：这不是用户的输入错误，而是环境问题，页面要把原话显示出来（端口/入口/超时都在里面）
         throw refuse(500, `试玩服务器启动失败：${e && e.message ? e.message : String(e)}`);
@@ -2324,7 +2395,17 @@ export async function createEditorServer(opts = {}) {
       const idOfRecord = chess
         ? (typeof rec.chessId === 'string' && rec.chessId ? rec.chessId : wanted)
         : (typeof rec.key === 'string' && rec.key ? rec.key : wanted);
-      return sendJson(res, 200, { ok: true, spec: { ...spec, id: idOfRecord, override: true, slug: ids?.slug }, ids, official: rec });
+      // 「试玩时直接发到手上」在覆盖模式下住在 `pack.json.playtest.directToHand`（记录必须与官方同形，写不进记录）。
+      // 界面要按**声明**来勾：`spec` 是从官方记录读出来的，里面根本没有这个键 —— 不看这一份，作者上次勾的开关
+      // 就会显示成没勾（再保存一次就把它悄悄关掉了）。声明属于**选中的那个包**，所以包 id 由页面通过 `?pack=` 给。
+      const packId = url.searchParams.get('pack') ?? '';
+      const declared = packId && PACK_ID_RE.test(packId)
+        ? (readJson(path.join(root, packId, 'pack.json'), null)?.playtest?.directToHand ?? [])
+        : [];
+      const playtest = chess
+        ? { ids: [ids?.base, ids?.golden].filter((id) => typeof id === 'string' && id), declared }
+        : null;
+      return sendJson(res, 200, { ok: true, spec: { ...spec, id: idOfRecord, override: true, slug: ids?.slug }, ids, official: rec, playtest });
     }
 
     // 写一个包的元数据（`pack.json` 的 name/version/author/license/description/gameVersion）——只动传进来的键
@@ -2415,6 +2496,27 @@ export async function createEditorServer(opts = {}) {
         changed: written.changed,
         warnings: written.warnings,
       });
+    }
+
+    // 写一个包的 `pack.json.playtest.directToHand`（整表替换：加一条与删一条都是「把新表发过来」）。
+    //
+    // 加一条的正路是干员页那个勾（保存时按 `spec.directToHand` 自动写，见 `withPlaytestDeclarations`）；
+    // 这条路由存在的理由是**删**：手写的、或者已经陈旧的条目必须能在界面上删掉，否则一个写坏的 id 会让
+    // 加载器以 `PLAYTEST_UNKNOWN_CHESS` 整包拒绝，而作者找不到能改的地方（与 overrides 同一条规矩）。
+    if (p.startsWith('/api/packs/') && p.endsWith('/playtest') && method === 'POST') {
+      const packId = p.slice('/api/packs/'.length, -'/playtest'.length);
+      if (!PACK_ID_RE.test(packId)) throw refuse(400, '工坊包 id 不合法（只能是字母、数字、下划线和短横线）');
+      const body = await readBody(req);
+      const list = Array.isArray(body) ? body : body.directToHand;
+      const officialTables = officialIdTables(dataDir);
+      let written;
+      try {
+        written = await writePackPlaytest(root, packId, list);
+      } catch (e) {
+        // PLAYTEST_BAD_SHAPE / 404 包不存在
+        throw packRefusal(e);
+      }
+      return sendJson(res, 200, { ok: true, pack: packId, ...packMetaState(root, packId, officialTables), changed: written.changed });
     }
 
     // 导出一个包：<packId>.zip，内容就是「这个包」（pack.json 与 assets/** 都在 zip 根）

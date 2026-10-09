@@ -1093,5 +1093,5 @@
   "助战选择被服务器拒绝：": "The server refused the support selection: ",
   "助战卡池里没有 {n} 个已选干员，已移除": "{n} of your picks are not in the support pool and were removed",
   "{0} 已不在服务端助战卡池中，本次禁用": "{0} is no longer in the server's support pool — disabled for this match",
-  "试玩：记录里标了「直接发到手上」的 {0} 名干员已进手牌": "Playtest: {0} operator(s) flagged as “straight to the hand” are in your hand"
+  "试玩：标了「直接发到手上」的 {0} 名干员已进手牌": "Playtest: {0} operator(s) flagged as “straight to the hand” are in your hand"
 }
