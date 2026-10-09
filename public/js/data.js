@@ -49,6 +49,10 @@ export const DATA_FILES = Object.freeze({
   // Optional art extracted from a local game client (DESIGN §13): { groups: { '<subdir>': { name: { path, w, h } } } }.
   // The emotes and the 玩法说明 pages are in data/assets.json too (downloaded from the mirror): artUrls().
   local: 'local-assets.json',
+  // 公告与鸣谢 (DESIGN §28.15): the merged body the server builds from CHANGELOG.md plus every pack's `notices` —
+  // served at /data/notices.json. It lives in this table so the panel reads it through the same loader/cache/retry the
+  // rest of the page uses, and so a pack's own panel may read it through `ctx.data.get('notices')` too.
+  notices: 'notices.json',
 });
 
 const ID_KEYS = ['id', 'chessId', 'bondId', 'itemId', 'bandId', 'enemyKey', 'enemyId', 'stageId', 'bossId', 'tokenId', 'choiceId', 'key'];

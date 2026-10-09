@@ -1077,3 +1077,16 @@
    address, not the look. */
 .mod-host { display: contents; }
 .mod-host[data-mod-slot] > .mod-panel { pointer-events: none; }
+
+/* ---- 公告与鸣谢 (DESIGN §28.15, public/js/ui/notices.js) ------------------------------------------ */
+/* 正文是引擎从 CHANGELOG 生成的 + 各包声明的（可能很长），所以这里只管排版与层级：长条目换行、小节有缩进、
+   署名的外链看得出能点。没有动画、没有折叠 —— 一块要读的文本不该有不同的读法。 */
+.notices-block + .notices-block { margin-top: .24rem; }
+.notices-item { margin-top: .16rem; }
+.notices-item__head { display: flex; align-items: baseline; gap: .12rem; justify-content: space-between; }
+.notices-item p { margin: .06rem 0 .08rem; line-height: 1.5; }
+.notices-sec { margin-top: .08rem; }
+.notices-sec h4 { margin: 0 0 .04rem; font-size: .16rem; }
+.notices-sec ul { margin: 0; padding-left: .22rem; }
+.notices-credits { list-style: none; margin: 0; padding-left: 0; }
+.notices-credits a { color: inherit; text-decoration: underline; text-underline-offset: .02rem; }

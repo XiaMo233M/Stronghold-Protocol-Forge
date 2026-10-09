@@ -290,7 +290,7 @@ const CLIENT_MAX_PANEL_DATA_TABLES = 13;
  */
 export const CLIENT_PANEL_DATA_TABLES = Object.freeze([
   'chess', 'bonds', 'items', 'bands', 'enemies', 'bosses',
-  'stages', 'tokens', 'choices', 'config', 'assets', 'backups', 'local',
+  'stages', 'tokens', 'choices', 'config', 'assets', 'backups', 'local', 'notices',
 ]);
 /** 一个包能声明它需要哪些浏览器能力；缺一即「浏览器不支持」，不是「装了但静默不工作」（DESIGN §28.13）。 */
 export const CLIENT_REQUIRES = Object.freeze(['serviceWorker', 'cacheStorage', 'webCrypto']);

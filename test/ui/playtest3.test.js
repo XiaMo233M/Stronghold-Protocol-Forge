@@ -482,10 +482,14 @@ describe('9: busy indicators and data loading', () => {
   });
 
   test('every data file the in-match UI reads is in GAME_FILES (the match screen waits for them: no text appears late); main.js warms them in a room', () => {
+    // 这条判据的前提是「`public/js/ui/**` 里的东西都在对局界面里」。**标题页的面板不是**：登录页的「公告」
+    // （`ui/notices.js`）读 `notices`，而那份合并体只在面板被打开时才需要 —— 把它塞进 `GAME_FILES` 会让每一局
+    // 都先拉一份公告，正是这份清单要避免的事。豁免写在**这里**（看得见、有理由），而不是放宽判据本身。
+    const TITLE_ONLY = new Set(['public/js/ui/notices.js']);
     const files = [
       ...readdirSync(path.join(ROOT, 'public/js/ui')).filter((f) => f.endsWith('.js')).map((f) => `public/js/ui/${f}`),
       ...['game', 'briefing', 'bandDraft', 'result'].map((s) => `public/js/screens/${s}.js`),
-    ];
+    ].filter((f) => !TITLE_ONLY.has(f));
     const used = new Set();
     for (const f of files) for (const m of read(f).matchAll(/data\.(?:get|lookup|list|load|status)\('([A-Za-z-]+)'/g)) used.add(m[1]);
     for (const m of read('public/js/ui/gameComponents.js').matchAll(/useData\('([A-Za-z-]+)'/g)) used.add(m[1]);

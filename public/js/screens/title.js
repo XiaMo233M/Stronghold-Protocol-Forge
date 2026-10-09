@@ -20,6 +20,7 @@ import { net, identity } from '../net.js';
 import { store, useStore, shallowEqual } from '../store.js';
 import { data, useData } from '../data.js';
 import { FullscreenButton, detectFeatures } from '../ui/device.js';
+import { NoticesButton, NoticesModal } from '../ui/notices.js';
 import { LangToggle, useLang } from '../ui/lang.js';
 import { t, N_ } from '../../../shared/i18n.js';
 import { scriptOf } from '../../../shared/i18nPacks.js';
@@ -193,6 +194,7 @@ export function TitleScreen() {
   useLang(); // re-render on a language switch
   const [name, setName] = useState(() => store.get().me.name || identity.loadName() || '');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [noticesOpen, setNoticesOpen] = useState(false);
   const assetsSettled = useData('assets');
   const assets = data.get('assets');
   const backdrop = findUiAsset(assets, BACKDROP_KEYS);
@@ -248,6 +250,7 @@ export function TitleScreen() {
       <div>
         <div class="title-corner__tools">
           <${Button} variant="ghost" size="sm" icon="chart" class="title-stats" onClick=${openStats} title=${t('统计数据')}>${t('统计')}<//>
+          <${NoticesButton} onOpen=${() => setNoticesOpen(true)} />
           <${LangToggle} class="title-lang" />
         </div>
         <${MicroLabel} tone="hi">TARGET POINT<//><br /><${MicroLabel}>STRONGHOLD PROTOCOL<//>
@@ -285,6 +288,7 @@ export function TitleScreen() {
     </main>
 
     <${SettingsModal} open=${settingsOpen} onClose=${() => setSettingsOpen(false)} />
+    <${NoticesModal} open=${noticesOpen} onClose=${() => setNoticesOpen(false)} />
 
     <footer class="title-foot">
       <span>${t('非官方同人复刻 · 游戏素材版权归 上海鹰角网络 / Yostar 所有')}</span>

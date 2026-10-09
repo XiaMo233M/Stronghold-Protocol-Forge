@@ -1233,5 +1233,12 @@
   "客户端": "Client",
   "会改动战斗结果": "Changes battle results",
   "本房间使用模组（{n} 个）": "Mods this room uses ({n})",
-  "房间指定了本服务器没有的模组包": "The room named a mod pack this server does not have"
+  "房间指定了本服务器没有的模组包": "The room named a mod pack this server does not have",
+  "公告": "Notices",
+  "公告与鸣谢": "Notices and credits",
+  "更新记录": "Changelog",
+  "游戏更新": "Game updates",
+  "来自 {pack}": "From {pack}",
+  "鸣谢": "Credits",
+  "这一版没有要展示的公告。": "There is nothing to announce in this build."
 }
