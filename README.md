@@ -2,7 +2,7 @@
 
 《明日方舟》季节性自走棋塔防玩法「卫戍协议：盟约」的**非官方同人复刻**：浏览器即开即玩，单人或 1–4 人联机合作。
 
-![version](https://img.shields.io/badge/version-0.9.4-2ea44f)
+![version](https://img.shields.io/badge/version-0.10.0-2ea44f)
 ![license](https://img.shields.io/badge/code%20license-GPL--3.0--or--later-blue)
 ![node](https://img.shields.io/badge/node-22%20%7C%2024-339933)
 
@@ -176,7 +176,7 @@ npm run editor                                                                  
 
 - **独立模拟**（单人）与**同盟模拟**（1–4 人**合作**，没有 PvP；空位可以加 AI 队友）。
 - 服务器是一个 Node.js 程序，**战斗在各玩家的浏览器里模拟**（和官方一样），服务器只管经济与回合，一台低功耗小主机就能开服。
-- **本仓库打包的上游游戏本体为 0.2.1**（本仓库自己的版本是 0.8.2，两者的读法见[版本号怎么读](#版本号怎么读)）：0.2.0 带来补位、自选编队、中英日韩四语言、自定义快捷键与精简包；0.2.1 把联防改回在本回合的战场上打（0.2.0 那张空马路是所有波次模板共用的占位地图）、**干员按满潜能计算**、装备栏满时再装一次性道具会弹「替换装备」窗，并修掉凋亡扣技力、频次器物、飞行敌人高度、盟约栏与详情卡等一批问题，详见 [CHANGELOG.md](CHANGELOG.md) 与 [docs/history/0.2.1.md](docs/history/0.2.1.md)。仍有少数规则按推断实现，与官方不一致的地方欢迎在 Issue 里反馈。
+- **本仓库打包的上游游戏本体为 0.2.2**（本仓库自己的版本是 0.10.0，两者的读法见[版本号怎么读](#版本号怎么读)）：0.2.0 带来补位、自选编队、中英日韩四语言、自定义快捷键与精简包；0.2.1 把联防改回在本回合的战场上打（0.2.0 那张空马路是所有波次模板共用的占位地图）、装备栏满时再装一次性道具会弹「替换装备」窗，并修掉凋亡扣技力、频次器物、飞行敌人高度、盟约栏与详情卡等一批问题；**0.2.2 把干员的潜能与练度改成按干员、按玩家在运行时设置**（缺省满潜，比 0.2.1 一律满潜的数值再高约 10 %）、新增**日文语音**与本机**统计页**、补上装置说明卡与详情卡攻击范围等界面项，并把协议里 `loadout.ops`、`b.progress` 的 `resolved` / `leaksBy` 等字段补齐，详见 [CHANGELOG.md](CHANGELOG.md) 与 [docs/history/0.2.2.md](docs/history/0.2.2.md)。仍有少数规则按推断实现，与官方不一致的地方欢迎在 Issue 里反馈。
 - **多语言配音**（0.7.1 起）：干员战斗语音有中文 / 日文 / 英文 / 韩文四种，**设置 → 配音语言** 选全局默认，
   任何干员还能在 **干员详情 → 配音** 里单独换一种（点一下当场试听）。某种配音缺一句时自动退回默认配音。
   **发行包只带默认配音**（**0.9.0 起是日文**），其余三种在同一个 release 的 `…-voices-*.zip` 里（解压覆盖到 `app/public/assets/audio/voice/` 即可，不用改配置）。
@@ -235,13 +235,13 @@ macOS / Linux 请用方式二。
 
 #### 方式二：源码包 / 从源码运行（不含素材）
 
-包里只有代码，素材在首次运行时从公开镜像下载（约 270 MB，可中断续传）。
+包里只有代码，素材在首次运行时从公开镜像下载（约 550 MB，可中断续传）。
 
 ```bash
 unzip Stronghold-Protocol-Forge-*-src.zip     # 或 git clone 本仓库
 cd Stronghold-Protocol
 npm install        # 安装依赖（postinstall 会把 pixi / preact / three 复制到 public/vendor）
-npm run setup      # 检查环境，并从公开镜像下载约 270 MB 美术 / 音频（可中断，再次运行会续传）
+npm run setup      # 检查环境，并从公开镜像下载约 550 MB 美术 / 音频（可中断，再次运行会续传）
 npm start          # 启动服务器：http://localhost:3000
 ```
 
@@ -254,7 +254,7 @@ npm start          # 启动服务器：http://localhost:3000
 
 #### 版本号怎么读
 
-发行 tag 写成 **`v<forge>-<上游>`**：`v0.8.2-0.2.1` = 本仓库（Forge 工坊编辑器）**0.8.2** + 上游游戏（[sganggs/Stronghold-Protocol](https://github.com/sganggs/Stronghold-Protocol)）**0.2.1**。程序里显示的版本（标题页、启动横幅、`/healthz`）只是前半部分，因为仓库自己的元数据检查要求它是三段普通 semver —— 详见 [CHANGELOG.md](CHANGELOG.md) 与 `test/version.test.js`。
+发行 tag 写成 **`v<forge>-<上游>`**：`v0.10.0-0.2.2` = 本仓库（Forge 工坊编辑器）**0.10.0** + 上游游戏（[sganggs/Stronghold-Protocol](https://github.com/sganggs/Stronghold-Protocol)）**0.2.2**。程序里显示的版本（标题页、启动横幅、`/healthz`）只是前半部分，因为仓库自己的元数据检查要求它是三段普通 semver —— 详见 [CHANGELOG.md](CHANGELOG.md) 与 `test/version.test.js`。
 
 #### 系统要求
 
@@ -452,7 +452,7 @@ work for direct profit.
 |---|---|
 | 上游项目 | **Stronghold-Protocol**（卫戍协议：盟约 · 非官方同人复刻） |
 | 上游地址 | <https://github.com/sganggs/Stronghold-Protocol> |
-| 本仓库当前的底座 | 上游 **v0.2.1** 的源码树（tag `v0.2.1` = commit `c2a2ef7`）。0.8.2 把底座从 v0.2.0（commit `1303321`）抬到 v0.2.1（含增量包没带上的开发侧改动）；0.7.0 起按上游 tag 逐文件移植；此前的 0.1.x–0.6.x 基于上游 **v0.1.3** 的 Release 整合包（解压得到，不是 `git clone`）。 |
+| 本仓库当前的底座 | 上游 **v0.2.2** 的源码树（tag `v0.2.2` = commit `62eb113`）。0.10.0 把底座从 v0.2.1（commit `c2a2ef7`）抬到 v0.2.2（含增量包没带上的开发侧改动）；0.8.2 把底座从 v0.2.0（commit `1303321`）抬到 v0.2.1；0.7.0 起按上游 tag 逐文件移植；此前的 0.1.x–0.6.x 基于上游 **v0.1.3** 的 Release 整合包（解压得到，不是 `git clone`）。 |
 | 改动时间 | 2026 年 10 月起，逐次提交见 `git log` 的提交日期 |
 | 许可 | 整体 **GPL-3.0-or-later**，全文见 [LICENSE](LICENSE)；上游的版权与许可声明原样保留（[NOTICE.md](NOTICE.md)、[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)） |
 
@@ -466,16 +466,19 @@ work for direct profit.
 | 2 | 0.7.0 的移植以**上游 v0.2.0 的源码树**为底座 | 863 个文件直接取自上游（含 `server/sim` 的拆分、`server/http/`、i18n、`packs/` 与上游那 519 个测试文件）；290 个「上游没改动过」的文件保留我们的版本；6 个按上游删除 |
 | 3 | 我们自己的功能层与补丁重贴 | 我们的自研文件原样保留；我们相对上游的运行时改动约 **1100 行**、散在 63 个文件，用三方合并（ours=0.6.4 / base=上游 v0.1.3 / theirs=上游 v0.2.0）逐文件重贴；上游拆开的 4 个文件（`server/index.js`、`match/Match.js`、`match/PlayerState.js`、`ui/gameLogic.js`）按新结构重写钩子 |
 | 4 | 0.8.2 的移植以**上游 v0.2.1** 为新底座 | 逐文件用 sha256 判定（不看时间戳）：我们与 v0.2.0 逐字节相同的 **116 个文件直接采纳** v0.2.1；双方都改过的做三方合并；上游新增的 `server/update.js`、`tools/package-update.mjs` 等一并带入。**上游的增量包只含 MANIFEST 里的发行文件（138 个），开发侧的 148 个改动（`tools/**`、`test/**`、`docs/**`）是用上游 tag 的全树比对补齐的** |
+| 5 | 0.10.0 的移植以**上游 v0.2.2** 为新底座 | 上游 tag `v0.2.2` 相对 `v0.2.1` 是 **445 个文件、+33 528 / −8 891 行**：444 个开发侧文件按 sha256 分类处置 —— **273 个照搬**、**95 个上游新增**（含 `shared/potential.js`、统计页与日文语音链路）、**76 个双方都改过、做三方合并**；`data/` 由生成器重建，产物与上游 v0.2.2 逐字节一致 |
 
 | 分类 | 依据 | 强度 |
 |---|---|---|
-| **A 本项目新增** | 上游 v0.2.1 的树里**没有**这个路径 | 可核实（与上游 tag 比对） |
-| **B 本项目修改** | 路径在上游树里存在，但内容与上游 v0.2.1 不同 | 可核实（逐文件 diff） |
-| **C 上游原文** | 与上游 v0.2.1 逐字节相同 | 可核实 |
+| **A 本项目新增** | 上游 v0.2.2 的树里**没有**这个路径 | 可核实（与上游 tag 比对） |
+| **B 本项目修改** | 路径在上游树里存在，但内容与上游 v0.2.2 不同 | 可核实（逐文件 diff） |
+| **C 上游原文** | 与上游 v0.2.2 逐字节相同 | 可核实 |
 
-**移植正确性怎么证明的**：0.8.2 的黄金值（`test/golden/*.json`）里，**roster / bonds / fields / standins / diy 五个家族重新生成后与上游 v0.2.1 的存值逐字节相同**（283 / 300 个场景）—— 战斗内核与规则层与上游完全一致。只有 `matches` 家族不同，原因是我们**刻意保留的两处分歧**：调度中心升级只多一个空位（0.7.2 起，见 [docs/META.md](docs/META.md)）与助战干员进商店的定价（0.5.0 起）。用上游的 `server/match/player/economy.js` 做对照实验，matches 的差异场景会从 7 个降到 1 个，而那 1 个是同一处分歧的下游影响（补位清单按时序随之调整）。
+**移植正确性怎么证明的（0.10.0 = 上游 v0.2.2）**：黄金值（`test/golden/*.json`）的六个语料里，**只有 `matches` 家族移动**，且 **18 / 18 场全部归因**到上游 v0.2.2 本身的对局层变化 —— 其中 **17 场与上游 v0.2.2 逐字节相同**，`roster` / `bonds` / `fields` / `standins` / `diy` 五个家族**重算后与旧基线逐字节相同**（0.2.2 没有碰战斗内核）。唯一与上游不同的是 `coop2-NORMAL-14-standins`：我们**刻意保留的分歧**（补位候选池我们排除 12 位、上游排除 9 位，0.2.0 移植时就定下），不是本次移植引入的偏差。注意这条与 0.8.2 那次的形态不同 —— 那次 matches 的差异全部来自我们的分歧，这次**差异会改变对局结果**，所以它是「会改变对局的实证」而不是「无关紧要的漂移」。
 
-### A. 本项目新增（上游 v0.2.1 里没有）
+**0.8.2 那次（上游 v0.2.1）的复核结论**：`roster` / `bonds` / `fields` / `standins` / `diy` 五个家族重新生成后与上游 v0.2.1 的存值逐字节相同（283 / 300 个场景），只有 `matches` 家族不同，原因是我们**刻意保留的两处分歧**：调度中心升级只多一个空位（0.7.2 起，见 [docs/META.md](docs/META.md)）与助战干员进商店的定价（0.5.0 起）。
+
+### A. 本项目新增（上游 v0.2.2 里没有）
 
 | 目录 | 内容 |
 |---|---|
@@ -488,7 +491,7 @@ work for direct profit.
 | `docs/` | `EDITOR.md` `WORKSHOP.md` `prompts/**` `examples/**` `img/intro/**` |
 | 其他 | `workshop/README.md` `data/support.json` `third-party/README.md` |
 
-### B. 本项目修改的上游文件（相对上游 v0.2.1）
+### B. 本项目修改的上游文件（相对上游 v0.2.2）
 
 | 目录 | 内容与改动 |
 |---|---|
@@ -537,7 +540,7 @@ work for direct profit.
 This repository is **Stronghold-Protocol-Forge**: a standalone, out-of-game **graphical authoring tool (the Forge editor)** for the content of the fan remake of Arknights' seasonal auto-chess tower-defense mode *Stronghold Protocol: Alliance* — plus that bundled upstream game itself.
 
 - **The Forge editor (what this repo is for):** run `npm run editor` and open <http://127.0.0.1:3311> — no build step, no game-server change, bound to loopback by default. Nine pages author operators (`/`), maps (`/stage.html`, 19×21 grid with 2D placement and a 3D preview), enemies (`/enemy.html`), spawn waves (`/wave.html`), items (`/item.html`), bonds (`/bond.html`: add a bond, or override one of the official 23), behaviour-layer kits (`/kit.html`), a pack's voice lines (`/voice.html`) and the pack itself (`/pack.html`: export to a `.zip`, import someone else's, tick which of the pack's own operators enter the 助战 pool, and start a playtest server that opens straight into a solo run). Mechanical fields are always derived from the real engine rather than typed by hand, and `tools/workshop-validate.mjs` re-checks every pack in layers (format → semantics → the real engine → kits / maps / enemies / waves / items / voice lines / 助战) through the same `shared/*Authoring.js` rules the editor and CLI use, so the rules cannot drift. Saved Options carry a `_meta` attribution block. See [docs/EDITOR.md](docs/EDITOR.md) and [docs/WORKSHOP.md](docs/WORKSHOP.md).
-- **The bundled game:** an **unofficial, non-commercial fan remake** played in the browser: solo, or 1–4 player co-op (AI teammates can fill seats). Combat is simulated in each player's browser, so a low-power PC can host. The bundled upstream game is **0.2.0** (this repo's own version is **0.7.0**; the release tag spells both halves, `v0.7.0-0.2.0`): it adds stand-ins for operators you do not own (补位), a custom squad (自选编队), Chinese / English / Japanese / Korean / Traditional Chinese, configurable hotkeys and a ~22 MB lite bundle, plus a batch of rule fixes checked against the official data and PRTS. Download the all-in-one bundle from [Releases](../../releases/latest), install Node.js 22 or 24, then double-click `scripts\start-windows.bat` (Windows) or run `./scripts/start.sh` (macOS / Linux) and open <http://localhost:3000>. From source: `npm install && npm run setup && npm start` (setup downloads ~300 MB of art from public mirrors, the emotes, the how-to-play pages and the twelve battle-voice slots per operator included; the official 3D board, some official HUD icons and two enemy models are extracted from a local Arknights client — without one the game uses the 2D board and look-alike stand-ins, and a server can copy `public/assets/local/` and `data/local-assets.json` from the release bundle of the same version). Create a co-op room and share the 4-letter key or the `?room=KEY` link; on a LAN use the address printed at start, otherwise a virtual-LAN tool, a tunnel or a VPS — see [docs/DEPLOY.md](docs/DEPLOY.md).
+- **The bundled game:** an **unofficial, non-commercial fan remake** played in the browser: solo, or 1–4 player co-op (AI teammates can fill seats). Combat is simulated in each player's browser, so a low-power PC can host. The bundled upstream game is **0.2.2** (this repo's own version is **0.10.0**; the release tag spells both halves, `v0.10.0-0.2.2`): it adds stand-ins for operators you do not own (补位), a custom squad (自选编队), Chinese / English / Japanese / Korean / Traditional Chinese, configurable hotkeys and a ~22 MB lite bundle, plus a batch of rule fixes checked against the official data and PRTS; 0.2.2 makes an operator's potential and cultivation a per-operator, per-player runtime setting (full potential by default), adds the Japanese voice track and an on-device statistics page. Download the all-in-one bundle from [Releases](../../releases/latest), install Node.js 22 or 24, then double-click `scripts\start-windows.bat` (Windows) or run `./scripts/start.sh` (macOS / Linux) and open <http://localhost:3000>. From source: `npm install && npm run setup && npm start` (setup downloads ~550 MB of art from public mirrors, the emotes and the how-to-play pages included; the official 3D board, some official HUD icons, two enemy models and 39 summon models are extracted from a local Arknights client — without one the game uses the 2D board and look-alike stand-ins, and a server can copy `public/assets/local/` and `data/local-assets.json` from the release bundle of the same version). Create a co-op room and share the 4-letter key or the `?room=KEY` link; on a LAN use the address printed at start, otherwise a virtual-LAN tool, a tunnel or a VPS — see [docs/DEPLOY.md](docs/DEPLOY.md).
 - **Run:** download the full bundle `Stronghold-Protocol-v<version>.zip` (~505 MB, all the art inside, the Chinese and Japanese operator voices included) from [Releases](../../releases/latest) — or the lite one, `…-lite.zip` (~22 MB), which downloads the art (~550 MB) on its first start; from 0.2.1 on, `…-update.zip` holds only the files changed since the earlier 0.2.x releases: stop the server, extract it over an existing 0.2.x folder and start again (the first start deletes the files the new version dropped and verifies the install) — install Node.js 22 or 24, then double-click `scripts\start-windows.bat` (Windows) or run `./scripts/start.sh` (macOS / Linux) and open <http://localhost:3000>. From source: `npm install && npm run setup && npm start` (setup downloads ~550 MB of art from public mirrors, the emotes and the how-to-play pages included; the official 3D board, some official HUD icons, two enemy models and 39 summon models are extracted from a local Arknights client — without one the game uses the 2D board and look-alike stand-ins (the summons show their avatars), and a server can copy `public/assets/local/` and `data/local-assets.json` from the full bundle of the same version).
 - **Languages:** Chinese (the default), English, 日本語, 한국어 and 繁體中文 — switch on the title screen or in Settings. Game texts come from the official clients; the Japanese, Korean and Traditional Chinese interface strings are machine translations (corrections welcome: [docs/I18N.md](docs/I18N.md)).
 - **Play with friends:** create a co-op room and share the 4-letter key or the `?room=KEY` link. On a LAN, use the address printed at start; otherwise use a virtual-LAN tool, a tunnel or a VPS — see [docs/DEPLOY.md](docs/DEPLOY.md).

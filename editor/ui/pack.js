@@ -87,7 +87,7 @@ function metaExample(field) {
     case 'author': return t('例如 {0}', 'Example Author');
     case 'license': return t('例如 {0}', 'CC0-1.0');
     case 'description': return t('例如 {0}', 'a pack that ships one new map');
-    case 'gameVersion': return t('例如 {0}', '0.2.1');
+    case 'gameVersion': return t('例如 {0}', '0.2.2');
     default: return '';
   }
 }
