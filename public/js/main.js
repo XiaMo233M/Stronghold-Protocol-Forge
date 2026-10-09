@@ -261,6 +261,15 @@ function wireNet() {
   // C 层注册点（DESIGN §28.8）：包声明的面板清单随 `welcome` 到达。没有包声明 `client` 时这个字段根本不出现 ——
   // 于是这次握手、这次订阅之后的行为、以及页面上的一切都与从前逐字节相同（没有新请求、新 DOM、新全局）。
   net.on('welcome', (msg) => {
+    // 资源声明（DESIGN §28.13.5）：包只**声明**容器与策略，SW 与整条流程是引擎的。这里刻意用 **动态 import** ——
+    // 没有声明时 `public/js/resources/host.js` 及其依赖根本不进浏览器，于是「不声明 ⇒ 无字段、无新请求、无新 DOM、
+    // 无新全局」是结构性的，而不是靠几个 `if` 拦住的。
+    if (Array.isArray(msg && msg.modAssets) && msg.modAssets.length) {
+      import('./resources/host.js')
+        // 引擎自带的 SW 由 host 在**后台**注册（`resources/worker.js`）：入口放行绝不等待它。
+        .then((host) => host.installModAssets(msg.modAssets, { log: console }))
+        .catch((err) => recordError('mod-assets', err, 'resource host failed to load'));
+    }
     if (Array.isArray(msg && msg.modPanels) && msg.modPanels.length) modPanels.apply(msg.modPanels);
   });
   net.on('helloError', (err) => toastError(err));

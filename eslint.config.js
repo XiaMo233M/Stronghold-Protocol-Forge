@@ -75,7 +75,9 @@ export default [
     rules,
   },
   {
-    files: ['public/js/**/*.js'],
+    // Browser: `public/js/**` and the engine's own Service Worker (`public/resource-sw.js`, DESIGN §28.13.5 —
+    // a worker global scope, so it needs the same browser globals and its own file pattern).
+    files: ['public/js/**/*.js', 'public/*.js'],
     languageOptions: {
       ecmaVersion: 2024,
       sourceType: 'module',

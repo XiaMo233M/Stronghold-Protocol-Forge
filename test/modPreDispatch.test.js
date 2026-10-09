@@ -14,7 +14,8 @@
 //      键（没有 data / lobby / Match —— 注入改不了对局结果）、包 id 次序决定调用次序、不注册第二个 message 监听器。
 //   5. **坏声明拒的是整个包**（B3a 段对齐，DESIGN §28.13.3）：模块/策略文件不在、策略不是 JSON 对象、`intercepts`
 //      里有协议不认识的名字 —— 以前只拒那个钩子、包照旧加载（服务器以为自己被准入闸门保护着），现在整包不进
-//      `loaded.packs`。`loadWorkshopHooks` 的同类拒绝只剩「模块变了 / 没有工厂导出」这一层 import 才知道的后备。
+//      `loaded.packs`。B4 段把最后剩下的一格也补上：只有 import 才知道的两种（模块装不上 / 没有工厂导出）由**启动
+//      装配路径**上的 `dropUnavailablePreDispatchPacks` 裁剪，于是「声明了闸门却没有闸门」不再是一个能通过的结局。
 //
 // Run: node --test test/modPreDispatch.test.js
 import { describe, test, before, after } from 'node:test';
@@ -26,7 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 
 import { C2S, validateC2S } from '../shared/protocol.js';
-import { loadWorkshop, loadWorkshopHooks } from '../server/workshop.js';
+import { loadWorkshop, loadWorkshopHooks, dropUnavailablePreDispatchPacks } from '../server/workshop.js';
 import { createModDispatch, PRE_DISPATCH_DEPS } from '../server/modDispatch.js';
 import { Network, SessionRegistry } from '../server/net.js';
 import { startServer } from '../server/index.js';
@@ -470,22 +471,30 @@ describe('server.preDispatch: 坏声明 ⇒ 整包被拒（B3a 段对齐，DESIG
     }
   });
 
-  test('`moduleNoFactory`（文件在、内容没有工厂导出）是唯一留在这层 import 才知道的一条', async () => {
+  test('`moduleNoFactory`（文件在、内容没有工厂导出）是**装载期看不出来**的那一条，装配路径把它裁掉', async () => {
     const loaded = loadWorkshop(wsRoot, { log: quiet });
     // 装载期的判据是「module / policy 是不是可读文件、policy 是不是 JSON 对象、intercepts 认不认识」。模块**内容**
     // 有没有 `createPreDispatch` 导出必须 import 才知道，而 `loadWorkshop` 是同步的（server/data.js 在叠数据时
-    // 也调它），所以这一条留在 `loadWorkshopHooks`：包装上了，钩子没装上，并且有具名警告。
-    // 这是一个**已知的口子**，写在 DESIGN §28.13.3 与 B3a 报告里 —— 不假装它已经被堵上。
-    assert.ok(loaded.packs.some((p) => p.id === 'moduleNoFactory'), '文件层面它合法，所以包照旧加载');
+    // 也调它），所以这一条留在 `loadWorkshopHooks`：**文件层面它合法**，装载器照旧列出它。
+    // B4 段把最后这一格补上：`server/index.js` 在装配路径上（`loadWorkshopHooks` 之后、其余一切读者之前）用
+    // `dropUnavailablePreDispatchPacks` 把这类包移出已加载集合并点名。这里同时钉住两半 —— 装载器照旧列出它
+    // （文件合法），装配路径照旧裁掉它（能力不合法）——「声明了闸门却没有闸门」于是不再是一个能通过的结局。
+    assert.ok(loaded.packs.some((p) => p.id === 'moduleNoFactory'), '文件层面它合法，所以装载器照旧列出它');
     assert.equal(loaded.errors.some((e) => e.pack === 'moduleNoFactory'), false);
     const { hooks, errors } = await loadWorkshopHooks(loaded, { log: quiet });
     assert.equal(hookFor(hooks, 'moduleNoFactory'), undefined);
     const err = errors.find((e) => e.pack === 'moduleNoFactory');
     assert.equal(err?.code, 'PREDISPATCH_BAD_MODULE');
     assert.match(err.reason, /createPreDispatch/);
-    assert.match(err.reason, /the loader refuses the whole pack for this/, '后备拒绝要说明自己为什么在这层');
-    // 好的那个照旧装上
+    assert.match(err.reason, /the startup assembly path drops this pack/, '这条拒绝要说明自己为什么在这层、以及接下来会发生什么');
+    const pruned = dropUnavailablePreDispatchPacks(loaded, errors);
+    assert.deepEqual(pruned.removed.map((r) => r.pack), ['moduleNoFactory']);
+    assert.equal(pruned.packs.some((p) => p.id === 'moduleNoFactory'), false, '装配路径不得让它留在已加载集合里');
+    assert.ok(pruned.errors.some((e) => e.pack === 'moduleNoFactory' && /^PREDISPATCH_BAD_MODULE: /.test(e.reason)),
+      '裁剪必须是**点名**的：追加进 errors 的那一条带拒绝码');
+    // 好的那个照旧装上，也照旧留在集合里
     assert.deepEqual(hooks.map((h) => h.pack), ['guard']);
+    assert.deepEqual(pruned.packs.map((p) => p.id).sort(), ['guard', 'plain']);
   });
 
   test('intercepts 按**运行时真的装着的协议**再判一次（声明可以比协议活得久）', async () => {

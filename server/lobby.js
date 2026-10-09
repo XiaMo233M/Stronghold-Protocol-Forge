@@ -772,13 +772,19 @@ export class Lobby {
   /** Extra fields of every `welcome` (net.js): the operators a 自选 slot may field (shared/diy.js `kitted`), and what
    * this server is running (`mods`, DESIGN §28.2) so the client can mark itself modded and echo the digest to enter.
    * Since B2 段 it also carries the C-layer panels the installed packs declared (`modPanels`, DESIGN §28.8): the
-   * registration list travels in a frame the server already sends, so a server with no such pack is byte-identical. */
+   * registration list travels in a frame the server already sends, so a server with no such pack is byte-identical.
+   * Since B4 段 the same is true of `modAssets` (DESIGN §28.13.5): the packs that declared `assets` — their registered
+   * container / manifest URLs, the container digest the loader verified against the bytes, and the two normalized
+   * policy values. **Only readers add it**: no pack declaring `assets` means no field, no SW registration, no new
+   * request, no new DOM, no new global on the client (main.js only imports the resource flow when the field arrives). */
   welcomeInfo() {
     const panels = this.workshop && Array.isArray(this.workshop.panels) ? this.workshop.panels : [];
+    const assets = this.workshop && Array.isArray(this.workshop.assets) ? this.workshop.assets : [];
     return {
       diyKitted: KITTED_CHARS,
       ...(this.modSet ? { mods: this.modSet } : {}),
       ...(panels.length ? { modPanels: panels } : {}),
+      ...(assets.length ? { modAssets: assets } : {}),
     };
   }
 

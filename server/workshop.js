@@ -31,6 +31,12 @@ export const WORKSHOP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
+ * `identifyPack` 的哈希清单里那一条**合成**路径：容器的 sha256（`pack.json.assets` 的容器，装载期已与字节核对）。
+ * 它不可能与真实文件同名（见 `identifyPack` 里那一段），所以「有没有声明 `assets`」在身份哈希里是可判定的一件事。
+ */
+export const ASSETS_DIGEST_PATH = 'assets.container.sha256';
+
+/**
  * A rewritten kit source as an importable module. `data:` and not a temp file: nothing is written to disk, and the
  * module still has a readable identity in a stack trace. `v` (the file's mtime) is appended as a `//#` comment so two
  * revisions of the same kit are two different URLs — the same cache-buster the real-path import carries as `?v=`.
@@ -155,10 +161,12 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
         continue;
       }
       // 容器的 sha256 在这里已经算过（`assetsIssues` 流式读过一遍），所以把它随包带出去：服务面（HTTP 头
-      // `X-SP-Resource-Sha256`）要用同一个值，重启时不该为几百 MB 再算第二遍。没声明 `assets` 的包这个键缺席，
-      // 与 B2 一样「声明了才有」。
+      // `X-SP-Resource-Sha256`、`welcome.modAssets[].digest`）要用同一个值，重启时不该为几百 MB 再算第二遍。
+      // 没声明 `assets` 的包这个键缺席，与 B2 一样「声明了才有」；同时它进**身份哈希**（见 `identifyPack`）：
+      // 「同一个房间摘要 ⇒ 同一份容器」这条对齐就是靠那一步成立的。
       packs.push({
-        ...manifest.pack, dir: packDir, files, ...identifyPack(packDir, manifest.pack, files),
+        ...manifest.pack, dir: packDir, files,
+        ...identifyPack(packDir, manifest.pack, files, { assetsDigest: assetIssues.digest }),
         ...(assetIssues.digest ? { assetsDigest: assetIssues.digest } : {}),
       });
     }
@@ -462,9 +470,11 @@ export function loadWorkshopPanels(loaded, { log = null, baseUrl = WORKSHOP_PANE
  * @param {string} packDir
  * @param {object} pack the normalized manifest
  * @param {Record<string, Record<string, object>>} files the normalized content files
+ * @param {{ assetsDigest?: string|null }} [opts] 装载期已与容器**字节**核对过的 sha256（`assetsIssues`）；只有声明了
+ *   `assets` 的包才有值
  * @returns {{ hash: string, manifest: Array<{ path: string, hash: string }>, layer: string, combat: boolean, api: string|null, game: string|null }}
  */
-export function identifyPack(packDir, pack, files) {
+export function identifyPack(packDir, pack, files, { assetsDigest = null } = {}) {
   /** @type {Array<{ path: string, hash: string }>} */
   const manifest = [];
   const addText = (rel, text) => manifest.push({ path: rel, hash: sha256Hex(text) });
@@ -508,6 +518,15 @@ export function identifyPack(packDir, pack, files) {
   const hasMedia = ['voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art'].some((k) => Object.keys(pack[k] || {}).length > 0);
   const layer = pack.layer || (kits ? 'B' : (hasMedia || panelFiles.length) ? 'C' : 'A');
   const combat = pack.combat === null || pack.combat === undefined ? kits > 0 : pack.combat;
+  // 6. 声明的资源容器的 sha256（`pack.json.assets`, DESIGN §28.13.5）。装载期已经拿它与容器的**字节**核对过
+  //    （`assetsIssues` 流式读过一遍），所以它是这份包的一个真实属性，而不是一句声明 —— 这就是「同一个房间摘要
+  //    ⇒ 同一份容器」这条对齐的落点：换了容器、字节不同、摘要不同、包的内容哈希就不同，房间的摘要闸门随之拦下。
+  //    只有声明了 `assets` 的包才有这个条目：没声明的包哈希逐字节不变（`test/packAssets.test.js` 钉了三份真实包）。
+  //
+  //    合成路径 `assets.container.sha256` **不可能被真实文件占用**：进这份清单的路径只有 `pack.json`、
+  //    `<内容文件>.json`（13 个固定名字，没有 `assets`）、`kits/*.js`、`assets/**` 与声明过的面板模块（必须
+  //    `.js`）。这一条的 `hash` 直接就是容器的 sha256（它没有「另一份字节」可以哈希），路径名说的就是这件事。
+  if (typeof assetsDigest === 'string' && assetsDigest) manifest.push({ path: ASSETS_DIGEST_PATH, hash: assetsDigest });
   manifest.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   return { hash: modManifestDigest(manifest), manifest, layer, combat, api: pack.api || null, game: pack.game || pack.gameVersion || null };
 }
@@ -686,8 +705,14 @@ export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/worksho
  *
  * An import that fails, or a module without the factory, is reported under the same names
  * (`PREDISPATCH_BAD_MODULE` / `PREDISPATCH_BAD_POLICY` / `PREDISPATCH_UNKNOWN_TYPE` / `PREDISPATCH_BAD_PATH`) and that
- * hook is not installed. On a tree the loader already accepted those cannot fire — the only way in is a pack that
- * changed on disk between the two calls (or a hand-built `loaded` object in a test).
+ * hook is not installed. On a tree the loader already accepted the first three cannot fire — the only way in is a pack
+ * that changed on disk between the two calls (or a hand-built `loaded` object in a test).
+ *
+ * The LAST two can only be decided here (a dynamic import is not synchronous), so they are the one remaining hole in
+ * §28.13.3: `loadWorkshop` cannot refuse a module it has not imported yet. `server/index.js` therefore calls
+ * `dropUnavailablePreDispatchPacks` with this function's `errors` on the **startup assembly path**, right after this
+ * call and before anything derived from `loaded.packs` is built — so a pack whose declared gate cannot be installed
+ * does not end up in the data overlay, in `welcome.mods`, in the kit list or in the resource tables either.
  *
  * Never throws: one unimportable hook must not stop a server from starting (the same stance as the data layer and
  * `loadWorkshopKits`).
@@ -702,6 +727,9 @@ export async function loadWorkshopHooks(loaded, { log = null, c2s = C2S } = {}) 
   /** @type {Array<{ pack: string, code: string, reason: string }>} */
   const errors = [];
   const known = c2s && typeof c2s === 'object' ? c2s : {};
+  // 装载期已经拒绝过这几种（`preDispatchIssues` 在 `loadWorkshop` 里跑过一遍）—— 走到这里说明包在两次调用之间
+  // 变了，或者调用方手搓了一个 `loaded` 对象。措辞如实说明这一点，而不是把它说成一条新的判据。
+  const LOADER_BACKSTOP = ' (the loader already refuses the whole pack for this; reaching here means the pack changed on disk after it was listed, or the loader object was hand-built)';
   for (const pack of ((loaded && loaded.packs) || []).slice().sort(byPackId)) {
     const decl = pack && pack.server && pack.server.preDispatch;
     if (!decl) continue;
@@ -710,7 +738,7 @@ export async function loadWorkshopHooks(loaded, { log = null, c2s = C2S } = {}) 
     // pack that is rejected before it is listed and a pack this function refuses can never disagree about why.
     const issues = preDispatchIssues(pack, dir, { c2s: known });
     if (issues.length) {
-      errors.push({ pack: pack.id, code: issues[0].code, reason: `${issues[0].reason} (the loader refuses the whole pack for this; reaching here means the pack changed on disk or the loader object was hand-built)` });
+      errors.push({ pack: pack.id, code: issues[0].code, reason: `${issues[0].reason}${LOADER_BACKSTOP}` });
       continue;
     }
     const moduleAbs = path.join(dir, ...String(decl.module).split('/'));
@@ -723,23 +751,69 @@ export async function loadWorkshopHooks(loaded, { log = null, c2s = C2S } = {}) 
       continue;
     }
     let mod;
-    const backstop = ' (the loader refuses the whole pack for this; reaching here means the pack changed on disk or the loader object was hand-built)';
+    // 这一层只剩「只有 import 才知道」的两件事：模块装了能不能 import、装了有没有工厂导出。它们与上面那些**装载期
+    // 判据**不是一回事（那三种在装载期已经拒绝整个包了），所以这里的措辞说的是**调用方接下来会做什么**。
+    const unavailable = ' (the declared hook cannot be installed, so the startup assembly path drops this pack from the loaded set — a pack that declares a gate it does not have must not look loaded)';
     try {
       // mtime 既打败服务端 ESM 缓存，又让两个版本的模块是两个 URL（与 loadWorkshopKits 同一条理由）。
       const v = Math.round(fs.statSync(moduleAbs).mtimeMs);
       mod = await import(`${pathToFileURL(moduleAbs).href}?v=${v}`);
     } catch (e) {
-      errors.push({ pack: pack.id, code: 'PREDISPATCH_BAD_MODULE', reason: `server.preDispatch.module "${decl.module}" failed to import: ${e && e.message ? e.message : String(e)}${backstop}` });
+      errors.push({ pack: pack.id, code: 'PREDISPATCH_BAD_MODULE', reason: `server.preDispatch.module "${decl.module}" failed to import: ${e && e.message ? e.message : String(e)}${unavailable}` });
       continue;
     }
     const create = typeof mod.createPreDispatch === 'function' ? mod.createPreDispatch
       : (typeof mod.default === 'function' ? mod.default : null);
     if (!create) {
-      errors.push({ pack: pack.id, code: 'PREDISPATCH_BAD_MODULE', reason: `server.preDispatch.module "${decl.module}" must export createPreDispatch(deps) (or default-export that function)${backstop}` });
+      errors.push({ pack: pack.id, code: 'PREDISPATCH_BAD_MODULE', reason: `server.preDispatch.module "${decl.module}" must export createPreDispatch(deps) (or default-export that function)${unavailable}` });
       continue;
     }
     hooks.push({ pack: pack.id, module: decl.module, policyFile: decl.policy, policy, intercepts: [...decl.intercepts], create });
   }
   for (const e of errors) log?.warn?.(`[workshop] hook ${e.pack}: ${e.code}: ${e.reason}`);
   return { hooks, errors };
+}
+
+/**
+ * 把「声明了 `server.preDispatch` 却装不上」的包移出已加载集合 —— DESIGN §28.13.3 的**最后一格**。
+ *
+ * 为什么需要这一步：`loadWorkshop` 是同步的（`server/data.js` 在装叠加层时调它），而「模块能不能 import、有没有
+ * 工厂导出」只有动态 import 才知道。于是在装载期这道闸门之外还剩两种结局：
+ *   * `PREDISPATCH_BAD_MODULE`（import 失败 —— 语法错、模块不存在于导入图、依赖缺失）；
+ *   * `PREDISPATCH_BAD_MODULE`（导出了，但没有 `createPreDispatch`）；
+ * 以及一种「两次调用之间包变了」的兜底（策略文件变得读不动 / `intercepts` 变得不在协议里）。
+ *
+ * 它在 B1 段是「**包照旧加载**，只是那个钩子没装上」—— 那正是本仓反复点名的最坏形态：运维以为自己有一道准入
+ * 闸门，而实际上一条消息都没拦。所以这里与 B2 的 `client`、B3a 的 `assets` 同口径：**声明不可用 ⇒ 该包不进
+ * 已加载集合**，并点名报告（返回的 `removed` 与追加进 `errors` 的那一条都带拒绝码）。
+ *
+ * 为什么放在**启动装配路径**而不是 `loadWorkshop` 里：那需要把 `loadWorkshop` 变成 async，而它的调用方
+ * （`server/data.js` 的 `loadData`、`tools/workshop-validate.mjs`、`tools/workshop-pack.mjs`、十几份测试）全是同步的。
+ * `server/index.js` 因此在装配的最前面（`loadWorkshopHooks` 之后、其余一切之前）调用本函数，**用一个被裁剪过的
+ * `packs` 数组**喂给后面每一个读者（数据叠加层、身份清单、kits、面板、资源表、Lobby/Network），于是
+ * 「不进已加载集合」是**一处裁剪、处处成立**，而不是各读各处地漏。
+ *
+ * 纯函数：不改入参，返回新的数组。
+ * @param {{ packs?: Array<{ id: string }>, errors?: Array<{ pack: string, reason: string }> }} loaded
+ * @param {Array<{ pack: string, code: string, reason: string }>} hookErrors `loadWorkshopHooks(...).errors`
+ * @returns {{ packs: Array<any>, removed: Array<{ pack: string, code: string, reason: string }>,
+ *   errors: Array<{ pack: string, reason: string }> }}
+ */
+export function dropUnavailablePreDispatchPacks(loaded, hookErrors) {
+  /** @type {Map<string, { code: string, reason: string }>} */
+  const failing = new Map();
+  for (const e of Array.isArray(hookErrors) ? hookErrors : []) {
+    if (e && typeof e.pack === 'string' && e.pack && !failing.has(e.pack)) failing.set(e.pack, { code: String(e.code || 'PREDISPATCH_UNAVAILABLE'), reason: String(e.reason || '') });
+  }
+  /** @type {Array<any>} */
+  const packs = [];
+  const removed = [];
+  const errors = Array.isArray(loaded && loaded.errors) ? [...loaded.errors] : [];
+  for (const p of ((loaded && loaded.packs) || [])) {
+    const hit = p && typeof p.id === 'string' ? failing.get(p.id) : null;
+    if (!hit) { packs.push(p); continue; }
+    removed.push({ pack: p.id, code: hit.code, reason: hit.reason });
+    errors.push({ pack: p.id, reason: `${hit.code}: ${hit.reason}` });
+  }
+  return { packs, removed, errors };
 }

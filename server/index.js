@@ -25,10 +25,10 @@
 import http from 'node:http';
 import path from 'node:path';
 import { getData, loadData } from './data.js';
-import { loadWorkshop, loadWorkshopKits, loadWorkshopHooks, loadWorkshopPanels, WORKSHOP_DIR } from './workshop.js';
+import { loadWorkshop, loadWorkshopKits, loadWorkshopHooks, loadWorkshopPanels, dropUnavailablePreDispatchPacks, WORKSHOP_DIR } from './workshop.js';
 import {
   buildWorkshopDataFiles, workshopKitFilesFor, workshopPanelFilesFor, workshopAssetsFor, workshopRoutesFor,
-  workshopResourceFilesFor, resourceServerPolicy, WORKSHOP_ASSET_PREFIX, WORKSHOP_ASSET_TYPES,
+  workshopResourceFilesFor, workshopModAssetsFrom, resourceServerPolicy, WORKSHOP_ASSET_PREFIX, WORKSHOP_ASSET_TYPES,
 } from './http/workshop.js';
 import { ROOT, listenAddress, bindCandidates, serveDirs, makeLogger, parseTrustProxy } from './http/config.js';
 import { WS_MAX_PAYLOAD, createSessionStack, attachWebSocket } from './http/websocket.js';
@@ -46,7 +46,7 @@ export {
   acceptsGzip, parseRange, createStaticHandler, lanUrls, parseTrustProxy,
   // 创意工坊 (docs/WORKSHOP.md): the HTTP helpers live in ./http/workshop.js but stay part of this module's API
   buildWorkshopDataFiles, workshopKitFilesFor, workshopPanelFilesFor, workshopAssetsFor, workshopRoutesFor,
-  workshopResourceFilesFor, resourceServerPolicy, WORKSHOP_ASSET_PREFIX, WORKSHOP_ASSET_TYPES,
+  workshopResourceFilesFor, workshopModAssetsFrom, resourceServerPolicy, WORKSHOP_ASSET_PREFIX, WORKSHOP_ASSET_TYPES,
 };
 
 /**
@@ -77,24 +77,40 @@ export async function startServer(opts = {}) {
   // pack being edited (docs/EDITOR.md 「工坊目录」).
   const envWorkshop = process.env.SP_WORKSHOP ? path.resolve(process.env.SP_WORKSHOP) : null;
   const workshopDir = opts.workshopDir === undefined ? (envWorkshop || WORKSHOP_DIR) : opts.workshopDir;
+  // 分发前钩子（`pack.json.server.preDispatch`, DESIGN §28.13）**排在最前面**，因为它的最后两种失败只能由动态
+  // import 发现（模块装不上 / 没有工厂导出），而 `loadWorkshop` 与 `loadData` 都是同步的。判据一旦跑完，装配路径
+  // 就把「声明了钩子却装不上」的包从已加载集合里**裁掉**（`dropUnavailablePreDispatchPacks`），再用裁剪后的数组
+  // 喂给下面每一个读者：数据叠加层、身份清单、kits、面板、资源表、Lobby/Network。B1 段这里是「包照旧加载、只是
+  // 钩子没装上」—— 那种结局让运维以为自己有一道不存在的闸门，而它的内容却已经并进了游戏数据。
+  const loadedOnce = loadWorkshop(workshopDir, { log });
+  const workshopHooks = await loadWorkshopHooks(loadedOnce, { log });
+  const pruned = dropUnavailablePreDispatchPacks(loadedOnce, workshopHooks.errors);
+  if (pruned.removed.length) {
+    log.warn(`[workshop] dropped ${pruned.removed.length} pack(s) whose declared server.preDispatch cannot be installed: `
+      + pruned.removed.map((r) => `"${r.pack}" (${r.code})`).join(', '));
+  }
+  const excludedPacks = new Set(pruned.removed.map((r) => r.pack));
+  // The process-wide singleton serves the default data dir; a custom dir (tests) gets its own copy. The 创意工坊 overlay
+  // is applied inside the loader (server/data.js), i.e. whichever way the data is obtained, it is already merged.
+  // SP_WORKSHOP (editor/playtest.mjs) lets the Forge editor's 试玩 subprocess read the workshop root the editor was
+  // started with (`--workshop <dir>`) instead of the repository's own workshop/ — without it the playtest cannot see the
+  // pack being edited (docs/EDITOR.md 「工坊目录」).
   // A caller that names a data dir OR a workshop root must get a FRESH load: `getData` is a process-wide singleton whose
   // first caller wins, and something in the import graph may already have created it with the default workshop/ — which
   // is exactly why SP_WORKSHOP has to take the loadData() branch, or the 试玩 subprocess would silently read the wrong
   // (empty) pack root.
+  // `excludePacks` 让那一层也遵守同一次裁剪（`server/data.js`）：不这样做，被裁的包会留下一个「谁都不认识的干员」。
   const data = (opts.dataDir || opts.workshopDir !== undefined || envWorkshop)
-    ? loadData(dataDir, { log, workshopDir })
-    : getData({ dir: dataDir, log, workshopDir });
-  // 创意工坊 (docs/WORKSHOP.md): load the packs ONCE and derive the three things the runtime needs —
+    ? loadData(dataDir, { log, workshopDir, excludePacks: excludedPacks })
+    : getData({ dir: dataDir, log, workshopDir, excludePacks: excludedPacks });
+  // 创意工坊 (docs/WORKSHOP.md): 装载一次，派生运行时要的三件东西 ——
   //   * workshopJson      the /data files the browser must receive merged instead of the on-disk originals;
   //   * workshopKits.kits the behaviour layer (a per-battle kit map) for battles the server itself runs;
   //   * workshopKitFiles  the URLs serving those same kit modules to the browser, which must rebuild the identical map,
   //                       or its client-simulated battle would disagree with the server's verification.
-  const workshopLoaded = loadWorkshop(workshopDir, { log });
+  const workshopLoaded = { ...loadedOnce, packs: pruned.packs, errors: pruned.errors };
   const workshopJson = buildWorkshopDataFiles(data, workshopLoaded);
   const workshopKits = await loadWorkshopKits(workshopLoaded, { log, knownIds: new Set(Object.keys(data.chess || {})) });
-  // 分发前钩子（`pack.json.server.preDispatch`, DESIGN §28.13）：同一个加载期，同一条「坏声明点名拒绝、不装钩子」的
-  // 姿态。没有包声明它时 `hooks` 是空数组，装配出来的钩子是 null，Network 的行为与今天逐字节相同。
-  const workshopHooks = await loadWorkshopHooks(workshopLoaded, { log });
   // The mod set (DESIGN §28.2): one identity per pack, one digest for the whole set. It travels in `welcome`, in
   // `/healthz` (lobby.stats) and in every BattleSpec, so the three can never disagree about what is running.
   const workshopMods = (workshopLoaded.packs || []).map((p) => ({ id: p.id, hash: p.hash, layer: p.layer, combat: p.combat, api: p.api }));
@@ -112,6 +128,10 @@ export async function startServer(opts = {}) {
   const workshopResourceFiles = workshopResourceFilesFor(workshopLoaded.packs, workshopDir, {
     digests: new Map((workshopLoaded.packs || []).filter((p) => p && p.assetsDigest).map((p) => [p.id, p.assetsDigest])),
   });
+  // 声明清单（`welcome.modAssets`, DESIGN §28.13.5）：容器/清单的注册 URL、装载期核对过的容器摘要、以及两个归一化
+  // 后的策略值。没有包声明 `assets` 时它是**空数组** ⇒ `welcome` 里没有这个字段、客户端不 import 资源流程、
+  // 不注册 SW、不多一个请求（B2/B3a 同一条不变量）。
+  const workshopModAssets = workshopModAssetsFrom(workshopResourceFiles, workshopLoaded.packs);
   // `serverPolicy` 只有 `cache-only` 一种取值会改变行为，而它**只在包显式声明时**生效（缺省 `serve` = 今天逐字节
   // 不变）。策略覆盖的是 `/assets/` 与 `/fonts/` 这两棵**全服务器共用**的树，所以是进程级的：一个包声明它，就是
   // 全服务器都不再服务那两棵树 —— 这件事必须在启动日志里说出来（`resourceServerPolicy` 负责）。
@@ -120,7 +140,7 @@ export async function startServer(opts = {}) {
     { log },
   );
   const { registry, lobby, network } = createSessionStack(
-    { ...opts, workshop: { kits: workshopKits.kits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels } },
+    { ...opts, workshop: { kits: workshopKits.kits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets } },
     { data, log },
   );
   // content packs (docs/PACKS.md): scanned now — the start log names them — and again whenever their folders change

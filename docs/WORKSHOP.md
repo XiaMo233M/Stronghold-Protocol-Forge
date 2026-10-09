@@ -552,7 +552,7 @@ node tools/workshop-validate.mjs my-pack
 而区间不含本 build，整个包被拒（`MOD_API_INCOMPATIBLE`，理由里写出声明的区间与本 build 的号）。写成坏区间照旧是
 `BAD_API_RANGE`（先判语法，再判区间）。A 段**只**加了那个常量与这一条判罚，没有别的东西读它。
 
-#### 当前状态（A 段 + B1 段 + B2 段 + B3a 段）
+#### 当前状态（A 段 + B1 段 + B2 段 + B3a 段 + B4 段）
 
 | 部分 | 状态 |
 |---|---|
@@ -569,8 +569,12 @@ node tools/workshop-validate.mjs my-pack
 | `verify`：按声明校验容器，失败明示 | ✅ 已实现（B3a：`server/workshop.js assetsIssues` + 旁挂 `<container>.sha256`；`ASSETS_VERIFY_FAILED` / `ASSETS_VERIFY_UNAVAILABLE`） |
 | 目录逃逸 / 非 `.js` / 声明了却没有文件的模块 ⇒ **整包被拒** | ✅ 已实现（B2：`server/workshop.js panelModuleIssues` + `shared/workshop.js` 的 `.js` 判据；DESIGN §28.13.3） |
 | 声明了却没有的容器/清单、摘要对不上、`server.preDispatch` 的文件不在 ⇒ **整包被拒** | ✅ 已实现（B3a：`server/workshop.js assetsIssues` / `preDispatchIssues`，在 `loadWorkshop` 列出包之前；DESIGN §28.13.3） |
-| Service Worker（客户端把容器导入 CacheStorage、由它应答素材） | ⛔ 未做（B4 段：等「包能不能注册根作用域 SW」的信任裁决） |
-| 浏览器里真的 import + 真的渲染（真 Chrome） | ⛔ 本机无 Chrome（`SP_E2E=1` 的可选路径，与 §4.4 同一个 standing gap） |
+| Service Worker（引擎自带、包只声明） | ✅ 已实现（B4：`public/resource-sw.js` + `public/js/resources/**`；注册口径与流程的纯逻辑在 `test/modAssets.test.js` 里钉住） |
+| 客户端资源流程（取清单 → 容器导入 → 逐文件校验 → 写缓存 → 索引/收据 → 深浅校验） | ✅ 已实现（B4：`public/js/resources/{host,bundle,verify,service}.js`；Node 里用假 `CacheStorage` + 真 `Response`/`crypto.subtle` 真跑） |
+| `welcome.modAssets` 的条件性（不声明 ⇒ 无字段、无请求、无 DOM、无全局） | ✅ 已实现（B4：`server/http/workshop.js workshopModAssetsFrom`、`server/lobby.js welcomeInfo`、`public/js/main.js` 的动态 import） |
+| 容器摘要进身份哈希（同一房间摘要 ⇒ 同一份容器） | ✅ 已实现（B4：`server/workshop.js identifyPack` 的 `assets.container.sha256` 那一条；不声明 `assets` 的包逐字节不变） |
+| `server.preDispatch` 的最后一格（import 失败 / 没有工厂导出 ⇒ 整包移出已加载集合，数据也不并） | ✅ 已实现（B4：`server/workshop.js dropUnavailablePreDispatchPacks` + `server/index.js` 装配路径 + `server/data.js excludePacks`） |
+| 浏览器里真的 import + 真的渲染（真 Chrome）、真 SW 的生命周期与作用域 | ⛔ 本机无 Chrome（`SP_E2E=1` 的可选路径，与 §4.4 同一个 standing gap；`test/modAssets.test.js` §10 是**跳过且从未运行**的占位用例） |
 
 #### 1.9.1 `server.preDispatch`：分发前的准入钩子（B1 段已实现）
 
@@ -746,6 +750,12 @@ export function mount(ctx) {
 }
 ```
 
+**容器怎么产**：`node tools/make-spresources.mjs --manifest <清单.json> --public <素材根> --out <你的包目录>` 会写出
+三件东西 —— `<包>/packs/<名字>.spresources`、它的旁挂 `<…>.sha256`、以及 `<包>/resource-manifest.json`（就是
+`assets.manifest` 指向的那份**权威清单**）。**清单必须显式给**：`tier` 是内容判断（首屏必需 / 后台慢慢拉），
+工具不替作者猜，而且它产出的容器字节与参考实现（`_up/mod4-pack/tools/spresources.mjs` 的 `buildPack`）在
+`test/modAssets.test.js` 里被断言为**逐字节相同**。
+
 **容器与清单从哪取**：`/workshop-resources/<包id>/<你声明的那条路径>`。`?v=<内容哈希前 12 位>` 是缓存键
 （重新打包 = 新 URL）。两条纪律：
 
@@ -763,8 +773,8 @@ export function mount(ctx) {
 
 `cache-only` 覆盖的 `/assets/` 与 `/fonts/` 是**全服务器共用**的两棵树（核心游戏、所有包都用它们），所以它是
 **进程级**的：任何一个包声明它，整个服务器的这两棵树都不再服务。启动日志会点名是哪个包声明的。客户端那半
-（把容器导入 `CacheStorage`、由 Service Worker 应答这两棵树）**不在本段** —— 它等业主对「包能不能注册根作用域
-SW」的裁决。
+（把容器导入 `CacheStorage`、由 Service Worker 应答这两棵树）见下面「客户端那半」与
+[DEPLOY.md](DEPLOY.md) 的 `cache-only` 一节。
 
 **`verify` —— 校验失败就是整个包被拒**：装载期读旁挂的 `<container>.sha256`（格式 `<64 位十六进制摘要>`，
 后面可以跟一个文件名，两段之间空白分隔 —— 与 `sha256sum` 的输出一致），再用**流式**读取把容器哈希一遍：
@@ -782,14 +792,82 @@ SW」的裁决。
 **纪律：一个用不了的声明拒绝整个包**（DESIGN §28.13.3，与 §1.9.3 逐字同一条）。**`server.preDispatch` 从本刀起
 也是这条**（§1.9.1）：模块或策略文件不在包里、策略不是 JSON 对象、`intercepts` 里有协议不认识的名字 ⇒ 整个包
 不加载。B1 段当时只拒那个钩子、包照旧加载 —— 「服务器以为自己被准入闸门保护着，其实一条消息都没拦」正是这条纪律
-要消灭的失败形态。唯一留在装载期之外的是「模块文件在、但 `import` 失败或没有 `createPreDispatch` 导出」：那要
-`import` 才知道，而装载器是同步的，所以它仍由 `loadWorkshopHooks` 具名拒绝（包照旧加载）。
+要消灭的失败形态。B4 段把最后剩下的一格也补上：**`import` 失败 / 没有 `createPreDispatch` 导出**这两种只有
+`import` 才知道的失败，由启动装配路径（`loadWorkshopHooks` 之后、其余一切读者之前）**把整个包移出已加载集合**并
+在启动日志里点名（`server/workshop.js dropUnavailablePreDispatchPacks`）。它的数据文件也不再并进游戏数据 ——
+「包不在身份清单里，而它的干员在游戏里」这种半装状态是被明确拒绝的。
 
-**对既有包的影响是零**：不声明 `assets` 的包一个字节都不受影响（没有新路由、没有新响应头、没有 412）。
+**对既有包的影响是零**：不声明 `assets` 的包一个字节都不受影响（没有新路由、没有新响应头、没有 412、没有新字段、
+没有 SW 注册）。
 
-**当前状态**：服务端全部有测试（`test/modAssets.test.js`：不声明 ⇒ 无变化、容器/清单可取、`?v=` 生效、
-穿越/未注册 ⇒ 404、容器走流式、`cache-only` 只对两棵树生效且只在声明时生效、`verify` 失败点名、
-`server.preDispatch` 对齐后的回归）。客户端那半没有。
+##### 客户端那半：引擎自带 SW，包只声明（B4 段）
+
+**业主裁决（2026-10-10）：Service Worker 由引擎自带，包只声明。** 理由一句话：根作用域的 SW 能拦截该站点**所有**
+请求，让包提供 `.js` 去注册它就等于把客户端控制权交出去。所以：
+
+| 谁 | 提供什么 |
+|---|---|
+| **引擎** | `public/resource-sw.js`（唯一的 SW 脚本）与 `public/js/resources/**`（`common` / `service` / `bundle` / `verify` / `worker` / `host`）。注册口径：`type: 'module'`、`scope: '/'`、`updateViaCache: 'none'` |
+| **包** | 只有那一句 `assets` 声明，加上**容器 / 清单 / 旁挂摘要**三个文件。**不能**提供 SW 脚本，也没有任何字段能指定一个 SW 地址 |
+
+**缺省不启用**：没有任何包声明 `assets` 时，`welcome` 里没有 `modAssets` 字段，浏览器**不加载资源流程、不注册
+SW、不多一个请求、不多一个 DOM、不在 `globalThis` 上留任何名字**（`public/js/main.js` 只在字段真的到达时才
+`import('./resources/host.js')`，所以这条不变量是结构性的）。
+
+**声明之后你会得到什么**：服务器在 `welcome` 里为你的包带一条 `modAssets`（容器 URL、清单 URL、装载期已与字节核对
+过的容器摘要 `digest`、归一化后的 `serverPolicy` / `verify`）。客户端拿到它之后——
+
+```
+① 取清单（你的 assets.manifest）→ 校验形状，并核对 version == sha256(压紧 files)[0:12]
+② 取容器（你的 assets.container，或玩家自己选的文件）→ 解析容器头，核对它与①逐条相同
+③ 逐文件核对 SHA-1[0:12] → 写进 Cache Storage（每个条目带 X-SP-Resource / X-SP-Resource-Hash）
+④ 写索引（URL → 指纹）与收据（这个包是为哪份容器、哪版清单导入的）
+⑤ 浅度校验（条目指纹三处一致）／深度校验（重读字节、重算指纹）→ 都过了才算装好
+```
+
+**入口放行是你（包）的事，不是引擎的事**。什么时候算「装好了」是包的策略（浅度还是深度、允不允许跳过），所以
+引擎只**报告**结果，动那支笔的是你的 C 层面板（§1.9.3）：`ctx.session.setPreload({ required: true, ready: false })`
+在挂载时关闸，导入 + 校验通过之后 `{ ready: true }` 开闸。两个标志缺省都是 `false`，也就是**不声明就完全不挡人**。
+
+你的面板模块可以直接 import 引擎的流程（它们是站点上的模块，不是包里的文件）：
+
+```js
+import { installModAssets, modAssetsFor, importAndVerify, importFromServer, importStateFor } from '/js/resources/host.js';
+
+export function mount(ctx) {
+  const decl = modAssetsFor(ctx.pack);       // 服务器宣告的、属于你这个包的那一条（没声明 assets 时是 null）
+  ctx.session.setPreload({ required: true, ready: false });
+  // …你自己的界面：一个「导入完整资源包」的按钮 + 一个 <input type=file accept=".spresources">…
+  // 两种来路喂的是同一个函数：服务端那条（`decl.container`）与玩家本地的文件。
+  return {
+    async onPick(file) {
+      const report = await importAndVerify(file, ctx.pack, { deep: false });
+      // 或者：const report = await importFromServer(ctx.pack);
+      if (report.valid) ctx.session.setPreload({ ready: true });
+    },
+  };
+}
+```
+
+**两条要记住的后果**：
+
+- **容器摘要进了包的身份哈希。** 装载期已经拿它与字节核对过，所以它和 `pack.json`、内容文件、`kits/`、`assets/**`
+  一样是这份包的属性：**换了容器 = 换了身份** = 房间的摘要闸门（`welcome.mods.digest`）随之改变，客户端也会据此判定
+  旧缓存作废（收据里的 `digest` 与服务器这次宣告的比）。不声明 `assets` 的包哈希逐字节不变（`test/packAssets.test.js`
+  钉着 `docs/examples/` 三份真实包）。
+- **`serverPolicy: "cache-only"` 的两半合起来才成立。** 服务端对 `/assets`、`/fonts` 回 412（不回源），客户端那半
+  由引擎的 SW 用**本地校验过的缓存**回答同一批 URL：命不中也是 **412，绝不回源**。所以 `cache-only` 的部署里，
+  容器从 `/workshop-resources/…` 进来一次是玩家唯一需要的那次网络传输；离线/别人给的文件则是第二条来路。
+
+**当前状态**：服务端与客户端流程的**纯逻辑**都有测试（`test/modAssets.test.js`：不声明 ⇒ 无变化、容器/清单可取、
+`?v=` 生效、穿越/未注册 ⇒ 404、容器走流式、`cache-only` 只对两棵树生效且只在声明时生效、`verify` 失败点名、
+我们的容器写入器与参考写入器**逐字节相同**、容器导入/逐文件校验/索引/收据/深浅校验在 Node 里真跑、SW 的应答选择
+规则（含 `%5B` 编码等价、`/media/` 候选、Range ⇒ 206、命不中 412）、`welcome.modAssets` 的条件性、
+`assetsDigest` 进身份、`server.preDispatch` 装配路径裁剪的回归）。**浏览器路径没有验过**：真 SW 的注册与作用域、
+真 `caches` 的配额行为、`<input type=file>` 的 `File`、面板模块的真 `import()`、渲染与样式叠放 —— 那是
+`SP_E2E=1` + 有 Chrome 的机器上的事（§4.4 同一条 standing gap），本机没有 Chrome，所以这些用例**默认跳过**，
+而且没有跑过。
+
 
 ---
 

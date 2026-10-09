@@ -275,10 +275,65 @@ export function workshopResourceFilesFor(packs, workshopDir, { digests = null } 
   return out;
 }
 
+/**
+ * `welcome.modAssets` —— 声明了 `assets` 的包的**声明清单**（DESIGN §28.13.5，docs/WORKSHOP.md §1.9.4）。
+ *
+ * 它是 `modPanels` 的同构物，就同一个理由：客户端要把「哪个包有一份资源容器、去哪儿取、它的字节是哪一份、服务端
+ * 对 `/assets` 是什么策略」搞清楚，而这条信息只有服务端有。字段恰好是**声明的那四个**（`pack` 是身份）：
+ *
+ *   `container` / `manifest`  装载器**注册过**的那两个 URL（带 `?v=<包内容哈希[0:12]>` 缓存键）；
+ *   `digest`                  装载期与容器**字节**核对过的 sha256（`assetsIssues`，不重算）。客户端拿它做两件事：
+ *                             把导入的字节绑到「服务器验过的那份容器」上，以及在换容器之后判旧缓存作废；
+ *   `serverPolicy` / `verify` 归一化后的声明值（缺省已在形状层补成 `"serve"` / `"sha256"`）。
+ *
+ * 三条纪律：
+ *   1. **只有读者才加**：没有任何包声明 `assets` 时返回空数组，`welcome` 里就没有 `modAssets` 这个字段，
+ *      客户端因此不 `import` 资源流程、不注册 SW、不多一个请求（B2/B3a 同一条不变量）。
+ *   2. **从服务表反推，而不是另算一遍 URL**：`container` / `manifest` 就是 `workshopResourceFilesFor` 给出的那两个
+ *      URL。两处各拼一次就是一个会漂移的真相（一个注册了、另一个请求的不是同一个键）。
+ *   3. **两个 URL 都在才成一条声明**。少了哪一个（例如手工拼出来的 `packs` 数组绕过了装载器）就没有可用的声明，
+ *      宁可不出这一条，也不给客户端半个地址。
+ * @param {Map<string, { kind: 'container'|'manifest', pack: string, url: string, sha256: string|null }>|null} files
+ *   `workshopResourceFilesFor(...)` 的输出
+ * @param {Array<{ id: string, assets?: { serverPolicy: string, verify: string }, assetsDigest?: string }>} packs
+ *   `loadWorkshop(...).packs`（只用来读归一化后的两个枚举值与摘要 —— URL 不从这里拼）
+ * @returns {Array<{ pack: string, container: string, manifest: string, digest: string, serverPolicy: string, verify: string }>}
+ */
+export function workshopModAssetsFrom(files, packs) {
+  /** @type {Map<string, { container?: any, manifest?: any }>} */
+  const byPack = new Map();
+  for (const entry of (files && typeof files.values === 'function') ? files.values() : []) {
+    if (!entry || typeof entry.pack !== 'string') continue;
+    const group = byPack.get(entry.pack) || {};
+    group[entry.kind === 'manifest' ? 'manifest' : 'container'] = entry;
+    byPack.set(entry.pack, group);
+  }
+  const byId = new Map(((Array.isArray(packs) ? packs : [])).filter((p) => p && typeof p.id === 'string').map((p) => [p.id, p]));
+  /** @type {Array<any>} */
+  const out = [];
+  // 包 id 次序（DESIGN §28.3 的同一条规则）：列表的顺序不随装载器 / 调用方给的数组顺序变。
+  for (const id of [...byPack.keys()].sort()) {
+    const group = byPack.get(id);
+    const pack = byId.get(id);
+    if (!group.container || !group.manifest || !pack || !pack.assets) continue;
+    // 摘要必须是**装载器交出来的**那一个（`assetsDigest`）。拿不到它就没有「同一份容器」这句话，不出这一条。
+    const digest = typeof group.container.sha256 === 'string' ? group.container.sha256 : (typeof pack.assetsDigest === 'string' ? pack.assetsDigest : '');
+    if (!/^[0-9a-f]{64}$/.test(digest)) continue;
+    out.push({
+      pack: id,
+      container: group.container.url,
+      manifest: group.manifest.url,
+      digest,
+      serverPolicy: pack.assets.serverPolicy,
+      verify: pack.assets.verify,
+    });
+  }
+  return out;
+}
+
 /** `/assets/` 与 `/fonts/` —— `cache-only` 只对这两棵树短路：它们正是 `tools/fetch-assets.mjs` 落到
  *  `public/assets/**` 与 `public/fonts/**` 的那两个 git-ignored 目录（`.gitignore` 里点名的那两行）。 */
 const CACHE_ONLY_PREFIXES = Object.freeze(['/assets', '/fonts']);
-
 /** 一个请求路径是否落在 `cache-only` 覆盖的两棵树里（`/assets` 与 `/assets/…` 都算，缺尾斜杠的裸挂载也拦）。 */
 export function isCacheOnlyPath(pathname) {
   const p = typeof pathname === 'string' ? pathname : '';

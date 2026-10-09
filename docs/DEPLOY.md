@@ -324,9 +324,23 @@ services:
 * **没有环境变量开关，也不由服务器配置决定**。唯一能打开它的是一个工坊包的 `pack.json`。缺省 `serve`（等于
   不写这个字段）时服务器行为与没有这个字段时**逐字节相同** —— 本仓库自带的包与 `docs/examples/` 三份示例包
   全是这个值。
-* **客户端那半还没做**：把资源容器导入 `CacheStorage`、并让 Service Worker 应答这两棵树的部分还在等一个信任
-  裁决（DESIGN §28.13.4）。也就是说今天打开 `cache-only` 会让页面**拿不到**这两棵树的素材，除非玩家自己的浏览器
-  里已经缓存过它们。
+* **客户端那半是引擎自带的 Service Worker**（B4 段，业主裁决：**引擎自带 SW、包只声明**）。服务端对那两棵树回
+  412 且不回源，客户端那半用**同一批本地校验过的字节**回答同一批 URL，命不中也是 **412，绝不回源**。两半合起来
+  才是一份完整的「缓存优先」部署；只开服务器那一半会让页面拿不到这两棵树的素材，除非玩家浏览器里已经缓存过它们。
+
+**客户端那半在部署上要知道的四件事**：
+
+| 事 | 说明 |
+|---|---|
+| SW 脚本在哪 | `/resource-sw.js`（引擎文件，`public/resource-sw.js`），由 `public/js/resources/worker.js` 用 `type:'module'`、`scope:'/'`、`updateViaCache:'none'` 注册。**只有包声明了 `assets` 才会注册**（`welcome.modAssets` 到达时才加载那套流程） |
+| 为什么不需要 `Service-Worker-Allowed` | 脚本落在站点**根**上，它自己的最大作用域就是 `/`。把站点部署在**子路径**下（反代前缀、静态托管的子目录）时脚本会变成 `/<前缀>/resource-sw.js`，那时 `scope:'/'` 会被浏览器拒绝；要么把前缀下的 `/resource-sw.js` 反代到根，要么给这个响应加 `Service-Worker-Allowed: /`，并同步改 `public/js/resources/common.js` 的 `SW_URL` |
+| 容器从哪来 | 玩家本地导入（离线分发），或浏览器自己从 `/workshop-resources/<包id>/<声明路径>` 取一次（`importFromServer`）。两条来路喂的是同一条流程；取回来的字节逐文件核对 `SHA-1[0:12]` 之后才进 `CacheStorage` |
+| 怎么回滚 / 怎么让玩家清掉 | 服务器侧：删掉包或把 `serverPolicy` 改回 `serve` 后重启（不留持久状态）。玩家侧那半**不在服务器上**：`CacheStorage` 里的几百 MB 与已注册的 SW 会一直留着。同一个站点**同源**下换一次部署不会自动清掉它，需要 `navigator.serviceWorker.getRegistrations()` + `registration.unregister()`（或站点数据/清除浏览器数据）才会消失 —— 回滚脚本要自己带上这一步 |
+
+容器是流式的、可以到数百 MB：`cache-only` 的部署里那次下载是**玩家唯一需要的一次网络传输**（此后 `/assets`
+与 `/fonts` 都由 SW 本地回答）。反向代理/前置缓存不需要为 `/workshop-resources/` 配置任何特殊规则（它已经是
+`Cache-Control: no-cache` + `?v=` 缓存键），但要留意代理自身的**响应体大小上限**与**超时**：一个几百 MB 的
+流式响应被代理截断时，`Content-Length` 会让客户端看出「传输不完整」并拒绝导入，而不是装进一半。
 
 装了这样一个包想退回去：删掉那个包（或把 `assets.serverPolicy` 改回 `"serve"`）后重启即可 —— 服务器不在任何地方
 留下持久状态。

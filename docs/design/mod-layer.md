@@ -699,7 +699,7 @@ itself is the browser's job; `test/ui/kitimports.e2e.test.js` is the opt-in chec
 asserts the export-name floor, and asserts a specifier outside the whitelist does not resolve there either), and until
 someone runs it on a machine with Chrome this remains the standing gap recorded in `docs/WORKSHOP.md` §4.4.
 
-### 28.13 The four capability declarations: `assets`, `client`, `server.preDispatch`, `routes` (A 段 + B1 段 + B2 段 + B3a 段)
+### 28.13 The four capability declarations: `assets`, `client`, `server.preDispatch`, `routes` (A 段 + B1 段 + B2 段 + B3a 段 + B4 段)
 
 **The gap, stated by its own verdict.** A third-party mod ("full resource pack: import, verify, server admission") was
 rewritten into this repository's pack format and then judged by the REAL validator, on both this branch and the middle
@@ -717,9 +717,10 @@ module route `/workshop-panels/`, mount in the browser from `welcome.modPanels`,
 usable refuses the whole pack (§28.13.3). **B3a 段 landed the fourth and paid off the debt B2 named**: the declared
 container and manifest are served on their own pack-scoped route, `serverPolicy` decides whether `/assets/` and
 `/fonts/` answer at all, `verify` is checked at load time, and `server.preDispatch` was **aligned** to the
-"unusable declaration refuses the whole pack" rule it had been exempt from (§28.13.4). The Service Worker half of
-`assets` — what the client does with the container once it has it — is **not** here: whether a pack may register a
-root-scope worker is a trust ruling the owner has not made yet.
+"unusable declaration refuses the whole pack" rule it had been exempt from (§28.13.4). **B4 段 closed the two things
+B3a left open**, both named in the last paragraph of §28.13.4: the owner made the ruling about the root-scope worker
+(the Service Worker is the **engine's**, a pack only declares — §28.13.5), and the one remaining hole in §28.13.3
+(a hook module that only `import` can judge) is closed on the startup assembly path (§28.13.5).
 
 **The shapes, with the one decision each carries.**
 
@@ -924,12 +925,120 @@ while that group was declaration-only.
   core game**, so one pack declaring it changes what the whole server serves. It is therefore said out loud once at
   boot, naming the pack(s) that asked for it, and the reference implementation of the mod says the same thing
   (`_up/mod4-pack`, gap ⑥).
-* **The client half is not here.** What the browser does with a container it has fetched — import it into
-  `CacheStorage`, answer `/assets/…` from it, and prove possession to `server.preDispatch` — is the Service Worker
-  half, and it waits on the owner's ruling about a pack registering a root-scope worker (`_up/mod4-resource-pack-recon.md`
-  §8.2 lists the two models). Serving the bytes and refusing to serve them are decidable on their own, so they landed
-  first.
+* **The client half is §28.13.5, not here.** Serving the bytes and refusing to serve them are decidable on their own, so
+  they landed first; what the browser does with a container it has — import it into `CacheStorage`, answer `/assets/…`
+  from it, and answer **412, never the origin**, when it has nothing — is the Service Worker half, and it waited on the
+  owner's ruling about a pack registering a root-scope worker (`_up/mod4-resource-pack-recon.md` §8.2 lists the models).
 
-**What this section does not decide.** The Service Worker's defaults and the client import flow (B4 段, blocked on the
-trust ruling above), the editor's graphical entry points for the four fields, and whether `assets` ships in a release.
-Serving the bytes was the half that could be decided alone; what a browser does with them could not.
+#### 28.13.5 The Service Worker is the engine's, and the pack only declares (B4 段)
+
+**The ruling (owner, 2026-10-10).** `_up/mod4-resource-pack-recon.md` §8.2 put three models on the table (a pack ships
+the worker; the engine ships it and the pack declares; no worker at all) and the owner picked the middle one:
+**the Service Worker is engine code, and a pack only declares `assets`.** The reason is a capability argument, not
+taste: a root-scope worker intercepts **every** request of the site, so letting a pack supply the `.js` that registers
+it hands over client-side control — the pack could serve, rewrite or swallow anything. A pack's `assets` declaration
+therefore stays exactly the four fields A 段 defined; there is no field for a worker URL, and the shape layer has no
+seam to add one (`ASSETS_UNKNOWN_FIELD` names any fifth key).
+
+**What the engine ships.** `public/resource-sw.js` (the only worker script in the tree) plus
+`public/js/resources/{common,service,bundle,verify,worker,host}.js`. Registration is engine-owned
+(`resources/worker.js`) and its five parameters are pinned in `test/modAssets.test.js` with a fake
+`navigator.serviceWorker`:
+
+* `type: 'module'` — the worker and the page share `public/js/resources/common.js`, and that module takes the audio
+  extension list straight from `shared/media.js` (`public/js/resources/common.js` imports it) so there is exactly one
+  copy of it in the repository;
+* `scope: '/'` — root scope, which the reference implementation also used. The script sits at the **site root**
+  (`/resource-sw.js`), so `/` is already its maximum scope and **no `Service-Worker-Allowed` header is needed**; the
+  test asserts the header stays absent and `docs/DEPLOY.md` records the one case that would change it (moving the file
+  into a subdirectory, e.g. behind a reverse proxy that serves the app under a prefix);
+* `updateViaCache: 'none'` — the worker script is never taken from the HTTP cache, so a deploy reaches an open tab.
+  `server/http/files.js` already answers `.js` with `no-cache`; this is the second lock.
+
+**The client flow, and what each step refuses.** `welcome.modAssets` (the same shape of "only readers add it" as
+`modPanels`) carries, per declaring pack: the two registered URLs, the container digest the loader verified against the
+bytes, and the two normalized policy values. `host.js` turns that into a five-step flow — fetch the manifest
+(`validateManifest`, then `version === sha256(compact files)[0:12]`), fetch or accept the container
+(`fetchContainer` / an `<input type=file>` `File`; both are just `Blob`-shaped, so the sequential reader is one
+implementation), check the container's embedded manifest against the served one entry by entry (url / size / hash /
+tier, **and order**, because the order is the body order), verify every file's `SHA-1[0:12]` while writing it into the
+cache with `X-SP-Resource: 1` and `X-SP-Resource-Hash`, then shallow or deep verify.
+
+* **Two synthetic cache entries, not a compiled-in pin.** The reference implementation pinned the version in
+  `pack-config.js` and checked a global receipt. That cannot express several declaring packs, so the index
+  (`URL → sha1[0:12]`, the worker's allowlist **and** expected digest) and the receipt (per pack: which container
+  digest, which manifest version, how many files) are ordinary entries in the same cache. The worker serves a key only
+  if the index vouches for it **and** the cached response's own hash header agrees; anything else is 412. That is what
+  makes "a stale entry from the previous manifest is not served" a property of the lookup rather than a cleanup job.
+* **412 is the only failure answer, and the origin is never a fallback.** Returning `null`/`undefined` from the
+  `fetch` handler is what "let the network answer" looks like, so the test asserts the handler returns a `Response` for
+  **every** resource path, including the misses, and 412 carries `Cache-Control: no-store`. This is the other half of
+  B3a's `serverPolicy: "cache-only"`: the server refuses `/assets` and `/fonts`, and the worker answers those same URLs
+  from locally verified bytes or not at all.
+* **Three behaviours of the reference implementation are kept verbatim, because they are its real value.** The
+  extension-less audio route (`/media/bgm/act1` → `/assets/audio/bgm/act1.mp3`, candidates in `shared/media.js` order),
+  the `%5B` spelling equivalence (the board-art loader uses `encodeURI`, which escapes brackets, while the importer
+  preserves them — the same file has two spellings and both must hit), and Range support (a cached full response
+  answers a byte range with 206, 416 when unsatisfiable, because media elements seek and Safari refuses without it).
+* **The whole-container digest check is opt-in and says so.** `assetsDigest` is what ties the imported bytes to the
+  container the server verified, but `crypto.subtle.digest` has no streaming interface, so checking it means holding
+  the whole container in memory — exactly what the import path avoids. `verify.js verifyContainerBytes` therefore
+  refuses above `maxBytes` and returns `{ checked: false, reason: 'too-large' }`: an honest "I did not check" beats a
+  green light that was never earned.
+* **The entry gate is the pack's panel, not the engine.** Whether an import counts as "ready" (shallow or deep, may an
+  older cache do) is a policy the pack's C-layer panel owns, and B2 already gave panels exactly one write —
+  `ctx.session.setPreload({ required, ready })`, which is the only thing `selectRoute` reads as a second condition.
+  Both flags default to `false`, so a server whose packs declare nothing has an inert gate. The engine reports the
+  verdict (`importAndVerify` returns `valid` / `missing`) and never touches the flags: an engine that closed the gate
+  would make a pack that declares `assets` and no panel unplayable.
+* **A failed verification revokes the index, not just the receipt.** `importAndVerify` re-verifies what it just wrote;
+  on failure it drops the pack's receipt **and** its URLs from the index, because the worker reads the index — dropping
+  only the receipt would leave a pack whose bytes are known to be wrong still being served (their headers are
+  unchanged, so every check the worker makes would pass).
+
+**The invariant, and why it is structural here.** "No pack declares `assets` ⇒ no field, no request, no DOM, no global"
+is not enforced by an `if` in the page: `public/js/main.js` only `import`s `resources/host.js` **when the field
+arrives**, so a server with no declaring pack never loads the flow, never registers the worker, and never fetches a
+single engine resource module. The server side is the same statement one level up: `welcomeInfo` spreads `modAssets`
+only when the list is non-empty, exactly like `modPanels`, and `test/modAssets.test.js` compares the two welcome frames
+field-set-for-field-set.
+
+**The container digest joins the pack's identity.** `assetsIssues` already hashes the container against the declared
+sidecar while gating the pack, so `identifyPack` now takes that digest and adds one entry to the hash manifest —
+`assets.container.sha256`, whose `hash` field **is** the container's sha256 (there are no separate bytes at that path
+to hash). The path is synthetic and unreachable by a real file: the only paths that enter that list are `pack.json`,
+`<content>.json`, `kits/*.js`, `assets/**` and declared panel modules (which must be `.js`). The payoff is the sentence
+this section exists for: **the same room digest now implies the same container** — re-packing a container changes the
+pack's content hash, which moves `modSetOf`'s wire digest, which the room gate already compares. The cost is bounded
+and pinned: a pack that declares no `assets` gains no entry and keeps its bytes, so the three shipped example packs
+still hash to `96ebc2d4…` / `15092019…` / `77b80c6e…` and the set digest is still `eacd0485…` (both re-asserted in
+`test/modAssets.test.js`, next to the stricter pre-existing pins in `test/packAssets.test.js`).
+
+**The last hole in §28.13.3, and the shape of the fix.** B3a moved every *filesystem* judgement into `loadWorkshop`, so
+a declaration whose files are missing refuses the whole pack. Two judgements cannot go there: "does the module import"
+and "does it export `createPreDispatch`" need a dynamic `import`, and `loadWorkshop` is synchronous (`server/data.js`
+calls it while building the overlay, and a dozen tools and tests call it synchronously). B4 therefore does the pruning
+where it can be done — on the **startup assembly path** — and does it in one place:
+`server/index.js` runs `loadWorkshop` → `loadWorkshopHooks` → `dropUnavailablePreDispatchPacks` before anything derived
+from the loaded packs exists, so the pruned array feeds the data overlay, the identity list, the kit loader, the panel
+registry and the resource tables alike. Two details are load-bearing:
+
+* **`loadData` had to be told.** The 创意工坊 overlay is merged inside `server/data.js` (before `deepFreeze`), i.e.
+  before that point in the assembly order. Without passing the excluded ids down (`excludePacks`), a dropped pack's
+  `chess.json` would still be merged: the pack would be absent from `welcome.mods`, its kits, panels and resources
+  unserved, and its operator present in the game data — the half-loaded state this rule exists to forbid. So the async
+  verdict is computed first and handed to the loader. `test/modAssets.test.js` asserts exactly that: three packs whose
+  hook modules cannot be installed produce no `[data]` contribution and no identity entry, while a good hook next to
+  them is untouched.
+* **The report names the pack and the code.** Every removal appends `PREDISPATCH_BAD_MODULE: …` to the loader's error
+  list (so `/healthz` and the boot summary keep telling one story) and the boot prints one line naming all of them:
+  `dropped N pack(s) whose declared server.preDispatch cannot be installed: "x" (PREDISPATCH_BAD_MODULE), …`.
+
+**What this section does not decide, and what is not verified.** The editor's graphical entry points for the four
+fields are still open, and the reference mod's rewritten pack still lives in `_up/` rather than in a release. The
+browser path is **not verified**: this machine has no Chrome, so the real worker lifecycle and scope, real `caches`
+quota behaviour, a real `<input type=file>` `File`, the panel module's real `import()` and the rendered UI are written
+as **skipped placeholders** in `test/modAssets.test.js` §10 and are recorded as unresolved in the B4 report. Everything
+decidable without a browser is exercised for real in Node against a fake `CacheStorage` but real `Response`,
+`Request`, `Headers` and `crypto.subtle` — including the container byte-for-byte agreement between this repository's
+writer, the reference writer and both parsers.
