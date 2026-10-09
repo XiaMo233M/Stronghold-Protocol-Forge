@@ -34,9 +34,15 @@
 workshop/<packId>/
   pack.json         必需
   chess.json        内容文件：{ [id]: record }，与 data/chess.json 同形
+  units.json        内容文件：{ [charId]: record }，与 data/backups.json 的 units[charId] 同形（新干员的干员记录）
   items.json  enemies.json  stages.json  waves.json  tokens.json  bosses.json
   factions.json  garrisons.json  bands.json  bonds.json  effects.json  choices.json
 ```
+
+> `units.json` 是唯一一个**文件名与落点不同名**的内容文件：`data/` 里没有顶层 `units.json`，那条干员记录住在
+> `data/backups.json` 的 `units[charId]`（`server/sim/simdata.js`、`shared/standIn.js`、客户端
+> `data.get('backups').units` 都只读这一个位置）。所以 `content: ["units"]` 的包，装载时被并进 `data.backups.units`，
+> 而浏览器要拿到的**合并后**文件是 `/data/backups.json`（`workshopTouchedFiles` 把 `units` 映射成 `backups`）。
 
 `pack.json`：
 
@@ -47,23 +53,24 @@ workshop/<packId>/
 | `version` | 否 | 默认 `0.0.0` | 包管理 → 包元数据 |
 | `author` / `license` / `description` | 否 | 元信息；`license` 用于声明素材授权 | 包管理 → 包元数据 |
 | `gameVersion` | 否 | 作者针对的游戏版本，便于排查 | 包管理 → 包元数据 |
-| `content` | 贡献项之一 | 这个包提供哪些数据文件（上表的名字，含 `bonds`） | 各页保存时自动补 |
+| `content` | 贡献项之一 | 这个包提供哪些数据文件（上表的名字，含 `bonds`、`units`） | 各页保存时自动补 |
 | `voices` | 贡献项之一 | 这个包为哪些干员提供**默认配音**的语音，见 §1.4 | 语音页 |
 | `voiceLangs` | 贡献项之一 | 同一个包给**其它配音语言**（cn/en/kr，默认那一档是日文）各配一份，见 §1.4；形状与 `voices` 相同，多一层语种 | 语音页（语种选择） |
 | `bondIcons` | 贡献项之一 | 这个包为哪些盟约提供图标，见 §1.4 与 §1.8：`{ "<bondId>": "<包内相对 assets/ 的路径>" }` | 盟约页 + 该页的「已声明」清单 |
 | `itemIcons` | 贡献项之一 | 这个包为哪些装备/道具提供图标，见 §1.4：`{ "<图标 id>": "<包内相对 assets/ 的路径>" }` | 装备页 + 该页的「已声明」清单 |
-| `art` | 贡献项之一 | 这个包自带的外观素材（头像 / 立绘 / 模型），见 §1.4：`{ chars / enemies / tokens: { "<id>": <官方条目形状的子集> } }` | 干员页 / 怪物页的「本包自带的外观素材」+ 「已声明」清单 |
+| `art` | 贡献项之一 | 这个包自带的外观素材（头像 / 立绘 / 模型）**与两张扁平图标表**（技能图标 / 分支图标），见 §1.4：`{ chars / enemies / tokens / skills / profSub: { "<id>": … } }` | 干员页 / 怪物页的「本包自带的外观素材」+ 「已声明」清单 |
 | `support` | 否 | 这个包自己新增的、应当进助战卡池的干员 id 列表，见 §2.1；阶由记录推导 | 包管理 → 助战声明 |
-| `overrides` | 否 | 允许覆盖的官方记录，格式 `"<file>:<id>"`，例如 `"chess:chess_char_1_01_a"`、`"bonds:yanShip"` | 包管理 → overrides（盟约页覆盖官方时自动补 `bonds:<id>`） |
+| `operators` | 贡献项之一 | 这个包自己新增的、应当进**自选池**（自选编队）的干员，见 §1.2；名字/星级/职业/分支从本包那条 `units` 记录派生 | 包管理 → 自选池声明 |
+| `overrides` | 否 | 允许覆盖的官方记录，格式 `"<file>:<id>"`，例如 `"chess:chess_char_1_01_a"`、`"bonds:yanShip"`、`"units:char_4231_clemnt"` | 包管理 → overrides（盟约页覆盖官方时自动补 `bonds:<id>`） |
 
-**每个字段都有图形入口**（0.8.1 起，最后补上的是元数据与 `overrides`）：写进 `pack.json` 的东西必须能在界面上增删改，
-包括**陈旧/没人用的条目**（它们只是不生效，不是错误，但要能删掉）。唯一没有入口的是 `id`：它必须等于目录名。
+**每个字段都有图形入口**（0.8.1 起，最后补上的是元数据与 `overrides`；`operators` 的入口见 §1.2）：写进 `pack.json`
+的东西必须能在界面上增删改，包括**陈旧/没人用的条目**（它们只是不生效，不是错误，但要能删掉）。唯一没有入口的是 `id`：它必须等于目录名。
 
 `content` 只接受上表列出的文件。**`config` 被刻意排除**：一个能改写经济、回合表或难度参数的包改的是规则而不是内容，那需要另一套审查机制，不在本功能范围内。
 
-**只带素材的包是合法的包**：`content: []` + `voices` / `voiceLangs` / `bondIcons` / `itemIcons` / `art` 里任意一项（见 §1.4）。
-一个只给助战干员配语音、只给盟约/装备配一张图、或只给某个干员配一张立绘的包，不需要提供任何数据文件；
-反过来，这些贡献项**全空**才会被拒（`EMPTY_PACK`）。
+**只带素材的包是合法的包**：`content: []` + `voices` / `voiceLangs` / `bondIcons` / `itemIcons` / `art` / `operators`
+里任意一项（见 §1.4）。一个只给助战干员配语音、只给盟约/装备配一张图、只给某个干员配一张立绘的包，不需要提供任何
+数据文件；反过来，这些贡献项**全空**才会被拒（`EMPTY_PACK`）。
 
 ### 1.2 叠加规则
 - **默认叠加（additive）**：新 id 直接加入。
@@ -76,6 +83,68 @@ workshop/<packId>/
   **为什么单独开一条规则**：官方记录里的天赋可以带「潜能链」注释（记录层的 `potDown`、天赋层的 `potMin` + `potBelow`），而编辑器派生出来的记录**故意不带**这些注释。整块替换的话，你只是改了一条天赋的文案，官方那条天赋的整条潜能链就没了，而加载器一句错都不报 —— 一条**静默**的数据丢失。裸列表（`bonds` / `immunities` / `rangeGrid` …）仍然是整块替换：按字段合并一个裸列表会造出一条没人写过的记录。
 - **失败关闭**：包 id 不合法、`content` 为空、文件缺失或不是合法 JSON — 该包被跳过并报告，服务器继续启动。
 - **`workshop/` 不存在是正常情况**：没有包就没有叠加层，行为与加入本功能之前完全一致。
+
+#### 新增一个干员（`content: ["units"]` + `pack.json.operators`）
+
+「一个包新增一名干员」需要两件东西，缺一件这个干员在游戏里就不完整：
+
+| 件 | 写在哪 | 落进哪 | 少了它会怎样 |
+|---|---|---|---|
+| 干员记录 | `<pack>/units.json`，`{ [charId]: record }`，形状与 `data/backups.json` 的 `units[charId]` 同形 | `data.backups.units[charId]` | 自选界面画不出名字/职业，一局里取不到 def |
+| 自选池声明 | `pack.json.operators`，`{ [charId]: { bonds, powers } }` | `data.backups.diy.ownedPool`（push，去重）+ `diy.operators[charId]` | 干员记录在数据里，但**自选编队里没有他** —— 拿不到手 |
+
+```json
+{
+  "id": "my-op", "license": "CC0-1.0", "content": ["units"],
+  "operators": { "char_4231_clemnt": { "bonds": ["egirShip"], "powers": ["egir", "iberia"] } },
+  "art": {
+    "skills":  { "skchr_my_1": "skill/my1.png" },
+    "profSub": { "mybranch":  "prof/sub/mybranch.png" }
+  }
+}
+```
+
+**规则（都已强制）**：
+
+| 规则 | 说明 |
+|---|---|
+| **只查「下游用得上吗」，不复制官方 schema** | `units.json` 的每条记录只要求 `charId`（＝键）、`name`、`rarity`（整数）、`profession`、`subProfessionId`、`forms`（非空对象）六项，其余字段**一律照抄**。理由：复刻一份官方 schema 就是给自己加一个会漂移的第二真相；下游真正读的也只是这几个键。逐条的拒绝码：`UNIT_MISSING_CHAR_ID` / `UNIT_MISSING_NAME` / `UNIT_BAD_RARITY` / `UNIT_MISSING_PROFESSION` / `UNIT_MISSING_SUB_PROFESSION` / `UNIT_BAD_FORMS`，`charId` 与键不一致是既有的 `ID_MISMATCH` |
+| **四个字段从记录派生，清单里不重复写** | `name` / `rarity` / `profession` / `subProfessionId` 一律取本包那条 `units` 记录，`obtainable` 恒为 `true`。`pack.json.operators` 里写这些字段是**没有用**的（装载器不读）—— 两份真相会漂移，而 `diy.operators` 那份今天是生成器产出的 |
+| `OPERATOR_NO_UNIT` | 声明了一个本包没有 `units` 记录的干员 → 拒绝 + 点名。没有记录就没有名字与职业，进池等于一个空槽 |
+| `OPERATOR_NOT_SIX` | `rarity !== 6` → 拒绝。**自选池就是六星那条路**；5★ 及以下请走工坊棋子注册表（`content.chess` + `kits/<chessId>.js`），那里才有商店阶级 |
+| `OPERATOR_BOND_UNKNOWN` | `bonds` 里某个 id 不在 `data/bonds.json` → 拒绝 + 点名。**这条必须拒**：盟约 id 写错时那条盟约条**永远不会出现**（没有图标、没有阈值），而作者只会以为「盟约没生效」—— 一次完全静默的失效 |
+| `OPERATOR_FORM_MISSING` | `forms` 没覆盖自选槽要的档位 → 拒绝 + 点名缺的那一档。自选槽的**普通与精锐两条记录各自**要求一个档位（`shared/diy.js` `checkDiyPick` 同时解析两条），缺一个这个干员就挑不上；更重的是 `tools/golden.mjs` 会给池里每位配一个精锐场景，所以缺档位会让**语料生成抛异常**，`golden` / `ci` 全线挂。要求的那一组**从 `diy.slots` 的两条记录派生**（`requiredUnitForms`），不是硬编码 `2/60/7/3` |
+| `OPERATOR_BAD_SHAPE` | `operators` 不是对象、某一条不是对象、`bonds`/`powers` 不是字符串数组、干员 id 不合法 → 拒绝 |
+| **两个包给同一个 charId** | 内容文件那一层就按 §1.2 裁决：**包 id 字典序最小者赢**，输的一方得到一条点名报告（`units:<id>`），它的自选池声明随之作废（它其实没有可供声明的记录）。`ownedPool` 因此只会多一个 id |
+| **`data/*.json` 一个字节都不改** | 叠加发生在 `deepFreeze` 之前（§1.3）。所以「作者能加」与「生成器是唯一来源」同时成立：磁盘上的 `ownedPool` 仍是生成器写的那份，`test/backups.test.js` 对**文件**的断言完全不受影响；把包删掉，游戏立刻回到原样 |
+| **入池顺序只由包 id 排序决定** | 与目录扫描顺序无关（`byPackId`，DESIGN §27.3）—— 同样的包集合永远得到同样的 `ownedPool` |
+| **潜能注解（`potDown` / `potMin` / `potBelow`）不写 = 潜能对它无效** | 包干员通常没有这些注解，0.2.2 引擎的行为是：**不报错、天赋不丢，但属性与天赋数值不随潜能缩放**（潜能 1 与潜能 6 真建局逐字节相同；官方带注解的干员会缩放）。要让它随潜能变，就得照官方记录把注解一并抄进 `forms` |
+| 编辑器入口 | 包管理 → **自选池声明**（§1.1）。干员记录本身由干员页写成 `units.json`；**「新建一个干员」的表单不在本轮**，见 DESIGN §27.11 |
+
+#### 技能图标与分支图标（`art.skills` / `art.profSub`）
+
+`assets.json` 的这两张表**值直接就是路径字符串**（不像 `chars` 那样是「对象 + `urls` 字段」），所以它们是
+`ART_TABLES` 里的**扁平表**（`flat: true`）：条目本身就是路径，落点由 `target` 给出。
+
+```json
+"art": {
+  "skills":  { "skchr_my_1": "skill/my1.png" },
+  "profSub": { "mybranch":  "prof/sub/mybranch.png" }
+}
+```
+
+| 表 | 落点 | 客户端读它的地方 |
+|---|---|---|
+| `skills` | `data.assets.skills[<图标 id>]` | 技能图标（`<技能 id>` = 记录里 `skills[].icon`） |
+| `profSub` | `data.assets.prof.sub[<subProfessionId>]` | 职业分支图标（小写分支名，例如 `primguard`） |
+
+规则与其它图标通道逐字相同：路径相对 `assets/`、无穿越（`ART_PATH_UNSAFE`）、id 字符集同一套（`ART_BAD_ID`）、
+URL 走 `/workshop-assets`（客户端零改动）、官方已有这个 id 时是**替换**（给官方技能换图标）、两个包抢同一个 id 时
+**包 id 最小者赢**并点名（`ASSET_COLLISION`）。`assets.json` 缺失时报告 `MANIFEST_MISSING`，不凭空造一张表。
+
+**`skillsById` 不在本轮范围内**（业主 2026-10-09）：我们没查清它的用途（本仓数据里它是 `{ id: id }` 这种自映射，
+522 条与 `skills` 一一对应），所以**故意不开口子**。写了 `art.skillsById` 会被 `ART_UNKNOWN_TABLE` 拒掉 —— 那正是
+我们要的：宁可当场说「这张表没有通道」，也不要收下一份没人读的声明。
 
 ### 1.3 数据流
 
@@ -257,7 +326,8 @@ URL 走同一条 `/workshop-assets/<pack>/<路径>`，**客户端零改动**（`
 
 | 规则 | 说明 |
 |---|---|
-| 三张表，形状照抄官方条目 | `chars` 的 `spine` 是**嵌套**的 `{ front: …, back: … }`；`enemies` / `tokens` 的 `spine` 是**扁平**的。可用的字段就是官方条目里的那几个：`chars` 用 `avatar`/`avatarE2`/`portrait`/`portraitE2`，`enemies` 用 `icon`（另有 `spineAliasOf` 指向别的模型），`tokens` 用 `avatar`（另有 `owner`）。写别的字段会被拒（`ART_UNKNOWN_FIELD`） |
+| 三张对象表，形状照抄官方条目 | `chars` 的 `spine` 是**嵌套**的 `{ front: …, back: … }`；`enemies` / `tokens` 的 `spine` 是**扁平**的。可用的字段就是官方条目里的那几个：`chars` 用 `avatar`/`avatarE2`/`portrait`/`portraitE2`，`enemies` 用 `icon`（另有 `spineAliasOf` 指向别的模型），`tokens` 用 `avatar`（另有 `owner`）。写别的字段会被拒（`ART_UNKNOWN_FIELD`） |
+| **另外两张是扁平表** | `skills`（技能图标）与 `profSub`（职业分支图标）：条目本身**就是一条路径字符串**（`assets.skills[key]` / `assets.prof.sub[key]` 在官方清单里就是路径）。落点分别是 `assets.skills` 与 `assets.prof.sub`，见 §1.2 最后一小节；`skillsById` 没有通道（故意） |
 | 路径相对 `assets/` | 与语音、各类图标逐字相同（`ART_PATH_UNSAFE`）；**受 §1.4 的授权闸门约束**（有 `assets/` 就必须声明 `license`） |
 | `skel` 与 `atlas` 缺一不可 | `ART_SPINE_INCOMPLETE`。清单里的 `atlas` 我方代码只用来做内存回收，但形状这一层就要求它必须在 —— 见下面第一条硬约束 |
 | **字段级合并，不是整条替换** | 官方已有这个 id 时，包只给头像就保留官方模型、只给 `spine.front` 的 `skel`/`atlas` 就保留官方那一侧的 `anims`/`events`（整侧替换会让一个官方模型变成「能出来但不动」，而且一条日志都没有） |
@@ -366,6 +436,11 @@ node tools/workshop-validate.mjs my-pack
 | **盟约图标（`bondIcons`）**：汇总进 `assets.bonds`、随合并的 `assets.json` 送达客户端（只带图标的包也合法） | ✅ 已实现（`test/workshopBondIcons.test.js`） |
 | **装备图标（`itemIcons`）**：汇总进 `assets.items`、随合并的 `assets.json` 送达客户端（客户端零改动） | ✅ 已实现（`test/workshopItemIcons.test.js`） |
 | **外观素材（`art`）**：头像 / 立绘 / spine 模型汇总进 `assets.chars` / `assets.enemies` / `assets.tokens`，包新增的干员不再是菱形贴图 | ✅ 已实现（`test/workshopArt.test.js`） |
+| **技能图标与分支图标（`art.skills` / `art.profSub`）**：两张扁平表汇总进 `assets.skills` / `assets.prof.sub`，走同一条 `/workshop-assets` 路由 | ✅ 已实现（`test/workshopOperators.test.js`） |
+| **新增一个干员（`content: ["units"]`）**：干员记录并进 `data.backups.units`，形状只查「下游用得上吗」 | ✅ 已实现（`test/workshopOperators.test.js`、`docs/examples/clementia-pack/`） |
+| **自选池声明（`pack.json.operators`）**：进 `diy.ownedPool` / `diy.operators`；四条拒绝规则（`OPERATOR_NO_UNIT` / `OPERATOR_NOT_SIX` / `OPERATOR_BOND_UNKNOWN` / `OPERATOR_FORM_MISSING`）失败关闭 | ✅ 已实现（`test/workshopOperators.test.js`、编辑器包管理页） |
+| **「新建一个干员」的编辑器表单** | ⛔ 不在本轮（业主未裁定；干员记录目前只能手写 `units.json`，或由干员页的机制产出） |
+| **包 kit 的 import 权利（`KIT_IMPORT`）** | ⛔ 未裁定：本轮之后，克莱门莎的 kit 仍然只能用就地补丁（`test/modSurface.test.js` 那条「判罚稳定」的测试是留给这次裁决的锚点） |
 | **包自带助战（`support`）**：按记录推导阶并入 `data/support.json` 的卡池、随合并的 `support.json` 送达客户端 | ✅ 已实现（`test/workshopSupport.test.js`） |
 | **分享与安装（`.zip`）**：导出/导入/列出，CLI 与编辑器第八页共用同一批函数 | ✅ 已实现（`shared/zip.js`、`tools/workshop-pack.mjs`、`test/workshopPack.test.js`） |
 | **局外编辑器 UI**：干员 / 地图 / 怪物 / 出怪 / 装备 / **盟约** / 行为层 kit / **语音** / **包管理** 九个页面 | ✅ 已实现（`editor/`，见 `docs/EDITOR.md`） |

@@ -5,7 +5,7 @@ Part of [DESIGN.md](../DESIGN.md) (the index; section numbers are global).
 This section is the design for the middle layer between "content a pack can add" and "code a pack can run". It is the
 first part of DESIGN that describes something the repository does **not** implement yet: the behaviour layer exists and
 works (§27.1), but identity, load-order arbitration, verification, versioning and the client surface do not. Nothing
-here is implemented by the commit that adds this file; §27.10 lists what is deliberately left out.
+here is implemented by the commit that adds this file; §27.11 lists what is deliberately left out.
 
 Every `file:line` below was read at the revision this section was written against (`main` `1283050`, `APP_VERSION`
 `0.9.4`, `shared/constants.js:9`). A line number is a **snapshot, not a contract** — where a sentence is load-bearing it
@@ -492,7 +492,77 @@ committed does not ship. A hash computed from the manifest could describe conten
 the files really on disk (or, in a release, from the files really in the archive) cannot. That is the reason §27.2
 computes from bytes.
 
-### 27.10 What this section does not decide
+### 27.10 Operator packs: `units`, `operators`, and the two flat icon tables
+
+The B-段 channel for "a pack adds ONE operator" (`docs/WORKSHOP.md` §1.2). Before it, a community mod could ship an
+operator's RECORD, media and voice lines as a pack but the operator still did not exist where a player meets one: the
+自选编队 roster is generated into `data/backups.json` (`diy.ownedPool`, `diy.operators`), and a pack cannot contribute
+to a generated file. The community mod "克莱门莎" was therefore an **in-place patch** whose only options were to edit
+that file (and lose the edit at the next `npm run build-data`) or to not exist.
+
+**Three pieces, one goal.** `content: ["units"]` lands a `units.json` record in `data.backups.units[charId]`;
+`pack.json.operators` lands the same operator in the 自选 pool; `art.skills` / `art.profSub` land the two icon tables
+whose values are bare path strings (`assets.skills`, `assets.prof.sub`). `units` is the one content file whose on-disk
+name and destination differ — `data/` has no top-level `units.json` (`OVERLAY_TARGET_BY_FILE` in `shared/workshop.js`,
+and `workshopTouchedFiles` maps it to `backups` for the HTTP half), because `server/sim/simdata.js`,
+`shared/standIn.js` and the client all read `backups.units` and nothing else.
+
+#### 27.10.1 Why a pack operator does NOT join the generator's `diy.ownedPool`
+
+The generator contract (`docs/WORKSHOP.md` §1.3, `test/backups.test.js`) says: `data/backups.json` is a GENERATED file,
+its `ownedPool` has exactly the 71 operators the generator decided on, and `workshop/` content is an overlay applied
+**before `deepFreeze`**. Both halves are satisfied by publishing the pack's operator into the in-memory object only:
+
+- the author can add an operator (the overlay is additive, and a pack is the supported channel);
+- the generator stays the single source of the FILE (a pack that is removed takes its operator with it, and
+  `npm run build-data` cannot erase an operator the pack owns).
+
+What this deliberately does NOT give the author is a way to change which OFFICIAL operators are in the pool, or to edit
+`diy.slots` — the same boundary `support` draws for the 助战 pool ("the pool belongs to the install").
+
+#### 27.10.2 The refusal set is the interesting half
+
+Each of the four refusals exists because the corresponding mistake is SILENT otherwise (`shared/workshop.js`
+`workshopOperatorEntries`, one function used by the loader):
+
+| code | the silent failure it replaces |
+|---|---|
+| `OPERATOR_NO_UNIT` | an operator with no record is an empty slot: no name, no profession, no def |
+| `OPERATOR_NOT_SIX` | the 自选 pool IS the 6★ path; a 5★ declaration would be stored and never offered (the workshop chess registry is the 5★ route) |
+| `OPERATOR_BOND_UNKNOWN` | a mistyped bond id means that bond strip never appears, and the author only sees "the bond does not work" |
+| `OPERATOR_FORM_MISSING` | a pool member whose `forms` miss a 自选 slot's status cannot be picked — and `tools/golden.mjs` builds a corpus scenario for every pool member, so it makes the corpus generation THROW and takes `golden` / `ci` down |
+
+`OPERATOR_FORM_MISSING`'s requirement is DERIVED (`shared/diy.js` `requiredUnitForms`, built from `diy.slots` and the
+records' `status`), never a hardcoded `2/60/7/3`: a data change that adds a slot moves the check with it. The operator
+record's own shape is checked just as narrowly: six fields, everything else copied verbatim, because re-stating the
+official schema would create a second truth that drifts (the same stance `ART_TABLES` takes for art).
+
+Ordering follows §27.3 unchanged: packs merge in `byPackId` order, so the smaller pack id keeps a contested `charId`
+and the loser is named (`contributors` + `PACK_ID_COLLISION`). Two faces report it, because the loser's *declaration*
+is refused one layer later — it has no record to declare.
+
+#### 27.10.3 Potential annotations: absent means potential does NOT scale
+
+A pack operator's `forms` normally carry none of the potential annotations (record-level `potDown`, talent-level
+`potMin` / `potBelow`). Measured on 0.2.2 (`_up/clemnt-runtime-proof.md`): the engine **does not error, does not drop
+the talent, but neither the stats nor the talent values scale with potential** — a battle built at potential 1 and one
+at potential 6 are byte-identical, while an official operator carrying the annotations scales (its `atk` moves
+392 → 417). So the semantics of the new channel are: *a pack operator is fielded at full potential and lowering its
+potential changes nothing.* This is a new interface with a silent consequence, which is why it is written down here —
+and why no warning was added in this round (in 0.9.4's data NO record carries the annotations, so a warning would fire
+for every pack operator and drown the boot log). An author who wants potential to matter copies the official record's
+annotations into its `forms` along with the numbers.
+
+#### 27.10.4 `test/modSurface.test.js` is the frozen list
+
+`test/modSurface.test.js` (commit `7b90bb7`) pins the interface surface an in-place patch depends on. The operator
+channel is the pack-side answer to the same surface, so the rule stays: **touching that file requires the repository
+reference census** (it names `data/backups.json`'s record keys, `diy.operators`' field set, `assets.prof.sub` /
+`assets.skills`'s container shape, the nine named exports and the live `Battle` members). The two are deliberately
+complementary — the guard says "these positions must not move", this section says "and here is the supported way to
+reach the same content".
+
+### 27.11 What this section does not decide
 
 - **No sandbox for layer B.** The ruling is "the server executes it", not "untrusted code executes safely". A pack with
   a `while(true)` is refused by the load-time budget check (§27.4), not contained.
