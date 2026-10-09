@@ -15,6 +15,13 @@ import {
   PROFESSIONS, PROFESSION_NAMES, POSITION_NAMES, DMG_TYPES, ATTACK_KINDS, PROJECTILES,
   MODULE_ATTR_KEYS, TRIGGER_RULES, KNOWN_CUSTOM_TRIGGER_RULES,
 } from '../shared/chessAuthoring.js';
+// 0.2.2 把潜能从「烘焙进记录」改成「运行时注解」（`potDown` 记录层 / `potMin`+`potBelow` 天赋层）：官方记录**带**注解，
+// 而 spec 派生出来的记录**不带**（shared/potential.js:146-153 明说这是引擎约定）。所以「往返逐字节一致」的口径要按
+// 上游 test/data.test.js:563 那样改成「**两边都剥掉注解后**逐字节一致」，而不是让创作层把注解脱传（那会违反约定）。
+import { stripPotential, hasPotentialData } from '../shared/potential.js';
+
+/** 比对用：剥掉潜能注解（不修改入参）。 */
+const bare = (v) => stripPotential(v);
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CHESS = JSON.parse(readFileSync(join(ROOT, 'data/chess.json'), 'utf8'));
@@ -232,6 +239,7 @@ describe('干员创作层：模组', () => {
 
   test('官方 110 位带模组的干员：spec → 记录 逐字节往返一致（含富文本与 bbStr）', () => {
     let checked = 0;
+    let potChecked = 0;
     for (const [id, g] of Object.entries(CHESS)) {
       if (!g.isGolden || !Array.isArray(g.modules) || !g.modules.length) continue;
       const rec = CHESS[g.baseId];
@@ -240,15 +248,25 @@ describe('干员创作层：模组', () => {
       spec.id = `rt_${id.replace(/^chess_char_/, '').replace(/_b$/, '')}`;
       const out = deriveChessRecord(spec);
       assert.equal(out.ok, true, `${id}: ${JSON.stringify(out.errors)}`);
-      assert.deepEqual(out.golden.modules, g.modules, `${id}: modules`);
-      assert.deepEqual(out.golden.trait, g.trait, `${id}: trait`);
-      assert.deepEqual(out.golden.stats, g.stats, `${id}: stats（含默认模组）`);
-      assert.deepEqual(out.golden.statsBase, g.statsBase, `${id}: statsBase（不带模组）`);
-      assert.deepEqual(out.golden.talents, g.talents, `${id}: talents`);
-      assert.deepEqual(out.golden.module, g.module, `${id}: module 指针`);
+      // 潜能注解按引擎约定处置：官方两态记录里**带注解的**，派生记录必须是**不带注解的**，且剥掉注解后逐字节相同。
+      // 这两条一起守住「模板保真」：既不许把注解漏进派生记录，也不许借剥注解之名把别的字段改坏。
+      for (const [label, official, derived] of [['base', rec, out.base], ['golden', g, out.golden]]) {
+        if (hasPotentialData(official)) {
+          potChecked++;
+          assert.equal(hasPotentialData(derived), false, `${id}: ${label} 派生记录不该带潜能注解（potDown / 链式天赋）`);
+        }
+        assert.deepEqual(bare(derived.modules), bare(official.modules), `${id}: ${label} modules`);
+        assert.deepEqual(bare(derived.trait), bare(official.trait), `${id}: ${label} trait`);
+        assert.deepEqual(bare(derived.stats), bare(official.stats), `${id}: ${label} stats（含默认模组）`);
+        assert.deepEqual(bare(derived.statsBase), bare(official.statsBase), `${id}: ${label} statsBase（不带模组）`);
+        assert.deepEqual(bare(derived.talents), bare(official.talents), `${id}: ${label} talents`);
+        assert.deepEqual(bare(derived.module), bare(official.module), `${id}: ${label} module 指针`);
+      }
       checked++;
     }
     assert.ok(checked >= 100, `只往返了 ${checked} 位，样本太少`);
+    // 0.2.2 之后官方多数记录带潜能注解；这条断言防止「注解全没了」时上面那段悄悄失去意义（样本为 0 也照样绿）
+    assert.ok(potChecked >= 100, `只有 ${potChecked} 份带注解的记录被查到，样本太少`);
   });
 
   // 完整覆盖：**每一位**可见干员都做一次模板往返。这份名单是已知的例外 —— 官方数据在它身上用了 spec 层
@@ -265,11 +283,12 @@ describe('干员创作层：模组', () => {
       const out = deriveChessRecord(spec);
       if (!out.ok) { offenders.push(`${id}(derive)`); continue; }
       const diffs = [];
+      const j = (v) => JSON.stringify(bare(v));
       for (const k of ['stats', 'statsBase', 'talents', 'talentsBase', 'trait', 'traitBase', 'modules', 'module', 'rangeGrid', 'dmgType', 'attackKind', 'projectile', 'canHitFly', 'bonds', 'price', 'rarity']) {
-        if (g && JSON.stringify(out.golden[k]) !== JSON.stringify(g[k])) diffs.push(k);
+        if (g && j(out.golden[k]) !== j(g[k])) diffs.push(k);
       }
       for (const k of ['stats', 'talents', 'trait', 'rangeGrid']) {
-        if (JSON.stringify(out.base[k]) !== JSON.stringify(rec[k])) diffs.push(`base.${k}`);
+        if (j(out.base[k]) !== j(rec[k])) diffs.push(`base.${k}`);
       }
       if (diffs.length) offenders.push(`${id}(${diffs.join('+')})`);
       checked++;
