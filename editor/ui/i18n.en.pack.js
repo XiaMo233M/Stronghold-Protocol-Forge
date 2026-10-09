@@ -147,4 +147,35 @@ export const EN_PACK = Object.freeze({
   '试玩服务器本来就没在跑。': 'The playtest server was not running.',
   '{0} 个包': '{0} pack(s)',
   '还没有包': 'no pack yet',
+
+  // ---- 中栏：自选池声明（pack.json 的 operators）----
+  '自选池声明（pack.json 的 operators）': 'Draft-pool declaration (pack.json operators)',
+  '这个包的 pack.json 读不出来，先修好它才能声明自选池。': 'This pack\'s pack.json cannot be read; fix it before declaring a draft pool.',
+  '这个包里没有 units.json（干员记录），所以没有可进自选池的干员。先在干员编辑器里建这个包自己的干员记录。': 'This pack has no units.json (operator records), so there is nobody to put in the draft pool. Create this pack\'s own operator records in the operator editor first.',
+  '勾上＝让这个干员**出现在自选编队里**（服务端把它并进 backups.json 的 diy.ownedPool / diy.operators；data/*.json 本身不改）。只能勾本包自己 units.json 里的干员，而且必须是 6★：自选池就是六星那条路，5★ 及以下请走工坊棋子注册表（content.chess + kits/）。名字、星级、职业、分支**从那条 units 记录派生**，这里不写第二遍。':
+    'Ticking makes this operator **appear in the draft roster** (the server merges it into backups.json\'s diy.ownedPool / diy.operators; data/*.json itself is never rewritten). Only operators in THIS pack\'s own units.json can be ticked, and they must be 6★: the draft pool is the six-star route, so 5★ and below go through the workshop chess registry instead (content.chess + kits/). Name, rarity, profession and branch are **derived from that units record** — they are never typed again here.',
+  '能否进池': 'Can enter',
+  '盟约（data/bonds.json 的 id）': 'Bonds (ids in data/bonds.json)',
+  '权能': 'Powers',
+  '（不在本包的 units.json 里）': '(not in this pack\'s units.json)',
+  '缺 units 记录': 'no units record',
+  '不是 6★': 'not 6★',
+  '缺形态 {0}': 'missing form {0}',
+  '可以进池': 'can enter',
+  '例如 egirShip': 'e.g. egirShip',
+  '例如 egir, iberia': 'e.g. egir, iberia',
+  '⚠ {0} 声明了自选池，但本包的 units.json 里没有这条记录 —— 加载器会记 OPERATOR_NO_UNIT 并整条丢掉。取消勾选即可删掉它。':
+    '⚠ {0} declares a draft-pool entry, but this pack\'s units.json has no such record — the loader records OPERATOR_NO_UNIT and drops the whole entry. Untick it to delete the declaration.',
+  '本包没有这条 units 记录（OPERATOR_NO_UNIT）': 'this pack has no such units record (OPERATOR_NO_UNIT)',
+  '不是 6★（OPERATOR_NOT_SIX）': 'not 6★ (OPERATOR_NOT_SIX)',
+  '缺形态档位 {0}（OPERATOR_FORM_MISSING）': 'missing unit form(s) {0} (OPERATOR_FORM_MISSING)',
+  '盟约 {0} 不在 data/bonds.json 里（OPERATOR_BOND_UNKNOWN）': 'bond(s) {0} are not in data/bonds.json (OPERATOR_BOND_UNKNOWN)',
+  '{0} 条声明会被加载器拒绝': '{0} declaration(s) the loader will refuse',
+  '保存自选池声明': 'Save draft-pool declaration',
+  '保存只改 pack.json 的 operators 字段：其余字段、键序与两空格缩进原样保留，也不会给包补一条它没声明过的 content。':
+    'Saving touches only the operators field of pack.json: every other field, the key order and the two-space indent stay as they are, and no content entry the pack never declared gets added.',
+  '进池的是**自选编队**那一栏（房间里选四名干员），不是助战卡池 —— 两者互不影响。改完要重启游戏服务器才会生效。':
+    'What enters is the **draft roster** tab (four operators picked in the room), not the support pool — the two do not affect each other. Restart the game server for the change to take effect.',
+  '已写入 {0} 的 operators：{1} 个{2}': 'Wrote the operators of {0}: {1} entr(ies){2}',
+  '{0} 的 operators 没有变化，文件未被改写{1}': 'The operators of {0} are unchanged; the file was not rewritten{1}',
 });
