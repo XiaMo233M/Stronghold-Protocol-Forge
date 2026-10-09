@@ -562,10 +562,19 @@ its exact `reason`, and `test/kitImports.test.js` asserts that equality on a ref
   files, not a directory. Widening it is a one-line change to a table that a test reads, which is the point — the
   boundary should be visible in a diff, not implied by a path.
 
+**A whitelist row is a promise about names, so a guard holds it.** Opening a file makes its exported names an external
+interface, and nothing in the engine would notice a rename. `test/kitImports.test.js` therefore records every
+whitelisted file's export-name set and asserts the module still exports **at least** those names — a superset check,
+not equality, because adding an export cannot break a mod while deleting or renaming one breaks every pack that imports
+it. The failure names the file, the specifier and the missing names. `test/ui/kitimports.e2e.test.js` reads the same
+table, so the guard and the browser check can never drift apart.
+
 **What is verified, and what is not.** The server half is verified end to end: a fixture kit that imports all five
 community-kit modules is really imported through `loadWorkshopKits`, its helper is called, and the value it computes is
 asserted. The refusals are verified through both readers, and the pack hash is asserted unchanged across a load. The
 browser half is verified only as far as Node can go — the import map is asserted to agree with the table, and every
 whitelisted module is asserted to be served as JavaScript at the URL the map resolves it to. Import-map resolution
-itself is the browser's job and **was not exercised in a real browser**; that remains the standing gap recorded in
-`docs/WORKSHOP.md` §4.4.
+itself is the browser's job; `test/ui/kitimports.e2e.test.js` is the opt-in check that does it in a real Chrome
+(`SP_E2E=1 node --test test/ui/kitimports.e2e.test.js`: it imports every whitelisted specifier in the page context,
+asserts the export-name floor, and asserts a specifier outside the whitelist does not resolve there either), and until
+someone runs it on a machine with Chrome this remains the standing gap recorded in `docs/WORKSHOP.md` §4.4.

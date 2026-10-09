@@ -573,7 +573,7 @@ export default function kit(bb, chess, def) {
 | kit **静态校验**（钩子词表 + 三条硬规则），机器可读 | ✅ 已完成（`shared/kitAuthoring.js`、`test/kitAuthoring.test.js`，词表有漂移守卫） |
 | 浏览器分发（spec 携带 URL + runner 重建同一张表） | ✅ 已实现并测试（模块可按 URL 取得、装配路径有断言） |
 | kit 的**受限 import**（白名单 + 双端解析，§4.5） | ✅ 服务端已验（真 import 成功、helper 可用、白名单外仍被拒、包哈希不变）；浏览器侧只验到「import map 与表一致 + 模块在 `/sim/` 可取」 |
-| 浏览器端**真机端到端**（Chrome 跑一场带 kit 的对局） | ⛔ 未做（需 `SP_E2E=1` + Chrome；import map 的解析本身由浏览器做，Node 没有 import map） |
+| 浏览器端**真机端到端**（Chrome 跑一场带 kit 的对局） | ⛔ 未做（需 `SP_E2E=1` + Chrome；import map 的解析本身由浏览器做，Node 没有 import map）。**能跑的那一条已经写好**：`SP_E2E=1 node --test test/ui/kitimports.e2e.test.js`（页面上下文里 import 每个白名单 specifier、验导出名下限、并验白名单外的 specifier 在浏览器里也解析不到） |
 | 编辑器里的 kit 编辑页签（`editor/ui/kit.html`） | ✅ 已完成（编辑文件本体 + 上面的静态校验 + 保存时写署名头；真正 `import` 一遍仍由 `tools/workshop-validate.mjs` 做，编辑器不执行作者的文件） |
 | 包之间 kit id 冲突、kit 的沙箱与审查 | ⛔ 未做（冲突会被报告并跳过；沙箱按分渠道策略不做） |
 
@@ -640,4 +640,5 @@ export default function kit(bb, chess, def) { /* … */ }
   （warning），本次只动 import 口径。
 
 测试：`test/kitImports.test.js`（白名单表与两端解析、校验器口径、服务端真加载并调用 `num`、白名单外仍被拒、
-哈希前后不变、社区 kit 5 条映射）。
+哈希前后不变、社区 kit 5 条映射、以及每个白名单文件的**导出名下限**守卫 —— 删名/改名会红并点名，
+加导出不会）；真机那半是 `test/ui/kitimports.e2e.test.js`（默认跳过，见 §4.4 的命令）。

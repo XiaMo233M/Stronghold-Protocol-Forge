@@ -147,6 +147,101 @@ describe('kit import 白名单：表与两端解析', () => {
 });
 
 // ---------------------------------------------------------------------------------------------------
+// ①b 白名单文件的**导出名下限**守卫
+//
+// 白名单把 tier1..tier6 + summoner + 三个 @sim/ helper 变成了**对外接口**：作者包 import 的就是这些名字。
+// 所以这里把每个白名单文件当前的**具名导出名集合**记下来，断言「这些名字仍然都被导出」——
+//   · 用**超集**（⊇）而不是相等：**加**一个导出永远不会打断任何 mod（老包不 import 它），**删**或**改名**才会。
+//     相等断言会把「加导出」也判红，那是把守卫变成噪声。
+//   · 失败信息点名「哪个文件少了哪个导出」，让读的人一眼知道谁被打断了（而不是自己去 diff 两个集合）。
+// 与 §⑤ 的 9 个名字不重复：那条是社区 kit 用到的名字，这条是**每个白名单文件的全部导出**。
+// 快照取自各模块自己的命名空间（2026-10-10，commit 1c64bd7 时点），不是从源码文本里猜的。
+// ---------------------------------------------------------------------------------------------------
+/** 每个白名单文件的导出名下限（写死在测试里：改动它必须是**有意**的，而不是跟着源码自动变）。 */
+const KIT_IMPORT_EXPORTS = {
+  "server/sim/content/kits/shared/tier1.js": [
+    "PROTECT", "PROTECT_TICK_HOLD", "RING1", "alliesInGridOf", "batMod", "byEnemyAttack", "cheb", "enemiesInGrid",
+    "enemyInRange", "freeTileAround", "giveSp", "holdProtect", "hurtSpDamage", "installAura", "installReveal",
+    "instantKind", "isMainHit", "makeZone", "moduleBb", "moduleOn", "num", "onDamagedOn", "onHitBy", "onHitOn",
+    "once", "posKey", "protectMods", "skillBbOf", "skillBusy", "skillRec", "spTimeBonus", "statBuff",
+    "summonTileFree", "talentBb", "talentGrid", "toggleBuff", "traitBb", "up",
+  ],
+  "server/sim/content/kits/shared/tier2.js": [
+    "onDefaultSkill",
+  ],
+  "server/sim/content/kits/shared/tier3.js": [
+    "NINE", "alive", "altSkills", "aura", "copyGrid", "defOf", "enemiesOn", "freeTile", "funnelMap", "fx",
+    "giveSp", "gridKeys", "groundAspd", "groundTile", "installFunnelPrune", "instantKindOf", "isLeader",
+    "moduleTalentBb", "num", "onTiles", "selectedId", "statSkill", "tacticalPoint", "talentBb", "textNum",
+    "traitBb", "whileTrue",
+  ],
+  "server/sim/content/kits/shared/tier4.js": [
+    "AURA", "AURA_DUR", "alt", "applyModuleRange", "batFlat", "enemiesOnRange", "enemyHasTag", "grid",
+    "installLowHpHealBonus", "instantKind", "isSel", "keySet", "lonely", "moduleBb", "nationOf", "num",
+    "pullToFront", "pulse", "resCut", "reveal", "skillActive", "spAura", "targetsInGrid", "targetsInRange", "tbb",
+    "toggleBuff", "whileDeployed", "withDefaults",
+  ],
+  "server/sim/content/kits/shared/tier5.js": [
+    "AURA_DUR", "AURA_IV", "HALF_HP", "NEVER", "RING1", "batPct", "burstDamageUp", "burstSpUp", "crowdAspd",
+    "dist", "elementHit", "enemiesInGrid", "inFaction", "inRange", "instantKind", "isAbyssal", "isOp",
+    "lazySkills", "leaderOf", "lowHpHealUp", "maxCharges", "mods", "moduleRangeUp", "num", "on", "permBuff",
+    "selectedId", "skillGrid", "skillRange", "spAura", "talent", "talentRec", "traitBb", "whileOn",
+  ],
+  "server/sim/content/kits/shared/tier6.js": [
+    "ABNORMAL", "ANY", "AROUND8", "N4", "WHOLE_FIELD", "aura", "batOf", "bestTile", "bstate", "bv",
+    "cleanseAbnormal", "elementDmg", "enemiesIn", "freeTiles", "hasAbnormal", "hasBond", "instantKind", "isElite",
+    "isTok", "keyOf", "live", "moduleBb", "num", "onDefaultSkill", "onElementHit", "opsOf", "parseN",
+    "pullToward", "selectedSkill", "skillGridOf", "tbb", "tdesc",
+  ],
+  "server/sim/content/kits/shared/summoner.js": [
+    "DECK_RETRY", "holdBuff", "summonDeck", "summonTriggerArea", "tokenStat",
+  ],
+  "server/sim/constants.js": [
+    "ALLY_COLLIDER_RADIUS", "ASPD_MAX", "ASPD_MIN", "ATTACK_ANIM_TIME", "ATTACK_PAUSE", "AUTO_OP_COOLDOWN",
+    "BLOCK_RADIUS", "BLOCK_RADIUS_SQ", "BOOMERANG_RETURN_SPEED", "BOSS_POOL_MIN_HP", "BOSS_ROW_OFFSET",
+    "CHAIN_RADIUS", "COLD_ASPD", "COLD_FREEZE_DURATION", "COLS", "DEPLOY_ANIM_TIME", "DIE_ANIM_TIME",
+    "DIRECT_BONUS_STACKING", "DOWN_STATE", "DP_DEFAULTS", "ELEMENT", "ELEMENTS", "ELEMENT_GAUGE_MAX",
+    "ELEMENT_GAUGE_MAX_LEADER", "ELEMENT_ORDER", "EVENT_BUFFER_CAP", "FIELD_COLS", "FIELD_ROWS", "FORCED_EXIT",
+    "FREEZE_RES_DOWN", "LEVITATE_HALF_WEIGHT", "MAX_ALIVE_ENEMIES", "MAX_BATTLE_TIME", "MAX_HOOK_DEPTH",
+    "MAX_INTERNAL_ERRORS", "MIN_DAMAGE_RATIO", "MOVE_SCALE", "OBSTACLE_DEVICES", "PALSY_MAX", "PROJECTILE_SPEED",
+    "PROJECTILE_SPEEDS", "PULL_CRAWL", "PULL_ORIGIN", "PULL_STOP_RADIUS", "PULL_WEAK_SHARE",
+    "PUSH_DIRECTIONAL_MIN_DIST", "PUSH_EFFECT_SKILLS", "PUSH_TILES", "PUSH_TILES_EFFECT", "REGEN_EVENT_MIN",
+    "RESIST_DEFAULT", "RESIST_PALSY_DECAY", "ROWS", "SNAPSHOT_EVERY", "STEALTH_RESTORE", "TICK",
+  ],
+  "server/sim/dir.js": [
+    "DEFAULT_DIR", "DIRS", "DIR_VEC", "dirFromDelta", "dirVec", "frontOf", "hSign", "isDir", "localBefore",
+    "localOrder", "mirrorDir", "normDir", "offsetTile", "oppositeDir", "perpendicular", "rotateOffset", "toLocal",
+  ],
+  "server/sim/targeting.js": [
+    "absoluteRangeKeys", "aggroCmp", "areaSelectable", "auraSelectable", "canTargetAlly", "canTargetEnemy",
+    "enemyStealthed", "evadesGround", "extendedGrid", "sortAllyTargets", "sortEnemyTargets", "stealthOffKey",
+    "tileKeyOf",
+  ],
+};
+
+describe('kit import 白名单：每个文件的导出名下限（⊇，不是相等）', () => {
+  test('记录的导出名下限覆盖了白名单里的每一个文件（表加了文件就要加一行）', () => {
+    assert.deepEqual(
+      Object.keys(KIT_IMPORT_EXPORTS).sort(),
+      KIT_IMPORT_FILES.map((e) => e.file).sort(),
+      'KIT_IMPORT_EXPORTS 与 shared/kitImports.js KIT_IMPORT_FILES 不同步：白名单加了文件，这里必须补上它的导出名',
+    );
+  });
+
+  for (const { specifier, file } of KIT_IMPORT_FILES) {
+    test(`${specifier} 仍然导出它承诺的每一个名字（删名/改名 = 打断所有依赖它的包）`, async () => {
+      const mod = await import(new URL(`../${file}`, import.meta.url).href);
+      const missing = KIT_IMPORT_EXPORTS[file].filter((name) => !(name in mod));
+      assert.deepEqual(
+        missing,
+        [],
+        `${file}（${specifier}）少导出这些名字：${missing.join('、')} —— 白名单文件是对外接口，删名或改名会打断所有 import 它的工坊包`,
+      );
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------------------------------
 // ② 校验器口径（编辑器/CLI 走这一条）
 // ---------------------------------------------------------------------------------------------------
 describe('kit import：校验器口径', () => {
