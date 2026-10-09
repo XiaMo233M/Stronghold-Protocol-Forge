@@ -143,15 +143,16 @@ matters and is the answer for the third file the ruling names:
 
 ### 27.3 Loading (gap 2): one rule for "who wins", and attribution that names the pack
 
-**Decided by the owner on 2026-10-09, and implemented** (the four points below are the ruling verbatim in substance; the
-first step of the slice carries them, `docs/WORKSHOP.md` §1.2 states them for authors):
+**Decided by the owner on 2026-10-09 and refined the same day, and implemented** (the points below are the ruling in
+substance; the first step of the slice carries them, `docs/WORKSHOP.md` §1.2 states them for authors):
 
 | collision | the rule | where it is enforced |
 |---|---|---|
-| a new id claimed by two packs — a data record | **refused, and the report names the pack that holds it** | `shared/workshop.js:636-645` (`PACK_ID_COLLISION`, `definedBy`) |
+| a **new** id claimed by two packs — a data record | **refused, and the report names the pack that holds it** (neither author's claim can be preferred) | `shared/workshop.js:653-666` (`PACK_ID_COLLISION`, `definedBy`) |
 | a new kit id claimed by two packs | **refused, and the report names the pack that holds it** | `server/workshop.js:169-174` (`KIT_ID_COLLISION`, `definedBy`) |
+| two packs **overriding the same existing record** (an official id, or a record another pack contributed) | **the smaller pack id wins + the conflict is reported** (`definedBy` names the pack that was passed over) | `shared/workshop.js:653-666` and `:675-679` |
 | an icon / item icon / art entry claimed by two packs | **the smaller pack id wins**; the loser is reported and named | `shared/workshop.js:855`, `:926`, `:1055` |
-| `overrides` declares the replacement of an OFFICIAL id | **allowed, and the declaration is what makes it allowed** | `shared/workshop.js:14-16`, `:636-645` |
+| `overrides` declares the replacement of an **OFFICIAL** id | **allowed, and the declaration is what makes it allowed** | `shared/workshop.js:14-16`, `:668-679` |
 | anything, between two packs | **the smaller pack id wins — on every face** | one comparator: `shared/workshop.js:508` `byPackId` |
 
 Two rules, not three, and they are the only two:
@@ -162,6 +163,13 @@ Two rules, not three, and they are the only two:
    Equal ids cannot occur: the manifest must equal the directory name (`shared/workshop.js:195` `PACK_ID_MISMATCH`).
    A collision the loser cannot win is *reported and attributed* rather than silently resolved, which is why the data
    and kit faces "refuse" while the icon faces "keep the first": both are the same rule, seen from the side that lost.
+
+The refinement the owner added is the interaction of the two, and it is the subtle one: **`overrides` is the licence to
+replace OFFICIAL data, not a licence to overwrite another pack.** A pack that declares `"chess:X"` and finds that another
+pack already contributed `X` loses on id order like everyone else, and the report says so
+(`an "overrides" entry does not win against another pack`). Without that sentence the rule would have had a quiet
+back door: the bigger-id pack could take the record by adding one line to `pack.json`, which is exactly the
+"silently redefines someone else's content" failure the whole section exists to prevent.
 
 Rule 2 needed one comparator, not five implementations. It used to be five: `applyWorkshop` trusted the **array order**
 it was handed, the icon and art paths each re-sorted with their own inline compare, and the kit loader used yet another
@@ -174,14 +182,14 @@ The two in-memory callers that can pass any order — the tests, and the editor 
 pack id that holds the record, or the string `official`. The text says the same thing:
 
 - official: `"<id>" already exists in the official data — add "<file>:<id>" to pack.json overrides to replace it` (`OFFICIAL_ID_COLLISION`)
-- against another pack: `"<id>" is already contributed by pack "<X>" — two packs must not ship the same <file>.json id;
-  rename this record, or add "<file>:<id>" to pack.json overrides to replace that pack's record on purpose` (`PACK_ID_COLLISION`)
+- against another pack: `"<id>" is already contributed by pack "<X>" — the pack with the smaller id keeps it (DESIGN
+  §27.3). Rename this record, or let "<X>" drop it; an "overrides" entry does not win against another pack` (`PACK_ID_COLLISION`)
 - kit: `kit "<id>" is already defined by pack "<X>"` (`KIT_ID_COLLISION`, `server/workshop.js:169-174`)
 - icon / art: `another pack (<X>) already ships …` (`ASSET_COLLISION`, with `definedBy` as well)
 
 Why it matters enough to be a section: the data path used to say "**official** data" for both cases, because the
 variable holding "official + every pack merged so far" was called `official` (it is `prior` at
-`shared/workshop.js:630` now). The author's next move was to open `data/chess.json` and look for a record that is not
+`shared/workshop.js:649` now). The author's next move was to open `data/chess.json` and look for a record that is not
 there. Both defects — the wrong attribution and the unnamed kit holder — are fixed in the first step of the slice.
 
 **Cross-pack conflicts are reported once, at load, in one shape.** The report used to be split across three carriers
@@ -328,7 +336,7 @@ So verification is a **differential run over the corpus's own scenario generator
 
 | the pack declares | the check | it fails when |
 |---|---|---|
-| `combat: false` (a performance / refactor mod) | run the fixed scenario list twice in one process — once with the pack's kit map injected (`Battle opts.kits`, `server/sim/content/index.js:112-114`), once without — and require `resultDigest` (`server/sim/spec.js:308-328`) equality per scenario | the pack changes any observable outcome. **This is the enforcement of "a performance mod must be semantically preserving".** |
+| `combat: false` (a performance / refactor mod) | run the fixed scenario list twice in one process — once with the pack's kit map injected (`Battle opts.kits`, `server/sim/content/index.js:112-114`), once without — and require `resultDigest` (`server/sim/spec.js:319-339`) equality per scenario | the pack changes any observable outcome. **This is the enforcement of "a performance mod must be semantically preserving".** |
 | `combat: true` | run the fixed scenario list twice with the pack loaded and require digest equality (the `--twice` idea, `test/golden/README.md:44`), plus the two execution paths the ruling keeps (server headless vs. the browser's module list, `public/js/battle/runner.js:127-145`) | the pack is non-deterministic, or the two paths disagree. |
 
 Both forms reuse what exists: `tools/golden.mjs` builds the scenarios in a fixed order from `data/*.json` and reduces
@@ -367,7 +375,7 @@ per row:
 | a hook name nothing emits never fires and nothing reports it (`server/sim/battle/hooks.js:17-25`, `:57-59`) | the static check already suggests a near miss (`HOOK_UNKNOWN_EVENT`, `shared/kitAuthoring.js:235-237`), but it is text analysis. Add a **runtime** report: `on` keeps the registration in `this._hooks[name]` (`server/sim/battle/hooks.js:20`), so at `battleEnd` the bus can name every pack-owned hook that was registered and never emitted. A typo then costs one battle instead of one bug report. |
 | non-determinism is a warning (`shared/kitAuthoring.js:220-224`) | an error for layer B (§27.4), and the refusal quotes the construct *and* its source line, so it stops being "a reason that looks nothing like 'you used Math.random'" (`shared/kitAuthoring.js:13-17`). |
 | a kit that returns no `skill` leaves the operator with no skill (`docs/WORKSHOP.md:528`) | the loader knows both facts — a kit was injected *and* `skillSource` says where the skill came from (`server/sim/content/index.js:214`, `:219`). A pack kit with no skill becomes a validation error the editor shows before saving, not a live surprise. |
-| a `chess.assets.spine` that points at an uninstalled model draws a flat portrait and logs nothing (`shared/workshop.js:689-705`) | already solved by `report.looks` (logged at `server/data.js:97`) — generalise it: every field that degrades silently gets a `looks`-style check, and the editor surface must show it, not only the server log. |
+| a `chess.assets.spine` that points at an uninstalled model draws a flat portrait and logs nothing (`shared/workshop.js:717-733`) | already solved by `report.looks` (logged at `server/data.js:97`) — generalise it: every field that degrades silently gets a `looks`-style check, and the editor surface must show it, not only the server log. |
 | the editor deliberately does not import author files (`editor/server.mjs:2827-2855`) | **do not change this.** An HTTP endpoint that executes author code is a code-execution surface. Instead expose the verifier of §27.6 as an explicit action that runs in the **playtest subprocess** (`server/index.js:71-75` `SP_WORKSHOP`), which is already a separate process. |
 | runtime errors land in a 100-entry array reachable only through `m.simErrorLog` (`server/match/Match.js:127-129`, `server/sim/battle/hooks.js:167-185`) | per-owner counters (§27.4), plus the room's mod digest on every error line, so a player's bug report carries the identity of the content it came from. |
 

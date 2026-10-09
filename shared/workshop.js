@@ -651,20 +651,29 @@ export function applyWorkshop(base, packs) {
       let added = 0;
       let overridden = 0;
       for (const [id, rec] of Object.entries(records || {})) {
+        const key = `${file}:${id}`;
         const exists = Object.hasOwn(prior, id);
-        if (exists && !declared.has(`${file}:${id}`)) {
-          const holder = contributors.get(`${file}:${id}`);
+        const holder = contributors.get(key);
+        // The owner's refinement (2026-10-09, DESIGN §27.3): when another PACK already contributed this record, pack id
+        // order decides the winner — the later pack loses even if it declared `"<file>:<id>"` in `overrides`, because a
+        // declaration is the authorisation to replace OFFICIAL data, not a licence to overwrite another pack. Two packs
+        // adding the same NEW id is the same rule seen from the other side: the id is refused and the holder is named.
+        if (holder) {
           report.errors.push({
-            pack: pack.id, file, id, code: holder ? 'PACK_ID_COLLISION' : 'OFFICIAL_ID_COLLISION',
-            definedBy: holder || 'official',
-            reason: holder
-              ? `"${id}" is already contributed by pack "${holder}" — two packs must not ship the same ${file}.json id; rename this record, or add "${file}:${id}" to pack.json overrides to replace that pack's record on purpose`
-              : `"${id}" already exists in the official data — add "${file}:${id}" to pack.json overrides to replace it`,
+            pack: pack.id, file, id, code: 'PACK_ID_COLLISION', definedBy: holder,
+            reason: `"${id}" is already contributed by pack "${holder}" — the pack with the smaller id keeps it (DESIGN §27.3). Rename this record, or let "${holder}" drop it; an "overrides" entry does not win against another pack`,
+          });
+          continue;
+        }
+        if (exists && !declared.has(key)) {
+          report.errors.push({
+            pack: pack.id, file, id, code: 'OFFICIAL_ID_COLLISION', definedBy: 'official',
+            reason: `"${id}" already exists in the official data — add "${file}:${id}" to pack.json overrides to replace it`,
           });
           continue;
         }
         merged[id] = rec;
-        contributors.set(`${file}:${id}`, pack.id);
+        contributors.set(key, pack.id);
         if (file === 'chess') looked.push({ pack: pack.id, id, rec });
         if (file === 'enemies') lookedEnemies.push({ pack: pack.id, id, rec });
         if (exists) { overridden++; push(report.overridden, file, id); } else { added++; push(report.added, file, id); }

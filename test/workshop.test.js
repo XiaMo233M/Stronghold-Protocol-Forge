@@ -221,7 +221,11 @@ describe('workshop: the overlay', () => {
     assert.equal(err.definedBy, 'alpha', 'and names the pack that holds it');
     assert.match(err.reason, /pack "alpha"/);
     assert.doesNotMatch(err.reason, /official/, 'the record is not in the official data and the text must not imply it is');
-    assert.match(err.reason, /chess:chess_ws_shared_a/, 'the declared override is still offered as the deliberate way in');
+    // the refined rule (owner, 2026-10-09): an `overrides` declaration does NOT beat another pack, so the message must
+    // not offer it as the way in — the way in is to rename the record, or to let the holder drop it
+    assert.doesNotMatch(err.reason, /overrides to replace/, 'an override cannot beat another pack');
+    assert.match(err.reason, /does not win against another pack/);
+    assert.match(err.reason, /Rename this record/);
 
     // and the winner is a property of the pack ids, not of the array: the reversed array gives the same verdict
     const flipped = applyWorkshop({ chess: {} }, [claim('beta'), claim('alpha')]);
@@ -282,6 +286,29 @@ describe('workshop: the overlay', () => {
     assert.equal(report.errors.length, 1);
     assert.equal(report.errors[0].pack, 'beta');
     assert.equal(report.errors[0].definedBy, 'alpha');
+    assert.equal(report.errors[0].code, 'PACK_ID_COLLISION');
+  });
+
+  // 业主 2026-10-09 细化的裁决（DESIGN §27.3）：**覆盖同一条已存在记录**时，包 id 字典序最小者生效 —— 而且
+  // `overrides` 声明**不能**用来压过另一个包（声明是「可以替换官方数据」的授权，不是抢别人内容的许可）。
+  test('overriding the SAME existing record: the smaller pack id wins even when both declare the override', () => {
+    const officialId = 'chess_char_1_01_a';
+    const official = loadData(DATA_DIR, { log: quiet, workshopDir: null }).chess[officialId];
+    const base = () => ({ chess: { [officialId]: official } });
+    const both = [
+      { id: 'alpha', overrides: [`chess:${officialId}`], files: { chess: { [officialId]: { ...official, name: 'alpha' } } } },
+      { id: 'zeta', overrides: [`chess:${officialId}`], files: { chess: { [officialId]: { ...official, name: 'zeta' } } } },
+    ];
+    for (const packs of [both, [...both].reverse()]) {
+      const { data, report } = applyWorkshop(base(), packs);
+      assert.equal(data.chess[officialId].name, 'alpha', 'the smaller pack id keeps the record');
+      assert.equal(report.errors.length, 1, JSON.stringify(report.errors));
+      assert.equal(report.errors[0].pack, 'zeta');
+      assert.equal(report.errors[0].definedBy, 'alpha');
+      assert.equal(report.errors[0].code, 'PACK_ID_COLLISION');
+      assert.match(report.errors[0].reason, /does not win against another pack/);
+      assert.deepEqual(report.overridden.chess, [officialId], 'alpha did override the official record; zeta did not');
+    }
   });
 
   test('the merge never mutates its input and reports readable counts', () => {
