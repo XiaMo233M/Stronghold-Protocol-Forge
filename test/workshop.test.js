@@ -193,6 +193,7 @@ describe('workshop: the overlay', () => {
     assert.match(silent.report.errors[0].reason, /overrides/);
     assert.match(silent.report.errors[0].reason, /official data/);
     assert.equal(silent.report.errors[0].definedBy, 'official', 'and the attribution must say so');
+    assert.equal(silent.report.errors[0].code, 'OFFICIAL_ID_COLLISION');
     assert.deepEqual(silent.report.overridden, {});
 
     const declared = applyWorkshop(base, [{ id: 'ok', name: 'ok', overrides: [`chess:${officialId}`], files: { chess: { [officialId]: hostile } } }]);
@@ -214,6 +215,7 @@ describe('workshop: the overlay', () => {
     assert.equal(report.errors.length, 1);
     const err = report.errors[0];
     assert.equal(err.pack, 'beta', 'the error blames the pack that collided');
+    assert.equal(err.code, 'PACK_ID_COLLISION', 'and carries a machine-readable code');
     assert.equal(err.file, 'chess');
     assert.equal(err.id, 'chess_ws_shared_a');
     assert.equal(err.definedBy, 'alpha', 'and names the pack that holds it');
@@ -221,10 +223,48 @@ describe('workshop: the overlay', () => {
     assert.doesNotMatch(err.reason, /official/, 'the record is not in the official data and the text must not imply it is');
     assert.match(err.reason, /chess:chess_ws_shared_a/, 'the declared override is still offered as the deliberate way in');
 
-    // the attribution follows whoever got there first, not the message: the same pair in the other order blames alpha
+    // and the winner is a property of the pack ids, not of the array: the reversed array gives the same verdict
     const flipped = applyWorkshop({ chess: {} }, [claim('beta'), claim('alpha')]);
-    assert.equal(flipped.report.errors[0].pack, 'alpha');
-    assert.equal(flipped.report.errors[0].definedBy, 'beta');
+    assert.equal(flipped.data.chess.chess_ws_shared_a.name, 'chess_ws_shared_a');
+    assert.deepEqual(flipped.report.errors, report.errors, 'the array order must not decide anything');
+  });
+
+  // 归一（DESIGN §27.3，2026-10-09 业主裁定）：**所有面都按包 id 字典序**，赢家与「包是按什么顺序交进来的」无关。
+  // 这条测试钉的是契约本身：同一个包集正序与倒序必须给出同一个赢家、同一条报告、同一份合并结果。
+  test('every face picks the same winner, and the winner does not depend on the array order', () => {
+    const chessId = 'chess_ws_tie_a';
+    const packOf = (id, name) => ({
+      id, name, overrides: [],
+      files: { chess: { [chessId]: { chessId, baseId: chessId, name } } },
+      bondIcons: { bond_tie: `${name}.png` },
+      itemIcons: { item_tie: `${name}.png` },
+      art: { chars: { [chessId]: { avatar: `${name}.png` } } },
+    });
+    const zeta = packOf('zeta', 'Z');   // 数组里在前，但包 id 更大
+    const alpha = packOf('alpha', 'A');
+    const base = () => ({ chess: {}, assets: { bonds: {}, items: {}, chars: {} } });
+
+    const results = [[zeta, alpha], [alpha, zeta]].map((packs) => applyWorkshop(base(), packs));
+    for (const { data, report } of results) {
+      assert.deepEqual(report.packs.map((p) => p.id), ['alpha', 'zeta'], 'packs merge in pack-id order');
+      // the five faces: data record, bond icon, item icon, art entry — the smaller id wins every one of them
+      assert.equal(data.chess[chessId].name, 'A', 'data face');
+      assert.equal(data.assets.bonds.bond_tie, '/workshop-assets/alpha/A.png', 'bond icon face');
+      assert.equal(data.assets.items.item_tie, '/workshop-assets/alpha/A.png', 'item icon face');
+      assert.equal(data.assets.chars[chessId].avatar, '/workshop-assets/alpha/A.png', 'art face');
+      // one reported collision per face, all of them blaming zeta and naming alpha as the holder
+      assert.equal(report.errors.length, 4, JSON.stringify(report.errors));
+      for (const e of report.errors) {
+        assert.equal(e.pack, 'zeta');
+        assert.equal(e.definedBy, 'alpha');
+      }
+      assert.deepEqual([...new Set(report.errors.map((e) => e.code))].sort(), ['ASSET_COLLISION', 'PACK_ID_COLLISION']);
+    }
+    // …and the two runs are indistinguishable: the array order changed nothing at all
+    assert.deepEqual(results[0].report.errors, results[1].report.errors);
+    assert.deepEqual(results[0].report.added, results[1].report.added);
+    assert.deepEqual(results[0].data.assets, results[1].data.assets);
+    assert.deepEqual(Object.keys(results[0].data.chess), Object.keys(results[1].data.chess));
   });
 
   test('a collision that a declared override resolved does not mis-attribute the next pack', () => {

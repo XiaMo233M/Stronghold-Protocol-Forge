@@ -11,7 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { normalizePackManifest, normalizeContentFile } from '../shared/workshop.js';
+import { normalizePackManifest, normalizeContentFile, byPackId } from '../shared/workshop.js';
 
 /** Default pack root: `<repo>/workshop`. */
 export const WORKSHOP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'workshop');
@@ -138,20 +138,25 @@ export function workshopTouchedFiles(loaded) {
  *     battle spec; public/js/battle/runner.js imports them and builds the same map. Shipping only the server half would
  *     make a client-simulated battle disagree with the server's re-computation and get its result rejected.
  *
- * Never throws: a kit that fails to import is reported and skipped.
+ * Never throws: a kit that fails to import is reported and skipped. A kit-id collision between two packs is decided by
+ * `byPackId` (DESIGN §27.3, the same rule the data overlay uses) and the report names the pack that holds the id.
  * @param {ReturnType<typeof loadWorkshop>} loaded
  * @param {{ log?: object|null, baseUrl?: string, knownIds?: Set<string>|null }} [opts] `knownIds` warns about a kit for
  *   an operator that does not exist (dead code) — pass the merged chess ids.
- * @returns {{ kits: Record<string, Function>, modules: Array<{ id: string, pack: string, url: string }>, errors: Array<{ pack: string, id: string, reason: string }> }}
+ * @returns {{ kits: Record<string, Function>, modules: Array<{ id: string, pack: string, url: string }>, errors: Array<{ pack: string, id: string, code: string, definedBy?: string, reason: string }> }}
  */
 export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/workshop-kits', knownIds = null } = {}) {
   /** @type {Record<string, Function>} */
   const kits = {};
   /** @type {Array<{ id: string, pack: string, url: string }>} */
   const modules = [];
-  /** @type {Array<{ pack: string, id: string, reason: string }>} */
+  /** @type {Array<{ pack: string, id: string, code: string, definedBy?: string, reason: string }>} */
   const errors = [];
-  for (const pack of (loaded && loaded.packs) || []) {
+  /** kit id → the pack that loaded it, so a collision can name the holder instead of "another pack" (DESIGN §27.3). */
+  const kitOwner = new Map();
+  // THE ordering rule (DESIGN §27.3), the same comparator the data overlay uses: the smaller pack id wins a collision,
+  // so which pack's kit survives never depends on the order the packs were discovered in.
+  for (const pack of ((loaded && loaded.packs) || []).slice().sort(byPackId)) {
     const kitDir = path.join(pack.dir, 'kits');
     if (!fs.existsSync(kitDir)) continue;
     /** Chess ids this pack itself contributes, and the official ids it declared it may replace. */
@@ -161,16 +166,22 @@ export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/worksho
       if (!name.endsWith('.js')) continue;
       const id = name.slice(0, -'.js'.length);
       const file = path.join(kitDir, name);
-      if (Object.hasOwn(kits, id)) { errors.push({ pack: pack.id, id, reason: 'another pack already defines this kit id' }); continue; }
+      if (Object.hasOwn(kits, id)) {
+        errors.push({
+          pack: pack.id, id, code: 'KIT_ID_COLLISION', definedBy: kitOwner.get(id),
+          reason: `kit "${id}" is already defined by pack "${kitOwner.get(id)}" — two packs must not ship the same kit id; rename this file, or drop one of the two packs`,
+        });
+        continue;
+      }
       if (knownIds && !knownIds.has(id)) {
-        errors.push({ pack: pack.id, id, reason: 'no chess record carries this id, so the kit would never be used' });
+        errors.push({ pack: pack.id, id, code: 'KIT_NO_TARGET', reason: 'no chess record carries this id, so the kit would never be used' });
         continue;
       }
       // The behaviour layer obeys the same rule as the data layer: replacing an OFFICIAL operator's kit is a declared
       // act. Without this, a pack could rewrite official combat behaviour server-wide with no `overrides` entry.
       if (!ownChess.has(id) && !declared.has(`chess:${id}`)) {
         errors.push({
-          pack: pack.id, id,
+          pack: pack.id, id, code: 'KIT_OFFICIAL_OVERRIDE_UNDECLARED',
           reason: `this pack ships no chess record with this id — replacing an official operator's kit requires "chess:${id}" in pack.json overrides`,
         });
         continue;
@@ -182,13 +193,14 @@ export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/worksho
         const mod = await import(`${pathToFileURL(file).href}?v=${v}`);
         const fn = typeof mod.default === 'function' ? mod.default : (typeof mod.kit === 'function' ? mod.kit : null);
         if (!fn) {
-          errors.push({ pack: pack.id, id, reason: 'the module must default-export the kit function (bb, chess, def) => Kit' });
+          errors.push({ pack: pack.id, id, code: 'KIT_NO_DEFAULT_EXPORT', reason: 'the module must default-export the kit function (bb, chess, def) => Kit' });
           continue;
         }
         kits[id] = fn;
+        kitOwner.set(id, pack.id);
         modules.push({ id, pack: pack.id, url: `${baseUrl}/${pack.id}/${name}?v=${v}` });
       } catch (e) {
-        errors.push({ pack: pack.id, id, reason: `import failed: ${String(e && e.message ? e.message : e)}` });
+        errors.push({ pack: pack.id, id, code: 'KIT_IMPORT_FAILED', reason: `import failed: ${String(e && e.message ? e.message : e)}` });
       }
     }
   }

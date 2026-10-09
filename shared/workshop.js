@@ -453,7 +453,7 @@ export function workshopVoiceIndex(packs, { prefix = WORKSHOP_MEDIA_PREFIX, lang
   const out = {};
   const list = (Array.isArray(packs) ? packs : []).filter((p) => p && typeof p.id === 'string' && p.id);
   // sorted by pack id: the merged line list must not depend on the order the filesystem handed the packs over
-  for (const pack of [...list].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
+  for (const pack of [...list].sort(byPackId)) {
     const table = lang === null
       ? (isPlainObj(pack.voices) ? pack.voices : null)
       : (isPlainObj(pack.voiceLangs) && isPlainObj(pack.voiceLangs[lang]) ? pack.voiceLangs[lang] : null);
@@ -499,8 +499,13 @@ export function workshopVoiceLangIndex(packs, { prefix = WORKSHOP_MEDIA_PREFIX }
   return Object.fromEntries(VOICE_LANGS.filter((l) => out[l]).map((l) => [l, out[l]]));
 }
 
-/** Pack ids are slugs, so a plain code-unit compare is a stable, locale-independent order. */
-const byPackId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+/**
+ * The ONE arbitration order of the overlay (DESIGN §27.3): pack ids are slugs, so a plain code-unit compare is a stable,
+ * locale-independent order, and "the pack with the smaller id wins" is decided by this comparator on **every** face —
+ * data records, kit ids, icons, item icons and art. Exported because the kit loader (server/workshop.js) must sort by
+ * the same rule; two orderings would be two contracts, and the loser of a collision would depend on which one ran.
+ */
+export const byPackId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 /**
  * Resolve every pack's 助战 declaration (`pack.json.support`) into the pool entries it asks for, plus the reasons a
@@ -556,7 +561,7 @@ export function workshopSupportEntries(data, packs) {
  */
 function mergeWorkshopSupport(data, packs, report) {
   const { entries, errors } = workshopSupportEntries(data, packs);
-  for (const e of errors) report.errors.push({ pack: e.pack, file: 'support', id: e.id, reason: e.reason });
+  for (const e of errors) report.errors.push({ pack: e.pack, file: 'support', id: e.id, code: e.code, reason: e.reason });
   if (!entries.length) return;
   const support = isPlainObj(data.support) ? data.support : null;
   if (!support) {
@@ -565,7 +570,7 @@ function mergeWorkshopSupport(data, packs, report) {
       if (seen.has(e.pack)) continue;
       seen.add(e.pack);
       report.errors.push({
-        pack: e.pack, file: 'support', id: e.id,
+        pack: e.pack, file: 'support', id: e.id, code: 'MANIFEST_MISSING',
         reason: 'this pack declares 助战 operators, but data/support.json is missing — 助战 is off for this install',
       });
     }
@@ -592,14 +597,14 @@ function mergeWorkshopSupport(data, packs, report) {
  * mutated; the caller freezes the result). Official ids are only replaced when the pack declared them in `overrides`;
  * a collision that was not declared is a reported error and the record already in place is kept.
  *
- * The record already in place is not always an OFFICIAL one: packs are merged in order, so a second pack claiming a
- * first pack's new id collides with that pack. Such an error says which pack holds the id (`definedBy`, and in the
- * text); it used to say "already exists in the official data" for both cases, which sent the author looking for a
- * record that is not in `data/`.
+ * The record already in place is not always an OFFICIAL one: packs are merged in `byPackId` order (DESIGN §27.3 — the
+ * order is the rule, not the caller's array order), so a later pack claiming an earlier pack's new id collides with
+ * that pack. Such an error says which pack holds the id (`definedBy`, and in the text); it used to say "already exists
+ * in the official data" for both cases, which sent the author looking for a record that is not in `data/`.
  *
  * @param {Readonly<Record<string, any>>} base the loaded official data (server/data.js)
  * @param {Array<{ id: string, name?: string, overrides?: string[], files: Record<string, Record<string, object>> }>} packs
- * @returns {{ data: Record<string, any>, report: { packs: object[], added: Record<string, string[]>, overridden: Record<string, string[]>, errors: Array<{ pack: string, file: string, id: string, definedBy: string, reason: string }> } }}
+ * @returns {{ data: Record<string, any>, report: { packs: object[], added: Record<string, string[]>, overridden: Record<string, string[]>, errors: Array<{ pack: string, file: string, id: string, code: string, definedBy?: string, reason: string }> } }}
  */
 export function applyWorkshop(base, packs) {
   const out = { ...(isPlainObj(base) ? base : {}) };
@@ -613,8 +618,9 @@ export function applyWorkshop(base, packs) {
   /** `"<file>:<id>"` → the pack id that put that record into `out` (a pack-vs-pack collision is attributed with it). */
   const contributors = new Map();
 
-  for (const pack of Array.isArray(packs) ? packs : []) {
-    if (!pack || typeof pack !== 'object' || !pack.id) continue;
+  // THE ordering rule (DESIGN §27.3): the smaller pack id wins every collision, so the merge never depends on the
+  // order the caller happened to hand the packs over in. Sorting a copy keeps the caller's array untouched.
+  for (const pack of (Array.isArray(packs) ? packs : []).filter((p) => p && typeof p === 'object' && p.id).sort(byPackId)) {
     const declared = new Set(Array.isArray(pack.overrides) ? pack.overrides : []);
     const entry = { id: pack.id, name: pack.name || pack.id, files: {} };
     for (const [file, records] of Object.entries(pack.files || {})) {
@@ -630,7 +636,8 @@ export function applyWorkshop(base, packs) {
         if (exists && !declared.has(`${file}:${id}`)) {
           const holder = contributors.get(`${file}:${id}`);
           report.errors.push({
-            pack: pack.id, file, id, definedBy: holder || 'official',
+            pack: pack.id, file, id, code: holder ? 'PACK_ID_COLLISION' : 'OFFICIAL_ID_COLLISION',
+            definedBy: holder || 'official',
             reason: holder
               ? `"${id}" is already contributed by pack "${holder}" — two packs must not ship the same ${file}.json id; rename this record, or add "${file}:${id}" to pack.json overrides to replace that pack's record on purpose`
               : `"${id}" already exists in the official data — add "${file}:${id}" to pack.json overrides to replace it`,
@@ -798,7 +805,7 @@ function mergeWorkshopVoices(data, packs, report) {
     for (const pack of Array.isArray(packs) ? packs : []) {
       if (!packDeclaresVoices(pack)) continue;
       report.errors.push({
-        pack: pack.id, file: 'assets', id: 'audio.voice',
+        pack: pack.id, file: 'assets', id: 'audio.voice', code: 'MANIFEST_MISSING',
         reason: 'this pack declares voice lines, but data/assets.json is missing — run `npm run assets` so the client has an audio manifest to extend',
       });
     }
@@ -808,7 +815,8 @@ function mergeWorkshopVoices(data, packs, report) {
   const voice = appendVoiceLines(isPlainObj(audio.voice) ? audio.voice : {}, index);
   /** @type {Record<string, number>} */
   const counts = {};
-  for (const pack of Array.isArray(packs) ? packs : []) {
+  // 按包 id 排序后再数：这两个 map 会随合并后的 manifest 一起发给客户端，键序不能随加载顺序变（DESIGN §27.3）
+  for (const pack of (Array.isArray(packs) ? packs : []).slice().sort(byPackId)) {
     const n = countVoiceLines(pack?.voices);
     if (n) counts[pack.id] = n;
   }
@@ -822,7 +830,7 @@ function mergeWorkshopVoices(data, packs, report) {
     voiceLangs = { ...base };
     for (const [lang, idx] of Object.entries(langIndex)) {
       voiceLangs[lang] = appendVoiceLines(isPlainObj(base[lang]) ? base[lang] : {}, idx);
-      for (const pack of Array.isArray(packs) ? packs : []) {
+      for (const pack of (Array.isArray(packs) ? packs : []).slice().sort(byPackId)) {
         const n = countVoiceLines(isPlainObj(pack?.voiceLangs) && isPlainObj(pack.voiceLangs[lang]) ? pack.voiceLangs[lang] : null);
         if (n) ((langCounts ||= {})[pack.id] ||= {})[lang] = n;
       }
@@ -875,7 +883,8 @@ function mergeWorkshopBondIcons(data, packs, report) {
     for (const bondId of Object.keys(isPlainObj(pack?.bondIcons) ? pack.bondIcons : {})) {
       if (claimed.has(bondId)) {
         report.errors.push({
-          pack: pack.id, file: 'assets', id: `bonds.${bondId}`,
+          pack: pack.id, file: 'assets', id: `bonds.${bondId}`, code: 'ASSET_COLLISION',
+          definedBy: claimed.get(bondId),
           reason: `another pack (${claimed.get(bondId)}) already ships an icon for this bond; keep only one`,
         });
       } else claimed.set(bondId, pack.id);
@@ -886,7 +895,7 @@ function mergeWorkshopBondIcons(data, packs, report) {
     for (const pack of list) {
       if (!isPlainObj(pack?.bondIcons) || !Object.keys(pack.bondIcons).length) continue;
       report.errors.push({
-        pack: pack.id, file: 'assets', id: 'bonds',
+        pack: pack.id, file: 'assets', id: 'bonds', code: 'MANIFEST_MISSING',
         reason: 'this pack ships a bond icon, but data/assets.json is missing — run `npm run assets` so the client has a manifest to extend',
       });
     }
@@ -949,7 +958,8 @@ function mergeWorkshopItemIcons(data, packs, report) {
     for (const itemId of Object.keys(isPlainObj(pack?.itemIcons) ? pack.itemIcons : {})) {
       if (claimed.has(itemId)) {
         report.errors.push({
-          pack: pack.id, file: 'assets', id: `items.${itemId}`,
+          pack: pack.id, file: 'assets', id: `items.${itemId}`, code: 'ASSET_COLLISION',
+          definedBy: claimed.get(itemId),
           reason: `another pack (${claimed.get(itemId)}) already ships an icon for this item; keep only one`,
         });
       } else claimed.set(itemId, pack.id);
@@ -960,7 +970,7 @@ function mergeWorkshopItemIcons(data, packs, report) {
     for (const pack of list) {
       if (!isPlainObj(pack?.itemIcons) || !Object.keys(pack.itemIcons).length) continue;
       report.errors.push({
-        pack: pack.id, file: 'assets', id: 'items',
+        pack: pack.id, file: 'assets', id: 'items', code: 'MANIFEST_MISSING',
         reason: 'this pack ships an item icon, but data/assets.json has no "items" map — run `npm run assets` so the client has an icon table to extend',
       });
     }
@@ -1052,7 +1062,8 @@ function mergeWorkshopArt(data, packs, report) {
         const key = `${table}.${id}`;
         if (claimed.has(key)) {
           report.errors.push({
-            pack: pack.id, file: 'assets', id: key,
+            pack: pack.id, file: 'assets', id: key, code: 'ASSET_COLLISION',
+            definedBy: claimed.get(key),
             reason: `another pack (${claimed.get(key)}) already ships art for this entry; keep only one`,
           });
         } else claimed.set(key, pack.id);
@@ -1064,7 +1075,7 @@ function mergeWorkshopArt(data, packs, report) {
     for (const pack of list) {
       if (!isPlainObj(pack?.art) || !Object.keys(pack.art).length) continue;
       report.errors.push({
-        pack: pack.id, file: 'assets', id: 'art',
+        pack: pack.id, file: 'assets', id: 'art', code: 'MANIFEST_MISSING',
         reason: 'this pack ships art (avatars / portraits / spine models), but data/assets.json is missing — run `npm run assets` so the client has a manifest to extend',
       });
     }

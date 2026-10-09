@@ -20,8 +20,8 @@ The owner's ruling of 2026-10-09 fixes three layers:
 
 | layer | what it is | who executes it | when it may change a battle result |
 |---|---|---|---|
-| **A** content | declarative data, no code: the workshop pack of today (`shared/workshop.js:604` `applyWorkshop`) | nobody — it is merged into the data every consumer reads (`server/data.js:92`) | always, and never detectably by the golden corpus (the corpus is generated from the official `data/*.json`, `test/golden/README.md:8-10`) |
-| **B** server logic | hooks and kits: the code of `workshop/<pack>/kits/<chessId>.js` (`server/workshop.js:147` `loadWorkshopKits`) | **the server only** — this is new | only through the hooks it registers, and only after a declared intent passes deterministic verification |
+| **A** content | declarative data, no code: the workshop pack of today (`shared/workshop.js:609` `applyWorkshop`) | nobody — it is merged into the data every consumer reads (`server/data.js:92`) | always, and never detectably by the golden corpus (the corpus is generated from the official `data/*.json`, `test/golden/README.md:8-10`) |
+| **B** server logic | hooks and kits: the code of `workshop/<pack>/kits/<chessId>.js` (`server/workshop.js:148` `loadWorkshopKits`) | **the server only** — this is new | only through the hooks it registers, and only after a declared intent passes deterministic verification |
 | **C** client UI | rendering, themes, panels | the player's tab | never |
 
 Two sentences in the repository already fix the constraints this design must satisfy at once, and they are currently
@@ -30,13 +30,13 @@ written as if they conflicted:
 - `docs/PACKS.md:131-139` — "the maintainers' study of mods, 2026-10-07": server-side only for gameplay; a content hash
   in the handshake (`welcome`, `/healthz`, the BattleSpec) before data packs ship; **no third-party code** ("a pack type
   that runs code is a separate decision of the owner's"); golden stays on the original content.
-- `docs/WORKSHOP.md:368` — the behaviour layer **is** an owner decision, taken later: "scripts run in the client
+- `docs/WORKSHOP.md:371` — the behaviour layer **is** an owner decision, taken later: "scripts run in the client
   (default `SP_COMBAT=client`), and `SP_VERIFY` can only recompute the result, not stop the script".
 
 The ruling resolves them: **B runs on the server, so the `docs/PACKS.md:137-138` objection no longer applies** (the
-owner has now taken that separate decision), and the `docs/WORKSHOP.md:368` warning stops being a permanent hazard
+owner has now taken that separate decision), and the `docs/WORKSHOP.md:371` warning stops being a permanent hazard
 because a room containing a B pack is no longer simulated in the player's tab (§27.4). The three-channel distribution
-(`docs/WORKSHOP.md:368`) stays.
+(`docs/WORKSHOP.md:371`) stays.
 
 What already exists, and must not be rebuilt: the two event buses (`server/sim/battle/hooks.js:17` `on`, `:57` `emit`;
 `server/match/effectsMeta.js:48-52` the 19 meta hooks), the kit injection point `Battle opts.kits`
@@ -49,7 +49,7 @@ is, who wins when two of them want the same id, and what has to be true before i
 
 Today a pack has an `id` (the directory name, `shared/workshop.js:193-195`) and free-text metadata
 (`shared/workshop.js:392-398`), and the BattleSpec carries only `SPEC_VERSION = 1` (`server/sim/spec.js:33`, written at
-`:55`) plus a list of kit **URLs** (`server/sim/spec.js:79-81`; produced by `server/workshop.js:189`). There is nowhere
+`:55`) plus a list of kit **URLs** (`server/sim/spec.js:79-81`; produced by `server/workshop.js:201`). There is nowhere
 in the wire, in the data or in the match for "which content is this room running".
 
 **The tuple.** One record, one shape, one place:
@@ -77,7 +77,7 @@ sorted by path, over exactly the bytes the loader reads and the browser will be 
    (`server/http/workshop.js:75-105`).
 
 What deliberately does **not** participate: the mtime "version" that currently versions kit URLs
-(`server/workshop.js:181` — a version credential that is not a content hash, and the reason `docs/WORKSHOP.md:366`
+(`server/workshop.js:192` — a version credential that is not a content hash, and the reason `docs/WORKSHOP.md:369`
 records content addressing as unimplemented), the pack directory's absolute path, and any engine code. The last one
 matters and is the answer for the third file the ruling names:
 
@@ -128,54 +128,60 @@ matters and is the answer for the third file the ruling names:
 
 ### 27.3 Loading (gap 2): one rule for "who wins", and attribution that names the pack
 
-Three different arbitrations coexist today, and a pack author meets all three:
+**Decided by the owner on 2026-10-09, and implemented** (the four points below are the ruling verbatim in substance; the
+first step of the slice carries them, `docs/WORKSHOP.md` §1.2 states them for authors):
 
-| collision | today | where |
+| collision | the rule | where it is enforced |
 |---|---|---|
-| data record (official id) | rejected unless the pack declares `"<file>:<id>"` in `overrides`; the record in place is kept | `shared/workshop.js:628-640` |
-| icon / art entry | the pack with the smaller id wins, the later one gets an error | `shared/workshop.js:847`, `:917`, `:1045` (sorted by `shared/workshop.js:503` `byPackId`) |
-| kit id | first come, first served | `server/workshop.js:164` |
+| a new id claimed by two packs — a data record | **refused, and the report names the pack that holds it** | `shared/workshop.js:636-645` (`PACK_ID_COLLISION`, `definedBy`) |
+| a new kit id claimed by two packs | **refused, and the report names the pack that holds it** | `server/workshop.js:169-174` (`KIT_ID_COLLISION`, `definedBy`) |
+| an icon / item icon / art entry claimed by two packs | **the smaller pack id wins**; the loser is reported and named | `shared/workshop.js:855`, `:926`, `:1055` |
+| `overrides` declares the replacement of an OFFICIAL id | **allowed, and the declaration is what makes it allowed** | `shared/workshop.js:14-16`, `:636-645` |
+| anything, between two packs | **the smaller pack id wins — on every face** | one comparator: `shared/workshop.js:508` `byPackId` |
 
-**The rule.** Keep exactly two rules, and make them the only two:
+Two rules, not three, and they are the only two:
 
-1. **An official record is never replaced without a declaration.** Unchanged, and not negotiable: silently redefining a
-   shipped operator would corrupt every match on the server (`shared/workshop.js:14-16`).
-2. **Between two packs, the smaller pack id wins, for every kind of contribution** — data, icon, art, kit. Equal ids
-   cannot occur (the manifest must equal the directory name, `shared/workshop.js:195` `PACK_ID_MISMATCH`). This is
-   already what the icon and art paths intend; the kit path and the data path are brought in line.
+1. **An official record is never replaced without a declaration.** Not negotiable: silently redefining a shipped
+   operator would corrupt every match on the server (`shared/workshop.js:14-16`).
+2. **Between two packs, the smaller pack id wins, for every kind of contribution** — data, kit, icon, item icon, art.
+   Equal ids cannot occur: the manifest must equal the directory name (`shared/workshop.js:195` `PACK_ID_MISMATCH`).
+   A collision the loser cannot win is *reported and attributed* rather than silently resolved, which is why the data
+   and kit faces "refuse" while the icon faces "keep the first": both are the same rule, seen from the side that lost.
 
-Rule 2 is cheaper than it looks, and saying why is part of the design: `applyWorkshop` currently trusts the **array
-order** it is given (`shared/workshop.js:627`), and the only production caller happens to be sorted by directory name
-(`server/workshop.js:33-36` `readdirSync(...).sort()`), which coincides with pack-id order only because rule-of-manifest
-forces `id === directory`. With the rule stated, `applyWorkshop` sorts with the existing `byPackId`
-(`shared/workshop.js:503`) and the outcome stops depending on who called it — a test, the editor, or a future loader.
-For the shipped loader the winner does not change; for an in-memory caller it stops being an accident.
+Rule 2 needed one comparator, not five implementations. It used to be five: `applyWorkshop` trusted the **array order**
+it was handed, the icon and art paths each re-sorted with their own inline compare, and the kit loader used yet another
+one — they agreed only because the production loader sorts directory names (`server/workshop.js:33-36`) and the manifest
+rule forces `id === directory`. `byPackId` (`shared/workshop.js:508`) is now exported and used by every face, including
+the kit loader (`server/workshop.js:159`), so the winner is a property of the pack ids and not of who called the merge.
+The two in-memory callers that can pass any order — the tests, and the editor — no longer decide anything by accident.
 
 **Attribution.** Every collision error carries `{ pack, code, file, id, definedBy, reason }`, where `definedBy` is the
 pack id that holds the record, or the string `official`. The text says the same thing:
 
-- official: `"<id>" already exists in the official data — add "<file>:<id>" to pack.json overrides to replace it`
+- official: `"<id>" already exists in the official data — add "<file>:<id>" to pack.json overrides to replace it` (`OFFICIAL_ID_COLLISION`)
 - against another pack: `"<id>" is already contributed by pack "<X>" — two packs must not ship the same <file>.json id;
-  rename this record, or add "<file>:<id>" to pack.json overrides to replace that pack's record on purpose`
-- kit: `kit "<id>" is already defined by pack "<X>"` (today: `another pack already defines this kit id`,
-  `server/workshop.js:164` — the same defect this section exists to remove, one file over)
+  rename this record, or add "<file>:<id>" to pack.json overrides to replace that pack's record on purpose` (`PACK_ID_COLLISION`)
+- kit: `kit "<id>" is already defined by pack "<X>"` (`KIT_ID_COLLISION`, `server/workshop.js:169-174`)
+- icon / art: `another pack (<X>) already ships …` (`ASSET_COLLISION`, with `definedBy` as well)
 
 Why it matters enough to be a section: the data path used to say "**official** data" for both cases, because the
 variable holding "official + every pack merged so far" was called `official` (it is `prior` at
-`shared/workshop.js:624` now). The author's next move was to open `data/chess.json` and look for a record that is not
-there. The attribution defect is fixed in the same pass that adds this file (§27.6 lists what is verified).
+`shared/workshop.js:630` now). The author's next move was to open `data/chess.json` and look for a record that is not
+there. Both defects — the wrong attribution and the unnamed kit holder — are fixed in the first step of the slice.
 
-**Cross-pack conflicts are reported once, at load, in one shape.** Today the report is split across three carriers: the
-overlay's `report.errors` (logged by `server/data.js:95`), the same `report.errors` for icons and art, and
-`loadWorkshopKits`' own `errors` (`server/workshop.js:195`) — three shapes for the same event, and no single line an
-author can grep. The design unifies them into the overlay's report and states the ordering contract in the author
-documentation (`docs/WORKSHOP.md` §1.7 gains one row: "two packs ship the same id"), because a rule an author cannot
-read is a rule an author cannot follow.
+**Cross-pack conflicts are reported once, at load, in one shape.** The report used to be split across three carriers
+with three shapes: the overlay's `report.errors` (logged by `server/data.js:95`), the icon and art collisions on that
+same array, and `loadWorkshopKits`' own `errors` (`server/workshop.js:207`) — no single line an author could grep. Every
+one of them now carries a `code`, and the four `MANIFEST_MISSING` cases (`data/assets.json` or `data/support.json` not
+produced by the asset pipeline) are distinguishable from a collision without reading prose. The ordering contract is
+documented for authors in `docs/WORKSHOP.md` §1.2 and summarized in the §1.7 status table, because a rule an author
+cannot read is a rule an author cannot follow.
+
 
 ### 27.4 Isolation (gap 3)
 
 **Server authority.** The behaviour layer runs in the player's browser by default today (`server/match/Match.js:107`, `:202-203`),
-and `docs/WORKSHOP.md:368` records the consequence honestly. Under the ruling, a room whose mod set contains any
+and `docs/WORKSHOP.md:371` records the consequence honestly. Under the ruling, a room whose mod set contains any
 `layer: B` pack runs with `clientCombat = false` for **that room**: the decision moves from the process-level
 `SP_COMBAT` environment variable to the room's mod set (`server/match/Match.js:262` is where the flag is resolved). Player tabs then
 never execute pack code, and the `docs/PACKS.md:137-138` objection is answered rather than waived. Layer A keeps
@@ -230,7 +236,7 @@ inventing a timer.
 
 ### 27.5 Versioning (gap 4)
 
-`gameVersion` is metadata and nothing reads it (`docs/WORKSHOP.md:366` records version alignment, dependency
+`gameVersion` is metadata and nothing reads it (`docs/WORKSHOP.md:369` records version alignment, dependency
 declaration and content addressing as unimplemented), while the editor writes the string `'0.2.1'` in ten places
 (`editor/server.mjs:1759` and nine siblings, `tools/workshop-scaffold.mjs:82`, `editor/ui/pack.js:90`). Two problems,
 one shape.
@@ -258,21 +264,42 @@ the intended policy — *outside the range the pack still loads, what it lacks f
 | **degrade** | a `layer: A` pack whose `game` range excludes the installed game version | load only the records that still pass the existing per-record validators — the same functions `tools/workshop-validate.mjs` already runs as layers 2–8 (`:482`, `:511`, `:551`, `:578`, `:592`, `:609`) — report every dropped record by id, and mark the pack `compatible: false` in the sense `shared/packs.js:167-168` already uses. |
 | **warn** | anything else: no declared range, or a range that includes this build | load normally; flag the absence of a declaration in the boot report. |
 
-**Citations that rot, and the guard that must get stronger.** This is not hypothetical: it is the second defect fixed
-alongside this section. `shared/kitAuthoring.js`'s header taught authors where the hook bus lives by citing two line
-numbers of `server/sim/Battle.js` (583 and 623), long after `on`/`emit` had moved into `server/sim/battle/hooks.js`
-(`:17`, `:57`) — the cited file does not declare either method any more, and the second of the two is past its end. The fix is the pattern `HOOK_EVENTS` already uses: a symbol
-(`HOOK_BUS`, `shared/kitAuthoring.js:46`) plus a drift guard that reads the source and requires the symbols to still be
-declared there (`test/kitAuthoring.test.js`). Two more instances of the same rot remain **outside** that fix and are
-recorded here as work items:
+**Citations that rot, and the guard that checks the claim.** This is not hypothetical: three instances of it turned up
+while writing this section.
 
-- `docs/WORKSHOP.md` §4.3 carried the same stale citation; it was fixed in the same pass and the guard now covers it.
-- `docs/prompts/kit.md:647`, `:668`, `:674` cite `server/sim/Battle.js:113` for "`battle.flags` is a construction-time
-  input" — `this.flags` is assigned at `server/sim/Battle.js:124`, and line 113 is a statement about `this.rect`. The
-  existing citation guard (`test/promptCitations.test.js:41-52`) cannot catch this: it verifies only that the cited
-  line exists and is not blank. **The guard must check the claim, not the address**: a `path:line` citation in an
-  author-facing document is backed by the sentence naming an identifier that actually occurs on that line. That rule is
-  mechanical, cheap, and it is the only thing that makes a line number in prose safe to write.
+1. `shared/kitAuthoring.js`'s header taught authors where the hook bus lives by citing two line numbers of
+   `server/sim/Battle.js` (583 and 623), long after `on`/`emit` had moved into `server/sim/battle/hooks.js` (`:17`,
+   `:57`) — the cited file no longer declares either method, and the second number is past its end. **Fixed**, with the
+   pattern `HOOK_EVENTS` already uses: a symbol (`HOOK_BUS`, `shared/kitAuthoring.js:46`) plus a drift guard that reads
+   the source and requires the symbols to still be declared there (`test/kitAuthoring.test.js`).
+2. `docs/WORKSHOP.md` §4.3 carried the same stale citation. **Fixed**, and the guard above now covers that file too.
+3. `docs/prompts/kit.md` cites `server/sim/Battle.js:113` for "`battle.flags` is a construction-time input" in three
+   places, while `this.flags` is assigned at `server/sim/Battle.js:124` and line 113 is a statement about `this.rect`.
+   The citation guard (`test/promptCitations.test.js`) could not see it: it verified only that the cited line exists and
+   is not blank. **Deliberately not fixed here**: the drift is a consequence of the in-flight 0.2.2 port moving every
+   server-side line number, so the fix belongs to that port rather than to a second branch editing the same file (owner's
+   coordination of 2026-10-09). The upgraded guard below therefore **reports these three today**, each with the line the
+   member really lives on, and turns green by itself when the port changes `:113` to `:124` — no test has to be touched
+   for that. A fourth instance of the same defect, `docs/prompts/kit.md:460`, has no dotted member next to it and is not
+   judged by the narrow rule below; it needs the same one-line fix and is recorded here so it is not lost.
+
+**The rule now enforced, and its deliberate narrowness.** A `path:line` citation in `docs/prompts/*.md` is judged when
+the sentence next to it names a **member of an engine-context object** — a dotted reference whose root is one of
+`battle` / `this` / `flags` / `bb` / `ctx`, close enough to the citation to belong to the same claim (45 characters, 90
+for `flags`, cut at a table cell / sentence / line boundary). At least one such member must occur on the cited line (or
+anywhere in a cited range). Measured on the current tree: 10 of 181 citations in `docs/prompts/kit.md` are judged, and
+the rule flags exactly the three stale ones — nothing else, on any of the three prompts. Bare identifiers are **not**
+judged — a citation next to `inRect` or `hit` is usually naming a call site or a concept, not a declaration, and a
+single false positive is what gets such a guard switched off. The coverage limit is the price of the zero-false-positive
+requirement, and it is the right trade while the 0.2.2 port is about to move every server-side line number at once:
+this class of citation fails in bulk, silently, and only the reader who clicks finds out.
+
+Two things this section records about the guard's own blast radius, because both happened while writing it: the 0.2.2
+port is not the only thing that moves line numbers — **any** edit to a cited file does, and the citations into
+`shared/workshop.js` and `docs/WORKSHOP.md` that the first slice's edits broke were caught by the *existing* "line
+exists and is not blank" guard (`docs/prompts/README.md:252` was the one that fired). The cheap discipline that
+follows: after touching a file that any document cites, run the citation sweep, and prefer naming a symbol over a line
+number whenever the sentence can carry the symbol.
 
 ### 27.6 Deterministic verification (the enforcement mechanism)
 
@@ -324,8 +351,8 @@ per row:
 |---|---|
 | a hook name nothing emits never fires and nothing reports it (`server/sim/battle/hooks.js:17-25`, `:57-59`) | the static check already suggests a near miss (`HOOK_UNKNOWN_EVENT`, `shared/kitAuthoring.js:235-237`), but it is text analysis. Add a **runtime** report: `on` keeps the registration in `this._hooks[name]` (`server/sim/battle/hooks.js:20`), so at `battleEnd` the bus can name every pack-owned hook that was registered and never emitted. A typo then costs one battle instead of one bug report. |
 | non-determinism is a warning (`shared/kitAuthoring.js:220-224`) | an error for layer B (§27.4), and the refusal quotes the construct *and* its source line, so it stops being "a reason that looks nothing like 'you used Math.random'" (`shared/kitAuthoring.js:13-17`). |
-| a kit that returns no `skill` leaves the operator with no skill (`docs/WORKSHOP.md:525`) | the loader knows both facts — a kit was injected *and* `skillSource` says where the skill came from (`server/sim/content/index.js:214`, `:219`). A pack kit with no skill becomes a validation error the editor shows before saving, not a live surprise. |
-| a `chess.assets.spine` that points at an uninstalled model draws a flat portrait and logs nothing (`shared/workshop.js:682-698`) | already solved by `report.looks` (logged at `server/data.js:97`) — generalise it: every field that degrades silently gets a `looks`-style check, and the editor surface must show it, not only the server log. |
+| a kit that returns no `skill` leaves the operator with no skill (`docs/WORKSHOP.md:528`) | the loader knows both facts — a kit was injected *and* `skillSource` says where the skill came from (`server/sim/content/index.js:214`, `:219`). A pack kit with no skill becomes a validation error the editor shows before saving, not a live surprise. |
+| a `chess.assets.spine` that points at an uninstalled model draws a flat portrait and logs nothing (`shared/workshop.js:689-705`) | already solved by `report.looks` (logged at `server/data.js:97`) — generalise it: every field that degrades silently gets a `looks`-style check, and the editor surface must show it, not only the server log. |
 | the editor deliberately does not import author files (`editor/server.mjs:2827-2855`) | **do not change this.** An HTTP endpoint that executes author code is a code-execution surface. Instead expose the verifier of §27.6 as an explicit action that runs in the **playtest subprocess** (`server/index.js:71-75` `SP_WORKSHOP`), which is already a separate process. |
 | runtime errors land in a 100-entry array reachable only through `m.simErrorLog` (`server/match/Match.js:127-129`, `server/sim/battle/hooks.js:167-185`) | per-owner counters (§27.4), plus the room's mod digest on every error line, so a player's bug report carries the identity of the content it came from. |
 
@@ -354,7 +381,7 @@ The minimal registration point (design only, not implemented):
 
 ### 27.9 Distribution (the 5th gap)
 
-Two channels, already decided (`docs/WORKSHOP.md:368`): the official bundle stays clean (`docs/PACKS.md:133-134`,
+Two channels, already decided (`docs/WORKSHOP.md:371`): the official bundle stays clean (`docs/PACKS.md:133-134`,
 `:139`), workshop content ships separately through the existing zip path (`shared/zip.js`,
 `tools/workshop-pack.mjs`). What is missing is the player-visible half of `docs/PACKS.md:135-136`, and it is four
 surfaces quoting one string:
