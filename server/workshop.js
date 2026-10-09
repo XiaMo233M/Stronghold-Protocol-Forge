@@ -182,7 +182,9 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
       // `server.meta`（DESIGN §29）：声明的模块必须真的在包里、可读、是 `.mjs`。同一条口径 —— 一个声明了自己
       // 要改对局结果却没有模块文件的包，会让服务器以为这一局有它的效果而实际上没有。
       const metaFileIssues = metaIssues(manifest.pack, packDir);
-      const gateIssues = [...assetIssues.issues, ...hookIssues, ...langIssues, ...metaFileIssues];
+      // `server.modules`（DESIGN §28.14）：声明的 `.mjs` 必须真的在包里 —— 同一条纪律，同一个裁剪点。
+      const moduleFileIssues = serverModuleIssues(manifest.pack, packDir);
+      const gateIssues = [...assetIssues.issues, ...hookIssues, ...langIssues, ...metaFileIssues, ...moduleFileIssues];
       if (gateIssues.length) {
         errors.push({ pack: name, reason: `${gateIssues[0].code}: ${gateIssues[0].reason}` });
         continue;
@@ -527,6 +529,37 @@ export function metaIssues(pack, packDir) {
 }
 
 /**
+ * `pack.json.server.modules[*].entry` 的**装载期**判据（DESIGN §28.14）：声明的每一个 `.mjs` 必须真的在包里、可读。
+ *
+ * 与 `metaIssues` / `panelModuleIssues` 同一条纪律（「一条用不了的声明拒绝整个包」）：一个声明了服务端模块却拿不出
+ * 文件的包，会让运维以为那件事（停机播报、统计落盘、`/healthz` 的字段）已经在做 —— 而它一件都没做。
+ *
+ * 判不到的两件事照旧留到装配路径：模块能不能 `import`、有没有 `registerServer` 导出（那只有动态 import 知道），
+ * 以及它挂上去之后会不会抛。
+ * @param {{ server?: { modules?: Array<{ id: string, entry: string }> } }|null} pack normalized manifest
+ * @param {string} packDir the pack's directory on disk
+ * @returns {Array<{ code: string, reason: string }>}
+ */
+export function serverModuleIssues(pack, packDir) {
+  const list = pack && pack.server && Array.isArray(pack.server.modules) ? pack.server.modules : [];
+  if (!list.length || typeof packDir !== 'string' || !packDir) return [];
+  const dir = path.resolve(packDir);
+  for (const mod of list) {
+    const rel = String(mod.entry);
+    const abs = path.join(dir, ...rel.split('/'));
+    if (abs !== dir && !abs.startsWith(dir + path.sep)) {
+      return [{ code: 'MODULES_BAD_ENTRY', reason: `server.modules["${mod.id}"].entry "${rel}" must resolve inside the pack` }];
+    }
+    let readable;
+    try { readable = fs.statSync(abs).isFile(); } catch { readable = false; }
+    if (!readable) {
+      return [{ code: 'MODULES_BAD_ENTRY', reason: `server.modules["${mod.id}"].entry "${rel}" is not a readable file inside the pack` }];
+    }
+  }
+  return [];
+}
+
+/**
  * `pack.json.i18n` 的**装载期**判据（fanpack G-04 / plugin-pack G4，docs/WORKSHOP.md §1.10）：
  * 声明的每一个 `.json` 必须真的在包里、必须是 JSON 对象、每一个值必须是**字符串且键不是 `_meta`**。
  *
@@ -765,6 +798,18 @@ export function identifyPack(packDir, pack, files, { assetsDigest = null } = {})
     if (abs === packDir || !abs.startsWith(packDir + path.sep)) continue;
     try { addBytes(rel, fs.readFileSync(abs)); } catch { /* unreachable for a LOADED pack: loadWorkshop refuses it first */ }
   }
+  // 包的**服务端模块**源码（`pack.json.server.modules[*].entry`, DESIGN §28.14）：它是会在服务器上执行的代码，
+  // 所以它的字节必须进身份 —— 与 kits / panels / meta 逐字相同的一条理由（同一份摘要不能描述两段不同的行为）。
+  // 没声明 `server.modules` 的包哈希逐字节不变。
+  const moduleFiles = [...new Set(((pack.server && Array.isArray(pack.server.modules)) ? pack.server.modules : [])
+    .map((m) => (m && typeof m.entry === 'string' ? m.entry : ''))
+    .filter(Boolean))];
+  for (const rel of moduleFiles) {
+    if (manifest.some((m) => m.path === rel)) continue;
+    const abs = path.join(packDir, ...rel.split('/'));
+    if (abs === packDir || !abs.startsWith(packDir + path.sep)) continue;
+    try { addBytes(rel, fs.readFileSync(abs)); } catch { /* unreachable for a LOADED pack: loadWorkshop refuses it first */ }
+  }
   // the declared layer wins; the derivation is the fallback, and `combat` follows the artifact kind. A pack that only
   // mounts a panel IS layer C (DESIGN §28.1: "C client UI") — §28.8's "the pack is marked in the UI like any other"
   // means the layer derivation counts the panels the way it counts media, and `combat` stays "kits only": a panel
@@ -772,7 +817,12 @@ export function identifyPack(packDir, pack, files, { assetsDigest = null } = {})
   const hasMedia = ['voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art'].some((k) => Object.keys(pack[k] || {}).length > 0);
   // 只写主题变量的包同样是 C 层（一个颜色包改的就是界面），所以主题也算进这条推导。
   const hasTheme = !!(pack.client && pack.client.theme && Object.keys(pack.client.theme.vars || {}).length > 0);
-  const layer = pack.layer || (kits ? 'B' : (hasMedia || panelFiles.length || styleFiles.length || hasTheme) ? 'C' : 'A');
+  // 声明了**服务端模块**的包是 B 层（`server.modules`, DESIGN §28.14）：它会执行服务端代码（可能碰对局，若挂了
+  // `matchClass`），所以按 §28.1 的三层表它属于 B，而不是 A/C 里任何一层。
+  const hasServerModules = moduleFiles.length > 0;
+  const layer = pack.layer || (kits || hasServerModules ? 'B' : (hasMedia || panelFiles.length || styleFiles.length || hasTheme) ? 'C' : 'A');
+  // `combat` 的推导**不**把服务端模块算进来：只挂 `boot` / `shutdown` / `healthz` 的模块碰不到对局，而挂了
+  // `matchClass` 的包由形状层要求它**显式**声明 `combat: true`（`MODULES_NEED_COMBAT`）—— 所以这里照旧只看 kits。
   const combat = pack.combat === null || pack.combat === undefined ? kits > 0 : pack.combat;
   // 6. 声明的资源容器的 sha256（`pack.json.assets`, DESIGN §28.13.5）。装载期已经拿它与容器的**字节**核对过
   //    （`assetsIssues` 流式读过一遍），所以它是这份包的一个真实属性，而不是一句声明 —— 这就是「同一个房间摘要

@@ -320,6 +320,25 @@ const PRE_DISPATCH_FIELDS = Object.freeze(['module', 'policy', 'intercepts']);
 const META_FIELDS = Object.freeze(['module', 'registers']);
 const META_MODULE_EXT = '.mjs';
 /**
+ * `server.modules[*]` —— 包的**服务端模块**载荷（DESIGN §28.14）。与 `kits/` 并列的一类载荷，但两者的契约相反：
+ * kit 是**战斗里**的代码（禁文件系统、禁网络），而这一类要做的恰恰是写盘、挂启动钩子、给 `/healthz` 加字段。
+ *
+ * 所以它的安全性不来自「禁掉什么」，而来自**只给声明过的那几样**：
+ *   * `uses` 是**挂载点**的闭枚举，模块只拿得到自己声明的那几个能力（没声明的那个属性一碰就抛，见
+ *     `server/modModules.js` 的宿主对象）；
+ *   * `write: true` 才拿到一个**被限定在 `<状态目录>/mod/<包id>/`** 里的文件门面（包自己的目录是只读的，引擎的
+ *     目录根本不在门面里）；
+ *   * `uses` 里有 `matchClass` 的包**必须**声明 `combat: true`：一个 `MatchClass` 包装器原则上能改对局结果，
+ *     而「要改结果的必须进房间摘要闸门与 golden 那条线」是业主裁决（与 `server.meta` 同一条）。
+ */
+export const SERVER_MODULE_USES = Object.freeze(['boot', 'shutdown', 'matchClass', 'healthz']);
+/** `server.modules[*]` 的字段，一个不多一个不少。 */
+const SERVER_MODULE_FIELDS = Object.freeze(['id', 'entry', 'uses', 'write']);
+/** 一个包最多声明几个服务端模块。 */
+const MAX_SERVER_MODULES = 8;
+/** 服务端模块的扩展名：它是**服务端**加载的 ESM（浏览器不加载，战斗也不加载）。 */
+const SERVER_MODULE_EXT = '.mjs';
+/**
  * 对局元注册表的**七个键类别**（DESIGN §29）：`server/match/effectsMeta.js` 的 `MetaRegistry` 恰好有七个
  * 对应的方法（`garrison` / `band` / `bond` / `item` / `choice` / `effect` / `global`），一条注册键就是
  * `<类别>:<id>`。
@@ -397,6 +416,16 @@ const CLIENT_PANEL_MODULE_EXT = '.js';
  */
 const isSafeModulePath = (p) =>
   isSafeRelativePath(p) && p.endsWith(CLIENT_PANEL_MODULE_EXT) && p.length > CLIENT_PANEL_MODULE_EXT.length
+  && !p.split('/').some((seg) => seg.startsWith('.'))
+  && !/^[a-z][a-z0-9+.-]*:/i.test(p);
+
+/**
+ * 服务端模块（`server.modules[*].entry`）的路径判据：与上面那条**同一条规则**（相对、不是 URL、目录段不以 `.`
+ * 开头），只有扩展名不同（`.mjs`）。分成两个函数而不是给上面那个加参数，是因为「面板模块」与「服务端模块」是
+ * 两条不同的通道 —— 一个 `.js` 永远不该从服务端这条进来，反之亦然。
+ */
+const isSafeServerModulePath = (p) =>
+  isSafeRelativePath(p) && p.endsWith(SERVER_MODULE_EXT) && p.length > SERVER_MODULE_EXT.length
   && !p.split('/').some((seg) => seg.startsWith('.'))
   && !/^[a-z][a-z0-9+.-]*:/i.test(p);
 
@@ -575,26 +604,88 @@ function parseClientDecl(raw) {
 }
 
 /**
- * `pack.json.server` —— 消息分发前的准入钩子（§28.13）。本轮**只认形状**：没有钩子被安装、没有模块被加载
- * （B 段）。三条硬约束里有两条是形状层就能拦住的：`intercepts` 必须是真实存在的 `C2S` 类型，且 `module`
- * 必须是包内相对路径（一个绝对路径会让「这个钩子来自哪个包」从身份里消失）。
+ * `pack.json.server.modules` —— 包的**服务端模块**（DESIGN §28.14，业主 2026-10-10：插件包那三件 —— 停机播报与快照、
+ * 匿名对局统计、`/healthz` 加字段 —— 要有一条**不用手改引擎文件**的挂载通道）。
+ *
+ * 形状层判四件事：id 唯一且合法、`entry` 是包内相对 `.mjs`、`uses` 是挂载点闭枚举的非空子集且不重复、`write` 是布尔。
+ * 「文件真的在不在、模块能不能 import、它挂上去之后有没有抛」都在装载期与运行期判（`server/modModules.js`）。
+ * @returns {{ ok: true, decl: object } | { ok: false, error: string, detail: string }}
+ */
+function parseServerModulesDecl(raw) {
+  if (!Array.isArray(raw)) return fail('MODULES_BAD_SHAPE', 'server.modules must be an array of { id, entry, uses, write? }');
+  if (!raw.length) return fail('MODULES_BAD_SHAPE', 'server.modules must declare at least one module (drop the key instead of sending [])');
+  if (raw.length > MAX_SERVER_MODULES) {
+    return fail('MODULES_TOO_MANY', `server.modules: at most ${MAX_SERVER_MODULES} modules per pack (got ${raw.length})`);
+  }
+  const out = [];
+  const seen = new Set();
+  for (const [i, mod] of raw.entries()) {
+    if (!isPlainObj(mod)) return fail('MODULES_BAD_SHAPE', `server.modules[${i}] must be an object: { id, entry, uses, write? }`);
+    for (const key of Object.keys(mod)) {
+      if (!SERVER_MODULE_FIELDS.includes(key)) {
+        return fail('MODULES_UNKNOWN_FIELD', `server.modules[${i}]: "${key}" is not a module field (${SERVER_MODULE_FIELDS.join(', ')})`);
+      }
+    }
+    if (typeof mod.id !== 'string' || !RECORD_ID_RE.test(mod.id)) {
+      return fail('MODULES_BAD_ID', `server.modules[${i}].id: "${String(mod.id)}" is not a valid module id`);
+    }
+    if (seen.has(mod.id)) {
+      return fail('MODULES_DUPLICATE_ID', `server.modules: "${mod.id}" is declared twice (one id, one module)`);
+    }
+    seen.add(mod.id);
+    if (!isSafeServerModulePath(mod.entry)) {
+      return fail('MODULES_BAD_ENTRY', `server.modules["${mod.id}"].entry must be a pack-relative "${SERVER_MODULE_EXT}" path (e.g. "server/ops${SERVER_MODULE_EXT}") — the server loads it, the browser and the battle sim never do`);
+    }
+    if (!Array.isArray(mod.uses) || !mod.uses.length) {
+      return fail('MODULES_BAD_USES', `server.modules["${mod.id}"].uses must be a non-empty array of mount points (one of: ${SERVER_MODULE_USES.join(', ')})`);
+    }
+    for (const use of mod.uses) {
+      if (!SERVER_MODULE_USES.includes(use)) {
+        return fail('MODULES_BAD_USES', `server.modules["${mod.id}"].uses: "${String(use)}" is not a mount point this layer knows (one of: ${SERVER_MODULE_USES.join(', ')})`);
+      }
+    }
+    if (new Set(mod.uses).size !== mod.uses.length) {
+      return fail('MODULES_DUPLICATE_USE', `server.modules["${mod.id}"].uses lists the same mount point twice`);
+    }
+    if (mod.write !== undefined && typeof mod.write !== 'boolean') {
+      return fail('MODULES_BAD_WRITE', `server.modules["${mod.id}"].write must be true or false (may this module write into its own state directory?)`);
+    }
+    out.push({
+      id: mod.id,
+      entry: mod.entry,
+      // 按闭枚举次序（不按作者书写顺序）：清单字节要稳定，与 `requires` / `registers` 同一条。
+      uses: SERVER_MODULE_USES.filter((u) => mod.uses.includes(u)),
+      write: mod.write === true,
+    });
+  }
+  out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return { ok: true, decl: { modules: out } };
+}
+
+/**
+ * `pack.json.server` —— 分发前的准入钩子（§28.13）、对局元注册表（§29）与**服务端模块**（§28.14）。
  * @returns {{ ok: true, decl: object } | { ok: false, error: string, detail: string }}
  */
 function parseServerDecl(raw) {
   if (!isPlainObj(raw)) {
     return fail('SERVER_DECL_BAD_SHAPE', 'server must be an object: { preDispatch: { module, policy, intercepts }, meta: { module, registers } }');
   }
-  const SERVER_MEMBERS = ['preDispatch', 'meta'];
+  const SERVER_MEMBERS = ['preDispatch', 'meta', 'modules'];
   for (const key of Object.keys(raw)) {
     if (!SERVER_MEMBERS.includes(key)) {
       return fail('SERVER_UNKNOWN_FIELD', `server: "${key}" is not a declared field (${SERVER_MEMBERS.join(', ')})`);
     }
   }
-  if (raw.preDispatch === undefined && raw.meta === undefined) {
+  if (raw.preDispatch === undefined && raw.meta === undefined && raw.modules === undefined) {
     return fail('SERVER_EMPTY_MEMBER', `server must declare at least one member (${SERVER_MEMBERS.join(', ')}) — an empty object says nothing and is refused rather than ignored`);
   }
   /** @type {Record<string, object>} */
   const decl = {};
+  if (raw.modules !== undefined) {
+    const modules = parseServerModulesDecl(raw.modules);
+    if (!modules.ok) return modules;
+    decl.modules = modules.decl.modules;
+  }
   if (raw.meta !== undefined) {
     const meta = parseMetaDecl(raw.meta);
     if (!meta.ok) return meta;
@@ -1292,6 +1383,12 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // 退化成一句口号。位置放在这里（而不是形状层刚解析完 `server` 的地方）是为了让 `combat` 的**类型**错误先报出来。
   if (serverParsed && serverParsed.decl.meta && raw.combat !== true) {
     return fail('META_NEEDS_COMBAT', 'server.meta changes match results, so this pack must declare "combat": true — that is what puts it into the room digest gate and the golden corpus (DESIGN §29); a pack that cannot state that must not ship server-side match logic');
+  }
+  // `server.modules` 里挂了 `matchClass` 的模块**也**要 `combat: true`：一个 `MatchClass` 包装器原则上能改对局结果
+  // （它可以覆写 `finish` / `dispose` 之外的任何东西），而「要改结果的必须进摘要闸门与 golden 那条线」是业主裁决。
+  // 只挂 `boot` / `shutdown` / `healthz` 的模块不在此列 —— 那三件碰不到对局。
+  if (serverParsed && (serverParsed.decl.modules || []).some((m) => m.uses.includes('matchClass')) && raw.combat !== true) {
+    return fail('MODULES_NEED_COMBAT', 'a server module whose uses includes "matchClass" wraps the match itself, so this pack must declare "combat": true — that is what puts it into the room digest gate and the golden corpus (DESIGN §28.14); a module that only mounts boot / shutdown / healthz does not need it');
   }
   return {
     ok: true,
