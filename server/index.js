@@ -26,6 +26,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { getData, loadData } from './data.js';
 import { loadWorkshop, loadWorkshopKits, loadWorkshopHooks, loadWorkshopPanels, workshopThemeFor, dropUnavailablePreDispatchPacks, WORKSHOP_DIR } from './workshop.js';
+import { loadMetaModules } from './match/metaPack.js';
 import {
   buildWorkshopDataFiles, workshopKitFilesFor, workshopPanelFilesFor, workshopAssetsFor, workshopRoutesFor,
   workshopResourceFilesFor, workshopModAssetsFrom, buildWorkshopI18nFiles, resourceServerPolicy, WORKSHOP_ASSET_PREFIX, WORKSHOP_ASSET_TYPES,
@@ -89,7 +90,11 @@ export async function startServer(opts = {}) {
   // 钩子没装上」—— 那种结局让运维以为自己有一道不存在的闸门，而它的内容却已经并进了游戏数据。
   const loadedOnce = loadWorkshop(workshopDir, { log });
   const workshopHooks = await loadWorkshopHooks(loadedOnce, { log });
-  const pruned = dropUnavailablePreDispatchPacks(loadedOnce, workshopHooks.errors);
+  // 包声明的**对局元注册表**模块（`pack.json.server.meta`, DESIGN §29，B 段）：与钩子同一条纪律 —— 声明了却装不上
+  //（源码里带非确定性的东西、没有 `registerMeta` 导出、import 失败）的包**整包移出已加载集合**，而不是「包照旧
+  // 加载、只是它的效果不在」。所以它必须在**数据叠加层之前**跑完，与钩子合在同一个裁剪点上。
+  const workshopMeta = await loadMetaModules(loadedOnce, { log });
+  const pruned = dropUnavailablePreDispatchPacks(loadedOnce, [...workshopHooks.errors, ...workshopMeta.errors]);
   if (pruned.removed.length) {
     log.warn(`[workshop] dropped ${pruned.removed.length} pack(s) whose declared server.preDispatch cannot be installed: `
       + pruned.removed.map((r) => `"${r.pack}" (${r.code})`).join(', '));
@@ -156,7 +161,7 @@ export async function startServer(opts = {}) {
   // routes answer `{ packs: [] }` / 404 and nothing else.
   const modsJson = createModsRoute(workshopLoaded, buildModCatalog(workshopLoaded));
   const { registry, lobby, network } = createSessionStack(
-    { ...opts, workshop: { kits: workshopKits.kits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme } },
+    { ...opts, workshop: { kits: workshopKits.kits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme, meta: workshopMeta.modules } },
     { data, log },
   );
   // content packs (docs/PACKS.md): scanned now — the start log names them — and again whenever their folders change

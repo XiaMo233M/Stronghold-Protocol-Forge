@@ -106,6 +106,8 @@ import { normalizeSupportConfig, checkSupport, supportPicker, supportCapacity, s
 import { encode, isDroppable, isErrCode, sendRaw, sendSession } from './net.js';
 import { getData as defaultGetData, lookup } from './data.js';
 import { Match as DefaultMatch } from './match/Match.js';
+import { buildRoomRegistry } from './match/metaPack.js';
+import { getDefaultRegistry } from './match/effectsMeta.js';
 import { KITTED_CHARS } from './sim/content/kits/index.js';
 
 /** Room code alphabet: uppercase letters without I and O (and no digits, so no 0/1). */
@@ -950,6 +952,16 @@ export class Lobby {
     }));
     // lastPublic / results: the latest m.public broadcast and the m.result frames (encoded), kept for the replay.
     const ctx = { live: true, ended: false, disposed: false, match: null, lastPublic: null, sharedResult: null, results: new Map() };
+    // 包声明的对局元注册表（DESIGN §29，B 段）：**按房间装配** —— 每个包在自己的试用副本上注册，成功后那份才成为
+    // 这一局的注册表，而进程级那一份（`getDefaultRegistry()`）一个键都不动（业主裁决的「禁止全局 set/restore」；
+    // 多局并发时「开局前设全局、打完恢复」本来就是错的）。逐包失败**不抛**：失败的包整体回滚，其余包照旧生效。
+    const metaModules = this.workshop && Array.isArray(this.workshop.meta) ? this.workshop.meta : [];
+    let roomRegistry = null;
+    if (metaModules.length) {
+      const built = buildRoomRegistry({ packs: metaModules, base: getDefaultRegistry(), log: this.log });
+      roomRegistry = built.registry;
+      for (const e of built.errors) this.log.warn?.(`[workshop] meta ${e.pack}: ${e.code}: ${e.reason}`);
+    }
     let seed = 0;
     try { seed = this.seedFn() >>> 0; } catch { seed = randomInt(2 ** 32); }
     try {
@@ -972,6 +984,9 @@ export class Lobby {
         workshopKitModules: this.workshop && Array.isArray(this.workshop.modules) ? this.workshop.modules : [],
         // …and the identity of that content, which every BattleSpec of this match carries (DESIGN §28.2)
         mods: this.modSet,
+        // 这一局自己的元注册表副本：**没有包声明 `server.meta` 时这个字段根本不出现**，Match 照旧用进程级那一份
+        //（`opts.registry` 的缺省）—— 于是干净安装的行为与从前逐字节相同。
+        ...(roomRegistry ? { registry: roomRegistry } : {}),
         log: this.log,
         now: this.now,
         send: (playerId, msg) => (ctx.live ? this.matchSend(room, ctx, playerId, msg) : false),

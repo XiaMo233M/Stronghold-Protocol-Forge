@@ -1140,7 +1140,7 @@ JSON 对象、每个值必须是字符串** —— 任一不满足**整个包不
 
 ---
 
-### 1.11 `server.meta`：包写的**对局逻辑**（A 段：只认声明）
+### 1.11 `server.meta`：包写的**对局逻辑**（**A 段 + B 段已实现**）
 
 `kits/<chessId>.js` 能给一名干员一套战斗行为，但它碰不到**对局**：它不会在 `onRoundStart` 触发、不能加盟约层数、
 不能对商店刷新做反应。`server.meta` 就是给这一类代码开的口子 —— 它的形状与引擎自己的内容模块**逐字相同**：
@@ -1181,13 +1181,38 @@ export function registerMeta(registry) {
    **不要**去改共享的处理器对象；也**不要**写「开局前设全局、打完恢复」——多局并发会串味。
    房间没有声明任何带 `meta` 的包时，`Match` 的行为与从前**逐字节相同**（不做 fork）。
 
-**代码纪律**：这个模块在**一局对局里**执行，所以它与引擎同一条确定性规则 —— 不得用 `Math.random`（用对局自己的随机流）、
-不得读时钟、不得依赖无序容器的遍历顺序。B 段会在装载路径上做一次**静态扫描**并点名拒绝（规则与
-`shared/kitAuthoring.js` 对 kit 的那一套一致）。
+**代码纪律**：这个模块在**一局对局里**执行，所以它与引擎同一条确定性规则 —— 不得用 `Math.random`（用 `ctx.rng`，
+那是对局自己的随机流）、不得读时钟（`Date.now` / `new Date` / `performance.now`）、不得碰 `process` / `globalThis` /
+`eval`、不得收发网络。**静态扫描挡在 `import` 之前**：命中就**整包移出已加载集合**并点名（`META_BAD_SOURCE`，
+规则与 `shared/kitAuthoring.js` 对 kit 的那一套共用同一份判据）。
 
-**当前状态**：**A 段已实现**（`server.meta` 的形状、点名拒绝、`registers` 归一化、`combat` 闸门、模块字节进身份哈希、
-装载期判「文件真的在不在」）—— **还没有任何执行**：B 段（按房间装配、受控注册表、静态扫描、与 `Lobby`/`Match` 接线）
-是紧跟着的那一刀。所以今天写它的包会被**如实地**读成「声明合法但还不生效」—— loader 不会假装它已经在跑。
+**你拿到的两样东西**（`registerMeta(registry)` 的参数）：
+
+| 给 | 说明 |
+|---|---|
+| `registry.garrison / band / bond / item / choice / effect / global` | 注册处理器（七个类别，与 `registers` 里写的键同形），另外 `register` / `unregister` / `get` / `has` / `keys` / `globals` |
+| `registry.api` | 引擎辅助函数：`num` / `bondRecord` / `itemRecord` / `garrisonRecord` / `bandRecord` / `effectRecord` / `buffsOf` / `buffParams` / `itemKeyOf` / `isGoldenId`，外加 `version`（= `MOD_API_VERSION`）。**这是唯一的引擎入口** —— 模块里不许 `import` 引擎内部，一条爬出包目录的 `import` 会被静态扫描点名 |
+
+处理器签名与官方内容模块一样：`(ctx, ev) => void`，`ctx` 就是 `server/match/effectsMeta.js makeCtx` 那个对象
+（读：`bondActive` / `layers` / `board` / `hand` / `piece` / `chessRecord` …；写：`addFunds` / `grantItem` / `grantChess` /
+`addLayers` / `setCounter` / `toast` / `offerChess` …；`ctx.rng` 是这一局的随机流）。钩子名就是 `HOOKS` 那 19 个
+（`onRoundStart` / `onIncome` / `onPrepStart` / `onPrepEnd` / `onGain` / `onSold` / `onRefresh` / `onPrice` / `onBuy` /
+`onSpend` / `onMerge` / `onLevelUp` / `onBattleStart` / `onBattleResult` / `onChoicePick` / `onEquip` / `onArt` /
+`onDestroy` / `onLayers`）；写错的名字会进启动日志的警告（不会静默不跑）。
+
+**当前状态（全部已实现）**：
+* **A 段**：形状、点名拒绝、`registers` 归一化、`combat` 闸门、模块字节进身份哈希、装载期判「文件真的在不在」；
+* **B 段**：启动时静态扫描 + `import`（模块 URL 带包摘要，换版本不会被模块缓存粘住）、受控注册表、逐包**试用副本**
+  （失败的包连它注册到一半的键一起回滚）、多包抢同一个键时**包 id 小的持有**并点名（`META_KEY_TAKEN`，DESIGN §28.3）、
+  `Lobby` 建对局时做 `fork()` 并作为 `Match` 的 `opts.registry` 传下去；
+* 一个包都没声明 `server.meta` 时**连 fork 都不做**（`opts.registry` 根本不出现），行为与从前逐字节相同；
+* 端到端验收：`test/packMetaWiring.test.js`（真服务器 + 真 `Match`，处理器派发、进程级那一份一个键都不多、装不上的包
+  被移出已加载集合）与 `test/packMetaFanpack.test.js`（把 fanpack 的**准备阶段那一半**逐句移植成 meta 模块，按层里程碑
+  发奖、计数器保证一步只结一次账）。
+
+**装配期失败（注册了一个没声明的键）怎么办**：那个包的注册**整份回滚**并在启动/装配日志里点名，**对局照常开始** ——
+不让一个包把整个房间变成不能玩。装载期就失败的（扫描 / import / 没有 `registerMeta`）更早：整包移出已加载集合，
+它的内容也不并进游戏数据（与 `server.preDispatch` 同一个裁剪点）。
 
 **写错的拒绝码**：`META_BAD_SHAPE` / `META_UNKNOWN_FIELD` / `META_BAD_PATH` / `META_BAD_MODULE` /
 `META_BAD_REGISTERS` / `META_BAD_KEY` / `META_DUPLICATE_KEY` / `META_NEEDS_COMBAT` / `SERVER_EMPTY_MEMBER`；

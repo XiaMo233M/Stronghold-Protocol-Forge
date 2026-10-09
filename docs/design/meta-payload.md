@@ -9,7 +9,8 @@ cannot react to a shop refresh. A real community mod's whole "personality" lives
 ("damage enemies that are stunned", "at 6 distinct members give the whole team attack speed", "on every N kills add a
 layer") through `registry.bond(id, handler)` / `registerMeta(registry)`. None of that can be expressed in data, and
 §28.11's list of what is deliberately left out did not include it — it was simply not designed yet. This is that
-design, and its A 段 (the declaration) is implemented; the B 段 (the runtime assembly) is named at the end.
+design, and both cuts are implemented (§29.4 lists every piece and the two places where the shipped behaviour is
+deliberately softer than this section's first draft).
 
 ## 29. The declaration, and the three decisions it carries
 
@@ -86,9 +87,9 @@ into the copy only. Handler **objects** are shared by the copy; a handler that n
 instead of mutating the shared object. When no pack declares `server.meta`, no fork is made and `Match` behaves byte for
 byte as before — the same "declared, or nothing changed" rule §28.13 uses for the other four capability groups.
 
-### 29.4 What is implemented now, and what B 段 adds
+### 29.4 What is implemented now
 
-**A 段 (this cut, `feat/012-meta-payload`)** — declaration only, nothing executes it:
+Both cuts are in. **A 段** (`feat/012-meta-payload`) is the declaration; **B 段** is the runtime assembly.
 
 | piece | where |
 |---|---|
@@ -99,19 +100,21 @@ byte as before — the same "declared, or nothing changed" rule §28.13 uses for
 | load-time file judgement (module present, readable, `.mjs`, inside the pack) | `server/workshop.js metaIssues`, wired into `loadWorkshop`'s gate |
 | the module's **bytes** enter the content hash | `server/workshop.js identifyPack` |
 | `MetaRegistry.fork()` | `server/match/effectsMeta.js` |
+| the static determinism scan, **before any import** | `server/match/metaPack.js metaSourceIssues` (shares `shared/kitAuthoring.js`'s `stripComments` / `mentionsIdentifier` with the kit rules) |
+| `loadMetaModules`: import (URL carries the pack hash), require `registerMeta`, refuse a module that fails either | `server/match/metaPack.js`, called from `server/index.js` and merged into the **same prune point** as `server.preDispatch` (`dropUnavailablePreDispatchPacks`) |
+| the guarded registry: a declared-only whitelist, read-through reads, `unregister` limited to its own keys, and the frozen `registry.api` | `server/match/metaPack.js GuardedMetaRegistry` |
+| per-pack **trial copy**: a pack that throws part-way is rolled back whole — including the entries it left in the room's ownership map | `server/match/metaPack.js buildRoomRegistry` |
+| two packs claiming one key: the smaller pack id holds it, the loser is named (`META_KEY_TAKEN`) | the same function (DESIGN §28.3's rule, applied to the registry) |
+| the per-room registry reaching the match | `server/lobby.js startMatch` → `Match`'s existing `opts.registry`; **absent when no pack declares `server.meta`**, so a clean install forks nothing |
+| acceptance | `test/packMetaWiring.test.js` (real server + real `Match`: the handler dispatches, the process-wide registry gains no key, an unloadable pack leaves the loaded set) and `test/packMetaFanpack.test.js` (the community mod's prep half ported verbatim — milestone step, once-per-step counter, grant, toast — driven through a real match) |
 
-**B 段** (next cut) adds the things only an import can answer, on the startup assembly path, exactly as §28.13.3's
-last box does for `server.preDispatch`:
+**Two deliberate softenings against this section's original wording**, both recorded here rather than in a comment:
 
-- `server/match/metaPack.js`: `loadPackMeta(loaded)` imports each declared module and keeps
-  `registerMeta(registry)`; a module that fails to import, exports no `registerMeta`, or registers an **undeclared
-  key** (the guarded registry) refuses **that pack for the match**, named;
-- `Lobby` builds the per-room registry from the room's declared set (W-A's `Room.modSet`) and passes it to
-  `MatchClass` through the existing `opts.registry`;
-- a **static determinism scan** of the module source, with the same rules and refusal wording as `kitAuthoring`
-  (§28.4): no `Math.random`, no clocks, no dependency on unordered iteration. A meta module runs inside a match, so it
-  is bound by the same rules as the engine it plugs into;
-- the acceptance case is the real thing: port the community mod's `bonds/custom.js` (331 lines) into
-  `meta/bonds.mjs` and assert that "6 distinct members → team attack speed" actually fires, that a room that does not
-  declare the pack plays byte-identically to 0.12.0-minus-this-cut, and that a `registers` list missing one key refuses
-  the match by name.
+- The room's declared set (`Room.modSet`, W-A) does **not** yet decide which meta packs run: every loaded `server.meta`
+  pack is assembled into every room, exactly like the content layer, until W-B makes the room's set the one the
+  simulation runs. Half-applying it (meta honours the set, content does not) would make "declared set" mean two
+  different things on two layers.
+- An **assembly-time** failure (a key outside `registers`) rolls that pack back and names it, but the match **still
+  starts**. The stricter reading ("that pack's match does not start") was written before the rollback existed: it would
+  let one pack make a whole room unplayable for everyone in it. Load-time failures still drop the pack entirely, which
+  is where the strict reading belongs.
