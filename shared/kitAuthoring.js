@@ -16,14 +16,34 @@
 //                                                          player's result is REJECTED — with a reason that looks
 //                                                          nothing like "you used Math.random"
 //
-// And one that is specific to the hook bus: `battle.on(name, fn)` accepts ANY string (server/sim/Battle.js:583) and
-// `emit()` only fires the names something actually emits (:623). So `battle.on('beforeAttck', …)` registers cleanly,
-// never fires, and nothing anywhere reports it. HOOK_EVENTS below is the engine's real emit vocabulary, pinned to the
-// source by a drift guard (test/kitAuthoring.test.js), so a typo can be answered with a suggestion.
+// And one that is specific to the hook bus: `battle.on(name, fn)` accepts ANY string — the bus never checks the name —
+// while `emit()` only fires the names something actually emits. So `battle.on('beforeAttck', …)` registers cleanly,
+// never fires, and nothing anywhere reports it. Both live in HOOK_BUS.file (see HOOK_BUS below), which is also where
+// the MAX_HOOK_DEPTH guard and the handler-error isolation are; `server/sim/Battle.js` installs that method container
+// on the prototype and declares neither one.
+//
+// Neither the file nor the methods are cited here with a LINE NUMBER, and that is deliberate: this header used to point
+// at two line numbers in `server/sim/Battle.js` for `on` / `emit`, and by the time anyone read them they landed in the
+// middle of a much shorter file that no longer declares either method — a citation that rots silently, exactly the
+// failure class this module exists to catch. HOOK_BUS below names the file and the two methods, and
+// test/kitAuthoring.test.js reads that file and requires both of them to still be declared there (and forbids the stale
+// `Battle.js` + line-number form from coming back, in this header and in docs/WORKSHOP.md §4.3). HOOK_EVENTS below is
+// the engine's real emit vocabulary, pinned to the source by the same test, so a typo can be answered with a suggestion.
 //
 // A kit may also declare its OWN event under a namespace (`battle.emit('mypack:ready')`), which is how the official
 // content does it (`nearl2:knockdown`). Such a name is legal as long as the same file emits it — so the check is
 // "the engine emits it, or this file emits it".
+
+/**
+ * Where the hook bus a kit registers on really lives — cited BY SYMBOL, never by a line number.
+ *
+ * `file` is the file that declares the bus; `register` and `fire` are its two method names. A line number in a comment
+ * starts rotting the moment the file it points into moves and nothing reports it — the header above used to carry two
+ * of them for `server/sim/Battle.js`, a file that no longer declares either method. A symbol only rots if the method is
+ * renamed, and that is what the drift guard in test/kitAuthoring.test.js reads this constant to check — the same pattern
+ * HOOK_EVENTS uses for the event vocabulary.
+ */
+export const HOOK_BUS = Object.freeze({ file: 'server/sim/battle/hooks.js', register: 'on', fire: 'emit' });
 
 /**
  * Every event the engine emits (server/sim + public/js), minus the engine-internal ones a kit has no reason to hook.

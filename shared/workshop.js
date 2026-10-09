@@ -590,11 +590,16 @@ function mergeWorkshopSupport(data, packs, report) {
 /**
  * Apply every pack's content on top of the official data and return a NEW top-level object (the input is never
  * mutated; the caller freezes the result). Official ids are only replaced when the pack declared them in `overrides`;
- * a collision that was not declared is a reported error and the official record is kept.
+ * a collision that was not declared is a reported error and the record already in place is kept.
+ *
+ * The record already in place is not always an OFFICIAL one: packs are merged in order, so a second pack claiming a
+ * first pack's new id collides with that pack. Such an error says which pack holds the id (`definedBy`, and in the
+ * text); it used to say "already exists in the official data" for both cases, which sent the author looking for a
+ * record that is not in `data/`.
  *
  * @param {Readonly<Record<string, any>>} base the loaded official data (server/data.js)
  * @param {Array<{ id: string, name?: string, overrides?: string[], files: Record<string, Record<string, object>> }>} packs
- * @returns {{ data: Record<string, any>, report: { packs: object[], added: Record<string, string[]>, overridden: Record<string, string[]>, errors: object[] } }}
+ * @returns {{ data: Record<string, any>, report: { packs: object[], added: Record<string, string[]>, overridden: Record<string, string[]>, errors: Array<{ pack: string, file: string, id: string, definedBy: string, reason: string }> } }}
  */
 export function applyWorkshop(base, packs) {
   const out = { ...(isPlainObj(base) ? base : {}) };
@@ -605,25 +610,35 @@ export function applyWorkshop(base, packs) {
   /** 同上，怪物记录（`enemies`）：包自带怪物模型这条路本来没有任何启动保护，见 `enemyLookIssues`。 */
   const lookedEnemies = [];
 
+  /** `"<file>:<id>"` → the pack id that put that record into `out` (a pack-vs-pack collision is attributed with it). */
+  const contributors = new Map();
+
   for (const pack of Array.isArray(packs) ? packs : []) {
     if (!pack || typeof pack !== 'object' || !pack.id) continue;
     const declared = new Set(Array.isArray(pack.overrides) ? pack.overrides : []);
     const entry = { id: pack.id, name: pack.name || pack.id, files: {} };
     for (const [file, records] of Object.entries(pack.files || {})) {
-      const official = isPlainObj(out[file]) ? out[file] : {};
-      const merged = { ...official };
+      // `prior` is the OFFICIAL data PLUS every pack merged before this one (NOT just the official data — the variable
+      // was called `official`, and reading it as one is what produced a message that sent authors to `data/` for a
+      // record only another pack ships). `contributors` says which of the two it is.
+      const prior = isPlainObj(out[file]) ? out[file] : {};
+      const merged = { ...prior };
       let added = 0;
       let overridden = 0;
       for (const [id, rec] of Object.entries(records || {})) {
-        const exists = Object.hasOwn(official, id);
+        const exists = Object.hasOwn(prior, id);
         if (exists && !declared.has(`${file}:${id}`)) {
+          const holder = contributors.get(`${file}:${id}`);
           report.errors.push({
-            pack: pack.id, file, id,
-            reason: `"${id}" already exists in the official data — add "${file}:${id}" to pack.json overrides to replace it`,
+            pack: pack.id, file, id, definedBy: holder || 'official',
+            reason: holder
+              ? `"${id}" is already contributed by pack "${holder}" — two packs must not ship the same ${file}.json id; rename this record, or add "${file}:${id}" to pack.json overrides to replace that pack's record on purpose`
+              : `"${id}" already exists in the official data — add "${file}:${id}" to pack.json overrides to replace it`,
           });
           continue;
         }
         merged[id] = rec;
+        contributors.set(`${file}:${id}`, pack.id);
         if (file === 'chess') looked.push({ pack: pack.id, id, rec });
         if (file === 'enemies') lookedEnemies.push({ pack: pack.id, id, rec });
         if (exists) { overridden++; push(report.overridden, file, id); } else { added++; push(report.added, file, id); }

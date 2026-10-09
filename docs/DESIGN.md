@@ -33,3 +33,4 @@ normative lines it rewrote).
 | §24 | [history/0.1.4.md](history/0.1.4.md) | 0.1.4 — community reports after 0.1.3 |
 | §25 | [history/0.2.0.md](history/0.2.0.md) | 0.2.0 |
 | §26 | [history/0.2.1.md](history/0.2.1.md) | 0.2.1 — after the 0.2.0 release |
+| §27 | [design/mod-layer.md](design/mod-layer.md) | The mod layer: identity, loading, isolation, versioning, distribution |

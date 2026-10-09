@@ -191,12 +191,57 @@ describe('workshop: the overlay', () => {
     assert.equal(silent.data.chess[officialId].name, official.name, 'the official record must win');
     assert.equal(silent.report.errors.length, 1);
     assert.match(silent.report.errors[0].reason, /overrides/);
+    assert.match(silent.report.errors[0].reason, /official data/);
+    assert.equal(silent.report.errors[0].definedBy, 'official', 'and the attribution must say so');
     assert.deepEqual(silent.report.overridden, {});
 
     const declared = applyWorkshop(base, [{ id: 'ok', name: 'ok', overrides: [`chess:${officialId}`], files: { chess: { [officialId]: hostile } } }]);
     assert.equal(declared.data.chess[officialId].name, 'hijacked');
     assert.deepEqual(declared.report.overridden.chess, [officialId]);
     assert.deepEqual(declared.report.errors, []);
+  });
+
+  // 归因（本次修复）：第二个包撞上第一个包**新增**的 id 时，旧文案说它「已存在于官方数据」——作者会去 `data/chess.json`
+  // 里找一条根本不存在的记录。文案必须点名占位的那个包，并且给出机器可读的 `definedBy`（日志只打 reason，测试只能
+  // 靠文字，而编辑器/工具需要结构化字段）。
+  test('two packs claiming the same NEW id name the pack that already ships it, not the official data', () => {
+    const rec = (chessId) => ({ chessId, baseId: chessId, name: chessId });
+    const claim = (id) => ({ id, name: id, files: { chess: { chess_ws_shared_a: rec('chess_ws_shared_a') } } });
+
+    const { data, report } = applyWorkshop({ chess: {} }, [claim('alpha'), claim('beta')]);
+    assert.equal(data.chess.chess_ws_shared_a.name, 'chess_ws_shared_a', 'the first pack keeps the id');
+    assert.deepEqual(report.added.chess, ['chess_ws_shared_a']);
+    assert.equal(report.errors.length, 1);
+    const err = report.errors[0];
+    assert.equal(err.pack, 'beta', 'the error blames the pack that collided');
+    assert.equal(err.file, 'chess');
+    assert.equal(err.id, 'chess_ws_shared_a');
+    assert.equal(err.definedBy, 'alpha', 'and names the pack that holds it');
+    assert.match(err.reason, /pack "alpha"/);
+    assert.doesNotMatch(err.reason, /official/, 'the record is not in the official data and the text must not imply it is');
+    assert.match(err.reason, /chess:chess_ws_shared_a/, 'the declared override is still offered as the deliberate way in');
+
+    // the attribution follows whoever got there first, not the message: the same pair in the other order blames alpha
+    const flipped = applyWorkshop({ chess: {} }, [claim('beta'), claim('alpha')]);
+    assert.equal(flipped.report.errors[0].pack, 'alpha');
+    assert.equal(flipped.report.errors[0].definedBy, 'beta');
+  });
+
+  test('a collision that a declared override resolved does not mis-attribute the next pack', () => {
+    // alpha REPLACES an official id on purpose; beta claims the same id without declaring it — beta collides with
+    // alpha's record, so the message names alpha (the official record is gone from the merged view either way)
+    const officialId = 'chess_char_1_01_a';
+    const official = loadData(DATA_DIR, { log: quiet, workshopDir: null }).chess[officialId];
+    const base = { chess: { [officialId]: official } };
+    const packs = [
+      { id: 'alpha', overrides: [`chess:${officialId}`], files: { chess: { [officialId]: { ...official, name: 'alpha' } } } },
+      { id: 'beta', overrides: [], files: { chess: { [officialId]: { ...official, name: 'beta' } } } },
+    ];
+    const { data, report } = applyWorkshop(base, packs);
+    assert.equal(data.chess[officialId].name, 'alpha');
+    assert.equal(report.errors.length, 1);
+    assert.equal(report.errors[0].pack, 'beta');
+    assert.equal(report.errors[0].definedBy, 'alpha');
   });
 
   test('the merge never mutates its input and reports readable counts', () => {
