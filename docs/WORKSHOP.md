@@ -558,7 +558,7 @@ node tools/workshop-validate.mjs my-pack
 | 字段 | 形状 | 要点 |
 |---|---|---|
 | `assets` | `{ container, manifest, serverPolicy?, verify? }` | `container` 是包内相对路径、必须以 `.spresources` 结尾（`tools/make-spresources.mjs` 的产物）；`manifest` 是包内相对路径、必须 `.json`（客户端要验的扁平文件表）；`serverPolicy` 缺省 `"serve"`，可选 `"cache-only"`（后者让服务器对 `/assets`、`/fonts` 回 412，见 §1.9.4）；`verify` 缺省 `"sha256"`，按旁挂 `<container>.sha256` 校验 |
-| `client` | `{ panels: [{ id, slot, module, order?, gate? }], requires? }` | 面板按 `id` 排序后才进清单；`module` 是包内相对路径，**不是 URL**；`slot` 是闭枚举 `root.overlays` / `root.guide` / `screen.game.aside` / `screen.result.footer`（DESIGN §28.8 已经数得清的那四个宿主）；`requires` 只能取 `serviceWorker` / `cacheStorage` / `webCrypto` —— 缺一即「浏览器不支持」，不是「装了但静默不工作」 |
+| `client` | `{ panels: [{ id, slot, module, order?, gate?, styles? }], requires?, theme? }` | 面板按 `id` 排序后才进清单；`module` 是包内相对路径，**不是 URL**；`slot` 是闭枚举的九个宿主（四个浮层 + 五个既有组件里的宿主，见 §1.9.3）；`styles` 是这个面板自带的 `.css`（见 §1.9.5）；`requires` 只能取 `serviceWorker` / `cacheStorage` / `webCrypto` —— 缺一即「浏览器不支持」，不是「装了但静默不工作」；`theme.vars` 是包写的 CSS 变量（同样见 §1.9.5） |
 | `server` | `{ preDispatch: { module, policy, intercepts } }` | `module` 必须 `.mjs`（服务端加载，浏览器不加载）；`policy` 必须 `.json`；`intercepts` 每一项**必须**存在于 `shared/protocol.js C2S`（从协议反推，不在这里另抄一份名单 —— 抄一份就是第二个会漂移的真相） |
 | `routes` | `[{ path, file, cache? }]` | `path` 是 `/` 开头的绝对 HTTP 路径；`file` 是包内相对路径且必须 `.json`（`.js` / `.html` 一律不在此通道：那是代码执行面）；`cache` 缺省 `"no-cache"`，可选 `"no-store"` / `"public"` |
 | `i18n` | `{ "<语种>": "<包内相对 .json>" }` | 给**已有语种**（`en` / `ja` / `ko` / `zh-TW` …）补界面词条；语种码必须是常用大小写、不能是源语言 `zh`；文件里是 `{ "<中文 msgid>": "<译文>" }`。**已有键绝不覆盖**、冲突点名报告 —— 见 **§1.10** |
@@ -770,17 +770,31 @@ export function mount(ctx) {
 `default` 导出同一个函数也行。**模块源码进包的身份哈希**：改了面板的字节就是换了一个包（DESIGN §28.8），所以不
 用担心「摘要一样、界面不一样」。
 
-**四个挂载点**（闭枚举，写别的整包被拒：`CLIENT_BAD_PANEL_SLOT`）：
+**九个挂载点**（闭枚举，写别的整包被拒：`CLIENT_BAD_PANEL_SLOT`）：
 
-| `slot` | 位置 |
-|---|---|
-| `root.overlays` | 最上层浮层（模态框、提示条这类东西放这里） |
-| `root.guide` | 说明层之上、浮层之下 |
-| `screen.game.aside` | 屏幕右侧竖条（对局界面旁边） |
-| `screen.result.footer` | 屏幕底部横条（结算界面下方） |
+| `slot` | 位置 | 容器谁创建 |
+|---|---|---|
+| `root.overlays` | 最上层浮层（模态框、提示条这类东西放这里） | 注册点按需创建 |
+| `root.guide` | 说明层之上、浮层之下 | 注册点按需创建 |
+| `screen.game.aside` | 屏幕右侧竖条（对局界面旁边） | 注册点按需创建 |
+| `screen.result.footer` | 屏幕底部横条（结算界面下方） | 注册点按需创建 |
+| `screen.game.shopCard` | **每一张商店卡**里（可重复） | 组件渲染 |
+| `screen.game.bondStrip` | 盟约条里 | 组件渲染 |
+| `screen.game.hud` | 对局 HUD 层里 | 组件渲染 |
+| `screen.game.overlay` | 对局画面之上（整屏覆盖层） | 组件渲染 |
+| `screen.loadout.detail` | 干员详情面板里（插一节） | 组件渲染 |
 
-四个宿主都是**固定的浮层容器**，与当前在哪个界面无关 —— 面板挂一次就一直在，不需要自己判断路由。容器的类与
-`data-mod-slot` 属性由注册点在面板真的挂载时创建（没有包声明 `client` 时页面上一个容器都没有）。
+前四个是**固定浮层**：与当前在哪个界面无关，面板挂一次就一直在，容器由注册点在面板真的挂载时创建（没有包声明
+`client` 时页面上一个容器都没有）。
+
+后五个是**既有组件里的宿主**（业主裁决 2026-10-10），容器由**组件自己**渲染 `[data-mod-slot]`。三条性质：
+
+- **空闲时零影响**：容器 `display: contents`（不产生盒子），里面的面板默认 `pointer-events: none`（不吃点击）。
+  想让标记/手势/一节接收输入，在你自己的样式表里打开 `pointer-events: auto` —— 默认绝不能是「一层看不见的东西
+  把你的点击吃了」，商店卡尤其必须照旧能买。
+- **定位是你的事**：引擎只给地址，不给样子（这正是 `styles[]` 那一半存在的理由）。
+- **`screen.game.shopCard` 是「可重复」宿主**：每张卡一个容器，你的面板会挂进**每一张**，并且通过 `ctx.hostKey`
+  知道自己是哪一张（那个键就是棋子的 id）。后来才出现的卡会在下一次状态变化时自动补上。
 
 **`order` 决定挂载顺序**（整数，缺省 0）：小的先挂；相同则包 id 小的先，再按面板 id。顺序永远不随发现顺序 /
 数组顺序变（DESIGN §28.3 的同一条规则）。**`gate` 是一个客户端 store 点路径**（例如 `session.entered`）：路径为真

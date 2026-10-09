@@ -1064,3 +1064,16 @@
 .mod-slot[data-mod-slot="screen.game.aside"] { top: 0; right: 0; bottom: 0; z-index: 62; }
 .mod-slot[data-mod-slot="screen.result.footer"] { right: 0; bottom: 0; left: 0; z-index: 62; }
 .mod-panel { pointer-events: auto; }
+
+/* ---- C-layer HOSTS INSIDE COMPONENTS (owner's ruling 2026-10-10, extensions.js MOD_PANEL_CREATED) --- */
+/* The other five mount points are rendered by the component itself (`[data-mod-slot]` inside the shop card, the bond
+   strip, the HUD, the game screen and 干员详情). The engine guarantees exactly two things about an idle host, and both
+   are about not changing what is already there:
+     * `display: contents` — the host adds NO box, so a pack that mounts nothing leaves every layout untouched;
+     * the panel inside it is **inert by default** (`pointer-events: none`). A mark, a gesture or a section that wants
+       input turns it back on in its OWN stylesheet: the default must never be "an invisible layer ate your click", and a
+       shop card in particular has to keep working with a pack installed.
+   Positioning is the pack's business too (that is the whole point of shipping a stylesheet) — the engine hands out the
+   address, not the look. */
+.mod-host { display: contents; }
+.mod-host[data-mod-slot] > .mod-panel { pointer-events: none; }

@@ -472,12 +472,17 @@ frame the server already sends**: `welcome.modPanels` (`server/lobby.js welcomeI
 no `client` produces no new request, no new DOM and no new global — the same "a JSON-safe module list, built by the
 server" shape `spec.workshopKits` has for kits (§28.13), and the reason the list is not fetched.
 
-- **The four slots are positions, and no container exists until a panel needs one.** The registry creates the
-  `[data-mod-slot]` container on demand (`browserSlotHost`, styled by `public/css/components.css`) and appends a `<div>`
-  of its own inside it — not a Preact child, because Preact owns everything under `#app` and a raw child a re-render does
-  not know about is how a package's UI disappears on the next frame. A page whose packs declare no `client` therefore
-  adds **no DOM at all**; an app shell that renders its own `[data-mod-slot]` element wins (that attribute is the
-  addressing contract, and the registry treats its absence as "not yet" rather than "failed").
+- **Nine slots, in two kinds, and no container exists until something needs one.** The first four are 0.11.0's fixed
+  overlays: the registry creates the `[data-mod-slot]` container on demand (`browserSlotHost`, styled by
+  `public/css/components.css`) and appends a `<div>` of its own inside it — not a Preact child, because Preact owns
+  everything under `#app` and a raw child a re-render does not know about is how a pack's UI disappears on the next
+  frame. The other five (owner's ruling 2026-10-10) live **inside components the engine already renders** — a shop card,
+  the bond strip, the HUD layer, a full-screen layer over the game screen, 干员详情 — and there the component renders the
+  `[data-mod-slot]` element itself; the registry only **looks it up** (absent means "not yet", never "failed", and never
+  a container invented at a position nobody recognises). `screen.game.shopCard` is **repeatable**: one container per
+  card, the panel mounts into every one of them and learns which through `ctx.hostKey`. A page whose packs declare no
+  `client` still adds **no DOM at all** (`display: contents` on a host that mounts nothing, `pointer-events: none` on an
+  idle panel), so an installed pack cannot eat a click on a shop card.
 - **`order`, then pack id, then panel id.** `order` (default 0) decides the mount sequence, ties break on the smaller
   pack id — DESIGN §28.3's rule, applied to a list, so the order never depends on the discovery order or the wire order.
 - **`gate` is a dotted path into the client store**, read-only (`session.preloadRequired`, `session.entered`). A panel

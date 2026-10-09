@@ -26,7 +26,7 @@ import { tmpdir } from 'node:os';
 
 import {
   normalizePackManifest, WORKSHOP_CONTENT_FILES,
-  ASSETS_SERVER_POLICIES, ASSETS_VERIFY_ALGORITHMS, CLIENT_PANEL_SLOTS, CLIENT_REQUIRES, ROUTE_CACHE_POLICIES,
+  ASSETS_SERVER_POLICIES, ASSETS_VERIFY_ALGORITHMS, CLIENT_PANEL_SLOTS, CLIENT_PANEL_REPEATABLE, CLIENT_REQUIRES, ROUTE_CACHE_POLICIES,
 } from '../shared/workshop.js';
 import { loadWorkshop } from '../server/workshop.js';
 import { MOD_API_VERSION } from '../shared/constants.js';
@@ -193,7 +193,11 @@ describe('四组声明: 形状合法 ⇒ 接受，并如实出现在解析结果
       panels: [{ id: 'sp-resource-import', slot: 'root.overlays', module: 'resources/preloadModal.js', order: 10, gate: 'session.preloadRequired' }],
       requires: ['serviceWorker', 'cacheStorage', 'webCrypto'],   // 闭枚举的次序，不是书写次序
     });
-    assert.deepEqual(CLIENT_PANEL_SLOTS, ['root.overlays', 'root.guide', 'screen.game.aside', 'screen.result.footer']);
+    // 挂载点是**闭枚举**：前四个是 0.11.0 的浮层，后五个是业主 2026-10-10 裁决里「插进已存在的组件」那一半
+    //（`screen.game.shopCard` 是可重复宿主，每张商店卡一个容器）。
+    assert.deepEqual(CLIENT_PANEL_SLOTS, ['root.overlays', 'root.guide', 'screen.game.aside', 'screen.result.footer',
+      'screen.game.shopCard', 'screen.game.bondStrip', 'screen.game.hud', 'screen.game.overlay', 'screen.loadout.detail']);
+    assert.deepEqual(CLIENT_PANEL_REPEATABLE, ['screen.game.shopCard']);
     assert.deepEqual(CLIENT_REQUIRES, ['serviceWorker', 'cacheStorage', 'webCrypto']);
     // 可选字段不写就不出现（不然「没声明」与「声明成 undefined」会是两种字节）
     const minimal = norm({ content: ['chess'], client: { panels: [{ id: 'p1', slot: 'root.guide', module: 'a/b.js' }] } });

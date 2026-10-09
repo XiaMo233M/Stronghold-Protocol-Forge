@@ -36,11 +36,27 @@
 import { t } from '../../../shared/i18n.js';
 
 /**
- * The four mount points — the closed enum of `shared/workshop.js CLIENT_PANEL_SLOTS`, kept here as its own table because
- * importing that module would pull the whole pack schema into the page. A test pins the two tables together, the same
- * way `test/kitImports.test.js` pins the import map to the whitelist.
+ * The mount points (DESIGN §28.8). The first four are 0.11.0's **overlays** — the registry creates their container on
+ * demand and `public/css/components.css` fixes them. The last five live **inside components the engine already renders**
+ * (the owner's ruling of 2026-10-10): the component renders `[data-mod-slot="…"]` and the panel fills it, which is how a
+ * pack marks a shop card, adds a gesture to the bond strip or inserts a section into 操作员详情.
+ *
+ * Kept here as its own table because importing `shared/workshop.js` would pull the whole pack schema into the page; a
+ * test pins the two tables together, the same way `test/kitImports.test.js` pins the import map to the whitelist.
  */
-export const MOD_PANEL_SLOTS = Object.freeze(['root.overlays', 'root.guide', 'screen.game.aside', 'screen.result.footer']);
+export const MOD_PANEL_SLOTS = Object.freeze([
+  'root.overlays', 'root.guide', 'screen.game.aside', 'screen.result.footer',
+  'screen.game.shopCard', 'screen.game.bondStrip', 'screen.game.hud', 'screen.game.overlay',
+  'screen.loadout.detail',
+]);
+
+/**
+ * Hosts the engine renders MORE THAN ONCE (one container per shop card). A panel declaring one of these mounts into
+ * **every** match and learns which one it is through `ctx.hostKey` — that is what makes "a mark on each card" possible
+ * without handing the pack the store (DESIGN §28.8's boundary). `shared/workshop.js CLIENT_PANEL_REPEATABLE` is the
+ * other copy; a test pins them together.
+ */
+export const MOD_PANEL_REPEATABLE = Object.freeze(['screen.game.shopCard']);
 
 /** The URL prefix a panel module is served under: `shared/workshop.js WORKSHOP_PANEL_PREFIX` (pinned by a test). */
 export const MOD_PANEL_PREFIX = '/workshop-panels/';
@@ -50,6 +66,26 @@ export const MOD_PANEL_REQUIRES = Object.freeze(['serviceWorker', 'cacheStorage'
 
 /** The selector of a slot container: an existing one wins, otherwise the registry creates it (see `browserSlotHost`). */
 export const slotSelector = (slot) => `[data-mod-slot="${slot}"]`;
+
+/**
+ * 引擎**按需创建**容器的宿主：0.11.0 的四个浮层。其余宿主由组件自己渲染 `[data-mod-slot]`，注册点只查不造 ——
+ * 一个「谁也不认识的位置」比一个没挂上的面板难查得多。
+ */
+export const MOD_PANEL_CREATED = Object.freeze(['root.overlays', 'root.guide', 'screen.game.aside', 'screen.result.footer']);
+
+/** 一个宿主容器自己带的键（`data-mod-slot-key`）—— 可重复宿主用它告诉面板「你是哪一份」（商店卡那个键就是棋子 id）。 */
+export function hostKeyOf(el) {
+  if (!el || typeof el.getAttribute !== 'function') return null;
+  const k = el.getAttribute('data-mod-slot-key');
+  return typeof k === 'string' && k ? k : null;
+}
+
+/** 组件已经渲染出来的全部该宿主的容器（可重复宿主会有多个）；浏览器里是 `querySelectorAll`。 */
+export function browserSlotHosts(slot) {
+  const doc = globalThis.document;
+  if (!doc || typeof doc.querySelectorAll !== 'function') return [];
+  return [...doc.querySelectorAll(slotSelector(slot))];
+}
 
 /** 主题变量的名字：与 `shared/workshop.js CLIENT_THEME_VAR_RE` 逐字相同（两处真相会漂，所以测试把它们钉在一起）。 */
 export const THEME_VAR_RE = /^--[A-Za-z0-9_-]{1,64}$/;
@@ -171,13 +207,19 @@ export function createPanelRegistry(deps) {
   const env = deps.env || browserEnv();
   const styleHost = deps.styleHost || browserStyleHost;
   const themeHost = deps.themeHost || browserThemeHost;
+  const slotHosts = deps.slotHosts || browserSlotHosts;
 
   /** @type {Array<any>} */
   let panels = [];
-  /** panel key -> { rec, host, unmount } while mounted (or being mounted). */
+  /** panel key -> { rec, host, unmount } while mounted (or being mounted). Repeatable hosts key by
+   *  `<panel>#<hostKey>` — one entry per container the panel mounted into. */
   const mounted = new Map();
-  /** panel keys that were refused: never retried (their URL is content-addressed, so a retry cannot succeed). */
+  /** mount keys that were refused: never retried (their URL is content-addressed, so a retry cannot succeed). */
   const blocked = new Set();
+  /** PANEL keys refused for a reason that holds for every container: a missing capability, an unknown gate path. */
+  const blockedPanels = new Set();
+  /** panels whose stylesheets are already injected (N mounts share one injection). */
+  const styled = new Set();
   /** panel key -> its host element (created once, inside the slot container). */
   const hosts = new Map();
   /** @type {Array<{ code: string, detail: string }>} */
@@ -251,7 +293,7 @@ export function createPanelRegistry(deps) {
   }
 
   /** The frozen surface one panel module is called with (see the header: what is NOT here is the point). */
-  function panelContext(rec, host) {
+  function panelContext(rec, host, hostKey = null) {
     const scoped = Object.freeze({
       info: (...a) => log?.info?.(`[mod ${rec.key}]`, ...a),
       warn: (...a) => log?.warn?.(`[mod ${rec.key}]`, ...a),
@@ -279,24 +321,51 @@ export function createPanelRegistry(deps) {
     });
     return Object.freeze({
       id: rec.id, pack: rec.pack, slot: rec.slot, order: rec.order, gate: rec.gate,
-      host, session, net: netFacade, log: scoped,
+      host, hostKey, session, net: netFacade, log: scoped,
     });
   }
 
-  /** The slot container exists (or is created) only when a panel really mounts: absent means "this shell has no such
-   * mount point yet", and the next store change retries. */
-  function ensureHost(rec) {
-    const had = hosts.get(rec.key);
+  /**
+   * 一个面板这次要挂进**哪些**容器（业主裁决 2026-10-10 的「插进已存在的组件」那一半）。三种宿主：
+   *   * **浮层**（`MOD_PANEL_CREATED`，0.11.0 的四个）—— 引擎按需创建容器（`slotHost`）；
+   *   * **组件渲染的**（`screen.game.bondStrip` / `.hud` / `.overlay` / `screen.loadout.detail`）—— **只查不造**：
+   *     容器没渲染出来就是「还没到时候」，下一次 store 变化再试。凭空虚造一个的结局是面板画在页面上一个谁也不
+   *     认识的位置，而作者与玩家都不会知道为什么；
+   *   * **可重复的**（`MOD_PANEL_REPEATABLE`，每张商店卡一个）—— 全部返回，面板挂进**每一个**。
+   * @param {any} rec
+   * @returns {Array<{ el: any, key: string|null }>}
+   */
+  function hostTargets(rec) {
+    const found = (typeof slotHosts === 'function' ? slotHosts(rec.slot) : null) || [];
+    const list = (Array.isArray(found) ? found : []).filter((el) => el && typeof el.appendChild === 'function');
+    if (list.length) return list.map((el) => ({ el, key: hostKeyOf(el) }));
+    if (!MOD_PANEL_CREATED.includes(rec.slot)) return [];
+    const el = slotHost(rec.slot);
+    return el && typeof el.appendChild === 'function' ? [{ el, key: null }] : [];
+  }
+
+  /** 这次挂载的键：可重复宿主按容器自己的键区分（不可重复的就是面板键本身）。 */
+  function mountKeyOf(rec, key) { return key === null || key === undefined ? rec.key : `${rec.key}#${key}`; }
+
+  /** 容器里那个属于这次挂载的 `div`（一个容器一次，缓存）。 */
+  function ensureHost(rec, container, mk) {
+    const had = hosts.get(mk);
     if (had) return had;
-    const container = slotHost(rec.slot);
-    if (!container || typeof container.appendChild !== 'function') return null;
     const el = createElement('div');
     if (!el) return null;
     el.className = 'mod-panel';
-    if (typeof el.setAttribute === 'function') el.setAttribute('data-mod-panel', rec.key);
+    if (typeof el.setAttribute === 'function') el.setAttribute('data-mod-panel', mk);
     container.appendChild(el);
-    hosts.set(rec.key, el);
+    hosts.set(mk, el);
     return el;
+  }
+
+  /** 样式表按**面板**注入一次：可重复宿主下会挂 N 份，样式只该在页面上出现一份。 */
+  function injectStylesOnce(rec) {
+    if (styled.has(rec.key)) return true;
+    if (!injectStyles(rec)) return false;
+    styled.add(rec.key);
+    return true;
   }
 
   /**
@@ -331,34 +400,34 @@ export function createPanelRegistry(deps) {
     return true;
   }
 
-  async function mountOne(rec, host) {
+  async function mountOne(rec, host, mk, hostKey) {
     let mod;
     try {
       mod = await importModule(rec.url);
     } catch (err) {
-      mounted.delete(rec.key);
-      blocked.add(rec.key);
+      mounted.delete(mk);
+      blocked.add(mk);
       refuse('CLIENT_PANEL_IMPORT_FAILED', `panel "${rec.key}" failed to import ${rec.url}: ${err && err.message ? err.message : String(err)}`);
       return true;
     }
     const factory = mod && typeof mod.mount === 'function' ? mod.mount
       : (mod && typeof mod.default === 'function' ? mod.default : null);
     if (!factory) {
-      mounted.delete(rec.key);
-      blocked.add(rec.key);
+      mounted.delete(mk);
+      blocked.add(mk);
       refuse('CLIENT_PANEL_NO_MOUNT', `panel "${rec.key}" (${rec.url}) must export mount(ctx) (or default-export that function)`);
       return true;
     }
     let result;
     try {
-      result = await factory(panelContext(rec, host));
+      result = await factory(panelContext(rec, host, hostKey));
     } catch (err) {
-      mounted.delete(rec.key);
-      blocked.add(rec.key);
+      mounted.delete(mk);
+      blocked.add(mk);
       refuse('CLIENT_PANEL_MOUNT_FAILED', `panel "${rec.key}" threw while mounting: ${err && err.message ? err.message : String(err)}`);
       return true;
     }
-    const entry = mounted.get(rec.key);
+    const entry = mounted.get(mk);
     if (entry) entry.unmount = result && typeof result.unmount === 'function' ? result.unmount : null;
     return true;
   }
@@ -370,10 +439,10 @@ export function createPanelRegistry(deps) {
     try {
       for (const rec of panels) {
         if (disposed) return;
-        if (mounted.has(rec.key) || blocked.has(rec.key)) continue;
+        if (blockedPanels.has(rec.key)) continue;
         const missing = capabilityIssues(rec.requires, env);
         if (missing.length) {
-          blocked.add(rec.key);
+          blockedPanels.add(rec.key);
           refuse('CLIENT_REQUIRES_UNSUPPORTED', `panel "${rec.key}" requires ${missing.join(', ')}, which this browser does not provide`);
           // 明示：浏览器不支持不是「装了但静默不工作」—— 玩家与作者都必须看到这句话（DESIGN §28.13）。
           notify(t('{0} 需要浏览器支持 {1}，当前浏览器不支持 —— 这个包的面板不会挂载', [rec.pack, missing.join(', ')]), 'error');
@@ -382,19 +451,26 @@ export function createPanelRegistry(deps) {
         if (rec.gate) {
           const gate = readGate(store.get(), rec.gate);
           if (!gate.ok) {
-            blocked.add(rec.key);
+            blockedPanels.add(rec.key);
             refuse('CLIENT_PANEL_GATE_UNKNOWN', `panel "${rec.key}" gates on ${JSON.stringify(rec.gate)}, which is not a path of the client store`);
             continue;
           }
           if (!gate.value) continue; // not yet: the next store change retries
         }
-        // The slot container exists only once the app shell rendered it: absent means "not yet", not "failed", so
-        // nothing is recorded and the next store change retries (no element is invented for a slot that is not there).
-        const host = ensureHost(rec);
-        if (!host) continue;
-        if (!injectStyles(rec)) { blocked.add(rec.key); continue; }
-        mounted.set(rec.key, { rec, host, unmount: null });
-        await mountOne(rec, host);
+        // 容器只在组件真的渲染出 `[data-mod-slot]` 之后才存在：没有就是「还没到时候」，不记任何东西，
+        // 下一次 store 变化再试（可重复宿主因此会随着新卡片出现而逐个挂上）。
+        const targets = hostTargets(rec);
+        if (!targets.length) continue;
+        if (!injectStylesOnce(rec)) { for (const { key } of targets) blocked.add(mountKeyOf(rec, key)); continue; }
+        for (const { el, key } of targets) {
+          if (disposed) return;
+          const mk = mountKeyOf(rec, key);
+          if (mounted.has(mk) || blocked.has(mk)) continue;
+          const host = ensureHost(rec, el, mk);
+          if (!host) continue;
+          mounted.set(mk, { rec, host, unmount: null, key });
+          await mountOne(rec, host, mk, key);
+        }
       }
     } finally {
       flushing = false;

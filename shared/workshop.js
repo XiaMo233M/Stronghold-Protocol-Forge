@@ -242,10 +242,26 @@ export const ASSETS_FILE_CODES = Object.freeze({
 });
 
 /**
- * `client.panels[*].slot`（DESIGN §28.8 列出的四个宿主 → §28.13）：**闭枚举**。写成自由字符串的话，
- * 一个拼错的挂载点就是一个永远不出现的界面 —— 而挂载点是设计稿里已经数得清的那四个。
+ * `client.panels[*].slot`（DESIGN §28.8）：**闭枚举**。写成自由字符串的话，一个拼错的挂载点就是一个永远不出现的
+ * 界面 —— 而挂载点是设计稿里已经数得清的那些。
+ *
+ * 前四个是 0.11.0 的**浮层**（引擎按需创建容器、`position: fixed`）。后五个是业主 2026-10-10 裁决里
+ * 「插进**已存在**的组件」那一半：容器由**组件自己**渲染（`[data-mod-slot]`），面板因此能往商店卡加一个角标、
+ * 给盟约条加一个手势、往干员详情插一节 —— 而不是只能挂在浮层上。
  */
-export const CLIENT_PANEL_SLOTS = Object.freeze(['root.overlays', 'root.guide', 'screen.game.aside', 'screen.result.footer']);
+export const CLIENT_PANEL_SLOTS = Object.freeze([
+  'root.overlays', 'root.guide', 'screen.game.aside', 'screen.result.footer',
+  'screen.game.shopCard', 'screen.game.bondStrip', 'screen.game.hud', 'screen.game.overlay',
+  'screen.loadout.detail',
+]);
+/**
+ * **可重复的宿主**：引擎在这些位置渲染*多个*容器（每张商店卡一个），一个面板会挂进**每一个**，并通过
+ * `ctx.hostKey` 知道自己是哪一份（商店卡那个键就是棋子的 id）。
+ *
+ * 为什么需要这一档：`cardMarks.js` 要的是「每张卡上一个标记」，而不是「屏幕上有一个标记」。把它塞进不可重复的
+ * 浮层等于让包自己去做「哪张卡在哪」这件事 —— 而那需要 store，正是 §28.8 不给它的东西。
+ */
+export const CLIENT_PANEL_REPEATABLE = Object.freeze(['screen.game.shopCard']);
 /** 面板的字段：四个 + `styles`（这个面板自带的样式表，见 `CLIENT_PANEL_STYLES_EXT`）。 */
 const CLIENT_PANEL_FIELDS = Object.freeze(['id', 'slot', 'module', 'order', 'gate', 'styles']);
 /** 一个包能声明它需要哪些浏览器能力；缺一即「浏览器不支持」，不是「装了但静默不工作」（DESIGN §28.13）。 */
