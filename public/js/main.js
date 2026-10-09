@@ -308,6 +308,9 @@ function wireNet() {
         });
     }
     if (Array.isArray(msg && msg.modPanels) && msg.modPanels.length) modPanels.apply(msg.modPanels);
+    // 包写的主题变量（业主裁决 2026-10-10）：与 `modPanels` 同一条不变量 —— 服务端没有包声明主题就没有这个字段，
+    // 这里一次都不调，页面不多一条 CSS 自定义属性。
+    if (msg && msg.modTheme && typeof msg.modTheme === 'object') modPanels.applyTheme(msg.modTheme);
   });
   net.on('helloError', (err) => toastError(err));
   net.on('replaced', () => toast(t('该身份已在其他页面登录，本页已断开'), 'warn', { ttl: 6000 }));

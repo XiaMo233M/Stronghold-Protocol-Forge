@@ -657,9 +657,15 @@ reach the same content".
   surface, operator packs, kit import, the two middle-layer declarations `server.preDispatch` / `routes`, and since
   B2 段 the client registration point §28.8) have code and tests named in their sections; the rest are still design —
   `assets` (the container, the Service Worker policy) is B3 段 — and each such section says so in its own text.
-- **No theme registration.** §28.8's draft also sketched a `registerTheme({ id, pack, vars })` writing CSS custom
-  properties. B2 段 implemented panels only: a theme is a different surface (it would need a rule for which pack wins a
-  variable, and the variable namespace would become an interface), and nothing in the three community mods asked for it.
+- **Theme variables and panel stylesheets — both, per the owner's ruling of 2026-10-10.** §28.8's draft sketched a
+  `registerTheme({ id, pack, vars })`; that half is now `client.theme.vars` — CSS custom properties, **additive**,
+  written by `public/js/ui/extensions.js applyTheme` and restored on `dispose`. The same ruling added the other half,
+  because variables cannot express *a whole new component's styles*: `client.panels[].styles[]` injects the pack's own
+  `.css` over the same registered route (`/workshop-panels/<pack>/<file>.css`, `text/css`), appended to `<head>` so it
+  lands after the engine's styles, and removed on `dispose`. The variable namespace is arbitrated like every other
+  collision in this layer — the **smaller pack id** holds a variable and a later pack writing the same name is refused
+  by name (`CLIENT_THEME_VAR_TAKEN`, §28.3). This supersedes the earlier "no theme registration" stance: the reference
+  community pack needed both halves (chat 21 KB / devices 11.7 KB / title 22 KB of component stylesheets).
 
 ### 28.12 The kit import surface (gap ④): a whitelist, resolved on both ends
 

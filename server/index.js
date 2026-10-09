@@ -25,7 +25,7 @@
 import http from 'node:http';
 import path from 'node:path';
 import { getData, loadData } from './data.js';
-import { loadWorkshop, loadWorkshopKits, loadWorkshopHooks, loadWorkshopPanels, dropUnavailablePreDispatchPacks, WORKSHOP_DIR } from './workshop.js';
+import { loadWorkshop, loadWorkshopKits, loadWorkshopHooks, loadWorkshopPanels, workshopThemeFor, dropUnavailablePreDispatchPacks, WORKSHOP_DIR } from './workshop.js';
 import {
   buildWorkshopDataFiles, workshopKitFilesFor, workshopPanelFilesFor, workshopAssetsFor, workshopRoutesFor,
   workshopResourceFilesFor, workshopModAssetsFrom, buildWorkshopI18nFiles, resourceServerPolicy, WORKSHOP_ASSET_PREFIX, WORKSHOP_ASSET_TYPES,
@@ -127,6 +127,9 @@ export async function startServer(opts = {}) {
   // 没有包声明 `client` 时两者都是空的，`welcome` 不多一个字段、`/workshop-panels/` 不服务任何东西。
   const workshopPanels = loadWorkshopPanels(workshopLoaded, { log });
   const workshopPanelFiles = workshopPanelFilesFor(workshopPanels.panels, workshopDir);
+  // 包写的主题变量（`pack.json.client.theme.vars`, 业主裁决 2026-10-10）：合并成**一份** `{ vars }`，随 `welcome` 送到
+  // 客户端。没有包声明主题时是 `null` ⇒ `welcome` 里没有这个字段、页面不多一条自定义属性（与 `modPanels` 同一条不变量）。
+  const workshopTheme = workshopThemeFor(workshopLoaded, { log });
   // 资源容器与清单（`pack.json.assets`, DESIGN §28.13）：两个注册 URL → 包内的那两个文件。容器的 sha256 是装载期
   // 已经校验过的那个（`assetsIssues` 随包带出来），服务时只进 HTTP 头、不重算。没有包声明 `assets` 时这张表是空
   // 的，`/workshop-resources/` 一个字节都不服务、也没有任何 412 策略生效。
@@ -153,7 +156,7 @@ export async function startServer(opts = {}) {
   // routes answer `{ packs: [] }` / 404 and nothing else.
   const modsJson = createModsRoute(workshopLoaded, buildModCatalog(workshopLoaded));
   const { registry, lobby, network } = createSessionStack(
-    { ...opts, workshop: { kits: workshopKits.kits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets } },
+    { ...opts, workshop: { kits: workshopKits.kits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme } },
     { data, log },
   );
   // content packs (docs/PACKS.md): scanned now — the start log names them — and again whenever their folders change

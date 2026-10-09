@@ -5,6 +5,14 @@
 // registered URLs are servable) and sends the list in `welcome` (`modPanels`) — a frame the server already sends, so a
 // server with no such pack produces **no new request, no new DOM and no new global** in the browser.
 //
+// The owner's ruling of 2026-10-10 added a second half, "both paths at once":
+//   * `client.theme.vars` — a handful of CSS custom properties, an **additive** write (`applyTheme`, restored on
+//     `dispose`), which is what §28.8 always described;
+//   * `client.panels[].styles[]` — a panel's OWN `.css`, injected from the same registered route (a `<link>` appended
+//     to `<head>`, so it lands after the engine's styles) and removed on `dispose`. A declaration that brings a whole
+//     new component (the reference pack's `chat.css` is 21 KB of it) cannot be expressed as variables, which is why
+//     this half exists at all.
+//
 // This module turns that list into mounts. Three properties are load-bearing:
 //
 //   * THE BOUNDARY IS WHAT IS NOT PASSED IN (DESIGN §28.8). A panel's factory gets a frozen object with exactly
@@ -42,6 +50,21 @@ export const MOD_PANEL_REQUIRES = Object.freeze(['serviceWorker', 'cacheStorage'
 
 /** The selector of a slot container: an existing one wins, otherwise the registry creates it (see `browserSlotHost`). */
 export const slotSelector = (slot) => `[data-mod-slot="${slot}"]`;
+
+/** 主题变量的名字：与 `shared/workshop.js CLIENT_THEME_VAR_RE` 逐字相同（两处真相会漂，所以测试把它们钉在一起）。 */
+export const THEME_VAR_RE = /^--[A-Za-z0-9_-]{1,64}$/;
+
+/** 样式表注入到哪里（`<head>` 末尾 = 排在引擎样式之后，这正是裁决里那条顺序要求）。 */
+function browserStyleHost() {
+  const doc = globalThis.document;
+  return doc && doc.head ? doc.head : null;
+}
+
+/** 主题变量写到哪个元素上（`:root`）。 */
+function browserThemeHost() {
+  const doc = globalThis.document;
+  return doc && doc.documentElement ? doc.documentElement : null;
+}
 
 /**
  * The slot container for a mount point, created **on demand**. A page whose packs declare no panel therefore adds no
@@ -146,6 +169,8 @@ export function createPanelRegistry(deps) {
   const createElement = deps.createElement
     || ((tag) => (globalThis.document ? globalThis.document.createElement(tag) : null));
   const env = deps.env || browserEnv();
+  const styleHost = deps.styleHost || browserStyleHost;
+  const themeHost = deps.themeHost || browserThemeHost;
 
   /** @type {Array<any>} */
   let panels = [];
@@ -157,6 +182,10 @@ export function createPanelRegistry(deps) {
   const hosts = new Map();
   /** @type {Array<{ code: string, detail: string }>} */
   const rejected = [];
+  /** 注入过的样式表元素：`dispose` 要把它们一并撤掉 —— 注入过一次的东西必须能收回来。 */
+  const styleEls = [];
+  /** 主题变量被我们改之前的原值（空字符串 = 当时没有这个变量，撤销时 removeProperty）。 */
+  const themePrevious = new Map();
   let subscribed = false;
   let unsubscribe = null;
   let flushing = false;
@@ -198,11 +227,26 @@ export function createPanelRegistry(deps) {
       refuse('CLIENT_UNKNOWN_REQUIRE', `panel "${key}" declares requires ${JSON.stringify(raw.requires)} — a list or nothing`);
       return null;
     }
+    // 面板自带的样式表（业主裁决 2026-10-10）：客户端是**第二个读者**，所以与模块走同一条复判 —— 只认登记过的
+    // 前缀 + `.css`。一份样式表的 URL 坏了不是「少一个样式」，而是这个面板看起来是坏的而没人知道为什么，所以它是
+    // 点名拒绝整个面板（与坏模块同一个结局）。
+    /** @type {Array<{ path: string, url: string }>} */
+    const styles = [];
+    for (const style of Array.isArray(raw.styles) ? raw.styles : []) {
+      const url = style && typeof style.url === 'string' ? style.url : '';
+      const stylePath = style && typeof style.path === 'string' ? style.path : '';
+      if (!url.startsWith(MOD_PANEL_PREFIX) || !url.split('?')[0].endsWith('.css') || !stylePath) {
+        refuse('CLIENT_BAD_PANEL_STYLE', `panel "${key}" declares stylesheet ${JSON.stringify(url)} — only ${MOD_PANEL_PREFIX}<pack>/<file>.css is injectable`);
+        return null;
+      }
+      styles.push({ path: stylePath, url });
+    }
     return {
       key, id, pack, slot: raw.slot, url,
       order: Number.isInteger(raw.order) ? raw.order : 0,
       gate: typeof raw.gate === 'string' && raw.gate ? raw.gate : null,
       requires: Array.isArray(raw.requires) ? raw.requires.map(String) : [],
+      styles,
     };
   }
 
@@ -253,6 +297,38 @@ export function createPanelRegistry(deps) {
     container.appendChild(el);
     hosts.set(rec.key, el);
     return el;
+  }
+
+  /**
+   * 注入一个面板自带的样式表（业主裁决 2026-10-10）。三条性质：
+   *   * **排在引擎样式之后**：`<link>` 追加到 `<head>` 末尾，后到的规则在层叠里更靠后；
+   *   * **在调用工厂之前**注入：面板首次渲染时它自己的样式已经在层叠里（否则第一帧是没样式的）；
+   *   * **可以收回来**：元素记在 `styleEls` 里，`dispose()` 一并移除。
+   * 没有可注入的宿主（Node、一个没有 `<head>` 的壳）时**点名拒绝这个面板**，而不是「挂了但没样式」——
+   * 那正是 §28.13.3 那条纪律：一条用不了的声明不许变成「装了但静默不工作」。
+   * @param {any} rec
+   * @returns {boolean} 全部注入成功
+   */
+  function injectStyles(rec) {
+    if (!rec.styles.length) return true;
+    const parent = styleHost();
+    if (!parent || typeof parent.appendChild !== 'function') {
+      refuse('CLIENT_PANEL_NO_STYLE_HOST', `panel "${rec.key}" declares ${rec.styles.length} stylesheet(s) but this page has no <head> to inject them into`);
+      return false;
+    }
+    for (const style of rec.styles) {
+      const el = createElement('link');
+      if (!el) {
+        refuse('CLIENT_PANEL_STYLE_FAILED', `panel "${rec.key}": could not create the element for stylesheet ${style.url}`);
+        return false;
+      }
+      el.rel = 'stylesheet';
+      el.href = style.url;
+      if (typeof el.setAttribute === 'function') el.setAttribute('data-mod-style', `${rec.key}:${style.path}`);
+      parent.appendChild(el);
+      styleEls.push(el);
+    }
+    return true;
   }
 
   async function mountOne(rec, host) {
@@ -316,6 +392,7 @@ export function createPanelRegistry(deps) {
         // nothing is recorded and the next store change retries (no element is invented for a slot that is not there).
         const host = ensureHost(rec);
         if (!host) continue;
+        if (!injectStyles(rec)) { blocked.add(rec.key); continue; }
         mounted.set(rec.key, { rec, host, unmount: null });
         await mountOne(rec, host);
       }
@@ -354,6 +431,32 @@ export function createPanelRegistry(deps) {
     },
     /** The panel keys currently mounted (test / diagnostic surface). */
     mounted: () => [...mounted.keys()].sort(),
+    /** The registered stylesheet URLs currently injected, in injection order (test / diagnostic surface). */
+    styleUrls: () => styleEls.map((el) => el && el.href).filter((u) => typeof u === 'string'),
+    /**
+     * 包写的主题变量（`welcome.modTheme`, 业主裁决 2026-10-10）：写 CSS 自定义属性，**加法**语义 —— 只写这几个名字，
+     * 不动任何规则、不替换任何样式表。原值记下来，`dispose()` 时按名字恢复。
+     *
+     * 客户端是**第二个读者**：与别处一样复判一遍形状（`--` 开头的名字、字符串值），坏名字跳过而不是写进去 ——
+     * 一个不叫 `--x` 的键写进去是什么都不发生，那正是这一版到处在消灭的静默失败。
+     * @param {{ vars?: Record<string, string> }} theme
+     * @returns {{ applied: number }}
+     */
+    applyTheme(theme) {
+      if (disposed) return { applied: 0 };
+      const vars = theme && isPlainObj(theme.vars) ? theme.vars : null;
+      if (!vars) return { applied: 0 };
+      const root = themeHost();
+      if (!root || !root.style || typeof root.style.setProperty !== 'function') return { applied: 0 };
+      let applied = 0;
+      for (const [name, value] of Object.entries(vars)) {
+        if (!THEME_VAR_RE.test(name) || typeof value !== 'string' || !value) continue;
+        if (!themePrevious.has(name)) themePrevious.set(name, root.style.getPropertyValue(name) || '');
+        root.style.setProperty(name, value);
+        applied++;
+      }
+      return { applied };
+    },
     /** Every refusal so far, declaration and mount alike (test / diagnostic surface). */
     refusals: () => rejected.map((r) => ({ ...r })),
     /** Unmount every panel and stop following the store. */
@@ -369,6 +472,20 @@ export function createPanelRegistry(deps) {
         if (el && typeof el.remove === 'function') el.remove();
       }
       hosts.clear();
+      // 注入过的东西一并收回：样式表元素移除，主题变量按名字恢复原值（原本没有这个变量就删掉它）。
+      const root = themeHost();
+      for (const [name, before] of themePrevious) {
+        if (!root || !root.style) break;
+        try {
+          if (before) root.style.setProperty(name, before);
+          else if (typeof root.style.removeProperty === 'function') root.style.removeProperty(name);
+        } catch (err) { log?.error?.(`[mod-panels] theme ${name} restore failed`, err); }
+      }
+      themePrevious.clear();
+      for (const el of styleEls) {
+        if (el && typeof el.remove === 'function') el.remove();
+      }
+      styleEls.length = 0;
       if (typeof unsubscribe === 'function') unsubscribe();
       unsubscribe = null;
       subscribed = false;

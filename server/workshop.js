@@ -218,29 +218,46 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
  * @returns {Array<{ id: string, code: 'CLIENT_BAD_PANEL_MODULE', reason: string }>} one entry per unusable panel
  */
 export function panelModuleIssues(pack, packDir) {
-  /** @type {Array<{ id: string, code: 'CLIENT_BAD_PANEL_MODULE', reason: string }>} */
+  /** @type {Array<{ id: string, code: string, reason: string }>} */
   const out = [];
   const panels = pack && pack.client && Array.isArray(pack.client.panels) ? pack.client.panels : [];
   if (!panels.length || typeof packDir !== 'string' || !packDir) return out;
   const dir = path.resolve(packDir);
-  for (const panel of panels) {
-    const id = panel && typeof panel.id === 'string' ? panel.id : '';
-    const rel = panel && typeof panel.module === 'string' ? panel.module : '';
-    const segments = rel.split('/');
+  /** 一个声明的包内相对文件是否真的在包里（模块与样式表走同一条判据，只有扩展名不同）。 */
+  const fileIssue = (panelId, field, rel, ext, what) => {
+    const segments = String(rel).split('/');
     const abs = path.join(dir, ...segments);
     // `..` cannot build a path outside the pack that is also inside it: the join is re-checked, the same way
     // server/http/workshop.js re-checks a declared route's file.
-    const bad = !rel || path.isAbsolute(rel) || !rel.endsWith('.js')
+    const bad = !rel || path.isAbsolute(rel) || !String(rel).endsWith(ext)
       || segments.some((s) => !s || s === '..' || s === '.' || s.startsWith('.'))
       || (abs !== dir && !abs.startsWith(dir + path.sep));
     if (bad) {
-      out.push({ id, code: 'CLIENT_BAD_PANEL_MODULE', reason: `client.panels["${id}"].module "${rel}" is not a pack-relative .js file inside the pack (this channel serves code, and only the pack's own)` });
-      continue;
+      return {
+        id: panelId, code: field === 'module' ? 'CLIENT_BAD_PANEL_MODULE' : 'CLIENT_BAD_PANEL_STYLE',
+        reason: `client.panels["${panelId}"].${field} "${rel}" is not a pack-relative ${ext} file inside the pack (this channel serves ${what}, and only the pack's own)`,
+      };
     }
     let isFile = false;
     try { isFile = fs.statSync(abs).isFile(); } catch { /* stays false: no such file */ }
     if (!isFile) {
-      out.push({ id, code: 'CLIENT_BAD_PANEL_MODULE', reason: `client.panels["${id}"].module "${rel}" is declared in pack.json but is not a readable file inside the pack` });
+      return {
+        id: panelId, code: field === 'module' ? 'CLIENT_BAD_PANEL_MODULE' : 'CLIENT_BAD_PANEL_STYLE',
+        reason: `client.panels["${panelId}"].${field} "${rel}" is declared in pack.json but is not a readable file inside the pack`,
+      };
+    }
+    return null;
+  };
+  for (const panel of panels) {
+    const id = panel && typeof panel.id === 'string' ? panel.id : '';
+    const issue = fileIssue(id, 'module', panel && typeof panel.module === 'string' ? panel.module : '', '.js', 'code');
+    if (issue) { out.push(issue); continue; }
+    // 面板自带的样式表（业主裁决 2026-10-10）：同一个口径 —— 声明了一份读不到/不在包里的样式表，就是**签了名却
+    // 拿不出东西**，那一份样式会静默不生效、界面看着像「包没装对」。所以它也是整包被拒，而不是少注入一份。
+    const styles = panel && Array.isArray(panel.styles) ? panel.styles : [];
+    for (const style of styles) {
+      const styleIssue = fileIssue(id, 'styles', typeof style === 'string' ? style : '', '.css', 'a stylesheet');
+      if (styleIssue) { out.push(styleIssue); break; }
     }
   }
   return out;
@@ -590,12 +607,18 @@ export function loadWorkshopPanels(loaded, { log = null, baseUrl = WORKSHOP_PANE
     const requires = Object.freeze(Array.isArray(decl.requires) ? [...decl.requires] : []);
     const hash = typeof pack.hash === 'string' ? pack.hash : '';
     for (const panel of list) {
-      const url = `${base}/${encodeURIComponent(pack.id)}/${panel.module.split('/').map(encodeURIComponent).join('/')}?v=${hash.slice(0, 12)}`;
+      const fileUrl = (rel) => `${base}/${encodeURIComponent(pack.id)}/${rel.split('/').map(encodeURIComponent).join('/')}?v=${hash.slice(0, 12)}`;
+      const url = fileUrl(panel.module);
+      // 面板自带的样式表（业主裁决 2026-10-10）：`path` 是包内相对路径（服务表用它定位文件），`url` 是浏览器注入用的
+      // 登记 URL（与模块同一条通道、同一份 `?v=`，所以「同一个房间摘要 ⇒ 同一份样式」这条对齐对样式同样成立）。
+      const styles = (Array.isArray(panel.styles) ? panel.styles : [])
+        .map((rel) => ({ path: rel, url: fileUrl(rel) }));
       panels.push({
         id: panel.id, pack: pack.id, slot: panel.slot, module: panel.module,
         order: Number.isInteger(panel.order) ? panel.order : 0,
         gate: typeof panel.gate === 'string' && panel.gate ? panel.gate : null,
         url, hash, requires,
+        ...(styles.length ? { styles } : {}),
       });
     }
   }
@@ -604,6 +627,51 @@ export function loadWorkshopPanels(loaded, { log = null, baseUrl = WORKSHOP_PANE
     || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   for (const e of errors) log?.warn?.(`[workshop] panel ${e.pack}/${e.id}: ${e.code}: ${e.reason}`);
   return { panels, errors };
+}
+
+/**
+ * 包写的**主题变量**合并体（`pack.json.client.theme.vars`，业主裁决 2026-10-10）。
+ *
+ * 这是「两条路一起给」里的第一条：几个颜色/尺寸这类东西写成 **CSS 自定义属性**，是**加法**语义 —— 引擎只把这
+ * 几个变量名写到页面上，它改不了任何规则、也替换不了任何样式表。要「一整份新组件的样式」走 `client.panels[].styles`
+ * （面板自带 `.css`），那是同一条裁决的另一半。
+ *
+ * 冲突规则与内容层逐字相同（DESIGN §28.3）：**包 id 小的持有那个变量**，后面的包写同一个名字被**点名拒绝**并
+ * 保留先到的那份值 —— 一个后到的包静默改掉别人的主题色，是这一版每个面都在拒绝的那类失败。返回值与
+ * `loadWorkshopPanels` 同形：没有包声明主题时 `theme` 是 `null`，调用方据此**一个字段都不加**。
+ * @param {{ packs?: Array<any> }} loaded `loadWorkshop(...)`
+ * @param {{ log?: any }} [opts]
+ * @returns {{ theme: { vars: Record<string, string> }|null, errors: Array<{ pack: string, name: string, code: string, reason: string }> }}
+ */
+export function workshopThemeFor(loaded, { log = null } = {}) {
+  /** @type {Array<{ pack: string, name: string, code: string, reason: string }>} */
+  const errors = [];
+  const isPlain = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  const packs = (loaded && Array.isArray(loaded.packs) ? loaded.packs : [])
+    .filter((p) => p && p.client && isPlain(p.client.theme) && isPlain(p.client.theme.vars))
+    .slice()
+    .sort((a, b) => (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
+  /** @type {Map<string, string>} */
+  const owners = new Map();
+  /** @type {Record<string, string>} */
+  const vars = {};
+  for (const pack of packs) {
+    const entries = Object.entries(pack.client.theme.vars).slice().sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    for (const [name, value] of entries) {
+      const holder = owners.get(name);
+      if (holder) {
+        errors.push({
+          pack: pack.id, name, code: 'CLIENT_THEME_VAR_TAKEN',
+          reason: `client.theme.vars["${name}"] is already written by pack "${holder}" — the pack with the smaller id keeps it (DESIGN §28.3); rename the variable, or let "${holder}" drop it`,
+        });
+        continue;
+      }
+      owners.set(name, pack.id);
+      vars[name] = value;
+    }
+  }
+  for (const e of errors) log?.warn?.(`[workshop] theme ${e.pack}: ${e.code}: ${e.reason}`);
+  return { theme: Object.keys(vars).length ? { vars } : null, errors };
 }
 
 /**
@@ -667,6 +735,18 @@ export function identifyPack(packDir, pack, files, { assetsDigest = null } = {})
     if (abs === packDir || !abs.startsWith(packDir + path.sep)) continue;
     try { addBytes(rel, fs.readFileSync(abs)); } catch { /* unreachable for a LOADED pack: loadWorkshop refuses it first */ }
   }
+  // 5b. 面板自带样式表的源码（`client.panels[].styles[]`, 业主裁决 2026-10-10）：与模块逐字相同的理由 —— 一份样式表
+  //     改变的是**界面长什么样**，不把它算进身份，两份不同的样式就会共用同一个摘要（而那份摘要声称「同一份界面」）。
+  //     同样按声明路径去重、同样只在包真的声明了样式表时才加：没声明的包哈希逐字节不变。
+  const styleFiles = [...new Set(((pack.client && Array.isArray(pack.client.panels)) ? pack.client.panels : [])
+    .flatMap((p) => (p && Array.isArray(p.styles) ? p.styles : []))
+    .filter((s) => typeof s === 'string' && s))].sort();
+  for (const rel of styleFiles) {
+    if (manifest.some((m) => m.path === rel)) continue;
+    const abs = path.join(packDir, ...rel.split('/'));
+    if (abs === packDir || !abs.startsWith(packDir + path.sep)) continue;
+    try { addBytes(rel, fs.readFileSync(abs)); } catch { /* unreachable for a LOADED pack: loadWorkshop refuses it first */ }
+  }
   // 包的**对局元注册表**模块（`pack.json.server.meta`, DESIGN §29）：它是要在**对局里执行**的代码，所以它的字节
   // 必须进身份 —— 与面板模块逐字相同的一条理由（同一份摘要不能描述两段不同的行为）。它同时是**唯一**能让两个
   // 内容哈希相同的包在对局里跑出不同结果的声明，所以漏了它，房间的摘要闸门就在最该拦的地方漏掉。
@@ -684,7 +764,9 @@ export function identifyPack(packDir, pack, files, { assetsDigest = null } = {})
   // means the layer derivation counts the panels the way it counts media, and `combat` stays "kits only": a panel
   // cannot change a battle result.
   const hasMedia = ['voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art'].some((k) => Object.keys(pack[k] || {}).length > 0);
-  const layer = pack.layer || (kits ? 'B' : (hasMedia || panelFiles.length) ? 'C' : 'A');
+  // 只写主题变量的包同样是 C 层（一个颜色包改的就是界面），所以主题也算进这条推导。
+  const hasTheme = !!(pack.client && pack.client.theme && Object.keys(pack.client.theme.vars || {}).length > 0);
+  const layer = pack.layer || (kits ? 'B' : (hasMedia || panelFiles.length || styleFiles.length || hasTheme) ? 'C' : 'A');
   const combat = pack.combat === null || pack.combat === undefined ? kits > 0 : pack.combat;
   // 6. 声明的资源容器的 sha256（`pack.json.assets`, DESIGN §28.13.5）。装载期已经拿它与容器的**字节**核对过
   //    （`assetsIssues` 流式读过一遍），所以它是这份包的一个真实属性，而不是一句声明 —— 这就是「同一个房间摘要

@@ -256,7 +256,9 @@ describe('四组声明: 坏形状 ⇒ 点名拒绝（断言拒绝码）', () => 
     ['client', { client: { panels: [{ id: 'p', slot: 'root.overlays', module: 'a.js', gate: 3 }] } }, 'CLIENT_BAD_PANEL_GATE', 'gate 不是字符串'],
     ['client', { client: { panels: VALID.client.panels, requires: 'serviceWorker' } }, 'CLIENT_BAD_REQUIRES', 'requires 不是数组'],
     ['client', { client: { panels: VALID.client.panels, requires: ['serviceworker'] } }, 'CLIENT_UNKNOWN_REQUIRE', '能力名不在闭枚举里'],
-    ['client', { client: { ...VALID.client, theme: true } }, 'CLIENT_UNKNOWN_FIELD', '未知顶层键'],
+    // `theme` 曾经落在这里（0.11.0 时它还不是 `client` 的字段），2026-10-10 的业主裁决把它收进了已知字段，
+    // 所以「未知键点名」这一条换一个真的未知键来钉 —— 判据本身没变，变的是哪个键属于已知集合。
+    ['client', { client: { ...VALID.client, colour: true } }, 'CLIENT_UNKNOWN_FIELD', '未知顶层键'],
     // server.preDispatch —— 未知键 / 路径 / 扩展名 / 拦截类型
     ['server', { server: [] }, 'SERVER_DECL_BAD_SHAPE', '不是对象'],
     ['server', { server: { hooks: {} } }, 'SERVER_UNKNOWN_FIELD', '未知顶层键'],

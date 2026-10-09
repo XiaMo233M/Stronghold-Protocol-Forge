@@ -260,7 +260,13 @@ export function createStaticHandler({
     // imports — the twin of the kit route below, and the reason `/workshop-assets` can keep refusing `.js`. Only URLs
     // the loader registered are servable, and only `.js` ones ever entered that map; the request path is the DECODED
     // one, so a module whose name needs percent-encoding is addressed by the same string the loader built.
-    if (workshopPanelFiles && workshopPanelFiles.size && decoded.startsWith(WORKSHOP_PANEL_PREFIX) && decoded.endsWith('.js')) {
+    //
+    // Since the owner's ruling of 2026-10-10 the same route also serves a panel's OWN stylesheets (`.css`): a
+    // declaration that brings a whole new component (`chat.css` in the reference pack is 21 KB of it) cannot be
+    // expressed as theme variables. Same registration rule, same `?v=` cache-busting, different MIME — and `.css`
+    // entering this map is why the check below is an extension pair rather than the single `.js` it used to be.
+    const panelExt = decoded.endsWith('.css') ? '.css' : decoded.endsWith('.js') ? '.js' : '';
+    if (workshopPanelFiles && workshopPanelFiles.size && decoded.startsWith(WORKSHOP_PANEL_PREFIX) && panelExt) {
       const abs = workshopPanelFiles.get(decoded);
       if (!abs) { sendError(req, res, 404, '页面不存在 · Not found'); return; }
       let body;
@@ -274,7 +280,8 @@ export function createStaticHandler({
       // `no-cache` and not `public`: a panel module is code, and the URL already carries the pack's content hash as
       // `?v=` (a repack means a new URL), so a cached copy can never be stale — but a browser holding one without
       // revalidation is how a deploy reaches an open tab (ui/buildGuard.js).
-      res.writeHead(200, { 'Content-Type': MIME['.js'], 'Content-Length': body.length, 'Cache-Control': 'no-cache' });
+      const type = panelExt === '.css' ? 'text/css; charset=utf-8' : MIME['.js'];
+      res.writeHead(200, { 'Content-Type': type, 'Content-Length': body.length, 'Cache-Control': 'no-cache' });
       res.end(req.method === 'HEAD' ? undefined : body);
       return;
     }

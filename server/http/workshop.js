@@ -133,19 +133,29 @@ export function workshopPanelFilesFor(panels, workshopDir) {
   if (typeof workshopDir !== 'string' || workshopDir === '') return out;
   const root = path.resolve(workshopDir);
   for (const p of Array.isArray(panels) ? panels : []) {
-    if (!p || typeof p.url !== 'string' || typeof p.pack !== 'string' || typeof p.module !== 'string') continue;
-    const raw = p.url.split('?')[0];
-    if (!raw.endsWith('.js')) continue;
-    let key = raw;
-    try { key = decodeURIComponent(raw); } catch { /* an unencoded "%" in the declaration: key on the raw text */ }
-    const rel = p.module.split('/');
-    const bad = !rel.length || rel.some((s) => !s || s === '..' || s === '.' || s.startsWith('.'))
-      || rel[rel.length - 1].length <= '.js'.length;
-    if (bad) continue;
-    const dir = path.join(root, p.pack);
-    const abs = path.join(dir, ...rel);
-    if (abs !== dir && !abs.startsWith(dir + path.sep)) continue;
-    out.set(key, abs);
+    if (!p || typeof p.pack !== 'string') continue;
+    // 一个面板可能带两条通道：它的模块（`.js`）与它自带的样式表（`.css`，业主裁决 2026-10-10）。两边的判据逐字相同
+    // —— 只服务**登记过**的路径，而且那个文件必须在包目录里、扩展名对得上。
+    /** @type {Array<[string, string, string]>} */
+    const entries = [];
+    if (typeof p.url === 'string' && typeof p.module === 'string') entries.push([p.url, p.module, '.js']);
+    for (const style of Array.isArray(p.styles) ? p.styles : []) {
+      if (style && typeof style.url === 'string' && typeof style.path === 'string') entries.push([style.url, style.path, '.css']);
+    }
+    for (const [entryUrl, relPath, ext] of entries) {
+      const raw = entryUrl.split('?')[0];
+      if (!raw.endsWith(ext)) continue;
+      let key = raw;
+      try { key = decodeURIComponent(raw); } catch { /* an unencoded "%" in the declaration: key on the raw text */ }
+      const rel = relPath.split('/');
+      const bad = !rel.length || rel.some((s) => !s || s === '..' || s === '.' || s.startsWith('.'))
+        || rel[rel.length - 1].length <= ext.length;
+      if (bad) continue;
+      const dir = path.join(root, p.pack);
+      const abs = path.join(dir, ...rel);
+      if (abs !== dir && !abs.startsWith(dir + path.sep)) continue;
+      out.set(key, abs);
+    }
   }
   return out;
 }

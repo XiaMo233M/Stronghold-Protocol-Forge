@@ -854,11 +854,15 @@ export class Lobby {
   welcomeInfo() {
     const panels = this.workshop && Array.isArray(this.workshop.panels) ? this.workshop.panels : [];
     const assets = this.workshop && Array.isArray(this.workshop.assets) ? this.workshop.assets : [];
+    // 包写的主题变量（业主裁决 2026-10-10）：合并好的那一份 `{ vars }`，与 `modPanels` 同构 —— **只有声明了才有**，
+    // 没有包声明主题时 `welcome` 的字段集合一个都不多（`test/modClientPanels.test.js` 两侧对照钉着这条）。
+    const theme = this.workshop && this.workshop.theme && typeof this.workshop.theme === 'object' ? this.workshop.theme : null;
     return {
       diyKitted: KITTED_CHARS,
       ...(this.modSet ? { mods: this.modSet } : {}),
       ...(panels.length ? { modPanels: panels } : {}),
       ...(assets.length ? { modAssets: assets } : {}),
+      ...(theme && theme.vars && Object.keys(theme.vars).length ? { modTheme: theme } : {}),
     };
   }
 

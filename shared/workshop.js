@@ -246,10 +246,30 @@ export const ASSETS_FILE_CODES = Object.freeze({
  * 一个拼错的挂载点就是一个永远不出现的界面 —— 而挂载点是设计稿里已经数得清的那四个。
  */
 export const CLIENT_PANEL_SLOTS = Object.freeze(['root.overlays', 'root.guide', 'screen.game.aside', 'screen.result.footer']);
-/** 面板的三个必填字段与两个可选字段。 */
-const CLIENT_PANEL_FIELDS = Object.freeze(['id', 'slot', 'module', 'order', 'gate']);
+/** 面板的字段：四个 + `styles`（这个面板自带的样式表，见 `CLIENT_PANEL_STYLES_EXT`）。 */
+const CLIENT_PANEL_FIELDS = Object.freeze(['id', 'slot', 'module', 'order', 'gate', 'styles']);
 /** 一个包能声明它需要哪些浏览器能力；缺一即「浏览器不支持」，不是「装了但静默不工作」（DESIGN §28.13）。 */
 export const CLIENT_REQUIRES = Object.freeze(['serviceWorker', 'cacheStorage', 'webCrypto']);
+/**
+ * 面板自带样式表的扩展名 —— `.css` 是**唯一**一种。这个通道送的是**样式**：不是代码（`.js` 那条是 `module`），
+ * 不是媒体（那条是 `assets` / `art`）。业主裁决 2026-10-10：两条路一起给 —— 主题变量写「几个值」，
+ * 自带样式表写「一整份新组件的样式」。插件包那三份（`chat.css` 21 KB / `devices.css` 11.7 KB /
+ * `title.css` 22 KB）走的是后者，光有变量装不下。
+ */
+const CLIENT_PANEL_STYLES_EXT = '.css';
+/** 上限：一个面板最多带几份样式表、一份主题最多写几个变量 —— 「注入」这件事必须有界。 */
+const CLIENT_MAX_PANEL_STYLES = 8;
+const CLIENT_MAX_THEME_VARS = 200;
+/** 一个主题里允许的字段，一个不多一个不少。 */
+const CLIENT_THEME_FIELDS = Object.freeze(['vars']);
+/** CSS 自定义属性的名字必须是 `--` 开头：一个不叫 `--x` 的键写进去等于什么都没发生（正是要消灭的静默失败）。 */
+const CLIENT_THEME_VAR_RE = /^--[A-Za-z0-9_-]{1,64}$/;
+/**
+ * 一个变量值里**不许**出现的东西。这几个字符能让一条声明跑出它自己那一格：`;` 结束当前声明、`{}` 结束规则块、
+ * `<` 是往标签里插内容的第一笔、换行同理。值本身是数据，不该有能力改结构。
+ */
+const CLIENT_THEME_VALUE_BAD = /[;{}<>\n\r]/;
+const CLIENT_THEME_VALUE_MAX = 400;
 
 /** `server.preDispatch`：包内模块、准入策略文件、以及它要拦的消息类型。三件都不能空 —— 少了 `policy`
  *  的钩子无法判定该放谁进来，那正是「声明了却没人能执行」这一类静默失败。 */
@@ -348,18 +368,22 @@ function parseClientDecl(raw) {
     return fail('CLIENT_DECL_BAD_SHAPE', 'client must be an object: { panels: [...], requires: [...] }');
   }
   for (const key of Object.keys(raw)) {
-    if (key !== 'panels' && key !== 'requires') {
-      return fail('CLIENT_UNKNOWN_FIELD', `client: "${key}" is not a declared field (panels, requires)`);
+    if (key !== 'panels' && key !== 'requires' && key !== 'theme') {
+      return fail('CLIENT_UNKNOWN_FIELD', `client: "${key}" is not a declared field (panels, requires, theme)`);
     }
   }
-  // `panels` 是 `client` 的必填字段，而且**至少要有一个面板**：一个空数组与不声明没有区别，却会让「这个包有
-  // 客户端界面」这句话变成假的；`requires` 是浏览器能力声明，今天没有「只声明能力、不带界面」这种包
-  //（`client: { requires: [...] }` 缺 `panels` 会被下面这一行拒 —— B2 段把这段注释改成与代码一致）。
-  if (!Array.isArray(raw.panels)) return fail('CLIENT_BAD_PANELS', 'client.panels must be an array of panel declarations');
-  if (!raw.panels.length) return fail('CLIENT_BAD_PANELS', 'client.panels must declare at least one panel (drop the key instead of sending [])');
+  // `client` 至少要声明**一件能用的东西**：面板，或主题变量。业主裁决 2026-10-10 之后主题可以单独存在 —— 一个只想
+  // 换几个颜色的包不该为了合法而附一个空面板（那正是「多样性/简便性」要的东西）。`requires` 单独出现仍然被拒：
+  // 一个既没有界面、也没有主题的能力声明等于什么都没声明。空 `panels` 数组照旧被拒（与不写没区别，却会让
+  // 「这个包有客户端界面」这句话变成假的）。
+  if (raw.panels !== undefined && !Array.isArray(raw.panels)) return fail('CLIENT_BAD_PANELS', 'client.panels must be an array of panel declarations');
+  if (Array.isArray(raw.panels) && !raw.panels.length) return fail('CLIENT_BAD_PANELS', 'client.panels must declare at least one panel (drop the key instead of sending [])');
+  if (raw.panels === undefined && raw.theme === undefined) {
+    return fail('CLIENT_BAD_PANELS', 'client must declare at least one of: panels (client interfaces), theme (CSS variables) — a client block that declares neither, or only requires, says nothing at all');
+  }
   const panels = [];
   const seen = new Set();
-  for (const [i, panel] of raw.panels.entries()) {
+  for (const [i, panel] of (Array.isArray(raw.panels) ? raw.panels : []).entries()) {
     if (!isPlainObj(panel)) return fail('CLIENT_BAD_PANEL', `client.panels[${i}] must be an object: { id, slot, module, order?, gate? }`);
     for (const key of Object.keys(panel)) {
       if (!CLIENT_PANEL_FIELDS.includes(key)) {
@@ -385,10 +409,34 @@ function parseClientDecl(raw) {
     if (panel.gate !== undefined && (typeof panel.gate !== 'string' || !panel.gate)) {
       return fail('CLIENT_BAD_PANEL_GATE', `client.panels["${panel.id}"].gate must be a non-empty string (e.g. "session.preloadRequired")`);
     }
+    // 面板自带的样式表（业主裁决 2026-10-10）：包内相对 `.css`，一份一份点名。`clean` 里放的是**稳定序**清单 ——
+    // 注入顺序就是层叠顺序，所以同一份声明两处写法不同必须得到同一份字节（DESIGN §28.2）。
+    /** @type {string[]} */
+    let styles = [];
+    if (panel.styles !== undefined) {
+      if (!Array.isArray(panel.styles) || !panel.styles.length) {
+        return fail('CLIENT_BAD_PANEL_STYLES', `client.panels["${panel.id}"].styles must be a non-empty array of pack-relative "${CLIENT_PANEL_STYLES_EXT}" paths (drop the key instead of sending [])`);
+      }
+      if (panel.styles.length > CLIENT_MAX_PANEL_STYLES) {
+        return fail('CLIENT_BAD_PANEL_STYLES', `client.panels["${panel.id}"].styles: at most ${CLIENT_MAX_PANEL_STYLES} stylesheets per panel (got ${panel.styles.length})`);
+      }
+      for (const style of panel.styles) {
+        if (typeof style !== 'string' || !isSafeRelativePath(style)
+          || !style.endsWith(CLIENT_PANEL_STYLES_EXT) || style.length <= CLIENT_PANEL_STYLES_EXT.length) {
+          return fail('CLIENT_BAD_PANEL_STYLE', `client.panels["${panel.id}"].styles: "${String(style)}" must be a pack-relative "${CLIENT_PANEL_STYLES_EXT}" path (e.g. "ui/chat${CLIENT_PANEL_STYLES_EXT}")`);
+        }
+      }
+      styles = stableStringList(panel.styles);
+      if (styles.length !== panel.styles.length) {
+        const dup = panel.styles.find((s, i) => panel.styles.indexOf(s) !== i);
+        return fail('CLIENT_DUPLICATE_PANEL_STYLE', `client.panels["${panel.id}"].styles: "${String(dup)}" is listed twice (a stylesheet injected twice is not a thing to reason about)`);
+      }
+    }
     /** @type {Record<string, unknown>} */
     const clean = { id: panel.id, slot: panel.slot, module: panel.module };
     if (panel.order !== undefined) clean.order = panel.order;
     if (panel.gate !== undefined) clean.gate = panel.gate;
+    if (styles.length) clean.styles = styles;
     panels.push(clean);
   }
   const rawRequires = raw.requires === undefined ? [] : raw.requires;
@@ -402,8 +450,47 @@ function parseClientDecl(raw) {
     }
   }
   panels.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  // 主题（`client.theme.vars`）：写 CSS 自定义属性，**加法**语义 —— 只加/改这几个变量名，不整份替换样式表。
+  // 与面板自带 `.css` 的分工：要「几个颜色」用这里，要「一整份新组件的样式」用 `panels[].styles`（业主裁决：两条路都给）。
+  /** @type {{ vars: Record<string, string> }|undefined} */
+  let theme;
+  if (raw.theme !== undefined) {
+    const spec = raw.theme;
+    if (!isPlainObj(spec)) return fail('CLIENT_THEME_BAD_SHAPE', 'client.theme must be an object: { vars }');
+    for (const key of Object.keys(spec)) {
+      if (!CLIENT_THEME_FIELDS.includes(key)) {
+        return fail('CLIENT_THEME_UNKNOWN_FIELD', `client.theme: "${key}" is not a declared field (${CLIENT_THEME_FIELDS.join(', ')})`);
+      }
+    }
+    if (!isPlainObj(spec.vars) || !Object.keys(spec.vars).length) {
+      return fail('CLIENT_THEME_BAD_VARS', 'client.theme.vars must be a non-empty object of CSS custom properties (e.g. { "--sp-accent": "#c33" })');
+    }
+    const names = Object.keys(spec.vars);
+    if (names.length > CLIENT_MAX_THEME_VARS) {
+      return fail('CLIENT_THEME_TOO_MANY_VARS', `client.theme.vars: at most ${CLIENT_MAX_THEME_VARS} variables (got ${names.length})`);
+    }
+    /** @type {Record<string, string>} */
+    const vars = {};
+    // 按名字排序写进清单：注入顺序不影响结果（变量之间不互相替换），但字节必须稳定（DESIGN §28.2）。
+    for (const name of names.slice().sort()) {
+      if (!CLIENT_THEME_VAR_RE.test(name)) {
+        return fail('CLIENT_THEME_BAD_VAR_NAME', `client.theme.vars: "${name}" is not a CSS custom property name — it must start with "--", or writing it would do nothing at all`);
+      }
+      const value = spec.vars[name];
+      const text = typeof value === 'number' && Number.isFinite(value) ? String(value) : value;
+      if (typeof text !== 'string' || !text.trim()) {
+        return fail('CLIENT_THEME_BAD_VAR_VALUE', `client.theme.vars["${name}"] must be a non-empty string or a finite number`);
+      }
+      // 值是**数据**：它不许有「结束自己这条声明、再开一条」的能力（`;` / `{}` / `<` / 换行）。
+      if (text.length > CLIENT_THEME_VALUE_MAX || CLIENT_THEME_VALUE_BAD.test(text)) {
+        return fail('CLIENT_THEME_BAD_VAR_VALUE', `client.theme.vars["${name}"] may not contain ; { } < > or a newline, and is limited to ${CLIENT_THEME_VALUE_MAX} characters — a variable value must not be able to end its own declaration and start another`);
+      }
+      vars[name] = text;
+    }
+    theme = { vars };
+  }
   // requires 按闭枚举次序，不按作者书写顺序：同一个包两处写法不同的清单必须是同一份字节（DESIGN §28.2）
-  return { ok: true, decl: { panels, requires: CLIENT_REQUIRES.filter((c) => requires.includes(c)) } };
+  return { ok: true, decl: { panels, requires: CLIENT_REQUIRES.filter((c) => requires.includes(c)), ...(theme ? { theme } : {}) } };
 }
 
 /**
