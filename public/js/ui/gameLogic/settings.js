@@ -13,6 +13,14 @@ import { VOICE_LANGS, DEFAULT_VOICE_LANG } from '../../../../shared/constants.js
  * voiceLangByChar: charId → dub, the per-operator override of 干员详情 → 配音 (absent = follow voiceLang).
  */
 export const DEFAULT_SETTINGS = Object.freeze({ bgm: 0.6, sfx: 0.8, voice: 0.8, muted: false, damageNumbers: true, quality: 'high', keys: DEFAULT_HOTKEYS, voiceLang: DEFAULT_VOICE_LANG, voiceLangByChar: Object.freeze({}) });
+
+/**
+ * The 配音语言 vocabulary (settings 语音语言) under upstream 0.2.2's name: the canonical list is shared/constants.js
+ * (cn / jp / en / kr, imported above), which the workshop validator, the editor's voice page and the CLI all read.
+ * Upstream's own export was its two dubs ('cn' 中文 / 'jp' 日本語 through `audio.voiceJp`); `availableVoiceLangs`
+ * below still narrows the choice to the dubs the loaded manifest really ships.
+ */
+export { VOICE_LANGS };
 const QUALITIES = ['high', 'medium', 'low'];
 /** A charId an override may name (the same shape the workshop validator accepts for a voice line). */
 const CHAR_ID = /^char_[A-Za-z0-9_]{1,64}$/;

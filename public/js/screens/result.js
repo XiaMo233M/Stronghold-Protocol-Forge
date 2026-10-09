@@ -103,12 +103,22 @@ function PlayerCard({ p, myId, titles, best, solo = false }) {
   </article>`;
 }
 
-/** RESULT screen. */
+/** RESULT screen of the match on screen: reads the store; 返回同盟 / 返回大厅 drops the match. */
 export function ResultScreen() {
   const res = useStore((s) => s.match.result);
   const pub = useStore((s) => s.match.public);
   const myId = useStore((s) => s.me.playerId);
   const hasRoom = useStore((s) => !!s.room);
+  const back = () => store.set({ match: emptyMatch() });
+  return html`<${ResultView} res=${res} pub=${pub} myId=${myId} backLabel=${hasRoom ? t('返回同盟') : t('返回大厅')} onBack=${back} />`;
+}
+
+/**
+ * The settlement view of one m.result payload — the live screen above, and the stats page's re-view of a stored match
+ * (screens/stats.js, which hands it the payload recordToResult rebuilt; `quiet`: no settlement jingle).
+ * @param {{ res: any, pub?: any, myId?: string|null, backLabel: string, onBack: () => void, quiet?: boolean }} props
+ */
+export function ResultView({ res, pub = null, myId = null, backLabel, onBack, quiet = false }) {
   const gd = useGameData();
   const r = normalizeResult(res, pub);
   const titles = Array.isArray(gd.config?.titles) ? gd.config.titles : [];
@@ -118,22 +128,21 @@ export function ResultScreen() {
     for (const p of r.players) if (Number.isFinite(p.stats[k]) && p.stats[k] > 0 && (top == null || p.stats[k] > top.v)) top = { v: p.stats[k], id: p.playerId };
     if (top && r.players.length > 1) best[k] = top.id;
   }
-  useEffect(() => { audio.sfx(r.victory ? 'settlementSucceed' : 'settlementFail'); }, []);
+  useEffect(() => { if (!quiet) audio.sfx(r.victory ? 'settlementSucceed' : 'settlementFail'); }, []);
   // 角色语音台词 (opt-in, OFF by default): the reporting player's OWN MVP says the result line — each client hears its
   // own team's MVP (owner's rule 2026-10-06: 「结算页用 MVP 干员语音说一句，每个玩家不一样（各自队伍里的 MVP）」).
-  // Read from the raw payload (not the normalised view) so the server's field is used as sent; `audio.voice` stays
+  // The props above are the payload this view was handed (the live screen's store, or screens/stats.js re-viewing a
+  // stored match), so the line follows the view on screen; upstream 0.2.2's `quiet` silences that re-view.
+  // Read from the provided payload (not a store lookup) so the stats page's stored match works too; `audio.voice` stays
   // silent without the manifest entry or with the 语音 volume at 0, and does nothing when the player has no MVP.
   // The slot names are the upstream 0.2.0 client's (public/js/audio.js VOICE_PRIORITY, shared/constants.js VOICE_SLOTS):
   // 完成高难行动 on 险境/终极, 3星结束行动 otherwise, 行动失败 when the match was lost.
   useEffect(() => {
-    const myId = store.get().me.playerId;
     const mine = (Array.isArray(res?.players) ? res.players : []).find((p) => p && p.playerId === myId) || null;
-    if (!mine || !mine.mvp) return;
-    const diff = store.get().match?.public?.difficulty;
-    const hard = diff === 'HARD' || diff === 'ABYSS';
+    if (quiet || !mine || !mine.mvp) return;
+    const hard = pub?.difficulty === 'HARD' || pub?.difficulty === 'ABYSS';
     audio.voice(mine.mvp, r.victory ? (hard ? 'resultFour' : 'resultThree') : 'resultLose');
   }, []);
-  const back = () => store.set({ match: emptyMatch() });
   const boss = r.bossId ? gd.boss(r.bossId) : null;
   // the Hidden Core medal (and its corrupted leader) only once R15 was actually fought
   const hidden = r.hiddenBossId && r.hiddenReached ? gd.boss(r.hiddenBossId) : null;
@@ -164,7 +173,7 @@ export function ResultScreen() {
         </div>
         ${mins ? html`<p class="result__time t-lo">${tParts('本局耗时 {n} 分钟', { n: html`<b class="num">${mins}</b>`, mins })}</p>` : null}
         <footer class="result__foot">
-          <${Button} variant="primary" size="xl" icon="chevronLeft" onClick=${back}>${hasRoom ? t('返回同盟') : t('返回大厅')}<//>
+          <${Button} variant="primary" size="xl" icon="chevronLeft" onClick=${onBack}>${backLabel}<//>
         </footer>
       </section>
       <section class="result__players">

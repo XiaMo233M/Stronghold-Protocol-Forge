@@ -29,9 +29,18 @@ import { EMOTE_CATALOG, DEFAULT_VOICE_LANG } from '../../shared/constants.js';
 
 /**
  * The voice slots are read from the zh_CN charword table, whose voiceIds are always `CN_*`: the other dubs
- * (`--voice-lang=jp|en|kr`) share the very same slot numbering and file names, only the dump folder differs.
+ * (`--voice-lang=jp|en|kr`, the JP tree `audio.voiceJp`) share the very same slot numbering and file names, only the
+ * dump folder differs.
  */
 const VOICE_ID_LANG = 'CN';
+
+/**
+ * The second voice tree, `audio.voiceJp`: the Japanese dub (ArknightsAssets2 `voice/`, audio.mjs VOICE_DIRS.jp) of the
+ * same slots and lines as `audio.voice`, under `audio/voice/jp/`. The client plays it when the player picks 日本語
+ * (settings 语音语言) and falls back to `audio.voice` for a line it lacks (public/js/audio.js voiceLine). The owner's
+ * request of 2026-10-08 「全套的日配语音」: the JP dub of every line the game plays, beside the Chinese one.
+ */
+export const VOICE_JP_LANG = 'jp';
 
 /**
  * Enemies whose Spine no community dump carries: the web model is another enemy's (research 07 §5.6). Their official
@@ -294,12 +303,14 @@ export function collectEnemyIds({ assets07, enemies05, maps05, ops03 }) {
  * @param {any} p.maps05 docs/research/05-maps.json
  * @param {ReturnType<import('./audio.mjs').indexAudio>} p.audio indexed audio_data.json
  * @param {any} p.modelsData Ark-Models models_data.json
- * @param {any} [p.charword] parsed excel/charword_table.json — the operators' official voice slots (voice)
+ * @param {any} [p.charword] parsed excel/charword_table.json — the operators' official voice slots (voice, voiceJp)
  * @param {string} [p.voiceLang] the default voice dub to plan: jp (default, the released bundle's dub since 0.9.0) | cn
  *   | en | kr → `audio.voice`
  * @param {string[]} [p.voiceLangs] further dubs to download into the parallel `audio.voiceLangs[lang][charId][slot]`.
  *   Every dub uses the CN file names under its own folder (voiceAlt); `voiceLang` is never planned twice, and a dub
  *   whose files are missing on this machine is dropped by resolveTemplate, so a partial download degrades gracefully.
+ * @param {boolean} [p.voiceJp] plan upstream 0.2.2's second JP tree `audio.voiceJp` (default true): the memoised `jp`
+ *   table of the same model, so the JP files are planned once whatever `voiceLang` names
  * @param {Iterable<string>|null} [p.voiceSlots] which voice slots to plan: VOICE_BATTLE_SLOTS (default) plans only the
  *   lines a battle can play, null plans every slot of audio.mjs VOICE_SLOTS (`--voice-all`). The prep-only slots
  *   (干员报到 / 编入队伍 / 任命队长) are never requested by the client and cost 360 files / 19.3 MB of downloads.
@@ -320,7 +331,7 @@ export function collectEnemyIds({ assets07, enemies05, maps05, ops03 }) {
  * @returns {{ template: any, models: Map<string, any>, notes: string[] }}
  */
 export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsData, charword = null, voiceLang = DEFAULT_VOICE_LANG,
-  voiceLangs = null, voiceSlots = VOICE_BATTLE_SLOTS,
+  voiceLangs = null, voiceJp = true, voiceSlots = VOICE_BATTLE_SLOTS,
   extraEnemyIds = [], extraTokenIds = [], extraHandbook = {}, localEnemySpines = {}, localTokenSpines = {}, extraOperators = {},
   moduleTypes = [] }) {
   const notes = [];
@@ -616,7 +627,7 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
     modules[t] = leaf(alt(`module/${safeName(t).toLowerCase()}.png`, [...new Set([t, t.toLowerCase()])].map((n) => joinUrl(RAW.aa2, `arts/ui/uniequiptype/${n}.png`))));
   }
 
-  // --- 干员战斗语音 (excel/charword_table.json → audio.voice / audio.voiceLangs) --------------------------
+  // --- 干员战斗语音 (excel/charword_table.json → audio.voice, audio.voiceLangs, audio.voiceJp) ----------------
   // The official lines of every operator the mode can field, for the slots a battle can actually play: 行动出发 start /
   // 行动开始 faceEnemy / 选中干员 select / 部署 place / 作战中1-4 skillN / 结算 result* (charword `placeType`,
   // audio.mjs VOICE_BATTLE_SLOTS). A slot with several lines stays an array — the client draws one at random
@@ -632,6 +643,9 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
   // `voiceLangs` plans the OTHER dubs into the parallel `audio.voiceLangs[lang][charId][slot]`. A dub whose files are
   // missing on this machine resolves to nothing and is dropped (`resolveTemplate`), so a partial download degrades —
   // the client then falls back to the default dub.
+  // `audio.voiceJp` (VOICE_JP_LANG, upstream 0.2.2): the Japanese dub as a second tree of the same slots and file names
+  // (`audio/voice/jp/`, the owner's request of 2026-10-08). It is the memoised `jp` table of this very model, so the JP
+  // files are planned once however `voiceLang` is set; `voiceJp: false` leaves it out.
   const voiceTables = new Map();
   const voiceTable = (lang) => {
     if (voiceTables.has(lang)) return voiceTables.get(lang);
@@ -669,6 +683,9 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
       bgm,
       bossBgm: Object.fromEntries(Object.entries(bossBgm).sort(([a], [b]) => a.localeCompare(b, 'en', { numeric: true }))),
       voice,
+      // upstream 0.2.2's second tree for the Japanese dub (VOICE_JP_LANG): the memoised `jp` table, so this key costs
+      // no extra plan; off with `voiceJp: false`
+      ...(voiceJp ? { voiceJp: voiceTable(VOICE_JP_LANG) } : {}),
       // which dub `voice` holds (the client's fallback reads it) and the other dubs beside it
       voiceLang,
       voiceLangs: voiceLangsTable,
