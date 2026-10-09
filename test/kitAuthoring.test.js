@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 
-import { HOOK_EVENTS, KIT_FORBIDDEN_GLOBALS, hookNamesInSource, nearestEvent, validateKit, kitErrors } from '../shared/kitAuthoring.js';
+import { HOOK_EVENTS, HOOK_BUS, KIT_FORBIDDEN_GLOBALS, hookNamesInSource, nearestEvent, validateKit, kitErrors } from '../shared/kitAuthoring.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DEMO_KIT = join(ROOT, 'docs/examples/kit-demo/kits/chess_ws_abyss_hunter_a.js');
@@ -46,6 +46,35 @@ describe('kit authoring: the hook vocabulary is the engine\'s, not a guess', () 
     assert.equal(nearestEvent('damged'), 'damaged');
     assert.equal(nearestEvent('completelyUnrelatedEventName'), null, 'a bad suggestion is worse than none');
     assert.equal(nearestEvent('tick'), 'tick');
+  });
+});
+
+// 归因（本次修复）：教作者写钩子的那段话曾经用手写行号指向 `server/sim/Battle.js`，而 `on` / `emit` 早就搬进了
+// `server/sim/battle/hooks.js`（Battle.js 里已经没有这两个方法）—— 引用烂掉时没有任何东西会报错，作者照着点进去
+// 看到的是别的东西。所以这里把「总线在哪」钉成 HOOK_BUS 的两个符号：方法改名 / 再搬家时测试会响，而不是等下一个作者踩空。
+describe('kit authoring: where the hook bus lives is pinned by symbol, not by a line number', () => {
+  test('HOOK_BUS.file really declares HOOK_BUS.register and HOOK_BUS.fire', () => {
+    const src = fs.readFileSync(join(ROOT, HOOK_BUS.file), 'utf8');
+    for (const name of [HOOK_BUS.register, HOOK_BUS.fire]) {
+      assert.match(src, new RegExp(`^\\s{2}${name}\\s*\\(`, 'm'), `${name}() must still be declared in ${HOOK_BUS.file}`);
+    }
+    // and the file the old citation pointed at must NOT be where they live: that is what made it rot
+    const battle = fs.readFileSync(join(ROOT, 'server/sim/Battle.js'), 'utf8');
+    for (const name of [HOOK_BUS.register, HOOK_BUS.fire]) {
+      assert.doesNotMatch(battle, new RegExp(`^\\s{2}${name}\\s*\\(`, 'm'), `server/sim/Battle.js declares ${name}() again — update HOOK_BUS and the header`);
+    }
+    assert.match(battle, /battle\/hooks\.js/, 'Battle.js is where the container is installed, so it must still name it');
+  });
+
+  test('the author-facing text never cites the hook bus as `Battle.js:<line>` again', () => {
+    for (const rel of ['shared/kitAuthoring.js', 'docs/WORKSHOP.md']) {
+      const text = fs.readFileSync(join(ROOT, rel), 'utf8');
+      const stale = [...text.matchAll(/Battle\.js:\d+/g)].map((m) => m[0]);
+      assert.deepEqual(stale, [], `${rel} cites ${stale.join(', ')} — the bus is ${HOOK_BUS.file}, and a line number there rots silently`);
+      assert.match(text, /HOOK_BUS/, `${rel} must name the bus by the symbol the guard reads`);
+    }
+    // the two names the docs promise are the two names a kit actually calls
+    assert.deepEqual([HOOK_BUS.register, HOOK_BUS.fire], ['on', 'emit']);
   });
 });
 

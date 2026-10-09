@@ -43,8 +43,15 @@
   <link rel="stylesheet" href="/css/emotes.css" />
   <link rel="stylesheet" href="/css/devices.css" />
 
+  <!-- `@kit/` and `@sim/` are the ONLY module specifiers a workshop pack kit may import (shared/kitImports.js, the
+       whitelist; DESIGN §28.12). They are declared here so the very same kit source the server imports by real path
+       also resolves in the browser, which is why a relative specifier can never work for both. The table is generated
+       by kitImportMap() and pinned by test/kitImports.test.js: edit the table, not this map. -->
   <script type="importmap">
-    { "imports": { "preact": "/vendor/preact.module.js", "preact/hooks": "/vendor/hooks.module.js", "htm": "/vendor/htm.module.js" } }
+    { "imports": {
+      "preact": "/vendor/preact.module.js", "preact/hooks": "/vendor/hooks.module.js", "htm": "/vendor/htm.module.js",
+      "@kit/": "/sim/content/kits/shared/", "@sim/": "/sim/"
+    } }
   </script>
   <link rel="modulepreload" href="/vendor/preact.module.js" />
   <link rel="modulepreload" href="/vendor/hooks.module.js" />

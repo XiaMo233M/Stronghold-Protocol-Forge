@@ -36,11 +36,34 @@ function walk(dir, ext, out = []) {
   return out;
 }
 
+/**
+ * The static mounts of `server/http/static.js`: URL prefix → the directory on disk it serves. The order matters
+ * (`/data.js` is a generated single file, not the `/data/` mount).
+ */
+const MOUNTS = [
+  ['/sim/', path.join(ROOT, 'server', 'sim')],
+  ['/shared/', path.join(ROOT, 'shared')],
+  ['/data/', path.join(ROOT, 'data')],
+  ['/packs/', path.join(ROOT, 'packs')],
+];
+const mountFor = (urlPath) => MOUNTS.find(([p]) => urlPath.startsWith(p));
+
 /** URL path served by the server → file on disk (mirrors the server/http/static.js mounts). */
 function urlPathToFile(urlPath) {
   const clean = decodeURIComponent(urlPath.split(/[?#]/)[0]);
-  if (clean.startsWith('/shared/')) return path.join(ROOT, clean);
-  if (clean.startsWith('/data/')) return path.join(ROOT, clean);
+  const mount = mountFor(clean);
+  if (mount) return path.join(mount[1], clean.slice(mount[0].length));
+  return path.join(PUBLIC, clean);
+}
+
+/**
+ * URL path of a served **directory** → the directory on disk. An import map may map a prefix (`"@kit/": "/sim/…/"`):
+ * that names a subtree, so what has to exist is the directory, and `/sim/` is served from `server/sim/`, not `public/`.
+ */
+function urlPathToDir(urlPath) {
+  const clean = decodeURIComponent(urlPath.split(/[?#]/)[0]).replace(/\/+$/, '');
+  const mount = mountFor(`${clean}/`);
+  if (mount) return path.join(mount[1], clean.slice(mount[0].length));
   return path.join(PUBLIC, clean);
 }
 
@@ -182,6 +205,9 @@ describe('HTML pages reference existing files', () => {
         const urlPath = new URL(ref, pageUrl).pathname;
         const file = urlPathToFile(urlPath);
         if (!existsSync(file)) {
+          // an import map value may be a PREFIX mapping (it ends in `/`): it names a served subtree, not a file, so the
+          // directory is what has to exist (`@kit/` → `/sim/content/kits/shared/`, served from server/sim/)
+          if (ref.endsWith('/') && existsSync(urlPathToDir(urlPath))) continue;
           if (OPTIONAL_PREFIXES.some((p) => urlPath.startsWith(p))) t.diagnostic(`optional asset missing: ${urlPath}`);
           else assert.fail(`${page} references missing ${urlPath}`);
         }

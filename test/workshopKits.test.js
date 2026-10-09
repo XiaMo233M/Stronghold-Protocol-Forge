@@ -131,6 +131,38 @@ describe('行为层: loading a pack\'s kits', () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // 归因 + 归一（DESIGN §28.3）：kit id 撞车必须**点名占位的那一个包**，而且赢家由包 id 决定，不由扫描顺序决定。
+  test('two packs shipping the same kit id: the smaller pack id wins, and the report names the holder', async () => {
+    const root = fs.mkdtempSync(join(tmpdir(), 'sp-kit-tie-'));
+    const REC = { chessId: BASE, baseId: BASE, goldenId: null, isGolden: false, visible: true, tier: 5, profession: 'WARRIOR', position: 'MELEE', rangeGrid: [[0, 0]], stats: { maxHp: 1, atk: 1, def: 1, res: 0, cost: 1, blockCnt: 1, bat: 1 }, talents: [], bonds: [] };
+    const pack = (id) => {
+      const dir = join(root, id);
+      fs.mkdirSync(join(dir, 'kits'), { recursive: true });
+      fs.writeFileSync(join(dir, 'pack.json'), JSON.stringify({ id, name: id, version: '0.1.0', content: ['chess'], overrides: [] }));
+      fs.writeFileSync(join(dir, 'chess.json'), JSON.stringify({ [BASE]: REC }));
+      fs.writeFileSync(join(dir, 'kits', `${BASE}.js`), KIT_SRC);
+      // what loadWorkshop would hand over: each pack OWNS the operator it kits, so ownership is not what refuses this
+      return { id, dir, overrides: [], files: { chess: { [BASE]: REC } } };
+    };
+    const zeta = pack('zeta-kit');   // 数组里在前，但包 id 更大
+    const alpha = pack('alpha-kit');
+    try {
+      for (const packs of [[zeta, alpha], [alpha, zeta]]) {
+        const info = await loadWorkshopKits({ packs }, { log: quiet, knownIds: new Set([BASE]) });
+        const hit = info.errors.find((e) => e.id === BASE);
+        assert.ok(hit, JSON.stringify(info.errors));
+        assert.equal(hit.code, 'KIT_ID_COLLISION');
+        assert.equal(hit.pack, 'zeta-kit', 'the pack that lost is the one blamed');
+        assert.equal(hit.definedBy, 'alpha-kit', 'and the winner is named in a field, not only in prose');
+        assert.match(hit.reason, /pack "alpha-kit"/);
+        assert.equal(info.modules.length, 1);
+        assert.equal(info.modules[0].pack, 'alpha-kit', 'the smaller pack id owns the id');
+      }
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('行为层: the injection point (battle.opts.kits wins over the registry)', () => {

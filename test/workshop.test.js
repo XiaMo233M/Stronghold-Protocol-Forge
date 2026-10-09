@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os';
 
 import { loadData, getData } from '../server/data.js';
 import { loadWorkshop, workshopTouchedFiles, WORKSHOP_DIR } from '../server/workshop.js';
-import { applyWorkshop, normalizePackManifest, normalizeContentFile, workshopSummary, WORKSHOP_CONTENT_FILES } from '../shared/workshop.js';
+import { applyWorkshop, normalizePackManifest, normalizeContentFile, workshopSummary, WORKSHOP_CONTENT_FILES, OVERRIDE_REPLACE_KEYS, OVERRIDE_KEYED_LISTS } from '../shared/workshop.js';
 import { GameData } from '../server/match/gamedata.js';
 import { SharedPool } from '../server/match/pool.js';
 import { buildWorkshopDataFiles, startServer } from '../server/index.js';
@@ -191,12 +191,197 @@ describe('workshop: the overlay', () => {
     assert.equal(silent.data.chess[officialId].name, official.name, 'the official record must win');
     assert.equal(silent.report.errors.length, 1);
     assert.match(silent.report.errors[0].reason, /overrides/);
+    assert.match(silent.report.errors[0].reason, /official data/);
+    assert.equal(silent.report.errors[0].definedBy, 'official', 'and the attribution must say so');
+    assert.equal(silent.report.errors[0].code, 'OFFICIAL_ID_COLLISION');
     assert.deepEqual(silent.report.overridden, {});
 
     const declared = applyWorkshop(base, [{ id: 'ok', name: 'ok', overrides: [`chess:${officialId}`], files: { chess: { [officialId]: hostile } } }]);
     assert.equal(declared.data.chess[officialId].name, 'hijacked');
     assert.deepEqual(declared.report.overridden.chess, [officialId]);
     assert.deepEqual(declared.report.errors, []);
+  });
+
+  // 归因（本次修复）：第二个包撞上第一个包**新增**的 id 时，旧文案说它「已存在于官方数据」——作者会去 `data/chess.json`
+  // 里找一条根本不存在的记录。文案必须点名占位的那个包，并且给出机器可读的 `definedBy`（日志只打 reason，测试只能
+  // 靠文字，而编辑器/工具需要结构化字段）。
+  test('two packs claiming the same NEW id name the pack that already ships it, not the official data', () => {
+    const rec = (chessId) => ({ chessId, baseId: chessId, name: chessId });
+    const claim = (id) => ({ id, name: id, files: { chess: { chess_ws_shared_a: rec('chess_ws_shared_a') } } });
+
+    const { data, report } = applyWorkshop({ chess: {} }, [claim('alpha'), claim('beta')]);
+    assert.equal(data.chess.chess_ws_shared_a.name, 'chess_ws_shared_a', 'the first pack keeps the id');
+    assert.deepEqual(report.added.chess, ['chess_ws_shared_a']);
+    assert.equal(report.errors.length, 1);
+    const err = report.errors[0];
+    assert.equal(err.pack, 'beta', 'the error blames the pack that collided');
+    assert.equal(err.code, 'PACK_ID_COLLISION', 'and carries a machine-readable code');
+    assert.equal(err.file, 'chess');
+    assert.equal(err.id, 'chess_ws_shared_a');
+    assert.equal(err.definedBy, 'alpha', 'and names the pack that holds it');
+    assert.match(err.reason, /pack "alpha"/);
+    assert.doesNotMatch(err.reason, /official/, 'the record is not in the official data and the text must not imply it is');
+    // the refined rule (owner, 2026-10-09): an `overrides` declaration does NOT beat another pack, so the message must
+    // not offer it as the way in — the way in is to rename the record, or to let the holder drop it
+    assert.doesNotMatch(err.reason, /overrides to replace/, 'an override cannot beat another pack');
+    assert.match(err.reason, /does not win against another pack/);
+    assert.match(err.reason, /Rename this record/);
+
+    // and the winner is a property of the pack ids, not of the array: the reversed array gives the same verdict
+    const flipped = applyWorkshop({ chess: {} }, [claim('beta'), claim('alpha')]);
+    assert.equal(flipped.data.chess.chess_ws_shared_a.name, 'chess_ws_shared_a');
+    assert.deepEqual(flipped.report.errors, report.errors, 'the array order must not decide anything');
+  });
+
+  // 归一（DESIGN §28.3，2026-10-09 业主裁定）：**所有面都按包 id 字典序**，赢家与「包是按什么顺序交进来的」无关。
+  // 这条测试钉的是契约本身：同一个包集正序与倒序必须给出同一个赢家、同一条报告、同一份合并结果。
+  test('every face picks the same winner, and the winner does not depend on the array order', () => {
+    const chessId = 'chess_ws_tie_a';
+    const packOf = (id, name) => ({
+      id, name, overrides: [],
+      files: { chess: { [chessId]: { chessId, baseId: chessId, name } } },
+      bondIcons: { bond_tie: `${name}.png` },
+      itemIcons: { item_tie: `${name}.png` },
+      art: { chars: { [chessId]: { avatar: `${name}.png` } } },
+    });
+    const zeta = packOf('zeta', 'Z');   // 数组里在前，但包 id 更大
+    const alpha = packOf('alpha', 'A');
+    const base = () => ({ chess: {}, assets: { bonds: {}, items: {}, chars: {} } });
+
+    const results = [[zeta, alpha], [alpha, zeta]].map((packs) => applyWorkshop(base(), packs));
+    for (const { data, report } of results) {
+      assert.deepEqual(report.packs.map((p) => p.id), ['alpha', 'zeta'], 'packs merge in pack-id order');
+      // the five faces: data record, bond icon, item icon, art entry — the smaller id wins every one of them
+      assert.equal(data.chess[chessId].name, 'A', 'data face');
+      assert.equal(data.assets.bonds.bond_tie, '/workshop-assets/alpha/A.png', 'bond icon face');
+      assert.equal(data.assets.items.item_tie, '/workshop-assets/alpha/A.png', 'item icon face');
+      assert.equal(data.assets.chars[chessId].avatar, '/workshop-assets/alpha/A.png', 'art face');
+      // one reported collision per face, all of them blaming zeta and naming alpha as the holder
+      assert.equal(report.errors.length, 4, JSON.stringify(report.errors));
+      for (const e of report.errors) {
+        assert.equal(e.pack, 'zeta');
+        assert.equal(e.definedBy, 'alpha');
+      }
+      assert.deepEqual([...new Set(report.errors.map((e) => e.code))].sort(), ['ASSET_COLLISION', 'PACK_ID_COLLISION']);
+    }
+    // …and the two runs are indistinguishable: the array order changed nothing at all
+    assert.deepEqual(results[0].report.errors, results[1].report.errors);
+    assert.deepEqual(results[0].report.added, results[1].report.added);
+    assert.deepEqual(results[0].data.assets, results[1].data.assets);
+    assert.deepEqual(Object.keys(results[0].data.chess), Object.keys(results[1].data.chess));
+  });
+
+  test('a collision that a declared override resolved does not mis-attribute the next pack', () => {
+    // alpha REPLACES an official id on purpose; beta claims the same id without declaring it — beta collides with
+    // alpha's record, so the message names alpha (the official record is gone from the merged view either way)
+    const officialId = 'chess_char_1_01_a';
+    const official = loadData(DATA_DIR, { log: quiet, workshopDir: null }).chess[officialId];
+    const base = { chess: { [officialId]: official } };
+    const packs = [
+      { id: 'alpha', overrides: [`chess:${officialId}`], files: { chess: { [officialId]: { ...official, name: 'alpha' } } } },
+      { id: 'beta', overrides: [], files: { chess: { [officialId]: { ...official, name: 'beta' } } } },
+    ];
+    const { data, report } = applyWorkshop(base, packs);
+    assert.equal(data.chess[officialId].name, 'alpha');
+    assert.equal(report.errors.length, 1);
+    assert.equal(report.errors[0].pack, 'beta');
+    assert.equal(report.errors[0].definedBy, 'alpha');
+    assert.equal(report.errors[0].code, 'PACK_ID_COLLISION');
+  });
+
+  // 业主 2026-10-09 细化的裁决（DESIGN §28.3）：**覆盖同一条已存在记录**时，包 id 字典序最小者生效 —— 而且
+  // `overrides` 声明**不能**用来压过另一个包（声明是「可以替换官方数据」的授权，不是抢别人内容的许可）。
+  test('overriding the SAME existing record: the smaller pack id wins even when both declare the override', () => {
+    const officialId = 'chess_char_1_01_a';
+    const official = loadData(DATA_DIR, { log: quiet, workshopDir: null }).chess[officialId];
+    const base = () => ({ chess: { [officialId]: official } });
+    const both = [
+      { id: 'alpha', overrides: [`chess:${officialId}`], files: { chess: { [officialId]: { ...official, name: 'alpha' } } } },
+      { id: 'zeta', overrides: [`chess:${officialId}`], files: { chess: { [officialId]: { ...official, name: 'zeta' } } } },
+    ];
+    for (const packs of [both, [...both].reverse()]) {
+      const { data, report } = applyWorkshop(base(), packs);
+      assert.equal(data.chess[officialId].name, 'alpha', 'the smaller pack id keeps the record');
+      assert.equal(report.errors.length, 1, JSON.stringify(report.errors));
+      assert.equal(report.errors[0].pack, 'zeta');
+      assert.equal(report.errors[0].definedBy, 'alpha');
+      assert.equal(report.errors[0].code, 'PACK_ID_COLLISION');
+      assert.match(report.errors[0].reason, /does not win against another pack/);
+      assert.deepEqual(report.overridden.chess, [officialId], 'alpha did override the official record; zeta did not');
+    }
+  });
+
+  // 业主 2026-10-09（DESIGN §28.3）：`overrides` 是**按字段合并**，不是整条替换。改之前实测：一条只写
+  // `stats.maxHp` 的覆盖把 44 字段的干员压成 2 字段，engine 看到 tier:1 / atk:0 / skill:null，画成一格占位，
+  // 而 `applyWorkshop` 报 **0 error** —— 这就是这一组测试要挡住的静默失败。
+  test('a partial override keeps every field it did not write (45-field record in, 45-field record out)', () => {
+    const officialId = 'chess_char_1_01_a';
+    const official = loadData(DATA_DIR, { log: quiet, workshopDir: null }).chess[officialId];
+    // 45（不是 44）：0.2.2 的官方记录多一个记录层的潜能注解锁 `potDown`（`shared/potential.js`,
+    // docs/history/0.2.2.md §27）。这里是**数据事实**的断言，跟着发行线那份真数据走；下面「一个字段都不许丢」
+    // 仍然按官方那条的字段数逐条比对，不是放宽。
+    assert.equal(Object.keys(official).length, 45, 'the fixture is the shipped record');
+    assert.equal(Object.keys(official.stats).length, 16);
+
+    const patch = { stats: { maxHp: 12345 } };
+    const { data, report } = applyWorkshop({ chess: { [officialId]: official } }, [
+      { id: 'p', overrides: [`chess:${officialId}`], files: { chess: { [officialId]: patch } } },
+    ]);
+    assert.deepEqual(report.errors, []);
+    const got = data.chess[officialId];
+    assert.equal(Object.keys(got).length, 45, 'no top-level field may be lost by a partial override');
+    for (const k of Object.keys(official)) assert.ok(Object.hasOwn(got, k), `survived: ${k}`);
+    assert.equal(Object.keys(got.stats).length, 16, 'the other stats survive too');
+    assert.equal(got.stats.maxHp, 12345, 'and the one field the pack wrote is the pack\'s');
+    assert.equal(got.stats.atk, official.stats.atk);
+    assert.equal(got.tier, official.tier);
+    assert.equal(got.skill, official.skill, 'a behaviour field the patch did not name is untouched');
+    assert.equal(official.stats.maxHp === 12345, false, 'the official record on the way in is never mutated');
+  });
+
+  test('behaviour fields and bare arrays are replaced wholesale, by name; keyed lists merge on their key', () => {
+    const officialId = 'chess_char_1_01_a';
+    const official = loadData(DATA_DIR, { log: quiet, workshopDir: null }).chess[officialId];
+    const patch = { rangeGrid: [[0, 0]], skill: { index: 2 }, talents: [{ name: 'mine' }] };
+    const { data } = applyWorkshop({ chess: { [officialId]: official } }, [
+      { id: 'p', overrides: [`chess:${officialId}`], files: { chess: { [officialId]: patch } } },
+    ]);
+    const got = data.chess[officialId];
+    assert.deepEqual(got.rangeGrid, [[0, 0]], 'an array is replaced, never field-merged');
+    assert.deepEqual(got.skill, { index: 2 }, 'a half-merged skill would be a record nobody wrote');
+    // `talents` 是**键控列表**（按 `index` 合并）：补丁那一条没有可用的 `index` ⇒ 追加，官方的条目原样留下。
+    // 2026-10-09 修正：整块替换会让作者改一个天赋就抹掉官方的整条潜能链（0.2.2 的 `potMin` / `potBelow`），
+    // 而编辑器派生的记录按引擎约定本来就不带这些注解 ⇒ 那是一条**静默**的数据丢失。
+    // 逐条覆盖见 test/overridePotential.test.js（含「改数值不丢 potDown」与「改文案不丢 potMin」）。
+    assert.deepEqual(got.talents.slice(0, official.talents.length), official.talents,
+      'the official talents stay, potential annotations and all');
+    assert.deepEqual(got.talents.at(-1), { name: 'mine' }, 'an entry with no usable index is appended, not guessed at');
+    assert.equal(got.stats.maxHp, official.stats.maxHp, 'and the untouched numeric map still comes from the official record');
+    const keys = ['skill', 'skills', 'trait', 'traitBase', 'traitOverride', 'modules', 'rangeGrid', 'attackRangeGrid', 'assets', 'diy', 'bonds'];
+    for (const k of keys) assert.ok(OVERRIDE_REPLACE_KEYS.includes(k), `${k} is a replace-type key`);
+    assert.ok(!OVERRIDE_REPLACE_KEYS.includes('talents'),
+      '`talents` now merges on its `index` — it must not be back in the wholesale list');
+    // 2026-10-09 第二轮：`talentChanges`（模组内部的天赋改写）也是键控列表，键名是 `talentIndex`。
+    // 它 0.2.2 里同样挂 `potMin`/`potBelow`，而 `modules` 自己整块替换 ⇒ 不键控就是同一个静默缺口。
+    assert.deepEqual(OVERRIDE_KEYED_LISTS, { talents: 'index', talentsBase: 'index', talentChanges: 'talentIndex' },
+      'the keyed lists are exactly these');
+  });
+
+  test('an override is a closed world: a field the record does not have is refused, and nothing is applied', () => {
+    const officialId = 'chess_char_1_01_a';
+    const official = loadData(DATA_DIR, { log: quiet, workshopDir: null }).chess[officialId];
+    const { data, report } = applyWorkshop({ chess: { [officialId]: official } }, [
+      { id: 'p', overrides: [`chess:${officialId}`], files: { chess: { [officialId]: { stats: { maxHp: 1 }, nonsense: true } } } },
+    ]);
+    assert.equal(report.errors.length, 1);
+    assert.equal(report.errors[0].code, 'UNKNOWN_OVERRIDE_FIELD');
+    assert.match(report.errors[0].reason, /"nonsense"/);
+    assert.equal(data.chess[officialId].stats.maxHp, official.stats.maxHp, 'the good half of the patch is not applied either');
+    assert.deepEqual(report.overridden, {});
+    // a NEW record has no official counterpart to be closed against: the per-record authoring layers own that check
+    const fresh = applyWorkshop({ chess: {} }, [{ id: 'p', files: { chess: { chess_ws_fresh_a: { chessId: 'chess_ws_fresh_a', nonsense: true } } } }]);
+    assert.deepEqual(fresh.report.errors, []);
+    assert.equal(fresh.data.chess.chess_ws_fresh_a.nonsense, true);
   });
 
   test('the merge never mutates its input and reports readable counts', () => {

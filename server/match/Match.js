@@ -259,8 +259,14 @@ export class Match {
      * @type {Record<string, Function>|null}
      */
     this.workshopKits = opts.workshopKits && typeof opts.workshopKits === 'object' ? opts.workshopKits : null;
-    /** @type {Array<{ id: string, pack: string, url: string }>} */
+    /** @type {Array<{ id: string, pack: string, hash?: string, url: string }>} */
     this.workshopKitModules = Array.isArray(opts.workshopKitModules) ? opts.workshopKitModules : [];
+    /**
+     * The content this match runs with (DESIGN §28.2): `{ digest, packs }`, or null for a plain install. It goes into
+     * every BattleSpec (`spec.mods`) so a field's result is always attributable to the content that produced it.
+     * @type {{ digest: string, packs: Array<object> }|null}
+     */
+    this.mods = opts.mods && typeof opts.mods === 'object' && typeof opts.mods.digest === 'string' ? opts.mods : null;
     this.timerScale = Number.isFinite(opts.timerScale) && opts.timerScale >= 0 ? opts.timerScale : 1;
     this.gameSpeed = Number.isFinite(opts.combatSpeed) && opts.combatSpeed > 0 ? Math.min(opts.combatSpeed, 200) : GAME_SPEED;
     /** layouts a bot rehearses per prep with the real simulation (bot.js; 0 = heuristic placement only) */
