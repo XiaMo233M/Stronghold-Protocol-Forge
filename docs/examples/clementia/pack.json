@@ -1,0 +1,195 @@
+{
+  "id": "clementia",
+  "name": "克莱门莎",
+  "version": "1.0.0",
+  "author": "community (clementia-mod)",
+  "license": "CC0-1.0",
+  "description": "端到端夹具：社区 mod「克莱门莎」的 payload 按包格式写一遍（干员记录 + 自选池 + 技能/分支图标 + 双语语音 + 外观）。素材文件不在仓库里，路径只是形状。",
+  "gameVersion": ">=0.2.0",
+  "layer": "A",
+  "content": [
+    "units"
+  ],
+  "operators": {
+    "char_4231_clemnt": {
+      "bonds": [
+        "egirShip"
+      ],
+      "powers": [
+        "egir",
+        "iberia"
+      ]
+    }
+  },
+  "voices": {
+    "char_4231_clemnt": {
+      "start": [
+        "audio/voice/jp/char_4231_clemnt/cn_019.mp3"
+      ],
+      "select": [
+        "audio/voice/jp/char_4231_clemnt/cn_021.mp3",
+        "audio/voice/jp/char_4231_clemnt/cn_022.mp3"
+      ],
+      "place": [
+        "audio/voice/jp/char_4231_clemnt/cn_023.mp3",
+        "audio/voice/jp/char_4231_clemnt/cn_024.mp3"
+      ],
+      "skill1": [
+        "audio/voice/jp/char_4231_clemnt/cn_025.mp3"
+      ]
+    }
+  },
+  "voiceLangs": {
+    "cn": {
+      "char_4231_clemnt": {
+        "start": [
+          "audio/voice/cn/char_4231_clemnt/cn_019.mp3"
+        ],
+        "select": [
+          "audio/voice/cn/char_4231_clemnt/cn_021.mp3",
+          "audio/voice/cn/char_4231_clemnt/cn_022.mp3"
+        ],
+        "place": [
+          "audio/voice/cn/char_4231_clemnt/cn_023.mp3",
+          "audio/voice/cn/char_4231_clemnt/cn_024.mp3"
+        ],
+        "skill1": [
+          "audio/voice/cn/char_4231_clemnt/cn_025.mp3"
+        ]
+      }
+    }
+  },
+  "art": {
+    "chars": {
+      "char_4231_clemnt": {
+        "avatar": "char/avatar/char_4231_clemnt.png",
+        "avatarE2": "char/avatar/char_4231_clemnt_2.png",
+        "portrait": "char/portrait/char_4231_clemnt_1.png",
+        "portraitE2": "char/portrait/char_4231_clemnt_2.png",
+        "spine": {
+          "front": {
+            "skel": "spine/op/char_4231_clemnt/front/char_4231_clemnt.skel",
+            "atlas": "spine/op/char_4231_clemnt/front/char_4231_clemnt.atlas",
+            "textures": [
+              "spine/op/char_4231_clemnt/front/char_4231_clemnt.png"
+            ],
+            "pma": false,
+            "anims": {
+              "idle": "Idle",
+              "deploy": "Start",
+              "attack": {
+                "begin": null,
+                "loop": "Attack",
+                "end": null,
+                "via": "attackAny"
+              },
+              "die": "Die",
+              "move": null,
+              "stun": null,
+              "attackDown": {
+                "begin": null,
+                "loop": "Attack_Down",
+                "end": null
+              },
+              "skill": {
+                "begin": null,
+                "loop": "Attack",
+                "end": null,
+                "via": "attack",
+                "index": 0,
+                "idle": null
+              },
+              "skills": {
+                "0": {
+                  "begin": null,
+                  "loop": "Attack",
+                  "end": null,
+                  "via": "attack",
+                  "index": 0,
+                  "idle": null
+                },
+                "1": {
+                  "begin": "Skill_2_Begin",
+                  "loop": "Skill_2_Loop",
+                  "end": "Skill_2_End",
+                  "index": 1,
+                  "idle": "Skill_2_Idle"
+                },
+                "2": {
+                  "begin": null,
+                  "loop": "Attack",
+                  "end": null,
+                  "via": "attack",
+                  "index": 2,
+                  "idle": null
+                }
+              }
+            }
+          },
+          "back": {
+            "skel": "spine/op/char_4231_clemnt/back/char_4231_clemnt.skel",
+            "atlas": "spine/op/char_4231_clemnt/back/char_4231_clemnt.atlas",
+            "textures": [
+              "spine/op/char_4231_clemnt/back/char_4231_clemnt.png"
+            ],
+            "pma": false,
+            "anims": {
+              "idle": "Idle",
+              "deploy": "Start",
+              "attack": {
+                "begin": null,
+                "loop": "Attack",
+                "end": null,
+                "via": "attackAny"
+              },
+              "die": null,
+              "move": null,
+              "stun": null,
+              "skill": {
+                "begin": null,
+                "loop": "Attack",
+                "end": null,
+                "via": "attack",
+                "index": 0,
+                "idle": null
+              },
+              "skills": {
+                "0": {
+                  "begin": null,
+                  "loop": "Attack",
+                  "end": null,
+                  "via": "attack",
+                  "index": 0,
+                  "idle": null
+                },
+                "1": {
+                  "begin": "Skill_2_Begin",
+                  "loop": "Skill_2_Loop",
+                  "end": "Skill_2_End",
+                  "index": 1,
+                  "idle": "Skill_2_Idle"
+                },
+                "2": {
+                  "begin": null,
+                  "loop": "Attack",
+                  "end": null,
+                  "via": "attack",
+                  "index": 2,
+                  "idle": null
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "skills": {
+      "skchr_clemnt_1": "skill/skchr_clemnt_1.png",
+      "skchr_clemnt_2": "skill/skchr_clemnt_2.png",
+      "skchr_clemnt_3": "skill/skchr_clemnt_3.png"
+    },
+    "profSub": {
+      "primguard": "prof/sub/primguard.png"
+    }
+  }
+}

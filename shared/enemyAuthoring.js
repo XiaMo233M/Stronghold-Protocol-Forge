@@ -79,6 +79,21 @@ export function enemyKey(idOrSlug) {
 }
 
 /**
+ * 覆盖模式（override mode）的 key：**原样保留官方 key，不加 `enemy_ws_` 前缀**（与 `overrideChessIds` 同一套）。
+ *
+ * 与干员那边的差异写在这里，免得下一个人重新推一遍：**怪物只有一个 key，没有 golden 兄弟** —— 干员是一对
+ * （`_a` + `_b`，两条都要写进 `chess.json`、两条都要在 `overrides` 里声明），怪物覆盖就是一条记录。
+ *
+ * @param {object} rec 官方（或包内已有的）怪物记录
+ * @returns {{ slug: string, key: string }|null}
+ */
+export function overrideEnemyKey(rec) {
+  if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return null;
+  const key = typeof rec.key === 'string' && rec.key ? rec.key : null;
+  return key ? { slug: key, key } : null;
+}
+
+/**
  * Build a complete enemy record from the facts an author (or an AI) actually knows.
  *
  * Spec: { id, name, rank?, applyWay?, motion?, dmgType?, desc?,
@@ -90,14 +105,21 @@ export function enemyKey(idOrSlug) {
  *         notCountInTotal? }
  *
  * @returns {{ ok: true, enemy: object, warnings: string[] } | { ok: false, errors: object[] }}
+ *
+ * 第二个参数是**覆盖模式**的 key（`overrideEnemyKey` 的产出，官方 key 原样）：省略时走默认路径
+ * （`enemyKey(spec.id)`，产出 `enemy_ws_<slug>`），**一字不变**。形状不对就等于没给。
  */
-export function deriveEnemy(spec) {
+export function deriveEnemy(spec, overrideIds) {
   const errors = [];
   const warnings = [];
   const req = (cond, field, code, message, hint) => { if (!cond) errors.push({ field, code, message, ...(hint ? { hint } : {}) }); };
   if (!isPlain(spec)) return { ok: false, errors: [{ field: '', code: 'NOT_AN_OBJECT', message: 'spec must be a JSON object' }] };
 
-  const ids = enemyKey(spec.id);
+  // 形状不对就等于没给（回到默认路径）—— 与 `deriveChessRecord` 同一条规矩。
+  const ids = (overrideIds && typeof overrideIds.slug === 'string' && overrideIds.slug
+    && typeof overrideIds.key === 'string' && overrideIds.key)
+    ? { slug: overrideIds.slug, key: overrideIds.key }
+    : enemyKey(spec.id);
   req(ids, 'id', 'BAD_ID', 'id must contain at least one letter or digit', 'e.g. "frost_hound"');
   req(typeof spec.name === 'string' && spec.name.trim(), 'name', 'MISSING', 'name is required');
   if (spec.rank !== undefined) req(ENEMY_RANKS.includes(spec.rank), 'rank', 'BAD_ENUM', `rank must be one of ${ENEMY_RANKS.join(', ')}`);

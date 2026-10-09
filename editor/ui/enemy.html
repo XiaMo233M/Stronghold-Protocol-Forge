@@ -43,6 +43,11 @@
   .banner.bad { background:#3a1f1e; border:1px solid #5f312e; }
   .banner.good { background:#1c3229; border:1px solid #2c5a44; }
   .hint { color:var(--dim); font-size:12px; }
+  /* 覆盖模式的差异预览（enemy.js 的 renderDiffPreview）：官方值 → 保存后的值，一个字段一行 */
+  table.diff { width:100%; border-collapse:collapse; font-size:12px; }
+  table.diff th, table.diff td { text-align:left; padding:3px 8px 3px 0; border-bottom:1px solid var(--line); vertical-align:top; }
+  table.diff th { color:var(--dim); font-weight:600; }
+  table.diff code { font-size:12px; }
   .chk { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--fg); }
   .chk input { width:auto; }
   .derived { font-family:ui-monospace, monospace; }

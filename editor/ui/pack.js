@@ -37,6 +37,10 @@ const state = {
   // 「包元数据」那六个输入框的草稿（`{ name: '…', license: '…' }`）与 overrides 添加行里的两个选择：
   // 输入框在每次重画时从草稿重建，所以勾一个助战、删一条声明都不会把作者正在打的字弄丢。
   metaDraft: {}, ovFile: '', ovId: '',
+  // 自选池声明（`pack.json.operators`）的两份草稿：勾了哪些干员，以及每个干员的盟约/权能文本
+  // （`{ '<charId>': { bonds: 'egirShip', powers: 'egir, iberia' } }`，空格与逗号都当分隔符）。
+  // 同样是「重画时从草稿重建」，所以改一个输入框不会把别的行弄丢。
+  opPicked: new Set(), opText: {},
 };
 
 const packOf = (id = state.packId) => state.packs.find((p) => p.id === id) ?? null;
@@ -87,7 +91,7 @@ function metaExample(field) {
     case 'author': return t('例如 {0}', 'Example Author');
     case 'license': return t('例如 {0}', 'CC0-1.0');
     case 'description': return t('例如 {0}', 'a pack that ships one new map');
-    case 'gameVersion': return t('例如 {0}', '0.2.1');
+    case 'gameVersion': return t('例如 {0}', '0.2.2');
     default: return '';
   }
 }
@@ -152,6 +156,8 @@ function selectPack(id) {
   state.packId = id;
   state.message = null;
   state.picked = new Set(packOf(id)?.support ?? []);
+  state.opPicked = new Set(packOf(id)?.diyOperators?.declared ?? []);
+  state.opText = {};
   state.ovId = '';
   resetMetaDraft(id);
   renderAll();
@@ -370,6 +376,8 @@ function renderDetail() {
     box.append(renderMetaPanel(meta));
     box.append(h(t('覆盖官方记录（pack.json 的 overrides）')));
     box.append(renderOverridesPanel(meta));
+    box.append(h(t('试玩直接发到手上（pack.json 的 playtest）')));
+    box.append(renderPlaytestPanel(meta, p));
   }
 
   // ---- 助战声明 ----
@@ -449,6 +457,12 @@ function renderDetail() {
     note.append(box2);
   }
   box.append(note);
+
+  // ---- 自选池声明（pack.json.operators）----
+  // 这是「一个包新增一个干员」在界面上缺的最后一块：干员记录（units.json）由干员页写入，而**让它出现在自选
+  // 池里**只有这一条路（`diy.ownedPool` 是生成物，包改不了它）。四个派生字段（名字/星级/职业/分支）不在这里
+  // 写：它们从本包那条 units 记录来（服务端 mergeWorkshopOperators 就只有这一个来源）。
+  box.append(renderOperatorsPanel(p));
 
   // 卡池的归属地：说清楚 support 只是「建议」，真正的池子在服务端
   box.append(h(t('卡池在哪里')));
@@ -645,6 +659,183 @@ function priceCell(p, op) {
   return td;
 }
 
+/** 「自选池声明」（`pack.json.operators`）的一段：列出本包自己的干员、勾选要进池的、给每个勾了的写盟约与权能。 */
+function renderOperatorsPanel(p) {
+  // 小标题的构造与这一页别处一样（`renderDetail` 里那个 `h` 是它自己的局部函数，这里不共享作用域）
+  const h = (t) => { const e = document.createElement('h2'); e.textContent = t; return e; };
+  const wrap = document.createElement('div');
+  wrap.append(h(t('自选池声明（pack.json 的 operators）')));
+
+  const op = p.diyOperators;
+  if (!op) {
+    const bad = document.createElement('div'); bad.className = 'panel';
+    bad.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('这个包的 pack.json 读不出来，先修好它才能声明自选池。') }));
+    wrap.append(bad);
+    return wrap;
+  }
+  if (!op.candidates.length && !op.declared.length) {
+    // 一个还没有 units.json 的包没有可选对象 —— 说清去哪里建，而不是给一个空表
+    const none = document.createElement('div'); none.className = 'panel';
+    none.append(Object.assign(document.createElement('p'), {
+      className: 'hint',
+      textContent: t('这个包里没有 units.json（干员记录），所以没有可进自选池的干员。先在干员编辑器里建这个包自己的干员记录。'),
+    }));
+    wrap.append(none);
+    return wrap;
+  }
+
+  const note = document.createElement('div'); note.className = 'panel';
+  note.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('勾上＝让这个干员**出现在自选编队里**（服务端把它并进 backups.json 的 diy.ownedPool / diy.operators；data/*.json 本身不改）。只能勾本包自己 units.json 里的干员，而且必须是 6★：自选池就是六星那条路，5★ 及以下请走工坊棋子注册表（content.chess + kits/）。名字、星级、职业、分支**从那条 units 记录派生**，这里不写第二遍。'),
+  }));
+
+  const table = document.createElement('table');
+  const head = document.createElement('tr');
+  for (const th of ['', t('干员 id'), t('名称'), t('能否进池'), t('盟约（data/bonds.json 的 id）'), t('权能')]) {
+    head.append(Object.assign(document.createElement('th'), { textContent: th }));
+  }
+  table.append(head);
+
+  const ids = [...new Set([...op.candidates.map((c) => c.id), ...op.declared])].sort();
+  const byId = new Map(op.candidates.map((c) => [c.id, c]));
+  const rowOf = new Map(op.rows.map((r) => [r.id, r]));
+  for (const id of ids) {
+    const cand = byId.get(id);
+    const row = rowOf.get(id);
+    const tr = document.createElement('tr');
+    // 勾选
+    const pick = document.createElement('td'); pick.className = 'pick';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = state.opPicked.has(id);
+    cb.addEventListener('change', () => {
+      if (cb.checked) {
+        state.opPicked.add(id);
+        // 新勾上的：草稿从磁盘上已有的声明（或空）起步，别把别的行的输入弄丢
+        if (!(id in state.opText)) state.opText[id] = textOf(row);
+      } else state.opPicked.delete(id);
+      renderDetail();
+    });
+    pick.append(cb);
+    tr.append(pick);
+    tr.append(Object.assign(document.createElement('td'), { className: 'id', textContent: id }));
+    tr.append(Object.assign(document.createElement('td'), { textContent: cand?.name ?? t('（不在本包的 units.json 里）') }));
+    // 能不能进池：服务端已经把加载器的三条判据算好了（缺记录 / 不是 6★ / 缺形态档位）
+    const why = document.createElement('td');
+    if (!cand) why.append(Object.assign(document.createElement('span'), { className: 'tag err', textContent: t('缺 units 记录') }));
+    else if (!cand.six) why.append(Object.assign(document.createElement('span'), { className: 'tag err', textContent: t('不是 6★') }));
+    else if (cand.missingForms.length) why.append(Object.assign(document.createElement('span'), { className: 'tag err', textContent: t('缺形态 {0}', cand.missingForms.join(t('、'))) }));
+    else why.append(Object.assign(document.createElement('span'), { className: 'tag ok', textContent: t('可以进池') }));
+    tr.append(why);
+    // 盟约 / 权能（逗号或空格分隔的 id 文本）
+    for (const field of ['bonds', 'powers']) {
+      const td = document.createElement('td');
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = state.opText[id]?.[field] ?? (row ? row[field].join(', ') : '');
+      input.placeholder = field === 'bonds' ? t('例如 egirShip') : t('例如 egir, iberia');
+      if (field === 'bonds') {
+        // 盟约 id 的候选来自服务端（data/bonds.json 的键）：写错一个 id 那条盟约永远不会出现（静默失效）
+        const list = document.createElement('datalist');
+        list.id = `bond-opts-${id}`;
+        for (const b of op.bonds) list.append(Object.assign(document.createElement('option'), { value: b }));
+        input.setAttribute('list', list.id);
+        td.append(list);
+      }
+      input.addEventListener('input', () => {
+        state.opText[id] = { ...(state.opText[id] ?? textOf(row)), [field]: input.value };
+      });
+      td.append(input);
+      tr.append(td);
+    }
+    table.append(tr);
+  }
+  note.append(table);
+
+  // 声明里引用不到的东西：加载器会整条拒，所以在保存前就标出来（这些行不能勾）
+  if (op.unknown.length) {
+    const bad = document.createElement('div'); bad.className = 'banner bad';
+    bad.textContent = t('⚠ {0} 声明了自选池，但本包的 units.json 里没有这条记录 —— 加载器会记 OPERATOR_NO_UNIT 并整条丢掉。取消勾选即可删掉它。', op.unknown.join(t('、')));
+    note.append(bad);
+  }
+  // 会因为在途改动被拒的行：把判据摆出来（服务端保存时也会再判一次，并原样返回原因）
+  const broken = op.rows.filter((r) => !r.unit || r.unitRarity !== 6 || r.missingForms.length || r.unknownBonds.length);
+  if (broken.length) {
+    const ul = document.createElement('ul'); ul.className = 'issues';
+    for (const r of broken) {
+      const why = !r.unit ? t('本包没有这条 units 记录（OPERATOR_NO_UNIT）')
+        : r.unitRarity !== 6 ? t('不是 6★（OPERATOR_NOT_SIX）')
+          : r.missingForms.length ? t('缺形态档位 {0}（OPERATOR_FORM_MISSING）', r.missingForms.join(t('、')))
+            : t('盟约 {0} 不在 data/bonds.json 里（OPERATOR_BOND_UNKNOWN）', r.unknownBonds.join(t('、')));
+      ul.append(Object.assign(document.createElement('li'), { className: 'err', textContent: `${r.id}：${why}` }));
+    }
+    const box2 = document.createElement('div'); box2.className = 'panel';
+    box2.append(Object.assign(document.createElement('div'), { className: 'err', textContent: t('{0} 条声明会被加载器拒绝', broken.length) }));
+    box2.append(ul);
+    note.append(box2);
+  }
+
+  const actions = document.createElement('div'); actions.className = 'row'; actions.style.marginTop = '10px';
+  const save = document.createElement('button');
+  save.className = 'primary';
+  save.textContent = state.busy ? t('保存中…') : t('保存自选池声明');
+  save.disabled = state.busy;
+  save.addEventListener('click', saveOperators);
+  const reset = document.createElement('button');
+  reset.className = 'ghost';
+  reset.textContent = t('还原');
+  reset.addEventListener('click', () => {
+    state.opPicked = new Set(op.declared);
+    state.opText = {};
+    renderDetail();
+  });
+  actions.append(save, reset);
+  note.append(actions);
+  note.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('保存只改 pack.json 的 operators 字段：其余字段、键序与两空格缩进原样保留，也不会给包补一条它没声明过的 content。'),
+  }));
+  note.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('进池的是**自选编队**那一栏（房间里选四名干员），不是助战卡池 —— 两者互不影响。改完要重启游戏服务器才会生效。'),
+  }));
+  wrap.append(note);
+  return wrap;
+}
+
+/** 一行声明在输入框里的文本形态（`{ bonds: 'egirShip', powers: 'egir, iberia' }`）。 */
+const textOf = (row) => ({ bonds: row ? row.bonds.join(', ') : '', powers: row ? row.powers.join(', ') : '' });
+
+/** 「egir, iberia」→ `['egir', 'iberia']`：逗号、中文逗号与空白都当分隔符（作者怎么写都行）。 */
+const splitIds = (s) => String(s ?? '').split(/[,，\s]+/).map((x) => x.trim()).filter(Boolean);
+
+async function saveOperators() {
+  const p = packOf();
+  if (!p) return;
+  state.busy = true; renderDetail(); renderSide();
+  try {
+    const body = {};
+    for (const id of [...state.opPicked].sort()) {
+      const text = state.opText[id] ?? textOf(p.diyOperators?.rows.find((r) => r.id === id));
+      body[id] = { bonds: splitIds(text.bonds), powers: splitIds(text.powers) };
+    }
+    const r = await api(`/api/packs/${encodeURIComponent(p.id)}/diyOperators`, { method: 'POST', body: { operators: body } });
+    const warn = Array.isArray(r.warnings) && r.warnings.length ? ' ' + t('；⚠ {0}', r.warnings.join(' ' + t('；') + ' ')) : '';
+    state.message = {
+      kind: r.changed ? 'ok' : 'warn',
+      text: r.changed
+        ? t('已写入 {0} 的 operators：{1} 个{2}', r.pack, r.declared.length, warn)
+        : t('{0} 的 operators 没有变化，文件未被改写{1}', r.pack, warn),
+    };
+    await load(p.id);
+  } catch (e) {
+    state.message = { kind: 'error', text: errText(e) };
+  } finally {
+    state.busy = false; renderAll();
+  }
+}
+
 async function saveSupport() {
   const p = packOf();
   if (!p) return;
@@ -760,6 +951,86 @@ function removeOverride(entry) {
   if (!m) return;
   if (!confirm(t('删掉这条覆盖声明 {0}？', entry))) return;
   return writeOverrides(m.overrides.map((o) => o.entry).filter((e) => e !== entry), t('已删掉覆盖声明 {0}。', entry));
+}
+
+/**
+ * 「试玩直接发到手上」（`pack.json` 的 `playtest.directToHand`）这一块：列出声明、逐条删除。
+ *
+ * 为什么这个字段住在 `pack.json` 而不是 chess 记录里：覆盖官方干员时记录必须与官方**同形**（官方记录没有
+ * `directToHand` 这个键），所以那个开关在覆盖模式下写不进记录 —— 它搬到了行为层。**新增的**工坊干员仍旧写在
+ * 记录里（`directToHand: true`），两种写法在引擎里是**并集**（见 `phases.js` 的 `directToHandIds`）。
+ *
+ * 这里只给**删**，不给手输：加一条的正路是干员页那个勾（它会连记录一起写对）。而手写的、或者记录已经被删掉的
+ * 条目必须能在这里删掉 —— 加载器会因为 `PLAYTEST_UNKNOWN_CHESS` **整包拒绝**，作者否则找不到能改的地方。
+ */
+function renderPlaytestPanel(m, p) {
+  const panel = document.createElement('div');
+  panel.className = 'panel ovPanel';
+  for (const text of [
+    t('试玩时直接发到手上：只有编辑器「一键试玩」起的那个服务器会在开局把这些干员塞进手牌（正式对局照旧，只在商店里摇到）。'),
+    t('名单里的 id 必须真的属于这个包（本包的 chess 记录，或本包在 overrides 里声明过的官方 id）；认不出来的 id 会让加载器整包拒绝（PLAYTEST_UNKNOWN_CHESS）。'),
+  ]) panel.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: text }));
+
+  const list = document.createElement('div'); list.className = 'ovList'; list.style.marginTop = '8px';
+  const ids = m.playtest?.directToHand ?? [];
+  const unknown = new Set(m.playtest?.unknown ?? []);
+  if (!ids.length) {
+    list.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('还没有声明。在干员页勾上「试玩时直接发到手上」就会写到这里。') }));
+  }
+  for (const id of ids) {
+    const row = document.createElement('div'); row.className = 'row ovRow';
+    row.dataset.id = id;
+    row.append(Object.assign(document.createElement('code'), { className: 'ovEntry', textContent: id }));
+    row.append(unknown.has(id)
+      ? Object.assign(document.createElement('span'), { className: 'tag err', textContent: t('这个包没有这条记录') })
+      : Object.assign(document.createElement('span'), { className: 'tag ok', textContent: t('在用') }));
+    const del = document.createElement('button');
+    del.className = 'ghost tiny ovDel';
+    del.textContent = t('删除');
+    del.disabled = state.busy;
+    del.addEventListener('click', () => removePlaytestId(id));
+    row.append(del);
+    list.append(row);
+  }
+  panel.append(list);
+
+  // 记录里那份（非覆盖模式）不在这张表里：它跟着记录走，删记录就没了 —— 这里说一句，免得作者以为漏了。
+  const inRecords = p.operators.filter((o) => o.directToHand === true).map((o) => o.id);
+  if (inRecords.length) {
+    panel.append(Object.assign(document.createElement('p'), {
+      className: 'hint',
+      textContent: t('另有 {0} 条记录自己带着这个开关（写 `directToHand: true` 的工坊干员）：{1}。它们跟着记录走，不在这张表里。', inRecords.length, inRecords.join('、')),
+    }));
+  }
+  return panel;
+}
+
+/** 整表替换 `playtest.directToHand` 并立刻写盘（与 overrides 同一条：服务端去重并排序）。 */
+async function writePlaytest(list, okText) {
+  const p = packOf();
+  if (!p) return;
+  state.busy = true; renderAll();
+  let written = null;
+  try {
+    written = await api(`/api/packs/${encodeURIComponent(p.id)}/playtest`, { method: 'POST', body: { directToHand: list } });
+    state.message = {
+      kind: written.changed ? 'ok' : 'warn',
+      text: written.changed ? okText : t('playtest.directToHand 没有变化，文件没有被改写。'),
+    };
+  } catch (e) {
+    state.message = { kind: 'error', text: errText(e) };
+  } finally {
+    state.busy = false;
+  }
+  if (written) await reloadAfterWrite(p.id); else renderAll();
+}
+
+/** 删一条试玩发牌声明：**全部**条目都要能删（含认不出来的那些）。 */
+function removePlaytestId(id) {
+  const m = metaOf();
+  if (!m) return;
+  if (!confirm(t('删掉这条试玩发牌声明 {0}？', id))) return;
+  return writePlaytest((m.playtest?.directToHand ?? []).filter((e) => e !== id), t('已删掉试玩发牌声明 {0}。', id));
 }
 
 /** 写完一次就整页重取：左栏的版本/作者/license 来自另一份形状（supportStateFor），只补 meta 会让它过期。 */
@@ -881,6 +1152,8 @@ async function load(keepId = null, { resetDraft = false } = {}) {
   // 换了一个包才重置元数据草稿：overrides 的写盘会重新载入这一页，不该顺手丢掉作者正在改的 license
   if (resetDraft || state.packId !== before) resetMetaDraft();
   state.picked = new Set(packOf()?.support ?? []);
+  state.opPicked = new Set(packOf()?.diyOperators?.declared ?? []);
+  state.opText = {};
   $('#rootPath').textContent = state.packs.length
     ? `${state.data.workshopRoot} · ${t('{0} 个包', state.packs.length)}`
     : `${state.data.workshopRoot} · ${t('还没有包')}`;

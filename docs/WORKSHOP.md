@@ -34,9 +34,15 @@
 workshop/<packId>/
   pack.json         必需
   chess.json        内容文件：{ [id]: record }，与 data/chess.json 同形
+  units.json        内容文件：{ [charId]: record }，与 data/backups.json 的 units[charId] 同形（新干员的干员记录）
   items.json  enemies.json  stages.json  waves.json  tokens.json  bosses.json
   factions.json  garrisons.json  bands.json  bonds.json  effects.json  choices.json
 ```
+
+> `units.json` 是唯一一个**文件名与落点不同名**的内容文件：`data/` 里没有顶层 `units.json`，那条干员记录住在
+> `data/backups.json` 的 `units[charId]`（`server/sim/simdata.js`、`shared/standIn.js`、客户端
+> `data.get('backups').units` 都只读这一个位置）。所以 `content: ["units"]` 的包，装载时被并进 `data.backups.units`，
+> 而浏览器要拿到的**合并后**文件是 `/data/backups.json`（`workshopTouchedFiles` 把 `units` 映射成 `backups`）。
 
 `pack.json`：
 
@@ -47,30 +53,103 @@ workshop/<packId>/
 | `version` | 否 | 默认 `0.0.0` | 包管理 → 包元数据 |
 | `author` / `license` / `description` | 否 | 元信息；`license` 用于声明素材授权 | 包管理 → 包元数据 |
 | `gameVersion` | 否 | 作者针对的游戏版本，便于排查 | 包管理 → 包元数据 |
-| `content` | 贡献项之一 | 这个包提供哪些数据文件（上表的名字，含 `bonds`） | 各页保存时自动补 |
+| `content` | 贡献项之一 | 这个包提供哪些数据文件（上表的名字，含 `bonds`、`units`） | 各页保存时自动补 |
 | `voices` | 贡献项之一 | 这个包为哪些干员提供**默认配音**的语音，见 §1.4 | 语音页 |
 | `voiceLangs` | 贡献项之一 | 同一个包给**其它配音语言**（cn/en/kr，默认那一档是日文）各配一份，见 §1.4；形状与 `voices` 相同，多一层语种 | 语音页（语种选择） |
 | `bondIcons` | 贡献项之一 | 这个包为哪些盟约提供图标，见 §1.4 与 §1.8：`{ "<bondId>": "<包内相对 assets/ 的路径>" }` | 盟约页 + 该页的「已声明」清单 |
 | `itemIcons` | 贡献项之一 | 这个包为哪些装备/道具提供图标，见 §1.4：`{ "<图标 id>": "<包内相对 assets/ 的路径>" }` | 装备页 + 该页的「已声明」清单 |
-| `art` | 贡献项之一 | 这个包自带的外观素材（头像 / 立绘 / 模型），见 §1.4：`{ chars / enemies / tokens: { "<id>": <官方条目形状的子集> } }` | 干员页 / 怪物页的「本包自带的外观素材」+ 「已声明」清单 |
+| `art` | 贡献项之一 | 这个包自带的外观素材（头像 / 立绘 / 模型）**与两张扁平图标表**（技能图标 / 分支图标），见 §1.4：`{ chars / enemies / tokens / skills / profSub: { "<id>": … } }` | 干员页 / 怪物页的「本包自带的外观素材」+ 「已声明」清单 |
 | `support` | 否 | 这个包自己新增的、应当进助战卡池的干员 id 列表，见 §2.1；阶由记录推导 | 包管理 → 助战声明 |
-| `overrides` | 否 | 允许覆盖的官方记录，格式 `"<file>:<id>"`，例如 `"chess:chess_char_1_01_a"`、`"bonds:yanShip"` | 包管理 → overrides（盟约页覆盖官方时自动补 `bonds:<id>`） |
+| `operators` | 贡献项之一 | 这个包自己新增的、应当进**自选池**（自选编队）的干员，见 §1.2；名字/星级/职业/分支从本包那条 `units` 记录派生 | 包管理 → 自选池声明 |
+| `playtest` | 否 | **试玩行为开关**（不进记录）：`{ "directToHand": ["<chessId>", …] }` —— 这些干员在编辑器「一键试玩」的第一回合直接进手牌，见 §1.2 与 docs/EDITOR.md §试玩 | 干员页的「试玩时直接发到手上」复选框（覆盖官方干员时写在这里；本包新增的干员仍写在记录里）+ 包管理 → 试玩直接发到手上（逐条删除） |
+| `overrides` | 否 | 允许覆盖的官方记录，格式 `"<file>:<id>"`，例如 `"chess:chess_char_1_01_a"`、`"bonds:yanShip"`、`"units:char_4231_clemnt"` | 包管理 → overrides（盟约页覆盖官方时自动补 `bonds:<id>`） |
 
-**每个字段都有图形入口**（0.8.1 起，最后补上的是元数据与 `overrides`）：写进 `pack.json` 的东西必须能在界面上增删改，
-包括**陈旧/没人用的条目**（它们只是不生效，不是错误，但要能删掉）。唯一没有入口的是 `id`：它必须等于目录名。
+**每个字段都有图形入口**（0.8.1 起，最后补上的是元数据与 `overrides`；`operators` 的入口见 §1.2）：写进 `pack.json`
+的东西必须能在界面上增删改，包括**陈旧/没人用的条目**（它们只是不生效，不是错误，但要能删掉）。唯一没有入口的是 `id`：它必须等于目录名。
 
 `content` 只接受上表列出的文件。**`config` 被刻意排除**：一个能改写经济、回合表或难度参数的包改的是规则而不是内容，那需要另一套审查机制，不在本功能范围内。
 
-**只带素材的包是合法的包**：`content: []` + `voices` / `voiceLangs` / `bondIcons` / `itemIcons` / `art` 里任意一项（见 §1.4）。
-一个只给助战干员配语音、只给盟约/装备配一张图、或只给某个干员配一张立绘的包，不需要提供任何数据文件；
-反过来，这些贡献项**全空**才会被拒（`EMPTY_PACK`）。
+**只带素材的包是合法的包**：`content: []` + `voices` / `voiceLangs` / `bondIcons` / `itemIcons` / `art` / `operators`
+里任意一项（见 §1.4）。一个只给助战干员配语音、只给盟约/装备配一张图、只给某个干员配一张立绘的包，不需要提供任何
+数据文件；反过来，这些贡献项**全空**才会被拒（`EMPTY_PACK`）。
 
 ### 1.2 叠加规则
 - **默认叠加（additive）**：新 id 直接加入。
 - **覆盖需要显式声明**：官方已有的 id 只有在 `overrides` 里列出时才被替换；否则该记录**被拒绝并记入报告**，官方记录保留。这条规则存在的理由是：静默替换一名官方干员会污染服务器上的每一局。
 - **记录自检**：内容文件必须是 `{ id: record }` 对象；当记录自带 id 字段（如 `chess.chessId`）而它与键不一致时，整条被拒绝。
+- **两个包抢同一个 id：包 id 字典序小的赢**（DESIGN §28.3，2026-10-09 业主裁定）。这一条**对所有面都一样** —— 数据记录、`kits/<chessId>.js`、`bondIcons`、`itemIcons`、`art`；而且与「包是按什么顺序被扫描到的」**无关**（服务端按目录名读、合并前再按包 id 排序，两处用同一个比较器）。输的一方会得到一条**点名**占位包的报告（`definedBy` + 文案里写出包名），不是静默覆盖。
+- **覆盖官方 id 仍要显式声明**：`overrides` 是唯一能让一个包替换**官方**记录 / 官方干员 kit 的方式，且这份声明会让它同时成为「后来的包」要撞的那一方（上一条规则决定谁赢）。**给维护者的一句话**：编辑器这一侧的判罚必须**同时看 id 与声明**，不能只在校验前把官方 id 从集合里剔掉 —— 后者会让编辑器放行一次保存、而加载器随后因为「没声明」丢掉这条记录（编辑器回 200、游戏里没有），比「编辑器 400 拒绝」更坏。所以放行与记住声明是同一次保存的两半（`editor/server.mjs` 的 `overrideBlockers` 与 `withOverrideDeclarations`），预览与保存也必须算出同一个判罚。
+- **覆盖是「按字段打补丁」，不是整条替换**（DESIGN §28.3，2026-10-09）：只写 `stats.maxHp` 就只改这一个数，官方那条记录的其它 43 个字段（`tier` / `skill` / `talents` / `rangeGrid`…）原样保留；数值与普通对象递归合并，**行为与结构字段整块替换** —— `skill` / `skills` / `trait` / `traitBase` / `traitOverride` / `modules` / `rangeGrid` / `attackRangeGrid` / `assets` / `diy` / `bonds`（清单在 `shared/workshop.js` 的 `OVERRIDE_REPLACE_KEYS`，数组一律整块替换）。**覆盖是闭合世界**：写了记录里没有的字段会被 `UNKNOWN_OVERRIDE_FIELD` 拒绝（要发明新字段就把它作为一个新 id 的新记录）。想「连行为一起接管」的包必须成套补回：给了 kit 就要给 `skill`（§4.1），否则那个干员没有技能。
+- **两张天赋表按条目合并，不是整块替换**（DESIGN §28.3，2026-10-09 当天第二次修正）：`talents` / `talentsBase` 按 `index` 逐条合并 —— 你写的那一条里出现的字段生效，**你没写的字段（包括官方那条天赋自带的注释）留着**；`index` 对不上官方任何一条时是「你新增了一条天赋」，追加在后面。模组内部的 `modules[].talentChanges` 同理，按 `talentIndex` 逐条合并。
+  **为什么单独开一条规则**：官方记录里的天赋可以带「潜能链」注释（记录层的 `potDown`、天赋层的 `potMin` + `potBelow`），而编辑器派生出来的记录**故意不带**这些注释。整块替换的话，你只是改了一条天赋的文案，官方那条天赋的整条潜能链就没了，而加载器一句错都不报 —— 一条**静默**的数据丢失。裸列表（`bonds` / `immunities` / `rangeGrid` …）仍然是整块替换：按字段合并一个裸列表会造出一条没人写过的记录。
+- **行为开关不进记录：`playtest.directToHand`**（2026-10-09）。这个字段列出的干员在**编辑器「一键试玩」**起的那个服务器里第一回合直接进手牌；正式对局一个都不发。它存在的理由是**覆盖模式**：覆盖官方干员时记录必须与官方**同形**（覆盖的契约就是「按字段打补丁」，多一个官方没有的键会被 `UNKNOWN_OVERRIDE_FIELD` 整条拒掉），所以「试玩直接发牌」这种**行为开关**不能写进记录，只能写在包的行为层。三条规则：
+  - **成员资格**：名单里的每个 id 必须是**这个包自己的** chess 记录 id，或者（覆盖模式）这个包在 `overrides` 里声明过的官方 id（**一对都要**：普通 `_a` 与精锐 `_b` 各算一个 id）。不认识的 id ⇒ **整个包被拒**并**点名**那个 id（`PLAYTEST_UNKNOWN_CHESS`）—— 静默无效正是这个字段要修的那个老毛病。形状错（不是对象、值不是字符串数组、元素不是合法 id）⇒ `PLAYTEST_BAD_SHAPE`。
+  - **谁赢**：两个包声明同一个 id 时，沿用上面那条「包 id 字典序小的赢」；输的一方拿到一条点名报告（`PLAYTEST_ID_COLLISION` + `definedBy`），名单里那个 id 只出现一次。与目录扫描顺序无关。
+  - **与记录里的 `directToHand` 是并集**：本包**新增**的干员照旧把 `directToHand: true` 写在记录里（今天的行为一字未改），引擎把两个来源并起来。两种写法都只在 `SP_PLAYTEST=1` 时生效。
 - **失败关闭**：包 id 不合法、`content` 为空、文件缺失或不是合法 JSON — 该包被跳过并报告，服务器继续启动。
 - **`workshop/` 不存在是正常情况**：没有包就没有叠加层，行为与加入本功能之前完全一致。
+
+#### 新增一个干员（`content: ["units"]` + `pack.json.operators`）
+
+「一个包新增一名干员」需要两件东西，缺一件这个干员在游戏里就不完整：
+
+| 件 | 写在哪 | 落进哪 | 少了它会怎样 |
+|---|---|---|---|
+| 干员记录 | `<pack>/units.json`，`{ [charId]: record }`，形状与 `data/backups.json` 的 `units[charId]` 同形 | `data.backups.units[charId]` | 自选界面画不出名字/职业，一局里取不到 def |
+| 自选池声明 | `pack.json.operators`，`{ [charId]: { bonds, powers } }` | `data.backups.diy.ownedPool`（push，去重）+ `diy.operators[charId]` | 干员记录在数据里，但**自选编队里没有他** —— 拿不到手 |
+
+```json
+{
+  "id": "my-op", "license": "CC0-1.0", "content": ["units"],
+  "operators": { "char_4231_clemnt": { "bonds": ["egirShip"], "powers": ["egir", "iberia"] } },
+  "art": {
+    "skills":  { "skchr_my_1": "skill/my1.png" },
+    "profSub": { "mybranch":  "prof/sub/mybranch.png" }
+  }
+}
+```
+
+**规则（都已强制）**：
+
+| 规则 | 说明 |
+|---|---|
+| **只查「下游用得上吗」，不复制官方 schema** | `units.json` 的每条记录只要求 `charId`（＝键）、`name`、`rarity`（整数）、`profession`、`subProfessionId`、`forms`（非空对象）六项，其余字段**一律照抄**。理由：复刻一份官方 schema 就是给自己加一个会漂移的第二真相；下游真正读的也只是这几个键。逐条的拒绝码：`UNIT_MISSING_CHAR_ID` / `UNIT_MISSING_NAME` / `UNIT_BAD_RARITY` / `UNIT_MISSING_PROFESSION` / `UNIT_MISSING_SUB_PROFESSION` / `UNIT_BAD_FORMS`，`charId` 与键不一致是既有的 `ID_MISMATCH` |
+| **四个字段从记录派生，清单里不重复写** | `name` / `rarity` / `profession` / `subProfessionId` 一律取本包那条 `units` 记录，`obtainable` 恒为 `true`。`pack.json.operators` 里写这些字段是**没有用**的（装载器不读）—— 两份真相会漂移，而 `diy.operators` 那份今天是生成器产出的 |
+| `OPERATOR_NO_UNIT` | 声明了一个本包没有 `units` 记录的干员 → 拒绝 + 点名。没有记录就没有名字与职业，进池等于一个空槽 |
+| `OPERATOR_NOT_SIX` | `rarity !== 6` → 拒绝。**自选池就是六星那条路**；5★ 及以下请走工坊棋子注册表（`content.chess` + `kits/<chessId>.js`），那里才有商店阶级 |
+| `OPERATOR_BOND_UNKNOWN` | `bonds` 里某个 id 不在 `data/bonds.json` → 拒绝 + 点名。**这条必须拒**：盟约 id 写错时那条盟约条**永远不会出现**（没有图标、没有阈值），而作者只会以为「盟约没生效」—— 一次完全静默的失效 |
+| `OPERATOR_FORM_MISSING` | `forms` 没覆盖自选槽要的档位 → 拒绝 + 点名缺的那一档。自选槽的**普通与精锐两条记录各自**要求一个档位（`shared/diy.js` `checkDiyPick` 同时解析两条），缺一个这个干员就挑不上；更重的是 `tools/golden.mjs` 会给池里每位配一个精锐场景，所以缺档位会让**语料生成抛异常**，`golden` / `ci` 全线挂。要求的那一组**从 `diy.slots` 的两条记录派生**（`requiredUnitForms`），不是硬编码 `2/60/7/3` |
+| `OPERATOR_BAD_SHAPE` | `operators` 不是对象、某一条不是对象、`bonds`/`powers` 不是字符串数组、干员 id 不合法 → 拒绝 |
+| **两个包给同一个 charId** | 内容文件那一层就按 §1.2 裁决：**包 id 字典序最小者赢**，输的一方得到一条点名报告（`units:<id>`），它的自选池声明随之作废（它其实没有可供声明的记录）。`ownedPool` 因此只会多一个 id |
+| **`data/*.json` 一个字节都不改** | 叠加发生在 `deepFreeze` 之前（§1.3）。所以「作者能加」与「生成器是唯一来源」同时成立：磁盘上的 `ownedPool` 仍是生成器写的那份，`test/backups.test.js` 对**文件**的断言完全不受影响；把包删掉，游戏立刻回到原样 |
+| **入池顺序只由包 id 排序决定** | 与目录扫描顺序无关（`byPackId`，DESIGN §28.3）—— 同样的包集合永远得到同样的 `ownedPool` |
+| **潜能注解（`potDown` / `potMin` / `potBelow`）不写 = 潜能对它无效** | 包干员通常没有这些注解，0.2.2 引擎的行为是：**不报错、天赋不丢，但属性与天赋数值不随潜能缩放**（潜能 1 与潜能 6 真建局逐字节相同；官方带注解的干员会缩放）。要让它随潜能变，就得照官方记录把注解一并抄进 `forms` |
+| 编辑器入口 | 包管理 → **自选池声明**（§1.1）。干员记录本身由干员页写成 `units.json`；**「新建一个干员」的表单不在本轮**，见 DESIGN §28.11 |
+
+#### 技能图标与分支图标（`art.skills` / `art.profSub`）
+
+`assets.json` 的这两张表**值直接就是路径字符串**（不像 `chars` 那样是「对象 + `urls` 字段」），所以它们是
+`ART_TABLES` 里的**扁平表**（`flat: true`）：条目本身就是路径，落点由 `target` 给出。
+
+```json
+"art": {
+  "skills":  { "skchr_my_1": "skill/my1.png" },
+  "profSub": { "mybranch":  "prof/sub/mybranch.png" }
+}
+```
+
+| 表 | 落点 | 客户端读它的地方 |
+|---|---|---|
+| `skills` | `data.assets.skills[<图标 id>]` | 技能图标（`<技能 id>` = 记录里 `skills[].icon`） |
+| `profSub` | `data.assets.prof.sub[<subProfessionId>]` | 职业分支图标（小写分支名，例如 `primguard`） |
+
+规则与其它图标通道逐字相同：路径相对 `assets/`、无穿越（`ART_PATH_UNSAFE`）、id 字符集同一套（`ART_BAD_ID`）、
+URL 走 `/workshop-assets`（客户端零改动）、官方已有这个 id 时是**替换**（给官方技能换图标）、两个包抢同一个 id 时
+**包 id 最小者赢**并点名（`ASSET_COLLISION`）。`assets.json` 缺失时报告 `MANIFEST_MISSING`，不凭空造一张表。
+
+**`skillsById` 不在本轮范围内**（业主 2026-10-09）：我们没查清它的用途（本仓数据里它是 `{ id: id }` 这种自映射，
+522 条与 `skills` 一一对应），所以**故意不开口子**。写了 `art.skillsById` 会被 `ART_UNKNOWN_TABLE` 拒掉 —— 那正是
+我们要的：宁可当场说「这张表没有通道」，也不要收下一份没人读的声明。
 
 ### 1.3 数据流
 
@@ -252,7 +331,8 @@ URL 走同一条 `/workshop-assets/<pack>/<路径>`，**客户端零改动**（`
 
 | 规则 | 说明 |
 |---|---|
-| 三张表，形状照抄官方条目 | `chars` 的 `spine` 是**嵌套**的 `{ front: …, back: … }`；`enemies` / `tokens` 的 `spine` 是**扁平**的。可用的字段就是官方条目里的那几个：`chars` 用 `avatar`/`avatarE2`/`portrait`/`portraitE2`，`enemies` 用 `icon`（另有 `spineAliasOf` 指向别的模型），`tokens` 用 `avatar`（另有 `owner`）。写别的字段会被拒（`ART_UNKNOWN_FIELD`） |
+| 三张对象表，形状照抄官方条目 | `chars` 的 `spine` 是**嵌套**的 `{ front: …, back: … }`；`enemies` / `tokens` 的 `spine` 是**扁平**的。可用的字段就是官方条目里的那几个：`chars` 用 `avatar`/`avatarE2`/`portrait`/`portraitE2`，`enemies` 用 `icon`（另有 `spineAliasOf` 指向别的模型），`tokens` 用 `avatar`（另有 `owner`）。写别的字段会被拒（`ART_UNKNOWN_FIELD`） |
+| **另外两张是扁平表** | `skills`（技能图标）与 `profSub`（职业分支图标）：条目本身**就是一条路径字符串**（`assets.skills[key]` / `assets.prof.sub[key]` 在官方清单里就是路径）。落点分别是 `assets.skills` 与 `assets.prof.sub`，见 §1.2 最后一小节；`skillsById` 没有通道（故意） |
 | 路径相对 `assets/` | 与语音、各类图标逐字相同（`ART_PATH_UNSAFE`）；**受 §1.4 的授权闸门约束**（有 `assets/` 就必须声明 `license`） |
 | `skel` 与 `atlas` 缺一不可 | `ART_SPINE_INCOMPLETE`。清单里的 `atlas` 我方代码只用来做内存回收，但形状这一层就要求它必须在 —— 见下面第一条硬约束 |
 | **字段级合并，不是整条替换** | 官方已有这个 id 时，包只给头像就保留官方模型、只给 `spine.front` 的 `skel`/`atlas` 就保留官方那一侧的 `anims`/`events`（整侧替换会让一个官方模型变成「能出来但不动」，而且一条日志都没有） |
@@ -340,6 +420,7 @@ node tools/workshop-validate.mjs my-pack
 | 部分 | 状态 |
 |---|---|
 | 包发现、格式校验、叠加合并、失败关闭 | ✅ 已实现 |
+| **冲突裁决（谁赢）与归因**：所有面按包 id 字典序，报告点名占位的包 | ✅ 已实现（契约写在 §1.2，`test/workshop.test.js` 钉住「五个面算出同一个赢家」） |
 | 合并数据送达浏览器（HTTP） | ✅ 已实现 |
 | 新干员进入商店池、被购买、部署、真实战斗、精英/模组解析 | ✅ 已验证（`test/workshop.test.js`） |
 | **干员模组（`modules`）**：spec → 精锐记录的 `modules[]`（数值加成 / 特性覆盖 / 天赋改写），且模板往返逐字节保真 | ✅ 已完成（`shared/chessAuthoring.js`、`test/chessModules.test.js`、编辑器干员页的模组块） |
@@ -360,6 +441,11 @@ node tools/workshop-validate.mjs my-pack
 | **盟约图标（`bondIcons`）**：汇总进 `assets.bonds`、随合并的 `assets.json` 送达客户端（只带图标的包也合法） | ✅ 已实现（`test/workshopBondIcons.test.js`） |
 | **装备图标（`itemIcons`）**：汇总进 `assets.items`、随合并的 `assets.json` 送达客户端（客户端零改动） | ✅ 已实现（`test/workshopItemIcons.test.js`） |
 | **外观素材（`art`）**：头像 / 立绘 / spine 模型汇总进 `assets.chars` / `assets.enemies` / `assets.tokens`，包新增的干员不再是菱形贴图 | ✅ 已实现（`test/workshopArt.test.js`） |
+| **技能图标与分支图标（`art.skills` / `art.profSub`）**：两张扁平表汇总进 `assets.skills` / `assets.prof.sub`，走同一条 `/workshop-assets` 路由 | ✅ 已实现（`test/workshopOperators.test.js`） |
+| **新增一个干员（`content: ["units"]`）**：干员记录并进 `data.backups.units`，形状只查「下游用得上吗」 | ✅ 已实现（`test/workshopOperators.test.js`、`docs/examples/clementia-pack/`） |
+| **自选池声明（`pack.json.operators`）**：进 `diy.ownedPool` / `diy.operators`；四条拒绝规则（`OPERATOR_NO_UNIT` / `OPERATOR_NOT_SIX` / `OPERATOR_BOND_UNKNOWN` / `OPERATOR_FORM_MISSING`）失败关闭 | ✅ 已实现（`test/workshopOperators.test.js`、编辑器包管理页） |
+| **「新建一个干员」的编辑器表单** | ⛔ 不在本轮（业主未裁定；干员记录目前只能手写 `units.json`，或由干员页的机制产出） |
+| **包 kit 的 import 权利（`KIT_IMPORT`）** | ⛔ 未裁定：本轮之后，克莱门莎的 kit 仍然只能用就地补丁（`test/modSurface.test.js` 那条「判罚稳定」的测试是留给这次裁决的锚点） |
 | **包自带助战（`support`）**：按记录推导阶并入 `data/support.json` 的卡池、随合并的 `support.json` 送达客户端 | ✅ 已实现（`test/workshopSupport.test.js`） |
 | **分享与安装（`.zip`）**：导出/导入/列出，CLI 与编辑器第八页共用同一批函数 | ✅ 已实现（`shared/zip.js`、`tools/workshop-pack.mjs`、`test/workshopPack.test.js`） |
 | **局外编辑器 UI**：干员 / 地图 / 怪物 / 出怪 / 装备 / **盟约** / 行为层 kit / **语音** / **包管理** 九个页面 | ✅ 已实现（`editor/`，见 `docs/EDITOR.md`） |
@@ -523,7 +609,7 @@ export default function kit(bb, chess, def) {
 | 规则 | 为什么 |
 |---|---|
 | **返回了 kit 就必须自己给出 `skill`** | `Battle._setupUnit` 用 `u.kit.skill \|\| null` 取技能：给了 kit 却省略 `skill`，该干员就**没有技能** —— 缺省技能**不会**回退到通用 kit |
-| **必须自包含，不要 import 引擎模块** | 同一份文件服务端按真实路径加载、浏览器按 URL 加载，相对路径不可能同时对 |
+| **只能 import 白名单里的模块** | 同一份文件服务端按真实路径加载、浏览器按 URL 加载，相对路径不可能同时对。所以作者写 `@kit/…` / `@sim/…` 前缀，两端各自解析（§4.5）；其余一切 import / `require` / 动态 `import()` 仍然是 `KIT_IMPORT` |
 | **它会在玩家浏览器里执行** | 默认 `SP_COMBAT=client`；服务端用**同一份文件**复算，所以不要有环境依赖（随机用 `battle.rng`，不要碰 DOM/网络/时间） |
 
 ### 4.2 注入点与双通道（关键一致性）
@@ -546,10 +632,10 @@ export default function kit(bb, chess, def) {
 
 | code | 严重度 | 抓的是什么 |
 |---|---|---|
-| `HOOK_UNKNOWN_EVENT` | warn | `battle.on('beforeAttck', …)` —— `on()` 接受**任意**字符串（`Battle.js:583`），而 `emit()` 只触发真正被 emit 的名字（`:623`）。写错的钩子**永远不会触发，且没有任何地方会报错**。引擎真实的 emit 词表在 `HOOK_EVENTS`，由漂移守卫钉在源码上，所以能给出「你是想写 beforeAttack 吗」。命名空间事件（`mypack:ready`）只要**同一文件自己 emit 过**就合法 —— 官方内容就是这么扩展总线的（`nearl2:knockdown`） |
+| `HOOK_UNKNOWN_EVENT` | warn | `battle.on('beforeAttck', …)` —— `on()` 接受**任意**字符串（总线在 `server/sim/battle/hooks.js`；这个文件与两个方法名钉在 `shared/kitAuthoring.js` 的 `HOOK_BUS` 上，**这里不写行号** —— 从前写的是 `server/sim/Battle.js` 的两个行号，而那个文件早就不含这两个方法，行号烂掉时没有任何东西会报错），而 `emit()` 只触发真正被 emit 的名字（同一文件的方法 `emit`）。写错的钩子**永远不会触发，且没有任何地方会报错**。引擎真实的 emit 词表在 `HOOK_EVENTS`，由漂移守卫钉在源码上，所以能给出「你是想写 beforeAttack 吗」。命名空间事件（`mypack:ready`）只要**同一文件自己 emit 过**就合法 —— 官方内容就是这么扩展总线的（`nearl2:knockdown`） |
 | `HOOK_DYNAMIC_NAME` | warn | 用变量当事件名（`battle.on(name, …)`）—— 查不了，所以要说一声 |
 | `KIT_NONDETERMINISTIC` | warn | `Math.random` / `Date.now` / `fetch` / `document` / `setTimeout` … —— 服务端用同一份文件**复算**对局，不一致就**拒绝玩家的结果**，而报错信息看上去和「你用了 Math.random」毫无关系 |
-| `KIT_IMPORT` | error | `import` / `require` —— 违反 §4.1 第二条（服务端按路径、浏览器按 URL，相对路径不可能同时对） |
+| `KIT_IMPORT` | error | 白名单之外的 `import` / `export … from` / `require` / 动态 `import()` —— 违反 §4.1 第二条（服务端按路径、浏览器按 URL，相对路径不可能同时对）。白名单写法见 §4.5，错误 reason 里会直接列出可用的 specifier |
 | `NO_DEFAULT_EXPORT` | error | 没有默认导出（加载器读的是 `mod.default`） |
 | `KIT_NO_TARGET` | error | 包内没有这个干员 id，也没在 `pack.json overrides` 里声明 `chess:<id>` |
 
@@ -566,6 +652,73 @@ export default function kit(bb, chess, def) {
 | 服务端加载 + 校验 + 注入 `opts.kits` | ✅ 已用**真实战斗**验证（kit 的 `install` 在对局中确实执行） |
 | kit **静态校验**（钩子词表 + 三条硬规则），机器可读 | ✅ 已完成（`shared/kitAuthoring.js`、`test/kitAuthoring.test.js`，词表有漂移守卫） |
 | 浏览器分发（spec 携带 URL + runner 重建同一张表） | ✅ 已实现并测试（模块可按 URL 取得、装配路径有断言） |
-| 浏览器端**真机端到端**（Chrome 跑一场带 kit 的对局） | ⛔ 未做（需 `SP_E2E=1` + Chrome） |
+| kit 的**受限 import**（白名单 + 双端解析，§4.5） | ✅ 服务端已验（真 import 成功、helper 可用、白名单外仍被拒、包哈希不变）；浏览器侧只验到「import map 与表一致 + 模块在 `/sim/` 可取」 |
+| 浏览器端**真机端到端**（Chrome 跑一场带 kit 的对局） | ⛔ 未做（需 `SP_E2E=1` + Chrome；import map 的解析本身由浏览器做，Node 没有 import map）。**能跑的那一条已经写好**：`SP_E2E=1 node --test test/ui/kitimports.e2e.test.js`（页面上下文里 import 每个白名单 specifier、验导出名下限、并验白名单外的 specifier 在浏览器里也解析不到） |
 | 编辑器里的 kit 编辑页签（`editor/ui/kit.html`） | ✅ 已完成（编辑文件本体 + 上面的静态校验 + 保存时写署名头；真正 `import` 一遍仍由 `tools/workshop-validate.mjs` 做，编辑器不执行作者的文件） |
 | 包之间 kit id 冲突、kit 的沙箱与审查 | ⛔ 未做（冲突会被报告并跳过；沙箱按分渠道策略不做） |
+
+---
+
+### 4.5 受限 import：白名单 + 双端解析
+
+一个 kit 是**同一份文件被两处加载**：服务端按真实路径 `import()`（`server/workshop.js loadWorkshopKits()`），
+浏览器按 URL `import('/workshop-kits/<pack>/<id>.js?v=…')`（`public/js/battle/runner.js loadSpecKits()`）。
+相对 specifier 对其中一端成立、对另一端必然不成立 —— 所以 kit 的 import 走**前缀白名单**：
+
+```js
+import { num, talentBb, traitBb, skillRec, up } from '@kit/tier1.js';
+import { selectedId, copyGrid } from '@kit/tier3.js';
+import { dirVec } from '@sim/dir.js';
+import { absoluteRangeKeys } from '@sim/targeting.js';
+import { COLS, ROWS } from '@sim/constants.js';
+
+export default function kit(bb, chess, def) { /* … */ }
+```
+
+这就是社区 mod「克莱门莎」那 5 行 import 的等价改写（它原来写的是 `../shared/tier1.js`、`../../../dir.js` …）。
+两端怎么解析：
+
+| 端 | 谁做 | 怎么做 |
+|---|---|---|
+| 服务端 | `server/workshop.js` | import 前用 `shared/kitImports.js rewriteKitImports()` 把白名单 specifier **窄重写**成真实 `file:` URL，再用 `data:` 模块 import（不改磁盘） |
+| 浏览器 | `public/index.html` 的 import map | `"@kit/": "/sim/content/kits/shared/"`、`"@sim/": "/sim/"` —— 声明式解析，源码**原样**发给浏览器（`/sim/` → `server/sim/`，见 `server/http/static.js`） |
+
+#### 4.5.1 白名单（唯一真相：`shared/kitImports.js KIT_IMPORT_FILES`）
+
+| specifier | 真实文件 | 里面有什么 |
+|---|---|---|
+| `@kit/tier1.js` … `@kit/tier6.js` | `server/sim/content/kits/shared/tierN.js` | 官方 kit 写作用的那套 helper（`num`、`skillRec`、`onHitOn`、`installAura` …） |
+| `@kit/summoner.js` | `server/sim/content/kits/shared/summoner.js` | 召唤物 helper |
+| `@sim/constants.js` | `server/sim/constants.js` | `COLS` / `ROWS` / `TICK` … |
+| `@sim/dir.js` | `server/sim/dir.js` | `dirVec` / `offsetTile` |
+| `@sim/targeting.js` | `server/sim/targeting.js` | `absoluteRangeKeys` / `sortEnemyTargets` |
+
+一个文件只开一个名字；加一行就是同时给两端开一个模块（表在 `shared/kitImports.js`，浏览器那张 import map 由
+`kitImportMap()` 生成、`test/kitImports.test.js` 钉住两者一致 —— 改表就要改 `public/index.html`，否则测试会红）。
+
+#### 4.5.2 白名单之外：全部仍是 `KIT_IMPORT`（error）
+
+| 作者写了 | 为什么不行 | reason 里会说的 |
+|---|---|---|
+| `'../shared/tier1.js'` | 相对路径：服务端解析成真实文件、浏览器解析成 `/workshop-kits/…` | 「相对路径无法同时在服务端与浏览器成立」 |
+| `'./x.js'` | 同上 | 同上 |
+| `'/abs.js'` | 绝对路径：浏览器按站点根、服务端按文件系统根 | 「绝对路径无法同时在服务端与浏览器成立」 |
+| `'@kit/../../x.js'` | 路径穿越，一律拒绝 | 「路径穿越一律拒绝」 |
+| `'@kit/evil.js'` | 前缀合法但模块名没开放 | 「模块名 "evil.js" 未开放」 |
+| `'lodash'` | 裸模块名：两端都没有 node_modules 解析 | 「裸模块名未开放」 |
+| `require('…')` | kit 两端都按 ES 模块加载，没有 CommonJS | 「禁止 require()」 |
+| `import('@kit/tier1.js')` | 动态 import 的 specifier 是表达式，两端都无法静态解析 | 「禁止动态 import()」 |
+| `export { x } from '…'` | 与 `import` 同一张白名单（`export … from` 也是一个模块依赖） | 同 import |
+
+每一条 reason 末尾都会列出**完整白名单**，`hint` 里给可用写法 —— 拒绝的时候必须说清允许什么。
+
+#### 4.5.3 哈希与确定性（两条都不受影响）
+
+- **包哈希按作者写的源码算**：`server/workshop.js identifyPack()` 把 `kits/*.js` 的**磁盘字节**放进 `[path, sha256]`
+  清单（DESIGN §28.2）。服务端那次重写只发生在内存里，**不落盘、不进哈希**，所以同一个包在两端摘要一致。
+- **确定性判罚不变**：`Math.random` / `Date.now` / `fetch` / `document` … 仍然是 `KIT_NONDETERMINISTIC`
+  （warning），本次只动 import 口径。
+
+测试：`test/kitImports.test.js`（白名单表与两端解析、校验器口径、服务端真加载并调用 `num`、白名单外仍被拒、
+哈希前后不变、社区 kit 5 条映射、以及每个白名单文件的**导出名下限**守卫 —— 删名/改名会红并点名，
+加导出不会）；真机那半是 `test/ui/kitimports.e2e.test.js`（默认跳过，见 §4.4 的命令）。

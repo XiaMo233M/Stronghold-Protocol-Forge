@@ -22,8 +22,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Battle } from '../server/sim/Battle.js';
-import { getDefaultSource, spawnsFromTemplate } from '../server/sim/simdata.js';
-import { getData } from '../server/data.js';
+import { DataSource, getResearchSource, spawnsFromTemplate } from '../server/sim/simdata.js';
+import { getData, resetData } from '../server/data.js';
 import { GameData } from '../server/match/gamedata.js';
 import { setupMatchWaves, buildNormalWave, previewOf } from '../server/match/waves.js';
 import { createRng } from '../server/sim/rng.js';
@@ -45,8 +45,16 @@ const MAX_SECONDS = Number(opt.max ?? 90);
 const maxSecondsOf = (sc) => (opt.max != null ? MAX_SECONDS : Number(sc.max ?? MAX_SECONDS));
 
 const quiet = { warn() {}, error() {}, info() {}, debug() {} };
-const ds = getDefaultSource();
-const data = getData({ log: quiet });
+// The recordings under `public/dev/recordings` are committed and a plain run reproduces them byte for byte, so this tool
+// runs the OFFICIAL content whatever this machine has installed (docs/PACKS.md §4: a pack never moves a baseline):
+// `resetData()` drops a data singleton an earlier import may have created WITH the default `workshop/`
+// (server/sim/simdata.js loads it in a top-level await) and `workshopDir: null` keeps the 创意工坊 overlay off — the
+// battle's content modules read that same singleton (server/sim/content/support/index.js gameData()).
+// The sim's own source is built from this object explicitly instead of `getDefaultSource()`, which wraps the copy
+// simdata loaded at import time (with packs): official data first, the research tables still its fallback (as before).
+resetData();
+const data = getData({ log: quiet, workshopDir: null });
+const ds = new DataSource(data, getResearchSource());
 const config = data.config ?? {};
 
 function chessByName(name, golden = false) {

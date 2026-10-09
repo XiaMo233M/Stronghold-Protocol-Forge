@@ -8,7 +8,8 @@
 // every later 0.2.x given as a base); `removed` lists the files some base shipped that the new version does not, with
 // the bytes each base had (the player's copy is deleted only when it still holds them). A removed path that differs
 // from a new one only in case is the same file on Windows / macOS: it is left out of `removed` (`caseOnly`).
-// The zip reader handles what tools/package.mjs and GitHub hand out: stored and deflated entries, zip64, UTF-8 names.
+// The zip reader handles what tools/package.mjs and GitHub hand out: stored and deflated entries, zip64, UTF-8 names —
+// also a name zip on Windows (Info-ZIP) stored in the system code page, through its Unicode Path extra field.
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -34,16 +35,29 @@ const U32 = 0xffffffff;
 const UTF8_FLAG = 0x0800;
 
 /**
- * A central-directory name. ZIP has exactly one flag bit for this (`UTF8_FLAG`): when it is set the name is UTF-8.
- * When it is NOT set the name is in **the creating tool's local codepage**, and that is not a corner case for us:
- * the Windows release zips are made by `tar`, which writes a Chinese name as CP936 while Windows Explorer unzips it as
- * CP936 too. Decoding those as UTF-8 gives mojibake paths, and an update diffed against such a base would then ship
- * the same file twice (once under the mojibake name, once under the real one). So: honour the flag; otherwise try
- * strict UTF-8 (plenty of tools write UTF-8 without setting it) and fall back to the system codepage, which is what
- * the user's own unzip will do.
+ * The name of the central-directory entry at `p`. ZIP has exactly one flag bit for this (`UTF8_FLAG`): when it is set
+ * the header bytes are UTF-8. When it is NOT set the name is in **the creating tool's local codepage**, and that is not
+ * a corner case for us: the Windows release zips are made by `tar`, which writes a Chinese name as CP936 while Windows
+ * Explorer unzips it as CP936 too — decoded as UTF-8 that is a mojibake path, and an update diffed against such a base
+ * would send the same file twice (once under the mojibake name, once under the real one). Two ways out, both here:
+ *   - the Info-ZIP Unicode Path extra field (0x7075, APPNOTE 4.6.9), when it is present and its CRC matches the header
+ *     name — Info-ZIP's zip on Windows keeps the UTF-8 name only there;
+ *   - no such field: strict UTF-8 first (plenty of tools write UTF-8 without setting the flag), else the system
+ *     codepage, which is what the user's own unzip will do.
  */
-function decodeName(raw, flags) {
-  if (flags & UTF8_FLAG) return raw.toString('utf8');
+function entryName(cd, p, flags, nameLen, extraLen) {
+  const raw = cd.subarray(p + 46, p + 46 + nameLen);
+  if (!(flags & UTF8_FLAG)) {
+    for (let q = p + 46 + nameLen, end = q + extraLen; q + 4 <= end;) {
+      const id = cd.readUInt16LE(q);
+      const len = cd.readUInt16LE(q + 2);
+      if (id === 0x7075 && len >= 5 && cd[q + 4] === 1 && q + 4 + len <= end
+        && (typeof zlib.crc32 !== 'function' || (zlib.crc32(raw) >>> 0) === cd.readUInt32LE(q + 5))) {
+        return cd.toString('utf8', q + 9, q + 4 + len);
+      }
+      q += 4 + len;
+    }
+  }
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(raw);
   } catch {
@@ -94,7 +108,7 @@ export function readZip(zipPath, onFile) {
       const commentLen = cd.readUInt16LE(p + 32);
       const external = cd.readUInt32LE(p + 38);
       let offset = cd.readUInt32LE(p + 42);
-      const name = decodeName(cd.subarray(p + 46, p + 46 + nameLen), flags);
+      const name = entryName(cd, p, flags, nameLen, extraLen);
       if (packedSize === U32 || rawSize === U32 || offset === U32) {
         // the zip64 extra field carries the values the header marks 0xFFFFFFFF, in this order
         for (let q = p + 46 + nameLen, end = q + extraLen; q + 4 <= end;) {

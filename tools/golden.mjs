@@ -39,7 +39,9 @@
 //            each of its skills, then every prototype pick with a kit at its locked selection, both forms of each tier;
 //            12 pieces per battle on a real stage against the round's real wave three times over (diyScenarios)
 // Battles run through the production BattleSpec path (server/sim/spec.js buildBattleSpec → createBattleFromSpec, the
-// path browsers and the server's headless fields use) with every option explicit; matches construct Match directly
+// path browsers and the server's headless fields use) with every option explicit — every operator the player owns at
+// the default player's settings, 潜能 6 and 练度 精英2 Lv.60 (PlayerBattleInput `potential` / `cultivate`, as
+// PlayerState.battleInput states them, 0.2.2; a stand-in and a prototype 自选 pick neither); matches construct Match directly
 // with a VirtualScheduler (as tools/botbench.mjs) — test-harness defaults never move a digest.
 //
 // Digest (battle): end time, ticks, reason, kills / total / leaks, per player (kills, leaks, coins, damage, boss
@@ -62,7 +64,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { availableParallelism } from 'node:os';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
-import { getData } from '../server/data.js';
+import { getData, resetData } from '../server/data.js';
 import { DataSource } from '../server/sim/simdata.js';
 import { buildBattleSpec, createBattleFromSpec } from '../server/sim/spec.js';
 import { createRng, deriveSeed } from '../server/sim/rng.js';
@@ -75,15 +77,30 @@ import { VirtualScheduler } from '../server/match/scheduler.js';
 import { resolveRecordLoadout, loadoutRecord, attackRangeGrid } from '../shared/loadoutRecord.js';
 import { diyRecordOf, DIY_TIERS } from '../shared/diy.js';
 import { unitForm } from '../shared/standIn.js';
+import { POTENTIAL_DEFAULT, CULTIVATE_DEFAULT } from '../shared/potential.js';
 import { OPERATOR_KITS, KITTED_CHARS } from '../server/sim/content/kits/index.js';
 import { GEO } from '../shared/constants.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+/** The default player's 潜能 / 练度 of every owned operator (shared/potential.js; the owner's decision of 2026-10-08). */
+const DEFAULT_CULTIVATION = Object.freeze({ potential: POTENTIAL_DEFAULT, cultivate: CULTIVATE_DEFAULT });
 export const GOLDEN_DIR = join(ROOT, 'test', 'golden');
 export const FAMILY_NAMES = Object.freeze(['roster', 'bonds', 'fields', 'matches', 'standins', 'diy']);
 
 const QUIET = Object.freeze({ warn() {}, error() {}, info() {}, log() {}, debug() {} });
-const data = getData({ log: QUIET });
+// The corpus runs the OFFICIAL content and nothing else (docs/PACKS.md §4: "The golden results stay on the original
+// content — a pack never changes them"): a 创意工坊 pack installed under `workshop/` on this machine must not move a
+// digest. Both steps are needed, because this process has three data entry points and two of them are already filled by
+// the time this line runs (server/sim/simdata.js loads the data in a top-level await):
+//   * `resetData()` drops a singleton an earlier import created WITH the default `workshop/` — server/data.js ignores
+//     the options of every later getData() call, so `workshopDir: null` alone would not help;
+//   * `getData({ workshopDir: null })` is the official data (the overlay off) that every later reader of the singleton
+//     sees — the battle's content modules read it too (server/sim/content/support/index.js gameData()).
+// simdata.js's own copy stays as it was: it is only a fallback source for ids the official data lacks (`getDefaultSource`
+// / `DataSource.rawEffect`), and the corpus is generated from THIS object, so it can never name a pack-only id.
+// This runs before CHESS / VISIBLE below are derived, so a pack record can never enter the corpus.
+resetData();
+const data = getData({ log: QUIET, workshopDir: null });
 const ds = new DataSource(data, null); // what Match and browsers use (no research fallback)
 const gdCache = new Map();
 const gdFor = (modeId) => { let g = gdCache.get(modeId); if (!g) { g = new GameData(data, modeId); gdCache.set(modeId, g); } return g; };
@@ -351,6 +368,7 @@ function layout(gd, stageId, wanted, { field = 'normal', colOffset = 0, max = 12
     if (w.skillIndex != null) u.skillIndex = w.skillIndex;
     if (w.moduleId != null) u.moduleId = w.moduleId;
     if (w.standIn) u.standIn = true;
+    else Object.assign(u, DEFAULT_CULTIVATION); // an owned operator: the default player's 潜能 / 练度 (0.2.2)
     if (w.carryState) u.carryState = w.carryState;
     units.push(u);
   }
@@ -955,7 +973,8 @@ function diyLayout(stageId, wanted) {
     const [r, c] = free[0];
     used.add(tileKey(r, c));
     const dir = units.length % 7 === 6 ? ['UP', 'LEFT', 'DOWN'][Math.floor(units.length / 7) % 3] : 'RIGHT';
-    units.push({ uid: uid++, kind: 'chess', chessId: w.chessId, diy: { ...w.diy }, row: r, col: c, dir, items: [] });
+    // an owned pick at the default player's 潜能 / 练度 (0.2.2); a prototype has neither
+    units.push({ uid: uid++, kind: 'chess', chessId: w.chessId, diy: { ...w.diy }, row: r, col: c, dir, items: [], ...(w.rec.diyProto ? null : DEFAULT_CULTIVATION) });
   }
   return units;
 }

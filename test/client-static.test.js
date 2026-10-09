@@ -36,11 +36,34 @@ function walk(dir, ext, out = []) {
   return out;
 }
 
+/**
+ * The static mounts of `server/http/static.js`: URL prefix → the directory on disk it serves. The order matters
+ * (`/data.js` is a generated single file, not the `/data/` mount).
+ */
+const MOUNTS = [
+  ['/sim/', path.join(ROOT, 'server', 'sim')],
+  ['/shared/', path.join(ROOT, 'shared')],
+  ['/data/', path.join(ROOT, 'data')],
+  ['/packs/', path.join(ROOT, 'packs')],
+];
+const mountFor = (urlPath) => MOUNTS.find(([p]) => urlPath.startsWith(p));
+
 /** URL path served by the server → file on disk (mirrors the server/http/static.js mounts). */
 function urlPathToFile(urlPath) {
   const clean = decodeURIComponent(urlPath.split(/[?#]/)[0]);
-  if (clean.startsWith('/shared/')) return path.join(ROOT, clean);
-  if (clean.startsWith('/data/')) return path.join(ROOT, clean);
+  const mount = mountFor(clean);
+  if (mount) return path.join(mount[1], clean.slice(mount[0].length));
+  return path.join(PUBLIC, clean);
+}
+
+/**
+ * URL path of a served **directory** → the directory on disk. An import map may map a prefix (`"@kit/": "/sim/…/"`):
+ * that names a subtree, so what has to exist is the directory, and `/sim/` is served from `server/sim/`, not `public/`.
+ */
+function urlPathToDir(urlPath) {
+  const clean = decodeURIComponent(urlPath.split(/[?#]/)[0]).replace(/\/+$/, '');
+  const mount = mountFor(`${clean}/`);
+  if (mount) return path.join(mount[1], clean.slice(mount[0].length));
   return path.join(PUBLIC, clean);
 }
 
@@ -182,6 +205,9 @@ describe('HTML pages reference existing files', () => {
         const urlPath = new URL(ref, pageUrl).pathname;
         const file = urlPathToFile(urlPath);
         if (!existsSync(file)) {
+          // an import map value may be a PREFIX mapping (it ends in `/`): it names a served subtree, not a file, so the
+          // directory is what has to exist (`@kit/` → `/sim/content/kits/shared/`, served from server/sim/)
+          if (ref.endsWith('/') && existsSync(urlPathToDir(urlPath))) continue;
           if (OPTIONAL_PREFIXES.some((p) => urlPath.startsWith(p))) t.diagnostic(`optional asset missing: ${urlPath}`);
           else assert.fail(`${page} references missing ${urlPath}`);
         }
@@ -788,6 +814,58 @@ describe('identity (reconnect-token selection across tabs)', () => {
     const [tx, ty] = await Promise.all([x.init(), y.init()]);
     assert.equal(tx, 'tokShared');
     assert.equal(ty, null);
+  });
+
+  for (const [firstId, secondId, expected] of [
+    ['a-tab', 'b-tab', ['tokShared', null]],
+    ['b-tab', 'a-tab', [null, 'tokShared']],
+  ]) {
+    test(`staggered channels: ${firstId} starts before ${secondId}`, async () => {
+      const { createIdentity, CLAIM_QUERY_MS } = await mod('net.js');
+      const hub = channelHub(), timers = fakeTimers(), local = memStorage();
+      local.setItem('sp.tokens', JSON.stringify(['tokShared']));
+      const firstSession = memStorage(), secondSession = memStorage();
+      const first = createIdentity({ local, session: firstSession, tabId: firstId,
+        channel: hub.create(), setTimeout: timers.setTimeout });
+      const firstPick = first.init();
+      timers.advance(30);
+      // This channel did not exist when the first tab broadcast its query.
+      const second = createIdentity({ local, session: secondSession, tabId: secondId,
+        channel: hub.create(), setTimeout: timers.setTimeout });
+      const secondPick = second.init();
+      await new Promise((r) => setImmediate(r));
+      timers.advance(CLAIM_QUERY_MS - 30);
+      assert.equal(await firstPick, expected[0]);
+      timers.advance(30);
+      assert.equal(await secondPick, expected[1]);
+      assert.deepEqual([first.getToken(), second.getToken()], expected);
+      assert.deepEqual([firstSession.getItem('sp.token'), secondSession.getItem('sp.token')], expected);
+    });
+  }
+
+  test('staggered elections reserve fallback candidates while a live owner keeps its token', async () => {
+    const { createIdentity, CLAIM_QUERY_MS } = await mod('net.js');
+    const hub = channelHub(), timers = fakeTimers(), local = memStorage();
+    const owner = createIdentity({ local, session: memStorage(), tabId: 'z-owner', channel: hub.create() });
+    await owner.init();
+    owner.saveToken('tokOwned');
+    local.setItem('sp.tokens', JSON.stringify(['tokOwned', 'tokFree']));
+    const first = createIdentity({ local, session: memStorage(), tabId: 'a-tab',
+      channel: hub.create(), setTimeout: timers.setTimeout });
+    const firstPick = first.init();
+    timers.advance(30);
+    const duplicateSession = memStorage();
+    duplicateSession.setItem('sp.token', 'tokOwned');
+    const second = createIdentity({ local, session: duplicateSession, tabId: 'b-tab',
+      channel: hub.create(), setTimeout: timers.setTimeout });
+    const secondPick = second.init();
+    await new Promise((r) => setImmediate(r));
+    timers.advance(CLAIM_QUERY_MS - 30);
+    assert.equal(await firstPick, 'tokFree');
+    timers.advance(30);
+    assert.equal(await secondPick, null);
+    assert.equal(duplicateSession.getItem('sp.token'), null, 'the copied live token is discarded');
+    assert.equal(owner.getToken(), 'tokOwned', 'a live owner outranks even a smaller tab id');
   });
 
   test('without BroadcastChannel only the own token is used; init is idempotent; welcome during init wins', async () => {

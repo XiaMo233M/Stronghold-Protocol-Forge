@@ -27,6 +27,9 @@ import { renderKeepingFocus } from './focusKeep.js';
 import { packIdForm, createPack, autoPackId } from './packPicker.js';
 // spine 判定的同一条规则：出怪页与干员页共用一个纯函数（填错不会报错的字段，两页都要当场说话）
 import { spineIsKnown } from './enemyWizard.js';
+// 覆盖模式的差异预览：摊平、比对、画值的三件事都在 shared/recordDiff.js（纯函数，node 里直接测）。
+// 界面只负责把它画出来 —— 判罚逻辑不进界面，免得界面与服务端两套口径。
+import { diffRecords, shortValue, flattenRecord } from '../../shared/recordDiff.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -63,6 +66,11 @@ const state = {
   data: null, packId: null, slug: null, spec: null, preview: null, message: null, busy: false,
   // 「以模板新建」的选择器是否打开，以及搜索串
   picking: false, pickQuery: '',
+  // 覆盖模式（B 段）：选择器是否打开，以及当前这条覆盖的官方原文。
+  // `official` 只用于差异预览 —— 它是「磁盘上那条官方记录现在长什么样」，不是 spec 的一部分。
+  // `playtestDeclared` 是**选中的那个包**在 `pack.json.playtest.directToHand` 里已经声明的 id（覆盖模式下
+  // 「试玩直接发到手上」住在行为层，记录里没有这个键 —— 不看这一份，上次勾的开关会显示成没勾）。
+  overridePicking: false, official: null, officialSpecSlug: null, playtestDeclared: [],
   // 盟约清单的搜索串（只重画清单那一块，别整页重画）
   bondQuery: '',
   // 哪些「自己画范围」的画板是打开的（key → true）。它是界面状态，不进 spec，但必须留在重画之外 ——
@@ -142,19 +150,25 @@ function renderOps() {
   if (!pack) { box.append(h('div', { class: 'item' }, h('div', { class: 'm' }, t('先在左边选一个工坊包')))); return; }
   box.append(h('div', {
     class: 'item',
-    onclick: () => { state.slug = null; state.spec = blankSpec(); state.preview = null; state.picking = false; renderShell(); },
+    onclick: () => { state.slug = null; state.spec = blankSpec(); state.preview = null; state.picking = false; state.overridePicking = false; state.official = null; state.playtestDeclared = []; renderShell(); },
   }, h('div', { class: 'n ok' }, t('＋ 新建干员')), h('div', { class: 'm' }, t('从空白表单开始'))));
   // 「以模板新建」是省事的那条路：官方的数值、分支、攻击范围、技能、天赋与外观一次填好，改个 id 与名字就能用。
   box.append(h('div', {
     class: `item${state.picking ? ' on' : ''}`,
-    onclick: () => { state.slug = null; state.spec = null; state.preview = null; state.picking = true; state.pickQuery = ''; renderShell(); },
+    onclick: () => { state.slug = null; state.spec = null; state.preview = null; state.picking = true; state.overridePicking = false; state.official = null; state.playtestDeclared = []; state.pickQuery = ''; renderShell(); },
   }, h('div', { class: 'n ok' }, t('⧉ 以模板新建')), h('div', { class: 'm' }, t('复制一个现成干员的数值、范围、技能与外观'))));
+  // 覆盖模式：**不复制**，而是以官方 id 打开那一条记录本身。保存出来的就是官方 id，
+  // 加载器按 A2 的按字段合并打补丁 —— 作者只写要改的那几个字段。
+  box.append(h('div', {
+    class: `item${state.overridePicking ? ' on' : ''}`,
+    onclick: () => { state.slug = null; state.spec = null; state.preview = null; state.official = null; state.playtestDeclared = []; state.overridePicking = true; state.picking = false; state.pickQuery = ''; renderShell(); },
+  }, h('div', { class: 'n ok' }, t('✎ 覆盖官方干员')), h('div', { class: 'm' }, t('以官方 id 打开那一条记录：只改你要改的字段，保存时自动声明 overrides'))));
   for (const spec of pack.specs) {
     const base = pack.operators.find((o) => o.name && !o.isGolden && o.chessId.endsWith('_a') && o.chessId.includes(spec.id));
     const errs = pack.operators.filter((o) => o.chessId.includes(spec.id)).reduce((n, o) => n + o.issues.filter((i) => i.severity === 'error').length, 0);
     box.append(h('div', {
       class: `item${spec.id === state.slug ? ' on' : ''}`,
-      onclick: () => { state.slug = spec.id; state.spec = JSON.parse(JSON.stringify(spec)); state.preview = null; state.message = null; renderShell(); previewSoon(); },
+      onclick: () => { state.slug = spec.id; state.spec = JSON.parse(JSON.stringify(spec)); state.preview = null; state.message = null; state.official = null; state.officialSpecSlug = null; state.playtestDeclared = []; state.overridePicking = false; renderShell(); previewSoon(); },
     },
     h('div', { class: 'n' }, spec.name || spec.id),
     h('div', { class: 'm' }, t('id {0} · {1} 阶 · {2}', spec.id, spec.tier, spec.profession),
@@ -899,6 +913,7 @@ function renderEditor() {
   if (!state.data) { box.append(h('p', { class: 'hint' }, t('正在载入…'))); return; }
   if (state.message) box.append(h('div', { class: `banner ${state.message.kind === 'error' ? 'bad' : 'good'}` }, state.message.text));
   if (state.picking) { renderPicker(box); return; }
+  if (state.overridePicking) { renderOverridePicker(box); return; }
   if (!state.spec) { box.append(h('p', { class: 'hint' }, t('左边的列表中选一个工坊包，或新建一个干员。'))); return; }
 
   const s = state.spec;
@@ -1222,6 +1237,19 @@ function renderEditor() {
     const tier = s.tier;
     const pool = state.data.support.pool[tier] || [];
     const isSupport = pool.includes(baseId);
+    // 「试玩时直接发到手上」的勾选状态：**行为层**的开关，只有编辑器起的试玩服务器会发牌 —— 这样作者不用为了
+    // 看一眼自己的干员先把调度中心升到它那一阶（六阶要升到 6 级）。正式对局一切照旧（仍然只在商店里摇）。
+    //
+    // 落点分两种，因为覆盖模式下记录必须与官方**同形**（官方记录没有 `directToHand` 这个键）：
+    //   * 非覆盖（工坊新增的干员）：写进记录（`directToHand: true`）—— 今天的行为，一个字都没改；
+    //   * 覆盖官方干员：写进 `pack.json` 的 `playtest.directToHand`（保存时落盘，见 editor/server.mjs 的
+    //     `withPlaytestDeclarations`）。这里只改 `state.spec`，勾选状态按**声明**显示（`state.playtestDeclared`）。
+    const isOverride = s.override === true;
+    const declaredIds = Array.isArray(state.playtestDeclared) ? state.playtestDeclared : [];
+    // 覆盖：按 `pack.json` 的声明显示（服务端连这条覆盖的两个 id 一起给）；非覆盖：按 spec 自己显示
+    const directOn = isOverride
+      ? declaredIds.includes(s.id) || declaredIds.includes(state.slug)
+      : s.directToHand === true;
     box.append(section('support', t('助战'), [
       h('p', { class: 'hint' }, t('勾上＝把这份记录写进 data/support.json 的服务端卡池（重启游戏服务器后生效）。')),
       h('p', { class: 'hint' }, t('助战干员**进商店**：它只比普通棋子多一份池中拷贝，仍然要在自己的商店里**摇到**、按阶级价买到、按普通规则卖掉 —— 不会被直接发到手上。')),
@@ -1237,12 +1265,10 @@ function renderEditor() {
         }),
         t('把 {0} 加入 {1} 阶助战卡池', baseId, tier)),
       h('p', { class: 'hint' }, t('当前 {0} 阶卡池：{1}', tier, pool.length ? pool.join(', ') : t('（空）'))),
-      // 「试玩时直接发到手上」：写进记录（`directToHand`），只有编辑器起的试玩服务器会发牌 —— 这样作者不用为了
-      // 看一眼自己的干员先把调度中心升到它那一阶（六阶要升到 6 级）。正式对局一切照旧（仍然只在商店里摇）。
       h('label', { style: 'display:flex;gap:8px;align-items:center;color:var(--fg)' },
-        checkInput(s.directToHand === true, (on) => { state.spec.directToHand = on === true; renderEditor(); }),
+        checkInput(directOn, (on) => { state.spec.directToHand = on === true; renderEditor(); }),
         t('试玩时直接发到手上（正式对局不受影响）')),
-      h('p', { class: 'hint' }, t('勾上＝记录里写 `directToHand: true`：只有编辑器「一键试玩」起的那个服务器会在开局把它塞进手牌。正式服务器即使装了这个包也不会发牌，干员照样只在商店里摇到。')),
+      h('p', { class: 'hint' }, t('勾上＝只有编辑器「一键试玩」起的那个服务器会在开局把它塞进手牌。正式服务器即使装了这个包也不会发牌，干员照样只在商店里摇到。覆盖官方干员时，这个开关写在包的行为层（`pack.json` 的 `playtest.directToHand`）—— 记录保持与官方同形；新增的工坊干员写在记录里（`directToHand: true`）。两种写法都会在保存时落盘。')),
     ], { note: t('可选：让这张卡出现在助战卡池里') }));
   }
 
@@ -1277,6 +1303,16 @@ function renderEditor() {
   }
   box.append(section('check', t('校验结果'), panel,
     { note: pv && pv.ok && !pv.warnings?.length ? t('✔ 通过') : t('实时校验（与 CLI、AI 同一套规则）') }));
+
+  // 覆盖模式：保存前就看清楚「到底会改哪几个字段」。没有官方原文（新建 / 复制 / 模板）时这一块不出现 ——
+  // 那些路径没有「官方原文」可比，硬造一份默认值只会让差异预览撒谎。
+  if (state.official) {
+    const diffBox = h('div', {});
+    renderDiffPreview(diffBox);
+    const changed = diffRecords(state.official, state.preview?.base ?? {}, { limit: 60 }).total;
+    box.append(section('overrideDiff', t('将改动的字段（覆盖官方 id）'), diffBox,
+      { note: changed ? t('{0} 处差异', changed) : t('还没有改动') }));
+  }
 }
 
 // ---- 天赋列表编辑器（普通态与精锐态共用一个实现） -------------------------------------------------------------------
@@ -1484,6 +1520,9 @@ async function loadOperatorTemplate(chessId) {
     state.spec = r.spec;
     state.slug = null;
     state.picking = false;
+    state.overridePicking = false;
+    state.official = null;
+    state.playtestDeclared = [];
     state.preview = null;
     state.message = { kind: 'ok', text: t('已按「{0}」生成模板：请填一个新的 id 与名字（改完会自动校验）。', r.spec.name || chessId) };
     renderShell();
@@ -1492,6 +1531,92 @@ async function loadOperatorTemplate(chessId) {
     state.message = { kind: 'error', text: errText(e) };
     renderEditor();
   }
+}
+
+/**
+ * 覆盖模式：选一条**官方干员**，以它的官方 id 打开记录本身（不是复制一份）。
+ *
+ * 「覆盖」与「以模板新建」是两件相反的事，所以刻意分成两个入口：
+ *   * 模板：id 留空，作者填一个新的 ⇒ 出来的是一条**新**记录；
+ *   * 覆盖：id 就是官方 id，作者只改要改的字段 ⇒ 保存时写官方 id + 自动补 `overrides` 声明。
+ * 服务端认的是 `spec.override === true` 那一个分支（`editor/server.mjs`）。
+ */
+function renderOverridePicker(box) {
+  box.append(h('h2', {}, t('覆盖官方干员')));
+  box.append(h('p', { class: 'hint' }, t('选一条官方记录：编辑器会把它**原样**读成表单（id 就是官方 id）。你只改要改的字段，没写的字段保存后仍然是官方的 —— 保存时会自动往 pack.json 的 overrides 里补一条声明。')));
+  box.append(h('div', { class: 'row', style: 'margin:10px 0' },
+    textInput(() => state.pickQuery, (v) => { state.pickQuery = v; renderEditorKeepingFocus(); }, { placeholder: t('搜索干员（名称 / 代号 / id）') }),
+    h('button', { class: 'ghost', onclick: () => { state.overridePicking = false; state.pickQuery = ''; renderShell(); } }, t('返回'))));
+
+  const matched = matchOperators(state.data.officialChess, state.pickQuery);
+  const LIMIT = 60;
+  box.append(h('h2', {}, t('官方干员（匹配 {0} / 共 {1}）', matched.length, state.data.officialChess.length)));
+  if (!matched.length) box.append(h('p', { class: 'hint' }, t('（没有匹配的干员）')));
+  for (const o of matched.slice(0, LIMIT)) {
+    box.append(h('div', {
+      class: 'item', title: `${o.id}${o.spine ? ` · ${o.spine}` : ''}`,
+      onclick: () => { loadOperatorOverride(o.id); },
+    },
+    h('div', { class: 'n' }, o.name || o.id),
+    h('div', { class: 'm' }, t('{0} 阶 · {1}{2} · 官方 id {3}', o.tier, o.profession, o.subProfessionId ? ` · ${o.subProfessionId}` : '', o.id))));
+  }
+  if (matched.length > LIMIT) box.append(h('p', { class: 'hint' }, t('只显示了前 {0} 个，用上面的搜索框缩小范围。', LIMIT)));
+}
+
+/** 以官方 id 打开一条记录：只读端点回 `{ spec, ids, official }`，`official` 留下来做差异预览。 */
+async function loadOperatorOverride(chessId) {
+  try {
+    // `pack` 让服务端把**这个包**的 `pack.json.playtest.directToHand` 一起读出来（覆盖模式下那个开关住在行为层）
+    const packQ = state.packId ? `?pack=${encodeURIComponent(state.packId)}` : '';
+    const r = await api(`/api/official/chess/${encodeURIComponent(chessId)}${packQ}`);
+    state.spec = r.spec;
+    state.official = r.official ?? null;
+    state.officialSpecSlug = r.spec.slug ?? r.ids?.slug ?? null;
+    // 覆盖模式下开关按**声明**显示：`spec` 是从官方记录读出来的，里面根本没有 `directToHand` 这个键
+    state.playtestDeclared = Array.isArray(r.playtest?.declared) ? r.playtest.declared : [];
+    // `slug` 用服务端算出来的那个（= 官方 baseId）：保存路径与删除都以它为文件名。
+    state.slug = state.officialSpecSlug;
+    state.picking = false;
+    state.overridePicking = false;
+    state.preview = null;
+    state.message = { kind: 'ok', text: t('已打开官方干员「{0}」（id {1}）：你改的字段会覆盖它，没改的仍然是官方的。', r.spec.name || chessId, chessId) };
+    renderShell();
+    preview();
+  } catch (e) {
+    state.message = { kind: 'error', text: errText(e) };
+    renderEditor();
+  }
+}
+
+/**
+ * 差异预览里的一个格子：`shortValue` 对「那一边根本没有这个字段」回 `null`（shared/ 那层不写中文），
+ * 这里把它画成一句话并顺手翻译。
+ */
+const diffCell = (v) => (shortValue(v, 46) === null ? t('（没有这个字段）') : shortValue(v, 46));
+
+/**
+ * 差异预览：把「官方原文 → 将要写出的记录」里真正会变的叶子路径列出来。
+ *
+ * 为什么在**保存之前**就要看：官方记录 40+ 字段，作者改了其中两个 —— 从表单上看不出是哪两个；而看漏一个的
+ * 代价可能是「官方的一整条潜能链没了」。比对与画值都在 shared/recordDiff.js（纯函数，node 里直接测），
+ * 这里只负责画。
+ */
+function renderDiffPreview(box) {
+  const derived = state.preview?.base ?? null;
+  if (!derived) return box.append(h('p', { class: 'hint' }, t('（改动后会自动算出差异）')));
+  const r = diffRecords(state.official, derived, { limit: 60 });
+  if (!r.changed) return box.append(h('p', { class: 'hint' }, t('还没有改动：写出去的就是官方那一条（一个字段都没变）。')));
+  // 官方那边的值从原文里按路径取回来（`flattenRecord` 的键就是路径）
+  const flatOfficial = flattenRecord(state.official);
+  const rows = r.changes.map((c) => h('tr', {},
+    h('td', { style: 'white-space:nowrap' }, h('code', {}, c.path)),
+    h('td', {}, diffCell(flatOfficial.get(c.path))),
+    h('td', {}, diffCell(c.to))));
+  const table = h('table', { class: 'diff' },
+    h('thead', {}, h('tr', {}, h('th', {}, t('字段')), h('th', {}, t('官方')), h('th', {}, t('保存后')))),
+    h('tbody', {}, ...rows));
+  box.append(table);
+  if (r.truncated) box.append(h('p', { class: 'hint' }, t('只列了前 {0} 条差异（总共 {1} 条）。', r.changes.length, r.total)));
 }
 
 /** 复制本包的一个已有干员：只清空 id（那一个必须重填，否则会覆盖原来那份）。 */

@@ -39,6 +39,11 @@
   .err { color:var(--err); } .warn { color:var(--warn); } .ok { color:var(--ok); } .dim { color:var(--dim); }
   pre { background:#12141a; border:1px solid var(--line); border-radius:6px; padding:10px; overflow:auto; max-height:260px; font-size:12px; }
   .hint { color:var(--dim); font-size:12px; }
+  /* 覆盖模式的差异预览（app.js 的 renderDiffPreview）：官方值 → 保存后的值，一个字段一行 */
+  table.diff { width:100%; border-collapse:collapse; font-size:12px; }
+  table.diff th, table.diff td { text-align:left; padding:3px 8px 3px 0; border-bottom:1px solid var(--line); vertical-align:top; }
+  table.diff th { color:var(--dim); font-weight:600; }
+  table.diff code { font-size:12px; }
   .kv { display:grid; grid-template-columns:1fr 110px 32px; gap:6px; margin-bottom:6px; }
   .split { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
   .banner { padding:8px 12px; border-radius:6px; margin-bottom:10px; }

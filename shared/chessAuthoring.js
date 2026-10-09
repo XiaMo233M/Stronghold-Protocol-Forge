@@ -18,6 +18,7 @@
 // tools/build-data.mjs 与引擎都用它）：派生的精锐记录必须按同一套算术把默认模组烘进去，否则玩家选「不装备」
 // 会得到带模组的数值 —— 这一类不一致不会报错，只会让作者的模组在游戏里表现不对。
 import { composeStats, composeTalents } from './loadoutRecord.js';
+import { talentAtRank, FULL_RANK } from './potential.js';
 
 /**
  * The professions THIS project's data uses — which are NOT the global Arknights class names. The mapping that bit us
@@ -207,6 +208,93 @@ export function chessIds(idOrSlug) {
 }
 
 /**
+ * 覆盖模式（override mode）的 id：**原样保留官方 id，不加 `chess_ws_` 前缀**。
+ *
+ * 为什么是「平行函数」而不是给 `chessIds` 加开关：`chessIds` 有六个调用点（编辑器的保存 / 复校验 / 列表 /
+ * 取回，以及 `deriveChessRecord` 自己）。让它「有时候加前缀、有时候不加」会让每个调用点都得先想清自己在哪种
+ * 模式里 —— 那是静默错 id 的温床。默认路径（新建 / 复制）因此**一字不动**。
+ *
+ * 取值只用记录自己的字段（`baseId` / `goldenId`），**不做字符串手术**：普通与精锐是一对，
+ * `chess_char_1_01_a` 的兄弟 `_b` 只能从记录里读出来 —— 官方 id 的后缀规则不是本仓库定的。
+ *
+ * @param {object} rec 官方（或包内已有的）干员记录
+ * @returns {{ slug: string, base: string, golden: string|null }|null}
+ */
+export function overrideChessIds(rec) {
+  if (!isPlainObj(rec)) return null;
+  const id = typeof rec.chessId === 'string' && rec.chessId ? rec.chessId : null;
+  if (!id) return null;
+  const base = typeof rec.baseId === 'string' && rec.baseId ? rec.baseId : id;
+  const golden = typeof rec.goldenId === 'string' && rec.goldenId ? rec.goldenId : null;
+  return { slug: base, base, golden };
+}
+
+/**
+ * Value equality for the chain rebuild below (arrays and plain objects deep; key order is irrelevant — a talent entry at
+ * two ranks is the same entry when its values are equal, not when its keys happen to be inserted in the same order).
+ */
+const sameValue = (a, b) => {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => sameValue(x, b[i]));
+  }
+  if (!isPlainObj(a) || !isPlainObj(b)) return Number.isNaN(a) && Number.isNaN(b);
+  const ka = Object.keys(a);
+  return ka.length === Object.keys(b).length
+    && ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && sameValue(a[k], b[k]));
+};
+
+/**
+ * One talent entry as the data build writes its chain (tools/build-data.mjs chainTalent): the rank-`hi` entry, plus
+ * `potMin` (the lowest rank that builds the same entry) and `potBelow` (the entry below it — only the fields it changes,
+ * itself chained) when a lower rank builds something else.
+ */
+function chainTalent(vals, hi) {
+  const node = vals[hi];
+  let m = hi;
+  while (m > 0 && sameValue(vals[m - 1], node)) m--;
+  if (m === 0) return node;
+  const below = chainTalent(vals, m - 1);
+  const part = {};
+  for (const [k, v] of Object.entries(below)) if (k === 'potMin' || k === 'potBelow' || !sameValue(v, node[k])) part[k] = v;
+  return { ...node, potMin: m, potBelow: part };
+}
+
+/**
+ * 带默认模组的精锐天赋，**连同潜能链一起**合并（`deriveChessRecord` 精锐侧的 `talents`）。
+ *
+ * 合并规则与 `composeTalents` **同一套**（覆盖已有 index：模组的值赢、模组没重述的键保留基础值；否则追加；空占位丢弃），
+ * 注解按同一优先级一起合并。做法是逐档合并再链式化，与官方数据的生成方式一致（`tools/build-data.mjs` 的
+ * `withPotentialData` / `chainTalent`）：`shared/potential.js` 的 `talentAtRank` 把基础天赋与每条模组改动解析到该档，
+ * 每档交给 `composeTalents` 合并一次，最后按档位把结果写成 `potMin` / `potBelow`。于是：
+ *   * 改动带了自己的 `potMin` / `potBelow` → **模组的值赢**（`chess_char_6_02_b` 精锐链用它那一份 105% / 100%）；
+ *   * 改动没重述 → 保留基础天赋上那一份（链不会因为过一遍模组就消失）；
+ *   * 追加的条目（`talentIndex` 为负）用它自己带的。
+ * `potBelow` 是**部分条目**（没重述的字段沿用上一档的值），所以「照抄 change 的 potBelow」不够：`chess_char_6_05_b`
+ * 的改动只重述 desc / descRaw，它的低档仍要用改动自己的 bb 与基础的 bb 合并。
+ *
+ * 为什么不直接用 `composeTalents`：它的口径就是「一个潜能档位的结果」，故意剥掉 `potMin` / `potBelow`
+ * （`shared/loadoutRecord.js` 写明，引擎先解析潜能再合并）。而创作层必须把作者的数据原样还回去 —— 覆盖模式每次保存
+ * 都用 spec 重新派生一遍盘上的记录（`regeneratePack`），派生时丢掉的链是找不回来的。逐档复用同一个合并函数，既保住
+ * 「只有一份合并规则」，又让注解按该规则一起落下来。某一档合并出来的列表与满档不同形状（更低潜能下多/少一条天赋）时
+ * 写不成链：此时原样返回满档合并结果（与旧行为一致，不猜）。
+ */
+function composeTalentsWithPotential(base, changes) {
+  const top = composeTalents(base, changes);
+  const base0 = Array.isArray(base) ? base : [];
+  const ch0 = Array.isArray(changes) ? changes : [];
+  const ranks = [];
+  for (let r = 0; r < FULL_RANK; r++) {
+    ranks.push(composeTalents(base0.map((t) => talentAtRank(t, r)), ch0.map((t) => talentAtRank(t, r))));
+  }
+  ranks.push(top);
+  // 链是**按数组位置**写的（官方生成器如此，`index` 可以是 -1 且重复），所以形状必须逐档一致才敢写
+  const shape = (l) => l.map((t) => t.index).join(',');
+  if (!ranks.every((l) => l.length === top.length && shape(l) === shape(top))) return top;
+  return top.map((_, i) => chainTalent(ranks.map((l) => l[i]), FULL_RANK));
+}
+
+/**
  * Build a valid base + elite record pair from an authoring spec.
  *
  * Spec (only `id`, `name`, `tier`, `profession`, `position` and `stats` are required):
@@ -218,14 +306,26 @@ export function chessIds(idOrSlug) {
  * Stats keys: maxHp, atk, def, res, cost, blockCnt, bat, aspd?, respawnTime?, spRecovery?, moveSpeed?
  *
  * @returns {{ ok: true, base: object, golden: object, warnings: string[] } | { ok: false, errors: Array<{field:string,code:string,message:string,hint?:string}> }}
+ *
+ * 第二个参数是**覆盖模式**的 id 对（`overrideChessIds` 的产出）：省略时走默认路径（`chessIds(spec.id)`，产出
+ * `chess_ws_<slug>_a/_b`），**一字不变** —— 那是 A 段护身符钉住的。形状不对就等于没给。
  */
-export function deriveChessRecord(spec) {
+export function deriveChessRecord(spec, overrideIds) {
   const errors = [];
   const warnings = [];
   const req = (cond, field, code, message, hint) => { if (!cond) errors.push({ field, code, message, hint }); };
   if (!isPlainObj(spec)) return { ok: false, errors: [{ field: '', code: 'NOT_AN_OBJECT', message: 'spec must be a JSON object' }] };
 
-  const ids = chessIds(spec.id);
+  // 默认路径：`chessIds` 无条件加前缀。覆盖模式由调用方给出 id 对（官方 id 原样保留），**这里不猜** ——
+  // 猜就是「有时候加前缀、有时候不加」，正是 A 段特意没做的那件事。形状不对就等于没给（回到默认路径）。
+  // `golden` 可以是 null（官方那条没有精锐兄弟），那时给一个 `_b` 占位；校验器认不认是它的事。
+  const ids = (overrideIds && typeof overrideIds.slug === 'string' && typeof overrideIds.base === 'string' && overrideIds.base)
+    ? {
+      slug: overrideIds.slug,
+      base: overrideIds.base,
+      golden: typeof overrideIds.golden === 'string' && overrideIds.golden ? overrideIds.golden : `${overrideIds.base}_b`,
+    }
+    : chessIds(spec.id);
   req(ids, 'id', 'BAD_ID', 'id must contain at least one letter or digit', 'e.g. "abyss_hunter"');
   req(typeof spec.name === 'string' && spec.name.trim(), 'name', 'MISSING', 'name is required');
   req(isIntIn(spec.tier, 1, 6), 'tier', 'BAD_TIER', 'tier must be an integer 1..6');
@@ -353,6 +453,13 @@ export function deriveChessRecord(spec) {
     tokenKey: t && typeof t.tokenKey === 'string' && t.tokenKey ? t.tokenKey : null,
     // `hidden` 官方对占位天赋（desc 是 `-`）两种写法都有，所以照抄记录里的布尔值，别自己推
     hidden: t && typeof t.hidden === 'boolean' ? t.hidden : !(t && t.desc), fromModule: false,
+    // 0.2.2 的潜能注解**原样穿过**：`potMin` = 这条天赋从哪一档起生效，`potBelow` = 更低那一档换掉的字段
+    // （`shared/potential.js` 的链式天赋）。它们不是「派生器算出来的东西」，而是**来源记录带过来的事实**：
+    // `specFromChessRecord` 本来就把它们搬进了 spec，派生时丢掉就等于**每存一次覆盖就抹一层潜能链**
+    // （`regeneratePack` 会用 spec 重新派生一遍盘上已有的记录，所以丢在这里的注解是找不回来的）。
+    // 引擎那一侧照旧：真正「某一档建出来的记录」由 `stripPotential` / `atRank` 负责，不是这里。
+    ...(t && Number.isInteger(t.potMin) ? { potMin: t.potMin } : {}),
+    ...(t && isPlainObj(t.potBelow) ? { potBelow: { ...t.potBelow } } : {}),
   }));  const talentsOf = (golden) => talentList(golden && Array.isArray(spec.talentsGolden) ? spec.talentsGolden : spec.talents);
 
   // 模组（`data/chess.json` 精锐记录的 `modules[]`）：官方那 184 个模组就是长这个形状，引擎按它算
@@ -390,6 +497,10 @@ export function deriveChessRecord(spec) {
       tokenKey: ch && typeof ch.tokenKey === 'string' && ch.tokenKey ? ch.tokenKey : null,
       hidden: ch ? ch.hidden !== false : true,
       ...(Number.isInteger(ch && ch.skillIndex) ? { skillIndex: ch.skillIndex } : {}),
+      // 潜能注解（0.2.2）：模组自己也能重述某条天赋的链（官方 `chess_char_6_02` 的默认模组就带），
+      // 这两条同样不许在派生时丢掉 —— `composeTalentsWithPotential` 按「模组的值赢」把它并进精锐侧。
+      ...(Number.isInteger(ch && ch.potMin) ? { potMin: ch.potMin } : {}),
+      ...(isPlainObj(ch && ch.potBelow) ? { potBelow: { ...ch.potBelow } } : {}),
       _ci: ci,
     }));
     for (const ch of talentChanges) delete ch._ci;
@@ -487,7 +598,7 @@ export function deriveChessRecord(spec) {
     statsBase: goldenStatsBase, traitBase: goldenTraitBase, talentsBase: goldenTalentsBase,
     stats: defaultModule ? composeStats(goldenStatsBase, defaultModule.attr) : goldenStatsBase,
     trait: defaultModule && defaultModule.traitOverride ? { ...defaultModule.traitOverride } : goldenTraitBase,
-    talents: defaultModule ? composeTalents(goldenTalentsBase, defaultModule.talentChanges) : goldenTalentsBase,
+    talents: defaultModule ? composeTalentsWithPotential(goldenTalentsBase, defaultModule.talentChanges) : goldenTalentsBase,
     modules: Array.isArray(spec.modules) ? modules.map((m) => ({ ...m })) : undefined,
     module: modulePointer(true),
     skill: skillRecord(true), skills: sk ? [skillRecord(true)] : [],
@@ -553,6 +664,11 @@ export function specFromChessRecord(base, golden) {
     if (t && isPairGrid(t.rangeGrid)) out.rangeGrid = t.rangeGrid.map((p) => [...p]);
     if (t && typeof t.tokenKey === 'string' && t.tokenKey) out.tokenKey = t.tokenKey;
     if (t && typeof t.hidden === 'boolean') out.hidden = t.hidden;
+    // 潜能注解（0.2.2）：这是**来源记录带过来的事实**，不是可以省略的元数据。覆盖模式把官方原文读成 spec、
+    // 再派生回去，所以这里少搬一次，作者每存一次就会抹掉官方的一层潜能链（`deriveChessRecord` 的 `talentList`
+    // 也会原样带出来，两头对齐）。
+    if (t && Number.isInteger(t.potMin)) out.potMin = t.potMin;
+    if (t && isPlainObj(t.potBelow)) out.potBelow = { ...t.potBelow };
     return out;
   });
   const spec = {
@@ -655,6 +771,9 @@ export function specFromChessRecord(base, golden) {
           if (isPlainObj(ch.bbStr) && Object.keys(ch.bbStr).length) c.bbStr = { ...ch.bbStr };
           if (typeof ch.tokenKey === 'string' && ch.tokenKey) c.tokenKey = ch.tokenKey;
           if (ch.hidden === false) c.hidden = false;
+          // 潜能注解（0.2.2）：模组改动自带的链要一起搬进 spec，否则「记录 → spec → 记录」这一趟就把它丢了。
+          if (Number.isInteger(ch.potMin)) c.potMin = ch.potMin;
+          if (isPlainObj(ch.potBelow)) c.potBelow = { ...ch.potBelow };
           const cg = grid(ch.rangeGrid);
           if (cg) c.rangeGrid = cg;
           return c;

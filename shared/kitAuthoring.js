@@ -7,23 +7,51 @@
 //
 //   1. the module must default-export the kit function     server/workshop.js loadWorkshopKits — no default export means
 //                                                          the whole file is reported and skipped
-//   2. it must be SELF-CONTAINED (no import)               the same file is loaded twice: the server by real path, the
-//                                                          browser by URL. `../../sim/…` resolves for one and not the
-//                                                          other, so no relative specifier can work for both
+//   2. its imports must come from the WHITELIST             the same file is loaded twice: the server by real path, the
+//                                                          browser by URL. A relative specifier resolves for one and not
+//                                                          the other, so a kit imports through `@kit/` (the kit SDK) or
+//                                                          `@sim/` (three pure engine helpers) — a prefix that resolves
+//                                                          in both worlds (shared/kitImports.js, DESIGN §28.12). This
+//                                                          check and the loader share one scanner, so the editor cannot
+//                                                          pass what loadWorkshopKits then refuses
 //   3. it must be DETERMINISTIC and environment-free         it runs in the player's browser (SP_COMBAT=client) and the
 //                                                          server recomputes the same battle to verify the result. A
 //                                                          Math.random() or a Date.now() makes the two disagree and the
 //                                                          player's result is REJECTED — with a reason that looks
 //                                                          nothing like "you used Math.random"
 //
-// And one that is specific to the hook bus: `battle.on(name, fn)` accepts ANY string (server/sim/Battle.js:583) and
-// `emit()` only fires the names something actually emits (:623). So `battle.on('beforeAttck', …)` registers cleanly,
-// never fires, and nothing anywhere reports it. HOOK_EVENTS below is the engine's real emit vocabulary, pinned to the
-// source by a drift guard (test/kitAuthoring.test.js), so a typo can be answered with a suggestion.
+// And one that is specific to the hook bus: `battle.on(name, fn)` accepts ANY string — the bus never checks the name —
+// while `emit()` only fires the names something actually emits. So `battle.on('beforeAttck', …)` registers cleanly,
+// never fires, and nothing anywhere reports it. Both live in HOOK_BUS.file (see HOOK_BUS below), which is also where
+// the MAX_HOOK_DEPTH guard and the handler-error isolation are; `server/sim/Battle.js` installs that method container
+// on the prototype and declares neither one.
+//
+// Neither the file nor the methods are cited here with a LINE NUMBER, and that is deliberate: this header used to point
+// at two line numbers in `server/sim/Battle.js` for `on` / `emit`, and by the time anyone read them they landed in the
+// middle of a much shorter file that no longer declares either method — a citation that rots silently, exactly the
+// failure class this module exists to catch. HOOK_BUS below names the file and the two methods, and
+// test/kitAuthoring.test.js reads that file and requires both of them to still be declared there (and forbids the stale
+// `Battle.js` + line-number form from coming back, in this header and in docs/WORKSHOP.md §4.3). HOOK_EVENTS below is
+// the engine's real emit vocabulary, pinned to the source by the same test, so a typo can be answered with a suggestion.
 //
 // A kit may also declare its OWN event under a namespace (`battle.emit('mypack:ready')`), which is how the official
 // content does it (`nearl2:knockdown`). Such a name is legal as long as the same file emits it — so the check is
 // "the engine emits it, or this file emits it".
+
+// Rule 2's table, scanner and error text live in shared/kitImports.js, because the LOADER reads them too: one verdict,
+// two readers (server/workshop.js loadWorkshopKits). See the header of that file for why the whitelist is prefix-based.
+import { kitImportIssues, kitImportAllowedText } from './kitImports.js';
+
+/**
+ * Where the hook bus a kit registers on really lives — cited BY SYMBOL, never by a line number.
+ *
+ * `file` is the file that declares the bus; `register` and `fire` are its two method names. A line number in a comment
+ * starts rotting the moment the file it points into moves and nothing reports it — the header above used to carry two
+ * of them for `server/sim/Battle.js`, a file that no longer declares either method. A symbol only rots if the method is
+ * renamed, and that is what the drift guard in test/kitAuthoring.test.js reads this constant to check — the same pattern
+ * HOOK_EVENTS uses for the event vocabulary.
+ */
+export const HOOK_BUS = Object.freeze({ file: 'server/sim/battle/hooks.js', register: 'on', fire: 'emit' });
 
 /**
  * Every event the engine emits (server/sim + public/js), minus the engine-internal ones a kit has no reason to hook.
@@ -81,14 +109,6 @@ function stripComments(src) {
     out += c;
   }
   return out;
-}
-
-/** Strip comments AND string bodies, so a check never fires on prose or on a string that merely names a global. */
-function stripCommentsAndStrings(src) {
-  return stripComments(src)
-    .replace(/'(?:\\.|[^'\\\n])*'/g, "''")
-    .replace(/"(?:\\.|[^"\\\n])*"/g, '""')
-    .replace(/`(?:\\.|[^`\\])*`/g, '``');
 }
 
 /**
@@ -171,6 +191,9 @@ export function validateKit(source, opts = {}) {
     return out;
   }
   const text = source;
+  // comment-stripped, strings kept: the import whitelist reads real specifiers, the forbidden-global scan must not fire
+  // on prose, and neither may fire on a string that merely names a global.
+  const code = stripComments(text);
 
   // ---- ownership: the same rule loadWorkshopKits enforces, so the editor refuses before the server silently drops it
   if (ID_RE.test(id)) {
@@ -189,12 +212,11 @@ export function validateKit(source, opts = {}) {
       'the loader reads mod.default, so the file is reported and skipped without it');
   }
 
-  // ---- rule 2: self-contained. Checked on the COMMENT-STRIPPED text, because the rule itself is worth explaining in
-  // the file's own header (the shipped example kit does exactly that).
-  const code = stripCommentsAndStrings(text);
-  if (/^\s*import\s|\bfrom\s+['"]|^\s*export\s+\{[^}]*\}\s*from\s+['"]/m.test(code) || /\brequire\s*\(/.test(code)) {
-    err('source', 'KIT_IMPORT', 'a kit must not import or require anything — it has to be self-contained',
-      'the same file is loaded by the server (by real path) and by the browser (by URL), so no relative path works for both; use only the battle and the (bb, chess, def) arguments');
+  // ---- rule 2: imports come from the whitelist (shared/kitImports.js). Checked on the COMMENT-STRIPPED text, because
+  // the rule itself is worth explaining in the file's own header (the shipped example kit does exactly that), and with
+  // the SAME scanner the loader uses — one verdict, two readers (DESIGN §28.12).
+  for (const issue of kitImportIssues(text)) {
+    err('source', issue.code, issue.reason, `a kit may import only: ${kitImportAllowedText()}`);
   }
 
   // ---- rule 3: deterministic and environment-free

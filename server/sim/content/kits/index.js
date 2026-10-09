@@ -9,19 +9,25 @@
 // module, no directory listing): a file that fails to load (syntax error, throwing top-level code, missing file) is
 // logged and skipped — its chess falls back to the generic kit — instead of breaking the server or the page.
 //
-// 补位 stand-in kits (DATA.md §18): STANDIN_KIT_FILES lists `ops/standin-<codename>.js`, one per stand-in character
+// 补位 stand-in kits (DATA.md §18): 下面那个 stand-in 注册表列出 `ops/standin-<codename>.js`，一个 stand-in 角色一个
 // (codename = its charId without `char_<n>_`: `standin-acguad.js` = Sharp, char_609_acguad); each registers exactly one
 // key, that charId. A stand-in keeps the ids of the chess it replaces, so content/index.js kitOf finds its kit by
 // `def.charId` only, never by the chess id (the replaced operator's kit). STANDIN_KITS is merged into KITS after every
 // tier group: the chess keys keep their order, and `char_…` keys never meet `chess_char_…` ones.
 //
-// 自选 operator kits (DATA.md §18, README.md "How to add an operator (自选)"): OPERATOR_KIT_FILES lists
+// 自选 operator kits (DATA.md §18, README.md "How to add an operator (自选)"): 下面那个自选注册表列出
 // `ops/op-<codename>.js`, one per owned-6★ pick of data/backups.json `diy.ownedPool` (codename = its charId without
 // `char_<n>_`: `op-siege.js` = 推进之王, char_112_siege), each registering exactly that charId and writing every skill under
 // `skills`. A 自选 piece keeps its DIY slot's ids, so kitOf finds its kit by `def.charId` — a prototype pick runs its
 // stand-in kit, a 4★ reserve the generic kit (GENERIC_KIT_CHARS). OPERATOR_KITS is merged after the stand-ins.
 // KITTED_CHARS = every character a 自选 pick may field with a faithful kit; an operator outside it is not offered
 // (shared/diy.js diyPool / validateDiyPicks `kitted`).
+//
+// ⚠ 这两段注释**故意不写下面那两个导出数组的名字**（它们各自只在声明行第一次出现）。
+// 社区的就地补丁是「按名字文本定位、插一行」来注册自己的 kit 的：名字若在注释里先出现一次，它会定位到注释，
+// 再把行插进**下一个** `]);` 所属的数组 —— 结果是两个字符串字面量之间没有逗号、`server/index.js` 起不来，
+// 而补丁自己的自检只查「名字在不在文件里」，于是全绿。2026-10-09 实测发生过（社区「克莱门莎」mod）。
+// 规矩：**靠文本定位的名字，第一次出现必须在它的声明行**。守卫在 test/modSurface.test.js。
 
 export const KIT_FILES = Object.freeze([
   // tier 1

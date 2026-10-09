@@ -19,11 +19,14 @@
 //   still field any module, as the kits test them); a prototype carries the skill
 //   and module of its 补位 rows at that tier (`diy.locked`: "技能携带规则与系统补位时一致" — [ASSUMED] that reading, the
 //   owner's decision of 2026-10-05);
-// - full potential for everyone, as every chess (the owner's decision of 2026-10-07: the backups.json forms).
+// - an owned pick fights at its player's potential and 练度, as every chess (0.2.2, the owner's decision of 2026-10-08 —
+//   default 潜能 6 / 精英2 Lv.60; the backups.json forms carry the lower potentials, shared/potential.js); a prototype
+//   pick has neither (`diyProto` on its composed record).
 // Which operators have a kit (a pick without one is not offered) is the sim's kit registry
 // (server/sim/content/kits/index.js KITTED_CHARS), passed in as `kitted`.
 
 import { composeUnitRecord, unitForm, statusKey } from './standIn.js';
+import { atPotential } from './potential.js';
 
 /** The tiers that have 自选 slots. */
 export const DIY_TIERS = Object.freeze([5, 6]);
@@ -96,6 +99,45 @@ export function diySlot(slotId, data) {
 /** The base ids of the 自选 slots (data order: tier 5 then tier 6). @param {DiyData} data @returns {string[]} */
 export function diySlotIds(data) {
   return Object.keys(diyOf(data)?.slots ?? {});
+}
+
+/**
+ * The unit forms (`statusKey` of `backups.units[charId].forms`) a character must HAVE to be a legal 自选 pick of the
+ * slots it can reach — **derived from the slots themselves**, never hardcoded.
+ *
+ * Why it exists: `checkDiyPick` resolves BOTH a slot's records against the character (`unitForm(backups, charId,
+ * slot.normal.status)` and `slot.golden.status`) and refuses the pick when either is missing. A character with two elite
+ * forms instead of three (an elite record at `equipLevel` 3 against a character holding only 0 and 1) is therefore a
+ * 自选 pick that cannot be made — and the failure is not in the 自选 screen: `tools/golden.mjs` builds a corpus scenario
+ * for every pool member through a tier-6 elite slot, so one such character in `ownedPool` makes the corpus generation
+ * throw and takes `golden` / `ci` down with it. The loader refuses it at pack-install time instead (shared/workshop.js
+ * `OPERATOR_FORM_MISSING`).
+ *
+ * The required set is the union over every 自选 slot of the two records' statuses, so a data change that adds a slot
+ * (or moves an `equipLevel`) moves this check with it — no second copy of `2/60/7/3`. A prototype (原型干员) is fielded
+ * through its LOCKED selection and is not reachable by an owned-pool operator, so `prototypes` are excluded; pass
+ * `tier` when the caller knows the character sits in one tier's pool.
+ *
+ * **The caller must pass `chess` as well as `backups`.** `diy.slots` names the slots; each form key comes from the
+ * `status` of those slots' records in `chess.json` (`diySlot` → `chessOf`). With `backups` alone this returns an EMPTY
+ * list, which turns the caller's check into "nothing is required" — the silent failure the rule exists to prevent. A
+ * caller that genuinely has no chess data (a half-installed data directory) gets `[]`, and must treat that as "cannot
+ * judge" rather than as a pass.
+ *
+ * @param {DiyData} data `{ chess, backups }` — chess is required for a non-empty answer
+ * @param {{ tier?: number|null }} [opts] restrict to one tier's slots
+ * @returns {string[]} sorted status keys, e.g. `['2/1/4/0', '2/60/7/1', '2/60/7/3']`
+ */
+export function requiredUnitForms(data, { tier = null } = {}) {
+  const statuses = new Set();
+  for (const slotId of diySlotIds(data)) {
+    const slot = diySlot(slotId, data);
+    if (!slot || (tier !== null && slot.tier !== tier)) continue;
+    for (const rec of [slot.normal, slot.golden]) {
+      if (rec && rec.status) statuses.add(statusKey(rec.status));
+    }
+  }
+  return [...statuses].sort();
 }
 
 /**
@@ -191,40 +233,46 @@ export function checkDiyPick(slotId, pick, data) {
 
 /**
  * A 自选 slot record (either form) filled with a checked pick: composeUnitRecord of the slot's identity (tier, price,
- * merge, status; no 特质) with the operator's form at the slot's status, the pick's skill and module (active on the elite
- * form only), the derived bonds — plus `diyFor` (the slot's base id: the record is a 自选 piece) and `charId` (the
- * operator). Null when the pick is not legal for the slot (checkDiyPick) or the data lacks a part.
+ * merge, status; no 特质) with the operator's form at the slot's status — an owned pick's at `potential` (1–6, default
+ * 6: shared/potential.js atPotential) — the pick's skill and module (active on the elite form only), the derived bonds —
+ * plus `diyFor` (the slot's base id: the record is a 自选 piece), `charId` (the operator) and, for a prototype pick,
+ * `diyProto: true` (no potential, no 练度: shared/potential.js cultivationOf). Null when the pick is not legal for the
+ * slot (checkDiyPick) or the data lacks a part.
  * @param {object} slot a DIY chess record (data/chess.json, `isDiy`)
  * @param {DiyPick} pick
  * @param {DiyData} data
+ * @param {{ potential?: number|null }} [opts]
  * @returns {object|null}
  */
-export function diyRecordOf(slot, pick, data) {
+export function diyRecordOf(slot, pick, data, { potential = null } = {}) {
   if (!isObj(slot) || !slot.isDiy || typeof slot.chessId !== 'string') return null;
   const c = checkDiyPick(slot.chessId, pick, data);
   if (!('ok' in c)) return null;
   const { charId, skillIndex, uniEquipId } = c.pick;
   const backups = backupsOf(data);
   const unit = backups?.units?.[charId] ?? null;
-  const rec = composeUnitRecord(slot, unit, unitForm(backups, charId, slot.status),
+  const proto = isPrototypePick(data, slot.tier, charId);
+  const form = unitForm(backups, charId, slot.status);
+  const rec = composeUnitRecord(slot, unit, proto ? form : atPotential(form, potential),
     { skillIndex, moduleId: uniEquipId, bonds: diyOf(data)?.operators?.[charId]?.bonds ?? null });
   if (!rec || !rec.skill) return null;
   rec.diyFor = slot.baseId ?? slot.chessId;
+  if (proto) rec.diyProto = true;
   return rec;
 }
 
 /**
  * The record of a 自选 slot filled with `pick` (diyRecordOf): `elite` = the slot's `_b` form (E2 Lv60, module stage 1 at
- * tier 5 / 3 at tier 6), else the normal form (E2 Lv1, no module).
+ * tier 5 / 3 at tier 6), else the normal form (E2 Lv1, no module); `potential` as diyRecordOf.
  * @param {string} slotId the slot's base id (an elite id is accepted and taken as the elite)
  * @param {DiyPick} pick
- * @param {{ elite?: boolean, data: DiyData }} opts
+ * @param {{ elite?: boolean, data: DiyData, potential?: number|null }} opts
  * @returns {object|null}
  */
-export function diyRecord(slotId, pick, { elite = false, data } = { data: null }) {
+export function diyRecord(slotId, pick, { elite = false, data, potential = null } = { data: null }) {
   const slot = diySlot(slotId, data);
   if (!slot) return null;
-  return diyRecordOf(elite || slot.elite ? slot.golden : slot.normal, pick, data);
+  return diyRecordOf(elite || slot.elite ? slot.golden : slot.normal, pick, data, { potential });
 }
 
 /**
