@@ -543,13 +543,30 @@ export const byPackId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
  * two fields, and `applyWorkshop` reported no error at all.
  */
 export const OVERRIDE_REPLACE_KEYS = Object.freeze([
-  'skill', 'skills', 'talents', 'trait', 'traitBase', 'traitOverride', 'modules',
+  'skill', 'skills', 'trait', 'traitBase', 'traitOverride', 'modules',
   'rangeGrid', 'attackRangeGrid', 'assets', 'diy', 'bonds',
 ]);
 
 /**
+ * Lists whose entries carry a **stable identity key**: merged entry by entry on that key instead of wholesale, so an
+ * author's partial edit cannot erase data they never wrote.
+ *
+ * Why this exists (0.2.2's potential annotations): a record in `data/chess.json` carries `potDown`, and a talent carries
+ * `potMin` + `potBelow` — the chain that changes that talent below a potential rank (`shared/potential.js`). A record
+ * the editor derives deliberately carries **none** of them (that is the engine's convention; `stripPotential` is "what a
+ * record built at one rank looks like"). So replacing `talents` wholesale dropped the official's whole potential chain
+ * the moment an author touched one talent — while `potDown` survived only because the patch never mentioned it. Merging
+ * by `index` keeps the chain: the author's fields win, everything they did not write stays.
+ *
+ * Deliberately narrow: only lists that HAVE such a key. `bonds` / `immunities` / `rangeGrid` … still replace wholesale
+ * (see the note above `OVERRIDE_REPLACE_KEYS`): a field-wise merge of a bare list would invent a record nobody wrote.
+ */
+export const OVERRIDE_KEYED_LISTS = Object.freeze({ talents: 'index', talentsBase: 'index' });
+
+/**
  * Merge one override record onto the record it replaces: field by field, with `OVERRIDE_REPLACE_KEYS` and arrays taken
- * wholesale. The input objects are never mutated (the caller may keep the official data frozen).
+ * wholesale (`OVERRIDE_KEYED_LISTS` excepted — those merge on their identity key). The input objects are never mutated
+ * (the caller may keep the official data frozen).
  * @param {object} base the record being overridden (official, or a record an earlier pack contributed)
  * @param {object} patch the pack's record
  * @returns {object} a new record
@@ -558,10 +575,39 @@ export function mergeRecord(base, patch) {
   if (!isPlainObj(base) || !isPlainObj(patch)) return patch;
   const out = { ...base };
   for (const [key, value] of Object.entries(patch)) {
+    const idKey = OVERRIDE_KEYED_LISTS[key];
+    if (idKey && Array.isArray(value) && Array.isArray(base[key])) {
+      out[key] = mergeKeyedList(base[key], value, idKey);
+      continue;
+    }
     if (OVERRIDE_REPLACE_KEYS.includes(key) || Array.isArray(value)) { out[key] = value; continue; }
     out[key] = isPlainObj(value) && isPlainObj(base[key]) ? mergeRecord(base[key], value) : value;
   }
   return out;
+}
+
+/**
+ * Merge a list whose entries carry an identity key (`OVERRIDE_KEYED_LISTS`) onto the base list: entries pair up by that
+ * key and merge field by field, unmatched base entries stay where they are, unmatched patch entries are appended.
+ *
+ * Order and the base's own order are preserved (a `talents` index is sparse — 0, 1, 3 — so array position is not the
+ * key). An entry without a usable key is appended rather than guessed at: that is a talent the author added.
+ * @param {unknown[]} baseList @param {unknown[]} patchList @param {string} idKey
+ * @returns {unknown[]}
+ */
+function mergeKeyedList(baseList, patchList, idKey) {
+  const at = new Map();
+  for (const [i, entry] of baseList.entries()) {
+    if (isPlainObj(entry) && Number.isInteger(entry[idKey])) at.set(entry[idKey], i);
+  }
+  const out = baseList.map((e) => e);
+  const added = [];
+  for (const entry of patchList) {
+    const i = isPlainObj(entry) && Number.isInteger(entry[idKey]) ? at.get(entry[idKey]) : undefined;
+    if (i === undefined) { added.push(entry); continue; }
+    out[i] = mergeRecord(baseList[i], entry);
+  }
+  return [...out, ...added];
 }
 
 /**

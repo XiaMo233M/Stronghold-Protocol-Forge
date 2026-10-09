@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os';
 
 import { loadData, getData } from '../server/data.js';
 import { loadWorkshop, workshopTouchedFiles, WORKSHOP_DIR } from '../server/workshop.js';
-import { applyWorkshop, normalizePackManifest, normalizeContentFile, workshopSummary, WORKSHOP_CONTENT_FILES, OVERRIDE_REPLACE_KEYS } from '../shared/workshop.js';
+import { applyWorkshop, normalizePackManifest, normalizeContentFile, workshopSummary, WORKSHOP_CONTENT_FILES, OVERRIDE_REPLACE_KEYS, OVERRIDE_KEYED_LISTS } from '../shared/workshop.js';
 import { GameData } from '../server/match/gamedata.js';
 import { SharedPool } from '../server/match/pool.js';
 import { buildWorkshopDataFiles, startServer } from '../server/index.js';
@@ -336,7 +336,7 @@ describe('workshop: the overlay', () => {
     assert.equal(official.stats.maxHp === 12345, false, 'the official record on the way in is never mutated');
   });
 
-  test('behaviour and array fields are replaced wholesale, by name', () => {
+  test('behaviour fields and bare arrays are replaced wholesale, by name; keyed lists merge on their key', () => {
     const officialId = 'chess_char_1_01_a';
     const official = loadData(DATA_DIR, { log: quiet, workshopDir: null }).chess[officialId];
     const patch = { rangeGrid: [[0, 0]], skill: { index: 2 }, talents: [{ name: 'mine' }] };
@@ -346,10 +346,19 @@ describe('workshop: the overlay', () => {
     const got = data.chess[officialId];
     assert.deepEqual(got.rangeGrid, [[0, 0]], 'an array is replaced, never field-merged');
     assert.deepEqual(got.skill, { index: 2 }, 'a half-merged skill would be a record nobody wrote');
-    assert.deepEqual(got.talents, [{ name: 'mine' }]);
+    // `talents` 是**键控列表**（按 `index` 合并）：补丁那一条没有可用的 `index` ⇒ 追加，官方的条目原样留下。
+    // 2026-10-09 修正：整块替换会让作者改一个天赋就抹掉官方的整条潜能链（0.2.2 的 `potMin` / `potBelow`），
+    // 而编辑器派生的记录按引擎约定本来就不带这些注解 ⇒ 那是一条**静默**的数据丢失。
+    // 逐条覆盖见 test/overridePotential.test.js（含「改数值不丢 potDown」与「改文案不丢 potMin」）。
+    assert.deepEqual(got.talents.slice(0, official.talents.length), official.talents,
+      'the official talents stay, potential annotations and all');
+    assert.deepEqual(got.talents.at(-1), { name: 'mine' }, 'an entry with no usable index is appended, not guessed at');
     assert.equal(got.stats.maxHp, official.stats.maxHp, 'and the untouched numeric map still comes from the official record');
-    const keys = ['skill', 'skills', 'talents', 'trait', 'traitBase', 'traitOverride', 'modules', 'rangeGrid', 'attackRangeGrid', 'assets', 'diy', 'bonds'];
+    const keys = ['skill', 'skills', 'trait', 'traitBase', 'traitOverride', 'modules', 'rangeGrid', 'attackRangeGrid', 'assets', 'diy', 'bonds'];
     for (const k of keys) assert.ok(OVERRIDE_REPLACE_KEYS.includes(k), `${k} is a replace-type key`);
+    assert.ok(!OVERRIDE_REPLACE_KEYS.includes('talents'),
+      '`talents` now merges on its `index` — it must not be back in the wholesale list');
+    assert.deepEqual(OVERRIDE_KEYED_LISTS, { talents: 'index', talentsBase: 'index' }, 'the keyed lists are exactly these');
   });
 
   test('an override is a closed world: a field the record does not have is refused, and nothing is applied', () => {
