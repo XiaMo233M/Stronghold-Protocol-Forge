@@ -27,6 +27,8 @@ import path from 'node:path';
 import { getData, loadData } from './data.js';
 import { loadWorkshop, loadWorkshopKits, loadWorkshopHooks, loadWorkshopPanels, workshopThemeFor, dropUnavailablePreDispatchPacks, WORKSHOP_DIR } from './workshop.js';
 import { loadMetaModules } from './match/metaPack.js';
+import { loadServerModules, mountServerModules, stateRootFor } from './modModules.js';
+import { Match as DefaultMatch } from './match/Match.js';
 import {
   buildWorkshopDataFiles, workshopKitFilesFor, workshopPanelFilesFor, workshopAssetsFor, workshopRoutesFor,
   workshopResourceFilesFor, workshopModAssetsFrom, buildWorkshopI18nFiles, resourceServerPolicy, WORKSHOP_ASSET_PREFIX, WORKSHOP_ASSET_TYPES,
@@ -94,11 +96,20 @@ export async function startServer(opts = {}) {
   //（源码里带非确定性的东西、没有 `registerMeta` 导出、import 失败）的包**整包移出已加载集合**，而不是「包照旧
   // 加载、只是它的效果不在」。所以它必须在**数据叠加层之前**跑完，与钩子合在同一个裁剪点上。
   const workshopMeta = await loadMetaModules(loadedOnce, { log });
-  const pruned = dropUnavailablePreDispatchPacks(loadedOnce, [...workshopHooks.errors, ...workshopMeta.errors]);
+  // 包的**服务端模块**（`server.modules`, DESIGN §28.14）：与上面两条同一个裁剪点 —— 模块文件不在、import 失败、
+  // 没有 `registerServer`、或者它挂了一个自己没声明的挂载点，都让**这个包**整份移出已加载集合。
+  const serverModules = await loadServerModules(loadedOnce, { log, stateRoot: stateRootFor(ROOT) });
+  const pruned = dropUnavailablePreDispatchPacks(loadedOnce, [...workshopHooks.errors, ...workshopMeta.errors, ...serverModules.errors]);
   if (pruned.removed.length) {
-    log.warn(`[workshop] dropped ${pruned.removed.length} pack(s) whose declared server.preDispatch cannot be installed: `
+    log.warn(`[workshop] dropped ${pruned.removed.length} pack(s) whose declared server-side payload cannot be installed: `
       + pruned.removed.map((r) => `"${r.pack}" (${r.code})`).join(', '));
   }
+  // 裁剪之后才有「这一版到底装了哪些包」：被别的声明裁掉的包**也不该**留下它的 meta 处理器或服务端模块
+  // （否则一个装不上的包会继续在对局里 / 在 /healthz 上说话）。
+  const survivors = new Set(pruned.packs.map((p) => p.id));
+  const metaModules = workshopMeta.modules.filter((m) => survivors.has(m.id));
+  const serverModulesLive = serverModules.modules.filter((m) => survivors.has(m.pack));
+  const modMount = mountServerModules(serverModulesLive, { log });
   const excludedPacks = new Set(pruned.removed.map((r) => r.pack));
   // The process-wide singleton serves the default data dir; a custom dir (tests) gets its own copy. The 创意工坊 overlay
   // is applied inside the loader (server/data.js), i.e. whichever way the data is obtained, it is already merged.
@@ -160,8 +171,33 @@ export async function startServer(opts = {}) {
   // 已加载集合），所以「不在身份清单里的包」也不会出现在目录里。Empty on a plain install, and then the two /mods
   // routes answer `{ packs: [] }` / 404 and nothing else.
   const modsJson = createModsRoute(workshopLoaded, buildModCatalog(workshopLoaded));
+  // 包声明服务端模块时，它可以给对局套一层 `MatchClass` 包装器（`uses: ['matchClass']`，DESIGN §28.14）。按**包 id**
+  // 次序层层套上（`mountServerModules` 已经排过序），任何一层抛异常或返回非函数都只记日志并跳过那一层 ——
+  // 一个包不该让服务器起不来。没有包声明时 `MatchClass` 就是原来的那一个（连字段都不多传）。
+  const matchWrappers = modMount.matchClassWrappers();
+  let MatchClass = opts.MatchClass;
+  if (matchWrappers.length) {
+    let base = MatchClass || DefaultMatch;
+    for (const w of matchWrappers) {
+      try {
+        const next = w.fn(base);
+        if (typeof next !== 'function') {
+          log.warn(`[workshop] ${w.pack}/${w.id}: matchClass(...) returned ${typeof next}, not a class — that layer is skipped`);
+          continue;
+        }
+        base = next;
+      } catch (e) {
+        log.warn(`[workshop] ${w.pack}/${w.id}: matchClass(...) threw (${e && e.message ? e.message : e}) — that layer is skipped`);
+      }
+    }
+    MatchClass = base;
+  }
   const { registry, lobby, network } = createSessionStack(
-    { ...opts, workshop: { kits: workshopKits.kits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme, meta: workshopMeta.modules } },
+    {
+      ...opts,
+      ...(matchWrappers.length ? { MatchClass } : {}),
+      workshop: { kits: workshopKits.kits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme, meta: metaModules },
+    },
     { data, log },
   );
   // content packs (docs/PACKS.md): scanned now — the start log names them — and again whenever their folders change
@@ -173,7 +209,7 @@ export async function startServer(opts = {}) {
   resetBuildTag();
   buildTag();
 
-  const server = http.createServer(createRequestHandler({ serveStatic, health: { startedAt, network, registry, lobby }, log,
+  const server = http.createServer(createRequestHandler({ serveStatic, health: { startedAt, network, registry, lobby, modHealth: () => modMount.healthz() }, log,
     modsCatalog: (req, res) => serveMods(req, res, MODS_CATALOG_URL, '', modsJson) }));
   server.on('clientError', answerClientError);
   const wss = attachWebSocket(server, { network, log });
@@ -212,6 +248,9 @@ export async function startServer(opts = {}) {
     throw e;
   }
   server.on('error', (e) => log.error('[http] server error', e));
+  // 包的服务端模块的 `onBoot`（DESIGN §28.14）：**绑上端口之后**才跑 —— 「服务起来了」对它们是一句真话。
+  // 每个回调单独 try（`mountServerModules.boot` 内部就是这么做的），一个包炸了不影响别的包，也不影响启动。
+  modMount.boot();
 
   const addr = server.address();
   const actualPort = typeof addr === 'object' && addr ? addr.port : port;
@@ -222,6 +261,8 @@ export async function startServer(opts = {}) {
     if (closing) return closing;
     closing = (async () => {
       try { lobby.shutdown('shutdown'); } catch (e) { log.error('[shutdown] lobby', e); }
+      // 包的服务端模块的 `onShutdown`（例如停机播报 + 快照留档）：与 `onBoot` 同一条，失败只记日志、不阻塞停机。
+      try { modMount.shutdown(); } catch (e) { log.error('[shutdown] mod modules', e); }
       network.close();
       await new Promise((resolve) => {
         server.close(() => resolve());

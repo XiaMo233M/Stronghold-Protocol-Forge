@@ -17,17 +17,31 @@ const MAX_URL_LENGTH = 4096;
 
 /**
  * The GET /healthz body.
+ *
+ * `modHealth`（可选）是包的服务端模块贡献的字段（DESIGN §28.14）：一个**函数**（每次请求现算，因为那三件要报的是
+ * 内存 / 循环延迟 / 归档标签这类实时值）或一个现成的对象。返回空对象时**不加这个键** —— 干净安装的 `/healthz`
+ * 与从前逐字节相同。**包的摘要**已经在 `lobby.stats()` 里（`mods` / `modPacks`，DESIGN §28.9 第 2 项），所以这里
+ * 不重复放一份。
  * @param {{ startedAt: number, network: import('../net.js').Network, registry: import('../net.js').SessionRegistry,
- *           lobby: import('../lobby.js').Lobby }} health
+ *           lobby: import('../lobby.js').Lobby, modHealth?: (() => Record<string, any>)|null }} health
  */
-export function healthReport({ startedAt, network, registry, lobby }) {
-  return {
+export function healthReport({ startedAt, network, registry, lobby, modHealth = null }) {
+  /** @type {Record<string, any>} */
+  const out = {
     ok: true, version: PROTOCOL_VERSION, app: APP_VERSION, uptimeSec: Math.round((Date.now() - startedAt) / 1000),
     // the runtime the server is serving right now (public/js/ui/buildGuard.js): a page whose own build is
     // older than this reloads itself, so a deploy reaches clients that never reload
     build: buildTag(),
     sockets: network.connectionCount, sessions: registry.size, ...lobby.stats(),
   };
+  let fields = null;
+  try {
+    fields = typeof modHealth === 'function' ? modHealth() : modHealth;
+  } catch {
+    fields = null; // 一个包的 healthz 回调炸了不该让运维拿不到 /healthz
+  }
+  if (fields && typeof fields === 'object' && Object.keys(fields).length) out.modHealth = fields;
+  return out;
 }
 
 /**

@@ -66,7 +66,7 @@ workshop/<packId>/
 | `api` | 否 | 包写它时的**模组 API 区间**（钩子总线与 kit 契约，见 §1.9）：只有声明了才与 `shared/constants.js MOD_API_VERSION` 比对，不含这个 build 就整个包被拒（`MOD_API_INCOMPATIBLE`） | 包管理 → 包元数据（本轮只是可写可读可判，编辑器入口见 §1.9「当前状态」） |
 | `assets` | 贡献项之一 | 客户端资源容器声明（§1.9）：`{ container, manifest, serverPolicy?, verify? }` | ⛔ 本轮无入口（A 段只做格式） |
 | `client` | 贡献项之一 | C 层注册点声明（§1.9）：`{ panels: [{ id, slot, module, order?, gate? }], requires?: […] }`，`slot` 是闭枚举 | ⛔ 本轮无入口 |
-| `server` | 贡献项之一 | 分发前准入钩子声明（§1.9）：`{ preDispatch: { module, policy, intercepts } }`；`intercepts` 必须是 `shared/protocol.js C2S` 里真实存在的类型 | ⛔ 本轮无入口 |
+| `server` | 贡献项之一 | 服务端侧的三类声明（§1.9）：`{ preDispatch: { module, policy, intercepts }, meta: { module, registers }, modules: [{ id, entry, uses, write? }] }`。`preDispatch.intercepts` 必须是 `shared/protocol.js C2S` 里真实存在的类型；`meta` 与挂了 `matchClass` 的模块都要求包声明 `combat: true` | ⛔ 本轮无图形入口 |
 | `routes` | 贡献项之一 | 只读 HTTP 路由声明（§1.9）：`[{ path, file, cache? }]`，只服务包内 `.json` | ⛔ 本轮无入口 |
 | `i18n` | 贡献项之一 | 给**已有语种**（`en` / `ja` / `ko` / `zh-TW` …）补界面词条：`{ "<语种>": "<包内相对 .json 路径>" }`，见 §1.10 | ⛔ 本轮无入口 |
 
@@ -1217,6 +1217,70 @@ export function registerMeta(registry) {
 **写错的拒绝码**：`META_BAD_SHAPE` / `META_UNKNOWN_FIELD` / `META_BAD_PATH` / `META_BAD_MODULE` /
 `META_BAD_REGISTERS` / `META_BAD_KEY` / `META_DUPLICATE_KEY` / `META_NEEDS_COMBAT` / `SERVER_EMPTY_MEMBER`；
 装载期还有 `META_BAD_MODULE`（模块文件不在包里）。前八个在 `pack.json` 的形状层就拒，失败同样**整包不加载**。
+
+### 1.12 `server.modules`：包的**服务端模块**（已实现）
+
+一类与 `kits/` 并列、但契约**相反**的载荷。kit 是战斗里的代码，明写「不碰文件系统、不碰网络」；而社区插件包真正要做
+的那几件事恰好相反 —— 停机播报与快照留档、匿名对局统计落盘、给 `/healthz` 加几个字段。以前它们只能靠**手改引擎
+文件**；这一格就是那条不手改的通道。
+
+```jsonc
+"server": {
+  "modules": [
+    { "id": "ops",     "entry": "server/ops.mjs",     "uses": ["boot", "shutdown"], "write": true },
+    { "id": "stats",   "entry": "server/stats.mjs",   "uses": ["matchClass"],       "write": true },
+    { "id": "healthz", "entry": "server/healthz.mjs", "uses": ["healthz"] }
+  ]
+}
+```
+
+```js
+// server/ops.mjs —— 一个 registerServer(host)
+export function registerServer(host) {
+  host.onBoot(() => host.io.write('state.json', JSON.stringify({ startedAt: Date.now() })));
+  host.onShutdown(() => host.log.info('bye'));
+  host.healthz(() => ({ boots: 1, tag: host.hash.slice(0, 8) }));
+}
+```
+
+**四个挂载点**（`uses` 是闭枚举，写别的整包被拒）：
+
+| 挂载点 | 拿到什么 | 何时跑 |
+|---|---|---|
+| `boot` | `host.onBoot(fn)` | 服务器**绑上端口之后**一次 |
+| `shutdown` | `host.onShutdown(fn)` | 关闭流程里一次（失败只记日志，不阻塞停机）|
+| `healthz` | `host.healthz(() => ({...}))` | 每次 `GET /healthz`（现算），字段进 `modHealth["<包id>"]` |
+| `matchClass` | `host.matchClass(Base => Sub)` | 建对局时：按**包 id** 次序层层套在 `MatchClass` 上 |
+
+**没声明的挂载点一碰就抛**（`MODULE_USE_UNDECLARED`），不是给一个 `undefined` —— 后者只会变成一行
+`TypeError: not a function`，作者看不出是「没声明」还是「拼错了」。
+
+**写盘要单独声明**（`"write": true`）：拿到的是 `host.io`，它被**限定在 `<状态目录>/mod/<包id>/`**（`SP_STATE_DIR`
+优先，否则 `<仓库>/var`）。包自己的目录是只读的、引擎的目录根本不在门面里 —— `..` 与绝对路径一律
+`MODULE_IO_BAD_PATH`，目录按需创建（声明了却从没写过，磁盘上不留东西）。
+
+**`matchClass` 是唯一能碰到对局的挂载点**，所以只有它要求包声明 `combat: true`（`MODULES_NEED_COMBAT`）：一个
+`MatchClass` 包装器原则上能改对局结果，而「要改结果的必须进房间摘要闸门与 golden 那条线」是业主裁决。只挂
+`boot` / `shutdown` / `healthz` 的模块碰不到对局，不需要它。
+
+**`healthz` 的回执有界**：扁平对象、值只能是字符串/数字/布尔/`null`、最多 12 个字段 / 2KB；嵌套或超限的那一条被
+**点名跳过**（其余字段照旧报到）。端点是给运维看的，不是数据通道。
+
+**宿主还给你**：`host.pack` / `host.module` / `host.hash`（包的摘要，写进归档或播报里用）/ `host.dir`（包的目录，
+只读，仅用于诊断）/ `host.log`（带 `[mod <包>/<模块>]` 前缀）。
+
+**纪律：一个用不了的声明拒绝整个包**（与 §1.9 同一条）。`entry` 不在包里、不是 `.mjs`、import 失败、没有
+`registerServer` 导出、或者挂了一个自己没声明的挂载点 —— 这个包**整份移出已加载集合**（与 `server.preDispatch` /
+`server.meta` **同一个裁剪点**），它的数据也不并进游戏数据。没有任何包声明服务端模块时：`/healthz` 里没有
+`modHealth` 这个键，一个字节都不多。
+
+**模块字节进内容哈希**，层推导算 **B**（DESIGN §28.1 的三层表：它执行服务端逻辑）。`combat` 的推导仍然**只看
+`kits/`** —— 只挂 `boot`/`healthz` 的模块不该被算成「可能改对局结果」。
+
+**写错的拒绝码**：`MODULES_BAD_SHAPE` / `MODULES_UNKNOWN_FIELD` / `MODULES_BAD_ID` / `MODULES_DUPLICATE_ID` /
+`MODULES_BAD_ENTRY` / `MODULES_BAD_USES` / `MODULES_DUPLICATE_USE` / `MODULES_BAD_WRITE` / `MODULES_TOO_MANY` /
+`MODULES_NEED_COMBAT`（以上在形状层）；装载期与运行期另有 `MODULES_NO_REGISTER` / `MODULES_IMPORT_FAILED` /
+`MODULE_USE_UNDECLARED` / `MODULE_IO_BAD_PATH` / `MODULE_BAD_HOOK`。
 
 ---
 

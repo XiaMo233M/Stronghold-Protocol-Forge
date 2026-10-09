@@ -1168,3 +1168,48 @@ from disk byte for byte.
 **What it does not do.** `data/i18n/<code>.json` (the game texts, a different file family) is out of scope, and
 `tools/i18n.mjs check` still does not flag a msgid a pack declares and the code never uses. Both are recorded as open in
 the B5 report rather than implied by the field's existence.
+
+### 28.14 `server.modules`: the server-module payload (implemented)
+
+**The defect, as the community pack states it.** Three of its files — `server/ops.js` (shutdown announcement + a snapshot
+archive under `var/state`), `server/stats.js` (anonymous match/emote counters under `var/stats`) and `server/healthz.js`
+(three extra fields on `/healthz`) — cannot be expressed by any declaration this layer has. Each is the exact opposite of
+what §28.4 requires of a kit ("no file system, no network"): they write files, mount a startup hook and extend an
+existing HTTP endpoint. Today the only way to ship them is to **hand-patch engine files**, which is what the pack's own
+`② 共享层补丁` folder does.
+
+**The ruling.** A new payload class beside `kits/`, with security coming from *granting only what was declared* rather
+than from banning things:
+
+- **`uses` is a closed enum of mount points** — `boot`, `shutdown`, `healthz`, `matchClass` — and the host object a
+  module receives exposes exactly those. An undeclared one **throws by name** (`MODULE_USE_UNDECLARED`) instead of being
+  `undefined`: an `undefined` is a `TypeError: not a function` the author cannot tell apart from a typo.
+- **Writing is a separate bit** (`"write": true`) and grants `host.io`, scoped to `<state root>/mod/<pack id>/`
+  (`SP_STATE_DIR`, else `<repo>/var`). The pack's own directory stays read-only and the engine's directories are not in
+  the facade at all: `..` and absolute paths are refused (`MODULE_IO_BAD_PATH`), and the directory is created on the
+  first write so a module that declares `write` and never writes leaves nothing on disk.
+- **`healthz` callbacks are bounded**: a flat object of scalars, at most 12 fields / 2 KB, grouped under
+  `modHealth["<pack id>"]` so two packs cannot overwrite each other's fields. A callback that throws, returns a nested
+  object or overflows is **named and skipped** while the others still report — the endpoint is for operators, not a data
+  channel.
+- **`matchClass` is the only mount point that can reach a match**, so it alone requires `combat: true`
+  (`MODULES_NEED_COMBAT`): a `MatchClass` wrapper can in principle change a result, and "a pack that can change a result
+  declares it" is the owner's ruling. `boot` / `shutdown` / `healthz` cannot, and do not need it. The layer derivation
+  counts such a pack as **B**, while `combat`'s *derived* value still looks only at `kits/`.
+
+**Where it is enforced.** The declaration is `shared/workshop.js parseServerModulesDecl` (shape, closed enums, caps:
+8 modules per pack, ids unique, `entry` a pack-relative `.mjs`); the file's presence is judged in the load gate
+(`server/workshop.js serverModuleIssues`); the import, the `registerServer(host)` export and the mount points themselves
+are judged on the startup path (`server/modModules.js`), and a module that fails **takes its whole pack out of the loaded
+set** — the same prune point `server.preDispatch` and `server.meta` use. Module bytes enter the content hash, exactly
+like `kits/`, panel modules and meta modules.
+
+**Two deliberate asymmetries, recorded rather than implied:**
+
+- **Server modules are process-wide, not per-room.** `boot` / `shutdown` are process events by nature, and so is
+  `/healthz`. `matchClass` wraps the class the *Lobby* hands to every match. So unlike `server.meta`, a room's declared
+  set does not select them — a server-module pack is a property of the installation, which is what the three real
+  modules are.
+- **No network hook, and no arbitrary mount points.** The ruling's third requirement (declarative lifecycle mounts)
+  is met with four named places; anything else a server-side mod wants today still has to be an engine feature. That is
+  a deliberate limit of the first cut, not an oversight: four mounts were what the three files actually needed.
