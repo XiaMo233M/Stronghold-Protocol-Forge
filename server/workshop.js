@@ -189,9 +189,11 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
       const battleFileIssues = battleIssues(manifest.pack, packDir);
       // `server.modules`（DESIGN §28.14）：声明的 `.mjs` 必须真的在包里 —— 同一条纪律，同一个裁剪点。
       const moduleFileIssues = serverModuleIssues(manifest.pack, packDir);
+      // `server.room`（DESIGN §28.20）：声明的房间级钩子 `.mjs` 必须真的在包里 —— 同一条纪律，同一个裁剪点。
+      const roomFileIssues = roomIssues(manifest.pack, packDir);
       // `notices`（DESIGN §28.15）：声明的公告 / 鸣谢 `.json` 必须真的在包里、可读、是 JSON —— 同一条纪律。
       const noticeIssues = noticesIssues(manifest.pack, packDir);
-      const gateIssues = [...assetIssues.issues, ...hookIssues, ...langIssues, ...metaFileIssues, ...battleFileIssues, ...moduleFileIssues, ...noticeIssues];
+      const gateIssues = [...assetIssues.issues, ...hookIssues, ...langIssues, ...metaFileIssues, ...battleFileIssues, ...moduleFileIssues, ...roomFileIssues, ...noticeIssues];
       if (gateIssues.length) {
         errors.push({ pack: name, reason: `${gateIssues[0].code}: ${gateIssues[0].reason}` });
         continue;
@@ -564,6 +566,36 @@ export function battleIssues(pack, packDir) {
 }
 
 /**
+ * `pack.json.server.room` 的**装载期**判据（DESIGN §28.20）：声明的 `module` 必须真的在包里、可读、是 `.mjs`。
+ *
+ * 与 `metaIssues` / `battleIssues` / `serverModuleIssues` / `panelModuleIssues` 逐字同一条纪律（「一条用不了的
+ * 声明拒绝整个包」）：一个声明了「房间建起来时我要做事」却拿不出模块文件的包，会让房主以为这个房间有它的行为
+ * 而实际上没有 —— 那正是 §28.13.3 立这条规矩要消灭的那一类静默失效。
+ *
+ * 判不到的三件事留到装配路径（`server/roomPack.js`）：能不能 `import`（只有动态 import 知道）、有没有 `install`
+ * 导出、以及它跑起来会不会抛 —— 最后一件由 `install(room)` 与每个事件**逐钩子** try/catch 隔离
+ * （`ROOM_HOOK_THREW` 点名**哪个包的哪个钩子**，房间照旧工作）。
+ * @param {{ server?: { room?: { module: string } } }|null} pack normalized manifest
+ * @param {string} packDir the pack's directory on disk
+ * @returns {Array<{ code: string, reason: string }>}
+ */
+export function roomIssues(pack, packDir) {
+  const decl = pack && pack.server && pack.server.room;
+  if (!decl || typeof packDir !== 'string' || !packDir) return [];
+  const dir = path.resolve(packDir);
+  const moduleAbs = path.join(dir, ...String(decl.module).split('/'));
+  if (!(moduleAbs === dir || moduleAbs.startsWith(dir + path.sep))) {
+    return [{ code: 'ROOM_BAD_PATH', reason: `server.room.module "${decl.module}" must resolve inside the pack` }];
+  }
+  let readable;
+  try { readable = fs.statSync(moduleAbs).isFile(); } catch { readable = false; }
+  if (!readable) {
+    return [{ code: 'ROOM_BAD_MODULE', reason: `server.room.module "${decl.module}" is not a readable file inside the pack` }];
+  }
+  return [];
+}
+
+/**
  * `pack.json.server.modules[*].entry` 的**装载期**判据（DESIGN §28.14）：声明的每一个 `.mjs` 必须真的在包里、可读。
  *
  * 与 `metaIssues` / `panelModuleIssues` 同一条纪律（「一条用不了的声明拒绝整个包」）：一个声明了服务端模块却拿不出
@@ -859,7 +891,19 @@ export function identifyPack(packDir, pack, files, { assetsDigest = null } = {})
   const moduleFiles = [...new Set(((pack.server && Array.isArray(pack.server.modules)) ? pack.server.modules : [])
     .map((m) => (m && typeof m.entry === 'string' ? m.entry : ''))
     .filter(Boolean))];
+  // 包的**房间级钩子**模块（`pack.json.server.room`, DESIGN §28.20）：它会在**每一个**装上这个包的房间里执行，
+  // 所以它的字节必须进身份 —— 与 kits / panels / meta / battle / server.modules 逐字相同的一条理由：能改变
+  // 一端行为的声明不进哈希，同一个摘要下就有两种行为（§28.2），而房间的摘要闸门正是在这里对齐的。
+  // 没声明 `server.room` 的包（今天所有的包）哈希逐字节不变。
+  const roomFiles = [...new Set([pack.server && pack.server.room && typeof pack.server.room.module === 'string'
+    ? pack.server.room.module : ''].filter(Boolean))];
   for (const rel of moduleFiles) {
+    if (manifest.some((m) => m.path === rel)) continue;
+    const abs = path.join(packDir, ...rel.split('/'));
+    if (abs === packDir || !abs.startsWith(packDir + path.sep)) continue;
+    try { addBytes(rel, fs.readFileSync(abs)); } catch { /* unreachable for a LOADED pack: loadWorkshop refuses it first */ }
+  }
+  for (const rel of roomFiles) {
     if (manifest.some((m) => m.path === rel)) continue;
     const abs = path.join(packDir, ...rel.split('/'));
     if (abs === packDir || !abs.startsWith(packDir + path.sep)) continue;
@@ -875,12 +919,16 @@ export function identifyPack(packDir, pack, files, { assetsDigest = null } = {})
   // 声明了**服务端模块**的包是 B 层（`server.modules`, DESIGN §28.14）：它会执行服务端代码（可能碰对局，若挂了
   // `matchClass`），所以按 §28.1 的三层表它属于 B，而不是 A/C 里任何一层。
   const hasServerModules = moduleFiles.length > 0;
-  // 声明了 `server.meta` 或 `server.battle` 的包同样是 B 层（对局 / 战斗里的服务端逻辑）：它们执行的都是引擎的
-  // 对局侧代码，按 §28.1 的三层表属于 B。
-  const hasMatchLogic = metaFiles.length > 0 || battleFiles.length > 0;
-  const layer = pack.layer || (kits || hasServerModules || hasMatchLogic ? 'B' : (hasMedia || panelFiles.length || styleFiles.length || hasTheme) ? 'C' : 'A');
+  // 声明了 `server.meta` / `server.battle` / `server.room` 的包同样是 B 层：它们执行的都是引擎的**服务端**代码
+  //（对局 / 战斗里的逻辑，或房间生命周期），按 §28.1 的三层表属于 B —— 那一层的名字是「B server logic」，
+  // 不是「只进对局」。
+  const hasServerLogic = metaFiles.length > 0 || battleFiles.length > 0 || roomFiles.length > 0;
+  const layer = pack.layer || (kits || hasServerModules || hasServerLogic ? 'B' : (hasMedia || panelFiles.length || styleFiles.length || hasTheme) ? 'C' : 'A');
   // `combat` 的推导**不**把服务端模块算进来：只挂 `boot` / `shutdown` / `healthz` 的模块碰不到对局，而挂了
   // `matchClass` 的包由形状层要求它**显式**声明 `combat: true`（`MODULES_NEED_COMBAT`）—— 所以这里照旧只看 kits。
+  // `server.room`（§28.20）同理**不**算：它没有一件能力能改对局结果，形状层因此不要求它声明 `combat: true`；
+  // 把它算进来的话，一个只做「观战人数播报」的诚实包会被推成 `combat: true`、进 golden 语料与摘要闸门 ——
+  // 那是把「改结果的包」这条线稀释掉。分类规则见 §28.20「闸门分类」那一段。
   const combat = pack.combat === null || pack.combat === undefined ? kits > 0 : pack.combat;
   // 6. 声明的资源容器的 sha256（`pack.json.assets`, DESIGN §28.13.5）。装载期已经拿它与容器的**字节**核对过
   //    （`assetsIssues` 流式读过一遍），所以它是这份包的一个真实属性，而不是一句声明 —— 这就是「同一个房间摘要

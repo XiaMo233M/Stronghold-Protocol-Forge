@@ -1426,3 +1426,127 @@ determinism scan, the ownership rule, and the pack hash of any pack that does no
 
 Tests: `test/packRelativeImports.test.js`; the whitelist and its two readers: `test/kitImports.test.js`,
 `test/workshopKits.test.js`.
+
+### 28.20 `server.room`: the room-level hooks (implemented)
+
+**Why a fifth server payload.** After §28.14 and §28.17 a pack has four server-side payloads — `server.modules` (process
+start), `server.preDispatch` (one HTTP request), `server.meta` (a match's shop/economy), `server.battle` (the
+battlefield) — and **none of them covers the LOBBY/ROOM lifecycle**: a room being created, a member joining or leaving,
+a spectator joining, a match starting or ending, a room being disposed. That is not a hypothetical gap: the reference
+community plugin pack hand-patched `server/lobby.js` (**+687 / −14 lines**) to get exactly these behaviours, and every
+one of those edits is a rule this layer has to state instead. §28.4's boundary is not violated by opening the seam —
+it is tested by what the seam hands out.
+
+**The declaration is one field, parallel to `server.battle`** (`shared/workshop.js parseRoomDecl`):
+
+```jsonc
+"server": { "room": { "module": "room/hooks.mjs" } }
+```
+
+Same closure rules as the other four members: `room` is a member of the `server` object (`SERVER_UNKNOWN_FIELD`
+otherwise, and the refusal lists it), the shape is `{ module }` and nothing else, the path must be pack-relative with no
+traversal (`ROOM_BAD_PATH`) and end in `.mjs` (`ROOM_BAD_MODULE` — this module is server-only, unlike `server.battle`
+which both ends run). Named refusals mirror `BATTLE_*` exactly: `ROOM_BAD_SHAPE` / `ROOM_UNKNOWN_FIELD` /
+`ROOM_BAD_PATH` / `ROOM_BAD_MODULE` / `ROOM_NO_INSTALL` / `ROOM_BAD_SOURCE` / `ROOM_BAD_IMPORT` / `ROOM_IMPORT_FAILED`.
+It is a **contribution** (§28.13's `EMPTY_PACK` list names `server.room`), the module's **bytes enter the content hash**
+(`server/workshop.js identifyPack` — the same reason kits, panels, `server.meta`, `server.battle` and `server.modules`
+do: one digest must not describe two behaviours), a declaration whose file is not in the pack **refuses the whole pack**
+at the same prune point (`server/workshop.js roomIssues` → `loadWorkshop` → `dropUnavailablePreDispatchPacks`), and the
+editor needs no change because `normalizePackManifest` is the one validator it saves through.
+
+**Loading mirrors `server/battlePack.js`, with a narrower import surface.** `server/roomPack.js roomSourceIssues` scans
+the source **before any import** with the same two tables (`KIT_FORBIDDEN_GLOBALS` + `SERVER_CODE_FORBIDDEN_GLOBALS`), and
+`kitImportIssues` judges the imports against a whitelist that is **`@sim/` only** (`ROOM_IMPORT_FILES`). The module
+exports `install(room)`; anything else is refused by name. The `@sim/` files are the three stateless pure-function
+modules the engine itself is built on.
+
+**No `@room/` prefix, and that is a decision.** A whitelist prefix is a **two-end** table: `kitImportMap()` and
+`public/index.html`'s import map are generated from the same rows and pinned together by `test/kitImports.test.js`, so
+adding `@room/` would open a browser-side namespace for a module the browser never loads — the exact "declared but
+never used" failure this section keeps removing. Reusing `@sim/` costs nothing: this module only ever runs on the
+server, so it needs no two-end resolution at all. `@battle/` is deliberately **not** on the list either: those are
+battlefield helpers (`battleStore`, `passiveBuff`, …) and a room hook is an observation surface.
+
+**The hook API is bounded, and the boundary is what is NOT passed in** (§28.8's rule, applied to the lobby). What
+`install(room)` receives, one line of justification each:
+
+| Member | What it is | Why it is there |
+|---|---|---|
+| `room.id` | the 4-letter room code | a pack must be able to name the room its logs/broadcasts belong to |
+| `room.modIds` | the pack ids this room declared (frozen), or `null` when it declared none | after §28.16 "which packs does this room run" is the room's most important fact |
+| `room.players` | frozen **seat snapshot** at `install` time: `{ playerId, name, seat, isBot, ready, connected, left }` | a read-only roster: bots are distinguishable from humans, and the pack never holds a live seat object |
+| `room.spectators` | the spectator snapshot (`{ playerId, name, connected }`) | spectating is a real seat class here (header of `server/lobby.js`), and 播报/statistics must be able to count it |
+| `room.player(seat)` | one entry of the above by seat index (an empty seat yields an empty object, never `undefined`) | saves the author a `find`; one accessor is safer than teaching them to walk internals |
+| `room.phase()` | `'lobby'` or `'match'` | "are we in a match right now" is the most basic question a hook asks |
+| `room.now()` | the lobby's own clock (ms) | 播报/采样 need a timestamp, and it must **not** be `Date.now()` (see the scan below) |
+| `room.on(event, fn)` / `room.off(event, fn)` | subscribe/unsubscribe to one lifecycle event | the observation channel; the event names are a **closed enum** and a typo is named (`ROOM_UNKNOWN_EVENT`), never silently inert |
+| `room.log.{info,warn,error}` | a logger prefixed with the pack and the room code | one line must be attributable to "which pack, which room", or an operator cannot separate them |
+
+**Eight events, fired in the engine's own call order**, each with a frozen payload:
+
+| Event | When | Payload |
+|---|---|---|
+| `create` | after the room is **fully** built (host seated, set materialised, `room.state` broadcast) | `{ room, by }` |
+| `join` | a new human took a player seat (a repeated `room.join` does not fire) | `{ room, by }` |
+| `spectate` | a new spectator sat down | `{ room, by }` |
+| `leave` | any permanent departure (`room.leave`, kick, spectator removal, lobby grace timeout, expiry) — **before** the seat is freed | `{ by }` |
+| `matchStart` | a match really started (`match.start()` returned without throwing) | `{ matchNo, mode, difficulty, seed, players, spectators }` |
+| `matchEnd` | a match ended, before the seat cleanup | `{ matchNo, summary, victory, players, spectators }` |
+| `matchFailed` | the match could not start (construction or `start()` threw) | `{ matchNo, error }` |
+| `dispose` | the room was destroyed (last event; `room.disposed` is already `true`) | `{ reason, room }` |
+
+`by` is a seat snapshot in the same shape as `room.players`; `room` is the room state at that instant (`room.state`'s
+fields minus the wire `t` and minus `mods`, which is static per room and already available as `room.modIds`).
+`leave` carries **no** room snapshot on purpose: the room is mid-change and a snapshot would lie.
+
+**The gating classification, stated once — this is the point of the slice.** A room hook does **not** require
+`combat: true`, and the shape layer therefore has no `ROOM_NEEDS_COMBAT`. The rule is about **capability, not intent**:
+
+> A payload that can change **who plays**, **what set is loaded**, or **a match's outcome** must declare `combat: true`
+> (that is what puts it into the room digest gate and the golden corpus — §28.13.1, and §28.14's `matchClass` case). A
+> payload that can only **observe and announce** must not, because forcing the declaration would either refuse honest
+> packs or dilute the gate into a slogan.
+
+Every member above is a read-only snapshot, an accessor over one, a subscription, or a logger; the return value of an
+`on(...)` callback is **ignored**. So `server.room` is not combat-gated: it does not enter the room digest gate, it does
+not enter the golden corpus, and the layer derivation (`identifyPack`) counts it as **B** (it is server-side code that
+reads a room, not data and not UI) while `combat` stays exactly what it was (`kits > 0` when undeclared). The rule is
+written down here so the **next** addition to this layer has a test to pass: the day a room hook can refuse a join, pick
+a set, or touch a battle, that capability — not the payload as a whole — must be gated behind `combat: true`.
+
+**Isolation: load-time refuses the pack, run time refuses the hook.** A module that cannot load, has no `install`
+export, or whose declaration names a file that is not in the pack costs the pack its place in the loaded set at the
+same prune point as `server.preDispatch` / `server.meta` / `server.modules` / `server.battle`. But `install(room)` and
+every event listener run inside **their own** `try/catch` (`server/roomPack.js createRoomHooks`): a throw is named once
+as `ROOM_HOOK_THREW` with the **pack and the hook**, the pack's remaining hooks stay silent for that event, and room
+creation, a join and a match end all complete normally. The asymmetry with the load-time stance is deliberate and is the
+same one §28.16's per-room materialisation makes: at load time no human is in the room yet, so refusing is free; at run
+time real players are sitting in it, so the room must survive. One log line per event, never a broken lobby.
+
+**W-B applies the way it does everywhere else.** `Lobby.create` calls `roomHooks.install(room)` once per room, and only
+the packs **that room declared** get their hooks installed in it (`room.modIds` → the same `Set` used for the room's
+`server.meta` modules and battle installers). A room that declared nothing runs every installed pack's hooks — that is
+the process-level set, i.e. today's behaviour, and with no pack declaring `server.room` the hub holds **no entry at
+all**: `fire` is one early return, so a clean install's lobby is byte-for-byte what it was.
+
+**What a room hook still cannot do** (the list is the contract): it cannot change a battle result (no `Battle`, no
+`Match`, no store, no result channel); it cannot change who plays (seat snapshots are copies and callback return values
+are ignored — a pack can neither admit nor remove anybody); it cannot change what is loaded (`room.modIds` is frozen;
+the only way in is `room.create`'s `modIds`, and that is the client's request, not a pack's); it cannot touch the file
+system or the network (the static scan refuses `process` / `require` / `fetch` / `setTimeout` / `Date.now` /
+`Math.random` / `globalThis`, and the import surface is three pure-function modules); it is **not protocol**: it cannot
+add or intercept a client message (that is `server.preDispatch`, §28.13.1, and the C-layer pack channels, §1.9.6) and
+it cannot send a frame to a player (there is no `send`).
+
+**Where this seam sits relative to the two engine features it must not block.** Quick match (野排匹配) and room
+retention (房间保留) are **engine product features**, not pack powers, and this section deliberately adds no
+pack-facing surface for them. The hook points are nevertheless exactly where those features need their own call sites:
+quick match has to create/seat/fill a room (the same point `Lobby.create` / `Lobby.join` fire `create` / `join` from)
+and retention changes *when* a room is disposed (the one function that fires `dispose`). Both are engine decisions
+about `Lobby`'s own state machine; neither needs a new hook name, and a pack can observe both through the existing
+events without being able to influence either.
+
+Tests: `test/packRoom.test.js` (declaration shape and named refusals, the gating classification, load-time
+success/failure, the static forbidden-global scan, the whitelist verdict, and a real server + real lobby: the event
+order `create → join → matchStart → matchEnd → dispose`, a throwing hook that does not break the room, and W-B where
+only the declared pack's hooks are installed).

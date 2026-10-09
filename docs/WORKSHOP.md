@@ -1392,6 +1392,98 @@ export function install(battle) {
 
 ---
 
+### 1.16 `server.room`：包写的**房间级钩子**（已实现）
+
+到这一刀之前，一个包能挂的服务端载荷有四类：`server.modules`（进程启动）、`server.preDispatch`（一次 HTTP 请求）、
+`server.meta`（一局的商店 / 经济）、`server.battle`（战场）。**没有一样覆盖房间本身** —— 房间被创建、有人加入或离开、
+有人加入观战、一局开始或结束、房间被销毁。参考社区插件包就是手改 `server/lobby.js`（+687/−14 行）补的这些行为。
+`server.room` 就是给这一类代码开的口子：**一个包一份，每个房间跑一次**。
+
+```jsonc
+// combat: true 不是必须的 —— 房间钩子只观察，它改不了对局结果（见下面的「闸门分类」）
+"server": { "room": { "module": "room/hooks.mjs" } }
+```
+
+```js
+// room/hooks.mjs —— install(room)：拿到的是这个房间的**只读观察面**
+export function install(room) {
+  room.log.info(`房间 ${room.id} 起来了，模组集合 ${room.modIds ? room.modIds.join(', ') : '(进程级)'}`);
+  room.on('join', ({ by }) => room.log.info(`${by.name} 进来了（座位 ${by.seat}）`));
+  room.on('matchEnd', ({ matchNo, victory }) => room.log.info(`第 ${matchNo} 局结束，胜=${victory}`));
+  room.on('dispose', ({ reason }) => room.log.info(`房间没了（${reason}）`));
+}
+```
+
+`install(room)` 收到的东西，一条一句理由：
+
+| 成员 | 是什么 | 为什么给 |
+|---|---|---|
+| `room.id` | 4 字母房间码（`room.code`） | 包要能把自己的日志 / 播报对上某个房间 |
+| `room.modIds` | 这个房间声明的模组 id 数组（**冻结**），没声明集合时是 `null` | W-B 之后「这个房间跑哪几个包」是房间里最重要的一件事，包要能看见 |
+| `room.players` | 本包 `install` 那一刻的**座位快照**数组（冻结），每项 `{ playerId, name, seat, isBot, ready, connected, left }` | 只读名单：机器人和真人一眼分得开，而包拿不到活的座位对象 |
+| `room.spectators` | 同一刻的观战者快照（`{ playerId, name, connected }`） | 观战是这一版有的一档，播报 / 统计要数得上 |
+| `room.player(seat)` | 按座位号取一条上面的快照（空位给一个空对象，不是 `undefined`） | 少了它，包要自己写 `find`；多给一个方法比让作者自己遍历安全 |
+| `room.phase()` | `'lobby'` 或 `'match'` | 「现在是不是在对局里」是最基本的判断，读一个字符串比读内部字段好 |
+| `room.now()` | 与大厅同一个时钟（毫秒） | 播报 / 采样要时间戳，而**不能**是 `Date.now()`（进程内要一致，见下面的扫描） |
+| `room.on(event, fn)` | 订阅一个生命周期事件，返回 `true` / `false`（名字 / 函数非法时点名 + `false`） | 观察通道；名字是**闭枚举**，拼错会被点名（`ROOM_UNKNOWN_EVENT`），不会静默不动 |
+| `room.off(event, fn)` | 退订（`on` 是稳的：同一个函数注册几次就是几个钩子） | 一次性钩子（例如「只报第一局」）要收得回来 |
+| `room.log.{info,warn,error}` | 带包名与房间码前缀的日志 | 一条日志必须归属到「哪个包的哪个房间」，否则运维分不开 |
+
+**8 个事件**（`create` / `join` / `spectate` / `leave` / `matchStart` / `matchEnd` / `matchFailed` / `dispose`），触发顺序就是
+引擎的调用顺序，每个事件的载荷：
+
+| 事件 | 何时 | 载荷 |
+|---|---|---|
+| `create` | 房间**完全建好**之后（房主就位、集合已物化、`room.state` 已广播） | `{ room, by }` |
+| `join` | 一个新的人类拿到玩家座位（重复 `room.join` 不算） | `{ room, by }` |
+| `spectate` | 一个新观战者入座 | `{ room, by }` |
+| `leave` | 任何永久性离开：`room.leave`、被踢、观战者被移除、大厅宽限超时、连接过期 —— **在座位释放之前**触发 | `{ by }` |
+| `matchStart` | 一局真的起来了（`match.start()` 跑完且没抛） | `{ matchNo, mode, difficulty, seed, players, spectators }` |
+| `matchEnd` | 一局结束（座位清理之前） | `{ matchNo, summary, victory, players, spectators }` |
+| `matchFailed` | 这一局没起来（构造 / `start()` 抛了） | `{ matchNo, error }` |
+| `dispose` | 房间被销毁（最后一个事件；此时 `room.disposed` 已经是 `true`） | `{ reason, room }` |
+
+`by` 是一条**座位快照**（与 `room.players` 里的条目同形）；`room` 是那一刻的房间状态快照（`room.state` 的字段，
+去掉线格式的 `t` 与 `mods`）；`players` / `spectators` 是 id 数组。
+
+**闸门分类：房间钩子不需要 `combat: true`。** 判据是**能力**而不是意图 —— `install(room)` 拿到的每一件东西要么是
+只读快照、要么是订阅，`on(...)` 回调的**返回值被忽略**，所以这一层没有一件能力能改「谁在玩 / 装了什么 / 这一局的
+结果」。因此它**不**进房间摘要闸门、**不**进 golden 语料（把它算进去只会让一个只做观战播报的诚实包被推成
+`combat: true`，把那条线稀释掉）。反过来是硬规则：**将来这一层若交出任何一件能改那三样中任一样的东西**
+（「按包自己的规则拒绝一个人进房」「按包的点名换掉这一局的集合」），那件东西**必须**要求 `combat: true`
+（DESIGN §28.20 的分类规则），因为那时它就不再是观察面了。
+
+**房间钩子仍然做不到什么**（这一层有意不开口子的东西）：
+
+- **改不了对局结果**：拿不到 Battle、拿不到 `Match`、拿不到 store、拿不到 socket，也没有任何写入口；
+- **改不了谁在玩**：座位快照是拷贝，`room.on` 的回调没有返回值语义 —— 包不能让谁进来、也不能把谁踢出去；
+- **改不了装了什么**：`room.modIds` 是只读的，集合在房间建起来那一刻就定死了（那条路是 `room.create` 的 `modIds`）；
+- **碰不到文件系统与网络**：源码在 import **之前**过静态扫描（`process` / `require` / `fetch` / `setTimeout` /
+  `Date.now` / `Math.random` / `globalThis` … 一律点名），import 只能走 `@sim/`；
+- **不是协议层**：包不能新增或拦截任何客户端消息（那是 `server.preDispatch` 与 C 层包通道的事），也不能给某个玩家
+  发一帧（没有 `send`）。
+
+**判据**（与 `server.battle` 同一条线，只有 import 面更窄）：
+
+- 模块必须是包内相对 `.mjs`（`ROOM_BAD_MODULE` 管扩展名），声明的文件必须真的在包里（`ROOM_BAD_MODULE` 整包被拒）；
+- 模块必须导出 `install(room)`（`ROOM_NO_INSTALL`）；
+- 源码在 import **之前**过静态扫描，非确定性 / 环境绑定一律点名（`ROOM_BAD_SOURCE`）；
+- **import 只有 `@sim/`**（`@sim/constants.js` / `dir.js` / `targeting.js` 三个纯函数模块）——`ROOM_BAD_IMPORT`。
+  **刻意不新开 `@room/` 前缀**：白名单前缀是**两端共用**的一张表（`kitImportMap()` 与 `public/index.html` 的 import
+  map 由测试钉在一起），而这个模块**只在服务端**跑 —— 为一个永不进浏览器的模块在浏览器侧开一个命名空间，正是这一层
+  到处在拒绝的「声明了却没有」。`@battle/` 也不开放：那是战场辅助函数，房间钩子是观察面；
+- 模块字节进内容哈希（换了代码就是换了包摘要 —— 房间的摘要闸门靠这一步对齐）；
+- 装不上的包**整包移出已加载集合**，与 `server.preDispatch` / `server.meta` / `server.modules` / `server.battle`
+  同一个裁剪点；
+- **一个钩子抛异常只记一行**（`ROOM_HOOK_THREW`，点名**包 + 钩子**），建房、加入、对局结束照旧完成 ——
+  一个包坏掉不能让真人卡在房间里；
+- 房间声明了集合时，只有**它点名的包**的房间钩子在这个房间里装上（W-B，见 §1.14）；一个包都没声明时，
+  大厅连一张表都不建（干净安装与从前逐字节相同）。
+
+完整规范（成员表、分类规则、隔离、测试）见 [docs/design/mod-layer.md](design/mod-layer.md) §28.20。
+
+---
+
 ## 2. 助战
 
 ### 2.1 配置：`data/support.json`

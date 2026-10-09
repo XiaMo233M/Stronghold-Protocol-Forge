@@ -79,11 +79,37 @@ export const KIT_IMPORT_TARGETS = Object.freeze(new Map(KIT_IMPORT_FILES.map((e)
 /** 战斗逻辑模块的 specifier → file。 */
 export const BATTLE_IMPORT_TARGETS = Object.freeze(new Map(BATTLE_IMPORT_FILES.map((e) => [e.specifier, e.file])));
 
+/**
+ * 房间级钩子模块（`pack.json.server.room`, DESIGN §28.20）允许的名单：**只有 `@sim/`**。
+ *
+ * 为什么这一份比 kit 与战斗逻辑模块都窄，而且**刻意不加 `@room/` 前缀**：
+ *   * 房间钩子只跑在服务端（没有浏览器那一半），所以它不需要一个「两端都成立」的前缀 —— 但加一个 `@room/` 的代价
+ *     恰恰是它必须两端都成立：`public/index.html` 的 import map 与 `kitImportMap()` 是从同一张表生成的
+ *     （`test/kitImports.test.js` 把它们钉在一起），凭空多一个服务端专用前缀就等于在浏览器侧也开一个命名空间，
+ *     只为了一个永远不在那里加载的模块。**复用 `@sim/`** 是这一刀的选择。
+ *   * 三个纯函数（constants / dir / targeting）是引擎里唯一一类「没有状态、没有对局句柄、两端逐字相同」的模块，
+ *     拿它们做常量表与几何计算是房间钩子的正当需要。
+ *   * `@kit/` 与 `@battle/` **都不在**这一份里：那两个前缀通向的是**战斗里**的东西（一个够到 `battleStore` /
+ *     战场写法的辅助函数），而房间钩子的契约是「观察与声明」——它拿不到战场是有意的（见 §28.20 的成员表）。
+ *
+ * 名单从 `KIT_IMPORT_FILES` 里**筛**出来，不抄第二份：一条更窄的视图不该是另一份会漂的真相。
+ */
+export const ROOM_IMPORT_PREFIXES = Object.freeze(['@sim/']);
+
+/** 房间钩子模块允许的名单（`@sim/` 那几行）。 */
+export const ROOM_IMPORT_FILES = Object.freeze(KIT_IMPORT_FILES.filter((e) => e.specifier.startsWith('@sim/')));
+
+/** 房间钩子模块的 specifier → file。 */
+export const ROOM_IMPORT_TARGETS = Object.freeze(new Map(ROOM_IMPORT_FILES.map((e) => [e.specifier, e.file])));
+
 /** The list a reason/hint quotes, so the message and the table can never disagree. */
 export const KIT_IMPORT_ALLOWED = Object.freeze(KIT_IMPORT_FILES.map((e) => e.specifier));
 
 /** 战斗逻辑模块那份可写清单。 */
 export const BATTLE_IMPORT_ALLOWED = Object.freeze(BATTLE_IMPORT_FILES.map((e) => e.specifier));
+
+/** 房间钩子模块那份可写清单（`@sim/`）。 */
+export const ROOM_IMPORT_ALLOWED = Object.freeze(ROOM_IMPORT_FILES.map((e) => e.specifier));
 
 /** One line naming every allowed specifier — the "here is what you may write instead" half of an error. */
 export const kitImportAllowedText = () => KIT_IMPORT_ALLOWED.join(', ');
@@ -97,6 +123,9 @@ export const kitImportRelativeText = '也可以用 ./… 开头的相对路径 i
 
 /** 同上，战斗逻辑模块那份。 */
 export const battleImportAllowedText = () => BATTLE_IMPORT_ALLOWED.join(', ');
+
+/** 同上，房间钩子模块那份。 */
+export const roomImportAllowedText = () => ROOM_IMPORT_ALLOWED.join(', ');
 
 /**
  * 一个 specifier 是不是「向下相对」形式（§28.18）：`./` 开头、`.js` 结尾、没有任何 `..` 段、没有反斜杠、没有 `%`
