@@ -296,6 +296,29 @@ function ModPicker({ selected, onToggle }) {
   </div>`;
 }
 
+/**
+ * 野排匹配 (quick match, `room.queue` / `room.dequeue`; server/matchmaking.js, docs/META.md §1.6). The panel is the
+ * waiting state: how many others are searching, how many are needed, how long is left, and the cancel button.
+ *
+ * `queue` is the last `room.queued` frame the screen saw ('waiting' only — 'placed' / 'timeout' / 'cancelled' end the
+ * panel; main.js routes into the room on the `room.state` that follows a 'placed'). Every text goes through t().
+ * @param {{ queue: any, busy: string|null, onCancel: () => void }} props
+ */
+function QuickMatchPanel({ queue, busy, onCancel }) {
+  const left = Math.max(0, Math.ceil(((queue.deadline || 0) - Date.now()) / 1000));
+  return html`<${Panel} class="quickmatch-panel" tone="mint">
+    <div class="quickmatch-row">
+      <${Spinner} size="sm" label="SEARCHING" />
+      <span class="quickmatch-text">${t('正在搜寻队友…')}</span>
+      <span class="quickmatch-count num">${queue.size}/${queue.need}</span>
+    </div>
+    <div class="quickmatch-foot">
+      <span class="t-dim">${t('等待中的第 {position} 位 · 还需 {need} 名博士 · 剩余 {left} 秒', { position: queue.position, need: queue.need, left })}</span>
+      <${Button} variant="secondary" size="sm" loading=${busy === 'dequeue'} onClick=${onCancel}>${t('取消搜寻')}<//>
+    </div>
+  <//>`;
+}
+
 /** Lobby screen component. */
 export function LobbyScreen() {
   const me = useStore((s) => s.me, shallowEqual);
@@ -311,10 +334,24 @@ export function LobbyScreen() {
   });
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(null);
+  // 野排匹配: the last `room.queued` frame WHILE we are still waiting (null = not in the queue). 'placed' / 'timeout' /
+  // 'cancelled' clear it: the first is followed by the room.state that routes into the room, the other two mean the
+  // server already took us out of the queue.
+  const [queue, setQueue] = useState(null);
   const [recent] = useState(recentRooms);
   const alive = useRef(true);
   const inFlight = useRef(false); // synchronous guard against double clicks (state updates are async)
   useEffect(() => () => { alive.current = false; }, []);
+  useEffect(() => {
+    // The queue is server state: the only place this screen learns it is the frame the server pushes. A timeout is
+    // worth a toast (the player must know the search ended); a placement needs nothing — main.js already moved on.
+    return net.on('room.queued', (msg) => {
+      if (!alive.current) return;
+      if (msg.status === 'waiting') { setQueue(msg); return; }
+      setQueue(null);
+      if (msg.status === 'timeout') toast(t('快速匹配超时：没有等到足够的博士，请稍后再试'), 'warn');
+    });
+  }, []);
 
   const online = conn.status === 'online';
   const codeOk = CODE_RE.test(code);
@@ -341,6 +378,23 @@ export function LobbyScreen() {
     }
   };
   const create = () => run('create', () => net.request('room.create', roomMods.buildCreatePayload(roomMode, difficulty)));
+  // 野排匹配: enter the queue with the difficulty cards' pick (the server refuses `solo` — a queue of strangers forms a
+  // co-op room; the button is hidden for 独立模拟). `mods` is the same digest gate `room.create` carries, so a modded
+  // server still checks that we know what we are joining; `modIds` is deliberately NOT sent — a quick-matched room runs
+  // the server's default set (docs/META.md §1.6), never a subset this client picked for some other room.
+  const quickMatch = () => run('queue', async () => {
+    const set = roomMods.currentModSet();
+    const payload = { mode: 'coop', difficulty, ...(set ? { mods: set.digest } : {}) };
+    await net.request('room.queue', payload, { timeout: 20000 });
+    // Only a reply that was actually `ok` reaches this line (`run` shows the error otherwise — QUEUE_FULL included).
+    // The server's own `room.queued` frame follows for a real queue; until it does, the panel shows the one frame the
+    // protocol lets a client assume. A placement clears it again through the listener above.
+    if (alive.current) setQueue((q) => q || { status: 'waiting', position: 1, size: 1, need: MAX_SEATS, deadline: Date.now() + 120000 });
+  });
+  const cancelQueue = () => run('dequeue', async () => {
+    await net.request('room.dequeue', {});
+    if (alive.current) setQueue(null);
+  });
   const join = (c = code) => {
     // `onClick=${join}` hands the click EVENT as the first argument, and a default parameter only applies to
     // `undefined` — codeArg keeps an event target out of the key and falls back to the input field
@@ -437,6 +491,17 @@ export function LobbyScreen() {
               ${roomMode === 'solo' ? t('开始独立模拟') : t('创建同盟')}
             <//>
           <//>
+          ${queue
+            ? html`<${QuickMatchPanel} queue=${queue} busy=${busy} onCancel=${cancelQueue} />`
+            : roomMode === 'coop'
+              // No threshold in this label: the queue size is the SERVER's setting (`queue.size`) and the client cannot
+              // read the deployment's options — the waiting panel above shows the real numbers once it is queued.
+              ? html`<${Tooltip} block=${true} text=${t('和陌生人组队：等待的博士凑够人数即自动建房（本房间按服务器默认模组运行）')}>
+                  <${Button} variant="secondary" size="lg" block=${true} icon="users" loading=${busy === 'queue'} disabled=${!online} onClick=${quickMatch}>
+                    ${t('快速匹配')}
+                  <//>
+                <//>`
+              : null}
           <div class="create-box__hint">
             ${online
               ? html`<span>${roomMode === 'solo' ? t('创建后即可开始模拟') : t('创建后可邀请好友或添加 AI 队友')}</span>`

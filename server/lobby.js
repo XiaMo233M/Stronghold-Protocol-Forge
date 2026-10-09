@@ -97,6 +97,21 @@
 //     time → room.closed {kicked} to it. A spectator in a LOBBY room may take a free player seat with room.join of the same
 //     code; a player never switches to spectating in place (ALREADY). Disconnect / grace / reconnect / expiry work as for
 //     a player seat (the seat is kept and given back on resume).
+//   * 野排匹配 quick match (a PRODUCT feature, not a pack surface — server/matchmaking.js, docs/META.md §1.6):
+//     `room.queue` enters its queue and `room.dequeue` cancels. The queue is PLACEMENT ONLY — when `queue.size` (default
+//     MAX_SEATS) players wait, `lobby.matchmake` forms one ORDINARY room by calling this file's own `create` (the
+//     longest-waiting player hosts it) and `join` (the rest take the lowest free seat, in arrival order), so every rule
+//     above applies to a quick-matched room unchanged. It never declares `modIds`: a quick-matched room runs the
+//     server's DEFAULT set, while a room that already declared one keeps it (W-B). The wait is bounded (`queue.waitMs`),
+//     a waiting player who drops stops counting but keeps the slot for a resume, `room.queued` is the only new frame,
+//     and nothing at all runs while the queue is empty (one Map, no timer).
+//   * 房间保留 room retention (a PRODUCT feature of the same ruling): when a match ends the room is NOT torn down — it
+//     stays in `this.rooms` in its LOBBY state with its members, its `modIds` / `modSet` (W-B), its difficulty and its
+//     AI-picks-last option intact, so the group starts another match without re-inviting (`onMatchEnd` below frees only
+//     the seats of humans who departed, un-readies the rest and drops the match). It is reclaimed exactly as any other
+//     room is: `removeMember` disposes it once no active human remains ('empty'), and a disconnected human's seat is
+//     released by the lobby grace ('timeout'). A retained room holds no timer of its own — the only timers that outlive
+//     the match are the grace timers already running for its disconnected seats.
 
 import { randomBytes, randomInt } from 'node:crypto';
 import { ERR, MAX_SEATS, MAX_SPECTATORS, ROOM_CODE_LEN, modeIdFor } from '../shared/constants.js';
@@ -109,6 +124,7 @@ import { Match as DefaultMatch } from './match/Match.js';
 import { buildRoomRegistry } from './match/metaPack.js';
 import { getDefaultRegistry } from './match/effectsMeta.js';
 import { KITTED_CHARS } from './sim/content/kits/index.js';
+import { MatchmakeQueue } from './matchmaking.js';
 
 /** Room code alphabet: uppercase letters without I and O (and no digits, so no 0/1). */
 export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -121,6 +137,7 @@ export const LOBBY_DEFAULTS = Object.freeze({
   maxMatchesPerAddr: 8,   // matches started from one client network that may run at once (0 = unlimited)
   resyncMinGapMs: 1000,   // heavy resyncs (match state / result replay) per session at most this often on repeated hellos
   soloReconnectWindowMs: null, // a dropped solo run stays resumable this long (null = data singleReconnectTime, 24 h)
+  queue: null,            // 野排匹配 (server/matchmaking.js MATCHMAKE_DEFAULTS): size / max / waitMs / sweepMs / difficulty
 });
 
 /** Official `singleReconnectTime` (s) when the data lacks it (constData, research 01 §1). */
@@ -361,6 +378,13 @@ export class Lobby {
     this.resyncTimers = new Map();
     /** per-network limit warnings: at most one log line per 10 s (the rest are counted) */
     this.limitLog = { at: -Infinity, suppressed: 0 };
+    /**
+     * 野排匹配 (quick match; a PRODUCT feature of the engine — server/matchmaking.js, docs/META.md §1.6). The queue is
+     * placement only: when enough players wait, it forms an ORDINARY room through `this.create` / `this.join` below, so
+     * nothing about rooms, seats, mods or matches changes here. Nothing is created for a server nobody queues on, which
+     * is why the queue is built here (one Map, no timer) and not in `server/index.js`.
+     */
+    this.matchmake = new MatchmakeQueue(this, this.opts.queue || undefined);
   }
 
   /** @param {string} code @returns {Room | null} */
@@ -378,7 +402,7 @@ export class Lobby {
       for (const s of r.seats) if (s && !s.left) (s.isBot ? bots++ : humans++);
       spectators += r.spectators.length;
     }
-    return { rooms: this.rooms.size, matches, humans, bots, spectators, ...(this.modSet ? { mods: this.modSet.digest, modPacks: this.modSet.packs.length } : {}) };
+    return { rooms: this.rooms.size, matches, humans, bots, spectators, ...this.matchmake.stats(), ...(this.modSet ? { mods: this.modSet.digest, modPacks: this.modSet.packs.length } : {}) };
   }
 
   // ---------------------------------------------------------------------------------------------------
@@ -391,6 +415,8 @@ export class Lobby {
    * @param {{ resumed: boolean, repeat: boolean }} info
    */
   onHello(session, { resumed, repeat }) {
+    // the queue's own resume (a queued player has no room, so nothing below would reach them)
+    this.matchmake.onHello(session);
     if (!resumed && !repeat) return;
     const room = this.roomOf(session);
     if (!room) {
@@ -467,6 +493,9 @@ export class Lobby {
       case 'room.diy': return this.diy(session, msg);
       case 'room.spectate': return this.spectate(session, msg);
       case 'room.removeSpectator': return this.removeSpectator(session, msg);
+      // 野排匹配 (quick match): the queue lives in server/matchmaking.js; these two cases are its only entry points
+      case 'room.queue': return this.matchmake.join(session, msg);
+      case 'room.dequeue': return this.matchmake.leave(session);
       case 'pack.msg': return this.packMsg(session, msg);
       default:
         if (typeof msg.t === 'string' && msg.t.startsWith('g.')) return this.routeGame(session, msg);
@@ -525,6 +554,8 @@ export class Lobby {
   /** The session's socket closed. @param {import('./net.js').Session} session */
   onDisconnect(session) {
     this.clearResync(session.playerId); // the next resume resyncs immediately
+    // 野排匹配: a queued player may have no room at all, so the queue is told before the `if (!room)` return below
+    this.matchmake.onDisconnect(session);
     const room = this.roomOf(session);
     // a solo run may be resumed within singleReconnectTime (24 h); everything else keeps the registry's window
     session.resumeWindowMs = room && room.match && room.mode === 'solo' ? this.soloResumeWindowMs() : null;
@@ -542,6 +573,7 @@ export class Lobby {
     session.notice = null;
     session.pendingResult = null;
     this.clearResync(session.playerId);
+    this.matchmake.onExpire(session.playerId); // gone for good: also out of the quick-match queue
     const code = session.roomCode;
     session.roomCode = null;
     const room = code ? this.rooms.get(code) : null;
@@ -553,6 +585,7 @@ export class Lobby {
    * @param {string} [reason]
    */
   shutdown(reason = 'shutdown') {
+    this.matchmake.shutdown();
     for (const room of [...this.rooms.values()]) this.disposeRoom(room, reason);
     for (const t of this.graceTimers.values()) clearTimeout(t);
     this.graceTimers.clear();
