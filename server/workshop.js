@@ -11,7 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { normalizePackManifest, normalizeContentFile, byPackId } from '../shared/workshop.js';
+import { normalizePackManifest, normalizeContentFile, byPackId, playtestUnknownIds } from '../shared/workshop.js';
 import { sha256Hex, canonicalJson, modManifestDigest } from '../shared/modIdentity.js';
 
 /** Default pack root: `<repo>/workshop`. */
@@ -89,6 +89,16 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null } = {}) {
       || Object.keys(manifest.pack.bondIcons || {}).length
       || Object.keys(manifest.pack.itemIcons || {}).length
       || Object.keys(manifest.pack.art || {}).length) {
+      // 试玩开关的名单必须点名本包真的有的 id：`normalizePackManifest` 只能查形状，成员资格要等 chess.json 读完。
+      // 不查这一条，名单里一个写错的 id 就是**静默无效** —— 作者勾了、试玩里什么都没发生（这个缺口的老毛病）。
+      const unknown = playtestUnknownIds(manifest.pack.playtest?.directToHand, manifest.pack.overrides, Object.keys(files.chess || {}));
+      if (unknown.length) {
+        errors.push({
+          pack: name,
+          reason: `PLAYTEST_UNKNOWN_CHESS: ${unknown.map((id) => `"${id}"`).join(', ')} — playtest.directToHand may only name a chess record THIS pack ships (or an official id this pack declares in overrides)`,
+        });
+        continue;
+      }
       packs.push({ ...manifest.pack, dir: packDir, files, ...identifyPack(packDir, manifest.pack, files) });
     }
   }

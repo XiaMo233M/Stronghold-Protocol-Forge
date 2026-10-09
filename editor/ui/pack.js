@@ -370,6 +370,8 @@ function renderDetail() {
     box.append(renderMetaPanel(meta));
     box.append(h(t('覆盖官方记录（pack.json 的 overrides）')));
     box.append(renderOverridesPanel(meta));
+    box.append(h(t('试玩直接发到手上（pack.json 的 playtest）')));
+    box.append(renderPlaytestPanel(meta, p));
   }
 
   // ---- 助战声明 ----
@@ -760,6 +762,86 @@ function removeOverride(entry) {
   if (!m) return;
   if (!confirm(t('删掉这条覆盖声明 {0}？', entry))) return;
   return writeOverrides(m.overrides.map((o) => o.entry).filter((e) => e !== entry), t('已删掉覆盖声明 {0}。', entry));
+}
+
+/**
+ * 「试玩直接发到手上」（`pack.json` 的 `playtest.directToHand`）这一块：列出声明、逐条删除。
+ *
+ * 为什么这个字段住在 `pack.json` 而不是 chess 记录里：覆盖官方干员时记录必须与官方**同形**（官方记录没有
+ * `directToHand` 这个键），所以那个开关在覆盖模式下写不进记录 —— 它搬到了行为层。**新增的**工坊干员仍旧写在
+ * 记录里（`directToHand: true`），两种写法在引擎里是**并集**（见 `phases.js` 的 `directToHandIds`）。
+ *
+ * 这里只给**删**，不给手输：加一条的正路是干员页那个勾（它会连记录一起写对）。而手写的、或者记录已经被删掉的
+ * 条目必须能在这里删掉 —— 加载器会因为 `PLAYTEST_UNKNOWN_CHESS` **整包拒绝**，作者否则找不到能改的地方。
+ */
+function renderPlaytestPanel(m, p) {
+  const panel = document.createElement('div');
+  panel.className = 'panel ovPanel';
+  for (const text of [
+    t('试玩时直接发到手上：只有编辑器「一键试玩」起的那个服务器会在开局把这些干员塞进手牌（正式对局照旧，只在商店里摇到）。'),
+    t('名单里的 id 必须真的属于这个包（本包的 chess 记录，或本包在 overrides 里声明过的官方 id）；认不出来的 id 会让加载器整包拒绝（PLAYTEST_UNKNOWN_CHESS）。'),
+  ]) panel.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: text }));
+
+  const list = document.createElement('div'); list.className = 'ovList'; list.style.marginTop = '8px';
+  const ids = m.playtest?.directToHand ?? [];
+  const unknown = new Set(m.playtest?.unknown ?? []);
+  if (!ids.length) {
+    list.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('还没有声明。在干员页勾上「试玩时直接发到手上」就会写到这里。') }));
+  }
+  for (const id of ids) {
+    const row = document.createElement('div'); row.className = 'row ovRow';
+    row.dataset.id = id;
+    row.append(Object.assign(document.createElement('code'), { className: 'ovEntry', textContent: id }));
+    row.append(unknown.has(id)
+      ? Object.assign(document.createElement('span'), { className: 'tag err', textContent: t('这个包没有这条记录') })
+      : Object.assign(document.createElement('span'), { className: 'tag ok', textContent: t('在用') }));
+    const del = document.createElement('button');
+    del.className = 'ghost tiny ovDel';
+    del.textContent = t('删除');
+    del.disabled = state.busy;
+    del.addEventListener('click', () => removePlaytestId(id));
+    row.append(del);
+    list.append(row);
+  }
+  panel.append(list);
+
+  // 记录里那份（非覆盖模式）不在这张表里：它跟着记录走，删记录就没了 —— 这里说一句，免得作者以为漏了。
+  const inRecords = p.operators.filter((o) => o.directToHand === true).map((o) => o.id);
+  if (inRecords.length) {
+    panel.append(Object.assign(document.createElement('p'), {
+      className: 'hint',
+      textContent: t('另有 {0} 条记录自己带着这个开关（写 `directToHand: true` 的工坊干员）：{1}。它们跟着记录走，不在这张表里。', inRecords.length, inRecords.join('、')),
+    }));
+  }
+  return panel;
+}
+
+/** 整表替换 `playtest.directToHand` 并立刻写盘（与 overrides 同一条：服务端去重并排序）。 */
+async function writePlaytest(list, okText) {
+  const p = packOf();
+  if (!p) return;
+  state.busy = true; renderAll();
+  let written = null;
+  try {
+    written = await api(`/api/packs/${encodeURIComponent(p.id)}/playtest`, { method: 'POST', body: { directToHand: list } });
+    state.message = {
+      kind: written.changed ? 'ok' : 'warn',
+      text: written.changed ? okText : t('playtest.directToHand 没有变化，文件没有被改写。'),
+    };
+  } catch (e) {
+    state.message = { kind: 'error', text: errText(e) };
+  } finally {
+    state.busy = false;
+  }
+  if (written) await reloadAfterWrite(p.id); else renderAll();
+}
+
+/** 删一条试玩发牌声明：**全部**条目都要能删（含认不出来的那些）。 */
+function removePlaytestId(id) {
+  const m = metaOf();
+  if (!m) return;
+  if (!confirm(t('删掉这条试玩发牌声明 {0}？', id))) return;
+  return writePlaytest((m.playtest?.directToHand ?? []).filter((e) => e !== id), t('已删掉试玩发牌声明 {0}。', id));
 }
 
 /** 写完一次就整页重取：左栏的版本/作者/license 来自另一份形状（supportStateFor），只补 meta 会让它过期。 */

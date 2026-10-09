@@ -538,6 +538,38 @@ node scripts/launch.mjs --port 3001     # 换个端口
 > [!NOTE]
 > 试玩**不是**打包器：它跑的是这个仓库当前的工作树。要让别人也能玩到你写的内容，用「包管理」页导出 `.zip`。
 
+### 试玩直接发到手上（`playtest.directToHand`）
+
+干员页有一个复选框 **「试玩时直接发到手上（正式对局不受影响）」**：勾上之后，这个干员在**试玩**的第一回合直接进手牌，
+不用为了看一眼它先把调度中心升到它那一阶（六阶要升到 6 级）。**正式服务器一个都不发** —— 装了这个包也一样，
+干员仍然只在商店里摇到。这条不变量在引擎里是硬条件：`SP_PLAYTEST` 不是 `1` 时 `directToHandIds()` 直接回空。
+
+**开关写在哪儿，取决于这条记录是「新增」还是「覆盖」**：
+
+| 记录 | 落点 | 为什么 |
+|---|---|---|
+| 本包**新增**的干员 | 记录里写 `directToHand: true`（`shared/chessAuthoring.js` 的 `deriveChessRecord`） | 今天的写法，一字未改；这条记录本来就是本包自己的，多一个键没人管 |
+| **覆盖官方干员** | `pack.json` 的 `playtest.directToHand`（包的行为层） | 覆盖的契约是「与官方**同形**」：官方记录没有这个键，写进记录会被 `UNKNOWN_OVERRIDE_FIELD` 整条拒掉，而 `stripEditorOnlyKeys` 会在写盘前把它摘掉 ⇒ **开关静默失效**（这正是这个字段要修的缺口） |
+
+两种写法在引擎侧是**并集**（`server/match/match/phases.js` 的 `directToHandIds`）。传递路径与 `SP_STAGE` 同一条：
+
+```
+干员页复选框 ──保存──→ pack.json.playtest.directToHand
+                            │
+GET /api/playtest ──────────┤（编辑器每次现算：workshopPlaytestIndex，谁赢沿用 §1.2 的包 id 字典序规则）
+                            ▼
+POST /api/playtest/start ──→ playtest.start({directToHand}) ──SP_DIRECT_TO_HAND=a,b──→ phases.js 读它
+```
+
+界面按**声明**显示勾选状态（不是按记录）：覆盖模式下 `spec` 是从官方记录读出来的，里面根本没有这个键，
+所以只读端点 `GET /api/official/chess/<id>?pack=<包id>` 会把**这个包**的声明与「这条覆盖的两个 id」一起回给页面 ——
+不看这一份，作者上次勾的开关会显示成没勾，再保存一次就把它悄悄关掉了。
+
+删掉一条覆盖时，`pack.json` 里对应的声明会**一起收掉**（否则加载器随后会以 `PLAYTEST_UNKNOWN_CHESS` 整包拒绝 ——
+一个删不掉的陈旧声明会让整个包起不来）。**包管理页**另有一块「试玩直接发到手上（pack.json 的 playtest）」：
+逐条列出声明、逐条删除（手写的或已经陈旧的条目必须能在界面上删掉），并单列「记录自己带这个开关」的那些干员 ——
+两者在引擎里是并集。字段的形状、成员资格与谁赢规则见 [docs/WORKSHOP.md](WORKSHOP.md) §1.2。
+
 ## 助战（客户端）
 
 助战的选择由**服务端**声明并强制：卡池之外的干员是**禁用**的，请求会被整条拒绝，**没有回退**（回退会让一个被禁用的干员变成已发放）。
@@ -629,6 +661,7 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 |---|---|---|
 | GET | `/api/state` | 工坊包（含每个包 `bonds.json` 里的盟约清单 `bonds`，以及各包的 `packArt` —— `art` 声明 + 本包真实素材 + 已声明 spine 的骨架动画名/版本、图谱页名）、干员、校验问题、助战配置、可选用的官方 Spine 列表、**按职业的数值参照 `statRanges`**、**官方盟约清单 `officialBonds`**（干员页的盟约勾选）；官方干员条目带 `subProfessionName`（分支中文名） |
 | GET | `/api/operators/template?chessId=` | 把一对已发布的干员记录转成一份**可继续编辑的 spec**（模板新建用；id 留空） |
+| GET | `/api/official/chess/:id`（可选 `?pack=`） | **覆盖模式**的只读入口：回 `{ spec, ids, official }` —— `spec` 带 `override: true` 与 `slug`，`official` 是官方原文（供差异预览）；给了 `pack` 时再回 `playtest`（该包 `pack.json.playtest.directToHand` 的声明 + 这条覆盖的两个 id），界面按声明显示「试玩直接发到手上」的勾选状态 |
 | POST | `/api/preview` | `{ spec }` → 推导并校验，**不写盘** |
 | POST | `/api/packs/:pack/operators` | `{ spec }` → 写 specs 并重新生成 `chess.json` |
 | DELETE | `/api/packs/:pack/operators/:slug` | 删除 spec 及其拥有的记录 |
@@ -683,8 +716,9 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 | POST | `/api/packs/:id/support` | `{ ids }` → 就地更新 `pack.json` 的 `support`（只动这一个字段，绝不补 `content`） |
 | POST | `/api/packs/:id/meta` | `{ name?, version?, author?, license?, description?, gameVersion? }` → 就地更新 `pack.json` 的元数据（只动传进来的键；空串/null = 删掉那个键；清空一个有 `assets/` 的包的 license → 400 `ASSETS_NEED_LICENSE`） |
 | POST | `/api/packs/:id/overrides` | `{ overrides }` → 整表替换 `pack.json` 的 `overrides`（`"<文件>:<id>"`；形状与文件白名单由 `OVERRIDE_ENTRY_RE` 判，官方没有的 id 照收 —— 写进去的要能删掉） |
-| GET | `/api/playtest` | 试玩状态（`running` / `port` / `url` / `pid`）+ 难度键表 + 当前工坊根 |
-| POST | `/api/playtest/start` | `{ difficulty?, stage? }` → 起（或复用）一个游戏服务器子进程并等 `/healthz`；`stage` 让**这一局强制打那张图**（子进程带 `SP_STAGE`，`Match` 构造器覆盖抽图并重算部署图；id 不存在直接 400）。子进程同时带 `SP_PLAYTEST=1`，记录里标了 `directToHand` 的干员会在第一回合进手牌。起不来 → 500 + 原话，且进程已被收尸 |
+| POST | `/api/packs/:id/playtest` | `{ directToHand }` → 整表替换 `pack.json` 的 `playtest.directToHand`（元素只查形状，成员资格仍由加载器判 `PLAYTEST_UNKNOWN_CHESS`；清空 = 删掉这个键）。加一条的正路是干员页那个勾，这条路由存在的理由是**删**：手写的、或者记录已经被删掉的陈旧条目必须能删掉，否则一个错 id 会让整个包起不来而作者无处可改 |
+| GET | `/api/playtest` | 试玩状态（`running` / `port` / `url` / `pid`）+ 难度键表 + 当前工坊根 + `directToHand`（这一局会直接进手牌的干员 id，由 `pack.json.playtest` 现算） |
+| POST | `/api/playtest/start` | `{ difficulty?, stage? }` → 起（或复用）一个游戏服务器子进程并等 `/healthz`；`stage` 让**这一局强制打那张图**（子进程带 `SP_STAGE`，`Match` 构造器覆盖抽图并重算部署图；id 不存在直接 400）。子进程同时带 `SP_PLAYTEST=1` 与 `SP_DIRECT_TO_HAND=<逗号分隔的 id>`，记录里标了 `directToHand` 的干员**加上** `pack.json.playtest.directToHand` 声明的那批会在第一回合进手牌（见上）。起不来 → 500 + 原话，且进程已被收尸 |
 | POST | `/api/playtest/stop` | 停掉试玩（没在跑时 `stopped: false`，幂等） |
 
 ## Option 署名（`_meta`）

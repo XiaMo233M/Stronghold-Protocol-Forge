@@ -251,11 +251,24 @@ code:
   `declarationsFor(...)` — the set the manifest will have after this save. This does not weaken the A3 rule: an id enters
   that set only when `spec.override` is true **and** `spec.id` addresses a real official record, in which case the derived
   record's id is that same id by construction. Hand-writing an official id into an ordinary spec is still refused.
-- **The editor's own two keys are not the author's content.** `deriveChessRecord` stamps `workshop: {schema, id}` and
-  `directToHand` onto every record it builds. Neither exists in official data, so writing them back turned a 44-field
-  official record into 46 fields. They are stripped before an override record is written (`stripEditorOnlyKeys`); the
-  closed world of A2 is untouched, because that check is about keys an AUTHOR writes, and these two are the deriver's
-  own. A hand-written `chess.json` override passes through unmodified and the closed world still judges it.
+- **The editor's own two keys are not the author's content — and a behaviour switch is not content at all.**
+  `deriveChessRecord` stamps `workshop: {schema, id}` and `directToHand` onto every record it builds. Neither exists in
+  official data, so writing them back turned a 44-field official record into 46 fields. `stripEditorOnlyKeys` removes
+  both before an override record is written; the closed world of A2 is untouched, because that check is about keys an
+  AUTHOR writes, and these two are the deriver's own. A hand-written `chess.json` override passes through unmodified and
+  the closed world still judges it.
+  That much was right for `workshop`, but stripping `directToHand` also **silently killed the switch**: the pack stores
+  records, nothing else remembered it, and an author who overrode an official operator ticked the box and got no
+  hand-out at all — the editor said 200, the game said nothing. The fix keeps the record shape and gives the switch its
+  own home in the **behaviour layer**: `pack.json.playtest.directToHand` (docs/WORKSHOP.md §1.2). The split follows from
+  what the two things ARE. "Same shape as the official record" is the override contract — an override says *this
+  operator's data is patched*, so the patched record must be the official record with fields changed, and a key official
+  data never had is not a patch. "Hand this operator to the player in playtest" says nothing about the operator: it is a
+  decision about what the *session* does, which is what the manifest is for — the same reason `support` and `overrides`
+  live there. So a pack that ADDS its own operator keeps the record marker (unchanged behaviour), a pack that OVERRIDES
+  an official one declares it in `pack.json`, and the engine reads the union of the two (`directToHandIds`). The
+  production invariant is untouched and now has its own test: with `SP_PLAYTEST` not exactly `1`, `directToHandIds`
+  returns empty, so a stock server hands out nothing even with a pack that declares the switch installed.
 
 The entry points are the official-record lists the operator and monster pages already render; the diff preview reads the
 `official` field of the same read-only response and compares it against the record the preview endpoint already returns.

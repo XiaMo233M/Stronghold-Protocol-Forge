@@ -126,7 +126,7 @@ export const EN_INDEX = Object.freeze({
   '{0} 已移出 {1} 阶助战卡池（重启游戏服务器后生效）': '{0} left the tier-{1} support pool (restart the game server to take effect)',
   '当前 {0} 阶卡池：{1}': 'Current tier-{0} pool: {1}',
   '试玩时直接发到手上（正式对局不受影响）': 'Hand it straight to the hand in playtest (real matches are unaffected)',
-  '勾上＝记录里写 `directToHand: true`：只有编辑器「一键试玩」起的那个服务器会在开局把它塞进手牌。正式服务器即使装了这个包也不会发牌，干员照样只在商店里摇到。': 'Ticking writes `directToHand: true` into the record: only the server the editor’s one-click playtest starts will put it into your hand at round 1. A stock server never hands it out even with this pack installed — there it is still rolled in the shop.',
+  "勾上＝只有编辑器「一键试玩」起的那个服务器会在开局把它塞进手牌。正式服务器即使装了这个包也不会发牌，干员照样只在商店里摇到。覆盖官方干员时，这个开关写在包的行为层（`pack.json` 的 `playtest.directToHand`）—— 记录保持与官方同形；新增的工坊干员写在记录里（`directToHand: true`）。两种写法都会在保存时落盘。": "Ticking means only the server the editor’s one-click playtest starts will put it into your hand at round 1. A stock server never hands it out even with this pack installed — there it is still rolled in the shop. When you override an OFFICIAL operator the switch lives in the pack’s behaviour layer (`playtest.directToHand` in `pack.json`) so the record stays the same shape as the official one; for an operator this pack adds it is written into the record (`directToHand: true`). Both land on disk when you save.",
   '保存并生成': 'Save and generate',
   '删除该干员': 'Delete this operator',
   '清空表单': 'Clear the form',

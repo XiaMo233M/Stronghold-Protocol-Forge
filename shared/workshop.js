@@ -389,6 +389,34 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     }
     if (!supportIds.includes(id)) supportIds.push(id);
   }
+  // 试玩行为开关（行为层，不进记录）：`playtest: { "directToHand": ["<chessId>", …] }`。
+  //
+  // 为什么住在 pack.json 而不是 chess 记录里：覆盖模式下记录必须与官方**同形**（官方记录没有
+  // `directToHand` 这个键，保存路径因此会在写补丁前把它摘掉），而「试玩时直接发到手上」是**行为层**的开关，
+  // 不是「覆盖官方数据」这件事 —— 于是覆盖一条官方干员时它曾经静默失效。搬到这里之后，记录继续同形，
+  // 开关照旧能用（见 docs/WORKSHOP.md §1.2）。
+  //
+  // 形状这一层只查「是不是对象、值是不是字符串数组」；「名单里的 id 真的属于这个包吗」要看包自己的
+  // chess 记录与 `overrides`，那只有文件系统/加载器知道（`server/workshop.js` 与 `tools/workshop-pack.mjs`
+  // 用同一个 `playtestUnknownIds` 判）。
+  const playtest = raw.playtest === undefined ? {} : raw.playtest;
+  if (!isPlainObj(playtest)) {
+    return fail('PLAYTEST_BAD_SHAPE', 'playtest must be an object: { "directToHand": ["<chessId>", …] }');
+  }
+  /** @type {string[]} */
+  let directToHand = [];
+  if (playtest.directToHand !== undefined) {
+    if (!Array.isArray(playtest.directToHand)) {
+      return fail('PLAYTEST_BAD_SHAPE', 'playtest.directToHand must be an array of chess ids this pack ships (or declares in overrides)');
+    }
+    for (const id of playtest.directToHand) {
+      if (typeof id !== 'string' || !RECORD_ID_RE.test(id)) {
+        return fail('PLAYTEST_BAD_SHAPE', `playtest.directToHand: "${String(id)}" is not a valid chess id`);
+      }
+      if (!directToHand.includes(id)) directToHand.push(id);
+    }
+    directToHand.sort();
+  }
   // 版本声明（DESIGN §27.5）：`api` 是**模组 API** 的区间（钩子总线与 kit 契约），`game` 是**上游游戏版本**的区间，
   // 两者都用 shared/packs.js isVersionRange 的语法（`>=0.2.0`、`0.2.x`、`^0.2.0`、`~0.2.1`、`*`、`||`）。
   // `gameVersion` 保留一代作为 `game` 的别名：编辑器与现成的包都在写它，读的时候优先 `game`。
@@ -423,8 +451,39 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
       itemIcons: itemIconFiles,
       art: artEntries,
       support: supportIds,
+      playtest: { directToHand },
     },
   };
+}
+
+/**
+ * `pack.json.playtest.directToHand` 里那些**不属于这个包**的 id（`PLAYTEST_UNKNOWN_CHESS` 的判罚依据）。
+ *
+ * 为什么要有这条：名单里的 id 只要加载器不认识，开关就是**静默失效** —— 作者在界面上勾了、试玩里却什么都没发生。
+ * 静默无效正是这个缺口的老毛病，所以这里点名拒绝。合法的 id 只有两类：
+ *   * 本包自己的 chess 记录 id（`ownChessIds`，非覆盖的工坊干员）；
+ *   * 本包在 `overrides` 里声明过的官方 id（覆盖模式：记录写的是官方 id，加载器只认这条声明）。
+ *
+ * 形状（不是对象、值不是字符串数组）在 `normalizePackManifest` 就已经被拒了，这里只管成员资格。
+ * 判罚只有这一份：加载器（`server/workshop.js`）、`tools/workshop-pack.mjs` 的 `readPackDir`
+ * 与编辑器读包的地方都调它，所以三处不可能给出不同结论。
+ *
+ * @param {string[]} declared `pack.json.playtest.directToHand`（已归一化）
+ * @param {string[]} overrides `pack.json.overrides`（`"<file>:<id>"` 列表）
+ * @param {Iterable<string>} ownChessIds 本包 chess.json 自己的记录 id
+ * @returns {string[]} 不认识的 id（保持声明顺序，去重）
+ */
+export function playtestUnknownIds(declared, overrides, ownChessIds) {
+  const own = ownChessIds instanceof Set ? ownChessIds : new Set(Array.isArray(ownChessIds) ? ownChessIds : []);
+  const declaredOverrides = new Set(Array.isArray(overrides) ? overrides : []);
+  const out = [];
+  for (const id of Array.isArray(declared) ? declared : []) {
+    if (typeof id !== 'string' || !id) continue;
+    if (own.has(id)) continue;
+    if (declaredOverrides.has(`chess:${id}`)) continue;
+    if (!out.includes(id)) out.push(id);
+  }
+  return out;
 }
 
 /**
@@ -525,6 +584,45 @@ export function workshopVoiceLangIndex(packs, { prefix = WORKSHOP_MEDIA_PREFIX }
  * the same rule; two orderings would be two contracts, and the loser of a collision would depend on which one ran.
  */
 export const byPackId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+/**
+ * 「试玩时直接发到手上」名单的**声明侧**：把所有包的 `pack.json.playtest.directToHand` 汇成一份名单，并裁掉撞车的。
+ *
+ * 沿用 §1.2 的**谁赢**规则（DESIGN §27.3）：两个包声明同一个 id 时，包 id 字典序最小者赢，输的一方拿到一条
+ * **点名**报告（`definedBy` 是赢家的包 id）。与其它面一样，结果只取决于包 id —— 先把包按 `byPackId` 排序再处理，
+ * 所以与「目录是按什么顺序扫描到的」无关。
+ *
+ * 这只是名单的**一半**：另一半是记录里自带 `directToHand: true` 的工坊件（非覆盖的包，向后兼容）。
+ * 两半的并集在引擎侧算（`server/match/match/phases.js` 的 `directToHandIds`）—— 正式服务器一个都不发，
+ * 因为那里 `SP_PLAYTEST` 不是 `1`。
+ *
+ * @param {Array<{ id: string, playtest?: { directToHand?: string[] } }>} packs
+ * @returns {{ ids: string[], errors: Array<{ pack: string, id: string, code: string, definedBy: string, reason: string }> }}
+ */
+export function workshopPlaytestIndex(packs) {
+  /** @type {string[]} */
+  const ids = [];
+  const owner = new Map();
+  const errors = [];
+  for (const pack of (Array.isArray(packs) ? packs : []).filter((p) => p && typeof p.id === 'string' && p.id).sort(byPackId)) {
+    const declared = isPlainObj(pack.playtest) && Array.isArray(pack.playtest.directToHand) ? pack.playtest.directToHand : [];
+    for (const id of declared) {
+      if (typeof id !== 'string' || !id) continue;
+      const holder = owner.get(id);
+      if (holder) {
+        if (holder === pack.id) continue;
+        errors.push({
+          pack: pack.id, id, code: 'PLAYTEST_ID_COLLISION', definedBy: holder,
+          reason: `"${id}" is already declared by pack "${holder}" — the pack with the smaller id keeps it (DESIGN §27.3). Remove it from this pack, or rename the record; an "overrides" entry does not win against another pack`,
+        });
+        continue;
+      }
+      owner.set(id, pack.id);
+      ids.push(id);
+    }
+  }
+  return { ids, errors };
+}
 
 /**
  * Keys of a record that an override REPLACES wholesale instead of merging field by field (DESIGN §27.3, owner's
@@ -828,6 +926,10 @@ export function applyWorkshop(base, packs) {
   // 「这个干员没有模型（会画成贴图）」的警告就该消失（反过来放在后面，日志会一直报一条已经解决的问题）。
   mergeWorkshopArt(out, packs, report);
   mergeWorkshopSupport(out, packs, report);
+  // 试玩开关（`pack.json.playtest`）不并进任何数据文件 —— 它是**行为层**的声明，引擎只在试玩服务器里读它
+  // （`SP_PLAYTEST=1`）。但两个包撞同一个 id 这件事必须与其它面一样被点名报告，否则输的一方会在
+  // 「我明明勾了」和「试玩里没有」之间反复，而日志一句话都不说。
+  for (const e of workshopPlaytestIndex(packs).errors) report.errors.push({ pack: e.pack, file: 'playtest', id: e.id, code: e.code, definedBy: e.definedBy, reason: e.reason });
   report.looks = [...chessLookIssues(out, looked), ...enemyLookIssues(out, lookedEnemies)];
   for (const list of Object.values(report.added)) list.sort();
   for (const list of Object.values(report.overridden)) list.sort();
