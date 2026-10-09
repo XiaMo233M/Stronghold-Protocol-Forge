@@ -97,6 +97,24 @@ export class MetaRegistry {
   has(key) { return this._h.has(key); }
   keys() { return [...this._h.keys()]; }
 
+  /**
+   * 复制一份注册表：**内容相同、互不影响**（DESIGN §29）。
+   *
+   * 这是「按房间装配」的落点，也是业主裁决里那条「**禁止全局 set/restore**」的实现方式：一个声明了
+   * `server.meta` 的包，它的处理器只能进**这一局**的那一份副本，绝不改进程级那一份（`getDefaultRegistry()`）
+   * —— 否则两台服务器上并发跑着的两个房间会互相串味，而且「开局前设全局、打完恢复」在多局并发下本来就是错的。
+   *
+   * 处理器对象本身是**共享**的（浅拷贝 Map）：官方内容注册的处理器是冻结的模块级常量，包注册的处理器同理不该
+   * 在运行期被改写。要按房间改**行为**，正确做法是注册一个**闭包捕获了房间参数**的处理器，而不是改这个对象。
+   * @returns {MetaRegistry}
+   */
+  fork() {
+    const copy = new MetaRegistry();
+    for (const [k, h] of this._h) copy._h.set(k, h);
+    copy.warnings = [...this.warnings];
+    return copy;
+  }
+
   // sugar
   garrison(effectKey, h) { return this.register(`garrison:${effectKey}`, h); }
   band(bandId, h) { return this.register(`band:${bandId}`, h); }

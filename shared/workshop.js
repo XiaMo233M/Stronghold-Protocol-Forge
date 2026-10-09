@@ -254,6 +254,25 @@ export const CLIENT_REQUIRES = Object.freeze(['serviceWorker', 'cacheStorage', '
 /** `server.preDispatch`：包内模块、准入策略文件、以及它要拦的消息类型。三件都不能空 —— 少了 `policy`
  *  的钩子无法判定该放谁进来，那正是「声明了却没人能执行」这一类静默失败。 */
 const PRE_DISPATCH_FIELDS = Object.freeze(['module', 'policy', 'intercepts']);
+/** `server.meta` 的两个字段，一个不多一个不少（DESIGN §29）。 */
+const META_FIELDS = Object.freeze(['module', 'registers']);
+const META_MODULE_EXT = '.mjs';
+/**
+ * 对局元注册表的**七个键类别**（DESIGN §29）：`server/match/effectsMeta.js` 的 `MetaRegistry` 恰好有七个
+ * 对应的方法（`garrison` / `band` / `bond` / `item` / `choice` / `effect` / `global`），一条注册键就是
+ * `<类别>:<id>`。
+ *
+ * 为什么这一份名单住在 `shared/` 而不是从 `effectsMeta.js` 读出来：那个模块在服务端（`server/match/`），
+ * 而形状层要在浏览器也会加载的共享文件里判形状。第二份真相会漂 —— 所以 `test/packMeta.test.js` 用**反射**
+ * 把两者钉在一起：`MetaRegistry.prototype` 上那七个方法必须与这份名单逐字相同，少一个或多一个都失败。
+ */
+export const META_KEY_CLASSES = Object.freeze(['garrison', 'band', 'bond', 'item', 'choice', 'effect', 'global']);
+/**
+ * 注册键里**类别之后**那一段允许的字符。与 `server/match/effectsMeta.js` 的 `KEY_RE` 的尾段逐字相同
+ * （`[A-Za-z0-9_\-.:#]`）—— 「形状层放行、运行时抛异常」是最坏的一种分工，所以两处必须一致
+ * （`test/packMeta.test.js` 用反射与实例各钉一遍）。
+ */
+const META_KEY_TAIL_RE = /^[A-Za-z0-9_\-.:#]+$/;
 /** 分发前钩子只能拦 `shared/protocol.js` 的 `C2S` 里真实存在的类型（DESIGN §28.13）。刻意从协议反推而不是
  *  在这里抄一份名单：抄一份就是第二个会漂移的真相，而漂移的方向是「作者声明了一个拦不住的类型」。 */
 const PRE_DISPATCH_INTERCEPTS = Object.freeze(Object.keys(C2S).sort());
@@ -395,13 +414,25 @@ function parseClientDecl(raw) {
  */
 function parseServerDecl(raw) {
   if (!isPlainObj(raw)) {
-    return fail('SERVER_DECL_BAD_SHAPE', 'server must be an object: { preDispatch: { module, policy, intercepts } }');
+    return fail('SERVER_DECL_BAD_SHAPE', 'server must be an object: { preDispatch: { module, policy, intercepts }, meta: { module, registers } }');
   }
+  const SERVER_MEMBERS = ['preDispatch', 'meta'];
   for (const key of Object.keys(raw)) {
-    if (key !== 'preDispatch') {
-      return fail('SERVER_UNKNOWN_FIELD', `server: "${key}" is not a declared field (preDispatch)`);
+    if (!SERVER_MEMBERS.includes(key)) {
+      return fail('SERVER_UNKNOWN_FIELD', `server: "${key}" is not a declared field (${SERVER_MEMBERS.join(', ')})`);
     }
   }
+  if (raw.preDispatch === undefined && raw.meta === undefined) {
+    return fail('SERVER_EMPTY_MEMBER', `server must declare at least one member (${SERVER_MEMBERS.join(', ')}) — an empty object says nothing and is refused rather than ignored`);
+  }
+  /** @type {Record<string, object>} */
+  const decl = {};
+  if (raw.meta !== undefined) {
+    const meta = parseMetaDecl(raw.meta);
+    if (!meta.ok) return meta;
+    decl.meta = meta.decl.meta;
+  }
+  if (raw.preDispatch === undefined) return { ok: true, decl };
   const pre = raw.preDispatch;
   if (!isPlainObj(pre)) {
     return fail('PREDISPATCH_BAD_SHAPE', 'server.preDispatch must be an object: { module, policy, intercepts }');
@@ -433,7 +464,79 @@ function parseServerDecl(raw) {
   // 与 `client.panels` / `operators` 同一个理由：键序（列表次序也是字节）不能随作者书写顺序变。
   // 返回值保持提案的形状（外面那一层 `preDispatch` 是包格式的一部分，不在这里拆平）。
   const intercepts = stableStringList(pre.intercepts);
-  return { ok: true, decl: { preDispatch: { module: pre.module, policy: pre.policy, intercepts } } };
+  decl.preDispatch = { module: pre.module, policy: pre.policy, intercepts };
+  return { ok: true, decl };
+}
+
+/**
+ * 一条注册键的形状：`<类别>:<id>`，或结尾带**一个** `*` 的前缀通配（`garrison:custom_*`）。
+ * @returns {string|null} 拒绝理由；`null` = 形状合法
+ */
+function metaKeyIssue(key) {
+  if (typeof key !== 'string' || !key) return `server.meta.registers: ${JSON.stringify(key)} is not a registry key`;
+  const starred = key.endsWith('*');
+  const body = starred ? key.slice(0, -1) : key;
+  // 星号只能是**结尾那一个**：`bond:a*b` 既不是精确键（注册表的 id 字符集不含 `*`）也不是前缀匹配，
+  // 它会变成一条永远注册不上的声明 —— 而「写了等于没写」正是这一节要消灭的东西。
+  if (body.includes('*')) {
+    return `server.meta.registers: "${key}" may carry at most ONE trailing "*" (a prefix match such as "garrison:custom_*")`;
+  }
+  if (starred && !body) return `server.meta.registers: "${key}" is only a "*": name a class and a prefix`;
+  const at = body.indexOf(':');
+  if (at <= 0 || at === body.length - 1) {
+    return `server.meta.registers: "${key}" must look like "<class>:<id>" — one of ${META_KEY_CLASSES.join(', ')}`;
+  }
+  const cls = body.slice(0, at);
+  if (!META_KEY_CLASSES.includes(cls)) {
+    return `server.meta.registers: "${key}" names the registry class "${cls}", which is not one of ${META_KEY_CLASSES.join(', ')}`;
+  }
+  // id 的字符集与注册表自己那条 `KEY_RE` 一致（`[A-Za-z0-9_\-.:#]`）：形状层放行、运行时抛异常，是最坏的一种分工。
+  if (!META_KEY_TAIL_RE.test(body.slice(at + 1))) {
+    return `server.meta.registers: "${key}" has characters the registry does not accept after the class (allowed: letters, digits, _ - . : #)`;
+  }
+  return null;
+}
+
+/**
+ * `pack.json.server.meta` —— 包的**对局元注册表**载荷（DESIGN §29）。它是 B 层的第二类载荷：一个 `.mjs` 导出
+ * `registerMeta(registry)`（与官方内容模块同形），在**这一局**的注册表上登记它自己的处理器。
+ *
+ * `registers` 是**白名单，不是提示**：运行时那个受限注册表对任何没列在这里的键**一注册就抛**。理由与
+ * `intercepts` 逐字相同 —— 不声明就可能**悄悄顶掉官方的**处理器（`register()` 是「后注册的赢」），
+ * 而「静默改官方行为」正是本仓每个面都在拒绝的那一类。
+ *
+ * 形状层判形状；「文件真的在不在、能不能 import」是装载期（`server/workshop.js metaIssues` 与装配路径）。
+ * @returns {{ ok: true, decl: object } | { ok: false, error: string, detail: string }}
+ */
+function parseMetaDecl(raw) {
+  if (!isPlainObj(raw)) {
+    return fail('META_BAD_SHAPE', 'server.meta must be an object: { module, registers }');
+  }
+  for (const key of Object.keys(raw)) {
+    if (!META_FIELDS.includes(key)) {
+      return fail('META_UNKNOWN_FIELD', `server.meta: "${key}" is not a declared field (${META_FIELDS.join(', ')})`);
+    }
+  }
+  if (!isSafeRelativePath(raw.module)) {
+    return fail('META_BAD_PATH', 'server.meta.module must be a relative path inside the pack (no absolute paths, no "..")');
+  }
+  if (!raw.module.endsWith(META_MODULE_EXT)) {
+    return fail('META_BAD_MODULE', `server.meta.module must be a "${META_MODULE_EXT}" module — the server loads it, the browser does not`);
+  }
+  if (!Array.isArray(raw.registers) || !raw.registers.length) {
+    return fail('META_BAD_REGISTERS', 'server.meta.registers must be a non-empty array of the registry keys this pack may register (a module allowed to register nothing is a module that does nothing)');
+  }
+  for (const key of raw.registers) {
+    const issue = metaKeyIssue(key);
+    if (issue) return fail('META_BAD_KEY', issue);
+  }
+  const registers = stableStringList(raw.registers);
+  if (registers.length !== raw.registers.length) {
+    const seen = new Set();
+    const dup = raw.registers.find((k) => (seen.has(k) ? true : (seen.add(k), false)));
+    return fail('META_DUPLICATE_KEY', `server.meta.registers: "${String(dup)}" is listed twice (one key, one owner)`);
+  }
+  return { ok: true, decl: { meta: { module: raw.module, registers } } };
 }
 
 /**
@@ -990,7 +1093,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     const notContributions = ['support', 'playtest']
       .filter((n) => raw[n] !== undefined);
     const names = [...WORKSHOP_CONTENT_FILES, 'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'operators',
-      'assets', 'client', 'server.preDispatch', 'routes', 'i18n'];
+      'assets', 'client', 'server.preDispatch', 'server.meta', 'routes', 'i18n'];
     const alsoNot = notContributions.length
       ? ` (note: ${notContributions.map((n) => `"${n}"`).join(' and ')} ${notContributions.length === 1 ? 'is' : 'are'} NOT a contribution — a pack that declares ${notContributions.length === 1 ? 'it' : 'them'} alone brings nothing into a match)`
       : '';
@@ -1015,6 +1118,13 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   const layer = raw.layer === undefined || raw.layer === null ? null : String(raw.layer).trim().toUpperCase();
   if (layer !== null && !MOD_LAYERS.includes(layer)) return fail('BAD_LAYER', `"layer": "${raw.layer}" is not one of ${MOD_LAYERS.join(' / ')}`);
   if (raw.combat !== undefined && typeof raw.combat !== 'boolean') return fail('BAD_COMBAT', '"combat" must be true or false (may this pack change a battle result?)');
+  // `server.meta` 改的是**对局结果**，所以按业主裁决（2026-10-10）它必须声明 `combat: true` —— 那正是「要改
+  // 对局结果的包进入房间摘要闸门 + golden 语料」这条线的入口（DESIGN §28.13.1 与 §29）。**硬闸门，不是警告**：
+  // 一个能改结果却把自己标成 `combat: false` 的包，会让「不声明 combat 的包改不了结果」这句话从**结构性保证**
+  // 退化成一句口号。位置放在这里（而不是形状层刚解析完 `server` 的地方）是为了让 `combat` 的**类型**错误先报出来。
+  if (serverParsed && serverParsed.decl.meta && raw.combat !== true) {
+    return fail('META_NEEDS_COMBAT', 'server.meta changes match results, so this pack must declare "combat": true — that is what puts it into the room digest gate and the golden corpus (DESIGN §29); a pack that cannot state that must not ship server-side match logic');
+  }
   return {
     ok: true,
     pack: {

@@ -1018,6 +1018,61 @@ JSON 对象、每个值必须是字符串** —— 任一不满足**整个包不
 
 ---
 
+### 1.11 `server.meta`：包写的**对局逻辑**（A 段：只认声明）
+
+`kits/<chessId>.js` 能给一名干员一套战斗行为，但它碰不到**对局**：它不会在 `onRoundStart` 触发、不能加盟约层数、
+不能对商店刷新做反应。`server.meta` 就是给这一类代码开的口子 —— 它的形状与引擎自己的内容模块**逐字相同**：
+
+```jsonc
+"combat": true,                                   // 必填，见下
+"server": {
+  "meta": {
+    "module": "meta/bonds.mjs",                   // 包内相对路径，必须 .mjs（服务端加载，浏览器不加载）
+    "registers": ["bond:kazdelShip", "garrison:custom_*"]
+  }
+}
+```
+
+```js
+// meta/bonds.mjs —— 与 server/sim/content/bonds.js 同形：一个 registerMeta(registry)
+export function registerMeta(registry) {
+  registry.bond('kazdelShip', {
+    onRoundStart(ctx, ev) { /* 这一局开始时做点什么 */ },
+    onGain(ctx, ev) { /* … */ },
+  });
+}
+```
+
+**三条硬规则**（设计全文见 [DESIGN §29](design/meta-payload.md)）：
+
+1. **`registers` 是白名单，不是说明。** 注册表的规则是「**后注册的覆盖先注册的**」，而官方内容先注册 —— 所以一个
+   没声明的键可能**悄悄顶掉官方的**处理器（例如 `bond:yanShip`）。运行时给你的是一个**受控注册表**：写一个不在
+   清单里的键就抛，那一局这个包的作用**整份不生效并点名**，而不是「一半生效、一半静默」。清单里每项写法：
+   * 精确键：`bond:kazdelShip`；
+   * 前缀通配：**只能**在结尾带一个 `*`，例如 `garrison:custom_*` 覆盖那 13 个 `custom_*` 效果键。
+   类别只能是七个之一：`garrison` / `band` / `bond` / `item` / `choice` / `effect` / `global`。
+2. **必须声明 `combat: true`。** 这是业主裁决（2026-10-10）的落地：注入的服务端逻辑**不得成为对局结果的差异来源**，
+   除非它声明 `combat: true` —— 那正是「进入房间摘要闸门 + 全员同集合 + golden 语料」这条线的入口。
+   声明了 `server.meta` 却没写 `combat: true` ⇒ **整包不加载**并点名（`META_NEEDS_COMBAT`）。**这不是警告。**
+3. **按房间装配，没有全局 set/restore。** 你的处理器只进**这一局**的注册表副本（`MetaRegistry.fork()`），
+   进程级那一份永远不动。所以：状态放在**闭包**里（用传给 `registerMeta` 的那次调用捕获房间参数），
+   **不要**去改共享的处理器对象；也**不要**写「开局前设全局、打完恢复」——多局并发会串味。
+   房间没有声明任何带 `meta` 的包时，`Match` 的行为与从前**逐字节相同**（不做 fork）。
+
+**代码纪律**：这个模块在**一局对局里**执行，所以它与引擎同一条确定性规则 —— 不得用 `Math.random`（用对局自己的随机流）、
+不得读时钟、不得依赖无序容器的遍历顺序。B 段会在装载路径上做一次**静态扫描**并点名拒绝（规则与
+`shared/kitAuthoring.js` 对 kit 的那一套一致）。
+
+**当前状态**：**A 段已实现**（`server.meta` 的形状、点名拒绝、`registers` 归一化、`combat` 闸门、模块字节进身份哈希、
+装载期判「文件真的在不在」）—— **还没有任何执行**：B 段（按房间装配、受控注册表、静态扫描、与 `Lobby`/`Match` 接线）
+是紧跟着的那一刀。所以今天写它的包会被**如实地**读成「声明合法但还不生效」—— loader 不会假装它已经在跑。
+
+**写错的拒绝码**：`META_BAD_SHAPE` / `META_UNKNOWN_FIELD` / `META_BAD_PATH` / `META_BAD_MODULE` /
+`META_BAD_REGISTERS` / `META_BAD_KEY` / `META_DUPLICATE_KEY` / `META_NEEDS_COMBAT` / `SERVER_EMPTY_MEMBER`；
+装载期还有 `META_BAD_MODULE`（模块文件不在包里）。前八个在 `pack.json` 的形状层就拒，失败同样**整包不加载**。
+
+---
+
 ## 2. 助战
 
 ### 2.1 配置：`data/support.json`

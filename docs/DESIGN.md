@@ -35,3 +35,4 @@ normative lines it rewrote).
 | §26 | [history/0.2.1.md](history/0.2.1.md) | 0.2.1 — after the 0.2.0 release |
 | §27 | [history/0.2.2.md](history/0.2.2.md) | 0.2.2 — after the 0.2.1 release (2026-10-09) |
 | §28 | [design/mod-layer.md](design/mod-layer.md) | The mod layer: identity, loading, isolation, versioning, distribution |
+| §29 | [design/meta-payload.md](design/meta-payload.md) | The match meta payload: a pack's server-side match logic (`server.meta`) |

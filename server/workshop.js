@@ -179,7 +179,10 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
       // i18n（fanpack G-04）：声明的译文文件必须真的在包里、是 JSON 对象、每个值都是字符串。
       // 与上面两组同一个口径：一条用不了的声明拒绝整个包 —— 否则作者看到的是「包加载了、词条没生效」。
       const langIssues = i18nIssues(manifest.pack, packDir, readUiLangFile);
-      const gateIssues = [...assetIssues.issues, ...hookIssues, ...langIssues];
+      // `server.meta`（DESIGN §29）：声明的模块必须真的在包里、可读、是 `.mjs`。同一条口径 —— 一个声明了自己
+      // 要改对局结果却没有模块文件的包，会让服务器以为这一局有它的效果而实际上没有。
+      const metaFileIssues = metaIssues(manifest.pack, packDir);
+      const gateIssues = [...assetIssues.issues, ...hookIssues, ...langIssues, ...metaFileIssues];
       if (gateIssues.length) {
         errors.push({ pack: name, reason: `${gateIssues[0].code}: ${gateIssues[0].reason}` });
         continue;
@@ -476,6 +479,37 @@ export function validateHookPolicy(mod, policy) {
 }
 
 /**
+ * `pack.json.server.meta` 的**装载期**判据（DESIGN §29）：声明的 `module` 必须真的在包里、可读、是 `.mjs`。
+ *
+ * 与 B2/B3a/B4 同一条纪律（「一条用不了的声明拒绝整个包」）：一个声明了自己要改对局结果、却连模块文件都不在的包，
+ * 会让服务器以为这一局有它的效果而实际上没有 —— 那正是本仓反复点名的最坏形态。所以这里与 `assetsIssues` /
+ * `panelModuleIssues` 一样，在 `loadWorkshop` **列出这个包之前**判，失败就整包不出现。
+ *
+ * **这一层判不到的两件事**（都留到装配路径，理由与 `server.preDispatch` 逐字相同）：
+ *   * 模块能不能 `import`、有没有 `registerMeta` 导出 —— 只有动态 `import` 才知道；
+ *   * `registers` 里的键是不是运行时**真的**注册的那些 —— 那要模块跑一遍才知道（受限注册表在那一刻拒绝，
+ *     见 `server/match/metaPack.js`）。
+ * @param {{ server?: { meta?: { module: string, registers: string[] } } }|null} pack normalized manifest
+ * @param {string} packDir the pack's directory on disk
+ * @returns {Array<{ code: string, reason: string }>}
+ */
+export function metaIssues(pack, packDir) {
+  const decl = pack && pack.server && pack.server.meta;
+  if (!decl || typeof packDir !== 'string' || !packDir) return [];
+  const dir = path.resolve(packDir);
+  const moduleAbs = path.join(dir, ...String(decl.module).split('/'));
+  if (!(moduleAbs === dir || moduleAbs.startsWith(dir + path.sep))) {
+    return [{ code: 'META_BAD_PATH', reason: `server.meta.module "${decl.module}" must resolve inside the pack` }];
+  }
+  let readable;
+  try { readable = fs.statSync(moduleAbs).isFile(); } catch { readable = false; }
+  if (!readable) {
+    return [{ code: 'META_BAD_MODULE', reason: `server.meta.module "${decl.module}" is not a readable file inside the pack` }];
+  }
+  return [];
+}
+
+/**
  * `pack.json.i18n` 的**装载期**判据（fanpack G-04 / plugin-pack G4，docs/WORKSHOP.md §1.10）：
  * 声明的每一个 `.json` 必须真的在包里、必须是 JSON 对象、每一个值必须是**字符串且键不是 `_meta`**。
  *
@@ -628,6 +662,18 @@ export function identifyPack(packDir, pack, files, { assetsDigest = null } = {})
   for (const rel of panelFiles) {
     // A panel module may live under `assets/` (or be a kit source): then that file is already in the manifest and
     // adding it twice would list the same bytes under the same path twice.
+    if (manifest.some((m) => m.path === rel)) continue;
+    const abs = path.join(packDir, ...rel.split('/'));
+    if (abs === packDir || !abs.startsWith(packDir + path.sep)) continue;
+    try { addBytes(rel, fs.readFileSync(abs)); } catch { /* unreachable for a LOADED pack: loadWorkshop refuses it first */ }
+  }
+  // 包的**对局元注册表**模块（`pack.json.server.meta`, DESIGN §29）：它是要在**对局里执行**的代码，所以它的字节
+  // 必须进身份 —— 与面板模块逐字相同的一条理由（同一份摘要不能描述两段不同的行为）。它同时是**唯一**能让两个
+  // 内容哈希相同的包在对局里跑出不同结果的声明，所以漏了它，房间的摘要闸门就在最该拦的地方漏掉。
+  // 没声明 `server.meta` 的包（今天所有的包）哈希逐字节不变。
+  const metaFiles = [...new Set([pack.server && pack.server.meta && typeof pack.server.meta.module === 'string'
+    ? pack.server.meta.module : ''].filter(Boolean))];
+  for (const rel of metaFiles) {
     if (manifest.some((m) => m.path === rel)) continue;
     const abs = path.join(packDir, ...rel.split('/'));
     if (abs === packDir || !abs.startsWith(packDir + path.sep)) continue;
