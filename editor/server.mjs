@@ -262,6 +262,9 @@ function packEnemySpecs(packDir) {
 /** Write a pack's `enemies.json` from its enemy specs, preserving every record no spec owns. */
 function regenerateEnemies(packDir, officialEnemies, dropIds = []) {
   const existing = readJson(path.join(packDir, 'enemies.json'), {}) || {};
+  // A3: the same verdict as the save path, from one manifest read (see regeneratePack for the reasoning).
+  const manifestOverrides = readJson(path.join(packDir, 'pack.json'), null)?.overrides;
+  const declaredOverrides = Array.isArray(manifestOverrides) ? manifestOverrides : [];
   const owned = new Set(Array.isArray(dropIds) ? dropIds : []);
   const fresh = {};
   const errors = [];
@@ -273,7 +276,7 @@ function regenerateEnemies(packDir, officialEnemies, dropIds = []) {
       continue;
     }
     owned.add(derived.enemy.key);
-    const issues = enemyErrors(validateEnemy(derived.enemy, { key: derived.enemy.key, officialIds: officialEnemies }));
+    const issues = enemyErrors(validateEnemy(derived.enemy, { key: derived.enemy.key, officialIds: overrideBlockers(officialEnemies, [derived.enemy.key], declaredOverrides, 'enemies') }));
     if (issues.length) errors.push({ key: derived.enemy.key, issues });
     fresh[derived.enemy.key] = derived.enemy;
   }
@@ -610,8 +613,10 @@ function packState(root, packId, officialIds) {
     if (ids) { generated.add(ids.base); generated.add(ids.golden); }
   }
   const operators = [];
+  // 本包声明过的覆盖（A3）：列表也要按同一判罚，否则会「保存放行、列表继续说这个 id 冲突」
+  const declaredOverrides = Array.isArray(manifest?.overrides) ? manifest.overrides : [];
   for (const [id, rec] of Object.entries(records)) {
-    const issues = validateChessRecord(rec, { id, officialIds });
+    const issues = validateChessRecord(rec, { id, officialIds: overrideBlockers(officialIds, [id], declaredOverrides, 'chess') });
     operators.push({
       chessId: id, name: rec.name ?? null, tier: rec.tier ?? null, isGolden: !!rec.isGolden,
       profession: rec.profession ?? null, position: rec.position ?? null,
@@ -640,6 +645,10 @@ function regeneratePack(root, packId, officialIds, dropIds = []) {
   const packDir = path.join(root, packId);
   const existing = readJson(path.join(packDir, 'chess.json'), {}) || {};
   const specDir = path.join(packDir, 'specs');
+  // A3: the SAME verdict as the save path (one manifest read for the whole pass). Without this, a hand-written
+  // official-id record that the pack DID declare in `overrides` would block every operator save in this pack.
+  const manifestOverrides = readJson(path.join(packDir, 'pack.json'), null)?.overrides;
+  const declaredOverrides = Array.isArray(manifestOverrides) ? manifestOverrides : [];
   const owned = new Set(Array.isArray(dropIds) ? dropIds : []);
   const fresh = {};
   const errors = [];
@@ -658,7 +667,7 @@ function regeneratePack(root, packId, officialIds, dropIds = []) {
       const ids = chessIds(spec.id);
       if (ids) { owned.add(ids.base); owned.add(ids.golden); }
       for (const [id, rec] of [[derived.base.chessId, derived.base], [derived.golden.chessId, derived.golden]]) {
-        const issues = authoringErrors(validateChessRecord(rec, { id, officialIds }));
+        const issues = authoringErrors(validateChessRecord(rec, { id, officialIds: overrideBlockers(officialIds, [id], declaredOverrides, 'chess') }));
         if (issues.length) errors.push({ slug: spec.id, issues });
         fresh[id] = rec;
       }
@@ -1567,6 +1576,39 @@ const sendJson = (res, status, obj) => {
  * Create the editor's HTTP server. Exported for tests (`port: 0`).
  * @param {{ workshopRoot?: string, host?: string, port?: number, dataDir?: string, supportFile?: string, log?: object }} [opts]
  */
+/**
+ * 官方 id 的覆盖（A3）：一个 id 只要**正在被保存**且 `pack.json.overrides` 里**声明过**，就不再算冲突。
+ *
+ * 照盟约页的先例（`/api/bonds` 那条 `new Set([...officialBondIds].filter((id) => id !== bondId || !declared.has(bondId)))`：
+ * 同时看 id 与 declared，**不是**把官方 id 一律剔掉）。为什么两件事必须一起看：只过滤 officialIds 会让编辑器
+ * 放行一次保存，而加载器随后因为 `pack.json.overrides` 没声明而**丢掉这条记录** —— 比今天「编辑器 400 拒绝」
+ * 更坏，因为它是静默的（编辑器说存好了，游戏里没有）。所以放行与声明是同一次保存的两半。
+ *
+ * @param {Iterable<string>} officialIds 官方数据里的 id
+ * @param {Iterable<string>} savedIds 本次保存会写出的 id（干员：base + golden）
+ * @param {Iterable<string>} declaredOverrideKeys 本包 `pack.json.overrides` 的原样条目（`"<file>:<id>"`）
+ * @param {string} file 数据文件名（`chess` / `enemies` …），用来拼声明键
+ * @returns {Set<string>} 仍需按冲突报出去的官方 id
+ */
+export function overrideBlockers(officialIds, savedIds, declaredOverrideKeys, file) {
+  const saved = new Set(savedIds);
+  const declared = new Set(declaredOverrideKeys);
+  return new Set([...officialIds].filter((id) => !(saved.has(id) && declared.has(`${file}:${id}`))));
+}
+
+/**
+ * 把 `"<file>:<id>"` 声明并进清单（A3 的另一半）：保存时自动补，作者不必在两页之间手抄 id。
+ * 返回**排序后的新数组**（原地不改 `manifest`），与包管理页写入端的排序一致，避免同一份清单两种顺序。
+ * @param {{ overrides?: string[] }|null|undefined} manifest
+ * @param {Iterable<string>} entries 要补的声明（例如 `chess:chess_char_1_01_a`）
+ * @returns {string[]}
+ */
+export function withOverrideDeclarations(manifest, entries) {
+  const overrides = new Set(Array.isArray(manifest?.overrides) ? manifest.overrides : []);
+  for (const e of entries) if (typeof e === 'string' && e) overrides.add(e);
+  return [...overrides].sort();
+}
+
 export async function createEditorServer(opts = {}) {
   const root = path.resolve(opts.workshopRoot ?? WORKSHOP_DIR);
   // The data dir and the support file are injectable so a test never rewrites the real data/support.json.
@@ -1724,12 +1766,18 @@ export async function createEditorServer(opts = {}) {
 
     // derive + validate WITHOUT writing: the live preview of the form
     if (p === '/api/preview' && method === 'POST') {
-      const { spec } = await readBody(req);
+      const { spec, pack } = await readBody(req);
+      // A3: the preview must reach the SAME verdict as the save. `pack` is optional (an unsaved/new spec has no pack
+      // yet, and no declared overrides either) — without it this is exactly today's behaviour.
+      if (pack !== undefined && pack !== null && !PACK_ID_RE.test(String(pack))) throw Object.assign(new Error('bad pack id'), { status: 400 });
+      const declaredOverrides = pack ? (readJson(path.join(root, String(pack), 'pack.json'), null)?.overrides ?? []) : [];
       const derived = deriveChessRecord(spec);
       if (!derived.ok) return sendJson(res, 200, { ok: false, errors: derived.errors, warnings: [] });
+      const savedIds = [derived.base.chessId, derived.golden.chessId];
+      const blockers = overrideBlockers(officialIds, savedIds, Array.isArray(declaredOverrides) ? declaredOverrides : [], 'chess');
       const issues = [];
       for (const [id, rec] of [[derived.base.chessId, derived.base], [derived.golden.chessId, derived.golden]]) {
-        issues.push(...validateChessRecord(rec, { id, officialIds }));
+        issues.push(...validateChessRecord(rec, { id, officialIds: blockers }));
       }
       issues.push(...assetSpineIssues(derived.base, { knownSpines: modelSpines }));
       return sendJson(res, 200, {
@@ -1770,9 +1818,16 @@ export async function createEditorServer(opts = {}) {
       if (!derived.ok) return sendJson(res, 400, { error: 'the spec is invalid', errors: derived.errors });
       const ids = chessIds(spec.id);
       if (!SLUG_RE.test(ids.slug)) throw Object.assign(new Error('bad operator id'), { status: 400 });
+      // A3: an official id may be saved when the pack declares the override — and the save below ADDS that
+      // declaration by itself (see `withOverrideDeclarations`), so the two halves land in the same request.
+      const manifestPath = path.join(root, packId, 'pack.json');
+      const existingManifest = readJson(manifestPath, null);
+      const declaredOverrides = Array.isArray(existingManifest?.overrides) ? existingManifest.overrides : [];
+      const savedIds = [derived.base.chessId, derived.golden.chessId];
+      const blockers = overrideBlockers(officialIds, savedIds, declaredOverrides, 'chess');
       const errs = [
-        ...validateChessRecord(derived.base, { id: derived.base.chessId, officialIds }),
-        ...validateChessRecord(derived.golden, { id: derived.golden.chessId, officialIds }),
+        ...validateChessRecord(derived.base, { id: derived.base.chessId, officialIds: blockers }),
+        ...validateChessRecord(derived.golden, { id: derived.golden.chessId, officialIds: blockers }),
         // 没有模型 = 试玩里是一张贴图：宁可在这里拒绝，也不要让作者去试玩里猜
         ...assetSpineIssues(derived.base, { knownSpines: modelSpines }),
       ];
@@ -1780,23 +1835,22 @@ export async function createEditorServer(opts = {}) {
       if (blocking.length) return sendJson(res, 400, { error: 'the operator did not validate', errors: blocking });
 
       const packDir = path.join(root, packId);
-      const manifestPath = path.join(packDir, 'pack.json');
       // `content` 必须声明 chess，否则加载器**完全不读这个包的 chess.json**：干员在编辑器里存在、在磁盘上存在、
       // 语法也没问题，却永远进不了游戏（商店摇不到、试玩里没有）——一条没有任何报错的静默失败。
       // 这个包可能是别的页面建的（content: ['stages'] …），所以这里补一条，而不是只在「包不存在」时才写。
-      const existingManifest = readJson(manifestPath, null);
       const content = new Set(Array.isArray(existingManifest?.content) ? existingManifest.content : []);
       content.add('chess');
+      // A3 的另一半：本次保存的 id 里哪些是官方 id ⇒ 自动补 `"chess:<id>"` 声明。作者不该在两页之间手抄 id。
+      const overrides = withOverrideDeclarations(existingManifest, savedIds.filter((id) => officialIds.has(id)).map((id) => `chess:${id}`));
       const nextManifest = existingManifest
-        ? { ...existingManifest, content: [...content].sort() }
+        ? { ...existingManifest, content: [...content].sort(), overrides }
         : {
           id: packId, name: spec.name || packId, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null,
-          description: null, gameVersion: '0.2.1', content: [...content].sort(), overrides: [],
+          description: null, gameVersion: '0.2.1', content: [...content].sort(), overrides,
         };
-      const declared = Array.isArray(existingManifest?.content) ? existingManifest.content : [];
-      if (!existingManifest || declared.length !== content.size || declared.some((f) => !content.has(f))) {
-        await writeJson(manifestPath, nextManifest);
-      }
+      // 无条件写：`overrides` 可能刚刚被自动补上，而 `content` 一个字都没变 —— 今天那个「content 变了才写」的条件
+      // 正好漏掉这个场景（声明补不上 ⇒ 加载器丢掉这条记录，而编辑器已经回了 200）。
+      await writeJson(manifestPath, nextManifest);
       const specPath = path.join(packDir, 'specs', `${ids.slug}.json`);
       const previousSpec = readJson(specPath, null);
       await writeJson(specPath, withForgeMeta(spec, { author: authorFor(packDir, forgeAuthor), packId, now: new Date().toISOString(), previous: previousSpec }));
@@ -2412,6 +2466,9 @@ export async function createEditorServer(opts = {}) {
           return ids ? ids.key : null;
         }).filter(Boolean));
         const records = readJson(path.join(packDir, 'enemies.json'), {}) || {};
+        // A3: the list applies the same verdict as the save (declared overrides are not collisions).
+        const manifestOverrides = readJson(path.join(packDir, 'pack.json'), null)?.overrides;
+        const declaredOverrides = Array.isArray(manifestOverrides) ? manifestOverrides : [];
         for (const [key, rec] of Object.entries(records)) {
           enemies.push({
             pack: packId, key, name: rec.name ?? key, rank: rec.rank ?? null, applyWay: rec.applyWay ?? null,
@@ -2421,7 +2478,7 @@ export async function createEditorServer(opts = {}) {
             abilities: Array.isArray(rec.abilities) ? rec.abilities.length : 0,
             skills: Array.isArray(rec.skills) ? rec.skills.length : 0,
             managed: managed.has(key),
-            issues: validateEnemy(rec, { key, officialIds: officialEnemies }),
+            issues: validateEnemy(rec, { key, officialIds: overrideBlockers(officialEnemies, [key], declaredOverrides, 'enemies') }),
           });
         }
       }
@@ -2454,10 +2511,16 @@ export async function createEditorServer(opts = {}) {
 
     // derive + validate a monster WITHOUT writing: the form's live feedback
     if (p === '/api/enemies/preview' && method === 'POST') {
-      const { spec } = await readBody(req);
+      const { spec, pack } = await readBody(req);
+      // A3: same verdict as the save path; `pack` is optional (backward compatible: no pack ⇒ no declared overrides)
+      if (pack !== undefined && pack !== null && !PACK_ID_RE.test(String(pack))) throw Object.assign(new Error('bad pack id'), { status: 400 });
+      const declaredOverrides = pack ? (readJson(path.join(root, String(pack), 'pack.json'), null)?.overrides ?? []) : [];
       const derived = deriveEnemy(spec);
       if (!derived.ok) return sendJson(res, 200, { ok: false, errors: derived.errors, warnings: [] });
-      const issues = validateEnemy(derived.enemy, { key: derived.enemy.key, officialIds: officialEnemies });
+      const issues = validateEnemy(derived.enemy, {
+        key: derived.enemy.key,
+        officialIds: overrideBlockers(officialEnemies, [derived.enemy.key], Array.isArray(declaredOverrides) ? declaredOverrides : [], 'enemies'),
+      });
       return sendJson(res, 200, {
         ok: enemyErrors(issues).length === 0,
         errors: issues.filter((i) => i.severity === 'error'),
@@ -2474,17 +2537,21 @@ export async function createEditorServer(opts = {}) {
       if (!ids) throw Object.assign(new Error('spec.id must be a slug (letters, digits, _ - . :)'), { status: 400 });
       const derived = deriveEnemy(spec);
       if (!derived.ok) return sendJson(res, 400, { error: 'the monster spec is invalid', errors: derived.errors });
-      const blocking = enemyErrors(validateEnemy(derived.enemy, { key: derived.enemy.key, officialIds: officialEnemies }));
-      if (blocking.length) return sendJson(res, 400, { error: 'the monster did not validate', errors: blocking });
-
       const packDir = path.join(root, packId);
       const manifestPath = path.join(packDir, 'pack.json');
       const existingManifest = readJson(manifestPath, null);
+      const declaredOverrides = Array.isArray(existingManifest?.overrides) ? existingManifest.overrides : [];
+      // A3: an official KEY may be saved when the pack declares `"enemies:<key>"`, and the write below adds it.
+      const blockers = overrideBlockers(officialEnemies, [derived.enemy.key], declaredOverrides, 'enemies');
+      const blocking = enemyErrors(validateEnemy(derived.enemy, { key: derived.enemy.key, officialIds: blockers }));
+      if (blocking.length) return sendJson(res, 400, { error: 'the monster did not validate', errors: blocking });
+
       const content = new Set(Array.isArray(existingManifest?.content) ? existingManifest.content : []);
       content.add('enemies');
+      const overrides = withOverrideDeclarations(existingManifest, officialEnemies.has(derived.enemy.key) ? [`enemies:${derived.enemy.key}`] : []);
       await writeJson(manifestPath, existingManifest
-        ? { ...existingManifest, content: [...content].sort() }
-        : { id: packId, name: spec.name || packId, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null, description: null, gameVersion: '0.2.1', content: [...content], overrides: [] });
+        ? { ...existingManifest, content: [...content].sort(), overrides }
+        : { id: packId, name: spec.name || packId, version: '0.1.0', author: authorFor(packDir, forgeAuthor), license: null, description: null, gameVersion: '0.2.1', content: [...content], overrides });
       const specPath = path.join(packDir, ENEMY_SPEC_DIR, `${ids.slug}.json`);
       const previousSpec = readJson(specPath, null);
       await writeJson(specPath, withForgeMeta(spec, { author: authorFor(packDir, forgeAuthor), packId, now: new Date().toISOString(), previous: previousSpec }));
