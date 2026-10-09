@@ -262,16 +262,20 @@ function packEnemySpecs(packDir) {
 }
 
 /** Write a pack's `enemies.json` from its enemy specs, preserving every record no spec owns. */
-function regenerateEnemies(packDir, officialEnemies, dropIds = []) {
+function regenerateEnemies(packDir, officialEnemies, dropIds = [], officialTable = null) {
   const existing = readJson(path.join(packDir, 'enemies.json'), {}) || {};
   // A3: the same verdict as the save path, from one manifest read (see regeneratePack for the reasoning).
   const manifestOverrides = readJson(path.join(packDir, 'pack.json'), null)?.overrides;
-  const declaredOverrides = Array.isArray(manifestOverrides) ? manifestOverrides : [];
+  const specs = packEnemySpecs(packDir);
+  // A3 + B 段：磁盘上已声明的 + 覆盖 spec 将要写的（与 `regeneratePack` 同一条规矩）。
+  const declaredOverrides = [...(Array.isArray(manifestOverrides) ? manifestOverrides : []), ...declarationsFor('enemies', specs, officialTable)];
   const owned = new Set(Array.isArray(dropIds) ? dropIds : []);
   const fresh = {};
   const errors = [];
-  for (const spec of packEnemySpecs(packDir)) {
-    const derived = deriveEnemy(spec);
+  for (const spec of specs) {
+    // B 段：覆盖模式的 spec 用官方 key 本身；其余（含所有老 spec）走默认路径一字不变。
+    const overIds = overrideIdsFor('enemies', spec, officialTable);
+    const derived = deriveEnemy(spec, overIds);
     if (!derived.ok) {
       // a spec that cannot derive owns nothing: claiming its key would delete the previous record on an unrelated save
       errors.push({ key: spec && spec.id, issues: derived.errors.map((e) => ({ ...e, severity: 'error' })) });
@@ -643,36 +647,43 @@ function packState(root, packId, officialIds) {
  * derived from the (now absent) spec.
  * @returns {{ records: object, generated: string[] }}
  */
-function regeneratePack(root, packId, officialIds, dropIds = []) {
+function regeneratePack(root, packId, officialIds, dropIds = [], officialChessTable = null) {
   const packDir = path.join(root, packId);
   const existing = readJson(path.join(packDir, 'chess.json'), {}) || {};
   const specDir = path.join(packDir, 'specs');
   // A3: the SAME verdict as the save path (one manifest read for the whole pass). Without this, a hand-written
   // official-id record that the pack DID declare in `overrides` would block every operator save in this pack.
   const manifestOverrides = readJson(path.join(packDir, 'pack.json'), null)?.overrides;
-  const declaredOverrides = Array.isArray(manifestOverrides) ? manifestOverrides : [];
   const owned = new Set(Array.isArray(dropIds) ? dropIds : []);
-  const fresh = {};
-  const errors = [];
+  const specs = [];
   if (fs.existsSync(specDir)) {
     for (const name of fs.readdirSync(specDir).sort()) {
       if (!name.endsWith('.json')) continue;
       const spec = readJson(path.join(specDir, name), null);
-      if (!spec) continue;
-      const derived = deriveChessRecord(spec);
-      if (!derived.ok) {
-        // A spec that cannot derive OWNS NOTHING: its previous records must be preserved. Claiming them here and then
-        // skipping would delete them from chess.json on an unrelated save — data loss behind a 200 OK.
-        errors.push({ slug: spec.id, issues: derived.errors.map((e) => ({ ...e, severity: 'error' })) });
-        continue;
-      }
-      const ids = chessIds(spec.id);
-      if (ids) { owned.add(ids.base); owned.add(ids.golden); }
-      for (const [id, rec] of [[derived.base.chessId, derived.base], [derived.golden.chessId, derived.golden]]) {
-        const issues = authoringErrors(validateChessRecord(rec, { id, officialIds: overrideBlockers(officialIds, [id], declaredOverrides, 'chess') }));
-        if (issues.length) errors.push({ slug: spec.id, issues });
-        fresh[id] = rec;
-      }
+      if (spec) specs.push(spec);
+    }
+  }
+  // A3 + B 段：磁盘上已声明的 + 每个覆盖 spec **将要**写的（第一次覆盖还没有声明，见 `declarationsFor`）。
+  const declaredOverrides = [...(Array.isArray(manifestOverrides) ? manifestOverrides : []), ...declarationsFor('chess', specs, officialChessTable)];
+  const fresh = {};
+  const errors = [];
+  for (const spec of specs) {
+    // B 段：覆盖模式的 spec 交出它要写的**官方** id 对；其余（含所有老 spec）走默认路径一字不变。
+    const overIds = overrideIdsFor('chess', spec, officialChessTable);
+    const derived = deriveChessRecord(spec, overIds);
+    if (!derived.ok) {
+      // A spec that cannot derive OWNS NOTHING: its previous records must be preserved. Claiming them here and then
+      // skipping would delete them from chess.json on an unrelated save — data loss behind a 200 OK.
+      errors.push({ slug: spec.id, issues: derived.errors.map((e) => ({ ...e, severity: 'error' })) });
+      continue;
+    }
+    const ids = overIds ?? chessIds(spec.id);
+    if (ids) { owned.add(ids.base); owned.add(ids.golden); }
+    // 覆盖模式摘掉编辑器自己的两个键（`stripEditorOnlyKeys`）：官方 44 字段不该变成 46。
+    for (const [id, rec] of (overIds ? overridePair(derived) : [[derived.base.chessId, derived.base], [derived.golden.chessId, derived.golden]])) {
+      const issues = authoringErrors(validateChessRecord(rec, { id, officialIds: overrideBlockers(officialIds, [id], declaredOverrides, 'chess') }));
+      if (issues.length) errors.push({ slug: spec.id, issues });
+      fresh[id] = rec;
     }
   }
   const records = {};
@@ -1611,6 +1622,91 @@ export function withOverrideDeclarations(manifest, entries) {
   return [...overrides].sort();
 }
 
+// ---- 覆盖模式的保存路径（B 段）：**唯一**一个把 id 函数换成平行函数的地方 ------------------------------------------
+//
+// 默认路径（新建 / 复制）一字不变：`chessIds` / `enemyKey` 照旧无条件加 `chess_ws_` / `enemy_ws_` 前缀，
+// `test/overrideMode.test.js` 第一条把它们的字面量输出钉住。只有 `spec.override === true` 这一条分支换函数，
+// 而换的方式是**把 id 对交给 `deriveChessRecord` / `deriveEnemy`**，不是让它们自己猜 ——
+// 「有时候加前缀、有时候不加」正是 A 段特意没做的事。
+//
+// 作者看到的那条规矩：以官方 id 打开一条记录 ⇒ 保存的也是那个官方 id ⇒ 包声明 `overrides` ⇒ 加载器按 A2
+// 打字段补丁。少了任何一环，作者改的就是一条**新**记录，而游戏里那条官方记录一个字都没变（静默）。
+
+/**
+ * 覆盖模式下的 id 对 —— 干员是**一对**（`_a` + `_b`，两条都要写、两条都要声明），怪物只有**一个 key**。
+ * 取值只从官方记录自己的字段读（`overrideChessIds` / `overrideEnemyKey`），**不做字符串手术**。
+ *
+ * 纯函数、显式拿表：它在保存路径、`regeneratePack` / `regenerateEnemies` 三个地方都要用，而那三处的官方数据
+ * 来自不同的参数（不是同一个模块级变量）—— 让它们各传各的，比藏一个全局好读也好测。
+ *
+ * @param {'chess'|'enemies'} file
+ * @param {object} spec
+ * @param {Record<string, object>} officialTable 官方那一张表（`chess` 或 `enemies`）
+ * @returns {{ slug: string, base: string, golden: string|null }|{ slug: string, key: string }|null}
+ */
+function overrideIdsFor(file, spec, officialTable) {
+  if (!spec || spec.override !== true) return null;          // 默认路径：交给 `chessIds` / `enemyKey`
+  const id = typeof spec.id === 'string' ? spec.id : '';
+  const rec = id ? officialTable?.[id] : null;
+  if (!rec || typeof rec !== 'object') return null;          // 指不到官方记录 ⇒ 当作普通 spec（校验器会说话）
+  return file === 'enemies' ? overrideEnemyKey(rec) : overrideChessIds(rec);
+}
+
+/** 一条覆盖要写出去的两条记录：派生记录先摘掉编辑器自己造的两个键（理由见 `stripEditorOnlyKeys`）。 */
+function overridePair(derived) {
+  return [[derived.base.chessId, stripEditorOnlyKeys(derived.base)], [derived.golden.chessId, stripEditorOnlyKeys(derived.golden)]];
+}
+
+/**
+ * 某一次保存**将要**补上的 `"<file>:<id>"` 声明（A3 的自动补声明）。
+ *
+ * 为什么判罚不能只看磁盘上那份 `pack.json`：第一次覆盖一条官方记录时，文件里**还没有**这条声明 —— 而补声明正是
+ * 这次保存要做的事。只看文件就会把这次保存自己拒掉（作者看到「already exists in the official data」，
+ * 却在界面上找不到任何要先做的事）。所以判罚看的是「这次保存之后会是什么样」。
+ *
+ * 安全性没有放松：能进这个集合的 id **只能**来自「`spec.override === true` 且 `spec.id` 指向一条真的官方记录」，
+ * 而那种 spec 写出来的记录 id 恰好就是它自己 ⇒ 声明必然与记录对得上。别的路径（手填官方 id 的普通 spec）
+ * 一个都进不来，A3 的执法点原样保留。
+ *
+ * @param {'chess'|'enemies'} file
+ * @param {object[]} specs 本次保存会落盘的那些 spec
+ * @param {Record<string, object>} officialTable
+ * @returns {Set<string>}
+ */
+function declarationsFor(file, specs, officialTable) {
+  const out = new Set();
+  for (const spec of Array.isArray(specs) ? specs : []) {
+    const ids = overrideIdsFor(file, spec, officialTable);
+    if (!ids) continue;
+    for (const id of [ids.base, ids.golden, ids.key]) if (typeof id === 'string' && id) out.add(`${file}:${id}`);
+  }
+  return out;
+}
+
+/**
+ * 覆盖一条**官方**记录时，派生记录里这两个键**不写回**：它们不是作者的编辑内容，是编辑器自己造出来的。
+ *
+ *   * `workshop: {schema, id}` —— `deriveChessRecord` 给每条工坊记录盖的出厂戳（官方记录里没有这个键）。
+ *   * `directToHand` —— 「试玩时直接发到手上」那个开关（`spec.directToHand === true` 才写，默认 false）。
+ *
+ * 为什么要特判，而不是让 A2 的**闭合世界**顺手拒掉：闭合世界管的是「作者手写进记录里的未知键」（那是发明数据），
+ * 而这两个键是**派生器自己**的产物 —— 一律拒会让覆盖模式连一条记录都存不下来（作者看到的是
+ * `UNKNOWN_OVERRIDE_FIELD`，而他从没写过这个键）。所以这里在**写补丁之前**就把它们摘掉：
+ *   * 官方记录本来没有这个键 ⇒ 合并结果里也不该凭空多出来（否则官方 44 字段会变成 46 ——
+ *     `test/overrideMode.test.js` 第二条钉的就是这件事）；
+ *   * 作者想开的那些行为开关，走它们自己的界面入口（行为层的开关不属于「覆盖官方数据」这一件事）。
+ *
+ * 手写一份 `chess.json` 覆盖（不经编辑器）**不受影响**：那条路一个键都不摘，闭合世界照旧执法。
+ * @param {object} rec
+ * @returns {object}
+ */
+function stripEditorOnlyKeys(rec) {
+  const out = { ...rec };
+  delete out.workshop;
+  delete out.directToHand;
+  return out;
+}
+
 export async function createEditorServer(opts = {}) {
   const root = path.resolve(opts.workshopRoot ?? WORKSHOP_DIR);
   // The data dir and the support file are injectable so a test never rewrites the real data/support.json.
@@ -1773,10 +1869,13 @@ export async function createEditorServer(opts = {}) {
       // yet, and no declared overrides either) — without it this is exactly today's behaviour.
       if (pack !== undefined && pack !== null && !PACK_ID_RE.test(String(pack))) throw Object.assign(new Error('bad pack id'), { status: 400 });
       const declaredOverrides = pack ? (readJson(path.join(root, String(pack), 'pack.json'), null)?.overrides ?? []) : [];
-      const derived = deriveChessRecord(spec);
+      const derived = deriveChessRecord(spec, overrideIdsFor('chess', spec, chessData));
       if (!derived.ok) return sendJson(res, 200, { ok: false, errors: derived.errors, warnings: [] });
       const savedIds = [derived.base.chessId, derived.golden.chessId];
-      const blockers = overrideBlockers(officialIds, savedIds, Array.isArray(declaredOverrides) ? declaredOverrides : [], 'chess');
+      // B 段：预览与保存必须算出同一个判罚 —— 覆盖模式第一次保存时声明还没落盘，那正是这次保存要补的，
+      // 预览要是只看文件，作者会看到一个保存后立刻消失的假冲突。
+      const blockers = overrideBlockers(officialIds, savedIds,
+        [...(Array.isArray(declaredOverrides) ? declaredOverrides : []), ...declarationsFor('chess', [spec], chessData)], 'chess');
       const issues = [];
       for (const [id, rec] of [[derived.base.chessId, derived.base], [derived.golden.chessId, derived.golden]]) {
         issues.push(...validateChessRecord(rec, { id, officialIds: blockers }));
@@ -1816,17 +1915,22 @@ export async function createEditorServer(opts = {}) {
       const packId = p.slice('/api/packs/'.length, -'/operators'.length);
       if (!PACK_ID_RE.test(packId)) throw Object.assign(new Error('bad pack id'), { status: 400 });
       const { spec } = await readBody(req);
-      const derived = deriveChessRecord(spec);
+      // B 段：`spec.override === true` 时用官方记录自己的 id 对（`overrideChessIds`），其余走默认路径一字不变。
+      // `ids` 同时是「写哪个 spec 文件」和「写哪两条记录」，两个问题一个答案（A 段那条规矩：不做字符串手术）。
+      const overIds = overrideIdsFor('chess', spec, chessData);
+      const derived = deriveChessRecord(spec, overIds);
       if (!derived.ok) return sendJson(res, 400, { error: 'the spec is invalid', errors: derived.errors });
-      const ids = chessIds(spec.id);
+      const ids = overIds ?? chessIds(spec.id);
       if (!SLUG_RE.test(ids.slug)) throw Object.assign(new Error('bad operator id'), { status: 400 });
       // A3: an official id may be saved when the pack declares the override — and the save below ADDS that
       // declaration by itself (see `withOverrideDeclarations`), so the two halves land in the same request.
       const manifestPath = path.join(root, packId, 'pack.json');
       const existingManifest = readJson(manifestPath, null);
-      const declaredOverrides = Array.isArray(existingManifest?.overrides) ? existingManifest.overrides : [];
       const savedIds = [derived.base.chessId, derived.golden.chessId];
-      const blockers = overrideBlockers(officialIds, savedIds, declaredOverrides, 'chess');
+      // B 段：判罚看的是「这次保存之后清单会是什么样」—— 第一次覆盖一条官方记录时，声明正是这次保存要补上的，
+      // 只看磁盘上那份 pack.json 就会把这次保存自己拒掉（作者看到「already exists」却无事可做）。
+      const willDeclare = [...(Array.isArray(existingManifest?.overrides) ? existingManifest.overrides : []), ...declarationsFor('chess', [spec], chessData)];
+      const blockers = overrideBlockers(officialIds, savedIds, willDeclare, 'chess');
       const errs = [
         ...validateChessRecord(derived.base, { id: derived.base.chessId, officialIds: blockers }),
         ...validateChessRecord(derived.golden, { id: derived.golden.chessId, officialIds: blockers }),
@@ -1856,7 +1960,7 @@ export async function createEditorServer(opts = {}) {
       const specPath = path.join(packDir, 'specs', `${ids.slug}.json`);
       const previousSpec = readJson(specPath, null);
       await writeJson(specPath, withForgeMeta(spec, { author: authorFor(packDir, forgeAuthor), packId, now: new Date().toISOString(), previous: previousSpec }));
-      const regen = regeneratePack(root, packId, officialIds);
+      const regen = regeneratePack(root, packId, officialIds, [], chessData);
       if (regen.errors.length) {
         // another spec in this pack no longer derives: report it rather than silently writing a pack that lost records
         return sendJson(res, 400, { error: 'another operator in this pack no longer derives — fix it before saving', errors: regen.errors });
@@ -1874,9 +1978,11 @@ export async function createEditorServer(opts = {}) {
       if (!PACK_ID_RE.test(packId) || !SLUG_RE.test(slug)) throw Object.assign(new Error('bad id'), { status: 400 });
       const specPath = path.join(root, packId, 'specs', `${slug}.json`);
       if (fs.existsSync(specPath)) await fsp.rm(specPath);
-      // the spec is gone, so ownership cannot be derived any more: name the records it owned explicitly
+      // the spec is gone, so ownership cannot be derived any more: name the records it owned explicitly.
+      // 覆盖模式不用在这里特判：它的记录 id **就是** `slug` 自己（官方 id 原样），而 spec 文件刚被删掉 ⇒
+      // `regeneratePack` 走「没有 spec 拥有它」那条路，官方 id 的记录照样被写出来。
       const ids = chessIds(slug);
-      const regen = regeneratePack(root, packId, officialIds, ids ? [ids.base, ids.golden] : []);
+      const regen = regeneratePack(root, packId, officialIds, ids ? [ids.base, ids.golden] : [], chessData);
       await writeJson(path.join(root, packId, 'chess.json'), regen.records);
       // a broken sibling spec is reported, not hidden (its records are preserved — see regeneratePack)
       return sendJson(res, 200, { ok: true, removed: slug, generated: regen.generated, errors: regen.errors });
@@ -2059,7 +2165,7 @@ export async function createEditorServer(opts = {}) {
       if (unknown.length) {
         throw refuse(400, `这些干员不归这个包管：${unknown.join('、')}。先把它覆盖/新建进这个包，再改它的盟约归属`);
       }
-      const regen = regeneratePack(root, packId, officialIds);
+      const regen = regeneratePack(root, packId, officialIds, [], chessData);
       if (regen.errors.length) throw refuse(400, `这个包里还有干员 spec 无法派生：${JSON.stringify(regen.errors)}`);
       await writeJson(path.join(packDir, 'chess.json'), regen.records);
       // 成员的变动会改变盟约记录的 `members`（弹窗里列的就是它），所以顺手把盟约重新生成一次
@@ -2161,8 +2267,8 @@ export async function createEditorServer(opts = {}) {
       });
     }
 
-    // ---- 覆盖模式（A 段）: 只读，把一条官方记录读成一份可编辑的 spec --------------------------------
-    // 这两个端点**不写任何东西**：它们只回答「这条官方记录长什么样、它的 id 是什么」。保存路径的分支留给 B 段。
+    // ---- 覆盖模式: 只读，把一条官方记录读成一份可编辑的 spec ------------------------------------------
+    // 这两个端点**不写任何东西**：它们只回答「这条官方记录长什么样、它的 id 是什么」。写盘走保存路径的分支（B 段）。
     // 形状校验挡的是 `../etc` 这类路径穿越（id 会被拼进 data/<file>.json 的查找里）。
     if ((p.startsWith('/api/official/chess/') || p.startsWith('/api/official/enemies/')) && method === 'GET') {
       const chess = p.startsWith('/api/official/chess/');
@@ -2172,13 +2278,33 @@ export async function createEditorServer(opts = {}) {
       const tables = officialIdTables(dataDir);
       const rec = chess ? tables.chess?.[wanted] : tables.enemies?.[wanted];
       if (!rec || typeof rec !== 'object') throw refuse(404, `官方数据里没有 ${wanted}`);
-      const spec = chess ? specFromChessRecord(rec) : specFromEnemyRecord(rec);
+      // 干员是一**对**记录（普通 `_a` + 精锐 `_b`）：`specFromChessRecord(base, golden)` 要从精锐那条读
+      // `statsBase` / `talentsBase` / `modules`，只喂普通那条的话精锐形态会**静默退回普通形态的数值**
+      // （`_b` 的 id 只能从记录自己的 `goldenId` 读出来，见 `overrideChessIds`）。模板端点一直是成对喂的，
+      // 这里也成对 —— 两处口径不同的话，覆盖模式保存出来的记录会比「以模板新建」少一截。
+      const goldenRec = chess
+        ? (() => {
+          const pair = overrideChessIds(rec);
+          return pair?.golden ? tables.chess?.[pair.golden] : null;
+        })()
+        : null;
+      const spec = chess ? specFromChessRecord(rec, goldenRec) : specFromEnemyRecord(rec);
       if (!spec) throw refuse(500, `${wanted} 读不成一份编辑用的 spec`);
-      // `override: true` 是**覆盖模式**的标记，只活在 spec 层（`specs/<slug>.json`）。它**不许**出现在生成的
-      // 记录里：`chess.json` / `enemies.json` 的每一条都要过 A2 的闭合世界检查，多一个未知键会被加载器拒掉。
-      // 这就是为什么 `deriveChessRecord` / `deriveEnemy` 只从它们认识的字段取值（下面那条测试钉住它）。
+      // `override: true` 与 `slug` 是**覆盖模式**的标记，只活在 spec 层（`specs/<slug>.json`）。`override` **不许**
+      // 出现在生成的记录里：`chess.json` / `enemies.json` 的每一条都要过 A2 的闭合世界检查，多一个未知键会被加载器
+      // 拒掉。这就是为什么 `deriveChessRecord` / `deriveEnemy` 只从它们认识的字段取值（下面那条测试钉住它）。
+      //
+      // `slug` 是**服务端算出来的那个 spec 文件名**（干员从 `baseId` 取、怪物就是官方 key），不是 `spec.id`：
+      // 保存时用它写 `specs/<slug>.json`，删掉再存不会多出一份孤儿 spec。
+      //
+      // `id` **就是官方 id**：保存路径靠 `spec.override === true` + `spec.id` 认出「这是哪条官方记录」。
+      // 注意它与模板端点相反 —— 模板把 `id` 清空（那才是「新建一条」的意思），覆盖必须留着它，
+      // 否则作者保存时只能得到一条 `chess_ws_…` 的**新**记录，而游戏里那条官方记录一个字都没变（静默）。
       const ids = chess ? overrideChessIds(rec) : overrideEnemyKey(rec);
-      return sendJson(res, 200, { ok: true, spec: { ...spec, override: true }, ids, official: rec });
+      const idOfRecord = chess
+        ? (typeof rec.chessId === 'string' && rec.chessId ? rec.chessId : wanted)
+        : (typeof rec.key === 'string' && rec.key ? rec.key : wanted);
+      return sendJson(res, 200, { ok: true, spec: { ...spec, id: idOfRecord, override: true, slug: ids?.slug }, ids, official: rec });
     }
 
     // 写一个包的元数据（`pack.json` 的 name/version/author/license/description/gameVersion）——只动传进来的键
@@ -2537,11 +2663,14 @@ export async function createEditorServer(opts = {}) {
       // A3: same verdict as the save path; `pack` is optional (backward compatible: no pack ⇒ no declared overrides)
       if (pack !== undefined && pack !== null && !PACK_ID_RE.test(String(pack))) throw Object.assign(new Error('bad pack id'), { status: 400 });
       const declaredOverrides = pack ? (readJson(path.join(root, String(pack), 'pack.json'), null)?.overrides ?? []) : [];
-      const derived = deriveEnemy(spec);
+      const overIds = overrideIdsFor('enemies', spec, enemyData);
+      const derived = deriveEnemy(spec, overIds);
       if (!derived.ok) return sendJson(res, 200, { ok: false, errors: derived.errors, warnings: [] });
+      // B 段：与保存路径同一个判罚 —— 加上这次保存会补的声明（第一次覆盖时清单里还没有它们）。
       const issues = validateEnemy(derived.enemy, {
         key: derived.enemy.key,
-        officialIds: overrideBlockers(officialEnemies, [derived.enemy.key], Array.isArray(declaredOverrides) ? declaredOverrides : [], 'enemies'),
+        officialIds: overrideBlockers(officialEnemies, [derived.enemy.key],
+          [...(Array.isArray(declaredOverrides) ? declaredOverrides : []), ...declarationsFor('enemies', [spec], enemyData)], 'enemies'),
       });
       return sendJson(res, 200, {
         ok: enemyErrors(issues).length === 0,
@@ -2555,16 +2684,20 @@ export async function createEditorServer(opts = {}) {
       const packId = p.slice('/api/packs/'.length, -'/enemies'.length);
       if (!PACK_ID_RE.test(packId)) throw Object.assign(new Error('bad pack id'), { status: 400 });
       const { spec } = await readBody(req);
-      const ids = enemyKeyOf(spec && spec.id);
+      // B 段：`spec.override === true` 时用官方 key 本身；其余走默认路径一字不变。
+      const overIds = overrideIdsFor('enemies', spec, enemyData);
+      const ids = overIds ?? enemyKeyOf(spec && spec.id);
       if (!ids) throw Object.assign(new Error('spec.id must be a slug (letters, digits, _ - . :)'), { status: 400 });
-      const derived = deriveEnemy(spec);
+      const derived = deriveEnemy(spec, overIds);
       if (!derived.ok) return sendJson(res, 400, { error: 'the monster spec is invalid', errors: derived.errors });
       const packDir = path.join(root, packId);
       const manifestPath = path.join(packDir, 'pack.json');
       const existingManifest = readJson(manifestPath, null);
       const declaredOverrides = Array.isArray(existingManifest?.overrides) ? existingManifest.overrides : [];
       // A3: an official KEY may be saved when the pack declares `"enemies:<key>"`, and the write below adds it.
-      const blockers = overrideBlockers(officialEnemies, [derived.enemy.key], declaredOverrides, 'enemies');
+      // B 段：判罚加上这次保存会补的声明（第一次覆盖时文件里还没有它，见 `declarationsFor`）。
+      const blockers = overrideBlockers(officialEnemies, [derived.enemy.key],
+        [...declaredOverrides, ...declarationsFor('enemies', [spec], enemyData)], 'enemies');
       const blocking = enemyErrors(validateEnemy(derived.enemy, { key: derived.enemy.key, officialIds: blockers }));
       if (blocking.length) return sendJson(res, 400, { error: 'the monster did not validate', errors: blocking });
 
@@ -2577,7 +2710,7 @@ export async function createEditorServer(opts = {}) {
       const specPath = path.join(packDir, ENEMY_SPEC_DIR, `${ids.slug}.json`);
       const previousSpec = readJson(specPath, null);
       await writeJson(specPath, withForgeMeta(spec, { author: authorFor(packDir, forgeAuthor), packId, now: new Date().toISOString(), previous: previousSpec }));
-      const regen = regenerateEnemies(packDir, officialEnemies);
+      const regen = regenerateEnemies(packDir, officialEnemies, [], enemyData);
       if (regen.errors.length) {
         return sendJson(res, 400, { error: 'another monster in this pack no longer derives — fix it before saving', errors: regen.errors });
       }
@@ -2594,7 +2727,7 @@ export async function createEditorServer(opts = {}) {
       const ids = enemyKeyOf(key);
       const specPath = path.join(root, packId, ENEMY_SPEC_DIR, `${ids.slug}.json`);
       if (fs.existsSync(specPath)) await fsp.rm(specPath);
-      const regen = regenerateEnemies(path.join(root, packId), officialEnemies, [key]);
+      const regen = regenerateEnemies(path.join(root, packId), officialEnemies, [key], enemyData);
       await writeJson(path.join(root, packId, 'enemies.json'), regen.records);
       return sendJson(res, 200, { ok: true, removed: key, generated: regen.generated, errors: regen.errors });
     }

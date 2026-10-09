@@ -240,14 +240,26 @@ export function overrideChessIds(rec) {
  * Stats keys: maxHp, atk, def, res, cost, blockCnt, bat, aspd?, respawnTime?, spRecovery?, moveSpeed?
  *
  * @returns {{ ok: true, base: object, golden: object, warnings: string[] } | { ok: false, errors: Array<{field:string,code:string,message:string,hint?:string}> }}
+ *
+ * 第二个参数是**覆盖模式**的 id 对（`overrideChessIds` 的产出）：省略时走默认路径（`chessIds(spec.id)`，产出
+ * `chess_ws_<slug>_a/_b`），**一字不变** —— 那是 A 段护身符钉住的。形状不对就等于没给。
  */
-export function deriveChessRecord(spec) {
+export function deriveChessRecord(spec, overrideIds) {
   const errors = [];
   const warnings = [];
   const req = (cond, field, code, message, hint) => { if (!cond) errors.push({ field, code, message, hint }); };
   if (!isPlainObj(spec)) return { ok: false, errors: [{ field: '', code: 'NOT_AN_OBJECT', message: 'spec must be a JSON object' }] };
 
-  const ids = chessIds(spec.id);
+  // 默认路径：`chessIds` 无条件加前缀。覆盖模式由调用方给出 id 对（官方 id 原样保留），**这里不猜** ——
+  // 猜就是「有时候加前缀、有时候不加」，正是 A 段特意没做的那件事。形状不对就等于没给（回到默认路径）。
+  // `golden` 可以是 null（官方那条没有精锐兄弟），那时给一个 `_b` 占位；校验器认不认是它的事。
+  const ids = (overrideIds && typeof overrideIds.slug === 'string' && typeof overrideIds.base === 'string' && overrideIds.base)
+    ? {
+      slug: overrideIds.slug,
+      base: overrideIds.base,
+      golden: typeof overrideIds.golden === 'string' && overrideIds.golden ? overrideIds.golden : `${overrideIds.base}_b`,
+    }
+    : chessIds(spec.id);
   req(ids, 'id', 'BAD_ID', 'id must contain at least one letter or digit', 'e.g. "abyss_hunter"');
   req(typeof spec.name === 'string' && spec.name.trim(), 'name', 'MISSING', 'name is required');
   req(isIntIn(spec.tier, 1, 6), 'tier', 'BAD_TIER', 'tier must be an integer 1..6');
@@ -375,6 +387,13 @@ export function deriveChessRecord(spec) {
     tokenKey: t && typeof t.tokenKey === 'string' && t.tokenKey ? t.tokenKey : null,
     // `hidden` 官方对占位天赋（desc 是 `-`）两种写法都有，所以照抄记录里的布尔值，别自己推
     hidden: t && typeof t.hidden === 'boolean' ? t.hidden : !(t && t.desc), fromModule: false,
+    // 0.2.2 的潜能注解**原样穿过**：`potMin` = 这条天赋从哪一档起生效，`potBelow` = 更低那一档换掉的字段
+    // （`shared/potential.js` 的链式天赋）。它们不是「派生器算出来的东西」，而是**来源记录带过来的事实**：
+    // `specFromChessRecord` 本来就把它们搬进了 spec，派生时丢掉就等于**每存一次覆盖就抹一层潜能链**
+    // （`regeneratePack` 会用 spec 重新派生一遍盘上已有的记录，所以丢在这里的注解是找不回来的）。
+    // 引擎那一侧照旧：真正「某一档建出来的记录」由 `stripPotential` / `atRank` 负责，不是这里。
+    ...(t && Number.isInteger(t.potMin) ? { potMin: t.potMin } : {}),
+    ...(t && isPlainObj(t.potBelow) ? { potBelow: { ...t.potBelow } } : {}),
   }));  const talentsOf = (golden) => talentList(golden && Array.isArray(spec.talentsGolden) ? spec.talentsGolden : spec.talents);
 
   // 模组（`data/chess.json` 精锐记录的 `modules[]`）：官方那 184 个模组就是长这个形状，引擎按它算
@@ -575,6 +594,11 @@ export function specFromChessRecord(base, golden) {
     if (t && isPairGrid(t.rangeGrid)) out.rangeGrid = t.rangeGrid.map((p) => [...p]);
     if (t && typeof t.tokenKey === 'string' && t.tokenKey) out.tokenKey = t.tokenKey;
     if (t && typeof t.hidden === 'boolean') out.hidden = t.hidden;
+    // 潜能注解（0.2.2）：这是**来源记录带过来的事实**，不是可以省略的元数据。覆盖模式把官方原文读成 spec、
+    // 再派生回去，所以这里少搬一次，作者每存一次就会抹掉官方的一层潜能链（`deriveChessRecord` 的 `talentList`
+    // 也会原样带出来，两头对齐）。
+    if (t && Number.isInteger(t.potMin)) out.potMin = t.potMin;
+    if (t && isPlainObj(t.potBelow)) out.potBelow = { ...t.potBelow };
     return out;
   });
   const spec = {

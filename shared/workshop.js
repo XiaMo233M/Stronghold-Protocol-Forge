@@ -527,7 +527,7 @@ export function workshopVoiceLangIndex(packs, { prefix = WORKSHOP_MEDIA_PREFIX }
 export const byPackId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 /**
- * Keys of a record that an override REPLACES wholesale instead of merging field by field (DESIGN §27.5, owner's
+ * Keys of a record that an override REPLACES wholesale instead of merging field by field (DESIGN §27.3, owner's
  * request of 2026-10-09). Two classes, one reason each:
  *
  *   * **behaviour / structure** — `skill`, `skills`, `talents`, `trait`, `traitBase`, `traitOverride`, `modules`,
@@ -558,10 +558,20 @@ export const OVERRIDE_REPLACE_KEYS = Object.freeze([
  * the moment an author touched one talent — while `potDown` survived only because the patch never mentioned it. Merging
  * by `index` keeps the chain: the author's fields win, everything they did not write stays.
  *
- * Deliberately narrow: only lists that HAVE such a key. `bonds` / `immunities` / `rangeGrid` … still replace wholesale
- * (see the note above `OVERRIDE_REPLACE_KEYS`): a field-wise merge of a bare list would invent a record nobody wrote.
+ * The key is a property of the **list**, not of the entry shape, and it is not always `index`:
+ *
+ *   * `talents` / `talentsBase` — a talent entry is keyed by `index` (sparse: 0, 1, 3).
+ *   * `talentChanges` — the module-internal talent rewrites, keyed by `talentIndex` (the `name` of the field says it).
+ *     It sits INSIDE an entry of `modules`, which is itself replaced wholesale; the key list still applies, because
+ *     `mergeRecord` recurses into the entries it pairs up. Without it the same silent loss happened one level deeper:
+ *     a record opened as an override template comes back without `potMin`/`potBelow`, `modules` is replaced wholesale,
+ *     and the official's chained module talent is gone (see `test/overridePotential.test.js`).
+ *
+ * Deliberately narrow: only lists that HAVE such a key. `bonds` / `immunities` / `rangeGrid` / `modules` itself still
+ * replace wholesale (see the note above `OVERRIDE_REPLACE_KEYS`): a field-wise merge of a bare list would invent a
+ * record nobody wrote, and `modules` is an ordered list the loadout screen reads as a whole.
  */
-export const OVERRIDE_KEYED_LISTS = Object.freeze({ talents: 'index', talentsBase: 'index' });
+export const OVERRIDE_KEYED_LISTS = Object.freeze({ talents: 'index', talentsBase: 'index', talentChanges: 'talentIndex' });
 
 /**
  * Merge one override record onto the record it replaces: field by field, with `OVERRIDE_REPLACE_KEYS` and arrays taken
@@ -592,11 +602,27 @@ export function mergeRecord(base, patch) {
  *
  * Order and the base's own order are preserved (a `talents` index is sparse — 0, 1, 3 — so array position is not the
  * key). An entry without a usable key is appended rather than guessed at: that is a talent the author added.
+ *
+ * **A key that repeats is not an identity.** `talentChanges` uses `-1` for "a hidden module talent", and an official
+ * module may carry several of those, so the same key can address more than one entry. When either side has a duplicate
+ * key the whole list falls back to the behaviour every other list gets (replace wholesale): pairing two of them would
+ * drop an entry, and appending the ambiguous ones would reorder a list the loadout screen reads positionally. Merging
+ * is for a list that really is keyed; when the data says otherwise, honesty beats cleverness.
  * @param {unknown[]} baseList @param {unknown[]} patchList @param {string} idKey
  * @returns {unknown[]}
  */
 function mergeKeyedList(baseList, patchList, idKey) {
   const at = new Map();
+  const dup = (list) => {
+    const seen = new Set();
+    for (const entry of list) {
+      if (!isPlainObj(entry) || !Number.isInteger(entry[idKey])) continue;
+      if (seen.has(entry[idKey])) return true;
+      seen.add(entry[idKey]);
+    }
+    return false;
+  };
+  if (dup(baseList) || dup(patchList)) return patchList;
   for (const [i, entry] of baseList.entries()) {
     if (isPlainObj(entry) && Number.isInteger(entry[idKey])) at.set(entry[idKey], i);
   }
@@ -611,7 +637,7 @@ function mergeKeyedList(baseList, patchList, idKey) {
 }
 
 /**
- * The keys of `patch` that the record it overrides does not have (DESIGN §27.5, "closed world"): a declared override
+ * The keys of `patch` that the record it overrides does not have (DESIGN §27.3, "closed world"): a declared override
  * may only speak about fields that exist, because today any well-formed nonsense is accepted silently and the author
  * gets a record that is quietly not what they wrote. `null` when `base` is not an object (nothing to compare against).
  * @param {object} base @param {object} patch
@@ -768,7 +794,7 @@ export function applyWorkshop(base, packs) {
           });
           continue;
         }
-        // A declared override is a FIELD-LEVEL patch, not a replacement (DESIGN §27.5): writing one number must keep
+        // A declared override is a FIELD-LEVEL patch, not a replacement (DESIGN §27.3): writing one number must keep
         // every other field of the record it overrides. And it may only speak about fields that exist ("closed world").
         if (exists) {
           const official = /** @type {Record<string, unknown>} */ (base[file] && isPlainObj(base[file]) ? base[file][id] : prior[id]);

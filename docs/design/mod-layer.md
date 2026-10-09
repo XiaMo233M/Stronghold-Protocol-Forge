@@ -200,6 +200,68 @@ produced by the asset pipeline) are distinguishable from a collision without rea
 documented for authors in `docs/WORKSHOP.md` §1.2 and summarized in the §1.7 status table, because a rule an author
 cannot read is a rule an author cannot follow.
 
+#### What "replacing" an official record actually means (A2: a field-wise patch)
+
+A declaration buys the right to replace an official record; it does not say *how*. The first cut of the implementation
+said "wholesale": `merged[id] = rec`. An author who wanted to change one number therefore had to ship the other
+forty-three fields too — and a record that named only `stats.maxHp` silently became a two-field operator (tier 1,
+`atk` 0, `skill` null) that the engine drew as a one-tile placeholder, with `applyWorkshop` reporting **zero** errors.
+The rule now is `shared/workshop.js`'s `mergeRecord`: numbers, strings, booleans and the plain objects holding them merge
+field by field, recursively, so the forty-three fields the author never mentioned come from the official record. Two
+exceptions, each with its own failure mode:
+
+- **`OVERRIDE_REPLACE_KEYS`** (`skill`, `skills`, `trait`, `traitBase`, `traitOverride`, `modules`, `rangeGrid`,
+  `attackRangeGrid`, `assets`, `diy`, `bonds`) are taken wholesale, and so is every array. These are read as whole units
+  by the sim and the loadout layer; a half-merged `skill` is a record nobody wrote and no validator describes.
+- **`OVERRIDE_KEYED_LISTS`** (`talents`/`talentsBase` on `index`, `talentChanges` on `talentIndex`) merge entry by entry
+  **on their identity key** instead. Why this is not the same as a bare list: a 0.2.2 record carries the potential chain
+  (`potDown` on the record, `potMin` + `potBelow` on a talent — `shared/potential.js`), while a record the editor derives
+  deliberately carries none of it (`stripPotential` is "what a record built at one rank looks like"). Replacing `talents`
+  wholesale therefore erased the official's whole chain the moment an author touched one talent, and `potDown`'s leaves
+  then pointed at nothing. `talentChanges` is the same shape one level deeper — it lives **inside** an entry of `modules`,
+  which is itself replaced wholesale; the key list still applies, because `mergeRecord` recurses into the entries it pairs
+  up.
+
+**A key that repeats is not an identity.** `talentIndex: -1` means "a hidden module talent", and an official module may
+carry several. When either side of the merge has a duplicate key, that list falls back to wholesale replacement: pairing
+two of them would drop an entry, and appending the ambiguous ones would reorder a list the loadout screen reads
+positionally. Merging is for a list that really is keyed; when the data says otherwise, honesty beats cleverness.
+
+**The third leg: the record a patch is built from must round-trip.** Field-wise merging protects only what the patch
+never mentions. Anything the editor's own derive step drops is gone before the merge runs — which is how the same silent
+loss appeared a third time, via `regeneratePack` re-deriving every spec on disk on every save. So the derive path carries
+the annotations through: `specFromChessRecord` moves `potMin`/`potBelow` into the spec, and `deriveChessRecord`'s
+`talentList` writes them back out. The engine-side convention is unchanged — `stripPotential` / `atRank` still decide what
+a record built at one rank looks like.
+
+#### Override mode, end to end (B: the author-facing path)
+
+The last piece is the one an author actually touches. `spec.override === true` is set by the two read-only endpoints
+(`GET /api/official/chess/<id>`, `/api/official/enemies/<key>`, `editor/server.mjs`), which return the official record
+read as an editable spec plus `ids` and the original record. On save, **that one branch** swaps the id function:
+`overrideChessIds` / `overrideEnemyKey` keep the official id instead of adding `chess_ws_` / `enemy_ws_`. The default path
+is untouched, and `test/overrideMode.test.js` pins the literal output of `chessIds` / `enemyKey` as its amulet.
+
+Two design points are worth naming, because both were found by writing the end-to-end test rather than by reading the
+code:
+
+- **The verdict sees the declaration the save is about to add.** `overrideBlockers` first looked only at the `pack.json`
+  on disk, so the very first override of an official record refused itself: nothing had declared `"chess:<id>"` yet, and
+  adding that declaration was the thing being refused. The save, the preview and the regeneration now all judge against
+  `declarationsFor(...)` — the set the manifest will have after this save. This does not weaken the A3 rule: an id enters
+  that set only when `spec.override` is true **and** `spec.id` addresses a real official record, in which case the derived
+  record's id is that same id by construction. Hand-writing an official id into an ordinary spec is still refused.
+- **The editor's own two keys are not the author's content.** `deriveChessRecord` stamps `workshop: {schema, id}` and
+  `directToHand` onto every record it builds. Neither exists in official data, so writing them back turned a 44-field
+  official record into 46 fields. They are stripped before an override record is written (`stripEditorOnlyKeys`); the
+  closed world of A2 is untouched, because that check is about keys an AUTHOR writes, and these two are the deriver's
+  own. A hand-written `chess.json` override passes through unmodified and the closed world still judges it.
+
+The entry points are the official-record lists the operator and monster pages already render; the diff preview reads the
+`official` field of the same read-only response and compares it against the record the preview endpoint already returns.
+`test/overrideMode.test.js` carries the three end-to-end proofs: with no pack loaded the whole record equals the one in
+`data/chess.json` field for field, with a pack loaded the author's number wins and the key count is unchanged, and the
+0.2.2 potential chain survives an editor save for both the normal and the elite record.
 
 ### 27.4 Isolation (gap 3)
 

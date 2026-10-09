@@ -5,13 +5,21 @@
 // 会让编辑器放行、加载器随后因为「没声明」而**丢掉这条记录** —— 比 400 更坏，因为它是静默的。
 // 所以放行（blockers 同时看 id 与 declared）与记住声明（withOverrideDeclarations）是同一件活的两半。
 //
-// **一条实测出来的边界（重要）**：编辑器的 spec → 记录映射**无条件加前缀** —— `chessIds` 产出
-// `chess_ws_<slug>_a/_b`（shared/chessAuthoring.js:204-206）、`enemyKey` 产出 `enemy_ws_<slug>`
-// （shared/enemyAuthoring.js:77-78）。所以**今天没有任何一次表单保存能指向官方 id**：
+// **一条实测出来的边界（2026-10-09，A3 当时写的）**：编辑器的 spec → 记录映射**无条件加前缀** —— `chessIds` 产出
+// `chess_ws_<slug>_a/_b`（shared/chessAuthoring.js）、`enemyKey` 产出 `enemy_ws_<slug>`
+// （shared/enemyAuthoring.js）。所以 A3 落地的那一天，**没有任何一次表单保存能指向官方 id**：
 //   * 官方 id 的记录只能来自**手写 / CLI**（tools/workshop-scaffold.mjs、手改 chess.json）；
 //   * `OFFICIAL_ID_COLLISION` 因此只在**列表 / 预览 / 复校验**这些读路径上出现（下面第 2、3 条测的就是它们）；
-//   * 保存路径上的「自动补声明」是为**覆盖模式**（在编辑器里以官方 id 打开一条记录）准备的，那条路今天还不存在。
-// 这三句都写进了测试，免得下一个人以为「能存官方覆盖了」。
+//   * 保存路径上的「自动补声明」是为**覆盖模式**准备的，而那条路当时还不存在。
+//
+// **时态说明（B 段落地后更新，这段是留给后来者的边界记录）**：上一条描述的「今天」已经过去了 ——
+// `spec.override === true` 的那一条分支现在会换成 `overrideChessIds` / `overrideEnemyKey`（官方 id 原样保留），
+// 以官方 id 打开一条记录、改一处、保存，写出来的就是那个官方 id 加一条自动补的声明。
+// **但上面那三句对「默认路径」仍然逐字成立**，所以本文件继续原样留着：
+//   * `chessIds` / `enemyKey` 一个字符都没改（`test/overrideMode.test.js` 第一条把字面量输出钉住）；
+//   * 因此**普通**保存（新建 / 复制 / 模板）照旧永远产出 `chess_ws_…` / `enemy_ws_…`，
+//     想存一条官方覆盖仍然只能靠 `spec.override` 这条路。
+// 覆盖模式整条路的证据在 `test/overrideMode.test.js`（B 段）与 `test/overridePotential.test.js`（合并规则）。
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

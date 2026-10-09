@@ -311,7 +311,7 @@ describe('workshop: the overlay', () => {
     }
   });
 
-  // 业主 2026-10-09（DESIGN §27.5）：`overrides` 是**按字段合并**，不是整条替换。改之前实测：一条只写
+  // 业主 2026-10-09（DESIGN §27.3）：`overrides` 是**按字段合并**，不是整条替换。改之前实测：一条只写
   // `stats.maxHp` 的覆盖把 44 字段的干员压成 2 字段，engine 看到 tier:1 / atk:0 / skill:null，画成一格占位，
   // 而 `applyWorkshop` 报 **0 error** —— 这就是这一组测试要挡住的静默失败。
   test('a partial override keeps every field it did not write (44-field record in, 44-field record out)', () => {
@@ -358,7 +358,10 @@ describe('workshop: the overlay', () => {
     for (const k of keys) assert.ok(OVERRIDE_REPLACE_KEYS.includes(k), `${k} is a replace-type key`);
     assert.ok(!OVERRIDE_REPLACE_KEYS.includes('talents'),
       '`talents` now merges on its `index` — it must not be back in the wholesale list');
-    assert.deepEqual(OVERRIDE_KEYED_LISTS, { talents: 'index', talentsBase: 'index' }, 'the keyed lists are exactly these');
+    // 2026-10-09 第二轮：`talentChanges`（模组内部的天赋改写）也是键控列表，键名是 `talentIndex`。
+    // 它 0.2.2 里同样挂 `potMin`/`potBelow`，而 `modules` 自己整块替换 ⇒ 不键控就是同一个静默缺口。
+    assert.deepEqual(OVERRIDE_KEYED_LISTS, { talents: 'index', talentsBase: 'index', talentChanges: 'talentIndex' },
+      'the keyed lists are exactly these');
   });
 
   test('an override is a closed world: a field the record does not have is refused, and nothing is applied', () => {

@@ -70,9 +70,15 @@ describe('覆盖 × 潜能注解：作者没写的潜能数据必须留下', () 
   });
 
   test('只有**带身份键**的列表按条目合并；其余列表仍然整块替换（不许发明没人写过的记录）', () => {
-    assert.deepEqual(OVERRIDE_KEYED_LISTS, { talents: 'index', talentsBase: 'index' });
+    // 断言随规则更新（2026-10-09 第二轮审计）：`talentChanges`（模组内部的天赋改写）也带身份键
+    // （`talentIndex`），它 0.2.2 里同样挂 `potMin`/`potBelow`，所以与 `talents` 是同一个缺口、同一条修法。
+    // **不是为让测试变绿而放宽**：这一条仍然钉住「键控名单只有这三个」「裸列表整块替换」两件事。
+    assert.deepEqual(OVERRIDE_KEYED_LISTS, { talents: 'index', talentsBase: 'index', talentChanges: 'talentIndex' });
     assert.ok(!OVERRIDE_REPLACE_KEYS.includes('talents'),
       '`talents` 不该再出现在「整块替换」名单里，否则上面那条修复就等于没做');
+    assert.ok(!OVERRIDE_REPLACE_KEYS.includes('talentsBase'), '`talentsBase` 同理');
+    assert.ok(OVERRIDE_REPLACE_KEYS.includes('modules'),
+      '`modules` 自己仍然整块替换（它是有序列表，载入界面整体读它）—— 键控的是它**内部**的 `talentChanges`');
     const patch = derived({ bonds: ['sargonShip'], immunities: [] });
     const m = mergeRecord(official(), patch);
     assert.deepEqual(m.bonds, ['sargonShip'], '`bonds` 是裸列表 ⇒ 整块替换');

@@ -105,14 +105,21 @@ export function overrideEnemyKey(rec) {
  *         notCountInTotal? }
  *
  * @returns {{ ok: true, enemy: object, warnings: string[] } | { ok: false, errors: object[] }}
+ *
+ * 第二个参数是**覆盖模式**的 key（`overrideEnemyKey` 的产出，官方 key 原样）：省略时走默认路径
+ * （`enemyKey(spec.id)`，产出 `enemy_ws_<slug>`），**一字不变**。形状不对就等于没给。
  */
-export function deriveEnemy(spec) {
+export function deriveEnemy(spec, overrideIds) {
   const errors = [];
   const warnings = [];
   const req = (cond, field, code, message, hint) => { if (!cond) errors.push({ field, code, message, ...(hint ? { hint } : {}) }); };
   if (!isPlain(spec)) return { ok: false, errors: [{ field: '', code: 'NOT_AN_OBJECT', message: 'spec must be a JSON object' }] };
 
-  const ids = enemyKey(spec.id);
+  // 形状不对就等于没给（回到默认路径）—— 与 `deriveChessRecord` 同一条规矩。
+  const ids = (overrideIds && typeof overrideIds.slug === 'string' && overrideIds.slug
+    && typeof overrideIds.key === 'string' && overrideIds.key)
+    ? { slug: overrideIds.slug, key: overrideIds.key }
+    : enemyKey(spec.id);
   req(ids, 'id', 'BAD_ID', 'id must contain at least one letter or digit', 'e.g. "frost_hound"');
   req(typeof spec.name === 'string' && spec.name.trim(), 'name', 'MISSING', 'name is required');
   if (spec.rank !== undefined) req(ENEMY_RANKS.includes(spec.rank), 'rank', 'BAD_ENUM', `rank must be one of ${ENEMY_RANKS.join(', ')}`);

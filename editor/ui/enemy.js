@@ -15,6 +15,9 @@ import { packSelect } from './packPicker.js';
 // 记录键的推导只有一份（`enemy_ws_<slug>`，shared/enemyAuthoring.js 的 enemyKey）：外观声明的 id 必须与它一致，
 // 否则客户端按记录键查 `assets.enemies` 时查不到这套素材。
 import { enemyKey } from '../../shared/enemyAuthoring.js';
+// 覆盖模式的差异预览：摊平、比对、画值都在 shared/recordDiff.js（纯函数，node 里直接测）。
+// 界面只负责画出来 —— 判罚逻辑不进界面。
+import { diffRecords, shortValue, flattenRecord } from '../../shared/recordDiff.js';
 
 const $ = (s) => document.querySelector(s);
 
@@ -44,6 +47,8 @@ const state = {
   data: null, packId: null, key: null, spec: null, preview: null, message: null, busy: false,
   // 「以模板新建」的选择器：是否打开、搜索串
   picking: false, pickQuery: '',
+  // 覆盖模式（B 段）：选择器是否打开，以及当前这条覆盖的官方原文（差异预览用）
+  overridePicking: false, official: null,
   // 本包自带的外观素材那一块：草稿、它的目标 key、上一次保存/删除的回话，以及现场问来的骨架/图谱解析结论
   artDraft: null, artDraftKey: '', artMessage: null, artParsed: null,
 };
@@ -511,6 +516,7 @@ function renderForm() {
   const box = $('#form');
   box.replaceChildren();
   if (state.picking) { renderPicker(box); return; }
+  if (state.overridePicking) { renderOverridePicker(box); return; }
   const spec = state.spec;
   if (!spec) {
     box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('左边选一只怪物，或点「新建怪物」。') }));
@@ -632,9 +638,19 @@ function renderForm() {
     field(t('偏移 dy'), numInput(() => spec.hitArea?.dy ?? 0, (v) => { spec.hitArea = { ...(spec.hitArea || { w: 0, h: 0, dx: 0, dy: 0 }), dy: v }; })),
   );
   artBox.append(hit);
-  // 本包自带的外观素材（图标 + 扁平的 spine）：id 就是这一只会生成/已保存的记录键（客户端按它查 enemies 表）
-  artBox.append(enemyArtBox(enemyKey(spec.id)?.key ?? null));
+  // 本包自带的外观素材（图标 + 扁平的 spine）：id 就是这一只会生成/已保存的记录键（客户端按它查 enemies 表）。
+  // 覆盖模式下那个键**就是官方 key**（不加 `enemy_ws_` 前缀），所以这里问 `state.key` 而不是再推一遍 id ——
+  // 推出来的会是 `enemy_ws_<官方 key>`，外观会挂到一条不存在的记录上（静默不生效）。
+  artBox.append(enemyArtBox(state.official ? state.key : (enemyKey(spec.id)?.key ?? null)));
   box.append(artBox);
+
+  // 覆盖模式：保存前看清楚「到底会改哪几个字段」（比对逻辑在 shared/recordDiff.js，这里只画）
+  if (state.official) {
+    box.append(h(t('将改动的字段（覆盖官方 key）')));
+    const diffWrap = document.createElement('div'); diffWrap.className = 'panel';
+    renderDiffPreview(diffWrap);
+    box.append(diffWrap);
+  }
 }
 
 function areaInput(get, set) {
@@ -760,6 +776,8 @@ async function loadEnemyTemplate(key) {
     state.spec = r.spec;
     state.key = null;
     state.picking = false;
+    state.overridePicking = false;
+    state.official = null;
     state.preview = null;
     state.message = { kind: 'ok', text: t('已按「{0}」生成模板：请填一个新的 id 与名字（改完会自动校验）。', r.spec.name || key) };
     renderList(); renderForm(); renderSide(); schedule(true);
@@ -767,6 +785,97 @@ async function loadEnemyTemplate(key) {
     state.message = { kind: 'error', text: e.message };
     renderSide();
   }
+}
+
+/**
+ * 覆盖模式的选择器：选一只官方怪物，以它的官方 key 打开记录本身（不是复制一份）。
+ * 「模板」与「覆盖」是两件相反的事：模板要一个新 id，覆盖要的就是官方那个 key。
+ */
+function renderOverridePicker(box) {
+  box.append(Object.assign(document.createElement('h2'), { textContent: t('覆盖官方怪物') }));
+  box.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('选一只官方怪物：编辑器会把它**原样**读成表单（key 就是官方 key，不加 enemy_ws_ 前缀）。你只改要改的字段，没写的字段保存后仍然是官方的 —— 保存时会自动往 pack.json 的 overrides 里补一条声明。'),
+  }));
+
+  const search = document.createElement('input');
+  search.value = state.pickQuery;
+  search.placeholder = t('搜索怪物（名称 / key）');
+  search.addEventListener('input', () => {
+    state.pickQuery = search.value;
+    renderKeepingFocus($('#form'), renderForm);
+  });
+  const back = document.createElement('button');
+  back.className = 'ghost'; back.textContent = t('返回');
+  back.addEventListener('click', () => { state.overridePicking = false; state.pickQuery = ''; renderList(); renderForm(); renderSide(); });
+  const row = document.createElement('div'); row.className = 'row'; row.style.margin = '10px 0';
+  row.append(search, back);
+  box.append(row);
+
+  const matched = sortTemplates(matchEnemies(state.data?.officialTemplates ?? [], state.pickQuery));
+  const head = document.createElement('h2');
+  head.textContent = t('官方怪物（匹配 {0} / 共 {1}）', matched.length, (state.data?.officialTemplates ?? []).length);
+  box.append(head);
+  if (!matched.length) box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('（没有匹配的怪物）') }));
+  const LIMIT = 60;
+  for (const e of matched.slice(0, LIMIT)) {
+    const item = document.createElement('div'); item.className = 'item'; item.title = e.key;
+    item.innerHTML = `<div class="n">${e.name}</div>`
+      + `<div class="m">${e.rank ?? '?'} · ${e.applyWay ?? '?'} · ${e.motion ?? '?'} · ${t('官方 key {0}', e.key)}</div>`;
+    item.addEventListener('click', () => loadEnemyOverride(e.key));
+    box.append(item);
+  }
+  if (matched.length > LIMIT) box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('只显示了前 {0} 只，用上面的搜索框缩小范围。', LIMIT) }));
+}
+
+/** 以官方 key 打开一条怪物记录：只读端点回 `{ spec, ids, official }`。 */
+async function loadEnemyOverride(key) {
+  try {
+    const r = await api(`/api/official/enemies/${encodeURIComponent(key)}`);
+    state.spec = r.spec;
+    state.official = r.official ?? null;
+    // `key` 用官方那个（服务端算出来的 slug 就是它）：保存路径与删除都以它为文件名
+    state.key = r.spec.slug ?? r.ids?.key ?? key;
+    state.picking = false;
+    state.overridePicking = false;
+    state.preview = null;
+    state.message = { kind: 'ok', text: t('已打开官方怪物「{0}」（key {1}）：你改的字段会覆盖它，没改的仍然是官方的。', r.spec.name || key, key) };
+    renderList(); renderForm(); renderSide(); schedule(true);
+  } catch (e) {
+    state.message = { kind: 'error', text: e.message };
+    renderSide();
+  }
+}
+
+/** 差异预览里的一个格子：`shortValue` 对「那一边根本没有这个字段」回 `null`（shared/ 那层不写中文）。 */
+const diffCell = (v) => (shortValue(v, 46) === null ? t('（没有这个字段）') : shortValue(v, 46));
+
+/**
+ * 差异预览：官方原文 → 将要写出的记录，列出真正会变的叶子路径。
+ * 比对与画值在 shared/recordDiff.js（纯函数，node 里直接测），这里只画。
+ */
+function renderDiffPreview(box) {
+  const derived = state.preview?.record ?? null;
+  if (!derived) return box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('（改动后会自动算出差异）') }));
+  const r = diffRecords(state.official, derived, { limit: 60 });
+  if (!r.changed) return box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('还没有改动：写出去的就是官方那一条（一个字段都没变）。') }));
+  const flatOfficial = flattenRecord(state.official);
+  const table = document.createElement('table'); table.className = 'diff';
+  const thead = document.createElement('thead');
+  const hr = document.createElement('tr');
+  for (const label of [t('字段'), t('官方'), t('保存后')]) { const th = document.createElement('th'); th.textContent = label; hr.append(th); }
+  thead.append(hr); table.append(thead);
+  const tbody = document.createElement('tbody');
+  for (const c of r.changes) {
+    const tr = document.createElement('tr');
+    const c1 = document.createElement('td'); c1.style.whiteSpace = 'nowrap';
+    const code = document.createElement('code'); code.textContent = c.path; c1.append(code);
+    const c2 = document.createElement('td'); c2.textContent = diffCell(flatOfficial.get(c.path));
+    const c3 = document.createElement('td'); c3.textContent = diffCell(c.to);
+    tr.append(c1, c2, c3); tbody.append(tr);
+  }
+  table.append(tbody); box.append(table);
+  if (r.truncated) box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t('只列了前 {0} 条差异（总共 {1} 条）。', r.changes.length, r.total) }));
 }
 
 /** 复制当前打开的怪物：只清空 id（那一个必须重填，否则会覆盖原来那只）。 */
@@ -785,10 +894,15 @@ function renderList() {
   const box = $('#list');
   box.replaceChildren();
   const mk = (text, cls, onClick) => { const d = document.createElement('div'); d.className = cls; d.textContent = text; d.addEventListener('click', onClick); return d; };
-  box.append(mk(t('＋ 新建怪物'), 'item', () => { state.key = null; state.spec = blankSpec(); state.preview = null; state.picking = false; renderList(); renderForm(); renderSide(); schedule(true); }));
+  box.append(mk(t('＋ 新建怪物'), 'item', () => { state.key = null; state.spec = blankSpec(); state.preview = null; state.picking = false; state.overridePicking = false; state.official = null; renderList(); renderForm(); renderSide(); schedule(true); }));
   // 「以模板新建」：官方 249 只怪随便挑一只当底子，spine 与数值都不用自己摸
   box.append(mk(t('⧉ 以模板新建'), `item${state.picking ? ' on' : ''}`, () => {
-    state.key = null; state.spec = null; state.preview = null; state.picking = true; state.pickQuery = '';
+    state.key = null; state.spec = null; state.preview = null; state.picking = true; state.overridePicking = false; state.official = null; state.pickQuery = '';
+    renderList(); renderForm(); renderSide();
+  }));
+  // 覆盖模式：**不复制**，以官方 key 打开那一条记录本身（保存出来的就是官方 key + 自动补的 overrides 声明）
+  box.append(mk(t('✎ 覆盖官方怪物'), `item${state.overridePicking ? ' on' : ''}`, () => {
+    state.key = null; state.spec = null; state.preview = null; state.official = null; state.overridePicking = true; state.picking = false; state.pickQuery = '';
     renderList(); renderForm(); renderSide();
   }));
   for (const e of state.data?.enemies ?? []) {
@@ -807,6 +921,8 @@ async function openEnemy(e) {
   state.packId = e.pack;
   state.key = e.key;
   state.picking = false;
+  state.overridePicking = false;
+  state.official = null;
   state.message = null;
   try {
     const r = await api(`/api/enemies/${encodeURIComponent(e.pack)}/${encodeURIComponent(e.key)}`);

@@ -99,4 +99,10 @@ export const EN_ENEMY = Object.freeze({
   '图标 icon': 'Icon',
   '别人的模型 spineAliasOf（可留空）': 'Another enemy’s model (spineAliasOf — may be empty)',
   '还没选骨架：这一条就不会带模型（只换图标/头像也可以）。': 'No skeleton picked yet: this entry ships no model (replacing only the icon is fine).',
+  "✎ 覆盖官方怪物": "✎ Override an official enemy",
+  "覆盖官方怪物": "Override an official enemy",
+  "选一只官方怪物：编辑器会把它**原样**读成表单（key 就是官方 key，不加 enemy_ws_ 前缀）。你只改要改的字段，没写的字段保存后仍然是官方的 —— 保存时会自动往 pack.json 的 overrides 里补一条声明。": "Pick an official enemy: the editor reads it into the form as-is (the key is the official key, with no enemy_ws_ prefix). Change only the fields you care about — anything you leave alone stays official — and saving adds the matching declaration to pack.json overrides for you.",
+  "官方 key {0}": "official key {0}",
+  "已打开官方怪物「{0}」（key {1}）：你改的字段会覆盖它，没改的仍然是官方的。": "Opened the official enemy “{0}” (key {1}): the fields you change override it, the ones you leave alone stay official.",
+  "将改动的字段（覆盖官方 key）": "Fields that will change (official key override)",
 });
