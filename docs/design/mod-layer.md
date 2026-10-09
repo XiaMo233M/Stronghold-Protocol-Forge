@@ -1301,3 +1301,53 @@ makes the declaration true. `server/roomAssets.js` is the whole mechanism:
   match the process builds. A room's set decides what a **match** runs, not what the **process** boots.
 
 Tests: `test/roomAssets.test.js`.
+
+### 28.17 `server.battle`: a pack's battle-level logic (implemented)
+
+**Why `kits/` is not enough.** §28.12's behaviour layer is one file per operator (`kits/<chessId>.js`): a kit sees its
+own unit and the battle through the public API. A real community mod's whole "personality" is not per-operator — its
+`bonds/custom.js` (331 lines) and `garrisons/custom.js` (336 lines) say things like *"every member of this bond deals
+more damage to enemies that are stunned / bound / immobile"*, *"at 6 distinct members every member gains attack speed
+and its attacks carry true damage"*, *"an operator holding both of these items burns controlled enemies in range every
+second"*. Those conditions read the player, the whole field and the item combinations — a kit cannot see any of that,
+and one file per operator would mean rewriting the mod's 42 operators by hand (gap G-13).
+
+**The declaration is one field.**
+
+```jsonc
+"combat": true,                                   // required — a battle installer changes results
+"server": { "battle": { "module": "battle/bonds.mjs" } }
+```
+
+The module exports `install(battle)` — **the same shape official content uses** (`content/bonds/custom.js` and
+friends). Like `server.meta` (§29) the declaration is a hard gate: without `combat: true` the pack is refused whole
+(`BATTLE_NEEDS_COMBAT`), because a pack that cannot state that its code changes results must not ship battle logic.
+The module's bytes enter the content hash (§28.2) — the same reason kits, panels, `server.meta` and `server.modules`
+do: one digest must not describe two behaviours.
+
+**The import surface is a whitelist, and it is a different one from a kit's.** A battle module may import
+`@battle/index.js` (the battle content layer's helpers — `num`, `bondRecord`, `buffParams`, `bondActive`, `isMember`,
+`playerOps`, `passiveBuff`, `directMods`, `battleStore`, …: the very module the official content modules are built on)
+and `@sim/` (three pure helpers). `@kit/`'s tier SDK is deliberately *not* on that list: a battle module is not an
+operator kit. One table (`shared/kitImports.js BATTLE_IMPORT_FILES`) feeds both ends — the server rewrites each
+whitelisted specifier to a real `file:` URL and loads the module from a `data:` URL, and the browser resolves the same
+prefixes through `public/index.html`'s import map, so the pack's source runs **unmodified on both ends**. That is what
+makes the two execution paths (the player's browser and the server's re-computation) run literally the same code.
+
+**Determinism, load-time and run-time isolation.** The source is scanned **before any import** with the same two tables
+a kit and a `server.meta` module go through (`KIT_FORBIDDEN_GLOBALS` + `SERVER_CODE_FORBIDDEN_GLOBALS`: no
+`Math.random` / `Date.now` / `fetch` / `setTimeout`, no `process` / `globalThis` / `require` / `eval`), and an import
+outside the whitelist refuses the pack. A module that fails to load, has no `install` export, or whose declaration names
+a file that is not in the pack is reported and the **whole pack** leaves the loaded set at the same prune point as
+`server.preDispatch` / `server.meta` / `server.modules`. At run time each pack's installer is called **inside its own
+`try/catch`** by `server/sim/content/index.js installContent` (reported as `content:pack:<id>`), so one broken pack
+cannot take a whole field down — the same isolation kits get per unit.
+
+**How it reaches both ends.** The server passes the real functions to `Match` (`opts.battleInstallers`) and the JSON-safe
+URL list (`opts.workshopBattleModules`) into every BattleSpec (`spec.workshopBattle`, the twin of `spec.workshopKits`);
+`public/js/battle/runner.js loadSpecBattleInstallers` imports those URLs and hands the result to
+`createBattleFromSpec`. `/workshop-battle/<pack>/<path>` serves only URLs the loader registered (the discipline every
+pack-scoped route here follows). W-B applies (§28.16): a room that declares a subset assembles only **its** packs'
+installers, so "the declared set decides what runs" holds for this payload too.
+
+Tests: `test/packBattle.test.js`.

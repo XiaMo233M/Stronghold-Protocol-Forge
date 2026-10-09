@@ -185,11 +185,13 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
       // `server.meta`（DESIGN §29）：声明的模块必须真的在包里、可读、是 `.mjs`。同一条口径 —— 一个声明了自己
       // 要改对局结果却没有模块文件的包，会让服务器以为这一局有它的效果而实际上没有。
       const metaFileIssues = metaIssues(manifest.pack, packDir);
+      // `server.battle`（DESIGN §28.17）：声明的战斗逻辑模块必须真的在包里、可读、是 `.mjs` —— 同一条纪律。
+      const battleFileIssues = battleIssues(manifest.pack, packDir);
       // `server.modules`（DESIGN §28.14）：声明的 `.mjs` 必须真的在包里 —— 同一条纪律，同一个裁剪点。
       const moduleFileIssues = serverModuleIssues(manifest.pack, packDir);
       // `notices`（DESIGN §28.15）：声明的公告 / 鸣谢 `.json` 必须真的在包里、可读、是 JSON —— 同一条纪律。
       const noticeIssues = noticesIssues(manifest.pack, packDir);
-      const gateIssues = [...assetIssues.issues, ...hookIssues, ...langIssues, ...metaFileIssues, ...moduleFileIssues, ...noticeIssues];
+      const gateIssues = [...assetIssues.issues, ...hookIssues, ...langIssues, ...metaFileIssues, ...battleFileIssues, ...moduleFileIssues, ...noticeIssues];
       if (gateIssues.length) {
         errors.push({ pack: name, reason: `${gateIssues[0].code}: ${gateIssues[0].reason}` });
         continue;
@@ -534,6 +536,34 @@ export function metaIssues(pack, packDir) {
 }
 
 /**
+ * `pack.json.server.battle` 的**装载期**判据（DESIGN §28.17）：声明的 `module` 必须真的在包里、可读、是 `.mjs`。
+ *
+ * 与 `metaIssues` / `serverModuleIssues` / `panelModuleIssues` 逐字同一条纪律（「一条用不了的声明拒绝整个包」）：
+ * 一个声明了自己要在战场里改增伤 / 攻速、却拿不出模块文件的包，会让房主以为这一局有它的效果而实际上没有。
+ *
+ * 判不到的三件事留到装配路径：能不能 `import`（只有动态 import 知道）、有没有 `install` 导出、以及它跑起来会不会抛
+ * —— 最后一件由 `server/sim/content/index.js` 逐包隔离（一个包抛异常不该让整个战场起不来）。
+ * @param {{ server?: { battle?: { module: string } } }|null} pack normalized manifest
+ * @param {string} packDir the pack's directory on disk
+ * @returns {Array<{ code: string, reason: string }>}
+ */
+export function battleIssues(pack, packDir) {
+  const decl = pack && pack.server && pack.server.battle;
+  if (!decl || typeof packDir !== 'string' || !packDir) return [];
+  const dir = path.resolve(packDir);
+  const moduleAbs = path.join(dir, ...String(decl.module).split('/'));
+  if (!(moduleAbs === dir || moduleAbs.startsWith(dir + path.sep))) {
+    return [{ code: 'BATTLE_BAD_PATH', reason: `server.battle.module "${decl.module}" must resolve inside the pack` }];
+  }
+  let readable;
+  try { readable = fs.statSync(moduleAbs).isFile(); } catch { readable = false; }
+  if (!readable) {
+    return [{ code: 'BATTLE_BAD_MODULE', reason: `server.battle.module "${decl.module}" is not a readable file inside the pack` }];
+  }
+  return [];
+}
+
+/**
  * `pack.json.server.modules[*].entry` 的**装载期**判据（DESIGN §28.14）：声明的每一个 `.mjs` 必须真的在包里、可读。
  *
  * 与 `metaIssues` / `panelModuleIssues` 同一条纪律（「一条用不了的声明拒绝整个包」）：一个声明了服务端模块却拿不出
@@ -803,6 +833,17 @@ export function identifyPack(packDir, pack, files, { assetsDigest = null } = {})
     if (abs === packDir || !abs.startsWith(packDir + path.sep)) continue;
     try { addBytes(rel, fs.readFileSync(abs)); } catch { /* unreachable for a LOADED pack: loadWorkshop refuses it first */ }
   }
+  // 包的**战斗逻辑**模块（`pack.json.server.battle`, DESIGN §28.17）：它比 meta 更直接 —— 每个战场建起来时都会跑，
+  // 能改增伤 / 攻速 / 真实伤害。所以字节必须进身份，理由与 kits / panels / meta / server.modules 逐字相同。
+  // 没声明 `server.battle` 的包（今天所有的包）哈希逐字节不变。
+  const battleFiles = [...new Set([pack.server && pack.server.battle && typeof pack.server.battle.module === 'string'
+    ? pack.server.battle.module : ''].filter(Boolean))];
+  for (const rel of battleFiles) {
+    if (manifest.some((m) => m.path === rel)) continue;
+    const abs = path.join(packDir, ...rel.split('/'));
+    if (abs === packDir || !abs.startsWith(packDir + path.sep)) continue;
+    try { addBytes(rel, fs.readFileSync(abs)); } catch { /* unreachable for a LOADED pack: loadWorkshop refuses it first */ }
+  }
   // 包的**服务端模块**源码（`pack.json.server.modules[*].entry`, DESIGN §28.14）：它是会在服务器上执行的代码，
   // 所以它的字节必须进身份 —— 与 kits / panels / meta 逐字相同的一条理由（同一份摘要不能描述两段不同的行为）。
   // 没声明 `server.modules` 的包哈希逐字节不变。
@@ -825,7 +866,10 @@ export function identifyPack(packDir, pack, files, { assetsDigest = null } = {})
   // 声明了**服务端模块**的包是 B 层（`server.modules`, DESIGN §28.14）：它会执行服务端代码（可能碰对局，若挂了
   // `matchClass`），所以按 §28.1 的三层表它属于 B，而不是 A/C 里任何一层。
   const hasServerModules = moduleFiles.length > 0;
-  const layer = pack.layer || (kits || hasServerModules ? 'B' : (hasMedia || panelFiles.length || styleFiles.length || hasTheme) ? 'C' : 'A');
+  // 声明了 `server.meta` 或 `server.battle` 的包同样是 B 层（对局 / 战斗里的服务端逻辑）：它们执行的都是引擎的
+  // 对局侧代码，按 §28.1 的三层表属于 B。
+  const hasMatchLogic = metaFiles.length > 0 || battleFiles.length > 0;
+  const layer = pack.layer || (kits || hasServerModules || hasMatchLogic ? 'B' : (hasMedia || panelFiles.length || styleFiles.length || hasTheme) ? 'C' : 'A');
   // `combat` 的推导**不**把服务端模块算进来：只挂 `boot` / `shutdown` / `healthz` 的模块碰不到对局，而挂了
   // `matchClass` 的包由形状层要求它**显式**声明 `combat: true`（`MODULES_NEED_COMBAT`）—— 所以这里照旧只看 kits。
   const combat = pack.combat === null || pack.combat === undefined ? kits > 0 : pack.combat;

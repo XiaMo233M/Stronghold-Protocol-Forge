@@ -962,6 +962,12 @@ export class Lobby {
     const roomIds = room.modSet && Array.isArray(room.modSet.packs) ? new Set(room.modSet.packs.map((p) => p && p.id)) : null;
     const metaModules = (this.workshop && Array.isArray(this.workshop.meta) ? this.workshop.meta : [])
       .filter((m) => !roomIds || (m && roomIds.has(m.pack)));
+    // 包声明的**战斗逻辑**（`server.battle`, DESIGN §28.17）：与 meta 同一条口径 —— 房间声明了集合时只有它点名的包参与。
+    // installer（真函数，服务端跑）与 modules（JSON 安全的 URL 清单，进 BattleSpec 让浏览器加载同一段代码）两份都过滤。
+    const battleInstallers = (this.workshop && Array.isArray(this.workshop.battleInstallers) ? this.workshop.battleInstallers : [])
+      .filter((m) => !roomIds || (m && roomIds.has(m.id)));
+    const battleModules = (this.workshop && Array.isArray(this.workshop.battle) ? this.workshop.battle : [])
+      .filter((m) => !roomIds || (m && roomIds.has(m.pack)));
     let roomRegistry = null;
     if (metaModules.length) {
       const built = buildRoomRegistry({ packs: metaModules, base: getDefaultRegistry(), log: this.log });
@@ -995,6 +1001,10 @@ export class Lobby {
         // …and the identity of that content, which every BattleSpec of this match carries (DESIGN §28.2). The room's own
         // set when it declared one — that IS what this match runs — else the process set, byte for byte as before.
         mods: room.modSet || this.modSet,
+        // 包声明的**战斗逻辑**（`server.battle`, DESIGN §28.17）：两个字段都只在真的有包声明时出现 —— 干净安装
+        // （或一个都没点名的房间）送进去的 opts 与从前逐字节相同，`Battle` 也拿不到 `battleInstallers` 这个键。
+        ...(battleInstallers.length ? { battleInstallers } : {}),
+        ...(battleModules.length ? { workshopBattleModules: battleModules } : {}),
         // 这一局自己的元注册表副本：**没有包声明 `server.meta` 时这个字段根本不出现**，Match 照旧用进程级那一份
         //（`opts.registry` 的缺省）—— 于是干净安装的行为与从前逐字节相同。
         ...(roomRegistry ? { registry: roomRegistry } : {}),

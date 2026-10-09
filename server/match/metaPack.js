@@ -18,7 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { KIT_FORBIDDEN_GLOBALS, stripComments, mentionsIdentifier } from '../../shared/kitAuthoring.js';
+import { KIT_FORBIDDEN_GLOBALS, SERVER_CODE_FORBIDDEN_GLOBALS, stripComments, mentionsIdentifier } from '../../shared/kitAuthoring.js';
 import { META_KEY_CLASSES } from '../../shared/workshop.js';
 import { MOD_API_VERSION } from '../../shared/constants.js';
 import { MetaRegistry } from './effectsMeta.js';
@@ -31,13 +31,7 @@ import { num, bondRecord, itemRecord, garrisonRecord, bandRecord, effectRecord, 
  * 计划里那句「错误码与文案与 kit 那套一致」就是这个意思。kit 跑在浏览器里所以禁 `document` / `window`；
  * 而 meta 模块跑在**服务端对局进程**里，`process` / `require` / 动态 `import()` 这些是它比 kit 多出来的口子。
  */
-const META_FORBIDDEN_EXTRA = Object.freeze([
-  ['process', 'a meta module runs inside the match loop — reading the environment makes the same seed play out differently on another machine'],
-  ['globalThis', 'a meta module must not reach outside its own registration: what it may do is exactly what the registry and ctx give it'],
-  ['require', 'the engine loads this file as ESM — require() does not exist here, and a CommonJS escape hatch would bypass this scan'],
-  ['eval', 'eval defeats the deterministic scan (the scan is what keeps the golden corpus meaningful)'],
-  ['new Function', 'new Function defeats the deterministic scan, like eval'],
-]);
+const META_FORBIDDEN_EXTRA = SERVER_CODE_FORBIDDEN_GLOBALS;
 
 /** 一个 meta 模块只许 import **包内相对文件**。引擎的辅助函数走 `registry.api`，不走 import —— 见下面的说明。 */
 function importSpecifiers(code) {

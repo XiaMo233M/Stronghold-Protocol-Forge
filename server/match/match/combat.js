@@ -17,6 +17,9 @@ export class MatchCombat {
     // 工坊行为层 (docs/WORKSHOP.md §4): the pack's kits are the real functions on the server (the browser rebuilds them
     // from `workshopKitModules`); an explicit opts.kits always wins.
     if (this.workshopKits && !full.kits) full.kits = this.workshopKits;
+    // 包声明的战斗逻辑（`server.battle`, DESIGN §28.17）：服务端跑的这一场用同一批 installer（浏览器那边按 spec 的
+    // URL 自己加载）。没有包声明时 `this.battleInstallers` 是 null，这个键就不出现 —— 行为与从前逐字节相同。
+    if (Array.isArray(this.battleInstallers) && this.battleInstallers.length && !full.battleInstallers) full.battleInstallers = this.battleInstallers;
     try {
       return new this.BattleClass(full);
     } catch (e) {

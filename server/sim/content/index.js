@@ -247,7 +247,7 @@ export function skillSpecSource(def, kits = KITS) {
  * (simdata withUnitLoadouts over its players' inputs), so summons spawned during the battle (`getToken(id, owner)`)
  * and every other id-only lookup resolve the owner's selected skill / module there too (DESIGN §16).
  */
-export function installContent(battle, { mode = 'full', extra = null } = {}) {
+export function installContent(battle, { mode = 'full', extra = null, installers = null } = {}) {
   try {
     const view = withUnitLoadouts(battle.data, (battle.players || []).map((p) => p && p.input));
     if (view && view !== battle.data) battle.data = view;
@@ -261,6 +261,13 @@ export function installContent(battle, { mode = 'full', extra = null } = {}) {
       if (typeof mod.install !== 'function') continue;
       try { mod.install(battle); } catch (e) { battle._handlerError(`content:${name}`, null, e); }
     }
+  }
+  // 包声明的**战斗逻辑**（`pack.json.server.battle`, DESIGN §28.17）：每个包单独一层 try/catch，报错点名是哪个包。
+  // 一个包抛异常只记一条内容错误，绝不让整个战场起不来 —— 与 kits 逐单位隔离同一条口径。**没有包声明时这里是空的**，
+  // 所以干净安装与从前逐字节相同（golden 语料不动）。
+  for (const m of installers || []) {
+    if (!m || typeof m.install !== 'function') continue;
+    try { m.install(battle); } catch (e) { battle._handlerError(`content:pack:${m.id || '?'}`, null, e); }
   }
   for (const m of extra || []) {
     try { (typeof m === 'function' ? m : m.install)?.(battle); } catch (e) { battle._handlerError('content:extra', null, e); }

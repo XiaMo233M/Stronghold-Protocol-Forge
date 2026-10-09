@@ -257,6 +257,8 @@ export function makeBattle(opts = {}) {
     content: opts.content ?? 'full', recordEvents: opts.recordEvents !== false, logger: opts.logger ?? quietLogger(opts.verbose),
     quiet: opts.verbose ? false : true, devices: opts.devices,
     autoFinish: opts.autoFinish ?? spawns.length > 0, kits: opts.kits, extraContent: opts.extraContent,
+    // 包声明的战斗逻辑（`server.battle`, DESIGN §28.17）：测试可以把装载器交出来的 installer 直接递给战场。
+    battleInstallers: opts.battleInstallers,
     setup: (b) => {
       for (const name of hookNames) {
         captured[name] = [];

@@ -147,6 +147,36 @@ export async function loadSpecKits(spec) {
   return kits;
 }
 
+/**
+ * 包声明的**战斗逻辑**（`pack.json.server.battle`, DESIGN §28.17）：按 `spec.workshopBattle` 的 URL 加载每个包的
+ * `install(battle)`，交给 `createBattleFromSpec` 的 `opts.battleInstallers`。
+ *
+ * 为什么必须在浏览器里也跑一遍：与服务端复算同一场战斗的两个执行路径必须跑**同一段代码**（kit 那条通道的同一个
+ * 理由，见 loadSpecKits）。一个加载不上的模块照实报出来，而不是悄悄少一个包的效果 —— 少了它，服务端算出来的战果
+ * 会与客户端不一致，玩家的成绩会被拒。
+ * @param {{ workshopBattle?: Array<{ id: string, url: string }> }|null} spec
+ * @returns {Promise<Array<{ id: string, install: Function }>|undefined>} undefined when the field needs none
+ */
+export async function loadSpecBattleInstallers(spec) {
+  const list = Array.isArray(spec && spec.workshopBattle) ? spec.workshopBattle : [];
+  if (!list.length) return undefined;
+  /** @type {Array<{ id: string, install: Function }>} */
+  const out = [];
+  for (const m of list) {
+    // only a same-origin, root-relative URL is ever imported (the server built this list itself)
+    if (!m || typeof m.id !== 'string' || typeof m.url !== 'string' || !m.url.startsWith('/')) continue;
+    try {
+      const mod = await import(/* @vite-ignore */ m.url);
+      const install = typeof mod.install === 'function' ? mod.install : (typeof mod.default === 'function' ? mod.default : null);
+      if (typeof install === 'function') out.push({ id: m.id, install });
+      else console.warn('[runner] workshop battle module has no exported install function', m.id);
+    } catch (err) {
+      console.warn('[runner] workshop battle module failed to load', m.id, err);
+    }
+  }
+  return out.length ? out : undefined;
+}
+
 /** Request failures after which a b.result counts as never delivered (re-sent on resume / b.start). */
 export const LOST_RESULT_CODES = Object.freeze(['DISCONNECTED', 'OFFLINE', 'TIMEOUT']);
 
@@ -741,7 +771,9 @@ export function createBattleRunner(deps) {
       try {
         // 工坊行为层: rebuild the very kits the server verifies this field with (see loadSpecKits)
         const kits = await loadSpecKits(e.spec);
-        battle = sim.spec.createBattleFromSpec(e.spec, sim.ds, { logger, kits });
+        // 包声明的战斗逻辑（`server.battle`, DESIGN §28.17）：同一场战斗、同一段代码（见 loadSpecBattleInstallers）
+        const battleInstallers = await loadSpecBattleInstallers(e.spec);
+        battle = sim.spec.createBattleFromSpec(e.spec, sim.ds, { logger, kits, ...(battleInstallers ? { battleInstallers } : {}) });
       } catch (err) {
         console.warn('[runner] battle construction failed', err);
         recordError('runner', err, 'battle construction failed');

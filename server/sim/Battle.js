@@ -210,7 +210,7 @@ export class Battle {
 
     // ---- content
     this.contentMode = opts.content ?? 'full';
-    this._safe(() => installContent(this, { mode: this.contentMode, extra: opts.extraContent }), 'installContent');
+    this._safe(() => installContent(this, { mode: this.contentMode, extra: opts.extraContent, installers: opts.battleInstallers }), 'installContent');
     for (const u of this.allyUnits) if (!u.kit) this._setupUnit(u);
     if (typeof opts.setup === 'function') this._safe(() => opts.setup(this), 'opts.setup');
   }

@@ -262,6 +262,15 @@ export class Match {
     /** @type {Array<{ id: string, pack: string, hash?: string, url: string }>} */
     this.workshopKitModules = Array.isArray(opts.workshopKitModules) ? opts.workshopKitModules : [];
     /**
+     * 包声明的**战斗逻辑**（`pack.json.server.battle`, DESIGN §28.17）：这一场要跑的 `install(battle)` 真函数
+     * （服务端跑的就是它们）与浏览器要加载的那份 `{ id, pack, hash, url }` 清单（进每一份 BattleSpec）。
+     * 没有包声明时两者分别是 null / 空数组 —— 战斗拿不到这个键，行为与从前逐字节相同。
+     * @type {Array<{ id: string, install: Function }>|null}
+     */
+    this.battleInstallers = Array.isArray(opts.battleInstallers) && opts.battleInstallers.length ? opts.battleInstallers : null;
+    /** @type {Array<{ id: string, pack: string, hash?: string, url: string }>} */
+    this.workshopBattleModules = Array.isArray(opts.workshopBattleModules) ? opts.workshopBattleModules : [];
+    /**
      * The content this match runs with (DESIGN §28.2): `{ digest, packs }`, or null for a plain install. It goes into
      * every BattleSpec (`spec.mods`) so a field's result is always attributable to the content that produced it.
      * @type {{ digest: string, packs: Array<object> }|null}

@@ -36,8 +36,9 @@ export class MatchClientCombat {
     const battleId = seq.length + 1 + String(fieldId).length <= 64 ? `${seq}.${fieldId}` : seq;
     // workshopKits: the JSON-safe module list the browser imports to rebuild the pack's behaviour layer
     // (public/js/battle/runner.js loadSpecKits) — the server re-computes the same battle, so both sides must load it.
+    // workshopBattle: the same thing one level up (DESIGN §28.17) — the packs' battle-level `install(battle)` modules.
     // mods: the identity of that content (DESIGN §28.2), so the field carries what it ran with.
-    const spec = buildBattleSpec({ ...opts, battleId, fieldId, kind, content: this.battleContent, boss, workshopKits: this.workshopKitModules, mods: this.mods });
+    const spec = buildBattleSpec({ ...opts, battleId, fieldId, kind, content: this.battleContent, boss, workshopKits: this.workshopKitModules, workshopBattle: this.workshopBattleModules, mods: this.mods });
     let total = 0;
     for (const x of spec.spawns) if (x && x.tag !== 'boss' && x.tag !== 'part' && x.countInTotal !== false) total += Math.max(1, Math.floor(Number(x.count) || 1));
     return {
@@ -61,7 +62,10 @@ export class MatchClientCombat {
   /** A battle built from a spec on the server (headless / takeover / verification); never throws. */
   _specBattle(spec, { sharedBoss = null } = {}) {
     try {
-      return createBattleFromSpec(spec, this.ds, { BattleClass: this.BattleClass, sharedBoss, logger: this.log, recordEvents: false });
+      // 包声明的战斗逻辑（`server.battle`, DESIGN §28.17）：服务端复算这一场时用的是**同一批真函数**（浏览器那边按
+      // spec.workshopBattle 的 URL 自己加载），两边跑同一段代码才算「同一场战斗」。没有包声明时不传这个键。
+      const installers = Array.isArray(this.battleInstallers) && this.battleInstallers.length ? { battleInstallers: this.battleInstallers } : {};
+      return createBattleFromSpec(spec, this.ds, { BattleClass: this.BattleClass, sharedBoss, logger: this.log, recordEvents: false, ...installers });
     } catch (e) {
       this.reportError(`battle ${spec && spec.fieldId} construct`, e);
       return new DeadBattle({ fieldId: spec && spec.fieldId, kind: spec && spec.kind, players: (spec && spec.players) || [], rect: spec && spec.rect, stageId: spec && spec.stageId }, 'forced');

@@ -96,6 +96,17 @@ export function buildBattleSpec(o = {}) {
     // this spec (server/match/fields.js specBounds), so a result computed under a DIFFERENT mod set has to be
     // distinguishable from one computed under this one.
     mods: o.mods && typeof o.mods === 'object' ? JSON.parse(JSON.stringify(o.mods)) : null,
+    // 包声明的**战斗逻辑**模块（`pack.json.server.battle`, DESIGN §28.17）：与 `workshopKits` 逐字同形 —— 一条
+    // JSON 安全的 `{ id, pack, hash, url }`，浏览器按 URL 加载同一段代码并跑 `install(battle)`，服务端复算用的是同
+    // 一个包的同一份字节。空数组 = 没有包声明它（干净安装），此时 spec 里这个键照旧存在但什么都不做。
+    workshopBattle: (Array.isArray(o.workshopBattle) ? o.workshopBattle : [])
+      .filter((m) => m && typeof m.id === 'string' && typeof m.url === 'string')
+      .map((m) => ({
+        id: m.id,
+        pack: typeof m.pack === 'string' ? m.pack : null,
+        url: m.url,
+        ...(typeof m.hash === 'string' ? { hash: m.hash } : {}),
+      })),
   };
   const out = JSON.parse(JSON.stringify(spec, specReplacer));
   for (const p of out.players) for (const u of (p && Array.isArray(p.units) ? p.units : [])) if (u && typeof u === 'object') sanitizeUnitLoadout(u);
@@ -185,6 +196,10 @@ export function createBattleFromSpec(spec, dataSource, opts = {}) {
   // takes precedence over the built-in registry (server/sim/content/index.js setupUnitKit). The server passes the map it
   // loaded from the packs; the browser passes the map it built from `spec.workshopKits`.
   if (opts.kits && typeof opts.kits === 'object') battleOpts.kits = opts.kits;
+  // 包声明的战斗逻辑（`server.battle`, DESIGN §28.17）：服务端把**这一场**要跑的 installer 直接递进来（一个函数过不了
+  // 线），浏览器那边按 `spec.workshopBattle` 的 URL 自己加载出同一批。没有包声明时不传这个键 —— Match 与 Battle
+  // 的行为与从前逐字节相同。
+  if (Array.isArray(opts.battleInstallers) && opts.battleInstallers.length) battleOpts.battleInstallers = opts.battleInstallers;
   const b = new BattleClass(battleOpts);
   b.battleId = s.battleId ?? null;
   return b;

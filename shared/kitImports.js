@@ -29,6 +29,16 @@
 export const KIT_IMPORT_PREFIXES = Object.freeze(['@kit/', '@sim/']);
 
 /**
+ * 包**战斗逻辑**模块（`pack.json.server.battle`, DESIGN §28.17）允许的两个前缀：`@battle/`（战斗内容层的辅助函数，
+ * 官方 `content/bonds/custom.js` 之类用的就是这一套）与 `@sim/`（三个纯函数模块）。
+ *
+ * 与 kit 的关系：kit 是**一个干员**的代码，战斗模块是**整场**的代码 —— 两者需要的东西不同（kit 要 tier1..6 那套
+ * 构造器，战斗模块要 `bondActive` / `isMember` / `passiveBuff` / `battleStore` 这类战场级读法），所以是两份名单、
+ * 两个前缀，而不是把 kit 的名单撑大。
+ */
+export const BATTLE_IMPORT_PREFIXES = Object.freeze(['@battle/', '@sim/']);
+
+/**
  * The whitelist. `specifier` is what the author writes; `file` is the real path, workspace-relative and POSIX — the
  * server resolves it against the repository root and the browser resolves the same string through the import map.
  * Adding a line here is the ONLY way to open a new module, and it opens it on both ends at once.
@@ -46,16 +56,32 @@ export const KIT_IMPORT_FILES = Object.freeze([
   { specifier: '@sim/constants.js', file: 'server/sim/constants.js' },
   { specifier: '@sim/dir.js', file: 'server/sim/dir.js' },
   { specifier: '@sim/targeting.js', file: 'server/sim/targeting.js' },
+  // 战斗逻辑模块的 SDK：**战斗内容层的辅助函数**（`server/sim/content/support/index.js`）—— 官方内容模块
+  // （`content/bonds/*.js`、`content/garrisons/*.js`）用的同一份。它已经在浏览器侧被服务（`/sim/content/support/`，
+  // 客户端战斗本来就要加载它），所以两端都能解。
+  { specifier: '@battle/index.js', file: 'server/sim/content/support/index.js' },
 ]);
+
+/** 战斗逻辑模块允许的名单（它不比 kit 多一个前缀，只是指向另一组文件）。 */
+export const BATTLE_IMPORT_FILES = Object.freeze(KIT_IMPORT_FILES.filter((e) => BATTLE_IMPORT_PREFIXES.some((p) => e.specifier.startsWith(p))));
 
 /** specifier → file, for the loader and the import-map generator. */
 export const KIT_IMPORT_TARGETS = Object.freeze(new Map(KIT_IMPORT_FILES.map((e) => [e.specifier, e.file])));
 
+/** 战斗逻辑模块的 specifier → file。 */
+export const BATTLE_IMPORT_TARGETS = Object.freeze(new Map(BATTLE_IMPORT_FILES.map((e) => [e.specifier, e.file])));
+
 /** The list a reason/hint quotes, so the message and the table can never disagree. */
 export const KIT_IMPORT_ALLOWED = Object.freeze(KIT_IMPORT_FILES.map((e) => e.specifier));
 
+/** 战斗逻辑模块那份可写清单。 */
+export const BATTLE_IMPORT_ALLOWED = Object.freeze(BATTLE_IMPORT_FILES.map((e) => e.specifier));
+
 /** One line naming every allowed specifier — the "here is what you may write instead" half of an error. */
 export const kitImportAllowedText = () => KIT_IMPORT_ALLOWED.join(', ');
+
+/** 同上，战斗逻辑模块那份。 */
+export const battleImportAllowedText = () => BATTLE_IMPORT_ALLOWED.join(', ');
 
 /**
  * Blank out comments, keeping string literals AND the newlines (so an index into the result is an index into the input).
@@ -157,23 +183,23 @@ export function kitRequireCalls(src) {
  * @param {ReturnType<typeof kitImportDeclarations>} [decls]
  * @returns {Array<{ code: string, reason: string }>}
  */
-export function kitImportIssues(src, decls = null) {
+export function kitImportIssues(src, decls = null, { targets = KIT_IMPORT_TARGETS, allowedText = kitImportAllowedText } = {}) {
   const out = [];
   if (kitDynamicImports(src).length) {
     out.push({
       code: 'KIT_IMPORT',
-      reason: `禁止动态 import()：它无法被双端静态解析（服务端按真实路径、浏览器按 URL），只允许写在文件顶部的静态 import；白名单：${kitImportAllowedText()}`,
+      reason: `禁止动态 import()：它无法被双端静态解析（服务端按真实路径、浏览器按 URL），只允许写在文件顶部的静态 import；白名单：${allowedText()}`,
     });
   }
   if (kitRequireCalls(src).length) {
     out.push({
       code: 'KIT_IMPORT',
-      reason: `禁止 require()：kit 两端都按 ES 模块加载（服务端 import()、浏览器 import），CommonJS 在两端都不存在；白名单：${kitImportAllowedText()}`,
+      reason: `禁止 require()：kit 两端都按 ES 模块加载（服务端 import()、浏览器 import），CommonJS 在两端都不存在；白名单：${allowedText()}`,
     });
   }
   for (const d of (decls || kitImportDeclarations(src))) {
-    if (KIT_IMPORT_TARGETS.has(d.specifier)) continue;
-    out.push({ code: 'KIT_IMPORT', reason: `import "${d.specifier}" 不在白名单里：${kitImportUnavailableReason(d.specifier)}` });
+    if (targets.has(d.specifier)) continue;
+    out.push({ code: 'KIT_IMPORT', reason: `import "${d.specifier}" 不在白名单里：${kitImportUnavailableReason(d.specifier, { allowedText })}` });
   }
   return out;
 }
@@ -183,19 +209,19 @@ export function kitImportIssues(src, decls = null) {
  * module the author misspelled, or a module that simply is not on the list. Every branch ends by naming the whitelist,
  * because "you may not do this" without "here is what you may do" is what makes an author guess.
  */
-export function kitImportUnavailableReason(specifier) {
+export function kitImportUnavailableReason(specifier, { allowedText = kitImportAllowedText } = {}) {
   const s = String(specifier ?? '');
-  const allowed = `白名单：${kitImportAllowedText()}`;
+  const allowed = `白名单：${allowedText()}`;
   if (s.startsWith('..') || s.includes('/../') || s === '..') {
     return `相对路径（含 ".."）无法同时在服务端与浏览器成立，且路径穿越一律拒绝；${allowed}`;
   }
   if (s.startsWith('.')) return `相对路径无法同时在服务端与浏览器成立；${allowed}`;
   if (s.startsWith('/')) return `绝对路径无法同时在服务端与浏览器成立；${allowed}`;
-  if (s.startsWith('@kit/') || s.startsWith('@sim/')) {
+  if (s.startsWith('@kit/') || s.startsWith('@sim/') || s.startsWith('@battle/')) {
     return `模块名 "${s.slice(s.indexOf('/') + 1)}" 未开放（前缀合法，但这个文件不在白名单里）；${allowed}`;
   }
   if (s.startsWith('@')) return `未知前缀 "${s.slice(0, s.indexOf('/') + 1 || undefined)}"；${allowed}`;
-  return `裸模块名 "${s}" 未开放（kit 只能 import 引擎的 kit SDK 与三个纯函数模块）；${allowed}`;
+  return `裸模块名 "${s}" 未开放（只能 import 引擎给出的 SDK 与那几个纯函数模块）；${allowed}`;
 }
 
 /** The allowed file for a specifier, or null. */
@@ -214,7 +240,8 @@ export const kitImportTarget = (specifier) => KIT_IMPORT_TARGETS.get(String(spec
 export function kitImportMap() {
   /** @type {Record<string, string>} */
   const map = {};
-  for (const prefix of KIT_IMPORT_PREFIXES) {
+  const prefixes = [...new Set([...KIT_IMPORT_PREFIXES, ...BATTLE_IMPORT_PREFIXES])];
+  for (const prefix of prefixes) {
     const first = KIT_IMPORT_FILES.find((e) => e.specifier.startsWith(prefix));
     if (!first) continue;
     const tail = first.specifier.slice(prefix.length);
@@ -241,14 +268,14 @@ export const kitImportBrowserUrl = (file) => `/${String(file).replace(/^server\/
  * @param {(file: string) => string} urlOf workspace-relative file → URL (the loader passes `pathToFileURL`)
  * @returns {string}
  */
-export function rewriteKitImports(src, urlOf) {
+export function rewriteKitImports(src, urlOf, { targets = KIT_IMPORT_TARGETS } = {}) {
   const text = String(src || '');
   const decls = kitImportDeclarations(text);
   if (!decls.length) return text;
   let out = '';
   let at = 0;
   for (const d of decls) {
-    const file = KIT_IMPORT_TARGETS.get(d.specifier);
+    const file = targets.get(d.specifier);
     if (!file) continue;                                   // refused: left for the loader to report
     const url = String(urlOf(file));
     out += text.slice(at, d.specStart) + url;

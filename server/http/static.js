@@ -67,6 +67,8 @@ const SIM_PRIVATE = new Set(['nodedata.js']); // lower-case (compared case-insen
 /** 按房间的游戏数据 (W-B): the URL prefix and the digest shape (`shared/modIdentity.js` modDigest = sha256 hex). */
 export const ROOM_DATA_PREFIX = '/room-data/';
 const ROOM_DIGEST_RE = /^[0-9a-f]{64}$/;
+/** 包声明的战斗逻辑模块（`server.battle`, DESIGN §28.17）的 URL 前缀 —— 与 `shared/battlePack` 的默认值同一个字符串。 */
+export const WORKSHOP_BATTLE_PREFIX = '/workshop-battle/';
 
 // ---------------------------------------------------------------------------------------------------
 // Static file handler
@@ -110,6 +112,9 @@ export function createStaticHandler({
   // 按房间的游戏数据 (W-B, DESIGN §28.16): `(digest) => { data } | null` from server/roomAssets.js. Null on a plain
   // install (no packs ⇒ every room runs the process data), and the `/room-data/` branch is skipped then.
   roomData = null,
+  // 包声明的战斗逻辑模块（`server.battle`, DESIGN §28.17）的 URL → 磁盘文件。空 map = 没有包声明它，那条路由不服务任何
+  // URL（与 `/workshop-kits/` 同一条不变量）。
+  workshopBattleFiles = null,
 }) {
   const registry = packs || createPackRegistry({ publicDir, dataDir, packsDir }, { log: /** @type {any} */ (log) });
   const mounts = [
@@ -228,6 +233,24 @@ export function createStaticHandler({
         res.end(req.method === 'HEAD' ? undefined : buf);
         return;
       }
+    }
+    // 包声明的**战斗逻辑**模块（`pack.json.server.battle`, DESIGN §28.17）：与 `/workshop-kits/` 逐字同一条通道 ——
+    // 只服务装载器登记过的 URL，按 ES 模块送出（浏览器要 import 它，并在客户端战斗里跑同一段代码）。包内路径可以是
+    // 子目录，所以这里的键是完整 URL 而不是文件名。
+    if (workshopBattleFiles && workshopBattleFiles.size && decoded.startsWith(WORKSHOP_BATTLE_PREFIX)) {
+      const abs = workshopBattleFiles.get(decoded);
+      if (!abs) { sendError(req, res, 404, '页面不存在 · Not found'); return; }
+      let body;
+      try {
+        body = await fsp.readFile(abs);
+      } catch (e) {
+        log.error('[workshop] battle module read failed', e);
+        sendError(req, res, 404, '页面不存在 · Not found');
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': MIME['.js'], 'Content-Length': body.length, 'Cache-Control': 'no-cache' });
+      res.end(req.method === 'HEAD' ? undefined : body);
+      return;
     }
     // 工坊行为层 (docs/WORKSHOP.md §4): serve a pack's kit module as an ES module, so the BROWSER runs the very code the
     // server runs. Only URLs the loader registered are servable.

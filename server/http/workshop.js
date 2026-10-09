@@ -85,6 +85,39 @@ export function buildWorkshopDataFiles(data, workshop) {
 }
 
 /**
+ * 包声明的**战斗逻辑**模块的 URL → 磁盘文件（`server.battle`, DESIGN §28.17）。与 `workshopKitFilesFor` 逐字同形、
+ * 同一条纪律：只服务**装载器登记过**的 URL。
+ *
+ * 与 kits 的唯一差别是包内位置：kit 固定在 `kits/<id>.js`，战斗模块的路径由声明给出
+ * （`server.battle.module`，可以是 `battle/main.mjs` 这样的子目录），所以这里从 URL 里解出包内相对路径。
+ * @param {Array<{ id: string, pack: string, url: string }>} modules
+ * @param {string} workshopDir
+ * @returns {Map<string, string>}
+ */
+export function workshopBattleFilesFor(modules, workshopDir) {
+  /** @type {Map<string, string>} */
+  const out = new Map();
+  if (typeof workshopDir !== 'string' || workshopDir === '') return out;
+  const root = path.resolve(workshopDir);
+  for (const m of Array.isArray(modules) ? modules : []) {
+    if (!m || typeof m.url !== 'string' || typeof m.pack !== 'string') continue;
+    const url = m.url.split('?')[0];
+    const marker = `/workshop-battle/${encodeURIComponent(m.pack)}/`;
+    const at = url.indexOf(marker);
+    if (at < 0) continue;
+    const rel = url.slice(at + marker.length).split('/').map((seg) => {
+      try { return decodeURIComponent(seg); } catch { return seg; }
+    }).join('/');
+    // 只在包里解：`..` 与绝对路径一律丢掉（与 `modCatalog` 的 safeRelPath 同一条纪律）。
+    const abs = path.join(root, m.pack, ...rel.split('/'));
+    const dir = path.join(root, m.pack);
+    if (!abs.startsWith(dir + path.sep)) continue;
+    out.set(url, abs);
+  }
+  return out;
+}
+
+/**
  * Map each kit module URL to the file on disk that serves it. Built from the LOADED modules only, so a request can
  * never name a path this map does not already hold — the game server must not become a general file server for the
  * sake of the behaviour layer.

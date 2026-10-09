@@ -322,6 +322,20 @@ const PRE_DISPATCH_FIELDS = Object.freeze(['module', 'policy', 'intercepts']);
 const META_FIELDS = Object.freeze(['module', 'registers']);
 const META_MODULE_EXT = '.mjs';
 /**
+ * `server.battle` —— 包的**战斗逻辑**载荷（DESIGN §28.17）：一个导出 `install(battle)` 的模块，服务端与浏览器**都**
+ * 会在这一局建起来之后跑一次。
+ *
+ * 为什么它必须与 `kits/` 并存，而不是拿 kit 凑：kit 是**一个干员**的代码（`kits/<chessId>.js`），而一份真实 mod 的
+ * 盟约效果是**整场**的 —— 「我方所有成员对处于眩晕/停顿/束缚的敌人增伤」「凑够 6 名不同成员时全员加攻速」「某两件
+ * 装备同时装备时每秒真实伤害」。这些条件要在**战场级别**读玩家、读全场单位、读装备组合，而 kit 只能看到自己那个
+ * 单位。所以这一类载荷的粒度就是「一个包一份、一场一次」。
+ *
+ * 纪律与 `server.meta` 逐字相同（它同样是**改对局结果**的代码）：必须声明 `combat: true`（进摘要闸门与 golden），
+ * 源码在 import 之前过静态确定性扫描，字节进内容哈希，装不上的整包移出已加载集合。
+ */
+const BATTLE_FIELDS = Object.freeze(['module']);
+const BATTLE_MODULE_EXT = '.mjs';
+/**
  * `server.modules[*]` —— 包的**服务端模块**载荷（DESIGN §28.14）。与 `kits/` 并列的一类载荷，但两者的契约相反：
  * kit 是**战斗里**的代码（禁文件系统、禁网络），而这一类要做的恰恰是写盘、挂启动钩子、给 `/healthz` 加字段。
  *
@@ -670,19 +684,24 @@ function parseServerModulesDecl(raw) {
  */
 function parseServerDecl(raw) {
   if (!isPlainObj(raw)) {
-    return fail('SERVER_DECL_BAD_SHAPE', 'server must be an object: { preDispatch: { module, policy, intercepts }, meta: { module, registers } }');
+    return fail('SERVER_DECL_BAD_SHAPE', 'server must be an object: { preDispatch: { module, policy, intercepts }, meta: { module, registers }, battle: { module } }');
   }
-  const SERVER_MEMBERS = ['preDispatch', 'meta', 'modules'];
+  const SERVER_MEMBERS = ['preDispatch', 'meta', 'modules', 'battle'];
   for (const key of Object.keys(raw)) {
     if (!SERVER_MEMBERS.includes(key)) {
       return fail('SERVER_UNKNOWN_FIELD', `server: "${key}" is not a declared field (${SERVER_MEMBERS.join(', ')})`);
     }
   }
-  if (raw.preDispatch === undefined && raw.meta === undefined && raw.modules === undefined) {
+  if (raw.preDispatch === undefined && raw.meta === undefined && raw.modules === undefined && raw.battle === undefined) {
     return fail('SERVER_EMPTY_MEMBER', `server must declare at least one member (${SERVER_MEMBERS.join(', ')}) — an empty object says nothing and is refused rather than ignored`);
   }
   /** @type {Record<string, object>} */
   const decl = {};
+  if (raw.battle !== undefined) {
+    const battle = parseBattleDecl(raw.battle);
+    if (!battle.ok) return battle;
+    decl.battle = battle.decl.battle;
+  }
   if (raw.modules !== undefined) {
     const modules = parseServerModulesDecl(raw.modules);
     if (!modules.ok) return modules;
@@ -798,6 +817,34 @@ function parseMetaDecl(raw) {
     return fail('META_DUPLICATE_KEY', `server.meta.registers: "${String(dup)}" is listed twice (one key, one owner)`);
   }
   return { ok: true, decl: { meta: { module: raw.module, registers } } };
+}
+
+/**
+ * `pack.json.server.battle` —— 包的**战斗逻辑**模块（DESIGN §28.17）。形状只有 `{ module }`：
+ * 一个包内相对 `.mjs`，导出 `install(battle)`。
+ *
+ * 形状为什么这么小：这一层**不需要** `registers` 那样的白名单 —— 一个 `install(battle)` 拿到的是 Battle 对象的
+ * 公开方法（`docs/SIM.md` §6 那一套，与官方内容模块用的是同一个），它**不是**往一个共享命名空间里注册键，
+ * 所以没有「悄悄顶掉官方处理器」这条失败模式。真正的边界在 import 面（`@battle/` + `@sim/`）与确定性扫描上。
+ * 形状层判形状；「文件在不在、能不能 import、有没有 `install` 导出」是装载期与装配路径。
+ * @returns {{ ok: true, decl: object } | { ok: false, error: string, detail: string }}
+ */
+function parseBattleDecl(raw) {
+  if (!isPlainObj(raw)) {
+    return fail('BATTLE_BAD_SHAPE', 'server.battle must be an object: { module }');
+  }
+  for (const key of Object.keys(raw)) {
+    if (!BATTLE_FIELDS.includes(key)) {
+      return fail('BATTLE_UNKNOWN_FIELD', `server.battle: "${key}" is not a declared field (${BATTLE_FIELDS.join(', ')})`);
+    }
+  }
+  if (!isSafeRelativePath(raw.module)) {
+    return fail('BATTLE_BAD_PATH', 'server.battle.module must be a relative path inside the pack (no absolute paths, no "..")');
+  }
+  if (!raw.module.endsWith(BATTLE_MODULE_EXT)) {
+    return fail('BATTLE_BAD_MODULE', `server.battle.module must be a "${BATTLE_MODULE_EXT}" module — it runs on both ends (the server recomputes the battle the browser simulated)`);
+  }
+  return { ok: true, decl: { battle: { module: raw.module } } };
 }
 
 /**
@@ -1397,7 +1444,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     const notContributions = ['support', 'playtest']
       .filter((n) => raw[n] !== undefined);
     const names = [...WORKSHOP_CONTENT_FILES, 'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'operators',
-      'assets', 'client', 'server.preDispatch', 'server.meta', 'routes', 'i18n', 'notices'];
+      'assets', 'client', 'server.preDispatch', 'server.meta', 'server.battle', 'routes', 'i18n', 'notices'];
     const alsoNot = notContributions.length
       ? ` (note: ${notContributions.map((n) => `"${n}"`).join(' and ')} ${notContributions.length === 1 ? 'is' : 'are'} NOT a contribution — a pack that declares ${notContributions.length === 1 ? 'it' : 'them'} alone brings nothing into a match)`
       : '';
@@ -1428,6 +1475,10 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // 退化成一句口号。位置放在这里（而不是形状层刚解析完 `server` 的地方）是为了让 `combat` 的**类型**错误先报出来。
   if (serverParsed && serverParsed.decl.meta && raw.combat !== true) {
     return fail('META_NEEDS_COMBAT', 'server.meta changes match results, so this pack must declare "combat": true — that is what puts it into the room digest gate and the golden corpus (DESIGN §29); a pack that cannot state that must not ship server-side match logic');
+  }
+  // `server.battle` 是**战斗里**跑的代码：它比 meta 更直接地改对局结果（增伤、攻速、真实伤害），所以同一条硬闸门。
+  if (serverParsed && serverParsed.decl.battle && raw.combat !== true) {
+    return fail('BATTLE_NEEDS_COMBAT', 'server.battle runs inside every battle and can change its result, so this pack must declare "combat": true — that is what puts it into the room digest gate and the golden corpus (DESIGN §28.17); a pack that cannot state that must not ship battle logic');
   }
   // `server.modules` 里挂了 `matchClass` 的模块**也**要 `combat: true`：一个 `MatchClass` 包装器原则上能改对局结果
   // （它可以覆写 `finish` / `dispose` 之外的任何东西），而「要改结果的必须进摘要闸门与 golden 那条线」是业主裁决。

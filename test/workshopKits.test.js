@@ -247,8 +247,12 @@ describe('行为层: delivery to the browser', () => {
     assert.match(src, /spec\s*&&\s*spec\.workshopKits|spec\.workshopKits/);
     // 上游 0.2.1 把战斗启动重写成「待处理表 + prepare()」，参数从 `msg` 变成条目 `e`：
     // 这条断言钉的是**工坊 kits 必须挂在真正构造战斗的那一处**（否则工坊行为层会静默失效）。
-    assert.match(src, /createBattleFromSpec\(e\.spec, sim\.ds, \{ logger, kits \}\)/);
+    assert.match(src, /createBattleFromSpec\(e\.spec, sim\.ds, \{ logger, kits/);
     assert.match(src, /import\(\/\* @vite-ignore \*\/ m\.url\)/);
+    // 包声明的**战斗逻辑**（`server.battle`, DESIGN §28.17）走同一个落点：没有它，一个包的整场效果在浏览器侧会静默消失。
+    assert.match(src, /export async function loadSpecBattleInstallers/);
+    assert.match(src, /spec\.workshopBattle/);
+    assert.match(src, /battleInstallers/);
   });
 });
 

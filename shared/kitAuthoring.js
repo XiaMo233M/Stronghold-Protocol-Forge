@@ -81,6 +81,21 @@ export const KIT_FORBIDDEN_GLOBALS = Object.freeze([
   ['setInterval', 'the battle has its own clock (battle.after / battle.every) — a real timer desynchronises it'],
 ]);
 
+/**
+ * 除了上面那张表，**服务端跑的对局 / 战斗代码**（`server.meta` 与 `server.battle`）还要禁掉的东西。
+ *
+ * 为什么两段而不是另起一份：这两类模块与 kit 是同一类东西（对局/战斗逻辑），共用同一份判据才不会漂。kit 跑在浏览器
+ * 里所以禁 `document` / `window`；而它们在**服务端进程内**执行，`process` / `require` / 动态 `import()` 是它们比 kit
+ * 多出来的口子 —— 一个 `process.env` 会让同一个种子在另一台机器上打出不同结果。
+ */
+export const SERVER_CODE_FORBIDDEN_GLOBALS = Object.freeze([
+  ['process', 'a server-side match/battle module runs inside the match loop — reading the environment makes the same seed play out differently on another machine'],
+  ['globalThis', 'a server-side match/battle module must not reach outside what the engine hands it (the registry / ctx, or the battle itself)'],
+  ['require', 'the engine loads this file as ESM — require() does not exist here, and a CommonJS escape hatch would bypass this scan'],
+  ['eval', 'eval defeats the deterministic scan (the scan is what keeps the golden corpus meaningful)'],
+  ['new Function', 'new Function defeats the deterministic scan, like eval'],
+]);
+
 const isPlain = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 /** The wire-id charset shared/protocol.js uses, which a kit file name must also satisfy. */
 const ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;

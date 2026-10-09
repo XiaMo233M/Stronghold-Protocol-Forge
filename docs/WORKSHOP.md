@@ -1333,6 +1333,63 @@ JSON，否则**整包被拒**（`NOTICES_BAD_FILE`，与 §1.9 同一条纪律�
 - **对作者意味着什么**：一个包的 `combat` / 数据 / kit / meta 能改的东西，只有在房间**点名了它**时才生效。既是
   「不同房间可以跑不同组合」，也是「玩家下载的东西与那一局真正跑的东西一致」。
 
+### 1.15 `server.battle`：包写的**战斗逻辑**（整场一份，已实现）
+
+`kits/<干员id>.js` 是**一个干员**的代码。可一份真实 mod 的效果常常是**整场**的：「我方这个盟约的成员，对处于
+眩晕 / 停顿 / 束缚 / 不动的敌人增伤」「凑够 6 名**不同**成员时全员加攻速、攻击额外带真实伤害」「某两件装备同时装备
+时，每秒对范围内受控敌人造成伤害」。这些条件要读**玩家**、读**全场单位**、读**装备组合** —— kit 看不到别人，而给
+42 名干员一人写一份 kit 也不现实。
+
+```jsonc
+"combat": true,                                     // 必须：它会改战斗结果
+"server": { "battle": { "module": "battle/bonds.mjs" } }
+```
+
+```js
+// battle/bonds.mjs —— install(battle)，与官方内容模块（content/bonds/*.js）逐字同形
+import { num, bondRecord, buffParams, bondActive, isMember, playerOps, passiveBuff } from '@battle/index.js';
+
+export function install(battle) {
+  const bb = buffParams(bondRecord('kazdelShip'), 'env_gbuff_new') ?? {};
+  for (const p of battle.players) {
+    if (!bondActive(battle, p.playerId, 'kazdelShip')) continue;
+    const members = playerOps(battle, p.playerId).filter((u) => isMember(battle, u, 'kazdelShip'));
+    const set = new Set(members);
+    battle.on('hit', (c) => {                       // 受控的敌人才吃增伤（数值只从黑板读）
+      if (!set.has(c.source) || !c.dmg) return;
+      const f = (c.target.s && c.target.s.flags) || {};
+      if (!(f.stun || f.bind || f.noMove)) return;
+      c.dmg.mul *= 1 + num(bb.base_damage_scale) + num(bb.damage_scale_per_stack) * battle.getPlayer(p.playerId).bonds.kazdelShip.layers;
+    });
+    if (battle.getPlayer(p.playerId).bonds.kazdelShip.tier >= 2) {
+      for (const u of members) passiveBuff(battle, u, 'bond:kazdelShip:aspd', { aspd: num(bb.bonus_attack_speed) });
+    }
+  }
+}
+```
+
+| 你能 import 什么 | 前缀 | 是什么 |
+|---|---|---|
+| `@battle/index.js` | `@battle/` | **战斗内容层的辅助函数**：`num` / `bondRecord` / `itemRecord` / `garrisonRecord` / `bandRecord` / `effectRecord` / `buffsOf` / `buffParams` / `bondActive` / `bondTier` / `bondLayers` / `isMember` / `onField` / `playerOps` / `itemsOf` / `itemKeyOf` / `hasItemKey` / `passiveBuff` / `directMods` / `fxOn` / `battleStore`（官方内容模块用的同一份） |
+| `@sim/constants.js` `@sim/dir.js` `@sim/targeting.js` | `@sim/` | 三个纯函数模块（数值常数、方向、选中判定） |
+
+`battle` 就是引擎的 Battle 对象，**能用的方法以 [docs/SIM.md](SIM.md) §6 为准**（`on` / `every` / `after` /
+`addBuff` / `dealDamage` / `spawnEnemy` / `enemiesInKeys` / `allies` / `getPlayer` …）。**不能 import** `@kit/`
+那一套干员构造器：这是战斗逻辑，不是干员 kit。
+
+**判据**（与 `server.meta` 同一条线）：
+
+- **必须声明 `combat: true`**，否则整包被拒（`BATTLE_NEEDS_COMBAT`）—— 改战斗结果的代码要进房间摘要闸门与 golden；
+- 源码在 import **之前**过静态扫描：`Math.random` / `Date.now` / `fetch` / `setTimeout` / `process` / `globalThis` /
+  `require` / `eval` 一律点名；import 只能走上面两个前缀（相对路径、`node:fs` 之类一律拒）；
+- 模块文件必须真的在包里（`BATTLE_BAD_MODULE`）、导出 `install(battle)`（`BATTLE_NO_IMPORT` / `BATTLE_NO_INSTALL`）；
+  装不上的包**整包移出已加载集合**，与 `server.preDispatch` / `server.meta` / `server.modules` 同一个裁剪点；
+- 模块字节进内容哈希（换了代码就是换了包摘要）；
+- **两端都跑同一段代码**：浏览器按 `/workshop-battle/<包>/<模块>` 加载它（源码原样、`@battle/` 由 import map 解），
+  服务端复算也用同一份 —— 所以浏览器算出来的战果与服务端的对得上；
+- 一个包抛异常只记一条内容错误（点名是哪个包），**不让整个战场起不来**；
+- 房间声明了集合时只有**它点名的包**的 installer 参与（W-B，见 §1.14）。
+
 ---
 
 ## 2. 助战

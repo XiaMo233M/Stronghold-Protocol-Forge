@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 
 import {
-  KIT_IMPORT_FILES, KIT_IMPORT_PREFIXES, KIT_IMPORT_TARGETS, kitImportAllowedText, kitImportBrowserUrl,
+  BATTLE_IMPORT_PREFIXES, KIT_IMPORT_FILES, KIT_IMPORT_PREFIXES, KIT_IMPORT_TARGETS, kitImportAllowedText, kitImportBrowserUrl,
   kitImportDeclarations, kitImportIssues, kitImportMap, rewriteKitImports,
 } from '../shared/kitImports.js';
 import { validateKit, kitErrors } from '../shared/kitAuthoring.js';
@@ -91,11 +91,14 @@ after(() => { if (fx) fs.rmSync(fx.dir, { recursive: true, force: true }); });
 // ---------------------------------------------------------------------------------------------------
 // ① 白名单表：它是两端唯一的真相，所以先钉住表本身
 // ---------------------------------------------------------------------------------------------------
+/** kit 与 battle 两份前缀的并集：表是共用的，解析时的前缀也要一起看。 */
+const ALL_PREFIXES = Object.freeze([...new Set([...KIT_IMPORT_PREFIXES, ...BATTLE_IMPORT_PREFIXES])]);
+
 describe('kit import 白名单：表与两端解析', () => {
   test('每个白名单 specifier 都指向一个真实存在的文件，且浏览器 URL 落在 /sim/ 挂载里', () => {
     assert.ok(KIT_IMPORT_FILES.length > 0);
     for (const { specifier, file } of KIT_IMPORT_FILES) {
-      assert.ok(KIT_IMPORT_PREFIXES.some((p) => specifier.startsWith(p)), `${specifier} 必须带一个白名单前缀`);
+      assert.ok(ALL_PREFIXES.some((p) => specifier.startsWith(p)), `${specifier} 必须带一个白名单前缀`);
       assert.ok(fs.existsSync(path.join(ROOT, file)), `${specifier} → ${file} 不存在`);
       // 浏览器侧：/sim/ → server/sim/（server/http/static.js 的挂载），只服务 .js
       const url = kitImportBrowserUrl(file);
@@ -117,7 +120,7 @@ describe('kit import 白名单：表与两端解析', () => {
     }
     // 前缀映射必须真的把 specifier 落到表里那个文件上：把每个 specifier 按 import map 解析一遍
     for (const { specifier, file } of KIT_IMPORT_FILES) {
-      const prefix = KIT_IMPORT_PREFIXES.find((p) => specifier.startsWith(p));
+      const prefix = ALL_PREFIXES.find((p) => specifier.startsWith(p));
       const resolved = imports[prefix] + specifier.slice(prefix.length);
       assert.equal(resolved, kitImportBrowserUrl(file), `${specifier} 经 import map 解析后不是 ${file}`);
       assert.ok(fs.existsSync(path.join(ROOT, 'server', resolved.replace(/^\/sim\//, 'sim/'))), `${resolved} 不存在`);
@@ -219,6 +222,17 @@ const KIT_IMPORT_EXPORTS = {
     "absoluteRangeKeys", "aggroCmp", "areaSelectable", "auraSelectable", "canTargetAlly", "canTargetEnemy",
     "enemyStealthed", "evadesGround", "extendedGrid", "sortAllyTargets", "sortEnemyTargets", "stealthOffKey",
     "tileKeyOf",
+  ],
+  // 战斗逻辑模块（`server.battle`, DESIGN §28.17）的 SDK：官方内容模块用的那一份辅助函数。
+  "server/sim/content/support/index.js": [
+    "COLS", "activeBondIds", "alliesAround", "allyAt", "bandRecord", "baseChessId", "battleStore", "bodyDist",
+    "bodyInKeys", "bodyInRadius", "bodyOnTile", "bodyTileReach", "bondActive", "bondLayers", "bondMembers",
+    "bondRecord", "bondState", "bondTier", "buffParams", "buffsOf", "chessRecord", "contentInfo", "coreBondIds",
+    "directMods", "effectRecord", "frontTile", "fxOn", "gainLayers", "gameData", "garrisonRecord", "goldenItemCount",
+    "hasItemKey", "inRange", "isCoreBond", "isElite", "isGoldenId", "isGroundOp", "isMember", "isOp", "itemKeyOf",
+    "itemRecord", "itemsOf", "layersUsed", "matchBands", "num", "onField", "onKeys", "passiveBuff", "player",
+    "playerOps", "rowMates", "setGameData", "sideTiles", "tierOf", "tileKey", "topActiveBond", "unitBonds",
+    "withGameData",
   ],
 };
 
