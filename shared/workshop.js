@@ -26,15 +26,64 @@
 /** Data files a pack may contribute to. Deliberately a conservative subset of data/: `config` is excluded because a
  * pack that rewrote the economy or the round schedule would change the rules rather than the content. */
 export const WORKSHOP_CONTENT_FILES = Object.freeze([
-  'chess', 'items', 'enemies', 'stages', 'waves', 'tokens', 'bosses', 'factions', 'garrisons', 'bands', 'bonds', 'effects', 'choices',
+  'chess', 'units', 'items', 'enemies', 'stages', 'waves', 'tokens', 'bosses', 'factions', 'garrisons', 'bands', 'bonds', 'effects', 'choices',
 ]);
 
 /** Files whose records are keyed by an id field that must equal the map key (catches copy-paste mistakes in a pack). */
 const ID_FIELD_BY_FILE = Object.freeze({
-  chess: 'chessId', items: 'id', enemies: 'key', stages: 'stageId', waves: 'templateId',
+  chess: 'chessId', units: 'charId', items: 'id', enemies: 'key', stages: 'stageId', waves: 'templateId',
   tokens: 'tokenId', bosses: 'bossId', factions: 'factionId', garrisons: 'garrisonId',
   bands: 'bandId', bonds: 'bondId', effects: 'effectId', choices: 'id',
 });
+
+/**
+ * `units.json` 的一条干员记录**必须有的那几个字段**（docs/WORKSHOP.md §1.2）。
+ *
+ * 为什么只查这几个：这条记录是 `data/backups.json` 的 `units[charId]`，形状由**上游官方数据**决定（14 个顶层键，
+ * 见 `test/modSurface.test.js`）。我们**不复制官方 schema** —— 复刻一份就是给自己加一个会漂移的第二真相，官方每次
+ * 加字段我们都要跟一次；而下游（`server/sim`、`server/match`）真正读的也只是这几个键。其余字段一律照抄
+ * （与 `ART_TABLES` 同一个哲学：作者照抄官方条目，我们不重新发明形状）。
+ *
+ * 每一条的形状用一套**声明**写出来（名字 + 一个判据 + 缺了它下游会怎样），所以校验、拒绝码与提示文案只有一个来源。
+ */
+export const UNIT_REQUIRED_FIELDS = Object.freeze([
+  {
+    key: 'charId',
+    ok: (v) => typeof v === 'string' && v.length > 0,
+    code: 'UNIT_MISSING_CHAR_ID',
+    detail: 'must be a non-empty string (it is how the client asks for this operator\'s data)',
+  },
+  {
+    key: 'name',
+    ok: (v) => typeof v === 'string' && v.length > 0,
+    code: 'UNIT_MISSING_NAME',
+    detail: 'must be a non-empty string (the operator shows up nameless otherwise)',
+  },
+  {
+    key: 'rarity',
+    ok: (v) => Number.isInteger(v),
+    code: 'UNIT_BAD_RARITY',
+    detail: 'must be an integer (the star rating; the 自选池 screen draws it)',
+  },
+  {
+    key: 'profession',
+    ok: (v) => typeof v === 'string' && v.length > 0,
+    code: 'UNIT_MISSING_PROFESSION',
+    detail: 'must be a non-empty string (WARRIOR / SNIPER / … — the project\'s own profession names, not DEFENDER/VANGUARD)',
+  },
+  {
+    key: 'subProfessionId',
+    ok: (v) => typeof v === 'string' && v.length > 0,
+    code: 'UNIT_MISSING_SUB_PROFESSION',
+    detail: 'must be a non-empty string (the branch; `assets.prof.sub` carries its icon)',
+  },
+  {
+    key: 'forms',
+    ok: (v) => isPlainObj(v) && Object.keys(v).length > 0,
+    code: 'UNIT_BAD_FORMS',
+    detail: 'must be a non-empty object of "elite/level/skill/module" ranks (the operator has no stats without one)',
+  },
+]);
 
 /** Pack ids: a short filesystem- and URL-safe slug (it names the directory under workshop/). */
 export const PACK_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
@@ -59,6 +108,7 @@ import { VOICE_SLOTS, VOICE_LANGS, DEFAULT_VOICE_LANG } from './constants.js';
 import { isSupportTier } from './support.js';
 import { isVersionRange } from './packs.js';
 import { MOD_LAYERS } from './modIdentity.js';
+import { requiredUnitForms } from './diy.js';
 
 const isPlainObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const fail = (error, detail) => ({ ok: false, error, detail });
@@ -71,6 +121,32 @@ const isSafeAssetPath = (p) =>
   && !p.split('/').some((seg) => seg === '..' || seg === '.') && !/^[A-Za-z]:/.test(p);
 
 /**
+ * `pack.json.operators[<charId>]` 允许的两个列表字段。**只此一份**：形状校验（`normalizePackManifest`）与
+ * 「盟约存不存在」那一步（`mergeWorkshopOperators`）读的是同一张表，两处不会漂移。
+ *
+ * 为什么 `bonds` 必须点名：盟约 id 写错时那条盟约条**永远不会出现**，而作者只会以为「盟约没生效」—— 静默失效
+ * （与 `bondIcons` 同一个理由：一个没人读到的声明比一条报错坏得多）。
+ */
+const OPERATOR_LIST_FIELDS = Object.freeze(['powers', 'bonds']);
+
+/**
+ * 一个「字符串列表」字段（`operators[*].bonds` / `.powers`）：数组、每一项是非空字符串、去重、排序（键序是清单
+ * 字节的一部分）。不是数组、或里面有一个不是字符串 → 拒绝，并指出**是哪一条的哪一个字段**。
+ * @returns {{ ok: true, list: string[] } | { ok: false, detail: string }}
+ */
+function parseStringList(value, where) {
+  const list = value === undefined ? [] : value;
+  if (!Array.isArray(list)) return { ok: false, detail: `${where} must be an array of ids` };
+  const out = [];
+  for (const id of list) {
+    if (typeof id !== 'string' || !id.trim()) return { ok: false, detail: `${where}: "${String(id)}" is not a valid id` };
+    const clean = id.trim();
+    if (!out.includes(clean)) out.push(clean);
+  }
+  return { ok: true, list: out.sort() };
+}
+
+/**
  * 外观素材的三张表，以及每张表的条目允许带什么。
  *
  * 形状与 `data/assets.json` 里对应条目**1:1**，作者可以照抄官方条目（tools/assets 计划的产物）再改路径，所以这里
@@ -79,11 +155,17 @@ const isSafeAssetPath = (p) =>
  *   * `strings`—— 原样抄过去的字符串字段（`enemies.spineAliasOf` 指向另一个怪物的模型、`tokens.owner` 是它属于谁）；
  *   * `spine`  —— `'sides'`：spine 在 `spine.front` / `spine.back` 两层下（chars）；`'flat'`：spine 就是条目上的
  *                 `spine` 字段（enemies / tokens）。
+ *   * `flat`   —— 这一张表的**条目本身就是一条路径字符串**（不是"对象 + `urls` 字段"）。今天的成员是 `skills`
+ *                 （技能图标）与 `profSub`（分支图标）：`assets.skills[key]` 与 `assets.prof.sub[key]` 的值**直接
+ *                 就是路径字符串**（`data/assets.json` 实测），所以这里没有字段可列。谁赢与落盘位置由 `target`
+ *                 给出（见 `mergeWorkshopFlatArt`）。
  */
 export const ART_TABLES = {
   chars: { urls: ['avatar', 'avatarE2', 'portrait', 'portraitE2'], strings: [], spine: 'sides' },
   enemies: { urls: ['icon'], strings: ['spineAliasOf'], spine: 'flat' },
   tokens: { urls: ['avatar'], strings: ['owner'], spine: 'flat' },
+  skills: { flat: true, target: ['skills'] },
+  profSub: { flat: true, target: ['prof', 'sub'] },
 };
 /**
  * 一个 spine 对象里的路径字段、路径数组字段，以及原样抄过去但要查类型的字段。
@@ -141,6 +223,9 @@ function parseArtSpine(spine, where) {
 
 /** 一张外观表里的一个条目：路径字段、原样字符串、以及（按表）嵌套或扁平的 spine。 */
 function parseArtEntry(entry, where, shape) {
+  // 扁平表（skills / profSub）：条目本身就是一条路径。`isSafeAssetPath` 由调用方判，好让拒绝码是 ART_PATH_UNSAFE
+  // 而不是形状错误 —— 作者写一条 `../x.png` 与写一个对象是两种错，提示要分开。
+  if (shape.flat) return { entry, error: null };
   if (!isPlainObj(entry)) return { error: 'ART_BAD_SHAPE', detail: `${where} must be an object` };
   const out = {};
   for (const [key, value] of Object.entries(entry)) {
@@ -188,7 +273,8 @@ function parseArtEntry(entry, where, shape) {
  *   description: string|null, gameVersion: string|null, content: string[], overrides: string[],
  *   voices: Record<string, Record<string, string[]>>, voiceLangs: Record<string, Record<string, Record<string, string[]>>>,
  *   bondIcons: Record<string, string>, itemIcons: Record<string, string>,
- *   art: Record<string, Record<string, object>>, support: string[] } }
+ *   art: Record<string, Record<string, object>>, support: string[],
+ *   operators: Record<string, { powers: string[], bonds: string[] }> } }
  *   | { ok: false, error: string, detail: string }}
  */
 export function normalizePackManifest(raw, dirName = '', opts = {}) {
@@ -362,17 +448,19 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     const clean = {};
     for (const [id, entry] of Object.entries(entries)) {
       if (!RECORD_ID_RE.test(id)) return fail('ART_BAD_ID', `art.${table}: "${id}" is not a valid id`);
+      // 扁平表：条目本身就是路径（`assets.skills[key]` / `assets.prof.sub[key]` 的值就是路径字符串）
+      if (shape.flat) {
+        if (!isSafeAssetPath(entry)) {
+          return fail('ART_PATH_UNSAFE', `art.${table}["${id}"]: "${String(entry)}" must be a relative path inside assets/`);
+        }
+        clean[id] = entry;
+        continue;
+      }
       const parsed = parseArtEntry(entry, `art.${table}["${id}"]`, shape);
       if (parsed.error) return fail(parsed.error, parsed.detail);
       if (Object.keys(parsed.entry).length) clean[id] = parsed.entry;
     }
     if (Object.keys(clean).length) artEntries[table] = clean;
-  }
-  // A pack may bring data files, voice lines (either table), 盟约图标, 装备图标, 外观素材, 助战声明 — never none of them
-  // (docs/WORKSHOP.md §1.4).
-  if (!content.length && !Object.keys(voiceLines).length && !Object.keys(orderedLangLines).length
-    && !Object.keys(bondIconFiles).length && !Object.keys(itemIconFiles).length && !Object.keys(artEntries).length) {
-    return fail('EMPTY_PACK', `content must name at least one of: ${WORKSHOP_CONTENT_FILES.join(', ')} — or the pack must declare voices / voiceLangs / bondIcons / itemIcons / art`);
   }
   // 助战卡池贡献 (docs/WORKSHOP.md §2): the operators of THIS pack that should be selectable as 助战. The tier is NOT
   // written here — it is derived from the pack's own chess record, exactly like every other derived field, so a tier can
@@ -388,6 +476,43 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
       return fail('SUPPORT_BAD_ID', `"${String(id)}" is not a valid operator id`);
     }
     if (!supportIds.includes(id)) supportIds.push(id);
+  }
+  // 自选池贡献 (`pack.json.operators`, docs/WORKSHOP.md §1.2): the operators of THIS pack that should be **selectable
+  // in the 自选 pool** (`data/backups.json` 的 `diy.ownedPool` / `diy.operators`) — the half that made a community
+  // "new operator" mod a hand-patch instead of a pack.
+  //
+  // 形状是**对象**（不是数组）：每个干员要带它自己的盟约与该盟约的权能。而 `name` / `rarity` / `profession` /
+  // `subProfessionId` **一律从同一个包的 `units[charId]` 派生**（`mergeWorkshopOperators`），清单里再写一遍就是
+  // 两份会漂移的真相 —— `diy.operators` 那份今天是生成器产出的，包不该抄它。
+  //
+  // 这里只查**形状**与「同一个 id 只出现一次」；「有没有同名的 units 记录」「是不是 6★」「盟约存不存在」三条要读
+  // 数据，它们失败要关闭，所以在加载期（`mergeWorkshopOperators`）判定并点名报告。
+  const operators = raw.operators === undefined ? {} : raw.operators;
+  if (!isPlainObj(operators)) {
+    return fail('OPERATOR_BAD_SHAPE', 'operators must be an object: { "<charId>": { bonds: ["<bondId>"], powers: ["<powerId>"] } }');
+  }
+  /** @type {Record<string, { powers: string[], bonds: string[] }>} */
+  const operatorDecls = {};
+  for (const [charId, decl] of Object.entries(operators)) {
+    if (!RECORD_ID_RE.test(charId)) return fail('OPERATOR_BAD_SHAPE', `operators: "${charId}" is not a valid operator id`);
+    if (!isPlainObj(decl)) return fail('OPERATOR_BAD_SHAPE', `operators["${charId}"] must be an object: { bonds, powers }`);
+    const parsed = { powers: [], bonds: [] };
+    for (const field of OPERATOR_LIST_FIELDS) {
+      const list = parseStringList(decl[field], `operators["${charId}"].${field}`);
+      if (!list.ok) return fail('OPERATOR_BAD_SHAPE', list.detail);
+      parsed[field] = list.list;
+    }
+    operatorDecls[charId] = parsed;
+  }
+  // 键序是**清单的字节**的一部分（`identifyPack` 把归一化后的清单哈希进去），所以按 id 排序，不随作者书写顺序变。
+  const orderedOperators = Object.fromEntries(Object.keys(operatorDecls).sort().map((k) => [k, operatorDecls[k]]));
+  // A pack may bring data files, voice lines (either table), 盟约图标, 装备图标, 外观素材, 助战声明, 自选池声明
+  // — never none of them (docs/WORKSHOP.md §1.4). 这条检查必须放在**所有**贡献项都解析完之后：放在前面会出现
+  // 「一个只带 `operators` 的包被判成空包」，而在它前面引用后面声明的变量则是 TDZ 报错。
+  if (!content.length && !Object.keys(voiceLines).length && !Object.keys(orderedLangLines).length
+    && !Object.keys(bondIconFiles).length && !Object.keys(itemIconFiles).length && !Object.keys(artEntries).length
+    && !Object.keys(orderedOperators).length) {
+    return fail('EMPTY_PACK', `content must name at least one of: ${WORKSHOP_CONTENT_FILES.join(', ')} — or the pack must declare voices / voiceLangs / bondIcons / itemIcons / art / operators`);
   }
   // 版本声明（DESIGN §27.5）：`api` 是**模组 API** 的区间（钩子总线与 kit 契约），`game` 是**上游游戏版本**的区间，
   // 两者都用 shared/packs.js isVersionRange 的语法（`>=0.2.0`、`0.2.x`、`^0.2.0`、`~0.2.1`、`*`、`||`）。
@@ -423,6 +548,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
       itemIcons: itemIconFiles,
       art: artEntries,
       support: supportIds,
+      operators: orderedOperators,
     },
   };
 }
@@ -430,6 +556,9 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
 /**
  * Validate one content file of a pack: a `{ [id]: record }` map, every key a safe id, every value a JSON object, and —
  * when the record carries its own id field — that field equal to the key.
+ *
+ * `units`（新干员的干员记录）**另外**要过一遍「下游用得上吗」：见 `UNIT_REQUIRED_FIELDS` 的长注释 —— 我们只查那
+ * 六个字段，其余一律照抄，不复制官方 schema。
  * @param {string} file data file basename, e.g. 'chess'
  * @param {any} json parsed file
  * @returns {{ ok: true, records: Record<string, object> } | { ok: false, error: string, detail: string }}
@@ -444,6 +573,12 @@ export function normalizeContentFile(file, json) {
     if (!isPlainObj(rec)) return fail('BAD_RECORD', `${file}.json["${id}"] must be a JSON object`);
     if (field && rec[field] !== undefined && rec[field] !== id) {
       return fail('ID_MISMATCH', `${file}.json["${id}"].${field} is "${rec[field]}" — it must equal the key`);
+    }
+    if (file === 'units') {
+      for (const need of UNIT_REQUIRED_FIELDS) {
+        if (need.ok(rec[need.key])) continue;
+        return fail(need.code, `units.json["${id}"].${need.key} ${need.detail}`);
+      }
     }
     records[id] = rec;
   }
@@ -734,6 +869,70 @@ function mergeWorkshopSupport(data, packs, report) {
 }
 
 /**
+ * 内容文件的记录**落在哪个容器**里 —— 只对本仓库的**真实数据布局**与文件名不一致的那一个文件开口子。
+ *
+ * `units.json` 是唯一一个：「新增一个干员的干员记录」在 `data/` 里**没有顶层 `units.json`**，那条记录住在
+ * `data/backups.json` 的 `units[charId]`（`server/sim/simdata.js:541`、`shared/standIn.js:36`、客户端
+ * `data.get('backups').units` 都只读这一个位置）。所以 `content: ["units"]` 的 `units.json` 会被并进
+ * `data.backups.units` —— 这也正是合同 §1.1 写的那句「落盘：`applyWorkshop` 里写进 `data.backups.units[id]`」。
+ *
+ * 其它文件一律同名：`chess.json` → `data.chess`，`items.json` → `data.items`，依此类推（不在这里出现）。
+ */
+const OVERLAY_TARGET_BY_FILE = Object.freeze({ units: ['backups', 'units'] });
+
+/**
+ * 把一组记录并进 `out` 上由 `OVERLAY_TARGET_BY_FILE` 指定的那一层。
+ *
+ * 非嵌套的文件（绝大多数）：就是 `out[file]` 的一份浅复制，写完挂回去。
+ * 嵌套的文件（今天的 `units` → `backups.units`）：路径上的每一层各浅复制一次，**只复制这条路径**，
+ * 所以 `backups` 的同层兄弟（`diy` / `tokens`）原样留着，`data/*.json` 也一个字节都不动。
+ *
+ * @param {Record<string, any>} out 合并中的顶层数据
+ * @param {Record<string, any>} base 加载出来的官方数据（`overrides` 的「官方那条」从这里取）
+ * @param {string} file 内容文件基名
+ * @param {Record<string, object>} records 归一化过的记录
+ * @param {(id: string, rec: object, prior: Record<string, object>) => 'added'|'overridden'} mergeOne
+ *   把一条记录并进 `prior`（调用方负责判定与报错）；返回它是新增还是覆盖。
+ * @returns {Record<string, number>} `{ added, overridden }`
+ */
+function overlayContentFile(out, base, file, records, mergeOne) {
+  const path = OVERLAY_TARGET_BY_FILE[file] || [file];
+  /** @type {Array<{ owner: Record<string, any>, key: string, value: Record<string, any> }>} */
+  const chain = [];
+  let cur = out;
+  for (const seg of path.slice(0, -1)) {
+    const inner = isPlainObj(cur[seg]) ? { ...cur[seg] } : {};
+    chain.push({ owner: cur, key: seg, value: inner });
+    cur = inner;
+  }
+  const leaf = path[path.length - 1];
+  const prior = isPlainObj(cur[leaf]) ? cur[leaf] : {};
+  const merged = { ...prior };
+  let added = 0;
+  let overridden = 0;
+  for (const [id, rec] of Object.entries(records || {})) {
+    const outcome = mergeOne(id, rec, prior);
+    if (!outcome) continue;
+    merged[id] = outcome.record;
+    if (outcome.existed) overridden++; else added++;
+  }
+  cur[leaf] = merged;
+  for (let i = chain.length - 1; i >= 0; i--) chain[i].owner[chain[i].key] = chain[i].value;
+  return { added, overridden };
+}
+
+/** `base` 上这条记录所在的容器（`overrides` 的「官方那条」要按落盘位置取，不是按内容文件名取）。 */
+function baseContainerFor(base, file) {
+  const path = OVERLAY_TARGET_BY_FILE[file] || [file];
+  let cur = isPlainObj(base) ? base : null;
+  for (const seg of path) {
+    if (!cur || !isPlainObj(cur[seg])) return null;
+    cur = cur[seg];
+  }
+  return cur;
+}
+
+/**
  * Apply every pack's content on top of the official data and return a NEW top-level object (the input is never
  * mutated; the caller freezes the result). Official ids are only replaced when the pack declared them in `overrides`;
  * a collision that was not declared is a reported error and the record already in place is kept.
@@ -765,16 +964,12 @@ export function applyWorkshop(base, packs) {
     const declared = new Set(Array.isArray(pack.overrides) ? pack.overrides : []);
     const entry = { id: pack.id, name: pack.name || pack.id, files: {} };
     for (const [file, records] of Object.entries(pack.files || {})) {
-      // `prior` is the OFFICIAL data PLUS every pack merged before this one (NOT just the official data — the variable
-      // was called `official`, and reading it as one is what produced a message that sent authors to `data/` for a
-      // record only another pack ships). `contributors` says which of the two it is.
-      const prior = isPlainObj(out[file]) ? out[file] : {};
-      const merged = { ...prior };
-      let added = 0;
-      let overridden = 0;
-      for (const [id, rec] of Object.entries(records || {})) {
+      // 落盘位置由 `overlayContentFile` 决定（`units` 并进 `data.backups.units`，其余文件就是 `out[file]`）。
+      // `priorMap` 是 **官方数据 + 这个包之前已经并进去的每一个包**（变量曾经叫 `official`，把它当成「只有官方」
+      // 正是那条把作者引到 `data/` 去找一条其实属于另一个包的记录的错误文案）。
+      const { added, overridden } = overlayContentFile(out, base, file, records, (id, rec, priorMap) => {
         const key = `${file}:${id}`;
-        const exists = Object.hasOwn(prior, id);
+        const exists = Object.hasOwn(priorMap, id);
         const holder = contributors.get(key);
         // The owner's refinement (2026-10-09, DESIGN §27.3): when another PACK already contributed this record, pack id
         // order decides the winner — the later pack loses even if it declared `"<file>:<id>"` in `overrides`, because a
@@ -785,37 +980,34 @@ export function applyWorkshop(base, packs) {
             pack: pack.id, file, id, code: 'PACK_ID_COLLISION', definedBy: holder,
             reason: `"${id}" is already contributed by pack "${holder}" — the pack with the smaller id keeps it (DESIGN §27.3). Rename this record, or let "${holder}" drop it; an "overrides" entry does not win against another pack`,
           });
-          continue;
+          return null;
         }
         if (exists && !declared.has(key)) {
           report.errors.push({
             pack: pack.id, file, id, code: 'OFFICIAL_ID_COLLISION', definedBy: 'official',
             reason: `"${id}" already exists in the official data — add "${file}:${id}" to pack.json overrides to replace it`,
           });
-          continue;
+          return null;
         }
         // A declared override is a FIELD-LEVEL patch, not a replacement (DESIGN §27.3): writing one number must keep
         // every other field of the record it overrides. And it may only speak about fields that exist ("closed world").
         if (exists) {
-          const official = /** @type {Record<string, unknown>} */ (base[file] && isPlainObj(base[file]) ? base[file][id] : prior[id]);
+          const official = baseContainerFor(base, file)?.[id] ?? priorMap[id];
           const unknown = unknownOverrideKeys(official, rec);
           if (unknown && unknown.length) {
             report.errors.push({
               pack: pack.id, file, id, code: 'UNKNOWN_OVERRIDE_FIELD', definedBy: 'official',
               reason: `the override of "${id}" names ${unknown.map((k) => `"${k}"`).join(', ')}, which the record does not have — an override may only change fields that exist (add the record under a new id to invent one)`,
             });
-            continue;
+            return null;
           }
-          merged[id] = mergeRecord(prior[id], rec);
-        } else {
-          merged[id] = rec;
         }
         contributors.set(key, pack.id);
         if (file === 'chess') looked.push({ pack: pack.id, id, rec });
         if (file === 'enemies') lookedEnemies.push({ pack: pack.id, id, rec });
-        if (exists) { overridden++; push(report.overridden, file, id); } else { added++; push(report.added, file, id); }
-      }
-      out[file] = merged;
+        if (exists) push(report.overridden, file, id); else push(report.added, file, id);
+        return { record: exists ? mergeRecord(priorMap[id], rec) : rec, existed: exists };
+      });
       entry.files[file] = { added, overridden };
     }
     report.packs.push(entry);
@@ -825,9 +1017,16 @@ export function applyWorkshop(base, packs) {
   mergeWorkshopBondIcons(out, packs, report);
   mergeWorkshopItemIcons(out, packs, report);
   // 必须在 chessLookIssues 之前：那条检查读的是**合并后**的 assets.chars，包自带模型到位之后
-  // 「这个干员没有模型（会画成贴图）」的警告就该消失（反过来放在后面，日志会一直报一条已经解决的问题）。
+  // 「这个干员没有模型（会画成贴纸）」的警告就该消失（反过来放在后面，日志会一直报一条已经解决的问题）。
   mergeWorkshopArt(out, packs, report);
+  // 扁平的那两张图标表（`assets.skills` / `assets.prof.sub`）—— 与上一条同一个理由放在 looks 之前，
+  // 而且必须在 mergeWorkshopOperators 之前：干员进池时读的 `units` 记录已经由内容文件那一层并好了，
+  // 但它的**分支图标**要靠这一条（`prof.sub[subProfessionId]`），顺序反了自选界面就是一个没有分支图的格子。
+  mergeWorkshopFlatArt(out, packs, report);
   mergeWorkshopSupport(out, packs, report);
+  // 自选池（`diy.ownedPool` / `diy.operators`）：读 `data.backups.units` 里那条已经合并好的记录，
+  // 所以必须排在内容文件那一层之后 —— 它在这个函数里是最末一批，天然满足。
+  mergeWorkshopOperators(out, packs, report);
   report.looks = [...chessLookIssues(out, looked), ...enemyLookIssues(out, lookedEnemies)];
   for (const list of Object.values(report.added)) list.sort();
   for (const list of Object.values(report.overridden)) list.sort();
@@ -1172,7 +1371,13 @@ export function workshopArtIndex(packs, { prefix = WORKSHOP_MEDIA_PREFIX } = {})
       if (!shape || !isPlainObj(entries)) continue;
       const bucket = (out[table] ||= {});
       for (const [id, entry] of Object.entries(entries)) {
-        if (Object.hasOwn(bucket, id) || !isPlainObj(entry)) continue;
+        if (Object.hasOwn(bucket, id)) continue;
+        if (shape.flat) {
+          // 扁平表：条目本身就是路径，转成 URL 就是终点（没有字段可映射）；校验阶段已经确认它是安全相对路径
+          if (typeof entry === 'string' && entry) bucket[id] = toUrl(pack.id, entry);
+          continue;
+        }
+        if (!isPlainObj(entry)) continue;
         bucket[id] = artEntryUrls(entry, shape, (p) => toUrl(pack.id, p));
       }
     }
@@ -1215,30 +1420,16 @@ function spineUrls(spine, toUrl) {
  */
 function mergeWorkshopArt(data, packs, report) {
   const index = workshopArtIndex(packs);
-  const tables = Object.keys(index);
+  // 扁平表（skills / profSub）不住在 `assets.<表>` 下，它们的家是 `assets.skills` / `assets.prof.sub`，所以拿掉
+  const tables = Object.keys(index).filter((t) => !ART_TABLES[t]?.flat);
   if (!tables.length) return;
   const list = [...(Array.isArray(packs) ? packs : [])].sort(byPackId);
   // 谁跟谁抢了同一个 <表>.<id>：按包 id 排序后第一个赢，后面的写进 report.errors
-  /** @type {Map<string, string>} */
-  const claimed = new Map();
-  for (const pack of list) {
-    for (const [table, entries] of Object.entries(isPlainObj(pack?.art) ? pack.art : {})) {
-      for (const id of Object.keys(isPlainObj(entries) ? entries : {})) {
-        const key = `${table}.${id}`;
-        if (claimed.has(key)) {
-          report.errors.push({
-            pack: pack.id, file: 'assets', id: key, code: 'ASSET_COLLISION',
-            definedBy: claimed.get(key),
-            reason: `another pack (${claimed.get(key)}) already ships art for this entry; keep only one`,
-          });
-        } else claimed.set(key, pack.id);
-      }
-    }
-  }
+  const claimed = artClaims(list, (t) => !ART_TABLES[t]?.flat, report);
   const assets = isPlainObj(data.assets) ? data.assets : null;
   if (!assets) {
     for (const pack of list) {
-      if (!isPlainObj(pack?.art) || !Object.keys(pack.art).length) continue;
+      if (!isPlainObj(pack?.art) || !Object.keys(pack.art).filter((t) => !ART_TABLES[t]?.flat).length) continue;
       report.errors.push({
         pack: pack.id, file: 'assets', id: 'art', code: 'MANIFEST_MISSING',
         reason: 'this pack ships art (avatars / portraits / spine models), but data/assets.json is missing — run `npm run assets` so the client has a manifest to extend',
@@ -1254,12 +1445,99 @@ function mergeWorkshopArt(data, packs, report) {
     }
     next[table] = entries;
   }
+  data.assets = next;
+  report.art = artClaimCounts(claimed, (t) => !ART_TABLES[t]?.flat);
+}
+
+/**
+ * 谁跟谁抢了同一张 art 表里的同一个 id：按包 id 排序后第一个赢（`claimArt`），输的一方**点名**记一条
+ * `ASSET_COLLISION`（`definedBy` = 占住的那一方）。
+ *
+ * 两张 art 面（对象表与扁平表）共用它：规则只有一份，输出两张面孔 —— 谁赢这件事不该因为「这张表的条目是对象还是
+ * 字符串」而不同。
+ * @param {Array<object>} list 已按包 id 排好序的包
+ * @param {(table: string) => boolean} include 这次要处理哪些表
+ * @param {{ errors: object[] }} report 错误去处
+ * @returns {Map<string, string>} `"<表>.<id>"` → 占住它的包 id
+ */
+function artClaims(list, include, report) {
+  /** @type {Map<string, string>} */
+  const claimed = new Map();
+  for (const pack of list) {
+    for (const [table, entries] of Object.entries(isPlainObj(pack?.art) ? pack.art : {})) {
+      if (!ART_TABLES[table] || !include(table)) continue;
+      // 扁平表的条目**是路径字符串**，`isPlainObj` 会为假 —— 用 `entries` 存在与否判断，不是「它是不是对象」
+      for (const id of Object.keys(isPlainObj(entries) ? entries : {})) {
+        const key = `${table}.${id}`;
+        if (claimed.has(key)) {
+          report.errors.push({
+            pack: pack.id, file: 'assets', id: key, code: 'ASSET_COLLISION',
+            definedBy: claimed.get(key),
+            reason: `another pack (${claimed.get(key)}) already ships art for this entry; keep only one`,
+          });
+        } else claimed.set(key, pack.id);
+      }
+    }
+  }
+  return claimed;
+}
+
+/** `artClaims` 的结果按包归拢、每张表内按 key 排序（`report.art` / `report.flatArt` 的形状）。 */
+function artClaimCounts(claimed, include) {
   /** @type {Record<string, string[]>} */
   const counts = {};
-  for (const [key, packId] of claimed) (counts[packId] ??= []).push(key);
+  for (const [key, packId] of claimed) {
+    const table = key.slice(0, key.indexOf('.'));
+    if (!include(table)) continue;
+    (counts[packId] ??= []).push(key);
+  }
   for (const arr of Object.values(counts)) arr.sort();
+  return counts;
+}
+
+/**
+ * 把包自带的**两张扁平图标表**并进 `assets.skills` / `assets.prof.sub`（`pack.json.art.skills` /
+ * `pack.json.art.profSub`）—— 客户端画技能图标与分支图标时读的那两张表。
+ *
+ * 为什么单独一条通道：这两张表的值**直接就是路径字符串**（`data/assets.json` 实测：`skills["skchr_kalts_1"]`
+ * 与 `prof.sub["fastshot"]`），不像 `chars` 那样是一个带 `urls` 字段的对象，所以它可以复用 `mergeWorkshopArt`
+ * 的一切（路径安全规则、`/workshop-assets` 路由、包 id 排序、点名撞车），只有「写进哪一层」不同 —— 那一层由
+ * `ART_TABLES[表].target` 给出（`['skills']` / `['prof','sub']`）。
+ *
+ * 官方已有这个 id 时**替换**（这就是一个包给官方技能换图标的方式）；`assets.json` 缺失时报告，不凭空造一份。
+ */
+function mergeWorkshopFlatArt(data, packs, report) {
+  const index = workshopArtIndex(packs);
+  const tables = Object.keys(index).filter((t) => ART_TABLES[t]?.flat);
+  if (!tables.length) return;
+  const list = [...(Array.isArray(packs) ? packs : [])].sort(byPackId);
+  const claimed = artClaims(list, (t) => ART_TABLES[t]?.flat, report);
+  if (!isPlainObj(data.assets)) {
+    for (const pack of list) {
+      if (!Object.keys(isPlainObj(pack?.art) ? pack.art : {}).some((t) => ART_TABLES[t]?.flat)) continue;
+      report.errors.push({
+        pack: pack.id, file: 'assets', id: 'art', code: 'MANIFEST_MISSING',
+        reason: 'this pack ships skill / sub-profession icons, but data/assets.json is missing — run `npm run assets` so the client has an icon table to extend',
+      });
+    }
+    return;
+  }
+  const next = { ...data.assets };
+  for (const table of tables) {
+    // `target` 就是那张表在 `assets.json` 里的路径：`['skills']` 或 `['prof','sub']`。**逐个**段浅复制
+    // （长度 1 时落点就是 `assets.skills` 这个表本身 —— 要往表里写，不是把整张表换成一条路径）。
+    const chain = [];
+    let cur = /** @type {Record<string, any>} */ (next);
+    for (const seg of ART_TABLES[table].target) {
+      const inner = isPlainObj(cur[seg]) ? { ...cur[seg] } : {};
+      chain.push({ owner: cur, key: seg, value: inner });
+      cur = inner;
+    }
+    for (const [id, url] of Object.entries(index[table])) cur[id] = url;
+    for (let i = chain.length - 1; i >= 0; i--) chain[i].owner[chain[i].key] = chain[i].value;
+  }
   data.assets = next;
-  report.art = counts;
+  report.flatArt = artClaimCounts(claimed, (t) => ART_TABLES[t]?.flat);
 }
 
 /** 一个条目按字段合并；`spine` 再往里一层（一侧之内的字段逐项合并，见 mergeWorkshopArt 的注释）。 */
@@ -1274,6 +1552,160 @@ function mergeArtEntry(cur, patch) {
     out.spine = spine;
   }
   return out;
+}
+
+/**
+ * 一个包声明要进**自选池**的干员，逐条判定它能不能进（`pack.json.operators`，docs/WORKSHOP.md §1.2）。
+ *
+ * 与 `workshopSupportEntries` 同一种结构、同一种理由（**规则只有一份**，加载期与校验器/编辑器读的是同一个函数）：
+ * 每一条声明要么给出它落盘时要写的数据，要么给出一条**点名**的拒绝。四条规则：
+ *
+ *   * `OPERATOR_NO_UNIT` —— 这个包没有同名的 `units[charId]` 记录。没有干员记录的干员进池后是**空槽**：
+ *     自选界面画不出名字与职业，一局里也取不到 def。这是唯一一条「写成什么样都不该放过」的错。
+ *   * `OPERATOR_NOT_SIX` —— `rarity !== 6`。**不是 6★ 请走工坊棋子注册表**（`content.chess` + `kits/<chessId>.js`）：
+ *     自选池这一层是「六星干员的获得方式」，5★ 与以下在这条路上没有商店阶级可落。
+ *   * `OPERATOR_BOND_UNKNOWN` —— `bonds` 里某个 id 不在 `data/bonds.json`。**这条必须拒**：盟约 id 写错时那条
+ *     盟约条**永远不会出现**（`assets.bonds` 里没有它的图标，`bonds` 表里没有它的阈值），而作者只会以为
+ *     「盟约没生效」—— 一次完全静默的失效。
+ *   * `OPERATOR_FORM_MISSING` —— `forms` 没覆盖自选槽要的档位。自选槽的普通与精锐两条记录**各自**要求一个档位
+ *     （`shared/diy.js checkDiyPick` 同时解析两条），缺一个这个干员就挑不上；更重的是 `tools/golden.mjs` 会给池里
+ *     每位配一个精锐场景，所以缺档位会让**语料生成抛异常**，`golden` / `ci` 全线挂。要求的那一组从 `diy.slots`
+ *     派生（`requiredUnitForms`），不硬编码。
+ *   * `PACK_ID_COLLISION` —— 两个包声明同一个 charId。按包 id 字典序最小者赢（DESIGN §27.3），输的一方得到一条
+ *     点名报告；`ownedPool` 因此只会多一个 id，不会出现两条记录抢一个槽。
+ *
+ * `name` / `rarity` / `profession` / `subProfessionId` **从 `data.backups.units[charId]` 派生**（同一个包的
+ * `units` 记录已经由内容文件那一层并进 `data` 了），所以清单里写不出第二份会漂移的真相。
+ *
+ * @param {Readonly<Record<string, any>>} data 合并后的数据（`units` 记录已就位）
+ * @param {Array<{ id: string, operators?: Record<string, { powers?: string[], bonds?: string[] }> }>} packs
+ * @returns {{ entries: Array<{ pack: string, id: string, rec: object }>, errors: object[] }}
+ */
+export function workshopOperatorEntries(data, packs) {
+  /** @type {Array<{ pack: string, id: string, rec: object }>} */
+  const entries = [];
+  /** @type {object[]} */
+  const errors = [];
+  const list = (Array.isArray(packs) ? packs : []).filter((p) => p && typeof p.id === 'string' && p.id).sort(byPackId);
+  const units = isPlainObj(data) && isPlainObj(data.backups) && isPlainObj(data.backups.units) ? data.backups.units : {};
+  const bonds = isPlainObj(data) && isPlainObj(data.bonds) ? data.bonds : {};
+  /** charId → 已经声明它的包（`byPackId` 顺序下第一个就是赢家）。 */
+  const claimed = new Map();
+  for (const pack of list) {
+    const declared = isPlainObj(pack.operators) ? pack.operators : {};
+    for (const charId of Object.keys(declared).sort()) {
+      const decl = isPlainObj(declared[charId]) ? declared[charId] : {};
+      const unit = isPlainObj(units[charId]) ? units[charId] : null;
+      if (!unit) {
+        errors.push({
+          pack: pack.id, file: 'backups', id: charId, code: 'OPERATOR_NO_UNIT',
+          reason: `"${charId}" has no units record in this pack — declare it in units.json (the 自选池 entry derives its name / rarity / profession from that record)`,
+        });
+        continue;
+      }
+      if (unit.rarity !== 6) {
+        errors.push({
+          pack: pack.id, file: 'backups', id: charId, code: 'OPERATOR_NOT_SIX',
+          reason: `"${charId}" is rarity ${JSON.stringify(unit.rarity)}, not 6 — the 自选池 is the 6★ path; a 5★ or lower operator goes through the workshop chess registry instead (content.chess + kits/<chessId>.js)`,
+        });
+        continue;
+      }
+      const unknown = (Array.isArray(decl.bonds) ? decl.bonds : []).filter((b) => !isPlainObj(bonds[b]));
+      if (unknown.length) {
+        errors.push({
+          pack: pack.id, file: 'backups', id: charId, code: 'OPERATOR_BOND_UNKNOWN',
+          reason: `"${charId}" declares the bond(s) ${unknown.map((b) => `"${b}"`).join(', ')}, which data/bonds.json does not have — that bond would simply never appear in a match (a mistyped id fails silently; check data/bonds.json for the exact id, e.g. "egirShip")`,
+        });
+        continue;
+      }
+      // 形态齐不齐：自选槽的两条记录（普通 + 精锐）各自要求一个 forms 档位，缺一个这个干员**根本挑不上**
+      // （shared/diy.js checkDiyPick 同时解析两条）。而它的后果不止「挑不上」：`tools/golden.mjs` 会给池里每一位
+      // 配一个 tier-6 精锐场景，所以一个缺档位的干员进池 = 语料生成抛异常 = `golden` / `ci` 全线挂（2026-10-09 实测：
+      // 只有 `2/1/4/0` 与 `2/60/7/1` 两个档位的干员会让 `chess_char_6_diy1_a` 报 `no form for`）。
+      // 要求的那一组**从 `diy.slots` 的两条记录派生**（shared/diy.js requiredUnitForms），不硬编码 `2/60/7/3`。
+      const forms = isPlainObj(unit.forms) ? unit.forms : {};
+      const missing = requiredUnitForms(data).filter((f) => !isPlainObj(forms[f]));
+      if (missing.length) {
+        errors.push({
+          pack: pack.id, file: 'backups', id: charId, code: 'OPERATOR_FORM_MISSING',
+          reason: `"${charId}" has no unit form for ${missing.map((f) => `"${f}"`).join(', ')} — the 自选 slots' normal and elite records both need one (data/backups.json diy.slots => chess status), and a pool member without them cannot be picked: \`node tools/golden.mjs\` throws and the golden / ci suites go down with it. Copy the missing form(s) from the operator record you derived this one from`,
+        });
+        continue;
+      }
+      const holder = claimed.get(charId);
+      if (holder) {
+        errors.push({
+          pack: pack.id, file: 'backups', id: charId, code: 'PACK_ID_COLLISION', definedBy: holder,
+          reason: `"${charId}" is already contributed by pack "${holder}" — the pack with the smaller id keeps it (DESIGN §27.3). Rename this record, or let "${holder}" drop it; an "overrides" entry does not win against another pack`,
+        });
+        continue;
+      }
+      claimed.set(charId, pack.id);
+      entries.push({
+        pack: pack.id,
+        id: charId,
+        rec: {
+          name: unit.name,
+          rarity: unit.rarity,
+          profession: unit.profession,
+          subProfessionId: unit.subProfessionId,
+          obtainable: true,
+          powers: [...(Array.isArray(decl.powers) ? decl.powers : [])],
+          bonds: [...(Array.isArray(decl.bonds) ? decl.bonds : [])],
+        },
+      });
+    }
+  }
+  return { entries, errors };
+}
+
+/**
+ * 把包声明的新干员**放进自选池**：`data/backups.json` 的 `diy.ownedPool`（push，去重）与
+ * `diy.operators[charId]`（那张自选界面读的名字 / 星级 / 职业 / 盟约表）。
+ *
+ * 这是「新增一个干员」从**就地补丁**变成**包**的最后一块：在它之前，一个包能带干员记录、能带素材、能带语音，
+ * 但它加的新干员在自选界面里**根本不存在**（`diy` 只认生成器写出来的那 86 条）；作者只能手改
+ * `data/backups.json`，而那是生成物 —— 下次 `npm run build-data` 会把他的条目整条抹掉。
+ *
+ * `data/*.json` 依旧一个字节都不改：叠加发生在 `deepFreeze` 之前（docs/WORKSHOP.md §1.3），所以
+ * 「作者能加」与「生成器是唯一来源」同时成立 —— 磁盘上的 `ownedPool.length === 71` 那几条生成器契约
+ * （`test/backups.test.js`）完全不受影响。
+ *
+ * 入池顺序只由包 id 排序决定（`workshopOperatorEntries` 内部就是 `byPackId`），不依赖目录扫描顺序。
+ * `data.backups` 不存在时报告 `MANIFEST_MISSING`，不凭空造一份（与 art 缺 `assets.json` 同一手法）。
+ */
+function mergeWorkshopOperators(data, packs, report) {
+  const { entries, errors } = workshopOperatorEntries(data, packs);
+  for (const e of errors) report.errors.push(e);
+  if (!entries.length) return;
+  const backups = isPlainObj(data.backups) ? data.backups : null;
+  const diy = backups && isPlainObj(backups.diy) ? backups.diy : null;
+  if (!diy) {
+    const seen = new Set();
+    for (const e of entries) {
+      if (seen.has(e.pack)) continue;
+      seen.add(e.pack);
+      report.errors.push({
+        pack: e.pack, file: 'backups', id: 'diy', code: 'MANIFEST_MISSING',
+        reason: 'this pack declares 自选池 operators, but data/backups.json has no "diy" map — run `npm run build-data` so the 自选 pool has somewhere to publish to',
+      });
+    }
+    return;
+  }
+  const pool = [...(Array.isArray(diy.ownedPool) ? diy.ownedPool : [])];
+  const operators = { ...(isPlainObj(diy.operators) ? diy.operators : {}) };
+  /** @type {Record<string, string[]>} */
+  const added = {};
+  for (const { pack, id, rec } of entries) {
+    // 已经在这个池里（一个官方干员、或者……）时不再 push：`ownedPool` 是一份「拥有哪些干员」的集合，
+    // 两个条目一个 id 只会让自选界面出现两个一样的格子。
+    if (!pool.includes(id)) pool.push(id);
+    operators[id] = rec;
+    (added[pack] ||= []).push(id);
+  }
+  for (const list of Object.values(added)) list.sort();
+  data.backups = { ...backups, diy: { ...diy, ownedPool: pool, operators } };
+  report.operators = added;
 }
 
 /**
@@ -1334,8 +1766,14 @@ export function workshopSummary(report) {
     if (itemIcons) bits.push(`${itemIcons.length} item icon${itemIcons.length === 1 ? '' : 's'}`);
     const art = report.art && report.art[p.id];
     if (art) bits.push(`${art.length} art entr${art.length === 1 ? 'y' : 'ies'} (${art.join(', ')})`);
+    // 扁平图标表（`assets.skills` / `assets.prof.sub`）与上面那条分开数：它们的落点不是 `assets.<表>`，
+    // 一条日志里混在一起会让读的人去 assets.chars 里找一个技能图标。
+    const flatArt = report.flatArt && report.flatArt[p.id];
+    if (flatArt) bits.push(`${flatArt.length} icon${flatArt.length === 1 ? '' : 's'} (${flatArt.join(', ')})`);
     const support = report.support && report.support[p.id];
     if (support) bits.push(`助战 +${support.length}`);
+    const operators = report.operators && report.operators[p.id];
+    if (operators) bits.push(`自选池 +${operators.length}`);
     const looks = (report.looks || []).filter((l) => l.pack === p.id);
     // 干员与怪物分开数：一句话里混着「3 个干员」而其中两个是怪物，读日志的人会去找错对象
     const lookOperators = looks.filter((l) => l.kind !== 'enemy').length;

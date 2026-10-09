@@ -61,7 +61,7 @@ node tools/workshop-editor.mjs --workshop D:\packs # 指定其它工坊目录
 | `/bond.html` | **盟约（羁绊）**编辑器（新增盟约，或**覆盖官方 23 条**的阈值 / 计数 / 说明 / 黑板数值 + 成员） |
 | `/kit.html` | **kit（行为层）**编辑器（直接编辑 `kits/<chessId>.js` 的代码，静态校验） |
 | `/voice.html` | **语音**编辑器（`pack.json` 的 `voices` 字段 + 每个语种一份 `voiceLangs`：语言 × 干员 × 槽位 × 文件） |
-| `/pack.html` | **包管理**（导出/导入 `.zip`、`pack.json` 的 `support` 助战声明、**一键试玩**） |
+| `/pack.html` | **包管理**（导出/导入 `.zip`、`pack.json` 的 `support` 助战声明与 `operators` 自选池声明、**一键试玩**） |
 
 五个内容页（地图 / 怪物 / 出怪 / 装备 / 盟约）的侧栏或右栏都有一个**保存目标**下拉：列出所有工坊包（id 与 `pack.json` 里的名字），
 选好再保存。以前每次保存都要在对话框里手打一次包 id —— 打错就是存进别的包，或者凭空建一个空包。
@@ -427,7 +427,7 @@ node tools/workshop-validate.mjs workshop     # 语音层：文件是否存在�
 - **左栏**：每个工坊包一条 —— 名称、包 id、版本、license、内容文件、语音条数、助战个数，以及**加载器的结论**
   （`loadWorkshop` 接受的显示「加载器接受」，否则显示它拒绝的码，例如 `EMPTY_PACK`、`ASSETS_NEED_LICENSE`）。
 - **中栏**：这个包的详情（id / 版本 / 作者 / license / 内容 / 语音 / 是否有 `assets/`）+ 校验结论 +
-  **包元数据表单** + **overrides 清单** + **助战声明编辑器** + 「卡池在哪里」的说明。
+  **包元数据表单** + **overrides 清单** + **助战声明编辑器** + **自选池声明编辑器** + 「卡池在哪里」的说明。
 - **右栏**：**导出**（下载 `<包id>.zip`）与**导入**（选一个 `.zip`，可选覆盖同名包），各自都写明命令行等价路径。
 
 ### 包元数据（`name` / `version` / `author` / `license` / `description` / `gameVersion`）
@@ -495,6 +495,21 @@ node tools/workshop-validate.mjs workshop     # 语音层：文件是否存在�
   而且**绝不会**给包补一条它没声明过的 `content`（写助战不是声明数据文件）。内容没变就不写盘。
 - 页面明说卡池本身在服务端的 `data/support.json`，而且安装方在那里写 `"workshop": false` 就会忽略所有包的声明 ——
   否则作者会把「没生效」当成编辑器的 bug。
+
+**自选池声明**（`pack.json` 的 `operators`，`docs/WORKSHOP.md` §1.2）：
+
+- 勾上＝让这个干员**出现在自选编队里**（服务端把它并进 `data/backups.json` 的 `diy.ownedPool` / `diy.operators`，
+  磁盘上的 `data/*.json` 一个字都不改）。可勾的对象是**本包 `units.json` 里的干员**；5★ 及以下被标成
+  「不是 6★」并不给进（自选池就是六星那条路，工坊棋子走 `content.chess`）。
+- **四个派生字段不在这一页写**（名字 / 星级 / 职业 / 分支）：它们从本包那条 `units` 记录来
+  （`mergeWorkshopOperators` 只有这一个来源），页面上只**显示**它们。
+- 每行显示它会不会被加载器拒（缺 `units` 记录 / 不是 6★ / 缺形态档位 / 盟约 id 不存在），并给出确切的原因；
+  保存时服务端按同一批规则再判一次，拒绝就地返回（`OPERATOR_NO_UNIT` / `OPERATOR_NOT_SIX` /
+  `OPERATOR_BOND_UNKNOWN` / `OPERATOR_FORM_MISSING` / `OPERATOR_BAD_SHAPE`）。
+- 盟约输入框的候选来自服务端（`data/bonds.json` 的键）：写错一个 id 那条盟约条**永远不会出现**，一次静默失效。
+- **写入只动 `operators` 一个字段**：其余字段、键序与两空格缩进原样保留。内容没变就不写盘。
+- **「新建一个干员」的表单不在这一版**（业主未裁定，见 `docs/WORKSHOP.md` §1.2）：干员记录目前要么手写
+  `units.json`，要么由干员页的既有机制产出；这一页只管「把它放进自选池」。
 
 命令行等价路径（同一批函数，所以结果逐字节相同）：
 
