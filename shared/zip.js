@@ -193,6 +193,67 @@ const has = (buf, at, n) => at >= 0 && n >= 0 && at + n <= buf.length;
 /** 归档在 EOCD 之前就断了：单独一个 code，因为「文件没下完」和「文件被改过」要分开说。 */
 const truncated = (detail) => refusal('ZIP_TRUNCATED', detail);
 
+/** General-purpose bit 11:「这个文件名是 UTF-8」(APPNOTE 4.4.4)。 */
+const UTF8_FLAG = 0x0800;
+/** Info-ZIP Unicode Path extra field (0x7075, APPNOTE 4.6.9)：`version(1) + nameCRC32(4) + utf8Name`。 */
+const UNICODE_PATH_ID = 0x7075;
+
+/**
+ * 解出一个条目的名字。**「有中文文件夹就不让导入」是错的**，所以这里不是「UTF-8 失败就拒」，而是按 ZIP 自己的
+ * 规矩分三种情况（这套逻辑原来只长在 `tools/package-update.mjs` 的 `entryName` 里，包导入这条路没有 —— 现在
+ * 两处共用这一份，见 `test/zip.test.js` 与 `test/update-package.test.js`）：
+ *
+ *   1. **bit 11 置位** ⇒ 头自己承诺了 UTF-8。承诺坏了（字节不是合法 UTF-8）就是**坏归档**，照旧拒（`fatal: true`）。
+ *      这一条必须留着：用替换字符「猜」出来的名字会让名字检查放行一个其实不同的文件。
+ *   2. **bit 11 未置位 + 有 0x7075 extra field** ⇒ 用它的 UTF-8 名字（CRC 与头里的名字对上才认，否则那是被改过的
+ *      字段）。Info-ZIP 的 zip 在 Windows 上就把真名只放在这里。
+ *   3. **bit 11 未置位、没有那个字段** ⇒ 先按严格 UTF-8 试（不少工具写 UTF-8 却不置位），再按 **Windows 中文
+ *      codepage（GBK）** 试 —— `tar` / 资源管理器造的中文名 zip 就是这一种，而玩家的解压器也是这么解的。
+ *      两种都解不出来才拒（那才是真的坏字节，例如 0xFF）。
+ *
+ * 为什么**没有** CP437 兜底：ZIP 的规范默认码页是 CP437，但 WHATWG 的 `TextDecoder` 根本不提供它 —— 加一个
+ * 「每个字节都能解出东西」的兜底等于**永远不再拒绝坏名字**，那不是宽松，是把这一层判据删掉。GBK 覆盖了我们
+ * 真正会遇到的那一类（Windows 中文工具），其余情况如实拒绝并说明试过哪些编码。
+ *
+ * 安全性不变：解出来的名字照样过 `nameProblem`（穿越 / 绝对路径 / 反斜杠 / 空段），所以「解码宽松」不会变成
+ * 「写文件跑到包目录外面」。
+ * @param {Buffer|Uint8Array} nameBuf
+ * @param {Buffer|Uint8Array} extraBuf 中央目录条目里那段 extra field（可能是空的）
+ * @param {number} flags general purpose bit flag
+ * @returns {{ ok: true, name: string } | { ok: false, detail: string }}
+ */
+export function decodeEntryName(nameBuf, extraBuf = Buffer.alloc(0), flags = 0) {
+  const raw = Buffer.isBuffer(nameBuf) ? nameBuf : Buffer.from(nameBuf);
+  const extra = extraBuf && extraBuf.length ? (Buffer.isBuffer(extraBuf) ? extraBuf : Buffer.from(extraBuf)) : null;
+  const utf8Strict = () => new TextDecoder('utf-8', { fatal: true }).decode(raw);
+  if (flags & UTF8_FLAG) {
+    try {
+      return { ok: true, name: utf8Strict() };
+    } catch {
+      return { ok: false, detail: 'the entry sets the UTF-8 flag (bit 11) but its bytes are not valid UTF-8 — a broken archive, not a codepage difference' };
+    }
+  }
+  if (extra) {
+    for (let q = 0; q + 4 <= extra.length;) {
+      const id = extra.readUInt16LE(q);
+      const len = extra.readUInt16LE(q + 2);
+      if (q + 4 + len > extra.length) break;
+      if (id === UNICODE_PATH_ID && len >= 5 && extra[q + 4] === 1
+        && (crc32(raw) >>> 0) === extra.readUInt32LE(q + 5)) {
+        return { ok: true, name: extra.toString('utf8', q + 9, q + 4 + len) };
+      }
+      q += 4 + len;
+    }
+  }
+  try {
+    return { ok: true, name: utf8Strict() };
+  } catch { /* 不是 UTF-8：往下试本地码页 */ }
+  try {
+    return { ok: true, name: new TextDecoder('gbk', { fatal: true }).decode(raw) };
+  } catch { /* 也不是 GBK */ }
+  return { ok: false, detail: 'its bytes are not valid UTF-8 and not valid GBK either (the two encodings we can read without guessing) — re-zip it with a tool that writes UTF-8 names' };
+}
+
 /**
  * 读一个 ZIP 归档，带三道帽子：条目数、单条解压后大小、解压后总量。
  *
@@ -277,14 +338,10 @@ export function zipRead(buffer, limits = {}) {
     const nameBuf = buf.subarray(at + 46, at + 46 + nameLen);
     if (nameLen === 0) return refusal('ZIP_BAD_NAME', `entry ${i} has an empty name`);
     if (nameLen > ZIP_MAX_NAME_BYTES) return refusal('ZIP_BAD_NAME', `entry ${i}'s name is ${nameLen} bytes, over the ${ZIP_MAX_NAME_BYTES} byte cap`);
-    // fatal: true 才是正解 —— 一个名字坏掉的条目在归档里到底占多少个字节已经不知道了，
-    // 用替换字符「猜」出来的名字可能会让名字检查放行一个其实不同的文件
-    let name;
-    try {
-      name = new TextDecoder('utf-8', { fatal: true }).decode(nameBuf);
-    } catch {
-      return refusal('ZIP_BAD_NAME', `entry ${i}'s name is not valid UTF-8`);
-    }
+    const extraBuf = buf.subarray(at + 46 + nameLen, at + 46 + nameLen + extraLen);
+    const decoded = decodeEntryName(nameBuf, extraBuf, flags);
+    if (!decoded.ok) return refusal('ZIP_BAD_NAME', `entry ${i}'s name: ${decoded.detail}`);
+    const name = decoded.name;
     if (name.endsWith('/')) {
       // 目录条目：跳过，但**名字规则照样过一遍** —— 删掉尾部斜杠之后 `../` 就是 `..`，
       // 跳过不等于免检。目录名里带一个空段（`a//b/`）在这里也会被拒。
@@ -354,7 +411,15 @@ function readEntry(buf, localOffset, method, compSize, rawSize, expectedName) {
   const nameLen = buf.readUInt16LE(localOffset + 26);
   const extraLen = buf.readUInt16LE(localOffset + 28);
   if (!has(buf, localOffset + 30, nameLen)) return truncated('a local header\'s name runs past the end of the file');
-  if (buf.subarray(localOffset + 30, localOffset + 30 + nameLen).toString('utf8') !== expectedName) {
+  // 两边都要**按同一套编码规则解出来**再比（中央目录那份已经解好了）：中文名在本地头里同样是 GBK，
+  // 直接 `toString('utf8')` 比会把一份完全正常的归档判成「两个头名字不同」（实测过）。
+  // 用 extra field 时的 CRC 校验发生在 `decodeEntryName` 里，所以「只改本地头」照样拦得住。
+  const localName = decodeEntryName(
+    buf.subarray(localOffset + 30, localOffset + 30 + nameLen),
+    buf.subarray(localOffset + 30 + nameLen, localOffset + 30 + nameLen + extraLen),
+    buf.readUInt16LE(localOffset + 6),
+  );
+  if (!localName.ok || localName.name !== expectedName) {
     return refusal('ZIP_NAME_MISMATCH', `the local header for "${expectedName}" carries a different name`);
   }
   const dataStart = localOffset + 30 + nameLen + extraLen;

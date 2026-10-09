@@ -15,7 +15,7 @@ import { deflateRawSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 
 import {
-  zipWrite, zipRead, crc32,
+  zipWrite, zipRead, crc32, decodeEntryName,
   ZIP_MAX_ENTRIES, ZIP_MAX_TOTAL_BYTES, ZIP_MAX_FILE_BYTES, ZIP_MAX_NAME_BYTES,
 } from '../shared/zip.js';
 
@@ -434,17 +434,93 @@ describe('shared/zip.js: 拒绝而不是猜（坏归档、恶意归档、超上�
     assert.equal(r2.error, 'ZIP_BAD_NAME');
   });
 
-  test('a name that is not valid UTF-8 is refused rather than decoded with replacement characters', () => {
+  test('a name whose bytes are valid in NO encoding we read is refused rather than decoded with replacement characters', () => {
+    // 这一条是「拒绝而不是猜」的**窄化版**：0xFF 在 UTF-8 里非法，在 GBK 里也非法（实测严格解码会抛），
+    // 所以它既不是「某个工具写错了码页」也不是「工具没置 UTF-8 位」，而是**真的坏字节** —— 照样拒。
     const zip = zipWrite([{ name: 'ok.txt', data: Buffer.from('x') }]);
     // patch the name in BOTH headers, so the only reason left to refuse is the encoding itself
     for (const at of allOffsets(zip, Buffer.from('ok.txt'))) zip[at] = 0xff; // invalid UTF-8 lead byte
     const read = zipRead(zip);
     assert.equal(read.ok, false);
     assert.equal(read.error, 'ZIP_BAD_NAME');
+    assert.match(read.detail, /not valid GBK/);
   });
 
   test('crc32 matches the reference vector for "123456789"', () => {
     assert.equal(crc32(Buffer.from('123456789')).toString(16), 'cbf43926');
     assert.equal(crc32(Buffer.alloc(0)), 0);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// 中文名字不是「坏归档」：Windows 工具（tar / 资源管理器）写的中文名是 **GBK**，而且多半**不置** bit 11。
+// 这一组用例就是业主要求的那条规则：只要结构正确就该能导入 —— 名字的编码不该成为拒绝的理由。
+// ---------------------------------------------------------------------------------------------------
+describe('zip 名字的编码：UTF-8 位、Unicode Path extra field、GBK 兜底', () => {
+  /** 把两个头里的名字字节换成 GBK 编码的同一长度串（`zipWrite` 只会写 UTF-8，所以这里按字节改）。 */
+  const patchNameBytes = (zip, placeholder, gbkBytes) => {
+    assert.equal(placeholder.length, gbkBytes.length, '补丁的占位名必须与目标编码等长');
+    const offsets = allOffsets(zip, Buffer.from(placeholder));
+    assert.ok(offsets.length >= 2, '本地头与中央目录各一处');
+    for (const at of offsets) for (let i = 0; i < gbkBytes.length; i++) zip[at + i] = gbkBytes[i];
+    return zip;
+  };
+
+  test('GBK 目录名 + GBK 文件名（没有 UTF-8 位）能读出来，且中文一字不差', () => {
+    // 卡兹戴尔 = BF A8 D7 C8 B4 F7 B6 FB（GBK），/ = 2F。占位名等长：8 字节 + '/'
+    const dirGbk = Buffer.from([0xbf, 0xa8, 0xd7, 0xc8, 0xb4, 0xf7, 0xb6, 0xfb, 0x2f]);
+    const fileGbk = Buffer.from([0xbf, 0xa8, 0xd7, 0xc8, 0x2f, 0x61, 0x2e, 0x74, 0x78, 0x74]); // 卡兹/a.txt
+    const zip = patchNameBytes(zipWrite([
+      { name: 'abcdefgh/', data: '' },
+      { name: 'abcdef/a.t', data: 'x' },
+    ]), 'abcdefgh/', dirGbk);
+    patchNameBytes(zip, 'abcdef/a.t', fileGbk);
+    const read = zipRead(zip);
+    assert.equal(read.ok, true, JSON.stringify(read));
+    assert.deepEqual(read.skippedDirs, ['卡兹戴尔/']);
+    assert.deepEqual(read.entries.map((e) => e.name), ['卡兹/a.txt']);
+    assert.equal(read.entries[0].data.toString(), 'x');
+  });
+
+  test('bit 11 置位 = 头承诺了 UTF-8：字节不合法就是坏归档，照旧拒（这条不放松）', () => {
+    const zip = zipWrite([{ name: '中文.txt', data: 'x' }]); // 非 ASCII ⇒ zipWrite 置位 bit 11
+    for (const at of allOffsets(zip, Buffer.from('中文.txt', 'utf8'))) zip[at] = 0xff;
+    const read = zipRead(zip);
+    assert.equal(read.ok, false);
+    assert.equal(read.error, 'ZIP_BAD_NAME');
+    assert.match(read.detail, /sets the UTF-8 flag/);
+  });
+
+  test('decodeEntryName：0x7075（Info-ZIP Unicode Path）优先，且名字 CRC 对不上就不认它', () => {
+    const gbk = Buffer.from([0xbf, 0xa8, 0xd7, 0xc8]); // 卡兹（GBK）
+    const utf8Name = Buffer.from('卡兹', 'utf8');
+    const field = (crc) => {
+      const tail = Buffer.concat([Buffer.from([1]), (() => { const b = Buffer.alloc(4); b.writeUInt32LE(crc >>> 0); return b; })(), utf8Name]);
+      const head = Buffer.alloc(4);
+      head.writeUInt16LE(0x7075, 0);
+      head.writeUInt16LE(tail.length, 2);
+      return Buffer.concat([head, tail]);
+    };
+    const hit = decodeEntryName(gbk, field(crc32(gbk)), 0);
+    assert.deepEqual(hit, { ok: true, name: '卡兹' }, 'extra field 里的 UTF-8 名字优先');
+    const miss = decodeEntryName(gbk, field(0xdeadbeef), 0);
+    assert.equal(miss.ok, true);
+    assert.equal(miss.name, '卡兹', 'CRC 对不上时退回按码页解，而不是采信一个被改过的字段');
+    // 置位时根本不看 extra field（头已经承诺了 UTF-8）
+    const flagged = decodeEntryName(utf8Name, field(crc32(gbk)), 0x0800);
+    assert.deepEqual(flagged, { ok: true, name: '卡兹' });
+    // 没有 extra field 时：UTF-8 优先，其次 GBK
+    assert.deepEqual(decodeEntryName(utf8Name, Buffer.alloc(0), 0), { ok: true, name: '卡兹' });
+    assert.deepEqual(decodeEntryName(gbk, Buffer.alloc(0), 0), { ok: true, name: '卡兹' });
+    assert.equal(decodeEntryName(Buffer.from([0xff]), Buffer.alloc(0), 0).ok, false);
+  });
+
+  test('GBK 解出来的名字照样过安全判据：`..` / 绝对路径仍然是 ZIP_BAD_NAME', () => {
+    // 遍历名是纯 ASCII，编码换不掉它 —— 这一条是「宽松解码没有放松安全」的直接证据
+    const zip = patchNameBytes(zipWrite([{ name: 'aaaa/../../evil.txt', data: 'x' }]),
+      'aaaa/../../evil.txt', Buffer.from('aaaa/../../evil.txt'));
+    const read = zipRead(zip);
+    assert.equal(read.ok, false);
+    assert.equal(read.error, 'ZIP_BAD_NAME');
   });
 });

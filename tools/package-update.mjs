@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { UPDATE_FILE, UPDATE_FORMAT, digestFile } from '../server/update.js';
+import { decodeEntryName } from '../shared/zip.js';
 
 /** Read `len` bytes at `pos` of an open file. */
 function readAt(fd, pos, len) {
@@ -31,39 +32,29 @@ function readAt(fd, pos, len) {
 
 const SIG = { eocd: 0x06054b50, loc64: 0x07064b50, eocd64: 0x06064b50, central: 0x02014b50, local: 0x04034b50 };
 const U32 = 0xffffffff;
-/** General-purpose bit 11: "this name is UTF-8" (APPNOTE 4.4.4). */
-const UTF8_FLAG = 0x0800;
-
 /**
- * The name of the central-directory entry at `p`. ZIP has exactly one flag bit for this (`UTF8_FLAG`): when it is set
+ * The name of the central-directory entry at `p`. ZIP has exactly one flag bit for this (`bit 11`, see
+ * `shared/zip.js decodeEntryName`): when it is set the header bytes are UTF-8.
  * the header bytes are UTF-8. When it is NOT set the name is in **the creating tool's local codepage**, and that is not
  * a corner case for us: the Windows release zips are made by `tar`, which writes a Chinese name as CP936 while Windows
  * Explorer unzips it as CP936 too — decoded as UTF-8 that is a mojibake path, and an update diffed against such a base
- * would send the same file twice (once under the mojibake name, once under the real one). Two ways out, both here:
- *   - the Info-ZIP Unicode Path extra field (0x7075, APPNOTE 4.6.9), when it is present and its CRC matches the header
- *     name — Info-ZIP's zip on Windows keeps the UTF-8 name only there;
- *   - no such field: strict UTF-8 first (plenty of tools write UTF-8 without setting the flag), else the system
- *     codepage, which is what the user's own unzip will do.
+ * would send the same file twice (once under the mojibake name, once under the real one).
+ *
+ * **The rules and their code live in `shared/zip.js decodeEntryName`** (bit 11 ⇒ strict UTF-8; else the 0x7075
+ * Unicode Path extra field when its CRC matches; else strict UTF-8, then GBK). This used to be a second copy here —
+ * and that is exactly how the pack-import path ended up refusing a Chinese folder name while the updater handled it
+ * (`shared/zip.js` had no such fallback). One reader, one decoder: the two callers pass the same bytes and must agree.
  */
 function entryName(cd, p, flags, nameLen, extraLen) {
-  const raw = cd.subarray(p + 46, p + 46 + nameLen);
-  if (!(flags & UTF8_FLAG)) {
-    for (let q = p + 46 + nameLen, end = q + extraLen; q + 4 <= end;) {
-      const id = cd.readUInt16LE(q);
-      const len = cd.readUInt16LE(q + 2);
-      if (id === 0x7075 && len >= 5 && cd[q + 4] === 1 && q + 4 + len <= end
-        && (typeof zlib.crc32 !== 'function' || (zlib.crc32(raw) >>> 0) === cd.readUInt32LE(q + 5))) {
-        return cd.toString('utf8', q + 9, q + 4 + len);
-      }
-      q += 4 + len;
-    }
-  }
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(raw);
-  } catch {
-    const legacy = process.platform === 'win32' ? 'gbk' : 'utf-8';
-    try { return new TextDecoder(legacy).decode(raw); } catch { return raw.toString('utf8'); }
-  }
+  const decoded = decodeEntryName(
+    cd.subarray(p + 46, p + 46 + nameLen),
+    cd.subarray(p + 46 + nameLen, p + 46 + nameLen + extraLen),
+    flags,
+  );
+  // `decodeEntryName` 只在「两种编码都解不出来」时失败（真坏字节）。这里没有 refusual 通道，所以按原样退回
+  // 非严格 UTF-8 解码 —— **这与原来的行为一致**：更新包是维护者自己造的文件，坏名字会在 diff 那一步暴露出来，
+  // 而包导入那条路（`shared/zip.js zipRead`）会如实拒绝。
+  return decoded.ok ? decoded.name : cd.toString('utf8', p + 46, p + 46 + nameLen);
 }
 
 /**
