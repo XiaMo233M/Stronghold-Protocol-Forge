@@ -27,6 +27,8 @@ import { useEffect, useRef, useState } from '../../vendor/hooks.module.js';
 import { PHASE } from '../../../shared/constants.js';
 import { html, Button, Icon, PingPill, Countdown, Tooltip, MicroLabel, DifficultyTag, Modal, useTicker } from './components.js';
 import { Sprite, LpTower, GIcon, LocalSprite } from './gameComponents.js';
+// 组件级改写（DESIGN §28.19）：`game.hud.topBar` 是引擎的具名组件之一（对局 HUD 的顶栏），包声明的 wraps 就长在它上面。
+import { modComponent } from './modComponents.js';
 import { localAsset } from '../data.js';
 import { serverNow } from '../store.js';
 import { isCombatPhase, isBossPhase, prepCapsuleLabel, bossFrac, bossPctText, fmtNum, shopBlockReason } from './gameLogic.js';
@@ -355,7 +357,7 @@ export function PauseButton({ paused, busy = false, onToggle }) {
  *   live: the own battle's pending LP loss (liveLp): the tower shows lp − pending in red with a −N tick, 联防中 during 联防;
  *     `left` (a leaker in 联防): its enemies still standing — the capsule's ×N tag
  */
-export function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, onReady, readyBusy, readyCount, playerCount, pen = false, penAvail = false, onPen = () => {},
+export const TopBar = modComponent('game.hud.topBar', function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, onReady, readyBusy, readyCount, playerCount, pen = false, penAvail = false, onPen = () => {},
   config = null, frozenAt = null, pause = null, live = null, spectator = false,
   spectators = null, myId = null, isHost = false, onRemoveSpectator = null }) {
   const phase = pub?.phase;
@@ -420,7 +422,7 @@ export function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, 
       ${showReady ? html`<${ReadyToggle} priv=${priv} onToggle=${onReady} busy=${readyBusy} readyCount=${readyCount} total=${playerCount} />` : null}
     </div>
   </header>`;
-}
+});
 
 /** DP counter shown at the right edge during combat. */
 export function DpCounter({ dp }) {

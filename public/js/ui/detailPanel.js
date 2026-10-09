@@ -50,6 +50,8 @@ import { moduleBadge, fullTraitText } from './loadoutModel.js';
 import { t, tc, N_ } from '../../../shared/i18n.js';
 import { audio } from '../audio.js';
 import { tokenVariantFor } from './gameLogic/loadout.js';
+// 组件级改写（DESIGN §28.19）：`loadout.detail` 是引擎的具名组件之一（干员详情面板本身），包声明的 wraps 就长在它上面。
+import { modComponent } from './modComponents.js';
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
 
@@ -878,7 +880,7 @@ export function selectVoiceKey(detail) {
  *   (the owner's request of 2026-10-08 「添加一下干员点击上去的语气一样的语音」 lifted 2026-10-03's 「整备阶段不需要干员语音」
  *   for this line only; [ASSUMED] the official prep tap says 选中干员 like the battle's FOCUS_CHAR)
  */
-export function DetailPanel({ detail, editable, snapHp, onClose, onSell, onDestroy, bonds = [], offBonds = null, loadout = null, ops = null, onBond = null, side = 'left', shopOpen = false, live = null, voice = false }) {
+export const DetailPanel = modComponent('loadout.detail', function DetailPanel({ detail, editable, snapHp, onClose, onSell, onDestroy, bonds = [], offBonds = null, loadout = null, ops = null, onBond = null, side = 'left', shopOpen = false, live = null, voice = false }) {
   const getter = typeof live === 'function' ? live : null;
   useTicker(detail && getter ? 250 : 0);
   // 配音语言 (v0.7.1): the panel is the component that subscribes to the settings store, so picking a dub in the card
@@ -923,5 +925,5 @@ export function DetailPanel({ detail, editable, snapHp, onClose, onSell, onDestr
       ${detail.type === 'device' ? html`<${DeviceDetail} device=${detail.device} snapHp=${snapHp} live=${liveNow} />` : null}
     </div>
   </aside>`;
-}
+});
 

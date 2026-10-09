@@ -264,8 +264,26 @@ export const CLIENT_PANEL_SLOTS = Object.freeze([
  * 浮层等于让包自己去做「哪张卡在哪」这件事 —— 而那需要 store，正是 §28.8 不给它的东西。
  */
 export const CLIENT_PANEL_REPEATABLE = Object.freeze(['screen.game.shopCard']);
-/** 面板的字段：四个 + `styles`（这个面板自带的样式表）+ `data`（它要读的数据表）+ `messages`（它要收发的通道）。 */
-const CLIENT_PANEL_FIELDS = Object.freeze(['id', 'slot', 'module', 'order', 'gate', 'styles', 'data', 'messages']);
+/**
+ * 引擎**具名组件**的闭枚举（`client.panels[].wraps[].component`，DESIGN §28.19）。九个挂载点说的是「插进哪个
+ * 位置」，这一张说的是「**哪个组件本身**被改写」—— 一个槽位永远表达不了「这个界面现在长得不一样了」。
+ *
+ * 名字与 `CLIENT_PANEL_SLOTS` 是**两个**命名空间（`game.bondStrip` vs `screen.game.bondStrip`）：前者是组件，
+ * 后者是那个组件里的一个容器。作者看到的两份名单因此不能互相替代，理由与「slot 是闭枚举」逐字相同 ——
+ * 一个拼错的组件名等于一条永远不会生效的改写，而那正是这一层到处在拒绝的形态。
+ *
+ * 唯一真相在客户端（`public/js/ui/modComponents.js MOD_COMPONENT_IDS`，每个 id 在组件自己的文件里经
+ * `modComponent(id, impl)` 对上实现），这里是为了**形状层能在不加载客户端的前提下判死**而放的副本 —— 两个表由
+ * `test/modPanelWraps.test.js` 钉在一起（与 `CLIENT_PANEL_SLOTS` / `MOD_PANEL_SLOTS` 同一条做法）。
+ */
+export const CLIENT_WRAP_COMPONENTS = Object.freeze([
+  'game.bondStrip', 'game.hud.topBar', 'game.shopCard', 'loadout.detail',
+]);
+/** 改写方式：`wrap` = 包住引擎的那一份（外层拿到内层的结果当 `orig`）；`replace` = 整段换掉（`orig` 是 `null`）。 */
+export const CLIENT_WRAP_MODES = Object.freeze(['wrap', 'replace']);
+/** 面板的字段：四个 + `styles`（这个面板自带的样式表）+ `data`（它要读的数据表）+ `messages`（它要收发的通道）
+ *  + `wraps`（它要包裹 / 替换的引擎组件）。 */
+const CLIENT_PANEL_FIELDS = Object.freeze(['id', 'slot', 'module', 'order', 'gate', 'styles', 'data', 'messages', 'wraps']);
 /** 一个面板最多声明几条包通道（上限让「通道」这件事有界；今天没有一个真包用到两条以上）。 */
 const CLIENT_MAX_PANEL_MESSAGES = 8;
 /**
@@ -562,6 +580,43 @@ function parseClientDecl(raw) {
         return fail('CLIENT_DUPLICATE_PANEL_CHANNEL', `client.panels["${panel.id}"].messages lists the same channel twice`);
       }
       clean.messages = stableStringList(panel.messages);
+    }
+    // 组件级改写（`client.panels[].wraps`，DESIGN §28.19）：这个面板要包裹 / 替换哪几个**引擎具名组件**。
+    // 与 `data` / `messages` 那两格**不同**的一条纪律：一条用不了的 wraps 声明让**整个面板**落地不了 ——
+    // 一半的改写（链挂上了、另一半没挂）比完全没有改写更难查，与坏模块 / 坏样式表同一个结局。
+    if (panel.wraps !== undefined) {
+      if (!Array.isArray(panel.wraps) || !panel.wraps.length) {
+        return fail('CLIENT_WRAP_BAD_SHAPE', `client.panels["${panel.id}"].wraps must be a non-empty array of { component, mode } (drop the key instead of sending [])`);
+      }
+      // 上限就是**枚举的大小**（一个组件一条链，重复的那条下面会被拒）：链长在引擎组件上，一次渲染要走完整条链，
+      // 所以这个数必须有界 —— 而且它不该是第二个会漂的常量。
+      if (panel.wraps.length > CLIENT_WRAP_COMPONENTS.length) {
+        return fail('CLIENT_WRAP_BAD_SHAPE', `client.panels["${panel.id}"].wraps: at most ${CLIENT_WRAP_COMPONENTS.length} components per panel (got ${panel.wraps.length})`);
+      }
+      /** @type {Array<{ component: string, mode: string }>} */
+      const wraps = [];
+      for (const entry of panel.wraps) {
+        if (!isPlainObj(entry) || Object.keys(entry).some((k) => k !== 'component' && k !== 'mode')) {
+          return fail('CLIENT_WRAP_BAD_SHAPE', `client.panels["${panel.id}"].wraps: every entry must be an object { component, mode } (got ${JSON.stringify(entry)})`);
+        }
+        if (typeof entry.component !== 'string' || !entry.component) {
+          return fail('CLIENT_WRAP_BAD_SHAPE', `client.panels["${panel.id}"].wraps: "component" must name an engine component (got ${JSON.stringify(entry.component)})`);
+        }
+        if (!CLIENT_WRAP_COMPONENTS.includes(entry.component)) {
+          return fail('CLIENT_WRAP_UNKNOWN_COMPONENT', `client.panels["${panel.id}"].wraps: "${entry.component}" is not an engine component this build renders (one of: ${CLIENT_WRAP_COMPONENTS.join(', ')})`);
+        }
+        if (!CLIENT_WRAP_MODES.includes(entry.mode)) {
+          return fail('CLIENT_WRAP_BAD_MODE', `client.panels["${panel.id}"].wraps["${entry.component}"].mode must be one of: ${CLIENT_WRAP_MODES.join(', ')} (got ${JSON.stringify(entry.mode)})`);
+        }
+        wraps.push({ component: entry.component, mode: entry.mode });
+      }
+      if (new Set(wraps.map((w) => w.component)).size !== wraps.length) {
+        return fail('CLIENT_WRAP_BAD_SHAPE', `client.panels["${panel.id}"].wraps names the same component twice (one component, one link: two links would be two wrappers nobody can tell apart)`);
+      }
+      // 按组件名排序写进清单：一个面板里两条链互不影响，但清单字节必须稳定（DESIGN §28.2）——
+      // **链的次序不在这里**：同一条链上多个包的先后由 `order` → 包 id → 面板 id 决定（§28.3），
+      // 与作者书写次序、发现次序都无关。
+      clean.wraps = wraps.slice().sort((a, b) => (a.component < b.component ? -1 : a.component > b.component ? 1 : 0));
     }
     panels.push(clean);
   }
