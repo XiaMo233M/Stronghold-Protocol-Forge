@@ -1427,6 +1427,117 @@ determinism scan, the ownership rule, and the pack hash of any pack that does no
 Tests: `test/packRelativeImports.test.js`; the whitelist and its two readers: `test/kitImports.test.js`,
 `test/workshopKits.test.js`.
 
+
+### 28.19 组件级改写：面板可以包裹或替换一个具名引擎组件
+
+**槽位表达不了「这一屏长得不一样了」。** §28.8 的九个 `[data-mod-slot]` 宿主说的是「插进这个位置」：包在**引擎已经
+渲染出来的容器**里画自己的东西。参考社区插件包的十个客户端文件干的是另一件事 —— **整屏重画**，改的是引擎自己那个
+组件。所以 C 层补上最后一块：面板除了挂槽位，还可以对引擎的**具名组件**声明 `wrap`（包一层，链条下方那一份作为
+`orig` 交给它）或 `replace`（整段换掉）。两者可以同时出现在一个面板上，也可以只改写不挂载。
+
+**声明**（`client.panels[].wraps`，形状层的闭枚举）：
+
+```jsonc
+"client": { "panels": [
+  { "id": "hud-badge", "slot": "screen.game.hud", "module": "ui/badge.js",
+    "wraps": [
+      { "component": "game.hud.topBar", "mode": "wrap" },     // 顶栏外面包一层
+      { "component": "game.bondStrip", "mode": "replace" }    // 盟约条整段换掉
+    ] }
+] }
+```
+
+三条判据、三个码，全是**整包**级别的拒绝（与 §28.13.3 同一条纪律：一个用不了的声明不许变成「装了但静默不工作」；
+与 §28.12 的 import 白名单同一个做法 —— 一份闭枚举，两个读者各判一次）：
+
+| 坏在哪里 | 码 | 判在哪 |
+|---|---|---|
+| `component` 不在闭枚举里（理由里**列出全部合法 id**） | `CLIENT_WRAP_UNKNOWN_COMPONENT` | 形状层（`shared/workshop.js`）+ 客户端复判 |
+| `mode` 不是 `wrap` / `replace`（**缺了也算**，大小写写错也算） | `CLIENT_WRAP_BAD_MODE` | 同上 |
+| 不是数组 / 空数组 / 条目不是 `{ component, mode }` / 同一个组件两条 / 条数超过组件数 | `CLIENT_WRAP_BAD_SHAPE` | 同上 |
+
+装载期再补两条：模块 import 不了 = `CLIENT_PANEL_IMPORT_FAILED`（与槽位那条**同一个码**：坏的是这个字段，不是
+「在哪一层被发现的」，§28.13.3），模块没有 `wrap` 导出 = `CLIENT_WRAP_NO_EXPORT`，**整个面板**不落地（连它声明的
+槽位也不挂）。**声明了 `wraps` 的模块不再必须导出 `mount`**：一个只改写的模块声明一个它用不到的槽位就行（`slot`
+仍是闭枚举里的必填项，形状层一个字没改 —— `[ASSUMED]`：让 `slot` 可选会是第二条规则，而这一步要的只是「能改写」）。
+`wraps` 只在清单真的写了这个键时才进归一化结果，所以没声明它的包内容哈希**逐字节不变**（§28.2）；声明了的包，
+`mode` 不同就是两个摘要。
+
+**注册表：一个组件 id 就是一处 `modComponent(id, impl)`。** 引擎的具名组件渲染**经过**
+`public/js/ui/modComponents.js`。每个 id 在自己的文件里登记，今天四个，都是**纯视图**（改不了对局结果 —— 与
+「面板不给 store」是同一条边界）：
+
+| id | 实现 | 被谁渲染 |
+|---|---|---|
+| `game.bondStrip` | `ui/bondStrip.js BondStrip` | 对局 HUD 的盟约条 |
+| `game.shopCard` | `ui/shopBar.js ChessCard` | 商店 / 晋升奖励 / 定向投放的每一张干员卡 |
+| `game.hud.topBar` | `ui/hud.js TopBar` | 对局 HUD 的顶栏 |
+| `loadout.detail` | `ui/detailPanel.js DetailPanel` | 干员详情面板 |
+
+`impl` **就是**今天那份实现；`modComponent` 返回的组件里只有一次查找：
+
+```js
+function ModComponent(props) {
+  if (!wrapped.has(id)) return impl(props);   // 没有任何包声明 wraps ⇒ 就是今天那一棵 vnode 树
+  return renderChain(id, impl, props);
+}
+```
+
+**没有声明的路径逐字不变**，而且这是结构性的，不是「小心地等价」：`ModComponent(props)` 返回的是 `impl(props)`
+**原样的那个 vnode 对象**，props 也**就是**引擎给的那一个（不多一层组件边界、不多一次快照、不多一个 DOM 节点、
+不多一次订阅）。没有任何包声明 `wraps` 时 `wrapped` 是空集合，`setComponentWraps` 一次都不会被调用，页面不重画。
+`test/modPanelWraps.test.js` 钉的就是这条：返回同一个 vnode、props 同一性、四个空断言（不 import 包模块、不建
+DOM、不重画、组件树里没有多出来的那一层）。
+
+**链的次序就是既有面板比较器**（§28.3）：`order` → 包 id → 面板 id。注册点在每次 `apply` 之后按 `panels` 已经排好
+的次序重建每个组件的链 —— `panels[0]` 的那一条贴着引擎组件（**内层**），最后一条在**最外面**；与数组次序、发现
+次序、加载次序都无关。求值也是确定的：
+
+```js
+let rendered = h(impl, props);                    // 链底 = 引擎自己的组件，拿的是这一帧的 props
+for (const link of links) {                       // 内层 → 外层
+  const below = rendered;
+  const out = applyLink(link, link.mode === 'replace' ? null : below, props);
+  rendered = out === null ? below : out;          // 这一环坏了 ⇒ 它下面那一份照旧渲染
+}
+```
+
+* `wrap` 拿到链条下方那一份当 `orig`（一个 **vnode**，直接嵌进自己返回的树里）；
+* `replace` 拿到的 `orig` 是 **`null`** —— 「它下方整段不再被渲染」由**引擎**决定，不靠作者自觉：引擎实现与内层的
+  wrap 都不会跑，链条从它的结果继续往外包；
+* 混合链（wrap → replace → wrap）因此也是确定的；一个 `replace` 坏掉时退回的是**它下面那一份**，不是整屏。
+
+**边界：`ctx` = 面板那份冻结注入面 + `component` + `props`，没有别的东西。** 一次改写的工厂是
+`export function wrap(ctx) { return (orig) => vnode; }`，**每次渲染调用一次**（`ctx.props` 是**这一帧**的只读深拷贝，
+用的就是数据口那一个 `readonlySnapshot`）：
+
+| 给 | 说明 |
+|---|---|
+| 面板那 11 个键 | `id` / `pack` / `slot` / `order` / `gate` / `log` / `host` / `hostKey` / `session` / `net` / `data`，一字不改；改写没有宿主可挂，所以 `host` / `hostKey` 是 `null` |
+| `component` | 这一条链改的是哪一个组件 id（一个面板可以声明两条链，模块得知道自己是哪一条） |
+| `props` | 这个组件**这一帧**的 props 的冻结深拷贝（改它改不到引擎那份） |
+
+**没有** store 句柄、没有 store 切片、没有 engine、没有 `Match` / `Battle`、没有对局状态 —— 边界由**没给什么**决定
+（§28.8）。所以一次改写能画错，**改不了对局结果**。
+
+**失败隔离，两个码，各点名一次。** 链条上任何一环：
+
+* 抛异常（工厂里或渲染里）⇒ `CLIENT_WRAP_THREW`，这一环退回它下面那一份（最内层就是引擎自己的组件）；
+* 什么都没返回 / `wrap(ctx)` 返回的不是函数 ⇒ `CLIENT_WRAP_NO_RENDER`，同样退回。
+
+两条都带**包 id + 面板 id + 组件 id**，并且**同一环同一个码只报一次**（一次渲染一条会把控制台刷满）。一个写坏的包
+因此不会把屏幕弄没：最坏情况就是「引擎照今天的样子渲染」。
+
+**传输与重画。** 服务端不判 `wraps`（形状层已经在装载期判死），只把 `component` + `mode` **原样**放进
+`welcome.modPanels`；模块 URL / 注册路径**一字不动**（`/workshop-panels/<包>/<模块>?v=<摘要>`，
+`server/http/workshop.js workshopPanelFilesFor`，§28.8）。链是**渲染期**生效的，所以注册成功之后注册点调用一次
+`main.js` 注入的 `onWrapsChanged`（再 `render` 同一个 `<App/>`：Preact 就地 diff，状态不丢）；没有包声明 `wraps`
+时它一次都不被调用，页面上不多一次渲染、不多一个新全局。
+
+Tests: `test/modPanelWraps.test.js`（声明 / 装载期 / 传输 / 链的次序与合成 / `replace` / 混合链 / 两个失败码 /
+无声明零工作 / 快照脱钩 / 组件 id 表的漂移守卫），`test/modClientPanels.test.js` 与 `test/modClientHosts.test.js`
+（既有 C 层行为一字未改）。
+
 ### 28.20 `server.room`: the room-level hooks (implemented)
 
 **Why a fifth server payload.** After §28.14 and §28.17 a pack has four server-side payloads — `server.modules` (process
@@ -1550,3 +1661,4 @@ Tests: `test/packRoom.test.js` (declaration shape and named refusals, the gating
 success/failure, the static forbidden-global scan, the whitelist verdict, and a real server + real lobby: the event
 order `create → join → matchStart → matchEnd → dispose`, a throwing hook that does not break the room, and W-B where
 only the declared pack's hooks are installed).
+

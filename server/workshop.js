@@ -725,6 +725,12 @@ export function loadWorkshopPanels(loaded, { log = null, baseUrl = WORKSHOP_PANE
         // 包通道（`client.panels[].messages`，§1.9.6）：服务端**要用**它 —— `pack.msg` 只放行这个包真的声明过的
         // 通道（`server/lobby.js` 的 `packChannels`），所以这一份也随清单送到浏览器（客户端是第二个读者）。
         ...(Array.isArray(panel.messages) && panel.messages.length ? { messages: [...panel.messages] } : {}),
+        // 组件级改写（`client.panels[].wraps`，DESIGN §28.19）：服务端**不判**它 —— 形状层已经在装载期判死，
+        // 客户端是第二个读者、自己再判一遍（`extensions.js`）。这里只是**原样透传**（component + mode），
+        // 因为链长在引擎组件上、只有浏览器知道有哪些组件；模块的 URL / 注册路径一字不动。
+        ...(Array.isArray(panel.wraps) && panel.wraps.length
+          ? { wraps: panel.wraps.map((w) => ({ component: w.component, mode: w.mode })) }
+          : {}),
       });
     }
   }

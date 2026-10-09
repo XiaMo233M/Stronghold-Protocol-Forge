@@ -18,6 +18,15 @@
 //     room. The ENGINE defines the envelope (`pack.msg`), the PACK defines the channel — so a pack cannot invent a
 //     protocol type, and `b.*` stays out of reach. Engine message types (`S2C`) keep working through `on` unchanged.
 //
+//   * `client.panels[].wraps[]` — **组件级改写** (DESIGN §28.19, docs/WORKSHOP.md §1.9.7): a panel may also WRAP or
+//     REPLACE one of the engine's named components (`public/js/ui/modComponents.js`). A slot says "insert here"; this
+//     says "this screen looks different now" — the reference community pack rewrites whole screens, which no mount
+//     point can express. The chain is ordered by the same comparator as mounting (order → pack id → panel id, §28.3),
+//     and the wrapper's `ctx` is the SAME frozen surface a panel gets plus exactly two things: `component` (which id
+//     this link rewrites) and `props` (a read-only deep snapshot of the component's props, this render's). There is
+//     still no store handle, no engine and no match state — the boundary is what is not passed in. A wrap declaration
+//     that cannot be used drops the WHOLE panel, never half of it (the stance below).
+//
 // This module turns that list into mounts. Three properties are load-bearing:
 //
 //   * THE BOUNDARY IS WHAT IS NOT PASSED IN (DESIGN §28.8). A panel's factory gets a frozen object with exactly
@@ -42,6 +51,9 @@ import { t } from '../../../shared/i18n.js';
 // 引擎已经定义好的服务端→客户端类型（`shared/protocol.js S2C`）。**不在这里抄一份**：抄一份就是第二个会漂的真相，
 // 而漂的方向是「一个面板订阅了一个引擎其实不会发的名字」—— 那正是这一层到处在拒绝的形态。
 import { S2C } from '../../../shared/protocol.js';
+// 组件级改写（DESIGN §28.19）：引擎的具名组件注册表。**只有包真的声明了 `wraps` 才会走到它**——
+// 没有任何包声明时 `setComponentWraps` 一次都不会被调用，链表是空的，组件里的那一次查找之后就是引擎今天那份实现。
+import { MOD_COMPONENT_IDS, MOD_WRAP_MODES, setComponentWraps, clearComponentWraps, wrappedComponentIds } from './modComponents.js';
 
 /** 引擎类型集合（`net.on(type)` 对它们照旧原样透传）。 */
 const S2C_TYPES = new Set(S2C);
@@ -229,9 +241,10 @@ const isPanelId = (v) => typeof v === 'string' && v.length > 0 && v.length <= 64
  *   slotHost?: (slot: string) => any,
  *   createElement?: (tag: string) => any,
  *   env?: Record<string, boolean>,
+ *   onWrapsChanged?: (links: number) => void,
  * }} deps
  * @returns {{ apply: (list: any) => { accepted: number },
- *   mounted: () => string[], refusals: () => Array<{ code: string, detail: string }>, dispose: () => void }}
+ *   mounted: () => string[], wrapped: () => string[], refusals: () => Array<{ code: string, detail: string }>, dispose: () => void }}
  */
 export function createPanelRegistry(deps) {
   const store = deps.store;
@@ -249,6 +262,9 @@ export function createPanelRegistry(deps) {
   /** 客户端数据层（`public/js/data.js`）。注入而不是 import：那是浏览器模块（fetch / location），
    *  extensions.js 必须能在 Node 里整套跑（`test/modClientPanels.test.js` 就是这么跑的）。 */
   const dataApi = deps.data || null;
+  /** 组件级改写注册成功之后的**重画回调**（DESIGN §28.19）：链是渲染期生效的，注册完成之后已经画出来的那一帧
+   *  必须重画一次（`main.js` 重新 `render` 同一个 `<App/>`）。没有包声明 `wraps` 时它一次都不会被调用。 */
+  const onWrapsChanged = typeof deps.onWrapsChanged === 'function' ? deps.onWrapsChanged : () => {};
   /** 表名 → 冻结快照（首次读时造一次，之后共享；没声明过的表根本走不到这里）。 */
   const dataSnapshots = new Map();
 
@@ -273,6 +289,12 @@ export function createPanelRegistry(deps) {
   const themePrevious = new Map();
   /** 面板订阅包通道（`net.on('<通道>')`）拿到的退订函数：`dispose` 要一并撤掉。 */
   const channelOffs = [];
+  /** panel key -> 它注册成功的 wraps 链接（模块每个面板只 import 一次）。 */
+  const wrapLinks = new Map();
+  /** panel key -> 这个模块导出过 `mount` / `default` 吗（**只改写**的模块没有，也不该因此被点名拒绝）。 */
+  const wrapMounts = new Map();
+  /** panel key -> 为一个面板的 wraps 已经 import 过的模块（挂载那条路复用同一个模块对象，不重复 import）。 */
+  const wrapModules = new Map();
   let subscribed = false;
   let unsubscribe = null;
   let flushing = false;
@@ -328,8 +350,45 @@ export function createPanelRegistry(deps) {
       }
       styles.push({ path: stylePath, url });
     }
+    // 组件级改写（`client.panels[].wraps`，DESIGN §28.19）：这个面板要包裹 / 替换哪几个引擎具名组件。客户端是
+    // **第二个读者**，所以与形状层同一条复判、同一批拒绝码。三条都用同一个出口：**点名 + 整个面板不落地** ——
+    // 链挂了一半（这个组件改了、那个没改）比完全没改更难查，而「静默丢掉一条声明」正是这一层到处在拒绝的形态。
+    /** @type {Array<{ component: string, mode: string }>} */
+    const wraps = [];
+    if (raw.wraps !== undefined) {
+      if (!Array.isArray(raw.wraps) || !raw.wraps.length) {
+        refuse('CLIENT_WRAP_BAD_SHAPE', `panel "${key}" declares wraps ${JSON.stringify(raw.wraps)} — a non-empty array of { component, mode }`);
+        return null;
+      }
+      // 上限就是**枚举的大小**（一个组件一条链，重复的那条下面会被拒）：链长在**引擎组件**上，一次渲染要走完整条
+      // 链 —— 一个坏掉 / 敌意的服务端不该能用一千条声明把 HUD 的每一帧变成一千层递归。
+      if (raw.wraps.length > MOD_COMPONENT_IDS.length) {
+        refuse('CLIENT_WRAP_BAD_SHAPE', `panel "${key}" declares ${raw.wraps.length} wraps — at most ${MOD_COMPONENT_IDS.length} components per panel (one link per component)`);
+        return null;
+      }
+      for (const entry of raw.wraps) {
+        if (!isPlainObj(entry) || typeof entry.component !== 'string' || !entry.component) {
+          refuse('CLIENT_WRAP_BAD_SHAPE', `panel "${key}" declares the wrap ${JSON.stringify(entry)} — every entry is { component, mode } and component names an engine component`);
+          return null;
+        }
+        if (!MOD_COMPONENT_IDS.includes(entry.component)) {
+          refuse('CLIENT_WRAP_UNKNOWN_COMPONENT', `panel "${key}" wraps ${JSON.stringify(entry.component)}, which is not an engine component this build renders — one of ${MOD_COMPONENT_IDS.join(', ')}`);
+          return null;
+        }
+        if (!MOD_WRAP_MODES.includes(entry.mode)) {
+          refuse('CLIENT_WRAP_BAD_MODE', `panel "${key}" wraps "${entry.component}" with mode ${JSON.stringify(entry.mode)} — "wrap" (compose with the engine's own component) or "replace" (supply the whole subtree)`);
+          return null;
+        }
+        if (wraps.some((w) => w.component === entry.component)) {
+          refuse('CLIENT_WRAP_BAD_SHAPE', `panel "${key}" wraps "${entry.component}" twice — one component, one link (two links would be two wrappers nobody can tell apart)`);
+          return null;
+        }
+        wraps.push({ component: entry.component, mode: entry.mode });
+      }
+    }
     return {
       key, id, pack, slot: raw.slot, url,
+      wraps,
       order: Number.isInteger(raw.order) ? raw.order : 0,
       gate: typeof raw.gate === 'string' && raw.gate ? raw.gate : null,
       requires: Array.isArray(raw.requires) ? raw.requires.map(String) : [],
@@ -342,8 +401,15 @@ export function createPanelRegistry(deps) {
     };
   }
 
-  /** The frozen surface one panel module is called with (see the header: what is NOT here is the point). */
-  function panelContext(rec, host, hostKey = null) {
+  /**
+   * The frozen surface one panel module is called with (see the header: what is NOT here is the point).
+   *
+   * `extra` is how a **component rewrite** (DESIGN §28.19) gets its two additions on top of the very same object:
+   * `{ component, props }` — the id this link rewrites and that component's props as a read-only deep snapshot. A
+   * wrapper is not mounted anywhere, so `host` / `hostKey` are `null` for it (the shape is the same; nothing else is
+   * added, and there is still no store, no engine and no match state).
+   */
+  function panelContext(rec, host, hostKey = null, extra = null) {
     const scoped = Object.freeze({
       info: (...a) => log?.info?.(`[mod ${rec.key}]`, ...a),
       warn: (...a) => log?.warn?.(`[mod ${rec.key}]`, ...a),
@@ -440,6 +506,7 @@ export function createPanelRegistry(deps) {
     return Object.freeze({
       id: rec.id, pack: rec.pack, slot: rec.slot, order: rec.order, gate: rec.gate,
       host, hostKey, session, net: netFacade, data: dataFacade, log: scoped,
+      ...(extra || {}),
     });
   }
 
@@ -519,14 +586,17 @@ export function createPanelRegistry(deps) {
   }
 
   async function mountOne(rec, host, mk, hostKey) {
-    let mod;
-    try {
-      mod = await importModule(rec.url);
-    } catch (err) {
-      mounted.delete(mk);
-      blocked.add(mk);
-      refuse('CLIENT_PANEL_IMPORT_FAILED', `panel "${rec.key}" failed to import ${rec.url}: ${err && err.message ? err.message : String(err)}`);
-      return true;
+    // 声明了 `wraps` 的面板已经为它的链 import 过这个模块了：同一个 URL 只 import 一次（模块对象直接复用）。
+    let mod = wrapModules.get(rec.key);
+    if (!mod) {
+      try {
+        mod = await importModule(rec.url);
+      } catch (err) {
+        mounted.delete(mk);
+        blocked.add(mk);
+        refuse('CLIENT_PANEL_IMPORT_FAILED', `panel "${rec.key}" failed to import ${rec.url}: ${err && err.message ? err.message : String(err)}`);
+        return true;
+      }
     }
     const factory = mod && typeof mod.mount === 'function' ? mod.mount
       : (mod && typeof mod.default === 'function' ? mod.default : null);
@@ -548,6 +618,68 @@ export function createPanelRegistry(deps) {
     const entry = mounted.get(mk);
     if (entry) entry.unmount = result && typeof result.unmount === 'function' ? result.unmount : null;
     return true;
+  }
+
+  /**
+   * 组件级改写（`client.panels[].wraps`，DESIGN §28.19）：把一个面板的 wraps 声明变成长在引擎组件上的链。
+   *
+   * 三件事按这个次序发生，每一件都是**具名**的：
+   *   * 模块 import 不了 ⇒ `CLIENT_PANEL_IMPORT_FAILED`（与挂载路径同一个码：坏的是这个字段，不是「在哪一层发现的」）；
+   *   * 模块没有 `wrap` 导出 ⇒ `CLIENT_WRAP_NO_EXPORT`，**整个面板**不落地（连它声明的槽位也不挂 ——
+   *     「一半的改写」比完全没有改写更难查）；
+   *   * 导出过 `mount` 没有：记下来。一个**只改写**的模块不需要 `mount`，它声明了槽位也不往里面挂东西
+   *     （所以那个空容器也不建）。
+   *
+   * 模块每个面板只 import 一次：挂载那条路复用这里拿到的模块对象（`wrapModules`），所以「既挂又改」的面板不会
+   * import 两次。
+   * @param {any} rec
+   * @returns {Promise<boolean>} 链注册成功？
+   */
+  async function registerWraps(rec) {
+    if (!rec.wraps.length || wrapLinks.has(rec.key)) return true;
+    let mod;
+    try {
+      mod = await importModule(rec.url);
+    } catch (err) {
+      blockedPanels.add(rec.key);
+      refuse('CLIENT_PANEL_IMPORT_FAILED', `panel "${rec.key}" failed to import ${rec.url}: ${err && err.message ? err.message : String(err)}`);
+      return false;
+    }
+    const wrap = mod && typeof mod.wrap === 'function' ? mod.wrap : null;
+    if (!wrap) {
+      blockedPanels.add(rec.key);
+      refuse('CLIENT_WRAP_NO_EXPORT', `panel "${rec.key}" declares wraps but ${rec.url} exports no wrap(ctx) — a rewrite that cannot be used drops the whole panel (its slot is not mounted either)`);
+      return false;
+    }
+    wrapMounts.set(rec.key, typeof mod.mount === 'function' || typeof mod.default === 'function');
+    wrapModules.set(rec.key, mod);
+    wrapLinks.set(rec.key, rec.wraps.map((w) => ({
+      component: w.component, mode: w.mode, pack: rec.pack, panel: rec.id, key: rec.key, wrap,
+      report: refuse, reported: new Set(),
+      // ctx = 面板那份冻结注入面 + `component` + `props`（这一帧的只读深拷贝，用数据口那一个 `readonlySnapshot`）。
+      // 一个改写没有宿主可挂，所以 `host` / `hostKey` 是 `null`；除这两个之外**不多给任何东西**。
+      makeCtx: (props) => panelContext(rec, null, null, { component: w.component, props: readonlySnapshot(props) }),
+    })));
+    return true;
+  }
+
+  /**
+   * 重建每个组件的链。`panels` 已经按**既有面板比较器**排好（order → 包 id → 面板 id，§28.3），所以这个循环的
+   * 次序**就是**链的次序：最先的那一条贴着引擎组件（内层），最后的那一条在最外面。只有链表真的变了才通知页面
+   * 重画一次 —— 一个没声明 wraps 的服务器上，这个函数连一次都不会走到「变了」。
+   */
+  function syncWrapChains() {
+    /** @type {Map<string, any[]>} */
+    const byComponent = new Map();
+    let links = 0;
+    for (const rec of panels) {
+      for (const link of wrapLinks.get(rec.key) || []) {
+        if (!byComponent.has(link.component)) byComponent.set(link.component, []);
+        byComponent.get(link.component).push(link);
+        links++;
+      }
+    }
+    if (setComponentWraps(byComponent)) onWrapsChanged(links);
   }
 
   async function flush() {
@@ -575,6 +707,14 @@ export function createPanelRegistry(deps) {
           }
           if (!gate.value) continue; // not yet: the next store change retries
         }
+        // 组件级改写（DESIGN §28.19）：与槽位挂载**互相独立** —— 一个只改写的模块不导出 `mount`，一个既挂又改的模块
+        // 两件事都做；链也**不依赖任何容器已经渲染**（这正是「改写一个组件」与「插进一个槽位」的区别）。
+        if (rec.wraps.length) {
+          if (!(await registerWraps(rec))) continue;      // 声明用不了 ⇒ 整个面板不落地（槽位也不挂）
+          // 自带样式表在**改写生效之前**注入：改写的第一帧就该有它自己的样式（与挂载路径同一份 `styles[]`）。
+          if (!injectStylesOnce(rec)) { blockedPanels.add(rec.key); continue; }
+          if (wrapMounts.get(rec.key) === false) continue; // 只改写的模块：不建那个空容器
+        }
         // 容器只在组件真的渲染出 `[data-mod-slot]` 之后才存在：没有就是「还没到时候」，不记任何东西，
         // 下一次 store 变化再试（可重复宿主因此会随着新卡片出现而逐个挂上）。
         const targets = hostTargets(rec);
@@ -590,6 +730,8 @@ export function createPanelRegistry(deps) {
           await mountOne(rec, host, mk, key);
         }
       }
+      // 链在**所有**面板都判过之后重建一次：`panels` 的次序就是链的次序，没声明 wraps 时这里什么都不做。
+      syncWrapChains();
     } finally {
       flushing = false;
       if (dirty && !disposed) { dirty = false; void flush(); }
@@ -625,6 +767,8 @@ export function createPanelRegistry(deps) {
     },
     /** The panel keys currently mounted (test / diagnostic surface). */
     mounted: () => [...mounted.keys()].sort(),
+    /** The engine component ids some panel currently rewrites (test / diagnostic surface, DESIGN §28.19). */
+    wrapped: () => wrappedComponentIds(),
     /** The registered stylesheet URLs currently injected, in injection order (test / diagnostic surface). */
     styleUrls: () => styleEls.map((el) => el && el.href).filter((u) => typeof u === 'string'),
     /**
@@ -685,6 +829,11 @@ export function createPanelRegistry(deps) {
         if (el && typeof el.remove === 'function') el.remove();
       }
       styleEls.length = 0;
+      // 组件级改写一并撤回：链空了之后，引擎下一次渲染就是它今天那份实现（没有链就没有快照、没有分支变化）。
+      clearComponentWraps();
+      wrapLinks.clear();
+      wrapMounts.clear();
+      wrapModules.clear();
       if (typeof unsubscribe === 'function') unsubscribe();
       unsubscribe = null;
       subscribed = false;

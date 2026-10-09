@@ -86,6 +86,10 @@ const SCREENS = { title: TitleScreen, lobby: LobbyScreen, room: RoomScreen, game
  * module is imported and **no DOM is added** — the slot containers are created on demand by the registry (the four
  * overlay ones) or rendered by the components themselves (the five host ones), never by this shell.
  */
+// 第一个渲染的容器。组件级改写（DESIGN §28.19）在**渲染期**生效，所以链注册完成之后已经画出来的那一帧要重画一次 ——
+// 重画就是再 `render` 同一个 `<App/>`（Preact 就地 diff，状态不丢）。boot 之前它是 `null`：那时还没有东西需要重画。
+let appRoot = null;
+
 const modPanels = createPanelRegistry({
   store,
   net,
@@ -93,6 +97,9 @@ const modPanels = createPanelRegistry({
   // 数据层（`public/js/data.js`），所以读一张表不会多一个请求 —— 它读的就是引擎已经抓过的那份内容。
   data,
   notify: (text, kind) => toast(text, kind || 'warn'),
+  // 组件级改写（DESIGN §28.19）：`client.panels[].wraps` 注册完成、链表真的变了才调用一次。没有包声明 `wraps`
+  // 的服务器上它一次都不会被调用 —— 页面上不多一次渲染、不多一个新全局（与面板那条不变量逐字相同）。
+  onWrapsChanged: () => { if (appRoot) render(html`<${App} />`, appRoot); },
 });
 
 /** Copy of a server message without transport fields. */
@@ -491,6 +498,7 @@ async function boot() {
   await Promise.all([waitForFonts(1200), connectWhenReady, langReady]);
   const root = document.getElementById('app');
   render(html`<${App} />`, root);
+  appRoot = root; // 组件级改写（§28.19）注册完成之后要重画的正是这一个根
 
   const splash = document.getElementById('boot');
   if (splash) {

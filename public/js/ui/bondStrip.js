@@ -30,6 +30,8 @@
 // pick goes with onMember: never the empty 甄选干员 slot's card).
 
 import { html, BondDisc, Icon, MicroLabel, Tooltip } from './components.js';
+// 组件级改写（DESIGN §28.19）：`game.bondStrip` 是引擎的具名组件之一，包声明的 wraps 就长在它上面。
+import { modComponent } from './modComponents.js';
 import { RichText, UnitThumb, BondGlyph, GIcon } from './gameComponents.js';
 import { sortBonds, bondMembers, nextThreshold, bondTier, harmonyMembers, HARMONY_BOND, memberHeadCount, briefingBondTip, diyGetter, diyRecordFor, memberStandIn, standInForText } from './gameLogic.js';
 import { formatBondEffect } from './richText.js';
@@ -50,7 +52,7 @@ function OwnerTag({ owner }) {
  * @param {{ bonds: any[], layersDisabled?: boolean, onOpen:(bondId:string)=>void, openId?: string|null, max?: number,
  *   owner?: string|null }} props — owner: the watched teammate's name (null = your own bonds)
  */
-export function BondStrip({ bonds, layersDisabled = false, onOpen, openId = null, max = 14, owner = null }) {
+export const BondStrip = modComponent('game.bondStrip', function BondStrip({ bonds, layersDisabled = false, onOpen, openId = null, max = 14, owner = null }) {
   const sorted = sortBonds(bonds, (id) => data.lookup('bonds', id));
   if (!sorted.length) {
     return html`<div class=${cx('bstrip', 'bstrip--empty', owner && 'is-other')} data-owner=${owner || null}>
@@ -89,7 +91,7 @@ export function BondStrip({ bonds, layersDisabled = false, onOpen, openId = null
     ${sorted.length > shown.length ? html`<span class="bstrip__more num">+${sorted.length - shown.length}</span>` : null}
   </div>`;
   return layersDisabled ? html`<${Tooltip} text=${t('层数叠加已禁用')} placement="bottom">${strip}<//>` : strip;
-}
+});
 
 /**
  * Bond detail popup.

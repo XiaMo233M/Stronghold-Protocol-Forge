@@ -558,7 +558,7 @@ node tools/workshop-validate.mjs my-pack
 | 字段 | 形状 | 要点 |
 |---|---|---|
 | `assets` | `{ container, manifest, serverPolicy?, verify? }` | `container` 是包内相对路径、必须以 `.spresources` 结尾（`tools/make-spresources.mjs` 的产物）；`manifest` 是包内相对路径、必须 `.json`（客户端要验的扁平文件表）；`serverPolicy` 缺省 `"serve"`，可选 `"cache-only"`（后者让服务器对 `/assets`、`/fonts` 回 412，见 §1.9.4）；`verify` 缺省 `"sha256"`，按旁挂 `<container>.sha256` 校验 |
-| `client` | `{ panels: [{ id, slot, module, order?, gate?, styles?, data?, messages? }], requires?, theme? }` | 面板按 `id` 排序后才进清单；`module` 是包内相对路径，**不是 URL**；`slot` 是闭枚举的九个宿主（四个浮层 + 五个既有组件里的宿主，见 §1.9.3）；`styles` 是这个面板自带的 `.css`、`data` 是它要读的数据表、`messages` 是它要收发的**包通道**（四者见 §1.9.3 的数据口 / §1.9.5 / §1.9.6）；`requires` 只能取 `serviceWorker` / `cacheStorage` / `webCrypto` —— 缺一即「浏览器不支持」，不是「装了但静默不工作」；`theme.vars` 是包写的 CSS 变量（见 §1.9.5） |
+| `client` | `{ panels: [{ id, slot, module, order?, gate?, styles?, data?, messages?, wraps? }], requires?, theme? }` | 面板按 `id` 排序后才进清单；`module` 是包内相对路径，**不是 URL**；`slot` 是闭枚举的九个宿主（四个浮层 + 五个既有组件里的宿主，见 §1.9.3）；`styles` 是这个面板自带的 `.css`、`data` 是它要读的数据表、`messages` 是它要收发的**包通道**（四者见 §1.9.3 的数据口 / §1.9.5 / §1.9.6）；`wraps` 是它要**包裹 / 替换**的引擎具名组件（见 §1.9.7）；`requires` 只能取 `serviceWorker` / `cacheStorage` / `webCrypto` —— 缺一即「浏览器不支持」，不是「装了但静默不工作」；`theme.vars` 是包写的 CSS 变量（见 §1.9.5） |
 | `server` | `{ preDispatch: { module, policy, intercepts } }` | `module` 必须 `.mjs`（服务端加载，浏览器不加载）；`policy` 必须 `.json`；`intercepts` 每一项**必须**存在于 `shared/protocol.js C2S`（从协议反推，不在这里另抄一份名单 —— 抄一份就是第二个会漂移的真相） |
 | `routes` | `[{ path, file, cache? }]` | `path` 是 `/` 开头的绝对 HTTP 路径；`file` 是包内相对路径且必须 `.json`（`.js` / `.html` 一律不在此通道：那是代码执行面）；`cache` 缺省 `"no-cache"`，可选 `"no-store"` / `"public"` |
 | `i18n` | `{ "<语种>": "<包内相对 .json>" }` | 给**已有语种**（`en` / `ja` / `ko` / `zh-TW` …）补界面词条；语种码必须是常用大小写、不能是源语言 `zh`；文件里是 `{ "<中文 msgid>": "<译文>" }`。**已有键绝不覆盖**、冲突点名报告 —— 见 **§1.10** |
@@ -622,6 +622,7 @@ node tools/workshop-validate.mjs my-pack
 | `resource.*` 三个 `C2S` 类型 | ✅ 已实现（B1：`shared/protocol.js`；`PROTOCOL_VERSION` 仍是 1） |
 | 只读路由被注册、被服务 | ✅ 已实现（B1：`server/http/workshop.js workshopRoutesFor`、`server/http/static.js`；`test/modRoutes.test.js`） |
 | C 层面板被注册、被挂载（模块路由 + `welcome.modPanels` + 四个宿主 + `order`/`gate`/`requires`） | ✅ 已实现（B2：`server/workshop.js loadWorkshopPanels`、`server/http/workshop.js workshopPanelFilesFor`、`public/js/ui/extensions.js`、`server/lobby.js welcomeInfo`；`test/modClientPanels.test.js`） |
+| **组件级改写**（`client.panels[].wraps`：包裹 / 替换一个具名引擎组件，链按 §28.3 次序合成） | ✅ 已实现（DESIGN §28.19：`shared/workshop.js` 的闭枚举 + `public/js/ui/modComponents.js` + `extensions.js` 的注册与失败隔离；`test/modPanelWraps.test.js`） |
 | `assets` 的容器与清单被服务（`/workshop-resources/`，流式、只服务注册过的 URL、`?v=` 缓存键） | ✅ 已实现（B3a：`server/workshop.js assetsIssues`、`server/http/workshop.js workshopResourceFilesFor`、`server/http/static.js`；`test/modAssets.test.js`） |
 | `serverPolicy`：`serve`（缺省）/ `cache-only`（`/assets`、`/fonts` 回 412 且不回源） | ✅ 已实现（B3a：`server/http/workshop.js resourceServerPolicy`、`server/http/static.js`；只在包显式声明时生效） |
 | `verify`：按声明校验容器，失败明示 | ✅ 已实现（B3a：`server/workshop.js assetsIssues` + 旁挂 `<container>.sha256`；`ASSETS_VERIFY_FAILED` / `ASSETS_VERIFY_UNAVAILABLE`） |
@@ -1080,6 +1081,87 @@ export function mount(ctx) {
 **这一格不提供什么**：没有服务端存档、没有离线消息、没有跨房间广播、没有服务端语义（谁该收到、聊天记录怎么存、
 皮肤怎么同步，都是**包自己**的事 —— 服务端那一半用 §1.9.1 的 `server.preDispatch` 钩子接，它在 `intercepts` 里
 写上 `pack.msg` 就能看到这条消息，并可以用 `send` 回话）。
+
+#### 1.9.7 组件级改写：`client.panels[].wraps`（DESIGN §28.19）
+
+**它解决的是什么**：§1.9.3 的九个槽位说的是「插进这个位置」—— 你在引擎**已经画出来的容器**里画你自己的东西。
+但「这一屏现在长得不一样了」不是插入：那要改的是**引擎自己那个组件**。所以面板还可以声明 `wraps`，
+每个条目点名一个**引擎具名组件**和一个方式：
+
+| 方式 | 意思 | 你拿到什么 |
+|---|---|---|
+| `wrap` | **包一层**：链条下方那一份留给你放在自己的树里 | `orig`（一个 vnode，直接嵌进你返回的那棵树即可） |
+| `replace` | **整段换掉**：你给出完整子树 | `orig` 是 `null` —— 引擎决定它下方不再渲染，不是靠你自觉 |
+
+可改写的组件就四个（闭枚举，写别的整包被拒 `CLIENT_WRAP_UNKNOWN_COMPONENT`）：
+
+| `component` | 是什么 | 里面顺带有的槽位 |
+|---|---|---|
+| `game.bondStrip` | 对局 HUD 的**盟约条** | `screen.game.bondStrip` |
+| `game.shopCard` | **每一张干员卡**（商店 / 晋升奖励 / 定向投放） | `screen.game.shopCard`（可重复） |
+| `game.hud.topBar` | 对局 HUD 的**顶栏** | `screen.game.hud` |
+| `loadout.detail` | **干员详情面板**本身 | `screen.loadout.detail` |
+
+名字与槽位**是两个命名空间**（`game.bondStrip` 是组件，`screen.game.bondStrip` 是那个组件里的一个容器）：
+要「往里塞东西」用槽位，要「换掉/包住整块」用组件。
+
+**模块契约**（与 `mount` 同一个模块文件，两个导出可以同时有）：
+
+```js
+// wrap(ctx) 每次渲染调用一次：ctx.props 是**这一帧**的 props 只读快照。
+export function wrap(ctx) {
+  // 返回一个渲染函数：外层拿到链条下方那一份当 `orig`（replace 档拿到 null）。
+  return (orig) => html`<div class="badge">${ctx.props.pub?.round ?? '-'}<${orig} /></div>`;
+}
+```
+
+```jsonc
+// 1) wrap：给顶栏加一个角标 —— 顶层组件原样还在
+{ "id": "hud-badge", "slot": "screen.game.hud", "module": "ui/badge.js",
+  "wraps": [ { "component": "game.hud.topBar", "mode": "wrap" } ] }
+```
+
+```js
+// 2) replace：整条盟约条换成你自己的那一套（引擎的实现与它里面的槽位这一帧都不渲染）
+export function wrap(ctx) {
+  return () => html`<div class="mychat">
+    ${ctx.props.bonds.map((b) => html`<span key=${b.bondId}>${b.bondId} ×${b.count}</span>`)}
+  </div>`;
+}
+```
+
+**`ctx` 就是面板那一个注入面**（§1.9.3 的那张表），**只多两个键**：
+
+| 多给 | 说明 |
+|---|---|
+| `component` | 你这一条链改的是哪个组件 id（一个面板可以声明两条链，得知道自己是哪一条） |
+| `props` | 那个组件**这一帧**的 props 的**冻结深拷贝**：`ctx.props.pub.round`、`ctx.props.bonds`… 你改自己那份，引擎那份一个字节不动 |
+
+**没有** store、没有对局对象、没有 `Match` / `Battle` —— 所以改写能画错，**改不了对局结果**（与面板同一条边界）。
+`host` / `hostKey` 是 `null`：改写没有容器可挂。
+
+**次序**：同一条链上多个包按**既有面板比较器**排（`order` → 包 id → 面板 id，DESIGN §28.3）：`order` 小的在**内层**、
+大的在**外层**；与数组次序、谁先加载都无关。**只改写的面板不需要 `mount`**（`wraps` 和挂槽位互不影响：两个都写
+就两件事都做）。
+
+**三条纪律**（与别处逐字相同）：
+
+- **用不了的声明拒整包**：未知组件（`CLIENT_WRAP_UNKNOWN_COMPONENT`，理由里会列出合法 id）、坏或缺 `mode`
+  （`CLIENT_WRAP_BAD_MODE`）、坏形状（`CLIENT_WRAP_BAD_SHAPE`：不是数组 / 空数组 / 条目不是 `{ component, mode }` /
+  同一组件两条 / 条数超过组件数 —— 一个组件一条链）。装载期再加两条：模块 import 不了（`CLIENT_PANEL_IMPORT_FAILED`）、
+  模块没有 `wrap` 导出（`CLIENT_WRAP_NO_EXPORT`）—— 这时**整个面板不落地**，连它声明的槽位也不挂。
+- **失败隔离，点名一次**：`wrap(ctx)` 抛异常、或什么都没返回（`null` / 不是函数），这一环就退回**它下面那一份**
+  （最内层 = 引擎自己的组件），控制台一条 `CLIENT_WRAP_THREW` / `CLIENT_WRAP_NO_RENDER`（带包 + 面板 + 组件），
+  一次渲染只报一条。**屏幕不会因为你的包坏掉而消失**。
+- **不声明就没有成本**：没有包写 `wraps` 时，引擎渲染的还是它今天那一棵 vnode 树（不多一层、不多一次快照、不多
+  一个 DOM 节点、不多一次重画）。
+
+`wraps` 进内容哈希：只有 `mode` 不同就是两个摘要（同一个摘要不能有两种界面）。声明写进 `pack.json` 之后照旧随
+`welcome.modPanels` 到达浏览器；模块 URL 与注册路由一字不动（`/workshop-panels/<包id>/<module>`）。
+
+**当前状态**：形状层、装载期、传输与全部纯逻辑有测试（`test/modPanelWraps.test.js`：次序与合成、`replace`、
+混合链、两个失败码、无声明零工作、快照脱钩、组件 id 表的漂移守卫）。浏览器里真的 import + 真的渲染在本机没有
+Chrome 上跑不了 —— 那是 `SP_E2E=1` 的可选路径，与 §4.4 同一个 standing gap。
 
 ### 1.10 `i18n`：给**已有语种**补界面词条（B5 段已实现）
 
