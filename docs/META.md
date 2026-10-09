@@ -295,6 +295,67 @@ flowing), then `botPrepEnd` (the rehearsed layout when it won, temp, Ready). The
 default layout stays). Virtual time runs it in one go (same decisions). Tests default rehearsal to 0
 (`test/match/harness.js`); `tools/matchrun.mjs --rehearsal N` sets it.
 
+### 1.6 野排匹配 (quick match)
+A queue of strangers that becomes an ordinary co-op room (`server/matchmaking.js`, `MatchmakeQueue`; PRODUCT feature of
+the engine — deliberately NOT a mod-layer or pack surface, and a pack can neither declare nor read anything of it).
+Messages: `room.queue { mode?, difficulty?, mods? }` enters or re-answers, `room.dequeue {}` cancels; `room.queued
+{ status, position, size, need, waitedMs, deadline, code? }` is the queue's only frame.
+
+* **Placement rule.** When the number of WAITING players reaches `queue.size` (default `MAX_SEATS` 4) the engine takes
+  that many **longest-waiting** players — strict arrival order, the order of accepted `room.queue` messages — and forms
+  ONE room: the first arrival becomes host in seat 0, the next takes the lowest free seat, and so on. Formation calls the
+  lobby's own `create` + `join`, so a quick-matched room is byte-for-byte the room `room.create` + 3 × `room.join` would
+  have produced (highest-numbered rule, kick, AI seats, spectators, start gate all unchanged). WAITING means queued AND
+  connected: a dropped player is skipped and does not count towards the threshold.
+* **Bounded wait.** `queue.waitMs` (default `120 000` ms = the official `matchTimeMax`, [ASSUMED]: research 06 §3.3
+  says 120 s but not what follows) after a player entered, they leave the queue and get
+  `room.queued { status: 'timeout' }`. The sweep `queue.sweepMs` (5 s) also retries placement and runs at most while the
+  queue is not empty (an empty queue is one Map and no timer).
+* **Named answers.** The queue already holds `queue.max` waiting players (default: the queue size) ⇒ `QUEUE_FULL`
+  (the refusal does not consume the arrival). `room.dequeue` from a player who is not queued ⇒ `QUEUE_EMPTY` (that IS
+  the empty-queue answer: an empty queue simply accepts the next arrival, it has no state to report). A player already in
+  a room (or in a running match) ⇒ `QUEUED` — a quick match places people INTO rooms, it never pulls them out of one.
+  Queueing twice is idempotent (one player, one slot).
+* **Cancel and drops.** `room.dequeue` removes the entry at once and answers `status: 'cancelled'`. A dropped player
+  keeps the slot (a resume inside the window is waiting again) but stops counting as waiting, and the bounded wait still
+  ends it — so a slot can never be parked forever. `room.leave` is not the queue's message (a queued player with no room
+  has nothing to leave: `NOT_IN_ROOM`).
+* **Orthogonality.** The queue never carries a room's `modIds`: a quick-matched room declares no set and therefore runs
+  the server's DEFAULT content, while a room that already declared one keeps it (§1.7, W-B). Queue content is the players
+  waiting, their declared `mode`/`difficulty`/`mods` digest and their arrival time — there is no rating, no power level
+  and no cross-room broadcast. The one frame shape a client must know is `room.queued`; the client change is the lobby
+  entry + the waiting panel (`public/js/screens/lobby.js`), because a placed player is routed by the ordinary
+  `room.state` (`public/js/main.js` `onRoomState`).
+* **Config** (`LOBBY_DEFAULTS.queue`, `MATCHMAKE_DEFAULTS`; `startServer({ queue: { size, max, waitMs, sweepMs,
+  difficulty } })`, `server/http/config.js`): `size` = the threshold (≤ `MAX_SEATS`), `max` = the cap, `waitMs`, `sweepMs`,
+  `difficulty` = the room's difficulty when the queueing player named none (`NORMAL`). `room.queue` draws from the
+  per-connection heavy bucket (`server/net.js HEAVY_TYPES`): entering re-announces the queue to everyone waiting.
+* `/healthz` adds `queued` / `queuedWaiting` / `queueSize` / `queueFormed` (`Lobby.stats`).
+* **Not provided** (owner decisions, deliberately not implemented here): a partly filled queue is never started by the
+  engine (no "start with whoever is here" and no AI top-up — the threshold is the queue size), there is no 精确搜寻
+  rating, no requeue-after-match and no region or content filter beyond the server's own default set.
+
+### 1.7 房间保留 (room retention)
+When a match ends the room is **not** torn down (`server/lobby.js onMatchEnd`). It stays in the lobby in its LOBBY state
+with everything the group set up:
+
+* the **members and their seats** (a human who departed during the match has its seat freed; the rest stay seated),
+* its **`modIds` / `modSet`** — the set the room declared at `room.create` (W-A) and the one its matches actually ran
+  (W-B). Nothing at match end clears or re-resolves it, and `room.state.mods` keeps naming it,
+* its `difficulty` and the `aiPicksLast` option, its spectators, and its `matchNo` counter (the next match gets
+  `matchCount + 1`, so a late `b.progress` / `b.result` of the finished match stays ignored, DESIGN §14).
+
+The room is reclaimed exactly like any other room, with no extra keep-alive: the **last active human leaving** (explicit
+`room.leave` / `g.leave`) disposes it at once (`removeMember` → `disposeRoom { reason: 'empty' }`, spectators get
+`room.closed {empty}`), and a **disconnected** human's seat is released by the lobby grace (`lobbyGraceMs`, default 60 s;
+`room.closed {timeout}`) — which is also what reclaims a room whose last human never came back. A room with no match is
+reclaimed the same way, so retention adds no second lifecycle: a retained room holds no timer of its own (the only timers
+that outlive the match are the grace timers already running for its disconnected seats).
+
+Starting again needs nothing new: the room is in LOBBY, so `room.start` runs with the same seats and the same declared
+set — no re-invite, no new code, and the result replay of the finished match is still owed to a member who resumes in
+the meantime (header bullet of `server/lobby.js`, test/roomKeep.test.js).
+
 ---
 
 ## 2. Effect registry (content API)

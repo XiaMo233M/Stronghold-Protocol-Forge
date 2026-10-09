@@ -1249,5 +1249,14 @@
   "正在补齐 {done}/{total}": "Downloading {done}/{total}",
   "补齐模组": "Download mods",
   "模组仍未就绪：{ids}": "Mods still not ready: {ids}",
-  "模组未就绪：先补齐本房间的模组文件": "Mods not ready: download this room's mod files first"
+  "模组未就绪：先补齐本房间的模组文件": "Mods not ready: download this room's mod files first",
+  "正在搜寻的博士已满，请稍后再试": "The search queue is full — try again shortly",
+  "你不在快速匹配队列中": "You are not in the quick match queue",
+  "你已在同盟中：先离开同盟，才能开始快速匹配": "You are already in an alliance — leave it before your search starts",
+  "快速匹配": "Quick match",
+  "正在搜寻队友…": "Searching for teammates…",
+  "等待中的第 {position} 位 · 还需 {need} 名博士 · 剩余 {left} 秒": "Waiting at #{position} · {need} more doctor(s) · {left}s left",
+  "取消搜寻": "Cancel search",
+  "快速匹配超时：没有等到足够的博士，请稍后再试": "Quick match timed out: not enough doctors were searching — try again shortly",
+  "和陌生人组队：等待的博士凑够人数即自动建房（本房间按服务器默认模组运行）": "Team up with strangers: a room is created as soon as enough doctors are waiting (it runs the server's default mods)"
 }

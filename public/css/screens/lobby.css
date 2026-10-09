@@ -238,3 +238,10 @@
 .create-box { margin-top: .3rem; display: flex; flex-direction: column; gap: .12rem; }
 .create-box .btn--xl { height: .92rem; font-size: .32rem; letter-spacing: .3em; }
 .create-box__hint { display: flex; align-items: center; justify-content: center; min-height: .3rem; font-size: .14rem; color: var(--text-lo); }
+
+/* ---- 野排匹配 quick match (server/matchmaking.js, docs/META.md §1.6) ---------------------------------- */
+.quickmatch-panel { margin-top: .06rem; }
+.quickmatch-panel .panel__body { display: flex; flex-direction: column; gap: .08rem; }
+.quickmatch-row { display: flex; align-items: center; gap: .14rem; font-size: .2rem; }
+.quickmatch-count { margin-left: auto; font-size: .24rem; color: var(--mint); letter-spacing: .1em; }
+.quickmatch-foot { display: flex; align-items: center; justify-content: space-between; gap: .12rem; font-size: .14rem; }

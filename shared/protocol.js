@@ -450,6 +450,22 @@ export const C2S = {
   'room.spectate': { code: (v) => isStr(v, ROOM_CODE_LEN + 2) && /^[A-Za-z0-9]+$/.test(v) },
   'room.removeSpectator': { playerId: isId },
 
+  // 野排匹配 (quick match; a PRODUCT feature of the engine, not a pack surface — server/matchmaking.js):
+  // `room.queue` puts the player in the quick-match queue, `room.dequeue` takes them out (the same thing
+  // `room.leave`/`g.leave` do for a room). The queue is placement, not a room: when enough players wait, the ENGINE
+  // creates one ordinary co-op room and seats them through the ordinary `room.create` / `room.join` flow, so the
+  // client needs no second way in. `mode` is optional and only `'coop'` is accepted (a queue of strangers cannot
+  // form a solo run, which holds exactly one human and never bots). `difficulty` and `mods` (the digest gate of a
+  // modded server) are optional too; their default is the room's own default. There is deliberately no way to ask
+  // for a room's `modIds` here: a quick-matched room runs the server's DEFAULT set — see docs/META.md §1.6.
+  'room.queue': {
+    mode: (v) => v == null || v === 'coop',
+    difficulty: (v) => v == null || DIFFICULTIES.includes(v),
+    mods: (v) => v == null || isModDigest(v),
+    $optional: ['mode', 'difficulty', 'mods'],
+  },
+  'room.dequeue': {},
+
   // 资源包准入（DESIGN §28.13，B1 段；docs/WORKSHOP.md §1.9）。这三个类型属于**钩子总线**：唯一的消费者是包声明的
   // `server.preDispatch` 钩子（server/net.js onFrame，过了 validateC2S 之后、ping/hello 之前）。它们必须在这里，
   // 否则消息在 :599 的 C2S 自有属性白名单就被当非法类型拒掉，连钩子都到不了；而钩子在 ping/hello **之前**被调用，
@@ -547,6 +563,14 @@ export const C2S = {
 export const S2C = [
   'welcome', 'ok', 'error', 'pong',
   'room.state', 'room.closed',
+  // 野排匹配 (quick match, server/matchmaking.js): the queue's own state push, `room.queued { status, position, size,
+  // need, waitedMs, deadline, code? }`. status 'waiting' = in the queue (position 1-based, `need` = the queue size the
+  // engine waits for), 'placed' = the engine just put this player into a room whose 4-letter code is `code` (the
+  // ordinary room.state follows; the client needs no second way into a room), 'timeout' = the bounded wait ran out and
+  // the player is out of the queue, 'cancelled' = the player answered its own `room.dequeue`. A connection drop sends
+  // nothing (the slot is kept for a resume and merely stops counting as waiting); a player who is not in the queue
+  // never receives one at all.
+  'room.queued',
   'm.public', 'm.private', 'm.field', 'm.toast', 'm.ticker', 'm.emote', 'm.result',
   // m.unitStats { seq, round, units: [unitStatsEntry] } — the answer to g.unitStats (the requester only)
   'm.unitStats',
