@@ -68,6 +68,43 @@ export function workshopKitFilesFor(modules, workshopDir) {
 export const WORKSHOP_ASSET_PREFIX = WORKSHOP_MEDIA_PREFIX;
 
 /**
+ * Map each **C-layer panel module URL** to the file on disk that serves it (`pack.json.client.panels[].module`,
+ * DESIGN §28.8). Built from the LOADED panel list only, exactly like `workshopKitFilesFor`: a request can never name a
+ * path this map does not already hold, so the registration point does not turn the game server into a file server.
+ *
+ * The map key is the DECODED path (the loader percent-encodes each module segment, `server/http/static.js` compares
+ * against `decodeURIComponent(rawPath)`), and a module whose bytes are not a `.js` file never enters it — the same line
+ * `/workshop-assets` draws from the other side (that route serves media and refuses `.js`; this one serves code and
+ * serves nothing else).
+ * @param {Array<{ pack: string, module: string, url: string }>} panels the list `loadWorkshopPanels` built
+ * @param {string} workshopDir
+ * @returns {Map<string, string>}
+ */
+export function workshopPanelFilesFor(panels, workshopDir) {
+  /** @type {Map<string, string>} */
+  const out = new Map();
+  // `workshopDir: null` switches the whole feature off (tests, a clean server): never resolve a path from a missing root.
+  if (typeof workshopDir !== 'string' || workshopDir === '') return out;
+  const root = path.resolve(workshopDir);
+  for (const p of Array.isArray(panels) ? panels : []) {
+    if (!p || typeof p.url !== 'string' || typeof p.pack !== 'string' || typeof p.module !== 'string') continue;
+    const raw = p.url.split('?')[0];
+    if (!raw.endsWith('.js')) continue;
+    let key = raw;
+    try { key = decodeURIComponent(raw); } catch { /* an unencoded "%" in the declaration: key on the raw text */ }
+    const rel = p.module.split('/');
+    const bad = !rel.length || rel.some((s) => !s || s === '..' || s === '.' || s.startsWith('.'))
+      || rel[rel.length - 1].length <= '.js'.length;
+    if (bad) continue;
+    const dir = path.join(root, p.pack);
+    const abs = path.join(dir, ...rel);
+    if (abs !== dir && !abs.startsWith(dir + path.sep)) continue;
+    out.set(key, abs);
+  }
+  return out;
+}
+
+/**
  * `routes[*].cache` 声明 → 真正的 `Cache-Control` 头。三种语义就是三种，一个不多一个不少（`shared/workshop.js`
  * `ROUTE_CACHE_POLICIES` 是那份闭枚举的唯一来源）：
  *   * `no-cache`（缺省）—— 可以存，但每次都要回来问（`/data/*.json` 那一类「随时会变」的东西）；

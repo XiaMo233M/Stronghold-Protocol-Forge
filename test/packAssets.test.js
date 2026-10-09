@@ -59,7 +59,8 @@ let wsRoot;
 const PACKS = {
   base: { name: 'Base', files: { chess: { chess_ws_base_a: { chessId: 'chess_ws_base_a', name: 'base' } } } },
   onlyAssets: { name: 'OnlyAssets', assets: VALID.assets },
-  onlyClient: { name: 'OnlyClient', client: VALID.client },
+  // B2 段：一个声明了面板的包必须**真的带着那个模块**（声明了却不可用的声明拒绝整个包），所以夹具把它写进磁盘
+  onlyClient: { name: 'OnlyClient', client: VALID.client, extra: { 'resources/preloadModal.js': 'export function mount() {}\n' } },
   onlyServer: { name: 'OnlyServer', server: VALID.server },
   onlyRoutes: { name: 'OnlyRoutes', routes: VALID.routes },
   assetsA: { name: 'AssetsA', assets: { container: 'packs/a.spresources', manifest: 'm.json', serverPolicy: 'cache-only', verify: 'sha256' } },
@@ -72,10 +73,14 @@ before(() => {
   for (const [id, pack] of Object.entries(PACKS)) {
     const dir = join(wsRoot, id);
     fs.mkdirSync(dir, { recursive: true });
-    const { name, files, ...decl } = pack;
+    const { name, files, extra, ...decl } = pack;
     const content = Object.keys(files || {});
     fs.writeFileSync(join(dir, 'pack.json'), JSON.stringify({ id, name, version: '0.1.0', content, ...decl }));
     for (const [file, records] of Object.entries(files || {})) fs.writeFileSync(join(dir, `${file}.json`), JSON.stringify(records));
+    for (const [file, body] of Object.entries(extra || {})) {
+      fs.mkdirSync(join(dir, dirname(file)), { recursive: true });
+      fs.writeFileSync(join(dir, file), body);
+    }
   }
 });
 after(() => {
@@ -215,6 +220,10 @@ describe('四组声明: 坏形状 ⇒ 点名拒绝（断言拒绝码）', () => 
     ['client', { client: { panels: [{ id: 'p', slot: 'overlays', module: 'a.js' }] } }, 'CLIENT_BAD_PANEL_SLOT', 'slot 不在闭枚举里'],
     ['client', { client: { panels: [{ id: 'p', slot: 'root.overlays', module: '/abs/a.js' }] } }, 'CLIENT_BAD_PANEL_MODULE', '绝对 module 路径'],
     ['client', { client: { panels: [{ id: 'p', slot: 'root.overlays', module: 'https://cdn/a.js' }] } }, 'CLIENT_BAD_PANEL_MODULE', 'module 是 URL'],
+    // B2 段补：这条通道只送代码（服务面 `/workshop-panels/` 只服务 `.js`），所以形状层也要拒非 `.js` ——
+    // 否则一个 `module: "x.html"` 的包合法、进哈希，而浏览器永远拿不到它（「包合法、面板不出现」）。
+    ['client', { client: { panels: [{ id: 'p', slot: 'root.overlays', module: 'x.html' }] } }, 'CLIENT_BAD_PANEL_MODULE', 'module 不是 .js'],
+    ['client', { client: { panels: [{ id: 'p', slot: 'root.overlays', module: '.hidden.js' }] } }, 'CLIENT_BAD_PANEL_MODULE', '点文件'],
     ['client', { client: { panels: [{ id: 'p', slot: 'root.overlays', module: 'a.js', order: '10' }] } }, 'CLIENT_BAD_PANEL_ORDER', 'order 不是整数'],
     ['client', { client: { panels: [{ id: 'p', slot: 'root.overlays', module: 'a.js', gate: 3 }] } }, 'CLIENT_BAD_PANEL_GATE', 'gate 不是字符串'],
     ['client', { client: { panels: VALID.client.panels, requires: 'serviceWorker' } }, 'CLIENT_BAD_REQUIRES', 'requires 不是数组'],
@@ -283,6 +292,10 @@ describe('四组声明: 进身份哈希（DESIGN §28.2 / §28.13）', () => {
       assert.notEqual(p.hash, base.hash, `${id}: 声明必须进内容哈希（同一个摘要下两种行为是不允许的）`);
       assert.ok(p.manifest.some((m) => m.path === 'pack.json'), `${id}: 归一化清单仍进哈希清单`);
     }
+    // B2 段：C 层面板的**模块源码**也进哈希清单（DESIGN §28.8）—— 声明能改变客户端行为，模块的字节同样能，
+    // 一个不算源码的摘要会让两份不同的面板共用一个身份。
+    assert.ok(by('onlyClient').manifest.some((m) => m.path === 'resources/preloadModal.js'),
+      'C 层面板的模块源码必须在身份清单里');
     // 键序不影响哈希：两份写法不同（`verify` / `serverPolicy` / `manifest` / `container` 顺序颠倒）、归一化后相同的
     // 声明，必须是同一份字节 —— 这正是 `canonicalJson` 排序键、`pack.json` 条目哈希它的那条链。
     // （两个包的 id/name 不同，所以整包哈希本来就不同；这里比的是**声明那一段的字节**。）

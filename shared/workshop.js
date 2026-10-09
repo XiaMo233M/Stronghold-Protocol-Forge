@@ -101,6 +101,15 @@ export const OVERRIDE_ENTRY_RE = /^([a-z]+):([A-Za-z0-9_\-.:]{1,64})$/;
  * writes into the data must be exactly the ones that route answers.
  */
 export const WORKSHOP_MEDIA_PREFIX = '/workshop-assets/';
+
+/**
+ * The URL prefix a pack's **C-layer panel module** is served under: `<prefix><packId>/<module path inside the pack>`
+ * (DESIGN §28.8, docs/WORKSHOP.md §1.9.3). The twin of `WORKSHOP_MEDIA_PREFIX` on the other side of the line
+ * `/workshop-assets` draws: that route serves a pack's MEDIA and therefore refuses `.js`; this one serves its CODE and
+ * therefore serves nothing else. One source of truth, because a URL the loader builds and a route that answers it must
+ * be the same string — and because the browser-side guard (`public/js/ui/extensions.js`) accepts exactly this prefix.
+ */
+export const WORKSHOP_PANEL_PREFIX = '/workshop-panels/';
 /** Record ids follow the wire-id charset (shared/protocol.js isId) so an id can travel in a message. */
 const RECORD_ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
 
@@ -221,9 +230,22 @@ function parseAssetsDecl(raw) {
   return { ok: true, decl: { container: raw.container, manifest: raw.manifest, serverPolicy, verify } };
 }
 
-/** 一个面板的 `module` 必须是**包内相对路径**、不是 URL：装载器要知道去哪个包的哪一层读它，
- *  而一条 `https://…` 或 `/…` 会把「代码来自哪个包」这件事从身份里抹掉（DESIGN §28.2）。 */
-const isSafeModulePath = (p) => isSafeRelativePath(p) && !/^[a-z][a-z0-9+.-]*:/i.test(p);
+/** 面板模块的扩展名：这个通道送的是**代码**（浏览器 import 它），所以只有 `.js`。 */
+const CLIENT_PANEL_MODULE_EXT = '.js';
+
+/**
+ * 一个面板的 `module` 必须是**包内相对路径**、不是 URL、且是一个 `.js`：装载器要知道去哪个包的哪一层读它，
+ * 而一条 `https://…` 或 `/…` 会把「代码来自哪个包」这件事从身份里抹掉（DESIGN §28.2）；`.html` / `.json` 之类
+ * 则是这条通道**永远送不出去**的东西（服务面只送 `.js`，与 `/workshop-assets` 拒 `.js` 是同一条线的两侧）。
+ *
+ * `.js` 这一条是 B2 段补的：A 段只判了「相对、不是 URL」，而一条 `module: "x.html"` 在形状层合法、进了身份哈希，
+ * 客户端却永远拿不到它 —— 作者看到的是「包合法、面板不出现」。两次判据（形状层与服务面）现在一致。
+ * 目录段不许以 `.` 开头：与 `/workshop-assets`、核心静态挂载对点文件的处理同一条规则。
+ */
+const isSafeModulePath = (p) =>
+  isSafeRelativePath(p) && p.endsWith(CLIENT_PANEL_MODULE_EXT) && p.length > CLIENT_PANEL_MODULE_EXT.length
+  && !p.split('/').some((seg) => seg.startsWith('.'))
+  && !/^[a-z][a-z0-9+.-]*:/i.test(p);
 
 /**
  * `pack.json.client` —— C 层注册点（§28.13）。`panels` 按 id 排序（与 `operators` 同一个理由：键序是清单字节的
@@ -239,8 +261,9 @@ function parseClientDecl(raw) {
       return fail('CLIENT_UNKNOWN_FIELD', `client: "${key}" is not a declared field (panels, requires)`);
     }
   }
-  // `panels` 本身可以缺省（一个只声明浏览器能力、不带界面的包），但**声明了就至少要有一个面板**：
-  // 一个空数组与不声明没有区别，却会让「这个包有客户端界面」这句话变成假的。
+  // `panels` 是 `client` 的必填字段，而且**至少要有一个面板**：一个空数组与不声明没有区别，却会让「这个包有
+  // 客户端界面」这句话变成假的；`requires` 是浏览器能力声明，今天没有「只声明能力、不带界面」这种包
+  //（`client: { requires: [...] }` 缺 `panels` 会被下面这一行拒 —— B2 段把这段注释改成与代码一致）。
   if (!Array.isArray(raw.panels)) return fail('CLIENT_BAD_PANELS', 'client.panels must be an array of panel declarations');
   if (!raw.panels.length) return fail('CLIENT_BAD_PANELS', 'client.panels must declare at least one panel (drop the key instead of sending [])');
   const panels = [];

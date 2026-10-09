@@ -106,6 +106,14 @@ const WS_OPEN = 1;
 const WS_CONNECTING = 0;
 
 /**
+ * The resource-admission message types (DESIGN §28.13 / docs/WORKSHOP.md §1.9.1). They belong to the pack-declared
+ * dispatch hook bus: the SERVER sends its challenge the moment the socket is adopted, i.e. **before `hello`**, so a
+ * client answer sent through `send()` would be dropped by that method's `status !== 'online'` guard. They therefore go
+ * through `_sendRaw` via `sendResourceMessage`, and nothing else may use that door.
+ */
+export const RESOURCE_MSG_TYPES = Object.freeze(['resource.proof', 'resource.challenge.request', 'resource.reset']);
+
+/**
  * Game server connection. Construct with injectable dependencies for tests.
  */
 export class Net {
@@ -469,6 +477,27 @@ export class Net {
     const bad = validateC2S(msg);
     if (bad) { console.warn(`[net] refusing invalid ${t}: ${bad}`); return false; }
     if (this.status !== 'online') return false;
+    return this._sendRaw(msg);
+  }
+
+  /**
+   * Send one resource-admission message (`RESOURCE_MSG_TYPES`). This is the **only** caller of `_sendRaw` that is not
+   * `send()` / `request()` / `hello` / `ping`, and it exists because those all gate on the session: the server's
+   * resource challenge is sent while the socket is adopted, before `hello`, so `send()` would silently drop the proof
+   * and the gate could never close (缺口 4 — the community resource-pack mod's client hit exactly this).
+   *
+   * The type is checked against the closed list and the frame against `shared/protocol.js validateC2S` before anything
+   * is written: a malformed proof is a named local refusal, not a `BAD_MSG` red bar in the middle of connecting.
+   * @param {{ t: string }} msg
+   * @returns {boolean} whether the frame really reached the socket
+   */
+  sendResourceMessage(msg) {
+    if (!msg || typeof msg !== 'object' || !RESOURCE_MSG_TYPES.includes(msg.t)) {
+      console.warn(`[net] refusing resource message of type ${JSON.stringify(msg && msg.t)}`);
+      return false;
+    }
+    const bad = validateC2S(msg);
+    if (bad) { console.warn(`[net] refusing invalid ${msg.t}: ${bad}`); return false; }
     return this._sendRaw(msg);
   }
 

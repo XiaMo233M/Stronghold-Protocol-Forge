@@ -44,7 +44,7 @@ import { html, UiHosts, Button, MicroLabel, closeAllDialogs } from './ui/compone
 import { ConnectionBanner } from './ui/connBanner.js';
 import { ToastHost, toast, toastError, describeError } from './ui/toasts.js';
 import { net, identity, NetError } from './net.js';
-import { store, useStore, emptyMatch, selectRoute, sessionResetNotice, isSpectating } from './store.js';
+import { store, useStore, emptyMatch, selectRoute, entryGateBlocked, sessionResetNotice, isSpectating } from './store.js';
 import { data } from './data.js';
 import { GAME_FILES } from './ui/gameComponents.js';
 import { TitleScreen, sanitizeName } from './screens/title.js';
@@ -68,6 +68,7 @@ import { startBuildGuard } from './ui/buildGuard.js';
 import { initLang, useLang, tickerText } from './ui/lang.js';
 import { t, N_, translateWire } from '../../shared/i18n.js';
 import { recordError } from './diag.js';
+import { createPanelRegistry } from './ui/extensions.js';
 
 const RESTORE_GRACE_MS = 1500;
 const JOIN_DELAY_MS = 350;
@@ -75,6 +76,19 @@ const TICKER_KEEP = 20;
 const EMOTE_KEEP = 20;
 
 const SCREENS = { title: TitleScreen, lobby: LobbyScreen, room: RoomScreen, game: GameScreen };
+
+/**
+ * C 层注册点 (DESIGN §28.8, docs/WORKSHOP.md §1.9.3): one per page. A pack's panel gets the frozen surface
+ * `public/js/ui/extensions.js` builds — no store handle, no `net`, no engine — and the module list arrives in
+ * `welcome.modPanels` (src of truth: `pack.json.client.panels`, served from `/workshop-panels/`). A server whose packs
+ * declare no `client` never sends the field: nothing here is called, no module is imported and **no DOM is added** —
+ * the four slot containers are created on demand by the registry, not rendered by this shell.
+ */
+const modPanels = createPanelRegistry({
+  store,
+  net,
+  notify: (text, kind) => toast(text, kind || 'warn'),
+});
 
 /** Copy of a server message without transport fields. */
 function payload(msg) {
@@ -114,6 +128,8 @@ function schedulePendingPlaytest() {
   playtestTimer = setTimeout(() => {
     const s = store.get();
     if (!s.ui.pendingPlaytest || !s.session.entered || net.status !== 'online') return;
+    // 闸门未就绪时不烧掉深链（缺口 8）：否则这一条会自动发 room.create，然后被服务端准入拒一次、弹一次红条。
+    if (entryGateBlocked(s)) return;
     // The deep link is spent either way: consumed when the match starts, abandoned when it was refused.
     runSoloPlaytest(net, store, {
       difficulty: s.ui.pendingPlaytest.difficulty,
@@ -130,6 +146,8 @@ function schedulePendingJoin() {
     const s = store.get();
     const code = s.ui.pendingJoin;
     if (!code || joinInFlight || !s.session.entered || net.status !== 'online') return;
+    // 同上：`?room=` 深链不能绕过闸门（缺口 8）。
+    if (entryGateBlocked(s)) return;
     if (s.room) {
       if (s.room.code !== code) toast(t('你已在其他同盟中，请先离开当前同盟'), 'warn');
       clearPendingJoin();
@@ -240,6 +258,11 @@ function wireNet() {
   });
   net.on('clock', (c) => store.set({ clock: { offset: c.offset, rtt: c.rtt, synced: c.synced } }));
   net.on('welcome', onWelcome);
+  // C 层注册点（DESIGN §28.8）：包声明的面板清单随 `welcome` 到达。没有包声明 `client` 时这个字段根本不出现 ——
+  // 于是这次握手、这次订阅之后的行为、以及页面上的一切都与从前逐字节相同（没有新请求、新 DOM、新全局）。
+  net.on('welcome', (msg) => {
+    if (Array.isArray(msg && msg.modPanels) && msg.modPanels.length) modPanels.apply(msg.modPanels);
+  });
   net.on('helloError', (err) => toastError(err));
   net.on('replaced', () => toast(t('该身份已在其他页面登录，本页已断开'), 'warn', { ttl: 6000 }));
   net.on('unhandledError', (err) => toastError(err));
@@ -377,7 +400,10 @@ async function boot() {
   const entered = identity.wasEntered() && !!savedName;
   store.set((s) => ({
     me: { ...s.me, name: savedName },
-    session: { entered },
+    // 整片替换会冲掉闸门状态位（缺口 8）：先摊开现有的 session，再强制 `entered`。不堵这里，`identity.wasEntered()`
+    // （public/js/net.js 读 localStorage / sessionStorage 的 sp.entered）每次开机都会把 `preloadRequired` 重置掉，
+    // 而 `entered` 又因此为真 —— 闸门形同虚设，玩家在素材就绪前照样进大厅。
+    session: { ...s.session, entered },
     ui: { ...s.ui, pendingJoin, pendingPlaytest },
   }));
 

@@ -11,7 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { normalizePackManifest, normalizeContentFile, byPackId, playtestUnknownIds } from '../shared/workshop.js';
+import { normalizePackManifest, normalizeContentFile, byPackId, playtestUnknownIds, WORKSHOP_PANEL_PREFIX } from '../shared/workshop.js';
 import { sha256Hex, canonicalJson, modManifestDigest } from '../shared/modIdentity.js';
 // `intercepts` 的运行时判据就是**真的装在这个服务器上的那份协议**（DESIGN §28.13）：A 段在形状层判过一次，这里再判
 // 一次 —— 一份包声明可以比协议活得久（协议收窄了、包还是老写法），那时要在加载期点名拒绝，而不是「装了但拦不住」。
@@ -125,11 +125,116 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null } = {}) {
         });
         continue;
       }
+      // C 层面板（`pack.json.client.panels`, DESIGN §28.8/§28.13, docs/WORKSHOP.md §1.9.3）：声明的模块必须**真的
+      // 在包里**、是 `.js`、解析得到包目录里面。这就是本刀的纪律裁决 —— **声明了却不可用的声明拒绝整个包**，
+      // 而不是「包照旧加载、只是那个面板不出现」。后者会让作者与服务端都以为自己有客户端界面，而浏览器里什么都
+      // 没有；B1 段的 `server.preDispatch` 只拒那个钩子，C 层这条线走得比它远，理由写在 DESIGN §28.13.3。
+      const panelIssues = panelModuleIssues(manifest.pack, packDir);
+      if (panelIssues.length) {
+        errors.push({ pack: name, reason: `${panelIssues[0].code}: ${panelIssues[0].reason}` });
+        continue;
+      }
       packs.push({ ...manifest.pack, dir: packDir, files, ...identifyPack(packDir, manifest.pack, files) });
     }
   }
   for (const e of errors) log?.warn?.(`[workshop] ${e.pack}: ${e.reason}`);
   return { dir, present: true, packs, errors };
+}
+
+/**
+ * The **C-layer panels** a pack declares, judged against the pack on disk (`pack.json.client.panels`, DESIGN §28.8).
+ *
+ * This is the load-time half of *"a declaration that cannot be used refuses the whole pack"* (§28.13.3). A panel whose
+ * `module` is missing, is not a `.js`, or resolves outside its own pack is not "a panel that did not show up": it is a
+ * pack whose author believes the client has an interface it does not have. `shared/workshop.js parseClientDecl` judged
+ * the SHAPE (relative, no URL, `.js`); this judges the BYTES on disk, and the two readers must agree — the same
+ * "the editor cannot pass what the loader then refuses" rule §28.12 states for kit imports.
+ *
+ * `packDir` is the second argument (not read from `pack.dir`) so the check runs inside `loadWorkshop` BEFORE the pack is
+ * listed, and so a test can point it at a hand-built pack object.
+ * @param {{ client?: { panels?: Array<{ id: string, module: string }> } }|null} pack normalized manifest
+ * @param {string} packDir the pack's directory on disk
+ * @returns {Array<{ id: string, code: 'CLIENT_BAD_PANEL_MODULE', reason: string }>} one entry per unusable panel
+ */
+export function panelModuleIssues(pack, packDir) {
+  /** @type {Array<{ id: string, code: 'CLIENT_BAD_PANEL_MODULE', reason: string }>} */
+  const out = [];
+  const panels = pack && pack.client && Array.isArray(pack.client.panels) ? pack.client.panels : [];
+  if (!panels.length || typeof packDir !== 'string' || !packDir) return out;
+  const dir = path.resolve(packDir);
+  for (const panel of panels) {
+    const id = panel && typeof panel.id === 'string' ? panel.id : '';
+    const rel = panel && typeof panel.module === 'string' ? panel.module : '';
+    const segments = rel.split('/');
+    const abs = path.join(dir, ...segments);
+    // `..` cannot build a path outside the pack that is also inside it: the join is re-checked, the same way
+    // server/http/workshop.js re-checks a declared route's file.
+    const bad = !rel || path.isAbsolute(rel) || !rel.endsWith('.js')
+      || segments.some((s) => !s || s === '..' || s === '.' || s.startsWith('.'))
+      || (abs !== dir && !abs.startsWith(dir + path.sep));
+    if (bad) {
+      out.push({ id, code: 'CLIENT_BAD_PANEL_MODULE', reason: `client.panels["${id}"].module "${rel}" is not a pack-relative .js file inside the pack (this channel serves code, and only the pack's own)` });
+      continue;
+    }
+    let isFile = false;
+    try { isFile = fs.statSync(abs).isFile(); } catch { /* stays false: no such file */ }
+    if (!isFile) {
+      out.push({ id, code: 'CLIENT_BAD_PANEL_MODULE', reason: `client.panels["${id}"].module "${rel}" is declared in pack.json but is not a readable file inside the pack` });
+    }
+  }
+  return out;
+}
+
+/**
+ * The **wire list of C-layer panels** (DESIGN §28.8/§28.13, docs/WORKSHOP.md §1.9.3): the JSON-safe module list the
+ * browser turns into mounts. A function cannot cross the wire, and neither can a directory scan — so this list is built
+ * from the LOADED packs only (the same stance `workshopKitFilesFor` takes for kits): a URL that is not in this list is
+ * never servable, and a pack that declares nothing produces an empty list, i.e. a `welcome` without the field.
+ *
+ * Panels are ordered by `order`, then by pack id, then by panel id — DESIGN §28.3's "the smaller pack id wins" applied
+ * to a list, so the mount order never depends on the order the packs were discovered in.
+ *
+ * `hash` rides along (the pack's content hash, §28.2): the URL carries it as `?v=`, so a repack invalidates a cached
+ * module, and the spec says WHICH bytes the browser is supposed to be served.
+ * @param {ReturnType<typeof loadWorkshop>} loaded
+ * @param {{ log?: object|null, baseUrl?: string }} [opts]
+ * @returns {{ panels: Array<{ id: string, pack: string, slot: string, module: string, order: number, gate: string|null, url: string, hash: string, requires: string[] }>, errors: Array<{ pack: string, id: string, code: string, reason: string }> }}
+ */
+export function loadWorkshopPanels(loaded, { log = null, baseUrl = WORKSHOP_PANEL_PREFIX } = {}) {
+  /** @type {Array<any>} */
+  const panels = [];
+  /** @type {Array<{ pack: string, id: string, code: string, reason: string }>} */
+  const errors = [];
+  const base = String(baseUrl).replace(/\/+$/, '');
+  for (const pack of ((loaded && loaded.packs) || []).slice().sort(byPackId)) {
+    const decl = pack && pack.client;
+    const list = decl && Array.isArray(decl.panels) ? decl.panels : [];
+    if (!list.length) continue;
+    const dir = path.resolve(pack.dir || path.join(WORKSHOP_DIR, pack.id));
+    // Defence in depth: loadWorkshop already refused a pack with an unusable panel, but this reader may see a
+    // hand-built loader object or a pack written against an older schema (the same reason workshopRoutesFor re-judges).
+    const issues = panelModuleIssues(pack, dir);
+    if (issues.length) {
+      errors.push({ pack: pack.id, id: issues[0].id, code: issues[0].code, reason: issues[0].reason });
+      continue;
+    }
+    const requires = Object.freeze(Array.isArray(decl.requires) ? [...decl.requires] : []);
+    const hash = typeof pack.hash === 'string' ? pack.hash : '';
+    for (const panel of list) {
+      const url = `${base}/${encodeURIComponent(pack.id)}/${panel.module.split('/').map(encodeURIComponent).join('/')}?v=${hash.slice(0, 12)}`;
+      panels.push({
+        id: panel.id, pack: pack.id, slot: panel.slot, module: panel.module,
+        order: Number.isInteger(panel.order) ? panel.order : 0,
+        gate: typeof panel.gate === 'string' && panel.gate ? panel.gate : null,
+        url, hash, requires,
+      });
+    }
+  }
+  panels.sort((a, b) => (a.order - b.order)
+    || (a.pack < b.pack ? -1 : a.pack > b.pack ? 1 : 0)
+    || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  for (const e of errors) log?.warn?.(`[workshop] panel ${e.pack}/${e.id}: ${e.code}: ${e.reason}`);
+  return { panels, errors };
 }
 
 /**
@@ -176,9 +281,27 @@ export function identifyPack(packDir, pack, files) {
   } catch { /* no kits/ directory: an ordinary data pack */ }
   const assetsDir = path.join(packDir, 'assets');
   for (const rel of listFiles(assetsDir)) addBytes(`assets/${rel}`, fs.readFileSync(path.join(assetsDir, rel)));
-  // the declared layer wins; the derivation is the fallback, and `combat` follows the artifact kind
+  // 5. C 层面板的模块源码（`pack.json.client.panels[].module`, DESIGN §28.8）：一条声明能改变客户端行为，模块的
+  //    字节同样能 —— 不把面板源码算进身份，两份不同的面板就会共用同一个摘要（那份摘要将不再描述浏览器真的会
+  //    执行的代码）。两个面板共用同一个文件时只算一次（按声明路径去重），并且只有在包真的声明了面板时才加：
+  //    没声明 `client` 的包（今天所有的包）哈希逐字节不变。
+  const panelFiles = [...new Set(((pack.client && Array.isArray(pack.client.panels)) ? pack.client.panels : [])
+    .map((p) => (p && typeof p.module === 'string' ? p.module : ''))
+    .filter(Boolean))].sort();
+  for (const rel of panelFiles) {
+    // A panel module may live under `assets/` (or be a kit source): then that file is already in the manifest and
+    // adding it twice would list the same bytes under the same path twice.
+    if (manifest.some((m) => m.path === rel)) continue;
+    const abs = path.join(packDir, ...rel.split('/'));
+    if (abs === packDir || !abs.startsWith(packDir + path.sep)) continue;
+    try { addBytes(rel, fs.readFileSync(abs)); } catch { /* unreachable for a LOADED pack: loadWorkshop refuses it first */ }
+  }
+  // the declared layer wins; the derivation is the fallback, and `combat` follows the artifact kind. A pack that only
+  // mounts a panel IS layer C (DESIGN §28.1: "C client UI") — §28.8's "the pack is marked in the UI like any other"
+  // means the layer derivation counts the panels the way it counts media, and `combat` stays "kits only": a panel
+  // cannot change a battle result.
   const hasMedia = ['voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art'].some((k) => Object.keys(pack[k] || {}).length > 0);
-  const layer = pack.layer || (kits ? 'B' : hasMedia ? 'C' : 'A');
+  const layer = pack.layer || (kits ? 'B' : (hasMedia || panelFiles.length) ? 'C' : 'A');
   const combat = pack.combat === null || pack.combat === undefined ? kits > 0 : pack.combat;
   manifest.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   return { hash: modManifestDigest(manifest), manifest, layer, combat, api: pack.api || null, game: pack.game || pack.gameVersion || null };

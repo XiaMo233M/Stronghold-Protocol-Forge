@@ -78,7 +78,11 @@ export const emptyMatch = () => ({ public: null, private: null, field: null, res
 export const initialState = Object.freeze({
   connection: { status: 'idle', ping: null, attempt: 0, retryAt: 0, lastError: null, everOnline: false },
   me: { playerId: null, name: '', token: null },
-  session: { entered: false },
+  // `preloadRequired` / `preloadReady` are the resource-pack entry gate (缺口 3, DESIGN §28.13.3): a C-layer panel
+  // raises the first and lowers the second, and `selectRoute` holds the title screen while
+  // `preloadRequired && !preloadReady`. Both default to `false`, so with no pack declaring one the gate is inert and
+  // every route decision is exactly what it was — the fields are additive, nothing else reads them.
+  session: { entered: false, preloadRequired: false, preloadReady: false },
   room: null,
   match: emptyMatch(),
   ticker: [],
@@ -91,13 +95,31 @@ export const initialState = Object.freeze({
 export const store = createStore(initialState);
 
 /**
+ * Whether the resource-pack entry gate is holding the client on the title screen (缺口 3, DESIGN §28.13.3).
+ *
+ * This is **not a security boundary** — it decides what the player sees, not what the server accepts (that is the
+ * pack-declared `server.preDispatch` hook). It is one expression used by `selectRoute` and by `main.js`'s two deep-link
+ * consumers, so 「未就绪也能进」 cannot come back through a `?room=` / `?playtest=` link or through the localStorage
+ * "already entered" flag.
+ * @param {any} s store state
+ * @returns {boolean}
+ */
+export function entryGateBlocked(s) {
+  return !!(s?.session?.preloadRequired && !s.session.preloadReady);
+}
+
+/**
  * Which screen the router shows for a given app state:
- * not entered → title; m.public.phase ≠ LOBBY or room.inMatch → game; in a room → room; else lobby.
+ * not entered → title; the pack entry gate is closed → title; m.public.phase ≠ LOBBY or room.inMatch → game; in a room
+ * → room; else lobby.
  * @param {any} s store state
  * @returns {'title'|'lobby'|'room'|'game'}
  */
 export function selectRoute(s) {
   if (!s?.session?.entered) return 'title';
+  // 入口闸门（缺口 3）：只在 `preloadRequired` 时加条件，所以没有包声明预载时这一行等价于不存在；`entered` 由
+  // `identity.wasEntered()`（public/js/net.js）在开机时就能置真 —— 那条 localStorage 旁路因此进不了大厅。
+  if (entryGateBlocked(s)) return 'title';
   const phase = s.match?.public?.phase;
   if (phase && phase !== PHASE.LOBBY) return 'game';
   if (s.room?.inMatch) return 'game'; // match starting: m.public is on its way

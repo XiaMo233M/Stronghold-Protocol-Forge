@@ -490,8 +490,9 @@ node tools/workshop-validate.mjs my-pack
 
 这四组字段是给「包不只是数据」这件事开的口子：一个包可以说它要一个客户端资源容器、一个挂载点、一个分发前准入钩子、
 一条只读路由。**A 段只做格式**：解析形状、点名拒绝、把声明并进身份哈希；**B1 段把其中两组落成行为** ——
-`server.preDispatch` 的钩子真的挂在分发路径上（§1.9.1），`routes` 的只读路由真的被服务（§1.9.2）。`assets` 与
-`client` 此刻**仍然只有声明**：资源容器不被服务、C 层面板不被挂载、Service Worker 一行没动。
+`server.preDispatch` 的钩子真的挂在分发路径上（§1.9.1），`routes` 的只读路由真的被服务（§1.9.2）；**B2 段把
+`client` 落成行为** —— 包内的面板模块真的被送到浏览器并挂上四个宿主（§1.9.3），而「声明了却用不了的声明」从此
+**拒绝整个包**（§1.9.3 末尾的那条纪律）。`assets` 仍然只有声明：资源容器不被服务、Service Worker 一行没动（那是 B3 段）。
 
 **为什么需要它们**：一个第三方「完整资源包导入 / 校验 / 服务端准入」的 mod 改写成本仓库的包格式之后，在 A 层
 **什么都不贡献**（没有干员/装备/怪物/地图/语音/美术），而旧 schema 没有地方表达这四件事，所以真校验器两边都判它
@@ -559,7 +560,10 @@ node tools/workshop-validate.mjs my-pack
 | 分发前钩子被挂上、能拦消息 | ✅ 已实现（B1：`server/workshop.js loadWorkshopHooks`、`server/modDispatch.js`、`server/net.js`；`test/modPreDispatch.test.js`） |
 | `resource.*` 三个 `C2S` 类型 | ✅ 已实现（B1：`shared/protocol.js`；`PROTOCOL_VERSION` 仍是 1） |
 | 只读路由被注册、被服务 | ✅ 已实现（B1：`server/http/workshop.js workshopRoutesFor`、`server/http/static.js`；`test/modRoutes.test.js`） |
-| 资源容器被服务、C 层面板被挂载、Service Worker 策略 | ⛔ 未做（仍是设计稿） |
+| C 层面板被注册、被挂载（模块路由 + `welcome.modPanels` + 四个宿主 + `order`/`gate`/`requires`） | ✅ 已实现（B2：`server/workshop.js loadWorkshopPanels`、`server/http/workshop.js workshopPanelFilesFor`、`public/js/ui/extensions.js`、`server/lobby.js welcomeInfo`；`test/modClientPanels.test.js`） |
+| 目录逃逸 / 非 `.js` / 声明了却没有文件的模块 ⇒ **整包被拒** | ✅ 已实现（B2：`server/workshop.js panelModuleIssues` + `shared/workshop.js` 的 `.js` 判据；DESIGN §28.13.3） |
+| 资源容器被服务、Service Worker 策略 | ⛔ 未做（B3 段，仍是设计稿） |
+| 浏览器里真的 import + 真的渲染（真 Chrome） | ⛔ 本机无 Chrome（`SP_E2E=1` 的可选路径，与 §4.4 同一个 standing gap） |
 
 #### 1.9.1 `server.preDispatch`：分发前的准入钩子（B1 段已实现）
 
@@ -632,6 +636,88 @@ export function createPreDispatch(deps) {
 - 声明的路径**先于**核心静态挂载被查找：一条声明过的路径不会因为磁盘上恰好有同名核心文件而变成别的东西。反过来，
   「声明了但文件不在」是 **404**，不会悄悄回落到那个同名核心文件。
 - 两条路由声明同一个 `path`：包 id 小的赢（DESIGN §28.3），输的那条记一条警告。
+
+#### 1.9.3 `client`：包自带的客户端面板（B2 段已实现）
+
+一条声明就能让包带上一块界面，而且**不用改本仓库一行代码**：
+
+```jsonc
+"client": {
+  "panels": [
+    { "id": "resource-import", "slot": "root.overlays", "module": "resources/preloadModal.js", "order": 10, "gate": "session.preloadRequired" },
+    { "id": "aside-note", "slot": "screen.game.aside", "module": "resources/aside.js" }
+  ],
+  "requires": ["cacheStorage", "webCrypto"]
+}
+```
+
+**模块契约**（`module` 是包内 `.js`；浏览器 `import` 它）：
+
+```js
+export function mount(ctx) {
+  // ctx.host 是一个属于你这次挂载的 <div>，往里画你的界面。
+  return { unmount() { /* 可选：页面卸载 / 引擎 dispose 时收尾 */ } };   // 也可以什么都不返回
+}
+```
+
+`default` 导出同一个函数也行。**模块源码进包的身份哈希**：改了面板的字节就是换了一个包（DESIGN §28.8），所以不
+用担心「摘要一样、界面不一样」。
+
+**四个挂载点**（闭枚举，写别的整包被拒：`CLIENT_BAD_PANEL_SLOT`）：
+
+| `slot` | 位置 |
+|---|---|
+| `root.overlays` | 最上层浮层（模态框、提示条这类东西放这里） |
+| `root.guide` | 说明层之上、浮层之下 |
+| `screen.game.aside` | 屏幕右侧竖条（对局界面旁边） |
+| `screen.result.footer` | 屏幕底部横条（结算界面下方） |
+
+四个宿主都是**固定的浮层容器**，与当前在哪个界面无关 —— 面板挂一次就一直在，不需要自己判断路由。容器的类与
+`data-mod-slot` 属性由注册点在面板真的挂载时创建（没有包声明 `client` 时页面上一个容器都没有）。
+
+**`order` 决定挂载顺序**（整数，缺省 0）：小的先挂；相同则包 id 小的先，再按面板 id。顺序永远不随发现顺序 /
+数组顺序变（DESIGN §28.3 的同一条规则）。**`gate` 是一个客户端 store 点路径**（例如 `session.preloadRequired`、
+`session.entered`）：路径为真**才**挂，一个面板只挂一次、之后不会被摘掉。写一个 store 里不存在的路径是**具名拒绝**
+（`CLIENT_PANEL_GATE_UNKNOWN`），不是「永远不出现」。
+
+**`requires` 是能力声明，不是愿望**：只能取 `serviceWorker` / `cacheStorage` / `webCrypto`（写别的 `CLIENT_UNKNOWN_REQUIRE`）。
+缺一项时这个包的面板**一个都不挂**，并且**明说**「浏览器不支持」（控制台一条具名错误 + 玩家界面一条提示）——
+这个仓库不接受「装了但静默不工作」。
+
+**注入面是冻结的，键恰好这几个**（DESIGN §28.8 的「边界由没给什么决定」）：
+
+| 给 | 说明 |
+|---|---|
+| `id` / `pack` / `slot` / `order` / `gate` | 你声明的那几个值（只读） |
+| `log` | 带 `[mod <包>/<面板>]` 前缀的 `info` / `warn` / `error` |
+| `host` | 属于这次挂载的 `<div>`；往里画界面 |
+| `session.setPreload({ required, ready })` | **唯一**的 store 写口：入口闸门那两个状态位（见下） |
+| `net.on(type, fn)` / `net.sendResourceMessage(msg)` | **唯一**的网络口；见下 |
+
+**没有** store 句柄、没有 `net` 对象本身、没有对局对象、没有 `Match`/`Battle`，也**不能**自己注册
+`socket.on('message')`。所以面板能画错，**改不了对局结果**。
+
+**入口闸门（「素材没就绪不许进」怎么写）**：`session.setPreload({ required: true, ready: false })` 把路由压回标题页，
+预载完成后再 `setPreload({ ready: true })` 放行。两个状态位缺省都是 `false`（不启用 = 今天的行为一个字节不变），
+`selectRoute` 里那条件是 `preloadRequired && !preloadReady`。它**不是安全边界**（真正的边界是 §1.9.1 的服务端准入），
+但它连 `?room=` / `?playtest=` 深链和「localStorage 说我已经进过」那条旁路一起挡住（B2 段把 `main.js` 的
+`wasEntered` 旁路堵了）。
+
+**资源消息（挑战在 `hello` 之前到）**：用 `ctx.net.sendResourceMessage({ t: 'resource.challenge.request' })`、
+`{ t: 'resource.proof', nonce, version, proofs }`、`{ t: 'resource.reset' }`。**不要**用普通的 `send()`：服务端的挑战
+是连接建立时就发出去的，那一刻 `status` 还不是 `online`，`send()` 会**静默丢弃**（这正是社区资源包 mod 踩过的坑）。
+`sendResourceMessage` 走原始发送口（`_sendRaw`），只看这三个类型 + 协议形状。
+
+**模块路由**：`/workshop-panels/<包id>/<module>`。只有装载器注册过的 URL 被服务（没注册的、`..` 穿越的、`.html`
+一律 404），所以**别指望它当文件服务器用**；要送数据请用 §1.9.2 的 `routes`，要送图片/音频请用 `/workshop-assets`。
+
+**纪律：一个用不了的声明拒绝整个包**（DESIGN §28.13.3）。`module` 文件不在包里、不是 `.js`、或解析后跑出包目录，
+包**整个不加载**（拒绝码 `CLIENT_BAD_PANEL_MODULE`，与形状层同名），因为「包照旧加载、只是面板不出现」会让作者与
+服务器都以为自己有客户端界面，而浏览器里什么都没有。对既有包的影响是零：不声明 `client` 的包一个字节都不受影响。
+
+**当前状态**：服务端与纯逻辑部分全部有测试（`test/modClientPanels.test.js`：注册、服务面、`welcome`、
+`order`/`gate`/`requires`、注入面、三处客户端缺口）。**浏览器里真的 `import` 与真的渲染在本机没有 Chrome 上跑不了**
+—— 那是 `SP_E2E=1` 的可选路径，与 §4.4 同一个 standing gap。
 
 ---
 
