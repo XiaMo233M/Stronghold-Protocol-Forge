@@ -34,6 +34,8 @@ import { createPackRegistry } from './packs.js';
 import { MIME, COMPRESSIBLE, acceptsGzip, parseRange } from './http/files.js';
 import { BUILD_INPUTS, computeBuildTag, buildTag, resetBuildTag } from './http/buildTag.js';
 import { createRequestHandler } from './http/routes.js';
+import { createModsRoute, serveMods, MODS_CATALOG_URL, MOD_FILE_PREFIX } from './http/mods.js';
+import { buildModCatalog } from './modCatalog.js';
 import { answerClientError } from './http/common.js';
 import { lanUrls, isProcessEntry, runMain } from './http/boot.js';
 
@@ -43,6 +45,9 @@ export {
   acceptsGzip, parseRange, createStaticHandler, lanUrls, parseTrustProxy,
   // 创意工坊 (docs/WORKSHOP.md): the HTTP helpers live in ./http/workshop.js but stay part of this module's API
   buildWorkshopDataFiles, workshopKitFilesFor, workshopAssetsFor, WORKSHOP_ASSET_PREFIX, WORKSHOP_ASSET_TYPES,
+  // 客户端 mod 本地缓存 (W-C): the catalogue builder and the routes a browser downloads from (server/modCatalog.js,
+  // server/http/mods.js) — exported here so tests reach them the way they reach the workshop helpers above.
+  buildModCatalog, createModsRoute, serveMods, MODS_CATALOG_URL, MOD_FILE_PREFIX,
 };
 
 /**
@@ -93,6 +98,10 @@ export async function startServer(opts = {}) {
   const workshopMods = (workshopLoaded.packs || []).map((p) => ({ id: p.id, hash: p.hash, layer: p.layer, combat: p.combat, api: p.api }));
   const workshopKitFiles = workshopKitFilesFor(workshopKits.modules, workshopDir);
   const workshopAssets = workshopAssetsFor(workshopLoaded, workshopDir);
+  // 客户端 mod 本地缓存 (W-C): the catalogue a browser downloads to decide what it is missing. Built from the SAME
+  // `workshopLoaded` that produced `workshopMods` above, so a pack's identity in the catalogue and on the wire cannot
+  // drift. Empty on a plain install, and then the two /mods routes below answer `{ packs: [] }` / 404 and nothing else.
+  const modsJson = createModsRoute(workshopLoaded, buildModCatalog(workshopLoaded));
   const { registry, lobby, network } = createSessionStack(
     { ...opts, workshop: { kits: workshopKits.kits, modules: workshopKits.modules, mods: workshopMods } },
     { data, log },
@@ -100,13 +109,14 @@ export async function startServer(opts = {}) {
   // content packs (docs/PACKS.md): scanned now — the start log names them — and again whenever their folders change
   const packs = createPackRegistry({ publicDir, dataDir, packsDir }, { log });
   packs.refresh(true);
-  const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, packsDir, packs, log, workshopJson, workshopKitFiles, workshopAssets });
+  const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, packsDir, packs, log, workshopJson, workshopKitFiles, workshopAssets, modsJson });
   const startedAt = Date.now();
   // The tag is per process (see buildTag): read the browser runtime once, here, not on every /healthz.
   resetBuildTag();
   buildTag();
 
-  const server = http.createServer(createRequestHandler({ serveStatic, health: { startedAt, network, registry, lobby }, log }));
+  const server = http.createServer(createRequestHandler({ serveStatic, health: { startedAt, network, registry, lobby }, log,
+    modsCatalog: (req, res) => serveMods(req, res, MODS_CATALOG_URL, '', modsJson) }));
   server.on('clientError', answerClientError);
   const wss = attachWebSocket(server, { network, log });
 
