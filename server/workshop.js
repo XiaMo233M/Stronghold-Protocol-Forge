@@ -13,9 +13,25 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { normalizePackManifest, normalizeContentFile, byPackId } from '../shared/workshop.js';
 import { sha256Hex, canonicalJson, modManifestDigest } from '../shared/modIdentity.js';
+// the kit import whitelist + the narrow rewrite (DESIGN §27.11). shared/ because the VALIDATOR reads the same table —
+// the loader must reach the same verdict the editor did.
+import { kitImportDeclarations, kitImportIssues, rewriteKitImports } from '../shared/kitImports.js';
 
 /** Default pack root: `<repo>/workshop`. */
 export const WORKSHOP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'workshop');
+
+/** Repository root — the base a whitelisted specifier's workspace-relative file is resolved against. */
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+/**
+ * A rewritten kit source as an importable module. `data:` and not a temp file: nothing is written to disk, and the
+ * module still has a readable identity in a stack trace. `v` (the file's mtime) is appended as a `//#` comment so two
+ * revisions of the same kit are two different URLs — the same cache-buster the real-path import carries as `?v=`.
+ * @param {string} source rewritten source (every whitelisted specifier already a real `file:` URL)
+ * @param {number} v the kit file's mtime, in ms
+ */
+const kitDataUrl = (source, v) =>
+  `data:text/javascript;charset=utf-8,${encodeURIComponent(`${source}\n//# sourceURL=workshop-kit.js?v=${v}\n`)}`;
 
 /**
  * Load every pack under `dir`.
@@ -261,7 +277,22 @@ export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/worksho
         // the mtime both defeats the server-side ESM cache AND versions the URL, so a browser that already loaded the
         // module imports the new one instead of running a stale kit against a server that verifies with the new code
         const v = Math.round(fs.statSync(file).mtimeMs);
-        const mod = await import(`${pathToFileURL(file).href}?v=${v}`);
+        // IMPORT SURFACE (DESIGN §27.11): the loader reaches the SAME verdict as shared/kitAuthoring.js validateKit,
+        // because both call kitImportIssues() — the editor must not pass something this loop then refuses.
+        const source = fs.readFileSync(file, 'utf8');
+        const decls = kitImportDeclarations(source);
+        const imports = kitImportIssues(source, decls);
+        if (imports.length) {
+          errors.push({ pack: pack.id, id, code: imports[0].code, reason: imports[0].reason });
+          continue;
+        }
+        // A kit with no import is loaded from its REAL PATH, exactly as before. A kit that imports is loaded from a
+        // `data:` module: a relative specifier inside it could not resolve (`data:` has no directory), which is why the
+        // whitelisted ones are rewritten to the real `file:` URLs first. Only whitelisted specifiers are touched, and
+        // the rewrite never reaches the pack hash — identifyPack() hashes the bytes on disk (§27.2).
+        const mod = decls.length === 0
+          ? await import(`${pathToFileURL(file).href}?v=${v}`)
+          : await import(kitDataUrl(rewriteKitImports(source, (rel) => pathToFileURL(path.join(ROOT, rel)).href), v));
         const fn = typeof mod.default === 'function' ? mod.default : (typeof mod.kit === 'function' ? mod.kit : null);
         if (!fn) {
           errors.push({ pack: pack.id, id, code: 'KIT_NO_DEFAULT_EXPORT', reason: 'the module must default-export the kit function (bb, chess, def) => Kit' });

@@ -333,8 +333,9 @@ node tools/workshop-validate.mjs workshop     # items 层：重算 params/mergea
 
 1. **返回了 kit 就必须自己给出 `skill`** —— `Battle._setupUnit` 用 `u.kit.skill || null` 取技能：返回了 kit 却省略
    `skill`，这名干员就**没有技能**，缺省技能**不会**回退到通用 kit。
-2. **必须自包含，不能 `import`** —— 同一份文件服务端按真实路径加载、浏览器按 URL 加载，`../../sim/…` 对前者成立、
-   对后者不成立，所以没有任何相对路径能同时成立。
+2. **只能 `import` 白名单里的模块** —— 同一份文件服务端按真实路径加载、浏览器按 URL 加载，`../../sim/…` 对前者成立、
+   对后者不成立，所以相对路径不可能同时对。作者写 `@kit/…`（kit SDK）或 `@sim/…`（三个纯函数模块），两端各自解析；
+   白名单之外的一切 `import` / `require` / 动态 `import()` 仍然是 `KIT_IMPORT`（见 `docs/WORKSHOP.md` §4.5）。
 3. **它会跑在玩家浏览器里，服务端用同一份文件复算这场战斗** —— 默认 `SP_COMBAT=client`，服务端 `SP_VERIFY` 会重算并
    比对，不一致就**拒绝玩家的结果**，而报错信息看上去和「你用了 `Math.random()`」毫无关系。随机请用 `battle.rng`，
    时间请用战斗自己的时钟（`battle.after` / `battle.every`），DOM、网络、墙钟一律不要碰。
@@ -667,7 +668,7 @@ node tools/workshop-validate.mjs workshop     # waves 层：重算 totalCount/sl
 | DELETE | `/api/packs/:pack/items/:id` | 删除该装备的 spec **及它的一对记录** |
 | GET | `/api/kits` | 工坊 kit 列表（含静态 `issues`）+ **钩子词表** + **禁用词及其原因** + 每个包合法的 kit id 与 `overrides` |
 | GET | `/api/kits/:pack/:id` | 该 kit 的**文件原文**（文件不存在时 `source: null`） |
-| POST | `/api/kits/preview` | `{ pack, id, source }` → **仅静态**校验（不写盘，**不 import / 不执行**你的文件） |
+| POST | `/api/kits/preview` | `{ pack, id, source }` → **仅静态**校验（不写盘，**不执行**你的文件；import 只按白名单静态判，见 `docs/WORKSHOP.md` §4.5） |
 | POST | `/api/packs/:pack/kits` | `{ id, source }` → 写 `kits/<id>.js`，并在缺少署名头时补写 |
 | DELETE | `/api/packs/:pack/kits/:id` | 删除该 kit 文件 |
 | GET | `/api/voices`（可选 `?pack=`） | 各包的语音状态（`voices` + 每个非默认语种的 `voiceLangs`）+ **槽位词表** + **语种词表 `langs` 与 `defaultLang`** + **允许的扩展名** + 可选干员 id + 包内 `assets/` 真实存在的文件 |

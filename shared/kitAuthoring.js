@@ -7,9 +7,13 @@
 //
 //   1. the module must default-export the kit function     server/workshop.js loadWorkshopKits — no default export means
 //                                                          the whole file is reported and skipped
-//   2. it must be SELF-CONTAINED (no import)               the same file is loaded twice: the server by real path, the
-//                                                          browser by URL. `../../sim/…` resolves for one and not the
-//                                                          other, so no relative specifier can work for both
+//   2. its imports must come from the WHITELIST             the same file is loaded twice: the server by real path, the
+//                                                          browser by URL. A relative specifier resolves for one and not
+//                                                          the other, so a kit imports through `@kit/` (the kit SDK) or
+//                                                          `@sim/` (three pure engine helpers) — a prefix that resolves
+//                                                          in both worlds (shared/kitImports.js, DESIGN §27.11). This
+//                                                          check and the loader share one scanner, so the editor cannot
+//                                                          pass what loadWorkshopKits then refuses
 //   3. it must be DETERMINISTIC and environment-free         it runs in the player's browser (SP_COMBAT=client) and the
 //                                                          server recomputes the same battle to verify the result. A
 //                                                          Math.random() or a Date.now() makes the two disagree and the
@@ -33,6 +37,10 @@
 // A kit may also declare its OWN event under a namespace (`battle.emit('mypack:ready')`), which is how the official
 // content does it (`nearl2:knockdown`). Such a name is legal as long as the same file emits it — so the check is
 // "the engine emits it, or this file emits it".
+
+// Rule 2's table, scanner and error text live in shared/kitImports.js, because the LOADER reads them too: one verdict,
+// two readers (server/workshop.js loadWorkshopKits). See the header of that file for why the whitelist is prefix-based.
+import { kitImportIssues, kitImportAllowedText } from './kitImports.js';
 
 /**
  * Where the hook bus a kit registers on really lives — cited BY SYMBOL, never by a line number.
@@ -101,14 +109,6 @@ function stripComments(src) {
     out += c;
   }
   return out;
-}
-
-/** Strip comments AND string bodies, so a check never fires on prose or on a string that merely names a global. */
-function stripCommentsAndStrings(src) {
-  return stripComments(src)
-    .replace(/'(?:\\.|[^'\\\n])*'/g, "''")
-    .replace(/"(?:\\.|[^"\\\n])*"/g, '""')
-    .replace(/`(?:\\.|[^`\\])*`/g, '``');
 }
 
 /**
@@ -191,6 +191,9 @@ export function validateKit(source, opts = {}) {
     return out;
   }
   const text = source;
+  // comment-stripped, strings kept: the import whitelist reads real specifiers, the forbidden-global scan must not fire
+  // on prose, and neither may fire on a string that merely names a global.
+  const code = stripComments(text);
 
   // ---- ownership: the same rule loadWorkshopKits enforces, so the editor refuses before the server silently drops it
   if (ID_RE.test(id)) {
@@ -209,12 +212,11 @@ export function validateKit(source, opts = {}) {
       'the loader reads mod.default, so the file is reported and skipped without it');
   }
 
-  // ---- rule 2: self-contained. Checked on the COMMENT-STRIPPED text, because the rule itself is worth explaining in
-  // the file's own header (the shipped example kit does exactly that).
-  const code = stripCommentsAndStrings(text);
-  if (/^\s*import\s|\bfrom\s+['"]|^\s*export\s+\{[^}]*\}\s*from\s+['"]/m.test(code) || /\brequire\s*\(/.test(code)) {
-    err('source', 'KIT_IMPORT', 'a kit must not import or require anything — it has to be self-contained',
-      'the same file is loaded by the server (by real path) and by the browser (by URL), so no relative path works for both; use only the battle and the (bb, chess, def) arguments');
+  // ---- rule 2: imports come from the whitelist (shared/kitImports.js). Checked on the COMMENT-STRIPPED text, because
+  // the rule itself is worth explaining in the file's own header (the shipped example kit does exactly that), and with
+  // the SAME scanner the loader uses — one verdict, two readers (DESIGN §27.11).
+  for (const issue of kitImportIssues(text)) {
+    err('source', issue.code, issue.reason, `a kit may import only: ${kitImportAllowedText()}`);
   }
 
   // ---- rule 3: deterministic and environment-free

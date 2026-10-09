@@ -529,7 +529,7 @@ export default function kit(bb, chess, def) {
 | 规则 | 为什么 |
 |---|---|
 | **返回了 kit 就必须自己给出 `skill`** | `Battle._setupUnit` 用 `u.kit.skill \|\| null` 取技能：给了 kit 却省略 `skill`，该干员就**没有技能** —— 缺省技能**不会**回退到通用 kit |
-| **必须自包含，不要 import 引擎模块** | 同一份文件服务端按真实路径加载、浏览器按 URL 加载，相对路径不可能同时对 |
+| **只能 import 白名单里的模块** | 同一份文件服务端按真实路径加载、浏览器按 URL 加载，相对路径不可能同时对。所以作者写 `@kit/…` / `@sim/…` 前缀，两端各自解析（§4.5）；其余一切 import / `require` / 动态 `import()` 仍然是 `KIT_IMPORT` |
 | **它会在玩家浏览器里执行** | 默认 `SP_COMBAT=client`；服务端用**同一份文件**复算，所以不要有环境依赖（随机用 `battle.rng`，不要碰 DOM/网络/时间） |
 
 ### 4.2 注入点与双通道（关键一致性）
@@ -555,7 +555,7 @@ export default function kit(bb, chess, def) {
 | `HOOK_UNKNOWN_EVENT` | warn | `battle.on('beforeAttck', …)` —— `on()` 接受**任意**字符串（总线在 `server/sim/battle/hooks.js`；这个文件与两个方法名钉在 `shared/kitAuthoring.js` 的 `HOOK_BUS` 上，**这里不写行号** —— 从前写的是 `server/sim/Battle.js` 的两个行号，而那个文件早就不含这两个方法，行号烂掉时没有任何东西会报错），而 `emit()` 只触发真正被 emit 的名字（同一文件的方法 `emit`）。写错的钩子**永远不会触发，且没有任何地方会报错**。引擎真实的 emit 词表在 `HOOK_EVENTS`，由漂移守卫钉在源码上，所以能给出「你是想写 beforeAttack 吗」。命名空间事件（`mypack:ready`）只要**同一文件自己 emit 过**就合法 —— 官方内容就是这么扩展总线的（`nearl2:knockdown`） |
 | `HOOK_DYNAMIC_NAME` | warn | 用变量当事件名（`battle.on(name, …)`）—— 查不了，所以要说一声 |
 | `KIT_NONDETERMINISTIC` | warn | `Math.random` / `Date.now` / `fetch` / `document` / `setTimeout` … —— 服务端用同一份文件**复算**对局，不一致就**拒绝玩家的结果**，而报错信息看上去和「你用了 Math.random」毫无关系 |
-| `KIT_IMPORT` | error | `import` / `require` —— 违反 §4.1 第二条（服务端按路径、浏览器按 URL，相对路径不可能同时对） |
+| `KIT_IMPORT` | error | 白名单之外的 `import` / `export … from` / `require` / 动态 `import()` —— 违反 §4.1 第二条（服务端按路径、浏览器按 URL，相对路径不可能同时对）。白名单写法见 §4.5，错误 reason 里会直接列出可用的 specifier |
 | `NO_DEFAULT_EXPORT` | error | 没有默认导出（加载器读的是 `mod.default`） |
 | `KIT_NO_TARGET` | error | 包内没有这个干员 id，也没在 `pack.json overrides` 里声明 `chess:<id>` |
 
@@ -572,6 +572,72 @@ export default function kit(bb, chess, def) {
 | 服务端加载 + 校验 + 注入 `opts.kits` | ✅ 已用**真实战斗**验证（kit 的 `install` 在对局中确实执行） |
 | kit **静态校验**（钩子词表 + 三条硬规则），机器可读 | ✅ 已完成（`shared/kitAuthoring.js`、`test/kitAuthoring.test.js`，词表有漂移守卫） |
 | 浏览器分发（spec 携带 URL + runner 重建同一张表） | ✅ 已实现并测试（模块可按 URL 取得、装配路径有断言） |
-| 浏览器端**真机端到端**（Chrome 跑一场带 kit 的对局） | ⛔ 未做（需 `SP_E2E=1` + Chrome） |
+| kit 的**受限 import**（白名单 + 双端解析，§4.5） | ✅ 服务端已验（真 import 成功、helper 可用、白名单外仍被拒、包哈希不变）；浏览器侧只验到「import map 与表一致 + 模块在 `/sim/` 可取」 |
+| 浏览器端**真机端到端**（Chrome 跑一场带 kit 的对局） | ⛔ 未做（需 `SP_E2E=1` + Chrome；import map 的解析本身由浏览器做，Node 没有 import map） |
 | 编辑器里的 kit 编辑页签（`editor/ui/kit.html`） | ✅ 已完成（编辑文件本体 + 上面的静态校验 + 保存时写署名头；真正 `import` 一遍仍由 `tools/workshop-validate.mjs` 做，编辑器不执行作者的文件） |
 | 包之间 kit id 冲突、kit 的沙箱与审查 | ⛔ 未做（冲突会被报告并跳过；沙箱按分渠道策略不做） |
+
+---
+
+### 4.5 受限 import：白名单 + 双端解析
+
+一个 kit 是**同一份文件被两处加载**：服务端按真实路径 `import()`（`server/workshop.js loadWorkshopKits()`），
+浏览器按 URL `import('/workshop-kits/<pack>/<id>.js?v=…')`（`public/js/battle/runner.js loadSpecKits()`）。
+相对 specifier 对其中一端成立、对另一端必然不成立 —— 所以 kit 的 import 走**前缀白名单**：
+
+```js
+import { num, talentBb, traitBb, skillRec, up } from '@kit/tier1.js';
+import { selectedId, copyGrid } from '@kit/tier3.js';
+import { dirVec } from '@sim/dir.js';
+import { absoluteRangeKeys } from '@sim/targeting.js';
+import { COLS, ROWS } from '@sim/constants.js';
+
+export default function kit(bb, chess, def) { /* … */ }
+```
+
+这就是社区 mod「克莱门莎」那 5 行 import 的等价改写（它原来写的是 `../shared/tier1.js`、`../../../dir.js` …）。
+两端怎么解析：
+
+| 端 | 谁做 | 怎么做 |
+|---|---|---|
+| 服务端 | `server/workshop.js` | import 前用 `shared/kitImports.js rewriteKitImports()` 把白名单 specifier **窄重写**成真实 `file:` URL，再用 `data:` 模块 import（不改磁盘） |
+| 浏览器 | `public/index.html` 的 import map | `"@kit/": "/sim/content/kits/shared/"`、`"@sim/": "/sim/"` —— 声明式解析，源码**原样**发给浏览器（`/sim/` → `server/sim/`，见 `server/http/static.js`） |
+
+#### 4.5.1 白名单（唯一真相：`shared/kitImports.js KIT_IMPORT_FILES`）
+
+| specifier | 真实文件 | 里面有什么 |
+|---|---|---|
+| `@kit/tier1.js` … `@kit/tier6.js` | `server/sim/content/kits/shared/tierN.js` | 官方 kit 写作用的那套 helper（`num`、`skillRec`、`onHitOn`、`installAura` …） |
+| `@kit/summoner.js` | `server/sim/content/kits/shared/summoner.js` | 召唤物 helper |
+| `@sim/constants.js` | `server/sim/constants.js` | `COLS` / `ROWS` / `TICK` … |
+| `@sim/dir.js` | `server/sim/dir.js` | `dirVec` / `offsetTile` |
+| `@sim/targeting.js` | `server/sim/targeting.js` | `absoluteRangeKeys` / `sortEnemyTargets` |
+
+一个文件只开一个名字；加一行就是同时给两端开一个模块（表在 `shared/kitImports.js`，浏览器那张 import map 由
+`kitImportMap()` 生成、`test/kitImports.test.js` 钉住两者一致 —— 改表就要改 `public/index.html`，否则测试会红）。
+
+#### 4.5.2 白名单之外：全部仍是 `KIT_IMPORT`（error）
+
+| 作者写了 | 为什么不行 | reason 里会说的 |
+|---|---|---|
+| `'../shared/tier1.js'` | 相对路径：服务端解析成真实文件、浏览器解析成 `/workshop-kits/…` | 「相对路径无法同时在服务端与浏览器成立」 |
+| `'./x.js'` | 同上 | 同上 |
+| `'/abs.js'` | 绝对路径：浏览器按站点根、服务端按文件系统根 | 「绝对路径无法同时在服务端与浏览器成立」 |
+| `'@kit/../../x.js'` | 路径穿越，一律拒绝 | 「路径穿越一律拒绝」 |
+| `'@kit/evil.js'` | 前缀合法但模块名没开放 | 「模块名 "evil.js" 未开放」 |
+| `'lodash'` | 裸模块名：两端都没有 node_modules 解析 | 「裸模块名未开放」 |
+| `require('…')` | kit 两端都按 ES 模块加载，没有 CommonJS | 「禁止 require()」 |
+| `import('@kit/tier1.js')` | 动态 import 的 specifier 是表达式，两端都无法静态解析 | 「禁止动态 import()」 |
+| `export { x } from '…'` | 与 `import` 同一张白名单（`export … from` 也是一个模块依赖） | 同 import |
+
+每一条 reason 末尾都会列出**完整白名单**，`hint` 里给可用写法 —— 拒绝的时候必须说清允许什么。
+
+#### 4.5.3 哈希与确定性（两条都不受影响）
+
+- **包哈希按作者写的源码算**：`server/workshop.js identifyPack()` 把 `kits/*.js` 的**磁盘字节**放进 `[path, sha256]`
+  清单（DESIGN §27.2）。服务端那次重写只发生在内存里，**不落盘、不进哈希**，所以同一个包在两端摘要一致。
+- **确定性判罚不变**：`Math.random` / `Date.now` / `fetch` / `document` … 仍然是 `KIT_NONDETERMINISTIC`
+  （warning），本次只动 import 口径。
+
+测试：`test/kitImports.test.js`（白名单表与两端解析、校验器口径、服务端真加载并调用 `num`、白名单外仍被拒、
+哈希前后不变、社区 kit 5 条映射）。
