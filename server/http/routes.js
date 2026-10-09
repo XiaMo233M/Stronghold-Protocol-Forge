@@ -11,6 +11,7 @@
 import { PROTOCOL_VERSION, APP_VERSION } from '../../shared/constants.js';
 import { buildTag } from './buildTag.js';
 import { setSecurityHeaders, sendError, sendJson, splitUrl } from './common.js';
+import { MODS_CATALOG_URL } from './mods.js';
 
 const MAX_URL_LENGTH = 4096;
 
@@ -33,10 +34,11 @@ export function healthReport({ startedAt, network, registry, lobby }) {
  * The request listener for `http.createServer`.
  * @param {{ serveStatic: (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse,
  *             rawPath: string, query: string) => Promise<void>,
- *           health: Parameters<typeof healthReport>[0], log: object }} deps
+ *           health: Parameters<typeof healthReport>[0], log: object,
+ *           modsCatalog?: (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => boolean }} deps
  * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => void}
  */
-export function createRequestHandler({ serveStatic, health, log }) {
+export function createRequestHandler({ serveStatic, health, log, modsCatalog }) {
   async function handleRequest(req, res) {
     const url = req.url || '/';
     if (url.length > MAX_URL_LENGTH) { sendError(req, res, 414, '请求地址过长 · URI too long'); return; }
@@ -47,6 +49,7 @@ export function createRequestHandler({ serveStatic, health, log }) {
       sendError(req, res, 405, '不支持的请求方法 · Method not allowed');
       return;
     }
+    if (parts.rawPath === MODS_CATALOG_URL && modsCatalog && modsCatalog(req, res)) return;
     if (parts.rawPath === '/healthz') {
       sendJson(req, res, 200, healthReport(health));
       return;
