@@ -20,10 +20,25 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Match } from '../server/match/Match.js';
 import { VirtualScheduler } from '../server/match/scheduler.js';
-import { getData } from '../server/data.js';
+import { getData, resetData } from '../server/data.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const KIND_TITLE = { normal: '普通战', unite: '联防', boss: '最终攻势', hidden: '隐秘核心' };
+const QUIET_LOG = { warn() {}, error() {}, info() {} };
+
+/**
+ * The OFFICIAL content, whatever this machine has installed (docs/PACKS.md §4: a pack never moves a committed
+ * baseline). The captured specs under `public/dev/perf` are committed and a plain run reproduces them byte for byte, so
+ * a 创意工坊 pack under `workshop/` must not leak into them: `resetData()` drops a data singleton an earlier import
+ * (server/sim/simdata.js loads it in a top-level await) may have created WITH the default `workshop/`, and the explicit
+ * `workshopDir: null` keeps the overlay off — every later reader of the singleton (the battle's content modules,
+ * server/sim/content/support/index.js gameData()) then sees the official data too. Only the CLI path touches it; the
+ * helpers this tool exports stay free of side effects.
+ */
+function officialData() {
+  resetData();
+  return getData({ log: QUIET_LOG, workshopDir: null });
+}
 
 /** One spec's file name and index row. */
 export function specMeta(difficulty, msg, round) {
@@ -53,7 +68,7 @@ export function cleanStart(msg) {
 }
 
 /** Run one bot match and return seat 1's b.start messages in order: [{ round, msg }]. */
-export function captureMatch({ difficulty = 'HARD', seed = 7, data = getData({ log: { warn() {}, error() {}, info() {} } }) } = {}) {
+export function captureMatch({ difficulty = 'HARD', seed = 7, data = officialData() } = {}) {
   const sched = new VirtualScheduler();
   const seats = [0, 1, 2, 3].map((i) => ({ seat: i, playerId: i < 2 ? `p_${i}` : `ai_${i}`, name: i < 2 ? `P${i + 1}` : `AI-${i + 1}`, isBot: i >= 2, connected: true }));
   const captured = [];

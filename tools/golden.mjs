@@ -64,7 +64,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { availableParallelism } from 'node:os';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
-import { getData } from '../server/data.js';
+import { getData, resetData } from '../server/data.js';
 import { DataSource } from '../server/sim/simdata.js';
 import { buildBattleSpec, createBattleFromSpec } from '../server/sim/spec.js';
 import { createRng, deriveSeed } from '../server/sim/rng.js';
@@ -88,7 +88,19 @@ export const GOLDEN_DIR = join(ROOT, 'test', 'golden');
 export const FAMILY_NAMES = Object.freeze(['roster', 'bonds', 'fields', 'matches', 'standins', 'diy']);
 
 const QUIET = Object.freeze({ warn() {}, error() {}, info() {}, log() {}, debug() {} });
-const data = getData({ log: QUIET });
+// The corpus runs the OFFICIAL content and nothing else (docs/PACKS.md §4: "The golden results stay on the original
+// content — a pack never changes them"): a 创意工坊 pack installed under `workshop/` on this machine must not move a
+// digest. Both steps are needed, because this process has three data entry points and two of them are already filled by
+// the time this line runs (server/sim/simdata.js loads the data in a top-level await):
+//   * `resetData()` drops a singleton an earlier import created WITH the default `workshop/` — server/data.js ignores
+//     the options of every later getData() call, so `workshopDir: null` alone would not help;
+//   * `getData({ workshopDir: null })` is the official data (the overlay off) that every later reader of the singleton
+//     sees — the battle's content modules read it too (server/sim/content/support/index.js gameData()).
+// simdata.js's own copy stays as it was: it is only a fallback source for ids the official data lacks (`getDefaultSource`
+// / `DataSource.rawEffect`), and the corpus is generated from THIS object, so it can never name a pack-only id.
+// This runs before CHESS / VISIBLE below are derived, so a pack record can never enter the corpus.
+resetData();
+const data = getData({ log: QUIET, workshopDir: null });
 const ds = new DataSource(data, null); // what Match and browsers use (no research fallback)
 const gdCache = new Map();
 const gdFor = (modeId) => { let g = gdCache.get(modeId); if (!g) { g = new GameData(data, modeId); gdCache.set(modeId, g); } return g; };
