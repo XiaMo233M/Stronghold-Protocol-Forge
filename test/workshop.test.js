@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os';
 
 import { loadData, getData } from '../server/data.js';
 import { loadWorkshop, workshopTouchedFiles, WORKSHOP_DIR } from '../server/workshop.js';
-import { applyWorkshop, normalizePackManifest, normalizeContentFile, workshopSummary, WORKSHOP_CONTENT_FILES } from '../shared/workshop.js';
+import { applyWorkshop, normalizePackManifest, normalizeContentFile, workshopSummary, WORKSHOP_CONTENT_FILES, OVERRIDE_REPLACE_KEYS } from '../shared/workshop.js';
 import { GameData } from '../server/match/gamedata.js';
 import { SharedPool } from '../server/match/pool.js';
 import { buildWorkshopDataFiles, startServer } from '../server/index.js';
@@ -309,6 +309,64 @@ describe('workshop: the overlay', () => {
       assert.match(report.errors[0].reason, /does not win against another pack/);
       assert.deepEqual(report.overridden.chess, [officialId], 'alpha did override the official record; zeta did not');
     }
+  });
+
+  // 业主 2026-10-09（DESIGN §27.5）：`overrides` 是**按字段合并**，不是整条替换。改之前实测：一条只写
+  // `stats.maxHp` 的覆盖把 44 字段的干员压成 2 字段，engine 看到 tier:1 / atk:0 / skill:null，画成一格占位，
+  // 而 `applyWorkshop` 报 **0 error** —— 这就是这一组测试要挡住的静默失败。
+  test('a partial override keeps every field it did not write (44-field record in, 44-field record out)', () => {
+    const officialId = 'chess_char_1_01_a';
+    const official = loadData(DATA_DIR, { log: quiet, workshopDir: null }).chess[officialId];
+    assert.equal(Object.keys(official).length, 44, 'the fixture is the shipped record');
+    assert.equal(Object.keys(official.stats).length, 16);
+
+    const patch = { stats: { maxHp: 12345 } };
+    const { data, report } = applyWorkshop({ chess: { [officialId]: official } }, [
+      { id: 'p', overrides: [`chess:${officialId}`], files: { chess: { [officialId]: patch } } },
+    ]);
+    assert.deepEqual(report.errors, []);
+    const got = data.chess[officialId];
+    assert.equal(Object.keys(got).length, 44, 'no top-level field may be lost by a partial override');
+    for (const k of Object.keys(official)) assert.ok(Object.hasOwn(got, k), `survived: ${k}`);
+    assert.equal(Object.keys(got.stats).length, 16, 'the other stats survive too');
+    assert.equal(got.stats.maxHp, 12345, 'and the one field the pack wrote is the pack\'s');
+    assert.equal(got.stats.atk, official.stats.atk);
+    assert.equal(got.tier, official.tier);
+    assert.equal(got.skill, official.skill, 'a behaviour field the patch did not name is untouched');
+    assert.equal(official.stats.maxHp === 12345, false, 'the official record on the way in is never mutated');
+  });
+
+  test('behaviour and array fields are replaced wholesale, by name', () => {
+    const officialId = 'chess_char_1_01_a';
+    const official = loadData(DATA_DIR, { log: quiet, workshopDir: null }).chess[officialId];
+    const patch = { rangeGrid: [[0, 0]], skill: { index: 2 }, talents: [{ name: 'mine' }] };
+    const { data } = applyWorkshop({ chess: { [officialId]: official } }, [
+      { id: 'p', overrides: [`chess:${officialId}`], files: { chess: { [officialId]: patch } } },
+    ]);
+    const got = data.chess[officialId];
+    assert.deepEqual(got.rangeGrid, [[0, 0]], 'an array is replaced, never field-merged');
+    assert.deepEqual(got.skill, { index: 2 }, 'a half-merged skill would be a record nobody wrote');
+    assert.deepEqual(got.talents, [{ name: 'mine' }]);
+    assert.equal(got.stats.maxHp, official.stats.maxHp, 'and the untouched numeric map still comes from the official record');
+    const keys = ['skill', 'skills', 'talents', 'trait', 'traitBase', 'traitOverride', 'modules', 'rangeGrid', 'attackRangeGrid', 'assets', 'diy', 'bonds'];
+    for (const k of keys) assert.ok(OVERRIDE_REPLACE_KEYS.includes(k), `${k} is a replace-type key`);
+  });
+
+  test('an override is a closed world: a field the record does not have is refused, and nothing is applied', () => {
+    const officialId = 'chess_char_1_01_a';
+    const official = loadData(DATA_DIR, { log: quiet, workshopDir: null }).chess[officialId];
+    const { data, report } = applyWorkshop({ chess: { [officialId]: official } }, [
+      { id: 'p', overrides: [`chess:${officialId}`], files: { chess: { [officialId]: { stats: { maxHp: 1 }, nonsense: true } } } },
+    ]);
+    assert.equal(report.errors.length, 1);
+    assert.equal(report.errors[0].code, 'UNKNOWN_OVERRIDE_FIELD');
+    assert.match(report.errors[0].reason, /"nonsense"/);
+    assert.equal(data.chess[officialId].stats.maxHp, official.stats.maxHp, 'the good half of the patch is not applied either');
+    assert.deepEqual(report.overridden, {});
+    // a NEW record has no official counterpart to be closed against: the per-record authoring layers own that check
+    const fresh = applyWorkshop({ chess: {} }, [{ id: 'p', files: { chess: { chess_ws_fresh_a: { chessId: 'chess_ws_fresh_a', nonsense: true } } } }]);
+    assert.deepEqual(fresh.report.errors, []);
+    assert.equal(fresh.data.chess.chess_ws_fresh_a.nonsense, true);
   });
 
   test('the merge never mutates its input and reports readable counts', () => {

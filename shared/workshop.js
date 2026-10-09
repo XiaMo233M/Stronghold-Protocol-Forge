@@ -527,6 +527,56 @@ export function workshopVoiceLangIndex(packs, { prefix = WORKSHOP_MEDIA_PREFIX }
 export const byPackId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 /**
+ * Keys of a record that an override REPLACES wholesale instead of merging field by field (DESIGN §27.5, owner's
+ * request of 2026-10-09). Two classes, one reason each:
+ *
+ *   * **behaviour / structure** — `skill`, `skills`, `talents`, `trait`, `traitBase`, `traitOverride`, `modules`,
+ *     `rangeGrid`, `attackRangeGrid`, `assets`, `diy`, `bonds`: these are read as whole units by the sim and the
+ *     loadout layer (`shared/loadoutRecord.js` resolveRecordLoadout / loadoutRecord, `server/sim/simdata.js`).
+ *     Half-merging e.g. a `skill` (a new index with the old blackboard) would create a record nobody wrote and no
+ *     validator describes; replacing is the only honest reading of "this pack ships its own skill".
+ *   * **arrays** — replaced by definition, a field-wise array merge has no meaning here.
+ *
+ * Everything else (numbers, strings, booleans and the plain objects that hold them, e.g. `stats`, `assets`' sibling
+ * numeric maps) is merged field by field, recursively, so an override that writes ONE number keeps every other field of
+ * the official record. That is the whole point: before this, a one-key override silently reduced a 44-field operator to
+ * two fields, and `applyWorkshop` reported no error at all.
+ */
+export const OVERRIDE_REPLACE_KEYS = Object.freeze([
+  'skill', 'skills', 'talents', 'trait', 'traitBase', 'traitOverride', 'modules',
+  'rangeGrid', 'attackRangeGrid', 'assets', 'diy', 'bonds',
+]);
+
+/**
+ * Merge one override record onto the record it replaces: field by field, with `OVERRIDE_REPLACE_KEYS` and arrays taken
+ * wholesale. The input objects are never mutated (the caller may keep the official data frozen).
+ * @param {object} base the record being overridden (official, or a record an earlier pack contributed)
+ * @param {object} patch the pack's record
+ * @returns {object} a new record
+ */
+export function mergeRecord(base, patch) {
+  if (!isPlainObj(base) || !isPlainObj(patch)) return patch;
+  const out = { ...base };
+  for (const [key, value] of Object.entries(patch)) {
+    if (OVERRIDE_REPLACE_KEYS.includes(key) || Array.isArray(value)) { out[key] = value; continue; }
+    out[key] = isPlainObj(value) && isPlainObj(base[key]) ? mergeRecord(base[key], value) : value;
+  }
+  return out;
+}
+
+/**
+ * The keys of `patch` that the record it overrides does not have (DESIGN §27.5, "closed world"): a declared override
+ * may only speak about fields that exist, because today any well-formed nonsense is accepted silently and the author
+ * gets a record that is quietly not what they wrote. `null` when `base` is not an object (nothing to compare against).
+ * @param {object} base @param {object} patch
+ * @returns {string[]|null}
+ */
+export function unknownOverrideKeys(base, patch) {
+  if (!isPlainObj(base) || !isPlainObj(patch)) return null;
+  return Object.keys(patch).filter((k) => !Object.hasOwn(base, k));
+}
+
+/**
  * Resolve every pack's 助战 declaration (`pack.json.support`) into the pool entries it asks for, plus the reasons a
  * declaration is refused (docs/WORKSHOP.md §2).
  *
@@ -672,7 +722,22 @@ export function applyWorkshop(base, packs) {
           });
           continue;
         }
-        merged[id] = rec;
+        // A declared override is a FIELD-LEVEL patch, not a replacement (DESIGN §27.5): writing one number must keep
+        // every other field of the record it overrides. And it may only speak about fields that exist ("closed world").
+        if (exists) {
+          const official = /** @type {Record<string, unknown>} */ (base[file] && isPlainObj(base[file]) ? base[file][id] : prior[id]);
+          const unknown = unknownOverrideKeys(official, rec);
+          if (unknown && unknown.length) {
+            report.errors.push({
+              pack: pack.id, file, id, code: 'UNKNOWN_OVERRIDE_FIELD', definedBy: 'official',
+              reason: `the override of "${id}" names ${unknown.map((k) => `"${k}"`).join(', ')}, which the record does not have — an override may only change fields that exist (add the record under a new id to invent one)`,
+            });
+            continue;
+          }
+          merged[id] = mergeRecord(prior[id], rec);
+        } else {
+          merged[id] = rec;
+        }
         contributors.set(key, pack.id);
         if (file === 'chess') looked.push({ pack: pack.id, id, rec });
         if (file === 'enemies') lookedEnemies.push({ pack: pack.id, id, rec });
