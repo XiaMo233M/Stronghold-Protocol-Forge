@@ -296,7 +296,7 @@ now runs those fields itself, sliced by the existing wall-clock budget (`server/
 That is the price of the guarantee, and it is why `combat: false` packs matter: they keep the cheap path.
 
 **No file system, no network.** `KIT_IMPORT` is an error for anything outside the kit import whitelist
-(`shared/kitImports.js`, §27.11) and the environment globals are already scanned for (`shared/kitAuthoring.js`
+(`shared/kitImports.js`, §27.12) and the environment globals are already scanned for (`shared/kitAuthoring.js`
 `KIT_FORBIDDEN_GLOBALS`, checked inside `validateKit`) — but as **warnings**
 (`KIT_NONDETERMINISTIC`). Under server-only execution a `Date.now()` is no longer excusable as "both sides ran
 it"; it is a direct threat to the recomputation the match depends on. Design: **`KIT_NONDETERMINISTIC` becomes an
@@ -593,7 +593,7 @@ reach the same content".
 - **Nothing here is implemented yet.** The first slice, its files, its verification and its failure modes are in the
   proposal that accompanies this section; the two attribution/rot defects it fixes are the only code that changed.
 
-### 27.11 The kit import surface (gap ④): a whitelist, resolved on both ends
+### 27.12 The kit import surface (gap ④): a whitelist, resolved on both ends
 
 **The defect, stated as the code states it.** A pack kit is one file with two loaders:
 

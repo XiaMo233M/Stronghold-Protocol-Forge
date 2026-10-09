@@ -1,4 +1,4 @@
-// test/kitImports.test.js — 工坊包 kit 的 import 权利（缺口④，DESIGN §27.11 / docs/WORKSHOP.md §4.5）。
+// test/kitImports.test.js — 工坊包 kit 的 import 权利（缺口④，DESIGN §27.12 / docs/WORKSHOP.md §4.5）。
 //
 // 一个 kit 是**同一份文件被两处加载**：服务端按真实路径（server/workshop.js loadWorkshopKits 的 import()）、
 // 浏览器按 URL（public/js/battle/runner.js loadSpecKits 的 import('/workshop-kits/…')）。相对 specifier 对其中

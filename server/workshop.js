@@ -13,7 +13,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { normalizePackManifest, normalizeContentFile, byPackId, playtestUnknownIds } from '../shared/workshop.js';
 import { sha256Hex, canonicalJson, modManifestDigest } from '../shared/modIdentity.js';
-// the kit import whitelist + the narrow rewrite (DESIGN §27.11). shared/ because the VALIDATOR reads the same table —
+// the kit import whitelist + the narrow rewrite (DESIGN §27.12). shared/ because the VALIDATOR reads the same table —
 // the loader must reach the same verdict the editor did.
 import { kitImportDeclarations, kitImportIssues, rewriteKitImports } from '../shared/kitImports.js';
 
@@ -298,7 +298,7 @@ export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/worksho
         // the mtime both defeats the server-side ESM cache AND versions the URL, so a browser that already loaded the
         // module imports the new one instead of running a stale kit against a server that verifies with the new code
         const v = Math.round(fs.statSync(file).mtimeMs);
-        // IMPORT SURFACE (DESIGN §27.11): the loader reaches the SAME verdict as shared/kitAuthoring.js validateKit,
+        // IMPORT SURFACE (DESIGN §27.12): the loader reaches the SAME verdict as shared/kitAuthoring.js validateKit,
         // because both call kitImportIssues() — the editor must not pass something this loop then refuses.
         const source = fs.readFileSync(file, 'utf8');
         const decls = kitImportDeclarations(source);

@@ -1,4 +1,4 @@
-// 浏览器侧的真机验证：import map 真的把 @kit/ / @sim/ 解析到了模块上（DESIGN §27.11 / docs/WORKSHOP.md §4.5）。
+// 浏览器侧的真机验证：import map 真的把 @kit/ / @sim/ 解析到了模块上（DESIGN §27.12 / docs/WORKSHOP.md §4.5）。
 //
 //   SP_E2E=1 node --test test/ui/kitimports.e2e.test.js
 //
