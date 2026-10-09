@@ -79,6 +79,21 @@ export function enemyKey(idOrSlug) {
 }
 
 /**
+ * 覆盖模式（override mode）的 key：**原样保留官方 key，不加 `enemy_ws_` 前缀**（与 `overrideChessIds` 同一套）。
+ *
+ * 与干员那边的差异写在这里，免得下一个人重新推一遍：**怪物只有一个 key，没有 golden 兄弟** —— 干员是一对
+ * （`_a` + `_b`，两条都要写进 `chess.json`、两条都要在 `overrides` 里声明），怪物覆盖就是一条记录。
+ *
+ * @param {object} rec 官方（或包内已有的）怪物记录
+ * @returns {{ slug: string, key: string }|null}
+ */
+export function overrideEnemyKey(rec) {
+  if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return null;
+  const key = typeof rec.key === 'string' && rec.key ? rec.key : null;
+  return key ? { slug: key, key } : null;
+}
+
+/**
  * Build a complete enemy record from the facts an author (or an AI) actually knows.
  *
  * Spec: { id, name, rank?, applyWay?, motion?, dmgType?, desc?,

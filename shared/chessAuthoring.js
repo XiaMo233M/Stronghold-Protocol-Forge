@@ -207,6 +207,28 @@ export function chessIds(idOrSlug) {
 }
 
 /**
+ * 覆盖模式（override mode）的 id：**原样保留官方 id，不加 `chess_ws_` 前缀**。
+ *
+ * 为什么是「平行函数」而不是给 `chessIds` 加开关：`chessIds` 有六个调用点（编辑器的保存 / 复校验 / 列表 /
+ * 取回，以及 `deriveChessRecord` 自己）。让它「有时候加前缀、有时候不加」会让每个调用点都得先想清自己在哪种
+ * 模式里 —— 那是静默错 id 的温床。默认路径（新建 / 复制）因此**一字不动**。
+ *
+ * 取值只用记录自己的字段（`baseId` / `goldenId`），**不做字符串手术**：普通与精锐是一对，
+ * `chess_char_1_01_a` 的兄弟 `_b` 只能从记录里读出来 —— 官方 id 的后缀规则不是本仓库定的。
+ *
+ * @param {object} rec 官方（或包内已有的）干员记录
+ * @returns {{ slug: string, base: string, golden: string|null }|null}
+ */
+export function overrideChessIds(rec) {
+  if (!isPlainObj(rec)) return null;
+  const id = typeof rec.chessId === 'string' && rec.chessId ? rec.chessId : null;
+  if (!id) return null;
+  const base = typeof rec.baseId === 'string' && rec.baseId ? rec.baseId : id;
+  const golden = typeof rec.goldenId === 'string' && rec.goldenId ? rec.goldenId : null;
+  return { slug: base, base, golden };
+}
+
+/**
  * Build a valid base + elite record pair from an authoring spec.
  *
  * Spec (only `id`, `name`, `tier`, `profession`, `position` and `stats` are required):

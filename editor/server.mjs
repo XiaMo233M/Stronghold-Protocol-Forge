@@ -21,14 +21,14 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { deriveChessRecord, validateChessRecord, chessIds, formatIssues, authoringErrors, specFromChessRecord } from '../shared/chessAuthoring.js';
+import { deriveChessRecord, validateChessRecord, chessIds, overrideChessIds, formatIssues, authoringErrors, specFromChessRecord } from '../shared/chessAuthoring.js';
 import { TILE_PALETTE, DEPLOY_RECTS, STAGE_ROWS, STAGE_COLS, normalizeRows, stageErrors, SAMPLE_STAGE_SPEC, sampleStageSpec } from '../shared/stageAuthoring.js';
 // 一张图自己的尺寸与分区（shared/layout.js）：编者的 spec 读回一张记录时要带上它们，否则大图一保存就缩回官方尺寸。
 import { clampSize } from '../shared/layout.js';
 import { deriveStage, validateStageRecord, deriveRoutePaths } from '../server/stageAuthoring.js';
 import { normalizeLegendEntry } from '../server/sim/grid.js';
 import {
-  deriveEnemy, validateEnemy, enemyErrors, enemyKey as enemyKeyOf, specFromEnemyRecord,
+  deriveEnemy, validateEnemy, enemyErrors, enemyKey as enemyKeyOf, overrideEnemyKey, specFromEnemyRecord,
   ENEMY_RANKS, ENEMY_MOTIONS, ENEMY_DMG_TYPES, ENEMY_APPLY_WAYS,
   ENEMY_AC_TYPES, ENEMY_IMMUNITIES, ENEMY_STAT_DEFAULTS,
 } from '../shared/enemyAuthoring.js';
@@ -106,6 +106,8 @@ const BOND_ICON_ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
 const ITEM_ICON_ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
 /** 外观条目的 id 字符集：与 shared/workshop.js 的 `RECORD_ID_RE`（`ART_BAD_ID`）同一份规则。 */
 const ART_ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
+/** 记录 id 的字符集（官方 `data/*.json` 的键）：覆盖模式用它挡路径穿越（id 会被拿去查表）。 */
+const RECORD_ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
 /** `{…}` 这种朴素对象（外观表、条目都是它）——数组与 null 都不算。 */
 const isPlainObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 
@@ -2157,6 +2159,26 @@ export async function createEditorServer(opts = {}) {
         overrideCandidates: overrideCandidates(officialTables),
         meta,
       });
+    }
+
+    // ---- 覆盖模式（A 段）: 只读，把一条官方记录读成一份可编辑的 spec --------------------------------
+    // 这两个端点**不写任何东西**：它们只回答「这条官方记录长什么样、它的 id 是什么」。保存路径的分支留给 B 段。
+    // 形状校验挡的是 `../etc` 这类路径穿越（id 会被拼进 data/<file>.json 的查找里）。
+    if ((p.startsWith('/api/official/chess/') || p.startsWith('/api/official/enemies/')) && method === 'GET') {
+      const chess = p.startsWith('/api/official/chess/');
+      const prefix = chess ? '/api/official/chess/' : '/api/official/enemies/';
+      const wanted = decodeURIComponent(p.slice(prefix.length));
+      if (!RECORD_ID_RE.test(wanted)) throw refuse(400, `不是合法的记录 id：${wanted}`);
+      const tables = officialIdTables(dataDir);
+      const rec = chess ? tables.chess?.[wanted] : tables.enemies?.[wanted];
+      if (!rec || typeof rec !== 'object') throw refuse(404, `官方数据里没有 ${wanted}`);
+      const spec = chess ? specFromChessRecord(rec) : specFromEnemyRecord(rec);
+      if (!spec) throw refuse(500, `${wanted} 读不成一份编辑用的 spec`);
+      // `override: true` 是**覆盖模式**的标记，只活在 spec 层（`specs/<slug>.json`）。它**不许**出现在生成的
+      // 记录里：`chess.json` / `enemies.json` 的每一条都要过 A2 的闭合世界检查，多一个未知键会被加载器拒掉。
+      // 这就是为什么 `deriveChessRecord` / `deriveEnemy` 只从它们认识的字段取值（下面那条测试钉住它）。
+      const ids = chess ? overrideChessIds(rec) : overrideEnemyKey(rec);
+      return sendJson(res, 200, { ok: true, spec: { ...spec, override: true }, ids, official: rec });
     }
 
     // 写一个包的元数据（`pack.json` 的 name/version/author/license/description/gameVersion）——只动传进来的键
