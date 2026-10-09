@@ -408,6 +408,51 @@ describe('workshop: the overlay', () => {
     assert.equal(normalizeContentFile('chess', { a: { chessId: 'b' } }).error, 'ID_MISMATCH');
     assert.equal(normalizeContentFile('chess', { a: { chessId: 'a' } }).ok, true);
   });
+
+  // ── 顶层键闭集（B5 段，三个社区 mod 的 G-01 / G-04 / G-05 都栽在这里） ────────────────────────────────
+  // 判据只有一条：**一个这份格式不认识的顶层键，必须点名拒绝**，绝不读过去。以前 `variants` / `skins`
+  // 是静默丢（`{content:["chess","variants"]}` 归一化成 `["chess"]`），`i18n` 连键都不存在。
+  test('an unknown top-level key refuses the whole pack, and the reason lists the known fields', () => {
+    for (const key of ['variants', 'skins', 'official', 'config', 'meta', 'shared', 'theme', 'serverModules', 'hasAssets']) {
+      const r = normalizePackManifest({ id: 'p', content: ['chess'], [key]: {} }, 'p', {});
+      assert.equal(r.ok, false, `"${key}" must not be read past`);
+      assert.equal(r.error, 'PACK_UNKNOWN_FIELD', `"${key}": ${r.detail}`);
+      assert.match(r.detail, new RegExp(`"${key}"`), 'the refusal names the key the author wrote');
+      for (const known of ['content', 'i18n', 'support', 'assets', 'client', 'server', 'routes']) {
+        assert.ok(r.detail.includes(known), `the refusal lists "${known}" as a field this format knows`);
+      }
+    }
+  });
+
+  test('the refusal happens before any other judgement, and every known field still parses', () => {
+    // 一个连键都不认识的清单，后面的字段级判据都是在猜它想说什么 —— 所以这一条排在最前面。
+    const both = normalizePackManifest({ id: 'p', content: [], variants: {}, operators: { char_x: {} } }, 'p', {});
+    assert.equal(both.error, 'PACK_UNKNOWN_FIELD', 'the unknown key wins over EMPTY_PACK');
+    // 闭集里的每一个键都不会因为这一刀被误拒（`id` / `name` … `routes` 各有自己的判据）。
+    const ok = normalizePackManifest({
+      id: 'p', name: 'P', version: '1.0.0', author: 'A', license: 'CC0-1.0', description: 'D',
+      gameVersion: '0.2.1', game: '0.2.x', api: '1.x', layer: 'A', combat: false,
+      content: ['chess'], overrides: [], voices: {}, voiceLangs: {}, bondIcons: {}, itemIcons: {}, art: {},
+      support: [], operators: {}, i18n: {}, playtest: { directToHand: [] },
+    }, 'p', {});
+    assert.equal(ok.ok, true, ok.detail);
+    assert.equal(ok.pack.content.length, 1);
+  });
+
+  test('a pack whose only declaration is 助战 or 试玩 says so in the refusal (plugin-pack G6)', () => {
+    const supportOnly = normalizePackManifest({ id: 'p', content: [], support: ['chess_ws_a'] }, 'p', {});
+    assert.equal(supportOnly.error, 'EMPTY_PACK');
+    assert.match(supportOnly.detail, /"support"/, 'the refusal names 助战 — it used to name only the fields that DO work');
+    assert.match(supportOnly.detail, /NOT a contribution/);
+    const playtestOnly = normalizePackManifest({ id: 'p', content: [], playtest: { directToHand: ['chess_ws_a'] } }, 'p', {});
+    assert.equal(playtestOnly.error, 'EMPTY_PACK');
+    assert.match(playtestOnly.detail, /"playtest"/);
+    // 语义一个字都没放宽：补上 content 就合法（plugin-pack 的 f2-control-chess-support 就是这个形状）。
+    assert.equal(normalizePackManifest({ id: 'p', content: ['chess'], support: ['chess_ws_a'] }, 'p', {}).ok, true);
+    // 没写这两个键时文案也不该提到它们（否则每一份空包都多两句无关的话）
+    const bare = normalizePackManifest({ id: 'p', content: [] }, 'p', {});
+    assert.doesNotMatch(bare.detail, /NOT a contribution/);
+  });
 });
 
 describe('workshop: the content reaches the game', () => {

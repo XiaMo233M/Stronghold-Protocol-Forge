@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 
 import {
   normalizePackManifest, normalizeContentFile, applyWorkshop, workshopSummary, WORKSHOP_CONTENT_FILES,
-  UNIT_REQUIRED_FIELDS, ART_TABLES,
+  UNIT_REQUIRED_FIELDS, ART_TABLES, unknownOverrideKeys,
 } from '../shared/workshop.js';
 import { requiredUnitForms } from '../shared/diy.js';
 import { loadWorkshop, workshopTouchedFiles } from '../server/workshop.js';
@@ -355,6 +355,39 @@ describe('干员包: pack.json.operators（自选池声明）', () => {
   });
 });
 
+// ── G-07 `giveBondBiasOnly`：一条社区 mod 想在记录层引入的**规则**字段 ────────────────────────────────
+//
+// **本刀不做它**，只做「响亮拒绝」这一半。判据：它的语义是「商店里那 18 件盟约签名装备的**刷出概率**偏向你
+// 叠得最高的盟约，但不授予盟约」—— 那改的是**一局的商店出货概率**（= 改对局结果），按 `AGENTS.md`
+// 「Official first … Deliberate deviations from the official mode are the maintainer's decision only」
+// 属于维护者的决定，不该由内容包引入。
+// 而且它**不能凑合**：只写 `giveBondId` 会变成「**授予**盟约」（本引擎的语义，见 `server/match/bondsMeta.js`、
+// `server/sim/content/support/index.js`），与原件「只偏置、不授予」**相反** —— 宁可少一个特性，也不制造一个
+// 语义相反的假实现。
+// 两条路都已经被既有的闸门挡住，这条测试把它们钉住（不是新判据，是**既有判据的实证**）：
+describe('干员包: G-07 `giveBondBiasOnly`（记录层规则字段——不做，只响亮拒绝）', () => {
+  test('写进记录 ⇒ UNKNOWN_OVERRIDE_FIELD 整条被拒，值一个字节都不落地', () => {
+    const official = { giveBondId: 'yanShip', bb: { base_atk: 10 } };
+    const patch = { giveBondBiasOnly: true, giveBondId: 'kazimierzShip' };
+    assert.deepEqual(unknownOverrideKeys(official, patch), ['giveBondBiasOnly'], '闭合世界判据认得它');
+    const { data, report } = applyWorkshop(
+      { items: { item_x: JSON.parse(JSON.stringify(official)) } },
+      [pack('bias', { items: { item_x: patch } }, { overrides: ['items:item_x'] })],
+    );
+    assert.equal(report.errors.length, 1);
+    assert.equal(report.errors[0].code, 'UNKNOWN_OVERRIDE_FIELD');
+    assert.match(report.errors[0].reason, /giveBondBiasOnly/);
+    assert.equal(data.items.item_x.giveBondId, 'yanShip', '整条不生效（连一起写的那个字段也不落地）');
+    assert.equal(Object.hasOwn(data.items.item_x, 'giveBondBiasOnly'), false, '值绝不落地');
+  });
+
+  test('写成 pack.json 的顶层键 ⇒ PACK_UNKNOWN_FIELD（闭集）', () => {
+    const r = normalizePackManifest({ id: 'p', content: ['items'], giveBondBiasOnly: true }, 'p', {});
+    assert.equal(r.error, 'PACK_UNKNOWN_FIELD');
+    assert.match(r.detail, /giveBondBiasOnly/);
+  });
+});
+
 describe('干员包: 两张扁平图标表（art.skills / art.profSub）', () => {
   const norm = (art) => normalizePackManifest({ id: 'p', content: [], art, license: 'CC0-1.0' }, 'p', { hasAssets: true });
 
@@ -594,5 +627,66 @@ describe('干员包: 临时工坊根的端到端（自造包，不依赖例子�
     assert.equal(data.backups.units.char_ws_tmp.name, '临时干员');
     assert.equal(data.backups.diy.operators.char_ws_tmp.name, '临时干员');
     assert.equal(data.backups.diy.ownedPool.length, 72);
+  });
+});
+
+// ── G-16 `stripPackOperators`：包把一名官方干员变成棋子时，他与自选池的关系必须被**记录** ────────────────
+//
+// 本刀只做「记录 + 拒绝重复」这一半：真的把人摘出 `diy.ownedPool` 会改变自选槽能挑到的干员（= 改对局结果），
+// 而本刀的验收要求 `test/golden/*.json` 一个字节不动、六份语料数字不变 —— 两件事不可能同时成立，
+// 所以摘除那一半是**维护者的决定**（理由与实测数字写在 `shared/workshop.js stripPackOperators` 的注释里）。
+describe('干员包: stripPackOperators（G-16，记录 + 拒绝重复）', () => {
+  const pool = OFFICIAL_BACKUPS.diy.ownedPool;
+
+  test('一个把池里已有干员变成棋子的包被逐条点名，而池子一个字节不改', () => {
+    const charId = pool[0];
+    const chessId = 'chess_ws_shadow_a';
+    const packs = [{ id: 'shadow', files: { chess: { [chessId]: { chessId, charId, name: '影子', tier: 3 } } } }];
+    const base = loadData(DATA_DIR, { log: quiet, workshopDir: null });
+    const { data, report } = applyWorkshop(base, packs);
+    assert.equal(report.overlaps.length, 1);
+    assert.deepEqual(
+      { pack: report.overlaps[0].pack, charId: report.overlaps[0].charId, inPoolBefore: report.overlaps[0].inPoolBefore, poolEntry: report.overlaps[0].poolEntry, entryFrom: report.overlaps[0].entryFrom },
+      { pack: 'shadow', charId, inPoolBefore: true, poolEntry: false, entryFrom: chessId },
+    );
+    assert.match(report.overlaps[0].note, /self-selected|自选|ownedPool|two ways in|fielded twice|bypasses/i);
+    // 记录不是判罚：`errors` 一条不加（否则「装一个包」会让整个包看起来是坏的）
+    assert.deepEqual(report.errors, []);
+    // 池子不变（71），那一位仍然在
+    assert.equal(data.backups.diy.ownedPool.length, OFFICIAL_POOL);
+    assert.ok(data.backups.diy.ownedPool.includes(charId));
+  });
+
+  test('「包把一名官方干员变成棋子」这件事不会让池里出现第二条（既有的去重不变量）', () => {
+    const charId = pool[1];
+    const chessId = 'chess_ws_dup_a';
+    // 同时声明 `operators`（想进池）与 chess 记录（变成棋子）：`mergeWorkshopOperators` 的 `!pool.includes` 挡住重复。
+    const packs = [{
+      id: 'dup',
+      operators: { [charId]: { bonds: [] } },
+      files: { chess: { [chessId]: { chessId, charId, name: '重影', tier: 3 } } },
+    }];
+    const { data, report } = applyWorkshop(loadData(DATA_DIR, { log: quiet, workshopDir: null }), packs);
+    assert.equal(data.backups.diy.ownedPool.filter((id) => id === charId).length, 1, '一个 id 只会有一个条目');
+    assert.equal(data.backups.diy.ownedPool.length, OFFICIAL_POOL);
+    assert.equal(report.overlaps.length, 1);
+    assert.equal(report.overlaps[0].poolEntry, true, '他是这个包声明进池的 —— 报告要说清这一点');
+  });
+
+  test('真实的 fanpack（本机有那份数据时）：13 名干员里 8 名在池里，池子仍是 71', () => {
+    const fan = 'E:\\destop\\harness_1\\_up\\fanpack-pack\\pack\\fanpack-kazdel-rhodes\\chess.json';
+    if (!fs.existsSync(fan)) {
+      assert.ok(true, '本机没有那份 fanpack 数据，跳过这一条（它不在仓库里）');
+      return;
+    }
+    const chess = JSON.parse(fs.readFileSync(fan, 'utf8'));
+    const packs = [{ id: 'fanpack-kazdel-rhodes', files: { chess } }];
+    const { data, report } = applyWorkshop(loadData(DATA_DIR, { log: quiet, workshopDir: null }), packs);
+    assert.equal(report.overlaps.length, 8, `8 名干员同时在池里，实际 ${report.overlaps.length}`);
+    for (const o of report.overlaps) {
+      assert.equal(o.inPoolBefore, true);
+      assert.ok(pool.includes(o.charId));
+    }
+    assert.equal(data.backups.diy.ownedPool.length, OFFICIAL_POOL, '记录不等于摘除：池子仍是 71');
   });
 });

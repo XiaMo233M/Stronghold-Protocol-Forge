@@ -89,6 +89,44 @@ export const UNIT_REQUIRED_FIELDS = Object.freeze([
 export const PACK_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
 
 /**
+ * `pack.json` 的**顶层键闭集** —— 这份格式认识的每一个字段，一个不多一个不少。
+ *
+ * 为什么需要它（本刀最重要的那条纪律）：一个**声明了、而我们不认识的键**如果只是被读过去，作者看到的是
+ * 「pack.json 合法、包加载了、可我写的那件事没发生」。这正是三个社区 mod 反复撞上的那面墙：
+ *   * `variants`（fanpack G-01，口径/变体）—— `normalizePackManifest` 从没读过它，`{content:["chess","variants"]}`
+ *     归一化之后只剩 `["chess"]`，作者以为写了；
+ *   * `skins`（fanpack G-05）—— 与 `variants` 同一个形状：静默丢；
+ *   * `i18n`（fanpack G-04）—— 归一化结果里根本没有这个键。
+ * 三者都是「写了等于没写」，而且失败的方向是**静默**。所以这一层的判据是：任何一个不在下面这张表里的顶层键，
+ * **点名整包拒绝**（`PACK_UNKNOWN_FIELD`），理由里列出这份格式认识的字段 —— 作者一眼能看到自己该写哪个。
+ *
+ * 这不是「不支持新特性」的门：一个我们**故意**不支持的键（`config`，见 `WORKSHOP_CONTENT_FILES` 的注释）与一个
+ * 拼错的键在作者眼里是同一件事（都是「没用」），而拒绝的错误文案会把两种情况都解释清楚（"config" is not a
+ * field of this pack format）。方向也一致：宁可当场说「这张表没有通道」，也不要收下一份没人读的声明。
+ *
+ * 加字段的规矩：新字段进这张表的那一刀，必须同时（a）在 `normalizePackManifest` 里给它一个解析分支、
+ * （b）决定它算不算贡献项、（c）把它的文件并进 `identifyPack` 的哈希清单（能改变一端行为的声明不进哈希，
+ * 同一个摘要下就有两种行为，DESIGN §28.2）。
+ */
+export const PACK_FIELDS = Object.freeze([
+  // 身份与元信息
+  'id', 'name', 'version', 'author', 'license', 'description', 'gameVersion', 'game', 'api', 'layer', 'combat',
+  // 内容与覆盖
+  'content', 'overrides',
+  // 素材与声明（贡献项，见 EMPTY_PACK 那一处）
+  'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'support', 'operators', 'i18n',
+  // 行为开关（**不是**贡献项）
+  'playtest',
+  // 中间层四组能力声明（DESIGN §28.13）
+  'assets', 'client', 'server', 'routes',
+]);
+
+/** 未知顶层键的拒绝码（见 `PACK_FIELDS`）。 */
+export const PACK_UNKNOWN_FIELD_CODE = 'PACK_UNKNOWN_FIELD';
+/** 一个顶层键在错误文案里最多显示多少个字符（一个手写坏掉的 pack.json 可以有几千字符的键）。 */
+const MAX_KEY_SHOWN = 60;
+
+/**
  * 一条 `pack.json.overrides` 声明的形状：`"<文件>:<id>"`（例 `chess:chess_char_1_01_a`）。**只此一份**：
  * `normalizePackManifest` 下面用它过滤，编辑器的写入端与校验器用它拒绝（两处正则不一致的话，界面会写出一个
  * 加载器悄悄丢掉的声明 —— 那正是「写了等于没写」这一类静默失败）。
@@ -125,6 +163,7 @@ export const WORKSHOP_RESOURCE_PREFIX = '/workshop-resources/';
 const RECORD_ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
 
 import { VOICE_SLOTS, VOICE_LANGS, DEFAULT_VOICE_LANG, MOD_API_VERSION } from './constants.js';
+import { SOURCE_LANG, isLangCode } from './i18nPacks.js';
 import { isSupportTier } from './support.js';
 import { isVersionRange, appVersionMatches } from './packs.js';
 import { MOD_LAYERS } from './modIdentity.js';
@@ -436,6 +475,50 @@ function parseRoutesDecl(raw) {
   return { ok: true, decl: out };
 }
 
+/**
+ * `pack.json.i18n` —— 给**已有语种**补词条的通道（fanpack G-04 / plugin-pack G4，docs/WORKSHOP.md §1.10）。
+ *
+ * 为什么需要它：`packs/` 的 `lang` 类型只能**新增**一个语种 —— 一个包带 `en` / `ja` / `ko` / `zh-TW` 里的任何一个，
+ * 真实的扫描器都会整包跳过，原文是 `the language en is already provided by public/i18n/en.json`。而任何带新界面的
+ * 包（新面板、新按钮、新提示）都需要**给已有语种补键**，所以这是个结构性的缺口，不是配置问题。
+ *
+ * 形状刻意是「语种 → 包内 .json 文件」而不是内联对象：
+ *   * 一个包给四个语种各补 74 键，内联会让 `pack.json` 长出 20 KB，而这份清单是身份哈希的输入（`identifyPack`
+ *     哈希的是归一化后的清单），内联等于把整份译文塞进哈希清单的**一个字符串**里；
+ *   * 文件路径是**可哈希**的：`identifyPack` 对每一个声明的 i18n 文件单独 `sha256`（与 `client.panels` 的模块同一条
+ *     纪律）—— 换一份译文就是换一个包；
+ *   * 形状与语言包本身逐字相同（`{ "<中文 msgid>": "<译文>" }`），作者可以照抄 `public/i18n/<code>.json`。
+ *
+ * 拒绝的三种形状（都点名，不静默）：语种码不是 `shared/i18nPacks.js` 认的常用大小写、语种是源语言 `zh`
+ * （msgid 自己，没有包）、路径不是包内相对 `.json`。至于「这个文件在不在、是不是 JSON 对象」要读磁盘，
+ * 在装载期（`server/workshop.js i18nIssues`）。
+ *
+ * @returns {{ ok: true, decl: Record<string, string> } | { ok: false, error: string, detail: string }}
+ */
+function parseI18nDecl(raw) {
+  if (!isPlainObj(raw)) {
+    return fail('I18N_BAD_SHAPE', 'i18n must be an object: { "<lang code>": "<relative path to a .json of msgid → translation>" }');
+  }
+  /** @type {Record<string, string>} */
+  const out = {};
+  for (const code of Object.keys(raw).sort()) {
+    const file = raw[code];
+    if (!isLangCode(code)) {
+      return fail('I18N_BAD_LANG', `i18n: "${code}" is not a language code in its usual case (en, ja, ko, zh-TW, pt-BR …)`);
+    }
+    if (code === SOURCE_LANG) {
+      return fail('I18N_SOURCE_LANG', `i18n: "${SOURCE_LANG}" is the source language (the msgids themselves) — it has no language file to add to`);
+    }
+    if (!isSafeRelativePath(file) || !file.endsWith('.json')) {
+      return fail('I18N_BAD_FILE', `i18n["${code}"] must be a relative path inside the pack, ending in .json (e.g. "i18n/${code}.json") — the loader reads those bytes, and they are part of this pack's identity`);
+    }
+    out[code] = file;
+  }
+  // 键序不影响 `canonicalJson`（它排键），但**键在不在**影响哈希，所以这里只保证「声明过才有」，
+  // 顺序由 `parseI18nDecl` 的 sort 定死，不随作者书写顺序变。
+  return { ok: true, decl: out };
+}
+
 
 /**
  * `pack.json.operators[<charId>]` 允许的两个列表字段。**只此一份**：形状校验（`normalizePackManifest`）与
@@ -591,11 +674,19 @@ function parseArtEntry(entry, where, shape) {
  *   voices: Record<string, Record<string, string[]>>, voiceLangs: Record<string, Record<string, Record<string, string[]>>>,
  *   bondIcons: Record<string, string>, itemIcons: Record<string, string>,
  *   art: Record<string, Record<string, object>>, support: string[],
- *   operators: Record<string, { powers: string[], bonds: string[] }> } }
+ *   operators: Record<string, { powers: string[], bonds: string[] }>, i18n?: Record<string, string> } }
  *   | { ok: false, error: string, detail: string }}
  */
 export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (!isPlainObj(raw)) return fail('BAD_MANIFEST', 'pack.json must be a JSON object');
+  // 顶层键闭集（`PACK_FIELDS`）：一个我们不认识的键**点名拒绝**，绝不读过去。这是本刀那条共通纪律的落点 ——
+  // 三个社区 mod 里的 `variants` / `skins` / `i18n` 全都是「写了等于没写」的静默丢，而作者从错误文案里
+  // 得不到任何线索。判据放在最前面：一个连键都不认识的清单，后面的字段级判据都是在猜它想说什么。
+  for (const key of Object.keys(raw)) {
+    if (PACK_FIELDS.includes(key)) continue;
+    return fail(PACK_UNKNOWN_FIELD_CODE,
+      `pack.json: "${key.length > MAX_KEY_SHOWN ? `${key.slice(0, MAX_KEY_SHOWN)}…` : key}" is not a field of this pack format (${PACK_FIELDS.join(', ')}). A key this loader does not know is never read: write it as one of the fields above, or drop it — a declaration that is ignored is worse than a refusal`);
+  }
   const id = typeof raw.id === 'string' && raw.id ? raw.id : dirName;
   if (!PACK_ID_RE.test(id)) return fail('BAD_PACK_ID', `"${id}" is not a valid pack id (letters, digits, _ and - only)`);
   if (dirName && typeof raw.id === 'string' && raw.id && raw.id !== dirName) {
@@ -864,6 +955,10 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (serverParsed && !serverParsed.ok) return serverParsed;
   const routesParsed = raw.routes === undefined ? null : parseRoutesDecl(raw.routes);
   if (routesParsed && !routesParsed.ok) return routesParsed;
+  // `i18n`（fanpack G-04）：给**已有语种**补词条的声明，形状见 `parseI18nDecl`。它同样遵守上面那条
+  // 「只在清单真的写了这个键时才进归一化结果」的纪律 —— 没声明 i18n 的包（今天所有的包）哈希逐字节不变。
+  const i18nParsed = raw.i18n === undefined ? null : parseI18nDecl(raw.i18n);
+  if (i18nParsed && !i18nParsed.ok) return i18nParsed;
   // 一条声明只有在清单里**真的写了这个键**时才进归一化结果。这一条是本刀最容易做坏的地方：无条件写进去会让
   // 每一个已存在的包（它们没有这些键）的归一化清单多出四个键，于是内容哈希全变、`identifyPack` 的
   // `manifest` 与 `hash` 也跟着变 —— 房间的摘要闸门会开始误判（DESIGN §28.2）。
@@ -873,6 +968,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (clientParsed) declared.push(['client', clientParsed.decl]);
   if (serverParsed) declared.push(['server', serverParsed.decl]);
   if (routesParsed) declared.push(['routes', routesParsed.decl]);
+  if (i18nParsed) declared.push(['i18n', i18nParsed.decl]);
   /** 一条声明算不算「贡献」：归一化后的值里有没有东西。`routes: []` 与 `client: { panels: [], requires: [] }`
    *  都是**合法但什么都不做**的声明（与 `voices: {}` / `art: { chars: {} }` 同一个语义），照旧不算贡献 ——
    *  所以「一个只写了 `routes: []` 的包」仍然是空包。反向的那条同样载重：`assets` / `client.panels` /
@@ -887,9 +983,18 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (!content.length && !Object.keys(voiceLines).length && !Object.keys(orderedLangLines).length
     && !Object.keys(bondIconFiles).length && !Object.keys(itemIconFiles).length && !Object.keys(artEntries).length
     && !Object.keys(orderedOperators).length && !declared.some(([, v]) => contributes(v))) {
+    // `support` 与 `playtest` 是这份清单里**唯二**「声明了也不算贡献」的字段，所以它们单独出现时必须被点名 ——
+    // 只声明助战的包今天整包被拒（plugin-pack G6：一个 `support: [...]` + `content: []` 的包得到的就是这一条），
+    // 而原来的文案里**没有** `support` 这个词，作者只能对着 `EMPTY_PACK` 猜。`support` 只决定**助战卡池**里放谁，
+    // 干员本体还是由 `content: ["chess"]` 带进来的 —— 所以放宽它不是这一刀的活（那是既有裁决），把话说明白才是。
+    const notContributions = ['support', 'playtest']
+      .filter((n) => raw[n] !== undefined);
     const names = [...WORKSHOP_CONTENT_FILES, 'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'operators',
-      'assets', 'client', 'server.preDispatch', 'routes'];
-    return fail('EMPTY_PACK', `content must name at least one of: ${WORKSHOP_CONTENT_FILES.join(', ')} — or the pack must declare ${names.filter((n) => !WORKSHOP_CONTENT_FILES.includes(n)).join(' / ')}`);
+      'assets', 'client', 'server.preDispatch', 'routes', 'i18n'];
+    const alsoNot = notContributions.length
+      ? ` (note: ${notContributions.map((n) => `"${n}"`).join(' and ')} ${notContributions.length === 1 ? 'is' : 'are'} NOT a contribution — a pack that declares ${notContributions.length === 1 ? 'it' : 'them'} alone brings nothing into a match)`
+      : '';
+    return fail('EMPTY_PACK', `content must name at least one of: ${WORKSHOP_CONTENT_FILES.join(', ')} — or the pack must declare ${names.filter((n) => !WORKSHOP_CONTENT_FILES.includes(n)).join(' / ')}${alsoNot}`);
   }
   // 版本声明（DESIGN §28.5）：`api` 是**模组 API** 的区间（钩子总线与 kit 契约），`game` 是**上游游戏版本**的区间，
   // 两者都用 shared/packs.js isVersionRange 的语法（`>=0.2.0`、`0.2.x`、`^0.2.0`、`~0.2.1`、`*`、`||`）。
@@ -1003,6 +1108,202 @@ export function normalizeContentFile(file, json) {
   }
   if (!Object.keys(records).length) return fail('EMPTY_CONTENT', `${file}.json has no records`);
   return { ok: true, records };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// i18n：给**已有语种**补词条（fanpack G-04 / plugin-pack G4，docs/WORKSHOP.md §1.10）
+//
+// 背景：`packs/` 的 `lang` 类型只能**新增**一个语种 —— 带 `en` / `ja` / `ko` / `zh-TW` 的包会被真实的扫描器整包
+// 跳过，原文是 `the language en is already provided by public/i18n/en.json`。而任何带新界面的包都需要给已有语种
+// 补键，所以这是一个结构性的缺口。补法只有三条规矩，三条都必须有测试钉住：
+//   1. **已有键绝不覆盖**（官方/先到的译文永远赢）；
+//   2. **冲突显式报告**，点名 **键 + 语种 + 包 id**（外加双方的值）—— 只报「值不同」的重叠；
+//   3. **包里的值必须是字符串**，否则整包拒绝（非字符串会让 `t()` 把原文打印到界面上，是查不出源头的那种故障）。
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * 一个包的 `i18n` 声明摊平成 `Map<语种, { pack, file }>`（装载期校验、HTTP 合并体与校验器共用的**唯一**解析）。
+ *
+ * 同一个语种被多个包声明时**按包 id 排序后的第一个赢**（与 `workshopVoiceIndex` / DESIGN §28.3 同一条规则），
+ * 其余的进 `overridden`：输的那个作者必须看到一行字，否则他会以为自己那份译文生效了。
+ *
+ * @param {Array<{ id?: string, i18n?: Record<string, string> }>} packs
+ * @returns {{ langs: Map<string, { pack: string, file: string }>, overridden: Array<{ pack: string, lang: string, definedBy: string, reason: string }> }}
+ */
+export function parsePackI18n(packs) {
+  /** @type {Map<string, { pack: string, file: string }>} */
+  const langs = new Map();
+  /** @type {Array<{ pack: string, lang: string, definedBy: string, reason: string }>} */
+  const overridden = [];
+  for (const pack of (Array.isArray(packs) ? packs : []).filter((p) => p && typeof p === 'object' && p.id).sort(byPackId)) {
+    const decl = isPlainObj(pack.i18n) ? pack.i18n : {};
+    for (const lang of Object.keys(decl).sort()) {
+      const file = decl[lang];
+      if (typeof file !== 'string' || !file) continue;
+      const holder = langs.get(lang);
+      if (holder) {
+        overridden.push({
+          pack: pack.id, lang, definedBy: holder.pack.id,
+          reason: `i18n["${lang}"] is already contributed by pack "${holder.pack.id}" — the pack with the smaller id keeps it (DESIGN §28.3). Drop this file, or let "${holder.pack.id}" drop it`,
+        });
+        continue;
+      }
+      langs.set(lang, { pack, file });
+    }
+  }
+  return { langs, overridden };
+}
+
+/**
+ * 把包带的词条并进一份已存在的语言文件 —— **已有键绝不覆盖**，冲突逐条报告（见上面那一节的三条规矩）。
+ *
+ * `entries` 的形状就是一条 i18n 声明的形状（`{ "<msgid>": "<译文>" }`）。校验与合并共用这一个函数：不可能出现
+ * 「校验器放行的值，合并时被丢掉」。
+ *
+ * @param {Record<string, any>|null|undefined} base 已有的语言文件（`public/i18n/<code>.json` 的解析结果）
+ * @param {Record<string, any>|null|undefined} entries 包声明的词条
+ * @param {{ pack?: string, lang?: string }} [where] 点名信息（拒绝文案与冲突报告都带上）
+ * @returns {{ ok: true, merged: Record<string, any>, added: string[], conflicts: Array<{ pack: string, lang: string, key: string, official: string, packValue: string }>, skippedSame: number }
+ *   | { ok: false, error: string, detail: string }}
+ */
+export function mergeWorkshopI18n(base, entries, { pack = '', lang = '' } = {}) {
+  if (entries !== undefined && !isPlainObj(entries)) {
+    return fail('I18N_BAD_FILE', `i18n["${lang}"] must be a JSON object of { "<msgid>": "<translation>" } (got ${Array.isArray(entries) ? 'an array' : typeof entries})`);
+  }
+  const clean = isPlainObj(entries) ? entries : {};
+  /** @type {string[]} */
+  const added = [];
+  /** @type {Array<{ pack: string, lang: string, key: string, official: string, packValue: string }>} */
+  const conflicts = [];
+  let skippedSame = 0;
+  for (const key of Object.keys(clean).sort()) {
+    const value = clean[key];
+    if (!key || key.startsWith('_')) {
+      return fail('I18N_BAD_KEY', `i18n["${lang}"]: "${key}" is not a valid msgid (a non-empty key that does not start with "_" — the "_"-prefixed keys are a language file's metadata block)`);
+    }
+    if (typeof value !== 'string') {
+      return fail('I18N_BAD_VALUE', `i18n["${lang}"]: "${key}" must map to a string (got ${Array.isArray(value) ? 'an array' : typeof value}) — t() would print the raw value, and the broken interface could never be traced back to this pack`);
+    }
+    const official = isPlainObj(base) ? base[key] : undefined;
+    if (typeof official === 'string') {
+      // 已有键**绝不覆盖**。值相同就什么都不用做（也不是冲突）；值不同就是一条要报出来的冲突。
+      if (official === value) skippedSame++;
+      else conflicts.push({ pack, lang, key, official, packValue: value });
+      continue;
+    }
+    if (!added.includes(key)) added.push(key);
+  }
+  const merged = { ...(isPlainObj(base) ? base : {}) };
+  for (const key of added) merged[key] = clean[key];
+  return { ok: true, merged, added, conflicts, skippedSame };
+}
+
+/**
+ * `parsePackI18n` + `mergeWorkshopI18n` 的一站式版本：遍历每个声明的语种，读出包的文件并合并。
+ *
+ * 读盘由调用方注入（`shared/` 两端共用，浏览器没有 fs）：`readFile(packId, file)` 返回**已解析的对象**，或 `null`
+ * （文件不在 / 不是 JSON）。所以「文件在不在」的判罚点只有调用方一处，而「值合不合法」的判罚点只有这里一个。
+ *
+ * @param {Array<{ id?: string, i18n?: Record<string, string> }>} packs
+ * @param {(pack: string, file: string) => Record<string, any>|null} readFile `(pack id, declared path)` → the parsed file
+ * @param {(lang: string) => Record<string, any>|null} readBase 读官方语言文件（`public/i18n/<code>.json`）
+ * @returns {{ files: Map<string, Record<string, any>>, added: Record<string, string[]>, conflicts: object[], skippedSame: Record<string, number>, errors: Array<{ pack: string, lang: string, code: string, reason: string }> }}
+ */
+export function workshopI18nFiles(packs, readFile, readBase) {
+  const { langs, overridden } = parsePackI18n(packs);
+  /** @type {Map<string, Record<string, any>>} */
+  const files = new Map();
+  /** @type {Record<string, string[]>} */
+  const added = {};
+  /** @type {object[]} */
+  const conflicts = [...overridden];
+  /** @type {Record<string, number>} */
+  const skippedSame = {};
+  /** @type {Array<{ pack: string, lang: string, code: string, reason: string }>} */
+  const errors = [];
+  for (const lang of [...langs.keys()].sort()) {
+    const { pack, file } = langs.get(lang);
+    const entries = readFile(pack.id, file);
+    if (entries === null || entries === undefined) {
+      errors.push({
+        pack: pack.id, lang, code: 'I18N_BAD_FILE',
+        reason: `i18n["${lang}"] names "${file}", which is not a readable JSON object inside the pack`,
+      });
+      continue;
+    }
+    const merged = mergeWorkshopI18n(readBase(lang), entries, { pack: pack.id, lang });
+    if (!merged.ok) {
+      errors.push({ pack: pack.id, lang, code: merged.error, reason: merged.detail });
+      continue;
+    }
+    files.set(lang, merged.merged);
+    if (merged.added.length) (added[pack.id] ||= []).push(...merged.added.map((k) => `${lang}:${k}`));
+    for (const c of merged.conflicts) conflicts.push(c);
+    if (merged.skippedSame) skippedSame[lang] = merged.skippedSame;
+  }
+  for (const list of Object.values(added)) list.sort();
+  return { files, added, conflicts, skippedSame, errors };
+}
+
+/**
+ * `stripPackOperators`（fanpack G-16）：**包把一名官方干员变成棋子**时，他与自选池的关系要**记录下来** ——
+ * 一个被包变成棋子的干员同时躺在自选池里，意味着同一个干员能被上两次（一次作为棋子、一次作为自选槽），
+ * 而且还绕过棋子自己的盟约。原件在它自己的 `shared/customContent.js` 里为此写了一条装载层规则：**把人摘出池**。
+ *
+ * 本刀**只做「记录 + 拒绝重复」这一半**，理由必须说清（业主需要裁决的那一半）：
+ *
+ *   * `diy.ownedPool` 是「自选槽能挑的已拥有干员」这份**名单本身**（`shared/diy.js` 从它出格子，
+ *     `tools/golden.mjs` 给池里每一位配一个精锐场景）。把它摘掉不是「去重」，而是**改对局结果**：
+ *     池子变小、可挑的干员变少、语料里那一位的场景整个消失。实测：fanpack 那份真实数据里 **8 名**
+ *     干员同时在池里（`char_147_shining`、`char_4088_hodrer`、`char_4132_ascln`、`char_1035_wisdel`、
+ *     `char_017_huang`、`char_003_kalts`、`char_4179_monstr`、`char_4133_logos`），摘掉就是 `ownedPool` 71 → 63。
+ *   * 而本刀的验收要求 `test/golden/*.json` 一个字节都不动、六份语料的数字不变 —— 这两件事不可能同时成立。
+ *     按 `AGENTS.md`「Deliberate deviations from the official mode are the maintainer's decision only」，
+ *     这一半是**维护者的决定**，所以它停在这里，写进报告等裁决。
+ *
+ * 「拒绝重复」那一半**今天已经成立**，而且不在这个函数里：`mergeWorkshopOperators` 的 `if (!pool.includes(id))`
+ * 是一条既有的不变量（`test/workshopOperators.test.js` 钉着「一个 id 只进池一次」）。所以一个包把池里已有的
+ * 干员声明进 `operators` 时**不会**让池里出现第二条 —— 但「他本来就在池里、现在又被这个包变成棋子」这件事
+ * 以前**没有任何地方说出来**，这个函数就是那句话。
+ *
+ * @param {Array<{ id?: string, operators?: Record<string, unknown>, files?: Record<string, Record<string, object>> }>} packs
+ * @param {Readonly<Record<string, any>>} data 合并后的数据（`data.backups.units` / `data.backups.diy.ownedPool`）
+ * @returns {{ overlaps: Array<{ pack: string, charId: string, inPoolBefore: boolean, poolEntry: boolean, entryFrom: string, note: string }>, stripped: string[] }}
+ *   `overlaps` 逐条点名（`inPoolBefore` = 官方池里本来就有他，`poolEntry` = 他是这个包声明进池的）；
+ *   `stripped` 是**没有真的被摘掉**的 id（本刀不移除任何东西，所以它列出的就是全部 `inPoolBefore` 的 id ——
+ *   留一个显式的名字，好让将来真的做摘除时改动面一目了然）。
+ */
+export function stripPackOperators(packs, data) {
+  const backups = isPlainObj(data) && isPlainObj(data.backups) ? data.backups : {};
+  const ownedPool = Array.isArray(backups.diy?.ownedPool) ? backups.diy.ownedPool : [];
+  const inPool = new Set(ownedPool);
+  /** @type {Array<{ pack: string, charId: string, inPoolBefore: boolean, poolEntry: boolean, entryFrom: string, note: string }>} */
+  const overlaps = [];
+  /** @type {string[]} */
+  const stripped = [];
+  for (const pack of (Array.isArray(packs) ? packs : []).filter((p) => p && typeof p.id === 'string' && p.id).sort(byPackId)) {
+    /** @type {Map<string, string>} charId → 这个包把它变成棋子的那条记录 id */
+    const chessByChar = new Map();
+    for (const [chessId, rec] of Object.entries(isPlainObj(pack.files?.chess) ? pack.files.chess : {})) {
+      const charId = isPlainObj(rec) && typeof rec.charId === 'string' && rec.charId ? rec.charId : null;
+      if (charId && !chessByChar.has(charId)) chessByChar.set(charId, chessId);
+    }
+    const declared = isPlainObj(pack.operators) ? pack.operators : {};
+    for (const charId of [...chessByChar.keys()].sort()) {
+      const inPoolBefore = inPool.has(charId);
+      const poolEntry = Object.hasOwn(declared, charId);
+      if (!inPoolBefore && !poolEntry) continue;
+      if (inPoolBefore) stripped.push(charId);
+      overlaps.push({
+        pack: pack.id, charId, inPoolBefore, poolEntry,
+        entryFrom: chessByChar.get(charId),
+        note: inPoolBefore
+          ? `"${charId}" is in the 自选 pool (data/backups.json diy.ownedPool) AND this pack turns him into the chess piece "${chessByChar.get(charId)}" — he can be fielded twice, and the 自选 slot bypasses the piece's own bond. Stripping him from the pool changes what the pool offers, so it is the maintainer's call (see the loader report)`
+          : `this pack puts "${charId}" into the 自选 pool through pack.json operators AND ships the chess piece "${chessByChar.get(charId)}" for the same operator — one operator with two ways in`,
+      });
+    }
+  }
+  return { overlaps, stripped };
 }
 
 /**
@@ -1490,6 +1791,11 @@ export function applyWorkshop(base, packs) {
   // 「我明明勾了」和「试玩里没有」之间反复，而日志一句话都不说。
   for (const e of workshopPlaytestIndex(packs).errors) report.errors.push({ pack: e.pack, file: 'playtest', id: e.id, code: e.code, definedBy: e.definedBy, reason: e.reason });
   report.looks = [...chessLookIssues(out, looked), ...enemyLookIssues(out, lookedEnemies)];
+  // `stripPackOperators`（fanpack G-16）：**只记录，不摘除**。一个被包变成棋子的干员同时还在自选池里这件事，
+  // 以前没有任何地方说出来；而「真的把他摘出池」会改变自选槽能挑到的干员（= 改对局结果），
+  // 与「`test/golden/*.json` 一个字节不动」的验收不能同时成立 —— 所以它是一条**待裁决**的记录，
+  // 不是一次静默的行为差异（理由与实测数字见 `stripPackOperators` 的注释）。
+  report.overlaps = stripPackOperators(packs, out).overlaps;
   for (const list of Object.values(report.added)) list.sort();
   for (const list of Object.values(report.overridden)) list.sort();
   return { data: out, report };

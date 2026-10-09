@@ -15,6 +15,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   normalizePackManifest, normalizeContentFile, byPackId, playtestUnknownIds, WORKSHOP_PANEL_PREFIX,
   ASSETS_FILE_CODES,
+  // i18n（fanpack G-04）：**形状**在 shared/workshop.js 判（`parseI18nDecl`），**值**用同一个 `mergeWorkshopI18n` 判
+  // —— 校验与合并是同一个函数，所以不可能出现「校验器放行的值，合并时被丢掉」。
+  mergeWorkshopI18n, parsePackI18n,
 } from '../shared/workshop.js';
 import { sha256Hex, canonicalJson, modManifestDigest } from '../shared/modIdentity.js';
 // `intercepts` 的运行时判据就是**真的装在这个服务器上的那份协议**（DESIGN §28.13）：A 段在形状层判过一次，这里再判
@@ -45,6 +48,23 @@ export const ASSETS_DIGEST_PATH = 'assets.container.sha256';
  */
 const kitDataUrl = (source, v) =>
   `data:text/javascript;charset=utf-8,${encodeURIComponent(`${source}\n//# sourceURL=workshop-kit.js?v=${v}\n`)}`;
+
+/**
+ * 读一份官方语言文件（`public/i18n/<code>.json`）—— 装载期与 HTTP 合并体共用的那一处读盘。
+ * 读不出来一律 `null`（`mergeWorkshopI18n` 把 null base 当作「什么都还没有」，于是包的键全部算新增；
+ * 这只会让冲突少报一条，不会让包被拒 —— 官方文件读不出来是这台机器的事，不是这个包的错）。
+ * @param {string} lang
+ * @returns {Record<string, any>|null}
+ */
+export function readUiLangFile(lang) {
+  if (typeof lang !== 'string' || !/^[A-Za-z][A-Za-z0-9-]{0,15}$/.test(lang)) return null;
+  try {
+    const json = JSON.parse(fs.readFileSync(path.join(ROOT, 'public', 'i18n', `${lang}.json`), 'utf8'));
+    return json && typeof json === 'object' && !Array.isArray(json) ? json : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Load every pack under `dir`.
@@ -127,7 +147,8 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
       || Object.keys(manifest.pack.itemIcons || {}).length
       || Object.keys(manifest.pack.art || {}).length
       || Object.keys(manifest.pack.operators || {}).length
-      || !!manifest.pack.assets || !!manifest.pack.client || !!manifest.pack.server || !!manifest.pack.routes) {
+      || !!manifest.pack.assets || !!manifest.pack.client || !!manifest.pack.server || !!manifest.pack.routes
+      || !!manifest.pack.i18n) {
       // 试玩开关的名单必须点名本包真的有的 id：`normalizePackManifest` 只能查形状，成员资格要等 chess.json 读完。
       // 不查这一条，名单里一个写错的 id 就是**静默无效** —— 作者勾了、试玩里什么都没发生（这个缺口的老毛病）。
       const unknown = playtestUnknownIds(manifest.pack.playtest?.directToHand, manifest.pack.overrides, Object.keys(files.chess || {}));
@@ -155,7 +176,10 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
       // 而实际上一条消息都没拦（「加载了但能力没生效」是最坏的失败形态）。
       const assetIssues = assetsIssues(manifest.pack, packDir);
       const hookIssues = preDispatchIssues(manifest.pack, packDir, { c2s });
-      const gateIssues = [...assetIssues.issues, ...hookIssues];
+      // i18n（fanpack G-04）：声明的译文文件必须真的在包里、是 JSON 对象、每个值都是字符串。
+      // 与上面两组同一个口径：一条用不了的声明拒绝整个包 —— 否则作者看到的是「包加载了、词条没生效」。
+      const langIssues = i18nIssues(manifest.pack, packDir, readUiLangFile);
+      const gateIssues = [...assetIssues.issues, ...hookIssues, ...langIssues];
       if (gateIssues.length) {
         errors.push({ pack: name, reason: `${gateIssues[0].code}: ${gateIssues[0].reason}` });
         continue;
@@ -399,6 +423,51 @@ export function preDispatchIssues(pack, packDir, { c2s = C2S } = {}) {
 }
 
 /**
+ * `pack.json.i18n` 的**装载期**判据（fanpack G-04 / plugin-pack G4，docs/WORKSHOP.md §1.10）：
+ * 声明的每一个 `.json` 必须真的在包里、必须是 JSON 对象、每一个值必须是**字符串且键不是 `_meta`**。
+ *
+ * 与 B2/B3a 同一条纪律（DESIGN §28.13.3「一条用不了的声明拒绝整个包」）：一份读不出来的译文如果只是被跳过，
+ * 作者看到的是「包加载了、我的界面词条没生效」—— 而 `t()` 会退回中文 msgid 或英文，页面上看不出任何异常。
+ * 值这一层的判据**不是**在这里重写的：`mergeWorkshopI18n` 是合并与校验共用的那一个函数，所以服务面合并时
+ * 不可能遇到「装载期放行、合并时丢掉」的值。
+ *
+ * `readBase` 只为「冲突报告」而读官方语言文件：一份读不出来的官方文件（不该发生）不会让包被拒，
+ * 只会让那一份的冲突报不出来（`mergeWorkshopI18n` 把 null base 当作「什么都还没有」）。
+ *
+ * @param {{ i18n?: Record<string, string> }} pack normalized manifest
+ * @param {string} packDir the pack's directory on disk
+ * @param {(lang: string) => Record<string, any>|null} [readBase] reads `public/i18n/<lang>.json`
+ * @returns {Array<{ code: string, reason: string }>}
+ */
+export function i18nIssues(pack, packDir, readBase = () => null) {
+  const decl = pack && pack.i18n;
+  if (!decl || typeof packDir !== 'string' || !packDir) return [];
+  const dir = path.resolve(packDir);
+  const { langs } = parsePackI18n([{ id: pack.id, i18n: decl }]);
+  for (const lang of [...langs.keys()].sort()) {
+    const rel = langs.get(lang).file;
+    const abs = path.join(dir, ...String(rel).split('/'));
+    if (abs !== dir && !abs.startsWith(dir + path.sep)) {
+      return [{ code: 'I18N_BAD_FILE', reason: `i18n["${lang}"] must resolve inside the pack (got "${rel}")` }];
+    }
+    let json;
+    try {
+      json = JSON.parse(fs.readFileSync(abs, 'utf8'));
+    } catch (e) {
+      return [{
+        code: 'I18N_BAD_FILE',
+        reason: e && e.code === 'ENOENT'
+          ? `i18n["${lang}"] is declared in pack.json but "${rel}" is missing from the pack`
+          : `i18n["${lang}"] ("${rel}") is not readable JSON: ${e && e.message ? e.message : String(e)}`,
+      }];
+    }
+    const merged = mergeWorkshopI18n(readBase(lang), json, { pack: pack.id, lang });
+    if (!merged.ok) return [{ code: merged.error, reason: merged.detail }];
+  }
+  return [];
+}
+
+/**
  * The **wire list of C-layer panels** (DESIGN §28.8/§28.13, docs/WORKSHOP.md §1.9.3): the JSON-safe module list the
  * browser turns into mounts. A function cannot cross the wire, and neither can a directory scan — so this list is built
  * from the LOADED packs only (the same stance `workshopKitFilesFor` takes for kits): a URL that is not in this list is
@@ -527,6 +596,18 @@ export function identifyPack(packDir, pack, files, { assetsDigest = null } = {})
   //    `<内容文件>.json`（13 个固定名字，没有 `assets`）、`kits/*.js`、`assets/**` 与声明过的面板模块（必须
   //    `.js`）。这一条的 `hash` 直接就是容器的 sha256（它没有「另一份字节」可以哈希），路径名说的就是这件事。
   if (typeof assetsDigest === 'string' && assetsDigest) manifest.push({ path: ASSETS_DIGEST_PATH, hash: assetsDigest });
+  // 7. 声明的 i18n 译文文件（`pack.json.i18n`, fanpack G-04）：**字节**进身份哈希。理由与面板模块逐字相同 ——
+  //    一份译文能改变玩家看到的界面，两份不同的译文不该共用同一个摘要；而且这些文件是**声明过的路径**
+  //    （`i18n["en"]: "i18n/en.json"`），不进清单的话「换了译文、包摘要不变」就会让房间的摘要闸门失效。
+  //    没声明 `i18n` 的包（今天所有的包）哈希逐字节不变。文件与面板模块共用同一条去重与路径复核。
+  const langFiles = [...new Set(Object.values(pack.i18n && typeof pack.i18n === 'object' ? pack.i18n : {})
+    .filter((rel) => typeof rel === 'string' && rel))].sort();
+  for (const rel of langFiles) {
+    if (manifest.some((m) => m.path === rel)) continue;
+    const abs = path.join(packDir, ...rel.split('/'));
+    if (abs === packDir || !abs.startsWith(packDir + path.sep)) continue;
+    try { addBytes(rel, fs.readFileSync(abs)); } catch { /* unreachable for a LOADED pack: loadWorkshop refuses it first */ }
+  }
   manifest.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   return { hash: modManifestDigest(manifest), manifest, layer, combat, api: pack.api || null, game: pack.game || pack.gameVersion || null };
 }

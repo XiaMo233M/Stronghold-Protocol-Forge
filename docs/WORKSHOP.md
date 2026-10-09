@@ -68,18 +68,33 @@ workshop/<packId>/
 | `client` | 贡献项之一 | C 层注册点声明（§1.9）：`{ panels: [{ id, slot, module, order?, gate? }], requires?: […] }`，`slot` 是闭枚举 | ⛔ 本轮无入口 |
 | `server` | 贡献项之一 | 分发前准入钩子声明（§1.9）：`{ preDispatch: { module, policy, intercepts } }`；`intercepts` 必须是 `shared/protocol.js C2S` 里真实存在的类型 | ⛔ 本轮无入口 |
 | `routes` | 贡献项之一 | 只读 HTTP 路由声明（§1.9）：`[{ path, file, cache? }]`，只服务包内 `.json` | ⛔ 本轮无入口 |
+| `i18n` | 贡献项之一 | 给**已有语种**（`en` / `ja` / `ko` / `zh-TW` …）补界面词条：`{ "<语种>": "<包内相对 .json 路径>" }`，见 §1.10 | ⛔ 本轮无入口 |
 
 **每个字段都有图形入口**（0.8.1 起，最后补上的是元数据与 `overrides`；`operators` 的入口见 §1.2）：写进 `pack.json`
 的东西必须能在界面上增删改，包括**陈旧/没人用的条目**（它们只是不生效，不是错误，但要能删掉）。唯一没有入口的是 `id`：它必须等于目录名。
 
+**顶层键是闭集**（`shared/workshop.js PACK_FIELDS`）：上面这张表**就是**这份格式认识的每一个字段。写一个不在这张表里的
+顶层键（打错、或者抄了另一个 mod 格式的字段）**整个包被点名拒绝**：`PACK_UNKNOWN_FIELD`，理由里列出全部合法字段。
+这不是「我们还没做」，是**刻意**的 —— 一个我们不认识的键如果只是被读过去，作者看到的是「包合法、加载了、可我写的那件事
+没发生」。三个社区 mod 里最典型的三个键因此都被当场拒绝而不是静默丢弃：
+
+| 键 | 今天的结果 | 想做的事 | 今天该往哪儿写 |
+|---|---|---|---|
+| `variants` | `PACK_UNKNOWN_FIELD` | 「同一份数据的另一套数值 + 一个开关」（满练度 / 12 部署位这类**可切换口径**） | **没有通道**。可以拿 `overrides` 落**一份**数值进默认口径，但那不是「可切换的变体」，而且会让包改默认规则（比不做更坏）。要做得先在引擎里做出「口径 / 变体」这一层（`data/official.json` + 运行时的练度开关，今天都不存在） |
+| `skins` | `PACK_UNKNOWN_FIELD` | 干员时装（皮肤）与「换装」Tab：皮肤表 + 切换 UI + 包字段**三样都没有** | **走 `art`**（§1.4）—— `art.chars[<charId>]` 收 `avatar` / `portrait` / `spine`，也就是「这个包给这名干员一套外观素材」。**换装界面**是另一件事（C 层，§1.9.3 的 `client.panels` 能挂一个面板，但它读不到 store，换装要写进玩家状态就不在这个口子里）。`skins: {…}` 不是 `art` 的别名，别照抄 |
+| `official` / `config` / `meta` / `shared` / `theme` / `serverModules` | `PACK_UNKNOWN_FIELD` | 官方口径文件 / 规则改写 / match 元注册表 / 共享层补丁 / 主题 / 服务端模块 | **刻意没有通道**（`config` 见下面那一段；其余是引擎特性或 wire 契约，按 `AGENTS.md`「Official first … the maintainer's decision only」） |
+
 `content` 只接受上表列出的文件。**`config` 被刻意排除**：一个能改写经济、回合表或难度参数的包改的是规则而不是内容，那需要另一套审查机制，不在本功能范围内。
 
-**只带素材的包是合法的包**：`content: []` + `voices` / `voiceLangs` / `bondIcons` / `itemIcons` / `art` / `operators`
-里任意一项（见 §1.4）。一个只给助战干员配语音、只给盟约/装备配一张图、只给某个干员配一张立绘的包，不需要提供任何
-数据文件；反过来，这些贡献项**全空**才会被拒（`EMPTY_PACK`）。
+**只带素材的包是合法的包**：`content: []` + `voices` / `voiceLangs` / `bondIcons` / `itemIcons` / `art` / `operators` / `i18n`
+里任意一项（见 §1.4、§1.10）。一个只给助战干员配语音、只给盟约/装备配一张图、只给某个干员配一张立绘、只给已有语种
+补几条界面词条的包，不需要提供任何数据文件；反过来，这些贡献项**全空**才会被拒（`EMPTY_PACK`）。
 
-中间层的四组能力声明（`assets` / `client` / `server` / `routes`，见 §1.9）也是贡献项 —— 但只有**声明了内容**才算：
-`routes: []`（空数组）与不声明没有区别，照旧 `EMPTY_PACK`。`api` 与 `playtest` 一样**不是**贡献项：它们是声明
+`support` 与 `playtest` **不是**贡献项：`support` 只决定**助战卡池**里放谁，干员本体还是由 `content: ["chess"]` 带进来的
+—— 所以一个只写 `"support": […]`、`content: []` 的包会被 `EMPTY_PACK` 拒，而理由里会点名 `support`（见 §2.1 的完整例子）。
+
+中间层的四组能力声明（`assets` / `client` / `server` / `routes`，见 §1.9）与 `i18n` 也是贡献项 —— 但只有**声明了内容**
+才算：`routes: []`（空数组）与不声明没有区别，照旧 `EMPTY_PACK`。`api` 与 `playtest` 一样**不是**贡献项：它们是声明
 （前者的区间、后者的行为开关），一个只带它们的包什么都没带来。
 
 ### 1.2 叠加规则
@@ -89,6 +104,25 @@ workshop/<packId>/
 - **两个包抢同一个 id：包 id 字典序小的赢**（DESIGN §28.3，2026-10-09 业主裁定）。这一条**对所有面都一样** —— 数据记录、`kits/<chessId>.js`、`bondIcons`、`itemIcons`、`art`；而且与「包是按什么顺序被扫描到的」**无关**（服务端按目录名读、合并前再按包 id 排序，两处用同一个比较器）。输的一方会得到一条**点名**占位包的报告（`definedBy` + 文案里写出包名），不是静默覆盖。
 - **覆盖官方 id 仍要显式声明**：`overrides` 是唯一能让一个包替换**官方**记录 / 官方干员 kit 的方式，且这份声明会让它同时成为「后来的包」要撞的那一方（上一条规则决定谁赢）。**给维护者的一句话**：编辑器这一侧的判罚必须**同时看 id 与声明**，不能只在校验前把官方 id 从集合里剔掉 —— 后者会让编辑器放行一次保存、而加载器随后因为「没声明」丢掉这条记录（编辑器回 200、游戏里没有），比「编辑器 400 拒绝」更坏。所以放行与记住声明是同一次保存的两半（`editor/server.mjs` 的 `overrideBlockers` 与 `withOverrideDeclarations`），预览与保存也必须算出同一个判罚。
 - **覆盖是「按字段打补丁」，不是整条替换**（DESIGN §28.3，2026-10-09）：只写 `stats.maxHp` 就只改这一个数，官方那条记录的其它 43 个字段（`tier` / `skill` / `talents` / `rangeGrid`…）原样保留；数值与普通对象递归合并，**行为与结构字段整块替换** —— `skill` / `skills` / `trait` / `traitBase` / `traitOverride` / `modules` / `rangeGrid` / `attackRangeGrid` / `assets` / `diy` / `bonds`（清单在 `shared/workshop.js` 的 `OVERRIDE_REPLACE_KEYS`，数组一律整块替换）。**覆盖是闭合世界**：写了记录里没有的字段会被 `UNKNOWN_OVERRIDE_FIELD` 拒绝（要发明新字段就把它作为一个新 id 的新记录）。想「连行为一起接管」的包必须成套补回：给了 kit 就要给 `skill`（§4.1），否则那个干员没有技能。
+- **规则字段不靠包引入（`giveBondBiasOnly` 这一类）**。一个社区 mod 给**每一条官方装备**加了一个字段
+  `giveBondBiasOnly`（其中 18 条为 `true`），语义是「商店里那 18 件盟约签名装备的**刷出概率**偏向你叠得最高的
+  盟约，但**不授予**盟约」。它今天的两条路都被挡住，而且是**故意的**：
+  - 写进记录（`overrides`）⇒ `UNKNOWN_OVERRIDE_FIELD`，整条被拒、值一个字节都不落地（闭合世界，上面那一条）；
+  - 写成 `pack.json` 的顶层键 ⇒ `PACK_UNKNOWN_FIELD`（§1.1 的闭集）。
+
+  **为什么不补它**：它改的是**一局的商店出货概率**（= 改对局结果），而按 `AGENTS.md`
+  「Official first … Deliberate deviations from the official mode are the maintainer's decision only」，
+  这类改动是维护者的决定，不该由内容包引入 —— 与 `config` 被排除是同一条理由。**也不能凑合**：只写 `giveBondId`
+  会变成「**授予**盟约」（本引擎的语义），与原作的「只偏置、不授予」**相反** —— 宁可少一个特性，也不制造一个
+  语义相反的假实现。真要这条特性，正确做法是维护者在引擎里做成一个开关（商店池 + `bondsMeta` 的读取点），
+  然后**任何**包都能用。
+- **被包变成棋子的官方干员：记录，不摘除（`stripPackOperators`）**。一个包可以把一名**官方干员**变成棋子
+  （`content: ["chess"]` 里那条记录的 `charId` 指向他）。这时他会**同时**躺在自选池（`data/backups.json` 的
+  `diy.ownedPool`）里 —— 同一个干员能被上两次，而且自选槽绕过棋子自己的盟约。装载层把这件事**逐条记下来**
+  （`applyWorkshop` 报告的 `overlaps`：包 id、干员 id、那条 chess 记录 id、他本来就在池里还是本包声明进池的），
+  但**不把人摘出池**：`diy.ownedPool` 就是「自选槽能挑到谁」这份名单，摘掉它 = 改对局结果 = 改版本语料，
+  那是维护者的决定（实测：一份真实的社区数据里 **8 名**干员同时满足这两个条件，摘掉就是 `ownedPool` 71 → 63）。
+  重复**永远不会发生**：`mergeWorkshopOperators` 的「一个 id 只进池一次」是既有不变量，与这条记录无关。
 - **两张天赋表按条目合并，不是整块替换**（DESIGN §28.3，2026-10-09 当天第二次修正）：`talents` / `talentsBase` 按 `index` 逐条合并 —— 你写的那一条里出现的字段生效，**你没写的字段（包括官方那条天赋自带的注释）留着**；`index` 对不上官方任何一条时是「你新增了一条天赋」，追加在后面。模组内部的 `modules[].talentChanges` 同理，按 `talentIndex` 逐条合并。
   **为什么单独开一条规则**：官方记录里的天赋可以带「潜能链」注释（记录层的 `potDown`、天赋层的 `potMin` + `potBelow`），而编辑器派生出来的记录**故意不带**这些注释。整块替换的话，你只是改了一条天赋的文案，官方那条天赋的整条潜能链就没了，而加载器一句错都不报 —— 一条**静默**的数据丢失。裸列表（`bonds` / `immunities` / `rangeGrid` …）仍然是整块替换：按字段合并一个裸列表会造出一条没人写过的记录。
 - **行为开关不进记录：`playtest.directToHand`**（2026-10-09）。这个字段列出的干员在**编辑器「一键试玩」**起的那个服务器里第一回合直接进手牌；正式对局一个都不发。它存在的理由是**覆盖模式**：覆盖官方干员时记录必须与官方**同形**（覆盖的契约就是「按字段打补丁」，多一个官方没有的键会被 `UNKNOWN_OVERRIDE_FIELD` 整条拒掉），所以「试玩直接发牌」这种**行为开关**不能写进记录，只能写在包的行为层。三条规则：
@@ -502,7 +536,7 @@ node tools/workshop-validate.mjs my-pack
 `EMPTY_PACK`。缺口与逐字理由写在 `_up/mod4-pack/pack/README.md` §4，实测判罚在
 `_up/mod4-pack/pack/validator-verdict.json`。
 
-#### 四组字段的形状
+#### 四组字段的形状（+ `i18n`，B5 段）
 
 | 字段 | 形状 | 要点 |
 |---|---|---|
@@ -510,6 +544,7 @@ node tools/workshop-validate.mjs my-pack
 | `client` | `{ panels: [{ id, slot, module, order?, gate? }], requires? }` | 面板按 `id` 排序后才进清单；`module` 是包内相对路径，**不是 URL**；`slot` 是闭枚举 `root.overlays` / `root.guide` / `screen.game.aside` / `screen.result.footer`（DESIGN §28.8 已经数得清的那四个宿主）；`requires` 只能取 `serviceWorker` / `cacheStorage` / `webCrypto` —— 缺一即「浏览器不支持」，不是「装了但静默不工作」 |
 | `server` | `{ preDispatch: { module, policy, intercepts } }` | `module` 必须 `.mjs`（服务端加载，浏览器不加载）；`policy` 必须 `.json`；`intercepts` 每一项**必须**存在于 `shared/protocol.js C2S`（从协议反推，不在这里另抄一份名单 —— 抄一份就是第二个会漂移的真相） |
 | `routes` | `[{ path, file, cache? }]` | `path` 是 `/` 开头的绝对 HTTP 路径；`file` 是包内相对路径且必须 `.json`（`.js` / `.html` 一律不在此通道：那是代码执行面）；`cache` 缺省 `"no-cache"`，可选 `"no-store"` / `"public"` |
+| `i18n` | `{ "<语种>": "<包内相对 .json>" }` | 给**已有语种**（`en` / `ja` / `ko` / `zh-TW` …）补界面词条；语种码必须是常用大小写、不能是源语言 `zh`；文件里是 `{ "<中文 msgid>": "<译文>" }`。**已有键绝不覆盖**、冲突点名报告 —— 见 **§1.10** |
 
 四条纪律，与本仓库其它字段逐字相同：
 
@@ -528,8 +563,14 @@ node tools/workshop-validate.mjs my-pack
 | 声明 | 算贡献项吗 |
 |---|---|
 | `content` 里任一文件 / `voices` / `voiceLangs` / `bondIcons` / `itemIcons` / `art` / `operators` | **算**（旧语义，一字未改） |
-| `assets` / `client`（至少一个面板）/ `server.preDispatch` / `routes`（至少一条） | **算**（本刀新增；一个只声明它们的包是合法包） |
-| `routes: []`、空的 `client.panels`、`playtest`、`api` | **不算** —— 什么都没带来，照旧 `EMPTY_PACK` |
+| `assets` / `client`（至少一个面板）/ `server.preDispatch` / `routes`（至少一条） | **算**（A 段新增；一个只声明它们的包是合法包） |
+| `i18n`（至少一个语种） | **算**（B5 段；一个只给已有语种补词条的包是合法包，见 §1.10） |
+| `routes: []`、空的 `client.panels`、空的 `i18n`、`playtest`、`api`、`support` | **不算** —— 什么都没带来，照旧 `EMPTY_PACK` |
+
+`support` 在这一行里是**最容易踩**的一条：它只决定助战**卡池**里放谁，干员本体由 `content: ["chess"]` 带进来。
+一个只写 `"support": ["chess_ws_x"]`、`content: []` 的包会被 `EMPTY_PACK` 拒，理由里会**点名 `support` 不是贡献项**
+（B5 段补的措辞：原来的文案只列了合法贡献项，没有提到 `support`，作者只能对着 `EMPTY_PACK` 猜）。
+`EMPTY_PACK` 的**语义一个字都没放宽** —— 改的只是它把话说清楚。
 
 「只带 `playtest` 的包照旧被拒」是既有裁决（`test/playtestDirectToHand.test.js` 钉着它），本刀**没有**为了让谁的
 测试变绿而放松任何断言 —— `test/packAssets.test.js` 里有同一断言的对照用例。
@@ -552,7 +593,7 @@ node tools/workshop-validate.mjs my-pack
 而区间不含本 build，整个包被拒（`MOD_API_INCOMPATIBLE`，理由里写出声明的区间与本 build 的号）。写成坏区间照旧是
 `BAD_API_RANGE`（先判语法，再判区间）。A 段**只**加了那个常量与这一条判罚，没有别的东西读它。
 
-#### 当前状态（A 段 + B1 段 + B2 段 + B3a 段 + B4 段）
+#### 当前状态（A 段 + B1 段 + B2 段 + B3a 段 + B4 段 + B5 段）
 
 | 部分 | 状态 |
 |---|---|
@@ -575,6 +616,8 @@ node tools/workshop-validate.mjs my-pack
 | 容器摘要进身份哈希（同一房间摘要 ⇒ 同一份容器） | ✅ 已实现（B4：`server/workshop.js identifyPack` 的 `assets.container.sha256` 那一条；不声明 `assets` 的包逐字节不变） |
 | `server.preDispatch` 的最后一格（import 失败 / 没有工厂导出 ⇒ 整包移出已加载集合，数据也不并） | ✅ 已实现（B4：`server/workshop.js dropUnavailablePreDispatchPacks` + `server/index.js` 装配路径 + `server/data.js excludePacks`） |
 | 浏览器里真的 import + 真的渲染（真 Chrome）、真 SW 的生命周期与作用域 | ⛔ 本机无 Chrome（`SP_E2E=1` 的可选路径，与 §4.4 同一个 standing gap；`test/modAssets.test.js` §10 是**跳过且从未运行**的占位用例） |
+| **顶层键闭集**：不认识的键 ⇒ `PACK_UNKNOWN_FIELD` 整包被拒（不是静默丢） | ✅ 已实现（B5：`shared/workshop.js PACK_FIELDS` + `normalizePackManifest`；`test/workshop.test.js`） |
+| `i18n`：给已有语种补词条，**已有键绝不覆盖** + 冲突点名 | ✅ 已实现（B5：`shared/workshop.js parseI18nDecl` / `mergeWorkshopI18n`、`server/workshop.js i18nIssues`、`server/http/workshop.js buildWorkshopI18nFiles`、`server/http/static.js` 的 `/i18n/<code>.json` 合并体；见 §1.10） |
 
 #### 1.9.1 `server.preDispatch`：分发前的准入钩子（B1 段已实现）
 
@@ -785,6 +828,10 @@ export function mount(ctx) {
 | 摘要对不上 | `ASSETS_VERIFY_FAILED` | **整个包不加载**（理由里写出两个摘要值） |
 | 声明了 `verify` 却没有旁挂摘要（或格式不对） | `ASSETS_VERIFY_UNAVAILABLE` | **整个包不加载** |
 | `container` / `manifest` 指的文件不在包里 | `ASSETS_BAD_CONTAINER` / `ASSETS_BAD_MANIFEST` | **整个包不加载** |
+| `i18n[<语种>]` 指的文件不在包里 / 不是 JSON 对象 | `I18N_BAD_FILE` | **整个包不加载**（§1.10） |
+| `i18n` 里语种码不是常用大小写 / 是源语言 `zh` | `I18N_BAD_LANG` / `I18N_SOURCE_LANG` | **整个包不加载**（§1.10） |
+| `i18n` 的某条译文不是字符串 / 键以 `_` 开头 | `I18N_BAD_VALUE` / `I18N_BAD_KEY` | **整个包不加载**（§1.10） |
+| `pack.json` 有一个这份格式不认识的顶层键 | `PACK_UNKNOWN_FIELD` | **整个包不加载**（§1.1 的闭集表） |
 
 「声明了校验、但校验不过还照旧发」这个仓库不接受：客户端会导入一份服务端**已经知道是坏的**字节，而唯一的信号是
 一行没人看的日志。
@@ -869,6 +916,63 @@ export function mount(ctx) {
 而且没有跑过。
 
 
+### 1.10 `i18n`：给**已有语种**补界面词条（B5 段已实现）
+
+**它解决的是什么**：`packs/` 的 `lang` 类型只能**新增**一个语种 —— 一个包带 `en` / `ja` / `ko` / `zh-TW` 里的任何一个，
+真实的扫描器都会整包跳过，原文是：
+
+```
+[packs] packs/quickchat-en/ skipped: the language en is already provided by public/i18n/en.json
+```
+
+同一个 fixture 换成全新语种 `pt` 就被正常登记（`quickchat-pt … 1 strings`）。而任何带新界面的包（新面板、新按钮、新提示）
+都需要**给已有语种补键**，所以这是个结构性的缺口 —— 窄路（做成一个全新语种）解决不了它。
+
+```json
+// pack.json
+{
+  "id": "quickchat",
+  "content": ["chess"],
+  "i18n": { "en": "i18n/en.json", "ja": "i18n/ja.json" }
+}
+```
+
+```json
+// i18n/en.json —— 形状与 public/i18n/<code>.json 逐字相同：{ "<中文 msgid>": "<译文>" }
+{ "我玩 {bond}": "I'm playing {bond}", "请给我 {chess}": "Can you send me {chess}?" }
+```
+
+**形状**：`i18n` 是对象，键是**语种码**（`shared/i18nPacks.js` 的常用大小写：`en` / `ja` / `ko` / `zh-TW` / `pt-BR` …），
+值是**包内相对路径**、必须以 `.json` 结尾。源语言 `zh` 被拒（msgid 自己，没有语言文件可补，`I18N_SOURCE_LANG`）；
+路径不是包内相对 `.json` 被拒（`I18N_BAD_FILE`）；语种码写错被拒（`I18N_BAD_LANG`）。**声明的文件必须在包里、必须是
+JSON 对象、每个值必须是字符串** —— 任一不满足**整个包不加载**（与 `assets` / `client` / `server.preDispatch` 同一条
+纪律，DESIGN §28.13.3）：一份读不出来的译文如果只是被跳过，作者看到的是「包加载了、我的词条没生效」。
+
+**合并规则（三条，都有测试钉住）**：
+
+1. **已有键绝不覆盖**。官方（`public/i18n/<code>.json`）里已经有的 msgid，值**原样留着**，你写的那一份只是被记下来。
+   理由：这类补丁的来源常常是机器翻译或某个旧版官方文件，覆盖它等于让一个包**悄悄改掉**已发布的界面文案。
+2. **冲突显式报告**。你的键与已有键**值不同**时，装载期与启动日志各报一条，点名**键 + 语种 + 包 id + 双方的值**：
+
+   ```
+   [workshop] i18n en "语音语言": kept the existing translation (pack "quickchat" wanted "Voice language")
+   ```
+
+   值相同的重叠**不是冲突**（它只是「这一条官方已经有了」），所以不会堆进报告 —— 报告的条数就是真要你处理的那几条。
+3. **值是字符串**。非字符串（数组 / 对象）整包被拒（`I18N_BAD_VALUE`）：`t()` 会把非字符串原样打印到界面上，
+   那是最难查的一类界面故障。
+
+**服务面**：客户端读的一直是 `/i18n/<code>.json`（`public/js/ui/lang.js`），而 `public/i18n/<code>.json` **一个字节都不改**
+（与 `data/*.json` 同一条纪律）。有包声明 `i18n` 的语种，这个 URL 送的是**合并体**（官方文件 + 这个包的新增键，
+`_meta` 原样保留）；没有包声明的语种照旧走普通静态路径，字节不变。
+
+**身份哈希**：声明的每一个 i18n 文件都**逐字节进包的身份哈希**（与 `client.panels[*].module` 同一条：能改变玩家看到的
+东西的字节不该躲在摘要之外）。没声明 `i18n` 的包哈希逐字节不变（`docs/examples/` 三份真实包钉着）。
+
+**今天没有的东西（照实说）**：`data/i18n/<code>.json`（**游戏文本**）不在这个通道里 —— 本字段只补界面词条
+（`public/i18n/`）。要不要让包也给游戏文本补键是下一刀的裁决；`tools/i18n.mjs check` 也不检查包声明了却没被代码用到的键
+（一个写错的键今天不会报错，只是永远不显示）。
+
 ---
 
 ## 2. 助战
@@ -906,6 +1010,10 @@ export function mount(ctx) {
 ```json
 { "id": "my-ally", "content": ["chess"], "support": ["chess_char_ws_my_ally_01_a"] }
 ```
+
+> **`support` 本身不是贡献项**（`content` 才是）：上面那个例子里的 `"content": ["chess"]` 是**必需**的，
+> 因为干员本体是 `chess` 记录带进来的。一个只有 `"support": [...]`、`content: []` 的包会被 `EMPTY_PACK` 拒
+> —— 这不是缺陷，是既有裁决（§1.9 的 `EMPTY_PACK` 表）；B5 段把这条**写进了拒绝文案**，理由里会点名 `support`。
 
 装载时叠加层把每个 id 按**记录自己的阶**加进 `pool`（`shared/workshop.js` 的 `workshopSupportEntries` / `mergeWorkshopSupport`），
 于是「装包即可选」——不必再手工改 `data/support.json`。两条硬规则：

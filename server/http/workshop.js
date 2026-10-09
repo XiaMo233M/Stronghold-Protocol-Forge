@@ -15,8 +15,54 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { WORKSHOP_MEDIA_PREFIX, WORKSHOP_RESOURCE_PREFIX, byPackId } from '../../shared/workshop.js';
-import { workshopTouchedFiles } from '../workshop.js';
+import { WORKSHOP_MEDIA_PREFIX, WORKSHOP_RESOURCE_PREFIX, byPackId, workshopI18nFiles } from '../../shared/workshop.js';
+import { workshopTouchedFiles, readUiLangFile } from '../workshop.js';
+
+/**
+ * The `/i18n/<code>.json` bodies the HTTP layer must serve MERGED for a 创意工坊 pack (fanpack G-04,
+ * docs/WORKSHOP.md §1.10) — the i18n twin of `buildWorkshopDataFiles`, and deliberately the same shape: one Buffer of
+ * `JSON.stringify(merged)` per language any pack adds to, and an **empty map** when no pack declares `i18n`.
+ *
+ * Why the merge must happen here and not in the pack: the file the client fetches is the language folder's own
+ * (`public/i18n/<code>.json`, `public/js/ui/lang.js` reads `/i18n/<code>.json`), and a pack may not rewrite a folder
+ * file — the same reason `data/*.json` is never rewritten. So the pack's entries are merged ON THE WAY OUT:
+ *   * a key that already exists **keeps the official translation** (`mergeWorkshopI18n`), and the difference is
+ *     reported instead of applied;
+ *   * `_meta` of the on-disk file is preserved untouched (it is the language manifest the client reads).
+ *
+ * A language no pack touches is not in the map at all, so the request falls through to the plain static path and a
+ * normal install serves byte-for-byte what it served before.
+ * @param {ReturnType<import('../workshop.js').loadWorkshop>} workshop
+ * @param {{ readBase?: (lang: string) => Record<string, any>|null, log?: object|null }} [opts]
+ * @returns {Map<string, Buffer>}
+ */
+export function buildWorkshopI18nFiles(workshop, { readBase = readUiLangFile, log = null } = {}) {
+  /** @type {Map<string, Buffer>} */
+  const out = new Map();
+  const packs = (workshop && workshop.packs) || [];
+  if (!packs.length) return out;
+  /** pack id → 它的目录（一份 i18n 文件住在**声明它的那个包**里，不是住在赢家的包里时也一样读自己的）。 */
+  const dirs = new Map(packs.map((p) => [p.id, typeof p.dir === 'string' && p.dir ? path.resolve(p.dir) : null]));
+  const readFile = (pack, rel) => {
+    const dir = dirs.get(pack) || null;
+    if (!dir) return null;
+    const abs = path.join(dir, ...String(rel).split('/'));
+    if (abs === dir || !abs.startsWith(dir + path.sep)) return null;
+    try {
+      const json = JSON.parse(fs.readFileSync(abs, 'utf8'));
+      return json && typeof json === 'object' && !Array.isArray(json) ? json : null;
+    } catch {
+      return null;
+    }
+  };
+  const { files, conflicts, errors } = workshopI18nFiles(packs, readFile, readBase);
+  for (const [lang, merged] of files) out.set(lang, Buffer.from(JSON.stringify(merged), 'utf8'));
+  for (const c of conflicts) {
+    log?.warn?.(`[workshop] i18n ${c.lang} "${c.key}": kept the existing translation (pack "${c.pack}" wanted ${JSON.stringify(c.packValue)})`);
+  }
+  for (const e of errors) log?.warn?.(`[workshop] i18n ${e.pack}/${e.lang}: ${e.code}: ${e.reason}`);
+  return out;
+}
 
 /**
  * The `/data/<file>.json` bodies the HTTP layer must serve MERGED for a 创意工坊 pack (docs/WORKSHOP.md): one Buffer of

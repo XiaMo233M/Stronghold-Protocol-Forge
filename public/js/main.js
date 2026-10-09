@@ -268,7 +268,14 @@ function wireNet() {
       import('./resources/host.js')
         // 引擎自带的 SW 由 host 在**后台**注册（`resources/worker.js`）：入口放行绝不等待它。
         .then((host) => host.installModAssets(msg.modAssets, { log: console }))
-        .catch((err) => recordError('mod-assets', err, 'resource host failed to load'));
+        // 这条 `.catch` 是 B4 §6 第 6 条补的：资源流程的模块拉不下来时（网络断在部署中间、模块 404、语法错误），
+        // 以前只有一行 `recordError` 进诊断记录，**页面上什么都不说** —— 玩家装了资源包却一直卡在入口闸门上，
+        // 而唯一的信号在一个他看不到的地方。照仓库既有的错误通道（toast + describeError）给他一句话，
+        // 诊断记录照旧留一份。
+        .catch((err) => {
+          recordError('mod-assets', err, 'resource host failed to load');
+          toast(t('加载模组资源模块失败：{error}', { error: describeError(err) }).slice(0, 160), 'error', { ttl: 8000 });
+        });
     }
     if (Array.isArray(msg && msg.modPanels) && msg.modPanels.length) modPanels.apply(msg.modPanels);
   });

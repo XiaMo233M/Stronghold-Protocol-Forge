@@ -851,6 +851,23 @@ export function packSummary(root, packId, loaded = null, { supportFile = null } 
   // —— 干员进不了商店、地图进不了轮换，而加载器还会说这个包「没问题」。`readPackDir` 故意读全盘（见它的注释），
   // 正是为了让这里能把这份差异报出来，而不是靠作者自己发现。
   const undeclared = Object.keys(pack.files).filter((f) => !content.includes(f)).sort();
+  // 被拒的包在**包管理页的列表里**也要带着理由出现（B3a §6 第 4 条 / B5 段）：一个包从列表里消失，作者能看到的
+  // 只有「我建的包不见了」。所以这里把「为什么被拒」整理成**机器可读**的一对：
+  //   * `syntaxError` —— `normalizePackManifest` 自己的结论（形状层拒绝时它带着码，例如 `PACK_UNKNOWN_FIELD`）；
+  //   * `refusal` —— 一律存在的判别对象。装载期拒绝（文件不在、摘要不符、i18n 文件读不出来…）的码写在
+  //     `loadWorkshop` 的 reason 前缀里（`CODE: detail`），这里把它拆出来；读不出码时 `code` 是 `PACK_LOAD`，
+  //     也就是 `tools/workshop-validate.mjs` 一直用的那个名字。
+  // 两个字段是互补的，不是两份真相：`refusal.detail` 就是 `reason` 的后半段（或整条 reason）。
+  const syntaxError = pack.checked && !pack.checked.ok
+    ? { code: pack.checked.error, detail: pack.checked.detail }
+    : null;
+  const reason = err ? err.reason : null;
+  const refusal = where === 'loaded' || !reason
+    ? null
+    : (() => {
+      const parsed = /^([A-Z][A-Z0-9_]{2,60}): ([\s\S]*)$/.exec(reason);
+      return { code: syntaxError ? syntaxError.code : (parsed ? parsed[1] : 'PACK_LOAD'), detail: parsed ? parsed[2] : reason };
+    })();
   return {
     id: packId,
     name: typeof manifest.name === 'string' && manifest.name ? manifest.name : packId,
@@ -867,8 +884,9 @@ export function packSummary(root, packId, loaded = null, { supportFile = null } 
     // 校验结论：加载器自己的答案（loaded / refused + 原因），不是第二套判断
     status: where,
     reason: err ? err.reason : null,
+    refusal,
     syntaxOk: pack.checked ? pack.checked.ok : false,
-    syntaxError: pack.checked && !pack.checked.ok ? { code: pack.checked.error, detail: pack.checked.detail } : null,
+    syntaxError,
     // 安装方的总开关：`data/support.json` 里 `"workshop": false` 时，所有包的助战声明都被忽略
     supportEnabled: cfg ? cfg.enabled : null,
   };

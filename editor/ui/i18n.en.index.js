@@ -287,4 +287,5 @@ export const EN_INDEX = Object.freeze({
   "保存后": "After saving",
   "只列了前 {0} 条差异（总共 {1} 条）。": "Only the first {0} differences are listed (out of {1}).",
   "（没有这个字段）": "(the field does not exist)",
+  "已被拒绝：{0}": "Refused: {0}",
 });

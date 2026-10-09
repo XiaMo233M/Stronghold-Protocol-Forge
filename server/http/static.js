@@ -93,6 +93,10 @@ export function createStaticHandler({
   // and every route below is skipped then.
   workshopJson = null, workshopKitFiles = null, workshopAssets = null, workshopRoutes = null, workshopPanelFiles = null,
   workshopResourceFiles = null, resourcePolicy = 'serve',
+  // 包给**已有语种**补的词条（`pack.json.i18n`, fanpack G-04, docs/WORKSHOP.md §1.10）：`Map<语种, Buffer>`，
+  // 「官方 <code>.json + 包的新增键」合并后的体。空 map 时 `/i18n/<code>.json` 走下面普通静态路径 ——
+  // 一个包都没声明 i18n 的安装与从前逐字节相同。
+  workshopI18n = null,
 }) {
   const registry = packs || createPackRegistry({ publicDir, dataDir, packsDir }, { log: /** @type {any} */ (log) });
   const mounts = [
@@ -163,6 +167,22 @@ export function createStaticHandler({
       const buf = name && !name.includes('/') ? workshopJson.get(name) : null;
       if (buf) {
         const tag = `"ws-${createHash('sha1').update(buf).digest('hex').slice(0, 20)}"`;
+        const headers = { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-cache', ETag: tag, 'Content-Length': buf.length };
+        if (isNotModified(req, tag, new Date(0))) { delete headers['Content-Length']; res.writeHead(304, headers); res.end(); return; }
+        res.writeHead(200, headers);
+        res.end(req.method === 'HEAD' ? undefined : buf);
+        return;
+      }
+    }
+    // 包给**已有语种**补的词条（`pack.json.i18n`, fanpack G-04, docs/WORKSHOP.md §1.10）：`/i18n/<code>.json` 在
+    // 有包声明时送**合并体**（官方文件 + 包的新增键，已有键绝不覆盖），与上面 `/data/*.json` 逐字同一条纪律
+    // —— 客户端读的就是这个 URL（public/js/ui/lang.js），而 `public/i18n/<code>.json` 一个字节都不改。
+    // 没有包声明 i18n 时这张表是空的 ⇒ 请求落到下面的普通静态路径，行为逐字节不变。
+    if (workshopI18n && workshopI18n.size && decoded.startsWith('/i18n/') && decoded.endsWith('.json')) {
+      const code = decoded.slice('/i18n/'.length, -'.json'.length);
+      const buf = code && !code.includes('/') ? workshopI18n.get(code) : null;
+      if (buf) {
+        const tag = `"ws-i18n-${createHash('sha1').update(buf).digest('hex').slice(0, 20)}"`;
         const headers = { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-cache', ETag: tag, 'Content-Length': buf.length };
         if (isNotModified(req, tag, new Date(0))) { delete headers['Content-Length']; res.writeHead(304, headers); res.end(); return; }
         res.writeHead(200, headers);

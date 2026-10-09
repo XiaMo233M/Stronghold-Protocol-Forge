@@ -699,7 +699,7 @@ itself is the browser's job; `test/ui/kitimports.e2e.test.js` is the opt-in chec
 asserts the export-name floor, and asserts a specifier outside the whitelist does not resolve there either), and until
 someone runs it on a machine with Chrome this remains the standing gap recorded in `docs/WORKSHOP.md` §4.4.
 
-### 28.13 The four capability declarations: `assets`, `client`, `server.preDispatch`, `routes` (A 段 + B1 段 + B2 段 + B3a 段 + B4 段)
+### 28.13 The four capability declarations: `assets`, `client`, `server.preDispatch`, `routes` + the top-level key closure and `i18n` (A 段 + B1 段 + B2 段 + B3a 段 + B4 段 + B5 段)
 
 **The gap, stated by its own verdict.** A third-party mod ("full resource pack: import, verify, server admission") was
 rewritten into this repository's pack format and then judged by the REAL validator, on both this branch and the middle
@@ -722,6 +722,29 @@ B3a left open**, both named in the last paragraph of §28.13.4: the owner made t
 (the Service Worker is the **engine's**, a pack only declares — §28.13.5), and the one remaining hole in §28.13.3
 (a hook module that only `import` can judge) is closed on the startup assembly path (§28.13.5).
 
+**B5 段 closed the two remaining "declared, but silent" holes**, and the second one is the reason this section now has a
+fifth row in the table below:
+
+* **The top-level key set is closed** (`shared/workshop.js PACK_FIELDS`). Before this stage, a `pack.json` key the loader
+  did not read was simply not read: the three community mods each carried keys that this format has no home for —
+  `variants` (fanpack G-01, "the same record in another calibration, switchable"), `skins` (G-05) and `i18n` (G-04, now a
+  real field) — and the only signal the author got was that the thing he wrote did not happen. `{content:["chess",
+  "variants"]}` even normalized to `content: ["chess"]`. That is the failure mode this whole design keeps naming, so the
+  loader now refuses the whole pack by name (`PACK_UNKNOWN_FIELD`, with the full field list in the reason). The direction
+  is deliberate: a key we *choose* not to support (`config`) and a key the author *typoed* look identical to the author,
+  and the refusal explains both. The author-facing consequences — including what to write instead of `skins`
+  (`art`) and why `variants` has no substitute — are `docs/WORKSHOP.md` §1.1.
+* **`i18n`: adding strings to a language that already exists.** The `packs/` `lang` type can only ADD a language — a pack
+  carrying `en` / `ja` / `ko` / `zh-TW` is skipped whole (`the language en is already provided by public/i18n/en.json`),
+  and a pack with a new interface needs exactly that. The field is `{ "<lang code>": "<pack-relative .json>" }`; the
+  merge rule is **existing keys are never overwritten** and every overlapping key whose value differs is **reported by
+  name** (key + language + pack id + both values), because the sources of such patches are machine translations and old
+  official files — silently replacing a published string is the same class of failure as silently dropping a key. The
+  merged body is what `/i18n/<code>.json` serves; `public/i18n/*.json` is never rewritten (the same stance the data
+  overlay takes). The declared files are hashed into the pack identity exactly like `client.panels[*].module`
+  (a translation is bytes that change what the player sees), so a pack that declares no `i18n` keeps its hash
+  byte-for-byte. Details for authors: `docs/WORKSHOP.md` §1.10.
+
 **The shapes, with the one decision each carries.**
 
 | group | shape | the decision it encodes |
@@ -730,6 +753,7 @@ B3a left open**, both named in the last paragraph of §28.13.4: the owner made t
 | `client` | `{ panels: [{ id, slot, module, order?, gate? }], requires? }` | `slot` is a **closed enum** — the four hosts §28.8 already names (`root.overlays`, `root.guide`, `screen.game.aside`, `screen.result.footer`); `module` is a pack-relative **`.js`** path, never a URL (B2 段: this channel serves code, so the shape layer refuses a `.html` the same way the serving side does); `order` decides the mount sequence, `gate` names a client-store path that must be truthy; `requires` is the closed capability list (`serviceWorker`, `cacheStorage`, `webCrypto`), because "the browser does not support it" and "it is installed but silently does nothing" are different answers |
 | `server` | `{ preDispatch: { module, policy, intercepts } }` | `intercepts` must name types that exist in `shared/protocol.js C2S` — the list is derived from the protocol, not copied here, so an author cannot declare an interception the bus never delivers (the original mod's `match.queue` / `queue.join` do not exist in this repository) |
 | `routes` | `[{ path, file, cache? }]` | deliberately narrow: an absolute path, a pack-relative **`.json`** file (never `.js` / `.html`: this channel is data, not code, the same line `/workshop-assets` draws), `cache` one of `no-cache` / `no-store` / `public` |
+| `i18n` | `{ "<lang code>": "<pack-relative .json>" }` | the language code must be canonical (`shared/i18nPacks.js`) and never the source language `zh` (the msgids themselves have no file); the value is a pack-relative `.json` whose entries merge into an EXISTING language without replacing any key (§28.13.6) |
 
 **One refusal per way to be wrong, and they name the field.** Unknown keys are refused rather than ignored
 (`ASSETS_UNKNOWN_FIELD`, `CLIENT_PANEL_UNKNOWN_FIELD`, `PREDISPATCH_UNKNOWN_FIELD`, `ROUTE_UNKNOWN_FIELD`): a `container`
@@ -872,6 +896,12 @@ What is judged, per group, and where:
   `static.js`): only a registered URL is answered, and only a declared path ever enters those maps. Defence in depth,
   because the serving side may read a hand-built loader object or a pack written against an older schema (the same
   reason `workshopRoutesFor` re-judges).
+* **`i18n`** (B5 段, `server/workshop.js i18nIssues`, same place): every declared language file must resolve inside the
+  pack, parse as a JSON object, and hold only string values under keys that are not `_meta`'s. The merge and the
+  judgement are **the same function** (`shared/workshop.js mergeWorkshopI18n`), so the serving side cannot meet a value
+  the loader cleared and then drop it. Codes: `I18N_BAD_FILE` / `I18N_BAD_LANG` / `I18N_SOURCE_LANG` / `I18N_BAD_VALUE` /
+  `I18N_BAD_KEY`. The reason this one matters more than it looks: a skipped translation file shows the player a string in
+  the wrong language, which nobody will ever trace back to a pack.
 * **On the client** (`public/js/ui/extensions.js`): an unknown `slot`, a module without `mount`, a `gate` that names no
   store path, and a required browser capability this browser lacks are each refused **by name**, and the capability case
   is also said out loud to the player. The one judgement the server cannot make is the gate (the client store is the
@@ -1042,3 +1072,43 @@ as **skipped placeholders** in `test/modAssets.test.js` §10 and are recorded as
 decidable without a browser is exercised for real in Node against a fake `CacheStorage` but real `Response`,
 `Request`, `Headers` and `crypto.subtle` — including the container byte-for-byte agreement between this repository's
 writer, the reference writer and both parsers.
+
+#### 28.13.6 `i18n`: adding strings to an existing language (B5 段)
+
+**The gap was structural, not a configuration.** The `packs/` language type ("lang", `shared/packs.js` /
+`docs/PACKS.md`) can only ADD a language: a single-file pack is `public/i18n/<code>.json`, one pack per language, and the
+scanner reports the second one as skipped — the exact string, measured against the real scanner, is
+`the language en is already provided by public/i18n/en.json`. Measured the other way: the same fixture renamed to a new
+language (`pt`) registers normally as `quickchat-pt … 1 strings`. So "new language: yes; add 74 strings to `en`: no",
+and it is precisely the second thing any pack with a new interface needs (all four community-mod payloads that touch the
+interface need it). Before B5 an `i18n` key in `pack.json` was not even read: the normalized manifest had no such key.
+
+**Shape.** `i18n: { "<lang code>": "<pack-relative .json>" }`. The code must be canonical
+(`shared/i18nPacks.js canonicalLang`: `en`, `ja`, `ko`, `zh-TW`, `pt-BR`) and never `zh`, which is the source language —
+the msgids themselves have no file to add to. The value is a `.json` file **inside the pack**, whose contents are the
+same `{ "<Chinese msgid>": "<translation>" }` shape as `public/i18n/<code>.json`. A path rather than an inline object,
+for one reason: an inline map of 4 × 74 entries would put the whole translation inside a single string of the normalized
+manifest, while a path can be **hashed as its own file** — which is what happens (`identifyPack`, same rule as
+`client.panels[*].module`: bytes that change what the player sees belong to the identity).
+
+**The merge rule, and why it is "never overwrite".** The pack's entries are merged onto the existing file:
+
+1. **An existing msgid keeps the existing translation.** These patches come from machine translations and from old
+   official files: the real plugin-pack data has exactly one key of its 74 that this repository already has
+   (`语音语言`), and its `en` value is `Voice language` against our `Voice Language` — while its `ja` / `ko` / `zh-TW`
+   values are identical to ours. Letting a pack win there is letting a pack quietly edit published interface text.
+2. **Every difference is reported by name**: key + language + pack id + both values
+   (`[workshop] i18n en "语音语言": kept the existing translation (pack "quickchat" wanted "Voice language")`). An
+   overlap whose value is *identical* is not a conflict and does not enter the report — otherwise the one entry that
+   needs a decision drowns in 73 that do not; the report counts them separately instead.
+3. **Values must be strings.** A non-string is refused with the pack (`I18N_BAD_VALUE`), because `t()` would print the
+   raw value into the interface — a fault with no visible link back to the pack.
+
+**Serving.** The client has always fetched `/i18n/<code>.json` (`public/js/ui/lang.js`); a pack's entries are merged into
+that response (`server/http/workshop.js buildWorkshopI18nFiles` → `static.js`), so `public/i18n/*.json` is never
+rewritten — the same stance the `/data/*.json` overlay takes. A language no pack touches is not in the map and is served
+from disk byte for byte.
+
+**What it does not do.** `data/i18n/<code>.json` (the game texts, a different file family) is out of scope, and
+`tools/i18n.mjs check` still does not flag a msgid a pack declares and the code never uses. Both are recorded as open in
+the B5 report rather than implied by the field's existence.

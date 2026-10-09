@@ -123,9 +123,16 @@ function fillIdChoices(listEl, file) {
 
 // ---- 左栏：包列表 -------------------------------------------------------------------------------------------------
 
+/**
+ * 一个包**为什么**被拒（B3a §6 第 4 条 / B5 段）：`refusal` 是服务端整理好的 `{ code, detail }`（形状层与装载期
+ * 两种拒绝都在里面），`reason` 是加载器那句原文（兜底）。两处（列表行与详情横幅）读同一个函数，所以同一个包在
+ * 列表里和详情里**不可能给出不同的理由**。
+ */
+const refusalOf = (p) => p.refusal ?? (p.syntaxError ? { code: p.syntaxError.code, detail: p.syntaxError.detail } : null);
+const refusalText = (p) => refusalOf(p)?.detail ?? p.reason ?? t('（未知原因）');
+
 function renderPackList() {
-  const box = $('#packList');
-  box.replaceChildren();
+  const box = $('#packList');  box.replaceChildren();
   if (!state.packs.length) {
     box.append(Object.assign(document.createElement('div'), { className: 'item dim', textContent: t('还没有工坊包（先用干员编辑器建一个，或导入一个 .zip）') }));
     return;
@@ -143,8 +150,18 @@ function renderPackList() {
     const verdict = document.createElement('div'); verdict.className = 'm';
     const tag = document.createElement('span');
     if (p.status === 'loaded') { tag.className = 'tag ok'; tag.textContent = t('加载器接受'); }
-    else { tag.className = 'tag err'; tag.textContent = p.syntaxError?.code ?? p.reason?.split(':')[0] ?? 'REFUSED'; }
+    else { tag.className = 'tag err'; tag.textContent = p.refusal?.code ?? p.syntaxError?.code ?? p.reason?.split(':')[0] ?? 'REFUSED'; }
     verdict.append(tag);
+    // 被拒的包**在列表里也要看得见理由**（B3a §6 第 4 条 / B5 段）：以前列表只有一个小小的错误标签，理由要点进
+    // 这个包才看得到，而 pack.json 读不出来时连标签都只能是 `REFUSED` —— 包看起来就像「不见了」。
+    if (p.status !== 'loaded') {
+      const why = document.createElement('span');
+      why.className = 'err';
+      why.textContent = ` ${t('已被拒绝：{0}', refusalText(p)).slice(0, 160)}`;
+      if (p.reason) why.title = p.reason;
+      verdict.append(why);
+      el.title = p.reason ?? '';
+    }
     el.append(name, meta, verdict);
     el.addEventListener('click', () => selectPack(p.id));
     box.append(el);
@@ -354,7 +371,7 @@ function renderDetail() {
     verdict.textContent = t('✔ 加载器接受这个包（格式与 content 声明都对得上）。改完要重启游戏服务器才会生效。');
   } else {
     verdict.className = 'banner bad';
-    verdict.textContent = t('✘ 加载器不会使用这个包：{0}', p.reason ?? t('（未知原因）'))
+    verdict.textContent = t('✘ 加载器不会使用这个包：{0}', refusalText(p))
       + (p.syntaxError ? t('；pack.json 本身：{0} — {1}', p.syntaxError.code, p.syntaxError.detail) : '');
   }
   box.append(verdict);
