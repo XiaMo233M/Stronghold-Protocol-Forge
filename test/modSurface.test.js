@@ -135,11 +135,20 @@ test('kits/index.js 的 OPERATOR_KIT_FILES：就地补丁靠「插一行」注�
     assert.ok(existsSync(new URL(`../server/sim/content/kits/ops/${f}`, import.meta.url)),
       `OPERATOR_KIT_FILES 列了 "${f}"，但 kits/ops/ 下没有这个文件`);
   }
-  // 就地补丁是从源码文本里定位 `OPERATOR_KIT_FILES` 的结尾 `]);` 再插一行（install.mjs 的做法）
+  // 就地补丁是从源码文本里定位注册表、再往它的 `]);` 前插一行。**名字第一次出现在哪一行**因此是接口的一部分：
+  // 2026-10-09 实测（社区「克莱门莎」mod）：名字先在第 18 行注释里出现一次，补丁于是把行插进了更靠前的
+  // stand-in 数组，两个字符串字面量之间没有逗号 ⇒ `node server/index.js` 直接 exit 1，而补丁自己的自检只查
+  // 「名字在不在文件里」，全绿。规矩：**靠文本定位的名字，第一次出现必须在它的声明行**。
   const src = readFileSync(new URL('../server/sim/content/kits/index.js', import.meta.url), 'utf8');
-  assert.ok(src.includes('OPERATOR_KIT_FILES'), '注册表的字面名必须留在源码里（就地补丁按它定位插入点）');
-  const i = src.indexOf('OPERATOR_KIT_FILES');
-  assert.ok(src.indexOf(']);', i) > i, 'OPERATOR_KIT_FILES 的结尾必须是 `]);`（就地补丁按它找插入点）');
+  const first = src.indexOf('OPERATOR_KIT_FILES');
+  assert.notEqual(first, -1, '注册表的名字必须留在源码里（就地补丁按它做文本定位）');
+  const toEol = src.slice(src.lastIndexOf('\n', first) + 1, src.indexOf('\n', first));
+  assert.match(toEol, /export const OPERATOR_KIT_FILES\s*=/,
+    `第一次出现必须是声明行，否则就地补丁会定位到注释、把注册行插进别的数组：今天是「${toEol.trim()}」`);
+  const close = src.indexOf(']);', first);
+  assert.ok(close > first, '声明的结尾必须是 `]);`（就地补丁按它找插入点）');
+  assert.ok(!src.slice(first, close).includes('export const'),
+    '声明之后第一个 `]);` 必须是这个数组自己的结尾，中间不能夹着另一个导出（否则插入点属于别的数组）');
   assert.ok(Object.keys(OPERATOR_KITS).length > 0, 'OPERATOR_KITS 不能是空的');
   for (const [charId, fn] of Object.entries(OPERATOR_KITS)) {
     assert.equal(typeof fn, 'function', `OPERATOR_KITS["${charId}"] 必须是函数（kit 的默认导出会进来）`);
