@@ -539,6 +539,10 @@ export class AudioManager {
     this.voiceNode = null;    // { src, gain, url, token } of the line on air
     this.voiceToken = 0;
     this.voiceLang = 'cn';    // settings 语音语言: 'cn' (audio.voice) | 'jp' (audio.voiceJp, falling back to audio.voice)
+    // Whether a host ever CALLED setVoiceLang (or installAudio with settings): until it does, `voiceLang` is only the
+    // field's initial value and `voice()` must leave the dub to `voiceLangOf` / the manifest's own default (this repo's
+    // model: `audio.voiceLang` names the default dub, jp since 0.9.0, and `audio.voiceLangs` the other ones).
+    this.voiceLangSet = false;
     this.startVoiceDone = false; // 行动出发 of this field (the first operator deployed says it)
     this.uiVoices = 0;
     this.wantBgm = null;      // desired key (kept while locked)
@@ -686,6 +690,7 @@ export class AudioManager {
    */
   setVoiceLang(lang) {
     this.voiceLang = lang === 'jp' ? 'jp' : 'cn';
+    this.voiceLangSet = true;
   }
 
   _applyVolumes() {
@@ -933,7 +938,7 @@ export class AudioManager {
     try {
       if (!this.ctx || !this.voiceGain || this.volumes.muted || this.volumes.voice <= 0) return false;
       if (typeof charId !== 'string' || typeof slot !== 'string') return false;
-      const lang = (typeof o.lang === 'string' && o.lang) || this.voiceLangOf(charId) || this.voiceLang;
+      const lang = (typeof o.lang === 'string' && o.lang) || this.voiceLangOf(charId) || (this.voiceLangSet ? this.voiceLang : null);
       const line = voiceLinesFor(this.getManifest(), charId, slot, lang);
       const url = Array.isArray(line) ? line[Math.floor(Math.random() * line.length)] : line;
       if (typeof url !== 'string' || !url) return false;
