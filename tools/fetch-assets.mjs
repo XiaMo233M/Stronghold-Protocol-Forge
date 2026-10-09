@@ -18,6 +18,8 @@
 // Idempotent: existing files with the right size are skipped, so re-running is
 // cheap. Downloads use ~16 parallel connections, 3 retries per direct source,
 // a jsDelivr fallback and an opt-in GitHub proxy (one short attempt per URL).
+// HTTP(S)_PROXY is picked up by restarting once with NODE_USE_ENV_PROXY=1
+// (Node >=22.21 or >=24). An older Node warns and fetches directly, as before.
 // Spine atlases get `size:` (and `pma: true` for enemies); every skeleton is
 // parsed to resolve animation roles.
 //
@@ -49,6 +51,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Downloader } from './assets/downloader.mjs';
+import { restartForEnvProxy } from './assets/env-proxy.mjs';
 import { MirrorPolicy, selectDownloadSource, validateSource } from './assets/network.mjs';
 import { normalizeProxyPrefix } from './assets/sources.mjs';
 import { loadIndexes } from './assets/cache.mjs';
@@ -97,6 +100,7 @@ const HELP = `Usage: node tools/fetch-assets.mjs [options]
                     download MORE dubs beside the default one (comma separated, cn | jp | en | kr). They land in
                     audio.voiceLangs[lang][charId][slot] and the game's 干员语音 setting lets each operator pick one.
                     Every dub is the same file names under its own folder: ≈ 2674 files / 66 MB per dub.
+                    audio.voiceJp (upstream 0.2.2's 日本語 tree) is planned as well and is always the JP dub.
   --voice-all       plan every official voice slot, including the prep-only lines no battle plays
                     (干员报到 / 编入队伍 / 任命队长; 360 files / 19.3 MB more per run — off by default)
   --prune           delete files under public/assets that the manifest no longer references
@@ -266,6 +270,7 @@ function countStats(m, bytes, files) {
     sfxUnits: Object.keys(m.audio?.sfx?.units || {}).length,
     voiceChars: Object.keys(m.audio?.voice || {}).length,
     voiceLangs: Object.fromEntries(Object.entries(m.audio?.voiceLangs || {}).map(([l, t]) => [l, Object.keys(t || {}).length])),
+    voiceJpChars: Object.keys(m.audio?.voiceJp || {}).length,
   };
 }
 
@@ -359,7 +364,8 @@ async function main() {
     `${Object.keys(plan.template.tokens).length} tokens, ${Object.keys(plan.template.ui).length} UI sprites, ` +
     `${Object.keys(plan.template.audio.sfx.units).length} units with SFX, ` +
     `${Object.keys(plan.template.audio.voice).length} operators with ${opts.voiceLang.toUpperCase()} voice` +
-    `${opts.voiceLangs.length ? ` + dubs ${opts.voiceLangs.filter((l) => l !== opts.voiceLang).map((l) => l.toUpperCase()).join('/')}` : ''})`);
+    `${opts.voiceLangs.length ? ` + dubs ${opts.voiceLangs.filter((l) => l !== opts.voiceLang).map((l) => l.toUpperCase()).join('/')}` : ''}, ` +
+    `${Object.keys(plan.template.audio.voiceJp || {}).length} with JP voice)`);
   if (opts.dryRun) {
     for (const n of plan.notes) log(`  note: ${n}`);
     return 0;
@@ -450,7 +456,8 @@ async function main() {
   const overlays = (o) => Object.values(o || {}).filter((e) => e?.spineLocal).length;
   log(`local-client models (spineLocal, drawn when extracted): enemies ${overlays(manifest.enemies)} · tokens ${overlays(manifest.tokens)}`);
   log(`operator battle voice: ${s.voiceChars} charIds, dub ${opts.voiceLang}` +
-    `${Object.keys(s.voiceLangs || {}).length ? ` (+${Object.entries(s.voiceLangs).map(([l, n]) => `${l} ${n}`).join(', ')})` : ''}`);
+    `${Object.keys(s.voiceLangs || {}).length ? ` (+${Object.entries(s.voiceLangs).map(([l, n]) => `${l} ${n}`).join(', ')})` : ''}` +
+    `${s.voiceJpChars ? ` · JP dub (audio.voiceJp): ${s.voiceJpChars} charIds` : ''}`);
   log(`fonts: ${Object.values(fonts.files).map((f) => f.woff2 || f.original).join(', ') || 'none'}`);
   if (resolved.fallbacks.length) { log(`fallbacks used (${resolved.fallbacks.length}):`); for (const f of resolved.fallbacks.slice(0, 20)) log(`  ${f}`); }
   if (downloadErrors.length) log(`download errors (${downloadErrors.length}, re-run to retry): ${downloadErrors.slice(0, 10).join(', ')}`);
@@ -479,7 +486,7 @@ async function main() {
 
 // run only as a script (tests import parseArgs / shrinkGuard)
 const invoked = (() => { try { return pathToFileURL(realpathSync(process.argv[1] || '')).href; } catch { return null; } })();
-if (invoked === import.meta.url) {
+if (invoked === import.meta.url && !restartForEnvProxy()) {
   main().then((code) => { process.exitCode = code; }, (e) => {
     console.error(`[assets] FAILED: ${process.env.DEBUG ? e?.stack || e : e?.message || e}`);
     process.exitCode = 1;
