@@ -336,6 +336,22 @@ const META_MODULE_EXT = '.mjs';
 const BATTLE_FIELDS = Object.freeze(['module']);
 const BATTLE_MODULE_EXT = '.mjs';
 /**
+ * `server.room` —— 包的**房间级钩子**载荷（DESIGN §28.20）：一个导出 `install(room)` 的模块，服务端在**每一个**
+ * 装上这个包的房间里跑一次，让包观察房间的生命周期（建房、加入、加入观战、对局开始 / 结束、离开、房间销毁）。
+ *
+ * 为什么它不是 `server.modules` 的一个 `uses`：这一层要的是**每个房间**一次、并且**按房间的集合**过滤（W-B，
+ * §28.16）—— 而 `server.modules` 的挂载点是进程级的（boot / shutdown / healthz / matchClass，§28.14 明说房间的
+ * 集合决定的是**一局**跑什么，不是进程启动什么）。一个包想知道「这个房间里是谁」，进程级钩子没有房间这个对象。
+ *
+ * 为什么它不要求 `combat: true`（与 `server.meta` / `server.battle` 相反）：它的契约里**没有任何一条**能改对局
+ * 结果 —— `install(room)` 拿到的是一个只读的观察面（成员快照、阶段、事件），没有 store、没有战场句柄、没有 socket、
+ * 没有文件系统，返回值被忽略。判据是**能力**而不是意图：等哪一天这一层真的交出一件能改「谁在玩 / 装了什么 / 这一局
+ * 的结果」的东西，那件东西必须 `combat: true`（§28.20 的闸门分类规则）。
+ */
+const ROOM_FIELDS = Object.freeze(['module']);
+/** 房间钩子模块的扩展名：它只由**服务端**加载（浏览器与战场都不加载），所以是 `.mjs`，与 `server.meta` 同一条。 */
+const ROOM_MODULE_EXT = '.mjs';
+/**
  * `server.modules[*]` —— 包的**服务端模块**载荷（DESIGN §28.14）。与 `kits/` 并列的一类载荷，但两者的契约相反：
  * kit 是**战斗里**的代码（禁文件系统、禁网络），而这一类要做的恰恰是写盘、挂启动钩子、给 `/healthz` 加字段。
  *
@@ -679,20 +695,22 @@ function parseServerModulesDecl(raw) {
 }
 
 /**
- * `pack.json.server` —— 分发前的准入钩子（§28.13）、对局元注册表（§29）与**服务端模块**（§28.14）。
+ * `pack.json.server` —— 分发前的准入钩子（§28.13）、对局元注册表（§29）、**服务端模块**（§28.14）与
+ * **房间级钩子**（§28.20）。
  * @returns {{ ok: true, decl: object } | { ok: false, error: string, detail: string }}
  */
 function parseServerDecl(raw) {
   if (!isPlainObj(raw)) {
-    return fail('SERVER_DECL_BAD_SHAPE', 'server must be an object: { preDispatch: { module, policy, intercepts }, meta: { module, registers }, battle: { module } }');
+    return fail('SERVER_DECL_BAD_SHAPE', 'server must be an object: { preDispatch: { module, policy, intercepts }, meta: { module, registers }, modules: [...], battle: { module }, room: { module } }');
   }
-  const SERVER_MEMBERS = ['preDispatch', 'meta', 'modules', 'battle'];
+  const SERVER_MEMBERS = ['preDispatch', 'meta', 'modules', 'battle', 'room'];
   for (const key of Object.keys(raw)) {
     if (!SERVER_MEMBERS.includes(key)) {
       return fail('SERVER_UNKNOWN_FIELD', `server: "${key}" is not a declared field (${SERVER_MEMBERS.join(', ')})`);
     }
   }
-  if (raw.preDispatch === undefined && raw.meta === undefined && raw.modules === undefined && raw.battle === undefined) {
+  if (raw.preDispatch === undefined && raw.meta === undefined && raw.modules === undefined
+    && raw.battle === undefined && raw.room === undefined) {
     return fail('SERVER_EMPTY_MEMBER', `server must declare at least one member (${SERVER_MEMBERS.join(', ')}) — an empty object says nothing and is refused rather than ignored`);
   }
   /** @type {Record<string, object>} */
@@ -701,6 +719,11 @@ function parseServerDecl(raw) {
     const battle = parseBattleDecl(raw.battle);
     if (!battle.ok) return battle;
     decl.battle = battle.decl.battle;
+  }
+  if (raw.room !== undefined) {
+    const room = parseRoomDecl(raw.room);
+    if (!room.ok) return room;
+    decl.room = room.decl.room;
   }
   if (raw.modules !== undefined) {
     const modules = parseServerModulesDecl(raw.modules);
@@ -845,6 +868,34 @@ function parseBattleDecl(raw) {
     return fail('BATTLE_BAD_MODULE', `server.battle.module must be a "${BATTLE_MODULE_EXT}" module — it runs on both ends (the server recomputes the battle the browser simulated)`);
   }
   return { ok: true, decl: { battle: { module: raw.module } } };
+}
+
+/**
+ * `pack.json.server.room` —— 包的**房间级钩子**模块（DESIGN §28.20）。形状与 `server.battle` 逐字同形：只有
+ * `{ module }`，一个包内相对 `.mjs`，导出 `install(room)`。
+ *
+ * 为什么形状这么小：与战斗逻辑模块同一个理由 —— 房间钩子**不是**往一个共享命名空间里注册键（没有 `registers`
+ * 那样的白名单），它拿到的是引擎递进来的一个对象。真正的边界在**那个对象有什么**（`server/roomPack.js` 的成员表）
+ * 与 **import 面**（只有 `@sim/`，§28.20）上。形状层判形状；「文件在不在、能不能 import、有没有 `install` 导出」
+ * 是装载期与运行期。
+ * @returns {{ ok: true, decl: object } | { ok: false, error: string, detail: string }}
+ */
+function parseRoomDecl(raw) {
+  if (!isPlainObj(raw)) {
+    return fail('ROOM_BAD_SHAPE', 'server.room must be an object: { module }');
+  }
+  for (const key of Object.keys(raw)) {
+    if (!ROOM_FIELDS.includes(key)) {
+      return fail('ROOM_UNKNOWN_FIELD', `server.room: "${key}" is not a declared field (${ROOM_FIELDS.join(', ')})`);
+    }
+  }
+  if (!isSafeRelativePath(raw.module)) {
+    return fail('ROOM_BAD_PATH', 'server.room.module must be a relative path inside the pack (no absolute paths, no "..")');
+  }
+  if (!raw.module.endsWith(ROOM_MODULE_EXT) || raw.module.length <= ROOM_MODULE_EXT.length) {
+    return fail('ROOM_BAD_MODULE', `server.room.module must be a "${ROOM_MODULE_EXT}" module — the server loads it, the browser never does (unlike server.battle, which both ends run)`);
+  }
+  return { ok: true, decl: { room: { module: raw.module } } };
 }
 
 /**
@@ -1426,7 +1477,8 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   /** 一条声明算不算「贡献」：归一化后的值里有没有东西。`routes: []` 与 `client: { panels: [], requires: [] }`
    *  都是**合法但什么都不做**的声明（与 `voices: {}` / `art: { chars: {} }` 同一个语义），照旧不算贡献 ——
    *  所以「一个只写了 `routes: []` 的包」仍然是空包。反向的那条同样载重：`assets` / `client.panels` /
-   *  `server.preDispatch` 的必填字段在形状层就各自非空，所以它们只声明出来就**是**贡献项。 */
+   *  `server.preDispatch` 的必填字段在形状层就各自非空，所以它们只声明出来就**是**贡献项；`server.battle` 与
+   *  `server.room` 同理（形状层就要求 `module` 是一个合法的包内 `.mjs`）。 */
   const contributes = (v) => (Array.isArray(v) ? v.length > 0 : Object.keys(v).length > 0);
   // A pack may bring data files, voice lines (either table), 盟约图标, 装备图标, 外观素材, 助战声明, 自选池声明
   // — never none of them (docs/WORKSHOP.md §1.4). 这条检查必须放在**所有**贡献项都解析完之后：放在前面会出现
@@ -1444,7 +1496,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     const notContributions = ['support', 'playtest']
       .filter((n) => raw[n] !== undefined);
     const names = [...WORKSHOP_CONTENT_FILES, 'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'operators',
-      'assets', 'client', 'server.preDispatch', 'server.meta', 'server.battle', 'routes', 'i18n', 'notices'];
+      'assets', 'client', 'server.preDispatch', 'server.meta', 'server.battle', 'server.room', 'server.modules', 'routes', 'i18n', 'notices'];
     const alsoNot = notContributions.length
       ? ` (note: ${notContributions.map((n) => `"${n}"`).join(' and ')} ${notContributions.length === 1 ? 'is' : 'are'} NOT a contribution — a pack that declares ${notContributions.length === 1 ? 'it' : 'them'} alone brings nothing into a match)`
       : '';
@@ -1486,6 +1538,11 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (serverParsed && (serverParsed.decl.modules || []).some((m) => m.uses.includes('matchClass')) && raw.combat !== true) {
     return fail('MODULES_NEED_COMBAT', 'a server module whose uses includes "matchClass" wraps the match itself, so this pack must declare "combat": true — that is what puts it into the room digest gate and the golden corpus (DESIGN §28.14); a module that only mounts boot / shutdown / healthz does not need it');
   }
+  // `server.room` **不在**上面这条线里（DESIGN §28.20）：它的契约是「观察与声明」——`install(room)` 拿到的是一个只读
+  // 观察面（成员快照 / 阶段 / 事件 / 一条日志），没有 store、没有战场句柄、没有 socket、没有文件系统，返回值被忽略。
+  // 判据是**能力**而不是意图：一件改不了结果的能力不要求 `combat: true`（要求了只会让诚实的包被拒，而闸门本身变成
+  // 一句口号）。反过来，这一层**将来**若交出任何能改「谁在玩 / 装了什么 / 这一局的结果」的东西，那件东西必须
+  // `combat: true` —— 那条规则写在 §28.20 的分类规则那一段，落点在 `server/roomPack.js` 的成员表上。
   return {
     ok: true,
     pack: {

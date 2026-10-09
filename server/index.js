@@ -28,6 +28,7 @@ import { getData, loadData } from './data.js';
 import { loadWorkshop, loadWorkshopKits, loadWorkshopHooks, loadWorkshopPanels, workshopThemeFor, dropUnavailablePreDispatchPacks, WORKSHOP_DIR } from './workshop.js';
 import { loadMetaModules } from './match/metaPack.js';
 import { loadBattleInstallers } from './battlePack.js';
+import { loadRoomInstallers } from './roomPack.js';
 import { loadServerModules, mountServerModules, stateRootFor } from './modModules.js';
 import { workshopNotices } from './notices.js';
 import { createRoomAssets } from './roomAssets.js';
@@ -106,7 +107,11 @@ export async function startServer(opts = {}) {
   // 包声明的**战斗逻辑**模块（`pack.json.server.battle`, DESIGN §28.17）：与上面三条同一个裁剪点 —— 源码里带非确定性
   // 的东西、import 越界、没有 `install` 导出、模块文件不在，都让**这个包**整份移出已加载集合。
   const battlePack = await loadBattleInstallers(loadedOnce, { log });
-  const pruned = dropUnavailablePreDispatchPacks(loadedOnce, [...workshopHooks.errors, ...workshopMeta.errors, ...serverModules.errors, ...battlePack.errors]);
+  // 包声明的**房间级钩子**（`pack.json.server.room`, DESIGN §28.20）：与上面四条同一个裁剪点 —— 源码里带非确定性的
+  // 东西、import 越界、没有 `install` 导出、模块文件不在，都让**这个包**整份移出已加载集合。与 `server.battle` 的
+  // 差别只有一处：这一层**只在服务端**跑，所以没有一份「送浏览器的 URL 清单」。
+  const roomPack = await loadRoomInstallers(loadedOnce, { log });
+  const pruned = dropUnavailablePreDispatchPacks(loadedOnce, [...workshopHooks.errors, ...workshopMeta.errors, ...serverModules.errors, ...battlePack.errors, ...roomPack.errors]);
   if (pruned.removed.length) {
     log.warn(`[workshop] dropped ${pruned.removed.length} pack(s) whose declared server-side payload cannot be installed: `
       + pruned.removed.map((r) => `"${r.pack}" (${r.code})`).join(', '));
@@ -119,6 +124,8 @@ export async function startServer(opts = {}) {
   // 战斗逻辑同理：被别的声明裁掉的包不该继续在战场里说话（它的 installer 与 URL 清单一起消失）。
   const battleInstallers = battlePack.installers.filter((m) => survivors.has(m.id));
   const battleModules = battlePack.modules.filter((m) => survivors.has(m.pack));
+  // 房间级钩子同理：被别的声明裁掉的包不该继续在大厅里说话（它的 `install(room)` 与事件钩子一起消失）。
+  const roomInstallers = roomPack.installers.filter((m) => survivors.has(m.id));
   const modMount = mountServerModules(serverModulesLive, { log });
   const excludedPacks = new Set(pruned.removed.map((r) => r.pack));
   // The process-wide singleton serves the default data dir; a custom dir (tests) gets its own copy. The 创意工坊 overlay
@@ -229,7 +236,7 @@ export async function startServer(opts = {}) {
     {
       ...opts,
       ...(matchWrappers.length ? { MatchClass } : {}),
-      workshop: { kits: workshopKits.kits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme, meta: metaModules, roomAssets, battle: battleModules, battleInstallers },
+      workshop: { kits: workshopKits.kits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme, meta: metaModules, roomAssets, battle: battleModules, battleInstallers, roomHooks: roomInstallers },
     },
     { data, log },
   );
