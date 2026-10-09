@@ -1225,5 +1225,13 @@
   "试玩：标了「直接发到手上」的 {0} 名干员已进手牌": "Playtest: {0} operator(s) flagged as “straight to the hand” are in your hand",
   "{0} 需要浏览器支持 {1}，当前浏览器不支持 —— 这个包的面板不会挂载": "{0} needs browser support for {1}, which this browser does not provide — the pack’s panels are not mounted",
   "加载模组资源模块失败：{error}": "Failed to load the mod resource module: {error}",
-  "已被拒绝：{0}": "Refused: {0}"
+  "已被拒绝：{0}": "Refused: {0}",
+  "本房间使用的模组": "Mods this room uses",
+  "不勾选 = 本房间不声明模组（模拟仍按服务器加载的全部模组运行）": "Leave all unchecked = this room declares no mods (the simulation still runs every mod the server loaded)",
+  "数据": "Data",
+  "逻辑": "Logic",
+  "客户端": "Client",
+  "会改动战斗结果": "Changes battle results",
+  "本房间使用模组（{n} 个）": "Mods this room uses ({n})",
+  "房间指定了本服务器没有的模组包": "The room named a mod pack this server does not have"
 }

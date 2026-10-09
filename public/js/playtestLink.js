@@ -63,7 +63,8 @@ let inFlight = false;
  * Quiet and non-destructive on failure: every refusal is only reported, and the player stays in the lobby.
  * @param {{ request: (t: string, fields?: object) => Promise<any> }} netLike
  * @param {{ get: () => any }} storeLike
- * @param {{ difficulty?: string, notify?: (text: string, kind?: string) => void,
+ * @param {{ difficulty?: string, roomFields?: () => object,
+ *           notify?: (text: string, kind?: string) => void,
  *           notifyError?: (err: any) => void }} [opts]
  * @returns {Promise<boolean>} true when the match was started
  */
@@ -71,6 +72,9 @@ export async function runSoloPlaytest(netLike, storeLike, opts = {}) {
   const s = typeof storeLike?.get === 'function' ? storeLike.get() : null;
   const difficulty = DIFFICULTIES.includes(opts.difficulty) ? opts.difficulty : DEFAULT_DIFFICULTY;
   const notify = typeof opts.notify === 'function' ? opts.notify : () => {};
+  // Extra `room.create` fields the caller owns (main.js passes the mod digest this server declared): absent ⇒ `{}`, so
+  // a plain install sends exactly `{ mode, difficulty }` and this module keeps no opinion about mods (roomMods.js).
+  const roomFields = typeof opts.roomFields === 'function' ? opts.roomFields() : null;
   if (inFlight) {
     notify(t('试玩正在启动，请稍候'), 'warn');
     return false;
@@ -88,7 +92,7 @@ export async function runSoloPlaytest(netLike, storeLike, opts = {}) {
   try {
     // The two intents are independent server-side (the rate limiter counts room.create / room.start per socket —
     // server/lobby.js header), and the server handles them in arrival order: create first, then start.
-    await netLike.request('room.create', { mode: 'solo', difficulty });
+    await netLike.request('room.create', { mode: 'solo', difficulty, ...(roomFields || {}) });
     await netLike.request('room.start');
     return true;
   } catch (err) {

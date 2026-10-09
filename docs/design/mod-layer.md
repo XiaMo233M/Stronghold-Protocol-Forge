@@ -533,6 +533,26 @@ Two vocabulary decisions belong here because they are cheap now and expensive la
   at a restart. That makes the room list the right place to show it, and makes "the server told me X and then ran Y"
   impossible.
 
+**A room may narrow that set, and the narrowing is declared rather than inferred (W-A).** The process set is what the
+server *can* run; it is not a promise about what a particular room *does* run. `room.create` therefore accepts an
+optional `modIds` — pack ids from the catalogue `welcome.mods.packs` already handed the client — and the server resolves
+them through the same `modSetOf` that produces the process digest (`shared/modIdentity.js`), so a room's `{ digest,
+packs }` is the same kind of value as `welcome.mods` and not a second opinion about the same list. Three rules make it
+safe to add without a flag day:
+
+- **Absent means absent.** No `modIds` (or `[]`) leaves `Room.modSet` null and `room.state` without a `mods` key, so a
+  vanilla install's frames stay byte-identical. Only the packs this process loaded may be named; an unknown id is refused
+  by name (`ERR.MOD_UNKNOWN`) rather than silently dropped, because a client that asked for content the server cannot
+  run must be told, not humoured.
+- **`room.join` takes no `modIds`.** The set is the host's to declare, and every member is *told* it — `room.state.mods`
+  reaches members and spectators alike. A joiner's own `mods` stays what it always was: the digest of the process set,
+  which is what the entry gate judges (below).
+- **W-A declares; W-B decides.** This cut stores the room's set and ships it to the clients. It deliberately does NOT
+  change what the simulation runs: the entry gate still judges the process digest, and `Match` still receives the process
+  set. Until the room's merged data reaches `Match` and the two bypass singletons (`server/sim/content/support/index.js`
+  `gameData()`, `server/data.js` `getData()`), a room that declares a subset is running the whole process set, and the
+  honest thing is to say so rather than to refuse the room or to pretend the declaration took effect.
+
 Finally, `tools/package.mjs:13-14` and `:156-157` (the `git ls-files` allowlist) mean a mod-layer file that is not
 committed does not ship. A hash computed from the manifest could describe content no player has; a hash computed from
 the files really on disk (or, in a release, from the files really in the archive) cannot. That is the reason §28.2

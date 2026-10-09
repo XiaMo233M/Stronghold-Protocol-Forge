@@ -101,7 +101,7 @@
 import { randomBytes, randomInt } from 'node:crypto';
 import { ERR, MAX_SEATS, MAX_SPECTATORS, ROOM_CODE_LEN, modeIdFor } from '../shared/constants.js';
 import { checkLoadout, checkLoadoutOps, cultivationCharIds, checkNotOwned, checkDiyPicks } from '../shared/protocol.js';
-import { modSetOf } from '../shared/modIdentity.js';
+import { modSetOf, isModId } from '../shared/modIdentity.js';
 import { normalizeSupportConfig, checkSupport, supportPicker, supportCapacity, supportTiers } from '../shared/support.js';
 import { encode, isDroppable, isErrCode, sendRaw, sendSession } from './net.js';
 import { getData as defaultGetData, lookup } from './data.js';
@@ -173,6 +173,48 @@ function freezeDiy(picks) {  const out = {};
   return Object.freeze(out);
 }
 
+/**
+ * Resolve a `room.create` `modIds` list into the room's own mod set (W-A, DESIGN §28.9).
+ *
+ * The ids are matched against the packs THIS PROCESS already loaded (`Lobby.workshop.mods`), because a room picks a
+ * subset of the catalogue — the server owns every hash, so a client cannot name content the server does not have. The
+ * digest is computed by `modSetOf` — the SAME function the process set, `welcome` and every BattleSpec go through — so
+ * the room's digest can never be a second opinion about the same list.
+ *
+ * `modSetOf` sorts by id, so the room's `packs` are sorted whatever order the client sent.
+ * @param {any[]} requested pack ids as they arrived (`isModId`-checked by shared/protocol.js)
+ * @param {Array<{ id: string, hash: string, layer: string, combat: boolean, api?: string }>} catalogue loaded packs
+ * @returns {{ ok: true, modIds: string[], modSet: { digest: string, packs: Array<object> } }
+ *          | { ok: false, unknown: string[], available: string[] }}
+ */
+function resolveRoomModSet(requested, catalogue) {
+  const available = (Array.isArray(catalogue) ? catalogue : []).filter((p) => p && isModId(p.id));
+  const known = new Set(available.map((p) => p.id));
+  const ids = [];
+  const unknown = [];
+  for (const raw of requested) {
+    if (typeof raw !== 'string' || !isModId(raw)) continue;   // shared/protocol.js already refused these
+    if (!known.has(raw)) { if (!unknown.includes(raw)) unknown.push(raw); continue; }
+    if (!ids.includes(raw)) ids.push(raw);
+  }
+  if (unknown.length) {
+    return { ok: false, unknown: unknown.sort(), available: [...known].sort() };
+  }
+  if (!ids.length) return { ok: true, modIds: [], modSet: null };
+  // The catalogue entry is copied, never handed out by reference: the room must not be able to reach into the loader's
+  // pack objects (and `api` is dropped when the pack declared none — the wire shape is what `isModEntry` accepts).
+  const picked = ids.map((id) => {
+    const p = available.find((e) => e.id === id);
+    return p.api == null ? { id: p.id, hash: p.hash, layer: p.layer, combat: p.combat }
+      : { id: p.id, hash: p.hash, layer: p.layer, combat: p.combat, api: p.api };
+  });
+  const modSet = modSetOf(picked);
+  // A pack the loader identified but `modSetOf` will not accept (an empty hash, an unknown layer) is a server-side
+  // inconsistency, not a client error: say so instead of quietly handing back a room with a different set than asked.
+  if (!modSet) return { ok: false, unknown: [], available: [...known].sort() };
+  return { ok: true, modIds: Object.freeze(ids.slice().sort()), modSet };
+}
+
 /** One room: 4 seat slots, host, difficulty, optional running match. */
 export class Room {
   /** @param {string} code @param {'solo'|'coop'} mode @param {string} difficulty @param {number} now */
@@ -209,6 +251,15 @@ export class Room {
     this.matchKey = null;
     this.createdAt = now;
     this.disposed = false;
+    /**
+     * The room's OWN mod set (W-A, DESIGN §28.9) — a subset of what the process loaded, named by `room.create`. Both
+     * stay null for a room that declared nothing (the default: the room runs whatever the process runs). `modSet` is
+     * `{ digest, packs }` of the same shape as `welcome.mods`, built by the same `modSetOf`.
+     * @type {readonly string[] | null}
+     */
+    this.modIds = null;
+    /** @type {{ digest: string, packs: Array<object> } | null} */
+    this.modSet = null;
   }
 
   /** @param {string} playerId @returns {Seat | null} */
@@ -227,7 +278,10 @@ export class Room {
   activeHumans() { return this.seats.filter((s) => s && !s.isBot && !s.left); }
 
   /**
-   * `room.state` frame (DESIGN §8.1) plus `inMatch`.
+   * `room.state` frame (DESIGN §8.1) plus `inMatch`, plus the room's own `mods` when it declared a set (W-A,
+   * DESIGN §28.9). `mods` has the SAME shape as `welcome.mods` (`{ digest, packs }`, packs sorted by id) and is
+   * ABSENT — not null, not `{}` — for a room that declared nothing, so a vanilla install's frame is byte-identical to
+   * what it was before this feature.
    * @param {object|null} [support] the SERVER's 助战 catalog (Lobby.supportView): the client cannot derive the pool, so
    *   the picker is only ever able to offer what the server declares.
    */
@@ -244,6 +298,7 @@ export class Room {
         ? { seat: s.seat, playerId: s.playerId, name: s.name, isBot: s.isBot, ready: s.ready, connected: s.connected && !s.left }
         : null)),
       spectators: this.spectators.map((s) => ({ playerId: s.playerId, name: s.name, connected: s.connected })),
+      ...(this.modSet ? { mods: this.modSet } : {}),
       ...(support ? { support } : {}),
     };
   }
@@ -356,6 +411,13 @@ export class Lobby {
    * so the client must say which content it thinks it is joining. A client that does not answer (or answers with what
    * the server is not running) is refused with a reason it can act on — the alternative is a player silently playing
    * content the UI never told them about.
+   *
+   * ▸ W-A DOES NOT CHANGE THIS. It still judges `msg.mods` against the PROCESS-wide set (`this.modSet`), i.e. everything
+   * the server loaded — NOT the set a room declared in `modIds`. A room's declared set is only DECLARED and handed out
+   * (`Room.modSet` → `room.state.mods`) in this cut; it starts deciding what the simulation runs in W-B, when the room's
+   * merged data reaches `Match` and the two bypass singletons (`server/sim/content/support/index.js`, `server/data.js`).
+   * Until then a client is let into a room whose declared set is a strict subset of the server's — deliberately, because
+   * the simulation is still running the server's whole set either way, and pretending otherwise would be the lie.
    * @param {any} msg the `room.create` / `room.join` message
    * @returns {{ ok: true } | { error: string, detail?: string }}
    */
@@ -439,11 +501,20 @@ export class Lobby {
   // room.* handlers
   // ---------------------------------------------------------------------------------------------------
 
-  create(session, { mode, difficulty, mods }) {
+  create(session, { mode, difficulty, mods, modIds }) {
     const cur = this.roomOf(session);
     if (cur && cur.match) return fail(ERR.ROOM_STARTED, 'leave your running match first');
     const gate = this.checkModSet({ mods });
     if (!gate.ok) return gate;
+    // The room's own set (W-A, DESIGN §28.9): every id must name a pack THIS server loaded, and the refusal names both
+    // what was not found and what is on offer — a client cannot guess its way into a set the server cannot run. Absent
+    // or `[]` = today's behaviour (the room declares nothing and `room.state` gets no `mods`).
+    const resolved = resolveRoomModSet(Array.isArray(modIds) ? modIds : [], this.workshop?.mods);
+    if (!resolved.ok) {
+      const unknown = resolved.unknown.length ? resolved.unknown.join(', ') : '(none)';
+      const available = resolved.available.length ? resolved.available.join(', ') : '(none)';
+      return fail(ERR.MOD_UNKNOWN, `this server does not run the mod pack(s) (${unknown}); available: ${available}`);
+    }
     if (this.rooms.size >= this.opts.maxRooms) return fail(ERR.INTERNAL, 'too many rooms');
     const key = session.limitKey || null;
     if (key && this.opts.maxRoomsPerAddr > 0) {
@@ -459,6 +530,9 @@ export class Lobby {
     if (cur) this.removeMember(cur, session.playerId);
     const room = new Room(code, mode, difficulty, this.now());
     room.ownerKey = key;
+    // the room's own mod set, resolved above (both stay null when it declared none — the default)
+    room.modIds = resolved.modIds.length ? resolved.modIds : null;
+    room.modSet = resolved.modSet;
     room.seats[0] = this.humanSeat(0, session);
     room.hostId = session.playerId;
     this.rooms.set(code, room);

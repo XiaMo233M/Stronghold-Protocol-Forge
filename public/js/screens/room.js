@@ -25,7 +25,9 @@ import { LoadoutButton } from './loadout.js';
 import { SupportButton } from './support.js';
 import { net } from '../net.js';
 import { store, useStore, shallowEqual, emptyMatch, isSpectating } from '../store.js';
-import { difficultyInfo } from './lobby.js';
+import { difficultyInfo, LAYER_TEXT } from './lobby.js';
+import * as roomMods from '../roomMods.js';
+import { roomModsOf, shortDigest } from '../roomMods.js';
 import { t, tc } from '../../../shared/i18n.js';
 
 /**
@@ -220,6 +222,27 @@ function AiLastToggle({ option, busy, onToggle }) {
   </div>`;
 }
 
+/**
+ * 本房间使用 mod (W-A, DESIGN §28.9): the set THIS room declared, shown to every member and spectator from
+ * `room.state.mods`. Absent when the room declared none, in which case this component returns nothing — a room on a
+ * plain install (or one whose host ticked nothing) looks exactly as it did before this feature.
+ */
+function RoomModsPanel({ room }) {
+  const mods = roomModsOf(room);
+  if (!mods) return null;
+  return html`<div class="room-mods brackets">
+    <${MicroLabel} tone="mint">ROOM MODS<//>
+    <span class="room-mods__title">${t('本房间使用模组（{n} 个）', { n: mods.packs.length })}</span>
+    <span class="room-mods__digest num" title=${mods.digest}>${shortDigest(mods.digest)}…</span>
+    <ul class="room-mods__list">
+      ${mods.packs.map((p) => html`<li key=${p.id}>
+        <span class="room-mods__id">${p.id}</span>
+        <span class="room-mods__meta">${t(LAYER_TEXT[p.layer] || p.layer)}${p.combat ? ` · ${t('会改动战斗结果')}` : ''}</span>
+      </li>`)}
+    </ul>
+  </div>`;
+}
+
 /** Room screen component. */
 export function RoomScreen() {
   const room = useStore((s) => s.room);
@@ -263,7 +286,7 @@ export function RoomScreen() {
   const setAiLast = (on) => run('ailast', () => net.request('room.setAiPicksLast', { on }));
   // spectator seats: the host frees one; a spectator takes a free player seat with room.join of this room
   const removeSpectator = (playerId) => run(`rs${playerId}`, () => net.request('room.removeSpectator', { playerId }));
-  const sit = () => run('sit', () => net.request('room.join', { code: room.code }));
+  const sit = () => run('sit', () => net.request('room.join', roomMods.buildJoinPayload(room.code)));
   const leave = async () => {
     if (inFlight.current) return;
     const othersHere = facts.humans.some((s) => s.playerId !== me.playerId);
@@ -336,6 +359,7 @@ export function RoomScreen() {
         </ul>
       </aside>`}
     </main>
+    <${RoomModsPanel} room=${room} />
     <${SpectatorBar} facts=${facts} myId=${me.playerId} busy=${busy} onRemove=${removeSpectator} onSit=${sit} />
 
     <footer class="room-bar">

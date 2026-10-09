@@ -50,6 +50,7 @@ import { GAME_FILES } from './ui/gameComponents.js';
 import { TitleScreen, sanitizeName } from './screens/title.js';
 import { LobbyScreen, rememberRoom } from './screens/lobby.js';
 import { deepLinkSeeds, stripDeepLinkParams, runSoloPlaytest } from './playtestLink.js';
+import * as roomMods from './roomMods.js';
 import { RoomScreen } from './screens/room.js';
 import { GameScreen } from './screens/game.js';
 import { installAudio } from './audio.js';
@@ -122,6 +123,16 @@ function clearPendingPlaytest() {
   clearDeepLinkParams();
 }
 
+/**
+ * Extra fields for a solo quick start (the `?playtest=` deep link): the mod digest this server declared, if any.
+ * `runSoloPlaytest` calls it only for `room.create`, and it returns `{}` on a plain install — the request stays exactly
+ * what it was (public/js/roomMods.js buildCreatePayload).
+ */
+const roomModFields = () => {
+  const { mods } = roomMods.buildCreatePayload('solo', '');
+  return mods ? { mods } : {};
+};
+
 /** One-click playtest once entered + online (idempotent): the `?playtest=` deep link, consumed here. */
 function schedulePendingPlaytest() {
   clearTimeout(playtestTimer);
@@ -131,8 +142,11 @@ function schedulePendingPlaytest() {
     // 闸门未就绪时不烧掉深链（缺口 8）：否则这一条会自动发 room.create，然后被服务端准入拒一次、弹一次红条。
     if (entryGateBlocked(s)) return;
     // The deep link is spent either way: consumed when the match starts, abandoned when it was refused.
+    // `roomFields` is what makes a solo quick start work on a MODDED server too: without the digest the gate refuses
+    // `room.create` with BAD_MSG, and a plain install sends exactly `{ mode, difficulty }` as before (roomMods.js).
     runSoloPlaytest(net, store, {
       difficulty: s.ui.pendingPlaytest.difficulty,
+      roomFields: roomModFields,
       notify: (text, kind) => toast(text, kind || 'info'),
       notifyError: toastError,
     }).finally(clearPendingPlaytest);
@@ -155,7 +169,7 @@ function schedulePendingJoin() {
     }
     joinInFlight = true;
     try {
-      await net.request('room.join', { code });
+      await net.request('room.join', roomMods.buildJoinPayload(code));
     } catch (err) {
       toastError(err);
     } finally {
@@ -195,6 +209,16 @@ function onWelcome(msg) {
   const prev = store.get();
   const prevId = prev.me.playerId;
   const name = typeof msg.name === 'string' && msg.name ? msg.name : prev.me.name;
+  // 工坊 mod set (W-A): what this server runs. The client must echo this digest to enter a room, and the lobby renders
+  // its pack list as the room-declaration picker. A server that changed under us (restart, another pack root) must not
+  // leave a pick from the old catalogue selected — setWelcomeMods drops it and returns false (see roomMods.js).
+  const sameMods = roomMods.setWelcomeMods(msg);
+  store.set({
+    roomMods: {
+      available: roomMods.availableMods(),
+      selected: sameMods ? prev.roomMods.selected : roomMods.getSelectedModIds(),
+    },
+  });
   store.set({ me: { playerId: msg.playerId ?? null, name, token: typeof msg.token === 'string' ? msg.token : null } });
   welcomeAt = Date.now();
 
@@ -236,6 +260,12 @@ function onRoomState(msg) {
   // A (new) match starts: forget the previous match's state so stale results never show.
   if (room.inMatch && !(prevRoom && prevRoom.inMatch && prevRoom.code === room.code)) store.set({ match: emptyMatch() });
   store.set({ room });
+  // The picks were made FOR the room we just entered (host) or joined: the next create starts from none, so a pick can
+  // never leak into a room the player did not choose it for (roomMods.js).
+  if (!prevRoom && room) {
+    roomMods.clearSelection();
+    if (store.get().roomMods.selected.length) store.set({ roomMods: { ...store.get().roomMods, selected: [] } });
+  }
   if (room.mode === 'coop' && typeof room.code === 'string') rememberRoom(room.code);
   maybeFinishRestore();
 }

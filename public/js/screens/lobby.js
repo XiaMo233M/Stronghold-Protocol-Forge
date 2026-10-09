@@ -22,6 +22,7 @@ import { LoadoutButton } from './loadout.js';
 import { SupportButton } from './support.js';
 import { net, identity } from '../net.js';
 import { store, useStore, shallowEqual, loadPref, savePref } from '../store.js';
+import * as roomMods from '../roomMods.js';
 import { getConfig, getMode, getStage, useData } from '../data.js';
 import { t, tc, N_ } from '../../../shared/i18n.js';
 
@@ -263,10 +264,45 @@ function DifficultyCard({ roomMode, difficulty, selected, onSelect }) {
   </button>`;
 }
 
+/** One-line name of a pack's layer (DESIGN §28.1): what kind of content the pack brings. */
+export const LAYER_TEXT = { A: N_('数据'), B: N_('逻辑'), C: N_('客户端') };
+
+/**
+ * 本房间使用 mod (W-A, DESIGN §28.9): the host ticks the packs THIS server declared, and the pick travels as
+ * `room.create.modIds`. The list comes from `welcome.mods.packs` (main.js writes it into store.roomMods), so it can only
+ * ever offer content the server has — the server refuses an unknown id with MOD_UNKNOWN rather than guessing.
+ *
+ * Rendered only when the server declared at least one pack; on a plain install this component returns nothing and the
+ * create button sends exactly what it always did.
+ */
+function ModPicker({ selected, onToggle }) {
+  const { available } = useStore((s) => s.roomMods, shallowEqual);
+  if (!available.length) return null;
+  return html`<div class="mod-picker">
+    <div class="mod-picker__head">
+      <${MicroLabel} tone="mint">ROOM MODS<//>
+      <span>${t('本房间使用的模组')}</span>
+    </div>
+    <ul class="mod-picker__list">
+      ${available.map((p) => html`<li key=${p.id}>
+        <button type="button" class=${`mod-chip${selected.includes(p.id) ? ' is-on' : ''}`}
+          aria-pressed=${selected.includes(p.id) ? 'true' : 'false'} onClick=${() => onToggle(p.id)}>
+          <span class="mod-chip__id">${p.id}</span>
+          <span class="mod-chip__meta">${t(LAYER_TEXT[p.layer] || p.layer)}${p.combat ? ` · ${t('会改动战斗结果')}` : ''}</span>
+        </button>
+      </li>`)}
+    </ul>
+    <div class="mod-picker__note">${t('不勾选 = 本房间不声明模组（模拟仍按服务器加载的全部模组运行）')}</div>
+  </div>`;
+}
+
 /** Lobby screen component. */
 export function LobbyScreen() {
   const me = useStore((s) => s.me, shallowEqual);
   const conn = useStore((s) => s.connection, shallowEqual);
+  // The host's picks for the room it is about to create (store.roomMods, written by main.js from `welcome.mods`). The
+  // values themselves live in roomMods.js; this slice is only what the picker renders and re-renders from.
+  const selectedMods = useStore((s) => s.roomMods.selected, shallowEqual);
   useData('config');
   const [roomMode, setRoomMode] = useState(() => (loadPref('lobby.mode', 'coop') === 'solo' ? 'solo' : 'coop'));
   const [difficulty, setDifficulty] = useState(() => {
@@ -285,6 +321,14 @@ export function LobbyScreen() {
 
   const pickMode = (m) => { setRoomMode(m); savePref('lobby.mode', m); };
   const pickDifficulty = (d) => { setDifficulty(d); savePref('lobby.difficulty', d); };
+  /** Tick/untick one pack for the next room: roomMods owns the list (it drops ids the server no longer declares). */
+  const toggleMod = (id) => {
+    const next = roomMods.getSelectedModIds();
+    const at = next.indexOf(id);
+    if (at >= 0) next.splice(at, 1); else next.push(id);
+    const kept = roomMods.setSelectedModIds(next);
+    store.set({ roomMods: { ...store.get().roomMods, selected: kept } });
+  };
 
   const run = async (kind, fn) => {
     if (inFlight.current) return;
@@ -296,13 +340,13 @@ export function LobbyScreen() {
       if (alive.current) setBusy(null);
     }
   };
-  const create = () => run('create', () => net.request('room.create', { mode: roomMode, difficulty }));
+  const create = () => run('create', () => net.request('room.create', roomMods.buildCreatePayload(roomMode, difficulty)));
   const join = (c = code) => {
     // `onClick=${join}` hands the click EVENT as the first argument, and a default parameter only applies to
     // `undefined` — codeArg keeps an event target out of the key and falls back to the input field
     const k = codeArg(c, code);
     if (!k) { toast(t('同盟密钥为 {ROOM_CODE_LEN} 位字母或数字', { ROOM_CODE_LEN }), 'warn'); return; }
-    run('join', () => net.request('room.join', { code: k }));
+    run('join', () => net.request('room.join', roomMods.buildJoinPayload(k)));
   };
   // a spectator seat: no player seat taken, nothing to do but watch (also a match already running)
   const spectate = (c = code) => {
@@ -387,6 +431,7 @@ export function LobbyScreen() {
           ${DIFFICULTIES.map((d) => html`<${DifficultyCard} key=${d} roomMode=${roomMode} difficulty=${d} selected=${difficulty === d} onSelect=${pickDifficulty} />`)}
         </div>
         <div class="create-box">
+          <${ModPicker} selected=${selectedMods} onToggle=${toggleMod} />
           <${Tooltip} block=${true} text=${online ? null : t('正在连接服务器…')}>
             <${Button} variant="primary" size="xl" block=${true} iconRight="chevrons" loading=${busy === 'create'} disabled=${!online} onClick=${create}>
               ${roomMode === 'solo' ? t('开始独立模拟') : t('创建同盟')}

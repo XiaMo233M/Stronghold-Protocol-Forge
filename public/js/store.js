@@ -89,6 +89,10 @@ export const initialState = Object.freeze({
   emotes: [],
   clock: { offset: 0, rtt: null, synced: false },
   ui: { pendingJoin: null, pendingPlaytest: null, restoring: false, buildStale: false },
+  // 工坊 mod set (W-A, DESIGN §28.9): `available` = the packs `welcome.mods` declared (empty on a plain install, so the
+  // lobby's picker stays hidden), `selected` = the host's picks for the next room it creates. The values themselves live
+  // in public/js/roomMods.js; this slice is what the UI renders from.
+  roomMods: { available: [], selected: [] },
 });
 
 /** The app-wide store singleton. */

@@ -1,17 +1,20 @@
 // Normative message catalogue (DESIGN §8). Used by server (validation) and client (building requests).
 // Every client→server message is `{ t, rid?, ...fields }`. Unknown `t` or invalid fields ⇒ ERR.BAD_MSG.
 
-import { DIFFICULTIES, NAME_MAX_LEN, ROOM_CODE_LEN, MAX_SEATS, EMOTES, GEO } from './constants.js';
+import { DIFFICULTIES, NAME_MAX_LEN, ROOM_CODE_LEN, MAX_SEATS, MAX_ROOM_MODS, EMOTES, GEO } from './constants.js';
 import { isDroppableChess } from './standIn.js';
 import { diySlotIds, validateDiyPicks } from './diy.js';
 import { isSupportEntries } from './support.js';
 import { cultivatedStats, isPotential, isCultivate, POTENTIAL_DEFAULT, CULTIVATE_DEFAULT } from './potential.js';
-import { isModDigest } from './modIdentity.js';
+import { isModDigest, isModId } from './modIdentity.js';
 
 // Mod identity (DESIGN §28.2): the wire shape of a mod set lives in shared/modIdentity.js, because jsconfig.json
 // excludes THIS file from the typecheck slice and a validator written here is never machine-checked. Re-exported so the
 // protocol contract is still declared in the protocol file.
 export { MOD_LIMITS, isModId, isModEntry, isModList, isModDigest, modDigest, modSetOf } from './modIdentity.js';
+// A room declares a SUBSET of the packs the server already loaded (W-A, DESIGN §28.9): `modIds` is a list of pack ids,
+// not a list of identities — the server owns the hashes, so a client cannot invent one.
+export { MAX_ROOM_MODS } from './constants.js';
 
 // ---- tiny validators -------------------------------------------------------
 const isInt = (v, lo = -Infinity, hi = Infinity) => Number.isInteger(v) && v >= lo && v <= hi;
@@ -387,7 +390,15 @@ export const C2S = {
   // session & lobby
   hello: { name: (v) => isStr(v, NAME_MAX_LEN) && v.trim().length > 0, token: (v) => v == null || isStr(v, 64), version: (v) => v == null || isInt(v, 0, 1e6), $optional: ['token', 'version'] },
   ping: { c: (v) => typeof v === 'number' && Number.isFinite(v) },
-  'room.create': { mode: (v) => v === 'solo' || v === 'coop', difficulty: (v) => DIFFICULTIES.includes(v), mods: (v) => v == null || isModDigest(v), $optional: ['mods'] },
+  'room.create': {
+    mode: (v) => v === 'solo' || v === 'coop',
+    difficulty: (v) => DIFFICULTIES.includes(v),
+    mods: (v) => v == null || isModDigest(v),
+    // the room's own mod set (W-A, DESIGN §28.9): pack ids the server has loaded, sorted+deduped server-side.
+    // Absent or `[]` = the room declares no set (today's behaviour: the room runs whatever the process runs).
+    modIds: (v) => Array.isArray(v) && v.length <= MAX_ROOM_MODS && v.every(isModId),
+    $optional: ['mods', 'modIds'],
+  },
   'room.join': { code: (v) => isStr(v, ROOM_CODE_LEN + 2) && /^[A-Za-z0-9]+$/.test(v), mods: (v) => v == null || isModDigest(v), $optional: ['mods'] },
   'room.leave': {},
   'room.ready': { ready: isBool },
@@ -497,6 +508,9 @@ export const C2S = {
 // `welcome` also carries `mods: { digest, packs }` when the server runs any workshop pack (DESIGN §28.2, §28.9): the
 // client shows the "modded" mark from it, and echoes `digest` in `room.join` / `room.create` — a client that does not
 // echo it is refused entry to a modded room instead of entering one silently.
+// `room.state` carries its OWN `mods` of the same shape when the room declared a set (W-A, DESIGN §28.9) — absent when
+// the room declared none. It names the set the room asked for; the gate above still judges against the process set
+// until W-B makes the room's set the one the simulation runs.
 export const S2C = [
   'welcome', 'ok', 'error', 'pong',
   'room.state', 'room.closed',
