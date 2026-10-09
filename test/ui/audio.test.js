@@ -454,10 +454,11 @@ describe('operator battle voice', () => {
       a._stopVoice();
       a.setVoiceLang('kr');
       assert.equal(a.voiceLang, 'cn', 'no other dub: anything but jp is 中文');
-      // the settings store hands the choice over (installAudio and ui/settings.js)
+      // the settings store hands the choice over (installAudio and ui/settings.js). The ROW is 配音语言 in this repo
+      // (four dubs, the manifest default unless the player picks one); upstream 0.2.2's two-tier UI called it 语音语言.
       const settings = readFileSync(path.join(ROOT, 'public/js/ui/settings.js'), 'utf8');
       assert.match(settings, /audio\.setVoiceLang\(s\.voiceLang\)/);
-      assert.match(settings, /t\('语音语言'\)/);
+      assert.match(settings, /t\('配音语言'\)/);
     } finally {
       globalThis.fetch = origFetch;
     }

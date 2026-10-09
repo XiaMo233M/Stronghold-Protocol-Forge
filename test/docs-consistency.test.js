@@ -951,7 +951,9 @@ test('干员战斗语音 (DESIGN §21.30): the manifest data, the official prior
   assert.equal(manifest.stats.voiceJpChars, charIds.length);
   assert.match(doc('docs/ASSETS.md'), /voiceJp: \{ \[charId\]: \{ …the slots of `voice` \} \}/);
   assert.match(doc('docs/DEPLOY.md'), /`FULL_ZIP_JP_VOICE` 改成 `false` 时/);
-  assert.match(PLAYING, /「语音语言」选 \*\*中文 \/ 日本語\*\*（默认中文，和界面语言无关/);
+  // this repo's voice-language row is 配音语言 with four dubs (the manifest's default one unless the player picks);
+  // upstream 0.2.2's two-tier UI called the same row 语音语言 with 中文 / 日本語 — the deliberate divergence
+  assert.match(PLAYING, /「设置 → \*\*配音语言\*\*」选全局默认/);
   assert.match(PLAYING, /会说一句官方的「选中干员」语音，休整期也一样/);
   assert.match(SIM, /\['engage', id\]/);
   // the code: every slot the client asks for comes from a running battle's own stream — the three prep-only lines
