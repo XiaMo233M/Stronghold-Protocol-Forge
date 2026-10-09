@@ -1093,5 +1093,13 @@
   "助战选择被服务器拒绝：": "The server refused the support selection: ",
   "助战卡池里没有 {n} 个已选干员，已移除": "{n} of your picks are not in the support pool and were removed",
   "{0} 已不在服务端助战卡池中，本次禁用": "{0} is no longer in the server's support pool — disabled for this match",
-  "试玩：记录里标了「直接发到手上」的 {0} 名干员已进手牌": "Playtest: {0} operator(s) flagged as “straight to the hand” are in your hand"
+  "试玩：记录里标了「直接发到手上」的 {0} 名干员已进手牌": "Playtest: {0} operator(s) flagged as “straight to the hand” are in your hand",
+  "本房间使用的模组": "Mods this room uses",
+  "不勾选 = 本房间不声明模组（模拟仍按服务器加载的全部模组运行）": "Leave all unchecked = this room declares no mods (the simulation still runs every mod the server loaded)",
+  "数据": "Data",
+  "逻辑": "Logic",
+  "客户端": "Client",
+  "会改动战斗结果": "Changes battle results",
+  "本房间使用模组（{n} 个）": "Mods this room uses ({n})",
+  "房间指定了本服务器没有的模组包": "The room named a mod pack this server does not have"
 }

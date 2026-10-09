@@ -131,7 +131,9 @@ describe('mod identity: entering a modded room needs the client to confirm the c
     assert.equal(validateC2S({ t: 'room.join', code: 'ABCD', mods: 'nope' }), 'bad field mods');
     assert.equal(validateC2S({ t: 'room.join', code: 'ABCD', mods: 42 }), 'bad field mods');
     assert.deepEqual(C2S['room.join'].$optional, ['mods']);
-    assert.deepEqual(C2S['room.create'].$optional, ['mods']);
+    // W-A (DESIGN §27.10): `room.create` gained `modIds` — the packs a ROOM declares, a subset of what this server
+    // loaded. `room.join` deliberately did not: a room set is the host's to declare, never a joiner's.
+    assert.deepEqual(C2S['room.create'].$optional, ['mods', 'modIds']);
   });
 });
 
