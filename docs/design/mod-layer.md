@@ -1351,3 +1351,51 @@ pack-scoped route here follows). W-B applies (§28.16): a room that declares a s
 installers, so "the declared set decides what runs" holds for this payload too.
 
 Tests: `test/packBattle.test.js`.
+
+### 28.21 The surface list: what a pack may depend on, frozen and guarded
+
+Every section above adds one more thing a pack may write. This one names the set, because the question the owner asked
+on 2026-10-10 has no shape until it does: **「如果改动引擎，我们的中间层可能又被覆盖，那怎么办呢」**.
+
+**The honest half of the answer first.** Nothing in this layer can stop an engine rewrite. `server/lobby.js`,
+`server/match/*` and `public/js/screens/*` are ordinary engine files and a port will replace them. What a rewrite cannot
+do is **succeed silently**: the pack-facing contract is enumerated in one machine-readable table
+(`shared/modSurface.js MOD_SURFACE`), every row is anchored to a **real exported symbol** of the schema
+(`shared/workshop.js`), and `test/modSurface.test.js` asserts each row — symbols present, members still in them,
+implementing files on disk, the pinning test file on disk, the design section still in this document, the row still in
+`docs/MOD-SURFACE.md`. A port that drops a surface fails the test suite in the port itself, not in a community bug report
+three releases later.
+
+**The list is closed in both directions.** The other direction is the one that usually rots: adding a surface. The
+guard also requires that **every** pack-declarable list in the schema (`PACK_FIELDS`, `WORKSHOP_CONTENT_FILES`,
+`CLIENT_PANEL_SLOTS`, `SERVER_MEMBERS`, …) is referenced by some row. So a new declaration cannot land without a row, a
+doc anchor and a test — which is the only way this file stays true a year from now.
+
+**Generations, not releases.** The table belongs to an ABI **generation**: `shared/constants.js MOD_API_VERSION`, the
+number `pack.json.api` is compared against (§28.5). Two rules decide whether it moves:
+
+| change | generation | why |
+|---|---|---|
+| **add** a surface (a new `server.*` member, a new panel field, a new whitelist prefix) | **does not move** | it is additive for every published pack; bumping it would refuse every pack that declared `api: "1.x"` — punishing the packs that did the right thing |
+| **remove, rename, or change the meaning** of a surface | **moves**, with a migration note | a pack written against the old shape cannot be shown to still be safe; `MOD_SURFACE_FROZEN` records each generation's ids, and dropping one without a bump is a red test |
+
+The ledger's rule is a pure function (`surfaceLedgerIssues(ids, generation)`) for the same reason as everything else
+here: a guard whose failure branch has never been executed is not a guard. `test/modSurface.test.js` feeds it a list with
+one id removed and requires the message to name that id and to say that removal needs a generation bump — so the rule
+itself is tested, not only today's data.
+
+**Negotiation already exists, and it is loud.** A surface this build does not implement is not ignored: `pack.json`'s
+top-level keys and `server`'s members are closed sets, so the pack is refused at load time by name
+(`PACK_UNKNOWN_FIELD` / `SERVER_UNKNOWN_FIELD`), and a `layer: B` pack whose `api` range excludes this build is refused
+outright (§28.5). The table adds the half an author needs to *avoid* that: which generation carries which surface, and
+what else that surface requires (`requires` in every row — the `combat: true` gate, determinism, both ends running the
+same bytes).
+
+**What is deliberately not a surface.** Patches that edit engine files in place (`shared/protocol.js`,
+`shared/constants.js`, `server/lobby.js` — the reference mod ships exactly those as `.patch` artifacts) are distribution
+artifacts, not surfaces: to get their *effect* in this model, the effect must first become a row. Product features are
+not surfaces either: **quick match and room retention are the engine's own features**, unrelated to this layer, open to
+no pack and requiring no declaration. The full list lives in `docs/MOD-SURFACE.md`.
+
+Tests: `test/modSurface.test.js` (the second half of that file; the first half pins the generic names that *in-place
+patch* mods depend on — those mods never pass through our validator, so they need their own guard).
