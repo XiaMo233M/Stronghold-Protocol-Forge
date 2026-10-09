@@ -1472,6 +1472,22 @@ export function install(battle) {
 - 一个包抛异常只记一条内容错误（点名是哪个包），**不让整个战场起不来**；
 - 房间声明了集合时只有**它点名的包**的 installer 参与（W-B，见 §1.14）。
 
+### 1.16 我到底能用哪些东西？（表面清单）
+
+一个包能依赖的**全部**东西写成了一张表：[`docs/MOD-SURFACE.md`](MOD-SURFACE.md)。每一行是一格「表面」——
+一条 `pack.json` 声明、承载它的引擎符号、实现文件、钉死它的测试、定义它的设计稿小节；机读版本是
+`shared/modSurface.js`，守卫是 `test/modSurface.test.js`。
+
+作者只需要知道两件事：
+
+- **这一格属于哪一代 ABI**：用 `pack.json.api` 声明你要的世代（`>=1 <2`、`1.x`…），数字见
+  `shared/constants.js MOD_API_VERSION`（见 §1.9 的 `api` 那一节）。**加一格不抬世代**，所以老包不会因为引擎变强
+  而被拒；
+- **用这一格还要满足什么**：表里每行都有 `requires`（例如 `server.battle` 要 `combat: true` 且两端跑同一段字节）。
+
+写了一个引擎**没有**的格子不会静默：顶层键与 `server` 成员都是闭集，加载期点名拒绝
+（`PACK_UNKNOWN_FIELD` / `SERVER_UNKNOWN_FIELD`）。
+
 ---
 
 ### 1.16 `server.room`：包写的**房间级钩子**（已实现）

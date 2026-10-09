@@ -750,22 +750,30 @@ function parseServerModulesDecl(raw) {
 }
 
 /**
+ * `pack.json.server` 允许的成员。**一份真相**：形状校验、`SERVER_EMPTY_MEMBER` 的文案，以及
+ * `shared/modSurface.js` 的表面清单都锚在这一个符号上（`test/modSurface.test.js` 逐条断言它的成员仍在）。
+ *
+ * 加一格（例如历史上的 `meta`、`modules`、`battle`、`room`）= 一起做三件事：加进这张表、进表面清单、加一条钉它的测试。
+ * 三处缺一，守卫就红 —— 这就是「引擎被移植改写时，中间层不会静默少一格」的那道闸门。
+ */
+export const SERVER_MEMBERS = Object.freeze(['preDispatch', 'meta', 'modules', 'battle', 'room']);
+
+/**
  * `pack.json.server` —— 分发前的准入钩子（§28.13）、对局元注册表（§29）、**服务端模块**（§28.14）与
  * **房间级钩子**（§28.20）。
  * @returns {{ ok: true, decl: object } | { ok: false, error: string, detail: string }}
  */
 function parseServerDecl(raw) {
   if (!isPlainObj(raw)) {
-    return fail('SERVER_DECL_BAD_SHAPE', 'server must be an object: { preDispatch: { module, policy, intercepts }, meta: { module, registers }, modules: [...], battle: { module }, room: { module } }');
+    return fail('SERVER_DECL_BAD_SHAPE', `server must be an object with at least one of: ${SERVER_MEMBERS.join(', ')}`);
   }
-  const SERVER_MEMBERS = ['preDispatch', 'meta', 'modules', 'battle', 'room'];
   for (const key of Object.keys(raw)) {
     if (!SERVER_MEMBERS.includes(key)) {
       return fail('SERVER_UNKNOWN_FIELD', `server: "${key}" is not a declared field (${SERVER_MEMBERS.join(', ')})`);
     }
   }
-  if (raw.preDispatch === undefined && raw.meta === undefined && raw.modules === undefined
-    && raw.battle === undefined && raw.room === undefined) {
+  // 「成员一个都没写」用名单本身判，不抄第二份 —— 加一格时这里不会忘（漏改一处就是一条永远判不出的拒绝）。
+  if (SERVER_MEMBERS.every((m) => raw[m] === undefined)) {
     return fail('SERVER_EMPTY_MEMBER', `server must declare at least one member (${SERVER_MEMBERS.join(', ')}) — an empty object says nothing and is refused rather than ignored`);
   }
   /** @type {Record<string, object>} */

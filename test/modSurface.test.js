@@ -21,6 +21,12 @@ import * as simDir from '../server/sim/dir.js';
 import * as targeting from '../server/sim/targeting.js';
 import * as constants from '../server/sim/constants.js';
 import { validateKit, kitErrors } from '../shared/kitAuthoring.js';
+import * as workshopSchema from '../shared/workshop.js';
+import * as kitImports from '../shared/kitImports.js';
+import {
+  MOD_SURFACE, MOD_SURFACE_IDS, MOD_SURFACE_FROZEN, surfaceLedgerIssues, modSurfaceAnchorSymbols,
+} from '../shared/modSurface.js';
+import { MOD_API_VERSION } from '../shared/constants.js';
 
 const load = (f) => JSON.parse(readFileSync(new URL(`../data/${f}.json`, import.meta.url), 'utf8'));
 const BACKUPS = load('backups');
@@ -226,5 +232,109 @@ test('活体 Battle 上的运行时成员与事件名：社区 kit 直接调的�
     const hooked = b.on(ev, () => {});
     assert.ok(hooked === undefined || hooked === b || typeof hooked === 'object',
       `battle.on('${ev}') 的返回值形状变了（社区 kit 忽略返回值，但不能抛错）`);
+  }
+});
+
+// ---------------------------------------------------------------------------------------------------
+// 五、**工坊包**能依赖的表面清单（`shared/modSurface.js` + docs/MOD-SURFACE.md）。
+//
+// 与上面四条的分工：那些钉的是**就地补丁式** mod 依赖的通用名；这五条钉的是**声明层 ABI** —— 引擎会被上游移植整段
+// 改写（lobby / match / screens 都换过），中间层不能靠「没人会动它」活着。业主 2026-10-10 的问题原话：
+// 「如果改动引擎，我们的中间层可能又被覆盖，那怎么办呢」——答案就是这几条断言。
+// ---------------------------------------------------------------------------------------------------
+const WORKSHOP_MD = readFileSync(new URL('../docs/MOD-SURFACE.md', import.meta.url), 'utf8');
+const MOD_LAYER_MD = readFileSync(new URL('../docs/design/mod-layer.md', import.meta.url), 'utf8');
+
+/** 锚点符号住在哪个模块。默认是 schema（`shared/workshop.js`）；kit import 面住在 `shared/kitImports.js`。 */
+const ANCHOR_MODULES = { schema: workshopSchema, kitImports };
+
+test('表面清单：每一条的锚点符号都还在它声明的模块里，成员一个不少', () => {
+  assert.ok(MOD_SURFACE.length > 0, '表面清单不能是空的');
+  for (const s of MOD_SURFACE) {
+    for (const a of s.anchors) {
+const mod = ANCHOR_MODULES[a.module || 'schema'];
+      assert.ok(mod, `表面 "${s.id}" 的锚点声明的模块 "${a.module}" 不在 ANCHOR_MODULES 里（守卫不认识它）`);
+      assert.ok(a.symbol in mod,
+        `表面 "${s.id}" 锚在 ${a.symbol} 上，但 ${a.module || 'shared/workshop.js'} 不再导出这个名字（改名/挪走 = 打断所有用它的包）`);
+      if (a.members) {
+        const list = mod[a.symbol];
+        for (const m of a.members) {
+          assert.ok(Array.isArray(list) ? list.includes(m) : m in list,
+            `表面 "${s.id}"：${a.symbol} 里不再有 "${m}" —— 这一格没了，包写下的声明会被 ${a.symbol === 'SERVER_MEMBERS' ? 'SERVER_UNKNOWN_FIELD' : '未知字段'} 拒掉`);
+        }
+      }
+    }
+  }
+});
+
+test('表面清单：实现文件、测试文件、设计稿小节、本文档的那一行都还在', () => {
+  for (const s of MOD_SURFACE) {
+    for (const f of s.files) {
+      assert.ok(existsSync(new URL(`../${f}`, import.meta.url)), `表面 "${s.id}" 的实现文件 ${f} 不在了`);
+    }
+    for (const t of s.tests) {
+      const u = new URL(`../${t}`, import.meta.url);
+      assert.ok(existsSync(u), `表面 "${s.id}" 的测试文件 ${t} 不在了（没有测试钉的表面，等于没有表面）`);
+      assert.match(readFileSync(u, 'utf8'), /test\(/, `表面 "${s.id}" 的 ${t} 里一条 test() 都没有`);
+    }
+    assert.ok(MOD_LAYER_MD.includes(s.spec.slice(1)),
+      `表面 "${s.id}" 指向设计稿 ${s.spec}，但 docs/design/mod-layer.md 里没有这一节`);
+    assert.ok(WORKSHOP_MD.includes(`\`${s.id}\``),
+      `表面 "${s.id}" 没有写进 docs/MOD-SURFACE.md（表与文档必须同时有一行）`);
+  }
+});
+
+test('表面清单：引擎里每一个「包可声明的名单」都被某条表面引用（加了一格却没进清单也红）', () => {
+  // 这份名单本身也要是真实导出 —— 否则它自己会烂掉，而它正是「新加的格子有没有被漏掉」的判据。
+  // 名单按「符号 + 它在哪个模块」列，和锚点同一套写法：一半在 schema（shared/workshop.js），
+  // 一半在 import 面（shared/kitImports.js，kit 与战斗/房间载荷共用的白名单前缀）。
+  const SURFACE_LISTS = [
+    ['PACK_FIELDS', 'schema'], ['WORKSHOP_CONTENT_FILES', 'schema'], ['UNIT_REQUIRED_FIELDS', 'schema'],
+    ['OVERRIDE_ENTRY_RE', 'schema'], ['WORKSHOP_MEDIA_PREFIX', 'schema'], ['WORKSHOP_PANEL_PREFIX', 'schema'],
+    ['ART_TABLES', 'schema'],
+    ['CLIENT_PANEL_SLOTS', 'schema'], ['CLIENT_PANEL_REPEATABLE', 'schema'],
+    ['CLIENT_PANEL_DATA_TABLES', 'schema'], ['CLIENT_REQUIRES', 'schema'],
+    ['CLIENT_WRAP_COMPONENTS', 'schema'], ['CLIENT_WRAP_MODES', 'schema'],
+    ['SERVER_MEMBERS', 'schema'], ['SERVER_MODULE_USES', 'schema'], ['META_KEY_CLASSES', 'schema'],
+    ['ROUTE_CACHE_POLICIES', 'schema'], ['ASSETS_SERVER_POLICIES', 'schema'],
+    ['ASSETS_VERIFY_ALGORITHMS', 'schema'], ['PACK_ID_RE', 'schema'],
+    ['KIT_IMPORT_PREFIXES', 'kitImports'], ['KIT_IMPORT_FILES', 'kitImports'],
+    ['BATTLE_IMPORT_PREFIXES', 'kitImports'], ['ROOM_IMPORT_PREFIXES', 'kitImports'],
+  ];
+  const anchored = new Set(MOD_SURFACE.flatMap((s) => s.anchors.map((a) => `${a.module || 'schema'}:${a.symbol}`)));
+  for (const [sym, mod] of SURFACE_LISTS) {
+    assert.ok(sym in ANCHOR_MODULES[mod], `判据列了 ${mod}:${sym}，但它不是那个模块的导出（判据自己烂了）`);
+    assert.ok(anchored.has(`${mod}:${sym}`),
+      `${mod}:${sym} 是「包可声明的一格」，但没有一条表面锚在它上面 —— 新加一格必须同时进 shared/modSurface.js 与 docs/MOD-SURFACE.md`);
+  }
+});
+
+test('表面清单：一个世代里不许悄悄拿掉一格（账本的失败分支自己也被测）', () => {
+  assert.deepEqual(surfaceLedgerIssues(MOD_SURFACE_IDS, MOD_API_VERSION), [], '今天的表必须满足今天世代的冻结账本');
+  assert.ok(MOD_SURFACE_FROZEN[String(MOD_API_VERSION)],
+    `没有世代 ${MOD_API_VERSION} 的冻结账本：这一代没有任何防删保护`);
+  // 失败分支：少一格必须被点名。只验「今天是对的」的守卫，和没有守卫是一回事。
+  const missing = MOD_SURFACE_IDS.filter((id) => id !== 'server.battle');
+  const issues = surfaceLedgerIssues(missing, MOD_API_VERSION);
+  assert.equal(issues.length, 1, '少一格必须正好报一条');
+  assert.match(issues[0], /server\.battle/, '报的必须是少掉的那一格');
+  assert.match(issues[0], /MOD_API_VERSION/, '理由里必须说清「删格要抬世代并写迁移」');
+  // 没登记过的世代要明说自己没有账本，而不是默默通过。
+  assert.match(surfaceLedgerIssues(MOD_SURFACE_IDS, 999)[0] ?? '', /没有任何防删保护|冻结账本/);
+});
+
+test('表面清单：一行的字段齐、id 不重复、层次合法', () => {
+  const seen = new Set();
+  for (const s of MOD_SURFACE) {
+    assert.match(s.id, /^[a-z][A-Za-z0-9._]*$/, `表面 id "${s.id}" 形状不对（会被文档与守卫当成键用）`);
+    assert.ok(!seen.has(s.id), `表面 id 重复：${s.id}`);
+    seen.add(s.id);
+    assert.ok(['A', 'B', 'C'].includes(s.layer), `表面 "${s.id}" 的 layer 必须是 A/B/C`);
+    assert.ok(s.decl && s.decl.length > 0, `表面 "${s.id}" 没有写声明路径`);
+    assert.ok(Array.isArray(s.requires) && s.requires.length > 0,
+      `表面 "${s.id}" 没写 requires —— 「这一格不是白给的」必须落在纸上`);
+    assert.ok(Array.isArray(s.files) && s.files.length > 0, `表面 "${s.id}" 没有实现文件`);
+    assert.ok(Array.isArray(s.tests) && s.tests.length > 0, `表面 "${s.id}" 没有钉它的测试`);
+    assert.match(s.spec, /^§28\.\d+$/, `表面 "${s.id}" 的 spec 要写成 §28.NN`);
   }
 });
