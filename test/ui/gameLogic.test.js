@@ -729,11 +729,15 @@ describe('keyboard & settings', () => {
     assert.equal(sanitizeSettings({ bgm: 0.5 }).voiceLang, DEFAULT_VOICE_LANG);
     assert.deepEqual(sanitizeSettings({ bgm: 0.5 }).voiceLangByChar, {});
     assert.equal(sanitizeSettings({ bgm: 0.5 }).voice, DEFAULT_SETTINGS.voice, 'a saved profile without `voice` gets the default');
-    // 语音语言 (0.2.2): 中文 by default — a profile saved before it, or any other value, plays the Chinese dub
-    assert.equal(DEFAULT_SETTINGS.voiceLang, 'cn');
-    assert.equal(sanitizeSettings({ bgm: 0.5 }).voiceLang, 'cn');
+    // 配音语言 (v0.7.1, 0.9.0): the default dub is the manifest's DEFAULT_VOICE_LANG (jp — the owner's decision, the dub
+    // the released bundle ships) and every dub of VOICE_LANGS is accepted; a junk value falls back to the default.
+    // (Upstream 0.2.2 has two dubs (`audio.voice` = 中文) and defaults to `cn`; this repo's four-dub model is the
+    // deliberate divergence the owner ruled on — see test/feedback7-voices.test.js.)
+    assert.equal(DEFAULT_SETTINGS.voiceLang, DEFAULT_VOICE_LANG);
+    assert.equal(sanitizeSettings({ bgm: 0.5 }).voiceLang, DEFAULT_VOICE_LANG);
     assert.equal(sanitizeSettings({ voiceLang: 'jp' }).voiceLang, 'jp');
-    for (const bad of ['en', 'kr', 'JP', 'ja', 1, null]) assert.equal(sanitizeSettings({ voiceLang: bad }).voiceLang, 'cn', String(bad));
+    assert.equal(sanitizeSettings({ voiceLang: 'en' }).voiceLang, 'en');
+    for (const bad of ['JP', 'ja', 1, null, 'nope']) assert.equal(sanitizeSettings({ voiceLang: bad }).voiceLang, DEFAULT_VOICE_LANG, String(bad));
     assert.equal(sanitizeSettings({ bgm: 0.333 }).bgm, 0.33);
     assert.equal(sanitizeSettings({ quality: 'low' }).quality, 'low');
   });

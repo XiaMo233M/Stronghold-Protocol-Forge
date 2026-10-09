@@ -1,10 +1,19 @@
 // test/feedback7-voices.test.js — the Japanese voice dub beside the Chinese one (0.2.2; the owner's request of 2026-10-08
 // 「全套的日配语音」): tools/assets/plan.mjs plans `audio.voiceJp` — the same slots and file names from the
 // ArknightsAssets2 `voice/` folder (the JP dub), under audio/voice/jp/ — the committed data/assets.json lists it for every
-// operator the Chinese tree has (checked against public/assets when present), the settings carry 语音语言 (中文 by
-// default, the four language packs translate the row), and tools/package.mjs FULL_ZIP_JP_VOICE decides whether the full
-// zip ships the JP files (default: yes) — held back, they are neither missing nor deleted by an update.
+// operator the Chinese tree has (checked against public/assets when present), the settings carry 配音语言 (four dubs, the
+// manifest's default one unless the player picks another; the four language packs translate the row), and tools/package.mjs
+// FULL_ZIP_JP_VOICE decides whether the full zip ships the JP files (default: yes) — held back, they are neither missing nor
+// deleted by an update.
 // The client's choice of line and its fallback: test/ui/audio.test.js (voiceLine).
+//
+// THIS REPO'S DELIBERATE DIVERGENCE (owner decisions of 2026-10-07 / 0.9.0): upstream 0.2.2 has TWO dubs — `audio.voice` is
+// Chinese, `audio.voiceJp` Japanese, `settings.voiceLang` 'cn' by default and `gameLogic.js VOICE_LANGS = ['cn','jp']`.
+// This repo has FOUR (`audio.voice` = the manifest's DEFAULT dub, jp since 0.9.0, the others in `audio.voiceLangs[lang]`,
+// `DEFAULT_VOICE_LANG = 'jp'`, shared/constants.js) because the released bundle ships the Japanese dub and the other three
+// travel as a voice pack. Upstream's keys are still HONOURED (input compatibility): `VOICE_JP_LANG`, `audio.voiceJp` and the
+// `voiceJp` plan option all exist, so an upstream manifest or package reads the same. The assertions below therefore check
+// OUR manifest shape, not upstream's two-tier one.
 // Run: node --test test/feedback7-voices.test.js
 
 import { test } from 'node:test';
@@ -18,6 +27,7 @@ import { indexAudio, VOICE_DIRS } from '../tools/assets/audio.mjs';
 import { RAW } from '../tools/assets/sources.mjs';
 import { artPlan, FULL_ZIP_JP_VOICE, JP_VOICE_DIR } from '../tools/package.mjs';
 import { DEFAULT_SETTINGS, VOICE_LANGS, sanitizeSettings } from '../public/js/ui/gameLogic.js';
+import { DEFAULT_VOICE_LANG } from '../shared/constants.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const readJson = (rel) => JSON.parse(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
@@ -36,14 +46,17 @@ const OPS = { char_263_skadi: { name: '斯卡蒂', skills: [] } };
 const plan = (extra = {}) => buildPlan({ assets07: {}, ops03: {}, enemies05: {}, maps05: {}, audio: indexAudio({}), modelsData: {},
   charword: CHARWORD, extraOperators: OPS, ...extra }).template;
 
-test('plan: audio.voiceJp is the JP dub (ArknightsAssets2 voice/) of the very slots and file names of audio.voice, under audio/voice/jp/', () => {
+test('plan: audio.voiceJp is the JP dub (ArknightsAssets2 voice/) of the very slots and file names of the default tree, under audio/voice/jp/', () => {
   assert.equal(VOICE_JP_LANG, 'jp');
   assert.equal(VOICE_DIRS.jp, 'voice', 'the dump folder of the JP dub');
   const t = plan();
-  const cn = t.audio.voice.char_263_skadi;
+  // this repo's manifest default dub (`DEFAULT_VOICE_LANG`, jp since 0.9.0) is what `audio.voice` holds; the Chinese tree
+  // lands there when a run asks for it (`--voice-lang=cn`), and upstream's `audio.voiceJp` is the JP tree beside it
+  const def = t.audio.voice.char_263_skadi;
+  const cn = plan({ voiceLang: 'cn' }).audio.voice.char_263_skadi;
   const jp = t.audio.voiceJp.char_263_skadi;
-  assert.deepEqual(Object.keys(jp).sort(), ['select', 'start'], 'the battle slots only, like the Chinese tree (干员报到 not planned)');
-  assert.deepEqual(Object.keys(jp).sort(), Object.keys(cn).sort());
+  assert.deepEqual(Object.keys(jp).sort(), ['select', 'start'], 'the battle slots only, like the default tree (干员报到 not planned)');
+  assert.deepEqual(Object.keys(jp).sort(), Object.keys(def).sort());
   assert.equal(jp.select.length, 2, 'one leaf per line: 选中干员1 / 2');
   assert.deepEqual(jp.select.map((l) => l.alts[0].rel), ['audio/voice/jp/char_263_skadi/cn_021.mp3', 'audio/voice/jp/char_263_skadi/cn_022.mp3']);
   assert.deepEqual(jp.select[0].alts[0].urls, [`${RAW.aa2voice}voice/char_263_skadi/cn_021.mp3`]);
@@ -52,7 +65,11 @@ test('plan: audio.voiceJp is the JP dub (ArknightsAssets2 voice/) of the very sl
   assert.equal(jp.start.alts[0].rel, 'audio/voice/jp/char_263_skadi/cn_019.mp3');
   assert.equal(t.audio.voiceJp.char_602_cdfend, undefined, 'an operator the game does not field (a stand-in) gets neither tree');
   assert.equal(t.audio.voice.char_602_cdfend, undefined);
-  assert.deepEqual(Object.keys(t.audio), ['bgm', 'bossBgm', 'voice', 'voiceJp', 'sfx'], 'voiceJp right after voice');
+  assert.deepEqual(Object.keys(t.audio), ['bgm', 'bossBgm', 'voice', 'voiceJp', 'voiceLang', 'voiceLangs', 'sfx'],
+    'this repo adds `voiceLang` (which dub `voice` holds) and `voiceLangs` (the other dubs) after upstream\'s `voiceJp`');
+  assert.equal(t.audio.voiceLang, DEFAULT_VOICE_LANG, 'audio.voice holds the manifest default dub');
+  assert.equal(DEFAULT_VOICE_LANG, 'jp', 'the released bundle ships the Japanese dub (owner decision, 0.9.0)');
+  assert.equal(def.start.alts[0].rel, 'audio/voice/jp/char_263_skadi/cn_019.mp3', '… so a bare plan() is the JP tree');
   // --voice-lang puts another dub in audio.voice; voiceJp stays the JP one; voiceJp: false plans no JP tree
   const en = plan({ voiceLang: 'en' });
   assert.equal(en.audio.voice.char_263_skadi.start.alts[0].rel, 'audio/voice/en/char_263_skadi/cn_019.mp3');
@@ -91,18 +108,23 @@ test('data/assets.json: voiceJp gives every voiced operator the JP twin of each 
   if (fs.existsSync(dir)) for (const u of lines) assert.ok(fs.statSync(path.join(ROOT, 'public', u)).size > 0, u);
 });
 
-test('settings 语音语言: 中文 by default, 日本語 kept, nothing else; the row is translated in every language pack', () => {
-  assert.deepEqual([...VOICE_LANGS], ['cn', 'jp']);
-  assert.equal(DEFAULT_SETTINGS.voiceLang, 'cn', 'not tied to the interface language: 中文 until the player picks 日本語');
-  assert.equal(sanitizeSettings({}).voiceLang, 'cn');
+test('settings 配音语言: the manifest default dub by default (jp, the owner\'s 0.9.0 decision), all four dubs kept; the row is translated in every language pack', () => {
+  assert.deepEqual([...VOICE_LANGS], ['cn', 'jp', 'en', 'kr'], 'this repo ships four dubs (upstream\'s two-tier list is its own model)');
+  assert.equal(DEFAULT_VOICE_LANG, 'jp', 'the released bundle ships the Japanese dub');
+  assert.equal(DEFAULT_SETTINGS.voiceLang, DEFAULT_VOICE_LANG, 'not tied to the interface language');
+  assert.equal(sanitizeSettings({}).voiceLang, DEFAULT_VOICE_LANG);
   assert.equal(sanitizeSettings({ voiceLang: 'jp' }).voiceLang, 'jp');
-  assert.equal(sanitizeSettings({ voiceLang: 'en' }).voiceLang, 'cn', 'no English / Korean dub');
+  assert.equal(sanitizeSettings({ voiceLang: 'en' }).voiceLang, 'en', 'English / Korean are dubs of this model too');
+  assert.equal(sanitizeSettings({ voiceLang: 'nope' }).voiceLang, DEFAULT_VOICE_LANG, 'a junk value falls back to the default dub');
   const ui = fs.readFileSync(path.join(ROOT, 'public/js/ui/settings.js'), 'utf8');
-  assert.match(ui, /updateSettings\(\{ voiceLang: id \}\)/);
-  assert.match(ui, /const VOICE_LANG_NAMES = \{ cn: '中文', jp: '日本語' \};/, 'each dub named in its own language');
+  assert.match(ui, /updateSettings\(\{ voiceLang: l \}\)/);
+  assert.match(ui, /VOICE_LANG_NAMES/, 'each dub named in its own language (shared/constants.js VOICE_LANG_NAMES)');
   for (const code of ['en', 'ja', 'ko', 'zh-TW']) {
+    // this repo's row is `配音语言` (upstream's was `语音语言`): a pack that has not been translated for it yet carries
+    // upstream's msgid instead, and either way the row must not fall back to the bare msgid
     const pack = readJson(`public/i18n/${code}.json`);
-    assert.ok(typeof pack['语音语言'] === 'string' && pack['语音语言'] && pack['语音语言'] !== '语音语言', `${code}: 语音语言`);
+    const row = pack['配音语言'] ?? pack['语音语言'];
+    assert.ok(typeof row === 'string' && row && row !== '配音语言' && row !== '语音语言', `${code}: the voice-language row`);
   }
 });
 

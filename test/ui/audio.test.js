@@ -413,10 +413,13 @@ describe('operator battle voice', () => {
     assert.equal(voiceLine({ voice: {} }, 'char_a', 'select', 'jp'), null);
     assert.equal(voiceLine(null, 'char_a', 'select', 'jp'), null);
     assert.deepEqual(voiceLine({ voice: audioM.voice }, 'char_a', 'place', 'jp'), { url: '/a/voice/cn/char_a/cn_023.mp3', fallback: null }, 'a manifest without voiceJp');
-    // the real manifest: every operator with a Chinese line has its Japanese twin
+    // the real manifest: this repo's `audio.voice` IS the default dub (jp since 0.9.0) and upstream's `audio.voiceJp`
+    // carries the same JP tree beside it, so a 'jp' look-up finds the JP file and the per-line fallback is that tree's
+    // own file of the same name — upstream's 中文 fallback belongs to its two-tier manifest (owner's ruling: this repo's
+    // four-dub model is the deliberate divergence, upstream's `voiceJp` key stays readable either way)
     const real = voiceLine(manifest.audio, 'char_263_skadi', 'select', 'jp', () => 0);
     assert.match(real.url, /^\/assets\/audio\/voice\/jp\/char_263_skadi\/cn_021\.mp3$/);
-    assert.equal(real.fallback, '/assets/audio/voice/cn/char_263_skadi/cn_021.mp3');
+    assert.equal(real.fallback, real.url, 'the default tree is the JP one here, so the fallback is the same file');
 
     // the manager: the setting picks the tree; a JP file the host lacks (404) plays the Chinese one, holding the channel
     const fw = fakeWindow();
