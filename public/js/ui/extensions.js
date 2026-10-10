@@ -48,6 +48,8 @@
 // the browser half is the opt-in `SP_E2E=1` path, see docs/WORKSHOP.md §4.4 for the same standing gap).
 
 import { t } from '../../../shared/i18n.js';
+// 立绘解析链的**唯一 hook**（皮肤层第 1 步）：核心只认识「有一个函数可能回答这个 id」，不认识「皮肤」。
+import { setAppearanceLookup, clearAppearanceLookup } from './portraitChain.js';
 // 引擎已经定义好的服务端→客户端类型（`shared/protocol.js S2C`）。**不在这里抄一份**：抄一份就是第二个会漂的真相，
 // 而漂的方向是「一个面板订阅了一个引擎其实不会发的名字」—— 那正是这一层到处在拒绝的形态。
 import { S2C } from '../../../shared/protocol.js';
@@ -411,6 +413,51 @@ export function createPanelRegistry(deps) {
   }
 
   /**
+   * 已经注册的外观提供者（`<包>/<面板id>`）或 null；`appearanceRefused` 记「有人想注册但被拒」。
+   * 进程内**最多一个**：见 `appearance()` 的三条性质。
+   */
+  let appearanceProvider = null;
+  let appearanceRefused = false;
+
+  /**
+   * 一个模块导出了 `appearance(ctx)` 时，把它接进解析链。
+   *
+   * 顺序：先 import，再这里，最后才是 `mount` —— 外观在**第一帧之前**就位，否则首帧画的是原版、下一帧才跳过去
+   * （一个「闪一下再变」的错比不生效更难查）。失败一律**点名**，不静默。
+   * @param {any} rec @param {any} mod
+   * @returns {boolean} 是否成功建立（没有导出 `appearance` 时返回 true：那是「这个面板不提供外观」，不是失败）
+   */
+  function registerAppearance(rec, mod) {
+    const fn = mod && typeof mod.appearance === 'function' ? mod.appearance : null;
+    if (!fn) return true;
+    if (appearanceProvider) {
+      appearanceRefused = true;
+      refuse('CLIENT_APPEARANCE_TAKEN', `panel "${rec.key}" exports appearance(ctx) but "${appearanceProvider}" already provides one — at most ONE appearance provider may be active (which operator's art it answers must not depend on import order)`);
+      return false;
+    }
+    let provided = null;
+    try {
+      // `ctx` 与面板同一份（同一个边界：没有 store / match / battle）
+      provided = fn(panelContext(rec, null, null));
+    } catch (err) {
+      refuse('CLIENT_APPEARANCE_THREW', `panel "${rec.key}" threw in appearance(ctx): ${err && err.message ? err.message : String(err)}`);
+      return false;
+    }
+    const lookup = provided && typeof provided.lookup === 'function' ? provided.lookup : null;
+    if (!lookup) {
+      refuse('CLIENT_APPEARANCE_BAD_SHAPE', `panel "${rec.key}" appearance(ctx) must return { lookup(kind, charId, id) } (got ${provided === null ? 'null' : typeof provided})`);
+      return false;
+    }
+    // 链只认「一个函数」：`list(charId)` 这类别的成员由提供者自己拿着，核心不认识「有哪些外观」。
+    if (!setAppearanceLookup(lookup)) {
+      refuse('CLIENT_APPEARANCE_TAKEN', `panel "${rec.key}" could not register its appearance provider`);
+      return false;
+    }
+    appearanceProvider = rec.key;
+    return true;
+  }
+
+  /**
    * The frozen surface one panel module is called with (see the header: what is NOT here is the point).
    *
    * `extra` is how a **component rewrite** (DESIGN §28.19) gets its two additions on top of the very same object:
@@ -662,9 +709,15 @@ export function createPanelRegistry(deps) {
         return true;
       }
     }
+    // 外观提供者（皮肤层第 2 步）：**在 mount 之前**接进解析链，否则首帧画原版、下一帧才跳过去。
+    // 它不依赖宿主是否渲染出来，所以放在 factory 判定之前 —— 一个只提供外观、不挂任何界面的模块也该生效。
+    registerAppearance(rec, mod);
     const factory = mod && typeof mod.mount === 'function' ? mod.mount
       : (mod && typeof mod.default === 'function' ? mod.default : null);
     if (!factory) {
+      // 一个**只提供外观**的模块（导出 `appearance` 而没有 `mount`）不是错误：它已经完成了它要做的事。
+      // 其余情况仍旧点名（`CLIENT_PANEL_NO_MOUNT`）—— 声明了要挂却挂不上，必须响亮。
+      if (appearanceProvider === rec.key) return false;
       mounted.delete(mk);
       blocked.add(mk);
       refuse('CLIENT_PANEL_NO_MOUNT', `panel "${rec.key}" (${rec.url}) must export mount(ctx) (or default-export that function)`);
@@ -836,6 +889,24 @@ export function createPanelRegistry(deps) {
     /** The registered stylesheet URLs currently injected, in injection order (test / diagnostic surface). */
     styleUrls: () => styleEls.map((el) => el && el.href).filter((u) => typeof u === 'string'),
     /**
+     * **外观提供者**的注册面（皮肤层的第 2 步，设计稿 §2 / §6）：一个面板模块**可以**（不是必须）导出
+     * `appearance(ctx)`，返回 `{ lookup(kind, charId, id), list(charId) }`。它在模块 import 之后、`mount` 之前被调用，
+     * 拿到的 `ctx` 与面板同一份（所以它同样没有 store / match / battle）。
+     *
+     * 三条性质，每条都有理由：
+     *   * **进程内最多一个提供者**：后注册者被**点名拒绝**（`CLIENT_APPEARANCE_TAKEN`）—— 「谁提供外观」不能有歧义，
+     *     否则同一个干员的立绘取决于两个 mod 的加载次序；
+     *   * **注册进解析链的唯一 hook**（`portraitChain.setAppearanceLookup`）：链本身不认识「皮肤」，
+     *     它只知道「有一个函数可能回答这个 id」；
+     *   * **没有提供者时链与今天逐字相同**（`currentAppearanceLookup()` 返回 `undefined`）。
+     *
+     * 为什么放在面板模块上而不是另开一个「mod 清单」：客户端能加载的代码只有**服务端声明过的那几条**
+     * （`welcome.modPanels`），多开一条通道就等于多一处「服务端说加载了、浏览器永远拿不到」。同一个模块既挂界面、
+     * 又提供外观，是**一条**已验证的加载路径。
+     * @returns {{ providedBy: string|null, refused: boolean }}
+     */
+    appearance: () => ({ providedBy: appearanceProvider, refused: appearanceRefused }),
+    /**
      * 包写的主题变量（`welcome.modTheme`, 业主裁决 2026-10-10）：写 CSS 自定义属性，**加法**语义 —— 只写这几个名字，
      * 不动任何规则、不替换任何样式表。原值记下来，`dispose()` 时按名字恢复。
      *
@@ -870,6 +941,10 @@ export function createPanelRegistry(deps) {
         try { entry.unmount(); } catch (err) { log?.error?.(`[mod-panels] ${key} unmount failed`, err); }
       }
       mounted.clear();
+      // 外观提供者随注册点一起收回：链回到「没有 hook」那条路径（与今天逐字相同），而不是留着一个指向
+      // 已经拆掉的模块的函数 —— 那会让立绘继续解析到一套已经没人管的素材上。
+      clearAppearanceLookup();
+      appearanceProvider = null;
       for (const [, el] of hosts) {
         if (el && typeof el.remove === 'function') el.remove();
       }

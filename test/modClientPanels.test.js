@@ -31,6 +31,7 @@ import {
   createPanelRegistry, capabilityIssues, readGate, slotSelector, browserSlotHost,
   MOD_PANEL_SLOTS, MOD_PANEL_PREFIX, MOD_PANEL_REQUIRES,
 } from '../public/js/ui/extensions.js';
+import { portraitEntry, clearAppearanceLookup, currentAppearanceLookup } from '../public/js/ui/portraitChain.js';
 import { TestClient } from './helpers/wsClient.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -668,6 +669,93 @@ describe('C 层客户端：注册点', () => {
     assert.equal(readGate(state, 'session.constructor').ok, false, '原型链上的名字不是 store 路径');
     assert.equal(readGate(state, '').ok, false);
     assert.equal(readGate(null, 'session').ok, false);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// 4b. 外观提供者（皮肤层第 2 步，设计稿 §2 / §6）：一个进程最多一个，接进解析链的**唯一 hook**。
+//
+// 三条性质各有一条测试：最多一个（后注册者点名拒绝）/ 接进链（链真的走它）/ dispose 收回（回到「没有 hook」
+// 那条与今天逐字相同的路径）。外加两条边界：只提供外观不挂界面的模块是合法的；抛异常或形状不对都点名拒绝。
+// ---------------------------------------------------------------------------------------------------
+describe('外观提供者：一个进程最多一个，接进解析链', () => {
+  const URL_AP1 = `${MOD_PANEL_PREFIX}alpha/app1.js?v=1`;
+  const URL_AP2 = `${MOD_PANEL_PREFIX}beta/app2.js?v=1`;
+  const M2 = { chars: { char_a: { portrait: 'a/p1.png' } } };
+  const askChain = () => portraitEntry(M2, { charId: 'char_a', assets: { portrait: 'summer' } }, { lookup: currentAppearanceLookup() });
+
+  test('模块导出 appearance(ctx) ⇒ 接进链；appearance() 报出是谁提供的', async () => {
+    clearAppearanceLookup();
+    const h = harness({
+      modules: new Map([[URL_AP1, {
+        // 只提供外观、不挂界面 —— 合法形态（它已经把要做的事做完了）
+        appearance: () => ({ lookup: (kind, charId, id) => (id === 'summer' ? { portrait: 's/p.png' } : null) }),
+      }]]),
+    });
+    h.apply([wire({ url: URL_AP1 })]);
+    await settle();
+    assert.deepEqual(h.registry.refusals(), [], '0 拒绝');
+    assert.equal(h.registry.appearance().providedBy, 'alpha/p1');
+    assert.equal(askChain(), 's/p.png', '链真的走了它');
+    clearAppearanceLookup();
+  });
+
+  test('第二个提供者被点名拒绝（谁提供外观不能取决于加载次序）', async () => {
+    clearAppearanceLookup();
+    const h = harness({
+      modules: new Map([
+        [URL_AP1, { appearance: () => ({ lookup: () => null }), mount: () => ({ unmount() {} }) }],
+        [URL_AP2, { appearance: () => ({ lookup: () => null }), mount: () => ({ unmount() {} }) }],
+      ]),
+    });
+    h.apply([
+      wire({ id: 'p1', pack: 'alpha', url: URL_AP1, order: 0 }),
+      wire({ id: 'p2', pack: 'beta', url: URL_AP2, order: 1 }),
+    ]);
+    await settle();
+    const refused = h.registry.refusals();
+    assert.equal(refused.length, 1, `恰好一条拒绝：${JSON.stringify(refused)}`);
+    assert.equal(refused[0].code, 'CLIENT_APPEARANCE_TAKEN');
+    assert.match(refused[0].detail, /alpha\/p1/, '理由要点名先来的那个');
+    assert.equal(h.registry.appearance().providedBy, 'alpha/p1', '先来的继续有效');
+    clearAppearanceLookup();
+  });
+
+  test('appearance 抛异常 / 形状不对 ⇒ 点名拒绝，链不受影响', async () => {
+    clearAppearanceLookup();
+    const URL_BAD = `${MOD_PANEL_PREFIX}alpha/bad.js?v=1`;
+    const URL_SHAPE = `${MOD_PANEL_PREFIX}alpha/shape.js?v=1`;
+    const h1 = harness({ modules: new Map([[URL_BAD, { appearance: () => { throw new Error('boom'); } }]]) });
+    h1.apply([wire({ url: URL_BAD })]);
+    await settle();
+    assert.equal(h1.registry.refusals()[0].code, 'CLIENT_APPEARANCE_THREW');
+    assert.equal(h1.registry.appearance().providedBy, null);
+    const h2 = harness({ modules: new Map([[URL_SHAPE, { appearance: () => ({ list: () => [] }) }]]) });
+    h2.apply([wire({ url: URL_SHAPE })]);
+    await settle();
+    assert.equal(h2.registry.refusals()[0].code, 'CLIENT_APPEARANCE_BAD_SHAPE', '必须有 lookup');
+    clearAppearanceLookup();
+  });
+
+  test('不导出 appearance 的面板一切照旧（这是绝大多数）', async () => {
+    clearAppearanceLookup();
+    const h = harness({ modules: new Map([[URL_AP1, { mount: () => ({ unmount() {} }) }]]) });
+    h.apply([wire({ url: URL_AP1 })]);
+    await settle();
+    assert.deepEqual(h.registry.refusals(), []);
+    assert.equal(h.registry.appearance().providedBy, null);
+    assert.equal(currentAppearanceLookup(), undefined, '链上没有 hook ⇒ 与今天逐字相同');
+  });
+
+  test('dispose 把提供者收回去：链回到「没有 hook」', async () => {
+    clearAppearanceLookup();
+    const h = harness({ modules: new Map([[URL_AP1, { appearance: () => ({ lookup: () => ({ portrait: 'x' }) }) }]]) });
+    h.apply([wire({ url: URL_AP1 })]);
+    await settle();
+    assert.equal(typeof currentAppearanceLookup(), 'function');
+    h.registry.dispose();
+    assert.equal(currentAppearanceLookup(), undefined, 'dispose 之后回到与今天逐字相同的链');
+    assert.equal(h.registry.appearance().providedBy, null);
   });
 });
 
