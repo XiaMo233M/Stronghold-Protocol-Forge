@@ -136,12 +136,20 @@ export const MOD_SURFACE = Object.freeze([
   {
     id: 'server.modules',
     layer: 'B',
-    decl: 'pack.json.server.modules = { module, uses[] }',
-    anchors: [{ symbol: 'SERVER_MEMBERS', members: ['modules'] }, { symbol: 'SERVER_MODULE_USES' }],
-    requires: ['只允许 uses 里那几个生命周期钩子', '源码过静态确定性扫描（无 process / require / eval）'],
-    files: ['shared/workshop.js', 'server/modModules.js', 'shared/kitAuthoring.js'],
-    tests: ['test/packServerModules.test.js', 'test/packServerModulesWire.test.js'],
-    spec: '§28.14',
+    decl: 'pack.json.server.modules = { module, uses[], channels? }',
+    anchors: [
+      { symbol: 'SERVER_MEMBERS', members: ['modules'] },
+      { symbol: 'SERVER_MODULE_USES' },
+      { symbol: 'MAX_SERVER_MODULE_CHANNELS' },
+    ],
+    requires: [
+      '只允许 uses 里那几个生命周期钩子',
+      '源码过静态确定性扫描（无 process / require / eval）',
+      'channels（接收通道，§28.23）的每个名字要同时被本包的 client.panels[].messages 声明过，且该模块必须挂 matchClass —— 投递进对局 = 改得了结果，所以整包仍须 combat: true；房间集合既管投递也管转发（不在集合里的包在 packMsg 就被点名拒绝），返回 true = 消费（不再转发），发送者身份由平台解析（客户端载荷里自称的 from/seat 不作数）',
+    ],
+    files: ['shared/workshop.js', 'server/modModules.js', 'server/lobby.js', 'shared/kitAuthoring.js'],
+    tests: ['test/packServerModules.test.js', 'test/packServerModulesWire.test.js', 'test/modMatchChannels.test.mjs'],
+    spec: '§28.23',
   },
   {
     id: 'server.battle',

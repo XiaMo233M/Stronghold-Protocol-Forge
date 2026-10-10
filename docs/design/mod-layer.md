@@ -1783,3 +1783,86 @@ pack is refused. The two tests that pin the ctx key set (`test/modClientPanels.t
 Tests: `test/modClientPanels.test.js` — the ctx surface, the frozen-snapshot rule, and the three room states (not in a
 room / seated / spectating), plus "a later store change is visible through the same ctx".
 
+### 28.23 `server.modules[].channels`: the server half of a pack channel (implemented)
+
+**The gap, stated as an asymmetry.** §1.9.6 gave a pack a channel of its own (`client.panels[].messages` →
+`pack.msg`): the engine fixes the wire type, the pack names the channel, the server validates, rate-limits and relays
+it to the room's other clients. The server half of that feature is `server.preDispatch`, and §28.13.1 decision 3 is
+explicit about what it cannot do — "there is no `data`, no `lobby`, no `Match`, no battle object … it cannot change a
+battle result at all". So a **gameplay** mod — one whose whole point is that a player's action changes the match (a
+team borrows funds, a rescue is offered, a project is bought) — had no surface at all: the engine's `g.*` intents are
+a closed set a pack cannot extend, `server.meta` fires on engine events rather than player input, `server.room` is an
+observation surface with no `send`, and `pack.msg` died at the relay.
+
+**The ruling.** The receiving half of a pack channel is the **match**, and `matchClass` is the only mount point this
+layer ever granted the power to touch one (§28.14) — so the inlet lives on the same module:
+
+```jsonc
+"server": { "modules": [ { "id": "xie", "entry": "server/mod.mjs",
+  "uses": ["matchClass"], "channels": ["borrow", "answer"] } ] }
+```
+
+Five properties, each one a rule this layer already states elsewhere:
+
+1. **Declared, not implied.** `channels` is an optional module field (≤ 8, the same name shape
+   `client.panels[].messages` uses — one regex, `PACK_CHANNEL_RE`), every name must also be declared by one of the
+   pack's own panels (`MODULES_UNKNOWN_CHANNEL`): Lobby's whitelist is derived from the panel list, so a channel no
+   panel declares could never be sent — a declaration that cannot happen is refused rather than stored. And channels
+   without `matchClass` (i.e. without a receiver) are refused (`MODULES_CHANNELS_NEED_MATCH`).
+2. **The room's set gates the whole path (W-B) — the relay included.** `Lobby.packMsg` first asks whether the pack is
+   in the room's **effective set** (`room.modIds === null` is the server default set — a room that declared nothing, or
+   `[]`, runs every installed pack, DESIGN §28.9's "absent means absent" — never an empty set), and a message for a pack
+   the room did not enable is refused **by name** before the channel check, the rate bucket or the relay. A pack that is
+   merely *installed* cannot use its channel to speak into a room that did not select it. (The first cut of this section
+   gated only the delivery and left the relay process-wide; the owner's audit of 2026-10-10 named that as a room
+   isolation break, and it was fixed here.)
+3. **Gated like a match-touching payload, with a consume contract.** Delivery happens before the relay, and only when
+   the room has a live match that implements the optional `handlePackMsg(playerId, msg)`, `msg = { pack, channel,
+   from, seat, data? }`. **`from` and `seat` are resolved from the session and the seat** — anything the client writes
+   into `data` (a `from`, a `playerId`, a `seat`) is opaque payload and is not trusted; the match looks the seat up by
+   the `playerId` it is handed. The return value is the pack's answer about the relay: **`true` = consumed** (a command
+   channel — no broadcast; the state, and therefore the *private* debts and requests, travels through `m.public` /
+   `m.private`), `false` / `undefined` = a plain client-to-client channel message, relayed exactly as before. A throw is
+   named once and treated as "not consumed". Touching a match means the module already declares `matchClass`, which
+   already requires `combat: true` (`MODULES_NEED_COMBAT`) — the same gate, not a new one. The pack remains the
+   authority for game rules (phase, alive, ready, amounts, targets, rounds, one-shot claims); the manager's part is
+   identity, set, live match and method.
+4. **Failure is local, and the default path is unchanged.** A pack that declares channels but returns a class without
+   the method is named **once at startup** and its messages are relayed only; a throwing handler does not eat the
+   message; a message the match consumed is simply not relayed. No pack declaring channels ⇒ no map, no call, no log
+   line — the plain-install path is byte-for-byte what it was.
+5. **Bytes and order.** `channels` enters the normalized manifest only when declared (the §28.13 rule for hash
+   stability: an undeclared key must not change a pack's digest) and is sorted, so two spellings are one pack; the
+   module's bytes were already in the digest. The §1.9.6 caps and the per-session token bucket are the ones that
+   already exist; a command that must not execute twice does it the way this layer always has — server-side one-shot
+   state (a request consumed by id, a rescue claimed before it is applied), never client-side trust.
+
+**Isolation, and what the manager owes the wrapper.** A `matchClass` wrapper is still composed into the process's
+`MatchClass` (§28.16's asymmetry, deliberately kept: a room's set decides what a *match* runs, not what the *process*
+boots), so a wrapper **is** invoked for every match the process builds and must gate itself on the set it is handed.
+What the manager owes it, and now delivers:
+
+* **A trustworthy set.** `Match.opts.mods` is the **room's** set — not the process set — when the room declared one
+  (`mods: room.modSet || this.modSet`), and `modSetOf` deep-freezes it (`{ digest, packs }` and every entry), so a
+  wrapper reads a value it cannot mutate and no reader can be confused about what this match runs. `null` means "this
+  install has no packs at all".
+* **A gated inlet.** Every message the manager itself routes — this section's channels — is filtered by that same set
+  (property 2), so a pack's `handlePackMsg` is never reached for a room that did not select it.
+* **A required pattern, with a test.** A wrapper whose pack is not in `Match.mods` must be a pass-through;
+  `test/modMatchChannels.test.mjs` drives the dual-room case — room A with the pack, room B without, both create
+  orders — and asserts each match receives **its own** set.
+
+Composing a per-room wrapper chain at match creation was considered and declined for now: it contradicts §28.16's
+written asymmetry, it cannot sandbox a wrapper's *code* anyway (a wrapper can reach whatever the match can), and the
+frozen set plus the gated inlet already give the "trustworthy, unmixable active pack set" the audit asked for. A future
+pack that genuinely needs per-room composition is a new ruling with its own section, not an amendment smuggled into
+this one.
+
+**What it deliberately is not.** Not a request/response protocol (replies travel through the pack's own views or its
+own channel frames), not a second message bus (the wire type stays the engine's `pack.msg`; the size cap and the
+per-session token bucket are the ones §1.9.6 set), not a way for a pack to invent a C2S type, and not a way to
+broadcast a command as if it were accepted — a consumed command is not relayed at all, so no member ever sees a
+"borrow request" frame that the match refused. It is one inlet: player → pack channel → this room's match.
+
+Tests: `test/modMatchChannels.test.mjs`.
+

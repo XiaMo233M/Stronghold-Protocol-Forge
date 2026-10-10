@@ -1079,8 +1079,17 @@ export function mount(ctx) {
 | 引擎类型 | `ctx.net.on('<引擎类型>')`（`shared/protocol.js S2C` 里的那些）照旧原样透传，不受这一格影响 |
 
 **这一格不提供什么**：没有服务端存档、没有离线消息、没有跨房间广播、没有服务端语义（谁该收到、聊天记录怎么存、
-皮肤怎么同步，都是**包自己**的事 —— 服务端那一半用 §1.9.1 的 `server.preDispatch` 钩子接，它在 `intercepts` 里
-写上 `pack.msg` 就能看到这条消息，并可以用 `send` 回话）。
+皮肤怎么同步，都是**包自己**的事。服务端要看这条消息有**两格**，各有各的边界）：
+
+- 想**观察 / 记录 / 在限流之外再拦一层**：用 §1.9.1 的 `server.preDispatch` 钩子，在 `intercepts` 里写上
+  `pack.msg`，可以用 `send` 回话 —— 它的注入面是冻结的，**改不了对局**（DESIGN §28.13.1）；
+- 想让它**改变这一局**（借钱、救援、项目这类玩法动作）：在服务端模块上声明 `channels`
+  （`server.modules[].channels`，DESIGN §28.23）：**房间声明的集合先过一道**（不在集合里的包在 `packMsg` 就被点名
+  拒绝，连转发都没有；`modIds` 缺席或 `[]` 都算「没声明」＝服务端默认集合＝全部在），消息再在转发**之前**投给
+  本房间进行中的对局（`Match.handlePackMsg(playerId, { pack, channel, from, seat, data })`；`from` / `seat` 由平台
+  解析，载荷里自称的身份不作数），模块必须挂 `matchClass`（⇒ 整包仍须 `combat: true`）。对局**返回 `true` = 消费**：
+  `packMsg` 不再把这条消息广播给全房（命令的后果走 `m.public` / `m.private` 视图 —— 私有债务与请求因此不会被默认
+  公开）；返回假值 = 纯客户端通道，照旧转发；抛异常只记一条日志并按「没消费」处理。
 
 #### 1.9.7 组件级改写：`client.panels[].wraps`（DESIGN §28.19）
 
@@ -1345,6 +1354,15 @@ export function registerServer(host) {
 `MatchClass` 包装器原则上能改对局结果，而「要改结果的必须进房间摘要闸门与 golden 那条线」是业主裁决。只挂
 `boot` / `shutdown` / `healthz` 的模块碰不到对局，不需要它。
 
+**接收通道**（`"channels": ["borrow", …]`，DESIGN §28.23）：声明这个模块在对局里**接收**哪些包通道 —— 玩家从
+包的面板（§1.9.6 的 `client.panels[].messages` + `pack.msg`）发出来的消息，在**转发之前**投给本房间进行中的对局
+（`Match.handlePackMsg(playerId, { pack, channel, from, seat, data })`）。四条判据：每条通道名必须**同时**被本包
+某个面板声明（否则没人发得出来，`MODULES_UNKNOWN_CHANNEL`）；模块必须挂 `matchClass`（否则没有接收人，
+`MODULES_CHANNELS_NEED_MATCH`）；**房间声明的集合先过一道**（不在集合里的包在 `packMsg` 就被点名拒绝 —— 转发与
+投递一起堵住；`modIds` 缺席或 `[]` 都算「没声明」＝服务端默认集合＝全部在）；对局实现了那个方法才投（没实现 =
+只转发，启动日志点名一次）。`from` / `seat` 由平台从会话与座位解析（载荷里自称的身份不作数）。对局**返回 `true`
+= 消费**（命令类通道不再广播，状态走视图）；返回假值 = 纯客户端通道；抛异常只记一条日志、消息照常转发。
+
 **`healthz` 的回执有界**：扁平对象、值只能是字符串/数字/布尔/`null`、最多 12 个字段 / 2KB；嵌套或超限的那一条被
 **点名跳过**（其余字段照旧报到）。端点是给运维看的，不是数据通道。
 
@@ -1361,7 +1379,9 @@ export function registerServer(host) {
 
 **写错的拒绝码**：`MODULES_BAD_SHAPE` / `MODULES_UNKNOWN_FIELD` / `MODULES_BAD_ID` / `MODULES_DUPLICATE_ID` /
 `MODULES_BAD_ENTRY` / `MODULES_BAD_USES` / `MODULES_DUPLICATE_USE` / `MODULES_BAD_WRITE` / `MODULES_TOO_MANY` /
-`MODULES_NEED_COMBAT`（以上在形状层）；装载期与运行期另有 `MODULES_NO_REGISTER` / `MODULES_IMPORT_FAILED` /
+`MODULES_NEED_COMBAT` / `MODULES_BAD_CHANNELS` / `MODULES_BAD_CHANNEL` / `MODULES_DUPLICATE_CHANNEL` /
+`MODULES_TOO_MANY_CHANNELS` / `MODULES_CHANNELS_NEED_MATCH` / `MODULES_UNKNOWN_CHANNEL`（以上在形状层）；
+装载期与运行期另有 `MODULES_NO_REGISTER` / `MODULES_IMPORT_FAILED` /
 `MODULE_USE_UNDECLARED` / `MODULE_IO_BAD_PATH` / `MODULE_BAD_HOOK`。
 
 ### 1.13 `notices`：公告与鸣谢（已实现，服务端 + 声明）

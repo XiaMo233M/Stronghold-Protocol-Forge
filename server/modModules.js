@@ -224,7 +224,10 @@ export async function loadServerModules(loaded, { log = noopLog, stateRoot = nul
         continue;
       }
       mounted.uses = mod.uses;
-      modules.push({ pack: pack.id, id: mod.id, entry: mod.entry, hash: pack.hash || '', dir: pack.dir, uses: mod.uses, write: mod.write, mounted });
+      // 接收通道（`server.modules[].channels`，DESIGN §28.23）：装载结果把它带出来，`server/index.js` 收成
+      // `<包 id>` → 通道集合交给 Lobby，Lobby 在 `pack.msg` 的转发之前把它投给这一局（`Match.handlePackMsg`）。
+      const channels = Array.isArray(mod.channels) ? [...mod.channels] : [];
+      modules.push({ pack: pack.id, id: mod.id, entry: mod.entry, hash: pack.hash || '', dir: pack.dir, uses: mod.uses, write: mod.write, channels, mounted });
     }
   }
   return { modules, errors };

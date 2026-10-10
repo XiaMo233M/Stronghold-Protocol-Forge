@@ -121,6 +121,16 @@ export async function startServer(opts = {}) {
   const survivors = new Set(pruned.packs.map((p) => p.id));
   const metaModules = workshopMeta.modules.filter((m) => survivors.has(m.id));
   const serverModulesLive = serverModules.modules.filter((m) => survivors.has(m.pack));
+  // 包通道的服务端那一半（DESIGN §28.23）：`<包 id>` → 这个包的 `server.modules` 声明过的接收通道集合。
+  // 空表 ⇒ Lobby 的 `pack.msg` 路径与从前**逐字节相同**（不建对象、不多一次调用、不多一行日志）。
+  /** @type {Map<string, Set<string>>} */
+  const serverChannelMap = new Map();
+  for (const m of serverModulesLive) {
+    for (const channel of (m.channels || [])) {
+      if (!serverChannelMap.has(m.pack)) serverChannelMap.set(m.pack, new Set());
+      serverChannelMap.get(m.pack).add(channel);
+    }
+  }
   // 战斗逻辑同理：被别的声明裁掉的包不该继续在战场里说话（它的 installer 与 URL 清单一起消失）。
   const battleInstallers = battlePack.installers.filter((m) => survivors.has(m.id));
   const battleModules = battlePack.modules.filter((m) => survivors.has(m.pack));
@@ -229,6 +239,12 @@ export async function startServer(opts = {}) {
           log.warn(`[workshop] ${w.pack}/${w.id}: matchClass(...) returned ${typeof next}, not a class — that layer is skipped`);
           continue;
         }
+        // 「声明了 channels 却没有接收方法」是这一层最讨厌的形态（装了但没反应），所以点名一次 —— 但**不拒绝**：
+        // 方法可以挂在实例上（构造器里），静态看不出来，拒绝会误伤合法写法（DESIGN §28.23）。
+        const declaredChannels = (serverModulesLive.find((m) => m.pack === w.pack && m.id === w.id) || {}).channels || [];
+        if (declaredChannels.length && typeof next.prototype?.handlePackMsg !== 'function') {
+          log.warn(`[workshop] ${w.pack}/${w.id}: declares server channels (${declaredChannels.join(', ')}) but its MatchClass layer has no handlePackMsg method — those messages will only be relayed (DESIGN §28.23)`);
+        }
         base = next;
       } catch (e) {
         log.warn(`[workshop] ${w.pack}/${w.id}: matchClass(...) threw (${e && e.message ? e.message : e}) — that layer is skipped`);
@@ -240,7 +256,7 @@ export async function startServer(opts = {}) {
     {
       ...opts,
       ...(matchWrappers.length ? { MatchClass } : {}),
-      workshop: { kits: workshopKits.kits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme, meta: metaModules, roomAssets, battle: battleModules, battleInstallers, roomHooks: roomInstallers },
+      workshop: { kits: workshopKits.kits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme, meta: metaModules, roomAssets, battle: battleModules, battleInstallers, roomHooks: roomInstallers, serverChannels: serverChannelMap },
     },
     { data, log },
   );

@@ -455,6 +455,19 @@ export class Lobby {  /**
       for (const channel of panel.messages) this.packChannels.get(panel.pack).add(channel);
     }
     /**
+     * 包通道的**服务端那一半**（DESIGN §28.23）：`<包id>` → 这个包的 `server.modules[].channels` 声明过的通道集合。
+     * 与 `packChannels`（客户端能说什么）成对：那张表决定消息**收不收**，这张决定消息送不送进**这一局**
+     * （`deliverPackMsgToMatch` → `Match.handlePackMsg`）。没有包声明时是空表 ⇒ `pack.msg` 的路径与从前逐字节相同。
+     * @type {Map<string, Set<string>>}
+     */
+    this.serverChannels = new Map();
+    const declaredServerChannels = this.workshop && this.workshop.serverChannels;
+    if (declaredServerChannels instanceof Map) {
+      for (const [packId, channels] of declaredServerChannels) {
+        if (typeof packId === 'string' && channels) this.serverChannels.set(packId, new Set(channels));
+      }
+    }
+    /**
      * 快捷短语的服务端白名单（`room.quickMsg`）。与 `packChannels` 同一个形状的「不认识就点名」判据：**表里没有
      * 的 id 不会被转发**，接收端因此永远不必对着一堆不认识的 id 猜文案。默认 `DEFAULT_QUICK_PHRASES`。
      * 用 `options.quickPhrases` 换掉（部署方口径），显式传空数组即「这个服务器不做快捷消息」。
@@ -635,11 +648,22 @@ export class Lobby {  /**
   packMsg(session, msg) {
     const room = this.roomOf(session);
     if (!room) return fail(ERR.NOT_IN_ROOM);
+    // W-B（第二轮审计 P1-1）：房间声明了集合就只谈它点名的包 —— **`null` 是服务端默认集合（全部在），不是空集合**
+    // （`room.create` 的 `modIds` 缺席或 `[]` 都是「没声明」，DESIGN §28.9 的 "absent means absent"）。不在集合里的
+    // 包**连转发都不该有**：房间的集合决定这一局跑什么，也决定这一局谈什么；一个仍装在服务器上的包不能借它往别的
+    // 房间说话（把它堵在这里，比只堵对局投递更严 —— 那一条曾经是唯一的门）。
+    if (room.modIds && !room.modIds.includes(msg.pack)) {
+      return fail(ERR.BAD_MSG, `pack "${String(msg.pack).slice(0, 32)}" is not enabled in this room (this room runs: ${room.modIds.join(', ')})`);
+    }
     const declared = this.packChannels.get(msg.pack);
     if (!declared || !declared.has(msg.channel)) {
       return fail(ERR.BAD_MSG, `pack "${String(msg.pack).slice(0, 32)}" does not declare the channel "${String(msg.channel).slice(0, 32)}"`);
     }
     if (!this.packMsgAllowed(session)) return fail(ERR.RATE);
+    // 包通道进对局（DESIGN §28.23）：转发**之前**先投给这一局（`Match.handlePackMsg`，可选方法）。对局**返回 true
+    // 表示它消费了这条消息**（命令类通道的正门：状态走视图，原始命令不再广播给全房）；没消费 / 没有对局 / 方法抛
+    // 异常都回到下面那条转发路径 —— 一个包坏掉只丢它自己那一次投递，房间不会因此变成不能玩。
+    if (this.deliverPackMsgToMatch(room, session, msg)) return OK;
     const out = {
       t: 'pack.msg', pack: msg.pack, channel: msg.channel, from: session.playerId,
       ...(msg.data === undefined ? {} : { data: msg.data }),
@@ -654,6 +678,45 @@ export class Lobby {  /**
       if (target && target.connected) sendSession(target, out);
     }
     return OK;
+  }
+
+  /**
+   * `pack.msg` 的服务端那一半（DESIGN §28.23，docs/WORKSHOP.md §1.9.6）：把一条玩家发的包消息投给**进行中的对局**。
+   *
+   * 三条判据缺一不投：这个包的某个 `server.modules` 声明过该通道（`this.serverChannels`）、房间有**进行中的对局**
+   * （`room.match`）、对局实现了可选方法 `handlePackMsg(playerId, msg)`。**房间集合的那条判据在 `packMsg` 里**
+   * （不在房间集合里的包在那一步就被点名拒绝，连转发都没有），所以这里不再重复。
+   *
+   * **身份与载荷**：`from` 与 `seat` 由平台**从会话与座位解析** —— 客户端在 `data` 里写什么 `from` / `playerId` /
+   * `seat` 都不作数（`data` 对平台是不透明载荷；对局必须按传入的 `playerId` 找席位，不能信载荷里自称的身份）。
+   * 观战者的 `seat` 是 `null`（他们收得到每条通道消息，但不是玩家）。
+   *
+   * **返回值 = 消费**：对局返回 `true` 表示它接管了这条消息 —— `packMsg` 因此**不再转发**（命令类通道：状态走
+   * `m.public` / `m.private` 视图，原始命令不广播）。`false` / `undefined` / 没有该方法 ⇒ 照旧转发（纯客户端通道）。
+   * 抛异常只记一条点名日志并按「没消费」处理：投递失败是包自己的问题，玩家的消息仍然照常转发给同房的人。
+   * @param {any} room
+   * @param {import('./net.js').Session} session
+   * @param {{ pack: string, channel: string, data?: any }} msg
+   * @returns {boolean} 对局有没有消费这条消息（true ⇒ 调用方不要转发）
+   */
+  deliverPackMsgToMatch(room, session, msg) {
+    const declared = this.serverChannels.get(msg.pack);
+    if (!declared || !declared.has(msg.channel)) return false;
+    const match = room.match;
+    if (!match || typeof match.handlePackMsg !== 'function') return false;
+    const seat = room.seatOf(session.playerId);
+    try {
+      return match.handlePackMsg(session.playerId, {
+        pack: msg.pack,
+        channel: msg.channel,
+        from: session.playerId,
+        seat: seat ? seat.seat : null,
+        ...(msg.data === undefined ? {} : { data: msg.data }),
+      }) === true;
+    } catch (e) {
+      this.log.warn(`[mod] ${msg.pack}.handlePackMsg("${msg.channel}") threw: ${e && e.message ? e.message : e}`);
+      return false;
+    }
   }
 
   /**

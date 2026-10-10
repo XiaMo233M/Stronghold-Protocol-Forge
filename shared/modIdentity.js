@@ -201,10 +201,14 @@ export function modDigest(list) {
   return sha256Hex(canonicalJson(pairs));
 }
 
-/** The wire/`welcome`/spec body of a mod set: `{ digest, packs }`, or `null` when there are no mods at all. */
+/** The wire/`welcome`/spec body of a mod set: `{ digest, packs }`, or `null` when there are no mods at all.
+ *
+ * 冻结（第二轮审计 P1-3）：这个值会被交给**包的代码** —— `Match.mods` 就是它，而 `matchClass` 包装器正是靠读它
+ * 判断本局该不该武装。所以它必须是**可信且不可混淆**的一份：房间声明的集合（或房间没声明时的进程集合）与它的
+ * 每一个条目都在这里冻结 —— 包装器只能读，改不动自己看到的那一份，也污染不了房间状态与其它读者。 */
 export function modSetOf(packs) {
   const list = Array.isArray(packs) ? packs.filter(isModEntry) : [];
   if (!list.length) return null;
-  const sorted = [...list].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  return { digest: modDigest(sorted), packs: sorted };
+  const sorted = [...list].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map((e) => Object.freeze({ ...e }));
+  return Object.freeze({ digest: modDigest(sorted), packs: Object.freeze(sorted) });
 }

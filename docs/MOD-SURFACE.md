@@ -60,7 +60,7 @@
 |---|---|---|---|
 | `server.preDispatch` | `server.preDispatch = { module, policy, intercepts }` | `intercepts` 必须是 `shared/protocol.js` C2S 里的类型名 | §28.13 |
 | `server.meta` | `server.meta = { module, registers }` | `registers` 的每一类都要有对应键 | §28.13 |
-| `server.modules` | `server.modules = { module, uses[] }` | 只用 `SERVER_MODULE_USES` 里的钩子；源码过静态确定性扫描 | §28.14 |
+| `server.modules` | `server.modules = { module, uses[], channels? }` | 只用 `SERVER_MODULE_USES` 里的钩子；源码过静态确定性扫描；`channels`（§28.23）= 对局的**接收入口**：每个名字还必须被本包某个面板的 `messages` 声明（否则没人发得出来），模块必须挂 `matchClass`（⇒ 整包仍须 `combat: true`），消息在转发之前投进**进行中的对局**（`Match.handlePackMsg`，只有房间集合点名了这个包时才投） | §28.14 / §28.23 |
 | `server.battle` | `server.battle = { module }` | `combat: true`；两端跑同一段字节；只能 import `@battle/` 与 `@sim/` | §28.17 |
 | `server.room` | `server.room = { module }` | **不**要 `combat: true`：只读观察面（快照/访问器/订阅），返回值被忽略 ⇒ 改不了谁在玩、装了什么、这一局的结果；import 只走 `@sim/` | §28.20 |
 | `kits.relativeImports` | `kits/<id>.js` 里的 `./…`（含 `kits/_shared.js` 这类辅助文件） | 只许**向下**相对（`..`/绝对/`%`/反斜杠/非 `.js` 仍拒）；按「出现 import 的那个文件」自己的目录解析，两端同一文件；辅助文件字节进身份哈希（`kits/**/*.js` 递归） | §28.18 |

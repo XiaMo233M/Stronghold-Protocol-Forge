@@ -291,7 +291,7 @@ const CLIENT_MAX_PANEL_MESSAGES = 8;
  * `<包id>.<名字>` —— 所以这个名字必须是**小写字母开头的短名**：它会出现在线上、会进 `pack.msg` 的字段、
  * 要能被 `^[a-z][a-z0-9_-]{0,63}$` 判死（拼错一个名字就是一条永远收不到的消息，那正是这一层到处在拒绝的形态）。
  */
-const CLIENT_PANEL_CHANNEL_RE = /^[a-z][a-z0-9_-]{0,63}$/;
+export const PACK_CHANNEL_RE = /^[a-z][a-z0-9_-]{0,63}$/;
 /** 一个面板最多读几张表（今天是 13 张，写着是为了让「全读」这件事有个上限而不是一个通配）。 */
 const CLIENT_MAX_PANEL_DATA_TABLES = 13;
 /**
@@ -383,9 +383,15 @@ const ROOM_MODULE_EXT = '.mjs';
  */
 export const SERVER_MODULE_USES = Object.freeze(['boot', 'shutdown', 'matchClass', 'healthz']);
 /** `server.modules[*]` 的字段，一个不多一个不少。 */
-const SERVER_MODULE_FIELDS = Object.freeze(['id', 'entry', 'uses', 'write']);
+const SERVER_MODULE_FIELDS = Object.freeze(['id', 'entry', 'uses', 'write', 'channels']);
 /** 一个包最多声明几个服务端模块。 */
 const MAX_SERVER_MODULES = 8;
+/**
+ * 一个服务端模块最多声明几条**接收通道**（`server.modules[].channels`，DESIGN §28.23）：玩家从包自己的面板
+ * （`client.panels[].messages` + `pack.msg`）发出来的消息，由**这一格**声明谁在对局里收。与面板那半边的
+ * `CLIENT_MAX_PANEL_MESSAGES` 同一个数量级 —— 这不是数据通道，是玩法动作的入口，写着是为了让它有界。
+ */
+export const MAX_SERVER_MODULE_CHANNELS = 8;
 /** 服务端模块的扩展名：它是**服务端**加载的 ESM（浏览器不加载，战斗也不加载）。 */
 const SERVER_MODULE_EXT = '.mjs';
 /**
@@ -588,7 +594,7 @@ function parseClientDecl(raw) {
         return fail('CLIENT_BAD_PANEL_MESSAGES', `client.panels["${panel.id}"].messages: at most ${CLIENT_MAX_PANEL_MESSAGES} channels per panel`);
       }
       for (const channel of panel.messages) {
-        if (typeof channel !== 'string' || !CLIENT_PANEL_CHANNEL_RE.test(channel)) {
+        if (typeof channel !== 'string' || !PACK_CHANNEL_RE.test(channel)) {
           return fail('CLIENT_BAD_PANEL_CHANNEL', `client.panels["${panel.id}"].messages: "${String(channel)}" is not a channel name (lowercase letter first, then a-z 0-9 _ -, at most 64 — the wire name is "<this pack's id>.<channel>")`);
         }
       }
@@ -737,12 +743,38 @@ function parseServerModulesDecl(raw) {
     if (mod.write !== undefined && typeof mod.write !== 'boolean') {
       return fail('MODULES_BAD_WRITE', `server.modules["${mod.id}"].write must be true or false (may this module write into its own state directory?)`);
     }
+    // `channels`（DESIGN §28.23）：这个模块在对局里**接收**哪些包通道。判据四条，与面板那半边同一个通道名形状
+    // （`PACK_CHANNEL_RE`）——「客户端能说什么」与「服务端在对局里收什么」必须是同一批名字，不能各写一套。
+    if (mod.channels !== undefined) {
+      if (!Array.isArray(mod.channels) || !mod.channels.length) {
+        return fail('MODULES_BAD_CHANNELS', `server.modules["${mod.id}"].channels must be a non-empty array of channel names (drop the key instead of sending []) — the names are the ones a panel of this pack declares in "messages"`);
+      }
+      if (mod.channels.length > MAX_SERVER_MODULE_CHANNELS) {
+        return fail('MODULES_TOO_MANY_CHANNELS', `server.modules["${mod.id}"].channels: at most ${MAX_SERVER_MODULE_CHANNELS} channels per module (got ${mod.channels.length})`);
+      }
+      for (const channel of mod.channels) {
+        if (typeof channel !== 'string' || !PACK_CHANNEL_RE.test(channel)) {
+          return fail('MODULES_BAD_CHANNEL', `server.modules["${mod.id}"].channels: "${String(channel)}" is not a channel name (^[a-z][a-z0-9_-]{0,63}$ — the same shape client.panels[].messages uses)`);
+        }
+      }
+      if (new Set(mod.channels).size !== mod.channels.length) {
+        return fail('MODULES_DUPLICATE_CHANNEL', `server.modules["${mod.id}"].channels lists the same channel twice`);
+      }
+      // 通道的接收人是**对局**（`Match.handlePackMsg`），而对局只可能是 `matchClass` 包装器交给平台的 —— 所以
+      // 没有 matchClass 的 channels 是一条没有接收人的声明。拒掉，而不是让它永远不生效（本层到处在消灭的形态）。
+      if (!mod.uses.includes('matchClass')) {
+        return fail('MODULES_CHANNELS_NEED_MATCH', `server.modules["${mod.id}"].channels is delivered to the running match (Match.handlePackMsg, DESIGN §28.23), so this module must also declare the "matchClass" mount point — channels without matchClass have no receiver`);
+      }
+    }
     out.push({
       id: mod.id,
       entry: mod.entry,
       // 按闭枚举次序（不按作者书写顺序）：清单字节要稳定，与 `requires` / `registers` 同一条。
       uses: SERVER_MODULE_USES.filter((u) => mod.uses.includes(u)),
       write: mod.write === true,
+      // 只在**声明了的时候**进清单（声明进身份哈希，没声明的包逐字节不变），并且排序：两个书写顺序不同的
+      // 写法必须是同一个包（与 `uses` 按闭枚举次序同一条纪律）。
+      ...(mod.channels === undefined ? {} : { channels: [...mod.channels].sort() }),
     });
   }
   out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -1598,6 +1630,22 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (clientParsed && !clientParsed.ok) return clientParsed;
   const serverParsed = raw.server === undefined ? null : parseServerDecl(raw.server);
   if (serverParsed && !serverParsed.ok) return serverParsed;
+  // 包通道的服务端那一半（DESIGN §28.23）：`server.modules[].channels` 里点名的每一条，必须也被本包的某个面板
+  // 声明过（`client.panels[].messages`）。理由不是洁癖：Lobby 的 `packChannels` 白名单是**从面板清单推出来的**
+  // —— 没有面板声明过的通道，客户端根本发不出来，那是一条「声明了却不可能发生」的声明。
+  if (serverParsed) {
+    const panelChannels = new Set();
+    for (const panel of (clientParsed ? clientParsed.decl.panels : [])) {
+      for (const channel of (panel.messages || [])) panelChannels.add(channel);
+    }
+    for (const m of serverParsed.decl.modules || []) {
+      for (const channel of m.channels || []) {
+        if (!panelChannels.has(channel)) {
+          return fail('MODULES_UNKNOWN_CHANNEL', `server.modules["${m.id}"].channels: "${channel}" is not declared by any of this pack's client.panels[].messages — the engine only lets a pack send the channels its panels declare, so this one could never arrive (add it to a panel's "messages", or drop it here)`);
+        }
+      }
+    }
+  }
   const routesParsed = raw.routes === undefined ? null : parseRoutesDecl(raw.routes);
   if (routesParsed && !routesParsed.ok) return routesParsed;
   // `i18n`（fanpack G-04）：给**已有语种**补词条的声明，形状见 `parseI18nDecl`。它同样遵守上面那条
