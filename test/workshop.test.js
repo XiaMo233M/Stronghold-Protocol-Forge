@@ -413,7 +413,9 @@ describe('workshop: the overlay', () => {
   // 判据只有一条：**一个这份格式不认识的顶层键，必须点名拒绝**，绝不读过去。以前 `variants` / `skins`
   // 是静默丢（`{content:["chess","variants"]}` 归一化成 `["chess"]`），`i18n` 连键都不存在。
   test('an unknown top-level key refuses the whole pack, and the reason lists the known fields', () => {
-    for (const key of ['variants', 'skins', 'official', 'config', 'meta', 'shared', 'theme', 'serverModules', 'hasAssets']) {
+    // `skins` 曾经在这张名单里（0.10.0 时代「静默丢」的三个键之一）—— 皮肤层落地后它是**真字段**了，
+    // 所以从这里移出，改由它自己的形状判据覆盖（见 workshopArt.test.js 的 skins 一节）。
+    for (const key of ['variants', 'official', 'config', 'meta', 'shared', 'theme', 'serverModules', 'hasAssets']) {
       const r = normalizePackManifest({ id: 'p', content: ['chess'], [key]: {} }, 'p', {});
       assert.equal(r.ok, false, `"${key}" must not be read past`);
       assert.equal(r.error, 'PACK_UNKNOWN_FIELD', `"${key}": ${r.detail}`);

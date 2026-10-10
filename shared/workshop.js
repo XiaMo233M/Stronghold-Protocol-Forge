@@ -114,7 +114,7 @@ export const PACK_FIELDS = Object.freeze([
   // 内容与覆盖
   'content', 'overrides',
   // 素材与声明（贡献项，见 EMPTY_PACK 那一处）
-  'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'support', 'operators', 'i18n',
+  'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'skins', 'support', 'operators', 'i18n',
   // 纯文本声明（公告 / 鸣谢，DESIGN §28.15）：一段**结构化文本**，既不是游戏数据也不是素材
   'notices',
   // 行为开关（**不是**贡献项）
@@ -1123,6 +1123,15 @@ function parseStringList(value, where) {
  *                 就是路径字符串**（`data/assets.json` 实测），所以这里没有字段可列。谁赢与落盘位置由 `target`
  *                 给出（见 `mergeWorkshopFlatArt`）。
  */
+/**
+ * 时装（`pack.json.skins`）允许的字段。**一个不多一个不少** —— 与 art 表同一个纪律：写错的名字点名拒绝，
+ * 而不是静默丢掉（静默丢掉的那一半正是 `variants` / `skins` 在 0.10.0 时代的遭遇）。
+ */
+export const SKIN_FIELDS = Object.freeze(['id', 'charId', 'name', 'series', 'desc', 'art', 'voices']);
+
+/** 一套时装的 id：包内唯一、短、出现在 `settings.skinByChar` 的 `<包id>:<皮肤id>` 指针里。 */
+export const SKIN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
+
 export const ART_TABLES = {
   chars: { urls: ['avatar', 'avatarE2', 'portrait', 'portraitE2'], strings: [], spine: 'sides' },
   enemies: { urls: ['icon'], strings: ['spineAliasOf'], spine: 'flat' },
@@ -1438,6 +1447,74 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     }
     if (Object.keys(clean).length) artEntries[table] = clean;
   }
+  // 时装（`pack.json.skins`，皮肤层设计稿 §3）：一套外观的**数据**在 A 层声明，**行为**在 mod 里。
+  //
+  // 形状刻意与 `ART_TABLES.chars` **完全同形**（`art` 字段就是 `chars` 那一份子集）：复用同一个 `parseArtEntry`，
+  // 所以「白名单字段 / 路径必须包内相对 / spine 要齐 skel+atlas」这些判据不会出现第二份实现。新增的只有
+  // 时装自己的元数据（id / charId / name / series / desc）与可选语音。
+  const skins = raw.skins === undefined ? [] : raw.skins;
+  if (!Array.isArray(skins)) {
+    return fail('SKIN_BAD_SHAPE', 'skins must be an array of { id, charId, name, art } entries (one entry per outfit)');
+  }
+  /** @type {Array<object>} */
+  const skinEntries = [];
+  const skinIds = new Set();
+  for (const [i, entry] of skins.entries()) {
+    const where = `skins[${i}]`;
+    if (!isPlainObj(entry)) return fail('SKIN_BAD_SHAPE', `${where} must be an object`);
+    for (const key of Object.keys(entry)) {
+      if (!SKIN_FIELDS.includes(key)) {
+        return fail('SKIN_UNKNOWN_FIELD', `${where}: "${key}" is not a declared field (${SKIN_FIELDS.join(', ')})`);
+      }
+    }
+    if (typeof entry.id !== 'string' || !SKIN_ID_RE.test(entry.id)) {
+      return fail('SKIN_BAD_ID', `${where}.id must be a short id matching ${SKIN_ID_RE} (letters/digits/underscore/dash, ≤32)`);
+    }
+    if (skinIds.has(entry.id)) {
+      return fail('SKIN_DUPLICATE_ID', `${where}.id "${entry.id}" appears twice — one id per outfit`);
+    }
+    skinIds.add(entry.id);
+    if (typeof entry.charId !== 'string' || !RECORD_ID_RE.test(entry.charId)) {
+      return fail('SKIN_BAD_CHAR_ID', `${where}.charId must name the official operator this outfit belongs to (an existing charId)`);
+    }
+    if (typeof entry.name !== 'string' || !entry.name.trim()) {
+      return fail('SKIN_BAD_SHAPE', `${where}.name must be a non-empty string (the player sees it in the picker)`);
+    }
+    for (const opt of ['series', 'desc']) {
+      if (entry[opt] !== undefined && (typeof entry[opt] !== 'string' || !entry[opt].trim())) {
+        return fail('SKIN_BAD_SHAPE', `${where}.${opt} must be a non-empty string when present`);
+      }
+    }
+    // 外观那一半与 `art.chars` **同一个解析器**（同形 ⇒ 同一套判据，不新造一份）
+    if (entry.art !== undefined) {
+      if (!isPlainObj(entry.art)) return fail('SKIN_BAD_SHAPE', `${where}.art must be an object shaped like art.chars`);
+      const parsed = parseArtEntry(entry.art, `${where}.art`, ART_TABLES.chars);
+      if (parsed.error) return fail(parsed.error, parsed.detail);
+      if (!Object.keys(parsed.entry).length) {
+        return fail('SKIN_BAD_SHAPE', `${where}.art is empty — an outfit must bring at least one of avatar / portrait / spine`);
+      }
+    }
+    // 可选语音：形状与 `pack.json.voices` 的槽位表一致（`{ <槽位>: [路径…] }`），走同一条包内路径判据
+    let voices = null;
+    if (entry.voices !== undefined) {
+      if (!isPlainObj(entry.voices)) return fail('SKIN_BAD_SHAPE', `${where}.voices must be { "<slot>": ["<path>"] }`);
+      voices = {};
+      for (const [slot, list] of Object.entries(entry.voices)) {
+        if (!Array.isArray(list) || !list.length) return fail('SKIN_BAD_SHAPE', `${where}.voices["${slot}"] must be a non-empty array of paths`);
+        for (const p of list) {
+          if (!isSafeAssetPath(p)) return fail('SKIN_PATH_UNSAFE', `${where}.voices["${slot}"]: "${String(p)}" must be a relative path inside assets/`);
+        }
+        voices[slot] = [...list];
+      }
+    }
+    skinEntries.push({
+      id: entry.id, charId: entry.charId, name: entry.name,
+      ...(entry.series !== undefined ? { series: entry.series } : {}),
+      ...(entry.desc !== undefined ? { desc: entry.desc } : {}),
+      ...(entry.art !== undefined ? { art: parseArtEntry(entry.art, `${where}.art`, ART_TABLES.chars).entry } : {}),
+      ...(voices ? { voices } : {}),
+    });
+  }
   // 助战卡池贡献 (docs/WORKSHOP.md §2): the operators of THIS pack that should be selectable as 助战. The tier is NOT
   // written here — it is derived from the pack's own chess record, exactly like every other derived field, so a tier can
   // never disagree with the record (a mismatch would silently disable the operator: shared/support.js isSupportChess
@@ -1556,6 +1633,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // A 段把提案的语义落死（B 段实现行为时不用再改），而「只带 `playtest` 照旧被拒」这条既有裁决一字未动。
   if (!content.length && !Object.keys(voiceLines).length && !Object.keys(orderedLangLines).length
     && !Object.keys(bondIconFiles).length && !Object.keys(itemIconFiles).length && !Object.keys(artEntries).length
+    && !skinEntries.length
     && !Object.keys(orderedOperators).length && !declared.some(([, v]) => contributes(v))) {
     // `support` 与 `playtest` 是这份清单里**唯二**「声明了也不算贡献」的字段，所以它们单独出现时必须被点名 ——
     // 只声明助战的包今天整包被拒（plugin-pack G6：一个 `support: [...]` + `content: []` 的包得到的就是这一条），
@@ -1563,7 +1641,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     // 干员本体还是由 `content: ["chess"]` 带进来的 —— 所以放宽它不是这一刀的活（那是既有裁决），把话说明白才是。
     const notContributions = ['support', 'playtest']
       .filter((n) => raw[n] !== undefined);
-    const names = [...WORKSHOP_CONTENT_FILES, 'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'operators',
+    const names = [...WORKSHOP_CONTENT_FILES, 'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'skins', 'operators',
       'assets', 'client', 'server.preDispatch', 'server.meta', 'server.battle', 'server.room', 'server.modules', 'routes', 'i18n', 'notices'];
     const alsoNot = notContributions.length
       ? ` (note: ${notContributions.map((n) => `"${n}"`).join(' and ')} ${notContributions.length === 1 ? 'is' : 'are'} NOT a contribution — a pack that declares ${notContributions.length === 1 ? 'it' : 'them'} alone brings nothing into a match)`
@@ -1633,6 +1711,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
       bondIcons: bondIconFiles,
       itemIcons: itemIconFiles,
       art: artEntries,
+      skins: skinEntries,
       support: supportIds,
       operators: orderedOperators,
       playtest: { directToHand },

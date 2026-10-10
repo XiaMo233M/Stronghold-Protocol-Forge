@@ -435,7 +435,7 @@ export function createPanelRegistry(deps) {
       refuse('CLIENT_APPEARANCE_TAKEN', `panel "${rec.key}" exports appearance(ctx) but "${appearanceProvider}" already provides one — at most ONE appearance provider may be active (which operator's art it answers must not depend on import order)`);
       return false;
     }
-    let provided = null;
+    let provided;
     try {
       // `ctx` 与面板同一份（同一个边界：没有 store / match / battle）
       provided = fn(panelContext(rec, null, null));
