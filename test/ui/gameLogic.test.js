@@ -723,7 +723,7 @@ describe('keyboard & settings', () => {
   test('sanitizeSettings', () => {
     assert.deepEqual(sanitizeSettings(null), { ...DEFAULT_SETTINGS });
     assert.deepEqual(sanitizeSettings({ bgm: 3, sfx: -1, voice: 2, muted: 'yes', damageNumbers: false, quality: 'ultra' }),
-      { bgm: 1, sfx: 0, voice: 1, muted: false, damageNumbers: false, quality: 'high', keys: { ...DEFAULT_SETTINGS.keys }, voiceLang: DEFAULT_VOICE_LANG, voiceLangByChar: {} },
+      { bgm: 1, sfx: 0, voice: 1, muted: false, damageNumbers: false, quality: 'high', textSize: 'sm', keys: { ...DEFAULT_SETTINGS.keys }, voiceLang: DEFAULT_VOICE_LANG, voiceLangByChar: {} },
       'a saved profile without `keys` (before 0.2.0) gets the default key map (test/ui/feedback5-hotkeys.test.js)');
     // 配音语言 (v0.7.1): a profile saved before it existed falls back to 默认配音 (DEFAULT_VOICE_LANG) and no per-operator overrides
     assert.equal(sanitizeSettings({ bgm: 0.5 }).voiceLang, DEFAULT_VOICE_LANG);
