@@ -392,7 +392,7 @@ describe('room.create { modIds } declares the room set (W-A, DESIGN §28.9)', ()
     assert.equal(validateC2S({ ...base, modIds: [42] }), 'bad field modIds');
     assert.equal(validateC2S({ ...base, modIds: Array.from({ length: MAX_ROOM_MODS }, (_, i) => `p${i}`) }), null, 'at the limit');
     assert.equal(validateC2S({ ...base, modIds: Array.from({ length: MAX_ROOM_MODS + 1 }, (_, i) => `p${i}`) }), 'bad field modIds');
-    assert.deepEqual(C2S['room.create'].$optional, ['mods', 'modIds']);
+    assert.deepEqual(C2S['room.create'].$optional, ['mods', 'modIds', 'chatMode']);
     assert.deepEqual(C2S['room.join'].$optional, ['mods'], 'room.join takes no modIds: the set is the host\'s to declare');
   });
 });

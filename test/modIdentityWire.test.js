@@ -133,7 +133,8 @@ describe('mod identity: entering a modded room needs the client to confirm the c
     assert.deepEqual(C2S['room.join'].$optional, ['mods']);
     // W-A (DESIGN §28.9): `room.create` gained `modIds` — the packs a ROOM declares, a subset of what this server
     // loaded. `room.join` deliberately did not: a room set is the host's to declare, never a joiner's.
-    assert.deepEqual(C2S['room.create'].$optional, ['mods', 'modIds']);
+    // 房内聊天（docs/META.md §1.8）又加了 `chatMode`：同样是**房主建的那个房间**的属性，不是加入者的。
+    assert.deepEqual(C2S['room.create'].$optional, ['mods', 'modIds', 'chatMode']);
   });
 });
 
