@@ -1233,8 +1233,11 @@ const BASELINE = {
       assert.equal(p.manifest.some((m) => m.path === ASSETS_DIGEST_PATH), false, `${p.id}: 不该有容器摘要那一条`);
     }
     const set = modSetOf(loaded.packs.map((p) => ({ id: p.id, hash: p.hash, layer: p.layer, combat: p.combat, api: p.api })));
-    // 实测值。前 8 位与 `_up` 记录里的基线摘要（`eacd0485…`）逐字相同 ⇒ 「不声明 assets 的包一字不变」成立。
-    assert.equal(set.digest, 'eacd0485338b87ddca4eafe9c867168bbdeea05cbf36fae7a19e4a9d890ea634');
+    // 实测值。整套摘要随着 clementia 那一份身份哈希一起移过：上游 0.2.3 把克莱门莎收成官方干员
+    // （char_4231_clemnt），示例夹具换成工坊保留前缀的 char_ws_clemnt（docs/examples/clementia/README.md），
+    // 于是那一个包的 hash 变了、整套摘要跟着变 —— 而另两份包（demo-workshop / kit-demo）的哈希一个字没变，
+    // 正是这一条要守的东西。
+    assert.equal(set.digest, '8913d669e9c01c15e2293b966de3a547c05828ba36c5f805f8888dcfc9f6ac10');
   });
 });
 
