@@ -13,6 +13,7 @@ import { useLayoutEffect, useState } from '../../vendor/hooks.module.js';
 import { html, Icon, Button, TierChip } from '../ui/components.js';
 import { Img, RichText, BondGlyph } from '../ui/gameComponents.js';
 import { chessAvatarUrl, chessPortraitUrl, profIconUrl, skillRecordIconUrl, moduleTypeIconUrl } from '../ui/assetUrls.js';
+import { portraitUrlOf, currentAppearanceLookup } from '../ui/portraitChain.js';
 import { data } from '../data.js';
 import { PROF_NAME, skillLabel, moduleBadge, fullTraitText } from '../ui/loadoutModel.js';
 import { diySlotList, pickChoices, pickOptions, slotRecord, defaultPick } from '../ui/diyModel.js';
@@ -61,7 +62,7 @@ function SlotCard({ m, slot, pick, illegal, onOpen, onClear, ops = {}, onOps = n
   const sk = rec.skill;
   const mod = elite?.module?.active ? elite.module : null;
   return html`<div class=${cx('diy-slot', `diy-slot--t${slot.tier}`, illegal && 'is-bad')} data-slot=${slot.slotId} data-char=${rec.charId}>
-    <div class="diy-slot__art"><${Img} src=${chessPortraitUrl(m, elite || rec)} fallback=${html`<b>${[...(rec.name || '?')][0]}</b>`} /></div>
+    <div class="diy-slot__art"><${Img} src=${portraitUrlOf(m, elite || rec, { lookup: currentAppearanceLookup() })} fallback=${html`<b>${[...(rec.name || '?')][0]}</b>`} /></div>
     <div class="diy-slot__body">
       <div class="diy-slot__head"><${TierChip} tier=${slot.tier} size="sm" /><span class="diy-slot__label">${label}</span><${KindTag} proto=${proto} /></div>
       <b class="diy-slot__name">${rec.name}</b>

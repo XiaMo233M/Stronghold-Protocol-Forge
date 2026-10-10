@@ -28,7 +28,8 @@ import { useEffect, useState } from '../../vendor/hooks.module.js';
 import { html, Icon, HexBadge, TierChip, Tooltip, MicroLabel } from './components.js';
 import { Img, BondGlyph, CoinGlyph, GIcon, RichText } from './gameComponents.js';
 import { priceTone, mergeProgress, mergeTarget, shopBlockReason, chessLoadout, offerHeader, briefingBondTip, ownStandIn, standInLoadout, standInLabel, standInTip, standInForText, ownDiyRecord, diyGetter } from './gameLogic.js';
-import { chessPortraitUrl, itemIconUrl, profIconUrl, uiUrl, skillIconUrl, skillRecordIconUrl, moduleTypeIconUrl } from './assetUrls.js';
+import { itemIconUrl, profIconUrl, uiUrl, skillIconUrl, skillRecordIconUrl, moduleTypeIconUrl } from './assetUrls.js';
+import { portraitUrlOf, currentAppearanceLookup } from './portraitChain.js';
 import { data } from '../data.js';
 import { hotkeyLabelOf } from './settings.js';
 // 组件级改写（DESIGN §28.19）：`game.shopCard` 是引擎的具名组件之一（每一张干员卡：商店、晋升奖励、定向投放），
@@ -104,7 +105,7 @@ export const ChessCard = modComponent('game.shopCard', function ChessCard({ slot
     <span class="mod-host" data-mod-slot="screen.game.shopCard" data-mod-slot-key=${slot.id}></span>
     <span class="scard__bg" aria-hidden="true"></span>
     <span class="scard__water" aria-hidden="true">${bonds[0] ? html`<${BondGlyph} bondId=${bonds[0]} />` : null}</span>
-    <${Img} src=${chessPortraitUrl(m, c)} class="scard__art" />
+    <${Img} src=${portraitUrlOf(m, c, { lookup: currentAppearanceLookup() })} class="scard__art" />
     <span class="scard__top">
       <${TierChip} tier=${tier} size="md" />
       <${PriceHex} slot=${slot} free=${free} poor=${reason === t('资金不足')} />

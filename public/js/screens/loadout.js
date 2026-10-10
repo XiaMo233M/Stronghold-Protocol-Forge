@@ -26,6 +26,7 @@ import { useEffect, useMemo, useRef, useState } from '../../vendor/hooks.module.
 import { html, Icon, MicroLabel, Button, TierChip, TextField, Countdown, Spinner, confirmDialog, hasDeadline, Modal, Fragment } from '../ui/components.js';
 import { Img, RichText, UnitThumb } from '../ui/gameComponents.js';
 import { chessAvatarUrl, chessPortraitUrl, subProfIconUrl, bondIconUrl, moduleTypeIconUrl } from '../ui/assetUrls.js';
+import { portraitUrlOf, currentAppearanceLookup } from '../ui/portraitChain.js';
 import { chessStatsBlock, traitText, chessTalents, GarrisonBlock } from '../ui/detailPanel.js';
 import { chessLoadout } from '../ui/gameLogic.js';
 import { data, useData, localAsset, DATA_FILES } from '../data.js';
@@ -370,7 +371,7 @@ function Detail({ m, chess, golden, entries, ops = {}, onChange, onOps, onReset,
   return html`<aside class="lo-detail" aria-label=${t('{name} 调配', { name: chess.name })}>
     <div class="lo-dhead">
       <div class=${cx('lo-dhead__art', `lo-dhead__art--t${chess.tier}`)}>
-        <${Img} src=${chessPortraitUrl(m, golden || chess)} fallback=${html`<${UnitThumb} kind="chess" id=${chess.chessId} size="lg" />`} />
+        <${Img} src=${portraitUrlOf(m, golden || chess, { lookup: currentAppearanceLookup() })} fallback=${html`<${UnitThumb} kind="chess" id=${chess.chessId} size="lg" />`} />
       </div>
       <div class="lo-dhead__info">
         <div class="lo-dhead__chips"><${TierChip} tier=${chess.tier} size="md" />

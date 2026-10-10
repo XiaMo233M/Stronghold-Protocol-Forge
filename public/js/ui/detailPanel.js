@@ -42,6 +42,9 @@ import { updateSettings, settingsStore, useSettings } from './settings.js';
 import { dubsInstalled } from '../voiceDubs.js';
 import { VOICE_LANG_NAMES } from '../../../shared/constants.js';
 import { chessPortraitUrl, skillIconUrl, skillRecordIconUrl, profIconUrl, subProfIconUrl, itemIconUrl, enemyIconUrl, tokenAvatarUrl, factionIconUrl, uiUrl, moduleTypeIconUrl } from './assetUrls.js';
+// 立绘走**统一解析链**（`portraitChain.js`）：同一个干员在详情页 / 手牌 / 商店卡 / 自选池里是同一个函数，
+// 所以不会再出现「卡面是那套外观、详情页是原版」。没有外观提供者时它与 `chessPortraitUrl` 逐字相同。
+import { portraitUrlOf, currentAppearanceLookup } from './portraitChain.js';
 import { abilityRows } from './abilityLines.js';
 import { data } from '../data.js';
 import { attackRangeGrid } from '../../../shared/loadoutRecord.js';
@@ -438,7 +441,7 @@ export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bond
   blocks.head = html`
     <div key="head" class="dhead">
       <div class=${cx('dhead__art', golden && 'is-golden', `dhead__art--t${c.tier}`)}>
-        <${Img} src=${chessPortraitUrl(m, body)} fallback=${html`<${UnitThumb} kind="chess" id=${c.chessId} size="lg" rec=${si} />`} />
+        <${Img} src=${portraitUrlOf(m, body, { lookup: currentAppearanceLookup() })} fallback=${html`<${UnitThumb} kind="chess" id=${c.chessId} size="lg" rec=${si} />`} />
       </div>
       <div class="dhead__info">
         <div class="dhead__chips">
