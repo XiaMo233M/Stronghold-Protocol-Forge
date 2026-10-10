@@ -370,9 +370,11 @@ describe('match UI of a not-owned chess', () => {
     assert.match(src, /standInList = Array\.isArray\(src\.standIns\)/);
     assert.match(src, /const sig = `\$\{info\.kind\}\|\$\{info\.defId\}\|\$\{info\.golden \? 1 : 0\}\|\$\{info\.spine \|\| ''\}`/);
     assert.match(readFileSync(path.join(ROOT, 'public/js/render/app/info.js'), 'utf8'), /standInFor: typeof u\.standInFor === 'string'/);
-    // the DOM fallback field draws every own piece of it with the stand-in's avatar and name
+    // the DOM fallback field draws every own piece of it with the stand-in's avatar and name.
+    // 头像走统一解析链（皮肤层）：所以这里断言的是**那条链的调用**，不是某个具体函数名 ——
+    // 断言的意图是「补位那一条记录喂给了画头像的地方」，实现用哪个函数名不是这条测试该管的事。
     const ff = readFileSync(path.join(ROOT, 'public/js/ui/fallbackField.js'), 'utf8');
-    assert.match(ff, /chessAvatarUrl\(mm, ownSi\(chess\) \|\| ownDiy\(chess\) \|\| chess\)/);
+    assert.match(ff, /avatarUrlOf\(mm, ownSi\(chess\) \|\| ownDiy\(chess\) \|\| chess, \{ lookup: currentAppearanceLookup\(\) \}\)/);
     assert.match(ff, /\(ownSi\(chess\) \|\| ownDiy\(chess\) \|\| chess\)\?\.name/);
   });
 });
