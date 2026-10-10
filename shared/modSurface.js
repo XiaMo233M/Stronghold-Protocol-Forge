@@ -199,6 +199,24 @@ export const MOD_SURFACE = Object.freeze([
     spec: '§28.8',
   },
   {
+    id: 'client.panels.me',
+    layer: 'C',
+    decl: '（无声明：`ctx.me` 是引擎**总是**给的那一格只读会话态）',
+    // 这一格没有 schema 符号（它不是 pack.json 里的一条声明，而是引擎**总是**注入的读数），所以锚在
+    // **引擎自己那一端的真相**上：客户端的面板契约表（`public/js/ui/extensions.js` 的 `MOD_PANEL_SLOTS`
+    // 与 `MOD_PANEL_REPEATABLE`）。宿主键那一半（`hostKey`）就是同一份契约里的概念。
+    anchors: [{ symbol: 'MOD_PANEL_SLOTS', module: 'extensions' }, { symbol: 'SLOT_KEY_ATTR', module: 'extensions' }],
+    requires: [
+      '只读：`playerId` / `name` / `room`（展示面快照）+ `snapshot()` 一次取全；每次读取当前值（面板挂上不重挂）',
+      '**没有** store 句柄、match / battle 对象、battleRunner、audio —— 边界仍由「不传什么」保证',
+      '**不含** `search`（野排匹配态活在房间屏自己的 useState 里，store 没有；提升它是另一件事）',
+      '宿主键（`ctx.hostKey`）来自容器的 `data-mod-slot-key`：可重复宿主每张卡一个，`screen.loadout.detail` 也给',
+    ],
+    files: ['public/js/ui/extensions.js', 'public/js/ui/detailPanel.js'],
+    tests: ['test/modClientPanels.test.js'],
+    spec: '§28.22',
+  },
+  {
     id: 'client.panels.wraps',
     layer: 'C',
     decl: 'pack.json.client.panels[].wraps[] = { component, mode }',

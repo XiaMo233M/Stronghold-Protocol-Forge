@@ -473,21 +473,81 @@ describe('C 层客户端：注册点', () => {
     const ctx = seen[0];
     // `hostKey` 是业主 2026-10-10 裁决里「可重复宿主」那一半（每张商店卡一个容器）：不可重复的宿主它是 `null`。
     // `data` 是同一条裁决里的**数据口**（`ctx.data.get('<表>')` 返回冻结快照）。
-    assert.deepEqual(Object.keys(ctx).sort(), ['data', 'gate', 'host', 'hostKey', 'id', 'log', 'net', 'order', 'pack', 'session', 'slot']);
+    // `me` 是「一格只读会话态」：`{ playerId, name, room }` 一份**冻结快照** —— 面板答不出来的那几件事实。
+    assert.deepEqual(Object.keys(ctx).sort(),
+      ['data', 'gate', 'host', 'hostKey', 'id', 'log', 'me', 'net', 'order', 'pack', 'session', 'slot']);
     assert.equal(ctx.hostKey, null, '不可重复的宿主没有键');
     assert.ok(Object.isFrozen(ctx));
     assert.ok(Object.isFrozen(ctx.session));
     assert.ok(Object.isFrozen(ctx.net));
     assert.ok(Object.isFrozen(ctx.log));
+    assert.ok(Object.isFrozen(ctx.me), '会话态也是一份冻结快照');
+    // 只读会话态的形状与**边界**：只有这三样，没有 store / match / battle / runner / audio
+    assert.deepEqual(Object.keys(ctx.me).sort(), ['name', 'playerId', 'room', 'snapshot'],
+      '只读会话态：三样读数 + 一次取全的 snapshot（没有别的）');
     assert.equal(ctx.store, undefined, '不给 store');
     assert.equal(ctx.engine, undefined);
     assert.equal(ctx.match, undefined);
+    assert.equal(ctx.me.battle, undefined, '会话态里没有对局对象');
+    assert.equal(ctx.me.runner, undefined, '也没有战斗播放层');
+    assert.equal(ctx.me.audio, undefined);
     assert.notEqual(ctx.net, realNet, '给的是受控门面，不是 net 本身');
     assert.equal(typeof ctx.net.sendResourceMessage, 'function');
     assert.equal(typeof ctx.session.setPreload, 'function');
     assert.equal(typeof ctx.host.appendChild, 'function');
     assert.throws(() => { ctx.extra = 1; }, TypeError);
     assert.equal(ctx.gate, 'session.entered');
+  });
+
+  // 「一格只读会话态」：面板答不出来的那几件事实（我是谁 / 房间的展示面），由引擎以**冻结快照**告知。
+  // 这条是它的语义钉子：房间三类状态（不在房间 / 就座 / 旁观）各自读出什么。
+  test('只读会话态 me：不在房间时是空态；就座时给出座位号；旁观时 spectating=true 且 mySeat=null', async () => {
+    const seen = [];
+    const URL_S1 = `${MOD_PANEL_PREFIX}alpha/s1.js?v=1`;
+    const h = harness({ modules: new Map([[URL_S1, { mount: (ctx) => { seen.push(ctx.me); } }]]) });
+    const list = [wire({ url: URL_S1 })];
+
+    // ① 还没进房间：三样都是空态（不是错误 —— 面板该画空态，不该抛）
+    h.apply(list);
+    await settle();
+    assert.equal(seen.length, 1);
+    const me = seen[0];
+    assert.deepEqual({ ...me.snapshot() }, { playerId: null, name: null, room: null }, '没进房间时是干净的空态');
+
+    // ② 就座：拿到自己的 playerId / name、房间码与座位号
+    //    注意：面板**挂上之后不重挂**，所以这三点是**活的只读读数**（每次读都取当前值），不是挂载那一刻的定格。
+    h.store.patch('me', { playerId: 'p1', name: '甲' });
+    h.store.patch('room', {
+      code: 'ABCD', mode: 'coop', difficulty: 'NORMAL', inMatch: false, mods: ['alpha'],
+      seats: [{ playerId: 'p1', seat: 0 }, { playerId: 'p2', seat: 1 }], spectators: [],
+    });
+    await settle();
+    assert.equal(me.playerId, 'p1', 'store 变了之后读得到新值（不是挂载时的定格）');
+    assert.equal(me.name, '甲');
+    assert.equal(me.room.code, 'ABCD');
+    assert.equal(me.room.mySeat, 0, '座位号让面板能在 seats 里定位自己');
+    assert.equal(me.room.spectating, false);
+    assert.deepEqual([...me.room.mods], ['alpha'], '房间自己那一套（W-A）也读得到');
+
+    // ③ 旁观：座位表里没有我、观众席里有我 ⇒ spectating=true 且 mySeat=null
+    h.store.patch('room', {
+      code: 'ABCD', mode: 'coop', difficulty: 'NORMAL', inMatch: true,
+      seats: [{ playerId: 'p2', seat: 0 }], spectators: [{ playerId: 'p1' }],
+    });
+    await settle();
+    assert.equal(me.room.mySeat, null, '旁观没有座位号');
+    assert.equal(me.room.spectating, true);
+    assert.equal(me.room.inMatch, true, '对局中：面板据此决定要不要显示对局相关的块');
+    // 没声明集合的房间：`mods` 是 null（不是 undefined）——面板可以按 falsy 判。
+    // 注意 `store.patch('room', …)` 是**浅合并**（store 的既有语义），所以要显式写 `mods: null` 才清得掉。
+    h.store.patch('room', { code: 'ABCD', mode: 'coop', difficulty: 'NORMAL', inMatch: false, mods: null, seats: [], spectators: [] });
+    await settle();
+    assert.equal(me.room.mods, null, '没声明集合的房间：mods 是 null');
+    // 快照是**冻结**的：面板改不动它（也就改不了引擎那份）
+    assert.throws(() => { me.room.code = 'ZZZZ'; }, TypeError);
+    assert.throws(() => { me.playerId = 'p9'; }, TypeError);
+    // 一次取全：三样来自同一次 store 读（避免面板分三次读出现撕裂）
+    assert.deepEqual(Object.keys({ ...me.snapshot() }).sort(), ['name', 'playerId', 'room']);
   });
 
   test('gate：等路径为真才挂；路径不存在 ⇒ 具名拒绝（不是永远不出现）', async () => {

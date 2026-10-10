@@ -1713,3 +1713,54 @@ no pack and requiring no declaration. The full list lives in `docs/MOD-SURFACE.m
 Tests: `test/modSurface.test.js` (the second half of that file; the first half pins the generic names that *in-place
 patch* mods depend on — those mods never pass through our validator, so they need their own guard).
 
+### 28.22 `ctx.me`: one read-only session cell, and the one host key that was missing
+
+Two small additions closed six "half-done" items at once (§28.8's C layer had every mount point and data table, but a
+panel still could not answer two questions about itself).
+
+**`ctx.me` — read-only session facts.** A panel's ctx now carries exactly three readings plus one helper:
+
+| reading | what it answers | who needs it |
+|---|---|---|
+| `playerId` / `name` | who am I (my own seat, my own lines) | a chat panel's own-message marking |
+| `room` | the room's **display face**: `code` / `mode` / `difficulty` / `inMatch` / `mySeat` / `spectating` / `mods` | `cardMarks` (clear marks when the match changes), a chat panel (`spectating` disables input), a match overlay (`inMatch`) |
+| `snapshot()` | all of the above from **one** `store.get()` | a panel that needs two readings consistently |
+
+Three properties, each deliberate:
+
+* **It is a live reading, not a frozen value.** A panel mounts once and is not re-mounted when the store changes, so a
+  captured value would freeze at mount time. Every read re-reads the store (the same stance as `ctx.data.get()`), and
+  `snapshot()` exists so a panel that needs two readings gets them from one read rather than risking a torn view.
+* **The returned objects are frozen.** A panel can read them, cannot write them, and therefore cannot write the
+  engine's state through them.
+* **The boundary is still what is NOT here.** No store handle, no `match`, no `battle`, no `battleRunner`, no `audio` —
+  the same rule §28.8 states. This is a *read-only fact*, not a capability.
+
+**Deliberately NOT included: `search` (quick-match state).** That reading lives in the **lobby screen's own
+`useState`** today (`public/js/screens/lobby.js` subscribes `room.queued`); the store has no such field. Surfacing it
+would mean first lifting it into the store — a new piece of client-global state added for a payload whose value has
+already dropped (0.13.0 ships quick match as an engine feature, §1.6 of `docs/META.md`). That is a different job, and
+it is recorded here rather than half-done.
+
+**The missing host key.** `screen.loadout.detail`'s container rendered `data-mod-slot` but **no**
+`data-mod-slot-key` (`public/js/ui/detailPanel.js:915`), so a panel mounting there read `ctx.hostKey === null` and
+could not know *which operator* the detail panel was showing — and `ctx` has no store, so it could not find out.
+The repeatable shop-card host was the positive example all along. One attribute fixes it:
+
+```html
+<div class="mod-host" data-mod-slot="screen.loadout.detail"
+     data-mod-slot-key=${detail?.type === 'chess' ? (detail.chess?.chessId || detail.standIn?.charId || detail.chess?.charId || null) : null}></div>
+```
+
+`null` (no target yet) is "not yet", not an error: the registry does not mount into a keyless container it cannot
+resolve, which is the same stance the component-rendered hosts already take.
+
+**Cost and blast radius.** Both additions are *additive*: a page with no pack declaring a panel behaves exactly as
+before (no new DOM, no new request, no new global), and `ctx.me` is one more property on an object that already
+exists. Per `docs/MOD-SURFACE.md`'s policy these are additions, so `MOD_API_VERSION` does **not** move and no published
+pack is refused. The two tests that pin the ctx key set (`test/modClientPanels.test.js`,
+`test/modPanelWraps.test.js`) had to learn the new key, which is exactly what they are for.
+
+Tests: `test/modClientPanels.test.js` — the ctx surface, the frozen-snapshot rule, and the three room states (not in a
+room / seated / spectating), plus "a later store change is visible through the same ctx".
+

@@ -563,7 +563,7 @@ describe('边界：改写拿到的 ctx 是面板那份 + component + props（只
     assert.equal(ctxs.length, 1, 'wrap(ctx) 每次渲染调用一次');
     const ctx = ctxs[0];
     assert.deepEqual(Object.keys(ctx).sort(), [
-      'component', 'data', 'gate', 'host', 'hostKey', 'id', 'log', 'net', 'order', 'pack', 'props', 'session', 'slot',
+      'component', 'data', 'gate', 'host', 'hostKey', 'id', 'log', 'me', 'net', 'order', 'pack', 'props', 'session', 'slot',
     ]);
     assert.equal(ctx.component, ENGINE_ID);
     assert.equal(ctx.id, 'p1');

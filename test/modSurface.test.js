@@ -23,8 +23,9 @@ import * as constants from '../server/sim/constants.js';
 import { validateKit, kitErrors } from '../shared/kitAuthoring.js';
 import * as workshopSchema from '../shared/workshop.js';
 import * as kitImports from '../shared/kitImports.js';
+import * as extensions from '../public/js/ui/extensions.js';
 import {
-  MOD_SURFACE, MOD_SURFACE_IDS, MOD_SURFACE_FROZEN, surfaceLedgerIssues, modSurfaceAnchorSymbols,
+  MOD_SURFACE, MOD_SURFACE_IDS, MOD_SURFACE_FROZEN, surfaceLedgerIssues,
 } from '../shared/modSurface.js';
 import { MOD_API_VERSION } from '../shared/constants.js';
 
@@ -245,8 +246,9 @@ test('活体 Battle 上的运行时成员与事件名：社区 kit 直接调的�
 const WORKSHOP_MD = readFileSync(new URL('../docs/MOD-SURFACE.md', import.meta.url), 'utf8');
 const MOD_LAYER_MD = readFileSync(new URL('../docs/design/mod-layer.md', import.meta.url), 'utf8');
 
-/** 锚点符号住在哪个模块。默认是 schema（`shared/workshop.js`）；kit import 面住在 `shared/kitImports.js`。 */
-const ANCHOR_MODULES = { schema: workshopSchema, kitImports };
+/** 锚点符号住在哪个模块。默认是 schema（`shared/workshop.js`）；kit import 面住 `shared/kitImports.js`；
+ *  客户端那一格（`ctx.me` / 宿主键）住 `public/js/ui/extensions.js`（引擎自己那一端的契约表）。 */
+const ANCHOR_MODULES = { schema: workshopSchema, kitImports, extensions };
 
 test('表面清单：每一条的锚点符号都还在它声明的模块里，成员一个不少', () => {
   assert.ok(MOD_SURFACE.length > 0, '表面清单不能是空的');

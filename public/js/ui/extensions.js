@@ -96,10 +96,19 @@ export const slotSelector = (slot) => `[data-mod-slot="${slot}"]`;
  */
 export const MOD_PANEL_CREATED = Object.freeze(['root.overlays', 'root.guide', 'screen.game.aside', 'screen.result.footer']);
 
-/** 一个宿主容器自己带的键（`data-mod-slot-key`）—— 可重复宿主用它告诉面板「你是哪一份」（商店卡那个键就是棋子 id）。 */
+/**
+ * 宿主容器用来告诉面板「你是哪一份」的属性名（`ctx.hostKey` 的来源）。
+ *
+ * 三个读者共用这一个名字，所以它必须是一份真相：注册点（`hostKeyOf`）、**渲染宿主的引擎组件**
+ * （商店卡每张一个、`screen.loadout.detail` 给出当前干员）、以及包作者（照它写选择器）。
+ * 一个包改不动它 —— 它只**读**这个属性。
+ */
+export const SLOT_KEY_ATTR = 'data-mod-slot-key';
+
+/** 一个宿主容器自己带的键（`SLOT_KEY_ATTR`）—— 可重复宿主用它告诉面板「你是哪一份」（商店卡那个键就是棋子 id）。 */
 export function hostKeyOf(el) {
   if (!el || typeof el.getAttribute !== 'function') return null;
-  const k = el.getAttribute('data-mod-slot-key');
+  const k = el.getAttribute(SLOT_KEY_ATTR);
   return typeof k === 'string' && k ? k : null;
 }
 
@@ -431,6 +440,58 @@ export function createPanelRegistry(deps) {
         return true;
       },
     });
+    // 只读会话态的取数：每次读都重新取一次 store（面板挂上之后**不重挂**，一次性的值会变陈旧 —— 与
+    // `ctx.data.get()` 同一条思路：那份读的是活数据层、每次调用都取当前值）。取不到就是 `null`：
+    // 「还没进房间」是一个合法状态，不是错误（面板该画空态，而不是抛）。
+    /** @returns {{ playerId: string|null, name: string|null, room: object|null }} 一次读的冻结快照 */
+    const readMe = () => {
+      const snap = (store && typeof store.get === 'function' ? store.get() : null) || {};
+      const me = snap.me && typeof snap.me === 'object' ? snap.me : null;
+      const meId = me && typeof me.playerId === 'string' && me.playerId ? me.playerId : null;
+      const meName = me && typeof me.name === 'string' && me.name ? me.name : null;
+      const rawRoom = snap.room && typeof snap.room === 'object' ? snap.room : null;
+      const seats = rawRoom && Array.isArray(rawRoom.seats) ? rawRoom.seats : null;
+      const seatIdx = seats ? seats.findIndex((s) => s && s.playerId === meId) : -1;
+      // 房间快照只带**展示面**：座位表本身就是公开视图，面板拿 playerId 自己找。
+      const room = rawRoom ? Object.freeze({
+        code: typeof rawRoom.code === 'string' ? rawRoom.code : null,
+        mode: typeof rawRoom.mode === 'string' ? rawRoom.mode : null,
+        difficulty: typeof rawRoom.difficulty === 'string' ? rawRoom.difficulty : null,
+        inMatch: !!rawRoom.inMatch,
+        // 我的座位号；旁观 / 不在座为 null
+        mySeat: seatIdx >= 0 ? seatIdx : null,
+        // 我是不是旁观者：与 `store.isSpectating` 同一条判据（座位表里没有我、观众席里有我）
+        spectating: !!(rawRoom.spectators && Array.isArray(rawRoom.spectators)
+          && rawRoom.spectators.some((s) => s && s.playerId === meId)),
+        // 房间自己那一套（W-A）：面板要知道"这一局跑的是哪几个包"时用它；没声明就是 null
+        mods: Array.isArray(rawRoom.mods) ? Object.freeze([...rawRoom.mods]) : null,
+      }) : null;
+      return Object.freeze({ playerId: meId, name: meName, room });
+    };
+    /**
+     * **只读会话态**（业主裁决「一格只读会话态」）：面板答不出来、只能由引擎告知的事实。
+     *
+     * 三项：`playerId` / `name`（我是谁 —— 自己的座位、自己的消息，面板无法从别处推出来）、
+     * `room`（房间的**展示面**快照：`code` / `mode` / `difficulty` / `inMatch` / `mySeat` / `spectating` / `mods`）。
+     * `cardMarks` 靠"换局"清标记、`chat` 靠 `spectating` 禁输入、`matchOverlay` 靠 `inMatch`。
+     *
+     * **为什么是 getter 而不是固定值**：面板挂上之后**不重挂**（注册点不会因为 store 变了再调一次 `mount`），
+     * 一次性的值会一直停在挂载那一刻。所以这三个读数**每次读都取当前值**，与 `ctx.data.get()` 同一条思路。
+     *
+     * **刻意不含 `search`（野排匹配态）**：那个读数今天活在**大厅屏自己的 `useState`** 里（`screens/lobby.js`
+     * 订阅 `room.queued`），store 里没有它。要让面板读到就得先把它提升进 store —— 那是**为一个已无价值的件**
+     * （引擎 0.13.0 已自带快速匹配）新增一格客户端全局状态，属于「不必要的不动」。真要做，是另一件事。
+     *
+     * **边界仍然由「不传什么」保证**：只有这几样标量/浅快照 —— **没有** store 句柄、没有 match / battle 对象、
+     * 没有 battleRunner、没有 audio。面板**读得到、改不动、也算不了**。
+     */
+    const meFacade = Object.freeze({
+      get playerId() { return readMe().playerId; },
+      get name() { return readMe().name; },
+      get room() { return readMe().room; },
+      /** 一次取全（一次 `store.get()`，三样一致）：面板要同时用两个以上的读数时用它，避免三次分别取出现撕裂。 */
+      snapshot: readMe,
+    });
     const netFacade = Object.freeze({
       /**
        * 订阅。**引擎类型**（`shared/protocol.js S2C`）照旧原样透传；其余名字被当作**这个包自己的通道**，必须先在
@@ -506,6 +567,9 @@ export function createPanelRegistry(deps) {
     return Object.freeze({
       id: rec.id, pack: rec.pack, slot: rec.slot, order: rec.order, gate: rec.gate,
       host, hostKey, session, net: netFacade, data: dataFacade, log: scoped,
+      // 只读会话态（`playerId` / `name` / `room` 快照）：面板答不出来的那几件事实，由引擎告知。
+      // 它是**活的只读读数**（每次读取当前 store），没有 store 句柄、没有 match / battle / runner / audio。
+      me: meFacade,
       ...(extra || {}),
     });
   }
