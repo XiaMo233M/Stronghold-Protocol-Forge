@@ -346,6 +346,13 @@ export async function createFieldView(host, options = {}) {
   const impostors = new ImpostorAtlas(app.renderer);
   setupCleanup.push(() => impostors.destroy());
   ctx.impostors = impostors;
+  // `layout` must be declared **before every use in this function body**. `const`/`let` live in the temporal dead zone
+  // until their initializer runs, and the statement right below calls `layout()` (via camRect()) — so a declaration
+  // further down makes `createFieldView` throw `Cannot access 'layout' before initialization` on **every** call.
+  // The caller (ui/fieldHost.js) catches that and silently falls back to the DOM field view, which is why the Pixi
+  // board — and with it the 3D board — never came up. It is an arrow function over `stageRec` (assigned by setStage),
+  // so declaring it here is safe. Do not move it back down.
+  const layout = () => layoutOfStage(stageRec);
   tiles.setView(bandFor('prep', layout()), camRect(), fieldRows('prep', layout()));
   // the real board art of the local client (optional): wait briefly so the first frame already uses it; a late
   // arrival swaps the atlas in place
@@ -465,7 +472,7 @@ export async function createFieldView(host, options = {}) {
   // Every rect below is a rect of the MAP's own window (shared/layout.js): the official 19×21 numbers when the stage
   // declares no size, the map's own bands otherwise. `stageRec` is filled by setStage before any camera is asked for a
   // rect, so `layout()` is the current map. The server's own rect (m.field `meta.rect`) wins where it is present.
-  const layout = () => layoutOfStage(stageRec);
+  // (`layout` itself is declared further up — see the note where it is declared, and do not move it back down.)
 
   function defaultPadding(kind, sz) {
     if (typeof opts.padding === 'function') { try { const p = opts.padding(kind, sz); if (p) return p; } catch { /* ignore */ } }
