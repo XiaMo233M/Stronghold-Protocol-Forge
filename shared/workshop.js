@@ -1126,7 +1126,12 @@ function parseStringList(value, where) {
 export const ART_TABLES = {
   chars: { urls: ['avatar', 'avatarE2', 'portrait', 'portraitE2'], strings: [], spine: 'sides' },
   enemies: { urls: ['icon'], strings: ['spineAliasOf'], spine: 'flat' },
-  tokens: { urls: ['avatar'], strings: ['owner'], spine: 'flat' },
+  // tokens 按官方条目的**实际字段**放开（G-08 / G-09 收口）：官方 `data/assets.json` 的 58 条 token 里有
+  // `owner` / `avatar` / `spine|spineLocal`（spine 那两种写法是既有现实），而 `portrait`（召唤物立绘）与
+  // `spineVariant`（同一套 spine 换个皮）是**这一层一直缺的两个格子**：真实 mod 要用它们，而白名单里没有，
+  // 于是作者只能弃用。`portrait` 与 `avatar` 同类（一条包内相对路径），`spineVariant` 是一条非空字符串
+  // （它选的是**引擎已有**的某个变体名，不是路径 —— 路径那一半是 `spine`）。两者都不改对局结果。
+  tokens: { urls: ['avatar', 'portrait'], strings: ['owner', 'spineVariant'], spine: 'flat' },
   skills: { flat: true, target: ['skills'] },
   profSub: { flat: true, target: ['prof', 'sub'] },
 };

@@ -143,12 +143,13 @@ describe('工坊外观素材：声明（pack.json 的 art）', () => {
     assert.equal(e.spineAliasOf, 'enemy_10001_trslim');
   });
 
-  test('tokens：avatar + 扁平的 spine + 原样抄的 owner；textures 去重', () => {
+  test('tokens：avatar + portrait（召唤物立绘）+ spineVariant + 扁平的 spine + 原样抄的 owner；textures 去重', () => {
     const r = norm({
       art: {
         tokens: {
           token_ws_thing: {
-            avatar: 'art/token.png', owner: 'char_ws_my_op',
+            avatar: 'art/token.png', portrait: 'art/token_full.png', owner: 'char_ws_my_op',
+            spineVariant: 'winter',
             spine: spine('token', { textures: ['art/token.png', 'art/token.png', 'art/token_2.png'] }),
           },
         },
@@ -157,8 +158,25 @@ describe('工坊外观素材：声明（pack.json 的 art）', () => {
     assert.equal(r.ok, true, r.detail);
     const t = r.pack.art.tokens.token_ws_thing;
     assert.equal(t.avatar, 'art/token.png');
+    // G-08 / G-09 收口：这两格是真实 mod 要用的，白名单里原本没有 ⇒ 作者只能弃用
+    assert.equal(t.portrait, 'art/token_full.png', 'portrait（召唤物立绘）与 avatar 同类：一条包内相对路径');
+    assert.equal(t.spineVariant, 'winter', 'spineVariant 是一条非空字符串（选引擎已有的变体名，不是路径）');
     assert.equal(t.owner, 'char_ws_my_op');
     assert.deepEqual(t.spine.textures, ['art/token.png', 'art/token_2.png']);
+  });
+
+  test('tokens 的新格子照旧挡两种错：未知字段点名、portrait 的穿越路径拒', () => {
+    const unknown = norm({ art: { tokens: { t: { avatar: 'a.png', nope: 1 } } } });
+    assert.equal(unknown.ok, false);
+    assert.equal(unknown.error, 'ART_UNKNOWN_FIELD');
+    assert.match(unknown.detail, /portrait/, '拒绝理由要列出合法字段（含新开的这两个），否则作者只能猜');
+    assert.match(unknown.detail, /spineVariant/);
+    const escape = norm({ art: { tokens: { t: { portrait: '../escape.png' } } } });
+    assert.equal(escape.ok, false);
+    assert.equal(escape.error, 'ART_PATH_UNSAFE', 'portrait 是新开的路径格，穿越必须照样被拒');
+    const emptyVariant = norm({ art: { tokens: { t: { spineVariant: '' } } } });
+    assert.equal(emptyVariant.ok, false);
+    assert.equal(emptyVariant.error, 'ART_BAD_SHAPE', 'spineVariant 不许空串（空名选不到任何变体）');
   });
 
   test('没有声明时是空对象（不是 undefined），包照常加载', () => {
