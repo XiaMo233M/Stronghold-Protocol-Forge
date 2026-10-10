@@ -355,7 +355,11 @@ export class Room {
       chatMode: this.chatMode,
       inMatch: !!this.match,
       seats: this.seats.map((s) => (s
-        ? { seat: s.seat, playerId: s.playerId, name: s.name, isBot: s.isBot, ready: s.ready, connected: s.connected && !s.left }
+        ? {
+          seat: s.seat, playerId: s.playerId, name: s.name, isBot: s.isBot, ready: s.ready, connected: s.connected && !s.left,
+          // 外观选择（皮肤层）：**别人看到的你**。只有选过才有这个键 —— 一个没换装的房间与从前逐字节相同。
+          ...(s.appearance && Object.keys(s.appearance).length ? { appearance: s.appearance } : {}),
+        }
         : null)),
       spectators: this.spectators.map((s) => ({ playerId: s.playerId, name: s.name, connected: s.connected })),
       ...(this.modSet ? { mods: this.modSet } : {}),
@@ -598,6 +602,8 @@ export class Lobby {  /**
       case 'room.support': return this.support(session, msg);
       case 'room.ownership': return this.ownership(session, msg);
       case 'room.diy': return this.diy(session, msg);
+      // 外观选择（皮肤层）：别人看到的你长什么样 —— 纯展示，比赛中也接受，变更即广播
+      case 'room.appearance': return this.appearance(session, msg);
       case 'room.spectate': return this.spectate(session, msg);
       case 'room.removeSpectator': return this.removeSpectator(session, msg);
       // 野排匹配 (quick match): the queue lives in server/matchmaking.js; these two cases are its only entry points
@@ -1146,6 +1152,32 @@ export class Lobby {  /**
     const seat = room.seatOf(session.playerId);
     if (seat) seat.diy = kept;
     if (room.match && seat) return fail(ERR.ROOM_STARTED, 'stored for the next match');
+    return OK;
+  }
+
+  /**
+   * `room.appearance`（皮肤层）：把**别人看到的你长什么样**存到会话与座位上，并向全房广播。
+   *
+   * 与 `room.diy` / `room.ownership` 有三处刻意的不同：
+   *   * **服务端不判定内容**。形状由 `validateC2S` 卡死（`{ skinId } | { avatar }`，恰好一个），但「这个 skinId
+   *     存不存在」要看包声明的 `assets.skins`，而**服务端看不见包内容** —— 所以这一层只转发，不认识的那一项由
+   *     画的一方回落原版（`portraitChain` 的回落：可见、可解释，不会串到别的干员身上）；
+   *   * **比赛中也接受**（不像 diy / ownership 存起来等下一局）：它只改显示，**不碰战果**，所以没有理由等；
+   *   * 每次变更**广播** `room.state`（同房的人要立刻看到），而不是等下一次状态推送。
+   * @param {any} session
+   * @param {{ picks: Record<string, { skinId?: string, avatar?: string }> }} msg
+   */
+  appearance(session, { picks }) {
+    const kept = Object.freeze(Object.fromEntries(
+      Object.entries(picks).map(([charId, pick]) => [charId, Object.freeze({ ...pick })]),
+    ));
+    session.appearance = kept;
+    const room = this.roomOf(session);
+    if (!room) return OK;
+    const seat = room.seatOf(session.playerId);
+    if (seat) seat.appearance = kept;
+    // 广播：外观是**给别人看的**，所以它必须立刻到达同房的人（不像 loadout 那样只对本人生效）
+    this.broadcastState(room);
     return OK;
   }
 
