@@ -27,8 +27,8 @@
   padding: .1rem 0 .3rem; border-bottom: 1px solid var(--line);
 }
 .sp-head__spacer { flex: 1; }
-.sp-usage { font-size: max(.13rem, 12px); color: var(--text-hi); }
-.sp-sync { font-size: max(.12rem, 11px); color: var(--text-lo); }
+.sp-usage { font-size: max(calc(.13 * var(--t)), 12px); color: var(--text-hi); }
+.sp-sync { font-size: max(calc(.12 * var(--t)), 11px); color: var(--text-lo); }
 .sp-sync--synced { color: var(--ok, #4ed8af); }
 .sp-sync--error, .sp-sync--waiting { color: var(--warn, #e0b357); }
 .sp-loading { padding: .6rem; color: var(--text-lo); }
@@ -36,7 +36,7 @@
 /* ---- one tier ---------------------------------------------------------------------------------------------------- */
 .sp-tier { margin-top: .28rem; }
 .sp-tier__head { display: flex; align-items: center; gap: .16rem; margin-bottom: .14rem; }
-.sp-tier__n { font-size: max(.13rem, 12px); color: var(--text-lo); }
+.sp-tier__n { font-size: max(calc(.13 * var(--t)), 12px); color: var(--text-lo); }
 
 .sp-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(max(.9rem, 200px), 1fr)); gap: .12rem;
@@ -58,16 +58,16 @@
   display: flex; align-items: center; justify-content: center; font-weight: 600;
 }
 .sp-row__txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.sp-row__name { font-size: max(.14rem, 13px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sp-row__meta { display: flex; align-items: center; gap: .08rem; font-size: max(.12rem, 11px); }
+.sp-row__name { font-size: max(calc(.14 * var(--t)), 13px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-row__meta { display: flex; align-items: center; gap: .08rem; font-size: max(calc(.12 * var(--t)), 11px); }
 .sp-row__prof { width: max(.16rem, 15px); height: max(.16rem, 15px); object-fit: contain; }
-.sp-row__mark { flex: none; font-size: max(.12rem, 11px); color: var(--accent, #4ed8af); }
+.sp-row__mark { flex: none; font-size: max(calc(.12 * var(--t)), 11px); color: var(--accent, #4ed8af); }
 .sp-row.full .sp-row__mark { color: var(--text-lo); }
 
 /* ---- the entry button -------------------------------------------------------------------------------------------- */
 .sp-entry__n {
   margin-left: .08rem; padding: 0 .06rem; border-radius: 999px;
   background: var(--accent, #4ed8af); color: var(--bg-0);
-  font-size: max(.11rem, 10px); font-weight: 700; line-height: max(.16rem, 16px);
+  font-size: max(calc(.11 * var(--t)), 10px); font-weight: 700; line-height: max(.16rem, 16px);
 }
 .sp-entry:disabled { opacity: .5; cursor: not-allowed; }

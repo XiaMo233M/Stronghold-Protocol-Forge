@@ -208,6 +208,7 @@ function maybeFinishRestore() {
  * follow the store themselves).
  */
 function backToLobby() {
+  identity.rememberMatch(null);
   clearTimeout(restoreTimer);
   const s = store.get();
   if (s.room || s.match.public) closeAllDialogs();
@@ -217,6 +218,7 @@ function backToLobby() {
 
 function onWelcome(msg) {
   identity.saveToken(msg.token);
+  identity.rememberMatch(null);
   const prev = store.get();
   const prevId = prev.me.playerId;
   const name = typeof msg.name === 'string' && msg.name ? msg.name : prev.me.name;
@@ -230,6 +232,7 @@ function onWelcome(msg) {
       selected: sameMods ? prev.roomMods.selected : roomMods.getSelectedModIds(),
     },
   });
+  identity.saveName(name);
   store.set({ me: { playerId: msg.playerId ?? null, name, token: typeof msg.token === 'string' ? msg.token : null } });
   welcomeAt = Date.now();
 
@@ -277,6 +280,8 @@ function onRoomState(msg) {
     roomMods.clearSelection();
     if (store.get().roomMods.selected.length) store.set({ roomMods: { ...store.get().roomMods, selected: [] } });
   }
+  identity.rememberMatch(room.inMatch && seats.some((seat) => seat?.playerId === myId)
+    ? { name: store.get().me.name, code: room.code || '' } : null);
   if (room.mode === 'coop' && typeof room.code === 'string') rememberRoom(room.code);
   maybeFinishRestore();
 }
@@ -323,7 +328,12 @@ function wireNet() {
     // 这里一次都不调，页面不多一条 CSS 自定义属性。
     if (msg && msg.modTheme && typeof msg.modTheme === 'object') modPanels.applyTheme(msg.modTheme);
   });
-  net.on('helloError', (err) => toastError(err));
+  // 只注册一次：上游 0.2.3 这个处理器是本仓库原版的**超集**（同样 toastError，另加 SESSION_IN_USE 时作废本机令牌），
+  // 两处都留会让同一个握手错误弹两次提示。
+  net.on('helloError', (err) => {
+    if (err.code === 'SESSION_IN_USE') identity.rejectToken();
+    toastError(err);
+  });
   net.on('replaced', () => toast(t('该身份已在其他页面登录，本页已断开'), 'warn', { ttl: 6000 }));
   net.on('unhandledError', (err) => toastError(err));
   net.on('room.state', onRoomState);

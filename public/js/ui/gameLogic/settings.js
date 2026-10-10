@@ -8,17 +8,28 @@ import { VOICE_LANGS, DEFAULT_VOICE_LANG } from '../../../../shared/constants.js
 // ---- settings ------------------------------------------------------------------------------------------------------
 
 /**
+ * The steps of 设置 →「文字大小」 (textSize): the interface text root `--t` of css/theme.css — 'sm' is the design's own
+ * sizes (`--t: 1rem`), the others lift the phone's 40 px root by a floor and grow the desktop gently. Text only: the
+ * layout root `1rem` (and with it the field camera, the detail card's side and the DOM fallback board) never moves.
+ */
+export const TEXT_SIZES = Object.freeze(['sm', 'md', 'lg', 'xl']);
+
+/**
  * keys: the in-match shortcuts' key map (ui/gameLogic/shortcuts.js; settings → 快捷键).
  * voiceLang: the 配音语言 every operator speaks unless it has its own (VOICE_LANGS).
- * voiceLangByChar: charId → dub, the per-operator override of 干员详情 → 配音 (absent = follow voiceLang).
+ * voiceLangByChar: charId → dub, the per-operator override of 干员详情 / 干员调配 → 配音 (absent = follow voiceLang).
+ * textSize: TEXT_SIZES (css/theme.css `--t`, applied by ui/settings.js applyTextSize).
  */
-export const DEFAULT_SETTINGS = Object.freeze({ bgm: 0.6, sfx: 0.8, voice: 0.8, muted: false, damageNumbers: true, quality: 'high', keys: DEFAULT_HOTKEYS, voiceLang: DEFAULT_VOICE_LANG, voiceLangByChar: Object.freeze({}) });
+export const DEFAULT_SETTINGS = Object.freeze({ bgm: 0.6, sfx: 0.8, voice: 0.8, muted: false, damageNumbers: true, quality: 'high', textSize: 'sm', keys: DEFAULT_HOTKEYS, voiceLang: DEFAULT_VOICE_LANG, voiceLangByChar: Object.freeze({}) });
 
 /**
  * The 配音语言 vocabulary (settings 语音语言) under upstream 0.2.2's name: the canonical list is shared/constants.js
  * (cn / jp / en / kr, imported above), which the workshop validator, the editor's voice page and the CLI all read.
  * Upstream's own export was its two dubs ('cn' 中文 / 'jp' 日本語 through `audio.voiceJp`); `availableVoiceLangs`
  * below still narrows the choice to the dubs the loaded manifest really ships.
+ *
+ * 上游 0.2.3 在 public/js/voicePrefs.js 里另开了一套逐干员语音（`voiceOverrides` + 只有 cn / jp 的词表）。
+ * 不并存两套：那套的词表现在也指向 shared/constants.js 这一份，存储键仍是下面的 `voiceLangByChar`。
  */
 export { VOICE_LANGS };
 const QUALITIES = ['high', 'medium', 'low'];
@@ -75,7 +86,7 @@ export function voiceLangFor(s, charId) {
  * Sanitize persisted settings.
  * @param {any} raw
  * @returns {{ bgm: number, sfx: number, voice: number, muted: boolean, damageNumbers: boolean, quality: 'high'|'medium'|'low',
- *   keys: Record<'refresh'|'freeze'|'levelUp'|'retreat'|'sell'|'ready', string>,
+ *   textSize: 'sm'|'md'|'lg'|'xl', keys: Record<'refresh'|'freeze'|'levelUp'|'retreat'|'sell'|'ready', string>,
  *   voiceLang: 'cn'|'jp'|'en'|'kr', voiceLangByChar: Record<string, 'cn'|'jp'|'en'|'kr'> }}
  */
 export function sanitizeSettings(raw) {
@@ -88,6 +99,7 @@ export function sanitizeSettings(raw) {
     muted: typeof r.muted === 'boolean' ? r.muted : DEFAULT_SETTINGS.muted,
     damageNumbers: typeof r.damageNumbers === 'boolean' ? r.damageNumbers : DEFAULT_SETTINGS.damageNumbers,
     quality: QUALITIES.includes(r.quality) ? r.quality : DEFAULT_SETTINGS.quality,
+    textSize: TEXT_SIZES.includes(r.textSize) ? r.textSize : DEFAULT_SETTINGS.textSize,
     keys: sanitizeHotkeys(r.keys),
     voiceLang: VOICE_LANGS.includes(r.voiceLang) ? r.voiceLang : DEFAULT_SETTINGS.voiceLang,
     voiceLangByChar: sanitizeVoiceLangByChar(r.voiceLangByChar),

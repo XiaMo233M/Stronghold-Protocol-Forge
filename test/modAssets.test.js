@@ -1217,8 +1217,11 @@ describe('assetsDigest 进身份哈希（DESIGN §28.2 / §28.13.5）', () => {
   });
 
   test('不声明 `assets` 的包一个字不变：三份真实包的哈希 + 集合摘要照旧', () => {
-    const BASELINE = {
-      clementia: '96ebc2d4998c5897b25b6b7dbc0e497f84e7e45c974b68d7eb661f93a28d4e58',
+    // clementia 那一个在 0.2.3 那一轮**移过**：上游把克莱门莎收成了官方干员（官方 id `char_4231_clemnt`），
+// 本仓库的示例夹具再用那个 id 会被加载器按 OFFICIAL_ID_COLLISION 拒掉，于是 id 换成工坊保留前缀的
+// `char_ws_clemnt`（docs/examples/clementia/README.md）—— 包的内容真的变了，基线随之移动。
+const BASELINE = {
+      clementia: '27627f47d04aef3a622202a92038ada7a514b2c2b44389bfb069720b823d987e',
       'demo-workshop': '15092019fd1dbc85589af4b89102746c3a3c0389aef3847d7d9a335bca1a73ef',
       'kit-demo': '77b80c6e74021508d5857208d669da36cc74f20384798a6d5a269fd37f9e4f35',
     };
@@ -1230,8 +1233,11 @@ describe('assetsDigest 进身份哈希（DESIGN §28.2 / §28.13.5）', () => {
       assert.equal(p.manifest.some((m) => m.path === ASSETS_DIGEST_PATH), false, `${p.id}: 不该有容器摘要那一条`);
     }
     const set = modSetOf(loaded.packs.map((p) => ({ id: p.id, hash: p.hash, layer: p.layer, combat: p.combat, api: p.api })));
-    // 实测值。前 8 位与 `_up` 记录里的基线摘要（`eacd0485…`）逐字相同 ⇒ 「不声明 assets 的包一字不变」成立。
-    assert.equal(set.digest, 'eacd0485338b87ddca4eafe9c867168bbdeea05cbf36fae7a19e4a9d890ea634');
+    // 实测值。整套摘要随着 clementia 那一份身份哈希一起移过：上游 0.2.3 把克莱门莎收成官方干员
+    // （char_4231_clemnt），示例夹具换成工坊保留前缀的 char_ws_clemnt（docs/examples/clementia/README.md），
+    // 于是那一个包的 hash 变了、整套摘要跟着变 —— 而另两份包（demo-workshop / kit-demo）的哈希一个字没变，
+    // 正是这一条要守的东西。
+    assert.equal(set.digest, '8913d669e9c01c15e2293b966de3a547c05828ba36c5f805f8888dcfc9f6ac10');
   });
 });
 

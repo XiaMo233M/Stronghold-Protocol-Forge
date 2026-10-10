@@ -11,7 +11,7 @@
     "units"
   ],
   "operators": {
-    "char_4231_clemnt": {
+    "char_ws_clemnt": {
       "bonds": [
         "egirShip"
       ],
@@ -22,56 +22,56 @@
     }
   },
   "voices": {
-    "char_4231_clemnt": {
+    "char_ws_clemnt": {
       "start": [
-        "audio/voice/jp/char_4231_clemnt/cn_019.mp3"
+        "audio/voice/jp/char_ws_clemnt/cn_019.mp3"
       ],
       "select": [
-        "audio/voice/jp/char_4231_clemnt/cn_021.mp3",
-        "audio/voice/jp/char_4231_clemnt/cn_022.mp3"
+        "audio/voice/jp/char_ws_clemnt/cn_021.mp3",
+        "audio/voice/jp/char_ws_clemnt/cn_022.mp3"
       ],
       "place": [
-        "audio/voice/jp/char_4231_clemnt/cn_023.mp3",
-        "audio/voice/jp/char_4231_clemnt/cn_024.mp3"
+        "audio/voice/jp/char_ws_clemnt/cn_023.mp3",
+        "audio/voice/jp/char_ws_clemnt/cn_024.mp3"
       ],
       "skill1": [
-        "audio/voice/jp/char_4231_clemnt/cn_025.mp3"
+        "audio/voice/jp/char_ws_clemnt/cn_025.mp3"
       ]
     }
   },
   "voiceLangs": {
     "cn": {
-      "char_4231_clemnt": {
+      "char_ws_clemnt": {
         "start": [
-          "audio/voice/cn/char_4231_clemnt/cn_019.mp3"
+          "audio/voice/cn/char_ws_clemnt/cn_019.mp3"
         ],
         "select": [
-          "audio/voice/cn/char_4231_clemnt/cn_021.mp3",
-          "audio/voice/cn/char_4231_clemnt/cn_022.mp3"
+          "audio/voice/cn/char_ws_clemnt/cn_021.mp3",
+          "audio/voice/cn/char_ws_clemnt/cn_022.mp3"
         ],
         "place": [
-          "audio/voice/cn/char_4231_clemnt/cn_023.mp3",
-          "audio/voice/cn/char_4231_clemnt/cn_024.mp3"
+          "audio/voice/cn/char_ws_clemnt/cn_023.mp3",
+          "audio/voice/cn/char_ws_clemnt/cn_024.mp3"
         ],
         "skill1": [
-          "audio/voice/cn/char_4231_clemnt/cn_025.mp3"
+          "audio/voice/cn/char_ws_clemnt/cn_025.mp3"
         ]
       }
     }
   },
   "art": {
     "chars": {
-      "char_4231_clemnt": {
-        "avatar": "char/avatar/char_4231_clemnt.png",
-        "avatarE2": "char/avatar/char_4231_clemnt_2.png",
-        "portrait": "char/portrait/char_4231_clemnt_1.png",
-        "portraitE2": "char/portrait/char_4231_clemnt_2.png",
+      "char_ws_clemnt": {
+        "avatar": "char/avatar/char_ws_clemnt.png",
+        "avatarE2": "char/avatar/char_ws_clemnt_2.png",
+        "portrait": "char/portrait/char_ws_clemnt_1.png",
+        "portraitE2": "char/portrait/char_ws_clemnt_2.png",
         "spine": {
           "front": {
-            "skel": "spine/op/char_4231_clemnt/front/char_4231_clemnt.skel",
-            "atlas": "spine/op/char_4231_clemnt/front/char_4231_clemnt.atlas",
+            "skel": "spine/op/char_ws_clemnt/front/char_ws_clemnt.skel",
+            "atlas": "spine/op/char_ws_clemnt/front/char_ws_clemnt.atlas",
             "textures": [
-              "spine/op/char_4231_clemnt/front/char_4231_clemnt.png"
+              "spine/op/char_ws_clemnt/front/char_ws_clemnt.png"
             ],
             "pma": false,
             "anims": {
@@ -127,10 +127,10 @@
             }
           },
           "back": {
-            "skel": "spine/op/char_4231_clemnt/back/char_4231_clemnt.skel",
-            "atlas": "spine/op/char_4231_clemnt/back/char_4231_clemnt.atlas",
+            "skel": "spine/op/char_ws_clemnt/back/char_ws_clemnt.skel",
+            "atlas": "spine/op/char_ws_clemnt/back/char_ws_clemnt.atlas",
             "textures": [
-              "spine/op/char_4231_clemnt/back/char_4231_clemnt.png"
+              "spine/op/char_ws_clemnt/back/char_ws_clemnt.png"
             ],
             "pma": false,
             "anims": {

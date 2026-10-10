@@ -1,6 +1,6 @@
 {
-  "char_4231_clemnt": {
-    "charId": "char_4231_clemnt",
+  "char_ws_clemnt": {
+    "charId": "char_ws_clemnt",
     "name": "克莱门莎",
     "appellation": "Clementia",
     "rarity": 6,
@@ -11,11 +11,11 @@
     "nationId": "egir",
     "isNotObtainable": false,
     "assets": {
-      "avatar": "char_4231_clemnt",
-      "avatarGolden": "char_4231_clemnt_2",
-      "portrait": "char_4231_clemnt_1",
-      "portraitGolden": "char_4231_clemnt_2",
-      "spine": "char_4231_clemnt",
+      "avatar": "char_ws_clemnt",
+      "avatarGolden": "char_ws_clemnt_2",
+      "portrait": "char_ws_clemnt_1",
+      "portraitGolden": "char_ws_clemnt_2",
+      "spine": "char_ws_clemnt",
       "subProfIcon": "sub_primguard_icon"
     },
     "moduleNames": {},
