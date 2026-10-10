@@ -65,7 +65,7 @@ LICENSE / NOTICE.md / THIRD-PARTY-NOTICES.md
 
 ```powershell
 # 玩家侧：停掉游戏 → 解压覆盖到安装文件夹（就是那个含 启动游戏.bat 的目录）→ 照常启动
-tar -xf Stronghold-Protocol-Forge-0.13.0-0.2.2-update.zip -C C:\Stronghold-Protocol
+tar -xf Stronghold-Protocol-Forge-0.13.1-0.2.2-update.zip -C C:\Stronghold-Protocol
 ```
 
 启动时服务端会先跑一遍 `server/update.js` 的检查：按包里的 `app\MANIFEST.json`（每个程序文件的大小与 sha256）
@@ -76,7 +76,7 @@ tar -xf Stronghold-Protocol-Forge-0.13.0-0.2.2-update.zip -C C:\Stronghold-Proto
 维护者侧打这个包（`app\MANIFEST.json` 由打包脚本写出，更新包再拿它当新版本的清单）：
 
 ```powershell
-node scripts/make-windows-bundle.mjs --out E:\destop\Stronghold-Protocol-Forge-0.13.0-0.2.2-win-x64 --force
+node scripts/make-windows-bundle.mjs --out E:\destop\Stronghold-Protocol-Forge-0.13.1-0.2.2-win-x64 --force
 node scripts/make-update-package.mjs --bundle <上面那个目录> --from <上一版的 win-x64.zip> --out <update.zip>
 ```
 
