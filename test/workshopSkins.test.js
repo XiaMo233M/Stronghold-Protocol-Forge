@@ -105,10 +105,12 @@ describe('pack.json.skins：形状与拒绝路径', () => {
     assert.equal(SKIN_ID_RE.test('a b'), false);
   });
 
-  test('没有声明 skins 时归一化结果是空数组（旧包逐字节不变）', () => {
+  test('没有声明 skins 时**清单里没有这个键**（老包哈希逐字节不变）', () => {
     const r = normalizePackManifest({ id: 'p', name: 'p', content: ['chess'] }, 'p', {});
     assert.equal(r.ok, true);
-    assert.deepEqual(r.pack.skins, [], '缺席 ⇒ 空数组，包不因此被拒');
+    // 与 `declared` 那四组同一条纪律：只在声明过时才存在。给每个包都加 `skins: []` 会让**所有已发布包的哈希
+    // 全部改变**，而哈希是房间身份与 W-D 对齐的依据（test/modAssets.test.js 那条基线就是这么被撞红的）。
+    assert.equal('skins' in r.pack, false, '缺席 ⇒ 键根本不存在，而不是空数组');
   });
 });
 

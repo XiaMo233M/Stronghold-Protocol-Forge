@@ -1711,7 +1711,10 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
       bondIcons: bondIconFiles,
       itemIcons: itemIconFiles,
       art: artEntries,
-      skins: skinEntries,
+      // 时装**只在声明过时才存在**（与下面 `declared` 同一条纪律，理由逐字相同）：`identifyPack` 哈希的是这份
+      // 归一化清单的 `canonicalJson`，所以给每个包都加一个 `skins: []` 会让**所有已发布包的哈希全部改变**
+      // —— 而哈希是房间身份与 W-D 对齐的依据，动它等于让每个老包在同一条房间里被判成「另一个包」。
+      ...(skinEntries.length ? { skins: skinEntries } : {}),
       support: supportIds,
       operators: orderedOperators,
       playtest: { directToHand },

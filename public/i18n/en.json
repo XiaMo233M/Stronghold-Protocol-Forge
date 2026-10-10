@@ -1278,5 +1278,7 @@
   "允许打字与快捷短语": "Allow typing and quick messages",
   "只允许快捷短语": "Quick messages only",
   "关闭聊天": "Chat off",
-  "该房间的聊天设置不允许这条消息": "This room's chat setting does not allow that message"
+  "该房间的聊天设置不允许这条消息": "This room's chat setting does not allow that message",
+  "战斗倍速 {cur}×": "Battle speed {cur}×",
+  "战斗倍速 {cur}× · 点击切到 {next}×（只加快播放，结果不变）": "Battle speed {cur}× · click for {next}× (playback only — the outcome is unchanged)"
 }

@@ -358,6 +358,34 @@ const isDiyPickWire = (p) => p === null || (isPlain(p) && isId(p.charId)
 /** Structural check of `room.diy.picks`: a map of ≤ 8 slot ids → a pick `{ charId, skillIndex?, uniEquipId? }` or null. */
 export const isDiyPicks = (v) => isMap(v, DIY_LIMITS.slots, isId, isDiyPickWire);
 
+// ---- 外观选择 (皮肤层): room.appearance { picks } -------------------------------------------------------------------
+
+/**
+ * `room.appearance { picks }`: **别人看到的你长什么样**（业主裁决：换装与头像要对同房的人可见）。
+ *
+ * 形状：`{ [charId]: { skinId } | { avatar } }` —— 按干员记「当前选了哪套」。两种值：
+ *   * `{ skinId }`：包声明的时装 id（客户端去 `assets.skins[charId]` 里找那一套）；
+ *   * `{ avatar }`：直接一个头像 id（原版 `chars` 的键，或包给的 `art` 条目）。
+ *
+ * 三条纪律：
+ *   * **结构判据只有这一层**（形状对不对、条数超没超）；「这个 skinId 到底存不存在」要靠客户端手里的
+ *     `assets.skins`，而服务端**看不见**包内容 —— 所以服务端**只转发不判定**，不认识的那一项由**画的一方**
+ *     回落原版（与 `portraitChain` 的回落同一条：可见、可解释，不会串到别的干员身上）；
+ *   * 它是**展示**消息：不进 golden、不影响任何服务端判定，因此 `combat` 与它无关；
+ *   * 上界 `APPEARANCE_LIMITS.picks`：一间房最多这么多干员，多出来的是坏数据而不是「更多的时装」。
+ */
+export const APPEARANCE_LIMITS = Object.freeze({ picks: 64 });
+/** 一项外观：`{ skinId }` 或 `{ avatar }`，**恰好一个**（两个都给/都不给都是坏消息，不是「取其一」）。 */
+const isAppearancePick = (p) => {
+  if (!isPlain(p)) return false;
+  const hasSkin = p.skinId !== undefined, hasAvatar = p.avatar !== undefined;
+  if (hasSkin === hasAvatar) return false;
+  const id = hasSkin ? p.skinId : p.avatar;
+  return isId(id);
+};
+/** Structural check of `room.appearance.picks`: a map of ≤ 64 charIds → `{ skinId } | { avatar }`. */
+export const isAppearancePicks = (v) => isMap(v, APPEARANCE_LIMITS.picks, isId, isAppearancePick);
+
 /**
  * Semantic check + normalisation of a 自选 roster against the game data (`{ chess, backups }` or a sim DataSource) and
  * the kit registry (`kitted`: server/sim/content/kits/index.js KITTED_CHARS — an operator without a kit is never fielded):
@@ -497,6 +525,14 @@ export const C2S = {
   // 自选编队 (0.2.0 DIY): the player's DIY slot picks; stored per session / seat like room.ownership (a match takes the
   // picks its seat had when it started; during a match they are stored for the next one: ROOM_STARTED)
   'room.diy': { picks: isDiyPicks },
+  // 房间内的**外观选择**（皮肤层，业主裁决：让「换装 / 头像」对同房的人可见）。
+  //
+  // 这是一条**展示**消息，不是玩法消息：它改的是别人看到的你长什么样，**永远不碰战果**，因此
+  //   * 不进 golden、不影响任何服务端判定；
+  //   * 值必须是引擎认识的形状（`{ charId, skinId }` 或 `{ charId, avatar }`），不认识就**点名拒绝**，
+  //     而不是存一个没人能解释的字符串（静默失败的老毛病）；
+  //   * 每条上限 64 项（`APPEARANCE_MAX`）：一间房最多就这么多干员，多出来的是坏数据。
+  'room.appearance': { picks: isAppearancePicks },
   // spectator seats (remake feature, community report #26; MAX_SPECTATORS): take one of a co-op room's spectator seats —
   // in its lobby or while its match runs — never a player seat; the host frees one by playerId (the spectator gets
   // room.closed { reason: 'kicked' }). room.leave / g.leave leave a spectator seat like a player seat.
