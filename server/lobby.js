@@ -115,7 +115,7 @@
 
 import { randomBytes, randomInt } from 'node:crypto';
 import { ERR, MAX_SEATS, MAX_SPECTATORS, ROOM_CODE_LEN, modeIdFor } from '../shared/constants.js';
-import { checkLoadout, checkLoadoutOps, cultivationCharIds, checkNotOwned, checkDiyPicks, PACK_MSG_LIMITS, CHAT_LIMITS, CHAT_MODES } from '../shared/protocol.js';
+import { checkLoadout, checkLoadoutOps, cultivationCharIds, checkNotOwned, checkDiyPicks, PACK_MSG_LIMITS, CHAT_LIMITS } from '../shared/protocol.js';
 import { modSetOf, isModId } from '../shared/modIdentity.js';
 import { normalizeSupportConfig, checkSupport, supportPicker, supportCapacity, supportTiers } from '../shared/support.js';
 import { encode, isDroppable, isErrCode, sendRaw, sendSession } from './net.js';
