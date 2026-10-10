@@ -357,7 +357,8 @@ export class Room {
       seats: this.seats.map((s) => (s
         ? {
           seat: s.seat, playerId: s.playerId, name: s.name, isBot: s.isBot, ready: s.ready, connected: s.connected && !s.left,
-          // 外观选择（皮肤层）：**别人看到的你**。只有选过才有这个键 —— 一个没换装的房间与从前逐字节相同。
+          // 外观选择（皮肤层）：**别人看到的你** —— `{ picks?, avatar? }`（见 `appearance()`）。
+          // 只有选过才有这个键 —— 一个没换装的房间与从前逐字节相同。
           ...(s.appearance && Object.keys(s.appearance).length ? { appearance: s.appearance } : {}),
         }
         : null)),
@@ -1158,19 +1159,33 @@ export class Lobby {  /**
   /**
    * `room.appearance`（皮肤层）：把**别人看到的你长什么样**存到会话与座位上，并向全房广播。
    *
+   * 两个字段：`picks`（按干员的换装）与 `avatar`（玩家自己那张头像）—— **合并进同一份**会话/座位状态，
+   * 因为对别人来说它们就是同一件事（「他现在长这样」）。
+   *
    * 与 `room.diy` / `room.ownership` 有三处刻意的不同：
-   *   * **服务端不判定内容**。形状由 `validateC2S` 卡死（`{ skinId } | { avatar }`，恰好一个），但「这个 skinId
-   *     存不存在」要看包声明的 `assets.skins`，而**服务端看不见包内容** —— 所以这一层只转发，不认识的那一项由
-   *     画的一方回落原版（`portraitChain` 的回落：可见、可解释，不会串到别的干员身上）；
-   *   * **比赛中也接受**（不像 diy / ownership 存起来等下一局）：它只改显示，**不碰战果**，所以没有理由等；
-   *   * 每次变更**广播** `room.state`（同房的人要立刻看到），而不是等下一次状态推送。
+   *   * **服务端不判定内容**。形状由 `validateC2S`（`isAppearanceMsg`）卡死，但「这个 skinId 存不存在」要看包
+   *     声明的 `assets.skins`，而**服务端看不见包内容** —— 所以这一层只转发，不认识的那一项由画的一方回落原版
+   *     （`portraitChain` 的回落：可见、可解释，不会串到别的干员身上）；
+   *   * **比赛中也接受**（不像 diy / ownership 存起来等下一局）：它只改显示、**不碰战果**，没有理由等；
+   *   * **变更即广播**（同房的人要立刻看到），而不是等下一次状态推送。
+   *
+   * 合并语义是**浅合并**：这一条只带 `avatar` 时，已经选过的 `picks` 原样保留（反之亦然）——
+   * 「换头像把皮肤清空」是没人会报的错（两个字段说的是两件事）。
    * @param {any} session
-   * @param {{ picks: Record<string, { skinId?: string, avatar?: string }> }} msg
+   * @param {{ picks?: Record<string, { skinId?: string, avatar?: string }>, avatar?: { avatar?: string } }} msg
    */
-  appearance(session, { picks }) {
-    const kept = Object.freeze(Object.fromEntries(
-      Object.entries(picks).map(([charId, pick]) => [charId, Object.freeze({ ...pick })]),
-    ));
+  appearance(session, msg) {
+    const prev = session.appearance && typeof session.appearance === 'object' ? session.appearance : null;
+    const picks = msg.picks !== undefined
+      ? Object.freeze(Object.fromEntries(Object.entries(msg.picks).map(([charId, pick]) => [charId, Object.freeze({ ...pick })])))
+      : (prev ? prev.picks : null);
+    const avatar = msg.avatar !== undefined
+      ? Object.freeze({ ...msg.avatar })
+      : (prev ? prev.avatar : null);
+    const kept = Object.freeze({
+      ...(picks && Object.keys(picks).length ? { picks } : {}),
+      ...(avatar ? { avatar } : {}),
+    });
     session.appearance = kept;
     const room = this.roomOf(session);
     if (!room) return OK;

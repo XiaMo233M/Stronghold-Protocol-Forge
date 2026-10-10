@@ -358,14 +358,18 @@ const isDiyPickWire = (p) => p === null || (isPlain(p) && isId(p.charId)
 /** Structural check of `room.diy.picks`: a map of ≤ 8 slot ids → a pick `{ charId, skillIndex?, uniEquipId? }` or null. */
 export const isDiyPicks = (v) => isMap(v, DIY_LIMITS.slots, isId, isDiyPickWire);
 
-// ---- 外观选择 (皮肤层): room.appearance { picks } -------------------------------------------------------------------
+// ---- 外观选择 (皮肤层): room.appearance { picks?, avatar? } ---------------------------------------------------------
 
 /**
- * `room.appearance { picks }`: **别人看到的你长什么样**（业主裁决：换装与头像要对同房的人可见）。
+ * `room.appearance { picks?, avatar? }`: **别人看到的你长什么样**（业主裁决：换装与头像要对同房的人可见）。
  *
- * 形状：`{ [charId]: { skinId } | { avatar } }` —— 按干员记「当前选了哪套」。两种值：
- *   * `{ skinId }`：包声明的时装 id（客户端去 `assets.skins[charId]` 里找那一套）；
- *   * `{ avatar }`：直接一个头像 id（原版 `chars` 的键，或包给的 `art` 条目）。
+ * 两件事**刻意分开**，因为它们的归属不同：
+ *   * `picks` —— **按干员**记「当前选了哪套」：`{ [charId]: { skinId } | { avatar } }`。
+ *     一套皮肤属于一个干员，所以键是干员 id。两种值：
+ *       - `{ skinId }`：包声明的时装 id（客户端去 `assets.skins[charId]` 里找那一套）；
+ *       - `{ avatar }`：直接一个头像 id（官方 charId，或包给的 `art` 条目）。
+ *   * `avatar` —— **玩家自己**那一张头像，是**一个人**的选择、不按干员分组。它如果混进 `picks`，
+ *     就需要一个假的 charId 当键 —— 那是把「人的选择」硬塞进「干员的选择」，下一个读的人必然误用。
  *
  * 三条纪律：
  *   * **结构判据只有这一层**（形状对不对、条数超没超）；「这个 skinId 到底存不存在」要靠客户端手里的
@@ -373,6 +377,7 @@ export const isDiyPicks = (v) => isMap(v, DIY_LIMITS.slots, isId, isDiyPickWire)
  *     回落原版（与 `portraitChain` 的回落同一条：可见、可解释，不会串到别的干员身上）；
  *   * 它是**展示**消息：不进 golden、不影响任何服务端判定，因此 `combat` 与它无关；
  *   * 上界 `APPEARANCE_LIMITS.picks`：一间房最多这么多干员，多出来的是坏数据而不是「更多的时装」。
+ *     两个字段都**可选**（只换头像不动皮肤，反之亦然），但**不能都不给** —— 一条什么都没说的消息是坏消息。
  */
 export const APPEARANCE_LIMITS = Object.freeze({ picks: 64 });
 /** 一项外观：`{ skinId }` 或 `{ avatar }`，**恰好一个**（两个都给/都不给都是坏消息，不是「取其一」）。 */
@@ -383,8 +388,30 @@ const isAppearancePick = (p) => {
   const id = hasSkin ? p.skinId : p.avatar;
   return isId(id);
 };
-/** Structural check of `room.appearance.picks`: a map of ≤ 64 charIds → `{ skinId } | { avatar }`. */
-export const isAppearancePicks = (v) => isMap(v, APPEARANCE_LIMITS.picks, isId, isAppearancePick);
+/**
+ * Structural check of `room.appearance`: `{ picks?: {<charId>: {skinId}|{avatar}}, avatar?: {avatar} }`.
+ *
+ * `picks` 的**每一项也必须是 `{skinId}` 或 `{avatar}` 恰好一个**（同一个判据两处用）—— 一件「两个都给」的
+ * 声明是坏消息，而不是「取其一」，这条在干员层与玩家层是同一条。
+ *
+ * **忽略信封字段**：`$check` 拿到的是整条消息（含 `t` / `rid`），所以这里只挑自己认识的两个字段看 ——
+ * 不忽略它们的话，每一条都会因为「多了个 `t`」被判成坏形状（这一版第一次跑就是这么全红的）。
+ */
+export const isAppearanceMsg = (v) => {
+  if (!isPlain(v)) return false;
+  for (const key of Object.keys(v)) {
+    if (key === 't' || key === 'rid') continue;       // 信封，不是载荷
+    if (key !== 'picks' && key !== 'avatar') return false;
+  }
+  const hasPicks = v.picks !== undefined, hasAvatar = v.avatar !== undefined;
+  if (!hasPicks && !hasAvatar) return false;
+  if (hasPicks && !isMap(v.picks, APPEARANCE_LIMITS.picks, isId, isAppearancePick)) return false;
+  // 顶层 `avatar` **只能**是 `{ avatar }`：它是「玩家自己那张头像」的简写，写成 `{ skinId }` 没有意义
+  // （皮肤属于干员，不属于人）—— 那种写法多半是作者把 `picks` 的形状抄错了地方，所以要**点名拒绝**
+  // 而不是「反正也解析不出东西，收下算了」。
+  if (hasAvatar && !(isPlain(v.avatar) && v.avatar.avatar !== undefined && v.avatar.skinId === undefined && isId(v.avatar.avatar))) return false;
+  return true;
+};
 
 /**
  * Semantic check + normalisation of a 自选 roster against the game data (`{ chess, backups }` or a sim DataSource) and
@@ -483,7 +510,7 @@ const target = (v) => {
   return false;
 };
 
-/** @type {Record<string, Record<string, (v:any)=>boolean> & { $optional?: string[] }>} */
+/** @type {Record<string, Record<string, (v:any)=>boolean> & { $optional?: string[], $check?: (m:any)=>boolean }>} */
 export const C2S = {
   // session & lobby
   hello: { name: (v) => isStr(v, NAME_MAX_LEN) && v.trim().length > 0, token: (v) => v == null || isStr(v, 64), version: (v) => v == null || isInt(v, 0, 1e6), $optional: ['token', 'version'] },
@@ -529,10 +556,10 @@ export const C2S = {
   //
   // 这是一条**展示**消息，不是玩法消息：它改的是别人看到的你长什么样，**永远不碰战果**，因此
   //   * 不进 golden、不影响任何服务端判定；
-  //   * 值必须是引擎认识的形状（`{ charId, skinId }` 或 `{ charId, avatar }`），不认识就**点名拒绝**，
-  //     而不是存一个没人能解释的字符串（静默失败的老毛病）；
-  //   * 每条上限 64 项（`APPEARANCE_MAX`）：一间房最多就这么多干员，多出来的是坏数据。
-  'room.appearance': { picks: isAppearancePicks },
+  //   * 形状由 `isAppearanceMsg` **整体**判（两个字段都可选但**不能都不给**，这条没法拆成按字段的判据；
+  //     拆开就会出现「两个都没给」被当成合法的缝）—— 坏形状**点名拒绝**，而不是存一个没人能解释的东西；
+  //   * `picks` 上限 64 项（一间房最多就这么多干员，多出来是坏数据）。
+  'room.appearance': { $check: isAppearanceMsg },
   // spectator seats (remake feature, community report #26; MAX_SPECTATORS): take one of a co-op room's spectator seats —
   // in its lobby or while its match runs — never a player seat; the host frees one by playerId (the spectator gets
   // room.closed { reason: 'kicked' }). room.leave / g.leave leave a spectator seat like a player seat.
@@ -697,6 +724,13 @@ export function validateC2S(msg) {
   const spec = typeof msg.t === 'string' && Object.hasOwn(C2S, msg.t) ? C2S[msg.t] : null;
   if (!spec) return `unknown type ${String(msg.t).slice(0, 32)}`;
   if (msg.rid != null && !isInt(msg.rid, 0, 2 ** 31)) return 'bad rid';
+  // `$check`：**整体**判据，用于「字段之间有关联」的形状（例如「两个可选字段不能都不给」）。
+  // 按字段的判据表达不了这种关系 —— 拆成两条就会留下「两个都没给」这个缝。它拿到的是整条消息
+  // （含 `t` / `rid`，所以判据自己忽略它们即可）。
+  if (typeof spec.$check === 'function') {
+    if (!spec.$check(msg)) return 'bad shape';
+    return null;
+  }
   const optional = spec.$optional || [];
   for (const [k, check] of Object.entries(spec)) {
     if (k === '$optional') continue;

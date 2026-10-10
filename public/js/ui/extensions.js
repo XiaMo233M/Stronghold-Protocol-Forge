@@ -48,6 +48,7 @@
 // the browser half is the opt-in `SP_E2E=1` path, see docs/WORKSHOP.md §4.4 for the same standing gap).
 
 import { t } from '../../../shared/i18n.js';
+import { validateC2S } from '../../../shared/protocol.js';
 // 立绘解析链的**唯一 hook**（皮肤层第 1 步）：核心只认识「有一个函数可能回答这个 id」，不认识「皮肤」。
 import { setAppearanceLookup, clearAppearanceLookup } from './portraitChain.js';
 // 引擎已经定义好的服务端→客户端类型（`shared/protocol.js S2C`）。**不在这里抄一份**：抄一份就是第二个会漂的真相，
@@ -97,6 +98,32 @@ export const slotSelector = (slot) => `[data-mod-slot="${slot}"]`;
  * 一个「谁也不认识的位置」比一个没挂上的面板难查得多。
  */
 export const MOD_PANEL_CREATED = Object.freeze(['root.overlays', 'root.guide', 'screen.game.aside', 'screen.result.footer']);
+
+/**
+ * **面板偏好**的容量上限（`ctx.session.setPref` / `getPref`）与「面板能主动发的引擎消息」闭枚举。
+ *
+ * 两处都是**刻意的摩擦**：
+ *   * 偏好只收短标量 —— 让它成为第二个数据库是它最可能的变坏方式；
+ *   * `PANEL_SEND_TYPES` 只列**展示**类的引擎消息。面板能改对局状态的那一天，就是这一层失效的那一天；
+ *     所以加一条要同时改这张表、那条消息的 C2S 形状、以及一条测试。
+ */
+export const PREFS_MAX_KEY = 64;
+export const PREFS_MAX_VALUE = 512;
+export const PANEL_SEND_TYPES = Object.freeze(['room.appearance']);
+
+/**
+ * 面板偏好表（模块级、内存里）。
+ *
+ * **为什么必须在内存里**：`public/js/ui/extensions.js` 在**服务端测试里也被 import**（注册点的用例跑在 Node 下），
+ * 而 `localStorage` 在那里不存在 —— 一处在模块顶层碰 `localStorage` 的代码会让那一整组用例炸掉。
+ * 键按 `<包 id>/<面板写的键>` 前缀分区：两个包用同一个键名不会互相覆盖（否则是**跨包串味**，最难查的那种）。
+ * @type {Map<string, any>}
+ */
+const prefs = new Map();
+const setPref = (k, v) => { prefs.set(k, v); };
+const getPref = (k) => prefs.get(k);
+/** 清空（测试用；`dispose()` 不收，因为偏好本来就该活过界面）。 */
+export const clearPanelPrefs = () => { prefs.clear(); };
 
 /**
  * 宿主容器用来告诉面板「你是哪一份」的属性名（`ctx.hostKey` 的来源）。
@@ -485,6 +512,69 @@ export function createPanelRegistry(deps) {
         if (!Object.keys(patch).length) return false;
         store.patch('session', patch);
         return true;
+      },
+      /**
+       * **这一格的偏好**（`prefs` 那个模块级表，不是 store）：一个面板要记住「每干员选了哪套」这类东西，
+       * 而它**没有** localStorage / store 的写权限 —— 所以引擎给一格受限的键值口。
+       *
+       * 为什么不是把 store 交出去：store 里放着对局状态（`match` / `room` / `me`），
+       * 一个面板能写它就等于能改对局 —— 那是这一层从头到尾在避免的事。这一格**只有**偏好。
+       *
+       * 键与值都有界：键 1..64 字符，值只收 `string` / `number` / `boolean` / `null`（复杂结构请自己
+       * 序列化成字符串）—— 一个面板不该把任意对象塞进偏好里，那会让「偏好」变成第二个数据库。
+       * **越界一律 `false` 并点名**，不静默。
+       * @param {string} key @param {string|number|boolean|null} value
+       * @returns {boolean} 是否写入
+       */
+      setPref(key, value) {
+        if (typeof key !== 'string' || !key || key.length > PREFS_MAX_KEY) {
+          refuse('CLIENT_PREF_BAD_KEY', `panel "${rec.key}" setPref("${String(key).slice(0, 40)}") — the key must be a non-empty string of at most ${PREFS_MAX_KEY} characters`);
+          return false;
+        }
+        const ok = value === null || ['string', 'number', 'boolean'].includes(typeof value);
+        if (!ok) {
+          refuse('CLIENT_PREF_BAD_VALUE', `panel "${rec.key}" setPref("${key}", ${typeof value}) — the value must be a string, number, boolean or null (serialise anything larger yourself)`);
+          return false;
+        }
+        if (typeof value === 'string' && value.length > PREFS_MAX_VALUE) {
+          refuse('CLIENT_PREF_BAD_VALUE', `panel "${rec.key}" setPref("${key}") — a string value of at most ${PREFS_MAX_VALUE} characters`);
+          return false;
+        }
+        setPref(`${rec.pack}/${key}`, value);
+        return true;
+      },
+      /** 读回 `setPref` 写下的那一格（没有时是 `dflt`）。 */
+      getPref(key, dflt = null) {
+        if (typeof key !== 'string' || !key) return dflt;
+        const v = getPref(`${rec.pack}/${key}`);
+        return v === undefined ? dflt : v;
+      },
+      /**
+       * **发一条引擎消息**（业主裁决：面板要能主动做一件对房内可见的事，例如换装广播）。
+       *
+       * 白名单是**闭枚举** `PANEL_SEND_TYPES`，不是「想发什么发什么」：面板能改的是**展示**，
+       * 所以今天只有 `room.appearance`（它只改别人看到的外观、不碰战果）。加一条要同时改这张表、
+       * 它的 C2S 形状与一条测试 —— 这是有意的摩擦（一个面板能改对局状态的那一天，就是这一层失效的那一天）。
+       *
+       * 形状由 `shared/protocol.js` 再判一遍（客户端是**第一个**读者，服务端是最后的）：这里先判一次
+       * 是为了让作者当场看到问题，而不是等一个 `error` 帧回来。
+       * @param {string} type @param {any} fields
+       * @returns {boolean} 是否发出去了
+       */
+      send(type, fields) {
+        if (typeof type !== 'string' || !PANEL_SEND_TYPES.includes(type)) {
+          refuse('CLIENT_SEND_NOT_ALLOWED', `panel "${rec.key}" send("${String(type).slice(0, 40)}") — a panel may only send ${PANEL_SEND_TYPES.map((x) => `"${x}"`).join(', ')} (the closed list of engine messages a panel may originate; everything else is not a display action)`);
+          return false;
+        }
+        if (!net || typeof net.send !== 'function') return false;
+        const msg = { t: type, ...(fields && typeof fields === 'object' ? fields : {}) };
+        // 客户端先判一次形状（与服务端同一份判据）：判不过就**不发**，并点名 —— 发出去只会换回一个 error 帧
+        const bad = typeof validateC2S === 'function' ? validateC2S(msg) : null;
+        if (bad) {
+          refuse('CLIENT_SEND_BAD_SHAPE', `panel "${rec.key}" send("${type}") has a bad shape: ${bad}`);
+          return false;
+        }
+        return net.send(msg);
       },
     });
     // 只读会话态的取数：每次读都重新取一次 store（面板挂上之后**不重挂**，一次性的值会变陈旧 —— 与
