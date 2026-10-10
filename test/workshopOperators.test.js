@@ -689,4 +689,48 @@ describe('干员包: stripPackOperators（G-16，记录 + 拒绝重复）', () =
     }
     assert.equal(data.backups.diy.ownedPool.length, OFFICIAL_POOL, '记录不等于摘除：池子仍是 71');
   });
+
+  // ── 摘除那一半：**可开关**，默认不做（上面三条钉的就是默认） ─────────────────────────────────────────
+  //
+  // 业主口径（2026-10-10）：「G-16 那半属于业主」。它确实改玩法 —— 池子变小、语料里那一位的精锐场景消失 ——
+  // 所以它不是加载器有权自己决定的事。给它一个显式开关：谁要就 `{ apply: true }`，并且**摘了谁必须被点名**。
+  // 默认路径因此逐字节不变（golden 不动），这就是这条设计的意义。
+  test('apply 为 false（默认）时一个字节都不改，只把「如果摘会是哪些」列出来', () => {
+    const charId = pool[0];
+    const packs = [{ id: 'shadow', files: { chess: { chess_ws_x_a: { chessId: 'chess_ws_x_a', charId, name: '影子', tier: 3 } } } }];
+    const base = loadData(DATA_DIR, { log: quiet, workshopDir: null });
+    const { data, report } = applyWorkshop(base, packs);
+    assert.equal(report.poolStripped, false);
+    assert.deepEqual(report.strippedPool, [charId], '名单里列出「如果摘会是哪些」');
+    assert.equal(data.backups.diy.ownedPool.length, OFFICIAL_POOL);
+  });
+
+  test('apply: true 真的把那一位摘出 ownedPool，并逐条点名摘了谁', async () => {
+    const charId = pool[0];
+    const packs = [{ id: 'shadow', files: { chess: { chess_ws_x_a: { chessId: 'chess_ws_x_a', charId, name: '影子', tier: 3 } } } }];
+    const base = loadData(DATA_DIR, { log: quiet, workshopDir: null });
+    // 直接调那个函数（`applyWorkshop` 走的是默认口径；这里测的是开关本身）
+    const { stripPackOperators } = await import('../shared/workshop.js');
+    const data = structuredClone(base);
+    const report = stripPackOperators(packs, data, { apply: true });
+    assert.equal(report.applied, true);
+    assert.deepEqual(report.stripped, [charId]);
+    assert.equal(data.backups.diy.ownedPool.length, OFFICIAL_POOL - 1, '摘掉一位：池子从 71 变 70');
+    assert.equal(data.backups.diy.ownedPool.includes(charId), false, '那一位真的不在池里了');
+    // `diy.operators` 那条记录**留着**：它在池外也仍被界面按 id 读，删记录会让别的引用找不到它
+    assert.ok(data.backups.diy.operators[charId], 'operators 记录不受影响（摘的是名单，不是记录）');
+    // 摘了谁必须能被点名（findings 里的 note 要说摘除这件事）
+    assert.match(report.overlaps[0].note, /Stripped from the pool|opt-in/);
+  });
+
+  test('apply: true 但没有重叠时什么都不做（applied=false，池子不变）', async () => {
+    const packs = [{ id: 'clean', files: { chess: { chess_ws_new_a: { chessId: 'chess_ws_new_a', charId: 'char_ws_brand_new', name: '新人', tier: 3 } } } }];
+    const base = loadData(DATA_DIR, { log: quiet, workshopDir: null });
+    const { stripPackOperators } = await import('../shared/workshop.js');
+    const data = structuredClone(base);
+    const report = stripPackOperators(packs, data, { apply: true });
+    assert.equal(report.applied, false);
+    assert.deepEqual(report.stripped, []);
+    assert.equal(data.backups.diy.ownedPool.length, OFFICIAL_POOL);
+  });
 });

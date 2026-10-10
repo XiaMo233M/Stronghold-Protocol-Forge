@@ -1864,12 +1864,18 @@ export function workshopI18nFiles(packs, readFile, readBase) {
  *
  * @param {Array<{ id?: string, operators?: Record<string, unknown>, files?: Record<string, Record<string, object>> }>} packs
  * @param {Readonly<Record<string, any>>} data 合并后的数据（`data.backups.units` / `data.backups.diy.ownedPool`）
- * @returns {{ overlaps: Array<{ pack: string, charId: string, inPoolBefore: boolean, poolEntry: boolean, entryFrom: string, note: string }>, stripped: string[] }}
+ * @param {{ apply?: boolean }} [opts] `apply: true` 时**真的摘除**（见下）；默认 false = 只报告（今天的口径）
+ * @returns {{ overlaps: Array<{ pack: string, charId: string, inPoolBefore: boolean, poolEntry: boolean, entryFrom: string, note: string }>, stripped: string[], applied: boolean }}
  *   `overlaps` 逐条点名（`inPoolBefore` = 官方池里本来就有他，`poolEntry` = 他是这个包声明进池的）；
- *   `stripped` 是**没有真的被摘掉**的 id（本刀不移除任何东西，所以它列出的就是全部 `inPoolBefore` 的 id ——
- *   留一个显式的名字，好让将来真的做摘除时改动面一目了然）。
+ *   `stripped` 是**被摘掉**的 id（`apply: false` 时这一列是「如果摘会是哪些」，好让改动面一目了然）；
+ *   `applied` 说明这一次到底改没改数据。
+ *
+ * **为什么默认不摘**：摘掉一份已经在池里的干员 = 池子变小、可挑的干员变少、`tools/golden.mjs` 给池里每一位
+ * 配的那个精锐场景整个消失（实测 fanpack 那份数据里 8 名，`ownedPool` 71 → 63）。按 `AGENTS.md` 的 golden 规矩，
+ * 一次**有意的玩法改动**必须在同一个提交里跑 `golden:update` 并逐条点名移动了哪些场景 —— 而那不是一个
+ * 加载器函数有权替维护者决定的事。所以这里给的是**开关**：`apply: true` 才摘，且摘了谁必须能被点名。
  */
-export function stripPackOperators(packs, data) {
+export function stripPackOperators(packs, data, { apply = false } = {}) {
   const backups = isPlainObj(data) && isPlainObj(data.backups) ? data.backups : {};
   const ownedPool = Array.isArray(backups.diy?.ownedPool) ? backups.diy.ownedPool : [];
   const inPool = new Set(ownedPool);
@@ -1894,12 +1900,23 @@ export function stripPackOperators(packs, data) {
         pack: pack.id, charId, inPoolBefore, poolEntry,
         entryFrom: chessByChar.get(charId),
         note: inPoolBefore
-          ? `"${charId}" is in the 自选 pool (data/backups.json diy.ownedPool) AND this pack turns him into the chess piece "${chessByChar.get(charId)}" — he can be fielded twice, and the 自选 slot bypasses the piece's own bond. Stripping him from the pool changes what the pool offers, so it is the maintainer's call (see the loader report)`
+          ? `"${charId}" is in the 自选 pool (data/backups.json diy.ownedPool) AND this pack turns him into the chess piece "${chessByChar.get(charId)}" — he can be fielded twice, and the 自选 slot bypasses the piece's own bond.${apply ? ' Stripped from the pool (opt-in): the pool offers one fewer operator and the golden corpus moves with it' : ' Stripping him from the pool changes what the pool offers, so it is the maintainer\'s call — pass { apply: true } to do it (see the loader report)'}`
           : `this pack puts "${charId}" into the 自选 pool through pack.json operators AND ships the chess piece "${chessByChar.get(charId)}" for the same operator — one operator with two ways in`,
       });
     }
   }
-  return { overlaps, stripped };
+  // 真的摘除：只动 `ownedPool` 这一份名单（`diy.operators` 那一条记录留着 —— 它在池外也仍被界面按 id 读，
+  // 摘掉名单条目就够了，删记录反而会让别的引用找不到它）。摘除是**就地**改一个拷贝，调用方决定要不要采用。
+  let applied = false;
+  if (apply && stripped.length && isPlainObj(backups.diy)) {
+    const drop = new Set(stripped);
+    const remaining = ownedPool.filter((id) => !drop.has(id));
+    if (remaining.length !== ownedPool.length) {
+      data.backups = { ...backups, diy: { ...backups.diy, ownedPool: remaining } };
+      applied = true;
+    }
+  }
+  return { overlaps, stripped, applied };
 }
 
 /**
@@ -2391,7 +2408,14 @@ export function applyWorkshop(base, packs) {
   // 以前没有任何地方说出来；而「真的把他摘出池」会改变自选槽能挑到的干员（= 改对局结果），
   // 与「`test/golden/*.json` 一个字节不动」的验收不能同时成立 —— 所以它是一条**待裁决**的记录，
   // 不是一次静默的行为差异（理由与实测数字见 `stripPackOperators` 的注释）。
-  report.overlaps = stripPackOperators(packs, out).overlaps;
+  // 摘除是**开关**（`{ apply: true }`），这条默认路径不摘：`applied` 与 `stripped` 照实带出来，好让报告说清
+  // 「如果摘会是哪些」与「这一次到底改没改」。默认路径下 `applied` 恒为 false。
+  {
+    const pool = stripPackOperators(packs, out);
+    report.overlaps = pool.overlaps;
+    report.strippedPool = pool.stripped;
+    report.poolStripped = pool.applied;
+  }
   for (const list of Object.values(report.added)) list.sort();
   for (const list of Object.values(report.overridden)) list.sort();
   return { data: out, report };
