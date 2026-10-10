@@ -260,18 +260,39 @@ describe('交付包：形状层与装载期的三处读者一致', () => {
     assert.equal(norm.ok, true, norm.detail);
   });
 
-  test('i18n 四语种真的合并（74 键里 72 条新增，两条重叠按事实处理）', async () => {
+  test('i18n 四语种真的合并（74 键里 71 条新增；重叠 3 条，其中 2 条是各语种的真冲突）', async () => {
     if (!HAS_PACK) return skip();
     const { mergeWorkshopI18n } = await import('../shared/workshop.js');
     const { panels } = loadOnce();
     const decl = panels.panels.length ? JSON.parse(fs.readFileSync(path.join(PACK_DIR, 'pack.json'), 'utf8')) : null;
+    // 三条重叠键，逐语种的事实（实测，不是估计）：
+    //   * `语音语言` —— 只在 **en** 冲突（官方 "Voice Language" vs 补丁 "Voice language"，只差大小写）；
+    //   * `快速匹配` —— 引擎 0.13.0 野排匹配自带，四语种与补丁**逐字相同** ⇒ 不是冲突；
+    //   * `发送`     —— 引擎 0.13.0 房内聊天自带（docs/META.md §1.8）；en / ja / zh-TW 逐字相同，
+    //                  **ko 不同**（我们对 "전송"，补丁对 "보내기"）⇒ ko 多一条真冲突。
+    // 合并规则是「已有键绝不覆盖 + 值不同就点名」：所以 added 恒为 71，冲突按语种分别是 en 1 / ko 1 / ja 0 / zh-TW 0。
+    const SHARED = ['语音语言', '快速匹配', '发送'];
+    const CONFLICT_LANG = { '语音语言': 'en', '发送': 'ko' };
     for (const code of Object.keys(decl.i18n)) {
       const ours = JSON.parse(fs.readFileSync(path.join(ROOT, 'public/i18n', `${code}.json`), 'utf8'));
       const theirs = JSON.parse(fs.readFileSync(path.join(PACK_DIR, decl.i18n[code]), 'utf8'));
+      const overlap = Object.keys(theirs).filter((k) => Object.hasOwn(ours, k));
+      assert.deepEqual(overlap.slice().sort(), SHARED.slice().sort(), `${code}: 与我们重叠的就是这三条`);
+      // 逐条核对「哪一个语种真的冲突」—— 这条断言就是「不许为了过测试去改文案」的守卫：
+      // 引擎里那两条（快速匹配 / 发送）除了 ko 的发送之外必须与补丁一致，否则就是两条译文对不上。
+      const expected = Object.entries(CONFLICT_LANG).filter(([, lang]) => lang === code).map(([k]) => k);
+      for (const k of SHARED) {
+        const differs = theirs[k] !== ours[k];
+        assert.equal(differs, expected.includes(k),
+          `${code}: "${k}" 两边${differs ? '不同' : '相同'}，与实测的冲突表不符（theirs=${JSON.stringify(theirs[k])} ours=${JSON.stringify(ours[k])}）`);
+      }
       const r = mergeWorkshopI18n(ours, theirs, { pack: 'plugin-pack', lang: code });
       assert.equal(r.ok, true, `${code}: ${r.detail}`);
-      assert.equal(r.added.length, 72, `${code}: 74 键里 2 键引擎已有`);
-      assert.equal(r.conflicts.length, code === 'en' ? 1 : 0, `${code}: 冲突条数`);
+      assert.equal(r.added.length, 71, `${code}: 74 键里 3 键引擎已有`);
+      assert.equal(r.conflicts.length, expected.length, `${code}: 冲突条数`);
+      for (const k of expected) {
+        assert.equal(r.conflicts.find((c) => c.key === k)?.key, k, `${code}: 冲突必须点名 "${k}"`);
+      }
     }
   });
 });
