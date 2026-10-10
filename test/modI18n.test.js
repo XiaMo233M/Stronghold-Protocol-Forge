@@ -145,8 +145,10 @@ describe('i18n: merging into an existing language', () => {
   });
 
   test('the real plugin-pack patch: 74 keys, THREE already ours, conflicts named per language', () => {
-    // 这份补丁的真实内容（`E:\destop\卫戍协议-插件包-v0.2.1\④ i18n补丁\<code>.新增键.json`）—— 74 键 × 4 语种。
-    // 本机没有那份原文时跳过（它不在仓库里，是业主侧的交付物）。
+    // 这份补丁的真实内容—— 74 键 × 4 语种，原文是业主侧交付物
+    // （`卫戍协议-插件包-v0.2.1\④ i18n补丁\<code>.新增键.json`）。
+    // 已逐字节钉进 test/fixtures/plugin-pack-i18n/，所以这条断言**在任何机器上都真跑**：
+    // 先前那种「本机没有那份原文就跳过」的后路已去掉 —— 它会让守卫在别人机器上静默消失。
     //
     // 重叠键有**三条**，都是**事实**而非错误：
     //   * `语音语言` —— 真冲突，只在 **en**（官方 "Voice Language" vs 补丁 "Voice language"，只差大小写）；
@@ -158,13 +160,9 @@ describe('i18n: merging into an existing language', () => {
     const SEND_KEY = '发送';
     const SHARED = [COLLIDING_KEY, QUICK_MATCH_KEY, SEND_KEY];
     const CONFLICT_LANG = { [COLLIDING_KEY]: 'en', [SEND_KEY]: 'ko' };
-    const src = 'E:\\destop\\卫戍协议-插件包-v0.2.1\\④ i18n补丁';
-    if (!fs.existsSync(src)) {
-      assert.ok(true, '本机没有那份补丁原文，跳过这一条（插件包不在仓库里）');
-      return;
-    }
+    const src = join(ROOT, 'test', 'fixtures', 'plugin-pack-i18n');
     for (const code of ['en', 'ja', 'ko', 'zh-TW']) {
-      const entries = JSON.parse(fs.readFileSync(join(src, `${code}.新增键.json`), 'utf8'));
+      const entries = JSON.parse(fs.readFileSync(join(src, `${code}.json`), 'utf8'));
       assert.equal(Object.keys(entries).length, 74, `${code}: 74 键`);
       const ours = ourLang(code);
       const overlap = Object.keys(entries).filter((k) => Object.hasOwn(ours, k));
