@@ -174,7 +174,7 @@ Each domain file `server/sim/content/{tokens,bonds,garrisons,items,bands,enemies
 - kits: all 112 visible chess + hidden ones used by effects (盟约·辅助干员), default skill + talents + trait specifics; tokens. The 72 non-collaboration 6★ DIY operators include 克莱门莎 (§28.1); her launch-day provisional mechanics are local to her kit. 黍 GUA-Y and 乌尔比安 CRU-Y follow the generated module blackboards and existing module-level rules (§28.2).
   克莱门莎 S2 removes dead, hidden, self-bound / teleport-immune and unreachable passengers before checking new
   boarding in the same tick. Each released passenger returns its current weight to the cabin's remaining budget
-  and frees its slot (§28.27); neither corpses nor failed carries reserve capacity.
+  and frees its slot (§30.27); neither corpses nor failed carries reserve capacity.
 - bonds: 23 (battle + meta), exact per-layer formulas from research 02.
 - garrisons: 43 effect keys (IN_BATTLE via hooks; SERVER_* via meta registry).
   远牙's granted `garrison_108_a/b` additionally gains on both directions of `dollSwap`, sharing its deployment
@@ -207,7 +207,7 @@ silence and control checks apply. [ASSUMED] The activation area is that grid plu
 not every tile the roaming wave might eventually reach.
 
 
-0.2.3 echo/counter interaction (DESIGN §28.24): recursively earned “余音” pulses are drained FIFO by that echo in the
+0.2.3 echo/counter interaction (DESIGN §30.24): recursively earned “余音” pulses are drained FIFO by that echo in the
 same call, retaining the earned attack value and the lethal-hit pulse. [ASSUMED] This local order avoids exhausting
 the hook-depth guard on scaled hit-count HP; the guard remains unchanged for other recursive handlers.
 
@@ -223,4 +223,4 @@ the hook-depth guard on scaled hit-count HP; the guard remains unchanged for oth
 - 隐秘核心 铳 takes 20% physical/arts damage while another gun or spring remains. The condition is checked on each hit
   as well as by its aura tick, including the first hit and immediately after the last companion leaves.
 
-Sources and the feedback items requiring no simulation change are recorded in [§28.25](../history/0.2.3.md#2825-community-feedback-of-2026-10-10).
+Sources and the feedback items requiring no simulation change are recorded in [§30.25](../history/0.2.3.md#3025-community-feedback-of-2026-10-10).

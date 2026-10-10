@@ -152,7 +152,10 @@ describe('server.meta：身份（声明与模块字节都进内容哈希）', ()
 
   test('没声明 server.meta 的包：归一化清单里没有 server 键，哈希逐字节不变（三份真实示例包）', () => {
     // 0.11.0 之前钉下的三个值（test/packAssets.test.js 同一套）：它们必须一个字都不变。
-    const EXPECT = { clementia: '96ebc2d4', 'demo-workshop': '15092019', 'kit-demo': '77b80c6e' };
+    // clementia 那一个在 0.2.3 那一轮**移过**：上游把克莱门莎收成了官方干员（官方 id `char_4231_clemnt`），
+// 本仓库的示例夹具再用那个 id 会被加载器按 OFFICIAL_ID_COLLISION 拒掉，于是 id 换成工坊保留前缀的
+// `char_ws_clemnt`（docs/examples/clementia/README.md）—— 包的内容真的变了，基线随之移动。
+const EXPECT = { clementia: '27627f47', 'demo-workshop': '15092019', 'kit-demo': '77b80c6e' };
     const loaded = loadWorkshop(join(ROOT, 'docs/examples'), { log: quiet });
     for (const [id, prefix] of Object.entries(EXPECT)) {
       const pack = loaded.packs.find((p) => p.id === id);

@@ -538,7 +538,7 @@ walking the ground path). `deploySeq` counts deployments (and identifies one: `s
 克莱门莎 S2's kit stores its cabin in `unit.mem.clemntCabin`. Before boarding each tick, it removes passengers
 that died, became hidden / uncarryable or cannot path to the next cabin position, removes their carry buff and
 returns their current `weight` (including modifiers). The same tick's count and weight limits use that cleaned
-list and budget (DESIGN §28.27); this is local to the kit, not a change to general displacement.
+list and budget (DESIGN §30.27); this is local to the kit, not a change to general displacement.
 
 **Hit areas (`body.js`, user playtest #5 item 10).** A regular enemy is a point: in a grid range when the tile of its
 position (`round(y)`, `round(x)`) is a range tile, in a radius when its position is (DESIGN §3). A huge enemy (巨型单位:
@@ -1558,6 +1558,6 @@ yet — enemy content must pick one); 抵抗 covers the control statuses of `RES
 冻结/恐惧/诱导…, the rest follow the operator kits that grant it) and caps at 0.95; tactical points prefer enemy path tiles.
 
 
-“余音” owns a same-call pulse queue (DESIGN §28.24): reflected hits enqueue their earned pulses instead of recursively
+“余音” owns a same-call pulse queue (DESIGN §30.24): reflected hits enqueue their earned pulses instead of recursively
 entering another pulse. This retains the lethal-hit pulse and prevents valid high hit-count chains from tripping the
 general hook guard. The queue is emptied in `finally`; it introduces no timer or simulation RNG.

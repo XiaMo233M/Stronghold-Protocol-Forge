@@ -45,6 +45,9 @@ import { chessPortraitUrl, skillIconUrl, skillRecordIconUrl, profIconUrl, subPro
 // 立绘走**统一解析链**（`portraitChain.js`）：同一个干员在详情页 / 手牌 / 商店卡 / 自选池里是同一个函数，
 // 所以不会再出现「卡面是那套外观、详情页是原版」。没有外观提供者时它与 `chessPortraitUrl` 逐字相同。
 import { portraitUrlOf, currentAppearanceLookup } from './portraitChain.js';
+// 逐干员配音的客户端接口层（../voicePrefs.js）：干的这两件事（读自己的覆盖、写一份新覆盖表）都走它，
+// 于是「干员详情」与「干员调配」两处界面不可能给出不同结论。
+import { voiceLangOverrideOf, withVoiceLang } from '../voicePrefs.js';
 import { abilityRows } from './abilityLines.js';
 import { data } from '../data.js';
 import { attackRangeGrid } from '../../../shared/loadoutRecord.js';
@@ -318,9 +321,7 @@ export const CHESS_SECTIONS = Object.freeze(['head', 'garrison', 'trait', 'stats
  */
 export function setVoiceLang(charId, lang) {
   if (typeof charId !== 'string' || !charId) return;
-  const next = { ...(settingsStore.get().voiceLangByChar || {}) };
-  if (lang) next[charId] = lang; else delete next[charId];
-  updateSettings({ voiceLangByChar: next });
+  updateSettings({ voiceLangByChar: withVoiceLang(settingsStore.get().voiceLangByChar, charId, lang) });
 }
 
 /**
@@ -511,7 +512,7 @@ export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bond
   // function is also called directly as a plain function by many tests, so it must not read a hook itself.
   const voiceChar = body?.charId || c.charId || null;
   const voiceLangs = dubsInstalled(availableVoiceLangs(m));
-  const ownVoice = (voiceSettings?.voiceLangByChar || {})[voiceChar] || null;
+  const ownVoice = voiceLangOverrideOf(voiceSettings, voiceChar) || null;
   blocks.voice = voiceChar && voiceLangs.length > 1 ? html`<${Section} key="voice" title=${t('配音')} micro="VOICE" class="dsec--voice">
       <div class="dvoice set-seg" role="radiogroup" aria-label=${t('配音语言')}>
         <button type="button" role="radio" aria-checked=${ownVoice ? 'false' : 'true'} class=${ownVoice ? '' : 'is-on'}

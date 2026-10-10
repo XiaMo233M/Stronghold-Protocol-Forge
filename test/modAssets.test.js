@@ -1217,8 +1217,11 @@ describe('assetsDigest 进身份哈希（DESIGN §28.2 / §28.13.5）', () => {
   });
 
   test('不声明 `assets` 的包一个字不变：三份真实包的哈希 + 集合摘要照旧', () => {
-    const BASELINE = {
-      clementia: '96ebc2d4998c5897b25b6b7dbc0e497f84e7e45c974b68d7eb661f93a28d4e58',
+    // clementia 那一个在 0.2.3 那一轮**移过**：上游把克莱门莎收成了官方干员（官方 id `char_4231_clemnt`），
+// 本仓库的示例夹具再用那个 id 会被加载器按 OFFICIAL_ID_COLLISION 拒掉，于是 id 换成工坊保留前缀的
+// `char_ws_clemnt`（docs/examples/clementia/README.md）—— 包的内容真的变了，基线随之移动。
+const BASELINE = {
+      clementia: '27627f47d04aef3a622202a92038ada7a514b2c2b44389bfb069720b823d987e',
       'demo-workshop': '15092019fd1dbc85589af4b89102746c3a3c0389aef3847d7d9a335bca1a73ef',
       'kit-demo': '77b80c6e74021508d5857208d669da36cc74f20384798a6d5a269fd37f9e4f35',
     };

@@ -1,15 +1,23 @@
 // 0.2.3 的「逐干员配音」在本仓库的落地形态。
 //
-// 上游 0.2.3 为这件事另开了一套存储（`public/js/voicePrefs.js` 的 `voiceOverrides` 映射 + 只有 cn / jp 的词表）。
-// 本仓库在此之前已经有同一件事的实现：存储键 `voiceLangByChar`（settings），词表是共用的
-// shared/constants.js VOICE_LANGS（cn / jp / en / kr，编辑器、CLI 与工坊校验器都读这一份），
-// 播放时由宿主注入的 `voiceLangOf(charId)` 解析。**不并存两套** —— 两套会让「设置里选了 A、实际播 B」。
-// 所以这份测试断言的是我们的那一套，并保留上游那份测试里独有的两条覆盖：原型链污染、按槽位的中文回退。
+// 上游 0.2.3 为这件事另开了一套调用（`public/js/voicePrefs.js`：`VOICE_LANGS` + `sanitizeVoiceOverrides` +
+// `voiceLangFor(charId, globalLang, overrides)`，词表只有 cn / jp）。本仓库在此之前已经有同一件事的**实现**
+// （存储键 `voiceLangByChar`，词表是共用的 shared/constants.js VOICE_LANGS = cn / jp / en / kr，编辑器、CLI 与
+// 工坊校验器都读这一份，播放时由宿主注入的 `voiceLangOf(charId)` 解析）。
+//
+// 处理方式（业主裁决）：**实现用我们的、上游那套调用形状保留为接口**。于是 public/js/voicePrefs.js 是一个
+// **接口层**：对外同时给出上游同名同签名的三个导出与本仓库形状的便利函数，内部一律委托给我们的存储与校验器，
+// 自己一份状态都不存。这份测试把两种形状都钉住，并保留上游那份测试里独有的两条覆盖（原型链污染、按槽位中文回退）。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sanitizeSettings, sanitizeVoiceLangByChar, voiceLangFor, DEFAULT_SETTINGS } from '../../public/js/ui/gameLogic/settings.js';
 import { VOICE_LANGS, DEFAULT_VOICE_LANG } from '../../shared/constants.js';
 import { AudioManager, voiceLine } from '../../public/js/audio.js';
+import {
+  VOICE_LANGS as IFACE_LANGS, DEFAULT_VOICE_LANG as IFACE_DEFAULT,
+  sanitizeVoiceOverrides, voiceLangFor as ifaceVoiceLangFor,
+  voiceLangOverrideOf, voiceLangOf, withVoiceLang,
+} from '../../public/js/voicePrefs.js';
 
 const a = 'char_263_skadi', b = 'char_103_angel';
 
@@ -79,4 +87,43 @@ test('逐干员的日语偏好仍然保留按槽位的中文回退（上游那�
   assert.equal(jp.fallback, '/cn/skill1.mp3', '同名中文文件就是回退');
   // 中文自己的那份没有回退可言
   assert.equal(voiceLine(tree, a, 'skill1', 'cn').fallback, null);
+});
+
+// ---- 接口层（public/js/voicePrefs.js）：两种调用形状都给，实现只有一份 -------------------------------
+
+test('接口层：上游形状与本仓库形状对同一份存储给出同一结论', () => {
+  // 词表就是共用那一份（不是上游原来的 cn / jp 两份）
+  assert.deepEqual([...IFACE_LANGS], ['cn', 'jp', 'en', 'kr']);
+  assert.equal(IFACE_DEFAULT, DEFAULT_VOICE_LANG);
+
+  const overrides = { [a]: 'kr' };
+  // 上游签名 voiceLangFor(charId, globalLang, overrides)
+  assert.equal(ifaceVoiceLangFor(a, 'jp', overrides), 'kr', '自己的覆盖');
+  assert.equal(ifaceVoiceLangFor(b, 'jp', overrides), 'jp', '没有覆盖 ⇒ 跟随全局');
+  assert.equal(ifaceVoiceLangFor(a, 'nope', {}), DEFAULT_VOICE_LANG, '全局是坏值 ⇒ 默认');
+  // 本仓库形状 voiceLangOf(settings, charId) —— 同一份数据必须同一答案
+  const settings = { voiceLang: 'jp', voiceLangByChar: overrides };
+  for (const id of [a, b, 'char_999_none']) {
+    assert.equal(voiceLangOf(settings, id), ifaceVoiceLangFor(id, settings.voiceLang, overrides), `干员 ${id}`);
+  }
+});
+
+test('接口层：sanitizeVoiceOverrides 与我们那一个校验器是同一个（不会给出不同结论）', () => {
+  assert.equal(sanitizeVoiceOverrides, sanitizeVoiceLangByChar, '就是同一个函数，不是抄一份');
+  const polluted = Object.assign(Object.create({ [b]: 'jp' }), { [a]: 'jp', bad: 'cn', char_1_no: 'fr' });
+  assert.deepEqual(sanitizeVoiceOverrides(polluted), { [a]: 'jp' });
+});
+
+test('接口层：读自己的覆盖 / 写一份新表（不可变、空值即删、非法语言被拒）', () => {
+  const s = { voiceLang: 'jp', voiceLangByChar: { [a]: 'en' } };
+  assert.equal(voiceLangOverrideOf(s, a), 'en');
+  assert.equal(voiceLangOverrideOf(s, b), '', '没有覆盖 ⇒ 空串（界面显示「跟随全局」）');
+  assert.equal(voiceLangOverrideOf(s, null), '', '没有 charId 也不抛');
+
+  const before = { ...s.voiceLangByChar };
+  const next = withVoiceLang(s.voiceLangByChar, b, 'kr');
+  assert.deepEqual(next, { [a]: 'en', [b]: 'kr' });
+  assert.deepEqual(s.voiceLangByChar, before, '不改原对象（调用方自己 updateSettings）');
+  assert.deepEqual(withVoiceLang(next, a, null), { [b]: 'kr' }, '传空即删掉这一条');
+  assert.deepEqual(withVoiceLang(next, b, 'nope'), { [a]: 'en' }, '非法语言在写入前就被拒');
 });

@@ -250,7 +250,7 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
 
 **送达与回退**：默认语种的台词并进 `assets.audio.voice`，其它语种并进 `assets.audio.voiceLangs[<lang>]`
 （`shared/workshop.js:2488` 的 `appendVoiceLines`，两处调用在 `:2538` 与 `:2555`；是**追加**，不替换官方已有的台词，客户端仍在这些台词里随机）。播放侧按玩家选的配音语言取
-台词 —— `public/js/audio.js:327` 的 `voiceLinesFor(manifest, charId, slot, lang)`：先看
+台词 —— `public/js/audio.js:390` 的 `voiceLinesFor(manifest, charId, slot, lang)`：先看
 `audio.voiceLangs[lang][charId][slot]`，**该语种没有这个干员的这个槽位时回退到默认配音那一档**（`audio.voice`），
 两者都没有才算没台词。所以「给某个干员单独配一种语言」是正常用法：其它干员在那个语种下照旧播默认那一档。
 

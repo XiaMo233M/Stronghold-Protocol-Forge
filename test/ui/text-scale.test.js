@@ -60,6 +60,10 @@ const NOT_SCALED = [
   /\.gm__/, /\.roundbox/, /\.capsule/, /\.lp\b/, /\.lp--/, /\.misstag/, /\.bossbar/, /\.readywrap/,
   /\.bstrip/, /\.bslot/, /\.effect/, /\.efftip/, /\.ebubble/, /\.ticker/, /\.dpbox/, /\.vswitch/,
   /\.specpill/, /\.otwarn/, /\.team/, /\.enemybtn/, /\.readybtn/, /\.ewheel/, /\.fwheel/, /\.chud/, /\.toolbtn/,
+  // 本仓库自己加的那个按钮（战斗倍速，0.13.0）：它坐在**固定尺寸的对局顶栏**里，与相邻的 .pausebtn（用图标、本来
+  // 就没有字号）同类 —— 顶栏那一排在这次改动里整体不缩放（见上面 /\.lp--/、/\.capsule/ 那几条），
+  // 单独让它一个人放大只会把那一排顶歪。
+  /\.speedbtn/,
   /\.shopbar/, /\.scard/, /\.scr\b/,
   // text inside a fixed-height bar (the HP bar of the detail card, the boss bar's fill)
   /\.dhp\b/,
