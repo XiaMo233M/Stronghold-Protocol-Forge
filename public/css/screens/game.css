@@ -83,6 +83,17 @@
 .pausebtn.is-on { background: var(--mint-500); border-color: var(--mint-400); color: var(--text-on-mint); box-shadow: 0 0 .22rem rgba(23, 249, 183, .45); }
 .pausebtn.is-busy { opacity: .6; }
 
+/* 战斗倍速（ui/hud.js SpeedButton）：与暂停按钮同一套外观，但它是**纯本地播放选择**（不往返服务端、不改战果） */
+.speedbtn {
+  display: grid; place-items: center; min-width: .6rem; height: .6rem; padding: 0 .06rem; flex: none;
+  background: rgba(10, 14, 12, .88); border: 2px solid rgba(242, 242, 242, .75); color: #fff;
+  font-family: var(--font-num); font-size: .2rem; cursor: pointer;
+  box-shadow: 0 .04rem .16rem rgba(0, 0, 0, .55);
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
+}
+.speedbtn:hover { background: rgba(255, 255, 255, .14); border-color: #fff; }
+.speedbtn .num { line-height: 1; }
+
 /* boss-round overtime warning (ui/hud.js OvertimeWarning; red DOT look: official icon_warn / blood_icon + bg_lose_hp) */
 .otwarn {
   position: relative; display: flex; align-items: center; gap: .08rem; height: .38rem; padding: 0 .14rem 0 .1rem;

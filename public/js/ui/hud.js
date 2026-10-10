@@ -34,6 +34,8 @@ import { serverNow } from '../store.js';
 import { isCombatPhase, isBossPhase, prepCapsuleLabel, bossFrac, bossPctText, fmtNum, shopBlockReason } from './gameLogic.js';
 import { overtimeState, overtimeDrainPerSec, remainAt } from './matchStatus.js';
 import { hotkeyLabelOf } from './settings.js';
+// 倍速的档位表来自 runner（一份真相）：按钮只显示与循环它，实际生效由 `runner.setRate` 负责。
+import { RATE_STEPS } from '../battle/runner.js';
 import { t, tParts, N_ } from '../../../shared/i18n.js';
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
@@ -345,6 +347,26 @@ export function PauseButton({ paused, busy = false, onToggle }) {
 }
 
 /**
+ * 战斗倍速按钮（×1 / ×2 / ×3 / ×4 循环）。
+ *
+ * **纯本地播放选择**：同一段确定的 tick 序列只是推进得更快，因此**战果一字不变** —— 这一条由
+ * `public/js/battle/runner.js` 的 `setRate` 保证（倍速只改「墙钟 → tick」的映射，`test/match/runner.test.js`
+ * 用「4× 与 1× 跑完后 `b.result` 逐字节相同」钉住它）。服务端在 `b.start` 里给的 `speed` 是**对局**节奏，
+ * 这里改的是**这台机器看得多快**，两者相乘，服务端不参与、也不需要参与。
+ *
+ * 与「暂停」的区别（原件注释同一条）：暂停是服务端往返（单人对局），倍速不是。
+ * @param {{ speed?: number|null, onSpeed: (next: number) => void }} props
+ */
+export function SpeedButton({ speed, onSpeed }) {
+  const cur = RATE_STEPS.includes(Number(speed)) ? Number(speed) : 1;
+  const next = RATE_STEPS[(RATE_STEPS.indexOf(cur) + 1) % RATE_STEPS.length];
+  return html`<${Tooltip} text=${t('战斗倍速 {cur}× · 点击切到 {next}×（只加快播放，结果不变）', { cur, next })} placement="bottom">
+    <button type="button" class="speedbtn tapx" aria-label=${t('战斗倍速 {cur}×', { cur })}
+        data-testid="speed" onClick=${() => onSpeed?.(next)}><span class="num">${cur}×</span></button>
+  <//>`;
+}
+
+/**
  * Top bar.
  * @param {{ pub:any, priv:any, conn:any, hud:any, total:number|null, drawer:string|null, onExit:Function, onDrawer:(tab:string)=>void,
  *   onReady:(r:boolean)=>void, readyBusy?:boolean, readyCount?:number, playerCount?:number,
@@ -359,6 +381,7 @@ export function PauseButton({ paused, busy = false, onToggle }) {
  */
 export const TopBar = modComponent('game.hud.topBar', function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, onReady, readyBusy, readyCount, playerCount, pen = false, penAvail = false, onPen = () => {},
   config = null, frozenAt = null, pause = null, live = null, spectator = false,
+  speed = null, onSpeed = () => {},
   spectators = null, myId = null, isHost = false, onRemoveSpectator = null }) {
   const phase = pub?.phase;
   const boss = isBossPhase(phase);
@@ -417,6 +440,7 @@ export const TopBar = modComponent('game.hud.topBar', function TopBar({ pub, pri
           ? html`<${Countdown} seconds=${frozenSecs} total=${total ?? undefined} size="md" label="PAUSED" />`
           : html`<${Countdown} deadline=${pub?.deadline} total=${total ?? undefined} size="md" />`}
         ${pause && (pause.show || pause.paused) ? html`<${PauseButton} paused=${!!pause.paused} busy=${pause.busy} onToggle=${pause.onToggle} />` : null}
+        ${onSpeed ? html`<${SpeedButton} speed=${speed} onSpeed=${onSpeed} />` : null}
       </div>
       <${OvertimeWarning} ot=${ot} />
       ${showReady ? html`<${ReadyToggle} priv=${priv} onToggle=${onReady} busy=${readyBusy} readyCount=${readyCount} total=${playerCount} />` : null}

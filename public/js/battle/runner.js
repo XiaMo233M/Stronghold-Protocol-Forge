@@ -100,6 +100,14 @@ export const HELD_MAX = 3000;
  */
 export const EV_SLICE = 15;
 
+/** 本地播放倍速的上下限（`setRate`）。上限不是「不能更快」，而是再快也只是画面跳 —— 帧预算由
+ *  `ticksPerFrameCap` 夹住，所以放宽上限不会绕过任何判定。下限 0.5 让「慢放看清一次技能」可用。 */
+export const RATE_MIN = 0.5;
+export const RATE_MAX = 4;
+
+/** 顶栏那个按钮循环的四档（与原件 `SPEED_STEPS` 同一个语义：纯本地播放选择）。 */
+export const RATE_STEPS = Object.freeze([1, 2, 3, 4]);
+
 /**
  * A hidden-tab backlog without the superseded toggles: of the 'status' tuples only the last per (unit, status), of the
  * 'skill' tuples only the last per unit, every other tuple (spawn / die / deploy / leak / form fx — bounded by the units)
@@ -284,6 +292,14 @@ export function createBattleRunner(deps) {
   let lastPool = null;
   /** solo pause: the runner clock's instant when m.public.paused turned true (null while running) */
   let pausedAt = null;
+  /**
+   * **本地播放倍速**（玩家在顶栏按的那个）：只改「墙钟 → tick」的映射，**不改 tick 序列**。
+   * 服务端给的 `speed`（`b.start` 里那一份，今天恒为 2）是**对局**的节奏，玩家改不了也不该改；
+   * 这里乘上去的是**这台机器看得多快**，所以两端算出的战果仍然逐 tick 相同（`targetTick` 的注释）。
+   * 上限见 `RATE_MAX`：再快也只是同一段 tick 跑得更急，但帧预算会被 `ticksPerFrameCap` 夹住，
+   * 所以「无限快」不会绕过任何判定，只会让画面跳。
+   */
+  let rate = 1;
   /** a normal field's leak count (or a battle's bond layers) changed since the last publishState() */
   let leaksDirty = false;
   const stats = { ticks: 0, stepMs: 0, maxFrameMs: 0, catchups: 0, errors: 0, battles: 0, frames: 0 };
@@ -413,8 +429,15 @@ export function createBattleRunner(deps) {
   /** Publish the state when a leak count (or a battle's bond layers) changed since the last publish. */
   function flushLeaks() { if (leaksDirty) publishState(); }
 
-  /** Target tick of an entry on its clock. */
-  const targetTick = (e, t) => Math.max(0, Math.floor((((t - e.t0) / 1000) * e.speed) / TICK + 1e-9));
+  /**
+   * Target tick of an entry on its clock.
+   *
+   * `rate` 是**本地播放倍速**（玩家按的那个 ×1/×2/×3/×4）：它只改「墙钟时间怎么映射到 tick」，**不改 tick 序列**
+   * —— 同一场战斗、同一种子，无论 rate 是多少，跑过的 tick 数与判定完全相同，只是**跑得快慢**不同。
+   * 这正是「只加快播放，结果不变」在代码里的形状，也是它安全的原因：`Battle` 的确定性来自 tick 序列，
+   * 不来自我们多久调一次 `step()`。
+   */
+  const targetTick = (e, t) => Math.max(0, Math.floor((((t - e.t0) / 1000) * e.speed * rate) / TICK + 1e-9));
 
   /**
    * Step `n` ticks. `sliced` (a catch-up frame, a hidden-tab step): every EV_SLICE ticks the events drained so far go to
@@ -905,6 +928,27 @@ export function createBattleRunner(deps) {
       return () => listeners.get(type)?.delete(fn);
     },
     state,
+    /**
+     * **本地播放倍速**（玩家按的 ×1/×2/×3/×4）。
+     *
+     * 它只改「墙钟时间怎么映射到 tick」（`targetTick` 乘上它），**不改 tick 序列** —— 同一场战斗无论按到几倍，
+     * 跑过的 tick 与每一步判定完全相同，只是跑得快慢不同。所以它**不会**影响战果，也**不需要**服务端参与：
+     * 服务端在 `b.start` 里给的 `speed` 是对局的节奏，这个 `rate` 是这台机器看得多快，两者相乘。
+     *
+     * 接受的值被夹在 `RATE_MIN..RATE_MAX`，取整到一位小数；非法值（0 / NaN / 负数）当作 1，**不抛**。
+     * 改变它不会重放已过的帧 —— 下一帧起按新速率推进（这正是「加快播放」的语义）。
+     * @param {number} next
+     * @returns {number} 实际生效的倍速
+     */
+    setRate(next) {
+      const n = Number(next);
+      rate = Number.isFinite(n) && n > 0 ? Math.min(RATE_MAX, Math.max(RATE_MIN, Math.round(n * 10) / 10)) : 1;
+      // 广播出去：顶栏的那个按钮要显示当前倍速（它就是唯一的读者）
+      emit('rate', rate);
+      return rate;
+    },
+    /** 当前本地播放倍速（默认 1 = 完全按服务端给的 speed 走，与从前逐字相同）。 */
+    rate: () => rate,
     /**
      * The battle on screen as a report attaches it (diag.js): its b.start fields and its game time; null without one.
      * @returns {{ battleId: string, fieldId: string, kind: string, spec: object, time: number|null }|null}

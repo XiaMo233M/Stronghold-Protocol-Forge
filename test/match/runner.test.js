@@ -5,7 +5,7 @@
 // leak count of normal fields (state().leaks, user playtest #3 item 2).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createBattleRunner, ticksPerFrameCap } from '../../public/js/battle/runner.js';
+import { createBattleRunner, ticksPerFrameCap, RATE_MIN, RATE_MAX } from '../../public/js/battle/runner.js';
 import { createStore, initialState } from '../../public/js/store.js';
 import * as specMod from '../../server/sim/spec.js';
 import { DataSource } from '../../server/sim/simdata.js';
@@ -473,5 +473,109 @@ test('live unit stats (user playtest #4 item 7): unitStats(id) reads the battle 
   r.runner.clear();
   assert.equal(r.runner.unitStats(ally.id), null, 'nothing on screen after the battles were dropped');
   assert.equal(r.runner.unitIdOf(ally.uid, ally.ownerId), null);
+  r.runner.dispose();
+});
+
+// 本地播放倍速（顶栏那个 ×1/×2/×3/×4 按钮；插件包 `hud.js.patch` 的 SpeedButton 那一半）。
+//
+// 它存在的唯一理由，是原件自己注释里的那句话：**「purely local playback choice — the same deterministic tick
+// sequence just advances faster, so the outcome is unchanged」**。所以这一组测的就是那句话：
+//   * 倍速只改「墙钟 → tick」的映射（同一段墙钟跑更多 tick），**不改 tick 序列本身**；
+//   * 因此**战果一字不变**：同一种子、同一份 spec，跑完后 `b.result` 完全一致；
+//   * 它**不碰**服务端给的 `speed`（那是对局节奏），两者相乘；
+//   * 非法值不抛，夹在上下限内。
+test('本地播放倍速：跑得更快，但 tick 序列与战果一字不变', async () => {
+  const start = realStart(4407);
+
+  /** 跑完一场，返回 { ticks, time, result }。 */
+  const playOut = async (rate) => {
+    const r = rig();
+    r.net.emit('b.start', start);
+    await r.settle();
+    if (rate !== undefined) {
+      assert.equal(r.runner.setRate(rate), rate);
+      assert.equal(r.runner.rate(), rate);
+    }
+    const e = r.runner._entries.get(start.battleId);
+    for (let i = 0; i < 600 && !e.done; i++) r.advance(1000, 50);
+    assert.ok(e.done, `跑到结束（rate=${rate}）`);
+    await r.settle();
+    const res = r.net.sent.filter((x) => x.t === 'b.result').pop();
+    return { ticks: e.battle.tickCount, time: e.battle.time, result: res };
+  };
+
+  const base = await playOut(undefined);      // 默认 1×（与从前逐字相同）
+  const fast = await playOut(4);              // 4×
+  const slow = await playOut(0.5);            // 0.5×
+
+  // 战果与游戏内时间**完全相同**：倍速只是让我们更快地走到同一个地方
+  assert.equal(fast.ticks, base.ticks, '4× 与 1× 跑过的 tick 数相同');
+  assert.equal(fast.time, base.time, '游戏内时间相同');
+  assert.deepEqual(fast.result, base.result, 'b.result 逐字节相同 —— 倍速不改战果');
+  assert.equal(slow.ticks, base.ticks, '0.5× 也是同一段 tick');
+  assert.deepEqual(slow.result, base.result, '慢放同样不改战果');
+});
+
+test('本地播放倍速：同一段墙钟时间跑更多 tick（这就是「更快」的全部含义）', async () => {
+  const start = realStart(4407);
+  const ticksAfter = async (rate, ms = 1000) => {
+    const r = rig();
+    r.net.emit('b.start', start);
+    await r.settle();
+    if (rate !== undefined) r.runner.setRate(rate);
+    const e = r.runner._entries.get(start.battleId);
+    r.advance(ms);
+    return e.battle.tickCount;
+  };
+  const one = await ticksAfter(1);
+  const two = await ticksAfter(2);
+  const four = await ticksAfter(4);
+  assert.ok(one > 0);
+  // 服务端给的 speed 是 2，所以 1× ⇒ ~60 tick / 秒；2× ⇒ ~120；4× ⇒ ~240
+  assert.ok(Math.abs(one - 60) <= 3, `1× ⇒ ~60 tick（实际 ${one}）`);
+  assert.ok(Math.abs(two - 120) <= 4, `2× ⇒ ~120 tick（实际 ${two}）`);
+  assert.ok(Math.abs(four - 240) <= 8, `4× ⇒ ~240 tick（实际 ${four}）`);
+});
+
+test('本地播放倍速：不碰服务端给的 speed，非法值不抛且被夹住', async () => {
+  const start = realStart(4407);
+  const r = rig();
+  r.net.emit('b.start', start);
+  await r.settle();
+  const e = r.runner._entries.get(start.battleId);
+
+  // 服务端那一份 speed 原样保留（它是对局节奏，玩家改不了也不该改）
+  assert.equal(e.speed, 2, 'b.start 的 speed 没被动过');
+  assert.equal(r.runner.rate(), 1, '默认 1×（不声明就与从前逐字相同）');
+
+  // 非法值：一律当 1，**不抛**
+  for (const bad of [0, -3, NaN, Infinity, null, undefined, 'x', {}]) {
+    assert.doesNotThrow(() => r.runner.setRate(bad), `${String(bad)} 不该抛`);
+    assert.equal(r.runner.rate(), 1, `${String(bad)} ⇒ 回到 1`);
+  }
+  // 夹在上下限
+  assert.equal(r.runner.setRate(99), RATE_MAX, '上限');
+  assert.equal(r.runner.setRate(0.01), RATE_MIN, '下限');
+  assert.equal(r.runner.setRate(2.34), 2.3, '一位小数');
+  r.runner.dispose();
+});
+
+test('本地播放倍速：切换广播 rate 事件，且上报帧仍然合法', async () => {
+  const start = realStart(4407);
+  const r = rig();
+  const rates = [];
+  r.runner.on('rate', (x) => rates.push(x));
+  r.net.emit('b.start', start);
+  await r.settle();
+  r.runner.setRate(3);
+  r.runner.setRate(1);
+  assert.deepEqual(rates, [3, 1], '每次切换广播一次（顶栏那个按钮是唯一读者）');
+
+  const e = r.runner._entries.get(start.battleId);
+  for (let i = 0; i < 300 && !e.done; i++) r.advance(1000, 50);
+  await r.settle();
+  const prog = r.net.sent.filter((x) => x.t === 'b.progress');
+  assert.ok(prog.length > 0, '仍然在按协议上报');
+  assert.ok(prog.every((x) => validateC2S(x) === null), '每一帧都仍然是合法协议帧');
   r.runner.dispose();
 });
