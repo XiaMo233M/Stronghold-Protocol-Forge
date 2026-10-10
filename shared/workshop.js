@@ -2474,6 +2474,9 @@ export function applyWorkshop(base, packs) {
   // 而且必须在 mergeWorkshopOperators 之前：干员进池时读的 `units` 记录已经由内容文件那一层并好了，
   // 但它的**分支图标**要靠这一条（`prof.sub[subProfessionId]`），顺序反了自选界面就是一个没有分支图的格子。
   mergeWorkshopFlatArt(out, packs, report);
+  // 时装（`pack.json.skins` → `assets.skins`）：与 art 同一条「并进既有清单、路径变绝对 URL」的路，
+  // 所以客户端零改动就能 `ctx.data.get('assets').skins[charId]` 读到它（皮肤 mod 的 list/lookup 全靠这一张表）。
+  mergeWorkshopSkins(out, packs, report);
   mergeWorkshopSupport(out, packs, report);
   // 自选池（`diy.ownedPool` / `diy.operators`）：读 `data.backups.units` 里那条已经合并好的记录，
   // 所以必须排在内容文件那一层之后 —— 它在这个函数里是最末一批，天然满足。
@@ -2914,6 +2917,80 @@ function mergeWorkshopArt(data, packs, report) {
   }
   data.assets = next;
   report.art = artClaimCounts(claimed, (t) => !ART_TABLES[t]?.flat);
+}
+
+/**
+ * 时装（`pack.json.skins`）并进 `assets.skins`（皮肤层设计稿 §3）。
+ *
+ * 形状：`assets.skins[<charId>] = [{ pack, id, name, series?, desc?, art?, voices? }, …]` —— **按干员分组的一列**，
+ * 不是一个扁平的表。理由：客户端要问的问题永远是「这个干员有哪几套」，按 charId 分好组，那个问题的答案就是
+ * `skins[charId]` 本身（面板的 `list(charId)` 直接读它）；反过来（一张扁平表 + 每次过滤）会让每个消费点各写一遍
+ * 过滤，而那些过滤迟早会漂。
+ *
+ * 三条与既有素材通道**逐字相同**的规则：
+ *   * 路径转成 `/workshop-assets/<包>/<路径>` 的绝对 URL（客户端零改动，走的还是那条只服务登记 URL 的路由）；
+ *   * 两个包给**同一个干员的同一套 id** 时，按包 id 升序**第一个赢**，输的一方点名 `SKIN_COLLISION`
+ *     （`definedBy` = 占住的那一方）—— 谁赢不能取决于加载次序；
+ *   * `assets`（清单）不在时点名报告，而不是静默丢掉（与 art 的 `MANIFEST_MISSING` 同一条）。
+ *
+ * **不同干员、或同一干员的不同 id，互不冲突**：时装天然是并列的（一个人可以有好几套），
+ * 这与 art 的「一个 id 一条记录」不同，也是它必须单独一个函数而不是复用 `mergeWorkshopArt` 的原因。
+ */
+function mergeWorkshopSkins(data, packs, report) {
+  const list = [...(Array.isArray(packs) ? packs : [])].sort(byPackId);
+  const withSkins = list.filter((p) => Array.isArray(p?.skins) && p.skins.length);
+  if (!withSkins.length) return;
+  const assets = isPlainObj(data.assets) ? data.assets : null;
+  if (!assets) {
+    for (const pack of withSkins) {
+      report.errors.push({
+        pack: pack.id, file: 'assets', id: 'skins', code: 'MANIFEST_MISSING',
+        reason: 'this pack declares 时装 (skins), but data/assets.json is missing — run `npm run assets` so the client has a manifest to extend',
+      });
+    }
+    return;
+  }
+  const toUrl = (packId, p) => `${WORKSHOP_MEDIA_PREFIX}${packId}/${String(p).split('/').map(encodeURIComponent).join('/')}`;
+  /** @type {Record<string, object[]>} */
+  const byChar = {};
+  /** @type {Map<string, string>} `"<charId>|<skinId>"` → 占住它的包 id */
+  const claimed = new Map();
+  for (const pack of withSkins) {
+    for (const skin of pack.skins) {
+      const key = `${skin.charId}|${skin.id}`;
+      const holder = claimed.get(key);
+      if (holder) {
+        report.errors.push({
+          pack: pack.id, file: 'skins', id: key, code: 'SKIN_COLLISION', definedBy: holder,
+          reason: `another pack (${holder}) already ships the outfit "${skin.id}" for "${skin.charId}"; keep only one`,
+        });
+        continue;
+      }
+      claimed.set(key, pack.id);
+      // 外观那一半与 art 同一条转换（字段级、spine 再往下一层）：复用 `artEntryUrls`，判据只有一份
+      const art = isPlainObj(skin.art) ? artEntryUrls(skin.art, ART_TABLES.chars, (p) => toUrl(pack.id, p)) : null;
+      const voices = isPlainObj(skin.voices)
+        ? Object.fromEntries(Object.entries(skin.voices).map(([slot, paths]) => [slot, paths.map((p) => toUrl(pack.id, p))]))
+        : null;
+      (byChar[skin.charId] ||= []).push({
+        pack: pack.id, id: skin.id, name: skin.name,
+        ...(skin.series !== undefined ? { series: skin.series } : {}),
+        ...(skin.desc !== undefined ? { desc: skin.desc } : {}),
+        ...(art && Object.keys(art).length ? { art } : {}),
+        ...(voices ? { voices } : {}),
+      });
+    }
+  }
+  if (!Object.keys(byChar).length) return;
+  // 同一个干员的那一列按 `(包 id, 时装 id)` 排序：**列表次序不该取决于加载次序**（面板直接按它画）
+  for (const arr of Object.values(byChar)) {
+    arr.sort((a, b) => (a.pack < b.pack ? -1 : a.pack > b.pack ? 1 : 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  }
+  const prevSkins = isPlainObj(assets.skins) ? assets.skins : {};
+  const next = { ...prevSkins };
+  for (const [charId, arr] of Object.entries(byChar)) next[charId] = [...(Array.isArray(prevSkins[charId]) ? prevSkins[charId] : []), ...arr];
+  data.assets = { ...assets, skins: next };
+  report.skins = Object.fromEntries(Object.entries(byChar).map(([charId, arr]) => [charId, arr.length]));
 }
 
 /**

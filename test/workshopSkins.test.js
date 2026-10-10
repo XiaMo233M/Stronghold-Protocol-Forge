@@ -11,7 +11,11 @@
 // Run: node --test test/workshopSkins.test.js
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizePackManifest, SKIN_FIELDS, SKIN_ID_RE } from '../shared/workshop.js';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { normalizePackManifest, SKIN_FIELDS, SKIN_ID_RE, applyWorkshop } from '../shared/workshop.js';
+import { loadWorkshop, workshopTouchedFiles } from '../server/workshop.js';
 
 /** 一个有 assets/ 的包的合法底盘（时装素材放在包内，所以要 license）。 */
 const mk = (skins, extra = {}) => normalizePackManifest({
@@ -105,5 +109,103 @@ describe('pack.json.skins：形状与拒绝路径', () => {
     const r = normalizePackManifest({ id: 'p', name: 'p', content: ['chess'] }, 'p', {});
     assert.equal(r.ok, true);
     assert.deepEqual(r.pack.skins, [], '缺席 ⇒ 空数组，包不因此被拒');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// 第 3 步的另一半：`assets.skins` 的**合并**（`shared/workshop.js mergeWorkshopSkins`）。
+// 形状是**按干员分组的一列** `skins[charId] = [entry…]`，因为客户端要问的问题永远是「这个干员有哪几套」。
+// 与 art 的三条规则逐字相同：路径变绝对 URL、同 id 冲突按包 id 升序第一个赢、清单不在时点名报告。
+// ---------------------------------------------------------------------------------------------------
+describe('assets.skins：按干员分组的合并', () => {
+  const apply = (packs) => applyWorkshop({ assets: { chars: {} }, backups: { diy: { ownedPool: [] } } }, packs);
+  const P = (id, skins) => ({ id, skins });
+
+  test('按 charId 分组；路径变成 /workshop-assets 的绝对 URL', () => {
+    const r = apply([P('skinA', [{ id: 'summer', charId: 'char_1_01', name: '夏日', art: { portrait: 's/p.png' } }])]);
+    const one = r.data.assets.skins['char_1_01'];
+    assert.equal(one.length, 1);
+    assert.equal(one[0].pack, 'skinA');
+    assert.equal(one[0].art.portrait, '/workshop-assets/skinA/s/p.png', '客户端零改动：还是那条只服务登记 URL 的路由');
+    assert.deepEqual(r.report.skins, { char_1_01: 1 });
+  });
+
+  test('同一干员的多套**并列共存**（这是它与 art 最不同的一点）', () => {
+    const r = apply([P('skinA', [
+      { id: 'summer', charId: 'char_1_01', name: '夏日' },
+      { id: 'winter', charId: 'char_1_01', name: '冬日' },
+    ])]);
+    assert.deepEqual(r.data.assets.skins['char_1_01'].map((s) => s.id), ['summer', 'winter'], '一个人可以有好几套');
+  });
+
+  test('不同包、不同干员互不冲突；**同一个干员的同一套 id** 冲突时按包 id 升序第一个赢并点名', () => {
+    const r = apply([
+      P('skinB', [{ id: 'summer', charId: 'char_1_01', name: '撞车的' }, { id: 'other', charId: 'char_2_02', name: '别的' }]),
+      P('skinA', [{ id: 'summer', charId: 'char_1_01', name: '先来的' }]),
+    ]);
+    const one = r.data.assets.skins['char_1_01'];
+    assert.equal(one.length, 1, '同一套 id 只有一份');
+    assert.equal(one[0].pack, 'skinA', '包 id 升序第一个赢（与加载次序无关）');
+    assert.equal(one[0].name, '先来的');
+    assert.equal(r.data.assets.skins['char_2_02'].length, 1, '不同干员不受影响');
+    const cols = r.report.errors.filter((e) => e.code === 'SKIN_COLLISION');
+    assert.equal(cols.length, 1);
+    assert.equal(cols[0].pack, 'skinB', '被拒的一方点名');
+    assert.equal(cols[0].definedBy, 'skinA', '并指出是谁占住了');
+  });
+
+  test('可选字段缺席时**不写空键**（面板按 falsy 判，不必区分 undefined 与 null）', () => {
+    const r = apply([P('skinA', [{ id: 'plain', charId: 'char_1_01', name: '素' }])]);
+    const s = r.data.assets.skins['char_1_01'][0];
+    assert.deepEqual(Object.keys(s).sort(), ['id', 'name', 'pack'], '没写 art / voices / series / desc 就不出现');
+  });
+
+  test('语音路径同样转绝对 URL', () => {
+    const r = apply([P('skinA', [{ id: 'summer', charId: 'char_1_01', name: '夏', voices: { start: ['v/a.mp3'] } }])]);
+    assert.deepEqual(r.data.assets.skins['char_1_01'][0].voices.start, ['/workshop-assets/skinA/v/a.mp3']);
+  });
+
+  test('清单不在时点名 MANIFEST_MISSING（不是静默丢掉）', () => {
+    const r = applyWorkshop({ backups: { diy: { ownedPool: [] } } }, [P('skinA', [{ id: 'summer', charId: 'char_1_01', name: '夏' }])]);
+    assert.equal(r.report.errors.filter((e) => e.code === 'MANIFEST_MISSING' && e.id === 'skins').length, 1);
+  });
+
+  test('没有包带时装时，assets 一个字节都不多（旧行为不变）', () => {
+    const r = apply([{ id: 'plain', content: ['chess'], files: {} }]);
+    assert.equal('skins' in (r.data.assets || {}), false, '不写这个键');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// 真实装载路径：只带时装的包必须**被认下**，而且 `assets` 必须进「被触及文件」。
+// 这两条都是「装上了但什么都没发生」那类静默失效的入口 —— 我第一次跑就撞上了第一条。
+// ---------------------------------------------------------------------------------------------------
+describe('只带时装的包：真的被装载，且 assets 进了被触及文件', () => {
+  const write = (root, id, pack, files = {}) => {
+    const dir = join(root, id);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'pack.json'), JSON.stringify(pack), 'utf8');
+    for (const [rel, body] of Object.entries(files)) {
+      mkdirSync(join(dir, rel, '..'), { recursive: true });
+      writeFileSync(join(dir, rel), body, 'utf8');
+    }
+    return dir;
+  };
+
+  test('一个只有 skins 的包会被 loadWorkshop 认下（不是「静默跳过」）', () => {
+    const root = mkdtempSync(join(tmpdir(), 'sp-skins-'));
+    try {
+      write(root, 'skins-only', {
+        id: 'skins-only', name: '纯时装', license: 'CC0-1.0', content: [],
+        skins: [{ id: 'summer', charId: 'char_1_01', name: '夏日', art: { portrait: 's/p.png' } }],
+      }, { 'assets/s/p.png': 'x' });
+      const loaded = loadWorkshop(root, { log: null });
+      const pack = (loaded.packs || []).find((p) => p.id === 'skins-only');
+      assert.ok(pack, `只带时装的包必须被认下（errors: ${JSON.stringify(loaded.errors)}）`);
+      assert.deepEqual(loaded.errors, [], '0 拒绝');
+      assert.equal(pack.skins.length, 1);
+      // 被触及文件：漏了这一条，服务端说「时装在」，浏览器拿到的清单里没有 skins ⇒ 面板永远是空的
+      assert.ok([...workshopTouchedFiles(loaded)].includes('assets'), 'assets 必须在被触及文件里');
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });

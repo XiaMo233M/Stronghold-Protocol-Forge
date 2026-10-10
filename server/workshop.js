@@ -149,6 +149,10 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
       || Object.keys(manifest.pack.bondIcons || {}).length
       || Object.keys(manifest.pack.itemIcons || {}).length
       || Object.keys(manifest.pack.art || {}).length
+      // 只带时装（`pack.json.skins`）的包与「只带外观素材」那一类逐字相同：它的贡献经 `assets.skins`
+      // 发布（`shared/workshop.js mergeWorkshopSkins`），**没有任何数据文件** —— 漏掉这一行，一个纯时装包
+      // 会「装上了但什么都没发生」（`loadWorkshop` 不把它算作已加载的包，房间摘要里也没有它）。
+      || (Array.isArray(manifest.pack.skins) && manifest.pack.skins.length)
       || Object.keys(manifest.pack.operators || {}).length
       || !!manifest.pack.assets || !!manifest.pack.client || !!manifest.pack.server || !!manifest.pack.routes
       || !!manifest.pack.i18n || !!manifest.pack.notices) {
@@ -1015,6 +1019,10 @@ export function workshopTouchedFiles(loaded) {
     // 两张扁平图标表（`art.skills` / `art.profSub` → `assets.skills` / `assets.prof.sub`，mergeWorkshopFlatArt）
     // 落的是同一个文件，所以它们已经在这次判断里了。
     if (p.art && Object.keys(p.art).length) out.add('assets');
+    // 时装（mergeWorkshopSkins：`assets.skins[charId]`）落的是**同一个** `assets.json` —— 理由与上面几行逐字相同。
+    // 漏掉这一行，服务端会说「包已加载、时装也在」，而浏览器拿到的是磁盘上那份没有 skins 的清单：
+    // 面板的 list(charId) 永远是空的，玩家看不到任何一套（一个不会报错的静默失效）。
+    if (Array.isArray(p.skins) && p.skins.length) out.add('assets');
     // 助战 pool entries are merged into `support` (mergeWorkshopSupport) — the browser picks 助战 from that file.
     if (p.support && p.support.length) out.add('support');
     // 自选池（mergeWorkshopOperators：`backups.diy.ownedPool` / `backups.diy.operators`）写的是 `backups.json`，
