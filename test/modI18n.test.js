@@ -144,15 +144,20 @@ describe('i18n: merging into an existing language', () => {
     assert.equal(en.skippedSame, 0);
   });
 
-  test('the real plugin-pack patch: 74 keys, TWO already ours, exactly ONE conflict, on en only', () => {
+  test('the real plugin-pack patch: 74 keys, THREE already ours, conflicts named per language', () => {
     // 这份补丁的真实内容（`E:\destop\卫戍协议-插件包-v0.2.1\④ i18n补丁\<code>.新增键.json`）—— 74 键 × 4 语种。
     // 本机没有那份原文时跳过（它不在仓库里，是业主侧的交付物）。
     //
-    // 重叠键有两条，都是**事实**而非错误：
-    //   * `语音语言` —— 唯一一条真冲突，只在 en（官方 "Voice Language" vs 补丁 "Voice language"，只有大小写不同）；
-    //   * `快速匹配` —— 0.13.0 起引擎自己就带这一条（野排匹配落地），四语种与补丁**逐字相同**，所以它是
-    //     「已经有了、值也一样」而不是冲突。插件包那一侧因此不再需要加这个键。
+    // 重叠键有**三条**，都是**事实**而非错误：
+    //   * `语音语言` —— 真冲突，只在 **en**（官方 "Voice Language" vs 补丁 "Voice language"，只差大小写）；
+    //   * `快速匹配` —— 0.13.0 起引擎自己就带这一条（野排匹配落地），四语种与补丁**逐字相同** ⇒ 「已有且同值」；
+    //   * `发送`     —— 0.13.0 起引擎自己就带这一条（房内聊天落地，docs/META.md §1.8）：en / ja / zh-TW 同值，
+    //                  **ko 不同**（我们 "전송"，补丁 "보내기"）⇒ ko 多一条真冲突。
+    // 合并规则是「已有键绝不覆盖 + 值不同就点名」，所以 added 恒为 71，冲突按语种分别是 en 1 / ko 1 / ja 0 / zh-TW 0。
     const QUICK_MATCH_KEY = '快速匹配';
+    const SEND_KEY = '发送';
+    const SHARED = [COLLIDING_KEY, QUICK_MATCH_KEY, SEND_KEY];
+    const CONFLICT_LANG = { [COLLIDING_KEY]: 'en', [SEND_KEY]: 'ko' };
     const src = 'E:\\destop\\卫戍协议-插件包-v0.2.1\\④ i18n补丁';
     if (!fs.existsSync(src)) {
       assert.ok(true, '本机没有那份补丁原文，跳过这一条（插件包不在仓库里）');
@@ -163,20 +168,28 @@ describe('i18n: merging into an existing language', () => {
       assert.equal(Object.keys(entries).length, 74, `${code}: 74 键`);
       const ours = ourLang(code);
       const overlap = Object.keys(entries).filter((k) => Object.hasOwn(ours, k));
-      assert.deepEqual(overlap.slice().sort(), [COLLIDING_KEY, QUICK_MATCH_KEY].slice().sort(), `${code}: 与我们重叠的就是这两条`);
-      // `快速匹配` 必须是「值也相同」那一档：不同的话它就变成第二条真冲突，说明我们的译文与交付物对不上。
-      assert.equal(entries[QUICK_MATCH_KEY], ours[QUICK_MATCH_KEY], `${code}: 快速匹配 的译文两边必须逐字相同`);
+      assert.deepEqual(overlap.slice().sort(), SHARED.slice().sort(), `${code}: 与我们重叠的就是这三条`);
+      // 逐条核对「哪一语种真的不同」：这条断言同时是「不许为了过测试去改文案」的守卫 ——
+      // 引擎自带的那两条必须与补丁一致（ko 的 发送 除外），否则就是两条译文真的对不上。
+      const expected = Object.entries(CONFLICT_LANG).filter(([, lang]) => lang === code).map(([k]) => k);
+      for (const k of SHARED) {
+        assert.equal(entries[k] !== ours[k], expected.includes(k),
+          `${code}: "${k}" 两边${entries[k] !== ours[k] ? '不同' : '相同'}，与实测的冲突表不符`);
+      }
       const r = mergeWorkshopI18n(ours, entries, { pack: 'quickchat-en', lang: code });
       assert.equal(r.ok, true, r.detail);
-      assert.equal(r.added.length, 72, `${code}: 补上 72 条（74 键里 2 键我们已有）`);
-      assert.equal(r.conflicts.length, code === 'en' ? 1 : 0, `${code}: 冲突条数`);
-      assert.equal(r.skippedSame, code === 'en' ? 1 : 2, `${code}: 值相同而不计的条数`);
-      if (code === 'en') {
-        assert.equal(r.conflicts[0].key, COLLIDING_KEY);
-        assert.equal(r.conflicts[0].official, 'Voice Language');
-        assert.equal(r.conflicts[0].packValue, 'Voice language');
+      assert.equal(r.added.length, 71, `${code}: 补上 71 条（74 键里 3 键我们已有）`);
+      assert.equal(r.conflicts.length, expected.length, `${code}: 冲突条数`);
+      assert.equal(r.skippedSame, SHARED.length - expected.length, `${code}: 值相同而不计的条数`);
+      for (const k of expected) {
+        assert.ok(r.conflicts.some((c) => c.key === k), `${code}: 冲突必须点名 "${k}"`);
       }
-      assert.equal(Object.keys(r.merged).length, Object.keys(ours).length + 72);
+      if (code === 'en') {
+        const c = r.conflicts.find((x) => x.key === COLLIDING_KEY);
+        assert.equal(c.official, 'Voice Language');
+        assert.equal(c.packValue, 'Voice language');
+      }
+      assert.equal(Object.keys(r.merged).length, Object.keys(ours).length + 71);
     }
   });
 
