@@ -22,7 +22,8 @@
 import { render } from '../../vendor/preact.module.js';
 import { html, TierChip } from './components.js';
 import { GEO } from '../../../shared/constants.js';
-import { chessAvatarUrl, itemIconUrl, tokenAvatarUrl, enemyIconUrl } from './assetUrls.js';
+import { itemIconUrl, tokenAvatarUrl, enemyIconUrl } from './assetUrls.js';
+import { avatarUrlOf, currentAppearanceLookup } from './portraitChain.js';
 import { layoutOf, mapRectOf } from '../render/layout.js';
 import { penRect } from '../render/pen.js';
 import { tileKey, hasFlag, UF, penPlacement, fieldTile, ownStandIn, ownDiyRecord } from './gameLogic.js';
@@ -131,7 +132,7 @@ export function createFallbackView(host, opts = {}) {
     if (p.kind === 'item') return itemIconUrl(mm, lookup('items', p.id));
     if (p.kind === 'token') return tokenAvatarUrl(mm, p.id);
     const chess = lookup('chess', p.id);
-    return chessAvatarUrl(mm, ownSi(chess) || ownDiy(chess) || chess);
+    return avatarUrlOf(mm, ownSi(chess) || ownDiy(chess) || chess, { lookup: currentAppearanceLookup() });
   }
   /** 0.2.0 补位: the player's own piece of a chess it does not own is its stand-in, bench and board alike (render/app.js pieceInfo) */
   function ownSi(chess) {

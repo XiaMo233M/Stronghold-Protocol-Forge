@@ -142,3 +142,45 @@ describe('简写与清单缺失', () => {
     assert.equal(portraitEntry(M, { charId: 'ghost' }), null);
   });
 });
+
+// ---------------------------------------------------------------------------------------------------
+// 消费点：立绘与头像**走同一条链**（皮肤层设计稿的开放问题 2 —— 时装也影响小头像这一类）。
+//
+// 这条测的不是链本身，而是「**没有哪个消费点漏掉**」：漏掉的那个会继续读旧函数，
+// 于是同一个干员在结算页是原版、在详情页是新装 —— 一个没人会报的错（两个画面各自都对）。
+// ---------------------------------------------------------------------------------------------------
+describe('消费点都接了链（源码级守卫）', () => {
+  const ROOT = new URL('../../', import.meta.url);
+  const read = async (rel) => (await import('node:fs')).readFileSync(new URL(rel, ROOT), 'utf8');
+
+  /** 这些文件以前直接调旧函数，现在必须全走链。 */
+  const CONSUMERS = [
+    'public/js/ui/gameComponents.js',     // UnitThumb：结算页 / 队伍面板 / 手牌共用的小头像
+    'public/js/ui/detailPanel.js',        // 详情页立绘
+    'public/js/ui/shopBar.js',            // 商店卡立绘
+    'public/js/ui/fallbackField.js',      // 补位小头像
+    'public/js/screens/loadout.js',       // 干员调配：立绘 + 头像
+    'public/js/screens/diy.js',           // 自选编队
+    'public/js/screens/ownership.js',     // 干员持有
+    'public/js/screens/support.js',       // 助战列表
+  ];
+
+  test('没有任何消费点还在直接调旧函数（调用，不是 import）', async () => {
+    for (const f of CONSUMERS) {
+      const src = await read(f);
+      for (const old of ['chessAvatarUrl', 'chessPortraitUrl']) {
+        const calls = src.split('\n').filter((l) => !/^\s*import\b/.test(l) && l.includes(`${old}(`));
+        assert.equal(calls.length, 0, `${f} 还在直接调 ${old}()：${calls[0]?.trim()}`);
+      }
+    }
+  });
+
+  test('每个消费点都传了 hook（`currentAppearanceLookup()`）—— 否则装了时装也不生效', async () => {
+    for (const f of CONSUMERS) {
+      const src = await read(f);
+      const usesChain = /(portraitUrlOf|avatarUrlOf)\(/.test(src);
+      assert.ok(usesChain, `${f} 应当用链上的简写`);
+      assert.ok(src.includes('currentAppearanceLookup'), `${f} 必须传 hook`);
+    }
+  });
+});

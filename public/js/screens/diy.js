@@ -12,8 +12,8 @@
 import { useLayoutEffect, useState } from '../../vendor/hooks.module.js';
 import { html, Icon, Button, TierChip } from '../ui/components.js';
 import { Img, RichText, BondGlyph } from '../ui/gameComponents.js';
-import { chessAvatarUrl, chessPortraitUrl, profIconUrl, skillRecordIconUrl, moduleTypeIconUrl } from '../ui/assetUrls.js';
-import { portraitUrlOf, currentAppearanceLookup } from '../ui/portraitChain.js';
+import { profIconUrl, skillRecordIconUrl, moduleTypeIconUrl } from '../ui/assetUrls.js';
+import { portraitUrlOf, avatarUrlOf, currentAppearanceLookup } from '../ui/portraitChain.js';
 import { data } from '../data.js';
 import { PROF_NAME, skillLabel, moduleBadge, fullTraitText } from '../ui/loadoutModel.js';
 import { diySlotList, pickChoices, pickOptions, slotRecord, defaultPick } from '../ui/diyModel.js';
@@ -27,7 +27,8 @@ const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI'];
 export const diyData = () => ({ chess: data.get('chess'), backups: data.get('backups') });
 
 /** A unit summary's avatar / portrait URL (a backups.json unit or a composed record). */
-const avatarOf = (m, unit, elite = false) => chessAvatarUrl(m, unit && { charId: unit.charId, assets: { avatar: elite ? unit.assets?.avatarGolden : unit.assets?.avatar } });
+// 头像走统一解析链（皮肤层）：`elite` 由调用方自己选变体，链**不看** isGolden（两边语义一致）。
+const avatarOf = (m, unit, elite = false) => avatarUrlOf(m, unit && { charId: unit.charId, assets: { avatar: elite ? unit.assets?.avatarGolden : unit.assets?.avatar } }, { lookup: currentAppearanceLookup() });
 const classLine = (u) => `${t(PROF_NAME[u?.profession] || '') || ''}${u?.subProfessionName ? ` · ${u.subProfessionName}` : ''}`;
 const bondName = (id) => data.lookup('bonds', id)?.name || id;
 

@@ -1755,6 +1755,25 @@ The repeatable shop-card host was the positive example all along. One attribute 
 `null` (no target yet) is "not yet", not an error: the registry does not mount into a keyless container it cannot
 resolve, which is the same stance the component-rendered hosts already take.
 
+**What the chain covers (the skin design's open question 2, decided: yes).** The unified chain is not just the detail
+panel's portrait — **every** avatar and portrait consumer goes through it, because a consumer left on the old function
+produces exactly the silent split the chain exists to remove (the same operator reads as the original on the result
+screen and as the new outfit in the detail card, and each of the two screens agrees with its own code). Concretely:
+
+| consumer | what it draws |
+|---|---|
+| `public/js/ui/gameComponents.js` `UnitThumb` | the shared small avatar — **the result screen, the squad panel, the hand and the shop all go through this one component**, so wiring it here covers them at once |
+| `public/js/ui/detailPanel.js` | the detail card's portrait |
+| `public/js/ui/shopBar.js` | the shop card's portrait |
+| `public/js/ui/fallbackField.js` | the stand-in (补位) avatar |
+| `public/js/screens/{loadout,diy,ownership,support}.js` | the picker, the DIY slots, the ownership list, the support list |
+
+`test/ui/portraitChain.test.js` guards this at the **source level**: for every one of those files it asserts that no
+line outside an `import` still calls `chessAvatarUrl(...)` / `chessPortraitUrl(...)`, and that each one passes
+`currentAppearanceLookup()`. A consumer that quietly keeps the old call therefore fails the suite instead of showing a
+stale picture to one player. `chessAvatarUrl` / `chessPortraitUrl` themselves stay exported — they are the reference
+implementation the chain is tested **against** (`test/ui/portraitChain.test.js` compares the two on every case).
+
 **Cost and blast radius.** Both additions are *additive*: a page with no pack declaring a panel behaves exactly as
 before (no new DOM, no new request, no new global), and `ctx.me` is one more property on an object that already
 exists. Per `docs/MOD-SURFACE.md`'s policy these are additions, so `MOD_API_VERSION` does **not** move and no published

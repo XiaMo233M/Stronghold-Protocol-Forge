@@ -15,7 +15,8 @@
 import { useEffect, useRef } from '../../vendor/hooks.module.js';
 import { html, Icon, MicroLabel, Button, TierChip } from '../ui/components.js';
 import { Img } from '../ui/gameComponents.js';
-import { chessAvatarUrl, profIconUrl } from '../ui/assetUrls.js';
+import { profIconUrl } from '../ui/assetUrls.js';
+import { avatarUrlOf, currentAppearanceLookup } from '../ui/portraitChain.js';
 import { data, useData } from '../data.js';
 import { useStore } from '../store.js';
 import { PHASE } from '../../../shared/constants.js';
@@ -56,7 +57,7 @@ function SupportRow({ id, picked, full, onToggle }) {
       data-testid=${`support-${id}`} disabled=${disabled}
       title=${disabled ? t('该阶助战名额已满') : (picked ? t('点击移出本次助战') : t('点击加入本次助战'))}
       onClick=${() => onToggle(id)}>
-    <${Img} src=${chessAvatarUrl(m, rec)} class="sp-row__img" fallback=${html`<span class="sp-row__ph">${name.slice(0, 1)}</span>`} />
+    <${Img} src=${avatarUrlOf(m, rec, { lookup: currentAppearanceLookup() })} class="sp-row__img" fallback=${html`<span class="sp-row__ph">${name.slice(0, 1)}</span>`} />
     <span class="sp-row__txt">
       <span class="sp-row__name">${name}</span>
       <span class="sp-row__meta">

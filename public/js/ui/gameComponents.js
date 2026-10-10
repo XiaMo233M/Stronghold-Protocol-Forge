@@ -7,8 +7,11 @@ import { data, useData, localAsset } from '../data.js';
 import { parseRichText, rtClassName } from './richText.js';
 import { t as tr } from '../../../shared/i18n.js';
 import {
-  uiUrl, chessAvatarUrl, chessPortraitUrl, itemIconUrl, tokenAvatarUrl, enemyIconUrl, bondIconUrl, bandIconUrl,
+  uiUrl, itemIconUrl, tokenAvatarUrl, enemyIconUrl, bondIconUrl, bandIconUrl,
 } from './assetUrls.js';
+// 头像统一走解析链（皮肤层）：`UnitThumb` 是结算页 / 队伍面板 / 手牌共用的小头像组件，
+// 所以接这一处就等于把「时装也影响小头像」这件事一次接对所有消费点。
+import { avatarUrlOf, currentAppearanceLookup } from './portraitChain.js';
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
 
@@ -115,7 +118,10 @@ export function UnitThumb({ kind = 'chess', id, golden, size = 'md', tier, showT
   if (kind === 'chess') {
     const c = rec || data.lookup('chess', id);
     si = rec && typeof rec.standInFor === 'string' && rec.standInFor ? rec : null;
-    src = chessAvatarUrl(m, c);
+    // 头像走**统一解析链**（皮肤层设计稿的开放问题 2：时装也影响小头像这一类）：
+    // 这条链同时认「官方的内置皮肤」与「包声明的时装」，所以一个干员换了装之后，
+    // 结算页 / 队伍面板 / 手牌 / 详情页看到的是**同一张**；没有外观提供者时与 `chessAvatarUrl` 逐字相同。
+    src = avatarUrlOf(m, c, { lookup: currentAppearanceLookup() });
     name = c?.name || '';
     t = t ?? c?.tier;
     golden = golden ?? !!c?.isGolden;
