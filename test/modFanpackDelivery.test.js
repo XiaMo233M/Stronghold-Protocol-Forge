@@ -107,8 +107,8 @@ function countClass(node, cls) {
   return n;
 }
 
-describe('fanpack 交付包：装备总览面板（G-12 的另一半，C 层）', () => {
-  test('真装载路径：包认下、面板 1 条、0 拒绝，且声明了它要用的三张表', () => {
+describe('fanpack 交付包：两个只读面板（G-12 的另一半，C 层）', () => {
+  test('真装载路径：包认下、面板 2 条、0 拒绝，且各自声明了它要用的表', () => {
     if (!HAS_PACK) return skip('本机没有 fanpack 交付包');
     const { loaded, panels, cleanup } = loadOnce();
     try {
@@ -117,13 +117,21 @@ describe('fanpack 交付包：装备总览面板（G-12 的另一半，C 层）'
       assert.ok(p, '包被认下');
       assert.equal(p.layer, 'B', '有服务端载荷 ⇒ 层推导为 B');
       assert.deepEqual(panels.errors, [], '面板层 0 拒绝');
-      assert.equal(panels.panels.length, 1);
-      const panel = panels.panels[0];
-      assert.equal(panel.id, 'equipment');
+      assert.equal(panels.panels.length, 2, '两条面板声明（装备总览 + 盟约策略）');
+      const panel = panels.panels.find((p) => p.id === 'equipment');
+      assert.ok(panel, '装备总览那条在');
       assert.equal(panel.slot, 'root.overlays', '浮层宿主：引擎按需创建，包不需要改 index.html');
       assert.deepEqual([...panel.data].sort(), ['assets', 'bonds', 'items'], '声明了它要读的表（读别的会被 CLIENT_DATA_UNDECLARED 点名）');
       assert.equal(panel.styles.length, 1, '自带样式表走同一条通道');
       assert.match(panel.url, /^\/workshop-panels\/fanpack-kazdel-rhodes\/ui\/equipment\.js/);
+      const al = panels.panels.find((p) => p.id === 'alliances');
+      assert.ok(al, '盟约策略那条在');
+      assert.equal(al.slot, 'root.overlays');
+      assert.deepEqual([...al.data].sort(), ['assets', 'bands', 'bonds', 'chess', 'items'], '盟约屏要读五张表');
+      assert.match(al.url, /^\/workshop-panels\/fanpack-kazdel-rhodes\/ui\/alliances\.js/);
+      // 两条声明共用同一份样式表：**按面板各注入一次**（注册点的键是面板键），所以是 2 个 `<link>`、
+      // 指向同一个 URL（同一份字节、同一个 `?v=`）。
+      assert.equal(al.styles[0].path, panel.styles[0].path, '两条面板共用一份 css');
     } finally { cleanup(); }
   });
 
@@ -147,34 +155,48 @@ describe('fanpack 交付包：装备总览面板（G-12 的另一半，C 层）'
         importModule,
         createElement: (tag) => doc.createElement(tag),
         slotHost: (slot) => {
-          const el = doc.createElement('div');
-          el.setAttribute('data-mod-slot', slot);
-          doc.body.appendChild(el);
-          created.set(slot, el);
-          return el;
+          // 与引擎的 `browserSlotHost` 一致：同一个槽位**只建一次**，之后返回那一个（真实现先 querySelector 找已有的）。
+          // 每次调用都新建一个的话，同一槽位上的多条面板会各自拿到不同的容器，测出来的结构就不是浏览器里的样子。
+          if (!created.has(slot)) {
+            const el = doc.createElement('div');
+            el.setAttribute('data-mod-slot', slot);
+            doc.body.appendChild(el);
+            created.set(slot, el);
+          }
+          return created.get(slot);
         },
         slotHosts: () => [],
         env: { serviceWorker: true, cacheStorage: true, webCrypto: true },
-        // 面板声明了 items / bonds / assets：这里给最小但真实的形状（空表也要能画出来，不能抛）
-        data: { get: (name) => ({ items: {}, bonds: {}, assets: {} })[name] ?? null },
+        // 面板声明了那几张表：这里给最小但真实的形状（空表也要能画出来，不能抛）
+        data: { get: (name) => ({ items: {}, bonds: {}, bands: {}, chess: {}, assets: {} })[name] ?? null },
         onWrapsChanged: () => {},
       });
       const applied = registry.apply(panels.panels);
-      assert.equal(applied.accepted, 1);
+      assert.equal(applied.accepted, 2, '两条声明都被接受');
       await new Promise((r) => setTimeout(r, 80));
       assert.deepEqual(registry.refusals(), [], '0 拒绝');
-      assert.deepEqual(registry.mounted(), ['fanpack-kazdel-rhodes/equipment'], '面板挂上了（键是 <包>/<面板id>）');
+      assert.deepEqual(registry.mounted(), ['fanpack-kazdel-rhodes/alliances', 'fanpack-kazdel-rhodes/equipment'], '两条面板都挂上了（键是 <包>/<面板id>）');
       const container = created.get('root.overlays');
       assert.ok(container, '浮层容器被按需创建');
       // 注册点在槽位容器里再造一层 `mod-panel` 包装，并把**那一层**当 `ctx.host` 交给面板。
-      const wrapper = container.childNodes[0];
-      assert.equal(container.childNodes.length, 1, '容器里只有注册点建的那一层包装');
+      // 两条面板都挂这个槽位 ⇒ 容器里两层包装；按 `data-mod-panel` 认人。
+      assert.equal(container.childNodes.length, 2, '两条面板各一层包装');
+      const wrapperOf = (key) => container.childNodes.find((n) => n.getAttribute('data-mod-panel') === key);
+      const wrapper = wrapperOf('fanpack-kazdel-rhodes/equipment');
+      assert.ok(wrapper, '找到装备总览那层包装');
       assert.equal(wrapper.className, 'mod-panel', '包装层是 mod-panel');
       assert.equal(wrapper.childNodes.length, 1, '面板自己的根挂在包装里');
       assert.equal(countClass(wrapper, 'fx-cx__open'), 1, '默认是收起状态：一个「装备总览」按钮');
+      const alWrapper = wrapperOf('fanpack-kazdel-rhodes/alliances');
+      assert.equal(countClass(alWrapper, 'fx-al__open'), 1, '盟约策略也是收起状态：一个按钮');
+      // 两条声明共用同一份样式表：**按面板各注入一次**（注册点的键是面板键），2 个 `<link>` 指向同一个 URL。
+      const styleUrls = registry.styleUrls();
+      assert.equal(styleUrls.length, 2, '两个面板各注入一次');
+      assert.equal(new Set(styleUrls).size, 1, '全部指向同一份样式表');
       // 卸载：面板自己的节点要收干净
       registry.dispose();
       assert.equal(wrapper.childNodes.length, 0, 'dispose 后包装层里不留面板节点');
+      assert.equal(alWrapper.childNodes.length, 0, '两条面板都要收干净');
       assert.equal((stubs.listeners.get('keydown') || []).length, 0, 'Esc 监听要摘掉（否则每次挂载漏一个）');
     } finally { stubs.restore(); cleanup(); }
   });
@@ -200,11 +222,15 @@ describe('fanpack 交付包：装备总览面板（G-12 的另一半，C 层）'
         importModule: (url) => import(pathToFileURL(files.get(key(url))).href),
         createElement: (tag) => doc.createElement(tag),
         slotHost: (slot) => {
-          const el = doc.createElement('div');
-          el.setAttribute('data-mod-slot', slot);
-          doc.body.appendChild(el);
-          created.set(slot, el);
-          return el;
+          // 与引擎的 `browserSlotHost` 一致：同一个槽位**只建一次**，之后返回那一个（真实现先 querySelector 找已有的）。
+          // 每次调用都新建一个的话，同一槽位上的多条面板会各自拿到不同的容器，测出来的结构就不是浏览器里的样子。
+          if (!created.has(slot)) {
+            const el = doc.createElement('div');
+            el.setAttribute('data-mod-slot', slot);
+            doc.body.appendChild(el);
+            created.set(slot, el);
+          }
+          return created.get(slot);
         },
         slotHosts: () => [],
         env: { serviceWorker: true, cacheStorage: true, webCrypto: true },
@@ -216,8 +242,8 @@ describe('fanpack 交付包：装备总览面板（G-12 的另一半，C 层）'
       assert.deepEqual(registry.refusals(), []);
       const container = created.get('root.overlays');
       assert.ok(container, '找到槽位容器');
-      const wrapper = container.childNodes[0];
-      assert.ok(wrapper, '找到注册点的包装层');
+      const wrapper = container.childNodes.find((n) => n.getAttribute('data-mod-panel') === 'fanpack-kazdel-rhodes/equipment');
+      assert.ok(wrapper, '找到装备总览那层包装');
       // 点「装备总览」
       const openBtn = (function find(el) {
         if (String(el.className || '').split(/\s+/).includes('fx-cx__open')) return el;
@@ -260,9 +286,92 @@ describe('fanpack 交付包：装备总览面板（G-12 的另一半，C 层）'
     assert.deepEqual(mod.effectTexts({ id: 'y' }), { normal: null, golden: null });
   });
 
+  test('盟约策略面板的纯模型函数：与原件同一套判据（分层 / 成员 / 装备 / 过滤）', async () => {
+    if (!HAS_PACK) return skip('本机没有 fanpack 交付包');
+    const al = await import(pathToFileURL(join(PACK, 'ui', 'alliances.js')).href);
+
+    // 排序：核心盟约在前（按 bondOrder），附加在后
+    const rows = al.bondRows([
+      { bondId: 'add1', isCore: false, bondOrder: 1 },
+      { bondId: 'core2', isCore: true, bondOrder: 2 },
+      { bondId: 'core1', isCore: true, bondOrder: 1 },
+    ]);
+    assert.deepEqual(rows.map((r) => r.bond.bondId), ['core1', 'core2', 'add1']);
+    assert.deepEqual(rows.map((r) => r.isCore), [true, true, false]);
+
+    // 分层：有阈值就按阈值个数，没有就按 maxCount
+    assert.deepEqual(al.bondLayers({ thresholds: [2, 4, 6] }), [0, 1, 2, 3]);
+    assert.deepEqual(al.bondLayers({ maxCount: 3 }), [0, 1, 2, 3]);
+    assert.deepEqual(al.bondLayers({}), [0, 1], '都没有 ⇒ 至少基础层 + 一层');
+    assert.deepEqual(al.bondLayers({ maxCount: 99 }), Array.from({ length: 11 }, (_, i) => i), 'maxCount 夹在 10');
+
+    // 每层的所需人数来自 thresholds[i-1]；基础层是 null
+    const layers = al.bondLayerTexts({ thresholds: [2, 4], effectDescRaw: 'x{0}' });
+    assert.deepEqual(layers.map((l) => l.need), [null, 2, 4]);
+
+    // 成员按阶级排（数据里的次序不是按阶的）
+    const members = al.bondMembers({ members: [5, 3] }, (id) => ({ id, name: `m${id}`, tier: id }));
+    assert.deepEqual(members.map((m) => m.tier), [3, 5]);
+
+    // 配套装备：只看非精锐且 giveBondId 命中的
+    const eq = al.bondEquipment('b1', [
+      { id: 'i1', tier: 2, giveBondId: 'b1' },
+      { id: 'i2', tier: 1, giveBondId: 'b1' },
+      { id: 'i3', tier: 1, giveBondId: 'other' },
+      { id: 'i4', tier: 1, giveBondId: 'b1', isGolden: true },
+    ]);
+    assert.deepEqual(eq.map((i) => i.id), ['i2', 'i1'], '只留非精锐、按档位');
+
+    // 生效阶段：只留有标签的
+    assert.deepEqual(al.bondPhases([{ bond: { activeType: 'BATTLE' } }, { bond: { activeType: 'MANI' } }, { bond: { activeType: 'BATTLE' } }]), ['BATTLE']);
+
+    // 过滤：核心 / 附加、阶段、自由搜索
+    const fr = al.bondRows([
+      { bondId: 'a', isCore: true, activeType: 'BATTLE', name: '卡兹戴尔' },
+      { bondId: 'b', isCore: false, activeType: 'ALL', name: '罗德岛' },
+    ]);
+    assert.equal(al.filterBonds(fr, { core: true }).length, 1);
+    assert.equal(al.filterBonds(fr, { core: false }).length, 1);
+    assert.equal(al.filterBonds(fr, { phase: 'ALL' }).length, 1);
+    assert.equal(al.filterBonds(fr, { query: '卡兹' }).length, 1);
+    assert.equal(al.filterBonds(fr, { query: '不存在的词' }).length, 0);
+
+    // 机变：按模式过滤
+    const br = al.bandRows([{ bandId: 'x', sortId: 2 }, { bandId: 'y', sortId: 1 }]);
+    assert.deepEqual(br.map((r) => r.band.bandId), ['y', 'x'], '按 sortId');
+    // 模式过滤**只作用于有 modeTypeList 的记录**：没有那个字段的策略不会被这个筛选项排除（原件同一条判据）
+    assert.equal(al.filterBands(br, { mode: 'MULTI' }, {}).length, 2, '没有 modeTypeList ⇒ 模式过滤不排除它');
+    assert.equal(al.filterBands([{ band: { bandId: 'z', modeTypeList: ['MULTI'] } }], { mode: 'MULTI' }).length, 1);
+    assert.equal(al.filterBands([{ band: { bandId: 'z', modeTypeList: ['LOCAL'] } }], { mode: 'MULTI' }).length, 0, '有不包含该模式的清单 ⇒ 排除');
+  });
+
+  test('效果文本格式化链（bondfmt.js）逐字等价：占位符、百分比、四位小数、层数型概率夹 100%', async () => {
+    if (!HAS_PACK) return skip('本机没有 fanpack 交付包');
+    const bf = await import(pathToFileURL(join(PACK, 'ui', 'bondfmt.js')).href);
+    assert.equal(bf.formatPlaceholder(1.2345, '0.00'), '1.23');
+    assert.equal(bf.formatPlaceholder(0.5, '0.0%'), '50.0%');
+    assert.equal(bf.formatPlaceholder(-0.0001, '0'), '0', '不许出现 -0');
+    assert.equal(bf.formatPlaceholder('nope', '0'), '?');
+    assert.equal(bf.fillPlaceholders('a{0}b{1}', ['X', 'Y']), 'aXbY');
+    assert.equal(bf.fillPlaceholders('a{9}', ['X']), 'a{9}', '不认识的索引原样留着');
+    // bb[base] + bb[perStack] × layers
+    const bond = { effectDescRaw: '{0}', effectDescParams: [{ index: 0, base: 'atk', perStack: 'per' }], bb: { atk: 10, per: 5 } };
+    assert.equal(bf.formatBondEffect(bond, 0), '10');
+    assert.equal(bf.formatBondEffect(bond, 3), '25');
+    // 层数型概率：值夹在 1（sim 是 min(1, …)），**渲染格式来自 param 的 `format`**（没有就退成 `'0'`）。
+    // 下面每一行都对着引擎 `public/js/ui/richText.js` 的同一个输入实测过（`_up/mod-compat/out/cmp-bondfmt.mjs`，6/6 等价）：
+    // 没有 `format` 时引擎也输出 `'1'` —— 这不是移植的偏差，是本函数的既有行为（`formats[i] || fmt`）。
+    const prob = { effectDescRaw: '{0}', effectDescParams: [{ index: 0, base: 'base_prob', perStack: 'prob_per_stack' }], bb: { base_prob: 0.5, prob_per_stack: 0.3 } };
+    assert.equal(bf.formatBondEffect(prob, 0), '1', '无 format ⇒ 0 位小数；0.5 四舍五入成 1（与引擎一致）');
+    assert.equal(bf.formatBondEffect(prob, 10), '1', '3.5 被夹在 1（与引擎一致）');
+    const probPct = { ...prob, effectDescParams: [{ index: 0, base: 'base_prob', perStack: 'prob_per_stack', format: '0.0%' }] };
+    assert.equal(bf.formatBondEffect(probPct, 0), '50.0%', 'param 给了格式就按它渲染');
+    assert.equal(bf.formatBondEffect(probPct, 10), '100.0%', '超过 100% 要夹住');
+  });
+
   test('面板源码不碰引擎的私有面：没有 store / battle / fetch，也不写死中文文案', () => {
     if (!HAS_PACK) return skip('本机没有 fanpack 交付包');
-    const src = readFileSync(join(PACK, 'ui', 'equipment.js'), 'utf8');
+    const src = readFileSync(join(PACK, 'ui', 'alliances.js'), 'utf8');
     // 判据只看**代码**，不看注释：把注释剥掉再扫，否则一句「拿不到 battle 句柄」的说明就会误报。
     const code = src
       .split('\n')
