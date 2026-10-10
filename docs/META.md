@@ -358,6 +358,40 @@ the meantime (header bullet of `server/lobby.js`, test/roomKeep.test.js).
 
 ---
 
+### 1.8 房内聊天与快捷短语 (room chat)
+
+**这是引擎特性，不是包能力。** 两样都在 `server/lobby.js`（`chat` / `quickMsg` / `sayInRoom` / `chatAllowed`）与
+`shared/protocol.js`（`CHAT_LIMITS` / `QUICK_MSG_LIMITS` / `CHAT_MODES`）里，客户端是
+`public/js/screens/chat.js`（挂在房间屏上）。一个包要用自己的消息，走 `client.panels[].messages` + `pack.msg`
+（docs/WORKSHOP.md §1.9.6）—— 它**不能**发明线上类型，所以「包想聊天」从来不是加一条 C2S 的理由。
+
+| 消息 | 方向 | 形状 |
+|---|---|---|
+| `room.chat` | C2S | `{ text }` —— 一条文本 |
+| `room.quickMsg` | C2S | `{ ids, arg? }` —— 逗号分隔的短语 id（最多 3 个）与一个可选短参 |
+| `chat.msg` | S2C | `{ from, name, seat, at, text? \| quick? + arg? }`，广播给房间里每个连着的人 |
+| `chat.history` | S2C | `{ messages }` —— **只在重连的 resync 里发给那一个会话** |
+
+**三条硬边界**，每一条都有测试（`test/lobby-chat.test.js`）：
+
+1. **限制在服务端**。`room.state.chatMode` 是三态闭枚举（`room.create.chatMode` 由房主设，默认 `'open'`）：
+   `'open'` 打字与短语都行、`'quick'` 只许短语、`'off'` 全禁。客户端的输入框只是**照着它摆样子**；能不能说由
+   `chat` / `quickMsg` 各自再判一次，答 `CHAT_MODE`。
+2. **旁观者收得到、说不了**（`SPECTATOR`）—— 与既有 `g.*` 同一条口径：观战席只看不演。不在房间里回
+   `NOT_IN_ROOM`；未声明的短语 id 回 `BAD_MSG`（短语的**文案在客户端**，服务端只认 id，白名单是
+   `DEFAULT_QUICK_PHRASES` / `instantServer({ quickPhrases })`，没有白名单的话接收端就得对着不认识的 id 猜）。
+3. **超长是截断，不是拒绝**（按 **Unicode 码点**切到 `CHAT_LIMITS.text`，一个 emoji 算 1 个 —— 与昵称
+   `sanitizeName` 同一条「显示用上限」的思路）；全空白的消息**不广播也不报错**（它没有可观察效果）。
+
+**限流**：每会话令牌桶，**打字与快捷短语各自一份**（`CHAT_LIMITS.burst` / `perSec`）。共用一只桶会让「连点几下
+短语」把人的打字额度吃掉；与包通道（`packMsgAllowed`）也各自一份。
+
+**永不落盘**：聊天只活在房间对象的**内存环形缓冲**里（`CHAT_LIMITS.history` 条，`Room.addChat`），
+重连时整份回放给那一个会话。这条路不碰任何持久化 —— `/healthz` 与既有的快照白名单里都没有聊天字段，测试用一个
+哨兵字符串钉住这一点。房间被回收（`disposeRoom`）时缓冲随之消失。
+
+---
+
 ## 2. Effect registry (content API)
 
 ```js

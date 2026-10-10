@@ -26,6 +26,7 @@ import { SupportButton } from './support.js';
 import { net } from '../net.js';
 import { store, useStore, shallowEqual, emptyMatch, isSpectating } from '../store.js';
 import { difficultyInfo, LAYER_TEXT } from './lobby.js';
+import { ChatPanel } from './chat.js';
 import * as roomMods from '../roomMods.js';
 import { roomModsOf, shortDigest } from '../roomMods.js';
 import { loadCatalog, planAlignment, alignRoom, missingPackIds, storeFor } from '../mods/align.js';
@@ -436,6 +437,7 @@ export function RoomScreen() {
       </aside>`}
     </main>
     <${RoomModsPanel} room=${room} onAlignment=${setAlign} />
+    <${ChatPanel} />
     <${SpectatorBar} facts=${facts} myId=${me.playerId} busy=${busy} onRemove=${removeSpectator} onSit=${sit} />
 
     <footer class="room-bar">

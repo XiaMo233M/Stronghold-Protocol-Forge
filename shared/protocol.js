@@ -26,6 +26,57 @@ const isNum = (v, lo = -Infinity, hi = Infinity) => typeof v === 'number' && Num
 const isPlain = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
 const optional = (check) => (v) => v === undefined || check(v);
 const nullable = (check) => (v) => v === null || v === undefined || check(v);
+
+// ---- 房间打字聊天与快捷短语（引擎特性，不是包能力）-------------------------------------------------------------
+//
+// 这两样是**产品功能**：房内文字聊天与「快捷短语」是引擎自己的一等能力，不开放给包（包要用自己的消息，走
+// `client.panels[].messages` + `pack.msg`，§1.9.6）。这里只定义**形状与上限**；谁能在什么时候说，由大厅裁决
+// （观战者不可发言、对局中按 `chatMode` 限制、超长截断而非拒绝）。
+//
+// 三条与既有口径一致的设计：
+//   * `text` 是**截断上限**（按 Unicode 码点计，不是字节、不是 UTF-16 单元：一个 emoji 是 1 个码点 / 2 个单元），
+//     与 NAME_MAX_LEN 同一条「显示用上限」的思路 —— 超长消息被截断，不会被拒；
+//   * `inbound` 是**结构帧守卫**（`validateC2S` 用的）：比 `text` 高得多，好让「截断」始终是正常路径，
+//     到不了这一层的才判 BAD_MSG；
+//   * `history` 是每个房间**内存里**的环形缓冲（重连时回放给这一个会话），**永不落盘**：这条路不碰任何持久化。
+//
+// 聊天**从不持久化**：这条路径不触碰任何统计/快照白名单（`server/stats.js` / `server/ops.js` 的快照里没有聊天
+// 字段），由 `test/lobby-chat.test.js` 用一个哨兵字符串钉住。
+export const CHAT_LIMITS = Object.freeze({
+  text: 120,        // 截断上限（Unicode 码点）
+  inbound: 4096,    // 结构帧守卫（比 text 高得多，让截断始终是正常路径）
+  history: 50,      // 每房间内存环形缓冲的条数
+  // 每会话令牌桶，**打字与快捷短语各自一份**（server/lobby.js chatAllowed）。容量/pack 通道那套同形：
+  // 一次连点几下不会被拒，持续刷屏会。数字比包通道（PACK_MSG_LIMITS）宽一点 —— 人在对局里说话比机器的载荷频繁。
+  burst: 8,
+  perSec: 2,
+});
+
+/** 快捷短语：一次最多几个 id、单个 id 多长（`niceOne` 这类 camelCase 合法 —— 字符集含大写）。 */
+export const QUICK_MSG_LIMITS = Object.freeze({ ids: 3, idLen: 32 });
+
+/**
+ * 快捷短语的 id 形状：逗号分隔、最多 `QUICK_MSG_LIMITS.ids` 个、每个 1–32 位 `[A-Za-z0-9_]`。
+ * **真正的白名单在服务端**（配置里的短语表）—— 这里只挡「把任意文本当 id 送进来」。
+ * 字符集含大写是刻意的：`niceOne` / `myBad` 就是 id 本身，不是显示文案。
+ */
+export const isQuickId = (v) => typeof v === 'string' && v.length > 0 && v.length <= 128
+  && v.split(',').length <= QUICK_MSG_LIMITS.ids
+  && v.split(',').every((s) => /^[A-Za-z0-9_]{1,32}$/.test(s));
+
+/**
+ * 快捷短语的可选参数：**一个短参**（无参句式不带它）。
+ * 它不是自由文本 —— 服务端只做长度 / 空白 / 控制字符校验，渲染在接收端（文案见 `public/i18n/*`）。
+ */
+export const isQuickArg = (v) => typeof v === 'string' && v.length <= 24 && !/[\u0000-\u001f\u007f]/.test(v);
+
+/**
+ * 房间的聊天模式，`room.state.chatMode` 与 `room.create.chatMode` 共用这一份：
+ * `'open'` = 打字与短语都可以（默认）；`'quick'` = 只允许快捷短语（服务端强制）；`'off'` = 都禁。
+ * 三态一起留在表里：将来要用 `'off'` 不必再改协议。
+ */
+export const CHAT_MODES = Object.freeze(['open', 'quick', 'off']);
+export const isChatMode = (v) => typeof v === 'string' && CHAT_MODES.includes(v);
 /** A plain object with at most `max` own keys, every key passing `key` and every value passing `val`. */
 const isMap = (v, max, key, val) => {
   if (!isPlain(v)) return false;
@@ -416,7 +467,9 @@ export const C2S = {
     // the room's own mod set (W-A, DESIGN §28.9): pack ids the server has loaded, sorted+deduped server-side.
     // Absent or `[]` = the room declares no set (today's behaviour: the room runs whatever the process runs).
     modIds: (v) => Array.isArray(v) && v.length <= MAX_ROOM_MODS && v.every(isModId),
-    $optional: ['mods', 'modIds'],
+    // 房内聊天模式（`room.state.chatMode` 回给所有人）：房主在建房时定，默认 'open'。服务端强制它。
+    chatMode: (v) => v == null || isChatMode(v),
+    $optional: ['mods', 'modIds', 'chatMode'],
   },
   'room.join': { code: (v) => isStr(v, ROOM_CODE_LEN + 2) && /^[A-Za-z0-9]+$/.test(v), mods: (v) => v == null || isModDigest(v), $optional: ['mods'] },
   'room.leave': {},
@@ -465,6 +518,18 @@ export const C2S = {
     $optional: ['mode', 'difficulty', 'mods'],
   },
   'room.dequeue': {},
+
+  // 房内聊天（引擎特性）：`room.chat { text }` 与 `room.quickMsg { ids, arg? }`。
+  // 形状只判到这里，能不能说由大厅裁决：不在房间 / 是旁观者 / 模式不允许 / 短语 id 不在服务端白名单，都各自
+  // 点名拒绝（不是静默丢弃）。`text` 超长是**截断**（CHAT_LIMITS.text 个码点），到不了 inbound 那一步。
+  'room.chat': {
+    text: (v) => isStr(v, CHAT_LIMITS.inbound),
+  },
+  'room.quickMsg': {
+    ids: isQuickId,
+    arg: optional(isQuickArg),
+    $optional: ['arg'],
+  },
 
   // 资源包准入（DESIGN §28.13，B1 段；docs/WORKSHOP.md §1.9）。这三个类型属于**钩子总线**：唯一的消费者是包声明的
   // `server.preDispatch` 钩子（server/net.js onFrame，过了 validateC2S 之后、ping/hello 之前）。它们必须在这里，
@@ -571,6 +636,9 @@ export const S2C = [
   // nothing (the slot is kept for a resume and merely stops counting as waiting); a player who is not in the queue
   // never receives one at all.
   'room.queued',
+  // 房内聊天（引擎特性）：`chat.msg { from, name, seat, text, at }` 广播给房间里每个连着的人（旁观者收得到、
+  // 说不了）；`chat.history { messages }` 只在重连的 resync 里发给**这一个**会话。两者都永不落盘。
+  'chat.msg', 'chat.history',
   'm.public', 'm.private', 'm.field', 'm.toast', 'm.ticker', 'm.emote', 'm.result',
   // m.unitStats { seq, round, units: [unitStatsEntry] } — the answer to g.unitStats (the requester only)
   'm.unitStats',

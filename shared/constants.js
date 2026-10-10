@@ -206,6 +206,8 @@ export const ERR = Object.freeze({
   TEMP_NOT_EMPTY: 'TEMP_NOT_EMPTY',
   ELIMINATED: 'ELIMINATED',
   SPECTATOR: 'SPECTATOR',         // a spectator seat only watches (MAX_SPECTATORS)
+  // 房内聊天：这个房间的 `chatMode` 不允许这一类消息（`'quick'` 只许快捷短语，`'off'` 全禁）
+  CHAT_MODE: 'CHAT_MODE',
   MOD_UNKNOWN: 'MOD_UNKNOWN',     // room.create named a pack id this server does not have loaded (DESIGN §28.9, W-A)
   // 野排匹配 (quick match, server/matchmaking.js): the queue already holds its limit of waiting players
   QUEUE_FULL: 'QUEUE_FULL',
@@ -224,6 +226,7 @@ export const ERR_TEXT = {
   BAD_TILE: N_('无法部署在该位置'), BAD_TARGET: N_('无效的目标'), SOLD_OUT: N_('已售出'), MAX_LEVEL: N_('调度中心已达最高等级'),
   NOT_YOUR_TURN: N_('尚未轮到你'), ALREADY: N_('已完成该操作'), TEMP_NOT_EMPTY: N_('临时整备区不为空'), ELIMINATED: N_('你已被淘汰'),
   SPECTATOR: N_('观战中无法进行该操作'), MOD_UNKNOWN: N_('房间指定了本服务器没有的模组包'), INTERNAL: N_('服务器内部错误'),
+  CHAT_MODE: N_('该房间的聊天设置不允许这条消息'),
   QUEUE_FULL: N_('正在搜寻的博士已满，请稍后再试'), QUEUE_EMPTY: N_('你不在快速匹配队列中'), QUEUED: N_('你已在同盟中：先离开同盟，才能开始快速匹配'),
 };
 

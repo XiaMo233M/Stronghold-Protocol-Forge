@@ -115,7 +115,7 @@
 
 import { randomBytes, randomInt } from 'node:crypto';
 import { ERR, MAX_SEATS, MAX_SPECTATORS, ROOM_CODE_LEN, modeIdFor } from '../shared/constants.js';
-import { checkLoadout, checkLoadoutOps, cultivationCharIds, checkNotOwned, checkDiyPicks, PACK_MSG_LIMITS } from '../shared/protocol.js';
+import { checkLoadout, checkLoadoutOps, cultivationCharIds, checkNotOwned, checkDiyPicks, PACK_MSG_LIMITS, CHAT_LIMITS, CHAT_MODES } from '../shared/protocol.js';
 import { modSetOf, isModId } from '../shared/modIdentity.js';
 import { normalizeSupportConfig, checkSupport, supportPicker, supportCapacity, supportTiers } from '../shared/support.js';
 import { encode, isDroppable, isErrCode, sendRaw, sendSession } from './net.js';
@@ -142,7 +142,19 @@ export const LOBBY_DEFAULTS = Object.freeze({
   resyncMinGapMs: 1000,   // heavy resyncs (match state / result replay) per session at most this often on repeated hellos
   soloReconnectWindowMs: null, // a dropped solo run stays resumable this long (null = data singleReconnectTime, 24 h)
   queue: null,            // 野排匹配 (server/matchmaking.js MATCHMAKE_DEFAULTS): size / max / waitMs / sweepMs / difficulty
+  // 房内聊天（引擎特性）允许的快捷短语 id。**唯一真源**：文案在客户端（`public/i18n/*`），服务端只认 id，
+  // 所以未在此列出的 id 一律点名拒绝（`request === 'room.quickMsg'` 的 `BAD_MSG`）。
+  // 默认这一组与官方「快捷交流」的常用句式对应；部署方可以通过 startServer({ quickPhrases: [...] }) 换掉。
+  quickPhrases: null,
 });
+
+/**
+ * 默认快捷短语 id（`niceOne` / `myBad` 这类 camelCase 就是 id 本身，不是显示文案）。
+ * 客户端把它们渲染成本地化句子（`public/i18n/*` 的 `quick.*` 词条）；服务端只做「是不是我认识的 id」这一件事。
+ */
+export const DEFAULT_QUICK_PHRASES = Object.freeze([
+  'niceOne', 'myBad', 'wellPlayed', 'thanks', 'wait', 'ready', 'help', 'focus', 'goodLuck',
+]);
 
 /** Official `singleReconnectTime` (s) when the data lacks it (constData, research 01 §1). */
 export const SOLO_RECONNECT_FALLBACK_SEC = 86_400;
@@ -283,6 +295,28 @@ export class Room {
     this.modIds = null;
     /** @type {{ digest: string, packs: Array<object> } | null} */
     this.modSet = null;
+    /**
+     * 房内聊天模式（`room.state.chatMode`，`room.create.chatMode` 设）：`'open'` 打字与短语都可以（默认）、
+     * `'quick'` 只允许快捷短语、`'off'` 都禁。**服务端强制** —— 客户端的输入框只是照着这个值摆样子。
+     * @type {'open'|'quick'|'off'}
+     */
+    this.chatMode = 'open';
+    /**
+     * 聊天**环形缓冲**（`CHAT_LIMITS.history` 条），重连的 resync 里回放给**这一个**会话。
+     * **只在内存里**：这条路不碰任何持久化，房间没了它也就没了。
+     * @type {object[]}
+     */
+    this.chat = [];
+  }
+
+  /**
+   * 往环形缓冲里放一条（超出上限就丢最旧的）。
+   * @param {object} frame 已塑形的 `chat.msg` 帧
+   */
+  addChat(frame) {
+    this.chat.push(frame);
+    if (this.chat.length > CHAT_LIMITS.history) this.chat.splice(0, this.chat.length - CHAT_LIMITS.history);
+    return this.chat.length;
   }
 
   /** @param {string} playerId @returns {Seat | null} */
@@ -316,6 +350,9 @@ export class Room {
       mode: this.mode,
       difficulty: this.difficulty,
       aiPicksLast: this.aiPicksLast,
+      // 房内聊天模式：客户端据此决定要不要显示输入框。**服务端强制**（`chat` / `quickMsg` 各自再判一次），
+      // 这个字段只是让界面说实话。
+      chatMode: this.chatMode,
       inMatch: !!this.match,
       seats: this.seats.map((s) => (s
         ? { seat: s.seat, playerId: s.playerId, name: s.name, isBot: s.isBot, ready: s.ready, connected: s.connected && !s.left }
@@ -354,9 +391,28 @@ export class Room {
   }
 }
 
+/**
+ * 一条聊天文本的**塑形**：按 Unicode 码点截到 `CHAT_LIMITS.text`，去掉控制字符，两端空白抹平；全是空白 ⇒ `''`。
+ *
+ * 为什么按**码点**切而不是 `slice`：`'🙂'.length === 2`，按 UTF-16 单元切会把一个代理对劈成两半，接收端渲染出
+ * 一个替换字符。`[...s]` 走的是码点迭代，这是 `sanitizeName`（昵称那条）的同一条思路。
+ *
+ * 控制字符（含 `\n` / `\t` / DEL）一律换成空格：聊天是**单行**展示，一条消息不该有能力自己排版。
+ * @param {unknown} raw
+ * @returns {string} 可直接广播的文本；无内容时是空串
+ */
+export function chatText(raw) {
+  const s = typeof raw === 'string' ? raw : '';
+  return [...s]
+    .map((ch) => (ch.codePointAt(0) < 0x20 || ch.codePointAt(0) === 0x7f ? ' ' : ch))
+    .slice(0, CHAT_LIMITS.text)
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /** Room registry + lobby message handlers. Pass an instance as the `handler` of net.js Network. */
-export class Lobby {
-  /**
+export class Lobby {  /**
    * @param {{
    *   registry: import('./net.js').SessionRegistry,
    *   log?: { info: Function, warn: Function, error: Function, debug?: Function },
@@ -393,6 +449,15 @@ export class Lobby {
       if (!this.packChannels.has(panel.pack)) this.packChannels.set(panel.pack, new Set());
       for (const channel of panel.messages) this.packChannels.get(panel.pack).add(channel);
     }
+    /**
+     * 快捷短语的服务端白名单（`room.quickMsg`）。与 `packChannels` 同一个形状的「不认识就点名」判据：**表里没有
+     * 的 id 不会被转发**，接收端因此永远不必对着一堆不认识的 id 猜文案。默认 `DEFAULT_QUICK_PHRASES`。
+     * 用 `options.quickPhrases` 换掉（部署方口径），显式传空数组即「这个服务器不做快捷消息」。
+     * @type {Set<string>}
+     */
+    this.quickPhrases = new Set(
+      Array.isArray(this.opts.quickPhrases) ? this.opts.quickPhrases : DEFAULT_QUICK_PHRASES,
+    );
     /**
      * What this server is running, as one identity (DESIGN §28.2): `{ digest, packs }`, or null for a plain install.
      * The digest travels in `welcome` and must be echoed in `room.create` / `room.join` before a seat is given in a
@@ -538,6 +603,9 @@ export class Lobby {
       // 野排匹配 (quick match): the queue lives in server/matchmaking.js; these two cases are its only entry points
       case 'room.queue': return this.matchmake.join(session, msg);
       case 'room.dequeue': return this.matchmake.leave(session);
+      // 房内聊天（引擎特性）：打字与快捷短语，形状由 shared/protocol.js 判死，能不能说由这里裁决
+      case 'room.chat': return this.chat(session, msg);
+      case 'room.quickMsg': return this.quickMsg(session, msg);
       case 'pack.msg': return this.packMsg(session, msg);
       default:
         if (typeof msg.t === 'string' && msg.t.startsWith('g.')) return this.routeGame(session, msg);
@@ -579,6 +647,92 @@ export class Lobby {
       if (target && target.connected) sendSession(target, out);
     }
     return OK;
+  }
+
+  /**
+   * `room.chat { text }` —— **房内打字聊天**（引擎特性，不是包能力；包要用自己的消息走 `pack.msg`）。
+   *
+   * 四道判据，全部落在「不认识的请求要响亮」那条线上，没有一道是静默丢弃：
+   *   1. 必须**在房间里**（`ERR.NOT_IN_ROOM`）；
+   *   2. **旁观者不可发言**（`ERR.SPECTATOR`）—— 他们收得到每一条，但说不出话，与既有的 `g.*` 同一条口径；
+   *   3. 房间的 `chatMode` 允许打字（`ERR.CHAT_MODE`）：`'quick'` 只许快捷短语，`'off'` 全禁；
+   *   4. 每会话令牌桶限流（`ERR.RATE`）。
+   *
+   * **超长是截断，不是拒绝**：按 Unicode 码点切到 `CHAT_LIMITS.text`（一个 emoji 算 1 个码点），与昵称
+   * `sanitizeName` 同一条「显示用上限」的思路；到不了 `CHAT_LIMITS.inbound` 的消息在 `validateC2S` 就被拒了。
+   *
+   * 空白消息（全是空白的也算）**不广播**、也不报错 —— 它没有任何可观察效果，回一个错误只会让客户端为难。
+   * @param {import('./net.js').Session} session
+   * @param {{ text: string }} msg
+   */
+  chat(session, msg) {
+    const room = this.roomOf(session);
+    if (!room) return fail(ERR.NOT_IN_ROOM);
+    if (room.spectatorOf(session.playerId)) return fail(ERR.SPECTATOR);
+    if (room.chatMode !== 'open') return fail(ERR.CHAT_MODE, `this room only allows ${room.chatMode === 'quick' ? 'quick messages' : 'no chat'}`);
+    const seat = room.seatOf(session.playerId);
+    if (!seat) return fail(ERR.NOT_IN_ROOM);
+    if (!this.chatAllowed(session, 'chat')) return fail(ERR.RATE);
+    const text = chatText(msg.text);
+    if (!text) return OK;                                   // whitespace only: nothing to say, nothing to report
+    this.sayInRoom(room, seat, { text });
+    return OK;
+  }
+
+  /**
+   * `room.quickMsg { ids, arg? }` —— **快捷短语**（引擎特性）。`ids` 是逗号分隔的短语 id，`arg` 是可选的短参。
+   *
+   * 为什么 id 要有服务端白名单：短语的**文案在客户端**（`public/i18n/*`），服务端只认 id。没有白名单的话，
+   * 任何字符串都能当 id 送进来，接收端就得对着一堆不认识的 id 猜。所以 `this.quickPhrases` 是唯一真源：
+   * 未声明的 id 点名拒绝（`ERR.BAD_MSG`）。
+   *
+   * 与打字聊天共用同一套房间判据（在房间 / 不是旁观者 / 限流），但**模式判据不同**：`'quick'` 模式放行的正是
+   * 这一条，`'off'` 才一起禁掉。
+   * @param {import('./net.js').Session} session
+   * @param {{ ids: string, arg?: string }} msg
+   */
+  quickMsg(session, msg) {
+    const room = this.roomOf(session);
+    if (!room) return fail(ERR.NOT_IN_ROOM);
+    if (room.spectatorOf(session.playerId)) return fail(ERR.SPECTATOR);
+    if (room.chatMode === 'off') return fail(ERR.CHAT_MODE, 'chat is off in this room');
+    const seat = room.seatOf(session.playerId);
+    if (!seat) return fail(ERR.NOT_IN_ROOM);
+    for (const id of String(msg.ids).split(',')) {
+      if (!this.quickPhrases.has(id)) return fail(ERR.BAD_MSG, `unknown quick phrase "${id.slice(0, 32)}"`);
+    }
+    if (!this.chatAllowed(session, 'quick')) return fail(ERR.RATE);
+    this.sayInRoom(room, seat, {
+      quick: String(msg.ids).split(','),
+      ...(msg.arg === undefined ? {} : { arg: msg.arg }),
+    });
+    return OK;
+  }
+
+  /** 房内说话的**唯一出口**（打字与短语共用）：塑形 → 进环形缓冲（重连回放用）→ 广播。 */
+  sayInRoom(room, seat, payload) {
+    const out = { t: 'chat.msg', from: seat.playerId, name: seat.name, seat: seat.seat, at: this.now(), ...payload };
+    room.addChat(out);
+    this.broadcastRoom(room, out);
+    return out;
+  }
+
+  /**
+   * 聊天的**每会话**令牌桶，**打字与快捷短语各自一份**（`kind` 区分）：短语是「零成本的按一下」，打字要走
+   * 输入框，两者的合理频率差得很远 —— 共用一只桶会让「连点几下短语」把人的打字额度吃掉，反过来也一样。
+   * 与包通道（`packMsgAllowed`）同样各自一份。
+   * @param {import('./net.js').Session} session
+   * @param {'chat'|'quick'} kind
+   */
+  chatAllowed(session, kind, now = this.now()) {
+    const key = kind === 'quick' ? 'quickBucket' : 'chatBucket';
+    const bucket = session[key] || (session[key] = { tokens: CHAT_LIMITS.burst, at: now });
+    const elapsed = Math.max(0, now - bucket.at) / 1000;
+    bucket.at = now;
+    bucket.tokens = Math.min(CHAT_LIMITS.burst, bucket.tokens + elapsed * CHAT_LIMITS.perSec);
+    if (bucket.tokens < 1) return false;
+    bucket.tokens -= 1;
+    return true;
   }
 
   /** 包通道的**每会话**令牌桶（`PACK_MSG_LIMITS`）：一个没有限流的聊天通道就是一个刷屏通道，
@@ -639,7 +793,7 @@ export class Lobby {
   // room.* handlers
   // ---------------------------------------------------------------------------------------------------
 
-  create(session, { mode, difficulty, mods, modIds }) {
+  create(session, { mode, difficulty, mods, modIds, chatMode }) {
     const cur = this.roomOf(session);
     if (cur && cur.match) return fail(ERR.ROOM_STARTED, 'leave your running match first');
     const gate = this.checkModSet({ mods });
@@ -668,6 +822,9 @@ export class Lobby {
     if (cur) this.removeMember(cur, session.playerId);
     const room = new Room(code, mode, difficulty, this.now());
     room.ownerKey = key;
+    // 房内聊天模式由房主在建房时定（`room.create.chatMode`，默认 'open'）。**服务端强制**：这个值决定
+    // `chat` / `quickMsg` 各自放不放行，客户端的输入框只是照着它摆样子。
+    if (chatMode !== undefined) room.chatMode = chatMode;
     // the room's own mod set, resolved above (both stay null when it declared none — the default)
     room.modIds = resolved.modIds.length ? resolved.modIds : null;
     room.modSet = resolved.modSet;
@@ -1243,6 +1400,9 @@ export class Lobby {
     }
     const frames = this.replayFor(room, session.playerId);
     if (frames) for (const frame of frames) sendRaw(session.ws, frame);
+    // 聊天回放（只给**这一个**会话）：重连的人该看到刚才房里说了什么，但别让所有人再看一遍。
+    // 空房间不回放（没有内容就是没有帧，不是一条空 history）。
+    if (room.chat.length) sendSession(session, { t: 'chat.history', messages: room.chat });
   }
 
   clearResync(playerId) {
