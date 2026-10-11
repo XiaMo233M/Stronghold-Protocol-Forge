@@ -35,6 +35,10 @@
 //       - `session.setPreload({ required, ready })` is the ONLY store write a panel gets (the entry gate, 缺口 3);
 //       - `net.{ on, sendResourceMessage }` is the ONLY network access (缺口 4: the resource challenge arrives before
 //         `hello`, so `send()` would drop the message — `sendResourceMessage` goes through `_sendRaw`).
+//         Since §28.24 / §28.25 the same facade carries two **readings** that originate no frame and drive no behaviour:
+//         `net.status()` (the connection snapshot `public/js/net.js` already publishes as its `'status'` event) and
+//         `net.welcome()` (the `welcome` frame the client already received). Both are frozen copies and both are `null`
+//         when there is nothing to report — a panel may draw the wrong thing, never compute the wrong thing.
 //     There is no store handle, no store slice, no engine and no match state, so a C module can be wrong in the
 //     rendering sense and cannot be wrong in the result sense.
 //   * A DECLARATION THAT CANNOT BE USED IS NAMED, never silently skipped: an unknown slot, a URL outside the
@@ -272,7 +276,7 @@ const isPanelId = (v) => typeof v === 'string' && v.length > 0 && v.length <= 64
  *
  * @param {{
  *   store: { get: () => any, subscribe: (fn: Function) => Function, patch: (key: string, value: object) => void },
- *   net?: { on: Function, sendResourceMessage: Function } | null,
+ *   net?: { on: Function, sendResourceMessage: Function, snapshot?: Function } | null,
  *   log?: { info?: Function, warn?: Function, error?: Function } | null,
  *   notify?: (text: string, kind?: string) => void,
  *   importModule?: (url: string) => Promise<any>,
@@ -327,6 +331,16 @@ export function createPanelRegistry(deps) {
   const themePrevious = new Map();
   /** 面板订阅包通道（`net.on('<通道>')`）拿到的退订函数：`dispose` 要一并撤掉。 */
   const channelOffs = [];
+  /**
+   * 引擎自己那一份 `welcome` 快照（DESIGN §28.24 / §28.25，面板 `ctx.net.welcome()` 的**唯一**来源）。
+   *
+   * 引擎本来就在订阅 `welcome`（`main.js` 的 `onWelcome` / 面板清单 / 资源声明 / 主题），这里只是把**同一条**帧
+   * 的只读深拷贝留下最后一份：`null` = 这一页还没收到过任何一帧（干净安装、标题屏、握手被拒都算）。
+   * 面板由**同一条** welcome 装载，注册点自己的订阅在 `apply()` 之前就注册好了，所以这一帧它收得到 ——
+   * 但这仍然**不保证**首帧可见（订阅者顺序、服务端重发都不由面板决定）：拿不到就是 `null`，不编造。
+   * @type {any}
+   */
+  let welcomeSnapshot = null;
   /** panel key -> 它注册成功的 wraps 链接（模块每个面板只 import 一次）。 */
   const wrapLinks = new Map();
   /** panel key -> 这个模块导出过 `mount` / `default` 吗（**只改写**的模块没有，也不该因此被点名拒绝）。 */
@@ -338,11 +352,32 @@ export function createPanelRegistry(deps) {
   let flushing = false;
   let dirty = false;
   let disposed = false;
+  /**
+   * 那一份 `welcome` 快照的订阅退订函数（`dispose` 要一并撤掉 —— 注入过一次的东西必须能收回来）。
+   *
+   * **为什么在构造时就订阅，而不是等某个面板读第一格时再订阅**：`main.js` 在收到 `welcome` 的那一次回调里才
+   * `apply()` 面板清单（`:341`），所以「读第一格时再订阅」注定**永远**追不上任何一帧 —— 连重连的那一帧都追不上。
+   * 注册点本来就活在这一层订阅里（它与 `modPanels` / `assets` / `theme` 是同一个订阅者的邻居），先订阅一格
+   * 读面不新增任何**帧**、任何请求、任何 DOM：只是在别人已经在处理的那条帧上留一份只读副本。
+   * @type {Function|null}
+   */
+  let unsubscribeWelcome = null;
 
   /** One named refusal: reported to the console and collected for the caller (a test, a diagnostic report). */
   function refuse(code, detail) {
     rejected.push({ code, detail });
     log?.error?.(`[mod-panels] ${code}: ${detail}`);
+  }
+
+  // 引擎自己那一份 `welcome` 快照（DESIGN §28.24 / §28.25）。`net.on` 不在（Node 用例、注入面极小的宿主）时什么都不做：
+  // 那一格读面就是 `null`，面板照样装得上。
+  if (net && typeof net.on === 'function') {
+    try {
+      const off = net.on('welcome', (msg) => { welcomeSnapshot = readonlySnapshot(msg ?? null); });
+      if (typeof off === 'function') unsubscribeWelcome = off;
+    } catch (err) {
+      log?.error?.('[mod-panels] could not subscribe to `welcome` for ctx.net.welcome()', err);
+    }
   }
 
   /** The wire entry, re-judged here: the client is a second reader of the same declaration (the server was the first). */
@@ -671,6 +706,65 @@ export function createPanelRegistry(deps) {
         return net.send({ t: 'pack.msg', pack: rec.pack, channel, ...(data === undefined ? {} : { data }) });
       },
       sendResourceMessage: (msg) => (net && typeof net.sendResourceMessage === 'function' ? net.sendResourceMessage(msg) : false),
+      /**
+       * **连接读数**（DESIGN §28.24 / §28.25，业主裁决「引擎补两格只读读面」）：引擎自己已经握着的那份连接状态的**只读快照**。
+       *
+       * 来源是 `public/js/net.js` 的 `Net.snapshot()`（`'status'` 事件携带的就是它）——**同一条事实**，不是第二份推断：
+       * 连接 / 重连 / 延迟 / 最后一次错误只有引擎答得出来，面板拿不到 `WebSocket`、拿不到心跳往返。
+       *
+       * 形状（键与 `Net.status` 的取值一字不差）：
+       * ```
+       * { status: 'idle'|'connecting'|'connected'|'handshaking'|'online'|'reconnecting'|'closed',
+       *   attempt: number, retryAt: number, ping: number|null,
+       *   lastError: { code: string, text: string } | null }
+       * ```
+       * 只读语义：**每次调用都是一份新的、冻结的副本**，只带上面这五个键（`playerId` 等引擎内部字段不外传）；
+       * 改它不影响引擎的状态，引擎之后的状态变化也不会污染**已经发出去**的那一份。
+       *
+       * 拿不到时返回 `null`，**不抛、不编造**：注入的 `net` 没有 `snapshot()`（Node 用例、极小的宿主），
+       * 或它的返回值不是一个带字符串 `status` 的对象。没有读数就是没有读数 —— 面板该画空态。
+       *
+       * 这是一格**读数**，不是一条通道：它不新增协议消息、不发任何帧、不改变引擎行为。
+       * @returns {{ status: string, attempt: number, retryAt: number, ping: number|null, lastError: { code: string, text: string }|null }|null}
+       */
+      status() {
+        if (!net || typeof net.snapshot !== 'function') return null;
+        let snap;
+        try { snap = net.snapshot(); } catch { return null; }
+        if (!snap || typeof snap !== 'object' || typeof snap.status !== 'string') return null;
+        const err = snap.lastError && typeof snap.lastError === 'object'
+          ? Object.freeze({
+            code: typeof snap.lastError.code === 'string' ? snap.lastError.code : null,
+            text: typeof snap.lastError.text === 'string' ? snap.lastError.text : null,
+          })
+          : null;
+        return Object.freeze({
+          status: snap.status,
+          attempt: Number.isFinite(snap.attempt) ? snap.attempt : 0,
+          retryAt: Number.isFinite(snap.retryAt) ? snap.retryAt : 0,
+          ping: Number.isFinite(snap.ping) ? snap.ping : null,
+          lastError: err,
+        });
+      },
+      /**
+       * **服务器身份读数**（DESIGN §28.24 / §28.25）：客户端**已经收到的那一帧 `welcome`** 的只读快照
+       * （`shared/protocol.js` S2C 的 `welcome`，服务端 `server/net.js:713` 组装）。
+       *
+       * 与 `ctx.net.on('welcome', fn)` 是**同一份事实**，只是不必再等一帧：面板由同一条 welcome 装载，
+       * 自己订阅的那一份首帧大概率赶不上（包侧 README 记过这一点），而注册点本来就在这条帧上。
+       *
+       * 只读语义：**冻结的深拷贝**（与 `ctx.data.get()` 同一个 `readonlySnapshot`），面板改不动它，
+       * 引擎之后收到的帧也不会污染**已经发出去**的那一份。帧里的字段原样保留（`playerId` / `name` / `token` /
+       * `serverNow` / `version` / 可选的 `mods` / `modPanels` / `modAssets` / `modTheme` / `maxSeats` …）——
+       * 它是引擎已经发给页面的那一份，不裁剪、不改名、不补默认值。
+       *
+       * 拿不到时返回 `null`，**不抛、不编造**：这一页还没收到过任何一帧 `welcome`（标题屏、握手被拒、干净安装）。
+       * 它也不触发任何新请求：读的就是引擎已经收到的那一份。
+       * @returns {any|null}
+       */
+      welcome() {
+        return welcomeSnapshot;
+      },
     });
     /**
      * 数据口（业主裁决 2026-10-10）：面板**只读**的那几张表。
@@ -1058,6 +1152,12 @@ export function createPanelRegistry(deps) {
         try { off(); } catch (err) { log?.error?.('[mod-panels] channel unsubscribe failed', err); }
       }
       channelOffs.length = 0;
+      // 引擎自己那一份 `welcome` 快照的订阅：与包通道的退订同一个出口（注入过一次的东西必须能收回来）。
+      if (typeof unsubscribeWelcome === 'function') {
+        try { unsubscribeWelcome(); } catch (err) { log?.error?.('[mod-panels] welcome unsubscribe failed', err); }
+      }
+      unsubscribeWelcome = null;
+      welcomeSnapshot = null;
       for (const el of styleEls) {
         if (el && typeof el.remove === 'function') el.remove();
       }

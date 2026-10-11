@@ -1940,6 +1940,79 @@ pack is refused. The two tests that pin the ctx key set (`test/modClientPanels.t
 Tests: `test/modClientPanels.test.js` — the ctx surface, the frozen-snapshot rule, and the three room states (not in a
 room / seated / spectating), plus "a later store change is visible through the same ctx".
 
+### 28.24 ctx.net.status(): the connection reading a panel cannot take itself
+
+A panel can see a room and its own identity (§28.22), but it could not answer **「这条连接现在怎么样」**. That reading
+cannot be derived in the panel: the panel gets no `WebSocket`, no heartbeat round-trip and no reconnect counter — the
+boundary of §28.8 is exactly "what is not passed in is not reachable". The engine already holds all of it.
+
+**The reading.** `ctx.net.status()` returns the **same fact** the engine publishes as its `'status'` event
+(`public/js/net.js` `Net.snapshot()`, fed by every `_setStatus` and every `pong`), as a frozen copy:
+
+| field | meaning |
+|---|---|
+| `status` | `idle` / `connecting` / `connected` / `handshaking` / `online` / `reconnecting` / `closed` — the seven values of `Net.status`, verbatim |
+| `attempt` | consecutive failed connection attempts (0 when none) |
+| `retryAt` | epoch ms of the next reconnect attempt (0 = none) |
+| `ping` | last measured round-trip in ms, or `null` before the first `pong` |
+| `lastError` | `{ code, text }` of the last connection-relevant `NetError` (e.g. `REPLACED`, `VERSION`), or `null` |
+
+Three properties, each deliberate:
+
+* **Read-only, and a copy.** Every call builds a **new frozen object** with exactly those five keys. The engine's own
+  state is not handed out (`playerId` and the private socket fields stay inside), a panel that writes the returned object
+  gets a `TypeError`, and a later state change does **not** reach into a snapshot that was already handed out. Read
+  twice, get two objects; the earlier one keeps its old values.
+* **Nothing when there is nothing.** A `net` without `snapshot()` (a Node harness, a minimal host), a malformed return
+  value, or a `snapshot()` that throws all yield **`null`** — never a filled-in default and never a thrown error. A
+  panel draws its empty state; it must not compute one.
+* **A reading, not a channel.** The method originates no frame, sends no request and changes no engine behaviour. This
+  is asserted mechanically, not by promise: `test/modClientNetReads.test.js` wraps every exit of a real `Net`
+  (`send` / `request` / `sendResourceMessage` / `_sendRaw`) in a counter and requires zero calls.
+
+### 28.25 ctx.net.welcome(): the handshake frame the client already received
+
+> **编号注记（只说明，不改号）。** 本仓库这里的 §28.24 / §28.25 是**本节新增的面板读面规范**
+> （`ctx.net.status()` / `ctx.net.welcome()`；只在包内 `PROVENANCE.md` 与代码里同样写作 §28.24 / §28.25，
+> 故两个号一律保持不动，mod 作者才对得上）。`docs/design/engine.md:214` 那个
+> 「Community corrections (2026-10-10, §28.25)」是**另一处松引用标签**，`docs/design/client.md:150` 引的
+> §28.25、`docs/design/network.md:23` 引的 §28.27 同为松引用（`test/docs-paths.test.js` 只判「号是否出现过」，
+> 不核对所指内容）。**二者不是同一节**，互不替代。
+
+The second half of the same gap. The `welcome` frame (`shared/protocol.js` S2C; assembled in `server/net.js:713` from
+`welcomeInfo()`) is the server's identity: protocol version, the pack set it runs (`mods { digest, packs }`), the
+operator catalogue, the seat ceiling. A panel could already subscribe to it (`ctx.net.on('welcome', fn)`, an engine type
+passes through unchanged), **but the frame that mounts the panel is the same one it would have to subscribe to** — the
+panel list travels in `welcome.modPanels`. A panel that subscribes inside `mount()` therefore waits for a reconnect to
+learn who it is talking to, which is exactly what the `net-panel` submission reported.
+
+**The reading.** `ctx.net.welcome()` returns a **frozen deep copy** of the last `welcome` frame this page received
+(same `readonlySnapshot` as `ctx.data.get()`), or `null` if none has arrived yet. The frame is passed through as it
+reached the page — no fields renamed, trimmed or defaulted — so a panel reads `playerId` / `name` / `serverNow` /
+`version` / `mods` / `modPanels` … exactly as `on('welcome')` would deliver them.
+
+* **Where the copy comes from.** The registry subscribes to `welcome` **once, when it is created**, and keeps one
+  frozen copy. This is not a new frame and not a new request: `main.js` already subscribes to the same frame for the
+  panel list, the resource declarations and the theme, and the registry is created at page scope — so its listener is
+  in place before the `welcome` that calls `apply()` is dispatched. Subscribing lazily on first read would be too late
+  for **every** frame, including the reconnect one.
+* **Read-only, and a copy.** A panel cannot write the frame, and a later `welcome` does not rewrite a snapshot already
+  handed out. `dispose()` unsubscribes and clears the copy (anything injected once must be recoverable), after which
+  the reading is `null` again — while `status()`, which only reads live engine state, still answers.
+* **Nothing when there is nothing.** Title screen, a rejected handshake, a plain install: `null`, no error.
+
+**Cost and blast radius.** Both cells are *additions* to an object that already exists: `MOD_API_VERSION` does **not**
+move (§28.21's table, the first row) and no published pack is refused. A page whose packs declare no panel behaves as
+before — the two cells are defined on the facade, which is only built for a mounted panel — and the one extra
+`welcome` listener caches a private copy without adding a frame, a request or a DOM node. The two tests that pin the ctx
+key set had to learn nothing: `net` is still one key, and the pinned nets in `test/modClientPanels.test.js` /
+`test/modPanelWraps.test.js` are minimal hosts, which is exactly the `null` path above.
+
+Tests: `test/modClientNetReads.test.js` — both cells on one frozen facade; the `status()` field-by-field agreement with
+`Net.snapshot()`; a handed-out snapshot surviving engine changes and rejecting panel writes; `welcome()` pass-through,
+depth of the freeze, and a later frame not rewriting an earlier snapshot; `null` for every "nothing to report" host;
+`dispose()`; and "no new protocol message".
+
 ---
 
 ### 28.28 工坊时装（§28.28）：一个开关，加「提供者先说话」
