@@ -1,5 +1,66 @@
 # 更新记录
 
+## 0.15.1-0.2.4 — 2026-10-11
+
+本仓库自己的版本 **0.15.0 → 0.15.1**；打包的上游游戏本体**仍是 0.2.4**（这一批没有任何上游改动）。
+`MOD_API_VERSION` 仍是 **1** —— 这一批全是加法，已发布的包一个都不受影响，也不需要重装已装的包。
+上游游戏本体仍是 **0.2.4**，发行 tag：`v0.15.1-0.2.4`。
+
+**面板读面第二批：`ctx.me.voice` / `ctx.session.setVoiceLang` / `ctx.net.transport()`**（`docs/design/mod-layer.md`
+§28.31 / §28.32，实现见 `public/js/ui/extensions.js` + `ui/settings.js` + `main.js`）。面板答不出「这台机器现在
+用哪套配音」（那个值住在设置库，与 `ctx.me` 读的不是同一个 store），也答不出「这条 WebSocket 实际跑在什么
+参数上」（浏览器侧 `WebSocket` API 不暴露 `Sec-WebSocket-Extensions`）——补一格读数加**一个受限写口**：
+`ctx.me.voice` 是 `{ global, byChar }` 的冻结副本（每次读一份新的，`byChar[charId] ?? global` 就是播放时那个
+语言，形状不对的键不进快照，拿不到就是 `null`）；`ctx.session.setVoiceLang(charId, lang)` 是**面板能写的唯一
+一格设置**：只改 `voiceLangByChar` 的一个键、过同一份 sanitize、走同一条既有 `savePref` 订阅，值是闭枚举
+（`''` / `null` = 清覆盖），越界一律点名（`CLIENT_VOICE_*`）而不是静默丢弃；`ctx.net.transport()` 读的就是
+`welcome.transport`，缺字段 ⇒ 整格 `null` 并记一行，**绝不自己造默认值**。
+
+**`pack.json.server.transport`：声明式的启动期传输配置**（§28.33）。`perMessageDeflate` 原先写死在
+`server/http/websocket.js`，一个想开压缩的包只能手改引擎那一行。现在它是一张字段闭集
+（`deflate` 必填，其余有上下界），复用 `assets.serverPolicy` 的同一条三件套（读声明 → 收敛成**一个进程级**的
+值 → 启动日志点名），多包声明时包 id 小的赢、其余点名。**只是声明**：包永远不能注入服务端代码去改 `wss`。
+生效值随既有的 `welcome` 帧送出去，**报的是生效值不是声明值**；没有任何包声明时仍是 `false`，与这一刀之前
+逐字节相同。
+
+**`uses: ["metrics"]` 与 `boot(config)` 的冻结快照**（§28.34）。`host.metrics()` 交出的是一份**深冻结的标量
+快照**（`uptimeSec` / `rss` / `heapUsed` / `elu` / `loopP*` / `sampleAgeMs` / `state`）：是值不是句柄，没有
+`process`、没有直方图、没有定时器、没有函数，惰性启用（没包声明时开销为零），样本过期就 `loopP*` 全 `null` +
+`state: "stale"` + 点名一次。`onBoot` 的回调收到深冻结只读配置快照 `{ port, host, stateDir, env }`（真正绑到的
+port / host 才在里面，`env` 只带 `BOOT_CONFIG_ENV_KEYS` 白名单）——包只能观察，不能设值。
+
+**`uses: ["route"]`：动态只读端点 `/mod/<包id>/…`**（§28.35）。`pack.json.routes` 只能挂一个包内写死的
+`.json`，「内容随运行时状态变」表达不出来。这一格是一个**同步返回 JSON 可序列化值**的回调：路径必须在
+`/mod/<包id>/…` 里（结构性隔离）并再判一遍核心保留路径表，只有 GET / HEAD，缓存只有 `no-store` / `no-cache`，
+体 ≤ 64 KB，四种失败各自点名并回 500。**认证口径与引擎其余 HTTP 面逐字一致：没有认证** ⇒ 它不是私有通道。
+
+**作者自备 CDN 的语音素材**（§28.36）。业主口径：**分发官方语音不行，但留出「按作者写下的地址取作者自己的
+素材」这条路**。所以 `voices` / `voiceLangs` 的条目可以是 `{ url, sha256, file }`：协议只认 `https:`、
+`sha256` 是作者声明的内容摘要（取回来必须对上，对不上不落盘、不服务）、`file` 是包内逻辑位置（客户端看见的
+URL 与「素材本来就在包里」时逐字相同）、声明了就必须写 `license`、失败逐条点名并把那条台词从客户端语音表里
+摘掉（回落默认配音，而不是留一条永远 404 的静音）。**引擎里没有一个语音素材主机名常量、没有新增任何下载
+路由、`VOICE_LANG_*` 一个字没放宽**。
+
+**三个「说了没做」的真 bug。** 一、`shared/modSurface.js` 的 `server.modules` 那一格从第一天起写着「源码过静态
+确定性扫描（无 `process` / `require` / `eval`）」，而 `server/modModules.js` 只检查了文件读得到就直接 `import()`
+进服务器自己的进程 —— 现在在 import **之前**跑 `stripComments` + `mentionsIdentifier`，取与另外三处同一张共享表
+（`SERVER_CODE_FORBIDDEN_GLOBALS`）**去掉 `globalThis`** 一格（承诺逐字是那三个名字，而仓库里有一个能用的
+`server.modules` fixture 用 `globalThis` 与同进程测试通信）。二、`MOD_SURFACE_FROZEN['1']` 原先直接写成
+`MOD_SURFACE_IDS`：两者是同一个数组对象 ⇒ 从表面清单里删掉一格时账本跟着一起少一格，守卫恒真、真实代码路径
+从来没有红过（装饰性守卫比没有守卫更坏），现在改成手抄字面量并加断言钉住「两者不是同一个对象」。三、面板
+数据表上限是手写的 13，而名单在 `notices` 加进来之后是 **14** ⇒「把这个面板要读的表全列出来」这件最自然的事
+被判成超限，错误文案还写着「at most 13 tables (that is all of them)」；现在上限由名单推导
+（`CLIENT_MAX_PANEL_DATA_TABLES`），并有断言钉住「上限 == 名单长度」。
+
+**如实说清的四件事。** ① 那道源码扫描是**启发式，不是沙箱**：`globalThis['pro'+'cess']` 这类拼字符串仍然绕得过
+（另外三处也一样绕得过）；真正兜底的是「同一份包字节 ⇒ 同一份服务端代码」的内容哈希与模块只能拿到 `uses` 里
+声明过的那几样东西。② 静态 `pack.json.routes` 通道仍然可以声明一条与核心挂载同名的路径（`server/http/static.js`
+的「声明过的路径就是声明过的路径」），**本批没动**：核心保留路径表这一批只施加在**动态**通道上，给静态通道补
+这条判据会改变已发布包的行为，需要单独裁。③ `/healthz` 的 `ok` 恒为 `true`、状态码恒为 `200`，**「不 ok 时
+503」做不到、本批也不做**：要那个语义就得先定义「谁的不 ok」，而「任一第三方包说不 ok 就摘流量」正是这一层
+一直在拒绝的能力形态（详见 §28.37）。④ 文档里**既有**的 13 处 `文件:行` 引用漂移（非功能性引用）**本批未修**，
+留作单独一次重数。
+
 ## 0.15.0-0.2.4 — 2026-10-11
 
 **`m.public` 改成增量帧**（`docs/design/network.md` §8.2.1，实现见 `server/viewsDelta.js` +
