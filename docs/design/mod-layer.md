@@ -1803,6 +1803,37 @@ the same deliberate friction as `PANEL_SEND_TYPES` and `CLIENT_PANEL_SLOTS`. Rea
 gets a copy (mutating it changes nothing), and there is still no store, no `Match`, no runner.
 
 **What it does NOT give.** Server-side health (`/healthz` fields: load, queue depth, worker pools) is not public and
-stays that way — a "server status" panel shows what the engine already tells clients (the connection readout, the
-`welcome` frame through `ctx.net.on('welcome')`) plus whatever the pack's own server half reports over its channel.
-Adding the rest would be a product decision, not a pack surface.
+stays that way — a "server status" panel shows what the engine already tells clients (this connection readout, the
+identity readout of §28.25, and whatever the pack's own server half reports over its channel). Adding the rest would be
+a product decision, not a pack surface.
+
+
+### 28.25 `ctx.net.welcome()`: the identity of the server this page is on (implemented)
+
+**Why a second readout.** §28.24 answers "how is my connection" (status, attempt, ping). The companion question a
+status/identity panel asks is "which server am I on" — its protocol version and **which workshop packs it declared**
+(`welcome.mods`, DESIGN §28.2: `{ digest, packs: [{ id, hash, layer, combat, api? }] }`). The frame itself is already
+public to every client; what was missing was a *readout*: the natural-looking answer, `ctx.net.on('welcome')`, **cannot
+work** for the first welcome — panels are applied **from that very frame** (`welcome.modPanels`, §28.8), so by the time
+a panel's module has been imported and `mount` ran, the frame was dispatched long ago. An event subscription only ever
+catches a *reconnect*. A panel that silently showed "no info" on every fresh page load would be wrong in the most
+confusing way.
+
+**The shape.** `ctx.net.welcome()` — same family as `ctx.me` / `ctx.net.status()`: **no `pack.json` declaration**, the
+engine always gives it. It returns a frozen copy of the **last `welcome` this page received**, restricted to the closed
+field set `public/js/ui/extensions.js NET_WELCOME_FIELDS`:
+
+* `version` — the protocol version the server answered with (or `null`);
+* `mods` — `{ digest, packs: [{ id, layer, combat }] }`, or `null` when the frame carried none (a plain install has no
+  `mods` key at all) or when the frame's `mods` was malformed. The pack `hash` (a 64-hex content hash) and the `api`
+  range are **dropped**: they name bytes and ranges, not things a readout displays.
+
+**Where it is kept.** `public/js/net.js` stores the frame's identity in `Net.serverHello` inside `_onWelcome` (the same
+place that already keeps `serverName` / `playerId`), so it survives reconnects and is replaced wholesale by each new
+welcome — the readout only ever echoes a set that actually arrived, never one remembered from an earlier session. A
+`null` return (no engine net attached: Node tests, an unwired host — or a page that has not been welcomed yet) is the
+empty state, exactly like `status()`.
+
+**Why a closed set.** Same friction as §28.24: the engine may grow `welcome`; a panel-facing surface must not grow
+silently with it. Adding a field means editing `NET_WELCOME_FIELDS`, the row in `docs/MOD-SURFACE.md` and a test.
+Read-only in both directions, and there is still no store, no `Match`, no runner.

@@ -881,3 +881,86 @@ describe('客户端缺口：资源消息 / 入口闸门 / wasEntered 旁路', ()
     await settle();
     assert.equal(seen[1].net.status(), null);
   });
+
+  test('ctx.net.welcome()：最后一次 welcome 的身份闭集拷贝（版本 + 服务器声明的包集合），没连接时是 null（DESIGN §28.25）', async () => {
+    const seen = [];
+    const h = harness();
+    // 为什么这一格必须是「存下来的那一份」而不是让面板订 `net.on('welcome')`：面板由**同一条帧**里的 `modPanels`
+    // 装载 —— 等它挂上时第一次 welcome 早发完了。这里就把 `Net.serverHello` 摆成 welcome 之后的形状，验门面这一侧。
+    const serverHello = Object.freeze({
+      version: '0.2.3',
+      mods: Object.freeze({
+        digest: 'a'.repeat(64),
+        packs: Object.freeze([Object.freeze({ id: 'dmg-board', layer: 'C', combat: false })]),
+      }),
+    });
+    const realNet = { on: () => () => {}, sendResourceMessage: () => true, serverHello };
+    const registry = createPanelRegistry({
+      store: h.store, net: realNet, log: quiet,
+      importModule: async () => ({ mount: (ctx) => { seen.push(ctx); } }),
+      slotHost: (s) => h.dom.resolve(s) || h.dom.render(s), createElement: (t) => h.dom.create(t),
+      env: { serviceWorker: true, cacheStorage: true, webCrypto: true },
+    });
+    h.store.patch('session', { entered: true });
+    registry.apply([wire({ gate: 'session.entered', url: `${MOD_PANEL_PREFIX}alpha/gate3.js?v=1` })]);
+    await settle();
+    const w = seen[0].net.welcome();
+    assert.ok(Object.isFrozen(w), '拿到的是冻结拷贝');
+    assert.deepEqual(Object.keys(w).sort(), ['mods', 'version'],
+      '字段闭集：与 NET_WELCOME_FIELDS 一字不差（welcome 以后多一个字段，面板不会突然多拿到一个）');
+    assert.equal(w.version, '0.2.3');
+    assert.deepEqual(w.mods.packs.map((p) => [p.id, p.layer, p.combat]), [['dmg-board', 'C', false]]);
+    assert.equal(w.mods.digest, 'a'.repeat(64));
+    assert.equal(w.mods.packs[0].hash, undefined, '包的 64 位内容哈希不外溢（读数是身份，不是字节）');
+    assert.ok(Object.isFrozen(w.mods) && Object.isFrozen(w.mods.packs) && Object.isFrozen(w.mods.packs[0]), '深冻结：改自己那份也改不动结构');
+    assert.notEqual(seen[0].net.welcome(), w, '每次取的是新拷贝');
+
+    // 不成形 / 没到过 welcome / 没有引擎连接：空态而不是半份数据
+    const brokenNet = { on: () => () => {}, sendResourceMessage: () => true, serverHello: { version: 42, mods: { digest: 42, packs: 'x' } } };
+    const bare = createPanelRegistry({
+      store: h.store, net: brokenNet, log: quiet,
+      importModule: async () => ({ mount: (ctx2) => { seen.push(ctx2); } }),
+      slotHost: (s) => h.dom.resolve(s) || h.dom.render(s), createElement: (t) => h.dom.create(t),
+      env: { serviceWorker: true, cacheStorage: true, webCrypto: true },
+    });
+    bare.apply([wire({ gate: 'session.entered', url: `${MOD_PANEL_PREFIX}alpha/gate4.js?v=1` })]);
+    await settle();
+    const broken = seen[1].net.welcome();
+    assert.equal(broken.version, null, '版本不是字符串 ⇒ null（不把作者的错当成服务器的值）');
+    assert.equal(broken.mods, null, '不成形的 mods ⇒ null，面板据此画「无包」');
+    const noNet = createPanelRegistry({
+      store: h.store, net: { on: () => () => {}, sendResourceMessage: () => true }, log: quiet,
+      importModule: async () => ({ mount: (ctx3) => { seen.push(ctx3); } }),
+      slotHost: (s) => h.dom.resolve(s) || h.dom.render(s), createElement: (t) => h.dom.create(t),
+      env: { serviceWorker: true, cacheStorage: true, webCrypto: true },
+    });
+    noNet.apply([wire({ gate: 'session.entered', url: `${MOD_PANEL_PREFIX}alpha/gate5.js?v=1` })]);
+    await settle();
+    assert.equal(seen[2].net.welcome(), null, '没有引擎连接（Node 用例 / 未接线）⇒ null');
+  });
+
+  test('net.js：welcome 帧把身份存进 Net.serverHello（版本 + 包集合；干净安装 / 坏帧 ⇒ mods 为 null）', () => {
+    const timers = { setTimeout: () => 0, clearTimeout: () => {}, setInterval: () => 0, clearInterval: () => {} };
+    const net = new Net({ url: 'ws://test/ws', WebSocket: class {}, getToken: () => null, timers, now: () => 0 });
+    net.ws = { readyState: 1, send: () => {} };
+    const frame = (mods) => JSON.stringify({
+      t: 'welcome', playerId: 'p1', token: 'tok', name: 'me', serverNow: 0, version: '0.2.3', resumed: false,
+      ...(mods === undefined ? {} : { mods }),
+    });
+    // 有包集合：id/layer/combat 留下、hash 丢掉；整份冻结
+    net._onMessage(frame({ digest: 'a'.repeat(64), packs: [{ id: 'dmg-board', hash: 'b'.repeat(64), layer: 'C', combat: false, api: '>=1 <2' }] }));
+    assert.equal(net.serverHello.version, '0.2.3');
+    assert.deepEqual(net.serverHello.mods.packs, [{ id: 'dmg-board', layer: 'C', combat: false }]);
+    assert.ok(Object.isFrozen(net.serverHello) && Object.isFrozen(net.serverHello.mods) && Object.isFrozen(net.serverHello.mods.packs[0]));
+    // 干净安装（welcome 没有 mods 键）：mods 为 null —— 「没有包」不是「错了」
+    net._onMessage(frame(undefined));
+    assert.equal(net.serverHello.mods, null);
+    assert.equal(net.serverHello.version, '0.2.3');
+    // 坏帧：digest 不是字符串 ⇒ mods 为 null（只回放真到过的那一份，不回放记忆里的）
+    net._onMessage(frame({ digest: 42, packs: [{ id: 'x', layer: 'C', combat: false }] }));
+    assert.equal(net.serverHello.mods, null);
+    // 没有 version 的帧（旧服务端）：version 为 null，不抛
+    net._onMessage(JSON.stringify({ t: 'welcome', playerId: 'p1' }));
+    assert.equal(net.serverHello.version, null);
+    assert.equal(net.serverHello.mods, null);
+  });

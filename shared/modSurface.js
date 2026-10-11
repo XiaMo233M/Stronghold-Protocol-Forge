@@ -293,6 +293,22 @@ export const MOD_SURFACE = Object.freeze([
     tests: ['test/modClientPanels.test.js'],
     spec: '§28.24',
   },
+  {
+    id: 'client.panels.net.welcome',
+    layer: 'C',
+    decl: '（无声明：`ctx.net.welcome()` 与 `ctx.net.status()` 同一条做法 —— 引擎总是给的那一格只读身份读数）',
+    // 同样锚在引擎自己那一端的真相上：闭集常量与宿主槽位枚举（后者把这一格钉在面板注入面里）。
+    anchors: [{ symbol: 'NET_WELCOME_FIELDS', module: 'extensions' }, { symbol: 'MOD_PANEL_SLOTS', module: 'extensions' }],
+    requires: [
+      '只读：**最后一次 `welcome`** 的身份闭集 `NET_WELCOME_FIELDS` 的冻结拷贝（`version` / `mods`）',
+      '`mods` = 这台服务器声明的包集合 `{ digest, packs: [{ id, layer, combat }] }`，或 null（干净安装 / 那一帧不成形）',
+      "与 `ctx.net.on('welcome')` 的分工：**第一次 welcome 在面板挂载之前就发完了**（面板由同一条帧里的 `modPanels` 装载），事件订阅只赶得上重连 —— 要答「我连的是哪台服务器」必须用这一格",
+      '**没有** store / match / battle / audio 句柄，也不能改引擎那一份（拿到的是拷贝）',
+    ],
+    files: ['public/js/ui/extensions.js', 'public/js/net.js'],
+    tests: ['test/modClientPanels.test.js'],
+    spec: '§28.25',
+  },
   {    id: 'client.panels.messages',
     layer: 'C',
     decl: 'pack.json.client.panels[].messages[] = "<通道名>"',

@@ -114,6 +114,34 @@ const WS_CONNECTING = 0;
 export const RESOURCE_MSG_TYPES = Object.freeze(['resource.proof', 'resource.challenge.request', 'resource.reset']);
 
 /**
+ * The identity fields a `welcome` carries for C-layer panels (DESIGN §28.25): the protocol version and the pack set this
+ * server declared (`welcome.mods`, DESIGN §28.2). Kept to what a panel may display — the pack `hash` (a 64-hex content
+ * hash) and `api` range are dropped: they name bytes, they are not something a status readout shows.
+ *
+ * `mods` is null when the frame has none (a plain install — `welcome` then has no `mods` key at all) and also when the
+ * frame's `mods` is malformed: the readout only ever echoes what actually arrived, never a remembered set.
+ * @param {any} msg the `welcome` frame
+ * @returns {{ version: string|null, mods: { digest: string, packs: ReadonlyArray<{ id: string, layer: string|null, combat: boolean }> } | null }}
+ */
+function helloIdentity(msg) {
+  const raw = msg && msg.mods && typeof msg.mods === 'object' ? msg.mods : null;
+  const digest = raw && typeof raw.digest === 'string' ? raw.digest : null;
+  const list = raw && Array.isArray(raw.packs) ? raw.packs : [];
+  const packs = digest
+    ? list.filter((p) => p && typeof p === 'object' && typeof p.id === 'string')
+      .map((p) => Object.freeze({
+        id: p.id,
+        layer: typeof p.layer === 'string' ? p.layer : null,
+        combat: p.combat === true,
+      }))
+    : [];
+  return Object.freeze({
+    version: typeof msg?.version === 'string' ? msg.version : null,
+    mods: digest ? Object.freeze({ digest, packs: Object.freeze(packs) }) : null,
+  });
+}
+
+/**
  * Game server connection. Construct with injectable dependencies for tests.
  */
 export class Net {
@@ -152,6 +180,11 @@ export class Net {
     this.retryAt = 0;          // epoch ms of the next reconnect attempt (0 = none)
     this.ping = null;          // last RTT in ms
     this.lastError = null;     // last NetError relevant to the connection (e.g. hello rejected)
+    // 最后一次 `welcome` 的身份读数（DESIGN §28.25）：`{ version, mods }`，`mods` 是 `{ digest, packs: [{id, layer,
+    // combat}] }` 或 null（干净安装不带这个字段）。面板的 `ctx.net.welcome()` 只读这一份的闭集拷贝 ——
+    // 它存下来是因为**第一次 welcome 在面板挂载之前就发完了**（面板由同一条帧里的 `modPanels` 装载），
+    // 一个只订 `net.on('welcome')` 的面板会永远错过它所连服务器的身份。
+    this.serverHello = null;
     this.clockOffset = 0;
     this.clockSynced = false;
 
@@ -408,6 +441,7 @@ export class Net {
     this.helloName = this._helloSentName;
     this.serverName = typeof msg.name === 'string' && msg.name ? msg.name : this._helloSentName;
     this.playerId = msg.playerId ?? null;
+    this.serverHello = helloIdentity(msg);
     this.attempt = 0;
     this.lastError = null;
     if (Number.isFinite(msg.serverNow)) this._addClockSample(msg.serverNow + (this.ping ?? 0) / 2 - this.now(), Infinity);

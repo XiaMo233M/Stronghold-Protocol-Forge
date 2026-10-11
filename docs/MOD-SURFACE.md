@@ -74,6 +74,7 @@
 | `client.panels` | `client.panels[] = { id, slot, module, order, gate }` | `slot` 必须是引擎渲染得出的宿主；用不了就点名丢掉整个面板 | §28.8 |
 | `client.panels.me` | 无需声明：`ctx.me` 引擎总是给 | 只读会话态 `playerId` / `name` / `room` 快照 + `snapshot()`；每次读取当前值；**不含** store / match / runner / audio，也不含 `search` | §28.8 |
 | `client.panels.net.status` | 无需声明：`ctx.net.status()` 引擎总是给 | 只读连接读数（`Net.snapshot()` 的字段闭集 `NET_STATUS_FIELDS` 的冻结拷贝：`status` / `attempt` / `retryAt` / `ping` / `lastError` / `playerId`）；无连接时 `null` | §28.24 |
+| `client.panels.net.welcome` | 无需声明：`ctx.net.welcome()` 引擎总是给 | 只读身份读数（**最后一次 `welcome`** 的闭集 `NET_WELCOME_FIELDS` 的冻结拷贝：`version` / `mods` = `{ digest, packs: [{ id, layer, combat }] }`）；没到过 `welcome` / 那一帧 `mods` 不成形时 `mods` 为 `null`；第一次 welcome 早于面板挂载 ⇒ 答「连的是哪台服务器」只能用这一格 | §28.25 |
 | `client.panels.wraps` | `client.panels[].wraps[] = { component, mode }` | `component` 必须在引擎注册表里，`mode` 是 `wrap` \| `replace`；`wrap` 每帧拿一次 vnode，`replace` 的 `orig` 是 `null`；注入面只多 `component` 与 `props`（只读深拷贝）；任一环坏了退回**它下面那一份**并点名 | §28.19 |
 | `client.panels.styles` | `client.panels[].styles[]` | 只服务登记过的 URL；挂载时注入、dispose 时移除 | §28.8 |
 | `client.theme` | `client.theme.vars = { --x: 值 }` | 变量名 `--` 开头；值里不许有 `; { } < >` 换行 | §28.8 |

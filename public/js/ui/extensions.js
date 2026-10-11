@@ -119,6 +119,13 @@ export const PANEL_SEND_TYPES = Object.freeze(['room.appearance']);
 export const NET_STATUS_FIELDS = Object.freeze(['status', 'attempt', 'retryAt', 'ping', 'lastError', 'playerId']);
 
 /**
+ * **`welcome` 身份读数**（`client.panels.net.welcome`，DESIGN §28.25）的字段闭集：`version`（协议版本）与
+ * `mods`（这台服务器声明的包集合 `{ digest, packs }`，或 null）。与 `NET_STATUS_FIELDS` 同一条摩擦：闭集钉死在这里，
+ * 引擎以后往 `welcome` 里加字段，面板不会静默多拿到一格；加一格要改这一行、加一条测试。
+ */
+export const NET_WELCOME_FIELDS = Object.freeze(['version', 'mods']);
+
+/**
  * 面板偏好表（模块级、内存里）。
  *
  * **为什么必须在内存里**：`public/js/ui/extensions.js` 在**服务端测试里也被 import**（注册点的用例跑在 Node 下），
@@ -695,6 +702,31 @@ export function createPanelRegistry(deps) {
           if (!s || typeof s !== 'object') return null;
           return Object.freeze(Object.fromEntries(NET_STATUS_FIELDS.map((k) => [k, s[k] ?? null])));
         } catch { return null; }
+      },
+      /**
+       * **最后一次 `welcome` 的身份读数**（业主裁决：面板要能显示「我连的是哪个服务器」，DESIGN §28.25）。
+       *
+       * 与 `status()` 同一条做法（无需声明、引擎总是给、只读冻结拷贝），但答的是另一个问题：`mods` 是这台服务器
+       * 声明的包集合（`welcome.mods`，DESIGN §28.2），`version` 是它说的协议版本。为什么必须是**存下来的那一份**
+       * 而不是让面板订 `net.on('welcome')`：面板由同一条 `welcome` 帧里的 `modPanels` 装载 —— 等面板挂上时，
+       * **第一次 welcome 早就发完了**，一个只订事件的面板会永远错过它连的那台服务器是谁。
+       *
+       * `mods` 为 `null` 有两种情况（面板该画「无包」而不是画一个空清单）：这台服务器没有包（`welcome` 里没有这个
+       * 字段），或那一帧的 `mods` 不成形 —— 读数只回放过真到过的那一份，从不回放记忆里的。
+       * @returns {{ version: string|null, mods: { digest: string, packs: Array<{ id: string, layer: string|null, combat: boolean }> } | null } | null}
+       */
+      welcome() {
+        const h = net && net.serverHello;
+        if (!h || typeof h !== 'object') return null;
+        const mods = h.mods && typeof h.mods === 'object' && typeof h.mods.digest === 'string' && Array.isArray(h.mods.packs)
+          ? Object.freeze({
+            digest: h.mods.digest,
+            packs: Object.freeze(h.mods.packs
+              .filter((p) => p && typeof p === 'object' && typeof p.id === 'string')
+              .map((p) => Object.freeze({ id: p.id, layer: typeof p.layer === 'string' ? p.layer : null, combat: p.combat === true }))),
+          })
+          : null;
+        return Object.freeze({ version: typeof h.version === 'string' ? h.version : null, mods });
       },
     });
     /**
