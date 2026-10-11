@@ -34,8 +34,8 @@ import { t, tc } from '../../../shared/i18n.js';
 
 /**
  * Upper bound on the seat cards the client will pad out from `room.state.seatCap`. The server owns the real cap
- * (server/lobby.js LOBBY_DEFAULTS.maxSeats, 4 unless SP_MAX_SEATS raises it), so this is a SANITY CLAMP, not policy:
- * without it a bogus/hostile `seatCap` (1e9) loops 10⁹ times and dies with `RangeError: Invalid array length`
+ * (server/lobby.js LOBBY_DEFAULTS.maxSeats, 20 by default since 业主裁令 2026-10-12), so this is a SANITY CLAMP, not
+ * policy: without it a bogus/hostile `seatCap` (1e9) loops 10⁹ times and dies with `RangeError: Invalid array length`
  * instead of drawing a room. Above it the extra seats are simply not drawn — they can hold nobody the client could
  * address anyway.
  */
@@ -45,9 +45,11 @@ const MAX_RENDERED_SEATS = 256;
  * Seats padded to the room's capacity (co-op 4, solo 1, or the room's own `seatCap`), each null or a seat record.
  *
  * 座位容量 (100 人版移植, docs/PS100-MIGRATION.md §7): the cap comes from the ROOM (`room.state.seatCap`, sent only
- * when it differs from `MAX_SEATS`), never from a constant here — `seats` alone cannot tell "4 seats" from "100 seats
- * with 96 empty". An absent/unusable value keeps `MAX_SEATS`, and anything above MAX_RENDERED_SEATS is clamped, so a
- * 4-seat room renders exactly the four cards it always did and a garbage cap cannot hang the tab.
+ * when it differs from the official `MAX_SEATS` — so a 20-seat default room carries it and a 4-seat one does not),
+ * never from a constant here — `seats` alone cannot tell "4 seats" from "100 seats with 96 empty". An absent/unusable
+ * value keeps `MAX_SEATS` (a server too old to send the field is an official-room server, so this only ever
+ * UNDER-asks), and anything above MAX_RENDERED_SEATS is clamped, so a 4-seat room renders exactly the four cards it
+ * always did and a garbage cap cannot hang the tab.
  * @param {any} room room.state payload
  * @returns {(null | {seat:number, playerId:any, name:string, isBot:boolean, ready:boolean, connected:boolean})[]}
  */

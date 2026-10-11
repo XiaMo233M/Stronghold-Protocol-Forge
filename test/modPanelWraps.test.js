@@ -554,7 +554,7 @@ describe('链：次序 = 既有面板比较器；wrap 合成、replace 换掉、
 });
 
 describe('边界：改写拿到的 ctx 是面板那份 + component + props（只读快照）', () => {
-  test('键集合 = 面板那 11 个 + component + props；没有 store / engine / match；host 与 hostKey 是 null', async () => {
+  test('键集合 = 面板那 12 个 + component + props；没有 store / engine / match；host 与 hostKey 是 null', async () => {
     const ctxs = [];
     const h1 = harness({ modules: new Map([[URL_A, wrapModule('a', { ctxs })]]) });
     h1.registry.apply([wire()]);
@@ -563,7 +563,7 @@ describe('边界：改写拿到的 ctx 是面板那份 + component + props（只
     assert.equal(ctxs.length, 1, 'wrap(ctx) 每次渲染调用一次');
     const ctx = ctxs[0];
     assert.deepEqual(Object.keys(ctx).sort(), [
-      'component', 'data', 'gate', 'host', 'hostKey', 'id', 'log', 'me', 'net', 'order', 'pack', 'props', 'session', 'slot',
+      'battle', 'component', 'data', 'gate', 'host', 'hostKey', 'id', 'log', 'me', 'net', 'order', 'pack', 'props', 'session', 'slot',
     ]);
     assert.equal(ctx.component, ENGINE_ID);
     assert.equal(ctx.id, 'p1');

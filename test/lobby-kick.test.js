@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { startServer } from '../server/index.js';
 import { StubMatch } from '../server/match/StubMatch.js';
 import { TestClient } from './helpers/wsClient.js';
-import { ERR } from '../shared/constants.js';
+import { ERR, maxSeatsFrom } from '../shared/constants.js';
 import { validateC2S } from '../shared/protocol.js';
 
 function clientPool(getUrl) {
@@ -61,7 +61,10 @@ describe('room.kick (lobby)', () => {
   test('protocol: room.kick {seat, playerId} — a seat index and the confirmed player', () => {
     assert.equal(validateC2S({ t: 'room.kick', seat: 1, playerId: 'p_0123456789' }), null);
     assert.notEqual(validateC2S({ t: 'room.kick', seat: 1 }), null, 'the player is required');
-    assert.notEqual(validateC2S({ t: 'room.kick', seat: 9, playerId: 'p_0123456789' }), null);
+    // The bound is this server's ceiling (20 by default; `seat 9` used to be past the official 4), and one past it is
+    // the refusal — a seat inside the range but not in the sender's room is answered by the HANDLER, not here.
+    const ceiling = maxSeatsFrom();
+    assert.notEqual(validateC2S({ t: 'room.kick', seat: ceiling + 1, playerId: 'p_0123456789' }), null);
     assert.notEqual(validateC2S({ t: 'room.kick', seat: 1, playerId: '' }), null);
     assert.notEqual(validateC2S({ t: 'room.kick' }), null);
   });

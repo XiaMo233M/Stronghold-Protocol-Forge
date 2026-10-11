@@ -5,8 +5,8 @@
 //   * Rooms are keyed by 4-letter codes from an unambiguous alphabet (no I/O, letters only). Join codes are
 //     case-insensitive.
 //   * 'solo' rooms hold exactly one human and never bots. 'coop' rooms have `opts.maxSeats` seats (humans + AI bots) —
-//     4, the official room, unless the deployment raised `SP_MAX_SEATS`; the host picks a smaller count for its own room
-//     (`room.create.seatCap`, 本房座位上限, docs/META.md §1.9) and may change it again before the match
+//     20 by default (缺省上限, 业主裁令 2026-10-12), raised with `SP_MAX_SEATS`; the host picks a smaller count for its
+//     own room (`room.create.seatCap`, 本房座位上限, docs/META.md §1.9) and may change it again before the match
 //     (`room.setSeatCap`, §1.9a), never below the people already in the room.
 //     Humans and bots take the lowest free seat index; seat indexes never compact.
 //   * ▸ Being in a LOBBY room and sending room.create / room.join implicitly leaves it. While your room is
@@ -155,10 +155,10 @@ export const LOBBY_DEFAULTS = Object.freeze({
   maxRooms: 1000,
   maxRoomsPerAddr: 16,    // rooms created from one client network that may exist at once (0 = unlimited)
   maxMatchesPerAddr: 8,   // matches started from one client network that may run at once (0 = unlimited)
-  // 座位上限 (100 人版移植): `MAX_SEATS` (4, the official room) unless `SP_MAX_SEATS` raises it. 100 seats need this
-  // AND the per-address limits above raised (`SP_MAX_CONNS_PER_ADDR`, maxRoomsPerAddr, maxMatchesPerAddr) — see
-  // docs/PS100-MIGRATION.md. A room's seat count is fixed when it is created, so a changed cap never resizes a live
-  // room (and never resizes the seats array during a running match).
+  // 座位上限 (业主裁令 2026-10-12): **缺省 20 座**（`DEFAULT_MAX_SEATS`），`SP_MAX_SEATS` 可加。100 座那种部署还要
+  // 同抬上面的 per-address 上限与 `maxConnectionsPerAddr`（`startServer` 选项，**不是**环境变量）—— docs/NET-TUNING.md
+  // §2 列全了。注意 `MAX_SEATS`（4）不在这里：它是「官方房间 1–4 人」的声明与超容变体的闸门口径，不是缺省上限。
+  // 房间的座位数在建房时定死，改上限不会 resize 一个活房间（也不会在对局中动座位数组）。
   maxSeats: maxSeatsFrom(process.env),
   resyncMinGapMs: 1000,   // heavy resyncs (match state / result replay) per session at most this often on repeated hellos
   soloReconnectWindowMs: null, // a dropped solo run stays resumable this long (null = data singleReconnectTime, 24 h)
@@ -285,11 +285,13 @@ function resolveRoomModSet(requested, catalogue) {
   return { ok: true, modIds: Object.freeze(ids.slice().sort()), modSet };
 }
 
-/** One room: `seatCap` seat slots (4 by default, LOBBY_DEFAULTS.maxSeats), host, difficulty, optional running match. */
+/** One room: `seatCap` seat slots (the server's ceiling, 20 by default, LOBBY_DEFAULTS.maxSeats), host, difficulty,
+ * optional running match. */
 export class Room {
   /**
    * @param {string} code @param {'solo'|'coop'} mode @param {string} difficulty @param {number} now
-   * @param {number} [seatCap] seat slots of this room (LOBBY_DEFAULTS.maxSeats; defaults to MAX_SEATS)
+   * @param {number} [seatCap] seat slots of this room. The default is the OFFICIAL `MAX_SEATS` (this class is also
+   *   built directly by tests and packages); the Lobby always passes `LOBBY_DEFAULTS.maxSeats` (20 by default).
    */
   constructor(code, mode, difficulty, now, seatCap = MAX_SEATS) {
     this.code = code;
@@ -922,11 +924,11 @@ export class Lobby {  /**
     //      静默钳制 —— 客户端收到的是一句能改的错，而不是一个它没要求过的房间。
     //   2. 这里再钳一次，给**不走协议**的调用方兜底：`server/matchmaking.js` 的快速匹配、包钩子、测试都直接调
     //      `create`。房间一旦建出来座位数就定死（`Room` 从不 resize），所以这条底线必须在这里，而不是指望调用方。
-    //      `clampSeats` 同时把「这台服务器允许的最大值」(`this.opts.maxSeats` = `SP_MAX_SEATS`，缺省 `MAX_SEATS`)
+    //      `clampSeats` 同时把「这台服务器允许的最大值」(`this.opts.maxSeats` = `SP_MAX_SEATS`，缺省 20)
     //      封成上界：**绝不信任客户端**。
     //
-    // 缺省（旧客户端根本不发，或 `null`）⇒ `this.opts.maxSeats`，也就是今天那个房间 —— 4 座房的
-    // `room.state` 因此逐字节不变（`toState` 只在容量 ≠ `MAX_SEATS` 时才多带 `seatCap`）。
+    // 缺省（旧客户端根本不发，或 `null`）⇒ `this.opts.maxSeats`（缺省 20 座）。`SP_MAX_SEATS=4` 的部署拿到的还是
+    // 4 座房，它的 `room.state` 因此逐字节不变（`toState` 只在容量 ≠ `MAX_SEATS` 时才多带 `seatCap`）。
     //
     // **只作用于 co-op**：solo 房今天也是按 `this.opts.maxSeats` 建座位数组的（客户端 `normalizeSeats` 按
     // `mode:'solo'` 只画一张卡），改掉它就会移动每一个 solo 帧 —— 所以 solo 一律忽略这个字段。
@@ -1081,7 +1083,7 @@ export class Lobby {  /**
    * （`BAD_MSG` + 点名的 `detail`，与 `room.create.seatCap` 同一套口径），后者去请人离开（`SEAT_CAP_TOO_SMALL`）。
    * **两者都不静默钳制** —— 一个被悄悄换成别的数字的上限，房主没有任何办法看出来。
    *
-   * 上限本身（`this.opts.maxSeats` = `SP_MAX_SEATS`，缺省 `MAX_SEATS`）是「**绝不信任客户端**」的那一条：协议已经
+   * 上限本身（`this.opts.maxSeats` = `SP_MAX_SEATS`，缺省 20）是「**绝不信任客户端**」的那一条：协议已经
    * 判过 `[MIN_SEATS, SEAT_CAP]`，这里再按这台服务器真正的天花板判一次，好让不走协议的调用方也过不去。
    */
   setSeatCap(session, { code, seatCap }) {
@@ -1367,10 +1369,11 @@ export class Lobby {  /**
    * request, no new DOM, no new global on the client (main.js only imports the resource flow when the field arrives).
    *
    * Since B5 段 the same rule covers `maxSeats`: the seat ceiling this deployment allows (`SP_MAX_SEATS`, i.e.
-   * `LOBBY_DEFAULTS.maxSeats`) travels with the handshake, because the lobby's seat slider must not offer a number the
-   * server would refuse. **Absent while the ceiling is the official `MAX_SEATS`** — a vanilla server's `welcome` keeps
-   * the exact field set it always had, byte for byte (`test/modClientPanels.test.js` pins that on the mod fields; the
-   * same reasoning applies here). */
+   * `LOBBY_DEFAULTS.maxSeats`, **20 by default since 业主裁令 2026-10-12**) travels with the handshake, because the
+   * lobby's seat slider must not offer a number the server would refuse. It is sent on EVERY handshake — a 20-seat
+   * ceiling is not the official `MAX_SEATS`, so there is no "vanilla" case left to omit it for; a deployment that pins
+   * `SP_MAX_SEATS=4` gets the field with the value 4, and its `room.state` frames stay byte-for-byte the old ones
+   * (`toState` only adds `seatCap` when the capacity differs from `MAX_SEATS`). */
   welcomeInfo() {
     const panels = this.workshop && Array.isArray(this.workshop.panels) ? this.workshop.panels : [];
     const assets = this.workshop && Array.isArray(this.workshop.assets) ? this.workshop.assets : [];
@@ -1386,9 +1389,10 @@ export class Lobby {  /**
       ? this.workshop.transport : null;
     return {
       diyKitted: KITTED_CHARS,
-      // 本房座位上限 (业主裁决 B5): 只有这台服务器的上限不是官方 `MAX_SEATS` 时才发 —— 4 座服务器（缺省）的
-      // `welcome` 字段集合一个都不多，逐字节与从前相同。
-      ...(this.opts.maxSeats !== MAX_SEATS ? { maxSeats: this.opts.maxSeats } : {}),
+      // 本房座位上限 (业主裁令 2026-10-12): **总是发** —— 缺省上限已经是 20（不是官方 `MAX_SEATS`），没有「官方那一档」
+      // 可以省掉它了。`SP_MAX_SEATS=4` 的部署会拿到 `maxSeats: 4`，而它的 `room.state` 帧照旧逐字节不变
+      //（`toState` 只在容量 ≠ `MAX_SEATS` 时才带 `seatCap`）。
+      maxSeats: this.opts.maxSeats,
       ...(this.modSet ? { mods: this.modSet } : {}),
       ...(panels.length ? { modPanels: panels } : {}),
       ...(assets.length ? { modAssets: assets } : {}),

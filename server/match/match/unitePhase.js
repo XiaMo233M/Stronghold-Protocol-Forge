@@ -3,11 +3,12 @@
 // counts (_uniteLeft, user playtest #6 item 7; _uniteTick in the server-run mode).
 //
 // TWO SHAPES, ONE SWITCH (design-level item C of 百卫补丁 v0.3, docs/PS100-MIGRATION.md §10-C):
-//   * ≤ MAX_SEATS (every existing deployment): `startUnite(plan)` — ONE room-wide plan, ONE battlefield 'u'. That code
+//   * ≤ MAX_SEATS PARTICIPANTS (every existing deployment, and a 20-seat room with only 4 players in it):
+//     `startUnite(plan)` — ONE room-wide plan, ONE battlefield 'u'. That code
 //     is the `Array.isArray` else-branch below, statement for statement, and it never touches `unitePlans` /
 //     `uniteRound` / `_uniteToken` / `_uniteHandoff` / `_phase1Driven` / `_relay*` (Match.js initializes them and
 //     leaves them at rest; test/ps100-variant-ac.test.js pins that).
-//   * `seatCap > MAX_SEATS`: `planUnite` returns the per-squad list (unite100.mjs planUniteBySquad) and
+//   * more than `MAX_SEATS` participants: `planUnite` returns the per-squad list (unite100.mjs planUniteBySquad) and
 //     `startUnite(plans)` takes the Array branch — one battlefield per squad (`u<squad>` for 阶段 1, `r<squad>` for
 //     阶段 2), all stepping in lockstep in one FieldRunner, and `_afterUniteRound` runs 阶段 2 (跨队兜底) as a REAL
 //     second battlefield round (config.unite.relayBattlefield, default true; the atomic strength check stays as the

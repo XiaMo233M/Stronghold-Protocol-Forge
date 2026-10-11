@@ -19,7 +19,7 @@ npm run editor                                      # 图形化等价物：编�
 > 真实代码范本：`server/sim/content/kits/shared/tier1.js` … `tier6.js`（官方 200 多个 kit 共用的辅助函数，
 > 单个干员的 kit 在同级的 `ops/` 下）。
 >
-> **本版基线**：本仓库 **0.15.1** / 上游游戏本体 **0.2.4**。上游这一版**没有增删任何钩子**，本文的词表就是引擎现在
+> **本版基线**：本仓库 **0.15.2** / 上游游戏本体 **0.2.4**。上游这一版**没有增删任何钩子**，本文的词表就是引擎现在
 > emit 的全部事件；但它把官方干员的数值口径改成了**按干员按玩家在运行时输入**（缺省满潜能、精英阶段2-60级）——
 > 你读到的 `unit.s.atk` 之类的数是**各自主人的设置算出来的**，所以数值**永远从 `bb` 读**这条硬规矩比以前更要紧。
 
@@ -537,7 +537,7 @@ install(battle, unit) {
 |---|---|---|
 | 「攻击范围 +1」 | buff 的 `mods.rangeExtend`（永久的那部分进初始范围） | `server/sim/units.js:141`、`server/sim/buffs.js:183`、`server/sim/battle/queries.js:252` |
 | 换掉整个范围形状 | `unit.rangeGrid = 副本` + `battle.refreshRange` | `server/sim/content/kits/ops/chess_char_5_15-thorn2.js:168`、`…/op-cgbird.js:149` |
-| 只多几个「打得到」的格子（不改形状） | `battle.setExtraRange(unit, keys)`，key 是绝对 tile key（`row * COLS + col`，`COLS` 是**画布**宽度 —— 一张图是画布里的一个窗口，`shared/constants.js:114` 的 `CANVAS_COLS`，`server/sim/constants.js:18`） | `server/sim/battle/queries.js:273`、用法 `…/ops/chess_char_6_01-lemuen.js:201` |
+| 只多几个「打得到」的格子（不改形状） | `battle.setExtraRange(unit, keys)`，key 是绝对 tile key（`row * COLS + col`，`COLS` 是**画布**宽度 —— 一张图是画布里的一个窗口，`shared/constants.js:216` 的 `CANVAS_COLS`，`server/sim/constants.js:18`） | `server/sim/battle/queries.js:273`、用法 `…/ops/chess_char_6_01-lemuen.js:201` |
 | 技能范围与自己的范围不同 | `targeting.rangeGrid` | `docs/SIM.md:1025` |
 | 技能范围**不**吃单位的攻击距离加成 | `targeting.noRangeExtend` | `server/sim/battle/queries.js:240` |
 | 范围只用来选目标、不改卡面上的范围 | `targeting.showOwnRange` | `server/sim/battle/queries.js:249` |
@@ -603,7 +603,7 @@ trait: { priority: 'lowDef', maxTargets: 2, splashRadius: 1.2 },
   import，照抄 `server/sim/dir.js:39` 那张表：
 
 ```js
-const COLS = 33;                                                  // shared/constants.js:114 的 CANVAS_COLS（server/sim/constants.js:18）
+const COLS = 33;                                                  // shared/constants.js:216 的 CANVAS_COLS（server/sim/constants.js:18）
 /** 把朝 RIGHT 编写的相对格 [dr, dc] 转到 `dir` 的绝对格（抄 server/sim/dir.js:17 的 rotateOffset）。 */
 const rot = ([dr, dc], dir) => (dir === 'UP' ? [dc, -dr] : dir === 'LEFT' ? [-dr, -dc] : dir === 'DOWN' ? [-dc, dr] : [dr, dc]);
 const gridKeys = (unit, grid) => grid.map(([dr, dc]) => {

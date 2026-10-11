@@ -21,10 +21,19 @@ import { tmpdir } from 'node:os';
 import { ROUTE_CACHE_POLICIES } from '../shared/workshop.js';
 import { loadWorkshop } from '../server/workshop.js';
 import { workshopRoutesFor, ROUTE_CACHE_HEADERS } from '../server/http/workshop.js';
+// 保留表只此一处真相（DESIGN §28.35）：静态 `pack.json.routes` 与动态 `host.route` 判的是同一份。
+import {
+  coreRouteShadow, isReservedRoutePath, coreMounts, CORE_ROUTE_EXACT, CORE_ROUTE_PREFIXES, RESERVED_ROUTE_PREFIXES,
+} from '../server/http/routeMount.js';
+import { MODS_CATALOG_URL } from '../server/http/mods.js';
 import { startServer } from '../server/index.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const quiet = { info() {}, warn() {}, error() {}, debug() {} };
+/** 引擎真正的核心挂载目录（与 `startServer` 走同一份 `coreMounts`），给服务面判据当输入。 */
+const CORE_MOUNT = coreMounts({
+  publicDir: join(ROOT, 'public'), dataDir: join(ROOT, 'data'), sharedDir: join(ROOT, 'shared'), simDir: join(ROOT, 'server', 'sim'),
+});
 
 let tmp;
 let wsRoot;
@@ -185,10 +194,12 @@ describe('routes: 真 HTTP 服务面', () => {
       assert.equal((await get('/sp-not-declared.js')).status, 404);
       assert.equal((await get('/data/nope.json')).status, 404);
 
-      // 声明的路径没有文件 ⇒ 404（而不是回落到核心同名文件）
+      // 核心先吃（DESIGN §28.35）：这条路径**核心自己**有文件 ⇒ 包的那条同名声明不生效，服务的是引擎的 data/support.json。
+      // （上面那条单独的用例把这条语义连同「包不被拒」一起钉住，这里只钉「HTTP 面上确实是核心那份」。）
       const claimed = await get('/data/support.json');
-      assert.equal(claimed.status, 200, '这条路径有文件，所以是包的文件');
-      assert.deepEqual(await claimed.json(), { from: 'the pack' });
+      assert.equal(claimed.status, 200, '核心那份还在');
+      const officialSupport = JSON.parse(fs.readFileSync(join(ROOT, 'data', 'support.json'), 'utf8'));
+      assert.deepEqual(await claimed.json(), officialSupport, '核心先吃：不是包里的 support.json');
 
       // 穿越：编码过的 `..` 解出来还是 `..`，但没有那样的声明路径 ⇒ 落到核心静态层被拒
       for (const path of ['/data/../manifest-pack/pack.json', '/%2e%2e/%2e%2e/etc/passwd', '/data/%2e%2e/manifest-pack/pack.json']) {
@@ -221,17 +232,92 @@ describe('routes: 真 HTTP 服务面', () => {
     }
   });
 
-  test('声明的路径抢占核心同名文件时，服务的是包的文件（有意为之：声明过的路径就是声明过的）', async () => {
+  test('声明的路径与核心同名时：核心先吃，包的那条声明不生效且被点名（就地改语义：这条曾经「有意为之」）', async () => {
+    // 这条断言的**语义**在 0.15.2 就地从「声明的路径就是声明过的」改成了「核心先吃」——不是删掉它。改前的立场是
+    // 包声明的 `/data/support.json` 顶掉核心那份；现在核心那份必须赢，而且包**不被拒**（只那一条声明不生效）。
     const srv = await startServer({ port: 0, host: '127.0.0.1', quiet: true, workshopDir: wsRoot });
     try {
       const res = await fetch(`${srv.url}/data/support.json`);
-      assert.equal(res.status, 200);
-      assert.deepEqual(await res.json(), { from: 'the pack' });
+      assert.equal(res.status, 200, '核心那份还在，所以还是 200');
       const official = JSON.parse(fs.readFileSync(join(ROOT, 'data', 'support.json'), 'utf8'));
-      assert.notDeepEqual(JSON.parse(fs.readFileSync(join(wsRoot, 'core-claim', 'support.json'), 'utf8')), official);
+      assert.deepEqual(await res.json(), official, '服务的是引擎自己的 data/support.json，不是包里的那份');
+      const packFile = JSON.parse(fs.readFileSync(join(wsRoot, 'core-claim', 'support.json'), 'utf8'));
+      assert.notDeepEqual(packFile, official, '两份确实不同 —— 否则上面那条断言证明不了谁赢');
+      assert.deepEqual(packFile, { from: 'the pack' });
+      // 包**没有被拒**：它另一条不撞核心的声明照常服务（这是「兼容」那一半）
+      const kept = await fetch(`${srv.url}/sp-public.json`);
+      assert.equal(kept.status, 200, '同一个包的另一条声明照旧生效 —— 收紧不拒包');
+      assert.deepEqual(await kept.json(), JSON.parse(PUBLIC));
     } finally {
       await srv.close();
     }
+  });
+
+  test('与核心同名的声明从表里去掉、响亮 warn 到 log（不许静默失败）', () => {
+    const warnings = [];
+    const { routes, errors } = workshopRoutesFor(loadWorkshop(wsRoot, { log: quiet }), wsRoot, {
+      log: { ...quiet, warn: (...a) => warnings.push(a.join(' ')) },
+      mount: CORE_MOUNT,
+    });
+    // 核心真的服务那两条 ⇒ 包的同名声明不生效
+    assert.equal(routes.has('/data/support.json'), false, '撞核心的文件不在表里 ⇒ 请求落到核心挂载');
+    // 响亮：一条 error（装载报告）+ 一行 log.warn（启动日志），都点出这条路径
+    const shadowed = errors.filter((e) => e.path === '/data/support.json');
+    assert.equal(shadowed.length, 1, JSON.stringify(errors));
+    assert.match(shadowed[0].reason, /engine answers this path first/);
+    assert.match(shadowed[0].reason, /may not shadow a core path/);
+    assert.match(shadowed[0].reason, /Still loads/i, '报告里必须说清「包仍然装载」');
+    const warned = warnings.filter((w) => w.includes('/data/support.json'));
+    assert.equal(warned.length, 1, JSON.stringify(warnings));
+    assert.match(warned[0], /the engine answers this path first/);
+  });
+
+  test('落在核心命名空间但核心**没有**那个文件：声明照常服务，不报错（兼容已发布包）', () => {
+    // 线上已发布的 ws-compression-reference 正是这一形状：`/data/ws-compression.json`，而 data/ 下没有同名文件。
+    // 「核心先吃」防的是**顶掉**，不是「用了 /data 这个词」—— 所以这条必须继续服务，不许被打断、也不该被报警
+    // （每一次 `/data/<自己的名字>.json` 都吐一行，会把真正要紧的那一条淹掉）。
+    assert.equal(fs.existsSync(join(ROOT, 'data', 'ws-compression.json')), false, '前提：核心今天没有这个文件');
+    const dir = join(tmp, 'live-shape');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(join(dir, 'ws-compression.json'), JSON.stringify({ from: 'the pack' }));
+    const loaded = { packs: [{ id: 'live-shape', dir, routes: [{ path: '/data/ws-compression.json', file: 'ws-compression.json', cache: 'no-cache' }] }] };
+    const warnings = [];
+    const { routes, errors } = workshopRoutesFor(loaded, tmp, {
+      log: { ...quiet, warn: (...a) => warnings.push(a.join(' ')) },
+      mount: CORE_MOUNT,
+    });
+    assert.equal(routes.has('/data/ws-compression.json'), true, '核心不服务这条路径 ⇒ 声明照常生效（已发布包不被打断）');
+    assert.equal(routes.get('/data/ws-compression.json').pack, 'live-shape');
+    assert.deepEqual(errors, [], `没有撞上核心 ⇒ 不报错：${JSON.stringify(errors)}`);
+    assert.deepEqual(warnings, []);
+    // 但判据**知道**它在核心命名空间里 —— 将来核心长出 `data/ws-compression.json` 那一天，同一条声明自动让位
+    assert.deepEqual(coreRouteShadow('/data/ws-compression.json', { mount: CORE_MOUNT }), { kind: 'reserved', prefix: '/data' });
+  });
+
+  test('保留表与动态通道**同源**：静态判据读的就是 routeMount.js 那两张表（表变两边一起变）', () => {
+    // 同源的第一层：动态通道拒的路径，静态通道也一律认得出来（判据读同一份 RESERVED_ROUTE_PREFIXES）
+    for (const prefix of CORE_ROUTE_PREFIXES) {
+      assert.equal(isReservedRoutePath(prefix), true, `${prefix} 必须在保留表里`);
+      assert.notEqual(coreRouteShadow(prefix, { mount: CORE_MOUNT }), null, `${prefix} 静态通道也必须认得`);
+      assert.equal(isReservedRoutePath(`${prefix}/x.json`), true, `${prefix}/x.json 动态通道要拒（命名空间是一棵树）`);
+    }
+    for (const exact of CORE_ROUTE_EXACT) {
+      assert.equal(isReservedRoutePath(exact), true, `${exact} 必须在保留表里`);
+      assert.notEqual(coreRouteShadow(exact, { mount: CORE_MOUNT }), null, `${exact} 静态通道也必须认得`);
+    }
+    // 常量端点表与真正的常量端点**不许漂移**：`/mods/catalog.json` 是 `mods.js` 导出的那个值，写死在表里要钉住
+    assert.equal(isReservedRoutePath(MODS_CATALOG_URL), true, 'mods.js 的目录 URL 必须在常量端点表里');
+    assert.equal(coreRouteShadow(MODS_CATALOG_URL, { mount: CORE_MOUNT }).kind, 'exact');
+    assert.equal(isReservedRoutePath('/mod/x/a.json'), false, '包自己的命名空间不在保留表里');
+    assert.equal(coreRouteShadow('/mod/x/a.json', { mount: CORE_MOUNT }), null);
+    // 同源的第二层：常量端点单列一份（`/ws` 是树、`/healthz` 是路径），并集必须覆盖两份
+    assert.deepEqual([...CORE_ROUTE_EXACT, ...CORE_ROUTE_PREFIXES], [...RESERVED_ROUTE_PREFIXES]);
+    assert.equal(RESERVED_ROUTE_PREFIXES.includes('/healthz'), true);
+    assert.equal(CORE_ROUTE_PREFIXES.includes('/healthz'), false, '常量端点不该混进「树」那一份里');
+    assert.equal(isReservedRoutePath('/healthz/x.json'), false, '`/healthz` 是一条路径，不是一棵树');
+    assert.equal(isReservedRoutePath('/healthz.json'), true, '`<端点>.<ext>` 仍算保留（与旧表逐字一致）');
+    assert.equal(isReservedRoutePath('/data/x.json'), true, '`/data` 是一棵树');
+    assert.equal(coreRouteShadow('/healthz/x.json', { mount: CORE_MOUNT }), null);
   });
 
   test('拒绝码与 A 段同名：`routes` 的形状层判罚一字未改', () => {

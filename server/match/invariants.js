@@ -4,9 +4,9 @@
 //
 // collectViolations(m) → string[] (empty when every invariant holds):
 //   pool     raw balance ≤ cap and raw balance + Σ copies held by pieces == cap (public availability is clamped at zero) per base chess; non-pool chess hold 0 copies;
-//            above MAX_SEATS (the 100-seat variant, docs/PS100-MIGRATION.md §10-A) the same equation holds PER PLAYER
+//            above MAX_SEATS PARTICIPANTS (the 100-seat variant, docs/PS100-MIGRATION.md §10-A) the same equation holds PER PLAYER
 //            against that player's own pool (PlayerState.poolOf), while the shared `m.pool` is checked as the read-only
-//            canonical catalog; ≤ MAX_SEATS keeps the room-wide reading
+//            canonical catalog; ≤ MAX_SEATS participants keeps the room-wide reading (a 20-seat room with 4 players in it included)
 //            every capped shop item is held by at most its cap (normal occupies 1, upgraded 2; effect-only items have no cap)
 //            a player's 自选 stock (0.2.0, player/diy.js) the same against its own pieces of each slotted slot — a DIY
 //            piece is always a slotted slot of its owner's, and a DIY shop / reward card one of its stocked slots
@@ -28,7 +28,7 @@
 //            with one to three different cards
 //   match    phase known; teamLp / boss pool within range; combat fields match the alive players
 
-import { PHASE, BOND_LAYER_CAP, MAX_SEATS } from '../../shared/constants.js';
+import { PHASE, BOND_LAYER_CAP } from '../../shared/constants.js';
 import { FIELD, canPlace, placeClass, positionClass, parseKey } from './board.js';
 import { computeBonds } from './bondsMeta.js';
 
@@ -46,10 +46,12 @@ export function collectViolations(m, { limit = 25 } = {}) {
   const held = new Map();
   const uids = new Set();
   const banned = new Set(m.bannedChess || []);
-  // 100-seat variant (design-level A, docs/PS100-MIGRATION.md §10-A): above MAX_SEATS every player has a pool of its
-  // own, so the SAME conservation equation holds PER PLAYER instead of room-wide. Both readings are checked below —
-  // this is a gate, not a replacement: ≤ MAX_SEATS still runs the room-wide equation, statement for statement.
-  const independent = Number.isFinite(m.seatCap) && m.seatCap > MAX_SEATS;
+  // 100-seat variant (design-level A, docs/PS100-MIGRATION.md §10-A): above MAX_SEATS PARTICIPANTS every player has a
+  // pool of its own, so the SAME conservation equation holds PER PLAYER instead of room-wide. Both readings are checked
+  // below — this is a gate, not a replacement: ≤ MAX_SEATS participants still runs the room-wide equation, statement
+  // for statement. It reads the Match's ONE computed gate (`m.variant`, 「在场参与者数」不是「房间容量」) rather than
+  // re-deriving it from `seatCap`, so the checker can never disagree with the code it checks.
+  const independent = m.variant === true;
   /** @type {Map<string, Map<string, number>>} playerId → baseId → the copies its pieces hold (自选 stock excluded) */
   const heldOf = new Map();
   const note = (ps, p) => {

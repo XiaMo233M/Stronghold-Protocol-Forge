@@ -179,6 +179,10 @@ export function buildResult(m, outcome) {
     bossId: m.bossId,
     hiddenBossId: m.hiddenBossId,
     seed: m.seed,
+    // 这一局走的是哪条路径 (业主裁令 2026-10-12): true = 超容变体（参与人数 > 官方 4）—— 每人独立池 / 分小队联防。
+    // It rides the frame so the settlement, `room.lastSummary` and a bug report can all name the path that ran, and it
+    // is the ONE computed gate (Match.variant), never re-derived here.
+    variant: m.variant === true,
     durationMs: Math.max(0, m.sched.now() - m.startedAt),
     players: rows,
   };

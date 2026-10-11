@@ -28,12 +28,27 @@
 //   * 序列化后的体有上限（`DYNAMIC_ROUTE_MAX_BYTES`）。`/healthz` 的字段有上限是同一个理由：一条包声明的通道
 //     不该能把响应撑到没有边界。
 
-/** 引擎自己的顶层 HTTP 命名空间。包声明的动态端点**一个都不能落在它们里面**。 */
-export const RESERVED_ROUTE_PREFIXES = Object.freeze([
-  '/healthz',
+import fs from 'node:fs';
+import path from 'node:path';
+
+/**
+ * 引擎自己的**逐字** HTTP 端点。包声明的任何一条路径都不得等于它们 —— `/healthz` 与 `/data.js` 是
+ * `server/http/routes.js` / `static.js` 在**任何**包之前就吃掉的常量路径。
+ */
+export const CORE_ROUTE_EXACT = Object.freeze(['/healthz', '/data.js', '/mods/catalog.json']);
+
+/**
+ * 引擎自己的顶层 HTTP 命名空间（**目录**：`/data` 与 `/data/x` 都算）。包声明的端点**一个都不能落在里面**。
+ *
+ * 为什么要分成两份：`/healthz` 是**一条路径**，`/data` 是**一棵树**，判据不同（一份比对、一份前缀比对）。
+ * 混在一张扁平表里就得靠「派生」去猜哪条是哪条，而派生表在**前缀语义**上无解（`/packs` 明明是树，
+ * `<prefix>.` 那条派生规则却想说它是文件 `/packs.json`）。同一份真相改成显式两组之后，动态通道的
+ * `isReservedRoutePath` 与静态 `pack.json.routes` 通道的 `coreRouteShadow` 都从**这里**取，
+ * 没有第二份表可以漂移。
+ */
+export const CORE_ROUTE_PREFIXES = Object.freeze([
   '/ws',
   '/data',
-  '/data.js',
   '/shared',
   '/sim',
   '/i18n',
@@ -49,6 +64,13 @@ export const RESERVED_ROUTE_PREFIXES = Object.freeze([
   '/workshop-battle',
   '/room-data',
 ]);
+
+/**
+ * 上面两份的并集。**保留表只此一处真相**：动态通道（`dynamicRoutePathIssue`）与静态通道
+ * （`shared/workshop.js` 用到的 `coreRouteShadow`）判的都是它。两条通道读的是同一张表，改一处两条一起变
+ * （`test/modRoutes.test.js` 有一条断言钉住这件事）。
+ */
+export const RESERVED_ROUTE_PREFIXES = Object.freeze([...CORE_ROUTE_EXACT, ...CORE_ROUTE_PREFIXES]);
 
 /** 动态端点的命名空间前缀：`/mod/<包id>/…`。 */
 export const DYNAMIC_ROUTE_PREFIX = '/mod/';
@@ -68,11 +90,81 @@ export const DYNAMIC_ROUTE_CACHE_HEADERS = Object.freeze({
 /** 一条路径是否落在引擎保留的命名空间里（`/data` 与 `/data/x` 都算）。 */
 export function isReservedRoutePath(pathname) {
   const p = typeof pathname === 'string' ? pathname : '';
-  return RESERVED_ROUTE_PREFIXES.some((prefix) => p === prefix || p.startsWith(`${prefix}/`) || p.startsWith(`${prefix}.`));
+  // 常量端点：逐字命中，外加 `<端点>.<ext>`（`/data.js` 的旁支）。刻意**不**认 `/healthz/x` —— `/healthz` 是一条
+  // 路径，不是一棵树（旧的那张扁平表也是这个语义，这里一字不改）。
+  if (CORE_ROUTE_EXACT.some((e) => p === e || p.startsWith(`${e}.`))) return true;
+  return CORE_ROUTE_PREFIXES.some((prefix) => p === prefix || p.startsWith(`${prefix}/`));
+}
+
+/**
+ * `pack.json.routes` 的一条声明路径会不会**顶掉引擎自己的路由**（静态通道，DESIGN §28.13/§28.35）。
+ *
+ * 为什么静态通道也要这一条：`server/http/static.js` 把包声明的路由查在核心挂载**之前**，所以一条声明能回答
+ * 一条与核心同名的路径。动态通道（`host.route`）本来就顶不掉（路径必须在 `/mod/<包id>/…` 里），静态通道今天
+ * 能顶 —— 这一格把它收成「**核心先吃、包的同名声明不生效**」，并且**不拒包**（已发布的包不会因为多写一条声明
+ * 就装不上）。判据只有一条：**引擎自己真的会服务这条路径吗**。
+ *
+ * 两种「真的会服务」，各自点名：
+ *   1. 逐字的常量端点 / 引擎自己的命名空间（上面那两张表）—— 引擎在这些位置上一定先答；
+ *   2. 这条路径映射到核心挂载目录里**真的存在的那个文件**（`dataDir` / `sharedDir` / `simDir` / `publicDir`）。
+ *
+ * 第 2 条刻意是**按文件探**、不是「按前缀一律拦」：那不是同一件事，而且是刻意的选择。今天线上有一条已发布的包
+ * （`ws-compression-reference`）声明了 `/data/ws-compression.json` —— 它落在核心命名空间里，但 `data/` 下**没有**
+ * 同名文件，所以核心今天**并不**服务那条路径。按前缀一律拦会把这条已发布的包当场打断（快照审计：14 条线上包
+ * 里只有这一条声明 `routes`），而它并没有顶掉任何东西。「核心先吃」要防的是**顶掉**，不是「用了 `/data` 这个词」。
+ * 副作用是好的：核心将来真的长出 `data/ws-compression.json` 那一天，这条声明**自动**让位给核心，不需要再改一次
+ * 规则 —— 那就是「核心先吃」这条不变量本身。
+ *
+ * @param {string} pathname 声明路径（调用方已判过「绝对路径、无 `..`」）
+ * @param {{ mount?: Array<{ prefix: string, name?: string, dir?: string }> }} [core] 核心挂载目录（`server/index.js`
+ *   与 `server/http/static.js` 用同一份 `publicDir` / `dataDir` / `sharedDir` / `simDir`）
+ * @returns {{ kind: 'exact' } | { kind: 'file', mount: string, file: string } | { kind: 'reserved', prefix: string } | null}
+ *   `exact` / `file` = **核心真的先吃**（声明不生效）；`reserved` = 落在引擎命名空间里但核心今天没有那个文件
+ *   （声明照常服务，只是预告将来会让位）；`null` = 与核心无关。
+ */
+export function coreRouteShadow(pathname, { mount = [] } = {}) {
+  const p = typeof pathname === 'string' ? pathname : '';
+  if (!p.startsWith('/')) return null;
+  if (CORE_ROUTE_EXACT.includes(p)) return { kind: 'exact' };
+  // 顺序要紧：**先看核心今天是不是真的服务这条路径**（按文件探），再看它只是「用了引擎的命名空间」。
+  // 前者是「核心先吃」，后者只是一句预告 —— 把两者混成一条会把没顶掉任何东西的声明也判死（线上有一条包正是
+  // 这样：`/data/ws-compression.json`，而 `data/` 下没有同名文件）。
+  for (const m of Array.isArray(mount) ? mount : []) {
+    if (!m || typeof m.prefix !== 'string' || typeof m.dir !== 'string' || !m.dir) continue;
+    if (m.prefix !== '/' && !p.startsWith(m.prefix)) continue;
+    const rest = m.prefix === '/' ? p.slice(1) : p.slice(m.prefix.length);
+    if (!rest || rest.includes('\\')) continue;
+    const segments = rest.split('/').filter((s) => s.length > 0);
+    if (!segments.length || segments.some((s) => s === '..' || s === '.')) continue;
+    const abs = path.join(path.resolve(m.dir), ...segments);
+    try {
+      if (fs.statSync(abs).isFile()) return { kind: 'file', mount: m.name || m.prefix, file: abs };
+    } catch { /* 这个挂载下没有这个文件 ⇒ 核心不服务这条路径 */ }
+  }
+  for (const prefix of CORE_ROUTE_PREFIXES) {
+    if (p === prefix || p.startsWith(`${prefix}/`)) return { kind: 'reserved', prefix };
+  }
+  return null;
 }
 
 /** 包 id / 模块 id 的字符集与 `shared/workshop.js` 的 `PACK_ID_RE` 同一条（路径要能拼出 URL 段）。 */
 const SEG_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
+ * 核心静态挂载的**一份**描述：前缀 → 磁盘目录。`server/http/static.js` 用它建真正的挂载表，
+ * `coreRouteShadow` 用同一份判断「核心是不是真的服务这条路径」—— 两张表原来是各写一遍的，那就是必然漂移。
+ *
+ * `/sim/` 的 `only: .js` / `deny` 由调用方补进来（那两条是**服务**约束，与「这条路径归谁」无关）。
+ * @param {{ publicDir: string, dataDir: string, sharedDir: string, simDir: string }} dirs
+ */
+export function coreMounts({ publicDir, dataDir, sharedDir, simDir }) {
+  return [
+    { prefix: '/data/', name: 'data', dir: path.resolve(dataDir) },
+    { prefix: '/shared/', name: 'shared', dir: path.resolve(sharedDir) },
+    { prefix: '/sim/', name: 'sim', dir: path.resolve(simDir) },
+    { prefix: '/', name: 'public', dir: path.resolve(publicDir) },
+  ];
+}
 
 /**
  * 一条路径能不能被 `host.route` 登记。返回 `null` = 可以，否则是给人看的理由。

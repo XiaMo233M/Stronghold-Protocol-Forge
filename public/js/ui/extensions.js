@@ -314,6 +314,7 @@ const isPanelId = (v) => typeof v === 'string' && v.length > 0 && v.length <= 64
  *   createElement?: (tag: string) => any,
  *   env?: Record<string, boolean>,
  *   settings?: { get: () => any, setVoiceLang: (charId: string, lang: string) => boolean } | null,
+ *   battle?: { damage: () => any } | null,
  *   onWrapsChanged?: (links: number) => void,
  * }} deps
  * @returns {{ apply: (list: any) => { accepted: number },
@@ -348,6 +349,16 @@ export function createPanelRegistry(deps) {
    * `ctx.session.setVoiceLang`）。
    */
   const settingsApi = deps.settings || null;
+  /**
+   * **战斗运行时的注入面**（业主裁决 2026-10-11 的第二批：`ctx.battle.damage()`，DESIGN §28.38）：注入的是
+   * **一个函数**（`battleRunner.damage`），不是 runner 句柄 —— 与 `settings` / `data` 同一条理由：这个文件必须能在
+   * Node 下整套跑，而 `public/js/battle/runner.js` 拖进 `/sim/` 加载器、渲染帧调度与 `net`/`store` 单例。
+   *
+   * 「不传什么就是边界」在这里同样成立：面板拿到的是**一次读一份的冻结副本**，没有 `step`、没有 `Battle`、
+   * 没有 `_entries`，也没有 `stats()` 那种运行时可写面。没有注入时那一格**拿不到就是 `null`**（一行日志，见
+   * `noteBattleGap`），不抛、不编造。
+   */
+  const battleApi = deps.battle || null;
   /** 组件级改写注册成功之后的**重画回调**（DESIGN §28.19）：链是渲染期生效的，注册完成之后已经画出来的那一帧
    *  必须重画一次（`main.js` 重新 `render` 同一个 `<App/>`）。没有包声明 `wraps` 时它一次都不会被调用。 */
   const onWrapsChanged = typeof deps.onWrapsChanged === 'function' ? deps.onWrapsChanged : () => {};
@@ -433,6 +444,23 @@ export function createPanelRegistry(deps) {
     if (transportGapsLogged.has(reason)) return;
     transportGapsLogged.add(reason);
     log?.warn?.(`[mod-panels] CLIENT_TRANSPORT_UNAVAILABLE (${reason}): ${detail}`);
+  }
+
+  /**
+   * `ctx.battle.damage()`（DESIGN §28.38）拿不到读数时的那**一行**日志，每种原因一次（`transportGapsLogged`
+   * 的同一条规矩、同一个理由：面板每秒可能读一次，「这一格没接上」是一个**引擎级安装事实**，刷屏的日志与没有日志
+   * 一样没用）。走注册点的 `log`，不走进面板自己的 `ctx.log` —— 那是按包分区的，而这件事只发生一次。
+   *
+   * **没有正在跑的战斗时不记**（`without-battle` 那条路根本走不到这里）：那是一个**正常状态**（准备期、结算期、
+   * 刚开局），不是一个缺件。日志留给三种真的「接不上」：门面没被注入、`damage()` 抛了、返回值不成形。
+   * @type {Set<string>}
+   */
+  const battleGapsLogged = new Set();
+  /** @param {string} reason @param {string} detail */
+  function noteBattleGap(reason, detail) {
+    if (battleGapsLogged.has(reason)) return;
+    battleGapsLogged.add(reason);
+    log?.warn?.(`[mod-panels] CLIENT_BATTLE_UNAVAILABLE (${reason}): ${detail}`);
   }
 
   // 引擎自己那一份 `welcome` 快照（DESIGN §28.24 / §28.25）。`net.on` 不在（Node 用例、注入面极小的宿主）时什么都不做：
@@ -964,6 +992,98 @@ export function createPanelRegistry(deps) {
       },
     });
     /**
+     * **战斗读数**（DESIGN §28.38，业主裁决 2026-10-11 的第二批）：这一场战斗的**逐单位伤害累计**，连同一个
+     * **时间基准**，让包自己算 DPS（「伤害看板」点名的那一格）。
+     *
+     * **为什么引擎必须给**：默认路径下战斗在这台机器上跑（`public/js/battle/runner.js`），伤害元组走 runner
+     * **自己的** listener map，**根本不进 `net`** ⇒ 面板订阅不到（§28.30 已查明）。而伤害数字早在模拟里算好了：
+     * `server/sim/damage.js:370` 每次命中写 `source.stats.dmg`，`:371` 写 `battle._pp(ownerId).damageDealt`，
+     * `:352` 写 `bossDamage`。这一格就是**把已经在那儿的数字取出来**，不是第二份账。
+     *
+     * **形状**（一次读一份新的、冻结的副本；`dmg` / `bossDmg` / `kills` / `heal` 取整，与结果页 `compactResult`
+     * 同一口径）：
+     * ```
+     * { battleId, fieldId, kind, authoritative, own, gt, t0,
+     *   players: [{ playerId, dmg, bossDmg, kills, heal }],
+     *   units:   [{ id, uid, defId, ownerId, kind, dmg, kills, heal }] }
+     * ```
+     * `gt` 是**战斗内秒**（`Battle.time`），`t0` 恒为 0（一局一场）⇒ `dps = dmg / (gt - t0)`。`uid` 是这块棋在那个
+     * 玩家棋盘上的 id（与 `ctx.me` 的名单、`battleRunner.unitIdOf()` 同一个号）—— 面板对名单要用它。`players[]` 里
+     * 的 `dmg` 已经含 `bossDmg`（与 `m.result` 的 `stats.dmgDealt` 同一口径），所以「总伤」与「领袖伤害」都在这一格，
+     * 作者不必再拼 `m.result` + `b.pool` 两个面。
+     *
+     * **只给本场**：读的就是**屏上这一场**（与 `battleRunner.unitStats()` 同一语义）。**队友那几场不在这一格里**，
+     * 正在准备的下一场也不在；一次战斗只有一个 `battleId`。面板要的是**全队总伤**时请走 `m.result`
+     * （`players[].stats.dmgDealt`，那是服务端按每个玩家累出来的全队口径）。
+     *
+     * 只读语义：**每次调用都是一份新的、冻结到第二层的副本**（嵌套对象与数组逐个冻上）—— 面板写它当场 `TypeError`，
+     * 引擎之后的新伤害也不会回溯进**已经发出去**的那一份。
+     *
+     * **这里不用 `readonlySnapshot`，是有意的**：那个函数的底图缓存是**按源对象**缓存的（`snapshotCache`），而这一格
+     * 每次读都造一个**新对象** ⇒ 用它等于每次读往缓存里塞一个新键，一局几千次读就把缓存撑爆。它适用的场合是
+     * 「每次读拿到同一个源对象」（`ctx.data.get()` 那几张表）。
+     *
+     * 拿不到时返回 `null`，**不抛、不编造** —— 而且**绝不**让这一格把别的东西带崩，所以四条出口分开写：
+     *   * 没注入 `battle`（Node 用例、极小的宿主）⇒ `null` + 一行；
+     *   * `damage()` 抛了 ⇒ `null` + 一行；
+     *   * 返回值不是一个对象 ⇒ `null` + 一行（半个读数比没有更危险）；
+     *   * 引擎说「这一场拿不到」（`null`：没有正在跑的战斗、战斗还没建好）⇒ `null`，**不记日志**（正常状态，不是缺件）。
+     *
+     * 它是一格**读数**，不是一条通道：不新增协议消息、不发任何帧、不改变战斗行为（判据见 `test/modClientBattleReads.test.js`）。
+     * @returns {{ battleId: string, fieldId: string|null, kind: string, authoritative: boolean, own: boolean,
+     *   gt: number, t0: number, players: ReadonlyArray<object>, units: ReadonlyArray<object> }|null}
+     */
+    const battleFacade = Object.freeze({
+      damage() {
+        if (!battleApi || typeof battleApi.damage !== 'function') {
+          noteBattleGap('absent', 'no battle runtime is injected into this registry — returning null (main.js passes `battle: battleRunner`; a Node harness or a minimal host passes nothing, and nothing is invented here)');
+          return null;
+        }
+        let snap;
+        try { snap = battleApi.damage(); } catch (err) {
+          noteBattleGap('threw', `the injected battle runtime threw in damage(): ${err && err.message ? err.message : String(err)}`);
+          return null;
+        }
+        if (snap === null || snap === undefined) return null;   // 正常状态：这一场没有可读的战斗
+        if (typeof snap !== 'object' || Array.isArray(snap)) {
+          noteBattleGap('bad-shape', `damage() returned ${Array.isArray(snap) ? 'an array' : typeof snap} instead of an object — the whole reading is null rather than half a reading`);
+          return null;
+        }
+        const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+        // 冻结到第二层：面板手里的每一格都改不动（`readonlySnapshot` 不适用，见上）
+        const units = [];
+        for (const u of Array.isArray(snap.units) ? snap.units : []) {
+          if (!u || typeof u !== 'object') continue;
+          units.push(Object.freeze({
+            id: Number.isInteger(u.id) ? u.id : null,
+            uid: Number.isInteger(u.uid) ? u.uid : null,
+            defId: typeof u.defId === 'string' ? u.defId : null,
+            ownerId: typeof u.ownerId === 'string' ? u.ownerId : null,
+            kind: typeof u.kind === 'string' ? u.kind : null,
+            dmg: num(u.dmg), kills: num(u.kills), heal: num(u.heal),
+          }));
+        }
+        const players = [];
+        for (const p of Array.isArray(snap.players) ? snap.players : []) {
+          if (!p || typeof p !== 'object' || typeof p.playerId !== 'string') continue;
+          players.push(Object.freeze({
+            playerId: p.playerId, dmg: num(p.dmg), bossDmg: num(p.bossDmg), kills: num(p.kills), heal: num(p.heal),
+          }));
+        }
+        return Object.freeze({
+          battleId: typeof snap.battleId === 'string' ? snap.battleId : null,
+          fieldId: typeof snap.fieldId === 'string' ? snap.fieldId : null,
+          kind: typeof snap.kind === 'string' ? snap.kind : null,
+          authoritative: !!snap.authoritative,
+          own: !!snap.own,
+          gt: num(snap.gt),
+          t0: num(snap.t0),
+          players: Object.freeze(players),
+          units: Object.freeze(units),
+        });
+      },
+    });
+    /**
      * 数据口（业主裁决 2026-10-10）：面板**只读**的那几张表。
      *
      * 读一张**没在 `client.panels[].data` 里声明过**的表会返回 `null` 并**点名**（`CLIENT_DATA_UNDECLARED`，
@@ -995,6 +1115,9 @@ export function createPanelRegistry(deps) {
     return Object.freeze({
       id: rec.id, pack: rec.pack, slot: rec.slot, order: rec.order, gate: rec.gate,
       host, hostKey, session, net: netFacade, data: dataFacade, log: scoped,
+      // 战斗读数（DESIGN §28.38）：这一场战斗的逐单位 / 逐人累计伤害 + 时间基准，供包自己算 DPS。
+      // 仍然没有 runner 句柄、没有 Battle、没有 match 对象 —— 只有这一格冻结读数。
+      battle: battleFacade,
       // 只读会话态（`playerId` / `name` / `room` 快照）：面板答不出来的那几件事实，由引擎告知。
       // 它是**活的只读读数**（每次读取当前 store），没有 store 句柄、没有 match / battle / runner / audio。
       me: meFacade,

@@ -37,6 +37,34 @@
 
 等价的手动命令：`npm ci`、`node tools/setup.mjs`、`npm start`。
 
+#### 一间房能坐多少人：缺省 20 座，`SP_MAX_SEATS` 可加
+
+**不做任何配置时，这台服务器允许房主把一间同盟房开到 20 座**（业主裁令 2026-10-12：「改成默认 20 吧，上限可加并给出
+文档」）。房主在大厅用滑杆选**本房**开几张座位卡（2 … 服务器上限），快速匹配的队列仍是**一间官方房 = 4 人**。
+
+要更多座就设这一个环境变量（与 `PORT` 的设法完全一样）：
+
+```powershell
+$env:SP_MAX_SEATS = 40; npm start          # PowerShell
+```
+```bash
+SP_MAX_SEATS=40 npm start                  # macOS / Linux
+```
+```
+set "SP_MAX_SEATS=40" && npm start         # cmd
+```
+
+* **缺省 20**，空值 / 写错 / 小于 1 都回落到 20，小数向下取整（`7.8` ⇒ 7）。
+* **`SP_MAX_SEATS=4` 回到官方那一档**：`room.state` 与协议帧与从前的 4 座部署逐字节相同。
+* **官方 4 座这个常量本身没动**（`MAX_SEATS`）：它是「官方房间 1–4 人」的声明，也是「超过 4 人」才启用
+  每人独立牌库 / 分小队联防那条路径的参照。**闸门读的是在场参与者数，不是房间容量** —— 容量 20、只坐 4 人的房
+  走的是原来那条代码路径。
+* **抬席位常要同时抬连接上限**：`maxConnectionsPerAddr` 是 `startServer` 的**选项**（`server/http/config.js:20`），
+  **不是环境变量**；注释里出现过的 `SP_MAX_CONNS_PER_ADDR` **代码里并不存在**，别照它去设（`docs/NET-TUNING.md` §2.3、§7）。
+* **部署后让玩家刷新一次页面**：老页面不认新握手里的 `maxSeats`，滑杆只会到 4（只会少要，不会报错），但多人时会少画座位卡。
+* 常驻服务要在各自的环境里加这一条：NSSM 的服务加进 `AppEnvironmentExtra`（第 2 节），systemd 加一行
+  `Environment=SP_MAX_SEATS=40`（第 4 节）；Docker 用 `-e SP_MAX_SEATS=40`。
+
 #### 国内镜像下载
 
 Setup 默认使用「GitHub 原始源 → jsDelivr」，不查询公网 IP，也不请求 gh-proxy.com。GitHub 下载失败时会提示如何手动开启镜像；仅添加提示，不自动切换到第三方代理。

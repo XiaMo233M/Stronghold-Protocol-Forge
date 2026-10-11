@@ -8,7 +8,9 @@ import { isSupportEntries } from './support.js';
 import { cultivatedStats, isPotential, isCultivate, POTENTIAL_DEFAULT, CULTIVATE_DEFAULT } from './potential.js';
 
 /**
- * 座位校验的上界 (100 人版移植): `SP_MAX_SEATS` when the deployment raised the cap, else `MAX_SEATS` (4).
+ * 座位校验的上界 (100 人版移植; 缺省上限 20 座, 业主裁令 2026-10-12): `SP_MAX_SEATS` when the deployment set it,
+ * else the DEFAULT ceiling (`DEFAULT_MAX_SEATS` 20 — NOT `MAX_SEATS`, which is the official-room declaration and the
+ * variant gate in server/match/Match.js `variant`).
  *
  * The seat field of `room.removeBot` / `room.kick` is validated HERE and nowhere else — the handler only checks that
  * the addressed seat actually holds an AI / the confirmed player (server/lobby.js) — so this bound is the single gate
@@ -540,7 +542,7 @@ export const C2S = {
     // （solo 房永远是 `mode:'solo'` 那一个座位形状，见 server/lobby.js create）。
     //
     // 范围是 `[MIN_SEATS, SEAT_CAP]`，`SEAT_CAP` 就是上面 `room.removeBot` / `room.kick` 用的那一个号 ——
-    // 这台服务器允许的最大座位数（`SP_MAX_SEATS`，缺省 `MAX_SEATS` = 4）。越界或垃圾值**点名拒绝**
+    // 这台服务器允许的最大座位数（`SP_MAX_SEATS`，缺省 20 —— 不是 `MAX_SEATS` 那个「官方 4 座」）。越界或垃圾值**点名拒绝**
     // （`bad field seatCap` ⇒ `ERR.BAD_MSG`），不是静默钳制：静默钳制会让「我明明选了 100」变成一个
     // 玩家自己解释不了的 4 座房间。
     //
@@ -548,7 +550,7 @@ export const C2S = {
     // 是**作者可见的表面**：`server/modDispatch.js` 把它复制进交给包的 `c2s`，包据此判断哪个字段可以不发。
     // 表里漏一条，包就会把一个合法的 `room.create` 当成缺字段。所以判据与 `$optional` 两条路都要留着：
     // `$optional` 管「键根本没出现」，判据里的 `v === undefined || v === null` 管「显式给了 null」。
-    // 缺省 / `null`（= 旧客户端根本不发）⇒ 服务器默认，也就是 `MAX_SEATS`。
+    // 缺省 / `null`（= 旧客户端根本不发）⇒ 服务器缺省上限（缺省 20 座）。
     seatCap: (v) => v === undefined || v === null || isInt(v, MIN_SEATS, SEAT_CAP),
     $optional: ['mods', 'modIds', 'chatMode', 'seatCap'],
   },
@@ -737,10 +739,11 @@ export const C2S = {
 // `room.state` carries its OWN `mods` of the same shape when the room declared a set (W-A, DESIGN §28.9) — absent when
 // the room declared none. It names the set the room asked for; the gate above still judges against the process set
 // until W-B makes the room's set the one the simulation runs.
-// `welcome` ALSO carries `maxSeats` when this deployment's seat ceiling is not the official `MAX_SEATS` (业主裁决 B5;
-// server/lobby.js `welcomeInfo`): the number the lobby's seat slider is allowed to reach. Absent on a plain install, so
-// a 4-seat server's handshake keeps the exact field set it always had, and a client that does not know it must use
-// `MAX_SEATS` — never a number of its own.
+// `welcome` ALSO carries `maxSeats` on EVERY handshake (业主裁令 2026-10-12; server/lobby.js `welcomeInfo`): the seat
+// ceiling this deployment allows (`LOBBY_DEFAULTS.maxSeats` = `maxSeatsFrom(env)`, **20 by default**), i.e. the number
+// the lobby's seat slider is allowed to reach. It used to be sent only when the ceiling left the official `MAX_SEATS`;
+// the default ceiling is no longer the official one, so there is no case left to omit it for — and a client that never
+// received it (an older server) must keep assuming `MAX_SEATS`, which can only ever ask for FEWER seats.
 export const S2C = [
   'welcome', 'ok', 'error', 'pong',
   'room.state', 'room.closed',

@@ -52,12 +52,47 @@
 | `lobbyGraceMs` / `soloReconnectWindowMs` | `60000` / `null` | `server/lobby.js:154`、`:164` | 同值 |
 | 静态 gzip 阈值 / 缓存 | `GZIP_MIN_BYTES = 512`、`GZIP_CACHE_MAX_FILE = 8 << 20`、`GZIP_CACHE_MAX_TOTAL = 96 << 20`、level 6 | `server/http/files.js:62-64`、`:94` | 同值 |
 | 匹配队列 `MATCHMAKE_DEFAULTS` | `size:null, max:null, waitMs:120000, sweepMs:5000, difficulty:'NORMAL'` | `server/matchmaking.js:59-70` | **上游无此参数**（野排匹配是我们的功能，与本次优化无关） |
-| 座位上限 | `MAX_SEATS = 4`，可由 `SP_MAX_SEATS` 覆盖 | `shared/constants.js:70`、`:87-94`；`server/lobby.js:162` | `MAX_SEATS = 4` 但**无覆盖**（上游 `shared/constants.js` 没有 `maxSeatsFrom`） |
+| 座位上限 | **缺省 20 座**（`DEFAULT_MAX_SEATS`），`SP_MAX_SEATS=N` 可加 | `shared/constants.js`（`MAX_SEATS = 4`、`DEFAULT_MAX_SEATS = 20`、`maxSeatsFrom`）；`server/lobby.js:162` | 上游 `MAX_SEATS = 4` 且**无覆盖**（上游 `shared/constants.js` 没有 `maxSeatsFrom`）。**`MAX_SEATS = 4` 不动**：它是「官方房间 1–4 人」的声明与超容变体的参照，缺省上限是另一件事 |
 
 **哪些参数能不改代码就调**：`startServer()` 选项里只有 `server/http/config.js:19-23` 列的键能被转发
 （net：`reconnectWindowMs, heartbeatMs, helloTimeoutMs, ratePerSec, rateBurst, maxConnections, abuseDropsPerSec, maxConnectionsPerAddr, heavyPerSec, heavyBurst, trustProxy`；
 lobby：`lobbyGraceMs, maxRooms, maxRoomsPerAddr, maxMatchesPerAddr, resyncMinGapMs, soloReconnectWindowMs, queue`）。
 **§2.1 的五个参数都不在这两张名单里**——这就是「要动必须改源码」的确切依据。
+
+### 2.3 席位上限：缺省 20 座，`SP_MAX_SEATS=N` 可加
+
+一台**没设任何环境变量**的服务器现在允许房主开到 **20 座**（业主裁令 2026-10-12：「改成默认 20 吧，上限可加并给出文档」）。
+这是**唯一**的接口，改法与 `PORT` 一样：
+
+```powershell
+# PowerShell（Windows）
+$env:SP_MAX_SEATS = 40; npm start
+```
+```bash
+# macOS / Linux
+SP_MAX_SEATS=40 npm start
+```
+```
+# cmd
+set "SP_MAX_SEATS=40" && npm start
+```
+
+* **缺省 20**：解析见 `shared/constants.js maxSeatsFrom` —— 读 `SP_MAX_SEATS`，空 / 不可解析 / `< 1` ⇒ **20**
+  （`DEFAULT_MAX_SEATS`）；小数**向下取整**（`7.8` ⇒ 7）。同一个数成为 `LOBBY_DEFAULTS.maxSeats`（房主滑杆的上限）
+  与协议里的 `SEAT_CAP`（`room.create.seatCap` / `room.removeBot` / `room.kick` 的上界），三者不会漂。
+* **`MAX_SEATS = 4` 一个字不动**：它是「官方房间 1–4 人」的声明，也是超容变体的参照 —— 见下一条。
+* **`SP_MAX_SEATS=4` 回到官方那一档**：那时 `room.state` 与协议帧与从前的 4 座部署**逐字节相同**
+  （`welcome.maxSeats` 仍会发、值为 4；`room.state.seatCap` 只在容量 ≠ 4 时才出现）。
+* **抬席位常要同时抬连接上限**：`maxConnectionsPerAddr` 是 `startServer` 的**选项**（`server/http/config.js:20`），
+  **不是环境变量**；注释里出现过的 `SP_MAX_CONNS_PER_ADDR` **代码里并不存在**（见 §7），别照它去设。同批还要看
+  lobby 的 `maxRoomsPerAddr` / `maxMatchesPerAddr`（§2.2 的表）。
+* **超容变体的闸门读的是「在场参与者数」，不是房间容量**：一场**超过 4 人**的对局才走「每人独立池 / 分小队联防」
+  （`server/match/Match.js` 的 `variant`，一场开始时定死）。所以**容量 20、只坐 4 人**的房走的是原来那条代码路径，
+  人头 `/血池` 等都不受容量影响；**快速匹配的队列门槛是「一间官方房」= 4，不跟随本变量**，只有显式配了
+  `queue.size` 才由部署方决定（见 `docs/META.md` §1.9）。
+* **旧浏览器要强刷**：这一改让缺省部署的 `welcome` **总是**多带一个 `maxSeats`。老页面不认这个字段，它的座位滑杆
+  只会到 4（少要，不会发出服务器会拒的请求）；但**同一个房间的第 5 个人加进来时它会只画 4 张卡**。部署后让玩家
+  刷新一次页面即可（资源版本戳会让老页面自己顶号）。
 
 ## 3. 同步与自愈：客户端多久发现错了、多快能修好
 
@@ -160,7 +195,8 @@ W_worst     = max(W_keepalive, W_ask) + RTT ≈ 3.2 s + RTT
 | 单人/测试环境想更快看到效果 | `opts.timerScale`（`server/match/Match.js:298`） | 调小 | 它**不会**改变 `PUBLIC_THROTTLE`（该值不经 `scaled()`），只会让阶段推进更快 |
 | 想限定某个连接的调用频率 | `ratePerSec`/`rateBurst`、`heavyPerSec`/`heavyBurst`（`server/net.js:50-51`、`:61-62`） | 按需 | 通用网络层，与增量帧本身无关；但 `g.publicFull` **走重负载桶**（在 `HEAVY_TYPES` 里，`server/net.js:83`），不再走普通桶 |
 | 想换上行前的反代行为 | `TRUST_PROXY` / `trustProxy`（`server/http/config.js:75`、`net.js:63`） | — | 通用网络层 |
-| 100 人版需要更多连接 | `maxConnectionsPerAddr`（`startServer` 选项，`server/http/config.js:20`）与 `SP_MAX_SEATS` | 按需 | 注释里写的 `SP_MAX_CONNS_PER_ADDR` **代码里并不存在**（全仓只有两处注释提到它，未证实为可用环境变量） |
+| 100 人版需要更多连接 | `maxConnectionsPerAddr`（`startServer` 选项，`server/http/config.js:20`）与 `SP_MAX_SEATS` | 按需 | 注释里写的 `SP_MAX_CONNS_PER_ADDR` **代码里并不存在**（全仓只有注释提到它，未证实为可用环境变量） |
+| 一台服务器默认允许多少座 | `SP_MAX_SEATS`（环境变量） | 缺省 **20**；`SP_MAX_SEATS=4` 回到官方那一档 | 抬席位**不会**自动抬连接上限：同抬 `startServer({ maxConnectionsPerAddr })`、lobby 的 `maxRoomsPerAddr` / `maxMatchesPerAddr`。快速匹配的队列门槛**不跟随**它（见 §2 末） |
 
 ## 7. 未证实 / 我们没法确认的
 

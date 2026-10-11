@@ -8,7 +8,8 @@
 //     match's canonical catalog — its `entries` / `has` / `cap` are the authoritative id set and copy ceilings, and
 //     audit.js / invariants.js / platform.js keep reading them — but no copies are ever taken from it in this variant.
 //
-//   * THE SWITCH is `seatCap > MAX_SEATS` (≥ 5 seats; `MAX_SEATS` stays 4). It is read in exactly ONE place per
+//   * THE SWITCH is 「MORE THAN THE OFFICIAL 4 PARTICIPANTS」 (`Match.variant`, computed once at construction from the
+//     seat list — 闸门读的是在场参与者数，不是房间容量 —— 容量 20 只坐 4 人走原路径). It is read in exactly ONE place per
 //     concern: `poolOf()` for copy accounting (below) and `mainPool()` for draws. With the switch OFF both return the
 //     very same `this.m.pool` object the code returned before this file existed — not "new code with the same result",
 //     but the same expression on the same object (docs/PS100-MIGRATION.md §10-A: 「关掉落回同一个 m.pool 对象」).
@@ -23,17 +24,20 @@
 // Installed on PlayerState.prototype by server/match/PlayerState.js (a method container: never instantiated; `this` is
 // the player state).
 
-import { MAX_SEATS } from '../../../shared/constants.js';
 import { SharedPool } from '../pool.js';
 import { squadIndexOf, squadPeersOf } from '../unite100.mjs';
 
 export class PlayerRules {
   /**
-   * Whether this match runs the 100-seat variant: more seat slots than the official 4 (`MAX_SEATS`). The single switch
-   * behind the independent pools (design-level A); design-level C reads `m.seatCap` directly for the 联防 shape.
+   * Whether this match runs the 100-seat variant — MORE THAN THE OFFICIAL 4 PARTICIPANTS. The single switch behind the
+   * independent pools (design-level A); the per-squad 联防 shape (design-level C) reads the same value through
+   * `planUnite` (server/match/unite.js).
+   *
+   * 闸门读的是在场参与者数，不是房间容量 —— 容量 20 只坐 4 人走原路径 (业主裁令 2026-10-12). The value is computed
+   * once by the Match constructor (`m.variant`) from the seat list it was handed, so it cannot flip mid-match.
    * @returns {boolean}
    */
-  variantOn() { return Number.isFinite(this.m.seatCap) && this.m.seatCap > MAX_SEATS; }
+  variantOn() { return this.m.variant === true; }
 
   /**
    * This player's own pool — the full original copy count of every non-banned base chess, built from the MATCH's

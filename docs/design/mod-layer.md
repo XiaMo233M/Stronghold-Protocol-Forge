@@ -1029,10 +1029,30 @@ file + cache policy, and served from `server/http/static.js` **before** the core
   405 with `Allow: GET, HEAD`).
 * **`cache` maps to `Cache-Control`**: `no-cache` → `no-cache`, `no-store` → `no-store`, `public` →
   `public, max-age=86400` (the same policy the pack's own art carries).
-* **A declared path wins over a core file at the same path, on purpose** — the path is part of the pack's identity and
-  an author who declares `/data/resource-manifest.json` means it. The load-bearing half of that decision is the
-  converse: a declared route whose file is missing answers **404** instead of silently falling through to the
-  same-named core file (that is why the route stays in the map, with a warning naming the missing file).
+* **The core mount wins at a path the core really serves (since 0.15.2).** This used to read the other way round — "a
+  declared path wins over a core file at the same path, on purpose", the `server/http/static.js` stance that a declared
+  path *is* that path. `static.js` still asks this table before the core mounts, but `workshopRoutesFor` now judges
+  every declaration with the **same** core reserved table the dynamic channel uses (`coreRouteShadow` in
+  `server/http/routeMount.js`, §28.35): a declaration that would shadow a path the engine really serves is **dropped
+  from the map**, so the core mount answers exactly as if the pack had declared nothing. The pack is **not** refused
+  (a published pack carrying such a declaration still installs and runs, only that one declaration stops taking
+  effect) and the drop is **named twice**, never silent: one `errors` entry on the load report and one `log.warn` line
+  at startup.
+  The test is deliberately **a real collision, not "it uses the word `/data`"**: `coreRouteShadow` first asks whether
+  the engine would really serve that exact path (the file exists verbatim under `dataDir` / `sharedDir` / `simDir` /
+  `publicDir`, or the path is one of the engine's constant endpoints), and only then is it a shadow. A declaration that
+  merely sits inside a core namespace with no core file under it keeps working and is **not** reported — one live
+  published pack is exactly that shape (`ws-compression-reference` declares `/data/ws-compression.json` and `data/`
+  has no such file), and reporting every such declaration would drown the one that matters. The good side effect: on
+  the day the core really grows `data/ws-compression.json`, that very declaration yields to it with no rule change.
+* **`RESERVED_ROUTE_PREFIXES` is the one table** (re-exported from `server/http/routeMount.js`): split into
+  `CORE_ROUTE_EXACT` (constant endpoints, matched literally — `/healthz` is a path, not a tree) and
+  `CORE_ROUTE_PREFIXES` (namespaces, matched by prefix). `test/modRoutes.test.js` pins the union and that both
+  channels read it.
+* **A declared route whose file is missing still answers 404** instead of silently falling through to whatever the
+  core static mount happens to have at that path (that is why the route stays in the map, with a warning naming the
+  missing file). That half is unchanged and is the converse of "the core wins": the pack that **owns** a path must not
+  silently serve the core's file at it.
 * **Two packs, one path**: the smaller pack id wins (DESIGN §28.3's rule, the same one the data overlay and the kit
   loader use) and the loser is reported.
 
@@ -1378,11 +1398,11 @@ heuristic, not a sandbox: `globalThis['pro'+'cess']` slips past this scan exactl
   | `metrics` (§28.31) | a **deep-frozen object of scalars** (`uptimeSec`, `rss`, `heapUsed`, `elu`, `loopP*`, `sampleAgeMs`, `state`) | it is a *value*, not a handle: no `process`, no histogram, no timer, no function. A read cannot change a result |
   | `route` (§28.32) | a synchronous callback answering a JSON value | the path **must** live under `/mod/<pack id>/…`, a namespace the engine reserves for exactly this; `GET`/`HEAD` only; `no-store`/`no-cache` only; bounded body. A pack has no position to name `/data/support.json`, so the "core reserved path table" is the second line of defence rather than the first |
 
-  The static `pack.json.routes` channel (§28.13) still answers an exact declared path **before** the core mounts, and that
-  stance is written into `server/http/static.js` on purpose ("a declared path is that path"). It is **not** changed by
-  this batch: the reserved-prefix table this section describes is applied to the **dynamic** channel, and re-judging the
-  static one is a separate decision with its own compatibility question (a live pack may already declare such a path).
-  Recorded here so the asymmetry is not mistaken for an oversight.
+  The static `pack.json.routes` channel (§28.13.2) also asks this same reserved table before it mounts anything, so a
+  declaration can no longer shadow a core path either — but it asks a **narrower** question than the dynamic channel's
+  prefix test: it requires a real collision (a file the core would actually serve at that exact path), which is what
+  keeps a published pack declaring `/data/<its own name>.json` working. The dynamic channel stays strict by prefix:
+  no `host.route` may fall inside a core reserved namespace at all. Both read the one table, so widening it moves both.
 
 **The one trigger: `handlePackMsg(playerId, msg)` on the `matchClass` subclass.** `pack.msg` is handled by the Lobby
 (`Lobby.packMsg`): it validates the declaration, rate-limits the session and forwards to the room's seats and
@@ -2259,23 +2279,28 @@ export function mount(ctx) {
   服务器只把它折进 `m.public` / `b.pool`，**从不原帧广播**），所以面板 `ctx.net.on('b.progress', …)` 会被
   `CLIENT_CHANNEL_UNDECLARED` **点名拒绝** —— 那条路上连订阅都不成立。
 
-**三、要真 DPS，需要什么（形状先给，本批不实现）。** 「面板可以画错、但不能算错」在这里的落点是：**没有读数就
+**三、要真 DPS，需要什么（本批**已实现**，见 §28.38）。** 「面板可以画错、但不能算错」在这里的落点是：**没有读数就
 不造读数**。一个能算逐单位 DPS 的读面至少要有三件事，缺一条就不该做：
 
-1. **数据源**：默认路径下伤害元组只活在 `public/js/battle/runner.js` 的 listener map 里，所以要么由
-   `public/js/main.js` 把 runner 的 `on('ev')` 转给注册点（`deps.damage = { subscribe }`），要么由 runner 自己
-   维护一个**只读累计**再交出来。两条都要碰 `public/js/battle/runner.js` 与 `main.js`，不在本批的文件面里。
-2. **形状（建议）**：`ctx.net.damage()` → 一次读一份**冻结**的累计快照
-   `{ battleId, fieldId, gt, total, byPlayer, byUnit }`，`null` = 当前没有正在跑的战斗 / 没有数据源 ——
-   与 `status()` / `welcome()` / `transport()` 同一套「拿不到就是 `null`，不抛、不编造」。
-3. **判据**：它只读累计，**不许**让 runner 多算一步 / 改一条帧 / 碰模拟输入 ——
+1. **数据源**：**§28.38 已落地**，而且不是这里当初设想的那两条路（把 `on('ev')` 转出去、或由 runner 自己再累计
+   一份）—— 查下来**伤害早就在模拟里算好了**（`server/sim/damage.js` 每次命中写 `source.stats.dmg` 与
+   `battle._perPlayer[ownerId].damageDealt`），所以那一格只是 runner 里的一个**只读读者**：碰的文件确实还是
+   `public/js/battle/runner.js` 与 `public/js/main.js`，但**没有第二份累计**，`step()` / `drainEvents()` / `emit`
+   一行都不动。
+2. **形状**：**不再是** `ctx.net.damage()`（模拟事实不该挂在 `net` 上，见 §28.38 的理由）；落地的是
+   **`ctx.battle.damage()`** → 一次读一份冻结副本
+   `{ battleId, fieldId, kind, authoritative, own, gt, t0, players, units }`，`null` = 当前没有正在跑的战斗 / 没有
+   注入战斗运行时 —— 与 `status()` / `welcome()` / `transport()` 同一套「拿不到就是 `null`，不抛、不编造」。
+3. **判据**：它只读已经在那儿的数字，**不许**让 runner 多算一步 / 改一条帧 / 碰模拟输入 ——
    可执行的判据是「同一 seed 的战斗结果摘要逐字节相同」，模板就在 `test/modClientSettings.test.js` 的
-   「模拟侧零副作用」那一条。
+   「模拟侧零副作用」那一条（§28.38 又加了一份专门的守卫：`test/modClientBattleReads.test.js`）。
 
-**四、表面与守卫。** 这一节没有新代码，所以也没有新表面：与 §28.24 / §28.25 同一先例（纯读数不新增
+**四、表面与守卫。** 这一节当时没有新代码，所以没有新表面：与 §28.24 / §28.25 同一先例（纯读数不新增
 `pack.json` 声明，没有 schema 符号可锚，故不进 `shared/modSurface.js`）。守卫是 `test/modClientSettings.test.js`
 里「伤害看板」那一组：`m.result` 原样透传、结算帧里没有 `unitStats`、`b.progress` 订阅被点名、runner 的元组
 不进 `net`、以及面板活着时战斗摘要不变。**`MOD_API_VERSION` 不动**（今天这一半是零改动）。
+**逐单位那一半后来落地了**：见 **§28.38**（`ctx.battle.damage()`），它把「这一点读不到」补成「读得到，但只给
+本场」，并把上面这三条判据写成了可执行的守卫 `test/modClientBattleReads.test.js`。
 
 ### 28.31 `ctx.me.voice` 与 `ctx.session.setVoiceLang`：一格配音读数，加一个**唯一**的设置写口
 
@@ -2432,9 +2457,12 @@ JSON 可序列化值**的回调。
 
 1. **命名空间**：路径必须在 `/mod/<包id>/…` 里。两个包在结构上不可能撞车，核心命名空间也不可能被顶掉 ——
    包**没有位置**去点名 `/data/support.json`。
-2. **核心保留路径表**（`RESERVED_ROUTE_PREFIXES`）：`/healthz`、`/ws`、`/data`、`/data.js`、`/shared`、`/sim`、
-   `/i18n`、`/mods`、`/media`、`/packs`、`/assets`、`/fonts`、`/workshop-*`、`/room-data` 逐条再判一遍。这是
-   **纵深防御**：将来谁放宽了第 1 条，第 2 条还在。
+2. **核心保留路径表**（`RESERVED_ROUTE_PREFIXES` = `CORE_ROUTE_EXACT` + `CORE_ROUTE_PREFIXES`，都在
+   `server/http/routeMount.js`）：常量端点 `/healthz`、`/data.js`、`/mods/catalog.json` 逐字比，命名空间
+   `/ws`、`/data`、`/shared`、`/sim`、`/i18n`、`/mods`、`/media`、`/packs`、`/assets`、`/fonts`、`/workshop-*`、
+   `/room-data` 按前缀比。这是**纵深防御**：将来谁放宽了第 1 条，第 2 条还在。分成两份是因为判据本来就不同 ——
+   `/healthz` 是一条**路径**（`/healthz/x` 不是它），`/data` 是一棵**树**（`/data/x` 是它）；混成一张扁平表只能靠
+   派生去猜哪条是哪条。**这张表只此一处真相**：动态通道与静态 `pack.json.routes` 通道（§28.13.2）读的是同一份。
 3. **只有 GET / HEAD**（别的动词在 `server/http/routes.js` 就已经 405）。
 4. **缓存只有 `no-store` / `no-cache`**，默认 `no-store`。刻意**没有** `public`：一个现算的端点说「可以公开缓存
    一天」几乎总是错的（静态 `routes` 有 `public`，因为它挂的是一个**文件**）。
@@ -2444,11 +2472,35 @@ JSON 可序列化值**的回调。
    理由是实在的：单进程单事件循环，一个 `await` 的处理器就是一条能拖住整台服务器的路，而这一格**不**做每请求隔离。
    四种失败（`Promise` / `undefined` / 不可序列化 / 超限）各自点名并回 500，**不**回落到空体 200。
 
-**与 §28.13 静态通道的关系（一处刻意的不对称）。** 两条通道都声明同一条路径时**静态的赢**（`static.js` 里
-静态那一半先查）。静态通道今天仍然按 `server/http/static.js` 写明的立场行事 ——「声明过的路径就是声明过的
-路径」，即它可以回答一条与核心挂载同名的路径。**核心保留路径表本批只施加在动态通道上**：给静态通道补这条判据
-会改变已发布包的行为（一个包今天可能真的声明了这样一条路径），那是另一件事，需要单独裁。这一条记在这里，免得
-被当成漏改。
+**与 §28.13 静态通道的关系。** 两条通道都声明同一条路径时**静态的赢**（`static.js` 里静态那一半先查）；
+一条路径若与**核心**相撞，则**核心先吃**，两条通道都不得顶掉它（§28.13.2 写下静态那一半的判据）。
+
+**静态 `pack.json.routes` 这一半在 0.15.2 收紧了（本节的立场原来写着「本批未动」）。** 旧立场是 `static.js` 里那句
+「声明过的路径就是声明过的路径」，即一条声明能回答一条与核心挂载同名的路径。现在：`static.js` 仍然先查包声明，
+但 `workshopRoutesFor` 在**建表时**就用**同一张**核心保留表（`coreRouteShadow`，与上面第 2 条同源）判一遍，撞上
+核心的声明**不生效** —— 核心挂载照旧回答，包**不被拒**（已发布的包不会因为多写一条声明就装不上），并且**响亮
+点名**：装载报告里一条 `errors`、启动日志里一行 `log.warn`（不许静默失败）。
+
+判据刻意**只认真的撞上**，不是「用了 `/data` 这个词就当撞上」：`coreRouteShadow` 先看核心是不是**真的会服务这条
+路径**（`dataDir` / `sharedDir` / `simDir` / `publicDir` 里逐字存在那个文件，或命中常量端点），只有那样才算顶掉。
+线上有一条已发布的包（`ws-compression-reference`：`/data/ws-compression.json`，而 `data/` 下没有同名文件）正好落在
+这条线上 —— 它今天照常服务、也**不**报警，因为那个文件不是核心的，它没有顶掉任何东西。副作用是好的：核心将来真的
+长出 `data/ws-compression.json` 那一天，同一条声明**自动**让位给核心，不需要再改一次规则。
+
+**两条被否掉的路（业主裁决 2026-10-11）：「不做动态 `route` 挂点、不做 `/client-build`」。** 写在这里，免得反复
+被问 —— 也免得把「没做」误读成「漏做」：
+
+* **动态 `route` 挂点只开包自己命名空间下的路径**：`host.route()` 的路径**必须**在 `/mod/<包id>/…` 里（本节第 1
+  条）。引擎自己的顶层 HTTP 路由**不由包提供** —— 包没有位置去点名它们。
+* **`/client-build` 这条引擎路由不做。** 它属于「引擎自己的 HTTP 路由」那一类，不由包提供；今天的**合法做法**是包用
+  **静态** `pack.json.routes` 在**自己的命名空间下**放一份「字段契约」文档：先例是 `ws-compression-reference` 的
+  `/data/ws-compression.json`（它今天照常生效，见上一段），以及 `256e45e4e588` 的 `/mod/healthz-ext.json` 与
+  `/mod/client-build.json`。作者要用哪几个字段，就照这条路写一份自己的 JSON。
+* **口径**：静态 `routes` 的保留表就是 `server/http/routeMount.js` 的 `CORE_ROUTE_EXACT`（`/healthz`、`/data.js`、
+  `/mods/catalog.json`）加 `CORE_ROUTE_PREFIXES`（`/ws`、`/data`、`/shared`、`/sim`、`/i18n`、`/mods`、`/media`、
+  `/packs`、`/assets`、`/fonts`、`/workshop-*`、`/room-data`），两条通道读的是同一张表。**`/mod/…` 不在那张表里**：
+  表里的 `/mods` 按 `:96` 的 `p === prefix || p.startsWith(\`${prefix}/\`)` 比对，`/mod/<包id>/x` **不**命中它
+  （`/mods` 与 `/mod/` 是两个不同的命名空间）—— 所以包的自留地正是 `/mod/<包id>/…`。
 
 ### 28.36 作者自备 CDN 的语音素材（`{ url, sha256, file }`）
 
@@ -2505,6 +2557,100 @@ JSON 可序列化值**的回调。
 - **「不 ok 时 503」做不到，本批也不做。** 要那个语义就得先定义「谁的不 ok」：是所有已装包都说 ok？还是任一包说
   不 ok 就 503？前者给不出信息，后者等于**一个第三方包可以决定整台服务器被判死**（负载均衡/容器编排会照它摘流量）
   —— 那正是本层一直在拒绝的能力形态。所以这一格只报事实，判断留给运维。
+
+### 28.38 `ctx.battle.damage()`：逐单位伤害读数，让包自己算 DPS
+
+§28.30 把「伤害看板」拆成了两半：总伤今天就能读（`m.result` 的原样透传），逐单位 / 逐场那一半「今天读不到」。
+这一节补上后半：一格**只读**的逐单位 / 逐人累计伤害，加一个**时间基准**，让包自己算 DPS。
+
+**为什么引擎必须给，而不是包自己算。** 默认路径下战斗在**这台机器**上跑（`public/js/battle/runner.js`），
+伤害元组走 runner **自己的** listener map（`:282` 的 `emit`），**根本不进 `net`** —— 面板订阅不到（§28.30 已经
+查明）。包要想自己算，只能再去订阅一条它拿不到的通道，或者自己维护第二份累计；而**第二份账与引擎那份必然会对不
+上**（`m.result` 报的是服务端按 `_perPlayer` 累出来的数）—— 那正是「面板可以画错、但不能算错」要消灭的东西。
+所以这一格只能由引擎给，而且给的是**同一本账**。
+
+**这一格不是新账，是一个读者。** 伤害早在模拟里逐次命中就记好了：`server/sim/damage.js:370` 写
+`source.stats.dmg`，`:371` 写 `battle._perPlayer[ownerId].damageDealt`，`:352` 写 `bossDamage`（单位那本账在
+`server/sim/units.js:97` 初始化）。`battleRunner.damage()`（`public/js/battle/runner.js`）只做一件事：**把这些
+已经在那儿的数字按面板看得懂的形状抄出来**。
+
+* **不维护第二份累计**：`step()` / `drainEvents()` / `emit` 一行都不动，也**没有**逐 tick / 逐命中的新工作。实测
+  代价（`_up/dps-probe-3.mjs`，四个公开 perf spec 前 600 tick、N=30 交替取样）：写元组本体 95（normal）/ 425（boss）
+  / 435（hidden）次每 1000 tick，各配置的 p50 差值 ≤ 1.1 ms，全部落在噪声（sd 2–9 ms）内。
+* **配的是引擎自己那本账**：逐人那几行照 `Battle._buildResult()` 的写法配对
+  （`server/sim/battle/lifecycle.js:209-210`：座位在 `battle.players[]`，账在 `battle._perPlayer[playerId]`，
+  **不是同一个对象**）。写错一边（例如 `getPlayer(pid).damageDealt`）会永远读到 `0`，而单位那几行照样有数字 ——
+  这个静默错误由 `test/modClientBattleReads.test.js` 钉住。
+
+**形状**（一次读一份**新的、冻结到第二层**的副本）：
+
+| 字段 | 含义 |
+|---|---|
+| `battleId` / `fieldId` / `kind` | 这一场是谁（`b.start` 的那三个字段；`fieldId` 缺失时是 `null`） |
+| `authoritative` / `own` | 这场是本机在算的（要上报），还是替别人放的显示副本；与自己那一场的关系（`own`） |
+| `gt` / `t0` | **时间基准**：`gt` = `Battle.time`（战斗内秒），`t0` 恒为 `0`（一局一场）⇒ `dps = dmg / (gt - t0)` |
+| `players[]` | `{ playerId, dmg, bossDmg, kills, heal }`，**这一场真在场的玩家**（`battle.players`），次序即场上次序 |
+| `units[]` | `{ id, uid, defId, ownerId, kind, dmg, kills, heal }`，场上己方单位（操作员 / 召唤物 / 装置） |
+
+三条**口径**决定，都是刻意的：
+
+* **`dmg` / `bossDmg` / `kills` / `heal` 取整**，与 `shared/protocol.js` `compactResult`（结果页读的那一份）同一个
+  口径。DPS 是速率显示，给未取整的浮点只会**装作更精确**，还会让面板的数字与结果页差一个尾数。
+* **`players[].dmg` 已经含 `bossDmg`**（`damageDealt` 就是这么累的，与 `m.result` 的 `stats.dmgDealt` 同源），
+  所以「总伤」与「领袖伤害」都在这一格里 —— 作者不必再拼 `m.result` + `b.pool` 两个面。
+* **`uid` 必须给**：那是这块棋在那个玩家棋盘上的 id（与 `battleRunner.unitIdOf()` / 结果页 `unitsEnd` 同一个号）。
+  面板对名单靠它；少了它，作者只能拿战斗内的 `id` 去猜。装置（`ownerId: null`、`uid: null`）也在 `units[]` 里，
+  它们打的伤害一样进拥有者那本账，对不上号的几行按 `kind` 自己归并即可。
+
+**只给本场 —— 这是边界，不是缺陷。** 读的就是**屏上这一场**（与 `battleRunner.unitStats()` 同一语义，含正在播的
+显示副本）。**队友那几场不在这一格里**（一次战斗只有一个 `battleId`），正在准备的下一场也不在。`ctx.battle` 那一格
+**不合并**多场 —— 合并会把「别的玩家同一场」算成另一份，也会把副本重复计入。面板要**全队总伤**时走 `m.result`
+（`players[].stats.dmgDealt`，服务端按每个玩家累出来的全队口径；§28.30 那张表）。
+
+**只读语义。** 每次调用都是**一份新的、冻结到第二层的副本**（外层对象、两个数组、以及每个单位 / 每个人那一行都
+`Object.freeze`）：面板写它当场 `TypeError`，引擎之后的新伤害也不会回溯进**已经发出去**的那一份。
+
+**这里不复用 `readonlySnapshot`，是有意的。** 那个函数的底图缓存按**源对象**缓存（`snapshotCache`），而这一格每次
+读都造一个**新对象** ⇒ 用它等于每次读往缓存里塞一个新键，一局几千次读就把缓存撑爆。它适用的场合是「每次读拿到
+同一个源对象」（`ctx.data.get()` 那几张表）。
+
+**拿不到就是 `null`，而且绝不让这一格把别的东西带崩。** 四种出口分开写（`public/js/ui/extensions.js`）：
+
+| 情形 | 返回 | 日志 |
+|---|---|---|
+| 注册点没被注入战斗运行时（Node 用例、极小的宿主） | `null` | **一行**：`CLIENT_BATTLE_UNAVAILABLE (absent)` |
+| 注入的 `damage()` 抛了 | `null` | **一行**：`(threw)` + 可读原因 |
+| 返回值不是一个对象（数组 / 字符串 / 数字） | `null` | **一行**：`(bad-shape)` —— 半个读数比没有更危险 |
+| 引擎说这一场拿不到（`null`：没有正在跑的战斗、战斗还没建好） | `null` | **不记** —— 那是正常状态（准备期 / 结算期），不是缺件 |
+
+每种原因只记一行（与 `CLIENT_TRANSPORT_UNAVAILABLE` 同一条 `dedup` 规矩、同一个理由：面板每秒可能读一次，刷屏的
+日志与没有日志一样没用），而且走**注册点**的 `log`（引擎级事实，不在每个读它的包的日志里各说一次）。
+
+**注入路径。** `public/js/main.js` 把**一个函数**交给注册点：`createPanelRegistry({ …, battle: battleRunner })`
+（`deps.battle.damage()`）。注入的不是 runner 句柄 —— 与 `settings` / `data` 同一条边界（**不传什么就是边界**）：
+面板拿不到 `step`、拿不到 `Battle`、拿不到 `_entries`、也拿不到 `stats()` 那种运行时可写面。
+
+**一格里有什么、没有什么：**
+
+| 有 | 没有（这一格的边界） |
+|---|---|
+| `ctx.battle.damage()`（唯一成员，门面冻结） | `ctx.net.damage()` —— 模拟事实**不挂在 `net` 上**（`net` 那六格都是连接事实） |
+| 逐单位 / 逐人累计伤害 + `gt` / `t0` | runner 句柄、`Battle`、`_entries`、`stats()`、`on('ev')` |
+| `uid` / `defId` / `ownerId` / `kind` 供对名单 | 任何写入、任何订阅、任何帧 |
+
+**表面与守卫。** 这一格**不新增 `pack.json` 声明**（纯读数，没有 schema 符号可锚）⇒ **不进 `shared/modSurface.js`**，
+与 §28.24 / §28.25 / §28.32 同一先例；**`MOD_API_VERSION` 不动**（加能力不加版本）。守卫是
+`test/modClientBattleReads.test.js` 那一组：
+
+* **数字是真的**：逐单位 / 逐人与模拟自己那本账（`u.stats.dmg`、`battle._perPlayer[pid]`）逐个相同，含 `uid` 映射与
+  取整口径 —— 配错对象、抄错单位、少算一个人当场红；
+* **只读**：每次一份新的冻结副本，面板改不了、引擎之后的新伤害不回溯（`readFileSync` 级的源码判据也钉住
+  「`damage()` 里没有 `step()` / `drainEvents` / `emit`」）；
+* **零协议消息**：真 `Net` 的四个出口（`send` / `request` / `sendResourceMessage` / `_sendRaw`）全计数，读这一格
+  **一次都不许发生**（`test/modClientNetReads.test.js` 的同一套判据）；`damage` 既不是 S2C 也不是 C2S；
+* **不碰 `net`**：`runner.js` 对 `net` 仍然只有 `on` / `request` / `send`，面板那份 `ctx.net` 门面的键集**一个都没多**；
+* **零副作用**：面板活着、真的消费这一格去算 DPS / 总伤 / 领袖伤时，同一场战斗的结算账与不变量照旧
+  （`test/modClientSettings.test.js` 的「模拟侧零副作用」那一条现在也读这一格）。
 
 
 

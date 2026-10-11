@@ -87,6 +87,8 @@ const MODE_CARDS = [
     id: 'coop', name: N_('同盟模拟'), en: 'ALLIANCE SIMULATION', icon: 'users',
     desc: N_('与至多 {n} 名博士组成同盟，共享干员池，联防协作抵御敌潮。'), params: { n: MAX_SEATS - 1 },
     points: [N_('1–{n} 名博士 · 可由 AI 队友补位'), N_('联防阶段 · 最终攻势合并生命值')], pointParams: { n: MAX_SEATS },
+    // ↑ 这两处 `params` 只是**兜底**（= 官方 4 座那一档：3 与 4）：render 时按这台服务器的上限（缺省 20）重算
+    //   —— 19 与 20（见 ModeCard，业主裁令 2026-10-12）。msgid 与参数名一个都没动，四个语言包照旧。
   },
 ];
 
@@ -233,6 +235,13 @@ function TipsPanel() {
 }
 
 function ModeCard({ card, selected, onSelect }) {
+  // 座位数文案 (业主裁令 2026-10-12): the ceiling is THIS server's (`welcome.maxSeats`), not the official 4 — a 20-seat
+  // server's card must not still promise 「至多 3 名博士」. The number is read at render time, so a `welcome` that lands
+  // after the module was evaluated (or a reconnect that changes servers) is reflected; the msgid and its `{n}` params
+  // are unchanged (only the VALUE moves), so every i18n pack keeps working.
+  const seats = card.id === 'coop' ? serverSeatMaxOf() : MAX_SEATS;
+  const params = card.id === 'coop' ? { n: Math.max(1, seats - 1) } : card.params;
+  const pointParams = card.id === 'coop' ? { n: seats } : card.pointParams;
   return html`<button type="button" class=${`mode-card brackets${selected ? ' is-selected' : ''}`} onClick=${() => onSelect(card.id)}
       aria-pressed=${selected ? 'true' : 'false'}>
     <span class="mode-card__bg" aria-hidden="true"></span>
@@ -240,8 +249,8 @@ function ModeCard({ card, selected, onSelect }) {
     <span class="mode-card__text">
       <${MicroLabel} tone=${selected ? 'mint' : undefined}>${card.en}<//>
       <span class="mode-card__name">${t(card.name)}</span>
-      <span class="mode-card__desc">${t(card.desc, card.params)}</span>
-      <span class="mode-card__points">${card.points.map((p) => html`<span key=${p}>${t(p, card.pointParams)}</span>`)}</span>
+      <span class="mode-card__desc">${t(card.desc, params)}</span>
+      <span class="mode-card__points">${card.points.map((p) => html`<span key=${p}>${t(p, pointParams)}</span>`)}</span>
     </span>
     <span class="mode-card__check" aria-hidden="true"><${Icon} name="check" />${t('已选定')}</span>
   </button>`;
@@ -276,14 +285,15 @@ export const LAYER_TEXT = { A: N_('数据'), B: N_('逻辑'), C: N_('客户端')
 /**
  * The seat ceiling THIS server allows, as `welcome.maxSeats` announced it.
  *
- * The number travels in the handshake (server/lobby.js `welcomeInfo`) and only when the deployment raised
- * `SP_MAX_SEATS` above the official `MAX_SEATS` — a 4-seat server sends no field and every client keeps the default,
- * exactly like `welcome.mods` / `welcome.modPanels` before it. The lobby reads it HERE, at module scope, because the
- * handshake happens before this screen is ever mounted (main.js imports the screens eagerly, the socket connects in
- * `boot()`): a first `welcome` would otherwise be missed and the slider would keep offering 4 on a 100-seat server.
- * A reconnect re-announces it, so the cache follows the server it is actually talking to.
+ * The number travels in the handshake (server/lobby.js `welcomeInfo`) on EVERY handshake — the server's default ceiling
+ * is 20 (业主裁令 2026-10-12), not the official `MAX_SEATS`, so there is no "vanilla" case left to omit it for. The
+ * lobby reads it HERE, at module scope, because the handshake happens before this screen is ever mounted (main.js
+ * imports the screens eagerly, the socket connects in `boot()`): a first `welcome` would otherwise be missed and the
+ * slider would keep offering 4 on a 20-seat server. A reconnect re-announces it, so the cache follows the server it is
+ * actually talking to.
  *
- * Unusable / absent ⇒ `MAX_SEATS`: the client never invents a ceiling, it only mirrors the one it was told.
+ * Unusable / absent ⇒ the client keeps the OFFICIAL 4: a server too old to send the field is an official-room server,
+ * and assuming 4 can only ever ask for FEWER seats than it allows.
  */
 let serverSeatMax = MAX_SEATS;
 
@@ -488,6 +498,8 @@ export function LobbyScreen() {
     // Only a reply that was actually `ok` reaches this line (`run` shows the error otherwise — QUEUE_FULL included).
     // The server's own `room.queued` frame follows for a real queue; until it does, the panel shows the one frame the
     // protocol lets a client assume. A placement clears it again through the listener above.
+    // 排队人数占位用**官方一间房**（`MAX_SEATS` 4），不是服务器上限：快速匹配的 `size` 是 `MATCHMAKE_DEFAULTS.size`
+    // 的一间官方房，**不跟随 `SP_MAX_SEATS`**（业主裁令 2026-10-12），而真正的 `need` 由服务端的 `room.queued` 覆盖。
     if (alive.current) setQueue((q) => q || { status: 'waiting', position: 1, size: 1, need: MAX_SEATS, deadline: Date.now() + 120000 });
   });
   const cancelQueue = () => run('dequeue', async () => {

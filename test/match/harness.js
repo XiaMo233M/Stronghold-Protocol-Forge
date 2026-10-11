@@ -3,7 +3,8 @@
 //   const h = makeMatch({ mode: 'coop', difficulty: 'NORMAL', humans: 1, bots: 1, seed: 7, fake: true });
 //   h.start(); h.runToPhase('PREP'); const ps = h.ps('p_0'); …; h.invariants();
 //
-// Options: mode, difficulty, humans (count) | seats (explicit), bots, spectators (spectator seat ids, opts.spectators),
+// Options: mode, difficulty, humans (count) | seats (explicit), seatCap (the room's capacity when it differs from the
+// seat list — a 20-seat room with 4 players in it), bots, spectators (spectator seat ids, opts.spectators),
 // seed, matchNo (the room's match number: part of the battleId prefix), data (default: real data/*.json),
 // fake (true → test/match/fakeBattle.js as BattleClass), script (FakeBattle.script), registry, instant (virtual
 // scheduler runs battles synchronously; default true), timerScale, battleContent, botRehearsal (default 0),
@@ -58,6 +59,10 @@ export function makeMatch(o = {}) {
   }
   h.m = new Match({
     roomCode: 'TEST', mode, difficulty, seats, spectators: o.spectators, seed: o.seed ?? 1, matchNo: o.matchNo, data: o.data ?? DATA, log,
+    // The room's CAPACITY, when the caller wants it to differ from the seat list (a 20-seat room with 4 players in it:
+    // the variant gate reads the PARTICIPANTS, so capacity stays a separate fact). Absent ⇒ Match derives it from
+    // `seats.length`, exactly as before.
+    ...(Number.isFinite(o.seatCap) ? { seatCap: o.seatCap } : {}),
     send: (id, msg) => {
       for (const fn of h.onSend) fn(id, msg);
       if (msg.t === 'b.snap' || msg.t === 'b.ev') { h.frames++; if (!captureFrames) return true; }

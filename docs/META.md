@@ -414,7 +414,7 @@ the meantime (header bullet of `server/lobby.js`, test/roomKeep.test.js).
 
 | 层 | 谁定 | 形状 | 缺省 |
 | --- | --- | --- | --- |
-| 这台服务器**允许**多少座 | 部署方（环境变量） | `maxSeatsFrom(process.env)` ← `SP_MAX_SEATS`；成为 `LOBBY_DEFAULTS.maxSeats` | `MAX_SEATS` = **4**（官方房间 1–4 人） |
+| 这台服务器**允许**多少座 | 部署方（环境变量） | `maxSeatsFrom(process.env)` ← `SP_MAX_SEATS`；成为 `LOBBY_DEFAULTS.maxSeats` | **20**（`DEFAULT_MAX_SEATS`；业主裁令 2026-10-12）。`MAX_SEATS` = **4** 是「官方房间 1–4 人」的声明与超容变体的参照，**不是**缺省上限 |
 | **本房**开多少座 | **房主**（大厅滑杆） | `room.create.seatCap`（可选，只作用于 `coop`） | 不发 / `null` ⇒ 服务器上限 |
 | 座位数的**下限** | `MIN_SEATS` = **2** | 协议范围 `[MIN_SEATS, SEAT_CAP]` | —— |
 
@@ -445,10 +445,12 @@ solo 帧。
   `v === null` 管「显式给了 null」。那张表还是**作者可见的表面** —— `server/modDispatch.js` 把它复制进交给包的
   `c2s`，漏一条，包就会把一个合法的 `room.create` 当成缺字段。
 * `room.state.seatCap`：**只在容量 ≠ `MAX_SEATS` 时**才出现（上一刀定的规矩，客户端 `normalizeSeats` 按它补卡，
-  上限 256 防呆）。所以一个 4 座房的帧与今天**逐字节相同** —— 键、键序、值都不动。
-* `welcome.maxSeats`：**只在这台服务器的上限 ≠ `MAX_SEATS` 时**才发（与 `welcome.mods` / `modPanels` /
-  `modAssets` 同一条「不声明就不多一个键」的规矩）。房主滑杆的**范围上限**取自这里：客户端绝不自己编一个上限。
-  没收到就当 `MAX_SEATS`（旧客户端 / 4 座服务器），它只会**少要**，不会发出任何服务器会拒的请求。
+  上限 256 防呆）。所以**容量 4** 的房（含 `SP_MAX_SEATS=4` 的部署）帧与今天**逐字节相同** —— 键、键序、值都不动；
+  缺省 20 座的房因此会带 `seatCap: 20`（这是新缺省该有的样子）。
+* `welcome.maxSeats`：**每次握手都发**（业主裁令 2026-10-12）。原来只在服务器上限 ≠ `MAX_SEATS` 时才发，而缺省上限
+  已经不是官方那一个了，所以没有「官方那一档」可以省掉它；`SP_MAX_SEATS=4` 的部署拿到的是值为 4 的同一个字段。
+  房主滑杆的**范围上限**取自这里：客户端绝不自己编一个上限。没收到这个字段的**旧页面**当 `MAX_SEATS` 用
+  （旧服务器也不会发），它只会**少要**，不会发出任何服务器会拒的请求。
 
 **UI（只在房主界面出现）**：大厅建房框里的滑杆（`public/js/screens/lobby.js` `SeatCapPicker`，
 样式 `public/css/screens/lobby.css` `.seat-cap*`）。显示**当前值**与**服务器允许的范围上限**；`coop` 才有，
@@ -456,23 +458,45 @@ solo 帧。
 也就是这条特性出现之前客户端一直发的那个请求。**房间页（`room.js`）另有一个房主专属的滑杆**（`SeatCapSetter`，
 下限跟着房间里现有人数走），建房**之后**也还能改 —— 见 §1.9a。
 
-**快速匹配（`server/matchmaking.js`）不动，且这是决定**：`room.queue` 的 `need` 就是这台服务器的上限
-（`queue.size` 缺省 = `lobby.opts.maxSeats`），而被建房那一刻**还没有房主**（最早排队的陌生人在建完之后才成为
-房主）。替他挑一个数，要么是猜一个队列里没人同意的值，要么是悄悄把「你排的那个队」开成更小的房。所以快速匹配的
-房间**保持服务器上限**，也就是 `room.queue` 当时承诺的那个数。房主想开小屋就自己建房再邀请。
+**快速匹配（`server/matchmaking.js`）：队列门槛是「一间官方房」= `MAX_SEATS`（4），**不跟随**服务器上限**
+（业主裁令 2026-10-12 追加）。`queue.size` 缺省 `null` 的含义就是这 4 个——**不是** `lobby.opts.maxSeats`：把缺省上限抬到
+20 不该让陌生人凑满 20 才开局，那是另一个产品；只有部署方**显式**配了 `queue.size` 才由他决定门槛（仍会被房间容量夹住）。
+被建房那一刻**还没有房主**（最早排队的陌生人在建完之后才成为房主），替他挑一个数要么是猜一个队列里没人同意的值，
+要么是悄悄把「你排的那个队」开成更小的房 —— 所以快速匹配的**房间**保持服务器上限（缺省 20 座，房里坐 4 人），
+也就是 `room.queue` 当时承诺的那个数（面板的 `need` = 队列门槛 = 4）。房主想开小屋就自己建房再邀请。
 
-**为什么本房容量**不**继续传给血池缩放（业主裁决 2026-10-11，记在这里免得后人以为漏了）**：`GameData.seatCap`
+**血池按「实际入座人数」缩放，不按「容量」**（业主裁决 2026-10-11）：`GameData.seatCap`
 ← `Match.seatCap` ← `opts.seatCap`（`startMatch` **没传**）或 `opts.seats.length` = `room.seats.filter(Boolean).length`
-= **实际入座人数**。这是对的：**血池按「实际入座人数」缩放，而不是按「容量」** —— 容量回答的是「**允许**多少人」，
-不是「多少人在打」。一个容量 40 的房只坐了 6 个人，血池就该按 6 人份；而 32 人满房仍有 `max(aliveFull, 32) = 32`，
-**原始缺口已经被覆盖**，不需要容量参与。本房容量 ≤ `MAX_SEATS`（2 或 3）时更是逐单位不变：`max(4, n) = 4`。
+= **实际入座人数**。这是对的：容量回答的是「**允许**多少人」，不是「多少人在打」。一个容量 40 的房只坐了 6 个人，
+血池就该按 6 人份；而 32 人满房仍有 `max(aliveFull, 32) = 32`，**原始缺口已经被覆盖**，不需要容量参与。
 （`server/sim/battle/spawns.js` 的 `aliveEnemyCap(this.players.length)` 同理读的是**场上人数**，与容量无关。）
+
+> 缺省上限改成 20 之后这一条**没有变**（`startMatch` 依旧不传 `seatCap`），而且**超容变体的闸门也改读人数**
+> （`Match.variant` = 参与人数 > 4，业主裁令 2026-10-12）：容量 20、只坐 4 人的房走原路径。唯一按**容量**取值的是
+> `bossPoolShareOf` 的 `aliveFull` 地板（`max(aliveFull, seatCap)`）：今天 `data/config.json` 里唯一的
+> `bossHpScale` 是 `perPlayer: true`（份额 = `coop × 存活人数`），`full` 根本不参与，所以实测无差；哪天有模式
+> 改成 `perPlayer: false`，就要重新看这一处（`server/match/gamedata.js` 的注释记着）。
 
 **容量 4 的逐字节承诺**：`test/roomSeatCap.test.js` §2 用三种方式钉住 —— 4 座 `room.state` 的**整串字面量**、
 **键表**（`['t','code','hostId','mode','difficulty','aiPicksLast','chatMode','inMatch','seats','spectators']`，
-顺序也不许漂）、以及线上「显式写 `seatCap: 4`」与「什么都不写」两个请求的帧在**抹掉房间码之后完全相同**。
-上一刀的 `Object.hasOwn(frame, 'seatCap') === false` 断言（`test/ps100-migration.test.js` §1 (D)）原样保留，
+顺序也不许漂）、以及线上「显式写 `seatCap`」与「什么都不写」两次建房在缺省 4 座时代的帧**抹掉房间码之后完全相同**
+（缺省上限改成 20 之后，这一条改成两边都显式点名 `seatCap: 4`）。
+`Object.hasOwn(frame, 'seatCap') === false` 这条断言（`test/ps100-migration.test.js` §1 (D)）原样保留，
 **没有放松**。缩容功能落地后这条承诺仍然成立：`4 → 8 → 4` 往返之后帧**逐字节**回到起点（键重新消失）。
+
+### 1.9b 缺省上限 20 座，与「超容变体」的闸门 (业主裁令 2026-10-12)
+
+**这台服务器缺省允许 20 座**（`DEFAULT_MAX_SEATS`，`SP_MAX_SEATS=N` 可加；`SP_MAX_SEATS=4` 回到官方那一档）。
+`MAX_SEATS = 4` **一个字没动** —— 它是「官方房间 1–4 人」的声明，也是下面这条闸门的参照。部署级的改法、
+同抬的连接上限与旧页面强刷，见 [NET-TUNING.md](NET-TUNING.md) §2.3。
+
+**闸门读的是在场参与者数，不是房间容量**：一场对局只有在**参与者（真人 + AI）超过 4** 时才走「每人独立牌库 /
+分小队联防 / 逐玩家守恒」那套超容变体。`Match` 在构造时把这件事**算一次**并定死（`Match.participants` = 实际入座的
+人数、`Match.variant` = `participants > MAX_SEATS`；旁观席不在其中），此后 `PlayerState.variantOn`、
+`planUnite`、`collectViolations` 都读同一个值 —— 对局中不可能翻转。**容量 20、只坐 4 人 ⇒ 原路径**；5 人起才进变体。
+`Match.seatCap` 保留原义（座位可寻址上界 + `bossPoolShareOf` 的 `aliveFull` 地板），血池那一处的口径见上一节。
+
+**快速匹配的门槛是「一间官方房」= 4 人，不跟随 `SP_MAX_SEATS`**（见本节末），只有显式配 `queue.size` 才由部署方决定。
 
 ### 1.9a 建房后仍可改容量 (`room.setSeatCap`)
 

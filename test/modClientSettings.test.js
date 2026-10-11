@@ -526,7 +526,20 @@ describe('伤害看板（业主点名那一格）：今天能读什么、读不�
     const baseHash = hashOf(baseResult);
 
     // ② 面板注册点活着：订阅 m.result / b.pool / b.ev，并**真的消费**它们去算一块「伤害看板」
-    const { ctx, net } = await ctxOf({ settings: settingsStub({ voiceLang: 'jp', voiceLangByChar: { char_a: 'kr' } }) });
+    const damageReads = { reads: 0, dmg: 0, gt: 0 };
+    // 这一格（§28.38）由引擎给：这里注入一个**与 runner 同形**的只读读者，确认「面板活着、并且真的读这一格」
+    // 也不会动模拟一根毫毛（真正的 runner 读者由 `test/modClientBattleReads.test.js` 单独钉住）
+    const battleStub = {
+      damage: () => {
+        damageReads.reads++;
+        return {
+          battleId: 'b1', fieldId: 'test', kind: 'normal', authoritative: true, own: true, gt: 3, t0: 0,
+          players: [{ playerId: 'p1', dmg: 5_000, bossDmg: 0, kills: 1, heal: 0 }],
+          units: [{ id: 1, uid: 7, defId: 'char_a', ownerId: 'p1', kind: 'op', dmg: 5_000, kills: 1, heal: 0 }],
+        };
+      },
+    };
+    const { ctx, net } = await ctxOf({ settings: settingsStub({ voiceLang: 'jp', voiceLangByChar: { char_a: 'kr' } }), extra: { battle: battleStub } });
     const board = { total: 0, hits: 0, live: 0, frames: 0, voice: 0 };
     ctx.net.on('m.result', (msg) => { for (const p of msg.players || []) board.total += Number(p.stats?.dmgDealt) || 0; board.frames++; });
     ctx.net.on('b.pool', (msg) => { for (const v of Object.values(msg.acked || {})) board.live = Math.max(board.live, Number(v) || 0); board.frames++; });
@@ -538,6 +551,15 @@ describe('伤害看板（业主点名那一格）：今天能读什么、读不�
     net.emit('b.ev', { fieldId: 'test', gt: 3, ev: [[EV.DMG, 1, 500, 'phys'], [EV.ATK, 1, 2, 'arrow']] });
     net.emit('m.result', { players: [{ playerId: 'p1', stats: { dmgDealt: 5000 } }] });
     for (let i = 0; i < 3; i++) { ctx.me.voice; ctx.net.status(); ctx.net.welcome(); ctx.net.transport(); board.voice++; }
+    // §28.38 那一格也一起读、一起消费（DPS = dmg / (gt - t0)）—— 它同样不许碰模拟、不许发帧
+    for (let i = 0; i < 3; i++) {
+      const d = ctx.battle.damage();
+      assert.ok(d, '这一格读得到');
+      damageReads.dmg = d.units.reduce((s, u) => s + u.dmg, 0) / Math.max(1e-9, d.gt - d.t0);
+      damageReads.gt = d.gt;
+    }
+    assert.equal(damageReads.reads, 3, '面板真的读了这一格（不是「什么都没发生」的假通过）');
+    assert.ok(damageReads.dmg > 0, '按 `dmg / (gt - t0)` 算出的 DPS 非零');
     assert.equal(ctx.session.setVoiceLang('char_a', 'cn'), true, '面板连唯一那格设置也写了');
     battle.runToEnd(120);
     const withPanel = battle.result();

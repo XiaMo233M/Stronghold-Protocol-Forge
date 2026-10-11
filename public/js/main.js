@@ -47,6 +47,10 @@ import { net, identity, NetError } from './net.js';
 import { store, useStore, emptyMatch, selectRoute, entryGateBlocked, sessionResetNotice, isSpectating } from './store.js';
 import { applyPublic } from './matchDelta.js';
 import { data } from './data.js';
+// 战斗读数（DESIGN §28.38）：注入给注册点的**只有** `battleRunner.damage` 一个函数（`ctx.battle.damage()`），
+// 面板拿不到 runner 句柄、拿不到 `Battle`、拿不到 `_entries`。非浏览器环境里这个导出是 `null`，那一格就是 `null`
+// （一行日志，不抛）—— 与 `net` / `settings` 两条注入面同一个形状。
+import { battleRunner } from './battle/runner.js';
 import { GAME_FILES } from './ui/gameComponents.js';
 import { TitleScreen, sanitizeName } from './screens/title.js';
 import { LobbyScreen, rememberRoom } from './screens/lobby.js';
@@ -102,6 +106,9 @@ const modPanels = createPanelRegistry({
   // （只改 `voiceLangByChar` 一格、过同一份 sanitize、走同一条 `savePref` 订阅）。注入的是**两样函数**，不是
   // store 句柄 —— 面板读得到配音、改得动这一格，别的设置既读不到也写不了。
   settings: { get: () => settingsStore.get(), setVoiceLang: setVoiceLangByChar },
+  // 战斗读数（DESIGN §28.38）：`ctx.battle.damage()` 读这一场战斗的逐单位 / 逐人累计伤害 + 时间基准。
+  // 注入的是**一个函数**，不是 runner 句柄 —— 与 settings / data 同一条边界（不传什么就是边界）。
+  battle: battleRunner,
   notify: (text, kind) => toast(text, kind || 'warn'),
   // 组件级改写（DESIGN §28.19）：`client.panels[].wraps` 注册完成、链表真的变了才调用一次。没有包声明 `wraps`
   // 的服务器上它一次都不会被调用 —— 页面上不多一次渲染、不多一个新全局（与面板那条不变量逐字相同）。

@@ -21,13 +21,16 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { ERR, ERR_TEXT, MAX_SEATS, MIN_SEATS, clampSeats, maxSeatsFrom } from '../shared/constants.js';
+import { ERR, ERR_TEXT, DEFAULT_MAX_SEATS, MAX_SEATS, MIN_SEATS, clampSeats, maxSeatsFrom } from '../shared/constants.js';
 import { validateC2S, C2S } from '../shared/protocol.js';
 import { LOBBY_DEFAULTS, Lobby, Room } from '../server/lobby.js';
 import { MATCHMAKE_DEFAULTS } from '../server/matchmaking.js';
 import { startServer } from '../server/index.js';
 import { StubMatch } from '../server/match/StubMatch.js';
 import { TestClient } from './helpers/wsClient.js';
+
+/** 这台服务器允许的上限 —— 缺省 20（业主裁令 2026-10-12），不是官方 `MAX_SEATS` 那个 4。 */
+const CEILING = DEFAULT_MAX_SEATS;
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = (rel) => readFileSync(path.join(ROOT, rel), 'utf8');
@@ -92,10 +95,10 @@ test('roomSeatCap §1: room.create.seatCap is optional and typed — in range pa
   // absent and `null` are the same thing: the server default (what every existing client sends)
   assert.equal(validateC2S({ t: 'room.create', mode: 'coop', difficulty: 'NORMAL' }), null);
   assert.equal(ok(null), null, 'null = not sent');
-  // the whole legal range, at both ends
-  for (let n = MIN_SEATS; n <= MAX_SEATS; n++) assert.equal(ok(n), null, `seatCap ${n}`);
+  // the whole legal range, at both ends (the ceiling is `maxSeatsFrom(process.env)`: 20 by default)
+  for (let n = MIN_SEATS; n <= CEILING; n++) assert.equal(ok(n), null, `seatCap ${n}`);
   // the ceiling the room.seat/kick gate already uses, and one past it
-  assert.equal(ok(MAX_SEATS + 1), 'bad field seatCap', 'above the server ceiling ⇒ an error, not a clamp');
+  assert.equal(ok(CEILING + 1), 'bad field seatCap', 'above the server ceiling ⇒ an error, not a clamp');
   assert.equal(ok(1e9), 'bad field seatCap');
   assert.equal(ok(MIN_SEATS - 1), 'bad field seatCap', 'below the floor');
   assert.equal(ok(0), 'bad field seatCap');
@@ -121,7 +124,9 @@ test('roomSeatCap §1: the floor is MIN_SEATS and it is on the REQUEST, not on t
   // The rationale (shared/constants.js): the official range is 1–4 players and the ONE-seat shape already has a mode
   // of its own (`mode: 'solo'`), so a co-op room may not be created with fewer than MIN_SEATS seats.
   assert.equal(MIN_SEATS, 2, 'the floor this slice picked');
-  assert.equal(MAX_SEATS, 4, 'and the default ceiling is still the official room');
+  assert.equal(MAX_SEATS, 4, 'the official room — the variant gate reads participants, not this');
+  assert.equal(DEFAULT_MAX_SEATS, 20, 'and the DEFAULT ceiling is 20 (业主裁令 2026-10-12)');
+  assert.equal(maxSeatsFrom(), DEFAULT_MAX_SEATS, 'what a deployment that says nothing gets');
   // A Room still accepts any cap ≥ 1 — the floor is a rule about what a client may ASK for, not a new class invariant.
   assert.equal(new Room('AAAA', 'coop', 'NORMAL', 0, 1).seats.length, 1);
 });
@@ -130,35 +135,48 @@ test('roomSeatCap §1: the floor is MIN_SEATS and it is on the REQUEST, not on t
 // §2 the invariant: capacity 4 is byte-for-byte today's room
 
 test('roomSeatCap §2: a 4-seat frame is the EXACT string it was before this feature', () => {
-  // The literal is the pre-B5 frame (pinned by hand, not derived from the code under test).
+  // The literal is the pre-B5 frame (pinned by hand, not derived from the code under test). The room is built with an
+  // explicit 4 — since 业主裁令 2026-10-12 the Lobby's ceiling is 20, so "4" is now a PICK, and this test is about the
+  // official-room shape rather than about the default.
   const EXPECTED = '{"t":"room.state","code":"ABCD","hostId":null,"mode":"coop","difficulty":"NORMAL",'
     + '"aiPicksLast":false,"chatMode":"open","inMatch":false,"seats":[null,null,null,null],"spectators":[]}';
-  assert.equal(JSON.stringify(new Room('ABCD', 'coop', 'NORMAL', 0).toState()), EXPECTED);
+  assert.equal(JSON.stringify(new Room('ABCD', 'coop', 'NORMAL', 0, MAX_SEATS).toState()), EXPECTED);
   // …and naming the ceiling explicitly (which is what the slider sends when the host leaves it alone) is NOT a
   // different room: same string, same keys, no key at all.
   const named = new Room('ABCD', 'coop', 'NORMAL', 0, MAX_SEATS).toState();
-  assert.equal(JSON.stringify(named), EXPECTED, 'seatCap = MAX_SEATS is the default room');
-  assert.equal(Object.hasOwn(named, 'seatCap'), false, 'a vanilla room adds no key (byte-for-byte the old frame)');
+  assert.equal(JSON.stringify(named), EXPECTED, 'seatCap = MAX_SEATS is the official room');
+  assert.equal(Object.hasOwn(named, 'seatCap'), false, 'a 4-seat room adds no key (byte-for-byte the old frame)');
   assert.deepEqual(Object.keys(named), ['t', 'code', 'hostId', 'mode', 'difficulty', 'aiPicksLast', 'chatMode',
     'inMatch', 'seats', 'spectators'], 'the key LIST is unchanged too, so key order cannot drift');
-  // A solo room keeps its four slots as well: the client renders one card from `mode`, and this slice must not move it.
-  assert.equal(JSON.stringify(new Room('ABCD', 'solo', 'FUNNY', 0).toState()), EXPECTED.replace('"coop"', '"solo"').replace('"NORMAL"', '"FUNNY"'));
-  // …while a room that really left the official 4 says so, and only then.
+  // A solo room keeps those four slots as well: the client renders one card from `mode`, and this slice must not move it.
+  assert.equal(JSON.stringify(new Room('ABCD', 'solo', 'FUNNY', 0, MAX_SEATS).toState()), EXPECTED.replace('"coop"', '"solo"').replace('"NORMAL"', '"FUNNY"'));
+  // …while the DEFAULT room (20 seats) says so, and only a capacity ≠ 4 adds the key at all.
+  assert.equal(new Room('ABCD', 'coop', 'NORMAL', 0, DEFAULT_MAX_SEATS).toState().seatCap, DEFAULT_MAX_SEATS);
   assert.equal(new Room('ABCD', 'coop', 'NORMAL', 0, 5).toState().seatCap, 5);
   assert.equal(new Room('ABCD', 'coop', 'NORMAL', 0, 3).toState().seatCap, 3);
+  // The CLASS default stays the official `MAX_SEATS`: the class is also built directly by tests / packages, and the
+  // Lobby is the one that always passes its own ceiling.
+  assert.equal(new Room('ABCD', 'coop', 'NORMAL', 0).seatCap, MAX_SEATS);
 });
 
-test('roomSeatCap §2: 4 seats over the WIRE — naming the ceiling equals saying nothing', async () => {
+test('roomSeatCap §2: over the WIRE, naming the ceiling equals saying nothing', async () => {
   const srv = await server();
   const a = await player(srv, 'Quiet');
+  // The server's ceiling is 20, so a create that names NOTHING builds a 20-seat room — and that room is byte-for-byte
+  // the one that NAMES the ceiling (which is what the slider sends when the host leaves it alone).
   assert.equal((await a.request({ t: 'room.create', mode: 'coop', difficulty: 'NORMAL' })).t, 'ok');
   const plain = await stateOf(a);
-  assert.equal(Object.hasOwn(plain, 'seatCap'), false, 'no field, no key');
-  assert.equal(plain.seats.length, MAX_SEATS);
-  // The same player recreates the room, this time naming the ceiling the slider would send at its default position.
-  assert.equal((await a.request({ t: 'room.create', mode: 'coop', difficulty: 'NORMAL', seatCap: MAX_SEATS })).t, 'ok');
+  assert.equal(plain.seatCap, CEILING, 'the default room says which cap it has');
+  assert.equal(plain.seats.length, CEILING);
+  assert.equal((await a.request({ t: 'room.create', mode: 'coop', difficulty: 'NORMAL', seatCap: CEILING })).t, 'ok');
   const named = await stateOf(a);
   assert.equal(withoutCode(named), withoutCode(plain), 'byte for byte, the room code aside');
+  // …and a room that returns to the OFFICIAL 4 is byte-for-byte the pre-B5 frame: no `seatCap` key, 4 slots.
+  // (The predicate names the 4-seat frame: the host's inbox still holds the 20-seat ones from the creates above.)
+  assert.equal((await a.request({ t: 'room.create', mode: 'coop', difficulty: 'NORMAL', seatCap: MAX_SEATS })).t, 'ok');
+  const four = await a.waitFor('room.state', (s) => s.hostId === a.id && s.seats.length === MAX_SEATS);
+  assert.equal(Object.hasOwn(four, 'seatCap'), false, 'no field, no key at the official 4');
+  assert.equal(four.seats.length, MAX_SEATS);
   assert.deepEqual(errors, []);
 });
 
@@ -188,11 +206,15 @@ test('roomSeatCap §3: the host picks the room cap — over the wire, and only f
   const refused = await d.request({ t: 'room.join', code: state.code });
   assert.equal(refused.t, 'error');
   assert.equal(refused.code, ERR.ROOM_FULL);
-  // A SOLO room ignores the field (its one-seat shape is the mode's, and moving it would move every solo frame).
+  // A SOLO room ignores the field (its one-seat shape is the mode's): it keeps the SERVER's slot count whatever
+  // `seatCap` the message named. Since the default ceiling is 20 that frame carries `seatCap: 20` (it differs from the
+  // official 4 — the same rule every room follows); the mode still renders exactly one card.
   assert.equal((await a.request({ t: 'room.create', mode: 'solo', difficulty: 'FUNNY', seatCap: 3 })).t, 'ok');
   const solo = await stateOf(a, 'solo');
-  assert.equal(Object.hasOwn(solo, 'seatCap'), false, 'solo is untouched by this feature');
-  assert.equal(solo.seats.length, MAX_SEATS, 'and keeps the server slot count the client has always been sent');
+  assert.equal(solo.seatCap, CEILING, 'the field is ignored: solo keeps the server slot count');
+  assert.equal(solo.seats.length, CEILING, 'which is the 缺省上限 20, not the 3 the message asked for');
+  // …and a solo room at the OFFICIAL 4 hides the key like any other 4-seat room (a class-level fact, so no extra room).
+  assert.equal(Object.hasOwn(new Room('ZZZZ', 'solo', 'FUNNY', 0, MAX_SEATS).toState(), 'seatCap'), false);
   assert.deepEqual(errors, []);
 });
 
@@ -201,7 +223,7 @@ test('roomSeatCap §3: out-of-range and junk seatCap are refused on the wire (no
   const a = await player(srv, 'Fuzzer');
   // NB: `NaN` is deliberately absent from this list — `JSON.stringify({ seatCap: NaN })` writes `null`, so the wire
   // cannot even carry it (the field then means "not sent"). The protocol's own handling of NaN is asserted in §1.
-  for (const bad of [MAX_SEATS + 1, 1e9, MIN_SEATS - 1, 0, -3, 2.5, '3', true, {}, []]) {
+  for (const bad of [CEILING + 1, 1e9, MIN_SEATS - 1, 0, -3, 2.5, '3', true, {}, []]) {
     const r = await a.request({ t: 'room.create', mode: 'coop', difficulty: 'NORMAL', seatCap: bad });
     assert.equal(r.t, 'error', `seatCap ${String(bad)} must be refused`);
     assert.equal(r.code, ERR.BAD_MSG);
@@ -274,36 +296,40 @@ test('roomSeatCap §3: Lobby.create clamps a raised ceiling and ignores the fiel
 });
 
 // ---------------------------------------------------------------------------------------------------------------
-// §4 the ceiling travels: welcome.maxSeats, absent on a vanilla server
+// §4 the ceiling travels: welcome.maxSeats, on EVERY handshake (业主裁令 2026-10-12)
 
-test('roomSeatCap §4: welcome carries maxSeats ONLY when the ceiling left the official 4', () => {
-  // A vanilla server adds no field at all — the same rule `mods` / `modPanels` / `modAssets` follow, and the reason a
-  // 4-seat handshake stays byte-identical (test/modClientPanels.test.js pins the same thing for the mod fields).
-  const vanilla = bareLobby();
-  assert.equal(vanilla.opts.maxSeats, MAX_SEATS);
-  assert.deepEqual(Object.keys(vanilla.welcomeInfo()), ['diyKitted'], 'no field, no new key');
-  assert.equal(Object.hasOwn(vanilla.welcomeInfo(), 'maxSeats'), false);
+test('roomSeatCap §4: welcome ALWAYS carries maxSeats — the default ceiling is no longer the official 4', () => {
+  // It used to be sent only when the ceiling left the official `MAX_SEATS`; the default ceiling is 20 now, so there is
+  // no "vanilla" case left to omit it for. `SP_MAX_SEATS=4` is the deployment whose frames stay byte-identical, and it
+  // still gets the field (with the value 4).
+  const plain = bareLobby();
+  assert.equal(plain.opts.maxSeats, DEFAULT_MAX_SEATS);
+  assert.deepEqual(Object.keys(plain.welcomeInfo()), ['diyKitted', 'maxSeats'], 'the field is always there');
+  assert.equal(plain.welcomeInfo().maxSeats, DEFAULT_MAX_SEATS);
   // A raised ceiling announces itself, because the slider must not offer a number the server would refuse.
   const wide = bareLobby({ maxSeats: 8 });
   assert.equal(wide.welcomeInfo().maxSeats, 8);
+  // …and the official-4 deployment announces 4 — the field is present, the VALUE is what moved.
+  const official = bareLobby({ maxSeats: MAX_SEATS });
+  assert.equal(official.welcomeInfo().maxSeats, MAX_SEATS);
 });
 
-test('roomSeatCap §4: a vanilla server\'s welcome has no maxSeats (real handshake)', async () => {
+test('roomSeatCap §4: the real handshake announces the default ceiling (20)', async () => {
   const srv = await server();
-  const a = await player(srv, 'Vanilla');
-  assert.equal(Object.hasOwn(a.welcome, 'maxSeats'), false, 'the field set is the one it always was');
+  const a = await player(srv, 'Defaulted');
+  assert.equal(a.welcome.maxSeats, DEFAULT_MAX_SEATS, 'the slider learns its range from the handshake');
   assert.equal(a.welcome.diyKitted !== undefined, true, 'the fields it always did have are still there');
   assert.deepEqual(errors, []);
 });
 
 // ---------------------------------------------------------------------------------------------------------------
-// §5 quick match is untouched (no host picked anything)
+// §5 quick match: its queue is ONE official room, and the room it builds keeps the server ceiling
 
-test('roomSeatCap §5: a quick-matched room keeps the server ceiling and adds no field', async () => {
-  // The queue IS this server's ceiling (`MATCHMAKE_DEFAULTS.size: null` ⇒ `lobby.opts.maxSeats`), so a placement
-  // cannot promise more seats than the room it builds. Nothing in this slice changes that path.
-  assert.equal(MATCHMAKE_DEFAULTS.size, null, 'the queue size still follows the server ceiling');
-  assert.equal(LOBBY_DEFAULTS.maxSeats, MAX_SEATS, 'which is 4 unless SP_MAX_SEATS says otherwise');
+test('roomSeatCap §5: a quick-matched room keeps the server ceiling; the queue stays one official room', async () => {
+  // The queue size is the OFFICIAL room (`MAX_SEATS`), NOT the server's ceiling (业主裁令 2026-10-12): raising
+  // `SP_MAX_SEATS` must not make strangers wait for 20 people. The room the placement builds still gets the ceiling.
+  assert.equal(MATCHMAKE_DEFAULTS.size, null, 'null = one official room, never the server ceiling');
+  assert.equal(LOBBY_DEFAULTS.maxSeats, DEFAULT_MAX_SEATS, 'the server ceiling is 20 by default');
 
   const srv = await server({ size: 2 });
   const a = await player(srv, 'Solo1');
@@ -313,9 +339,24 @@ test('roomSeatCap §5: a quick-matched room keeps the server ceiling and adds no
   const placed = await a.waitFor('room.queued', (m) => m.status === 'placed');
   const state = await stateOf(a);
   assert.equal(state.code, placed.code);
-  assert.equal(Object.hasOwn(state, 'seatCap'), false, 'a quick-matched room is an ordinary 4-seat room');
-  assert.equal(state.seats.length, MAX_SEATS);
+  assert.equal(state.seatCap, DEFAULT_MAX_SEATS, 'a quick-matched room carries the server ceiling');
+  assert.equal(state.seats.length, DEFAULT_MAX_SEATS);
   assert.equal(srv.lobby.getRoom(state.code).seatCap, LOBBY_DEFAULTS.maxSeats);
+  assert.deepEqual(errors, []);
+});
+
+test('roomSeatCap §5: the queue threshold does NOT follow the server ceiling (业主裁令 2026-10-12)', async () => {
+  // A 20-seat server that queues with NO explicit `size` must still wait for ONE OFFICIAL ROOM (4), not for 20: the
+  // queue has no host to ask, and 「陌生人要凑满 20 才开局」 would be a different product. `queue.size` is the only way
+  // to move it.
+  const srv = await server();           // queue: { sweepMs: 20, waitMs: 3000 } — no `size`
+  assert.equal(srv.lobby.opts.maxSeats, DEFAULT_MAX_SEATS, 'this server really is the 20-seat default');
+  assert.equal(srv.lobby.matchmake.size, MAX_SEATS, 'and its queue is one official room wide');
+  const a = await player(srv, 'Q1');
+  assert.equal((await a.request({ t: 'room.queue' })).t, 'ok');
+  const waiting = await a.waitFor('room.queued', (m) => m.status === 'waiting');
+  assert.equal(waiting.need, MAX_SEATS, 'the panel is told 4, not the ceiling');
+  assert.equal((await a.request({ t: 'room.dequeue' })).t, 'ok');
   assert.deepEqual(errors, []);
 });
 
@@ -327,7 +368,7 @@ test('roomSeatCap §6: SP_MAX_SEATS=8 raises the ceiling, the welcome field and 
   // in a child process — the real `SP_MAX_SEATS=8 npm start` wiring, not a stub.
   const script = `
     const { LOBBY_DEFAULTS, Lobby } = await import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'server/lobby.js')).href)});
-    const { MAX_SEATS, maxSeatsFrom } = await import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'shared/constants.js')).href)});
+    const { MAX_SEATS, DEFAULT_MAX_SEATS, maxSeatsFrom } = await import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'shared/constants.js')).href)});
     const { validateC2S } = await import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'shared/protocol.js')).href)});
     const lobby = new Lobby({ registry: { byId: () => null }, getData: () => ({}), options: {} });
     const create = (seatCap) => validateC2S({ t: 'room.create', mode: 'coop', difficulty: 'NORMAL', seatCap });
@@ -340,6 +381,7 @@ test('roomSeatCap §6: SP_MAX_SEATS=8 raises the ceiling, the welcome field and 
       gate5: create(5),
       gate1: create(1),
       official: MAX_SEATS,
+      builtinDefault: DEFAULT_MAX_SEATS,
     }));
   `;
   const res = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
@@ -355,6 +397,40 @@ test('roomSeatCap §6: SP_MAX_SEATS=8 raises the ceiling, the welcome field and 
   assert.equal(out.gate9, 'bad field seatCap', 'while 9 is still refused — the gate moved WITH the ceiling');
   assert.equal(out.gate1, 'bad field seatCap', 'and the floor is unchanged');
   assert.equal(out.official, 4, 'MAX_SEATS itself never moves');
+  assert.equal(out.builtinDefault, 20, 'and the built-in default ceiling is 20 even here (the env overrides it)');
+});
+
+test('roomSeatCap §6: with NO environment the ceiling, the welcome field and the gate are all the default 20', () => {
+  // The mirror of the child above, with the variable REMOVED: this is what a plain `npm start` deployment gets since
+  // 业主裁令 2026-10-12. A child process again, because all three are module-load constants.
+  const script = `
+    const { LOBBY_DEFAULTS, Lobby } = await import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'server/lobby.js')).href)});
+    const { maxSeatsFrom } = await import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'shared/constants.js')).href)});
+    const { validateC2S } = await import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'shared/protocol.js')).href)});
+    const lobby = new Lobby({ registry: { byId: () => null }, getData: () => ({}), options: {} });
+    const create = (seatCap) => validateC2S({ t: 'room.create', mode: 'coop', difficulty: 'NORMAL', seatCap });
+    process.stdout.write(JSON.stringify({
+      env: process.env.SP_MAX_SEATS ?? null,
+      maxSeatsFrom: maxSeatsFrom(process.env),
+      defaultCap: LOBBY_DEFAULTS.maxSeats,
+      welcome: lobby.welcomeInfo(),
+      gate20: create(20),
+      gate21: create(21),
+      gate4: create(4),
+    }));
+  `;
+  const env = { ...process.env };
+  delete env.SP_MAX_SEATS;
+  const res = spawnSync(process.execPath, ['--input-type=module', '-e', script], { env, encoding: 'utf8' });
+  assert.equal(res.status, 0, `child failed: ${res.stderr}`);
+  const out = JSON.parse(res.stdout);
+  assert.equal(out.env, null, 'the variable really is absent in the child');
+  assert.equal(out.maxSeatsFrom, 20, 'no SP_MAX_SEATS ⇒ 20 seats, not 4');
+  assert.equal(out.defaultCap, 20);
+  assert.equal(out.welcome.maxSeats, 20, 'the handshake announces it');
+  assert.equal(out.gate20, null, 'a 20-seat room is requestable');
+  assert.equal(out.gate21, 'bad field seatCap', 'and 21 is refused — the gate followed the new default');
+  assert.equal(out.gate4, null, 'the official 4 is still requestable');
 });
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -364,17 +440,20 @@ test('roomSeatCap §7: the lobby builds a payload the server accepts, and stays 
   const lobbyScreen = await import(pathToFileURL(path.join(ROOT, 'public/js/screens/lobby.js')).href);
   const { seatCapRange, seatCapPayload } = lobbyScreen;
 
-  // The range: the floor, and the ceiling this client was told about (MAX_SEATS until a welcome says otherwise).
+  // The range: the floor, and the ceiling this client was told about. The slider itself starts from the 缺省上限 now
+  // (20) — a client with no `welcome` yet keeps the OFFICIAL `MAX_SEATS`, which can only ever under-ask.
+  assert.deepEqual(seatCapRange(DEFAULT_MAX_SEATS), { min: MIN_SEATS, max: DEFAULT_MAX_SEATS });
   assert.deepEqual(seatCapRange(MAX_SEATS), { min: MIN_SEATS, max: MAX_SEATS });
   assert.deepEqual(seatCapRange(100), { min: MIN_SEATS, max: 100 });
   assert.deepEqual(seatCapRange(undefined), { min: MIN_SEATS, max: MAX_SEATS }, 'unknown ⇒ the official room');
   assert.deepEqual(seatCapRange(0), { min: MIN_SEATS, max: MAX_SEATS });
   assert.deepEqual(seatCapRange(1), { min: 1, max: 1 }, 'a one-seat server: the floor narrows, the range is not empty');
 
-  // The payload: `{}` — i.e. the pre-B5 request — whenever the room is the server's default one.
+  // The payload: `{}` whenever the room is the server's default one — which is now 20 seats.
   assert.deepEqual(seatCapPayload('coop', 3, 4), { seatCap: 3 });
   assert.deepEqual(seatCapPayload('coop', 2, 4), { seatCap: 2 });
-  assert.deepEqual(seatCapPayload('coop', MAX_SEATS, MAX_SEATS), {}, 'an untouched slider sends NOTHING');
+  assert.deepEqual(seatCapPayload('coop', 4, 4), {}, 'an untouched slider sends NOTHING');
+  assert.deepEqual(seatCapPayload('coop', DEFAULT_MAX_SEATS, DEFAULT_MAX_SEATS), {}, 'and so does the 20-seat default');
   assert.deepEqual(seatCapPayload('coop', 8, 8), {}, 'nor does one sitting at a raised ceiling');
   assert.deepEqual(seatCapPayload('coop', 9, 4), {}, 'above the ceiling ⇒ clamped to it ⇒ the default room');
   assert.deepEqual(seatCapPayload('coop', 1, 4), { seatCap: 2 }, 'below the floor ⇒ clamped to it');
@@ -382,18 +461,19 @@ test('roomSeatCap §7: the lobby builds a payload the server accepts, and stays 
   assert.deepEqual(seatCapPayload('solo', 3, 4), {}, 'a solo room never carries the field');
   assert.deepEqual(seatCapPayload('coop', 6, 8), { seatCap: 6 }, 'a raised server: 6 of 8 is a real choice');
   // Whatever the client builds must pass the very gate the server applies (§1) — for the ceilings THIS process's
-  // protocol gate knows (`SEAT_CAP` = `maxSeatsFrom(process.env)` = MAX_SEATS here). A deployment that raises the
-  // ceiling through `SP_MAX_SEATS` moves BOTH together, which §6 proves end to end: there the gate admits 5 and 8.
+  // protocol gate knows (`SEAT_CAP` = `maxSeatsFrom(process.env)` = 20 here). A deployment that sets `SP_MAX_SEATS`
+  // moves BOTH together, which §6 proves end to end (8 admits 5 and 8; the default admits 20).
   for (const pick of [undefined, null, 0, 1, 2, 3, 4, 6, 99, 1e9]) {
-    const payload = seatCapPayload('coop', pick, MAX_SEATS);
+    const payload = seatCapPayload('coop', pick, CEILING);
     assert.equal(validateC2S({ t: 'room.create', mode: 'coop', difficulty: 'NORMAL', ...payload }), null,
-      `pick ${String(pick)} of ${MAX_SEATS} must be a legal request`);
+      `pick ${String(pick)} of ${CEILING} must be a legal request`);
   }
   // The asymmetry this test cannot exercise in-process (a ceiling raised by OPTION while the gate stays at the
   // environment's) is unreachable in a deployment: `maxSeats` is not one of the lobby options startServer forwards
   // (server/http/config.js LOBBY_OPTION_KEYS), so the only production source of a raised ceiling is `SP_MAX_SEATS` —
   // and that one moves `LOBBY_DEFAULTS.maxSeats` and `SEAT_CAP` in the same evaluation. What matters for a STALE
-  // client is that assuming `MAX_SEATS` can only ever UNDER-ask, never produce a request any server refuses.
+  // client (a page too old to know `maxSeats` at all) is that assuming `MAX_SEATS` can only ever UNDER-ask, never
+  // produce a request any server refuses — including the 20-seat default one.
   for (const pick of [undefined, 0, 1, 2, 5, 9, 1e9, 'x']) {
     const payload = seatCapPayload('coop', pick, MAX_SEATS);
     assert.equal(validateC2S({ t: 'room.create', mode: 'coop', difficulty: 'NORMAL', ...payload }), null,
@@ -404,12 +484,17 @@ test('roomSeatCap §7: the lobby builds a payload the server accepts, and stays 
 test('roomSeatCap §7: the ceiling reaches the screen from `welcome`, and resets with it', async () => {
   const lobbyScreen = await import(pathToFileURL(path.join(ROOT, 'public/js/screens/lobby.js')).href);
   const { net } = await import(pathToFileURL(path.join(ROOT, 'public/js/net.js')).href);
-  assert.equal(lobbyScreen.serverSeatMaxOf(), MAX_SEATS, 'a deployment that says nothing keeps the official room');
+  // The module starts at the OFFICIAL 4 (what a page that never hears `welcome` must assume), and follows the
+  // handshake from there — a 20-seat default server announces 20, so the slider reaches 20.
+  assert.equal(lobbyScreen.serverSeatMaxOf(), MAX_SEATS, 'no welcome yet ⇒ the official room, never a guess upward');
   // The module listens for the frame itself: the handshake lands before this screen is mounted, so a listener added
   // with the component would miss it and the slider would keep offering 4 on a 100-seat server.
   net._emit('welcome', { maxSeats: 100 });
   assert.equal(lobbyScreen.serverSeatMaxOf(), 100);
   assert.deepEqual(lobbyScreen.seatCapRange(lobbyScreen.serverSeatMaxOf()), { min: MIN_SEATS, max: 100 });
+  // …and the 缺省上限 itself (20) is what a plain server sends.
+  net._emit('welcome', { maxSeats: DEFAULT_MAX_SEATS });
+  assert.equal(lobbyScreen.serverSeatMaxOf(), DEFAULT_MAX_SEATS);
   net._emit('welcome', { maxSeats: 'junk' });
   assert.equal(lobbyScreen.serverSeatMaxOf(), MAX_SEATS, 'junk ⇒ the official room, never `undefined`');
   net._emit('welcome', {});
@@ -452,19 +537,45 @@ test('roomSeatCap §7: the new interface strings exist in all four packs', () =>
   }
 });
 
+test('roomSeatCap §7: the mode card counts THIS server\'s ceiling, not the official 4 (业主裁令 2026-10-12)', async () => {
+  const screen = src('public/js/screens/lobby.js');
+  // The card's `{n}` is computed at render time from the handshake value — a fixed `MAX_SEATS - 1` would keep promising
+  // 「至多 3 名博士」 on a 20-seat server.
+  assert.match(screen, /const seats = card\.id === 'coop' \? serverSeatMaxOf\(\) : MAX_SEATS;/,
+    'the co-op card reads the server ceiling');
+  assert.match(screen, /const params = card\.id === 'coop' \? \{ n: Math\.max\(1, seats - 1\) \} : card\.params;/,
+    'the description counts the other doctors (ceiling − 1)');
+  assert.match(screen, /const pointParams = card\.id === 'coop' \? \{ n: seats \} : card\.pointParams;/,
+    'the bullet counts the whole room (ceiling)');
+  // The msgids themselves did not move: only the VALUE does, so every pack keeps working.
+  assert.match(screen, /N_\('与至多 \{n\} 名博士组成同盟，共享干员池，联防协作抵御敌潮。'\)/);
+  assert.match(screen, /N_\('1–\{n\} 名博士 · 可由 AI 队友补位'\)/);
+  // …and the translation renders the ceiling the server actually allows, in the official mode too.
+  const { t } = await import(pathToFileURL(path.join(ROOT, 'shared/i18n.js')).href);
+  const desc = '与至多 {n} 名博士组成同盟，共享干员池，联防协作抵御敌潮。';
+  assert.match(t(desc, { n: DEFAULT_MAX_SEATS - 1 }), /19/, 'a 20-seat server says 19 other Doctors');
+  assert.match(t(desc, { n: MAX_SEATS - 1 }), /3/, 'and an official 4-seat server still says 3');
+});
+
 // ---------------------------------------------------------------------------------------------------------------
 // §8 what this slice did NOT touch
 
-test('roomSeatCap §8: maxSeatsFrom is untouched, and quick match still reads the same source', () => {
-  assert.equal(maxSeatsFrom(), MAX_SEATS);
+test('roomSeatCap §8: MAX_SEATS is untouched; the default ceiling and the queue threshold both moved for the right reason', () => {
+  assert.equal(MAX_SEATS, 4, 'the official room, and the variant gate reads participants — never this');
+  assert.equal(maxSeatsFrom(), DEFAULT_MAX_SEATS, 'no SP_MAX_SEATS ⇒ the DEFAULT ceiling (20)');
   assert.equal(maxSeatsFrom({ SP_MAX_SEATS: '100' }), 100);
-  assert.equal(maxSeatsFrom({ SP_MAX_SEATS: 'junk' }), MAX_SEATS);
-  // server/matchmaking.js keeps `lobby.opts.maxSeats` as its one source; this slice added a comment there and no code.
+  assert.equal(maxSeatsFrom({ SP_MAX_SEATS: 'junk' }), DEFAULT_MAX_SEATS, 'junk ⇒ the default ceiling, not 4');
+  assert.equal(maxSeatsFrom({ SP_MAX_SEATS: '4' }), MAX_SEATS, 'and the official 4 is one env var away');
+  // server/matchmaking.js: the queue threshold is the OFFICIAL room, NOT the server ceiling (业主裁令 2026-10-12).
   const mm = src('server/matchmaking.js');
   assert.match(mm, /const seats = Number\.isInteger\(lobby\?\.opts\?\.maxSeats\)/);
+  assert.match(mm, /\? Math\.min\(this\.opts\.size, seats\) : MAX_SEATS;/, 'an explicit size is clamped; the default is 4');
   assert.match(mm, /seatCap` is deliberately NOT sent here/, 'the decision is written down where it is taken');
   assert.match(mm, /this\.lobby\.create\(picked\[0\]\.session, \{ mode: QUEUE_MODE, difficulty: picked\[0\]\.difficulty \}\)/,
     'and the placement still asks for no seat cap at all');
+  // A live queue proves it: a 20-seat server still opens a room for the OLD threshold (explicit size here, so the
+  // default itself is pinned by the assertion above and by §5).
+  assert.equal(MATCHMAKE_DEFAULTS.size, null);
 });
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -486,7 +597,8 @@ test('roomSeatCap §9: room.setSeatCap is a C2S message whose TWO fields are bot
   assert.equal(validateC2S({ t: 'room.setSeatCap', code: 42, seatCap: 3 }), 'bad field code');
   // `seatCap` shares room.create's bound and its explicit refusal, so one rule covers both messages.
   for (let n = MIN_SEATS; n <= MAX_SEATS; n++) assert.equal(validateC2S({ ...base, seatCap: n }), null, `seatCap ${n}`);
-  for (const bad of [MAX_SEATS + 1, 1e9, MIN_SEATS - 1, 0, -3, 2.5, '3', true, {}, [], null]) {
+  assert.equal(validateC2S({ ...base, seatCap: CEILING }), null, `seatCap ${CEILING} is the ceiling itself`);
+  for (const bad of [CEILING + 1, 1e9, MIN_SEATS - 1, 0, -3, 2.5, '3', true, {}, [], null]) {
     assert.equal(validateC2S({ ...base, seatCap: bad }), 'bad field seatCap',
       `junk seatCap ${JSON.stringify(bad) ?? String(bad)}`);
   }
@@ -637,7 +749,8 @@ test('roomSeatCap §10: the host resizes a live room over the wire, and the fram
   const guest = await player(srv, 'Stays');
   assert.equal((await host.request({ t: 'room.create', mode: 'coop', difficulty: 'NORMAL' })).t, 'ok');
   const start = await stateOf(host);
-  assert.equal(start.seats.length, MAX_SEATS);
+  assert.equal(start.seats.length, CEILING, 'the room opens at the server ceiling (缺省 20)');
+  assert.equal(start.seatCap, CEILING);
   assert.equal((await guest.request({ t: 'room.join', code: start.code })).t, 'ok');
 
   // shrink to 3 (2 people, so 3 is legal) — the broadcast is the room's own `room.state`. The predicate names the NEW
@@ -682,7 +795,7 @@ test('roomSeatCap §10: the refusals over the wire — NOT_HOST, NOT_IN_ROOM, BA
   assert.equal(wrongRoom.code, ERR.NOT_IN_ROOM);
 
   // the number itself is wrong ⇒ BAD_MSG, and the detail names the field's bound
-  const malformed = await ask(host, { code: state.code, seatCap: MAX_SEATS + 1 });
+  const malformed = await ask(host, { code: state.code, seatCap: CEILING + 1 });
   assert.equal(malformed.code, ERR.BAD_MSG);
   assert.match(malformed.detail, /seatCap/);
 
@@ -692,7 +805,7 @@ test('roomSeatCap §10: the refusals over the wire — NOT_HOST, NOT_IN_ROOM, BA
   assert.equal(tooSmall.code, ERR.SEAT_CAP_TOO_SMALL);
   assert.notEqual(tooSmall.code, ERR.BAD_MSG);
   // the room is untouched by every one of them
-  assert.equal(srv.lobby.getRoom(state.code).seatCap, MAX_SEATS);
+  assert.equal(srv.lobby.getRoom(state.code).seatCap, CEILING);
   assert.deepEqual(errors, []);
 });
 
@@ -706,7 +819,7 @@ test('roomSeatCap §10: room.setSeatCap is refused inside a running match (ROOM_
   const denied = await host.request({ t: 'room.setSeatCap', code: state.code, seatCap: 3 });
   assert.equal(denied.t, 'error');
   assert.equal(denied.code, ERR.ROOM_STARTED, 'a running match keeps the seats it started with');
-  assert.equal(srv.lobby.getRoom(state.code).seatCap, MAX_SEATS);
+  assert.equal(srv.lobby.getRoom(state.code).seatCap, CEILING);
 });
 
 test('roomSeatCap §10: the room slider range mirrors the server, so the host cannot drag into a refusal', async () => {

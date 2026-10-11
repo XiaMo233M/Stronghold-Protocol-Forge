@@ -31,7 +31,7 @@ export const MOD_API_VERSION = 1;
 /** Release version shown to players (title screen, server banner, /healthz). Kept equal to package.json "version"
  * (test/version.test.js); PROTOCOL_VERSION above is the separate wire-format number. The release TAG spells both halves
  * out — `v<this>-<upstream>` (README 「版本号」) — because this one has to stay a plain three-part semver. */
-export const APP_VERSION = '0.15.1';
+export const APP_VERSION = '0.15.2';
 /**
  * The UPSTREAM game version this checkout bundles (README 「版本号」). The release TAG spells both halves out —
  * `v<APP_VERSION>-<UPSTREAM_VERSION>` — because `APP_VERSION` itself has to stay a plain three-part semver.
@@ -81,28 +81,35 @@ export const VOICE_LANG_NAMES = Object.freeze({ cn: '中文', jp: '日本語', e
 
 export const MAX_SEATS = 4;
 /**
- * 座位上限的可配置覆盖 (100 人版移植, docs/PS100-MIGRATION.md)。
+ * 这台服务器**缺省**允许多少座 (业主裁令 2026-10-12：「你改成默认 20 吧，上限可加并给出文档」)。 **它不是
+ * `MAX_SEATS`**：那个 4 是「官方房间 1–4 人」的声明，也是超容变体的闸门口径（见 `server/match/Match.js` 的
+ * `variant`），所以它一个字不动 —— 移动的只是「缺省上限」。
  *
- * The official room has 1–4 player seats, so `MAX_SEATS` stays the DEFAULT. A deployment that wants the third-party
- * 100-seat variant raises the cap without editing `shared/`: `SP_MAX_SEATS=100 npm start`. Nothing else changes by
- * itself — see the doc for the limits that must be raised alongside it (`SP_MAX_CONNS_PER_ADDR`, the lobby's
- * `maxRoomsPerAddr` / `maxMatchesPerAddr`, `bossHpScale.aliveFull`, the 隐秘核心 threshold).
+ * 座位上限的可配置覆盖 (100 人版移植, docs/PS100-MIGRATION.md)。缺省 **20** 座：一台没设任何环境变量的服务器
+ * 允许房主开到 20 座；要更多座不必改 `shared/`：`SP_MAX_SEATS=100 npm start`。抬了席位**不会**自动抬别的上限，
+ * 同抬的清单见 docs/NET-TUNING.md §2（`maxConnectionsPerAddr`——它是 `startServer` 选项、不是环境变量；lobby 的
+ * `maxRoomsPerAddr` / `maxMatchesPerAddr`；`bossHpScale.aliveFull`；隐秘核心阈值）。注：注释里曾出现过
+ * `SP_MAX_CONNS_PER_ADDR`，**代码里并不存在那个环境变量**，别照它去设。
+ *
+ * `SP_MAX_SEATS=4` 是**回到官方那一档**的口径：那时 `room.state` 与协议帧与「缺省 4 座」的旧部署**逐字节相同**
+ * （`welcome.maxSeats` 仍会发、值为 4；`room.state.seatCap` 只在容量 ≠ 4 时才出现）。
  *
  * This file is loaded by the BROWSER too and sits inside the `npm run typecheck` slice (`jsconfig.json` includes
  * `shared/**`, with no node types), so it never touches `process`: the parser is PURE and its callers hand the
  * environment in — `server/lobby.js` (`process.env`) and `shared/protocol.js` (the SEAT_CAP gate). Absent /
- * unparsable ⇒ `MAX_SEATS`, i.e. the behaviour of every existing test and deployment is unchanged.
+ * unparsable ⇒ `DEFAULT_MAX_SEATS`, i.e. a deployment that says nothing gets a 20-seat ceiling.
  *
  * @param {Record<string, string|undefined>|null|undefined} env the environment to read (absent ⇒ the default)
  * @returns {number} the effective seat cap (an integer ≥ 1)
  */
+export const DEFAULT_MAX_SEATS = 20;
 export function maxSeatsFrom(env) {
   const raw = env ? env.SP_MAX_SEATS : undefined;
-  if (raw == null || String(raw).trim() === '') return MAX_SEATS;
+  if (raw == null || String(raw).trim() === '') return DEFAULT_MAX_SEATS;
   const n = Number(raw);
-  if (!Number.isFinite(n)) return MAX_SEATS;
+  if (!Number.isFinite(n)) return DEFAULT_MAX_SEATS;
   const i = Math.floor(n);
-  return i >= 1 ? i : MAX_SEATS;
+  return i >= 1 ? i : DEFAULT_MAX_SEATS;
 }
 
 /**
@@ -113,7 +120,7 @@ export function maxSeatsFrom(env) {
  * as one card whatever the server's slot count is (public/js/screens/room.js `normalizeSeats`). A co-op room whose
  * `seatCap` were 1 would be a second way to spell that, with none of the solo mode's rules behind it (a solo room
  * refuses `room.addBot` and any second `room.join`), so the floor keeps 「coop ⇒ ≥ 2 seats」 true — the invariant
- * every existing co-op room satisfies today (they are all created with 4).
+ * every existing co-op room satisfies (a room created without a pick gets the server's ceiling: 20 by default).
  *
  * It is a lower bound on the REQUEST, not a new ceiling on a room: `Room(code, 'coop', diff, now, 1)` still builds
  * (the class takes any `seatCap ≥ 1`), and a deployment whose `SP_MAX_SEATS` is below this value can still create
@@ -139,7 +146,9 @@ export const MIN_SEATS = 2;
  * that never see the protocol — `server/matchmaking.js` (a quick-matched room has no host to ask) and packages.
  *
  * @param {unknown} want the requested seat count
- * @param {number} [max] this server's ceiling (absent / unusable ⇒ `MAX_SEATS`)
+ * @param {number} [max] this server's ceiling. The default is the OFFICIAL 4, not the server's 缺省上限: every
+ *   production caller passes `LOBBY_DEFAULTS.maxSeats` (= `maxSeatsFrom(env)`, 20 by default) explicitly, and an
+ *   absent/unusable ceiling must not invent a 20-seat room for a caller that forgot to ask.
  * @returns {number} an integer in `[min(MIN_SEATS, max), max]`
  */
 export function clampSeats(want, max = MAX_SEATS) {

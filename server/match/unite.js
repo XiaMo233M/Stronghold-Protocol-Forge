@@ -41,9 +41,10 @@ import { planUniteBySquad } from './unite100.mjs';
 
 /**
  * The 联防 plans of a finished COMBAT round (docs/PS100-MIGRATION.md §10-C):
- *   * ≤ MAX_SEATS (the default): ONE room-wide plan, exactly as before this switch existed — the same object the
- *     caller has always received (single battlefield, single helper pair, the whole room's leakers).
- *   * `seatCap > MAX_SEATS` (100-seat deployment): the per-squad list of unite100.planUniteBySquad — one plan per squad
+ *   * ≤ MAX_SEATS PARTICIPANTS (the default, including a 20-seat room with only 4 players in it): ONE room-wide plan,
+ *     exactly as before this switch existed — the same object the caller has always received (single battlefield,
+ *     single helper pair, the whole room's leakers).
+ *   * more than `MAX_SEATS` participants: the per-squad list of unite100.planUniteBySquad — one plan per squad
  *     that both leaked and still has a perfect member (阶段 1 队内兜底). The list shape is what `MatchUnite.startUnite`
  *     branches on, so the switch has exactly one read per concern.
  *
@@ -51,11 +52,11 @@ import { planUniteBySquad } from './unite100.mjs';
  *
  * @param {import('./Match.js').Match} m
  * @param {Map<string, object>} results playerId → BattleResult.perPlayer entry of the player's own combat
- * @returns {null | object | object[]} one plan (≤ MAX_SEATS) or the per-squad plan list (100-seat variant)
+ * @returns {null | object | object[]} one plan (≤ MAX_SEATS participants) or the per-squad plan list (variant)
  */
 export function planUnite(m, results) {
   if (m.isSolo) return null;
-  if (Number.isFinite(m.seatCap) && m.seatCap > MAX_SEATS) return planUniteBySquad(m, results);
+  if (m.variant === true) return planUniteBySquad(m, results);
   const alive = m.alivePlayers();
   const leakers = [];
   const perfects = [];

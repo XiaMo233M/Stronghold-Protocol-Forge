@@ -478,8 +478,12 @@ describe('C 层客户端：注册点', () => {
     // `hostKey` 是业主 2026-10-10 裁决里「可重复宿主」那一半（每张商店卡一个容器）：不可重复的宿主它是 `null`。
     // `data` 是同一条裁决里的**数据口**（`ctx.data.get('<表>')` 返回冻结快照）。
     // `me` 是「一格只读会话态」：`{ playerId, name, room }` 一份**冻结快照** —— 面板答不出来的那几件事实。
+    // `battle` 是 §28.38 那一格（`ctx.battle.damage()`：逐单位伤害 + 时间基准，供包自己算 DPS）。
+    // 这一条**故意逐键列全**：`ctx` 上多一个键就必须在这里显式加一个（不是「随便加」）。
     assert.deepEqual(Object.keys(ctx).sort(),
-      ['data', 'gate', 'host', 'hostKey', 'id', 'log', 'me', 'net', 'order', 'pack', 'session', 'slot']);
+      ['battle', 'data', 'gate', 'host', 'hostKey', 'id', 'log', 'me', 'net', 'order', 'pack', 'session', 'slot']);
+    assert.ok(Object.isFrozen(ctx.battle), '战斗读数那一格也是冻结门面');
+    assert.deepEqual(Object.keys(ctx.battle), ['damage'], '那一格只有 damage 一个成员');
     assert.equal(ctx.hostKey, null, '不可重复的宿主没有键');
     assert.ok(Object.isFrozen(ctx));
     assert.ok(Object.isFrozen(ctx.session));

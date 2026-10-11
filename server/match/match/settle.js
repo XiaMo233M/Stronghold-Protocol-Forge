@@ -164,6 +164,9 @@ export class MatchSettle {
     const { t, ...summary } = result;
     void t;
     summary.errors = this.errorCount;
+    // 走的是哪条路径，不许静默 (业主裁令 2026-10-12): 参与人数决定超容变体（每人独立池 / 分小队联防），
+    // 所以结算日志里必须看得到人数与闸门状态。
+    this.log?.info?.(`[match] ${this.roomCode} settled (${summary.reason}) participants=${this.participants} variant=${this.variant === true}`);
     try { this.onEndFn(summary); } catch (e) { this.reportError('onEnd', e); }
   }
 }

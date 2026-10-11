@@ -60,6 +60,10 @@
 //                           times a second (user playtest #4 item 7; the range mini-map, community report E1 after
 //                           0.1.0). Read-only: it takes the stats the sim computed last (`unit._s`) and the range grid it
 //                           keeps, and never makes the unit recompute them, so looking never changes the battle's floats.
+//   battleRunner.damage() → the per-unit / per-player cumulative damage of the battle ON SCREEN plus its time basis
+//                           (`gt`) — the one read a 伤害看板 needs to compute DPS itself (DESIGN §28.38); a frozen copy,
+//                           `null` when there is no battle. Read-only: it takes the numbers the sim already accumulated
+//                           (server/sim/damage.js) and never keeps a second account of its own.
 //   battleRunner.unitIdOf(uid, ownerId, fieldId?) → the id of an own board piece's unit in that battle | null
 //   battleRunner.ownerOps(ownerId, fieldId?) → [{ kind: 'op', ownerId, defId, items?, standInFor? }] that player's
 //                           operators in the battle on screen with their equipment (a teammate's bond popup: the members in
@@ -985,6 +989,83 @@ export function createBattleRunner(deps) {
       try { u = typeof e.battle.unitById === 'function' ? e.battle.unitById(unitId) : null; } catch { u = null; }
       if (!u) return null;
       try { return unitStatsEntry(u, u._s || null); } catch { return null; }
+    },
+    /**
+     * **逐单位伤害读数**（DESIGN §28.38）：本场战斗里每个单位的累计伤害与每个人自己的累计伤害，连同一个**时间
+     * 基准**（`gt`，战斗内秒）—— 面板据此自己算 DPS。
+     *
+     * **它不在热路径上，也不需要累计一份自己的账**：伤害早在模拟里算好了 —— `server/sim/damage.js:370` 每次命中写
+     * `source.stats.dmg += dealt`，`:371` 写 `battle._pp(ownerId).damageDealt`，`:352` 写 `bossDamage`（`units.js:97`
+     * 初始化 `stats = { dmg, kills, heal, taken, attacks }`）。这个读者只是**把已经在那儿的数字取出来**，所以
+     * `step()` / `drainEvents()` / `emit` 一个字都不改，并且**绝不**维护第二份累计 —— 两份口径对不上正是
+     * 「面板可以画错、但不能算错」要消灭的东西。
+     *
+     * 形状：`{ battleId, fieldId, kind, authoritative, own, gt, t0, players: [{ playerId, dmg, bossDmg, kills, heal }],
+     * units: [{ id, uid, defId, ownerId, kind, dmg, kills, heal }] }`（一次读一份新的、冻结的副本）。
+     * `dmg` / `bossDmg` / `kills` / `heal` **取整**，与 `shared/protocol.js` `compactResult`（结果页读的那一份）
+     * 同一个口径 —— DPS 是速率显示，给未取整的浮点只会装作更精确。`gt` 是 `battle.time`（战斗内秒），`t0` 恒为 0
+     * （一局一场），所以 `dps = dmg / (gt - t0)`。
+     *
+     * **只给本场**：读的就是屏上这一场（与 `unitStats()` 同一语义），**不含**队友那几场、也不含正在准备的下一场；
+     * `uid` 是这块棋在那个玩家棋盘上的 id（与 `unitIdOf()` / `unitsEnd` 同一个号，面板对名单要用它）。`players[]`
+     * 只列**这一场真在场的玩家**（`battle.players`），不是 `b.start` 的座位表。
+     *
+     * 拿不到就是 `null`（没有正在跑的战斗、战斗还没建好）—— **不抛、不编造**。注入面那一层（`ctx.battle.damage()`）
+     * 把这个 `null` 与「门面自己没接上」的几种原因分开记一行日志。
+     * @returns {{ battleId: string, fieldId: string|null, kind: string, authoritative: boolean, own: boolean,
+     *   gt: number, t0: number, players: ReadonlyArray<object>, units: ReadonlyArray<object> }|null}
+     */
+    damage() {
+      const e = cur;
+      const b = e && e.battle;
+      if (!b) return null;
+      const units = [];
+      // 己方单位（**场上**的：操作员、召唤物、装置 —— 装置也算，它打的伤害一样进它拥有者那本账，所以面板拿
+      // `uid` 对名单时，对不上号的几行可以按 `kind` 自己归并）
+      for (const u of Array.isArray(b.allyUnits) ? b.allyUnits : []) {
+        const s = u && u.stats;
+        if (!s) continue;
+        units.push({
+          id: Number.isInteger(u.id) ? u.id : null,
+          uid: Number.isInteger(u.uid) ? u.uid : null,
+          defId: typeof u.defId === 'string' ? u.defId : null,
+          ownerId: typeof u.ownerId === 'string' ? u.ownerId : null,
+          kind: typeof u.kind === 'string' ? u.kind : null,
+          dmg: Math.round(Number(s.dmg) || 0),
+          kills: Math.trunc(Number(s.kills) || 0),
+          heal: Math.round(Number(s.heal) || 0),
+        });
+      }
+      const players = [];
+      // **照 `Battle._buildResult()` 的配对写法**（`server/sim/battle/lifecycle.js:209-210`）：座位对象是
+      // `battle.players[]`，而每人那本伤害账在 `battle._perPlayer[playerId]` —— **不是同一个对象**。写错一边
+      // （例如去读 `getPlayer(pid).damageDealt`）会永远读到 0，而单位那几行照样有数字：正是「面板可以画错、
+      // 但不能算错」要消灭的那种静默错误。
+      for (const ps of Array.isArray(b.players) ? b.players : []) {
+        const pid = ps && ps.playerId;
+        if (typeof pid !== 'string') continue;
+        const pp = typeof b._pp === 'function' ? b._pp(pid) : null;
+        if (!pp) continue;
+        players.push({
+          playerId: pid,
+          dmg: Math.round(Number(pp.damageDealt) || 0),
+          bossDmg: Math.round(Number(pp.bossDamage) || 0),
+          // 这个玩家的计入击破数（`_pp` 那本账里的 `killed`；结果页的 `kills` 同源）
+          kills: Math.trunc(Number(pp.killed) || 0),
+          heal: Math.round(Number(pp.healingDone) || 0),
+        });
+      }
+      return {
+        battleId: e.battleId,
+        fieldId: e.fieldId ?? null,
+        kind: e.kind,
+        authoritative: !!e.authoritative,
+        own: !!e.own,
+        gt: Number.isFinite(Number(b.time)) ? Number(b.time) : 0,
+        t0: 0,
+        players,
+        units,
+      };
     },
     /**
      * The unit id of the board piece `uid` owned by `ownerId` in the battle on screen (an own operator's card opened in

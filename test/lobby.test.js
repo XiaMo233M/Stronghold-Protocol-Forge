@@ -20,6 +20,7 @@ import { StubMatch as Match } from '../server/match/StubMatch.js';
 import { Match as RealMatch } from '../server/match/Match.js';
 import { TestClient } from './helpers/wsClient.js';
 import { ERR, MAX_SEATS, MAX_SPECTATORS, PHASE, EMOTES, PROTOCOL_VERSION } from '../shared/constants.js';
+import { LOBBY_DEFAULTS } from '../server/lobby.js';
 
 const CODE_RE = new RegExp(`^[${CODE_ALPHABET}]{4}$`);
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -67,10 +68,20 @@ function clientPool(getUrl) {
   };
 }
 
+/**
+ * Create a CO-OP room and wait for its first `room.state`.
+ *
+ * …at the OFFICIAL 4 seats, EXPLICITLY. Since 业主裁令 2026-10-12 the server's ceiling is 20, so a create that names no
+ * cap builds a 20-seat room — and these tests are about the official-room flow (「房满」, seat indices, spectators),
+ * which fills up after four people. Naming 4 keeps them measuring what they were written for; the default ceiling
+ * itself is pinned in test/roomSeatCap.test.js and by 「a create that names no cap gets the server ceiling」 below.
+ * The wait keys on host/mode/difficulty only: a 4-seat frame carries NO `seatCap` key (it equals the official
+ * `MAX_SEATS`), so requiring it there would time out.
+ */
 async function createRoom(c, mode = 'coop', difficulty = 'NORMAL') {
-  const r = await c.request({ t: 'room.create', mode, difficulty });
+  const r = await c.request({ t: 'room.create', mode, difficulty, seatCap: MAX_SEATS });
   assert.equal(r.t, 'ok', JSON.stringify(r));
-  return c.waitFor('room.state', (s) => s.hostId === c.id && s.mode === mode);
+  return c.waitFor('room.state', (s) => s.hostId === c.id && s.mode === mode && s.difficulty === difficulty);
 }
 
 async function joinRoom(c, code) {
@@ -487,7 +498,9 @@ describe('websocket lobby', () => {
     await expectError(c, { t: 'room.join', code: 'AB CD' }, ERR.BAD_MSG);
     await expectError(c, { t: 'room.join', code: { $gt: '' } }, ERR.BAD_MSG);
     await expectError(c, { t: 'room.ready', ready: 'yes' }, ERR.BAD_MSG);
-    await expectError(c, { t: 'room.removeBot', seat: 9 }, ERR.BAD_MSG);
+    // A seat beyond the ceiling is still refused on the wire (`maxSeatsFrom(process.env)`, 20 by default — a seat
+    // inside that range but not in this connection's (empty) room answers NOT_IN_ROOM in the handler instead).
+    await expectError(c, { t: 'room.removeBot', seat: LOBBY_DEFAULTS.maxSeats + 1 }, ERR.BAD_MSG);
     await expectError(c, { t: 'g.buy', slot: -1 }, ERR.BAD_MSG);
     await expectError(c, { t: 'g.move', uid: 1, to: { area: 'moon' } }, ERR.BAD_MSG);
     await expectError(c, { t: 'ping', c: 'x' }, ERR.BAD_MSG);
@@ -537,13 +550,31 @@ describe('websocket lobby', () => {
     assert.equal(info.code, 1008);
   });
 
+  test('a create that names no cap gets the server ceiling (20 by default)', async () => {
+    // 业主裁令 2026-10-12: the default ceiling moved 4 → 20, and `room.state` says so (the cap differs from the
+    // official 4). A client that draws the frame pads to this number.
+    const wideHost = await pool.player('Wide');
+    const wide = await wideHost.request({ t: 'room.create', mode: 'coop', difficulty: 'HARD' });
+    assert.equal(wide.t, 'ok', JSON.stringify(wide));
+    const wideState = await wideHost.waitFor('room.state', (s) => s.hostId === wideHost.id);
+    assert.equal(wideState.seatCap, LOBBY_DEFAULTS.maxSeats, 'the frame carries the default ceiling');
+    assert.equal(LOBBY_DEFAULTS.maxSeats, 20, 'which is 20, not the official 4');
+    assert.equal(wideState.seats.length, LOBBY_DEFAULTS.maxSeats, 'the room really has 20 slots');
+    assert.deepEqual(wideState.seats[0], { seat: 0, playerId: wideHost.id, name: 'Wide', isBot: false, ready: false, connected: true });
+    assert.deepEqual(wideState.seats.slice(1), new Array(LOBBY_DEFAULTS.maxSeats - 1).fill(null));
+  });
+
   test('create / join / leave', async () => {
     const host = await pool.player('Host');
+    // The official 4-seat room (an explicit pick), which is what these tests exercise: a create that names NOTHING
+    // would build a 20-seat room since 业主裁令 2026-10-12 (pinned by the test above).
     const st = await createRoom(host, 'coop', 'HARD');
     assert.match(st.code, CODE_RE);
     assert.equal(st.mode, 'coop');
     assert.equal(st.difficulty, 'HARD');
     assert.equal(st.inMatch, false);
+    // A 4-seat room carries NO `seatCap` key (it equals the official `MAX_SEATS`): that is the byte-for-byte promise.
+    assert.equal(Object.hasOwn(st, 'seatCap'), false, 'the official 4 hides the cap');
     assert.equal(st.seats.length, MAX_SEATS);
     assert.deepEqual(st.seats[0], { seat: 0, playerId: host.id, name: 'Host', isBot: false, ready: false, connected: true });
     assert.deepEqual(st.seats.slice(1), [null, null, null]);

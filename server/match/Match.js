@@ -172,7 +172,7 @@
 //   common.js        what the modules share (FLOW_TICKER_PRIORITY, DELAYS, BAND_TURN_SECONDS — re-exported here, OK,
 //                    fail, BOSS_CLOCK_MS)
 
-import { PHASE, modeIdFor, bossHitLimitFrom } from '../../shared/constants.js';
+import { PHASE, modeIdFor, bossHitLimitFrom, MAX_SEATS } from '../../shared/constants.js';
 import { layoutOf } from '../../shared/layout.js';
 import { Battle } from '../sim/Battle.js';
 import { DataSource } from '../sim/simdata.js';
@@ -245,7 +245,8 @@ export class Match {
     /**
      * Seat slots of this match (opts.seatCap, or how many seats the caller handed in). Only the boss-pool ceiling
      * reads it: a room bigger than the official 4 must not clamp its leader pool to the 4-seat `aliveFull`
-     * (gamedata.js bossPoolShareOf; 百卫补丁 v0.3, docs/PS100-MIGRATION.md §2.4).
+     * (gamedata.js bossPoolShareOf; 百卫补丁 v0.3, docs/PS100-MIGRATION.md §2.4). It is NOT the variant switch — see
+     * `variant` below.
      */
     this.seatCap = Number.isFinite(opts.seatCap) && opts.seatCap >= 1 ? Math.floor(opts.seatCap)
       : (Array.isArray(opts.seats) && opts.seats.length >= 1 ? opts.seats.length : undefined);
@@ -365,6 +366,22 @@ export class Match {
      * (draft order and skip, 6 机变 cards, 联防 …) stay.
      */
     this.loneHuman = this.order.filter((p) => !p.isBot).length === 1;
+    /**
+     * 超容变体的闸门 (业主裁令 2026-10-12)。**闸门读的是在场参与者数，不是房间容量 —— 容量 20 只坐 4 人走原路径。**
+     *
+     * `participants` = the seats this match actually fields (humans + AI, `order.length`; spectators are NOT
+     * participants — they are stored separately below and never take a seat). The default ceiling became 20, so a room's
+     * CAPACITY no longer says anything about how many players are in it: the official 4-player game must keep the
+     * room-wide code path (shared pool, one room-wide 联防 plan), and only a match with MORE than the official
+     * `MAX_SEATS` participants needs a pool per player / per-squad planning (百卫补丁 v0.3, docs/PS100-MIGRATION.md §10).
+     *
+     * Computed ONCE, here, and read (never re-derived) by every gate: `PlayerState.variantOn` (server/match/player/
+     * rules.js), `planUnite` (server/match/unite.js) and the invariant checker (server/match/invariants.js). Deriving it
+     * per call from `seatCap` is what a mid-match path flip would look like — the seat list is fixed at start, so this
+     * boolean is too.
+     */
+    this.participants = this.order.length;
+    this.variant = this.participants > MAX_SEATS;
 
     // per-match setup (DESIGN §6.5)
     const setup = setupMatchWaves(this.gd, this.rngSetup);
@@ -483,7 +500,7 @@ export class Match {
      * 100-seat variant ONLY (design-level item C, docs/PS100-MIGRATION.md §10-C): the per-squad plans of the running
      * 联防 round (`unitePlans`), its round number (`uniteRound`: 1 阶段 1 队内兜底 / 2 阶段 2 跨队兜底) and the
      * re-entrancy tokens of the two-round hand-off. They stay AT REST (`null` / `1` / `0` / `null`) whenever the switch
-     * is off — a `≤ MAX_SEATS` match never reads or writes them, because `planUnite` only returns an array above
+     * is off — a match with ≤ MAX_SEATS PARTICIPANTS never reads or writes them, because `planUnite` only returns an array
      * `MAX_SEATS` and `MatchUnite.startUnite` branches on that shape (test/ps100-variant-ac.test.js pins the rest).
      */
     this.unitePlans = null;

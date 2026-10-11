@@ -9,11 +9,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { MAX_SEATS, PHASE, maxSeatsFrom, BOSS_HIT_LIMIT, bossHitLimitFrom } from '../shared/constants.js';
+import { MAX_SEATS, DEFAULT_MAX_SEATS, PHASE, maxSeatsFrom, BOSS_HIT_LIMIT, bossHitLimitFrom } from '../shared/constants.js';
 import { MAX_ALIVE_ENEMIES, MAX_ALIVE_ENEMIES_PER_PLAYER, aliveEnemyCap } from '../server/sim/constants.js';
 import { bossPoolShareOf, GameData } from '../server/match/gamedata.js';
 import { LOBBY_DEFAULTS, Room } from '../server/lobby.js';
 import { validateC2S } from '../shared/protocol.js';
+import { collectViolations } from '../server/match/invariants.js';
 import { buildBattleSpec, createBattleFromSpec } from '../server/sim/spec.js';
 import { leaderHitCancelled } from '../server/sim/damage.js';
 import { normalizeSeats } from '../public/js/screens/room.js';
@@ -21,33 +22,38 @@ import { DATA as MATCH_DATA, makeMatch } from './match/harness.js';
 import { planUnite } from '../server/match/unite.js';
 
 // ---------------------------------------------------------------------------------------------------------------
-// §1 the seat cap is configurable, and its default is still the official 4
+// §1 the seat cap is configurable; its DEFAULT ceiling is 20 since 业主裁令 2026-10-12 (`MAX_SEATS` is the official
+// room and the variant gate's reference, not the default)
 
-test('ps100 §1: MAX_SEATS stays the official 4 — the 100-seat cap is opt-in through SP_MAX_SEATS', () => {
-  assert.equal(MAX_SEATS, 4, 'the official room is 1–4 players: the default must not move');
-  assert.equal(maxSeatsFrom(), MAX_SEATS, 'no SP_MAX_SEATS in the environment ⇒ the default');
-  assert.equal(LOBBY_DEFAULTS.maxSeats, MAX_SEATS, 'the Lobby default follows the same rule');
+test('ps100 §1: MAX_SEATS stays the official 4; the DEFAULT ceiling is 20 and SP_MAX_SEATS overrides it', () => {
+  assert.equal(MAX_SEATS, 4, 'the official room is 1–4 players: this constant must not move');
+  assert.equal(maxSeatsFrom(), DEFAULT_MAX_SEATS, 'no SP_MAX_SEATS in the environment ⇒ the default ceiling (20)');
+  assert.equal(LOBBY_DEFAULTS.maxSeats, DEFAULT_MAX_SEATS, 'the Lobby default follows the same rule');
 });
 
 test('ps100 §1: maxSeatsFrom reads SP_MAX_SEATS and falls back on anything unusable', () => {
   assert.equal(maxSeatsFrom({ SP_MAX_SEATS: '100' }), 100);
   assert.equal(maxSeatsFrom({ SP_MAX_SEATS: '  100  ' }), 100, 'surrounding whitespace is tolerated');
-  assert.equal(maxSeatsFrom({ SP_MAX_SEATS: '4' }), 4);
-  for (const bad of ['', '   ', 'junk', '0', '-5', 'NaN', 'Infinity', '4.9']) {
-    assert.equal(maxSeatsFrom({ SP_MAX_SEATS: bad }), MAX_SEATS, `unusable value ${JSON.stringify(bad)} ⇒ the default`);
+  assert.equal(maxSeatsFrom({ SP_MAX_SEATS: '4' }), 4, 'and the official room is still one env var away');
+  assert.equal(maxSeatsFrom({ SP_MAX_SEATS: '20' }), DEFAULT_MAX_SEATS);
+  for (const bad of ['', '   ', 'junk', '0', '-5', 'NaN', 'Infinity']) {
+    assert.equal(maxSeatsFrom({ SP_MAX_SEATS: bad }), DEFAULT_MAX_SEATS, `unusable value ${JSON.stringify(bad)} ⇒ the default`);
   }
-  assert.equal(maxSeatsFrom({}), MAX_SEATS, 'an environment without the variable');
+  assert.equal(maxSeatsFrom({}), DEFAULT_MAX_SEATS, 'an environment without the variable');
   assert.equal(maxSeatsFrom({ SP_MAX_SEATS: '7.8' }), 7, 'a fraction is floored, never zero');
 });
 
 test('ps100 §1: a room honours its seat cap and keeps the protocol gate in step with it', () => {
-  // default cap: exactly the official seats, and the protocol refuses the first seat beyond them
-  const room = new Room('ABCD', 'coop', 'NORMAL', 0);
-  assert.equal(room.seatCap, MAX_SEATS);
-  assert.equal(room.seats.length, MAX_SEATS);
-  assert.equal(validateC2S({ t: 'room.removeBot', seat: MAX_SEATS - 1 }), null, 'the last official seat is addressable');
-  assert.equal(validateC2S({ t: 'room.removeBot', seat: MAX_SEATS }), 'bad field seat', 'and nothing beyond it');
-  assert.equal(validateC2S({ t: 'room.kick', seat: MAX_SEATS, playerId: 'p_0' }), 'bad field seat');
+  // The class default is the official 4 (the class is also built directly by tests / packages), and the protocol gate
+  // is the SERVER's ceiling — the same `maxSeatsFrom` the Lobby uses, so the two can never drift.
+  const official = new Room('ABCD', 'coop', 'NORMAL', 0, MAX_SEATS);
+  assert.equal(official.seatCap, MAX_SEATS);
+  assert.equal(official.seats.length, MAX_SEATS);
+  const cap = maxSeatsFrom();
+  assert.equal(cap, DEFAULT_MAX_SEATS, 'this process has no SP_MAX_SEATS');
+  assert.equal(validateC2S({ t: 'room.removeBot', seat: cap - 1 }), null, 'the last seat of the ceiling is addressable');
+  assert.equal(validateC2S({ t: 'room.removeBot', seat: cap }), 'bad field seat', 'and nothing beyond it');
+  assert.equal(validateC2S({ t: 'room.kick', seat: cap, playerId: 'p_0' }), 'bad field seat');
   // a 100-seat room: the seats exist and the same gate admits them
   const big = new Room('WXYZ', 'coop', 'NORMAL', 0, 100);
   assert.equal(big.seatCap, 100);
@@ -55,9 +61,9 @@ test('ps100 §1: a room honours its seat cap and keeps the protocol gate in step
 });
 
 test('ps100 §1 (D): room.state carries the cap ONLY when it leaves the official 4, so a 4-seat frame is unchanged', () => {
-  const vanilla = new Room('AAAA', 'coop', 'NORMAL', 0);
+  const vanilla = new Room('AAAA', 'coop', 'NORMAL', 0, MAX_SEATS);
   const frame = vanilla.toState();
-  assert.equal(Object.hasOwn(frame, 'seatCap'), false, 'a vanilla room adds no key (byte-for-byte the old frame)');
+  assert.equal(Object.hasOwn(frame, 'seatCap'), false, 'a 4-seat room adds no key (byte-for-byte the old frame)');
   assert.equal(frame.seats.length, MAX_SEATS);
   // …and a bigger room tells the client what to pad to, without the client guessing
   const wide = new Room('BBBB', 'coop', 'NORMAL', 0, 100);
@@ -263,13 +269,14 @@ test('ps100 §5b: the override reaches a REAL battle and decides the cancels (sp
 // (gate ON and OFF, the live per-player conservation, one plan object vs the per-squad list, the single-squad
 // battlefield equality and the 阶段 2 relay round).
 
-test('ps100 §6A: the independent-pool switch is `seatCap > MAX_SEATS`, and OFF it hands back the identical m.pool', () => {
+test('ps100 §6A: the switch is PARTICIPANT COUNT, and OFF it hands back the identical m.pool — even in a 20-seat room', () => {
   const mk = (humans) => makeMatch({ mode: 'coop', humans, seed: 60 + humans, fake: true }).start();
   const small = mk(MAX_SEATS);
   small.toPrep(1);
   const s = small.ps('p_0');
-  assert.equal(small.m.seatCap, MAX_SEATS);
-  assert.equal(s.variantOn(), false, 'the switch reads seatCap, not a flag');
+  assert.equal(small.m.participants, MAX_SEATS);
+  assert.equal(small.m.variant, false);
+  assert.equal(s.variantOn(), false, 'the switch reads the participant count, not the room capacity');
   assert.equal(s.mainPool(), small.m.pool, 'OFF: the draw source IS the shared pool object');
   assert.equal(s._ownPool, null, 'OFF: no per-player pool is ever built');
   for (const base of small.m.gd.visibleChess.slice(0, 40)) assert.equal(s.poolOf(base), small.m.pool);
@@ -278,17 +285,34 @@ test('ps100 §6A: the independent-pool switch is `seatCap > MAX_SEATS`, and OFF 
   const big = mk(MAX_SEATS + 1);
   big.toPrep(1);
   const b = big.ps('p_0');
-  assert.equal(big.m.seatCap, MAX_SEATS + 1);
-  assert.equal(b.variantOn(), true, 'one seat past the official cap turns it on');
+  assert.equal(big.m.participants, MAX_SEATS + 1);
+  assert.equal(b.variantOn(), true, 'one participant past the official 4 turns it on');
   assert.notEqual(b.mainPool(), big.m.pool, 'ON: the draw source is the player own pool');
   assert.equal(b.poolOf(big.m.gd.visibleChess[0]), b.mainPool());
   big.m.dispose();
 });
 
-test('ps100 §6C: the 联防 shape is the switch — one plan object at ≤ MAX_SEATS, the per-squad list above it', () => {
-  // the same finished-combat results in a 4-seat and an 8-seat room; squad 0 leaks, everything else is perfect
+test('ps100 §6A: 闸门读在场参与者数 —— a 20-seat room with only 4 players in it stays on the ORIGINAL path', () => {
   const seats = (n) => Array.from({ length: n }, (_, i) => ({ seat: i, playerId: `p_${i}`, name: `P${i}`, isBot: false, connected: true }));
-  const mk = (n) => makeMatch({ mode: 'coop', seats: seats(n), seed: 6, fake: true }).m;
+  // Capacity 20 (the new default ceiling), participants 4: the seat list is what the Match sees, so `seatCap` is 20 and
+  // the gate must still be OFF. This is the core case of 业主裁令 2026-10-12.
+  const h = makeMatch({ mode: 'coop', seats: seats(4), seatCap: 20, seed: 61, fake: true }).start();
+  h.toPrep(1);
+  const ps = h.ps('p_0');
+  assert.equal(h.m.seatCap, 20, 'the room really is a 20-seat room …');
+  assert.equal(h.m.participants, 4, '… with four participants');
+  assert.equal(h.m.variant, false);
+  assert.equal(ps.variantOn(), false, 'so the capacity never turns the variant on');
+  assert.equal(ps.mainPool(), h.m.pool, 'the shared pool object, exactly as before');
+  assert.equal(ps._ownPool, null, 'and no per-player pool is built');
+  assert.deepEqual(collectViolations(h.m), [], 'the room-wide invariant reading passes');
+  h.m.dispose();
+});
+
+test('ps100 §6C: the 联防 shape follows the PARTICIPANTS — one plan object at ≤ 4, the per-squad list above it', () => {
+  // the same finished-combat results in a 4-participant and an 8-participant room; squad 0 leaks, everything else is perfect
+  const seats = (n) => Array.from({ length: n }, (_, i) => ({ seat: i, playerId: `p_${i}`, name: `P${i}`, isBot: false, connected: true }));
+  const mk = (n, seatCap) => makeMatch({ mode: 'coop', seats: seats(n), ...(seatCap ? { seatCap } : {}), seed: 6, fake: true }).m;
   const results = (n) => new Map(Array.from({ length: n }, (_, i) => [`p_${i}`, {
     leaked: i === 0 ? [{ enemyKey: Object.keys(MATCH_DATA.enemies)[0], lpr: 1, counted: true, tag: null, mods: null }] : [],
     perfect: i !== 0,
@@ -297,13 +321,39 @@ test('ps100 §6C: the 联防 shape is the switch — one plan object at ≤ MAX_
   const big = mk(MAX_SEATS + 4);
   const one = planUnite(small, results(MAX_SEATS));
   const many = planUnite(big, results(MAX_SEATS + 4));
-  assert.ok(one && !Array.isArray(one), '≤ MAX_SEATS: the upstream single plan object');
-  assert.ok(Array.isArray(many), '> MAX_SEATS: the per-squad plan list');
+  assert.ok(one && !Array.isArray(one), '≤ 4 participants: the upstream single plan object');
+  assert.ok(Array.isArray(many), '> 4 participants: the per-squad plan list');
   assert.equal(many.length, 1, 'only squad 0 has both a leaker and a perfect member');
   assert.deepEqual(many[0].helpers.map((p) => p.playerId), one.helpers.map((p) => p.playerId));
   assert.deepEqual(many[0].leakers.map((p) => p.playerId), one.leakers.map((p) => p.playerId));
+  // …and CAPACITY alone never changes the shape: the same four people in a 20-seat room get the single plan object.
+  const wideRoom = mk(MAX_SEATS, 20);
+  assert.equal(wideRoom.seatCap, 20);
+  const stillOne = planUnite(wideRoom, results(MAX_SEATS));
+  assert.ok(stillOne && !Array.isArray(stillOne), '容量 20 只坐 4 人 ⇒ 原路径');
+  assert.deepEqual(stillOne.helpers.map((p) => p.playerId), one.helpers.map((p) => p.playerId));
   // and the fields C adds to Match stay at rest for a ≤ MAX_SEATS room (a live match is pinned in the §6 file)
   assert.equal(small.unitePlans, null);
   assert.equal(small.uniteRound, 1);
   assert.equal(small._uniteToken, 0);
+});
+
+test('ps100 §6D: the settlement frame names the path (m.result.variant) — capacity never decides it', () => {
+  const seats = (n) => Array.from({ length: n }, (_, i) => ({ seat: i, playerId: `p_${i}`, name: `P${i}`, isBot: false, connected: true }));
+  const four = makeMatch({ mode: 'coop', seats: seats(4), seatCap: 20, seed: 71, fake: true }).start();
+  four.drive(() => four.ended != null);
+  assert.ok(four.ended, 'the match ended');
+  assert.equal(four.ended.variant, false, '4 participants in a 20-seat room report the ORIGINAL path');
+  const frame = four.sent.map(([, msg]) => msg).find((msg) => msg.t === 'm.result');
+  assert.ok(frame, 'the settlement frame was sent');
+  assert.equal(frame.variant, false, 'and it rides the wire');
+  four.m.dispose();
+
+  const five = makeMatch({ mode: 'coop', seats: seats(5), seatCap: MAX_SEATS, seed: 72, fake: true }).start();
+  five.drive(() => five.ended != null);
+  assert.ok(five.ended, 'the match ended');
+  assert.equal(five.ended.variant, true, '5 participants report the variant even when the capacity is the official 4');
+  const wideFrame = five.sent.map(([, msg]) => msg).find((msg) => msg.t === 'm.result');
+  assert.equal(wideFrame.variant, true);
+  five.m.dispose();
 });

@@ -11,7 +11,8 @@
 //
 // WHY this module exists at all: upstream 联防 is ONE room-wide plan on ONE battlefield (unite.js planUnite, taken by
 // `MatchUnite.startUnite(plan)`), which cannot hold 25 squads. The variant keeps that implementation untouched for
-// ≤ MAX_SEATS and layers this per-squad planning on top (unite.js planUnite → planUniteBySquad under the switch).
+// ≤ MAX_SEATS PARTICIPANTS and layers this per-squad planning on top (unite.js planUnite → planUniteBySquad under
+// `Match.variant` = 参与人数 > 4; 闸门读的是在场参与者数，不是房间容量).
 //
 // The squad structure (shared/squads.js of the patch) is inlined here rather than added to shared/: this delivery is
 // scoped to server/match/** and must not open a second consumer for a 40-line module (see the delivery report).

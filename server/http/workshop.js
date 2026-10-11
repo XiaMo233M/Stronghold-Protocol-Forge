@@ -17,6 +17,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { WORKSHOP_MEDIA_PREFIX, WORKSHOP_RESOURCE_PREFIX, byPackId, workshopI18nFiles } from '../../shared/workshop.js';
 import { workshopTouchedFiles, readUiLangFile } from '../workshop.js';
+// 保留表只此一处真相：静态 `pack.json.routes` 与动态 `host.route` 两条通道判的都是 routeMount.js 里的那两张表。
+import { coreRouteShadow } from './routeMount.js';
 
 /**
  * The `/i18n/<code>.json` bodies the HTTP layer must serve MERGED for a 创意工坊 pack (fanpack G-04,
@@ -242,12 +244,21 @@ export const ROUTE_CACHE_HEADERS = Object.freeze({
  * have at that path. Two packs declaring the same path: the smaller pack id wins (DESIGN §28.3's rule), and the loser
  * is reported — the same ordering rule the data overlay and the kit loader use.
  *
+ * **核心先吃（DESIGN §28.35）。** `static.js` asks this table *before* the core mounts, so a declaration can answer a
+ * path the engine itself serves. That is no longer allowed: `coreRouteShadow` (routeMount.js — the same table the
+ * dynamic `host.route` channel judges with) decides whether a declared path is one the engine really serves, and such
+ * a declaration is **dropped from the map** — the core mount answers, exactly as if the pack had declared nothing. The
+ * pack is **not** refused: a published pack that carries a shadowing declaration still installs and runs, only that one
+ * declaration stops taking effect, and it is named in `errors` and in a `log.warn` line (never a silent drop). A
+ * declaration that merely *sits in* a core namespace without a core file occupying it is kept and reported as a
+ * pre-announced displacement.
+ *
  * @param {{ packs?: Array<{ id: string, dir?: string, routes?: Array<{ path: string, file: string, cache?: string }> }> }} loaded
  * @param {string|null} workshopDir
- * @param {{ log?: object|null }} [opts]
+ * @param {{ log?: object|null, mount?: Array<{ prefix: string, name?: string, dir?: string }> }} [opts]
  * @returns {{ routes: Map<string, { file: string, cache: string, pack: string }>, errors: Array<{ pack: string, path: string, reason: string }> }}
  */
-export function workshopRoutesFor(loaded, workshopDir, { log = null } = {}) {
+export function workshopRoutesFor(loaded, workshopDir, { log = null, mount = [] } = {}) {
   /** @type {Map<string, { file: string, cache: string, pack: string }>} */
   const routes = new Map();
   /** @type {Array<{ pack: string, path: string, reason: string }>} */
@@ -277,6 +288,21 @@ export function workshopRoutesFor(loaded, workshopDir, { log = null } = {}) {
       }
       if (routes.has(route.path)) {
         errors.push({ pack: p.id, path: at, reason: `already declared by pack "${routes.get(route.path).pack}" (the smaller pack id wins, DESIGN §28.3)` });
+        continue;
+      }
+      // 核心先吃（DESIGN §28.35）：引擎真的会服务这条路径 ⇒ 这条声明**不生效**（核心挂载照旧回答），但**不拒包**，
+      // 并且响亮点名。判据只此一处（routeMount.js），与动态 `host.route` 通道读同一张保留表。
+      //
+      // 只有**真的撞上**（`exact` / `file`）才点名。`reserved`（落在引擎命名空间里、而核心今天没有那个文件，例如
+      // 已发布的 ws-compression-reference 那条 `/data/ws-compression.json`）刻意**不报**：它今天一切照旧服务，
+      // 报它只会让每一次 `/data/<自己的名字>.json` 声明都吐一行，把真正要紧的那一条淹掉 —— 而「将来核心长出这个
+      // 文件就让位」是 `coreRouteShadow` 求值的**自动**结果，不需要作者现在做什么。这条立场写在 DESIGN §28.35。
+      const shadow = coreRouteShadow(route.path, { mount });
+      if (shadow && shadow.kind !== 'reserved') {
+        const where = shadow.kind === 'file'
+          ? `the core mount "${shadow.mount}" already serves ${shadow.file}`
+          : 'the engine answers that exact path before any pack';
+        errors.push({ pack: p.id, path: at, reason: `the engine answers this path first — ${where}; the declaration is ignored and the engine's own route serves it (a pack may not shadow a core path, DESIGN §28.35). The pack still loads.` });
         continue;
       }
       let exists = false;

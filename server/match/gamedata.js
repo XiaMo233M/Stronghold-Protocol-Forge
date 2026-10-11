@@ -72,8 +72,13 @@ export const COMBAT_TIME_SCALE = 2;
  *
  * `aliveFull` is a CEILING on the per-player multiplier, and it is calibrated for the official 4-seat room. A bigger
  * room (百卫补丁 v0.3, docs/PS100-MIGRATION.md §2.4) must not be silently clamped to it — `Math.min(32, 4)` made a
- * 32-seat pool exactly as large as a 4-seat one — so the effective ceiling is `max(aliveFull, seatCap)`. With the
- * default `seatCap` of MAX_SEATS (4) this is a no-op for every existing scale, to the unit: `alive ≤ 4` already.
+ * 32-seat pool exactly as large as a 4-seat one — so the effective ceiling is `max(aliveFull, seatCap)`.
+ *
+ * This reads the room's CAPACITY (`seatCap`), deliberately: it is a calibration floor, not the variant gate (that one
+ * is `Match.variant` = 参与人数 > 4, 业主裁令 2026-10-12). With the 缺省上限 of 20 a room that fields fewer people is
+ * therefore scaled as if it could hold 20 — a no-op for today's data (`data/config.json`'s only `bossHpScale` has
+ * `perPlayer: true`, so the share is `coop × alive` and `full` never enters), but a mode switching to `perPlayer: false`
+ * would see the 20-seat ceiling instead of the 4-seat one.
  * @param {object|null|undefined} modeScale config.modes[modeId].bossHpScale
  * @param {object|null|undefined} cfgScale config.bossHpScale
  * @param {boolean} isSolo
