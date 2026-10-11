@@ -79,6 +79,7 @@ export {
  *   maxConnectionsPerAddr?: number, maxRoomsPerAddr?: number, maxMatchesPerAddr?: number, resyncMinGapMs?: number,
  *   heavyPerSec?: number, heavyBurst?: number, trustProxy?: 'auto' | boolean, soloReconnectWindowMs?: number,
  *   accounts?: boolean, accountsFile?: string, recordsFile?: string,
+ *   wsLanes?: readonly import('./http/wsLanes.js').WsLane[],
  * }} [opts]
  * @returns {Promise<{ port: number, host: string, url: string, server: http.Server, wss: import('ws').WebSocketServer,
  *                     lobby: import('./lobby.js').Lobby, network: import('./net.js').Network,
@@ -337,7 +338,7 @@ export async function startServer(opts = {}) {
     records, accounts,
     modsCatalog: (req, res) => serveMods(req, res, MODS_CATALOG_URL, '', modsJson) }));
   server.on('clientError', answerClientError);
-  const wss = attachWebSocket(server, { network, log, perMessageDeflate: transport.perMessageDeflate });
+  const wss = attachWebSocket(server, { network, log, lanes: opts.wsLanes, perMessageDeflate: transport.perMessageDeflate });
 
   // The address actually bound. The default may fall back to IPv4; the returned host and url follow that.
   let boundHost;
