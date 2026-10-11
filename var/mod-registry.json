@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "packs": {
+    "demo": {
+      "state": "enabled",
+      "installedAt": "2026-10-11T03:15:09.135Z",
+      "source": "cli-demo.zip",
+      "digest": "4265a457bfdec6241cc067d178b19a319665346320b85ef858eececfa24ef648"
+    }
+  }
+}
