@@ -2652,6 +2652,85 @@ JSON 可序列化值**的回调。
 * **零副作用**：面板活着、真的消费这一格去算 DPS / 总伤 / 领袖伤时，同一场战斗的结算账与不变量照旧
   （`test/modClientSettings.test.js` 的「模拟侧零副作用」那一条现在也读这一格）。
 
+### 28.39 `pack.json.variants`：变体 / 口径层（闭枚举，不是数值覆盖通道）
+
+**要解决的那面墙**逐字记在 `shared/workshop.js` 的 `PACK_FIELDS` 注释里：`variants` 是 0.10.0 时代三个社区 mod
+「写了等于没写」的键之一 —— `normalizePackManifest` 从没读过它，`{content:["chess","variants"]}` 归一化之后
+只剩 `["chess"]`。`docs/WORKSHOP.md` §1.1 那张表把它记成「**没有通道**」，并写明要做就得先在引擎里做出
+「口径 / 变体」这一层。这一节就是那一层。驱动它的是投稿 `e4fe4d5cf0a0`（「干员满练mod」）：同一份数据要两套
+表现 —— 满练度 / 12 部署位 —— 由房间选一套。
+
+**它不是什么，比它是什么更重要。** 一个能指定任意文件覆盖、或让包直接写数值的包格式**就是安装器**：
+`official` / `config` / `meta` / `shared` / `theme` / `serverModules` 那六格「刻意没有通道」的判断逐字适用
+（`AGENTS.md`「Official first … the maintainer's decision only」）。所以这一层收成**闭枚举的口径声明**：
+包说的是**「哪一套」，不是「改成几」**。值由引擎自己给，且**一个数只有一个真相**（§28.35 那条口径之外的又一处：
+从前 `12` 硬编码在 `server/match/effectsMeta.js` 的 `setDeployCapAtLeast` 里，本刀把它提成
+`shared/constants.js` 的 `DEPLOY_CAP_MAX`，两处都读它）。
+
+**轴表**（`shared/variants.js` 的 `VARIANT_AXES`；**只在被一份真实投稿要求时才加轴**，不许为将来预留空轴）：
+
+| 轴 | 选项 | 缺省 = 引擎今天的行为 | 动什么 | 依据 |
+|---|---|---|---|---|
+| `training` | `official` / `full` | `full` | 这一局用哪一套练度 | 投稿 `e4fe4d5cf0a0` 的 `training` 一段（258 条干员 + 19 个召唤物）。落点是引擎**已有的** `room.loadout.ops`（`{ potential, cultivate }`，`shared/potential.js` 的 `POTENTIAL_DEFAULT` / `CULTIVATE_DEFAULT`），**不在数据里塞第二套数值** |
+| `deploy` | `official` / `max` | `official` | `config.economy.deployCap` | 同一投稿的 `deploy.config.economy.deployCap = 12`；官方 `maxBattleChessCnt` 是 8（`data/config.json`，`tools/build-data.mjs`），`max` = `DEPLOY_CAP_MAX` |
+
+**形状**：`variants: [{ axis, default?, name?, desc? }]`，条目字段闭集；归一化结果**按轴名排序**（键序是清单字节的
+一部分，不许随作者书写顺序变）。**声明了但选了缺省**与**没声明**在**数据上**等价 —— 但归一化清单**不丢**作者写的
+那个键（「选了 official」要能读回来）。
+
+**四条判据**（判据只有一份：`shared/variants.js`，装载器与校验器都调它）：
+
+1. **闭枚举、响亮失败**。`VARIANTS_BAD_SHAPE`（不是数组 / 条目不是对象 / 未知字段 / `name`·`desc` 写坏）·
+   `VARIANTS_UNKNOWN_AXIS`（轴名不在表里，文案列出全部轴）· `VARIANTS_UNKNOWN_OPTION`（`default` 不在那个轴的
+   选项里，文案列出该轴全部选项）· `VARIANTS_BAD_DEFAULT`（`default` 是 `null` / 数字 / `false` 这类「不是选项名」
+   的东西 —— 与 §28.5 的 `BAD_API_TYPE` 同一条理由：非字符串会被读成「用了轴的缺省」，即**静默不是作者写的那个**）·
+   `VARIANTS_DUPLICATE_AXIS`。**每一条都是整包拒绝**，不是忽略、也不是回落。
+2. **缺省逐字节不变**。不声明 `variants` 的包归一化清单里**不长出这个键**（无条件写进去会让**所有**已发布包的
+   内容哈希改变，房间的摘要闸门随即误判，§28.2）—— 与 `skins` / `voiceCdn` / `assets` 同一条纪律。
+   `GameData` 拿不到口径时 `deployCap` 逐字是 `posIntOr(economy.deployCap, DEFAULTS.deployCap)`。
+3. **声明了必须进身份哈希**。`identifyPack` 哈希的是归一化清单的 `canonicalJson`（`server/workshop.js:834`），
+   所以只要第 2 条那条「写了才进清单」成立，这一条自动成立 —— 而它**必须**成立：只差口径的两份包摘要若相同，
+   同一个摘要下就有两种对局行为（§28.2）。
+4. **必须 `combat: true`**（`VARIANTS_NEED_COMBAT`）。判据是**能力**而不是意图，与 `server.meta`
+   （`META_NEEDS_COMBAT`）/ `server.battle`（`BATTLE_NEEDS_COMBAT`）/ `modules[].uses: ["matchClass"]`
+   （`MODULES_NEED_COMBAT`）同一条线：一条**能**改结果的口径声明必须进房间摘要闸门与 golden 语料。
+   位置在 `BAD_COMBAT`（类型）之后、`EMPTY_PACK` 之后 —— 一个只声明了口径、什么都没带来的包，真问题是「空包」。
+
+**不是贡献项**：与 `support` / `playtest` 同一个语义 —— 口径选的是引擎已有的一套表现，不是内容。所以
+`contributesDecl` 不数它，一个只带 `variants` 的包照旧 `EMPTY_PACK`（文案里点名 `"variants" is NOT a contribution`）。
+
+**多包抢同一个轴**：按既有的「包 id 字典序小的赢」（§28.3，与数据记录 / kit / 图标同一条），由
+`mergeVariantDecls` 合成，输的一方进 `overridden` 供调用方点名报告。
+
+**执行点**：口径**不写进 `data/*.json`**（那张离线重建表要能逐字节复现 `data/`，§数据契约）。它在**这一局**生效，
+走的是既有的那条链，**不加协议消息**：
+
+1. `server/index.js:187` 构建 `welcome.mods` 的条目时**带上 `variants`**（只在声明过时才存在这个键）。`modDigest`
+   只哈希 `[id, hash]` 对（`shared/modIdentity.js:196`），所以带它**不改任何摘要** —— 这一点必须钉住：改摘要等于让
+   每个已发布的包在同一条房间里被判成「另一个包」。
+2. `modSetOf` 只按 `isModEntry`（id / hash / layer / combat / api）**过滤**、不剥别的键，所以房间集合
+   （`server/lobby.js:1476` 的 `room.modSet || this.modSet`）把声明原样带到 `Match`。
+3. `Match` 用 `mergeVariantDecls(mods.packs)` 合成轴表（`server/match/Match.js`），交给 `GameData`
+   （`opts.variants`），`GameData.deployCap` 读它。
+
+第 1 步是这一层最容易做坏的地方：漏掉那个投影，`Match` 读到的是 `undefined`、口径**静默不生效**
+（`test/workshopVariants.test.js` 的「装载结果 → 房间 mod 集合 → `Match` 的那条链」那一节钉住它）。
+没有包声明口径 ⇒ `[]` ⇒ 每一处读点都走今天那条缺省路径。
+
+**既有静默失败一并修掉**：`normalizePackManifest` 的 `content` 成员资格从前是
+`raw.content.filter((f) => WORKSHOP_CONTENT_FILES.includes(f))` —— 一个不认识的条目被**安静地丢掉**，
+于是 `{content:["chess","variants"]}` 的作者看到「包合法、我写的那件事没发生」。这正是本格式存在的理由
+（§1.1 那句「不认识的声明必须响亮失败」），只是位置从「顶层键」挪到了「这张表的成员」。本刀改成
+`UNKNOWN_CONTENT_FILE` 点名整包拒绝（`config` 与 `variants` 都在文案里被点名说明它们**没有** content 通道）。
+
+**`MOD_API_VERSION` 不动**（仍是 `1`）：`api` 是**可选项**（§28.5），没声明 `api` 的包一个字节都不受影响，
+而加一格字段不抬版本有 `:434` 的先例。**不新增协议消息**：口径是服务端的判据，客户端读到的仍然是它一直在读的
+`priv.deployCap`。
+
+**还没做的**：`training` 今天只落在引擎已有的练度开关（`room.loadout.ops`）上；把一名**普通**干员的精锐形态
+数值投影给它（投稿 `training` 一段真正想做的那件事：`_a` 拿到 `_b` 的 `status`/`stats`/`skills`/`talents`，
+258 条 + 19 个召唤物）**不在本刀**，需要独立立项 —— 它是「练度投影」这条新规则，不是声明通道。
+
 
 
 

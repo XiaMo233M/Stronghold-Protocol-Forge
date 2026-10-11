@@ -73,6 +73,7 @@ workshop/<packId>/
 | `i18n` | 贡献项之一 | 给**已有语种**（`en` / `ja` / `ko` / `zh-TW` …）补界面词条：`{ "<语种>": "<包内相对 .json 路径>" }`，见 §1.10 | ⛔ 本轮无入口 |
 | `forms` | 贡献项之一 | 这个包自带的干员 / 怪物**自己的形态（clip set）**，见 §1.19：`{ chars / enemies / tokens: { "<spine id>": { "<形态名>": { change?, end?, leave?, next?, roles } } } }`。**第一方已有的形态名不许覆盖**（`FORMS_FIRST_PARTY_OVERLAP` 整包拒绝） | ⛔ 本轮无图形入口（作者手写 `pack.json`） |
 | `fx` | 贡献项之一（空数组除外） | 包自己的**静态相位**：`{ "silentPhases": ["<phase kind>", …] }`，命中的 `'phase'` 特效不放通用特效，见 §1.19。与第一方那两个**并集**（取消不了） | ⛔ 本轮无图形入口 |
+| `variants` | 否（声明，**不是**贡献项） | 这个包要的**变体 / 口径**（满练度 / 12 部署位这类可切换口径），见 §1.20：`[{ axis, default? }]`，轴与选项名都是**闭枚举**（`shared/variants.js`），值由引擎自己给。声明了就必须标 `combat: true`（`VARIANTS_NEED_COMBAT`） | ⛔ 本轮无图形入口（作者手写 `pack.json`） |
 
 **每个字段都有图形入口**（0.8.1 起，最后补上的是元数据与 `overrides`；`operators` 的入口见 §1.2）：写进 `pack.json`
 的东西必须能在界面上增删改，包括**陈旧/没人用的条目**（它们只是不生效，不是错误，但要能删掉）。唯一没有入口的是 `id`：它必须等于目录名。
@@ -85,11 +86,13 @@ workshop/<packId>/
 
 | 键 | 今天的结果 | 想做的事 | 今天该往哪儿写 |
 |---|---|---|---|
-| `variants` | `PACK_UNKNOWN_FIELD` | 「同一份数据的另一套数值 + 一个开关」（满练度 / 12 部署位这类**可切换口径**） | **没有通道**。可以拿 `overrides` 落**一份**数值进默认口径，但那不是「可切换的变体」，而且会让包改默认规则（比不做更坏）。要做得先在引擎里做出「口径 / 变体」这一层（`data/official.json` + 运行时的练度开关，今天都不存在） |
+| `variants` | **已实现，见 §1.20** | 「同一份数据的另一套数值 + 一个开关」（满练度 / 12 部署位这类**可切换口径**） | 写成 `variants: [{ axis, default? }]` —— **不是**一张数据文件，也**不是**一条数值覆盖通道：轴与选项名都是**闭枚举**（`shared/variants.js` 的 `VARIANT_AXES`），值由引擎自己给。声明了就必须标 `combat: true`（`VARIANTS_NEED_COMBAT`） |
 | `skins` | **已实现，见 §1.17** | 干员时装（皮肤）与「换装」Tab | 写成 `skins: [{ id, charId, name, art?, voices? }]`（一套外观的**数据**）；**哪一套生效**由一个注册了的外观提供者决定（C 层面板导出的 `appearance(ctx)`），玩家可以用设置里的「工坊外观」整个关掉。只装数据包不会有画面变化 —— 那需要那个提供者。**不要**改成 `art.chars[<charId>]`：那给的是**唯一一套**素材，换不了装 |
 | `official` / `config` / `meta` / `shared` / `theme` / `serverModules` | `PACK_UNKNOWN_FIELD` | 官方口径文件 / 规则改写 / match 元注册表 / 共享层补丁 / 主题 / 服务端模块 | **刻意没有通道**（`config` 见下面那一段；其余是引擎特性或 wire 契约，按 `AGENTS.md`「Official first … the maintainer's decision only」） |
 
-`content` 只接受上表列出的文件。**`config` 被刻意排除**：一个能改写经济、回合表或难度参数的包改的是规则而不是内容，那需要另一套审查机制，不在本功能范围内。
+`content` 只接受上表列出的文件，而且**不认识的条目点名整包拒绝**（`UNKNOWN_CONTENT_FILE`）—— 从前它是安静过滤掉的，
+作者看到的是「包合法、我写的那件事没发生」。**`config` 被刻意排除**：一个能改写经济、回合表或难度参数的包改的是
+规则而不是内容，那需要另一套审查机制，不在本功能范围内。
 
 **只带素材的包是合法的包**：`content: []` + `voices` / `voiceLangs` / `bondIcons` / `itemIcons` / `art` / `skins` / `operators` / `i18n` / `forms` / `fx`
 里任意一项（见 §1.4、§1.10、§1.17、§1.19）。一个只给助战干员配语音、只给盟约/装备配一张图、只给某个干员配一张立绘或一套时装、
@@ -1858,6 +1861,57 @@ node --test test/packForms.test.js
 ```
 
 完整规范（判据逐条、合并规则、为什么第一方优先）见 [docs/design/mod-layer.md](design/mod-layer.md) §28.29。
+
+---
+
+### 1.20 变体 / 口径（`variants`）：同一份数据的另一套数值 + 一个开关
+
+**它解决什么**：一个社区 mod 反复撞上的那面墙（§1.1 那张表的第一行）——「满练度 / 12 部署位」这类**可切换口径**：
+同一份数据、两套表现，由玩家/房主选一套。从前 `variants` 是 `PACK_UNKNOWN_FIELD`（整个包被拒），
+而它想做的事在包里**没有通道**。
+
+**它不是什么**（这一条比上面那条更重要）：**它不是一个「包可以覆盖任意数值」的通道**。一个能指定任意文件覆盖的
+包格式就是安装器 —— `official` / `config` / `meta` / `shared` / `theme` / `serverModules` 那六格的判断逐字适用。
+所以这一层收成**闭枚举的口径声明**：包说的是「哪一套」，**不是「改成几」**。
+
+```jsonc
+{
+  "id": "my-pack", "name": "满练度", "content": ["chess"],
+  "combat": true,                                  // ← 硬闸门：口径改对局结果，必须标（VARIANTS_NEED_COMBAT）
+  "variants": [
+    { "axis": "deploy",   "default": "max" },      // 12 个部署位（官方 8）
+    { "axis": "training", "default": "full" }      // 引擎缺省的满潜能 / 精英2 Lv.60
+  ]
+}
+```
+
+**首发两条轴**（`shared/variants.js` 的 `VARIANT_AXES` —— 一个轴只在这份表里，一个数只有一个真相）：
+
+| 轴 | 选项 | 缺省（= **引擎今天的行为**） | 它动什么 |
+|---|---|---|---|
+| `training` | `official` / `full` | `full` | 这一局用哪一套练度。落点是引擎**已有的** `room.loadout.ops`（干员调配：潜能 1–6 与 未精英化→精英2 Lv.60，`shared/potential.js`），不是在数据里塞第二套数值 |
+| `deploy` | `official` / `max` | `official` | 部署位：`official` 是数据里的 8（官方 `maxBattleChessCnt`），`max` 抬到 `shared/constants.js` 的 `DEPLOY_CAP_MAX` = 12（与销毁类装备的天花板同一个常量） |
+
+**三条硬判据**：
+
+1. **闭枚举、响亮失败**。轴名不认识 ⇒ `VARIANTS_UNKNOWN_AXIS`；选项名不认识 ⇒ `VARIANTS_UNKNOWN_OPTION`；
+   形状 / 未知字段 ⇒ `VARIANTS_BAD_SHAPE`；非字符串的 `default` ⇒ `VARIANTS_BAD_DEFAULT`；同一个轴写两遍 ⇒
+   `VARIANTS_DUPLICATE_AXIS`。**每一条都是整包拒绝**，不是忽略、也不是回落到缺省。
+2. **缺省逐字节不变**。不声明 `variants` 的包，归一化清单里**不长出这个键**（多一个键会让所有已发布包的内容哈希
+   全变，房间的摘要闸门随即误判，DESIGN §28.2）；`GameData` 拿不到口径时 `deployCap` 逐字是数据里那个 8。
+   而**声明了口径就必须进内容哈希**：只差口径的两份包摘要必须不同 —— 同一个摘要下两种对局行为是不允许的。
+3. **必须标 `combat: true`**（`VARIANTS_NEED_COMBAT`）。判据是**能力**而不是意图：一条能改结果的口径声明，
+   必须进房间摘要闸门与 golden 语料（与 `server.meta` / `server.battle` / `modules[].uses: ["matchClass"]` 同一条线）。
+
+**不是**贡献项：一个只声明了 `variants` 的包照旧 `EMPTY_PACK`（与 `support` / `playtest` 同一个语义 —— 口径选的
+是引擎已有的一套表现，不是内容）。
+
+**多包抢同一个轴**：按既有的「包 id 字典序小的赢」（§1.2、DESIGN §28.3），输的一方会被**点名**报告。
+
+**还没有的**：`training` 今天只落在引擎已有的练度开关上；把一名普通干员的**精锐形态数值**投影给它（投稿
+`e4fe4d5cf0a0` 的 `training` 一段真正想做的那件事）不在本刀，需要另外立项。
+
+完整规范见 [docs/design/mod-layer.md](design/mod-layer.md) §28.39。
 
 ---
 

@@ -31,7 +31,7 @@ export const MOD_API_VERSION = 1;
 /** Release version shown to players (title screen, server banner, /healthz). Kept equal to package.json "version"
  * (test/version.test.js); PROTOCOL_VERSION above is the separate wire-format number. The release TAG spells both halves
  * out — `v<this>-<upstream>` (README 「版本号」) — because this one has to stay a plain three-part semver. */
-export const APP_VERSION = '0.15.2';
+export const APP_VERSION = '0.15.3';
 /**
  * The UPSTREAM game version this checkout bundles (README 「版本号」). The release TAG spells both halves out —
  * `v<APP_VERSION>-<UPSTREAM_VERSION>` — because `APP_VERSION` itself has to stay a plain three-part semver.
@@ -127,6 +127,21 @@ export function maxSeatsFrom(env) {
  * its rooms — `clampSeats` narrows the floor to the ceiling instead of leaving an empty range.
  */
 export const MIN_SEATS = 2;
+
+/**
+ * 一局里一名玩家能同时站在场上的干员数上限（部署位）—— **一个数只许一个真相**。
+ *
+ * 它从前是**两处**硬编码的 `12`，本刀把它收到这里：
+ *   * `server/match/effectsMeta.js` 的 `setDeployCapAtLeast`：销毁类装备 / 分队加成把部署位**至少**抬到这么多
+ *     （本模式最多 12 个部署位），所以那个 `Math.min(v, 12)` 不是「随手挑的上限」，就是这一条；
+ *   * `shared/variants.js` 的 `deploy: "max"` 口径（投稿 e4fe4d5cf0a0 要的「12 部署位」）把它写进
+ *     `config.economy.deployCap`。
+ *
+ * **它不是官方值**：官方 `maxBattleChessCnt` 是 8（`data/config.json economy.deployCap` 由
+ * `tools/build-data.mjs` 从 `act.constData.maxBattleChessCnt` 写出），8→12 这一段是这台服务器自己的天花板。
+ * 所以缺省路径仍然逐字节是 `data/` 里那个 8，这个常量只在口径被**显式**打开时出现。
+ */
+export const DEPLOY_CAP_MAX = 12;
 
 /**
  * 房主选的本房上限 → 这台服务器真正接受的座位数 (业主裁决 B5)。**纯函数**, `shared/` 的纪律同 `maxSeatsFrom`:

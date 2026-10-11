@@ -39,6 +39,9 @@
 // (onRoundStart, EffectDispatcher.dispatchEliminated: 信标's gift — GitHub #86).
 
 import { itemKey } from './gamedata.js';
+// 部署位天花板（`DEPLOY_CAP_MAX`，shared/constants.js）：从前这里是硬编码的 `12`，与 `shared/variants.js` 的
+// `deploy: "max"` 口径各写一遍 —— 一个数两个真相，本刀收到常量里。
+import { DEPLOY_CAP_MAX } from '../../shared/constants.js';
 import { boardOrder, parseKey, tileKey } from './board.js';
 import { pieceBonds as bondsOfPiece } from './bondsMeta.js';
 import { registerAllMeta } from '../sim/content/index.js';
@@ -678,7 +681,7 @@ export function makeCtx(m, ps, source, hook, ev = null) {
       return true;
     },
     addDeployCap: (n) => { const v = finiteInt(n); ps.deployCapBonus += v; ps.dirty(); return ps.deployCap; },
-    setDeployCapAtLeast: (n) => { const v = finiteInt(n); if (v > ps.deployCapMin) { ps.deployCapMin = Math.min(v, 12); ps.dirty(); } return ps.deployCap; },
+    setDeployCapAtLeast: (n) => { const v = finiteInt(n); if (v > ps.deployCapMin) { ps.deployCapMin = Math.min(v, DEPLOY_CAP_MAX); ps.dirty(); } return ps.deployCap; },
     setBondCountBonus: (bondId, n) => { if (gd.bond(bondId) && Number.isInteger(n)) { ps.bondCountBonus[bondId] = n; ps.recompute(); } },
     setDeviceActive: (alias, on) => { if (typeof alias === 'string') { ps.deviceOverrides[alias] = !!on; ps.invalidateDeployMap(); ps.dirty(); } },
     setTileOverride: (r, c, cls) => { if (Number.isInteger(r) && Number.isInteger(c) && ['melee', 'ranged', 'none'].includes(cls)) { ps.tileOverrides[`${r},${c}`] = cls; ps.invalidateDeployMap(); ps.dirty(); } },

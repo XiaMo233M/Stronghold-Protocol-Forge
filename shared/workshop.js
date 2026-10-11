@@ -23,8 +23,17 @@
 // The behaviour layer (a pack's `kits/*.js`, wired to the battle.on(...) hook bus) is deliberately NOT part of this
 // module: it is code, it is loaded by the server only, and it is documented in docs/WORKSHOP.md.
 
+// 变体 / 口径层（DESIGN §28.39）：轴的闭枚举与解析只有一份，`shared/variants.js`。这一层**不**在这里重新判一遍
+// —— 一个轴表有两份实现，就是一个「哪个才算数」的问题。
+import { parseVariantsDecl } from './variants.js';
+
 /** Data files a pack may contribute to. Deliberately a conservative subset of data/: `config` is excluded because a
- * pack that rewrote the economy or the round schedule would change the rules rather than the content. */
+ * pack that rewrote the economy or the round schedule would change the rules rather than the content.
+ *
+ * `variants`（变体 / 口径层，DESIGN §28.39）**也不在这张表里**，理由与 `config` 同一条但更强：一个口径不是一张
+ * 数据表，而是一个**闭枚举的选项名**（`shared/variants.js` 的 `VARIANT_AXES`）。把它写成一张 `{ id: record }`
+ * 的数据文件就等于开一条「包可以覆盖任意数值」的通道 —— 那就是把安装器做进引擎（`docs/WORKSHOP.md` §1.1 对
+ * `official` / `config` 的判断逐字成立）。所以口径走 `pack.json.variants` 这一格，值由引擎自己给。 */
 export const WORKSHOP_CONTENT_FILES = Object.freeze([
   'chess', 'units', 'items', 'enemies', 'stages', 'waves', 'tokens', 'bosses', 'factions', 'garrisons', 'bands', 'bonds', 'effects', 'choices',
 ]);
@@ -123,6 +132,9 @@ export const PACK_FIELDS = Object.freeze([
   'notices',
   // 行为开关（**不是**贡献项）
   'playtest',
+  // 变体 / 口径声明（DESIGN §28.39）：这个包要哪一套口径（练度 / 部署位）。**不是**贡献项，也**不是**一条
+  // 数值覆盖通道 —— 它只能声明轴的闭枚举里有的选项名，值由引擎自己给（`shared/variants.js`）。
+  'variants',
   // 中间层四组能力声明（DESIGN §28.13）
   'assets', 'client', 'server', 'routes',
 ]);
@@ -1565,6 +1577,21 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (dirName && typeof raw.id === 'string' && raw.id && raw.id !== dirName) {
     return fail('PACK_ID_MISMATCH', `pack.json id "${raw.id}" does not match its directory "${dirName}"`);
   }
+  // `content` 的成员资格：**不认识的条目点名整包拒绝**，不再静默过滤。
+  //
+  // 从前这里是 `raw.content.filter(… includes(f))`：一个包写 `content: ["chess", "variants"]` 时，`variants` 被
+  // 安静地丢掉，作者看到的是「pack.json 合法、包加载了、可我写的那件事没发生」—— 正是 `PACK_FIELDS` 那段注释
+  // 点名的三个社区 mod（`variants` / `skins` / `i18n`）撞上的那面墙，只是位置从「顶层键」挪到了「这张表的成员」。
+  // 这一刀把它一并修掉（业主口径：不认识的声明必须响亮失败）。
+  if (raw.content !== undefined && !Array.isArray(raw.content)) {
+    return fail('BAD_CONTENT_LIST', '"content" must be an array of file names (an empty array is a pack that brings no data file)');
+  }
+  for (const f of Array.isArray(raw.content) ? raw.content : []) {
+    if (typeof f === 'string' && WORKSHOP_CONTENT_FILES.includes(f)) continue;
+    const shown = typeof f === 'string' ? (f.length > MAX_KEY_SHOWN ? `${f.slice(0, MAX_KEY_SHOWN)}…` : f) : (Array.isArray(f) ? 'an array' : typeof f);
+    return fail('UNKNOWN_CONTENT_FILE',
+      `content: "${shown}" is not a data file of this pack format (${WORKSHOP_CONTENT_FILES.join(', ')}). A name this loader does not know is never read: a pack that wrote it would ship a file nothing merges — "variants" and "config" in particular have NO content channel (see docs/WORKSHOP.md §1.1); a 口径 is declared as pack.json.variants instead`);
+  }
   const content = Array.isArray(raw.content)
     ? [...new Set(raw.content.filter((f) => typeof f === 'string' && WORKSHOP_CONTENT_FILES.includes(f)))].sort()
     : [];
@@ -1990,6 +2017,11 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   }
   const fxParsed = raw.fx === undefined ? null : parseFxDecl(raw.fx);
   if (fxParsed && !fxParsed.ok) return fxParsed;
+  // 变体 / 口径声明（DESIGN §28.39）：形状与闭枚举都在 `shared/variants.js` 判，这里只负责「写了才进清单」。
+  // **不是贡献项**（与 `playtest` 同一个语义）：一个只声明了 `variants: [{ axis: "deploy" }]` 的包什么都没带来
+  // —— 口径选的是引擎已有的另一套表现，不是内容。所以它不进 `contributesDecl`，一个只带它的包照旧 `EMPTY_PACK`。
+  const variantsParsed = raw.variants === undefined ? null : parseVariantsDecl(raw.variants);
+  if (variantsParsed && !variantsParsed.ok) return variantsParsed;
   // 一条声明只有在清单里**真的写了这个键**时才进归一化结果。这一条是本刀最容易做坏的地方：无条件写进去会让
   // 每一个已存在的包（它们没有这些键）的归一化清单多出四个键，于是内容哈希全变、`identifyPack` 的
   // `manifest` 与 `hash` 也跟着变 —— 房间的摘要闸门会开始误判（DESIGN §28.2）。
@@ -2031,7 +2063,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     // 只声明助战的包今天整包被拒（plugin-pack G6：一个 `support: [...]` + `content: []` 的包得到的就是这一条），
     // 而原来的文案里**没有** `support` 这个词，作者只能对着 `EMPTY_PACK` 猜。`support` 只决定**助战卡池**里放谁，
     // 干员本体还是由 `content: ["chess"]` 带进来的 —— 所以放宽它不是这一刀的活（那是既有裁决），把话说明白才是。
-    const notContributions = ['support', 'playtest']
+    const notContributions = ['support', 'playtest', 'variants']
       .filter((n) => raw[n] !== undefined);
     const names = [...WORKSHOP_CONTENT_FILES, 'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'skins', 'operators',
       'assets', 'client', 'server.preDispatch', 'server.meta', 'server.battle', 'server.room', 'server.modules', 'server.transport', 'routes', 'i18n', 'notices', 'forms', 'fx'];
@@ -2107,6 +2139,16 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (serverParsed && (serverParsed.decl.modules || []).some((m) => m.uses.includes('matchClass')) && raw.combat !== true) {
     return fail('MODULES_NEED_COMBAT', 'a server module whose uses includes "matchClass" wraps the match itself, so this pack must declare "combat": true — that is what puts it into the room digest gate and the golden corpus (DESIGN §28.14); a module that only mounts boot / shutdown / healthz does not need it');
   }
+  // 变体 / 口径（DESIGN §28.39）**也**要 `combat: true`，理由与上面三条逐字同构：一个口径改的就是**对局的结果**
+  // —— `deploy: "max"` 把 `config.economy.deployCap` 从官方的 8 抬到 12（场上同时多站四个人），
+  // `training` 说的是这一局用哪一套练度。判据是**能力**而不是意图：一条**能**改结果的口径声明，必须进房间摘要
+  // 闸门与 golden 语料，否则「不声明 combat 的包改不了结果」这句话就从结构性保证退化成一句口号。
+  //
+  // 位置在 `EMPTY_PACK` 之**后**（一个只声明了口径、什么都没带来的包照旧先得到 `EMPTY_PACK` —— 那才是它的真
+  // 问题），并且在上面三条 `combat` 类型检查之后：`BAD_COMBAT` 先报，作者才知道该改的是类型而不是缺一个 `true`。
+  if (variantsParsed && raw.combat !== true) {
+    return fail('VARIANTS_NEED_COMBAT', 'a pack that declares "variants" pins a 口径 that changes match results (deploy slots / operator training), so it must declare "combat": true — that is what puts it into the room digest gate and the golden corpus (DESIGN §28.39); a pack that cannot state that must not pin a 口径');
+  }
   // `server.room` **不在**上面这条线里（DESIGN §28.20）：它的契约是「观察与声明」——`install(room)` 拿到的是一个只读
   // 观察面（成员快照 / 阶段 / 事件 / 一条日志），没有 store、没有战场句柄、没有 socket、没有文件系统，返回值被忽略。
   // 判据是**能力**而不是意图：一件改不了结果的能力不要求 `combat: true`（要求了只会让诚实的包被拒，而闸门本身变成
@@ -2144,6 +2186,11 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
       support: supportIds,
       operators: orderedOperators,
       playtest: { directToHand },
+      // 变体 / 口径声明（DESIGN §28.39）：**只在声明过时才存在**，与 `skins` / `voiceCdn` 同一条纪律、理由逐字
+      // 相同 —— `identifyPack` 哈希的就是这份归一化清单的 `canonicalJson`（`server/workshop.js`），给每个包都加
+      // 一个 `variants: []` 会让**所有已发布包的哈希全部改变**。而它**必须**进哈希：一个口径改的是对局结果，
+      // 两份只差口径的包共用同一个摘要，房间的摘要闸门就会放行两种不同的行为（DESIGN §28.2）。
+      ...(variantsParsed ? { variants: variantsParsed.decl } : {}),
       // 四组新声明：**只在声明过时才存在**（见上面 `declared` 的注释）。哈希覆盖它们靠的就是这一条 ——
       // `identifyPack` 哈希的是这份归一化清单的 `canonicalJson`（server/workshop.js）。
       ...Object.fromEntries(declared),

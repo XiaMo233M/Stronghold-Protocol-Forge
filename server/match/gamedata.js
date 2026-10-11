@@ -13,6 +13,9 @@
 
 import { getConfig, getMode } from '../data.js';
 import { MAX_SEATS } from '../../shared/constants.js';
+// 变体 / 口径层（DESIGN §28.39）：`opts.variants` → 这一局的 `config` 覆盖。值与轴表都在 `shared/variants.js`，
+// 这里只消费它的判决（`null` = 什么都不用改，缺省路径逐字节不变）。
+import { variantDataPatch } from '../../shared/variants.js';
 import { isShopItem } from '../sim/simdata.js';
 import { standInRecord } from '../../shared/standIn.js';
 import {
@@ -107,15 +110,31 @@ export class GameData {
   /**
    * @param {Readonly<Record<string, any>>} data server/data.js getData() (may be partial)
    * @param {string} modeId e.g. 'mode_multi_hard'
-   * @param {{ seatCap?: number }} [opts] seatCap = seat slots of the room (default MAX_SEATS): the floor of the
+   * @param {{ seatCap?: number, variants?: Array<{ axis: string, default: string }>|null }} [opts] seatCap = seat slots of the room (default MAX_SEATS): the floor of the
    *        bossHpScale `aliveFull` ceiling, so a bigger room is not clamped to the 4-seat calibration
-   *        (bossPoolShareOf; 百卫补丁 v0.3, docs/PS100-MIGRATION.md §2.4)
+   *        (bossPoolShareOf; 百卫补丁 v0.3, docs/PS100-MIGRATION.md §2.4).
+   *        variants = the 口径 this match runs under (DESIGN §28.39, `pack.json.variants`); absent ⇒ the engine
+   *        defaults, i.e. exactly today's behaviour.
    */
   constructor(data, modeId, opts = {}) {
     this.raw = data && typeof data === 'object' ? data : {};
     this.config = getConfig(this.raw) || {};
     this.modeId = modeId;
     this.mode = getMode(modeId, this.raw) || {};
+    /**
+     * 变体 / 口径层（DESIGN §28.39）给出的 `config` 覆盖 —— **一个轴一个值，值来自引擎常量，不是包**。
+     * `opts.variants` 是本局声明的口径（`Array<{ axis, default }>`，`shared/variants.js` 归一化过的那一份）；
+     * 没声明（`undefined` / 空数组）时它逐字是 `null`，于是下面每一个读点都走今天那条缺省路径。
+     *
+     * 为什么在**这里**读、而不是把 `config.economy.deployCap` 写进 `data`：`data/*.json` 是 generated 且
+     * 逐字节被 `test/data.test.js` 钉住的（那张离线重建表要能逐字节复现 data/），口径改的是**这一局**的规则，
+     * 不是那份基线。这条与工坊 overlay 的既有分工一致：overlay 加的是**内容**，口径加的是**规则的一个选项**。
+     * @type {{ economy?: { deployCap?: number } } | null}
+     */
+    this.variantPatch = variantDataPatch(opts?.variants ?? null);
+    /** 口径给出的部署位；没有口径 ⇒ `null`（`deployCap` 落到数据 / DEFAULTS 那两级）。 */
+    const cap = this.variantPatch?.economy?.deployCap;
+    this._deployCap = Number.isInteger(cap) && cap > 0 ? cap : null;
     /**
      * Seat slots of the room this game data belongs to (MAX_SEATS when the caller has no seat list). Only the
      * boss-pool ceiling reads it — see bossPoolShareOf.
@@ -331,7 +350,14 @@ export class GameData {
   get refreshPrice() { return Math.max(0, numOr(this.economy.refreshPrice, DEFAULTS.refreshPrice)); }
   get benchSize() { return posIntOr(this.economy.benchSize, DEFAULTS.benchSize); }
   get tempSize() { return posIntOr(this.economy.tempSize, DEFAULTS.tempSize); }
-  get deployCap() { return posIntOr(this.economy.deployCap, DEFAULTS.deployCap); }
+  /**
+   * 部署位（一名玩家同时站在场上的干员数）。三条来源，**优先级就是这个顺序**：
+   *   1. 本局的**口径**（`pack.json.variants` 的 `deploy: "max"`，DESIGN §28.39）—— 见构造函数里的 `_deployCap`；
+   *   2. 数据里的 `config.economy.deployCap`（官方 `maxBattleChessCnt` = 8）；
+   *   3. `DEFAULTS.deployCap`（一份被裁过的 data 也还能开局）。
+   * 没有口径、也没有数据时逐字回到今天那条：`posIntOr(economy.deployCap, DEFAULTS.deployCap)`。
+   */
+  get deployCap() { return this._deployCap ?? posIntOr(this.economy.deployCap, DEFAULTS.deployCap); }
   get equipPerChess() { return posIntOr(this.economy.equipPerChess, DEFAULTS.equipPerChess); }
   get maxArtsPerRound() { return posIntOr(this.economy.maxArtsPerRound, DEFAULTS.maxArtsPerRound); }
   get goldenCopies() { return posIntOr(this.economy.goldenCopies, DEFAULTS.goldenCopies); }

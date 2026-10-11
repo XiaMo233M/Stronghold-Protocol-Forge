@@ -181,7 +181,13 @@ export async function startServer(opts = {}) {
   });
   // The mod set (DESIGN §28.2): one identity per pack, one digest for the whole set. It travels in `welcome`, in
   // `/healthz` (lobby.stats) and in every BattleSpec, so the three can never disagree about what is running.
-  const workshopMods = (workshopLoaded.packs || []).map((p) => ({ id: p.id, hash: p.hash, layer: p.layer, combat: p.combat, api: p.api }));
+  // 口径声明（DESIGN §28.39）**随同一个 mod 条目走**：`modDigest` 只哈希 `[id, hash]` 对（shared/modIdentity.js:196），
+  // 所以把 `variants` 带在这里不改任何摘要；而 `Match` 从 `mods.packs[].variants` 合成这一局的轴表，正是靠它。
+  // 与 `voiceCdn` / `skins` 同一条纪律：**只在包真的声明过时才存在这个键**，没声明的包这一份与从前逐字节相同。
+  const workshopMods = (workshopLoaded.packs || []).map((p) => ({
+    id: p.id, hash: p.hash, layer: p.layer, combat: p.combat, api: p.api,
+    ...(Array.isArray(p.variants) && p.variants.length ? { variants: p.variants } : {}),
+  }));
   const workshopKitFiles = workshopKitFilesFor(workshopKits.modules, workshopDir);
   // 行为层相对 import 的服务面（§28.18）：包 id → 它的 `kits/` 目录。`/workshop-kits/` 靠它才服务得了一个 kit
   // 用 `./lib/util.js` import 的兄弟文件 —— URL 里没有 `kits/` 这一段，所以路由要把这一段加回去（server/http/static.js

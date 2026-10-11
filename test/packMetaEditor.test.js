@@ -131,7 +131,10 @@ describe('包元数据：读（GET /api/packs/support 的 meta 与候选）', ()
         fs.writeFileSync(abs, body);
       }
     };
-    write('refused-unknown-key', `${JSON.stringify({ id: 'refused-unknown-key', name: '被拒的包', content: ['chess'], variants: {} }, null, 2)}\n`,
+    // `official`（一个**没有**通道的键，docs/WORKSHOP.md §1.1）是「不认识的顶层键」这一条的样例。
+    // 从前这里写的是 `variants` —— 变体 / 口径层落地后它成了真字段（DESIGN §28.39），留着它这条测试
+    // 会去断言一个已经过期的判决。
+    write('refused-unknown-key', `${JSON.stringify({ id: 'refused-unknown-key', name: '被拒的包', content: ['chess'], official: {} }, null, 2)}\n`,
       { 'chess.json': `${JSON.stringify({ chess_ws_r: { chessId: 'chess_ws_r', name: 'R', tier: 3 } }, null, 2)}\n` });
     write('refused-broken-json', '{ "id": "refused-broken-json", ');
     write('goodone', `${JSON.stringify({ id: 'goodone', content: ['chess'] }, null, 2)}\n`,

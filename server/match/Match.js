@@ -173,6 +173,8 @@
 //                    fail, BOSS_CLOCK_MS)
 
 import { PHASE, modeIdFor, bossHitLimitFrom, MAX_SEATS } from '../../shared/constants.js';
+// 变体 / 口径层（DESIGN §28.39）：本局的轴表由各包的归一化声明合成，规则就是既有的「包 id 字典序小的赢」。
+import { mergeVariantDecls } from '../../shared/variants.js';
 import { layoutOf } from '../../shared/layout.js';
 import { Battle } from '../sim/Battle.js';
 import { DataSource } from '../sim/simdata.js';
@@ -243,6 +245,18 @@ export class Match {
     this.onEndFn = opts.onEnd;
     this.data = opts.data && typeof opts.data === 'object' ? opts.data : {};
     /**
+     * The content this match runs with (DESIGN §28.2): `{ digest, packs }`, or null for a plain install. It goes into
+     * every BattleSpec (`spec.mods`) so a field's result is always attributable to the content that produced it.
+     *
+     * 它同时是**口径**的来源（DESIGN §28.39）：`packs[].variants` 是每个包的归一化声明，`mergeVariantDecls`
+     * 按既有的「包 id 字典序小的赢」（DESIGN §28.3）合成出这一局的轴表。没有包、或没有包声明口径 ⇒ `[]`，
+     * 于是 `GameData` 的每一处读点都走今天那条缺省路径（逐字节不变）。
+     * @type {{ digest: string, packs: Array<object> }|null}
+     */
+    this.mods = opts.mods && typeof opts.mods === 'object' && typeof opts.mods.digest === 'string' ? opts.mods : null;
+    /** @type {Array<{ axis: string, default: string, by: string }>} */
+    this.variants = mergeVariantDecls(this.mods && Array.isArray(this.mods.packs) ? this.mods.packs : []).decl;
+    /**
      * Seat slots of this match (opts.seatCap, or how many seats the caller handed in). Only the boss-pool ceiling
      * reads it: a room bigger than the official 4 must not clamp its leader pool to the 4-seat `aliveFull`
      * (gamedata.js bossPoolShareOf; 百卫补丁 v0.3, docs/PS100-MIGRATION.md §2.4). It is NOT the variant switch — see
@@ -250,7 +264,11 @@ export class Match {
      */
     this.seatCap = Number.isFinite(opts.seatCap) && opts.seatCap >= 1 ? Math.floor(opts.seatCap)
       : (Array.isArray(opts.seats) && opts.seats.length >= 1 ? opts.seats.length : undefined);
-    this.gd = new GameData(this.data, this.modeId, this.seatCap ? { seatCap: this.seatCap } : {});
+    this.gd = new GameData(this.data, this.modeId, {
+      ...(this.seatCap ? { seatCap: this.seatCap } : {}),
+      // 本局的口径（DESIGN §28.39）。空数组 = 没有包声明口径 ⇒ `GameData` 一个字节都不动。
+      variants: this.variants,
+    });
     if (!this.difficulty) this.difficulty = this.gd.difficulty;
     this.isSolo = this.mode === 'solo' || this.gd.isSolo;
     /** 「AI 队友最后选择」 (opts.aiPicksLast, GitHub #338): humans draft before AI seats (MatchPhases.humansFirst) */
@@ -294,12 +312,6 @@ export class Match {
     this.battleInstallers = Array.isArray(opts.battleInstallers) && opts.battleInstallers.length ? opts.battleInstallers : null;
     /** @type {Array<{ id: string, pack: string, hash?: string, url: string }>} */
     this.workshopBattleModules = Array.isArray(opts.workshopBattleModules) ? opts.workshopBattleModules : [];
-    /**
-     * The content this match runs with (DESIGN §28.2): `{ digest, packs }`, or null for a plain install. It goes into
-     * every BattleSpec (`spec.mods`) so a field's result is always attributable to the content that produced it.
-     * @type {{ digest: string, packs: Array<object> }|null}
-     */
-    this.mods = opts.mods && typeof opts.mods === 'object' && typeof opts.mods.digest === 'string' ? opts.mods : null;
     this.timerScale = Number.isFinite(opts.timerScale) && opts.timerScale >= 0 ? opts.timerScale : 1;
     this.gameSpeed = Number.isFinite(opts.combatSpeed) && opts.combatSpeed > 0 ? Math.min(opts.combatSpeed, 200) : GAME_SPEED;
     /** layouts a bot rehearses per prep with the real simulation (bot.js; 0 = heuristic placement only) */

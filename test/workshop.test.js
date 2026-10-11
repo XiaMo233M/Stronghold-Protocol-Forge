@@ -398,9 +398,11 @@ describe('workshop: the overlay', () => {
     assert.equal(normalizePackManifest({ id: 'a/b' }, 'a/b').error, 'BAD_PACK_ID');
     assert.equal(normalizePackManifest({ id: 'x' }, 'y').error, 'PACK_ID_MISMATCH');
     assert.equal(normalizePackManifest({ id: 'x', content: [] }, 'x').error, 'EMPTY_PACK');
-    // `config` is deliberately not a workshop-contributable file
+    // `config` is deliberately not a workshop-contributable file —— 而且它**点名被拒**，不是被静默过滤掉。
+    // （2026-10-13：`content` 的成员资格从前是「不认识的安静丢掉」，于是 `{content:["config"]}` 只是变成一个空包；
+    //   现在它拿 `UNKNOWN_CONTENT_FILE`，作者看得见自己写的那件事没有通道。见 test/workshopVariants.test.js。）
     assert.equal(WORKSHOP_CONTENT_FILES.includes('config'), false);
-    assert.equal(normalizePackManifest({ id: 'x', content: ['config'] }, 'x').error, 'EMPTY_PACK');
+    assert.equal(normalizePackManifest({ id: 'x', content: ['config'] }, 'x').error, 'UNKNOWN_CONTENT_FILE');
     assert.equal(normalizeContentFile('chess', []).error, 'BAD_CONTENT');
     assert.equal(normalizeContentFile('chess', {}).error, 'EMPTY_CONTENT');
     assert.equal(normalizeContentFile('chess', { a: 'nope' }).error, 'BAD_RECORD');
@@ -415,7 +417,9 @@ describe('workshop: the overlay', () => {
   test('an unknown top-level key refuses the whole pack, and the reason lists the known fields', () => {
     // `skins` 曾经在这张名单里（0.10.0 时代「静默丢」的三个键之一）—— 皮肤层落地后它是**真字段**了，
     // 所以从这里移出，改由它自己的形状判据覆盖（见 workshopArt.test.js 的 skins 一节）。
-    for (const key of ['variants', 'official', 'config', 'meta', 'shared', 'theme', 'serverModules', 'hasAssets']) {
+    // `variants` 同样在 2026-10-13 的变体 / 口径层落地后成为**真字段**（DESIGN §28.39，形状见
+    // test/workshopVariants.test.js），所以它也移出这张名单 —— 留着它会让这条测试钉住一个已经过期的判决。
+    for (const key of ['official', 'config', 'meta', 'shared', 'theme', 'serverModules', 'hasAssets']) {
       const r = normalizePackManifest({ id: 'p', content: ['chess'], [key]: {} }, 'p', {});
       assert.equal(r.ok, false, `"${key}" must not be read past`);
       assert.equal(r.error, 'PACK_UNKNOWN_FIELD', `"${key}": ${r.detail}`);
@@ -428,7 +432,7 @@ describe('workshop: the overlay', () => {
 
   test('the refusal happens before any other judgement, and every known field still parses', () => {
     // 一个连键都不认识的清单，后面的字段级判据都是在猜它想说什么 —— 所以这一条排在最前面。
-    const both = normalizePackManifest({ id: 'p', content: [], variants: {}, operators: { char_x: {} } }, 'p', {});
+    const both = normalizePackManifest({ id: 'p', content: [], official: {}, operators: { char_x: {} } }, 'p', {});
     assert.equal(both.error, 'PACK_UNKNOWN_FIELD', 'the unknown key wins over EMPTY_PACK');
     // 闭集里的每一个键都不会因为这一刀被误拒（`id` / `name` … `routes` 各有自己的判据）。
     const ok = normalizePackManifest({
