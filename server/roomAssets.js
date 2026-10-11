@@ -23,22 +23,25 @@ import { deepFreeze } from './data.js';
  *   official: Record<string, any>,    官方数据（无工坊叠加）
  *   processData: Record<string, any>, 进程级那一份（官方 + 所有已加载包）
  *   packs: Array<any>,                已加载（且已裁剪）的包
- *   kits: Record<string, Function>,   进程级的 kit 映射
+ *   kits: Record<string, Function>,   进程级的 kit 映射（干员键）
  *   kitOwners: Map<string, string>,   kit id → 包 id（`loadWorkshopKits` 的 `owners`）
- *   modules: Array<any>,              kit 的模块清单（带 `pack`）
+ *   tokenKits: Record<string, Function>, 进程级的 summon kit 映射（token 键，docs/WORKSHOP.md §4.7）
+ *   tokenKitOwners: Map<string, string>,  token kit id → 包 id（`loadWorkshopKits` 的 `tokenOwners`）
+ *   modules: Array<any>,              kit 的模块清单（带 `pack`，token 那一半带 `kind: 'token'`）
  *   log?: any,
  * }} opts
- * @returns {{ forRoom: (modSet: { digest: string, packs: Array<{ id: string }> }|null) => { data: any, kits: any, modules: any }, size: () => number }}
+ * @returns {{ forRoom: (modSet: { digest: string, packs: Array<{ id: string }> }|null) => { data: any, kits: any, tokenKits: any, modules: any }, size: () => number }}
  */
-export function createRoomAssets({ official, processData, packs, kits, kitOwners, modules, log = null }) {
+export function createRoomAssets({ official, processData, packs, kits, kitOwners, tokenKits = null, tokenKitOwners = null, modules, log = null }) {
   const list = Array.isArray(packs) ? packs : [];
   const allIds = new Set(list.map((p) => p.id));
   const processAssets = {
     data: processData,
     kits,
+    tokenKits,
     modules: Array.isArray(modules) ? modules : [],
   };
-  /** @type {Map<string, { data: any, kits: any, modules: any }>} */
+  /** @type {Map<string, { data: any, kits: any, tokenKits: any, modules: any }>} */
   const cache = new Map();
   /** digest → the materialised set (the HTTP face of a room, `/room-data/<digest>/…`). Only real digests land here. */
   const byDigest = new Map();
@@ -62,16 +65,24 @@ export function createRoomAssets({ official, processData, packs, kits, kitOwners
       const { data: merged, report } = applyWorkshop(official, chosen);
       log?.info?.(`[room-assets] materialised ${chosen.length} pack(s) for a room (${workshopSummary(report)})`);
       for (const e of report.errors) log?.warn?.(`[room-assets] ${e.pack}: ${e.reason}`);
-      // 只带这个房间声明的那几个包的 kit：进程级的映射里每个 kit 都记着它的包（`owners`）。
+      // 只带这个房间声明的那几个包的 kit：进程级的映射里每个 kit 都记着它的包（`owners` / `tokenOwners`）。
+      // 两个键空间各裁各的 —— 合并成一张表就会让「一个房间声明了 A 包」连 B 包的 summon kit 一起带上。
       /** @type {Record<string, Function>} */
       const roomKits = {};
       for (const [id, fn] of Object.entries(kits || {})) {
         const owner = kitOwners && typeof kitOwners.get === 'function' ? kitOwners.get(id) : null;
         if (owner && ids.includes(owner)) roomKits[id] = fn;
       }
+      /** @type {Record<string, Function>} */
+      const roomTokenKits = {};
+      for (const [id, fn] of Object.entries(tokenKits || {})) {
+        const owner = tokenKitOwners && typeof tokenKitOwners.get === 'function' ? tokenKitOwners.get(id) : null;
+        if (owner && ids.includes(owner)) roomTokenKits[id] = fn;
+      }
       const built = {
         data: deepFreeze(merged),
         kits: Object.freeze(roomKits),
+        tokenKits: Object.freeze(roomTokenKits),
         modules: Object.freeze((Array.isArray(modules) ? modules : []).filter((m) => m && ids.includes(m.pack))),
       };
       cache.set(key, built);

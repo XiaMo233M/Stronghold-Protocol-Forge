@@ -229,8 +229,36 @@ export const EVENT_BUFFER_CAP = 50000;
 
 /** Nested hook emits deeper than this are skipped (content recursion, e.g. a `damaged` handler dealing damage). */
 export const MAX_HOOK_DEPTH = 32;
-/** spawnEnemy refuses to exceed this many living enemies on one field (runaway content spawn loops). */
+/**
+ * `spawnEnemy` refuses to exceed this many living enemies on ONE field with ONE player on it (runaway content spawn
+ * loops). It is also the PER-PLAYER allowance of a field several players share: see aliveEnemyCap.
+ *
+ * The flat rail was measured too tight for a 100-seat match (百卫补丁 v0.3, docs/PS100-MIGRATION.md §2.3): a single
+ * board already carried ≥ 600 living enemies, so the shared 联防 field hit the refusal. Raising it here would change
+ * the guard for every existing scale, and `test/sim/robustness.test.js` pins the single-player rail at exactly this
+ * value — so the scaling lives in aliveEnemyCap instead and this number keeps its meaning.
+ */
 export const MAX_ALIVE_ENEMIES = 600;
+/**
+ * Per-player allowance of the living-enemy cap. It EQUALS `MAX_ALIVE_ENEMIES` by design: one player's own board is
+ * the unit the rail was calibrated on, and a field shared by `n` players may legitimately carry the sum of what `n`
+ * boards can (server/match/match/combat.js gives every player a field of exactly one player; the 联防 field is the
+ * only shared one). A deployment that measured a higher per-board peak raises this one number.
+ */
+export const MAX_ALIVE_ENEMIES_PER_PLAYER = MAX_ALIVE_ENEMIES;
+/**
+ * The living-enemy cap of a shared field with `players` players on it: `MAX_ALIVE_ENEMIES × players`.
+ *
+ * `players = 1` (every normal / boss / hidden field, solo or co-op — one field per player) returns EXACTLY
+ * `MAX_ALIVE_ENEMIES`, i.e. the guard of every existing scale is unchanged, to the unit. Only the 联防 field, which
+ * carries one player per helper (≤ `gd.unite.maxHelpers`), gets the multiplied rail — and 600 × 2 still exceeds the
+ * ≤ 600 a single board was ever measured to reach, so even there it stays a runaway guard rather than a gameplay
+ * limit. A missing / unparsable count falls back to one player.
+ */
+export const aliveEnemyCap = (players) => {
+  const n = Number(players);
+  return MAX_ALIVE_ENEMIES_PER_PLAYER * (Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1);
+};
 
 /** Heal-over-time / regen events are aggregated and only emitted when they reach this amount. */
 export const REGEN_EVENT_MIN = 1;

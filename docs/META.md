@@ -51,7 +51,7 @@ LOBBY → INFO_CHECK (co-op 25 s; solo and single-human matches untimed; all hum
                         shop reroll (frozen slots kept in place, then unfrozen), the round's wave generated (preview),
                         onRoundStart dispatch
      [SP_DRAFT]         r ∈ modes[m].spRounds (机变)
-     PREP               onPrepStart; co-op timer rounds[r].prepTime, solo / single human untimed; ends when every alive seat is ready
+     PREP               onPrepStart; co-op timer rounds[r].prepTime (else the infoCheck 25 s guard), solo untimed; ends when every alive seat is ready
      (prep end)         onPrepEnd, the temp pieces due at this prep resolved (tempDue; what arrived after Ready or
                         during onPrepEnd waits for the next prep), reward offers expire, unfrozen shop cleared, funds lost
                         (band_cannot keeps them), boss round: Σ activated layers recorded for the hidden-core check
@@ -83,19 +83,31 @@ legal from R14 into R15. The client mirrors it
 | band draft turn | `Match.BAND_TURN_SECONDS` 50 (owner official-play report, 2026-10-10) (= `timers.bandTurn`), the step's only countdown: `m.public.deadline` = the current turn's end, no step cap (`timers.bandDraft` 50 = the official whole step, informational) (co-op; solo / single human untimed) |
 | BATTLE_CHECK | `battleCheck` 3 |
 | 机变 first / other pickers | `spFirst` 30 / `spTurn` 16 (co-op; solo / single human untimed) |
-| PREP | `modes[m].rounds[r].prepTime` (co-op; solo / single human untimed) |
+| PREP | `modes[m].rounds[r].prepTime`, else the `infoCheck` 25 s guard (co-op AND a single human — the prep waits on a human's Ready, so it can never be left untimed; solo untimed) |
 | COMBAT / 联防 | `modes[m].rounds[r].combatTimeLimit` (= the level's `maxPlayTime`) real seconds = 2× that in game seconds |
-| 最终攻势 / 隐秘核心 | no hard stop: countdown `rounds[r].levelMaxPlayTime` 120 real s; overtime drain from `bossOvertimeAfter` 150 real s, 1 team LP per real s (§3) |
+| 最终攻势 / 隐秘核心 | no hard stop: countdown `rounds[r].levelMaxPlayTime` 120 real s; overtime drain at 120 real s for all-human teams, configured 150 real s with a non-departed AI teammate; 1 team LP per real s (§3) |
 | ROUND_START / after combat / SETTLE | 2 / 1.5 / 3 (presentation delays, `Match.DELAYS`) |
 | bot action delay | 0.9 s (+0.35 s per seat) |
 
 A match with a single human seat at the start (独立模拟, or a 同盟 room started alone / with AI teammates only:
-`Match.loneHuman` → `Match.soloUntimed`, user playtest #4 item 3) times nothing outside its battles: no INFO_CHECK /
-band draft / 机变 / PREP deadline, and BATTLE_CHECK / ROUND_START / SETTLE run silently (deadline 0); the co-op rules
-(draft order and skip, 6 机变 cards, 联防) stay.
+`Match.loneHuman` → `Match.soloUntimed`, user playtest #4 item 3) times nothing outside its battles — with ONE
+exception, the co-op PREP (百卫补丁 v0.3 移植, docs/PS100-MIGRATION.md §5): PREP ends on every alive seat's Ready
+(`Match.allReady`), so a lone human's silence stalled the match forever unless a deadline carried it forward. A SOLO
+match keeps its untimed prep (there the phase has no Ready gate to wait on). So: no INFO_CHECK / band draft / 机变 /
+solo-PREP deadline, a co-op PREP deadline for the waiting human, and BATTLE_CHECK / ROUND_START / SETTLE run silently
+(deadline 0); the co-op rules (draft order and skip, 6 机变 cards, 联防) stay.
 `m.public.deadline` is the absolute end of the current timer (ms epoch, 0 = untimed; combat: estimated end at 2×;
 最终攻势 / 隐秘核心: the boss level's `levelMaxPlayTime` countdown, 120 real s — the battle goes on past it — with
-`m.public.overtimeAt` = when the overtime drain starts, 150 real s; both on the field clock).
+`m.public.overtimeAt` = when the overtime drain starts: 120 real s for all-human teams, 150 real s with an AI teammate at fight start; both on the field clock).
+
+**修订 playtest #4 item 3（2026-10-11，百卫补丁 v0.3 移植）**：那条决定原本把「独狼同盟房（1 真人 + N AI）在
+准备阶段**永远等下去**」当成正确行为 —— 那是**缺陷**，不是意图：`maybeEndPrep` 要求每个存活座位 ready，而
+`soloUntimed` 又把这个房间的准备时限压掉了，于是那个真人**不按 Ready 就永远不会进对局**。现在：
+**按数据本来就声明的 `prepTime` 计时**（这是它一直该有的），只有**数据没有声明时限**时才退到
+`timers.infoCheck`；SOLO 仍不限时。**连带修订第二条既有决定**：`test/match/verification-slices.test.js` 里
+「抽样校验保留被接受结果」那条断言原本读 `m.lastResults`（**每回合重建的 Map**，跨回合必被 `startCombat()`
+清空），它只有在比赛被上述缺陷卡住时才可能成立 —— 现改到**该场已接受的结果对象**上（同一个断言、真正承载它
+的对象），并新增一条**正向断言**「独狼同盟房必须有准备时限」把缺陷的消失钉死（`test/ps100-migration.test.js` §5）。
 
 ### 1.1 Band draft
 Co-op: random order (all seats, bots included), one pick per turn, ONE countdown: `BAND_TURN_SECONDS` 50 s per turn,
@@ -394,6 +406,104 @@ the meantime (header bullet of `server/lobby.js`, test/roomKeep.test.js).
 **永不落盘**：聊天只活在房间对象的**内存环形缓冲**里（`CHAT_LIMITS.history` 条，`Room.addChat`），
 重连时整份回放给那一个会话。这条路不碰任何持久化 —— `/healthz` 与既有的快照白名单里都没有聊天字段，测试用一个
 哨兵字符串钉住这一点。房间被回收（`disposeRoom`）时缓冲随之消失。
+
+### 1.9 本房座位上限 (variable seats, 业主裁决 B5)
+
+**三层，各有唯一真源**（`shared/constants.js`，100 人版移植的地基见 [PS100-MIGRATION.md](PS100-MIGRATION.md) §3 的
+第 1 项与第 5 项 (D)）：
+
+| 层 | 谁定 | 形状 | 缺省 |
+| --- | --- | --- | --- |
+| 这台服务器**允许**多少座 | 部署方（环境变量） | `maxSeatsFrom(process.env)` ← `SP_MAX_SEATS`；成为 `LOBBY_DEFAULTS.maxSeats` | `MAX_SEATS` = **4**（官方房间 1–4 人） |
+| **本房**开多少座 | **房主**（大厅滑杆） | `room.create.seatCap`（可选，只作用于 `coop`） | 不发 / `null` ⇒ 服务器上限 |
+| 座位数的**下限** | `MIN_SEATS` = **2** | 协议范围 `[MIN_SEATS, SEAT_CAP]` | —— |
+
+**为什么下限是 2 而不是 1**：官方房间是 1–4 人，而「只有一张座位卡」这个形状**已经有自己的模式** ——
+`mode: 'solo'`（独立模拟：恰好 1 个真人、永不加 AI；`room.addBot` 与第二次 `room.join` 都被拒）。允许
+`coop` 房 `seatCap = 1` 等于给同一件事开第二个说法，却没有 solo 那套规则兜着。定 2 就保住了
+「**coop ⇒ ≥ 2 座**」这条**今天所有房间都满足**的不变量。`Room` 类本身仍然接受任意 `seatCap ≥ 1`（下限是
+「客户端能**要**什么」的规则，不是类的新不变量）；部署方若把 `SP_MAX_SEATS` 定到下限以下，`clampSeats` 会把下限
+收窄到上限，而不是留一个空区间。
+
+**服务端两层，缺一不可**（`server/lobby.js` `create`）：
+
+1. **线上判**（`shared/protocol.js` `room.create.seatCap`）：`isInt(v, MIN_SEATS, SEAT_CAP)`，越界 / 垃圾值 ⇒
+   `error BAD_MSG`，`detail` 点名 `bad field seatCap`。**明确拒绝，不静默钳制** —— 静默钳制会让「我明明选了 100」
+   变成一个玩家自己解释不了的 4 座房间。`SEAT_CAP` 就是 `room.removeBot` / `room.kick` 用的那一个号，所以
+   「这个座位地址有没有」与「这个房间能不能有」永远是同一个数。
+2. **引擎再钳一次**（`clampSeats(seatCap, this.opts.maxSeats)`）：给**不走协议**的调用方兜底 ——
+   `server/matchmaking.js` 的快速匹配、包钩子、测试都直接调 `create`。房间建出来座位数就定死（`Room` 从不
+   resize），所以这条底线必须在引擎里，而不是指望调用方。**绝不信任客户端**。
+
+**只作用于 `coop`**：`solo` 房忽略 `seatCap`。原因是逐字节的 —— solo 房今天也是按 `opts.maxSeats` 建座位数组的
+（**帧里就有 4 个 `seats` 条目**，客户端 `normalizeSeats` 按 `mode: 'solo'` 只画一张卡），改掉它就会移动每一个
+solo 帧。
+
+**协议面**：
+* `room.create { mode, difficulty, seatCap? }`（**仅 `coop` 认**；`MIN_SEATS` 2 … `SEAT_CAP`）。判据与
+  `$optional` **两条都要有**（`seatCap` 已登记进 `room.create.$optional`）：`$optional` 管「键根本没出现」，判据里的
+  `v === null` 管「显式给了 null」。那张表还是**作者可见的表面** —— `server/modDispatch.js` 把它复制进交给包的
+  `c2s`，漏一条，包就会把一个合法的 `room.create` 当成缺字段。
+* `room.state.seatCap`：**只在容量 ≠ `MAX_SEATS` 时**才出现（上一刀定的规矩，客户端 `normalizeSeats` 按它补卡，
+  上限 256 防呆）。所以一个 4 座房的帧与今天**逐字节相同** —— 键、键序、值都不动。
+* `welcome.maxSeats`：**只在这台服务器的上限 ≠ `MAX_SEATS` 时**才发（与 `welcome.mods` / `modPanels` /
+  `modAssets` 同一条「不声明就不多一个键」的规矩）。房主滑杆的**范围上限**取自这里：客户端绝不自己编一个上限。
+  没收到就当 `MAX_SEATS`（旧客户端 / 4 座服务器），它只会**少要**，不会发出任何服务器会拒的请求。
+
+**UI（只在房主界面出现）**：大厅建房框里的滑杆（`public/js/screens/lobby.js` `SeatCapPicker`，
+样式 `public/css/screens/lobby.css` `.seat-cap*`）。显示**当前值**与**服务器允许的范围上限**；`coop` 才有，
+且范围上限 ≤ 下限时整块不渲染。**默认位置就是服务器上限** —— 没动过 ⇒ 请求里**根本没有 `seatCap` 这个键**，
+也就是这条特性出现之前客户端一直发的那个请求。**房间页（`room.js`）另有一个房主专属的滑杆**（`SeatCapSetter`，
+下限跟着房间里现有人数走），建房**之后**也还能改 —— 见 §1.9a。
+
+**快速匹配（`server/matchmaking.js`）不动，且这是决定**：`room.queue` 的 `need` 就是这台服务器的上限
+（`queue.size` 缺省 = `lobby.opts.maxSeats`），而被建房那一刻**还没有房主**（最早排队的陌生人在建完之后才成为
+房主）。替他挑一个数，要么是猜一个队列里没人同意的值，要么是悄悄把「你排的那个队」开成更小的房。所以快速匹配的
+房间**保持服务器上限**，也就是 `room.queue` 当时承诺的那个数。房主想开小屋就自己建房再邀请。
+
+**为什么本房容量**不**继续传给血池缩放（业主裁决 2026-10-11，记在这里免得后人以为漏了）**：`GameData.seatCap`
+← `Match.seatCap` ← `opts.seatCap`（`startMatch` **没传**）或 `opts.seats.length` = `room.seats.filter(Boolean).length`
+= **实际入座人数**。这是对的：**血池按「实际入座人数」缩放，而不是按「容量」** —— 容量回答的是「**允许**多少人」，
+不是「多少人在打」。一个容量 40 的房只坐了 6 个人，血池就该按 6 人份；而 32 人满房仍有 `max(aliveFull, 32) = 32`，
+**原始缺口已经被覆盖**，不需要容量参与。本房容量 ≤ `MAX_SEATS`（2 或 3）时更是逐单位不变：`max(4, n) = 4`。
+（`server/sim/battle/spawns.js` 的 `aliveEnemyCap(this.players.length)` 同理读的是**场上人数**，与容量无关。）
+
+**容量 4 的逐字节承诺**：`test/roomSeatCap.test.js` §2 用三种方式钉住 —— 4 座 `room.state` 的**整串字面量**、
+**键表**（`['t','code','hostId','mode','difficulty','aiPicksLast','chatMode','inMatch','seats','spectators']`，
+顺序也不许漂）、以及线上「显式写 `seatCap: 4`」与「什么都不写」两个请求的帧在**抹掉房间码之后完全相同**。
+上一刀的 `Object.hasOwn(frame, 'seatCap') === false` 断言（`test/ps100-migration.test.js` §1 (D)）原样保留，
+**没有放松**。缩容功能落地后这条承诺仍然成立：`4 → 8 → 4` 往返之后帧**逐字节**回到起点（键重新消失）。
+
+### 1.9a 建房后仍可改容量 (`room.setSeatCap`)
+
+**房主可以在房间里改自己这一房的容量**（`room.setSeatCap { code, seatCap }`，业主裁决 2026-10-11）。这条能安全存在，
+靠的是**一条守卫把「被砍掉座位上的人怎么办」这个问题本身消灭掉**：
+
+> **新上限不得小于房间内现有人数（真人 + AI）** ⇒ 缩容只可能砍掉**空**座位 ⇒ **永远不可能踢掉任何人**。
+
+* 守卫有**两个**判据，都要过：人数（裁决书口径）与**最高被占座位号 + 1**。后者才是**充分**的那一条 —— 座位允许有
+  空洞（创建者永久离开后 `seats[0]` 是 null，而 `seats[2]` 还坐着人），只数人数会让 `seatCap = 2` 砍掉 2 号位的人。
+  实现见 `server/lobby.js` `Lobby.setSeatCap` 与 `Room.seatCapTo`（后者自己再校一遍「没有非空座位落在新上限之外」，
+  因为「缩容丢人」这种错误一旦发生是**静默**的）。
+* **不许静默钳制**。两个错误码**分得开**，因为它们要的是两个不同的动作：
+  * `BAD_MSG` + `detail "bad field seatCap"` —— **数字本身不合法**（越界 / 垃圾值，含超过本服务器上限）⇒ 去改数字；
+  * `SEAT_CAP_TOO_SMALL` —— **数字合法但这个房间装不下**（低于现有人数）⇒ 去请人离开，或者就别缩。
+  另外 `NOT_HOST`（只有房主）、`NOT_IN_ROOM`（`code` 不是你当前所在的房间 —— 停在旧帧上的标签页因此改不到别人
+  的房间）、`ROOM_STARTED`（模拟进行中不改：房间的 `seats` 是**大厅**的，正在跑的 Match 拿的是自己那份副本）、
+  `BAD_TARGET`（solo 房没有可选的座位数）。
+* 改完**广播 `room.state`** 给房里每个人；因为那条「容量 ≠ `MAX_SEATS` 才带 `seatCap`」的规矩没变，**调回 4 时那个键
+  会消失**，`4 → 8 → 4` 与改之前**逐字节相同**。
+* **UI**：房间页的房主多一个滑杆（`public/js/screens/room.js` `SeatCapSetter`），**只在房主界面出现**，下限跟着
+  **房间里现有人数**走（不是死板的 2）、上限是服务器上限。取值域由 `seatCapRoomRange` 算，与服务端的守卫**同一条
+  规则**，所以房主**拖不到**一个会被拒的值。它住在既有的 `.room-bar__opts` 里，是**一行**紧凑形式 —— 座位网格
+  （`.seats` / `.seats--dense`）与房间版式**一个字节都没动**。
+* **取值域那条边（两端算的底不同）**：滑杆的**最低合法值**是客户端用它**手上那份帧**算的 —— `seatCapRoomRange`
+  先把 `seats` 按帧里的 `seatCap` 补到 `MAX_RENDERED_SEATS`（256）那么长（`normalizeSeats` 截到 256），于是
+  `Range.min = max(MIN_SEATS, 最高被占座位号 + 1)` 在**空座位被补出来**时会被抬高；而服务端 `Lobby.setSeatCap`
+  数的是**真实的 `seats` 数组**。理论分歧只在「帧里座位数 > 256」时出现（服务端点名拒 `SEAT_CAP_TOO_SMALL`、
+  客户端 toast）—— **当前不可达**：上限来自 `SP_MAX_SEATS`，且滑杆本身只画到 `welcome.maxSeats`。
+* **不变量（测试钉死）**：改容量前后，`seats` 里非空条目的**集合与座位号都不变**、没有人被移出、没有人的 `seat` 号
+  变化（`test/roomSeatCap.test.js` §9「THE INVARIANT」对 4→8→5→4→6→4 每一步都验一遍）。
 
 ---
 
@@ -777,8 +887,9 @@ Any `choice:` handler whose EffectRef reuses its own key must guard like this (o
   which replaces the fixed pool of 「保持固定血量」 (config `bossHpScale.perPlayer: false` with `solo: 0.25` restores it;
   its optional × alive / 4, `aliveScaling`, stays off); leaders are never scaled by `enemyScale`, their parts and escorts
   keep their own HP. The merged team LP loses leaks (`lpr`), the overtime drain
-  (`bossTurnHpReduceTime` 150 counts REAL seconds, like the boss level's 120 s maxPlayTime that runs out first — the
-  battle goes on — so 1 LP per real second from 150 real s = 300 game s on the 2× field clock; `gd.bossOvertimeDue`)
+  (the boss level's 120 real-second countdown for all-human teams; `bossTurnHpReduceTime` 150 real seconds only with
+  a non-departed AI teammate at fight start. The first deduction follows one complete real second after that threshold;
+  `gd.bossOvertimeDue` receives the fight's frozen threshold — DESIGN §31.1)
   and leader "扣除目标生命" effects (the sim's `lpLoss` hook: boss_7 Doom, 斥退 …); after every change it is written back
   to the alive players as shares of the LP each brought in (`lpAtFinal`, largest remainder), so `lp` in m.public /
   m.private / m.result is what is left (Σ = team LP).
@@ -862,8 +973,7 @@ leaker's own capsule / row (`ui/hud.js uniteRemaining`) and the leakers' team ro
 
 ## 5. Views (DESIGN §8.2 / §8.3) and deviations
 
-`m.public` (throttled ≤ 10/s, only sent when it changed) carries the DESIGN fields plus: `drawnDisabledBonds` (the 3+4
-drawn set; `disabledBonds` = drawn ∪ the mode's static list), `hiddenBossId`, `bossRound`, `hiddenRound`, `spRound`,
+`m.public` (throttled ≤ 10/s, only sent when it changed) carries the DESIGN fields plus: `drawnDisabledBonds` (the 3+4drawn set; `disabledBonds` = drawn ∪ the mode's static list), `hiddenBossId`, `bossRound`, `hiddenRound`, `spRound`,
 `combatMode` (`'client'` | `'server'`), `fields[].progress { killed, total, done }` (teammates' progress UI), `paused`
 (solo pause, §1.3a),
 `players[].autoplay`, `players[].uniteLeft` (UNITE, leakers only: their enemies still standing, uncapped — §4),
@@ -884,6 +994,35 @@ PREP ready/acting · COMBAT/boss combat/done · UNITE helping/done · others don
 `m.private` = DESIGN §8.3 exactly (sent per player whenever it changed). `nextEnemies` = the current round's wave
 (+ the player's bounty enemies, tag `bounty`; boss rounds: the player's boss field, tag `boss` — the leader's entry with its
 spawn tile `start`, where the boss-field prep shows it —, + its bounties).
+
+**Incremental `m.public` frames** (DESIGN §8.2.1; the 40-seat load work): the frame has two forms and a client merges them
+into the complete materialized view above — a FULL frame (the whole view: the first frame and every reset point) and a
+DELTA frame (`delta: true`: only the changed top-level keys, `gone: [...]` for the ones that disappeared, one `players`
+patch per changed row — `playerId` plus the changed fields, `gone: true` for a departed seat — and `fields` per changed
+entry: only what changed, a new entry whole, `gone: true` for one that left the list). Inside a row `null` means "the key
+is gone" (the client deletes it; a row `null` in a FULL frame materializes the same way, since every consumer reads such a
+field as unset). `serverNow` rides every frame and is not part of the diffed state. Reset points: the first frame, any
+membership change (join / leave / disconnect / reconnect / spectator: the ROOM shares one baseline, so the next frame is
+full for everybody), a broadcast the sockets did not all take, and the keepalive (every `PUBLIC_FULL_EVERY` = 32nd
+consecutive delta). A client that cannot merge (a delta with no baseline, a patch naming no seat) must not apply it
+half-way: it sends `g.publicFull`, which answers that client with a full frame. `MatchViews.publicView` still builds the
+complete view (tests and tools call it directly); `server/viewsDelta.js` diffs two of them and
+`MatchMessaging._maybeSendPublic` decides full vs delta; the client's merge is `public/js/matchDelta.js`. The acceptance
+test is `test/match/public-delta.test.js` + `test/match/public-delta-match.test.js`: a real match's stream is replayed
+through the browser's own merge and compared field for field with the full frames, at 4 and at 40 seats.
+
+This change bumps `PROTOCOL_VERSION` to **2** (`shared/constants.js`): a page that predates the merge would read a delta's
+`players` list as the whole roster (a visibly wrong player list, not merely a stale one). `hello` declares the number, the
+server refuses a mismatch at the handshake (`error BAD_MSG` 'version mismatch', no session created) and the browser renders
+that as 「请刷新页面」 — an open tab across a deployment is told to refresh instead of entering a match it cannot read
+(`test/match/connection.test.js`: "a page from the previous wire format is refused…"; `test/version.test.js` pins the
+number).
+
+One existing assertion changed meaning with this work (semantics, not wording): in `test/match/connection.test.js`'s
+`m.public` shape check, `players[].bandId` / `players[].fieldId` / `players[].ready` went from "the key must be present"
+to "a value or absent" (`p[k] == null || k in p`). The engine writes those two as an explicit `null` when unset, while the
+incremental frame materializes "unset" and "the key is gone" as the same absent key — if they stayed two different states,
+a merged client row could never equal the full frame's row. Every other row field still must be present.
 
 Bond layers in the views (DESIGN §20.15): from the end of COMBAT (`_finishCombat`, every normal result in) until SETTLE,
 `m.private bonds` and `m.public players[].bonds` add the finished battle's IN_BATTLE gains (`PlayerState.pendingLayerGains`
@@ -1011,3 +1150,24 @@ requests cannot affect a new opening. See DESIGN §28.21 for cancellation and ti
 `botEmotes.js` is isolated from bot decisions and RNG. It sends the existing `m.emote` only in mixed matches, under
 normal cooldown/whitelist rules; `SP_BOT_EMOTES=0` disables it. The cooperation score in `bot.js` and these cosmetic
 choices are explicitly [ASSUMED]; DESIGN §28.15–16 records the source and validation.
+
+### Community follow-up contracts (DESIGN §31)
+
+- `triggerGarrisons` includes `source.copiedFrom` for copied effects. Only Ptilopsis copying Yu/Gladiia at SERVER_PREP_START skips the three-in-row prerequisite, as confirmed by the original-game recording; Saria and other copies keep existing conditions.
+- Jessica's placeable shield uses `shared/summonPlacement.js` for the four orthogonal neighbors, independent of her selected skill, facing or module. Client preview and server moves/swaps use the same grid.
+- Client result statistics resolve DIY and stand-in names from the authoritative BattleSpec. A client cannot replace those names.
+
+### Shared inventory after 0.2.3 (DESIGN §31.8)
+
+`SharedItemPool` derives equipment availability from current ownership across all players: ordinary 1, upgraded 2.
+Equips, merges and returns cannot lose reservations. Consumptions/destruction release ownership [ASSUMED removal
+interpretation]. Shop/reward displays reserve nothing; rejected exhausted purchases retain funds and offers.
+整备 upgrades the purchased item only when `left` still has the golden's second copy; otherwise the item stays
+normal and the charge remains.
+`m.public.sp.cards[].soldOut` disables duplicates when a preceding choice used the final copy; timer/bot choices
+use the same availability. Non-shop effect-only equipment is unlimited.
+
+Operator capacities use measured single-player exceptions and twice those counts in co-op; DIY remains private.
+`take(..., { overdraw: true })` records full occupation of a granted/promoted elite or a Mimic copy beyond capacity;
+normal takes remain bounded. Negative internal balance is a deficit, never negative available stock. Existing
+item selection probabilities and explicit grant weights remain unchanged.

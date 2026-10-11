@@ -19,7 +19,7 @@ import { sanitizeName, TokenBucket, SessionRegistry, clientAddress, normalizeIp,
 import { StubMatch as Match } from '../server/match/StubMatch.js';
 import { Match as RealMatch } from '../server/match/Match.js';
 import { TestClient } from './helpers/wsClient.js';
-import { ERR, MAX_SEATS, MAX_SPECTATORS, PHASE, EMOTES } from '../shared/constants.js';
+import { ERR, MAX_SEATS, MAX_SPECTATORS, PHASE, EMOTES, PROTOCOL_VERSION } from '../shared/constants.js';
 
 const CODE_RE = new RegExp(`^[${CODE_ALPHABET}]{4}$`);
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -451,7 +451,9 @@ describe('websocket lobby', () => {
     assert.notEqual(other.token, w.token);
 
     await expectError(c, { t: 'hello', name: '   ' }, ERR.BAD_MSG);
-    await expectError(c, { t: 'hello', name: 'x', version: 999 }, ERR.BAD_MSG);
+    // a wire number this build does not speak: refused at the handshake (the stale-page gate, DESIGN §8.2.1)
+    await expectError(c, { t: 'hello', name: 'x', version: PROTOCOL_VERSION + 997 }, ERR.BAD_MSG);
+    await expectError(c, { t: 'hello', name: 'x', version: PROTOCOL_VERSION - 1 }, ERR.BAD_MSG);
     await expectError(c, { t: 'hello', name: 'x'.repeat(13) }, ERR.BAD_MSG);
     // repeated hello updates the name, keeps identity
     const again = await c.hello('Renamed');
@@ -1055,8 +1057,10 @@ describe('websocket lobby', () => {
       const a = await pool.player('Twin');
       const before = srv.registry.size;
       const b = await pool.connect();
-      b.send({ t: 'hello', name: 'Twin', token: a.token, version: 1 });
-      for (let k = 0; k < 5; k++) a.send({ t: 'hello', name: 'Ghost', version: 1 });
+      // the wire number this build speaks (`PROTOCOL_VERSION`), never a literal: a deliberate bump must not leave this
+      // suite handshaking with a stale page's number (which the server refuses — DESIGN §8.2.1)
+      b.send({ t: 'hello', name: 'Twin', token: a.token, version: PROTOCOL_VERSION });
+      for (let k = 0; k < 5; k++) a.send({ t: 'hello', name: 'Ghost', version: PROTOCOL_VERSION });
       a.send({ t: 'room.create', mode: 'coop', difficulty: 'NORMAL' });
       const info = await a.closed;
       assert.equal(info.code, 4001);

@@ -297,7 +297,9 @@ describe('chess authoring: the derived pair is playable end to end', () => {
     assert.ok(gd.visibleChess.includes('chess_ws_abyss_hunter_a'), 'it must be shop-eligible');
     assert.equal(gd.tierOf('chess_ws_abyss_hunter_a'), 5);
     assert.equal(gd.goldenIdOf('chess_ws_abyss_hunter_a'), 'chess_ws_abyss_hunter_b');
-    assert.equal(new SharedPool(gd, {}).cap('chess_ws_abyss_hunter_a'), 8);
+    // co-op (`mode_multi_hard`): 0.2.4 doubles the shared stock (`economy.coopPoolMultiplier: 2`), so this
+    // tier-5 operator holds 16 = 8 x 2; solo still holds the base 8.
+    assert.equal(new SharedPool(gd, {}).cap('chess_ws_abyss_hunter_a'), 16);
 
     // it resolves in the sim and survives a real battle
     const h = makeMatch({ mode: 'solo', difficulty: 'FUNNY', humans: 1, seed: 31, data });

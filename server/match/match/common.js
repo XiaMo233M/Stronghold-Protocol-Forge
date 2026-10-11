@@ -29,3 +29,12 @@ export const DELAYS = Object.freeze({
  * the remake's (50 s per turn per the owner's 2026-10-10 official-play report). It is also the step's only countdown (m.public.deadline = draft.turnDeadline). × timerScale.
  */
 export const BAND_TURN_SECONDS = 50;
+
+/**
+ * Self-healing keepalive of the incremental `m.public` frame (DESIGN §8.2, incremental frame): after this many
+ * consecutive DELTA frames the next one is a FULL frame, so a client that lost a delta or mis-merged one (its state would
+ * otherwise drift forever) is back on the engine's state within about a second at the 10/s throttle. The client ALSO
+ * asks on its own (`g.publicFull`) when it notices it cannot merge — the two are independent, and this one needs no
+ * client cooperation at all.
+ */
+export const PUBLIC_FULL_EVERY = 32;

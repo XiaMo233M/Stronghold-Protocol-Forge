@@ -4,11 +4,15 @@
 // Rules (the choices where DESIGN is silent are marked ▸):
 //   * Rooms are keyed by 4-letter codes from an unambiguous alphabet (no I/O, letters only). Join codes are
 //     case-insensitive.
-//   * 'solo' rooms hold exactly one human and never bots. 'coop' rooms have 4 seats (humans + AI bots).
+//   * 'solo' rooms hold exactly one human and never bots. 'coop' rooms have `opts.maxSeats` seats (humans + AI bots) —
+//     4, the official room, unless the deployment raised `SP_MAX_SEATS`; the host picks a smaller count for its own room
+//     (`room.create.seatCap`, 本房座位上限, docs/META.md §1.9) and may change it again before the match
+//     (`room.setSeatCap`, §1.9a), never below the people already in the room.
 //     Humans and bots take the lowest free seat index; seat indexes never compact.
 //   * ▸ Being in a LOBBY room and sending room.create / room.join implicitly leaves it. While your room is
 //     in a match, create/join of another room fails with ROOM_STARTED (send g.leave or room.leave first).
-//   * Host-only: room.setDifficulty, room.setAiPicksLast, room.addBot, room.removeBot, room.kick, room.start.
+//   * Host-only: room.setDifficulty, room.setSeatCap, room.setAiPicksLast, room.addBot, room.removeBot, room.kick,
+//     room.start.
 //     ▸ Changing the difficulty or the AI-picks-last option (co-op only) un-readies the other humans.
 //     ▸ room.start requires every other human to be connected and ready; the host's start counts as the host's
 //     ready (the host may still toggle room.ready for display).
@@ -114,7 +118,7 @@
 //     the match are the grace timers already running for its disconnected seats.
 
 import { randomBytes, randomInt } from 'node:crypto';
-import { ERR, MAX_SEATS, MAX_SPECTATORS, ROOM_CODE_LEN, modeIdFor } from '../shared/constants.js';
+import { ERR, MAX_SEATS, MIN_SEATS, MAX_SPECTATORS, ROOM_CODE_LEN, modeIdFor, maxSeatsFrom, clampSeats } from '../shared/constants.js';
 import { checkLoadout, checkLoadoutOps, cultivationCharIds, checkNotOwned, checkDiyPicks, PACK_MSG_LIMITS, CHAT_LIMITS } from '../shared/protocol.js';
 import { modSetOf, isModId } from '../shared/modIdentity.js';
 import { normalizeSupportConfig, checkSupport, supportPicker, supportCapacity, supportTiers } from '../shared/support.js';
@@ -133,12 +137,29 @@ import { MatchmakeQueue } from './matchmaking.js';
 /** Room code alphabet: uppercase letters without I and O (and no digits, so no 0/1). */
 export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 
+/**
+ * Broadcast deliveries that did not reach every connected member: the frame object → `{ sent, dropped }`
+ * (server/lobby.js broadcastRoom). A frame that missed a socket leaves that client behind the engine's incremental
+ * `m.public` baseline, so the match answers with a full frame next time (`Match._notePublicDelivery`) — the reader is
+ * `publicDeliveryGap` below, and nothing else in this module looks at it.
+ * @type {WeakMap<object, { sent: number, dropped: number }>}
+ */
+const PUBLIC_DELIVERY = new WeakMap();
+
+/** Whether a broadcast frame failed to reach at least one connected member (see PUBLIC_DELIVERY). */
+export const publicDeliveryGap = (msg) => PUBLIC_DELIVERY.has(msg);
+
 /** Tunables. */
 export const LOBBY_DEFAULTS = Object.freeze({
   lobbyGraceMs: 60_000,   // disconnected humans keep their lobby seat this long
   maxRooms: 1000,
   maxRoomsPerAddr: 16,    // rooms created from one client network that may exist at once (0 = unlimited)
   maxMatchesPerAddr: 8,   // matches started from one client network that may run at once (0 = unlimited)
+  // 座位上限 (100 人版移植): `MAX_SEATS` (4, the official room) unless `SP_MAX_SEATS` raises it. 100 seats need this
+  // AND the per-address limits above raised (`SP_MAX_CONNS_PER_ADDR`, maxRoomsPerAddr, maxMatchesPerAddr) — see
+  // docs/PS100-MIGRATION.md. A room's seat count is fixed when it is created, so a changed cap never resizes a live
+  // room (and never resizes the seats array during a running match).
+  maxSeats: maxSeatsFrom(process.env),
   resyncMinGapMs: 1000,   // heavy resyncs (match state / result replay) per session at most this often on repeated hellos
   soloReconnectWindowMs: null, // a dropped solo run stays resumable this long (null = data singleReconnectTime, 24 h)
   queue: null,            // 野排匹配 (server/matchmaking.js MATCHMAKE_DEFAULTS): size / max / waitMs / sweepMs / difficulty
@@ -197,6 +218,20 @@ function opsCharIds(data) {
   return ids;
 }
 
+/**
+ * The game data ONE ROOM runs, for the lobby's own room-message checks (DESIGN §28.16).
+ *
+ * The loadout / 助战 / 干员持有 / 自选编队 messages are checked HERE and then handed to the seat, which the match reads —
+ * and the match checks them AGAIN against ITS data (`PlayerState.setLoadout` → `GameData(this.data)`, which is
+ * `roomAssets.forRoom(room.modSet)` from `startMatch`). The two faces must therefore be the SAME object, or a message the
+ * lobby accepts is silently dropped one step later: the seat keeps it, the match refuses the whole entry and leaves
+ * `PlayerState.loadout` empty with one warn line. That is a player's operator selection disappearing without an error.
+ *
+ * `forRoom` returns the PROCESS-level data itself when the room declared no set (or the whole set), so those rooms — the
+ * four-seat case included — get the very object they always got (`===`, byte for byte as before).
+ * @param {{ modSet: { digest: string, packs: Array<{ id: string }> }|null }|null} room
+ * @returns {Readonly<Record<string, any>>}
+ */
 /** Deep-frozen copy of a checked 助战 selection (shared by the session, the seat and the match's PlayerState). */
 function freezeSupport(entries) {
   return Object.freeze([...(entries || [])]);
@@ -250,10 +285,13 @@ function resolveRoomModSet(requested, catalogue) {
   return { ok: true, modIds: Object.freeze(ids.slice().sort()), modSet };
 }
 
-/** One room: 4 seat slots, host, difficulty, optional running match. */
+/** One room: `seatCap` seat slots (4 by default, LOBBY_DEFAULTS.maxSeats), host, difficulty, optional running match. */
 export class Room {
-  /** @param {string} code @param {'solo'|'coop'} mode @param {string} difficulty @param {number} now */
-  constructor(code, mode, difficulty, now) {
+  /**
+   * @param {string} code @param {'solo'|'coop'} mode @param {string} difficulty @param {number} now
+   * @param {number} [seatCap] seat slots of this room (LOBBY_DEFAULTS.maxSeats; defaults to MAX_SEATS)
+   */
+  constructor(code, mode, difficulty, now, seatCap = MAX_SEATS) {
     this.code = code;
     this.mode = mode;
     this.difficulty = difficulty;
@@ -264,8 +302,12 @@ export class Room {
     this.aiPicksLast = false;
     /** @type {string | null} */
     this.hostId = null;
+    /** Seat slots of THIS room (set at creation, 100-seat variant: LOBBY_DEFAULTS.maxSeats). Resized only through
+     * `seatCapTo` — i.e. only by `Lobby.setSeatCap` (房内改容量, docs/META.md §1.9a) — and a running match keeps its own
+     * copy of the seats, so nothing here ever moves during a match. */
+    this.seatCap = seatCap;
     /** @type {(Seat | null)[]} */
-    this.seats = new Array(MAX_SEATS).fill(null);
+    this.seats = new Array(seatCap).fill(null);
     /** @type {{ playerId: string, name: string, connected: boolean }[]} spectator seats, ≤ MAX_SPECTATORS (header) */
     this.spectators = [];
     /** @type {any} running Match instance */
@@ -334,6 +376,32 @@ export class Room {
   /** Humans that have not departed, in seat order. @returns {Seat[]} */
   activeHumans() { return this.seats.filter((s) => s && !s.isBot && !s.left); }
 
+  /** Every seat that holds somebody, AI included, in seat order (`left` seats are still IN the room). @returns {Seat[]} */
+  occupiedSeats() { return this.seats.filter(Boolean); }
+
+  /**
+   * 本房座位上限 (业主裁决 B5, docs/META.md §1.9): resize this room's seat array — the ONLY way `seats` ever changes
+   * length (`Room` deliberately never resizes it anywhere else, and a running match holds its own copy of the seats, so
+   * this never touches a match in progress).
+   *
+   * 不变量：**绝不挤掉任何人**。调用方（`Lobby.setSeatCap`）已经证明没有任何**非空**座位落在新上限之外，这里再自己
+   * 校一遍 —— 因为「缩容丢人」这种错误一旦发生就是静默的（数组短了，人不见了，谁也不报错），而这次的防线只有几行
+   * 代码，值得重复一次。任何非空座位会被丢掉时**整个调用什么都不做**（数组、`seatCap` 都不变），调用方的前置校验
+   * 保证这条分支不可达。
+   *
+   * @param {number} cap the new seat count (an integer ≥ 1)
+   * @returns {number} the room's seat cap after the call (unchanged when nothing was done)
+   */
+  seatCapTo(cap) {
+    if (!Number.isInteger(cap) || cap < 1 || cap === this.seatCap) return this.seatCap;
+    const next = this.seats.slice(0, cap);
+    while (next.length < cap) next.push(null);
+    if (next.filter(Boolean).length !== this.occupiedSeats().length) return this.seatCap; // would evict someone
+    this.seats = next;
+    this.seatCap = cap;
+    return this.seatCap;
+  }
+
   /**
    * `room.state` frame (DESIGN §8.1) plus `inMatch`, plus the room's own `mods` when it declared a set (W-A,
    * DESIGN §28.9). `mods` has the SAME shape as `welcome.mods` (`{ digest, packs }`, packs sorted by id) and is
@@ -354,6 +422,13 @@ export class Room {
       // 这个字段只是让界面说实话。
       chatMode: this.chatMode,
       inMatch: !!this.match,
+      /**
+       * 座位容量 (100 人版移植, docs/PS100-MIGRATION.md §7): present ONLY when this room's cap differs from
+       * `MAX_SEATS`, so a vanilla 4-seat room's frame stays byte-for-byte what it was. The client pads its seat cards
+       * to this (public/js/screens/room.js normalizeSeats): `seats` alone cannot tell "the room has 4 seats" from
+       * "the room has 100 and the rest are empty", and the client must not assume a cap of its own.
+       */
+      ...(this.seatCap !== MAX_SEATS ? { seatCap: this.seatCap } : {}),
       seats: this.seats.map((s) => (s
         ? {
           seat: s.seat, playerId: s.playerId, name: s.name, isBot: s.isBot, ready: s.ready, connected: s.connected && !s.left,
@@ -594,6 +669,7 @@ export class Lobby {  /**
       case 'room.leave': return this.leave(session);
       case 'room.ready': return this.ready(session, msg);
       case 'room.setDifficulty': return this.setDifficulty(session, msg);
+      case 'room.setSeatCap': return this.setSeatCap(session, msg);
       case 'room.setAiPicksLast': return this.setAiPicksLast(session, msg);
       case 'room.addBot': return this.addBot(session);
       case 'room.removeBot': return this.removeBot(session, msg);
@@ -631,6 +707,10 @@ export class Lobby {  /**
    *   3. 载荷大小由 `validateC2S` 卡过（`PACK_MSG_LIMITS.bytes`），这里再卡**频率**（每会话令牌桶，超了 `ERR.RATE`）；
    *   4. 送回**同一个房间**的成员与旁观者。引擎不解释 `data`，也不判断谁该收到 —— 客户端只把消息交给声明过这个
    *      通道的面板，那是「第二个读者」的判据（`extensions.js` 的 `net.on(channel, …)`）。
+   *   5. 若房间里跑着对局，且它的 `Match` 上有 `handlePackMsg(playerId, msg)`（这是 `server.modules` 的
+   *      `matchClass` 包装器唯一能收到网络消息的地方，DESIGN §28.14），**在限流之后、转发之前**调一次：
+   *      返回 `true` 或 `{ consumed: true }` = **已消费**，不再转发给同房其它人；其余返回值（含 `false` /
+   *      `undefined`）与**抛错**都当作未消费，照旧转发 —— 一条坏消息不能把整个转发打断。
    * @param {import('./net.js').Session} session
    * @param {{ pack: string, channel: string, data?: any }} msg
    */
@@ -642,6 +722,12 @@ export class Lobby {  /**
       return fail(ERR.BAD_MSG, `pack "${String(msg.pack).slice(0, 32)}" does not declare the channel "${String(msg.channel).slice(0, 32)}"`);
     }
     if (!this.packMsgAllowed(session)) return fail(ERR.RATE);
+    // 对局子类的触发点（业主裁决 2026-10-10 的 A 方案，DESIGN §28.14）：`matchClass` 包装器本来就能碰到整个 Match，
+    // 这里只补「消息到了」这一下。复用 `callMatch` 已有的 try/catch 与点名日志 ⇒ 钩子抛错时返回 undefined，
+    // 落进下面「未消费」那一条，转发照旧。`session.playerId` **可能是观战者**（`pack.msg` 没有旁观者判据，与
+    // `room.chat` 的 `ERR.SPECTATOR` 不同口径），判不判由包自己决定。
+    const hook = this.callMatch(room, 'handlePackMsg', session.playerId, msg);
+    if (hook === true || (hook !== null && typeof hook === 'object' && hook.consumed === true)) return OK;
     const out = {
       t: 'pack.msg', pack: msg.pack, channel: msg.channel, from: session.playerId,
       ...(msg.data === undefined ? {} : { data: msg.data }),
@@ -802,7 +888,7 @@ export class Lobby {  /**
   // room.* handlers
   // ---------------------------------------------------------------------------------------------------
 
-  create(session, { mode, difficulty, mods, modIds, chatMode }) {
+  create(session, { mode, difficulty, mods, modIds, chatMode, seatCap }) {
     const cur = this.roomOf(session);
     if (cur && cur.match) return fail(ERR.ROOM_STARTED, 'leave your running match first');
     const gate = this.checkModSet({ mods });
@@ -829,7 +915,23 @@ export class Lobby {  /**
     const code = this.genCode();
     if (!code) return fail(ERR.INTERNAL, 'no room code available');
     if (cur) this.removeMember(cur, session.playerId);
-    const room = new Room(code, mode, difficulty, this.now());
+    // 本房座位上限 (业主裁决 B5, docs/META.md §1.9): the HOST picks how many seat cards this one room opens.
+    //
+    // 两层，缺一不可：
+    //   1. `shared/protocol.js` 已经在线上判过 `seatCap ∈ [MIN_SEATS, SEAT_CAP]`，越界 / 垃圾值是 `BAD_MSG`，不是
+    //      静默钳制 —— 客户端收到的是一句能改的错，而不是一个它没要求过的房间。
+    //   2. 这里再钳一次，给**不走协议**的调用方兜底：`server/matchmaking.js` 的快速匹配、包钩子、测试都直接调
+    //      `create`。房间一旦建出来座位数就定死（`Room` 从不 resize），所以这条底线必须在这里，而不是指望调用方。
+    //      `clampSeats` 同时把「这台服务器允许的最大值」(`this.opts.maxSeats` = `SP_MAX_SEATS`，缺省 `MAX_SEATS`)
+    //      封成上界：**绝不信任客户端**。
+    //
+    // 缺省（旧客户端根本不发，或 `null`）⇒ `this.opts.maxSeats`，也就是今天那个房间 —— 4 座房的
+    // `room.state` 因此逐字节不变（`toState` 只在容量 ≠ `MAX_SEATS` 时才多带 `seatCap`）。
+    //
+    // **只作用于 co-op**：solo 房今天也是按 `this.opts.maxSeats` 建座位数组的（客户端 `normalizeSeats` 按
+    // `mode:'solo'` 只画一张卡），改掉它就会移动每一个 solo 帧 —— 所以 solo 一律忽略这个字段。
+    const roomCap = mode === 'coop' && seatCap != null ? clampSeats(seatCap, this.opts.maxSeats) : this.opts.maxSeats;
+    const room = new Room(code, mode, difficulty, this.now(), roomCap);
     room.ownerKey = key;
     // 房内聊天模式由房主在建房时定（`room.create.chatMode`，默认 'open'）。**服务端强制**：这个值决定
     // `chat` / `quickMsg` 各自放不放行，客户端的输入框只是照着它摆样子。
@@ -963,6 +1065,50 @@ export class Lobby {  /**
     return OK;
   }
 
+  /**
+   * 本房座位上限 (业主裁决 B5, docs/META.md §1.9): the HOST resizes the room it is already in.
+   *
+   * 三条守卫，一条都不许省：
+   *   1. `code` 必须是**你现在所在的这个房间**。一条消息只能改一个明确点名的房间 —— 一个停在旧 `room.state` 上的
+   *      标签页因此不会把房主刚换到的新房间改小。不匹配 ⇒ `NOT_IN_ROOM`（**不**是「默默改你现在待着的那个」）。
+   *   2. 只有房主 ⇒ `NOT_HOST`；模拟进行中 ⇒ `ROOM_STARTED`（房间的 `seats` 数组是**大厅**的，正在跑的 Match 拿的是
+   *      它自己那份副本，所以这里本来就改不了比赛 —— 但也不给一个正在打的人临时多开／少开座位）；solo 房没有可选的
+   *      座位数（它的形状就是 1）⇒ `BAD_TARGET`。
+   *   3. **新上限不许小于房间内现有的人数（真人 + AI）** ⇒ `SEAT_CAP_TOO_SMALL`。这一条就是「**永远不踢人**」的
+   *      **全部**保证：只要它成立，缩容只会砍掉**空**座位。
+   *
+   * 「越界 / 垃圾值」与「低于现有人数」**两个错误码分得开**，因为它们要的是两个不同的动作：前者去改数字
+   * （`BAD_MSG` + 点名的 `detail`，与 `room.create.seatCap` 同一套口径），后者去请人离开（`SEAT_CAP_TOO_SMALL`）。
+   * **两者都不静默钳制** —— 一个被悄悄换成别的数字的上限，房主没有任何办法看出来。
+   *
+   * 上限本身（`this.opts.maxSeats` = `SP_MAX_SEATS`，缺省 `MAX_SEATS`）是「**绝不信任客户端**」的那一条：协议已经
+   * 判过 `[MIN_SEATS, SEAT_CAP]`，这里再按这台服务器真正的天花板判一次，好让不走协议的调用方也过不去。
+   */
+  setSeatCap(session, { code, seatCap }) {
+    const room = this.roomOf(session);
+    if (!room || room.code !== code) return fail(ERR.NOT_IN_ROOM, `you are not in room ${code}`);
+    if (room.hostId !== session.playerId) return fail(ERR.NOT_HOST);
+    if (room.match) return fail(ERR.ROOM_STARTED);
+    if (room.mode === 'solo') return fail(ERR.BAD_TARGET, 'a solo room has exactly one seat');
+    const ceiling = this.opts.maxSeats;
+    if (!Number.isInteger(seatCap) || seatCap < MIN_SEATS || seatCap > ceiling) {
+      return fail(ERR.BAD_MSG, `seatCap is not a seat count this server allows (an integer in [${MIN_SEATS}, ${ceiling}])`);
+    }
+    // 「不踢人」的守卫：`occupied` 是裁决书上的口径（人数），`highest` 是它的**充分**版本 —— 座位允许有空洞
+    // （房主永久离开后 `seats[0]` 会是 null，而 `seats[2]` 还坐着人），只数人数会让 `seatCap = 2` 砍掉 2 号位。
+    const occupied = room.occupiedSeats().length;
+    const highest = room.seats.reduce((m, s, i) => (s ? i : m), -1);
+    if (seatCap < occupied || seatCap <= highest) {
+      return fail(ERR.SEAT_CAP_TOO_SMALL, `${occupied} player(s) are in ${room.code}; a smaller cap would evict somebody`);
+    }
+    if (room.seatCap === seatCap) return OK;   // idempotent: no state change, so no broadcast either
+    this.dropReplay(room, session.playerId);
+    room.seatCapTo(seatCap);
+    this.log.info(`[lobby] ${room.code} seat cap set to ${seatCap} by ${session.name}`);
+    this.broadcastState(room);
+    return OK;
+  }
+
   /** 「AI 队友最后选择」 (GitHub #338): host-only, before the match, co-op rooms only (a solo room has no AI seat). */
   setAiPicksLast(session, { on }) {
     const room = this.roomOf(session);
@@ -1072,7 +1218,9 @@ export class Lobby {  /**
    * during INFO_CHECK, see the header). Either part refused: nothing is stored.
    */
   loadout(session, { entries, ops }) {
-    const data = this.safeData();
+    const room = this.roomOf(session);
+    // the ROOM's data, not the process singleton: the match re-checks the same entries against the same object
+    const data = this.roomData(room);
     const res = checkLoadout(entries, (id) => lookup('chess', id, data));
     if (!res || res.error) return fail(res && isErrCode(res.error) ? res.error : ERR.BAD_MSG, res && res.detail);
     const ids = opsCharIds(data);
@@ -1082,7 +1230,6 @@ export class Lobby {  /**
     const opsSet = freezeOps(resOps.ops);
     session.loadout = loadout;
     session.ops = opsSet;
-    const room = this.roomOf(session);
     if (!room) return OK;
     const seat = room.seatOf(session.playerId);
     if (seat) { seat.loadout = loadout; seat.ops = opsSet; }
@@ -1108,13 +1255,14 @@ export class Lobby {  /**
    * loadout there is deliberately no fallback, because falling back would silently grant a disabled operator.
    */
   support(session, { entries }) {
-    const data = this.safeData();
+    const room = this.roomOf(session);
+    // the room's own pool AND the room's own chess table: `checkSupport` reads one and looks the other up
+    const data = this.roomData(room);
     const cfg = normalizeSupportConfig(data && data.support);
     const res = checkSupport(entries, cfg, (id) => lookup('chess', id, data));
     if (!res || res.error) return fail(res && isErrCode(res.error) ? res.error : ERR.BAD_MSG, res && res.detail);
     const support = freezeSupport(res.entries);
     session.support = support;
-    const room = this.roomOf(session);
     if (!room) return OK;
     const seat = room.seatOf(session.playerId);
     if (seat) seat.support = support;
@@ -1138,12 +1286,12 @@ export class Lobby {  /**
    * (see the header). A running match never takes it: it keeps the list its seat had at its start.
    */
   ownership(session, { notOwned }) {
-    const data = this.safeData();
+    const room = this.roomOf(session);
+    const data = this.roomData(room);
     const res = checkNotOwned(notOwned, (id) => lookup('chess', id, data));
     if (!res || res.error) return fail(ERR.BAD_MSG, res && res.detail);
     const list = Object.freeze(res.notOwned.slice());
     session.notOwned = list;
-    const room = this.roomOf(session);
     if (!room) return OK;
     const seat = room.seatOf(session.playerId);
     if (seat) seat.notOwned = list;
@@ -1157,11 +1305,11 @@ export class Lobby {  /**
    * start.
    */
   diy(session, { picks }) {
-    const res = checkDiyPicks(picks, { data: this.safeData(), kitted: KITTED_CHARS });
+    const room = this.roomOf(session);
+    const res = checkDiyPicks(picks, { data: this.roomData(room), kitted: KITTED_CHARS });
     if (!res || !('ok' in res)) return fail(ERR.BAD_MSG, res && res.detail);
     const kept = freezeDiy(res.picks);
     session.diy = kept;
-    const room = this.roomOf(session);
     if (!room) return OK;
     const seat = room.seatOf(session.playerId);
     if (seat) seat.diy = kept;
@@ -1216,7 +1364,13 @@ export class Lobby {  /**
    * Since B4 段 the same is true of `modAssets` (DESIGN §28.13.5): the packs that declared `assets` — their registered
    * container / manifest URLs, the container digest the loader verified against the bytes, and the two normalized
    * policy values. **Only readers add it**: no pack declaring `assets` means no field, no SW registration, no new
-   * request, no new DOM, no new global on the client (main.js only imports the resource flow when the field arrives). */
+   * request, no new DOM, no new global on the client (main.js only imports the resource flow when the field arrives).
+   *
+   * Since B5 段 the same rule covers `maxSeats`: the seat ceiling this deployment allows (`SP_MAX_SEATS`, i.e.
+   * `LOBBY_DEFAULTS.maxSeats`) travels with the handshake, because the lobby's seat slider must not offer a number the
+   * server would refuse. **Absent while the ceiling is the official `MAX_SEATS`** — a vanilla server's `welcome` keeps
+   * the exact field set it always had, byte for byte (`test/modClientPanels.test.js` pins that on the mod fields; the
+   * same reasoning applies here). */
   welcomeInfo() {
     const panels = this.workshop && Array.isArray(this.workshop.panels) ? this.workshop.panels : [];
     const assets = this.workshop && Array.isArray(this.workshop.assets) ? this.workshop.assets : [];
@@ -1225,6 +1379,9 @@ export class Lobby {  /**
     const theme = this.workshop && this.workshop.theme && typeof this.workshop.theme === 'object' ? this.workshop.theme : null;
     return {
       diyKitted: KITTED_CHARS,
+      // 本房座位上限 (业主裁决 B5): 只有这台服务器的上限不是官方 `MAX_SEATS` 时才发 —— 4 座服务器（缺省）的
+      // `welcome` 字段集合一个都不多，逐字节与从前相同。
+      ...(this.opts.maxSeats !== MAX_SEATS ? { maxSeats: this.opts.maxSeats } : {}),
       ...(this.modSet ? { mods: this.modSet } : {}),
       ...(panels.length ? { modPanels: panels } : {}),
       ...(assets.length ? { modAssets: assets } : {}),
@@ -1298,6 +1455,10 @@ export class Lobby {  /**
         // 工坊行为层: the same kits must reach the battles the server runs AND the browser's (see the Lobby constructor)
         workshopKits: assets ? assets.kits : (this.workshop && this.workshop.kits ? this.workshop.kits : null),
         workshopKitModules: assets ? assets.modules : (this.workshop && Array.isArray(this.workshop.modules) ? this.workshop.modules : []),
+        // 召唤物的行为层（docs/WORKSHOP.md §4.7）：与上面两个字段逐字对称 —— 服务端跑的这一场用真函数，浏览器按
+        // 同一份模块清单重建。没有包声明 summon kit 时它是 `{}`，`Battle opts.tokenKits` 因此是空对象、什么都不做
+        //（`content/index.js` 只在命中时用它），所以这条线的存在不改变任何一场无包对局。
+        workshopTokenKits: assets ? assets.tokenKits : (this.workshop && this.workshop.tokenKits ? this.workshop.tokenKits : null),
         // …and the identity of that content, which every BattleSpec of this match carries (DESIGN §28.2). The room's own
         // set when it declared one — that IS what this match runs — else the process set, byte for byte as before.
         mods: room.modSet || this.modSet,
@@ -1311,7 +1472,13 @@ export class Lobby {  /**
         log: this.log,
         now: this.now,
         send: (playerId, msg) => (ctx.live ? this.matchSend(room, ctx, playerId, msg) : false),
-        broadcast: (msg) => { if (ctx.live) this.matchBroadcast(room, ctx, msg); },
+        broadcast: (msg) => {
+          if (!ctx.live) return;
+          this.matchBroadcast(room, ctx, msg);
+          // incremental m.public (DESIGN §8.2): a frame that missed a socket leaves that client behind the baseline the
+          // engine believes the room holds — make the next one full, so nobody stays diverged
+          if (publicDeliveryGap(msg)) match.markMembershipChanged();
+        },
         onEnd: (summary) => this.onMatchEnd(room, ctx, summary),
       });
       ctx.match = match;
@@ -1543,6 +1710,16 @@ export class Lobby {  /**
     try { return this.getData(); } catch (e) { this.log.error('[lobby] getData failed', e); return Object.freeze({}); }
   }
 
+  /**
+   * The data one room's checks run on — the room's own set when it declared one, the process singleton otherwise
+   * (the header above `opsCharIds` states why the lobby and the match must read the same object).
+   * @param {{ modSet: { digest: string, packs: Array<{ id: string }> }|null }|null} room
+   */
+  roomData(room) {
+    const assets = room && this.workshop && this.workshop.roomAssets ? this.workshop.roomAssets.forRoom(room.modSet) : null;
+    return assets ? assets.data : this.safeData();
+  }
+
   /** How long a dropped solo run stays resumable (ms): the option, else data singleReconnectTime, else 24 h. */
   soloResumeWindowMs() {
     const o = this.opts.soloReconnectWindowMs;
@@ -1723,7 +1900,7 @@ export class Lobby {  /**
 
   broadcastState(room) {
     if (room.disposed) return;
-    const data = encode(room.toState(this.supportView()));
+    const data = encode(room.toState(this.supportView(room)));
     for (const session of this.memberSessions(room)) sendRaw(session.ws, data);
   }
 
@@ -1731,9 +1908,17 @@ export class Lobby {  /**
    * The 助战 catalog a client may show (`supportPicker` names this as its purpose), plus the player's own current picks.
    * An operator the pool does not list is DISABLED — the picker must not be able to offer it, and the server refuses a
    * request that names it (shared/support.js checkSupport) — so this is the only way the client learns the pool.
+   *
+   * **The same data the check runs on** (`roomData`, see its header): this is the VISIBLE face of the pool and
+   * `support()` is the CHECKING face, so reading `safeData()` here while `support()` reads the room would list a
+   * pickable-looking operator the very same server then refuses — "the client can see it but cannot pick it". A room
+   * that declared nothing (or everything), and a session with no room, still resolve to the process singleton itself,
+   * so 4 座 output is byte-for-byte unchanged.
+   * @param {{ modSet: { digest: string, packs: Array<{ id: string }> }|null }|null} [room]
    */
-  supportView() {
-    const cfg = normalizeSupportConfig(this.safeData() && this.safeData().support);
+  supportView(room = null) {
+    const data = this.roomData(room);
+    const cfg = normalizeSupportConfig(data && data.support);
     return {
       enabled: cfg.enabled,
       label: cfg.label,
@@ -1744,7 +1929,7 @@ export class Lobby {  /**
   }
 
   sendState(room, session) {
-    sendSession(session, room.toState(this.supportView()));
+    sendSession(session, room.toState(this.supportView(room)));
   }
 
   /** Match broadcast: encode once, send to every connected member. @returns {string | null} the encoded frame */
@@ -1753,7 +1938,16 @@ export class Lobby {  /**
     const data = encode(msg);
     if (data == null) { this.log.error(`[lobby] ${room.code} unserializable broadcast ${msg && msg.t}`); return null; }
     const droppable = isDroppable(msg);
-    for (const session of this.memberSessions(room)) sendRaw(session.ws, data, { droppable });
+    let sent = 0;
+    let dropped = 0;
+    for (const session of this.memberSessions(room)) {
+      if (sendRaw(session.ws, data, { droppable })) sent++;
+      else dropped++;
+    }
+    // A frame the sockets did not all take leaves whoever missed it behind the engine's incremental m.public baseline
+    // (DESIGN §8.2, incremental frame). The match reads this and answers with a full frame next time; the report is per
+    // frame object, so concurrent rooms never mix up their deliveries.
+    if (dropped) PUBLIC_DELIVERY.set(msg, { sent, dropped });
     return data;
   }
 

@@ -91,37 +91,8 @@ export class MatchViews {
       combatMode: this.clientCombat ? 'client' : 'server',
       // solo pause (g.pause, DESIGN §14): the battle, its field clock and every deadline are frozen while true
       paused: !!this.paused,
-      players: this.order.map((ps) => ({
-        playerId: ps.playerId,
-        seat: ps.seat,
-        name: ps.name,
-        isBot: ps.isBot,
-        connected: ps.isBot || (ps.connected && !ps.left),
-        alive: ps.alive,
-        lp: Math.max(0, ps.lp),
-        bandId: ps.bandId,
-        shopLevel: ps.shop.level,
-        boardCount: ps.deployCount,
-        ready: this.phase === PHASE.INFO_CHECK ? ps.infoReady : ps.ready,
-        // the strip of a teammate watching this player (DESIGN §20.15): every bond with members, layers or an active tier
-        // (= the player's own m.private list without thresholds / countsHand — the client reads those from bonds.json),
-        // this round's in-battle gains included once the COMBAT phase ended (PlayerState.bondsView); [] once eliminated —
-        // nobody can watch an eliminated player (g.watch refuses them, they have no field) and the result screen reads
-        // m.result's own bonds, so their layers would only cost every m.public bytes for the rest of the match
-        // (the mode-off bonds with members included, `off: true`, as in m.private — bondsMeta.offBondCounts)
-        bonds: ps.alive ? bondList(this.gd, ps.bondsView(), { off: offBondCounts(ps.gd || this.gd, ps) }) : [],
-        fieldId: this.fieldOf(ps),
-        status: this.statusOf(ps),
-        autoplay: ps.autoplay,
-        // the LP this round's own battle will cost at settlement so far (COMBAT / 联防 only, omitted when 0)
-        ...this._pendingLpView(ps),
-      })),
-      fields: this.fields.map((f) => {
-        const v = { fieldId: f.fieldId, kind: f.kind, players: f.players.slice(), live: !!f.live };
-        const pr = this._fieldProgress(f);
-        if (pr) v.progress = pr;
-        return v;
-      }),
+      players: this.order.map((ps) => this.publicPlayerView(ps)),
+      fields: this.fields.map((f) => this.publicFieldView(f)),
     };
     if (this.teamLp != null) v.teamLp = Math.max(0, Math.round(this.teamLp));
     // 最终攻势 / 隐秘核心: when the overtime drain starts (ms epoch; `deadline` is the level's 120 s countdown)
@@ -138,7 +109,8 @@ export class MatchViews {
     if (this.phase === PHASE.SP_DRAFT && this.sp) {
       const s = this.sp;
       v.sp = {
-        family: s.family, name: s.name, desc: s.desc, eventId: s.eventId, cards: s.cards.map(cardView), order: s.order.slice(),
+        family: s.family, name: s.name, desc: s.desc, eventId: s.eventId,
+        cards: s.cards.map(c => ({ ...cardView(c), soldOut: c.kind === 'item' && !this.itemPool.canGain(c.id) })), order: s.order.slice(),
         turn: this.spTurn(), picks: { ...s.picks }, taken: { ...s.taken }, untimed: !!s.untimed,
       };
     }
@@ -150,6 +122,48 @@ export class MatchViews {
       const ur = this.uniteResultView;
       v.uniteResult = { through: ur.through, helpers: ur.helpers.slice(), leakers: ur.leakers.slice(), losses: { ...ur.losses } };
     }
+    return v;
+  }
+
+  /**
+   * One `m.public.players[]` row (full form). Split out of publicView so the incremental frame (matchMessaging
+   * _publicFrame → server/viewsDelta.js) can diff one player at a time: the emitted objects are the same, field for
+   * field, in the same order — a full frame is byte-identical to before the delta work.
+   * @param {any} ps PlayerState
+   */
+  publicPlayerView(ps) {
+    return {
+      playerId: ps.playerId,
+      seat: ps.seat,
+      name: ps.name,
+      isBot: ps.isBot,
+      connected: ps.isBot || (ps.connected && !ps.left),
+      alive: ps.alive,
+      lp: Math.max(0, ps.lp),
+      bandId: ps.bandId,
+      shopLevel: ps.shop.level,
+      boardCount: ps.deployCount,
+      ready: this.phase === PHASE.INFO_CHECK ? ps.infoReady : ps.ready,
+      // the strip of a teammate watching this player (DESIGN §20.15): every bond with members, layers or an active tier
+      // (= the player's own m.private list without thresholds / countsHand — the client reads those from bonds.json),
+      // this round's in-battle gains included once the COMBAT phase ended (PlayerState.bondsView); [] once eliminated —
+      // nobody can watch an eliminated player (g.watch refuses them, they have no field) and the result screen reads
+      // m.result's own bonds, so their layers would only cost every m.public bytes for the rest of the match
+      // (the mode-off bonds with members included, `off: true`, as in m.private — bondsMeta.offBondCounts)
+      bonds: ps.alive ? bondList(this.gd, ps.bondsView(), { off: offBondCounts(ps.gd || this.gd, ps) }) : [],
+      fieldId: this.fieldOf(ps),
+      status: this.statusOf(ps),
+      autoplay: ps.autoplay,
+      // the LP this round's own battle will cost at settlement so far (COMBAT / 联防 only, omitted when 0)
+      ...this._pendingLpView(ps),
+    };
+  }
+
+  /** One `m.public.fields[]` row (full form; split out for the incremental frame, like publicPlayerView). @param {any} f */
+  publicFieldView(f) {
+    const v = { fieldId: f.fieldId, kind: f.kind, players: f.players.slice(), live: !!f.live };
+    const pr = this._fieldProgress(f);
+    if (pr) v.progress = pr;
     return v;
   }
 
@@ -243,10 +257,29 @@ export class MatchViews {
     return p ? { charId: p.charId, skillIndex: p.skillIndex, uniEquipId: p.uniEquipId } : undefined;
   }
 
+  /** The 外勤医疗 reserve medic already standing on each player's field in preparation. Touch replaces it only at
+   * battleStart, so the prep view always uses the reserve medic, regardless of the current elite count. The stage's
+   * normal-board slot is transformed to the correct half of a boss field by _onBossHalf / the client prep camera. */
+  prepMapChars(ps) {
+    if (!ps?.alive || this.phase !== PHASE.PREP || !this.order.some((p) => p.alive && p.bandId === 'band_amedic')) return [];
+    const id = 'char_605_cmedic';
+    const slot = this.stage?.mapChars?.find((m) => m?.key === id && Array.isArray(m.pos) && m.pos[0] >= 9 && m.pos[0] <= 12
+      && m.pos[1] >= 0 && m.pos[1] <= 10 && !/multi_only/.test(String(m.alias)));
+    const rec = this.gd.token(id);
+    if (!slot || !rec) return [];
+    const dir = slot.dir || 'RIGHT';
+    return [{
+      id: -ps.seat - 1, uid: -ps.seat - 1, kind: 'token', side: 'ally', ownerId: ps.playerId, defId: id,
+      area: 'board', name: rec.name || id, tier: 1, golden: false,
+      spine: rec.assets?.spine || id, avatar: rec.assets?.avatar || id,
+      x: slot.pos[1], y: slot.pos[0], dir, facing: dir === 'LEFT' ? -1 : 1, maxHp: rec.stats?.maxHp || 1,
+    }];
+  }
+
   /** UnitInfo of a player's board pieces on their (board) tiles — a prep scout's board, the boss partner's (bossMateView).
    *  `area: 'board'` (a bench unit says 'hand' / 'temp': prepFieldMeta). */
   _prepBoardUnits(ps) {
-    const units = [];
+    const units = this.prepMapChars(ps);
     // the player's own view of the data (0.2.0 自选编队: its slotted DIY slots are its operators — player/diy.js)
     const gd = ps.gd || this.gd;
     for (const { r, c, piece } of boardOrder(ps.board)) {

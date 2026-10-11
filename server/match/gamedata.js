@@ -12,6 +12,7 @@
 // that still carries them is ignored).
 
 import { getConfig, getMode } from '../data.js';
+import { MAX_SEATS } from '../../shared/constants.js';
 import { isShopItem } from '../sim/simdata.js';
 import { standInRecord } from '../../shared/standIn.js';
 import {
@@ -68,19 +69,26 @@ export const COMBAT_TIME_SCALE = 2;
  *          at most `aliveFull` (4); a count left out means a full team;
  *          `perPlayer` false: the fixed pool of 0.1.x (「保持固定血量」, restorable with `solo` 0.25): `coop` whatever the
  *          count, × min(alive, aliveFull) / aliveFull with `aliveScaling`.
+ *
+ * `aliveFull` is a CEILING on the per-player multiplier, and it is calibrated for the official 4-seat room. A bigger
+ * room (百卫补丁 v0.3, docs/PS100-MIGRATION.md §2.4) must not be silently clamped to it — `Math.min(32, 4)` made a
+ * 32-seat pool exactly as large as a 4-seat one — so the effective ceiling is `max(aliveFull, seatCap)`. With the
+ * default `seatCap` of MAX_SEATS (4) this is a no-op for every existing scale, to the unit: `alive ≤ 4` already.
  * @param {object|null|undefined} modeScale config.modes[modeId].bossHpScale
  * @param {object|null|undefined} cfgScale config.bossHpScale
  * @param {boolean} isSolo
  * @param {number} [aliveCount] alive players at the Final Assault / Hidden Core start (co-op)
+ * @param {number} [seatCap] seat slots of the room (default MAX_SEATS): the floor of the `aliveFull` ceiling
  * @returns {number}
  */
-export function bossPoolShareOf(modeScale, cfgScale, isSolo, aliveCount) {
+export function bossPoolShareOf(modeScale, cfgScale, isSolo, aliveCount, seatCap = MAX_SEATS) {
   const ms = modeScale && typeof modeScale === 'object' ? modeScale : {};
   const cs = cfgScale && typeof cfgScale === 'object' ? cfgScale : {};
   const pick = (k, d) => (Number.isFinite(ms[k]) && ms[k] > 0 ? ms[k] : Number.isFinite(cs[k]) && cs[k] > 0 ? cs[k] : d);
   const flag = (k, d) => (typeof ms[k] === 'boolean' ? ms[k] : typeof cs[k] === 'boolean' ? cs[k] : d);
   if (isSolo) return pick('solo', 1);
-  const full = Math.max(1, Math.floor(pick('aliveFull', 4)));
+  const cap = Number.isFinite(seatCap) && seatCap >= 1 ? Math.floor(seatCap) : MAX_SEATS;
+  const full = Math.max(1, Math.floor(pick('aliveFull', 4)), cap);
   const n = Number(aliveCount);
   const alive = Number.isFinite(n) && n >= 1 ? Math.min(full, Math.floor(n)) : full;
   if (flag('perPlayer', true)) return pick('coop', 1) * alive;
@@ -94,12 +102,20 @@ export class GameData {
   /**
    * @param {Readonly<Record<string, any>>} data server/data.js getData() (may be partial)
    * @param {string} modeId e.g. 'mode_multi_hard'
+   * @param {{ seatCap?: number }} [opts] seatCap = seat slots of the room (default MAX_SEATS): the floor of the
+   *        bossHpScale `aliveFull` ceiling, so a bigger room is not clamped to the 4-seat calibration
+   *        (bossPoolShareOf; 百卫补丁 v0.3, docs/PS100-MIGRATION.md §2.4)
    */
-  constructor(data, modeId) {
+  constructor(data, modeId, opts = {}) {
     this.raw = data && typeof data === 'object' ? data : {};
     this.config = getConfig(this.raw) || {};
     this.modeId = modeId;
     this.mode = getMode(modeId, this.raw) || {};
+    /**
+     * Seat slots of the room this game data belongs to (MAX_SEATS when the caller has no seat list). Only the
+     * boss-pool ceiling reads it — see bossPoolShareOf.
+     */
+    this.seatCap = Number.isFinite(opts?.seatCap) && opts.seatCap >= 1 ? Math.floor(opts.seatCap) : MAX_SEATS;
     this.economy = this.config.economy && typeof this.config.economy === 'object' ? this.config.economy : {};
     const chess = this.raw.chess && typeof this.raw.chess === 'object' ? this.raw.chess : {};
     this._chess = chess;
@@ -172,7 +188,7 @@ export class GameData {
    * @param {number} [aliveCount]
    */
   bossPoolShare(aliveCount) {
-    return bossPoolShareOf(this.mode.bossHpScale, this.config.bossHpScale, this.isSolo, aliveCount);
+    return bossPoolShareOf(this.mode.bossHpScale, this.config.bossHpScale, this.isSolo, aliveCount, this.seatCap);
   }
 
   /** config.titles with the tuning overrides (stat / rule per title id) merged in. */
@@ -332,11 +348,21 @@ export class GameData {
   /** Copies of a base chess in the shared pool. */
   poolCopies(baseId) {
     const ov = this.economy.poolCopiesOverrides;
-    if (ov && typeof ov === 'object' && Number.isInteger(ov[baseId]) && ov[baseId] >= 0) return ov[baseId];
     const tier = this.tierOf(baseId);
     const pc = this.economy.poolCopies;
-    const v = pc && typeof pc === 'object' ? pc[tier] : undefined;
-    return Number.isInteger(v) && v >= 0 ? v : (DEFAULTS.poolCopies[tier] ?? 10);
+    const v = ov && Number.isInteger(ov[baseId]) && ov[baseId] >= 0 ? ov[baseId] : pc?.[tier];
+    const base = Number.isInteger(v) && v >= 0 ? v : (DEFAULTS.poolCopies[tier] ?? 10);
+    // The measured doubled pool is shared by the whole co-op team, independent of team size. DIY is private stock.
+    const multiplier = this.isSolo || this.chess(baseId)?.isDiy ? 1 : posIntOr(this.economy.coopPoolMultiplier, 1);
+    return base * multiplier;
+  }
+
+  /** Normal equipment copies in the shared pool; effect-only items have no shop stock limit. */
+  itemPoolCopies(id) {
+    const base = this.baseIdOf(id), rec = this.item(base);
+    if (!rec || !isShopItem(rec)) return null;
+    const count = this.economy.itemPoolCopiesOverrides?.[base] ?? this.economy.itemPoolCopies?.[rec.tier];
+    return Number.isInteger(count) && count >= 0 ? count : null;
   }
 
   /** Copies needed to merge (0 = never merges: golden chess). */
@@ -480,8 +506,8 @@ export class GameData {
    * Team LP the overtime drain has taken when a boss field clock reads `gt` game seconds: bossOvertimeDrainReal per
    * whole REAL second past bossOvertimeAfterReal (the first point at 151 real s).
    */
-  bossOvertimeDue(gt) {
-    const over = (Number(gt) || 0) / this.combatTimeScale - this.bossOvertimeAfterReal;
+  bossOvertimeDue(gt, afterReal = this.bossOvertimeAfterReal) {
+    const over = (Number(gt) || 0) / this.combatTimeScale - afterReal;
     return over >= 1 ? Math.floor(over) * this.bossOvertimeDrainReal : 0;
   }
   get dp() {

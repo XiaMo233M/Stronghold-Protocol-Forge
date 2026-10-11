@@ -78,6 +78,10 @@ export function buildBattleSpec(o = {}) {
     waveId: o.waveId ?? null,
     bossId: o.bossId ?? null,
     content: o.content ?? 'full',
+    // 限伤 override (opt-in, shared/constants.js bossHitLimitFrom): the KEY appears only when a deployment set
+    // SP_BOSS_HIT_LIMIT, so a spec built without one is byte-for-byte the old spec. `null` = Infinity (off), because
+    // JSON.stringify turns Infinity into null; createBattleFromSpec turns it back.
+    ...(o.bossHitLimit === undefined ? {} : { bossHitLimit: Number.isFinite(o.bossHitLimit) ? o.bossHitLimit : null }),
     boss: bossLike && o.boss ? { poolHp: Number(o.boss.poolHp) || 0, poolMax: Number(o.boss.poolMax) || 1 } : null,
     // 工坊行为层 (docs/WORKSHOP.md §4): the kit MODULES this field needs, as JSON-safe { id, pack, hash, url } records.
     // A function cannot cross the wire, so a client-simulated battle imports these URLs and rebuilds the same kit map
@@ -90,6 +94,10 @@ export function buildBattleSpec(o = {}) {
         pack: typeof m.pack === 'string' ? m.pack : null,
         url: m.url,
         ...(typeof m.hash === 'string' ? { hash: m.hash } : {}),
+        // 召唤物的行为层（docs/WORKSHOP.md §4.7）：**同一份清单**里的另一条通道，`kind: 'token'` 标记它属于
+        // token 键空间（`Battle opts.tokenKits` 而不是 `opts.kits`）。干员 kit 照旧不带这个键 —— 线上格式对
+        // 已经存在的读者（包括老客户端）逐字节不变，而两个键空间在装载器里是**分开裁决**的，所以必须分开送达。
+        ...(m.kind === 'token' ? { kind: 'token' } : {}),
       })),
     // The content this field runs with (DESIGN §28.2): `{ digest, packs }`, or null. It is here because the spec is the
     // only object both execution paths share — and because validateClientResult derives every bound it enforces from
@@ -192,10 +200,18 @@ export function createBattleFromSpec(spec, dataSource, opts = {}) {
   if (opts.logger) battleOpts.logger = opts.logger;
   if (opts.recordEvents === false) battleOpts.recordEvents = false;
   if (opts.quiet) battleOpts.quiet = true;
+  // 限伤 override (`spec.bossHitLimit`, shared/constants.js bossHitLimitFrom): a finite number is the rail, `null`
+  // means Infinity (JSON has no Infinity — the browser rebuilds it). The spec/meta KEY being absent leaves the battle
+  // without one, i.e. the BOSS_HIT_LIMIT default, which is the behaviour of every existing spec.
+  if (s.bossHitLimit === null && Object.hasOwn(s, 'bossHitLimit')) battleOpts.bossHitLimit = Infinity;
+  else if (typeof s.bossHitLimit === 'number') battleOpts.bossHitLimit = s.bossHitLimit;
   // 工坊行为层 (docs/WORKSHOP.md §4): a per-battle kit map injected through the sanctioned hook — `Battle opts.kits`
   // takes precedence over the built-in registry (server/sim/content/index.js setupUnitKit). The server passes the map it
   // loaded from the packs; the browser passes the map it built from `spec.workshopKits`.
   if (opts.kits && typeof opts.kits === 'object') battleOpts.kits = opts.kits;
+  // 召唤物的行为层（docs/WORKSHOP.md §4.7）：另一张表，另一个键空间（token 记录 id，`content/index.js` 的
+  // `tokens.kits?.[def.id]`）。与上面一行同一条纪律：没有包声明它时这个键根本不出现，战斗与从前逐字节相同。
+  if (opts.tokenKits && typeof opts.tokenKits === 'object') battleOpts.tokenKits = opts.tokenKits;
   // 包声明的战斗逻辑（`server.battle`, DESIGN §28.17）：服务端把**这一场**要跑的 installer 直接递进来（一个函数过不了
   // 线），浏览器那边按 `spec.workshopBattle` 的 URL 自己加载出同一批。没有包声明时不传这个键 —— Match 与 Battle
   // 的行为与从前逐字节相同。

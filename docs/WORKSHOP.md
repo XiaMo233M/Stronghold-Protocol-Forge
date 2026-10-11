@@ -52,23 +52,27 @@ workshop/<packId>/
 | `name` | 否 | 显示名（默认取 `id`） | 包管理 → 包元数据 |
 | `version` | 否 | 默认 `0.0.0` | 包管理 → 包元数据 |
 | `author` / `license` / `description` | 否 | 元信息；`license` 用于声明素材授权 | 包管理 → 包元数据 |
-| `gameVersion` | 否 | 作者针对的游戏版本，便于排查 | 包管理 → 包元数据 |
+| `gameVersion` | 否 | 作者针对的游戏版本，便于排查；`game` 的**别名**（读的时候优先 `game`）。**必须是字符串**：写成非字符串（`3`、`true`、数组）整包被拒 `BAD_GAME_TYPE`；`null` / 空串 = 没写 | 包管理 → 包元数据 |
+| `game` | 否 | 作者针对的**上游游戏版本区间**（`>=0.2.0` / `0.2.x` / `*`），见 §1.9；`gameVersion` 是它的别名、优先读它。写了坏区间整包被拒 `BAD_GAME_RANGE`，写成非字符串被拒 `BAD_GAME_TYPE`；`null` / 空串 = 没写 | ⛔ 本轮无图形入口（作者手写 `pack.json`） |
 | `content` | 贡献项之一 | 这个包提供哪些数据文件（上表的名字，含 `bonds`、`units`） | 各页保存时自动补 |
 | `voices` | 贡献项之一 | 这个包为哪些干员提供**默认配音**的语音，见 §1.4 | 语音页 |
 | `voiceLangs` | 贡献项之一 | 同一个包给**其它配音语言**（cn/en/kr，默认那一档是日文）各配一份，见 §1.4；形状与 `voices` 相同，多一层语种 | 语音页（语种选择） |
 | `bondIcons` | 贡献项之一 | 这个包为哪些盟约提供图标，见 §1.4 与 §1.8：`{ "<bondId>": "<包内相对 assets/ 的路径>" }` | 盟约页 + 该页的「已声明」清单 |
 | `itemIcons` | 贡献项之一 | 这个包为哪些装备/道具提供图标，见 §1.4：`{ "<图标 id>": "<包内相对 assets/ 的路径>" }` | 装备页 + 该页的「已声明」清单 |
-| `art` | 贡献项之一 | 这个包自带的外观素材（头像 / 立绘 / 模型）**与两张扁平图标表**（技能图标 / 分支图标），见 §1.4：`{ chars / enemies / tokens / skills / profSub: { "<id>": … } }` | 干员页 / 怪物页的「本包自带的外观素材」+ 「已声明」清单 |
+| `art` | 贡献项之一 | 这个包自带的外观素材（头像 / 立绘 / 模型）**与四张扁平图表**（技能图标 / 分支图标 / 盟约图集 / 分队图集），见 §1.4、§1.2：`{ chars / enemies / tokens / skills / profSub / bonds / bands: { "<id>": … } }` | 干员页 / 怪物页的「本包自带的外观素材」+ 「已声明」清单 |
+| `skins` | 贡献项之一 | 这个包给某些干员带来的**时装**（一套 = 立绘 / 头像 / 可选模型与语音），见 §1.17：`[{ id, charId, name, series?, desc?, art?, voices? }]`。字段闭集是 `SKIN_FIELDS`，`art` 与 `art.chars` 的一条**同形**；落点是 `assets.skins[<charId>]` 的一列（同一干员可以有好几套）。**引擎不认识「皮肤」**：哪一套生效由一个注册了的外观提供者决定，玩家可以用设置里的「工坊外观」整个关掉 | ⛔ 本轮无图形入口（作者手写 `pack.json`） |
 | `support` | 否 | 这个包自己新增的、应当进助战卡池的干员 id 列表，见 §2.1；阶由记录推导 | 包管理 → 助战声明 |
 | `operators` | 贡献项之一 | 这个包自己新增的、应当进**自选池**（自选编队）的干员，见 §1.2；名字/星级/职业/分支从本包那条 `units` 记录派生 | 包管理 → 自选池声明 |
 | `playtest` | 否 | **试玩行为开关**（不进记录）：`{ "directToHand": ["<chessId>", …] }` —— 这些干员在编辑器「一键试玩」的第一回合直接进手牌，见 §1.2 与 docs/EDITOR.md §试玩 | 干员页的「试玩时直接发到手上」复选框（覆盖官方干员时写在这里；本包新增的干员仍写在记录里）+ 包管理 → 试玩直接发到手上（逐条删除） |
 | `overrides` | 否 | 允许覆盖的官方记录，格式 `"<file>:<id>"`，例如 `"chess:chess_char_1_01_a"`、`"bonds:yanShip"`、`"units:char_4231_clemnt"` | 包管理 → overrides（盟约页覆盖官方时自动补 `bonds:<id>`） |
-| `api` | 否 | 包写它时的**模组 API 区间**（钩子总线与 kit 契约，见 §1.9）：只有声明了才与 `shared/constants.js MOD_API_VERSION` 比对，不含这个 build 就整个包被拒（`MOD_API_INCOMPATIBLE`） | 包管理 → 包元数据（本轮只是可写可读可判，编辑器入口见 §1.9「当前状态」） |
+| `api` | 否 | 包写它时的**模组 API 区间**（钩子总线与 kit 契约，见 §1.9）：只有声明了才与 `shared/constants.js MOD_API_VERSION` 比对，不含这个 build 就整个包被拒（`MOD_API_INCOMPATIBLE`）。**必须是字符串**：`"1"` / `"1.x"` 都行，写成非字符串（`1`、`true`、数组）整包被拒 `BAD_API_TYPE` —— 不静默读成「没声明」；`null` / 空串 = 没写 | 包管理 → 包元数据（本轮只是可写可读可判，编辑器入口见 §1.9「当前状态」） |
 | `assets` | 贡献项之一 | 客户端资源容器声明（§1.9）：`{ container, manifest, serverPolicy?, verify? }` | ⛔ 本轮无入口（A 段只做格式） |
 | `client` | 贡献项之一 | C 层注册点声明（§1.9）：`{ panels: [{ id, slot, module, order?, gate? }], requires?: […] }`，`slot` 是闭枚举 | ⛔ 本轮无入口 |
 | `server` | 贡献项之一 | 服务端侧的三类声明（§1.9）：`{ preDispatch: { module, policy, intercepts }, meta: { module, registers }, modules: [{ id, entry, uses, write? }] }`。`preDispatch.intercepts` 必须是 `shared/protocol.js C2S` 里真实存在的类型；`meta` 与挂了 `matchClass` 的模块都要求包声明 `combat: true` | ⛔ 本轮无图形入口 |
 | `routes` | 贡献项之一 | 只读 HTTP 路由声明（§1.9）：`[{ path, file, cache? }]`，只服务包内 `.json` | ⛔ 本轮无入口 |
 | `i18n` | 贡献项之一 | 给**已有语种**（`en` / `ja` / `ko` / `zh-TW` …）补界面词条：`{ "<语种>": "<包内相对 .json 路径>" }`，见 §1.10 | ⛔ 本轮无入口 |
+| `forms` | 贡献项之一 | 这个包自带的干员 / 怪物**自己的形态（clip set）**，见 §1.19：`{ chars / enemies / tokens: { "<spine id>": { "<形态名>": { change?, end?, leave?, next?, roles } } } }`。**第一方已有的形态名不许覆盖**（`FORMS_FIRST_PARTY_OVERLAP` 整包拒绝） | ⛔ 本轮无图形入口（作者手写 `pack.json`） |
+| `fx` | 贡献项之一（空数组除外） | 包自己的**静态相位**：`{ "silentPhases": ["<phase kind>", …] }`，命中的 `'phase'` 特效不放通用特效，见 §1.19。与第一方那两个**并集**（取消不了） | ⛔ 本轮无图形入口 |
 
 **每个字段都有图形入口**（0.8.1 起，最后补上的是元数据与 `overrides`；`operators` 的入口见 §1.2）：写进 `pack.json`
 的东西必须能在界面上增删改，包括**陈旧/没人用的条目**（它们只是不生效，不是错误，但要能删掉）。唯一没有入口的是 `id`：它必须等于目录名。
@@ -76,26 +80,27 @@ workshop/<packId>/
 **顶层键是闭集**（`shared/workshop.js PACK_FIELDS`）：上面这张表**就是**这份格式认识的每一个字段。写一个不在这张表里的
 顶层键（打错、或者抄了另一个 mod 格式的字段）**整个包被点名拒绝**：`PACK_UNKNOWN_FIELD`，理由里列出全部合法字段。
 这不是「我们还没做」，是**刻意**的 —— 一个我们不认识的键如果只是被读过去，作者看到的是「包合法、加载了、可我写的那件事
-没发生」。三个社区 mod 里最典型的三个键因此都被当场拒绝而不是静默丢弃：
+没发生」。三个社区 mod 里最典型的三个键里，两个**没有通道**、都被当场拒绝而不是静默丢弃；第三个（`skins`）
+后来做成了真字段，所以它今天在**上面的字段表里**、在下面这张表里只留下「为什么它不该被当成 `art` 用」这一条：
 
 | 键 | 今天的结果 | 想做的事 | 今天该往哪儿写 |
 |---|---|---|---|
 | `variants` | `PACK_UNKNOWN_FIELD` | 「同一份数据的另一套数值 + 一个开关」（满练度 / 12 部署位这类**可切换口径**） | **没有通道**。可以拿 `overrides` 落**一份**数值进默认口径，但那不是「可切换的变体」，而且会让包改默认规则（比不做更坏）。要做得先在引擎里做出「口径 / 变体」这一层（`data/official.json` + 运行时的练度开关，今天都不存在） |
-| `skins` | `PACK_UNKNOWN_FIELD` | 干员时装（皮肤）与「换装」Tab：皮肤表 + 切换 UI + 包字段**三样都没有** | **走 `art`**（§1.4）—— `art.chars[<charId>]` 收 `avatar` / `portrait` / `spine`，也就是「这个包给这名干员一套外观素材」。**换装界面**是另一件事（C 层，§1.9.3 的 `client.panels` 能挂一个面板，但它读不到 store，换装要写进玩家状态就不在这个口子里）。`skins: {…}` 不是 `art` 的别名，别照抄 |
+| `skins` | **已实现，见 §1.17** | 干员时装（皮肤）与「换装」Tab | 写成 `skins: [{ id, charId, name, art?, voices? }]`（一套外观的**数据**）；**哪一套生效**由一个注册了的外观提供者决定（C 层面板导出的 `appearance(ctx)`），玩家可以用设置里的「工坊外观」整个关掉。只装数据包不会有画面变化 —— 那需要那个提供者。**不要**改成 `art.chars[<charId>]`：那给的是**唯一一套**素材，换不了装 |
 | `official` / `config` / `meta` / `shared` / `theme` / `serverModules` | `PACK_UNKNOWN_FIELD` | 官方口径文件 / 规则改写 / match 元注册表 / 共享层补丁 / 主题 / 服务端模块 | **刻意没有通道**（`config` 见下面那一段；其余是引擎特性或 wire 契约，按 `AGENTS.md`「Official first … the maintainer's decision only」） |
 
 `content` 只接受上表列出的文件。**`config` 被刻意排除**：一个能改写经济、回合表或难度参数的包改的是规则而不是内容，那需要另一套审查机制，不在本功能范围内。
 
-**只带素材的包是合法的包**：`content: []` + `voices` / `voiceLangs` / `bondIcons` / `itemIcons` / `art` / `operators` / `i18n`
-里任意一项（见 §1.4、§1.10）。一个只给助战干员配语音、只给盟约/装备配一张图、只给某个干员配一张立绘、只给已有语种
-补几条界面词条的包，不需要提供任何数据文件；反过来，这些贡献项**全空**才会被拒（`EMPTY_PACK`）。
+**只带素材的包是合法的包**：`content: []` + `voices` / `voiceLangs` / `bondIcons` / `itemIcons` / `art` / `skins` / `operators` / `i18n` / `forms` / `fx`
+里任意一项（见 §1.4、§1.10、§1.17、§1.19）。一个只给助战干员配语音、只给盟约/装备配一张图、只给某个干员配一张立绘或一套时装、
+只给已有语种补几条界面词条、只给自己的怪物补一个形态或一个静默相位的包，不需要提供任何数据文件；反过来，这些贡献项**全空**才会被拒（`EMPTY_PACK`）。
 
 `support` 与 `playtest` **不是**贡献项：`support` 只决定**助战卡池**里放谁，干员本体还是由 `content: ["chess"]` 带进来的
 —— 所以一个只写 `"support": […]`、`content: []` 的包会被 `EMPTY_PACK` 拒，而理由里会点名 `support`（见 §2.1 的完整例子）。
 
 中间层的四组能力声明（`assets` / `client` / `server` / `routes`，见 §1.9）与 `i18n` 也是贡献项 —— 但只有**声明了内容**
-才算：`routes: []`（空数组）与不声明没有区别，照旧 `EMPTY_PACK`。`api` 与 `playtest` 一样**不是**贡献项：它们是声明
-（前者的区间、后者的行为开关），一个只带它们的包什么都没带来。
+才算：`routes: []`（空数组）与不声明没有区别，照旧 `EMPTY_PACK`；`fx: { "silentPhases": [] }` 同理（见 §1.19）。
+`api` 与 `playtest` 一样**不是**贡献项：它们是声明（前者的区间、后者的行为开关），一个只带它们的包什么都没带来。
 
 ### 1.2 叠加规则
 - **默认叠加（additive）**：新 id 直接加入。
@@ -195,6 +200,64 @@ URL 走 `/workshop-assets`（客户端零改动）、官方已有这个 id 时�
 **`skillsById` 不在本轮范围内**（业主 2026-10-09）：我们没查清它的用途（本仓数据里它是 `{ id: id }` 这种自映射，
 522 条与 `skills` 一一对应），所以**故意不开口子**。写了 `art.skillsById` 会被 `ART_UNKNOWN_TABLE` 拒掉 —— 那正是
 我们要的：宁可当场说「这张表没有通道」，也不要收下一份没人读的声明。
+
+#### 盟约图集与分队图集（`art.bonds` / `art.bands`）
+
+`assets.json` 的这两张表**值也直接就是路径字符串**（`bonds["yanShip"]` = `/assets/bond/yanShip.png`，
+`bands["band_bldsk"]` = `/assets/band/band_bldsk.png`），所以它们同样是 `ART_TABLES` 里的**扁平表**：
+
+```json
+"art": {
+  "bonds": { "aveMujica": "bond/icon_aveMujica.png" },
+  "bands": { "band_wuyouyoumeng": "band/band_wuyouyoumeng.png" }
+}
+```
+
+| 表 | 落点 | 客户端读它的地方 | 键名 |
+|---|---|---|---|
+| `bonds` | `data.assets.bonds[<bondId>]` | 盟约条与详情面板的图标 | **`bondId`** |
+| `bands` | `data.assets.bands[<bandId>]` | 分队（策略）图标 | **`bandId`** |
+
+**键名必须与消费端一致，写错不会报错**：客户端那两行是
+`public/js/ui/assetUrls.js` 的 `bondIconUrl(m, bondId)`（`m.bonds[bondId]`）与 `bandIconUrl(m, bandId)`
+（`m.bands[bandId]`）—— 查不到时它们返回 `null`，调用方画自己的兜底（圆点 / CSS 形状），**不回落**到别的图，
+也**不回落首字**。所以把 id 挂到 `bond`（单数）上不会「看起来生效」，它只是每一个都查不到：
+
+```jsonc
+// 无效：assets.bond 这个键没人读（落点是 assets.bonds）
+"art": { "bond": { "aveMujica": "bond/icon.png" } }   // 连带 art.bond 表名本身也被拒：ART_UNKNOWN_TABLE
+```
+
+规则与 `skills` / `profSub` 逐字相同：路径相对 `assets/`、无穿越（`ART_PATH_UNSAFE`）、id 字符集同一套
+（`ART_BAD_ID`）、URL 走 `/workshop-assets`、官方已有这个 id 时是**替换**（给官方盟约换图）、两个包抢同一个 id 时
+**包 id 最小者赢**并点名（`ASSET_COLLISION`）。
+
+**与 `bondIcons` 是同一件事的两个写法 —— 不能同时声明同一个 id。** 两条路最后都写 `assets.bonds[<bondId>]`，
+客户端只看得到一条，所以：
+
+| 情形 | 结果 |
+|---|---|
+| 只在 `art.bonds` 里声明 | 生效（落点 `assets.bonds`） |
+| 只在 `bondIcons` 里声明 | 生效（落点同样是 `assets.bonds`，见 §1.4「盟约图标」） |
+| **同一个 `bondId` 两处都声明** | **点名拒绝整包**：`BOND_ICON_CONFLICT`。必须自己删掉一份 |
+| 两处声明**不同**的 id | 两份都生效，谁也不覆盖谁（各管一个图标） |
+
+为什么是**拒绝**而不是「谁赢」：`mergeWorkshopFlatArt` 排在 `mergeWorkshopBondIcons` 之后，真按顺序判就是
+`art.bonds` **静默压掉** `bondIcons` —— 作者改了 `bondIcons` 那一份却发现图标没变，日志一句话都没有。这不是
+「两种写法各有取舍」，而是同一个最终值的两个来源，必须由作者自己决定留哪一个。
+
+`art.bands` **没有**对应的历史字段（不存在 `bandIcons`），所以 `bands` 不参与这条互斥判据：一个 id 同时出现在
+`bondIcons` 与 `art.bands` 里是两件不相干的事（盟约 vs 分队），两份都生效。
+
+**落点必须先在 `data/assets.json` 里存在**：`assets.bonds` / `assets.bands` 是素材管线的产物（官方那 23 + 40 条），
+这两张表**不会被凭空创建** —— 清单里没有那张表时点名报告 `MANIFEST_MISSING`（`id` 是 `art.bonds` / `art.bands`），
+让作者去跑 `npm run assets`；这与 `itemIcons` 对 `assets.items` 的规矩一致。`skills` / `profSub` 不受这条约束
+（它们本来就没有「官方必有一张表」的前提）。
+
+**启动日志的措辞**：扁平表**按表名逐项汇总** —— `skills +11 (…)`、`bonds +1 (…)`、`bands +1 (…)`，
+（原为把四张表折成一句 `N icons`）。改措辞的两个理由：`art.bonds` 是盟约**图集**、不是图标，折进 `icons` 会让
+读日志的人去 `assets.skills` 里找一个盟约 id；而「表名 + N」正好是作者能在 `pack.json` 里对照着改的那个名字。
+按旧字样 `N icons` 在日志里找工坊包的人，请改看 `<表名> +N`。
 
 ### 1.3 数据流
 
@@ -314,6 +377,7 @@ workshop/*/ ──┘        （冻结之前）              └─→ /data/<fi
 | id 必须是盟约 id | 字符集 `[A-Za-z0-9_.:-]`（`BOND_ICON_BAD_ID`）。写一个不存在的 id 不会报错，但那张图永远不会被用到 —— 编辑器只允许给**本包真的有的盟约**配图 |
 | 覆盖官方 = 换掉官方图标 | 同一个 id 出现在官方 `bonds` 里时这张图**替换**它；新增的 id 直接加进去 |
 | 两张图抢同一个 id | 按**包 id 排序**第一个赢，后一个包会在启动日志里得到一条错误（静默覆盖会变成「换个包顺序图标就变了」） |
+| **不能与 `art.bonds` 声明同一个 `bondId`** | 两条路最后都写 `assets.bonds[<bondId>]`，客户端只看得到一条 ⇒ 同一个 id 两处都声明是 **`BOND_ICON_CONFLICT`：整包被拒**，必须自己删掉一份。两处声明**不同**的 id 则两份都生效（见 §1.2「盟约图集与分队图集」） |
 
 **送达方式与语音完全一致**：`applyWorkshop()` 把它们并进 `assets.bonds`（`workshopBondIconIndex` /
 `mergeWorkshopBondIcons`），`assets.json` 因此进入「被触及的数据文件」集合，URL 走同一条
@@ -377,7 +441,7 @@ URL 走同一条 `/workshop-assets/<pack>/<路径>`，**客户端零改动**（`
 | 规则 | 说明 |
 |---|---|
 | 三张对象表，形状照抄官方条目 | `chars` 的 `spine` 是**嵌套**的 `{ front: …, back: … }`；`enemies` / `tokens` 的 `spine` 是**扁平**的。可用的字段就是官方条目里的那几个：`chars` 用 `avatar`/`avatarE2`/`portrait`/`portraitE2`，`enemies` 用 `icon`（另有 `spineAliasOf` 指向别的模型），`tokens` 用 `avatar`（另有 `owner`）。写别的字段会被拒（`ART_UNKNOWN_FIELD`） |
-| **另外两张是扁平表** | `skills`（技能图标）与 `profSub`（职业分支图标）：条目本身**就是一条路径字符串**（`assets.skills[key]` / `assets.prof.sub[key]` 在官方清单里就是路径）。落点分别是 `assets.skills` 与 `assets.prof.sub`，见 §1.2 最后一小节；`skillsById` 没有通道（故意） |
+| **另外四张是扁平表** | `skills`（技能图标）、`profSub`（职业分支图标）、`bonds`（盟约图集）、`bands`（分队图集）：条目本身**就是一条路径字符串**（`assets.skills[key]` / `assets.prof.sub[key]` / `assets.bonds[bondId]` / `assets.bands[bandId]` 在官方清单里就是路径）。落点由 `ART_TABLES[表].target` 给出，见 §1.2 那两小节；`skillsById` 没有通道（故意） |
 | 路径相对 `assets/` | 与语音、各类图标逐字相同（`ART_PATH_UNSAFE`）；**受 §1.4 的授权闸门约束**（有 `assets/` 就必须声明 `license`） |
 | `skel` 与 `atlas` 缺一不可 | `ART_SPINE_INCOMPLETE`。清单里的 `atlas` 我方代码只用来做内存回收，但形状这一层就要求它必须在 —— 见下面第一条硬约束 |
 | **字段级合并，不是整条替换** | 官方已有这个 id 时，包只给头像就保留官方模型、只给 `spine.front` 的 `skel`/`atlas` 就保留官方那一侧的 `anims`/`events`（整侧替换会让一个官方模型变成「能出来但不动」，而且一条日志都没有） |
@@ -416,6 +480,16 @@ node tools/workshop-pack.mjs list                           # 每个包一行：
 **zip 布局**：`pack.json` 与包内其它文件（**包括 `assets/**`**）都在 **zip 根**，一个目录层级都不多 ——
 也就是「这个 zip 就是这个包」。导入时也接受常见的那一种变体：整个包在一个**唯一的顶层目录**里
 （`my-pack-1.0.0/pack.json`），那层目录会被去掉。
+
+**所以「这个包有哪些文件」= 这个目录里的每一个普通文件**（DESIGN §28.2 业主裁决 B，2026-10-11）：包的身份哈希
+覆盖包目录下的全部普通文件，而那一份清单**同时就是**客户端下载清单（`GET /mods/catalog.json`）—— 没有任何按
+名字或目录的排除项，`README.md` / `test/**` / `*.bak` / 点文件也一样。理由是：**被声明的模块可以 `import` 同目录
+的兄弟文件、可以在运行时读一个数据文件**（`server/rules.mjs`、`data/rules.mjs`、`client/helper.js` 都真的发生过），
+所以「这个包会执行/读到哪些文件」除了"一整个目录"以外没有可判定的答案。作者要自己承担两件事：
+
+- **别把不该分发的东西留在包目录里**：编辑器备份、构建产物、`node_modules/`、`.git/` 都会进身份、也会被每个装了
+  这个包的客户端下载（改一个 README 就是一个新摘要，房间的摘要闸门会要求客户端重新对齐）；
+- **别指望"没被声明就不算"**：清单是目录，不是声明。
 
 | 规则 | 为什么 |
 |---|---|
@@ -502,6 +576,10 @@ node tools/workshop-validate.mjs my-pack
 | **装备图标（`itemIcons`）**：汇总进 `assets.items`、随合并的 `assets.json` 送达客户端（客户端零改动） | ✅ 已实现（`test/workshopItemIcons.test.js`） |
 | **外观素材（`art`）**：头像 / 立绘 / spine 模型汇总进 `assets.chars` / `assets.enemies` / `assets.tokens`，包新增的干员不再是菱形贴图 | ✅ 已实现（`test/workshopArt.test.js`） |
 | **技能图标与分支图标（`art.skills` / `art.profSub`）**：两张扁平表汇总进 `assets.skills` / `assets.prof.sub`，走同一条 `/workshop-assets` 路由 | ✅ 已实现（`test/workshopOperators.test.js`） |
+| **盟约图集与分队图集（`art.bonds` / `art.bands`）**：两张扁平表汇总进 `assets.bonds` / `assets.bands`（客户端 `bondIconUrl` / `bandIconUrl` 零改动）；与 `bondIcons` 声明同一个 `bondId` 时整包被拒（`BOND_ICON_CONFLICT`）；落点不存在时报 `MANIFEST_MISSING`，不凭空造表 | ✅ 已实现（`test/workshopArtTables.test.js`） |
+| **时装（`skins`）**：一套外观的**数据**（一套一个 `art`，一名干员可以有好几套）按干员分组合并进 `assets.skins`；**哪一套生效**由一个注册了的外观提供者（C 层面板 `appearance(ctx)`）决定，玩家可以用设置里的「工坊外观」整个关掉（默认开） | ✅ 已实现（`test/workshopSkins.test.js`、`test/ui/portraitChain.test.js`；设计 §28.28 / §1.17）。⚠️ 只装数据包不会有画面变化 —— 还需要那个提供者 |
+| **形态（`forms`）**：包自带的干员 / 怪物声明自己的形态（clip set），并进 `assets.modForms` 后由 `formsFor()` 折进第一方 `FORMS`（**第一方优先**，包只做增量） | ✅ 已实现（`test/packForms.test.js`；设计 §28.29 / §1.19） |
+| **静态相位（`fx.silentPhases`）**：包声明哪几个 `'phase'` 种类不放通用特效，并进 `assets.silentPhases`，与第一方 `SILENT_PHASES` 取并集 | ✅ 已实现（`test/packForms.test.js`；设计 §28.29 / §1.19） |
 | **新增一个干员（`content: ["units"]`）**：干员记录并进 `data.backups.units`，形状只查「下游用得上吗」 | ✅ 已实现（`test/workshopOperators.test.js`、`docs/examples/clementia-pack/`） |
 | **自选池声明（`pack.json.operators`）**：进 `diy.ownedPool` / `diy.operators`；四条拒绝规则（`OPERATOR_NO_UNIT` / `OPERATOR_NOT_SIX` / `OPERATOR_BOND_UNKNOWN` / `OPERATOR_FORM_MISSING`）失败关闭 | ✅ 已实现（`test/workshopOperators.test.js`、编辑器包管理页） |
 | **「新建一个干员」的编辑器表单** | ⛔ 不在本轮（业主未裁定；干员记录目前只能手写 `units.json`，或由干员页的机制产出） |
@@ -579,7 +657,7 @@ node tools/workshop-validate.mjs my-pack
 
 | 声明 | 算贡献项吗 |
 |---|---|
-| `content` 里任一文件 / `voices` / `voiceLangs` / `bondIcons` / `itemIcons` / `art` / `operators` | **算**（旧语义，一字未改） |
+| `content` 里任一文件 / `voices` / `voiceLangs` / `bondIcons` / `itemIcons` / `art` / `skins` / `operators` | **算**（旧语义，一字未改；`skins` 见 §1.17） |
 | `assets` / `client`（至少一个面板）/ `server.preDispatch` / `routes`（至少一条） | **算**（A 段新增；一个只声明它们的包是合法包） |
 | `i18n`（至少一个语种） | **算**（B5 段；一个只给已有语种补词条的包是合法包，见 §1.10） |
 | `routes: []`、空的 `client.panels`、空的 `i18n`、`playtest`、`api`、`support` | **不算** —— 什么都没带来，照旧 `EMPTY_PACK` |
@@ -610,6 +688,25 @@ node tools/workshop-validate.mjs my-pack
 而区间不含本 build，整个包被拒（`MOD_API_INCOMPATIBLE`，理由里写出声明的区间与本 build 的号）。写成坏区间照旧是
 `BAD_API_RANGE`（先判语法，再判区间）。A 段**只**加了那个常量与这一条判罚，没有别的东西读它。
 
+**写成非字符串会被点名拒绝**（B7 段）。`"api": 1`（JSON 数字）、`true`、`["1.x"]`、`{ range: "1.x" }` 一律整包被拒：
+
+| 键 | 非字符串时的拒绝码 |
+|---|---|
+| `api` | `BAD_API_TYPE` |
+| `game` / `gameVersion` | `BAD_GAME_TYPE`（别名与主名同一条判罚，理由里点名**是哪一个键**写坏了） |
+
+这条判罚的落点与「写了等于没写」是同一处：三个键的解析以前只有 `strField` 一个人，而它把非字符串读成 `null`，
+于是 `api: 1` 在 `api &&` 的两条校验里都短路、归一化结果 `api: null` —— 包当没声明一样通过，作者看到的是
+「包合法、我写的区间没生效」。**失败方向是静默的**，所以这里当场拒绝。三条边界：
+
+- **缺键照旧一个字节都不受影响**：`api` / `game` / `gameVersion` 全缺的包不进任何新分支，归一化清单不多出键、
+  身份哈希与今天逐字相同（`test/workshopDeclTypes.test.js` 钉住一个缺键包的身份哈希）。
+- **`null` 与省略同一后果，不是错误**：仓库既有语义是「`null` = 没有这个键」—— 编辑器写元数据那一端把 `null`
+  当「删掉这个键」（`packMetaEditor.test.js`：`description: null` ⇒ `!Object.hasOwn(obj, 'description')`），
+  `layer` 的解析分支对 `undefined || null` 逐字相同。空串与纯空白同理（`""` / `"   "` 只是把键写成了空的）。
+- **类型先于语法**：`api: 1` 报的是 `BAD_API_TYPE`，不是 `BAD_API_RANGE` —— 把它报成「坏区间」会把作者引到错的
+  地方。`game` 写坏而 `gameVersion` 合法时**仍然是错**：一个被别名盖住的坏键只是被盖住，不是没事。
+
 #### 当前状态（A 段 + B1 段 + B2 段 + B3a 段 + B4 段 + B5 段）
 
 | 部分 | 状态 |
@@ -635,6 +732,8 @@ node tools/workshop-validate.mjs my-pack
 | `server.preDispatch` 的最后一格（import 失败 / 没有工厂导出 / 模块的 `validatePolicy` 拒绝策略 ⇒ 整包移出已加载集合，数据也不并） | ✅ 已实现（B4：`server/workshop.js dropUnavailablePreDispatchPacks` + `server/index.js` 装配路径 + `server/data.js excludePacks`；可选导出 `validatePolicy` 走同一条裁剪） |
 | 浏览器里真的 import + 真的渲染（真 Chrome）、真 SW 的生命周期与作用域 | ⛔ 本机无 Chrome（`SP_E2E=1` 的可选路径，与 §4.4 同一个 standing gap；`test/modAssets.test.js` §10 是**跳过且从未运行**的占位用例） |
 | **顶层键闭集**：不认识的键 ⇒ `PACK_UNKNOWN_FIELD` 整包被拒（不是静默丢） | ✅ 已实现（B5：`shared/workshop.js PACK_FIELDS` + `normalizePackManifest`；`test/workshop.test.js`） |
+| `api` / `game` / `gameVersion` 写成非字符串 ⇒ `BAD_API_TYPE` / `BAD_GAME_TYPE`（缺键与 `null` 逐字节不变） | ✅ 已实现（B7：`shared/workshop.js declaredString` 类型闸门 + `test/workshopDeclTypes.test.js`） |
+| 编辑器元数据页显示 `api` / `game`（`PACK_META_FIELDS` 不含它们，只读到了 `gameVersion`） | ⛔ **另一件事，本轮没动**（`tools/workshop-pack.mjs PACK_META_FIELDS` 归编辑器那一波） |
 | `i18n`：给已有语种补词条，**已有键绝不覆盖** + 冲突点名 | ✅ 已实现（B5：`shared/workshop.js parseI18nDecl` / `mergeWorkshopI18n`、`server/workshop.js i18nIssues`、`server/http/workshop.js buildWorkshopI18nFiles`、`server/http/static.js` 的 `/i18n/<code>.json` 合并体；见 §1.10） |
 
 #### 1.9.1 `server.preDispatch`：分发前的准入钩子（B1 段已实现）
@@ -1077,10 +1176,40 @@ export function mount(ctx) {
 | 不在房间里 | 回 `NOT_IN_ROOM` —— 通道是**房间内**的，不在大厅里广播全网 |
 | 没声明的通道 | 服务端回 `BAD_MSG` 并**点名**那个通道；客户端 `send` 返回 `false`、`on` 返回一个什么都不做的退订函数，两边都会在控制台点名（`CLIENT_CHANNEL_UNDECLARED`）|
 | 引擎类型 | `ctx.net.on('<引擎类型>')`（`shared/protocol.js S2C` 里的那些）照旧原样透传，不受这一格影响 |
+| 对局子类 | 声明了 `server.modules { uses: ["matchClass"] }` + `combat: true` 的包，其子类的 `handlePackMsg` 在**限流之后、转发之前**被调到一次；返回 `true` / `{ consumed: true }` 就不再转发（见下） |
 
 **这一格不提供什么**：没有服务端存档、没有离线消息、没有跨房间广播、没有服务端语义（谁该收到、聊天记录怎么存、
 皮肤怎么同步，都是**包自己**的事 —— 服务端那一半用 §1.9.1 的 `server.preDispatch` 钩子接，它在 `intercepts` 里
 写上 `pack.msg` 就能看到这条消息，并可以用 `send` 回话）。
+
+**让对局里也看到这条消息**：上面那条 `preDispatch` 是「消息路过大厅」，它拿不到这一局的 Match。要**对局里**的代码
+看到它，用 `server.modules` 的 `matchClass`（DESIGN §28.14）—— 它要求包同时写 `combat: true`，因为那条子类碰得到
+整个 Match：
+
+```json
+{ "combat": true,
+  "server": { "modules": [{ "id": "chat", "entry": "server/chat.mjs", "uses": ["matchClass"] }] },
+  "client": { "panels": [{ "id": "chat", "slot": "root.overlays", "module": "ui/chat.js", "messages": ["chat", "mute"] }] } }
+```
+
+```js
+// server/chat.mjs —— 引擎在**限流之后、转发之前**调它一次，参数就是发送者与那条 `pack.msg` 原样
+const muted = new Set();
+export function registerServer(host) {
+  host.matchClass((Base) => class extends Base {
+    handlePackMsg(playerId, msg) {
+      if (msg.channel === 'mute') { muted.add(playerId); return true; }   // 已消费：同房谁都不转发
+      if (msg.channel === 'chat' && muted.has(playerId)) return true;     // 同上
+      // 不返回 = 照旧转发（今天的行为，逐字不变）
+    }
+  });
+}
+```
+
+返回值就是全部语义：`true` 或 `{ consumed: true }` = **已消费**（同房谁都不转发，发送者也没有回显）；`false` /
+什么都不返回 / 根本没有这个方法 = **照旧转发**。钩子**抛错按「未消费」处理**：日志里点名一次
+（`match.handlePackMsg threw`），消息照旧转发 —— 一条坏消息不该把通道打断。注意 `playerId` **可能是观战者**
+（`pack.msg` 与 `room.chat` 不同，没有旁观者判据），要不要拒绝由包自己判。
 
 #### 1.9.7 组件级改写：`client.panels[].wraps`（DESIGN §28.19）
 
@@ -1490,7 +1619,77 @@ export function install(battle) {
 
 ---
 
-### 1.16 `server.room`：包写的**房间级钩子**（已实现）
+### 1.17 时装（`skins`）：一套外观的**数据**在包里
+
+到这一刀之前，`skins` 是「顶层键闭集」里被点名拒绝的那一格（`PACK_UNKNOWN_FIELD`），作者只能借 `art.chars`
+给一名干员换**唯一一套**素材。现在它是一个真字段：**一个包可以给一名干员带来好几套外观**，由玩家选哪一套。
+
+```jsonc
+{
+  "id": "my-outfits", "name": "我的时装", "license": "CC0-1.0", "content": [],
+  "skins": [
+    {
+      "id": "summer",                    // 包内唯一，≤32，字母/数字/_/-
+      "charId": "char_1_01",             // 这套是给谁的（必须在你的包或官方数据里存在才有画面）
+      "name": "夏日余韵",                 // 显示名（必填）
+      "series": "夏季系列", "desc": "作者给玩家看的说明",   // 可选
+      "art": {                           // 与 art.chars 的一条**同形**（同一套解析器、同一套拒绝码）
+        "portrait": "outfits/summer/p.png", "avatar": "outfits/summer/a.png",
+        "spine": { "front": { "skel": "outfits/summer/m.skel", "atlas": "outfits/summer/m.atlas" } }
+      },
+      "voices": { "start": ["outfits/summer/start.mp3"] }
+    }
+  ]
+}
+```
+
+| 判据 | 说明 |
+|---|---|
+| 字段闭集 | `SKIN_FIELDS` = `id` / `charId` / `name` / `series` / `desc` / `art` / `voices`，一个不多一个不少；写别的名字**点名拒绝**（`SKIN_UNKNOWN_FIELD`） |
+| `id` 与 `charId` | `SKIN_ID_RE`（≤32 字符、不许下划线开头）；同一个包里两个同名 `id` ⇒ `SKIN_DUPLICATE_ID` |
+| `art` | 路径必须是包内相对路径（`ART_PATH_UNSAFE`）；spine 要齐 `skel` + `atlas`（`ART_SPINE_INCOMPLETE`）。有 `assets/` 就要声明 `license`（与 art 同一条） |
+| 贡献项 | **只带时装、`content: []` 的包合法** —— 一套时装就是这个包带来的东西（空数组仍 `EMPTY_PACK`） |
+
+落点是**清单**：`assets.skins[<charId>] = [{ pack, id, name, series?, desc?, art?, voices? }, …]`（按干员分组的
+一列；同一干员可以有几套）。两个包给同一干员的**同一套 id** 时按包 id 升序第一个赢，输的一方点名
+`SKIN_COLLISION`。路径与其它素材通道逐字相同：变成 `/workshop-assets/<包>/<路径>`，只服务登记过的 URL。
+
+**引擎不认识「皮肤」。** 它做两件事，第三件由包自己做：
+
+1. **数据**：把上面的声明并进 `assets.skins`（`mergeWorkshopSkins`）；
+2. **一个中间层接口**：C 层面板可以导出 `appearance(ctx)` 返回 `{ lookup(kind, charId, id) }`，注册成**外观
+   提供者**（一个进程最多一个，后注册者被拒）。引擎把**不透明 id** 连同**这条链的 kind**
+   （`'portrait'` / `'avatar'`）交给它问一次 —— 那个 id 是不是一套时装、属于哪个包，是提供者自己的事；
+   提供者只回答**被问的那一条 kind** 的一张图（`{ portrait }` 或 `{ avatar }`），另一条 kind 没图就回
+   `null`，由链回落官方；
+3. **哪一套生效**：完全在提供者（也就是那个 mod）里 —— 它自己读偏好、自己决定回落。**偏好按 kind 分开记**
+   也是它的事（`skin-picker` 用 `skin:portrait:<charId>` / `skin:avatar:<charId>` 两格，旧键
+   `skin:<charId>` 仍作公共退路）：引擎侧只负责「按 kind 问」，不认识「皮肤」，也不认识偏好键。
+
+解析链（`public/js/ui/portraitChain.js`）里那一次提问在 `_1`/`_2` 后缀那一步**之前**（「提供者先说话」），
+所以提供者给出的那一套优先于 `chars` 里同名的条目；提供者给 `null`、抛错、或给一个没有可用字段的对象时，
+**继续走原来的链**（回落原版立绘，画面照旧）。
+
+**优先级：调用方显式点名的变体 > 提供者的选择 > 官方回落。** 调用方点名版本的三种写法 —— `id` 以 `_2`
+结尾（精锐）/ `_1` 结尾（一阶）、`chess.isGolden`（详情页 / 商店卡的精锐立绘）、显式传 `{ variant: 'elite' }`
+—— 都让提供者**一次都不被问到**：别人明确要精锐立绘时，不该被一份只有一张头像图的时装盖掉。头像那一条
+kind **不看 `isGolden`**（精锐头像由调用方自己传变体），所以时装在头像上照旧生效 —— 这就是「立绘与头像
+分开受控」。
+
+**玩家可以整个关掉它**：设置 →「工坊外观」（`settings.workshopSkins`，默认开）。关掉时解析链与没有这一步
+逐字相同 —— 房主把开关关掉，结果与不装包一致（`test/ui/portraitChain.test.js` 两个方向都钉）。
+
+三样东西一起才有一张会变的图：**一个声明了 `skins` 的包** + **一个注册了外观提供者的面板**（它决定哪一套生效）
++ **开关打开**。只装数据包（例如只带 271 套时装的目录包）不会有任何画面变化 —— 启动日志里那一行会写出
+`N outfits`（`workshopSummary`），所以「装了但没反应」在第一行日志里就看得见。
+
+自检：`node tools/workshop-validate.mjs <包目录>`（形状）；`node --test test/workshopSkins.test.js`
+（声明 → 清单 → 冲突 → 只带时装的包真的被装上）；`node --test test/ui/portraitChain.test.js`（链的两个方向）。
+设计稿：[`docs/design/mod-layer.md` §28.28](design/mod-layer.md)、[`docs/MOD-SURFACE.md`](MOD-SURFACE.md) 的 `skins` 一行。
+
+---
+
+### 1.18 `server.room`：包写的**房间级钩子**（已实现）
 
 到这一刀之前，一个包能挂的服务端载荷有四类：`server.modules`（进程启动）、`server.preDispatch`（一次 HTTP 请求）、
 `server.meta`（一局的商店 / 经济）、`server.battle`（战场）。**没有一样覆盖房间本身** —— 房间被创建、有人加入或离开、
@@ -1579,6 +1778,83 @@ export function install(room) {
   大厅连一张表都不建（干净安装与从前逐字节相同）。
 
 完整规范（成员表、分类规则、隔离、测试）见 [docs/design/mod-layer.md](design/mod-layer.md) §28.20。
+
+---
+
+### 1.19 形态（`forms`）与静态相位（`fx.silentPhases`）：渲染器的两条**行为增量**
+
+这两条是给「包自带干员 / 怪物有自己的变身形态，或者自己的相位不该撒通用特效」准备的。两条通道的规矩一样：
+**引擎里第一方那张表一个字节不动，你的声明只做增量**。
+
+#### `pack.json.forms` —— 形态（clip set）
+
+引擎里 `public/js/render/units.js` 的 `FORMS` 是一张**冻结的常量**：按 spine id（就是 `assets.spine` / 怪物 /
+召唤物自己的 id）键，值是「形态名 → `{ change, end, leave, next, roles }`」。sim 发一条 `'phase'` 特效带
+`form` 字段时，渲染器就用它换 clip 集（掠海漂移体的爬行模式、转译基底的变身、首领的重生……）。
+
+包能声明**引擎没有的**形态：
+
+```json
+{
+  "id": "my-pack", "name": "…", "version": "0.1.0", "license": "CC0-1.0",
+  "content": ["chess"],
+  "forms": {
+    "chars": {
+      "char_ws_hero": {
+        "shift":   { "change": "Start_B", "end": "Die_B", "next": "shifted",
+                     "roles": { "idle": "Idle_B", "die": "Die_B_2", "move": { "loop": "Move_B" } } },
+        "shifted": { "roles": { "idle": "Idle_C", "die": "Die_C" } }
+      }
+    }
+  }
+}
+```
+
+| 键 / 字段 | 说明 |
+|---|---|
+| `forms.chars` / `.enemies` / `.tokens` | 三张表，与 `art` 的对象表同一组（形态说的是 spine 模型） |
+| `<spine id>`（第二层键） | 渲染器查找用的那个 id：干员的 `assets.spine`、怪物自己的键、召唤物 id |
+| `<形态名>`（第三层键） | 自己起的名字，字母开头、字母数字下划线。**它就是 sim 的 fx 里 `form` 的值** |
+| `change` | 进这个形态时先放一遍的过渡 clip（可省 / `null` = 直接切） |
+| `end` | 这个形态结束前放的收尾 clip（配合 fx 的 `dur`） |
+| `leave` | 离开这个形态时放的 clip（例如傀儡师换回本体） |
+| `next` | `end` 放完之后落到**同一个 spine id 上**的哪个形态（必须是已声明的，否则 `FORMS_NEXT_UNKNOWN`） |
+| `roles` | 这个形态的 clip 集：`idle` / `deploy` / `die` / `stun` / `move` / `attack` / `skill`，值是 clip 名字符串、`null`、或 `{ begin, loop, end }`。`{}` = 这个形态什么都不画（合法） |
+
+**两条你会撞上的规则**：
+
+1. **第一方的形态名不许覆盖。** 引擎已经有 `enemy_1040_bombd` 的 `bombed`，你就不能在自己包里再声明一个
+   `bombed` —— 那样写**整包被拒**（`FORMS_FIRST_PARTY_OVERLAP`）。想要自己的形态，起一个自己的名字
+   （或者用自己的 spine id）。这是刻意的：一份「写了却不生效」的声明比一条报错坏得多。
+2. **两个包撞同一个 `spine id + 形态名` 时，包 id 小的赢**（`FORM_COLLISION` 点名），与 `art` / `skins` 同一条规则。
+
+不合法一律**报错**，不静默丢弃：表名错 `FORMS_UNKNOWN_TABLE`、形态名形状错 `FORMS_BAD_KIND`、clip 名不是字符串
+`FORMS_BAD_CLIP`、`roles` 缺 / 键不认识 / 值不是字符串 `FORMS_MISSING_ROLES` / `FORMS_BAD_ROLES`、
+`next` 死链 `FORMS_NEXT_UNKNOWN`、字段名写错 `FORMS_SPEC_UNKNOWN_FIELD`。
+
+#### `pack.json.fx.silentPhases` —— 「这个相位不要通用特效」
+
+`'phase'` 种类的特效默认会撒一层通用光效。有些相位是**模型自己就表示**的（引擎第一方有 `bombed` 与
+`warning` 两个），那些不放特效。你自己包的相位种类可以加进来：
+
+```json
+"fx": { "silentPhases": ["helmLow", "spinStop"] }
+```
+
+- **并集**：引擎第一方那两个永远静默，你只能**加**，取消不了（这一点与 `forms` 的「第一方优先」不同 ——
+  静默与否没有「同名覆盖」这回事）；
+- 每一项必须是非空字符串（`FX_BAD_SILENT_PHASE`），`fx` 里写别的字段会被点名拒绝（`FX_UNKNOWN_FIELD`）；
+- `"fx": { "silentPhases": [] }` 是合法但**什么都不做**的声明（与 `"routes": []` 同义），所以它不算贡献项 ——
+  一个只带它的包仍然会被判成空包。
+
+#### 怎么验证
+
+```bash
+node tools/workshop-validate.mjs workshop/<你的包>     # 形状不合法一律点名（两条通道都在这一层判）
+node --test test/packForms.test.js
+```
+
+完整规范（判据逐条、合并规则、为什么第一方优先）见 [docs/design/mod-layer.md](design/mod-layer.md) §28.29。
 
 ---
 
@@ -1696,9 +1972,10 @@ node --test test/chessAuthoring.test.js test/workshop.test.js test/support.test.
 
 ---
 
-## 4. 行为层（`kits/<chessId>.js`）
+## 4. 行为层（`kits/<id>.js`）
 
-一个包可以带 JavaScript：`workshop/<pack>/kits/<chessId>.js`。**文件名就是干员 id**（写 `_a` 那个 `baseId`）。
+一个包可以带 JavaScript：`workshop/<pack>/kits/<chessId>.js`。**文件名就是一个键**（写 `_a` 那个 `baseId`）——
+它可以是一个干员 id，也可以是一个**召唤物**的 token id（两个键空间，见 §4.7）。
 默认导出就是模拟器调用的 kit 函数，契约与官方内容 `server/sim/content/kits/tierN.js` **完全一致**，所以工坊能做官方能做的一切：
 
 ```js
@@ -1721,10 +1998,11 @@ export default function kit(bb, chess, def) {
 
 ### 4.2 注入点与双通道（关键一致性）
 
-- 注入点是 **`Battle opts.kits`**：`server/sim/content/index.js setupUnitKit()` 会**先**查它、再查内置注册表 ——
-  按对局注入，**不改动那个冻结的全局表**。
-- 浏览器拿不到函数，所以战斗 spec 里带的是 JSON 安全的 `workshopKits: [{ id, pack, url }]`，
-  `public/js/battle/runner.js loadSpecKits()` 按 URL 动态 `import` 后重建**同一张表**。
+- 注入点是 **`Battle opts.kits`**（干员）/ **`Battle opts.tokenKits`**（召唤物，§4.7）：`server/sim/content/index.js
+  setupUnitKit()` 会**先**查它、再查内置注册表 —— 按对局注入，**不改动那个冻结的全局表**。没有包声明对应那一半时
+  那个键**根本不出现**，战斗与从前逐字节相同。
+- 浏览器拿不到函数，所以战斗 spec 里带的是 JSON 安全的 `workshopKits: [{ id, pack, url }]`（召唤物那一半多一个
+  `kind: 'token'`），`public/js/battle/runner.js loadSpecKits()` 按 URL 动态 `import` 后重建**同一批表**。
 - **只做服务端会让默认配置直接出错**：浏览器若回退到通用 kit，算出的结果会被服务端复算判为不一致而**拒绝**。
   这就是「行为层必须成对交付」的原因。
 
@@ -1744,7 +2022,8 @@ export default function kit(bb, chess, def) {
 | `KIT_NONDETERMINISTIC` | warn | `Math.random` / `Date.now` / `fetch` / `document` / `setTimeout` … —— 服务端用同一份文件**复算**对局，不一致就**拒绝玩家的结果**，而报错信息看上去和「你用了 Math.random」毫无关系 |
 | `KIT_IMPORT` | error | 白名单之外的 `import` / `export … from` / `require` / 动态 `import()` —— 违反 §4.1 第二条（服务端按路径、浏览器按 URL，向上的相对路径不可能同时对）。可用写法见 §4.5（白名单前缀）与 §4.6（自己包里的 `./…`），错误 reason 里会直接列出可用的 specifier |
 | `NO_DEFAULT_EXPORT` | error | 没有默认导出（加载器读的是 `mod.default`） |
-| `KIT_NO_TARGET` | error | 包内没有这个干员 id，也没在 `pack.json overrides` 里声明 `chess:<id>` |
+| `KIT_NO_TARGET` | error | 本包没有这个干员 / 召唤物 id，也没在 `pack.json overrides` 里声明；键空间的完整定义见 §4.7 |
+| `KIT_TARGET_AMBIGUOUS` | error | 这个 id 在合并后的数据里**同时**是干员与召唤物（两张表都有它）：干员那一半会赢，召唤物那一半静默失效，所以点名拒绝（§4.7） |
 
 注释与字符串会先被剥掉再检查 —— 示例 kit 的头注释本来就在**讲解**这些规则，文字不该被当成代码。
 
@@ -1909,3 +2188,45 @@ kit 在磁盘上是 `<包目录>/kits/<id>.js`，浏览器取的却是 `/worksho
 
 > 可运行示例 `docs/examples/kit-demo/` 仍然**一个 import 都不写**（它演示的是三条硬规则本身）。要看 `./…` 的
 > 完整形态，读 `test/packRelativeImports.test.js`；把一份大文件拆成几个文件，照上面「拆之后」的目录摆法即可。
+
+---
+
+### 4.7 kit 键空间：`kits/<id>.js` 的 id 可以落在两个空间
+
+**最终定义（这一句是判据本身）**：一个 kit 文件的 id 必须是**本包 chess 记录 id**、**本包声明进自选池的 charId**
+（`pack.json.operators` 的键）、**本包 `tokens.json` 的 token id**、或**本包在 `pack.json.overrides` 里声明过的官方 id**
+（`"chess:<id>"` / `"tokens:<id>"`）之一；四条都不满足就是 `KIT_NO_TARGET`。
+
+引擎按**两把不同的键**取 kit，所以这里有**两个键空间**，一个文件名规则管两边：
+
+| 空间 | 引擎在哪取 | 键是谁 | 谁算「本包拥有」 |
+|---|---|---|---|
+| **干员** | `server/sim/content/index.js kitOf()`：`def.charId`（补位 / 自选干员）→ 否则 `def.baseId` / `def.id` / 去掉 `_a`/`_b` 的裸 id | 干员 id | 本包 `chess.json` 的记录 id；`pack.json.operators` 声明的 charId（**自选池干员的 kit 就是按 charId 查的**，`isDiyDef` + `kitOf:85`）；`overrides` 里的 `"chess:<id>"` |
+| **召唤物** | 同文件 `setupUnitKit()` 的 token 分支：`tokens.kits?.[def.id]`（`def.id` = token 记录的 id，`simdata.js normalizeToken` 逐字写下） | token 记录的 id | 本包 `tokens.json` 的记录 id；`overrides` 里的 `"tokens:<id>"` |
+
+两个空间**分开裁决**：同一个 id 上的两条 kit 互不遮挡（各自注册、各自的冲突与覆盖判定），注入点也是两个 ——
+服务端 `Battle opts.kits`（干员）/ `Battle opts.tokenKits`（召唤物），浏览器从**同一份** `spec.workshopKits`
+模块清单重建两张表（召唤物那一半带 `kind: 'token'` 标记，缺省 = 干员，所以老包与老读者逐字节不变）。
+
+**id 同时落在两个空间里是歧义，点名拒绝**（`KIT_TARGET_AMBIGUOUS`）：干员那一半会赢得引擎的查找，召唤物那一半
+就成了一条**永远不会跑、也没有任何报错**的 kit —— 这正是这条通道存在的理由。两个空间**确有重名**的现实例子是
+`data/tokens.json` 里的两名地图角色（`char_605_cmedic` / `char_613_acmedc`，`char_` 开头的 token id），所以
+**判据是查表、不是看名字前缀**：装载器拿到的两张表说这个 id 在哪，它就在哪。
+
+**冲突裁决（与 §1.2 同一条，一个字没改）**：两个包声明同一个 id（无论哪个空间）时，**包 id 字典序小的赢**，
+输的一方拿到一条**点名**占位包的报告（`definedBy` + 文案里写出包名），与「包是按什么顺序被扫描到的」无关
+（`server/workshop.js` 的 `byPackId`）。既有 `byPackId` 与 `KIT_ID_COLLISION` 的**顺序规则不变**，只是改为**按空间
+各裁一次**。
+
+**为什么要有第二个空间**：一个包的召唤物（例如一名干员的两个面具 token）原来只能有**数据**、没有**行为层** ——
+`tokens.kits` 这张表是引擎内置的，包碰不到。现在它与干员那条通道逐字对称：同样的白名单、同样的归属判据、
+同样的冲突裁决、同样的双端送达。
+
+```js
+// workshop/<包>/tokens.json          { "token_ws_mask_a": { … } }
+// workshop/<包>/kits/token_ws_mask_a.js
+export default function kit(bb, raw, def) {
+  return { skill: null, install(battle, unit) { /* battle.on('deploy', …) */ } };
+}
+```
+

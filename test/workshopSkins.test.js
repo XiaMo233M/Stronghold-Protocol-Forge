@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { normalizePackManifest, SKIN_FIELDS, SKIN_ID_RE, applyWorkshop } from '../shared/workshop.js';
+import { normalizePackManifest, SKIN_FIELDS, SKIN_ID_RE, applyWorkshop, workshopSummary } from '../shared/workshop.js';
 import { loadWorkshop, workshopTouchedFiles } from '../server/workshop.js';
 
 /** 一个有 assets/ 的包的合法底盘（时装素材放在包内，所以要 license）。 */
@@ -175,6 +175,28 @@ describe('assets.skins：按干员分组的合并', () => {
   test('没有包带时装时，assets 一个字节都不多（旧行为不变）', () => {
     const r = apply([{ id: 'plain', content: ['chess'], files: {} }]);
     assert.equal('skins' in (r.data.assets || {}), false, '不写这个键');
+  });
+
+  test('启动日志那一行会数出时装（按包），不再对一个只带时装的包说 "nothing"', () => {
+    // 业主实测撞上的就是这一条：271 套时装真的落进 `assets.skins`，而启动日志里那个包是 "nothing"。
+    const one = apply([P('skinA', [{ id: 'summer', charId: 'char_1_01', name: '夏日' }])]);
+    assert.match(workshopSummary(one.report), /1 outfit\b/, '一套也要说出来');
+    assert.equal(one.report.skinsByPack.skinA, 1, '按包数（日志那一份）');
+    assert.deepEqual(one.report.skins, { char_1_01: 1 }, '按干员那一份一字未改');
+    const many = apply([P('skinA', [
+      { id: 'summer', charId: 'char_1_01', name: '夏日' },
+      { id: 'winter', charId: 'char_1_01', name: '冬日' },
+      { id: 'plain', charId: 'char_2_02', name: '素' },
+    ])]);
+    assert.match(workshopSummary(many.report), /3 outfits\b/, '复数与其它面同一套写法');
+    // 被 `SKIN_COLLISION` 拒掉的那一套**不算**：日志不该替一个什么都没生效的包邀功
+    const clash = apply([
+      P('skinA', [{ id: 'summer', charId: 'char_1_01', name: '先来的' }]),
+      P('skinB', [{ id: 'summer', charId: 'char_1_01', name: '撞车的' }]),
+    ]);
+    assert.equal(clash.report.skinsByPack.skinB, undefined, '被拒的包不进这一行');
+    assert.match(workshopSummary(clash.report), /skinA\(skinA\): 1 outfit/, 'A 的那一套仍然报出来');
+    assert.match(workshopSummary(clash.report), /skinB\(skinB\): nothing/, 'B 什么都没生效 ⇒ nothing（而不是谎报 1 outfit）');
   });
 });
 

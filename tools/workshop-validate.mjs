@@ -103,6 +103,16 @@ const OFFICIAL_ART_IDS = { chars: artTableIds('chars'), enemies: artTableIds('en
 const ART_ENTRY_PATH_FIELDS = Object.fromEntries(Object.entries(ART_TABLES).map(([table, shape]) => [table, shape.urls]));
 /** spine 在哪一层：chars 是 `spine.front` / `spine.back`，enemies / tokens 是扁平的 `spine`。 */
 const ART_SPINE_NESTED_TABLES = new Set(Object.entries(ART_TABLES).filter(([, shape]) => shape.spine === 'sides').map(([table]) => table));
+/**
+ * `art` 里的**扁平表**（`skills` / `profSub`）：条目的值本身就是一条路径，键是官方图标 id，一张表一个。
+ *
+ * 这一层必须认出它们，因为下面「这个 id 有没有人用」那一段的判据**只对带 spine 的对象表成立**
+ * （`assets.chars` / `assets.enemies` / `assets.tokens`）：技能图标与分支图标是**按 id 覆盖/补充**的，
+ * 客户端拿的是合并后的 `assets.skills[key]`，没有「谁的模型」这回事，也没有 `ownIds` 这一栏。
+ * 测试 `test/workshopValidateArtTables.test.js` 钉住这一条（只声明 `art.skills` / `art.profSub` 的包必须**跑完**
+ * 并给出结论，而不是崩在 `OFFICIAL_ART_IDS[table].has` 上）。
+ */
+const ART_FLAT_TABLES = new Set(Object.entries(ART_TABLES).filter(([, shape]) => shape.flat).map(([table]) => table));
 
 /** 一个包自己新增的干员 char id：本包 chess 记录自己的 `assets.spine` / `charId`（客户端就是按这个查 chars 的）。 */
 function ownCharIds(pack) {
@@ -492,8 +502,17 @@ async function main() {
       tokens: 'list it in a chess record of this pack (`tokens`), or ignore this if another installed pack adds that summon',
     };
     for (const [table, entries] of Object.entries(art)) {
+      // 两张**扁平图标表**（`art.skills` / `art.profSub`）不在这条判据里：它们没有 spine、没有 `ownIds` 那一栏，
+      // 客户端读的是合并后的 `assets.skills[key]` —— 一个「官方已有 / 本包新加」的新加 id 就是那个包自己**用**它的
+      // 方式（覆盖官方图标同样是用法）。这一段以前没有这层守卫，于是任何声明 `art.skills` 的包都会在这里
+      // 以 `TypeError` 崩掉（退出码 2，连报告都吐不出来）：见 ART_FLAT_TABLES 的注释与那条回归测试。
+      if (ART_FLAT_TABLES.has(table)) continue;
+      // 两边的存在性都守着：`OFFICIAL_ART_IDS` 只对三张对象表建过，`ownIds` 同理。留一条不守就是同一个坑。
+      const official = OFFICIAL_ART_IDS[table];
+      const own = ownIds[table];
+      if (!official || !own) continue;
       for (const id of Object.keys(entries)) {
-        if (OFFICIAL_ART_IDS[table].has(id) || ownIds[table].has(id)) continue;
+        if (official.has(id) || own.has(id)) continue;
         push({
           field: `art.${table}.${id}`, code: 'ART_UNKNOWN_ID', severity: 'warning',
           message: `${id} is neither in the official assets.json "${table}" table nor contributed by this pack — nothing can ever use this art`,
@@ -559,21 +578,30 @@ async function main() {
   // or Date.now() that makes the server's recomputation reject the player's result, or a relative import that resolves
   // for the server and not for the browser. Those are static, so they are scanned for here (shared/kitAuthoring.js).
   if (loaded.packs.length) {
-    const kitInfo = await loadWorkshopKits(loaded, {
-      log: quiet,
-      knownIds: new Set(Object.keys(loadData(DATA_DIR, { log: quiet, workshopDir: root }).chess || {})),
-    });
+    // 两个键空间都要交给装载器（docs/WORKSHOP.md §4.7）：只给 chess 表的话，一个包的**召唤物 kit**（token 记录的
+    // id）会被判成未知目标丢掉 —— 校验器必须与加载器同判，否则作者会看到「校验通过、游戏里没有行为」。
+    const merged = loadData(DATA_DIR, { log: quiet, workshopDir: root });
+    const knownIds = new Set(Object.keys(merged.chess || {}));
+    const knownTokenIds = new Set(Object.keys(merged.tokens || {}));
+    const kitInfo = await loadWorkshopKits(loaded, { log: quiet, knownIds, knownTokenIds });
     const staticIssues = [];
+    // the two key spaces overlap when an id exists in both tables: the loader refuses those by name, and the editor /
+    // validator must reach the same verdict rather than let one save through that the loader then drops.
+    const ambiguousIds = [...knownIds].filter((id) => knownTokenIds.has(id));
     // a kit the static layer already explained is not reported a second time by the loader, whose message is blunter
     const explained = new Set();
     for (const pack of loaded.packs) {
       const kitDir = path.join(pack.dir, 'kits');
       if (!fs.existsSync(kitDir)) continue;
       const ownChessIds = Object.keys((pack.files && pack.files.chess) || {});
+      const ownTokenIds = Object.keys((pack.files && pack.files.tokens) || {});
+      const ownCharIds = Object.keys(pack.operators || {});
       for (const name of fs.readdirSync(kitDir).sort()) {
         if (!name.endsWith('.js')) continue;
         const id = name.slice(0, -'.js'.length);
-        const issues = validateKit(fs.readFileSync(path.join(kitDir, name), 'utf8'), { id, ownChessIds, overrides: pack.overrides })
+        const issues = validateKit(fs.readFileSync(path.join(kitDir, name), 'utf8'), {
+          id, ownChessIds, ownCharIds, ownTokenIds, overrides: pack.overrides, ambiguousIds,
+        })
           .map((i) => ({ ...i, field: `kits/${pack.id}/${name}${i.field && i.field !== 'source' ? ` · ${i.field}` : ''}` }));
         if (issues.some((i) => i.severity === 'error')) explained.add(`${pack.id}/${id}`);
         staticIssues.push(...issues);

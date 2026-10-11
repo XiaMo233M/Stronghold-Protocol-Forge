@@ -219,10 +219,19 @@ test('solo: no deadline outside combat (INFO_CHECK, strategy draft, 机变, prep
   // scripted battles (no leaks: the seat survives to the 机变 rounds), paced in virtual time (combat deadlines are real)
   const h = makeMatch({ mode: 'solo', difficulty: 'NORMAL', seed: 12, fake: true, instant: false }).start();
   const m = h.m;
-  const seen = new Map(); // phase → [deadline…]
-  const note = (pub) => { if (!seen.has(pub.phase)) seen.set(pub.phase, []); seen.get(pub.phase).push(pub.deadline); };
-  h.onBroadcast.push((msg) => { if (msg.t === 'm.public') note(msg); });
-  for (const msg of h.bc) if (msg.t === 'm.public') note(msg);
+  // What a client was TOLD: the published view is the INCREMENTAL frame (server/viewsDelta.js), whose DELTA frames carry
+  // only the keys that changed, so the countdown a phase published is read from the MATERIALIZED series
+  // (harness.publicSeries — full-then-delta merged exactly as the browser does). Raw h.bc frames read `undefined`
+  // wherever nothing changed.
+  const seen = () => {
+    /** @type {Map<string, number[]>} */
+    const out = new Map();
+    for (const st of h.publicSeries()) {
+      if (!out.has(st.phase)) out.set(st.phase, []);
+      out.get(st.phase).push(st.deadline);
+    }
+    return out;
+  };
   // INFO_CHECK waits for the player (no 25 s guard in solo)
   assert.equal(m.phase, PHASE.INFO_CHECK);
   assert.equal(m.deadline, 0);
@@ -243,15 +252,16 @@ test('solo: no deadline outside combat (INFO_CHECK, strategy draft, 机变, prep
   const lastR = (spRounds.find((r) => r > 1) || 3) + 1;
   assert.ok(h.drive(() => m.phase === PHASE.PREP && m.round === lastR), `reached PREP R${lastR}`);
   h.flushAll();
+  const published = seen();
   for (const ph of [PHASE.INFO_CHECK, PHASE.BAND_DRAFT, PHASE.BATTLE_CHECK, PHASE.ROUND_START, PHASE.PREP, PHASE.SETTLE]) {
-    assert.ok(seen.has(ph), `saw ${ph}`);
-    assert.ok(seen.get(ph).every((d) => d === 0), `${ph}: no deadline in solo (${seen.get(ph)})`);
+    assert.ok(published.has(ph), `saw ${ph}`);
+    assert.ok(published.get(ph).every((d) => d === 0), `${ph}: no deadline in solo (${published.get(ph)})`);
   }
   if (spRounds.some((r) => r < lastR)) {
-    assert.ok(seen.has(PHASE.SP_DRAFT), 'saw 机变');
-    assert.ok(seen.get(PHASE.SP_DRAFT).every((d) => d === 0), '机变 untimed in solo');
+    assert.ok(published.has(PHASE.SP_DRAFT), 'saw 机变');
+    assert.ok(published.get(PHASE.SP_DRAFT).every((d) => d === 0), '机变 untimed in solo');
   }
-  assert.ok(seen.get(PHASE.COMBAT).some((d) => d > 0), 'combat keeps its time limit');
+  assert.ok(published.get(PHASE.COMBAT).some((d) => d > 0), 'combat keeps its time limit');
   m.dispose();
 });
 

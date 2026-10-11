@@ -153,6 +153,10 @@ export class MatchSettle {
       result = { t: 'm.result', victory: !!victory, roundsPassed: 0, reason, modeId: this.modeId, difficulty: this.difficulty, players: [] };
     }
     this.lastResultMsg = result;
+    // the match's LAST m.public is sent in full: the lobby keeps that frame and replays it to a resume / reload that
+    // comes back to the result screen without a baseline to merge into (a delta there could not be applied — DESIGN
+    // §8.2, incremental frame)
+    this.markPublicFull();
     this.markPublic();
     try { this.flush(true); } catch (e) { this.reportError('flush', e); }
     // every human still here gets the settlement — the spectator seats the same public rows (none of them their own)

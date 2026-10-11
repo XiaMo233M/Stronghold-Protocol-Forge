@@ -24,6 +24,7 @@ import { validateKit, kitErrors } from '../shared/kitAuthoring.js';
 import * as workshopSchema from '../shared/workshop.js';
 import * as kitImports from '../shared/kitImports.js';
 import * as extensions from '../public/js/ui/extensions.js';
+import * as packForms from '../shared/packForms.js';
 import {
   MOD_SURFACE, MOD_SURFACE_IDS, MOD_SURFACE_FROZEN, surfaceLedgerIssues,
 } from '../shared/modSurface.js';
@@ -248,7 +249,7 @@ const MOD_LAYER_MD = readFileSync(new URL('../docs/design/mod-layer.md', import.
 
 /** 锚点符号住在哪个模块。默认是 schema（`shared/workshop.js`）；kit import 面住 `shared/kitImports.js`；
  *  客户端那一格（`ctx.me` / 宿主键）住 `public/js/ui/extensions.js`（引擎自己那一端的契约表）。 */
-const ANCHOR_MODULES = { schema: workshopSchema, kitImports, extensions };
+const ANCHOR_MODULES = { schema: workshopSchema, kitImports, extensions, packForms };
 
 test('表面清单：每一条的锚点符号都还在它声明的模块里，成员一个不少', () => {
   assert.ok(MOD_SURFACE.length > 0, '表面清单不能是空的');
@@ -292,6 +293,12 @@ test('表面清单：引擎里每一个「包可声明的名单」都被某条�
   // 一半在 import 面（shared/kitImports.js，kit 与战斗/房间载荷共用的白名单前缀）。
   const SURFACE_LISTS = [
     ['PACK_FIELDS', 'schema'], ['WORKSHOP_CONTENT_FILES', 'schema'], ['UNIT_REQUIRED_FIELDS', 'schema'],
+    // 形态通道的三张名单（DESIGN §28.29）：表名 / 形态名形状 / `roles` 的角色键。它们都是「一个包可以写哪几个
+    // 键」的那一类，所以与 `SKIN_FIELDS` / `ART_TABLES` 同一条：必须被某一格表面锚住。
+    ['FORM_TABLES', 'packForms'], ['FORM_KIND_RE', 'packForms'], ['FORM_ROLE_KEYS', 'packForms'],
+    // 时装的字段清单：与 `ART_TABLES` 同一个理由 —— 它是「一个包可以写哪几个键」的那张表，
+    // 而写错的名字会被点名拒绝（SKIN_UNKNOWN_FIELD），所以它必须被某一格表面锚住。
+    ['SKIN_FIELDS', 'schema'],
     ['OVERRIDE_ENTRY_RE', 'schema'], ['WORKSHOP_MEDIA_PREFIX', 'schema'], ['WORKSHOP_PANEL_PREFIX', 'schema'],
     ['ART_TABLES', 'schema'],
     ['CLIENT_PANEL_SLOTS', 'schema'], ['CLIENT_PANEL_REPEATABLE', 'schema'],

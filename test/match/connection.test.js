@@ -1,11 +1,13 @@
 // Platform interface: start/handle/onDisconnect/onReconnect/onLeave/dispose, autoplay, bot takeover, views.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { PHASE, ERR } from '../../shared/constants.js';
+import { PHASE, ERR, PROTOCOL_VERSION } from '../../shared/constants.js';
 import { Match } from '../../server/match/Match.js';
 import { StubMatch } from '../../server/match/StubMatch.js';
 import { DATA, makeMatch, checkInvariants, give, giveItem, chessOfTier } from './harness.js';
 import { bossPoolHp } from '../../server/match/finalAssault.js';
+import { startServer } from '../../server/index.js';
+import { TestClient } from '../helpers/wsClient.js';
 
 const STATUSES = ['acting', 'ready', 'deciding', 'combat', 'done', 'helping', 'left', 'dead'];
 
@@ -22,7 +24,11 @@ test('constructor validation mirrors the stub; start() sends the first m.public 
   assert.equal(pub.factions.length, 3);
   assert.ok(DATA.bosses[pub.bossId]);
   for (const p of pub.players) {
-    for (const k of ['playerId', 'seat', 'name', 'isBot', 'connected', 'alive', 'lp', 'bandId', 'shopLevel', 'boardCount', 'ready', 'bonds', 'fieldId', 'status']) assert.ok(k in p, `players[].${k}`);
+    for (const k of ['playerId', 'seat', 'name', 'isBot', 'connected', 'alive', 'lp', 'shopLevel', 'boardCount', 'bonds', 'status']) assert.ok(k in p, `players[].${k}`);
+    // an unset row field is absent in the materialized view (`bandId` / `fieldId` before a band / a field is assigned):
+    // `public/js/matchDelta.js` normalizes a full frame's null to the absent key, which is what every consumer reads
+    // as "unset" (`p.fieldId ?? null`, `typeof p.bandId === 'string'`)
+    for (const k of ['bandId', 'fieldId', 'ready']) assert.ok(p[k] == null || k in p, `players[].${k}`);
     assert.ok(STATUSES.includes(p.status));
   }
   const privs = h.sent.filter(([, m]) => m.t === 'm.private');
@@ -343,4 +349,50 @@ test('m.public follows player-state changes (shop level, board count, bonds) wit
   h.sched.advance(150);
   assert.equal(h.lastBc('m.public').players[0].shopLevel, 2);
   m.dispose();
+});
+
+// A tab left open across a deployment (the scenario the incremental `m.public` frame creates): it still runs the old
+// bundle, so it would read a DELTA frame as a full one and show the roster as "only the players that changed". The
+// handshake is the gate that must stop it, and this pins both halves of it:
+//   * the refusal names the version (server/net.js onHelloMsg) and happens BEFORE anything else — a stale page declares
+//     the old number, so the FIRST hello is refused and it never reaches `welcome`, a room, or a single match frame;
+//   * the browser's own error text for that refusal is the tell-refresh line (public/js/net.js NetError, the `version`
+//     detail), so the page says 「请刷新」 instead of silently showing a wrong roster. Asserted through the production
+//     code path (the same regex NetError runs), not restated here.
+test('a page from the previous wire format is refused at the handshake (told to refresh), never let into a match', async () => {
+  const { NetError } = await import('../../public/js/net.js');
+  const srv = await startServer({ port: 0, host: '127.0.0.1', quiet: true });
+  const clients = [];
+  try {
+    // the stale page: the PREVIOUS wire number, exactly what an open tab keeps sending
+    const stale = await TestClient.connect(`ws://127.0.0.1:${srv.port}/ws`);
+    clients.push(stale);
+    const refused = await stale.request({ t: 'hello', name: 'StaleTab', version: PROTOCOL_VERSION - 1 });
+    assert.equal(refused.t, 'error', 'the handshake is refused');
+    assert.equal(refused.code, ERR.BAD_MSG);
+    assert.match(String(refused.detail), /version mismatch/i, `the server names the reason (${refused.detail})`);
+    // ...and the browser turns that into the refresh line, not into a silent wrong roster
+    assert.match(new NetError(refused.code, refused.msg, refused.detail).message, /刷新/);
+    // refused means refused: no session, so no room and no game frame can be reached
+    const after1 = await stale.request({ t: 'room.create', mode: 'coop', difficulty: 'NORMAL' });
+    assert.equal(after1.t, 'error', 'a refused handshake cannot create a room');
+    assert.equal(stale.log.some((m) => m.t === 'welcome'), false, 'it never got a session');
+    assert.equal(stale.log.some((m) => m.t === 'm.public'), false, 'and never an m.public frame — the deltas stay away from it');
+
+    // the current build: accepted, and (as always) its first m.public frame is the full one the gate promises
+    const fresh = await TestClient.connect(`ws://127.0.0.1:${srv.port}/ws`);
+    clients.push(fresh);
+    const welcome = await fresh.hello('FreshTab');
+    assert.equal(welcome.version, PROTOCOL_VERSION, 'the welcome carries the server wire number');
+    fresh.id = welcome.playerId;
+    assert.equal((await fresh.request({ t: 'room.create', mode: 'solo', difficulty: 'NORMAL' })).t, 'ok');
+    await fresh.waitFor('room.state');
+    assert.equal((await fresh.request({ t: 'room.start' })).t, 'ok');
+    const pub = await fresh.waitFor('m.public', (p) => p.phase === PHASE.INFO_CHECK);
+    assert.equal(Object.hasOwn(pub, 'delta'), false, 'the first frame a client sees is the full one');
+    assert.ok(Array.isArray(pub.players) && pub.players.length >= 1, 'and its roster is the real one');
+  } finally {
+    for (const c of clients) await c.terminate().catch(() => {});
+    await srv.close();
+  }
 });

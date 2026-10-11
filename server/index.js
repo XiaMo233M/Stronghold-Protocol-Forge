@@ -153,7 +153,20 @@ export async function startServer(opts = {}) {
   // 也没有新的静态路径；`data/notices.json` 本来就不存在，所以这纯属新增。
   const notices = workshopNotices(workshopLoaded, { changelogPath: path.join(ROOT, 'CHANGELOG.md'), log });
   workshopJson.set('notices', Buffer.from(JSON.stringify(notices.body), 'utf8'));
-  const workshopKits = await loadWorkshopKits(workshopLoaded, { log, knownIds: new Set(Object.keys(data.chess || {})) });
+  // 行为层的**两个键空间**（docs/WORKSHOP.md §4.7）：一个 `kits/<id>.js` 的 id 要么是**干员键**（`kitOf`：
+  // `def.charId` / `def.baseId` / `def.id`），要么是**召唤物键**（token 记录的 id：`tokens.kits?.[def.id]`）。
+  // 两边都要被告知，装载器才判得出「这条 kit 到底给谁」—— 只给 chess 表的话，一个包的召唤物 kit 会被当成未知目标
+  // 丢掉（而那正是「包能做数据、做不了行为」这个缺口）。
+  //   干员那一半还包括各已装包 `pack.json.operators` 声明的 charId：自选池干员的 kit 就是按 charId 查的
+  //   （server/sim/content/index.js isDiyDef + kitOf:85），所以那个 id 也是一个合法的 kit 目标。
+  const workshopKits = await loadWorkshopKits(workshopLoaded, {
+    log,
+    knownIds: new Set([
+      ...Object.keys(data.chess || {}),
+      ...((workshopLoaded.packs || []).flatMap((p) => Object.keys(p.operators || {}))),
+    ]),
+    knownTokenIds: new Set(Object.keys(data.tokens || {})),
+  });
   // The mod set (DESIGN §28.2): one identity per pack, one digest for the whole set. It travels in `welcome`, in
   // `/healthz` (lobby.stats) and in every BattleSpec, so the three can never disagree about what is running.
   const workshopMods = (workshopLoaded.packs || []).map((p) => ({ id: p.id, hash: p.hash, layer: p.layer, combat: p.combat, api: p.api }));
@@ -174,6 +187,8 @@ export async function startServer(opts = {}) {
       packs: workshopLoaded.packs,
       kits: workshopKits.kits,
       kitOwners: workshopKits.owners,
+      tokenKits: workshopKits.tokenKits,
+      tokenKitOwners: workshopKits.tokenOwners,
       modules: workshopKits.modules,
       log,
     })
@@ -240,7 +255,7 @@ export async function startServer(opts = {}) {
     {
       ...opts,
       ...(matchWrappers.length ? { MatchClass } : {}),
-      workshop: { kits: workshopKits.kits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme, meta: metaModules, roomAssets, battle: battleModules, battleInstallers, roomHooks: roomInstallers },
+      workshop: { kits: workshopKits.kits, tokenKits: workshopKits.tokenKits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme, meta: metaModules, roomAssets, battle: battleModules, battleInstallers, roomHooks: roomInstallers },
     },
     { data, log },
   );

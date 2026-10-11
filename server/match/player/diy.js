@@ -19,7 +19,8 @@
 //     stock field] — drawn by this player only; it never enters the shared pool (PR #71's shared shop was the mistake to
 //     avoid). A piece all of whose bonds are switched off this match (本局禁用: the drawn bans and the mode's static list)
 //     gets no stock and so leaves the shop, like a preset chess whose bonds are all off (PRTS 卫戍协议：盟约 "禁用盟约有可能
-//     影响自选的支援干员"); 协防 (emptyShip) is never banned, so a prototype always stays. poolOf(baseId) routes every copy
+//     影响自选的支援干员"); 协防 (emptyShip) is never banned, so a prototype always stays. poolOf(baseId) — the one
+//     dispatch point, now in player/rules.js (docs/PS100-MIGRATION.md §10-A) — routes every copy
 //     taken or returned for a slotted slot to that stock (buy, reward picks, merges, promotions, sells, temp, elimination).
 //   * the shop's draws (diyRollEntries): the stock of each slotted slot joins this player's copy-weighted rolls — the
 //     shop's chess slots and the reward offers' temporary refreshes [ASSUMED] — weighted like any chess of its tier, once
@@ -53,13 +54,13 @@ export class DiyStock {
 
   has(baseId) { return this.entries.has(baseId); }
   cap(baseId) { return this.entries.get(baseId)?.cap ?? 0; }
-  left(baseId) { return this.entries.get(baseId)?.left ?? 0; }
+  left(baseId) { return Math.max(0, this.entries.get(baseId)?.left ?? 0); }
 
   /** Take up to n copies; returns the number taken (0 for a base id without stock). */
-  take(baseId, n = 1) {
+  take(baseId, n = 1, { overdraw = false } = {}) {
     const e = this.entries.get(baseId);
     if (!e || !(n > 0)) return 0;
-    const k = Math.min(e.left, Math.floor(n));
+    const k = overdraw ? Math.floor(n) : Math.min(Math.max(0, e.left), Math.floor(n));
     e.left -= k;
     return k;
   }
@@ -76,7 +77,7 @@ export class DiyStock {
   /** { baseId: left } (tests / diagnostics). */
   snapshot() {
     const o = {};
-    for (const [id, e] of this.entries) o[id] = e.left;
+    for (const [id, e] of this.entries) o[id] = Math.max(0, e.left);
     return o;
   }
 }
@@ -200,10 +201,10 @@ export class PlayerDiy {
     return { stock, banned: Object.freeze(banned) };
   }
 
-  /** The copy accounting of base chess `baseId` for this player: its own stock for a slotted DIY slot, else the shared pool. */
-  poolOf(baseId) {
-    return this.diyStock && this.diyStock.has(baseId) ? this.diyStock : this.m.pool;
-  }
+  // poolOf(baseId) / pool() / mainPool() live in player/rules.js (design-level item A, docs/PS100-MIGRATION.md §10-A):
+  // it is the SINGLE dispatch point every copy take/return goes through — this player's 自选 stock for a slotted slot
+  // (the same routing this file used to do), this player's own pool in the 100-seat variant, and the shared m.pool
+  // today. Relocated, not dropped: PlayerState throws on a name defined twice, and rules.js is installed last.
 
   /**
    * The stock entries this player's shop draws from now ([baseId, entry] with copies left and the 调度中心 at the slot's

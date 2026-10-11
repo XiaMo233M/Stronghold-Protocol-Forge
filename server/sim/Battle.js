@@ -104,6 +104,12 @@ export class Battle {
     this.recordEvents = opts.recordEvents !== false;
     /** When false the battle only ends by time limit / boss pool / forceEnd (tests, sandboxes). */
     this.autoFinish = opts.autoFinish !== false;
+    /**
+     * 限伤 override (`shared/constants.js bossHitLimitFrom`): the deploy-time `SP_BOSS_HIT_LIMIT`, threaded through
+     * Match → battle opts / the battle spec → here. `undefined` = keep `BOSS_HIT_LIMIT`, so a battle built without the
+     * option is byte-for-byte the old battle (server/sim/damage.js leaderHitCancelled reads this field).
+     */
+    this.bossHitLimit = opts.bossHitLimit;
     this.data = toDataSource(opts.data);
     let stage = opts.stage ?? (opts.stageId ? this.data.getStage(opts.stageId) : null);
     if (stage && !stage._norm) stage = normalizeStage(stage.id ?? opts.stageId, stage);

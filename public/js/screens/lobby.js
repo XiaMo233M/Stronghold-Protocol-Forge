@@ -13,7 +13,7 @@
 
 import { ResumeMatchButton } from '../ui/resumeMatch.js';
 import { useEffect, useRef, useState } from '../../vendor/hooks.module.js';
-import { DIFFICULTIES, DIFFICULTY_NAMES, DIFFICULTY_COLORS, ROOM_CODE_LEN, MAX_SEATS, MAX_SPECTATORS, modeIdFor, ERR } from '../../../shared/constants.js';
+import { DIFFICULTIES, DIFFICULTY_NAMES, DIFFICULTY_COLORS, ROOM_CODE_LEN, MAX_SEATS, MIN_SEATS, MAX_SPECTATORS, modeIdFor, clampSeats, ERR } from '../../../shared/constants.js';
 import { html, Button, Icon, MicroLabel, Panel, TextField, PingPill, AvatarFrame, Tooltip, Spinner, DifficultyIcon, doctorNo } from '../ui/components.js';
 import { toast, toastError } from '../ui/toasts.js';
 import { GuideButton } from '../ui/guide.js';
@@ -269,6 +269,82 @@ function DifficultyCard({ roomMode, difficulty, selected, onSelect }) {
 /** One-line name of a pack's layer (DESIGN §28.1): what kind of content the pack brings. */
 export const LAYER_TEXT = { A: N_('数据'), B: N_('逻辑'), C: N_('客户端') };
 
+// ---------------------------------------------------------------------------------------------------
+// 本房座位上限 (业主裁决 B5, docs/META.md §1.9): the host's seat slider
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * The seat ceiling THIS server allows, as `welcome.maxSeats` announced it.
+ *
+ * The number travels in the handshake (server/lobby.js `welcomeInfo`) and only when the deployment raised
+ * `SP_MAX_SEATS` above the official `MAX_SEATS` — a 4-seat server sends no field and every client keeps the default,
+ * exactly like `welcome.mods` / `welcome.modPanels` before it. The lobby reads it HERE, at module scope, because the
+ * handshake happens before this screen is ever mounted (main.js imports the screens eagerly, the socket connects in
+ * `boot()`): a first `welcome` would otherwise be missed and the slider would keep offering 4 on a 100-seat server.
+ * A reconnect re-announces it, so the cache follows the server it is actually talking to.
+ *
+ * Unusable / absent ⇒ `MAX_SEATS`: the client never invents a ceiling, it only mirrors the one it was told.
+ */
+let serverSeatMax = MAX_SEATS;
+
+/** @returns {number} the ceiling the lobby's seat slider may reach (never below 1) */
+export function serverSeatMaxOf() { return serverSeatMax; }
+
+net.on('welcome', (msg) => {
+  const n = msg ? msg.maxSeats : undefined;
+  serverSeatMax = Number.isInteger(n) && n >= 1 ? n : MAX_SEATS;
+});
+
+/** The slider's range for a ceiling: `max` is the server's, `min` the floor (narrowed if the server is below it). */
+export function seatCapRange(serverMax) {
+  const max = Number.isInteger(serverMax) && serverMax >= 1 ? serverMax : MAX_SEATS;
+  return { min: Math.min(MIN_SEATS, max), max };
+}
+
+/**
+ * What `room.create` should carry for a pick — `{}` whenever the room is built the way it always was.
+ *
+ * Two deliberate silences: a SOLO room never carries the field (its one-seat shape is `mode: 'solo'`'s, and the server
+ * ignores it there anyway), and a pick that equals the server's ceiling sends NOTHING — that is 「本房不另设上限」,
+ * i.e. the pre-B5 payload and the pre-B5 room, byte for byte. Only a pick BELOW the ceiling is a real choice.
+ *
+ * `clampSeats` is the same shared rule the server applies, so the client cannot send a value the server would refuse
+ * (`shared/protocol.js`: outside `[MIN_SEATS, SEAT_CAP]` ⇒ `BAD_MSG`).
+ */
+export function seatCapPayload(mode, pick, serverMax) {
+  if (mode !== 'coop') return {};
+  const { max } = seatCapRange(serverMax);
+  const cap = clampSeats(pick, max);
+  return cap === max ? {} : { seatCap: cap };
+}
+
+/**
+ * 房主决定本同盟开几张座位卡 (业主裁决 B5): a range input, with the current value, the server's ceiling and the two
+ * ends spelled out. **Only rendered for co-op** (a solo room has no seat count to choose) and only when the range has
+ * something to choose (`max > min`) — on a server whose ceiling is the floor there is nothing to pick, so the picker
+ * disappears rather than showing a dead slider.
+ *
+ * This is the ONLY seat-cap surface: it lives in the lobby (which is a host's screen), never in the room screen, where
+ * the cap is already fixed and `room.state.seatCap` merely describes it.
+ * @param {{ value: number, min: number, max: number, onChange: (n: number) => void }} props
+ */
+function SeatCapPicker({ value, min, max, onChange }) {
+  if (!(max > min)) return null;
+  const pct = Math.round(((value - min) / (max - min)) * 100);
+  return html`<div class="seat-cap">
+    <div class="seat-cap__head">
+      <${MicroLabel} tone="mint">SEATS<//>
+      <span class="seat-cap__name">${t('本房间人数上限')}</span>
+      <span class="seat-cap__value num">${value}<span class="t-dim"> / ${max}</span></span>
+    </div>
+    <input class="seat-cap__slider" type="range" min=${min} max=${max} step="1" value=${value}
+      style=${`--pct:${pct}%`} aria-label=${t('本房间人数上限')}
+      aria-valuemin=${min} aria-valuemax=${max} aria-valuenow=${value}
+      onInput=${(e) => onChange(Number(e.currentTarget.value))} />
+    <div class="seat-cap__note">${t('服务器允许最多 {max} 人；本同盟开 {value} 张座位卡', { max, value })}</div>
+  </div>`;
+}
+
 /**
  * 本房间使用 mod (W-A, DESIGN §28.9): the host ticks the packs THIS server declared, and the pick travels as
  * `room.create.modIds`. The list comes from `welcome.mods.packs` (main.js writes it into store.roomMods), so it can only
@@ -336,6 +412,14 @@ export function LobbyScreen() {
   });
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(null);
+  // 本房座位上限 (业主裁决 B5): `seatMax` = the ceiling this server announced, `seatPick` = the host's move of the
+  // slider. `null` means "not moved": the pick then IS the ceiling, which is the pre-B5 room and sends no field at all
+  // (`seatCapPayload`). Keeping the ceiling in state (not a module read at render time) is what makes a reconnect that
+  // announces a different ceiling actually re-render the slider.
+  const [seatMax, setSeatMax] = useState(() => serverSeatMaxOf());
+  const [seatPick, setSeatPick] = useState(null);
+  const seatRange = seatCapRange(seatMax);
+  const seatValue = seatPick == null ? seatRange.max : clampSeats(seatPick, seatRange.max);
   // 野排匹配: the last `room.queued` frame WHILE we are still waiting (null = not in the queue). 'placed' / 'timeout' /
   // 'cancelled' clear it: the first is followed by the room.state that routes into the room, the other two mean the
   // server already took us out of the queue.
@@ -353,6 +437,14 @@ export function LobbyScreen() {
       setQueue(null);
       if (msg.status === 'timeout') toast(t('快速匹配超时：没有等到足够的博士，请稍后再试'), 'warn');
     });
+  }, []);
+  useEffect(() => {
+    // 本房座位上限 (业主裁决 B5): the slider mirrors the CURRENT server. The module-scope listener above keeps the cache
+    // fresh while this screen is unmounted (the handshake usually lands on the title screen), and this one syncs the
+    // mounted component — including a reconnect that announces a different ceiling.
+    const sync = () => { if (alive.current) setSeatMax(serverSeatMaxOf()); };
+    sync();
+    return net.on('welcome', sync);
   }, []);
 
   const online = conn.status === 'online';
@@ -379,7 +471,12 @@ export function LobbyScreen() {
       if (alive.current) setBusy(null);
     }
   };
-  const create = () => run('create', () => net.request('room.create', roomMods.buildCreatePayload(roomMode, difficulty)));
+  // 本房座位上限 (业主裁决 B5): the host's own cap rides along only when it is a real choice — an untouched slider (and
+  // every solo room) adds no key, so this request is the one this client always sent.
+  const create = () => run('create', () => net.request('room.create', {
+    ...roomMods.buildCreatePayload(roomMode, difficulty),
+    ...seatCapPayload(roomMode, seatValue, seatMax),
+  }));
   // 野排匹配: enter the queue with the difficulty cards' pick (the server refuses `solo` — a queue of strangers forms a
   // co-op room; the button is hidden for 独立模拟). `mods` is the same digest gate `room.create` carries, so a modded
   // server still checks that we know what we are joining; `modIds` is deliberately NOT sent — a quick-matched room runs
@@ -433,26 +530,29 @@ export function LobbyScreen() {
       <div class="topbar__left">
         <${Button} variant="ghost" size="sm" icon="chevronLeft" onClick=${backToTitle} title=${t('返回标题')}>${t('返回')}<//>
         <${PingPill} ms=${conn.ping} online=${online} />
+        <span class="topbar__sep" aria-hidden="true"></span>
+        <div class="topbar__tools">
+          <${SettingsButton} class="lobby-settings" variant="secondary" square=${true} />
+          <${GuideButton} class="lobby-guide" variant="secondary" square=${true} />
+          <${PwaInstallButton} class="lobby-pwa" square=${true} />
+        </div>
       </div>
       <div class="topbar__center">
         <${MicroLabel} tone="mint">SIMULATION PROTOCOL SELECT<//>
         <h1 class="topbar__title">${t('选择模拟协议')}</h1>
       </div>
       <div class="topbar__right">
-        <${Button} variant="secondary" size="sm" icon="chart" class="stats-entry" onClick=${openStats} title=${t('统计数据')} aria-label=${t('统计数据')}>${t('统计')}<//>
         <${ResumeMatchButton} />
-        <${PwaInstallButton} class="lobby-pwa" />
-        <${SettingsButton} class="lobby-settings" variant="secondary" label=${t('设置')} />
-        <${GuideButton} class="lobby-guide" variant="secondary" label=${t('玩法说明')} />
         <${LoadoutButton} from="lobby" size="sm" class="lobby-loadout" label=${t('干员调配')} />
         <${SupportButton} from="lobby" size="sm" class="lobby-support" />
-        <div class="me-chip">
+        <button type="button" class="me-chip me-chip--btn stats-entry" onClick=${openStats} title=${t('统计数据')} aria-label=${t('统计数据')}>
           <${AvatarFrame} size="sm" name=${me.name} seat=${0} self=${true} />
-          <div class="me-chip__text">
+          <span class="me-chip__text">
             <span class="me-chip__name">${me.name || t('博士')}</span>
             <${MicroLabel}>${me.playerId != null ? `DOCTOR #${doctorNo(me.playerId)}` : 'DOCTOR'}<//>
-          </div>
-        </div>
+          </span>
+          <${Icon} name="chart" class="me-chip__stats" />
+        </button>
       </div>
     </header>
 
@@ -490,6 +590,9 @@ export function LobbyScreen() {
         </div>
         <div class="create-box">
           <${ModPicker} selected=${selectedMods} onToggle=${toggleMod} />
+          ${roomMode === 'coop'
+            ? html`<${SeatCapPicker} value=${seatValue} min=${seatRange.min} max=${seatRange.max} onChange=${setSeatPick} />`
+            : null}
           <${Tooltip} block=${true} text=${online ? null : t('正在连接服务器…')}>
             <${Button} variant="primary" size="xl" block=${true} iconRight="chevrons" loading=${busy === 'create'} disabled=${!online} onClick=${create}>
               ${roomMode === 'solo' ? t('开始独立模拟') : t('创建同盟')}

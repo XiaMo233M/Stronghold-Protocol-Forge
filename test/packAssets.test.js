@@ -132,10 +132,16 @@ describe('四组声明: 默认缺省 = 今天逐字节不变（本刀最重要�
     // clementia 那一个在 0.2.3 那一轮**移过**：上游把克莱门莎收成了官方干员（官方 id `char_4231_clemnt`），
 // 本仓库的示例夹具再用那个 id 会被加载器按 OFFICIAL_ID_COLLISION 拒掉，于是 id 换成工坊保留前缀的
 // `char_ws_clemnt`（docs/examples/clementia/README.md）—— 包的内容真的变了，基线随之移动。
+//
+// **2026-10-11 再移一次，理由同样是"身份的定义变了"**（业主裁决 B，DESIGN §28.2）：清单从"pack.json + 内容文件 +
+// kits/*.js + assets/** + 声明过的模块"扩成**包目录下的每一个普通文件**（`server/packFiles.js listPackFiles`），
+// 因为一份"被声明模块 import、自己却没被声明"的文件从前既不在摘要里、也不在下载清单里 —— 干净的客户端根本下不到它。
+// 于是 clementia 与 kit-demo 各自多出一条 `README.md`（它们真的在包里），哈希随之移动；demo-workshop 目录里
+// 本来就只有 `pack.json` 与 `chess.json`，两条都在旧清单里，所以它**一个字没变**（下面一并钉住）。
 const BASELINE = {
-      clementia: '27627f47d04aef3a622202a92038ada7a514b2c2b44389bfb069720b823d987e',
+      clementia: 'e89533a3624bc5260e15c421768f416c0ccea8b27a428a09ea6af52fb3cfc2cc',
       'demo-workshop': '15092019fd1dbc85589af4b89102746c3a3c0389aef3847d7d9a335bca1a73ef',
-      'kit-demo': '77b80c6e74021508d5857208d669da36cc74f20384798a6d5a269fd37f9e4f35',
+      'kit-demo': '4a75376f6acac54994808f9c0f622c9c0e482c14153eddcf8f883a3f7d6bde2b',
     };
     const loaded = loadWorkshop(EXAMPLES, { log: quiet });
     assert.deepEqual(loaded.errors, [], '三份示例包必须都加载成功');

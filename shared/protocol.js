@@ -1,11 +1,22 @@
 // Normative message catalogue (DESIGN §8). Used by server (validation) and client (building requests).
 // Every client→server message is `{ t, rid?, ...fields }`. Unknown `t` or invalid fields ⇒ ERR.BAD_MSG.
 
-import { DIFFICULTIES, NAME_MAX_LEN, ROOM_CODE_LEN, MAX_SEATS, MAX_ROOM_MODS, EMOTES, GEO } from './constants.js';
+import { DIFFICULTIES, NAME_MAX_LEN, ROOM_CODE_LEN, MAX_ROOM_MODS, EMOTES, GEO, maxSeatsFrom, MIN_SEATS } from './constants.js';
 import { isDroppableChess } from './standIn.js';
 import { diySlotIds, validateDiyPicks } from './diy.js';
 import { isSupportEntries } from './support.js';
 import { cultivatedStats, isPotential, isCultivate, POTENTIAL_DEFAULT, CULTIVATE_DEFAULT } from './potential.js';
+
+/**
+ * 座位校验的上界 (100 人版移植): `SP_MAX_SEATS` when the deployment raised the cap, else `MAX_SEATS` (4).
+ *
+ * The seat field of `room.removeBot` / `room.kick` is validated HERE and nowhere else — the handler only checks that
+ * the addressed seat actually holds an AI / the confirmed player (server/lobby.js) — so this bound is the single gate
+ * a bigger room has to widen. It reads the same `maxSeatsFrom` the Lobby's `maxSeats` default does, so the protocol
+ * can never be narrower than the seats a room really has (a message naming a seat the room does not have is still
+ * refused by the handler's own `!target ⇒ BAD_TARGET`).
+ */
+const SEAT_CAP = maxSeatsFrom(typeof process !== 'undefined' && process.env ? process.env : {});
 import { isModDigest, isModId } from './modIdentity.js';
 
 // Mod identity (DESIGN §28.2): the wire shape of a mod set lives in shared/modIdentity.js, because jsconfig.json
@@ -525,20 +536,50 @@ export const C2S = {
     modIds: (v) => Array.isArray(v) && v.length <= MAX_ROOM_MODS && v.every(isModId),
     // 房内聊天模式（`room.state.chatMode` 回给所有人）：房主在建房时定，默认 'open'。服务端强制它。
     chatMode: (v) => v == null || isChatMode(v),
-    $optional: ['mods', 'modIds', 'chatMode'],
+    // 本房座位上限 (业主裁决 B5): 房主建房时自己选这一个房间开几张座位卡，可选、**只作用于 co-op**
+    // （solo 房永远是 `mode:'solo'` 那一个座位形状，见 server/lobby.js create）。
+    //
+    // 范围是 `[MIN_SEATS, SEAT_CAP]`，`SEAT_CAP` 就是上面 `room.removeBot` / `room.kick` 用的那一个号 ——
+    // 这台服务器允许的最大座位数（`SP_MAX_SEATS`，缺省 `MAX_SEATS` = 4）。越界或垃圾值**点名拒绝**
+    // （`bad field seatCap` ⇒ `ERR.BAD_MSG`），不是静默钳制：静默钳制会让「我明明选了 100」变成一个
+    // 玩家自己解释不了的 4 座房间。
+    //
+    // 「可选」登记在下面的 `$optional` 里 —— 与同文件 `hello` 的写法一致（判据允许缺席的键就登记），而且这张表
+    // 是**作者可见的表面**：`server/modDispatch.js` 把它复制进交给包的 `c2s`，包据此判断哪个字段可以不发。
+    // 表里漏一条，包就会把一个合法的 `room.create` 当成缺字段。所以判据与 `$optional` 两条路都要留着：
+    // `$optional` 管「键根本没出现」，判据里的 `v === undefined || v === null` 管「显式给了 null」。
+    // 缺省 / `null`（= 旧客户端根本不发）⇒ 服务器默认，也就是 `MAX_SEATS`。
+    seatCap: (v) => v === undefined || v === null || isInt(v, MIN_SEATS, SEAT_CAP),
+    $optional: ['mods', 'modIds', 'chatMode', 'seatCap'],
   },
   'room.join': { code: (v) => isStr(v, ROOM_CODE_LEN + 2) && /^[A-Za-z0-9]+$/.test(v), mods: (v) => v == null || isModDigest(v), $optional: ['mods'] },
   'room.leave': {},
   'room.ready': { ready: isBool },
   'room.setDifficulty': { difficulty: (v) => DIFFICULTIES.includes(v) },
+  // 本房座位上限 (业主裁决 B5, docs/META.md §1.9): the HOST resizes the room it is already in — the same host-only,
+  // before-the-match window `room.setDifficulty` / `room.setAiPicksLast` live in.
+  //
+  // `code` is REQUIRED and must be the room the sender is in right now. It is not redundant with the session's own
+  // room: a tab that was left open (or a client that acted on a stale `room.state`) then names the room it MEANT, and
+  // the two answers are distinguishable — a mismatch is `NOT_IN_ROOM`, never a silent resize of "whatever room you
+  // happen to be in now", which on a host who just moved to a new room would resize the wrong one.
+  //
+  // `seatCap` uses the SAME bound as `room.create.seatCap` (`[MIN_SEATS, SEAT_CAP]`) and the same explicit refusal
+  // (`bad field seatCap` ⇒ `BAD_MSG`) — a value outside it is a malformed request, not a policy decision. The policy
+  // decision against the room's CURRENT occupants is the handler's, and it is the one with its own code
+  // (`SEAT_CAP_TOO_SMALL`).
+  'room.setSeatCap': {
+    code: (v) => isStr(v, ROOM_CODE_LEN + 2) && /^[A-Za-z0-9]+$/.test(v),
+    seatCap: (v) => isInt(v, MIN_SEATS, SEAT_CAP),
+  },
   // the co-op room option 「AI 队友最后选择」 (GitHub #338; host, before the match): the strategy and 机变 drafts order every
   // human seat before every AI seat (server/match/match/phases.js humansFirst); room.state.aiPicksLast
   'room.setAiPicksLast': { on: isBool },
   'room.addBot': {},
-  'room.removeBot': { seat: (v) => isInt(v, 0, MAX_SEATS - 1) },
+  'room.removeBot': { seat: (v) => isInt(v, 0, SEAT_CAP - 1) },
   // the host removes another human before the match (server/lobby.js kick; community report #17); playerId = the one the
   // host confirmed — a seat that changed hands meanwhile is refused
-  'room.kick': { seat: (v) => isInt(v, 0, MAX_SEATS - 1), playerId: isId },
+  'room.kick': { seat: (v) => isInt(v, 0, SEAT_CAP - 1), playerId: isId },
   'room.start': {},
   'room.rerollSetup': { setupRevision: (v) => isInt(v, 0, 2 ** 31) },
   'room.cancelReroll': { voteId: (v) => isInt(v, 1, 2 ** 31) },
@@ -664,6 +705,10 @@ export const C2S = {
   // the stats the own board's units start their next battle with (user playtest #4 item 7; prep phases): answered by
   // the push m.unitStats { seq, round, units: [unitStatsEntry] }; `seq` is echoed so the client keeps the newest answer
   'g.unitStats': { seq: (v) => isInt(v, 0, 2 ** 31), $optional: ['seq'] },
+  // incremental m.public (DESIGN §8.2 "incremental frame"): the client could not merge a delta — it holds no
+  // materialized state, or a patch named a seat it does not know — and asks for the full frame again. The answer is a
+  // unicast full m.public; a spectator seat may ask too (watching includes resyncing what it watches)
+  'g.publicFull': {},
   'g.leave': {},
 
   // client-side combat (DESIGN §14): the authoritative client of a field reports its battle; a 联防 field adds
@@ -692,6 +737,10 @@ export const C2S = {
 // `room.state` carries its OWN `mods` of the same shape when the room declared a set (W-A, DESIGN §28.9) — absent when
 // the room declared none. It names the set the room asked for; the gate above still judges against the process set
 // until W-B makes the room's set the one the simulation runs.
+// `welcome` ALSO carries `maxSeats` when this deployment's seat ceiling is not the official `MAX_SEATS` (业主裁决 B5;
+// server/lobby.js `welcomeInfo`): the number the lobby's seat slider is allowed to reach. Absent on a plain install, so
+// a 4-seat server's handshake keeps the exact field set it always had, and a client that does not know it must use
+// `MAX_SEATS` — never a number of its own.
 export const S2C = [
   'welcome', 'ok', 'error', 'pong',
   'room.state', 'room.closed',

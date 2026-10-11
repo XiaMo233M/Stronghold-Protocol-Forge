@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 
 import { C2S, validateC2S } from '../shared/protocol.js';
+import { PROTOCOL_VERSION } from '../shared/constants.js';
 import { loadWorkshop, loadWorkshopHooks, dropUnavailablePreDispatchPacks } from '../server/workshop.js';
 import { createModDispatch, PRE_DISPATCH_DEPS } from '../server/modDispatch.js';
 import { Network, SessionRegistry } from '../server/net.js';
@@ -361,7 +362,7 @@ describe('server.preDispatch: 否决不进大厅、放行照常分发、回执�
     const { network } = stack({ hooks: [hookOf('guard', guardFactory(), ['room.create'])], handler: { onMessage: (_s, msg) => { calls.push(msg.t); } } });
     const { sock, conn } = connect(network);
     // 先 hello（钩子对 hello 返回 false ⇒ 照常进入会话建立）
-    frame(network, conn, { t: 'hello', name: 'Fake', version: 1, rid: 1 });
+    frame(network, conn, { t: 'hello', name: 'Fake', version: PROTOCOL_VERSION, rid: 1 });
     assert.ok(sock.sent.some((m) => m.t === 'welcome'), JSON.stringify(sock.sent));
     frame(network, conn, { t: 'g.buy', slot: 0, rid: 8 });
     assert.deepEqual(calls, ['g.buy']);
@@ -377,7 +378,7 @@ describe('server.preDispatch: 否决不进大厅、放行照常分发、回执�
     // 先按钩子自己的协议证明（resource.proof 不在 intercepts 里，但仍然到达钩子 —— 而且是在 hello 之前）
     frame(network, conn, { t: 'resource.proof', ...PROOF, rid: 1 });
     assert.ok(sock.sent.some((m) => m.t === 'resource.accepted' && m.rid === 1), JSON.stringify(sock.sent));
-    frame(network, conn, { t: 'hello', name: 'Fake', version: 1, rid: 2 });
+    frame(network, conn, { t: 'hello', name: 'Fake', version: PROTOCOL_VERSION, rid: 2 });
     frame(network, conn, { t: 'room.create', mode: 'solo', difficulty: 'NORMAL', rid: 3 });
     assert.deepEqual(calls, ['room.create'], '证明之后的 room.create 必须进大厅');
     network.close();
@@ -419,7 +420,7 @@ describe('server.preDispatch: 否决不进大厅、放行照常分发、回执�
     const b = connect(network);
     frame(network, a.conn, { t: 'resource.proof', ...PROOF, rid: 1 });
     assert.ok(a.sock.sent.some((m) => m.t === 'resource.accepted'));
-    frame(network, a.conn, { t: 'hello', name: 'Fake', version: 1, rid: 4 });
+    frame(network, a.conn, { t: 'hello', name: 'Fake', version: PROTOCOL_VERSION, rid: 4 });
     // A 证明过了，B 没有：B 的 room.create 被否决，A 的照进大厅
     frame(network, b.conn, { t: 'room.create', mode: 'solo', difficulty: 'NORMAL', rid: 2 });
     const veto = b.sock.sent.find((m) => m.t === 'error');

@@ -88,7 +88,10 @@ export class MatchmakeQueue {
   constructor(lobby, options = {}) {
     this.lobby = lobby;
     this.opts = { ...MATCHMAKE_DEFAULTS, ...(options || {}) };
-    const size = Number.isInteger(this.opts.size) && this.opts.size > 1 ? Math.min(this.opts.size, MAX_SEATS) : MAX_SEATS;
+    // 座位上限 (100 人版移植): the room's own cap (LOBBY_DEFAULTS.maxSeats = MAX_SEATS unless SP_MAX_SEATS raised it),
+    // so an explicit `size` is still clamped to a cap that can never exceed the seats a room actually has.
+    const seats = Number.isInteger(lobby?.opts?.maxSeats) && lobby.opts.maxSeats >= 1 ? lobby.opts.maxSeats : MAX_SEATS;
+    const size = Number.isInteger(this.opts.size) && this.opts.size > 1 ? Math.min(this.opts.size, seats) : seats;
     // `max` is a CAP, not a minimum: an explicit value below `size` is honoured (the queue then refuses a new arrival
     // instead of placing anybody, which is the state the cap exists for). The default is the queue size itself —
     // anything larger would make QUEUE_FULL unreachable and let a stuck queue grow without a bound.
@@ -184,6 +187,14 @@ export class MatchmakeQueue {
       // later player takes the lowest free seat through the ordinary `room.join` — this module owns no seat logic.
       // A quick-matched room runs the server's DEFAULT set: no `modIds`, and `mods` was already judged when the player
       // entered the queue (`room.queue.mods`). W-B stays in the lobby.
+      //
+      // 本房座位上限 (业主裁决 B5): `seatCap` is deliberately NOT sent here, and this is a decision, not an oversight.
+      // The per-room cap is the HOST's pick (the lobby's slider, `room.create.seatCap`), and a quick-matched room has
+      // no host yet when it is built — the longest-waiting stranger becomes one afterwards. Choosing for them would
+      // mean either guessing a number the rest of the queue never agreed to or silently opening a stranger's room
+      // smaller than the queue they joined (`queue.size` IS this server's ceiling, `lobby.opts.maxSeats`). So a
+      // quick-matched room keeps the server's ceiling, which is also exactly the room `room.queue` promised when the
+      // player entered (the panel's `need` = `this.size`). A host who wants a smaller room creates one and invites.
       const res = this.lobby.create(picked[0].session, { mode: QUEUE_MODE, difficulty: picked[0].difficulty });
       if (!res || !res.ok) failure = res;
       else {

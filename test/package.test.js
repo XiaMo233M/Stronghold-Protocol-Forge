@@ -44,6 +44,8 @@ test('selection: runtime files in; tests, maintainer tools, other docs, dev page
     'tools/local-extract/LICENSE-Ark-Unpacker.txt', 'scripts/start.sh', 'scripts/start-windows.bat', 'scripts/launch.mjs',
     'scripts/install-service-windows.ps1', 'docs/PLAYING.md', 'docs/DEPLOY.md', ...RUNTIME_RESEARCH, 'package.json',
     'package-lock.json', 'LICENSE', 'NOTICE.md', 'THIRD-PARTY-NOTICES.md', 'README.md', 'CHANGELOG.md',
+    // the owner's 增量帧可调参数说明书: a player doc, so it ships (PLAYER_DOCS); the sample is a doc, not a stray file
+    'docs/NET-TUNING.md',
     // out
     'test/version.test.js', 'tools/golden.mjs', 'tools/build-data.mjs', 'tools/check-imports.mjs', 'tools/package.mjs',
     'tools/i18n/fallback-remake.json', 'scripts/make-windows-bundle.mjs', 'docs/DESIGN.md', 'docs/WINDOWS.md', 'docs/ASSETS.md',
@@ -56,10 +58,13 @@ test('selection: runtime files in; tests, maintainer tools, other docs, dev page
   ]);
   for (const f of ['server/index.js', 'public/i18n/en.json', 'data/i18n/en.json', 'tools/assets/local-enemy-spines.json',
     'tools/assets/local-token-spines.json', 'tools/local-extract/LICENSE-Ark-Unpacker.txt', 'scripts/install-service-windows.ps1',
-    'docs/research/07-assets.json', 'CHANGELOG.md']) {
+    'docs/research/07-assets.json', 'CHANGELOG.md', 'docs/NET-TUNING.md']) {
     assert.ok(keep.includes(f), `keeps ${f}`);
   }
-  assert.equal(keep.length, 35, keep.join(' '));
+  // …and the owner's 增量帧说明书 really is what puts it in: drop it from PLAYER_DOCS and the same path falls out
+  assert.deepEqual(selectTracked(['docs/NET-TUNING.md']).keep, ['docs/NET-TUNING.md']);
+  assert.ok(!keep.includes('docs/ASSETS.md'), 'the other docs stay out');
+  assert.equal(keep.length, 36, keep.join(' '));
   assert.equal(drop.length, 40, drop.join(' '));
   assert.ok(!keep.some((f) => drop.includes(f)));
 });
@@ -81,7 +86,12 @@ test('the real tracked tree: runtime in, the rest out; every shipped import, npm
   const got = new Set(p.files);
   for (const f of ['server/index.js', 'tools/setup.mjs', 'tools/fetch-assets.mjs', 'scripts/start.sh', 'docs/PLAYING.md', 'docs/DEPLOY.md',
     'package-lock.json', 'NOTICE.md', ...RUNTIME_RESEARCH]) assert.ok(got.has(f), f);
-  for (const f of ['tools/golden.mjs', 'tools/package.mjs', 'scripts/make-windows-bundle.mjs', 'docs/DESIGN.md', 'eslint.config.js', 'Dockerfile']) {
+  // the owner's 增量帧可调参数说明书 ships with the package (PLAYER_DOCS), full and lite alike
+  assert.ok(got.has('docs/NET-TUNING.md'), 'docs/NET-TUNING.md ships');
+  assert.deepEqual(plan(ROOT, { lite: false, allowDirty: true, scan: false, measure: false }).tracked,
+    p.tracked, 'the full and the lite zip ship the same tracked files');
+  for (const f of ['tools/golden.mjs', 'tools/package.mjs', 'scripts/make-windows-bundle.mjs', 'docs/DESIGN.md', 'docs/ASSETS.md',
+    'docs/PS100-MIGRATION.md', 'eslint.config.js', 'Dockerfile']) {
     assert.ok(!got.has(f), f);
   }
   // the design document (the index docs/DESIGN.md and its parts in docs/design/, docs/history/) stays out too

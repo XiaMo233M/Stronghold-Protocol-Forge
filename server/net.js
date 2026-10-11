@@ -9,7 +9,8 @@
 //     `opts.preDispatch` / `opts.onConnection`, assembled by server/modDispatch.js; with no such pack both are
 //     absent and this stage does not exist) → `hello`/`ping` handling → dispatch to the lobby handler → `ok`/`error`
 //     reply echoing the request id (`rid`). Intents whose answer is a large state resend (`g.watch` →
-//     m.field) also draw from a second, much smaller bucket (2/s, burst 6), so one socket cannot turn
+//     m.field, `g.publicFull` → a unicast FULL m.public plus the room's next full frame) also draw from a
+//     second, much smaller bucket (2/s, burst 6), so one socket cannot turn
 //     40 tiny requests per second into hundreds of KB/s of downstream traffic.
 //   * Client address per connection (`clientAddress`): the socket peer, or — when the peer is a local
 //     reverse proxy (loopback / private address, e.g. `cloudflared tunnel --url http://localhost:3000`) —
@@ -70,8 +71,16 @@ export const NET_DEFAULTS = Object.freeze({
  * (taking a spectator seat in a running match resends its state like a watcher's g.watch — server/lobby.js spectate).
  * 野排匹配 room.queue (server/matchmaking.js) is here for the other reason the bucket exists: entering the queue
  * re-announces the queue to everyone waiting, so a rapid enter/leave loop is fan-out work, not a single reply.
+ *
+ * g.publicFull (DESIGN §8.2, the self-healing ask) is the newest member and the reason is the plainest of all: one
+ * cheap request is answered with a UNICAST FULL frame — 17 kB in the 40-seat room, the size its own suite measures
+ * (test/match/public-delta-match.test.js, "[dense 40] full 17282 B") — and it also turns the ROOM's next frame full
+ * for everybody (platform.js resendPublic → markMembershipChanged), so N asks buy N full frames. On the 40 msg/s
+ * bucket the burst alone was 6 × 17 kB before any refill; the heavy bucket caps it at 2/s.
+ * Nothing a normal client loses: public/js/main.js:138 PUBLIC_FULL_ASK_MS = 2000 throttles the ask to 0.5/s, four
+ * times below the refill, so a legitimately out-of-sync player still asks as often as the client lets it.
  */
-export const HEAVY_TYPES = new Set(['g.watch', 'room.loadout', 'room.ownership', 'room.diy', 'room.spectate', 'room.queue']);
+export const HEAVY_TYPES = new Set(['g.watch', 'g.publicFull', 'room.loadout', 'room.ownership', 'room.diy', 'room.spectate', 'room.queue']);
 
 /** Close codes (see header). */
 export const CLOSE = Object.freeze({ REPLACED: 4001, HELLO_TIMEOUT: 4002, POLICY: 1008, SHUTDOWN: 1001 });

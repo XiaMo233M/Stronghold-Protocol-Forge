@@ -10,6 +10,7 @@ import { createBattleFromSpec, compactResult } from '../../server/sim/spec.js';
 import { RESULT_GRACE_MS, BOSS_SILENCE_MS } from '../../server/match/fields.js';
 import { FakeBattle } from './fakeBattle.js';
 import { makeMatch, checkInvariants } from './harness.js';
+import { applyPublic } from '../../public/js/matchDelta.js';
 
 /** A plausible client result for a spec (FakeBattle stepped to its end, like test/match/simClient.js). */
 function fakeResult(m, spec) {
@@ -104,8 +105,17 @@ test('Final Assault: boss b.progress (4 Hz per field) no longer re-marks m.publi
   assert.ok(h.drive(() => m.phase === PHASE.FINAL_ASSAULT));
   const pubs = [];
   const pools = [];
+  // The published view is the INCREMENTAL frame (server/viewsDelta.js): a DELTA carries only the keys that changed, so
+  // it has no `phase` key at all. A frame of this window is judged on the MERGED state — the same full-then-delta merge
+  // the browser and harness.lastBc('m.public') do — seeded from what the clients already hold.
+  let pubState = h.publicState();
   h.onBroadcast.push((msg) => {
-    if (msg.t === 'm.public' && msg.phase === PHASE.FINAL_ASSAULT) pubs.push({ at: h.sched.now(), msg });
+    if (msg.t === 'm.public') {
+      const res = applyPublic(pubState, msg);
+      if (res.ok) pubState = res.state;
+      if (pubState && pubState.phase === PHASE.FINAL_ASSAULT) pubs.push({ at: h.sched.now(), msg });
+      return;
+    }
     if (msg.t === 'b.pool') pools.push(msg);
   });
   const lp0 = m.teamLp;

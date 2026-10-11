@@ -50,8 +50,12 @@ describe('createRoomAssets：没声明集合就是进程级那一份本体，子
   const processData = deepFreeze(applyWorkshop(official, packs).data);
   const kits = { chess_ws_alpha_a: () => ({}), chess_ws_zeta_a: () => ({}) };
   const kitOwners = new Map([['chess_ws_alpha_a', 'alpha-pack'], ['chess_ws_zeta_a', 'zeta-pack']]);
+  // 第二个键空间（docs/WORKSHOP.md §4.7）：召唤物的 kit 各自按包裁剪，合并成一张表就会让「声明了 A 包」的房间
+  // 连 B 包的 summon kit 一起带上。
+  const tokenKits = { token_ws_alpha: () => ({}), token_ws_zeta: () => ({}) };
+  const tokenKitOwners = new Map([['token_ws_alpha', 'alpha-pack'], ['token_ws_zeta', 'zeta-pack']]);
   const modules = [{ id: 'alpha-pack/chess_ws_alpha_a', pack: 'alpha-pack', url: '/workshop-kits/a.js' }, { id: 'zeta-pack/chess_ws_zeta_a', pack: 'zeta-pack', url: '/workshop-kits/z.js' }];
-  const make = () => createRoomAssets({ official, processData, packs, kits, kitOwners, modules, log: quiet });
+  const make = () => createRoomAssets({ official, processData, packs, kits, kitOwners, tokenKits, tokenKitOwners, modules, log: quiet });
 
   const ids = (modSet) => modSet.packs.map((p) => p.id);
   const setOf = (list) => modSetOf(packs.filter((p) => list.includes(p.id)).map((p) => ({ id: p.id, hash: p.hash, layer: p.layer, combat: p.combat })));
@@ -62,6 +66,7 @@ describe('createRoomAssets：没声明集合就是进程级那一份本体，子
       const got = assets.forRoom(modSet);
       assert.equal(got.data, processData, '没声明集合的房间必须拿到进程级那一份本体');
       assert.equal(got.kits, kits);
+      assert.equal(got.tokenKits, tokenKits, '召唤物那一半同样是同一份本体');
       assert.equal(got.modules, modules);
     }
     assert.equal(assets.size(), 0, '一条都不该物化');
@@ -76,8 +81,9 @@ describe('createRoomAssets：没声明集合就是进程级那一份本体，子
     assert.deepEqual(Object.keys(got.data.chess).sort(), ['chess_official_a', 'chess_ws_alpha_a']);
     assert.equal('chess_ws_zeta_a' in got.data.chess, false, '没声明的包一条记录都不该在');
     assert.deepEqual(Object.keys(got.kits), ['chess_ws_alpha_a'], '另一个包的 kit 不该在这个房间里存在');
+    assert.deepEqual(Object.keys(got.tokenKits), ['token_ws_alpha'], '召唤物的 kit 同样只带这个房间声明的那几个包');
     assert.deepEqual(got.modules.map((m) => m.pack), ['alpha-pack']);
-    assert.ok(Object.isFrozen(got.data) && Object.isFrozen(got.kits) && Object.isFrozen(got.modules));
+    assert.ok(Object.isFrozen(got.data) && Object.isFrozen(got.kits) && Object.isFrozen(got.tokenKits) && Object.isFrozen(got.modules));
     assert.equal(Object.isFrozen(processData), true, '进程级那一份本来就冻结（server/data.js 同一条）');
   });
 

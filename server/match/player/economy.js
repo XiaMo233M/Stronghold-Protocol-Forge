@@ -61,8 +61,10 @@ export class PlayerEconomy {
   }
 
   _rollChessSlot() {
-    // the slotted 自选 pieces join the draw once the 调度中心 reaches their slot's level (player/diy.js diyRollEntries)
-    const id = this.m.pool.roll(this.m.rngShop, { maxTier: this.shop.level, extra: this.diyRollEntries() });
+    // the slotted 自选 pieces join the draw once the 调度中心 reaches their slot's level (player/diy.js diyRollEntries);
+    // the DRAW SOURCE is the player's own pool in the 100-seat variant and the shared one today (player/rules.js
+    // mainPool — the same object either way when the switch is off, docs/PS100-MIGRATION.md §10-A)
+    const id = this.mainPool().roll(this.m.rngShop, { maxTier: this.shop.level, extra: this.diyRollEntries() });
     if (!id) return null;
     // 助战：自己带上场的干员在商店里按 `data/support.json` 的 prices 标价（没配就是它的阶级价），
     // 卖掉仍按普通棋子的 sellPrice —— 它就是普通棋子，只是「我的商店池里一定有它」（连本局禁用也盖过去）。
@@ -73,7 +75,7 @@ export class PlayerEconomy {
   }
 
   _rollItemSlot() {
-    const id = this.m.pool.rollItem(this.m.rngShop, this.shop.level);
+    const id = this.m.pool.rollItem(this.m.rngShop, this.shop.level, this.m.itemPool);
     return id ? { kind: 'item', id, basePrice: this.gd.itemPrice(id), frozen: false, sold: false } : null;
   }
 
@@ -163,6 +165,7 @@ export class PlayerEconomy {
       piece = this.acquireChess(slot.id, { source: 'buy' });
     } else {
       if (!this.gd.item(slot.id)) return fail(ERR.BAD_TARGET);
+      if (!this.m.itemPool.canGain(slot.id)) return fail(ERR.SOLD_OUT);
       if (handFull) return fail(ERR.HAND_FULL);
       this.spend(price);
       slot.sold = true;

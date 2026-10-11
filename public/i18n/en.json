@@ -155,6 +155,8 @@
   "音效": "Sound Effects",
   "静音": "Mute",
   "显示伤害数字": "Damage Numbers",
+  "工坊外观": "Workshop Outfits",
+  "工坊外观由已加载的包提供，缺哪一套时回落原版立绘。": "Outfits come from the loaded packs. When one is missing, the original art is drawn.",
   "画面质量": "Graphics Quality",
   "触屏操作：点击单位选中（撤退 / 出售）· 长按单位或卡牌查看详情 · 拖动部署后滑动选择朝向": "Touch controls: tap a unit to select it (Retreat / Sell) · long-press a unit or card for details · after dragging to deploy, swipe to choose a direction",
   "快捷键": "Hotkeys",
@@ -1304,5 +1306,14 @@
   "关闭聊天": "Chat off",
   "该房间的聊天设置不允许这条消息": "This room's chat setting does not allow that message",
   "战斗倍速 {cur}×": "Battle speed {cur}×",
-  "战斗倍速 {cur}× · 点击切到 {next}×（只加快播放，结果不变）": "Battle speed {cur}× · click for {next}× (playback only — the outcome is unchanged)"
+  "战斗倍速 {cur}× · 点击切到 {next}×（只加快播放，结果不变）": "Battle speed {cur}× · click for {next}× (playback only — the outcome is unchanged)",
+  "只能部署在召唤者相邻四格": "Can only be deployed on the four tiles adjacent to the summoner",
+  "{names}只能部署在召唤者相邻四格，已退回整备区": "{names} can only be deployed on the four tiles adjacent to the summoner and returned to the Bench",
+  "{names}只能部署在召唤者相邻四格，整备区已满，下回合返还": "{names} can only be deployed on the four tiles adjacent to the summoner; the Bench is full, so they come back next round",
+  "装备库存不足，未获得该装备": "Equipment stock is insufficient; no equipment was received",
+  "库存不足": "Out of stock",
+  "本房间人数上限": "Player seats in this room",
+  "服务器允许最多 {max} 人；本同盟开 {value} 张座位卡": "This server allows up to {max} players; this Alliance opens {value} seats",
+  "不能小于同盟内现有人数（含 AI 队友）": "Cannot be lower than the players already in this Alliance (AI teammates included)",
+  "新的人数上限不能小于同盟内现有人数（含 AI 队友）": "The new seat limit cannot be lower than the players already in this Alliance (AI teammates included)"
 }

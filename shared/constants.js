@@ -2,7 +2,18 @@
 
 import { N_ } from './i18n.js';
 
-export const PROTOCOL_VERSION = 1;
+/**
+ * The **wire format** number, and the stale-page gate. A `hello` declares it (`public/js/net.js _sendHello`), the server
+ * refuses a mismatch outright — `BAD_MSG` with `version mismatch: server <n>` (server/net.js onHelloMsg, the FIRST check
+ * of the handshake) — and the browser turns that refusal into 「客户端版本与服务器不一致，请刷新页面」 (NetError, the
+ * `version` detail). So a tab left open across a deployment never reaches a room: it gets tell-refresh instead of
+ * decoding frames whose meaning changed under it (DESIGN §8.2.1).
+ *
+ * Bump it whenever the SHAPE of a pushed frame changes in a way an older page would read WRONG (not merely stale):
+ * 2 = `m.public` incremental frames (a delta frame is only understood by a client that merges it — an older page would
+ * read its `players` list as the whole roster). Additive fields an older page simply ignores do not need a bump.
+ */
+export const PROTOCOL_VERSION = 2;
 /**
  * The **mod-layer API** version (DESIGN §28.5, §28.13): the version of the hook bus and the kit contract a workshop pack
  * may write against. A pack declares `pack.json.api` as a RANGE and this number is what that range is compared against
@@ -57,6 +68,75 @@ export const DEFAULT_VOICE_LANG = 'jp';
 export const VOICE_LANG_NAMES = Object.freeze({ cn: '中文', jp: '日本語', en: 'English', kr: '한국어' }); // i18n-ignore: 语言名按母语写法显示
 
 export const MAX_SEATS = 4;
+/**
+ * 座位上限的可配置覆盖 (100 人版移植, docs/PS100-MIGRATION.md)。
+ *
+ * The official room has 1–4 player seats, so `MAX_SEATS` stays the DEFAULT. A deployment that wants the third-party
+ * 100-seat variant raises the cap without editing `shared/`: `SP_MAX_SEATS=100 npm start`. Nothing else changes by
+ * itself — see the doc for the limits that must be raised alongside it (`SP_MAX_CONNS_PER_ADDR`, the lobby's
+ * `maxRoomsPerAddr` / `maxMatchesPerAddr`, `bossHpScale.aliveFull`, the 隐秘核心 threshold).
+ *
+ * This file is loaded by the BROWSER too and sits inside the `npm run typecheck` slice (`jsconfig.json` includes
+ * `shared/**`, with no node types), so it never touches `process`: the parser is PURE and its callers hand the
+ * environment in — `server/lobby.js` (`process.env`) and `shared/protocol.js` (the SEAT_CAP gate). Absent /
+ * unparsable ⇒ `MAX_SEATS`, i.e. the behaviour of every existing test and deployment is unchanged.
+ *
+ * @param {Record<string, string|undefined>|null|undefined} env the environment to read (absent ⇒ the default)
+ * @returns {number} the effective seat cap (an integer ≥ 1)
+ */
+export function maxSeatsFrom(env) {
+  const raw = env ? env.SP_MAX_SEATS : undefined;
+  if (raw == null || String(raw).trim() === '') return MAX_SEATS;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return MAX_SEATS;
+  const i = Math.floor(n);
+  return i >= 1 ? i : MAX_SEATS;
+}
+
+/**
+ * 本房座位数的**下限** (业主裁决 B5, 2026-10-11): the fewest seats a co-op room may be created with.
+ *
+ * 依据 (why 2 and not 1): the official room's player range is 1–4 (`MAX_SEATS` above), and the ONE-seat shape
+ * already has its own mode — `mode: 'solo'` is 独立模拟, exactly one human, never bots, and the client renders it
+ * as one card whatever the server's slot count is (public/js/screens/room.js `normalizeSeats`). A co-op room whose
+ * `seatCap` were 1 would be a second way to spell that, with none of the solo mode's rules behind it (a solo room
+ * refuses `room.addBot` and any second `room.join`), so the floor keeps 「coop ⇒ ≥ 2 seats」 true — the invariant
+ * every existing co-op room satisfies today (they are all created with 4).
+ *
+ * It is a lower bound on the REQUEST, not a new ceiling on a room: `Room(code, 'coop', diff, now, 1)` still builds
+ * (the class takes any `seatCap ≥ 1`), and a deployment whose `SP_MAX_SEATS` is below this value can still create
+ * its rooms — `clampSeats` narrows the floor to the ceiling instead of leaving an empty range.
+ */
+export const MIN_SEATS = 2;
+
+/**
+ * 房主选的本房上限 → 这台服务器真正接受的座位数 (业主裁决 B5)。**纯函数**, `shared/` 的纪律同 `maxSeatsFrom`:
+ * no `process`, no state, so the server and the browser clamp a pick the same way.
+ *
+ * `want` is what a host picked (or a caller passed); `max` is this deployment's ceiling
+ * (`LOBBY_DEFAULTS.maxSeats` = `maxSeatsFrom(env)` server-side). The result is always an integer in
+ * `[min(MIN_SEATS, max), max]`:
+ *   * a usable integer inside the range ⇒ itself (a pick of exactly `max` is the DEFAULT, i.e. 「本房不另设上限」);
+ *   * below the floor ⇒ the floor;
+ *   * above the ceiling ⇒ the ceiling;
+ *   * unusable (absent, a fraction, a string, `NaN`, `Infinity`) ⇒ `max`, the same room the server builds when the
+ *     field is not sent at all — so a caller that bypasses `shared/protocol.js` can never widen a room by accident.
+ *
+ * This is the LAST line, never the first: `room.create.seatCap` is judged on the wire by `shared/protocol.js`
+ * (a value outside `[MIN_SEATS, SEAT_CAP]` is a `BAD_MSG`, not a silent clamp), and this function covers the callers
+ * that never see the protocol — `server/matchmaking.js` (a quick-matched room has no host to ask) and packages.
+ *
+ * @param {unknown} want the requested seat count
+ * @param {number} [max] this server's ceiling (absent / unusable ⇒ `MAX_SEATS`)
+ * @returns {number} an integer in `[min(MIN_SEATS, max), max]`
+ */
+export function clampSeats(want, max = MAX_SEATS) {
+  const hi = Number.isInteger(max) && max >= 1 ? max : MAX_SEATS;
+  const lo = Math.min(MIN_SEATS, hi);
+  if (!Number.isInteger(want)) return hi;
+  const n = /** @type {number} */ (want);
+  return Math.min(Math.max(n, lo), hi);
+}
 /**
  * Spectator seats of a co-op room (community report #26, owner's decision 2026-10-04) — a remake feature: the official
  * room has 1–4 players and no spectator seat (there only eliminated players and 联防 bystanders watch, research 09 §3.1).
@@ -174,8 +254,38 @@ export function layerGainRoom(before, n) {
  * Checked in server/sim/damage.js (dealDamage after DEF / RES and every multiplier, before shields; Battle.loseHp — not
  * the 胄 drone link's pool share, `noHitLimit`, DESIGN §25.13.4). Minions, normal rounds and 联防 are unaffected.
  * 0 / Infinity = off.
+ *
+ * This is the DEFAULT. A deployment may override it per process with `SP_BOSS_HIT_LIMIT` (see bossHitLimitFrom); the
+ * official 300000 is what every existing test and deployment keeps when the variable is absent.
  */
 export const BOSS_HIT_LIMIT = 300000;
+/**
+ * 限伤 override (百卫补丁 v0.3 移植, docs/PS100-MIGRATION.md §5): the third-party 100-seat variant turns 限伤 OFF
+ * (`BOSS_HIT_LIMIT = Infinity`). That is REMOVING A MECHANIC, not a self-contained port — `leaderHitCancelled` also
+ * fires on damage MY SIDE takes (a loss passed on to a leader counts as one hit), so switching it off changes play at
+ * every seat count. So the default stays the official 300000 and the change is opt-in, like `SP_MAX_SEATS`.
+ *
+ * Pure, like `maxSeatsFrom`: this file is loaded by the browser and sits in the `npm run typecheck` slice, so its
+ * callers hand the environment in (server/match/Match.js reads `process.env`).
+ *
+ * `undefined` ⇒ use `BOSS_HIT_LIMIT` (the built-in default, i.e. byte-for-byte today's behaviour).
+ * `0`, `off`, `infinity`, `inf` (any case) ⇒ `Infinity`, the documented "off" of the constant above.
+ * A positive finite number ⇒ that many HP. Anything else (empty, junk, negative) ⇒ `undefined` (the default).
+ *
+ * @param {Record<string, string|undefined>|null|undefined} env the environment to read
+ * @returns {number|undefined} the override, or undefined for "keep BOSS_HIT_LIMIT"
+ */
+export function bossHitLimitFrom(env) {
+  const raw = env ? env.SP_BOSS_HIT_LIMIT : undefined;
+  if (raw == null) return undefined;
+  const s = String(raw).trim().toLowerCase();
+  if (s === '') return undefined;
+  if (s === 'off' || s === 'infinity' || s === 'inf') return Infinity;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return undefined;
+  if (n === 0) return Infinity;                 // the constant's own "0 = off"
+  return n > 0 ? n : undefined;                 // negative / junk → the built-in default
+}
 
 // Snapshot unit flag bits (DESIGN §8.2)
 export const UF = Object.freeze({
@@ -209,6 +319,11 @@ export const ERR = Object.freeze({
   SPECTATOR: 'SPECTATOR',         // a spectator seat only watches (MAX_SPECTATORS)
   // 房内聊天：这个房间的 `chatMode` 不允许这一类消息（`'quick'` 只许快捷短语，`'off'` 全禁）
   CHAT_MODE: 'CHAT_MODE',
+  // 本房座位上限 (业主裁决 B5, docs/META.md §1.9): `room.setSeatCap` 想把上限缩到比**房间内现有人数
+  // （真人 + AI）**还小 —— 那会有人被挤出座位，所以**点名拒绝**（不是静默钳到人数：那会让房主看到的数字
+  // 与他按下去的不是同一个）。与 `BAD_MSG` 分开，是为了让「你给的数字根本不是合法座位数（越界 / 垃圾值）」
+  // 与「数字合法、但这个房间现在装不下」这两件事在客户端可分辨 —— 前者改数字，后者先请人离开。
+  SEAT_CAP_TOO_SMALL: 'SEAT_CAP_TOO_SMALL',
   MOD_UNKNOWN: 'MOD_UNKNOWN',     // room.create named a pack id this server does not have loaded (DESIGN §28.9, W-A)
   // 野排匹配 (quick match, server/matchmaking.js): the queue already holds its limit of waiting players
   QUEUE_FULL: 'QUEUE_FULL',
@@ -229,6 +344,7 @@ export const ERR_TEXT = {
   NOT_YOUR_TURN: N_('尚未轮到你'), ALREADY: N_('已完成该操作'), TEMP_NOT_EMPTY: N_('临时整备区不为空'), ELIMINATED: N_('你已被淘汰'),
   SPECTATOR: N_('观战中无法进行该操作'), MOD_UNKNOWN: N_('房间指定了本服务器没有的模组包'), INTERNAL: N_('服务器内部错误'),
   CHAT_MODE: N_('该房间的聊天设置不允许这条消息'),
+  SEAT_CAP_TOO_SMALL: N_('新的人数上限不能小于同盟内现有人数（含 AI 队友）'),
   QUEUE_FULL: N_('正在搜寻的博士已满，请稍后再试'), QUEUE_EMPTY: N_('你不在快速匹配队列中'), QUEUED: N_('你已在同盟中：先离开同盟，才能开始快速匹配'),
 };
 

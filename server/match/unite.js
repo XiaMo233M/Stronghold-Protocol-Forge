@@ -34,15 +34,28 @@
 // re-enter) — the same 10 cap as a normal round.
 
 import { buildUniteWave } from './waves.js';
-import { layerGainRoom } from '../../shared/constants.js';
+import { layerGainRoom, MAX_SEATS } from '../../shared/constants.js';
+// The 100-seat variant's per-squad planning (docs/PS100-MIGRATION.md §10-C). The two modules import each other's
+// hoisted function declarations only, never a value at module-evaluation time, so the cycle is inert.
+import { planUniteBySquad } from './unite100.mjs';
 
 /**
+ * The 联防 plans of a finished COMBAT round (docs/PS100-MIGRATION.md §10-C):
+ *   * ≤ MAX_SEATS (the default): ONE room-wide plan, exactly as before this switch existed — the same object the
+ *     caller has always received (single battlefield, single helper pair, the whole room's leakers).
+ *   * `seatCap > MAX_SEATS` (100-seat deployment): the per-squad list of unite100.planUniteBySquad — one plan per squad
+ *     that both leaked and still has a perfect member (阶段 1 队内兜底). The list shape is what `MatchUnite.startUnite`
+ *     branches on, so the switch has exactly one read per concern.
+ *
+ * The gate reads `m.seatCap` only; the OFF branch below is the pre-existing implementation, statement for statement.
+ *
  * @param {import('./Match.js').Match} m
  * @param {Map<string, object>} results playerId → BattleResult.perPlayer entry of the player's own combat
- * @returns {null | { helpers: any[], leakers: any[], leaked: object[], notReentered: Map<string, number> }}
+ * @returns {null | object | object[]} one plan (≤ MAX_SEATS) or the per-squad plan list (100-seat variant)
  */
 export function planUnite(m, results) {
   if (m.isSolo) return null;
+  if (Number.isFinite(m.seatCap) && m.seatCap > MAX_SEATS) return planUniteBySquad(m, results);
   const alive = m.alivePlayers();
   const leakers = [];
   const perfects = [];
@@ -172,4 +185,58 @@ export function uniteSurvivors(plan, uniteResult) {
     out.set(u.sourcePlayerId, (out.get(u.sourcePlayerId) || 0) + 1);
   }
   return out;
+}
+
+/**
+ * Fold the 100-seat variant's per-squad 联防 round into the ONE room-wide plan + result that `settle()` bills
+ * (docs/PS100-MIGRATION.md §10-C). Settlement is room-wide by construction: `plan.leakers` says who pays, and
+ * `uniteSurvivors(plan, result)` reads every field's survivors through the leaks' `sourcePlayerId`. So the helpers and
+ * leakers are the union (seat order), the leaked enemies and the never-re-entered counts are concatenated, and the
+ * per-player battle entries are merged — a player that fought on one squad's field has exactly one entry, and one
+ * enemy can only be on one field, so concatenation never double-counts.
+ *
+ * `synthetic` is kept only when NO field produced a real result: one real field is enough for settlement to charge the
+ * survivors instead of falling back to the players' own leaks (settle.js `uniteRan`).
+ *
+ * @param {Array<object>} plans the per-squad plans that ran (or were handed off)
+ * @param {Array<object|null>} results their results, paired by index
+ * @returns {{ plan: { helpers: any[], leakers: any[], leaked: object[], notReentered: Map<string, number> }, result: object }}
+ */
+export function combineUniteResults(plans, results) {
+  const list = (Array.isArray(plans) ? plans : [plans]).filter(Boolean);
+  const res = (Array.isArray(results) ? results : [results]).filter(Boolean);
+  const helpers = [];
+  const leakers = [];
+  const leaked = [];
+  const notReentered = new Map();
+  const seenHelper = new Set();
+  const seenLeaker = new Set();
+  for (const p of list) {
+    for (const h of p.helpers || []) if (h && !seenHelper.has(h.playerId)) { seenHelper.add(h.playerId); helpers.push(h); }
+    for (const l of p.leakers || []) if (l && !seenLeaker.has(l.playerId)) { seenLeaker.add(l.playerId); leakers.push(l); }
+    for (const l of p.leaked || []) leaked.push(l);
+    for (const [pid, n] of p.notReentered || []) notReentered.set(pid, (notReentered.get(pid) || 0) + n);
+  }
+  const perPlayer = {};
+  const unspawned = [];
+  for (const r of res) {
+    for (const [pid, pp] of Object.entries((r && r.perPlayer) || {})) {
+      if (!pp) continue;
+      const cur = perPlayer[pid] || (perPlayer[pid] = { leaked: [] });
+      if (Array.isArray(pp.leaked)) cur.leaked.push(...pp.leaked);
+      for (const k of ['coins', 'killed', 'damageDealt', 'healingDone']) {
+        if (pp[k] != null) cur[k] = (cur[k] || 0) + (Number(pp[k]) || 0);
+      }
+      if (Array.isArray(pp.unitStats)) { if (!cur.unitStats) cur.unitStats = []; cur.unitStats.push(...pp.unitStats); }
+      if (pp.perfect === false) cur.perfect = false;
+    }
+    if (Array.isArray(r.unspawned)) unspawned.push(...r.unspawned);
+  }
+  helpers.sort((a, b) => a.seat - b.seat);
+  leakers.sort((a, b) => a.seat - b.seat);
+  const synthetic = !res.length || res.every((r) => r && r.synthetic);
+  return {
+    plan: { helpers, leakers, leaked, notReentered },
+    result: { perPlayer, unspawned, ...(synthetic ? { synthetic: true } : {}) },
+  };
 }

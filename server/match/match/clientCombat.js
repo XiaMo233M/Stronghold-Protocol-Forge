@@ -7,6 +7,7 @@
 import { PHASE } from '../../../shared/constants.js';
 import { DeadBattle, syntheticResult, RESULT_GRACE_MS, HARD_CAP_SECONDS, HeadlessJob } from '../fields.js';
 import { buildBattleSpec, createBattleFromSpec } from '../../sim/spec.js';
+import { specBattleOpts } from './battleOpts.js';
 
 export class MatchClientCombat {
   /** Stop every client-combat timer and the headless pacer (phase end, finish, dispose). */
@@ -36,6 +37,8 @@ export class MatchClientCombat {
     const battleId = seq.length + 1 + String(fieldId).length <= 64 ? `${seq}.${fieldId}` : seq;
     // workshopKits: the JSON-safe module list the browser imports to rebuild the pack's behaviour layer
     // (public/js/battle/runner.js loadSpecKits) — the server re-computes the same battle, so both sides must load it.
+    // Both kit key spaces travel in that ONE list: a summon kit carries `kind: 'token'` and the browser rebuilds
+    // `opts.tokenKits` from it (docs/WORKSHOP.md §4.7) — the two spaces are arbitrated separately in the loader.
     // workshopBattle: the same thing one level up (DESIGN §28.17) — the packs' battle-level `install(battle)` modules.
     // mods: the identity of that content (DESIGN §28.2), so the field carries what it ran with.
     const spec = buildBattleSpec({ ...opts, battleId, fieldId, kind, content: this.battleContent, boss, workshopKits: this.workshopKitModules, workshopBattle: this.workshopBattleModules, mods: this.mods });
@@ -62,10 +65,13 @@ export class MatchClientCombat {
   /** A battle built from a spec on the server (headless / takeover / verification); never throws. */
   _specBattle(spec, { sharedBoss = null } = {}) {
     try {
-      // 包声明的战斗逻辑（`server.battle`, DESIGN §28.17）：服务端复算这一场时用的是**同一批真函数**（浏览器那边按
-      // spec.workshopBattle 的 URL 自己加载），两边跑同一段代码才算「同一场战斗」。没有包声明时不传这个键。
-      const installers = Array.isArray(this.battleInstallers) && this.battleInstallers.length ? { battleInstallers: this.battleInstallers } : {};
-      return createBattleFromSpec(spec, this.ds, { BattleClass: this.BattleClass, sharedBoss, logger: this.log, recordEvents: false, ...installers });
+      // 复算这一场必须用**这一局自己那一份** kit 表（`roomAssets.forRoom(room.modSet)` 按房间声明裁剪过的那份），
+      // 与 `combat.js newBattle`（服务端真跑的那一场）同源、同一批函数：少了它，SP_VERIFY 会在装了包的房间里拿内置
+      // 注册表复算客户端按工坊 kit 跑出的结果，两边必然对不上（误报不一致 / 把不一致放过）。
+      // 组装本身在 server/match/match/battleOpts.js —— 两条 Battle 路径调的是**同一个**助手，所以
+      // `kits` / `tokenKits` / `battleInstallers` / `bossHitLimit` 不可能只到一条；`recordEvents: false` 是复算
+      // 唯一有意保留的差异（只影响事件记录，不进结果）。
+      return createBattleFromSpec(spec, this.ds, specBattleOpts(this, { sharedBoss }));
     } catch (e) {
       this.reportError(`battle ${spec && spec.fieldId} construct`, e);
       return new DeadBattle({ fieldId: spec && spec.fieldId, kind: spec && spec.kind, players: (spec && spec.players) || [], rect: spec && spec.rect, stageId: spec && spec.stageId }, 'forced');

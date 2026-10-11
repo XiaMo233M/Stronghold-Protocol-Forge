@@ -22,6 +22,9 @@ import { GIcon } from './gameComponents.js';
 // 设置页列的是 `availableVoiceLangs()` 收窄后的「本机真的装了哪些配音」，语言名走 VOICE_LANG_NAMES。
 // 上游 0.2.3 的四档文字大小需要 TEXT_SIZES。
 import { sanitizeSettings, HOTKEY_ACTIONS, DEFAULT_HOTKEYS, hotkeyLabel, rebindHotkey, isDefaultHotkeys, captureHotkey, availableVoiceLangs, TEXT_SIZES } from './gameLogic.js';
+// 工坊外观 (workshopSkins): the switch itself lives in the settings store, but the **gate the chain reads** is one
+// module-level value in portraitChain.js — this file is its only writer (boot below + the subscription under it).
+import { setAppearanceFirst } from './portraitChain.js';
 import { VOICE_LANG_NAMES } from '../../../shared/constants.js';
 import { data, useData } from '../data.js';
 import { dubsInstalled, dubsMissing } from '../voiceDubs.js';
@@ -35,7 +38,7 @@ import { copyText } from './clipboard.js';
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
 
-/** Settings store: { bgm, sfx, voice, voiceLang, voiceLangByChar, muted, damageNumbers, quality, textSize, keys }. */
+/** Settings store: { bgm, sfx, voice, voiceLang, voiceLangByChar, muted, damageNumbers, workshopSkins, quality, textSize, keys }. */
 export const settingsStore = createStore(sanitizeSettings(loadPref('settings', null)));
 
 /**
@@ -56,11 +59,15 @@ settingsStore.subscribe((s) => {
   // 只传全局那一个配音：逐干员的覆盖由 main.js 注入的 voiceLangOf 在播放时读取（单一真相，见 audio.js 那一处）。
   audio.setVoiceLang(s.voiceLang);
   applyTextSize(s.textSize);
+  setAppearanceFirst(s.workshopSkins);
 });
 audio.setVolumes(settingsStore.get());
 audio.setVoiceLang(settingsStore.get().voiceLang);
 // before the first render (main.js boot renders after its imports ran): the stored step is on screen without a flash
 applyTextSize(settingsStore.get().textSize);
+// 同上：工坊外观的门控也要在**第一帧之前**同步好，否则首帧问的是链的默认值、下一帧才改成玩家的选择
+// —— 那是「闪一下再变」，正是这条链存在的理由要避免的那类错（见 portraitChain.js 步骤 0）。
+setAppearanceFirst(settingsStore.get().workshopSkins);
 
 /** @param {Partial<ReturnType<typeof sanitizeSettings>>} patch */
 export function updateSettings(patch) {
@@ -296,6 +303,8 @@ export function SettingsModal({ open, onClose }) {
                  onInput=${(v) => { updateSettings({ sfx: v }); if (!tested) { setTested(true); setTimeout(() => setTested(false), 400); audio.sfx('click'); } }} />
       <${Toggle} label=${t('静音')} micro="MUTE" value=${s.muted} onChange=${(v) => updateSettings({ muted: v })} />
       <${Toggle} label=${t('显示伤害数字')} micro="DAMAGE NUMBERS" value=${s.damageNumbers} onChange=${(v) => updateSettings({ damageNumbers: v })} />
+      <${Toggle} label=${t('工坊外观')} micro="WORKSHOP SKINS" value=${s.workshopSkins} onChange=${(v) => updateSettings({ workshopSkins: v })} />
+      <p class="set-hint">${t('工坊外观由已加载的包提供，缺哪一套时回落原版立绘。')}</p>
       <div class="set-row">
         <span class="set-row__label">${t('画面质量')}<${MicroLabel}>QUALITY<//></span>
         <div class="set-seg" role="radiogroup">
@@ -322,11 +331,12 @@ export function SettingsModal({ open, onClose }) {
  * The 设置 button of the lobby and the room (GitHub #238 — before it the settings were reachable only from the title
  * screen and a running match): the twin of the 玩法说明 button (ui/guide.js GuideButton), with the settings modal behind it
  * (mounted only while open). The same modal as the title screen's and the match's: nothing in it is match-only.
- * @param {{ class?: string, size?: 'sm'|'md'|'lg'|'xl', variant?: string, label?: string }} props
+ * `square`: the gear alone (the lobby's top bar), the name stays title / aria-label — like GuideButton's.
+ * @param {{ class?: string, size?: 'sm'|'md'|'lg'|'xl', variant?: string, label?: string, square?: boolean }} props
  */
-export function SettingsButton({ class: cls, size = 'sm', variant = 'ghost', label = t('设置') }) {
+export function SettingsButton({ class: cls, size = 'sm', variant = 'ghost', label = t('设置'), square = false }) {
   const [open, setOpen] = useState(false);
-  return html`<${Button} variant=${variant} size=${size} class=${cx('settings-btn', cls)} onClick=${() => setOpen(true)}
-      title=${t('设置')} aria-label=${t('设置')} data-testid="settings-btn"><${GIcon} name="gear" class="btn__icon" />${label}<//>
+  return html`<${Button} variant=${variant} size=${size} square=${square} class=${cx('settings-btn', cls)} onClick=${() => setOpen(true)}
+      title=${t('设置')} aria-label=${t('设置')} data-testid="settings-btn"><${GIcon} name="gear" class="btn__icon" />${square ? null : label}<//>
     ${open ? html`<${SettingsModal} open=${true} onClose=${() => setOpen(false)} />` : null}`;
 }

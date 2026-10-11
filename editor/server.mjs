@@ -445,20 +445,46 @@ function packKits(packDir) {
 }
 
 /**
- * What a kit in this pack may target, reproducing loadWorkshopKits' ownership rule: the chess ids THIS pack ships,
- * plus the official ones it declared it may replace (`pack.json.overrides`).
+ * What a kit in this pack may target, reproducing loadWorkshopKits' ownership rule. **Two key spaces** (docs/WORKSHOP.md
+ * §4.7), because the engine resolves a kit by two different keys and a pack may ship either:
+ *   * OPERATOR — the chess ids THIS pack ships, the charIds it declares into the 自选 pool (`pack.json.operators`; that
+ *     charId IS the key the sim looks a DIY piece's kit up by), plus the official ids it declared it may replace;
+ *   * SUMMON — the token ids its own `tokens.json` ships, plus `tokens:<id>` overrides.
+ * `ambiguousIds` are the ids the merged data carries in BOTH spaces: the loader refuses those by name (the operator half
+ * would win and the summon half would silently never run), so the editor must refuse them too — the page and the loader
+ * have to reach one verdict.
+ * @param {string} packDir
+ * @param {string} dataDir the official data directory (the two tables the ambiguity is judged against)
  */
-function kitTargets(packDir) {
+function kitTargets(packDir, dataDir = DATA_DIR) {
   const manifest = readJson(path.join(packDir, 'pack.json'), null);
   const ownChessIds = Object.keys(readJson(path.join(packDir, 'chess.json'), {}) || {}).sort();
+  const ownTokenIds = Object.keys(readJson(path.join(packDir, 'tokens.json'), {}) || {}).sort();
+  const ownCharIds = Object.keys((manifest && manifest.operators) || {}).sort();
   const overrides = Array.isArray(manifest && manifest.overrides) ? manifest.overrides : [];
-  const declared = overrides.filter((o) => typeof o === 'string' && o.startsWith('chess:')).map((o) => o.slice('chess:'.length));
-  return { manifest, ownChessIds, overrides, legalIds: [...new Set([...ownChessIds, ...declared])].sort() };
+  const declaredChess = overrides.filter((o) => typeof o === 'string' && o.startsWith('chess:')).map((o) => o.slice('chess:'.length));
+  const declaredTokens = overrides.filter((o) => typeof o === 'string' && o.startsWith('tokens:')).map((o) => o.slice('tokens:'.length));
+  const officialChess = new Set(Object.keys(readJson(path.join(dataDir, 'chess.json'), {}) || {}));
+  const officialTokens = new Set(Object.keys(readJson(path.join(dataDir, 'tokens.json'), {}) || {}));
+  const chessSide = new Set([...officialChess, ...ownChessIds, ...ownCharIds, ...declaredChess]);
+  const tokenSide = new Set([...officialTokens, ...ownTokenIds, ...declaredTokens]);
+  const ambiguousIds = [...chessSide].filter((id) => tokenSide.has(id)).sort();
+  return {
+    manifest, ownChessIds, ownTokenIds, ownCharIds, overrides, ambiguousIds,
+    legalIds: [...new Set([...ownChessIds, ...ownCharIds, ...ownTokenIds, ...declaredChess, ...declaredTokens])].sort(),
+  };
 }
 
 /** The same static check `/api/items` runs, with this pack's own ids — one place, so preview and save cannot drift. */
 function kitIssues(source, id, targets) {
-  return validateKit(source, { id, ownChessIds: targets.ownChessIds, overrides: targets.overrides });
+  return validateKit(source, {
+    id,
+    ownChessIds: targets.ownChessIds,
+    ownCharIds: targets.ownCharIds,
+    ownTokenIds: targets.ownTokenIds,
+    overrides: targets.overrides,
+    ambiguousIds: targets.ambiguousIds,
+  });
 }
 
 /** id → the packs that ship a kit with that id. loadWorkshopKits keeps the first and reports the rest. */
@@ -490,7 +516,10 @@ const duplicateKitIssue = (others) => ({
 function kitAdvisories(targets) {
   const out = [];
   const content = Array.isArray(targets.manifest && targets.manifest.content) ? targets.manifest.content : [];
-  if (!content.length) {
+  // `pack.json.operators` 与 `content` 里的**任何一个数据文件**都算「这个包贡献了东西」（`server/workshop.js`
+  // loadWorkshop 的同一份清单）—— 只带 `operators`（自选池干员）的包同样是已加载的包，它的 kit 会被导入。
+  const declaresData = content.length > 0 || Object.keys((targets.manifest && targets.manifest.operators) || {}).length > 0;
+  if (!declaresData) {
     out.push({
       field: 'pack', code: 'PACK_NOT_LOADED', severity: 'warning',
       message: '这个包还没有声明任何数据文件（pack.json 的 content 为空），加载器不会把它算作已加载的包，kit 也就不会被导入',
@@ -3180,11 +3209,12 @@ export async function createEditorServer(opts = {}) {
       for (const packId of fs.existsSync(root) ? fs.readdirSync(root).sort() : []) {
         if (!PACK_ID_RE.test(packId) || !fs.existsSync(path.join(root, packId, 'pack.json'))) continue;
         const packDir = path.join(root, packId);
-        const targets = kitTargets(packDir);
+        const targets = kitTargets(packDir, dataDir);
         const files = packKits(packDir);
         packs.push({
           id: packId, name: targets.manifest?.name ?? packId, author: targets.manifest?.author ?? null,
-          ownChessIds: targets.ownChessIds, overrides: targets.overrides, legalIds: targets.legalIds,
+          ownChessIds: targets.ownChessIds, ownCharIds: targets.ownCharIds, ownTokenIds: targets.ownTokenIds,
+          overrides: targets.overrides, legalIds: targets.legalIds, ambiguousIds: targets.ambiguousIds,
           kitIds: files.map((f) => f.id),
         });
         for (const kit of files) {
@@ -3214,7 +3244,7 @@ export async function createEditorServer(opts = {}) {
     // static validate WITHOUT writing: the page's live feedback, and the only validation the editor can honestly do
     if (p === '/api/kits/preview' && method === 'POST') {
       const { pack, id, source } = await readBody(req);
-      const targets = kitTargets(path.join(root, typeof pack === 'string' ? pack : ''));
+      const targets = kitTargets(path.join(root, typeof pack === 'string' ? pack : ''), dataDir);
       const issues = kitIssues(source, id, targets);
       const others = (kitIdOwners(root).get(id) || []).filter((x) => x !== pack);
       if (others.length) issues.push(duplicateKitIssue(others));
@@ -3238,7 +3268,7 @@ export async function createEditorServer(opts = {}) {
       }
       if (typeof source !== 'string') throw Object.assign(new Error('source must be the file text'), { status: 400 });
       const packDir = path.join(root, packId);
-      const targets = kitTargets(packDir);
+      const targets = kitTargets(packDir, dataDir);
       const issues = kitIssues(source, id, targets);
       const blocking = kitErrors(issues);
       if (blocking.length) return sendJson(res, 400, { error: 'the kit did not validate', errors: blocking });

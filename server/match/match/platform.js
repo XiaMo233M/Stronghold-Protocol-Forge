@@ -36,8 +36,9 @@ export class MatchPlatform {
   handle(playerId, msg) {
     const ps = this.players.get(playerId) || this.spectators.get(playerId);
     if (!ps || ps.isBot || ps.left) return fail(ERR.NOT_IN_ROOM);
-    // a spectator seat only watches (the platform routes nothing else of it)
-    if (ps.spectator && (!msg || msg.t !== 'g.watch')) return fail(ERR.SPECTATOR);
+    // a spectator seat only watches (the platform routes nothing else of it) — resyncing its own view of the public
+    // state is part of watching, so it may ask for that too (DESIGN §8.2, incremental frame)
+    if (ps.spectator && (!msg || (msg.t !== 'g.watch' && msg.t !== 'g.publicFull'))) return fail(ERR.SPECTATOR);
     if (this.disposed || this.ended) {
       // a battle report that crossed the match end (the last b.progress of a field) is stale: ignored, never an error
       // (DESIGN §14 — an error frame without a rid would surface as a toast in the browser)
@@ -107,7 +108,9 @@ export class MatchPlatform {
       // a paused solo battle resumes (the server takes the field over; nobody is left to resume it)
       this._resume();
       if (this.clientCombat) this._authorityLost(ps, 'disconnect');
-      this.markPublic();
+      // the member set the next m.public is built for changed: the frame goes out full, so every remaining client's
+      // baseline is one frame the whole room shares again (DESIGN §8.2, incremental frame)
+      this.markMembershipChanged();
     });
   }
 
@@ -118,8 +121,28 @@ export class MatchPlatform {
       const was = ps.connected;
       ps.connected = true;
       this._resync(ps);
-      if (!was) this.markPublic();
+      // a returning member's own state is freshly full, but the ROOM's baseline has to stay one every client shares:
+      // the next frame is full for everybody, which costs one frame per reconnect and no per-client bookkeeping
+      if (!was) this.markMembershipChanged();
     });
+  }
+
+  /**
+   * `g.publicFull` — the client could not merge a delta (it has no materialized state, or a patch named a seat it does
+   * not know) and asks for the full frame again (DESIGN §8.2, incremental frame: the self-healing path). Answered
+   * immediately as a unicast, and, like every resync, the ROOM's next frame is full so all clients share one baseline.
+   */
+  resendPublic(playerId) {
+    const ps = this.players.get(playerId) || this.spectators.get(playerId);
+    if (!ps || ps.isBot || ps.left || this.disposed) return fail(ERR.NOT_IN_ROOM);
+    this.guard(() => {
+      // the answer is a unicast full frame; a send that does not reach the socket is not an error to report (sendTo
+      // already logs it), and the room-wide full frame below is the same answer for everybody anyway
+      this._sendFullPublic(ps);
+      this.markMembershipChanged();
+    });
+    this.flush();
+    return OK;
   }
 
   /**
@@ -129,7 +152,9 @@ export class MatchPlatform {
    */
   _resync(ps) {
     const playerId = ps.playerId;
-    this.sendTo(playerId, this.publicView());
+    // a full frame, never a delta: a (re)connected client has no baseline (DESIGN §8.2, incremental frame — "a joiner
+    // always gets one full frame first")
+    this._sendFullPublic(ps);
     if (!this.ended) {
       if (!ps.spectator) {
         ps._lastPriv = null;
@@ -159,7 +184,7 @@ export class MatchPlatform {
       if (this.ended) return;
       this._resume();
       if (this.clientCombat) this._authorityLost(ps, 'left');
-      this.markPublic();
+      this.markMembershipChanged();
       if (!this.order.some((p) => !p.isBot && !p.left)) {
         this.finish({ victory: false, reason: 'abandoned' });
         return;

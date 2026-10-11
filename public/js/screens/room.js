@@ -12,7 +12,7 @@
 // Texts go through t() (docs/I18N.md).
 
 import { useEffect, useRef, useState } from '../../vendor/hooks.module.js';
-import { DIFFICULTIES, DIFFICULTY_NAMES, DIFFICULTY_COLORS, MAX_SEATS, MAX_SPECTATORS } from '../../../shared/constants.js';
+import { DIFFICULTIES, DIFFICULTY_NAMES, DIFFICULTY_COLORS, MAX_SEATS, MIN_SEATS, MAX_SPECTATORS } from '../../../shared/constants.js';
 import {
   html, Button, Icon, MicroLabel, PingPill, AvatarFrame, DifficultyTag, DifficultyIcon, Tooltip, confirmDialog, doctorNo,
 } from '../ui/components.js';
@@ -25,7 +25,7 @@ import { LoadoutButton } from './loadout.js';
 import { SupportButton } from './support.js';
 import { net } from '../net.js';
 import { store, useStore, shallowEqual, emptyMatch, isSpectating } from '../store.js';
-import { difficultyInfo, LAYER_TEXT } from './lobby.js';
+import { difficultyInfo, LAYER_TEXT, serverSeatMaxOf } from './lobby.js';
 import { ChatPanel } from './chat.js';
 import * as roomMods from '../roomMods.js';
 import { roomModsOf, shortDigest } from '../roomMods.js';
@@ -33,12 +33,28 @@ import { loadCatalog, planAlignment, alignRoom, missingPackIds, storeFor } from 
 import { t, tc } from '../../../shared/i18n.js';
 
 /**
- * Seats padded to the room's capacity (co-op 4, solo 1), each null or a seat record.
+ * Upper bound on the seat cards the client will pad out from `room.state.seatCap`. The server owns the real cap
+ * (server/lobby.js LOBBY_DEFAULTS.maxSeats, 4 unless SP_MAX_SEATS raises it), so this is a SANITY CLAMP, not policy:
+ * without it a bogus/hostile `seatCap` (1e9) loops 10⁹ times and dies with `RangeError: Invalid array length`
+ * instead of drawing a room. Above it the extra seats are simply not drawn — they can hold nobody the client could
+ * address anyway.
+ */
+const MAX_RENDERED_SEATS = 256;
+
+/**
+ * Seats padded to the room's capacity (co-op 4, solo 1, or the room's own `seatCap`), each null or a seat record.
+ *
+ * 座位容量 (100 人版移植, docs/PS100-MIGRATION.md §7): the cap comes from the ROOM (`room.state.seatCap`, sent only
+ * when it differs from `MAX_SEATS`), never from a constant here — `seats` alone cannot tell "4 seats" from "100 seats
+ * with 96 empty". An absent/unusable value keeps `MAX_SEATS`, and anything above MAX_RENDERED_SEATS is clamped, so a
+ * 4-seat room renders exactly the four cards it always did and a garbage cap cannot hang the tab.
  * @param {any} room room.state payload
  * @returns {(null | {seat:number, playerId:any, name:string, isBot:boolean, ready:boolean, connected:boolean})[]}
  */
 export function normalizeSeats(room) {
-  const cap = room?.mode === 'solo' ? 1 : MAX_SEATS;
+  const declared = room?.seatCap;
+  const cap = room?.mode === 'solo' ? 1
+    : (Number.isInteger(declared) && declared >= 1 ? Math.min(declared, MAX_RENDERED_SEATS) : MAX_SEATS);
   const src = Array.isArray(room?.seats) ? room.seats : [];
   const out = [];
   for (let i = 0; i < cap; i++) {
@@ -103,6 +119,77 @@ export function inviteLink(code) {
  * @returns {Promise<boolean>}
  */
 export { copyText };
+
+/**
+ * 本房座位上限 (业主裁决 B5, docs/META.md §1.9) — the host's slider range for the room it is ALREADY in.
+ *
+ * `null` means "there is nothing to choose here, do not draw a slider at all": a solo room (its one-seat shape has no
+ * cap to pick) and a room whose occupants already fill every legal seat (a slider with one stop is a dead control).
+ *
+ * The bounds are the SERVER's rules, mirrored so the host cannot drag into a refusal:
+ *   * `max` = this server's ceiling (`welcome.maxSeats`, read through `serverSeatMaxOf`; `MAX_SEATS` 4 when the
+ *     deployment said nothing), never below the room's current cap — a slider that cannot even show the current value
+ *     would be lying about the room.
+ *   * `min` = `max(MIN_SEATS, highest occupied seat + 1)`. That is exactly the server's eviction guard
+ *     (`Lobby.setSeatCap` refuses `cap <= highest`), expressed on the frame the client actually holds, so every stop
+ *     the host can reach is one the server accepts. It counts the HIGHEST OCCUPIED SEAT rather than the number of
+ *     people, because seats may have holes (the creator leaving for good empties seat 0 while seat 2 stays taken) and
+ *     a count would let the slider offer a cap that drops somebody at index 2.
+ *
+ * @param {any} room room.state payload
+ * @param {number} serverMax the ceiling `welcome.maxSeats` announced (absent / unusable ⇒ MAX_SEATS)
+ * @returns {{ min: number, max: number, value: number } | null}
+ */
+export function seatCapRoomRange(room, serverMax) {
+  if (!room || room.mode === 'solo') return null;
+  const seats = normalizeSeats(room);
+  const cap = seats.length;
+  const ceiling = Number.isInteger(serverMax) && serverMax >= 1 ? serverMax : MAX_SEATS;
+  const max = Math.max(ceiling, cap);
+  const highest = seats.reduce((m, s, i) => (s ? i : m), -1);
+  const min = Math.min(Math.max(MIN_SEATS, highest + 1), max);
+  if (max <= min) return null;
+  return { min, max, value: Math.min(Math.max(cap, min), max) };
+}
+
+/**
+ * The host's seat-count control INSIDE the room (`room.setSeatCap`, 业主裁决 B5). Rendered for the host only: for
+ * everybody else the room already says how many seats it has through its seat cards, and `room.state.seatCap` is what
+ * pads them (`normalizeSeats`).
+ *
+ * The server answers a refusal with a NAMED code (`SEAT_CAP_TOO_SMALL` when the new cap cannot hold the people already
+ * here, `BAD_MSG` when the number itself is not a legal seat count), and `run` toasts it — the slider never silently
+ * becomes a different number than the host asked for. `asked` keeps that request on screen until the room's own frame
+ * agrees (or the request fails), so a slow round trip does not snap the control back under the host's finger.
+ * @param {{ room: any, isHost: boolean, onPick: (n: number) => Promise<boolean> }} props
+ */
+function SeatCapSetter({ room, isHost, onPick }) {
+  const range = isHost ? seatCapRoomRange(room, serverSeatMaxOf()) : null;
+  const [asked, setAsked] = useState(null);
+  useEffect(() => {
+    if (asked != null && room && room.seatCap === asked) setAsked(null);
+  }, [asked, room]);
+  if (!range) return null;
+  const shown = asked != null && asked >= range.min && asked <= range.max ? asked : range.value;
+  const pct = Math.round(((shown - range.min) / (range.max - range.min)) * 100);
+  const commit = async (v) => {
+    const want = Math.min(Math.max(v, range.min), range.max);
+    if (want === range.value) { setAsked(null); return; }
+    setAsked(want);
+    if (!(await onPick(want))) setAsked(null);   // the frame (or the refusal) is the truth again
+  };
+  return html`<div class="seat-cap seat-cap--room">
+    <${MicroLabel} tone="mint">SEATS<//>
+    <span class="seat-cap__name">${t('本房间人数上限')}</span>
+    <input class="seat-cap__slider" type="range" min=${range.min} max=${range.max} step="1" value=${shown}
+      style=${`--pct:${pct}%`} aria-label=${t('本房间人数上限')}
+      aria-valuemin=${range.min} aria-valuemax=${range.max} aria-valuenow=${shown}
+      title=${t('不能小于同盟内现有人数（含 AI 队友）')}
+      onInput=${(e) => setAsked(Number(e.currentTarget.value))}
+      onChange=${(e) => commit(Number(e.currentTarget.value))} />
+    <span class="seat-cap__value num">${shown}<span class="t-dim"> / ${range.max}</span></span>
+  </div>`;
+}
 
 function SeatCard({ seat, index, room, facts, myId, busy, onAddBot, onRemoveBot, onKick }) {
   const coop = room.mode !== 'solo';
@@ -337,12 +424,14 @@ export function RoomScreen() {
   const myReady = !!facts.mine?.ready;
   const info = difficultyInfo(room.mode, room.difficulty);
 
+  // Returns whether the request actually went through: the seat-cap slider uses that to decide whether to keep showing
+  // what the host asked for or to fall back to the room's own frame. Every existing caller ignores the value.
   const run = async (kind, fn) => {
-    if (inFlight.current) return;
-    if (!online) { toast(t('连接中断，请稍候重试'), 'warn'); return; }
+    if (inFlight.current) return false;
+    if (!online) { toast(t('连接中断，请稍候重试'), 'warn'); return false; }
     inFlight.current = true;
     setBusy(kind);
-    try { await fn(); } catch (err) { toastError(err); } finally {
+    try { await fn(); return true; } catch (err) { toastError(err); return false; } finally {
       inFlight.current = false;
       if (alive.current) setBusy(null);
     }
@@ -361,6 +450,9 @@ export function RoomScreen() {
   };
   const setDifficulty = (difficulty) => run('diff', () => net.request('room.setDifficulty', { difficulty }));
   const setAiLast = (on) => run('ailast', () => net.request('room.setAiPicksLast', { on }));
+  // 本房座位上限 (业主裁决 B5): the `code` goes along so the request can only ever address THIS room — a tab acting on a
+  // stale frame gets NOT_IN_ROOM instead of resizing whatever room it happens to be in now.
+  const setSeatCap = (seatCap) => run('seatcap', () => net.request('room.setSeatCap', { code: room.code, seatCap }));
   // spectator seats: the host frees one; a spectator takes a free player seat with room.join of this room
   const removeSpectator = (playerId) => run(`rs${playerId}`, () => net.request('room.removeSpectator', { playerId }));
   const sit = () => run('sit', () => net.request('room.join', roomMods.buildJoinPayload(room.code)));
@@ -422,7 +514,7 @@ export function RoomScreen() {
       </div>
     </header>
 
-    <main class=${`seats${coop ? '' : ' seats--solo'}`}>
+    <main class=${`seats${coop ? '' : ' seats--solo'}${coop && facts.seats.length > MAX_SEATS ? ' seats--dense' : ''}${coop && facts.seats.length > MAX_SEATS && facts.occupied.length <= MAX_SEATS ? ' seats--compact' : ''}`}>
       ${facts.seats.map((s, i) => html`<${SeatCard} key=${s ? `p${s.playerId}` : `e${i}`} seat=${s} index=${i} room=${room} facts=${facts}
         myId=${me.playerId} busy=${busy} onAddBot=${addBot} onRemoveBot=${removeBot} onKick=${kick} />`)}
       ${coop ? null : html`<aside class="solo-brief brackets">
@@ -446,6 +538,7 @@ export function RoomScreen() {
         <div class="room-bar__opts">
           <${DifficultyPicker} room=${room} isHost=${facts.isHost} busy=${busy} onPick=${setDifficulty} />
           <${AiLastToggle} option=${aiLastOption(room, me.playerId)} busy=${busy} onToggle=${setAiLast} />
+          <${SeatCapSetter} room=${room} isHost=${facts.isHost} onPick=${setSeatCap} />
         </div>
       </div>
       <div class="room-bar__center">

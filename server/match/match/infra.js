@@ -65,6 +65,44 @@ export class MatchInfra {
    */
   get soloUntimed() { return this.isSolo || this.loneHuman; }
 
+  /**
+   * Is there a seat whose Ready can actually be waited for? A bot readies itself, so it never gates the prep; a
+   * departed or disconnected (AI 托管) human is driven like a bot. Only a connected human really has to press Ready.
+   *
+   * This is the guard against the prep deadlock (百卫补丁 v0.3, docs/PS100-MIGRATION.md §5): `maybeEndPrep` ends
+   * the prep as soon as every alive seat is ready (prep.js `allReady`), so a room that has a human able to Ready MUST
+   * arm a deadline — with none, that human's silence stalls the match forever. The shape that fired in practice is
+   * 「1 个真人 + N 个 AI」 (a 同盟 room started alone / with AI teammates only), which is exactly the room where
+   * `soloUntimed` is true while the run is NOT solo.
+   *
+   * @returns {boolean}
+   */
+  get hasReadyableHuman() {
+    for (const p of this.order) if (!p.isBot && p.alive && !p.left) return true;
+    return false;
+  }
+
+  /**
+   * Does the PREP phase of this match have to be timed? It is UNTIMED when the run is solo (nobody waits on
+   * anybody and there is no Ready gate to stall on) or when no seat can press Ready at all (an all-AI room). A co-op
+   * room with a seat that can — see `hasReadyableHuman` — is timed.
+   *
+   * This is the predicate behind the prep deadline (docs/PS100-MIGRATION.md §5); `MatchPrep.enterPrep` and the
+   * `attachAudit` prep check read the same rule, and the round's own `prepTime` still decides whether that deadline
+   * exists at all (a round the data leaves untimed must stay untimed — its zero-delay ordering is load-bearing).
+   * Everything ELSE `soloUntimed` governs: INFO_CHECK, BAND_DRAFT, SP_DRAFT and the silent presentation steps.
+   */
+  get prepUntimed() { return this.isSolo || !this.hasReadyableHuman; }
+
+  /**
+   * Is this THE lone-human co-op room — the only shape whose prep could stall? `soloUntimed` true (so no timer was
+   * ever armed) while the run is not solo, i.e. exactly the 「1 个真人 + N 个 AI」 同盟 room. Only such a match may
+   * fall back to the official `timers.infoCheck` guard when its round declares no prep timer; every other match keeps
+   * the data's own 0 / timer decision byte-for-byte (a room the data leaves untimed stays untimed, which is what
+   * `verification-slices.test.js` pins at `timerScale: 0`).
+   */
+  get prepFallbackGuard() { return !this.isSolo && this.loneHuman; }
+
   nextUid() { return ++this.uidSeq; }
 
   alivePlayers() { return this.order.filter((p) => p.alive); }

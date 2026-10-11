@@ -310,9 +310,10 @@ node tools/workshop-validate.mjs workshop     # items 层：重算 params/mergea
 ## kit（行为层）编辑器
 
 第六个页面：**`/kit.html`**（`shared/kitAuthoring.js`）。这是唯一一页**编辑代码**的编辑器，因为 kit 是唯一一种
-**本身就是代码**的内容：`workshop/<pack>/kits/<chessId>.js` 既是可编辑的源、也是游戏加载的产物，没有「spec → 产物」
-这一对，也就没有可推导的字段。所以中间那一栏是一个 `<textarea>`，装的就是**整份文件**（连文件名里的干员 id 也
-由你定）—— 代码要高亮才看得懂的话，那是编辑器的口味；这里刻意不做高亮、不引依赖、不加构建步骤。
+**本身就是代码**的内容：`workshop/<pack>/kits/<id>.js` 既是可编辑的源、也是游戏加载的产物，没有「spec → 产物」
+这一对，也就没有可推导的字段。所以中间那一栏是一个 `<textarea>`，装的就是**整份文件**（文件名里的那个 id
+也由你定 —— 它是干员 id 或召唤物的 token id，见下面的「文件名就是一个键」和 `docs/WORKSHOP.md` §4.7）——
+代码要高亮才看得懂的话，那是编辑器的口味；这里刻意不做高亮、不引依赖、不加构建步骤。
 
 **要写第一份 kit 就从 [docs/prompts/kit.md](prompts/kit.md) 开始**：它把 Kit 形状、四条硬规则、32 个钩子与
 `battle`/`unit` 常用接口写在一处，并带一个**被测试真的跑过**的完整示例 —— 那份示例既是范本，也是这一页静态校验的
@@ -323,11 +324,18 @@ node tools/workshop-validate.mjs workshop     # items 层：重算 params/mergea
   这个包**合法的 kit id**（点一下就填进文件名），以及三条硬规则的速查与 [docs/prompts/README.md](prompts/README.md) 的链接。
   那个链接指向本仓库的文档，编辑器为此提供一条**只读**通路 `/docs/**.md`：只服务 markdown，`..` 与点开头的段一律拒绝
   （所以 `docs/examples/kit-demo/kits/*.js` 读不到，它也不改变 `/data/**`、`/client/**` 那几条通路的范围）。
-- **文件名就是干员 id**：`kits/chess_ws_xxx_a.js`。加载器（`server/workshop.js loadWorkshopKits()`）只接受
-  **本包真的提供了这个干员 id**（`<pack>/chess.json` 里有），或者你在 `pack.json` 的 `overrides` 里声明了
-  `chess:<id>`（那是「替换官方干员的 kit」，属于声明过的行为）。两者都不满足就是 `KIT_NO_TARGET`：kit 永远不会被使用。
-- **kit 所在的包必须贡献至少一个数据文件**（例如 `chess`）。空包不会被 `loadWorkshop` 列为已加载的包，它的 kit 自然
-  也不会被导入 —— 保存时页面会给一条 `PACK_NOT_LOADED` 警告，因为文件看上去完全正常，失败是无声的。
+- **文件名就是一个键**：`kits/chess_ws_xxx_a.js`。加载器（`server/workshop.js loadWorkshopKits()`）只接受
+  **本包真的拥有这个 id**，四条里满足一条即可：本包 `<pack>/chess.json` 里有一条**这个 id** 的记录；
+  本包 `pack.json` 的 `operators` 里**声明了这个 charId**（自选池干员的 kit 就是按 charId 查的）；
+  本包 `<pack>/tokens.json` 里有**这个 token id**（召唤物的行为层，`docs/WORKSHOP.md` §4.7）；
+  或者你在 `pack.json` 的 `overrides` 里声明了它（`"chess:<id>"` / `"tokens:<id>"` —— 那是「替换官方的 kit」，
+  属于声明过的行为）。四条都不满足就是 `KIT_NO_TARGET`：kit 永远不会被使用。
+  右栏「合法的 kit id」那组按钮按**本包**的这四条算出来（含 operators 的键与 tokens.json 的 token id）。
+  一个 id 若**同时**是干员与召唤物（合并后的两张表都有它），那是一个**歧义**：`KIT_TARGET_AMBIGUOUS`，
+  干员那一半会赢、召唤物那一半会静默失效，所以两边都不放行。
+- **kit 所在的包必须贡献至少一个数据文件**（例如 `chess`、`tokens`），或声明至少一个自选池干员（`pack.json`
+  的 `operators`）。空包不会被 `loadWorkshop` 列为已加载的包，它的 kit 自然也不会被导入 —— 保存时页面会给一条
+  `PACK_NOT_LOADED` 警告，因为文件看上去完全正常，失败是无声的。
 
 三条硬规则（都来自引擎源码，都会**静默失败**，所以静态校验逐条检查）：
 

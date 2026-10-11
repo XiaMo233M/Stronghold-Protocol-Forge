@@ -423,7 +423,10 @@ describe('干员包: 两张扁平图标表（art.skills / art.profSub）', () =>
     assert.deepEqual(Object.keys(data.assets.prof).sort(), ['sub'], 'prof 的其它键不被碰');
     assert.equal(base.assets.skills.skchr_ws_1, undefined, 'the input is never mutated');
     assert.deepEqual(report.flatArt, { p1: ['profSub.primguard', 'skills.skchr_ws_1'] });
-    assert.match(workshopSummary(report), /2 icons/);
+    // 启动日志按**表名**分列（`skills +N (…)` / `profSub +N (…)`）—— 四张扁平表各占一句，不再糊成一句 "N icons"：
+    // 盟约图集（art.bonds）不是图标，混在一起会让读日志的人去 assets.skills 里找一个盟约 id
+    assert.match(workshopSummary(report), /skills \+1 \(skills\.skchr_ws_1\)/);
+    assert.match(workshopSummary(report), /profSub \+1 \(profSub\.primguard\)/);
   });
 
   test('官方已有这个 id 时是替换（给官方技能/分支换图标），不是拒绝', () => {
@@ -576,7 +579,9 @@ describe('干员包: 端到端（社区 mod「克莱门莎」当夹具）', () =
     const summary = workshopSummary(report);
     assert.match(summary, /units \+1/);
     assert.match(summary, /自选池 \+1/);
-    assert.match(summary, /4 icons/);
+    // 每一张扁平表各一句（以前是一句 "4 icons"）；表名就是作者在 pack.json 里写的那个键
+    assert.match(summary, /skills \+3 \(skills\.skchr_clemnt_1, skills\.skchr_clemnt_2, skills\.skchr_clemnt_3\)/);
+    assert.match(summary, /profSub \+1 \(profSub\.primguard\)/);
     assert.match(summary, /voice lines/);
   });
 

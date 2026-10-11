@@ -48,11 +48,103 @@ export function githubProxyUrl(url, prefix = DEFAULT_GITHUB_PROXY) {
   return normalized + url;
 }
 
-/** Ordered transport alternatives; direct mode retains the existing jsDelivr order. */
-export function downloadUrls(url, { source = 'direct', proxyPrefix = DEFAULT_GITHUB_PROXY } = {}) {
+/**
+ * Ordered transport alternatives; direct mode retains the existing jsDelivr order.
+ * `assetBase` (an override base, '' = today's behaviour) rewrites the raw.githubusercontent.com candidates onto that
+ * base; the jsDelivr fallback is left as it is (it is not a raw URL, and a CDN override implies the operator wants that
+ * host, not jsDelivr). Duplicates are removed, so a base that equals the default source collapses to one URL.
+ * @param {string} url
+ * @param {{source?:'direct'|'mirror', proxyPrefix?:string, assetBase?:string}} [opts]
+ */
+export function downloadUrls(url, { source = 'direct', proxyPrefix = DEFAULT_GITHUB_PROXY, assetBase = '' } = {}) {
   url = githubSourceUrl(url);
   const proxy = source === 'mirror' ? githubProxyUrl(url, proxyPrefix) : null;
-  return [...new Set([proxy, url, mirrorUrl(url)].filter(Boolean))];
+  return [...new Set([proxy, url, mirrorUrl(url)].filter(Boolean))].map((u) => withAssetBase(u, assetBase));
+}
+
+/** Hosts whose plain HTTP is a local test source, not an untrusted network hop. */
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1', '0.0.0.0']);
+
+/**
+ * Is this base URL an untrusted source? Anything that is not HTTPS and does not point at loopback: a plaintext mirror
+ * on the network, where a man in the middle can replace what lands in public/assets. Such a base is allowed for
+ * downloading, but it must not be combined with a flag that SHRINKS the committed manifest (--prune / --allow-shrink):
+ * untrusted bytes are one thing, a manifest missing the entries only another install has is a lasting one.
+ * @param {string|undefined|null} base normalized base ('' = no override, which is trusted)
+ * @returns {boolean}
+ */
+export function baseIsUntrusted(base) {
+  if (!base) return false;
+  try {
+    const url = new URL(base);
+    return url.protocol !== 'https:' && !LOOPBACK_HOSTS.has(url.hostname);
+  } catch { return true; }
+}
+
+/**
+ * The console warnings of a base URL override: a plaintext one on a real network host says what that means. Loopback
+ * over HTTP is a local test source and warns about nothing.
+ * @param {string} base normalized base ('' = nothing)
+ * @param {string} flag `--asset-base` / `--index-base`
+ * @returns {string[]} lines to print, empty when there is nothing to say
+ */
+export function baseWarnings(base, flag = '--asset-base') {
+  if (!base) return [];
+  try {
+    if (new URL(base).protocol === 'https:') return [];
+  } catch { return []; }
+  if (LOOPBACK_HOSTS.has(new URL(base).hostname)) return [];
+  return [
+    `[network] 警告：${flag} ${base} 使用明文 HTTP：下载内容可被中间人替换，` +
+    '而它会被写进 public/assets/ 并进 data/assets.json。非可信源不允许与 --prune / --allow-shrink 组合。',
+  ];
+}
+
+/**
+ * Validate a user-supplied base URL override (`--asset-base` / `--index-base`, `SP_ASSET_BASE` / `SP_INDEX_BASE`).
+ * Malformed input is refused by name: a typo must never silently fall back to the default source (the run would then
+ * quietly download from GitHub while the operator believes it is reading a CDN). `undefined`/`null`/empty means "no
+ * override" and returns `''`.
+ *
+ * HTTPS and HTTP are both accepted (a LAN mirror is often plain HTTP — see `baseWarnings` for what a non-loopback
+ * HTTP base prints, and `baseIsUntrusted` for the one combination that is refused); credentials, a query and a
+ * fragment are not.
+ * @param {string|undefined|null} value
+ * @param {string} flag the flag/env var to name in the error (e.g. `--asset-base`)
+ * @returns {string} normalized base ending with '/', or '' when unset
+ */
+export function normalizeAssetBase(value, flag = '--asset-base') {
+  if (value === undefined || value === null) return '';
+  const raw = String(value).trim();
+  if (raw === '') return '';
+  let url;
+  try { url = new URL(raw); } catch { throw new Error(`invalid ${flag} URL: ${raw} (an absolute URL, e.g. https://cdn.example.com/)`); }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new Error(`invalid ${flag} URL: ${raw} (must be http or https)`);
+  }
+  if (url.username || url.password) throw new Error(`invalid ${flag} URL: ${raw} (no credentials)`);
+  if (url.search || url.hash) throw new Error(`invalid ${flag} URL: ${raw} (no query or fragment)`);
+  return url.href.endsWith('/') ? url.href : url.href + '/';
+}
+
+/**
+ * A public GitHub download URL is rewritten onto the override base by replacing
+ * `raw.githubusercontent.com/` and keeping the repository path: the override mirrors the
+ * `https://raw.githubusercontent.com/<owner>/<repo>/<branch>/<path>` layout, so
+ * `--asset-base=https://cdn.example.com/` turns that URL into
+ * `https://cdn.example.com/<owner>/<repo>/<branch>/<path>`. Anything else (a jsDelivr mirror, a proxy URL, a data: URL,
+ * a Spine page URL under some other host) is returned unchanged, and a URL that already starts with the base is not
+ * prefixed twice.
+ * @param {string} url
+ * @param {string} base normalized override base ('' = no override)
+ * @returns {string}
+ */
+export function withAssetBase(url, base) {
+  if (!base) return url;
+  const s = String(url);
+  if (s.startsWith(base)) return s;
+  const marker = 'https://raw.githubusercontent.com/';
+  return s.startsWith(marker) ? base + s.slice(marker.length) : s;
 }
 
 /** Raw base URLs (always end with '/'). */

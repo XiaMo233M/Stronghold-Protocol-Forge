@@ -24,7 +24,7 @@ The owner's ruling of 2026-10-09 fixes three layers:
 | layer | what it is | who executes it | when it may change a battle result |
 |---|---|---|---|
 | **A** content | declarative data, no code: the workshop pack of today (`shared/workshop.js:972` `applyWorkshop`) | nobody — it is merged into the data every consumer reads (`server/data.js:92`) | always, and never detectably by the golden corpus (the corpus is generated from the official `data/*.json`, `test/golden/README.md:8-10`) |
-| **B** server logic | hooks and kits: the code of `workshop/<pack>/kits/<chessId>.js` (`server/workshop.js:350` `loadWorkshopKits`) | **the server only** — this is new | only through the hooks it registers, and only after a declared intent passes deterministic verification |
+| **B** server logic | hooks and kits: the code of `workshop/<pack>/kits/<id>.js` (`server/workshop.js:350` `loadWorkshopKits`) — one file-name rule over **two key spaces**, operator and summon (§28.12.1) | **the server only** — this is new | only through the hooks it registers, and only after a declared intent passes deterministic verification |
 | **C** client UI | rendering, themes, panels | the player's tab | never |
 
 Two sentences in the repository already fix the constraints this design must satisfy at once, and they are currently
@@ -66,18 +66,50 @@ artifact kind, `combat` is the declared intent ("this pack can change a battle r
 **digest** of its sorted list: `sha256` of the canonical JSON of `[{id, hash}, …]` sorted by `id`. That single string is
 what `welcome`, `/healthz`, the BattleSpec and a bug report all quote, so four different places cannot disagree.
 
-**What participates in the hash.** Not "the directory": a manifest of `(relative path, byte length, sha256)` pairs,
-sorted by path, over exactly the bytes the loader reads and the browser will be served:
+**What participates in the hash.** Not "the directory": a manifest of `(relative path, sha256)` pairs, sorted by path,
+over exactly the bytes the loader reads and the browser will be served:
 
 1. `pack.json` — hashed **after** `normalizePackManifest` (`shared/workshop.js:303`), so the hash covers the pack's
    effective declaration (normalized `overrides`, `content`, icon tables, `art`, `support`, `voices`), not its
    whitespace. Two spellings of the same pack then hash the same, and a declaration the loader silently dropped
    (`shared/workshop.js:315-317` filters a malformed `overrides` entry in silence today) cannot hide behind the hash.
 2. every declared content file, after `normalizeContentFile` — the same normalized records the loader merges.
-3. every `kits/*.js` **source text, byte for byte** (the module the server imports and the browser fetches by URL,
-   `server/workshop.js:309`, `public/js/battle/runner.js:136`).
-4. every file under `<pack>/assets/**` — the media the `/workshop-assets` route serves
-   (`server/http/workshop.js:112-142`).
+3. **every other regular file under the pack directory** — its bytes, byte for byte. That is `kits/**`, `assets/**`, the
+   declared panel modules and stylesheets, the `server.meta` / `battle` / `room` / `modules[*].entry` modules, the i18n
+   and notice files and the root-level files — and, the reason this rule exists at all, the files **nothing declares**
+   that one of those declared modules `import`s or reads at runtime (`server/rules.mjs`, `data/rules.mjs`,
+   `client/helper.js`, `kits/lib/util.js`).
+
+**The one enumerator, and why there is exactly one** (业主裁决 B, 2026-10-11). "Which files does this pack have" is one
+function, `server/packFiles.js listPackFiles` (`:42`): recursive, sorted by path, symlinks neither followed nor listed,
+`[]` when the directory is not there. `identifyPack` (`server/workshop.js:825`) builds the manifest from it, and
+`server/modCatalog.js catalogFiles` (`:174`) refuses to publish a row the same call does not return. **The list the pack
+hash is taken over IS the client's download list** (`GET /mods/catalog.json`, §28.9): one list, two consumers, so the two
+cannot drift. The failure B was decided to remove is not "the digest is a little off": a file that a declared module
+imports and that neither list names is a file a clean client never downloads — the pack runs on the server and cannot
+even resolve its imports in the browser.
+
+**Exclusions: none, and that is deliberate.** No name, no extension and no directory is exempted — not `README.md`, not
+`test/**`, not `*.bak`, not a dotfile. A declared module may `import` a sibling, read a data file or load a template at
+runtime, and Node resolves those paths natively, so "which files will this pack execute or read" has no decidable answer
+short of the whole directory; any exemption re-opens exactly the hole above. Two consequences the author owns: a stray
+file in the pack folder **is** part of the pack (it moves the hash and it is offered for download), and a pack folder
+should not carry editor backups, build output or version-control metadata. What stays out is only what is not in the pack
+directory: the workshop root's own files, and anything a `..` would reach (the route's two refusals,
+`server/http/mods.js`). **Symlinks are neither followed nor listed**, i.e. a link inside the pack is not part of it: a
+link may point outside the pack directory, and this route resolves a path by string (`modFileAbs`), so following one would
+turn the download list into a reader for the game's own tree. The loader itself *does* follow a symlinked declared module
+(`fs.statSync`), so a pack must not ship one — that mismatch is deliberate and errs toward not serving bytes from outside
+the pack.
+
+**The one row that is not a file.** A pack that declares `assets` (§28.13.5) contributes the container's sha256 under the
+reserved path `assets.container.sha256` (`server/packFiles.js ASSETS_DIGEST_PATH` `:28`). It has no bytes on disk, so
+`listPackFiles` cannot return it and `catalogFiles` derives it from the container's own row instead of copying it — and
+publishes it, with the digest text (64 bytes, `server/packFiles.js containerDigestBytes` `:77`) served by
+`GET /mods/file/<pack>/assets.container.sha256` (`server/http/mods.js:116`). So a client can rebuild an asset pack's
+hash too. Before this, `catalogFiles` dropped that row (its file read failed), so `catalogPackHash(files)` never equalled
+`hash` for an asset pack and such a pack could never be proven held: the row is the difference between "the download list
+is complete" and "the download list looks complete".
 
 What deliberately does **not** participate: the mtime "version" that currently versions kit URLs
 (`server/workshop.js:394` — a version credential that is not a content hash, and the reason `docs/WORKSHOP.md:447`
@@ -741,6 +773,109 @@ itself is the browser's job; `test/ui/kitimports.e2e.test.js` is the opt-in chec
 asserts the export-name floor, and asserts a specifier outside the whitelist does not resolve there either), and until
 someone runs it on a machine with Chrome this remains the standing gap recorded in `docs/WORKSHOP.md` §4.4.
 
+### 28.12.1 The second key space: a kit may target an OPERATOR or a SUMMON (2026-10-11)
+
+**The defect, stated as the code states it.** §28.12 closed the kit *import* surface. The kit **key** surface was still
+one-sided: `server/sim/content/index.js setupUnitKit()` resolves an operator's kit through `kitOf()` (keyed by
+`def.charId` for a 补位 / 自选 piece, else `def.baseId` / `def.id`), and a **summon's** kit through a second, entirely
+separate table — `tokens.kits?.[def.id]` (`tokens.js:1620` builds it from `RAW_KITS`, one entry per official token).
+That table is the engine's: a pack can ship `tokens.json` records, but it cannot put behaviour behind them. The
+consequence is the worst kind — a pack's summon has data and no behaviour layer, and **nothing reports it**.
+
+**The id is stable, and that is why this is possible.** `simdata.js normalizeToken(id, …)` writes `id` and `baseId`
+verbatim from the token record id, `setupUnitKit` looks the kit up by exactly that `def.id`, and `spawnToken` takes the
+token record id as its own key. So `kits/<tokenId>.js` names the same thing the engine looks up — no invented key, no
+per-owner variant, no spawn counter. (This was checked before anything was built: had the key been derived per owner or
+per spawn, the honest answer would have been to stop and report, because a channel that silently fails is worse than a
+missing one.)
+
+**The design: one file-name rule, two independently arbitrated spaces.** A pack kit is still `<packDir>/kits/<id>.js`
+and still a top-level `.js` whose basename does not start with `_` (§28.18) — no new suffix, no subdirectory, no second
+loader rule to keep in sync. What changed is that the id is judged in **two** spaces:
+
+| space | how the engine resolves it | which targets the pack owns |
+|---|---|---|
+| **operator** | `kitOf()`: `def.charId` (补位 / 自选) → else `def.baseId` / `def.id` / the suffix-less id | its own `chess.json` records; the charIds it declares into the 自选 pool (`pack.json.operators` — `isDiyDef` + `kitOf` key a DIY piece by exactly that charId); a declared `"chess:<id>"` |
+| **summon** | `setupUnitKit()`'s token branch: `tokens.kits[def.id]` | its own `tokens.json` records; a declared `"tokens:<id>"` |
+
+**The space is DECIDED, never guessed — and an id in both is refused.** `data/tokens.json` really does carry `char_…`
+ids (the two band map characters `char_605_cmedic` / `char_613_acmedc`), so a name-prefix rule would be a heuristic that
+is wrong on the repository's own data. `loadWorkshopKits` therefore decides by table lookup — the pack's own records
+first, then the two merged tables the caller hands over (`knownIds`, `knownTokenIds`), then the declared override — and
+an id present in BOTH is refused by name (`KIT_TARGET_AMBIGUOUS`): the operator half would win the engine's lookup and
+the summon half would be a kit **nothing ever runs and nothing reports**, which is the failure class this layer exists
+to eliminate. The same rule is reproduced in `shared/kitAuthoring.js` (`ambiguousIds`), so the editor, the validator and
+the loader reach one verdict.
+
+**Independent arbitration, both halves.** Each space owns its own registry, its own holder map and its own refusal, so an
+operator kit and a summon kit of the same name never hide each other; the collision rule is unchanged (§28.3: the
+smaller pack id wins, the loser is named) and is applied **once per space**. Both spaces travel to the browser in the
+**same** `spec.workshopKits` list, with a summon module marked `kind: 'token'` and an operator module unchanged
+(absent marker ⇒ operator), so every existing reader of that list keeps its exact meaning. The server injects the two
+maps separately (`Battle opts.kits` / `opts.tokenKits`), each winning over its own built-in registry; `spec.js` only
+sets a key when the caller passed it, so a battle without packs receives neither and the golden corpus is untouched.
+
+**What the caller must pass, and why one table is not enough.** `server/index.js` now builds `knownIds` from the merged
+chess ids **plus every loaded pack's `pack.json.operators` keys** — a 自选 operator's kit is keyed by charId, so that
+charId is a real kit target with no chess record behind it — and `knownTokenIds` from the merged token ids, i.e. the
+official `data/tokens.json` plus every pack's `tokens.json`. A caller that passes only one table does **not** get a
+"dead kit" verdict for the other space: a single table cannot speak for the space it does not know, so that case falls
+back to the ownership rule (the pack's own records and its `overrides`). Passing neither reproduces the pre-existing
+behaviour exactly, which is what the older test fixtures rely on.
+
+**Rejected, and why.** (a) A separate module-list key in the spec instead of a `kind` marker — a second list to keep in
+sync with `loadWorkshopKits`' output for no gain, and one more field every spec consumer has to learn. (b) Making
+`tokenKits` a slice of one merged `opts.kits` map — cheaper for the resolver, but then a name collision between the two
+spaces is decided by whichever map was consulted, silently, which is exactly the failure `KIT_TARGET_AMBIGUOUS` refuses
+by name. (c) Emitting `tokenKits: {}` unconditionally — the `lobby.js` / `Match.js` / `combat.js` chain is written so a
+plain install never puts the key on `Battle opts` at all, and that property is what makes "no packs ⇒ byte-for-byte"
+checkable rather than merely claimed.
+
+**What is verified.** `test/workshopKits.test.js`: a pack that ships a token record loads `kits/<tokenId>.js` with the
+summon key space (`kitInfo.tokenKits[tokenId]` is a function, no error), a pack that declares only a chess record is
+still refused for that token id (`KIT_NO_TARGET` — the existing rule, not relaxed), an id in both spaces is refused by
+name, the collision rule is applied per space, `buildBattleSpec` carries `kind: 'token'` and the runner rebuilds both
+maps, and `setupUnitKit` prefers the injected summon kit while falling back to the built-in one when the key is absent.
+`test/kitAuthoring.test.js`: `ownCharIds` / `ownTokenIds` release, the same-named chess id keeps its old verdict, and
+an ambiguous id is refused. The token record id is asserted to equal the key the engine looks up, so the channel cannot
+rot into a silent no-op without a red test.
+
+**复算与真跑必须用同一份 kit 表 (2026-10-12).** The server assembles a Battle in two places, and §28.12.1's two key
+spaces have to reach **both**: `MatchCombat.newBattle` (server/match/match/combat.js — the battle the server really runs)
+takes `this.workshopKits` / `this.workshopTokenKits`, and `MatchClientCombat._specBattle` (server/match/match/
+clientCombat.js — the headless run, a takeover and **the `SP_VERIFY` re-computation** of a client's result) takes them
+too. Both read the same fields, which come from **one** source: `lobby.js` hands `roomAssets.forRoom(room.modSet)`
+(W-B, §28.16 — the room's declared packs are what this match runs) to `Match opts`, and `Match.js` stores them verbatim
+(`assets ? assets.kits : this.workshop.kits`). So the sentence is exact: the re-computation must use *that* map — the one
+the room's declared set was trimmed down to — not the process-wide one and not a fresh copy.
+
+**What the missing half did.** Until this was closed, `_specBattle` passed only `BattleClass` / `sharedBoss` / `logger` /
+`recordEvents` / `battleInstallers`, never `kits` / `tokenKits`. In a room with a kit-carrying pack, the client simulated
+with the pack's behaviour layer (it rebuilds both maps from `spec.workshopKits`, §28.12.1) while the server re-computed
+with the **built-in registry** — two different battles by construction. `_verifyResult` then compares result digests
+(`resultDigest`), so the mismatch surfaced as a false "client result differs from the server's simulation" (the honest
+player's real result replaced by the server's), and a genuinely wrong result could pass when both sides happened to agree
+on the digest. A channel that silently fails is exactly the failure class this layer exists to eliminate.
+
+**Why it is checkable rather than merely claimed.** The five keys this section grew (`kits`, `tokenKits`,
+`battleInstallers`, `bossHitLimit`) had been written out **twice** — once per path — which is exactly how the missing
+half happened. They now have **one** assembly, `battleOptsFromMatch` in `server/match/match/battleOpts.js`, and both
+paths call it (`combat.js` from `newBattle`, `clientCombat.js` from `specBattleOpts`); a sixth key has one place to go.
+The discipline is unchanged: each key is spread only when the match really has it, so on a plain install both fields are
+`null` and no key is set — `Battle opts` keeps exactly the shape it had before, the same discipline as `spec.js`,
+`lobby.js` and the old `combat.js`. An **empty** map (a `{}` handed in by a caller) is a no-op by the same reading as
+before: `setupUnitKit` consults `opts.kits` / `opts.tokenKits` only on a hit, so the battle is unchanged (the existing
+"no packs: no maps vs EMPTY maps produce identical results" test pins that).
+
+**What is verified.** `test/workshopKits.test.js` (复算与真跑, §28.12.1): with a kit-carrying pack,
+`_specBattle(f.spec)` carries the match's own map by **identity** (`battle.opts.kits === match.workshopKits`, and the
+pack's kit function itself), the same for `tokenKits`; on a no-pack install neither key appears and the `Battle opts` of
+two same-seed runs are field-for-field equal; and the real-run assembly (`newBattle`) versus the re-computation
+(`_specBattle`) agree on every battle input (seed, players, spawns, routes, flags, …) and on the kit maps. Reverting the
+two spreads to empty objects turns two of those tests red. `test/battleOpts.test.js` pins the **single** assembly
+instead: the helper's own truth table (a key only when the match has it, an explicit per-battle option wins), and — on a
+real match driven to COMBAT — that both paths' `Battle opts` are field-for-field equal and are what the helper returned.
+
 ### 28.13 The four capability declarations: `assets`, `client`, `server.preDispatch`, `routes` + the top-level key closure and `i18n` (A 段 + B1 段 + B2 段 + B3a 段 + B4 段 + B5 段)
 
 **The gap, stated by its own verdict.** A third-party mod ("full resource pack: import, verify, server admission") was
@@ -1210,9 +1345,31 @@ like `kits/`, panel modules and meta modules.
   `/healthz`. `matchClass` wraps the class the *Lobby* hands to every match. So unlike `server.meta`, a room's declared
   set does not select them — a server-module pack is a property of the installation, which is what the three real
   modules are.
-- **No network hook, and no arbitrary mount points.** The ruling's third requirement (declarative lifecycle mounts)
-  is met with four named places; anything else a server-side mod wants today still has to be an engine feature. That is
-  a deliberate limit of the first cut, not an oversight: four mounts were what the three files actually needed.
+- **One network hook, and no arbitrary mount points.** Exactly one of the four mounts is driven by traffic: the
+  `matchClass` wrapper's `handlePackMsg` (below), the owner's ruling of 2026-10-10. Anything else a server-side mod
+  wants still has to be an engine feature — the other three are the lifecycle events the three real files actually
+  needed, and a fifth mount point is still not something a pack can name.
+
+**The one trigger: `handlePackMsg(playerId, msg)` on the `matchClass` subclass.** `pack.msg` is handled by the Lobby
+(`Lobby.packMsg`): it validates the declaration, rate-limits the session and forwards to the room's seats and
+spectators. It never reaches `Match.handle` — `routeGame` only lets `g.*` through. So the Lobby calls the optional hook
+once per **accepted** message, **after the rate limit and before the fan-out**:
+
+- **What it may write: nothing new is granted and nothing new is forbidden.** The hook is ordinary code on a
+  `MatchClass` subclass, and such a subclass already holds the whole Match (economy, board, `emit`): A adds *when it is
+  called*, not *what it may touch*. A pack that declares `matchClass` already declares `combat: true`
+  (`MODULES_NEED_COMBAT`), which is exactly what the room digest and the golden corpus gate on — so A adds no
+  `pack.json` field, no second gate, and does not move `MOD_API_VERSION`.
+- **Replay: server-authoritative match state, never a battle golden.** `pack.msg` is not a type the deterministic
+  replay records (the seed-driven battle and `g.*` intents are), so whatever the hook writes into the match is not
+  replayed and is not part of `test/golden/*` — A moves no golden scenario.
+- **Failure has no transaction.** The call goes through `callMatch`, whose `try`/`catch` logs one line naming the
+  method (`[lobby] <room code> match.handlePackMsg threw`) and returns `undefined`. That `undefined` is read as **not
+  consumed**, so a throwing hook still leaves the fan-out byte-identical: one bad message cannot cut the channel.
+- **Return value.** `true` or `{ consumed: true }` means *consumed* — nothing is forwarded (the sender does not get the
+  echo either). `false`, `undefined`, any other value, or no such method at all means *not consumed* — forwarded
+  exactly as before. `playerId` may be a **spectator**: unlike `room.chat` (`ERR.SPECTATOR`), `pack.msg` has no
+  spectator criterion and this change does not add one, so a hook that cares must judge for itself.
 
 ### 28.15 `notices`: plain text as a declaration (implemented, server + declaration)
 
@@ -1782,4 +1939,171 @@ pack is refused. The two tests that pin the ctx key set (`test/modClientPanels.t
 
 Tests: `test/modClientPanels.test.js` — the ctx surface, the frozen-snapshot rule, and the three room states (not in a
 room / seated / spectating), plus "a later store change is visible through the same ctx".
+
+---
+
+### 28.28 工坊时装（§28.28）：一个开关，加「提供者先说话」
+
+`pack.json.skins`（表面 `skins`）是 A 层的一格，形状与 art 同形并复用同一个解析器（`SKIN_FIELDS`，
+`shared/workshop.js`；A 层只判形状，拒绝码全部点名）。**数据和引擎都不认识「皮肤」** —— 这一段说的正是
+§28.2 那条边界落地之后剩下来的那一件事：**一个包声明了一套外观，谁来回答「这位玩家现在要哪一套」**。
+
+**1. 声明与落点。** 包的声明归一化成 `pack.skins` 并**并进清单**：`assets.skins[<charId>] = [{ pack, id,
+name, series?, desc?, art?, voices? }, …]`（`mergeWorkshopSkins`）—— 按干员分组的一列，客户端要问的问题
+（「这个干员有哪几套」）就是那张表本身。两个包给同一干员的同一套 id 时按包 id 升序第一个赢并点名
+`SKIN_COLLISION`（与 `ASSETS_COLLISION` 同一条纪律）。`skins` 同时是贡献项：只带时装、`content: []` 的包合法。
+
+**2. 谁决定「哪一套生效」。** 不是引擎。引擎侧只有一个中间层接口，既有的**外观提供者**
+（`client.panels[].appearance(ctx)` → `{ lookup(kind, charId, id) }`，§28.8，`public/js/ui/extensions.js`）：
+一个进程最多一个，后注册者被拒；它返回**被问的那一条 kind** 的一张图（`{ portrait }` 或 `{ avatar }`；
+老写法「整套 `portrait` / `avatar` / `portraitE2` / `avatarE2`」在步骤 0 与步骤 4 都仍然能用 —— 链只取
+自己那一条 kind 的字段）或者 `null`。**引擎不知道那个 `id` 是一套时装、一个包名还是一串随机字符** ——
+它把不透明 id 连同**这条链的 kind** 交给提供者问一次。
+
+**2b. 立绘与头像分开受控。** `lookup` 的第一参数是这一条链的 `kind`（`'portrait'` / `'avatar'`），于是
+「立绘用时装那张、头像还是原版」是提供者可以回答的一件事，而不是链替它猜的。四条一起构成这条边界：
+
+1. **按 kind 问**：链里 `kind: 'avatar'` 的那一次只问 `avatar`，与立绘那一次互不影响（两处调用点各画各的）；
+2. **按 kind 取字段**：步骤 0 只认 `FIELDS[kind]` 那一个字段（立绘看 `portrait` / `portraitE2`，头像看
+   `avatar` / `avatarE2`）—— 提供者给另一条 kind 的字段**不算答案**，否则一份只有 `avatar` 图的时装会把
+   头像也画到立绘位上（就是业主实测撞到的那个错）；
+3. **按 kind 记**：链自己**不读、不写偏好**（那是「引擎不认识皮肤」的一部分）；「记」由提供者决定
+   （`skin-picker` 用 `skin:portrait:<charId>` / `skin:avatar:<charId>` 两格，旧键 `skin:<charId>` 仍作
+   两条 kind 的公共退路）。链负责的只有「按 kind 问」这一半；
+4. **调用方点名版本时提供者不参与**（见下面第 3 条的第 4 点与优先级）。
+
+**3. 「提供者先说话」（步骤 0）。** 解析链（`public/js/ui/portraitChain.js`）里，`_1`/`_2` 后缀那一步
+**之前**先问一次提供者：给 URL 就用它，给 `null` / 抛错 / 给一个没有可用字段的对象就**继续走原来的链**
+（吞异常与步骤 4 逐字相同：坏 mod 不外溢、画面照旧）。**优先级：调用方显式点名的变体 > 提供者的选择 >
+官方回落。** 四条同时成立这一步才存在：
+
+1. **开关**：玩家设置里的「工坊外观」（`settings.workshopSkins`，默认 `true`）。链的门控是模块级的一份
+   （`setAppearanceFirst`，唯一写入面是 `public/js/ui/settings.js`：启动时 + 每次变更的同一次订阅里），
+   **默认 `true` 且与设置默认同值**；`opts.skins === false` 是这一个调用点的否决（压过模块值）。
+2. **确实注册了提供者**（`appearanceLookup` 非空）—— 这就是「装了时装却什么都不发生」在今天的原因：
+   没有任何东西把「玩家选的那套」写进 `chess.assets.portrait`，而问这一步本身也不存在，于是注册好的
+   提供者是**死代码**。
+3. **有 `charId` 也有 `id`** —— 提供者按这两样归属一套外观。
+4. **调用方没有点名版本**（`explicitVariant`）。三种写法都算点名：`opts.variant === 'elite'`、`id` 以
+   `_1` / `_2` 结尾（`assetUrls.js` 逐字同一套语义：`_2` = 精锐、`_1` = 一阶）、`kind: 'portrait'` 且
+   `chess.isGolden`（详情页 / 商店卡的既有语义）。命中时提供者**一次都不被问到**，链先给这个干员的精锐
+   字段、没有精英字段就走官方回落 —— 「别人明确要精锐立绘」不该被一份只有一张图的时装盖掉。**头像不看
+   `isGolden`**（与步骤 5 同一条：精锐头像由调用方自己传变体），所以时装在头像那一条 kind 上照旧生效。
+
+问的是**模块级那一个**提供者，不是调用点的 `opts.lookup`：后者是渲染点上那一份引用，可能比注册晚，
+而失败形态是**静默回落原版**（同一个干员在两个画面上不一样，各自都对）。步骤 4 那个 `opts.lookup` 是
+**另一条口**（登记外观 id 的历史形状）：它仍以 `'chars'` 作第一参数被调用，与 `kind` 无关 —— 两个问题不同
+（「这个 id 是谁」对「这一条链现在画哪一张」），所以没有合并成一次调用。
+
+**4. 最硬的那条不变量：关掉时逐字相同。** 开关关掉时步骤 0 **整段不存在** —— 增删的只有一次「要不要问」的
+判断，不用引擎认识皮肤、不动 `chess.assets`、不动任何读取点。`test/ui/portraitChain.test.js` 把它钉成两个
+方向：**关**（拿今天 `chessPortraitUrl` / `chessAvatarUrl` 两个实现当对照逐项比对，另加「一个调用点写
+`skins: false` 时连注册好的提供者都不问」）与**开**（提供者给的优先于 `chars` 里同名的条目、给 `null` 或抛错
+就回落、`_1`/`_2` 后缀与精确命中仍在它之后）。房主把开关关掉 = 这一版的解析结果与不装包逐字相同。
+「分开受控」那一段（2b / 第 3 条第 4 点）只在**开关打开且确有提供者**时才有意义：关掉时连这一步都不存在，
+所以四条性质不需要各自再钉一次逐字相同。
+
+**5. 表面与守卫。** `skins` 进 `shared/modSurface.js`（锚 `SKIN_FIELDS` / `PACK_FIELDS{skins}` / `SKIN_ID_RE`）
+与 `docs/MOD-SURFACE.md`；`test/modSurface.test.js` 的 `SURFACE_LISTS` 里加了 `SKIN_FIELDS`，所以「字段表被
+挪走」与「新加一格没进清单」两头都红。加一格对已发布的包是纯增量，`MOD_API_VERSION` **不动**。
+
+### 28.29 形态（clip set）与静态相位：两条**行为增量**通道
+
+这一节回答业主那一条要求：「做不了的我们就加接口，做到完美兼容。」有两件事今天包做不了，而两件都不是数据、
+是**渲染器的行为常量**：
+
+* `public/js/render/units.js` 的 `FORMS` —— 按 spine id 键、值是「形态名 → `{change, end, leave, next, roles}`」
+  的**冻结模块常量**。一个包带来的干员/怪物若有自己的变身形态（新模式、新 clip 集），今天没有任何声明能让
+  渲染器认识它。
+* `public/js/render/fx/kinds.js` 的 `SILENT_PHASES` —— 一个 `Set`（`'bombed'` / `'warning'`），命中的 `'phase'`
+  特效**不放**通用特效（模型自己会表示）。一个包自己的相位种类今天只能得到一层不属于它的通用特效。
+
+两条通道的形状是同一个：**第一方常量一个字节不动，包只做增量，消费点走统一入口**。
+
+**1. 第一方 `FORMS` 不动。** 它是第一方常量，每一条都是对着真 skeleton 的 clip 名校出来的（`units.js` 那段
+长注释逐条记着来源）。所以答案不是把它换成一个可写表，而是新增一张**包形态覆盖表**（`shared/packForms.js`）
+与一个统一入口：
+
+```js
+formsFor(FORMS, info.spine || info.defId)?.[form]   // 第一方在前、包只补第一方没有的形态名
+```
+
+四个消费点（`units.js` 的 `_formSpec`、`setForm` 的准入与 `next`，以及 `render/app.js` 的 fx `form` 那一处）
+全部改走它；两个文件都不再直接索引 `FORMS`。
+
+**2. 合并规则：第一方优先，包只做增量。** 四条，判据都落在代码里：
+
+| 情形 | 结果 |
+|---|---|
+| 包声明与**第一方**同名的形态（同一个 spine id） | 形状层 `FORMS_FIRST_PARTY_OVERLAP` —— **整包拒绝**，不是静默丢掉 |
+| 包声明一个第一方**没有**的形态名（同一个 spine id） | 进表；第一方那几条不受影响 |
+| 包声明一个第一方**完全没有**的 spine id | 进表（这就是「包自带干员/怪物有自己的形态」那条路） |
+| 两个包声明同一个 `spine id + 形态名` | `FORM_COLLISION` 点名；**包 id 小的赢**（与 art / skins 同一条） |
+
+**为什么第一方优先，而不是「包可以覆盖」**（取舍，请业主过目）：覆盖会让「第一方干员长什么样」变成
+**取决于装了哪个包**，而同一份摘要下的行为必须唯一（§28.2）。一个包真想改一个第一方干员的形态，它需要的
+其实是「新 spine id + 新形态名」，那条路一直是通的。反过来，若允许覆盖，作者写下一个不会生效的声明却拿不到
+任何提示 —— 那正是这一层存在的全部理由要消灭的方向，所以这里选择**大声拒绝**而不是悄悄让步。
+
+**3. 声明形状**（`pack.json.forms`，按 `ART_TABLES` 的**对象表**分组：形态说的是 spine 模型，而模型只住在这
+三张表里）：
+
+```json
+"forms": {
+  "chars": {
+    "char_ws_hero": {
+      "shift":   { "change": "Start_B", "end": "Die_B", "next": "shifted",
+                   "roles": { "idle": "Idle_B", "die": "Die_B_2", "move": { "loop": "Move_B" } } },
+      "shifted": { "roles": { "idle": "Idle_C", "die": "Die_C" } }
+    }
+  }
+}
+```
+
+判据（每条对应一种「写了却不生效」的失败方向，全部**整包拒绝**）：表名 ∈ `FORM_TABLES`（`chars` / `enemies` /
+`tokens`，`FORMS_UNKNOWN_TABLE`）；形态名合 `FORM_KIND_RE`（`FORMS_BAD_KIND`）；形态级字段只许
+`change` / `end` / `leave` / `next` / `roles`（`FORMS_SPEC_UNKNOWN_FIELD`）；三个 clip 名是非空字符串或 `null`
+（`FORMS_BAD_CLIP`）；`roles` 必须存在（`FORMS_MISSING_ROLES`）、键 ∈ `FORM_ROLE_KEYS`、值是非空字符串 / `null` /
+`{begin, loop, end}`（`FORMS_BAD_ROLES`）；`next` 必须指向**同一个 spine id 上已声明**的形态 —— 第一方或本包
+（`FORMS_NEXT_UNKNOWN`，纯函数 `formNextDeadLink` 判，失败分支自己也被测）。
+
+`change: null` 与省略 `change` 归一化后**逐字相同**（都表示「没有过渡 clip」）：同一份行为不该有两个哈希。
+
+**4. 第一方形态名的镜像与它的守卫。** 「与第一方同名」这条判据需要「第一方在这个 spine id 上有哪几个形态名」，
+而加载器不能 import 渲染器。所以 `shared/formNames.js` 是**生成物**（`node tools/build-form-names.mjs`，从
+`FORMS` 真身读出来），`test/packForms.test.js` 把每一格与 `FORMS` 逐条比对 —— 少一个、多一个、拼错都红。
+
+**5. 静态相位与 `forms` 共用同一个顶层键里的 `fx`。** `pack.json.fx = { silentPhases: [...] }`。**为什么并进
+`forms` 那一刀而不是各开一个顶层键**：两者是同一类东西（渲染器的行为增量、同一趟并进同一份 `assets.json`、
+同一条「第一方优先 / 并集」的规则），一个顶层键把它们归到一处，作者的发现路径与文档路径都短一条；而 `fx`
+这个名字本身是开放的（将来「哪些 kind 不抖屏」「哪些 kind 不进伤害数字」都落在它下面，不必每次加一个顶层键）。
+`fx` 在 `PACK_FIELDS` 里是**闭集成员**，不写它的包一个字不变；未知字段 `FX_UNKNOWN_FIELD`；每一项必须是非空
+字符串（`FX_BAD_SILENT_PHASE`）。合并规则是**并集**（`bombed` / `warning` 永远静默，包只能加；并集没有减法），
+`silentPhases: []` 与 `routes: []` 同义（合法但什么都不做 ⇒ 不算贡献项，只带它的包照旧 `EMPTY_PACK`）。
+
+**6. 落点与取数路径：`assets.json`。** 两条声明都并进**已经存在**的那份清单（`assets.modForms` /
+`assets.silentPhases`，`shared/workshop.js` 的 `mergeWorkshopForms` / `mergeWorkshopFx`），于是：
+
+* 客户端**零改动**就能 `data.get('assets')` 读到它们（与 `assets.skins` 逐字同一条理由）；
+* 服务端那一半只有一行：`workshopTouchedFiles` 把 `assets` 加进「必须合并后发给浏览器」的集合 —— 漏掉它，
+  服务端会说「包已加载、形态也在」，而浏览器拿到的是磁盘上那份没有 `modForms` 的清单（一个不会报错的静默失效）；
+* `public/js/assets.js` 在**清单被采纳的那一刻**装这两份声明（`adopt`，以及构造时就带清单的那一支），
+  不在每个视图上重复。
+
+**7. 没声明这两条的包：逐字相同。** 归一化清单里不会多出 `forms` / `fx` 键（「写了才进」那条纪律，§28.13），
+`formsFor` 在没有包增量时返回的就是 `FORMS[spine]` **本身**（`test/packForms.test.js` 断言对象同一性），
+`silentPhase` 在没有包增量时只认第一方那两个。所以老包的哈希与第一方的行为都不动，`MOD_API_VERSION` **不动**。
+
+**8. 表面与守卫。** 两格表面（`forms`、`fx.silentPhases`）进 `shared/modSurface.js`（锚 `FORM_TABLES` /
+`FORM_KIND_RE` / `FORM_ROLE_KEYS` 与 `PACK_FIELDS{fx}`）与 `docs/MOD-SURFACE.md`；`test/modSurface.test.js` 的
+`SURFACE_LISTS` 里加了那三个符号，所以「名单被挪走」与「新加一格没进清单」两头都红。
+
+测试：
+
+```
+node --test test/packForms.test.js                    # 声明生效 / 第一方与包共存 / 不合法被拒 / 没声明时逐字相同
+node --test test/workshopValidateArtTables.test.js    # art 的扁平表不再让校验器崩（本轮那条真 bug）
+node --test test/modSurface.test.js
+```
+
 

@@ -22,13 +22,42 @@ export class MatchPrep {
       this.dispatch(ps, 'onPrepStart', { round: this.round });
       ps.recompute();
     }
-    // solo / single-human matches: untimed (soloUntimed); co-op: the round's prepTime
-    const secs = this.soloUntimed ? null : this.gd.prepTime(this.round);
-    this.setDeadline(secs, () => this.prepDeadline());
+    // A co-op room waits for every alive seat's Ready (maybeEndPrep), so a human able to press it must have a
+    // deadline — otherwise that human's silence stalls the match forever (docs/PS100-MIGRATION.md §5, the
+    // 「1 真人 + N AI」 room: `prepFallbackGuard`). `soloUntimed` still governs the OTHER phases (INFO_CHECK,
+    // BAND_DRAFT, SP_DRAFT and the silent presentation steps); here the guard only hands that lone human the co-op
+    // prep timer it was missing.
+    //
+    // The round's own prepTime decides 0 vs a deadline, exactly as before: a round that declares `prepTime: null`
+    // means UNTIMED and stays untimed (the config is the authority on whether this round is timed at all — the
+    // zero-delay ordering of `verification-slices.test.js` depends on it). The `infoCheck` 25 s guard is used ONLY
+    // for the lone-human room, and never to time a round the data leaves untimed for anyone else.
+    this.setDeadline(this.prepDeadlineSeconds(), () => this.prepDeadline());
     let i = 0;
     for (const ps of alive) if (ps.botControlled) this.scheduleBotPrep(ps, i++);
     this.markPublic();
     this.maybeEndPrep();
+  }
+
+  /**
+   * Seconds of this round's prep deadline (null = untimed). The SINGLE definition of the rule, so the prep and the
+   * `attachAudit` check can never drift apart:
+   *
+   *   * solo (and any room with no seat able to press Ready) → null: nobody waits on anybody, and there is no Ready
+   *     gate that could stall;
+   *   * the round declares a `prepTime` → that value (today's behaviour, unchanged);
+   *   * the round declares none, but this is the lone-human co-op room (`prepFallbackGuard`) → the official
+   *     `timers.infoCheck` guard, so that human's silence can never stall the match (docs/PS100-MIGRATION.md §5);
+   *   * otherwise → null: the data left this round untimed and it stays untimed.
+   *
+   * @returns {number|null}
+   */
+  prepDeadlineSeconds() {
+    // SOLO only — NOT `soloUntimed`, which is also true for the lone-human co-op room this whole guard exists for.
+    if (this.isSolo) return null;
+    const declared = this.gd.prepTime(this.round);
+    if (declared != null) return declared;
+    return this.prepFallbackGuard ? this.gd.timer('infoCheck') : null;
   }
 
   /**

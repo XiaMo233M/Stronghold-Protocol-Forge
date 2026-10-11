@@ -19,7 +19,12 @@ export class MatchWatch {
   addSpectator(playerId) {
     if (this.disposed) return;
     const s = this._spectator(playerId);
-    if (s) this.guard(() => this._resync(s));
+    if (s) this.guard(() => {
+      // a spectator joined / came back: it gets a full m.public (_resync), and the room's next frame is full too, so
+      // every client's baseline is one frame they all share again (DESIGN §8.2, incremental frame)
+      this._resync(s);
+      this.markMembershipChanged();
+    });
   }
 
   /** The spectator left (room.leave / g.leave, removed by the host, reconnect window expired). */

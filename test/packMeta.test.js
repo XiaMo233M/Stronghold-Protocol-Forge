@@ -155,7 +155,9 @@ describe('server.meta：身份（声明与模块字节都进内容哈希）', ()
     // clementia 那一个在 0.2.3 那一轮**移过**：上游把克莱门莎收成了官方干员（官方 id `char_4231_clemnt`），
 // 本仓库的示例夹具再用那个 id 会被加载器按 OFFICIAL_ID_COLLISION 拒掉，于是 id 换成工坊保留前缀的
 // `char_ws_clemnt`（docs/examples/clementia/README.md）—— 包的内容真的变了，基线随之移动。
-const EXPECT = { clementia: '27627f47', 'demo-workshop': '15092019', 'kit-demo': '77b80c6e' };
+// 2026-10-11 再移一次：**身份的定义变了**（业主裁决 B，DESIGN §28.2）—— 清单扩成包目录下的每一个普通文件，
+// 于是 clementia / kit-demo 各多一条 `README.md`；demo-workshop 一个字没变（它只有 pack.json + chess.json）。
+const EXPECT = { clementia: 'e89533a3', 'demo-workshop': '15092019', 'kit-demo': '4a75376f' };
     const loaded = loadWorkshop(join(ROOT, 'docs/examples'), { log: quiet });
     for (const [id, prefix] of Object.entries(EXPECT)) {
       const pack = loaded.packs.find((p) => p.id === id);
@@ -183,7 +185,7 @@ const EXPECT = { clementia: '27627f47', 'demo-workshop': '15092019', 'kit-demo':
     assert.deepEqual(metaIssues({}, join(dir, 'gone')), [], '没声明 meta 的包：一条意见都没有');
   });
 
-  test('identifyPack 把 meta 模块的字节算进去（不传 meta 时与会话前的清单相同）', () => {
+  test('identifyPack 把 meta 模块的字节算进去（文件在磁盘上就在清单里，声明本身进的是 pack.json）', () => {
     const dir = join(wsRoot, 'meta-pack');
     const raw = JSON.parse(fs.readFileSync(join(dir, 'pack.json'), 'utf8'));
     const pack = normalizePackManifest(raw, 'meta-pack', { hasAssets: false }).pack;
@@ -192,8 +194,13 @@ const EXPECT = { clementia: '27627f47', 'demo-workshop': '15092019', 'kit-demo':
     const without = { ...pack, server: { preDispatch: pack.server.preDispatch } };
     delete without.server.meta;
     const noMeta = identifyPack(dir, without, {});
-    assert.equal(noMeta.manifest.some((m) => m.path === 'meta/bonds.mjs'), false);
-    assert.notEqual(noMeta.hash, withMeta.hash);
+    // 业主裁决 B（DESIGN §28.2）之后这条断言翻了个面，而它翻得有理由：清单是**包目录下的每一个普通文件**，
+    // 所以 `meta/bonds.mjs` 只要还在盘上就在清单里 —— 与"有没有声明它"无关。这正是 B 的目的（一个被声明模块
+    // import、自己没被声明的文件从前两份清单里都不在）。声明本身仍然进哈希，走的是另一条腿：`pack.json` 的
+    // 归一化清单（`server.meta` 那一段），所以下面那个 notEqual 照旧成立 —— 两条腿都得在，缺一不可。
+    assert.ok(noMeta.manifest.some((m) => m.path === 'meta/bonds.mjs'),
+      '文件还在盘上 ⇒ 它就在身份清单里（B：清单是目录，不是声明）');
+    assert.notEqual(noMeta.hash, withMeta.hash, '声明本身已经改变了 pack.json 的归一化清单，哈希必须跟着变');
   });
 });
 

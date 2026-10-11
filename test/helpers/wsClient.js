@@ -10,10 +10,20 @@
 //   const reply = await c.request({ t: 'room.create', mode: 'coop', difficulty: 'NORMAL' });
 //   const state = await c.waitFor('room.state');
 //   await c.close();
+//
+// `m.public` IS MATERIALIZED, exactly as the browser does it (DESIGN §8.2 "incremental frame"): the server sends a full
+// frame first and one DELTA afterwards, and this client merges the deltas with the browser's own module
+// (`public/js/matchDelta.js`), so a test that waits for `m.public` sees the complete view it always saw — never a patch.
+// The RAW frames stay in `this.log` (and the materialized view in `this.public`), for the tests that judge the wire
+// itself (test/match/public-delta*.test.js).
 
 import WebSocket from 'ws';
+import { applyPublic } from '../../public/js/matchDelta.js';
+import { PROTOCOL_VERSION } from '../../shared/constants.js';
 
 const REPLY_TYPES = new Set(['ok', 'error', 'welcome', 'pong']);
+/** How many materialized `m.public` frames the client remembers (`publicFrames`). */
+const PUBLIC_HISTORY = 500;
 
 export class TestClient {
   /**
@@ -36,8 +46,22 @@ export class TestClient {
     this.ws = ws;
     /** @type {any[]} unconsumed frames */
     this.inbox = [];
-    /** @type {any[]} every frame ever received (never consumed) */
+    /** @type {any[]} every frame ever received (never consumed, never materialized) */
     this.log = [];
+    /** @type {Record<string, any> | null} the materialized `m.public` view (deltas merged, like the browser) */
+    this.public = null;
+    /** @type {Record<string, any>} the latest materialized frame per type (`m.public` merged, the rest as received) */
+    this.materialized = {};
+    /**
+     * The last `m.public` frames as MATERIALIZED (each one the view a browser held when it arrived; the most recent
+     * `PUBLIC_HISTORY` are kept). This is what a test reads to ask "which phases / rows did this client see", and it
+     * must not be `log` — that one holds the wire frames, deltas included. Each entry keeps the frame's own `serverNow`
+     * (the engine clock travels on every frame; a resync's unicast frame is the one that carries none).
+     * @type {any[]}
+     */
+    this.publicFrames = [];
+    /** @type {any[]} `m.public` frames the merge refused (a delta with no baseline — the server's rules forbid it) */
+    this.mergeRefusals = [];
     /** @type {{ match: (m: any) => boolean, resolve: Function }[]} */
     this.waiters = [];
     this.nextRid = 1;
@@ -55,12 +79,32 @@ export class TestClient {
       let msg;
       try { msg = JSON.parse(data.toString()); } catch { return; }
       this.log.push(msg);
-      const i = this.waiters.findIndex((w) => w.match(msg));
+      // `m.public` (and only it) is pushed to waiters in its MATERIALIZED form: see the header. A frame the merge
+      // refuses (a delta with no baseline — which the server's own rules forbid) is dropped for the waiters, so a test
+      // never asserts on a state the browser could not build; the raw frame stays in `this.log` either way.
+      let out = msg;
+      if (msg && msg.t === 'm.public') {
+        const res = applyPublic(this.public, msg);
+        if (res.ok) {
+          this.public = res.state;
+          this.materialized['m.public'] = res.state;
+          // the frame a waiter sees is the MATERIALIZED view, except that it keeps this frame's own `serverNow` (a
+          // delta carries the engine's clock even when nothing else changed, and tests pace the stream by it)
+          out = { t: 'm.public', ...this.public, serverNow: msg.serverNow };
+          this.publicFrames.push(out);
+          if (this.publicFrames.length > PUBLIC_HISTORY) this.publicFrames.splice(0, this.publicFrames.length - PUBLIC_HISTORY);
+        } else {
+          this.mergeRefusals.push(msg);
+        }
+      } else if (msg && typeof msg.t === 'string') {
+        this.materialized[msg.t] = msg;
+      }
+      const i = this.waiters.findIndex((w) => w.match(out));
       if (i >= 0) {
         const [w] = this.waiters.splice(i, 1);
-        w.resolve(msg);
+        w.resolve(out);
       } else {
-        this.inbox.push(msg);
+        this.inbox.push(out);
       }
     });
   }
@@ -133,13 +177,22 @@ export class TestClient {
    * @param {string} name @param {string} [token] @param {object} [extra]
    */
   async hello(name, token, extra = {}) {
-    const reply = await this.request({ t: 'hello', name, version: 1, ...(token ? { token } : {}), ...extra });
+    // the CURRENT wire format, not a literal: a test client must be a client of this build, so a deliberate
+    // PROTOCOL_VERSION bump (DESIGN §8.2.1) cannot leave the suites handshaking with a stale page's number
+    const reply = await this.request({ t: 'hello', name, version: PROTOCOL_VERSION, ...(token ? { token } : {}), ...extra });
     if (reply.t !== 'welcome') throw new Error(`hello failed: ${JSON.stringify(reply)}`);
     return reply;
   }
 
   /** Drop every unconsumed frame. */
   clearInbox() { this.inbox.length = 0; }
+
+  /**
+   * The latest MATERIALIZED state of a frame type: for `m.public` the merged view a browser would hold (never a delta),
+   * for anything else the last frame received. The non-consuming counterpart of `waitFor` — use it to poll a state.
+   * @param {string} type @returns {any | null}
+   */
+  stateOf(type) { return this.materialized[type] ?? null; }
 
   /** Close gracefully and wait for the close event. */
   async close() {

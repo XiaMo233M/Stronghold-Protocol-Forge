@@ -115,6 +115,10 @@ export const PACK_FIELDS = Object.freeze([
   'content', 'overrides',
   // 素材与声明（贡献项，见 EMPTY_PACK 那一处）
   'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'skins', 'support', 'operators', 'i18n',
+  // 形态（clip set）通道与静态相位通道（DESIGN §28.29）：第一方 `FORMS` / `SILENT_PHASES` 冻结不动，包只做增量。
+  // 两者都是**行为**声明而不是素材：`forms` 说的是「这个 spine id 还有哪些形态、每个形态用哪几条 clip」，
+  // `fx.silentPhases` 说的是「这几个 'phase' 种类模型自己会表示，不要再撒一层通用特效」。
+  'forms', 'fx',
   // 纯文本声明（公告 / 鸣谢，DESIGN §28.15）：一段**结构化文本**，既不是游戏数据也不是素材
   'notices',
   // 行为开关（**不是**贡献项）
@@ -170,6 +174,8 @@ import { isSupportTier } from './support.js';
 import { isVersionRange, appVersionMatches } from './packs.js';
 import { MOD_LAYERS } from './modIdentity.js';
 import { requiredUnitForms } from './diy.js';
+import { FORM_TABLES, FORM_KIND_RE, FORM_SPEC_KEYS, checkFormRoles } from './packForms.js';
+import { firstPartyFormNames } from './formNames.js';
 // `intercepts` 是「分发前的准入钩子拦哪几个消息类型」，所以它的**唯一真相**必须是 `C2S` 本身（DESIGN §28.13）：
 // 一个写在 `intercepts` 里而协议不认识的类型，只会让作者以为钩子拦住了什么。同一条依赖方向已有先例 ——
 // `shared/modIdentity.js` 的线格式就被 `shared/protocol.js` 反过来 re-export（那两个模块之间的唯一箭头）。
@@ -177,7 +183,15 @@ import { C2S } from './protocol.js';
 
 const isPlainObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const fail = (error, detail) => ({ ok: false, error, detail });
-/** 一个可选的字符串字段：非空字符串就裁剪，其它一律 null（缺省与写错都读成「没声明」）。 */
+/**
+ * 一个可选的字符串字段：非空字符串就裁剪，其它一律 null（缺省与写错都读成「没声明」）。
+ *
+ * **这个「非字符串读成没声明」在这里是好事，但只在没人给它兜底的时候**：对调用方自己就是终点的字段（今天是
+ * `api` / `game` / `gameVersion`），把 `api: 1` 读成 null 会让包「当没声明一样」通过 —— 作者写了等于没写，
+ * 而包本身是合法的，失败方向是静默的。所以这三个字段在调用它**之前**先各自过一遍 `declaredString`（见下面
+ * `normalizePackManifest` 的版本声明那一段），类型不对就当场 `BAD_API_TYPE` / `BAD_GAME_TYPE` 拒绝。
+ * 本函数的行为**没有改**：它只负责「怎么读一个字符串」，不负责「类型错了要不要报」。
+ */
 const strField = (v, max) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
 
 /** 包内素材路径：相对、在包自己的 `assets/` 下、无穿越。语音、各类图标、外观素材共用这一条规则。 */
@@ -1082,6 +1096,144 @@ function parseI18nDecl(raw) {
   return { ok: true, decl: out };
 }
 
+/**
+ * 形态（clip set）通道的形状（`pack.json.forms`，DESIGN §28.29）。
+ *
+ * 判据逐条（每条都对应一种「作者写了却不生效」的失败方向）：
+ *   * 表名必须是 `chars` / `enemies` / `tokens` —— 与 `ART_TABLES` 的对象表**同一组**（形态说的是 spine 模型，
+ *     而模型只住在这三张表里）；写别的名字**点名拒绝**（`FORMS_UNKNOWN_TABLE`），不是悄悄丢掉；
+ *   * 形态名必须是 `FORM_KIND_RE` 形状的字符串（它会成为 `FORMS[spine][kind]` 的键，也是 sim fx 里 `form` 的值）；
+ *   * 形态级字段只许 `change` / `end` / `leave` / `next` / `roles`（`FORMS_SPEC_UNKNOWN_FIELD`）；
+ *   * 三个 clip 名（`change` / `end` / `leave`）必须是字符串或 null —— 渲染器拿它去 skeleton 里找 clip；
+ *   * `roles` 由 `checkFormRoles` 判（键在白名单里、值是非空字符串 / null / 一个 `{begin, loop, end}` 对象）；
+ *   * **第一方已有的形态名一律拒绝**（`FORMS_FIRST_PARTY_OVERLAP`）：合并规则是第一方优先（§28.29 裁决 2），
+ *     所以「包想覆盖第一方」这件事一旦被静静丢掉，作者面对的就是「写了等于没写」—— 这一层存在的全部理由就是
+ *     消灭那个方向，所以它在这里被点名，而不是在并表时被过滤。
+ *
+ * `next` 的死链判定**不在这里**：它要等同一个 spine id 上的形态名都收齐（`formNextDeadLink`，在
+ * `normalizePackManifest` 里形状判完之后跑）。
+ */
+function parseFormsDecl(raw) {
+  if (!isPlainObj(raw)) {
+    return fail('FORMS_BAD_SHAPE', `forms must be an object: { ${FORM_TABLES.join('|')}: { "<spine id>": { "<form name>": { roles } } } }`);
+  }
+  /** @type {Record<string, Record<string, object>>} */
+  const decl = {};
+  for (const [table, entries] of Object.entries(raw)) {
+    if (!FORM_TABLES.includes(table)) {
+      return fail('FORMS_UNKNOWN_TABLE', `forms: "${table}" is not a form table (one of: ${FORM_TABLES.join(', ')} — the three tables that carry a spine model)`);
+    }
+    if (!isPlainObj(entries)) {
+      return fail('FORMS_BAD_SHAPE', `forms.${table} must be an object: { "<spine id>": { "<form name>": { roles } } }`);
+    }
+    for (const [id, spec] of Object.entries(entries)) {
+      if (!RECORD_ID_RE.test(id)) {
+        return fail('FORMS_BAD_ID', `forms.${table}: "${id}" is not a valid spine id (the key is the spine id / defId the view looks the form up by)`);
+      }
+      if (!isPlainObj(spec)) {
+        return fail('FORMS_BAD_SHAPE', `forms.${table}["${id}"] must be an object of { "<form name>": { change?, end?, leave?, next?, roles } }`);
+      }
+      const official = firstPartyFormNames(id);
+      for (const [kind, form] of Object.entries(spec)) {
+        const where = `forms.${table}["${id}"].${kind}`;
+        if (!FORM_KIND_RE.test(kind)) {
+          return fail('FORMS_BAD_KIND', `${where}: the form name must be a plain name (letters, digits, "_", starting with a letter) — it becomes a key of the form table and the value of an fx "form"`);
+        }
+        if (official.has(kind)) {
+          return fail('FORMS_FIRST_PARTY_OVERLAP', `${where}: the first-party FORMS table already has the form "${kind}" on "${id}" and it wins (DESIGN §28.29) — pick a form name of your own; a declaration that cannot take effect is refused rather than dropped`);
+        }
+        if (!isPlainObj(form)) return fail('FORMS_BAD_SHAPE', `${where} must be an object: { change?, end?, leave?, next?, roles }`);
+        for (const key of Object.keys(form)) {
+          if (!FORM_SPEC_KEYS.includes(key)) {
+            return fail('FORMS_SPEC_UNKNOWN_FIELD', `${where}: "${key}" is not a field of a form (${FORM_SPEC_KEYS.join(', ')}) — the renderer reads change / end / leave / next / roles`);
+          }
+        }
+        for (const clip of ['change', 'end', 'leave']) {
+          const v = form[clip];
+          if (v === undefined || v === null) continue;
+          if (typeof v !== 'string' || !v) return fail('FORMS_BAD_CLIP', `${where}.${clip} must be a non-empty clip name string (or null: no such clip)`);
+        }
+        if (form.next !== undefined && form.next !== null) {
+          if (typeof form.next !== 'string' || !FORM_KIND_RE.test(form.next)) {
+            return fail('FORMS_BAD_NEXT', `${where}.next must be the name of another form on "${id}"`);
+          }
+        }
+        if (form.roles === undefined || form.roles === null) {
+          // `roles: null` / `roles: {}` 在渲染器里是同一件事（什么都不画的形态，中间态与终态都用得上），
+          // 但**省略** roles 与「这个形态没有 clip」不是同一件事：前者多半是作者忘了写。
+          return fail('FORMS_MISSING_ROLES', `${where} has no "roles" — every form states its clip set (use "roles": {} for a form that draws nothing of its own)`);
+        }
+        const roles = checkFormRoles(form.roles);
+        if (!roles.ok) return fail('FORMS_BAD_ROLES', `${where}.${roles.reason}`);
+        (decl[table] ||= {})[id] ||= {};
+        decl[table][id][kind] = {
+          ...(form.change !== undefined && form.change !== null ? { change: form.change } : {}),
+          ...(form.end !== undefined && form.end !== null ? { end: form.end } : {}),
+          ...(form.leave !== undefined && form.leave !== null ? { leave: form.leave } : {}),
+          ...(form.next !== undefined && form.next !== null ? { next: form.next } : {}),
+          roles: roles.value,
+        };
+      }
+    }
+  }
+  return { ok: true, decl };
+}
+
+/**
+ * `next` 那条链的判据（`FORMS_NEXT_UNKNOWN`）：`next` 必须指向**同一个 spine id 上**已声明的形态 ——
+ * 第一方 `FORMS` 里的那一个，或本包同一份声明里的那一个。指向别处就是死链：渲染器读
+ * `formsFor(spine)?.[f.next]`，取到 `undefined` 时那条 `end` 动画落地后**什么都不会切**。
+ *
+ * 纯函数（喂一份声明就能测失败分支），调用点在 `normalizePackManifest` 的形状判完之后。
+ * @param {Record<string, Record<string, object>>} decl 已过形状层的 `forms`
+ * @returns {{ table: string, id: string, kind: string, next: string } | null} 第一条死链
+ */
+export function formNextDeadLink(decl) {
+  for (const [table, entries] of Object.entries(isPlainObj(decl) ? decl : {})) {
+    for (const [id, forms] of Object.entries(entries)) {
+      const known = firstPartyFormNames(id);
+      for (const kind of Object.keys(forms)) known.add(kind);
+      for (const [kind, form] of Object.entries(forms)) {
+        const next = form && form.next;
+        if (typeof next === 'string' && !known.has(next)) return { table, id, kind, next };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * 静态相位通道的形状（`pack.json.fx.silentPhases`，DESIGN §28.29）。
+ *
+ * 判据只有两条，但两条都是「不生效」的方向：未知字段点名拒绝（`FX_UNKNOWN_FIELD`），数组里每一条必须是
+ * 非空字符串（`FX_BAD_SILENT_PHASE`）。`silentPhases: []` 是**合法但什么都不做**的声明 —— 与 `routes: []`
+ * 同一个语义，所以它不算贡献项（见 `contributes` 那一处）。
+ */
+function parseFxDecl(raw) {
+  if (!isPlainObj(raw)) return fail('FX_BAD_SHAPE', 'fx must be an object: { silentPhases: ["<phase kind>", …] }');
+  const FX_FIELDS = ['silentPhases'];
+  for (const key of Object.keys(raw)) {
+    if (!FX_FIELDS.includes(key)) {
+      return fail('FX_UNKNOWN_FIELD', `fx: "${key}" is not a declared field (${FX_FIELDS.join(', ')})`);
+    }
+  }
+  if (raw.silentPhases === undefined) {
+    return fail('FX_BAD_SHAPE', `fx must declare at least one of: ${FX_FIELDS.join(', ')} — an empty object says nothing and is refused rather than ignored`);
+  }
+  if (!Array.isArray(raw.silentPhases)) {
+    return fail('FX_BAD_SHAPE', 'fx.silentPhases must be an array of phase kinds (e.g. ["bombed", "warning"])');
+  }
+  /** @type {string[]} */
+  const silentPhases = [];
+  for (const kind of raw.silentPhases) {
+    if (typeof kind !== 'string' || !kind) {
+      return fail('FX_BAD_SILENT_PHASE', `fx.silentPhases: ${JSON.stringify(kind)} must be a non-empty string (the "kind" of a 'phase' fx)`);
+    }
+    if (!silentPhases.includes(kind)) silentPhases.push(kind);
+  }
+  silentPhases.sort();
+  return { ok: true, decl: { silentPhases } };
+}
 
 /**
  * `pack.json.operators[<charId>]` 允许的两个列表字段。**只此一份**：形状校验（`normalizePackManifest`）与
@@ -1143,7 +1295,31 @@ export const ART_TABLES = {
   tokens: { urls: ['avatar', 'portrait'], strings: ['owner', 'spineVariant'], spine: 'flat' },
   skills: { flat: true, target: ['skills'] },
   profSub: { flat: true, target: ['prof', 'sub'] },
+  // 盟约图标与分队（策略）图标：与 skills / profSub **同一张脸** —— `data/assets.json` 实测 `bonds["yanShip"]`
+  // 与 `bands["band_bldsk"]` 的值直接就是路径字符串（`/assets/bond/yanShip.png` / `/assets/band/band_bldsk.png`），
+  // 不是「对象 + urls 字段」。这两张表缺了会让**整包**在下面的闸门处被拒（`ART_UNKNOWN_TABLE`），而真实 mod
+  // （盟约拓展包把 `aveMujica` / `band_wuyouyoumeng` 摆在这里）正是这么写的 —— 一个只多两张图标表的合法包，
+  // 代价却是连 `data.chess` 都进不去。
+  //
+  // 落点：`assets.bonds` / `assets.bands`，客户端 `public/js/ui/assetUrls.js` 的 `bondIconUrl(m, bondId)` /
+  // `bandIconUrl(m, bandId)` 读的就是这两个键 —— **键名必须与消费端一致**，写成 `bond` / `band` 不会报错，
+  // 只会静默回落到没有图标（`test/workshopArtTables.test.js` 钉住了这一点）。
+  bonds: { flat: true, target: ['bonds'] },
+  bands: { flat: true, target: ['bands'] },
 };
+
+/**
+ * 每一张扁平表都必须给出 `target`（它在 `assets.json` 里的落点路径）。
+ *
+ * 为什么在**模块加载**时抛而不是留到运行时：`target` 只有 `mergeWorkshopFlatArt` 一个读者，一张扁平表缺了它
+ * 出现的症状是「校验通过、`report.flatArt` 也数到了、图就是没进清单」—— 又一个静默失效，正是这一层一直在拒绝
+ * 的那一类。纪律是「加一张扁平表 = 两行」，漏掉第二行现在会在导入时就炸，而不是等到有人发现图标不显示。
+ */
+for (const [table, shape] of Object.entries(ART_TABLES)) {
+  if (!shape.flat) continue;
+  if (Array.isArray(shape.target) && shape.target.length) continue;
+  throw new Error(`ART_TABLES["${table}"] is flat and must declare a non-empty "target" (the path inside assets.json it is merged into)`);
+}
 /**
  * 一个 spine 对象里的路径字段、路径数组字段，以及原样抄过去但要查类型的字段。
  *
@@ -1447,6 +1623,19 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     }
     if (Object.keys(clean).length) artEntries[table] = clean;
   }
+  // `art.bonds` 与 `bondIcons` 是**同一件事的两个写法** —— 两条路最后都写 `assets.bonds[<bondId>]`，客户端
+  // （`public/js/ui/assetUrls.js` 的 `bondIconUrl`）只看得到一条。同一个 id 两处都声明时**点名拒绝整包**，
+  // 而不是「谁赢」：`mergeWorkshopFlatArt` 排在 `mergeWorkshopBondIcons` 之后（见 `applyWorkshop` 的调用序），
+  // 真按顺序判就是 `art.bonds` 静默压掉 `bondIcons` —— 作者改了 `bondIcons` 那一份却发现图标没变，日志一句话
+  // 都没有。**两边都声明同一个 id 就是一次真正的冲突**（它们给的是同一个最终值），必须由作者自己删掉一份。
+  //
+  // 只撞**同一个 id**才算冲突：两处声明**不同**的盟约是各管一个图标，两份声明都生效，谁也不覆盖谁。
+  const artBondIds = isPlainObj(artEntries.bonds) ? Object.keys(artEntries.bonds) : [];
+  for (const bondId of artBondIds) {
+    if (!Object.hasOwn(raw.bondIcons && isPlainObj(raw.bondIcons) ? raw.bondIcons : {}, bondId)) continue;
+    return fail('BOND_ICON_CONFLICT',
+      `"${bondId}" is declared in both pack.json.bondIcons and pack.json.art.bonds — both write assets.bonds["${bondId}"], so only one of them can be the icon. Keep exactly one: drop it from art.bonds, or drop it from bondIcons`);
+  }
   // 时装（`pack.json.skins`，皮肤层设计稿 §3）：一套外观的**数据**在 A 层声明，**行为**在 mod 里。
   //
   // 形状刻意与 `ART_TABLES.chars` **完全同形**（`art` 字段就是 `chars` 那一份子集）：复用同一个 `parseArtEntry`，
@@ -1608,6 +1797,20 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // 结果」的纪律 —— 没声明 notices 的包哈希逐字节不变。
   const noticesParsed = raw.notices === undefined ? null : parseNoticesDecl(raw.notices);
   if (noticesParsed && !noticesParsed.ok) return noticesParsed;
+  // 形态（clip set）通道与静态相位通道（DESIGN §28.29）：两条都是**行为增量** —— 第一方 `FORMS` / `SILENT_PHASES`
+  // 冻结不动，包只能在自己新声明的 spine id / 形态名 / 'phase' 种类上加东西。同一条「写了才进归一化结果」的
+  // 纪律：没声明这两个键的包（今天所有的包）哈希逐字节不变。
+  const formsParsed = raw.forms === undefined ? null : parseFormsDecl(raw.forms);
+  if (formsParsed && !formsParsed.ok) return formsParsed;
+  if (formsParsed) {
+    // `next` 的死链要等同一个 spine id 上的形态名都收齐才判 —— 形状层已经收齐了，这里判。
+    const dead = formNextDeadLink(formsParsed.decl);
+    if (dead) {
+      return fail('FORMS_NEXT_UNKNOWN', `forms.${dead.table}["${dead.id}"].${dead.kind}.next points at "${dead.next}", which is not a form of "${dead.id}" (declare it in this pack, or name a first-party form of that spine) — the renderer would fall through on that link`);
+    }
+  }
+  const fxParsed = raw.fx === undefined ? null : parseFxDecl(raw.fx);
+  if (fxParsed && !fxParsed.ok) return fxParsed;
   // 一条声明只有在清单里**真的写了这个键**时才进归一化结果。这一条是本刀最容易做坏的地方：无条件写进去会让
   // 每一个已存在的包（它们没有这些键）的归一化清单多出四个键，于是内容哈希全变、`identifyPack` 的
   // `manifest` 与 `hash` 也跟着变 —— 房间的摘要闸门会开始误判（DESIGN §28.2）。
@@ -1619,12 +1822,22 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (routesParsed) declared.push(['routes', routesParsed.decl]);
   if (i18nParsed) declared.push(['i18n', i18nParsed.decl]);
   if (noticesParsed) declared.push(['notices', noticesParsed.decl]);
+  if (formsParsed) declared.push(['forms', formsParsed.decl]);
+  if (fxParsed) declared.push(['fx', fxParsed.decl]);
   /** 一条声明算不算「贡献」：归一化后的值里有没有东西。`routes: []` 与 `client: { panels: [], requires: [] }`
    *  都是**合法但什么都不做**的声明（与 `voices: {}` / `art: { chars: {} }` 同一个语义），照旧不算贡献 ——
    *  所以「一个只写了 `routes: []` 的包」仍然是空包。反向的那条同样载重：`assets` / `client.panels` /
    *  `server.preDispatch` 的必填字段在形状层就各自非空，所以它们只声明出来就**是**贡献项；`server.battle` 与
    *  `server.room` 同理（形状层就要求 `module` 是一个合法的包内 `.mjs`）。 */
   const contributes = (v) => (Array.isArray(v) ? v.length > 0 : Object.keys(v).length > 0);
+  /**
+   * 一条声明算不算**贡献项**。与上面 `contributes` 的差别只有 `fx` 那一处：`fx` 的归一化结果永远是
+   * `{ silentPhases: [...] }`，所以 `Object.keys` 恒为 1 —— 而 `silentPhases: []` 与 `routes: []`、
+   * `client: { panels: [], requires: [] }` 是同一个语义（**合法但什么都不做**）。照 `contributes` 数的话，
+   * 一个只写了 `"fx": { "silentPhases": [] }` 的包会从空包变成「有贡献」，那正是这一层最不该出现的
+   * 「声明了等于没声明还不报错」。声明本身仍然留在归一化清单里（作者写了什么就回什么），只是不算贡献。
+   */
+  const contributesDecl = ([name, v]) => (name === 'fx' ? Array.isArray(v.silentPhases) && v.silentPhases.length > 0 : contributes(v));
   // A pack may bring data files, voice lines (either table), 盟约图标, 装备图标, 外观素材, 助战声明, 自选池声明
   // — never none of them (docs/WORKSHOP.md §1.4). 这条检查必须放在**所有**贡献项都解析完之后：放在前面会出现
   // 「一个只带 `operators` 的包被判成空包」，而在它前面引用后面声明的变量则是 TDZ 报错。
@@ -1634,7 +1847,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (!content.length && !Object.keys(voiceLines).length && !Object.keys(orderedLangLines).length
     && !Object.keys(bondIconFiles).length && !Object.keys(itemIconFiles).length && !Object.keys(artEntries).length
     && !skinEntries.length
-    && !Object.keys(orderedOperators).length && !declared.some(([, v]) => contributes(v))) {
+    && !Object.keys(orderedOperators).length && !declared.some(contributesDecl)) {
     // `support` 与 `playtest` 是这份清单里**唯二**「声明了也不算贡献」的字段，所以它们单独出现时必须被点名 ——
     // 只声明助战的包今天整包被拒（plugin-pack G6：一个 `support: [...]` + `content: []` 的包得到的就是这一条），
     // 而原来的文案里**没有** `support` 这个词，作者只能对着 `EMPTY_PACK` 猜。`support` 只决定**助战卡池**里放谁，
@@ -1642,7 +1855,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     const notContributions = ['support', 'playtest']
       .filter((n) => raw[n] !== undefined);
     const names = [...WORKSHOP_CONTENT_FILES, 'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'skins', 'operators',
-      'assets', 'client', 'server.preDispatch', 'server.meta', 'server.battle', 'server.room', 'server.modules', 'routes', 'i18n', 'notices'];
+      'assets', 'client', 'server.preDispatch', 'server.meta', 'server.battle', 'server.room', 'server.modules', 'routes', 'i18n', 'notices', 'forms', 'fx'];
     const alsoNot = notContributions.length
       ? ` (note: ${notContributions.map((n) => `"${n}"`).join(' and ')} ${notContributions.length === 1 ? 'is' : 'are'} NOT a contribution — a pack that declares ${notContributions.length === 1 ? 'it' : 'them'} alone brings nothing into a match)`
       : '';
@@ -1651,7 +1864,36 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // 版本声明（DESIGN §28.5）：`api` 是**模组 API** 的区间（钩子总线与 kit 契约），`game` 是**上游游戏版本**的区间，
   // 两者都用 shared/packs.js isVersionRange 的语法（`>=0.2.0`、`0.2.x`、`^0.2.0`、`~0.2.1`、`*`、`||`）。
   // `gameVersion` 保留一代作为 `game` 的别名：编辑器与现成的包都在写它，读的时候优先 `game`。
-  const api = strField(raw.api, 60);
+  //
+  // 三条**类型闸门先于一切**（B7 段）。理由是这个缺口最坏的地方不是「写错了没人管」，而是**失败方向是静默的**：
+  // `strField` 把非字符串读成 null，于是 `api: 1` 在下面两条 `api &&` 的校验里**都短路**，归一化结果 `api: null`
+  // —— 包当没声明一样通过，作者看到的是「包合法、我写的区间没生效」，正是本仓库 §1.1 那句「写了等于没写」。
+  // 三条纪律：
+  //   1. **只有键存在且不是字符串才拒**。缺键 / `undefined` / `null` **照旧一个字节都不受影响**：`null` 在
+  //      JSON 里的意思就是「没有值」—— 编辑器的写元数据那一端也把它当「删掉这个键」（`packMetaEditor.test.js`：
+  //      `description: null` ⇒ `!Object.hasOwn(obj, 'description')`），`layer` 的既有解析分支逐字相同
+  //      （`raw.layer === undefined || raw.layer === null ? null : …`）。所以「显式 null = 等于没写」是既有语义，
+  //      这里跟随它，不发明一条「null 也算无效声明」。空串 / 全空白同理（`""` 与 `"   "` 只是把键写成了空的）。
+  //   2. **空串不是错误**：它连区间都没写成，`BAD_API_RANGE` 也只对「写了但写坏」的**非空**区间开口。
+  //   3. **不问「这个字段有没有人读」**：`game` 有 `gameVersion` 兜底时，`game` 写坏仍然是错 —— 一个作者改错的
+  //      键如果只是被另一个键盖住，他看到的是「包里明明写着 game，怎么读出来是 gameVersion」。三个键各自的类型
+  //      独立判，判完再按 `game` > `gameVersion` 的既有优先级解析（这里**没有**改优先级）。
+  /** 一个**声明了就不能是别的类型**的字符串字段：`{ s }` 成功（缺省 / `null` / 空串读成 `null`），否则一个判罚。
+   *  与 `strField` 的分工是「谁负责报错」：它保持沉默，这一层点名。@type {(key: string, v: any, code: string) => { s?: string|null, bad?: object }} */
+  const declaredString = (key, v, code) => {
+    if (v === undefined || v === null) return { s: null };
+    if (typeof v === 'string') return { s: strField(v, 60) };
+    return { bad: fail(code, `"${key}" must be a string (a version range such as ">=1 <2" or "1.x"), got ${Array.isArray(v) ? 'an array' : typeof v} — a non-string declaration would be read as "not declared"`) };
+  };
+  const apiDecl = declaredString('api', raw.api, 'BAD_API_TYPE');
+  if (apiDecl.bad) return apiDecl.bad;
+  const gameDecl = declaredString('game', raw.game, 'BAD_GAME_TYPE');
+  if (gameDecl.bad) return gameDecl.bad;
+  // `gameVersion` 是别名，所以它拿同一个码：一个包声明了两个版本号而坏的那个叫 `gameVersion`，作者该知道的
+  // 是「这个键的类型不对」，而不是两个看起来无关的判罚。
+  const gameVersionDecl = declaredString('gameVersion', raw.gameVersion, 'BAD_GAME_TYPE');
+  if (gameVersionDecl.bad) return gameVersionDecl.bad;
+  const api = apiDecl.s;
   if (api && !isVersionRange(api)) return fail('BAD_API_RANGE', `"api": "${api}" is not a version range (">=1 <2", "1.x" …)`);
   // `api` 的可比对那一半（DESIGN §28.5 的前置项，本轮补上）：`shared/constants.js MOD_API_VERSION` 是钩子总线与
   // kit 契约的版本，**只在包自己声明了 `api` 时才比对** —— 没声明的包（今天所有的包）一个字节都不受影响。
@@ -1661,7 +1903,9 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (api && !appVersionMatches(api, `${MOD_API_VERSION}.0.0`)) {
     return fail('MOD_API_INCOMPATIBLE', `this pack declares "api": "${api}", which excludes the installed mod API ${MOD_API_VERSION} (DESIGN §28.5: write the range this pack was written against, or drop the field)`);
   }
-  const game = strField(raw.game, 60) ?? strField(raw.gameVersion, 60);
+  // 优先级**一字未改**（`game` > `gameVersion`），只是两边都已经过类型闸门，所以这里的 `??` 今天能到达的
+  // 只有「都写了、`game` 是空串」这一种情形 —— 空串读成没声明，于是落到 `gameVersion` 那一侧。
+  const game = gameDecl.s ?? gameVersionDecl.s;
   if (game && !isVersionRange(game)) return fail('BAD_GAME_RANGE', `"game": "${game}" is not a version range (">=0.2.0", "0.2.x" …)`);
   // 声明的层（DESIGN §28.1）：A 内容 / B 服务端逻辑 / C 客户端界面。写错了要拒，不能猜。
   const layer = raw.layer === undefined || raw.layer === null ? null : String(raw.layer).trim().toUpperCase();
@@ -2480,6 +2724,14 @@ export function applyWorkshop(base, packs) {
   // 时装（`pack.json.skins` → `assets.skins`）：与 art 同一条「并进既有清单、路径变绝对 URL」的路，
   // 所以客户端零改动就能 `ctx.data.get('assets').skins[charId]` 读到它（皮肤 mod 的 list/lookup 全靠这一张表）。
   mergeWorkshopSkins(out, packs, report);
+  // 形态（clip set）通道（`pack.json.forms` → `assets.modForms`）：与 art / skins 同一条「并进既有清单」的路，
+  // 所以客户端零改动就能 `data.get('assets').modForms` 读到它，`shared/packForms.js` 的 `formsFor` 把它折进
+  // 第一方 `FORMS`（第一方优先，§28.29）。包与包撞同名形态在**这里**点名（照跑 `artClaims` / `SKIN_COLLISION`
+  // 的既有规矩），因为「谁赢取决于加载次序」是这个仓库一直在拒绝的东西。
+  mergeWorkshopForms(out, packs, report);
+  // 静态相位（`pack.json.fx.silentPhases` → `assets.silentPhases`）：落点是同一张清单，但它不是素材，
+  // 而是 `fx/kinds.js` 那个 `SILENT_PHASES` Set 的成员集合 —— 去重 / 排序，声明次序不影响结果。
+  mergeWorkshopFx(out, packs, report);
   mergeWorkshopSupport(out, packs, report);
   // 自选池（`diy.ownedPool` / `diy.operators`）：读 `data.backups.units` 里那条已经合并好的记录，
   // 所以必须排在内容文件那一层之后 —— 它在这个函数里是最末一批，天然满足。
@@ -2956,6 +3208,8 @@ function mergeWorkshopSkins(data, packs, report) {
   const toUrl = (packId, p) => `${WORKSHOP_MEDIA_PREFIX}${packId}/${String(p).split('/').map(encodeURIComponent).join('/')}`;
   /** @type {Record<string, object[]>} */
   const byChar = {};
+  /** @type {Record<string, number>} 包 id → 真的并进 `assets.skins` 的套数（日志那一份，见函数尾）。 */
+  const entriesByPack = {};
   /** @type {Map<string, string>} `"<charId>|<skinId>"` → 占住它的包 id */
   const claimed = new Map();
   for (const pack of withSkins) {
@@ -2970,6 +3224,7 @@ function mergeWorkshopSkins(data, packs, report) {
         continue;
       }
       claimed.set(key, pack.id);
+      entriesByPack[pack.id] = (entriesByPack[pack.id] || 0) + 1;
       // 外观那一半与 art 同一条转换（字段级、spine 再往下一层）：复用 `artEntryUrls`，判据只有一份
       const art = isPlainObj(skin.art) ? artEntryUrls(skin.art, ART_TABLES.chars, (p) => toUrl(pack.id, p)) : null;
       const voices = isPlainObj(skin.voices)
@@ -2994,6 +3249,117 @@ function mergeWorkshopSkins(data, packs, report) {
   for (const [charId, arr] of Object.entries(byChar)) next[charId] = [...(Array.isArray(prevSkins[charId]) ? prevSkins[charId] : []), ...arr];
   data.assets = { ...assets, skins: next };
   report.skins = Object.fromEntries(Object.entries(byChar).map(([charId, arr]) => [charId, arr.length]));
+  // 启动日志那一份（`workshopSummary`）：按**包**数，而不是按干员。`report.skins` 的键是 charId（消费点按
+  // 干员问「有哪几套」），而日志说的是「这个包带来了几套」—— 两个问题，所以两张表，都从同一趟循环里出来。
+  // 数的是**真的进了 `assets.skins` 的那些**：被 `SKIN_COLLISION` 拒掉的与「清单不在」的都没进，也就不该出现在
+  // 这一行里（否则日志会替一个什么都没生效的包邀功）。
+  report.skinsByPack = Object.fromEntries(Object.entries(entriesByPack).filter(([, n]) => n));
+}
+
+/**
+ * 把包声明的**形态（clip set）**并进 `assets.modForms`（`pack.json.forms`，DESIGN §28.29）。
+ *
+ * 为什么落在 `assets.json`：形态是 spine 模型的伴生语义，而包的模型本来就并进这一张清单
+ * （`mergeWorkshopArt` / `mergeWorkshopFlatArt` / `mergeWorkshopSkins`），客户端**零改动**就能通过
+ * `data.get('assets')` 读到 —— 与 `assets.skins` 逐字同一条理由（见 mergeWorkshopSkins 的注释）。
+ *
+ * 落盘形状：`assets.modForms[spineId][formName] = { pack: '<包 id>', form: { change?…, roles } }` ——
+ * 带上 `pack` 是为了两件事：（a）两个包撞同名形态时谁赢了要说得出名字（`FORM_COLLISION`）；
+ * （b）客户端 `installPackForms` 按包 id 判「谁先占位」，于是**结果不取决于加载次序**。
+ *
+ * 第一方优先那一半不在这里判：`FORMS_FIRST_PARTY_OVERLAP` 在形状层（`parseFormsDecl`）就已经把
+ * 「包想盖第一方」拒了，所以并到这里的每一条都是第一方没有的形态名。第二道闸仍在客户端
+ * （`installPackForms` 显式丢掉同名条目并报出来），因为浏览器拿到的是 JSON，而那张清单不该被信任。
+ */
+function mergeWorkshopForms(data, packs, report) {
+  const list = [...(Array.isArray(packs) ? packs : [])].sort(byPackId);
+  const withForms = list.filter((p) => isPlainObj(p?.forms) && Object.keys(p.forms).length);
+  if (!withForms.length) return;
+  const assets = isPlainObj(data.assets) ? data.assets : null;
+  if (!assets) {
+    for (const pack of withForms) {
+      report.errors.push({
+        pack: pack.id, file: 'assets', id: 'forms', code: 'MANIFEST_MISSING',
+        reason: 'this pack declares forms (clip sets), but data/assets.json is missing — run `npm run assets` so the client has a manifest to extend',
+      });
+    }
+    return;
+  }
+  /** @type {Record<string, Record<string, object>>} */
+  const bySpine = {};
+  /** @type {Map<string, string>} `"<spine id>|<form name>"` → 占住它的包 id */
+  const claimed = new Map();
+  /** @type {Record<string, string[]>} 包 id → 真的并进去的 `"<spine id>|<形态名>"` */
+  const byPack = {};
+  for (const pack of withForms) {
+    for (const [table, entries] of Object.entries(pack.forms)) {
+      for (const [id, forms] of Object.entries(entries)) {
+        for (const [kind, form] of Object.entries(forms)) {
+          const key = `${id}|${kind}`;
+          const holder = claimed.get(key);
+          if (holder) {
+            report.errors.push({
+              pack: pack.id, file: 'assets', id: `forms.${table}.${id}.${kind}`, code: 'FORM_COLLISION', definedBy: holder,
+              reason: `another pack (${holder}) already adds the form "${kind}" on spine "${id}"; the pack with the smaller id keeps it — rename the form, or let "${holder}" drop it`,
+            });
+            continue;
+          }
+          claimed.set(key, pack.id);
+          ((bySpine[id] ||= {})[kind] = { pack: pack.id, form });
+          (byPack[pack.id] ||= []).push(`forms.${table}.${id}.${kind}`);
+        }
+      }
+    }
+  }
+  if (!Object.keys(bySpine).length) return;
+  const prev = isPlainObj(assets.modForms) ? assets.modForms : {};
+  const next = { ...prev };
+  for (const [spineId, forms] of Object.entries(bySpine)) {
+    next[spineId] = { ...(isPlainObj(prev[spineId]) ? prev[spineId] : {}), ...forms };
+  }
+  data.assets = { ...assets, modForms: next };
+  for (const arr of Object.values(byPack)) arr.sort();
+  report.forms = byPack;
+}
+
+/**
+ * 把包声明的**静态相位**并进一个数据文件（`pack.json.fx.silentPhases`，DESIGN §28.29）。
+ *
+ * 落点与形态不同：相位名不是素材，是 `fx/kinds.js` 里一个 Set 的成员，所以它并进 `assets.silentPhases`。
+ * 为什么仍然走 `assets.json`：客户端的 `fxSpec` 在**每一个特效**上被调用，它必须是一次同步查表，不能是
+ * 「等一个文件加载」——而 `assets.json` 是渲染层启动时就已经在手里的那份清单（`ui/fieldHost.js` 把它交给
+ * 渲染器），所以它是这条通道唯一不需要新增取数路径的家。
+ *
+ * 去重 + 排序：`silentPhases` 是**声明**（谁先说的不重要），两句话说同一件事不该变成两个成员。
+ */
+function mergeWorkshopFx(data, packs, report) {
+  const list = [...(Array.isArray(packs) ? packs : [])].sort(byPackId);
+  const withPhases = list.filter((p) => isPlainObj(p?.fx) && Array.isArray(p.fx.silentPhases) && p.fx.silentPhases.length);
+  if (!withPhases.length) return;
+  const assets = isPlainObj(data.assets) ? data.assets : null;
+  if (!assets) {
+    for (const pack of withPhases) {
+      report.errors.push({
+        pack: pack.id, file: 'assets', id: 'fx', code: 'MANIFEST_MISSING',
+        reason: 'this pack declares fx.silentPhases, but data/assets.json is missing — run `npm run assets` so the client has a manifest to extend',
+      });
+    }
+    return;
+  }
+  const prev = Array.isArray(assets.silentPhases) ? assets.silentPhases : [];
+  const merged = [...prev];
+  /** @type {Record<string, string[]>} */
+  const byPack = {};
+  for (const pack of withPhases) {
+    for (const kind of pack.fx.silentPhases) {
+      if (!merged.includes(kind)) merged.push(kind);
+      (byPack[pack.id] ||= []).push(kind);
+    }
+  }
+  merged.sort();
+  for (const arr of Object.values(byPack)) arr.sort();
+  data.assets = { ...assets, silentPhases: merged };
+  report.silentPhases = byPack;
 }
 
 /**
@@ -3070,21 +3436,44 @@ function mergeWorkshopFlatArt(data, packs, report) {
     return;
   }
   const next = { ...data.assets };
+  /** 这一趟**真的并进去了**的表（缺落点的那几张不算：日志里数了却没并，就是一句假话）。 */
+  const merged = new Set();
   for (const table of tables) {
-    // `target` 就是那张表在 `assets.json` 里的路径：`['skills']` 或 `['prof','sub']`。**逐个**段浅复制
-    // （长度 1 时落点就是 `assets.skills` 这个表本身 —— 要往表里写，不是把整张表换成一条路径）。
+    const target = ART_TABLES[table].target;
+    // 「清单里**本来就有**这张表」是写入的前置条件 —— `mergeWorkshopItemIcons` 对 `assets.items` 立的是同一条
+    // 规矩（`:3021`），理由也一样：`art.bonds` / `art.bands` 的用途是给**已有的**盟约/分队配图（`assets.bonds` /
+    // `assets.bands` 是素材管线产物，官方那 23 + 40 条），把一个不存在的落点凭空造出来，就成了「客户端按 id 查得到
+    // 一张图，可 `data/bonds.json` 里根本没有这个盟约」的假象。缺这张表时**点名报告**，让作者去跑 `npm run assets`。
+    //
+    // 守卫只对**落点是 `assets.<表>` 自己**的扁平表生效（`bonds` / `bands`）。`skills` / `profSub` 的落点是
+    // `assets.skills` / `assets.prof.sub` —— 那两张是 art 这一层**本来就在创建**的表（既有语义，见
+    // test/workshopOperators.test.js「并进 assets.skills / assets.prof.sub」那组用例），对它们查 pre-existence
+    // 会把一条已经定下来的行为改掉。
+    const ownMap = target.length === 1 && target[0] === table;
+    if (ownMap && !isPlainObj(next[target[0]])) {
+      for (const p of list) {
+        if (!Object.hasOwn(isPlainObj(p?.art) ? p.art : {}, table)) continue;
+        report.errors.push({
+          pack: p.id, file: 'assets', id: `art.${table}`, code: 'MANIFEST_MISSING',
+          reason: `this pack ships art.${table} icons, but data/assets.json has no "${target[0]}" map — run \`npm run assets\` so the client has a table to extend`,
+        });
+      }
+      continue;
+    }
+    // **逐个**段浅复制（长度 1 时落点就是 `assets.<表>` 这个表本身 —— 要往表里写，不是把整张表换成一条路径）。
     const chain = [];
     let cur = /** @type {Record<string, any>} */ (next);
-    for (const seg of ART_TABLES[table].target) {
+    for (const seg of target) {
       const inner = isPlainObj(cur[seg]) ? { ...cur[seg] } : {};
       chain.push({ owner: cur, key: seg, value: inner });
       cur = inner;
     }
     for (const [id, url] of Object.entries(index[table])) cur[id] = url;
     for (let i = chain.length - 1; i >= 0; i--) chain[i].owner[chain[i].key] = chain[i].value;
+    merged.add(table);
   }
   data.assets = next;
-  report.flatArt = artClaimCounts(claimed, (t) => ART_TABLES[t]?.flat);
+  report.flatArt = artClaimCounts(claimed, (t) => merged.has(t));
 }
 
 /** 一个条目按字段合并；`spine` 再往里一层（一侧之内的字段逐项合并，见 mergeWorkshopArt 的注释）。 */
@@ -3313,10 +3702,30 @@ export function workshopSummary(report) {
     if (itemIcons) bits.push(`${itemIcons.length} item icon${itemIcons.length === 1 ? '' : 's'}`);
     const art = report.art && report.art[p.id];
     if (art) bits.push(`${art.length} art entr${art.length === 1 ? 'y' : 'ies'} (${art.join(', ')})`);
-    // 扁平图标表（`assets.skills` / `assets.prof.sub`）与上面那条分开数：它们的落点不是 `assets.<表>`，
-    // 一条日志里混在一起会让读的人去 assets.chars 里找一个技能图标。
+    // 时装（`pack.json.skins`）：漏了这一段，一个带来 271 套时装的包在启动日志里就是 "nothing" ——
+    // 而「装了但什么都没发生」正是这一层最容易被读错的那种失败（业主实测 skin-catalogue 撞上的就是它）。
+    const skins = report.skinsByPack && report.skinsByPack[p.id];
+    if (skins) bits.push(`${skins} outfit${skins === 1 ? '' : 's'}`);
+    // 扁平表（`assets.skills` / `assets.prof.sub` / `assets.bonds` / `assets.bands`）与上面那条分开数：它们的落点
+    // 不是 `assets.<表>`，一条日志里混在一起会让读的人去 assets.chars 里找一个技能图标。
+    //
+    // **每一张扁平表各占一句 `<表> +N (…)`**，分组规则从 `ART_TABLES[表].target` 推出来，不硬编码表名。
+    // 以前这四张表被糊成一句 `N icons`（`art.bonds` 是盟约**图集**，不是图标），读日志的人会去 `assets.skills`
+    // 里找一个盟约 id；而「表名 + N」正好是作者能在 `pack.json` 里对照着改的那个名字。
     const flatArt = report.flatArt && report.flatArt[p.id];
-    if (flatArt) bits.push(`${flatArt.length} icon${flatArt.length === 1 ? '' : 's'} (${flatArt.join(', ')})`);
+    if (flatArt) {
+      /** @type {Map<string, string[]>} */
+      const byTable = new Map();
+      for (const key of flatArt) {
+        const table = key.slice(0, key.indexOf('.'));
+        if (!byTable.has(table)) byTable.set(table, [key]);
+        else /** @type {string[]} */ (byTable.get(table)).push(key);
+      }
+      for (const table of [...byTable.keys()].sort()) {
+        const keys = /** @type {string[]} */ (byTable.get(table));
+        bits.push(`${table} +${keys.length} (${keys.join(', ')})`);
+      }
+    }
     const support = report.support && report.support[p.id];
     if (support) bits.push(`助战 +${support.length}`);
     const operators = report.operators && report.operators[p.id];

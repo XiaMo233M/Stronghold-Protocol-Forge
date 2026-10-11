@@ -19,8 +19,11 @@ export const TEXT_SIZES = Object.freeze(['sm', 'md', 'lg', 'xl']);
  * voiceLang: the 配音语言 every operator speaks unless it has its own (VOICE_LANGS).
  * voiceLangByChar: charId → dub, the per-operator override of 干员详情 / 干员调配 → 配音 (absent = follow voiceLang).
  * textSize: TEXT_SIZES (css/theme.css `--t`, applied by ui/settings.js applyTextSize).
+ * workshopSkins: 工坊时装（`pack.json.skins` + 一个注册了的外观提供者）要不要生效 —— 见
+ *   `public/js/ui/portraitChain.js` 的步骤 0。默认 **true**：装了一套时装却什么都不发生，比「能关掉」
+ *   更让人困惑。关掉时解析链与「这一版之前」逐字相同（那条不变量由 `test/ui/portraitChain.test.js` 钉住）。
  */
-export const DEFAULT_SETTINGS = Object.freeze({ bgm: 0.6, sfx: 0.8, voice: 0.8, muted: false, damageNumbers: true, quality: 'high', textSize: 'sm', keys: DEFAULT_HOTKEYS, voiceLang: DEFAULT_VOICE_LANG, voiceLangByChar: Object.freeze({}) });
+export const DEFAULT_SETTINGS = Object.freeze({ bgm: 0.6, sfx: 0.8, voice: 0.8, muted: false, damageNumbers: true, workshopSkins: true, quality: 'high', textSize: 'sm', keys: DEFAULT_HOTKEYS, voiceLang: DEFAULT_VOICE_LANG, voiceLangByChar: Object.freeze({}) });
 
 /**
  * The 配音语言 vocabulary (settings 语音语言) under upstream 0.2.2's name: the canonical list is shared/constants.js
@@ -85,7 +88,8 @@ export function voiceLangFor(s, charId) {
 /**
  * Sanitize persisted settings.
  * @param {any} raw
- * @returns {{ bgm: number, sfx: number, voice: number, muted: boolean, damageNumbers: boolean, quality: 'high'|'medium'|'low',
+ * @returns {{ bgm: number, sfx: number, voice: number, muted: boolean, damageNumbers: boolean, workshopSkins: boolean,
+ *   quality: 'high'|'medium'|'low',
  *   textSize: 'sm'|'md'|'lg'|'xl', keys: Record<'refresh'|'freeze'|'levelUp'|'retreat'|'sell'|'ready', string>,
  *   voiceLang: 'cn'|'jp'|'en'|'kr', voiceLangByChar: Record<string, 'cn'|'jp'|'en'|'kr'> }}
  */
@@ -98,6 +102,7 @@ export function sanitizeSettings(raw) {
     voice: vol(r.voice, DEFAULT_SETTINGS.voice),
     muted: typeof r.muted === 'boolean' ? r.muted : DEFAULT_SETTINGS.muted,
     damageNumbers: typeof r.damageNumbers === 'boolean' ? r.damageNumbers : DEFAULT_SETTINGS.damageNumbers,
+    workshopSkins: typeof r.workshopSkins === 'boolean' ? r.workshopSkins : DEFAULT_SETTINGS.workshopSkins,
     quality: QUALITIES.includes(r.quality) ? r.quality : DEFAULT_SETTINGS.quality,
     textSize: TEXT_SIZES.includes(r.textSize) ? r.textSize : DEFAULT_SETTINGS.textSize,
     keys: sanitizeHotkeys(r.keys),

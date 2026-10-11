@@ -93,6 +93,22 @@ export const MOD_SURFACE = Object.freeze([
     spec: '§28.13',
   },
   {
+    id: 'skins',
+    layer: 'A',
+    decl: 'pack.json.skins[] = { id, charId, name, series?, desc?, art?, voices? } + 包内素材',
+    // 三处锚点各钉一半：**字段闭集**（写错的名字点名拒绝，SKIN_FIELDS）、**顶层声明**（PACK_FIELDS 里有
+    // `skins`，否则这个键会被 PACK_UNKNOWN_FIELD 拒掉）、以及**落点**（合并进 `assets.skins` 的那一条）。
+    anchors: [{ symbol: 'SKIN_FIELDS' }, { symbol: 'PACK_FIELDS', members: ['skins'] }, { symbol: 'SKIN_ID_RE' }],
+    requires: [
+      '`art` 与 `art.chars` 同形（复用同一套解析器：路径必须包内相对、spine 要齐 skel + atlas）—— 引擎不认识「皮肤」，这里只判形状',
+      '**数据**在包声明里，**行为**（哪一套生效）在一个注册了的外观提供者里（`client.panels[].appearance`）',
+      '一个进程最多一个外观提供者，且玩家可以用设置里的「工坊外观」把它整个关掉 ⇒ 关掉时解析链与不装包逐字相同',
+    ],
+    files: ['shared/workshop.js', 'server/workshop.js', 'public/js/ui/portraitChain.js', 'public/js/ui/extensions.js'],
+    tests: ['test/workshopSkins.test.js', 'test/ui/portraitChain.test.js', 'test/lobby-appearance.test.js'],
+    spec: '§28.28',
+  },
+  {
     id: 'notices',
     layer: 'A',
     decl: 'pack.json.notices = { <栏目>: <文本> }',
@@ -138,9 +154,16 @@ export const MOD_SURFACE = Object.freeze([
     layer: 'B',
     decl: 'pack.json.server.modules = { module, uses[] }',
     anchors: [{ symbol: 'SERVER_MEMBERS', members: ['modules'] }, { symbol: 'SERVER_MODULE_USES' }],
-    requires: ['只允许 uses 里那几个生命周期钩子', '源码过静态确定性扫描（无 process / require / eval）'],
-    files: ['shared/workshop.js', 'server/modModules.js', 'shared/kitAuthoring.js'],
-    tests: ['test/packServerModules.test.js', 'test/packServerModulesWire.test.js'],
+    requires: [
+      '只允许 uses 里那几个生命周期钩子',
+      '源码过静态确定性扫描（无 process / require / eval）',
+      // 这一格唯一的**网络触发点**：`uses` 含 `matchClass`（⇒ 必须 `combat: true`）的包，其 MatchClass 子类上的
+      // `handlePackMsg(playerId, msg)` 会在 `pack.msg` 限流之后、转发之前被调到一次；返回 `true` /
+      // `{ consumed: true }` = 已消费（不再转发），其余返回值与抛错都按未消费继续转发。
+      '`matchClass` 子类上的 `handlePackMsg(playerId, msg)` 是唯一一条由消息驱动的调用点（见 DESIGN §28.14）',
+    ],
+    files: ['shared/workshop.js', 'server/modModules.js', 'server/lobby.js', 'shared/kitAuthoring.js'],
+    tests: ['test/packServerModules.test.js', 'test/packServerModulesWire.test.js', 'test/packMatchMsg.test.js'],
     spec: '§28.14',
   },
   {
@@ -298,6 +321,42 @@ export const MOD_SURFACE = Object.freeze([
     tests: ['test/modClientHosts.test.js'],
     spec: '§28.13',
   },
+  {
+    id: 'forms',
+    layer: 'C',
+    decl: 'pack.json.forms = { chars|enemies|tokens: { "<spine id>": { "<形态名>": { change?, end?, leave?, next?, roles } } } }',
+    anchors: [
+      // 锚点住在 `shared/packForms.js`（形态通道的统一入口），不是 `schema` —— 三张名单都在那里，
+      // 所以 `module` 必须写出来，否则守卫会去 `shared/workshop.js` 找一个不存在的导出。
+      { symbol: 'FORM_TABLES', module: 'packForms' },
+      { symbol: 'FORM_KIND_RE', module: 'packForms' },
+      { symbol: 'FORM_ROLE_KEYS', module: 'packForms' },
+      { symbol: 'PACK_FIELDS', members: ['forms'] },
+    ],
+    requires: [
+      '第一方 `FORMS` 优先：与第一方同名的形态在形状层就被 `FORMS_FIRST_PARTY_OVERLAP` 拒掉（宁可拒绝，不要静默丢掉）',
+      '`roles` 的键必须是 `FORM_ROLE_KEYS` 里的，clip 名必须是非空字符串（或 `{ begin, loop, end }`）',
+      '`next` 必须指向同一个 spine id 上已声明的形态（第一方或本包），否则 `FORMS_NEXT_UNKNOWN`',
+      '包只做增量：合并结果里第一方的条目一个字节不变（`shared/packForms.js formsFor`）',
+    ],
+    files: ['shared/workshop.js', 'shared/packForms.js', 'shared/formNames.js', 'public/js/render/units.js', 'public/js/render/app.js', 'public/js/assets.js'],
+    tests: ['test/packForms.test.js'],
+    spec: '§28.29',
+  },
+  {
+    id: 'fx.silentPhases',
+    layer: 'C',
+    decl: 'pack.json.fx = { silentPhases: ["<phase kind>", …] }',
+    anchors: [{ symbol: 'PACK_FIELDS', members: ['fx'] }],
+    requires: [
+      '并集：第一方那两个（`bombed` / `warning`）永远静默，包只能**加**，取消不了',
+      '每一项必须是非空字符串（`FX_BAD_SILENT_PHASE`）；未知字段点名拒绝（`FX_UNKNOWN_FIELD`）',
+      '落点是 `assets.silentPhases`，`fxSpec` 在每一个特效上同步查它',
+    ],
+    files: ['shared/workshop.js', 'public/js/assets.js', 'public/js/render/fx/kinds.js'],
+    tests: ['test/packForms.test.js'],
+    spec: '§28.29',
+  },
   // ------------------------------------------------------------------ 发行：房间集合与对齐
   {
     id: 'mods.catalog',
@@ -305,8 +364,11 @@ export const MOD_SURFACE = Object.freeze([
     decl: '客户端 mod 目录与房间声明（welcome.modPanels / room modIds）',
     anchors: [{ symbol: 'PACK_ID_RE' }],
     requires: ['房间声明了 modIds 时，只有它点名的包参与（W-B）', '两端的字节要能对齐（W-D：摘要一致才开局）'],
-    files: ['server/modCatalog.js', 'server/roomAssets.js', 'public/js/mods/store.js', 'public/js/mods/align.js', 'public/js/mods/sync.js'],
-    tests: ['test/modCatalog.test.js', 'test/modAlign.test.js', 'test/roomModSet.test.js'],
+    // `server/packFiles.js` 加进来是业主裁决 B（§28.2）的直接后果：**一个枚举器**同时产出身份哈希的文件清单与
+    // 客户端下载清单，两份清单漂移 = 干净客户端下不到「被声明模块 import 的那个文件」。所以它也是这一格的一部分
+    // —— 改名或挪走就是打断「摘要 = 下载清单 = 会被执行/读到的文件」这条契约。
+    files: ['server/modCatalog.js', 'server/packFiles.js', 'server/roomAssets.js', 'public/js/mods/store.js', 'public/js/mods/align.js', 'public/js/mods/sync.js'],
+    tests: ['test/modCatalog.test.js', 'test/packFileSet.test.js', 'test/modAlign.test.js', 'test/roomModSet.test.js'],
     spec: '§28.16',
   },
 ]);

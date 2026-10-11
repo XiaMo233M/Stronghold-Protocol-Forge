@@ -9,7 +9,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BOND_LAYER_CAP, BOSS_HIT_LIMIT, layerGainRoom } from '../../shared/constants.js';
+import { BOND_LAYER_CAP, BOSS_HIT_LIMIT, bossHitLimitFrom, layerGainRoom } from '../../shared/constants.js';
 import { makeBattle, chessRec, enemyRec } from '../helpers/battleHarness.js';
 import { gainLayers } from '../../server/sim/content/support/index.js';
 import { SharedBossPool } from '../../server/match/finalAssault.js';
@@ -28,6 +28,23 @@ const LIMIT = BOSS_HIT_LIMIT;
 test('switches: BOND_LAYER_CAP = 999 (MAX_GARRISON_STACK), BOSS_HIT_LIMIT = 300000 (MAX_BATTLE_DAMAGE)', () => {
   assert.equal(BOND_LAYER_CAP, 999);
   assert.equal(BOSS_HIT_LIMIT, 300000);
+  // …AND the 300000 is the DEFAULT, not the only possibility: a deployment can override it per process
+  // (百卫补丁 v0.3 移植, docs/PS100-MIGRATION.md §5) — `bossHitLimitFrom` is the pure parser, `undefined` means
+  // "keep BOSS_HIT_LIMIT". Nothing here weakens the assertion above: an unset environment still yields 300000.
+  assert.equal(bossHitLimitFrom({}), undefined, 'no SP_BOSS_HIT_LIMIT ⇒ keep the official default');
+  assert.equal(bossHitLimitFrom(undefined), undefined);
+  assert.equal(bossHitLimitFrom({ SP_BOSS_HIT_LIMIT: '' }), undefined);
+  assert.equal(bossHitLimitFrom({ SP_BOSS_HIT_LIMIT: '  ' }), undefined);
+  // the constant's own documented "0 / Infinity = off" semantics are preserved by the override
+  assert.equal(bossHitLimitFrom({ SP_BOSS_HIT_LIMIT: '0' }), Infinity, '0 = off, like the constant');
+  for (const off of ['off', 'OFF', 'infinity', 'Infinity', 'inf']) {
+    assert.equal(bossHitLimitFrom({ SP_BOSS_HIT_LIMIT: off }), Infinity, `${off} = off`);
+  }
+  assert.equal(bossHitLimitFrom({ SP_BOSS_HIT_LIMIT: '500000' }), 500000, 'a different rail');
+  assert.equal(bossHitLimitFrom({ SP_BOSS_HIT_LIMIT: ' 750000 ' }), 750000, 'whitespace tolerated');
+  for (const bad of ['junk', '-5', 'NaN', '1e999']) {
+    assert.equal(bossHitLimitFrom({ SP_BOSS_HIT_LIMIT: bad }), undefined, `unusable ${bad} ⇒ the official default`);
+  }
 });
 
 test('layerGainRoom: min(n, 999 − before), never negative, never lowers a count; +Infinity = the room left', () => {

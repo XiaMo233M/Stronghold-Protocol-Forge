@@ -51,6 +51,8 @@
 | `units.operators` | `operators` / `support` + `units.json` | 干员记录必须带 `UNIT_REQUIRED_FIELDS` 那几个键 | §28.10 |
 | `media.voices` | `voices` / `voiceLangs` + 包内音频 | 只服务登记过的 URL | §28.13 |
 | `media.icons` | `bondIcons` / `itemIcons` / `art` | 路径是包内相对路径；素材不进 git | §28.13 |
+| `skins` | `skins[] = { id, charId, name, series?, desc?, art?, voices? }` + 包内素材 | `art` 与 `art.chars` 同形（复用同一套解析器）；**哪一套生效**在一个注册了的外观提供者里（链按 `kind` 各问一次：`'portrait'` / `'avatar'`，于是立绘与头像**分开受控**；调用方点名版本——`_1`/`_2` 后缀、`isGolden`、`{ variant: 'elite' }`——时提供者不参与），且玩家可以用设置里的「工坊外观」整个关掉 —— 关掉时解析链与不装包逐字相同 | §28.28 |
+
 | `notices` | `notices = { 栏目: 文本 }` | 纯文本，结构化但不执行 | §28.15 |
 | `i18n` | `i18n = { 语言码: 包内 .json }` | 文件名必须是语言码 | §28.13 |
 
@@ -60,7 +62,7 @@
 |---|---|---|---|
 | `server.preDispatch` | `server.preDispatch = { module, policy, intercepts }` | `intercepts` 必须是 `shared/protocol.js` C2S 里的类型名 | §28.13 |
 | `server.meta` | `server.meta = { module, registers }` | `registers` 的每一类都要有对应键 | §28.13 |
-| `server.modules` | `server.modules = { module, uses[] }` | 只用 `SERVER_MODULE_USES` 里的钩子；源码过静态确定性扫描 | §28.14 |
+| `server.modules` | `server.modules = { module, uses[] }` | 只用 `SERVER_MODULE_USES` 里的钩子；源码过静态确定性扫描。`uses` 含 `matchClass`（⇒ 必须 `combat: true`）时，子类的 `handlePackMsg(playerId, msg)` 会在 `pack.msg` **限流之后、转发之前**被调到一次：返回 `true` / `{ consumed: true }` = 已消费（不再转发），其余返回值与抛错都按未消费继续转发 | §28.14 |
 | `server.battle` | `server.battle = { module }` | `combat: true`；两端跑同一段字节；只能 import `@battle/` 与 `@sim/` | §28.17 |
 | `server.room` | `server.room = { module }` | **不**要 `combat: true`：只读观察面（快照/访问器/订阅），返回值被忽略 ⇒ 改不了谁在玩、装了什么、这一局的结果；import 只走 `@sim/` | §28.20 |
 | `kits.relativeImports` | `kits/<id>.js` 里的 `./…`（含 `kits/_shared.js` 这类辅助文件） | 只许**向下**相对（`..`/绝对/`%`/反斜杠/非 `.js` 仍拒）；按「出现 import 的那个文件」自己的目录解析，两端同一文件；辅助文件字节进身份哈希（`kits/**/*.js` 递归） | §28.18 |
@@ -79,6 +81,8 @@
 | `client.panels.data` | `client.panels[].data[]` | 表必须在 `CLIENT_PANEL_DATA_TABLES` 里；拿到的是只读快照 | §28.8 |
 | `client.panels.messages` | `client.panels[].messages[]` | 类型名由引擎定（`pack.msg`），通道名由包定；有额度与限流 | §28.8 |
 | `client.requires` | `client.requires[]` | 缺一即「浏览器不支持」，不是静默不工作 | §28.13 |
+| `forms` | `forms = { chars\|enemies\|tokens: { "<spine id>": { "<形态名>": { change?, end?, leave?, next?, roles } } } }` | **第一方 `FORMS` 优先**：与第一方同名的形态在形状层就被 `FORMS_FIRST_PARTY_OVERLAP` 拒掉（宁可拒绝，不要静默丢掉）；`roles` 的键 ∈ `FORM_ROLE_KEYS`、clip 名是非空字符串（或 `{ begin, loop, end }`）；`next` 必须指向同一个 spine id 上已声明的形态，否则 `FORMS_NEXT_UNKNOWN`；两个包撞同一个 `spine id + 形态名` 时包 id 小的赢（`FORM_COLLISION`） | §28.29 |
+| `fx.silentPhases` | `fx = { silentPhases: ["<phase kind>", …] }` | **并集**：第一方那两个（`bombed` / `warning`）永远静默，包只能加、取消不了；每一项必须是非空字符串（`FX_BAD_SILENT_PHASE`），未知字段点名拒绝（`FX_UNKNOWN_FIELD`）；落点 `assets.silentPhases`，`fxSpec` 在每个特效上同步查它 | §28.29 |
 
 ### 发行
 

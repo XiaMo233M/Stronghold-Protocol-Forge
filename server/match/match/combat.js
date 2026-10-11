@@ -9,17 +9,18 @@ import { withBounties } from '../waves.js';
 import { planUnite } from '../unite.js';
 import { FieldRunner, DeadBattle } from '../fields.js';
 import { DELAYS } from './common.js';
+import { battleOptsFromMatch } from './battleOpts.js';
 
 export class MatchCombat {
   /** Construct a battle; a constructor failure yields a finished stand-in (clean result) and is logged. */
   newBattle(opts) {
-    const full = { data: this.ds, content: this.battleContent, logger: this.log, ...opts };
-    // 工坊行为层 (docs/WORKSHOP.md §4): the pack's kits are the real functions on the server (the browser rebuilds them
-    // from `workshopKitModules`); an explicit opts.kits always wins.
-    if (this.workshopKits && !full.kits) full.kits = this.workshopKits;
-    // 包声明的战斗逻辑（`server.battle`, DESIGN §28.17）：服务端跑的这一场用同一批 installer（浏览器那边按 spec 的
-    // URL 自己加载）。没有包声明时 `this.battleInstallers` 是 null，这个键就不出现 —— 行为与从前逐字节相同。
-    if (Array.isArray(this.battleInstallers) && this.battleInstallers.length && !full.battleInstallers) full.battleInstallers = this.battleInstallers;
+    // The assembly both Battle paths share (server/match/match/battleOpts.js): `this.ds` / `this.battleContent` /
+    // `this.log` under the caller's own options, then the match's kit tables (`kits`, `tokenKits` — docs/WORKSHOP.md
+    // §4 / §4.7, the room-trimmed `roomAssets.forRoom(room.modSet)` maps), the pack's battle installers
+    // (DESIGN §28.17) and the 限伤 override. An explicit opts.<key> always wins; a match without packs sets no key, so
+    // a plain install builds byte-for-byte the battle it built before each feature landed. `_specBattle` (复算) calls
+    // the same helper, so a sixth key cannot reach one path and stop at the other.
+    const full = battleOptsFromMatch(this, opts);
     try {
       return new this.BattleClass(full);
     } catch (e) {
@@ -71,6 +72,10 @@ export class MatchCombat {
       fieldId: `n:${ps.playerId}`,
       enemyOverrides: wave.overrides,
       waveId: wave.templateId,
+      // 限伤 override for the CLIENT-run spec (shared/constants.js bossHitLimitFrom): only present when a deployment
+      // set it, so an unconfigured server sends byte-for-byte the old spec (and server/sim/spec.js is left untouched
+      // by the key's absence).
+      ...(this.bossHitLimit === undefined ? {} : { bossHitLimit: this.bossHitLimit }),
     };
   }
 

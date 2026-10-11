@@ -983,11 +983,15 @@ export function createPanelRegistry(deps) {
      * `appearance(ctx)`，返回 `{ lookup(kind, charId, id), list(charId) }`。它在模块 import 之后、`mount` 之前被调用，
      * 拿到的 `ctx` 与面板同一份（所以它同样没有 store / match / battle）。
      *
+     * **`kind` 是 `'portrait'` / `'avatar'`**：链按这一条 kind 各问一次、只取这一条 kind 的字段，所以立绘与
+     * 头像在提供者这一层就是两件可分开回答的事（偏好按 kind 分开记也是提供者自己的事）。步骤 4 那个
+     * `opts.lookup` 是**另一条口**（历史形状，第一参数恒为 `'chars'`），两者不是同一个问题。
+     *
      * 三条性质，每条都有理由：
      *   * **进程内最多一个提供者**：后注册者被**点名拒绝**（`CLIENT_APPEARANCE_TAKEN`）—— 「谁提供外观」不能有歧义，
      *     否则同一个干员的立绘取决于两个 mod 的加载次序；
      *   * **注册进解析链的唯一 hook**（`portraitChain.setAppearanceLookup`）：链本身不认识「皮肤」，
-     *     它只知道「有一个函数可能回答这个 id」；
+     *     它只知道「有一个函数可能回答这个 (kind, charId, id)」；
      *   * **没有提供者时链与今天逐字相同**（`currentAppearanceLookup()` 返回 `undefined`）。
      *
      * 为什么放在面板模块上而不是另开一个「mod 清单」：客户端能加载的代码只有**服务端声明过的那几条**

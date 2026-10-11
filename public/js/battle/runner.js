@@ -125,34 +125,43 @@ export function compactHeld(list) {
 export const SIM_DATA_FILES = Object.freeze(['chess', 'enemies', 'tokens', 'stages', 'waves', 'bonds', 'items', 'garrisons', 'bands', 'effects', 'backups']);
 
 /**
- * 工坊行为层 (docs/WORKSHOP.md §4): build the per-battle kit map from `spec.workshopKits` — the JSON-safe module list the
- * server puts in the spec, because a function cannot cross the wire. The map is handed to createBattleFromSpec
- * (`opts.kits`), which server/sim/content/index.js setupUnitKit consults BEFORE the built-in registry.
+ * 工坊行为层 (docs/WORKSHOP.md §4): build the per-battle kit maps from `spec.workshopKits` — the JSON-safe module list the
+ * server puts in the spec, because a function cannot cross the wire. The maps are handed to createBattleFromSpec
+ * (`opts.kits` for operators, `opts.tokenKits` for summons), which server/sim/content/index.js setupUnitKit consults
+ * BEFORE the built-in registries.
+ *
+ * **Two key spaces, one list** (§4.7): the engine resolves a kit either by an operator key (`def.charId` / `def.baseId`
+ * / `def.id`) or by a summon's token record id. Both travel in `spec.workshopKits`, and a summon module carries
+ * `kind: 'token'` — the same marker the loader put on it, because the two spaces are arbitrated separately server-side
+ * (an id may be known in both). A module with no `kind` is an OPERATOR kit, exactly as before this channel existed.
  *
  * This function is the reason the behaviour layer cannot be server-only: the server re-computes a client's battle result
  * with the SAME kits, so a browser that silently fell back to the generic kit would produce a result the server rejects.
  * A module that fails to load is reported and skipped rather than hidden.
- * @param {{ workshopKits?: Array<{ id: string, url: string }> }|null} spec
- * @returns {Promise<Record<string, Function>|undefined>} undefined when the field needs no workshop kits
+ * @param {{ workshopKits?: Array<{ id: string, url: string, kind?: string }> }|null} spec
+ * @returns {Promise<{ kits: Record<string, Function>, tokenKits: Record<string, Function> }>} `{}`-valued maps when the
+ *   field needs no workshop kits (both maps are always objects, so a caller never has to test for undefined)
  */
 export async function loadSpecKits(spec) {
   const list = Array.isArray(spec && spec.workshopKits) ? spec.workshopKits : [];
-  if (!list.length) return undefined;
   /** @type {Record<string, Function>} */
   const kits = {};
+  /** @type {Record<string, Function>} */
+  const tokenKits = {};
+  if (!list.length) return { kits, tokenKits };
   for (const m of list) {
     // only a same-origin, root-relative URL is ever imported (the server built this list itself)
     if (!m || typeof m.id !== 'string' || typeof m.url !== 'string' || !m.url.startsWith('/')) continue;
     try {
       const mod = await import(/* @vite-ignore */ m.url);
       const fn = typeof mod.default === 'function' ? mod.default : (typeof mod.kit === 'function' ? mod.kit : null);
-      if (typeof fn === 'function') kits[m.id] = fn;
+      if (typeof fn === 'function') (m.kind === 'token' ? tokenKits : kits)[m.id] = fn;
       else console.warn('[runner] workshop kit has no exported kit function', m.id);
     } catch (err) {
       console.warn('[runner] workshop kit failed to load', m.id, err);
     }
   }
-  return kits;
+  return { kits, tokenKits };
 }
 
 /**
@@ -792,11 +801,12 @@ export function createBattleRunner(deps) {
       if (!wanted()) return;
       let battle;
       try {
-        // 工坊行为层: rebuild the very kits the server verifies this field with (see loadSpecKits)
-        const kits = await loadSpecKits(e.spec);
+        // 工坊行为层: rebuild the very kits the server verifies this field with (see loadSpecKits). Both key spaces —
+        // operators (`kits`) and summons (`tokenKits`) — from that ONE module list; an empty map changes nothing.
+        const { kits, tokenKits } = await loadSpecKits(e.spec);
         // 包声明的战斗逻辑（`server.battle`, DESIGN §28.17）：同一场战斗、同一段代码（见 loadSpecBattleInstallers）
         const battleInstallers = await loadSpecBattleInstallers(e.spec);
-        battle = sim.spec.createBattleFromSpec(e.spec, sim.ds, { logger, kits, ...(battleInstallers ? { battleInstallers } : {}) });
+        battle = sim.spec.createBattleFromSpec(e.spec, sim.ds, { logger, kits, tokenKits, ...(battleInstallers ? { battleInstallers } : {}) });
       } catch (err) {
         console.warn('[runner] battle construction failed', err);
         recordError('runner', err, 'battle construction failed');

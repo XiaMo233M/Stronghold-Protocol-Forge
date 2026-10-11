@@ -152,7 +152,15 @@ test('sample verification keeps the accepted result and finishes after the phase
   assert.ok(h.run(() => m.verifyStats.checked === 1));
   assert.equal(m.verifyStats.mismatches, 1);
   assert.equal(resultDigest(f.result).hash, resultDigest(forged).hash);
-  assert.deepEqual(m.lastResults.get('p_0').leaked, [], 'sampling never replaces the accepted result');
+  // The field's ACCEPTED result is the thing this test is about ("keeps the accepted result"), and it is the object
+  // `_finishCombat` recorded — it survives the phase changes. `m.lastResults` cannot carry this assertion: it is a
+  // per-round Map that `startCombat()` resets, so reading it here only ever worked while the lone human's 准备阶段
+  // stalled the match forever (docs/PS100-MIGRATION.md §5, the deadlock that fix removed). Same claim, on the object
+  // that actually holds it.
+  assert.deepEqual(f.result.perPlayer.p_0.leaked, [], 'sampling never replaces the accepted result');
+  // …and it is still the accepted one after the phases moved on: the verification that ran late neither replaced it
+  // (digest above) nor mutated it in place.
+  assert.deepEqual(resultDigest(f.result).hash, resultDigest(forged).hash, 'the accepted result is intact after the phase changes');
   assert.ok(h.logs.warn.some((line) => line.includes('client result differs')));
   assert.equal(m.errorCount, 0);
 });

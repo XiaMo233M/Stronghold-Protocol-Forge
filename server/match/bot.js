@@ -313,11 +313,19 @@ function ownedBonds(m, ps, exclude = null) {
  * left (what the shop can still bring soon — a teammate draining a bond, or a bond of high-tier members only, makes it
  * a poor target), `supply` = the copies left of all its members.
  */
+/**
+ * The copies an AI reads for `ps`: the player's OWN pool in the 100-seat variant, the shared one today
+ * (player/rules.js mainPool, docs/PS100-MIGRATION.md §10-A — the identical `m.pool` object while the switch is off).
+ * The bot's pool reads are advisory (how much supply a bond still has, whether a third copy can still come), so they
+ * have to follow the same source as the shop the bot actually buys from, or its odds would be wrong at 100 seats.
+ */
+function poolFor(m, ps) { return ps && typeof ps.mainPool === 'function' ? ps.mainPool() : m.pool; }
+
 function bondPoolStats(m, ps, owned) {
   const reach = new Map();
   const supply = new Map();
   const maxTier = Math.min(6, ps.shop.level + 1);
-  for (const [id, e] of m.pool.entries) {
+  for (const [id, e] of poolFor(m, ps).entries) {
     if (!(e.left > 0)) continue;
     const c = m.gd.chess(id);
     if (!c || !Array.isArray(c.bonds)) continue;
@@ -607,7 +615,7 @@ function buyScore(m, ps, id, ctx) {
   // [ASSUMED] A soft 18-point cooperation weight (PR #407), not an official rule or a reserved card.
   // Leave high-tier shared chess to living teammates whose opening strategy needs its faction.
   // Humans and bots count equally; a single soft penalty still allows valuable own merges.
-  if (c.tier >= 5 && !c.isGolden && !c.diyFor && m.pool.has(base) && m.alivePlayers().some((mate) =>
+  if (c.tier >= 5 && !c.isGolden && !c.diyFor && poolFor(m, ps).has(base) && m.alivePlayers().some((mate) =>
     mate !== ps && gd.bandBondIds(mate.bandId).some((b) => !gd.modeInactiveBonds.has(b) && c.bonds.includes(b)))) s -= 18;
   return s;
 }
@@ -1219,13 +1227,14 @@ function copyCounts(m, ps) {
  */
 function refreshValue(m, ps, ctx) {
   const L = ps.shop.level;
+  const pool = poolFor(m, ps);
   let total = 0;
-  for (const e of m.pool.entries.values()) if (e.left > 0 && e.tier <= L) total += e.left;
+  for (const e of pool.entries.values()) if (e.left > 0 && e.tier <= L) total += e.left;
   if (!(total > 0)) return 0;
   const slots = m.gd.shopSlots(L).chess;
   let v = 0;
   for (const [b, k] of ctx.copies) {
-    const e = m.pool.entries.get(b);
+    const e = pool.entries.get(b);
     if (!e || e.left <= 0 || e.tier > L) continue;
     const pShop = 1 - (1 - e.left / total) ** slots;
     if (k + 1 >= mergeNeed(m, b)) v += pShop * MERGE_HIT;
@@ -1287,6 +1296,7 @@ function lineupGain(m, ps, id, ctx, cur) {
  */
 function sellJunk(m, ps) {
   const ctx = context(m, ps);
+  const pool = poolFor(m, ps);
   const { bench } = chooseLineup(m, ps, ctx);
   const keep = [];
   const junk = [];
@@ -1296,7 +1306,7 @@ function sellJunk(m, ps) {
     const base = m.gd.baseIdOf(p.id);
     const copies = c.isGolden ? 0 : ctx.copies.get(base) || 0;
     // a pair whose third copy can still come (the merge's reward is worth it for any pair)
-    const pairLive = copies + 1 >= mergeNeed(m, base) && (m.pool.left(base) > 0 || !m.pool.has(base));
+    const pairLive = copies + 1 >= mergeNeed(m, base) && (pool.left(base) > 0 || !pool.has(base));
     const useful = c.isGolden || pairLive || ctx.keep.has(base) || (copies >= 2 && m.round <= 6);
     (useful ? keep : junk).push({ p, v: pieceValue(m, ps, p, ctx) + (pairLive ? 150 : useful ? 100 : 0) });
   }

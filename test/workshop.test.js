@@ -474,12 +474,14 @@ describe('workshop: the content reaches the game', () => {
   test('the shared pool gives it copies like any tier-5 operator', () => {
     const pool = new SharedPool(new GameData(data, 'mode_multi_hard'), {});
     assert.equal(pool.has(WS_BASE), true);
-    assert.equal(pool.cap(WS_BASE), 8);
-    assert.equal(pool.left(WS_BASE), 8);
+    // `mode_multi_hard` is co-op: 0.2.4 doubles the shared stock (`economy.coopPoolMultiplier: 2`),
+    // so a tier-5 operator holds 16 = 8 x 2 here. Solo still holds the base 8.
+    assert.equal(pool.cap(WS_BASE), 16);
+    assert.equal(pool.left(WS_BASE), 16);
     assert.equal(pool.take(WS_BASE, 3), 3);
-    assert.equal(pool.left(WS_BASE), 5);
+    assert.equal(pool.left(WS_BASE), 13);
     assert.equal(pool.give(WS_BASE, 3), 3);
-    assert.equal(pool.left(WS_BASE), 8);
+    assert.equal(pool.left(WS_BASE), 16);
   });
 
   test('the sim resolves a def for it (this is what makes it fight)', async () => {

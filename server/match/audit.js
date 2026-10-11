@@ -46,6 +46,7 @@ import { collectViolations } from './invariants.js';
 import { mergeTile, pieceDir, canPlace, placeClass } from './board.js';
 import { pairPlayers, bossPoolHp, hiddenEligible } from './finalAssault.js';
 import { helperOrder } from './unite.js';
+import { squadMembersOf, SQUAD_SIZE } from './unite100.mjs';
 import { BAND_TURN_SECONDS } from './Match.js';
 
 /**
@@ -364,7 +365,14 @@ export function attachAudit(m, { invariants = true, limit = 200 } = {}) {
     runInvariants();
     check('prep', () => {
       if (m.phase !== PHASE.PREP) return;
-      if (m.soloUntimed) { if (m.deadline) fail('untimed prep is timed'); } else if (!m._prepEndQueued) expectDeadline(gd.prepTime(m.round), 'PREP');
+      // PREP is timed whenever a human can press Ready — including a lone human in a co-op room, whose prep used to
+      // get NO deadline at all while maybeEndPrep still waited for that Ready: an unconditional stall
+      // (docs/PS100-MIGRATION.md §5). The rule has ONE definition (MatchPrep.prepDeadlineSeconds), so this check and
+      // the phase itself cannot drift apart.
+      const want = m.prepDeadlineSeconds();
+      if (m._prepEndQueued) return;
+      if (want == null) { if (m.deadline) fail('untimed prep is timed'); return; }
+      expectDeadline(want, 'PREP');
     });
     return res;
   });
@@ -395,10 +403,39 @@ export function attachAudit(m, { invariants = true, limit = 200 } = {}) {
     });
     return orig();
   });
-  wrap(m, 'startUnite', function (orig, plan) {
+  wrap(m, 'startUnite', function (orig, plan, round) {
     check('unite plan', () => {
       const res = m.lastResults;
       const counted = (pid) => ((res.get(pid) || {}).leaked || []).filter((l) => l && l.counted !== false).length;
+      if (Array.isArray(plan)) {
+        // 100-seat variant (design-level C, docs/PS100-MIGRATION.md §10-C): the SAME assertions, read PER SQUAD. A
+        // squad may only ever defend its OWN leakers with its OWN perfect members, and 阶段 1 may not hand an enemy to
+        // another squad — the union of the plans must still account for every leaker in the room exactly once.
+        if (m.isSolo) fail('联防 in solo');
+        const squads = new Set();
+        const allLeakers = new Set();
+        for (const p of plan) {
+          if (!p || !Number.isInteger(p.squad)) { fail(`联防 plan without a squad (${p && p.squad})`); continue; }
+          if (squads.has(p.squad)) fail(`联防 squad ${p.squad} planned twice in one round`);
+          squads.add(p.squad);
+          const seats = squadMembersOf(p.squad * SQUAD_SIZE);
+          const roster = m.alivePlayers().filter((x) => seats.includes(x.seat));
+          const leak = roster.filter((x) => counted(x.playerId) > 0);
+          const perfect = roster.filter((x) => counted(x.playerId) === 0);
+          const helpers = helperOrder(m, perfect, res);
+          if (helpers.length > gd.unite.maxHelpers) fail(`squad ${p.squad}: ${helpers.length} 联防 helpers (max ${gd.unite.maxHelpers})`);
+          if (p.helpers.some((x) => !x.alive || x.left)) fail(`squad ${p.squad}: 联防 helper eliminated / departed: ${p.helpers.filter((x) => !x.alive || x.left).map((x) => x.playerId)}`);
+          if (p.helpers.some((x) => !seats.includes(x.seat))) fail(`squad ${p.squad}: helper from another squad ${p.helpers.filter((x) => !seats.includes(x.seat)).map((x) => x.playerId)}`);
+          if (p.leakers.some((x) => !seats.includes(x.seat))) fail(`squad ${p.squad}: leaker from another squad ${p.leakers.filter((x) => !seats.includes(x.seat)).map((x) => x.playerId)}`);
+          if (JSON.stringify(p.leakers.map((x) => x.playerId).sort()) !== JSON.stringify(leak.map((x) => x.playerId).sort())) fail(`squad ${p.squad} 联防 leakers ${p.leakers.map((x) => x.playerId)} != ${leak.map((x) => x.playerId)}`);
+          if (JSON.stringify(p.helpers.map((x) => x.playerId)) !== JSON.stringify(helpers.map((x) => x.playerId))) fail(`squad ${p.squad} 联防 helpers ${p.helpers.map((x) => x.playerId)} != ${helpers.map((x) => x.playerId)}`);
+          for (const x of p.leakers) allLeakers.add(x.playerId);
+          for (const l of p.leaked || []) if (!p.leakers.some((x) => x.playerId === l.sourcePlayerId)) fail(`squad ${p.squad}: a 联防 enemy is credited to ${l.sourcePlayerId}, not one of its leakers`);
+        }
+        const room = m.alivePlayers().filter((x) => counted(x.playerId) > 0).map((x) => x.playerId).sort();
+        if (JSON.stringify([...allLeakers].sort()) !== JSON.stringify(room)) fail(`联防 squad leakers ${[...allLeakers].sort()} != ${room}`);
+        return;
+      }
       const alive = m.alivePlayers();
       const leakers = alive.filter((p) => counted(p.playerId) > 0).map((p) => p.playerId).sort();
       const perfect = alive.filter((p) => counted(p.playerId) === 0);
@@ -409,7 +446,7 @@ export function attachAudit(m, { invariants = true, limit = 200 } = {}) {
       if (JSON.stringify(plan.leakers.map((p) => p.playerId).sort()) !== JSON.stringify(leakers)) fail(`联防 leakers ${plan.leakers.map((p) => p.playerId)} != ${leakers}`);
       if (JSON.stringify(plan.helpers.map((p) => p.playerId)) !== JSON.stringify(helpers)) fail(`联防 helpers ${plan.helpers.map((p) => p.playerId)} != ${helpers}`);
     });
-    const r = orig(plan);
+    const r = orig(plan, round);
     runInvariants();
     return r;
   });

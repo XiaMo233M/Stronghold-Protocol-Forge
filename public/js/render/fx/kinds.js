@@ -107,10 +107,45 @@ const FX_GUESS = [
  */
 const SILENT_PHASES = new Set(['bombed', 'warning']);
 
+/**
+ * 包带来的**静态相位增量**（`pack.json.fx.silentPhases` → `assets.silentPhases`，DESIGN §28.29）。
+ *
+ * 上面那个第一方 `SILENT_PHASES` Set **一个字不动**：它是第一方常量，语义不许变味，而这一层要的只是「包还能
+ * 声明哪几个 'phase' 种类模型自己会表示」。合并规则：**并集**。第一方优先在这里不是一条可排序的规则 ——
+ * 一个种类要么静默要么不静默，没有「同名覆盖」这回事，所以两句声明说同一件事就是同一个成员；方向也只能是
+ * 「多几个静默」，包取消不了第一方那两条（并集没有减法）。
+ *
+ * 装包声明的挂点是 `public/js/assets.js`（清单被采纳的那一刻，读 `/data/assets.json` 的 `assets.silentPhases`）。
+ * @type {Set<string>}
+ */
+const PACK_SILENT_PHASES = new Set();
+
+/**
+ * 装一份包增量（`assets.silentPhases`；测试可以直接喂一份）。**整份替换**，不是叠加 —— 声明来自一份清单，
+ * 装载两次拿到的是同一份事实（叠加上去会让「卸掉一个包之后那条还在」这种状态活下来）。非字符串条目丢掉。
+ * @param {unknown} list
+ * @returns {{ added: string[] }} 这一次真正新增（第一方原来没有）的种类
+ */
+export function installSilentPhases(list) {
+  PACK_SILENT_PHASES.clear();
+  const added = [];
+  for (const kind of Array.isArray(list) ? list : []) {
+    if (typeof kind !== 'string' || !kind) continue;
+    PACK_SILENT_PHASES.add(kind);
+    if (!SILENT_PHASES.has(kind)) added.push(kind);
+  }
+  return { added };
+}
+
+/** 一个 'phase' 种类今天是不是静默的（第一方那两个 + 包声明的那些）。`fxSpec` 的唯一判据。 */
+export function silentPhase(kind) {
+  return SILENT_PHASES.has(kind) || PACK_SILENT_PHASES.has(kind);
+}
+
 /** Visual spec of an fx kind (see FX_KINDS); `extra.kind` / `extra.element` may pick a better colour. */
 export function fxSpec(kind, extra = {}) {
   const k = typeof kind === 'string' ? kind : '';
-  if (k === 'phase' && SILENT_PHASES.has(extra && extra.kind)) return { a: 'none', c: 0xffffff };
+  if (k === 'phase' && silentPhase(extra && extra.kind)) return { a: 'none', c: 0xffffff };
   let spec = FX_KINDS[k];
   if (!spec) {
     const g = FX_GUESS.find(([re]) => re.test(k));

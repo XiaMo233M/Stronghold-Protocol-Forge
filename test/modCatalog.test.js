@@ -21,6 +21,9 @@ import { startServer } from '../server/index.js';
 import { loadWorkshop } from '../server/workshop.js';
 import { WORKSHOP_ASSET_TYPES } from '../server/http/workshop.js';
 import { buildModCatalog, catalogPackHash, safeRelPath, modFileAbs, normalizedManifest, MOD_FILE_PREFIX } from '../server/modCatalog.js';
+// THE shared enumerator (DESIGN §28.2, 业主裁决 B): "the catalogue lists exactly these files" is only meaningful against
+// the one function the pack identity is built from.
+import { listPackFiles } from '../server/packFiles.js';
 import { createModsRoute, serveMods, MODS_CATALOG_URL } from '../server/http/mods.js';
 // the REAL canonicalizer, not a copy: this test claims the rebuilt manifest hashes to the loader's number, so it must
 // use the same serialization the loader used
@@ -109,6 +112,9 @@ before(async () => {
   // something the pack routes must NEVER serve, under the same pack
   fs.writeFileSync(join(alpha, 'assets', 'evil.js'), 'export default 1;');
   fs.writeFileSync(join(alpha, 'pack.json.bak'), 'TOP-SECRET-MANIFEST-BACKUP');
+  // a documentation file: 裁决 B (DESIGN §28.2) makes it part of the pack, so the catalogue lists it and the route
+  // serves it. It is here so "the list is the directory, not the declarations" has a file with nothing to execute.
+  fs.writeFileSync(join(alpha, 'README.md'), '# alpha pack\n');
   fs.writeFileSync(join(wsRoot, 'secret.txt'), 'TOP-SECRET-WORKSHOP-ROOT');
 
   loaded = loadWorkshop(wsRoot, { log: quiet });
@@ -153,14 +159,27 @@ describe('mod catalogue: the shape, and the hashes it claims', () => {
     assert.equal(alpha.layer, 'B');
     assert.equal(alpha.combat, true);
     assert.deepEqual(alpha.files.map((f) => f.path), [
-      // `assets/evil.js` IS part of the pack: identifyPack walks assets/** with no extension filter, so the loader
-      // hashed it and a client must be able to fetch it to rebuild the pack hash. What must NOT happen is that this
-      // route hands it over as `text/javascript` — see the Content-Type test below.
-      'assets/evil.js', 'assets/notes.txt', 'assets/sprites/a.png', 'chess.json', 'kits/chess_ws_alpha.js', 'pack.json',
+      // `assets/evil.js` IS part of the pack: the loader walks the pack directory, so the loader hashed it and a client
+      // must be able to fetch it to rebuild the pack hash. What must NOT happen is that this route hands it over as
+      // `text/javascript` — see the Content-Type test below.
+      // `README.md` and `pack.json.bak` are here for the same reason since 业主裁决 B (DESIGN §28.2): the list is
+      // **every regular file in the pack directory**, because a declared module can import or read any of them — so a
+      // file that is neither declared nor a kit or an asset is still part of what this pack IS (and a clean client must
+      // be able to download it).
+      'README.md', 'assets/evil.js', 'assets/notes.txt', 'assets/sprites/a.png', 'chess.json', 'kits/chess_ws_alpha.js',
+      'pack.json', 'pack.json.bak',
     ], 'exactly the loader\'s manifest: the files that went into the pack hash');
     assert.deepEqual(alpha.files.map((f) => f.path), [...alpha.files.map((f) => f.path)].sort(), 'sorted by path');
-    // and NOTHING the loader did not hash — a manifest backup and the workshop root's own file are not offered
-    for (const stray of ['pack.json.bak', 'secret.txt', '../secret.txt', 'README.md']) {
+    // THE CORE OF 裁决 B: the catalogue's list and the identity's list are the SAME list, one enumerator
+    // (server/packFiles.js listPackFiles) makes both, so neither can drift away from the other.
+    assert.deepEqual(alpha.files.map((f) => f.path), listPackFiles(join(wsRoot, 'alpha-pack')),
+      'the download list IS the shared file list');
+    assert.deepEqual(alpha.files.map((f) => f.path),
+      loaded.packs.find((p) => p.id === 'alpha-pack').manifest.map((m) => m.path),
+      'and so is the identity manifest');
+    // and NOTHING that is not in the pack directory: the workshop root's own file is not offered, and neither is a path
+    // that leaves the pack (`..`). Those are the two refusals this route's safety rests on.
+    for (const stray of ['secret.txt', '../secret.txt']) {
       assert.equal(alpha.files.some((f) => f.path === stray), false, `${stray} must not be listed`);
     }
   });
@@ -284,12 +303,11 @@ describe('mod routes: what may be fetched, and what may not', () => {
     assert.equal(WORKSHOP_ASSET_TYPES.has('.js'), false, 'the asset allowlist excludes .js, and this route reuses it');
   });
 
-  test('traversal, absolute paths and unlisted files are refused — and so is a pack this server lacks', async () => {
+  test('traversal, absolute paths and files outside the pack are refused — and so is a pack this server lacks', async () => {
     const refused = [
       `${MOD_FILE_PREFIX}alpha-pack/../pack.json`,
       `${MOD_FILE_PREFIX}alpha-pack/kits/../../pack.json`,
       `${MOD_FILE_PREFIX}alpha-pack//etc/passwd`,
-      `${MOD_FILE_PREFIX}alpha-pack/pack.json.bak`,
       `${MOD_FILE_PREFIX}alpha-pack/secret.txt`,
       `${MOD_FILE_PREFIX}alpha-pack`,
       `${MOD_FILE_PREFIX}alpha-pack/`,
@@ -305,6 +323,17 @@ describe('mod routes: what may be fetched, and what may not', () => {
       assert.equal(body.includes('TOP-SECRET'), false, `${path} must not leak the file's bytes`);
       assert.equal(body.includes('export default 1;'), false, `${path} must not leak a pack script`);
     }
+    // `pack.json.bak` and `README.md` are files INSIDE the pack directory, so since 裁决 B (DESIGN §28.2) they ARE part
+    // of the pack: the loader hashed them, the catalogue lists them, and this route hands them over — a file the author
+    // left in the folder is part of what the pack IS, and a clean client must be able to download it or it can never
+    // rebuild the pack hash. What must NOT change is the half that protects the PAGE: a leftover is never served as a
+    // URL the browser could execute.
+    for (const leftover of ['pack.json.bak', 'README.md']) {
+      const r = serve(`${MOD_FILE_PREFIX}alpha-pack/${leftover}`, routes);
+      await settled(r.res);
+      assert.equal(r.res.status, 200, `${leftover} is a file of the pack (B: the list is the directory)`);
+      assert.equal(r.res.headers['Content-Type'], 'application/octet-stream', `${leftover} is never a script`);
+    }
     // an `assets/evil.js` IS part of the pack (the loader hashed it) and IS served — but never as a script
     const script = serve(`${MOD_FILE_PREFIX}alpha-pack/assets/evil.js`, routes);
     await settled(script.res);
@@ -314,11 +343,11 @@ describe('mod routes: what may be fetched, and what may not', () => {
     assert.ok(fs.existsSync(join(wsRoot, 'secret.txt')));
     assert.ok(fs.existsSync(join(wsRoot, 'alpha-pack', 'assets', 'evil.js')));
     assert.ok(fs.existsSync(join(wsRoot, 'alpha-pack', 'pack.json.bak')));
-    // …and the folder's leftovers are not in the catalogue either: the route serves the loader's inventory, not the dir
+    // …and the boundary the two lists agree on is the PACK DIRECTORY: a leftover in it is listed, the workshop root's
+    // own file is not — so this route is still not a file server for the game's tree.
     const alpha = catalog.packs.find((p) => p.id === 'alpha-pack');
-    for (const stray of ['pack.json.bak', 'secret.txt']) {
-      assert.equal(alpha.files.some((f) => f.path === stray), false, `${stray} is not part of the pack`);
-    }
+    assert.equal(alpha.files.some((f) => f.path === 'pack.json.bak'), true, 'inside the pack ⇒ part of the pack');
+    assert.equal(alpha.files.some((f) => f.path === 'secret.txt'), false, 'outside the pack ⇒ not part of it');
   });
 
   test('the loader\'s path rule is the one this route applies', () => {

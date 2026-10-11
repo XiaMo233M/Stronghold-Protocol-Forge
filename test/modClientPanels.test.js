@@ -182,7 +182,7 @@ describe('C 层装载期：合法声明进包，不可用声明拒整包', () =>
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  test('身份：**声明了**的面板模块进内容哈希，没声明的文件不进（DESIGN §28.8）', () => {
+  test('身份：面板模块的字节进内容哈希；B 之后**包目录里的每一个文件**都进（DESIGN §28.2/§28.8）', () => {
     // 同样的 pack.json（同一个包 id），模块字节不同 ⇒ 两个摘要
     const decl = { license: 'CC0-1.0', client: { panels: [{ id: 'p', slot: 'root.overlays', module: 'm.js' }] } };
     const a = packRoot('ident', decl, { 'm.js': PANEL_JS });
@@ -190,11 +190,14 @@ describe('C 层装载期：合法声明进包，不可用声明拒整包', () =>
     const ha = loadWorkshop(a, { log: quiet }).packs[0].hash;
     const hb = loadWorkshop(b, { log: quiet }).packs[0].hash;
     assert.notEqual(ha, hb, '面板源码不在身份里 ⇒ 两份不同的面板会共用一个摘要');
-    // 两个包都**没有**声明 client：多出来的那个 `.js` 文件不进哈希
+    // 两个包都**没有**声明 client：`m.js` 照样进身份 —— 这一条按**新定义**翻了面（业主裁决 B，DESIGN §28.2）：
+    // 清单不再是"声明清单"，而是**包目录下的每一个普通文件**。理由就是下面这句旧断言的背面：一个被声明的模块
+    // 可以 import 同目录的兄弟文件，所以"没声明就不算"恰恰是那个洞（摘要不再等价于同一份行为，而且干净的客户端
+    // 根本下不到那个文件）。面板这一格仍然是必需的 —— 它保证的是"声明过的面板一定被服务"，不是"没声明的文件不算"。
     const plain = { license: 'CC0-1.0', content: ['chess'] };
     const ea = loadWorkshop(packRoot('un', plain, { ...CHESS_FILES, 'm.js': PANEL_JS }), { log: quiet }).packs[0].hash;
     const eb = loadWorkshop(packRoot('un', plain, { ...CHESS_FILES }), { log: quiet }).packs[0].hash;
-    assert.equal(ea, eb, '没声明的文件不许进哈希（否则每加一个文件就换一次身份）');
+    assert.notEqual(ea, eb, 'B：包目录里多一个文件就是另一个身份（"没声明就不算"正是要堵的那个洞）');
     for (const r of [a, b]) fs.rmSync(r, { recursive: true, force: true });
   });
 

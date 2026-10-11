@@ -7,11 +7,13 @@
 //     (server/packs.js), the "the server publishes an index, the client chooses" pattern this reuses.
 //   * `GET /mods/file/<pack>/<path>` — the BYTES of one pack file. A pack's kits and its art already have routes
 //     (`/workshop-kits/`, `/workshop-assets/`); this one exists for the pack's own JSON (`pack.json`, `chess.json`) and
-//     serves anything else the catalogue lists, so a client can cache the pack whole.
+//     serves anything else the catalogue lists, so a client can cache the pack whole. ONE row of that list names no file
+//     — the reserved container digest (`server/packFiles.js ASSETS_DIGEST_PATH`) — and this route serves the digest text
+//     for it, because a client that cannot fetch a row of the identity can never rebuild the pack hash.
 //
 // A request is served only when BOTH hold: the path is inside the pack directory, and the path is in the pack's file
-// list. The second check is the strong one — that list is what the loader hashed, so this route can never become a
-// general file server for the game's own tree.
+// list. The second check is the strong one — that list is the loader's identity inventory (DESIGN §28.2 裁决 B), so this
+// route can never become a general file server for the game's own tree.
 //
 // The catalogue is built once per process (the pack set is fixed at load, DESIGN §28.2) and handed in already built:
 // `serveMods` does no work per request beyond two map lookups.
@@ -19,10 +21,12 @@
 // (i18n-ignore-file: the error titles are the bilingual `中文 · English` page text of server/http/common.js, not UI
 // strings — docs/I18N.md)
 
+import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { sendError, sendJson } from './common.js';
 import { WORKSHOP_ASSET_TYPES } from './workshop.js';
 import { modFileAbs } from '../modCatalog.js';
+import { ASSETS_DIGEST_PATH, containerDigestBytes } from '../packFiles.js';
 
 /** The catalogue URL, next to `/packs/index.json`. */
 export const MODS_CATALOG_URL = '/mods/catalog.json';
@@ -103,7 +107,16 @@ export function serveMods(req, res, decoded, query, routes) {
     sendError(req, res, 403, '禁止访问 · Forbidden');
     return true;
   }
-  handleFile(req, res, abs, query).catch((err) => {
+  // The ONE row of the download list that has no file of its own: the reserved container digest (server/packFiles.js).
+  // `identifyPack` puts that digest into the pack's identity (DESIGN §28.13.5), so a client that cannot fetch the row can
+  // never rebuild the pack hash — and then it never proves it holds an asset pack at all. The row's payload is the digest
+  // text (64 bytes), uniquely determined by a value the loader verified against the container's real bytes.
+  // A real file of the same name WINS: `identifyPack` prefers it, the catalogue then describes THAT file, and the route
+  // must hand over its bytes — the existence check is that precedence, not a second opinion about the pack.
+  const virtual = rel === ASSETS_DIGEST_PATH && typeof pack.assetsDigest === 'string' && !fs.existsSync(abs)
+    ? containerDigestBytes(pack.assetsDigest)
+    : null;
+  handleFile(req, res, abs, query, virtual).catch((err) => {
     routes.error = err instanceof Error ? err : new Error(String(err));
     if (!res.headersSent) sendError(req, res, 404, '页面不存在 · Not found');
     else res.destroy();
@@ -143,9 +156,11 @@ function contentTypeFor(abs) {
  * @param {import('node:http').ServerResponse} res
  * @param {string} abs absolute path inside the pack directory (already checked)
  * @param {string} query
+ * @param {Buffer|null} [virtual] the bytes to serve INSTEAD of reading `abs` — the reserved container-digest row, whose
+ *   path names no file at all (see `serveMods`). `null` for every ordinary pack file.
  */
-async function handleFile(req, res, abs, query) {
-  const body = await fsp.readFile(abs);
+async function handleFile(req, res, abs, query, virtual = null) {
+  const body = virtual || await fsp.readFile(abs);
   const immutable = /(^|&)v=[^&]+/.test(query);
   res.writeHead(200, {
     'Content-Type': contentTypeFor(abs),

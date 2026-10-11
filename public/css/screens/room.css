@@ -50,6 +50,35 @@
 }
 .seats--solo { grid-template-columns: 3.8rem minmax(0, 6.4rem); }
 
+/* 100 人版移植 (docs/PS100-MIGRATION.md §7): a room whose seat capacity exceeds MAX_SEATS (coop only) wraps into as
+   many rows as it needs and scrolls, instead of running off the page. The token is added by room.js ONLY above the
+   official cap, so a 1–4 seat room keeps the four-column / one-row rules above byte-for-byte.
+
+   The column width is a floor, not a preference: `.seat` is `height: 100%` and `.seat__art` is `flex: 1; overflow:
+   hidden`, so a cell much below ~2.85rem clips the card's own content (the 100-seat probe in the third-party patch
+   measured ~160px fragments). `grid-auto-rows` sizes each row to its content: an occupied card resolves to 6rem
+   against it, an empty one to the ~100px it actually needs. `align-content: start` keeps row 1 at the top of the
+   scroller instead of vertically centring a 25-row grid. */
+.seats--dense {
+  grid-template-columns: repeat(auto-fill, minmax(2.85rem, 1fr));
+  grid-template-rows: none;
+  grid-auto-rows: minmax(1.2rem, auto);
+  justify-content: stretch;
+  align-content: start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(78, 216, 175, .45) transparent;
+}
+/* The per-card fade-in stagger is 60ms, so seat #100 would only appear ~6 s after the room opens. 6ms keeps the
+   cascade legible and finishes a 100-seat room in ~0.6 s. Scoped to the dense grid: the four official seats keep the
+   60ms stagger they have today. */
+.seats--dense .seat { animation-delay: calc(var(--seat-i, 0) * 6ms); }
+/* Few OCCUPIED seats: the box must still scroll, so `overflow` stays as above — an earlier variant set `visible` here
+   and let 100 laid-out cards overflow a parent with `overflow: hidden`, making most of them unreachable. Only the
+   height is capped, at the tallest a 4-seat room ever needs. */
+.seats--dense.seats--compact { max-height: calc(4 * 6rem + 3 * .3rem + .54rem); }
+
 .seat {
   --bk-c: var(--line-3);
   --bk-l: .18rem;

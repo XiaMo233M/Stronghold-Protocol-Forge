@@ -195,9 +195,14 @@ export function nearestEvent(name, known = HOOK_EVENTS) {
  * Static validation of one kit source.
  *
  * @param {string} source the file's text
- * @param {{ id?: string, ownChessIds?: Iterable<string>, overrides?: string[], knownEvents?: Iterable<string> }} [opts]
- *   `ownChessIds` = the chess ids THIS pack contributes, `overrides` = the pack's declared
- *   `"chess:<id>"` replacements. Together they reproduce loadWorkshopKits' ownership rule.
+ * @param {{ id?: string, ownChessIds?: Iterable<string>, ownCharIds?: Iterable<string>, ownTokenIds?: Iterable<string>,
+ *   overrides?: string[], ambiguousIds?: Iterable<string>, knownEvents?: Iterable<string> }} [opts]
+ *   `ownChessIds` = the chess ids THIS pack contributes, `ownCharIds` = the charIds it declares into the 自选 pool
+ *   (`pack.json.operators` — that charId IS the key the sim looks a DIY piece's kit up by), `ownTokenIds` = the token
+ *   records it ships (`tokens.json`, the SECOND kit key space: a summon's kit is keyed by the token record id).
+ *   `overrides` = the pack's declared `"<file>:<id>"` replacements (`chess:<id>` / `tokens:<id>`). Together they
+ *   reproduce loadWorkshopKits' ownership rule. `ambiguousIds` = ids that exist in BOTH spaces in the merged data (the
+ *   loader refuses those by name; the editor can only pass what it read).
  * @returns {Array<{ field: string, code: string, message: string, severity: string, hint?: string }>}
  */
 export function validateKit(source, opts = {}) {
@@ -219,11 +224,21 @@ export function validateKit(source, opts = {}) {
   // ---- ownership: the same rule loadWorkshopKits enforces, so the editor refuses before the server silently drops it
   if (ID_RE.test(id)) {
     const own = new Set(opts.ownChessIds || []);
+    const ownChars = new Set(opts.ownCharIds || []);
+    const ownTokens = new Set(opts.ownTokenIds || []);
     const declared = new Set(Array.isArray(opts.overrides) ? opts.overrides : []);
-    if (!own.has(id) && !declared.has(`chess:${id}`)) {
+    const ambiguous = new Set(opts.ambiguousIds || []);
+    // An id in BOTH key spaces cannot be told apart by the file name: the operator half would win the engine's lookup and
+    // the summon half would silently never run. The loader refuses it by name (KIT_TARGET_AMBIGUOUS); so does this.
+    if (ambiguous.has(id)) {
+      err('id', 'KIT_TARGET_AMBIGUOUS',
+        `"${id}" is both a chess id and a summon's token id, so this kit cannot say which one it is for`,
+        'rename the record, or let the two key spaces keep different ids — otherwise the operator half wins the engine\'s lookup and the summon silently keeps its own behaviour');
+    } else if (!own.has(id) && !ownChars.has(id) && !ownTokens.has(id)
+      && !declared.has(`chess:${id}`) && !declared.has(`tokens:${id}`)) {
       err('id', 'KIT_NO_TARGET',
-        `no chess record carries the id "${id}", so this kit would never be used`,
-        `name the file after an operator this pack defines (e.g. chess_ws_<slug>_a), or add "chess:${id}" to pack.json overrides to replace an official one`);
+        `no chess record carries the id "${id}", and no summon does either, so this kit would never be used`,
+        `name the file after an operator this pack defines (e.g. chess_ws_<slug>_a), after a 自选 charId it declares in pack.json operators, or after a summon it ships in tokens.json; to replace an official one, add "chess:${id}" (or "tokens:${id}") to pack.json overrides`);
     }
   }
 

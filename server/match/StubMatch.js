@@ -145,6 +145,13 @@ export class StubMatch {
     return { ok: true };
   }
 
+  /**
+   * The lobby calls this whenever a member joins, leaves, drops or comes back (DESIGN §8.2 "incremental frame"). The
+   * real Match marks its next m.public frame as the FULL form; this stub always sends the full view, so there is nothing
+   * to mark. Kept as an interface member so a stub host behaves exactly like the real class.
+   */
+  markMembershipChanged() { /* the stub's m.public is always the full view */ }
+
   onDisconnect(playerId) {
     const p = this.players.get(playerId);
     if (!p || p.isBot || this.disposed) return;

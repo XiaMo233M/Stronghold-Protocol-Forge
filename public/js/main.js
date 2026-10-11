@@ -45,6 +45,7 @@ import { ConnectionBanner } from './ui/connBanner.js';
 import { ToastHost, toast, toastError, describeError } from './ui/toasts.js';
 import { net, identity, NetError } from './net.js';
 import { store, useStore, emptyMatch, selectRoute, entryGateBlocked, sessionResetNotice, isSpectating } from './store.js';
+import { applyPublic } from './matchDelta.js';
 import { data } from './data.js';
 import { GAME_FILES } from './ui/gameComponents.js';
 import { TitleScreen, sanitizeName } from './screens/title.js';
@@ -123,6 +124,18 @@ let restoreTimer = null;
 let joinTimer = null;
 let joinInFlight = false;
 let playtestTimer = null;
+/**
+ * The materialized m.public view: the full frame the server sent plus every incremental frame merged into it
+ * (public/js/matchDelta.js, DESIGN §8.2 "incremental frame"). The store gets THIS, so nothing downstream sees a delta.
+ * Cleared whenever the match state is dropped (leaving a room, a fresh welcome), because a delta then has nothing to
+ * merge into and the server must send a full frame again — which it does for every joining / returning client.
+ * @type {Record<string, any> | null}
+ */
+let publicState = null;
+/** When the last `g.publicFull` ask was sent, so a broken stream cannot turn the self-healing ask into a flood. */
+let publicFullAskedAt = 0;
+/** The minimum gap between two `g.publicFull` asks (the server answers both the ask and the room's next full frame). */
+const PUBLIC_FULL_ASK_MS = 2000;
 
 function clearPendingJoin() {
   store.patch('ui', { pendingJoin: null });
@@ -212,6 +225,7 @@ function backToLobby() {
   clearTimeout(restoreTimer);
   const s = store.get();
   if (s.room || s.match.public) closeAllDialogs();
+  publicState = null;                        // the next m.public must be a full frame (the server sends one)
   store.set({ room: null, match: emptyMatch(), ticker: [], emotes: [] });
   store.patch('ui', { restoring: false });
 }
@@ -250,7 +264,7 @@ function onWelcome(msg) {
       const s = store.get();
       const patch = {};
       if (s.room && roomStateAt < welcomeAt) patch.room = null;
-      if (s.match.public && matchAt < welcomeAt) patch.match = emptyMatch();
+      if (s.match.public && matchAt < welcomeAt) { patch.match = emptyMatch(); publicState = null; }
       store.set(patch);
       store.patch('ui', { restoring: false });
     }, RESTORE_GRACE_MS);
@@ -267,12 +281,13 @@ function onRoomState(msg) {
   if (myId != null && seats.length && !seats.some((s) => s && s.playerId === myId) && !isSpectating(room, myId)) {
     // We are no longer seated (kicked / left elsewhere) — neither in a player seat nor a spectator seat.
     if (store.get().room) toast(t('你已不在该同盟中'), 'warn');
+    publicState = null;
     store.set({ room: null, match: emptyMatch() });
     return;
   }
   const prevRoom = store.get().room;
   // A (new) match starts: forget the previous match's state so stale results never show.
-  if (room.inMatch && !(prevRoom && prevRoom.inMatch && prevRoom.code === room.code)) store.set({ match: emptyMatch() });
+  if (room.inMatch && !(prevRoom && prevRoom.inMatch && prevRoom.code === room.code)) { publicState = null; store.set({ match: emptyMatch() }); }
   store.set({ room });
   // The picks were made FOR the room we just entered (host) or joined: the next create starts from none, so a pick can
   // never leak into a room the player did not choose it for (roomMods.js).
@@ -342,7 +357,24 @@ function wireNet() {
     const known = Object.hasOwn(CLOSE_REASON, String(msg.reason)) ? CLOSE_REASON[msg.reason] : null;
     toast(known ? t(known) : typeof msg.reason === 'string' && msg.reason.length < 60 ? t('同盟已关闭：{reason}', { reason: msg.reason }) : t('同盟已关闭'), 'warn');
   });
-  net.on('m.public', (msg) => { matchAt = Date.now(); store.patch('match', { public: payload(msg) }); maybeFinishRestore(); });
+  net.on('m.public', (msg) => {
+    // The incremental frame (DESIGN §8.2): a delta carries only what changed and is merged into the last materialized
+    // view. A frame that cannot be merged (no baseline yet, a patch naming an unknown shape) is NOT applied — the client
+    // asks for the full frame again instead, which is the self-healing path the server also drives on its own with a
+    // periodic full frame. `publicState` is what every screen reads; the wire's `delta` never reaches the store.
+    const res = applyPublic(publicState, msg);
+    if (!res.ok) {
+      if (Date.now() - publicFullAskedAt >= PUBLIC_FULL_ASK_MS) {
+        publicFullAskedAt = Date.now();
+        try { net.send('g.publicFull'); } catch { /* offline: the reconnect's full frame answers it */ }
+      }
+      return;
+    }
+    publicState = res.state;
+    matchAt = Date.now();
+    store.patch('match', { public: publicState });
+    maybeFinishRestore();
+  });
   net.on('m.private', (msg) => { matchAt = Date.now(); store.patch('match', { private: payload(msg) }); });
   net.on('m.field', (msg) => store.patch('match', { field: payload(msg) }));
   net.on('m.result', (msg) => {

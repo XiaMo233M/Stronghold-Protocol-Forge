@@ -86,7 +86,8 @@ export class BattlePlayers {
    * rows 2–5, the mirrored right half of a pair (whatever coordinates the player's input uses). Never the hand / 临时
    * 整备区 rows of a boss field (rows 0–1, inside BOSS_RECT) nor the other half of a 联防 or boss field. Automatic
    * redeployments and moves that must stay where the player could deploy read it (the 突袭 landing, bonds/addon/battle.js
-   * raidTile; 乌尔比安's S3 【移动】, kits/ops/chess_char_5_05-ulpia.js).
+   * raidTile; 乌尔比安's S3 【移动】, kits/ops/chess_char_5_05-ulpia.js). The 突袭 landing additionally admits the empty
+   * deployment half in multiplayer boss/hidden battles only (§31.13); this method itself stays unchanged.
    */
   onOwnBoard(ps, r, c) {
     if (!ps) return false;
@@ -105,7 +106,8 @@ export class BattlePlayers {
    * the players whose units this battle holds (a teammate eliminated before it or playing another field is not one).
    * Both halves on the two-helper 联防 field and on a Final Assault / Hidden Core pair field; the own half only for a
    * lone 联防 helper and on a solo boss field; never a boss field's hand / 临时整备区 rows. The 突袭 landing reads it
-   * (bonds/addon/battle.js raidTile — the owner's decision of 2026-10-07, DESIGN §26.1).
+   * (bonds/addon/battle.js raidTile — the owner's decision of 2026-10-07, DESIGN §26.1), then separately admits the
+   * empty deployment half in multiplayer boss/hidden battles only (§31.13); this general method is unchanged.
    *
    * 社群报告「协防时候突袭干员不能跳到队友的棋盘上」的落地：共享战场上逃逸的敌人是**跨两个半场**走的
    * （escaped_multi 从第 18 列进场往左走），所以左手玩家的成员必须能跳去追一个还在队友半场上的敌人。

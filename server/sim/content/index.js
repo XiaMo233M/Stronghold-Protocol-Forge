@@ -103,7 +103,16 @@ export function setupUnitKit(battle, unit, mode = 'full') {
   const raw = def.raw ?? def;
   const bb = def.skill?.bb ?? {};
   if (unit.kind === 'token') {
-    const tk = mode === 'full' ? (tokens.kits?.[def.id] ?? tokens.default?.[def.id]) : null;
+    // 工坊的召唤物行为层（docs/WORKSHOP.md §4.7）：与干员那一半同一条纪律 —— 一张按对局注入的表，**先查它、再查
+    // 内置注册表**。token 的键就是 token 记录的 id（`def.id`，normalizeToken 逐字写下），所以这一行的键规则与
+    // 下面 `tokens.kits[def.id]` 完全一致；`Object.hasOwnProperty` 让它不顺着原型链、也不吃 `baseId` 之类的回退。
+    // 没有包声明 summon kit 时 `opts.tokenKits` 根本不存在（`spec.js` 只在有值时传这个键），这一行是 no-op，
+    // token 的解析与从前逐字节相同。两个键空间是分开的：`opts.kits` 永远不会被当成 token kit，反之亦然。
+    const injectedTok = battle.opts && battle.opts.tokenKits;
+    const packTok = mode === 'full' || injectedTok
+      ? (injectedTok && Object.prototype.hasOwnProperty.call(injectedTok, def.id) ? injectedTok[def.id] : undefined)
+      : undefined;
+    const tk = packTok ?? (mode === 'full' ? (tokens.kits?.[def.id] ?? tokens.default?.[def.id]) : null);
     if (typeof tk === 'function') {
       try { const k = tk(bb, raw, def); if (k) return k; } catch (e) { battle._handlerError(`tokenKit:${def.id}`, unit, e); }
     }

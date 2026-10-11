@@ -29,6 +29,9 @@ import { kitImportDeclarations, kitImportIssues, packRelativePath, rewriteKitImp
 // 公告 / 鸣谢的装载期判据（DESIGN §28.15）：声明的 `.json` 在不在、是不是 JSON。合并体在 `server/index.js` 里经
 // 既有的合并数据通道送出 —— 形状与判据只有一份，这个 import 就是那一份。
 import { noticesIssues } from './notices.js';
+// 包的**文件清单**（DESIGN §28.2, 业主裁决 B）：身份哈希与客户端下载清单读的是同一份 `listPackFiles` —— 两份
+// 清单漂移就等于这个特性没做，所以枚举器与那条保留的合成路径名一起住在 server/packFiles.js。
+import { ASSETS_DIGEST_PATH, listPackFiles } from './packFiles.js';
 
 /** Default pack root: `<repo>/workshop`. */
 export const WORKSHOP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'workshop');
@@ -38,9 +41,11 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
  * `identifyPack` 的哈希清单里那一条**合成**路径：容器的 sha256（`pack.json.assets` 的容器，装载期已与字节核对）。
- * 它不可能与真实文件同名（见 `identifyPack` 里那一段），所以「有没有声明 `assets`」在身份哈希里是可判定的一件事。
+ *
+ * 定义搬到了 `server/packFiles.js`（枚举器与它同住：清单里唯一一个不是文件的路径，两处都要知道），这里**转发**，
+ * 所以 `server/modCatalog.js` 与既有的测试仍然从本模块取到同一个字符串。
  */
-export const ASSETS_DIGEST_PATH = 'assets.container.sha256';
+export { ASSETS_DIGEST_PATH };
 
 /**
  * A rewritten kit source as an importable module. `data:` and not a temp file: nothing is written to disk, and the
@@ -798,9 +803,12 @@ export function workshopThemeFor(loaded, { log = null } = {}) {
  *   * `pack.json` — the NORMALIZED manifest (`normalizePackManifest`'s output), so two spellings of the same pack hash
  *     the same and a declaration the loader silently dropped cannot hide behind the hash;
  *   * every declared content file — its NORMALIZED records (`normalizeContentFile`), the same thing the overlay merges;
- *   * every `kits/*.js` — the SOURCE TEXT, byte for byte: this is the code the server imports and the browser fetches,
- *     and a content hash that ignored it would say nothing about the one file that can change a battle;
- *   * every file under `assets/**` — the media the `/workshop-assets` route serves.
+ *   * **every other regular file under the pack directory** (`server/packFiles.js listPackFiles`) — its bytes, byte for
+ *     byte. That is kits, assets, panel modules and stylesheets, `server.meta` / `battle` / `room` / `modules` entries,
+ *     i18n and notice files, root-level files — and, crucially, the ones **nothing declares** that a declared module
+ *     `import`s or reads (DESIGN §28.2, 业主裁决 B). The list has no name- or directory-based exemption on purpose:
+ *     any exemption is a file whose bytes two different behaviours could share, and it is also a file a clean client
+ *     would never download.
  * What is NOT in it: the pack's path on this machine, the mtime "version" that currently versions kit URLs, and any
  * engine code — the engine half of the identity is the declared `api` range (DESIGN §28.5).
  *
@@ -817,21 +825,34 @@ export function workshopThemeFor(loaded, { log = null } = {}) {
 export function identifyPack(packDir, pack, files, { assetsDigest = null } = {}) {
   /** @type {Array<{ path: string, hash: string }>} */
   const manifest = [];
-  const addText = (rel, text) => manifest.push({ path: rel, hash: sha256Hex(text) });
-  const addBytes = (rel, buf) => manifest.push({ path: rel, hash: sha256Hex(buf) });
+  /** 清单里一个路径只出现一次，先到的赢：`assets.container.sha256` 那一条（step 6）就靠这里让位给同名真实文件。 */
+  const seen = new Set();
+  const add = (rel, hash) => { if (seen.has(rel)) return; seen.add(rel); manifest.push({ path: rel, hash }); };
+  const addText = (rel, text) => add(rel, sha256Hex(text));
+  const addBytes = (rel, buf) => add(rel, sha256Hex(buf));
   // 1. the normalized manifest
   addText('pack.json', canonicalJson(pack));
   // 2. the normalized content records
   for (const [file, records] of Object.entries(files || {})) addText(`${file}.json`, canonicalJson(records));
-  // 3. the kit sources, 4. the pack's own media
+  // 3 + 4. **包目录下的每一个普通文件**（`server/packFiles.js listPackFiles`；DESIGN §28.2「业主裁决 B」）。
+  //
+  // 这一条既是身份哈希的**主体**，也是客户端**下载清单**的同一份：`kits/**`、`assets/**` 与一切"声明过的模块 /
+  // 样式 / i18n / 公告"都在里面，而从前漏掉的那些**没被声明的**文件 —— 一个声明模块自己 `import` 的同目录 helper、
+  // `server/rules.mjs`、`client/helper.js` —— 现在也在里面。于是「同一个摘要」真的等价于「同一份会被执行 / 读到的
+  // 字节」，而干净的客户端也真的下得到它（从前它在两份清单里都不存在：这是 B 要堵的那个洞，比「摘要不准」更直接）。
+  //
+  // 只有 `pack.json` 与内容文件是**归一化**贡献（上面两条已经占位），其余一律按磁盘字节哈希 —— 归一化只对"有记录
+  // 形状"的那两类文件成立。
+  for (const rel of listPackFiles(packDir)) {
+    if (seen.has(rel)) continue;
+    try {
+      addBytes(rel, fs.readFileSync(path.join(packDir, ...rel.split('/'))));
+    } catch { /* 读不到就当它不在：装载期已经把不可读的包拒掉了，这里不该让一次启动崩掉 */ }
+  }
+  // `kits`（决定 layer B 的那个计数）读同一个目录，但只数**顶层的 kit**：子目录不是 kit，`_` 前缀的 helper 也不是
+  // —— 与 `loadWorkshopKits` 扫描用的两条规则逐字相同（§28.18）。文件本身已经在上面那份清单里了。
   let kits = 0;
   const kitDir = path.join(packDir, 'kits');
-  // RECURSIVE, and that is the point (§28.18): a kit may now split its helper code into `kits/lib/*.js`, and those
-  // bytes decide how a battle plays out exactly like the kit file does. Hashing only the top level would let two
-  // clients whose helper bytes differ share one digest — and that digest is what W-D alignment compares (§28.16).
-  // The manifest path keeps the `kits/` prefix, so a FLAT `kits/` directory produces the same `kits/<name>` entries it
-  // always did and no existing pack's hash moves. `kits` (the count that decides layer B) counts the KITS only:
-  // a subdirectory is not a kit and a `_`-prefixed helper is not a kit (the same two rules `loadWorkshopKits` scans by).
   try {
     for (const name of fs.readdirSync(kitDir).sort()) {
       if (!name.endsWith('.js')) continue;
@@ -840,11 +861,6 @@ export function identifyPack(packDir, pack, files, { assetsDigest = null } = {})
       if (!name.startsWith('_')) kits++;
     }
   } catch { /* no kits/ directory: an ordinary data pack */ }
-  for (const rel of listFiles(kitDir).filter((f) => f.endsWith('.js'))) {
-    addBytes(`kits/${rel}`, fs.readFileSync(path.join(kitDir, rel)));
-  }
-  const assetsDir = path.join(packDir, 'assets');
-  for (const rel of listFiles(assetsDir)) addBytes(`assets/${rel}`, fs.readFileSync(path.join(assetsDir, rel)));
   // 5. C 层面板的模块源码（`pack.json.client.panels[].module`, DESIGN §28.8）：一条声明能改变客户端行为，模块的
   //    字节同样能 —— 不把面板源码算进身份，两份不同的面板就会共用同一个摘要（那份摘要将不再描述浏览器真的会
   //    执行的代码）。两个面板共用同一个文件时只算一次（按声明路径去重），并且只有在包真的声明了面板时才加：
@@ -945,10 +961,10 @@ export function identifyPack(packDir, pack, files, { assetsDigest = null } = {})
   //    ⇒ 同一份容器」这条对齐的落点：换了容器、字节不同、摘要不同、包的内容哈希就不同，房间的摘要闸门随之拦下。
   //    只有声明了 `assets` 的包才有这个条目：没声明的包哈希逐字节不变（`test/packAssets.test.js` 钉了三份真实包）。
   //
-  //    合成路径 `assets.container.sha256` **不可能被真实文件占用**：进这份清单的路径只有 `pack.json`、
-  //    `<内容文件>.json`（13 个固定名字，没有 `assets`）、`kits/*.js`、`assets/**` 与声明过的面板模块（必须
-  //    `.js`）。这一条的 `hash` 直接就是容器的 sha256（它没有「另一份字节」可以哈希），路径名说的就是这件事。
-  if (typeof assetsDigest === 'string' && assetsDigest) manifest.push({ path: ASSETS_DIGEST_PATH, hash: assetsDigest });
+  //    合成路径 `assets.container.sha256` 与真实文件**可能**同名了（B 之后包目录里的每一个普通文件都进清单，包根
+  //    下一个叫这个名字的文件不再是"不可能"）：那时真实文件赢（`add` 的去重是"先到的赢"，上面那份目录清单先跑），
+  //    这一条被跳过 —— 一个病态命名不该让整包哈希崩掉，而"文件名即声明"的语义由真实文件自己承担。
+  if (typeof assetsDigest === 'string' && assetsDigest) add(ASSETS_DIGEST_PATH, assetsDigest);
   // 7. 声明的 i18n 译文文件（`pack.json.i18n`, fanpack G-04）：**字节**进身份哈希。理由与面板模块逐字相同 ——
   //    一份译文能改变玩家看到的界面，两份不同的译文不该共用同一个摘要；而且这些文件是**声明过的路径**
   //    （`i18n["en"]: "i18n/en.json"`），不进清单的话「换了译文、包摘要不变」就会让房间的摘要闸门失效。
@@ -970,23 +986,9 @@ export function identifyPack(packDir, pack, files, { assetsDigest = null } = {})
   return { hash: modManifestDigest(manifest), manifest, layer, combat, api: pack.api || null, game: pack.game || pack.gameVersion || null };
 }
 
-/** Every file under `dir`, as sorted `rel` paths (recursive, '/'-separated); `[]` when the directory is not there. */
-function listFiles(dir, prefix = '') {
-  /** @type {string[]} */
-  const out = [];
-  let entries;
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-  for (const e of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
-    const rel = prefix ? `${prefix}/${e.name}` : e.name;
-    if (e.isDirectory()) out.push(...listFiles(path.join(dir, e.name), rel));
-    else if (e.isFile()) out.push(rel);
-  }
-  return out;
-}
+// 私有的 `listFiles(dir)` 搬到了 `server/packFiles.js` 并成为**共享的** `listPackFiles(packDir)`：包身份哈希与
+// 客户端下载清单必须读同一个枚举器（DESIGN §28.2 业主裁决 B）。行为逐字保留（递归、跳过符号链接、目录不在即
+// `[]`），只多了"结果全局按路径排序"这一条，好让「两份清单是同一份」可以用 `deepEqual` 直接钉住。
 
 /**
  * The data files any loaded pack touches — the union of the files the packs ship. The HTTP layer must serve THOSE files
@@ -1023,6 +1025,12 @@ export function workshopTouchedFiles(loaded) {
     // 漏掉这一行，服务端会说「包已加载、时装也在」，而浏览器拿到的是磁盘上那份没有 skins 的清单：
     // 面板的 list(charId) 永远是空的，玩家看不到任何一套（一个不会报错的静默失效）。
     if (Array.isArray(p.skins) && p.skins.length) out.add('assets');
+    // 形态（`pack.json.forms` → `assets.modForms`）与静态相位（`pack.json.fx.silentPhases` → `assets.silentPhases`）
+    // 落的是**同一个** `assets.json` —— 理由与上面几行逐字相同。漏掉这两行，服务端会说「包已加载、形态也在」，
+    // 而浏览器拿到的是磁盘上那份没有 modForms / silentPhases 的清单：`formsFor()` 只看得见第一方那几条、
+    // `silentPhases()` 也只看得见第一方那两个（DESIGN §28.29）—— 一个不会报错的静默失效。
+    if (p.forms && Object.keys(p.forms).length) out.add('assets');
+    if (p.fx && Array.isArray(p.fx.silentPhases) && p.fx.silentPhases.length) out.add('assets');
     // 助战 pool entries are merged into `support` (mergeWorkshopSupport) — the browser picks 助战 from that file.
     if (p.support && p.support.length) out.add('support');
     // 自选池（mergeWorkshopOperators：`backups.diy.ownedPool` / `backups.diy.operators`）写的是 `backups.json`，
@@ -1055,17 +1063,31 @@ function relativeModuleUrl(baseDir, specifier) {
  * Load the BEHAVIOUR layer of every pack: `workshop/<pack>/kits/<chessId>.js` (docs/WORKSHOP.md §4).
  *
  * A kit module's default export is the function the sim calls — `(bb, chess, def) => Kit` — the contract
- * server/sim/content/kits/tierN.js already uses. It is injected per battle through `Battle opts.kits`, which takes
- * precedence over the built-in registry (server/sim/content/index.js setupUnitKit), so nothing global is mutated.
+ * server/sim/content/kits/tierN.js already uses. It is injected per battle through `Battle opts.kits` (operators) or
+ * `Battle opts.tokenKits` (summons), each taking precedence over its built-in registry (server/sim/content/index.js
+ * setupUnitKit), so nothing global is mutated.
+ *
+ * **Two key spaces, one file-name rule** (§4.7). The engine resolves a kit by two different keys and a pack may ship
+ * either: an OPERATOR key (`def.charId` for a 补位 / 自选 piece, else `def.baseId` / `def.id`) or a SUMMON key (a token
+ * record id, `tokens.kits?.[def.id]`). The space is DECIDED — the pack's own records first, then the two known tables,
+ * then the declared override — never guessed from a name prefix, because `data/tokens.json` really does hold `char_…`
+ * ids (the two band map characters). An id in both spaces is refused by name (`KIT_TARGET_AMBIGUOUS`): the operator half
+ * would win the lookup and the summon half would silently never run.
+ *
+ * Which targets a pack owns: its own `chess.json` records (operator space), the charIds it declares into the 自选 pool
+ * (`pack.json.operators` — that charId IS the key `kitOf` looks up for a DIY piece), its own `tokens.json` records
+ * (summon space), or a declared `"<file>:<id>"` in `pack.json.overrides` (`chess:<id>` / `tokens:<id>`).
  *
  * TWO consumers, and they must agree:
- *   * the SERVER passes `kits` to the battles it runs itself (verification, takeover, SP_COMBAT=server);
+ *   * the SERVER passes `kits` / `tokenKits` to the battles it runs itself (verification, takeover, SP_COMBAT=server);
  *   * the BROWSER cannot receive a function over the wire, so `modules` is a JSON-safe list of URLs that travels in the
- *     battle spec; public/js/battle/runner.js imports them and builds the same map. Shipping only the server half would
- *     make a client-simulated battle disagree with the server's re-computation and get its result rejected.
+ *     battle spec; public/js/battle/runner.js imports them and builds BOTH maps (`kind: 'token'` marks the summon half).
+ *     Shipping only the server half would make a client-simulated battle disagree with the server's re-computation and
+ *     get its result rejected.
  *
  * Never throws: a kit that fails to import is reported and skipped. A kit-id collision between two packs is decided by
- * `byPackId` (DESIGN §28.3, the same rule the data overlay uses) and the report names the pack that holds the id.
+ * `byPackId` (DESIGN §28.3, the same rule the data overlay uses) and the report names the pack that holds the id — per
+ * key space, so an operator kit and a summon kit of the same name never hide each other.
  *
  * **Which files are kits** (§28.18): a top-level `kits/<id>.js` whose name does not start with `_`. A subdirectory is
  * not a kit (its files are the ones a kit imports with `./…`), and `kits/_shared.js` is a shared helper, not an
@@ -1073,19 +1095,39 @@ function relativeModuleUrl(baseDir, specifier) {
  * A kit's imports: the `@kit/` / `@sim/` whitelist (§28.12) plus its OWN siblings under `kits/` as `./…` (§28.18),
  * which the browser resolves against the kit's URL and this function rewrites against the kit file's directory.
  * @param {ReturnType<typeof loadWorkshop>} loaded
- * @param {{ log?: object|null, baseUrl?: string, knownIds?: Set<string>|null }} [opts] `knownIds` warns about a kit for
- *   an operator that does not exist (dead code) — pass the merged chess ids.
- * @returns {{ kits: Record<string, Function>, modules: Array<{ id: string, pack: string, url: string }>, errors: Array<{ pack: string, id: string, code: string, definedBy?: string, reason: string }> }}
+ * @param {{ log?: object|null, baseUrl?: string, knownIds?: Set<string>|null, knownTokenIds?: Set<string>|null }} [opts]
+ *   `knownIds` (the merged chess ids) and `knownTokenIds` (the merged token ids) are the two key spaces a kit file may
+ *   target. Pass BOTH and a kit for an id nothing carries is reported as dead code; pass only one and the other space's
+ *   verdict is left to the ownership rule, because a single table cannot speak for the space it does not know. A caller
+ *   that passes NEITHER still gets the ownership rule, exactly as before.
+ * @returns {{ kits: Record<string, Function>, tokenKits: Record<string, Function>, modules: Array<{ id: string, pack: string, url: string, kind?: 'token' }>, owners: Map<string, string>, tokenOwners: Map<string, string>, errors: Array<{ pack: string, id: string, code: string, definedBy?: string, reason: string }> }}
  */
-export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/workshop-kits', knownIds = null } = {}) {
+export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/workshop-kits', knownIds = null, knownTokenIds = null } = {}) {
   /** @type {Record<string, Function>} */
   const kits = {};
-  /** @type {Array<{ id: string, pack: string, url: string }>} */
+  /** @type {Record<string, Function>} */
+  const tokenKits = {};
+  /** @type {Array<{ id: string, pack: string, url: string, kind?: 'token' }>} */
   const modules = [];
   /** @type {Array<{ pack: string, id: string, code: string, definedBy?: string, reason: string }>} */
   const errors = [];
   /** kit id → the pack that loaded it, so a collision can name the holder instead of "another pack" (DESIGN §28.3). */
   const kitOwner = new Map();
+  /** token kit id → the pack that loaded it; the two spaces arbitrate **independently** (a token id is never an operator kit). */
+  const tokenKitOwner = new Map();
+  // 两个键空间是**分开裁决**的：`kits/<id>.js` 里的 id 落在「干员」（`def.charId` / `def.baseId`）或「召唤物」
+  // （token 记录的 id，`content/index.js` 的 `tokens.kits?.[def.id]`）之一 …… 而这两个空间的 **id 可以重名**
+  // （`data/tokens.json` 里的两名地图角色 `char_605_cmedic` / `char_613_acmedc` 就是 `char_` 开头），所以
+  // 目标必须**判**出来，不能靠名字前缀猜。同时落在两个空间里的 id 是**歧义**：它会被当成干员 kit 装上，而
+  // token 那一半**静默失效** —— 所以那条 id 直接点名拒绝（KIT_TARGET_AMBIGUOUS），不猜、不静默。
+  const chessIds = knownIds ?? null;
+  const tokenIds = knownTokenIds ?? null;
+  const isChess = (id) => !!(chessIds && chessIds.has(id));
+  const isToken = (id) => !!(tokenIds && tokenIds.has(id));
+  const isAmbiguous = (id) => isChess(id) && isToken(id);
+  // 「这个 id 谁都不认识」（KIT_NO_TARGET）要看**交给我的表**：**任何一张**表被交进来就够判 —— 一个 id 既不
+  // 在 chess 表、也不在 token 表、又不是本包自己的记录，那它确实没有目标。只交一张表的调用因此与从前逐字一致
+  // （那张表里没有的 id 仍是死代码，旧测试钉着这条），而两张表都交的调用多得到的是**第二个空间**，不是放松。
   // THE ordering rule (DESIGN §28.3), the same comparator the data overlay uses: the smaller pack id wins a collision,
   // so which pack's kit survives never depends on the order the packs were discovered in.
   for (const pack of ((loaded && loaded.packs) || []).slice().sort(byPackId)) {
@@ -1093,6 +1135,12 @@ export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/worksho
     if (!fs.existsSync(kitDir)) continue;
     /** Chess ids this pack itself contributes, and the official ids it declared it may replace. */
     const ownChess = new Set(Object.keys((pack.files && pack.files.chess) || {}));
+    // **The other two ways a pack owns a kit target** (the same two the key space above names):
+    //   * `pack.json.operators` —— 自选池声明（`shared/workshop.js` §1.2）：那个 charId 就是模拟层 `kitOf` 对自选
+    //     def 唯一查的键（`def.charId`），所以它**是**一个合法的 kit 目标；
+    //   * 本包 `tokens.json` 的 token id —— 包自己的召唤物，行为层原来只能有数据、没有行为。
+    const ownCharIds = new Set(Object.keys(pack.operators || {}));
+    const ownTokens = new Set(Object.keys((pack.files && pack.files.tokens) || {}));
     const declared = new Set(Array.isArray(pack.overrides) ? pack.overrides : []);
     for (const name of fs.readdirSync(kitDir).sort()) {
       // Which files are kits (§28.18): a top-level `<id>.js` is a kit, and only that. A SUBDIRECTORY is not a kit (its
@@ -1105,23 +1153,51 @@ export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/worksho
       try { st = fs.statSync(file); } catch { continue; }
       if (!st.isFile()) continue;
       const id = name.slice(0, -'.js'.length);
-      if (Object.hasOwn(kits, id)) {
+      // Which space this kit belongs to (`space`, below) decides WHICH registry it collides in: the two key spaces
+      // arbitrate independently, so an operator kit and a summon kit may share a name without one hiding the other.
+      const space = ownTokens.has(id) || (tokenIds && isToken(id))
+        ? 'token'
+        : (ownChess.has(id) || ownCharIds.has(id) || (chessIds && isChess(id)) ? 'chess' : (declared.has(`tokens:${id}`) ? 'token' : 'chess'));
+      const ownerMap = space === 'token' ? tokenKitOwner : kitOwner;
+      const spaceKits = space === 'token' ? tokenKits : kits;
+      if (Object.hasOwn(spaceKits, id)) {
         errors.push({
-          pack: pack.id, id, code: 'KIT_ID_COLLISION', definedBy: kitOwner.get(id),
-          reason: `kit "${id}" is already defined by pack "${kitOwner.get(id)}" — two packs must not ship the same kit id; rename this file, or drop one of the two packs`,
+          pack: pack.id, id, code: 'KIT_ID_COLLISION', definedBy: ownerMap.get(id),
+          reason: `kit "${id}" is already defined by pack "${ownerMap.get(id)}" — two packs must not ship the same kit id; rename this file, or drop one of the two packs`,
         });
         continue;
       }
-      if (knownIds && !knownIds.has(id)) {
-        errors.push({ pack: pack.id, id, code: 'KIT_NO_TARGET', reason: 'no chess record carries this id, so the kit would never be used' });
+      // Gate 1 — the id must name something a kit can reach, and the answer depends on WHICH space owns it. A pack kit
+      // is keyed two ways in the engine: an operator's `def.charId` / `def.baseId` / `def.id` (content/index.js kitOf)
+      // and a token's record id (`tokens.kits?.[def.id]`, the same file). An id in BOTH is refused by name: the operator
+      // half would win the lookup and the token half would be a kit nobody ever runs (the silent failure this loader
+      // exists to prevent).
+      if (isAmbiguous(id)) {
+        errors.push({
+          pack: pack.id, id, code: 'KIT_TARGET_AMBIGUOUS',
+          reason: `"${id}" is both a chess id and a summon's token id, so the loader cannot tell which one this kit is for — it would be installed as the operator kit and the token would silently keep its own behaviour; rename the record, or let the two spaces keep different ids`,
+        });
         continue;
       }
-      // The behaviour layer obeys the same rule as the data layer: replacing an OFFICIAL operator's kit is a declared
-      // act. Without this, a pack could rewrite official combat behaviour server-wide with no `overrides` entry.
-      if (!ownChess.has(id) && !declared.has(`chess:${id}`)) {
+      if ((chessIds || tokenIds)
+        && !isChess(id) && !isToken(id) && !ownChess.has(id) && !ownCharIds.has(id) && !ownTokens.has(id)) {
+        errors.push({
+          pack: pack.id, id, code: 'KIT_NO_TARGET',
+          reason: 'no chess record and no summon carries this id, so the kit would never be used',
+        });
+        continue;
+      }
+      // Gate 2 — the behaviour layer obeys the same rule as the data layer: kit an OFFICIAL operator / summon only as a
+      // declared act. Three ways to own an id: the pack's own chess record, the charId it declares into the 自选 pool
+      // (`pack.json.operators` — that IS the id `kitOf` looks the kit up by for a DIY piece), or the token record it
+      // ships. Without this, a pack could rewrite official combat behaviour server-wide with no `overrides` entry.
+      // The two messages name the two different defects: an id that EXISTS (another pack's summon, or an official one)
+      // is an undeclared takeover, while an id nothing carries is caught by Gate 1 above.
+      if (!ownChess.has(id) && !ownCharIds.has(id) && !ownTokens.has(id)
+        && !declared.has(`chess:${id}`) && !declared.has(`tokens:${id}`)) {
         errors.push({
           pack: pack.id, id, code: 'KIT_OFFICIAL_OVERRIDE_UNDECLARED',
-          reason: `this pack ships no chess record with this id — replacing an official operator's kit requires "chess:${id}" in pack.json overrides`,
+          reason: `${isToken(id) ? 'a summon' : 'a chess record'} carries this id but this pack does not own it — replacing another pack's or an official kit requires "${isToken(id) ? 'tokens' : 'chess'}:${id}" in pack.json overrides`,
         });
         continue;
       }
@@ -1155,11 +1231,13 @@ export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/worksho
           errors.push({ pack: pack.id, id, code: 'KIT_NO_DEFAULT_EXPORT', reason: 'the module must default-export the kit function (bb, chess, def) => Kit' });
           continue;
         }
-        kits[id] = fn;
-        kitOwner.set(id, pack.id);
+        spaceKits[id] = fn;
+        ownerMap.set(id, pack.id);
         // `hash` is the pack's content hash (DESIGN §28.2): it rides along with the URL so the spec says WHICH bytes
-        // the browser is supposed to be served, not just where to fetch them from.
-        modules.push({ id, pack: pack.id, hash: pack.hash, url: `${baseUrl}/${pack.id}/${name}?v=${v}` });
+        // the browser is supposed to be served, not just where to fetch them from. `kind: 'token'` marks the summon half
+        // for the SECOND loader (`public/js/battle/runner.js loadSpecKits` rebuilds both maps from this one list); an
+        // operator kit keeps the historical shape with no `kind`, so every existing reader of `modules` is untouched.
+        modules.push({ id, pack: pack.id, hash: pack.hash, url: `${baseUrl}/${pack.id}/${name}?v=${v}`, ...(space === 'token' ? { kind: 'token' } : {}) });
       } catch (e) {
         errors.push({ pack: pack.id, id, code: 'KIT_IMPORT_FAILED', reason: `import failed: ${String(e && e.message ? e.message : e)}` });
       }
@@ -1168,8 +1246,8 @@ export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/worksho
   for (const e of errors) log?.warn?.(`[workshop] kit ${e.pack}/${e.id}: ${e.reason}`);
   // `owners`（kit id → 包 id）随结果一起交出去：**按房间物化**（W-B，DESIGN §28.16）要知道某个 kit 属于哪个包，
   // 才能给一个只声明了子集的房间只带它那几个包的 kit。没有它，唯一的选择是把进程级那一份整份发下去 ——
-  // 那正是 W-B 要修的事。
-  return { kits, modules, owners: kitOwner, errors };
+  // 那正是 W-B 要修的事。token 那一半同理（`tokenOwners`）：两半各自按包裁剪，谁也不能靠别人的声明混进来。
+  return { kits, tokenKits, modules, owners: kitOwner, tokenOwners: tokenKitOwner, errors };
 }
 
 /**

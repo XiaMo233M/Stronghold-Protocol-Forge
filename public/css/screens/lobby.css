@@ -246,3 +246,31 @@
 .quickmatch-foot { display: flex; align-items: center; justify-content: space-between; gap: .12rem; font-size: calc(.14 * var(--t)); }
 .create-box .btn--xl { height: .92rem; font-size: calc(.32 * var(--t)); letter-spacing: .3em; }
 .create-box__hint { display: flex; align-items: center; justify-content: center; min-height: .3rem; font-size: calc(.14 * var(--t)); color: var(--text-lo); }
+
+/* ---- 本房座位上限 seat cap (业主裁决 B5, docs/META.md §1.9) ---------------------------------------------
+   The host's slider lives in the create box, co-op only. Everything here is a NEW class: no existing selector of this
+   file is touched, so a room that has no picker (solo, and every co-op room created before this feature) renders
+   exactly the box it did. The slider borrows the settings screen's visual language (`.set-range` in game.css): a mint
+   fill drawn with the `--pct` custom property the component computes, so both sliders look like the same control. */
+.seat-cap { display: flex; flex-direction: column; gap: .06rem; padding: .08rem .1rem; background: rgba(0, 0, 0, .22); border: 1px solid var(--line); }
+.seat-cap__head { display: flex; align-items: center; gap: .1rem; font-size: calc(.14 * var(--t)); }
+.seat-cap__name { color: var(--text-md); }
+.seat-cap__value { margin-left: auto; font-size: calc(.2 * var(--t)); color: var(--mint); letter-spacing: .06em; }
+.seat-cap__slider {
+  -webkit-appearance: none; appearance: none; width: 100%; height: .08rem; margin: .04rem 0;
+  background: linear-gradient(90deg, var(--mint-500) var(--pct), #0a0d0c var(--pct));
+  border: 1px solid var(--line-2); outline: none; cursor: pointer;
+}
+.seat-cap__slider::-webkit-slider-thumb { -webkit-appearance: none; width: .2rem; height: .26rem; background: var(--mint-400); clip-path: polygon(50% 0, 100% 30%, 100% 100%, 0 100%, 0 30%); cursor: grab; }
+.seat-cap__slider::-moz-range-thumb { width: .2rem; height: .26rem; background: var(--mint-400); border: 0; }
+.seat-cap__slider:focus-visible { border-color: var(--mint-400); }
+.seat-cap__note { font-size: calc(.13 * var(--t)); line-height: 1.7; color: var(--text-dim); }
+
+/* In the room (public/js/screens/room.js SeatCapSetter) the same control shares `.room-bar__opts` with the difficulty
+   picker and the 「AI 队友最后选择」 switch, inside a 1.5rem bar. So it is ONE compact row instead of the lobby's
+   stacked block — nothing outside that box moves, and the seats grid keeps the height it always had. The lower bound
+   cannot be shown as text there; it lives in the slider's own `min` (and its title / aria-valuemin). */
+.seat-cap--room { flex-direction: row; align-items: center; gap: .1rem; padding: 0; background: none; border: 0; }
+.seat-cap--room .seat-cap__name { font-size: calc(.14 * var(--t)); color: var(--text-lo); }
+.seat-cap--room .seat-cap__slider { width: 1.1rem; margin: 0; }
+.seat-cap--room .seat-cap__value { margin-left: 0; font-size: calc(.16 * var(--t)); }

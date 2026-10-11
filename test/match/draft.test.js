@@ -238,16 +238,25 @@ test('机变 tactic defaults: team cards reach teammates; layers / funds / free 
 
 const awaitImport = await import('../../server/match/choices.js');
 
-test('a single human (a 同盟 room started alone or with AI teammates only) is never timed outside battles — user playtest #4 item 3', () => {
+test('a single human (a 同盟 room started alone or with AI teammates only) is never timed outside battles, except the PREP that waits on them — user playtest #4 item 3', () => {
   for (const bots of [0, 3]) {
     const h = makeMatch({ mode: 'coop', difficulty: 'NORMAL', humans: 1, bots, seed: 12, fake: true, instant: false }).start();
     const m = h.m;
     assert.equal(m.soloUntimed, true);
     assert.equal(m.isSolo, false, 'the co-op mode rules stay');
-    const seen = new Map(); // phase → deadlines published
-    const note = (pub) => { if (!seen.has(pub.phase)) seen.set(pub.phase, []); seen.get(pub.phase).push(pub.deadline); };
-    for (const msg of h.bc) if (msg.t === 'm.public') note(msg);
-    h.onBroadcast.push((msg) => { if (msg.t === 'm.public') note(msg); });
+    // What a client was TOLD: the published view is the INCREMENTAL frame (server/viewsDelta.js), whose DELTA frames
+    // carry only the keys that changed, so the countdown a phase published is read from the MATERIALIZED series
+    // (harness.publicSeries — full-then-delta merged exactly as the browser does, the same merge lastBc('m.public')
+    // uses). Reading the raw h.bc frames would see `deadline: undefined` wherever nothing changed.
+    const seen = () => {
+      /** @type {Map<string, number[]>} */
+      const out = new Map();
+      for (const st of h.publicSeries()) {
+        if (!out.has(st.phase)) out.set(st.phase, []);
+        out.get(st.phase).push(st.deadline);
+      }
+      return out;
+    };
     assert.equal(m.phase, PHASE.INFO_CHECK);
     h.sched.advance(10 * 60_000);
     assert.equal(m.phase, PHASE.INFO_CHECK, `briefing waits (${bots} AI)`);
@@ -257,15 +266,21 @@ test('a single human (a 同盟 room started alone or with AI teammates only) is 
     h.sched.advance(10 * 60_000);
     assert.equal(m.phase, PHASE.BAND_DRAFT, 'the strategy draft waits');
     assert.ok(h.drive(() => m.phase === PHASE.PREP && m.round === 2), 'reached PREP R2');
-    h.sched.advance(60 * 60_000);
-    assert.equal(m.phase, PHASE.PREP, 'prep waits');
+    // PREP is the ONE exception to "a single human is never timed": the prep ends on every alive seat's Ready, so
+    // with no deadline the lone human's silence stalled the match forever (docs/PS100-MIGRATION.md §5). The deadline
+    // is now armed, and the phase is therefore allowed to leave the prep — the stall this test used to assert as
+    // "prep waits" is exactly the bug.
+    assert.ok(seen().get(PHASE.PREP)?.some((d) => d > 0), `lone-human prep is timed (${bots} AI): ${JSON.stringify(seen().get(PHASE.PREP))}`);
     assert.ok(h.drive(() => m.phase === PHASE.PREP && m.round === 4), 'past the R3 机变');
     h.flushAll();
-    for (const ph of [PHASE.INFO_CHECK, PHASE.BAND_DRAFT, PHASE.BATTLE_CHECK, PHASE.ROUND_START, PHASE.SP_DRAFT, PHASE.PREP, PHASE.SETTLE]) {
-      assert.ok(seen.has(ph), `saw ${ph}`);
-      assert.ok(seen.get(ph).every((d) => d === 0), `${ph}: no countdown with a single human (${bots} AI): ${seen.get(ph)}`);
+    // every OTHER phase outside a battle stays untimed (playtest #4 item 3): INFO_CHECK and BAND_DRAFT wait for the
+    // human and can never deadlock, so nothing may time them
+    const published = seen();
+    for (const ph of [PHASE.INFO_CHECK, PHASE.BAND_DRAFT, PHASE.BATTLE_CHECK, PHASE.ROUND_START, PHASE.SP_DRAFT, PHASE.SETTLE]) {
+      assert.ok(published.has(ph), `saw ${ph}`);
+      assert.ok(published.get(ph).every((d) => d === 0), `${ph}: no countdown with a single human (${bots} AI): ${published.get(ph)}`);
     }
-    assert.ok(seen.get(PHASE.COMBAT).some((d) => d > 0), 'the battles keep their clock');
+    assert.ok(published.get(PHASE.COMBAT).some((d) => d > 0), 'the battles keep their clock');
     m.dispose();
   }
   // two humans: the co-op timers stay

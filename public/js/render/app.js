@@ -120,6 +120,9 @@ import { layoutOfStage, rectForKind, normMapRect, mapRectOf } from './layout.js'
 import { SnapshotBuffer, frameTime } from './interp.js';
 import { TileField } from './tiles.js';
 import { UnitView, ItemView, DeviceView, FORMS, syncView } from './units.js';
+// 包声明的形态（`assets.modForms`）与静态相位（`assets.silentPhases`）随 assets 清单到达时由 `public/js/assets.js`
+// 装进这两张注册表（DESIGN §28.29）；这里只 import 统一入口 —— 消费点不再直接索引第一方常量。
+import { formsFor } from '../../../shared/packForms.js';
 import { FxSystem, ensureDamageFonts } from './fx.js';
 import { createDragController, pieceTile, dragStandTile } from './drag.js';
 import { backdropTextures, shadowTexture, refreshTierChips, refreshDownLabels, silhouetteTexture } from './textures.js';
@@ -439,6 +442,13 @@ export async function createFieldView(host, options = {}) {
   }
   // Attach the board only after synchronous setup completes; enable3d also guards late arrivals.
   const boardReady = Promise.all([threePromise, packPromise]).then(([THREE, pack]) => (THREE && pack ? enable3d(THREE, pack) : false), () => false);
+  let boardRetry = null;
+  function retryBoard() {
+    if (!want3d || destroyed || board3d || recover.off || recover.timer || boardRetry) return;
+    boardRetry = Promise.all([loadThree(), loadBoardPack(assets)])
+      .then(([THREE, pack]) => enable3d(THREE, pack), () => false)
+      .finally(() => { boardRetry = null; });
+  }
   // the official soft shadow sprite replaces the procedural one once loaded (may already be cached; asked again when the
   // manifest arrives late)
   let shadowAsked = false;
@@ -813,8 +823,16 @@ export async function createFieldView(host, options = {}) {
       if (e.area === 'board' && info.dir && !held.has(e.uid) && typeof v.setDir === 'function') v.setDir(info.dir);
     }
     for (const k of [...views.keys()]) if (String(k).startsWith('p:') && !seen.has(Number(String(k).slice(2)))) dropView(k);
-    // the boss round's prep: the pair partner's board on its half of the boss field (item 51; display only)
-    syncMates(prepXf.kind === 'bossPrep' && src.bossMate && Array.isArray(src.bossMate.units) ? src.bossMate.units : []);
+    // The 外勤医疗 reserve medic is visible before battle but not a movable board piece. Map its board-space slot to
+    // the displayed boss half exactly as for the player's own pieces; the partner's units already use field coordinates.
+    const mapChars = Array.isArray(src.prepMapChars) ? src.prepMapChars.map((u) => {
+      if (!u || !Number.isInteger(u.x) || !Number.isInteger(u.y)) return null;
+      const p = prepXf.toDisp(u.y, u.x);
+      const dir = prepXf.dirToDisp(u.dir);
+      return { ...u, x: p.col, y: p.row, dir, facing: dir === 'LEFT' ? -1 : 1 };
+    }).filter(Boolean) : [];
+    const mate = prepXf.kind === 'bossPrep' && src.bossMate && Array.isArray(src.bossMate.units) ? src.bossMate.units : [];
+    syncReadOnlyPrepUnits([...mapChars, ...mate]);
     prepPieces = list.filter((e) => e.key && views.has(e.key));
     if (dragState && !views.has(dragState.key)) { drag.reset(); endDragVisual(false); }
     holdScene(false); // the prep pieces reference their models now (a battle's hold ends here)
@@ -822,11 +840,10 @@ export async function createFieldView(host, options = {}) {
   }
 
   /**
-   * The pair partner's pieces in the Final Assault / Hidden Core prep (m.private bossMate units: UnitInfo in boss-field
-   * coordinates, facing as the battle will place them): read-only 'm:<uid>' views — not prep pieces, so they are never
-   * picked, dragged or swept with the own ones; a view is rebuilt when its body, tile or facing changes.
+   * The reserve medic and a boss pair's partner pieces: read-only 'm:<uid>' views. These are not prep pieces, so they
+   * are never picked, dragged or swept with the own board; a view is rebuilt when its body, tile or facing changes.
    */
-  function syncMates(units) {
+  function syncReadOnlyPrepUnits(units) {
     const keep = new Set();
     for (const u of units) {
       const info = u && Number.isInteger(u.uid) ? renderInfo({ ...u, id: `m:${u.uid}` }) : null;
@@ -1502,7 +1519,7 @@ export async function createFieldView(host, options = {}) {
         const late = form !== undefined ? LATE.get(e) || 0 : 0;
         if (form !== undefined) {
           const inf = infos.get(e[4].id);
-          if (inf && (form === null || FORMS[inf.spine || inf.defId]?.[form])) inf.form = form;
+          if (inf && (form === null || formsFor(FORMS, inf.spine || inf.defId)?.[form])) inf.form = form;
           const x = late > 0 ? { ...e[4], late, ...(Number(e[4].dur) > 0 ? { dur: Math.max(0, Number(e[4].dur) - late) } : {}) } : e[4];
           views.get(e[4].id)?.setForm?.(form, x);
         }
@@ -1770,6 +1787,7 @@ export async function createFieldView(host, options = {}) {
   // load it again at once (their bounded retries never run while hidden: no frames).
   function onAssets() {
     if (destroyed) return;
+    retryBoard();
     loadShadow();
     loadMountains();
     if (mode === 'prep' && lastPrep) setPrep(lastPrep.ps, lastPrep.o);
@@ -1781,6 +1799,7 @@ export async function createFieldView(host, options = {}) {
   setupCleanup.push(() => offAssets?.());
   const onVisible = () => {
     if (destroyed || globalThis.document?.visibilityState !== 'visible') return;
+    retryBoard();
     if (assets.loaded === false && typeof assets.ready === 'function') assets.ready();
     for (const v of views.values()) v.retryAssets?.();
     for (const v of penViews.values()) v.retryAssets?.();

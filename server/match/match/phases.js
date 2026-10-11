@@ -28,7 +28,9 @@ import { OK, fail, DELAYS, BAND_TURN_SECONDS } from './common.js';
  * 名单里一个 `visibleChess` 里没有的 id 只是**不出现在结果里**，不抛错：那是声明侧该拦的事
  * （`PLAYTEST_UNKNOWN_CHESS`），引擎不该为了一个坏 id 把一局打不开。
  *
- * 取牌走的是共享池（`pool.take`），所以「池里那一份」是真的被拿走的 —— 与开局礼包不同，这里不会凭空多出一份拷贝。
+ * 取牌走 `PlayerState.poolOf` —— 唯一分派点（design-level A, docs/PS100-MIGRATION.md §10-A）：`≤ MAX_SEATS` 时它就是共享池
+ * （同一个 `m.pool` 对象），座位变体打开时是本玩家自己的池。两种情况下「池里那一份」都是真的被拿走的 —— 与开局礼包不同，
+ * 这里不会凭空多出一份拷贝。
  * @param {object} gd 这一局的 GameData
  * @param {Record<string, string|undefined>} [env] 默认 `process.env`（单测直接喂一个假环境）
  * @returns {string[]} 可见、非精锐、且被两个来源之一点名的干员 id
@@ -347,7 +349,10 @@ export class MatchPhases {
         try {
           const rec = this.gd.chess(id);
           const base = this.gd.baseIdOf(id);
-          const taken = this.pool.take(base, rec && rec.isGolden ? this.gd.goldenCopies : 1);
+          // 份数走 `PlayerState.poolOf` —— 唯一分派点（design-level A, docs/PS100-MIGRATION.md §10-A）：自选槽走本人 stock、
+          // 100 座变体走本玩家自己的池，≤ MAX_SEATS 时它就是 `this.pool` 本身（同一个对象上的同一条语句）。
+          // 从共享目录直接 take 会让变体下的目录 `left < cap`，正是变体要消灭的东西。
+          const taken = ps.poolOf(base).take(base, rec && rec.isGolden ? this.gd.goldenCopies : 1);
           ps.hand[slot] = ps.newPiece('chess', id, { poolCopies: taken });
           got.push(id);
         } catch (e) {

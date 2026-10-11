@@ -115,9 +115,13 @@
 //   round.js      the round lifecycle the match calls (startRound, endPrep, eliminate, recompute, bond views) and
 //                 battleInput
 //   views.js      pieceView, effectsView, m.private (privateView)
-//   diy.js        自选编队: the picks (setDiy), the player's data view, the DIY stock (initDiyStock, poolOf), the shop's
+//   diy.js        自选编队: the picks (setDiy), the player's data view, the DIY stock (initDiyStock), the shop's
 //                 DIY draws (diyRollEntries), the pick of a piece (diyPickOf)
 //   common.js     HAND_SIZE, TEMP_SIZE, MAX_OFFER_SLOTS, OK, fail
+//   rules.js      the 100-seat variant (design-level item A of 百卫补丁 v0.3, docs/PS100-MIGRATION.md §10-A): the
+//                 player's own pool (pool), the draw source (mainPool) and the UNIQUE copy dispatch point (poolOf) —
+//                 plus squad membership. Installed LAST, exactly as the patch does; with the switch off (`seatCap <=
+//                 MAX_SEATS`) both accessors hand back the very same `m.pool` object the code used before.
 
 import { FIELD } from './board.js';
 import { computeBonds } from './bondsMeta.js';
@@ -133,6 +137,7 @@ import { PlayerRound } from './player/round.js';
 import { PlayerViews } from './player/views.js';
 import { PlayerDiy, DiyStock } from './player/diy.js';
 import { PlayerSupport } from './player/support.js';
+import { PlayerRules } from './player/rules.js';
 
 export class PlayerState {
   /**
@@ -184,6 +189,13 @@ export class PlayerState {
     this._diyRecords = new Map();
     /** the copies of the slotted pieces (initDiyStock, once the match's bans are drawn) */
     this.diyStock = new DiyStock();
+    /**
+     * The 100-seat variant's per-player pool (design-level A, docs/PS100-MIGRATION.md §10-A), built lazily by
+     * PlayerRules.pool() the first time this player's copies are routed. `null` = not built; a ≤ MAX_SEATS match never
+     * builds one (poolOf hands back `m.pool`).
+     * @type {import('./pool.js').SharedPool|null}
+     */
+    this._ownPool = null;
     /** slotted slots without stock: every bond of the operator is switched off this match */
     this.diyBanned = Object.freeze([]);
     if (!this.isBot && seat.diy) this.setDiy(seat.diy);
@@ -252,7 +264,7 @@ export class PlayerState {
 }
 
 // the method modules, in this order (a name defined twice is an error, never a silent override)
-for (const part of [PlayerBasics, PlayerPieces, PlayerAcquire, PlayerEconomy, PlayerPlacement, PlayerItems, PlayerPrep, PlayerRound, PlayerViews, PlayerDiy, PlayerSupport]) {
+for (const part of [PlayerBasics, PlayerPieces, PlayerAcquire, PlayerEconomy, PlayerPlacement, PlayerItems, PlayerPrep, PlayerRound, PlayerViews, PlayerDiy, PlayerSupport, PlayerRules]) {
   for (const key of Reflect.ownKeys(part.prototype)) {
     if (key === 'constructor') continue;
     if (Object.prototype.hasOwnProperty.call(PlayerState.prototype, key)) throw new Error(`PlayerState.${String(key)} is defined twice`);

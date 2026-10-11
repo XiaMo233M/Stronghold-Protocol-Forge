@@ -1220,10 +1220,13 @@ describe('assetsDigest 进身份哈希（DESIGN §28.2 / §28.13.5）', () => {
     // clementia 那一个在 0.2.3 那一轮**移过**：上游把克莱门莎收成了官方干员（官方 id `char_4231_clemnt`），
 // 本仓库的示例夹具再用那个 id 会被加载器按 OFFICIAL_ID_COLLISION 拒掉，于是 id 换成工坊保留前缀的
 // `char_ws_clemnt`（docs/examples/clementia/README.md）—— 包的内容真的变了，基线随之移动。
+// 2026-10-11 再移一次，理由同样是"身份的定义变了"（业主裁决 B，DESIGN §28.2）：清单 = **包目录下的每一个普通
+// 文件**，clementia / kit-demo 各多一条 `README.md` ⇒ 两个包摘要移动、整套摘要跟着移动；demo-workshop 目录里
+// 只有 pack.json + chess.json（两条都在旧清单里），所以它一个字没变 —— 这一条正是本节要守的东西。
 const BASELINE = {
-      clementia: '27627f47d04aef3a622202a92038ada7a514b2c2b44389bfb069720b823d987e',
+      clementia: 'e89533a3624bc5260e15c421768f416c0ccea8b27a428a09ea6af52fb3cfc2cc',
       'demo-workshop': '15092019fd1dbc85589af4b89102746c3a3c0389aef3847d7d9a335bca1a73ef',
-      'kit-demo': '77b80c6e74021508d5857208d669da36cc74f20384798a6d5a269fd37f9e4f35',
+      'kit-demo': '4a75376f6acac54994808f9c0f622c9c0e482c14153eddcf8f883a3f7d6bde2b',
     };
     const loaded = loadWorkshop(EXAMPLES, { log: quiet });
     assert.deepEqual(loaded.errors, [], '三份示例包必须都加载成功');
@@ -1233,11 +1236,13 @@ const BASELINE = {
       assert.equal(p.manifest.some((m) => m.path === ASSETS_DIGEST_PATH), false, `${p.id}: 不该有容器摘要那一条`);
     }
     const set = modSetOf(loaded.packs.map((p) => ({ id: p.id, hash: p.hash, layer: p.layer, combat: p.combat, api: p.api })));
-    // 实测值。整套摘要随着 clementia 那一份身份哈希一起移过：上游 0.2.3 把克莱门莎收成官方干员
-    // （char_4231_clemnt），示例夹具换成工坊保留前缀的 char_ws_clemnt（docs/examples/clementia/README.md），
-    // 于是那一个包的 hash 变了、整套摘要跟着变 —— 而另两份包（demo-workshop / kit-demo）的哈希一个字没变，
-    // 正是这一条要守的东西。
-    assert.equal(set.digest, '8913d669e9c01c15e2293b966de3a547c05828ba36c5f805f8888dcfc9f6ac10');
+    // 实测值，两次移动都记在这里：
+    //   * 0.2.3 —— 上游把克莱门莎收成官方干员（char_4231_clemnt），示例夹具换成工坊保留前缀的
+    //     char_ws_clemnt（docs/examples/clementia/README.md），那一个包的 hash 变了、整套摘要跟着变；
+    //   * 2026-10-11 —— 业主裁决 B（DESIGN §28.2）改了**身份的定义**：清单 = 包目录下的每一个普通文件。
+    //     clementia 与 kit-demo 因此各多一条 `README.md`（它们真的在包里），两个包摘要移动 ⇒ 整套摘要移动；
+    //     demo-workshop 的哈希与上面那条基线一样没动 —— 这一条守的正是"哪些包真的变了"。
+    assert.equal(set.digest, '94de46c19705c6c58083a4c6367cdba60564e8ef0e40047d73526f57dfa755bb');
   });
 });
 

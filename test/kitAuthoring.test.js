@@ -215,6 +215,35 @@ describe('kit authoring: ownership (the same rule loadWorkshopKits enforces)', (
     assert.deepEqual(kitErrors(validateKit(src, { id: 'chess_ws_mine_a', ownChessIds: ['chess_ws_mine_a'] })), []);
   });
 
+  // 第二个键空间（docs/WORKSHOP.md §4.7）：一个 kit 的 id 还可以是**本包声明进自选池的 charId**（模拟层对自选干员
+  // 就是按 charId 查 kit 的）或**本包的召唤物 token id**（`tokens.kits?.[def.id]`）。编辑器必须与加载器同判，否则
+  // 作者会看到「编辑器放行、加载器丢掉」——那正是 KIT_NO_TARGET 这条判据要消掉的那种静默失败。
+  test('a charId this pack declares into the 自选 pool (pack.json operators) is a legal target', () => {
+    const src = 'export default function kit() { return {}; }';
+    assert.deepEqual(codes(validateKit(src, { id: 'char_ws_clemnt', ownChessIds: ['chess_ws_mine_a'], overrides: [] })), ['KIT_NO_TARGET']);
+    assert.deepEqual(kitErrors(validateKit(src, { id: 'char_ws_clemnt', ownCharIds: ['char_ws_clemnt'] })), []);
+  });
+
+  test('a summon token id this pack ships (tokens.json) is a legal target too', () => {
+    const src = 'export default function kit() { return {}; }';
+    assert.deepEqual(codes(validateKit(src, { id: 'token_ws_mask', ownChessIds: ['chess_ws_mine_a'], overrides: [] })), ['KIT_NO_TARGET']);
+    assert.deepEqual(kitErrors(validateKit(src, { id: 'token_ws_mask', ownTokenIds: ['token_ws_mask'] })), []);
+    // …and the sanctioned way to replace an OFFICIAL summon's behaviour is the declared `tokens:<id>`
+    assert.deepEqual(codes(validateKit(src, { id: 'token_10000_silent_healrb', ownTokenIds: [] })), ['KIT_NO_TARGET']);
+    assert.deepEqual(kitErrors(validateKit(src, { id: 'token_10000_silent_healrb', overrides: ['tokens:token_10000_silent_healrb'] })), []);
+  });
+
+  test('an id in BOTH key spaces is refused by name, not silently given to one of them', () => {
+    const src = 'export default function kit() { return {}; }';
+    const issues = validateKit(src, {
+      id: 'char_605_cmedic', ownChessIds: ['char_605_cmedic'], ownTokenIds: ['char_605_cmedic'], ambiguousIds: ['char_605_cmedic'],
+    });
+    assert.deepEqual(codes(issues), ['KIT_TARGET_AMBIGUOUS']);
+    assert.match(issues[0].hint, /operator half wins/);
+    // an ambiguous id is refused even when the pack DOES own it in one space: the file name cannot say which one it means
+    assert.deepEqual(codes(validateKit(src, { id: 'x_ws_y', ownTokenIds: ['x_ws_y'], ambiguousIds: ['x_ws_y'] })), ['KIT_TARGET_AMBIGUOUS']);
+  });
+
   test('a bad id and an empty file are refused outright', () => {
     assert.deepEqual(codes(validateKit('', { id: 'not a filename' })), ['BAD_KIT_ID', 'EMPTY_KIT']);
     assert.deepEqual(codes(validateKit('   \n ', { id: 'chess_ws_x_a' })), ['EMPTY_KIT']);

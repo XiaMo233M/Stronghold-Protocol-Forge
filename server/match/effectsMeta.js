@@ -372,7 +372,8 @@ export class EffectDispatcher {
         const repeat = hook === 'onGain' ? this.investRepeat(ps) : 1;
         const loc = ps.find(self.uid);
         const where = loc ? (loc.area === 'board' ? 'board' : loc.area) : 'trigger';
-        this._call(ps, key, h, hook, { kind: 'garrison', key, piece: self, garrisonId: gid, garrison: g, bb: g.bb || {}, bbStr: g.bbStr || {}, where, trigger: true, triggeredBy }, ev, repeat);
+        this._call(ps, key, h, hook, { kind: 'garrison', key, piece: self, copiedFrom: asPiece ? piece : null,
+          garrisonId: gid, garrison: g, bb: g.bb || {}, bbStr: g.bbStr || {}, where, trigger: true, triggeredBy }, ev, repeat);
         n++;
       }
     } finally {
@@ -600,7 +601,10 @@ export function makeCtx(m, ps, source, hook, ev = null) {
         return typeof opts.filter === 'function' ? !!opts.filter(id) : true;
       };
       const extra = typeof ps.diyStockEntries === 'function' ? ps.diyStockEntries() : null;
-      return m.pool.roll(m.rngMeta, { maxTier: Number.isInteger(opts.maxTier) ? opts.maxTier : 6, tier: Number.isInteger(opts.tier) ? opts.tier : null, filter: f, extra });
+      // the DRAW SOURCE: the player's own pool in the 100-seat variant, the shared one today (player/rules.js mainPool;
+      // the identical object when the switch is off — docs/PS100-MIGRATION.md §10-A)
+      const src = typeof ps.mainPool === 'function' ? ps.mainPool() : m.pool;
+      return src.roll(m.rngMeta, { maxTier: Number.isInteger(opts.maxTier) ? opts.maxTier : 6, tier: Number.isInteger(opts.tier) ? opts.tier : null, filter: f, extra, ignoreCounts: opts.ignoreCounts === true });
     },
     rollItem: (opts = {}) => m.rollItemId(opts),
     /**
@@ -609,8 +613,10 @@ export function makeCtx(m, ps, source, hook, ev = null) {
      */
     rollPool: (poolId, opts = {}) => m.rollPool(poolId, {
       shopLevel: ps.shop.level,
-      // a shared-pool draw also takes the player's 自选 stock, its bonds read through the player's view (rollChess)
+      // a shared-pool draw also takes the player's 自选 stock, its bonds read through the player's view (rollChess);
+      // the draw source follows the same switch (player/rules.js mainPool)
       extra: typeof ps.diyStockEntries === 'function' ? ps.diyStockEntries() : null, chessOf: (id) => gd.chess(id),
+      pool: typeof ps.mainPool === 'function' ? ps.mainPool() : null,
       ...opts,
     }),
     /**

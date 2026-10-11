@@ -167,9 +167,9 @@ describe('docs/prompts 的代码引用（点进去必须有东西）', () => {
   });
 
   test('这条判据本身有牙：指错一行的合成引用会被抓出来', () => {
-    // 拿真实文件当靶子：`:124` 与 `:143` 现在都指向 Battle.js，只有一处写着 flags
+    // 拿真实文件当靶子：`:124` 与 `:149` 现在都指向 Battle.js，只有一处写着 flags
     const stale = '`battle.flags` 是构造期输入（`server/sim/Battle.js:124`）';
-    const right = '`battle.flags` 是构造期输入（`server/sim/Battle.js:143`）';
+    const right = '`battle.flags` 是构造期输入（`server/sim/Battle.js:149`）';
     assert.equal(staleMemberClaims(stale, 'fixture').length, 1, '指错一行必须报出来');
     assert.deepEqual(staleMemberClaims(right, 'fixture'), [], '指对了不许报');
     // 裸名字不判：`inRect` 的引用常常是在说调用点，不是在说声明（误报会让这条门禁被关掉）

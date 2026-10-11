@@ -4,7 +4,7 @@
 // and the list compaction.
 // Installed on Battle.prototype by server/sim/Battle.js (a method container: never instantiated; `this` is the battle).
 
-import { MAX_ALIVE_ENEMIES } from '../constants.js';
+import { aliveEnemyCap } from '../constants.js';
 import { Unit } from '../units.js';
 import { compileRoute } from '../ai.js';
 import { unitInfo } from '../snapshot.js';
@@ -22,7 +22,7 @@ export class BattleSpawns {
   _queueSpawn(s, precount) {
     if (Number(s.time) === Infinity) return; // "never" — not scheduled, not counted
     // capped: a bogus count (Infinity, 1e9) would otherwise hang the constructor / exhaust memory
-    const count = Math.min(MAX_ALIVE_ENEMIES, Math.max(1, Math.floor(fin(s.count ?? 1, 1)) || 1));
+    const count = Math.min(aliveEnemyCap(Array.isArray(this.players) ? this.players.length : 1), Math.max(1, Math.floor(fin(s.count ?? 1, 1)) || 1));
     const interval = Math.max(0, fin(s.interval, 0));
     const def = this.data.getEnemy(s.enemyKey);
     for (let i = 0; i < count; i++) {
@@ -81,8 +81,9 @@ export class BattleSpawns {
    * sourcePlayerId, ownerPlayerId, bounty:{coins,ownerPlayerId}, countInTotal, inTotal }
    */
   spawnEnemy(enemyKey, opts = {}) {
-    if (this.enemies.length >= MAX_ALIVE_ENEMIES && this.aliveEnemies().length >= MAX_ALIVE_ENEMIES) {
-      this._handlerError('spawnEnemy', null, new Error(`more than ${MAX_ALIVE_ENEMIES} living enemies; spawn of ${enemyKey} refused`));
+    const cap = aliveEnemyCap(Array.isArray(this.players) ? this.players.length : 1);
+    if (this.enemies.length >= cap && this.aliveEnemies().length >= cap) {
+      this._handlerError('spawnEnemy', null, new Error(`more than ${cap} living enemies; spawn of ${enemyKey} refused`));
       return null;
     }
     // opts.def: an inline record (data/enemies.json shape, or an already normalised EnemyDef) for keys absent from data

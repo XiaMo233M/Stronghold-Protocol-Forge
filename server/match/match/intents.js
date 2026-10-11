@@ -47,6 +47,9 @@ export class MatchIntents {
       // the stats the board's units start their next battle with (the detail card in prep, user playtest #4 item 7)
       case 'g.unitStats': return this.unitStats(ps, msg.seq ?? null);
       case 'g.leave': this.onLeave(ps.playerId); return OK;
+      // the client could not merge an incremental m.public frame and asks for the full one again
+      // (DESIGN §8.2 "incremental frame", the self-healing ask; shared/protocol.js 'g.publicFull')
+      case 'g.publicFull': return this.resendPublic(ps.playerId);
       case 'b.progress': return this._onProgress(ps, msg);
       case 'b.result': return this._onResult(ps, msg);
       default: return fail(ERR.BAD_MSG);

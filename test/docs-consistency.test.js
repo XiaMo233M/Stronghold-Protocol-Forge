@@ -37,7 +37,7 @@ import { moduleTypeIconUrl } from '../public/js/ui/assetUrls.js';
 import { validateC2S } from '../shared/protocol.js';
 import { ERR, PHASE, VOICE_LANGS, DEFAULT_VOICE_LANG } from '../shared/constants.js';
 import { PROJECTILE_SPEEDS, BOOMERANG_RETURN_SPEED, ELEMENT, ELEMENT_ORDER, DOWN_STATE, BLOCK_RADIUS, FORCED_EXIT, ASPD_MIN, BOSS_POOL_MIN_HP, AUTO_OP_COOLDOWN, ALLY_COLLIDER_RADIUS } from '../server/sim/constants.js';
-import { SKILL_SUMMON_START_DEPLOY, BOND_LAYER_CAP, BOSS_HIT_LIMIT, layerGainRoom } from '../shared/constants.js';
+import { SKILL_SUMMON_START_DEPLOY, BOND_LAYER_CAP, BOSS_HIT_LIMIT, bossHitLimitFrom, layerGainRoom } from '../shared/constants.js';
 import * as SIM_CONST from '../server/sim/constants.js';
 import { MULTI_ROUND_BOUNTY_BATTLES } from '../server/match/choices.js';
 import { SELF_BOUND, PART_TRANSFER, BLADE_TRANSFER, DRONE_LINK_BASE } from '../server/sim/content/bosses.js';
@@ -584,6 +584,14 @@ test('playtest6b follow-up (DESIGN §20.10–§20.13): leader HP, 直接乘算, 
   for (const [name, src] of [['Match', matchText()], ['PlayerState', playerText()]]) assert.ok(!/layerRoom\b/.test(src), `${name}: no layerRoom`);
   // 限伤: official constant, not an overflow — no doc keeps the boss-HP branch's "fixed-point overflow, not modelled"
   assert.equal(BOSS_HIT_LIMIT, 300000);
+  // …and it stays the DEFAULT when a deployment overrides it (百卫补丁 v0.3 移植, docs/PS100-MIGRATION.md §5):
+  // `bossHitLimitFrom` is the pure parser, an unset environment yields undefined = "keep BOSS_HIT_LIMIT", and only a
+  // deliberate `SP_BOSS_HIT_LIMIT` moves the rail. This STRENGTHENS the line above (which it leaves untouched): it
+  // pins the 300000 as the default AND pins the documented 0 / Infinity = off semantics of its override.
+  assert.equal(bossHitLimitFrom({}), undefined, 'no override ⇒ the official 300000 stands');
+  assert.equal(bossHitLimitFrom({ SP_BOSS_HIT_LIMIT: '0' }), Infinity, '0 = off, as the constant documents');
+  assert.equal(bossHitLimitFrom({ SP_BOSS_HIT_LIMIT: 'infinity' }), Infinity);
+  assert.equal(bossHitLimitFrom({ SP_BOSS_HIT_LIMIT: 'junk' }), undefined, 'junk falls back to the official default');
   for (const [name, text] of [['BALANCE', BALANCE], ['DATA', DATA_MD], ['PLAYING', PLAYING], ['SIM', SIM], ['META', META], ['research 02', R02], ['DESIGN', DESIGN]]) {
     assert.ok(!/reads as the engine's fixed-point overflow|is \[inference\] and is not modelled|Not modelled: the largest damage/.test(text), `${name}: 限伤 is not called an unmodelled overflow`);
     assert.ok(!/BOND_LAYER_CAP`?\)? ?\[ASSUMED\]|999 \[ASSUMED\]|awaiting the user's confirmation/.test(text), `${name}: the 999 cap is official, not [ASSUMED]`);

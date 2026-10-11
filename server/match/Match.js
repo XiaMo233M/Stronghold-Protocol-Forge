@@ -172,14 +172,14 @@
 //   common.js        what the modules share (FLOW_TICKER_PRIORITY, DELAYS, BAND_TURN_SECONDS — re-exported here, OK,
 //                    fail, BOSS_CLOCK_MS)
 
-import { PHASE, modeIdFor } from '../../shared/constants.js';
+import { PHASE, modeIdFor, bossHitLimitFrom } from '../../shared/constants.js';
 import { layoutOf } from '../../shared/layout.js';
 import { Battle } from '../sim/Battle.js';
 import { DataSource } from '../sim/simdata.js';
 import { createRng, deriveSeed } from '../sim/rng.js';
 import { GameData } from './gamedata.js';
 import { RealScheduler } from './scheduler.js';
-import { SharedPool, drawDisabledBonds } from './pool.js';
+import { SharedPool, SharedItemPool, drawDisabledBonds } from './pool.js';
 import { PlayerState } from './PlayerState.js';
 import { EffectDispatcher, getDefaultRegistry } from './effectsMeta.js';
 import { setupMatchWaves } from './waves.js';
@@ -209,8 +209,7 @@ const BOT_REHEARSAL_DEFAULT = 3;
 const BOT_SLICE_MS = 8;
 const env = (k) => (typeof process !== 'undefined' && process.env ? process.env[k] : undefined);
 /** Default combat mode: client-side unless SP_COMBAT=server. */
-const envClientCombat = () => String(env('SP_COMBAT') || '').toLowerCase() !== 'server';
-/** SP_VERIFY → 'off' | 'sample' | 'all'. */
+const envClientCombat = () => String(env('SP_COMBAT') || '').toLowerCase() !== 'server';/** SP_VERIFY → 'off' | 'sample' | 'all'. */
 export function parseVerify(v) {
   const s = String(v ?? '').trim().toLowerCase();
   return s === 'all' || s === 'sample' ? s : 'off';
@@ -243,11 +242,27 @@ export class Match {
     this.broadcastFn = opts.broadcast;
     this.onEndFn = opts.onEnd;
     this.data = opts.data && typeof opts.data === 'object' ? opts.data : {};
-    this.gd = new GameData(this.data, this.modeId);
+    /**
+     * Seat slots of this match (opts.seatCap, or how many seats the caller handed in). Only the boss-pool ceiling
+     * reads it: a room bigger than the official 4 must not clamp its leader pool to the 4-seat `aliveFull`
+     * (gamedata.js bossPoolShareOf; 百卫补丁 v0.3, docs/PS100-MIGRATION.md §2.4).
+     */
+    this.seatCap = Number.isFinite(opts.seatCap) && opts.seatCap >= 1 ? Math.floor(opts.seatCap)
+      : (Array.isArray(opts.seats) && opts.seats.length >= 1 ? opts.seats.length : undefined);
+    this.gd = new GameData(this.data, this.modeId, this.seatCap ? { seatCap: this.seatCap } : {});
     if (!this.difficulty) this.difficulty = this.gd.difficulty;
     this.isSolo = this.mode === 'solo' || this.gd.isSolo;
     /** 「AI 队友最后选择」 (opts.aiPicksLast, GitHub #338): humans draft before AI seats (MatchPhases.humansFirst) */
     this.aiPicksLast = !this.isSolo && opts.aiPicksLast === true;
+    /**
+     * 限伤 override for this match's battles (`SP_BOSS_HIT_LIMIT`, shared/constants.js bossHitLimitFrom; opts wins).
+     * `undefined` = keep the official `BOSS_HIT_LIMIT` — the default of every existing deployment, in which case the
+     * battles are built with no `bossHitLimit` key at all (byte-for-byte the old behaviour). A number (or Infinity for
+     * "off") is passed to every field this match builds, server-run and client-side alike (the client reads it off the
+     * battle spec, so both sides cancel the same hits).
+     * @type {number|undefined}
+     */
+    this.bossHitLimit = opts.bossHitLimit !== undefined ? opts.bossHitLimit : bossHitLimitFrom(typeof process !== 'undefined' && process.env ? process.env : {});
     this.ownsScheduler = !opts.scheduler;
     this.sched = opts.scheduler || new RealScheduler({ now: opts.now || Date.now, onError: (e) => this.reportError('timer', e) });
     this.registry = opts.registry || getDefaultRegistry();
@@ -260,6 +275,13 @@ export class Match {
      * @type {Record<string, Function>|null}
      */
     this.workshopKits = opts.workshopKits && typeof opts.workshopKits === 'object' ? opts.workshopKits : null;
+    /**
+     * 召唤物的行为层（docs/WORKSHOP.md §4.7）: the same two halves for the SECOND kit key space — a summon kit is keyed
+     * by the token record id and is injected as `Battle opts.tokenKits`. `null` on a plain install, so the battle never
+     * sees the key (behaviour byte-for-byte as before).
+     * @type {Record<string, Function>|null}
+     */
+    this.workshopTokenKits = opts.workshopTokenKits && typeof opts.workshopTokenKits === 'object' ? opts.workshopTokenKits : null;
     /** @type {Array<{ id: string, pack: string, hash?: string, url: string }>} */
     this.workshopKitModules = Array.isArray(opts.workshopKitModules) ? opts.workshopKitModules : [];
     /**
@@ -390,7 +412,10 @@ export class Match {
       .flatMap((s) => s.support.map((id) => String(id || ''))))]
       .filter((id) => id && this.gd.isSupportChess(id))
       .sort();
+    // 上游 0.2.4（DESIGN §31.8 共享库存）与我们的助战供给落在同一行，两者互不相干，故并存：
+    // 助战多一份拷贝走 SharedPool 的 support 选项；共享装备库存是另一个池，由 SharedItemPool 表达。
     this.pool = new SharedPool(this.gd, { banned: bans.banned, support: this.supportSupply });
+    this.itemPool = new SharedItemPool(this.gd, () => this.order);
     // 自选编队 (0.2.0): each human's slotted DIY pieces get their own stock — none for one whose bonds are all off this
     // match (player/diy.js initDiyStock); no randomness is drawn here
     const off = new Set([...bans.drawn, ...bans.staticOff]);
@@ -418,6 +443,17 @@ export class Match {
     this._pubTimer = null;
     this._lastPubAt = -Infinity;
     this._lastPubJson = '';
+    /**
+     * The full m.public view the room's clients are believed to hold — the baseline of the incremental frame
+     * (DESIGN §8.2, incremental frame; matchMessaging _maybeSendPublic, server/viewsDelta.js). null until the first
+     * frame went out, which is what makes that first frame a full one.
+     * @type {Record<string, any> | null}
+     */
+    this._pubPrev = null;
+    /** The next m.public is sent in its full form (a membership change, a failed delivery, the keepalive). */
+    this._pubFull = true;
+    /** Consecutive delta frames since the last full one (the keepalive counter, PUBLIC_FULL_EVERY). */
+    this._pubFrames = 0;
     /** @type {Set<PlayerState>} */
     this._privDirty = new Set();
     this.errors = [];
@@ -443,6 +479,20 @@ export class Match {
     this.watchPref = new Map();
     this.lastResults = new Map();
     this.unitePlan = null;
+    /**
+     * 100-seat variant ONLY (design-level item C, docs/PS100-MIGRATION.md §10-C): the per-squad plans of the running
+     * 联防 round (`unitePlans`), its round number (`uniteRound`: 1 阶段 1 队内兜底 / 2 阶段 2 跨队兜底) and the
+     * re-entrancy tokens of the two-round hand-off. They stay AT REST (`null` / `1` / `0` / `null`) whenever the switch
+     * is off — a `≤ MAX_SEATS` match never reads or writes them, because `planUnite` only returns an array above
+     * `MAX_SEATS` and `MatchUnite.startUnite` branches on that shape (test/ps100-variant-ac.test.js pins the rest).
+     */
+    this.unitePlans = null;
+    this.uniteRound = 1;
+    this._uniteToken = 0;
+    this._uniteHandoff = null;
+    this._phase1Settle = null;
+    this._phase1Driven = 0;
+    this._relayToken = 0;
     /** 联防 outcome for the SETTLE view: { through, helpers, leakers, losses } (settle()), null when no 联防 resolved */
     this.uniteResultView = null;
     /** server-run 联防: the leakers' counts last published (_uniteTick) */

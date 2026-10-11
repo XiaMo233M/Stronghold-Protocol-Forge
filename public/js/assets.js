@@ -42,6 +42,11 @@
 // so it can be unit tested without a browser. Helpers never throw on unknown ids — they return null and the
 // caller falls back (docs/ASSETS.md "Other fallbacks").
 
+// 包声明里的**行为增量**（DESIGN §28.29）：形态（`assets.modForms` → `shared/packForms.js`）与静态相位
+// （`assets.silentPhases` → `render/fx/kinds.js`）。两者都随这份清单到达，所以装包声明挂在这里（见 readyState）。
+import { installPackForms } from '../../shared/packForms.js';
+import { installSilentPhases } from './render/fx/kinds.js';
+
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const str = (v) => (typeof v === 'string' && v ? v : null);
 const get = (o, k) => (isObj(o) && Object.hasOwn(o, k) ? o[k] : undefined);
@@ -729,6 +734,9 @@ export function createAssets(options) {
   let localManifest = isObj(opts.localManifest) ? opts.localManifest : null;
   const doFetch = opts.fetch || ((...a) => globalThis.fetch(...a));
   let manifest = isObj(opts.manifest) ? opts.manifest : null;
+  // 一次构造函数就带着清单来的那一半（`createAssets({ manifest })`，render/app/host.js 的 resolveAssets）：
+  // 它不走 `adopt`，所以包增量在这里装一次（`readyState` 与 `adopt` 里那次互不重叠）。
+  if (manifest) readyState(manifest);
   let readyPromise = manifest ? Promise.resolve(manifest) : null;
   const loadImage = opts.loadImage || loadImageElement;
   const images = new Map(); // url → { promise, value }
@@ -748,10 +756,26 @@ export function createAssets(options) {
     for (const fn of [...listeners]) { try { fn(what); } catch (err) { console.warn('[assets] change listener failed', err); } }
   };
 
+  /**
+   * 形态 / 静态相位的**包增量**（DESIGN §28.29）：它们随 `assets.json` 一起到达（`assets.modForms` /
+   * `assets.silentPhases`，由 `shared/workshop.js` 的 `mergeWorkshopForms` / `mergeWorkshopFx` 并进去），
+   * 所以「装包声明」这件事的挂点就是**清单被采纳的那一刻** —— 只在 `adopt` 里做一次，不在每个视图上重复。
+   * 第一方那一半（`FORMS` / `SILENT_PHASES`）不在这里，也不许在这里：它们是渲染器的常量，优先权在 `formsFor`。
+   */
+  function readyState(m) {
+    const dropped = installPackForms(isObj(m.modForms) ? m.modForms : null).dropped;
+    if (dropped.length) {
+      // 不静默：形状层（pack.json 解析）已经拒过非法声明，能走到这里的只有跨包撞车与「想盖第一方」那两类。
+      console.warn('[assets] 形态声明被丢掉（第一方优先 / 包 id 小的赢）：', dropped);
+    }
+    installSilentPhases(m.silentPhases);
+  }
+
   /** Adopt a manifest (fetched or seeded): resolves `ready()`, stops the background tries, tells the listeners. */
   function adopt(m) {
     if (manifest || !isObj(m)) return false;
     manifest = m;
+    readyState(m);
     readyPromise = Promise.resolve(m);
     backoffN = 0;
     if (backoffTimer != null) { timers.clear(backoffTimer); backoffTimer = null; }
@@ -840,10 +864,11 @@ export function createAssets(options) {
   });
 
   /** Image element (cached; failures resolve to null). */
-  function image(u) {
+  function image(u, { retry = false } = {}) {
     const s = str(u);
     if (!s) return Promise.resolve(null);
     let e = images.get(s);
+    if (retry && e?.done && !e.value) { images.delete(s); e = null; }
     if (!e) {
       e = { value: null, done: false, promise: null };
       e.promise = Promise.resolve().then(() => loadImage(s)).then(

@@ -66,6 +66,10 @@
 // ground point, i.e. on the pointer (render/app.js).
 
 import { UF, ANIM } from '../../../shared/constants.js';
+// 形态通道的统一入口（DESIGN §28.29）：`FORMS`（下面那张冻结的第一方表）仍然住在**本文件**、一个字节不改，
+// 包带来的增量由 `shared/packForms.js` 持有，`formsFor(FORMS, spine)` 两边合并、第一方优先。
+// 本文件里的三处查找（`_formSpec` / `setForm` 的准入与 `next`）全部走它 —— 不再直接索引 `FORMS`。
+import { formsFor } from '../../../shared/packForms.js';
 import { SpineActor } from './spine.js';
 import { diamondTexture, shadowTexture, fxAtlas, tierChip, statusTexture, itemTexture, hudRings, ringArc, downLabel, HUD_DISC, ELEMENT_RING } from './textures.js';
 import { COLORS, TIER_COLORS, ENEMY_FRAME, UNIT, PROJ, statusIconKey, statusIconSuppressed } from './style.js';
@@ -477,6 +481,8 @@ export class UnitView {
     this.sp = 0; this.spMax = 0;
     this.ammo = null;             // [rounds left, rounds in the magazine] while an ammo skill runs (sync; b.snap `ammo`)
     this.wolves = null;           // [狼影 left, the talent's maximum] of a 狼群 (sync; b.snap `wolves`)
+    this.coins = null;            // [balance, cap] of 琳琅诗怀雅's skill purse, including zero
+    this.coinHud = null;
     this.neg = 0;                 // the share of its cap a negative-HP pool holds, 0 = none (sync; b.snap `neg`, 斩业星熊's 我执)
     this.flags = 0; this.anim = ANIM.IDLE;
     this.statuses = new Set();
@@ -689,7 +695,7 @@ export class UnitView {
   }
 
   _formSpec() {
-    return this.form ? FORMS[this.info.spine || this.info.defId]?.[this.form] || null : null;
+    return this.form ? formsFor(FORMS, this.info.spine || this.info.defId)?.[this.form] || null : null;
   }
 
   /**
@@ -703,14 +709,14 @@ export class UnitView {
   setForm(kind, fx = null) {
     const k = typeof kind === 'string' ? kind : null;
     if (k === this.form) return;
-    if (k && !FORMS[this.info.spine || this.info.defId]?.[k]) return;
+    if (k && !formsFor(FORMS, this.info.spine || this.info.defId)?.[k]) return;
     const prev = this._formSpec();
     this.form = k;
     this.info.form = k;
     const f = this._formSpec();
     if (!this.actor) return;
     const dur = fx && Number(fx.dur);
-    let next = f && f.next ? FORMS[this.info.spine || this.info.defId]?.[f.next]?.roles || null : null;
+    let next = f && f.next ? formsFor(FORMS, this.info.spine || this.info.defId)?.[f.next]?.roles || null : null;
     if (next && typeof f.roles.die === 'string') next = { ...next, die: f.roles.die };
     // an fx handed out late (render/app.js: a stall, a hidden tab) skips a change clip that would already have ended
     const late = fx && Number(fx.late) > 0 ? Number(fx.late) : 0;
@@ -825,6 +831,7 @@ export class UnitView {
     this.hp = hp;
     this.sp = s.sp; this.spMax = s.spMax;
     this.ammo = s.ammo || null; this.wolves = s.wolves || null; this.neg = s.neg > 0 ? Math.min(1, s.neg) : 0;
+    this.coins = s.coins || null;
     const prevFlags = this.flags;
     this.flags = s.flags | 0;
     this.anim = s.anim | 0;
@@ -1412,7 +1419,8 @@ export class UnitView {
     // knocked-down operator (b.snap `down`)
     const rowsTop = cy + bh / 2 + (showSp ? spH + 1.5 : 0);
     const wolfH = this._updateWolfPips(showBars && !this.isEnemy && !!this.wolves, x0, rowsTop, s);
-    this._updateElementBar(showBars && !!this.el, x0, bw, rowsTop + wolfH + 1, spH, s, t);
+    const coinH = this._updateCoins(showBars && !this.isEnemy && !!this.coins, x0, rowsTop + wolfH, s);
+    this._updateElementBar(showBars && !!this.el, x0, bw, rowsTop + wolfH + coinH + 1, spH, s, t);
     this._updateDownRing(!prep && !!this.down && !this.alive, x, this.screen.y - DOWN_LOOK.height * s, s, t);
     // blocked marker at the feet (enemies held by a blocker)
     const blocked = !prep && this.alive && this.isEnemy && (this.flags & UF.BLOCKED);
@@ -1491,6 +1499,26 @@ export class UnitView {
     }
     r.root.visible = true;
     return d + 2 + WOLF_PIPS.pad;
+  }
+
+  /** Coin icon and balance/cap, read from the current snapshot rather than transient FX. */
+  _updateCoins(show, x, top, s) {
+    let r = this.coinHud;
+    if (!show) { if (r) r.root.visible = false; return 0; }
+    if (!r) {
+      const P = this.P, root = new P.Container(), icon = new P.Sprite(fxAtlas().tex.coin);
+      icon.width = icon.height = 16;
+      const text = new P.Text('', { fontFamily: 'Bender, Oxanium, sans-serif', fontSize: 16, fontWeight: '700', fill: '#ffd04a', stroke: '#0b0f0e', strokeThickness: 3 });
+      text.position.set(19, -2); root.addChild(icon, text); this.hud.addChild(root);
+      r = this.coinHud = { root, text, label: '' };
+    }
+    const label = `${this.coins[0]}/${this.coins[1]}`;
+    if (r.label !== label) { r.label = label; r.text.text = label; }
+    const size = clamp(s * 0.2, 10, 16);
+    r.root.scale.set(size / 16); r.root.position.set(x, top + 3); r.root.visible = true;
+    // Text includes font metrics and stroke beyond its nominal 16 px size; reserve the measured row so the next
+    // elemental gauge cannot overlap it (especially with a substituted browser font).
+    return Math.max(16, r.root.getLocalBounds?.().height || 24) * (size / 16) + 8;
   }
 
   /** True while the shown gauge is in its 爆发冷却 (b.snap `elem` carries the cooldown's end and length). */

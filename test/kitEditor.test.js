@@ -28,6 +28,10 @@ const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Typ
 const PACK = 'kit-pack';
 const OP_ID = 'chess_ws_fixture_a';
 const KIT_FILE = () => join(wsRoot, PACK, 'kits', `${OP_ID}.js`);
+/** The second key space (docs/WORKSHOP.md §4.7): a pack that ships a summon and declares a 自选 pool operator. */
+const SECOND_PACK = 'token-pack';
+const TOKEN_ID = 'token_ws_fixture_kit';
+const CHAR_ID = 'char_ws_fixture_kit';
 
 /** A minimal, legal kit: the loader reads `mod.default`, so that is the one thing a source must have. */
 const KIT_OK = [
@@ -61,6 +65,17 @@ before(async () => {
   fs.writeFileSync(join(packDir, 'chess.json'), `${JSON.stringify({ [OP_ID]: { id: OP_ID, name: '夹具干员', tier: 4 } }, null, 2)}\n`);
   // a hand-written kit with a real static error, so the list has something to report
   fs.writeFileSync(KIT_FILE(), 'function kit() { return {}; }\n');
+  // 第二个键空间（docs/WORKSHOP.md §4.7）：另开一个包，它贡献**召唤物**记录并**声明**一个自选池干员 —— 编辑器右栏
+  // 「合法的 kit id」那组按钮必须把这两类都列出来，否则作者点不到一个真的能装上的文件名。
+  const secondDir = join(wsRoot, SECOND_PACK);
+  fs.mkdirSync(join(secondDir, 'kits'), { recursive: true });
+  fs.writeFileSync(join(secondDir, 'pack.json'), `${JSON.stringify({
+    id: SECOND_PACK, name: '召唤物夹具包', version: '0.1.0', content: ['tokens'], overrides: [],
+    operators: { [CHAR_ID]: { bonds: [], powers: [] } },
+  }, null, 2)}\n`);
+  fs.writeFileSync(join(secondDir, 'tokens.json'), `${JSON.stringify({
+    [TOKEN_ID]: { tokenId: TOKEN_ID, kind: 'summon', name: '夹具召唤物', desc: '不会受到攻击', profession: 'TOKEN', position: 'ALL', stats: { maxHp: 10, atk: 1, def: 0, res: 0, cost: 0, blockCnt: 0, bat: 1, aspd: 100, respawnTime: 5, spRecovery: 1 }, rangeGrid: [[0, 0]], dmgType: 'phys' },
+  }, null, 2)}\n`);
   editor = await createEditorServer({ workshopRoot: wsRoot, port: 0, host: '127.0.0.1', supportFile: join(tmp, 'support.json') });
 });
 after(async () => {
@@ -94,6 +109,23 @@ describe('workshop editor: the behaviour layer (the kit API)', () => {
     assert.equal(kit.hasNotice, false, 'a hand-written file carries no Forge header yet');
     assert.deepEqual(kit.issues.map((i) => i.code), ['NO_DEFAULT_EXPORT']);
     assert.equal(kit.issues[0].severity, 'error');
+  });
+
+  test('the legal ids cover BOTH key spaces: the pack\'s chess ids, its 自选 charIds and its summons', async () => {
+    const r = await fetch(`${editor.url}/api/kits`).then((x) => x.json());
+    const pack = r.packs.find((p) => p.id === SECOND_PACK);
+    assert.ok(pack, 'the summon fixture pack must be listed');
+    assert.deepEqual(pack.ownChessIds, []);
+    assert.deepEqual(pack.ownTokenIds, [TOKEN_ID]);
+    assert.deepEqual(pack.ownCharIds, [CHAR_ID]);
+    assert.deepEqual(pack.legalIds, [CHAR_ID, TOKEN_ID].sort(), 'both spaces are offered as file names');
+    // …and the static check agrees with the loader: a file named after either one is accepted, one named after neither is not
+    const okToken = await post(`${editor.url}/api/kits/preview`, { pack: SECOND_PACK, id: TOKEN_ID, source: KIT_OK }).then((x) => x.json());
+    assert.equal(okToken.ok, true, JSON.stringify(okToken.errors));
+    const okChar = await post(`${editor.url}/api/kits/preview`, { pack: SECOND_PACK, id: CHAR_ID, source: KIT_OK }).then((x) => x.json());
+    assert.equal(okChar.ok, true, JSON.stringify(okChar.errors));
+    const bogus = await post(`${editor.url}/api/kits/preview`, { pack: SECOND_PACK, id: 'token_ws_neither', source: KIT_OK }).then((x) => x.json());
+    assert.deepEqual(bogus.errors.map((e) => e.code), ['KIT_NO_TARGET']);
   });
 
   test('GET /api/kits/:pack/:id returns the raw file text, and null when it is absent', async () => {
