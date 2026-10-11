@@ -61,6 +61,9 @@ function newestUpstream() {
 
 /** 本仓库版本的真源（与 `shared/constants.js APP_VERSION` 同一个数，见 test/version.test.js）。 */
 const APP = JSON.parse(read('package.json')).version;
+/** 一个比当前版本旧的版本号，给下面那条「判据有牙」的合成用例用：**不能写死**，否则每次抬版本它自己就变成了
+ *  「和 package.json 一样」，抓不到该抓的东西（0.14.0 → 0.15.0 那次就是这样红的）。 */
+const OLD = `${Number(APP.split('.')[0])}.${Number(APP.split('.')[1]) - 1}.0`;
 
 /** 「发行 tag 的格式示例」在两种语言里的写法（CHANGELOG 用的是「发行 tag：」，不在其中）。 */
 const TAG_MARKER = /发行 tag 写成|release tag spells both halves/;
@@ -132,34 +135,38 @@ describe('文档里的「当前基线」声明（必须与仓库实际状态对�
   test('这条判据本身有牙：四类合成过期声明都会被抓出来', () => {
     const newest = newestUpstream();
     assert.notEqual(newest, '0.2.2', '前置：0.2.2 的历史小节还在，但基线已经不是它了');
-    // ① 「本版基线」写旧一版（0.14.0 那次抓到的正是这一种）
-    const staleBaseline = '> **本版基线**：本仓库 **0.14.0** / 打包的上游游戏本体 **0.2.2**。';
+    // ① 「本版基线」写旧一版（0.14.0 那次抓到的正是这一种）：本仓库那一半与上游那一半都是旧的 ⇒ 两条都要报
+    const staleBaseline = `> **本版基线**：本仓库 **${OLD}** / 打包的上游游戏本体 **0.2.2**。`;
     const caught = baselineClaims(staleBaseline, 'fixture', newest).bad;
-    assert.equal(caught.length, 1, `写旧一版必须报出来，实际：${JSON.stringify(caught)}`);
-    assert.match(caught[0], /0\.2\.2/);
+    assert.equal(caught.length, 2, `写旧一版必须两条都报出来（本仓库那一半 + 上游那一半），实际：${JSON.stringify(caught)}`);
+    assert.ok(caught.some((b) => /0\.2\.2/.test(b)), `上游那一半要报：${JSON.stringify(caught)}`);
+    assert.ok(caught.some((b) => /package\.json/.test(b)), `本仓库那一半要报：${JSON.stringify(caught)}`);
     // 本仓库号对不上 package.json 也要报
     const repoBad = baselineClaims(`> **本版基线**：本仓库 **0.13.0** / 上游游戏本体 **${newest}**。`, 'fixture', newest).bad;
     assert.equal(repoBad.length, 1);
     assert.match(repoBad[0], /package\.json/);
-    // 凭空多出来的一版（docs/history 里没有那个小节）也要报
-    assert.equal(baselineClaims('> **本版基线**：本仓库 **0.14.0** / 上游游戏本体 **0.2.9**。', 'fixture', newest).bad.length, 1);
+    // 凭空多出来的一版（docs/history 里没有那个小节）也要报：本仓库那一半写对，只让上游那一半是假的
+    assert.equal(baselineClaims(`> **本版基线**：本仓库 **${APP}** / 上游游戏本体 **0.2.9**。`, 'fixture', newest).bad.length, 1);
     // ② 「当前的底座」写旧一版
     const staleBase = '| 本仓库当前的底座 | 上游 **v0.2.2** 的源码树（tag `v0.2.2` = commit `62eb113`）。 |';
     assert.equal(baselineClaims(staleBase, 'fixture', newest).bad.length, 1, '底座写旧一版必须报出来');
     // ③ tag 示例漂了（前半对、后半旧；中英两种写法都要抓）
-    const staleTag = '发行 tag 写成 **`v<forge>-<上游>`**：`v0.14.0-0.2.3` = 本仓库 **0.14.0** + 上游 **0.2.3**。';
+    const staleTag = `发行 tag 写成 **\`v<forge>-<上游>\`**：\`v${OLD}-0.2.3\` = 本仓库 **${OLD}** + 上游 **0.2.3**。`;
     const tagBad = baselineClaims(staleTag, 'fixture', newest).bad;
-    assert.equal(tagBad.length, 1, `中文 tag 示例写旧一版必须报出来，实际：${JSON.stringify(tagBad)}`);
-    assert.match(tagBad[0], /0\.2\.3/);
-    const staleTagEn = "- **The bundled game:** The bundled upstream game is **0.14.0** (this repo's own version is **0.14.0**; the release tag spells both halves, `v0.14.0-0.2.3`).";
+    assert.equal(tagBad.length, 2, `中文 tag 示例写旧一版两条都要报（前半 + 后半），实际：${JSON.stringify(tagBad)}`);
+    assert.ok(tagBad.some((b) => /0\.2\.3/.test(b)), `后半要报：${JSON.stringify(tagBad)}`);
+    assert.ok(tagBad.some((b) => /package\.json/.test(b)), `前半要报：${JSON.stringify(tagBad)}`);
+    const staleTagEn = `- **The bundled game:** The bundled upstream game is **${OLD}** (this repo's own version is **${OLD}**; the release tag spells both halves, \`v${OLD}-0.2.3\`).`;
     const tagBadEn = baselineClaims(staleTagEn, 'fixture', newest).bad;
     assert.ok(tagBadEn.some((b) => /tag 示例后半是 0\.2\.3/.test(b)), `英文 tag 示例写旧一版必须报出来，实际：${JSON.stringify(tagBadEn)}`);
     assert.equal(baselineClaims(`发行 tag 写成 **\`v<forge>-<上游>\`**：\`v0.13.1-${newest}\`。`, 'fixture', newest).bad.length, 1, 'tag 前半漂了也要报');
-    // ④ 英文 bundled 声明写旧一版（README:544 那次抓到的正是这一种）
-    const staleEn = "- **The bundled game:** … The bundled upstream game is **0.2.3** (this repo's own version is **0.14.0**; the release tag spells both halves, `v0.14.0-0.2.3`).";
+    // ④ 英文 bundled 声明写旧一版（README:544 那次抓到的正是这一种）：上游那一半、tag 两半、本仓库那一半都是旧的 ⇒ 四条
+    const staleEn = `- **The bundled game:** … The bundled upstream game is **0.2.3** (this repo's own version is **${OLD}**; the release tag spells both halves, \`v${OLD}-0.2.3\`).`;
     const enBad = baselineClaims(staleEn, 'fixture', newest).bad;
-    assert.equal(enBad.length, 2, `英文 bundled 声明与它的 tag 都要报出来，实际：${JSON.stringify(enBad)}`);
-    assert.ok(enBad.some((b) => /打包的上游游戏本体是 0\.2\.3/.test(b)));
+    assert.equal(enBad.length, 4, `英文 bundled 声明与它的 tag 两半、本仓库那一半都要报出来，实际：${JSON.stringify(enBad)}`);
+    assert.ok(enBad.some((b) => /打包的上游游戏本体是 0\.2\.3/.test(b)), `上游那一半要报：${JSON.stringify(enBad)}`);
+    assert.ok(enBad.some((b) => /tag 示例后半是 0\.2\.3/.test(b)), `tag 后半要报：${JSON.stringify(enBad)}`);
+    assert.ok(enBad.some((b) => /package\.json/.test(b)), `本仓库那一半要报：${JSON.stringify(enBad)}`);
     // 四类都对（当前真值）不许报
     assert.deepEqual(baselineClaims(`> **本版基线**：本仓库 **${APP}** / 上游游戏本体 **${newest}**。`, 'fixture', newest).bad, []);
     assert.deepEqual(baselineClaims(`| 本仓库当前的底座 | 上游 **v${newest}** 的源码树。 |`, 'fixture', newest).bad, []);

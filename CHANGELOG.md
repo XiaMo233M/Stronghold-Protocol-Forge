@@ -1,6 +1,6 @@
 # 更新记录
 
-## 未发布
+## 0.15.0-0.2.4 — 2026-10-11
 
 **`m.public` 改成增量帧**（`docs/design/network.md` §8.2.1，实现见 `server/viewsDelta.js` +
 `server/match/match/messaging.js` + `public/js/matchDelta.js`）。帧现在有两种形态：**全量**（整张视图，仍是首帧与每个

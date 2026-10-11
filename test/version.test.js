@@ -29,8 +29,12 @@ test('one release version: package.json, package-lock.json and APP_VERSION', () 
 
 test('CHANGELOG.md opens with the release version, and the README links it', () => {
   const log = read('CHANGELOG.md');
-  const first = log.match(/^## (\d+\.\d+\.\d+) — (\d{4}-\d{2}-\d{2})/m);
-  assert.ok(first, 'a "## x.y.z — date" heading');
+  // The newest section may carry the release tag's second half too (`## 0.15.0-0.2.4 — 2026-10-11`, the owner's
+  // decision for a release that moves the bundled upstream game), so only the first half is compared with APP_VERSION;
+  // older sections are plain `## x.y.z — date` and keep matching. The upstream half is checked by
+  // test/promptBaseline.test.js against docs/history/.
+  const first = log.match(/^## (\d+\.\d+\.\d+)(?:-\d+\.\d+\.\d+)? — (\d{4}-\d{2}-\d{2})/m);
+  assert.ok(first, 'a "## x.y.z — date" heading (the release tag may add a "-<upstream>" half)');
   if (DEV_BUILD) {
     // a dev build has no entry of its own yet: the newest one is the last release, older than the version in development
     const num = (v) => v.split(/[.-]/).slice(0, 3).map(Number);

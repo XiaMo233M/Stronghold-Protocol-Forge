@@ -19,7 +19,9 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { diffBases, readZip, updateText } from '../tools/package-update.mjs';
+// compareVersions 用在**排序**上（更新包只往上走），身份判断不用它：它只认恰好 `x.y.z[-pre]`，
+// 而发行标识是 `0.15.0-0.2.4` 这种两段串，喂给它只会抛 not a version。
+import { compareVersions, diffBases, readZip, updateText } from '../tools/package-update.mjs';
 import { MANIFEST_FILE, UPDATE_FILE, digestFile, parseManifest, parseUpdate, removalProblem } from '../server/update.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -37,18 +39,30 @@ function walk(dir, rel = '', out = []) {
 }
 
 /**
- * 读一个基准包（上一版的完整发行 zip，或它解压出来的目录）→ `{ version, files: Map<包相对路径, {size, sha256}> }`。
+ * 读一个基准包（上一版的完整发行 zip，或它解压出来的目录）
+ * → `{ version, release, files: Map<包相对路径, {size, sha256}> }`。
  * 我们的 zip 里所有条目都在**唯一一个顶层文件夹**下，这里把那一层剥掉，得到「包相对」的路径。
+ *
+ * `release` 是 `app/package.json` 的 `release` —— **发行标识**（`0.14.0-0.2.4`，tag `v` 后面那一串）。
+ * `version` 只是本仓库那一半（`0.14.0`）：两个只差上游的发行在它眼里一模一样，所以身份判断不能用它。
+ * 0.14.0-0.2.3 及更早的包没有这个字段，那时 `release` 是 null（见 candidateIdentity）。
  */
 function readBase(source) {
   const abs = path.resolve(source);
   const st = fs.statSync(abs);
   const files = new Map();
   let version = null;
+  let release = null;
+  const learn = (text) => {
+    const j = JSON.parse(text);
+    version = j.version;
+    if (typeof j.release === 'string' && j.release) release = j.release;
+  };
+  const manifestRel = `app/${MANIFEST_FILE}`;
   if (st.isDirectory()) {
     for (const rel of walk(abs)) {
       files.set(rel, digestFile(path.join(abs, ...rel.split('/'))));
-      if (rel === 'app/package.json') version = JSON.parse(fs.readFileSync(path.join(abs, rel), 'utf8')).version;
+      if (rel === 'app/package.json') { try { learn(fs.readFileSync(path.join(abs, rel), 'utf8')); } catch { /* 下面统一报错 */ } }
     }
   } else {
     readZip(abs, (name, data) => {
@@ -56,11 +70,42 @@ function readBase(source) {
       if (slash < 0) throw new Error(`${name}：包根直接有文件（发行 zip 里所有条目都应在唯一一个顶层文件夹下）`);
       const rel = name.slice(slash + 1);
       files.set(rel, { size: data.length, sha256: sha(data) });
-      if (rel === 'app/package.json') { try { version = JSON.parse(data.toString('utf8')).version; } catch { /* 下面统一报错 */ } }
+      if (rel === 'app/package.json') { try { learn(data.toString('utf8')); } catch { /* 下面统一报错 */ } }
     });
   }
   if (typeof version !== 'string') throw new Error(`${source} 里找不到 app/package.json 的版本号（不是我们的发行包？）`);
-  return { source: abs, version, files };
+  // 构建指纹 = 基准包自己那份 MANIFEST.json 的 sha256：它把「程序文件 + 大小 + sha256」整张表钉死，
+  // 两份字节完全相同当且仅当是同一个包 —— 「自己更新自己」由此判定，不靠版本号里有没有 release。
+  const fingerprint = files.get(manifestRel)?.sha256 ?? null;
+  return { source: abs, version, release, fingerprint, files };
+}
+
+/**
+ * 发行包的身份：**发行标识**（`0.14.0-0.2.4`，tag `v` 后面那一串，来自包内 `app/package.json` 的 `release`）
+ * 加**构建指纹**（包内 `app/MANIFEST.json` 的 sha256）。
+ *
+ * 两者分工，是踩过一次坑之后定下来的：
+ *   * `release` 说「这是哪一次发行」——「只抬上游」的下一版就靠它和上一版区分开（`version` 那一半相同，说不清）；
+ *   * `fingerprint` 说「这是不是同一个包」——旧包（0.14.0-0.2.3 及更早）没有 `release`，
+ *     但两份 MANIFEST.json 字节完全相同就等于同一个包，「自己更新自己」照样拒绝。
+ *     所以这里**绝不退回比 `version` 相等**：那会把「旧 → 旧」这一对合法的升级误杀。
+ *   * 排序（更新包只往上走）用 `version`（纯三段 semver）——`release` 是两段串，比较器不认它。
+ * @param {{ version: string, release: string|null, fingerprint: string|null }} b
+ */
+export function candidateIdentity(b) {
+  return { release: b.release, fingerprint: b.fingerprint };
+}
+
+/**
+ * 两个身份是不是同一个包：**构建指纹相同**（字节级同一份），或**发行标识相同**（同一次发行的重复打包）。 */
+export function samePackage(a, b) {
+  if (a.fingerprint && b.fingerprint && a.fingerprint === b.fingerprint) return true;
+  return !!a.release && a.release === b.release;
+}
+
+/** 身份的显示形式：有 `release` 用它（说得清是哪一次发行），否则退回 `version`。 */
+export function identityLabel(b) {
+  return b.release || b.version;
 }
 
 function main(argv) {
@@ -78,15 +123,40 @@ function main(argv) {
 
   const bundle = path.resolve(o.bundle);
   if (!fs.existsSync(path.join(bundle, 'app', 'package.json'))) { console.error(`✖ ${bundle} 里没有 app/package.json（--bundle 要指向打包脚本产出的那个目录）`); return 1; }
-  const version = JSON.parse(fs.readFileSync(path.join(bundle, 'app', 'package.json'), 'utf8')).version;
+  const pkg = JSON.parse(fs.readFileSync(path.join(bundle, 'app', 'package.json'), 'utf8'));
+  const version = pkg.version;
   const manifestPath = path.join(bundle, 'app', MANIFEST_FILE);
   if (!fs.existsSync(manifestPath)) { console.error(`✖ ${bundle}/app 里没有 ${MANIFEST_FILE}（打包脚本会写它；没有它启动校验与更新都无从谈起）`); return 1; }
   parseManifest(fs.readFileSync(manifestPath, 'utf8'));   // 形状不对就别往下走了
 
   const bases = o.from.map(readBase);
+  // 这一版自己的身份：发行标识（包内 app/package.json 的 release）+ 构建指纹（包内 app/MANIFEST.json 的 sha256）。
+  // 打包脚本（scripts/make-windows-bundle.mjs）把 release 写进包内，所以两种信息都随包走，不需要外部再传参数。
+  const thisRelease = typeof pkg.release === 'string' && pkg.release ? pkg.release : null;
+  const nextIdentity = candidateIdentity({ version, release: thisRelease, fingerprint: sha(fs.readFileSync(manifestPath)) });
+  // ① 同一个包：指纹相同（字节级同一份），或发行标识相同（同一次发行的重复打包）。这一条必须先判，否则
+  //    两个字节相同的旧包会先撞上下面「没有 release」那条，报出与事实不符的原因。
+  const twin = bases.find((b) => samePackage(candidateIdentity(b), nextIdentity));
+  if (twin) {
+    console.error(`✖ 基准包就是这一版（${identityLabel({ release: twin.release, version: twin.version })}）：`
+      + `自己更新自己只会把同样的文件重发一遍 —— 请直接用完整包，或换一个更早的版本当基准。`);
+    return 1;
+  }
+  // ② 这一版没盖章（release 字段是后来才加的）：只抬上游时 version 那一半相同，身份就分不出来了。
+  if (!thisRelease) {
+    console.error(`✖ ${bundle}/app/package.json 没有 release（发行标识）：这个 bundle 是加该字段之前打的。`
+      + ` 请用当前的 scripts/make-windows-bundle.mjs 重打（它会把 release=<本仓库版本>-<上游版本> 写进包内），`
+      + ` 否则「只抬上游」的下一版与这一版分不开。`);
+    return 1;
+  }
   for (const b of bases) {
-    if (b.version === version) { console.error(`✖ 基准包就是 ${version}（自己更新自己）`); return 1; }
     if (![...b.files.keys()].some((f) => f.startsWith('app/'))) { console.error(`✖ ${b.source} 里没有 app/（不是我们的发行包）`); return 1; }
+    // 排序只比 version（纯三段 semver）：release 是 `0.15.0-0.2.4` 这种两段串，比较器不认它。
+    const baseVersion = String(b.version);
+    if (compareVersions(baseVersion, version) > 0) {
+      console.error(`✖ 基准包 v${baseVersion} 比这一版 v${version} 还新：更新包只往上走（拿错了 --from？玩家那种情况该用完整包）。`);
+      return 1;
+    }
   }
 
   // 新版本的完整文件表（包相对），MANIFEST 本身不进 update 的文件表
@@ -128,7 +198,9 @@ function main(argv) {
     fs.copyFileSync(path.join(bundle, ...rel.split('/')), dst);
   }
   fs.writeFileSync(path.join(stage, 'app', UPDATE_FILE), updateText({
-    app: version, from: bases.map((b) => b.version), files: appShip, removed: diff.removed,
+    // `app` 保持 app/package.json 的 version（MANIFEST.json 里那一半，启动校验要两者相等）；
+    // `from` 写发行标识，因为它只是给玩家看的那句话（server/update.js:284），而 0.14.0 说不清是 0.2.3 还是 0.2.4
+    app: version, from: bases.map((b) => identityLabel({ release: b.release, version: b.version })), files: appShip, removed: diff.removed,
   }));
   // 新版本的 MANIFEST.json 必须随包带上：启动检查读的就是它（用新版本的清单校验整份安装有没有解压完整，
   // 并核对它属于哪个版本）。上游的 buildUpdate 同样会把 MANIFEST 放进更新包 —— 少了它，玩家一启动就被
@@ -143,7 +215,7 @@ function main(argv) {
   const bytes = appShip.size ? [...appShip.values()].reduce((n, d) => n + d.size, 0) : 0;
   const mb = (n) => (n / 1048576).toFixed(1);
   console.log(`\n✔ 更新包已生成：${out}`);
-  console.log(`  适用于：${bases.map((b) => `v${b.version}`).join(' / ')} → v${version}`);
+  console.log(`  适用于：${bases.map((b) => `v${identityLabel({ release: b.release, version: b.version })}`).join(' / ')} → v${identityLabel({ release: nextIdentity.release, version })}`);
   console.log(`  带上 ${appShip.size} 个 app 文件（${MB(bytes)}）${otherShip.length ? ` + ${otherShip.length} 个包根文件` : ''}`);
   console.log(`  删除清单：${diff.removed.length} 个（新版本不再需要的旧文件）`);
   for (const r of diff.removed.slice(0, 8)) console.log(`    - ${r.path}`);
@@ -161,4 +233,4 @@ const HELP = `用法：node scripts/make-update-package.mjs --bundle <新 bundle
 
 const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 if (invokedDirectly) process.exit(main(process.argv.slice(2)));
-export { };
+export { main };

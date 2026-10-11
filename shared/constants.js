@@ -21,7 +21,7 @@ export const PROTOCOL_VERSION = 2;
  * unverified. It is a whole number, like `PROTOCOL_VERSION`: the bus changes shape, it does not drift by patch.
  * Bumping it is an owner decision — it stops every pack whose range excludes the new number from loading.
  *
- * NOT `APP_VERSION` (which is `'0.14.0'`): the release number moves for reasons a pack's compat does not care about,
+ * NOT `APP_VERSION` (the release half above): the release number moves for reasons a pack's compat does not care about,
  * and `docs/design/mod-layer.md` §28.5 spells out the two ranges separately. The comparison needs a three-part version
  * (`shared/packs.js appVersionMatches` reads `v<major>.<minor>.<patch>` and **treats an unparsable one as a match** —
  * a fallback that would silently accept every pack), so `shared/workshop.js` builds the string from this number rather
@@ -31,7 +31,19 @@ export const MOD_API_VERSION = 1;
 /** Release version shown to players (title screen, server banner, /healthz). Kept equal to package.json "version"
  * (test/version.test.js); PROTOCOL_VERSION above is the separate wire-format number. The release TAG spells both halves
  * out — `v<this>-<upstream>` (README 「版本号」) — because this one has to stay a plain three-part semver. */
-export const APP_VERSION = '0.14.0';
+export const APP_VERSION = '0.15.0';
+/**
+ * The UPSTREAM game version this checkout bundles (README 「版本号」). The release TAG spells both halves out —
+ * `v<APP_VERSION>-<UPSTREAM_VERSION>` — because `APP_VERSION` itself has to stay a plain three-part semver.
+ *
+ * This is the ONE copy of the upstream half, and it exists because a release is identified by its TAG, not by
+ * `APP_VERSION`: a release that only follows upstream keeps `APP_VERSION` and moves this number
+ * (0.13.1 → 0.14.0 was the other way round: both halves moved). `scripts/make-windows-bundle.mjs` writes the pair
+ * into `app/package.json` as `release`, so the identity travels INSIDE the artifact — that is what lets
+ * `scripts/make-update-package.mjs` tell "the next release" from "the very release I am building"
+ * (a bundle that only names `0.14.0` cannot: 0.14.0-0.2.3 and 0.14.0-0.2.4 look identical to it).
+ */
+export const UPSTREAM_VERSION = '0.2.4';
 /** A development build (the public `dev` branch): the title screen, the boot banner and the README say so, and
  * tools/package.mjs refuses to build a release zip from it without --allow-dev. */
 export const DEV_BUILD = /-dev$/.test(APP_VERSION);

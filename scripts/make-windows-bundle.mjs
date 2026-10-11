@@ -31,7 +31,7 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { APP_VERSION } from '../shared/constants.js';
+import { APP_VERSION, UPSTREAM_VERSION } from '../shared/constants.js';
 // 更新包机制：MANIFEST / UPDATE 的读写、程序文件的判定与摘要，全部复用服务端自己那一份实现
 // （server/update.js 启动时按同一份规则校验，写与读不可能漂移），文本格式由 tools/package-update.mjs 生成。
 import { MANIFEST_FILE, digestFile, inManifest } from '../server/update.js';
@@ -101,7 +101,7 @@ function readDefaultDub(root = ROOT) {
 }
 
 function parseArgs(argv) {
-  const o = { out: '', node: true, force: false, nodeSpec: '', sha256: '', allDubs: false };
+  const o = { out: '', node: true, force: false, nodeSpec: '', sha256: '', allDubs: false, release: '' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const [k, v] = a.split('=');
@@ -109,6 +109,7 @@ function parseArgs(argv) {
     if (k === '--out') o.out = String(val() || '');
     else if (k === '--node-version') o.nodeSpec = String(val() || '');
     else if (k === '--sha256') o.sha256 = String(val() || '').toLowerCase();
+    else if (k === '--release') o.release = String(val() || '');
     else if (a === '--no-node') o.node = false;
     else if (a === '--force') o.force = true;
     else if (a === '--all-dubs') o.allDubs = true;
@@ -117,9 +118,36 @@ function parseArgs(argv) {
   return o;
 }
 
+/** A release tag's two halves: `v<APP_VERSION>-<UPSTREAM_VERSION>`, e.g. `0.14.0-0.2.4`. */
+export const RELEASE_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?-\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+
+/**
+ * The release identity written into `app/package.json` as `release` (`--release`, else
+ * `<APP_VERSION>-<UPSTREAM_VERSION>` from shared/constants.js).
+ *
+ * It has to travel inside the bundle: `app/package.json`'s plain `version` is only the Forge half, so two releases
+ * that differ upstream alone (0.14.0-0.2.3 vs 0.14.0-0.2.4) look identical through it — which is exactly the pair
+ * `scripts/make-update-package.mjs` must tell apart. An explicitly passed `--release` must name this build's
+ * `APP_VERSION`, so a mislabelled tag cannot be stamped in.
+ * @param {string} [spec] the `--release` value ('' = derive it)
+ * @returns {string}
+ */
+export function releaseIdentity(spec = '') {
+  const release = String(spec || '').trim() || `${APP_VERSION}-${UPSTREAM_VERSION}`;
+  if (!RELEASE_RE.test(release)) {
+    throw new Error(`--release 要写成 <本仓库版本>-<上游版本>（例如 ${APP_VERSION}-${UPSTREAM_VERSION}）；收到的是 ${JSON.stringify(release)}`);
+  }
+  if (!release.startsWith(`${APP_VERSION}-`)) {
+    throw new Error(`--release 的前半段必须是本仓库的版本 ${APP_VERSION}（shared/constants.js APP_VERSION），收到的是 ${release}`);
+  }
+  return release;
+}
+
 const HELP = `node scripts/make-windows-bundle.mjs — 生成 Windows 开箱即用便携包
 
   --out <dir>        产物目录（默认 <仓库上一级>/Stronghold-Protocol-Windows）
+  --release <标识>   发行标识 <本仓库版本>-<上游版本>（默认 ${APP_VERSION}-${UPSTREAM_VERSION}），写进 app/package.json；
+                     更新包靠它区分「下一版」与「我正在打的这一版」（只抬上游时两者 APP_VERSION 相同）
   --no-node          不下载便携版 Node（目标机器需自备 Node 22+）
   --all-dubs         把 public/assets/audio/voice/ 下的**全部**配音都打进包（默认只带清单里的默认配音，
                      其余走 release 的语音包，见 scripts/make-voice-pack.mjs）
@@ -356,6 +384,43 @@ function extractZip(zipPath, dir) {
 }
 
 /**
+ * Write the release identity into the bundle's `app/package.json` (the `release` field).
+ *
+ * `app/package.json` is the file every release artifact already carries (the full zip, the update zip and the
+ * boot-time check all read it), so the identity rides along with no new file and no new reader. `version` is left
+ * exactly as the repository has it — the game and `test/version.test.js` require a plain three-part semver there.
+ * @param {string} appDir the bundle's app/ directory
+ * @param {string} release e.g. `0.14.0-0.2.4`
+ * @returns {string} the release written
+ */
+export function stampRelease(appDir, release) {
+  const file = path.join(appDir, 'package.json');
+  const pkg = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (pkg.version !== APP_VERSION) {
+    throw new Error(`app/package.json 的 version 是 ${pkg.version}，不是 ${APP_VERSION}：包里的代码与本仓库不一致，不能盖章发行标识`);
+  }
+  // keep the repository's key order and put the new key right after `version` — a stable neighbourhood makes the
+  // update package's diff of this file readable
+  const out = {};
+  for (const [k, v] of Object.entries(pkg)) {
+    out[k] = v;
+    if (k === 'version') out.release = release;
+  }
+  if (!('release' in out)) out.release = release;
+  fs.writeFileSync(file, `${JSON.stringify(out, null, 2)}\n`, 'utf8');
+  return release;
+}
+
+/**
+ * The release identity a bundle carries (`app/package.json`'s `release`), or undefined for a bundle built before
+ * that field existed.
+ * @param {string} appDir
+ */
+export function readRelease(appDir) {
+  try { return JSON.parse(fs.readFileSync(path.join(appDir, 'package.json'), 'utf8')).release; } catch { return undefined; }
+}
+
+/**
  * 确保官方 zip 在仓库的 .cache\ 里，且 sha256 与仓库里钉死的一致。
  * @returns {Promise<string>} zip 的绝对路径
  */
@@ -558,6 +623,10 @@ async function main() {
   const appDir = path.join(out, 'app');
   const nodeDir = path.join(out, 'node');
 
+  // 发行标识：写进 app/package.json 的 release。它必须是 `<APP_VERSION>-<上游>`，否则拒绝出包（见 releaseIdentity）。
+  let release;
+  try { release = releaseIdentity(o.release); } catch (e) { console.error(`✖ ${e.message}`); return 1; }
+
   // 版本与哈希：默认用仓库里钉死的那一份；换版本必须同时给 --sha256，否则拒绝。
   let nodeVersion = NODE_PIN.version;
   let nodeHash = NODE_PIN.sha256;
@@ -605,6 +674,9 @@ async function main() {
   console.log(`  · 复制游戏本体（git 跟踪的 ${wanted.length} 个文件，略过 ${all.length - wanted.length} 个 test/ 文件）…`);
   const copied = await copyFiles(wanted, appDir);
   console.log(`    完成：${copied.files} 个文件 / ${MB(copied.bytes)}`);
+  // 发行标识必须在 MANIFEST.json 之前盖章：manifest 会把它的大小与 sha256 一起记下来（两个 zip 与启动校验都读它）
+  stampRelease(appDir, release);
+  console.log(`  · 盖上发行标识 app/package.json release="${release}"（本仓库 ${APP_VERSION} + 上游 ${UPSTREAM_VERSION}）`);
 
   // 2) 素材与前端库（不进版本库，必须存在）
   for (const d of ASSET_DIRS) {
