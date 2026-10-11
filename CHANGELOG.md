@@ -1,6 +1,8 @@
 # 更新记录
 
-## 未发布 —— 对局战绩与可选账号（第 2 刀）
+## 0.16.0-0.2.4 — 2026-10-12
+
+### 对局战绩与可选账号（第 2 刀）
 
 **战绩落盘 + 可选账号口令库（docs/RECORDS.md）。** 今天 `playerId` 每次连接都是新的，所以「我上一局打得
 怎么样」换个会话就找不回来；这一刀给两样东西：一次完整结算落一条战绩，以及一个**默认关闭**的账号层（账号名 →
@@ -34,42 +36,7 @@
   会打断 `test/lobby.test.js` 与 `test/client-static.test.js` 的既有断言，客户端 `title.js` 另有一份会漂移，而且
   它**不解决顶替** —— 另议。
 
-## 0.16.0-0.2.4 — 未发布
-
-**素材加载源：`pack.json.assets.mirrors[]` + `sources(ctx)`（DESIGN §28.40，docs/WORKSHOP.md §1.21）。**
-投稿 `2a031cf0f869`（「CDN 源选择」）的作者在 `note` 里把话说得很直：**做不到改素材加载源**。这一版把那一格补上，
-由两半组成 —— 数据那一半 `assets.mirrors[] = [{ id, base, sha256 }]` 说**哪些镜像被允许**，面板模块导出的
-`sources(ctx)` 说**先试哪一条**。
-
-- **只镜像「本包自己的容器」**，绝不做「把整棵 `/assets` 树指到第三方」。三条硬事实：`data/assets.json` 只有
-  清单级摘要、**没有逐文件摘要**（哈希锁得住清单字节、**锁不住图**）；把整站素材树交给第三方正是「不分发官方
-  素材」要拦的形态；坏一个镜像就等于**全站**素材出问题，收窄之后只影响一个包。`server/http/static.js` 一行未改。
-- **形状与守卫全部点名**：`base` 必须绝对 `https://`（有主机、无凭据、无查询、尾斜杠）、id 唯一且 ≤ 4 条、
-  `sha256` 是 64 位小写 hex、字段闭集；声明了 `mirrors` **必须**写 `license`
-  （`ASSETS_MIRROR_NEEDS_LICENSE`：素材的再分发者是作者，授权问题不因为换了一台主机就消失 —— 与 §28.36 的
-  `VOICE_CDN_NEEDS_LICENSE` 逐字同一条理由）。八条拒绝码：
-  `ASSETS_MIRROR_{BAD_SHAPE,UNKNOWN_FIELD,BAD_ID,DUPLICATE_ID,BAD_BASE,BAD_DIGEST,TOO_MANY,NEEDS_LICENSE}`。
-- **装载期比对、不下载**：每条镜像的 `sha256` 必须等于**装载期从包内文件算出的**容器摘要；对不上的那条**停用并
-  点名**（`ASSETS_MIRROR_DIGEST_MISMATCH`）而**不是拒绝整个包**（§28.35「宁少不拒」）。**服务端一条网络请求都不
-  发** —— 没有服务端超时、没有服务端缓存目录、没有启动期阻塞（与 §28.36 的 `voiceCdn` 相反）。
-- **客户端次序是硬性的**：取清单 → 取容器 → **先核整包 sha256**（必须 `checked && ok`）→ 再走**既有**的逐文件
-  SHA-1[0:12] 导入与写缓存；任何一步不过就换下一条；**全都不行 ⇒ 回落包内那条 `/workshop-resources/…` URL 并
-  点名**（`CLIENT_SOURCES_FALLBACK` + `via: 'pack'`，面板可见）。**不静默、不空白。**
-- **`sources(ctx)` 结构上不可能引入主机名**：与外观提供者（`appearance(ctx)`）逐条同构（进程内最多一个、
-  四个具名拒绝码、只提供不 `mount` 不是错），返回 `{ order(mirrors) }`，**只许回已声明 id 的排列或子集**；
-  喂主机名 / URL / 未声明 id ⇒ `CLIENT_SOURCES_BAD_ORDER`，整条顺序作废。地址只在 `pack.json`，
-  而每条都已在装载期与包内容器摘要比对过。
-- **一键回退**：设置里新增「工坊素材源」（`settings.workshopSources`，默认开）。关掉 ⇒ 走的与「没声明 `mirrors`」
-  **完全同一条**路径，镜像那条 URL **一次都不被请求**。
-- **如实说清的做不到**：容器大于 **256 MiB** 用不了镜像（浏览器没有流式摘要接口），那类包只能走包内；不设这条线
-  就等于「不核摘要也导入」，那是「不能算错」的直接反面。
-- **缺省逐字节不变**：不声明 `mirrors` 的包归一化清单里没有这个键、`welcome.modAssets` 里没有这个字段、请求的
-  URL 与次序与从前逐字相同、引擎 SW（§28.13.5）一行未改。**`MOD_API_VERSION` 仍是 1**（加一格字段不抬版本）、
-  **不要求 `combat: true`**（只改「哪台主机送同一份已校验字节」，改不了这一局的结果；容器摘要本来就在内容哈希里）。
-  **不新增协议消息、不动 `server/http/routeMount.js`、不动 `MOD_SURFACE_FROZEN['1']`**（新表面 `client.sources`
-  只加不改）。
-
-## 房间目录的公开面（投稿 `7ca51de6f346`）— 待并入下一版
+### 房间目录读面：`GET /api/rooms` 只报一个数（第 3 刀）
 
 **新增只读端点 `GET | HEAD /api/rooms` ⇒ `{ "publicRooms": <int> }`（DESIGN §28.42，docs/META.md §1.7a）。**
 
@@ -105,7 +72,42 @@
   含该房号或房主名）、HEAD 200 无 body、POST 405、`roomCounts()` 与 `stats()` 同源
   （`publicRooms === total ===` `/healthz` 的 `rooms`）。
 
-## 0.16.0 进行中（第 6 刀：干员形态投影）
+### 素材加载源：`pack.json.assets.mirrors[]` + `sources(ctx)`（第 5 刀）
+
+**素材加载源：`pack.json.assets.mirrors[]` + `sources(ctx)`（DESIGN §28.40，docs/WORKSHOP.md §1.21）。**
+投稿 `2a031cf0f869`（「CDN 源选择」）的作者在 `note` 里把话说得很直：**做不到改素材加载源**。这一版把那一格补上，
+由两半组成 —— 数据那一半 `assets.mirrors[] = [{ id, base, sha256 }]` 说**哪些镜像被允许**，面板模块导出的
+`sources(ctx)` 说**先试哪一条**。
+
+- **只镜像「本包自己的容器」**，绝不做「把整棵 `/assets` 树指到第三方」。三条硬事实：`data/assets.json` 只有
+  清单级摘要、**没有逐文件摘要**（哈希锁得住清单字节、**锁不住图**）；把整站素材树交给第三方正是「不分发官方
+  素材」要拦的形态；坏一个镜像就等于**全站**素材出问题，收窄之后只影响一个包。`server/http/static.js` 一行未改。
+- **形状与守卫全部点名**：`base` 必须绝对 `https://`（有主机、无凭据、无查询、尾斜杠）、id 唯一且 ≤ 4 条、
+  `sha256` 是 64 位小写 hex、字段闭集；声明了 `mirrors` **必须**写 `license`
+  （`ASSETS_MIRROR_NEEDS_LICENSE`：素材的再分发者是作者，授权问题不因为换了一台主机就消失 —— 与 §28.36 的
+  `VOICE_CDN_NEEDS_LICENSE` 逐字同一条理由）。八条拒绝码：
+  `ASSETS_MIRROR_{BAD_SHAPE,UNKNOWN_FIELD,BAD_ID,DUPLICATE_ID,BAD_BASE,BAD_DIGEST,TOO_MANY,NEEDS_LICENSE}`。
+- **装载期比对、不下载**：每条镜像的 `sha256` 必须等于**装载期从包内文件算出的**容器摘要；对不上的那条**停用并
+  点名**（`ASSETS_MIRROR_DIGEST_MISMATCH`）而**不是拒绝整个包**（§28.35「宁少不拒」）。**服务端一条网络请求都不
+  发** —— 没有服务端超时、没有服务端缓存目录、没有启动期阻塞（与 §28.36 的 `voiceCdn` 相反）。
+- **客户端次序是硬性的**：取清单 → 取容器 → **先核整包 sha256**（必须 `checked && ok`）→ 再走**既有**的逐文件
+  SHA-1[0:12] 导入与写缓存；任何一步不过就换下一条；**全都不行 ⇒ 回落包内那条 `/workshop-resources/…` URL 并
+  点名**（`CLIENT_SOURCES_FALLBACK` + `via: 'pack'`，面板可见）。**不静默、不空白。**
+- **`sources(ctx)` 结构上不可能引入主机名**：与外观提供者（`appearance(ctx)`）逐条同构（进程内最多一个、
+  四个具名拒绝码、只提供不 `mount` 不是错），返回 `{ order(mirrors) }`，**只许回已声明 id 的排列或子集**；
+  喂主机名 / URL / 未声明 id ⇒ `CLIENT_SOURCES_BAD_ORDER`，整条顺序作废。地址只在 `pack.json`，
+  而每条都已在装载期与包内容器摘要比对过。
+- **一键回退**：设置里新增「工坊素材源」（`settings.workshopSources`，默认开）。关掉 ⇒ 走的与「没声明 `mirrors`」
+  **完全同一条**路径，镜像那条 URL **一次都不被请求**。
+- **如实说清的做不到**：容器大于 **256 MiB** 用不了镜像（浏览器没有流式摘要接口），那类包只能走包内；不设这条线
+  就等于「不核摘要也导入」，那是「不能算错」的直接反面。
+- **缺省逐字节不变**：不声明 `mirrors` 的包归一化清单里没有这个键、`welcome.modAssets` 里没有这个字段、请求的
+  URL 与次序与从前逐字相同、引擎 SW（§28.13.5）一行未改。**`MOD_API_VERSION` 仍是 1**（加一格字段不抬版本）、
+  **不要求 `combat: true`**（只改「哪台主机送同一份已校验字节」，改不了这一局的结果；容器摘要本来就在内容哈希里）。
+  **不新增协议消息、不动 `server/http/routeMount.js`、不动 `MOD_SURFACE_FROZEN['1']`**（新表面 `client.sources`
+  只加不改）。
+
+### 口径轴 `form`：干员形态投影（第 6 刀）
 
 **口径轴 `form`：普通干员按精锐形态出战（DESIGN §28.41，docs/WORKSHOP.md §1.20）。** 投稿 `e4fe4d5cf0a0`
 （「干员满练mod」）的 `training` 一段真正想做的那件事，在这里单独立项落地：`pack.json.variants` 加第三条轴
@@ -141,7 +143,7 @@
 * **不许降级**是逐条断言的门（干员与召唤物都过）：投影后每条记录的 `atk` / `maxHp` / `def` 必须 ≥ 投影前
   （`test/form-projection.test.js`）。
 
-## 0.16.0 进行中（第 4 刀：行为补丁 / 声明通道）
+### 行为补丁 / 声明通道：`pack.json.behaviour`（第 4 刀）
 
 **`pack.json.behaviour`：引擎实现一格，任何包声明它（DESIGN §28.43，docs/WORKSHOP.md §1.22）。** 投稿
 `ac8c9821f5ba`（「卫戍协议mod-跨版本一键安装包-v1.4.8-适配0.2.4」）把「改一条规则」做成了**安装器**：`install.mjs`
@@ -194,6 +196,22 @@
   才下），所以那 7 张图是自制的 —— **对外表述必须与这条一致**，不要把它说成侵权包。
   **站侧含义**：原件在 `flagged/` 且 `flags` 含 `NO_PACK_JSON` + `WRAPPED`（全部文件套在 `跨版本安装包/` 一层下）
   ⇒ **若做成兼容包上传，必须先扁平化**（`pack.json` 必须在 zip 根）。这条归站侧那条线。
+
+### 本版刻意没有做、或被否决的部分（照实写）
+
+- **②（战绩/账号）**：投稿带的 `POST /api/account/password` + 站点级共享 `SP_ADMIN_TOKEN` **没有实现**，连为它服务的
+  脚手架（`sameSecret` / `readJsonBody` / `adminToken`）都没有 —— 改密必须是**账号上的操作**，等一次性重置票据的设计。
+  投稿还要禁 `test` / `admin` 这类名字，**未采纳**（那会反转既有判定，且不解决顶替）。
+- **③（房间目录）**：投稿原件的 C2S `room.list` / `user.activity` 与 S2C `room.list`（整张房间列表 + 招募排序 + 加入 /
+  观战入口）**没有采纳**，`inviteOnly` / `recruitWanted` / `lastInputAt` **一律不预埋**；公开面只剩一个整数。
+  **solo 房算数**（与原件「solo 不列出」不同）—— 这是刻意的口径差异。
+- **⑤（素材源）**：不把整棵 `/assets` 树指到第三方，**只镜像本包自己的容器**；服务端**不发任何网络请求**；
+  容器 > 256 MiB 用不了镜像（浏览器没有流式摘要接口）。
+- **⑥（形态投影）**：`status` **不参与投影**（身份标牌；39/129 对里 `_b.level` 更低，照搬会显示练度回落）；
+  价格与 `upgradeNum` 不动 ⇒「一档价拿到精锐数值」与「3 张 `_a` 换 1 张 `_b` 价值中性」两条**如实披露**。
+- **④（行为声明通道）**：**本版这一格没有任何可用开关** —— `BEHAVIOUR_SWITCHES` 今天为空 ⇒ **任何**一条 `behaviour`
+  声明都会被 `BEHAVIOUR_UNKNOWN_SWITCH` **点名整包拒**。这是刻意的：**格子先立起来、开关逐个按需加**
+  （首格与它的引擎实现点一起落）。
 
 ## 0.15.3-0.2.4 — 2026-10-12
 
