@@ -86,6 +86,8 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
   const packs = [];
   /** @type {Array<{ pack: string, reason: string }>} */
   const errors = [];
+  /** @type {Array<{ pack: string, reason: string }>} */
+  const foreign = []; // target "stardust" 的包：认识、不装载（它们属于 Stardust 宿主）
   let names = [];
   try {
     names = fs.readdirSync(dir, { withFileTypes: true })
@@ -94,7 +96,7 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
       .sort();
   } catch {
     // no workshop directory: the normal, supported case
-    return { dir, present: false, packs, errors };
+    return { dir, present: false, packs, errors, foreign };
   }
   for (const name of names) {
     const packDir = path.join(dir, name);
@@ -110,6 +112,12 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
     const manifest = normalizePackManifest(rawManifest, name, { hasAssets });
     if (!manifest.ok) {
       errors.push({ pack: name, reason: `${manifest.error}: ${manifest.detail}` });
+      continue;
+    }
+    // target "stardust"（docs/WORKSHOP.md「mod registry」）：声明型包，本引擎只**认识**它 —— 不进 packs、
+    // 不进数据叠加层、不装载任何载荷，只在启动日志里说一句它在（那是 Stardust 宿主的包）。
+    if (manifest.pack.target === 'stardust') {
+      foreign.push({ pack: name, reason: 'target "stardust" — declaration-only, loaded by the Stardust host (not by this engine)' });
       continue;
     }
     /** @type {Record<string, Record<string, object>>} */
@@ -216,7 +224,8 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
     }
   }
   for (const e of errors) log?.warn?.(`[workshop] ${e.pack}: ${e.reason}`);
-  return { dir, present: true, packs, errors };
+  for (const f of foreign) log?.info?.(`[workshop] ${f.pack}: ${f.reason}`);
+  return { dir, present: true, packs, errors, foreign };
 }
 
 /**

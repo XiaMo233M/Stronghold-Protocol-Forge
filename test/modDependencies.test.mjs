@@ -7,7 +7,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { normalizePackManifest, adjudicatePackGraph } from '../shared/workshop.js';
+import { loadWorkshop } from '../server/workshop.js';
 
 /** A pack shape the normalizer accepts, with the dependency/conflict fields of the mod registry contract. */
 function pack(id, fields = {}) {
@@ -136,4 +140,60 @@ test('adjudication: a dependency cycle refuses every member, named as a chain', 
   const r = adjudicatePackGraph(packs);
   assert.deepEqual(r.refused.map((x) => x.id).sort(), ['a', 'b', 'c'], 'standalone 不受牵连');
   assert.match(r.refused[0].reason, /dependency cycle: a → b → c → a/);
+});
+
+// ---- 目标引擎（`target`，docs/WORKSHOP.md「mod registry」1D）：同一份 pack.json 两端各自读得懂 ----------------
+
+/** A Stardust-target manifest: declaration-only (no Forge contributions by design). */
+const starPack = (over = {}) => ({
+  id: 'sd-pack', name: 'sd-pack', version: '1.0.0', license: 'CC0-1.0',
+  target: 'stardust', type: 'mod', capabilities: [], ...over,
+});
+
+test('target: stardust 的声明型包被接受（没有 Forge 贡献项也不是空包），profile 两格按 Stardust 规则校验', () => {
+  const ok = normalizePackManifest(starPack({ capabilities: ['skins', 'skins'] }), 'sd-pack', { hasAssets: false });
+  assert.equal(ok.ok, true, ok.ok ? '' : `${ok.error}: ${ok.detail}`);
+  assert.equal(ok.pack.target, 'stardust');
+  assert.equal(ok.pack.type, 'mod');
+  assert.deepEqual(ok.pack.capabilities, ['skins'], '去重且排序');
+
+  const noType = normalizePackManifest(starPack({ type: undefined }), 'sd-pack', { hasAssets: false });
+  assert.equal(noType.ok, false);
+  assert.equal(noType.error, 'STARDUST_TARGET_BAD_TYPE');
+  const badCaps = normalizePackManifest(starPack({ capabilities: ['Skins'] }), 'sd-pack', { hasAssets: false });
+  assert.equal(badCaps.ok, false);
+  assert.equal(badCaps.error, 'STARDUST_TARGET_BAD_CAPABILITIES');
+  // 未知 target：profile 的两格（type/capabilities）也要去掉 —— 它们只在 target:"stardust" 下合法
+  const badTarget = normalizePackManifest(
+    { id: 'sd-pack', name: 'sd-pack', version: '1.0.0', license: 'CC0-1.0', target: 'skyrim' }, 'sd-pack', { hasAssets: false });
+  assert.equal(badTarget.ok, false);
+  assert.equal(badTarget.error, 'PACK_TARGET_UNKNOWN');
+});
+
+test('target: forge（缺省）下 type/capabilities 仍是未知键（闭集一字未松）', () => {
+  const r = normalizePackManifest({ id: 'f', name: 'f', version: '1.0.0', license: 'CC0-1.0', content: ['items'], type: 'mod' }, 'f', { hasAssets: false });
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'PACK_UNKNOWN_FIELD');
+  assert.match(r.detail, /is not a field of this pack format/);
+});
+
+test('装载器：workshop 里的 stardust 包不进 packs、记一行 foreign（具名），forge 包照常装载', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sp-target-'));
+  try {
+    const sd = path.join(dir, 'sd-pack');
+    fs.mkdirSync(sd, { recursive: true });
+    fs.writeFileSync(path.join(sd, 'pack.json'), `${JSON.stringify(starPack(), null, 2)}\n`);
+    const forge = path.join(dir, 'forge-pack');
+    fs.mkdirSync(forge, { recursive: true });
+    fs.writeFileSync(path.join(forge, 'pack.json'), `${JSON.stringify({ id: 'forge-pack', name: 'f', version: '1.0.0', license: 'CC0-1.0', content: ['items'] }, null, 2)}\n`);
+    fs.writeFileSync(path.join(forge, 'items.json'), `${JSON.stringify({ forge_item_a: { id: 'forge_item_a', name: 'x', tier: 1 } }, null, 2)}\n`);
+
+    const loaded = loadWorkshop(dir, { log: null });
+    assert.deepEqual(loaded.errors, [], '一条拒绝都不该有：stardust 包不是错误');
+    assert.deepEqual(loaded.packs.map((p) => p.id), ['forge-pack'], '只有 forge 包进 packs');
+    assert.deepEqual(loaded.foreign.map((f) => f.pack), ['sd-pack']);
+    assert.match(loaded.foreign[0].reason, /declaration-only, loaded by the Stardust host/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
