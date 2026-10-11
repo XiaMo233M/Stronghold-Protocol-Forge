@@ -103,6 +103,8 @@ export function createSessionStack(opts, { data, log }) {
   const lobbyOptions = lobbyOptionsFrom(opts);
   const lobby = new Lobby({
     registry, log, MatchClass: opts.MatchClass, getData: () => data, seedFn: opts.seedFn, options: lobbyOptions,
+    // 对局战绩（docs/RECORDS.md §3）：null = 没有 SP_ACCOUNTS ⇒ 结算点不落盘。
+    records: opts.records || null,
     // 创意工坊 (docs/WORKSHOP.md): the behaviour layer of the installed packs travels with every match this lobby starts
     workshop: opts.workshop,
   });
@@ -119,6 +121,8 @@ export function createSessionStack(opts, { data, log }) {
   });
   network = new Network({
     registry, handler: lobby, log,
+    // 账号（docs/RECORDS.md §2）：null = 没有 SP_ACCOUNTS ⇒ `hello` 里没有认证那一段，握手逐字节不变。
+    accounts: opts.accounts || null,
     options: modDispatch ? { ...netOptions, preDispatch: modDispatch.preDispatch, onConnection: modDispatch.onConnection } : netOptions,
   });
   return { registry, lobby, network };

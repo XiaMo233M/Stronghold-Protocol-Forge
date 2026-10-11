@@ -45,6 +45,9 @@ import { createPackRegistry } from './packs.js';
 import { MIME, COMPRESSIBLE, acceptsGzip, parseRange } from './http/files.js';
 import { BUILD_INPUTS, computeBuildTag, buildTag, resetBuildTag } from './http/buildTag.js';
 import { createRequestHandler } from './http/routes.js';
+import { AccountStore } from './accounts.js';
+import { MatchRecords } from './matchRecords.js';
+import { resolveAccountConfig } from './accountConfig.js';
 // 保留表只此一处真相（DESIGN §28.35）：核心挂载目录与「核心先吃」判据都来自 routeMount.js。
 import { coreMounts } from './http/routeMount.js';
 import { createModsRoute, serveMods, MODS_CATALOG_URL, MOD_FILE_PREFIX } from './http/mods.js';
@@ -75,10 +78,13 @@ export {
  *   ratePerSec?: number, rateBurst?: number, maxConnections?: number, maxRooms?: number,
  *   maxConnectionsPerAddr?: number, maxRoomsPerAddr?: number, maxMatchesPerAddr?: number, resyncMinGapMs?: number,
  *   heavyPerSec?: number, heavyBurst?: number, trustProxy?: 'auto' | boolean, soloReconnectWindowMs?: number,
+ *   accounts?: boolean, accountsFile?: string, recordsFile?: string,
  * }} [opts]
  * @returns {Promise<{ port: number, host: string, url: string, server: http.Server, wss: import('ws').WebSocketServer,
  *                     lobby: import('./lobby.js').Lobby, network: import('./net.js').Network,
  *                     registry: import('./net.js').SessionRegistry, packs: ReturnType<typeof createPackRegistry>,
+ *                     accounts: import('./accounts.js').AccountStore|null,
+ *                     records: import('./matchRecords.js').MatchRecords|null,
  *                     close: () => Promise<void> }>}
  */
 export async function startServer(opts = {}) {
@@ -109,6 +115,23 @@ export async function startServer(opts = {}) {
   // 包的**服务端模块**（`server.modules`, DESIGN §28.14）：与上面两条同一个裁剪点 —— 模块文件不在、import 失败、
   // 没有 `registerServer`、或者它挂了一个自己没声明的挂载点，都让**这个包**整份移出已加载集合。
   const stateRoot = stateRootFor(ROOT);
+  // 账号与战绩（docs/RECORDS.md）。**开关是显式的 `SP_ACCOUNTS=1`**（业主裁令）：不能让「某个文件恰好存在」悄悄
+  // 改掉握手语义。没有它时下面两件**都不构造**，`Network` 收到 `accounts: null`、`Lobby` 收到 `records: null`，
+  // `hello` 与会话建立走的还是今天那条路，逐字节不变。
+  //
+  // 两个环境变量**刻意在 `server/accountConfig.js` 里读**，不在这里：`modModules.js` 的 `BOOT_CONFIG_ENV_KEYS`
+  // 是**包能看见的**环境白名单，而 `test/packServerSurface.test.js` 用反射源码把「引擎读过的 SP_*」与它钉成
+  // 一份 —— 而「这个服务器开不开账号」正是那种**不该**让包看见的运维杠杆（包据此分叉就成了「同一份摘要有两种
+  // 行为」）。为什么这样切，写在 `accountConfig.js` 的文件头。
+  const accountConfig = resolveAccountConfig(opts, stateRoot);
+  const accounts = accountConfig.enabled ? new AccountStore(accountConfig.accountsFile) : null;
+  const records = accountConfig.enabled ? new MatchRecords(accountConfig.recordsFile, log) : null;
+  if (accountConfig.enabled) {
+    // 生效值必须被**说出来**（与 resourcePolicy / transportPolicy 同一条纪律）：运维要能从启动日志确认
+    // 「账号开着、库在哪」，而不是靠猜。
+    log.info(`[accounts] enabled (SP_ACCOUNTS): ${accounts.byName.size} account(s) in ${accountConfig.accountsFile}; `
+      + `match records in ${accountConfig.recordsFile}`);
+  }
   const serverModules = await loadServerModules(loadedOnce, { log, stateRoot });
   // 包声明的**战斗逻辑**模块（`pack.json.server.battle`, DESIGN §28.17）：与上面三条同一个裁剪点 —— 源码里带非确定性
   // 的东西、import 越界、没有 `install` 导出、模块文件不在，都让**这个包**整份移出已加载集合。
@@ -289,6 +312,9 @@ export async function startServer(opts = {}) {
   const { registry, lobby, network } = createSessionStack(
     {
       ...opts,
+      // 账号与战绩：`accounts: null` 时 `Network` / `Lobby` 都走各自那条「没有这个功能」的分支。
+      accounts,
+      records,
       ...(matchWrappers.length ? { MatchClass } : {}),
       workshop: { kits: workshopKits.kits, tokenKits: workshopKits.tokenKits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme, meta: metaModules, roomAssets, battle: battleModules, battleInstallers, roomHooks: roomInstallers, transport: transport.transport },
     },
@@ -304,6 +330,7 @@ export async function startServer(opts = {}) {
   buildTag();
 
   const server = http.createServer(createRequestHandler({ serveStatic, health: { startedAt, network, registry, lobby, modHealth: () => modMount.healthz() }, log,
+    records, accounts,
     modsCatalog: (req, res) => serveMods(req, res, MODS_CATALOG_URL, '', modsJson) }));
   server.on('clientError', answerClientError);
   const wss = attachWebSocket(server, { network, log, perMessageDeflate: transport.perMessageDeflate });
@@ -369,7 +396,9 @@ export async function startServer(opts = {}) {
     return closing;
   }
 
-  return { port: actualPort, host: boundHost, url, server, wss, lobby, network, registry, packs, close };
+  // `accounts` / `records` 也交出来（两份都是 `null` 时表示没开 `SP_ACCOUNTS`）：运维与测试要能确认
+  // 「这个进程到底有没有账号」，而不是靠猜 `hello` 的回复。
+  return { port: actualPort, host: boundHost, url, server, wss, lobby, network, registry, packs, accounts, records, close };
 }
 
 // `node server/index.js` / npm start: listen, print the banner, stop on SIGINT / SIGTERM (http/boot.js).

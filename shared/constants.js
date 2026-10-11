@@ -368,6 +368,13 @@ export const ERR = Object.freeze({
   // 野排匹配: room.queue from a player who is already in a room — a quick match places people into rooms, it does not
   // pull them out of one (room.leave first)
   QUEUED: 'QUEUED',
+  // 账号（`SP_ACCOUNTS=1`, server/accounts.js）: `hello.auth` 的四个失败。`AUTH_REQUIRED` 与 `BAD_CREDENTIALS`
+  // 分开，是因为对客户端它们是两件事 —— 前者「你没带凭证，去登录或注册」，后者「凭证不对」。`NAME_TAKEN` /
+  // `WEAK_PASSWORD` 是注册分支向用户解释「换个名字」与「换个口令」的唯一通道。
+  AUTH_REQUIRED: 'AUTH_REQUIRED',     // hello 未带 auth，且本连接没有可复用的已认证会话
+  BAD_CREDENTIALS: 'BAD_CREDENTIALS', // 账号不存在或口令不匹配（**故意不区分**：区分即账号枚举）
+  NAME_TAKEN: 'NAME_TAKEN',           // 注册时该账号名已被占用（大小写不敏感）
+  WEAK_PASSWORD: 'WEAK_PASSWORD',     // 口令不满足长度 / 字符集门槛
   INTERNAL: 'INTERNAL',
 });
 
@@ -382,6 +389,8 @@ export const ERR_TEXT = {
   CHAT_MODE: N_('该房间的聊天设置不允许这条消息'),
   SEAT_CAP_TOO_SMALL: N_('新的人数上限不能小于同盟内现有人数（含 AI 队友）'),
   QUEUE_FULL: N_('正在搜寻的博士已满，请稍后再试'), QUEUE_EMPTY: N_('你不在快速匹配队列中'), QUEUED: N_('你已在同盟中：先离开同盟，才能开始快速匹配'),
+  AUTH_REQUIRED: N_('本服务器需要账号：请登录或注册'), BAD_CREDENTIALS: N_('账号名或口令不正确'),
+  NAME_TAKEN: N_('该代号已被占用'), WEAK_PASSWORD: N_('口令至少 8 位，且不能含控制字符'),
 };
 
 // ---- Emotes (交流, research 09 §4) -----------------------------------------------------------------------------

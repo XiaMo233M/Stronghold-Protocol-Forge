@@ -527,7 +527,13 @@ const target = (v) => {
 export const C2S = {
   // session & lobby
   hello: { name: (v) => isStr(v, NAME_MAX_LEN) && v.trim().length > 0, token: (v) => v == null || isStr(v, 64), version: (v) => v == null || isInt(v, 0, 1e6),
-    noReplace: isBool, claimAt: (v) => isNum(v, 0, Number.MAX_SAFE_INTEGER), $optional: ['token', 'version', 'noReplace', 'claimAt'] },
+    // 账号（`SP_ACCOUNTS=1`, server/accounts.js, docs/RECORDS.md）：`auth` = 'login' | 'register'，`password`
+    // 只在 `auth` 给同时出现。两者都是 **$optional** —— 关掉账号的服务器上老客户端一个字段都不发，握手逐字节不变；
+    // 开着账号的服务器上不发 auth 会得到 `AUTH_REQUIRED`（这是策略，不是协议不兼容）。
+    // `password` 的 128 上限是**传输**上限，真正的门槛（≥8 位、无控制字符）在 `accounts.js validPassword` ——
+    // 这里放宽到 128 是为了让超长口令走到那个判据去换 `WEAK_PASSWORD`，而不是被协议层当成 `BAD_MSG`。
+    auth: (v) => v === 'login' || v === 'register', password: (v) => isStr(v, 128),
+    noReplace: isBool, claimAt: (v) => isNum(v, 0, Number.MAX_SAFE_INTEGER), $optional: ['token', 'version', 'auth', 'password', 'noReplace', 'claimAt'] },
   ping: { c: (v) => typeof v === 'number' && Number.isFinite(v) },
   'room.create': {
     mode: (v) => v === 'solo' || v === 'coop',
@@ -556,6 +562,10 @@ export const C2S = {
   },
   'room.join': { code: (v) => isStr(v, ROOM_CODE_LEN + 2) && /^[A-Za-z0-9]+$/.test(v), mods: (v) => v == null || isModDigest(v), $optional: ['mods'] },
   'room.leave': {},
+  // 上局战绩（`SP_ACCOUNTS=1`, server/matchRecords.js, docs/RECORDS.md）：空消息，答案走 `records.latest`
+  // 给**请求者本人**。开着账号时它是「我这个账号的最近一局」；关着账号时按会话 playerId 查（每次连接的新 id，
+  // 所以实际上只会拿到本会话打过的局）。它在 `server/net.js` 的 `HEAVY_TYPES` 里：一次廉价请求换一整份战绩。
+  'records.mine': {},
   'room.ready': { ready: isBool },
   'room.setDifficulty': { difficulty: (v) => DIFFICULTIES.includes(v) },
   // 本房座位上限 (业主裁决 B5, docs/META.md §1.9): the HOST resizes the room it is already in — the same host-only,
@@ -747,6 +757,10 @@ export const C2S = {
 export const S2C = [
   'welcome', 'ok', 'error', 'pong',
   'room.state', 'room.closed',
+  // 上局战绩的答案（server/lobby.js `records.mine`）：`records.latest { record: publicRecord|null }`，只发给请求者。
+  // `record` 的**可见范围**由服务端收窄（docs/RECORDS.md §可见性）：本人看到完整明细，同房的人看到昵称，
+  // 只凭房间号查询的人连昵称都看不到。公开的 HTTP 面另有 `GET /api/records/<CODE>`，与这条消息同源同裁剪。
+  'records.latest',
   // 野排匹配 (quick match, server/matchmaking.js): the queue's own state push, `room.queued { status, position, size,
   // need, waitedMs, deadline, code? }`. status 'waiting' = in the queue (position 1-based, `need` = the queue size the
   // engine waits for), 'placed' = the engine just put this player into a room whose 4-letter code is `code` (the

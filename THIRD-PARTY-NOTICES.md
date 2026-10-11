@@ -66,6 +66,45 @@ terms and names in those files remain © Hypergryph / Yostar.
 
 ---
 
+## Contributions and evaluated submissions
+
+### 投稿 b639e98e6efb — 「账号绑定的完整对局战绩（待 Forge 兼容）」
+
+This project's 对局战绩与可选账号 layer (`server/accounts.js`, `server/matchRecords.js`, `docs/RECORDS.md`, the
+`hello.auth` fields and the read-only `/api/records/…` routes) was **specified from** a community submission whose own
+`SOURCE.md` self-describes as:
+
+* upstream repository **`NeoPecos/Stronghold-Protocol`**, commit **`2cadc618`** (itself based on `sganggs` 0.2.4);
+* patch baseline **`bc50cac0`**, diff author **`Leiothrix`**;
+* licence **GPL-3.0-or-later**, **no bundled assets**.
+
+`GPL-3.0-or-later` is the same licence this repository already carries (`LICENSE`, `NOTICE.md`), so the two are
+licence-compatible and no additional permission is needed to combine them.
+
+**What was taken, and what was not.** No file from the submission was copied into this repository. What was taken is
+the *feature contract* the submission describes (per-account durable identity, JSONL match records, the room-code →
+record lookup, and the visibility question that documents the room code as a non-secret). Everything implemented here
+was written for this repository's existing seams and differs from the submission in ways this notice records so nobody
+later mistakes one for the other:
+
+* **no `POST /api/account/password`** and no admin-token plumbing at all (the submission's own `SOURCE.md` says its
+  password-change entry point depends on an admin token and should not be enabled without a security review);
+* `scrypt` cost raised to `N=2^15` (the submission used `2^14`);
+* records are **bounded** (compaction at a fixed append count) and carry a per-line `v` version — the submission's
+  journal grows without limit;
+* the public records view exposes seat numbers only; nicknames and the purchase ledger require being in the room or
+  being the account owner;
+* `sanitizeName` is untouched (the submission added a `test`/`admin`/`aaa` name blacklist — a separate decision).
+
+The submission's other bundled payloads (the `integrations/astrbot_sp_records` AstrBot plugin, the `room.list` /
+`room.skins` / `user.activity` protocol surface) are **not** part of this layer; the submission's `changes.patch` was
+cumulative across several unrelated proposals.
+
+Should any file from that submission be adopted verbatim later, this section must be extended with the per-file list,
+the upstream commit and the author's attribution — the author's credit must not be altered or removed.
+
+---
+
 ## Licence texts
 
 ### PixiJS — MIT

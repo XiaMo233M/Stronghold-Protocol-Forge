@@ -505,7 +505,7 @@ export class Lobby {  /**
    *   options?: Partial<typeof LOBBY_DEFAULTS>,
    * }} opts
    */
-  constructor({ registry, log = noopLog, MatchClass = DefaultMatch, getData = defaultGetData, now = Date.now, seedFn, options = {}, workshop = null }) {
+  constructor({ registry, log = noopLog, MatchClass = DefaultMatch, getData = defaultGetData, now = Date.now, seedFn, options = {}, workshop = null, records = null }) {
     this.registry = registry;
     this.log = log;
     this.MatchClass = MatchClass;
@@ -513,6 +513,13 @@ export class Lobby {  /**
     this.now = now;
     this.seedFn = seedFn || (() => randomInt(2 ** 32));
     this.opts = { ...LOBBY_DEFAULTS, ...options };
+    /**
+     * 对局战绩（`SP_ACCOUNTS=1`, server/matchRecords.js, docs/RECORDS.md §3）：每局**完整结算**时落一条。
+     * `null`（默认，也是没有 `SP_ACCOUNTS` 时的唯一取值）⇒ `onMatchEnd` 里那两行**一个字都不写**，
+     * `records.mine` 回一条 `record: null`。大厅对它是只读的，失败也只记日志 —— 一份战绩不该让一局游戏出问题。
+     * @type {import('./matchRecords.js').MatchRecords | null}
+     */
+    this.records = records;
     /**
      * 工坊行为层 (docs/WORKSHOP.md §4): `{ kits, modules }` from server/workshop.js loadWorkshopKits — the per-battle
      * kit map (server-run battles) and the JSON-safe module list a client-simulated battle needs. null for a plain
@@ -669,6 +676,12 @@ export class Lobby {  /**
       case 'room.create': return this.create(session, msg);
       case 'room.join': return this.join(session, msg);
       case 'room.leave': return this.leave(session);
+      // 上局战绩（server/matchRecords.js, docs/RECORDS.md）：空消息，回执是**只发给请求者**的
+      // `records.latest`。没有 `records` 时照样回一条 `record: null` —— 客户端因此不需要「服务器有没有开这个
+      // 功能」这件事，它只会看到「暂无完整对局战绩」。可见档位：请求者就是 playerId 的持有者 ⇒ `OWNER`。
+      case 'records.mine':
+        sendSession(session, { t: 'records.latest', record: this.records ? this.records.latestPlayer(session.playerId) : null });
+        return OK;
       case 'room.ready': return this.ready(session, msg);
       case 'room.setDifficulty': return this.setDifficulty(session, msg);
       case 'room.setSeatCap': return this.setSeatCap(session, msg);
@@ -1526,6 +1539,13 @@ export class Lobby {  /**
     if (ctx.ended || !ctx.live || room.matchCtx !== ctx || room.disposed) return;
     ctx.ended = true;
     room.lastSummary = summary ?? null;
+    // 对局战绩（`SP_ACCOUNTS=1`）：**完整结算**才落一条 —— 这个位置就是「完整结算」的定义处。`this.records` 为
+    // null 时整行是 no-op（没有 SP_ACCOUNTS 的那条路径因此逐字节不变）。落盘失败只记日志：一局已经打完了，
+    // 战绩写不进去不该把它变成错误。
+    if (this.records) {
+      try { this.records.save(room, summary ?? null, this.now()); }
+      catch (error) { this.log.error(`[records] failed to save ${room.code}`, error); }
+    }
     room.match = null;
     room.matchCtx = null;
     room.matchKey = null;

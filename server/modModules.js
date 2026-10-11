@@ -43,9 +43,12 @@ export function moduleStateDir(stateRoot, packId) {
  *
  * 为什么是白名单而不是把 `process.env` 过滤一下：一个包能读到的环境变量越多，它就越像「运维杠杆」—— 作者可以
  * 写「只有 `SP_FOO=1` 时才干活」，于是同一份包字节在两台机器上是两种行为，而 `MOD_SURFACE` 存在的意义就是
- * 「同一份摘要 ⇒ 同一份行为」。这四个名字是引擎源码里真实读过的全部（`server/index.js`、
- * `server/modModules.js`、`server/match/Match.js`、`server/match/botEmotes.js`），并且 `test/packServerModules.test.js`
- * 用**反射源码**把它们钉住：引擎新读一个 `SP_*` 而这份名单没跟上，测试就红。
+ * 「同一份摘要 ⇒ 同一份行为」。这四个名字是**这份名单的扫描范围**（`server/index.js`、`server/modModules.js`、
+ * `server/match/Match.js`、`server/match/botEmotes.js`）里真实读过的全部，并且 `test/packServerSurface.test.js`
+ * 用**反射源码**把它们钉住：扫描范围内新读一个 `SP_*` 而这份名单没跟上，测试就红。
+ *
+ * 在扫描范围**之外**读的 `SP_*` 因此是刻意的，不是漏网：`server/accountConfig.js` 的 `SP_ACCOUNTS` /
+ * `SP_RECORDS_FILE` 就是例子 —— 「这台服务器开不开账号」正是**不该**让包看见并据此分叉的那种开关。
  */
 export const BOOT_CONFIG_ENV_KEYS = Object.freeze(['SP_BOT_EMOTES', 'SP_STAGE', 'SP_STATE_DIR', 'SP_WORKSHOP']);
 

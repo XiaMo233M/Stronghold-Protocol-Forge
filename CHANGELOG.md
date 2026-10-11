@@ -1,5 +1,39 @@
 # 更新记录
 
+## 未发布 —— 对局战绩与可选账号（第 2 刀）
+
+**战绩落盘 + 可选账号口令库（docs/RECORDS.md）。** 今天 `playerId` 每次连接都是新的，所以「我上一局打得
+怎么样」换个会话就找不回来；这一刀给两样东西：一次完整结算落一条战绩，以及一个**默认关闭**的账号层（账号名 →
+跨会话稳定的 `playerId`，口令由玩家自己持有）。
+
+* **开关是显式的 `SP_ACCOUNTS=1`，不是「某个文件恰好存在」。** 没有它时 `AccountStore` 与 `MatchRecords` 都
+  **不构造**：`hello` 里没有认证那一段、结算点不落盘、`GET /api/records/account/<NAME>` 回 404。**老客户端握手
+  逐字节不变**（`playerId` 还是那 10 位十六进制临时 id）。
+* **口令**：每账号 16 字节随机盐 + scrypt（`N=2^15, r=8, p=1`），`timingSafeEqual` 比较，**永不落明文、永不回显**，
+  落盘 `0o600`。登录失败不区分「账号不存在」与「口令不对」（那会是账号枚举）；注册才分开
+  `NAME_TAKEN` / `WEAK_PASSWORD`。坏库 / 版本不对 ⇒ 抛（fail closed）。
+* **限流按客户端网络键**（`TokenBucket(0.1, 8)`）加同连接不并发派生 —— 一次 scrypt 是几十毫秒单核 CPU，没有这道
+  闸门口令库就是一个 CPU 放大器。
+* **改密入口本版不存在**（业主裁令）。投稿带的是 `POST /api/account/password` + 站点级共享 `SP_ADMIN_TOKEN`：共享的
+  管理员密钥不是玩家的口令，而且它会让「必须提供旧口令」变成装饰。连为它服务的脚手架（`sameSecret` /
+  `readJsonBody` / `adminToken` / `MIN_TOKEN_LENGTH`）都没有实现。将来要代改，另立一次性重置票据的设计。
+* **战绩落盘有界**：JSONL 追加日志（行首 `v` = 行格式版本；坏行与未知版本**跳过并告警**），`byPlayer` ≤ 20000、
+  `byRoom` ≤ 5000，追加到 5000 行时**原子压缩重写**（临时文件 + `rename`）。行数硬上界 `20000+5000+5000`。
+  **代价**：压缩丢弃不再被索引引用的历史局 ⇒ 这不是一份可归档的战绩史（`SP_RECORDS_FILE` 指到会备份的地方）。
+* **公开战绩面收窄**（业主裁令）：`GET /api/records/<CODE>` 只给 **seat + 是否本人**；`GET /api/records/account/<NAME>`
+  只回**被查账号本人那一行聚合**（队友的昵称与逐回合购卡明细都不出现，本人明细走 `records.mine`）。昵称与购卡
+  明细只到房间成员与本人。`playerId` 任何档位都不出现在公开面。**房间号不是安全边界**。
+* **两条只读战绩路由限流**：每客户端地址 `TokenBucket(1/s, 突发 10)`，超限 **429 + `Retry-After`**；两条共用一只
+  桶。HTTP 面不受 WebSocket 的桶保护，而 `/account/<NAME>` 若不限流就是一个账号名枚举面。名字与登录同一套键
+  （NFC 归一 + 小写、**精确匹配**），「账号不存在」与「存在但没打过」**同答复**（否则是存在性探针）。
+* **协议面**：`hello` 加**可选** `auth` / `password`；C2S 加 `records.mine`、S2C 加 `records.latest`。
+  **`PROTOCOL_VERSION` 与 `MOD_API_VERSION` 都不动**，不改默认游戏行为 ⇒ **不需要 `golden:update`**。
+  `server/net.js` 的 `HEAVY_TYPES` **只**多 `records.mine`（`room.list` / `room.skins` / `user.activity` /
+  `lastInputAt` 属于第 3、4 刀，投稿的补丁把它们混在一起了，这里一律不带）。
+* **`sanitizeName` 一律不动**：投稿要禁 `test` / `admin` / 三位以上 `a`。那反转的是**既有判定**（脱敏 + 截断），
+  会打断 `test/lobby.test.js` 与 `test/client-static.test.js` 的既有断言，客户端 `title.js` 另有一份会漂移，而且
+  它**不解决顶替** —— 另议。
+
 ## 0.15.3-0.2.4 — 2026-10-12
 
 **变体 / 口径层：`pack.json.variants`（DESIGN §28.39，docs/WORKSHOP.md §1.20）。** 三个社区 mod「写了等于没写」

@@ -1,0 +1,68 @@
+/* ==========================================================================================
+   screens/records.css — 上局战绩 (js/screens/records.js): the dialog behind 「上局战绩」.
+
+   The overlay, the focus trap, Escape and the backdrop are the shared Modal's job (ui/components.js
+   .modal), so this file styles ONLY the content inside it: the match overview line, then one block per
+   player with the number grid and the two detail columns (盟约层数 / 购入卡牌).
+
+   The owner's ruling on what may be shown: the public server view gives a seat number and whether it is
+   your own seat, nothing else — so a viewer of another player's row sees `P1`…`P4` where this file would
+   put a name. That mask happens in SERVER data (server/matchRecords.js `visibleRecord`), not here: the
+   client renders whatever it was handed, which keeps one rendering path for both sources.
+   Sizes are design px ÷ 100 (theme.css root scale); text that must stay readable on phones uses
+   max(.xxrem, N px), because the root scale is clamped at 40 px there.
+   ========================================================================================== */
+
+.match-record__body { display: flex; flex-direction: column; gap: .16rem; }
+
+.match-record__meta {
+  margin: 0; font-size: max(calc(.13 * var(--t)), 11px); letter-spacing: .04em; color: var(--text-dim);
+  text-transform: none;
+}
+
+/* ---- one player ------------------------------------------------------------------------------------------------- */
+.match-record__player {
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--line);
+  border-radius: .06rem;
+  padding: .14rem .16rem;
+  background: rgba(255, 255, 255, .02);
+}
+/* 本人：左侧一道 mint 亮边 + 更亮的地面，扫一眼就知道哪一行是自己 */
+.match-record__player.is-own {
+  border-left-color: var(--mint-500);
+  background: var(--mint-a10);
+}
+.match-record__player > h3 {
+  margin: 0 0 .1rem; font-size: max(calc(.15 * var(--t)), 12px); font-weight: 600; color: var(--text-hi);
+  display: flex; align-items: baseline; gap: .08rem;
+}
+
+.match-record__stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(max(1.1rem, 96px), 1fr)); gap: .04rem .12rem;
+}
+.match-record__stats > div {
+  display: flex; align-items: baseline; justify-content: space-between; gap: .06rem;
+  font-size: max(calc(.12 * var(--t)), 10px); color: var(--text-dim);
+}
+.match-record__stats .num { color: var(--text-hi); font-variant-numeric: tabular-nums; }
+
+.match-record__details {
+  margin-top: .1rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(max(1.4rem, 140px), 1fr));
+  gap: .08rem .16rem;
+}
+.match-record__details h4 {
+  margin: 0 0 .04rem; font-size: max(calc(.11 * var(--t)), 10px); font-weight: 600; letter-spacing: .06em;
+  color: var(--text-dim);
+}
+.match-record__details p { margin: .04rem 0 0; font-size: max(calc(.12 * var(--t)), 10px); color: var(--text-dim); }
+.match-record__muted { font-style: italic; }
+
+.match-record__entry {
+  display: flex; align-items: baseline; justify-content: space-between; gap: .1rem;
+  font-size: max(calc(.12 * var(--t)), 10px); color: var(--text-md);
+}
+.match-record__entry + .match-record__entry { margin-top: .02rem; }
+.match-record__entry > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.match-record__entry small { margin-left: .06rem; color: var(--text-dim); font-size: .9em; }
+.match-record__entry .num { color: var(--text-hi); font-variant-numeric: tabular-nums; white-space: nowrap; }

@@ -19,6 +19,7 @@ import { useEffect } from '../../vendor/hooks.module.js';
 import { html, Button, Icon, MicroLabel, DifficultyTag } from '../ui/components.js';
 import { useGameData, Img, UnitThumb, BandIcon, PlayerAvatar, BondGlyph, LpTower, Sprite } from '../ui/gameComponents.js';
 import { normalizeResult, fmtNum, diyRecordFor, cardStandIn, standInForText } from '../ui/gameLogic.js';
+import { MatchRecordsButton } from './records.js';
 import { data } from '../data.js';
 import { enemyIconUrl, titleIconUrl, uiUrl } from '../ui/assetUrls.js';
 import { store, useStore, emptyMatch } from '../store.js';
@@ -176,6 +177,7 @@ export function ResultView({ res, pub = null, myId = null, backLabel, onBack, qu
         </div>
         <footer class="result__foot">
           <${Button} variant="primary" size="xl" icon="chevronLeft" onClick=${onBack}>${backLabel}<//>
+          <${MatchRecordsButton} />
         </footer>
       </section>
       <section class="result__players">

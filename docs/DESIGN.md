@@ -38,3 +38,5 @@ normative lines it rewrote).
 | §29 | [design/meta-payload.md](design/meta-payload.md) | The match meta payload: a pack's server-side match logic (`server.meta`) |
 | §30 | [history/0.2.3.md](history/0.2.3.md) | 0.2.3 — after the 0.2.2 release (2026-10-10) |
 | §31 | [history/0.2.4.md](history/0.2.4.md) | 0.2.4 — after the 0.2.3 release (2026-10-11) |
+
+Supplementary (no section numbers of its own): [RECORDS.md](RECORDS.md) — 对局战绩与可选账号（`SP_ACCOUNTS=1`）。
