@@ -264,10 +264,39 @@ export const ASSETS_SERVER_POLICIES = Object.freeze(['serve', 'cache-only']);
 /** `assets.verify`：整包摘要的算法（旁挂 `<container>.sha256`）。今天只有 sha256 一种，枚举写出来是为了让
  *  第二个算法出现时**必须**改这里，而不是让校验器悄悄按 sha256 比对一份 md5。 */
 export const ASSETS_VERIFY_ALGORITHMS = Object.freeze(['sha256']);
-/** `assets` 的四个字段，一个不多一个不少。 */
-const ASSETS_FIELDS = Object.freeze(['container', 'manifest', 'serverPolicy', 'verify']);
+/** `assets` 的五个字段，一个不多一个不少。 */
+const ASSETS_FIELDS = Object.freeze(['container', 'manifest', 'serverPolicy', 'verify', 'mirrors']);
 /** 资源容器的扩展名：它是 `tools/make-spresources.mjs` 的产物，由格式定义（`SPRES001` 魔数 + 压紧 JSON 头）。 */
 const SPRESOURCES_EXT = '.spresources';
+
+/**
+ * `assets.mirrors[]` —— **作者自备 CDN 承载本包自己的容器**（DESIGN §28.40）。它是「素材加载源」这一格的唯一入口，
+ * 三条边界写在这里，一处也不在别处：
+ *
+ *   * **只镜像本包自己的容器。** 这条通道改的是「这份容器的字节从哪台主机取」，**不是**「整棵 `/assets` 树指向谁」。
+ *     后者做不到诚实：`data/assets.json` 只有**清单级**的摘要、没有逐文件摘要，哈希锁得住清单字节、**锁不住图**；
+ *     把一整个站点的素材树交给第三方主机也正是「不分发官方素材」那条红线要拦的形态。所以一个坏镜像的爆炸半径是
+ *     **一个包自己的那份容器**，不是全站素材（`server/http/static.js` 的 `/assets` 分支一行都没动）。
+ *   * **`base` 只认绝对 `https://`**，且必须写出尾斜杠：拼的是 `<base><包内文件名>`，少一个斜杠会拼出一个看起来
+ *     对、取不到的地址。`http:` / `data:` / `file:` / 协议相对 / URL 里带凭据一律拒 —— 与 `VOICE_CDN_BAD_URL`
+ *     （§28.36）逐字同一条口径。
+ *   * **`sha256` 必须等于装载期算出来的容器摘要**（`assetsIssues.digest`）：镜像里的字节是不是「同一份容器」由这
+ *     一步判定，它**不是**包自己的一句话 —— 服务端先按包内文件算出摘要，再拿它去比每一条镜像的声明
+ *     （`server/workshop.js`），对不上的那条**不生效**并点名。于是「镜像换了内容」在装载期就被抓住。
+ *
+ * 镜像**不在服务端取字节**（与 `voiceCdn` 相反）：服务端一次网络请求都不发 —— 取字节的是**客户端**，走既有的
+ * `bundle.js` 逐文件 SHA-1[0:12] 导入与 Cache Storage。所以这一格没有服务端超时、没有服务端磁盘缓存、没有启动期
+ * 阻塞；一台 CDN 挂掉只影响**想用它的人**，而回落目标（包内那条 `/workshop-resources/` URL）永远在。
+ */
+export const ASSETS_MIRROR_FIELDS = Object.freeze(['id', 'base', 'sha256']);
+/** 一个包最多声明几条镜像：多到「全都试一遍」比「一条都不试」更慢时，这条通道就不再是优化了。 */
+export const ASSETS_MIRROR_MAX = 4;
+/** 镜像 id：`sources(ctx)` 只许谈这个名字，所以它必须是一个能被点名的短标识（见 `CLIENT_SOURCES_BAD_ORDER`）。 */
+export const ASSETS_MIRROR_ID_RE = /^[a-z][a-z0-9_-]{0,31}$/;
+/** 容器摘要的形态（与 `VOICE_CDN_SHA256_RE` 逐字相同）。 */
+export const ASSETS_MIRROR_SHA256_RE = /^[0-9a-f]{64}$/;
+/** 一条 `base` 的长度上限：与 `common.js isResourceUrl` 的 512 同一条口径，一条声明不该能拖住一次拼接。 */
+const ASSETS_MIRROR_BASE_MAX = 512;
 
 /**
  * `assets` 在**装载期**（文件真的在不在、摘要对不对）会用的两个拒绝码（DESIGN §28.13.3，B3a 段）。
@@ -515,7 +544,73 @@ function parseAssetsDecl(raw) {
   if (!ASSETS_VERIFY_ALGORITHMS.includes(verify)) {
     return fail('ASSETS_BAD_VERIFY', `assets.verify must be one of: ${ASSETS_VERIFY_ALGORITHMS.join(', ')}`);
   }
-  return { ok: true, decl: { container: raw.container, manifest: raw.manifest, serverPolicy, verify } };
+  // `mirrors`（DESIGN §28.40）是**可选的**一格，而且与 `skins` / `voiceCdn` / `variants` 同一条纪律：
+  // **只在真的声明过时才进归一化结果**。没声明它的包（今天所有的包）哈希逐字节不变；`identifyPack` 哈希的是
+  // 这份清单的 `canonicalJson`，给每个包都加一个 `mirrors: []` 会换掉每一个已发布包的身份。
+  const mirrorsParsed = raw.mirrors === undefined ? null : parseAssetsMirrors(raw.mirrors);
+  if (mirrorsParsed && !mirrorsParsed.ok) return mirrorsParsed;
+  return {
+    ok: true,
+    decl: {
+      container: raw.container, manifest: raw.manifest, serverPolicy, verify,
+      ...(mirrorsParsed ? { mirrors: mirrorsParsed.decl } : {}),
+    },
+  };
+}
+
+/**
+ * `assets.mirrors[]` 的形状（DESIGN §28.40）。判据与理由见 `ASSETS_MIRROR_FIELDS` 上面那一段；这里只说两件
+ * 实现上的事：
+ *
+ *   * **一条镜像不成立就拒整个 `assets`**，不做「丢掉坏的那条、留下好的」：形状层的既有纪律是「作者写下的东西
+ *     要么全被读懂、要么点名拒」（§28.13.3），静默丢一条会让作者以为它有四条镜像、实际只有三条。**装载期**那条
+ *     摘要比对相反 —— 它一次网络请求都不发，只把与包内字节不符的那条**停用**并点名（服务端算出来的摘要才是
+ *     真相，而包仍然可用）。两处口径不同是因为它们回答的问题不同。
+ *   * **`sha256` 只判形态，不比数值**：数值要等装载期把包内容器真的读一遍才有得比（`server/workshop.js`），
+ *     形状层连包目录都看不到。
+ * @param {unknown} raw
+ * @returns {{ ok: true, decl: Array<{ id: string, base: string, sha256: string }> } | { ok: false, error: string, detail: string }}
+ */
+function parseAssetsMirrors(raw) {
+  if (!Array.isArray(raw) || !raw.length) {
+    return fail('ASSETS_MIRROR_BAD_SHAPE', 'assets.mirrors must be a non-empty array of { id, base, sha256 } (drop the key instead of sending [])');
+  }
+  if (raw.length > ASSETS_MIRROR_MAX) {
+    return fail('ASSETS_MIRROR_TOO_MANY', `assets.mirrors declares ${raw.length} mirrors; at most ${ASSETS_MIRROR_MAX} — the loader tries them in order, so a fifth one only ever costs time`);
+  }
+  /** @type {Array<{ id: string, base: string, sha256: string }>} */
+  const out = [];
+  const seen = new Set();
+  for (let i = 0; i < raw.length; i++) {
+    const at = `assets.mirrors[${i}]`;
+    const entry = raw[i];
+    if (!isPlainObj(entry)) return fail('ASSETS_MIRROR_BAD_SHAPE', `${at} must be an object: { id, base, sha256 }`);
+    for (const key of Object.keys(entry)) {
+      if (!ASSETS_MIRROR_FIELDS.includes(key)) {
+        return fail('ASSETS_MIRROR_UNKNOWN_FIELD', `${at}: "${key}" is not a field of a mirror entry (${ASSETS_MIRROR_FIELDS.join(', ')})`);
+      }
+    }
+    if (typeof entry.id !== 'string' || !ASSETS_MIRROR_ID_RE.test(entry.id)) {
+      return fail('ASSETS_MIRROR_BAD_ID', `${at}.id must be a short lowercase id (a letter first, then a-z 0-9 _ -, at most 32) — it is the only name sources(ctx) is allowed to talk about`);
+    }
+    if (seen.has(entry.id)) {
+      return fail('ASSETS_MIRROR_DUPLICATE_ID', `${at}.id "${entry.id}" is declared twice (one id, one mirror: the second one is unreachable and the ordering would be ambiguous)`);
+    }
+    seen.add(entry.id);
+    if (typeof entry.base !== 'string' || entry.base.length > ASSETS_MIRROR_BASE_MAX || !entry.base.endsWith('/')) {
+      return fail('ASSETS_MIRROR_BAD_BASE', `${at}.base must be a string of at most ${ASSETS_MIRROR_BASE_MAX} characters ending in "/" — the container is fetched as <base><its file name inside the pack>, so a missing slash builds an address that looks right and never resolves`);
+    }
+    let parsed = null;
+    try { parsed = new URL(entry.base); } catch { parsed = null; }
+    if (!parsed || parsed.protocol !== 'https:' || !parsed.hostname || parsed.username || parsed.password || parsed.search || parsed.hash) {
+      return fail('ASSETS_MIRROR_BAD_BASE', `${at}.base must be an absolute "https://" URL with a host, no credentials, no query and no fragment — this channel fetches from the AUTHOR's own CDN, and https is the only protocol it will speak (http: / data: / file: / protocol-relative all refuse)`);
+    }
+    if (typeof entry.sha256 !== 'string' || !ASSETS_MIRROR_SHA256_RE.test(entry.sha256)) {
+      return fail('ASSETS_MIRROR_BAD_DIGEST', `${at}.sha256 must be a 64-character lowercase hex sha256 of the container bytes that base serves — the loader compares it with the digest it computed from the pack's own container and drops any mirror that does not match`);
+    }
+    out.push({ id: entry.id, base: entry.base, sha256: entry.sha256 });
+  }
+  return { ok: true, decl: out };
 }
 
 /** 面板模块的扩展名：这个通道送的是**代码**（浏览器 import 它），所以只有 `.js`。 */
@@ -1989,6 +2084,14 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // 但**键在不在**影响哈希 —— 所以下面用 `raw[k] !== undefined` 判定「这个包声明了没有」。
   const assetsParsed = raw.assets === undefined ? null : parseAssetsDecl(raw.assets);
   if (assetsParsed && !assetsParsed.ok) return assetsParsed;
+  // 镜像也是**再分发**：同一份字节从作者的域名上发给别人时，授权问题不因为换了一台主机就消失 —— 与
+  // `VOICE_CDN_NEEDS_LICENSE`（§28.36）逐字同一条理由。`ASSETS_NEED_LICENSE` 判的是「包里有没有 `assets/`
+  // 文件夹」，而容器路径不一定要落在那棵树下，所以这里单独判一条，并且只对**声明了 mirrors 的包**生效
+  // （今天一个都没有 ⇒ 已发布包的哈希与判据一字不变）。
+  if (assetsParsed && assetsParsed.decl.mirrors && !license) {
+    return fail('ASSETS_MIRROR_NEEDS_LICENSE',
+      'assets.mirrors makes this pack the redistributor of its own container, so pack.json must declare a license (e.g. "CC0-1.0", "CC-BY-4.0", or "see assets/LICENSE.txt")');
+  }
   const clientParsed = raw.client === undefined ? null : parseClientDecl(raw.client);
   if (clientParsed && !clientParsed.ok) return clientParsed;
   const serverParsed = raw.server === undefined ? null : parseServerDecl(raw.server);

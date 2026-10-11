@@ -461,6 +461,13 @@ export function workshopModAssetsFrom(files, packs) {
       digest,
       serverPolicy: pack.assets.serverPolicy,
       verify: pack.assets.verify,
+      // 作者自备 CDN 的镜像（DESIGN §28.40）：**只在真的声明过时才存在** —— 与 `modPanels` 同一条纪律，没声明
+      // `mirrors` 的包这一条 `welcome` 帧与从前逐字节相同。与包内容器摘要不符的那几条已经在装载期被摘掉
+      // （`server/workshop.js assetsMirrorIssues`），所以这里交出去的每一条都是**可用的**声明；
+      // 至多 `ASSETS_MIRROR_MAX` 条，字段就是形状层判过的那三个。
+      ...(Array.isArray(pack.assets.mirrors) && pack.assets.mirrors.length
+        ? { mirrors: pack.assets.mirrors.map((m) => ({ id: m.id, base: m.base, sha256: m.sha256 })) }
+        : {}),
     });
   }
   return out;

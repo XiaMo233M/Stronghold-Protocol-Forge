@@ -157,6 +157,8 @@
   "显示伤害数字": "Damage Numbers",
   "工坊外观": "Workshop Outfits",
   "工坊外观由已加载的包提供，缺哪一套时回落原版立绘。": "Outfits come from the loaded packs. When one is missing, the original art is drawn.",
+  "工坊素材源": "Workshop Load Sources",
+  "工坊素材源由已加载的包声明；关掉后一律从包内取。": "Load sources are declared by the loaded packs. Turned off, every container is taken from inside its own pack.",
   "画面质量": "Graphics Quality",
   "触屏操作：点击单位选中（撤退 / 出售）· 长按单位或卡牌查看详情 · 拖动部署后滑动选择朝向": "Touch controls: tap a unit to select it (Retreat / Sell) · long-press a unit or card for details · after dragging to deploy, swipe to choose a direction",
   "快捷键": "Hotkeys",

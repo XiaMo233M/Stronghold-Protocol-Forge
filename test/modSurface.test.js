@@ -29,6 +29,9 @@ import * as packForms from '../shared/packForms.js';
 import * as hostMetrics from '../server/hostMetrics.js';
 import * as routeMount from '../server/http/routeMount.js';
 import * as modModules from '../server/modModules.js';
+// 第 5 刀（§28.40）：素材加载源的**排序面**。它不是 `pack.json` 里的一格，而是面板模块的一个导出，所以锚点只能
+// 落在引擎自己那一端的模块上 —— 与 `extensions`（`client.panels.me` 用）同一条做法。
+import * as sources from '../public/js/resources/sources.js';
 import {
   MOD_SURFACE, MOD_SURFACE_IDS, MOD_SURFACE_FROZEN, surfaceLedgerIssues,
 } from '../shared/modSurface.js';
@@ -253,7 +256,7 @@ const MOD_LAYER_MD = readFileSync(new URL('../docs/design/mod-layer.md', import.
 
 /** 锚点符号住在哪个模块。默认是 schema（`shared/workshop.js`）；kit import 面住 `shared/kitImports.js`；
  *  客户端那一格（`ctx.me` / 宿主键）住 `public/js/ui/extensions.js`（引擎自己那一端的契约表）。 */
-const ANCHOR_MODULES = { schema: workshopSchema, kitImports, extensions, packForms, hostMetrics, routeMount, modModules };
+const ANCHOR_MODULES = { schema: workshopSchema, kitImports, extensions, packForms, hostMetrics, routeMount, modModules, sources };
 
 test('表面清单：每一条的锚点符号都还在它声明的模块里，成员一个不少', () => {
   assert.ok(MOD_SURFACE.length > 0, '表面清单不能是空的');
@@ -319,6 +322,9 @@ test('表面清单：引擎里每一个「包可声明的名单」都被某条�
     // `RESERVED_ROUTE_PREFIXES` / `DYNAMIC_ROUTE_CACHE_POLICIES` 是动态端点那两条判据，
     // `HOST_METRICS_FIELDS` / `BOOT_CONFIG_ENV_KEYS` 是包能读到的东西的两个闭集。
     ['TRANSPORT_FIELDS', 'schema'], ['VOICE_CDN_FIELDS', 'schema'], ['VOICE_CDN_AUDIO_EXTS', 'schema'],
+    // 第 5 刀（§28.40）：镜像条目的字段闭集 —— 与 `VOICE_CDN_FIELDS` 同一类（写错的名字被
+    // `ASSETS_MIRROR_UNKNOWN_FIELD` 点名拒绝），所以它必须被某一格表面锚住。
+    ['ASSETS_MIRROR_FIELDS', 'schema'],
     ['HOST_METRICS_FIELDS', 'hostMetrics'], ['BOOT_CONFIG_ENV_KEYS', 'modModules'],
     ['RESERVED_ROUTE_PREFIXES', 'routeMount'], ['DYNAMIC_ROUTE_CACHE_POLICIES', 'routeMount'],
   ];

@@ -126,12 +126,13 @@ export async function revokeImport(packId, { caches = globalThis.caches, origin 
  * `sha256(压紧 files)[0:12]`）。第二步是白拿的：一份版本号与文件表对不上的清单，说明作者手工改过它 —— 那正是
  * 「包内清单」与「容器头里的清单」会开始不一致的地方，而后者才是字节的真正描述。
  * @param {{ pack: string, manifest: string }} decl
- * @param {{ fetchImpl?: Function }} [opts]
+ * @param {{ fetchImpl?: Function, url?: string|null }} [opts] `url` 只在**镜像**那条路上被传进来（DESIGN §28.40）：
+ *   那个包的清单不在服务端，而在作者声明的那台主机上（`<base><包内文件名>`）。省略时逐字取 `decl.manifest`。
  */
-export async function fetchManifest(decl, { fetchImpl = globalThis.fetch } = {}) {
-  const url = decl && decl.manifest;
-  if (!url) throw new Error('这个包没有声明资源清单');
-  const res = await fetchImpl(url, { cache: 'no-cache' });
+export async function fetchManifest(decl, { fetchImpl = globalThis.fetch, url = null } = {}) {
+  const target = url || (decl && decl.manifest);
+  if (!target) throw new Error('这个包没有声明资源清单');
+  const res = await fetchImpl(target, { cache: 'no-cache' });
   if (!res || !res.ok) throw new Error(`资源清单取不到（HTTP ${res ? res.status : '?'}）`);
   let body;
   try { body = await res.json(); } catch { throw new Error('资源清单不是 JSON'); }

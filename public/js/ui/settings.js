@@ -30,6 +30,9 @@ import { sanitizeSettings, HOTKEY_ACTIONS, DEFAULT_HOTKEYS, hotkeyLabel, rebindH
 // 工坊外观 (workshopSkins): the switch itself lives in the settings store, but the **gate the chain reads** is one
 // module-level value in portraitChain.js — this file is its only writer (boot below + the subscription under it).
 import { setAppearanceFirst } from './portraitChain.js';
+// 工坊素材加载源 (workshopSources): the same shape — the switch lives in the settings store, and the **gate the mirror
+// ordering reads** is one module-level value in resources/sources.js; this file is its only writer.
+import { setSourcesEnabled } from '../resources/sources.js';
 import { VOICE_LANG_NAMES } from '../../../shared/constants.js';
 import { data, useData } from '../data.js';
 import { dubsInstalled, dubsMissing } from '../voiceDubs.js';
@@ -65,6 +68,7 @@ settingsStore.subscribe((s) => {
   audio.setVoiceLang(s.voiceLang);
   applyTextSize(s.textSize);
   setAppearanceFirst(s.workshopSkins);
+  setSourcesEnabled(s.workshopSources);
 });
 audio.setVolumes(settingsStore.get());
 audio.setVoiceLang(settingsStore.get().voiceLang);
@@ -73,6 +77,8 @@ applyTextSize(settingsStore.get().textSize);
 // 同上：工坊外观的门控也要在**第一帧之前**同步好，否则首帧问的是链的默认值、下一帧才改成玩家的选择
 // —— 那是「闪一下再变」，正是这条链存在的理由要避免的那类错（见 portraitChain.js 步骤 0）。
 setAppearanceFirst(settingsStore.get().workshopSkins);
+// 加载源的门控同样要在第一帧之前同步好：一个声明了镜像的包，第一次导入就在开机路径上。
+setSourcesEnabled(settingsStore.get().workshopSources);
 
 /** @param {Partial<ReturnType<typeof sanitizeSettings>>} patch */
 export function updateSettings(patch) {
@@ -344,6 +350,8 @@ export function SettingsModal({ open, onClose }) {
       <${Toggle} label=${t('显示伤害数字')} micro="DAMAGE NUMBERS" value=${s.damageNumbers} onChange=${(v) => updateSettings({ damageNumbers: v })} />
       <${Toggle} label=${t('工坊外观')} micro="WORKSHOP SKINS" value=${s.workshopSkins} onChange=${(v) => updateSettings({ workshopSkins: v })} />
       <p class="set-hint">${t('工坊外观由已加载的包提供，缺哪一套时回落原版立绘。')}</p>
+      <${Toggle} label=${t('工坊素材源')} micro="WORKSHOP LOAD SOURCES" value=${s.workshopSources} onChange=${(v) => updateSettings({ workshopSources: v })} />
+      <p class="set-hint">${t('工坊素材源由已加载的包声明；关掉后一律从包内取。')}</p>
       <div class="set-row">
         <span class="set-row__label">${t('画面质量')}<${MicroLabel}>QUALITY<//></span>
         <div class="set-seg" role="radiogroup">

@@ -723,7 +723,7 @@ describe('keyboard & settings', () => {
   test('sanitizeSettings', () => {
     assert.deepEqual(sanitizeSettings(null), { ...DEFAULT_SETTINGS });
     assert.deepEqual(sanitizeSettings({ bgm: 3, sfx: -1, voice: 2, muted: 'yes', damageNumbers: false, quality: 'ultra' }),
-      { bgm: 1, sfx: 0, voice: 1, muted: false, damageNumbers: false, workshopSkins: true, quality: 'high', textSize: 'sm', keys: { ...DEFAULT_SETTINGS.keys }, voiceLang: DEFAULT_VOICE_LANG, voiceLangByChar: {} },
+      { bgm: 1, sfx: 0, voice: 1, muted: false, damageNumbers: false, workshopSkins: true, workshopSources: true, quality: 'high', textSize: 'sm', keys: { ...DEFAULT_SETTINGS.keys }, voiceLang: DEFAULT_VOICE_LANG, voiceLangByChar: {} },
       'a saved profile without `keys` (before 0.2.0) gets the default key map (test/ui/feedback5-hotkeys.test.js)');
     // 工坊外观 (workshopSkins): a boolean, default ON, and only a real boolean survives — a hand-edited
     // localStorage must not turn the gate into something the chain reads as "off" by accident.
@@ -732,6 +732,14 @@ describe('keyboard & settings', () => {
     assert.equal(sanitizeSettings({ workshopSkins: false }).workshopSkins, false, 'explicitly off survives (the hard acceptance point)');
     for (const bad of ['yes', 'false', 0, 1, null, {}]) {
       assert.equal(sanitizeSettings({ workshopSkins: bad }).workshopSkins, true, `junk ${JSON.stringify(bad)} falls back to the default`);
+    }
+    // 工坊素材源 (workshopSources, DESIGN §28.40): the same three properties, for the same reason — a hand-edited
+    // localStorage must not turn the mirror gate into something `resources/sources.js` reads as "off" by accident.
+    assert.equal(DEFAULT_SETTINGS.workshopSources, true, 'default on: a declared mirror that is never used is worse');
+    assert.equal(sanitizeSettings({ bgm: 0.5 }).workshopSources, true, 'a profile saved before the setting existed');
+    assert.equal(sanitizeSettings({ workshopSources: false }).workshopSources, false, 'explicitly off survives (the one-click rollback)');
+    for (const bad of ['yes', 'false', 0, 1, null, {}]) {
+      assert.equal(sanitizeSettings({ workshopSources: bad }).workshopSources, true, `junk ${JSON.stringify(bad)} falls back to the default`);
     }
     // 配音语言 (v0.7.1): a profile saved before it existed falls back to 默认配音 (DEFAULT_VOICE_LANG) and no per-operator overrides
     assert.equal(sanitizeSettings({ bgm: 0.5 }).voiceLang, DEFAULT_VOICE_LANG);

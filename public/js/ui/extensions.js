@@ -60,6 +60,9 @@ import { t } from '../../../shared/i18n.js';
 import { validateC2S } from '../../../shared/protocol.js';
 // 立绘解析链的**唯一 hook**（皮肤层第 1 步）：核心只认识「有一个函数可能回答这个 id」，不认识「皮肤」。
 import { setAppearanceLookup, clearAppearanceLookup } from './portraitChain.js';
+// 素材加载源的**排序面**（DESIGN §28.40）：与外观提供者逐字同构的一条注册链 —— 一个提供者、最多一个、点名拒绝。
+// 这个模块没有依赖（不 import common.js/bundle.js），所以面板这条路不因为多了它而变重。
+import { setSourceOrder, clearSourceOrder } from '../resources/sources.js';
 // 引擎已经定义好的服务端→客户端类型（`shared/protocol.js S2C`）。**不在这里抄一份**：抄一份就是第二个会漂的真相，
 // 而漂的方向是「一个面板订阅了一个引擎其实不会发的名字」—— 那正是这一层到处在拒绝的形态。
 import { S2C } from '../../../shared/protocol.js';
@@ -576,6 +579,13 @@ export function createPanelRegistry(deps) {
   let appearanceRefused = false;
 
   /**
+   * 已经注册的**素材加载源**提供者（`<包>/<面板id>`）或 null；`sourcesRefused` 记「有人想注册但被拒」。
+   * 与上面那一对逐条同构，理由见 `registerSources`。见 DESIGN §28.40。
+   */
+  let sourcesProvider = null;
+  let sourcesRefused = false;
+
+  /**
    * 一个模块导出了 `appearance(ctx)` 时，把它接进解析链。
    *
    * 顺序：先 import，再这里，最后才是 `mount` —— 外观在**第一帧之前**就位，否则首帧画的是原版、下一帧才跳过去
@@ -610,6 +620,53 @@ export function createPanelRegistry(deps) {
       return false;
     }
     appearanceProvider = rec.key;
+    return true;
+  }
+
+  /**
+   * **素材加载源**的提供者（`sources(ctx)`，DESIGN §28.40）—— 与 `registerAppearance` **逐条同构**，因为它们是同一
+   * 张表面的两半：`pack.json.assets.mirrors[]` 说「哪些镜像被允许」，这个提供者只说「先试哪一条」。
+   *
+   * 四条性质，逐条照抄外观那条（差异只有一处，写在最后）：
+   *   * **顺序**：import 之后、`mount` 之前 —— 一条只提供加载源、不挂界面的模块也该生效（与「只提供外观」同族）；
+   *   * **最多一个**：后注册者被点名拒绝（`CLIENT_SOURCES_TAKEN`）——「哪台主机先说话」不许取决于 import 顺序；
+   *   * **失败一律点名**：抛错 `CLIENT_SOURCES_THREW`、没有 `order` 成员 `CLIENT_SOURCES_BAD_SHAPE`；
+   *   * **不导出 `sources` 时不是失败**（返回 `true`）：那是「这个面板不管加载源」，是绝大多数面板。
+   *
+   * **唯一的差异**：这里收的**不是一个能被调用的值，而是一个函数**。外观那条收到的是 `lookup`，因为链每一帧要拿它
+   * 回答一次「这个干员画哪一张」；加载源这条一次导入只问一次「先试哪一条」，所以注册的是一个纯函数，由
+   * `resources/sources.js orderDeclared()` 在**导入那一刻**调用，并且**只接受已声明 id 的排列/子集** ——
+   * 一个主机名或 URL 在那里被拒（`CLIENT_SOURCES_BAD_ORDER`）。于是「包能改加载源」与「包不能指定任意主机」这两句话
+   * 同时成立，而后者是**结构性**的：这个注册面没有位置写下任何地址。
+   * @param {any} rec @param {any} mod
+   * @returns {boolean} 是否成功建立（没有导出 `sources` 时返回 true：那是「这个面板不提供加载源」）
+   */
+  function registerSources(rec, mod) {
+    const fn = mod && typeof mod.sources === 'function' ? mod.sources : null;
+    if (!fn) return true;
+    if (sourcesProvider) {
+      sourcesRefused = true;
+      refuse('CLIENT_SOURCES_TAKEN', `panel "${rec.key}" exports sources(ctx) but "${sourcesProvider}" already provides one — at most ONE load-source provider may be active (which mirror speaks first must not depend on import order)`);
+      return false;
+    }
+    let provided;
+    try {
+      // `ctx` 与面板同一份（同一个边界：没有 store / match / battle）
+      provided = fn(panelContext(rec, null, null));
+    } catch (err) {
+      refuse('CLIENT_SOURCES_THREW', `panel "${rec.key}" threw in sources(ctx): ${err && err.message ? err.message : String(err)}`);
+      return false;
+    }
+    const order = provided && typeof provided.order === 'function' ? provided.order : null;
+    if (!order) {
+      refuse('CLIENT_SOURCES_BAD_SHAPE', `panel "${rec.key}" sources(ctx) must return { order(mirrors) } (got ${provided === null ? 'null' : typeof provided}) — the mirrors themselves are declared in pack.json, never here`);
+      return false;
+    }
+    if (!setSourceOrder(order, rec.key)) {
+      refuse('CLIENT_SOURCES_TAKEN', `panel "${rec.key}" could not register its load-source provider`);
+      return false;
+    }
+    sourcesProvider = rec.key;
     return true;
   }
 
@@ -1216,12 +1273,15 @@ export function createPanelRegistry(deps) {
     // 外观提供者（皮肤层第 2 步）：**在 mount 之前**接进解析链，否则首帧画原版、下一帧才跳过去。
     // 它不依赖宿主是否渲染出来，所以放在 factory 判定之前 —— 一个只提供外观、不挂任何界面的模块也该生效。
     registerAppearance(rec, mod);
+    // 素材加载源提供者（§28.40）：同一条理由、同一个位置 —— 「先试哪一条镜像」要在**第一次导入之前**就位，
+    // 否则第一次导入走的是声明顺序、第二次才按玩家选的来（同一件事两个结果）。
+    registerSources(rec, mod);
     const factory = mod && typeof mod.mount === 'function' ? mod.mount
       : (mod && typeof mod.default === 'function' ? mod.default : null);
     if (!factory) {
-      // 一个**只提供外观**的模块（导出 `appearance` 而没有 `mount`）不是错误：它已经完成了它要做的事。
-      // 其余情况仍旧点名（`CLIENT_PANEL_NO_MOUNT`）—— 声明了要挂却挂不上，必须响亮。
-      if (appearanceProvider === rec.key) return false;
+      // 一个**只提供外观 / 只提供加载源**的模块（导出 `appearance` / `sources` 而没有 `mount`）不是错误：它已经
+      // 完成了它要做的事。其余情况仍旧点名（`CLIENT_PANEL_NO_MOUNT`）—— 声明了要挂却挂不上，必须响亮。
+      if (appearanceProvider === rec.key || sourcesProvider === rec.key) return false;
       mounted.delete(mk);
       blocked.add(mk);
       refuse('CLIENT_PANEL_NO_MOUNT', `panel "${rec.key}" (${rec.url}) must export mount(ctx) (or default-export that function)`);
@@ -1415,6 +1475,19 @@ export function createPanelRegistry(deps) {
      */
     appearance: () => ({ providedBy: appearanceProvider, refused: appearanceRefused }),
     /**
+     * 素材加载源的提供者（`sources(ctx)`，DESIGN §28.40）。三条与 `appearance` 逐字相同：
+     *   * **进程内最多一个**：后注册者被**点名拒绝**（`CLIENT_SOURCES_TAKEN`）——「哪台主机先说话」不能有歧义；
+     *   * **注册进排序面的唯一 hook**（`resources/sources.js setSourceOrder`）：那个模块认识「一个函数」，**不**
+     *     认识「有哪些主机」—— 主机只在 `pack.json.assets.mirrors[]`，且每一条都在装载期与包内容器摘要比对过；
+     *   * **没有提供者时导入路径与今天逐字相同**（`orderDeclared` 不调用任何东西，按声明顺序；一个没声明
+     *     `mirrors` 的包连这一步都不到）。
+     *
+     * 与 `appearance` 唯一的不同写在 `registerSources` 里：这里注册的是**函数**而不是一张查找表，因为「先试哪一条」
+     * 一次导入只问一次，而不是每一帧问一次。
+     * @returns {{ providedBy: string|null, refused: boolean }}
+     */
+    sources: () => ({ providedBy: sourcesProvider, refused: sourcesRefused }),
+    /**
      * 包写的主题变量（`welcome.modTheme`, 业主裁决 2026-10-10）：写 CSS 自定义属性，**加法**语义 —— 只写这几个名字，
      * 不动任何规则、不替换任何样式表。原值记下来，`dispose()` 时按名字恢复。
      *
@@ -1453,6 +1526,10 @@ export function createPanelRegistry(deps) {
       // 已经拆掉的模块的函数 —— 那会让立绘继续解析到一套已经没人管的素材上。
       clearAppearanceLookup();
       appearanceProvider = null;
+      // 加载源提供者同一条理由：排序面回到「没有 hook」那条路径，而不是留着一个指向已经拆掉的模块的函数 ——
+      // 那会让下一次导入按一个没人再维护的顺序去试镜像。
+      clearSourceOrder();
+      sourcesProvider = null;
       for (const [, el] of hosts) {
         if (el && typeof el.remove === 'function') el.remove();
       }

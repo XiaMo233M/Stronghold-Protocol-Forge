@@ -207,12 +207,32 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
         errors.push({ pack: name, reason: `${gateIssues[0].code}: ${gateIssues[0].reason}` });
         continue;
       }
+      // `assets.mirrors[]`（DESIGN §28.40）：作者自备 CDN 承载**本包自己的容器**，所以每条镜像声明的 `sha256`
+      // 必须等于**刚才从包内文件算出来的**那一份摘要。不相等的那条**停用**，而不是拒绝整个包 —— 包本身完整
+      // 可用，服务端算出来的摘要才是真相，这正是 §28.35「宁少不拒」在装载期的同一条姿态（静态 routes 撞上核心
+      // 时也不拒包）。停用必须响亮：进 `errors`，`loadWorkshop` 的调用方逐条 warn 点名。
+      //
+      // **服务端一次网络请求都不发**：这里只做「声明与字节是否同一份」的比对，取字节的是客户端。所以没有服务端
+      // 超时、没有服务端缓存目录、没有启动期阻塞（与 `voiceCdn` 相反，理由见 `shared/workshop.js` 那一格）。
+      const mirrorIssues = assetsMirrorIssues(manifest.pack, assetIssues.digest);
+      for (const mi of mirrorIssues) errors.push({ pack: name, reason: `${mi.code}: ${mi.reason}` });
+      // 停用的那几条从**交给客户端的声明**上摘掉（`welcome.modAssets[].mirrors`），否则客户端会拿到一条永远不会
+      // 被采用的地址。注意 `identifyPack` 仍然哈希 `manifest.pack`（**声明**，含被停用的那条）：身份哈希的是作者
+      // 写下的东西，不是这一次的运行时裁决 —— 否则一条镜像某天失效就会静默换掉包身份，房间摘要跟着漂。
+      /** @type {Array<{ id: string }>} */
+      const droppedMirrors = mirrorIssues.map((mi) => mi.id);
+      const advertisedAssets = !droppedMirrors.length || !manifest.pack.assets
+        ? manifest.pack.assets
+        : { ...manifest.pack.assets, mirrors: (manifest.pack.assets.mirrors || []).filter((m) => !droppedMirrors.includes(m.id)) };
       // 容器的 sha256 在这里已经算过（`assetsIssues` 流式读过一遍），所以把它随包带出去：服务面（HTTP 头
       // `X-SP-Resource-Sha256`、`welcome.modAssets[].digest`）要用同一个值，重启时不该为几百 MB 再算第二遍。
       // 没声明 `assets` 的包这个键缺席，与 B2 一样「声明了才有」；同时它进**身份哈希**（见 `identifyPack`）：
       // 「同一个房间摘要 ⇒ 同一份容器」这条对齐就是靠那一步成立的。
       packs.push({
-        ...manifest.pack, dir: packDir, files,
+        ...manifest.pack,
+        // 只有真的停用过镜像时才覆盖这一格：没有 `mirrors` 的包（今天所有的包）这一份对象与从前逐字相同。
+        ...(advertisedAssets !== manifest.pack.assets ? { assets: advertisedAssets } : {}),
+        dir: packDir, files,
         ...identifyPack(packDir, manifest.pack, files, { assetsDigest: assetIssues.digest }),
         ...(assetIssues.digest ? { assetsDigest: assetIssues.digest } : {}),
       });
@@ -398,6 +418,52 @@ export function assetsIssues(pack, packDir) {
     return { issues, digest: null, containerAbs, manifestAbs };
   }
   return { issues, digest: declared, containerAbs, manifestAbs };
+}
+
+/**
+ * The **load-time half of the `assets.mirrors` declaration** (DESIGN §28.40): every mirror's declared `sha256` must
+ * equal the digest of the container **inside the pack**.
+ *
+ * The asymmetry with `assetsIssues` above is deliberate and is the whole point of this channel:
+ *   * a wrong container path or an unverifiable container refuses **the whole pack** (§28.13.3 — the pack believes it
+ *     ships resources and it does not);
+ *   * a mirror whose digest does not match refuses **only that mirror** — the pack is intact, the bytes it ships are
+ *     intact, and the author simply pointed one download address at the wrong bytes. §28.35 took the same posture for a
+ *     `pack.json.routes` declaration that collides with a core mount: name it loudly, drop the declaration, keep the pack.
+ *
+ * No network request is made here and none is made anywhere else on the server for this channel: whether those bytes
+ * really hash to that digest is decided by the **client** when it fetches them (`public/js/resources/verify.js
+ * verifyContainerBytes` + the per-file SHA-1[0:12] pass in `bundle.js`). This function only answers "is the author's
+ * declared mirror a claim about *these* bytes".
+ * @param {{ assets?: { mirrors?: Array<{ id: string, base: string, sha256: string }> } }|null} pack normalized manifest
+ * @param {string|null} digest the container's own sha256 (`assetsIssues`), or null when there is none to compare against
+ * @returns {Array<{ id: string, code: string, reason: string }>} one entry per mirror that must not be used
+ */
+export function assetsMirrorIssues(pack, digest) {
+  /** @type {Array<{ id: string, code: string, reason: string }>} */
+  const out = [];
+  const mirrors = pack && pack.assets && Array.isArray(pack.assets.mirrors) ? pack.assets.mirrors : [];
+  if (!mirrors.length) return out;
+  const known = typeof digest === 'string' && /^[0-9a-f]{64}$/.test(digest) ? digest : null;
+  for (const m of mirrors) {
+    if (!m || typeof m.id !== 'string') continue;
+    if (!known) {
+      out.push({
+        id: m.id,
+        code: 'ASSETS_MIRROR_NO_DIGEST',
+        reason: `assets.mirrors["${m.id}"] cannot be used: this pack's own container digest was not established, so there is nothing to compare its declared sha256 against`,
+      });
+      continue;
+    }
+    if (m.sha256 !== known) {
+      out.push({
+        id: m.id,
+        code: 'ASSETS_MIRROR_DIGEST_MISMATCH',
+        reason: `assets.mirrors["${m.id}"].sha256 is ${String(m.sha256)}, but the container inside the pack hashes to ${known} — a mirror may only serve the very bytes this pack ships, so this mirror is disabled`,
+      });
+    }
+  }
+  return out;
 }
 
 /**

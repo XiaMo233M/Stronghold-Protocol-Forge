@@ -975,7 +975,10 @@ export function mount(ctx) {
   "container": "packs/resources-0.1.0.spresources",  // 包内相对路径，必须是 .spresources，不能是别的扩展名
   "manifest":  "resource-manifest.json",             // 包内相对路径，必须是 .json
   "serverPolicy": "serve",                            // "serve"（缺省）| "cache-only"，见下
-  "verify": "sha256"                                  // 整包摘要的算法；缺省 sha256，今天只有这一种
+  "verify": "sha256",                                 // 整包摘要的算法；缺省 sha256，今天只有这一种
+  "mirrors": [                                        // 可选：作者自备 CDN 承载**本包自己的容器**（§1.21）
+    { "id": "fast", "base": "https://你的域名/ak/resources-0.1.0/", "sha256": "<64 位小写 hex>" }
+  ]
 }
 ```
 
@@ -1912,6 +1915,83 @@ node --test test/packForms.test.js
 `e4fe4d5cf0a0` 的 `training` 一段真正想做的那件事）不在本刀，需要另外立项。
 
 完整规范见 [docs/design/mod-layer.md](design/mod-layer.md) §28.39。
+
+### 1.21 素材加载源：`assets.mirrors[]` + `sources(ctx)`（第 5 刀，`0.16.0`）
+
+「让包真的换掉取素材字节的主机」由**两半**组成，拆开任一半都不成立：**`assets.mirrors[]` 说哪些镜像被允许**，
+**面板模块导出的 `sources(ctx)` 说先试哪一条**。
+
+#### 声明（数据那一半）
+
+```jsonc
+"assets": {
+  "container": "packs/resources-0.1.0.spresources",
+  "manifest": "resource-manifest.json",
+  "license": "CC0-1.0",                     // 声明了 mirrors 就**必须**写（ASSETS_MIRROR_NEEDS_LICENSE）
+  "mirrors": [
+    { "id": "fast", "base": "https://你的域名/ak/resources-0.1.0/", "sha256": "<64 位小写 hex>" },
+    { "id": "backup", "base": "https://另一台/ak/", "sha256": "<同上，必须一样>" }
+  ]
+}
+```
+
+| 位置 | 判据 | 拒绝码 |
+|---|---|---|
+| `mirrors` 整体 | 非空数组，至多 **4** 条 | `ASSETS_MIRROR_BAD_SHAPE` / `ASSETS_MIRROR_TOO_MANY` |
+| 条目字段 | 只有 `id` / `base` / `sha256` | `ASSETS_MIRROR_UNKNOWN_FIELD` |
+| `id` | 小写字母开头，`a-z0-9_-`，≤ 32；不许重复 | `ASSETS_MIRROR_BAD_ID` / `ASSETS_MIRROR_DUPLICATE_ID` |
+| `base` | **绝对 `https://`**、有主机、无凭据、无查询、无片段、**以 `/` 结尾** | `ASSETS_MIRROR_BAD_BASE` |
+| `sha256` | 64 位小写 hex | `ASSETS_MIRROR_BAD_DIGEST` |
+| 与包内字节的关系 | 必须**等于**装载期从包内容器算出的摘要 | `ASSETS_MIRROR_DIGEST_MISMATCH`（**停用那条镜像**，包照旧加载） |
+| `license` | 声明了 `mirrors` 就必须有 | `ASSETS_MIRROR_NEEDS_LICENSE` |
+
+地址拼法是 `<base><包内文件名>`（`base` 的那条尾斜杠就是为此）。**只镜像本包自己的容器**：`mirrors` 里的 `base`
+不会影响 `/assets/**` 从哪来 —— 那两棵树照旧由服务器（或 `cache-only` 下的引擎 SW）回答。理由是硬事实：
+`data/assets.json` 只有清单级摘要、**没有逐文件摘要**，一条镜像清单的哈希锁不住它指向的那些图；把整棵官方素材树
+交给第三方主机也正是「不分发官方素材」那条红线要拦的事；而且坏一个镜像就等于全站素材出问题，收窄之后只影响一个包。
+
+#### 提供者那一半（`sources(ctx)`）
+
+一个面板模块（`client.panels[].module`）可以导出 `sources(ctx)`，返回 `{ order(mirrors) }`：
+
+```js
+export function sources(ctx) {
+  return {
+    order(mirrors) {                       // mirrors：已声明镜像的只读列表 [{ id, base, sha256 }]
+      return [...mirrors].map((m) => m.id).sort();   // 只回 **id** 的排列或子集
+    },
+  };
+}
+```
+
+- **只许回已声明的 id**（排列或子集）。喂一个主机名、一条 URL、一个没声明过的 id ⇒ `CLIENT_SOURCES_BAD_ORDER`，
+  **整条顺序作废**、回落声明顺序。这不是一条约定，是这一格的结构：注册面没有位置写下地址。
+- 进程内**最多一个**提供者（`CLIENT_SOURCES_TAKEN`）；抛错 `CLIENT_SOURCES_THREW`；没有 `order` 成员
+  `CLIENT_SOURCES_BAD_SHAPE`；返回 promise `CLIENT_SOURCES_ASYNC`；返回 `null` = 「我没什么可排的」。
+- 一个**只导出 `sources`、不 `mount`** 的模块是合法的（它已经做完了要做的事）。
+- 排序是给「现场测速挑源」这类策略用的：把测得的次序用 `ctx.session.setPref` 记下来，下次直接回那个次序。
+
+#### 导入次序（硬性，作者不用管，但必须知道）
+
+1. 逐条镜像：取清单 → 取容器 → **先核整包 sha256**（必须真的算过且对得上）→ 过了才走**既有**的逐文件
+   SHA-1[0:12] 导入与写缓存；
+2. 任何一步不过 ⇒ **那条镜像作废、换下一条**；
+3. 全部不行 ⇒ **回落包内那条 `/workshop-resources/…` URL**，并在日志与返回值里**点名**
+   （`CLIENT_SOURCES_FALLBACK`，面板可以据此显示降级）。**绝不静默，也绝不空白。**
+
+**如实说清的一条限制**：容器大于 **256 MiB** 时用不了镜像（浏览器没有流式摘要接口），那种包只能走包内；
+不设这条线就等于「不核摘要也导入」。
+
+#### 玩家侧：一键回退
+
+设置 →「工坊素材源」（默认**开**）。关掉之后，导入走的与「这个包没声明 `mirrors`」**完全同一条**路径，镜像那条
+URL **一次都不被请求**。一个包把加载源改坏了，关掉这一格就回到原样。
+
+**默认逐字节不变**：不声明 `mirrors` 的包 —— 归一化清单里没有这个键、`welcome.modAssets` 里没有这个字段、
+请求的 URL 与次序与从前逐字相同、引擎 SW 一行未改。`MOD_API_VERSION` 仍是 **1**（加一格字段不抬版本），
+**不要求 `combat: true`**（它改的是「哪台主机送同一份已校验字节」，改不了对局结果）。
+
+完整规范见 [docs/design/mod-layer.md](design/mod-layer.md) §28.40。
 
 ---
 

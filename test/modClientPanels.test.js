@@ -32,6 +32,8 @@ import {
   MOD_PANEL_SLOTS, MOD_PANEL_PREFIX, MOD_PANEL_REQUIRES,
 } from '../public/js/ui/extensions.js';
 import { portraitEntry, clearAppearanceLookup, currentAppearanceLookup } from '../public/js/ui/portraitChain.js';
+// 素材加载源的排序面（第 5 刀，DESIGN §28.40）：与外观提供者同族的另一块注册面，见下面 4c 那一组。
+import { orderDeclared, currentSourceOrderer, resetSourcesState, setSourcesEnabled } from '../public/js/resources/sources.js';
 import { TestClient } from './helpers/wsClient.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -763,6 +765,119 @@ describe('外观提供者：一个进程最多一个，接进解析链', () => {
     h.registry.dispose();
     assert.equal(currentAppearanceLookup(), undefined, 'dispose 之后回到与今天逐字相同的链');
     assert.equal(h.registry.appearance().providedBy, null);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// 4c. 素材加载源的提供者（第 5 刀，DESIGN §28.40）：与 4b 那一条**逐条同构**，但这一格只排**已声明的**镜像
+//     ——「包能改加载源」与「包不能指名任意主机」两句话同时成立，而后者是结构性的：注册面没有位置写下地址。
+//     地址在 `pack.json.assets.mirrors[]`（装载期已与包内容器摘要比对过，见 test/modAssetsMirrors.test.js）。
+// ---------------------------------------------------------------------------------------------------
+describe('加载源提供者：一个进程最多一个，只排序、不点名主机', () => {
+  const URL_S1 = `${MOD_PANEL_PREFIX}alpha/src1.js?v=1`;
+  const URL_S2 = `${MOD_PANEL_PREFIX}beta/src2.js?v=1`;
+  const DECLARED = Object.freeze([
+    Object.freeze({ id: 'a', base: 'https://a.example/', sha256: 'a'.repeat(64) }),
+    Object.freeze({ id: 'b', base: 'https://b.example/', sha256: 'a'.repeat(64) }),
+  ]);
+
+  test('模块导出 sources(ctx) ⇒ 接进排序面；sources() 报出是谁提供的', async () => {
+    resetSourcesState();
+    const h = harness({
+      modules: new Map([[URL_S1, {
+        // 只提供加载源、不挂界面 —— 合法形态（与「只提供外观」同族）
+        sources: () => ({ order: (mirrors) => mirrors.map((m) => m.id).reverse() }),
+      }]]),
+    });
+    h.apply([wire({ url: URL_S1 })]);
+    await settle();
+    assert.deepEqual(h.registry.refusals(), [], '0 拒绝');
+    assert.equal(h.registry.sources().providedBy, 'alpha/p1');
+    assert.equal(currentSourceOrderer(), 'alpha/p1');
+    assert.deepEqual(orderDeclared(DECLARED), { ids: ['b', 'a'], refusals: [] }, '排序面真的走了它');
+  });
+
+  test('**喂一个主机名 / URL 进去必须被拒** —— 面板这条路也没有位置引入主机', async () => {
+    resetSourcesState();
+    const h = harness({
+      modules: new Map([[URL_S1, { sources: () => ({ order: () => ['https://evil.example/'] }) }]]),
+    });
+    h.apply([wire({ url: URL_S1 })]);
+    await settle();
+    // 注册本身合法（那是一个函数），但**顺序**整条作废，并点名 —— 恶意的那个字符串排不出任何地址来。
+    assert.equal(h.registry.sources().providedBy, 'alpha/p1');
+    const out = orderDeclared(DECLARED);
+    assert.deepEqual(out.ids, ['a', 'b'], '整条顺序作废，回落声明顺序');
+    assert.equal(out.refusals[0].code, 'CLIENT_SOURCES_BAD_ORDER');
+  });
+
+  test('第二个提供者被点名拒绝（哪台主机先说话不能取决于加载次序）', async () => {
+    resetSourcesState();
+    const h = harness({
+      modules: new Map([
+        [URL_S1, { sources: () => ({ order: () => ['a'] }), mount: () => ({ unmount() {} }) }],
+        [URL_S2, { sources: () => ({ order: () => ['b'] }), mount: () => ({ unmount() {} }) }],
+      ]),
+    });
+    h.apply([
+      wire({ id: 'p1', pack: 'alpha', url: URL_S1, order: 0 }),
+      wire({ id: 'p2', pack: 'beta', url: URL_S2, order: 1 }),
+    ]);
+    await settle();
+    const refused = h.registry.refusals();
+    assert.equal(refused.length, 1, `恰好一条拒绝：${JSON.stringify(refused)}`);
+    assert.equal(refused[0].code, 'CLIENT_SOURCES_TAKEN');
+    assert.match(refused[0].detail, /alpha\/p1/, '理由要点名先来的那个');
+    assert.equal(h.registry.sources().providedBy, 'alpha/p1', '先来的继续有效');
+    assert.deepEqual(orderDeclared(DECLARED).ids, ['a', 'b'], '先来的那个（只留 a）仍然说了算');
+  });
+
+  test('sources 抛异常 / 形状不对 ⇒ 点名拒绝，排序面不受影响', async () => {
+    resetSourcesState();
+    const URL_BAD = `${MOD_PANEL_PREFIX}alpha/sbad.js?v=1`;
+    const URL_SHAPE = `${MOD_PANEL_PREFIX}alpha/sshape.js?v=1`;
+    const h1 = harness({ modules: new Map([[URL_BAD, { sources: () => { throw new Error('boom'); } }]]) });
+    h1.apply([wire({ url: URL_BAD })]);
+    await settle();
+    assert.equal(h1.registry.refusals()[0].code, 'CLIENT_SOURCES_THREW');
+    assert.equal(h1.registry.sources().providedBy, null);
+    const h2 = harness({ modules: new Map([[URL_SHAPE, { sources: () => ({ list: () => [] }) }]]) });
+    h2.apply([wire({ url: URL_SHAPE })]);
+    await settle();
+    assert.equal(h2.registry.refusals()[0].code, 'CLIENT_SOURCES_BAD_SHAPE', '必须有 order');
+    assert.equal(currentSourceOrderer(), null);
+  });
+
+  test('不导出 sources 的面板一切照旧（这是绝大多数）', async () => {
+    resetSourcesState();
+    const h = harness({ modules: new Map([[URL_S1, { mount: () => ({ unmount() {} }) }]]) });
+    h.apply([wire({ url: URL_S1 })]);
+    await settle();
+    assert.deepEqual(h.registry.refusals(), []);
+    assert.equal(h.registry.sources().providedBy, null);
+    assert.equal(currentSourceOrderer(), null, '排序面上没有 hook ⇒ 导入按声明顺序');
+  });
+
+  test('dispose 把提供者收回去：排序面回到「没有 hook」', async () => {
+    resetSourcesState();
+    const h = harness({ modules: new Map([[URL_S1, { sources: () => ({ order: () => ['b'] }) }]]) });
+    h.apply([wire({ url: URL_S1 })]);
+    await settle();
+    assert.equal(currentSourceOrderer(), 'alpha/p1');
+    h.registry.dispose();
+    assert.equal(currentSourceOrderer(), null, 'dispose 之后下一次导入按声明顺序');
+    assert.equal(h.registry.sources().providedBy, null);
+  });
+
+  test('门控（设置里的「工坊素材源」）关掉时，注册面照旧、但「一次都不问」由调用方那一个 if 保证', async () => {
+    resetSourcesState();
+    const h = harness({ modules: new Map([[URL_S1, { sources: () => ({ order: () => ['b'] }) }]]) });
+    h.apply([wire({ url: URL_S1 })]);
+    await settle();
+    setSourcesEnabled(false);
+    assert.equal(currentSourceOrderer(), 'alpha/p1', '关掉门控不注销提供者（它只是不再被问到）');
+    setSourcesEnabled(true);
+    resetSourcesState();
   });
 });
 

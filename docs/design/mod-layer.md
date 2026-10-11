@@ -23,8 +23,8 @@ The owner's ruling of 2026-10-09 fixes three layers:
 
 | layer | what it is | who executes it | when it may change a battle result |
 |---|---|---|---|
-| **A** content | declarative data, no code: the workshop pack of today (`shared/workshop.js:972` `applyWorkshop`) | nobody — it is merged into the data every consumer reads (`server/data.js:92`) | always, and never detectably by the golden corpus (the corpus is generated from the official `data/*.json`, `test/golden/README.md:8-10`) |
-| **B** server logic | hooks and kits: the code of `workshop/<pack>/kits/<id>.js` (`server/workshop.js:350` `loadWorkshopKits`) — one file-name rule over **two key spaces**, operator and summon (§28.12.1) | **the server only** — this is new | only through the hooks it registers, and only after a declared intent passes deterministic verification |
+| **A** content | declarative data, no code: the workshop pack of today (`shared/workshop.js:1067` `applyWorkshop`) | nobody — it is merged into the data every consumer reads (`server/data.js:92`) | always, and never detectably by the golden corpus (the corpus is generated from the official `data/*.json`, `test/golden/README.md:8-10`) |
+| **B** server logic | hooks and kits: the code of `workshop/<pack>/kits/<id>.js` (`server/workshop.js:370` `loadWorkshopKits`) — one file-name rule over **two key spaces**, operator and summon (§28.12.1) | **the server only** — this is new | only through the hooks it registers, and only after a declared intent passes deterministic verification |
 | **C** client UI | rendering, themes, panels | the player's tab | never |
 
 Two sentences in the repository already fix the constraints this design must satisfy at once, and they are currently
@@ -50,9 +50,9 @@ is, who wins when two of them want the same id, and what has to be true before i
 
 ### 28.2 Identity (gap 1)
 
-Today a pack has an `id` (the directory name, `shared/workshop.js:302-304`) and free-text metadata
-(`shared/workshop.js:540-546`), and the BattleSpec carries only `SPEC_VERSION = 1` (`server/sim/spec.js:39`, written at
-`:61`) plus a list of kit **URLs** (`server/sim/spec.js:79-81`; produced by `server/workshop.js:405`). There is nowhere
+Today a pack has an `id` (the directory name, `shared/workshop.js:331-333`) and free-text metadata
+(`shared/workshop.js:635-641`), and the BattleSpec carries only `SPEC_VERSION = 1` (`server/sim/spec.js:39`, written at
+`:61`) plus a list of kit **URLs** (`server/sim/spec.js:79-81`; produced by `server/workshop.js:471`). There is nowhere
 in the wire, in the data or in the match for "which content is this room running".
 
 **The tuple.** One record, one shape, one place:
@@ -69,10 +69,10 @@ what `welcome`, `/healthz`, the BattleSpec and a bug report all quote, so four d
 **What participates in the hash.** Not "the directory": a manifest of `(relative path, sha256)` pairs, sorted by path,
 over exactly the bytes the loader reads and the browser will be served:
 
-1. `pack.json` — hashed **after** `normalizePackManifest` (`shared/workshop.js:303`), so the hash covers the pack's
+1. `pack.json` — hashed **after** `normalizePackManifest` (`shared/workshop.js:332`), so the hash covers the pack's
    effective declaration (normalized `overrides`, `content`, icon tables, `art`, `support`, `voices`), not its
    whitespace. Two spellings of the same pack then hash the same, and a declaration the loader silently dropped
-   (`shared/workshop.js:1573-1575` filters a malformed `overrides` entry in silence today) cannot hide behind the hash.
+   (`shared/workshop.js:1668-1670` filters a malformed `overrides` entry in silence today) cannot hide behind the hash.
 2. every declared content file, after `normalizeContentFile` — the same normalized records the loader merges.
 3. **every other regular file under the pack directory** — its bytes, byte for byte. That is `kits/**`, `assets/**`, the
    declared panel modules and stylesheets, the `server.meta` / `battle` / `room` / `modules[*].entry` modules, the i18n
@@ -82,7 +82,7 @@ over exactly the bytes the loader reads and the browser will be served:
 
 **The one enumerator, and why there is exactly one** (业主裁决 B, 2026-10-11). "Which files does this pack have" is one
 function, `server/packFiles.js listPackFiles` (`:42`): recursive, sorted by path, symlinks neither followed nor listed,
-`[]` when the directory is not there. `identifyPack` (`server/workshop.js:825`) builds the manifest from it, and
+`[]` when the directory is not there. `identifyPack` (`server/workshop.js:891`) builds the manifest from it, and
 `server/modCatalog.js catalogFiles` (`:174`) refuses to publish a row the same call does not return. **The list the pack
 hash is taken over IS the client's download list** (`GET /mods/catalog.json`, §28.9): one list, two consumers, so the two
 cannot drift. The failure B was decided to remove is not "the digest is a little off": a file that a declared module
@@ -112,7 +112,7 @@ hash too. Before this, `catalogFiles` dropped that row (its file read failed), s
 is complete" and "the download list looks complete".
 
 What deliberately does **not** participate: the mtime "version" that currently versions kit URLs
-(`server/workshop.js:394` — a version credential that is not a content hash, and the reason `docs/WORKSHOP.md:447`
+(`server/workshop.js:414` — a version credential that is not a content hash, and the reason `docs/WORKSHOP.md:447`
 records content addressing as unimplemented), the pack directory's absolute path, and any engine code. The last one
 matters and is the answer for the third file the ruling names:
 
@@ -183,19 +183,19 @@ substance; the first step of the slice carries them, `docs/WORKSHOP.md` §1.2 st
 
 | collision | the rule | where it is enforced |
 |---|---|---|
-| a **new** id claimed by two packs — a data record | **refused, and the report names the pack that holds it** (neither author's claim can be preferred) | `shared/workshop.js:1002-1006` (`PACK_ID_COLLISION`, `definedBy`) |
-| a new kit id claimed by two packs | **refused, and the report names the pack that holds it** | `server/workshop.js:372-376` (`KIT_ID_COLLISION`, `definedBy`) |
-| two packs **overriding the same existing record** (an official id, or a record another pack contributed) | **the smaller pack id wins + the conflict is reported** (`definedBy` names the pack that was passed over) | `shared/workshop.js:1002-1006` and `:986-990` |
-| an icon / item icon / art entry claimed by two packs | **the smaller pack id wins**; the loser is reported and named | `shared/workshop.js:1377-1381`, `:1429-1433`, `:1578-1582` |
+| a **new** id claimed by two packs — a data record | **refused, and the report names the pack that holds it** (neither author's claim can be preferred) | `shared/workshop.js:1097-1101` (`PACK_ID_COLLISION`, `definedBy`) |
+| a new kit id claimed by two packs | **refused, and the report names the pack that holds it** | `server/workshop.js:392-396` (`KIT_ID_COLLISION`, `definedBy`) |
+| two packs **overriding the same existing record** (an official id, or a record another pack contributed) | **the smaller pack id wins + the conflict is reported** (`definedBy` names the pack that was passed over) | `shared/workshop.js:1097-1101` and `:986-990` |
+| an icon / item icon / art entry claimed by two packs | **the smaller pack id wins**; the loser is reported and named | `shared/workshop.js:1472-1476`, `:1429-1433`, `:1578-1582` |
 | `overrides` declares the replacement of an **OFFICIAL** id | **allowed, and the declaration is what makes it allowed** | `shared/workshop.js:14-16`, `:986-990` |
-| anything, between two packs | **the smaller pack id wins — on every face** | one comparator: `shared/workshop.js:685` `byPackId` |
+| anything, between two packs | **the smaller pack id wins — on every face** | one comparator: `shared/workshop.js:780` `byPackId` |
 
 Two rules, not three, and they are the only two:
 
 1. **An official record is never replaced without a declaration.** Not negotiable: silently redefining a shipped
    operator would corrupt every match on the server (`shared/workshop.js:14-16`).
 2. **Between two packs, the smaller pack id wins, for every kind of contribution** — data, kit, icon, item icon, art.
-   Equal ids cannot occur: the manifest must equal the directory name (`shared/workshop.js:308` `PACK_ID_MISMATCH`).
+   Equal ids cannot occur: the manifest must equal the directory name (`shared/workshop.js:337` `PACK_ID_MISMATCH`).
    A collision the loser cannot win is *reported and attributed* rather than silently resolved, which is why the data
    and kit faces "refuse" while the icon faces "keep the first": both are the same rule, seen from the side that lost.
 
@@ -209,8 +209,8 @@ back door: the bigger-id pack could take the record by adding one line to `pack.
 Rule 2 needed one comparator, not five implementations. It used to be five: `applyWorkshop` trusted the **array order**
 it was handed, the icon and art paths each re-sorted with their own inline compare, and the kit loader used yet another
 one — they agreed only because the production loader sorts directory names (`server/workshop.js:34-37`) and the manifest
-rule forces `id === directory`. `byPackId` (`shared/workshop.js:685`) is now exported and used by every face, including
-the kit loader (`server/workshop.js:361`), so the winner is a property of the pack ids and not of who called the merge.
+rule forces `id === directory`. `byPackId` (`shared/workshop.js:780`) is now exported and used by every face, including
+the kit loader (`server/workshop.js:381`), so the winner is a property of the pack ids and not of who called the merge.
 The two in-memory callers that can pass any order — the tests, and the editor — no longer decide anything by accident.
 
 **Attribution.** Every collision error carries `{ pack, code, file, id, definedBy, reason }`, where `definedBy` is the
@@ -219,17 +219,17 @@ pack id that holds the record, or the string `official`. The text says the same 
 - official: `"<id>" already exists in the official data — add "<file>:<id>" to pack.json overrides to replace it` (`OFFICIAL_ID_COLLISION`)
 - against another pack: `"<id>" is already contributed by pack "<X>" — the pack with the smaller id keeps it (DESIGN
   §28.3). Rename this record, or let "<X>" drop it; an "overrides" entry does not win against another pack` (`PACK_ID_COLLISION`)
-- kit: `kit "<id>" is already defined by pack "<X>"` (`KIT_ID_COLLISION`, `server/workshop.js:372-376`)
+- kit: `kit "<id>" is already defined by pack "<X>"` (`KIT_ID_COLLISION`, `server/workshop.js:392-396`)
 - icon / art: `another pack (<X>) already ships …` (`ASSET_COLLISION`, with `definedBy` as well)
 
 Why it matters enough to be a section: the data path used to say "**official** data" for both cases, because the
 variable holding "official + every pack merged so far" was called `official` (it is `prior` at
-`shared/workshop.js:932` now). The author's next move was to open `data/chess.json` and look for a record that is not
+`shared/workshop.js:1027` now). The author's next move was to open `data/chess.json` and look for a record that is not
 there. Both defects — the wrong attribution and the unnamed kit holder — are fixed in the first step of the slice.
 
 **Cross-pack conflicts are reported once, at load, in one shape.** The report used to be split across three carriers
 with three shapes: the overlay's `report.errors` (logged by `server/data.js:95`), the icon and art collisions on that
-same array, and `loadWorkshopKits`' own `errors` (`server/workshop.js:412`) — no single line an author could grep. Every
+same array, and `loadWorkshopKits`' own `errors` (`server/workshop.js:478`) — no single line an author could grep. Every
 one of them now carries a `code`, and the four `MANIFEST_MISSING` cases (`data/assets.json` or `data/support.json` not
 produced by the asset pipeline) are distinguishable from a collision without reading prose. The ordering contract is
 documented for authors in `docs/WORKSHOP.md` §1.2 and summarized in the §1.7 status table, because a rule an author
@@ -486,7 +486,7 @@ per row:
 | a hook name nothing emits never fires and nothing reports it (`server/sim/battle/hooks.js:17-25`, `:57-59`) | the static check already suggests a near miss (`HOOK_UNKNOWN_EVENT`, `shared/kitAuthoring.js:235-237`), but it is text analysis. Add a **runtime** report: `on` keeps the registration in `this._hooks[name]` (`server/sim/battle/hooks.js:20`), so at `battleEnd` the bus can name every pack-owned hook that was registered and never emitted. A typo then costs one battle instead of one bug report. |
 | non-determinism is a warning (`shared/kitAuthoring.js:222-227`) | an error for layer B (§28.4), and the refusal quotes the construct *and* its source line, so it stops being "a reason that looks nothing like 'you used Math.random'" (`shared/kitAuthoring.js:13-17`). |
 | a kit that returns no `skill` leaves the operator with no skill (`docs/WORKSHOP.md:611`) | the loader knows both facts — a kit was injected *and* `skillSource` says where the skill came from (`server/sim/content/index.js:214`, `:219`). A pack kit with no skill becomes a validation error the editor shows before saving, not a live surprise. |
-| a `chess.assets.spine` that points at an uninstalled model draws a flat portrait and logs nothing (`shared/workshop.js:1076-1092`) | already solved by `report.looks` (logged at `server/data.js:97`) — generalise it: every field that degrades silently gets a `looks`-style check, and the editor surface must show it, not only the server log. |
+| a `chess.assets.spine` that points at an uninstalled model draws a flat portrait and logs nothing (`shared/workshop.js:1171-1187`) | already solved by `report.looks` (logged at `server/data.js:97`) — generalise it: every field that degrades silently gets a `looks`-style check, and the editor surface must show it, not only the server log. |
 | the editor deliberately does not import author files (`editor/server.mjs:428-431`) | **do not change this.** An HTTP endpoint that executes author code is a code-execution surface. Instead expose the verifier of §28.6 as an explicit action that runs in the **playtest subprocess** (`server/index.js:71-75` `SP_WORKSHOP`), which is already a separate process. |
 | runtime errors land in a 100-entry array reachable only through `m.simErrorLog` (`server/match/Match.js:127-129`, `server/sim/battle/hooks.js:167-185`) | per-owner counters (§28.4), plus the room's mod digest on every error line, so a player's bug report carries the identity of the content it came from. |
 
@@ -681,7 +681,7 @@ reach the same content".
 - **No sandbox for layer B.** The ruling is "the server executes it", not "untrusted code executes safely". A pack with
   a `while(true)` is refused by the load-time budget check (§28.4), not contained.
 - **No hot reload.** The pack set is fixed for the process; a digest that can change mid-match is worse than a restart.
-- **No code signing, no author identity.** `pack.json`'s `author` stays metadata (`shared/workshop.js:540-546`); the
+- **No code signing, no author identity.** `pack.json`'s `author` stays metadata (`shared/workshop.js:635-641`); the
   hash proves *which* bytes, not *whose*.
 - **No WASM kernel decision.** That is the performance benchmark's call, and it is a different layer: a faster kernel is
   a `combat: false` change and would be verified by §28.6 like any other.
@@ -2239,7 +2239,7 @@ node --test test/modSurface.test.js
 业主点名的那一格是「让包在**客户端**自己算 DPS 与总伤」。查完的结论**分成两半**，两半都写在下面 ——
 因为把「总伤今天就能读」与「逐单位 / 逐场 DPS 今天读不到」混成一句，作者就会照着一个不存在的读数写代码。
 
-**一、今天就能做：总伤（零引擎改动）。** 面板本来就订阅得到引擎的 S2C（`public/js/ui/extensions.js:827`
+**一、今天就能做：总伤（零引擎改动）。** 面板本来就订阅得到引擎的 S2C（`public/js/ui/extensions.js:884`
 `S2C_TYPES.has(type) → net.on(type, fn)`，**原样透传**），而伤害数字在两条既有帧上：
 
 | 面板读得到的 | 既有 S2C 帧 | 帧里的哪一格 | 粒度 |
@@ -2304,7 +2304,7 @@ export function mount(ctx) {
 
 ### 28.31 `ctx.me.voice` 与 `ctx.session.setVoiceLang`：一格配音读数，加一个**唯一**的设置写口
 
-面板答不出「这台机器现在用哪套配音」：那个值住在**另一个** store（`public/js/ui/settings.js:47`
+面板答不出「这台机器现在用哪套配音」：那个值住在**另一个** store（`public/js/ui/settings.js:50`
 `settingsStore`，与 `ctx.me` 读的 `public/js/store.js` 不是同一个），而注入面里没有 store 句柄。
 干员详情里的切换口（`public/js/ui/detailPanel.js:318` / `:519-522`）能改它，面板不能 —— 所以补一格**读数**加一格
 **受限写口**（业主裁决 2026-10-11：「能优化就优化，但要守边界」）。
@@ -2688,7 +2688,7 @@ JSON 可序列化值**的回调。
 2. **缺省逐字节不变**。不声明 `variants` 的包归一化清单里**不长出这个键**（无条件写进去会让**所有**已发布包的
    内容哈希改变，房间的摘要闸门随即误判，§28.2）—— 与 `skins` / `voiceCdn` / `assets` 同一条纪律。
    `GameData` 拿不到口径时 `deployCap` 逐字是 `posIntOr(economy.deployCap, DEFAULTS.deployCap)`。
-3. **声明了必须进身份哈希**。`identifyPack` 哈希的是归一化清单的 `canonicalJson`（`server/workshop.js:834`），
+3. **声明了必须进身份哈希**。`identifyPack` 哈希的是归一化清单的 `canonicalJson`（`server/workshop.js:900`），
    所以只要第 2 条那条「写了才进清单」成立，这一条自动成立 —— 而它**必须**成立：只差口径的两份包摘要若相同，
    同一个摘要下就有两种对局行为（§28.2）。
 4. **必须 `combat: true`**（`VARIANTS_NEED_COMBAT`）。判据是**能力**而不是意图，与 `server.meta`
@@ -2730,6 +2730,86 @@ JSON 可序列化值**的回调。
 **还没做的**：`training` 今天只落在引擎已有的练度开关（`room.loadout.ops`）上；把一名**普通**干员的精锐形态
 数值投影给它（投稿 `training` 一段真正想做的那件事：`_a` 拿到 `_b` 的 `status`/`stats`/`skills`/`talents`，
 258 条 + 19 个召唤物）**不在本刀**，需要独立立项 —— 它是「练度投影」这条新规则，不是声明通道。
+
+### 28.40 素材加载源（`assets.mirrors[]` + `sources(ctx)`）：让包真的换掉取字节的主机
+
+投稿 `2a031cf0f869`（「CDN 源选择」）的作者在 `note` 里把话说得很直：**做不到改素材加载源**，因为 `assets.json`
+里的地址是死的。这一节补上那一格，而它由**两半**组成 —— 拆开任一半都不成立：`pack.json.assets.mirrors[]` 定义
+**哪些镜像被允许**，面板模块导出的 `sources(ctx)` 定义**先试哪一条**。
+
+**A 半：`assets.mirrors[]`。** 一个条目就是 `{ id, base, sha256 }`（字段闭集 `ASSETS_MIRROR_FIELDS`，
+`ASSETS_MIRROR_UNKNOWN_FIELD`）：
+
+```json
+{ "assets": {
+  "container": "packs/resources-0.1.0.spresources",
+  "manifest": "resource-manifest.json",
+  "mirrors": [
+    { "id": "fast", "base": "https://作者自己的域名/ak/resources-0.1.0/", "sha256": "<64 位小写 hex>" }
+  ] } }
+```
+
+形状层（`shared/workshop.js parseAssetsMirrors`）判六条，每一条**点名**：`ASSETS_MIRROR_BAD_SHAPE`（不是非空数组 /
+条目不是对象）、`ASSETS_MIRROR_UNKNOWN_FIELD`、`ASSETS_MIRROR_BAD_ID`（小写字母开头、≤ 32 字符）、
+`ASSETS_MIRROR_DUPLICATE_ID`、`ASSETS_MIRROR_BAD_BASE`（必须**绝对 `https://`**、有主机、无凭据、无查询、无片段、
+**以 `/` 结尾** —— 拼的是 `<base><包内文件名>`，少一个斜杠会拼出一个看起来对、取不到的地址）、
+`ASSETS_MIRROR_BAD_DIGEST`、`ASSETS_MIRROR_TOO_MANY`（`ASSETS_MIRROR_MAX` = 4）。声明了 `mirrors` 的包**必须**写
+`license`（`ASSETS_MIRROR_NEEDS_LICENSE`）：素材的再分发者是作者，授权问题不因为换了一台主机就消失 —— 与
+§28.36 的 `VOICE_CDN_NEEDS_LICENSE` 逐字同一条理由。`mirrors` **只在声明过时才进归一化结果**（与 `skins` /
+`voiceCdn` / `variants` 同一条纪律）：没声明它的包哈希逐字节不变。
+
+**A 半为什么只能镜像「本包自己的容器」。** 这一格改的是「**这份容器的字节**从哪台主机取」，不是「整棵 `/assets`
+树指向谁」。后者做不到诚实，三条理由写在这里免得反复被问：① `data/assets.json` 只有**清单级**摘要、**没有逐文件
+摘要**，一个镜像清单的 sha256 锁得住清单的字节、**锁不住它指向的那些图** —— 那样的「校验」是一句空话；
+② 把一整个站点的素材树交给第三方主机，正是「不分发官方素材」那条红线要拦的形态；③ 一个坏镜像的爆炸半径会是
+**全站素材**（一坏全坏），而收窄之后它只是**一个包自己的那份容器**。`server/http/static.js` 的 `/assets` 分支
+因此一行都没动。
+
+**装载期（`server/workshop.js assetsMirrorIssues`）：比对，不下载。** 每条的 `sha256` 必须等于**刚从包内文件
+算出来的**容器摘要（`assetsIssues.digest`）。对不上的那条 **停用**（`ASSETS_MIRROR_DIGEST_MISMATCH`，在
+`errors` 里逐条点名、启动日志一行）而**不是拒绝整个包** —— 包本身完整可用，服务端算出来的摘要才是真相。这是
+§28.35「宁少不拒」在装载期的同一条姿态。拿不到容器摘要时如实报 `ASSETS_MIRROR_NO_DIGEST`，不假装通过。
+**服务端一条网络请求都不发**（与 §28.36 的 `voiceCdn` 相反）：取字节的是客户端，所以这一格没有服务端超时、
+没有服务端缓存目录、没有启动期阻塞；一台 CDN 挂掉只影响想用它的人。身份哈希仍然哈希**声明**（含被停用的那条）：
+一条镜像某天失效不该静默换掉包身份、让房间摘要跟着漂。
+
+**B 半：`sources(ctx)`。** 与外观提供者（`client.panels[].appearance(ctx)`，§28.28）**逐条同构**：模块导出、
+`import` 之后 `mount` 之前注册、进程内**最多一个**（`CLIENT_SOURCES_TAKEN`）、抛错 `CLIENT_SOURCES_THREW`、
+形状不对 `CLIENT_SOURCES_BAD_SHAPE`、只提供它而不 `mount` **不是错**。它返回 `{ order(mirrors) }`，`mirrors` 是
+**已声明**镜像的只读列表。
+
+**它结构上不可能引入主机名**，这是这一格存在的全部价值：`order()` 只许回那些 id 的一个**排列或子集**。
+不是数组、含未声明的 id、含非字符串 ⇒ `CLIENT_SOURCES_BAD_ORDER`，**整条顺序作废**（不半信半疑地采用一半 ——
+那会让「哪台先说话」变成没人能复现的事）并回落声明顺序；返回 thenable ⇒ `CLIENT_SOURCES_ASYNC`（这是一条**同步**
+读物，与 §28.35 拒 `Promise` 同一条理由）；`null` / `undefined` = 「我没什么可排的」，不是失败。于是「包能改
+加载源」与「包不能指名任意主机」同时成立，而后者不是一句承诺：**注册面没有位置写下地址**。
+
+**导入次序（硬性，`public/js/resources/host.js importFromServer`）。** ① 逐条镜像：取清单 → 取容器 →
+**先核整包 sha256**（`verify.js verifyContainerBytes`，必须 `checked && ok`）→ 过了才走**既有**的逐文件
+SHA-1[0:12] 导入与写缓存；② 任何一步不过 ⇒ **那条镜像作废、换下一条**；③ 全部不行 ⇒ **回落包内那条
+`/workshop-resources/…` URL**（容器仍在包里，所以这条回落是**结构性**的）并且**响亮**：`CLIENT_SOURCES_FALLBACK`
+一行日志 + 返回值里的 `via: 'pack'` 与 `refusals`（面板据此把降级显示出来）。**绝不静默，也绝不空白。**
+`checked: false`（容器大于 `verifyContainerBytes` 的 256 MiB 上限）**等于不能用** —— 镜像是不受信的一方，而
+`crypto.subtle` 没有流式接口。所以**如实写在这里**：超过 256 MiB 的容器用不了镜像，那类包只能走包内；不设这条
+线就等于「不核摘要也导入」，那是「不能算错」的直接反面。跨源只发生在「取容器与清单」这一步：缓存键与 SW 送出
+仍然是**同源站点路径**，所以引擎自带的 SW（§28.13.5）一个字节都没改。
+
+**一键回退。** 设置里新增「工坊素材源」（`settings.workshopSources`，默认 `true`）。关掉 ⇒ `importFromServer`
+走的与「这个包没声明 `mirrors`」**完全同一条**路径（连返回值的形状都一样，没有 `via` / `refusals`），镜像那条 URL
+**一次都不被请求**。一个包把加载源改坏了，玩家关掉这一格就回到原样。
+
+**默认逐字节不变（四条一起成立）。** ① 不声明 `mirrors` ⇒ 归一化结果里没有这个键、`welcome.modAssets` 里没有
+这个字段、`importFromServer` 请求的 URL 与次序与 B3a 逐字相同；② 服务端不新增任何路由（`/workshop-resources/`
+是既有那条，本刀不碰 `server/http/routeMount.js` 的保留表）；③ 引擎 SW 的 `service.js` 一行未改（它照旧只从
+**已校验**的缓存回答、否则 412、不回源）；④ 索引里那条「这个包没声明 `assets`」的路径（`modAssets` 字段不出现、
+不注册 SW）完全不变。
+
+**`MOD_API_VERSION` 不动**（仍是 `1`）：加一格字段是纯增量，抬数字会让所有写 `api: "1.x"` 的老包被判
+`MOD_API_INCOMPATIBLE`（§28.5 与 `shared/modSurface.js` 的版本政策）。**不强制 `combat: true`**：判据是**能力**
+而不是意图 —— 这一格改的是「哪台主机送**同一份已校验字节**」，改不了谁在玩、装了什么、这一局的结果；容器摘要
+本来就在包的内容哈希里（`identifyPack`），房间摘要闸门与 golden 语料一个字都没动。`MOD_SURFACE_FROZEN['1']`
+**只加不改**（新表面 `client.sources` 进表，账本那串字面量一个字母都不动）。
+
 
 
 

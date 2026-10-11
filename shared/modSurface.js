@@ -273,11 +273,20 @@ export const MOD_SURFACE = Object.freeze([
   {
     id: 'assets',
     layer: 'B',
-    decl: 'pack.json.assets = { container, algorithm, digest, file, server }',
-    anchors: [{ symbol: 'ASSETS_SERVER_POLICIES' }, { symbol: 'ASSETS_VERIFY_ALGORITHMS' }],
-    requires: ['装载期核对声明的摘要（对不上就不服务）', 'server: serve | cache-only 二选一'],
-    files: ['shared/workshop.js', 'server/workshop.js', 'server/http/static.js'],
-    tests: ['test/modAssets.test.js', 'test/packAssets.test.js', 'test/workshopAssets.test.js'],
+    decl: 'pack.json.assets = { container, manifest, serverPolicy?, verify?, mirrors? }',
+    anchors: [
+      { symbol: 'ASSETS_SERVER_POLICIES' }, { symbol: 'ASSETS_VERIFY_ALGORITHMS' },
+      // 作者自备 CDN 的镜像（§28.40）：字段闭集与两条形态判据。与 `VOICE_CDN_FIELDS` 同一类 —— 它们是「一个包
+      // 可以写哪几个键」的那张表，写错的名字被点名拒绝（`ASSETS_MIRROR_UNKNOWN_FIELD`），所以必须被锚住。
+      { symbol: 'ASSETS_MIRROR_FIELDS' }, { symbol: 'ASSETS_MIRROR_MAX' }, { symbol: 'ASSETS_MIRROR_ID_RE' },
+    ],
+    requires: [
+      '装载期核对声明的摘要（对不上就不服务）',
+      'server: serve | cache-only 二选一',
+      '`mirrors[]` **只镜像本包自己的容器**：`base` 必须是绝对 https、`sha256` 必须等于装载期从包内文件算出的容器摘要，对不上的那条**停用**并点名（不拒包）—— 服务端不为这条通道发一次网络请求',
+    ],
+    files: ['shared/workshop.js', 'server/workshop.js', 'server/http/static.js', 'server/http/workshop.js', 'public/js/resources/host.js'],
+    tests: ['test/modAssets.test.js', 'test/packAssets.test.js', 'test/workshopAssets.test.js', 'test/modAssetsMirrors.test.js'],
     spec: '§28.13',
   },
   // ------------------------------------------------------------------ C 层：客户端界面
@@ -390,6 +399,27 @@ export const MOD_SURFACE = Object.freeze([
     files: ['shared/workshop.js', 'public/js/ui/extensions.js'],
     tests: ['test/modClientHosts.test.js'],
     spec: '§28.13',
+  },
+  {
+    id: 'client.sources',
+    layer: 'C',
+    decl: '（无声明：面板模块导出 `sources(ctx)`；地址只在 `pack.json.assets.mirrors[]`）',
+    // 与 `client.panels.me` 同一条做法：这一格**不是** `pack.json` 里的一条声明（它是模块的一个导出，与
+    // `appearance(ctx)` 同族），所以锚在**引擎自己那一端的真相**上 —— 排序面那个模块的具名导出。
+    anchors: [
+      { symbol: 'orderDeclared', module: 'sources' },
+      { symbol: 'setSourceOrder', module: 'sources' },
+      { symbol: 'setSourcesEnabled', module: 'sources' },
+    ],
+    requires: [
+      '**结构上不可能引入主机名**：`sources(ctx)` 只回**已声明 id 的排列/子集**，喂主机名 / URL ⇒ `CLIENT_SOURCES_BAD_ORDER`，整条顺序作废、回落声明顺序',
+      '进程内最多一个提供者（`CLIENT_SOURCES_TAKEN`）；一个只导出 `sources` 而不 `mount` 的面板不是错',
+      '玩家设置里的「工坊素材源」关掉 ⇒ 导入路径与「没有这一格」逐字相同（这是那个包把加载源改坏时的一键回退）',
+      '导入次序是硬性的：**先核整包 sha256**（必须 `checked && ok`）⇒ 再走既有逐文件 SHA-1[0:12]；任何一步不过就换下一条，全都不行则回落包内那条 `/workshop-resources/…` URL 并**点名**（不静默、不空白）',
+    ],
+    files: ['public/js/resources/sources.js', 'public/js/resources/host.js', 'public/js/ui/extensions.js', 'public/js/ui/settings.js'],
+    tests: ['test/modAssetsMirrors.test.js', 'test/modClientPanels.test.js'],
+    spec: '§28.40',
   },
   {
     id: 'forms',

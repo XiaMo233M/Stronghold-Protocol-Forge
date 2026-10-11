@@ -71,7 +71,7 @@
 | `server.room` | `server.room = { module }` | **不**要 `combat: true`：只读观察面（快照/访问器/订阅），返回值被忽略 ⇒ 改不了谁在玩、装了什么、这一局的结果；import 只走 `@sim/` | §28.20 |
 | `kits.relativeImports` | `kits/<id>.js` 里的 `./…`（含 `kits/_shared.js` 这类辅助文件） | 只许**向下**相对（`..`/绝对/`%`/反斜杠/非 `.js` 仍拒）；按「出现 import 的那个文件」自己的目录解析，两端同一文件；辅助文件字节进身份哈希（`kits/**/*.js` 递归） | §28.18 |
 | `routes` | `routes = [{ path, cache }]` | 路径与缓存策略都在允许集合内 | §28.13 |
-| `assets` | `assets = { container, algorithm, digest, file, server }` | 装载期核对摘要；`server: serve \| cache-only` | §28.13 |
+| `assets` | `assets = { container, manifest, serverPolicy?, verify?, mirrors? }`；`mirrors[] = { id, base, sha256 }` | 装载期核对摘要；`server: serve \| cache-only`；`mirrors` **只镜像本包自己的容器**：`base` 必须绝对 `https://`（有主机、无凭据、无查询、尾斜杠）、id 唯一且 ≤ 4 条、`sha256` 必须等于装载期从包内文件算出的容器摘要（对不上的那条**停用并点名**，不拒包）；声明 `mirrors` 必须写 `license`（`ASSETS_MIRROR_NEEDS_LICENSE`：素材的再分发者是作者，授权问题不因为换了一台主机就消失，与 §28.36 的 `VOICE_CDN_NEEDS_LICENSE` 同一条理由）；**服务端不为这一格发一次网络请求**（取字节的是客户端） | §28.13 / §28.40 |
 
 ### C 层：客户端界面
 
@@ -85,6 +85,7 @@
 | `client.panels.data` | `client.panels[].data[]` | 表必须在 `CLIENT_PANEL_DATA_TABLES` 里；拿到的是只读快照 | §28.8 |
 | `client.panels.messages` | `client.panels[].messages[]` | 类型名由引擎定（`pack.msg`），通道名由包定；有额度与限流 | §28.8 |
 | `client.requires` | `client.requires[]` | 缺一即「浏览器不支持」，不是静默不工作 | §28.13 |
+| `client.sources` | 无需声明：面板模块导出 `sources(ctx)`；地址只在 `pack.json.assets.mirrors[]` | **结构上不可能引入主机名**：只许回已声明 id 的排列/子集（喂主机名 / URL ⇒ `CLIENT_SOURCES_BAD_ORDER`，整条顺序作废）；进程内最多一个提供者（`CLIENT_SOURCES_TAKEN`）；只导出 `sources` 不 `mount` 不是错；导入次序硬性 —— 先核整包 sha256（必须 `checked && ok`）⇒ 再走既有逐文件 SHA-1[0:12]，任何一步不过就换下一条，全败则回落包内 `/workshop-resources/…` 并**点名**；设置里「工坊素材源」关掉 ⇒ 一次都不问镜像（一键回退） | §28.40 |
 | `forms` | `forms = { chars\|enemies\|tokens: { "<spine id>": { "<形态名>": { change?, end?, leave?, next?, roles } } } }` | **第一方 `FORMS` 优先**：与第一方同名的形态在形状层就被 `FORMS_FIRST_PARTY_OVERLAP` 拒掉（宁可拒绝，不要静默丢掉）；`roles` 的键 ∈ `FORM_ROLE_KEYS`、clip 名是非空字符串（或 `{ begin, loop, end }`）；`next` 必须指向同一个 spine id 上已声明的形态，否则 `FORMS_NEXT_UNKNOWN`；两个包撞同一个 `spine id + 形态名` 时包 id 小的赢（`FORM_COLLISION`） | §28.29 |
 | `fx.silentPhases` | `fx = { silentPhases: ["<phase kind>", …] }` | **并集**：第一方那两个（`bombed` / `warning`）永远静默，包只能加、取消不了；每一项必须是非空字符串（`FX_BAD_SILENT_PHASE`），未知字段点名拒绝（`FX_UNKNOWN_FIELD`）；落点 `assets.silentPhases`，`fxSpec` 在每个特效上同步查它 | §28.29 |
 
