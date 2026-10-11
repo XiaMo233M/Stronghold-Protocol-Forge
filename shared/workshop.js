@@ -26,6 +26,9 @@
 // 变体 / 口径层（DESIGN §28.39）：轴的闭枚举与解析只有一份，`shared/variants.js`。这一层**不**在这里重新判一遍
 // —— 一个轴表有两份实现，就是一个「哪个才算数」的问题。
 import { parseVariantsDecl } from './variants.js';
+// 行为开关层（DESIGN §28.43）：与口径**同一形状、不同一张表**，判据只有一份在 `shared/behaviour.js`。同样不在这里
+// 重判一遍闭枚举 —— 而且这一层的表今天是**空的**（通道 + 守卫先落，第一格与它的引擎实现点一起落）。
+import { parseBehaviourDecl } from './behaviour.js';
 
 /** Data files a pack may contribute to. Deliberately a conservative subset of data/: `config` is excluded because a
  * pack that rewrote the economy or the round schedule would change the rules rather than the content.
@@ -135,6 +138,10 @@ export const PACK_FIELDS = Object.freeze([
   // 变体 / 口径声明（DESIGN §28.39）：这个包要哪一套口径（练度 / 部署位）。**不是**贡献项，也**不是**一条
   // 数值覆盖通道 —— 它只能声明轴的闭枚举里有的选项名，值由引擎自己给（`shared/variants.js`）。
   'variants',
+  // 行为开关声明（DESIGN §28.43）：这个包要哪一格开关、哪一档。**不是**贡献项，也**不是**一条数值 / 文件覆盖
+  // 通道 —— 它只能声明开关的闭枚举里有的选项名，**动作由引擎构造**（`shared/behaviour.js`）。今天那张表是空的，
+  // 所以任何一条声明都被 `BEHAVIOUR_UNKNOWN_SWITCH` 点名整包拒（这正是本刀的交付物：通道真的通、且响）。
+  'behaviour',
   // 中间层四组能力声明（DESIGN §28.13）
   'assets', 'client', 'server', 'routes',
 ]);
@@ -1649,6 +1656,12 @@ function parseArtEntry(entry, where, shape) {
  * Validate and normalise one pack's `pack.json`.
  * @param {any} raw parsed pack.json
  * @param {string} [dirName] the pack's directory name (authoritative when the manifest omits / contradicts `id`)
+ * @param {{ hasAssets?: boolean, behaviourSwitches?: Record<string, any> }} [opts] `hasAssets` = 这个包在磁盘上有
+ *   `assets/` 文件夹（判贡献项用）；`behaviourSwitches` = 行为开关的闭枚举表，**默认就是真的那一份**
+ *   （`shared/behaviour.js` 的 `BEHAVIOUR_SWITCHES`）。它做成入参的唯一理由与 `surfaceLedgerIssues(ids,
+ *   generation)` / `behaviourSwitchIssues(table)` 逐字相同：本刀那张表是**空的**，写死的话「写了才进清单」
+ *   与 `BEHAVIOUR_NEEDS_COMBAT` 这两条分支就**任何测试都碰不到** —— 一条从来没验过失败分支的守卫，和没有
+ *   守卫是一回事。生产路径（装载器 / 校验器 / 编辑器）一律不传它。
  * @returns {{ ok: true, pack: { id: string, name: string, version: string, author: string|null, license: string|null,
  *   description: string|null, gameVersion: string|null, content: string[], overrides: string[],
  *   voices: Record<string, Record<string, string[]>>, voiceLangs: Record<string, Record<string, Record<string, string[]>>>,
@@ -2125,6 +2138,11 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // —— 口径选的是引擎已有的另一套表现，不是内容。所以它不进 `contributesDecl`，一个只带它的包照旧 `EMPTY_PACK`。
   const variantsParsed = raw.variants === undefined ? null : parseVariantsDecl(raw.variants);
   if (variantsParsed && !variantsParsed.ok) return variantsParsed;
+  // 行为开关声明（DESIGN §28.43）：形状与闭枚举都在 `shared/behaviour.js` 判，这里只负责「写了才进清单」。
+  // **不是贡献项**（与 `variants` / `playtest` 同一个语义）：行为开关改的是引擎里**已经实现**的一条规则，
+  // 它自己不带来任何内容。所以一个只带 `behaviour` 的包照旧 `EMPTY_PACK`（文案里点名它）。
+  const behaviourParsed = raw.behaviour === undefined ? null : parseBehaviourDecl(raw.behaviour, opts.behaviourSwitches);
+  if (behaviourParsed && !behaviourParsed.ok) return behaviourParsed;
   // 一条声明只有在清单里**真的写了这个键**时才进归一化结果。这一条是本刀最容易做坏的地方：无条件写进去会让
   // 每一个已存在的包（它们没有这些键）的归一化清单多出四个键，于是内容哈希全变、`identifyPack` 的
   // `manifest` 与 `hash` 也跟着变 —— 房间的摘要闸门会开始误判（DESIGN §28.2）。
@@ -2166,7 +2184,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     // 只声明助战的包今天整包被拒（plugin-pack G6：一个 `support: [...]` + `content: []` 的包得到的就是这一条），
     // 而原来的文案里**没有** `support` 这个词，作者只能对着 `EMPTY_PACK` 猜。`support` 只决定**助战卡池**里放谁，
     // 干员本体还是由 `content: ["chess"]` 带进来的 —— 所以放宽它不是这一刀的活（那是既有裁决），把话说明白才是。
-    const notContributions = ['support', 'playtest', 'variants']
+    const notContributions = ['support', 'playtest', 'variants', 'behaviour']
       .filter((n) => raw[n] !== undefined);
     const names = [...WORKSHOP_CONTENT_FILES, 'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'skins', 'operators',
       'assets', 'client', 'server.preDispatch', 'server.meta', 'server.battle', 'server.room', 'server.modules', 'server.transport', 'routes', 'i18n', 'notices', 'forms', 'fx'];
@@ -2246,11 +2264,23 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // —— `deploy: "max"` 把 `config.economy.deployCap` 从官方的 8 抬到 12（场上同时多站四个人），
   // `training` 说的是这一局用哪一套练度。判据是**能力**而不是意图：一条**能**改结果的口径声明，必须进房间摘要
   // 闸门与 golden 语料，否则「不声明 combat 的包改不了结果」这句话就从结构性保证退化成一句口号。
+  // `form`（第 6 刀，DESIGN §28.41）同样：`form: "elite"` 让每条普通干员按精锐形态的职能出战，改的就是对局结果。
   //
   // 位置在 `EMPTY_PACK` 之**后**（一个只声明了口径、什么都没带来的包照旧先得到 `EMPTY_PACK` —— 那才是它的真
   // 问题），并且在上面三条 `combat` 类型检查之后：`BAD_COMBAT` 先报，作者才知道该改的是类型而不是缺一个 `true`。
   if (variantsParsed && raw.combat !== true) {
-    return fail('VARIANTS_NEED_COMBAT', 'a pack that declares "variants" pins a 口径 that changes match results (deploy slots / operator training), so it must declare "combat": true — that is what puts it into the room digest gate and the golden corpus (DESIGN §28.39); a pack that cannot state that must not pin a 口径');
+    return fail('VARIANTS_NEED_COMBAT', 'a pack that declares "variants" pins a 口径 that changes match results (deploy slots / operator training / operator form), so it must declare "combat": true — that is what puts it into the room digest gate and the golden corpus (DESIGN §28.39, §28.41); a pack that cannot state that must not pin a 口径');
+  }
+  // 行为开关（DESIGN §28.43）**也**要 `combat: true`，理由与上面四条逐字同构 —— 第五道同一条线。一格的入场券本就是
+  // 「它改一条规则」（`docs/WORKSHOP.md` §1.1 的 `giveBondBiasOnly` 就是活例子：它改的是一局的商店出货概率＝改对局
+  // 结果）。判据是**能力**而不是意图：一条**能**改结果的开关声明，必须进房间摘要闸门与 golden 语料，否则「不声明
+  // combat 的包改不了结果」这句话就从结构性保证退化成一句口号。
+  //
+  // 位置与 `VARIANTS_NEED_COMBAT` 同序：在 `BAD_COMBAT`（类型）之后、`EMPTY_PACK` 之后、上面四条 `*_NEEDS_COMBAT`
+  // 之后。将来若有一格**明确改不了结果**的开关（例如纯客户端规则），它必须**不**要求 `combat: true`，并把
+  // 「不改结果」写进那一格的 `effect` —— 判据是能力，不是意图（§28.20 的闸门分类规则）。
+  if (behaviourParsed && raw.combat !== true) {
+    return fail('BEHAVIOUR_NEEDS_COMBAT', 'a pack that declares "behaviour" pins a rule switch that changes how the engine plays, which can change match results, so it must declare "combat": true — that is what puts it into the room digest gate and the golden corpus (DESIGN §28.43); a pack that cannot state that must not pin a behaviour switch');
   }
   // `server.room` **不在**上面这条线里（DESIGN §28.20）：它的契约是「观察与声明」——`install(room)` 拿到的是一个只读
   // 观察面（成员快照 / 阶段 / 事件 / 一条日志），没有 store、没有战场句柄、没有 socket、没有文件系统，返回值被忽略。
@@ -2294,6 +2324,11 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
       // 一个 `variants: []` 会让**所有已发布包的哈希全部改变**。而它**必须**进哈希：一个口径改的是对局结果，
       // 两份只差口径的包共用同一个摘要，房间的摘要闸门就会放行两种不同的行为（DESIGN §28.2）。
       ...(variantsParsed ? { variants: variantsParsed.decl } : {}),
+      // 行为开关声明（DESIGN §28.43）：**只在声明过时才存在**，与 `variants` / `skins` / `voiceCdn` 同一条纪律、
+      // 理由逐字相同 —— `identifyPack` 哈希的就是这份归一化清单的 `canonicalJson`（`server/workshop.js`），给每个
+      // 包都加一个 `behaviour: []` 会让**所有已发布包的哈希全部改变**。而它**必须**进哈希：一条开关改的是引擎的
+      // 规则，两份只差开关的包共用同一个摘要，房间的摘要闸门就会放行两种不同的行为（DESIGN §28.2）。
+      ...(behaviourParsed ? { behaviour: behaviourParsed.decl } : {}),
       // 四组新声明：**只在声明过时才存在**（见上面 `declared` 的注释）。哈希覆盖它们靠的就是这一条 ——
       // `identifyPack` 哈希的是这份归一化清单的 `canonicalJson`（server/workshop.js）。
       ...Object.fromEntries(declared),

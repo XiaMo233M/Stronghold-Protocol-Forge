@@ -2727,9 +2727,9 @@ JSON 可序列化值**的回调。
 而加一格字段不抬版本有 `:434` 的先例。**不新增协议消息**：口径是服务端的判据，客户端读到的仍然是它一直在读的
 `priv.deployCap`。
 
-**还没做的**：`training` 今天只落在引擎已有的练度开关（`room.loadout.ops`）上；把一名**普通**干员的精锐形态
-数值投影给它（投稿 `training` 一段真正想做的那件事：`_a` 拿到 `_b` 的 `status`/`stats`/`skills`/`talents`，
-258 条 + 19 个召唤物）**不在本刀**，需要独立立项 —— 它是「练度投影」这条新规则，不是声明通道。
+**已做的**：`training` 落在引擎已有的练度开关（`room.loadout.ops`）上；把一名**普通**干员的精锐形态
+数值投影给它（投稿 `training` 一段真正想做的那件事：`_a` 拿到 `_b` 的 `stats`/`skills`/`talents`，
+258 条 + 19 个召唤物）落在 §28.41 的 `form` 轴上（第 6 刀落地）—— 它是「形态投影」这条新规则，不是数值覆盖通道。
 
 ### 28.40 素材加载源（`assets.mirrors[]` + `sources(ctx)`）：让包真的换掉取字节的主机
 
@@ -2925,3 +2925,98 @@ C2S `room.list` + `user.activity` 与 S2C `room.list` —— 大厅直接列出*
 **测试**：`test/lobby.test.js` —— body 恰好一个字段、随注册表 +1 / 离开 −1、**隐私哨兵**（建房后响应文本不得含
 该房号或房主名）、HEAD 200 无 body、POST 405、以及 `roomCounts()` 与 `stats()` 同源（`publicRooms === total ===
 `/healthz` 的 `rooms`）。
+
+### 28.43 `pack.json.behaviour`：行为开关（闭枚举、引擎自烘），**不是安装器**
+
+**要解决的那面墙**：投稿 `ac8c9821f5ba`（「卫戍协议mod-跨版本一键安装包-v1.4.8-适配0.2.4」）把「改一条规则」
+做成了**安装器** —— `install.mjs`（43,658 B）按 `files.json` 的 `copy` 清单**整份覆盖** `data/{chess,config,items,
+official,skins}.json`、`server/**` 48 个文件（含 `server/sim/**` 22 个）、`public/**` 五十余个与 `payload/tools/**`
+13 个，外加一条 `一键跨版本安装.bat`。它自己的 `files.json` 把语义写得很直：**「Nothing is trimmed: a target that
+gets the whole file gets the whole feature.」** —— 这一句就是 `docs/WORKSHOP.md` §1.1 对 `official` / `config` /
+`meta` / `shared` / `theme` / `serverModules` 六格「**刻意没有通道**」要挡的那个形态，**本节的判断与那六格逐字
+一致**：一个能指定任意文件覆盖、或让包直接写数值的包格式**就是安装器**。
+
+**它不是什么，比它是什么更重要**：`behaviour` **不是**一条数值覆盖通道，**不是**一条文件通道，**不是**一条代码
+通道。包里写的是「**哪一格开关、哪一档**」，而**动作由引擎构造**（`shared/behaviour.js` 的 `actions(option)`，
+值只能来自那一格或引擎自己的常量）。所以这一层**不是**通用 patch 分发器，也永远不可能是 —— 一个包给不出数字，
+也给不出键路径。
+
+**形状**：`behaviour: [{ switch, option?, name?, desc? }]`，条目字段**闭集**。`option` 省略 ⇒ 用这一格的
+`default`。归一化结果**按开关名排序**（键序是清单字节的一部分，`identifyPack` 哈希的是 `canonicalJson(pack)`）。
+**与 `variants` 逐字同构** —— 两张表读起来是同一套东西（`label` / `optionLabels` 中文、`effect` 英文、文件头
+i18n-ignore），差别只在**表是另一张**、每格多一个 `actions`。
+
+**为什么另开一格而不是塞进 `VARIANT_AXES`**：两层的**入场券不同**。口径（`variants`，§28.39）是「同一份数据的
+另一套表现」，每条轴**必有**「官方那一档」，缺省＝引擎今天的行为，落点是引擎**已经实现**的那套开关；行为开关是
+「引擎里本来没有、现在由维护者实现的规则」，它**不要求**有「官方那一档」。判据不同 ⇒ 拒绝码与 `combat` 披露口径
+必须分开，而且混进 `VARIANT_AXES` 会把 `variantDataPatch`（§28.39 的唯一执行点，今天只返回一个 `config` 标量）
+逼成一个**通用 patch 分发器** —— 那正是本节要拦的形态。**`VARIANT_AXES` 一字不动**。
+
+**它就是 `docs/WORKSHOP.md` §1.1 那句建议的落点**：那条 `giveBondBiasOnly`（改一局的商店出货概率）当时被两路挡
+住，文档写下「真要这条特性，正确做法是维护者在引擎里做成一个开关（商店池 + `bondsMeta` 的读取点），然后**任何**
+包都能用」。本节把那句话**制度化**：引擎实现一格，任何包声明它。
+
+**六条判据**（判据只有一份：`shared/behaviour.js`，装载器与校验器都调它）：
+
+1. **空表也响亮**（本刀的交付物）。`BEHAVIOUR_SWITCHES` **今天是一张空表**，这是刻意的：第 4 刀交的是
+   「**通道 + 守卫**」本身，**首格与它的引擎实现点一起落**（业主裁决 2026-10-13）。所以任何一条 `behaviour`
+   声明都被 `BEHAVIOUR_UNKNOWN_SWITCH` **点名整包拒** —— 空表不是「不认识的开关一律忽略」，而是**一个都不认识**，
+   文案里还写明「本版一个开关都没有，因为没有实现点」。**加一格的门槛**：那一格必须**已经在引擎里有实现点**，
+   比 `VARIANT_AXES` 的「只在被一份真实投稿要求时才加轴」更严。
+2. **闭枚举 + 响亮失败**：`BEHAVIOUR_BAD_SHAPE`（不是数组 / 条目不是对象 / `switch` 不是非空字符串 / **未知字段**
+   / `name`·`desc` 写坏）· `BEHAVIOUR_UNKNOWN_SWITCH` · `BEHAVIOUR_UNKNOWN_OPTION` ·
+   `BEHAVIOUR_BAD_OPTION`（`option` 是 `null` / 数字 / `false` —— 非字符串会被读成「用了缺省」，即**静默不是
+   作者写的那个**，与 `VARIANTS_BAD_DEFAULT` 同一条理由）· `BEHAVIOUR_DUPLICATE_SWITCH`。**每一条都是整包拒绝**。
+3. **红线逐条落在形状层**：未知字段那一条**具体点名** `module` / `entry` / `file` / `path` / `value` / `key` 这类
+   键，理由里写清「一条行为声明只说一个开关与它的一个选项 —— 它永远不带模块、文件、路径或数字」。**没有 `$del`
+   语义**：这一层没有「删官方键」的表达能力。
+4. **缺省逐字节不变**。不声明 `behaviour` 的包，归一化清单里**不长出这个键**（无条件写 `behaviour: []` 会让
+   **所有已发布包**的内容哈希改变，房间的摘要闸门随即误判，§28.2）—— 与 `skins` / `voiceCdn` / `variants` 同一条。
+   而**声明了就必须进身份哈希**：只差一个开关的两份包摘要必须不同（同一个摘要下两种对局行为是不允许的）。
+5. **必须 `combat: true`**（第五条硬闸门 `BEHAVIOUR_NEEDS_COMBAT`）。位置与 `VARIANTS_NEED_COMBAT` 同序：
+   `BAD_COMBAT`（类型）之后、`EMPTY_PACK` 之后。判据是**能力**而不是意图 —— 一格的入场券本就是「它改一条规则」
+   （§1.1 的 `shopBias` 就是活例子：它改的是一局的商店出货概率＝改对局结果）。将来若有一格**明确改不了结果**的
+   开关（例如纯客户端规则），它**必须不**要求 `combat: true`，并把「不改结果」写进那一格的 `effect`。
+6. **不是贡献项**：与 `support` / `playtest` / `variants` 同一个语义 —— 开关选的是引擎已实现的一条规则，不是内容。
+   所以一个只带 `behaviour` 的包照旧 `EMPTY_PACK`（文案里点名 `"behaviour" is NOT a contribution`）。
+
+**多包抢同一格**：按既有的「包 id 字典序小的赢」（§28.3，与数据记录 / kit / 图标 / 口径同一条），由
+`mergeBehaviourDecls` 合成，输的一方进 `overridden` 供调用方点名报告。
+
+**执行点**：`behaviourActions(decl)` 把归一化声明翻成**引擎具名动作** `{ kind, value }`。表空 ⇒ 动作数组空（今天
+**没有任何一格可以声明，也没有任何一条动作**）。这一格**不新增协议消息**，也**不动** `Match` / `GameData` 的既有
+通路：将来第一格若只涉及一个 `config` 标量，它**复用**口径那条既有通路（`opts.variants` → `gamedata.js`），
+**不新开第二套「引擎自烘 patch」先例**；若落在别处，读取点由那一格自己点名。
+
+**判据写成「表是入参」的纯函数**：`parseBehaviourDecl(raw, table)` / `behaviourSwitchIssues(table)` /
+`behaviourActions(decl, table)` / `mergeBehaviourDecls(packs, table)`，默认值都是真表。理由与
+`surfaceLedgerIssues(ids, generation)` 逐字相同：**表是空的**，把判据写死就没有任何测试碰得到「选项名不认识」
+「同一个开关写两遍」「缺省写错」这些分支，而一条从来没验过失败分支的守卫和没有守卫是一回事。`normalizePackManifest`
+因此多一个**可选** `opts.behaviourSwitches`（默认真表；装载器 / 校验器 / 编辑器一律不传它）。`behaviourSwitchIssues`
+把「一格少了 `actions` / `options` / `default` / `optionLabels` / `effect`」也写成可断言的一格守卫 —— 加第一格时
+最容易出的事就是「声明了、装上了、什么都没发生」。
+
+**`MOD_API_VERSION` 不动**（仍是 `1`）：`api` 是可选项，没声明 `api` 的包一个字节都不受影响，而**加一格字段不抬
+版本**有 §28.39 / §28.33 / `server.modules` 的 `metrics`·`route` 三处先例（`shared/modSurface.js` 的版本政策）。
+抬世代只有三种情形：**已有声明改语义** / **新声明复用老引擎已认识且会按旧语义执行的键** / **删改名任何一格**。
+本刀是「新键 + 老引擎 `PACK_UNKNOWN_FIELD` **响亮拒**」—— 老引擎不是静默走错，是点名拒绝，所以第三种也不成立。
+**「老引擎优雅降级」明确不做**：那会让「写了等于没写」复活；作者该知道的是自己该跑哪一版。
+
+**披露**：`welcome.mods[].behaviour` 与 `variants` **并列投影**（`server/index.js`，**只在声明过时才存在这个键**）；
+**不进 `modDigest`**（它只哈希 `[id, hash]` 对，`shared/modIdentity.js`），但**必须进包身份哈希**
+（`server/workshop.js` 的 `canonicalJson(pack)`）。漏掉投影 = `Match` 读到 `undefined`、开关**静默不生效**
+（§28.39 把这一处记成「这一层最容易做坏的地方」）。
+
+**站侧含义（照实写）**：投稿原件在站点 `flagged/ac8c9821f5ba/`，`meta.json` 的 `flags` 含 `EXECUTABLE`(blocker) /
+`NO_PACK_JSON` / `WRAPPED`（全部文件套在 `跨版本安装包/` 一层下 ⇒ 做成兼容包上传必须先**扁平化**）。它**不是**
+纯安装器：`payload/packs/fanpack/` 自带一个内容包（`pack.json` 893 B + `records` / `chess` / `tokens` / `variants` +
+7 张**自制** PNG），那一半**今天就有通道**（`content` + `kits/` + `art` / `bondIcons` / `itemIcons` + `variants`），
+只是**格式不同**（它的 `type: "data"` / `files{}` 会被 `PACK_UNKNOWN_FIELD` 点名拒）。**它从不随包发官方美术**
+（`public/assets/**` 由 `install.mjs --assets` 另下），所以那 7 张图是自制的、**不违反**「分发官方素材不行」。
+
+**测试**：`test/packBehaviour.test.js` —— 空表也响亮（真表路径整包拒 + 文案说清「一个都没有」）、五条拒绝码逐条
+（合成表）、**越权写入被拒**（`module` / `entry` / `file` / `path` / `value` / `key` / `$del` 全拒）、
+`BEHAVIOUR_NEEDS_COMBAT` 与 `BAD_COMBAT` 的先后、`EMPTY_PACK` 优先、缺省不长键、**只差开关的两份包摘要必须不同**
+（走装载器同一份 `identifyPack`）、投影那一行真的在 `server/index.js` 里（源码级断言）、以及 `PACK_FIELDS` 的闭集
+计数就地延长。**不需要 `golden:update`**：缺省路径一个字节不动。
+

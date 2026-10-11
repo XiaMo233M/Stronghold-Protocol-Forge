@@ -289,6 +289,29 @@ export const MOD_SURFACE = Object.freeze([
     tests: ['test/modAssets.test.js', 'test/packAssets.test.js', 'test/workshopAssets.test.js', 'test/modAssetsMirrors.test.js'],
     spec: '§28.13',
   },
+  {
+    id: 'behaviour',
+    layer: 'B',
+    // 与 `variants`（§28.39）是**同一形状、不同一张表**：包声明的是「哪一格开关、哪一档」，不是「改成几」、
+    // 更不是「改哪个文件」。这一格今天**没有执行点**，因为 `BEHAVIOUR_SWITCHES` 是空表 —— 首格与它的引擎
+    // 实现点一起落（业主裁决）。所以这里锚的是**表与顶层键**：表里加一格必须同时进本清单与 docs/MOD-SURFACE.md。
+    decl: 'pack.json.behaviour = [{ switch, option?, name?, desc? }]',
+    anchors: [
+      { symbol: 'BEHAVIOUR_SWITCHES', module: 'behaviour' },
+      { symbol: 'PACK_FIELDS', members: ['behaviour'] },
+    ],
+    requires: [
+      '闭枚举：开关名与选项名都只许取 `BEHAVIOUR_SWITCHES` 里有的（`BEHAVIOUR_UNKNOWN_SWITCH` / `BEHAVIOUR_UNKNOWN_OPTION`，整包拒，不是忽略）',
+      '**包里没有数值、也没有路径**：动作（`{ kind, value }`）由引擎构造，`value` 只来自那一格或引擎常量 —— 这一格**永远**不是一条数值 / 文件覆盖通道（那是安装器，`docs/WORKSHOP.md` §1.1）',
+      '**不是贡献项**：一个只带 `behaviour` 的包照旧 `EMPTY_PACK`（与 `variants` / `support` / `playtest` 同一条）',
+      '必须 `combat: true`（第五条硬闸门 `BEHAVIOUR_NEEDS_COMBAT`）：一格的入场券本就是「它改一条规则」⇒ 必须进房间摘要闸门与 golden 语料',
+      '不声明 ⇒ 归一化清单里**不长出这个键**（无条件写 `behaviour: []` 会让所有已发布包的内容哈希改变，§28.2）；**必须**进包身份哈希（`server/workshop.js` 的 `canonicalJson(pack)`），**不进** `modDigest`（只哈希 `[id, hash]`）',
+      '加一格的门槛：**那一格必须已经在引擎里有实现点**（比 `VARIANT_AXES` 的加轴纪律更严）—— 本格今天空表正是这条的后果',
+    ],
+    files: ['shared/workshop.js', 'shared/behaviour.js', 'server/index.js'],
+    tests: ['test/packBehaviour.test.js'],
+    spec: '§28.43',
+  },
   // ------------------------------------------------------------------ C 层：客户端界面
   {
     id: 'client.panels',

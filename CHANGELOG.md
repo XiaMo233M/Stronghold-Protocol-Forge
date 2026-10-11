@@ -141,6 +141,60 @@
 * **不许降级**是逐条断言的门（干员与召唤物都过）：投影后每条记录的 `atk` / `maxHp` / `def` 必须 ≥ 投影前
   （`test/form-projection.test.js`）。
 
+## 0.16.0 进行中（第 4 刀：行为补丁 / 声明通道）
+
+**`pack.json.behaviour`：引擎实现一格，任何包声明它（DESIGN §28.43，docs/WORKSHOP.md §1.22）。** 投稿
+`ac8c9821f5ba`（「卫戍协议mod-跨版本一键安装包-v1.4.8-适配0.2.4」）把「改一条规则」做成了**安装器**：`install.mjs`
+（43,658 B）按 `files.json` 的 `copy` 清单**整份覆盖** `data/{chess,config,items,official,skins}.json`、`server/**`
+48 个文件（含 `server/sim/**` 22 个）、`public/**` 五十余个与 `payload/tools/**` 13 个。它自己的 `files.json`
+把语义写得很直：「**Nothing is trimmed: a target that gets the whole file gets the whole feature**」。本刀**不
+把这套搬进引擎**，而是开一条受约束的声明通道 —— 判断与 `official` / `config` / `meta` / `shared` / `theme` /
+`serverModules` 六格「刻意没有通道」**逐字一致**。
+
+* **形状与 `variants` 逐字同构、表独立**：`behaviour = [{ switch, option?, name?, desc? }]`，条目字段闭集，
+  归一化结果按开关名排序（键序是清单字节）。它与口径**分两张表**，因为入场券不同 —— 口径必有「官方那一档」、
+  缺省＝引擎今天的行为；行为开关是「引擎里本来没有、现在由维护者实现的规则」。混在一起会把口径那条唯一的执行点
+  逼成一个通用 patch 分发器。**`VARIANT_AXES` 一字不动。**
+* **包里没有数值、也没有路径**：动作（`{ kind, value }`）**由引擎构造**，`value` 只能来自那一格或引擎自己的常量。
+  `module` / `entry` / `file` / `path` / `value` / `key` 这类键在形状层**点名拒**，理由里写清「一条行为声明只说
+  一个开关与它的一个选项」；这一层**没有**「删官方键」的表达能力（没有 `$del`）。
+* **不认识的声明响亮失败**：`BEHAVIOUR_UNKNOWN_SWITCH` / `BEHAVIOUR_UNKNOWN_OPTION` / `BEHAVIOUR_BAD_OPTION` /
+  `BEHAVIOUR_BAD_SHAPE` / `BEHAVIOUR_DUPLICATE_SWITCH`，每一条都整包拒绝并点名。
+* **本版那张表是空的 —— 这是交付物本身**（业主裁决 2026-10-13）：第 4 刀交的是「**通道 + 守卫**」，通道真的通、
+  且响 —— **任何**一条 `behaviour` 声明都被 `BEHAVIOUR_UNKNOWN_SWITCH` 点名整包拒（空表不是「一律忽略」，而是
+  一个都不认识，文案里写清「本版一个开关都没有，因为没有实现点」）。**首格与它的引擎实现点一起落**，由业主点名；
+  加一格的门槛因此比加口径轴更严。
+* **第五条 `combat` 硬闸门**（`BEHAVIOUR_NEEDS_COMBAT`）：一格的入场券本就是「它改一条规则」⇒ 必须进房间摘要闸门
+  与 golden 语料，与 `server.meta` / `server.battle` / `modules[].uses: ["matchClass"]` / `variants` 四条同一条线。
+  将来若有一格**明确改不了结果**，它必须**不**要求 `combat`（判据是能力，不是意图）。
+* **不是贡献项**：一个只带 `behaviour` 的包照旧 `EMPTY_PACK`（与 `support` / `playtest` / `variants` 同一条），
+  文案里点名 `"behaviour" is NOT a contribution`。
+* **缺省逐字节不变**：不声明 `behaviour` 的包归一化清单里**没有**这个键（否则所有已发布包的内容哈希全变、房间的
+  摘要闸门误判）；声明了**必须**进包身份哈希（只差一个开关的两份包摘要必须不同），**不进** `modDigest`
+  （只哈希 `[id, hash]`），随 `welcome.mods[].behaviour` 与 `variants` 并列投影（漏掉投影 = 开关**静默不生效**）。
+  **`MOD_API_VERSION` 仍是 1**（加一格字段不抬版本）、**不新增协议消息**、不改默认游戏行为 ⇒
+  **不需要 `golden:update`**。**`MOD_SURFACE_FROZEN['1']` 不动**（新表面 `behaviour` 只加不改）。
+* **判据写成「表是入参」的纯函数**（`parseBehaviourDecl(raw, table)` / `behaviourSwitchIssues(table)` …）：表是空的，
+  写死的话「选项名不认识」「同一个开关写两遍」「缺省写错」这些分支**任何测试都碰不到**，而一条从来没验过失败分支的
+  守卫和没有守卫是一回事（与 `surfaceLedgerIssues(ids, generation)` 同一条理由）。`normalizePackManifest` 因此多一个
+  **可选** `opts.behaviourSwitches`（默认真表；装载器 / 校验器 / 编辑器一律不传）。**如实说清**：这是为可测性加的
+  一个入口，不是新能力。
+* **投稿 `ac8c9821f5ba` 的采纳 / 改动说明**（作者 B站@伊佐那邪_，来源
+  `github.com/yznx09/Stronghold-Protocol-Rhodes-Kazdel-Mod`，站点 `flagged/`，`flags` 含 `EXECUTABLE`(blocker) /
+  `NO_PACK_JSON` / `WRAPPED`）：
+  **采纳**：它真正需要的那一类「改一条规则」的**方向** —— 由引擎实现、由包声明（本刀把那一格开好）；
+  以及它**自带内容包**那一半（`payload/packs/fanpack/`：`pack.json` 893 B + `records` / `chess` / `tokens` /
+  `variants` + 7 张**自制** PNG）所属的通道 —— 那一半今天**已有**通道（`content` + `kits/` + `art` / `bondIcons` /
+  `itemIcons` + `variants`），只是**格式不同**（它的 `type: "data"` / `files{}` / `_doc` / `credits` /
+  `englishName` 不在 `PACK_FIELDS` 里，会被 `PACK_UNKNOWN_FIELD` 点名拒）。
+  **改动 / 未采纳**：**不采纳安装器**（`install.mjs` + `一键跨版本安装.bat`）、**不采纳整包 `payload/` 上架**、
+  **不采纳**对 `data/*.json` / `server/sim/**` / 整屏 UI / `tools/**` 的**整份覆盖**语义；`EXECUTABLE` 那条
+  suspected 命中的只是文件名 `.bat`（规则字面判对、实务误判），但**整份覆盖**这条语义本身正是本刀要拦的形态。
+  **它自己遵守「不分发官方素材」**：`files.json` 自述官方 `public/assets/**` 从不随包发（`install.mjs --assets`
+  才下），所以那 7 张图是自制的 —— **对外表述必须与这条一致**，不要把它说成侵权包。
+  **站侧含义**：原件在 `flagged/` 且 `flags` 含 `NO_PACK_JSON` + `WRAPPED`（全部文件套在 `跨版本安装包/` 一层下）
+  ⇒ **若做成兼容包上传，必须先扁平化**（`pack.json` 必须在 zip 根）。这条归站侧那条线。
+
 ## 0.15.3-0.2.4 — 2026-10-12
 
 **变体 / 口径层：`pack.json.variants`（DESIGN §28.39，docs/WORKSHOP.md §1.20）。** 三个社区 mod「写了等于没写」

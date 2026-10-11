@@ -72,6 +72,7 @@
 | `kits.relativeImports` | `kits/<id>.js` 里的 `./…`（含 `kits/_shared.js` 这类辅助文件） | 只许**向下**相对（`..`/绝对/`%`/反斜杠/非 `.js` 仍拒）；按「出现 import 的那个文件」自己的目录解析，两端同一文件；辅助文件字节进身份哈希（`kits/**/*.js` 递归） | §28.18 |
 | `routes` | `routes = [{ path, cache }]` | 路径与缓存策略都在允许集合内 | §28.13 |
 | `assets` | `assets = { container, manifest, serverPolicy?, verify?, mirrors? }`；`mirrors[] = { id, base, sha256 }` | 装载期核对摘要；`server: serve \| cache-only`；`mirrors` **只镜像本包自己的容器**：`base` 必须绝对 `https://`（有主机、无凭据、无查询、尾斜杠）、id 唯一且 ≤ 4 条、`sha256` 必须等于装载期从包内文件算出的容器摘要（对不上的那条**停用并点名**，不拒包）；声明 `mirrors` 必须写 `license`（`ASSETS_MIRROR_NEEDS_LICENSE`：素材的再分发者是作者，授权问题不因为换了一台主机就消失，与 §28.36 的 `VOICE_CDN_NEEDS_LICENSE` 同一条理由）；**服务端不为这一格发一次网络请求**（取字节的是客户端） | §28.13 / §28.40 |
+| `behaviour` | `behaviour = [{ switch, option?, name?, desc? }]` | **闭枚举**：开关名与选项名都只许取 `BEHAVIOUR_SWITCHES` 里有的（`BEHAVIOUR_UNKNOWN_SWITCH` / `BEHAVIOUR_UNKNOWN_OPTION`，整包拒，不是忽略）；**包里没有数值、也没有路径** —— 动作（`{ kind, value }`）由引擎构造，`module` / `entry` / `file` / `path` / `value` / `key` 这类键在形状层**点名拒**（这一格永远不是一条数值 / 文件覆盖通道，那就是安装器）；必须 `combat: true`（`BEHAVIOUR_NEEDS_COMBAT`）；**不是贡献项**（只带它的包照旧 `EMPTY_PACK`）；不声明 ⇒ 归一化清单里不长这个键，而声明了**必须**进包身份哈希、**不进** `modDigest`（只哈希 `[id, hash]`）；**今天表是空的** ⇒ 任何声明都被点名整包拒（首格与它的引擎实现点一起落，加一格必须已有实现点） | §28.43 |
 
 ### C 层：客户端界面
 
