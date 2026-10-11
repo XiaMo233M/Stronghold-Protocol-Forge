@@ -136,6 +136,22 @@ export const PACK_TARGETS = Object.freeze(['forge', 'stardust']);
 /** `target: "stardust"` 的包额外允许的两格（Stardust profile）：`type`（必须是 `mod`）与 `capabilities`。 */
 export const STARDUST_TARGET_FIELDS = Object.freeze(['type', 'capabilities']);
 
+/**
+ * **能力认领的字段**（`target: "stardust"`）：Stardust 宿主的 profile 里，一个能力可以额外收下它自己的字段
+ * （例如 `announcements` 能力收 `announcements` 列表）。本引擎不装载这些包、也不解释那些字段 —— 但**必须认识它们**，
+ * 否则「同一份 pack.json 两端各自读得懂」在这张闭集前就断了：作者会看到本引擎报 `PACK_UNKNOWN_FIELD`。
+ * （注意名字：Stardust 用的字段叫 `announcements` **不是** `notices` —— 本引擎自己已经有一个 `notices`（DESIGN
+ * §28.15 的纯文本声明，形状是一个对象），同一个键不能对两个宿主说两种形状。）
+ *
+ * 这张表是**手抄的镜像**（与 Stardust 的 `shared/modPacks.js MOD_CAPABILITY_FIELDS` 对应），故意的：
+ * 一份远端仓库的表没法在这里被 import；漂移的代价是「本引擎拒装一份它其实该放行的包」——两端对照由作者侧的
+ * `chain-test.mjs`（同一份 pack.json 两个宿主各自读）盯着，改一边就要改另一边。字段本身**不做语义校验**：
+ * 它是 Stardust 的 profile 要判的东西，本引擎只看形状（必须是那份能力认领的名字）。
+ */
+export const STARDUST_CAPABILITY_FIELDS = Object.freeze({
+  announcements: Object.freeze(['announcements']),
+});
+
 /** 未知顶层键的拒绝码（见 `PACK_FIELDS`）。 */
 export const PACK_UNKNOWN_FIELD_CODE = 'PACK_UNKNOWN_FIELD';
 /** 一个顶层键在错误文案里最多显示多少个字符（一个手写坏掉的 pack.json 可以有几千字符的键）。 */
@@ -1315,13 +1331,23 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // 得不到任何线索。判据放在最前面：一个连键都不认识的清单，后面的字段级判据都是在猜它想说什么。
   //
   // 例外只有一条：`target: "stardust"` 的包（给 Stardust 宿主的**声明型包**）额外允许 Stardust profile 的两格
-  // （`type` / `capabilities`）—— 同一份 pack.json 两端各自读得懂，谁都不许把对方认识的键当成笔误。
+  // （`type` / `capabilities`），以及**那两格里声明的能力自己认领的字段**（`STARDUST_CAPABILITY_FIELDS`，
+  // 例如 `announcements` 能力的 `announcements`）—— 同一份 pack.json 两端各自读得懂，谁都不许把对方认识的键当成笔误。
   const starTarget = raw.target === 'stardust';
+  // 能力认领的字段只对**声明了那个能力**的包放行：`announcements` 字段跟着 `capabilities: ["announcements"]` 走
+  // （与 Stardust 侧 `MOD_CAPABILITY_NOT_DECLARED` 同一条规则，本引擎这边只管形状）。
+  const starClaimed = new Set();
+  if (starTarget && Array.isArray(raw.capabilities)) {
+    for (const cap of raw.capabilities) {
+      for (const name of STARDUST_CAPABILITY_FIELDS[cap] || []) starClaimed.add(name);
+    }
+  }
   for (const key of Object.keys(raw)) {
     if (PACK_FIELDS.includes(key)) continue;
     if (starTarget && STARDUST_TARGET_FIELDS.includes(key)) continue;
+    if (starClaimed.has(key)) continue;
     return fail(PACK_UNKNOWN_FIELD_CODE,
-      `pack.json: "${key.length > MAX_KEY_SHOWN ? `${key.slice(0, MAX_KEY_SHOWN)}…` : key}" is not a field of this pack format (${PACK_FIELDS.join(', ')}${starTarget ? `, plus ${STARDUST_TARGET_FIELDS.join(', ')} for target "stardust"` : ''}). A key this loader does not know is never read: write it as one of the fields above, or drop it — a declaration that is ignored is worse than a refusal`);
+      `pack.json: "${key.length > MAX_KEY_SHOWN ? `${key.slice(0, MAX_KEY_SHOWN)}…` : key}" is not a field of this pack format (${PACK_FIELDS.join(', ')}${starTarget ? `, plus ${STARDUST_TARGET_FIELDS.join(', ')} (and the fields a declared Stardust capability claims) for target "stardust"` : ''}). A key this loader does not know is never read: write it as one of the fields above, or drop it — a declaration that is ignored is worse than a refusal`);
   }
   const id = typeof raw.id === 'string' && raw.id ? raw.id : dirName;
   if (!PACK_ID_RE.test(id)) return fail('BAD_PACK_ID', `"${id}" is not a valid pack id (letters, digits, _ and - only)`);

@@ -177,6 +177,36 @@ test('target: forge（缺省）下 type/capabilities 仍是未知键（闭集一
   assert.match(r.detail, /is not a field of this pack format/);
 });
 
+test('stardust 目标：声明的能力认领它自己的字段（announcements）；没声明的同名键仍具名拒绝', () => {
+  // 声明了 `announcements` 能力 ⇒ 它认领的 `announcements` 字段放行（本引擎只看形状：字段内部是 Stardust profile 要判的）
+  const ok = normalizePackManifest(
+    starPack({ capabilities: ['announcements'], announcements: [{ title: '本服公告', paragraphs: ['欢迎。'] }] }), 'sd-pack', { hasAssets: false });
+  assert.equal(ok.ok, true, ok.ok ? '' : `${ok.error}: ${ok.detail}`);
+  assert.deepEqual(ok.pack.capabilities, ['announcements']);
+
+  // 没声明那个能力 ⇒ 同一个键还是未知键（闭集没有松，只是多了一条「能力认领」的例外）
+  const noCap = normalizePackManifest(starPack({ announcements: [{ title: 'x', paragraphs: ['y'] }] }), 'sd-pack', { hasAssets: false });
+  assert.equal(noCap.ok, false);
+  assert.equal(noCap.error, 'PACK_UNKNOWN_FIELD');
+  assert.match(noCap.detail, /"announcements"/);
+
+  // `capabilities` 里写别的能力不会顺手放行 announcements（认领按能力逐条对表）
+  const otherCap = normalizePackManifest(starPack({ capabilities: ['skins'], announcements: [] }), 'sd-pack', { hasAssets: false });
+  assert.equal(otherCap.ok, false);
+  assert.equal(otherCap.error, 'PACK_UNKNOWN_FIELD');
+
+  // forge 目标下（连 capabilities 都不是本引擎的键）更不会放行
+  const forge = normalizePackManifest({ id: 'f', name: 'f', version: '1.0.0', license: 'CC0-1.0', content: ['items'], announcements: [] }, 'f', { hasAssets: false });
+  assert.equal(forge.error, 'PACK_UNKNOWN_FIELD');
+  assert.doesNotMatch(forge.detail, /capability/, 'forge 目标的错误文案不提别的引擎的能力');
+
+  // 名字撞车用例：本引擎自己的 `notices`（对象，DESIGN §28.15）在 stardust 包上仍按**本引擎**的形状判 ——
+  // 这正是 Stardust 侧那个能力叫 `announcements` 的原因（同一个键不能对两个宿主说两种形状）。
+  const collide = normalizePackManifest(starPack({ notices: [{ title: 'x' }] }), 'sd-pack', { hasAssets: false });
+  assert.equal(collide.ok, false);
+  assert.equal(collide.error, 'NOTICES_BAD_SHAPE');
+});
+
 test('装载器：workshop 里的 stardust 包不进 packs、记一行 foreign（具名），forge 包照常装载', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sp-target-'));
   try {
