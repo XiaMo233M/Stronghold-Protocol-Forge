@@ -1,0 +1,13 @@
+/* perf-lite：低配 / 省电 —— 关掉全局动画与过渡。
+ *
+ * 为什么用「全局时长归零」而不是逐组件改：引擎的动画分散在几十个组件里，逐个改会随上游改样式而漏；
+ * 而时长归零对**所有**当前与将来出现的动画/过渡都成立，且不动布局、不动颜色、不动可读性。
+ * 与 `client.theme.vars` 里的 `--t-fast: 0s` 是同一条意图的两半：变量管用变量的那批过渡，这份样式管剩下的。 */
+*,
+*::before,
+*::after {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+}

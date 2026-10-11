@@ -1,0 +1,26 @@
+{
+  "id": "perf-lite",
+  "name": "低配优化（关动画与过渡）",
+  "version": "1.0.0",
+  "author": "jingjiangze",
+  "description": "低配设备 / 省电用：把引擎的过渡时长变量归零，并用一份样式表关掉全局动画与过渡。只影响观感（布局、可读性与对局结果一字不改）。",
+  "license": "GPL-3.0-or-later",
+  "api": ">=1 <2",
+  "client": {
+    "theme": {
+      "vars": {
+        "--t-fast": "0s",
+        "--ease-out": "linear"
+      }
+    },
+    "panels": [
+      {
+        "id": "lite",
+        "slot": "screen.game.hud",
+        "module": "client/lite.js",
+        "styles": ["client/lite.css"],
+        "order": 100
+      }
+    ]
+  }
+}

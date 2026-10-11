@@ -112,6 +112,13 @@ export const PREFS_MAX_VALUE = 512;
 export const PANEL_SEND_TYPES = Object.freeze(['room.appearance']);
 
 /**
+ * **连接读数**（`client.panels.net.status`，DESIGN §28.24）的字段闭集：面板拿到的恰好这几个键，一个不多一个不少。
+ * 与 `Net.snapshot()` 同形（`public/js/net.js`），但**闭集**在这里 —— 引擎以后往快照里加字段，面板不会
+ * 突然拿到一个新东西（面板能依赖的表面必须是钉死的，加一格要改这一行、加一条测试，与 `PANEL_SEND_TYPES` 同一条摩擦）。
+ */
+export const NET_STATUS_FIELDS = Object.freeze(['status', 'attempt', 'retryAt', 'ping', 'lastError', 'playerId']);
+
+/**
  * 面板偏好表（模块级、内存里）。
  *
  * **为什么必须在内存里**：`public/js/ui/extensions.js` 在**服务端测试里也被 import**（注册点的用例跑在 Node 下），
@@ -671,6 +678,24 @@ export function createPanelRegistry(deps) {
         return net.send({ t: 'pack.msg', pack: rec.pack, channel, ...(data === undefined ? {} : { data }) });
       },
       sendResourceMessage: (msg) => (net && typeof net.sendResourceMessage === 'function' ? net.sendResourceMessage(msg) : false),
+      /**
+       * **引擎自己的连接读数**（业主裁决：面板要能显示延迟与连接状态，DESIGN §28.24）。
+       *
+       * 这一格是 `client.panels.net.status` —— 与 `ctx.me` 同一条做法：**无需声明，引擎总是给**。它返回引擎
+       * `Net.snapshot()` 的**冻结拷贝**：`{ status, attempt, retryAt, ping, lastError, playerId }`，其中
+       * `ping` 是引擎心跳测出来的最近一次往返毫秒数（延迟），`status` 是连接状态。**只读**：面板能画，改不到
+       * 引擎那一个对象（改的是自己手里那份拷贝）。没有引擎连接时（Node 下的用例、未接线）返回 `null` ——
+       * 作者据此画空态，而不是画一个假的 0 ms。
+       * @returns {{ status: string, attempt: number, retryAt: number|null, ping: number|null, lastError: object|null, playerId: string|null } | null}
+       */
+      status() {
+        if (!net || typeof net.snapshot !== 'function') return null;
+        try {
+          const s = net.snapshot();
+          if (!s || typeof s !== 'object') return null;
+          return Object.freeze(Object.fromEntries(NET_STATUS_FIELDS.map((k) => [k, s[k] ?? null])));
+        } catch { return null; }
+      },
     });
     /**
      * 数据口（业主裁决 2026-10-10）：面板**只读**的那几张表。

@@ -844,3 +844,40 @@ describe('客户端缺口：资源消息 / 入口闸门 / wasEntered 旁路', ()
     assert.doesNotMatch(sp[1], /panel/i);
   });
 });
+
+  test('ctx.net.status()：引擎自己的连接读数（延迟/连接态）的只读闭集拷贝，没连接时是 null（DESIGN §28.24）', async () => {
+    const seen = [];
+    const h = harness();
+    const snapshot = { status: 'online', attempt: 0, retryAt: null, ping: 42, lastError: null, playerId: 'p1', extraFutureField: 'must not leak' };
+    const realNet = { on: () => () => {}, sendResourceMessage: () => true, snapshot: () => ({ ...snapshot }) };
+    const registry = createPanelRegistry({
+      store: h.store, net: realNet, log: quiet,
+      importModule: async () => ({ mount: (ctx) => { seen.push(ctx); } }),
+      slotHost: (s) => h.dom.resolve(s) || h.dom.render(s), createElement: (t) => h.dom.create(t),
+      env: { serviceWorker: true, cacheStorage: true, webCrypto: true },
+    });
+    h.store.patch('session', { entered: true });
+    registry.apply([wire({ gate: 'session.entered', url: `${MOD_PANEL_PREFIX}alpha/gate.js?v=1` })]);
+    await settle();
+    const ctx = seen[0];
+    const st = ctx.net.status();
+    assert.ok(Object.isFrozen(st), '拿到的是冻结拷贝');
+    assert.deepEqual(Object.keys(st).sort(), ['attempt', 'lastError', 'ping', 'playerId', 'retryAt', 'status'],
+      '字段闭集：与 NET_STATUS_FIELDS 一字不差（引擎以后往快照里加字段，面板不会突然多拿到一个）');
+    assert.equal(st.ping, 42, '延迟读数原样给出');
+    assert.equal(st.extraFutureField, undefined, '闭集之外的字段不外溢');
+    const again = ctx.net.status();
+    assert.notEqual(again, st, '每次取的是新拷贝（冻结的那一份改不动，改也改不到引擎）');
+    assert.equal(again.ping, 42);
+
+    // 没有引擎连接（未接线 / Node 用例）：null —— 作者据此画空态，而不是画一个假的 0 ms
+    const bare = createPanelRegistry({
+      store: h.store, net: { on: () => () => {}, sendResourceMessage: () => true }, log: quiet,
+      importModule: async () => ({ mount: (ctx2) => { seen.push(ctx2); } }),
+      slotHost: (s) => h.dom.resolve(s) || h.dom.render(s), createElement: (t) => h.dom.create(t),
+      env: { serviceWorker: true, cacheStorage: true, webCrypto: true },
+    });
+    bare.apply([wire({ gate: 'session.entered', url: `${MOD_PANEL_PREFIX}alpha/gate2.js?v=1` })]);
+    await settle();
+    assert.equal(seen[1].net.status(), null);
+  });

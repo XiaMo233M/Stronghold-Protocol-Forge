@@ -1783,3 +1783,26 @@ pack is refused. The two tests that pin the ctx key set (`test/modClientPanels.t
 Tests: `test/modClientPanels.test.js` — the ctx surface, the frozen-snapshot rule, and the three room states (not in a
 room / seated / spectating), plus "a later store change is visible through the same ctx".
 
+
+### 28.24 `ctx.net.status()`: the engine's own connection readout (implemented)
+
+**Why this is a surface and not a panel trick.** A pack that wants to show latency or connection state had no readout:
+the engine's own numbers live inside `public/js/net.js` (`Net.ping`, `Net.status`, the reconnect attempt), and a panel
+gets neither the store nor the net object — it only sees the S2C frames the engine forwards. So the honest options were
+"no latency panel" or "one read-only cell", and the owner's ruling (2026-10-11) picked the cell.
+
+**The shape.** `ctx.net.status()` — same family as `ctx.me`: **no `pack.json` declaration**, the engine always gives it.
+It returns a frozen copy of the engine's `Net.snapshot()` restricted to the closed field set
+`public/js/ui/extensions.js NET_STATUS_FIELDS` (`status`, `attempt`, `retryAt`, `ping`, `lastError`, `playerId`), or
+`null` when no engine net is attached (Node tests, an unwired host) — the author draws an empty state instead of a fake
+`0 ms`. `ping` is the engine heartbeat's last round-trip in milliseconds.
+
+**Why a closed set and not the whole snapshot.** The engine may grow `Net.snapshot()`; a panel-facing surface must not
+grow silently with it. Adding a field means editing `NET_STATUS_FIELDS`, the row in `docs/MOD-SURFACE.md` and a test —
+the same deliberate friction as `PANEL_SEND_TYPES` and `CLIENT_PANEL_SLOTS`. Read-only in both directions: the panel
+gets a copy (mutating it changes nothing), and there is still no store, no `Match`, no runner.
+
+**What it does NOT give.** Server-side health (`/healthz` fields: load, queue depth, worker pools) is not public and
+stays that way — a "server status" panel shows what the engine already tells clients (the connection readout, the
+`welcome` frame through `ctx.net.on('welcome')`) plus whatever the pack's own server half reports over its channel.
+Adding the rest would be a product decision, not a pack surface.

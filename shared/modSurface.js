@@ -279,7 +279,21 @@ export const MOD_SURFACE = Object.freeze([
     spec: '§28.8',
   },
   {
-    id: 'client.panels.messages',
+    id: 'client.panels.net.status',
+    layer: 'C',
+    decl: '（无声明：`ctx.net.status()` 与 `ctx.me` 同一条做法 —— 引擎总是给的那一格只读连接读数）',
+    // 与 ctx.me 同一类：不是 pack.json 里的声明，而是引擎总是注入的读数，所以锚在**引擎自己那一端的真相**上。
+    anchors: [{ symbol: 'NET_STATUS_FIELDS', module: 'extensions' }, { symbol: 'MOD_PANEL_SLOTS', module: 'extensions' }],
+    requires: [
+      '只读：引擎 `Net.snapshot()` 的字段闭集 `NET_STATUS_FIELDS` 的冻结拷贝（status / attempt / retryAt / ping / lastError / playerId）',
+      '`ping` 是引擎心跳测出的最近一次往返毫秒数（延迟读数）；没有连接时返回 null（作者画空态，不是画 0 ms）',
+      '**没有** store / match / battle / audio 句柄，也不能改引擎那一份（拿到的是拷贝）',
+    ],
+    files: ['public/js/ui/extensions.js', 'public/js/net.js'],
+    tests: ['test/modClientPanels.test.js'],
+    spec: '§28.24',
+  },
+  {    id: 'client.panels.messages',
     layer: 'C',
     decl: 'pack.json.client.panels[].messages[] = "<通道名>"',
     anchors: [{ symbol: 'CLIENT_PANEL_SLOTS' }],
