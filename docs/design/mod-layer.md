@@ -2810,8 +2810,43 @@ SHA-1[0:12] 导入与写缓存；② 任何一步不过 ⇒ **那条镜像作废
 本来就在包的内容哈希里（`identifyPack`），房间摘要闸门与 golden 语料一个字都没动。`MOD_SURFACE_FROZEN['1']`
 **只加不改**（新表面 `client.sources` 进表，账本那串字面量一个字母都不动）。
 
+### 28.42 房间目录的公开面：`GET /api/rooms` —— **一个数，不是列表**（投稿 `7ca51de6f346` 的收窄）
 
+**投稿 `7ca51de6f346`（作者 Leiothrix，GPL-3.0-or-later，来源 `NeoPecos/Stronghold-Protocol 2cadc618`）要的是什么**：
+C2S `room.list` + `user.activity` 与 S2C `room.list` —— 大厅直接列出**公开合作房间**，每条含房号、房主代号、难度、
+真人与 AI 人数、在线及近期操作人数、招募或对局状态，并提供加入 / 观战入口，招募房间优先；`user.activity` 用来
+更新「最近操作时间」，避免把后台连接误当活跃玩家。它自己在 `SOURCE.md` 里就写明：这需要引擎提供**受限的列表读面**，
+**不要让普通模组直接访问整个 Lobby 内部**。
 
+**业主裁令把它收窄成一个数**：「我们做成不枚举所有全服房间，我们枚举公开房间数，管理员可以查看所有房间数，
+这样就行了」。所以本刀**不做**房间列表，也不做 `room.list` / `user.activity` / `lastInputAt` / `inviteOnly` /
+`recruitWanted`，更**不预埋**它们；S2C 的 `room.list`、`user.activity` 这类帧**一个都不进** `shared/protocol.js`。
 
+**形状**：`GET | HEAD /api/rooms` ⇒ `200`，body **恰好** `{ "publicRooms": <int> }`。`sendJson` 回答
+（自带 `Cache-Control: no-store`），GET/HEAD 之外的动词走既有的 `405` + `Allow: GET, HEAD` 闸。**公开面永远只有
+这一个整数字段**：`inMatch` / `players` / `bots` / `maxSeats` 任何一个都不许加 —— 任何一个都能把「数」变成对
+某一个房间的**侧写**，那正是这一格被收窄掉的东西。
 
+**「公开」的定义 —— 今天没有这个概念，所以照实说**：引擎今天**没有**「公开 / 私有」这个房间属性
+（`room.setInviteOnly` 不存在，本刀不预埋）。因此 `publicRooms` 与 `/healthz` 的 `rooms` **今天恒等**，
+两者共用 `Lobby.roomCounts()` 的同一次遍历与同一个 `this.rooms.size`（`server/lobby.js`）。solo 房算数
+（与 `stats().rooms` 同口径、零歧义）。`this.rooms` 只装**在册**房间 —— `disposeRoom` 会立刻 `this.rooms.delete`，
+所以没有「已销毁但还在数里」的窗口。**`inviteOnly` 落地后，`roomCounts()` 是唯一该改的地方**：把 `publicRooms`
+改成排除 `inviteOnly` 的房间即可。
 
+**管理员面：不新建任何东西。** `/healthz` 的 `rooms`（= `rooms.size` = **全部房间数**）**就是**业主要的那个数，
+运维口径，无需新端点、**无需任何令牌**。本刀**不引入** `SP_ADMIN_TOKEN` 这类共享管理员秘密 —— 那正是
+`server/http/routes.js` 文件头拒绝投稿 `POST /api/account/password` 时给过的同一条理由。
+
+**为什么走 HTTP 而不是协议面**：① 零协议面变更（`shared/protocol.js` 一字不改，`server/net.js` 的 `HEAVY_TYPES`
+不加任何东西，`PROTOCOL_VERSION` / `MOD_API_VERSION` **不抬**）；② 与本仓库刚落地的 `/api/records/<CODE>`
+只读面无鉴权面同形；③ 将来的 `room.list` 若真要做，HTTP 面与协议面互不干扰。
+
+**隐私边界（要说清）**：只给数 ⇒ 不泄露房号、房主名、人数明细。但 **`n = 1` 时「数」就等于暴露「有一个房间
+存在」**，`n = 0` 与 `n >= 1` 的差别本身可推「现在有没有人在玩」—— 这个量级无法再降，除非不给数。而且
+`/healthz.rooms` **今天就已经公开同一个数**（默认 `HOST='::'` 是全网卡绑定），所以本刀新增的信息量约等于零；
+反过来说，「连数都不能给」这个选项今天已经不存在，要收回得连 `/healthz.rooms` 一起收回（另账）。
+
+**测试**：`test/lobby.test.js` —— body 恰好一个字段、随注册表 +1 / 离开 −1、**隐私哨兵**（建房后响应文本不得含
+该房号或房主名）、HEAD 200 无 body、POST 405、以及 `roomCounts()` 与 `stats()` 同源（`publicRooms === total ===
+`/healthz` 的 `rooms`）。

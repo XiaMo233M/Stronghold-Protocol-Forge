@@ -69,6 +69,42 @@
   **不新增协议消息、不动 `server/http/routeMount.js`、不动 `MOD_SURFACE_FROZEN['1']`**（新表面 `client.sources`
   只加不改）。
 
+## 房间目录的公开面（投稿 `7ca51de6f346`）— 待并入下一版
+
+**新增只读端点 `GET | HEAD /api/rooms` ⇒ `{ "publicRooms": <int> }`（DESIGN §28.42，docs/META.md §1.7a）。**
+
+- **一个数，不是列表**：公开面**永远只有** `publicRooms` 这一个整数字段，**不**回答房号、房主名、人数或任何明细
+  —— 任何一个这样的字段都能把「数」变成对某一个房间的**侧写**。`sendJson` 回答（`no-store`），
+  `POST` 等动词走既有的 `405` + `Allow: GET, HEAD` 闸。
+- **管理员面不新建任何东西**：`/healthz` 的 `rooms`（= `Lobby.stats().rooms` = `rooms.size` = **全部房间数**）
+  就是业主要的那个数，运维口径。**本刀不引入** `SP_ADMIN_TOKEN` 这类共享管理员秘密。
+- **「公开」的定义：今天没有这个概念，所以照实说。** 引擎今天没有「公开 / 私有」这个房间属性（`inviteOnly`
+  不存在，本刀**不预埋**），因此 `publicRooms` 与 `/healthz` 的 `rooms` **今天恒等**，两者共用
+  `Lobby.roomCounts()` 的**同一次遍历**与同一个 `rooms.size`（solo 房算数）。`this.rooms` 只装在册房间
+  （`disposeRoom` 立刻 `delete`）。`inviteOnly` 将来落地后，`roomCounts()` 是唯一该改的地方。
+- **协议面一字未动**：`shared/protocol.js` 的 C2S / S2C 不改，`server/net.js` 的 `HEAVY_TYPES` 不加任何东西,
+  **不引入** `ACTIVITY_TYPES` / `user.activity` / `lastInputAt`；`PROTOCOL_VERSION` / `MOD_API_VERSION` **不抬**；
+  默认逐字节不变（不新增任何线上帧，`/healthz` 的字段集合不变）。
+- **投稿 `7ca51de6f346` 的采纳/改动说明**（作者 **Leiothrix**，来源 `NeoPecos/Stronghold-Protocol 2cadc618`，
+  基线 `sganggs/Stronghold-Protocol bc50cac0`，许可 **GPL-3.0-or-later**，原件不含游戏素材）：
+  原件要的是 C2S `room.list` + `user.activity` 与 S2C `room.list` —— 整张**公开合作房间**列表，每条含房号、
+  房主代号、难度、真人与 AI 人数、在线及近期操作人数、招募或对局状态，并提供加入 / 观战入口，招募房间优先，
+  **独立模拟（solo）房间不公开列出**；它自己在 `SOURCE.md` 里就写明这需要引擎提供**受限的列表读面**，
+  **不要让普通模组直接访问整个 Lobby 内部**。
+  **采纳**：受限只读读面这一条**方向**（业主裁令收窄为「只给公开房间数 + 管理员可看全部房间数」），
+  以及「不要暴露 Lobby 内部」的边界主张。
+  **改动**：不做全量枚举、不做 `room.list` / `user.activity` / `lastInputAt` / `inviteOnly` / `recruitWanted`，
+  不做加入 / 观战入口与招募排序，**也不预埋**这些字段；公开面只剩一个整数。
+  **未采纳的原因**：整张列表需要先有一整套「公开 / 私有」房间属性、一个心跳口径和一套限流，且会把 4 字母房号
+  变成可枚举的东西。**solo 房**按业主裁令**算数**（与 `stats().rooms` 同口径），与原件「solo 不列出」不同 ——
+  这一处是我们**刻意**的口径差异。
+- **隐私边界（照实写）**：只给数 ⇒ 不泄露房号 / 房主名 / 人数明细；但 `n = 1` 时「数」就等于暴露「有一个房间
+  存在」，`n = 0` 与 `n >= 1` 的差别本身可推「现在有没有人在玩」，这个量级无法再降。而 `/healthz.rooms` **今天
+  就已经公开同一个数**（默认 `HOST='::'` 全网卡绑定），所以本刀新增的信息量约等于零。
+- **测试**：`test/lobby.test.js` —— body 恰好一个字段、随注册表 +1 / 离开 −1、**隐私哨兵**（建房后响应文本不得
+  含该房号或房主名）、HEAD 200 无 body、POST 405、`roomCounts()` 与 `stats()` 同源
+  （`publicRooms === total ===` `/healthz` 的 `rooms`）。
+
 ## 0.15.3-0.2.4 — 2026-10-12
 
 **变体 / 口径层：`pack.json.variants`（DESIGN §28.39，docs/WORKSHOP.md §1.20）。** 三个社区 mod「写了等于没写」

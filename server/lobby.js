@@ -586,9 +586,24 @@ export class Lobby {  /**
   /** @param {string} code @returns {Room | null} */
   getRoom(code) { return this.rooms.get(String(code).toUpperCase()) || null; }
 
-  /** Counters for /healthz, plus the mod-set digest when this server runs one (DESIGN §28.9: `welcome`, `/healthz` and
-   * the BattleSpec must quote the SAME string, so a bug report can name the content it came from). */
-  stats() {
+  /**
+   * 房间数（业主裁令：**只报数，不枚举**）。
+   *
+   * `publicRooms` 是公开面（`GET /api/rooms`）唯一的那个数，`total` 是运维面（`/healthz` 的 `rooms`）的那个数。
+   *
+   * **今天两者恒等**：引擎今天**没有「公开 / 私有」这个属性** —— `room.setInviteOnly` / `room.list` 都不存在
+   * （那是投稿 7ca51de6f346 与别的刀的内容，本刀**不预埋** `inviteOnly` 字段）。所以「公开房间数」暂时就是
+   * 「房间数」，这里如实返回同一个计数，而不是假装有一个筛选。**`inviteOnly` 落地后**，这个函数是**唯一**
+   * 该改的地方：把 `publicRooms` 改成排除 `inviteOnly` 的房间即可。
+   *
+   * **solo 房算数**（业主裁令，与 `stats().rooms` 同口径、零歧义）：`this.rooms` 只装**在册**房间，
+   * `disposeRoom` 会立刻 `delete`（`this.rooms.delete(room.code)`），所以它没有「已销毁但还在数里」的窗口。
+   *
+   * `out` 是给 `stats()` 复用的：**一次遍历，一件事一个真相** —— 两份「什么算房间」的口径是不允许的。
+   * @param {{ matches?: number, humans?: number, bots?: number, spectators?: number }} [out]
+   * @returns {{ publicRooms: number, total: number }}
+   */
+  roomCounts(out = {}) {
     let matches = 0;
     let humans = 0;
     let bots = 0;
@@ -598,6 +613,17 @@ export class Lobby {  /**
       for (const s of r.seats) if (s && !s.left) (s.isBot ? bots++ : humans++);
       spectators += r.spectators.length;
     }
+    out.matches = matches; out.humans = humans; out.bots = bots; out.spectators = spectators;
+    // 今天 publicRooms === total（见上）。共用的这个 `rooms.size` 就是两者唯一的来源。
+    return { publicRooms: this.rooms.size, total: this.rooms.size };
+  }
+
+  /** Counters for /healthz, plus the mod-set digest when this server runs one (DESIGN §28.9: `welcome`, `/healthz` and
+   * the BattleSpec must quote the SAME string, so a bug report can name the content it came from). */
+  stats() {
+    const seats = {};
+    this.roomCounts(seats);
+    const { matches, humans, bots, spectators } = seats;
     return { rooms: this.rooms.size, matches, humans, bots, spectators, ...this.matchmake.stats(), ...(this.modSet ? { mods: this.modSet.digest, modPacks: this.modSet.packs.length } : {}) };
   }
 

@@ -1146,6 +1146,80 @@ describe('websocket lobby', () => {
     assert.ok(h.sockets >= 1);
     assert.ok(h.sessions >= 1);
   });
+
+  // --------------------------------------------------------------------------------------------------
+  // 房间目录（公开面）：GET /api/rooms —— 一个数，不是列表（业主裁令）
+  // --------------------------------------------------------------------------------------------------
+
+  test('GET /api/rooms: body is EXACTLY { publicRooms } — one integer, nothing else', async () => {
+    const r = await httpReq(srv.port, '/api/rooms');
+    assert.equal(r.status, 200);
+    assert.match(r.headers['content-type'], /^application\/json/);
+    assert.equal(r.headers['cache-control'], 'no-store', 'sendJson must be the one answering');
+    const body = JSON.parse(r.body.toString());
+    // 唯一整数字段。数 = 在册房间数，而 `rooms` Map 在 disposeRoom 时立刻 delete。
+    assert.deepEqual(body, { publicRooms: srv.lobby.rooms.size });
+    assert.deepEqual(Object.keys(body), ['publicRooms'], '公开面永远只有一个整数字段');
+    assert.ok(Number.isInteger(body.publicRooms));
+  });
+
+  test('GET /api/rooms follows the registry: +1 on create, -1 after the last member leaves', async () => {
+    const before = JSON.parse((await httpReq(srv.port, '/api/rooms')).body.toString()).publicRooms;
+    const host = await pool.player('RoomsHost');
+    const st = await createRoom(host);
+    assert.equal(srv.lobby.rooms.size, before + 1);
+    assert.equal(JSON.parse((await httpReq(srv.port, '/api/rooms')).body.toString()).publicRooms, before + 1);
+    // 离开 ⇒ disposeRoom ⇒ this.rooms.delete ⇒ 计数跟着回来（没有「已销毁但还在数里」的窗口）。
+    await expectOk(host, { t: 'room.leave' });
+    assert.equal(srv.lobby.getRoom(st.code), null);
+    assert.equal(JSON.parse((await httpReq(srv.port, '/api/rooms')).body.toString()).publicRooms, before);
+  });
+
+  test('PRIVACY SENTINEL: no room code and no host name can appear in the /api/rooms response', async () => {
+    // 房号是随机 4 字母 ⇒ 断言「该房号与房主名一个字节都不在响应里」是有效哨兵（哨兵出现就必然是真泄露）。
+    // 房主名必须在 NAME_MAX_LEN(12) 以内，否则 hello 先被 BAD_MSG 挡下、这条测试就测不到东西。
+    const SENTINEL = 'SentHost1234';
+    const host = await pool.player(SENTINEL);
+    const st = await createRoom(host);
+    const r = await httpReq(srv.port, '/api/rooms');
+    const text = r.body.toString();
+    assert.equal(text.includes(st.code), false, '房号不得出现在公开面');
+    assert.equal(text.includes(SENTINEL), false, '房主名不得出现在公开面');
+    // 放宽到「任何 4 字母房号形状」也不许有：响应里只该有一个数字。
+    assert.equal(/[A-Z]{4}/.test(text), false, `响应里不该有任何房号形状的串: ${text}`);
+    assert.deepEqual(JSON.parse(text), { publicRooms: srv.lobby.rooms.size });
+  });
+
+  test('HEAD /api/rooms: 200, same headers, no body', async () => {
+    const r = await httpReq(srv.port, '/api/rooms', { method: 'HEAD' });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.length, 0, 'HEAD 无 body（sendJson 的既有行为）');
+  });
+
+  test('POST /api/rooms: 405 with Allow: GET, HEAD — the method gate runs first', async () => {
+    const r = await httpReq(srv.port, '/api/rooms', { method: 'POST' });
+    assert.equal(r.status, 405);
+    assert.equal(r.headers.allow, 'GET, HEAD');
+  });
+
+  test('roomCounts() and stats() are ONE traversal and ONE truth: rooms/publicRooms never diverge', async () => {
+    const c = await pool.player('SameTruth');
+    await createRoom(c);
+    const counts = srv.lobby.roomCounts();
+    const h = JSON.parse((await httpReq(srv.port, '/healthz')).body.toString());
+    // 今天 publicRooms 与 /healthz 的 rooms 恒等：引擎今天没有「公开 / 私有」这个属性（不预埋 inviteOnly）。
+    assert.equal(counts.publicRooms, counts.total);
+    assert.equal(counts.total, h.rooms, '/healthz.rooms 是运维口径的全部房间数');
+    assert.equal(JSON.parse((await httpReq(srv.port, '/api/rooms')).body.toString()).publicRooms, h.rooms);
+    // stats() 的座位计数来自同一次遍历（roomCounts(out) 的 out）：口径分叉会在这里变红。
+    const seats = {};
+    const again = srv.lobby.roomCounts(seats);
+    assert.equal(seats.humans, h.humans);
+    assert.equal(seats.bots, h.bots);
+    assert.equal(seats.spectators, h.spectators);
+    assert.equal(seats.matches, h.matches);
+    assert.equal(again.publicRooms, h.rooms);
+  });
 });
 
 // ---------------------------------------------------------------------------------------------------

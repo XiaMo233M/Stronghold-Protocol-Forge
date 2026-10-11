@@ -5,6 +5,7 @@
 //   * any method but GET / HEAD → 405 with `Allow: GET, HEAD`;
 //   * GET /healthz → JSON status (protocol `version`, release `app`, uptime, the served `build`, sockets, sessions,
 //     rooms, matches), never cached;
+//   * GET /api/rooms → 公开房间数，**一个整数，不是列表**（见下「房间目录」）；
 //   * GET /api/records/<CODE> → the latest finished match of that 4-letter room code;
 //   * GET /api/records/account/<NAME> → that account's OWN row from its latest finished match (name → playerId → row);
 //     404 when the server runs without accounts (`SP_ACCOUNTS` unset) — an absent feature, not an empty one;
@@ -32,6 +33,29 @@
 // That route is **not implemented here**: a site-wide admin secret shared with a chat bot is not a player's password,
 // and "change a password knowing only the account name" would make the old password decorative. Password changes are
 // an operator action on the account file until a per-account reset-ticket design exists (docs/RECORDS.md §5).
+
+// ## 房间目录（公开面）：只报数，不枚举（业主裁令）
+// 这一格来自投稿 7ca51de6f346「服务器房间目录与活跃人数」的**收窄**。原投稿要的是 C2S `room.list` + `user.activity`
+// 与 S2C `room.list`：整张房间列表，含**房号、房主代号、真人与 AI 人数、在线及近期操作人数、招募状态**，以及加入 /
+// 观战入口。**那个形状本批不采纳** —— 它必须先有一整套「公开 / 私有」的房间属性（`room.setInviteOnly`）、一个
+// 网络心跳口径（`lastInputAt`）和一套限流，而且会把 4 字母房号变成可枚举的东西（房号进列表就等于公开）。
+//
+// 业主裁令把它收窄成**一个数**：「我们做成不枚举所有全服房间，我们枚举公开房间数，管理员可以查看所有房间数，
+// 这样就行了」。所以公开面**只有** `publicRooms` 一个整数字段，**永远**不回答房号、房主名、人数或任何明细：
+// 任何一个这样的字段都能把「数」变成对某一个房间的**侧写**。
+//
+// 维护口径（`Lobby.roomCounts`）：**今天** `publicRooms` 与 `/healthz` 的 `rooms` **恒等**，因为引擎今天**没有**
+// 「公开 / 私有」这个属性（`inviteOnly` 不存在，本批**不预埋**）。「公开房间数」因此暂时就是「房间数」——
+// 如实返回同一个计数，而不是假装有一个筛选。solo 房算数（与 `stats().rooms` 同口径）。`inviteOnly` 落地后，
+// 改 `Lobby.roomCounts` 一处即可。
+//
+// **管理员面不在这里**：`/healthz` 的 `rooms` **就是**「全部房间数」（运维口径），无需新端点、无需任何令牌。
+// 本批**不引入** `SP_ADMIN_TOKEN` 这类共享管理员秘密（见 routes.js 头部对投稿 `POST /api/account/password` 的
+// 拒绝理由，那是同一个东西）。
+//
+// **本刀不动协议面**：`shared/protocol.js` 的 C2S / S2C 一字不改，`server/net.js` 的 `HEAVY_TYPES` 不加任何东西
+// （尤其**不引入** `ACTIVITY_TYPES` / `user.activity` / `lastInputAt`），`PROTOCOL_VERSION` / `MOD_API_VERSION`
+// 不抬。将来的 `room.list` 若真要做，HTTP 面与协议面互不干扰。
 
 import { PROTOCOL_VERSION, APP_VERSION } from '../../shared/constants.js';
 import { buildTag } from './buildTag.js';
@@ -65,6 +89,9 @@ const RECORDS_RATE_PER_SEC = 1;
 const RECORDS_RATE_BURST = 10;
 /** 空闲多久回收一只桶（与 `net.js` sweep 同一条思路：不做的话这张表本身会随着见过的地址一直长）。 */
 const RECORDS_BUCKET_IDLE_MS = 10 * 60_000;
+
+/** 公开房间数的**唯一**路径（一个数，不是列表）。见文件头「房间目录（公开面）」。 */
+export const PUBLIC_ROOMS_URL = '/api/rooms';
 
 /**
  * The GET /healthz body.
@@ -143,6 +170,12 @@ export function createRequestHandler({ serveStatic, health, log, records = null,
       return;
     }
     if (parts.rawPath === MODS_CATALOG_URL && modsCatalog && modsCatalog(req, res)) return;
+    if (parts.rawPath === PUBLIC_ROOMS_URL) {
+      // **只有一个整数字段**：加任何一个别的键（房号、房主名、在局中、人数、容量）都是把「数」变成侧写，
+      // 那正是这一格被收窄掉的东西。`sendJson` 自带 `Cache-Control: no-store`。
+      sendJson(req, res, 200, { publicRooms: health.lobby.roomCounts().publicRooms });
+      return;
+    }
     // 账号名规则**先**判：它与房间号规则共用 `/api/records/` 前缀，而账号名不一定是 4 个字母。
     // 没有账号的服务器上这里回 404 —— 「功能不存在」与「这个账号没打过」是两件事，不该用同一个码回答。
     const accountPath = ACCOUNT_PATH_RE.exec(parts.rawPath);

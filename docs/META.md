@@ -375,6 +375,24 @@ the meantime (header bullet of `server/lobby.js`, test/roomKeep.test.js).
 
 ---
 
+### 1.7a 房间目录的公开面：`GET /api/rooms` —— 一个数，不是列表
+
+**这一格只回答「现在有多少间公开房间」，永远不枚举房间。** `GET | HEAD /api/rooms` ⇒ `200`，
+body **恰好** `{ "publicRooms": <int> }`（`server/http/routes.js` 的 `PUBLIC_ROOMS_URL`；`sendJson` 回答，
+自带 `no-store`；405 + `Allow: GET, HEAD` 由既有的方法闸给出）。**公开面永远只有这一个整数字段**：
+`inMatch` / `players` / `bots` / `maxSeats` 任何一个都不许加 —— 任何一个都能把「数」变成对某一个房间的侧写。
+
+**「管理员看全部房间数」不需要新东西**：`/healthz` 的 `rooms`（= `Lobby.stats().rooms` = `rooms.size` = 全部房间数）
+就是那个数，运维口径。本刀**不新建**管理员端点，也**不引入**任何共享管理员令牌。
+
+**为什么不做成房间列表**（投稿 `7ca51de6f346` 原本要的）：那需要一整套「公开 / 私有」的房间属性、
+一个网络心跳口径（`lastInputAt`）和一套限流，而且会把 4 字母房号变成可枚举的东西。业主裁令把它收窄成一个数。
+**引擎今天没有「公开 / 私有」这个属性**，所以 `publicRooms` 与 `/healthz` 的 `rooms` **今天恒等**，
+两者共用 `Lobby.roomCounts()` 的同一次遍历（`server/lobby.js`；solo 房算数）。`inviteOnly` 将来落地后，
+`roomCounts()` 是唯一该改的地方。细节见 DESIGN §28.42 与 `server/http/routes.js` 文件头。
+
+---
+
 ### 1.8 房内聊天与快捷短语 (room chat)
 
 **这是引擎特性，不是包能力。** 两样都在 `server/lobby.js`（`chat` / `quickMsg` / `sayInRoom` / `chatAllowed`）与
