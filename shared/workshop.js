@@ -121,6 +121,10 @@ export const PACK_FIELDS = Object.freeze([
   'playtest',
   // 中间层四组能力声明（DESIGN §28.13）
   'assets', 'client', 'server', 'routes',
+  // 管理器合同（docs/WORKSHOP.md「mod registry」）：对其它工坊包的依赖与互斥声明。形状是 [{ id, range? }]，
+  // range 是那个包的 version 区间（shared/packs.js 的同一套语法）；**语义在装载期裁决**（server/workshop.js
+  // 的 adjudicatePackGraph），这里只管形状。声明了不存在的依赖 / 版本不合 / 循环 / 互斥，都在装载期具名拒绝。
+  'dependencies', 'conflicts',
 ]);
 
 /** 未知顶层键的拒绝码（见 `PACK_FIELDS`）。 */
@@ -1034,9 +1038,50 @@ function parseRoutesDecl(raw) {
  * 覆盖 —— 两个包的公告不会互相覆盖，引擎的公告也不会被包顶掉。
  * @returns {{ ok: true, decl: object } | { ok: false, error: string, detail: string }}
  */
+/**
+ * 管理器合同（docs/WORKSHOP.md「mod registry」）里 `dependencies` / `conflicts` 的形状：
+ * `[{ id, range? }]` —— `id` 是**另一个工坊包**的 id（同一套字符集），`range` 是那个包 `version` 的
+ * 区间（shared/packs.js 的同一套语法，缺省 = 任意版本）。重复的 (id, range) 对警告并去重；
+ * 同一个 id 出现两次而 range 不同是**作者的表达混乱**（语义无法确定），点名拒绝。
+ */
+function parseModRefsDecl(raw, what) {
+  if (!Array.isArray(raw)) {
+    return fail(`${what.toUpperCase()}_BAD_SHAPE`, `${what} must be a list of { id, range? } entries (a pack id of another workshop pack)`);
+  }
+  const out = [];
+  const seen = new Map();
+  for (const [i, row] of raw.entries()) {
+    const where = `${what}[${i}]`;
+    if (!isPlainObj(row)) return fail(`${what.toUpperCase()}_BAD_ENTRY`, `${where} must be an object: { id, range? }`);
+    for (const key of Object.keys(row)) {
+      if (!['id', 'range'].includes(key)) return fail(`${what.toUpperCase()}_UNKNOWN_FIELD`, `${where}: "${key}" is not a declared field (id, range)`);
+    }
+    if (typeof row.id !== 'string' || !PACK_ID_RE.test(row.id)) {
+      return fail(`${what.toUpperCase()}_BAD_ID`, `${where}.id ${JSON.stringify(row.id ?? null)} is not a pack id`);
+    }
+    if (row.range !== undefined && (typeof row.range !== 'string' || !isVersionRange(row.range))) {
+      return fail(`${what.toUpperCase()}_BAD_RANGE`, `${where}.range: ${JSON.stringify(row.range ?? null)} is not a version range (">=1.0.0", "1.x" …)`);
+    }
+    const key = `${row.id}@${row.range ?? '*'}`;
+    if (seen.has(key)) continue; // 逐字相同的重复条目：去重（输出按 (id, range) 排序，确定性不变）
+    seen.set(key, row.id);
+    out.push(row.range === undefined ? { id: row.id } : { id: row.id, range: row.range });
+  }
+  // 同 id 不同 range：语义没法确定（哪个区间算数？），点名拒绝而不是猜
+  const byId = new Map();
+  for (const e of out) {
+    if (!byId.has(e.id)) byId.set(e.id, []);
+    byId.get(e.id).push(e.range ?? '*');
+  }
+  for (const [id, ranges] of byId) {
+    if (new Set(ranges).size > 1) return fail(`${what.toUpperCase()}_CONFLICTING_RANGES`, `${what}: "${id}" is listed with different ranges (${ranges.join(' vs ')}) — one entry per dependency`);
+  }
+  out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : (a.range ?? '') < (b.range ?? '') ? -1 : 1));
+  return { ok: true, decl: out };
+}
+
 function parseNoticesDecl(raw) {
-  if (!isPlainObj(raw)) return fail('NOTICES_BAD_SHAPE', 'notices must be an object: { announcement?, credits? }');
-  const NOTICES_FIELDS = ['announcement', 'credits'];
+  if (!isPlainObj(raw)) return fail('NOTICES_BAD_SHAPE', 'notices must be an object: { announcement?, credits? }');  const NOTICES_FIELDS = ['announcement', 'credits'];
   for (const key of Object.keys(raw)) {
     if (!NOTICES_FIELDS.includes(key)) {
       return fail('NOTICES_UNKNOWN_FIELD', `notices: "${key}" is not a declared field (${NOTICES_FIELDS.join(', ')})`);
@@ -1608,6 +1653,14 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // 结果」的纪律 —— 没声明 notices 的包哈希逐字节不变。
   const noticesParsed = raw.notices === undefined ? null : parseNoticesDecl(raw.notices);
   if (noticesParsed && !noticesParsed.ok) return noticesParsed;
+  // 管理器合同（docs/WORKSHOP.md「mod registry」）：对**其它工坊包**的依赖与互斥声明，`[{ id, range? }]`——
+  // id 是另一个工坊包，range 是那个包的 version 区间（shared/packs.js 的同一套语法）。形状在这里；
+  // **语义在装载期裁决**（`adjudicatePackGraph`：缺失 / 版本不合 / 互斥 / 循环，全部具名拒绝）。与 `declared`
+  // 同一条「写了才进归一化结果」的纪律 —— 没声明的包哈希逐字节不变。
+  const depsParsed = raw.dependencies === undefined ? null : parseModRefsDecl(raw.dependencies, 'dependencies');
+  if (depsParsed && !depsParsed.ok) return depsParsed;
+  const conflictsParsed = raw.conflicts === undefined ? null : parseModRefsDecl(raw.conflicts, 'conflicts');
+  if (conflictsParsed && !conflictsParsed.ok) return conflictsParsed;
   // 一条声明只有在清单里**真的写了这个键**时才进归一化结果。这一条是本刀最容易做坏的地方：无条件写进去会让
   // 每一个已存在的包（它们没有这些键）的归一化清单多出四个键，于是内容哈希全变、`identifyPack` 的
   // `manifest` 与 `hash` 也跟着变 —— 房间的摘要闸门会开始误判（DESIGN §28.2）。
@@ -1619,6 +1672,8 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (routesParsed) declared.push(['routes', routesParsed.decl]);
   if (i18nParsed) declared.push(['i18n', i18nParsed.decl]);
   if (noticesParsed) declared.push(['notices', noticesParsed.decl]);
+  if (depsParsed) declared.push(['dependencies', depsParsed.decl]);
+  if (conflictsParsed) declared.push(['conflicts', conflictsParsed.decl]);
   /** 一条声明算不算「贡献」：归一化后的值里有没有东西。`routes: []` 与 `client: { panels: [], requires: [] }`
    *  都是**合法但什么都不做**的声明（与 `voices: {}` / `art: { chars: {} }` 同一个语义），照旧不算贡献 ——
    *  所以「一个只写了 `routes: []` 的包」仍然是空包。反向的那条同样载重：`assets` / `client.panels` /
@@ -1639,7 +1694,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     // 只声明助战的包今天整包被拒（plugin-pack G6：一个 `support: [...]` + `content: []` 的包得到的就是这一条），
     // 而原来的文案里**没有** `support` 这个词，作者只能对着 `EMPTY_PACK` 猜。`support` 只决定**助战卡池**里放谁，
     // 干员本体还是由 `content: ["chess"]` 带进来的 —— 所以放宽它不是这一刀的活（那是既有裁决），把话说明白才是。
-    const notContributions = ['support', 'playtest']
+    const notContributions = ['support', 'playtest', 'dependencies', 'conflicts']
       .filter((n) => raw[n] !== undefined);
     const names = [...WORKSHOP_CONTENT_FILES, 'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'skins', 'operators',
       'assets', 'client', 'server.preDispatch', 'server.meta', 'server.battle', 'server.room', 'server.modules', 'routes', 'i18n', 'notices'];
@@ -3332,4 +3387,98 @@ export function workshopSummary(report) {
   if (report.supportOff) parts.push('助战 pool contributions off (support.json "workshop": false)');
   if (report.errors.length) parts.push(`${report.errors.length} rejected record(s)`);
   return parts.join('; ');
+}
+
+/**
+ * 管理器合同的**装载期裁决**（docs/WORKSHOP.md「mod registry」；阶段 1C）：对一份已归一化的包清单
+ * （loadWorkshop 的 `packs`，或编辑器的同一形状）按 `dependencies` / `conflicts` 声明做跨包裁决。
+ *
+ * 规则全部确定性（与「包 id 字典序小的赢」同一家族）：
+ *   * **缺失依赖** —— 声明的 id 不在集合里 ⇒ 依赖方被拒（`missing dependency`）；
+ *   * **版本不合** —— 依赖在、但它的 `version` 不满足声明的 range ⇒ 依赖方被拒（`does not satisfy`）；
+ *     依赖包自己没有 `version` 时视为满足（它的 version 是「未声明」，不是「不匹配」）；
+ *   * **互斥** —— A 声明了对 B 的冲突（B 在集合里且 B 的 version 满足 range）⇒ **id 大的那个**被拒
+ *     （与既有裁决「同 id 抢占按包 id 排序」同一条确定性来源），理由里点名双方与声明方；
+ *   * **级联** —— 被拒的依赖让它的依赖方也无法工作 ⇒ 级联拒绝，理由链完整（迭代到不动点）；
+ *   * **循环** —— 幸存集合里的依赖边成环 ⇒ 环上全体被拒（`dependency cycle`）。
+ *
+ * 纯函数：同一输入永远同一输出（按 id 排序迭代）；不改输入。装载器把 `refused` 变成具名的启动错误，
+ * `kept` 就是真正装载的集合。
+ * @param {Array<{ id: string, version?: string, name?: string, dependencies?: Array<{ id: string, range?: string }>, conflicts?: Array<{ id: string, range?: string }> }>} packs
+ * @returns {{ kept: unknown[], refused: Array<{ id: string, reason: string }> }}
+ */
+export function adjudicatePackGraph(packs) {
+  const list = (Array.isArray(packs) ? packs : []).slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const byId = new Map();
+  for (const p of list) if (!byId.has(p.id)) byId.set(p.id, p);
+  /** @type {Map<string, string>} id → 拒绝理由 */
+  const refused = new Map();
+  const satisfied = (range, target) => (range === undefined || range === '' ? true : appVersionMatches(range, target.version));
+
+  // 第一层：缺失 / 版本不合 / 互斥（互斥按 id 大者败；双方都声明时同一条边只裁决一次）
+  for (const p of list) {
+    for (const dep of p.dependencies ?? []) {
+      const target = byId.get(dep.id);
+      if (!target) refused.set(p.id, `missing dependency "${dep.id}"`);
+      else if (dep.range !== undefined && !satisfied(dep.range, target)) {
+        refused.set(p.id, `dependency "${dep.id}" version ${target.version ?? '(undeclared)'} does not satisfy "${dep.range}"`);
+      }
+    }
+    for (const c of p.conflicts ?? []) {
+      const target = byId.get(c.id);
+      if (!target || (c.range !== undefined && !satisfied(c.range, target))) continue;
+      const loser = p.id > c.id ? p.id : c.id;
+      const winner = p.id > c.id ? c.id : p.id;
+      if (loser === winner) continue;
+      refused.set(loser, `conflicts with "${winner}" (declared by "${p.id}")`);
+    }
+  }
+  // 级联：依赖链上任何一个被拒，依赖方跟着拒（迭代到不动点）
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const p of list) {
+      if (refused.has(p.id)) continue;
+      for (const dep of p.dependencies ?? []) {
+        if (refused.has(dep.id) && !byId.has(dep.id)) continue; // 缺失依赖已经在第一层点名
+        if (refused.has(dep.id)) {
+          refused.set(p.id, `depends on "${dep.id}", which was refused`);
+          changed = true;
+          break;
+        }
+      }
+    }
+  }
+  // 循环：幸存集合里的依赖边成环 ⇒ 环上全体被拒（与级联不同：环上每个包自己的依赖都「在」，但声明本身是死锁）
+  const edges = new Map();
+  for (const p of list) {
+    if (refused.has(p.id)) continue;
+    const targets = (p.dependencies ?? []).map((d) => d.id).filter((id) => byId.has(id) && !refused.has(id));
+    edges.set(p.id, targets);
+  }
+  const state = new Map();
+  const stack = [];
+  const visit = (id) => {
+    state.set(id, 1);
+    stack.push(id);
+    for (const t of edges.get(id) ?? []) {
+      const s = state.get(t);
+      if (s === 1) {
+        const cycle = stack.slice(stack.indexOf(t));
+        for (const m of cycle) refused.set(m, `dependency cycle: ${cycle.concat(cycle[0]).join(' → ')}`);
+        return true;
+      }
+      if (s === undefined && visit(t)) return true;
+    }
+    stack.pop();
+    state.set(id, 2);
+    return false;
+  };
+  for (const p of list) if (!refused.has(p.id) && !state.has(p.id)) { if (visit(p.id)) break; }
+
+  const kept = list.filter((p) => !refused.has(p.id));
+  const refusedList = [...refused.entries()]
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+    .map(([id, reason]) => ({ id, reason }));
+  return { kept, refused: refusedList };
 }

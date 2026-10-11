@@ -25,7 +25,7 @@
 import http from 'node:http';
 import path from 'node:path';
 import { getData, loadData } from './data.js';
-import { loadWorkshop, loadWorkshopKits, loadWorkshopHooks, loadWorkshopPanels, workshopThemeFor, dropUnavailablePreDispatchPacks, WORKSHOP_DIR } from './workshop.js';
+import { loadWorkshop, loadWorkshopKits, loadWorkshopHooks, loadWorkshopPanels, workshopThemeFor, dropUnavailablePreDispatchPacks, adjudicatePackGraph, WORKSHOP_DIR } from './workshop.js';
 import { readModRegistry, applyModRegistry } from './modRegistry.js';
 import { loadMetaModules } from './match/metaPack.js';
 import { loadBattleInstallers } from './battlePack.js';
@@ -103,7 +103,11 @@ export async function startServer(opts = {}) {
   const modRegistry = readModRegistry(stateRootFor(ROOT), { log });
   const registryApplied = applyModRegistry(loadedOnce.packs, modRegistry);
   for (const d of registryApplied.disabled) log.warn(`[mod-registry] "${d.id}" disabled (${d.where}) — not loaded`);
-  const loadedForPayloads = { ...loadedOnce, packs: registryApplied.packs };
+  // 依赖 / 冲突的装载期裁决（docs/WORKSHOP.md「mod registry」）：缺失依赖、版本不合、互斥、级联与循环，
+  // 全部在这一步具名拒绝 —— 一个依赖链断裂的包，和它依赖的那个一样「不在」。
+  const adjudicated = adjudicatePackGraph(registryApplied.packs);
+  for (const r of adjudicated.refused) log.warn(`[mod-registry] "${r.id}" refused: ${r.reason}`);
+  const loadedForPayloads = { ...loadedOnce, packs: adjudicated.kept };
   const workshopHooks = await loadWorkshopHooks(loadedForPayloads, { log });
   // 包声明的**对局元注册表**模块（`pack.json.server.meta`, DESIGN §29，B 段）：与钩子同一条纪律 —— 声明了却装不上
   //（源码里带非确定性的东西、没有 `registerMeta` 导出、import 失败）的包**整包移出已加载集合**，而不是「包照旧
@@ -135,7 +139,7 @@ export async function startServer(opts = {}) {
   // 房间级钩子同理：被别的声明裁掉的包不该继续在大厅里说话（它的 `install(room)` 与事件钩子一起消失）。
   const roomInstallers = roomPack.installers.filter((m) => survivors.has(m.id));
   const modMount = mountServerModules(serverModulesLive, { log });
-  const excludedPacks = new Set([...pruned.removed.map((r) => r.pack), ...registryApplied.disabled.map((d) => d.id)]);
+  const excludedPacks = new Set([...pruned.removed.map((r) => r.pack), ...registryApplied.disabled.map((d) => d.id), ...adjudicated.refused.map((r) => r.id)]);
   // The process-wide singleton serves the default data dir; a custom dir (tests) gets its own copy. The 创意工坊 overlay
   // is applied inside the loader (server/data.js), i.e. whichever way the data is obtained, it is already merged.
   // SP_WORKSHOP (editor/playtest.mjs) lets the Forge editor's 试玩 subprocess read the workshop root the editor was
