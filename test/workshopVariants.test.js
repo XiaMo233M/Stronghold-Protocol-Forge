@@ -49,19 +49,50 @@ after(() => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { 
 
 // ---------------------------------------------------------------------------------------------------------------
 describe('轴表：闭枚举，一个轴只有一个值', () => {
-  test('首发两条轴与它们的选项 / 缺省，逐字是设计里定下的那一份', () => {
-    assert.deepEqual([...VARIANT_AXIS_NAMES].sort(), ['deploy', 'training']);
+  test('轴名单与各轴的选项 / 缺省，逐字是设计里定下的那一份', () => {
+    // 这一行是**闭合世界守卫**：轴名单一个不多一个不少。第 1 刀落地时它读作 `['deploy', 'training']`；
+    // **第 6 刀（干员形态投影）按同一形状加了第三条轴 `form`**，所以这里**就地把枚举延长到三条** ——
+    // 断言本身没有放松（多一条、少一条、改个名都仍然红），放松它等于把这条守卫变成一句口号。
+    assert.deepEqual([...VARIANT_AXIS_NAMES].sort(), ['deploy', 'form', 'training']);
     assert.deepEqual(VARIANT_AXES.training.options, ['official', 'full']);
     assert.deepEqual(VARIANT_AXES.deploy.options, ['official', 'max']);
-    // 缺省 = **引擎今天的行为**：练度缺省满潜能 / 精英2 Lv.60，部署位缺省是数据里那个官方 8。
+    assert.deepEqual(VARIANT_AXES.form.options, ['official', 'elite']);
+    // 缺省 = **引擎今天的行为**：练度缺省满潜能 / 精英2 Lv.60，部署位缺省是数据里那个官方 8，
+    // 形态缺省是「普通干员按普通形态出战」（`data/chess.json` 里那份记录本身）。
     assert.equal(VARIANT_AXES.training.default, 'full');
     assert.equal(VARIANT_AXES.deploy.default, 'official');
+    assert.equal(VARIANT_AXES.form.default, 'official');
     assert.equal(isVariantAxis('deploy'), true);
     assert.equal(isVariantAxis('nope'), false);
     assert.equal(isVariantOption('deploy', 'max'), true);
-    // 一个轴的选项名不许串到另一个轴上（`full` 是 training 的，不是 deploy 的）
+    assert.equal(isVariantOption('form', 'elite'), true);
+    // 一个轴的选项名不许串到另一个轴上（`full` 是 training 的、`elite` 是 form 的，不是 deploy 的）
     assert.equal(isVariantOption('deploy', 'full'), false);
+    assert.equal(isVariantOption('deploy', 'elite'), false);
     assert.equal(isVariantOption('training', 'max'), false);
+    assert.equal(isVariantOption('form', 'full'), false);
+  });
+
+  test('**可扩展**：每一条轴都按同一个形状登记（将来加轴按这条形状加，不许改既有轴的语义）', () => {
+    // 第 4 刀（行为补丁 / 声明通道）将来也会碰这条表，所以这里钉住的是**形状**而不是轴的数量：
+    // 每条轴都必须有 label / options / default / optionLabels / effect，且后两者覆盖**每一个**选项
+    // （缺一条 ⇒ 编辑器与错误文案会给作者一个空缺，那正是「写了等于没写」那种失败）。
+    assert.ok(VARIANT_AXIS_NAMES.length >= 2);
+    for (const name of VARIANT_AXIS_NAMES) {
+      const spec = VARIANT_AXES[name];
+      assert.equal(typeof spec.label, 'string', `${name}.label`);
+      assert.ok(spec.label.length > 0 && spec.label.length <= 40, `${name}.label 的长度`);
+      assert.ok(Array.isArray(spec.options) && spec.options.length >= 2, `${name}.options 至少两个选项`);
+      assert.equal(new Set(spec.options).size, spec.options.length, `${name}.options 不许重复`);
+      for (const o of spec.options) assert.ok(typeof o === 'string' && o.length > 0 && o.length <= 40, `${name}.options 的选项名`);
+      assert.ok(spec.options.includes(spec.default), `${name}.default 必须在 options 里`);
+      for (const o of spec.options) {
+        assert.equal(typeof spec.optionLabels[o], 'string', `${name}.optionLabels["${o}"]`);
+        assert.equal(typeof spec.effect[o], 'string', `${name}.effect["${o}"]`);
+      }
+      assert.deepEqual(Object.keys(spec.optionLabels).sort(), [...spec.options].sort(), `${name}.optionLabels 的键集`);
+      assert.deepEqual(Object.keys(spec.effect).sort(), [...spec.options].sort(), `${name}.effect 的键集`);
+    }
   });
 
   test('`variants` 是顶层键闭集的一员，且**不**在 content 白名单里（口径不是数据文件）', () => {

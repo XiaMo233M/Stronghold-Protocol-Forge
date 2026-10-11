@@ -2810,6 +2810,81 @@ SHA-1[0:12] 导入与写缓存；② 任何一步不过 ⇒ **那条镜像作废
 本来就在包的内容哈希里（`identifyPack`），房间摘要闸门与 golden 语料一个字都没动。`MOD_SURFACE_FROZEN['1']`
 **只加不改**（新表面 `client.sources` 进表，账本那串字面量一个字母都不动）。
 
+<!-- 第 6 刀（干员形态投影）在此后追加：`### 28.41`。上面那段「还没做的」在第 6 刀里已经做了，
+     所以 §28.41 开头会点名它；集成时若与本文件尾部的其它刀内容相邻，按小节标题顺序摆即可。 -->
+
+### 28.41 口径轴 `form`：干员形态投影（`_a` 按 `_b` 的战斗职能出战）
+
+**它补上 §28.39 那段「还没做的」。** 投稿 `e4fe4d5cf0a0`（「干员满练mod」）的 `training` 一段真正想要的是这件
+事：**把普通干员投影成精锐形态** —— 每条普通形态（`_a`）拿它精锐兄弟（`_b`）的职能。它不是练度开关能表达的：
+`shared/potential.js` 的潜能 1–6 与练度 0–3 **都改不了** `phase` / `equipLevel`，也开不出精锐的技能 2 与模组天赋
+（`shared/potential.js:29-39`）。所以它是一条**新规则**，走**声明通道**、默认关：§28.39 的轴表加第三条轴
+`form`（`official` / `elite`，**缺省 `official`** = 引擎今天的行为）。
+
+**它为什么不是「数值覆盖通道」。** 投稿把这件事实现成安装器：`payload/data/official.json` 里 258 条记录各写一份
+绝对数值。**本刀不采纳那些数，而且是刻意不采纳** —— 那套数比引擎今天**低**：投稿给 `chess_char_1_01_a` 的
+`atk` 是 497，而引擎自己的 `_b` 是 531（129 条里**一条都不相等**，投稿是官方口径、引擎是满潜能口径）。照搬会
+**静默降级** 129 名干员。所以：包只说「这一局用 `form: "elite"`」，**值全部从引擎自己的 `_b` 记录读**
+（`shared/formProjection.js`）—— 与 `deploy` 那条口径同一条纪律（§28.39 判据 2）。
+
+**投影什么、不投影什么**（`shared/formProjection.js`）：
+
+* 复制 donor（`_b`）的**全部自有键**，再减掉 `shared/standIn.js` 的 `IDENTITY_FIELDS`（那一份是判据的唯一来源，
+  构建期已证明它能重建每一条棋子；本刀**不另开第二份白名单**）。**默认跟随**比手写白名单更不会在新字段上悄悄漏
+  投影。
+* 身份与价格**都不动**：棋子 id、`tier`、`price`、`sellPrice`、盟约、特质（`garrisonIds`）、`upgradeNum` /
+  `upgradeChessId` 仍是 `_a` 那一份。投影过的 `_a` **仍然是 `_a`**（`isGolden: false`、`baseId` / `goldenId` 照旧），
+  所以 `baseIdOf` / `goldenIdOf` / 商店 / 合成 都看得见它。
+* **`status` 整格留在 `_a`**（`phase` / `level` / `skillLevel` / `equipLevel`）。三条依据：`shared/standIn.js:36-39`
+  用 `statusKey(status)` 去 `backups.units[charId].forms` 查补位形态、`:64` 又从它读 `equipLevel`、
+  `test/backups.test.js:209` 逐字钉住 `_b` 的 `status`；而且**数据本身不许** —— 129 对里有 **39 对**的 `_b.level`
+  **小于** `_a.level`（`1/55` → `2/50` 这种），照搬等于让那块地显示练度掉了。战斗数值不靠它：`stats` / `skill` /
+  `talents` / `modules` 是烘好的，`_a.skills[]` 每条的 `level` 与 `_a.skill.level` 都跟着精锐走（投稿对 `_a` 写的
+  `status.skillLevel = 7`，在引擎里由技能记录自己表达 —— `skillLevel` 与 `skills[].level` 恒等，`test/data.test.js:453`）。
+* **召唤物同一个轴、同一套机制**：`data/tokens.json` 的 `variants[ownerChessId]` 里 owner 键有 `_a` / `_b` 一对的
+  召唤物（本季 **19** 个），`_a` 的 owner 变体换成 `_b` 的那一条；没有 `_b` 变体的原样不动（投不了，也不假装投了）。
+  只投干员不投召唤物是自相矛盾的（业主裁决 2026-10-13）。
+
+**缺省路径逐字节不变（承诺落在对象身份上）。** 视图（`formView(chess, eliteProjected, { tokens })`）在
+`eliteProjected` 为假时 `chess(id)` / `token(id)` 返回**原对象本身**（`===`）。这是这一层最重要的一条承诺的影子：
+`DataSource` 的 def 缓存、`Match` 的 `dsCache`、`standIn()` 的 memo、`test/golden/*.json` 的摘要都按对象身份成立。
+所以**不需要** `golden:update`：`tools/golden.mjs:106` 构造 `GameData` 时**不传 `variants`**，口径又从
+`server/index.js` 的 `workshopMods` → `Match.mods.packs[].variants` → `Match.js` 进 —— 没声明这个轴的路径一个字节
+都不动。
+
+**面板与战斗不许分叉。** `Match` 建**一份**视图，`GameData` 与这一局的 `DataSource` 共用（`gamedata.js` 的
+`opts.forms` / `simdata.js` 的 `opts.forms`）。`Match.js` 的 `dsCache` 缓存键**并进了 `form` 口径**：同一份 data 的
+两个房间，一个声明 `elite`、一个不声明，各拿各的 `DataSource`（共用就是面板与战斗对同一条 `_a` 给出两套数值）。
+召唤物的 token 缓存键也把 owner 形态算进去。
+
+**`combat: true` 是硬闸门**：沿用 §28.39 的 `VARIANTS_NEED_COMBAT`（`shared/workshop.js`），**本刀没有新增闸门** ——
+判据是「能改结果的口径必须进房间摘要闸门与 golden 语料」，与 `server.meta` / `server.battle` /
+`modules[].uses: ["matchClass"]` 同一条线。**不新增协议消息**，`MOD_API_VERSION` 仍是 `1`。
+
+**两条如实披露的后果**（业主裁决 2026-10-13；两条都是**刻意的**，也是这条轴必须标 `combat: true` 的理由）：
+
+1. **1 阶价格拿到精锐形态的数值。** 价格与阶级不动 ⇒ 一枚 1 阶的普通棋子带着精锐的 `atk` / 技能 / 模组天赋上场。
+   这是「投影只改职能」的直接后果，**不是 bug**；改它（把 `_a` 的价提到 `_b` 的价）就越出「形态投影」这个声明的
+   范围 —— 那是改平衡，属于另一个决定。
+2. **`upgradeNum` 不动 ⇒「3 张 `_a` 换 1 张 `_b`」在投影下价值中性。** `_a` 已经带着 `_b` 的数值，合成出来的那一张
+   与合成前的一张一样强（合成仍然合法、仍然按既有的 3 张规则走）。同样不是 bug：投影改的是战斗职能，不是合成
+   经济；改它同样越出这个声明的范围。
+
+**不过降级是逐条断言的门**：投影后每条记录的 `atk` / `maxHp` / `def` 必须 ≥ 投影前，**干员与召唤物都过**
+（`test/form-projection.test.js`）。这道闸是本刀最重要的一条防线 —— 它挡的正是「把投稿那套旧数值倒灌进来」。
+（`status.level` 与 owner 变体上的 `level` **不**过这道闸：它们是那个形态的**名义练度标牌**，不是战斗数值，
+且 39 对里 `_b.level` 本来就比 `_a.level` 低 —— 拿它当降级判据是假阳性。）
+
+**测试**：`test/form-projection.test.js`（缺省恒等 / 投影真生效且逐条等于引擎 `_b` / 投稿的 497 一个都不许出现 /
+身份字段逐个不变 / 两条不降级闸 / 召唤物 / 面板与战斗不分叉）· `test/workshopVariants.test.js`（轴名单与逐轴形状）。
+
+
+
+
+
+
+
+
 ### 28.42 房间目录的公开面：`GET /api/rooms` —— **一个数，不是列表**（投稿 `7ca51de6f346` 的收窄）
 
 **投稿 `7ca51de6f346`（作者 Leiothrix，GPL-3.0-or-later，来源 `NeoPecos/Stronghold-Protocol 2cadc618`）要的是什么**：

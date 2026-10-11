@@ -105,6 +105,42 @@
   含该房号或房主名）、HEAD 200 无 body、POST 405、`roomCounts()` 与 `stats()` 同源
   （`publicRooms === total ===` `/healthz` 的 `rooms`）。
 
+## 0.16.0 进行中（第 6 刀：干员形态投影）
+
+**口径轴 `form`：普通干员按精锐形态出战（DESIGN §28.41，docs/WORKSHOP.md §1.20）。** 投稿 `e4fe4d5cf0a0`
+（「干员满练mod」）的 `training` 一段真正想做的那件事，在这里单独立项落地：`pack.json.variants` 加第三条轴
+`form`（`official` / `elite`，缺省 `official` = 引擎今天的行为），`elite` 时每条**普通（`_a`）**棋子按它精锐兄弟
+（`_b`）的**战斗职能**出战。
+
+* **数值全部由引擎自己烘，包一个数都不许塞。** 投影从**引擎自己的** `_b` 记录读 `stats` / `trait` / `skill` /
+  `skills` / `talents` / `module` / `modules[]` / `assets`（`shared/formProjection.js`；`IDENTITY_FIELDS` 复用
+  `shared/standIn.js` 那一份）。投稿自带的那套数**没有被采纳**，而且是刻意不采纳：它比引擎今天**低**
+  （投稿给 `chess_char_1_01_a` 的 `atk` 是 497，引擎的 `_b` 是 531），照搬会**静默降级**干员。
+* **身份与价格都不动**：棋子 id、`tier`、`price`、`sellPrice`、盟约、特质、`upgradeNum` / `upgradeChessId` 仍是
+  `_a` 那一份。
+* **`status` 是身份标牌，不参与投影**（`phase` / `level` / `skillLevel` / `equipLevel` 整格留在 `_a`）。这条是**刻意
+  的**，三条理由：**①** 引擎从它读补位形态（`shared/standIn.js` 的 `statusKey` → `backups.units[charId].forms`）、
+  模组激活与技能档位（`:64`），`test/backups.test.js:209` 逐字钉住 `_b` 的 `status` —— 挪过去会连带改掉这三条既有
+  语义；**② 数据本身不允许**：129 对里 **39 对**的 `_b.level` **小于** `_a.level`（`1/55` → `2/50`），照搬会让那 39
+  块地**显示练度回落**，直接违反本轴的「不许降级」；**③** 投稿自己也是这个口径（它对 `_a` 只写
+  `status.skillLevel = 7`，不改 `phase` / `level`）。作者的意图仍然达成：投影后 `_a.skills[]` 每条的 `level` 与
+  `_a.skill.level` **都跟着精锐走**（引擎里 `skillLevel` 与 `skills[].level` 恒等，`test/data.test.js:453` 钉住）。
+* **两条如实披露的后果**（业主裁决 2026-10-13；两者都是刻意的，也是它必须标 `combat: true` 的理由）：
+  **① 1 阶价拿到精锐形态的数值**（价格不动 ⇒ 一枚 1 阶棋子带着精锐的数值上场）；
+  **② `upgradeNum` 不动 ⇒「3 张 `_a` 换 1 张 `_b`」在投影下价值中性**（不是 bug：投影改的是战斗职能，不是合成经济，
+  改它就越出这个声明的范围）。
+* **召唤物同一个轴**：`data/tokens.json` 里 owner 变体有 `_a` / `_b` 一对的召唤物（本季 19 个），`_a` 的 owner 变体
+  在 `form: "elite"` 下换成 `_b` 的那一条；没有 `_b` 变体的原样不动。
+* **缺省逐字节不变**：不声明这个轴的包，`GameData.chess(id)` / `DataSource.rawChess(id)` 返回 `data/chess.json` 里
+  **那个对象本身**（`===`，对象身份不变）；`test/golden/*.json` 一个字节都不动，**不需要** `golden:update`。
+* **面板与战斗不分叉**：`Match` 建**一份**形态视图，`GameData` 与这一局的 `DataSource` 共用；`Match.js` 的
+  `dsCache` 缓存键并进了 `form` 口径（同一份 data 的两个房间，一个声明 `elite`、一个不声明，各拿各的
+  `DataSource`）。
+* **`combat: true` 是硬闸门**：沿用既有的 `VARIANTS_NEED_COMBAT`（口径改对局结果 ⇒ 必须进房间摘要闸门与 golden
+  语料），本刀没有新增闸门。**`MOD_API_VERSION` 仍是 1**（只加一格口径选项，不新增协议消息、不改默认游戏行为）。
+* **不许降级**是逐条断言的门（干员与召唤物都过）：投影后每条记录的 `atk` / `maxHp` / `def` 必须 ≥ 投影前
+  （`test/form-projection.test.js`）。
+
 ## 0.15.3-0.2.4 — 2026-10-12
 
 **变体 / 口径层：`pack.json.variants`（DESIGN §28.39，docs/WORKSHOP.md §1.20）。** 三个社区 mod「写了等于没写」

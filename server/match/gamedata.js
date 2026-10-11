@@ -15,7 +15,8 @@ import { getConfig, getMode } from '../data.js';
 import { MAX_SEATS } from '../../shared/constants.js';
 // 变体 / 口径层（DESIGN §28.39）：`opts.variants` → 这一局的 `config` 覆盖。值与轴表都在 `shared/variants.js`，
 // 这里只消费它的判决（`null` = 什么都不用改，缺省路径逐字节不变）。
-import { variantDataPatch } from '../../shared/variants.js';
+import { variantDataPatch, variantValue } from '../../shared/variants.js';
+import { formView, isEliteForm } from '../../shared/formProjection.js';
 import { isShopItem } from '../sim/simdata.js';
 import { standInRecord } from '../../shared/standIn.js';
 import {
@@ -110,11 +111,13 @@ export class GameData {
   /**
    * @param {Readonly<Record<string, any>>} data server/data.js getData() (may be partial)
    * @param {string} modeId e.g. 'mode_multi_hard'
-   * @param {{ seatCap?: number, variants?: Array<{ axis: string, default: string }>|null }} [opts] seatCap = seat slots of the room (default MAX_SEATS): the floor of the
+   * @param {{ seatCap?: number, variants?: Array<{ axis: string, default: string }>|null, forms?: object|null }} [opts] seatCap = seat slots of the room (default MAX_SEATS): the floor of the
    *        bossHpScale `aliveFull` ceiling, so a bigger room is not clamped to the 4-seat calibration
    *        (bossPoolShareOf; 百卫补丁 v0.3, docs/PS100-MIGRATION.md §2.4).
    *        variants = the 口径 this match runs under (DESIGN §28.39, `pack.json.variants`); absent ⇒ the engine
    *        defaults, i.e. exactly today's behaviour.
+   *        forms = 形态投影视图（`shared/formProjection.js` 的 `formView`，DESIGN §28.41）：`Match` 把它那一份传进来，
+   *        与这一局的 `DataSource` **共用同一份**（两边分叉就是 bug）。不给 ⇒ 由 `variants` 自己建一份（等价）。
    */
   constructor(data, modeId, opts = {}) {
     this.raw = data && typeof data === 'object' ? data : {};
@@ -143,6 +146,18 @@ export class GameData {
     this.economy = this.config.economy && typeof this.config.economy === 'object' ? this.config.economy : {};
     const chess = this.raw.chess && typeof this.raw.chess === 'object' ? this.raw.chess : {};
     this._chess = chess;
+    /**
+     * 形态投影（口径轴 `form`，DESIGN §28.41）：`form: "elite"` 时普通（`_a`）棋子按精锐（`_b`）的战斗职能出战。
+     * 这一份是**读取期**的视图（`shared/formProjection.js`）：缺省（没声明这个轴）时它的 `chess(id)` 返回**原对象
+     * 本身**，所以缺省路径逐字节不变、对象身份也不变（`sim/simdata.js` 的 DataSource 缓存与 golden 摘要都靠它）。
+     * 与 `deploy` 那条口径的分工一样：口径改的是**这一局的读取**，`data/*.json` 那份基线一个字节都不动。
+     */
+    this.eliteForm = isEliteForm(variantValue(opts?.variants ?? null, 'form'));
+    // 调用方（`Match`）可以把它那一份直接传进来：**同一份视图**才能在面板与战斗之间保证不分叉。
+    this.formView = opts && opts.forms && typeof opts.forms.chess === 'function' && typeof opts.forms.token === 'function'
+      ? opts.forms
+      : formView(chess, this.eliteForm, { tokens: this.raw.tokens });
+    this._tokensView = this.formView.token;
     this._items = this.raw.items && typeof this.raw.items === 'object' ? this.raw.items : {};
     this._bonds = this.raw.bonds && typeof this.raw.bonds === 'object' ? this.raw.bonds : {};
     /** visible, shop-eligible base (normal) chess ids */
@@ -231,7 +246,12 @@ export class GameData {
 
   // ---- ids ------------------------------------------------------------------------------------------
 
-  chess(id) { return own(this._chess, id); }
+  /**
+   * A chess record. 口径 `form: "elite"`（DESIGN §28.41）下**普通（`_a`）棋子**返回按它精锐兄弟烘出来的那一份
+   * （`shared/formProjection.js`：职能取 `_b`，棋子 id / 阶级 / 价格 / 盟约 / 特质 / 合成数仍取 `_a`）；没声明这个
+   * 轴时逐字返回 `data/chess.json` 里**那个对象本身**（`===`，对象身份不变）。
+   */
+  chess(id) { return this.formView.chess(id) ?? own(this._chess, id); }
   item(id) { return own(this._items, id); }
   bond(id) { return own(this._bonds, id); }
   band(id) { return own(this.raw.bands, id); }

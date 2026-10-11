@@ -90,6 +90,9 @@ export function makeMatch(o = {}) {
     verify: o.verify ?? 'off',
     headlessSliceMs: o.headlessSliceMs,
     aiPicksLast: o.aiPicksLast,
+    // The room's mod set (DESIGN §28.2 / §28.39): `{ digest, packs }`, the same object the lobby hands a real Match.
+    // Absent ⇒ no key at all, byte-for-byte the old construction (the 口径 layer's default path).
+    ...(o.mods ? { mods: o.mods } : {}),
   });
   const m = h.m;
   if (m.clientCombat && o.clients !== false) {

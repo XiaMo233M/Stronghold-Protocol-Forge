@@ -557,7 +557,15 @@ export function freezeDef(d) {
  * (`backups` = data/backups.json `{ units, diy }`, the 补位 stand-ins: getChess(id, { standIn: true })).
  */
 export class DataSource {
-  constructor(raw = {}, fallback = null) {
+  /**
+   * @param {object} [raw] `{ chess, enemies, tokens, stages, waves, backups?, effects? }`
+   * @param {DataSource|null} [fallback]
+   * @param {{ forms?: { eliteProjected: boolean, chess: (id: string) => any, token: (id: string) => any }|null }} [opts]
+   *   `forms` = 形态投影视图（口径轴 `form`，DESIGN §28.41）。**同一局的 `GameData` 与这里必须拿到同一份**
+   *   （`server/match/gamedata.js` 的 `formView`）：否则面板与战斗会对同一条 `_a` 给出两套数值，那就是 bug。
+   *   不给 / `eliteProjected` 为假 ⇒ 逐字是 `raw.chess[id]` 那个对象本身（缺省路径逐字节不变）。
+   */
+  constructor(raw = {}, fallback = null, opts = {}) {
     /**
      * The whole data object this source was built from (not just the five record tables below). W-B needs it: a
      * room that declares a subset of the installed packs runs its OWN merged data, and the sim's content helpers
@@ -575,13 +583,24 @@ export class DataSource {
       effects: raw.effects && typeof raw.effects === 'object' ? raw.effects : null,
     };
     this.fallback = fallback;
+    /** 形态投影视图（构造参数 `opts.forms`）；null ⇒ 一条 `_a` 都用自己那份记录。 */
+    this.forms = opts && opts.forms && typeof opts.forms.chess === 'function' ? opts.forms : null;
     this._chess = new Map();
     this._enemy = new Map();
     this._token = new Map();
     this._stage = new Map();
   }
 
-  rawChess(id) { return this.raw.chess[id] ?? this.fallback?.rawChess(id) ?? null; }
+  /**
+   * A chess record: this source's `raw.chess[id]`, else the fallback's. 口径 `form: "elite"`（DESIGN §28.41）下
+   * **普通（`_a`）棋子**返回按它精锐兄弟烘出来的那一份（`shared/formProjection.js`，与 `GameData.chess()` 用的是
+   * **同一份视图** —— 面板与战斗分叉就是 bug）；没有视图 / 没声明这个轴时逐字是 `raw.chess[id]` 那个对象本身。
+   */
+  rawChess(id) {
+    const rec = this.raw.chess[id];
+    if (rec !== undefined && rec !== null && this.forms) return this.forms.chess(id) ?? rec;
+    return rec ?? this.fallback?.rawChess(id) ?? null;
+  }
   rawEnemy(key) {
     return this.raw.enemies[key] ?? this.raw.enemies['enemy_' + key] ?? this.raw.enemies[String(key).replace(/^enemy_/, '')] ?? this.fallback?.rawEnemy(key) ?? null;
   }
@@ -708,7 +727,16 @@ export class DataSource {
   getToken(id, ownerChessId = null, ownerLoadout = null) {
     if (ownerChessId && ownerLoadout && ownerLoadout.diy && typeof ownerLoadout.diy === 'object') return this.getDiyToken(id, ownerChessId, ownerLoadout.diy, ownerLoadout.potential);
     const olo = ownerChessId && ownerLoadout ? resolveLoadout(this.rawChess(ownerChessId), ownerLoadout) : null;
-    const ck = id + '|' + (ownerChessId ?? '') + loadoutKey(olo);
+    let owner = ownerChessId;
+    // 形态投影（口径 `form`，DESIGN §28.41）：召唤物的 owner 变体里，普通形态（`_a`）拿它精锐兄弟（`_b`）那一条 ——
+    // 只投干员不投召唤物是自相矛盾的（业主裁决 2026-10-13）。`_b` 那一条不在 ⇒ 原样（投不了，也不假装投了）。
+    // 在缓存键**之前**定下来：少了这一句，同一份数据下声明与没声明 `form` 的两局会共用一份 token 缓存。
+    if (this.forms && ownerChessId && typeof ownerChessId === 'string' && ownerChessId.endsWith('_a')) {
+      const rt = this.rawToken(id);
+      const golden = `${ownerChessId.slice(0, -2)}_b`;
+      if (rt && rt.variants && rt.variants[golden]) owner = golden;
+    }
+    const ck = id + '|' + (owner ?? '') + loadoutKey(olo);
     if (this._token.has(ck)) return this._token.get(ck);
     let r = this.rawToken(id);
     if (r && ownerChessId && !r.variants) {
@@ -718,11 +746,10 @@ export class DataSource {
     }
     if (!r && ownerChessId) {
       // look inside the owner chess record
-      const owner = this.rawChess(ownerChessId);
-      const t = (owner?.tokens ?? []).find((x) => x && typeof x === 'object' && (x.tokenId ?? x.id) === id);
+      const ownerRec = this.rawChess(ownerChessId);
+      const t = (ownerRec?.tokens ?? []).find((x) => x && typeof x === 'object' && (x.tokenId ?? x.id) === id);
       if (t) r = t;
     }
-    let owner = ownerChessId;
     if (r && r.variants && owner && !r.variants[owner]) {
       // fall back to the normal/golden sibling variant, then any variant
       const alt = String(owner).replace(/_b$/, '_a');

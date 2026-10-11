@@ -1883,17 +1883,39 @@ node --test test/packForms.test.js
   "combat": true,                                  // ← 硬闸门：口径改对局结果，必须标（VARIANTS_NEED_COMBAT）
   "variants": [
     { "axis": "deploy",   "default": "max" },      // 12 个部署位（官方 8）
-    { "axis": "training", "default": "full" }      // 引擎缺省的满潜能 / 精英2 Lv.60
+    { "axis": "training", "default": "full" },     // 引擎缺省的满潜能 / 精英2 Lv.60
+    { "axis": "form",     "default": "elite" }     // 普通干员按精锐形态出战（第 6 刀）
   ]
 }
 ```
 
-**首发两条轴**（`shared/variants.js` 的 `VARIANT_AXES` —— 一个轴只在这份表里，一个数只有一个真相）：
+**首发三条轴**（`shared/variants.js` 的 `VARIANT_AXES` —— 一个轴只在这份表里，一个数只有一个真相）：
 
 | 轴 | 选项 | 缺省（= **引擎今天的行为**） | 它动什么 |
 |---|---|---|---|
 | `training` | `official` / `full` | `full` | 这一局用哪一套练度。落点是引擎**已有的** `room.loadout.ops`（干员调配：潜能 1–6 与 未精英化→精英2 Lv.60，`shared/potential.js`），不是在数据里塞第二套数值 |
 | `deploy` | `official` / `max` | `official` | 部署位：`official` 是数据里的 8（官方 `maxBattleChessCnt`），`max` 抬到 `shared/constants.js` 的 `DEPLOY_CAP_MAX` = 12（与销毁类装备的天花板同一个常量） |
+| `form` | `official` / `elite` | `official` | 干员形态投影（第 6 刀）：`elite` 时每条**普通（`_a`）**棋子按它精锐兄弟（`_b`）的**战斗职能**出战 —— `stats` / `trait` / `skill` / `skills` / `talents` / `module` / `modules[]` / `assets` 取自**引擎自己的** `_b` 记录（`shared/formProjection.js`）。身份与价格**都不动**：棋子 id、`tier`、`price`、盟约、特质、`upgradeNum` 仍是 `_a` 那一份 |
+
+**`form: "elite"` 要如实知道的三件事**（业主裁决 2026-10-13，三条都是**刻意的**，也是它必须标 `combat: true` 的理由）：
+
+1. **数值全部由引擎自己烘，作者一个数都不许塞**。这一条不是限制、是这一层存在的理由：投影从**引擎自己的** `_b`
+   记录读值。同一个想法在安装器时代是「把 `official.json` 里那 258 条的数值搬过来」—— 那套数比引擎今天**低**
+   （投稿 `e4fe4d5cf0a0` 给 `chess_char_1_01_a` 的 `atk` 是 497，引擎的 `_b` 是 531），照搬会**静默降级**干员。
+   所以 `variants` 里**没有**任何数值格，这一层也**没有**数值通道。
+2. **1 阶价拿到精锐形态的数值**。`_a` 的价格 / 阶级不动 ⇒ 一枚 1 阶的普通棋子带着精锐的 `atk` / 技能 / 模组天赋上场。
+   这是投影**只改职能**的直接后果，**不是 bug**，但它确实改平衡 —— 声明它的包必须标 `combat: true`，也必须让玩家
+   知道。
+3. **`upgradeNum` 不动 ⇒「3 张 `_a` 换 1 张 `_b`」在投影下是价值中性的**。`_a` 已经带着 `_b` 的数值，所以合成出来的
+   那一张与合成前的一张**一样强**（合成仍然合法、仍然按既有的 3 张规则走）。同样不是 bug：投影改的是战斗职能，
+   不是合成经济；改它就越出这个声明的范围。
+
+**召唤物同一个轴**：`data/tokens.json` 里 owner 变体有 `_a` / `_b` 一对的召唤物（本季 19 个），`_a` 的 owner 变体
+在 `form: "elite"` 下换成 `_b` 的那一条 —— 只投干员不投召唤物是自相矛盾的。没有 `_b` 变体的召唤物原样不动。
+
+**`status` 留在 `_a`**：`status`（`phase` / `level` / `skillLevel` / `equipLevel`）是那块地的**身份**，不是战斗数值 ——
+引擎从它读补位形态（`shared/standIn.js` 的 `statusKey`）、模组激活与技能档位。战斗数值由烘好的
+`stats` / `skill` / `talents` / `modules` 承担（`_a.skills[]` 里每条的 `level`、`_a.skill.level` 都跟着精锐走）。
 
 **三条硬判据**：
 
@@ -1911,10 +1933,11 @@ node --test test/packForms.test.js
 
 **多包抢同一个轴**：按既有的「包 id 字典序小的赢」（§1.2、DESIGN §28.3），输的一方会被**点名**报告。
 
-**还没有的**：`training` 今天只落在引擎已有的练度开关上；把一名普通干员的**精锐形态数值**投影给它（投稿
-`e4fe4d5cf0a0` 的 `training` 一段真正想做的那件事）不在本刀，需要另外立项。
+**落点**：`training` 落在引擎已有的练度开关上；把一名普通干员的**精锐形态**投影给它（投稿 `e4fe4d5cf0a0` 的
+`training` 一段真正想做的那件事）落在 `form` 轴上 —— 它在第 6 刀立项并落地（见上面那条与
+[docs/design/mod-layer.md](design/mod-layer.md) §28.41）。
 
-完整规范见 [docs/design/mod-layer.md](design/mod-layer.md) §28.39。
+完整规范见 [docs/design/mod-layer.md](design/mod-layer.md) §28.39（口径层）与 §28.41（形态投影）。
 
 ### 1.21 素材加载源：`assets.mirrors[]` + `sources(ctx)`（第 5 刀，`0.16.0`）
 

@@ -20,6 +20,10 @@
 //                  运行时的练度开关（`room.loadout.ops` 的 `{ potential, cultivate }`，`干员调配` 页：潜能 1–6
 //                  与 未精英化→精英2 Lv.60），本轴把「一局用哪一套练度」收成一个可声明的口径，**值仍然由
 //                  `shared/potential.js` 的缺省给**（`POTENTIAL_DEFAULT` / `CULTIVATE_DEFAULT`）。
+//   * `form`     — 同一投稿 `training` 那一段**真正想要的东西**（业主裁决 2026-10-13）：普通干员按精锐形态出战。
+//                  练度开关到不了那一档（潜能 / 练度都改不了 `phase` / `equipLevel`，也开不出精锐的技能 2 与模组
+//                  天赋），所以这一条是**读取期的形态投影**（`shared/formProjection.js`），不是数值覆盖通道：
+//                  值从引擎自己的 `_b` 记录来，身份与价格都不动。文档里的后果披露：`docs/WORKSHOP.md` §1.1。
 //
 // 这一份是**纯**的（`shared/` 的纪律）：没有 `process`、没有状态、没有文件系统，服务端与浏览器读到同一个判决。
 
@@ -63,6 +67,21 @@ export const VARIANT_AXES = Object.freeze({
       // `room.loadout.ops` 设置（干员调配页），不是在数据里塞第二套数值。
       official: 'players are set to 潜能 1 / 未精英化 (no 练度 bonus) — the engine\'s own 干员调配 baseline',
       full: 'the engine default: 潜能 6 and 精英2 Lv.60 练度 bonus (POTENTIAL_DEFAULT / CULTIVATE_DEFAULT)',
+    }),
+  }),
+  form: Object.freeze({
+    label: '干员形态 (operator form)',
+    options: Object.freeze(['official', 'elite']),
+    default: 'official',
+    optionLabels: Object.freeze({
+      official: '官方口径（普通干员按普通形态出战）',
+      elite: '普通干员按精锐形态出战（投影 `_b` 的战斗职能）',
+    }),
+    effect: Object.freeze({
+      // 值与 `training` / `deploy` 同一条纪律：包说的是「哪一套」，值由引擎自己从**它自己的** `_b` 记录读
+      // （`shared/formProjection.js`），所以一个包永远改不动一个它没有语义权的数字。
+      official: 'the engine default: a normal chess fights with its own normal form (`data/chess.json`)',
+      elite: 'every normal (`_a`) chess is projected onto its elite (`_b`) twin: status / stats / trait / skill / talents / module / assets from the engine\'s own elite record — identity (tier, price, bonds, 特质, merge) unchanged',
     }),
   }),
   deploy: Object.freeze({
@@ -195,7 +214,9 @@ export function variantIsDefault(decl, axis) {
  * **口径 → 数据动作**：这一层唯一的执行点，也是「包里没有数值」这条纪律的落点。
  *
  * 只有 `deploy` 需要动数据（它改的是一个 `config` 标量）；`training` **不动数据** —— 它是玩家自己的
- * `干员调配`（`room.loadout.ops`）那套既有开关的口径名，`shared/potential.js` 的缺省就是 `full`。所以这里给出的
+ * `干员调配`（`room.loadout.ops`）那套既有开关的口径名，`shared/potential.js` 的缺省就是 `full`。`form` 也**不动
+ * 数据** —— 它不动 `data/` 里的任何一个字节，投影是**读取期**的（`shared/formProjection.js`：`GameData.chess()` /
+ * `DataSource` 命中 `_a` 时返回按 `_b` 烘出来的那份记录，缺省路径返回原对象本身）。所以这里给出的
  * 第一条覆盖永远只有一条，且值来自引擎常量、不是包。
  *
  * 返回 `null` 表示「什么都不用改」—— 调用方（`server/data.js` 的 overlay 之后、deepFreeze 之前）据此**一个

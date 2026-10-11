@@ -174,7 +174,8 @@
 
 import { PHASE, modeIdFor, bossHitLimitFrom, MAX_SEATS } from '../../shared/constants.js';
 // 变体 / 口径层（DESIGN §28.39）：本局的轴表由各包的归一化声明合成，规则就是既有的「包 id 字典序小的赢」。
-import { mergeVariantDecls } from '../../shared/variants.js';
+import { mergeVariantDecls, variantValue } from '../../shared/variants.js';
+import { formView, isEliteForm } from '../../shared/formProjection.js';
 import { layoutOf } from '../../shared/layout.js';
 import { Battle } from '../sim/Battle.js';
 import { DataSource } from '../sim/simdata.js';
@@ -219,10 +220,22 @@ export function parseVerify(v) {
 const noopLog = { info() {}, warn() {}, error() {}, debug() {} };
 
 const dsCache = new WeakMap();
-function dataSourceFor(data) {
+/**
+ * 这一局的 `DataSource`，按 `[口径, data]` 取。缓存键**必须并进 `form` 口径**（DESIGN §28.41）：同一份 data 的
+ * 两个房间，一个声明 `form: "elite"`、一个不声明，共用一份 `DataSource` 会让面板与战斗对同一条 `_a` 给出两套
+ * 数值 —— 那就是分叉。缺省那一格（`elite === false`）建出来的对象与从前**逐字相同**（`new DataSource(data, null)`，
+ * 没有第三个参数），所以没声明这个轴的路径一个字节都没变，只是同一份 data 现在按口径各缓一格。
+ */
+function dataSourceFor(data, forms = null, elite = false) {
   if (!data || typeof data !== 'object' || !data.chess) return undefined;
-  let ds = dsCache.get(data);
-  if (!ds) { ds = new DataSource(data, null); dsCache.set(data, ds); }
+  let byForm = dsCache.get(data);
+  if (!byForm) { byForm = new Map(); dsCache.set(data, byForm); }
+  const key = elite ? 'elite' : 'official';
+  let ds = byForm.get(key);
+  if (!ds) {
+    ds = elite ? new DataSource(data, null, { forms }) : new DataSource(data, null);
+    byForm.set(key, ds);
+  }
   return ds;
 }
 
@@ -264,10 +277,19 @@ export class Match {
      */
     this.seatCap = Number.isFinite(opts.seatCap) && opts.seatCap >= 1 ? Math.floor(opts.seatCap)
       : (Array.isArray(opts.seats) && opts.seats.length >= 1 ? opts.seats.length : undefined);
+    /**
+     * 形态投影（口径轴 `form`，DESIGN §28.41）：`form: "elite"` 时普通（`_a`）干员按精锐（`_b`）的战斗职能出战。
+     * **一份视图、两个消费者**（`GameData.chess()` 与这一局的 `DataSource`）：两边分叉就是 bug，所以这里建一次，
+     * 往下传。没声明这个轴时视图的 `chess(id)` 逐字返回 `data.chess[id]` 那个对象本身。
+     */
+    this.eliteForm = isEliteForm(variantValue(this.variants, 'form'));
+    this.formView = formView(this.data && this.data.chess, this.eliteForm, { tokens: this.data && this.data.tokens });
     this.gd = new GameData(this.data, this.modeId, {
       ...(this.seatCap ? { seatCap: this.seatCap } : {}),
       // 本局的口径（DESIGN §28.39）。空数组 = 没有包声明口径 ⇒ `GameData` 一个字节都不动。
       variants: this.variants,
+      // 形态投影的那一份视图（与 `this.ds` 共用）。
+      forms: this.formView,
     });
     if (!this.difficulty) this.difficulty = this.gd.difficulty;
     this.isSolo = this.mode === 'solo' || this.gd.isSolo;
@@ -318,7 +340,7 @@ export class Match {
     this.botRehearsal = Number.isInteger(opts.botRehearsal) && opts.botRehearsal >= 0 ? Math.min(opts.botRehearsal, 8) : BOT_REHEARSAL_DEFAULT;
     /** wall-clock budget of one rehearsal slice (scheduleBotPrep) */
     this.botSliceMs = Number.isFinite(opts.botSliceMs) && opts.botSliceMs > 0 ? opts.botSliceMs : this.sched.virtual ? Infinity : BOT_SLICE_MS;
-    this.ds = dataSourceFor(this.data);
+    this.ds = dataSourceFor(this.data, this.formView, this.eliteForm);
     /** client-side combat (DESIGN §14) — see the header */
     this.clientCombat = opts.clientCombat != null ? !!opts.clientCombat : envClientCombat();
     this.verifyMode = parseVerify(opts.verify ?? env('SP_VERIFY'));
