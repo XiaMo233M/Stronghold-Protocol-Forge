@@ -133,8 +133,11 @@ export const PACK_FIELDS = Object.freeze([
 
 /** `pack.json.target` 的闭枚举：`forge`（缺省）本引擎装载；`stardust` 是给 Stardust 宿主的声明型包（本引擎只认识、不装载）。 */
 export const PACK_TARGETS = Object.freeze(['forge', 'stardust']);
-/** `target: "stardust"` 的包额外允许的两格（Stardust profile）：`type`（必须是 `mod`）与 `capabilities`。 */
-export const STARDUST_TARGET_FIELDS = Object.freeze(['type', 'capabilities']);
+/** `target: "stardust"` 的包额外允许的 Stardust profile 字段（本引擎自己的闭集里没有的那些拼法）：
+ *  `type`（必须是 `mod`）与 `capabilities` 是必须的两格；`englishName` / `authors` / `app` 是**同一个东西的
+ *  Stardust 拼法**（本引擎叫 `name` / `author` / `gameVersion`）—— 放行它们只为一件事：「同一份 pack.json
+ *  两端各自读得懂」不该逼作者在两种拼法里二选一。`target: "forge"`（含缺省）一个都不放行。 */
+export const STARDUST_TARGET_FIELDS = Object.freeze(['type', 'capabilities', 'englishName', 'authors', 'app']);
 
 /**
  * **能力认领的字段**（`target: "stardust"`）：Stardust 宿主的 profile 里，一个能力可以额外收下它自己的字段

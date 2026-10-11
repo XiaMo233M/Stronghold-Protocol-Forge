@@ -200,6 +200,11 @@ test('stardust 目标：声明的能力认领它自己的字段（announcements�
   assert.equal(forge.error, 'PACK_UNKNOWN_FIELD');
   assert.doesNotMatch(forge.detail, /capability/, 'forge 目标的错误文案不提别的引擎的能力');
 
+  // 同一件东西的两种拼法都放行（stardust 目标）：`englishName` / `authors` / `app` 是本引擎没有的拼法，
+  // 一份自然的 Stardust 清单不该因为写了自己的名字而被本引擎拒。
+  const spelled = normalizePackManifest(starPack({ englishName: 'Server notice', authors: ['jingjiangze'], app: '>=0.2.0' }), 'sd-pack', { hasAssets: false });
+  assert.equal(spelled.ok, true, spelled.ok ? '' : `${spelled.error}: ${spelled.detail}`);
+
   // 名字撞车用例：本引擎自己的 `notices`（对象，DESIGN §28.15）在 stardust 包上仍按**本引擎**的形状判 ——
   // 这正是 Stardust 侧那个能力叫 `announcements` 的原因（同一个键不能对两个宿主说两种形状）。
   const collide = normalizePackManifest(starPack({ notices: [{ title: 'x' }] }), 'sd-pack', { hasAssets: false });
