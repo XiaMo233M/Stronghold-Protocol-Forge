@@ -1377,6 +1377,13 @@ export class Lobby {  /**
     // 包写的主题变量（业主裁决 2026-10-10）：合并好的那一份 `{ vars }`，与 `modPanels` 同构 —— **只有声明了才有**，
     // 没有包声明主题时 `welcome` 的字段集合一个都不多（`test/modClientPanels.test.js` 两侧对照钉着这条）。
     const theme = this.workshop && this.workshop.theme && typeof this.workshop.theme === 'object' ? this.workshop.theme : null;
+    // 传输层的**生效值**（`pack.json.server.transport` 的声明 → `transportPolicy` 收敛 → `attachWebSocket` 真正装上去
+    // 的那个选项；DESIGN §28.30）：`{ deflate, params, maxPayload, threshold }`。客户端那格 `ctx.net.transport()`
+    // 是按**这个名字**定的，所以它必须真的落在这里 —— 缺字段时那一格返回 `null`（不抛、不编造）。
+    // **报的是生效值，不是声明值**：声明了 `deflate: false` 而引擎最终没开压缩，这里就是 `false` + `threshold: null`。
+    // `maxPayload` 是 `WS_MAX_PAYLOAD`（引擎常量，不是包的声明），所以它总有值。
+    const transport = this.workshop && this.workshop.transport && typeof this.workshop.transport === 'object'
+      ? this.workshop.transport : null;
     return {
       diyKitted: KITTED_CHARS,
       // 本房座位上限 (业主裁决 B5): 只有这台服务器的上限不是官方 `MAX_SEATS` 时才发 —— 4 座服务器（缺省）的
@@ -1386,6 +1393,7 @@ export class Lobby {  /**
       ...(panels.length ? { modPanels: panels } : {}),
       ...(assets.length ? { modAssets: assets } : {}),
       ...(theme && theme.vars && Object.keys(theme.vars).length ? { modTheme: theme } : {}),
+      ...(transport ? { transport } : {}),
     };
   }
 

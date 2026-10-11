@@ -39,6 +39,11 @@
 //         `net.status()` (the connection snapshot `public/js/net.js` already publishes as its `'status'` event) and
 //         `net.welcome()` (the `welcome` frame the client already received). Both are frozen copies and both are `null`
 //         when there is nothing to report — a panel may draw the wrong thing, never compute the wrong thing.
+//         §28.32 adds `net.transport()` on the same terms (the socket parameters only the server knows: the browser's
+//         `WebSocket` API exposes no `Sec-WebSocket-Extensions`) and §28.31 adds two cells on the OTHER two facades:
+//         `me.voice` (`{ global, byChar }`, the voice-dub reading — a panel cannot see the settings store) and
+//         `session.setVoiceLang(charId, lang)`, the ONE setting cell a panel may write (closed enum `VOICE_LANGS`,
+//         local-only, playback-time — see `VOICE_CHAR_ID_RE` for the boundary in full).
 //     There is no store handle, no store slice, no engine and no match state, so a C module can be wrong in the
 //     rendering sense and cannot be wrong in the result sense.
 //   * A DECLARATION THAT CANNOT BE USED IS NAMED, never silently skipped: an unknown slot, a URL outside the
@@ -58,6 +63,10 @@ import { setAppearanceLookup, clearAppearanceLookup } from './portraitChain.js';
 // 引擎已经定义好的服务端→客户端类型（`shared/protocol.js S2C`）。**不在这里抄一份**：抄一份就是第二个会漂的真相，
 // 而漂的方向是「一个面板订阅了一个引擎其实不会发的名字」—— 那正是这一层到处在拒绝的形态。
 import { S2C } from '../../../shared/protocol.js';
+// 配音词表（`shared/constants.js VOICE_LANGS`，编辑器 / CLI / 工坊校验器都读它）。**不在这里抄一份**：抄一份
+// 就是第二个会漂的真相，而漂的方向是「面板写了一个引擎不认识的配音」—— 那正是这一层到处在拒绝的形态。
+// 这个模块是纯数据，所以 `extensions.js` 仍然能在 Node 里整套跑（`test/modClientPanels.test.js` 就是这么跑的）。
+import { VOICE_LANGS } from '../../../shared/constants.js';
 // 组件级改写（DESIGN §28.19）：引擎的具名组件注册表。**只有包真的声明了 `wraps` 才会走到它**——
 // 没有任何包声明时 `setComponentWraps` 一次都不会被调用，链表是空的，组件里的那一次查找之后就是引擎今天那份实现。
 import { MOD_COMPONENT_IDS, MOD_WRAP_MODES, setComponentWraps, clearComponentWraps, wrappedComponentIds } from './modComponents.js';
@@ -114,6 +123,27 @@ export const MOD_PANEL_CREATED = Object.freeze(['root.overlays', 'root.guide', '
 export const PREFS_MAX_KEY = 64;
 export const PREFS_MAX_VALUE = 512;
 export const PANEL_SEND_TYPES = Object.freeze(['room.appearance']);
+
+/**
+ * **面板能写设置的那一格**（`ctx.session.setVoiceLang(charId, lang)`，业主裁决 2026-10-11：「能优化就优化，
+ * 但要守边界」）。这一格开了一个**新类**：在此之前 `session.setPreload` 只能写 store 里两个入口闸门标志，
+ * 面板**从来**改不了玩家自己的设置。所以边界写在这里，一条都不含糊：
+ *
+ *   * **只有这一个写口**，只写设置库里的 `voiceLangByChar`（逐干员的配音覆盖）**一格**：其它设置（音量、
+ *     静音、画质、文字大小、快捷键、工坊外观开关）面板连**读**都读不到（`ctx.me.voice` 只给配音那两格），
+ *     更一个都写不了；
+ *   * **只影响这一台机器**：配音语言在**播放时**解析（`public/js/audio.js:1207` / `:1214` 读注入的
+ *     `voiceLangOf`，它最终走 `ui/gameLogic/settings.js voiceLangFor`，缺档回退「覆盖 → 全局 → 默认」），
+ *     整个写口是纯 localStorage 偏好 —— 不发帧、不落对局、**改动不了任何人的战果**；
+ *   * **闭枚举**：值只收 `VOICE_LANGS`（`shared/constants.js`，cn / jp / en / kr）里的成员，或 `''` / `null`
+ *     （= 清掉这一格的覆盖，回到跟随全局）。别的值一律**拒绝并点名**，绝不静默丢弃；`VOICE_LANGS` 本身
+ *     一个字也不许改（它不从属于面板）。
+ *
+ * 干员 id 的形状：`sanitizeVoiceLangByChar` 只收 `/^char_[A-Za-z0-9_]{1,64}$/` 的键。这里**必须**先判一次
+ * ——否则一个形状不对的 id 会被那个清洗器**静默丢掉**，而面板会以为写成功了。两处判据由
+ * `test/modClientSettings.test.js` 钉在一起（这个文件与别处同形：`THEME_VAR_RE` 也是这么钉的）。
+ */
+export const VOICE_CHAR_ID_RE = /^char_[A-Za-z0-9_]{1,64}$/;
 
 /**
  * 面板偏好表（模块级、内存里）。
@@ -283,6 +313,7 @@ const isPanelId = (v) => typeof v === 'string' && v.length > 0 && v.length <= 64
  *   slotHost?: (slot: string) => any,
  *   createElement?: (tag: string) => any,
  *   env?: Record<string, boolean>,
+ *   settings?: { get: () => any, setVoiceLang: (charId: string, lang: string) => boolean } | null,
  *   onWrapsChanged?: (links: number) => void,
  * }} deps
  * @returns {{ apply: (list: any) => { accepted: number },
@@ -304,6 +335,19 @@ export function createPanelRegistry(deps) {
   /** 客户端数据层（`public/js/data.js`）。注入而不是 import：那是浏览器模块（fetch / location），
    *  extensions.js 必须能在 Node 里整套跑（`test/modClientPanels.test.js` 就是这么跑的）。 */
   const dataApi = deps.data || null;
+  /**
+   * **设置库的注入面**（业主裁决 2026-10-11 的第二个件）：`{ get, setVoiceLang }`。
+   *
+   * 为什么是注入而不是 import：设置库住在 `public/js/ui/settings.js`，而那个模块拖进 Preact、音频管理器、
+   * 数据层与语言包 —— 这里是**能在 Node 下整套跑**的一层，不能因为一格读数把整条界面链拖进来（`data` 那一格
+   * 是同一条理由）。注入的两样都来自引擎自己那一份真相：
+   *   * `get()` → `settingsStore.get()`（`ctx.me.voice` 的唯一来源）；
+   *   * `setVoiceLang(charId, lang)` → `ui/settings.js setVoiceLangByChar`（**唯一一个**面板能写的设置格，
+   *     它只改 `voiceLangByChar` 并走那条既有 sanitize + savePref 的路径）。
+   * 没有注入时两格都**拿不到就是 `null` / 点名拒绝**，不抛、不编造（见 `ctx.me.voice` 与
+   * `ctx.session.setVoiceLang`）。
+   */
+  const settingsApi = deps.settings || null;
   /** 组件级改写注册成功之后的**重画回调**（DESIGN §28.19）：链是渲染期生效的，注册完成之后已经画出来的那一帧
    *  必须重画一次（`main.js` 重新 `render` 同一个 `<App/>`）。没有包声明 `wraps` 时它一次都不会被调用。 */
   const onWrapsChanged = typeof deps.onWrapsChanged === 'function' ? deps.onWrapsChanged : () => {};
@@ -341,6 +385,15 @@ export function createPanelRegistry(deps) {
    * @type {any}
    */
   let welcomeSnapshot = null;
+  /**
+   * `ctx.net.transport()` 那一格**为什么拿不到**已经报过的原因（每种原因只记一行）。
+   *
+   * 「不许静默失败」在这里的正确形状是**一次一行**，不是每次读一行：面板可能每秒问一次，而
+   * 「这台服务器没有那一格字段」是一个**安装事实**（不是故障）—— 每帧刷屏的日志和没有日志一样没用。
+   * 没收到 `welcome` 时**不记**：那是「还没到时候」（标题屏、握手中），不是缺字段。
+   * @type {Set<string>}
+   */
+  const transportGapsLogged = new Set();
   /** panel key -> 它注册成功的 wraps 链接（模块每个面板只 import 一次）。 */
   const wrapLinks = new Map();
   /** panel key -> 这个模块导出过 `mount` / `default` 吗（**只改写**的模块没有，也不该因此被点名拒绝）。 */
@@ -367,6 +420,19 @@ export function createPanelRegistry(deps) {
   function refuse(code, detail) {
     rejected.push({ code, detail });
     log?.error?.(`[mod-panels] ${code}: ${detail}`);
+  }
+
+  /**
+   * `ctx.net.transport()` 拿不到读数时的那**一行**日志（每种原因一次，见 `transportGapsLogged` 的注释）。
+   *
+   * 走注册点的 `log`（`main.js` 接的是页面控制台）：面板的 `ctx.log` 是按包分区的，而「这格字段这台服务器
+   * 根本没有」是一个**引擎级**的事实，该在页面控制台上说一次，而不是在每个读它的包的日志里各说一次。
+   * @param {string} reason @param {string} detail
+   */
+  function noteTransportGap(reason, detail) {
+    if (transportGapsLogged.has(reason)) return;
+    transportGapsLogged.add(reason);
+    log?.warn?.(`[mod-panels] CLIENT_TRANSPORT_UNAVAILABLE (${reason}): ${detail}`);
   }
 
   // 引擎自己那一份 `welcome` 快照（DESIGN §28.24 / §28.25）。`net.on` 不在（Node 用例、注入面极小的宿主）时什么都不做：
@@ -585,6 +651,51 @@ export function createPanelRegistry(deps) {
         return v === undefined ? dflt : v;
       },
       /**
+       * **设置库里唯一一格面板能写的东西**：某个干员的配音语言（业主裁决 2026-10-11「能优化就优化，但要守边界」）。
+       *
+       * 面板今天读得到这台机器用哪套配音（`ctx.me.voice`），但改不了它 —— 而「这个干员的语音我想听另一种」
+       * 正是干员详情里那个切换口做的事。所以给一格**受限**写口，形状与 `setPreload` 同族（成功/失败用布尔回答），
+       * 边界见模块顶部 `VOICE_CHAR_ID_RE` 的注释，三条：
+       *   * 只写 `voiceLangByChar` 的**这一格**，其它设置一个字节都不动；
+       *   * 值只收 `VOICE_LANGS` 的成员，或 `''` / `null`（清掉覆盖 ⇒ 回到跟随全局）；
+       *   * 纯本地偏好：播放时解析，发不出帧、改不了对局 —— 「面板可以画错、但不能算错」在这里就是
+       *     「面板可以让你多听一句别的配音，但不能多打一点伤害」。
+       *
+       * **越界一律 `false` 并点名**（`CLIENT_VOICE_*`），不静默：一个被丢掉的写入如果只是「没反应」，
+       * 作者会以为是引擎的 bug；`undefined`（忘了传第二个参数）也**不是**清空 —— 清空要写明 `''` 或 `null`。
+       * @param {string} charId 干员 id（形状见 `VOICE_CHAR_ID_RE`，与 `sanitizeVoiceLangByChar` 同一判据）
+       * @param {'cn'|'jp'|'en'|'kr'|''|null} lang 配音语言，或空值 = 清除这一格的覆盖
+       * @returns {boolean} 是否写入
+       */
+      setVoiceLang(charId, lang) {
+        if (typeof charId !== 'string' || !VOICE_CHAR_ID_RE.test(charId)) {
+          refuse('CLIENT_VOICE_BAD_CHAR', `panel "${rec.key}" setVoiceLang(${JSON.stringify(typeof charId === 'string' ? charId.slice(0, 40) : charId)}, …) — an operator id must be "char_" + 1..64 of A-Za-z0-9_ (the same shape a per-operator voice-override key may have)`);
+          return false;
+        }
+        const clear = lang === '' || lang === null;
+        if (!clear && !VOICE_LANGS.includes(lang)) {
+          refuse('CLIENT_VOICE_BAD_LANG', `panel "${rec.key}" setVoiceLang("${charId}", ${JSON.stringify(lang)}) — the dub must be one of ${VOICE_LANGS.join(', ')}, or "" / null to clear this operator's override. That is the whole list: a panel cannot invent a dub, and an omitted argument is not a clear (write "" instead)`);
+          return false;
+        }
+        if (!settingsApi || typeof settingsApi.setVoiceLang !== 'function') {
+          refuse('CLIENT_VOICE_NO_SETTINGS', `panel "${rec.key}" setVoiceLang("${charId}", …) — this page injected no settings store, so the write is refused by name instead of silently doing nothing`);
+          return false;
+        }
+        /** @type {boolean} */
+        let ok;
+        try { ok = settingsApi.setVoiceLang(charId, clear ? '' : lang) === true; } catch (err) {
+          refuse('CLIENT_VOICE_WRITE_FAILED', `panel "${rec.key}" setVoiceLang("${charId}") threw in the settings store: ${err && err.message ? err.message : String(err)}`);
+          return false;
+        }
+        if (!ok) {
+          // 到这里说明两边的判据都过了、而设置库自己没写：它那一层还有一条上限（`VOICE_OVERRIDE_MAX`，400 个
+          // 干员）—— 一个**只有引擎知道**的边界，所以在这里点名，而不是让面板以为写成功了。
+          refuse('CLIENT_VOICE_REFUSED', `panel "${rec.key}" setVoiceLang("${charId}", ${JSON.stringify(lang)}) was refused by the settings store (the per-operator override table has a size limit of its own; nothing was written)`);
+          return false;
+        }
+        return true;
+      },
+      /**
        * **发一条引擎消息**（业主裁决：面板要能主动做一件对房内可见的事，例如换装广播）。
        *
        * 白名单是**闭枚举** `PANEL_SEND_TYPES`，不是「想发什么发什么」：面板能改的是**展示**，
@@ -657,10 +768,50 @@ export function createPanelRegistry(deps) {
      * **边界仍然由「不传什么」保证**：只有这几样标量/浅快照 —— **没有** store 句柄、没有 match / battle 对象、
      * 没有 battleRunner、没有 audio。面板**读得到、改不动、也算不了**。
      */
+    /**
+     * **配音读数**（`ctx.me.voice`，业主裁决 2026-10-11）：`{ global, byChar }`，与 `readMe()` 同形 ——
+     * **每次读都重新取一次设置库**，返回一份新的冻结对象。
+     *
+     * 为什么面板答不出来：设置库住在**另一个** store（`public/js/ui/settings.js:47` 的 `settingsStore`，
+     * 与 `ctx.me` 读的那个 `public/js/store.js` 不是同一个），而注入面里没有 store 句柄 —— 面板拿不到
+     * 「这台机器现在用哪套配音」，也推不出逐干员的覆盖。
+     *
+     * 形状与只读语义：
+     *   * `global`：全局配音（`settings.voiceLang`），永远是 `VOICE_LANGS` 的成员；设置库没注入 / 不成形时整格是 `null`；
+     *   * `byChar`：逐干员覆盖的**冻结浅拷贝**（缺档 = 不在这里，不是 `null`）—— 连同 `global` 就是完整的
+     *     「覆盖 → 全局」链，而链的最后一档（默认配音）由 `sanitizeSettings` 保证不会露出来：store 里的
+     *     `voiceLang` 一定是 `VOICE_LANGS` 的成员，所以 `byChar[charId] ?? global` 就是引擎播放时用的那个语言。
+     *     这里对 store 里的值**再判一次**（第二个读者）：形状不是 `char_…` 的键、不在 `VOICE_LANGS` 里的值一律
+     *     不进快照 —— 面板照它画出来的东西不该与音频管理器播放的不一致。
+     *
+     * 它是**读数**：改它 `TypeError`，引擎之后的选择变化不会回溯进**已经发出去**的那一份（每次读都是新的）。
+     * @returns {{ global: string|null, byChar: Record<string, string> }|null}
+     */
+    const readVoice = () => {
+      /** @type {any} */
+      let s;
+      try { s = settingsApi && typeof settingsApi.get === 'function' ? settingsApi.get() : null; } catch { return null; }
+      if (!s || typeof s !== 'object') return null;
+      /** @type {Record<string, string>} */
+      const byChar = {};
+      const raw = s.voiceLangByChar;
+      if (raw && typeof raw === 'object') {
+        for (const [k, v] of Object.entries(raw)) if (VOICE_CHAR_ID_RE.test(k) && VOICE_LANGS.includes(v)) byChar[k] = v;
+      }
+      return Object.freeze({
+        global: VOICE_LANGS.includes(s.voiceLang) ? s.voiceLang : null,
+        byChar: Object.freeze(byChar),
+      });
+    };
     const meFacade = Object.freeze({
       get playerId() { return readMe().playerId; },
       get name() { return readMe().name; },
       get room() { return readMe().room; },
+      /**
+       * 配音读数（见 `readVoice`）。**不**放进 `snapshot()`：那三个格来自**一次** `store.get()`（「一次取全」
+       * 才不撕裂），而这一格来自另一个 store —— 混进去会让「一次读」这句话变成两个来源的假话。
+       */
+      get voice() { return readVoice(); },
       /** 一次取全（一次 `store.get()`，三样一致）：面板要同时用两个以上的读数时用它，避免三次分别取出现撕裂。 */
       snapshot: readMe,
     });
@@ -764,6 +915,52 @@ export function createPanelRegistry(deps) {
        */
       welcome() {
         return welcomeSnapshot;
+      },
+      /**
+       * **传输层读数**（DESIGN §28.32，业主裁决 2026-10-11 的「动态挂点」那一批）：这一条 WebSocket 连接实际跑在
+       * 什么参数上 —— 压缩开关与参数、单帧上限、压缩阈值。
+       *
+       * **为什么只能由服务端给**：浏览器侧的 `WebSocket` API **不暴露** `Sec-WebSocket-Extensions`（也没有
+       * `maxPayload`），所以面板（以及引擎自己）都推不出来 —— 而这正是 `permessage-deflate` 那种会让
+       * 「帧大小 / 延迟 / CPU」三件事一起变的配置最容易被误判的地方。服务端知道它自己启动时用的参数，于是在
+       * `welcome` 里带一格**只读**字段；这一格读的就是那一帧（与 `ctx.net.welcome()` 同一条事实、同一份快照）。
+       *
+       * 形状（服务端那一格的四个键，逐个复判；键名与 `shared/protocol.js` 的 `welcome` 注释一致）：
+       * ```
+       * { deflate: boolean|null, params: string|null, maxPayload: number, threshold: number|null }
+       * ```
+       * `deflate` / `params` / `threshold` 读不到就是 `null`（不是 `false` / `''` / `0`：「不知道」与「关着」
+       * 是两件事）；`maxPayload` 是必填的那一格，不成形（不是有限非负数）就**整格 `null`** —— 半个读数比
+       * 没有读数更容易被算错。
+       *
+       * 拿不到时返回 `null`，**不抛、不编造**，并**记一行**（注册点的 `log` = 页面控制台，每种原因只记一次）：
+       *   * 这一页还没收到过任何 `welcome`（标题屏、握手被拒）—— 这是「还没到时候」，**不记**；
+       *   * 收到的 `welcome` 里**没有** `transport`（老服务器 / 未装服务端那一格的部署）—— 记一行，
+       *     并如实说明「待服务端补字段」，**不自己造一个默认值**（一个凭空来的 `maxPayload: 65536` 比
+       *     `null` 危险得多：面板会照它去解释为什么帧被拒）。
+       *
+       * 这是一格**读数**：不新增协议消息、不发任何帧、不改变引擎行为（与 `status()` / `welcome()` 同一条判据，
+       * `test/modClientNetReads.test.js` 的四个出口计数器一并管着它）。
+       * @returns {{ deflate: boolean|null, params: string|null, maxPayload: number, threshold: number|null }|null}
+       */
+      transport() {
+        if (!welcomeSnapshot) return null;
+        const raw = welcomeSnapshot.transport;
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+          noteTransportGap('absent', 'the `welcome` frame this page received carries no `transport` field — returning null (the server side of this cell, `pack.json.server.transport`, is not installed on this deployment; nothing is invented here)');
+          return null;
+        }
+        const maxPayload = raw.maxPayload;
+        if (!Number.isFinite(maxPayload) || maxPayload < 0) {
+          noteTransportGap('bad-max', `the \`welcome.transport.maxPayload\` this page received is not a finite number ≥ 0 (${JSON.stringify(maxPayload)}) — the whole reading is null rather than half a reading`);
+          return null;
+        }
+        return Object.freeze({
+          deflate: typeof raw.deflate === 'boolean' ? raw.deflate : null,
+          params: typeof raw.params === 'string' ? raw.params : null,
+          maxPayload,
+          threshold: Number.isFinite(raw.threshold) ? raw.threshold : null,
+        });
       },
     });
     /**

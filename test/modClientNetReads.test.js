@@ -100,13 +100,13 @@ const wire = (over = {}) => ({
 
 // ---------------------------------------------------------------------------------------------------------------
 describe('§28.24 / §28.25 面板注入面：ctx.net.status() 与 ctx.net.welcome()', () => {
-  test('两格都在，且与既有的 on / send / sendResourceMessage 同在一张冻结门面上', async () => {
+  test('三格都在，且与既有的 on / send / sendResourceMessage 同在一张冻结门面上', async () => {
     const { net } = liveNet();
     const { cell } = await ctxNetOf(net);
     assert.ok(Object.isFrozen(cell), '门面本身冻结');
     assert.deepEqual(Object.keys(cell).sort(),
-      ['on', 'send', 'sendResourceMessage', 'status', 'welcome'],
-      'net 面：三个成员照旧 + 两格只读读数（不多不少）');
+      ['on', 'send', 'sendResourceMessage', 'status', 'transport', 'welcome'],
+      'net 面：三个成员照旧 + 三格只读读数（不多不少；transport 是 §28.32 那一格）');
     assert.notEqual(cell, net, '给的是受控门面，不是 net 本身');
     assert.equal(cell.ws, undefined, '门面上没有 socket');
     assert.equal(cell.snapshot, undefined, '引擎的 snapshot() 也不直接外传（外传的是那两格读数）');

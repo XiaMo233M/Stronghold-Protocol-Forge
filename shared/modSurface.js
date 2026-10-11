@@ -155,16 +155,86 @@ export const MOD_SURFACE = Object.freeze([
     decl: 'pack.json.server.modules = { module, uses[] }',
     anchors: [{ symbol: 'SERVER_MEMBERS', members: ['modules'] }, { symbol: 'SERVER_MODULE_USES' }],
     requires: [
-      '只允许 uses 里那几个生命周期钩子',
-      '源码过静态确定性扫描（无 process / require / eval）',
+      '只允许 uses 里那几个生命周期钩子（闭枚举；加一格不抬世代）',
+      '源码过静态确定性扫描（无 process / require / eval）—— **这一条从 2026-10-11 起真的实现了**：' +
+        '`server/modModules.js serverModuleSourceIssues` 在 `import()` **之前**跑 `stripComments` + `mentionsIdentifier`，' +
+        '取 `SERVER_CODE_FORBIDDEN_GLOBALS`（与 server.meta / battle / room 三处**同一张共享表**）**去掉 `globalThis` 一格**：' +
+        '承诺逐字是那三个名字，而仓库里有一个能用的 server.modules 模块用 `globalThis` 与同进程测试通信（判死它就会裁掉那个合法包）。' +
+        'kit 那一段（时钟 / 随机 / DOM / 计时器）**刻意不取**：这一层的挂载点都在对局之外跑，要读进程信息请用 host.metrics',
       // 这一格唯一的**网络触发点**：`uses` 含 `matchClass`（⇒ 必须 `combat: true`）的包，其 MatchClass 子类上的
       // `handlePackMsg(playerId, msg)` 会在 `pack.msg` 限流之后、转发之前被调到一次；返回 `true` /
       // `{ consumed: true }` = 已消费（不再转发），其余返回值与抛错都按未消费继续转发。
       '`matchClass` 子类上的 `handlePackMsg(playerId, msg)` 是唯一一条由消息驱动的调用点（见 DESIGN §28.14）',
+      '`uses` 里含 `metrics` / `route` 的两格改不了对局（一个是只读标量快照，一个是只读 GET），所以都**不**要求 `combat: true`（§28.34 / §28.35）',
+      '`healthz` 与 `onBoot` 的读数口径见 §28.37：`/healthz` 的 `ok` 恒 true、恒 200（「不 ok 时 503」做不到，如实写在那一节）',
     ],
-    files: ['shared/workshop.js', 'server/modModules.js', 'server/lobby.js', 'shared/kitAuthoring.js'],
-    tests: ['test/packServerModules.test.js', 'test/packServerModulesWire.test.js', 'test/packMatchMsg.test.js'],
+    files: ['shared/workshop.js', 'server/modModules.js', 'server/hostMetrics.js', 'server/http/routeMount.js', 'server/lobby.js', 'shared/kitAuthoring.js'],
+    tests: ['test/packServerModules.test.js', 'test/packServerModulesWire.test.js', 'test/packMatchMsg.test.js', 'test/packServerSurface.test.js'],
     spec: '§28.14',
+  },
+  {
+    id: 'server.transport',
+    layer: 'B',
+    decl: 'pack.json.server.transport = { deflate, threshold?, level?, memLevel?, concurrencyLimit?, … }',
+    anchors: [{ symbol: 'TRANSPORT_FIELDS' }, { symbol: 'SERVER_MEMBERS', members: ['transport'] }],
+    requires: [
+      '**只是声明**：包永远不能注入服务端代码去改 `wss`（业主裁决「声明式足够就不做」）—— 那是进程启动选项写权限',
+      '`deflate` 必填（没有开关的块什么都没说）；其余字段是闭集 + 上下界（`TRANSPORT_BOUNDS`）',
+      '进程级：`perMessageDeflate` 是 `WebSocketServer` 的构造选项。多包声明时包 id 小的赢，其余点名；生效值进启动日志',
+      '`welcome.transport` 报的是**生效值**（`{ deflate, params, maxPayload, threshold }`），不是声明值；`MOD_API_VERSION` 不动（加法）',
+    ],
+    files: ['shared/workshop.js', 'server/index.js', 'server/http/websocket.js', 'server/lobby.js'],
+    tests: ['test/packServerSurface.test.js'],
+    spec: '§28.33',
+  },
+  {
+    id: 'server.modules.metrics',
+    layer: 'B',
+    decl: 'server.modules[].uses 含 "metrics" ⇒ `host.metrics()`',
+    anchors: [{ symbol: 'HOST_METRICS_FIELDS', module: 'hostMetrics' }, { symbol: 'BOOT_CONFIG_ENV_KEYS', module: 'modModules' }],
+    requires: [
+      '**是值不是句柄**：深冻结的标量对象（`uptimeSec` / `rss` / `heapUsed` / `elu` / `loopP*` / `sampleAgeMs` / `state`），没有 `process`、没有直方图、没有定时器、没有函数',
+      '惰性启用：直方图与采样定时器只在真有包声明 `metrics` 时才建（没装的进程开销为零）',
+      '样本过期 ⇒ `loopP*` 一律 `null` + `state: "stale"` + 点名 warn 一次（既不静默空白，也不报旧值）',
+      '`onBoot` 的回调收到一份**深冻结只读配置快照** `{ port, host, stateDir, env }`；`env` 只带 `BOOT_CONFIG_ENV_KEYS` 白名单。**包只能观察不能设值**，也永远不能**声明**启动变量',
+      '没声明就抛 `MODULE_USE_UNDECLARED`（不是 `undefined`）',
+    ],
+    files: ['server/hostMetrics.js', 'server/modModules.js', 'server/index.js'],
+    tests: ['test/packServerSurface.test.js'],
+    spec: '§28.34',
+  },
+  {
+    id: 'server.modules.route',
+    layer: 'B',
+    decl: 'server.modules[].uses 含 "route" ⇒ `host.route(path, fn, { cache? }?)`',
+    anchors: [{ symbol: 'RESERVED_ROUTE_PREFIXES', module: 'routeMount' }, { symbol: 'DYNAMIC_ROUTE_CACHE_POLICIES', module: 'routeMount' }],
+    requires: [
+      '路径必须在 `/mod/<包id>/…` 里（命名空间里有包 id ⇒ 冲突与顶掉核心路径在结构上不可能），并且再判一遍核心保留路径表',
+      '只有 GET / HEAD；缓存只有 `no-store` / `no-cache`（没有 `public`）；响应体有上限（64 KB）',
+      '回调必须**同步**返回 JSON 可序列化的值（`Promise` 点名拒绝并回 500 —— 单进程事件循环，这一格不做每请求隔离）',
+      '认证口径与引擎其余 HTTP 面逐字一致：**没有认证**，所以 `host.route` 不是私有通道（要私有数据落 `host.io`）',
+      '静态 `pack.json.routes` 通道仍然按「声明过的路径就是声明过的路径」行事；保留路径表本批只施加在动态通道上（§28.35 记了这条不对称）',
+    ],
+    files: ['server/http/routeMount.js', 'server/http/static.js', 'server/modModules.js', 'server/index.js'],
+    tests: ['test/packServerSurface.test.js'],
+    spec: '§28.35',
+  },
+  {
+    id: 'media.voices.cdn',
+    layer: 'A',
+    decl: 'pack.json.voices / voiceLangs 里的 `{ url, sha256, file }` 条目（作者自备 CDN）',
+    anchors: [{ symbol: 'VOICE_CDN_FIELDS' }, { symbol: 'VOICE_CDN_AUDIO_EXTS' }],
+    requires: [
+      '**协议只认 `https:`**（`http:` / `data:` / `file:` / 协议相对 / URL 里带凭据一律拒）',
+      '`sha256` 是作者声明的内容摘要：取回来的字节必须对上，对不上就**不落盘、不服务**',
+      '**绝不内置任何官方语音地址、也绝不新增下载路由**：主机名只来自 `pack.json`，取回来的字节由**既有**的 `/workshop-assets/` 送出',
+      '**不放宽 `VOICE_LANG_*`**，也不加任何便于拿官方语音的通道',
+      '失败要响亮：逐条点名 warn + 那条台词从客户端读的语音表里摘掉（回落默认配音，而不是留一条永远 404 的静音）',
+      '声明了 CDN 条目就必须写 `license`；CDN 条目不需要 `assets/` 文件夹，包内路径的既有规则一字未动',
+    ],
+    files: ['shared/workshop.js', 'server/voiceCdn.js', 'server/http/static.js', 'server/index.js'],
+    tests: ['test/packServerSurface.test.js'],
+    spec: '§28.36',
   },
   {
     id: 'server.battle',
@@ -384,10 +454,24 @@ export const MOD_SURFACE_IDS = Object.freeze(MOD_SURFACE.map((s) => s.id));
  *
  * 加一格不改这里（增量不需要新世代）；删一格而世代数字没抬，就是这里红。抬世代时把当世代那份抄下来、写成新的
  * 键，并在 docs/MOD-SURFACE.md 写明「哪一格被谁取代、老包怎么迁移」。
+ *
+ * **这个列表是逐字抄下来的字面量，不是 `MOD_SURFACE.map(...)` 的别名** —— 这一点是这个守卫存在的全部理由。
+ * 曾经它写的是 `1: MOD_SURFACE_IDS`，而那是一个**恒真的守卫**：`MOD_SURFACE_IDS` 就是 `MOD_SURFACE` 自己派生的
+ * 数组，所以账本与被检查的今天那份表**永远是同一个对象**（`MOD_SURFACE_FROZEN[1] === MOD_SURFACE_IDS` 为
+ * `true`），`surfaceLedgerIssues` 里的 `have.has(id)` 也就永远成立 —— 从表里删掉一格时，账本跟着一起少一格，
+ * 守卫一声不响。失败分支只被 `test/modSurface.test.js` 的**合成输入**覆盖过，真实代码路径从来没有红过。
+ * 装饰性守卫比没有守卫更坏：它让人以为有保护。所以这里改成字面量（第二个真相，代价是抬世代时要手抄一遍，
+ * 而那正是「冻结」两个字的含义）。
  * @type {Readonly<Record<string, readonly string[]>>}
  */
 export const MOD_SURFACE_FROZEN = Object.freeze({
-  1: MOD_SURFACE_IDS,
+  1: Object.freeze([
+    'content', 'overrides', 'units.operators', 'media.voices', 'media.icons', 'skins', 'notices', 'i18n',
+    'server.preDispatch', 'server.meta', 'server.modules', 'server.battle', 'server.room', 'routes', 'assets',
+    'client.panels', 'client.panels.me', 'client.panels.wraps', 'kits.relativeImports', 'client.panels.styles',
+    'client.theme', 'client.panels.data', 'client.panels.messages', 'client.requires',
+    'forms', 'fx.silentPhases', 'mods.catalog',
+  ]),
 });
 
 /**

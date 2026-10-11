@@ -72,7 +72,7 @@ over exactly the bytes the loader reads and the browser will be served:
 1. `pack.json` — hashed **after** `normalizePackManifest` (`shared/workshop.js:303`), so the hash covers the pack's
    effective declaration (normalized `overrides`, `content`, icon tables, `art`, `support`, `voices`), not its
    whitespace. Two spellings of the same pack then hash the same, and a declaration the loader silently dropped
-   (`shared/workshop.js:315-317` filters a malformed `overrides` entry in silence today) cannot hide behind the hash.
+   (`shared/workshop.js:1573-1575` filters a malformed `overrides` entry in silence today) cannot hide behind the hash.
 2. every declared content file, after `normalizeContentFile` — the same normalized records the loader merges.
 3. **every other regular file under the pack directory** — its bytes, byte for byte. That is `kits/**`, `assets/**`, the
    declared panel modules and stylesheets, the `server.meta` / `battle` / `room` / `modules[*].entry` modules, the i18n
@@ -1329,7 +1329,8 @@ than from banning things:
   channel.
 - **`matchClass` is the only mount point that can reach a match**, so it alone requires `combat: true`
   (`MODULES_NEED_COMBAT`): a `MatchClass` wrapper can in principle change a result, and "a pack that can change a result
-  declares it" is the owner's ruling. `boot` / `shutdown` / `healthz` cannot, and do not need it. The layer derivation
+  declares it" is the owner's ruling. `boot` / `shutdown` / `healthz` / `metrics` / `route` cannot, and do not need it
+  (§28.31 / §28.32: one hands back a frozen scalar snapshot, the other answers a read-only GET). The layer derivation
   counts such a pack as **B**, while `combat`'s *derived* value still looks only at `kits/`.
 
 **Where it is enforced.** The declaration is `shared/workshop.js parseServerModulesDecl` (shape, closed enums, caps:
@@ -1339,16 +1340,49 @@ are judged on the startup path (`server/modModules.js`), and a module that fails
 set** — the same prune point `server.preDispatch` and `server.meta` use. Module bytes enter the content hash, exactly
 like `kits/`, panel modules and meta modules.
 
+**The source scan is now real (2026-10-11, bug fix).** This surface's `requires` has promised "a static determinism scan
+(no `process` / `require` / `eval`)" since it was written, and until this batch the loader only checked that the file was
+readable before `import()`-ing it into the server's own process (`server/modModules.js`). The same three sites that *did*
+have the scan (`server/match/metaPack.js`, `server/battlePack.js`, `server/roomPack.js`) are the template:
+`serverModuleSourceIssues` runs `stripComments` + `mentionsIdentifier` over the source **before** the import and returns
+one `{ code: 'MODULES_BAD_SOURCE', reason }` per hit. The table it reads is `SERVER_CODE_FORBIDDEN_GLOBALS`
+(`process` / `globalThis` / `require` / `eval` / `new Function`) **minus `globalThis`** — the promise names exactly
+`process` / `require` / `eval`, and this repository already contains a *working* `server.modules` module that uses plain
+`globalThis` to talk to an in-process test (`test/packMatchMsg.test.js`), so banning it would prune a legitimate pack
+(the owner's rule: measure first, and if a real pack would be rejected, narrow the rule rather than force it). It is a
+heuristic, not a sandbox: `globalThis['pro'+'cess']` slips past this scan exactly as it slips past the other three.
+`KIT_FORBIDDEN_GLOBALS` (clocks, randomness, DOM, timers) is **deliberately not applied**:
+`boot` / `shutdown` / `healthz` / `metrics` / `route` all run outside the match loop, so a snapshot module stamping
+`Date.now()` is legitimate, and the one mount point that does run inside a match (`matchClass`) already carries
+`combat: true` and the digest/golden gate. An author who needs a process reading has a sanctioned replacement —
+`host.metrics` — and the refusal text names it, so the refusal is not a dead end.
+
 **Two deliberate asymmetries, recorded rather than implied:**
 
 - **Server modules are process-wide, not per-room.** `boot` / `shutdown` are process events by nature, and so is
   `/healthz`. `matchClass` wraps the class the *Lobby* hands to every match. So unlike `server.meta`, a room's declared
   set does not select them — a server-module pack is a property of the installation, which is what the three real
   modules are.
-- **One network hook, and no arbitrary mount points.** Exactly one of the four mounts is driven by traffic: the
-  `matchClass` wrapper's `handlePackMsg` (below), the owner's ruling of 2026-10-10. Anything else a server-side mod
-  wants still has to be an engine feature — the other three are the lifecycle events the three real files actually
-  needed, and a fifth mount point is still not something a pack can name.
+- **One message-driven hook, and no mount point a pack can invent.** Exactly one of the mounts is driven by traffic:
+  the `matchClass` wrapper's `handlePackMsg` (below), the owner's ruling of 2026-10-10. `uses` is a closed enum
+  (`SERVER_MODULE_USES`) — a name this layer does not know is `MODULES_BAD_USES`, so a pack can never name a seventh
+  thing into existence.
+
+  **This paragraph used to end with "a fifth mount point is still not something a pack can name", and that sentence is
+  now false.** The owner's ruling of 2026-10-11 (`route` / metrics: "做，实在做不到就算了") added two mount points, and
+  the reason the old sentence could be dropped is not that the rule was relaxed — it is that the *shape* of the new
+  mount points makes the danger the old sentence was guarding against structurally impossible:
+
+  | mount | what it hands over | why it cannot reach a core path / a match |
+  |---|---|---|
+  | `metrics` (§28.31) | a **deep-frozen object of scalars** (`uptimeSec`, `rss`, `heapUsed`, `elu`, `loopP*`, `sampleAgeMs`, `state`) | it is a *value*, not a handle: no `process`, no histogram, no timer, no function. A read cannot change a result |
+  | `route` (§28.32) | a synchronous callback answering a JSON value | the path **must** live under `/mod/<pack id>/…`, a namespace the engine reserves for exactly this; `GET`/`HEAD` only; `no-store`/`no-cache` only; bounded body. A pack has no position to name `/data/support.json`, so the "core reserved path table" is the second line of defence rather than the first |
+
+  The static `pack.json.routes` channel (§28.13) still answers an exact declared path **before** the core mounts, and that
+  stance is written into `server/http/static.js` on purpose ("a declared path is that path"). It is **not** changed by
+  this batch: the reserved-prefix table this section describes is applied to the **dynamic** channel, and re-judging the
+  static one is a separate decision with its own compatibility question (a live pack may already declare such a path).
+  Recorded here so the asymmetry is not mistaken for an oversight.
 
 **The one trigger: `handlePackMsg(playerId, msg)` on the `matchClass` subclass.** `pack.msg` is handled by the Lobby
 (`Lobby.packMsg`): it validates the declaration, rate-limits the session and forwards to the room's seats and
@@ -2178,5 +2212,301 @@ node --test test/packForms.test.js                    # 声明生效 / 第一方
 node --test test/workshopValidateArtTables.test.js    # art 的扁平表不再让校验器崩（本轮那条真 bug）
 node --test test/modSurface.test.js
 ```
+
+
+### 28.30 伤害看板（投稿 30498a468a0f 那一格）：今天能读什么，读不到什么
+
+业主点名的那一格是「让包在**客户端**自己算 DPS 与总伤」。查完的结论**分成两半**，两半都写在下面 ——
+因为把「总伤今天就能读」与「逐单位 / 逐场 DPS 今天读不到」混成一句，作者就会照着一个不存在的读数写代码。
+
+**一、今天就能做：总伤（零引擎改动）。** 面板本来就订阅得到引擎的 S2C（`public/js/ui/extensions.js:827`
+`S2C_TYPES.has(type) → net.on(type, fn)`，**原样透传**），而伤害数字在两条既有帧上：
+
+| 面板读得到的 | 既有 S2C 帧 | 帧里的哪一格 | 粒度 |
+|---|---|---|---|
+| **每人总伤害** | `m.result`（`shared/protocol.js:758`） | `players[].stats.dmgDealt`（同处还有 `bossDamage` / `healingDone` / `kills` / `leaks` / `perfectRounds`；`server/match/results.js:156-161` 组装，`ui/stats.js` 与 `screens/result.js` 的战绩页读的就是它） | 整场**结算时**一次，按玩家 |
+| **实时领袖伤害** | `b.pool`（`shared/protocol.js:764`） | `acked[fieldId]` = 那一场累计计入的领袖伤害（`server/match/match/bossRounds.js:381` `_broadcastPool`「to everyone」，≤ 4 Hz） | 首领 / 隐藏回合，按**场**，≤ 4 Hz |
+| 共享池血量 / 队伍 LP | 同一条 `b.pool` | `hp` / `max` / `teamLp` | 同上 |
+
+所以「总伤看板」是一个**今天就能发**的包：订阅 `m.result` 排个序就够了。
+
+```js
+// client.panels[] = [{ id: 'board', slot: 'screen.result.footer', module: 'board.js' }]
+export function mount(ctx) {
+  const rows = new Map();                        // playerId → 总伤
+  const off = ctx.net.on('m.result', (m) => {    // 既有 S2C：原样透传，不是新通道
+    rows.clear();
+    for (const p of m.players || []) rows.set(p.playerId, p.stats?.dmgDealt ?? null);
+    draw(rows);                                  // 面板自己的 DOM，ctx.host 里
+  });
+  return { unmount: off };
+}
+```
+
+**二、今天读不到：逐单位伤害、逐场伤害、每一次命中。** 三条各自有判据，不是「没查到」：
+
+* **逐单位伤害留在服务端。** 那份带 `defId/dmg/kills/heal` 的 `unitStats` 只到服务端为止
+  （`server/match/fields.js:61` / `:873`，`Match.js` 把它累进 `ps.stats.unitStats`），结算帧里**只有**由它选出来的
+  一个 **mvp id**（`server/match/results.js:154` `mvp: mvpOf(ps, lineup)`）—— `m.result` 的每个玩家条目里
+  **没有** `unitStats`。
+* **唯一带 `dmg` 元组的 S2C 是 `b.ev`**（`shared/protocol.js:766`，元组种类 `EV.DMG` 在同文件 `:799`），
+  而那一行自己的注释写着 `server-run combat streaming (legacy / SP_COMBAT=server only)`。
+* **默认（客户端跑战斗）时那些元组不进 `net`。** 权威客户端的战斗在本机跑，`b.snap` / `b.ev` 走
+  `public/js/battle/runner.js:282` 的 `emit` —— 那是 runner **自己的** listener map（`public/js/screens/game.js:601` 用
+  `battleRunner.on('ev', …)` 消费），不是 `net`。runner 对 `net` 只有三件事：`on`（订阅 `b.start` / `b.end` …）、
+  `send`（`b.progress` / `b.result`）、`request` —— 一条都不是「把伤害元组交给面板」。
+* 顺带一条容易踩的：**`b.progress` 不是 S2C**。它是 C2S（`server/match/match/reports.js:18` 是它的处理器，
+  服务器只把它折进 `m.public` / `b.pool`，**从不原帧广播**），所以面板 `ctx.net.on('b.progress', …)` 会被
+  `CLIENT_CHANNEL_UNDECLARED` **点名拒绝** —— 那条路上连订阅都不成立。
+
+**三、要真 DPS，需要什么（形状先给，本批不实现）。** 「面板可以画错、但不能算错」在这里的落点是：**没有读数就
+不造读数**。一个能算逐单位 DPS 的读面至少要有三件事，缺一条就不该做：
+
+1. **数据源**：默认路径下伤害元组只活在 `public/js/battle/runner.js` 的 listener map 里，所以要么由
+   `public/js/main.js` 把 runner 的 `on('ev')` 转给注册点（`deps.damage = { subscribe }`），要么由 runner 自己
+   维护一个**只读累计**再交出来。两条都要碰 `public/js/battle/runner.js` 与 `main.js`，不在本批的文件面里。
+2. **形状（建议）**：`ctx.net.damage()` → 一次读一份**冻结**的累计快照
+   `{ battleId, fieldId, gt, total, byPlayer, byUnit }`，`null` = 当前没有正在跑的战斗 / 没有数据源 ——
+   与 `status()` / `welcome()` / `transport()` 同一套「拿不到就是 `null`，不抛、不编造」。
+3. **判据**：它只读累计，**不许**让 runner 多算一步 / 改一条帧 / 碰模拟输入 ——
+   可执行的判据是「同一 seed 的战斗结果摘要逐字节相同」，模板就在 `test/modClientSettings.test.js` 的
+   「模拟侧零副作用」那一条。
+
+**四、表面与守卫。** 这一节没有新代码，所以也没有新表面：与 §28.24 / §28.25 同一先例（纯读数不新增
+`pack.json` 声明，没有 schema 符号可锚，故不进 `shared/modSurface.js`）。守卫是 `test/modClientSettings.test.js`
+里「伤害看板」那一组：`m.result` 原样透传、结算帧里没有 `unitStats`、`b.progress` 订阅被点名、runner 的元组
+不进 `net`、以及面板活着时战斗摘要不变。**`MOD_API_VERSION` 不动**（今天这一半是零改动）。
+
+### 28.31 `ctx.me.voice` 与 `ctx.session.setVoiceLang`：一格配音读数，加一个**唯一**的设置写口
+
+面板答不出「这台机器现在用哪套配音」：那个值住在**另一个** store（`public/js/ui/settings.js:47`
+`settingsStore`，与 `ctx.me` 读的 `public/js/store.js` 不是同一个），而注入面里没有 store 句柄。
+干员详情里的切换口（`public/js/ui/detailPanel.js:318` / `:519-522`）能改它，面板不能 —— 所以补一格**读数**加一格
+**受限写口**（业主裁决 2026-10-11：「能优化就优化，但要守边界」）。
+
+**1. 注入。** 注册点收 `deps.settings = { get, setVoiceLang }`（`public/js/main.js` 给的就是引擎自己那一对：
+`settingsStore.get()` 与 `ui/settings.js` 的 `setVoiceLangByChar`）。注入的是**两个函数**，不是 store 句柄 ——
+与 `deps.data` 同一条理由：`ui/settings.js` 会拖进 Preact 与整套界面，而这一层必须能在 Node 里跑。
+
+**2. 读数：`ctx.me.voice`。**
+
+| 字段 | 含义 |
+|---|---|
+| `global` | 全局配音（`settings.voiceLang`），永远是 `VOICE_LANGS`（`shared/constants.js:77`：cn / jp / en / kr）的成员 |
+| `byChar` | 逐干员覆盖的**冻结浅拷贝**（`charId → 语言`）；缺档 = 键不在，不是 `null` |
+
+* **每次读一份新的冻结副本**（与 `readMe()` 同形）：改它 `TypeError`，引擎之后换了选择也不会回溯改写已经
+  发出去的那一份。`byChar[charId] ?? global` 就是播放时用的那个语言 —— 最后一档「默认配音」被
+  `sanitizeSettings` 保证不会露出来（store 里的 `voiceLang` 一定是词表成员）。
+* **第二个读者**：形状不是 `char_…` 的键、值不在 `VOICE_LANGS` 里的，都不进快照 —— 面板画出来的不该与
+  `public/js/audio.js:1207` / `:1214` 播放的不一致。
+* **拿不到就是 `null`**（没注入设置库 / 不成形 / `get()` 抛）：不抛、不编造，面板画空态。
+* **不进 `me.snapshot()`**：那三格来自**一次** `store.get()`（「一次取全」才不撕裂），这一格来自另一个 store。
+
+**3. 写口：`ctx.session.setVoiceLang(charId, lang)`。** 它开了**新的一类**（在此之前面板只写得了
+`session.setPreload` 那两个入口闸门标志），所以边界写死在代码里（`public/js/ui/extensions.js`
+`VOICE_CHAR_ID_RE` 上面那一段注释）：
+
+* **只此一格**：只写 `voiceLangByChar` 的**一个键**，其它设置（音量 / 静音 / 画质 / 文字大小 / 快捷键 /
+  工坊外观开关）一个字节都不动；
+* **只影响本地**：配音在**播放时**解析（`public/js/audio.js:1207` 的 `voiceLangOf` → `ui/gameLogic/settings.js
+  voiceLangFor`：覆盖 → 全局 → 默认），整个写口是纯 localStorage 偏好 —— 不发帧、不落对局、改不了任何人的战果；
+* **闭枚举**：值只收 `VOICE_LANGS` 的成员，或 `''` / `null`（= 清掉这一格，回到跟随全局；与
+  `public/js/ui/detailPanel.js:519` 的「跟随默认」同一个含义）。`VOICE_LANGS` 本身一个字也不许改；
+* **越界一律点名**（不静默丢弃）：`CLIENT_VOICE_BAD_CHAR`（干员 id 形状）/ `CLIENT_VOICE_BAD_LANG`
+  （非枚举值，**列出全部可用配音**，并说清 `''` 才是清空 —— `undefined` 不是）/ `CLIENT_VOICE_NO_SETTINGS`
+  （这一页没注入设置库）/ `CLIENT_VOICE_WRITE_FAILED`（写函数抛）/ `CLIENT_VOICE_REFUSED`（设置库自己拒了，
+  例如覆盖表满 `VOICE_OVERRIDE_MAX` = 400 —— 这一条只有引擎知道，所以要点名）。
+* **落盘只有一条路**：写进 store → 设置库顶部那**一条**既有订阅（`settings.js` `settingsStore.subscribe`
+  → `savePref('settings', …)`）落盘。这里**不另调一次** `savePref`（同一件事两条落盘路径早晚会漂）。
+
+**4. 落点。** `public/js/ui/extensions.js`（`VOICE_CHAR_ID_RE` / `readVoice` / `session.setVoiceLang` /
+`net.transport`）、`public/js/ui/settings.js`（`setVoiceLangByChar`：只改一格的写函数，第二读者是
+`sanitizeVoiceLangByChar`）、`public/js/main.js`（注入那一对函数）。
+
+**5. 表面与守卫。** 加一格读数不抬版本（`MOD_API_VERSION` 不动，已发布的包一个都不受影响）。两条**既有**
+断言必须学新键 —— `test/modClientNetReads.test.js` 的「net 面不多不少」那张枚举表（多 `transport`）、
+`test/modClientPanels.test.js` 的 `Object.keys(ctx.me)`（多 `voice`）；两处**严格度不变**（仍然断言「不多不少」），
+这正是那两条断言存在的意义。新守卫是 `test/modClientSettings.test.js`。
+
+### 28.32 `ctx.net.transport()`：只有服务端知道的那一格
+
+同一条「面板推不出来、只有引擎答得出来」的清单又加一格：**这条 WebSocket 实际跑在什么参数上**。浏览器侧的
+`WebSocket` API **不暴露** `Sec-WebSocket-Extensions`（也没有 `maxPayload`），panel 与引擎都推不出来 —— 而这正是
+`permessage-deflate` 那种会让「帧大小 / 延迟 / CPU」一起变的配置最容易被误判的地方。
+
+**来源。** 服务端知道它自己启动时用的参数，于是在 `welcome` 里带一格**只读**字段 `transport`
+（与 §28.24 / §28.25 同一份快照：`ctx.net.welcome()` 与 `ctx.net.transport()` 读的是**同一条帧**）。
+字段名与本批服务端那一格的约定就是 `welcome.transport`。
+
+| 字段 | 含义 | 读不到时 |
+|---|---|---|
+| `deflate` | 压缩开着吗 | `null`（**不是** `false`：「不知道」与「关着」是两件事） |
+| `params` | 协商出来的参数串 | `null` |
+| `maxPayload` | 单帧上限（字节） | 这一格是必填的：**不成形（非有限、负数）就整格 `null`** —— 半个读数比没有更危险 |
+| `threshold` | 压缩阈值 | `null` |
+
+**只读语义。** 每次调用一份**新的冻结副本**，只带上面四个键（服务端那一格里多带的字段不外传）；改它
+`TypeError`；后到的一帧不回溯改写已经发出去的那一份。
+
+**拿不到时。** 返回 `null`，**不抛、不编造**，并**记一行**（注册点的 `log` = 页面控制台，**每种原因一次**，
+见 `extensions.js` 的 `transportGapsLogged`）：
+
+* 这一页还没收到过任何 `welcome`（标题屏、握手被拒）—— 这是「还没到时候」，**不记**；
+* 收到的 `welcome` 里**没有** `transport`（老服务器 / 未装服务端那一格的部署）—— 记一行并如实说明
+  「待服务端补字段」。**绝不自己造一个默认值**：一个凭空来的 `maxPayload: 65536` 会让面板照它去解释
+  「为什么这一帧被拒」，那比 `null` 危险得多。
+
+**表面与守卫。** 它**不是**新的消息类型：`transport` 只是 `welcome` 里的一格字段（`S2C` 里没有 `transport`，
+`C2S` 里也没有）。守卫是 `test/modClientSettings.test.js` 的「三格读数一次都不碰四个出口」（真 `Net` 的
+`send` / `request` / `sendResourceMessage` / `_sendRaw` 各套一个计数器，要求 0），加上 `test/modClientNetReads.test.js`
+那张「不多不少」的枚举表。**`MOD_API_VERSION` 不动**（加法）。
+
+### 28.33 `pack.json.server.transport`：声明式的启动期传输配置（服务端那一半）
+
+§28.32 说的是客户端那一格读数（`ctx.net.transport()`）；这一节说的是**它读的那个字段从哪来**。
+
+**问题。** WebSocket 的 `perMessageDeflate` 写死在 `server/http/websocket.js`（`false`）。参考包
+`ws-compression-reference` 想开压缩，唯一办法是手改引擎那一行 —— 正是这一层到处在消灭的东西。
+
+**两条路，业主裁决选第二条（`D 声明式足够就不做`）。**
+
+| 路 | 能力面 | 结论 |
+|---|---|---|
+| 包注入服务端代码去改 `wss` | **进程启动选项写权限**（改监听、改压缩、改超时） | 不做。那已经不是内容 / 界面 / 只读观察里的任何一层，而是运维杠杆 |
+| `pack.json.server.transport` 一张字段闭集 | 声明若干有上下界的值 | **做**。同一个结果，代价小一个数量级 |
+
+**声明。** `server.transport = { deflate, threshold?, level?, memLevel?, concurrencyLimit?,
+serverNoContextTakeover?, clientNoContextTakeover?, serverMaxWindowBits?, clientMaxWindowBits? }`。
+`deflate` **必填**（一个没有开关的块什么都没说，`TRANSPORT_BAD_DEFLATE`）；未知字段 `TRANSPORT_UNKNOWN_FIELD`；
+区间在 `shared/workshop.js TRANSPORT_BOUNDS`（`level` 0–9、`threshold` 0–1048576 …），越界 `TRANSPORT_BAD_VALUE`。
+**只把声明过的键交给 `ws`**：省掉的字段用库自己的缺省 —— 引擎不把库的缺省值抄成第二份真相。
+
+**落实（与 `assets.serverPolicy` 的 `resourceServerPolicy` 逐字同一条三件套）。** 读声明 →
+`transportPolicy(policies, { log })` 收敛成**一个进程级**的值（`perMessageDeflate` 是 `WebSocketServer` 的构造
+选项，不是某个房间的属性）→ **启动日志点名**。多包声明时按 DESIGN §28.3「包 id 小的赢」，其余每一包**点名**
+说明被谁盖住了。没有任何包声明时是 `false`，与这一刀之前逐字节相同。
+
+**`welcome.transport`。** 生效值随既有的 `welcome` 帧送到客户端，形状
+`{ deflate: boolean|null, params: string|null, maxPayload: number, threshold: number|null }`，来源是
+`server/lobby.js welcomeInfo()`。两条纪律：
+
+- **报的是生效值，不是声明值。** 声明了 `deflate: false`（或声明被更大的包 id 盖住、或最终没开）时
+  `deflate` 就是 `false`、`threshold` 就是 `null` —— 报声明值会让面板显示一个不存在的压缩。
+- **不新增协议消息。** `transport` 只是 `welcome` 里的一格字段（`S2C` / `C2S` 里都没有 `transport`），
+  **`MOD_API_VERSION` 不动**。
+
+**包只能观察，不能设值。** `pack.json` 里没有任何字段能往启动变量里写东西；`onBoot` 收到的是一份**深冻结**的
+只读快照（见 §28.34）。
+
+### 28.34 `uses: ["metrics"]`：只读指标快照，加 `boot(config)` 的冻结快照
+
+**为什么在这一刀里。** §28.14 的源码扫描从这一批起**真的会拒 `process`**（见上面那一段）。一条只有禁令没有替代
+品的规则会逼作者绕路（`globalThis['pro'+'cess']`），而「给 `/healthz` 加几个字段报内存 / 事件循环延迟」正是那三件
+原始社区需求里的一条。`host.metrics()` 就是那个替代品。
+
+**形状（`server/hostMetrics.js`）。** 返回一个**深冻结**的普通对象，字段闭集
+`HOST_METRICS_FIELDS = [uptimeSec, rss, heapUsed, elu, loopP50, loopP95, loopP99, loopMax, sampleAgeMs, state]`：
+`rss` / `heapUsed` 是字节，`elu` 是 [0,1] 的累积利用率，`loopP*` 是**毫秒**、最近一个采样窗口内的延迟。
+
+- **是值不是句柄**：没有 `process`、没有直方图对象、没有定时器、没有函数。包拿不到任何能改变服务器的东西。
+- **惰性启用**：`monitorEventLoopDelay` 与采样定时器**只在真有包声明 `uses: ["metrics"]` 时**才建（没装的进程
+  开销为零）。
+- **过期不给旧值**：采样器跑不动（事件循环被卡住）时 `loopP*` 全是 `null`、`state` 是 `stale`，并**点名 warn 一次**
+  —— 「不许静默空白」与「不许静默旧值」是同一条纪律的两面。
+- 没声明就抛 `MODULE_USE_UNDECLARED`（与 `io` 同一条，不是 `undefined`）。
+
+**`boot(config)`。** `onBoot` 的回调收到一份**深冻结**的只读配置快照
+`{ port, host, stateDir, env }`（`server/modModules.js bootConfigSnapshot`），`port` / `host` 是**真正绑到的**值
+（快照在 `listen` 之后建）。`env` 是**白名单** `BOOT_CONFIG_ENV_KEYS`（`SP_BOT_EMOTES` / `SP_STAGE` /
+`SP_STATE_DIR` / `SP_WORKSHOP` —— 引擎源码里读过的**全部** `SP_*`，`test/packServerSurface.test.js` 用反射钉住），
+其余环境变量看不见。**包只能观察不能设值**：改一个冻结属性在严格模式 ESM 里直接抛。
+
+### 28.35 `uses: ["route"]`：动态只读端点（`host.route(path, fn)`）
+
+`pack.json.routes`（§28.13）能让包把一个**包内写死的 `.json` 文件**挂到一条绝对路径上，但「内容随运行时状态变」
+表达不出来（今天的在线数、这一局的归档标签、包自己攒的计数）。这一格就是那条不手改的通道：一个**同步返回
+JSON 可序列化值**的回调。
+
+六条纪律（判据的唯一真相在 `server/http/routeMount.js`）：
+
+1. **命名空间**：路径必须在 `/mod/<包id>/…` 里。两个包在结构上不可能撞车，核心命名空间也不可能被顶掉 ——
+   包**没有位置**去点名 `/data/support.json`。
+2. **核心保留路径表**（`RESERVED_ROUTE_PREFIXES`）：`/healthz`、`/ws`、`/data`、`/data.js`、`/shared`、`/sim`、
+   `/i18n`、`/mods`、`/media`、`/packs`、`/assets`、`/fonts`、`/workshop-*`、`/room-data` 逐条再判一遍。这是
+   **纵深防御**：将来谁放宽了第 1 条，第 2 条还在。
+3. **只有 GET / HEAD**（别的动词在 `server/http/routes.js` 就已经 405）。
+4. **缓存只有 `no-store` / `no-cache`**，默认 `no-store`。刻意**没有** `public`：一个现算的端点说「可以公开缓存
+   一天」几乎总是错的（静态 `routes` 有 `public`，因为它挂的是一个**文件**）。
+5. **认证口径：与引擎其余 HTTP 面逐字一致 —— 没有认证。** 这台服务器没有任何需要凭据的 HTTP 端点。所以一个包
+   **不得**把 `host.route` 当私有通道（凭据进 URL / 靠路径保密）—— 要私有数据就落 `host.io`。
+6. **回调必须同步返回**（`Promise` 点名拒绝，不 await），体有上限（`DYNAMIC_ROUTE_MAX_BYTES` = 64 KB）。
+   理由是实在的：单进程单事件循环，一个 `await` 的处理器就是一条能拖住整台服务器的路，而这一格**不**做每请求隔离。
+   四种失败（`Promise` / `undefined` / 不可序列化 / 超限）各自点名并回 500，**不**回落到空体 200。
+
+**与 §28.13 静态通道的关系（一处刻意的不对称）。** 两条通道都声明同一条路径时**静态的赢**（`static.js` 里
+静态那一半先查）。静态通道今天仍然按 `server/http/static.js` 写明的立场行事 ——「声明过的路径就是声明过的
+路径」，即它可以回答一条与核心挂载同名的路径。**核心保留路径表本批只施加在动态通道上**：给静态通道补这条判据
+会改变已发布包的行为（一个包今天可能真的声明了这样一条路径），那是另一件事，需要单独裁。这一条记在这里，免得
+被当成漏改。
+
+### 28.36 作者自备 CDN 的语音素材（`{ url, sha256, file }`）
+
+**业主口径（2026-10-11）：「分发官方语音不行，但应该留出下载作者语音素材的 CDN 链接支持」。** 所以这一格做的事
+永远只有一件：按**作者在 `pack.json` 里写下的地址**把字节取回来。
+
+**声明。** `voices` / `voiceLangs` 表里的一个条目可以是一个对象而不是包内相对路径字符串：
+
+```json
+{ "voices": { "char_x": { "place": [
+  "voice/char_x/place_1.mp3",
+  { "url": "https://作者自己的域名/x/place_2.mp3", "sha256": "<64 位小写 hex>", "file": "voice/char_x/place_2.mp3" }
+] } } }
+```
+
+字段闭集 `VOICE_CDN_FIELDS`（`VOICE_CDN_UNKNOWN_FIELD`），三条一体：`url` 必须是绝对 `https://`（`http:` /
+`data:` / `file:` / 协议相对 / URL 里带凭据一律 `VOICE_CDN_BAD_URL`）；`sha256` 必须是小写 64 位 hex
+（`VOICE_CDN_BAD_DIGEST`）；`file` 必须是 `assets/` 下的安全相对路径 + 音频扩展名
+（`VOICE_CDN_AUDIO_EXTS` = `.mp3` / `.ogg` / `.wav` / `.m4a`，与 `/workshop-assets` 那条路由的白名单同一批，
+否则取回来也送不出去）。声明了它就**必须**写 `license`（`VOICE_CDN_NEEDS_LICENSE`）：素材的再分发者是作者，
+授权问题不因为字节放在别人的 CDN 上就消失。**CDN 条目不需要 `assets/` 文件夹**（它读的不是包里的字节），
+但包内路径的那一条既有规则（`VOICE_NEEDS_ASSETS`）一字未动。归一化结果里 `voiceCdn` **只在声明过时才存在**
+（与 `skins` 同一条纪律：给每个包都加一个空数组会换掉所有已发布包的哈希）。
+
+**装载（`server/voiceCdn.js materializeVoiceCdn`）。** 在**合并语音表之前**取、核对、落缓存：
+
+- **内容哈希是唯一判据**：字节先过作者声明的 sha256，对不上就 `VOICE_CDN_DIGEST_MISMATCH`，**不落盘、不进覆盖表**；
+- **缓存位置**：`<状态目录>/voice-cdn/<sha256>`（`voiceCdnCachePath`）。键就是摘要 ⇒ 两个包声明同一份字节只存一份，
+  第二次不联网。先写 `.part-<pid>` 再 `rename`，半截的下载不会在缓存里留下一个「看起来命中」的文件；
+- **有界**：单条超时 `VOICE_CDN_TIMEOUT_MS`（20 s）、单条上限 `VOICE_CDN_MAX_BYTES`（24 MB）；
+- **送出去走既有路由**：`server/http/static.js` 的 `/workshop-assets/` assets 分支在拼接包目录**之前**查一张覆盖表
+  （键与 URL 逐字同形 `<包id>/<assets 内的相对路径>`）。客户端看见的 URL 与「素材本来就在包里」时**逐字相同**；
+- **失败要响亮**：每一条失败回一条 `{ pack, file, url, code, reason }`，`server/index.js` 逐条 `log.warn` 点名，
+  并且把那条台词从**客户端读的语音表里摘掉**（`dropFailedVoiceCdnFiles`）—— 宁可让那个语种回落到默认配音，
+  也不要留一条永远 404 的静音台词。一条外部 CDN **不**让服务器起不来。
+
+**三条红线怎么守。** ① 引擎里**没有一个语音素材主机名常量**，也没有「已知素材站」白名单 —— 主机名只来自
+`pack.json`（要写白名单就得把官方域名写进引擎，那正是红线本身）；② **没有新增任何下载路由**：取回来的字节由
+既有的 `/workshop-assets/` 送出；③ **`VOICE_LANG_*` 一个字没放宽**：语种闭枚举（`shared/constants.js`）、槽位闭
+枚举、以及「默认语种不能写进 `voiceLangs`」三条都没动，也没有任何便于拿官方语音的新通道。
+
+### 28.37 `/healthz` 的只读字段：确认可用，以及两件**做不到**的事
+
+挂点**今天就有**，不是本批新增的：`uses: ["healthz"]` 的回调返回一个**扁平对象**（值只能是字符串 / 数字 / 布尔 /
+`null`，≤ 12 字段 / 2048 字符，`server/modModules.js HEALTHZ_LIMITS`），落在
+`/healthz` 的 `modHealth["<包id>"]` 下（按包 id 分组，两个包不能互相盖字段）。回调抛异常、返回嵌套对象或超限，
+都是**点名 warn + 跳过那一条**，别的包照旧报。没有包声明 `healthz` 时 `/healthz` 里**没有** `modHealth` 这个键
+—— 干净安装的字节不变。
+
+两件如实说清的事：
+
+- **`ok` 恒为 `true`、状态码恒为 `200`**（`server/http/routes.js healthReport`），本批**不动**。`ok` 的含义是
+  「这个 HTTP 服务在答话」，不是「一切正常」；让包的字段去影响它是把运维端点变成一条包可写的健康闸门。
+- **「不 ok 时 503」做不到，本批也不做。** 要那个语义就得先定义「谁的不 ok」：是所有已装包都说 ok？还是任一包说
+  不 ok 就 503？前者给不出信息，后者等于**一个第三方包可以决定整台服务器被判死**（负载均衡/容器编排会照它摘流量）
+  —— 那正是本层一直在拒绝的能力形态。所以这一格只报事实，判断留给运维。
+
+
+
 
 

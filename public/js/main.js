@@ -56,7 +56,7 @@ import { RoomScreen } from './screens/room.js';
 import { GameScreen } from './screens/game.js';
 import { installAudio } from './audio.js';
 import { probeDubs } from './voiceDubs.js';
-import { settingsStore } from './ui/settings.js';
+import { settingsStore, setVoiceLangByChar } from './ui/settings.js';
 import { voiceLangFor } from './ui/gameLogic/settings.js';
 import { GuideHost } from './ui/guide.js';
 import { installDeviceSupport } from './ui/device.js';
@@ -97,6 +97,11 @@ const modPanels = createPanelRegistry({
   // 数据口（业主裁决 2026-10-10）：面板经 `ctx.data.get('<表>')` 读**冻结快照**。注入的是页面本来就在用的那一个
   // 数据层（`public/js/data.js`），所以读一张表不会多一个请求 —— 它读的就是引擎已经抓过的那份内容。
   data,
+  // 面板的**设置读数**与**唯一一个设置写口**（业主裁决 2026-10-11）：`ctx.me.voice` 读的就是引擎自己那一份设置库
+  // （`ui/settings.js` 的 `settingsStore`），`ctx.session.setVoiceLang(charId, lang)` 写的就上面那个受限函数
+  // （只改 `voiceLangByChar` 一格、过同一份 sanitize、走同一条 `savePref` 订阅）。注入的是**两样函数**，不是
+  // store 句柄 —— 面板读得到配音、改得动这一格，别的设置既读不到也写不了。
+  settings: { get: () => settingsStore.get(), setVoiceLang: setVoiceLangByChar },
   notify: (text, kind) => toast(text, kind || 'warn'),
   // 组件级改写（DESIGN §28.19）：`client.panels[].wraps` 注册完成、链表真的变了才调用一次。没有包声明 `wraps`
   // 的服务器上它一次都不会被调用 —— 页面上不多一次渲染、不多一个新全局（与面板那条不变量逐字相同）。

@@ -486,9 +486,9 @@ describe('C 层客户端：注册点', () => {
     assert.ok(Object.isFrozen(ctx.net));
     assert.ok(Object.isFrozen(ctx.log));
     assert.ok(Object.isFrozen(ctx.me), '会话态也是一份冻结快照');
-    // 只读会话态的形状与**边界**：只有这三样，没有 store / match / battle / runner / audio
-    assert.deepEqual(Object.keys(ctx.me).sort(), ['name', 'playerId', 'room', 'snapshot'],
-      '只读会话态：三样读数 + 一次取全的 snapshot（没有别的）');
+    // 只读会话态的形状与**边界**：只有这三样 + voice（§28.31 的配音读数），没有 store / match / battle / runner / audio
+    assert.deepEqual(Object.keys(ctx.me).sort(), ['name', 'playerId', 'room', 'snapshot', 'voice'],
+      '只读会话态：三样读数 + 一次取全的 snapshot + 配音读数（没有别的）');
     assert.equal(ctx.store, undefined, '不给 store');
     assert.equal(ctx.engine, undefined);
     assert.equal(ctx.match, undefined);

@@ -147,6 +147,28 @@ export const OVERRIDE_ENTRY_RE = /^([a-z]+):([A-Za-z0-9_\-.:]{1,64})$/;
 export const WORKSHOP_MEDIA_PREFIX = '/workshop-assets/';
 
 /**
+ * **作者自备 CDN 的语音素材**（DESIGN §28.33）：一条 voice 表里的条目可以是
+ * `{ url, sha256, file }` 而不是一个包内相对路径。三件一体，缺一条都不收：
+ *   * `url` —— 作者自己的 `https://` 地址。**引擎只从这条地址取**，绝不内置任何语音素材地址，也绝不新增下载路由：
+ *     素材仍然由 `/workshop-assets/<包>/<file>` 这一条**既有**路由送出（引擎在装载期把它取到本地缓存，见
+ *     `server/voiceCdn.js`），所以客户端那边一个字节都没变；
+ *   * `sha256` —— 作者声明的**内容摘要**。取回来必须对上，对不上就当作没取到（绝不落盘、绝不上线）；
+ *   * `file` —— 素材在包里的**逻辑位置**（`assets/` 下的相对路径）。它是客户端看到的 URL、也是引擎缓存的键之外的
+ *     身份部分，所以必须是一个安全的相对路径 + 音频扩展名。
+ *
+ * 三条红线（业主口径：**分发官方语音不行，但作者自备 CDN 可以**）：
+ *   1. **协议只认 `https:`**（`http:` / `data:` / `file:` / 协议相对一律拒）—— 明文取素材等于允许中间人换掉音频；
+ *   2. **绝不内置任何官方语音地址**，也没有任何「已知素材站」白名单：白名单要把官方域名写进引擎，那正是红线本身；
+ *   3. **不放宽 `VOICE_LANG_*`**，也不新增任何「便于拿官方语音」的通道：语种闭枚举、槽位闭枚举、以及「默认语种不能
+ *      写进 `voiceLangs`」三条一个字都没动。
+ */
+export const VOICE_CDN_FIELDS = Object.freeze(['url', 'sha256', 'file']);
+/** CDN 素材的摘要形状：64 位小写十六进制 sha256。**小写**是刻意的 —— 大小写混写会让同一个摘要有两个字节形态。 */
+export const VOICE_CDN_SHA256_RE = /^[0-9a-f]{64}$/;
+/** CDN 素材允许的扩展名。与 `/workshop-assets` 那条路由的音频白名单**同一批**（否则引擎取回来了也送不出去）。 */
+export const VOICE_CDN_AUDIO_EXTS = Object.freeze(['.mp3', '.ogg', '.wav', '.m4a']);
+
+/**
  * The URL prefix a pack's **C-layer panel module** is served under: `<prefix><packId>/<module path inside the pack>`
  * (DESIGN §28.8, docs/WORKSHOP.md §1.9.3). The twin of `WORKSHOP_MEDIA_PREFIX` on the other side of the line
  * `/workshop-assets` draws: that route serves a pack's MEDIA and therefore refuses `.js`; this one serves its CODE and
@@ -306,8 +328,6 @@ const CLIENT_MAX_PANEL_MESSAGES = 8;
  * 要能被 `^[a-z][a-z0-9_-]{0,63}$` 判死（拼错一个名字就是一条永远收不到的消息，那正是这一层到处在拒绝的形态）。
  */
 const CLIENT_PANEL_CHANNEL_RE = /^[a-z][a-z0-9_-]{0,63}$/;
-/** 一个面板最多读几张表（今天是 13 张，写着是为了让「全读」这件事有个上限而不是一个通配）。 */
-const CLIENT_MAX_PANEL_DATA_TABLES = 13;
 /**
  * 一个面板可以**读**的数据表（业主裁决 2026-10-10 的「数据口」那一半，DESIGN §28.8）。
  *
@@ -324,6 +344,22 @@ export const CLIENT_PANEL_DATA_TABLES = Object.freeze([
   'chess', 'bonds', 'items', 'bands', 'enemies', 'bosses',
   'stages', 'tokens', 'choices', 'config', 'assets', 'backups', 'local', 'notices',
 ]);
+/**
+ * 一个面板最多读几张表 —— **由上面那张名单推导**，不是一个手写的数字。
+ *
+ * 这里原本写着 `= 13`，而名单在 `notices`（§28.15）加进来之后是 **14** 张：于是「把这个面板要读的表全列出来」
+ * 这件最自然的事会被 `CLIENT_BAD_PANEL_DATA` 拒掉，而错误文案还写着「at most 13 tables **(that is all of them)**」
+ * —— 文案与事实正好相反，作者拿到的是「你列太多了」，而真相是「我们忘了改这个数」。这一格的语义本来就是
+ * **「全部」**（它的判据是 `CLIENT_PANEL_DATA_TABLES.includes(...)`，名单是唯一的白名单），所以上限必须跟着名单走。
+ *
+ * 为什么**推导**而不是「把 13 改成 14」：手写第二个真相正是它漂掉的原因，改一次数字只换来下一次漂。
+ * `export` 出去是为了让 `test/modClientData.test.js` 能把它钉住（「上限 == 名单长度」+「14 张全声明必须被接受」）。
+ *
+ * 提高这个数的**影响面为零**：它从来不是「哪几张表可以读」的判据（那是 `includes`），只是「一次能列几张」的数量上限，
+ * 所以任何今天合法的声明在新值下**依然合法**（放宽只会多接受，不会少接受）。一个包今天就能单独声明 `notices`
+ * （长度 1 < 13），所以「第 14 张表读不到」这件事从来没有发生过 —— 发生的是「一次列全 14 张」被判成错误。
+ */
+export const CLIENT_MAX_PANEL_DATA_TABLES = CLIENT_PANEL_DATA_TABLES.length;
 /** 一个包能声明它需要哪些浏览器能力；缺一即「浏览器不支持」，不是「装了但静默不工作」（DESIGN §28.13）。 */
 export const CLIENT_REQUIRES = Object.freeze(['serviceWorker', 'cacheStorage', 'webCrypto']);
 /**
@@ -394,8 +430,12 @@ const ROOM_MODULE_EXT = '.mjs';
  *     目录根本不在门面里）；
  *   * `uses` 里有 `matchClass` 的包**必须**声明 `combat: true`：一个 `MatchClass` 包装器原则上能改对局结果，
  *     而「要改结果的必须进房间摘要闸门与 golden 那条线」是业主裁决（与 `server.meta` 同一条）。
+ *
+ * 后加的两格（`metrics` / `route`，加一格不抬 `MOD_API_VERSION`）都**不**要求 `combat: true`，因为它们都改不了
+ * 对局：`metrics` 交出的是一份**深冻结的标量快照**（读，不是写），`route` 交出的是**只读 GET/HEAD 的公开 JSON**
+ * （它甚至进不了对局进程 —— 它在 HTTP 处理器里跑）。判据是**能力**而不是意图，与 `server.room` 同一条。
  */
-export const SERVER_MODULE_USES = Object.freeze(['boot', 'shutdown', 'matchClass', 'healthz']);
+export const SERVER_MODULE_USES = Object.freeze(['boot', 'shutdown', 'matchClass', 'healthz', 'metrics', 'route']);
 /** `server.modules[*]` 的字段，一个不多一个不少。 */
 const SERVER_MODULE_FIELDS = Object.freeze(['id', 'entry', 'uses', 'write']);
 /** 一个包最多声明几个服务端模块。 */
@@ -573,7 +613,8 @@ function parseClientDecl(raw) {
     if (panel.gate !== undefined) clean.gate = panel.gate;
     if (styles.length) clean.styles = styles;
     // 数据口（`client.panels[].data`）：声明这个面板要读哪几张表。名字必须在闭枚举里（拼错的表名 = 一个永远
-    // 拿不到数据的读取），上限 13、去掉重复、按枚举次序写进清单（清单字节要稳定）。
+    // 拿不到数据的读取），上限就是「全部」（`CLIENT_MAX_PANEL_DATA_TABLES`，由名单推导）、去掉重复、
+    // 按枚举次序写进清单（清单字节要稳定）。
     if (panel.data !== undefined) {
       if (!Array.isArray(panel.data) || !panel.data.length) {
         return fail('CLIENT_BAD_PANEL_DATA', `client.panels["${panel.id}"].data must be a non-empty array of table names (drop the key instead of sending [])`);
@@ -770,7 +811,81 @@ function parseServerModulesDecl(raw) {
  * 加一格（例如历史上的 `meta`、`modules`、`battle`、`room`）= 一起做三件事：加进这张表、进表面清单、加一条钉它的测试。
  * 三处缺一，守卫就红 —— 这就是「引擎被移植改写时，中间层不会静默少一格」的那道闸门。
  */
-export const SERVER_MEMBERS = Object.freeze(['preDispatch', 'meta', 'modules', 'battle', 'room']);
+export const SERVER_MEMBERS = Object.freeze(['preDispatch', 'meta', 'modules', 'battle', 'room', 'transport']);
+
+/**
+ * `pack.json.server.transport` —— **声明式的启动期传输配置**（DESIGN §28.30）。
+ *
+ * 为什么需要它：WebSocket 的 `perMessageDeflate` 今天写死在 `server/http/websocket.js:58`（`false`）。一个包
+ * （参考包 `ws-compression-reference`）能拿到的唯一办法是**手改引擎那一行** —— 正是这一层到处在消灭的东西。
+ *
+ * 为什么它**只是声明**、而不是「包注入服务端代码去改 wss」：
+ *   * 后者的能力面是**进程启动选项写权限**（一个包能改监听、改压缩、改超时），那已经不是「内容 / 界面 /
+ *     只读观察」里的任何一层，而是运维杠杆；业主裁决「**声明式足够就不做**」说的就是这条；
+ *   * 声明能给的同一个结果，代价小一个数量级：一张字段闭集、每个字段有上下界、启动日志点名生效值。
+ *
+ * 语义（与 `assets.serverPolicy` 的 `resourcePolicy` 逐字同一条先例）：它是**进程级**的 —— `perMessageDeflate`
+ * 是 `WebSocketServer` 的构造选项，不是某个房间的属性，所以一个包声明它，全服务器的 socket 都变了。因此
+ * **任何一条声明都会在启动日志里点名**，而多包声明时按 **DESIGN §28.3「包 id 小的赢」**取一份，其余点名忽略。
+ *
+ * 它改不了对局：压缩只改字节怎么走线，不改任何一条消息的内容与顺序 ⇒ **不要求** `combat: true`。
+ */
+export const TRANSPORT_FIELDS = Object.freeze([
+  'deflate', 'threshold', 'level', 'memLevel', 'concurrencyLimit',
+  'serverNoContextTakeover', 'clientNoContextTakeover', 'serverMaxWindowBits', 'clientMaxWindowBits',
+]);
+/** `deflate` 之外的每个字段的合法区间（闭区间，整数）。写出来是为了让「一个包能设多细」有界。 */
+export const TRANSPORT_BOUNDS = Object.freeze({
+  threshold: [0, 1048576],
+  level: [0, 9],
+  memLevel: [1, 9],
+  concurrencyLimit: [1, 1000],
+  serverMaxWindowBits: [8, 15],
+  clientMaxWindowBits: [8, 15],
+});
+
+/**
+ * `pack.json.server.transport` —— 声明式启动期传输配置（DESIGN §28.30，字段与理由见 `TRANSPORT_FIELDS`）。
+ *
+ * 归一化两条：`deflate` **必须在**（一个没有开关的块什么都没说，与 `SERVER_EMPTY_MEMBER` 同一条口径 ——
+ * 宁可拒绝，也不收一份读不出意图的声明）；其余字段可省，省掉 = 用 `ws` 自己的缺省（引擎**不**在这里抄一份
+ * 库的缺省值，抄一份就是第二个会漂的真相）。写回时按 `TRANSPORT_FIELDS` 的次序，所以清单字节稳定（进身份哈希）。
+ * @returns {{ ok: true, decl: object } | { ok: false, error: string, detail: string }}
+ */
+function parseTransportDecl(raw) {
+  if (!isPlainObj(raw)) {
+    return fail('TRANSPORT_BAD_SHAPE', 'server.transport must be an object: { deflate, threshold?, level?, memLevel?, concurrencyLimit?, serverNoContextTakeover?, clientNoContextTakeover?, serverMaxWindowBits?, clientMaxWindowBits? }');
+  }
+  for (const key of Object.keys(raw)) {
+    if (!TRANSPORT_FIELDS.includes(key)) {
+      return fail('TRANSPORT_UNKNOWN_FIELD', `server.transport: "${key}" is not a declared field (${TRANSPORT_FIELDS.join(', ')})`);
+    }
+  }
+  if (typeof raw.deflate !== 'boolean') {
+    return fail('TRANSPORT_BAD_DEFLATE', 'server.transport.deflate must be true or false — it is the switch itself, and a block without it says nothing');
+  }
+  /** @type {Record<string, any>} */
+  const out = { deflate: raw.deflate };
+  for (const [key, [lo, hi]] of Object.entries(TRANSPORT_BOUNDS)) {
+    if (raw[key] === undefined) continue;
+    if (!Number.isInteger(raw[key]) || raw[key] < lo || raw[key] > hi) {
+      return fail('TRANSPORT_BAD_VALUE', `server.transport.${key} must be an integer between ${lo} and ${hi}, got ${JSON.stringify(raw[key])}`);
+    }
+    out[key] = raw[key];
+  }
+  for (const key of ['serverNoContextTakeover', 'clientNoContextTakeover']) {
+    if (raw[key] === undefined) continue;
+    if (typeof raw[key] !== 'boolean') {
+      return fail('TRANSPORT_BAD_VALUE', `server.transport.${key} must be true or false, got ${JSON.stringify(raw[key])}`);
+    }
+    out[key] = raw[key];
+  }
+  // 键序稳定：清单是身份哈希的输入，写法不同不该换一个摘要。
+  /** @type {Record<string, any>} */
+  const ordered = {};
+  for (const key of TRANSPORT_FIELDS) if (out[key] !== undefined) ordered[key] = out[key];
+  return { ok: true, decl: { transport: ordered } };
+}
 
 /**
  * `pack.json.server` —— 分发前的准入钩子（§28.13）、对局元注册表（§29）、**服务端模块**（§28.14）与
@@ -811,6 +926,11 @@ function parseServerDecl(raw) {
     const meta = parseMetaDecl(raw.meta);
     if (!meta.ok) return meta;
     decl.meta = meta.decl.meta;
+  }
+  if (raw.transport !== undefined) {
+    const transport = parseTransportDecl(raw.transport);
+    if (!transport.ok) return transport;
+    decl.transport = transport.decl.transport;
   }
   if (raw.preDispatch === undefined) return { ok: true, decl };
   const pre = raw.preDispatch;
@@ -1469,7 +1589,16 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // accepted, so a typo cannot silently produce a line that never plays.
   const voices = raw.voices === undefined ? {} : raw.voices;
   if (!isPlainObj(voices)) return fail('VOICE_BAD_SHAPE', 'voices must be an object: { "<charId>": { "<slot>": ["<path>"] } }');
-  if (Object.keys(voices).length && opts.hasAssets !== true) {
+  /**
+   * `voices` / `voiceLangs` 里**包内相对路径**的那几条（字符串条目）。CDN 条目（对象）不要求 `assets/` 文件夹 ——
+   * 它读的不是包里的字节。这个判据放在解析**之前**是刻意的：`VOICE_NEEDS_ASSETS` 与 `VOICE_SLOT_UNKNOWN` 谁先报
+   * 是既有行为，不动它（`test/workshopVoices.test.js` 钉着那几条）。
+   */
+  const anyLocalVoicePath = (tbl) => isPlainObj(tbl) && Object.values(tbl).some((slots) => isPlainObj(slots)
+    && Object.values(slots).some((v) => (Array.isArray(v) ? v : [v]).some((e) => typeof e === 'string' && e)));
+  const hasLocalVoice = anyLocalVoicePath(voices)
+    || Object.values(isPlainObj(raw.voiceLangs) ? raw.voiceLangs : {}).some(anyLocalVoicePath);
+  if (Object.keys(voices).length && opts.hasAssets !== true && hasLocalVoice) {
     return fail('VOICE_NEEDS_ASSETS', 'a pack that declares voices must put the files in its assets/ folder (e.g. assets/voice/…)');
   }
   /**
@@ -1480,7 +1609,9 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
    * Paths are relative and inside assets/, with no traversal — the same rule the /workshop-assets route enforces
    * (that route refuses `.` and `..` segments, so a `.` here would only ever produce a URL that 404s).
    */
-  const parseVoiceTable = (table, where) => {
+  /** CDN 条目的登记处（`pack.voiceCdn`）：`{ lang, charId, slot, file, url, sha256 }`。 */
+  const voiceCdn = [];
+  const parseVoiceTable = (table, where, lang) => {
     if (!isPlainObj(table)) return fail('VOICE_BAD_SHAPE', `${where} must map slots to file lists`);
     /** @type {Record<string, Record<string, string[]>>} */
     const out = {};
@@ -1492,7 +1623,40 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
         if (!VOICE_SLOTS.includes(slot)) {
           return fail('VOICE_SLOT_UNKNOWN', `${where}["${charId}"]["${slot}"] is not a voice slot (one of: ${VOICE_SLOTS.join(', ')})`);
         }
-        const list = (Array.isArray(files) ? files : [files]).filter((f) => typeof f === 'string' && f);
+        /** @type {string[]} */
+        const list = [];
+        for (const [i, entry] of (Array.isArray(files) ? files : [files]).entries()) {
+          const at = `${where}["${charId}"]["${slot}"]${Array.isArray(files) ? `[${i}]` : ''}`;
+          // 作者自备 CDN 的条目（DESIGN §28.33）：`{ url, sha256, file }`。它解析出来的**文件位置**进同一张表，
+          // 所以播放侧（索引 / 合并 / 客户端）一个字节都不用改；引擎装载期负责把字节从作者的地址取到本地缓存
+          // （`server/voiceCdn.js`），客户端仍然只看见 /workshop-assets 那一条既有路由。
+          if (isPlainObj(entry)) {
+            for (const key of Object.keys(entry)) {
+              if (!VOICE_CDN_FIELDS.includes(key)) {
+                return fail('VOICE_CDN_UNKNOWN_FIELD', `${at}: "${key}" is not a field of a CDN voice entry (${VOICE_CDN_FIELDS.join(', ')})`);
+              }
+            }
+            if (typeof entry.url !== 'string' || !entry.url.startsWith('https://')) {
+              return fail('VOICE_CDN_BAD_URL', `${at}.url must be an absolute "https://" URL — this channel fetches from the AUTHOR's own CDN, and https is the only protocol it will speak (http: / data: / file: / protocol-relative all refuse)`);
+            }
+            let parsed = null;
+            try { parsed = new URL(entry.url); } catch { parsed = null; }
+            if (!parsed || parsed.protocol !== 'https:' || !parsed.hostname || parsed.username || parsed.password) {
+              return fail('VOICE_CDN_BAD_URL', `${at}.url must be an absolute "https://" URL with a host and no credentials in it`);
+            }
+            if (typeof entry.sha256 !== 'string' || !VOICE_CDN_SHA256_RE.test(entry.sha256)) {
+              return fail('VOICE_CDN_BAD_DIGEST', `${at}.sha256 must be a 64-character lowercase hex sha256 of the bytes that URL serves — the engine checks it against what it downloads and refuses anything else`);
+            }
+            const lowerFile = String(entry.file).toLowerCase();
+            if (!isSafeRelativePath(entry.file) || !VOICE_CDN_AUDIO_EXTS.some((ext) => lowerFile.endsWith(ext))) {
+              return fail('VOICE_CDN_BAD_FILE', `${at}.file must be a relative path inside assets/ ending in ${VOICE_CDN_AUDIO_EXTS.join(' / ')} (e.g. "voice/char_1/place_1.mp3") — that is the URL the client will ask for`);
+            }
+            voiceCdn.push({ lang: lang || null, charId, slot, file: entry.file, url: entry.url, sha256: entry.sha256 });
+            list.push(entry.file);
+            continue;
+          }
+          if (typeof entry === 'string' && entry) list.push(entry);
+        }
         if (!list.length) return fail('VOICE_EMPTY', `${where}["${charId}"]["${slot}"] names no file`);
         for (const f of list) {
           if (f.startsWith('/') || f.includes('\\') || f.split('/').some((seg) => seg === '..' || seg === '.') || /^[A-Za-z]:/.test(f)) {
@@ -1505,7 +1669,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     }
     return { ok: true, table: out };
   };
-  const parsedVoices = parseVoiceTable(voices, 'voices');
+  const parsedVoices = parseVoiceTable(voices, 'voices', null);
   if (!parsedVoices.ok) return parsedVoices;
   const voiceLines = parsedVoices.table;
   // 多语言配音：`voiceLangs: { "<lang>": { <charId>: { <slot>: ["<path>"] } } }` —— 一个语种一张表，与上面 `voices`
@@ -1517,7 +1681,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (!isPlainObj(voiceLangs)) {
     return fail('VOICE_LANG_BAD_SHAPE', 'voiceLangs must be an object: { "<lang>": { "<charId>": { "<slot>": ["<path>"] } } }');
   }
-  if (Object.keys(voiceLangs).length && opts.hasAssets !== true) {
+  if (Object.keys(voiceLangs).length && opts.hasAssets !== true && hasLocalVoice) {
     return fail('VOICE_NEEDS_ASSETS', 'a pack that declares voices must put the files in its assets/ folder (e.g. assets/voice/…)');
   }
   /** @type {Record<string, Record<string, Record<string, string[]>>>} */
@@ -1537,6 +1701,21 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // VOICE_LANGS order is the canonical one (same reason workshopVoiceLangIndex sorts): the table this function returns
   // goes straight into the merged manifest, whose bytes must not depend on how the author happened to write pack.json.
   const orderedLangLines = Object.fromEntries(VOICE_LANGS.filter((l) => voiceLangLines[l]).map((l) => [l, voiceLangLines[l]]));
+  // 作者自备 CDN 的语音素材（DESIGN §28.33）：登记表按 `lang → charId → slot → file` 排序后再输出，因为它是**身份
+  // 哈希的输入**（`canonicalJson(pack)`），作者书写次序不同不该换一个摘要。
+  //
+  // 两条闸门，都在这里（解析完才知道有没有 CDN 条目）：
+  //   * `license` **必须有**：素材的再分发者是这个包的作者，与 assets/ 那条同一条理由 —— 只是字节放在别人的 CDN 上，
+  //     授权问题一点没变（`ASSETS_NEED_LICENSE` 只管 `assets/` 文件夹，所以这里单独判一条）；
+  //   * 一条 CDN 条目都没有时，归一化结果里**没有** `voiceCdn` 这个键（与 `client` / `i18n` 同一条「只在键存在时
+  //     才写回」的纪律）⇒ 今天所有包的归一化清单与哈希**逐字节不变**。
+  const orderedVoiceCdn = voiceCdn
+    .slice()
+    .sort((a, b) => `${a.lang || ''}\u0000${a.charId}\u0000${a.slot}\u0000${a.file}`.localeCompare(`${b.lang || ''}\u0000${b.charId}\u0000${b.slot}\u0000${b.file}`));
+  if (orderedVoiceCdn.length && !license) {
+    return fail('VOICE_CDN_NEEDS_LICENSE',
+      'a pack that fetches voice lines from a CDN must declare a license (e.g. "CC0-1.0", "CC-BY-4.0", or "see assets/LICENSE.txt") — the pack redistributes those bytes, so the manifest has to say under what terms');
+  }
   // 盟约图标（这个包自带的 art）：`bondIcons: { "<bondId>": "<path inside assets/>" }`。
   //
   // 为什么需要它：客户端按**盟约 id** 从 `data/assets.json` 的 `bonds` 取图标（public/js/assets.js bondIconUrl），
@@ -1855,7 +2034,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     const notContributions = ['support', 'playtest']
       .filter((n) => raw[n] !== undefined);
     const names = [...WORKSHOP_CONTENT_FILES, 'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'skins', 'operators',
-      'assets', 'client', 'server.preDispatch', 'server.meta', 'server.battle', 'server.room', 'server.modules', 'routes', 'i18n', 'notices', 'forms', 'fx'];
+      'assets', 'client', 'server.preDispatch', 'server.meta', 'server.battle', 'server.room', 'server.modules', 'server.transport', 'routes', 'i18n', 'notices', 'forms', 'fx'];
     const alsoNot = notContributions.length
       ? ` (note: ${notContributions.map((n) => `"${n}"`).join(' and ')} ${notContributions.length === 1 ? 'is' : 'are'} NOT a contribution — a pack that declares ${notContributions.length === 1 ? 'it' : 'them'} alone brings nothing into a match)`
       : '';
@@ -1952,6 +2131,9 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
       overrides,
       voices: voiceLines,
       voiceLangs: orderedLangLines,
+      // 作者自备 CDN 的语音素材（DESIGN §28.33）：**只在声明过时才存在** —— 与 `skins` 同一条纪律，
+      // 理由逐字相同（给每个包都加一个 `voiceCdn: []` 会让所有已发布包的哈希全部改变）。
+      ...(orderedVoiceCdn.length ? { voiceCdn: orderedVoiceCdn } : {}),
       bondIcons: bondIconFiles,
       itemIcons: itemIconFiles,
       art: artEntries,

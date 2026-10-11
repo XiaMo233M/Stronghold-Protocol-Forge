@@ -25,6 +25,10 @@ import * as workshopSchema from '../shared/workshop.js';
 import * as kitImports from '../shared/kitImports.js';
 import * as extensions from '../public/js/ui/extensions.js';
 import * as packForms from '../shared/packForms.js';
+// 本批新增的锚点模块（§28.31 / §28.32）：指标快照、动态只读端点的判据、以及 boot 快照的白名单。
+import * as hostMetrics from '../server/hostMetrics.js';
+import * as routeMount from '../server/http/routeMount.js';
+import * as modModules from '../server/modModules.js';
 import {
   MOD_SURFACE, MOD_SURFACE_IDS, MOD_SURFACE_FROZEN, surfaceLedgerIssues,
 } from '../shared/modSurface.js';
@@ -249,7 +253,7 @@ const MOD_LAYER_MD = readFileSync(new URL('../docs/design/mod-layer.md', import.
 
 /** 锚点符号住在哪个模块。默认是 schema（`shared/workshop.js`）；kit import 面住 `shared/kitImports.js`；
  *  客户端那一格（`ctx.me` / 宿主键）住 `public/js/ui/extensions.js`（引擎自己那一端的契约表）。 */
-const ANCHOR_MODULES = { schema: workshopSchema, kitImports, extensions, packForms };
+const ANCHOR_MODULES = { schema: workshopSchema, kitImports, extensions, packForms, hostMetrics, routeMount, modModules };
 
 test('表面清单：每一条的锚点符号都还在它声明的模块里，成员一个不少', () => {
   assert.ok(MOD_SURFACE.length > 0, '表面清单不能是空的');
@@ -309,6 +313,14 @@ test('表面清单：引擎里每一个「包可声明的名单」都被某条�
     ['ASSETS_VERIFY_ALGORITHMS', 'schema'], ['PACK_ID_RE', 'schema'],
     ['KIT_IMPORT_PREFIXES', 'kitImports'], ['KIT_IMPORT_FILES', 'kitImports'],
     ['BATTLE_IMPORT_PREFIXES', 'kitImports'], ['ROOM_IMPORT_PREFIXES', 'kitImports'],
+    // 本批新增的三张「包可声明的名单」+ 两张判据表：与上面同一条纪律 —— 新加一格必须同时进表面清单与
+    // docs/MOD-SURFACE.md。`TRANSPORT_FIELDS` 是 `pack.json.server.transport` 的字段闭集，
+    // `VOICE_CDN_FIELDS` / `VOICE_CDN_AUDIO_EXTS` 是 `{ url, sha256, file }` 那条通道的字段闭集与扩展名白名单，
+    // `RESERVED_ROUTE_PREFIXES` / `DYNAMIC_ROUTE_CACHE_POLICIES` 是动态端点那两条判据，
+    // `HOST_METRICS_FIELDS` / `BOOT_CONFIG_ENV_KEYS` 是包能读到的东西的两个闭集。
+    ['TRANSPORT_FIELDS', 'schema'], ['VOICE_CDN_FIELDS', 'schema'], ['VOICE_CDN_AUDIO_EXTS', 'schema'],
+    ['HOST_METRICS_FIELDS', 'hostMetrics'], ['BOOT_CONFIG_ENV_KEYS', 'modModules'],
+    ['RESERVED_ROUTE_PREFIXES', 'routeMount'], ['DYNAMIC_ROUTE_CACHE_POLICIES', 'routeMount'],
   ];
   const anchored = new Set(MOD_SURFACE.flatMap((s) => s.anchors.map((a) => `${a.module || 'schema'}:${a.symbol}`)));
   for (const [sym, mod] of SURFACE_LISTS) {
@@ -322,6 +334,11 @@ test('表面清单：一个世代里不许悄悄拿掉一格（账本的失败�
   assert.deepEqual(surfaceLedgerIssues(MOD_SURFACE_IDS, MOD_API_VERSION), [], '今天的表必须满足今天世代的冻结账本');
   assert.ok(MOD_SURFACE_FROZEN[String(MOD_API_VERSION)],
     `没有世代 ${MOD_API_VERSION} 的冻结账本：这一代没有任何防删保护`);
+  // 账本必须是**手抄的字面量**，不能是 MOD_SURFACE 自己派生出来的那份数组。是同一个对象的话，
+  // `surfaceLedgerIssues` 的 `have.has(id)` 永远成立 —— 这个守卫在真实代码路径上恒真，只能靠下面那行
+  // 合成输入才「红」一次，也就是一个装饰品（比没有守卫更坏：它让人以为有保护）。
+  assert.notEqual(MOD_SURFACE_FROZEN[String(MOD_API_VERSION)], MOD_SURFACE_IDS,
+    '冻结账本与 MOD_SURFACE_IDS 是同一个数组对象 ⇒ 删掉一格时账本跟着一起少一格，守卫永远不会红');
   // 失败分支：少一格必须被点名。只验「今天是对的」的守卫，和没有守卫是一回事。
   const missing = MOD_SURFACE_IDS.filter((id) => id !== 'server.battle');
   const issues = surfaceLedgerIssues(missing, MOD_API_VERSION);

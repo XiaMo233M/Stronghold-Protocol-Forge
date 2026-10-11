@@ -86,8 +86,18 @@ describe('声明层：`server.modules` 的形状与点名拒绝', () => {
     assert.ok(r.pack.server.modules.length);
   });
 
-  test('挂载点闭枚举就是那四个', () => {
-    assert.deepEqual(SERVER_MODULE_USES, ['boot', 'shutdown', 'matchClass', 'healthz']);
+  test('挂载点闭枚举就是那六个（后加的两格不抬版本、也不要求 combat）', () => {
+    // 就地改语义而不是放松：这一格从四格长到六格（`metrics` / `route`，两格都改不了对局 ⇒ 都不要求 `combat`），
+    // 「加一格不抬 MOD_API_VERSION」是 `shared/modSurface.js` 的版本政策。断言仍然**精确**等于闭枚举，
+    // 所以「悄悄多一格 / 少一格」照旧会红。
+    assert.deepEqual(SERVER_MODULE_USES, ['boot', 'shutdown', 'matchClass', 'healthz', 'metrics', 'route']);
+    // 只有 `matchClass` 需要 combat：另外五格判据是能力（读快照 / 只读 HTTP 路由），与 `server.room` 同一条。
+    for (const use of ['boot', 'shutdown', 'healthz', 'metrics', 'route']) {
+      const r = norm({ server: { modules: [{ id: 'x', entry: 'a/x.mjs', uses: [use] }] } });
+      assert.equal(r.ok, true, `${use} 不需要 combat: true（${r.ok ? '' : r.error}）`);
+    }
+    const match = norm({ server: { modules: [{ id: 'x', entry: 'a/x.mjs', uses: ['matchClass'] }] } });
+    assert.equal(match.error, 'MODULES_NEED_COMBAT');
   });
 });
 

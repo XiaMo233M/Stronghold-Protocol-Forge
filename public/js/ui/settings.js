@@ -8,6 +8,11 @@
 // the battle on screen; nothing is uploaded). The lobby and the room open it from a 设置 button next to 玩法说明
 // (SettingsButton, GitHub #238); the title screen and the match have their own gear.
 //
+// **面板那一格（`setVoiceLangByChar`，业主裁决 2026-10-11）。** 这个文件也是「C 层面板能写的**唯一一格**设置」的
+// 落点：`ctx.session.setVoiceLang(charId, lang)` 在引擎侧最终调的就是这里的 `setVoiceLangByChar`，它只改
+// `voiceLangByChar` 的一个键、过同一份 sanitize、走同一条 `savePref` 订阅。边界写在那个函数的注释里，一句话：
+// 面板可以改**这台机器上这个干员说哪种配音**，改不了别的东西，也改不了任何人的战果。
+//
 // 文字大小 (textSize, applied by applyTextSize): the interface text root `--t` of css/theme.css — a phone clamps the
 // layout root `1rem` at 40 px (theme.css), which left the .18rem body text at 7.2 CSS px while the browser's own font
 // settings only inflate the glyphs inside fixed boxes (and page zoom is off: index.html's viewport, ui/device.js).
@@ -21,7 +26,7 @@ import { GIcon } from './gameComponents.js';
 // 本仓库的语音词表是共用的那一份（shared/constants.js），所以这里不要 VOICE_LANGS：
 // 设置页列的是 `availableVoiceLangs()` 收窄后的「本机真的装了哪些配音」，语言名走 VOICE_LANG_NAMES。
 // 上游 0.2.3 的四档文字大小需要 TEXT_SIZES。
-import { sanitizeSettings, HOTKEY_ACTIONS, DEFAULT_HOTKEYS, hotkeyLabel, rebindHotkey, isDefaultHotkeys, captureHotkey, availableVoiceLangs, TEXT_SIZES } from './gameLogic.js';
+import { sanitizeSettings, HOTKEY_ACTIONS, DEFAULT_HOTKEYS, hotkeyLabel, rebindHotkey, isDefaultHotkeys, captureHotkey, availableVoiceLangs, TEXT_SIZES, sanitizeVoiceLangByChar } from './gameLogic.js';
 // 工坊外观 (workshopSkins): the switch itself lives in the settings store, but the **gate the chain reads** is one
 // module-level value in portraitChain.js — this file is its only writer (boot below + the subscription under it).
 import { setAppearanceFirst } from './portraitChain.js';
@@ -72,6 +77,40 @@ setAppearanceFirst(settingsStore.get().workshopSkins);
 /** @param {Partial<ReturnType<typeof sanitizeSettings>>} patch */
 export function updateSettings(patch) {
   settingsStore.set(sanitizeSettings({ ...settingsStore.get(), ...patch }));
+}
+
+/**
+ * **面板能写的唯一一格设置**：某个干员的配音覆盖（`ctx.session.setVoiceLang` 的落点，业主裁决 2026-10-11）。
+ *
+ * 为什么写在这里、而不是让面板自己去改：设置库与 `savePref` 都在这个文件里，写路径**只能有一条**。这个函数
+ * 就是那条路上的一个受限入口 —— 它做的三件事，每一件都是边界：
+ *   1. **只改 `voiceLangByChar` 里的一个键**（`next` 是当前表的浅拷贝，`updateSettings` 再 sanitize 一次），
+ *      音量 / 静音 / 画质 / 文字大小 / 快捷键 / 工坊外观开关一个字节都不动；
+ *   2. 写下去的值过 `sanitizeVoiceLangByChar` —— 与 `sanitizeSettings` **同一份判据**（第二读者）：形状不对的
+ *      干员 id、不在 `VOICE_LANGS` 里的语言、超过 `VOICE_OVERRIDE_MAX` 的第 401 个覆盖，都在这里被丢掉，
+ *      于是函数返回 `false`，调用方（C 层）**点名**（不是「写了个没反应的东西」）；
+ *   3. 持久化走**既有那一条订阅**（本文件顶部的 `settingsStore.subscribe` → `savePref('settings', …)`）：
+ *      这里不另调一次 `savePref` —— 同一条写入有两条落盘路径，早晚会漂。
+ *
+ * 播放时怎么用：`audio.js` 播放时问注入的 `voiceLangOf`（`ui/gameLogic/settings.js voiceLangFor`：覆盖 →
+ * 全局 → 默认）。所以这一格**纯本地**：不发帧、不落对局、改不了任何人的战果（「面板可以画错、但不能算错」）。
+ *
+ * @param {string} charId 干员 id（`char_` + 1..64 个 A-Za-z0-9_）
+ * @param {'cn'|'jp'|'en'|'kr'|''|null} lang 配音语言；`''` / `null` = 清掉这一格的覆盖（回到跟随全局）
+ * @returns {boolean} 是否真的写进去了（`false` = 被同一份判据拒掉，store 一个字节没变）
+ */
+export function setVoiceLangByChar(charId, lang) {
+  const cur = settingsStore.get();
+  const table = cur && typeof cur.voiceLangByChar === 'object' && cur.voiceLangByChar ? cur.voiceLangByChar : {};
+  const next = { ...table };
+  const clear = lang === '' || lang === null;
+  if (clear) delete next[charId]; else next[charId] = lang;
+  const judged = sanitizeVoiceLangByChar(next);
+  // 判据的**两个方向**都要对：写进去的键留下了，且值就是我们要的那个；清掉的键真的不在了。
+  const survived = clear ? !Object.hasOwn(judged, charId) : judged[charId] === lang;
+  if (!survived) return false;
+  updateSettings({ voiceLangByChar: judged });
+  return true;
 }
 
 /** Preact hook: current settings. */

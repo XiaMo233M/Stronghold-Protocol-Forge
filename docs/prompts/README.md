@@ -223,7 +223,7 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
 
 `voices` 是**默认语种**那一档（清单的 `audio.voiceLang`；**0.9.0 起是 `jp`**：`shared/constants.js` 的 `DEFAULT_VOICE_LANG`）。要让某个干员在别的语种下
 换一批台词，就写 `voiceLangs`：**一个语种一张表**，除最外层的语种键之外，形状、槽位词表与路径安全规则与 `voices`
-**完全相同** —— 两者共用同一个解析函数（`shared/workshop.js:1483` 的 `parseVoiceTable`，由 `:1508` 与 `:1532` 各调一次）。
+**完全相同** —— 两者共用同一个解析函数（`shared/workshop.js:1614` 的 `parseVoiceTable`，由 `:1672` 与 `:1696` 各调一次）。
 
 ```json
 {
@@ -241,15 +241,15 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
 
 | 规则 | 说明 |
 |---|---|
-| **语言只有四个** | `cn` `jp` `en` `kr`（`shared/constants.js` 的 `VOICE_LANGS`）。写别的整包被拒：`VOICE_LANG_UNKNOWN`（`shared/workshop.js:1527`） |
-| **默认语种 `jp` 不能写进 `voiceLangs`** | 默认语种那批台词写在 `voices` 里；写进 `voiceLangs["jp"]` 会被拒：`VOICE_LANG_DEFAULT`（`shared/workshop.js:1530`）。理由是同一批台词有两个写法的话，「客户端到底读哪一份」就成了作者猜不出来的事 |
-| **一个语种至少要有一个干员** | 空表被拒：`VOICE_LANG_EMPTY`（`shared/workshop.js:1534`）；整个 `voiceLangs` 不是对象是 `VOICE_LANG_BAD_SHAPE`（`shared/workshop.js:1518`） |
-| **路径与授权规则同 `voices`** | 相对 `assets/`、不许绝对路径 / `..` / `.` / 反斜杠 / 盘符（`VOICE_PATH_UNSAFE`，`shared/workshop.js:1499`）；有 `assets/` 就必须有 `license`（`VOICE_NEEDS_ASSETS`，`shared/workshop.js:1473`） |
-| **只配一种语言也合法** | `voiceLangs` 本身就算「这个包贡献了什么」（`shared/workshop.js:2883` 的 `packDeclaresVoices`，此处认的是 `voiceLangs` 键本身），所以 `content: []` + 只写 `voiceLangs` 不会被当成空包 |
-| **写法顺序不影响产物** | 合并前按 `VOICE_LANGS` 的固定顺序重排（`shared/workshop.js:1539` 的 `orderedLangLines`），`pack.json` 里先写 `cn` 还是 `en` 都一样 |
+| **语言只有四个** | `cn` `jp` `en` `kr`（`shared/constants.js` 的 `VOICE_LANGS`）。写别的整包被拒：`VOICE_LANG_UNKNOWN`（`shared/workshop.js:1691`） |
+| **默认语种 `jp` 不能写进 `voiceLangs`** | 默认语种那批台词写在 `voices` 里；写进 `voiceLangs["jp"]` 会被拒：`VOICE_LANG_DEFAULT`（`shared/workshop.js:1694`）。理由是同一批台词有两个写法的话，「客户端到底读哪一份」就成了作者猜不出来的事 |
+| **一个语种至少要有一个干员** | 空表被拒：`VOICE_LANG_EMPTY`（`shared/workshop.js:1698`）；整个 `voiceLangs` 不是对象是 `VOICE_LANG_BAD_SHAPE`（`shared/workshop.js:1682`） |
+| **路径与授权规则同 `voices`** | 相对 `assets/`、不许绝对路径 / `..` / `.` / 反斜杠 / 盘符（`VOICE_PATH_UNSAFE`，`shared/workshop.js:1663`）；有 `assets/` 就必须有 `license`（`VOICE_NEEDS_ASSETS`，`shared/workshop.js:1602`） |
+| **只配一种语言也合法** | `voiceLangs` 本身就算「这个包贡献了什么」（`shared/workshop.js:3065` 的 `packDeclaresVoices`，此处认的是 `voiceLangs` 键本身），所以 `content: []` + 只写 `voiceLangs` 不会被当成空包 |
+| **写法顺序不影响产物** | 合并前按 `VOICE_LANGS` 的固定顺序重排（`shared/workshop.js:1703` 的 `orderedLangLines`），`pack.json` 里先写 `cn` 还是 `en` 都一样 |
 
 **送达与回退**：默认语种的台词并进 `assets.audio.voice`，其它语种并进 `assets.audio.voiceLangs[<lang>]`
-（`shared/workshop.js:2854` 的 `appendVoiceLines`，两处调用在 `:2904` 与 `:2921`；是**追加**，不替换官方已有的台词，客户端仍在这些台词里随机）。播放侧按玩家选的配音语言取
+（`shared/workshop.js:3036` 的 `appendVoiceLines`，两处调用在 `:3086` 与 `:3103`；是**追加**，不替换官方已有的台词，客户端仍在这些台词里随机）。播放侧按玩家选的配音语言取
 台词 —— `public/js/audio.js:390` 的 `voiceLinesFor(manifest, charId, slot, lang)`：先看
 `audio.voiceLangs[lang][charId][slot]`，**该语种没有这个干员的这个槽位时回退到默认配音那一档**（`audio.voice`），
 两者都没有才算没台词。所以「给某个干员单独配一种语言」是正常用法：其它干员在那个语种下照旧播默认那一档。

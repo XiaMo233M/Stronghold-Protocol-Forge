@@ -29,7 +29,8 @@ import { loadWorkshop, loadWorkshopKits, loadWorkshopHooks, loadWorkshopPanels, 
 import { loadMetaModules } from './match/metaPack.js';
 import { loadBattleInstallers } from './battlePack.js';
 import { loadRoomInstallers } from './roomPack.js';
-import { loadServerModules, mountServerModules, stateRootFor } from './modModules.js';
+import { loadServerModules, mountServerModules, stateRootFor, bootConfigSnapshot } from './modModules.js';
+import { materializeVoiceCdn, dropFailedVoiceCdnFiles } from './voiceCdn.js';
 import { workshopNotices } from './notices.js';
 import { createRoomAssets } from './roomAssets.js';
 import { Match as DefaultMatch } from './match/Match.js';
@@ -38,7 +39,7 @@ import {
   workshopResourceFilesFor, workshopModAssetsFrom, buildWorkshopI18nFiles, resourceServerPolicy, WORKSHOP_ASSET_PREFIX, WORKSHOP_ASSET_TYPES, workshopBattleFilesFor,
 } from './http/workshop.js';
 import { ROOT, listenAddress, bindCandidates, serveDirs, makeLogger, parseTrustProxy } from './http/config.js';
-import { WS_MAX_PAYLOAD, createSessionStack, attachWebSocket } from './http/websocket.js';
+import { WS_MAX_PAYLOAD, createSessionStack, attachWebSocket, transportPolicy } from './http/websocket.js';
 import { DATA_SHIM_JS, createStaticHandler } from './http/static.js';
 import { createPackRegistry } from './packs.js';
 import { MIME, COMPRESSIBLE, acceptsGzip, parseRange } from './http/files.js';
@@ -103,7 +104,8 @@ export async function startServer(opts = {}) {
   const workshopMeta = await loadMetaModules(loadedOnce, { log });
   // 包的**服务端模块**（`server.modules`, DESIGN §28.14）：与上面两条同一个裁剪点 —— 模块文件不在、import 失败、
   // 没有 `registerServer`、或者它挂了一个自己没声明的挂载点，都让**这个包**整份移出已加载集合。
-  const serverModules = await loadServerModules(loadedOnce, { log, stateRoot: stateRootFor(ROOT) });
+  const stateRoot = stateRootFor(ROOT);
+  const serverModules = await loadServerModules(loadedOnce, { log, stateRoot });
   // 包声明的**战斗逻辑**模块（`pack.json.server.battle`, DESIGN §28.17）：与上面三条同一个裁剪点 —— 源码里带非确定性
   // 的东西、import 越界、没有 `install` 导出、模块文件不在，都让**这个包**整份移出已加载集合。
   const battlePack = await loadBattleInstallers(loadedOnce, { log });
@@ -147,7 +149,13 @@ export async function startServer(opts = {}) {
   //   * workshopKitFiles  the URLs serving those same kit modules to the browser, which must rebuild the identical map,
   //                       or its client-simulated battle would disagree with the server's verification.
   const workshopLoaded = { ...loadedOnce, packs: pruned.packs, errors: pruned.errors };
-  const workshopJson = buildWorkshopDataFiles(data, workshopLoaded);
+  // 作者自备 CDN 的语音素材（`pack.json.voices` / `voiceLangs` 里的 `{ url, sha256, file }` 条目，DESIGN §28.33）：
+  // 在**合并语音表之前**把字节取到本地缓存并按作者声明的 sha256 核对。四条纪律见 `server/voiceCdn.js`；
+  // 这里负责两件事 —— **逐条点名**（失败绝不静默）与**把取不到的那几条从语音表里摘掉**（宁可回落到默认配音，
+  // 也不要留一条永远 404 的静音台词）。一条外部 CDN 不该让服务器起不来，所以失败只影响那一条素材。
+  const voiceCdn = await materializeVoiceCdn(workshopLoaded.packs, { stateRoot, log });
+  const voiceLoaded = voiceCdn.failed.size ? { ...workshopLoaded, packs: dropFailedVoiceCdnFiles(workshopLoaded.packs, voiceCdn.failed) } : workshopLoaded;
+  const workshopJson = buildWorkshopDataFiles(data, voiceLoaded);
   // 公告 / 鸣谢的合并体（DESIGN §28.15）：引擎那一半**从更新记录生成**（单一事实源，不手写第二份），包那一半按
   // 包 id 追加。它走**既有的**合并数据通道送出（`/data/notices.json`，map 的键是 `notices`），所以既没有新路由、
   // 也没有新的静态路径；`data/notices.json` 本来就不存在，所以这纯属新增。
@@ -225,6 +233,14 @@ export async function startServer(opts = {}) {
     new Map((workshopLoaded.packs || []).filter((p) => p && p.assets).map((p) => [p.id, p.assets.serverPolicy])),
     { log },
   );
+  // 声明式传输配置（`pack.json.server.transport`, DESIGN §28.30）：与 `resourcePolicy` 逐字同一条先例 —— 读声明、
+  // 收敛成**一个进程级**的值（`perMessageDeflate` 是 `WebSocketServer` 的构造选项，不是某个房间的属性）、启动日志
+  // 点名生效值。没有任何包声明时是 `false`（B 段之前那一个 wss，逐字节不变）。包**只能声明**，绝不能注入代码改
+  // `wss`（业主裁决：声明式足够就不做）。
+  const transport = transportPolicy(
+    new Map((workshopLoaded.packs || []).filter((p) => p && p.server && p.server.transport).map((p) => [p.id, p.server.transport])),
+    { log },
+  );
   // 客户端 mod 本地缓存 (W-C): the catalogue a browser downloads to decide what it is missing. Built from the SAME
   // `workshopLoaded` that produced `workshopMods` above — which is the **裁剪后**的那一份（B4 段把装不上钩子的包移出了
   // 已加载集合），所以「不在身份清单里的包」也不会出现在目录里。Empty on a plain install, and then the two /mods
@@ -234,6 +250,10 @@ export async function startServer(opts = {}) {
   // 次序层层套上（`mountServerModules` 已经排过序），任何一层抛异常或返回非函数都只记日志并跳过那一层 ——
   // 一个包不该让服务器起不来。没有包声明时 `MatchClass` 就是原来的那一个（连字段都不多传）。
   const matchWrappers = modMount.matchClassWrappers();
+  // 包声明的动态只读端点（`server.modules[*].uses` 含 `route`，DESIGN §28.32）：解析成一张 `Map<路径, 登记项>`，
+  // 空 Map = 没有包声明它 ⇒ `createStaticHandler` 那一段整块跳过（干净安装逐字节不变）。启动日志点名每一条挂上的
+  // 路径（与 `resourcePolicy` / `transportPolicy` 同一条「生效值必须被说出来」的纪律）。
+  const modRoutes = modMount.routes();
   let MatchClass = opts.MatchClass;
   if (matchWrappers.length) {
     let base = MatchClass || DefaultMatch;
@@ -255,14 +275,14 @@ export async function startServer(opts = {}) {
     {
       ...opts,
       ...(matchWrappers.length ? { MatchClass } : {}),
-      workshop: { kits: workshopKits.kits, tokenKits: workshopKits.tokenKits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme, meta: metaModules, roomAssets, battle: battleModules, battleInstallers, roomHooks: roomInstallers },
+      workshop: { kits: workshopKits.kits, tokenKits: workshopKits.tokenKits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme, meta: metaModules, roomAssets, battle: battleModules, battleInstallers, roomHooks: roomInstallers, transport: transport.transport },
     },
     { data, log },
   );
   // content packs (docs/PACKS.md): scanned now — the start log names them — and again whenever their folders change
   const packs = createPackRegistry({ publicDir, dataDir, packsDir }, { log });
   packs.refresh(true);
-  const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, packsDir, packs, log, workshopJson, workshopKitFiles, workshopKitDirs, workshopPanelFiles, workshopAssets, workshopRoutes, workshopResourceFiles, resourcePolicy, workshopI18n, modsJson, roomData: roomDataFace, workshopBattleFiles });
+  const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, packsDir, packs, log, workshopJson, workshopKitFiles, workshopKitDirs, workshopPanelFiles, workshopAssets, workshopRoutes, workshopResourceFiles, resourcePolicy, workshopI18n, modsJson, roomData: roomDataFace, workshopBattleFiles, modRoutes, voiceCdn: voiceCdn.overrides });
   const startedAt = Date.now();
   // The tag is per process (see buildTag): read the browser runtime once, here, not on every /healthz.
   resetBuildTag();
@@ -271,7 +291,7 @@ export async function startServer(opts = {}) {
   const server = http.createServer(createRequestHandler({ serveStatic, health: { startedAt, network, registry, lobby, modHealth: () => modMount.healthz() }, log,
     modsCatalog: (req, res) => serveMods(req, res, MODS_CATALOG_URL, '', modsJson) }));
   server.on('clientError', answerClientError);
-  const wss = attachWebSocket(server, { network, log });
+  const wss = attachWebSocket(server, { network, log, perMessageDeflate: transport.perMessageDeflate });
 
   // The address actually bound. The default may fall back to IPv4; the returned host and url follow that.
   let boundHost;
@@ -307,12 +327,13 @@ export async function startServer(opts = {}) {
     throw e;
   }
   server.on('error', (e) => log.error('[http] server error', e));
-  // 包的服务端模块的 `onBoot`（DESIGN §28.14）：**绑上端口之后**才跑 —— 「服务起来了」对它们是一句真话。
-  // 每个回调单独 try（`mountServerModules.boot` 内部就是这么做的），一个包炸了不影响别的包，也不影响启动。
-  modMount.boot();
-
   const addr = server.address();
   const actualPort = typeof addr === 'object' && addr ? addr.port : port;
+  // 包的服务端模块的 `onBoot`（DESIGN §28.14）：**绑上端口之后**才跑 —— 「服务起来了」对它们是一句真话，
+  // 而**真正绑到的** port / host 也才是这个快照里该有的值（包只能观察，不能设值）。
+  // 每个回调单独 try（`mountServerModules.boot` 内部就是这么做的），一个包炸了不影响别的包，也不影响启动。
+  modMount.boot(bootConfigSnapshot({ port: actualPort, host: boundHost, stateRoot }));
+
   const url = `http://${displayHost(boundHost)}:${actualPort}`;
 
   let closing = null;

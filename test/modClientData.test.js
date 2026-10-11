@@ -18,7 +18,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-import { normalizePackManifest, CLIENT_PANEL_DATA_TABLES } from '../shared/workshop.js';
+import { normalizePackManifest, CLIENT_PANEL_DATA_TABLES, CLIENT_MAX_PANEL_DATA_TABLES } from '../shared/workshop.js';
 import { DATA_FILES } from '../public/js/data.js';
 import { loadWorkshop, loadWorkshopPanels } from '../server/workshop.js';
 import { createPanelRegistry, readonlySnapshot } from '../public/js/ui/extensions.js';
@@ -52,7 +52,19 @@ describe('声明层：读哪几张表要写出来', () => {
     bad(['chess.json'], 'CLIENT_BAD_PANEL_DATA', '带扩展名');
     bad(['unit'], 'CLIENT_BAD_PANEL_DATA', '不存在的表');
     bad(['chess', 'chess'], 'CLIENT_DUPLICATE_PANEL_DATA', '重复');
-    bad(Array.from({ length: 14 }, (_, i) => `t${i}`), 'CLIENT_BAD_PANEL_DATA', '超过上限');
+    // 数量上限：**比「全部」多一条**才算多。这个下标用的是真表名之外的假名，所以它只在数量判据上触发。
+    bad(Array.from({ length: CLIENT_MAX_PANEL_DATA_TABLES + 1 }, (_, i) => `t${i}`), 'CLIENT_BAD_PANEL_DATA', '超过上限');
+  });
+
+  test('上限就是「全部」：数量上限由名单推导，且 14 张全声明必须被接受', () => {
+    // 曾经的 bug：名单 14 张、上限手写成 13 ⇒「把这些表全列出来」被判成超限，而错误文案还说
+    // 「that is all of them」。判据（比名单长度）比断言（等于某个人当年数出来的数）重要。
+    assert.equal(CLIENT_MAX_PANEL_DATA_TABLES, CLIENT_PANEL_DATA_TABLES.length,
+      '上限与名单长度错开了：手写第二个真相就是它当年漂掉的原因，这里不能再错开');
+    const all = norm({ ...P, data: [...CLIENT_PANEL_DATA_TABLES] });
+    assert.equal(all.ok, true, all.ok ? '' : `${all.error} — ${all.detail}`);
+    assert.deepEqual(all.pack.client.panels[0].data, [...CLIENT_PANEL_DATA_TABLES],
+      '全读 = 按枚举次序的全表清单（放宽只会多接受，不会少接受任何今天合法的声明）');
   });
 
   test('两份名单钉在一起：可以读的表 == 浏览器真的抓得到的那几张', () => {

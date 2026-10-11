@@ -21,6 +21,9 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { SERVER_MODULE_USES } from '../shared/workshop.js';
+import { SERVER_CODE_FORBIDDEN_GLOBALS, stripComments, mentionsIdentifier } from '../shared/kitAuthoring.js';
+import { DYNAMIC_ROUTE_CACHE_POLICIES, createDynamicRoutes, dynamicRoutePathIssue } from './http/routeMount.js';
+import { hostMetrics } from './hostMetrics.js';
 
 /** 静默的日志替身（装载期不需要日志时用）。 */
 const noopLog = { info() {}, warn() {}, error() {}, debug() {} };
@@ -33,6 +36,45 @@ export function stateRootFor(repoRoot) {
 /** 声明过 `write` 的模块拿到的目录：`<状态目录>/mod/<包id>/`（一个包一个，永不与别的包共享）。 */
 export function moduleStateDir(stateRoot, packId) {
   return path.join(stateRoot, 'mod', packId);
+}
+
+/**
+ * `boot(config)` 快照里 `env` 那一段的白名单 —— **只有引擎自己已经在用的 `SP_*` 变量**，一个不多一个不少。
+ *
+ * 为什么是白名单而不是把 `process.env` 过滤一下：一个包能读到的环境变量越多，它就越像「运维杠杆」—— 作者可以
+ * 写「只有 `SP_FOO=1` 时才干活」，于是同一份包字节在两台机器上是两种行为，而 `MOD_SURFACE` 存在的意义就是
+ * 「同一份摘要 ⇒ 同一份行为」。这四个名字是引擎源码里真实读过的全部（`server/index.js`、
+ * `server/modModules.js`、`server/match/Match.js`、`server/match/botEmotes.js`），并且 `test/packServerModules.test.js`
+ * 用**反射源码**把它们钉住：引擎新读一个 `SP_*` 而这份名单没跟上，测试就红。
+ */
+export const BOOT_CONFIG_ENV_KEYS = Object.freeze(['SP_BOT_EMOTES', 'SP_STAGE', 'SP_STATE_DIR', 'SP_WORKSHOP']);
+
+/**
+ * `onBoot` 拿到的**只读配置快照**。
+ *
+ * 三条性质，都是刻意的：
+ *   * **是值不是句柄**：返回一个深冻结的普通对象，没有 `process`、没有 server、没有 getter —— 包**只能观察**，
+ *     改不动引擎的任何东西（改一个冻结对象的属性在严格模式 ESM 里直接抛，不是静默无效）；
+ *   * **`env` 走白名单**（`BOOT_CONFIG_ENV_KEYS`）：包看得见引擎**自己在用**的那几个 `SP_*`，看不见其余环境变量；
+ *   * **包永远不能"声明"启动变量**：这个对象是从 `opts` 与进程环境**读出来**的，`pack.json` 里没有任何一个字段
+ *     能往它里面写值。把包声明变成运维杠杆（「这个包要求 `SP_X=1` 才加载」）正是本层拒绝的那条路 —— 业主裁决
+ *     「声明式足够」指的是**读**是声明式的，不是让包去设。
+ * @param {{ port?: number, host?: string, stateRoot?: string, env?: Record<string, string|undefined> }} src
+ * @returns {{ port: number, host: string, stateDir: string, env: Readonly<Record<string, string>> }}
+ */
+export function bootConfigSnapshot({ port = 0, host = '', stateRoot = '', env = process.env } = {}) {
+  /** @type {Record<string, string>} */
+  const seen = {};
+  for (const key of BOOT_CONFIG_ENV_KEYS) {
+    const value = env ? env[key] : undefined;
+    if (typeof value === 'string') seen[key] = value;
+  }
+  return Object.freeze({
+    port: Number.isFinite(port) ? port : 0,
+    host: typeof host === 'string' ? host : '',
+    stateDir: typeof stateRoot === 'string' ? stateRoot : '',
+    env: Object.freeze(seen),
+  });
 }
 
 /** 挂载点拒绝：带错误码，装配层据此点名而不是打一句堆栈。 */
@@ -105,13 +147,31 @@ export function moduleHost({ packId, moduleId, hash, dir, uses, write, stateRoot
       write() { return say('write'); }, append() { return say('write'); }, read() { return say('write'); },
       exists() { return say('write'); }, remove() { return say('write'); }, list() { return say('write'); },
     });
-  /** 挂载点的登记处：装载器把这里收到的函数按用途收走（`boot` / `shutdown` / `healthz` / `matchClass`）。 */
+  /** 挂载点的登记处：装载器把这里收到的函数按用途收走（`boot` / `shutdown` / `healthz` / `matchClass` / `route`）。 */
   const mount = (use) => (fn) => {
     if (!declared(use)) say(use);
     if (typeof fn !== 'function') {
       throw new ModuleRefused('MODULE_BAD_HOOK', `server.modules["${moduleId}"].${use}(...) needs a function, got ${typeof fn}`);
     }
     return registry ? registry(use, fn) : true;
+  };
+  /**
+   * 一条**只读、公开**的动态端点（`uses: ["route"]`）。形状判据住在 `server/http/routeMount.js`（唯一真相），
+   * 这里只负责「没声明就抛」与把错误变成带码的 `ModuleRefused`（点名到模块，而不是一句 `TypeError`）。
+   * `opts.cache` 缺省 `no-store`，只认 `DYNAMIC_ROUTE_CACHE_POLICIES`。
+   */
+  const route = (pathname, fn, opts = {}) => {
+    if (!declared('route')) say('route');
+    const issue = dynamicRoutePathIssue(pathname, packId);
+    if (issue) throw new ModuleRefused('MODULE_ROUTE_REFUSED', `server.modules["${moduleId}"].route("${String(pathname)}"): ${issue}`);
+    if (typeof fn !== 'function') {
+      throw new ModuleRefused('MODULE_BAD_HOOK', `server.modules["${moduleId}"].route("${pathname}") needs a function, got ${typeof fn}`);
+    }
+    const cache = opts && opts.cache !== undefined ? opts.cache : 'no-store';
+    if (!DYNAMIC_ROUTE_CACHE_POLICIES.includes(cache)) {
+      throw new ModuleRefused('MODULE_ROUTE_REFUSED', `server.modules["${moduleId}"].route("${pathname}"): cache must be one of: ${DYNAMIC_ROUTE_CACHE_POLICIES.join(', ')}`);
+    }
+    return registry ? registry.route({ path: pathname, handler: fn, cache }) : true;
   };
   return Object.freeze({
     pack: packId,
@@ -121,7 +181,8 @@ export function moduleHost({ packId, moduleId, hash, dir, uses, write, stateRoot
     dir,
     log: scoped,
     io,
-    /** 服务起来之后跑一次（`server/index.js` 在 listen 之后调用）。 */
+    /** 服务起来之后跑一次（`server/index.js` 在 listen 之后调用）；回调收到一个**冻结的只读配置快照**
+     *  （`{ port, host, stateDir, env }`，见 `bootConfigSnapshot`）—— 包只能观察，不能设值。 */
     onBoot: mount('boot'),
     /** 服务停机时跑一次（关闭流程里，失败只记日志，不阻塞停机）。 */
     onShutdown: mount('shutdown'),
@@ -129,6 +190,15 @@ export function moduleHost({ packId, moduleId, hash, dir, uses, write, stateRoot
     healthz: mount('healthz'),
     /** 用一层包装器包住 `MatchClass`（`fn(Base) => Subclass`）；只有这一项要求包声明 `combat: true`。 */
     matchClass: mount('matchClass'),
+    /**
+     * 一份**只读标量快照**（是值，不是句柄）：`{ uptimeSec, rss, heapUsed, elu, loopP50, loopP95, loopP99,
+     * loopMax, sampleAgeMs, state }`。**绝不**交 `process` / 定时器句柄 / 函数 —— 一个包要报内存就是报这个值，
+     * 这就是「源码静态扫描禁 `process`」那条规则得以成立的原因（有正当的替代路径，拒绝才不是死路）。
+     * 样本过期时 `loop*` 是 `null` 且 `state` 点名（`server/hostMetrics.js`）。没声明就是抛，与 `io` 同一条。
+     */
+    metrics: declared('metrics') ? (opts) => hostMetrics({ ...(opts || {}), log: log || noopLog }) : () => say('metrics'),
+    /** 一条只读动态端点：`route(path, fn, { cache? }?)`，路径必须在 `/mod/<包id>/…` 里。 */
+    route,
   });
 }
 
@@ -168,6 +238,68 @@ function entryAbs(pack, mod) {
 }
 
 /**
+ * `server.modules` 源码里**不许出现**的名字。
+ *
+ * 取 `SERVER_CODE_FORBIDDEN_GLOBALS`（与那三处**同一张共享表**、同一个扫描器），但**去掉 `globalThis` 一格** ——
+ * 这一条是实测出来的，不是拍的：
+ *   * 这一格的承诺（`shared/modSurface.js`）**逐字**是「无 `process` / `require` / `eval`」，`globalThis` 不在其中；
+ *   * 仓库里**已经有一个能用的 `server.modules` 模块**（`test/packMatchMsg.test.js` 的 fixture）用 `globalThis`
+ *     与同进程的测试通信 —— 把 `globalThis` 判死会让那个**合法**模块连带整包被裁掉。业主的规矩是「先查有没有现存包
+ *     会被新扫描拒，真有 ⇒ 停下报我，别硬装」，所以这里收窄到承诺里那三个名字（+ `new Function`，`eval` 的同一族）。
+ *
+ * 诚实的一句：这仍然是**启发式，不是沙箱**。`globalThis['pro'+'cess']` 与 `globalThis['ev'+'al']` 绕得过它 —— 那三处
+ * （meta / battle / room）也一样绕得过，它们的表里虽然有 `globalThis`，但拼字符串一样能绕。真正兜底的是
+ * 「同一份包字节 ⇒ 同一份服务端代码」的内容哈希 + 模块只能拿到 `uses` 里声明过的那几样东西。
+ */
+const MODULE_FORBIDDEN_GLOBALS = Object.freeze(SERVER_CODE_FORBIDDEN_GLOBALS.filter(([name]) => name !== 'globalThis'));
+
+/**
+ * 静态判定一个 `server.modules` 模块的源码，**在 `import()` 之前**。
+ *
+ * 这一条是**补上的欠账**：`shared/modSurface.js` 的 `server.modules` 那一格从第一天起就写着
+ * 「源码过静态确定性扫描（无 `process` / `require` / `eval`）」，而 `loadServerModules` 只检查了「文件读得到」，
+ * 就直接 `import()` 进了**服务器自己的进程**。同一个仓库里另外三处（`server/match/metaPack.js`、
+ * `server/battlePack.js`、`server/roomPack.js`）都有这道扫描，只有这一处没有 —— 于是这一格从「声明层 ABI」变成了
+ * 一条**没有实现的要求**，而 `MOD_SURFACE` 表面清单存在的意义恰恰是「不要有说了不算的承诺」。
+ *
+ * 判据刻意与那三处**同机制、同来源**：同一份共享表（`shared/kitAuthoring.js`）、同一个扫描器
+ * （`stripComments` + `mentionsIdentifier`）、同一个「先判源码再 import」的次序、同一种「一条 `{code, reason}`
+ * 回到裁剪点」的失败形状。**唯一的差别是取哪一段名单**：
+ *   * 那三处取 `KIT_FORBIDDEN_GLOBALS + SERVER_CODE_FORBIDDEN_GLOBALS`，因为它们跑在**对局循环**里
+ *     （`Date.now` / `Math.random` 会让同一个种子在两端打出不同结果）；
+ *   * 这里取 `SERVER_CODE_FORBIDDEN_GLOBALS` 那一段（`process` / `globalThis` / `require` / `eval` /
+ *     `new Function`）—— 与这一格的承诺**逐字对应**，而 kit 那一段（时钟、随机、DOM、计时器）**故意不取**：
+ *     `boot` / `shutdown` / `healthz` 都在对局之外跑，一个给停机快照盖时间戳的模块用 `Date.now` 是正当的，
+ *     本层没有任何契约要求它确定（确定性那条线是 `server.battle` / `server.meta` 的事）。
+ *     唯一在对局里跑的挂载点是 `matchClass`，而它单独要求 `combat: true`（`MODULES_NEED_COMBAT`），
+ *     进的是房间摘要闸门与 golden 那条线 —— 那条线上另有判据，不靠这一份扫描兼职。
+ *
+ * 这是启发式，不是沙箱（与那三处逐字同一句免责）：真正兜底的是「同一份包字节 ⇒ 同一份服务端代码」的内容哈希、
+ * 以及模块只能拿到 `uses` 里声明过的那几样东西。但它必须挡在 import 前面 —— 一个模块的顶层副作用在 import
+ * 那一刻就已经发生了。
+ *
+ * 拒绝的替代路径要能指出来，否则作者只会看到「我的包没了」：读进程信息不要用 `process`，用宿主给的
+ * `host.metrics`（`server/hostMetrics.js`，只读标量快照；它正是为这一条存在的）。
+ * @param {string} source
+ * @param {string} packId
+ * @param {string} moduleId
+ * @returns {Array<{ code: string, reason: string }>}
+ */
+export function serverModuleSourceIssues(source, packId = '', moduleId = '') {
+  const code = stripComments(String(source ?? ''));
+  const out = [];
+  for (const [needle, why] of MODULE_FORBIDDEN_GLOBALS) {
+    if (mentionsIdentifier(code, needle)) {
+      out.push({
+        code: 'MODULES_BAD_SOURCE',
+        reason: `"${needle}" is not allowed in a server.modules module${packId ? ` ("${packId}/${moduleId}")` : ''}: ${why}. This module is loaded into the server's own process, so the scan runs before the import — read process values through host.metrics (uses: ["metrics"]) instead of the global`,
+      });
+    }
+  }
+  return out;
+}
+
+/**
  * 启动时一次：把每个声明了 `server.modules` 的包读出来、import，收下它挂上去的东西。
  *
  * 失败**不抛**：一条 `{ pack, code, reason }` 回到调用方，由它按「一条用不了的声明拒绝整个包」把包裁掉
@@ -194,6 +326,22 @@ export async function loadServerModules(loaded, { log = noopLog, stateRoot = nul
         errors.push({ pack: pack.id, code: 'MODULES_BAD_ENTRY', reason: `server.modules["${mod.id}"].entry "${mod.entry}" is not a readable file inside the pack` });
         continue;
       }
+      // **源码静态扫描必须在 `import()` 之前**（与 `server/match/metaPack.js`、`server/battlePack.js`、
+      // `server/roomPack.js` 同一个次序）：一个模块的顶层副作用在 import 那一刻就已经发生，扫描只能挡在前面。
+      // 判据住在 `serverModuleSourceIssues`（那里解释了为什么这一格只取 `SERVER_CODE_FORBIDDEN_GLOBALS`）。
+      let source;
+      try {
+        source = fs.readFileSync(abs, 'utf8');
+      } catch (e) {
+        errors.push({ pack: pack.id, code: 'MODULES_BAD_ENTRY', reason: `server.modules["${mod.id}"].entry "${mod.entry}" is not readable: ${e && e.message ? e.message : e}` });
+        continue;
+      }
+      const sourceIssues = serverModuleSourceIssues(source, pack.id, mod.id);
+      if (sourceIssues.length) {
+        errors.push({ pack: pack.id, code: sourceIssues[0].code, reason: sourceIssues[0].reason });
+        log.warn?.(`[workshop] ${sourceIssues[0].code}: ${pack.id}/${mod.id}: ${sourceIssues[0].reason}`);
+        continue;
+      }
       // 模块 URL 带包摘要：包换了一版（目录里的字节变了）就是另一条 URL，动态 import 缓存不会把旧模块交回来。
       const url = `${pathToFileURL(abs).href}?v=${encodeURIComponent(pack.hash || '')}&m=${encodeURIComponent(mod.id)}`;
       let ns;
@@ -207,12 +355,15 @@ export async function loadServerModules(loaded, { log = noopLog, stateRoot = nul
         errors.push({ pack: pack.id, code: 'MODULES_NO_REGISTER', reason: `server.modules["${mod.id}"].entry "${mod.entry}" does not export a registerServer(host) function` });
         continue;
       }
-      /** @type {{ boot: Function[], shutdown: Function[], healthz: Function[], matchClass: Function[] }} */
-      const mounted = { boot: [], shutdown: [], healthz: [], matchClass: [] };
+      /** @type {{ boot: Function[], shutdown: Function[], healthz: Function[], matchClass: Function[], route: Array<{ path: string, handler: Function, cache: string }> }} */
+      const mounted = { boot: [], shutdown: [], healthz: [], matchClass: [], route: [] };
       const host = moduleHost({
         packId: pack.id, moduleId: mod.id, hash: pack.hash, dir: pack.dir,
         uses: mod.uses, write: mod.write, stateRoot, log,
-        registry: (use, fn) => { mounted[use].push(fn); return true; },
+        registry: Object.assign(
+          (use, fn) => { mounted[use].push(fn); return true; },
+          { route: (entry) => { mounted.route.push(entry); return true; } },
+        ),
       });
       try {
         // 同步调用：与官方内容模块同形（`registerMeta(registry)` 也是同步的），所以「注册没注册上」不需要等一个 Promise。
@@ -236,14 +387,19 @@ export async function loadServerModules(loaded, { log = noopLog, stateRoot = nul
  * 顺序按**包 id**（`loadServerModules` 已经排过），所以「多个包同时给 `/healthz` 加字段 / 包同一层 MatchClass」时
  * 结果不随目录读取顺序变（DESIGN §28.3 的同一条规则）。
  */
-export function mountServerModules(modules, { log = noopLog } = {}) {
+export function mountServerModules(modules, { log = noopLog, config = null } = {}) {
   const list = Array.isArray(modules) ? modules.slice() : [];
   return {
-    /** 服务起来之后：每个挂了 `boot` 的模块跑一次；抛异常只记日志（一个包不该让服务起不来）。 */
-    boot() {
+    /**
+     * 服务起来之后：每个挂了 `boot` 的模块跑一次；抛异常只记日志（一个包不该让服务起不来）。
+     * 回调收到 `config`（`server/index.js` 传进来的**冻结只读配置快照**，`bootConfigSnapshot` 产出）——
+     * 包**只能观察**：这个对象是深冻结的，改动在 ESM 严格模式下直接抛，不是静默无效。
+     */
+    boot(configOverride = null) {
+      const cfg = configOverride || config;
       for (const m of list) {
         for (const fn of m.mounted.boot) {
-          try { fn(); } catch (e) { log.error?.(`[workshop] ${m.pack}/${m.id} onBoot threw`, e); }
+          try { fn(cfg); } catch (e) { log.error?.(`[workshop] ${m.pack}/${m.id} onBoot threw`, e); }
         }
       }
     },
@@ -279,6 +435,27 @@ export function mountServerModules(modules, { log = noopLog } = {}) {
       const out = [];
       for (const m of list) for (const fn of m.mounted.matchClass) out.push({ pack: m.pack, id: m.id, fn });
       return out;
+    },
+    /**
+     * 动态只读端点的**解析结果**：`Map<逐字声明的路径, { handler, cache, pack, module }>`。
+     *
+     * 冲突在这里收敛（注册时只判单条路径的合法性 —— 「自己的命名空间」这条规则让跨包冲突在结构上不可能，
+     * 但真发生了也按 DESIGN §28.3「包 id 小的赢 + 点名」处理）。返回**空 Map** 时 `server/http/static.js`
+     * 那一段整块跳过 —— 没有包声明 `route` 的安装逐字节不变。
+     */
+    routes() {
+      const reg = createDynamicRoutes();
+      for (const m of list) {
+        for (const entry of m.mounted.route || []) {
+          const r = reg.register({ pack: m.pack, module: m.id, path: entry.path, handler: entry.handler, cache: entry.cache });
+          if (!r.ok) log.warn?.(`[workshop] ${m.pack}/${m.id} route "${entry.path}": ${r.reason}`);
+        }
+      }
+      const table = reg.map();
+      if (table.size) {
+        log.info?.(`[workshop] ${table.size} dynamic route(s) mounted by packs: ${reg.paths().map((p) => `"${p}"`).join(', ')} (read-only, GET/HEAD, public like every other HTTP endpoint of this server)`);
+      }
+      return table;
     },
   };
 }
