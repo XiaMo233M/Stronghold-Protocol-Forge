@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 392" width="680" height="392" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans SC',sans-serif">
+  <rect x="0" y="0" width="680" height="392" fill="#ffffff"/>
+
+  <rect x="16" y="16" width="648" height="52" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+  <circle cx="42" cy="42" r="13" fill="#ddf4ff" stroke="#0969da"/>
+  <text x="42" y="46" font-size="12" fill="#0969da" text-anchor="middle">1</text>
+  <text x="66" y="36" font-size="13" fill="#1f2328">incoming/ —— 组员上传的原件</text>
+  <text x="66" y="56" font-size="12" fill="#57606a">照收不拒：补丁型与安装器型也收；被拒是正常现象，只报告不拦</text>
+
+  <line x1="340" y1="68" x2="340" y2="84" stroke="#8c959f" stroke-width="1.5"/>
+  <polygon points="336,82 344,82 340,90" fill="#8c959f"/>
+
+  <rect x="16" y="90" width="648" height="52" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+  <circle cx="42" cy="116" r="13" fill="#ddf4ff" stroke="#0969da"/>
+  <text x="42" y="120" font-size="12" fill="#0969da" text-anchor="middle">2</text>
+  <text x="66" y="110" font-size="13" fill="#1f2328">读懂它想改什么，再按现有通道改写成标准包</text>
+  <text x="66" y="130" font-size="12" fill="#57606a">口径轴 / 行为开关 / client.panels / content —— 确属引擎本体的整合进发行版</text>
+
+  <line x1="340" y1="142" x2="340" y2="158" stroke="#8c959f" stroke-width="1.5"/>
+  <polygon points="336,156 344,156 340,164" fill="#8c959f"/>
+
+  <rect x="16" y="164" width="648" height="52" rx="8" fill="#fff8c5" stroke="#9a6700"/>
+  <circle cx="42" cy="190" r="13" fill="#ffffff" stroke="#9a6700"/>
+  <text x="42" y="194" font-size="12" fill="#9a6700" text-anchor="middle">3</text>
+  <text x="66" y="184" font-size="13" fill="#1f2328">闸门：packs/ —— 用引擎自己的装载器验</text>
+  <text x="66" y="204" font-size="12" fill="#57606a">errors = 0 才算收录；今天 3 个包，数量以 packs/README.md 为准</text>
+
+  <line x1="340" y1="216" x2="340" y2="232" stroke="#8c959f" stroke-width="1.5"/>
+  <polygon points="336,230 344,230 340,238" fill="#8c959f"/>
+
+  <rect x="16" y="238" width="648" height="52" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+  <circle cx="42" cy="264" r="13" fill="#ddf4ff" stroke="#0969da"/>
+  <text x="42" y="268" font-size="12" fill="#0969da" text-anchor="middle">4</text>
+  <text x="66" y="258" font-size="13" fill="#1f2328">站上发布：审过才进公开列表</text>
+  <text x="66" y="278" font-size="12" fill="#57606a">疑似夹带官方素材的照收，单独一组并标注；上线必须勾一次确认</text>
+
+  <line x1="340" y1="290" x2="340" y2="306" stroke="#8c959f" stroke-width="1.5"/>
+  <polygon points="336,304 344,304 340,312" fill="#8c959f"/>
+
+  <rect x="16" y="312" width="648" height="64" rx="8" fill="#dafbe1" stroke="#1a7f37"/>
+  <circle cx="42" cy="344" r="13" fill="#ffffff" stroke="#1a7f37"/>
+  <text x="42" y="348" font-size="12" fill="#1a7f37" text-anchor="middle">5</text>
+  <text x="66" y="332" font-size="13" fill="#1f2328">入库：mods/index.json —— mod 仓库的唯一真相</text>
+  <text x="66" y="352" font-size="12" fill="#57606a">四道闸门：装得上（errors = 0）· 字节没走样（sha256 重算）</text>
+  <text x="66" y="370" font-size="12" fill="#57606a">· 不是说明包 · 元数据齐（pack.json 的 id 与目录名一致）</text>
+</svg>

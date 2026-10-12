@@ -6,12 +6,34 @@
 ![license](https://img.shields.io/badge/code%20license-GPL--3.0--or--later-blue)
 ![node](https://img.shields.io/badge/node-22%20%7C%2024-339933)
 
-本仓库 = **上游同人游戏**（卫戍协议：盟约 · Stronghold Protocol: Alliance）+ **一套图形化的内容创作工具「Forge 工坊编辑器」**。
+本仓库由三块组成：
+
+- **Forge 工坊编辑器**（`editor/`，本仓库的主角）—— 一个**游戏之外**的图形化工具，用来创作这个游戏的内容（干员、地图、怪物、出怪、装备、盟约、行为层 kit、语音），并把做好的包**导出成一个 `.zip` 交给别人**。九个页面，中英双语，**不运行就不存在**。
+- **mod 层**（`shared/workshop.js` 等）—— 引擎里**包能碰到的那一层**：32 个顶层键的**闭集**、9 个界面槽位、6 种服务端模块用途、4 个可改写的界面组件、包通道、口径轴、素材源、动态路由、公告面。**包只能消费这一层已有的通道**，改不了引擎本体。
+- **上游同人游戏本体**（卫戍协议：盟约 · Stronghold Protocol: Alliance，上游 **0.2.4**）—— 编辑器写出的内容最终在这里跑起来，本仓库一并附带。
+
+一份包从 `pack.json` 走到别人手上，还要经过**标准包规范**（`docs/STANDARD-PACK.md`）、**mod 仓库**（`Stronghold-Protocol-Forge-Mods`）与**投稿站**（`site/`）—— 这条链路今天已经通了，见[投稿到入库](#投稿到入库)。
 
 代码以 **GPL-3.0-or-later** 发布；与上海鹰角网络科技有限公司（Hypergryph）、Yostar 及其关联方**没有任何关系**。
 
+## 你想做什么 → 看哪份文档
+
+| 我想…… | 从这读 |
+|---|---|
+| 先玩一局 | [快速开始（游戏）](#快速开始游戏) · [操作](#操作) · [docs/PLAYING.md](docs/PLAYING.md) |
+| **知道 Forge 今天到底能干什么** | [Forge 现在能干什么](#forge-现在能干什么) · [还不能做什么](#还不能做什么) |
+| 装一个别人做好的包 | [怎么装一个包](https://github.com/XiaMo233M/Stronghold-Protocol-Forge-Mods#怎么装一个包) · [工坊与助战](#工坊与助战) |
+| 自己写一个包 | [一份最小 pack.json](#一份最小-packjson实测能装) · [docs/WORKSHOP.md](docs/WORKSHOP.md) · [docs/prompts/](docs/prompts/README.md) |
+| 知道我的投稿算不算标准包 | [docs/STANDARD-PACK.md](docs/STANDARD-PACK.md) —— 七种形态定级、四条硬要求、非标准的怎么办 |
+| 用图形界面做内容 | [快速开始（编辑器）](#快速开始编辑器) · [docs/EDITOR.md](docs/EDITOR.md) |
+| 把包交给别人 / 投稿 | [docs/WORKSHOP.md](docs/WORKSHOP.md) §1.5 · [投稿到入库](#投稿到入库) |
+| 改引擎、加一格开关 | [docs/MOD-SURFACE.md](docs/MOD-SURFACE.md) · [docs/SYNC-POINTS.md](docs/SYNC-POINTS.md) |
+| 开服、打包、发版 | [docs/DEPLOY.md](docs/DEPLOY.md) · [docs/WINDOWS.md](docs/WINDOWS.md) |
+| 查全部文档 | [docs/README.md](docs/README.md) —— `docs/` 的全量索引 |
+
 ## 目录
 
+- **能干什么（先看这条）**：[你想做什么 → 看哪份文档](#你想做什么--看哪份文档) · [Forge 现在能干什么](#forge-现在能干什么) · [一份最小 pack.json](#一份最小-packjson实测能装) · [behaviour：通道已通，表还是空的](#behaviour通道已通表还是空的) · [投稿到入库](#投稿到入库) · [还不能做什么](#还不能做什么)
 - **编辑器（本仓库的主角）**：[这是什么](#这是什么) · [能做什么](#能做什么) · [介绍图](#介绍图) · [快速开始（编辑器）](#快速开始编辑器) · [两条硬规矩](#设计上的两条硬规矩) · [Option 署名](#option-署名) · [工坊与助战](#工坊与助战)
 - **上游游戏本体**：[本仓库完整包含上游游戏](#本仓库完整包含上游游戏) · [功能一览](#功能一览) · [快速开始（游戏）](#快速开始游戏) · [联机方式](#联机方式) · [操作](#操作)
 - **文档与法律**：[文档](#文档) · [开发与测试](#开发与测试) · [项目结构](#项目结构) · [著作权声明](#著作权声明) · [上游来源与修改说明](#上游来源与修改说明) · [许可证](#许可证) · [致谢与数据来源](#致谢与数据来源) · [贡献](#贡献) · [English](#english)
@@ -56,6 +78,133 @@
 数值、分支、攻击范围、技能、天赋、外观、spine 一次带过来，改个 id 与名字就能保存；填数值时每个输入框下面
 有一条**官方同类区间**的尺子（干员按职业、怪物按档位），越界会变色 —— 它不是上限，只是让「我是不是捏超模了」
 这个问题有一个当场能看到的答案。`spine` 与干员 `id` 这两个**填错不报错**的字段都会当场提示后果。
+
+## Forge 现在能干什么
+
+下面是**包（工坊包 / mod）在今天这台引擎里能碰到的东西**，一条一行。表里的数字都是实测的，每条都指向引擎里那一份真相。
+
+| 你能做什么 | 包里的写法 | 今天的状态 | 判据在哪 |
+|---|---|---|---|
+| 加内容、覆盖官方记录 | `content` · `overrides` | ✅ 能用 | `shared/workshop.js` 的 `PACK_FIELDS` |
+| 在界面上挂一块自己的面板 | `client.panels[]` —— **9 个槽位**任选 | ✅ 能用。`screen.game.shopCard` 是**可重复宿主**：每张商店卡挂一个，面板用 `ctx.hostKey` 认自己那一份 | `CLIENT_PANEL_SLOTS`（`shared/workshop.js`）；客户端那一份在 `public/js/ui/extensions.js` |
+| 改写引擎自己的一块界面 | `client.panels[].wraps[]` —— **4 个组件**、两种模式 | ✅ 能用。`wrap` 包住引擎那一份、`replace` 整段换掉；抛错或返回空就**退回下面那一份**并点名 | `CLIENT_WRAP_COMPONENTS` · `CLIENT_WRAP_MODES` |
+| 在服务端跑自己的代码 | `server.modules[]` —— **6 种用途** | ✅ 能用：`boot` · `shutdown` · `matchClass` · `healthz` · `metrics` · `route`。上限 8 个模块，扩展名 `.mjs` | `SERVER_MODULE_USES` |
+| 跟自己的面板通信 | `client.panels[].messages[]` | ✅ 能用。线上名是 `<包id>.<短名>`；服务端唯一的消息驱动调用点是 `Match.handlePackMsg` | `shared/workshop.js` · `server/lobby.js` |
+| 选一套口径（练度 / 形态 / 部署位） | `variants` —— **3 条轴** | ✅ 能用：`training` · `form` · `deploy` | `VARIANT_AXES`（`shared/variants.js`） |
+| 声明一条规则开关 | `behaviour` | ⚠️ **通道通了，表还是空的** —— 今天任何声明都被整包拒，见[下一节](#behaviour通道已通表还是空的) | `shared/behaviour.js` |
+| 用自己的 CDN 发素材 | `assets.mirrors[]` | ✅ 能用。只镜像**本包自己的容器**；`sha256` 对不上的那一条**停用并点名**（不拒包），服务端不为它发网络请求 | `shared/workshop.js` 的 `ASSETS_FIELDS` |
+| 把数据挂成一个端点 | `routes[]` | ✅ 能用（`{ path, file, cache }`） | `server/http/routeMount.js` |
+| 发公告 / 鸣谢 | `notices` | ✅ 能用。纯文本，与引擎自带公告**追加合并**，互不覆盖 | `shared/workshop.js` |
+| 带语音 / 图标 / 外观 / 形态 | `voices` · `voiceLangs` · `bondIcons` · `itemIcons` · `art` · `skins` · `forms` · `fx` | ✅ 能用 | `shared/workshop.js` |
+| 带一个资源容器 | `assets`（`container` / `manifest` / `serverPolicy` / `verify`） | ✅ 能用 | `shared/workshop.js` |
+| 声明对局元数据 | `server.meta` | ✅ 能用（七个键类别） | [docs/design/meta-payload.md](docs/design/meta-payload.md) §29 |
+| 用图形界面做以上内容 | `editor/` | ✅ 能用（9 页，独立分发） | [docs/EDITOR.md](docs/EDITOR.md) |
+| 改完立刻试玩 | `SP_WORKSHOP` | ✅ 能用：编辑器起一个子进程，读你当前那个工坊根 | [docs/EDITOR.md](docs/EDITOR.md) |
+| 让别人拿到你包的**字节** | `GET /mods/catalog.json` | ✅ 能用：客户端按 sha256 同步，**先验哈希再落盘** | `server/modCatalog.js` · `public/js/mods/sync.js` |
+
+![能力分层：上游游戏 / mod 层 / 编辑器 / 分发链路](docs/img/cap-01-layers.svg)
+
+一句话读这张图：**包只能消费 mod 层已有的通道**。想要这一层里没有的能力，正确做法是**在引擎里先加一刀**（加一格开关、一条口径轴、一个槽位、一种模块用途），然后任何包才可能声明它 —— 见 [docs/STANDARD-PACK.md](docs/STANDARD-PACK.md) §五。
+
+![一个包的一生：写 → 装载 → 跑起来 → 同步 → 分发](docs/img/cap-02-pack-lifecycle.svg)
+
+## 一份最小 pack.json（实测能装）
+
+这是**真能装上**的最小包：一个 `pack.json`，没有一行代码、没有一张图。它把界面的调色板换成夜间一套。
+
+```json
+{
+  "id": "hello-pack",
+  "name": "我的第一个包",
+  "version": "1.0.0",
+  "author": "你的名字",
+  "license": "GPL-3.0-or-later",
+  "description": "把界面调色板换成夜间高对比一套。",
+  "api": ">=1 <2",
+  "client": { "theme": { "vars": { "--text-hi": "#f4faf7", "--line": "#2d3d37" } } }
+}
+```
+
+把它放在 `workshop/hello-pack/pack.json`（**目录名必须等于 `id`**，否则装载器整包跳过并报 `PACK_ID_MISMATCH`），然后：
+
+```bash
+node tools/workshop-validate.mjs workshop     # 分层校验：格式 → 语义 → 真实引擎
+```
+
+实测输出（本仓库跑出来的原样）：
+
+```
+pack hello-pack (我的第一个包)
+  OK
+
+behaviour layer (kits/):
+  (no kits)
+
+0 error(s), 0 warning(s)
+VALID: the engine accepts this content.
+```
+
+几条容易踩的：
+
+- **`license` 不能省** —— 缺了会让整个包被加载器拒绝。
+- **`client.theme.vars` 的键必须以 `--` 开头**（`^--[A-Za-z0-9_-]{1,64}$`），一个主题上限 200 条；值里不许出现 `;`、`{`、`}`、`<` 和换行 —— 那几个字符能让一条声明**跑出它自己那一格**。
+- **只声明 `variants` / `behaviour` / `support` / `playtest` 的包会被判 `EMPTY_PACK`**：这四样是「怎么跑」的声明，自己不往对局里带东西。要上架得**至少贡献一样真的**（`content` / `client` / `notices` / `routes` / 素材…）。上面这个例子贡献的是 `client`，所以不算空包。
+- 顶层键只有 32 个（完整清单见 [docs/STANDARD-PACK.md](docs/STANDARD-PACK.md) §二.2）；**不认识的顶层键点名拒绝**（`PACK_UNKNOWN_FIELD`），**绝不读过去**。
+
+## behaviour：通道已通，表还是空的
+
+`pack.json.behaviour` 是**包声明「我要哪一格规则开关、哪一档」**的地方。它今天的样子要写清楚，不然会以为「写了就能用」：
+
+- **通道本身是真的、也是响的**：开关名与选项名都是**闭枚举**，包只能声明引擎表里有的东西；包里**没有数值、也没有路径** —— 动作 `{ kind, value }` **由引擎构造**，`value` 只能来自引擎自己的常量。
+- **但那张表今天是空的**：`shared/behaviour.js` 的 `BEHAVIOUR_SWITCHES` 是 `Object.freeze({})`，**一格都没有**。这是刻意的：一格开关的入场券是「**引擎先有实现点**」，所以首格与它的引擎实现点**同刀落地**，由维护者点名。
+- ⇒ **今天任何一条 `behaviour` 声明都会被整包拒**。实测原文（`node tools/workshop-validate.mjs`）：
+
+```
+ERROR (record) [PACK_LOAD] BEHAVIOUR_UNKNOWN_SWITCH: behaviour[0].switch "shopBias"
+is not a switch of this 行为 format. Known switches: none yet — this build declares
+no behaviour switch at all, because a switch is only added together with its
+engine-side implementation point — a declaration the loader does not know is never
+applied, so it is refused instead of ignored
+```
+
+声明长这样（**今天会被拒；等表里有了格子，这就是合法写法**）：
+
+```json
+"behaviour": [ { "switch": "<开关名>", "option": "<选项名>" } ]
+```
+
+- `switch` 必须是非空字符串、`option` 必须是那一格列出的选项名；**可以只写 `switch`**，那就用这一格的缺省（缺省 = 引擎今天的行为）。
+- 只允许 `switch` / `option` / `name` / `desc` 四个字段 —— `module` / `entry` / `file` / `path` / `value` / `key` 这类「想改文件、想给数值」的键**在这里就被拒**（`BEHAVIOUR_BAD_SHAPE`）。
+- 声明 `behaviour` 任一格的包**必须 `combat: true`**（`BEHAVIOUR_NEEDS_COMBAT`），因为它会改对局结果。
+- 两个包声明同一格时，判据**不是**「谁后加载」（那会让结果依赖扫描顺序），而是**包 id 字典序小的赢**，输的一方被点名报告。
+
+加一格开关要一起改哪几处、漏了会怎样、谁拦，见 [docs/SYNC-POINTS.md](docs/SYNC-POINTS.md)。
+
+## 投稿到入库
+
+一份投稿不是「投进来就完事」。它在**两个仓库与一个站点**之间走完这条链：
+
+![投稿 → 兼容 → 入库](docs/img/cap-03-submission-pipeline.svg)
+
+- **七种投稿形态与定级**（① 标准工坊包 ② 包裹式 ③ 补丁型 ④ 安装器型 ⑤ 资源容器型 ⑥ 功能包 ⑦ 声明包）、标准包的四条硬要求、`functional` / `documentation` / `unknown` 判据，都在 [docs/STANDARD-PACK.md](docs/STANDARD-PACK.md)。
+- **② 包裹式的差别只在站点那一层**：引擎的装包器**两种都收**（zip 根 → 否则取唯一顶层目录），而投稿站**只认 zip 根** ⇒ 包裹式上传会被 **HTTP 400** 挡下。重新压一次、把包内文件放到 zip 根即可，**内容一个字都不用改**。
+- **③ 补丁型与 ④ 安装器型照收**（进 `incoming/`），由维护者按现有通道改写成包 —— **不打回、不删**。「非标准」这三个字**只用来告诉投稿人怎么写**，不是拒收规则。
+- **含官方素材的包照收，但必须标注**：包内 `PROVENANCE.md` 与站上备注写明「含官方素材」+ 实测清点 + 版权与用途。上传站是**宽进的漏斗**，仓库是发布物 —— **未标注才是问题**。
+- **mod 仓库**（[Stronghold-Protocol-Forge-Mods](https://github.com/XiaMo233M/Stronghold-Protocol-Forge-Mods)）的 `mods/` 存站上已通过成品的**镜像**，`mods/index.json` 是它唯一的真相（四道闸门：装得上 `errors = 0` / zip 字节没走样 / 不是说明包 / 元数据齐）。
+
+## 还不能做什么
+
+这一节和上一节一样重要。**以下都是今天真的做不到的事** —— 写在这里，是为了让「能不能用」有一个当场能查的答案。
+
+| 还不行 | 具体到什么程度 |
+|---|---|
+| **声明一条行为开关** | 表里 **0 格**（见上一节）：通道通了，但没有任何一格可以声明。 |
+| **包整份覆盖引擎文件** | 包**不能**覆盖 `data/**` 或 `server/sim/**`，也不能指定任意文件。这不是「还没做」，是**刻意的**：`official` / `config` / `meta` / `shared` / `theme` / `serverModules` 那几格**没有通道**。要这类能力，得在引擎里做成一格开关 / 一条口径轴 / 一个槽位，包才可能声明它。 |
+| **从远端 catalog 装包** | 客户端只从**当前连着的这台服务器**同步（`GET /mods/catalog.json`）。**没有**第三方 catalog 源，也没有「从别的站点装一个包」这条路。 |
+| **把包裹式 zip 投到站上** | 站点只认 zip 根，套了顶层目录即 **400**（引擎自己两种都收）。重压一次即可，但**站点那一层今天就是这个形状**。 |
+| **只放说明的包被上架** | 自述「参考 / 说明 / 装不上是预期」的包**不上架**，但**留在待审、不打回**（它的简介是做兼容包的依据）。 |
+| **浏览器端到端测试** | 默认关闭，需要本机 Chrome（`SP_E2E` / `SP_REAL_E2E` / `RENDER_E2E` / `EDITOR_E2E`）。缺 `puppeteer-core` 或 `CHROME_PATH` 时整批**静默跳过**，看起来像「通过了」。 |
+| **在 Serverless / 静态托管上开服** | 游戏是单个常驻 Node.js 进程 + WebSocket，只能跑一个实例，必须部署在域名根路径。 |
 
 ## 介绍图
 
@@ -147,6 +296,8 @@ node tools/workshop-pack.mjs import ~/Downloads/my-pack.zip   # 把别人的包�
 > [!NOTE]
 > 以下是**本项目自行新增**的功能，不是官方内容，也不在 `tools/build-data.mjs` 的生成范围内。它不修改 `data/*.json`。
 
+这一节讲**逐条细节**；「包到底能碰到哪些东西」的完整清单在上面的 [Forge 现在能干什么](#forge-现在能干什么)。
+
 - **助战**：每名玩家每阶可选 n 个助战干员，**卡池由服务端控制**（`data/support.json`），不在卡池中的即禁用。
 - **创意工坊**：把工坊包放进 `workshop/<包>/`，即可新增/覆盖干员等内容。官方数据保持字节不变。
 - **工坊语音包**：包可以在 `pack.json.voices` 里给自己的（或助战的）干员配语音，音频放在包自己的 `assets/` 下；客户端不需要任何新通道就能听到——叠加层把台词并进它本来就在读的 `assets.audio.voice`。**0.7.3 起还能逐语种各配一份**（`pack.json.voiceLangs` → `assets.audio.voiceLangs[<语言>]`）：玩家在设置里选了中文，就听这个包的中文那一条，缺这一句时照旧退回默认配音。只带语音、不含任何数据文件的包是合法的。见 [docs/WORKSHOP.md](docs/WORKSHOP.md) §1.4。
@@ -154,6 +305,16 @@ node tools/workshop-pack.mjs import ~/Downloads/my-pack.zip   # 把别人的包�
 - **包自带图标**：`pack.json.bondIcons` 给盟约配图、`pack.json.itemIcons` 给装备/道具配图（包新增的盟约与装备原本只能显示圆点/兜底图）；图放在包自己的 `assets/` 下，加载时并进合并后的 `assets.json`（`bonds` / `items` 两张表），客户端不需要任何新通道。只带图标的包同样合法。见 [docs/WORKSHOP.md](docs/WORKSHOP.md) §1.4。
 - **包自带外观素材**（0.8.0 起）：`pack.json.art` 让包带上**头像 / 立绘 / spine 模型**（`chars` / `enemies` / `tokens` 三张表，形状照官方条目抄），加载时并进 `assets.chars` / `assets.enemies` / `assets.tokens` —— 于是**包新增的干员/怪物不再是一张菱形贴图**，客户端同样零改动。干员页与怪物页各有一块图形入口：从本包真实素材里挑、**选完 `.skel` 自动填同目录同名的 `.atlas`**（这条是硬约束：加载器是从 skel 路径推 atlas 的）、动画名从骨架里真实存在的名字里选。见 [docs/WORKSHOP.md](docs/WORKSHOP.md) §1.4。
 - **把包交给别人 / 装别人的包**：`node tools/workshop-pack.mjs export <包>` 打成一个 `.zip`，对方 `import` 即装；整合包里更简单——**把 `.zip` 拖到 `安装工坊包.bat` 上**。装包只写 `workshop/<包>/`，不碰 `data/*.json`。见 [docs/WORKSHOP.md](docs/WORKSHOP.md) §1.5。
+- **包在界面上加东西**（`client.panels`）：9 个槽位任选，从大厅浮层到商店卡、到对局 HUD。`screen.game.shopCard` 是**可重复宿主** —— 引擎每张商店卡渲染一个容器，面板挂进**每一个**，并用 `ctx.hostKey`（商店卡那个键就是干员 id）认自己那一份；这正是「每张卡上一个标记」和「屏幕上有一个标记」的差别。面板拿到的注入面是**冻结的**：只读会话态 `ctx.me` + 它自己声明的样式表 / 数据表 / 通道，**没有** store、没有 match 对象、没有 audio。见 [docs/MOD-SURFACE.md](docs/MOD-SURFACE.md) 的 C 层。
+- **包改写引擎自己的界面**（`client.panels[].wraps[]`）：4 个组件（`game.bondStrip` · `game.hud.topBar` · `game.shopCard` · `loadout.detail`），两种模式 —— `wrap` 拿到引擎那一份的 `orig` 包住它，`replace` 整段换掉（`orig` 是 `null`）。任一环抛错或返回空：**退回下面那一份**并点名一次，屏幕照旧。见 [docs/design/mod-layer.md](docs/design/mod-layer.md) §28.19。
+- **包在服务端跑代码**（`server.modules[]`）：6 种用途，其中 `matchClass` 是唯一能改对局结果的那一种（所以声明它**必须 `combat: true`**）；声明过 `write` 的模块拿到**只属于自己包**的一个目录（`<状态目录>/mod/<包id>/`，永不与别的包共享）。见 [docs/MOD-SURFACE.md](docs/MOD-SURFACE.md) 的 B 层。
+- **包与自己的面板通信**（`messages`）：一条通道的线上名是 `<包id>.<短名>`，服务端侧唯一由消息驱动的调用点是 `Match.handlePackMsg(playerId, msg)`，它在 `pack.msg` 限流之后、转发之前被调到一次。见 [docs/design/mod-layer.md](docs/design/mod-layer.md) §28.14。
+- **包自带素材源**（`assets.mirrors`）：作者可以自备 CDN 承载**本包自己的容器**。它是「素材加载源」这一格的唯一入口，纪律很硬：`base` 必须是绝对 https，`sha256` 必须等于装载期从包内文件算出的容器摘要 —— 对不上的那一条**停用并点名**（**不拒包**），而服务端**不会为这条通道发一次网络请求**。见 [docs/design/mod-layer.md](docs/design/mod-layer.md) §28.40。
+- **包发公告**（`notices`）：一段结构化文本（公告 + 鸣谢），与引擎自带公告、其它包的公告**追加合并**，互不覆盖；纯文本、零代码的包因此也是合法包。见 [docs/WORKSHOP.md](docs/WORKSHOP.md) §1.13。
+- **包把数据挂成端点**（`routes`）：`{ path, file, cache }`，缓存策略取自引擎自己的那一份清单。见 `server/http/routeMount.js`。
+- **包选一套口径**（`variants`）：3 条轴 `training` / `form` / `deploy`，每条轴**必有「官方那一档」**，缺省就是引擎今天的行为。见 [docs/design/mod-layer.md](docs/design/mod-layer.md) §28.39。
+- **包声明一条规则开关**（`behaviour`）：通道已通、守卫已就位，但**表里今天一格都没有** —— 见 [behaviour：通道已通，表还是空的](#behaviour通道已通表还是空的)。
+- **客户端按哈希同步一个包**：`GET /mods/catalog.json` 给出每个包**每个文件**的 `path` / `bytes` / `sha256`（磁盘字节）与 `canonical`（进包哈希的那一份）；客户端用**与服务端同一个** `modManifestDigest` 重建包哈希，并发 4、单文件重试 2 次、30 秒超时，**字节先验哈希再落盘**（坏文件永不写进缓存）。见 `server/modCatalog.js` 与 `public/js/mods/sync.js`。
 
 ```bash
 node tools/workshop-scaffold.mjs docs/examples/operator-spec.json --pack my-pack   # spec → 合法工坊包
@@ -334,17 +495,25 @@ npm start          # 启动服务器：http://localhost:3000
 
 | 文档 | 内容 |
 |---|---|
-| [CHANGELOG.md](CHANGELOG.md) | 更新记录：每个版本修复了什么、哪些反馈经核实不是问题 |
+| [CHANGELOG.md](CHANGELOG.md) | 更新记录：**索引 + 最近 8 节**。更早的按大版本分卷在 [docs/changelog/](docs/changelog/)，每一卷是**冻结件**（逐字节不许改）。顶层那 8 节不是随便定的 —— 游戏内公告由它生成，再往下切就会**静默少发公告** |
+| [docs/README.md](docs/README.md) | **`docs/` 的全量索引**：新人先读哪三份、按你想做的事找路、全清单、改文档的规矩 |
 | [docs/EDITOR.md](docs/EDITOR.md) | **工坊编辑器**（可选、独立分发，游戏客户端不含它）：运行方式、界面、API、会写哪些文件 |
 | [docs/WORKSHOP.md](docs/WORKSHOP.md) | **创意工坊与助战**（本项目新增）：工坊包格式与叠加规则、助战卡池与名额、作者接口、当前状态 |
+| [docs/MOD-SURFACE.md](docs/MOD-SURFACE.md) | **mod 表面清单**（pack-facing ABI）：一个包能依赖引擎的哪些东西 —— 槽位 / 模块用途 / 可 wrap 组件 / 锚点，以及**刻意不是**表面的那些 |
+| [docs/STANDARD-PACK.md](docs/STANDARD-PACK.md) | **标准包规范**：七种投稿形态的定级、标准包的四条硬要求、`functional` / `documentation` / `unknown` 判据、非标准形态（补丁型 / 安装器型）怎么处置 |
+| [docs/SYNC-POINTS.md](docs/SYNC-POINTS.md) | **加东西时的同步点清单**：意图 / `behaviour` 开关 / 包字段 / 槽位 / i18n 各要一起改哪几处、漏了怎样、谁拦 |
 | [docs/prompts/](docs/prompts/README.md) | **官方 Prompt（创作模板）**：把文件全文丢给任意 AI，加上你的数值与文字描述，就能产出本仓库直接能用的工坊内容。干员有完整的一份（含 60+ 黑板书键表），地图/怪物/出怪/装备/kit 的 spec 形状与推导规则在索引里 |
 | [docs/PLAYING.md](docs/PLAYING.md) | 玩法指南：流程、经济、招募与晋升、摆阵、联防、盟约、最终攻势、结算称号 |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | 部署指南：Windows 开服与开机自启、防火墙、组网 / 隧道、反向代理与 HTTPS、Docker、systemd、排错 |
 | [docs/WINDOWS.md](docs/WINDOWS.md) | Windows 便携包：怎么打一份「零安装」包（`scripts/make-windows-bundle.mjs`）、包里放了什么、授权注意事项 |
+| [docs/NET-TUNING.md](docs/NET-TUNING.md) | 网络可调参数（`m.public` 增量帧）：座位上限这类数字怎么抬、抬了会牵动什么 |
+| [docs/RECORDS.md](docs/RECORDS.md) | 对局战绩与可选账号（`SP_ACCOUNTS=1`） |
+| [docs/UPSTREAM-UPGRADE.md](docs/UPSTREAM-UPGRADE.md) | 上游更新校对清单：上游发新版后照它走一遍 |
+| [docs/PS100-MIGRATION.md](docs/PS100-MIGRATION.md) | 百卫补丁（100 人版）的移植记录 |
 | [docs/DESIGN.md](docs/DESIGN.md) | 架构与契约（英文）：技术栈、目录分工、网络协议、渲染与 UI、各次试玩后的规则修订 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 上游 0.2.0 的目录与模块地图（英文）：拆分后每个文件负责什么 |
 | [docs/I18N.md](docs/I18N.md) | 界面与游戏文本的多语言（英文）：语言包格式、msgid 约定、怎么加一种语言 |
-| [docs/PACKS.md](docs/PACKS.md) | 上游的内容包（`packs/`，目前只装语言包）与本项目**工坊包**（`workshop/`）的区别 |
+| [docs/PACKS.md](docs/PACKS.md) | 上游的内容包（`packs/<id>/pack.json`，本版只加载 `lang` 语言包；索引 `GET /packs/index.json`）与本项目**工坊包**（`workshop/`）的区别 —— **两套机制、两个索引，互不相干**。工坊包的对外分发见[投稿到入库](#投稿到入库) |
 | [docs/SIM.md](docs/SIM.md) | 战斗模拟引擎参考（英文）：钩子、技能描述格式、职业默认行为 |
 | [docs/META.md](docs/META.md) | 对局与经济引擎（英文）：回合流程、商店、联防、最终攻势的实现细节 |
 | [docs/DATA.md](docs/DATA.md) | 由官方数据表生成的游戏数据（英文） |
@@ -356,7 +525,7 @@ npm start          # 启动服务器：http://localhost:3000
 
 ```bash
 npm run dev                 # node --watch：改动服务器代码后自动重启
-node --test                 # 单元 + 集成测试（约 6000 项；缺少素材 / 浏览器的用例会自动跳过）
+node --test                 # 单元 + 集成测试（约 8200 项；缺少素材 / 浏览器的用例会自动跳过）
 SP_E2E=1 node --test test/ui/mock.e2e.test.js        # 浏览器端到端测试，需要本机 Chrome（CHROME_PATH 可指定路径）
 SP_REAL_E2E=1 node --test test/ui/real.e2e.test.js   # 需要 Chrome + 已下载的素材
 RENDER_E2E=1 node --test 'test/render/*.browser.test.js'   # 渲染测试，部分需要本地提取的棋盘贴图
@@ -401,15 +570,17 @@ Chromium 同时开）见过 `waitForSelector` 偶发超时 —— 那是机器�
 | 路径 | 内容 |
 |---|---|
 | `editor/` | **工坊编辑器**（独立工具，不在 `public/` 下，客户端拿不到） |
-| `shared/` | 前后端共用的常量、网络协议与创作规则 `*Authoring.js` |
+| `shared/` | 前后端共用的常量、网络协议、**包格式那一份真相**（`workshop.js` 的 `PACK_FIELDS` 与槽位 / 模块用途 / 可 wrap 组件那几张清单）、包身份哈希（`modIdentity.js`）、mod 表面台账（`modSurface.js`）、口径轴（`variants.js`）、行为开关（`behaviour.js`），以及创作规则 `*Authoring.js` |
 | `workshop/` | 工坊包（内容叠加层）；编辑器与 `workshop-scaffold.mjs` 写这里 |
+| `packs/` | **content pack**（`packs/<id>/pack.json`，服务端从文件夹里读；本版只加载 `lang` 语言包，索引 `GET /packs/index.json`）。**与工坊包是两套机制、两个索引**，见 [docs/PACKS.md](docs/PACKS.md) |
 | `tools/` | `setup.mjs` / `doctor.mjs`、素材下载 `fetch-assets.mjs`、数据构建、`workshop-editor.mjs` / `workshop-validate.mjs` / `workshop-scaffold.mjs`、本地提取 `local-extract/` |
 | `server/` | Node HTTP 静态服务 + WebSocket（`/ws`）、大厅、对局引擎（`match/`）、战斗模拟（`sim/`，浏览器与服务器共用） |
 | `public/` | 浏览器客户端（原生 ES 模块，PixiJS + pixi-spine、three.js 3D 棋盘、Preact + htm UI） |
 | `data/` | 由官方数据表生成的游戏数据与素材清单 `assets.json`（以及助战卡池 `support.json`） |
 | `scripts/` | 启动脚本（Windows / macOS / Linux）、Windows 开机自启 |
 | `docs/` | 文档与调研 |
-| `test/` | `node:test` 测试 |
+| `test/` | `node:test` 测试；`test/golden/` 是固定种子的黄金结果语料 |
+| `types/` | 给编辑器与工具读的类型声明（`core.js`） |
 | `third-party/` | **不属于本项目 GPL 范围的内容**（游戏素材、字体、由官方数据表生成的数据、调研与截图）的边界，以及把它们**单独打包上传**的出口：`node tools/export-third-party.mjs` → `third-party/bundle/`（已 gitignore）。见 [third-party/README.md](third-party/README.md) |
 
 ## 著作权声明
@@ -540,12 +711,17 @@ work for direct profit.
 
 ## English
 
-This repository is **Stronghold-Protocol-Forge**: a standalone, out-of-game **graphical authoring tool (the Forge editor)** for the content of the fan remake of Arknights' seasonal auto-chess tower-defense mode *Stronghold Protocol: Alliance* — plus that bundled upstream game itself.
+This repository is **Stronghold-Protocol-Forge**. It holds three things: the **Forge editor** — a standalone, out-of-game **graphical authoring tool** for the content of the fan remake of Arknights' seasonal auto-chess tower-defense mode *Stronghold Protocol: Alliance*; the **mod layer** of that engine (everything a pack is allowed to touch); and the bundled upstream game itself.
+
+> The Chinese text above is the reference version. This English section is a self-contained summary of the same facts — it does not repeat the upstream porting history.
 
 - **The Forge editor (what this repo is for):** run `npm run editor` and open <http://127.0.0.1:3311> — no build step, no game-server change, bound to loopback by default. Nine pages author operators (`/`), maps (`/stage.html`, 19×21 grid with 2D placement and a 3D preview), enemies (`/enemy.html`), spawn waves (`/wave.html`), items (`/item.html`), bonds (`/bond.html`: add a bond, or override one of the official 23), behaviour-layer kits (`/kit.html`), a pack's voice lines (`/voice.html`) and the pack itself (`/pack.html`: export to a `.zip`, import someone else's, tick which of the pack's own operators enter the 助战 pool, and start a playtest server that opens straight into a solo run). Mechanical fields are always derived from the real engine rather than typed by hand, and `tools/workshop-validate.mjs` re-checks every pack in layers (format → semantics → the real engine → kits / maps / enemies / waves / items / voice lines / 助战) through the same `shared/*Authoring.js` rules the editor and CLI use, so the rules cannot drift. Saved Options carry a `_meta` attribution block. See [docs/EDITOR.md](docs/EDITOR.md) and [docs/WORKSHOP.md](docs/WORKSHOP.md).
+- **What a pack can touch today** (every number below is measured on this tree): `pack.json` is a **closed set of 32 top-level keys** — an unknown key is refused by name, never read past. A pack can declare content and overrides of official records (`content` / `overrides`); mount a panel into any of **9 client slots** (`client.panels`, with `screen.game.shopCard` a *repeatable* host — one container per shop card, and the panel tells them apart through `ctx.hostKey`); rewrite one of **4 engine components** (`wraps`, mode `wrap` or `replace`, falling back to the engine's own render and naming itself once if it throws); run server code through **6 module uses** (`boot` / `shutdown` / `matchClass` / `healthz` / `metrics` / `route`); talk to its own panel over **pack channels** (`messages`; the one message-driven call site is `Match.handlePackMsg`); pick one of **3 variant axes** (`training` / `form` / `deploy`); serve its own container from its own CDN (`assets.mirrors` — a mirror whose `sha256` does not match is disabled **by name**, not rejected, and the server makes no network request for it); publish announcements (`notices`); expose data at an endpoint (`routes`); ship voices, icons, art and forms; and have the client rebuild the pack hash file by file from `GET /mods/catalog.json` using the **same digest the server uses**, hashing every byte before it is written. See [docs/MOD-SURFACE.md](docs/MOD-SURFACE.md).
+- **From a `pack.json` to someone else running it:** the chain is the standard-pack spec ([docs/STANDARD-PACK.md](docs/STANDARD-PACK.md) — seven submission forms and what counts as a standard pack), the mod repository ([Stronghold-Protocol-Forge-Mods](https://github.com/XiaMo233M/Stronghold-Protocol-Forge-Mods), whose `mods/index.json` is its single source of truth) and the upload site (`site/`). A minimal pack is one `pack.json` with no code and no art: `node tools/workshop-validate.mjs workshop` prints `0 error(s), 0 warning(s)` for the one in [一份最小 pack.json](#一份最小-packjson实测能装).
 - **The bundled game:** an **unofficial, non-commercial fan remake** played in the browser: solo, or 1–4 player co-op (AI teammates can fill seats). Combat is simulated in each player's browser, so a low-power PC can host. The bundled upstream game is **0.2.4** (this repo's own version is **0.16.0**; the release tag spells both halves, `v0.16.0-0.2.4`): it adds stand-ins for operators you do not own (补位), a custom squad (自选编队), Chinese / English / Japanese / Korean / Traditional Chinese, configurable hotkeys and a ~22 MB lite bundle, plus a batch of rule fixes checked against the official data and PRTS; 0.2.2 makes an operator's potential and cultivation a per-operator, per-player runtime setting (full potential by default), adds the Japanese voice track and an on-device statistics page; **0.2.3** adds the six-star operator 克莱门莎 (three skills, two talents), the 黍「好时节」 and 乌尔比安「前路」 modules, a four-step interface text size, a per-operator dub language, add-to-home-screen, a pre-match reroll and resume-last-match, plus a batch of rule and interface fixes; **0.2.4** brings the official shared card pool and team-wide item stock (double for co-op, a few special items exempt; normal and advanced items take 1 and 2 shares, the shop display takes none, and consuming, destroying, selling or eliminating all return them), fixes the Raid reselect after a revive and lets Raid land on a normal deployable tile of an empty half in multiplayer boss / hidden-boss fights (#475), and corrects 克莱门莎's S2 splash, the damage sharing of 浊心斯卡蒂 with 坚守, 哈洛德 S2's elemental-injury check, the four adjacent tiles of 涤火杰西卡's shield, the family crest's first hit after stealth ends and 松果's per-deployment S2 growth, with the Japanese interface on the official client's wording — see [CHANGELOG.md](CHANGELOG.md). Download the all-in-one bundle from [Releases](../../releases/latest), install Node.js 22 or 24, then double-click `scripts\start-windows.bat` (Windows) or run `./scripts/start.sh` (macOS / Linux) and open <http://localhost:3000>. From source: `npm install && npm run setup && npm start` (setup downloads ~550 MB of art from public mirrors, the emotes and the how-to-play pages included; the official 3D board, some official HUD icons, two enemy models and 39 summon models are extracted from a local Arknights client — without one the game uses the 2D board and look-alike stand-ins, and a server can copy `public/assets/local/` and `data/local-assets.json` from the release bundle of the same version). Create a co-op room and share the 4-letter key or the `?room=KEY` link; on a LAN use the address printed at start, otherwise a virtual-LAN tool, a tunnel or a VPS — see [docs/DEPLOY.md](docs/DEPLOY.md).
 - **Run:** download the full bundle `Stronghold-Protocol-v<version>.zip` (~505 MB, all the art inside, the Chinese and Japanese operator voices included) from [Releases](../../releases/latest) — or the lite one, `…-lite.zip` (~22 MB), which downloads the art (~550 MB) on its first start; from 0.2.1 on, `…-update.zip` holds only the files changed since the earlier 0.2.x releases: stop the server, extract it over an existing 0.2.x folder and start again (the first start deletes the files the new version dropped and verifies the install) — install Node.js 22 or 24, then double-click `scripts\start-windows.bat` (Windows) or run `./scripts/start.sh` (macOS / Linux) and open <http://localhost:3000>. From source: `npm install && npm run setup && npm start` (setup downloads ~550 MB of art from public mirrors, the emotes and the how-to-play pages included; the official 3D board, some official HUD icons, two enemy models and 39 summon models are extracted from a local Arknights client — without one the game uses the 2D board and look-alike stand-ins (the summons show their avatars), and a server can copy `public/assets/local/` and `data/local-assets.json` from the full bundle of the same version).
 - **Languages:** Chinese (the default), English, 日本語, 한국어 and 繁體中文 — switch on the title screen or in Settings. Game texts come from the official clients; the Japanese, Korean and Traditional Chinese interface strings are machine translations (corrections welcome: [docs/I18N.md](docs/I18N.md)).
 - **Play with friends:** create a co-op room and share the 4-letter key or the `?room=KEY` link. On a LAN, use the address printed at start; otherwise use a virtual-LAN tool, a tunnel or a VPS — see [docs/DEPLOY.md](docs/DEPLOY.md).
+- **What does *not* work yet** (this part matters as much as the list above): `pack.json.behaviour` — declaring a rule switch — has a **working, guarded channel but an empty table**: `BEHAVIOUR_SWITCHES` is `Object.freeze({})`, so **any** declaration today is refused wholesale with `BEHAVIOUR_UNKNOWN_SWITCH`, because a switch is only ever added together with its engine-side implementation point. A pack **cannot** overwrite engine files (`data/**`, `server/sim/**`) or name arbitrary paths — that is deliberate, not pending. There is **no remote catalogue**: a client syncs only from the server it is connected to. The submission site accepts **only a `pack.json` at the zip root** (a wrapped zip gets HTTP 400, even though the engine's own installer takes both). Documentation-only packs are **not published** — they stay pending rather than being rejected. Browser end-to-end suites are off by default and **silently skip** without Chrome. And the game cannot run on serverless or static hosting. See [还不能做什么](#还不能做什么).
 - **Disclaimer:** not affiliated with or endorsed by Hypergryph or Yostar. All Arknights names, art, audio, text and data are © their respective owners and are **not** covered by this project's GPL licence. For study and personal non-commercial use only — no selling, paid distribution, paid servers or monetisation of any kind. Content will be removed on request of the rights holders. Provided "as is", without warranty.
 - **License:** code GPL-3.0-or-later ([LICENSE](LICENSE)); game assets excluded.
