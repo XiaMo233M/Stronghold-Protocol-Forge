@@ -109,6 +109,7 @@
 | [history/0.2.2.md](history/0.2.2.md) | §27 | 0.2.2 |
 | [history/0.2.3.md](history/0.2.3.md) | §30 | 0.2.3 |
 | [history/0.2.4.md](history/0.2.4.md) | §31 | 0.2.4 |
+| [history/0.2.5.md](history/0.2.5.md) | §32 | 0.2.5 |
 
 ### 更新记录的分卷
 

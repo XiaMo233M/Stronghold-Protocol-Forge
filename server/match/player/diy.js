@@ -30,7 +30,7 @@
 //     min(shopLevel + 1, 6): a tier-5 自选 piece can appear when the 调度中心 reaches 4, a tier-6 piece when it reaches
 //     5, one shop level before the ordinary shop. 卫戍协议/帮助 干员晋升 names that refresh and no second pool; the owner
 //     decided on 2026-10-12 that it includes 自选 of the newly reached tier. 0.2.0 had [ASSUMED] the shop-level gate
-//     for this refresh too (DESIGN §25); §30.23 reverses it. A piece is not guaranteed. Banned slots and `left <= 0`
+//     for this refresh too (DESIGN §25); §32.23 reverses it. A piece is not guaranteed. Banned slots and `left <= 0`
 //     stay out. Explicit-id offers do not use this draw.
 //   * random grants (diyStockEntries, 0.2.0 WE2 #9): an effect, reward or 机变 card that grants this player a random
 //     operator from the pool draws its stock too — 「自选干员放入后模拟中的补给池随机范围也将被相应扩大」 (bilibili), "调度中心

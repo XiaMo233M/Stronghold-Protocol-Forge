@@ -27,7 +27,7 @@
 //   * Merge: 3 normal copies (风丸 2) on board/hand/temp → 1 elite; equipment returns to the hand; a
 //     reward offer of 3 different free chess of tier min(level+1, 6) is queued (never one operator twice — user
 //     playtest #6 item 19; a short tier tops up from the tier below; the player's stocked 自选 of that tier joins,
-//     §30.23; pick 1, expires at prep end; an offer earned
+//     §32.23; pick 1, expires at prep end; an offer earned
 //     after the prep — SETTLE / Final Assault effects — is kept for the next prep). Where the elite goes (PRTS
 //     卫戍协议/帮助 "发送1名【精锐】状态的该干员至手牌区（若消耗已部署至作战区的干员，则发送至作战区对应位置）", user
 //     playtest #6 follow-up): when a consumed copy stood on the board, onto that copy's tile with its facing (of several,
