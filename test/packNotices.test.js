@@ -78,11 +78,14 @@ describe('引擎那一半：公告从更新记录生成', () => {
     assert.deepEqual(engineAnnouncements({ changelogPath: path.join(ROOT, 'nope.md') }), []);
   });
 
-  test('两种实测过的形状都要认：标题带 `-<上游>` 半边、以及正文写在小节标题下面', () => {
-    // 两处实测过的漏（合起来让玩家看到的公告最新一条停在 0.14.0，而当时发的就是 0.16.0）：
+  test('三种实测过的形状都要认：标题带 `-<上游>` 半边、正文写在小节标题下面、通篇没有小节', () => {
+    // 三处实测过的漏（合起来让玩家看到的公告最新一条停在 0.14.0，而当时发的就是 0.16.0）：
     // ① 正则原来要求版本后面直接跟空白 ⇒ `## 0.16.0-0.2.4 — …` 这类节全被跳过；
     // ② 摘要原来必须落在第一个 `###` 之前 ⇒ 「`##` 紧跟 `###`、正文在小节标题下面」的节取不到摘要，
-    //    整条被丢掉。`test/version.test.js` 早就认标题的那半边，这里跟它对齐。
+    //    整条被丢掉；
+    // ③ 原来还要求「至少一个小节」⇒ 通篇没有 `###` 的节（0.15.0–0.15.3）`sections` 是空的，整条被丢掉。
+    //   判据现在与客户端同一条（`public/js/ui/notices.js`：`version` + `summary` 就能展示）。
+    // `test/version.test.js` 早就认标题的那半边，这里跟它对齐。
     const file = path.join(tmpdir(), `sp-changelog-shapes-${process.pid}.md`);
     fs.writeFileSync(file, [
       '# 更新记录', '',
@@ -94,15 +97,25 @@ describe('引擎那一半：公告从更新记录生成', () => {
       '正文在第一个 `###` 之前。', '',
       '### 又一节', '',
       '- 另一条', '',
+      '## 9.9.7-0.2.4 — 2030-01-03', '',
+      '通篇没有小节，条目直接挂在标题下面。', '',
+      '* 一条直接挂在 ## 下的条目', '',
+      '## 9.9.6-0.2.4 — 2030-01-04', '',
+      '### 只有小节标题、没有正文',
+      '',
     ].join('\n'));
     try {
       const list = engineAnnouncements({ changelogPath: file });
-      assert.deepEqual(list.map((a) => a.version), ['9.9.9', '9.9.8'], '带 `-<上游>` 的两节都要认出来');
+      assert.deepEqual(list.map((a) => a.version), ['9.9.9', '9.9.8', '9.9.7'], '前三节都要认出来');
       assert.equal(list[0].summary, '正文写在小节标题下面。', '`###` 下面的第一段正文也算摘要');
       assert.deepEqual(list[0].sections[0].items, ['一条']);
       assert.equal(list[0].date, '2030-01-01');
       assert.equal(list[1].summary, '正文在第一个 `###` 之前。');
       assert.deepEqual(list[1].sections[0].items, ['另一条']);
+      assert.equal(list[2].summary, '通篇没有小节，条目直接挂在标题下面。', '没有 `###` 的节也发得出去');
+      assert.deepEqual(list[2].sections, [], '`##` 下的条目不属于任何小节，不替它编一个小节名');
+      // 连正文都没有的节（只有 `###`）仍然跳过 —— 它确实没有可展示的摘要，不拿标题行顶上
+      assert.equal(list.some((a) => a.version === '9.9.6'), false);
     } finally {
       fs.rmSync(file, { force: true });
     }

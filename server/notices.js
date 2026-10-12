@@ -39,12 +39,14 @@ function cleanText(value, max) {
  * 小节里的 `- ` 行是条目（续行按缩进并入上一条）。不认识的写法**跳过**而不是猜 —— 公告是展示用的，
  * 猜错比少一条难查得多。
  *
- * **两处实测过的漏**（2026-10-12 收，`test/packNotices.test.js` 各钉一条）：
+ * **三处实测过的漏**（2026-10-12 收，`test/packNotices.test.js` 逐条钉住）：
  * ① 发行 tag 会把上游版本挂在标题后面，一节可以写成 `## 0.16.0-0.2.4 — 2026-10-12`（本仓库 0.16.0 +
  *    上游 0.2.4）。原来只认 `## x.y.z — date`，这半边不认 —— 而 `test/version.test.js` 早就认了。
  * ② 「第一段正文」原来要求它落在**第一个 `###` 之前**；0.16.0 起有几节是「`##` 紧跟 `###`、正文写在小节
  *    标题下面」，那种节取不到摘要，`flushRelease` 就把整条丢掉。
- * 两处叠起来的结果：玩家看到的公告最新一条停在 0.14.0，而当时发的就是 0.16.0。
+ * ③ 原来还要求**至少一个小节**；0.15.0–0.15.3 那几节通篇没有 `###`（`##` + 正文 + `*` 条目），
+ *    于是 `sections` 是空的、整条被丢掉。判据改成与客户端同一条：有摘要就能展示。
+ * 三处叠起来的结果：玩家看到的公告最新一条停在 0.14.0，而当时发的就是 0.16.0。
  * @param {{ changelogPath: string, limit?: number }} opts
  * @returns {Array<{ version: string, date: string, summary: string, sections: Array<{ name: string, items: string[] }> }>}
  */
@@ -65,7 +67,11 @@ export function engineAnnouncements({ changelogPath, limit = NOTICE_LIMITS.annou
   const flushRelease = () => {
     flushSection();
     if (!cur) return;
-    if (cur.summary && cur.sections.length && out.length < limit) out.push(cur);
+    // 一条公告要有可展示的东西 = **摘要**（客户端 `public/js/ui/notices.js` 的同一条判据：`version` + `summary`
+    // 缺一就不画）。**不要求「至少一个小节」** —— 0.15.0–0.15.3 那几节通篇没有 `###`（`##` + 正文 + `*` 条目），
+    // 原来因为 `sections` 是空的被整条丢掉。这类节的条目直接挂在 `##` 下，不属于任何小节，所以
+    // `sections` 留空、公告只展示那一段摘要 —— 不替它编一个小节名（那是猜）。
+    if (cur.summary && out.length < limit) out.push(cur);
     cur = null;
   };
   for (const line of lines) {
