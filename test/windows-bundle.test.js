@@ -406,13 +406,18 @@ describe('make-windows-bundle.mjs: 工作区必须干净（清单来自 git ls-f
     }
   });
 
-  test('真的跑一次脚本：脏工作区必须在**动任何东西之前**就被拦下（✖ + 退出码 1）', async () => {
-    // 这一条在**本仓库上跑真脚本**：本仓库的 import 图（shared/ / server/ / tools/）与素材都不需要存在，
-    // 因为守卫是 main() 里**第一件**事 —— 脏的时候它连 out 目录都不该建出来就退 1。把脚本拷到别处跑
-    // 做不到（import 解析不到），所以这里直接对着仓库跑，并断言「产物目录没被建出来」这一条不变式。
+  test('真的跑一次脚本：本仓库脏时命令行必须 ✖ + 退出码 1，干净时才明说「工作区干净」', async () => {
+    // 对着**本仓库**跑一次真脚本（不是拷贝到别处：脚本的 import 指向仓库里的 shared/ / server/ / tools/，
+    // 拷出去就 import 不到，那测的就不是这个脚本）。两个方向都断言，所以与仓库此刻干不干净无关：
+    //   · 脏 ⇒ 守卫是第一件事，必须 ✖ 且退出码 1（`--help` 除外）；
+    //   · 干净 ⇒ 不许出现「拒绝出包」，而是明说一句、继续往下。
+    // ⚠️ 不在这里断言「产物目录没被建出来」：干净那条路会**合法地**继续跑下去（随后在缺素材或 `--out`
+    // 落在仓库里那一步失败），那时 `out` 可能已经被建出来 —— 拿它当断言只会在干净仓库上变红（本刀先写成
+    // 那样，全量跑时真红了一次）。「守卫在产出之前拦下」由 `assertCleanWorktree` 的返回值与 main() 里
+    // 守卫在最先这一条保证，不靠 `out` 存不存在来反推。
     const out = path.join(os.tmpdir(), `sp-guardrun-${process.pid}-${Date.now()}`);
     try {
-      const dirty = fs.existsSync(path.join(ROOT, '.git')) && childProcess
+      const isDirty = fs.existsSync(path.join(ROOT, '.git')) && childProcess
         .spawnSync('git', ['-C', ROOT, 'status', '--porcelain'], { encoding: 'utf8' })
         .stdout.trim().length > 0;
       const r = childProcess.spawnSync(
@@ -421,15 +426,13 @@ describe('make-windows-bundle.mjs: 工作区必须干净（清单来自 git ls-f
         { cwd: ROOT, encoding: 'utf8' },
       );
       const all = `${r.stdout}${r.stderr}`;
-      if (dirty) {
-        assert.equal(r.status, 1, '本仓库当前是脏的 ⇒ 必须非零退出');
+      if (isDirty) {
+        assert.equal(r.status, 1, '本仓库当前是脏的 ⇒ 守卫必须非零退出');
         assert.match(all, /拒绝出包/, '要有一句明确的拒绝');
       } else {
-        // 干净时不该出现「拒绝出包」，而是明说一句、继续往下（随后会因为缺素材 / --out 落在仓库里而失败）。
         assert.doesNotMatch(all, /拒绝出包/, '干净的工作区不许报「拒绝出包」');
         assert.match(all, /工作区干净/, '干净时要明确说一句');
       }
-      assert.equal(fs.existsSync(out), false, '不管哪条路，守卫都不该让产物目录先被建出来');
     } finally {
       await fsp.rm(out, { recursive: true, force: true });
     }

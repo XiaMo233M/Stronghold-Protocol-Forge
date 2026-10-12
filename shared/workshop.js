@@ -142,8 +142,10 @@ export const PACK_FIELDS = Object.freeze([
   // 数值覆盖通道 —— 它只能声明轴的闭枚举里有的选项名，值由引擎自己给（`shared/variants.js`）。
   'variants',
   // 行为开关声明（DESIGN §28.43）：这个包要哪一格开关、哪一档。**不是**贡献项，也**不是**一条数值 / 文件覆盖
-  // 通道 —— 它只能声明开关的闭枚举里有的选项名，**动作由引擎构造**（`shared/behaviour.js`）。今天那张表是空的，
-  // 所以任何一条声明都被 `BEHAVIOUR_UNKNOWN_SWITCH` 点名整包拒（这正是本刀的交付物：通道真的通、且响）。
+  // 通道 —— 它只能声明开关的闭枚举里有的选项名，**动作由引擎构造**（`shared/behaviour.js`）。那张表今天有
+  // **4 格**（`shopBias` / `prepLoadout` / `morphPairing` / `unequip`，每格与它的引擎实现点同刀落地），
+  // 所以声明表里没有的开关或选项仍被 `BEHAVIOUR_UNKNOWN_SWITCH` / `BEHAVIOUR_UNKNOWN_OPTION` 点名整包拒
+  // —— 通道真的通、且响，这正是这一格要守的东西。
   'behaviour',
   // 中间层四组能力声明（DESIGN §28.13）
   'assets', 'client', 'server', 'routes',
