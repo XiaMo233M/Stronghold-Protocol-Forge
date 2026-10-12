@@ -2503,6 +2503,13 @@ JSON 可序列化值**的回调。
   表里的 `/mods` 按 `:96` 的 `p === prefix || p.startsWith(\`${prefix}/\`)` 比对，`/mod/<包id>/x` **不**命中它
   （`/mods` 与 `/mod/` 是两个不同的命名空间）—— 所以包的自留地正是 `/mod/<包id>/…`。
 
+* **作者侧校验器读的就是这一张表**：`tools/workshop-validate.mjs` 对每条 `routes` 声明调 `coreRouteShadow`，
+  mount 表由 `serveDirs({})` + `server/sim` 经 `coreMounts(...)` 造出 —— 与 `server/index.js` 在服务期用的那一份
+  同源。三档判词与服务器逐字一致：`exact` / `file` ⇒ `ROUTE_CLASHES_CORE`（**error**，整轮非 0 退出：服务器会把这条
+  声明丢掉，校验器不许还给作者一个 VALID）；`reserved` ⇒ `ROUTE_IN_ENGINE_NAMESPACE`（**warning**，今天照常服务，
+  只预告将来让位）；`null` ⇒ 不吭声。**校验器里不许再抄一份保留名单**（`test/workshopValidateRoutes.test.js`
+  有一条源码级断言钉住这一点，另有一条把三档判词与 `coreRouteShadow` 的返回值逐条对照）。
+
 ### 28.36 作者自备 CDN 的语音素材（`{ url, sha256, file }`）
 
 **业主口径（2026-10-11）：「分发官方语音不行，但应该留出下载作者语音素材的 CDN 链接支持」。** 所以这一格做的事
