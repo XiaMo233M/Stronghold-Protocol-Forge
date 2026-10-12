@@ -997,8 +997,9 @@ test('荒芜拉普兰德: 叙拉古的荣幸 +5 initial SP on every deployment; 
   // (S3 may be running — its drones do not normal-attack): wait for a normal attack after stage 3
   assert.ok(h.runUntil(() => h.dmg.some((d) => d.src === u.id && d.attack && d.tgt === e.id && d.t > ts), 60));
   const last = h.dmg.filter((d) => d.src === u.id && d.attack && d.tgt === e.id).at(-1);
-  const same = h.dmg.filter((d) => d.src === u.id && d.attack && d.t === last.t);
-  assert.equal(same.length, 2, 'two drone hits per attack');
+  const same = h.dmg.filter((d) => d.src === u.id && d.t === last.t);
+  assert.equal(same.filter((d) => d.attack).length, 1, 'one body hit per attack');
+  assert.equal(same.filter((d) => d.tags.includes('funnel')).length, 2, 'two drone additions per attack');
 });
 
 test('缪尔赛思: 流形 copies stats/range/damage type but not the attack shape (锏 2-hit); a capped melee copy steals nothing more', () => {
