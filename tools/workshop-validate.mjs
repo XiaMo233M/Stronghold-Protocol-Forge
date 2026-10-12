@@ -34,6 +34,8 @@ import { parseSkel } from './assets/skel.mjs';
 import { roleAnimationNames } from './assets/anim-roles.mjs';
 import { GameData } from '../server/match/gamedata.js';
 import { toDataSource, isShopItem } from '../server/sim/simdata.js';
+import { coreMounts, coreRouteShadow } from '../server/http/routeMount.js';
+import { serveDirs } from '../server/http/config.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATA_DIR = path.join(ROOT, 'data');
@@ -224,6 +226,46 @@ async function main() {
       issues.push(...pairIssues(judged, file));
     }
     report.packs.push({ pack: pack.id, name: pack.name, files: Object.keys(pack.files), issues });
+  }
+
+  // ---- the static routes channel (docs/WORKSHOP.md §1.9.2, DESIGN §28.35). The shape layer already refused anything
+  // that is not "an absolute path + a pack-relative .json"; what only the FILESYSTEM can answer is whether the declared
+  // path is one **this engine already serves**. The server decides that at boot with `coreRouteShadow`
+  // (server/http/workshop.js) and drops just that declaration, so a validator staying silent would hand the author a
+  // green VALID for a route that never answers. Same rule, same table, no second copy: this tool runs inside an engine
+  // tree, so it reads the same four core mounts the server builds.
+  const dirs = serveDirs({});
+  const routeMounts = coreMounts({ ...dirs, simDir: path.join(ROOT, 'server', 'sim') });
+  for (const pack of packs) {
+    const routes = Array.isArray(pack.routes) ? pack.routes : [];
+    if (!routes.length) continue;
+    const entry = report.packs.find((p) => p.pack === pack.id);
+    if (!entry) continue;
+    for (const route of routes) {
+      if (!route || typeof route.path !== 'string') continue;
+      const shadow = coreRouteShadow(route.path, { mount: routeMounts });
+      if (!shadow) continue;
+      if (shadow.kind === 'exact' || shadow.kind === 'file') {
+        entry.issues.push({
+          field: 'routes',
+          code: 'ROUTE_CLASHES_CORE',
+          severity: 'error',
+          message: shadow.kind === 'exact'
+            ? `path ${route.path} is an endpoint the engine serves itself — the server drops this declaration at boot (DESIGN §28.35)`
+            : `path ${route.path} is already served by the core mount "${shadow.mount}" (${shadow.file}) — the server drops this declaration at boot (DESIGN §28.35)`,
+          hint: 'pick a path nobody owns, ship the file through pack.json.assets, or compute it at runtime with host.route() under "/mod/<pack id>/…" (§28.35)',
+        });
+      } else {
+        // `reserved` = inside an engine namespace but no core file occupies it today. The server serves it and only
+        // pre-announces the future displacement, so the validator must not be stricter than the server.
+        entry.issues.push({
+          field: 'routes',
+          code: 'ROUTE_IN_ENGINE_NAMESPACE',
+          severity: 'warning',
+          message: `path ${route.path} sits inside the engine's "${shadow.prefix}" namespace — it serves today, and yields automatically if a core file with that name ever appears (DESIGN §28.35)`,
+        });
+      }
+    }
   }
 
   // ---- the voice pack layer (docs/WORKSHOP.md §1.4). The shape is validated by the loader already (slots, char ids,
