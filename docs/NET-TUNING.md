@@ -24,7 +24,7 @@
 | --- | --- | --- | --- | --- | --- |
 | `DELAYS.PUBLIC_THROTTLE`（`m.public` 节流间隔） | `100`（ms，即 ≤ 10 帧/s） | `server/match/match/common.js:22` | `100`（上游同名同值，`v0.2.4:server/match/match/common.js` 的 `DELAYS` 块） | 帧更稀、带宽更低、界面更钝 | 帧更密、更实时，密集变化时带宽回升；到 0/1 等于取消节流，退回「每次变化发」 |
 | `PUBLIC_FULL_EVERY`（增量帧保活：多少个连续增量帧后强制全量） | `32` | `server/match/match/common.js:40` | **上游无此参数** | 自愈窗口变长（32→64 时约 3.2 s→6.4 s），全量帧占比下降 | 自愈窗口变短，全量帧占比上升；大房间带宽回升 |
-| `PUBLIC_FULL_ASK_MS`（客户端 `g.publicFull` 的最小间隔） | `2000`（ms） | `public/js/main.js:138`（用在 `:369`） | **上游无此参数**（上游客户端 `net.on('m.public', …)` 只有一行 `store.patch`） | 客户端发现状态错后更晚才修 | 客户端更急着要全量；调得太小会把「要全量」放大成「每帧都要全量」 |
+| `PUBLIC_FULL_ASK_MS`（客户端 `g.publicFull` 的最小间隔） | `2000`（ms） | `public/js/main.js:150`（用在 `:379`） | **上游无此参数**（上游客户端 `net.on('m.public', …)` 只有一行 `store.patch`） | 客户端发现状态错后更晚才修 | 客户端更急着要全量；调得太小会把「要全量」放大成「每帧都要全量」 |
 | `PROTOCOL_VERSION`（线上帧格式号 / 陈旧页面闸门） | `2` | `shared/constants.js:16` | `1`（`v0.2.3`、`v0.2.4` 两 tag 都是 `export const PROTOCOL_VERSION = 1;`） | 见 §4：只有「帧的形状变了、旧页面会读错」才顶 | 不要「改回去」；降回 1 等于放一台没有合并逻辑的旧页面进来读错名册 |
 | 增量 diff 的字段范围 `SCALAR_KEYS`（顶层哪些键参与 diff） | 27 个键：`phase, round, lastRound, deadline, modeId, difficulty, stageId, setupRevision, rerollVote, factions, disabledBonds, drawnDisabledBonds, bannedChess, bossId, hiddenBossId, bossRound, hiddenRound, spRound, combatMode, paused, teamLp, overtimeAt, bossHp, draft, sp, unite, uniteResult` | `server/viewsDelta.js:55-60` | **上游无此参数**（上游没有 diff，每次都发整份 `publicView()`） | 新增顶层字段若不登记，它的变化**不会**进入增量帧 | 移除某项后，该项变化只在全量帧时才更新（客户端会长期读到旧值） |
 | 行内字段的 diff | 无白名单：按 `Object.keys(row)` 逐字段比 | `server/viewsDelta.js:249-285`（玩家行）、`:297-327`（战场条目） | **上游无此参数** | — | — |
@@ -100,7 +100,7 @@ set "SP_MAX_SEATS=40" && npm start
 
 - **服务端保活（无需客户端配合）**：每 32 个连续增量帧后，下一帧是全量。
 - **客户端自救**：`applyPublic` 返回 `ok:false`（没有基线，或帧不可合并）时，客户端**不半途应用**
-  （`public/js/main.js:365-370`），而是发 `g.publicFull`；服务端 `resendPublic` 立刻单播一份全量，
+  （`public/js/main.js:379-382`），而是发 `g.publicFull`；服务端 `resendPublic` 立刻单播一份全量，
   并把**整个房间**的下一帧也置为全量（`server/match/match/platform.js:135-146`，配合 `markMembershipChanged`）。
 
 **最坏窗口的算法**（不是拍脑袋，而是把上面两条路的边界相加）：
@@ -167,7 +167,7 @@ W_worst     = max(W_keepalive, W_ask) + RTT ≈ 3.2 s + RTT
   **改法与代价**：想更松就把 `g.publicFull` 从 `server/net.js:83` 的集合里拿掉（它退回普通桶 40/s），
   或只把 `heavyPerSec` / `heavyBurst` 调大（`startServer()` 选项可覆盖，见 §2.2 末）；
   想更紧就调小这两个桶——但**不能再小到正常客户端之下**：客户端自己的闸门 `PUBLIC_FULL_ASK_MS = 2000`
-  （`public/js/main.js:138`、用在 `:369`）把请求压在 **≤ 0.5 次/s**，桶的 2/s 有 **4 倍余量**，
+  （`public/js/main.js:150`、用在 `:379`）把请求压在 **≤ 0.5 次/s**，桶的 2/s 有 **4 倍余量**，
   所以正常掉线的玩家照样要得到全量，被限的是「每帧都要全量」的那种失控节奏（后果见下一条）。
 - **不要删 `g.publicFull` 的意图。** 删了客户端自救就断了，只剩保活一条路（窗口 3.2 s 起）。
   单纯新增这个意图**不需要顶号**（旧客户端从不发它）。
@@ -190,7 +190,7 @@ W_worst     = max(W_keepalive, W_ask) + RTT ≈ 3.2 s + RTT
 | 密集变化时带宽被打满 | `DELAYS.PUBLIC_THROTTLE`（`server/match/match/common.js:22`） | 100 → 150/200 | 同时重算保活窗口 = 32 × 新值 |
 | 大房间仍嫌全量帧太多 | `PUBLIC_FULL_EVERY`（`common.js:40`） | 32 → 64 | 自愈窗口 3.2 s → 6.4 s |
 | 玩家偶尔看到错的名册/LP，恢复太慢 | `PUBLIC_FULL_EVERY` | 32 → 16 | 全量帧占比上升，带宽回升 |
-| 断线重连后界面卡在旧状态 | 先查客户端 `g.publicFull` 是否发得出去（`public/js/main.js:369`），再看服务端 `resendPublic`（`platform.js:135`） | — | 若两者都在，问题多半在 `canMerge` 判据，不在参数 |
+| 断线重连后界面卡在旧状态 | 先查客户端 `g.publicFull` 是否发得出去（`public/js/main.js:379`），再看服务端 `resendPublic`（`platform.js:135`） | — | 若两者都在，问题多半在 `canMerge` 判据，不在参数 |
 | 服务端日志出现「刷新页面」式的拒绝 | `PROTOCOL_VERSION`（`shared/constants.js:16`）与前端构建号是否一致 | — | 这是顶号的正常后果；部署时前后端必须整包一起换 |
 | 单人/测试环境想更快看到效果 | `opts.timerScale`（`server/match/Match.js:298`） | 调小 | 它**不会**改变 `PUBLIC_THROTTLE`（该值不经 `scaled()`），只会让阶段推进更快 |
 | 想限定某个连接的调用频率 | `ratePerSec`/`rateBurst`、`heavyPerSec`/`heavyBurst`（`server/net.js:50-51`、`:61-62`） | 按需 | 通用网络层，与增量帧本身无关；但 `g.publicFull` **走重负载桶**（在 `HEAVY_TYPES` 里，`server/net.js:83`），不再走普通桶 |

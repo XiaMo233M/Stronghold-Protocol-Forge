@@ -122,7 +122,7 @@ matters and is the answer for the third file the ruling names:
   every engine change would change every pack's hash and no pack could prove it was the same pack as yesterday. So: the
   hash covers a pack's own bytes; the **engine** half of the identity is `api` (§28.5). One consequence has to be
   designed for rather than discovered later: a loadout pick is validated against the **merged** data
-  (`shared/protocol.js:149` `checkLoadout`, `:180` `resolveLoadout`), and an id that exists on the server can be an
+  (`shared/protocol.js:235` `checkLoadout`, `:266` `resolveLoadout`), and an id that exists on the server can be an
   unknown id in a client that has a different pack set — where `lookup` returns `null` (`server/data.js:156-159`) and
   nothing throws. **Identity must therefore be established at the handshake, before any loadout is exchanged**, and the
   client must refuse to resolve a loadout at all until it has the server's digest.
@@ -2245,8 +2245,8 @@ node --test test/modSurface.test.js
 
 | 面板读得到的 | 既有 S2C 帧 | 帧里的哪一格 | 粒度 |
 |---|---|---|---|
-| **每人总伤害** | `m.result`（`shared/protocol.js:758`） | `players[].stats.dmgDealt`（同处还有 `bossDamage` / `healingDone` / `kills` / `leaks` / `perfectRounds`；`server/match/results.js:156-161` 组装，`ui/stats.js` 与 `screens/result.js` 的战绩页读的就是它） | 整场**结算时**一次，按玩家 |
-| **实时领袖伤害** | `b.pool`（`shared/protocol.js:764`） | `acked[fieldId]` = 那一场累计计入的领袖伤害（`server/match/match/bossRounds.js:381` `_broadcastPool`「to everyone」，≤ 4 Hz） | 首领 / 隐藏回合，按**场**，≤ 4 Hz |
+| **每人总伤害** | `m.result`（`shared/protocol.js:137`） | `players[].stats.dmgDealt`（同处还有 `bossDamage` / `healingDone` / `kills` / `leaks` / `perfectRounds`；`server/match/results.js:156-161` 组装，`ui/stats.js` 与 `screens/result.js` 的战绩页读的就是它） | 整场**结算时**一次，按玩家 |
+| **实时领袖伤害** | `b.pool`（`shared/protocol.js:786`） | `acked[fieldId]` = 那一场累计计入的领袖伤害（`server/match/match/bossRounds.js:381` `_broadcastPool`「to everyone」，≤ 4 Hz） | 首领 / 隐藏回合，按**场**，≤ 4 Hz |
 | 共享池血量 / 队伍 LP | 同一条 `b.pool` | `hp` / `max` / `teamLp` | 同上 |
 
 所以「总伤看板」是一个**今天就能发**的包：订阅 `m.result` 排个序就够了。
@@ -2270,7 +2270,7 @@ export function mount(ctx) {
   （`server/match/fields.js:61` / `:873`，`Match.js` 把它累进 `ps.stats.unitStats`），结算帧里**只有**由它选出来的
   一个 **mvp id**（`server/match/results.js:154` `mvp: mvpOf(ps, lineup)`）—— `m.result` 的每个玩家条目里
   **没有** `unitStats`。
-* **唯一带 `dmg` 元组的 S2C 是 `b.ev`**（`shared/protocol.js:766`，元组种类 `EV.DMG` 在同文件 `:799`），
+* **唯一带 `dmg` 元组的 S2C 是 `b.ev`**（`shared/protocol.js:788`，元组种类 `EV.DMG` 在同文件 `:823`），
   而那一行自己的注释写着 `server-run combat streaming (legacy / SP_COMBAT=server only)`。
 * **默认（客户端跑战斗）时那些元组不进 `net`。** 权威客户端的战斗在本机跑，`b.snap` / `b.ev` 走
   `public/js/battle/runner.js:282` 的 `emit` —— 那是 runner **自己的** listener map（`public/js/screens/game.js:601` 用
@@ -2325,7 +2325,7 @@ export function mount(ctx) {
   发出去的那一份。`byChar[charId] ?? global` 就是播放时用的那个语言 —— 最后一档「默认配音」被
   `sanitizeSettings` 保证不会露出来（store 里的 `voiceLang` 一定是词表成员）。
 * **第二个读者**：形状不是 `char_…` 的键、值不在 `VOICE_LANGS` 里的，都不进快照 —— 面板画出来的不该与
-  `public/js/audio.js:1207` / `:1214` 播放的不一致。
+  `public/js/audio.js:1020` / `:1026` 播放的不一致。
 * **拿不到就是 `null`**（没注入设置库 / 不成形 / `get()` 抛）：不抛、不编造，面板画空态。
 * **不进 `me.snapshot()`**：那三格来自**一次** `store.get()`（「一次取全」才不撕裂），这一格来自另一个 store。
 
@@ -2335,7 +2335,7 @@ export function mount(ctx) {
 
 * **只此一格**：只写 `voiceLangByChar` 的**一个键**，其它设置（音量 / 静音 / 画质 / 文字大小 / 快捷键 /
   工坊外观开关）一个字节都不动；
-* **只影响本地**：配音在**播放时**解析（`public/js/audio.js:1207` 的 `voiceLangOf` → `ui/gameLogic/settings.js
+* **只影响本地**：配音在**播放时**解析（`public/js/audio.js:1274` 的 `voiceLangOf` → `ui/gameLogic/settings.js
   voiceLangFor`：覆盖 → 全局 → 默认），整个写口是纯 localStorage 偏好 —— 不发帧、不落对局、改不了任何人的战果；
 * **闭枚举**：值只收 `VOICE_LANGS` 的成员，或 `''` / `null`（= 清掉这一格，回到跟随全局；与
   `public/js/ui/detailPanel.js:519` 的「跟随默认」同一个含义）。`VOICE_LANGS` 本身一个字也不许改；
