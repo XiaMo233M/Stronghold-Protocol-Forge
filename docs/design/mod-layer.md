@@ -360,7 +360,7 @@ right (it is a memory and wire budget) so the design keeps it and adds what the 
 when the detail log is truncated. The counters are what reaches the author (§28.7).
 
 **Time budget.** There is no timeout that can interrupt a handler: a tick is one synchronous call
-(`server/sim/battle/lifecycle.js:61`), so a loop in a pack hangs a battle in the browser and, for a server-run field,
+(`server/sim/battle/lifecycle.js:70`), so a loop in a pack hangs a battle in the browser and, for a server-run field,
 a scheduler callback. The design does not pretend to add preemption (that is a runtime change, not a middle-layer one).
 What it does is make the budget visible and enforceable at load: a pack's verification run (§28.6) measures the wall
 clock of the fixed scenario list with and without the pack, and a `combat: false` pack whose cost exceeds a declared
@@ -779,7 +779,7 @@ someone runs it on a machine with Chrome this remains the standing gap recorded 
 **The defect, stated as the code states it.** §28.12 closed the kit *import* surface. The kit **key** surface was still
 one-sided: `server/sim/content/index.js setupUnitKit()` resolves an operator's kit through `kitOf()` (keyed by
 `def.charId` for a 补位 / 自选 piece, else `def.baseId` / `def.id`), and a **summon's** kit through a second, entirely
-separate table — `tokens.kits?.[def.id]` (`server/sim/content/tokens.js:1622` builds it from `RAW_KITS`, one entry per official token).
+separate table — `tokens.kits?.[def.id]` (`server/sim/content/tokens.js:1624` builds it from `RAW_KITS`, one entry per official token).
 That table is the engine's: a pack can ship `tokens.json` records, but it cannot put behaviour behind them. The
 consequence is the worst kind — a pack's summon has data and no behaviour layer, and **nothing reports it**.
 
@@ -2246,7 +2246,7 @@ node --test test/modSurface.test.js
 | 面板读得到的 | 既有 S2C 帧 | 帧里的哪一格 | 粒度 |
 |---|---|---|---|
 | **每人总伤害** | `m.result`（`shared/protocol.js:758`） | `players[].stats.dmgDealt`（同处还有 `bossDamage` / `healingDone` / `kills` / `leaks` / `perfectRounds`；`server/match/results.js:156-161` 组装，`ui/stats.js` 与 `screens/result.js` 的战绩页读的就是它） | 整场**结算时**一次，按玩家 |
-| **实时领袖伤害** | `b.pool`（`shared/protocol.js:764`） | `acked[fieldId]` = 那一场累计计入的领袖伤害（`server/match/match/bossRounds.js:381` `_broadcastPool`「to everyone」，≤ 4 Hz） | 首领 / 隐藏回合，按**场**，≤ 4 Hz |
+| **实时领袖伤害** | `b.pool`（`shared/protocol.js:764`） | `acked[fieldId]` = 那一场累计计入的领袖伤害（`server/match/match/bossRounds.js:383` `_broadcastPool`「to everyone」，≤ 4 Hz） | 首领 / 隐藏回合，按**场**，≤ 4 Hz |
 | 共享池血量 / 队伍 LP | 同一条 `b.pool` | `hp` / `max` / `teamLp` | 同上 |
 
 所以「总伤看板」是一个**今天就能发**的包：订阅 `m.result` 排个序就够了。
@@ -2577,8 +2577,8 @@ JSON 可序列化值**的回调。
 上**（`m.result` 报的是服务端按 `_perPlayer` 累出来的数）—— 那正是「面板可以画错、但不能算错」要消灭的东西。
 所以这一格只能由引擎给，而且给的是**同一本账**。
 
-**这一格不是新账，是一个读者。** 伤害早在模拟里逐次命中就记好了：`server/sim/damage.js:370` 写
-`source.stats.dmg`，`:371` 写 `battle._perPlayer[ownerId].damageDealt`，`:352` 写 `bossDamage`（单位那本账在
+**这一格不是新账，是一个读者。** 伤害早在模拟里逐次命中就记好了：`server/sim/damage.js:424` 写
+`source.stats.dmg`，`:425` 写 `battle._perPlayer[ownerId].damageDealt`，`:406` 写 `bossDamage`（单位那本账在
 `server/sim/units.js:97` 初始化）。`battleRunner.damage()`（`public/js/battle/runner.js`）只做一件事：**把这些
 已经在那儿的数字按面板看得懂的形状抄出来**。
 

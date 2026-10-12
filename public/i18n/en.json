@@ -1333,5 +1333,9 @@
   "本房间人数上限": "Player seats in this room",
   "服务器允许最多 {max} 人；本同盟开 {value} 张座位卡": "This server allows up to {max} players; this Alliance opens {value} seats",
   "不能小于同盟内现有人数（含 AI 队友）": "Cannot be lower than the players already in this Alliance (AI teammates included)",
-  "新的人数上限不能小于同盟内现有人数（含 AI 队友）": "The new seat limit cannot be lower than the players already in this Alliance (AI teammates included)"
+  "新的人数上限不能小于同盟内现有人数（含 AI 队友）": "The new seat limit cannot be lower than the players already in this Alliance (AI teammates included)",
+  "项目仓库": "Repository",
+  "官方伤害数字": "Official Damage Numbers",
+  "只显示达到官方暴击条件的红色数字。关闭时仍显示每一次命中。": "Show only red numbers that meet the official crit rule. While off, every hit still shows a number.",
+  "正在刷新…": "Refreshing…"
 }

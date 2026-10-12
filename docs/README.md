@@ -12,7 +12,7 @@
 | 顺序 | 文件 | 它回答什么 |
 |---|---|---|
 | 1 | [AGENTS.md](../AGENTS.md) | 硬规则、怎么验、提交与 PR 要求 |
-| 2 | [DESIGN.md](DESIGN.md) | **设计的唯一真相**：§0–§31 各自住在哪个文件 |
+| 2 | [DESIGN.md](DESIGN.md) | **设计的唯一真相**：§0–§32 各自住在哪个文件 |
 | 3 | [ARCHITECTURE.md](ARCHITECTURE.md) | 代码地图：东西在哪、数据怎么流、常见改动从哪起手 |
 
 > `DESIGN.md` 与 `docs/research/` 冲突时以 `DESIGN.md` 为准；`DESIGN.md` 没说的看 research；
@@ -109,6 +109,7 @@
 | [history/0.2.2.md](history/0.2.2.md) | §27 | 0.2.2 |
 | [history/0.2.3.md](history/0.2.3.md) | §30 | 0.2.3 |
 | [history/0.2.4.md](history/0.2.4.md) | §31 | 0.2.4 |
+| [history/0.2.5.md](history/0.2.5.md) | §32 | 0.2.5 |
 
 ### 更新记录的分卷
 

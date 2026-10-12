@@ -352,6 +352,8 @@ export function SettingsModal({ open, onClose }) {
       <p class="set-hint">${t('工坊外观由已加载的包提供，缺哪一套时回落原版立绘。')}</p>
       <${Toggle} label=${t('工坊素材源')} micro="WORKSHOP LOAD SOURCES" value=${s.workshopSources} onChange=${(v) => updateSettings({ workshopSources: v })} />
       <p class="set-hint">${t('工坊素材源由已加载的包声明；关掉后一律从包内取。')}</p>
+      <${Toggle} label=${t('官方伤害数字')} micro="OFFICIAL NUMBERS" value=${s.officialDamageNumbers} onChange=${(v) => updateSettings({ officialDamageNumbers: v })} />
+      <p class="set-hint">${t('只显示达到官方暴击条件的红色数字。关闭时仍显示每一次命中。')}</p>
       <div class="set-row">
         <span class="set-row__label">${t('画面质量')}<${MicroLabel}>QUALITY<//></span>
         <div class="set-seg" role="radiogroup">
