@@ -103,6 +103,10 @@ export function loadData(dir = DATA_DIR, { log = console, expected = DATA_FILES,
       for (const e of report.errors) log.warn?.(`[workshop] ${e.pack}: ${e.reason}`);
       // 干员没有模型 = 试玩里画成一张头像贴图（游戏自己不会报错，所以这行日志往往是唯一的线索）
       for (const l of report.looks || []) log.warn?.(`[workshop] ${l.pack}: ${l.reason}`);
+      // 特质授予的盟约写歪了 / 指向不存在的盟约（`trait.grantsBonds`，DESIGN §28.49）：与 `looks` 分开的一条
+      // **只读**点名通道。这一格没有它就会安静地什么都不做 —— 而「装了但没反应」正是这一层最坏的那种失败。
+      // 口径是**不拒包**（一条 typo 不该让整包装不上），所以这里只喊，不改数据。
+      for (const g of report.traitGrants || []) log.warn?.(`[workshop] ${g.pack}: ${g.code}: ${g.reason}`);
     }
   }
   return deepFreeze(out);

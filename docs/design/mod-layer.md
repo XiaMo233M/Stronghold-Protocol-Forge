@@ -3323,3 +3323,63 @@ Tests: `test/httpLanes.test.js` (9) — every reserved URL proven unclaimable fr
 server**: a lane answers its subtree including POST, `POST /healthz` is still 405, an unclaimed path still reaches the
 static handler, and a throwing lane answers a named 500 without reaching the game.
 
+### 28.49 `trait.grantsBonds`：把「特质 → 盟约成员资格」写成数据
+
+**业主原话**：「我们的 forge 能不能做出游戏内的『特质』效果，即一般是用来**叠加盟约层数**的固有天赋」。
+
+**这一格是什么。** 一条 `chess.json` 记录可以在它的 `trait` 对象上写一格 `"grantsBonds": ["<bondId>", …]`：
+**带这条特质的棋子，视为那些盟约的成员**。成员资格就是 `server/match/bondsMeta.js` 数的那一份（`rawCount` 按
+`countMode` 数**去重 baseId 集合**，`tierFor` 按 `thresholds` 升序累加），所以 `grantsBonds` 里写一个盟约 ⇒
+count +1 ⇒ **层数自然上去**。这是一条**纯数据**通道：不需要模块、不需要 `server.meta`、不需要一行脚本 ——
+一个不懂代码的作者也能落这条天赋。
+
+**为什么是「加一格记录字段」而不是「加一条 `behaviour` 开关」。** `behaviour`（§28.43）是**安装器**：选项由引擎
+写死、包只能声明「要哪一档」。这里要的是「**记录自己**说它授哪几个盟约」—— 那是**内容**（与记录自己的 `bonds`、
+与装备的 `giveBondId` 同类），所以它落在**记录**上、落在 A 层，且**不占** `behaviour` 表。
+
+**一处判据、三处同源（本格真正的价值）。** 成员资格有三个读取点：prep 的 `bondsMeta.pieceBonds`、战斗里的
+`support/index.js unitBonds`、客户端的 `gameLogic/bonds.js`。在 §28.43.1 之前，三处**各自**写了一遍「自己的
+`bonds` + 装备授予」的合并循环；那正是这条规则历史上最容易分叉的地方（一份改了、另两份没改 ⇒「服务端数了、
+卡片没显示」）。本格把两件事都收进 `shared/morph.js`：
+
+* `grantedBondsByTrait(trait, { hasBond })` —— **这一格唯一的判据**（形状、去重、顺序、可选的存在性过滤）；
+* `memberBonds(own, { trait, recs, morphed, hasBond })` —— **成员资格的合并本体**（自己的盟约 ∪ 装备授予 ∪
+  特质授予）。三处读取点现在各写一行 `memberBonds`，**合并循环只剩一份**
+  （`test/morphPairing.test.js` 的源码级断言随之收紧为锚 `memberBonds`）。
+
+客户端的成员资格有**两个**读者 —— 卡片上的盟约 chips（`pieceBondIds`）与盟约弹窗的成员行（`bondMembers` 的授予
+判据）。两处都补上了特质那条腿：漏掉后者会得到「服务端数了他、弹窗名单里没有他」。
+
+**一个必须说清的读法。** 特质在 sim 里有**两个**字段：`unit.def.trait` 是 `simdata.js` 投影出来的 **trait 文本
+字符串**（`rec.trait.desc`），`unit.def.raw.trait` 才是**记录**。子键只能挂在后者上 —— 读错了不会报错，只会静默地
+什么都不授予。
+
+**写歪了会怎样：点名，但不拒包。** `shared/workshop.js` 的 `unknownOverrideKeys` 只比**顶层**键
+（`Object.keys`），所以往 `trait` 里加子键**天然通得过装载器**：一个拼错的盟约 id、或一个写歪的形状，会安静地
+变成「这条特质什么都不授予」—— 正是 `docs/WORKSHOP.md` §1.1 记着的那类失败（`content` 没声明 `chess` ⇒ 编辑器里
+在、磁盘里在、**永远进不了游戏、没有任何报错**）。所以：
+
+* **判据只有一份**：`shared/morph.js` 的 `traitGrantIssues`，两个读者 —— 装载期（`shared/workshop.js` 的
+  `traitGrantWarnings` → `report.traitGrants` → `server/data.js` 逐条 `warn`，`workshopSummary` 每包一句）与
+  作者侧（`shared/chessAuthoring.js` 的 `validateChessRecord` ⇒ `npm run workshop:validate` 与编辑器，
+  `severity: 'warning'`）；
+* **三条码**：`TRAIT_GRANT_UNKNOWN_BOND`（本机 `bonds.json` 里没有这个 id，含别的包加进去的盟约）、
+  `TRAIT_GRANT_BAD_SHAPE`（不是数组，或数组里有非空字符串以外的东西 —— `"x"` / `42` / `{}` / `[1]` / `[""]` /
+  `[null]` 逐种都点名）、`TRAIT_GRANT_EMPTY`（空数组：声明了个寂寞）；
+* **不拒包、不改记录**：一条 typo 不该让整包装不上（与 `assets.mirrors` 的「摘要对不上 ⇒ 停用并点名，**不拒包**」
+  同一条；`ART_UNKNOWN_ID` / `VOICE_UNKNOWN_OPERATOR` / `ITEM_ICON_UNKNOWN_ITEM` 也都是 warning）。而**读取点**
+  另外有一层 `hasBond`：不存在的 id 永远进不了计数 —— 「点名的响亮」与「数据的安全」是两件事，各做各的；
+* **没有盟约表就不判存在性**（`bondIds` 不给时只判形状）：宁可不说，也不要乱说。
+
+**缺省逐字节不变。** 官方 266 条记录一条都没有这一格，`grantedBondsByTrait` 在 `trait` 为字符串 / `null` / 缺项 /
+形状不对时一律回 `[]`，`memberBonds` 在缺省输入下逐字等于从前那条算式 ⇒ `test/golden/*.json` 不需要
+`golden:update`，`MOD_API_VERSION` 仍 = 1、`PROTOCOL_VERSION` 仍 = 2、版本号不动（**加一格字段不抬版本**）。
+
+**Numbering.** 本仓此前最高是 §28.45；§28.46（`pack.json.target`）/ §28.47（mod registry）/ §28.48（依赖与冲突
+裁决）由另一条并行线占号（它们在本格落地时还在未合并的工作树里），所以本格接 **§28.49**，不插进那串连号。
+
+**Tests.** `test/traitGrants.test.js` —— 缺省不变（官方 266 条逐条）、真生效（`loadWorkshop` + `applyWorkshop` +
+`GameData` + `computeBonds`：`egirShip` 2 名 ⇒ tier 0、补上探针棋子 3 名 ⇒ tier 1；4 名 ⇒ tier 1、5 名 ⇒ tier 2）、
+三处同源（行为级对照 + 源码级断言）、坏 id / 坏形状逐种点名且计数不动、作者侧校验器的 warning（`spawnSync` 真跑
+`tools/workshop-validate.mjs`）。
+

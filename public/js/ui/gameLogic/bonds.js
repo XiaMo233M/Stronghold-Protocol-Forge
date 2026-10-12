@@ -5,7 +5,9 @@ import { diyPicks } from './diy.js';
 import { t } from '../../../../shared/i18n.js';
 // 行为开关 `morphPairing`（DESIGN §28.43.1）：判据本体在 `shared/morph.js`，客户端与服务端/战斗调的是同一个函数。
 // 第 7 段把**同一格开关的另外半条**（装备位语义）也收在那里：`morphSlotPolicy` 给出这一页的策略对象。
-import { grantedBondsByMorph, morphSlotPolicy, OFFICIAL_SLOT_POLICY } from '../../../../shared/morph.js';
+// §28.49（`trait.grantsBonds`）：成员资格的**合并**也收在那边（`memberBonds`），所以客户端与服务端/战斗调的
+// 还是同一个函数 —— 只是它现在多了一条腿（特质）。客户端不必再知道「有几种成员资格来源」。
+import { grantedBondsByMorph, memberBonds, morphSlotPolicy, OFFICIAL_SLOT_POLICY } from '../../../../shared/morph.js';
 
 /**
  * 这一页的 `morphPairing` 档位（房间的包声明里派生的**有效档位**）。`setMorphPairing()` 由
@@ -111,14 +113,36 @@ export function grantedBonds(items, getItem = () => null) {
 }
 
 /**
- * A chess piece's bonds: its record's + those its 变形同构体 pairing grants (grantedBonds) — the detail card's chips.
- * @param {any} chess chess.json record @param {Array<string|{id:string}>|null|undefined} items @param {(id:string)=>any} [getItem]
+ * 一名干员的**成员资格**：自己的盟约 ∪ 装备授予 ∪ **特质授予**（`trait.grantsBonds`，DESIGN §28.49）。
+ *
+ * 判据与**合并**都在 `shared/morph.js` 的 `memberBonds` —— 服务端的 `bondsMeta.pieceBonds` 与战斗里的
+ * `support/index.js unitBonds` 调的是**同一个函数**，所以「卡片上显示什么」与「服务端数了谁」不可能分叉。
+ *
+ * `hasBond` 可选：这一页有盟约表时传 `(id) => !!data.lookup('bonds', id)`，把数据里不存在的 id 挡掉（与那两处
+ * 同一条约定）。`own` 传 `[]` 就是「只要授予来的那些」—— 盟约弹窗问的正是这个。
+ * @param {string[]} own 记录自己的 `bonds`
+ * @param {any} trait 记录上的 `trait` 对象（**不是** `def.trait` 那个文本字段）
+ * @param {Array<string|{id:string}>|null|undefined} items the carried items
+ * @param {(id:string)=>any} getItem items.json lookup
+ * @param {((id:string)=>boolean)|null} hasBond bonds.json lookup（拿不到权威名单时给 null）
  * @returns {string[]}
  */
-export function pieceBondIds(chess, items, getItem = () => null) {
-  const out = (Array.isArray(chess?.bonds) ? chess.bonds : []).filter((b) => typeof b === 'string');
-  for (const b of grantedBonds(items, getItem)) if (!out.includes(b)) out.push(b);
-  return out;
+const grantedBondsOf = (own, trait, items, getItem, hasBond) => {
+  const list = Array.isArray(items) ? items : [];
+  const recs = list.map((it) => getItem(typeof it === 'string' ? it : it?.id)).filter(isObj);
+  return memberBonds(own, { trait, recs, morphed: morphOption(), hasBond });
+};
+
+/**
+ * A chess piece's bonds: its record's + those its 变形同构体 pairing grants (grantedBonds) + those its **特质** grants
+ * (`trait.grantsBonds`, DESIGN §28.49) — the detail card's chips.
+ * @param {any} chess chess.json record @param {Array<string|{id:string}>|null|undefined} items @param {(id:string)=>any} [getItem]
+ * @param {((id:string)=>boolean)|null} [hasBond] bonds.json lookup（挡掉数据里不存在的盟约 id）
+ * @returns {string[]}
+ */
+export function pieceBondIds(chess, items, getItem = () => null, hasBond = null) {
+  const own = (Array.isArray(chess?.bonds) ? chess.bonds : []).filter((b) => typeof b === 'string');
+  return grantedBondsOf(own, chess?.trait, items, getItem, hasBond);
 }
 
 /**
@@ -215,8 +239,9 @@ export function harmonyMembers(priv, getChess = () => null) {
  * @param {(id:string)=>any} [getChess]
  * @param {(id:string)=>any} [getItem] items.json lookup (the 变形同构体 pairings)
  * @param {((p: any) => any)|null} [pieceRecord] the record of one of the pieces (default: getChess(p.id))
+ * @param {((id:string)=>boolean)|null} [hasBond] bonds.json lookup（授予来的盟约里，数据里不存在的那些不画）
  */
-export function bondMembers(bond, priv, banned = [], getChess = () => null, getItem = () => null, pieceRecord = null) {
+export function bondMembers(bond, priv, banned = [], getChess = () => null, getItem = () => null, pieceRecord = null, hasBond = null) {
   const bannedSet = banned instanceof Set ? banned : new Set(Array.isArray(banned) ? banned : []);
   const members = Array.isArray(bond?.visibleMembers) && bond.visibleMembers.length ? bond.visibleMembers : (Array.isArray(bond?.members) ? bond.members : []);
   const baseOf = (id) => getChess(id)?.baseId || (typeof id === 'string' ? id.replace(/_b$/, '_a') : id);
@@ -226,7 +251,9 @@ export function bondMembers(bond, priv, banned = [], getChess = () => null, getI
   const memberSet = new Set(members);
   /** base id → { on: on the board?, hand: in the hand?, items: the wearer's item ids } — operators of the player that join this bond through 变形同构体 */
   const granted = new Map();
-  const grants = (p) => typeof bond?.bondId === 'string' && grantedBonds(p.items, getItem).includes(bond.bondId);
+  // 授予来的盟约 = 装备（变形同构体）+ **特质**（DESIGN §28.49）。`own` 传 `[]`：这一行只问「他是**授予**来的
+  // 成员吗」—— 他自己的盟约由上面的 `memberSet` 与自选那两条管，混进来会把一个隐藏成员多画成一行「授予」。
+  const grants = (p) => typeof bond?.bondId === 'string' && grantedBondsOf([], recOf(p)?.trait, p.items, getItem, hasBond).includes(bond.bondId);
   const recOf = (p) => (pieceRecord ? pieceRecord(p) : getChess(p.id));
   /** a composed 自选 record whose operator carries this bond */
   const diyOfBond = (rec) => isObj(rec) && typeof rec.diyFor === 'string' && Array.isArray(rec.bonds) && rec.bonds.includes(bond?.bondId);

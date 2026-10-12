@@ -19,6 +19,9 @@
 // 会得到带模组的数值 —— 这一类不一致不会报错，只会让作者的模组在游戏里表现不对。
 import { composeStats, composeTalents } from './loadoutRecord.js';
 import { talentAtRank, FULL_RANK } from './potential.js';
+// 特质授予的盟约（`trait.grantsBonds`，DESIGN §28.49）：判据本体在 `shared/morph.js`，与装载期（
+// `shared/workshop.js` 的 `traitGrantWarnings`）读的是**同一个函数**。
+import { traitGrantIssues } from './morph.js';
 
 /**
  * The professions THIS project's data uses — which are NOT the global Arknights class names. The mapping that bit us
@@ -790,8 +793,10 @@ export function specFromChessRecord(base, golden) {
  * which is not a proof of correctness. It cannot see cross-record problems (the base/elite pair), whether the record is
  * shop-eligible, or what the sim does at runtime: tools/workshop-validate.mjs runs those extra layers.
  * @param {object} rec the record
- * @param {{ id?: string, officialIds?: Set<string>|string[] }} [opts] `id` defaults to the record's own id; `officialIds`
- *   turns an official-id collision into OFFICIAL_ID_COLLISION (the pack must declare it in overrides instead).
+ * @param {{ id?: string, officialIds?: Set<string>|string[], bondIds?: Set<string>|readonly string[]|null }} [opts]
+ *   `id` defaults to the record's own id; `officialIds` turns an official-id collision into OFFICIAL_ID_COLLISION (the
+ *   pack must declare it in overrides instead); `bondIds` = the merged bonds table's ids — with it,
+ *   `trait.grantsBonds` (DESIGN §28.49) also gets an existence judgment; without it only its shape is judged.
  * @returns {Array<{ field: string, code: string, message: string, hint?: string, severity: 'error'|'warning' }>}
  */
 export function validateChessRecord(rec, opts = {}) {
@@ -919,6 +924,11 @@ export function validateChessRecord(rec, opts = {}) {
   }
   if (!Array.isArray(rec.talents)) err('talents', 'BAD_TALENTS', 'talents must be an array (use [] for none)');
   if (!Array.isArray(rec.bonds)) err('bonds', 'BAD_BONDS', 'bonds must be an array (use [] for none)');
+  // 特质授予的盟约（`trait.grantsBonds`，DESIGN §28.49）：判据本体在 `shared/morph.js` 的 `traitGrantIssues` ——
+  // 装载期（`shared/workshop.js`）读的是**同一份**。一律 warning、也**不拒记录**：引擎那边照样装得上，只是那几条
+  // 授予不算数；在这里报 error 会变成「校验器红、引擎照装」的反向不一致（docs/EDITOR.md 的那条契约）。
+  // `bondIds` 只有调用方给了才判「这条盟约存不存在」：没有盟约表就没有权威答案（宁可不说，也不要乱说）。
+  for (const issue of traitGrantIssues(rec.trait, { bondIds: opts.bondIds })) warn(issue.field, issue.code, issue.message);
   if (!isPlainObj(rec.immunities)) warn('immunities', 'MISSING', 'immunities is missing: the engine treats every immunity as false');
   if (!isPlainObj(rec.assets)) warn('assets', 'MISSING', 'assets is missing: the operator renders with the fallback look');
   // the elite link must be consistent, or a merge produces a piece the data cannot resolve

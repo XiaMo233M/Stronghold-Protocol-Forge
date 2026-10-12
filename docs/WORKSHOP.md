@@ -139,6 +139,22 @@ workshop/<packId>/
   并把社区 mod 的 `stripPackOperators` 具名列为**按此条驳回**的行为。所以这里的「只记录」不是「还没做」。
 - **两张天赋表按条目合并，不是整块替换**（DESIGN §28.3，2026-10-09 当天第二次修正）：`talents` / `talentsBase` 按 `index` 逐条合并 —— 你写的那一条里出现的字段生效，**你没写的字段（包括官方那条天赋自带的注释）留着**；`index` 对不上官方任何一条时是「你新增了一条天赋」，追加在后面。模组内部的 `modules[].talentChanges` 同理，按 `talentIndex` 逐条合并。
   **为什么单独开一条规则**：官方记录里的天赋可以带「潜能链」注释（记录层的 `potDown`、天赋层的 `potMin` + `potBelow`），而编辑器派生出来的记录**故意不带**这些注释。整块替换的话，你只是改了一条天赋的文案，官方那条天赋的整条潜能链就没了，而加载器一句错都不报 —— 一条**静默**的数据丢失。裸列表（`bonds` / `immunities` / `rangeGrid` …）仍然是整块替换：按字段合并一个裸列表会造出一条没人写过的记录。
+- **特质可以授予盟约（`trait.grantsBonds`，DESIGN §28.49）**。一条 chess 记录的 `trait` 上可以写一格
+  `"grantsBonds": ["<bondId>", …]`，语义是「带这条特质的棋子**视为那些盟约的成员**」—— 于是它进成员计数
+  （`server/match/bondsMeta.js` 的去重成员集合）⇒ count +1 ⇒ 该盟约的**层数**自然上去（这就是「固有天赋叠加盟约
+  层数」那条路，纯数据，不需要模块、不需要 `server.meta`）。
+  - **不写这一格 ⇒ 逐字节不变**：特质今天完全不参与计数，官方 266 条记录一条都没有它，所以 `test/golden/*.json`
+    一个字都不动，也不需要抬 `MOD_API_VERSION` / `PROTOCOL_VERSION`（加一格字段不抬版本）。
+  - **判据只有一份**：`shared/morph.js` 的 `grantedBondsByTrait`；而**成员资格的合并**也只有一份
+    （同文件的 `memberBonds`）—— prep 的 `bondsMeta.pieceBonds`、战斗里的 `support/index.js unitBonds`、
+    客户端的 `gameLogic/bonds.js`（`pieceBondIds` 与盟约弹窗的 `bondMembers` **两处**读者）调的都是它。
+  - **写错了会被点名，但不会让包装不上**（与 `assets.mirrors` 那条「停用并点名，不拒包」同一条口径）：盟约 id
+    在这台机器上不存在 ⇒ `TRAIT_GRANT_UNKNOWN_BOND`；`grantsBonds` 不是「非空字符串数组」⇒
+    `TRAIT_GRANT_BAD_SHAPE`（`"yanShip"` / `[1]` / `[null]` / `{}` 都算）；空数组 ⇒ `TRAIT_GRANT_EMPTY`。
+    这三条在**启动日志**（`[workshop] <包>: <码>: <理由>`）与 **`npm run workshop:validate`**（warning，不红）
+    里都会出现，而且读取点会把不存在的 id 挡在计数之外 —— **一个静默降级都不会留下**。
+  - ⚠️ 那条特质的 `trait` 必须写成**对象**（`trait` 写成字符串时它连子键都挂不上；那是一个既有的静默降级，
+    不在本格范围内）。
 - **行为开关不进记录：`playtest.directToHand`**（2026-10-09）。这个字段列出的干员在**编辑器「一键试玩」**起的那个服务器里第一回合直接进手牌；正式对局一个都不发。它存在的理由是**覆盖模式**：覆盖官方干员时记录必须与官方**同形**（覆盖的契约就是「按字段打补丁」，多一个官方没有的键会被 `UNKNOWN_OVERRIDE_FIELD` 整条拒掉），所以「试玩直接发牌」这种**行为开关**不能写进记录，只能写在包的行为层。三条规则：
   - **成员资格**：名单里的每个 id 必须是**这个包自己的** chess 记录 id，或者（覆盖模式）这个包在 `overrides` 里声明过的官方 id（**一对都要**：普通 `_a` 与精锐 `_b` 各算一个 id）。不认识的 id ⇒ **整个包被拒**并**点名**那个 id（`PLAYTEST_UNKNOWN_CHESS`）—— 静默无效正是这个字段要修的那个老毛病。形状错（不是对象、值不是字符串数组、元素不是合法 id）⇒ `PLAYTEST_BAD_SHAPE`。
   - **谁赢**：两个包声明同一个 id 时，沿用上面那条「包 id 字典序小的赢」；输的一方拿到一条点名报告（`PLAYTEST_ID_COLLISION` + `definedBy`），名单里那个 id 只出现一次。与目录扫描顺序无关。

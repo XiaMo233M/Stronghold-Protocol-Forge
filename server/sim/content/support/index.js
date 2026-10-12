@@ -19,7 +19,7 @@
 
 import { getData } from '../../../data.js';
 import { COLS, DIRECT_BONUS_STACKING } from '../../constants.js';
-import { grantedBondsByMorph } from '../../../../shared/morph.js';
+import { memberBonds } from '../../../../shared/morph.js';
 import { frontOf, offsetTile } from '../../dir.js';
 import { bodyInKeys, bodyDist, bodyInRadius, bodyOnTile, bodyTileReach } from '../../body.js';
 
@@ -291,11 +291,18 @@ export function unitBonds(u) {
   const morphed = currentMorphPairing();
   const key = `${items.join('|')}#${morphed}`;
   if (cached && cached.key === key) return cached.bonds;
-  const out = [...(Array.isArray(u.def?.bonds) ? u.def.bonds : Array.isArray(u.def?.raw?.bonds) ? u.def.raw.bonds : [])];
+  // 成员资格的**合并**在 `shared/morph.js` 的 `memberBonds`（一处判据、三处同源）：自己的 `bonds` ∪ 装备授予 ∪
+  // **特质授予**（`trait.grantsBonds`，DESIGN §28.49）。特质读的是**记录**那一份 —— `u.def.raw.trait`：`u.def.trait`
+  // 是 `simdata.js` 投影出来的 trait **文本字符串**，它没有子键，读错了会静默地什么都不授予。
+  // 缓存键不加特质：`u.def` 对一名单位是固定的（与下面这条 `def.bonds` 是同一条既有假设）。
+  const own = Array.isArray(u.def?.bonds) ? u.def.bonds : Array.isArray(u.def?.raw?.bonds) ? u.def.raw.bonds : [];
   const recs = items.map((id) => itemRecord(id)).filter(Boolean);
-  for (const b of grantedBondsByMorph(recs, { morphed, hasBond: (id) => !!bondRecord(id) })) {
-    if (!out.includes(b)) out.push(b);
-  }
+  const out = memberBonds(own, {
+    trait: u.def?.raw?.trait,
+    recs,
+    morphed,
+    hasBond: (id) => !!bondRecord(id),
+  });
   const bonds = Object.freeze(out);
   BONDS.set(u, { key, bonds });
   return bonds;

@@ -24,7 +24,7 @@
 // Layers (`ps.layers[bondId]`) persist the whole match; they are reported for every bond but only matter while active.
 
 import { layerGainRoom } from '../../shared/constants.js';
-import { grantedBondsByMorph } from '../../shared/morph.js';
+import { memberBonds } from '../../shared/morph.js';
 
 export const HARMONY_BOND = 'maniShip';
 export const DEPUTY_BOND = 'deputShip';
@@ -40,12 +40,17 @@ export const DEPUTY_BOND = 'deputShip';
  */
 export function pieceBonds(gd, piece) {
   const c = gd.chess(piece.id);
-  const out = c && Array.isArray(c.bonds) ? c.bonds.slice() : [];
   const items = Array.isArray(piece.items) ? piece.items : [];
   const recs = items.map((it) => gd.item(it.id)).filter(Boolean);
-  const granted = grantedBondsByMorph(recs, { morphed: gd.morphPairing, hasBond: (id) => !!gd.bond(id) });
-  for (const b of granted) if (!out.includes(b)) out.push(b);
-  return out;
+  // 成员资格的**合并**在 `shared/morph.js` 的 `memberBonds`（一处判据、三处同源）：自己的 `bonds` ∪ 装备授予 ∪
+  // **特质授予**（`c.trait.grantsBonds`，DESIGN §28.49）。这一处、战斗里的 `unitBonds` 与客户端的 `pieceBondIds`
+  // 调的是同一个函数 —— 三处各写一份 push 循环正是这条规则历史上最容易分叉的地方。
+  return memberBonds(c && Array.isArray(c.bonds) ? c.bonds : [], {
+    trait: c && c.trait,
+    recs,
+    morphed: gd.morphPairing,
+    hasBond: (id) => !!gd.bond(id),
+  });
 }
 
 /**

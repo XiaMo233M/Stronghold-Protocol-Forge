@@ -443,7 +443,9 @@ export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bond
   // teammate's unit's UnitInfo items, a bond popup 同构 row's wearer's)
   const carried = piece ? items : (Array.isArray(unitItems) ? unitItems : []);
   const getItem = (id) => data.lookup('items', id);
-  const bondIds = pieceBondIds(c, carried, getItem);
+  // `hasBond`：数据里不存在的盟约 id 一个都不画（与 prep / 战斗同一条约定，`shared/morph.js` 的
+  // `grantedBondsByTrait` 的 `hasBond`）—— 一张卡片上出现一条不存在的盟约，与计数对不上是同一类谎话。
+  const bondIds = pieceBondIds(c, carried, getItem, (id) => !!data.lookup('bonds', id));
   const grantedIds = bondIds.filter((b) => !(Array.isArray(c.bonds) && c.bonds.includes(b)));
   const sell = c.sellPrice ?? 1;
   const blocks = {};

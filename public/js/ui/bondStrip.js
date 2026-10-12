@@ -119,7 +119,8 @@ export function BondPopup({ bondId, entry, priv, banned = [], onClose, onMember,
   const dd = { chess: data.get('chess'), backups: data.get('backups') };
   const getChess = diyGetter((id) => data.lookup('chess', id), priv, dd);
   const pieceRecord = (p) => (p && p.diy && typeof p.diy === 'object' ? diyRecordFor(data.lookup('chess', p.id), p.diy, dd) : null) || getChess(p.id);
-  const members = bondMembers(b, priv, banned, getChess, (id) => data.lookup('items', id), pieceRecord);
+  // 最后一格 `hasBond`：盟约弹窗的成员行也要按「这台机器上真有这条盟约」过滤（`pieceBondIds` 那一处同一条）
+  const members = bondMembers(b, priv, banned, getChess, (id) => data.lookup('items', id), pieceRecord, (id) => !!data.lookup('bonds', id));
   // 补位: the stand-in a row shows (a 自选 row is its operator already)
   const rawChess = (id) => data.lookup('chess', id);
   const siOf = (mb) => (mb.diy ? null : memberStandIn(priv, rawChess(mb.id), data.get('backups'), rawChess));

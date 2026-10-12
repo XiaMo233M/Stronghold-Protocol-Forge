@@ -29,6 +29,9 @@ import { parseVariantsDecl } from './variants.js';
 // 行为开关层（DESIGN §28.43）：与口径**同一形状、不同一张表**，判据只有一份在 `shared/behaviour.js`。同样不在这里
 // 重判一遍闭枚举 —— 而且这一层的表今天是**空的**（通道 + 守卫先落，第一格与它的引擎实现点一起落）。
 import { parseBehaviourDecl } from './behaviour.js';
+// 特质授予的盟约（`trait.grantsBonds`，DESIGN §28.49）：装载期那一条点名走**同一份判据**（`traitGrantIssues`），
+// 作者侧的点名在 `shared/chessAuthoring.js` 的 `validateChessRecord` 里读同一个函数。
+import { traitGrantIssues } from './morph.js';
 
 /** Data files a pack may contribute to. Deliberately a conservative subset of data/: `config` is excluded because a
  * pack that rewrote the economy or the round schedule would change the rules rather than the content.
@@ -3109,6 +3112,10 @@ export function applyWorkshop(base, packs) {
   // 「我明明勾了」和「试玩里没有」之间反复，而日志一句话都不说。
   for (const e of workshopPlaytestIndex(packs).errors) report.errors.push({ pack: e.pack, file: 'playtest', id: e.id, code: e.code, definedBy: e.definedBy, reason: e.reason });
   report.looks = [...chessLookIssues(out, looked), ...enemyLookIssues(out, lookedEnemies)];
+  // 特质授予的盟约（`trait.grantsBonds`，DESIGN §28.49）：与 `looks` 并列的一条**只读**点名通道（它查的不是外观，
+  // `workshopSummary` 也分开数）。必须排在内容文件那一层之后 —— 它要读**合并后**的 `out.chess` 与 `out.bonds`
+  // （盟约可能是另一个包加进来的）。**不改数据、不拒包**：坏 id 由读取点的 `hasBond` 挡在计数之外。
+  report.traitGrants = traitGrantWarnings(out, looked);
   // `stripPackOperators`（fanpack G-16）：**只记录，不摘除**。一个被包变成棋子的干员同时还在自选池里这件事，
   // 以前没有任何地方说出来；而「真的把他摘出池」会改变自选槽能挑到的干员（= 改对局结果），
   // 与「`test/golden/*.json` 一个字节不动」的验收不能同时成立 —— 所以它是一条**待裁决**的记录，
@@ -3124,6 +3131,36 @@ export function applyWorkshop(base, packs) {
   for (const list of Object.values(report.added)) list.sort();
   for (const list of Object.values(report.overridden)) list.sort();
   return { data: out, report };
+}
+
+/**
+ * `trait.grantsBonds` 写歪了的地方 —— 一条 chess 记录的「特质授予哪些盟约」（DESIGN §28.49）。
+ *
+ * **为什么单独一趟、为什么只读**：`unknownOverrideKeys` 只比**顶层**键（`Object.keys`），所以往 `trait` 里加子键
+ * **天然通得过装载器** —— 一个拼错的盟约 id、或一个写歪的形状，会安安静静地变成「这条特质什么都不授予」。
+ * 业主吃过这一类亏（docs/WORKSHOP.md §1.1：`content` 没声明 `chess` ⇒ 编辑器里在、磁盘里在、**永远进不了游戏、
+ * 没有任何报错**）。所以这里**逐条点名**；但**不拒包、不改记录**（一条 typo 不该让整包装不上，与 `assets.mirrors`
+ * 那条「停用并点名，不拒包」同一条），坏 id 由读取点的 `hasBond` 挡在计数之外。
+ *
+ * 判据本体在 `shared/morph.js` 的 `traitGrantIssues`；作者侧的同一个函数在 `shared/chessAuthoring.js` 里被
+ * `validateChessRecord` 调用（`npm run workshop:validate` 与编辑器）。没有盟约表就不判存在性。
+ * @param {Readonly<Record<string, any>>} data 合并后的数据
+ * @param {Array<{ pack: string, id: string }>} looked 工坊贡献的干员记录
+ * @returns {Array<{ pack: string, id: string, code: string, field: string, value: any, reason: string }>}
+ */
+function traitGrantWarnings(data, looked) {
+  const chess = isPlainObj(data) && isPlainObj(data.chess) ? data.chess : null;
+  const bonds = isPlainObj(data) && isPlainObj(data.bonds) ? data.bonds : null;
+  if (!chess || !bonds) return [];
+  const bondIds = new Set(Object.keys(bonds));
+  const out = [];
+  for (const { pack, id } of looked) {
+    const rec = chess[id];
+    for (const issue of traitGrantIssues(isPlainObj(rec) ? rec.trait : null, { bondIds })) {
+      out.push({ pack, id, code: issue.code, field: issue.field, value: issue.value, reason: `${id}: ${issue.message}` });
+    }
+  }
+  return out;
 }
 
 /**
@@ -4098,6 +4135,10 @@ export function workshopSummary(report) {
     if (support) bits.push(`助战 +${support.length}`);
     const operators = report.operators && report.operators[p.id];
     if (operators) bits.push(`自选池 +${operators.length}`);
+    // 特质授予的盟约写歪了 / 指向不存在的盟约（`trait.grantsBonds`，DESIGN §28.49）：与「没有模型」分开数 ——
+    // 把两件事糊成一句 `N 个干员…`，读日志的人会去 assets.chars 里找一个盟约 id。
+    const grantIssues = (report.traitGrants || []).filter((g) => g.pack === p.id).length;
+    if (grantIssues) bits.push(`${grantIssues} 处 trait.grantsBonds 无效（启动日志逐条点名）`);
     const looks = (report.looks || []).filter((l) => l.pack === p.id);
     // 干员与怪物分开数：一句话里混着「3 个干员」而其中两个是怪物，读日志的人会去找错对象
     const lookOperators = looks.filter((l) => l.kind !== 'enemy').length;
