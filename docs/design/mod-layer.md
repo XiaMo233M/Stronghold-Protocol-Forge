@@ -591,7 +591,7 @@ safe to add without a flag day:
   `gameData()`, `server/data.js` `getData()`), a room that declares a subset is running the whole process set, and the
   honest thing is to say so rather than to refuse the room or to pretend the declaration took effect.
 
-Finally, `tools/package.mjs:13-14` and `:156-157` (the `git ls-files` allowlist) mean a mod-layer file that is not
+Finally, `tools/package.mjs:13-14` and `:174-175` (the `git ls-files` allowlist) mean a mod-layer file that is not
 committed does not ship. A hash computed from the manifest could describe content no player has; a hash computed from
 the files really on disk (or, in a release, from the files really in the archive) cannot. That is the reason §28.2
 computes from bytes.
