@@ -5,10 +5,28 @@
 // the player state).
 
 import { ERR } from '../../../shared/constants.js';
+import { behaviourIsDefault } from '../../../shared/behaviour.js';
 import { tileKey, inField, parseDir } from '../board.js';
 import { offsetTile } from '../../sim/dir.js';
 import { itemKey } from '../gamedata.js';
+// 装备位语义（第 7 段）：策略对象来自 `shared/morph.js`（**同一格开关的另外半条**）。缺省档拿到的
+// `OFFICIAL_SLOT_POLICY` 是共享的冻结单例，每一个方法都逐字是引擎今天那条算术 ⇒ 下面三处的缺省路径逐字节不变。
+import { matchSlotPolicy } from '../../../shared/morph.js';
 import { OK, fail } from './common.js';
+
+/**
+ * **行为开关 `unequip` 的读取点**（DESIGN §28.43.1）：这一局允不允许卸下已装备的装备。
+ * 判据只有一份（`shared/behaviour.js` 的 `behaviourIsDefault`）：没声明这一格 / 声明成 `official`（缺省）⇒ `false`
+ * = 引擎今天的行为（装上就只能靠精英化 / 合成 / 卖出离开）；`allow` ⇒ `true`。
+ *
+ * 写成模块层的**纯**函数：一是 `PlayerState.unequip` 只读它、不写死，二是它是 `shared/modSurface.js` 里
+ * `behaviour` 那一格可锚的导出名（改名 / 挪走 = 打断所有声明这一格的包）。
+ * @param {Array<{ switch: string, option: string }>|null|undefined} decl 本局合成后的行为声明
+ * @returns {boolean}
+ */
+export function unequipAllowed(decl) {
+  return !behaviourIsDefault(decl, 'unequip');
+}
 
 export class PlayerItems {
   /**
@@ -17,6 +35,10 @@ export class PlayerItems {
    * oldest); the replaced item is destroyed. A `replaceUid` that is not one of the target's equipped items is refused.
    * A consume-on-equip item replaces the same way before it resolves (GitHub #263): the carrier keeps a free slot, and a
    * target its effect refuses (博士投影 on an elite) gets the picked item back — nothing is destroyed.
+   *
+   * `plus`（第 7 段，`shared/morph.js` 的 `PLUS_SLOT_POLICY`）另外两条：变形同构体**每名干员最多一件**（再装一件
+   * 回 `BAD_TARGET`），而 `replaceUid` 只认**真正占格**的那几件（变形同构体在加强档下不占位，所以它不是可顶替的
+   * 对象，也永远不会被第三件顶掉）。缺省档下这两条**一个字都不生效**。
    */
   equip(itemUid, targetUid, replaceUid = null) {
     const g = this._gate(); if (g) return g;
@@ -28,7 +50,21 @@ export class PlayerItems {
     if (!tloc || tloc.piece.kind !== 'chess' || tloc.area === 'equipped') return fail(ERR.BAD_TARGET);
     const item = iloc.piece;
     const target = tloc.piece;
-    if (replaceUid != null && !(Number.isInteger(replaceUid) && (target.items || []).some((x) => x.uid === replaceUid))) return fail(ERR.BAD_TARGET, 'replace: not equipped on the target');
+    const policy = matchSlotPolicy(this.m);
+    if (policy.active) {
+      const row = target.items || [];
+      // `plus`：变形同构体每名干员最多一件（`OFFICIAL_SLOT_POLICY.active` 为假 ⇒ 这一条在缺省档一个字都不生效）
+      if (policy.isSlotless(rec) && row.some((x) => policy.isSlotless(this.gd.item(x.id)))) {
+        return fail(ERR.BAD_TARGET, 'one slotless item per carrier');
+      }
+      // `plus`：顶替只认**真正占格**的那一件（它不占位，所以既不是可顶替的对象，也不会被第三件顶掉）
+      if (replaceUid != null && !(Number.isInteger(replaceUid) && row.some((x) => x.uid === replaceUid && !policy.isSlotless(this.gd.item(x.id))))) {
+        return fail(ERR.BAD_TARGET, 'replace: not a slotted item of the target');
+      }
+    }
+    if (replaceUid != null && !(Number.isInteger(replaceUid) && (target.items || []).some((x) => x.uid === replaceUid))) {
+      return fail(ERR.BAD_TARGET, 'replace: not equipped on the target');
+    }
     const consume = typeof rec.kind === 'string' && rec.kind.startsWith('consume_on_equip');
     if (consume) {
       const key = 'item:' + itemKey(item.id);
@@ -75,11 +111,17 @@ export class PlayerItems {
   /**
    * Attach an item. With both slots used the item `replaceUid` names (the player's pick) is replaced, else the oldest;
    * the replaced item is destroyed.
+   *
+   * 「两格满了」由这一局的**装备位策略**回答（`slotPolicy.slotsUsed`）：缺省档逐字就是
+   * `target.items.length >= this.gd.equipPerChess`，`plus` 档下变形同构体不计数、且它**永远不是**被顶掉的那一件
+   * （`slotPolicy.replacedIndex` 只挑真正占格的）。缺省档下策略就是官方那一条，循环体与从前同一批算术。
    */
   _attach(target, item, replaceUid = null) {
     target.items = target.items || [];
-    while (target.items.length >= this.gd.equipPerChess) {
-      const i = replaceUid != null ? target.items.findIndex((x) => x.uid === replaceUid) : -1;
+    const policy = matchSlotPolicy(this.m);
+    const used = () => policy.slotsUsed(target.items, (id) => this.gd.item(id));
+    while (used() >= this.gd.equipPerChess) {
+      const i = policy.replacedIndex(target.items, replaceUid, (id) => this.gd.item(id));
       const [old] = target.items.splice(i >= 0 ? i : 0, 1);
       replaceUid = null;
       this.m.dispatchItem(this, old, target, 'onDestroy', { item: old, holder: target, reason: 'replace' });
@@ -89,15 +131,16 @@ export class PlayerItems {
 
   /**
    * A consume-on-equip item on a full carrier: take the item `replaceUid` names (else the oldest) off `target` — not yet
-   * destroyed — and return { piece, idx } (null while a slot is free).
+   * destroyed — and return { piece, idx } (null while a slot is free). 「满」与「挑哪一件」都走这一局的装备位策略
+   * （`plus`：变形同构体既不占位、也不会被挑走）；缺省档逐字是 `items.length < equipPerChess` 与「找不到 ⇒ 0」。
    */
   _takeReplaced(target, replaceUid = null) {
     target.items = target.items || [];
-    if (target.items.length < this.gd.equipPerChess) return null;
-    const i = replaceUid != null ? target.items.findIndex((x) => x.uid === replaceUid) : -1;
-    const idx = i >= 0 ? i : 0;
-    const [piece] = target.items.splice(idx, 1);
-    return { piece, idx };
+    const policy = matchSlotPolicy(this.m);
+    if (policy.slotsUsed(target.items, (id) => this.gd.item(id)) < this.gd.equipPerChess) return null;
+    const idx = policy.replacedIndex(target.items, replaceUid, (id) => this.gd.item(id));
+    const [piece] = target.items.splice(idx >= 0 ? idx : 0, 1);
+    return { piece, idx: idx >= 0 ? idx : 0 };
   }
 
   /** g.art {itemUid, row, col, dir?}: the Art's range grid is rotated by `dir` (absent ⇒ RIGHT). */
@@ -143,6 +186,44 @@ export class PlayerItems {
     if (loc.area === 'equipped') return fail(ERR.BAD_TARGET, 'equipped items are locked');
     this._detach(loc);
     this.m.dispatchItem(this, loc.piece, loc.holder || null, 'onDestroy', { item: loc.piece, holder: loc.holder || null, reason: 'player' });
+    this.recompute();
+    return OK;
+  }
+
+  /**
+   * g.unequip {itemUid}（行为开关 `unequip: "allow"`，DESIGN §28.43.1）：把一件**已装备**的装备从干员身上取下，
+   * 放回手牌（右→左优先），手牌满则进**临时整备区**（`stow`，pieces.js）。
+   *
+   * **缺省档（`official`）逐字不变**：`unequipAllowed` 为假 ⇒ 回 `destroy` 今天那句
+   * `'equipped items are locked'`（`items.js` 的 destroy 用的就是它），于是一个不声明这一格的房间在这条意图上的
+   * 行为与从前**一字不差**。
+   *
+   * **原子性**：`_detach` 之后 `stow` 可能返回 `null`（手牌与临时都满）。那时按**原下标**把它塞回 `holder.items`，
+   * 并回 `HAND_FULL` —— 先摘后塞没有回滚的话，装备会**凭空消失**。「没地方放」是一件独立、可处理的事，所以用
+   * `HAND_FULL` 而不是 `BAD_TARGET`。
+   *
+   * **池不变式**：装备只是从**装备位**移到**手牌 / 临时**，`piece` 与 `uid` 都不变 ⇒ `SharedItemPool.held()`
+   * （遍历 hand / temp / board，以及 `p.items`）前后都数得到它 ⇒ `held` / `cap` / `left` 全不变，不变式
+   * `raw left + Σ held == cap` 一字不动。**没有「归还」这回事**（这与 destroy / sell 不同：那两者才真让池子少一件）。
+   *
+   * **不发内容钩子**（刻意的第一版决定，DESIGN §28.43.2）：`HOOKS` 那 19 个是契约面（进 `META`），而「卸下」用
+   * 哪一个都不贴切（不是 `onDestroy`、不是 `onEquip`），今天也没有任何包需要被通知。将来真有需要，另立一刀并
+   * 按 `META` 契约面扩展。
+   */
+  unequip(itemUid) {
+    const g = this._gate(); if (g) return g;
+    if (!unequipAllowed(this.m && this.m.behaviour)) return fail(ERR.BAD_TARGET, 'equipped items are locked');
+    const loc = this.find(itemUid);
+    if (!loc || loc.piece.kind !== 'item' || loc.area !== 'equipped') return fail(ERR.BAD_TARGET, 'not equipped on an operator');
+    const holder = loc.holder;
+    const idx = holder && Array.isArray(holder.items) ? holder.items.indexOf(loc.piece) : -1;
+    const piece = loc.piece;
+    this._detach(loc);
+    if (!this.stow(piece, { allowTemp: true })) {
+      // 没地方放 ⇒ 原子回滚（原下标）并点名。装备不会消失。
+      if (holder && Array.isArray(holder.items)) holder.items.splice(idx < 0 ? 0 : Math.min(idx, holder.items.length), 0, piece);
+      return fail(ERR.HAND_FULL);
+    }
     this.recompute();
     return OK;
   }

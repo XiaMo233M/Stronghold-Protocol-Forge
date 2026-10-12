@@ -20,6 +20,7 @@ import { createStore, loadPref, savePref } from '../store.js';
 import { data } from '../data.js';
 import { LOADOUT_PREF, parseStored, parseStoredOps, toStored, sanitizeEntries, sanitizeOps } from './loadoutModel.js';
 import { cultivationCharIds } from '../../../shared/protocol.js';
+import { PHASE } from '../../../shared/constants.js';
 import { OWNERSHIP_PREF, parseStoredOwnership, toStoredOwnership, cleanIds, sanitizeNotOwned } from './ownershipModel.js';
 import { DIY_PREF, parseStoredDiy, toStoredDiy, cleanPicks, sanitizeDiyPicks } from './diyModel.js';
 import { toast } from './toasts.js';
@@ -40,6 +41,54 @@ function readStoredOwnership() {
 function readStoredDiy() {
   try { return parseStoredDiy(loadPref(DIY_PREF, null)); } catch { return {}; }
 }
+
+/**
+ * 行为开关 `prepLoadout` 的**客户端半**（DESIGN §28.43.3）。
+ *
+ * 服务端那一半早就落了（`Match.setLoadout` 读 `LOADOUT_PHASES`：`locked`（缺省）只收 `INFO_CHECK`，`prep` 另收
+ * `PREP`）。而客户端这一半原来写死在 `screens/loadout.js` 的
+ * `phase !== PHASE.INFO_CHECK && phase !== PHASE.LOBBY` 里 ⇒ **只要在局中、非 `INFO_CHECK` 就一律算"锁定"** ⇒
+ * 声明了 `prep` 的房间会出现「**服务端收得下、界面却在说锁着**」的自相矛盾。
+ *
+ * 这里把那份相位判据收成**一份两档的表 + 一个纯函数**，屏幕只读它、不再自己比相位：
+ *   * `locked`（缺省）⇒ `[INFO_CHECK]`；
+ *   * `prep` ⇒ `[INFO_CHECK, PREP]`。
+ *
+ * ⚠️ **方向（这一处最容易写反）**：这张表列的是**这一档下 `room.loadout` 收得下**的相位 —— 与服务端
+ * `LOADOUT_PHASES` **同名同义**（缺省 `[INFO_CHECK]` 就是"只有简报里改才算本局的"）。所以界面那个
+ * 「本局已锁定」徽标是它的**取反**：`locked = !currentLoadoutLockPhases().includes(phase)`。
+ * 半成品的第一版把它写成了正读（`includes`）⇒ 缺省档下徽标**只在 `INFO_CHECK` 画**，正好把"能改"的那一段标成
+ * "已锁定"、把"改不了"的那几段反而不标 —— 那是**缺省路径的行为改变**。`test/prepLoadoutClient.test.js` 现在用
+ * **真实的相位枚举**逐相位钉方向（旧的那条遍历把 `Object.values(PHASE)` 按 `typeof === 'number'` 过滤，而
+ * `PHASE` 的值**全是字符串** ⇒ 那个循环空转、一个相位都没钉住）。
+ *
+ * ⚠️ **与 `server/match/match/platform.js` 的 `LOADOUT_PHASES` 是两张表**：客户端不能 import `server/**`（导入边界），
+ * 所以这是这一层既有的"客户端副本 + 一个测试把两张表钉在一起"的做法（与
+ * `CLIENT_WRAP_COMPONENTS`↔`MOD_COMPONENT_IDS`、`CLIENT_PANEL_SLOTS`↔`MOD_PANEL_SLOTS` 同一条）。
+ * 钉它的测试是 `test/prepLoadoutClient.test.js` 里那条"逐档逐字相等"。
+ */
+export const LOADOUT_CLIENT_PHASES = Object.freeze({
+  locked: Object.freeze([PHASE.INFO_CHECK]),
+  prep: Object.freeze([PHASE.INFO_CHECK, PHASE.PREP]),
+});
+/** 这一页拿到的档位（由 `roomMods.js` 从 `welcome.mods` 合成后写入；缺省 `'locked'` = 引擎今天的行为）。 */
+let prepLoadoutOption = 'locked';
+/** 记下这一页的有效档位（`roomMods.js` 调；非 `'prep'` 一律当作缺省）。 */
+export function setPrepLoadout(option) { prepLoadoutOption = option === 'prep' ? 'prep' : 'locked'; }
+/** 这一页允不允许在 `PREP` 里改调配（诊断 / 测试面）。 */
+export function prepLoadoutAllowed() { return prepLoadoutOption === 'prep'; }
+/**
+ * 这一档下 `room.loadout` **收**的相位（纯函数：入参是档位，不是这一页的状态 —— 于是两档都能直接断言）。
+ * **要判「锁定」就取反**（见上）。返回的数组里**没有** `LOBBY`：`LOBBY` 那一半由屏幕那句 `phase !== PHASE.LOBBY`
+ * 与 `inMatch && phase` 挡着，这一格不负责它。
+ * @param {'locked'|'prep'|null|undefined} option
+ * @returns {readonly string[]}
+ */
+export function loadoutLockPhases(option) {
+  return option === 'prep' ? LOADOUT_CLIENT_PHASES.prep : LOADOUT_CLIENT_PHASES.locked;
+}
+/** 这一页当前档位下 `room.loadout` **收**的相位（屏幕读它；判「锁定」时取反）。 */
+export function currentLoadoutLockPhases() { return loadoutLockPhases(prepLoadoutOption); }
 
 /** Loadout + ownership + screen state (separate from the app store: it must survive room / match resets). */
 export const loadoutStore = createStore({

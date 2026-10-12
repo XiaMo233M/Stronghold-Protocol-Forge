@@ -19,6 +19,7 @@
 
 import { getData } from '../../../data.js';
 import { COLS, DIRECT_BONUS_STACKING } from '../../constants.js';
+import { grantedBondsByMorph } from '../../../../shared/morph.js';
 import { frontOf, offsetTile } from '../../dir.js';
 import { bodyInKeys, bodyDist, bodyInRadius, bodyOnTile, bodyTileReach } from '../../body.js';
 
@@ -73,6 +74,30 @@ const VIEWS = new WeakMap();
 export function withGameData(data, fn) {
   SCOPED.push(data && typeof data === 'object' ? data : null);
   try { return fn(); } finally { SCOPED.pop(); }
+}
+
+/**
+ * 这一场战斗的行为开关档位（`morphPairing`），与 `withGameData` **同一条作用域纪律**：两个 Match 在一个进程里并发
+ * 跑（server/lobby.js 一房一个 Match），而这一段是**同步区**（一场 Battle 的构造与每一次 `step()`），两个 Match
+ * 只会在步与步之间交错、不会在一步之内交错。所以「进作用域前压上、出来弹掉」对并发是安全的，也正是
+ * `withGameData` 已经在用的那条做法（DESIGN §29 的那条业主裁决逐字同一条）。
+ *
+ * 不入栈时是 `null` ⇒ `morphPairingOf(null)` 给出缺省档 `official`，所以没有包声明这一格的战斗读到的还是今天
+ * 那一条规则。浏览器端同理：它由 BattleSpec 上的那一个键压进来（`public/js/battle/runner.js`）。
+ * @type {Array<string|null>}
+ */
+const MORPH = [];
+/**
+ * Run `fn` with `option` as this battle's `morphPairing`档位（见 MORPH）。可重入、异常安全。
+ * @template T @param {string|null|undefined} option @param {() => T} fn @returns {T}
+ */
+export function withMorphPairing(option, fn) {
+  MORPH.push(typeof option === 'string' && option ? option : null);
+  try { return fn(); } finally { MORPH.pop(); }
+}
+/** 当前作用域的档位（没入栈 ⇒ null = 缺省档）；`unitBonds` 与测试读它。 */
+export function currentMorphPairing() {
+  return MORPH.length ? MORPH[MORPH.length - 1] : null;
 }
 
 /** The scoped data merged over the default one (identity when the scoped object IS the default one). */
@@ -234,23 +259,22 @@ export const goldenItemCount = (u) => itemsOf(u).filter(isGoldenId).length;
 const BONDS = new WeakMap();
 /**
  * A unit's own bonds: the chess's data bonds + bonds granted by 变形同构体 (an item with `canGiveBond` worn together
- * with an item that has a `giveBondId`; same rule as server/match/bondsMeta.js pieceBonds). Tokens / enemies: [].
+ * with an item that has a `giveBondId`). **The pairing rule lives in `shared/morph.js`** (行为开关 `morphPairing`,
+ * DESIGN §28.43.1) so this, `server/match/bondsMeta.js pieceBonds` and the client's `grantedBonds` cannot drift; the
+ * option of THIS battle comes from the scope below (`withMorphPairing`, pushed around a Battle's construction and each
+ * `step()` — the same synchronous region `withGameData` uses). Tokens / enemies: [].
  */
 export function unitBonds(u) {
   if (!isOp(u)) return EMPTY;
   const cached = BONDS.get(u);
   const items = itemsOf(u);
-  const key = items.join('|');
+  const morphed = currentMorphPairing();
+  const key = `${items.join('|')}#${morphed}`;
   if (cached && cached.key === key) return cached.bonds;
   const out = [...(Array.isArray(u.def?.bonds) ? u.def.bonds : Array.isArray(u.def?.raw?.bonds) ? u.def.raw.bonds : [])];
-  if (items.length >= 2) {
-    const recs = items.map((id) => itemRecord(id)).filter(Boolean);
-    if (recs.some((r) => r.canGiveBond)) {
-      for (const r of recs) {
-        if (r.canGiveBond) continue;
-        if (typeof r.giveBondId === 'string' && bondRecord(r.giveBondId) && !out.includes(r.giveBondId)) out.push(r.giveBondId);
-      }
-    }
+  const recs = items.map((id) => itemRecord(id)).filter(Boolean);
+  for (const b of grantedBondsByMorph(recs, { morphed, hasBond: (id) => !!bondRecord(id) })) {
+    if (!out.includes(b)) out.push(b);
   }
   const bonds = Object.freeze(out);
   BONDS.set(u, { key, bonds });

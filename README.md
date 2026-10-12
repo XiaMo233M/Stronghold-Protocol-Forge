@@ -33,7 +33,7 @@
 
 ## 目录
 
-- **能干什么（先看这条）**：[你想做什么 → 看哪份文档](#你想做什么--看哪份文档) · [Forge 现在能干什么](#forge-现在能干什么) · [一份最小 pack.json](#一份最小-packjson实测能装) · [behaviour：通道已通，表还是空的](#behaviour通道已通表还是空的) · [投稿到入库](#投稿到入库) · [还不能做什么](#还不能做什么)
+- **能干什么（先看这条）**：[你想做什么 → 看哪份文档](#你想做什么--看哪份文档) · [Forge 现在能干什么](#forge-现在能干什么) · [一份最小 pack.json](#一份最小-packjson实测能装) · [behaviour：通道已通，表里有 4 格](#behaviour通道已通表里有-4-格) · [投稿到入库](#投稿到入库) · [还不能做什么](#还不能做什么)
 - **编辑器（本仓库的主角）**：[这是什么](#这是什么) · [能做什么](#能做什么) · [介绍图](#介绍图) · [快速开始（编辑器）](#快速开始编辑器) · [两条硬规矩](#设计上的两条硬规矩) · [Option 署名](#option-署名) · [工坊与助战](#工坊与助战)
 - **上游游戏本体**：[本仓库完整包含上游游戏](#本仓库完整包含上游游戏) · [功能一览](#功能一览) · [快速开始（游戏）](#快速开始游戏) · [联机方式](#联机方式) · [操作](#操作)
 - **文档与法律**：[文档](#文档) · [开发与测试](#开发与测试) · [项目结构](#项目结构) · [著作权声明](#著作权声明) · [上游来源与修改说明](#上游来源与修改说明) · [许可证](#许可证) · [致谢与数据来源](#致谢与数据来源) · [贡献](#贡献) · [English](#english)
@@ -91,7 +91,7 @@
 | 在服务端跑自己的代码 | `server.modules[]` —— **6 种用途** | ✅ 能用：`boot` · `shutdown` · `matchClass` · `healthz` · `metrics` · `route`。上限 8 个模块，扩展名 `.mjs` | `SERVER_MODULE_USES` |
 | 跟自己的面板通信 | `client.panels[].messages[]` | ✅ 能用。线上名是 `<包id>.<短名>`；服务端唯一的消息驱动调用点是 `Match.handlePackMsg` | `shared/workshop.js` · `server/lobby.js` |
 | 选一套口径（练度 / 形态 / 部署位） | `variants` —— **3 条轴** | ✅ 能用：`training` · `form` · `deploy` | `VARIANT_AXES`（`shared/variants.js`） |
-| 声明一条规则开关 | `behaviour` | ⚠️ **通道通了，表还是空的** —— 今天任何声明都被整包拒，见[下一节](#behaviour通道已通表还是空的) | `shared/behaviour.js` |
+| 声明一条规则开关 | `behaviour` | ✅ **能用，4 格**：`shopBias` / `prepLoadout` / `morphPairing` / `unequip`（缺省都是引擎今天的行为），见[下一节](#behaviour通道已通表里有-4-格) | `shared/behaviour.js` |
 | 用自己的 CDN 发素材 | `assets.mirrors[]` | ✅ 能用。只镜像**本包自己的容器**；`sha256` 对不上的那一条**停用并点名**（不拒包），服务端不为它发网络请求 | `shared/workshop.js` 的 `ASSETS_FIELDS` |
 | 把数据挂成一个端点 | `routes[]` | ✅ 能用（`{ path, file, cache }`） | `server/http/routeMount.js` |
 | 发公告 / 鸣谢 | `notices` | ✅ 能用。纯文本，与引擎自带公告**追加合并**，互不覆盖 | `shared/workshop.js` |
@@ -151,23 +151,22 @@ VALID: the engine accepts this content.
 - **只声明 `variants` / `behaviour` / `support` / `playtest` 的包会被判 `EMPTY_PACK`**：这四样是「怎么跑」的声明，自己不往对局里带东西。要上架得**至少贡献一样真的**（`content` / `client` / `notices` / `routes` / 素材…）。上面这个例子贡献的是 `client`，所以不算空包。
 - 顶层键只有 32 个（完整清单见 [docs/STANDARD-PACK.md](docs/STANDARD-PACK.md) §二.2）；**不认识的顶层键点名拒绝**（`PACK_UNKNOWN_FIELD`），**绝不读过去**。
 
-## behaviour：通道已通，表还是空的
+## behaviour：通道已通，表里有 4 格
 
 `pack.json.behaviour` 是**包声明「我要哪一格规则开关、哪一档」**的地方。它今天的样子要写清楚，不然会以为「写了就能用」：
 
 - **通道本身是真的、也是响的**：开关名与选项名都是**闭枚举**，包只能声明引擎表里有的东西；包里**没有数值、也没有路径** —— 动作 `{ kind, value }` **由引擎构造**，`value` 只能来自引擎自己的常量。
-- **但那张表今天是空的**：`shared/behaviour.js` 的 `BEHAVIOUR_SWITCHES` 是 `Object.freeze({})`，**一格都没有**。这是刻意的：一格开关的入场券是「**引擎先有实现点**」，所以首格与它的引擎实现点**同刀落地**，由维护者点名。
-- ⇒ **今天任何一条 `behaviour` 声明都会被整包拒**。实测原文（`node tools/workshop-validate.mjs`）：
+- **那张表里有 4 格**：`shared/behaviour.js` 的 `BEHAVIOUR_SWITCHES` 是 `shopBias`（商店出货偏向）/ `prepLoadout`（休整期可更换技能与模组）/ `morphPairing`（变形同构体的配对规则）/ `unequip`（装备拆卸），四格的缺省档都是**引擎今天的行为**（每一格有哪些档、各改了什么，见 [docs/WORKSHOP.md](docs/WORKSHOP.md) §1.22）。一格开关的入场券是「**引擎先有实现点**」，所以每一格与它的实现点**同刀落地**，由维护者点名。
+- ⇒ **声明表里没有的开关（或选项）仍会被整包拒**。实测原文（`node tools/workshop-validate.mjs`）：
 
 ```
-ERROR (record) [PACK_LOAD] BEHAVIOUR_UNKNOWN_SWITCH: behaviour[0].switch "shopBias"
-is not a switch of this 行为 format. Known switches: none yet — this build declares
-no behaviour switch at all, because a switch is only added together with its
-engine-side implementation point — a declaration the loader does not know is never
-applied, so it is refused instead of ignored
+ERROR (record) [PACK_LOAD] BEHAVIOUR_UNKNOWN_SWITCH: behaviour[0].switch "no-such-switch"
+is not a switch of this 行为 format. Known switches: "shopBias", "prepLoadout",
+"morphPairing", "unequip" — a declaration the loader does not know is never applied,
+so it is refused instead of ignored
 ```
 
-声明长这样（**今天会被拒；等表里有了格子，这就是合法写法**）：
+声明长这样（**表里有这几格，所以这是合法写法**）：
 
 ```json
 "behaviour": [ { "switch": "<开关名>", "option": "<选项名>" } ]
@@ -198,7 +197,7 @@ applied, so it is refused instead of ignored
 
 | 还不行 | 具体到什么程度 |
 |---|---|
-| **声明一条行为开关** | 表里 **0 格**（见上一节）：通道通了，但没有任何一格可以声明。 |
+| **声明表里没有的行为开关** | 表里 **4 格**（见上一节）：`shopBias` / `prepLoadout` / `morphPairing` / `unequip`。声明别的开关或选项被**整包拒** —— 一格开关的入场券是「引擎先有实现点」，不是「包里写一个名字」。 |
 | **包整份覆盖引擎文件** | 包**不能**覆盖 `data/**` 或 `server/sim/**`，也不能指定任意文件。这不是「还没做」，是**刻意的**：`official` / `config` / `meta` / `shared` / `theme` / `serverModules` 那几格**没有通道**。要这类能力，得在引擎里做成一格开关 / 一条口径轴 / 一个槽位，包才可能声明它。 |
 | **从远端 catalog 装包** | 客户端只从**当前连着的这台服务器**同步（`GET /mods/catalog.json`）。**没有**第三方 catalog 源，也没有「从别的站点装一个包」这条路。 |
 | **把包裹式 zip 投到站上** | 站点只认 zip 根，套了顶层目录即 **400**（引擎自己两种都收）。重压一次即可，但**站点那一层今天就是这个形状**。 |
@@ -315,7 +314,7 @@ node tools/workshop-pack.mjs import ~/Downloads/my-pack.zip   # 把别人的包�
 - **包发公告**（`notices`）：一段结构化文本（公告 + 鸣谢），与引擎自带公告、其它包的公告**追加合并**，互不覆盖；纯文本、零代码的包因此也是合法包。见 [docs/WORKSHOP.md](docs/WORKSHOP.md) §1.13。
 - **包把数据挂成端点**（`routes`）：`{ path, file, cache }`，缓存策略取自引擎自己的那一份清单。见 `server/http/routeMount.js`。
 - **包选一套口径**（`variants`）：3 条轴 `training` / `form` / `deploy`，每条轴**必有「官方那一档」**，缺省就是引擎今天的行为。见 [docs/design/mod-layer.md](docs/design/mod-layer.md) §28.39。
-- **包声明一条规则开关**（`behaviour`）：通道已通、守卫已就位，但**表里今天一格都没有** —— 见 [behaviour：通道已通，表还是空的](#behaviour通道已通表还是空的)。
+- **包声明一条规则开关**（`behaviour`）：通道已通、守卫已就位，**表里有 4 格**（`shopBias` / `prepLoadout` / `morphPairing` / `unequip`，缺省都是官方那一档）—— 见 [behaviour：通道已通，表里有 4 格](#behaviour通道已通表里有-4-格)。
 - **客户端按哈希同步一个包**：`GET /mods/catalog.json` 给出每个包**每个文件**的 `path` / `bytes` / `sha256`（磁盘字节）与 `canonical`（进包哈希的那一份）；客户端用**与服务端同一个** `modManifestDigest` 重建包哈希，并发 4、单文件重试 2 次、30 秒超时，**字节先验哈希再落盘**（坏文件永不写进缓存）。见 `server/modCatalog.js` 与 `public/js/mods/sync.js`。
 
 ```bash

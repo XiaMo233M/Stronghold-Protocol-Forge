@@ -242,9 +242,152 @@
   容器 > 256 MiB 用不了镜像（浏览器没有流式摘要接口）。
 - **⑥（形态投影）**：`status` **不参与投影**（身份标牌；39/129 对里 `_b.level` 更低，照搬会显示练度回落）；
   价格与 `upgradeNum` 不动 ⇒「一档价拿到精锐数值」与「3 张 `_a` 换 1 张 `_b` 价值中性」两条**如实披露**。
-- **④（行为声明通道）**：**本版这一格没有任何可用开关** —— `BEHAVIOUR_SWITCHES` 今天为空 ⇒ **任何**一条 `behaviour`
-  声明都会被 `BEHAVIOUR_UNKNOWN_SWITCH` **点名整包拒**。这是刻意的：**格子先立起来、开关逐个按需加**
-  （首格与它的引擎实现点一起落）。
+- **④（行为声明通道）**：第 4 刀落地时**那一格没有任何可用开关** —— `BEHAVIOUR_SWITCHES` 当初为空 ⇒ **任何**一条
+  `behaviour` 声明都会被 `BEHAVIOUR_UNKNOWN_SWITCH` **点名整包拒**。那是刻意的：**格子先立起来、开关逐个按需加**
+  （首格与它的引擎实现点一起落）。**第 8 刀按这条落了前三格，见下。**
+
+### 行为开关的第一批格（第 8 刀）
+
+**投稿 `b293e061b38f`（「商店刷新盟约装备几率提升」）与 `8b4e5da55c58`（「休整期可更换技能和模组」）要的那两件事，
+收成引擎里两格实现好的开关（DESIGN §28.43.1）。** 两份原件都把它们做成了**安装器**（`files.json` 的 `copy` 整份
+覆盖 `data/items.json`、`server/match/**`、`shared/protocol.js` 与客户端文件）。本刀不采纳安装器：**引擎实现一格，
+任何包声明它**（`docs/WORKSHOP.md` §1.22 / §1.23）。
+
+* **`shopBias`**：`official`（缺省，今天的行为）· `bondBias`（装备槽只在本玩家**已激活**盟约对应的装备里抽，
+  **只偏置、不授予**）。读取点 `bondBiasPreference`（`server/match/pool.js`）→ `bondBiasBonds`
+  （`server/match/player/economy.js`）→ `PlayerEconomy._rollItemSlot`。**抽到的阶级仍由棋子份额决定**，某一级无命中
+  就**回落官方那一份**（偏向不会把商店抽空），库存闸门一步不跳过。
+* **未实现的两条 + 未读的两个字段（如实披露）**：原件的 `_doc` 还提到「已激活**核心**盟约优先于已激活附加盟约」
+  与「骑士戒律也接入这套偏向」，其 `payload/data/items.json` 另带 `giveBondBiasOnly`（115 处）与一批
+  `canGiveBond`（115 处）。那两条的源件不在我们手上 ⇒ **不做、也不在 `effect` 里声称做了**；这一格**只读
+  `giveBondId`**，不读 `giveBondBiasOnly`（我们数据里连这个键都不存在）。`test/shopBias.test.js` 用源码级断言钉住。
+* **缺省路径逐字节不变**：不声明 / 选缺省 ⇒ `restrict` 为 `null`，与从前同一份代码路径、同一份结果；
+  `Match` 只多一行 `mergeBehaviourDecls`（与 `variants` 同一个投影点，**不新增协议消息**）。
+  **不需要 `golden:update`**：没有任何一格在缺省时改变一局的结果。
+* **`prepLoadout`**：`locked`（缺省，今天的行为）· `prep`（休整期里、且**这个座位还没准备**时，也收一次既有的
+  `room.loadout { entries, ops? }`）。读取点 `LOADOUT_PHASES` / `loadoutPhasesFor`
+  （`server/match/match/platform.js`）→ `MatchPlatform.setLoadout` 的相位闸门。**不新增协议消息**（投稿自己那个
+  `g.loadout` 我们不需要：`room.loadout` 在比赛进行中本来就走到 `Match.setLoadout`）；`PREP` 那一次走
+  `mergeLoadoutEntries`：**只覆盖这次写了的干员**，没写的保留当前配发（整份替换会把其余干员静默打回默认）。
+  `INFO_CHECK` 那一半**不看** `ps.ready`（今天也不看）—— 两个相位是两条独立的门。缺省档读到的相位数组与从前
+  逐字相同（只有 `INFO_CHECK`），**不需要 `golden:update`**。
+* **测试**：新增 `test/shopBias.test.js`（9 条）+ `test/prepLoadout.test.js`（8 条：形状 / 两档 / 缺省与今天
+  逐字相同 / `prep` 档的合并语义 / `ready` 后仍拒 / 别的相位照旧 `WRONG_PHASE` / 协议面一个字节不动）。
+* **`morphPairing`**：`official`（缺省，今天的行为：少于两件装备不配对、配上了就每一件 `giveBondId` 都授予）·
+  `plus`（投稿 `19ea65909cf6` 那一套：**一件起配**、只取装备行里**最左边**那一件）。**判据只有一份** ——
+  `shared/morph.js` 的 `grantedBondsByMorph`：投稿原件是把**三处读取点各覆盖一份**
+  （`bondsMeta.js` / `sim/content/support/index.js` / `public/js/ui/gameLogic/bonds.js`），三处各写一份循环正是
+  这条规则最容易分叉的地方。本刀把那三处收成一个纯函数：prep 侧从 `GameData.morphPairing` 读（`Match` 建
+  `GameData` 时传进去），战斗侧由 `withMorphPairing` 的作用域给（与 `withGameData` 同一条同步作用域纪律，
+  `Battle` 构造期与每一步都压上），客户端由 `roomMods.js` 从 `welcome.mods` 合成后写入
+  （`setMorphPairing`，合并规则直接调 `mergeBehaviourDecls`，不自己实现一遍）。BattleSpec 与
+  `battleOptsFromMatch` 各带一个 `morphPairing` 键，**只在非缺省档才出现**。缺省档一个键都不多 ⇒ 逐字节不变。
+* **`morphPairing` 的槽位语义（第 7 段补上的那半条）**：投稿还要求「不占装备位、每名干员只一件、第三件顶掉真占格
+  那两件」—— 第三格落地时它被如实记成「未做」，这一段把它做完。判据是同一份 `shared/morph.js` 的
+  **`morphSlotPolicy(decl)`**：`official`（缺省）⇒ **`OFFICIAL_SLOT_POLICY`**，一个**共享的冻结单例**，每个方法都
+  逐字是引擎今天那条算术（`slotsUsed` = `items.length`、`slotCap` / `maxItems` = `equipPerChess`、`replacedIndex`
+  的「`replaceUid` 找不到 ⇒ 0」）；`plus` ⇒ **`PLUS_SLOT_POLICY`**（不占位、每名干员最多一件、顶替只挑真正占格的
+  那一件、一行最多 `equipPerChess + 1` 件）。六处读取点**同判**：服务端 `player/items.js`（`_attach` /
+  `_takeReplaced` / `equip` 的两条守卫）· `player/acquire.js`（回收）· `bot.js`（选人与选装备）· `invariants.js`
+  （不变量），客户端 `ui/detailPanel.js`（`EQUIP n/2` 分子与「不占装备格」标签）· `ui/gameLogic/placement.js`
+  （`equipReplaces` 的替换判据，`roomMods.js` 把档位写进 `bonds.setMorphSlotPolicy`）。
+  **缺省档逐字节不变**：没声明 / `official` / 不认识的档位返回的都是**那个单例本身**，缺省路径上「同一批数字、
+  同一次比较、同一个 splice 下标」⇒ **不需要 `golden:update`**，已发布包一个字节不动。`gamedata.equipPerChess`
+  本身**一字未动**（那两格装备位是官方的，策略只回答「这一行占了几格、能不能再放一件、顶替挑哪一件」）。
+  `getItem` 的契约写在 `shared/morph.js`（收一件棋子或一个 id，回 items 记录）—— 第 7 段第一版在这里踩过一次真
+  bug（`invariants.js` 写的是收棋子的形状、其余写的是收 id 的，判据只假设一种 ⇒ 不变量把变形同构体当成占位的普通
+  装备），所以它由 `test/morphSlots.test.js` 的 `collectViolations` 断言回归。
+* **测试**：新增 `test/morphSlots.test.js`（8 条行为级：缺省档拿到官方单例 / 官方档它占位且会被顶掉 / `plus` 档
+  两件真装备 + 它共存 / 第三件真装备顶掉真占格的那一件 / 点名它做 `replaceUid` 被拒 / 每名干员最多一件 / 点名真
+  占格的有效 / 官方档不认「槽位豁免」）。`test/morphPairing.test.js` 原地改了两条：原来钉「未实现」的那条**反过来
+  钉「已经做了」**（`effect` 必须写明动了槽位、四处服务端读取点都必须读这一局的策略），另加两条单元级断言
+  （缺省档 `===` 官方单例、`equipSlotsUsed` 的裸入口）。
+* **测试**：`test/morphPairing.test.js`（形状 / 档位归一化 / 判据本体两档 / prep 读取点 / 战斗读取点的
+  缓存按档位失效 / **三处读取点同判**（逐行遍历两档）/ 三处共用同一份判据的源码级断言）。
+* **`test/packBehaviour.test.js` 原地改了三处（换语义，不放松）**：①「本版是空表」→「真表里每一格都通过形状守卫、
+  每一格至少两档且有非缺省档」；②「空表也响亮」→「不认识的开关也响亮」（被拒的名字从 `shopBias` 换成真表外的名字，
+  并新增「文案必须列出真表里的每一个开关」）；③「真表（空）下包装不上」→「真表下不认识的开关装不上」+ 新增
+  「选了缺省档 = 引擎今天的行为（逐格遍历真表）」。`PACK_FIELDS` 的闭集计数**不变**（这一刀加的是**表里的成员**，
+  不是顶层键）。`test/modSurface.test.js` 的 `ANCHOR_MODULES` 多登记三个模块（`pool` / `economy` / `platform`）
+  —— 那是**判据的登记**，不是放松：新增的锚点照样逐条被验。
+
+### 第 8 刀第四格 `unequip`：装备拆卸，以及本层**第一条「开关 + 新意图」**
+
+**投稿 `79de9ff03518`（「装备拆卸mod」）要的那件事收成引擎里一格开关 + 一条新意图（DESIGN §28.43.2）。**
+原件同样是安装器：`files.json` 的 `copy` **整份覆盖** `shared/protocol.js`、`server/match/match/intents.js`、
+`server/match/player/items.js` 与六个客户端文件，并自加 `g.unequip {itemUid}` 意图。
+
+* **`unequip`**：`official`（缺省，今天的行为：装上之后只能靠精英化 / 合成 / 卖出离开）· `allow`（休整期可以
+  把一件已装备的装备**退回手牌**，右→左优先；手牌满则进**临时整备区**）。读取点：
+  `unequipAllowed(decl)`（`server/match/player/items.js`，模块层纯函数）→ `PlayerState.unequip`；客户端同一判据
+  读它决定**画不画**「卸下」按钮。
+* **第一条「开关 + 新意图」的五处落点**（将来加意图照抄这份清单）：① `shared/protocol.js` 的 `C2S` 表
+  `'g.unequip': { itemUid: isUid }`（与 `g.equip.itemUid` / `g.destroy.uid` **同一个 `isUid` 子**）；
+  ② `server/match/match/intents.js` 一行分支；③ `PlayerState.unequip`；④ 客户端发送点（`gameActions.js` 复用
+  既有 `act()`）+ UI（`detailPanel.js` 的 `ItemRow` 的「卸下」+ `game.js` 接线）；⑤ 一处可锚的判据导出。
+  **`PROTOCOL_VERSION` 不动**（新增类型不是改已有形状，先例 `records.mine`）；**不新增 S2C 消息**。
+* **缺省档逐字节不变**：`unequipAllowed` 为假 ⇒ 回 `ERR.BAD_TARGET` + `'equipped items are locked'`，
+  **与 `destroy` 今天那一句逐字相同**；客户端**一个按钮都不画**（判据是「有人传 `onUnequip` 且 `unequipAllowed()`」），
+  `ItemDetail` 那句「配发后无法取下」**只在 `allow` 档**换成不带那半句的版本 ⇒ **不需要 `golden:update`**。
+* **原子性**（这一格最容易做坏的地方）：`_detach` 之后 `stow(piece, { allowTemp: true })` 可能返回 `null`
+  （手牌与临时都满）。那时按**原下标**塞回 `holder.items` 并回 `ERR.HAND_FULL` —— 先摘后塞没有回滚的话装备会
+  **凭空消失**。用 `HAND_FULL` 而不是 `BAD_TARGET`：「没地方放」是独立、可行动的错误。
+* **池不变式照旧**：装备只是从**装备位**移到**手牌 / 临时**（同一个 `piece`、同一个 `uid`）⇒
+  `SharedItemPool.held()` 前后都数得到它 ⇒ `held` / `cap` / `left` 全不变。**没有「归还」这回事**
+  （`destroy` / `sell` 才真让池子少一件）。
+* **刻意的决定：本格不发内容钩子。** `HOOKS` 那 19 个是**契约面**（进 `META`），「卸下」用哪一个都不贴切
+  （不是 `onDestroy`、不是 `onEquip`），今天也没有包需要被通知；将来真有需要就**另立一刀**按契约面扩展。
+  写进 §28.43.2 是为了让后人知道这是**决定**，不是漏做。
+* **i18n**：新增两个词条（`卸下`、以及不带「无法取下」的那半句），**四个包都补齐**（en / ja / ko / zh-TW）。
+  `node tools/i18n.mjs check --all --strict` 的 msgid 数 **1283 → 1285**，en 仍 **100 %**，ja / ko / zh-TW 的
+  **57 个缺失与基线逐字相同**（那是既有缺口，不是本刀引入的）。
+* **测试**：新增 `test/unequip.test.js`（10 条：真表那一格 / `C2S` 登记与 `validateC2S` 的拒绝（**两层都钉**：
+  `validateC2S` 返回原因串、`server/net.js` 折成 `BAD_MSG`，而 `Match.handle` 只认过了它的消息）/ 缺省档
+  `g.destroy` 与 `g.unequip` 回**同一句**且一个字节不落地 / `allow` 档三分支（手牌 / 临时 / 两者都满 ⇒
+  原子回滚 + `HAND_FULL` 且**下标与失败前相同**）/ 池快照与 `checkInvariants` 前后一致 / `recompute` 后盟约人数
+  真的变了（1 → 0，用 `morph-bonds.test.js` 的配方）/ 客户端源码级断言 / 四个 i18n 包的两个新词条）。
+  `test/modSurface.test.js` 的 `ANCHOR_MODULES` 多登记一个模块（`items`）—— 同样是**判据的登记**，不是放松。
+* **`test/match/fuzz.test.js` 必须同时教一遍**（这一次全量跑出来的真事）：那个模糊测试按 `C2S` 表逐个类型造随机
+  载荷，并有 `assert.equal(validateC2S(msg), null, …)` 钉住「造出来的每一条都是合法消息」。新类型没进它的
+  `switch` 就会掉进 `default`（`{ t }`，缺字段）⇒ **当场两条红**。补法是加一行
+  `case 'g.unequip': return { t, itemUid: uid() };` —— **断言一字未动**，而新意图这下真的进了模糊覆盖
+  （随机 uid 会打到 `BAD_TARGET` / 缺省档那句，都被 `assert.ok(res.ok || ERR[res.error])` 接住）。
+  ⇒ **记在这里**：这一层将来再加意图，`fuzz.test.js` 的 `randomIntent` 是必须同步的第三处（协议表、`intents.js`、
+  它的 `switch`）。
+
+### 第 8 刀第二格的**客户端半**：修掉一句写了很久的谎话（投稿 `8b4e5da55c58`）
+
+第二格的服务端半（`Match.setLoadout` 读 `LOADOUT_PHASES`）第 8 刀就落了，客户端半一直没落。取证发现它**不是**
+"少一个发送点"，而是**客户端在撒谎**：
+
+* **发送链路整套早就有**：`public/js/ui/loadoutSync.js` 的 `installLoadoutSync` 早在发 `room.loadout { entries, ops }`
+  （500 ms 去抖、面板关闭立刻冲刷、`WRONG_PHASE`/`ROOM_STARTED` ⇒ `'locked'` + 提示）；单干员编辑的纯函数也早在
+  （`loadoutModel.setChoice`，缺键即删 entry，与 `mergeLoadoutEntries` 的"只覆盖写了的干员"天然对齐）。
+  ⇒ **本刀不新造发送链路、不新增协议消息、不动 `PROTOCOL_VERSION`。**
+* **缺的是客户端自己的相位判据，而它写死在两处**（`screens/loadout.js`）：
+  1. 「本局已锁定 · 下一局生效」那句的 `locked`（原来"在局中、相位不是 `INFO_CHECK` 就算锁定"）—— 实测它
+     **只喂两处文案、不 disable 任何控件** ⇒ 声明 `prep` 的房间出现「**服务端收得下、界面却说锁着**」；
+  2. `shouldAutoClose` 的简报那一支 ⇒ 玩家刚进 `PREP`（正是服务端允许改调配的那一段）面板被**自动收走**。
+* **做法**：把那份判据收成"一份两档的表 + 一个纯函数"。`loadoutSync.js` 导出 `LOADOUT_CLIENT_PHASES` /
+  `loadoutLockPhases(option)` / `currentLoadoutLockPhases()` / `setPrepLoadout(option)`；`roomMods.js` 在**同一处**
+  （与 `morphPairing` / `unequip` 并列）用**同一份合并规则**（`mergeBehaviourDecls` + `behaviourValue`）喂档位。
+* **两张表的关系**：客户端的表与服务端的 `LOADOUT_PHASES` 是两张表（客户端不能 `import server/**`），这是这一层
+  既有的做法 —— **客户端副本 + 一个测试把两张表钉在一起**（与 `CLIENT_WRAP_COMPONENTS`↔`MOD_COMPONENT_IDS`、
+  `CLIENT_PANEL_SLOTS`↔`MOD_PANEL_SLOTS` 逐字同一条）。
+* **缺省逐字节不变**：缺省 / 没声明 / 不认识的档位 ⇒ 只含 `INFO_CHECK`；两处的旧表达式与新判据
+  **逐相位遍历同一个布尔** ⇒ 界面一个字节不变，**没有任何 `golden:update`**。
+* ⚠️ **还没做的一件（如实披露，`docs/design/mod-layer.md` §28.43.4 记账）**：`PREP` 里**没有入口**能打开干员调配
+  面板 —— `LoadoutButton` 只在大厅 / 房间 / 简报（只活在 `INFO_CHECK`）里出现，`screens/game.js` 里一个都没有
+  ⇒ 在贴一个 `PREP` 入口之前，"服务端开了"与"玩家改得了"之间还差最后一步。那是**在对局屏新增一个可见控件**，
+  属"新渲染分支"，本轮不做、记账待裁。
+* **顺带排查（同类写死相位 / 写死能力，只记录不改）**：`screens/support.js` 的 `shouldAutoClose` 同形，但助战
+  **没有开关**且服务端 `room.support` 同样只在 `INFO_CHECK` 收 ⇒ **两边一致、不是缺陷**（将来若要"休整期换助战"，
+  那就是第 5 格开关）；`ui/equipReplace.js` 的 `if (equipped.length < 2) return null;` 与
+  `ui/gameLogic/placement.js` 的 `items.length < 2` 把**装备位写死 2** ⇒ **与第 7 段（槽位语义）直接相关**，
+  第 7 段必须一并交代（否则客户端对话框的触发判据会与服务端的 `equipPerChess` 对不上）。
+* **测试**：新增 `test/prepLoadoutClient.test.js`（10 条：缺省档相位表逐字相等 / 默认状态不许"默认开" /
+  **逐相位遍历**新旧判据同判 / `prep` 档只放开 `PREP` 一个相位 / **两张表逐档逐字相等** / 源码级（那一行读函数、
+  旧写死消失、`ownLocked` 原样保留）/ `shouldAutoClose` 两档行为 / `roomMods` 接线 / **客户端半不新造发送链路**）。
 
 ## 0.15.3-0.2.4 — 2026-10-12
 

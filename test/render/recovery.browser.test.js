@@ -1,7 +1,10 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
+// 截图落盘用 `fileURLToPath`（`new URL(...).pathname` 在 Windows 上给出 `/E:/…` ⇒ puppeteer 解析成 `E:\E:\…`）；
+// 平台缺陷修复，不改任何断言。
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const enabled = process.env.RENDER_E2E === '1' && existsSync(CHROME);
 const art = existsSync(new URL('../../public/assets/local/map/autochess/TX_autochessi_D.png', import.meta.url));
@@ -143,7 +146,7 @@ describe('renderer recovery after transient resource failures', { skip: !enabled
       await page.waitForFunction(() => window.__demo.stats().board3d.on, { timeout: 15000 });
       assert.ok(requests > before, 'the failed resource is actually requested again');
       assert.equal(await page.evaluate(() => window.__demo.view.debug.app.view.parentNode.querySelectorAll('canvas').length), 2);
-      await page.screenshot({ path: new URL(`../e2e/out/recovery-${resource}.png`, import.meta.url).pathname });
+      await page.screenshot({ path: fileURLToPath(new URL(`../e2e/out/recovery-${resource}.png`, import.meta.url)) });
     } finally { await page.close(); }
   });
 });

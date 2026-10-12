@@ -293,12 +293,29 @@ export const MOD_SURFACE = Object.freeze([
     id: 'behaviour',
     layer: 'B',
     // 与 `variants`（§28.39）是**同一形状、不同一张表**：包声明的是「哪一格开关、哪一档」，不是「改成几」、
-    // 更不是「改哪个文件」。这一格今天**没有执行点**，因为 `BEHAVIOUR_SWITCHES` 是空表 —— 首格与它的引擎
-    // 实现点一起落（业主裁决）。所以这里锚的是**表与顶层键**：表里加一格必须同时进本清单与 docs/MOD-SURFACE.md。
+    // 更不是「改哪个文件」。第 4 刀落这一格时表是**空的**（通道 + 守卫本身）；第 8 刀起表里有实现好的格
+    // （`shopBias` / `prepLoadout` / `morphPairing`），每一格都带**引擎侧的读取点** —— 所以这里锚的是
+    // **表、顶层键，以及这三格的读取点**：表里加一格必须同时进本清单、进 docs/MOD-SURFACE.md，并补一节文档。
     decl: 'pack.json.behaviour = [{ switch, option?, name?, desc? }]',
     anchors: [
       { symbol: 'BEHAVIOUR_SWITCHES', module: 'behaviour' },
       { symbol: 'PACK_FIELDS', members: ['behaviour'] },
+      // 表里每一格的引擎侧读取点（第 8 刀起；表里再加一格 ⇒ 照这个形状再加一个可锚的符号）
+      { symbol: 'bondBiasPreference', module: 'pool' },
+      { symbol: 'bondBiasBonds', module: 'economy' },
+      { symbol: 'LOADOUT_PHASES', module: 'platform' },
+      { symbol: 'loadoutPhasesFor', module: 'platform' },
+      { symbol: 'MORPH_PAIRING_OPTIONS', module: 'morph' },
+      { symbol: 'grantedBondsByMorph', module: 'morph' },
+      // 第 7 段：`morphPairing` 的**装备位语义**那半条（同一格开关）。判据收成一个策略对象，六个读取点都读它：
+      // 服务端 `player/items.js` / `player/acquire.js` / `bot.js` / `invariants.js`，客户端
+      // `ui/detailPanel.js` 与 `ui/gameLogic/placement.js`。这四个符号是那一格的可锚面。
+      { symbol: 'morphSlotPolicy', module: 'morph' },
+      { symbol: 'matchSlotPolicy', module: 'morph' },
+      { symbol: 'OFFICIAL_SLOT_POLICY', module: 'morph' },
+      { symbol: 'PLUS_SLOT_POLICY', module: 'morph' },
+      { symbol: 'equipSlotsUsed', module: 'morph' },
+      { symbol: 'unequipAllowed', module: 'items' },
     ],
     requires: [
       '闭枚举：开关名与选项名都只许取 `BEHAVIOUR_SWITCHES` 里有的（`BEHAVIOUR_UNKNOWN_SWITCH` / `BEHAVIOUR_UNKNOWN_OPTION`，整包拒，不是忽略）',
@@ -306,10 +323,10 @@ export const MOD_SURFACE = Object.freeze([
       '**不是贡献项**：一个只带 `behaviour` 的包照旧 `EMPTY_PACK`（与 `variants` / `support` / `playtest` 同一条）',
       '必须 `combat: true`（第五条硬闸门 `BEHAVIOUR_NEEDS_COMBAT`）：一格的入场券本就是「它改一条规则」⇒ 必须进房间摘要闸门与 golden 语料',
       '不声明 ⇒ 归一化清单里**不长出这个键**（无条件写 `behaviour: []` 会让所有已发布包的内容哈希改变，§28.2）；**必须**进包身份哈希（`server/workshop.js` 的 `canonicalJson(pack)`），**不进** `modDigest`（只哈希 `[id, hash]`）',
-      '加一格的门槛：**那一格必须已经在引擎里有实现点**（比 `VARIANT_AXES` 的加轴纪律更严）—— 本格今天空表正是这条的后果',
+      '加一格的门槛：**那一格必须已经在引擎里有实现点**（比 `VARIANT_AXES` 的加轴纪律更严）—— 本版那三格就是按这条落的，每一格都有一处具名读取点与一个测试文件',
     ],
-    files: ['shared/workshop.js', 'shared/behaviour.js', 'server/index.js'],
-    tests: ['test/packBehaviour.test.js'],
+    files: ['shared/workshop.js', 'shared/behaviour.js', 'shared/morph.js', 'server/index.js', 'server/match/pool.js', 'server/match/player/economy.js', 'server/match/match/platform.js', 'server/match/player/items.js'],
+    tests: ['test/packBehaviour.test.js', 'test/shopBias.test.js', 'test/prepLoadout.test.js', 'test/morphPairing.test.js', 'test/unequip.test.js'],
     spec: '§28.43',
   },
   // ------------------------------------------------------------------ C 层：客户端界面

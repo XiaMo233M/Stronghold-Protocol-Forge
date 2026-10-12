@@ -6,6 +6,7 @@
 // the player state).
 
 import { pieceDir, parseDir, mergeTile } from '../board.js';
+import { matchSlotPolicy } from '../../../shared/morph.js';
 import { MAX_OFFER_SLOTS } from './common.js';
 import { onMerge } from '../botEmotes.js';
 
@@ -113,7 +114,10 @@ export class PlayerAcquire {
     if (!where && deployed.length) where = toTile(mergeTile(deployed));
     for (const it of items) {
       if (this.stow(it, { allowTemp: true })) continue;
-      if (where && elite.items.length < this.gd.equipPerChess) { elite.items.push(it); continue; }
+      // 「还放得下吗」由这一局的装备位策略回答（第 7 段）：缺省档逐字就是 `elite.items.length < equipPerChess`，
+      // `plus` 档下变形同构体不占位、且每名干员最多一件（`shared/morph.js`）。
+      const policy = matchSlotPolicy(this.m);
+      if (where && policy.canHold(elite.items, this.gd.item(it.id), this.gd.equipPerChess, (id) => this.gd.item(id))) { elite.items.push(it); continue; }
       this.m.log.warn?.(`[match ${this.m.roomCode}] ${this.playerId}: returned item ${it.id} destroyed (no space)`);
     }
     // the returned equipment follows the auto-merge rule like any other gain ("已拥有2件同一初始装备时…自动合并")
@@ -189,7 +193,8 @@ export class PlayerAcquire {
     const np = this.acquireChess(newId, { source: 'transform' });
     for (const it of left) {
       if (this.stow(it, { allowTemp: true })) continue;
-      if (np && this.find(np.uid) && np.items.length < this.gd.equipPerChess) { np.items.push(it); continue; }
+      const policy = matchSlotPolicy(this.m);
+      if (np && this.find(np.uid) && policy.canHold(np.items, this.gd.item(it.id), this.gd.equipPerChess, (id) => this.gd.item(id))) { np.items.push(it); continue; }
       this.m.log.warn?.(`[match ${this.m.roomCode}] ${this.playerId}: returned item ${it.id} destroyed (no space)`);
     }
     if (left.length) this.checkItemMerges();

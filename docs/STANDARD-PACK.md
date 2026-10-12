@@ -43,9 +43,10 @@
    （`behaviour` 选规则档、`variants` 选口径、`support` 只决定助战卡池里放谁、`playtest` 只是试玩时直接发手牌）。
    ⚠️ **声明行为开关的包必须另带一样真贡献**：`content` / `client` / `notices` / `routes` … 里至少要有一个，
    否则整包被拒（`EMPTY_PACK` 的文案会逐字写「`"behaviour"` is NOT a contribution — a pack that declares it
-   alone brings nothing into a match」）。**今天 `behaviour` 还多一道**：`shared/behaviour.js` 的
-   `BEHAVIOUR_SWITCHES` 是空表 ⇒ 任何声明都先被 `BEHAVIOUR_UNKNOWN_SWITCH` 拒（首格与它的引擎实现点同刀）；
-   等有一格之后，上面那条「另带一样真贡献」照样管着它。
+   alone brings nothing into a match」）。**声明还得是表里有的**：`shared/behaviour.js` 的
+   `BEHAVIOUR_SWITCHES` 今天 **4 格**（`shopBias` / `prepLoadout` / `morphPairing` / `unequip`）⇒
+   声明表里没有的开关或选项被 `BEHAVIOUR_UNKNOWN_SWITCH` / `BEHAVIOUR_UNKNOWN_OPTION` 点名整包拒；
+   上面那条「另带一样真贡献」照样管着它。
 4. **版本范围与 `combat`**：
    - `api` 要落在 `MOD_API_VERSION` 相容范围内（今天 `MOD_API_VERSION = 1`，写法 `">=1 <2"`）；
      **不写 `api` 不比对**，但写了就得对。

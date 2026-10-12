@@ -34,6 +34,10 @@ export class MatchIntents {
       case 'g.equip': return ps.equip(msg.itemUid, msg.targetUid, msg.replaceUid ?? null);
       case 'g.art': return ps.useArt(msg.itemUid, msg.row, msg.col, msg.dir);
       case 'g.destroy': return ps.destroy(msg.uid);
+      // 装备拆卸（行为开关 `unequip: "allow"`，DESIGN §28.43.1）：把一件已装备的装备退回手牌 / 临时整备区。
+      // 缺省档下 `PlayerState.unequip` 回的就是 `destroy` 那句 `'equipped items are locked'` ⇒ 这一行在缺省档与
+      // 「意图不存在」**行为等价**。
+      case 'g.unequip': return ps.unequip(msg.itemUid);
       case 'g.reward': return ps.pickReward(msg.idx);
       case 'g.choice': return msg.choiceId !== undefined
         ? this.pickPersonalChoice(ps, msg.idx, msg.choiceId)

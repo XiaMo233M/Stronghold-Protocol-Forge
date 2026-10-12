@@ -65,15 +65,28 @@ after(() => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { 
 
 // ---------------------------------------------------------------------------------------------------------------
 describe('表：闭枚举，一格开关只有一个值', () => {
-  test('**本版是空表**（业主裁决①）：通道先开、首格与它的引擎实现点一起落', () => {
-    // 这一行是**交付物的定义**，不是「今天恰好是空的」：第 4 刀交的就是通道 + 守卫，通道真的通、且响，
-    // 而引擎里还没有一格实现好的规则开关之前，一格都不许声明。
-    assert.deepEqual(Object.keys(BEHAVIOUR_SWITCHES), []);
-    assert.deepEqual([...BEHAVIOUR_SWITCH_NAMES], []);
-    assert.equal(isBehaviourSwitch('shopBias'), false);
-    assert.equal(isBehaviourOption('shopBias', 'official'), false);
-    // 空表也要能通过形状守卫（空表是**合法**的今天，而不是「表坏了」）：「一片空白」与「表自己烂了」必须分得开。
-    assert.deepEqual(behaviourSwitchIssues(BEHAVIOUR_SWITCHES), []);
+  test('**真表里每一格都实现好了**（通道 + 守卫之后的第一批格）：逐格形状守卫为 `[]`', () => {
+    // 第 4 刀（0.16.0）交的是**通道 + 守卫**本身，那一版的断言是「本版一个开关都没有」
+    // （`assert.deepEqual(Object.keys(BEHAVIOUR_SWITCHES), [])`）。第 8 刀按业主裁决**逐格加开关**：
+    // 每一格都带**引擎侧实现点**才准进表，所以这一条换成同一件事的**当代表达** ——
+    // 「表里每一格都通过形状守卫、每一个都能被解析、真表以外一个都不认」。
+    // **没有放松**：整份表的完整性仍被要求（`behaviourSwitchIssues` 逐格为 `[]`），而且比空表那一版多钉了
+    // 「每一格至少两档 + 有非缺省档」——一个只有缺省档的开关等于没有开关。
+    const names = Object.keys(BEHAVIOUR_SWITCHES);
+    assert.ok(names.length >= 1, '第 8 刀之后真表里至少有一格实现好的开关');
+    assert.deepEqual([...BEHAVIOUR_SWITCH_NAMES], names, '名字清单与表逐字同序');
+    assert.deepEqual(behaviourSwitchIssues(BEHAVIOUR_SWITCHES), [], '真表自己必须对得上（逐格）');
+    for (const name of names) {
+      assert.equal(isBehaviourSwitch(name), true);
+      const spec = BEHAVIOUR_SWITCHES[name];
+      assert.ok(spec.options.length >= 2, `${name}：一格开关至少两档（缺省那一档 + 至少一个非缺省档）`);
+      assert.ok(spec.options.includes(spec.default), `${name}：缺省必须在 options 里`);
+      assert.ok(spec.options.some((o) => o !== spec.default), `${name}：必须有一个非缺省档`);
+      for (const o of spec.options) assert.equal(isBehaviourOption(name, o), true, `${name} 的选项 ${o}`);
+      assert.equal(isBehaviourOption(name, 'nope'), false, `${name}：这一格以外的选项名不认`);
+    }
+    // 空表是**合法**的（那正是第 4 刀那一版），所以「一片空白」与「表自己烂了」必须分得开
+    assert.deepEqual(behaviourSwitchIssues({}), []);
   });
 
   test('形状守卫的**失败分支**自己也被测：一格少任何一件都当场报出来', () => {
@@ -240,27 +253,39 @@ describe('第五条 `combat` 硬闸门 + `EMPTY_PACK` 的次序', () => {
 
 // ---------------------------------------------------------------------------------------------------------------
 describe('空表也响亮（业主点名必加的那一条）', () => {
-  test('空表也响亮：本版没有任何可声明的开关，任何声明都被点名整包拒（不是静默通过）', () => {
-    // 这一条钉的是「通道真的通、且响」：表空着不是「不认识的开关一律忽略」，
-    // 而是一个都不认识 ⇒ 逐条点名拒绝，作者一眼看到本版有哪些开关（一个都没有）。
-    assert.deepEqual(Object.keys(BEHAVIOUR_SWITCHES), [], '本刀＝通道 + 守卫，首格空表（业主裁决①）');
+  test('不认识的开关也响亮：本版**认得的**只有真表里那几个，其余一律点名整包拒（不是静默通过）', () => {
+    // 这一条钉的是「通道真的通、且响」：通道开着**不等于**「不认识的开关一律忽略」。
+    // （第 8 刀之前这条钉的是「本版一个开关都没有」；那一版是**通道 + 守卫**本身，首格与它的引擎实现点一起落。
+    // 今天真表里有实现好的格了，所以这一条改成同一件事的**当代表达**：真表里的格名被认，真表外的名字被点名拒。
+    // 断言没有放松 —— 它仍在钉「响亮拒绝」，只是被拒的那个名字从 `shopBias` 换成了真表外的名字。）
+    const known = Object.keys(BEHAVIOUR_SWITCHES);
+    assert.ok(known.length >= 1, '这一条的前提：真表里至少有一格实现好的开关');
+    assert.equal(isBehaviourSwitch('nopeBias'), false);
+    for (const name of known) assert.equal(isBehaviourSwitch(name), true, `真表里声明的那一格必须被认：${name}`);
 
-    const res = parseBehaviourDecl([{ switch: 'shopBias', option: 'on' }]);
+    const res = parseBehaviourDecl([{ switch: 'nopeBias', option: 'on' }]);
     assert.equal(res.ok, false);
     assert.equal(res.error, 'BEHAVIOUR_UNKNOWN_SWITCH');
-    assert.match(res.detail, /shopBias/); // 命中的名字必须出现在文案里，不是只报一个码
-    assert.match(res.detail, /none yet/); // 空表时文案要说清「一个都没有，因为没有实现点」
+    assert.match(res.detail, /nopeBias/); // 命中的名字必须出现在文案里，不是只报一个码
+    // 文案里列出**本版真的有哪些开关**（空表那一版的「none yet — …」只要表里有一格就不再成立）
+    for (const name of known) assert.match(res.detail, new RegExp(`"${name}"`), `文案必须列出可声明的开关：${name}`);
 
     // 整包路径也要拒：不是「解析器拒、装载器放过」。
     const pack = normalizePackManifest(
-      { id: 'p', name: 'p', version: '1.0.0', combat: true, behaviour: [{ switch: 'shopBias' }] },
+      { id: 'p', name: 'p', version: '1.0.0', combat: true, behaviour: [{ switch: 'nopeBias' }] },
       'p',
     );
     assert.equal(pack.ok, false);
     assert.equal(pack.error, 'BEHAVIOUR_UNKNOWN_SWITCH');
-    // 忘了写 `combat` 也一样：真表下**任何**声明都到不了那条闸门 —— 响亮拒绝排在它前面
-    assert.equal(normalizePackManifest({ id: 'p', name: 'p', content: ['chess'], behaviour: [{ switch: 'shopBias' }] }, 'p').error,
+    // 忘了写 `combat` 也一样：不认识的开关**先**被那一层拒 —— 响亮拒绝排在 `BEHAVIOUR_NEEDS_COMBAT` 前面
+    assert.equal(normalizePackManifest({ id: 'p', name: 'p', content: ['chess'], behaviour: [{ switch: 'nopeBias' }] }, 'p').error,
       'BEHAVIOUR_UNKNOWN_SWITCH');
+  });
+
+  test('每一格真表都要能通过形状守卫（加格不是「塞进去就算」）', () => {
+    // `behaviourSwitchIssues` 是加格时最容易漏的那道闸：一格少了 `actions` / `options` / `default` / `effect` /
+    // `optionLabels` 就是「声明了、装上了、什么都没发生」。真表通过它，等于每一格都有实现点与文案。
+    assert.deepEqual(behaviourSwitchIssues(BEHAVIOUR_SWITCHES), []);
   });
 });
 
@@ -293,13 +318,36 @@ describe('缺省逐字节不变', () => {
     assert.equal(behaviourIsDefault(off, 'shopBias', SYNTH), true);
   });
 
-  test('真表（空）下：一个包**不可能**靠 `behaviour` 改变自己的摘要，因为它根本装不上', () => {
-    const raw = { id: 'p', name: 'P', combat: true, content: [], operators: { char_x: { powers: [], bonds: [] } }, behaviour: [{ switch: 'shopBias' }] };
+  test('真表下：一个包只能声明**真表里有的**那一格；它想靠一个不认识的开关改摘要 —— 装不上', () => {
+    const raw = { id: 'p', name: 'P', combat: true, content: [], operators: { char_x: { powers: [], bonds: [] } }, behaviour: [{ switch: 'nopeBias' }] };
     const real = normalizePackManifest(raw, 'p');
     assert.equal(real.ok, false);
     assert.equal(real.error, 'BEHAVIOUR_UNKNOWN_SWITCH');
-    // 而同一份 raw 去掉 `behaviour` 之后逐字就是既有的那次归一化 —— 「未声明的行为一个字不改」的证据在下面一条。
+    // 而同一份 raw 去掉 `behaviour` 之后逐字就是既有的那次归一化
     assert.equal(Object.hasOwn(normalizePackManifest({ ...raw, behaviour: undefined }, 'p').pack, 'behaviour'), false);
+  });
+
+  test('**选了缺省档 = 引擎今天的行为**（行为层那一半的「逐字节不变」）', () => {
+    // 真表里的每一格都过一遍：不声明这一格 ⇒ 读点是今天的值；显式选 `default` 那一档 ⇒ **同一个值**。
+    // 两条路在**规则读取**这一层必须等价（`behaviourIsDefault`）—— 这就是「声明了但选了缺省 = 没声明」这条承诺的
+    // 落点。**它不承诺归一化清单逐字节相同**：清单进的是包身份哈希，两份不同的字节必须有两个不同的摘要
+    // （§28.43 判据 4），所以这里钉的是读取点，不是清单。
+    for (const name of Object.keys(BEHAVIOUR_SWITCHES)) {
+      const spec = BEHAVIOUR_SWITCHES[name];
+      assert.equal(behaviourValue(null, name), null, `${name}：没声明 ⇒ 读点没有值`);
+      assert.equal(behaviourIsDefault(null, name), true, `${name}：没声明 = 今天的行为`);
+      const decl = parseBehaviourDecl([{ switch: name }]);
+      assert.equal(decl.ok, true, decl.detail);
+      const read = behaviourValue(decl.decl, name);
+      assert.equal(read, spec.default, `${name}：只写开关不写 option ⇒ 这一格的缺省`);
+      assert.equal(behaviourIsDefault(decl.decl, name), true, `${name}：选了缺省档 = 今天的行为`);
+      assert.deepEqual(behaviourActions(decl.decl), { ok: true, actions: [] }, `${name}：缺省档没有动作`);
+      // 另一端：真表里每一格至少有一个**非缺省**选项，选它就不再是「今天的行为」
+      const on = spec.options.find((o) => o !== spec.default);
+      assert.ok(on, `${name}：一格开关至少要有一个非缺省选项，否则它没有任何作用`);
+      const onDecl = parseBehaviourDecl([{ switch: name, option: on }]).decl;
+      assert.equal(behaviourIsDefault(onDecl, name), false, `${name}：非缺省档不是今天的行为`);
+    }
   });
 });
 

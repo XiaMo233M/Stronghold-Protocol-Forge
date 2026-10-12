@@ -10,6 +10,9 @@ import { boardTileOf, fieldTile } from './camera.js';
 import { layoutOf } from '../../render/layout.js';
 import { deployedRecord, fieldsStandIn, standInOf } from './standIn.js';
 import { t } from '../../../../shared/i18n.js';
+// 装备位语义（第 7 段）：`equipReplaces` 的「两格满了」那半读这一页的策略（`ui/gameLogic/bonds.js` 的 `slotPolicy`，
+// 由 `roomMods.js` 从 `welcome.mods` 写一次）。缺省档 ⇒ 引擎今天那条算术。
+import { slotPolicy } from './bonds.js';
 
 
 // ---- placement (canPlace mirror) ------------------------------------------------------------------------
@@ -416,13 +419,20 @@ const PROMOTE_KEYS = new Set(['use_equip_upgrade_char', 'equip_round_start_upgra
  * GitHub #263: the pick is destroyed, then the item resolves and the slot stays free). Not when nothing is replaced: an
  * attaching item that completes an item merge (the server merges it instead of equipping, `equipMerges`) or a
  * 博士投影 on an elite (refused by the server).
+ *
+ * 第 7 段（`morphPairing: "plus"`）：判据的「两格满了」那半改读这一页的**装备位策略**（`slotPolicy()`，
+ * `shared/morph.js`）—— 变形同构体不占位、且它**永远不是**被顶掉的那一件（它自己从不打开替换对话框）。
+ * 缺省档下策略就是引擎今天那条算术（`slotsUsed` = `items.length`、`slotCap` = 2）⇒ 这一函数逐字不变。
  * @param {ReturnType<typeof placementContext>} ctx
  * @param {number} uid
  * @param {any} targetPiece
  */
 export function equipReplaces(ctx, uid, targetPiece) {
-  if (!Array.isArray(targetPiece?.items) || targetPiece.items.length < 2) return false;
+  if (!Array.isArray(targetPiece?.items)) return false;
   const rec = ctx.getItem(ctx.pieces.get(uid)?.piece?.id);
+  const slot = slotPolicy();
+  if (slot.isSlotless(rec)) return false;
+  if (slot.slotsUsed(targetPiece.items, ctx.getItem) < slot.slotCap(2)) return false;
   if (!consumedOnEquip(rec)) return !equipMerges(ctx, uid);
   const promotes = Array.isArray(rec.buffs) && rec.buffs.some((b) => PROMOTE_KEYS.has(b?.key));
   return !(promotes && targetPiece.golden);

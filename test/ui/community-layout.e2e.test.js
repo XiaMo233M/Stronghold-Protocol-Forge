@@ -1,7 +1,10 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
+// 截图落盘用 `fileURLToPath`（`new URL(...).pathname` 在 Windows 上给出 `/E:/…` ⇒ puppeteer 解析成 `E:\E:\…`）；
+// 平台缺陷修复，不改任何断言。见 test/battleOpts.test.js:27 的同一类坑。
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ENABLED = process.env.SP_E2E === '1' && existsSync(CHROME);
 const results = JSON.parse(readFileSync(new URL('../fixtures/stats-results.json', import.meta.url)));
@@ -31,7 +34,7 @@ describe('settlement return control under enlarged text (#458)', { skip: !ENABLE
           await document.fonts.ready;
         }, results['coop4-hard']);
         await page.waitForSelector('.result__foot button');
-        await page.screenshot({ path: new URL(`../e2e/out/result-text-${width}-${textSize}.png`, import.meta.url).pathname });
+        await page.screenshot({ path: fileURLToPath(new URL(`../e2e/out/result-text-${width}-${textSize}.png`, import.meta.url)) });
         const bounds = await page.$eval('.result__foot button', b => {
           const r = b.getBoundingClientRect(), hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
           return { x: r.x, y: r.y, right: r.right, bottom: r.bottom, reachable: !!hit && (hit === b || b.contains(hit)) };

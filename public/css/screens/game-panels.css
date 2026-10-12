@@ -99,6 +99,8 @@
 .dtag-diy { font-size: calc(.13 * var(--t)); font-weight: 700; padding: .01rem .08rem; letter-spacing: .08em; background: var(--mint-500); color: var(--text-on-mint); }
 .dtag-standin { font-size: calc(.13 * var(--t)); font-weight: 700; padding: .01rem .08rem; letter-spacing: .08em; background: var(--ice); color: var(--ice-900); }
 .dtag-kind { border: 1px solid var(--line-2); color: var(--text-lo); font-weight: 500; }
+/* 第 7 段（行为开关 `morphPairing: "plus"`）: 变形同构体不占装备位，它那一行的标签（ui/detailPanel.js ItemRow）。 */
+.dtag-slotless { font-size: calc(.13 * var(--t)); font-weight: 700; padding: .01rem .08rem; letter-spacing: .08em; background: var(--bg-4); color: var(--text-md); border: 1px solid var(--line-2); }
 .drank { font-size: calc(.13 * var(--t)); font-weight: 700; padding: .01rem .08rem; }
 .drank--normal { background: var(--bg-4); color: var(--text-md); }
 .drank--elite { background: var(--gold-2); color: #1d1400; }

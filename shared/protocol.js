@@ -703,6 +703,11 @@ export const C2S = {
   'g.equip': { itemUid: isUid, targetUid: isUid, replaceUid: nullable(isUid), $optional: ['replaceUid'] },
   'g.art': { itemUid: isUid, row: (v) => isInt(v, 0, GEO.ROWS - 1), col: (v) => isInt(v, 0, GEO.COLS - 1), dir: isDir, $optional: ['dir'] },
   'g.destroy': { uid: isUid },
+  // 装备拆卸（行为开关 `unequip: "allow"`，DESIGN §28.43.1）：把一件**已装备**的装备从干员身上取下，退回手牌
+  // （手牌满则进临时整备区）。**新增的 C2S 类型，`PROTOCOL_VERSION` 不动**（先例 `records.mine`）：老客户端不发它
+  // 就一切照旧，而**缺省档（`official`）下这个意图逐字回今天那句 `'equipped items are locked'`**（见
+  // server/match/player/items.js）。形状只有一个字段，与 `g.equip.itemUid` / `g.destroy.uid` 同一个 `isUid`。
+  'g.unequip': { itemUid: isUid },
   'g.reward': { idx: (v) => isInt(v, 0, 5) },
   'g.choice': { idx: (v) => isInt(v, 0, 5), choiceId: isId, $optional: ['choiceId'] },
   'g.ready': { ready: isBool },

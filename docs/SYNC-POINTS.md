@@ -37,7 +37,7 @@
 
 | # | 同步点 | 漏了会怎样 |
 |---|---|---|
-| ① | `shared/behaviour.js` 的 **`BEHAVIOUR_SWITCHES`** 表加一格（**今天这张表是空的** `Object.freeze({})`，0 格） | 任何 `pack.json.behaviour` 声明都被 `BEHAVIOUR_UNKNOWN_SWITCH` **点名整包拒** —— 通道通、但响 |
+| ① | `shared/behaviour.js` 的 **`BEHAVIOUR_SWITCHES`** 表加一格（今天 **4 格**：`shopBias` / `prepLoadout` / `morphPairing` / `unequip`） | 声明表里没有的开关被 `BEHAVIOUR_UNKNOWN_SWITCH` **点名整包拒** —— 通道通、但响 |
 | ② | **引擎侧的执行点 / 读取点**（改那条规则的地方） | 开关**声明得下、却什么都不改** —— 正是这一格存在的理由就是「不许声明了没做」 |
 | ③ | `shared/modSurface.js` 的 `behaviour` 条目锚点（`{ symbol: 'BEHAVIOUR_SWITCHES', module: 'behaviour' }`） | `test/modSurface.test.js` 红：表面清单点名的锚点符号找不到 |
 | ④ | `test/packBehaviour.test.js` 用**合成表**把失败分支逐条走一遍 | 新开关的拒绝分支没有守卫 |

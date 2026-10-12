@@ -36,6 +36,12 @@ import * as sources from '../public/js/resources/sources.js';
 // 写哪几个开关 / 哪几个选项」的那张表 —— 写错的名字被 `BEHAVIOUR_UNKNOWN_SWITCH` 点名整包拒，所以它必须被锚住，
 // 与 `FORM_TABLES` / `ASSETS_MIRROR_FIELDS` 同一条纪律。
 import * as behaviour from '../shared/behaviour.js';
+import * as pool from '../server/match/pool.js';
+import * as economy from '../server/match/player/economy.js';
+import * as platform from '../server/match/match/platform.js';
+import * as morph from '../shared/morph.js';
+// 第 8 刀第四格 `unequip` 的读取点住在这里（`server/match/player/items.js`，模块层纯函数 `unequipAllowed`）。
+import * as items from '../server/match/player/items.js';
 import {
   MOD_SURFACE, MOD_SURFACE_IDS, MOD_SURFACE_FROZEN, surfaceLedgerIssues,
 } from '../shared/modSurface.js';
@@ -260,7 +266,7 @@ const MOD_LAYER_MD = readFileSync(new URL('../docs/design/mod-layer.md', import.
 
 /** 锚点符号住在哪个模块。默认是 schema（`shared/workshop.js`）；kit import 面住 `shared/kitImports.js`；
  *  客户端那一格（`ctx.me` / 宿主键）住 `public/js/ui/extensions.js`（引擎自己那一端的契约表）。 */
-const ANCHOR_MODULES = { schema: workshopSchema, kitImports, extensions, packForms, hostMetrics, routeMount, modModules, sources, behaviour };
+const ANCHOR_MODULES = { schema: workshopSchema, kitImports, extensions, packForms, hostMetrics, routeMount, modModules, sources, behaviour, pool, economy, platform, morph, items };
 
 test('表面清单：每一条的锚点符号都还在它声明的模块里，成员一个不少', () => {
   assert.ok(MOD_SURFACE.length > 0, '表面清单不能是空的');

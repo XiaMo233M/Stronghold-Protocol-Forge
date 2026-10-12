@@ -160,8 +160,18 @@ export class SharedPool {
   /**
    * Item roll for the shop's item slot: tier by the chess tier shares at this level, uniform item within the tier,
    * falling back to lower tiers when a tier has no item. Returns an item id or null.
+   *
+   * `restrict`（可选，行为开关 `shopBias: "bondBias"`）：`(id, stock) => boolean`，**只缩小候选集、不加权**。抽到
+   * 的阶级照旧由棋子份额决定（那一半一字不动）；三类扫描（本阶级 → 更低阶级 → 更高阶级）里，先在这一级的
+   * **官方候选**（≥1 件）上挑一件**合偏向且库存拿得动**的；挑不出来就照旧用这一级的官方名单 —— 于是「偏向」
+   * 永远不会把商店的装备槽变成空的，也不会改变候选阶级（`shopBias` 的 `effect` 逐字这么写）。
+   * 不给谓词 ⇒ `restrict` 为 null，每一步都走官方名单，与从前同一份结果。
+   *
+   * @param {() => number} rng @param {number} maxTier
+   * @param {{ canGain: (id: string) => boolean, pick: (rng: () => number, list: string[]) => string }|null} [stock]
+   * @param {((id: string, stock: any) => boolean)|null} [restrict]
    */
-  rollItem(rng, maxTier, stock = null) {
+  rollItem(rng, maxTier, stock = null, restrict = null) {
     const shares = this.tierShares(maxTier);
     const tiers = Object.keys(shares).map(Number).sort((a, b) => a - b);
     let tier = null;
@@ -173,14 +183,33 @@ export class SharedPool {
       tier = 1 + Math.floor(rng() * Math.max(1, maxTier));
     }
     for (let t = tier; t >= 1; t--) {
-      const list = (this.gd.shopItemsByTier[t] || []).filter(id => !stock || stock.canGain(id));
-      if (list.length) return stock ? stock.pick(rng, list) : list[Math.floor(rng() * list.length)];
+      const id = this._pickItemTier(rng, t, stock, restrict);
+      if (id) return id;
     }
     for (let t = tier + 1; t <= 6; t++) {
-      const list = (this.gd.shopItemsByTier[t] || []).filter(id => !stock || stock.canGain(id));
-      if (list.length) return stock ? stock.pick(rng, list) : list[Math.floor(rng() * list.length)];
+      const id = this._pickItemTier(rng, t, stock, restrict);
+      if (id) return id;
     }
     return null;
+  }
+
+  /**
+   * One tier of `rollItem`: the official candidate list of that tier (`stock.canGain`), then — when a 偏向 is
+   * declared — the same list narrowed to it. `pick` is asked FIRST on the narrowed list and only then on the official
+   * one, so a tier whose entire stock is held still falls through to the next tier exactly as it does today.
+   */
+  _pickItemTier(rng, t, stock, restrict) {
+    const all = (this.gd.shopItemsByTier[t] || []).filter(id => !stock || stock.canGain(id));
+    if (!all.length) return null;
+    const draw = (list) => (stock ? stock.pick(rng, list) : list[Math.floor(rng() * list.length)]);
+    if (restrict) {
+      const narrowed = all.filter(id => restrict(id, stock));
+      if (narrowed.length) {
+        const hit = draw(narrowed);
+        if (hit) return hit;
+      }
+    }
+    return draw(all);
   }
 
   /** { baseId: left } snapshot (tests / diagnostics). */
@@ -233,4 +262,25 @@ export class SharedItemPool {
     for (const [id, weight] of pairs) if ((r -= Math.max(0, weight)) < 0) return id;
     return pairs.at(-1)?.[0] || null;
   }
+}
+
+/**
+ * 行为开关 `shopBias: "bondBias"` 的谓词：这件装备是不是「偏向」的那一类 —— 它的 `giveBondId` 落在
+ * `bonds`（这个玩家**已激活**盟约的 id 集合）里。**只读，不授予**：授予盟约是 `giveBondId` 本来的语义，
+ * 由装备自己的规则（`server/match/bondsMeta.js` 的 `pieceBonds`）管，这一层一个字节都不碰它。
+ *
+ * 与 `SharedPool.rollItem` 的 `restrict` 同一个签名（`(id, stock) => boolean`）。把盟约集合单独传进来，
+ * 是因为这条谓词要能被**纯**地测（不需要造一局对局）。
+ *
+ * @param {import('./gamedata.js').GameData} gd
+ * @param {Iterable<string>} bonds 这个玩家已激活盟约的 id
+ * @returns {(id: string, stock?: any) => boolean}
+ */
+export function bondBiasPreference(gd, bonds) {
+  const wanted = bonds instanceof Set ? bonds : new Set(bonds || []);
+  return (id) => {
+    if (!wanted.size) return false;
+    const rec = gd.item(id);
+    return !!(rec && typeof rec.giveBondId === 'string' && wanted.has(rec.giveBondId));
+  };
 }

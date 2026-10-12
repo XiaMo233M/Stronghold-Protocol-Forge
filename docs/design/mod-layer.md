@@ -408,7 +408,7 @@ while writing this section.
    the source and requires the symbols to still be declared there (`test/kitAuthoring.test.js`).
 2. `docs/WORKSHOP.md` §4.3 carried the same stale citation. **Fixed**, and the guard above now covers that file too.
 3. `docs/prompts/kit.md` cites `server/sim/Battle.js:113` for "`battle.flags` is a construction-time input" in three
-   places, while `this.flags` is assigned at `server/sim/Battle.js:149` and line 113 is a statement about `this.data`.
+   places, while `this.flags` is assigned at `server/sim/Battle.js:150` and line 113 is a statement about `this.data`.
    The citation guard (`test/promptCitations.test.js`) could not see it: it verified only that the cited line exists and
    is not blank. **Deliberately not fixed at the time**: the drift was a consequence of the in-flight 0.2.2 port moving
    every server-side line number, so the fix belonged to that port rather than to a second branch editing the same file
@@ -2959,11 +2959,14 @@ i18n-ignore），差别只在**表是另一张**、每格多一个 `actions`。
 
 **六条判据**（判据只有一份：`shared/behaviour.js`，装载器与校验器都调它）：
 
-1. **空表也响亮**（本刀的交付物）。`BEHAVIOUR_SWITCHES` **今天是一张空表**，这是刻意的：第 4 刀交的是
-   「**通道 + 守卫**」本身，**首格与它的引擎实现点一起落**（业主裁决 2026-10-13）。所以任何一条 `behaviour`
+1. **空表也响亮**（第 4 刀的交付物）。`BEHAVIOUR_SWITCHES` 在第 4 刀落地时**是一张空表**，那是刻意的：那一刀交的
+   是「**通道 + 守卫**」本身，**首格与它的引擎实现点一起落**（业主裁决 2026-10-13）。所以当时任何一条 `behaviour`
    声明都被 `BEHAVIOUR_UNKNOWN_SWITCH` **点名整包拒** —— 空表不是「不认识的开关一律忽略」，而是**一个都不认识**，
    文案里还写明「本版一个开关都没有，因为没有实现点」。**加一格的门槛**：那一格必须**已经在引擎里有实现点**，
-   比 `VARIANT_AXES` 的「只在被一份真实投稿要求时才加轴」更严。
+   比 `VARIANT_AXES` 的「只在被一份真实投稿要求时才加轴」更严。**第 8 刀按这条落了前三格**（§28.43.1）：表里
+   每一格都有一处具名读取点、一个测试文件与一节文档；`behaviourSwitchIssues(BEHAVIOUR_SWITCHES)` 逐格为 `[]`
+   就是那三格「不是塞进去就算」的判据。**站上的实测需求**：空表真的挡过投稿 —— `e3a5d09eb6d3`（跨版本安装包）
+   按 `pack.json.behaviour` 声明时拿到 `BEHAVIOUR_UNKNOWN_SWITCH`（文案即「Known switches: none yet …」）。
 2. **闭枚举 + 响亮失败**：`BEHAVIOUR_BAD_SHAPE`（不是数组 / 条目不是对象 / `switch` 不是非空字符串 / **未知字段**
    / `name`·`desc` 写坏）· `BEHAVIOUR_UNKNOWN_SWITCH` · `BEHAVIOUR_UNKNOWN_OPTION` ·
    `BEHAVIOUR_BAD_OPTION`（`option` 是 `null` / 数字 / `false` —— 非字符串会被读成「用了缺省」，即**静默不是
@@ -2984,10 +2987,57 @@ i18n-ignore），差别只在**表是另一张**、每格多一个 `actions`。
 **多包抢同一格**：按既有的「包 id 字典序小的赢」（§28.3，与数据记录 / kit / 图标 / 口径同一条），由
 `mergeBehaviourDecls` 合成，输的一方进 `overridden` 供调用方点名报告。
 
-**执行点**：`behaviourActions(decl)` 把归一化声明翻成**引擎具名动作** `{ kind, value }`。表空 ⇒ 动作数组空（今天
-**没有任何一格可以声明，也没有任何一条动作**）。这一格**不新增协议消息**，也**不动** `Match` / `GameData` 的既有
-通路：将来第一格若只涉及一个 `config` 标量，它**复用**口径那条既有通路（`opts.variants` → `gamedata.js`），
-**不新开第二套「引擎自烘 patch」先例**；若落在别处，读取点由那一格自己点名。
+**执行点**：`behaviourActions(decl)` 把归一化声明翻成**引擎具名动作** `{ kind, value }`。表空 ⇒ 动作数组空；选了
+缺省档 ⇒ 也是空数组（第 8 刀那三格都照这条）。这一格**不新增协议消息**，也**不动** `Match` / `GameData` 的既有
+通路：一格若只涉及一个 `config` 标量，它**复用**口径那条既有通路（`opts.variants` → `gamedata.js`），
+**不新开第二套「引擎自烘 patch」先例**；若落在别处，读取点由那一格自己点名（**第 8 刀那三格都是这一类**：
+`shopBias` 落在商店池、`prepLoadout` 落在 `Match.setLoadout` 的相位闸门、`morphPairing` 落在三处盟约读取点 ——
+`service/match/Match.js` 只多一行 `mergeBehaviourDecls`，与 `variants` 同一个投影点）。
+**读取点问的是「哪一档」**（`behaviourValue` / `behaviourIsDefault`），与 `variants` 的 `variantValue` /
+`variantIsDefault` 同一个分工；`actions(option)` 是那一格的**声明**（给编辑器、错误文案与守卫读），
+**不是**一个通用分发器 —— 这一层永远不是 patch 分发器。
+
+### 28.43.1 第 8 刀：逐格加开关（`shopBias` 起）
+
+| 开关 | 选项 / 缺省 | 引擎侧读取点 | 投稿 |
+|---|---|---|---|
+| `shopBias` | `official`（缺省）· `bondBias` | `bondBiasPreference`（`server/match/pool.js`）→ `bondBiasBonds`（`server/match/player/economy.js`）→ `PlayerEconomy._rollItemSlot` | `b293e061b38f` |
+| `prepLoadout` | `locked`（缺省）· `prep` | `LOADOUT_PHASES` / `loadoutPhasesFor` + `MatchPlatform.setLoadout`（`server/match/match/platform.js`）：`locked` 只有 `INFO_CHECK`（与从前逐字相同），`prep` 另加 `PREP` 且只在这个座位还没准备时；`PREP` 那一次走 `mergeLoadoutEntries`（只覆盖写了的干员） | `8b4e5da55c58` |
+| `morphPairing` | `official`（缺省）· `plus` | 判据本体 `grantedBondsByMorph`（`shared/morph.js`），三处读取点**同判**：`pieceBonds`（`server/match/bondsMeta.js`）· `unitBonds`（`server/sim/content/support/index.js`，档位经 `withMorphPairing` 的作用域）· `grantedBonds`（`public/js/ui/gameLogic/bonds.js`，档位经 `roomMods.js` 从 `welcome.mods` 合成）。`official` = 今天的行为（两件起配、全部授予）；`plus` = 一件起配、只取最左那一件。**第 7 段补上槽位那半条**：`morphSlotPolicy`（同一文件）返回 `OFFICIAL_SLOT_POLICY` / `PLUS_SLOT_POLICY`，六处读取点同判：`player/items.js` · `player/acquire.js` · `bot.js` · `invariants.js` · `ui/detailPanel.js` · `ui/gameLogic/placement.js` | `19ea65909cf6` |
+
+**`morphPairing` 的槽位语义（第 7 段，第三格落地时记为「未做」的那半条）**：投稿还要求「不占装备位、每名干员只
+一件、第三件顶掉真占格那两件」。这一半落在**装备位**那套既有实现上，所以判据收成 `shared/morph.js` 的
+**`morphSlotPolicy(decl)`** —— 一个闭枚举的策略对象：
+
+* `official`（缺省）⇒ **`OFFICIAL_SLOT_POLICY`**，一个**共享的冻结单例**：`isSlotless` 恒假、`slotsUsed` 逐字是
+  `items.length`、`slotCap` / `maxItems` 逐字是 `equipPerChess`、`replacedIndex` 就是今天那个「`replaceUid` 找不到
+  ⇒ 0（最旧的那件）」。缺省档下六个读取点走的是**与从前同一批算术**（同一次比较、同一个 splice 下标）⇒
+  **缺省逐字节不变、没有任何 `golden:update`**，已发布包一个字节不动。`test/morphPairing.test.js` 拿 `===` 钉住
+  「缺省输入必须返回这个单例」。
+* `plus` ⇒ **`PLUS_SLOT_POLICY`**：它不占位（`slotsUsed` 不数 `canGiveBond` 的那件）、每名干员最多一件
+  （`canHold`）、顶替只挑真正占格的那一件（`replacedIndex` 跳过它）、一行最多 `equipPerChess + 1` 件（`maxItems`）。
+
+**`equipPerChess` 本身一字未动**：那两格装备位是官方的，策略只回答「这一行占了几格、能不能再放一件、顶替挑哪
+一件」。`slotCap` 与 `maxItems` 是**两件事**，刻意分开：前者是真正占格的上限（两档都 = `equipPerChess`，界面的
+`EQUIP n/2` 分母读它），后者是一行最多几件（只有不变量那条读它）。
+
+**`getItem` 的契约（这一格的一格）**：解析器收**一件棋子**（`{ id }`）或一个 id 字符串，回 items 记录 ——
+六个读取点统一写成 `(it) => gd.item(typeof it === 'string' ? it : it && it.id)`。第 7 段第一版在这里踩过一次真
+bug（`server/match/invariants.js` 写的是收棋子的形状、其余写的是收 id 的，判据只假设一种 ⇒ 不变量把变形同构体
+当成占位的普通装备），所以契约写在 `shared/morph.js` 的 `resolveRec` 注释里并由 `test/morphSlots.test.js` 覆盖
+（那条 `collectViolations(m)` 断言就是它的回归位）。
+
+**每加一格照这三条做**（这一刀起）：**缺省 = 引擎今天的行为，逐字节不变**（缺省路径与从前同一份代码路径，
+所以**没有任何 `golden:update`**，已发布包一个字节不动）；**非缺省档由引擎实现**（包给不出数字、路径、模块，
+`effect` 逐字写明它动了什么）；**一格一个测试文件 + 一节文档 + 一处可锚的读取点**
+（`test/shopBias.test.js`，`docs/WORKSHOP.md` §1.23，`shared/modSurface.js` 的 `behaviour` 那一格）。
+另有 `test/packBehaviour.test.js` 钉整表的形状、闭枚举与「不认识的开关点名拒」。
+
+**诚实边界（缺源件就不做假实现）**：`shopBias` 的原件 `_doc` 还提到「已激活**核心**盟约优先于已激活附加盟约」与
+「骑士戒律也接入这套偏向」，其 `payload/data/items.json` 另带 `giveBondBiasOnly`（115 处）与一批 `canGiveBond`
+（115 处）—— 那两条的源件不在我们手上，**没做**，也不在 `effect` 里声称做了；这一格**只读 `giveBondId`**，
+不读 `giveBondBiasOnly`（我们数据里连这个键都不存在）。`canGiveBond` 是官方记录本来就有的键（变形同构体的标记）。
+`test/shopBias.test.js` 把这几条写成源码级断言。
 
 **判据写成「表是入参」的纯函数**：`parseBehaviourDecl(raw, table)` / `behaviourSwitchIssues(table)` /
 `behaviourActions(decl, table)` / `mergeBehaviourDecls(packs, table)`，默认值都是真表。理由与
@@ -3020,4 +3070,135 @@ i18n-ignore），差别只在**表是另一张**、每格多一个 `actions`。
 `BEHAVIOUR_NEEDS_COMBAT` 与 `BAD_COMBAT` 的先后、`EMPTY_PACK` 优先、缺省不长键、**只差开关的两份包摘要必须不同**
 （走装载器同一份 `identifyPack`）、投影那一行真的在 `server/index.js` 里（源码级断言）、以及 `PACK_FIELDS` 的闭集
 计数就地延长。**不需要 `golden:update`**：缺省路径一个字节不动。
+
+### 28.43.2 第 8 刀：第四格 `unequip`（装备拆卸）与**新增一条 C2S 意图**的完整落点
+
+投稿 `79de9ff03518`（「装备拆卸mod」）把这件事做成了安装器：`files.json.copy` **整份覆盖** `shared/protocol.js`、
+`server/match/match/intents.js`、`server/match/player/items.js` 与六个客户端文件，并自己加了一个
+`g.unequip {itemUid}` 意图与 `PlayerState.unequip()`。本刀照 §28.43 收成一格：
+
+| 开关 | 选项 / 缺省 | 引擎侧读取点 | 投稿 |
+|---|---|---|---|
+| `unequip` | `official`（缺省）· `allow` | `unequipAllowed(decl)`（`server/match/player/items.js`，模块层纯函数）← `PlayerState.unequip` / `PlayerItems.unequip`；客户端另一处读 `unequipAllowed()`（`public/js/ui/gameActions.js`，由 `roomMods.js` 从 `welcome.mods` 合成）决定**画不画**「卸下」按钮 | `79de9ff03518` |
+
+**这是本层第一条「开关 + 新意图」的格子**，所以五处落点在这里点名（将来加意图照抄这份清单）：
+
+1. **协议表**（`shared/protocol.js` 的 `C2S`）：`'g.unequip': { itemUid: isUid }`，与 `g.destroy` / `g.equip.itemUid`
+   **同一个 `isUid` 子**。**`PROTOCOL_VERSION` 不动** —— 新增类型不是改已有形状（先例 `records.mine`）：老客户端
+   不发它就一切照旧。**不新增 S2C 消息**（结果走既有的 `dirty()` / 私有视图推送）。
+2. **意图路由**（`server/match/match/intents.js`）：`case 'g.unequip': return ps.unequip(msg.itemUid);`。
+3. **状态机**（`server/match/player/items.js`）：`unequip(itemUid)` —— 与 `destroy` 同一条 `_gate()`；必须
+   `kind === 'item'` 且 `area === 'equipped'`。
+4. **客户端发送点**（`public/js/ui/gameActions.js`）：意图→音效表 + `unequip: (itemUid) => act('g.unequip', { itemUid })`
+   —— 复用既有 `act()`，不另造发送路径。UI 那一半在 `detailPanel.js` 的 `ItemRow`（`onUnequip` 穿透 +
+   `screen/game.js` 接线）。
+5. **判据读取点**：一格一个模块层纯函数（`unequipAllowed`），于是它是 `shared/modSurface.js` 里 `behaviour`
+   那一格可锚的导出名。
+
+**加意图清单（同步点全表 —— ①② 是设计，③④⑤ 是「漏了就红 / 就哑」的机械同步点）**：
+
+| # | 同步点 | 漏了会怎样 |
+|---|---|---|
+| ① | `shared/protocol.js` 的 `C2S` 表（字段 + 判据子） | 传输层的 `validateC2S` 回 `unknown type …` ⇒ 这条意图**根本进不来**（`platform.js` 的 `GAME_TYPES` 从 `C2S` 的键派生） |
+| ② | `server/match/match/intents.js` 的 `switch` 分支 | 类型认了、**没人处理**（静默丢弃，客户端一直等到超时） |
+| ③ | **`test/match/fuzz.test.js` 的 `randomIntent`** | **全量当场两条红**：它按 `C2S` 表逐个类型造随机载荷，并钉住「造出来的每一条都合法」；新类型没进它的 `switch` 就掉进 `default`（`{t}`，缺字段）⇒ `validateC2S` 回 `bad field …`。补一行 `case`（**断言一字不用动**）之后这条意图才真的进模糊覆盖 —— 第 8 刀第四格 `g.unequip` 就是这么被抓住的 |
+| ④ | 客户端**意图→动作映射**（`public/js/ui/gameActions.js` 的音效表 + `act()` 包装） | 类型通了、UI 发不出去（或发出去了没有成功反馈） |
+| ⑤ | 若带新文案 ⇒ **i18n 词条**（`public/i18n/*.json`，`node tools/i18n.mjs check --all --strict`） | 新字面量的 msgid 不进包 ⇒ `check` 报 missing。**这是加类型的第一个隐藏成本**（第二个是 ③） |
+
+⇒ ⑤ 的规模要说清：本刀为 `g.unequip` 加了两个词条（按钮文案 + 去掉半句的提示），**四个包都要写**
+（en / ja / ko / zh-TW）。基线本来就 ja / ko / zh-TW 各缺 57 条（**既有缺口**，不是本层造成的），但
+**新词条必须四个包齐全**，否则缺失数就从基线往上走。
+
+**缺省档逐字节不变**：`unequipAllowed` 为假 ⇒ 回 `ERR.BAD_TARGET` + 文案 `'equipped items are locked'`，
+**与 `destroy`（`items.js` 里今天那一句）逐字同一句** ⇒ 一个不声明这一格的房间在 `g.unequip` 上的行为与
+「这条意图不存在」等价，**没有任何 `golden:update`**；客户端**一个按钮都不画**（`ItemRow` 的 `canDetach` 要求
+`onUnequip` 且 `unequipAllowed()`），`ItemDetail` 那句「配发后无法取下」也**只在 `allow` 档**换成不带那半句的版本
+（官方档那句话是对的，`test/unequip.test.js` 用源码级断言钉住它还在，并钉住四个 i18n 包都有两个新词条）。
+
+**原子性（这一格最容易做坏的地方）**：`_detach` 之后 `stow(piece, { allowTemp: true })` 可能返回 `null`
+（手牌与临时整备区都满）。那时按**原下标**把它塞回 `holder.items` 并回 `ERR.HAND_FULL` —— 先摘后塞没有回滚的话
+装备会**凭空消失**。用 `HAND_FULL` 而不是 `BAD_TARGET`：「没地方放」是一件独立、可行动的错误。
+
+**池不变式照旧**：装备只是从**装备位**移到**手牌 / 临时**，`piece` 与 `uid` 都不变 ⇒ `SharedItemPool.held()`
+（遍历 `hand` / `temp` / `board` 以及 `p.items`）前后都数得到它 ⇒ `held` / `cap` / `left` 全不变，不变式
+`raw left + Σ held == cap` 一字不动。**这一格没有「归还」这回事**（与 `destroy` / `sell` 不同：那两者才真让池子少一件）。
+
+**刻意的决定：第一版不发内容钩子。** `HOOKS` 那 19 个是**契约面**（进 `META`），而「卸下」用哪一个都不贴切
+（不是 `onDestroy`、不是 `onEquip`），**今天也没有任何包需要被通知**。将来真有包需要，**另立一刀**并按 `META`
+契约面扩展 —— 写在这里是为了让后人知道这是**决定**，不是漏做。
+
+**测试**：`test/unequip.test.js` —— 真表那一格的形状与两档、`C2S` 登记与 `validateC2S` 的拒绝（**在这里钉
+「形状错 ⇒ `BAD_MSG`」**：`validateC2S` 返回原因串、`server/net.js` 的 onFrame 把它折成 `ERR.BAD_MSG`，
+`Match.handle` 只认过了它的消息 ⇒ 意图层对形状错回的是 `BAD_TARGET`，测试两层都钉）、缺省档
+`g.destroy` 与 `g.unequip` 回**同一句**且一个字节不落地、`allow` 档三分支（手牌 / 临时 / 两者都满 ⇒ 原子回滚 +
+`HAND_FULL` 且**下标与失败前相同**）、池快照与 `checkInvariants` 前后一致、`recompute` 后盟约人数真的变了
+（用 `test/match/morph-bonds.test.js` 的「变形同构体 + 一件授予盟约的装备」配方，1 → 0）、客户端源码级断言
+（发送点 / 缺省 `unequipOn = false` / 按钮判据 / 官方那句提示还在 / 游戏屏接线）。
+
+### 28.43.3 第二格 `prepLoadout` 的**客户端半**：一句写了很久的谎话，与两处同类的写死相位
+
+第 8 刀第二格（§28.43.1）只落了**服务端**那一半：`Match.setLoadout` 读 `LOADOUT_PHASES`，`locked`（缺省）只收
+`INFO_CHECK`，`prep` 另收 `PREP`。**客户端那一半一直没落**，而它的缺失形态不是"少一个发送点"，是**客户端在撒谎**：
+
+* 发送链路**整套早就有** —— `public/js/ui/loadoutSync.js` 的 `installLoadoutSync` 早就在发
+  `room.loadout { entries, ops }`（500 ms 去抖、面板关闭时立刻冲刷、`WRONG_PHASE`/`ROOM_STARTED` ⇒
+  `setState('locked')` + 提示、`room.state.inMatch` 变假时自动解锁重试）；单干员编辑的纯函数也早就有
+  （`loadoutModel.setChoice(entries, base, golden, { skill?, module? })`，缺键即删那条 entry，与
+  `mergeLoadoutEntries` 的"只覆盖写了的干员"天然对齐）。**所以这一刀不新造任何发送链路、不新增协议消息。**
+* 缺的是**客户端自己的相位判据**，而它**写死在两个地方**：
+  1. `screens/loadout.js` 的 `locked`（原来："在局中、相位不是 `INFO_CHECK` 就算锁定"，顺手把 `LOBBY` 也排掉）
+     ⇒ 画「本局已锁定 · 下一局生效」与详情里那句「修改将在下一局生效」。**实测这个 `locked` 只喂那两处文案、
+     不 disable 任何控件** ⇒ 声明了 `prep` 的房间会出现「**服务端收得下、界面却说锁着**」的自相矛盾。
+  2. `screens/loadout.js` 的 `shouldAutoClose`（原来简报那一支写死"相位不是 `INFO_CHECK` 就关"）⇒ 玩家刚进
+     `PREP`——**正是服务端允许改调配的那一段**——面板被**自动收走**。
+
+**做法**：把那份相位判据收成"一份两档的表 + 一个纯函数"，屏幕只读它、不再自己比相位。
+`public/js/ui/loadoutSync.js` 导出 `LOADOUT_CLIENT_PHASES` / `loadoutLockPhases(option)` /
+`currentLoadoutLockPhases()` / `setPrepLoadout(option)`；`roomMods.js` 在**同一处**（与 `morphPairing` /
+`unequip` 并列）用**同一份合并规则**（`mergeBehaviourDecls` + `behaviourValue`）喂档位。
+
+**两张表的关系**：客户端的 `LOADOUT_CLIENT_PHASES` 与服务端的 `LOADOUT_PHASES` 是**两张表** —— 客户端不能
+`import server/**`（导入边界）。这是这一层既有的做法：**客户端副本 + 一个测试把两张表钉在一起**（与
+`CLIENT_WRAP_COMPONENTS`↔`MOD_COMPONENT_IDS`、`CLIENT_PANEL_SLOTS`↔`MOD_PANEL_SLOTS` 逐字同一条）。
+钉它的是 `test/prepLoadoutClient.test.js` 里那条"逐档逐字相等"。
+
+**缺省逐字节不变**（这一层的设计不变式）：缺省 / 没声明 / 不认识的档位 ⇒ 只含 `INFO_CHECK`。
+`locked` 那两处的旧表达式与新判据**逐相位遍历同一个布尔**，`shouldAutoClose` 那一处也**逐相位同判** ⇒
+一个不声明这一格的房间，界面一个字节不变，**没有任何 `golden:update`**。
+
+**还没做的那一件（如实披露，见 §28.43.4）**：`PREP` 里**没有入口**能打开干员调配面板 —— `LoadoutButton` 只在
+大厅（`from="lobby"`）、房间（`room`）与简报（`briefing`，只活在 `INFO_CHECK`）里出现，`screens/game.js` 里
+**一个都没有**。所以在贴一个 `PREP` 入口之前，"服务端开了"与"玩家改得了"之间还差最后一步。
+
+**同类的写死相位（本轮只记录，不改）**：
+
+| 位置 | 形态 | 与某格开关相关？ |
+|---|---|---|
+| `screens/support.js` 的 `shouldAutoClose` | 与 `loadout.js` 那一处**同形**（相位一离开 `INFO_CHECK` 就收走助战面板） | **无关**：助战**没有**开关，而服务端 `platform.js` 的 `room.support` 同样只在 `INFO_CHECK` 收（`WRONG_PHASE`）⇒ **两边一致，不是缺陷**。将来若有投稿要"休整期换助战"，那就是**第 5 格开关**，两处一起改 |
+| `ui/equipReplace.js` 的 `if (equipped.length < 2) return null;` | 客户端把**装备位写死 2**（换装对话框的触发判据） | **第 7 段已按格开关处理**：`equipReplaces`（`ui/gameLogic/placement.js`）改读 `slotPolicy().slotsUsed` / `slotCap`，`ui/equipReplace.js` 只消费它的判决 ⇒ 两档都对得上服务端 |
+| `ui/gameLogic/placement.js` 的 `if (targetPiece.items.length < 2) return false;` | 同上（拖拽配发的预判） | **同上，已处理**（判据收在 `equipReplaces` 一处） |
+| `ui/detailPanel.js` 的 `EQUIP n/2` 与"最多 2 件"文案 | 纯显示 | **第 7 段已处理**：分子换成 `slotPolicy().slotsUsed`（`plus` 档不数那件不占位的），分母 `slotCap`；`plus` 档另外给那一行画一个「不占装备格」标签（`dtag-slotless`，缺省档不画） |
+
+### 28.43.4 待办（本轮**刻意不做**）：`PREP` 里的干员调配入口
+
+§28.43.3 把客户端的相位判据扶正之后，**"服务端收得下"与"玩家改得了"之间还差最后一步**：`PREP` 里没有入口。
+
+**证据**：`LoadoutButton` 只有三个宿主 —— `screens/lobby.js`（`from="lobby"`）、`screens/room.js`（`from="room"`）、
+`screens/briefing.js`（`from="briefing"`，而简报只活在 `INFO_CHECK`）。`screens/game.js`（对局的屏）里**没有**
+任何入口；`shouldAutoClose` 的 `lobby`/`room` 那一支又会在对局开始时把面板收走。⇒ 声明 `prepLoadout: "prep"` 的
+房间，玩家仍然没有地方点开那个面板。
+
+**为什么不在 §28.43.3 里顺手加**：那是**在对局屏上新增一个可见控件**（不是修一句判据），属于"新渲染分支"，
+要单独裁。两个候选形状：
+
+1. **贴一个入口**：`screens/game.js` 加一个 `<LoadoutButton from="game" />`，**只在 `prepLoadoutAllowed()` 且
+   `editable` 时画**。便宜且**不需要新 i18n 词条**（`LoadoutButton` 的默认 label 就是既有的 `t('干员调配')`），
+   缺省（没声明）⇒ **一个按钮都不画** ⇒ 缺省渲染逐字节不变。
+2. **投稿 `8b4e5da55c58` 的 UX**：在详情面板的技能 / 模组段里直接加切换按钮（它那份 `detailPanel.js` 的
+   `dloadout-pick`）。更贴近投稿，但要**新 i18n 词条**（「切换为 {name}」「当前技能」…四个包都要写）+ 一个新的
+   `prep` 档渲染分支。
+
+**状态**：**未做，记账在此**（业主"站上 8 条全部做"的口径由"记账 + 待办"满足，不让它悄悄丢掉）。做的时候
+**必须**遵守 §28.43.1 那三条（缺省 = 引擎今天的行为、非缺省档由引擎实现、一格一个测试文件 + 一节文档）与
+§28.43.2 的「加意图清单」（若同时要发送新的东西）。
 

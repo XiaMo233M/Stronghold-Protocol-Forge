@@ -5,8 +5,31 @@
 // the player state).
 
 import { ERR, layerGainRoom } from '../../../shared/constants.js';
+import { behaviourIsDefault } from '../../../shared/behaviour.js';
 import { freeSlot } from '../board.js';
+import { bondBiasPreference } from '../pool.js';
 import { OK, fail } from './common.js';
+
+/**
+ * **行为开关 `shopBias` 的读取点**（DESIGN §28.43.1）：这一局的声明要不要偏向，要偏就给出「偏向哪些盟约」。
+ *
+ * 返回 `null` = **引擎今天的行为**，也就是两条路：没声明这一格 / 声明成 `official`（缺省档），或声明了
+ * `bondBias` 但此刻一个盟约都没激活（空集合 ⇒ 抽出来的商店会变成空的装备槽，那不是「偏向」，是「停发」）。
+ * 返回非空 `Set` = 只在「`giveBondId` 落在这个集合里」的装备里抽，**只偏置、不授予**。
+ *
+ * `behaviourIsDefault` 是这一格唯一的判据来源（`shared/behaviour.js`）：与 `variants` 的 `variantIsDefault`
+ * 同一个分工 —— `behaviourActions` 里那条 `{ kind: 'shop.biasActiveBonds', value: true }` 是这一格的**声明**，
+ * 读取点问的是「哪一档」。写成模块层的**纯**函数，是为了让它能被单测（`test/shopBias.test.js`）也为了它是
+ * `shared/modSurface.js` 里 `behaviour` 那一格可锚的一个导出名（改名 / 挪走 = 打断所有声明这一格的包）。
+ *
+ * @param {{ m: { behaviour: any }, _activeBondIds: () => Set<string> }} ps
+ * @returns {Set<string>|null}
+ */
+export function bondBiasBonds(ps) {
+  if (behaviourIsDefault(ps.m.behaviour, 'shopBias')) return null;
+  const active = ps._activeBondIds();
+  return active.size ? active : null;
+}
 
 export class PlayerEconomy {
   addFunds(n, { reason = '' } = {}) {
@@ -74,8 +97,38 @@ export class PlayerEconomy {
     return { kind: 'chess', id, basePrice: price, frozen: false, sold: false, ...(support ? { support: true } : {}) };
   }
 
+  /**
+   * 这个玩家**已激活**盟约的 id 集合（`recompute` 算出来的 `this.bonds`）—— `shopBias: "bondBias"` 的唯一输入。
+   * 缓存按 `this.bonds` 的**对象身份**失效：每一次 `recompute()` 都换一个新对象（`player/round.js`），于是同一个
+   * prep 里的多次刷新只付一次遍历，而变化之后一定重算。
+   * @returns {Set<string>}
+   */
+  _activeBondIds() {
+    if (this._biasBondsAt === this.bonds && this._biasBonds) return this._biasBonds;
+    const out = new Set();
+    for (const [id, state] of Object.entries(this.bonds || {})) if (state && state.active) out.add(id);
+    this._biasBondsAt = this.bonds;
+    this._biasBonds = out;
+    return out;
+  }
+
+  /**
+   * **执行点（`shopBias`）**：这一局的声明要不要偏向，要偏就给出「偏向哪些盟约」。
+   *
+   * 判据本体是模块层的 `bondBiasBonds`（纯函数，`shared/modSurface.js` 的 `behaviour` 那一格锚着它）；这里只把
+   * 这一格的读取点挂到玩家状态上，`_rollItemSlot` 与本文件以外的调用方都走这一个名字。
+   * @returns {Set<string>|null}
+   */
+  shopBiasBonds() {
+    return bondBiasBonds(this);
+  }
+
   _rollItemSlot() {
-    const id = this.m.pool.rollItem(this.m.rngShop, this.shop.level, this.m.itemPool);
+    // 行为开关 `shopBias`（DESIGN §28.43.1）：只有这一局的声明把那一格选成 `bondBias` 时，装备槽才拿这条
+    // 偏向谓词去缩候选集。`shopBiasBonds()` 在缺省档返回 null ⇒ 这一行与从前**同一份结果**、同一条代码路径。
+    const bonds = this.shopBiasBonds();
+    const restrict = bonds ? bondBiasPreference(this.gd, bonds) : null;
+    const id = this.m.pool.rollItem(this.m.rngShop, this.shop.level, this.m.itemPool, restrict);
     return id ? { kind: 'item', id, basePrice: this.gd.itemPrice(id), frozen: false, sold: false } : null;
   }
 

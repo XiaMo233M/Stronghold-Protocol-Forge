@@ -175,6 +175,11 @@
 import { PHASE, modeIdFor, bossHitLimitFrom, MAX_SEATS } from '../../shared/constants.js';
 // 变体 / 口径层（DESIGN §28.39）：本局的轴表由各包的归一化声明合成，规则就是既有的「包 id 字典序小的赢」。
 import { mergeVariantDecls, variantValue } from '../../shared/variants.js';
+// 行为开关层（DESIGN §28.43）：同一张合成规则（包 id 小的赢），另一张表。空数组 ⇒ 每一格的读取点走缺省路径。
+import { mergeBehaviourDecls } from '../../shared/behaviour.js';
+// 行为开关 `morphPairing` 的档位（DESIGN §28.43.1）：判据本体在 `shared/morph.js`，这一行只把这一局的档位算出来，
+// 往下交给 `GameData`（prep）、`battleOpts`（战斗）与 BattleSpec（客户端）。
+import { morphPairingOf } from '../../shared/morph.js';
 import { formView, isEliteForm } from '../../shared/formProjection.js';
 import { layoutOf } from '../../shared/layout.js';
 import { Battle } from '../sim/Battle.js';
@@ -270,6 +275,22 @@ export class Match {
     /** @type {Array<{ axis: string, default: string, by: string }>} */
     this.variants = mergeVariantDecls(this.mods && Array.isArray(this.mods.packs) ? this.mods.packs : []).decl;
     /**
+     * 行为开关的来源（DESIGN §28.43），与 `variants` **同一个投影点、同一个合并规则**（包 id 字典序小的赢）：
+     * `this.behaviour` 是这一局合成后的归一化声明。没有包、或没有包声明任何开关 ⇒ `[]`，于是每一格的读取点
+     * （`shopBiasBonds` 与将来的那些）都走今天那条缺省路径。**漏掉这一行 = 引擎读到 `undefined`、开关静默不生效**
+     * —— §28.39/§28.43 把这一处记成「这一层最容易做坏的地方」。
+     * @type {Array<{ switch: string, option: string, by: string }>}
+     */
+    this.behaviour = mergeBehaviourDecls(this.mods && Array.isArray(this.mods.packs) ? this.mods.packs : []).decl;
+    /**
+     * 行为开关 `morphPairing` 的档位（DESIGN §28.43.1）：prep 侧由 `GameData`（下面建 `this.gd` 时传进去）读，
+     * 战斗侧由 `battleOptsFromMatch` 递给每一场 Battle（`Battle` 再把它压进 `withMorphPairing` 的作用域），
+     * 客户端由 BattleSpec 上那一个键读。**三处读的是同一个值**，判据本体只有一份（`shared/morph.js`）。
+     * 没声明这一格 ⇒ `'official'` = 引擎今天的行为。
+     * @type {'official'|'plus'}
+     */
+    this.morphPairing = morphPairingOf(this.behaviour);
+    /**
      * Seat slots of this match (opts.seatCap, or how many seats the caller handed in). Only the boss-pool ceiling
      * reads it: a room bigger than the official 4 must not clamp its leader pool to the 4-seat `aliveFull`
      * (gamedata.js bossPoolShareOf; 百卫补丁 v0.3, docs/PS100-MIGRATION.md §2.4). It is NOT the variant switch — see
@@ -288,6 +309,8 @@ export class Match {
       ...(this.seatCap ? { seatCap: this.seatCap } : {}),
       // 本局的口径（DESIGN §28.39）。空数组 = 没有包声明口径 ⇒ `GameData` 一个字节都不动。
       variants: this.variants,
+      // 本局的行为开关（DESIGN §28.43.1）：prep 侧的 `pieceBonds` 从这一份读取视图里读 `morphPairing`。
+      behaviour: this.behaviour,
       // 形态投影的那一份视图（与 `this.ds` 共用）。
       forms: this.formView,
     });

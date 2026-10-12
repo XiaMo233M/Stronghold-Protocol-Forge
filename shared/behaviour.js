@@ -69,7 +69,119 @@ const MAX_TEXT = 160;
  *
  * @type {BehaviourTable}
  */
-export const BEHAVIOUR_SWITCHES = Object.freeze({});
+export const BEHAVIOUR_SWITCHES = Object.freeze({
+  /**
+   * 商店出货偏向（投稿 `b293e061b38f`，商店刷新盟约装备几率提升）。**改结果** ⇒ 声明它必须 `combat: true`。
+   *
+   * 引擎侧的读取点**不是** `behaviourActions`：那一格是一条**具名规则读取**（与 `variants` 的 `variantValue` 同一个
+   * 分工 —— 动作数组是这一格的**声明**，读取点问的是「哪一档」）。第三格（`morphPairing`）同理，读取点在它的三处
+   * 实现点上。
+   *
+   * `official` = 引擎今天的行为（`SharedPool.rollItem`：装备槽按棋子阶级份额抽一个阶级，同阶级**等概率**）；
+   * `bondBias` = 装备槽只在这个玩家**已激活**盟约对应的装备里抽（**只偏置、不授予** —— 授予盟约是 `giveBondId`
+   * 本来的语义，由装备自己的规则管）。
+   *
+   * **未实现、也不假装实现的三条**（原件 `files.json._doc` 与其 `payload/data/items.json` 提到）：
+   * ①「已激活**核心**盟约优先于已激活附加盟约」；②「骑士戒律也接入这套偏向」；③原件的 `data/items.json` 里
+   * 有 `giveBondBiasOnly` 115 处 / `canGiveBond` 115 处（`giveBondId` 119 处）—— **这两个字段我们的
+   * `data/items.json` 里都是 0 处**。三条的**源件都不在我们手上**，按业主的「缺源件就不做假实现」：这一格
+   * **只读 `giveBondId`**，**绝不读** `giveBondBiasOnly` / `canGiveBond`（读一个数据里不存在的字段＝一条永远为假
+   * 的判据，也就是一个假实现）。`test/shopBias.test.js` 有断言钉住这三条**没做**、且那两个字段**没被读**。
+   */
+  shopBias: {
+    label: '商店出货偏向',
+    options: Object.freeze(['official', 'bondBias']),
+    default: 'official',
+    optionLabels: Object.freeze({
+      official: '官方出货（装备槽不问盟约）',
+      bondBias: '装备槽偏向已激活盟约的装备（只偏置、不授予）',
+    }),
+    effect: Object.freeze({
+      official: "the official shop draw: the item slot picks a tier by the chess tier shares, then a uniform shop-eligible item of that tier",
+      bondBias: "the item slot prefers shop-eligible items whose giveBondId is one of this player's ACTIVE bonds, and grants nothing by itself; the tier stays the chess tier shares, and a tier with no such item falls back to the official draw",
+    }),
+    actions: (option) => (option === 'bondBias' ? [{ kind: 'shop.biasActiveBonds', value: true }] : []),
+  },
+  /**
+   * 休整期可更换技能与模组（投稿 `8b4e5da55c58`）。**改结果** ⇒ 声明它必须 `combat: true`：技能与模组决定战斗里
+   * 打出来的是什么。**不新增协议消息** —— 走的就是既有那条 `room.loadout { entries, ops? }`（投稿原件也是复用
+   * 既有意图，我们连它自己那个 `g.loadout` 都不需要）。
+   *
+   * `locked` = 引擎今天的行为（`Match.setLoadout` 只收 `INFO_CHECK`：briefing 的干员调配，之后锁死）；
+   * `prep` = 休整期（`PHASE.PREP`）里、且**这个座位还没准备**时也收一次。合并语义：这一次提交**只覆盖它写了的
+   * 那些干员**，没写的保留当前配发（否则一个只带一名干员的面板提交会把整份配发抹掉）。
+   */
+  prepLoadout: {
+    label: '休整期可更换技能与模组',
+    options: Object.freeze(['locked', 'prep']),
+    default: 'locked',
+    optionLabels: Object.freeze({
+      locked: '官方：干员调配锁定后不再可改',
+      prep: '休整期也能改（本座位未准备时）',
+    }),
+    effect: Object.freeze({
+      locked: 'the official rule: room.loadout is accepted only during INFO_CHECK (the briefing\'s 干员调配) and the loadout is frozen afterwards',
+      prep: 'room.loadout is accepted during PREP as well, while this seat has not readied up; the submission merges into the current loadout (operators it does not mention keep theirs), and nothing else about the loadout changes',
+    }),
+    actions: (option) => (option === 'prep' ? [{ kind: 'loadout.allowDuringPrep', value: true }] : []),
+  },
+  /**
+   * 变形同构体的配对规则（投稿 `19ea65909cf6`，其原件整份覆盖 `shared/morph.js` 与三处读取点）。**改结果**
+   * ⇒ 声明它必须 `combat: true`：配对出的盟约决定谁算成员、层数与战斗里的加成。
+   *
+   * 两档的**判据只有一份**（`shared/morph.js` 的 `grantedBondsByMorph`），三处读取点调的是同一个函数：
+   * prep 的 `bondsMeta.pieceBonds`、战斗的 `support/index.unitBonds`、客户端的 `gameLogic/bonds.grantedBonds`。
+   *
+   * `official` = **引擎今天的行为**：变形同构体**占一个装备位**（少于两件装备就不配对），并与**每一件**
+   * `giveBondId` 装备配对（全部授予）。`plus` = 投稿那一套：**不占装备位**（一件也能配对）、每名干员**只能装
+   * 一件**（多的由 `morphCarrierIndexes` 暴露给调用方）、只取装备行里**最左边**能授予盟约的那一件。
+   *
+   * **槽位语义（第 7 段补上的那半条）**：判据是同一份 `shared/morph.js` 的 **`morphSlotPolicy`** ——
+   * `official` 拿到 `OFFICIAL_SLOT_POLICY`（共享冻结单例，逐字是引擎今天那条算术），`plus` 拿到
+   * `PLUS_SLOT_POLICY`（不占位 / 每名干员一件 / 顶替只挑真正占格的那一件）。六处读取点同判：
+   * `player/items.js` · `player/acquire.js` · `bot.js` · `invariants.js` · `ui/detailPanel.js` ·
+   * `ui/gameLogic/placement.js`。`equipPerChess` 本身一字未动。
+   */
+  morphPairing: {
+    label: '变形同构体的配对规则',
+    options: Object.freeze(['official', 'plus']),
+    default: 'official',
+    optionLabels: Object.freeze({
+      official: '官方读数：占一个装备位，配上的都授予',
+      plus: '加强：不占装备位，只取最左边那一件',
+    }),
+    effect: Object.freeze({
+      official: 'the reading this engine has always had: fewer than two carried items pair with nothing (the 变形同构体 takes one of the two equipment slots), and EVERY giveBondId item it is worn with grants its bond',
+      plus: 'the submission\'s GRANT rule and SLOT rule together: one carried item is enough for the pairing to count (no two-item precondition) and ONLY the leftmost giveBondId item in the equipment row grants its bond; the 变形同构体 occupies NO equipment slot (it attaches with both real slots used, and a carrier holds at most one of it), and a third real item always displaces a real slotted item — never the 变形同构体. equipPerChess itself is untouched: the official two real slots stay two',
+    }),
+    actions: (option) => (option === 'plus' ? [{ kind: 'morph.pairingPlus', value: true }] : []),
+  },
+  /**
+   * 装备拆卸（投稿 `79de9ff03518`，「装备拆卸mod」）。**改结果** ⇒ 声明它必须 `combat: true`：装备离开干员会改
+   * 盟约人数（`bondsMeta.pieceBonds` 读装备行）与战斗里的数值，所以它进房间摘要闸门与 golden 语料。
+   *
+   * `official` = **引擎今天的行为**：装备装上之后只能靠精英化 / 合成 / 卖出离开（`g.destroy` 对已装备品回
+   * `'equipped items are locked'`）。`allow` = 休整期可以用 `g.unequip {itemUid}` 把一件已装备的装备取下，退回
+   * **手牌**（右→左优先），手牌满则进**临时整备区**；两者都满 ⇒ 整件事**原子拒绝**（`HAND_FULL`），装备留在原处。
+   *
+   * 缺省档下 `g.unequip` 回的就是 `g.destroy` 今天那句 `'equipped items are locked'` ⇒ **缺省逐字节不变**
+   * （不需要 `golden:update`）。
+   */
+  unequip: {
+    label: '装备拆卸',
+    options: Object.freeze(['official', 'allow']),
+    default: 'official',
+    optionLabels: Object.freeze({
+      official: '官方：装上后只能靠精英化 / 合成 / 卖出离开',
+      allow: '休整期可以把装备卸下（退回手牌 / 临时区）',
+    }),
+    effect: Object.freeze({
+      official: 'the official rule: an equipped item leaves its operator only on promotion, merge or sale — g.destroy refuses equipped items with "equipped items are locked"',
+      allow: 'g.unequip takes one equipped item off its operator during prep and stows it (the hand right-to-left first, then the temporary slots); if neither has room the whole action is refused with HAND_FULL and nothing moves',
+    }),
+    actions: (option) => (option === 'allow' ? [{ kind: 'items.allowUnequip', value: true }] : []),
+  },
+});
 
 /** 开关名，按声明顺序（界面 / 错误文案按它排）。 */
 export const BEHAVIOUR_SWITCH_NAMES = Object.freeze(Object.keys(BEHAVIOUR_SWITCHES));

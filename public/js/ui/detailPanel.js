@@ -37,7 +37,7 @@
 import { useEffect } from '../../vendor/hooks.module.js';
 import { html, Icon, TierChip, MicroLabel, Button, confirmDialog, useTicker } from './components.js';
 import { Img, RichText, UnitThumb, BondGlyph, GIcon, diyToken } from './gameComponents.js';
-import { attackInterval, rangeGridBox, fmtNum, tileKey, chessLoadout, nextThreshold, bondTier, briefingBondTip, pieceBondIds, grantedBonds, morphPairings, ownStandIn, standInOf, standInLoadout, standInLabel, standInTip, standInForText, ownDiyRecord, ownDiyPick, diyRecordFor, pickGetter, availableVoiceLangs, unitPick, unitCultivation } from './gameLogic.js';
+import { attackInterval, rangeGridBox, fmtNum, tileKey, chessLoadout, nextThreshold, bondTier, briefingBondTip, pieceBondIds, grantedBonds, morphPairings, slotPolicy, ownStandIn, standInOf, standInLoadout, standInLabel, standInTip, standInForText, ownDiyRecord, ownDiyPick, diyRecordFor, pickGetter, availableVoiceLangs, unitPick, unitCultivation } from './gameLogic.js';
 import { updateSettings, settingsStore, useSettings } from './settings.js';
 import { dubsInstalled } from '../voiceDubs.js';
 import { VOICE_LANG_NAMES } from '../../../shared/constants.js';
@@ -56,6 +56,8 @@ import { moduleBadge, fullTraitText } from './loadoutModel.js';
 import { t, tc, N_ } from '../../../shared/i18n.js';
 import { audio } from '../audio.js';
 import { tokenVariantFor } from './gameLogic/loadout.js';
+// 行为开关 `unequip` 的读数（画不画「卸下」按钮）：与发送点同一处（ui/gameActions.js），避免 UI 模块之间多一条 import。
+import { unequipAllowed } from './gameActions.js';
 // 组件级改写（DESIGN §28.19）：`loadout.detail` 是引擎的具名组件之一（干员详情面板本身），包声明的 wraps 就长在它上面。
 import { modComponent } from './modComponents.js';
 
@@ -234,13 +236,19 @@ export function MorphGrantLine({ item, off = null, carried = null }) {
   </p>`;
 }
 
-/** An equipped item of the card: icon, name, effect — and for 变形同构体 / a bond item its pairing (`carried`: the wearer's items). */
-function ItemRow({ itemId, carried = null, off = null }) {
+/** An equipped item of the card: icon, name, effect — and for 变形同构体 / a bond item its pairing (`carried`: the wearer's items).
+ * 第 7 段：`plus` 档下变形同构体**不占装备位**，所以它的行上多一个「不占装备格」标签（缺省档不画 ⇒ 界面逐字不变）。 */
+function ItemRow({ itemId, uid = null, carried = null, off = null, onUnequip = null }) {
   const it = data.lookup('items', itemId);
+  // 装备拆卸（行为开关 `unequip: "allow"`，DESIGN §28.43.1）：`onUnequip` 只在**可编辑的自己人**身上传进来，而
+  // `unequipAllowed()` 是这一页从 `welcome.mods` 派生的有效档位 ⇒ **缺省档一个按钮都不画**（缺省界面逐字节不变）。
+  const canDetach = typeof onUnequip === 'function' && Number.isInteger(uid) && unequipAllowed();
+  const slotless = slotPolicy().isSlotless(it);
   return html`<div class="ditem">
     <${UnitThumb} kind="item" id=${itemId} size="sm" />
-    <div class="ditem__text"><b>${it?.name || itemId}</b><${RichText} text=${it?.descRaw || it?.desc || ''} class="ditem__desc" />
+    <div class="ditem__text"><b>${it?.name || itemId}</b>${slotless ? html`<span class="dtag dtag-slotless">${t('不占装备格')}</span>` : null}<${RichText} text=${it?.descRaw || it?.desc || ''} class="ditem__desc" />
       ${it?.canGiveBond ? html`<${MorphPairings} off=${off} carried=${carried || []} />` : it?.giveBondId ? html`<${MorphGrantLine} item=${it} off=${off} carried=${carried} />` : null}</div>
+    ${canDetach ? html`<${Button} variant="ghost" size="sm" class="ditem__detach" title=${t('卸下')} aria-label=${t('卸下')} onClick=${() => onUnequip(uid)}>${t('卸下')}<//>` : null}
   </div>`;
 }
 
@@ -406,7 +414,7 @@ function skillTextNote(sk) {
   return note ? html`<p class="dhint dhint--rule" data-skill-note=${sk.skillId}><${Icon} name="info" />${t(note)}</p>` : null;
 }
 
-export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bonds, offBonds = null, loadout, onBond, live = null, hint = null, unitItems = null, standIn = null, diy = null, voiceSettings = null, cultOpts = null }) {
+export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bonds, offBonds = null, loadout, onBond, live = null, hint = null, unitItems = null, standIn = null, diy = null, voiceSettings = null, cultOpts = null, onUnequip = null }) {
   const m = data.get('assets');
   const hp = hpOf(live, snapHp);
   // 0.2.0 自选编队: `chess` is then the composed 自选 record (the operator, the slot's tier / price); its skill and module are
@@ -491,11 +499,17 @@ export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bond
       </div>
     <//>` : null;
   // (a 变形同构体 / bond item row shows its pairing against what this operator carries: ItemRow `carried`)
-  blocks.equip = piece?.kind === 'chess' ? html`<${Section} key="equip" title=${t('装备')} micro=${`EQUIP ${items.length}/2`} class="dsec--equip">
-      ${items.length ? items.map((it) => html`<${ItemRow} key=${it.uid} itemId=${it.id} carried=${items} off=${offBonds} />`) : html`<p class="t-dim dempty">${t('拖拽装备至该干员以配发（最多 2 件）')}</p>`}
+  // 第 7 段：`EQUIP n/2` 的**分子**与分母都走这一页的装备位策略（`shared/morph.js`）。缺省档的策略就是引擎今天那条
+  // 算术（分子 = `items.length`、分母 = 2）⇒ 缺省界面逐字不变；`plus` 档下变形同构体不计数、分母写它的上限。
+  const slot = slotPolicy();
+  const equipUsed = slot.slotsUsed(items, getItem);
+  const carriedUsed = slot.slotsUsed(carried, getItem);
+  const equipCap = slot.slotCap(2);
+  blocks.equip = piece?.kind === 'chess' ? html`<${Section} key="equip" title=${t('装备')} micro=${`EQUIP ${equipUsed}/${equipCap}`} class="dsec--equip">
+      ${items.length ? items.map((it) => html`<${ItemRow} key=${it.uid} itemId=${it.id} uid=${it.uid} carried=${items} off=${offBonds} onUnequip=${editable ? onUnequip : null} />`) : html`<p class="t-dim dempty">${t('拖拽装备至该干员以配发（最多 2 件）')}</p>`}
     <//>`
     // no own piece (a teammate's unit, a bond popup's 变形同构体 row): what it carries, read-only
-    : !piece && carried.length ? html`<${Section} key="equip" title=${t('装备')} micro=${`EQUIP ${carried.length}/2`} class="dsec--equip">
+    : !piece && carried.length ? html`<${Section} key="equip" title=${t('装备')} micro=${`EQUIP ${carriedUsed}/${equipCap}`} class="dsec--equip">
       ${carried.map((id, i) => html`<${ItemRow} key=${`${i}:${id}`} itemId=${id} carried=${carried} off=${offBonds} />`)}
     <//>` : null;
   const talents = chessTalents(fr);
@@ -553,7 +567,11 @@ export function ItemDetail({ item, piece, editable, onDestroy, offBonds = null }
     ${item.note ? html`<p class="dhint dhint--rule"><${Icon} name="info" />${item.note}</p>` : null}
     ${item.itemType === 'MAGIC'
       ? html`<p class="dhint"><${Icon} name="info" />${t('将其拖拽至战场上的格子使用')}</p>`
-      : html`<p class="dhint"><${Icon} name="info" />${t('拖拽至干员身上进行配发（每名干员最多 2 件，配发后无法取下）')}${item.mergeable ? t('；2 件相同装备自动合成进阶装备') : ''}</p>`}
+      // 装备拆卸（行为开关 `unequip: "allow"`）：**只有 `allow` 档**才去掉「配发后无法取下」那句 —— 官方档下那句话
+      // 是对的（`g.destroy` / `g.unequip` 都回 `'equipped items are locked'`），所以缺省档逐字不变。
+      : html`<p class="dhint"><${Icon} name="info" />${unequipAllowed()
+      ? t('拖拽至干员身上进行配发（每名干员最多 2 件）')
+      : t('拖拽至干员身上进行配发（每名干员最多 2 件，配发后无法取下）')}${item.mergeable ? t('；2 件相同装备自动合成进阶装备') : ''}</p>`}
     ${item.shopExcluded ? html`<p class="dhint dhint--source"><${Icon} name="info" />${t('调度中心不出售 · 获取途径：{source}', { source: item.shopExcludedBy || t('效果获得') })}</p>` : null}
     ${piece && editable ? html`<div class="dactions"><${Button} variant="danger" onClick=${() => onDestroy(piece, item)}>${t('销毁道具')}<//></div>` : null}`;
 }
@@ -884,7 +902,7 @@ export function selectVoiceKey(detail) {
  *   (the owner's request of 2026-10-08 「添加一下干员点击上去的语气一样的语音」 lifted 2026-10-03's 「整备阶段不需要干员语音」
  *   for this line only; [ASSUMED] the official prep tap says 选中干员 like the battle's FOCUS_CHAR)
  */
-export const DetailPanel = modComponent('loadout.detail', function DetailPanel({ detail, editable, snapHp, onClose, onSell, onDestroy, bonds = [], offBonds = null, loadout = null, ops = null, onBond = null, side = 'left', shopOpen = false, live = null, voice = false }) {
+export const DetailPanel = modComponent('loadout.detail', function DetailPanel({ detail, editable, snapHp, onClose, onSell, onDestroy, onUnequip = null, bonds = [], offBonds = null, loadout = null, ops = null, onBond = null, side = 'left', shopOpen = false, live = null, voice = false }) {
   const getter = typeof live === 'function' ? live : null;
   useTicker(detail && getter ? 250 : 0);
   // 配音语言 (v0.7.1): the panel is the component that subscribes to the settings store, so picking a dub in the card
@@ -922,7 +940,7 @@ export const DetailPanel = modComponent('loadout.detail', function DetailPanel({
     <div class="dpanel__scroll">
       ${detail.type === 'chess' ? html`<${ChessDetail} chess=${detail.chess} piece=${detail.piece} snapHp=${snapHp} editable=${editable} onSell=${sellIt}
         bonds=${bonds} offBonds=${offBonds} loadout=${loadout} onBond=${onBond} live=${liveNow} hint=${detail.hint || null} unitItems=${detail.unitItems || null}
-        standIn=${detail.standIn || null} diy=${detail.diy || null} voiceSettings=${voiceSettings} cultOpts=${detail.cultOpts || { ops }} />` : null}
+        standIn=${detail.standIn || null} diy=${detail.diy || null} voiceSettings=${voiceSettings} cultOpts=${detail.cultOpts || { ops }} onUnequip=${onUnequip} />` : null}
       ${detail.type === 'item' ? html`<${ItemDetail} item=${detail.item} piece=${detail.piece} editable=${editable} onDestroy=${destroyIt} offBonds=${offBonds} />` : null}
       ${detail.type === 'enemy' ? html`<${EnemyDetail} enemy=${detail.enemy} snapHp=${snapHp} count=${detail.count} live=${liveNow} />` : null}
       ${detail.type === 'token' ? html`<${TokenDetail} token=${detail.token} piece=${detail.piece} ownerId=${detail.ownerId ?? null} snapHp=${snapHp} live=${liveNow} />` : null}

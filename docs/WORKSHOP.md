@@ -74,7 +74,7 @@ workshop/<packId>/
 | `forms` | 贡献项之一 | 这个包自带的干员 / 怪物**自己的形态（clip set）**，见 §1.19：`{ chars / enemies / tokens: { "<spine id>": { "<形态名>": { change?, end?, leave?, next?, roles } } } }`。**第一方已有的形态名不许覆盖**（`FORMS_FIRST_PARTY_OVERLAP` 整包拒绝） | ⛔ 本轮无图形入口（作者手写 `pack.json`） |
 | `fx` | 贡献项之一（空数组除外） | 包自己的**静态相位**：`{ "silentPhases": ["<phase kind>", …] }`，命中的 `'phase'` 特效不放通用特效，见 §1.19。与第一方那两个**并集**（取消不了） | ⛔ 本轮无图形入口 |
 | `variants` | 否（声明，**不是**贡献项） | 这个包要的**变体 / 口径**（满练度 / 12 部署位这类可切换口径），见 §1.20：`[{ axis, default? }]`，轴与选项名都是**闭枚举**（`shared/variants.js`），值由引擎自己给。声明了就必须标 `combat: true`（`VARIANTS_NEED_COMBAT`） | ⛔ 本轮无图形入口（作者手写 `pack.json`） |
-| `behaviour` | 否（声明，**不是**贡献项） | 这个包要的**行为开关**（引擎里**已经实现**的一条规则按哪一档跑），见 §1.22：`[{ switch, option?, name?, desc? }]`，开关名与选项名都是**闭枚举**（`shared/behaviour.js`），**动作由引擎构造**。声明了就必须标 `combat: true`（`BEHAVIOUR_NEEDS_COMBAT`）。**本版那张表是空的** ⇒ 任何声明都被 `BEHAVIOUR_UNKNOWN_SWITCH` 点名整包拒（首格与它的引擎实现点一起落） | ⛔ 本轮无图形入口（作者手写 `pack.json`） |
+| `behaviour` | 否（声明，**不是**贡献项） | 这个包要的**行为开关**（引擎里**已经实现**的一条规则按哪一档跑），见 §1.22：`[{ switch, option?, name?, desc? }]`，开关名与选项名都是**闭枚举**（`shared/behaviour.js`），**动作由引擎构造**。声明了就必须标 `combat: true`（`BEHAVIOUR_NEEDS_COMBAT`）。**本版那张表有 4 格**（`shopBias` / `prepLoadout` / `morphPairing` / `unequip`，见 §1.22 与 §1.23）⇒ 声明表里没有的开关（或选项）仍被 `BEHAVIOUR_UNKNOWN_SWITCH` / `BEHAVIOUR_UNKNOWN_OPTION` 点名整包拒 | ⛔ 本轮无图形入口（作者手写 `pack.json`） |
 
 **每个字段都有图形入口**（0.8.1 起，最后补上的是元数据与 `overrides`；`operators` 的入口见 §1.2）：写进 `pack.json`
 的东西必须能在界面上增删改，包括**陈旧/没人用的条目**（它们只是不生效，不是错误，但要能删掉）。唯一没有入口的是 `id`：它必须等于目录名。
@@ -2074,14 +2074,105 @@ URL **一次都不被请求**。一个包把加载源改坏了，关掉这一格
    对局行为是不允许的）。**不进** `modDigest`（它只哈希 `[id, hash]` 对），但随 `welcome.mods[].behaviour` 与
    `variants` 并列投影（漏掉投影 = 开关**静默不生效**）。
 
-**本版那张表是空的 —— 这是刻意的。** 第 4 刀交的是「**通道 + 守卫**」本身：通道真的通、且响 —— 任何一条
-`behaviour` 声明都被 `BEHAVIOUR_UNKNOWN_SWITCH` **点名整包拒**（空表不是「不认识的开关一律忽略」，而是一个都
-不认识，文案里写清「本版一个开关都没有，因为没有实现点」）。**首格与它的引擎实现点一起落**，由业主点名；
-**加一格的门槛**因此比 §1.20 的加轴纪律更严：那一格必须**已经在引擎里有实现点**。
+### 1.23 逐格加开关（第 8 刀，`0.16.0` 内）
+
+**本版那张表里有实现好的格 —— 这一点与第 4 刀那一版不同。** 第 4 刀交的是「**通道 + 守卫**」本身（当时表是空的：
+任何一条 `behaviour` 声明都被 `BEHAVIOUR_UNKNOWN_SWITCH` **点名整包拒**，文案里写清「本版一个开关都没有，因为没有
+实现点」）。**首格与它的引擎实现点一起落**，由业主点名；**加一格的门槛**因此比 §1.20 的加轴纪律更严：那一格必须
+**已经在引擎里有实现点**（`docs/design/mod-layer.md` §28.43.1 逐格列出）。今天有 **3 格**，下表就是那三格。
+
+| 开关 | 选项 | 缺省 | 引擎侧的读取点 | 投稿 |
+|---|---|---|---|---|
+| `shopBias` | `official` · `bondBias` | `official` | `bondBiasPreference`（`server/match/pool.js`）→ `bondBiasBonds`（`server/match/player/economy.js`）→ `PlayerEconomy._rollItemSlot` | `b293e061b38f` |
+| `prepLoadout` | `locked` · `prep` | `locked` | `LOADOUT_PHASES` / `loadoutPhasesFor`（`server/match/match/platform.js`）→ `Match.setLoadout` 的相位闸门 | `8b4e5da55c58` |
+| `morphPairing` | `official` · `plus` | `official` | 判据本体 `grantedBondsByMorph`（`shared/morph.js`），三处读取点同判：`bondsMeta.pieceBonds` · `support/index.unitBonds` · 客户端 `gameLogic/bonds.grantedBonds`；**装备位语义**那半条是 `morphSlotPolicy`（`shared/morph.js`），六处读取点同判：`player/items.js` · `player/acquire.js` · `bot.js` · `invariants.js` · 客户端 `ui/detailPanel.js` · `ui/gameLogic/placement.js` | `19ea65909cf6` |
+| `unequip` | `official` · `allow` | `official` | `unequipAllowed`（`server/match/player/items.js`）→ `PlayerState.unequip`（新意图 `g.unequip { itemUid }`）；客户端同一判据读它决定画不画「卸下」按钮 | `79de9ff03518` |
+
+**每一格的三件事写清**：**缺省档 = 引擎今天的行为**（不声明 / 选缺省 ⇒ 逐字节不变，所以没有任何 `golden:update`）；
+**非缺省档由引擎实现**（包给不出数字、路径或模块）；**那一格的 `effect` 逐字说明它到底动了什么**。
+
+#### `shopBias` —— 商店装备槽的出货偏向
+
+* `official`：装备槽按**棋子**阶级份额抽一个阶级，再在同阶级的**商店候选**里等概率抽（今天的行为）。
+* `bondBias`：装备槽在这个玩家**已激活**盟约对应的装备里抽（`giveBondId` 落在那些盟约里），**只偏置、不授予** ——
+  授予盟约是 `giveBondId` 本来的语义，由装备自己的规则管。抽到的**阶级**仍由棋子份额决定；某一级里一件命中都没有
+  就**回落官方那一份**（偏向永远不会把商店抽空），库存闸门（`SharedItemPool.canGain`）一步都不跳过。
+* **没做的两条**（原件 `files.json._doc` 提到）：①「已激活**核心**盟约优先于已激活附加盟约」；②「骑士戒律也接入
+  这套偏向」。**原因**：那两条的源件不在我们手上 ⇒ 按「缺源件不做假实现」**不做**，也不在 `effect` 里声称做了。
+* **没读的两个字段**：原件的 `payload/data/items.json` 带来 `giveBondBiasOnly`（115 处）与一批
+  `canGiveBond`（115 处）。**这两个字段不是这一格读的东西** —— 我们只读 `giveBondId`；这一格与它那两个文件里
+  **没有**任何一处读 `giveBondBiasOnly`（我们数据里连这个键都不存在），`canGiveBond` 是官方记录本来就有的键
+  （变形同构体自己的标记）。`test/shopBias.test.js` 把这几条钉住。
+
+#### `prepLoadout` —— 休整期能不能改技能与模组
+
+* `locked`：**官方**——`room.loadout` 只在 `INFO_CHECK`（briefing 的干员调配）期间收，之后锁死（今天的行为）。
+* `prep`：休整期（`PHASE.PREP`）里、且**这个座位还没准备**（`ready` 还没置位）时，也收一次 `room.loadout`。
+  **不新增协议消息**：走的就是既有那条 `room.loadout { entries, ops? }`（投稿 `8b4e5da55c58` 自己也是复用既有
+  意图；它另加的那个 `g.loadout` 我们不需要）。**合并语义**：这一次提交**只覆盖它写了的那些干员**，没写的保留
+  当前配发 —— 整份替换会让一个只带一名干员的面板提交把其余干员静默打回默认。
+* `INFO_CHECK` 那一半**不看** `ready`（今天也不看）：两个相位是两条独立的门。
+* **客户端半（DESIGN §28.43.3）**：客户端的"是否锁定"现在**跟着这一格走** —— `screens/loadout.js` 里那两处
+  写死的相位判据（"本局已锁定"那句 + `shouldAutoClose`）改成读 `loadoutSync.currentLoadoutLockPhases()`，
+  档位由 `roomMods.js` 从 `welcome.mods` 合成。缺省 ⇒ 只含 `INFO_CHECK`，**与从前逐字等价**。
+  编辑本身**不需要新发送点**：`loadoutSync` 早就在发既有的 `room.loadout`。
+* ⚠️ **`PREP` 里的入口还没做**（§28.43.4 记账）：对局屏（`screens/game.js`）没有任何 `LoadoutButton`，
+  所以在贴一个 `PREP` 入口之前，这一格在实战里还差最后一步。
+
+#### `morphPairing` —— 变形同构体的配对规则
+
+* `official`：**引擎今天的行为** —— 少于两件装备就**不配对**（变形同构体占一个装备位），配上了就**每一件**
+  `giveBondId` 装备都授予。
+* `plus`：投稿 `19ea65909cf6` 的那一套 —— **一件就够**（不要求两件），且**只取装备行里最左边**那一件能授予盟约的。
+* **判据只有一份**：`shared/morph.js` 的 `grantedBondsByMorph`。prep 侧（`bondsMeta.pieceBonds`）、战斗里
+  （`support/index.unitBonds`，档位由 `withMorphPairing` 的作用域给）与客户端
+  （`gameLogic/bonds.grantedBonds`，档位由 `roomMods.js` 从 `welcome.mods` 合成后写入）**都调它** ——
+  投稿原件是把这三处各自覆盖一份，而三处各写一份循环正是这条规则最容易分叉的地方。
+* **第 7 段把槽位那半也补上了**（第三格落地时它被如实记成「未做」）：`plus` 档下变形同构体
+  **不占装备位**（两格真装备满了也装得上）、每名干员**最多一件**、第三件真装备**永远顶掉真正占格的那一件**
+  （它自己永远不会被顶掉，也不是可顶替的对象）。判据同样只有一份：`shared/morph.js` 的 **`morphSlotPolicy`**
+  返回一个策略对象（`OFFICIAL_SLOT_POLICY` / `PLUS_SLOT_POLICY`），六个读取点都读它：
+  服务端 `player/items.js`（`_attach` / `_takeReplaced` / `equip` 的两条守卫）、`player/acquire.js`（回收）、
+  `bot.js`（选人与选装备）、`invariants.js`（不变量），客户端 `ui/detailPanel.js`（`EQUIP n/2` 与
+  「不占装备格」标签）与 `ui/gameLogic/placement.js`（替换对话框的判据）。
+* **缺省档逐字节不变**：`morphSlotPolicy()` 在没声明 / `official` / 不认识的档位下返回的是
+  **`OFFICIAL_SLOT_POLICY` 这个共享冻结单例本身**，它的每个方法都逐字是引擎今天那条算术
+  （`slotsUsed` = `items.length`、`slotCap` = `equipPerChess`、`replacedIndex` 的「找不到 ⇒ 0」）——
+  所以缺省路径上「同一批数字、同一次比较、同一个 splice 下标」，**不需要 `golden:update`**。
+  `gamedata.equipPerChess` 本身**一字未动**：那两格装备位是官方的，策略只回答「这一行占了几格、能不能再放一件、
+  顶替挑哪一件」。`test/morphSlots.test.js` 逐条钉住两档的行为，`test/morphPairing.test.js` 钉住缺省档拿到的是
+  那个单例。
+
+#### `unequip` —— 已装备的装备能不能卸下
+
+* `official`：**引擎今天的行为** —— 装备装上之后只能靠**精英化 / 合成 / 卖出**离开干员；`g.destroy` 对已装备的
+  装备回 `equipped items are locked`。
+* `allow`：休整期可以用**新意图 `g.unequip { itemUid }`** 把一件已装备的装备取下，退回**手牌**（右→左优先），
+  手牌满则进**临时整备区**；两者都满 ⇒ 整件事**原子拒绝**（`HAND_FULL`），装备**留在原处、下标不变**。
+* **这是本层第一格「开关 + 新意图」**，五处落点（协议表 / `intents.js` / `PlayerState.unequip` / 客户端发送点 /
+  判据读取点 `unequipAllowed`）在 `docs/design/mod-layer.md` §28.43.2 里逐条点名。
+* **`PROTOCOL_VERSION` 不动**：新增一个类型不是改已有形状（先例 `records.mine`），老客户端不发它就一切照旧。
+* **缺省档逐字节不变**：缺省回的就是 `destroy` 今天那句 `'equipped items are locked'`，客户端**一个按钮都不画**
+  （`ItemRow` 的判据是「有人传 `onUnequip` **且** `unequipAllowed()`」），`ItemDetail` 那句「配发后无法取下」
+  **只在 `allow` 档**换成不带那半句的版本 —— 所以**不需要 `golden:update`**，已发布包一个字节不动。
+* **池不变式**：装备只是从**装备位**移到**手牌 / 临时**（同一个 `piece`、同一个 `uid`）⇒ `held` / `cap` / `left`
+  全不变，**没有「归还」这回事**（`destroy` / `sell` 才真让池子少一件）。
+* **刻意的决定**：本格**不发内容钩子**（`HOOKS` 是 `META` 契约面，「卸下」用哪个都不贴切，今天也没有包需要被
+  通知）；将来真有需要就**另立一刀**按契约面扩展。写在这里是为了让后人知道这是决定，不是漏做。
+
+**新增一格怎么做**：先把**引擎侧的读取点**实现好（照这一格），再把那一格加进 `BEHAVIOUR_SWITCHES`
+（`label` / `options` / `default` / `optionLabels` / `effect` / `actions` 一件都不能少 —— `behaviourSwitchIssues`
+逐格检查），最后补一节文档与一个测试文件（并把读取点登记进 `shared/modSurface.js` 的那一格锚点）。
 
 **`MOD_API_VERSION` 仍是 `1`**（加一格字段不抬版本；与 §1.20 / §1.21 同一条）。**「老引擎优雅降级」明确不做** ——
 老引擎遇到这个键回的是 `PACK_UNKNOWN_FIELD`（点名拒），作者该知道的是自己该跑哪一版；**老包一个字节不受影响**
 （不声明就不长键）。**不新增协议消息、不改默认游戏行为 ⇒ 不需要 `golden:update`**。
+
+**站侧含义（照实写）**：空表在站上**真的挡过投稿** —— `e3a5d09eb6d3`（第 4 刀那一份跨版本安装包，已批准公开）
+按 `pack.json.behaviour` 声明时拿到 `BEHAVIOUR_UNKNOWN_SWITCH`，文案就是「Known switches: none yet …」。这三格落了
+之后，`b293e061b38f` / `8b4e5da55c58` / `19ea65909cf6` 三条**有了可声明的档**（仍要按包格式重写，见 §1.1）。
+另一条实测约束：`11746baa0662` 只声明 `pack.json.variants` 会拿到 `EMPTY_PACK`（`"variants" is NOT a contribution`）
+—— **口径与开关都不是贡献项**，一个只带它们的包不构成一份包。
 
 完整规范见 [docs/design/mod-layer.md](design/mod-layer.md) §28.43。
 
