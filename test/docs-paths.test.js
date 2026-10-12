@@ -166,7 +166,7 @@ test('CHANGELOG: every `## x.y.z — date` section sits exactly once in the inde
   }
   assert.ok(where.size >= 44, `只找到 ${where.size} 节 —— 抽取是不是坏了？`);
   assert.ok(where.has('0.1.0'), '最早那一节（0.1.0）还在册');
-  assert.ok(where.has('0.16.0-0.2.4'), '最新那一节（带 `-<上游>` 半边的）还在册');
+  assert.ok(where.has('0.17.0-0.2.4'), '最新那一节（带 `-<上游>` 半边的）还在册');
   // 索引那张表：一行一卷，点名的版本必须**恰好**是该文件持有的那些（顺序也一致：新 → 旧）
   const held = (file) => [...where].filter(([, f]) => f === file).map(([v]) => v);
   let rows = 0;
