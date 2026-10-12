@@ -1054,7 +1054,7 @@ export function createPanelRegistry(deps) {
      *
      * **为什么引擎必须给**：默认路径下战斗在这台机器上跑（`public/js/battle/runner.js`），伤害元组走 runner
      * **自己的** listener map，**根本不进 `net`** ⇒ 面板订阅不到（§28.30 已查明）。而伤害数字早在模拟里算好了：
-     * `server/sim/damage.js:370` 每次命中写 `source.stats.dmg`，`:371` 写 `battle._pp(ownerId).damageDealt`，
+     * `server/sim/damage.js:424` 每次命中写 `source.stats.dmg`，`:371` 写 `battle._pp(ownerId).damageDealt`，
      * `:352` 写 `bossDamage`。这一格就是**把已经在那儿的数字取出来**，不是第二份账。
      *
      * **形状**（一次读一份新的、冻结的副本；`dmg` / `bossDmg` / `kills` / `heal` 取整，与结果页 `compactResult`

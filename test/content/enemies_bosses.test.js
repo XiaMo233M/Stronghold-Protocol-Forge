@@ -72,7 +72,9 @@ test('stats-only enemies attach no ability and fight with their data stats', () 
 
 // Abilities the client makes silenceable although their handbook line is NORMAL (the battle prefab's buff template checks
 // SILENCED): 萨卡兹枯朽战士 / 组长's PollutedDie = template projectile_on_killed, the 死亡爆炸 template of 高能源石虫's
-// SILENCE-flagged blast too (community report of 2026-10-06, item 10; DESIGN §25.18.2)
+// SILENCE-flagged blast too (community report of 2026-10-06, item 10; DESIGN §25.18.2).
+// **有意保留的与上游的偏离（GitHub #470 拒）**：上游 0.2.5 把这条的理由改述成「维护者的实机回忆」，与 PRTS / 游戏内
+// 文字「不可沉默」相反 —— 本作不采纳该改述（理由仍是上段的客户端模板读法），也不采纳它改写后的断言。
 const SILENCE_BY_TEMPLATE = new Set(['enemy_1267_nhpbr', 'enemy_1267_nhpbr_2']);
 
 test('沉默: exactly the abilities whose handbook line is SILENCE-flagged can be silenced (every authored enemy), plus the ones whose client template checks it', () => {
@@ -769,14 +771,18 @@ for (const key of ['enemy_1267_nhpbr', 'enemy_1267_nhpbr_2']) {
   });
 
   // PRTS 特殊机制 死亡爆炸 "默认可沉默…若不处于沉默状态，将会…释放"; client template projectile_on_killed: CheckAbnormalFlag
-  // SILENCED (unset) before EmitProjectile (community report of 2026-10-06, item 10: a silenced one still poisoned)
+  // SILENCED (unset) before EmitProjectile (community report of 2026-10-06, item 10: a silenced one still poisoned).
+  // **有意保留的与上游的偏离（GitHub #470 拒）**：上游 0.2.5 把这一条的理由改写成「项目维护者 2026-10-12 的实机回忆是
+  // 沉默能阻止这团雾」，与 PRTS / 游戏内文字「不可沉默」相反。本作**不采纳该改述**，继续按上段的客户端模板读法解释它；
+  // 行为自 0.2.0 起一字未变 —— 这两个键**可被沉默**，且沉默状态下死亡**不**释放污染秽蚀（偏离记录见
+  // server/sim/content/enemies/archetypes.js 的 kitPolluted，以及本文件末尾那个具名判据）。
   test(`${nm(key)}: silenced when it dies, it releases no 污染秽蚀; a silence that ran out does not stop it`, () => {
     const h = arena({ units: [{ chessId: 't_wall', row: 10, col: 6 }] });
     h.step();
     const e = put(h, key, [10, 7]);
     h.b.applyStatus(e, 'silence', { duration: 30 });
     h.step();
-    assert.ok(e.s.flags.silence);
+    assert.ok(e.s.flags.silence, `${nm(key)}: 本作按客户端模板读法允许沉默（PRTS 写「不可沉默」，#470 拒 —— 见 archetypes.js 的偏离记录）`);
     killed(h, e, null);
     h.run(3.05);
     assert.equal(h.unit('t_wall').stats.taken, 0);
@@ -792,6 +798,31 @@ for (const key of ['enemy_1267_nhpbr', 'enemy_1267_nhpbr_2']) {
     approx(h2.unit('t_wall').stats.taken, 3 * tb(key, 'PollutedDie.polluted_damage_low'));
   });
 }
+
+/**
+ * GitHub #470 **拒** —— 把现状钉住，且让「照搬上游读法」必然变红。
+ *
+ * 上游 0.2.5 对这两个键只改了**理由**（改成维护者 2026-10-12 的实机回忆），行为没变；本作两样都不采纳：理由是
+ * 0.2.0 的客户端模板读法（battle prefab 的 ON_OWNER_KILLED 先查 `CheckAbnormalFlag SILENCED`），行为是
+ * **可被沉默、沉默时死亡不留污染秽蚀**。PRTS 与游戏内文字写的是「不可沉默」，这是**有意保留的偏离**。
+ *
+ * 谁把 PRTS / #470 的读法照搬进来（「不可沉默」⇒ 沉默挂不上 ⇒ 死亡必留雾），下面每一条都会红：
+ * 第一条红在「可被沉默」，第二条红在「沉默死亡不留雾」。
+ */
+test('#470 拒: 萨卡兹枯朽战士 / 组长 可被沉默，且沉默状态下死亡不释放污染秽蚀（有意保留的偏离）', () => {
+  for (const key of ['enemy_1267_nhpbr', 'enemy_1267_nhpbr_2']) {
+    const h = arena({ units: [{ chessId: 't_wall', row: 10, col: 6 }] });
+    h.step();
+    const e = put(h, key, [10, 7]);
+    h.b.applyStatus(e, 'silence', { duration: 30 });
+    h.step();
+    assert.ok(e.s.flags.silence, `${nm(key)}: 可被沉默（PRTS「不可沉默」被有意拒绝：#470）`);
+    killed(h, e, null);
+    h.run(3.05);
+    assert.equal(h.unit('t_wall').stats.taken, 0, `${nm(key)}: 沉默状态下死亡不留污染秽蚀`);
+    assert.equal(h.eventsOf('fx').filter((x) => x[1] === 'zone' && x[4] && x[4].kind === 'pollution').length, 0, `${nm(key)}: 没有污染秽蚀区`);
+  }
+});
 
 for (const key of ['enemy_1270_nhstlk', 'enemy_1270_nhstlk_2']) {
   test(`${nm(key)}: attacks inflict bleeding (${tb(key, 'Bleeding.attack@bleeding_damage')} arts/s), removed by healing`, () => {

@@ -19,7 +19,7 @@ npm run editor                                      # 图形化等价物：编�
 > 真实代码范本：`server/sim/content/kits/shared/tier1.js` … `tier6.js`（官方 200 多个 kit 共用的辅助函数，
 > 单个干员的 kit 在同级的 `ops/` 下）。
 >
-> **本版基线**：本仓库 **0.17.0** / 上游游戏本体 **0.2.4**。上游这一版**没有增删任何钩子**，本文的词表就是引擎现在
+> **本版基线**：本仓库 **0.17.0** / 上游游戏本体 **0.2.5**。上游这一版**没有增删任何钩子**，本文的词表就是引擎现在
 > emit 的全部事件；但它把官方干员的数值口径改成了**按干员按玩家在运行时输入**（缺省满潜能、精英阶段2-60级）——
 > 你读到的 `unit.s.atk` 之类的数是**各自主人的设置算出来的**，所以数值**永远从 `bb` 读**这条硬规矩比以前更要紧。
 
@@ -319,7 +319,7 @@ export default function kit(bb, chess, def) {
 - **条件常驻**（「生命高于 50 % 时 +20 % 攻击」）不要每帧 `addBuff`：先 `findBuff` 比一下再改，或直接照抄
   `server/sim/content/kits/ops/chess_char_2_09-humus.js:24`（用 `buff.data.v` 记住当前档位）。
 - **「生命回复速度」不是治疗**：它是一条 `hpRegen` / `hpRegenRatio` 的 buff（`server/sim/units.js:170`），禁疗与治疗
-  加成都管不到它 —— 治疗加成那条路在 `server/sim/damage.js:591`（`opts.regen`）。口径见
+  加成都管不到它 —— 治疗加成那条路在 `server/sim/damage.js:648`（`opts.regen`）。口径见
   `server/sim/content/kits/README.md:330`。
 
 ### 8.3 攻击附带的额外效果（追加伤害 / 溅射 / 真伤 / 状态）
@@ -328,10 +328,10 @@ export default function kit(bb, chess, def) {
 
 | 想要的效果 | 写在哪 | 为什么 |
 |---|---|---|
-| 这次攻击的伤害倍率 / 多段 / 溅射 | SkillSpec 的 `attack`（`atkScale` `hits` `splashRadius` `splashScale` `dmgType`） | 引擎按它生成每次伤害实例（`server/sim/ai.js:296`），溅射在 `server/sim/ai.js:306` 用**中点判定**半径落 |
-| 临时改这一刻的伤害（增伤 / 无视防御 / 取消） | `hit` 钩子改 `ctx.dmg` | `hit` 在减伤**之前**触发（`server/sim/damage.js:285`），可改的字段在 `server/sim/damage.js:69` |
-| 命中之后的追加伤害 / 反伤 / 回技力 | `damaged` 钩子 + `battle.dealDamage` | `damaged` 在伤害**落地之后**触发（`server/sim/damage.js:379`） |
-| 打中了就给状态 | SkillSpec 的 `attack.onHitStatus`，或 `onEachHit` 里 `battle.applyStatus` | 引擎在每次攻击的主目标后应用 `onHitStatus`（`server/sim/ai.js:301`）；`onEachHit` 每个受害者各一次（`server/sim/ai.js:279`） |
+| 这次攻击的伤害倍率 / 多段 / 溅射 | SkillSpec 的 `attack`（`atkScale` `hits` `splashRadius` `splashScale` `dmgType`） | 引擎按它生成每次伤害实例（`server/sim/ai.js:307`），溅射在 `server/sim/ai.js:317` 用**中点判定**半径落 |
+| 临时改这一刻的伤害（增伤 / 无视防御 / 取消） | `hit` 钩子改 `ctx.dmg` | `hit` 在减伤**之前**触发（`server/sim/damage.js:340`），可改的字段在 `server/sim/damage.js:69` |
+| 命中之后的追加伤害 / 反伤 / 回技力 | `damaged` 钩子 + `battle.dealDamage` | `damaged` 在伤害**落地之后**触发（`server/sim/damage.js:436`） |
+| 打中了就给状态 | SkillSpec 的 `attack.onHitStatus`，或 `onEachHit` 里 `battle.applyStatus` | 引擎在每次攻击的主目标后应用 `onHitStatus`（`server/sim/ai.js:312`）；`onEachHit` 每个受害者各一次（`server/sim/ai.js:290`） |
 
 ```js
 skills: {
@@ -339,8 +339,8 @@ skills: {
     kind: 'instant',
     attack: {
       atkScale: num(bb.atk_scale, 1),        // 主目标倍率
-      hits: 2,                               // 主目标两段（server/sim/ai.js:295）
-      splashRadius: 1, splashScale: 0.5,     // 中点 1 格内溅射 50%（server/sim/ai.js:306）
+      hits: 2,                               // 主目标两段（server/sim/ai.js:306）
+      splashRadius: 1, splashScale: 0.5,     // 中点 1 格内溅射 50%（server/sim/ai.js:317）
       dmgType: 'arts',
       // 真伤：mitigate 完全不减（server/sim/damage.js:15）；改成 'true' 就是「真实伤害」
       onEachHit({ battle, unit, target, kind }) {
@@ -357,9 +357,9 @@ talents: [{
   install(battle, unit) {
     // ① 改「这一次」的伤害。守卫必须写：技能伤害、持续伤害、反伤、元素损伤都会走到 hit
     battle.on('hit', (ctx) => {
-      if (ctx.source !== unit || !ctx.dmg.isAttack) return;        // 只认普攻（伤害实例的 isAttack：server/sim/ai.js:296）
+      if (ctx.source !== unit || !ctx.dmg.isAttack) return;        // 只认普攻（伤害实例的 isAttack：server/sim/ai.js:307）
       if (ctx.target.hpRatio > 0.5) return;
-      ctx.dmg.mul *= 1.5;                                         // 在物理/法术减伤之后再乘（server/sim/damage.js:318、:274）
+      ctx.dmg.mul *= 1.5;                                         // 在物理/法术减伤之后再乘（server/sim/damage.js:312、:329）
       ctx.dmg.defIgnorePct = Math.max(ctx.dmg.defIgnorePct, 0.4);
     }, { owner: unit });
 
@@ -367,7 +367,7 @@ talents: [{
     battle.on('damaged', (ctx) => {
       const d = ctx.dmg;
       if (ctx.source !== unit || !d || ctx.target.side !== 'enemy') return;
-      if (ctx.type === 'element') return;                          // 元素损伤也走 damaged（server/sim/damage.js:462）
+      if (ctx.type === 'element') return;                          // 元素损伤也走 damaged（server/sim/damage.js:519）
       if (d.tags.includes('hpLoss')) return;                       // 流失不是「造成伤害」（server/sim/damage.js:121）
       if (d.tags.includes('ws:followup')) return;                  // ★ 必须挡住自己刚造成的那一下，否则无限递归
       battle.dealDamage(unit, ctx.target, { amount: unit.s.atk * 0.3, type: 'true', canDodge: false, tags: ['ws:followup'] });
@@ -381,8 +381,8 @@ talents: [{
   `server/sim/content/kits/ops/chess_char_1_06-vendla.js:57`（`tags: ['counter']` + `byEnemyAttack` 跳过
   `counter` / `reflect`）。
 - **手写 AoE 用哪个查询**：`battle.foesInRadius(x, y, r, centre)` 是「一次范围效果**能选中**的敌人」（剔除不可选中与
-  隐匿，`server/sim/battle/queries.js:175`），`battle.enemiesInRadius(...)` 是「位置在半径里」的（含不可选中，
-  `server/sim/battle/queries.js:154`）。写伤害用前者，写光环 / 碰撞用后者。德克萨斯 S2 的两段伤害 + 眩晕在
+  隐匿，`server/sim/battle/queries.js:176`），`battle.enemiesInRadius(...)` 是「位置在半径里」的（含不可选中，
+  `server/sim/battle/queries.js:155`）。写伤害用前者，写光环 / 碰撞用后者。德克萨斯 S2 的两段伤害 + 眩晕在
   `server/sim/content/kits/ops/chess_char_1_08-texas.js:30`。
 - **额外伤害要不要乘 `unit.s.atkScaleMul`**：它是「技能伤害倍率」桶（`server/sim/units.js:166`），官方 kit 的追加伤害
   会乘（`server/sim/content/kits/ops/op-judge.js:164`）。
@@ -399,18 +399,18 @@ talents: [{
 
 | 你要的效果 | 钩子 | 为什么不是别的 |
 |---|---|---|
-| 取消 / 改这一次攻击的目标 | `beforeAttack` `{ attacker, targets, isSkill, profile }` | 目标已选定、还没结算：清空 `ctx.targets` 就是取消（`server/sim/ai.js:205`） |
-| 「每次攻击」计数 / 特效 | `attack` `{ attacker, targets, isSkill }` | 伤害已发出、溅射与连锁还没走完（`server/sim/ai.js:221`） |
-| 改这一下伤害 | `hit` `{ source, target, dmg, credit }` | 在减伤之前，唯一能改 `dmg.mul` / `defIgnore*` / `cancel` 的位置（`server/sim/damage.js:285`） |
-| 附伤 / 反伤 / 回技力 / 叠层 | `damaged` `{ source, target, amount, type, dmg, credit }` | 伤害真的落地之后（`server/sim/damage.js:379`）；`amount` 可能为 0（全被盾吃掉） |
-| 元素损伤倍率 | `elementHit` `{ source, target, dmg }` | 只给元素损伤（`server/sim/damage.js:451`），改 `dmg.amount` / `dmg.mul` / `cancel` |
-| 不死 / 保留 1 点血 | `fatal` `{ unit, source, credit, dmg, amount, prevented }` | `ctx.prevented = true` 就是不死（`server/sim/damage.js:361`） |
-| 击杀叠层 | `kill` `{ killer, victim }` | `killer` 可能是召唤物或 `null`，要判 `killer === unit`（`server/sim/battle/deploy.js:77`）；召唤物击杀另有 `summonKill`（`server/sim/content/tokens.js:1747`） |
-| 清自己的标记 / 召唤物随主人消失 | `death` `{ unit, reason, killer, dying }` | 任何单位死亡（含友军、撤退、漏怪；`server/sim/battle/deploy.js:149`） |
+| 取消 / 改这一次攻击的目标 | `beforeAttack` `{ attacker, targets, isSkill, profile }` | 目标已选定、还没结算：清空 `ctx.targets` 就是取消（`server/sim/ai.js:215`） |
+| 「每次攻击」计数 / 特效 | `attack` `{ attacker, targets, isSkill }` | 伤害已发出、溅射与连锁还没走完（`server/sim/ai.js:231`） |
+| 改这一下伤害 | `hit` `{ source, target, dmg, credit }` | 在减伤之前，唯一能改 `dmg.mul` / `defIgnore*` / `cancel` 的位置（`server/sim/damage.js:340`） |
+| 附伤 / 反伤 / 回技力 / 叠层 | `damaged` `{ source, target, amount, type, dmg, credit }` | 伤害真的落地之后（`server/sim/damage.js:436`）；`amount` 可能为 0（全被盾吃掉） |
+| 元素损伤倍率 | `elementHit` `{ source, target, dmg }` | 只给元素损伤（`server/sim/damage.js:508`），改 `dmg.amount` / `dmg.mul` / `cancel` |
+| 不死 / 保留 1 点血 | `fatal` `{ unit, source, credit, dmg, amount, prevented }` | `ctx.prevented = true` 就是不死（`server/sim/damage.js:415`） |
+| 击杀叠层 | `kill` `{ killer, victim }` | `killer` 可能是召唤物或 `null`，要判 `killer === unit`（`server/sim/battle/deploy.js:81`）；召唤物击杀另有 `summonKill`（`server/sim/content/tokens.js:1749`） |
+| 清自己的标记 / 召唤物随主人消失 | `death` `{ unit, reason, killer, dying }` | 任何单位死亡（含友军、撤退、漏怪；`server/sim/battle/deploy.js:153`） |
 | 「受到攻击时」的反伤 | `damaged` + 自己判来源 | 官方口径是**任何敌方来源的伤害实例**（不是只有普攻），并且要跳过 `counter` / `reflect` / 流失 / 元素损伤 —— 内联版就是 `byEnemyAttack`： |
-| 部署时给东西 | `deploy` `{ unit, initial, move? }` | `initial: true` 才是开局那一次；`move: true` 是【移动】再部署（`server/sim/battle/deploy.js:66`、`server/sim/battle/tiles.js:56`） |
-| 技能起止 | `skillStart` / `skillEnd` `{ unit, skill, reason }` | `skillStart` 里挂的、`skillEnd` 里清；`onEnd` 跑的时候技能加成**还在**（`server/sim/skills.js:498`、`:556`） |
-| 每帧 | `tick` `{ dt }` | 只用来做轻量的条件检查（`server/sim/battle/lifecycle.js:102`） |
+| 部署时给东西 | `deploy` `{ unit, initial, move? }` | `initial: true` 才是开局那一次；`move: true` 是【移动】再部署（`server/sim/battle/deploy.js:70`、`server/sim/battle/tiles.js:56`） |
+| 技能起止 | `skillStart` / `skillEnd` `{ unit, skill, reason }` | `skillStart` 里挂的、`skillEnd` 里清；`onEnd` 跑的时候技能加成**还在**（`server/sim/skills.js:503`、`:556`） |
+| 每帧 | `tick` `{ dt }` | 只用来做轻量的条件检查（`server/sim/battle/lifecycle.js:111`） |
 | 定时 | `battle.after` / `battle.every` | 战斗自己的时钟（`server/sim/battle/hooks.js:112`、`:119`）；`setTimeout` 会被 `KIT_NONDETERMINISTIC` 抓 |
 
 「受到攻击时」的内联口径（官方版：`server/sim/content/kits/shared/tier1.js:80`）：
@@ -431,7 +431,7 @@ const byEnemyAttack = (ctx) => {
    （每次部署 +1：`server/sim/battle/deploy.js:39`）。
 2. **`battle.after` 的回调在单位死后仍会跑**（定时器在 step 开头统一执行）。回调里第一行就要自己判：
    `if (!unit.alive || !unit.deployed || unit.deploySeq !== seq) return;` —— 官方写法见
-   `server/sim/content/kits/ops/chess_char_1_01-inside.js:36`。`unit.deployedAt`（`server/sim/battle/deploy.js:41`）用来
+   `server/sim/content/kits/ops/chess_char_1_01-inside.js:36`。`unit.deployedAt`（`server/sim/battle/deploy.js:43`）用来
    算「部署后过了多少秒」。
 3. **`skillStart` 早于 `deploy`**（`activateOnDeploy` 的技能：`docs/SIM.md:925`），所以「部署时」的逻辑不要假设技能还没开；
    反过来，在 `skillStart` 里读 `unit.deployedAt` 是安全的。
@@ -455,7 +455,7 @@ battle.addBuff(unit, { key: 'ws:count', refresh: 'stack', maxStacks: 99, duratio
 - **封顶要自己判**。`maxStacks` 只管 buff 的层数，不管你的效果逻辑；超了要在加之前 `return`
   （官方例子：`server/sim/content/kits/ops/chess_char_3_04-swire2.js:243`）。
 - **要不要跨部署保留**：写 `persist: true, allowDead: true` 就留着（`server/sim/buffs.js:173`）；不写就随单位退场消失。
-  死亡时想清干净，在 `death` 里 `battle.removeBuff(unit, key)`（`server/sim/battle/deploy.js:149`）。
+  死亡时想清干净，在 `death` 里 `battle.removeBuff(unit, key)`（`server/sim/battle/deploy.js:153`）。
 - **层数状态挂在 buff 上，不要自己数**：`unit.findBuff(key).stacks` 就是唯一真相；`duration: Infinity` + `refresh: 'stack'`
   的组合天然自带「累计、封顶、随 key 唯一」。
 - **一场战斗级的计数**（「这场里第 3 次技能」）用 `unit.mem`（`server/sim/units.js:83`）或按 `battle` 作键的 `WeakMap`
@@ -498,9 +498,9 @@ const def = battle.tokenDef('token_ws_my_drone', unit);
   固定点位用 `battle.findTacticalPoint(unit)`（`server/sim/battle/tiles.js:130`）。
 - **本包自带 token 记录**：`tokens.json` 是允许工坊贡献的数据文件之一（`shared/workshop.js:44`，形状与 `data/tokens.json`
   同形，记录里的 `tokenId` 字段必须等于键：`shared/workshop.js:48`），放进 `pack.json.content` 里声明即可。
-- **召回 / 让召唤物离场**：`battle.retreat(token, { reason: 'retreat' })`（`server/sim/battle/deploy.js:94`）；
-  让它原地回来：`battle.redeploy(token, { free: false, tile: [r, c] })`（`server/sim/battle/deploy.js:198`）。
-- **召唤物的击杀**：引擎发 `summonKill` `{ token, owner, victim }`（`server/sim/content/tokens.js:1747`），
+- **召回 / 让召唤物离场**：`battle.retreat(token, { reason: 'retreat' })`（`server/sim/battle/deploy.js:98`）；
+  让它原地回来：`battle.redeploy(token, { free: false, tile: [r, c] })`（`server/sim/battle/deploy.js:202`）。
+- **召唤物的击杀**：引擎发 `summonKill` `{ token, owner, victim }`（`server/sim/content/tokens.js:1749`），
   召唤流干员听这个。
 - **引擎不提供（`import` 的那两个）**：
   - `releaseSkillSummon`（`server/sim/content/tokens.js:388`）—— 官方「技能召唤物做成一张手牌、开局免费部署一次、技能再
@@ -510,13 +510,13 @@ const def = battle.tokenDef('token_ws_my_drone', unit);
     自动回到原格）。要复刻就用 `unit.mem` 记持有数 + `battle.every` 轮询 + `battle.redeploy`。
 - **引擎不提供「凭空造一个任意单位」**：`spawnToken` 必须给 tokenId + def；`spawnDevice` 造的是**不可攻击**的装置
   （它的 profile 被钉成 `{ noAttack: true, maxTargets: 0 }`：`server/sim/battle/summons.js:97`）。要一个「能被自己人打」的
-  单位，用 `battle.setAllyTarget(unit, true)` 把己方单位注册成可攻击目标（`server/sim/battle/queries.js:77`）。
+  单位，用 `battle.setAllyTarget(unit, true)` 把己方单位注册成可攻击目标（`server/sim/battle/queries.js:78`）。
 
 ### 8.7 范围改写（rangeGrid）
 
 **技能自己的范围**用 SkillSpec 的 `targeting.rangeGrid`（相对格，朝 RIGHT 编写，引擎按 `unit.dir` 旋转：
 `server/sim/dir.js:6`）。**运行中改范围**要在改完 `unit.rangeGrid` 之后调 `battle.refreshRange(unit)`
-（`server/sim/battle/queries.js:262`）—— 不调的话 `unit.rangeKeys` 还是旧的（`server/sim/battle/queries.js:243`）：
+（`server/sim/battle/queries.js:263`）—— 不调的话 `unit.rangeKeys` 还是旧的（`server/sim/battle/queries.js:244`）：
 
 ```js
 install(battle, unit) {
@@ -535,16 +535,16 @@ install(battle, unit) {
 
 | 想要的效果 | 用什么 | 证据 |
 |---|---|---|
-| 「攻击范围 +1」 | buff 的 `mods.rangeExtend`（永久的那部分进初始范围） | `server/sim/units.js:141`、`server/sim/buffs.js:183`、`server/sim/battle/queries.js:252` |
+| 「攻击范围 +1」 | buff 的 `mods.rangeExtend`（永久的那部分进初始范围） | `server/sim/units.js:141`、`server/sim/buffs.js:183`、`server/sim/battle/queries.js:253` |
 | 换掉整个范围形状 | `unit.rangeGrid = 副本` + `battle.refreshRange` | `server/sim/content/kits/ops/chess_char_5_15-thorn2.js:168`、`…/op-cgbird.js:149` |
-| 只多几个「打得到」的格子（不改形状） | `battle.setExtraRange(unit, keys)`，key 是绝对 tile key（`row * COLS + col`，`COLS` 是**画布**宽度 —— 一张图是画布里的一个窗口，`shared/constants.js:216` 的 `CANVAS_COLS`，`server/sim/constants.js:18`） | `server/sim/battle/queries.js:273`、用法 `…/ops/chess_char_6_01-lemuen.js:201` |
+| 只多几个「打得到」的格子（不改形状） | `battle.setExtraRange(unit, keys)`，key 是绝对 tile key（`row * COLS + col`，`COLS` 是**画布**宽度 —— 一张图是画布里的一个窗口，`shared/constants.js:216` 的 `CANVAS_COLS`，`server/sim/constants.js:18`） | `server/sim/battle/queries.js:274`、用法 `…/ops/chess_char_6_01-lemuen.js:201` |
 | 技能范围与自己的范围不同 | `targeting.rangeGrid` | `docs/SIM.md:1025` |
-| 技能范围**不**吃单位的攻击距离加成 | `targeting.noRangeExtend` | `server/sim/battle/queries.js:240` |
-| 范围只用来选目标、不改卡面上的范围 | `targeting.showOwnRange` | `server/sim/battle/queries.js:249` |
+| 技能范围**不**吃单位的攻击距离加成 | `targeting.noRangeExtend` | `server/sim/battle/queries.js:241` |
+| 范围只用来选目标、不改卡面上的范围 | `targeting.showOwnRange` | `server/sim/battle/queries.js:250` |
 | 「不靠普攻触发技能」的额外范围 | `trigger: { rule: 'SKILL_RANGE', grid }`，或 `unit.skill.addTriggerRange(fn)`（回调返回格 key 数组或 `{ keys, profile }`） | `server/sim/skills.js:146`、`:130` |
 | 临时换自动释放规则 | `unit.skill.setTrigger(rule, grid)` | `server/sim/skills.js:138` |
 
-**不要**直接改 `unit.rangeKeys` / `unit.rangeKeySet`（每次 rebuild 都会重建，`server/sim/battle/queries.js:237`），
+**不要**直接改 `unit.rangeKeys` / `unit.rangeKeySet`（每次 rebuild 都会重建，`server/sim/battle/queries.js:238`），
 也**不要**往 `unit.rangeGrid` 里 `push`：初始那个数组就是冻结的 `def.rangeGrid`（`server/sim/battle/players.js:199`
 + `server/sim/simdata.js:518`），写它会抛异常。官方 kit 一律先复制：`server/sim/content/kits/shared/tier5.js:181`。
 
@@ -553,17 +553,17 @@ install(battle, unit) {
 ```js
 // 治疗：返回真正加上去的血量（damage.js heal 的返回值）；heal 钩子只能改 amount，不能改目标
 battle.heal(unit, ally, unit.s.atk * num(bb.heal_scale, 1));                        // server/sim/battle/combat.js:13
-battle.heal(unit, unit, num(bb.value, 0), { self: true });                          // 自疗：server/sim/damage.js:584
-battle.heal(unit, ally, 500, { overheal: true });                                   // 溢疗转屏障：server/sim/damage.js:554
+battle.heal(unit, unit, num(bb.value, 0), { self: true });                          // 自疗：server/sim/damage.js:641
+battle.heal(unit, ally, 500, { overheal: true });                                   // 溢疗转屏障：server/sim/damage.js:611
 
-// 屏障（护盾）= buff 上的 shield 字段；盾先于 HP 被扣（server/sim/damage.js:326）
+// 屏障（护盾）= buff 上的 shield 字段；盾先于 HP 被扣（server/sim/damage.js:380）
 battle.addBuff(ally, { key: 'ws:barrier', shield: unit.s.atk * 2, duration: num(bb.duration, 8), visible: true, source: unit });
 battle.addBuff(ally, { key: 'ws:artsbarrier', shield: 2000, duration: 10, shieldType: 'arts' }); // 只吸法术：server/sim/damage.js:243
 battle.addBuff(ally, { key: 'ws:onelayer', shieldHits: 1, visible: true });                      // 挡下一次伤害：server/sim/damage.js:246
 
 // 选治疗目标
-const hurt = battle.lowestHpAllyInRange(unit) ?? unit;        // server/sim/battle/queries.js:109
-const list = battle.alliesFor(unit);                          // 会跳过「孤立」：server/sim/battle/queries.js:145
+const hurt = battle.lowestHpAllyInRange(unit) ?? unit;        // server/sim/battle/queries.js:110
+const list = battle.alliesFor(unit);                          // 会跳过「孤立」：server/sim/battle/queries.js:146
 ```
 
 - 盾的数据模型就是 buff 的 `shield`（吸收量）与 `shieldHits`（免疫次数）（`server/sim/buffs.js:167`、`:168`），
@@ -572,11 +572,11 @@ const list = battle.alliesFor(unit);                          // 会跳过「孤
 - 「溢疗转屏障」也可以在 `heal` 钩子里手写：`server/sim/content/kits/ops/chess_char_2_09-humus.js:48`。
 - **递减屏障**：`buff.onTick` 里扣 `buff.shield`（`server/sim/buffs.js:161` 的 `onTick` + `interval`），官方例子
   `server/sim/content/kits/ops/chess_char_6_13-angel2.js:13`。
-- **禁疗 / 治疗加成**：目标是 `noHeal` / `healFree` 时 `heal` 返回 0（`server/sim/damage.js:590`、`:545`）；
-  治疗量乘的是施疗者的 `healingDealtMul` 与目标的 `healingTakenMul`（`server/sim/damage.js:593`）。
+- **禁疗 / 治疗加成**：目标是 `noHeal` / `healFree` 时 `heal` 返回 0（`server/sim/damage.js:647`、`:545`）；
+  治疗量乘的是施疗者的 `healingDealtMul` 与目标的 `healingTakenMul`（`server/sim/damage.js:650`）。
   这些桶你自己**不要**再乘一遍。
 - **「生命回复速度」不要用 `heal`**：用 `mods.hpRegen` / `hpRegenRatio`（`server/sim/units.js:170`），
-  它以 `opts.regen` 走同一条 `heal` 函数、但不吃禁疗与治疗加成（`server/sim/damage.js:591`）。口径见
+  它以 `opts.regen` 走同一条 `heal` 函数、但不吃禁疗与治疗加成（`server/sim/damage.js:648`）。口径见
   `server/sim/content/kits/README.md:330`。
 
 ### 8.9 目标选择
@@ -586,20 +586,20 @@ const list = battle.alliesFor(unit);                          // 会跳过「孤
 ```js
 // 技能期间：技能自己的索敌
 skill: { kind: 'duration', targeting: { maxTargets: 3, priority: 'elite', canHitFly: false, allInRange: false } },
-// 常驻：特性层（kit.trait 会覆盖战斗档案，server/sim/professions.js:698）
+// 常驻：特性层（kit.trait 会覆盖战斗档案，server/sim/professions.js:710）
 trait: { priority: 'lowDef', maxTargets: 2, splashRadius: 1.2 },
 ```
 
-- **`priority` 是固定词表**（`server/sim/targeting.js:176`）：`fly` `lowDef` `highDef` `ranged` `lowestHp` `highestHp`
+- **`priority` 是固定词表**（`server/sim/targeting.js:177`）：`fly` `lowDef` `highDef` `ranged` `lowestHp` `highestHp`
   `lowestHpRatio` `highestAtk` `boss` `elite` `notBurst` `ground` `heaviest`，另外 `nearest` / `farthest` 由引擎特判
-  （`server/sim/targeting.js:203`）。用法例子：`server/sim/content/kits/ops/chess_char_1_01-inside.js:21`（`ranged`）、
+  （`server/sim/targeting.js:204`）。用法例子：`server/sim/content/kits/ops/chess_char_1_01-inside.js:21`（`ranged`）、
   `…/chess_char_6_13-angel2.js:50`（`fly`）、`…/op-cerber.js:91`（`highDef`）。
 - **`maxTargets` 是上限，不是下限**：引擎按 `prof.maxTargets` 截断候选（`hitAllBlocked` 的档案改用阻挡数），
-  再加上 buff 的 `mods.maxTargets`（`server/sim/ai.js:178` 数目标数，`:163` 与 `:158` 才真正切片）。
+  再加上 buff 的 `mods.maxTargets`（`server/sim/ai.js:188` 数目标数，`:163` 与 `:158` 才真正切片）。
 - **打不打空军**：`targeting.canHitFly` / `trait.canHitFly`（`server/sim/ai.js:68`）；「只打地面」用 `groundOnly`
-  （`server/sim/targeting.js:88`）。
-- **自己挑人**（技能/天赋里手写选取）用 `battle.enemiesInKeys(keys, unit, profile)`（`server/sim/battle/queries.js:34`），
-  `keys` 是**绝对** tile key。工坊里要自己旋转范围格 —— 引擎的 `absoluteRangeKeys`（`server/sim/targeting.js:25`）不能
+  （`server/sim/targeting.js:89`）。
+- **自己挑人**（技能/天赋里手写选取）用 `battle.enemiesInKeys(keys, unit, profile)`（`server/sim/battle/queries.js:35`），
+  `keys` 是**绝对** tile key。工坊里要自己旋转范围格 —— 引擎的 `absoluteRangeKeys`（`server/sim/targeting.js:26`）不能
   import，照抄 `server/sim/dir.js:39` 那张表：
 
 ```js
@@ -613,15 +613,15 @@ const gridKeys = (unit, grid) => grid.map(([dr, dc]) => {
 const foes = battle.enemiesInKeys(gridKeys(unit, def.skill.rangeGrid), unit, { canHitFly: false });
 ```
 
-- **「范围效果能选中」的语义**用 `foesInRadius`（`server/sim/battle/queries.js:175`，剔除不可选中 / 隐匿），
+- **「范围效果能选中」的语义**用 `foesInRadius`（`server/sim/battle/queries.js:176`，剔除不可选中 / 隐匿），
   「谁在半径里」用 `enemiesInRadius`（`:154`）。
 - **友方**：`battle.alliesFor(unit)` / `battle.alliesInGrid(unit)` / `battle.alliesInRadius(...)` 都会跳过「孤立」单位
-  （`server/sim/battle/queries.js:140`）；`battle.injuredAlliesInKeys(keys, healer)` 专挑需要治疗的人（`:92`）。
+  （`server/sim/battle/queries.js:141`）；`battle.injuredAlliesInKeys(keys, healer)` 专挑需要治疗的人（`:92`）。
 - **每个受害者各一次**用 `attack.onEachHit(ctx)`（`ctx.kind` = `'main'` / `'splash'` / `'chain'`，还带
-  `dealt` / `isSplash` / `isChain` / `main` / `attackId`：`server/sim/ai.js:279`）；**每次攻击一次、只给主目标**用
-  `attack.onHit(ctx)`（`server/sim/ai.js:346`，它的 `ctx.dealt` 是这次攻击对**所有**目标造成的总伤害）。
+  `dealt` / `isSplash` / `isChain` / `main` / `attackId`：`server/sim/ai.js:290`）；**每次攻击一次、只给主目标**用
+  `attack.onHit(ctx)`（`server/sim/ai.js:373`，它的 `ctx.dealt` 是这次攻击对**所有**目标造成的总伤害）。
 - **引擎不提供**：改不了敌人「怎么挑我」（那是敌人的 profile / data），只能靠 `taunt`（`server/sim/units.js:148`）或
-  `battle.setAllyTarget` 把友军注册成可攻击目标（`server/sim/battle/queries.js:77`）。
+  `battle.setAllyTarget` 把友军注册成可攻击目标（`server/sim/battle/queries.js:78`）。
 
 ### 8.10 与盟约、天赋、数据层交互的边界
 
@@ -635,7 +635,7 @@ const foes = battle.enemiesInKeys(gridKeys(unit, def.skill.rangeGrid), unit, { c
   **特性**的模组升级已经并进 `traitBb(chess)`（`server/sim/content/kits/shared/tier1.js:48`、`:52`、`:58`）。
   `chess.module.active` 表示这个模组是否生效（同文件 `:60`）。不要自己按等级或模组再算一遍。
 - **`trait` 一身两职**：它既是战斗档案的覆盖字段（`{ priority, maxTargets, splashRadius, noAttack, groundOnly … }`，
-  合并点 `server/sim/professions.js:698`，键表在 `server/sim/professions.js:11`），也可以带 `install(battle, unit)`
+  合并点 `server/sim/professions.js:710`，键表在 `server/sim/professions.js:11`），也可以带 `install(battle, unit)`
   （与 `talents` 同形：`server/sim/content/kits/ops/chess_char_1_06-vendla.js:27`）。
 - **安装顺序是固定的**：`profile.install`（也就是 `trait.install`）→ `talents[].install` → `kit.install`
   （`server/sim/battle/players.js:239`–`:244`），都在战斗开始前的构造期跑一次。别指望 `talents` 先跑。
@@ -662,23 +662,23 @@ const foes = battle.enemiesInKeys(gridKeys(unit, def.skill.rangeGrid), unit, { c
 | 在 `hit` 里加伤却不判 `isAttack` / 不排元素损伤 | 技能伤害、持续伤害、反伤、元素损伤都会被加成 | `if (!ctx.dmg.isAttack) return;`（`server/sim/content/kits/ops/chess_char_4_10-aroma.js:38`、`:73`） |
 | 在 `damaged` 里 `dealDamage` 却不打 tag / 不跳过自己的 tag | 与自己的输出乒乓递归，嵌套守卫触发后连 `kill` / `death` 一起被跳过（`docs/SIM.md:810`） | 打 tag 并跳过它（`server/sim/content/kits/ops/chess_char_1_06-vendla.js:62`） |
 | 想用 `import` 拿官方辅助函数 | `KIT_IMPORT` 错误（`shared/kitAuthoring.js:195`）：服务端按路径、浏览器按 URL，跨环境路径不可能同时对 | 内联（§8.1） |
-| 改完 `unit.rangeGrid` 忘了 `refreshRange` | `unit.rangeKeys` / `rangeKeySet` 仍是旧格子，攻击与技能触发都用不上新范围 | 改完立刻 `battle.refreshRange(unit)`（`server/sim/battle/queries.js:262`） |
-| 用 `unit.rangeKeys` 当「范围定义」缓存起来 | 它是快照，部署、换方向、范围重建后都会变（`server/sim/battle/queries.js:237`） | 每次重新读，或读 `unit.rangeKeySet` |
+| 改完 `unit.rangeGrid` 忘了 `refreshRange` | `unit.rangeKeys` / `rangeKeySet` 仍是旧格子，攻击与技能触发都用不上新范围 | 改完立刻 `battle.refreshRange(unit)`（`server/sim/battle/queries.js:263`） |
+| 用 `unit.rangeKeys` 当「范围定义」缓存起来 | 它是快照，部署、换方向、范围重建后都会变（`server/sim/battle/queries.js:238`） | 每次重新读，或读 `unit.rangeKeySet` |
 
 ### 8.12 引擎确实不提供的那些东西（汇总）
 
 | 想要的效果 | 引擎不提供什么 | 替代写法 |
 |---|---|---|
 | 在工坊 kit 里 `import` 官方辅助 / 引擎模块 | `KIT_IMPORT`（`shared/kitAuthoring.js:195`） | 内联一份（§8.1） |
-| 运行时换掉战斗档案（攻击方式、弹道、治疗模式） | 没有公开接口：`kit.trait` 只在构造期合并一次（`server/sim/battle/players.js:213`、`server/sim/professions.js:698`） | 技能期间用 SkillSpec 的 `attack` / `targeting`（`server/sim/skills.js:567` 是它的生效判定），或改 `ctx.dmg` |
+| 运行时换掉战斗档案（攻击方式、弹道、治疗模式） | 没有公开接口：`kit.trait` 只在构造期合并一次（`server/sim/battle/players.js:213`、`server/sim/professions.js:710`） | 技能期间用 SkillSpec 的 `attack` / `targeting`（`server/sim/skills.js:572` 是它的生效判定），或改 `ctx.dmg` |
 | 直接设操作者的面板属性 | 没有接口（只有召唤物能用 `spawnToken` 的 `opts.stats`：`server/sim/battle/summons.js:60`） | `mods` |
 | 运行时改全局规则 / 经济 / 回合表 | `battle.flags` 是构造期输入（`server/sim/Battle.js:150`）；包也不能贡献 `config`（`docs/WORKSHOP.md:56`） | 改自己的单位、自己 `battle.emit` 命名空间事件 |
 | 让敌人改路线 / 换 AI | 没有接口 | 位移 `battle.push` / `pull` / `pullToFront`（`server/sim/battle/displacement.js:60`、`:97`、`:131`）与状态 `fear` / `attract`（`server/sim/buffs.js:85`、`:121`） |
 | 独立的护盾槽 / 多个盾各吸一类伤害 | 没有：盾就是 buff 的 `shield` / `shieldHits`（`server/sim/buffs.js:167`、`:168`） | 一个 key 一个盾，用 `shieldType` 限定吸收类型（`server/sim/damage.js:243`） |
-| 改「治疗落在谁身上」 | `heal` 钩子只能改 `amount`（`server/sim/damage.js:598`） | 自己选目标（`server/sim/battle/queries.js:92`、`:109`） |
+| 改「治疗落在谁身上」 | `heal` 钩子只能改 `amount`（`server/sim/damage.js:655`） | 自己选目标（`server/sim/battle/queries.js:93`、`:109`） |
 | 读存档 / 准备区 / 商店 / 装备栏 | sim 里没有这些对象 | `battle.getPlayer(playerId)` 给的是战场视图（`docs/SIM.md:843`），`battle.data` 给的是本局数据（`server/sim/Battle.js:114`） |
 | 给包加一份 `tokens.json` 之外的新数据种类 | 只有 14 个内容文件可贡献（`shared/workshop.js:44`） | 贡献 `tokens.json`（`shared/workshop.js:48`），或用 `spawnToken` 的 `opts.def` 内联定义（`server/sim/simdata.js:304`） |
 | 在联防 / boss 战场里加盟约层数 | `addLayers` 只在 `flags.layerGainsEnabled` 时生效（`server/sim/battle/economy.js:23`），只有普通战场是 `true`（`server/sim/Battle.js:150`） | 没有替代：那两种战场里加层是 no-op |
-| 我方单位的「攻击前摇开始」事件 | 没有：`beforeAttack` 在目标已选定之后才触发（`server/sim/ai.js:197-199`） | 用 `beforeAttack` 清 `ctx.targets` 取消这次攻击；敌人的起手另有 `enemyAttackStart`（`server/sim/ai.js:805`） |
+| 我方单位的「攻击前摇开始」事件 | 没有：`beforeAttack` 在目标已选定之后才触发（`server/sim/ai.js:207-209`） | 用 `beforeAttack` 清 `ctx.targets` 取消这次攻击；敌人的起手另有 `enemyAttackStart`（`server/sim/ai.js:832`） |
 | 「技能召唤物做成手牌」那套现成流程 | `releaseSkillSummon` 在 content 模块里，工坊不能 import（`server/sim/content/tokens.js:388`） | 自己 `battle.spawnToken`；手牌形式要走 `tokens.json` 的 `placeable` |
 | 召唤师牌堆（持有 / 回收 / 随主人消失） | `summonDeck` 是要 import 的辅助（`server/sim/content/kits/shared/summoner.js:99`） | `unit.mem` + `battle.every` + `battle.redeploy` 自己写 |

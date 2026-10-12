@@ -481,7 +481,7 @@ describe('伤害看板（业主点名那一格）：今天能读什么、读不�
     assert.equal(registry.refusals().length, n + 1, '但**点名**拒绝，不静默');
     assert.equal(registry.refusals().at(-1).code, 'CLIENT_CHANNEL_UNDECLARED');
     assert.equal(net.handlers.get('b.progress'), undefined, 'net 上一个处理器都没挂');
-    // 能读的那一格：`b.pool { hp, max, teamLp, acked }`（`server/match/match/bossRounds.js:381` `_broadcastPool`：发给**每个人**，≤ 4 Hz），
+    // 能读的那一格：`b.pool { hp, max, teamLp, acked }`（`server/match/match/bossRounds.js:382` `_broadcastPool`：发给**每个人**，≤ 4 Hz），
     // `acked[fieldId]` = 那一场累计计入的领袖伤害 —— 这是面板今天能拿到的**实时**伤害数字。
     assert.ok(S2C.includes('b.pool'), 'b.pool 是既有的 S2C 成员');
     let live = 0;
