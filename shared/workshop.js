@@ -144,7 +144,39 @@ export const PACK_FIELDS = Object.freeze([
   'behaviour',
   // 中间层四组能力声明（DESIGN §28.13）
   'assets', 'client', 'server', 'routes',
+  // 目标引擎（DESIGN §28.46）：`forge`（缺省，本引擎自己装）或 `stardust`（给 Stardust 宿主的**声明型包** ——
+  // 本引擎不装载它，但认识它、不拒绝它、也不把它算进数据叠加层；同一份 pack.json 两端各自读得懂）。
+  // `target: "stardust"` 的包额外允许 Stardust profile 的几格（见 `STARDUST_TARGET_FIELDS`）。
+  'target',
+  // 管理器合同（DESIGN §28.48）：对**其它工坊包**的依赖与互斥声明，形状是 `[{ id, range? }]` —— `id` 是另一个
+  // 工坊包的 id（同一套字符集），`range` 是那个包 `version` 的区间（`shared/packs.js` 的同一套语法，缺省 = 任意
+  // 版本）。这里只管**形状**；**语义在装载期裁决**（`adjudicatePackGraph`：缺失依赖 / 版本不合 / 互斥 / 级联 /
+  // 循环，全部具名拒绝）。与 `target` 同一条纪律：**只在写出来时**才进归一化结果 —— 没声明的包哈希逐字节不变。
+  'dependencies', 'conflicts',
 ]);
+
+/** `pack.json.target` 的闭枚举：`forge`（缺省）本引擎装载；`stardust` 是给 Stardust 宿主的声明型包（本引擎只认识、不装载）。 */
+export const PACK_TARGETS = Object.freeze(['forge', 'stardust']);
+/** `target: "stardust"` 的包额外允许的 Stardust profile 字段（本引擎自己的闭集里没有的那些拼法）：
+ *  `type`（必须是 `mod`）与 `capabilities` 是必须的两格；`englishName` / `authors` / `app` 是**同一个东西的
+ *  Stardust 拼法**（本引擎叫 `name` / `author` / `gameVersion`）—— 放行它们只为一件事：「同一份 pack.json
+ *  两端各自读得懂」不该逼作者在两种拼法里二选一。`target: "forge"`（含缺省）一个都不放行。 */
+export const STARDUST_TARGET_FIELDS = Object.freeze(['type', 'capabilities', 'englishName', 'authors', 'app']);
+/**
+ * **能力认领的字段**（`target: "stardust"`）：Stardust 宿主的 profile 里，一个能力可以额外收下它自己的字段
+ * （例如 `announcements` 能力收 `announcements` 列表）。本引擎不装载这些包、也不解释那些字段 —— 但**必须认识它们**，
+ * 否则「同一份 pack.json 两端各自读得懂」在这张闭集前就断了：作者会看到本引擎报 `PACK_UNKNOWN_FIELD`。
+ * （注意名字：Stardust 用的字段叫 `announcements` **不是** `notices` —— 本引擎自己已经有一个 `notices`（DESIGN
+ * §28.15 的纯文本声明，形状是一个对象），同一个键不能对两个宿主说两种形状。）
+ *
+ * 这张表是**手抄的镜像**（与 Stardust 的 `shared/modPacks.js MOD_CAPABILITY_FIELDS` 对应），故意的：
+ * 一份远端仓库的表没法在这里被 import；漂移的代价是「本引擎拒装一份它其实该放行的包」——两端对照由作者侧的
+ * `chain-test.mjs`（同一份 pack.json 两个宿主各自读）盯着，改一边就要改另一边。字段本身**不做语义校验**：
+ * 它是 Stardust 的 profile 要判的东西，本引擎只看形状（必须是那份能力认领的名字）。
+ */
+export const STARDUST_CAPABILITY_FIELDS = Object.freeze({
+  announcements: Object.freeze(['announcements']),
+});
 
 /** 未知顶层键的拒绝码（见 `PACK_FIELDS`）。 */
 export const PACK_UNKNOWN_FIELD_CODE = 'PACK_UNKNOWN_FIELD';
@@ -1269,6 +1301,60 @@ function parseRoutesDecl(raw) {
  * @returns {{ ok: true, decl: Record<string, string> } | { ok: false, error: string, detail: string }}
  */
 /**
+ * `pack.json.dependencies` / `pack.json.conflicts` —— 管理器合同（DESIGN §28.48）的形状：`[{ id, range? }]`。
+ *
+ * `id` 是**另一个工坊包**的 id（`PACK_ID_RE` 同一套字符集 —— 一个 `../escape` 在这里就被点名拒，绝不留到
+ * 装载期去拼路径），`range` 是那个包 `version` 的区间（`shared/packs.js` 的同一套语法，缺省 = 任意版本）。
+ *
+ * 两条形状纪律，都是「不许猜作者的意思」：
+ *   * **逐字重复的条目去重**（`{id:'b'}` 写两遍是同一个意思），输出按 `(id, range)` 排序 ⇒ 归一化确定、
+ *     同一个包在两端得到同一份清单；
+ *   * **同一个 id 配两个不同的 range 是点名拒绝**（`*_CONFLICTING_RANGES`）—— 哪个区间算数？作者没说，
+ *     猜一个就等于替他做了一个会影响装载的决定。
+ *
+ * 这里只管形状。**语义在装载期**：是不是真的缺、版本合不合、有没有和别的包互斥、链上有没有断、有没有环，
+ * 全部由 `adjudicatePackGraph` 在那份**已加载的包集合**上裁决（形状对、语义照样可以死）。
+ * @param {unknown} raw
+ * @param {string} what `dependencies` / `conflicts`（进错误码与文案）
+ * @returns {{ ok: true, decl: object[] } | { ok: false, error: string, detail: string }}
+ */
+function parseModRefsDecl(raw, what) {
+  if (!Array.isArray(raw)) {
+    return fail(`${what.toUpperCase()}_BAD_SHAPE`, `${what} must be a list of { id, range? } entries (a pack id of another workshop pack)`);
+  }
+  const out = [];
+  const seen = new Map();
+  for (const [i, row] of raw.entries()) {
+    const where = `${what}[${i}]`;
+    if (!isPlainObj(row)) return fail(`${what.toUpperCase()}_BAD_ENTRY`, `${where} must be an object: { id, range? }`);
+    for (const key of Object.keys(row)) {
+      if (!['id', 'range'].includes(key)) return fail(`${what.toUpperCase()}_UNKNOWN_FIELD`, `${where}: "${key}" is not a declared field (id, range)`);
+    }
+    if (typeof row.id !== 'string' || !PACK_ID_RE.test(row.id)) {
+      return fail(`${what.toUpperCase()}_BAD_ID`, `${where}.id ${JSON.stringify(row.id ?? null)} is not a pack id`);
+    }
+    if (row.range !== undefined && (typeof row.range !== 'string' || !isVersionRange(row.range))) {
+      return fail(`${what.toUpperCase()}_BAD_RANGE`, `${where}.range: ${JSON.stringify(row.range ?? null)} is not a version range (">=1.0.0", "1.x" …)`);
+    }
+    const key = `${row.id}@${row.range ?? '*'}`;
+    if (seen.has(key)) continue; // 逐字相同的重复条目：去重（输出按 (id, range) 排序，确定性不变）
+    seen.set(key, row.id);
+    out.push(row.range === undefined ? { id: row.id } : { id: row.id, range: row.range });
+  }
+  // 同 id 不同 range：语义没法确定（哪个区间算数？），点名拒绝而不是猜
+  const byId = new Map();
+  for (const e of out) {
+    if (!byId.has(e.id)) byId.set(e.id, []);
+    byId.get(e.id).push(e.range ?? '*');
+  }
+  for (const [id, ranges] of byId) {
+    if (new Set(ranges).size > 1) return fail(`${what.toUpperCase()}_CONFLICTING_RANGES`, `${what}: "${id}" is listed with different ranges (${ranges.join(' vs ')}) — one entry per dependency`);
+  }
+  out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : (a.range ?? '') < (b.range ?? '') ? -1 : 1));
+  return { ok: true, decl: out };
+}
+
+/**
  * `pack.json.notices` —— 包的**纯文本声明**（DESIGN §28.15，业主 2026-10-10：「公告 / 鸣谢这一类非游戏内容的声明」）。
  *
  * 两个成员都是**包内相对 `.json` 路径**（不是内联文本）：与 `i18n` 同一条理由 —— 一段要展示给人看的正文属于内容，
@@ -1675,10 +1761,26 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // 顶层键闭集（`PACK_FIELDS`）：一个我们不认识的键**点名拒绝**，绝不读过去。这是本刀那条共通纪律的落点 ——
   // 三个社区 mod 里的 `variants` / `skins` / `i18n` 全都是「写了等于没写」的静默丢，而作者从错误文案里
   // 得不到任何线索。判据放在最前面：一个连键都不认识的清单，后面的字段级判据都是在猜它想说什么。
+  //
+  // 例外只有一条：`target: "stardust"` 的包（给 Stardust 宿主的**声明型包**）额外允许 Stardust profile 的几格
+  // （`type` / `capabilities` / `englishName` / `authors` / `app`），以及**那格里声明的能力自己认领的字段**
+  // （`STARDUST_CAPABILITY_FIELDS`，例如 `announcements` 能力的 `announcements`）—— 同一份 pack.json 两端各自
+  // 读得懂，谁都不许把对方认识的键当成笔误。
+  const starTarget = raw.target === 'stardust';
+  // 能力认领的字段只对**声明了那个能力**的包放行：`announcements` 字段跟着 `capabilities: ["announcements"]` 走
+  // （与 Stardust 侧 `MOD_CAPABILITY_NOT_DECLARED` 同一条规则，本引擎这边只管形状）。
+  const starClaimed = new Set();
+  if (starTarget && Array.isArray(raw.capabilities)) {
+    for (const cap of raw.capabilities) {
+      for (const name of STARDUST_CAPABILITY_FIELDS[cap] || []) starClaimed.add(name);
+    }
+  }
   for (const key of Object.keys(raw)) {
     if (PACK_FIELDS.includes(key)) continue;
+    if (starTarget && STARDUST_TARGET_FIELDS.includes(key)) continue;
+    if (starClaimed.has(key)) continue;
     return fail(PACK_UNKNOWN_FIELD_CODE,
-      `pack.json: "${key.length > MAX_KEY_SHOWN ? `${key.slice(0, MAX_KEY_SHOWN)}…` : key}" is not a field of this pack format (${PACK_FIELDS.join(', ')}). A key this loader does not know is never read: write it as one of the fields above, or drop it — a declaration that is ignored is worse than a refusal`);
+      `pack.json: "${key.length > MAX_KEY_SHOWN ? `${key.slice(0, MAX_KEY_SHOWN)}…` : key}" is not a field of this pack format (${PACK_FIELDS.join(', ')}${starTarget ? `, plus ${STARDUST_TARGET_FIELDS.join(', ')} (and the fields a declared Stardust capability claims) for target "stardust"` : ''}). A key this loader does not know is never read: write it as one of the fields above, or drop it — a declaration that is ignored is worse than a refusal`);
   }
   const id = typeof raw.id === 'string' && raw.id ? raw.id : dirName;
   if (!PACK_ID_RE.test(id)) return fail('BAD_PACK_ID', `"${id}" is not a valid pack id (letters, digits, _ and - only)`);
@@ -2119,6 +2221,13 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // 结果」的纪律 —— 没声明 notices 的包哈希逐字节不变。
   const noticesParsed = raw.notices === undefined ? null : parseNoticesDecl(raw.notices);
   if (noticesParsed && !noticesParsed.ok) return noticesParsed;
+  // 管理器合同（DESIGN §28.48）：对**其它工坊包**的依赖与互斥声明 —— 形状在这里，**语义在装载期裁决**
+  //（`adjudicatePackGraph`：缺失 / 版本不合 / 互斥 / 级联 / 循环，全部具名拒绝）。与 `notices` 同一条
+  // 「写了才进归一化结果」的纪律 —— 没声明的包哈希逐字节不变（DESIGN §28.2）。
+  const depsParsed = raw.dependencies === undefined ? null : parseModRefsDecl(raw.dependencies, 'dependencies');
+  if (depsParsed && !depsParsed.ok) return depsParsed;
+  const conflictsParsed = raw.conflicts === undefined ? null : parseModRefsDecl(raw.conflicts, 'conflicts');
+  if (conflictsParsed && !conflictsParsed.ok) return conflictsParsed;
   // 形态（clip set）通道与静态相位通道（DESIGN §28.29）：两条都是**行为增量** —— 第一方 `FORMS` / `SILENT_PHASES`
   // 冻结不动，包只能在自己新声明的 spine id / 形态名 / 'phase' 种类上加东西。同一条「写了才进归一化结果」的
   // 纪律：没声明这两个键的包（今天所有的包）哈希逐字节不变。
@@ -2143,6 +2252,22 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // 它自己不带来任何内容。所以一个只带 `behaviour` 的包照旧 `EMPTY_PACK`（文案里点名它）。
   const behaviourParsed = raw.behaviour === undefined ? null : parseBehaviourDecl(raw.behaviour, opts.behaviourSwitches);
   if (behaviourParsed && !behaviourParsed.ok) return behaviourParsed;
+  // 目标引擎（`target`，DESIGN §28.46）：缺省 `forge`（本引擎自己装）。`stardust` 的包是**声明型**的 ——
+  // 本引擎认识它、不装载它（server/workshop.js 记一行 foreign），所以它不需要任何 Forge 贡献项
+  // （EMPTY_PACK 对它不适用），`type` / `capabilities` 两格按 Stardust profile 校验。写了才进归一化结果。
+  const target = raw.target === undefined ? 'forge' : raw.target;
+  if (!PACK_TARGETS.includes(target)) {
+    return fail('PACK_TARGET_UNKNOWN', `target: ${JSON.stringify(raw.target)} is not one of ${PACK_TARGETS.join(' / ')}`);
+  }
+  let starProfile = null;
+  if (target === 'stardust') {
+    if (raw.type !== 'mod') return fail('STARDUST_TARGET_BAD_TYPE', `target "stardust" needs "type": "mod" (got ${JSON.stringify(raw.type ?? null)}) — it is the type the Stardust host loads`);
+    const caps = raw.capabilities === undefined ? [] : raw.capabilities;
+    if (!Array.isArray(caps) || caps.some((c) => typeof c !== 'string' || !/^[a-z][A-Za-z0-9_.-]{0,63}$/.test(c))) {
+      return fail('STARDUST_TARGET_BAD_CAPABILITIES', 'capabilities must be a list of capability ids (lowercase first, then letters/digits/._-)');
+    }
+    starProfile = { capabilities: [...new Set(caps)].sort() };
+  }
   // 一条声明只有在清单里**真的写了这个键**时才进归一化结果。这一条是本刀最容易做坏的地方：无条件写进去会让
   // 每一个已存在的包（它们没有这些键）的归一化清单多出四个键，于是内容哈希全变、`identifyPack` 的
   // `manifest` 与 `hash` 也跟着变 —— 房间的摘要闸门会开始误判（DESIGN §28.2）。
@@ -2154,6 +2279,8 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (routesParsed) declared.push(['routes', routesParsed.decl]);
   if (i18nParsed) declared.push(['i18n', i18nParsed.decl]);
   if (noticesParsed) declared.push(['notices', noticesParsed.decl]);
+  if (depsParsed) declared.push(['dependencies', depsParsed.decl]);
+  if (conflictsParsed) declared.push(['conflicts', conflictsParsed.decl]);
   if (formsParsed) declared.push(['forms', formsParsed.decl]);
   if (fxParsed) declared.push(['fx', fxParsed.decl]);
   /** 一条声明算不算「贡献」：归一化后的值里有没有东西。`routes: []` 与 `client: { panels: [], requires: [] }`
@@ -2176,16 +2303,20 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // `playtest` **不是**贡献项：它是行为开关，一个只带它的包仍然什么都没带来，照旧 EMPTY_PACK
   // （test/playtestDirectToHand.test.js 有断言钉住这一点）。四组新声明的贡献语义见上面 `contributes` 的注释：
   // A 段把提案的语义落死（B 段实现行为时不用再改），而「只带 `playtest` 照旧被拒」这条既有裁决一字未动。
-  if (!content.length && !Object.keys(voiceLines).length && !Object.keys(orderedLangLines).length
+  // `target: "stardust"` 的包**不是**本引擎的包：它的价值在 Stardust 宿主那一侧，本引擎只看形状、不装载
+  //（server/workshop.js 记一行 foreign），所以「没有 Forge 贡献项」是它的正常形态，EMPTY_PACK 对它不适用。
+  if (target !== 'stardust' && !content.length && !Object.keys(voiceLines).length && !Object.keys(orderedLangLines).length
     && !Object.keys(bondIconFiles).length && !Object.keys(itemIconFiles).length && !Object.keys(artEntries).length
     && !skinEntries.length
     && !Object.keys(orderedOperators).length && !declared.some(contributesDecl)) {
     // 这份清单里「声明了也不算贡献」的字段**都要点名**：`support` / `playtest`（当初只有这两个），
-    // 以及后加的 `variants` / `behaviour`（它们只是「这一局按哪一套跑」的声明，自己不往对局里带任何东西）。
+    // 以及后加的 `variants` / `behaviour`（它们只是「这一局按哪一套跑」的声明，自己不往对局里带任何东西），
+    // 以及管理器合同的 `dependencies` / `conflicts`（DESIGN §28.48：它们说的是「和别的包什么关系」，
+    // 一个只声明依赖的包自己不带来任何内容 —— 与 `support` 同一条）。
     // 只声明助战的包今天整包被拒（plugin-pack G6：一个 `support: [...]` + `content: []` 的包得到的就是这一条），
     // 而原来的文案里**没有** `support` 这个词，作者只能对着 `EMPTY_PACK` 猜。`support` 只决定**助战卡池**里放谁，
     // 干员本体还是由 `content: ["chess"]` 带进来的 —— 所以放宽它不是这一刀的活（那是既有裁决），把话说明白才是。
-    const notContributions = ['support', 'playtest', 'variants', 'behaviour']
+    const notContributions = ['support', 'playtest', 'variants', 'behaviour', 'dependencies', 'conflicts']
       .filter((n) => raw[n] !== undefined);
     const names = [...WORKSHOP_CONTENT_FILES, 'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'skins', 'operators',
       'assets', 'client', 'server.preDispatch', 'server.meta', 'server.battle', 'server.room', 'server.modules', 'server.transport', 'routes', 'i18n', 'notices', 'forms', 'fx'];
@@ -2333,6 +2464,10 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
       // 四组新声明：**只在声明过时才存在**（见上面 `declared` 的注释）。哈希覆盖它们靠的就是这一条 ——
       // `identifyPack` 哈希的是这份归一化清单的 `canonicalJson`（server/workshop.js）。
       ...Object.fromEntries(declared),
+      // 目标引擎与 Stardust profile（同一条「写了才进归一化结果」的纪律）：`target: "forge"` 显式写出来时也进
+      // （那是一个声明），`type` / `capabilities` 只在 stardust 目标下存在。
+      ...(raw.target !== undefined ? { target } : {}),
+      ...(starProfile ? { type: 'mod', capabilities: starProfile.capabilities } : {}),
     },
   };
 }
@@ -4109,4 +4244,122 @@ export function workshopSummary(report) {
   if (report.supportOff) parts.push('助战 pool contributions off (support.json "workshop": false)');
   if (report.errors.length) parts.push(`${report.errors.length} rejected record(s)`);
   return parts.join('; ');
+}
+
+/**
+ * 管理器合同的**装载期裁决**（DESIGN §28.48）—— 对一份**已加载的包集合**按 `dependencies` / `conflicts`
+ * 声明做跨包裁决。形状由 `parseModRefsDecl` 在前面判过；这里判的是**语义**（形状合法、语义照样可以死）。
+ *
+ * 为什么必须在装载期判而不是校验期：一个包声明了什么，只有在**本机上真的装了哪些包**之后才成立。作者交上来的
+ * 是一份 pack.json，他看不到别人的 workshop/ 里有什么。所以「缺依赖」不是他写错了，而是**这台机器上这个组合
+ * 不成立** —— 这正是装载期的判断。
+ *
+ * 五条规则，全部**确定性**（同一份输入永远同一份输出；迭代顺序按包 id 排序，与既有裁决「同 id 抢占按包 id
+ * 排序」同一条确定性来源），全部**具名**（拒绝理由点名双方，见 `refused[].reason`）：
+ *
+ *   * **缺失依赖** —— 声明的 id 不在集合里 ⇒ **依赖方被拒**（`missing dependency "x"`）；
+ *   * **版本不合** —— 依赖在、但它的 `version` 不满足声明的 range ⇒ **依赖方被拒**
+ *     （`dependency "x" version 1.0.0 does not satisfy ">=2.0.0"`）。依赖包**自己没有写 `version`** 时视为
+ *     **满足** —— 它的 version 是「未声明」，不是「不匹配」。机制上：`normalizePackManifest` 把没写 version 的
+ *     包归一化成 `0.0.0`，所以这里把 `0.0.0` 当作「未声明」（见 `declaredVersion`）。这一条是 PR 原文的**规则**，
+ *     但 PR 自带的那条测试断言的是**相反**的行为 —— 本移植按规则实现，冲突已记进 commit 消息的差异清单；
+ *   * **互斥** —— A 声明了对 B 的冲突（B 在集合里、且 B 的 `version` 满足 range）⇒ **包 id 大的那个**被拒
+ *     （`conflicts with "alpha" (declared by "alpha")`）。双方都声明时同一条边只裁决一次，结论一样；
+ *   * **级联** —— 被拒的依赖让它的依赖方也无法工作 ⇒ 级联拒绝，理由链完整（`depends on "x", which was refused`），
+ *     **迭代到不动点**（A 依赖 B、B 依赖 C、C 被拒 ⇒ C、B、A 全拒，一次迭代不够）；
+ *   * **循环** —— 幸存集合里的依赖边成环 ⇒ **环上全体被拒**（`dependency cycle: a → b → c → a`）。它与级联
+ *     不同：环上每个包自己的依赖都「在」，但这份声明本身是死锁，没有任何一个能先装载。
+ *
+ * 纯函数：不改输入，不读磁盘，不抛异常。`kept` 就是真正装载的集合，`refused` 由调用方变成具名的启动日志。
+ * @param {{ id: string, version?: string, name?: string,
+ *           dependencies?: { id: string, range?: string }[],
+ *           conflicts?: { id: string, range?: string }[] }[]} packs
+ * @returns {{ kept: unknown[], refused: { id: string, reason: string }[] }}
+ */
+export function adjudicatePackGraph(packs) {
+  const list = (Array.isArray(packs) ? packs : []).slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const byId = new Map();
+  for (const p of list) if (!byId.has(p.id)) byId.set(p.id, p);
+  /** @type {Map<string, string>} 包 id → 拒绝理由 */
+  const refused = new Map();
+  // 「这个包声明了版本吗」—— `normalizePackManifest` 把**没写** `version` 的包归一化成立面的 `0.0.0`，
+  // 所以装载期看到的是一个字符串，分不出「没写」与「写了 0.0.0」。本仓库的口径是**没写 = 未声明**：
+  // 所以 `0.0.0` 在这里当作「未声明」处理，任何 range 都算**满足**（与 `range` 缺省 = 任意版本同一条意思）。
+  // 这一条是 PR 原文的规则（「依赖包自己没有 version 时视为满足（它的 version 是「未声明」，不是「不匹配」）」）；
+  // ⚠️ 注意 PR 自带的那条测试断言的是**相反**的行为（未声明 ⇒ 0.0.0 ⇒ `>=2.0.0` 不合 ⇒ 拒），
+  // 与本规则冲突，本移植按规则实现、并把它记进 commit 消息的差异清单。
+  const declaredVersion = (p) => (typeof p.version === 'string' && p.version.trim() && p.version.trim() !== '0.0.0' ? p.version.trim() : null);
+  const satisfied = (range, target) => {
+    if (range === undefined || range === '') return true;
+    const v = declaredVersion(target);
+    if (v === null) return true; // 未声明版本 ⇒ 视为满足（不是「不匹配」）
+    return appVersionMatches(range, v);
+  };
+
+  // 第一层：缺失 / 版本不合 / 互斥（互斥按 id 大者败；双方都声明时同一条边只裁决一次）
+  for (const p of list) {
+    for (const dep of p.dependencies ?? []) {
+      const target = byId.get(dep.id);
+      if (!target) refused.set(p.id, `missing dependency "${dep.id}"`);
+      else if (dep.range !== undefined && !satisfied(dep.range, target)) {
+        refused.set(p.id, `dependency "${dep.id}" version ${target.version ?? '(undeclared)'} does not satisfy "${dep.range}"`);
+      }
+    }
+    for (const c of p.conflicts ?? []) {
+      const target = byId.get(c.id);
+      if (!target || (c.range !== undefined && !satisfied(c.range, target))) continue;
+      const loser = p.id > c.id ? p.id : c.id;
+      const winner = p.id > c.id ? c.id : p.id;
+      if (loser === winner) continue;
+      refused.set(loser, `conflicts with "${winner}" (declared by "${p.id}")`);
+    }
+  }
+  // 级联：依赖链上任何一个被拒，依赖方跟着拒（迭代到不动点）
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const p of list) {
+      if (refused.has(p.id)) continue;
+      for (const dep of p.dependencies ?? []) {
+        if (refused.has(dep.id) && !byId.has(dep.id)) continue; // 缺失依赖已经在第一层点名
+        if (refused.has(dep.id)) {
+          refused.set(p.id, `depends on "${dep.id}", which was refused`);
+          changed = true;
+          break;
+        }
+      }
+    }
+  }
+  // 循环：幸存集合里的依赖边成环 ⇒ 环上全体被拒（与级联不同：环上每个包自己的依赖都「在」，但声明本身是死锁）
+  const edges = new Map();
+  for (const p of list) {
+    if (refused.has(p.id)) continue;
+    const targets = (p.dependencies ?? []).map((d) => d.id).filter((id) => byId.has(id) && !refused.has(id));
+    edges.set(p.id, targets);
+  }
+  const state = new Map();
+  const stack = [];
+  const visit = (id) => {
+    state.set(id, 1);
+    stack.push(id);
+    for (const t of edges.get(id) ?? []) {
+      const s = state.get(t);
+      if (s === 1) {
+        const cycle = stack.slice(stack.indexOf(t));
+        for (const m of cycle) refused.set(m, `dependency cycle: ${cycle.concat(cycle[0]).join(' → ')}`);
+        return true;
+      }
+      if (s === undefined && visit(t)) return true;
+    }
+    stack.pop();
+    state.set(id, 2);
+    return false;
+  };
+  for (const p of list) if (!refused.has(p.id) && !state.has(p.id)) { if (visit(p.id)) break; }
+
+  const kept = list.filter((p) => !refused.has(p.id));
+  const refusedList = [...refused.entries()]
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+    .map(([id, reason]) => ({ id, reason }));
+  return { kept, refused: refusedList };
 }

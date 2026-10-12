@@ -334,6 +334,68 @@ export const MOD_SURFACE = Object.freeze([
     tests: ['test/packBehaviour.test.js', 'test/shopBias.test.js', 'test/prepLoadout.test.js', 'test/morphPairing.test.js', 'test/unequip.test.js'],
     spec: '§28.43',
   },
+  {
+    id: 'target',
+    layer: 'A',
+    // 与 `content` / `notices` 同一类：一个**清单字段**，不是执行面。它的特殊性在值指向**另一个宿主**：
+    // `stardust` 的包本引擎只认识、不装载（`server/workshop.js` 的 `foreign`），所以它既不是贡献项，也不进
+    // 数据叠加层。这一格的判据是「闭枚举 + 闭集例外」—— `PACK_TARGETS` 与 `STARDUST_TARGET_FIELDS` 各是一条名单，
+    // 加一格必须同时进本清单与 docs/MOD-SURFACE.md。
+    decl: 'pack.json.target = "forge" | "stardust"',
+    anchors: [
+      { symbol: 'PACK_TARGETS' },
+      { symbol: 'STARDUST_TARGET_FIELDS' },
+      { symbol: 'PACK_FIELDS', members: ['target'] },
+    ],
+    requires: [
+      '闭枚举：只许 `PACK_TARGETS` 里有的（`PACK_TARGET_UNKNOWN`，整包拒，不是忽略）',
+      '缺省 `forge`；不写 ⇒ 归一化清单里**不长出这个键**（无条件写会让所有已发布包的内容哈希改变，§28.2）',
+      '`stardust` 是**声明型包**：本引擎认识、不装载、不进数据叠加层，启动日志一行具名（`server/workshop.js` 的 `foreign`）',
+      '`stardust` 目标额外放行 `STARDUST_TARGET_FIELDS`，以及**声明过的能力自己认领的字段**（`STARDUST_CAPABILITY_FIELDS`）；`forge` 一个都不放行',
+      '`stardust` 的包不受 `EMPTY_PACK` 约束（它没有 Forge 贡献项是正常形态）',
+    ],
+    files: ['shared/workshop.js', 'server/workshop.js'],
+    tests: ['test/modTarget.test.mjs'],
+    spec: '§28.46',
+  },
+  {
+    id: 'dependencies',
+    layer: 'A',
+    // 与 `content` / `notices` 同一类：一个**清单字段**（形状在 `shared/workshop.js` 判）。它的特殊性在
+    // **语义只在装载期成立** —— 「缺不缺这个依赖」要等本机真的装了哪些包才知道，所以这一格的判据分两半：
+    // 形状在这一层（`parseModRefsDecl`），跨包裁决在加载器那一步（`adjudicatePackGraph`，§28.48）。
+    decl: 'pack.json.dependencies[] = { id, range? }',
+    anchors: [{ symbol: 'PACK_FIELDS', members: ['dependencies'] }],
+    requires: [
+      '`id` 必须是**另一个工坊包**的 id（`PACK_ID_RE` 同一套字符集；`DEPENDENCIES_BAD_ID` 整包拒，绝不留到装载期拼路径）',
+      '`range` 是那个包 `version` 的区间（`shared/packs.js` 的同一套语法，缺省 = 任意版本；`DEPENDENCIES_BAD_RANGE`）',
+      '逐字重复的条目去重并按 (id, range) 排序；同一个 id 配两个 range ⇒ `DEPENDENCIES_CONFLICTING_RANGES` 整包拒（不许猜作者的意思）',
+      '**语义在装载期裁决**（`adjudicatePackGraph`）：缺失 / 版本不合 / 级联 / 循环 ⇒ 依赖方被拒，全部具名（`server/index.js` 一行启动日志）',
+      '**不是贡献项**：只声明依赖的包照旧 `EMPTY_PACK`（`notContributions` 逐字点名它）',
+      '不声明 ⇒ 归一化清单里不长这个键（无条件写会让所有已发布包的内容哈希改变，§28.2）',
+    ],
+    files: ['shared/workshop.js', 'server/workshop.js', 'server/index.js'],
+    tests: ['test/modDependencies.test.mjs'],
+    spec: '§28.48',
+  },
+  {
+    id: 'conflicts',
+    layer: 'A',
+    // 与 `dependencies` 同一条通道的**反向**声明：不是「我要谁」，而是「我不要谁」。两者共用同一个形状解析器、
+    // 同一个装载期裁决，差别只在裁决方向（互斥时 **id 大的那个**被拒）。
+    decl: 'pack.json.conflicts[] = { id, range? }',
+    anchors: [{ symbol: 'PACK_FIELDS', members: ['conflicts'] }],
+    requires: [
+      '形状与错误码同 `dependencies`（`CONFLICTS_` 前缀：`BAD_SHAPE` / `BAD_ENTRY` / `UNKNOWN_FIELD` / `BAD_ID` / `BAD_RANGE` / `CONFLICTING_RANGES`）',
+      '**包 id 大的那个被拒**（与既有裁决「同 id 抢占按包 id 排序」同一条确定性来源）；双方都声明时同一条边只裁决一次',
+      '带 `range` 时只有**区间匹配**才互斥（依赖包没写 `version` 时视为满足，见 §28.48）',
+      '**不是贡献项**：只声明互斥的包照旧 `EMPTY_PACK`',
+      '不声明 ⇒ 归一化清单里不长这个键（§28.2）',
+    ],
+    files: ['shared/workshop.js', 'server/workshop.js', 'server/index.js'],
+    tests: ['test/modDependencies.test.mjs'],
+    spec: '§28.48',
+  },
   // ------------------------------------------------------------------ C 层：客户端界面
   {
     id: 'client.panels',

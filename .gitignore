@@ -17,6 +17,10 @@ third-party/bundle/
 data/local-assets.json
 # download caches, upstream tables, ledgers, reports, setup state
 .cache/
+# per-machine runtime state (`server/modModules.js` stateRootFor: SP_STATE_DIR, else <repo>/var): server-module
+# state, account/record files, and the mod registry (DESIGN §28.47). Never a repository artifact — the CLI and the
+# server both write here, so a git checkout stays clean only if this is ignored.
+var/
 
 # --- Python (optional local-client extraction) ----------------------------------------------------
 .venv*/

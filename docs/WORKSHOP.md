@@ -2195,6 +2195,110 @@ URL **一次都不被请求**。一个包把加载源改坏了，关掉这一格
 
 ---
 
+### 1.23 目标引擎（`target`）：一份 `pack.json`，两个宿主各自读得懂
+
+`pack.json` 的顶层键是**闭集**：不认识的键点名拒绝（`PACK_UNKNOWN_FIELD`）。这条纪律对 Forge 自己的包是对的，但当同一份
+清单要给**另一个宿主**（Stardust）读时，它就成了死结 —— 那边认识的键（`type` / `capabilities` / `englishName` /
+`authors` / `app`，以及能力自己认领的 `announcements`）在 Forge 这一侧会被整包拒。
+
+`target` 就是这一格的出口：
+
+```json
+{ "id": "sd-pack", "name": "…", "version": "1.0.0", "license": "CC0-1.0",
+  "target": "stardust", "type": "mod", "capabilities": ["announcements"],
+  "announcements": [ … ] }
+```
+
+* **`"forge"`（缺省）**：本引擎自己装。**不写 `target` 时一个字节都不动** —— 归一化清单里不长这个键，包身份哈希、
+  `/mods/catalog.json`、`PROTOCOL_VERSION`、`MOD_API_VERSION` 全部逐字节不变。显式写 `target: "forge"` 是一条**声明**，
+  它进清单、也进哈希。
+* **`"stardust"`**：给 Stardust 宿主的**声明型包**。本引擎**只认识、不装载** —— 它不进 `packs`、不进数据叠加层、
+  不进 `/mods/catalog.json`，启动日志里留一行具名（`server/workshop.js` 的 `foreign`）。它不需要任何 Forge 贡献项，
+  所以 `EMPTY_PACK` 对它不适用。`type` 必须是 `"mod"`，`capabilities` 是能力 id 列表；能力自己认领的字段只对
+  **声明过那个能力**的包放行。
+* 写别的值：`PACK_TARGET_UNKNOWN`，整包拒。
+
+**作者可见面（已接线）**：三面都会**点名**它 —— `node tools/workshop-validate.mjs` 给它一行具名
+`PACK_FOREIGN` warning（清单合法，所以是 warning 不是 error；收尾另有一句 `NOTE: N pack(s) target another host
+("stardust")`），`node tools/workshop-pack.mjs list` 打的是 `FOREIGN（本引擎不装载：…）`（**带原因**，不是
+`REFUSED（null）`），编辑器包管理页的列表行与详情页各给一格说明（中英双语）。跨宿主误用从「响亮拒绝」变成
+「接受且不装载」之后，**这三面是作者唯一能看见它的地方** —— 不说就是 §1.1 那条教训。
+
+**不抬版本**：`MOD_API_VERSION` 仍是 `1`、`PROTOCOL_VERSION` 仍是 `2`（加一格字段不抬世代）。闭集就地延长：
+顶层键 32 → 33（`docs/STANDARD-PACK.md` §二.2 同步）。**不需要 `golden:update`**：缺省路径一个字节不动。
+
+完整规范见 [docs/design/mod-layer.md](design/mod-layer.md) §28.46。
+
+---
+
+### 1.24 模组管理器（mod registry）：装过什么、启停过什么，与**删除的两道闸**
+
+管理器（`tools/workshop-pack.mjs` 的 `import` / `enable` / `disable` / `uninstall` / `rollback`）把一个包的生命周期
+分成了三种状态，而在此以前只有两种：「装」与「没装」。第三种是**装了但不装载** —— 这是这一节要消掉的那面墙。
+
+```powershell
+node tools/workshop-pack.mjs import demo.zip        # 装上并启用；记下来源与 pack.json 摘要
+node tools/workshop-pack.mjs disable demo           # 文件留在盘上，服务器不再装载它（重启后生效）
+node tools/workshop-pack.mjs enable  demo           # 一条命令回来
+node tools/workshop-pack.mjs uninstall demo --json  # 整包留底到 workshop/.mod-backups/demo/uninstall-<时间戳>/
+node tools/workshop-pack.mjs rollback  demo         # 把升级时留底的上一版换回来
+```
+
+**唯一事实是登记册 `var/mod-registry.json`**（状态根，`SP_STATE_DIR` 可改；**不在** `workshop/` 里 —— 那里是加载器
+扫描的地方，状态文件放进去会被当成一个包）。CLI、编辑器、服务器读的是同一份。**不在册里 = 启用**：装一个包就该
+立刻能用，「禁用」是操作者的一次明确动作；反过来的话，这个文件一丢所有包都会静默消失。
+
+被禁用的包与**装载失败**的包在结果上完全一样：没有 hook、没有订阅、没有面板、没有字节进数据叠加层。
+`node tools/workshop-pack.mjs list` 里它带 ` · DISABLED（不装载）` 后缀 —— 这一格与 `FOREIGN`（§1.23）**正交**，
+一个包可以同时是「清单合法」且「被操作者关掉了」。
+
+**删除的两道闸（都不可绕过）。**
+
+1. **ownership：只卸载本管理器登记过的包。** 一个没有安装记录的包可能是仓库自带、手工放置或者旧版装的 ——
+   这个管理器不认识它，就没资格处置它。`uninstall` 会点名拒绝。
+2. **留底：卸载不销毁字节。** 卸载与回滚都是把整个包目录 **`rename`** 进
+   `workshop/.mod-backups/<id>/…`（点开头 ⇒ 加载器不扫描 ⇒ 立刻"不在"，但一个字节都没丢），**不是删除**。
+   CLI 会把留底路径打出来，不想要可以自己删。升级（`import --force`）也走这条路，`rollback` 靠它回去。
+
+**三条硬边界**：只动**这个包自己的目录**；引擎文件 / `data/` / `test/golden/` **一律不碰**；**越界删除必须被拦，
+而且有测试证明**（两条闸分别有契约测试：`PACK_ID_RE` 挡住 `../../x` 这类 id，`previous.backup` 只接受包内相对
+目录 —— 手改过的登记册也指不到工坊根之外；证明方式是逐字节比对目录树，见 `test/modRegistry.test.mjs`）。
+
+完整规范见 [docs/design/mod-layer.md](design/mod-layer.md) §28.47。
+
+---
+
+### 1.25 包之间的依赖与互斥（`dependencies` / `conflicts`）：**装载期**裁决
+
+```json
+{ "id": "my-mod", "…": "…",
+  "dependencies": [{ "id": "shared-lib", "range": ">=2.0.0" }],
+  "conflicts":    [{ "id": "rival-mod" }] }
+```
+
+`id` 是**另一个工坊包**的 id，`range` 是那个包 `version` 的区间（与 `api` / `game` 同一套语法，缺省 = 任意版本）。
+两个键都进顶层键闭集，但**都不是贡献项**：一个只声明依赖的包照旧 `EMPTY_PACK`。
+
+**为什么是装载期**：一个包声明「我依赖 `lib`」时，这句话只有在**本机真的装了哪些包**之后才成立 —— 作者看不到
+别人的 `workshop/` 里有什么。所以「缺依赖」不是他写错了，而是这个组合在这台机器上不成立。
+
+五条规则，全部**具名**（拒绝理由点名双方，写进启动日志）：
+
+| 情形 | 结果 |
+|---|---|
+| 缺失依赖 | **依赖方被拒**（`missing dependency "lib"`） |
+| 版本不合 | **依赖方被拒**（`dependency "lib" version 1.0.0 does not satisfy ">=2.0.0"`）；**依赖包没写 `version` 时视为满足** |
+| 互斥 | **包 id 大的那个**被拒（`conflicts with "alpha"`）；带 `range` 时只有区间匹配才互斥 |
+| 级联 | 依赖链上任何一个被拒，依赖方跟着拒（迭代到不动点，理由链完整） |
+| 循环 | 环上**全体**被拒（`dependency cycle: a → b → c → a`） |
+
+被拒的包与「没装」在结果上一样：不进数据叠加层、不进 `/mods/catalog.json`、不装载任何载荷。
+**不抬版本**：`MOD_API_VERSION` 仍是 `1`、`PROTOCOL_VERSION` 仍是 `2`；没写这两个键的包**一个字节都不变**。
+
+完整规范见 [docs/design/mod-layer.md](design/mod-layer.md) §28.48。
+
+---
+
 ## 2. 助战
 
 ### 2.1 配置：`data/support.json`

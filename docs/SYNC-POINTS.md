@@ -57,7 +57,7 @@
 
 | # | 同步点 | 漏了会怎样 |
 |---|---|---|
-| ① | `shared/workshop.js` 的 **`PACK_FIELDS`**（**今天 32 键**） | 作者写它 ⇒ `PACK_UNKNOWN_FIELD` **整包拒**；字段在这一层就是**闭集** |
+| ① | `shared/workshop.js` 的 **`PACK_FIELDS`**（**今天 35 键**） | 作者写它 ⇒ `PACK_UNKNOWN_FIELD` **整包拒**；字段在这一层就是**闭集** |
 | ② | 同文件的 **`normalizePackManifest`** 加解析分支 | 键合法了、**归一化时被丢掉** ⇒ 作者看到「pack.json 合法、包加载了、可我写的那件事没发生」 |
 | ③ | `server/workshop.js` 的 **`identifyPack`** 的哈希清单 | **能改变一端行为的声明不进哈希** ⇒ 同一个摘要下出现两种行为（§28.2） |
 | ④ | `docs/MOD-SURFACE.md` 那一行（表面清单） | 文档与实现分叉；`test/modSurface.test.js` 红 |

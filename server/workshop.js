@@ -14,11 +14,14 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   normalizePackManifest, normalizeContentFile, byPackId, playtestUnknownIds, WORKSHOP_PANEL_PREFIX,
-  ASSETS_FILE_CODES,
+  ASSETS_FILE_CODES, adjudicatePackGraph,
   // i18n（fanpack G-04）：**形状**在 shared/workshop.js 判（`parseI18nDecl`），**值**用同一个 `mergeWorkshopI18n` 判
   // —— 校验与合并是同一个函数，所以不可能出现「校验器放行的值，合并时被丢掉」。
   mergeWorkshopI18n, parsePackI18n,
 } from '../shared/workshop.js';
+// 依赖 / 冲突的装载期裁决随装载器一起暴露（`server/index.js` 从这里拿，与 `loadWorkshop` 同一个模块边界）：
+// 它作用的对象就是 `loadWorkshop` 的产物，从别处 import 会让「谁负责装载」这件事有两个答案。
+export { adjudicatePackGraph };
 import { sha256Hex, canonicalJson, modManifestDigest } from '../shared/modIdentity.js';
 // `intercepts` 的运行时判据就是**真的装在这个服务器上的那份协议**（DESIGN §28.13）：A 段在形状层判过一次，这里再判
 // 一次 —— 一份包声明可以比协议活得久（协议收窄了、包还是老写法），那时要在加载期点名拒绝，而不是「装了但拦不住」。
@@ -82,13 +85,16 @@ export function readUiLangFile(lang) {
  *   entry exists (tests inject a narrower catalogue to prove the load-time judgement is against the protocol
  *   actually installed, not against a copied list — the same injection `loadWorkshopHooks` takes).
  * @returns {{ dir: string, present: boolean, packs: Array<{ id: string, name: string, version: string, dir: string,
- *   overrides: string[], files: Record<string, Record<string, object>> }>, errors: Array<{ pack: string, reason: string }> }}
+ *   overrides: string[], files: Record<string, Record<string, object>> }>, errors: Array<{ pack: string, reason: string }>,
+ *   foreign: Array<{ pack: string, reason: string }> }}
  */
 export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {}) {
   /** @type {any[]} */
   const packs = [];
   /** @type {Array<{ pack: string, reason: string }>} */
   const errors = [];
+  /** @type {Array<{ pack: string, reason: string }>} */
+  const foreign = []; // target "stardust" 的包：认识、不装载（它们属于 Stardust 宿主，DESIGN §28.46）
   let names = [];
   try {
     names = fs.readdirSync(dir, { withFileTypes: true })
@@ -97,7 +103,7 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
       .sort();
   } catch {
     // no workshop directory: the normal, supported case
-    return { dir, present: false, packs, errors };
+    return { dir, present: false, packs, errors, foreign };
   }
   for (const name of names) {
     const packDir = path.join(dir, name);
@@ -113,6 +119,12 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
     const manifest = normalizePackManifest(rawManifest, name, { hasAssets });
     if (!manifest.ok) {
       errors.push({ pack: name, reason: `${manifest.error}: ${manifest.detail}` });
+      continue;
+    }
+    // target "stardust"（DESIGN §28.46）：声明型包，本引擎只**认识**它 —— 不进 packs、不进数据叠加层、不装载
+    // 任何载荷，只在启动日志里说一句它在（那是 Stardust 宿主的包）。
+    if (manifest.pack.target === 'stardust') {
+      foreign.push({ pack: name, reason: 'target "stardust" — declaration-only, loaded by the Stardust host (not by this engine)' });
       continue;
     }
     /** @type {Record<string, Record<string, object>>} */
@@ -239,7 +251,8 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
     }
   }
   for (const e of errors) log?.warn?.(`[workshop] ${e.pack}: ${e.reason}`);
-  return { dir, present: true, packs, errors };
+  for (const f of foreign) log?.info?.(`[workshop] ${f.pack}: ${f.reason}`);
+  return { dir, present: true, packs, errors, foreign };
 }
 
 /**

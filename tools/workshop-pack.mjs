@@ -20,9 +20,13 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { createHash } from 'node:crypto';
 
 import { normalizePackManifest, normalizeContentFile, workshopSupportEntries, WORKSHOP_CONTENT_FILES, OVERRIDE_ENTRY_RE, playtestUnknownIds } from '../shared/workshop.js';
 import { loadWorkshop, WORKSHOP_DIR } from '../server/workshop.js';
+// 管理器登记册（DESIGN §28.47）：装过什么、操作者启停过什么 —— CLI、编辑器、服务器读的是**同一份**状态文件。
+import { stateRootFor } from '../server/modModules.js';
+import { readModRegistry, writeModRegistry, enablePack, disablePack, forgetPack, recordInstall, recordBackup } from '../server/modRegistry.js';
 import { normalizeSupportConfig } from '../shared/support.js';
 import { requiredUnitForms } from '../shared/diy.js';
 import { zipWrite, zipRead, ZIP_LIMITS } from '../shared/zip.js';
@@ -208,11 +212,13 @@ function manifestPrefix(names) {
  *   3. 只有前两步都过了，才把它移到最终位置。
  * 所以一个坏归档、一个恶意归档、一个校验不过的包，**永远不会在 workshop/ 里留下半个包**。
  *
- * @param {{ root: string, buffer: Buffer, force?: boolean }} opts
+ * @param {{ root: string, buffer: Buffer, force?: boolean, backup?: boolean }} opts `backup`：force 覆盖时把被替换的
+ *   旧版留底到 `<root>/.mod-backups/<id>/…`（回滚的一半，DESIGN §28.47），而不是直接删掉
  * @returns {{ id: string, dir: string, files: number, bytes: number, content: string[], voiceLines: number,
- *   support: string[], skippedDirs: string[], manifest: object }}
+ *   support: string[], skippedDirs: string[], manifest: object, digest: string,
+ *   displaced: { backup: string, digest: string } | null }}
  */
-export function installZip({ root, buffer, force = false }) {
+export function installZip({ root, buffer, force = false, backup = false }) {
   const read = zipRead(buffer);
   if (!read.ok) throw refuse(`这个 zip 读不了：[${read.error}] ${read.detail}`);
   if (!read.entries.length) throw refuse('这个 zip 里没有任何文件');
@@ -256,7 +262,12 @@ export function installZip({ root, buffer, force = false }) {
     if (fs.existsSync(target) && !force) {
       throw refuse(`工坊包 "${packId}" 已经存在：要覆盖请加 --force（编辑器里是 ?force=1）`);
     }
-    commitDir(target, packDir, force);
+    // 升级留底（管理器的回滚一半，DESIGN §28.47）：force 覆盖时把被替换的旧版挪进 `.mod-backups/`（点开头，
+    // loadWorkshop 不扫描），旧 pack.json 的摘要随登记进 mod-registry，`rollback` 靠它回去。
+    const backupDir = backup ? path.join(root, '.mod-backups', packId) : null;
+    const newDigest = createHash('sha256').update(fs.readFileSync(manifestPath)).digest('hex');
+    const displacedDigest = fs.existsSync(target) ? createHash('sha256').update(fs.readFileSync(path.join(target, 'pack.json'))).digest('hex') : null;
+    const displacedBackup = commitDir(target, packDir, force, backupDir);
     const pack = readPackDir(target, packId);
     return {
       id: packId,
@@ -268,18 +279,29 @@ export function installZip({ root, buffer, force = false }) {
       support: checked.pack.support,
       skippedDirs: read.skippedDirs,
       manifest: raw,
+      digest: newDigest,
+      displaced: displacedBackup && displacedDigest ? { backup: displacedBackup, digest: displacedDigest } : null,
     };
   } finally {
     fs.rmSync(stagingRoot, { recursive: true, force: true });
   }
 }
 
-/** 把一个已经校验过的目录搬到最终位置。force 时先把旧的挪开，**不删** —— 新包搬进去之后才清理。 */
-function commitDir(target, source, force) {
+/**
+ * 把一个已经校验过的目录搬到最终位置。force 时先把旧的挪开：给了 `backupDir` 就在装好**之后**留底（回滚那一半，
+ * DESIGN §28.47），留底失败只损失回滚能力、**不回滚安装**（与旧行为「直接删」相比只会更好）；没给 `backupDir`
+ * 时保持旧行为（装好之后清掉旧目录）。
+ *
+ * 为什么留底要在「新包已经在位」之后做：留底是一次 rename，它自己会失败（权限、别的进程占着）。如果先留底再装，
+ * 留底失败就会挡住一次本来能成功的安装 —— 那是拿一个**附加**能力去否决主流程。所以顺序是「先让安装成功，
+ * 再尽力留底」，失败时如实打一行并返回 null（调用方据此不记回滚目标）。
+ * @returns {string|null} 留底目录相对 `root` 的路径（`backupDir` 相对同一起点），没有位移时是 null。
+ */
+function commitDir(target, source, _force, backupDir = null) {
   const parent = path.dirname(target);
   if (!fs.existsSync(target)) {
     fs.renameSync(source, target);
-    return;
+    return null;
   }
   // 先把旧目录改名到一个点开头的同级目录（同一个卷 → 原子），失败时 rename 会抛，不会留下半个包
   const displaced = fs.mkdtempSync(path.join(parent, '.pack-replaced-'));
@@ -292,7 +314,23 @@ function commitDir(target, source, force) {
     try { fs.renameSync(holder, target); } catch { /* 放不回去就只能报错，至少把原因说出来 */ }
     throw e;
   } finally {
+    if (!backupDir) fs.rmSync(displaced, { recursive: true, force: true }); // 旧行为：不留底就直接清
+  }
+  // 新包已在位：旧版留底（失败只损失回滚目标，安装本身已成功 —— 调用方按返回的 null 如实记录）
+  if (!backupDir) return null;
+  try {
+    fs.mkdirSync(backupDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    let dest = path.join(backupDir, stamp);
+    while (fs.existsSync(dest)) dest = path.join(backupDir, `${stamp}-${Math.random().toString(36).slice(2, 6)}`);
+    fs.renameSync(holder, dest);
+    const kept = path.relative(path.dirname(target), dest).split(path.sep).join('/');
     fs.rmSync(displaced, { recursive: true, force: true });
+    return kept;
+  } catch (e) {
+    fs.rmSync(displaced, { recursive: true, force: true });
+    console.error(`workshop-pack: 旧版留底失败（${e.message}）—— 新包已装上，但这次升级没有回滚目标`);
+    return null;
   }
 }
 
@@ -838,7 +876,12 @@ export function packSummary(root, packId, loaded = null, { supportFile = null } 
   const manifest = pack.manifest ?? {};
   const entry = loaded ? loaded.packs.find((p) => p.id === packId) ?? null : null;
   const err = loaded ? loaded.errors.find((e) => e.pack === packId) ?? null : null;
-  const where = entry ? 'loaded' : 'refused';
+  // `target: "stardust"`（DESIGN §28.46）：加载器**认识但不装载**的包。它不是「被拒」（清单合法、`errors` 里没有它），
+  // 但必须在列表里**看得见、且说得出为什么**。从前这一支落进 `refused` 而 `reason` 取自 `errors`（那里没有它）
+  // ⇒ 列表打出 `REFUSED（null）`：读者既不知道它是什么状态，也不知道为什么 —— 一个包「在磁盘上、在列表里、
+  // 却永远进不了游戏、没有任何说明」，正是 docs/WORKSHOP.md §1.1 那条教训的形状。
+  const foreign = loaded ? (loaded.foreign ?? []).find((f) => f.pack === packId) ?? null : null;
+  const where = entry ? 'loaded' : (foreign ? 'foreign' : 'refused');
   const content = Array.isArray(manifest.content) ? manifest.content : [];
   const voiceLines = countVoiceLines(manifest.voices);
   const support = Array.isArray(manifest.support) ? manifest.support : [];
@@ -861,12 +904,12 @@ export function packSummary(root, packId, loaded = null, { supportFile = null } 
   const syntaxError = pack.checked && !pack.checked.ok
     ? { code: pack.checked.error, detail: pack.checked.detail }
     : null;
-  const reason = err ? err.reason : null;
+  const reason = err ? err.reason : (foreign ? foreign.reason : null);
   const refusal = where === 'loaded' || !reason
     ? null
     : (() => {
       const parsed = /^([A-Z][A-Z0-9_]{2,60}): ([\s\S]*)$/.exec(reason);
-      return { code: syntaxError ? syntaxError.code : (parsed ? parsed[1] : 'PACK_LOAD'), detail: parsed ? parsed[2] : reason };
+      return { code: foreign ? 'PACK_FOREIGN' : (syntaxError ? syntaxError.code : (parsed ? parsed[1] : 'PACK_LOAD')), detail: parsed ? parsed[2] : reason };
     })();
   return {
     id: packId,
@@ -881,9 +924,9 @@ export function packSummary(root, packId, loaded = null, { supportFile = null } 
     voiceLines,
     support,
     supportDerived,
-    // 校验结论：加载器自己的答案（loaded / refused + 原因），不是第二套判断
+    // 校验结论：加载器自己的答案（loaded / foreign / refused + 原因），不是第二套判断
     status: where,
-    reason: err ? err.reason : null,
+    reason,
     refusal,
     syntaxOk: pack.checked ? pack.checked.ok : false,
     syntaxError,
@@ -908,7 +951,10 @@ const line = (...parts) => console.log(parts.filter((p) => p !== null && p !== u
 
 function cliList(root, { json }) {
   const loaded = loadWorkshop(root, { log: { info() {}, warn() {}, error() {}, debug() {} } });
-  const packs = listPackIds(root).map((id) => packSummary(root, id, loaded, { supportFile: SUPPORT_FILE }));
+  // 登记册的状态随列表一起出来（DESIGN §28.47）：一个被操作者禁用的包在列表里**必须看得见** —— 它文件在盘上、
+  // 清单一字不错，却什么都没装载，不说出来就是又一次「在编辑器里在、在磁盘上在、却永远进不了游戏、没有报错」。
+  const registry = readModRegistry(stateRootFor(ROOT));
+  const packs = listPackIds(root).map((id) => ({ ...packSummary(root, id, loaded, { supportFile: SUPPORT_FILE }), state: registry.packs[id]?.state || 'enabled' }));
   if (json) { console.log(JSON.stringify({ workshop: root, packs }, null, 2)); return; }
   line(`workshop root: ${root}`);
   if (!loaded.present) line('  （目录不存在 —— 没有包）');
@@ -920,7 +966,15 @@ function cliList(root, { json }) {
       const derived = p.supportDerived.map((e) => `${e.id}→阶${e.tier}`).join(' ');
       bits.push(`助战 ${p.support.length} 个${derived ? `（${derived}）` : ''}`);
     }
-    line(`pack ${p.id}`, `"${p.name}"`, `v${p.version}`, `·`, bits.join(' · '), `·`, p.status === 'loaded' ? 'VALID' : `REFUSED（${p.reason}）`);
+    const verdict = p.status === 'loaded'
+      ? 'VALID'
+      : p.status === 'foreign'
+        // 不是「被拒」：清单合法，只是这一格是给**另一个宿主**的。所以用词分开，且**必须带出原因**（DESIGN §28.46）。
+        ? `FOREIGN（本引擎不装载：${p.reason}）`
+        : `REFUSED（${p.reason}）`;
+    // 与上面那一格正交：禁用的包**可以**同时是 VALID（清单没问题，是操作者把它关掉了），所以两个后缀分开说。
+    const state = p.state === 'disabled' ? ' · DISABLED（不装载）' : '';
+    line(`pack ${p.id}`, `"${p.name}"`, `v${p.version}`, `·`, bits.join(' · '), `·`, verdict, state);
     if (p.undeclared.length) {
       line(`  ! 盘上有 ${p.undeclared.map((f) => `${f}.json`).join('、')}，但 pack.json 的 content 没声明 —— 加载器会忽略这些文件`);
       line(`    修法：在 pack.json 的 content 里补上 ${p.undeclared.join('、')}（编辑器里重新保存一次对应内容也会自动补）`);
@@ -945,17 +999,91 @@ function cliImport(root, file, { force, json }) {
   } catch {
     throw refuse(`读不到文件：${target}`);
   }
-  const r = installZip({ root, buffer, force });
-  if (json) { console.log(JSON.stringify(r, null, 2)); return; }
+  const r = installZip({ root, buffer, force, backup: true });
+  // 管理器登记（`server/modRegistry.js`）：装了什么、从哪来、pack.json 摘要 —— uninstall 的 ownership 判据
+  // 与 rollback 的凭据都在这一个文件里（DESIGN §28.47：登记册是唯一事实，不留第二份副本）。
+  recordInstall(stateRootFor(ROOT), r.id, { source: path.basename(target), digest: r.digest });
+  if (r.displaced) recordBackup(stateRootFor(ROOT), r.id, r.displaced);
+  if (json) { console.log(JSON.stringify({ ...r, state: 'enabled' }, null, 2)); return; }
   line(`已安装 ${r.id} → ${r.dir}`);
   line(`  ${r.files} 个文件，${r.bytes} 字节；内容 ${r.content.length ? r.content.join('/') : '（无）'}`
     + `${r.voiceLines ? `，语音 ${r.voiceLines} 条` : ''}${r.support.length ? `，助战 ${r.support.join('、')}` : ''}`);
+  if (r.displaced) line(`  （升级留底：${r.displaced.backup} · 旧摘要 ${r.displaced.digest.slice(0, 12)}…，回滚用 rollback ${r.id}）`);
   if (r.skippedDirs.length) line(`  （跳过了 ${r.skippedDirs.length} 个目录条目）`);
+}
+
+/** enable / disable / uninstall / rollback 共用的第一步：包必须在 workshop/ 里。 */
+function requirePackDir(root, id) {
+  return findPackDir(root, id);
+}
+
+function cliEnable(root, id, disabled) {
+  requirePackDir(root, id);
+  const registry = disabled ? disablePack(stateRootFor(ROOT), id) : enablePack(stateRootFor(ROOT), id);
+  const state = registry.packs[id]?.state;
+  line(`${disabled ? '已禁用' : '已启用'} ${id}（${state}）—— 重启服务器后生效；禁用的包不装载任何载荷。`);
+}
+
+/**
+ * 卸载：**两道闸**，都不可绕过（DESIGN §28.47）。
+ *
+ * 闸一 —— **ownership**（只卸载本管理器登记过的包）：一个登记册里没有记录的包可能是仓库自带、手工放置或者旧版
+ * 装的。删它不是这条命令的事 —— 这个管理器**不认识**它，就没有资格处置它。要删请手动。
+ *
+ * 闸二 —— **留底**：卸载**不销毁字节**。`fs.renameSync` 把整个包目录挪进 `<root>/.mod-backups/<id>/uninstall-<时间戳>/`
+ * （点开头 ⇒ `loadWorkshop` 不扫描 ⇒ 它立刻"不在"，但一个字节都没丢），**不是 unlink**。手滑、后悔、想查证
+ * 原包长什么样，都有地方找回来。CLI 会把留底路径打出来，告诉操作者可以自己删。
+ *
+ * 只 rename **这个包自己的目录**（`findPackDir` 的结果），引擎文件 / `data/` / `test/golden/` 一律不碰。
+ */
+function cliUninstall(root, id, { json }) {
+  const dir = requirePackDir(root, id);
+  const registry = readModRegistry(stateRootFor(ROOT));
+  if (!registry.packs[id]) throw refuse(`"${id}" 没有本管理器的安装登记（可能是手工放置或旧版安装的包）：删除它请手动处理`);
+  // 留底后再"删"：卸载不销毁字节（.mod-backups/ 点开头，加载器不扫描），手滑或反悔都有地方找回来
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const backupRel = `.mod-backups/${id}/uninstall-${stamp}`;
+  const backupAbs = path.join(root, ...backupRel.split('/'));
+  fs.mkdirSync(path.dirname(backupAbs), { recursive: true });
+  fs.renameSync(dir, backupAbs);
+  forgetPack(stateRootFor(ROOT), id);
+  if (json) { console.log(JSON.stringify({ id, uninstalled: true, backup: backupRel }, null, 2)); return; }
+  line(`已卸载 ${id}（整包留底在 ${backupRel}）—— 重启服务器后生效；不想要留底可手动删除。`);
+}
+
+/**
+ * 回滚：把升级时留底的上一版换回来。
+ *
+ * `previous.backup` 是**登记册里的一个字符串**，而它会被拼成路径 —— 所以那一条是安全闸，不是形状洁癖：
+ * `normalizePackEntry` 只接受**包内相对的留底目录**（含 `..` 的、绝对路径的整格丢掉并具名报出）。一份手改过的
+ * 登记册因此**永远指不到工坊根之外**，这里拿到的 previous 一定落在 root 之内。与 `PACK_ID_RE` 同一条纪律。
+ */
+function cliRollback(root, id, { json }) {
+  const registry = readModRegistry(stateRootFor(ROOT));
+  const previous = registry.packs[id]?.previous;
+  if (!previous) throw refuse(`"${id}" 没有可回滚的上一版（upgrade 时才会留底）`);
+  const backupAbs = path.join(root, ...previous.backup.split('/'));
+  if (!fs.existsSync(backupAbs)) throw refuse(`留底目录不见了：${previous.backup}`);
+  const dir = requirePackDir(root, id);
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const keepRel = `.mod-backups/${id}/pre-rollback-${stamp}`;
+  fs.mkdirSync(path.dirname(path.join(root, ...keepRel.split('/'))), { recursive: true });
+  fs.renameSync(dir, path.join(root, ...keepRel.split('/')));
+  fs.renameSync(backupAbs, dir);
+  const next = { ...registry.packs[id], digest: previous.digest, state: 'enabled' };
+  delete next.previous;
+  writeModRegistry(stateRootFor(ROOT), { ...registry, packs: { ...registry.packs, [id]: next } });
+  if (json) { console.log(JSON.stringify({ id, rolledBackTo: previous.digest, state: 'enabled', displacedTo: keepRel }, null, 2)); return; }
+  line(`已回滚 ${id} → 摘要 ${previous.digest.slice(0, 12)}…（被替换的那份留底在 ${keepRel}）—— 重启服务器后生效。`);
 }
 
 const USAGE = `用法：
   node tools/workshop-pack.mjs export <packId> [--workshop <root>] [--out <file.zip>]
   node tools/workshop-pack.mjs import <file.zip> [--workshop <root>] [--force] [--json]
+  node tools/workshop-pack.mjs enable <packId> [--workshop <root>]
+  node tools/workshop-pack.mjs disable <packId> [--workshop <root>]
+  node tools/workshop-pack.mjs uninstall <packId> [--workshop <root>] [--json]
+  node tools/workshop-pack.mjs rollback <packId> [--workshop <root>] [--json]
   node tools/workshop-pack.mjs list   [--workshop <root>] [--json]`;
 
 /**
@@ -997,6 +1125,21 @@ export function runCli(argv) {
   if (command === 'import') {
     if (positionals.length !== 1) throw usageError(`import 需要一个 .zip 文件\n${USAGE}`);
     cliImport(root, positionals[0], { force: values.force === true, json: values.json === true });
+    return 0;
+  }
+  if (command === 'enable' || command === 'disable') {
+    if (positionals.length !== 1) throw usageError(`${command} 需要一个包 id\n${USAGE}`);
+    cliEnable(root, positionals[0], command === 'disable');
+    return 0;
+  }
+  if (command === 'uninstall') {
+    if (positionals.length !== 1) throw usageError(`uninstall 需要一个包 id\n${USAGE}`);
+    cliUninstall(root, positionals[0], { json: values.json === true });
+    return 0;
+  }
+  if (command === 'rollback') {
+    if (positionals.length !== 1) throw usageError(`rollback 需要一个包 id\n${USAGE}`);
+    cliRollback(root, positionals[0], { json: values.json === true });
     return 0;
   }
   void quiet;
