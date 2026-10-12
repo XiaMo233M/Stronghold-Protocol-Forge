@@ -38,6 +38,7 @@ import { validateC2S } from '../shared/protocol.js';
 import { ERR, PHASE, VOICE_LANGS, DEFAULT_VOICE_LANG } from '../shared/constants.js';
 import { PROJECTILE_SPEEDS, BOOMERANG_RETURN_SPEED, ELEMENT, ELEMENT_ORDER, DOWN_STATE, BLOCK_RADIUS, FORCED_EXIT, ASPD_MIN, BOSS_POOL_MIN_HP, AUTO_OP_COOLDOWN, ALLY_COLLIDER_RADIUS } from '../server/sim/constants.js';
 import { SKILL_SUMMON_START_DEPLOY, BOND_LAYER_CAP, BOSS_HIT_LIMIT, bossHitLimitFrom, layerGainRoom } from '../shared/constants.js';
+import { BEHAVIOUR_SWITCHES } from '../shared/behaviour.js';
 import * as SIM_CONST from '../server/sim/constants.js';
 import { MULTI_ROUND_BOUNTY_BATTLES } from '../server/match/choices.js';
 import { SELF_BOUND, PART_TRANSFER, BLADE_TRANSFER, DRONE_LINK_BASE } from '../server/sim/content/bosses.js';
@@ -978,4 +979,68 @@ test('干员战斗语音 (DESIGN §21.30): the manifest data, the official prior
   assert.match(panel, /const selectKey = voice && detail\?\.type === 'chess'/);
   assert.match(game, /voice=\$\{true\}/);
   assert.match(game, /audio\.voice\(charId, resultVoiceSlot\(/);
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 「说法与代码脱钩」这一类：文档里对**代码当前状态**的一句断言，没有任何门禁会看它是否还成立。
+// 第一例是 `BEHAVIOUR_SWITCHES`（2026-10-12：同一句「今天这张表是空的」住在 6 份文档里，而 worktree 那一刀
+// 把四格开关落了进去 ⇒ 合并后会同时存在「表里有格」与「表是空的」两种说法）。
+// 判据**只钉这一个具体断言**（不做「所有文档陈述都校验」那种做不到的事），并且**不许自己变成空转**：
+// 表真的为空时，至少有一处还得这么说（照 test/promptBaseline.test.js「匹配不到就永远绿」那条先例）。
+
+/**
+ * 「今天 / 本版 `BEHAVIOUR_SWITCHES` 是空的」这一族说法住在哪几份**当前状态**文档里：`[文件, 窄正则]`。
+ * 正则只认**现在时**的措辞（`今天` / `本版` / `0 格`），历史叙述不会被误伤 —— 下面那条自证逐条钉住这一点。
+ *
+ * **故意不列两处**：`CHANGELOG.md`（0.16.0 节里第 4 刀那句「本版那张表是空的 —— 这是交付物本身」是**按时间
+ * 叙述**，紧接的第 8 刀小节自己写着「按这条落了前三格，见下」⇒ 管它就是误伤）；`shared/modSurface.js` 的代码
+ * 注释（worktree 单侧改过 ⇒ 合并后已经没有这句了，由合并自动收掉）。
+ */
+const EMPTY_BEHAVIOUR_TABLE_CLAIMS = [
+  ['README.md', /表还是空的|那张表今天是空的|表里(?: \*\*0 格\*\*|今天一格都没有)/],
+  ['docs/SYNC-POINTS.md', /今天这张表是空的/],
+  ['docs/STANDARD-PACK.md', /`BEHAVIOUR_SWITCHES` 是空表/],
+  ['docs/WORKSHOP.md', /本版那张表是空的/],
+  ['docs/MOD-SURFACE.md', /今天表是空的/],
+  ['docs/design/mod-layer.md', /今天是一张空表/],
+];
+
+test('「BEHAVIOUR_SWITCHES 今天是一张空表」这句话与代码同真同假（说法与代码不许脱钩）', () => {
+  assert.ok(BEHAVIOUR_SWITCHES && typeof BEHAVIOUR_SWITCHES === 'object', 'BEHAVIOUR_SWITCHES 是 shared/behaviour.js 导出的那张表');
+  const n = Object.keys(BEHAVIOUR_SWITCHES).length;
+  const carriers = EMPTY_BEHAVIOUR_TABLE_CLAIMS.filter(([f, re]) => re.test(doc(f))).map(([f]) => f);
+  if (n !== 0) {
+    assert.deepEqual(carriers, [], `这些文档还说「今天这张表是空的」，而 shared/behaviour.js 里已经有 ${n} 格 —— 改文档，别改判据：\n  ${carriers.join('\n  ')}`);
+  } else {
+    // 地板：判据不许自己变成空转（表是空的、而六份文档一处都不再提 ⇒ 要么把话说回去，要么把这条判据删掉）
+    assert.ok(carriers.length, '表是空的，而这六份文档一处都不再提这件事 —— 要么把话说回去，要么把这条判据连同位置表一起删掉（别让它空转）');
+  }
+  // 窄的自证：**同一份文件里**的历史叙述 / 另一件事，不许被算成「今天还是空表」
+  for (const [file, historical] of [
+    ['docs/design/mod-layer.md', '`BEHAVIOUR_SWITCHES` 在第 4 刀落地时**是一张空表**'],
+    ['docs/WORKSHOP.md', '第 4 刀交的是「**通道 + 守卫**」本身（当时表是空的：'],
+    ['README.md', '新建干员/怪物不必从一张空表单开始'],
+  ]) {
+    const re = EMPTY_BEHAVIOUR_TABLE_CLAIMS.find(([f]) => f === file)[1];
+    assert.ok(!re.test(historical), `${file} 的正则不该匹配这句（历史叙述 / 另一件事）：${historical}`);
+  }
+});
+
+test('README 里「behaviour」那一节的锚点跟着标题走（改了标题就要连那几处链接一起改）', () => {
+  // 只实现这一节用得到的几条 GitHub slug 规则；**先拿一个稳定的标题自证算法**，别硬编码今天那个 slug ——
+  // 否则算法写错了也看不出来。`## Forge 现在能干什么` 与它的链接都在 README 里，且不随这一节改。
+  const slug = (h) => h.toLowerCase().replace(/[^\p{L}\p{N} -]/gu, '').replace(/ /g, '-');
+  const stable = README.match(/^## (Forge 现在能干什么)$/m);
+  assert.ok(stable, 'README 里那个稳定的标题');
+  assert.equal(slug(stable[1]), 'forge-现在能干什么', 'slug 算法自证：它必须还原出 README 里已有的那个锚点');
+  assert.ok(README.includes('](#forge-现在能干什么)'), '那个链接也还在（否则自证是空转）');
+
+  const heading = README.match(/^## (behaviour：.+)$/m);
+  assert.ok(heading, 'README 里那一节的标题');
+  const want = slug(heading[1]);
+  const anchors = [...README.matchAll(/\]\(#(behaviour[^)]*)\)/g)].map((m) => m[1]);
+  assert.ok(anchors.length >= 1, 'README 里应当还有指向那一节的锚点');
+  for (const a of anchors) {
+    assert.equal(a, want, `指向「behaviour…」那一节的锚点必须与标题的 slug 逐字相同（今天 ${anchors.length} 处；改了标题就要一起改，否则是死锚点，没有别的门禁会看）`);
+  }
 });
