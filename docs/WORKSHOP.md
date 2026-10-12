@@ -155,6 +155,19 @@ workshop/<packId>/
 | 干员记录 | `<pack>/units.json`，`{ [charId]: record }`，形状与 `data/backups.json` 的 `units[charId]` 同形 | `data.backups.units[charId]` | 自选界面画不出名字/职业，一局里取不到 def |
 | 自选池声明 | `pack.json.operators`，`{ [charId]: { bonds, powers } }` | `data.backups.diy.ownedPool`（push，去重）+ `diy.operators[charId]` | 干员记录在数据里，但**自选编队里没有他** —— 拿不到手 |
 
+> ⚠️ **判据：走自选池的干员，`data.chess` 里没有他的棋子 —— 这是正常形状，不是「没装上」。**
+> 自选干员不注册自己的 `chess` 记录（所以 `content` 里**不该**声明 `chess`，他也没有 `kits/<chessId>.js`
+> 那种按棋子 id 挂的 kit）：他出战走的是**自选槽位** `chess_char_5_diy1_a` / `chess_char_6_diy1_a` 这类
+> 通用棋子，引擎在开局时按 `shared/diy.js` 把 `diy.operators[charId]` **组合**成那一局的 def。
+> ⇒ 于是「**`GameData.chess(charId)` 是 `false` / `visibleChess` 里没有他**」**不能**当作「永远进不了游戏」的证据。
+> **要判他进没进游戏，查这三处**（这才是判据）：① `backups.diy.ownedPool` 含这个 charId；
+> ② `backups.diy.operators[charId]` 在（名字/星级/职业/盟约）；③ 这条 `units` 记录的 `forms` 覆盖
+> `diy.slots` 要的那组档位（`requiredUnitForms`，缺了自选槽挑不上、`tools/golden.mjs` 会抛）。
+> 另外 `tools/workshop-validate.mjs` 对这类干员会报一条 `ART_UNKNOWN_ID`（「没有 chess 记录指过来 ⇒ 这份素材
+> 没人用」）—— 那是**误报**：素材由 `assets.chars[charId]` 直接可达（`assets.spine` 在），它只是不认识自选干员。
+> （实测来源：包 `makoto-yuki`，站上记录 `49e807b1b5b0`。第一次只查 `data.chess` 得 `[]`、误判「进不了游戏」，
+> 补查上面三处后为「进得了游戏」。）
+
 ```json
 {
   "id": "my-op", "license": "CC0-1.0", "content": ["units"],
