@@ -23,7 +23,7 @@ The owner's ruling of 2026-10-09 fixes three layers:
 
 | layer | what it is | who executes it | when it may change a battle result |
 |---|---|---|---|
-| **A** content | declarative data, no code: the workshop pack of today (`shared/workshop.js:1074` `applyWorkshop`) | nobody — it is merged into the data every consumer reads (`server/data.js:92`) | always, and never detectably by the golden corpus (the corpus is generated from the official `data/*.json`, `test/golden/README.md:8-10`) |
+| **A** content | declarative data, no code: the workshop pack of today (`shared/workshop.js:1077` `applyWorkshop`) | nobody — it is merged into the data every consumer reads (`server/data.js:92`) | always, and never detectably by the golden corpus (the corpus is generated from the official `data/*.json`, `test/golden/README.md:8-10`) |
 | **B** server logic | hooks and kits: the code of `workshop/<pack>/kits/<id>.js` (`server/workshop.js:370` `loadWorkshopKits`) — one file-name rule over **two key spaces**, operator and summon (§28.12.1) | **the server only** — this is new | only through the hooks it registers, and only after a declared intent passes deterministic verification |
 | **C** client UI | rendering, themes, panels | the player's tab | never |
 
@@ -50,8 +50,8 @@ is, who wins when two of them want the same id, and what has to be true before i
 
 ### 28.2 Identity (gap 1)
 
-Today a pack has an `id` (the directory name, `shared/workshop.js:338-340`) and free-text metadata
-(`shared/workshop.js:642-648`), and the BattleSpec carries only `SPEC_VERSION = 1` (`server/sim/spec.js:39`, written at
+Today a pack has an `id` (the directory name, `shared/workshop.js:341-343`) and free-text metadata
+(`shared/workshop.js:645-651`), and the BattleSpec carries only `SPEC_VERSION = 1` (`server/sim/spec.js:39`, written at
 `:61`) plus a list of kit **URLs** (`server/sim/spec.js:79-81`; produced by `server/workshop.js:471`). There is nowhere
 in the wire, in the data or in the match for "which content is this room running".
 
@@ -72,7 +72,7 @@ over exactly the bytes the loader reads and the browser will be served:
 1. `pack.json` — hashed **after** `normalizePackManifest` (`shared/workshop.js:339`), so the hash covers the pack's
    effective declaration (normalized `overrides`, `content`, icon tables, `art`, `support`, `voices`), not its
    whitespace. Two spellings of the same pack then hash the same, and a declaration the loader silently dropped
-   (`shared/workshop.js:1681-1683` filters a malformed `overrides` entry in silence today) cannot hide behind the hash.
+   (`shared/workshop.js:1684-1686` filters a malformed `overrides` entry in silence today) cannot hide behind the hash.
 2. every declared content file, after `normalizeContentFile` — the same normalized records the loader merges.
 3. **every other regular file under the pack directory** — its bytes, byte for byte. That is `kits/**`, `assets/**`, the
    declared panel modules and stylesheets, the `server.meta` / `battle` / `room` / `modules[*].entry` modules, the i18n
@@ -123,7 +123,7 @@ matters and is the answer for the third file the ruling names:
   hash covers a pack's own bytes; the **engine** half of the identity is `api` (§28.5). One consequence has to be
   designed for rather than discovered later: a loadout pick is validated against the **merged** data
   (`shared/protocol.js:149` `checkLoadout`, `:180` `resolveLoadout`), and an id that exists on the server can be an
-  unknown id in a client that has a different pack set — where `lookup` returns `null` (`server/data.js:152-155`) and
+  unknown id in a client that has a different pack set — where `lookup` returns `null` (`server/data.js:156-159`) and
   nothing throws. **Identity must therefore be established at the handshake, before any loadout is exchanged**, and the
   client must refuse to resolve a loadout at all until it has the server's digest.
 
@@ -487,7 +487,7 @@ per row:
 | a hook name nothing emits never fires and nothing reports it (`server/sim/battle/hooks.js:17-25`, `:57-59`) | the static check already suggests a near miss (`HOOK_UNKNOWN_EVENT`, `shared/kitAuthoring.js:235-237`), but it is text analysis. Add a **runtime** report: `on` keeps the registration in `this._hooks[name]` (`server/sim/battle/hooks.js:20`), so at `battleEnd` the bus can name every pack-owned hook that was registered and never emitted. A typo then costs one battle instead of one bug report. |
 | non-determinism is a warning (`shared/kitAuthoring.js:222-227`) | an error for layer B (§28.4), and the refusal quotes the construct *and* its source line, so it stops being "a reason that looks nothing like 'you used Math.random'" (`shared/kitAuthoring.js:13-17`). |
 | a kit that returns no `skill` leaves the operator with no skill (`docs/WORKSHOP.md:2332`) | the loader knows both facts — a kit was injected *and* `skillSource` says where the skill came from (`server/sim/content/index.js:214`, `:219`). A pack kit with no skill becomes a validation error the editor shows before saving, not a live surprise. |
-| a `chess.assets.spine` that points at an uninstalled model draws a flat portrait and logs nothing (`shared/workshop.js:1178-1194`) | already solved by `report.looks` (logged at `server/data.js:97`) — generalise it: every field that degrades silently gets a `looks`-style check, and the editor surface must show it, not only the server log. |
+| a `chess.assets.spine` that points at an uninstalled model draws a flat portrait and logs nothing (`shared/workshop.js:1181-1197`) | already solved by `report.looks` (logged at `server/data.js:97`) — generalise it: every field that degrades silently gets a `looks`-style check, and the editor surface must show it, not only the server log. |
 | the editor deliberately does not import author files (`editor/server.mjs:428-431`) | **do not change this.** An HTTP endpoint that executes author code is a code-execution surface. Instead expose the verifier of §28.6 as an explicit action that runs in the **playtest subprocess** (`server/index.js:71-75` `SP_WORKSHOP`), which is already a separate process. |
 | runtime errors land in a 100-entry array reachable only through `m.simErrorLog` (`server/match/Match.js:127-129`, `server/sim/battle/hooks.js:167-185`) | per-owner counters (§28.4), plus the room's mod digest on every error line, so a player's bug report carries the identity of the content it came from. |
 
@@ -682,7 +682,7 @@ reach the same content".
 - **No sandbox for layer B.** The ruling is "the server executes it", not "untrusted code executes safely". A pack with
   a `while(true)` is refused by the load-time budget check (§28.4), not contained.
 - **No hot reload.** The pack set is fixed for the process; a digest that can change mid-match is worse than a restart.
-- **No code signing, no author identity.** `pack.json`'s `author` stays metadata (`shared/workshop.js:642-648`); the
+- **No code signing, no author identity.** `pack.json`'s `author` stays metadata (`shared/workshop.js:645-651`); the
   hash proves *which* bytes, not *whose*.
 - **No WASM kernel decision.** That is the performance benchmark's call, and it is a different layer: a faster kernel is
   a `combat: false` change and would be verified by §28.6 like any other.
