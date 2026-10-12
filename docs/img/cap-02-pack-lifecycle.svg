@@ -5,7 +5,7 @@
   <circle cx="42" cy="40" r="13" fill="#ddf4ff" stroke="#0969da"/>
   <text x="42" y="44" font-size="12" fill="#0969da" text-anchor="middle">1</text>
   <text x="66" y="34" font-size="13" fill="#1f2328">写：pack.json 加它点名的文件</text>
-  <text x="66" y="53" font-size="12" fill="#57606a">顶层键 32 个闭集；不认识的键点名拒绝，绝不读过去</text>
+  <text x="66" y="53" font-size="12" fill="#57606a">顶层键 35 个闭集；不认识的键点名拒绝，绝不读过去</text>
 
   <line x1="340" y1="64" x2="340" y="78" stroke="#8c959f" stroke-width="1.5"/>
   <polygon points="336,76 344,76 340,84" fill="#8c959f"/>

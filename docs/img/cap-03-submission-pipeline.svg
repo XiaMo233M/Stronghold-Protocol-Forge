@@ -23,7 +23,7 @@
   <circle cx="42" cy="190" r="13" fill="#ffffff" stroke="#9a6700"/>
   <text x="42" y="194" font-size="12" fill="#9a6700" text-anchor="middle">3</text>
   <text x="66" y="184" font-size="13" fill="#1f2328">闸门：packs/ —— 用引擎自己的装载器验</text>
-  <text x="66" y="204" font-size="12" fill="#57606a">errors = 0 才算收录；今天 3 个包，数量以 packs/README.md 为准</text>
+  <text x="66" y="204" font-size="12" fill="#57606a">errors = 0 才算收录；今天 8 个包，数量以 packs/README.md 为准</text>
 
   <line x1="340" y1="216" x2="340" y2="232" stroke="#8c959f" stroke-width="1.5"/>
   <polygon points="336,230 344,230 340,238" fill="#8c959f"/>
