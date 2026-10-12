@@ -1,0 +1,38 @@
+{
+  "id": "mod-xie",
+  "name": "促融共竞 · 协同共竞",
+  "version": "2.1.0",
+  "author": "jingjiangze",
+  "description": "合作经济与救援：团队储备、借调与还款、救济、后勤项目、阵亡分红，以及结算期的救援窗口。房间勾选本模组后生效（官方模式记录的回合表 / 敌人倍率 / 商店不变）。",
+  "license": "GPL-3.0-or-later",
+  "api": ">=1 <2",
+  "combat": true,
+  "server": {
+    "modules": [
+      {
+        "id": "xie",
+        "entry": "server/mod.mjs",
+        "uses": [
+          "matchClass"
+        ]
+      }
+    ]
+  },
+  "client": {
+    "panels": [
+      {
+        "id": "econ",
+        "slot": "screen.game.hud",
+        "module": "client/econ.js",
+        "messages": [
+          "borrow",
+          "answer",
+          "project",
+          "vote",
+          "relief",
+          "revive"
+        ]
+      }
+    ]
+  }
+}
