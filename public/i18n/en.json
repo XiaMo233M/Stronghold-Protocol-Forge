@@ -493,6 +493,7 @@
   "干员调配中选择的模组": "Module chosen in Operator Loadout",
   "装备": "Equipment",
   "拖拽装备至该干员以配发（最多 2 件）": "Drag Equipment onto this Operator to equip it (up to 2)",
+  "不占装备格": "Takes no slot",
   "出售": "Sell",
   "可晋升：{hint}": "Can promote: {hint}",
   "效果": "Effect",

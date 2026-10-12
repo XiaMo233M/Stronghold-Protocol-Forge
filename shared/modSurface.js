@@ -307,6 +307,14 @@ export const MOD_SURFACE = Object.freeze([
       { symbol: 'loadoutPhasesFor', module: 'platform' },
       { symbol: 'MORPH_PAIRING_OPTIONS', module: 'morph' },
       { symbol: 'grantedBondsByMorph', module: 'morph' },
+      // 第 7 段：`morphPairing` 的**装备位语义**那半条（同一格开关）。判据收成一个策略对象，六个读取点都读它：
+      // 服务端 `player/items.js` / `player/acquire.js` / `bot.js` / `invariants.js`，客户端
+      // `ui/detailPanel.js` 与 `ui/gameLogic/placement.js`。这四个符号是那一格的可锚面。
+      { symbol: 'morphSlotPolicy', module: 'morph' },
+      { symbol: 'matchSlotPolicy', module: 'morph' },
+      { symbol: 'OFFICIAL_SLOT_POLICY', module: 'morph' },
+      { symbol: 'PLUS_SLOT_POLICY', module: 'morph' },
+      { symbol: 'equipSlotsUsed', module: 'morph' },
       { symbol: 'unequipAllowed', module: 'items' },
     ],
     requires: [

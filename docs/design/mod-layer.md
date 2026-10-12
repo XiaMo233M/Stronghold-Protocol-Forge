@@ -3002,11 +3002,29 @@ i18n-ignore），差别只在**表是另一张**、每格多一个 `actions`。
 |---|---|---|---|
 | `shopBias` | `official`（缺省）· `bondBias` | `bondBiasPreference`（`server/match/pool.js`）→ `bondBiasBonds`（`server/match/player/economy.js`）→ `PlayerEconomy._rollItemSlot` | `b293e061b38f` |
 | `prepLoadout` | `locked`（缺省）· `prep` | `LOADOUT_PHASES` / `loadoutPhasesFor` + `MatchPlatform.setLoadout`（`server/match/match/platform.js`）：`locked` 只有 `INFO_CHECK`（与从前逐字相同），`prep` 另加 `PREP` 且只在这个座位还没准备时；`PREP` 那一次走 `mergeLoadoutEntries`（只覆盖写了的干员） | `8b4e5da55c58` |
-| `morphPairing` | `official`（缺省）· `plus` | 判据本体 `grantedBondsByMorph`（`shared/morph.js`），三处读取点**同判**：`pieceBonds`（`server/match/bondsMeta.js`）· `unitBonds`（`server/sim/content/support/index.js`，档位经 `withMorphPairing` 的作用域）· `grantedBonds`（`public/js/ui/gameLogic/bonds.js`，档位经 `roomMods.js` 从 `welcome.mods` 合成）。`official` = 今天的行为（两件起配、全部授予）；`plus` = 一件起配、只取最左那一件 | `19ea65909cf6` |
+| `morphPairing` | `official`（缺省）· `plus` | 判据本体 `grantedBondsByMorph`（`shared/morph.js`），三处读取点**同判**：`pieceBonds`（`server/match/bondsMeta.js`）· `unitBonds`（`server/sim/content/support/index.js`，档位经 `withMorphPairing` 的作用域）· `grantedBonds`（`public/js/ui/gameLogic/bonds.js`，档位经 `roomMods.js` 从 `welcome.mods` 合成）。`official` = 今天的行为（两件起配、全部授予）；`plus` = 一件起配、只取最左那一件。**第 7 段补上槽位那半条**：`morphSlotPolicy`（同一文件）返回 `OFFICIAL_SLOT_POLICY` / `PLUS_SLOT_POLICY`，六处读取点同判：`player/items.js` · `player/acquire.js` · `bot.js` · `invariants.js` · `ui/detailPanel.js` · `ui/gameLogic/placement.js` | `19ea65909cf6` |
 
-**`morphPairing` 的一条如实边界**：投稿还要求槽位语义（不占装备位、每名干员只一件、第三件顶掉真占格那两件）。
-本版**只**实现「配对授予哪些盟约」这一条；槽位那半落在 `server/match/player/items.js` 与 `gamedata.equipPerChess`
-上，**未做**，`effect` 与 `test/morphPairing.test.js` 都写明这一点（缺 golden 授权的环境不改槽位判定）。
+**`morphPairing` 的槽位语义（第 7 段，第三格落地时记为「未做」的那半条）**：投稿还要求「不占装备位、每名干员只
+一件、第三件顶掉真占格那两件」。这一半落在**装备位**那套既有实现上，所以判据收成 `shared/morph.js` 的
+**`morphSlotPolicy(decl)`** —— 一个闭枚举的策略对象：
+
+* `official`（缺省）⇒ **`OFFICIAL_SLOT_POLICY`**，一个**共享的冻结单例**：`isSlotless` 恒假、`slotsUsed` 逐字是
+  `items.length`、`slotCap` / `maxItems` 逐字是 `equipPerChess`、`replacedIndex` 就是今天那个「`replaceUid` 找不到
+  ⇒ 0（最旧的那件）」。缺省档下六个读取点走的是**与从前同一批算术**（同一次比较、同一个 splice 下标）⇒
+  **缺省逐字节不变、没有任何 `golden:update`**，已发布包一个字节不动。`test/morphPairing.test.js` 拿 `===` 钉住
+  「缺省输入必须返回这个单例」。
+* `plus` ⇒ **`PLUS_SLOT_POLICY`**：它不占位（`slotsUsed` 不数 `canGiveBond` 的那件）、每名干员最多一件
+  （`canHold`）、顶替只挑真正占格的那一件（`replacedIndex` 跳过它）、一行最多 `equipPerChess + 1` 件（`maxItems`）。
+
+**`equipPerChess` 本身一字未动**：那两格装备位是官方的，策略只回答「这一行占了几格、能不能再放一件、顶替挑哪
+一件」。`slotCap` 与 `maxItems` 是**两件事**，刻意分开：前者是真正占格的上限（两档都 = `equipPerChess`，界面的
+`EQUIP n/2` 分母读它），后者是一行最多几件（只有不变量那条读它）。
+
+**`getItem` 的契约（这一格的一格）**：解析器收**一件棋子**（`{ id }`）或一个 id 字符串，回 items 记录 ——
+六个读取点统一写成 `(it) => gd.item(typeof it === 'string' ? it : it && it.id)`。第 7 段第一版在这里踩过一次真
+bug（`server/match/invariants.js` 写的是收棋子的形状、其余写的是收 id 的，判据只假设一种 ⇒ 不变量把变形同构体
+当成占位的普通装备），所以契约写在 `shared/morph.js` 的 `resolveRec` 注释里并由 `test/morphSlots.test.js` 覆盖
+（那条 `collectViolations(m)` 断言就是它的回归位）。
 
 **每加一格照这三条做**（这一刀起）：**缺省 = 引擎今天的行为，逐字节不变**（缺省路径与从前同一份代码路径，
 所以**没有任何 `golden:update`**，已发布包一个字节不动）；**非缺省档由引擎实现**（包给不出数字、路径、模块，
@@ -3156,9 +3174,9 @@ i18n-ignore），差别只在**表是另一张**、每格多一个 `actions`。
 | 位置 | 形态 | 与某格开关相关？ |
 |---|---|---|
 | `screens/support.js` 的 `shouldAutoClose` | 与 `loadout.js` 那一处**同形**（相位一离开 `INFO_CHECK` 就收走助战面板） | **无关**：助战**没有**开关，而服务端 `platform.js` 的 `room.support` 同样只在 `INFO_CHECK` 收（`WRONG_PHASE`）⇒ **两边一致，不是缺陷**。将来若有投稿要"休整期换助战"，那就是**第 5 格开关**，两处一起改 |
-| `ui/equipReplace.js` 的 `if (equipped.length < 2) return null;` | 客户端把**装备位写死 2**（换装对话框的触发判据） | **与第 7 段（槽位语义）直接相关**：`morphPairing: 'plus'` 若改槽位计数，这一处与服务端的 `equipPerChess` 就会**对不上** |
-| `ui/gameLogic/placement.js` 的 `if (targetPiece.items.length < 2) return false;` | 同上（拖拽配发的预判） | 同上 |
-| `ui/detailPanel.js` 的 `EQUIP n/2` 与"最多 2 件"文案 | 纯显示 | 第 7 段若要"不占装备格"，分子要换成 `equipSlotsUsed`（投稿 `bdb` 的那半就是这个形状，见 §28.43.2 末尾的 diff 记录） |
+| `ui/equipReplace.js` 的 `if (equipped.length < 2) return null;` | 客户端把**装备位写死 2**（换装对话框的触发判据） | **第 7 段已按格开关处理**：`equipReplaces`（`ui/gameLogic/placement.js`）改读 `slotPolicy().slotsUsed` / `slotCap`，`ui/equipReplace.js` 只消费它的判决 ⇒ 两档都对得上服务端 |
+| `ui/gameLogic/placement.js` 的 `if (targetPiece.items.length < 2) return false;` | 同上（拖拽配发的预判） | **同上，已处理**（判据收在 `equipReplaces` 一处） |
+| `ui/detailPanel.js` 的 `EQUIP n/2` 与"最多 2 件"文案 | 纯显示 | **第 7 段已处理**：分子换成 `slotPolicy().slotsUsed`（`plus` 档不数那件不占位的），分母 `slotCap`；`plus` 档另外给那一行画一个「不占装备格」标签（`dtag-slotless`，缺省档不画） |
 
 ### 28.43.4 待办（本轮**刻意不做**）：`PREP` 里的干员调配入口
 

@@ -2077,7 +2077,7 @@ URL **一次都不被请求**。一个包把加载源改坏了，关掉这一格
 |---|---|---|---|---|
 | `shopBias` | `official` · `bondBias` | `official` | `bondBiasPreference`（`server/match/pool.js`）→ `bondBiasBonds`（`server/match/player/economy.js`）→ `PlayerEconomy._rollItemSlot` | `b293e061b38f` |
 | `prepLoadout` | `locked` · `prep` | `locked` | `LOADOUT_PHASES` / `loadoutPhasesFor`（`server/match/match/platform.js`）→ `Match.setLoadout` 的相位闸门 | `8b4e5da55c58` |
-| `morphPairing` | `official` · `plus` | `official` | 判据本体 `grantedBondsByMorph`（`shared/morph.js`），三处读取点同判：`bondsMeta.pieceBonds` · `support/index.unitBonds` · 客户端 `gameLogic/bonds.grantedBonds` | `19ea65909cf6` |
+| `morphPairing` | `official` · `plus` | `official` | 判据本体 `grantedBondsByMorph`（`shared/morph.js`），三处读取点同判：`bondsMeta.pieceBonds` · `support/index.unitBonds` · 客户端 `gameLogic/bonds.grantedBonds`；**装备位语义**那半条是 `morphSlotPolicy`（`shared/morph.js`），六处读取点同判：`player/items.js` · `player/acquire.js` · `bot.js` · `invariants.js` · 客户端 `ui/detailPanel.js` · `ui/gameLogic/placement.js` | `19ea65909cf6` |
 | `unequip` | `official` · `allow` | `official` | `unequipAllowed`（`server/match/player/items.js`）→ `PlayerState.unequip`（新意图 `g.unequip { itemUid }`）；客户端同一判据读它决定画不画「卸下」按钮 | `79de9ff03518` |
 
 **每一格的三件事写清**：**缺省档 = 引擎今天的行为**（不声明 / 选缺省 ⇒ 逐字节不变，所以没有任何 `golden:update`）；
@@ -2120,10 +2120,20 @@ URL **一次都不被请求**。一个包把加载源改坏了，关掉这一格
   （`support/index.unitBonds`，档位由 `withMorphPairing` 的作用域给）与客户端
   （`gameLogic/bonds.grantedBonds`，档位由 `roomMods.js` 从 `welcome.mods` 合成后写入）**都调它** ——
   投稿原件是把这三处各自覆盖一份，而三处各写一份循环正是这条规则最容易分叉的地方。
-* **本版**未实现**的那一条（如实披露）**：投稿还要求「不占装备位、每名干员只能装一件、第三件装备永远顶掉真占格的
-  那两件」的**槽位**语义。本刀**没做**那些：它们落在装备位与替换的既有实现
-  （`server/match/player/items.js` 与 `gamedata.equipPerChess`）上；这一格今天只改「配对授予哪些盟约」。
-  `effect` 逐字写明这一点，`test/morphPairing.test.js` 把边界钉住。
+* **第 7 段把槽位那半也补上了**（第三格落地时它被如实记成「未做」）：`plus` 档下变形同构体
+  **不占装备位**（两格真装备满了也装得上）、每名干员**最多一件**、第三件真装备**永远顶掉真正占格的那一件**
+  （它自己永远不会被顶掉，也不是可顶替的对象）。判据同样只有一份：`shared/morph.js` 的 **`morphSlotPolicy`**
+  返回一个策略对象（`OFFICIAL_SLOT_POLICY` / `PLUS_SLOT_POLICY`），六个读取点都读它：
+  服务端 `player/items.js`（`_attach` / `_takeReplaced` / `equip` 的两条守卫）、`player/acquire.js`（回收）、
+  `bot.js`（选人与选装备）、`invariants.js`（不变量），客户端 `ui/detailPanel.js`（`EQUIP n/2` 与
+  「不占装备格」标签）与 `ui/gameLogic/placement.js`（替换对话框的判据）。
+* **缺省档逐字节不变**：`morphSlotPolicy()` 在没声明 / `official` / 不认识的档位下返回的是
+  **`OFFICIAL_SLOT_POLICY` 这个共享冻结单例本身**，它的每个方法都逐字是引擎今天那条算术
+  （`slotsUsed` = `items.length`、`slotCap` = `equipPerChess`、`replacedIndex` 的「找不到 ⇒ 0」）——
+  所以缺省路径上「同一批数字、同一次比较、同一个 splice 下标」，**不需要 `golden:update`**。
+  `gamedata.equipPerChess` 本身**一字未动**：那两格装备位是官方的，策略只回答「这一行占了几格、能不能再放一件、
+  顶替挑哪一件」。`test/morphSlots.test.js` 逐条钉住两档的行为，`test/morphPairing.test.js` 钉住缺省档拿到的是
+  那个单例。
 
 #### `unequip` —— 已装备的装备能不能卸下
 

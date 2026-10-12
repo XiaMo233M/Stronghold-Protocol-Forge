@@ -135,6 +135,12 @@ export const BEHAVIOUR_SWITCHES = Object.freeze({
    * `official` = **引擎今天的行为**：变形同构体**占一个装备位**（少于两件装备就不配对），并与**每一件**
    * `giveBondId` 装备配对（全部授予）。`plus` = 投稿那一套：**不占装备位**（一件也能配对）、每名干员**只能装
    * 一件**（多的由 `morphCarrierIndexes` 暴露给调用方）、只取装备行里**最左边**能授予盟约的那一件。
+   *
+   * **槽位语义（第 7 段补上的那半条）**：判据是同一份 `shared/morph.js` 的 **`morphSlotPolicy`** ——
+   * `official` 拿到 `OFFICIAL_SLOT_POLICY`（共享冻结单例，逐字是引擎今天那条算术），`plus` 拿到
+   * `PLUS_SLOT_POLICY`（不占位 / 每名干员一件 / 顶替只挑真正占格的那一件）。六处读取点同判：
+   * `player/items.js` · `player/acquire.js` · `bot.js` · `invariants.js` · `ui/detailPanel.js` ·
+   * `ui/gameLogic/placement.js`。`equipPerChess` 本身一字未动。
    */
   morphPairing: {
     label: '变形同构体的配对规则',
@@ -146,7 +152,7 @@ export const BEHAVIOUR_SWITCHES = Object.freeze({
     }),
     effect: Object.freeze({
       official: 'the reading this engine has always had: fewer than two carried items pair with nothing (the 变形同构体 takes one of the two equipment slots), and EVERY giveBondId item it is worn with grants its bond',
-      plus: 'the submission\'s GRANT rule: one carried item is enough for the pairing to count (no two-item precondition), and ONLY the leftmost giveBondId item in the equipment row grants its bond. NOT implemented in this build: the slot semantics the submission also asks for (no equipment slot, at most one carrier, a third item always displacing a real one) — those live in the equipment-slot code and are the next cut',
+      plus: 'the submission\'s GRANT rule and SLOT rule together: one carried item is enough for the pairing to count (no two-item precondition) and ONLY the leftmost giveBondId item in the equipment row grants its bond; the 变形同构体 occupies NO equipment slot (it attaches with both real slots used, and a carrier holds at most one of it), and a third real item always displaces a real slotted item — never the 变形同构体. equipPerChess itself is untouched: the official two real slots stay two',
     }),
     actions: (option) => (option === 'plus' ? [{ kind: 'morph.pairingPlus', value: true }] : []),
   },

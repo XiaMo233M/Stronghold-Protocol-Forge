@@ -16,7 +16,7 @@ import { MAX_SEATS } from '../../shared/constants.js';
 // 变体 / 口径层（DESIGN §28.39）：`opts.variants` → 这一局的 `config` 覆盖。值与轴表都在 `shared/variants.js`，
 // 这里只消费它的判决（`null` = 什么都不用改，缺省路径逐字节不变）。
 import { variantDataPatch, variantValue } from '../../shared/variants.js';
-import { morphPairingOf } from '../../shared/morph.js';
+import { morphPairingOf, morphSlotPolicy } from '../../shared/morph.js';
 import { formView, isEliteForm } from '../../shared/formProjection.js';
 import { isShopItem } from '../sim/simdata.js';
 import { standInRecord } from '../../shared/standIn.js';
@@ -143,6 +143,17 @@ export class GameData {
      * @type {'official'|'plus'}
      */
     this.morphPairing = morphPairingOf(opts?.behaviour ?? null);
+    /**
+     * 装备位语义的策略（第 7 段，与上面那一行是**同一格开关的另外半条**）：`plus` 档下变形同构体不占装备位、
+     * 每名干员最多一件、第三件顶掉真正占格的那两件；缺省档 ⇒ `OFFICIAL_SLOT_POLICY`（**共享的冻结单例**，每一个
+     * 方法都逐字是引擎今天那条算术）。
+     *
+     * 挂在 `GameData` 上的理由与 `morphPairing` 逐字相同：`GameData` 是**这一局**的读取视图，而槽位判定的调用方
+     * （`server/match/player/items.js` / `acquire.js` / `bot.js` / `invariants.js`）手上有的就是它。**它不参与
+     * `equipPerChess` 的取值** —— 那两格装备位是官方的；策略只回答「这一行占了几格、能不能再放一件、顶替挑哪一件」。
+     * @type {import('../../shared/morph.js').MorphSlotPolicy}
+     */
+    this.morphSlots = morphSlotPolicy(opts?.behaviour ?? null);
     /** 口径给出的部署位；没有口径 ⇒ `null`（`deployCap` 落到数据 / DEFAULTS 那两级）。 */
     const cap = this.variantPatch?.economy?.deployCap;
     this._deployCap = Number.isInteger(cap) && cap > 0 ? cap : null;

@@ -10,17 +10,21 @@
 //     `giveBondId` 装备配对（全部授予）。
 //   * `plus`（投稿那一套）：**不占装备位**（一件也能配对）、只取装备行里**最左边**能授予盟约的那一件。
 //
-// **未实现、也不假装实现的一条（如实披露）**：投稿还要求「每名干员只能装一件变形同构体」与「第三件装备永远顶掉
-// 真正占格的那两件」里的**装备位语义**部分。本刀**没做**那些：它们落在装备位/替换的既有实现
-// （`server/match/player/items.js` 与 `gamedata.equipPerChess` 的槽位判定）上，而本环境**跑不了 golden**
-// （纪律：不跑 `golden:update`）⇒ 那是下一刀的事。这一格今天**只**改「配对授予哪些盟约」这一条，测试把这条边界钉住。
+// **第 7 段把槽位那半也补上了**（第三格落地时它被如实记成「未做」）：`plus` 档下变形同构体**不占装备位**、每名
+// 干员**最多一件**、第三件装备**永远顶掉真正占格的那一件**。判据收在 `shared/morph.js` 的 `morphSlotPolicy`：
+// `official` ⇒ `OFFICIAL_SLOT_POLICY`（**共享的冻结单例**，每一个方法都逐字是引擎今天那条算术），`plus` ⇒
+// `PLUS_SLOT_POLICY`。四处服务端读取点（`player/items.js` · `player/acquire.js` · `bot.js` · `invariants.js`）与
+// 两处客户端读取点（`ui/detailPanel.js` 的 `EQUIP n/2` 与标签 · `ui/gameLogic/placement.js` 的替换对话框）都走它。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BEHAVIOUR_SWITCHES, parseBehaviourDecl, behaviourActions, behaviourIsDefault, behaviourValue } from '../shared/behaviour.js';
-import { MORPH_PAIRING_OPTIONS, isMorphCarrier, grantsBond, morphPairingOf, grantedBondsByMorph, morphCarrierIndexes } from '../shared/morph.js';
+import {
+  MORPH_PAIRING_OPTIONS, isMorphCarrier, grantsBond, morphPairingOf, grantedBondsByMorph, morphCarrierIndexes,
+  morphSlotPolicy, matchSlotPolicy, equipSlotsUsed, OFFICIAL_SLOT_POLICY, PLUS_SLOT_POLICY,
+} from '../shared/morph.js';
 import { pieceBonds } from '../server/match/bondsMeta.js';
 import { unitBonds, withMorphPairing } from '../server/sim/content/support/index.js';
 import { makeMatch, DATA } from './match/harness.js';
@@ -175,19 +179,70 @@ test('三个读取点**共用同一个判据**：源码级断言（三处都不�
   assert.match(readFileSync(join(ROOT, 'shared/morph.js'), 'utf8'), /export function grantedBondsByMorph/);
 });
 
-test('未实现的那一条写在测试里（装备位语义：不占格 / 顶掉真占格那两件）', () => {
-  // 投稿还要求「不占装备位」与「每名干员只能装一件」的**槽位**语义。本刀没做（见文件头）：它落在
-  // `server/match/player/items.js` 的槽位判定与 `gamedata.equipPerChess` 上，而本环境跑不了 golden。
-  // 这一条把边界钉住：那一格的 `effect` 不许声称做了它，`shared/morph.js` 也不许偷偷实现它。
-  // 边界只钉「槽位语义」这件事：那一格的 effect **可以**提到它占一个装备位（那是**官方**读数的事实），
-  // 但不许声称**改掉了**槽位语义（`plus` 那一行才是要求，而那一条本刀没做）。判据用「改槽位」的措辞。
+test('装备位语义（第 7 段）：缺省档走**共享的官方策略单例**，那一档的每一个方法都是引擎今天那条算术', () => {
+  // 三条「缺省逐字节不变」的钉法之一（**单元级**）：`morphSlotPolicy` 在缺省 / `official` / 不认识的档位下
+  // **必须**返回 `OFFICIAL_SLOT_POLICY` 这个对象本身（`===`），而它的每一个方法都逐字是引擎今天那条算术 ——
+  // 所以缺省路径上「同一批数字、同一次比较、同一个 splice 下标」不是一句承诺，是一条断言。
+  for (const decl of [null, undefined, [], declOf('official'), 'official', 'nope', [{ switch: 'shopBias', option: 'bondBias' }]]) {
+    assert.equal(morphSlotPolicy(decl), OFFICIAL_SLOT_POLICY, `${JSON.stringify(decl)} ⇒ 官方策略单例`);
+    assert.equal(matchSlotPolicy(null), OFFICIAL_SLOT_POLICY);
+    assert.equal(matchSlotPolicy({}), OFFICIAL_SLOT_POLICY);
+    assert.equal(matchSlotPolicy({ behaviour: decl }), OFFICIAL_SLOT_POLICY);
+  }
+  assert.equal(matchSlotPolicy({ behaviour: declOf('plus') }), PLUS_SLOT_POLICY);
+  assert.equal(morphSlotPolicy('plus'), PLUS_SLOT_POLICY);
+  assert.ok(Object.isFrozen(OFFICIAL_SLOT_POLICY) && Object.isFrozen(PLUS_SLOT_POLICY), '两个策略都是冻结单例');
+  assert.equal(OFFICIAL_SLOT_POLICY.active, false);
+  assert.equal(PLUS_SLOT_POLICY.active, true);
+  // 官方策略：`slotsUsed` = 件数、`slotCap` = 装备位数、`isSlotless` 恒假、`replacedIndex` = 今天那个「找不到 ⇒ 0」
+  const row = [{ uid: 7, id: ISO }, { uid: 8, id: HAMMER }, { uid: 9, id: YAN }];
+  assert.equal(OFFICIAL_SLOT_POLICY.isSlotless(rec(ISO)), false, '官方档：变形同构体是普通装备，占一个位');
+  assert.equal(OFFICIAL_SLOT_POLICY.slotsUsed(row), 3);
+  assert.equal(OFFICIAL_SLOT_POLICY.slotsUsed([]), 0);
+  assert.equal(OFFICIAL_SLOT_POLICY.slotCap(2), 2);
+  assert.equal(OFFICIAL_SLOT_POLICY.maxItems(2), 2, '官方档：一行最多两件');
+  assert.equal(OFFICIAL_SLOT_POLICY.canHold([], null, 2), true);
+  assert.equal(OFFICIAL_SLOT_POLICY.canHold(row, null, 2), false);
+  assert.equal(OFFICIAL_SLOT_POLICY.replacedIndex(row, 8), 1, '点名的那一件');
+  assert.equal(OFFICIAL_SLOT_POLICY.replacedIndex(row, null), 0, '没点名 ⇒ 最旧的那一件');
+  assert.equal(OFFICIAL_SLOT_POLICY.replacedIndex(row, 999), 0, '点名一个不在身上的 uid ⇒ 最旧的那一件');
+  // 加强策略：变形同构体不占位、上限 +1、它自己永远不是被顶掉的那一件
+  // `getItem` 的契约（`MorphSlotPolicy` 的一格）：收**一件棋子**（`{ id }`）或一个 id 字符串，回 items 记录。
+  const getItem = (id) => rec(id);
+  const P3 = [ISO, HAMMER, YAN].map((id) => ({ id }));
+  const P2 = [ISO, HAMMER].map((id) => ({ id }));
+  assert.equal(PLUS_SLOT_POLICY.isSlotless(rec(ISO)), true);
+  assert.equal(PLUS_SLOT_POLICY.isSlotless(rec(HAMMER)), false);
+  assert.equal(PLUS_SLOT_POLICY.slotsUsed(P3, getItem), 2);
+  assert.equal(PLUS_SLOT_POLICY.slotCap(2), 2);
+  assert.equal(PLUS_SLOT_POLICY.maxItems(2), 3, '加强档：两格 + 一件不占位的');
+  assert.equal(PLUS_SLOT_POLICY.canHold(P3, rec(HAMMER), 2, getItem), false, '两格满了');
+  assert.equal(PLUS_SLOT_POLICY.canHold(P2, rec(YAN), 2, getItem), true, '变形同构体不占位');
+  assert.equal(PLUS_SLOT_POLICY.canHold(P3, rec(ISO), 2, getItem), false, '每名干员最多一件');
+  assert.equal(PLUS_SLOT_POLICY.replacedIndex(P3, null, getItem), 1, '跳过它自己');
+  assert.equal(PLUS_SLOT_POLICY.replacedIndex(P3, 9, getItem), 1, '点名它自己 ⇒ 落到真正占格的那一件');
+});
+
+test('装备位语义（第 7 段）：`equipSlotsUsed` 是同一份判据的裸入口（缺省档 = 件数）', () => {
+  const row = [{ id: ISO }, { id: HAMMER }, { id: YAN }];
+  const getItem = (id) => rec(id);
+  assert.equal(equipSlotsUsed(row, getItem), 3, '缺省 ⇒ 官方读数');
+  assert.equal(equipSlotsUsed(row, getItem, { morphed: 'plus' }), 2, '加强 ⇒ 变形同构体不计数');
+  assert.equal(equipSlotsUsed([], null), 0);
+});
+
+test('槽位那半**已经做了**：effect 必须写明它动了装备位，四处读取点都读这一局的策略', () => {
+  // 这一条是上一版的**反面**：第三格落地时这里钉的是「effect 不许声称改了槽位语义」。第 7 段把那一半做完了，
+  // 所以现在钉的是相反的方向 —— 它**必须**说清楚 `plus` 档动了槽位，而不是继续假装没做。
   const effect = Object.values(BEHAVIOUR_SWITCHES[SW].effect).join(' ');
-  assert.equal(/no slot|does not occupy|takes no equipment slot|不占装备位|顶掉/.test(effect), false,
-    '这一格的 effect 不许声称改了槽位语义（未实现）');
-  const itemsSrc = readFileSync(join(ROOT, 'server/match/player/items.js'), 'utf8');
-  assert.equal(itemsSrc.includes('morphPairing'), false, '槽位判定今天不读这一格（未实现，别假装读了）');
-  // 而 `gamedata.equipPerChess` 的槽位数也一字未动（两件装备位是官方的）
+  assert.match(effect, /slot/i, 'plus 档的 effect 必须写明它改了装备位语义');
+  assert.equal(/NOT implemented in this build/.test(effect), false, '那一半已经做了，不许再留「未实现」的免责句');
+  for (const rel of ['server/match/player/items.js', 'server/match/player/acquire.js', 'server/match/bot.js', 'server/match/invariants.js']) {
+    assert.match(readFileSync(join(ROOT, rel), 'utf8'), /matchSlotPolicy/, `${rel} 的装备位判定必须读这一局的策略`);
+  }
+  // 而 `gamedata.equipPerChess` 的槽位数也一字未动（两件装备位是官方的，策略只回答「占几格」）
   const gdSrc = readFileSync(join(ROOT, 'server/match/gamedata.js'), 'utf8');
   assert.match(gdSrc, /equipPerChess/);
   assert.equal(/equipPerChess[\s\S]{0,80}morphPairing/.test(gdSrc), false);
+  assert.match(gdSrc, /this\.morphSlots = morphSlotPolicy\(/);
 });

@@ -9,6 +9,9 @@ import { behaviourIsDefault } from '../../../shared/behaviour.js';
 import { tileKey, inField, parseDir } from '../board.js';
 import { offsetTile } from '../../sim/dir.js';
 import { itemKey } from '../gamedata.js';
+// 装备位语义（第 7 段）：策略对象来自 `shared/morph.js`（**同一格开关的另外半条**）。缺省档拿到的
+// `OFFICIAL_SLOT_POLICY` 是共享的冻结单例，每一个方法都逐字是引擎今天那条算术 ⇒ 下面三处的缺省路径逐字节不变。
+import { matchSlotPolicy } from '../../../shared/morph.js';
 import { OK, fail } from './common.js';
 
 /**
@@ -32,6 +35,10 @@ export class PlayerItems {
    * oldest); the replaced item is destroyed. A `replaceUid` that is not one of the target's equipped items is refused.
    * A consume-on-equip item replaces the same way before it resolves (GitHub #263): the carrier keeps a free slot, and a
    * target its effect refuses (博士投影 on an elite) gets the picked item back — nothing is destroyed.
+   *
+   * `plus`（第 7 段，`shared/morph.js` 的 `PLUS_SLOT_POLICY`）另外两条：变形同构体**每名干员最多一件**（再装一件
+   * 回 `BAD_TARGET`），而 `replaceUid` 只认**真正占格**的那几件（变形同构体在加强档下不占位，所以它不是可顶替的
+   * 对象，也永远不会被第三件顶掉）。缺省档下这两条**一个字都不生效**。
    */
   equip(itemUid, targetUid, replaceUid = null) {
     const g = this._gate(); if (g) return g;
@@ -43,7 +50,21 @@ export class PlayerItems {
     if (!tloc || tloc.piece.kind !== 'chess' || tloc.area === 'equipped') return fail(ERR.BAD_TARGET);
     const item = iloc.piece;
     const target = tloc.piece;
-    if (replaceUid != null && !(Number.isInteger(replaceUid) && (target.items || []).some((x) => x.uid === replaceUid))) return fail(ERR.BAD_TARGET, 'replace: not equipped on the target');
+    const policy = matchSlotPolicy(this.m);
+    if (policy.active) {
+      const row = target.items || [];
+      // `plus`：变形同构体每名干员最多一件（`OFFICIAL_SLOT_POLICY.active` 为假 ⇒ 这一条在缺省档一个字都不生效）
+      if (policy.isSlotless(rec) && row.some((x) => policy.isSlotless(this.gd.item(x.id)))) {
+        return fail(ERR.BAD_TARGET, 'one slotless item per carrier');
+      }
+      // `plus`：顶替只认**真正占格**的那一件（它不占位，所以既不是可顶替的对象，也不会被第三件顶掉）
+      if (replaceUid != null && !(Number.isInteger(replaceUid) && row.some((x) => x.uid === replaceUid && !policy.isSlotless(this.gd.item(x.id))))) {
+        return fail(ERR.BAD_TARGET, 'replace: not a slotted item of the target');
+      }
+    }
+    if (replaceUid != null && !(Number.isInteger(replaceUid) && (target.items || []).some((x) => x.uid === replaceUid))) {
+      return fail(ERR.BAD_TARGET, 'replace: not equipped on the target');
+    }
     const consume = typeof rec.kind === 'string' && rec.kind.startsWith('consume_on_equip');
     if (consume) {
       const key = 'item:' + itemKey(item.id);
@@ -90,11 +111,17 @@ export class PlayerItems {
   /**
    * Attach an item. With both slots used the item `replaceUid` names (the player's pick) is replaced, else the oldest;
    * the replaced item is destroyed.
+   *
+   * 「两格满了」由这一局的**装备位策略**回答（`slotPolicy.slotsUsed`）：缺省档逐字就是
+   * `target.items.length >= this.gd.equipPerChess`，`plus` 档下变形同构体不计数、且它**永远不是**被顶掉的那一件
+   * （`slotPolicy.replacedIndex` 只挑真正占格的）。缺省档下策略就是官方那一条，循环体与从前同一批算术。
    */
   _attach(target, item, replaceUid = null) {
     target.items = target.items || [];
-    while (target.items.length >= this.gd.equipPerChess) {
-      const i = replaceUid != null ? target.items.findIndex((x) => x.uid === replaceUid) : -1;
+    const policy = matchSlotPolicy(this.m);
+    const used = () => policy.slotsUsed(target.items, (id) => this.gd.item(id));
+    while (used() >= this.gd.equipPerChess) {
+      const i = policy.replacedIndex(target.items, replaceUid, (id) => this.gd.item(id));
       const [old] = target.items.splice(i >= 0 ? i : 0, 1);
       replaceUid = null;
       this.m.dispatchItem(this, old, target, 'onDestroy', { item: old, holder: target, reason: 'replace' });
@@ -104,15 +131,16 @@ export class PlayerItems {
 
   /**
    * A consume-on-equip item on a full carrier: take the item `replaceUid` names (else the oldest) off `target` — not yet
-   * destroyed — and return { piece, idx } (null while a slot is free).
+   * destroyed — and return { piece, idx } (null while a slot is free). 「满」与「挑哪一件」都走这一局的装备位策略
+   * （`plus`：变形同构体既不占位、也不会被挑走）；缺省档逐字是 `items.length < equipPerChess` 与「找不到 ⇒ 0」。
    */
   _takeReplaced(target, replaceUid = null) {
     target.items = target.items || [];
-    if (target.items.length < this.gd.equipPerChess) return null;
-    const i = replaceUid != null ? target.items.findIndex((x) => x.uid === replaceUid) : -1;
-    const idx = i >= 0 ? i : 0;
-    const [piece] = target.items.splice(idx, 1);
-    return { piece, idx };
+    const policy = matchSlotPolicy(this.m);
+    if (policy.slotsUsed(target.items, (id) => this.gd.item(id)) < this.gd.equipPerChess) return null;
+    const idx = policy.replacedIndex(target.items, replaceUid, (id) => this.gd.item(id));
+    const [piece] = target.items.splice(idx >= 0 ? idx : 0, 1);
+    return { piece, idx: idx >= 0 ? idx : 0 };
   }
 
   /** g.art {itemUid, row, col, dir?}: the Art's range grid is rotated by `dir` (absent ⇒ RIGHT). */

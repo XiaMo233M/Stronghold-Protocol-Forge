@@ -31,6 +31,8 @@
 import { PHASE, BOND_LAYER_CAP } from '../../shared/constants.js';
 import { FIELD, canPlace, placeClass, positionClass, parseKey } from './board.js';
 import { computeBonds } from './bondsMeta.js';
+// 装备位语义（第 7 段）：不变量里「占几格 / 最多几件 / 最多一件变形同构体」读这一局的策略（缺省档 = 官方那条算术）。
+import { matchSlotPolicy } from '../../shared/morph.js';
 
 const PHASES = new Set(Object.values(PHASE));
 
@@ -112,7 +114,18 @@ export function collectViolations(m, { limit = 25 } = {}) {
         const rec = pgd.chess(p.id);
         if (!rec) { fail(`${id}: unknown chess ${p.id}`); continue; }
         if (rec.isDiy && !rec.diyFor) fail(`${id}: owns ${p.id}, a 自选 slot it has not filled`);
-        if (!Array.isArray(p.items) || p.items.length > gd.equipPerChess) fail(`${id}: ${p.id} carries ${p.items && p.items.length} items`);
+        if (!Array.isArray(p.items)) fail(`${id}: ${p.id} carries no item array`);
+        else {
+          // 装备位不变量（第 7 段）：**占几格**与**最多几件**都由这一局的装备位策略回答（`shared/morph.js`）。
+          // 缺省档 ⇒ `OFFICIAL_SLOT_POLICY`：`slotsUsed` 就是 `items.length`、`maxItems` 就是 `equipPerChess`
+          // ⇒ 逐字就是从前那条 `p.items.length > gd.equipPerChess`。`plus` 档下变形同构体不占位（一行最多
+          // `equipPerChess + 1` 件），而它自己**每名干员最多一件**。
+          const policy = matchSlotPolicy(m);
+          const slots = policy.slotsUsed(p.items, (id) => gd.item(id));
+          if (slots > gd.equipPerChess) fail(`${id}: ${p.id} uses ${slots} equipment slots`);
+          if (p.items.length > policy.maxItems(gd.equipPerChess)) fail(`${id}: ${p.id} carries ${p.items.length} items`);
+          if (p.items.filter((x) => policy.isSlotless(gd.item(x && x.id))).length > 1) fail(`${id}: ${p.id} carries more than one slotless item`);
+        }
         for (const it of p.items || []) {
           note(ps, it);
           if (it.kind !== 'item' || !gd.item(it.id)) fail(`${id}: ${p.id} carries a bad item ${it.kind}:${it.id}`);

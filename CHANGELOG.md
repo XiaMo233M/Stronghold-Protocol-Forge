@@ -249,12 +249,28 @@
   `Battle` 构造期与每一步都压上），客户端由 `roomMods.js` 从 `welcome.mods` 合成后写入
   （`setMorphPairing`，合并规则直接调 `mergeBehaviourDecls`，不自己实现一遍）。BattleSpec 与
   `battleOptsFromMatch` 各带一个 `morphPairing` 键，**只在非缺省档才出现**。缺省档一个键都不多 ⇒ 逐字节不变。
-* **`morphPairing` 的一条如实边界**：投稿还要求**槽位**语义（不占装备位、每名干员只一件、第三件顶掉真占格那两件）。
-  本版**只**实现「配对授予哪些盟约」；槽位那半落在 `server/match/player/items.js` 与 `gamedata.equipPerChess` 上，
-  **未做**（缺 golden 授权的环境不改槽位判定）。那一格的 `effect` 逐字写明，`test/morphPairing.test.js` 有两条
-  断言钉住这条边界（`effect` 不许声称改了槽位、槽位判定不许读这一格）。
-* **测试**：`test/morphPairing.test.js`（8 条：形状 / 档位归一化 / 判据本体两档 / prep 读取点 / 战斗读取点的
-  缓存按档位失效 / **三处读取点同判**（逐行遍历两档）/ 三处共用同一份判据的源码级断言 / 未实现那一条的边界）。
+* **`morphPairing` 的槽位语义（第 7 段补上的那半条）**：投稿还要求「不占装备位、每名干员只一件、第三件顶掉真占格
+  那两件」—— 第三格落地时它被如实记成「未做」，这一段把它做完。判据是同一份 `shared/morph.js` 的
+  **`morphSlotPolicy(decl)`**：`official`（缺省）⇒ **`OFFICIAL_SLOT_POLICY`**，一个**共享的冻结单例**，每个方法都
+  逐字是引擎今天那条算术（`slotsUsed` = `items.length`、`slotCap` / `maxItems` = `equipPerChess`、`replacedIndex`
+  的「`replaceUid` 找不到 ⇒ 0」）；`plus` ⇒ **`PLUS_SLOT_POLICY`**（不占位、每名干员最多一件、顶替只挑真正占格的
+  那一件、一行最多 `equipPerChess + 1` 件）。六处读取点**同判**：服务端 `player/items.js`（`_attach` /
+  `_takeReplaced` / `equip` 的两条守卫）· `player/acquire.js`（回收）· `bot.js`（选人与选装备）· `invariants.js`
+  （不变量），客户端 `ui/detailPanel.js`（`EQUIP n/2` 分子与「不占装备格」标签）· `ui/gameLogic/placement.js`
+  （`equipReplaces` 的替换判据，`roomMods.js` 把档位写进 `bonds.setMorphSlotPolicy`）。
+  **缺省档逐字节不变**：没声明 / `official` / 不认识的档位返回的都是**那个单例本身**，缺省路径上「同一批数字、
+  同一次比较、同一个 splice 下标」⇒ **不需要 `golden:update`**，已发布包一个字节不动。`gamedata.equipPerChess`
+  本身**一字未动**（那两格装备位是官方的，策略只回答「这一行占了几格、能不能再放一件、顶替挑哪一件」）。
+  `getItem` 的契约写在 `shared/morph.js`（收一件棋子或一个 id，回 items 记录）—— 第 7 段第一版在这里踩过一次真
+  bug（`invariants.js` 写的是收棋子的形状、其余写的是收 id 的，判据只假设一种 ⇒ 不变量把变形同构体当成占位的普通
+  装备），所以它由 `test/morphSlots.test.js` 的 `collectViolations` 断言回归。
+* **测试**：新增 `test/morphSlots.test.js`（8 条行为级：缺省档拿到官方单例 / 官方档它占位且会被顶掉 / `plus` 档
+  两件真装备 + 它共存 / 第三件真装备顶掉真占格的那一件 / 点名它做 `replaceUid` 被拒 / 每名干员最多一件 / 点名真
+  占格的有效 / 官方档不认「槽位豁免」）。`test/morphPairing.test.js` 原地改了两条：原来钉「未实现」的那条**反过来
+  钉「已经做了」**（`effect` 必须写明动了槽位、四处服务端读取点都必须读这一局的策略），另加两条单元级断言
+  （缺省档 `===` 官方单例、`equipSlotsUsed` 的裸入口）。
+* **测试**：`test/morphPairing.test.js`（形状 / 档位归一化 / 判据本体两档 / prep 读取点 / 战斗读取点的
+  缓存按档位失效 / **三处读取点同判**（逐行遍历两档）/ 三处共用同一份判据的源码级断言）。
 * **`test/packBehaviour.test.js` 原地改了三处（换语义，不放松）**：①「本版是空表」→「真表里每一格都通过形状守卫、
   每一格至少两档且有非缺省档」；②「空表也响亮」→「不认识的开关也响亮」（被拒的名字从 `shopBias` 换成真表外的名字，
   并新增「文案必须列出真表里的每一个开关」）；③「真表（空）下包装不上」→「真表下不认识的开关装不上」+ 新增

@@ -4,7 +4,8 @@ import { int, isObj } from './shared.js';
 import { diyPicks } from './diy.js';
 import { t } from '../../../../shared/i18n.js';
 // 行为开关 `morphPairing`（DESIGN §28.43.1）：判据本体在 `shared/morph.js`，客户端与服务端/战斗调的是同一个函数。
-import { grantedBondsByMorph } from '../../../../shared/morph.js';
+// 第 7 段把**同一格开关的另外半条**（装备位语义）也收在那里：`morphSlotPolicy` 给出这一页的策略对象。
+import { grantedBondsByMorph, morphSlotPolicy, OFFICIAL_SLOT_POLICY } from '../../../../shared/morph.js';
 
 /**
  * 这一页的 `morphPairing` 档位（房间的包声明里派生的**有效档位**）。`setMorphPairing()` 由
@@ -22,6 +23,27 @@ export function setMorphPairing(option) {
 }
 /** 当前档位（null = 没声明 ⇒ 缺省档）。 */
 export function morphOption() { return morphPairing; }
+
+/**
+ * 这一页的**装备位策略**（第 7 段，`shared/morph.js` 的 `morphSlotPolicy`）：与 `morphPairing` 同一格开关的另外
+ * 半条。`setMorphSlotPolicy()` 由 `roomMods.js` 在 `welcome.mods` 变化时写一次（与 `setMorphPairing` 同一个投影
+ * 点）；没写过 ⇒ `OFFICIAL_SLOT_POLICY`（共享的冻结单例，`slotsUsed` 就是 `items.length`）。
+ *
+ * 客户端两处读它：详情卡的 `EQUIP n/2` 与「不占装备格」标签（`ui/detailPanel.js`）、拖放替换对话框的判据
+ * （`ui/gameLogic/placement.js` 的 `equipReplaces`）。**缺省档下这两处逐字与从前相同** —— 那一档的策略就是
+ * 引擎今天那条算术。
+ * @type {import('../../../../shared/morph.js').MorphSlotPolicy}
+ */
+let morphSlots = OFFICIAL_SLOT_POLICY;
+/**
+ * 记下这一页的有效装备位策略（由 `roomMods.js` 从 `welcome.mods.packs[].behaviour` 合成后调用）。
+ * @param {string|Array<{ switch?: string, option?: string }>|null|undefined} option 档位名或归一化声明
+ */
+export function setMorphSlotPolicy(option) {
+  morphSlots = morphSlotPolicy(option);
+}
+/** 当前装备位策略（冻结对象，读它、别改它）。 */
+export function slotPolicy() { return morphSlots; }
 
 
 // ---- bonds -------------------------------------------------------------------------------------------
