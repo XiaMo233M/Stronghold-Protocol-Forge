@@ -26,7 +26,7 @@
   <text x="68" y="308" font-size="13" fill="#8250df" text-anchor="middle">分发</text>
   <rect x="136" y="272" width="528" height="60" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
   <text x="152" y="294" font-size="13" fill="#1f2328">从一份 pack.json 到别人装上它</text>
-  <text x="152" y="316" font-size="12" fill="#57606a">标准包规范 → mod 仓库（25 条，以 index.json 为准）→ 投稿站</text>
+  <text x="152" y="316" font-size="12" fill="#57606a">标准包规范 → mod 仓库（条数以 index.json 为准）→ 投稿站</text>
 
   <text x="16" y="356" font-size="12" fill="#57606a">包只能消费 mod 层已有的通道；要新能力就先在引擎侧加一刀，包才可能声明它。</text>
 </svg>
