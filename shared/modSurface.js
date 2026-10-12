@@ -265,9 +265,14 @@ export const MOD_SURFACE = Object.freeze([
     layer: 'B',
     decl: 'pack.json.routes = [{ path, cache }]',
     anchors: [{ symbol: 'ROUTE_CACHE_POLICIES' }, { symbol: 'PACK_FIELDS', members: ['routes'] }],
-    requires: ['路径与缓存策略都要在允许集合内（没有「包自己发明的缓存语义」）'],
-    files: ['shared/workshop.js', 'server/http/routes.js', 'server/http/mods.js'],
-    tests: ['test/modRoutes.test.js'],
+    requires: [
+      '路径与缓存策略都要在允许集合内（没有「包自己发明的缓存语义」）',
+      '撞核心只丢**那一条声明**、不拒包，并响亮点名；判据是 `coreRouteShadow`（真文件 / 常量端点才算撞），'
+        + '作者侧 `tools/workshop-validate.mjs` 读同一张表（撞 ⇒ error，落在命名空间但今天没文件 ⇒ warning），不许另抄一份',
+    ],
+    files: ['shared/workshop.js', 'server/http/routes.js', 'server/http/mods.js', 'server/http/workshop.js',
+      'server/http/routeMount.js', 'tools/workshop-validate.mjs'],
+    tests: ['test/modRoutes.test.js', 'test/workshopValidateRoutes.test.js'],
     spec: '§28.13',
   },
   {
