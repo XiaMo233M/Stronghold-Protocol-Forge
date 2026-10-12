@@ -3028,3 +3028,59 @@ i18n-ignore），差别只在**表是另一张**、每格多一个 `actions`。
 （走装载器同一份 `identifyPack`）、投影那一行真的在 `server/index.js` 里（源码级断言）、以及 `PACK_FIELDS` 的闭集
 计数就地延长。**不需要 `golden:update`**：缺省路径一个字节不动。
 
+### 28.44 The upgrade-path table: a second protocol on the same port (implemented)
+
+**The gap, stated as a hard-coded comparison.** `server/http/websocket.js` answered exactly one WebSocket path — the
+line was `if (!parts || parts.rawPath !== '/ws') { reject(404, …) }` — because one server ran one game and one
+protocol. Everything else about the upgrade was already data (`WS_MAX_PAYLOAD`, `NET_DEFAULTS`, the peer map): the
+path was the only routing rule in the file that could not be expressed as configuration. That stops being harmless
+the moment a host wants to serve a **self-contained game mode** next to Stronghold: a mode that brings its own
+message shapes, its own rooms and — the reason this cell exists — often its own process. Without a table the only
+way to get there is editing the pinned comparison, and a fork that edits it owns a merge conflict on the file that
+guards its own front door.
+
+**The ruling.** The paths a server answers become a **table the host process registers**, decided from data before
+the socket exists:
+
+```js
+startServer({ wsLanes: [{ id: 'lobby', path: '/duel/lobby', summary: '…', onUpgrade }] });
+```
+
+Four properties, each one closing a way this could quietly go wrong:
+
+1. **The game's `/ws` is not a lane.** It stays where it was, and `validateLanes` refuses a lane that claims it
+   (`LANE_RESERVED`). A table therefore *adds* endpoints; it cannot move, rename or shadow the one the client's
+   reconnect logic names (`public/js/net.js`), and a server started with no lanes — the default, and the only thing
+   `npm start` has — answers byte-for-byte as before: `/ws` accepted, everything else 404.
+2. **Exact paths, never a subtree.** `resolveLane` compares the whole `rawPath`, so `/duel` cannot silently take
+   over `/duelx`, and a query string or fragment is refused by `isLanePath` rather than being parsed differently in
+   two places. One listener (`websocket.js`'s `'upgrade'`) still owns the whole decision, so the order of parse →
+   resolve → admit → hand over cannot differ between the game and a lane.
+3. **A lane gets no privileges, and is never a fallback.** `Network.admission` runs for a lane exactly as for `/ws`
+   — registering a path is not a way to serve more sockets per address (`maxConnectionsPerAddr`) or past a full
+   server (`maxConnections`). A lane that throws has its socket closed and is named in the log; it does not fall
+   through to `/ws`, because "ask for the mode, land in a match" is the failure this cell exists to prevent.
+4. **A bad table fails at boot, naming every problem.** `attachWebSocket` throws with the whole `problems` list
+   rather than starting with the lanes it happened to like. This is the silent-revert shape this family has been
+   burned by before (an overlay that stops matching, no error, the feature simply gone): an operator who asked for
+   `/duel/lobby` and got a permanent 404 is worse off than a server that refused to start.
+
+**What this does *not* open — read this before proposing the next cell.** A lane is registered by **the host process,
+from code the operator installed**. Nothing here gives a **pack** a socket, a port, a route or a listener: packs
+still get no `fetch`/`WebSocket`, no timers and no child processes (`shared/kitAuthoring.js`, §28.13.1), the static
+channels stay `.json`-only (§28.13), and `C2S` is still a closed set a pack cannot extend (`server/net.js`). Letting
+a pack declare a lane is a separate ruling with its own surface cell, its own abuse analysis (a lane is a network
+listener owned by untrusted code) and its own version policy — it is deliberately not folded into this one.
+
+**Cost and blast radius.** One new file (`server/http/wsLanes.js`), one call site in `server/index.js`
+(`lanes: opts.wsLanes`), and the guard plus hand-over in `websocket.js`. Per `docs/MOD-SURFACE.md`'s policy this
+adds no pack-facing surface at all, so `MOD_API_VERSION` does not move and no published pack is refused.
+Numbering: `main` 到 0.15.1 那一刀写到 **§28.37**（§28.30–§28.37 是「服务端四格能力 + 面板第二批读面」那一批），
+**本仓库此后又往后落了若干格，现存最大是 §28.43.4**；而 §28.23（#2）与 §28.26–§28.27（#3）仍在两个待审 PR 手里，
+所以这一格往后接 **§28.44**，不插进那条被占用的连号 —— 与 §28.28/29 当年的放法同一条。
+
+Tests: `test/wsLanes.test.js` (8) — the shape layer (`isLanePath`, the five refusals by name, the empty-table
+identity, exact-match resolution) and, unlike a pure shape-layer test, **a real `http.Server` with real `ws`
+handshakes**: a lane answers its own path while `/ws` still reaches `Network.handleConnection`; a refused admission
+never reaches the lane's handler; a throwing lane closes its socket, is named, and does not become a game connection.
+
