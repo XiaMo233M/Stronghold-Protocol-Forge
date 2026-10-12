@@ -319,7 +319,7 @@ export default function kit(bb, chess, def) {
 - **条件常驻**（「生命高于 50 % 时 +20 % 攻击」）不要每帧 `addBuff`：先 `findBuff` 比一下再改，或直接照抄
   `server/sim/content/kits/ops/chess_char_2_09-humus.js:24`（用 `buff.data.v` 记住当前档位）。
 - **「生命回复速度」不是治疗**：它是一条 `hpRegen` / `hpRegenRatio` 的 buff（`server/sim/units.js:170`），禁疗与治疗
-  加成都管不到它 —— 治疗加成那条路在 `server/sim/damage.js:591`（`opts.regen`）。口径见
+  加成都管不到它 —— 治疗加成那条路在 `server/sim/damage.js:648`（`opts.regen`）。口径见
   `server/sim/content/kits/README.md:330`。
 
 ### 8.3 攻击附带的额外效果（追加伤害 / 溅射 / 真伤 / 状态）
@@ -329,8 +329,8 @@ export default function kit(bb, chess, def) {
 | 想要的效果 | 写在哪 | 为什么 |
 |---|---|---|
 | 这次攻击的伤害倍率 / 多段 / 溅射 | SkillSpec 的 `attack`（`atkScale` `hits` `splashRadius` `splashScale` `dmgType`） | 引擎按它生成每次伤害实例（`server/sim/ai.js:296`），溅射在 `server/sim/ai.js:306` 用**中点判定**半径落 |
-| 临时改这一刻的伤害（增伤 / 无视防御 / 取消） | `hit` 钩子改 `ctx.dmg` | `hit` 在减伤**之前**触发（`server/sim/damage.js:285`），可改的字段在 `server/sim/damage.js:69` |
-| 命中之后的追加伤害 / 反伤 / 回技力 | `damaged` 钩子 + `battle.dealDamage` | `damaged` 在伤害**落地之后**触发（`server/sim/damage.js:379`） |
+| 临时改这一刻的伤害（增伤 / 无视防御 / 取消） | `hit` 钩子改 `ctx.dmg` | `hit` 在减伤**之前**触发（`server/sim/damage.js:340`），可改的字段在 `server/sim/damage.js:69` |
+| 命中之后的追加伤害 / 反伤 / 回技力 | `damaged` 钩子 + `battle.dealDamage` | `damaged` 在伤害**落地之后**触发（`server/sim/damage.js:436`） |
 | 打中了就给状态 | SkillSpec 的 `attack.onHitStatus`，或 `onEachHit` 里 `battle.applyStatus` | 引擎在每次攻击的主目标后应用 `onHitStatus`（`server/sim/ai.js:301`）；`onEachHit` 每个受害者各一次（`server/sim/ai.js:279`） |
 
 ```js
@@ -359,7 +359,7 @@ talents: [{
     battle.on('hit', (ctx) => {
       if (ctx.source !== unit || !ctx.dmg.isAttack) return;        // 只认普攻（伤害实例的 isAttack：server/sim/ai.js:296）
       if (ctx.target.hpRatio > 0.5) return;
-      ctx.dmg.mul *= 1.5;                                         // 在物理/法术减伤之后再乘（server/sim/damage.js:318、:274）
+      ctx.dmg.mul *= 1.5;                                         // 在物理/法术减伤之后再乘（server/sim/damage.js:312、:329）
       ctx.dmg.defIgnorePct = Math.max(ctx.dmg.defIgnorePct, 0.4);
     }, { owner: unit });
 
@@ -367,7 +367,7 @@ talents: [{
     battle.on('damaged', (ctx) => {
       const d = ctx.dmg;
       if (ctx.source !== unit || !d || ctx.target.side !== 'enemy') return;
-      if (ctx.type === 'element') return;                          // 元素损伤也走 damaged（server/sim/damage.js:462）
+      if (ctx.type === 'element') return;                          // 元素损伤也走 damaged（server/sim/damage.js:519）
       if (d.tags.includes('hpLoss')) return;                       // 流失不是「造成伤害」（server/sim/damage.js:121）
       if (d.tags.includes('ws:followup')) return;                  // ★ 必须挡住自己刚造成的那一下，否则无限递归
       battle.dealDamage(unit, ctx.target, { amount: unit.s.atk * 0.3, type: 'true', canDodge: false, tags: ['ws:followup'] });
@@ -401,10 +401,10 @@ talents: [{
 |---|---|---|
 | 取消 / 改这一次攻击的目标 | `beforeAttack` `{ attacker, targets, isSkill, profile }` | 目标已选定、还没结算：清空 `ctx.targets` 就是取消（`server/sim/ai.js:205`） |
 | 「每次攻击」计数 / 特效 | `attack` `{ attacker, targets, isSkill }` | 伤害已发出、溅射与连锁还没走完（`server/sim/ai.js:221`） |
-| 改这一下伤害 | `hit` `{ source, target, dmg, credit }` | 在减伤之前，唯一能改 `dmg.mul` / `defIgnore*` / `cancel` 的位置（`server/sim/damage.js:285`） |
-| 附伤 / 反伤 / 回技力 / 叠层 | `damaged` `{ source, target, amount, type, dmg, credit }` | 伤害真的落地之后（`server/sim/damage.js:379`）；`amount` 可能为 0（全被盾吃掉） |
-| 元素损伤倍率 | `elementHit` `{ source, target, dmg }` | 只给元素损伤（`server/sim/damage.js:451`），改 `dmg.amount` / `dmg.mul` / `cancel` |
-| 不死 / 保留 1 点血 | `fatal` `{ unit, source, credit, dmg, amount, prevented }` | `ctx.prevented = true` 就是不死（`server/sim/damage.js:361`） |
+| 改这一下伤害 | `hit` `{ source, target, dmg, credit }` | 在减伤之前，唯一能改 `dmg.mul` / `defIgnore*` / `cancel` 的位置（`server/sim/damage.js:340`） |
+| 附伤 / 反伤 / 回技力 / 叠层 | `damaged` `{ source, target, amount, type, dmg, credit }` | 伤害真的落地之后（`server/sim/damage.js:436`）；`amount` 可能为 0（全被盾吃掉） |
+| 元素损伤倍率 | `elementHit` `{ source, target, dmg }` | 只给元素损伤（`server/sim/damage.js:508`），改 `dmg.amount` / `dmg.mul` / `cancel` |
+| 不死 / 保留 1 点血 | `fatal` `{ unit, source, credit, dmg, amount, prevented }` | `ctx.prevented = true` 就是不死（`server/sim/damage.js:415`） |
 | 击杀叠层 | `kill` `{ killer, victim }` | `killer` 可能是召唤物或 `null`，要判 `killer === unit`（`server/sim/battle/deploy.js:77`）；召唤物击杀另有 `summonKill`（`server/sim/content/tokens.js:1747`） |
 | 清自己的标记 / 召唤物随主人消失 | `death` `{ unit, reason, killer, dying }` | 任何单位死亡（含友军、撤退、漏怪；`server/sim/battle/deploy.js:149`） |
 | 「受到攻击时」的反伤 | `damaged` + 自己判来源 | 官方口径是**任何敌方来源的伤害实例**（不是只有普攻），并且要跳过 `counter` / `reflect` / 流失 / 元素损伤 —— 内联版就是 `byEnemyAttack`： |
@@ -553,10 +553,10 @@ install(battle, unit) {
 ```js
 // 治疗：返回真正加上去的血量（damage.js heal 的返回值）；heal 钩子只能改 amount，不能改目标
 battle.heal(unit, ally, unit.s.atk * num(bb.heal_scale, 1));                        // server/sim/battle/combat.js:13
-battle.heal(unit, unit, num(bb.value, 0), { self: true });                          // 自疗：server/sim/damage.js:584
-battle.heal(unit, ally, 500, { overheal: true });                                   // 溢疗转屏障：server/sim/damage.js:554
+battle.heal(unit, unit, num(bb.value, 0), { self: true });                          // 自疗：server/sim/damage.js:641
+battle.heal(unit, ally, 500, { overheal: true });                                   // 溢疗转屏障：server/sim/damage.js:611
 
-// 屏障（护盾）= buff 上的 shield 字段；盾先于 HP 被扣（server/sim/damage.js:326）
+// 屏障（护盾）= buff 上的 shield 字段；盾先于 HP 被扣（server/sim/damage.js:380）
 battle.addBuff(ally, { key: 'ws:barrier', shield: unit.s.atk * 2, duration: num(bb.duration, 8), visible: true, source: unit });
 battle.addBuff(ally, { key: 'ws:artsbarrier', shield: 2000, duration: 10, shieldType: 'arts' }); // 只吸法术：server/sim/damage.js:243
 battle.addBuff(ally, { key: 'ws:onelayer', shieldHits: 1, visible: true });                      // 挡下一次伤害：server/sim/damage.js:246
@@ -572,11 +572,11 @@ const list = battle.alliesFor(unit);                          // 会跳过「孤
 - 「溢疗转屏障」也可以在 `heal` 钩子里手写：`server/sim/content/kits/ops/chess_char_2_09-humus.js:48`。
 - **递减屏障**：`buff.onTick` 里扣 `buff.shield`（`server/sim/buffs.js:161` 的 `onTick` + `interval`），官方例子
   `server/sim/content/kits/ops/chess_char_6_13-angel2.js:13`。
-- **禁疗 / 治疗加成**：目标是 `noHeal` / `healFree` 时 `heal` 返回 0（`server/sim/damage.js:590`、`:545`）；
-  治疗量乘的是施疗者的 `healingDealtMul` 与目标的 `healingTakenMul`（`server/sim/damage.js:593`）。
+- **禁疗 / 治疗加成**：目标是 `noHeal` / `healFree` 时 `heal` 返回 0（`server/sim/damage.js:647`、`:545`）；
+  治疗量乘的是施疗者的 `healingDealtMul` 与目标的 `healingTakenMul`（`server/sim/damage.js:650`）。
   这些桶你自己**不要**再乘一遍。
 - **「生命回复速度」不要用 `heal`**：用 `mods.hpRegen` / `hpRegenRatio`（`server/sim/units.js:170`），
-  它以 `opts.regen` 走同一条 `heal` 函数、但不吃禁疗与治疗加成（`server/sim/damage.js:591`）。口径见
+  它以 `opts.regen` 走同一条 `heal` 函数、但不吃禁疗与治疗加成（`server/sim/damage.js:648`）。口径见
   `server/sim/content/kits/README.md:330`。
 
 ### 8.9 目标选择
@@ -675,7 +675,7 @@ const foes = battle.enemiesInKeys(gridKeys(unit, def.skill.rangeGrid), unit, { c
 | 运行时改全局规则 / 经济 / 回合表 | `battle.flags` 是构造期输入（`server/sim/Battle.js:150`）；包也不能贡献 `config`（`docs/WORKSHOP.md:56`） | 改自己的单位、自己 `battle.emit` 命名空间事件 |
 | 让敌人改路线 / 换 AI | 没有接口 | 位移 `battle.push` / `pull` / `pullToFront`（`server/sim/battle/displacement.js:60`、`:97`、`:131`）与状态 `fear` / `attract`（`server/sim/buffs.js:85`、`:121`） |
 | 独立的护盾槽 / 多个盾各吸一类伤害 | 没有：盾就是 buff 的 `shield` / `shieldHits`（`server/sim/buffs.js:167`、`:168`） | 一个 key 一个盾，用 `shieldType` 限定吸收类型（`server/sim/damage.js:243`） |
-| 改「治疗落在谁身上」 | `heal` 钩子只能改 `amount`（`server/sim/damage.js:598`） | 自己选目标（`server/sim/battle/queries.js:93`、`:109`） |
+| 改「治疗落在谁身上」 | `heal` 钩子只能改 `amount`（`server/sim/damage.js:655`） | 自己选目标（`server/sim/battle/queries.js:93`、`:109`） |
 | 读存档 / 准备区 / 商店 / 装备栏 | sim 里没有这些对象 | `battle.getPlayer(playerId)` 给的是战场视图（`docs/SIM.md:843`），`battle.data` 给的是本局数据（`server/sim/Battle.js:114`） |
 | 给包加一份 `tokens.json` 之外的新数据种类 | 只有 14 个内容文件可贡献（`shared/workshop.js:44`） | 贡献 `tokens.json`（`shared/workshop.js:48`），或用 `spawnToken` 的 `opts.def` 内联定义（`server/sim/simdata.js:304`） |
 | 在联防 / boss 战场里加盟约层数 | `addLayers` 只在 `flags.layerGainsEnabled` 时生效（`server/sim/battle/economy.js:23`），只有普通战场是 `true`（`server/sim/Battle.js:150`） | 没有替代：那两种战场里加层是 no-op |

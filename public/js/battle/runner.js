@@ -994,7 +994,7 @@ export function createBattleRunner(deps) {
      * **逐单位伤害读数**（DESIGN §28.38）：本场战斗里每个单位的累计伤害与每个人自己的累计伤害，连同一个**时间
      * 基准**（`gt`，战斗内秒）—— 面板据此自己算 DPS。
      *
-     * **它不在热路径上，也不需要累计一份自己的账**：伤害早在模拟里算好了 —— `server/sim/damage.js:370` 每次命中写
+     * **它不在热路径上，也不需要累计一份自己的账**：伤害早在模拟里算好了 —— `server/sim/damage.js:424` 每次命中写
      * `source.stats.dmg += dealt`，`:371` 写 `battle._pp(ownerId).damageDealt`，`:352` 写 `bossDamage`（`units.js:97`
      * 初始化 `stats = { dmg, kills, heal, taken, attacks }`）。这个读者只是**把已经在那儿的数字取出来**，所以
      * `step()` / `drainEvents()` / `emit` 一个字都不改，并且**绝不**维护第二份累计 —— 两份口径对不上正是

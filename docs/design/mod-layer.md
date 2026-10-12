@@ -2577,7 +2577,7 @@ JSON 可序列化值**的回调。
 上**（`m.result` 报的是服务端按 `_perPlayer` 累出来的数）—— 那正是「面板可以画错、但不能算错」要消灭的东西。
 所以这一格只能由引擎给，而且给的是**同一本账**。
 
-**这一格不是新账，是一个读者。** 伤害早在模拟里逐次命中就记好了：`server/sim/damage.js:370` 写
+**这一格不是新账，是一个读者。** 伤害早在模拟里逐次命中就记好了：`server/sim/damage.js:424` 写
 `source.stats.dmg`，`:371` 写 `battle._perPlayer[ownerId].damageDealt`，`:352` 写 `bossDamage`（单位那本账在
 `server/sim/units.js:97` 初始化）。`battleRunner.damage()`（`public/js/battle/runner.js`）只做一件事：**把这些
 已经在那儿的数字按面板看得懂的形状抄出来**。
