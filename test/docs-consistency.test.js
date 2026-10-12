@@ -1044,3 +1044,39 @@ test('README 里「behaviour」那一节的锚点跟着标题走（改了标题�
     assert.equal(a, want, `指向「behaviour…」那一节的锚点必须与标题的 slug 逐字相同（今天 ${anchors.length} 处；改了标题就要一起改，否则是死锚点，没有别的门禁会看）`);
   }
 });
+
+/**
+ * `docs/WORKSHOP.md` 的编号标题**不许重号**。
+ *
+ * 为什么单盯这一份：`WORKSHOP.md` 是**当前状态**文档（不是按时间叙述的历史），读者靠 §1.x 这个号互相指 ——
+ * 两份不同的内容共用一个号时，「见 §1.23」这句话就没法唯一地指向一节，而且 GitHub 的同名锚点只有第一个能到。
+ * 这一条是真发生过的：`### 1.23 逐格加开关` 与 `### 1.23 目标引擎（target）` 同时存在（本刀把后者改成 §1.26）。
+ *
+ * ⚠️ **判据必须钉在「号」上，不能钉在「整行标题」上**：重号的两节标题文字**必然不同**（那正是重号的样子），
+ * 比整行字符串一条都抓不到 —— 本刀先写成比整行，造回重号时判据照样全绿（白写了一次）。所以这里抽出
+ * 号（`1.23`）比号，并把两节的**完整标题**都打印出来，好让人一眼看出是哪两节撞了。
+ *
+ * **故意不扫 `docs/changelog/**` 与 `CHANGELOG.md`**：那是**按时间叙述的冻结件**，同一个版本节里出现
+ * 两次「### 门槛（发布前全绿）」是正常的（每一节各自一个小标题），上一刀已经把它们逐字节冻住 ——
+ * 扫它们就是把「历史长这样」判成错。要扫的是**当前状态**文档。
+ */
+test('docs/WORKSHOP.md 的编号标题不许重号（两份内容共用一个 §号 = 锚点与引文都指不准）', () => {
+  const text = doc('docs/WORKSHOP.md');
+  // `##` 与 `###` 一起看；先剥掉尾随的 `#`（`### 标题 ###` 这种写法），别把闭合井号算进标题。
+  const seen = new Map();          // 号 → { 第几行, 完整标题 }
+  const dups = [];
+  let numbered = 0;
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^(#{2,3})\s+(\d+(?:\.\d+)*)[.\s]/);
+    if (!m) continue;
+    numbered++;
+    const num = m[2];
+    const title = `${m[1]} ${lines[i].slice(m[1].length).trim()}`;
+    if (seen.has(num)) dups.push(`  §${num} 撞号：\n    ${seen.get(num).title}（第 ${seen.get(num).line} 行）\n    ${title}（第 ${i + 1} 行）`);
+    else seen.set(num, { line: i + 1, title });
+  }
+  // 地板：抽取本身不许空转 —— 这份文件今天有几十个编号小节，抽不到就是正则坏了。
+  assert.ok(numbered >= 30, `docs/WORKSHOP.md 里应当抽出几十个编号标题，只抽到 ${numbered} 个 —— 抽取坏了，这条判据会永远绿`);
+  assert.deepEqual(dups, [], `docs/WORKSHOP.md 里有重号的编号标题（两份内容共用一个 §号，引文与锚点都指不准）：\n${dups.join('\n')}`);
+});

@@ -4,7 +4,7 @@
 //   ① 缺省逐字节不变：不写 `target` 时，归一化清单与包身份摘要**逐字节**等于移植前实测的那一袋（FROZEN）。
 //      钉子能变红：把 `target: 'forge'` 无条件写进归一化结果（或把闭集放松）⇒ 这一袋全部对不上。
 //   ② 抬不抬版本：`MOD_API_VERSION` / `PROTOCOL_VERSION` 一字不动 —— 加一格能力不抬世代（docs/UPSTREAM-UPGRADE.md）。
-//   ③ 闭集 / 线格式：顶层键 32 → 33，多出来的那一格是 `target`；不写就不进清单，于是 `packHash` / `assetsDigest`
+//   ③ 闭集 / 线格式：顶层键 34 → 35，多出来的那一格是 `target`；不写就不进清单，于是 `packHash` / `assetsDigest`
 //      与 `/mods/catalog.json` 对老包逐字节不变。
 //   ④ 跨宿主误用：给 Stardust 宿主的包落在 Forge 上时是**具名**的（`foreign` 一行 + 一行启动日志），
 //      不是「静默半可用」—— 同时它确实**不会**进 `/mods/catalog.json`，这一条在报告里如实写出，不藏。
