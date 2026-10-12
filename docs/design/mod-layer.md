@@ -23,7 +23,7 @@ The owner's ruling of 2026-10-09 fixes three layers:
 
 | layer | what it is | who executes it | when it may change a battle result |
 |---|---|---|---|
-| **A** content | declarative data, no code: the workshop pack of today (`shared/workshop.js:1077` `applyWorkshop`) | nobody — it is merged into the data every consumer reads (`server/data.js:92`) | always, and never detectably by the golden corpus (the corpus is generated from the official `data/*.json`, `test/golden/README.md:8-10`) |
+| **A** content | declarative data, no code: the workshop pack of today (`shared/workshop.js:1109` `applyWorkshop`) | nobody — it is merged into the data every consumer reads (`server/data.js:92`) | always, and never detectably by the golden corpus (the corpus is generated from the official `data/*.json`, `test/golden/README.md:8-10`) |
 | **B** server logic | hooks and kits: the code of `workshop/<pack>/kits/<id>.js` (`server/workshop.js:370` `loadWorkshopKits`) — one file-name rule over **two key spaces**, operator and summon (§28.12.1) | **the server only** — this is new | only through the hooks it registers, and only after a declared intent passes deterministic verification |
 | **C** client UI | rendering, themes, panels | the player's tab | never |
 
@@ -50,8 +50,8 @@ is, who wins when two of them want the same id, and what has to be true before i
 
 ### 28.2 Identity (gap 1)
 
-Today a pack has an `id` (the directory name, `shared/workshop.js:341-343`) and free-text metadata
-(`shared/workshop.js:645-651`), and the BattleSpec carries only `SPEC_VERSION = 1` (`server/sim/spec.js:39`, written at
+Today a pack has an `id` (the directory name, `shared/workshop.js:373-375`) and free-text metadata
+(`shared/workshop.js:680-683`), and the BattleSpec carries only `SPEC_VERSION = 1` (`server/sim/spec.js:39`, written at
 `:61`) plus a list of kit **URLs** (`server/sim/spec.js:79-81`; produced by `server/workshop.js:471`). There is nowhere
 in the wire, in the data or in the match for "which content is this room running".
 
@@ -183,11 +183,11 @@ substance; the first step of the slice carries them, `docs/WORKSHOP.md` §1.2 st
 
 | collision | the rule | where it is enforced |
 |---|---|---|
-| a **new** id claimed by two packs — a data record | **refused, and the report names the pack that holds it** (neither author's claim can be preferred) | `shared/workshop.js:3184-3190` (`PACK_ID_COLLISION`, `definedBy`) |
+| a **new** id claimed by two packs — a data record | **refused, and the report names the pack that holds it** (neither author's claim can be preferred) | `shared/workshop.js:3184-3187` (`PACK_ID_COLLISION`, `definedBy`) |
 | a new kit id claimed by two packs | **refused, and the report names the pack that holds it** | `server/workshop.js:1229-1233` (`KIT_ID_COLLISION`, `definedBy`) |
-| two packs **overriding the same existing record** (an official id, or a record another pack contributed) | **the smaller pack id wins + the conflict is reported** (`definedBy` names the pack that was passed over) | `shared/workshop.js:3184-3190`, `:3184-3190` |
+| two packs **overriding the same existing record** (an official id, or a record another pack contributed) | **the smaller pack id wins + the conflict is reported** (`definedBy` names the pack that was passed over) | `shared/workshop.js:3184-3187`, `:3184-3187` |
 | an icon / item icon / art entry claimed by two packs | **the smaller pack id wins**; the loser is reported and named | `shared/workshop.js:3515`, `:3590`, `:3927` |
-| `overrides` declares the replacement of an **OFFICIAL** id | **allowed, and the declaration is what makes it allowed** | `shared/workshop.js:14-16`, `:3184-3190` |
+| `overrides` declares the replacement of an **OFFICIAL** id | **allowed, and the declaration is what makes it allowed** | `shared/workshop.js:14-16`, `:3184-3187` |
 | anything, between two packs | **the smaller pack id wins — on every face** | one comparator: `shared/workshop.js:2827` `byPackId` |
 
 Two rules, not three, and they are the only two:
@@ -195,7 +195,7 @@ Two rules, not three, and they are the only two:
 1. **An official record is never replaced without a declaration.** Not negotiable: silently redefining a shipped
    operator would corrupt every match on the server (`shared/workshop.js:14-16`).
 2. **Between two packs, the smaller pack id wins, for every kind of contribution** — data, kit, icon, item icon, art.
-   Equal ids cannot occur: the manifest must equal the directory name (`shared/workshop.js:1689` `PACK_ID_MISMATCH`).
+   Equal ids cannot occur: the manifest must equal the directory name (`shared/workshop.js:1791` `PACK_ID_MISMATCH`).
    A collision the loser cannot win is *reported and attributed* rather than silently resolved, which is why the data
    and kit faces "refuse" while the icon faces "keep the first": both are the same rule, seen from the side that lost.
 
@@ -682,7 +682,7 @@ reach the same content".
 - **No sandbox for layer B.** The ruling is "the server executes it", not "untrusted code executes safely". A pack with
   a `while(true)` is refused by the load-time budget check (§28.4), not contained.
 - **No hot reload.** The pack set is fixed for the process; a digest that can change mid-match is worse than a restart.
-- **No code signing, no author identity.** `pack.json`'s `author` stays metadata (`shared/workshop.js:645-651`); the
+- **No code signing, no author identity.** `pack.json`'s `author` stays metadata (`shared/workshop.js:680-683`); the
   hash proves *which* bytes, not *whose*.
 - **No WASM kernel decision.** That is the performance benchmark's call, and it is a different layer: a faster kernel is
   a `combat: false` change and would be verified by §28.6 like any other.
