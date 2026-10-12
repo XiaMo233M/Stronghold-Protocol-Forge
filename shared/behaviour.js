@@ -69,7 +69,40 @@ const MAX_TEXT = 160;
  *
  * @type {BehaviourTable}
  */
-export const BEHAVIOUR_SWITCHES = Object.freeze({});
+export const BEHAVIOUR_SWITCHES = Object.freeze({
+  /**
+   * 商店出货偏向（投稿 `b293e061b38f`，商店刷新盟约装备几率提升）。**改结果** ⇒ 声明它必须 `combat: true`。
+   *
+   * 引擎侧的读取点**不是** `behaviourActions`：那一格是一条**具名规则读取**（与 `variants` 的 `variantValue` 同一个
+   * 分工 —— 动作数组是这一格的**声明**，读取点问的是「哪一档」）。第三格（`morphPairing`）同理，读取点在它的三处
+   * 实现点上。
+   *
+   * `official` = 引擎今天的行为（`SharedPool.rollItem`：装备槽按棋子阶级份额抽一个阶级，同阶级**等概率**）；
+   * `bondBias` = 装备槽只在这个玩家**已激活**盟约对应的装备里抽（**只偏置、不授予** —— 授予盟约是 `giveBondId`
+   * 本来的语义，由装备自己的规则管）。
+   *
+   * **未实现、也不假装实现的三条**（原件 `files.json._doc` 与其 `payload/data/items.json` 提到）：
+   * ①「已激活**核心**盟约优先于已激活附加盟约」；②「骑士戒律也接入这套偏向」；③原件的 `data/items.json` 里
+   * 有 `giveBondBiasOnly` 115 处 / `canGiveBond` 115 处（`giveBondId` 119 处）—— **这两个字段我们的
+   * `data/items.json` 里都是 0 处**。三条的**源件都不在我们手上**，按业主的「缺源件就不做假实现」：这一格
+   * **只读 `giveBondId`**，**绝不读** `giveBondBiasOnly` / `canGiveBond`（读一个数据里不存在的字段＝一条永远为假
+   * 的判据，也就是一个假实现）。`test/shopBias.test.js` 有断言钉住这三条**没做**、且那两个字段**没被读**。
+   */
+  shopBias: {
+    label: '商店出货偏向',
+    options: Object.freeze(['official', 'bondBias']),
+    default: 'official',
+    optionLabels: Object.freeze({
+      official: '官方出货（装备槽不问盟约）',
+      bondBias: '装备槽偏向已激活盟约的装备（只偏置、不授予）',
+    }),
+    effect: Object.freeze({
+      official: "the official shop draw: the item slot picks a tier by the chess tier shares, then a uniform shop-eligible item of that tier",
+      bondBias: "the item slot prefers shop-eligible items whose giveBondId is one of this player's ACTIVE bonds, and grants nothing by itself; the tier stays the chess tier shares, and a tier with no such item falls back to the official draw",
+    }),
+    actions: (option) => (option === 'bondBias' ? [{ kind: 'shop.biasActiveBonds', value: true }] : []),
+  },
+});
 
 /** 开关名，按声明顺序（界面 / 错误文案按它排）。 */
 export const BEHAVIOUR_SWITCH_NAMES = Object.freeze(Object.keys(BEHAVIOUR_SWITCHES));

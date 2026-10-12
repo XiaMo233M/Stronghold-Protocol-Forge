@@ -2958,11 +2958,14 @@ i18n-ignore），差别只在**表是另一张**、每格多一个 `actions`。
 
 **六条判据**（判据只有一份：`shared/behaviour.js`，装载器与校验器都调它）：
 
-1. **空表也响亮**（本刀的交付物）。`BEHAVIOUR_SWITCHES` **今天是一张空表**，这是刻意的：第 4 刀交的是
-   「**通道 + 守卫**」本身，**首格与它的引擎实现点一起落**（业主裁决 2026-10-13）。所以任何一条 `behaviour`
+1. **空表也响亮**（第 4 刀的交付物）。`BEHAVIOUR_SWITCHES` 在第 4 刀落地时**是一张空表**，那是刻意的：那一刀交的
+   是「**通道 + 守卫**」本身，**首格与它的引擎实现点一起落**（业主裁决 2026-10-13）。所以当时任何一条 `behaviour`
    声明都被 `BEHAVIOUR_UNKNOWN_SWITCH` **点名整包拒** —— 空表不是「不认识的开关一律忽略」，而是**一个都不认识**，
    文案里还写明「本版一个开关都没有，因为没有实现点」。**加一格的门槛**：那一格必须**已经在引擎里有实现点**，
-   比 `VARIANT_AXES` 的「只在被一份真实投稿要求时才加轴」更严。
+   比 `VARIANT_AXES` 的「只在被一份真实投稿要求时才加轴」更严。**第 8 刀按这条落了前三格**（§28.43.1）：表里
+   每一格都有一处具名读取点、一个测试文件与一节文档；`behaviourSwitchIssues(BEHAVIOUR_SWITCHES)` 逐格为 `[]`
+   就是那三格「不是塞进去就算」的判据。**站上的实测需求**：空表真的挡过投稿 —— `e3a5d09eb6d3`（跨版本安装包）
+   按 `pack.json.behaviour` 声明时拿到 `BEHAVIOUR_UNKNOWN_SWITCH`（文案即「Known switches: none yet …」）。
 2. **闭枚举 + 响亮失败**：`BEHAVIOUR_BAD_SHAPE`（不是数组 / 条目不是对象 / `switch` 不是非空字符串 / **未知字段**
    / `name`·`desc` 写坏）· `BEHAVIOUR_UNKNOWN_SWITCH` · `BEHAVIOUR_UNKNOWN_OPTION` ·
    `BEHAVIOUR_BAD_OPTION`（`option` 是 `null` / 数字 / `false` —— 非字符串会被读成「用了缺省」，即**静默不是
@@ -2983,10 +2986,33 @@ i18n-ignore），差别只在**表是另一张**、每格多一个 `actions`。
 **多包抢同一格**：按既有的「包 id 字典序小的赢」（§28.3，与数据记录 / kit / 图标 / 口径同一条），由
 `mergeBehaviourDecls` 合成，输的一方进 `overridden` 供调用方点名报告。
 
-**执行点**：`behaviourActions(decl)` 把归一化声明翻成**引擎具名动作** `{ kind, value }`。表空 ⇒ 动作数组空（今天
-**没有任何一格可以声明，也没有任何一条动作**）。这一格**不新增协议消息**，也**不动** `Match` / `GameData` 的既有
-通路：将来第一格若只涉及一个 `config` 标量，它**复用**口径那条既有通路（`opts.variants` → `gamedata.js`），
-**不新开第二套「引擎自烘 patch」先例**；若落在别处，读取点由那一格自己点名。
+**执行点**：`behaviourActions(decl)` 把归一化声明翻成**引擎具名动作** `{ kind, value }`。表空 ⇒ 动作数组空；选了
+缺省档 ⇒ 也是空数组（第 8 刀那三格都照这条）。这一格**不新增协议消息**，也**不动** `Match` / `GameData` 的既有
+通路：一格若只涉及一个 `config` 标量，它**复用**口径那条既有通路（`opts.variants` → `gamedata.js`），
+**不新开第二套「引擎自烘 patch」先例**；若落在别处，读取点由那一格自己点名（**第 8 刀那三格都是这一类**：
+`shopBias` 落在商店池、`prepLoadout` 落在 `Match.setLoadout` 的相位闸门、`morphPairing` 落在三处盟约读取点 ——
+`service/match/Match.js` 只多一行 `mergeBehaviourDecls`，与 `variants` 同一个投影点）。
+**读取点问的是「哪一档」**（`behaviourValue` / `behaviourIsDefault`），与 `variants` 的 `variantValue` /
+`variantIsDefault` 同一个分工；`actions(option)` 是那一格的**声明**（给编辑器、错误文案与守卫读），
+**不是**一个通用分发器 —— 这一层永远不是 patch 分发器。
+
+### 28.43.1 第 8 刀：逐格加开关（`shopBias` 起）
+
+| 开关 | 选项 / 缺省 | 引擎侧读取点 | 投稿 |
+|---|---|---|---|
+| `shopBias` | `official`（缺省）· `bondBias` | `bondBiasPreference`（`server/match/pool.js`）→ `bondBiasBonds`（`server/match/player/economy.js`）→ `PlayerEconomy._rollItemSlot` | `b293e061b38f` |
+
+**每加一格照这三条做**（这一刀起）：**缺省 = 引擎今天的行为，逐字节不变**（缺省路径与从前同一份代码路径，
+所以**没有任何 `golden:update`**，已发布包一个字节不动）；**非缺省档由引擎实现**（包给不出数字、路径、模块，
+`effect` 逐字写明它动了什么）；**一格一个测试文件 + 一节文档 + 一处可锚的读取点**
+（`test/shopBias.test.js`，`docs/WORKSHOP.md` §1.23，`shared/modSurface.js` 的 `behaviour` 那一格）。
+另有 `test/packBehaviour.test.js` 钉整表的形状、闭枚举与「不认识的开关点名拒」。
+
+**诚实边界（缺源件就不做假实现）**：`shopBias` 的原件 `_doc` 还提到「已激活**核心**盟约优先于已激活附加盟约」与
+「骑士戒律也接入这套偏向」，其 `payload/data/items.json` 另带 `giveBondBiasOnly`（115 处）与一批 `canGiveBond`
+（115 处）—— 那两条的源件不在我们手上，**没做**，也不在 `effect` 里声称做了；这一格**只读 `giveBondId`**，
+不读 `giveBondBiasOnly`（我们数据里连这个键都不存在）。`canGiveBond` 是官方记录本来就有的键（变形同构体的标记）。
+`test/shopBias.test.js` 把这几条写成源码级断言。
 
 **判据写成「表是入参」的纯函数**：`parseBehaviourDecl(raw, table)` / `behaviourSwitchIssues(table)` /
 `behaviourActions(decl, table)` / `mergeBehaviourDecls(packs, table)`，默认值都是真表。理由与

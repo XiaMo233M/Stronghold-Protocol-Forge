@@ -175,6 +175,8 @@
 import { PHASE, modeIdFor, bossHitLimitFrom, MAX_SEATS } from '../../shared/constants.js';
 // 变体 / 口径层（DESIGN §28.39）：本局的轴表由各包的归一化声明合成，规则就是既有的「包 id 字典序小的赢」。
 import { mergeVariantDecls, variantValue } from '../../shared/variants.js';
+// 行为开关层（DESIGN §28.43）：同一张合成规则（包 id 小的赢），另一张表。空数组 ⇒ 每一格的读取点走缺省路径。
+import { mergeBehaviourDecls } from '../../shared/behaviour.js';
 import { formView, isEliteForm } from '../../shared/formProjection.js';
 import { layoutOf } from '../../shared/layout.js';
 import { Battle } from '../sim/Battle.js';
@@ -269,6 +271,14 @@ export class Match {
     this.mods = opts.mods && typeof opts.mods === 'object' && typeof opts.mods.digest === 'string' ? opts.mods : null;
     /** @type {Array<{ axis: string, default: string, by: string }>} */
     this.variants = mergeVariantDecls(this.mods && Array.isArray(this.mods.packs) ? this.mods.packs : []).decl;
+    /**
+     * 行为开关的来源（DESIGN §28.43），与 `variants` **同一个投影点、同一个合并规则**（包 id 字典序小的赢）：
+     * `this.behaviour` 是这一局合成后的归一化声明。没有包、或没有包声明任何开关 ⇒ `[]`，于是每一格的读取点
+     * （`shopBiasBonds` 与将来的那些）都走今天那条缺省路径。**漏掉这一行 = 引擎读到 `undefined`、开关静默不生效**
+     * —— §28.39/§28.43 把这一处记成「这一层最容易做坏的地方」。
+     * @type {Array<{ switch: string, option: string, by: string }>}
+     */
+    this.behaviour = mergeBehaviourDecls(this.mods && Array.isArray(this.mods.packs) ? this.mods.packs : []).decl;
     /**
      * Seat slots of this match (opts.seatCap, or how many seats the caller handed in). Only the boss-pool ceiling
      * reads it: a room bigger than the official 4 must not clamp its leader pool to the 4-seat `aliveFull`

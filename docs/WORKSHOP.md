@@ -2066,14 +2066,46 @@ URL **一次都不被请求**。一个包把加载源改坏了，关掉这一格
    对局行为是不允许的）。**不进** `modDigest`（它只哈希 `[id, hash]` 对），但随 `welcome.mods[].behaviour` 与
    `variants` 并列投影（漏掉投影 = 开关**静默不生效**）。
 
-**本版那张表是空的 —— 这是刻意的。** 第 4 刀交的是「**通道 + 守卫**」本身：通道真的通、且响 —— 任何一条
-`behaviour` 声明都被 `BEHAVIOUR_UNKNOWN_SWITCH` **点名整包拒**（空表不是「不认识的开关一律忽略」，而是一个都
-不认识，文案里写清「本版一个开关都没有，因为没有实现点」）。**首格与它的引擎实现点一起落**，由业主点名；
-**加一格的门槛**因此比 §1.20 的加轴纪律更严：那一格必须**已经在引擎里有实现点**。
+### 1.23 逐格加开关（第 8 刀，`0.16.0` 内）
+
+**本版那张表里有实现好的格 —— 这一点与第 4 刀那一版不同。** 第 4 刀交的是「**通道 + 守卫**」本身（当时表是空的：
+任何一条 `behaviour` 声明都被 `BEHAVIOUR_UNKNOWN_SWITCH` **点名整包拒**，文案里写清「本版一个开关都没有，因为没有
+实现点」）。**首格与它的引擎实现点一起落**，由业主点名；**加一格的门槛**因此比 §1.20 的加轴纪律更严：那一格必须
+**已经在引擎里有实现点**（`docs/design/mod-layer.md` §28.43.1 逐格列出）。今天有 **1 格**，下表就是那一格。
+
+| 开关 | 选项 | 缺省 | 引擎侧的读取点 | 投稿 |
+|---|---|---|---|---|
+| `shopBias` | `official` · `bondBias` | `official` | `bondBiasPreference`（`server/match/pool.js`）→ `bondBiasBonds`（`server/match/player/economy.js`）→ `PlayerEconomy._rollItemSlot` | `b293e061b38f` |
+
+**每一格的三件事写清**：**缺省档 = 引擎今天的行为**（不声明 / 选缺省 ⇒ 逐字节不变，所以没有任何 `golden:update`）；
+**非缺省档由引擎实现**（包给不出数字、路径或模块）；**那一格的 `effect` 逐字说明它到底动了什么**。
+
+#### `shopBias` —— 商店装备槽的出货偏向
+
+* `official`：装备槽按**棋子**阶级份额抽一个阶级，再在同阶级的**商店候选**里等概率抽（今天的行为）。
+* `bondBias`：装备槽在这个玩家**已激活**盟约对应的装备里抽（`giveBondId` 落在那些盟约里），**只偏置、不授予** ——
+  授予盟约是 `giveBondId` 本来的语义，由装备自己的规则管。抽到的**阶级**仍由棋子份额决定；某一级里一件命中都没有
+  就**回落官方那一份**（偏向永远不会把商店抽空），库存闸门（`SharedItemPool.canGain`）一步都不跳过。
+* **没做的两条**（原件 `files.json._doc` 提到）：①「已激活**核心**盟约优先于已激活附加盟约」；②「骑士戒律也接入
+  这套偏向」。**原因**：那两条的源件不在我们手上 ⇒ 按「缺源件不做假实现」**不做**，也不在 `effect` 里声称做了。
+* **没读的两个字段**：原件的 `payload/data/items.json` 带来 `giveBondBiasOnly`（115 处）与一批
+  `canGiveBond`（115 处）。**这两个字段不是这一格读的东西** —— 我们只读 `giveBondId`；这一格与它那两个文件里
+  **没有**任何一处读 `giveBondBiasOnly`（我们数据里连这个键都不存在），`canGiveBond` 是官方记录本来就有的键
+  （变形同构体自己的标记）。`test/shopBias.test.js` 把这几条钉住。
+
+**新增一格怎么做**：先把**引擎侧的读取点**实现好（照这一格），再把那一格加进 `BEHAVIOUR_SWITCHES`
+（`label` / `options` / `default` / `optionLabels` / `effect` / `actions` 一件都不能少 —— `behaviourSwitchIssues`
+逐格检查），最后补一节文档与一个测试文件（并把读取点登记进 `shared/modSurface.js` 的那一格锚点）。
 
 **`MOD_API_VERSION` 仍是 `1`**（加一格字段不抬版本；与 §1.20 / §1.21 同一条）。**「老引擎优雅降级」明确不做** ——
 老引擎遇到这个键回的是 `PACK_UNKNOWN_FIELD`（点名拒），作者该知道的是自己该跑哪一版；**老包一个字节不受影响**
 （不声明就不长键）。**不新增协议消息、不改默认游戏行为 ⇒ 不需要 `golden:update`**。
+
+**站侧含义（照实写）**：空表在站上**真的挡过投稿** —— `e3a5d09eb6d3`（第 4 刀那一份跨版本安装包，已批准公开）
+按 `pack.json.behaviour` 声明时拿到 `BEHAVIOUR_UNKNOWN_SWITCH`，文案就是「Known switches: none yet …」。这一格落了
+之后，`b293e061b38f` 那条**有了可声明的档**（仍要按包格式重写，见 §1.1）。
+另一条实测约束：`11746baa0662` 只声明 `pack.json.variants` 会拿到 `EMPTY_PACK`（`"variants" is NOT a contribution`）
+—— **口径与开关都不是贡献项**，一个只带它们的包不构成一份包。
 
 完整规范见 [docs/design/mod-layer.md](design/mod-layer.md) §28.43。
 
