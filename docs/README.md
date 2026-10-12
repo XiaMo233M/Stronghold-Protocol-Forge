@@ -33,6 +33,7 @@
 | 动生成的游戏数据 | [DATA.md](DATA.md) — **永不手改** `data/*.json` |
 | 部署、打包、发版 | [DEPLOY.md](DEPLOY.md) · [WINDOWS.md](WINDOWS.md) · [UPSTREAM-UPGRADE.md](UPSTREAM-UPGRADE.md) |
 | 素材从哪来、怎么授权 | [ASSETS.md](ASSETS.md) |
+| **加东西**（意图 / 开关 / 包字段 / 槽位 / i18n） | [SYNC-POINTS.md](SYNC-POINTS.md) — 要一起改哪几处、漏了怎样、谁拦 |
 | 对局战绩与账号 | [RECORDS.md](RECORDS.md) |
 | 百卫补丁（100 人版）移植史 | [PS100-MIGRATION.md](PS100-MIGRATION.md) |
 
@@ -63,6 +64,7 @@
 | [DEPLOY.md](DEPLOY.md) | 部署指南（长期开服） |
 | [WINDOWS.md](WINDOWS.md) | Windows 便携包（零安装方案） |
 | [RECORDS.md](RECORDS.md) | 对局战绩与可选账号（`SP_ACCOUNTS=1`） |
+| [SYNC-POINTS.md](SYNC-POINTS.md) | **加东西时的同步点清单**：意图 / `behaviour` 开关 / 包字段 / 槽位 / i18n 各要一起改哪几处、漏了怎样、谁拦 |
 | [UPSTREAM-UPGRADE.md](UPSTREAM-UPGRADE.md) | 上游更新校对清单：上游发新版后照它走一遍 |
 | [PS100-MIGRATION.md](PS100-MIGRATION.md) | 百卫补丁 v0.3（100 人版）移植记录 |
 | [PACKS.md](PACKS.md) | **content pack**（内容包）：语言包那套机制 |

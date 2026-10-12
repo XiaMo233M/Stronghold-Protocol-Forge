@@ -18,6 +18,10 @@ rooms) and a deterministic battle sim shared by the server and the browser. It a
 3. The reference for the part you touch: [docs/SIM.md](docs/SIM.md) (battle engine API, hooks, test harness),
    [docs/META.md](docs/META.md) (match flow, shop, protocol), [docs/DATA.md](docs/DATA.md) (generated data),
    [docs/I18N.md](docs/I18N.md) (interface strings), `server/sim/content/kits/README.md` (operator kits).
+4. [docs/README.md](docs/README.md) — the index of everything under `docs/` (which file answers which question).
+   [docs/SYNC-POINTS.md](docs/SYNC-POINTS.md) — **read this before adding anything**: a `C2S` intent, a `behaviour`
+   switch, a `pack.json` field, a `client.panels` slot, an i18n entry. It lists every place that has to change together,
+   what fails **silently** if you miss one, and the test that catches it.
 
 ## Hard rules
 
