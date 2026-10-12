@@ -168,15 +168,21 @@ test('三个读取点**同判**：同一份装备行、同一个档位，三处�
 test('三个读取点**共用同一个判据**：源码级断言（三处都不许再各写一份循环）', () => {
   // 这一条钉的是本刀真正的价值：规则只有一份。三处若是各写一份 `for … canGiveBond … giveBondId`，
   // 下一次改档位时漏掉一处就是「卡片与服务端计数打架」。
+  // §28.49（`trait.grantsBonds`）之后这条判据**收紧了一格**：成员资格的**合并**也收进了同一个文件
+  // （`shared/morph.js` 的 `memberBonds`，它内部调 `grantedBondsByMorph`），所以三处读取点现在锚的是
+  // `memberBonds`。断言换了个名字，钉的是同一件事，而且比从前更严：三处连「合并」都不许自己写。
   const files = ['server/match/bondsMeta.js', 'server/sim/content/support/index.js', 'public/js/ui/gameLogic/bonds.js'];
   for (const rel of files) {
     const src = readFileSync(join(ROOT, rel), 'utf8');
-    assert.match(src, /grantedBondsByMorph/, `${rel} 必须调那一份共用的判据`);
+    assert.match(src, /memberBonds/, `${rel} 必须调那一份共用的成员资格出口`);
     assert.equal(/r\.canGiveBond\s*\)\s*\{\s*for|some\(\(r\)\s*=>\s*r\.canGiveBond\)/.test(src), false,
       `${rel} 不许再留着那份自己写的配对循环`);
   }
   // 判据本体只在一个文件里
-  assert.match(readFileSync(join(ROOT, 'shared/morph.js'), 'utf8'), /export function grantedBondsByMorph/);
+  const morph = readFileSync(join(ROOT, 'shared/morph.js'), 'utf8');
+  assert.match(morph, /export function grantedBondsByMorph/);
+  assert.match(morph, /export function grantedBondsByTrait/, '特质那条腿的判据也在同一个文件里');
+  assert.match(morph, /export function memberBonds/, '成员资格的合并本体');
 });
 
 test('装备位语义（第 7 段）：缺省档走**共享的官方策略单例**，那一档的每一个方法都是引擎今天那条算术', () => {

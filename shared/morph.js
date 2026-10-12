@@ -102,6 +102,134 @@ export function morphCarrierIndexes(recs) {
   return out;
 }
 
+// ---- 特质授予盟约（`trait.grantsBonds`，DESIGN §28.49）----------------------------------------------------------
+//
+// 业主原话：「我们的 forge 能不能做出游戏内的『特质』效果，即一般是用来**叠加盟约层数**的固有天赋」。这一节就是
+// 那条路的**纯数据声明面**：一条 chess 记录写 `trait.grantsBonds: ["<bondId>", …]` ⇔「带这条特质的棋子视为那些
+// 盟约的成员」⇒ 进 `server/match/bondsMeta.js` 的去重成员集合 ⇒ count +1 ⇒ `tierFor` 层数自然上去。不需要模块、
+// 不需要 `server.meta`、不需要一行脚本 —— 而**不写这一格时，引擎的行为逐字节不变**（特质今天完全不参与计数）。
+//
+// 为什么与变形同构体挤在同一个文件：两者回答的是**同一个问题** ——「这名干员的成员资格从哪来」。三处读取点
+// （prep 的 `bondsMeta.pieceBonds`、战斗的 `support/index.js unitBonds`、客户端的 `gameLogic/bonds.js`）今天各自
+// 写了一遍「自己的 `bonds` + 装备授予」的合并循环，那正是这条规则历史上最容易分叉的地方。所以这里把**合并本身**
+// 也收成一份（`memberBonds`）：一处判据、三处同源，再加一条成员资格来源时不必再去改三个文件、也不会漏掉一处。
+
+/** `trait` 里那一格的键名（读取点、装载期点名、作者侧校验读的是同一个名字）。 */
+export const TRAIT_GRANT_KEY = 'grantsBonds';
+
+/**
+ * 一条特质**声明**了哪些盟约 —— 只要形状成立的那部分（非空字符串、去重、按声明顺序），**不看**盟约存不存在。
+ *
+ * 形状这件事只判一份：读取（`grantedBondsByTrait`）与报错（`traitGrantIssues`）都从这里取名单，所以「哪几个
+ * 算数」不会两边各判一次（那种分叉的后果是「报错说它能用、读取说它不算」）。
+ * @param {any} trait
+ * @returns {string[]}
+ */
+export function traitGrantList(trait) {
+  if (!trait || typeof trait !== 'object' || Array.isArray(trait)) return [];
+  const raw = trait[TRAIT_GRANT_KEY];
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const v of raw) if (typeof v === 'string' && v && !out.includes(v)) out.push(v);
+  return out;
+}
+
+/**
+ * **这一格唯一的判据**：一条特质授予哪些盟约。
+ *
+ * `trait` 是字符串 / `null` / 缺这一格 / 形状不对 ⇒ `[]`，也就是**引擎今天的行为**（特质不参与计数）。注意
+ * `trait` 写成字符串那个静默降级与本格无关：字符串上根本没有子键可写。
+ *
+ * `hasBond` 可选：服务端与战斗用它把数据里不存在的盟约 id 挡掉（与 `grantedBondsByMorph` 同一条约定 ——
+ * 客户端拿不到权威名单时不传）。挡掉的那一刻会**在装载期被点名**（`traitGrantIssues`，见下），所以这不是静默丢失。
+ * @param {any} trait 棋子的 `trait` 记录（**不是** `def.trait` 那个文本字段）
+ * @param {{ hasBond?: ((bondId: string) => boolean)|null }} [opts]
+ * @returns {string[]}
+ */
+export function grantedBondsByTrait(trait, { hasBond = null } = {}) {
+  const raw = traitGrantList(trait);
+  return typeof hasBond === 'function' ? raw.filter((id) => !!hasBond(id)) : raw;
+}
+
+/**
+ * 一条特质的 `grantsBonds` 写歪了的地方 —— **同一份判据的两个读者**：装载期（`shared/workshop.js` 逐条写进
+ * `report.traitGrants`，`server/data.js` 在启动日志里 `warn`）与作者侧（`shared/chessAuthoring.js` 的
+ * `validateChessRecord`，于是 `npm run workshop:validate` 与编辑器在**装之前**就点名）。
+ *
+ * 为什么要有它：`shared/workshop.js` 的 `unknownOverrideKeys` 只比**顶层**键（`Object.keys`），所以往 `trait`
+ * 里加子键**天然通得过装载器** —— 一个拼错的盟约 id、或者一个写歪的形状，会安安静静地变成「这条特质什么都不
+ * 授予」。业主吃过这一类亏（docs/WORKSHOP.md §1.1：`content` 没声明 `chess` ⇒ 编辑器里在、磁盘里在、**永远进不了
+ * 游戏、没有任何报错**）。所以这里一律**点名**；但**不拒包、不改数据**：一条 typo 不该让整个包装不上，与
+ * `assets.mirrors` 那条「停用并点名，不拒包」同一条。
+ *
+ * 四类，一条都不许静默：不是数组 / 数组里有非空字符串以外的东西（`TRAIT_GRANT_BAD_SHAPE`）、空数组
+ * （`TRAIT_GRANT_EMPTY`，声明了个寂寞）、以及数据里不存在的盟约 id（`TRAIT_GRANT_UNKNOWN_BOND`）。
+ *
+ * `bondIds` 不给 ⇒ **只判形状、不判存在**（没有盟约表就没有权威答案：宁可不说，也不要乱说）。
+ * @param {any} trait
+ * @param {{ bondIds?: Set<string>|readonly string[]|null }} [opts] 本机（合并后）的盟约 id 集合
+ * @returns {Array<{ code: string, field: string, value: any, message: string }>} 空数组 = 这一格成立
+ */
+export function traitGrantIssues(trait, { bondIds = null } = {}) {
+  if (!trait || typeof trait !== 'object' || Array.isArray(trait)) return [];
+  if (!Object.hasOwn(trait, TRAIT_GRANT_KEY)) return [];
+  const field = `trait.${TRAIT_GRANT_KEY}`;
+  const raw = trait[TRAIT_GRANT_KEY];
+  const out = [];
+  if (!Array.isArray(raw)) {
+    out.push({
+      code: 'TRAIT_GRANT_BAD_SHAPE', field, value: raw,
+      message: `${field} must be an array of bond ids (for example ["yanShip"]) — a ${raw === null ? 'null' : typeof raw} grants nothing`,
+    });
+    return out;
+  }
+  const bad = raw.filter((v) => typeof v !== 'string' || !v);
+  if (bad.length) {
+    out.push({
+      code: 'TRAIT_GRANT_BAD_SHAPE', field, value: bad,
+      message: `${field} must contain only non-empty strings — ${JSON.stringify(bad)} never grant${bad.length === 1 ? 's' : ''} anything`,
+    });
+  }
+  if (!raw.length) {
+    out.push({
+      code: 'TRAIT_GRANT_EMPTY', field, value: raw,
+      message: `${field} is an empty list: it declares nothing and can never do anything. Remove the key, or name the bonds this trait grants`,
+    });
+  }
+  const known = bondIds instanceof Set ? bondIds : (Array.isArray(bondIds) ? new Set(bondIds) : null);
+  if (known) {
+    const missing = traitGrantList(trait).filter((id) => !known.has(id));
+    if (missing.length) {
+      out.push({
+        code: 'TRAIT_GRANT_UNKNOWN_BOND', field, value: missing,
+        message: `${field} names ${missing.map((b) => `"${b}"`).join(', ')}, which ${missing.length === 1 ? 'is not a bond' : 'are not bonds'} this install has, so ${missing.length === 1 ? 'it grants' : 'they grant'} nothing (use a bonds.json id — including one another installed pack adds to bonds.json)`,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * **一名干员的成员资格**（`bonds` 这一格的唯一出口）：自己的盟约 ∪ 变形同构体授予 ∪ 特质授予。
+ *
+ * 三条腿的判据都在本文件：装备那条是 `grantedBondsByMorph`（行为开关 `morphPairing` 的档位由调用方经 `morphed`
+ * 传进来 —— 这一层不读任何局面状态），特质那条是 `grantedBondsByTrait`。**合并只在这一处**：三处读取点以前各写
+ * 一遍同样的 push 循环，加一条新的成员资格来源就得同时改三个文件、漏一个就变成「服务端数了、卡片没显示」。
+ *
+ * `own` 只能是数组（记录自己的 `bonds`）；调用方本来就要 `Array.isArray` 判一次（官方数据里它是数组）。
+ * @param {string[]|null|undefined} own 记录自己的 `bonds`
+ * @param {{ trait?: any, recs?: Iterable<any>, morphed?: any, hasBond?: ((bondId: string) => boolean)|null }} [opts]
+ *   `trait` = 记录上的 `trait` 对象；`recs` = 装备行顺序的 items 记录（`undefined` 项由调用方先滤掉）
+ * @returns {string[]}
+ */
+export function memberBonds(own, { trait = null, recs = [], morphed = null, hasBond = null } = {}) {
+  const out = Array.isArray(own) ? own.slice() : [];
+  const add = (list) => { for (const b of list) if (!out.includes(b)) out.push(b); };
+  add(grantedBondsByMorph(recs, { morphed, hasBond }));
+  add(grantedBondsByTrait(trait, { hasBond }));
+  return out;
+}
+
 // ---- 装备位语义（第 7 段）------------------------------------------------------------------------------------
 
 /**

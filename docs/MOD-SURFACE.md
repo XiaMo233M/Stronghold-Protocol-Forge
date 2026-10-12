@@ -47,6 +47,7 @@
 | id | 声明 | requires | 设计稿 |
 |---|---|---|---|
 | `content` | `content[]` + `<文件>.json`（14 张表，`WORKSHOP_CONTENT_FILES`） | 记录形状照抄官方；数据不是代码，改不了对局结果 | §28.13 |
+| `traits.grantsBonds` | 一条 chess 记录的 `trait.grantsBonds = ["<bondId>", …]` | **特质 ⇒ 盟约成员资格 ⇒ count/tier**：`bondId` 必须是本机 `bonds.json` 里真有的（不存在的 id **点名**且永不进计数，但**不拒包**）；形状写歪一律点名（`TRAIT_GRANT_BAD_SHAPE` / `TRAIT_GRANT_EMPTY`）；**不写 ⇒ 逐字节不变**；判据只有一份（`shared/morph.js` 的 `grantedBondsByTrait`），合并也只有一份（`memberBonds`），三处读取点同源 | §28.49 |
 | `overrides` | `overrides[] = "<文件>:<id>"` | 覆盖官方条目必须显式声明 | §28.3 |
 | `units.operators` | `operators` / `support` + `units.json` | 干员记录必须带 `UNIT_REQUIRED_FIELDS` 那几个键 | §28.10 |
 | `media.voices` | `voices` / `voiceLangs` + 包内音频 | 只服务登记过的 URL | §28.13 |

@@ -53,6 +53,34 @@ export const MOD_SURFACE = Object.freeze([
     spec: '§28.13',
   },
   {
+    id: 'traits.grantsBonds',
+    layer: 'A',
+    // 一格「记录里的字段」（与 `content` / `overrides` 同一层，但不是一条新的 `pack.json` 声明）：一条 chess 记录
+    // 的 `trait.grantsBonds` 写什么，谁算哪个盟约的成员就跟着变 —— 而成员资格决定 count / tier / 层数，
+    // 所以这一格**改对局结果**，必须像 `behaviour` 那样有具名读取点、锚点、测试与一节文档。
+    decl: '<file>.json 的一条 chess 记录：`trait.grantsBonds = ["<bondId>", …]`',
+    // 三个锚点各钉一半：**键名**（`TRAIT_GRANT_KEY`）、**这一格唯一的判据**（`grantedBondsByTrait`）、以及
+    // **成员资格的合并本体**（`memberBonds`）。三处读取点调的是后两个，改名 = 打断所有声明这一格的包。
+    anchors: [
+      { symbol: 'TRAIT_GRANT_KEY', module: 'morph' },
+      { symbol: 'grantedBondsByTrait', module: 'morph' },
+      { symbol: 'memberBonds', module: 'morph' },
+    ],
+    requires: [
+      '`bondId` 必须是**这台机器上真的有的**盟约 id（`bonds.json`，含别的已装包加进去的）：不存在的 id 会被**点名**（启动日志 `report.traitGrants` + `npm run workshop:validate` 的 `TRAIT_GRANT_UNKNOWN_BOND`），并且**永远进不了计数**（读取点的 `hasBond` 挡掉）；引擎**不拒包**',
+      '形状写歪同样点名，一个都不许静默：不是数组 / 数组里有非空字符串以外的东西 ⇒ `TRAIT_GRANT_BAD_SHAPE`，空数组 ⇒ `TRAIT_GRANT_EMPTY`（静默降级正是这一格要修的老毛病）',
+      '**不写这一格 ⇒ 逐字节不变**（特质今天完全不参与计数）：官方 266 条记录一条都没有它，`test/golden/*.json` 不需要 `golden:update`',
+      '判据只有一份：`shared/morph.js` 的 `grantedBondsByTrait`；成员资格的**合并**也只有一份（`memberBonds`）—— prep 的 `bondsMeta.pieceBonds`、战斗的 `support/index.js unitBonds`、客户端的 `gameLogic/bonds.js`（`pieceBondIds` 与 `bondMembers` 两处读者）都调它',
+      '`trait` 必须是**记录上的对象**：sim 里读 `def.raw.trait`，**不是** `def.trait`（那是投影出来的文本字符串，没有子键）',
+    ],
+    files: [
+      'shared/morph.js', 'shared/workshop.js', 'shared/chessAuthoring.js', 'server/data.js',
+      'server/match/bondsMeta.js', 'server/sim/content/support/index.js', 'public/js/ui/gameLogic/bonds.js',
+    ],
+    tests: ['test/traitGrants.test.js'],
+    spec: '§28.49',
+  },
+  {
     id: 'overrides',
     layer: 'A',
     decl: 'pack.json.overrides[] = "<文件>:<id>"',

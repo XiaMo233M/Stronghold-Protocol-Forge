@@ -223,7 +223,7 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
 
 `voices` 是**默认语种**那一档（清单的 `audio.voiceLang`；**0.9.0 起是 `jp`**：`shared/constants.js` 的 `DEFAULT_VOICE_LANG`）。要让某个干员在别的语种下
 换一批台词，就写 `voiceLangs`：**一个语种一张表**，除最外层的语种键之外，形状、槽位词表与路径安全规则与 `voices`
-**完全相同** —— 两者共用同一个解析函数（`shared/workshop.js:1749` 的 `parseVoiceTable`，由 `:1794` 与 `:1818` 各调一次）。
+**完全相同** —— 两者共用同一个解析函数（`shared/workshop.js:1752` 的 `parseVoiceTable`，由 `:1810` 与 `:1834` 各调一次）。
 
 ```json
 {

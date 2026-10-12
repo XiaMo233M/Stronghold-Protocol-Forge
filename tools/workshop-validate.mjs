@@ -220,6 +220,10 @@ async function main() {
   // 「谁读谁不读」见 judgeRecord 的注释（docs/EDITOR.md 的那条契约）。
   let mergedTables = null;
   const mergedData = () => (mergedTables ??= loadData(DATA_DIR, { log: quiet, workshopDir: root }));
+  // `trait.grantsBonds`（DESIGN §28.49）的存在性判据要一张盟约表 —— 用**合并后**那一份：一个包引用另一个包
+  // 加进 `bonds.json` 的盟约是合法的，而只有合并体知道它存不存在。它只在真的有 chess 记录要判时才被读一次
+  // （`mergedData` 自己缓存），所以上面那条「谁读谁不读」的契约没变。
+  const chessBondIds = () => new Set(Object.keys(mergedData().bonds || {}));
 
   for (const pack of packs) {
     const declared = new Set(Array.isArray(pack.overrides) ? pack.overrides : []);
@@ -231,7 +235,7 @@ async function main() {
       for (const [id, rec] of Object.entries(records)) {
         const j = judgeRecord(file, id, rec, { declared, merged, officialIds: OFFICIAL_IDS });
         judged[id] = j.rec;
-        if (file === 'chess') issues.push(...validateChessRecord(j.rec, { id, officialIds: j.officialIds }));
+        if (file === 'chess') issues.push(...validateChessRecord(j.rec, { id, officialIds: j.officialIds, bondIds: chessBondIds() }));
       }
       issues.push(...pairIssues(judged, file));
     }
