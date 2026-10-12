@@ -1,4 +1,4 @@
-// test/promptCitations.test.js — docs/prompts/*.md 里的每一处代码引用都必须**真的指得到**。
+// test/promptCitations.test.js — 文档里的每一处代码引用都必须**真的指得到**。
 //
 // 这几份文档是创作者（与人、与 AI）写第一份内容的唯一依据，而它们靠**手写的 `文件:行号`** 把读者带到引擎的真实现场。
 // 上游基线一换、引擎一挪行号，文档就变成「看起来很具体、点进去是别的东西」——这种腐烂不会有任何东西报错，
@@ -7,6 +7,11 @@
 //   ① 带 `:行号` 的引用：文件要在、行号要在范围内、被指的那一行要有内容（不是空行或孤零零的括号）；
 //   ② 不带行号的文件引用：只要它以仓库的顶层目录开头（server/ shared/ public/ …），就必须真的存在。
 // 引用的事实对不对（那一行是不是真在做文档说的事）判不了，那要靠人；能判的是「点进去有没有东西」。
+//
+// **覆盖面 2026-10 扩过一次（`docs/prompts` → 加上 `docs/design`）**：原来只扫 `docs/prompts`，于是
+// `docs/design/mod-layer.md` 里那 **162 处**手写 `文件:行号` **完全在门禁外** —— 而它偏偏是漂移面最大的一份
+// （0.16.0 那一刀就手工重指过 28 处）。这正是「引用会烂而没人知道」的根因：判据存在，但没看着那一份。
+// 扩完当场暴露 19 处既有漂移，登记在下面的 `KNOWN_STALE` 里（**已发现、待修**，不是「允许」）。
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -14,8 +19,15 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const DIR = join(ROOT, 'docs/prompts');
-const FILES = readdirSync(DIR).filter((n) => n.endsWith('.md')).sort();
+/**
+ * 扫哪些目录。`docs/prompts` 是创作者照抄的唯一依据；`docs/design` 是规则本身、也是手写行号最多的一份。
+ * 两个都要看 —— 只扫前者时后者那 162 处引用无人看守（见文件头）。
+ */
+const DIRS = ['docs/prompts', 'docs/design'];
+/** 每份文档的**仓库相对路径**（报告里的 `name` 就是它），稳定排序。 */
+const FILES = DIRS
+  .flatMap((d) => readdirSync(join(ROOT, d)).filter((n) => n.endsWith('.md')).map((n) => `${d}/${n}`))
+  .sort();
 
 /** 仓库里真实存在的顶层目录：只有这些开头的裸引用才当作「应该存在」。 */
 const TOP_DIRS = ['server/', 'shared/', 'public/', 'tools/', 'docs/', 'editor/', 'test/', 'scripts/'];
@@ -94,51 +106,91 @@ function staleMemberClaims(text, name) {
   return bad;
 }
 
-describe('docs/prompts 的代码引用（点进去必须有东西）', () => {
+/**
+ * **已知漂移台账（临时）** —— 把覆盖面从 `docs/prompts` 扩到 `docs/design` 的那一天，设计文档里这批**既有**的
+ * 引用问题当场暴露出来（三条判据合计 19 处，见文件头）。这里登记的是「**已发现、待修**」，**不是**「允许漂移」：
+ *   * 某一处被修好 ⇒ 实际数**少于**台账 ⇒ 红（要删掉那条台账，别留着）；
+ *   * 出现新的漂移 ⇒ 实际数**多于**台账 ⇒ 红。
+ * 所以它不会烂在这里。**修完那批漂移的那一刀把这张表整个删掉**（不是把数改成 0）—— 那时判据回到「一处都不许有」。
+ *
+ * 按**判据**分档（同一条判据里再按文档分）：三条判据各管一类毛病，混在一起数就说不清是谁的。
+ */
+const KNOWN_STALE = Object.freeze({
+  '引用点不到东西': Object.freeze({ 'docs/design/mod-layer.md': 8 }),
+  '这些路径不存在': Object.freeze({
+    'docs/design/client.md': 3,
+    'docs/design/mod-layer.md': 6,
+    'docs/design/overview.md': 1,
+  }),
+  '这些引用点进去是别的东西': Object.freeze({ 'docs/design/mod-layer.md': 1 }),
+});
+
+/**
+ * 逐份文档与**该判据那一档**台账对账：每一份的坏引用数**恰好等于**台账里的数（没登记就是 0）。
+ * 对完再把登记的那些逐条打出来 —— 报告与修复刀就按这份清单走。
+ * @param {Array<{doc: string, msg: string}>} bad
+ * @param {keyof typeof KNOWN_STALE} what
+ */
+function assertAgainstLedger(bad, what) {
+  const ledger = KNOWN_STALE[what];
+  const byDoc = new Map();
+  for (const b of bad) byDoc.set(b.doc, (byDoc.get(b.doc) ?? 0) + 1);
+  const wrong = [];
+  for (const rel of FILES) {
+    const got = byDoc.get(rel) ?? 0;
+    const want = ledger[rel] ?? 0;
+    if (got !== want) wrong.push(`${rel}: 实际 ${got} 处，台账 ${want} 处`);
+  }
+  assert.deepEqual(wrong, [], `${what}\n（本文件顶上 KNOWN_STALE 登记的是「已发现、待修」；修好了删条目，新出现的去修）`);
+  if (bad.length) console.log(`\n[${what}] 已登记待修 ${bad.length} 处：\n${bad.map((b) => `  ${b.msg}`).join('\n')}\n`);
+}
+
+describe('文档里的代码引用（docs/prompts + docs/design，点进去必须有东西）', () => {
   test('每个 `文件:行号` 引用都存在、行号在范围内、那一行有内容', () => {
-    assert.ok(FILES.length >= 3, `docs/prompts 下应当有几份 prompt，实际找到 ${FILES.length} 份`);
+    assert.ok(FILES.length >= 11, `两份文档目录下的 .md 应当不止几份，实际找到 ${FILES.length} 份`);
     const bad = [];
     let total = 0;
-    for (const name of FILES) {
-      const text = readFileSync(join(DIR, name), 'utf8');
+    for (const docRel of FILES) {
+      const text = readFileSync(join(ROOT, docRel), 'utf8');
       for (const m of text.matchAll(CITATION)) {
         const [, rel, from, to] = m;
         total += 1;
         const docLine = text.slice(0, m.index).split('\n').length;
+        const push = (msg) => bad.push({ doc: docRel, msg: `${docRel}:${docLine} ${msg}` });
         if (!existsSync(join(ROOT, rel))) {
-          bad.push(`${name}:${docLine} 引用的 ${rel} 不存在`);
+          push(`引用的 ${rel} 不存在`);
           continue;
         }
         const src = lines(rel);
         if (Number(to ?? from) > src.length) {
-          bad.push(`${name}:${docLine} 引用的 ${rel}:${to ?? from} 超出范围（该文件只有 ${src.length} 行）`);
+          push(`引用的 ${rel}:${to ?? from} 超出范围（该文件只有 ${src.length} 行）`);
           continue;
         }
         const cited = src[Number(from) - 1].trim();
         // 指向空行 / 只有括号的行 = 行号漂了，读者点进去看不到文档在说的东西
         if (!cited || /^[)}\]);,]+$/.test(cited)) {
-          bad.push(`${name}:${docLine} 引用的 ${rel}:${from} 那一行是空的（行号漂了）`);
+          push(`引用的 ${rel}:${from} 那一行是空的（行号漂了）`);
         }
       }
     }
-    assert.ok(total > 100, `引用数量看起来不对（只有 ${total} 处）—— 正则是不是失效了？`);
-    assert.deepEqual(bad, [], '这些引用点不到东西：\n' + bad.join('\n'));
+    assert.ok(total > 300, `引用数量看起来不对（只有 ${total} 处）—— 正则是不是失效了？`);
+    assertAgainstLedger(bad, '引用点不到东西');
   });
 
   test('以仓库顶层目录开头的裸引用（不带行号的那些）也必须存在', () => {
     const bad = [];
-    for (const name of FILES) {
-      const text = readFileSync(join(DIR, name), 'utf8');
+    for (const docRel of FILES) {
+      const text = readFileSync(join(ROOT, docRel), 'utf8');
       const seen = new Set();
       for (const m of text.matchAll(BARE)) {
         const rel = m[0].replace(/^\.\//, '');
         if (!TOP_DIRS.some((d) => rel.startsWith(d))) continue;
         if (seen.has(rel)) continue;
         seen.add(rel);
-        if (!existsSync(join(ROOT, rel))) bad.push(`${name}: ${rel}`);
+        if (!existsSync(join(ROOT, rel))) bad.push({ doc: docRel, msg: `${docRel}: 裸引用 ${rel} 不存在` });
       }
     }
-    assert.deepEqual(bad, [], '这些路径不存在：\n' + bad.join('\n'));
+    assertAgainstLedger(bad, '这些路径不存在');
   });
 
   // 上面那条只查「点进去有没有东西」。还差一类：**点进去是别的东西** —— 引用指着 `Battle.js:113`，而作者说的事实
@@ -153,17 +205,18 @@ describe('docs/prompts 的代码引用（点进去必须有东西）', () => {
   //   * 只判**离引用足够近**的成员（`battle.x` / `this.x` ≤ 45 字符，`flags.x` ≤ 90），跨过 `|`（表格单元）、句号、
   //     换行就重新开始 —— 同一格里更早的那句话不算；
   //   * 只要求**任一**被点名的成员出现在被引的**整段行号区间**里（`x:12-14` 逐行拼起来查）。
-  // 实测覆盖面：`docs/prompts/kit.md` 181 处引用里判 10 处 —— 这就是这条规则的代价与收益。
+  // 实测覆盖面：两份目录共 355 处引用里判 11 处（`kit.md` 181 处里判 10，`mod-layer.md` 162 处里判 1）
+  // —— 这就是这条规则的代价与收益。
   test('引用点名的成员必须真的出现在被引的那一行（只判引擎语境里的成员引用）', () => {
     const bad = [];
     let judged = 0;
-    for (const name of FILES) {
-      const text = readFileSync(join(DIR, name), 'utf8');
+    for (const docRel of FILES) {
+      const text = readFileSync(join(ROOT, docRel), 'utf8');
       judged += judgedClaims(text);
-      bad.push(...staleMemberClaims(text, name));
+      for (const s of staleMemberClaims(text, docRel)) bad.push({ doc: docRel, msg: s });
     }
     assert.ok(judged >= 8, `只判到 ${judged} 处引用 —— 抽取是不是失效了？`);
-    assert.deepEqual(bad, [], '这些引用点进去是别的东西：\n' + bad.join('\n'));
+    assertAgainstLedger(bad, '这些引用点进去是别的东西');
   });
 
   test('这条判据本身有牙：指错一行的合成引用会被抓出来', () => {
