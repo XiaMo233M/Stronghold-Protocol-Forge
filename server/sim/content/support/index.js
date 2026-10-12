@@ -27,6 +27,26 @@ export { COLS };
 /** Where an enemy can be hit (a huge enemy's whole hit rectangle, sim/body.js) — for every range test on enemies. */
 export { bodyInKeys, bodyDist, bodyInRadius, bodyOnTile, bodyTileReach };
 
+// 工坊 kit / 战斗逻辑模块的**再导出面**（`shared/kitImports.js` 的白名单只放行 11 条 specifier）。
+//
+// 为什么补在这一个文件：它就是白名单里的 `@battle/index.js`，**已经在两端被服务**
+// （服务端按 `KIT_IMPORT_TARGETS` 解析，浏览器走 `public/index.html` 的 import map，
+// `test/kitImports.test.js` 把两张表钉在一起）。所以在这里补再导出**不开新前缀、不动 import map、
+// 不动白名单本身** —— 这是把引擎里已有的原语交给包的最小改动。
+//
+// 这 5 个符号的出处是实测的：社区投稿（包 `makoto-yuki`，结城理）的 kit 用的是引擎内部相对路径
+// `../../../simdata.js` / `../../tokens.js` / `../../items/battle.js`，换名搬进 `kits/<charId>.js` 后
+// 装载器逐条报 `KIT_IMPORT`「不在白名单里」（共 5 个符号 / 15 处调用）。
+// **只增导出、不改既有行为**：下面三行是纯转发，本文件里没有任何调用点因此改变。
+//
+// ⚠️ `items/battle.js` 反过来 import 本文件（`../support/index.js`，它要 `num` / `itemRecord` / `fxOn` …），
+// 所以这一行让两个模块**成环**。这是安全的、也是刻意的：`weaknessRetype` 是**函数声明**（提升，取用时才读绑定），
+// 而 `items/battle.js` 只在函数体里用本文件的导出（顶层没有一处调用），所以两条边都不会在模块初始化期读到未初始化的绑定。
+// 新增再导出时**照这条判据核对**：被转发的符号必须是函数/常量**声明**，且对方只在函数体里用本文件的导出。
+export { normalizeChess, normalizeSkill } from '../../simdata.js';
+export { TOKEN_IDS, releaseSkillSummon, tacticalPoint } from '../tokens.js';
+export { weaknessRetype } from '../items/battle.js';
+
 // =====================================================================================================================
 // numbers & data
 
