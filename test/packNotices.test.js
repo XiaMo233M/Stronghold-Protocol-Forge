@@ -78,6 +78,44 @@ describe('引擎那一半：公告从更新记录生成', () => {
     assert.deepEqual(engineAnnouncements({ changelogPath: path.join(ROOT, 'nope.md') }), []);
   });
 
+  test('两种实测过的形状都要认：标题带 `-<上游>` 半边、以及正文写在小节标题下面', () => {
+    // 两处实测过的漏（合起来让玩家看到的公告最新一条停在 0.14.0，而当时发的就是 0.16.0）：
+    // ① 正则原来要求版本后面直接跟空白 ⇒ `## 0.16.0-0.2.4 — …` 这类节全被跳过；
+    // ② 摘要原来必须落在第一个 `###` 之前 ⇒ 「`##` 紧跟 `###`、正文在小节标题下面」的节取不到摘要，
+    //    整条被丢掉。`test/version.test.js` 早就认标题的那半边，这里跟它对齐。
+    const file = path.join(tmpdir(), `sp-changelog-shapes-${process.pid}.md`);
+    fs.writeFileSync(file, [
+      '# 更新记录', '',
+      '## 9.9.9-0.2.4 — 2030-01-01', '',
+      '### 一节', '',
+      '正文写在小节标题下面。', '',
+      '- 一条', '',
+      '## 9.9.8-0.2.4 — 2030-01-02', '',
+      '正文在第一个 `###` 之前。', '',
+      '### 又一节', '',
+      '- 另一条', '',
+    ].join('\n'));
+    try {
+      const list = engineAnnouncements({ changelogPath: file });
+      assert.deepEqual(list.map((a) => a.version), ['9.9.9', '9.9.8'], '带 `-<上游>` 的两节都要认出来');
+      assert.equal(list[0].summary, '正文写在小节标题下面。', '`###` 下面的第一段正文也算摘要');
+      assert.deepEqual(list[0].sections[0].items, ['一条']);
+      assert.equal(list[0].date, '2030-01-01');
+      assert.equal(list[1].summary, '正文在第一个 `###` 之前。');
+      assert.deepEqual(list[1].sections[0].items, ['另一条']);
+    } finally {
+      fs.rmSync(file, { force: true });
+    }
+  });
+
+  test('更新记录最上面那一节一定在公告里（公告不许悄悄漏掉当前版本）', () => {
+    const top = fs.readFileSync(CHANGELOG, 'utf8').match(/^##\s+(\d+\.\d+\.\d+)/m);
+    assert.ok(top, '更新记录里应当有 `## x.y.z` 标题');
+    const list = engineAnnouncements({ changelogPath: CHANGELOG });
+    assert.ok(list.length, '至少有一条公告');
+    assert.equal(list[0].version, top[1], `公告最新一条是 ${list[0].version}，而更新记录最上面是 ${top[1]}`);
+  });
+
   test('引擎的鸣谢有内容且网址都是 https', () => {
     const { credits } = engineNotices({ changelogPath: CHANGELOG });
     assert.ok(credits.length >= 3);
