@@ -3020,7 +3020,7 @@ i18n-ignore），差别只在**表是另一张**、每格多一个 `actions`。
 （走装载器同一份 `identifyPack`）、投影那一行真的在 `server/index.js` 里（源码级断言）、以及 `PACK_FIELDS` 的闭集
 计数就地延长。**不需要 `golden:update`**：缺省路径一个字节不动。
 
-### 28.44 启用声明 `pack.json.enabled`：**装好 ≠ 生效**
+### 28.46 启用声明 `pack.json.enabled`：**装好 ≠ 生效**
 
 **要解决的那面墙**：今天 `loadWorkshop`（`server/workshop.js`）遍历工坊目录，**每一个**能通过 `normalizePackManifest`
 与那七道声明闸门的目录都进 `packs`，`lobby.js:678` 的房间按**服务端装载集合**跑（不是房间自己声明的那一份）。

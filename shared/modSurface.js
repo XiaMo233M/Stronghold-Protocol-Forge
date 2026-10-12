@@ -315,7 +315,7 @@ export const MOD_SURFACE = Object.freeze([
   {
     id: 'enabled',
     layer: 'B',
-    // 装好 ≠ 生效（§28.44）。与 `variants` / `behaviour` 同一形状：包声明的是**一个布尔**，不是数值、不是路径。
+    // 装好 ≠ 生效（§28.46）。与 `variants` / `behaviour` 同一形状：包声明的是**一个布尔**，不是数值、不是路径。
     // 补的缺口是「留着这个包但现在不要它生效」在今天没有表达方式 —— 只能删目录，而删目录与停用是两件事。
     decl: 'pack.json.enabled = true | false',
     anchors: [
@@ -332,7 +332,7 @@ export const MOD_SURFACE = Object.freeze([
     ],
     files: ['shared/workshop.js', 'shared/enabled.js', 'server/workshop.js'],
     tests: ['test/packEnabled.test.js'],
-    spec: '§28.44',
+    spec: '§28.46',
   },
   // ------------------------------------------------------------------ C 层：客户端界面
   {

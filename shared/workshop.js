@@ -29,7 +29,7 @@ import { parseVariantsDecl } from './variants.js';
 // 行为开关层（DESIGN §28.43）：与口径**同一形状、不同一张表**，判据只有一份在 `shared/behaviour.js`。同样不在这里
 // 重判一遍闭枚举 —— 而且这一层的表今天是**空的**（通道 + 守卫先落，第一格与它的引擎实现点一起落）。
 import { parseBehaviourDecl } from './behaviour.js';
-// 启用声明（DESIGN §28.44）：装好 ≠ 生效。判据只有一份在 `shared/enabled.js`。
+// 启用声明（DESIGN §28.46）：装好 ≠ 生效。判据只有一份在 `shared/enabled.js`。
 import { parseEnabledDecl } from './enabled.js';
 
 /** Data files a pack may contribute to. Deliberately a conservative subset of data/: `config` is excluded because a
@@ -137,7 +137,7 @@ export const PACK_FIELDS = Object.freeze([
   'notices',
   // 行为开关（**不是**贡献项）
   'playtest',
-  // 启用声明（DESIGN §28.44）：装好 ≠ 生效。`false` = 装载期跳过（见 `shared/enabled.js`）。**不是**贡献项。
+  // 启用声明（DESIGN §28.46）：装好 ≠ 生效。`false` = 装载期跳过（见 `shared/enabled.js`）。**不是**贡献项。
   'enabled',
   // 变体 / 口径声明（DESIGN §28.39）：这个包要哪一套口径（练度 / 部署位）。**不是**贡献项，也**不是**一条
   // 数值覆盖通道 —— 它只能声明轴的闭枚举里有的选项名，值由引擎自己给（`shared/variants.js`）。
@@ -2147,7 +2147,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // 它自己不带来任何内容。所以一个只带 `behaviour` 的包照旧 `EMPTY_PACK`（文案里点名它）。
   const behaviourParsed = raw.behaviour === undefined ? null : parseBehaviourDecl(raw.behaviour, opts.behaviourSwitches);
   if (behaviourParsed && !behaviourParsed.ok) return behaviourParsed;
-  // 启用声明（DESIGN §28.44）：`false` = 这个包装好了但现在不参与。**不是贡献项**（与 `variants` 同一个语义）：
+  // 启用声明（DESIGN §28.46）：`false` = 这个包装好了但现在不参与。**不是贡献项**（与 `variants` 同一个语义）：
   // 一个只写 `"enabled": true` 的包什么都没带来，照旧 `EMPTY_PACK`；而 `"enabled": false` 的包连装载都不进
   // （`server/workshop.js loadWorkshop` 在归一化之后读它），所以它也到不了 `EMPTY_PACK` 那一行。
   const enabledParsed = raw.enabled === undefined ? null : parseEnabledDecl(raw.enabled);
@@ -2165,7 +2165,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (noticesParsed) declared.push(['notices', noticesParsed.decl]);
   if (formsParsed) declared.push(['forms', formsParsed.decl]);
   if (fxParsed) declared.push(['fx', fxParsed.decl]);
-  // `enabled` 比 `variants` / `behaviour` 多一条约束（§28.44 的判据 2：**缺省 = 引擎今天的行为**）：
+  // `enabled` 比 `variants` / `behaviour` 多一条约束（§28.46 的判据 2：**缺省 = 引擎今天的行为**）：
   // 无条件写进去会让 `"enabled": true` 与「没写」在**数据上**不再等价 —— 而 `identifyPack` 哈希的正是
   // `canonicalJson(pack)`（`server/workshop.js` step 1），于是写了 `true` 的包会换掉包身份、房间摘要跟着漂，
   // 而它做的事与没写一字不差。所以**只有 `false` 才进清单**：那是这一格唯一真正改变行为的取值，

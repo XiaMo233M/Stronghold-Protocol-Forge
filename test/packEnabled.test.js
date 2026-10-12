@@ -1,4 +1,4 @@
-// test/packEnabled.test.js — 包的启用声明（DESIGN §28.44）：`pack.json.enabled` + `shared/enabled.js`。
+// test/packEnabled.test.js — 包的启用声明（DESIGN §28.46）：`pack.json.enabled` + `shared/enabled.js`。
 //
 // 这一刀补的缺口：**装好 ≠ 生效**。`loadWorkshop` 今天读 `workshop/` 下每个目录，只要校验得过、有贡献项，
 // 这个包就参与装载。于是「先留着、但现在不要它生效」没有表达方式 —— 只能删目录，而删目录与停用是两件事
@@ -145,7 +145,7 @@ describe('第四层：`enabled` 不是贡献项，也不是热更新', () => {
   });
 
   test('`true` 不进归一化清单，`false` 进（唯一真正改变行为的取值必须进身份）', () => {
-    // 这一条是 §28.44 判据 2 的落点，也是本刀与 `variants` 唯一的不同：`identifyPack` 哈希
+    // 这一条是 §28.46 判据 2 的落点，也是本刀与 `variants` 唯一的不同：`identifyPack` 哈希
     // `canonicalJson(pack)`，所以 `true` 若进清单就会换掉包身份，而它做的事与没写一字不差。
     const on = normalizePackManifest({ id: 'd', name: 'D', license: 'MIT', content: ['chess'], enabled: true }, 'd', {});
     const off = normalizePackManifest({ id: 'd', name: 'D', license: 'MIT', content: ['chess'], enabled: false }, 'd', {});

@@ -2110,7 +2110,7 @@ URL **一次都不被请求**。一个包把加载源改坏了，关掉这一格
 而你又不想动它的字节。想让一个包**永久**不再参与，正确做法是从工坊目录里删掉它 —— `enabled: false` 是
 **暂停**，不是卸载。
 
-完整规范见 [docs/design/mod-layer.md](design/mod-layer.md) §28.44。
+完整规范见 [docs/design/mod-layer.md](design/mod-layer.md) §28.46。
 
 ---
 

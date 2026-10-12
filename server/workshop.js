@@ -116,7 +116,7 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
       errors.push({ pack: name, reason: `${manifest.error}: ${manifest.detail}` });
       continue;
     }
-    // 启用声明（DESIGN §28.44）：`pack.json.enabled === false` = 这个包装好了但现在不参与。放在这里 ——
+    // 启用声明（DESIGN §28.46）：`pack.json.enabled === false` = 这个包装好了但现在不参与。放在这里 ——
     // **归一化之后、读任何内容文件之前** —— 所以一个被关掉的包连 `chess.json` 都不读：它今天不贡献任何东西，
     // 为它报「缺文件」是噪声。判据只有一份（`shared/enabled.js packEnabled`），这里只负责把它接进同一个
     // `errors` 报告：一个静默消失的包比一个报错的包更难查，所以跳过必须响亮（与坏包同一个裁剪点）。
