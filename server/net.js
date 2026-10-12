@@ -77,7 +77,7 @@ export const NET_DEFAULTS = Object.freeze({
  * (test/match/public-delta-match.test.js, "[dense 40] full 17282 B") — and it also turns the ROOM's next frame full
  * for everybody (platform.js resendPublic → markMembershipChanged), so N asks buy N full frames. On the 40 msg/s
  * bucket the burst alone was 6 × 17 kB before any refill; the heavy bucket caps it at 2/s.
- * Nothing a normal client loses: public/js/main.js:138 PUBLIC_FULL_ASK_MS = 2000 throttles the ask to 0.5/s, four
+ * Nothing a normal client loses: public/js/main.js:150 PUBLIC_FULL_ASK_MS = 2000 throttles the ask to 0.5/s, four
  * times below the refill, so a legitimately out-of-sync player still asks as often as the client lets it.
  */
 export const HEAVY_TYPES = new Set(['g.watch', 'g.publicFull', 'room.loadout', 'room.ownership', 'room.diy', 'room.spectate', 'room.queue', 'records.mine']);

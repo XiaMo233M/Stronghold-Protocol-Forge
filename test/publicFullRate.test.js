@@ -8,7 +8,7 @@
 // any refill; the heavy bucket caps the sustained rate at 2/s.
 //
 // Why no normal client loses anything: the browser throttles the ask itself — `PUBLIC_FULL_ASK_MS = 2000`
-// (public/js/main.js:138, used at :367) — so a legitimate client sends at most 0.5/s, four times below the bucket's
+// (public/js/main.js:150, used at :379) — so a legitimate client sends at most 0.5/s, four times below the bucket's
 // 2/s refill. These tests pin BOTH halves: the flood is capped, and the client's own cadence is never touched.
 import { describe, test, before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -30,7 +30,7 @@ const HEAVY_PER_SEC = NET_DEFAULTS.heavyPerSec;
 const mainSource = readFileSync(new URL('../public/js/main.js', import.meta.url), 'utf8');
 const askMs = mainSource.match(/const PUBLIC_FULL_ASK_MS = (\d+)/);
 assert.ok(askMs, 'public/js/main.js no longer declares PUBLIC_FULL_ASK_MS');
-/** How often the browser may ask for the full frame — 2000 ms (public/js/main.js:138). */
+/** How often the browser may ask for the full frame — 2000 ms (public/js/main.js:150). */
 const PUBLIC_FULL_ASK_MS = Number(askMs[1]);
 
 class RecordingStub extends StubMatch {

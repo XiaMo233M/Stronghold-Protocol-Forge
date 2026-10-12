@@ -135,7 +135,7 @@ export const PANEL_SEND_TYPES = Object.freeze(['room.appearance']);
  *   * **只有这一个写口**，只写设置库里的 `voiceLangByChar`（逐干员的配音覆盖）**一格**：其它设置（音量、
  *     静音、画质、文字大小、快捷键、工坊外观开关）面板连**读**都读不到（`ctx.me.voice` 只给配音那两格），
  *     更一个都写不了；
- *   * **只影响这一台机器**：配音语言在**播放时**解析（`public/js/audio.js:1207` / `:1214` 读注入的
+ *   * **只影响这一台机器**：配音语言在**播放时**解析（`public/js/audio.js:1020` / `:1026` 读注入的
  *     `voiceLangOf`，它最终走 `ui/gameLogic/settings.js voiceLangFor`，缺档回退「覆盖 → 全局 → 默认」），
  *     整个写口是纯 localStorage 偏好 —— 不发帧、不落对局、**改动不了任何人的战果**；
  *   * **闭枚举**：值只收 `VOICE_LANGS`（`shared/constants.js`，cn / jp / en / kr）里的成员，或 `''` / `null`
@@ -857,7 +857,7 @@ export function createPanelRegistry(deps) {
      * **配音读数**（`ctx.me.voice`，业主裁决 2026-10-11）：`{ global, byChar }`，与 `readMe()` 同形 ——
      * **每次读都重新取一次设置库**，返回一份新的冻结对象。
      *
-     * 为什么面板答不出来：设置库住在**另一个** store（`public/js/ui/settings.js:47` 的 `settingsStore`，
+     * 为什么面板答不出来：设置库住在**另一个** store（`public/js/ui/settings.js:50` 的 `settingsStore`，
      * 与 `ctx.me` 读的那个 `public/js/store.js` 不是同一个），而注入面里没有 store 句柄 —— 面板拿不到
      * 「这台机器现在用哪套配音」，也推不出逐干员的覆盖。
      *
