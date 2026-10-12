@@ -51,6 +51,7 @@ import { RETRY_DELAYS_MS } from '../public/js/data.js';
 import { DATA, makeMatch } from './match/harness.js';
 import { KIT_FILES } from '../server/sim/content/kits/index.js';
 import { designText } from './helpers/designDocs.js';
+import { changelogText } from './helpers/changelog.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const doc = (p) => readFileSync(join(ROOT, p), 'utf8');
@@ -70,6 +71,8 @@ const SIM = doc('docs/SIM.md');
 const README = doc('README.md');
 const DEPLOY = doc('docs/DEPLOY.md');
 const PLAYING = doc('docs/PLAYING.md');
+/** 更新记录作为一份文本（顶层 + 各分卷）：0.1.1 / 0.2.2 那几节在 2026-10-12 分卷后住在 docs/changelog/。 */
+const CHANGELOG = changelogText(ROOT);
 /** The table row of DATA.md whose first cell is `key` (backticked), or ''. */
 const dataRow = (key, from = 0) => {
   const i = DATA_MD.indexOf(`| \`${key}\` |`, from);
@@ -775,7 +778,7 @@ test('batch 6 after 0.1.0 (DESIGN §21.21–§21.25): the hammer per deployment,
   assert.match(doc('docs/ASSETS.md'), /\| `--allow-shrink` \|/);
   assert.match(DATA_MD, /unless `--allow-shrink` \(or `--prune`\) is passed/);
   // CHANGELOG 0.1.1 credits both pull requests
-  const log = doc('CHANGELOG.md');
+  const log = CHANGELOG;
   assert.match(log, /共 32 条，其中 4 条核实后不是问题/);
   assert.match(log, /PR #2 指出/);
   assert.match(log, /PR #7 指出/);
@@ -821,7 +824,7 @@ test('batch 6 QA residuals (DESIGN §21.21–§21.25): the lock per deployment f
   assert.match(DESIGN, /Equipped items run from a snapshot — the owned chess and each holder's items as that step begins \(every \[holder, item\] pair, taken before the first item runs\)/);
   assert.match(sub(25), /every \[holder, item\] pair is now taken before the first item runs/);
   // CHANGELOG 0.1.1
-  const log = doc('CHANGELOG.md');
+  const log = CHANGELOG;
   assert.match(log, /被击倒再部署或被 M3茧甲、埃芒加德复活后又能锁血/);
   assert.match(log, /娜仁图亚策略下萨尔贡干员借给周围干员的坚固维式重锤同样每次部署锁血一次/);
   assert.match(log, /卢西恩、锏不会再因为身边只有起飞的蒂比就放出打不到人的范围技能/);
@@ -883,7 +886,7 @@ test('the deliberate trigger deviation (DESIGN §21.29): six 重装 skills DEFAU
   assert.match(DATA_MD, /a deliberate deviation, `tools\/build-data\.mjs TRIGGER_DEVIATIONS`, DESIGN §21\.29/);
   assert.match(SIM, /the six of DESIGN §21\.29/);
   assert.match(PLAYING, /深巡、雷蛇的二技能，号角的二、三技能，灰毫的一、二技能按玩家反馈改为攻击范围内有敌人时就释放/);
-  assert.match(doc('CHANGELOG.md'), /深巡、雷蛇的二技能，号角的二、三技能，灰毫的一、二技能改为攻击范围内有敌人时就释放/);
+  assert.match(CHANGELOG, /深巡、雷蛇的二技能，号角的二、三技能，灰毫的一、二技能改为攻击范围内有敌人时就释放/);
 });
 
 test('干员战斗语音 (DESIGN §21.30): the manifest data, the official priorities, and only a tap\'s 选中干员 speaks outside battle', async () => {

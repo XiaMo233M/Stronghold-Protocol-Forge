@@ -5,6 +5,10 @@
 // The design document (0.2.0 split): docs/DESIGN.md is the index, every `## N.` section sits exactly once in
 // docs/design/ (the current rules) or docs/history/ (the per-release revisions), the index names each file with its
 // sections, and every "DESIGN §N" / "DESIGN §N.M" cited anywhere in the repository is a heading of it.
+// The changelog (2026-10-12 split): CHANGELOG.md is the index plus the newest sections, every `## x.y.z — date`
+// section sits exactly once in it or in one docs/changelog/*.md volume, the index names each volume's sections,
+// and the top file still yields a full page of in-game announcements (they are generated from it — cutting one
+// section too many drops one announcement, silently).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -12,6 +16,8 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { designText, DESIGN_DIRS } from './helpers/designDocs.js';
+import { CHANGELOG_DIR, changelogSections, changelogVolumeFiles } from './helpers/changelog.js';
+import { engineAnnouncements, NOTICE_LIMITS } from '../server/notices.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 /** Each document with the least number of paths it names (a guard against an extraction that finds nothing). */
@@ -140,4 +146,43 @@ test('DESIGN: every "DESIGN §N" cited in the repository (code comments, tests, 
   }
   assert.ok(cited >= 700, `only ${cited} citations found — is the scan broken?`);
   assert.deepEqual(bad, [], 'citations of a section or subsection with no heading');
+});
+
+test('CHANGELOG: every `## x.y.z — date` section sits exactly once in the index or a volume, the index names each volume\'s sections, and the top file still yields a full page of announcements', () => {
+  const top = readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf8');
+  const files = ['CHANGELOG.md', ...changelogVolumeFiles(ROOT).map((f) => `${CHANGELOG_DIR}/${f}`)];
+  /** 节（保留 `-<上游>` 半边 —— 两节可以只差它）→ 住在哪个文件。 */
+  const where = new Map();
+  for (const file of files) {
+    const md = readFileSync(join(ROOT, file), 'utf8');
+    if (file !== 'CHANGELOG.md') {
+      assert.match(md, /^# 更新记录 · \d+\.\d+ 分卷\n\nPart of \[CHANGELOG\.md\]\(\.\.\/CHANGELOG\.md\)/,
+        `${file}: 它的标题与指回索引的那一行`);
+    }
+    for (const s of changelogSections(md)) {
+      assert.ok(!where.has(s.release), `${s.release} 在 ${where.get(s.release)} 与 ${file} 里各有一份`);
+      where.set(s.release, file);
+    }
+  }
+  assert.ok(where.size >= 44, `只找到 ${where.size} 节 —— 抽取是不是坏了？`);
+  assert.ok(where.has('0.1.0'), '最早那一节（0.1.0）还在册');
+  assert.ok(where.has('0.16.0-0.2.4'), '最新那一节（带 `-<上游>` 半边的）还在册');
+  // 索引那张表：一行一卷，点名的版本必须**恰好**是该文件持有的那些（顺序也一致：新 → 旧）
+  const held = (file) => [...where].filter(([, f]) => f === file).map(([v]) => v);
+  let rows = 0;
+  for (const m of top.matchAll(/^\| ([^|]+) \| ([^|]+) \| [^|]+ \| ([^|]+) \|$/gm)) {
+    const label = m[1].trim();
+    if (label === '卷' || /^-+$/.test(label)) continue;        // 表头与分隔行
+    rows++;
+    const target = m[3].trim();
+    const file = target === '本文' ? 'CHANGELOG.md' : (target.match(/^\[[^\]]+\]\(([^)]+)\)$/)?.[1] ?? target);
+    assert.ok(files.includes(file), `索引里的「${label}」点名了 ${file} —— 它不在分卷清单里`);
+    assert.deepEqual(m[2].split(' · ').map((x) => x.trim()), held(file),
+      `${file}: 索引那一行点名的版本与它实际持有的对不上`);
+  }
+  assert.equal(rows, files.length, '索引一行一卷，一卷不少');
+  // 顶层那一段必须仍能发满一页公告：公告**就是**从它生成的，少一节就少一条（而且是静默的）
+  const list = engineAnnouncements({ changelogPath: join(ROOT, 'CHANGELOG.md') });
+  assert.equal(list.length, NOTICE_LIMITS.announcements,
+    `顶层只发得出 ${list.length} 条公告（上限 ${NOTICE_LIMITS.announcements}）—— 再往下切就会静默少发，把节挪回顶层`);
 });

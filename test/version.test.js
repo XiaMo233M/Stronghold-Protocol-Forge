@@ -8,6 +8,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { APP_VERSION, PROTOCOL_VERSION, DEV_BUILD } from '../shared/constants.js';
 import { isDevVersion } from '../tools/package.mjs';
+import { changelogText } from './helpers/changelog.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
@@ -41,7 +42,9 @@ test('CHANGELOG.md opens with the release version, and the README links it', () 
     const [a, b] = [num(first[1]), num(APP_VERSION)];
     assert.ok(a[0] < b[0] || (a[0] === b[0] && (a[1] < b[1] || (a[1] === b[1] && a[2] < b[2]))), `the newest entry ${first[1]} precedes ${APP_VERSION}`);
   } else assert.equal(first[1], APP_VERSION, 'the newest entry is the current version');
-  assert.match(log, /^## 0\.1\.0 — 2026-10-02/m, 'the first public release stays listed');
+  // 0.1.0 moved into a volume when the log was split (2026-10-12): the assertion is "it is still listed at all",
+  // so read the top file plus every volume. `log` above stays the top file — the newest section has to be there.
+  assert.match(changelogText(ROOT), /^## 0\.1\.0 — 2026-10-02/m, 'the first public release stays listed (a volume counts)');
   const readme = read('README.md');
   assert.match(readme, /\[CHANGELOG\.md\]\(CHANGELOG\.md\)/);
   // shields.io escapes a '-' inside a badge field as '--'

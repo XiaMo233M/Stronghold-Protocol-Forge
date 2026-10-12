@@ -110,6 +110,13 @@
 | [history/0.2.3.md](history/0.2.3.md) | §30 | 0.2.3 |
 | [history/0.2.4.md](history/0.2.4.md) | §31 | 0.2.4 |
 
+### 更新记录的分卷
+
+[CHANGELOG.md](../CHANGELOG.md) 是**索引 + 最近 8 节**；更早的按大版本分卷在 [`changelog/`](changelog/)，每一卷是
+**冻结件**（正文与原文件逐字节相同，一个字都不许改）。顶层那 8 节**不是随便定的** —— 游戏内公告由它生成，
+`server/notices.js` 取前 8 条能展示的，**再往下切就静默少发公告**（守卫在
+[test/docs-paths.test.js](../test/docs-paths.test.js)）。每一卷的版本清单见 `CHANGELOG.md` 顶部那张表。
+
 ### 研究底稿
 
 [research/00-INDEX.md](research/00-INDEX.md) 是这一组的入口。研究文件正文与它的
