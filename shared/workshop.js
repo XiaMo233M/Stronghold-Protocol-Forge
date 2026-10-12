@@ -2180,7 +2180,8 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     && !Object.keys(bondIconFiles).length && !Object.keys(itemIconFiles).length && !Object.keys(artEntries).length
     && !skinEntries.length
     && !Object.keys(orderedOperators).length && !declared.some(contributesDecl)) {
-    // `support` 与 `playtest` 是这份清单里**唯二**「声明了也不算贡献」的字段，所以它们单独出现时必须被点名 ——
+    // 这份清单里「声明了也不算贡献」的字段**都要点名**：`support` / `playtest`（当初只有这两个），
+    // 以及后加的 `variants` / `behaviour`（它们只是「这一局按哪一套跑」的声明，自己不往对局里带任何东西）。
     // 只声明助战的包今天整包被拒（plugin-pack G6：一个 `support: [...]` + `content: []` 的包得到的就是这一条），
     // 而原来的文案里**没有** `support` 这个词，作者只能对着 `EMPTY_PACK` 猜。`support` 只决定**助战卡池**里放谁，
     // 干员本体还是由 `content: ["chess"]` 带进来的 —— 所以放宽它不是这一刀的活（那是既有裁决），把话说明白才是。
