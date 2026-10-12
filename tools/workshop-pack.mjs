@@ -838,7 +838,12 @@ export function packSummary(root, packId, loaded = null, { supportFile = null } 
   const manifest = pack.manifest ?? {};
   const entry = loaded ? loaded.packs.find((p) => p.id === packId) ?? null : null;
   const err = loaded ? loaded.errors.find((e) => e.pack === packId) ?? null : null;
-  const where = entry ? 'loaded' : 'refused';
+  // `target: "stardust"`（DESIGN §28.46）：加载器**认识但不装载**的包。它不是「被拒」（清单合法、`errors` 里没有它），
+  // 但必须在列表里**看得见、且说得出为什么**。从前这一支落进 `refused` 而 `reason` 取自 `errors`（那里没有它）
+  // ⇒ 列表打出 `REFUSED（null）`：读者既不知道它是什么状态，也不知道为什么 —— 一个包「在磁盘上、在列表里、
+  // 却永远进不了游戏、没有任何说明」，正是 docs/WORKSHOP.md §1.1 那条教训的形状。
+  const foreign = loaded ? (loaded.foreign ?? []).find((f) => f.pack === packId) ?? null : null;
+  const where = entry ? 'loaded' : (foreign ? 'foreign' : 'refused');
   const content = Array.isArray(manifest.content) ? manifest.content : [];
   const voiceLines = countVoiceLines(manifest.voices);
   const support = Array.isArray(manifest.support) ? manifest.support : [];
@@ -861,12 +866,12 @@ export function packSummary(root, packId, loaded = null, { supportFile = null } 
   const syntaxError = pack.checked && !pack.checked.ok
     ? { code: pack.checked.error, detail: pack.checked.detail }
     : null;
-  const reason = err ? err.reason : null;
+  const reason = err ? err.reason : (foreign ? foreign.reason : null);
   const refusal = where === 'loaded' || !reason
     ? null
     : (() => {
       const parsed = /^([A-Z][A-Z0-9_]{2,60}): ([\s\S]*)$/.exec(reason);
-      return { code: syntaxError ? syntaxError.code : (parsed ? parsed[1] : 'PACK_LOAD'), detail: parsed ? parsed[2] : reason };
+      return { code: foreign ? 'PACK_FOREIGN' : (syntaxError ? syntaxError.code : (parsed ? parsed[1] : 'PACK_LOAD')), detail: parsed ? parsed[2] : reason };
     })();
   return {
     id: packId,
@@ -881,9 +886,9 @@ export function packSummary(root, packId, loaded = null, { supportFile = null } 
     voiceLines,
     support,
     supportDerived,
-    // 校验结论：加载器自己的答案（loaded / refused + 原因），不是第二套判断
+    // 校验结论：加载器自己的答案（loaded / foreign / refused + 原因），不是第二套判断
     status: where,
-    reason: err ? err.reason : null,
+    reason,
     refusal,
     syntaxOk: pack.checked ? pack.checked.ok : false,
     syntaxError,
@@ -920,7 +925,13 @@ function cliList(root, { json }) {
       const derived = p.supportDerived.map((e) => `${e.id}→阶${e.tier}`).join(' ');
       bits.push(`助战 ${p.support.length} 个${derived ? `（${derived}）` : ''}`);
     }
-    line(`pack ${p.id}`, `"${p.name}"`, `v${p.version}`, `·`, bits.join(' · '), `·`, p.status === 'loaded' ? 'VALID' : `REFUSED（${p.reason}）`);
+    const verdict = p.status === 'loaded'
+      ? 'VALID'
+      : p.status === 'foreign'
+        // 不是「被拒」：清单合法，只是这一格是给**另一个宿主**的。所以用词分开，且**必须带出原因**（DESIGN §28.46）。
+        ? `FOREIGN（本引擎不装载：${p.reason}）`
+        : `REFUSED（${p.reason}）`;
+    line(`pack ${p.id}`, `"${p.name}"`, `v${p.version}`, `·`, bits.join(' · '), `·`, verdict);
     if (p.undeclared.length) {
       line(`  ! 盘上有 ${p.undeclared.map((f) => `${f}.json`).join('、')}，但 pack.json 的 content 没声明 —— 加载器会忽略这些文件`);
       line(`    修法：在 pack.json 的 content 里补上 ${p.undeclared.join('、')}（编辑器里重新保存一次对应内容也会自动补）`);

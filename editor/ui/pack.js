@@ -150,11 +150,25 @@ function renderPackList() {
     const verdict = document.createElement('div'); verdict.className = 'm';
     const tag = document.createElement('span');
     if (p.status === 'loaded') { tag.className = 'tag ok'; tag.textContent = t('加载器接受'); }
+    else if (p.status === 'foreign') { tag.className = 'tag warn'; tag.textContent = p.refusal?.code ?? 'PACK_FOREIGN'; }
     else { tag.className = 'tag err'; tag.textContent = p.refusal?.code ?? p.syntaxError?.code ?? p.reason?.split(':')[0] ?? 'REFUSED'; }
     verdict.append(tag);
     // 被拒的包**在列表里也要看得见理由**（B3a §6 第 4 条 / B5 段）：以前列表只有一个小小的错误标签，理由要点进
     // 这个包才看得到，而 pack.json 读不出来时连标签都只能是 `REFUSED` —— 包看起来就像「不见了」。
-    if (p.status !== 'loaded') {
+    //
+    // `foreign`（`target: "stardust"`，DESIGN §28.46）与「被拒」分开说：它不是缺陷（清单合法，只是这一格是给
+    // **另一个宿主**的），但**必须说出来** —— 一个包在磁盘上、在列表里、却永远不进游戏而没有任何说明，
+    // 正是 docs/WORKSHOP.md §1.1 那条教训。
+    if (p.status === 'foreign') {
+      const why = document.createElement('span');
+      why.className = 'warn';
+      // 单引号 + 拼接，与下面「被拒」那一支同形：`t(\`…\`)` 这种反引号写法不在 test/editorI18n.test.js
+      // 的扫描范围内（它只认 `t('…')` / `t("…")`）⇒ 反引号里的中文会被判成**死键**，译文也永远不生效。
+      why.textContent = ' ' + t('本引擎不装载它：{0}', refusalText(p)).slice(0, 160);
+      if (p.reason) why.title = p.reason;
+      verdict.append(why);
+      el.title = p.reason ?? '';
+    } else if (p.status !== 'loaded') {
       const why = document.createElement('span');
       why.className = 'err';
       why.textContent = ` ${t('已被拒绝：{0}', refusalText(p)).slice(0, 160)}`;
@@ -369,6 +383,11 @@ function renderDetail() {
   if (p.status === 'loaded') {
     verdict.className = 'banner good';
     verdict.textContent = t('✔ 加载器接受这个包（格式与 content 声明都对得上）。改完要重启游戏服务器才会生效。');
+  } else if (p.status === 'foreign') {
+    // `target: "stardust"`（DESIGN §28.46）：清单合法，只是这个包属于**另一个宿主** —— 本引擎认识它、不装载它。
+    // 这一格必须说出来（§1.1 那条教训），而且不能写成「被拒」：作者没写错任何东西。
+    verdict.className = 'banner warn';
+    verdict.textContent = t('⚠ 本引擎不装载这个包：{0}。它不是错误 —— pack.json 是合法的，只是这一份清单是给另一个宿主的。', refusalText(p));
   } else {
     verdict.className = 'banner bad';
     verdict.textContent = t('✘ 加载器不会使用这个包：{0}', refusalText(p))

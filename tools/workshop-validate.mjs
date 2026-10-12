@@ -201,6 +201,16 @@ async function main() {
   for (const e of loaded.errors) {
     report.packs.push({ pack: e.pack, issues: [{ field: '', code: 'PACK_LOAD', severity: 'error', message: e.reason }] });
   }
+  // `target: "stardust"` 的包（DESIGN §28.46）：本引擎**认识但不装载**。它既不是错误（清单是合法的、也没有错误码），
+  // 也绝不能**在报告里消失** —— 一个包从报告里消失，作者能看到的只有「我建的包不见了」，而它明明在磁盘上：
+  // 那正是 docs/WORKSHOP.md §1.1 那条教训（`content` 没声明 `chess` ⇒ 编辑器里在、磁盘上在、**永远进不了游戏、
+  // 没有任何报错**）。所以它在这里有一行**具名 warning**：说清它是谁、为什么没被装载。warning 而不是 error，
+  // 因为「这一格是给另一个宿主的」本身不是缺陷 —— 只有**不说**才是。
+  for (const f of loaded.foreign ?? []) {
+    report.packs.push({ pack: f.pack, issues: [{ field: 'target', code: 'PACK_FOREIGN', severity: 'warning', message: f.reason }] });
+  }
+  // 机器可读的那一份：`packs[]` 里已经有它，这里再给一份**按包 id 直接查**的列表（`--json` 的消费者不必遍历 issues）。
+  report.foreign = (loaded.foreign ?? []).map((f) => ({ pack: f.pack, reason: f.reason }));
   const packs = only ? loaded.packs.filter((p) => p.id === only) : loaded.packs;
   if (only && packs.length === 0) throw new Error(`no loadable pack named "${only}" under ${root}`);
 
@@ -771,6 +781,10 @@ async function main() {
     }
     console.log(`\n${report.errors} error(s), ${report.warnings} warning(s)`);
     if (report.errors === 0) console.log('VALID: the engine accepts this content.');
+    // 「接受」与「装载」是两件事（DESIGN §28.46）：收尾那一句不能让人以为报告里的每一个包都进游戏。
+    if (report.foreign.length) {
+      console.log(`NOTE: ${report.foreign.length} pack(s) target another host ("stardust") — this engine recognises them but does not load them (see the WARN lines above).`);
+    }
   }
   process.exit(report.errors ? 1 : 0);
 }

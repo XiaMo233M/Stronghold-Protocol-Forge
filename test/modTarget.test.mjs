@@ -8,11 +8,15 @@
 //      与 `/mods/catalog.json` 对老包逐字节不变。
 //   ④ 跨宿主误用：给 Stardust 宿主的包落在 Forge 上时是**具名**的（`foreign` 一行 + 一行启动日志），
 //      不是「静默半可用」—— 同时它确实**不会**进 `/mods/catalog.json`，这一条在报告里如实写出，不藏。
+//   ⑤ 三面接线（业主裁定 2026-10-12）：`foreign` 必须**响亮** —— 校验器 / 管理器 CLI / 编辑器三个作者可见面
+//      都要**点名**它、且说得出**为什么**。这一条也有牙：把任一面接回「不读 foreign」⇒ 当场红。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import {
   normalizePackManifest, PACK_FIELDS, PACK_TARGETS, STARDUST_TARGET_FIELDS, STARDUST_CAPABILITY_FIELDS,
@@ -21,6 +25,10 @@ import { canonicalJson, sha256Hex } from '../shared/modIdentity.js';
 import { MOD_API_VERSION, PROTOCOL_VERSION } from '../shared/constants.js';
 import { loadWorkshop } from '../server/workshop.js';
 import { buildModCatalog } from '../server/modCatalog.js';
+import { createEditorServer } from '../editor/server.mjs';
+
+const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const DATA_DIR = path.join(ROOT, 'data');
 
 /** 语料包的公共元信息（与实测脚本 `_up/k10/target-probe.mjs` 的语料逐字相同）。 */
 const M = (over) => ({ id: 'corpus-pack', name: '语料包', version: '1.0.0', license: 'CC0-1.0', ...over });
@@ -206,5 +214,112 @@ test('④ 跨宿主误用：stardust 包**不在** /mods/catalog.json 里（如�
       'stardust 包不进目录 ⇒ 客户端看不到它。具名日志是服务端那一侧的唯一信号');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---- ⑤ 三面接线（业主裁定 2026-10-12）：`foreign` 必须**响亮** ----------------------------------------------
+//
+// 「接受但不装载」如果只在启动日志里说一句，作者可见的三个面（校验器 / 管理器 CLI / 编辑器）就都是静默的：
+// 包在磁盘上、在列表里、却永远进不了游戏而没有任何说明 —— 正是 docs/WORKSHOP.md §1.1 那条教训的形状
+//（`content` 没声明 `chess` ⇒ 编辑器里在、磁盘上在、永远进不了游戏、没有任何报错）。
+// 下面三条钉住：三个面都必须**点名**它，而且都要说得出**为什么**（不是 `REFUSED（null）`）。
+
+/** 一个只装着 stardust 包的 workshop 目录（三条接线测试共用）。 */
+function starFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sp-target-wire-'));
+  fs.mkdirSync(path.join(dir, 'sd-pack'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'sd-pack', 'pack.json'),
+    `${JSON.stringify({ id: 'sd-pack', name: 'sd', version: '1.0.0', license: 'CC0-1.0', target: 'stardust', type: 'mod', capabilities: [] }, null, 2)}\n`);
+  return dir;
+}
+
+const runCli = (script, argv) => spawnSync(process.execPath, [path.join(ROOT, 'tools', script), ...argv], { encoding: 'utf8', timeout: 180000 });
+
+test('⑤ 接线①校验器：stardust 包在报告里**具名**（PACK_FOREIGN warning），不是「一行都不提」', () => {
+  const dir = starFixture();
+  try {
+    const json = runCli('workshop-validate.mjs', [dir, '--json']);
+    assert.equal(json.status, 0, `它是 warning 不是 error ⇒ 退出码仍是 0（stderr: ${json.stderr}）`);
+    const report = JSON.parse(json.stdout);
+    const row = report.packs.find((p) => p.pack === 'sd-pack');
+    assert.ok(row, 'stardust 包必须在报告里出现 —— 从报告里消失 = 作者看到的只有「我建的包不见了」');
+    const issue = row.issues.find((i) => i.code === 'PACK_FOREIGN');
+    assert.ok(issue, '必须有一条 PACK_FOREIGN');
+    assert.equal(issue.severity, 'warning', '清单是合法的 ⇒ 不是 error');
+    assert.match(issue.message, /Stardust host/, '理由要说清它是给哪个宿主的');
+    assert.deepEqual(report.foreign, [{ pack: 'sd-pack', reason: issue.message }], '--json 另外给一份按包 id 直接查的列表');
+
+    const text = runCli('workshop-validate.mjs', [dir]);
+    assert.match(text.stdout, /sd-pack/);
+    assert.match(text.stdout, /PACK_FOREIGN/);
+    assert.match(text.stdout, /Stardust host/);
+    assert.match(text.stdout, /1 warning/, '它计入 warning');
+    assert.match(text.stdout, /NOTE: 1 pack\(s\) target another host/, '收尾那句要说清「接受 ≠ 装载」');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('⑤ 接线②管理器 list：`REFUSED（null）` 变成具名的 `FOREIGN（本引擎不装载：…）`，reason 有值', () => {
+  const dir = starFixture();
+  try {
+    const json = runCli('workshop-pack.mjs', ['list', '--workshop', dir, '--json']);
+    const body = JSON.parse(json.stdout);
+    const p = body.packs.find((x) => x.id === 'sd-pack');
+    assert.ok(p, '列表里必须有它');
+    assert.equal(p.status, 'foreign', '既不是 loaded 也不是 refused');
+    assert.equal(typeof p.reason, 'string', 'reason 必须有值 —— 从前的 `REFUSED（null）` 就是这一处为 null');
+    assert.match(p.reason, /Stardust host/);
+    assert.equal(p.refusal.code, 'PACK_FOREIGN');
+
+    const text = runCli('workshop-pack.mjs', ['list', '--workshop', dir]);
+    assert.match(text.stdout, /FOREIGN（本引擎不装载：/);
+    assert.match(text.stdout, /Stardust host/);
+    assert.doesNotMatch(text.stdout, /REFUSED（null）/, '这个字符串本身就是那个缺陷');
+    assert.doesNotMatch(text.stdout, /REFUSED（/, 'stardust 包不是「被拒」：用词要分开');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('⑤ 接线③编辑器：包管理页拿到的是 `foreign` + 同一句原因（不是 refused / null）', async () => {
+  const dir = starFixture();
+  let editor = null;
+  try {
+    editor = await createEditorServer({ workshopRoot: dir, port: 0, host: '127.0.0.1', dataDir: DATA_DIR, supportFile: path.join(dir, 'support.json') });
+    const body = await fetch(`${editor.url}/api/packs/support`).then((r) => r.json());
+    const p = (body.packs ?? []).find((x) => x.id === 'sd-pack');
+    assert.ok(p, '编辑器必须列出它 —— 列表里消失 = 作者唯一能看到的结论是「我的包不见了」');
+    assert.equal(p.status, 'foreign');
+    assert.match(p.reason, /Stardust host/);
+    assert.equal(p.refusal.code, 'PACK_FOREIGN');
+    assert.match(p.refusal.detail, /Stardust host/);
+  } finally {
+    await editor?.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('⑤ 接线③编辑器：**渲染层**真的把 foreign 说出来（这一条有牙，接口对不代表页面说）', () => {
+  // 上面那条只走到 `/api/packs/support`：接口对了，页面照样可以把 `foreign` 当成 `refused` 显示、甚至整行不显示。
+  // `editor/ui/pack.js` 是页面脚本（顶层就跑 `load()` / `mountI18n()`），在 node 里 import 不起来，所以这里对
+  // **源码**立契约 —— 与 test/editorI18n.test.js 检查「源码与词典一致」同一路数：两个渲染分支必须都在，
+  // 且文案必须走 `t('…')` 单引号（反引号写法不在 i18n 扫描范围内，会被判死键、译文也不生效）。
+  const src = fs.readFileSync(path.join(ROOT, 'editor', 'ui', 'pack.js'), 'utf8');
+  const list = src.slice(src.indexOf('function renderPackList'), src.indexOf('function renderDetail'));
+  assert.match(list, /p\.status === 'foreign'/, '列表行必须单独认 foreign（否则它落进「已被拒绝」那一支，用词就错了）');
+  assert.match(list, /t\('本引擎不装载它：\{0\}'/, '列表行文案要走单引号 t()');
+  assert.doesNotMatch(list, /t\(`/, '反引号写法不算数：i18n 扫描器看不见它 ⇒ 死键 + 英文页留在中文');
+
+  const detail = src.slice(src.indexOf('function renderDetail'));
+  assert.match(detail, /p\.status === 'foreign'/, '详情页也必须单独认 foreign');
+  assert.match(detail, /banner warn/, '用 warn 而不是 bad —— 清单合法，作者没写错任何东西');
+  assert.match(detail, /t\('⚠ 本引擎不装载这个包：\{0\}/, '详情页文案要走单引号 t()');
+  assert.doesNotMatch(detail, /t\(`/, '详情页同样不许用反引号');
+
+  // 两条文案都要在英文词典里（`t()` 查不到就原样返回中文，英文页会静默留在中文）。
+  const en = fs.readFileSync(path.join(ROOT, 'editor', 'ui', 'i18n.en.pack.js'), 'utf8');
+  for (const key of ['本引擎不装载它：{0}', '⚠ 本引擎不装载这个包：{0}。它不是错误 —— pack.json 是合法的，只是这一份清单是给另一个宿主的。']) {
+    assert.ok(en.includes(key), `英文词典缺这一条：${key}`);
   }
 });

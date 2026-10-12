@@ -51,6 +51,8 @@ export const EN_PACK = Object.freeze({
   '候选只是提示，不是白名单：可以直接手输任何 `<文件>:<id>`（官方没有的 id 也能声明，只是不会生效）。': 'The candidates are hints, not a whitelist: you may type any `<file>:<id>` by hand (an id the official data lacks can be declared too — it just does nothing).',
   '✔ 加载器接受这个包（格式与 content 声明都对得上）。改完要重启游戏服务器才会生效。': '✔ The loader accepts this pack (its format and content declaration agree). Restart the game server for changes to take effect.',
   '✘ 加载器不会使用这个包：{0}': '✘ The loader will not use this pack: {0}',
+  '本引擎不装载它：{0}': 'This engine does not load it: {0}',
+  '⚠ 本引擎不装载这个包：{0}。它不是错误 —— pack.json 是合法的，只是这一份清单是给另一个宿主的。': '⚠ This engine does not load this pack: {0}. It is not an error — pack.json is valid; this manifest is simply meant for another host.',
   '商店售价': 'Shop price',
   '阶级价': 'tier price',
   '先勾上「助战」再定价：不在卡池里的价目没人会用到': 'Tick the support box first: a price for an operator outside the pool is never read',
