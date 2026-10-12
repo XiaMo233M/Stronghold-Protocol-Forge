@@ -405,12 +405,12 @@ talents: [{
 | 附伤 / 反伤 / 回技力 / 叠层 | `damaged` `{ source, target, amount, type, dmg, credit }` | 伤害真的落地之后（`server/sim/damage.js:436`）；`amount` 可能为 0（全被盾吃掉） |
 | 元素损伤倍率 | `elementHit` `{ source, target, dmg }` | 只给元素损伤（`server/sim/damage.js:508`），改 `dmg.amount` / `dmg.mul` / `cancel` |
 | 不死 / 保留 1 点血 | `fatal` `{ unit, source, credit, dmg, amount, prevented }` | `ctx.prevented = true` 就是不死（`server/sim/damage.js:415`） |
-| 击杀叠层 | `kill` `{ killer, victim }` | `killer` 可能是召唤物或 `null`，要判 `killer === unit`（`server/sim/battle/deploy.js:77`）；召唤物击杀另有 `summonKill`（`server/sim/content/tokens.js:1747`） |
-| 清自己的标记 / 召唤物随主人消失 | `death` `{ unit, reason, killer, dying }` | 任何单位死亡（含友军、撤退、漏怪；`server/sim/battle/deploy.js:149`） |
+| 击杀叠层 | `kill` `{ killer, victim }` | `killer` 可能是召唤物或 `null`，要判 `killer === unit`（`server/sim/battle/deploy.js:81`）；召唤物击杀另有 `summonKill`（`server/sim/content/tokens.js:1749`） |
+| 清自己的标记 / 召唤物随主人消失 | `death` `{ unit, reason, killer, dying }` | 任何单位死亡（含友军、撤退、漏怪；`server/sim/battle/deploy.js:153`） |
 | 「受到攻击时」的反伤 | `damaged` + 自己判来源 | 官方口径是**任何敌方来源的伤害实例**（不是只有普攻），并且要跳过 `counter` / `reflect` / 流失 / 元素损伤 —— 内联版就是 `byEnemyAttack`： |
-| 部署时给东西 | `deploy` `{ unit, initial, move? }` | `initial: true` 才是开局那一次；`move: true` 是【移动】再部署（`server/sim/battle/deploy.js:66`、`server/sim/battle/tiles.js:56`） |
+| 部署时给东西 | `deploy` `{ unit, initial, move? }` | `initial: true` 才是开局那一次；`move: true` 是【移动】再部署（`server/sim/battle/deploy.js:70`、`server/sim/battle/tiles.js:56`） |
 | 技能起止 | `skillStart` / `skillEnd` `{ unit, skill, reason }` | `skillStart` 里挂的、`skillEnd` 里清；`onEnd` 跑的时候技能加成**还在**（`server/sim/skills.js:503`、`:556`） |
-| 每帧 | `tick` `{ dt }` | 只用来做轻量的条件检查（`server/sim/battle/lifecycle.js:102`） |
+| 每帧 | `tick` `{ dt }` | 只用来做轻量的条件检查（`server/sim/battle/lifecycle.js:111`） |
 | 定时 | `battle.after` / `battle.every` | 战斗自己的时钟（`server/sim/battle/hooks.js:112`、`:119`）；`setTimeout` 会被 `KIT_NONDETERMINISTIC` 抓 |
 
 「受到攻击时」的内联口径（官方版：`server/sim/content/kits/shared/tier1.js:80`）：
@@ -431,7 +431,7 @@ const byEnemyAttack = (ctx) => {
    （每次部署 +1：`server/sim/battle/deploy.js:39`）。
 2. **`battle.after` 的回调在单位死后仍会跑**（定时器在 step 开头统一执行）。回调里第一行就要自己判：
    `if (!unit.alive || !unit.deployed || unit.deploySeq !== seq) return;` —— 官方写法见
-   `server/sim/content/kits/ops/chess_char_1_01-inside.js:36`。`unit.deployedAt`（`server/sim/battle/deploy.js:41`）用来
+   `server/sim/content/kits/ops/chess_char_1_01-inside.js:36`。`unit.deployedAt`（`server/sim/battle/deploy.js:43`）用来
    算「部署后过了多少秒」。
 3. **`skillStart` 早于 `deploy`**（`activateOnDeploy` 的技能：`docs/SIM.md:925`），所以「部署时」的逻辑不要假设技能还没开；
    反过来，在 `skillStart` 里读 `unit.deployedAt` 是安全的。
@@ -455,7 +455,7 @@ battle.addBuff(unit, { key: 'ws:count', refresh: 'stack', maxStacks: 99, duratio
 - **封顶要自己判**。`maxStacks` 只管 buff 的层数，不管你的效果逻辑；超了要在加之前 `return`
   （官方例子：`server/sim/content/kits/ops/chess_char_3_04-swire2.js:243`）。
 - **要不要跨部署保留**：写 `persist: true, allowDead: true` 就留着（`server/sim/buffs.js:173`）；不写就随单位退场消失。
-  死亡时想清干净，在 `death` 里 `battle.removeBuff(unit, key)`（`server/sim/battle/deploy.js:149`）。
+  死亡时想清干净，在 `death` 里 `battle.removeBuff(unit, key)`（`server/sim/battle/deploy.js:153`）。
 - **层数状态挂在 buff 上，不要自己数**：`unit.findBuff(key).stacks` 就是唯一真相；`duration: Infinity` + `refresh: 'stack'`
   的组合天然自带「累计、封顶、随 key 唯一」。
 - **一场战斗级的计数**（「这场里第 3 次技能」）用 `unit.mem`（`server/sim/units.js:83`）或按 `battle` 作键的 `WeakMap`
@@ -498,9 +498,9 @@ const def = battle.tokenDef('token_ws_my_drone', unit);
   固定点位用 `battle.findTacticalPoint(unit)`（`server/sim/battle/tiles.js:130`）。
 - **本包自带 token 记录**：`tokens.json` 是允许工坊贡献的数据文件之一（`shared/workshop.js:44`，形状与 `data/tokens.json`
   同形，记录里的 `tokenId` 字段必须等于键：`shared/workshop.js:48`），放进 `pack.json.content` 里声明即可。
-- **召回 / 让召唤物离场**：`battle.retreat(token, { reason: 'retreat' })`（`server/sim/battle/deploy.js:94`）；
-  让它原地回来：`battle.redeploy(token, { free: false, tile: [r, c] })`（`server/sim/battle/deploy.js:198`）。
-- **召唤物的击杀**：引擎发 `summonKill` `{ token, owner, victim }`（`server/sim/content/tokens.js:1747`），
+- **召回 / 让召唤物离场**：`battle.retreat(token, { reason: 'retreat' })`（`server/sim/battle/deploy.js:98`）；
+  让它原地回来：`battle.redeploy(token, { free: false, tile: [r, c] })`（`server/sim/battle/deploy.js:202`）。
+- **召唤物的击杀**：引擎发 `summonKill` `{ token, owner, victim }`（`server/sim/content/tokens.js:1749`），
   召唤流干员听这个。
 - **引擎不提供（`import` 的那两个）**：
   - `releaseSkillSummon`（`server/sim/content/tokens.js:388`）—— 官方「技能召唤物做成一张手牌、开局免费部署一次、技能再

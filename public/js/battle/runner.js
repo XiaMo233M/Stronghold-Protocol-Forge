@@ -1037,7 +1037,7 @@ export function createBattleRunner(deps) {
         });
       }
       const players = [];
-      // **照 `Battle._buildResult()` 的配对写法**（`server/sim/battle/lifecycle.js:209-210`）：座位对象是
+      // **照 `Battle._buildResult()` 的配对写法**（`server/sim/battle/lifecycle.js:218-219`）：座位对象是
       // `battle.players[]`，而每人那本伤害账在 `battle._perPlayer[playerId]` —— **不是同一个对象**。写错一边
       // （例如去读 `getPlayer(pid).damageDealt`）会永远读到 0，而单位那几行照样有数字：正是「面板可以画错、
       // 但不能算错」要消灭的那种静默错误。

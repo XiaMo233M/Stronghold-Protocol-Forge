@@ -360,7 +360,7 @@ right (it is a memory and wire budget) so the design keeps it and adds what the 
 when the detail log is truncated. The counters are what reaches the author (§28.7).
 
 **Time budget.** There is no timeout that can interrupt a handler: a tick is one synchronous call
-(`server/sim/battle/lifecycle.js:61`), so a loop in a pack hangs a battle in the browser and, for a server-run field,
+(`server/sim/battle/lifecycle.js:70`), so a loop in a pack hangs a battle in the browser and, for a server-run field,
 a scheduler callback. The design does not pretend to add preemption (that is a runtime change, not a middle-layer one).
 What it does is make the budget visible and enforceable at load: a pack's verification run (§28.6) measures the wall
 clock of the fixed scenario list with and without the pack, and a `combat: false` pack whose cost exceeds a declared
@@ -779,7 +779,7 @@ someone runs it on a machine with Chrome this remains the standing gap recorded 
 **The defect, stated as the code states it.** §28.12 closed the kit *import* surface. The kit **key** surface was still
 one-sided: `server/sim/content/index.js setupUnitKit()` resolves an operator's kit through `kitOf()` (keyed by
 `def.charId` for a 补位 / 自选 piece, else `def.baseId` / `def.id`), and a **summon's** kit through a second, entirely
-separate table — `tokens.kits?.[def.id]` (`server/sim/content/tokens.js:1622` builds it from `RAW_KITS`, one entry per official token).
+separate table — `tokens.kits?.[def.id]` (`server/sim/content/tokens.js:1624` builds it from `RAW_KITS`, one entry per official token).
 That table is the engine's: a pack can ship `tokens.json` records, but it cannot put behaviour behind them. The
 consequence is the worst kind — a pack's summon has data and no behaviour layer, and **nothing reports it**.
 
@@ -2586,7 +2586,7 @@ JSON 可序列化值**的回调。
   代价（`_up/dps-probe-3.mjs`，四个公开 perf spec 前 600 tick、N=30 交替取样）：写元组本体 95（normal）/ 425（boss）
   / 435（hidden）次每 1000 tick，各配置的 p50 差值 ≤ 1.1 ms，全部落在噪声（sd 2–9 ms）内。
 * **配的是引擎自己那本账**：逐人那几行照 `Battle._buildResult()` 的写法配对
-  （`server/sim/battle/lifecycle.js:209-210`：座位在 `battle.players[]`，账在 `battle._perPlayer[playerId]`，
+  （`server/sim/battle/lifecycle.js:218-219`：座位在 `battle.players[]`，账在 `battle._perPlayer[playerId]`，
   **不是同一个对象**）。写错一边（例如 `getPlayer(pid).damageDealt`）会永远读到 `0`，而单位那几行照样有数字 ——
   这个静默错误由 `test/modClientBattleReads.test.js` 钉住。
 
