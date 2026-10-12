@@ -10,6 +10,13 @@
 // **切点由公告定，不由体积定**：顶层那一段必须仍能让 `server/notices.js` 发满 `NOTICE_LIMITS.announcements`
 // 条公告，否则游戏内公告会**静默变少**。钉它的是 `test/docs-paths.test.js` 那条守卫与
 // `test/packNotices.test.js` 的「更新记录最上面那一节一定在公告里」。
+//
+// ⚠️ **凡直读顶层 `CHANGELOG.md` 的消费者都要跟着改** —— 这是分卷唯一的坑，2026-10-12 真踩过：
+// 顶层只剩最近 8 节，老节搬进了 `docs/changelog/`，所以一个 `readFileSync('CHANGELOG.md')` 再
+// `slice('## 0.1.1', '## 0.1.0')` 的测试会拿到**空串**（断言空转失败）。要老节就用这里的 `changelogText()`。
+// 找它们要**递归**扫：`git grep -n CHANGELOG -- test tools server` —— 只扫 `test/*.js` 会漏掉
+// `test/match/` 这种子目录（`test/match/feedback1-gaps.test.js` 就是这么漏的）；而且**定向跑测试不会红，
+// 只有全量会** —— 所以改这种「搬移内容 / 改读取路径」的活，落地前必须跑一次全量。
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';

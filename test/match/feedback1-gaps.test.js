@@ -19,6 +19,7 @@ import { validateClientResult } from '../../server/match/fields.js';
 import { bandBondIds as bandBondIdsOf } from '../../shared/bandBonds.js';
 import { DATA, makeMatch, give, legalTileFor, checkInvariants } from './harness.js';
 import { designText } from '../helpers/designDocs.js';
+import { changelogText } from '../helpers/changelog.js';
 
 const MLYSS = 'chess_char_6_11_a'; // 缪尔赛思 (调和)
 const members = (bond, n) => Object.values(DATA.chess).filter((c) => c.visible && !c.isGolden && c.bonds.includes(bond) && !c.bonds.includes(HARMONY_BOND)).map((c) => c.chessId).sort().slice(0, n);
@@ -283,7 +284,8 @@ test('§21.26 docs: DESIGN (the subsection and the normative lines), META, PLAYI
   assert.match(META, /\*\*Strategy\*\* \(`botPickBand`\)/);
   assert.match(META, /carries `harmony: 1` in both lists/);
   assert.match(doc('docs/PLAYING.md'), /盟约详情会写「含调和 \+1」/);
-  const log = doc('CHANGELOG.md');
+  // 0.1.1 那一节在 2026-10-12 分卷后住在 docs/changelog/0.1.md ⇒ 读「顶层 + 各分卷」，断言原文一字不动
+  const log = changelogText(fileURLToPath(new URL('../../', import.meta.url)));
   const v011 = log.slice(log.indexOf('## 0.1.1'), log.indexOf('## 0.1.0'));
   assert.match(v011, /变形同构体的详情卡列出天赋栏里的对应关系/);
   assert.match(v011, /盟约详情写明「含调和 \+1」/);
