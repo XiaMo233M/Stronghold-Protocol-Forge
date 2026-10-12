@@ -16,6 +16,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { designText, DESIGN_DIRS } from './helpers/designDocs.js';
+import { PLAYER_MARKDOWN, rewritePlayerDoc, selectTracked, trackedFiles } from '../tools/package.mjs';
 import { CHANGELOG_DIR, changelogSections, changelogVolumeFiles } from './helpers/changelog.js';
 import { engineAnnouncements, NOTICE_LIMITS } from '../server/notices.js';
 
@@ -185,4 +186,29 @@ test('CHANGELOG: every `## x.y.z — date` section sits exactly once in the inde
   const list = engineAnnouncements({ changelogPath: join(ROOT, 'CHANGELOG.md') });
   assert.equal(list.length, NOTICE_LIMITS.announcements,
     `顶层只发得出 ${list.length} 条公告（上限 ${NOTICE_LIMITS.announcements}）—— 再往下切就会静默少发，把节挪回顶层`);
+});
+
+test('shipped markdown: a source link exists or is releases/latest, and the packaged copy only links to shipped files', () => {
+  const shipped = new Set(selectTracked(trackedFiles(ROOT)).keep);
+  const version = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version;
+  assert.ok(PLAYER_MARKDOWN.length >= 6, PLAYER_MARKDOWN.join(' '));
+  for (const rel of PLAYER_MARKDOWN) {
+    const md = readFileSync(join(ROOT, rel), 'utf8');
+    for (const m of md.matchAll(/\]\(([^)\s]+)\)/g)) {
+      const href = m[1];
+      if (/^(?:[a-z]+:|#)/i.test(href)) continue;
+      const raw = href.replace(/#.*$/, '');
+      const norm = normalize(join(dirname(rel), raw)).split('\\').join('/');
+      if (norm.startsWith('..')) assert.match(norm, /^(?:\.\.\/)+releases\/latest$/, `${rel} → ${href}`);
+      else assert.ok(existsSync(join(ROOT, norm)), `${rel} → ${href}`);
+    }
+    const next = rewritePlayerDoc(md, rel, shipped, version);
+    for (const m of next.matchAll(/\]\(([^)\s]+)\)/g)) {
+      const href = m[1];
+      if (/^(?:[a-z][a-z0-9+.-]*:|#)/i.test(href)) continue;
+      const raw = href.replace(/#.*$/, '');
+      const norm = normalize(join(dirname(rel), raw)).split('\\').join('/');
+      assert.ok(shipped.has(norm), `${rel} packaged link ${href} (${norm}) is not in the zip`);
+    }
+  }
 });
