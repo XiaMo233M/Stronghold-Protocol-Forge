@@ -27,6 +27,7 @@
 | 改界面、渲染、棋面 | [design/client.md](design/client.md) |
 | 改联网与协议 | [design/network.md](design/network.md) · [NET-TUNING.md](NET-TUNING.md) |
 | 写工坊包（mod） | [WORKSHOP.md](WORKSHOP.md) → [MOD-SURFACE.md](MOD-SURFACE.md) |
+| **我这份投稿算不算标准包** | [STANDARD-PACK.md](STANDARD-PACK.md) — 七种形态定级、`functional`/`documentation` 判据、非标准的怎么办 |
 | 改工坊编辑器 | [EDITOR.md](EDITOR.md) |
 | 加语言、改界面文案 | [I18N.md](I18N.md) |
 | 改数值与平衡 | [BALANCE.md](BALANCE.md) · [PLAYING.md](PLAYING.md) |
@@ -59,6 +60,7 @@
 | [NET-TUNING.md](NET-TUNING.md) | 网络可调参数（`m.public` 增量帧） |
 | [WORKSHOP.md](WORKSHOP.md) | 创意工坊与助战（本项目自行新增） |
 | [MOD-SURFACE.md](MOD-SURFACE.md) | mod 表面清单（pack-facing ABI）：一个包能依赖引擎的哪些东西 |
+| [STANDARD-PACK.md](STANDARD-PACK.md) | **标准包规范**：七种投稿形态的定级、标准包的四条硬要求、`functional`/`documentation`/`unknown` 判据、非标准形态（补丁型 / 安装器型）怎么处置 |
 | [EDITOR.md](EDITOR.md) | 工坊编辑器（可选、独立分发） |
 | [PLAYING.md](PLAYING.md) | 玩法指南（给玩家） |
 | [DEPLOY.md](DEPLOY.md) | 部署指南（长期开服） |
