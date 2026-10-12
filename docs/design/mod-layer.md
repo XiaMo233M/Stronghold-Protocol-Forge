@@ -112,7 +112,7 @@ hash too. Before this, `catalogFiles` dropped that row (its file read failed), s
 is complete" and "the download list looks complete".
 
 What deliberately does **not** participate: the mtime "version" that currently versions kit URLs
-(`server/workshop.js:414` — a version credential that is not a content hash, and the reason `docs/WORKSHOP.md:447`
+(`server/workshop.js:414` — a version credential that is not a content hash, and the reason `docs/WORKSHOP.md:597`
 records content addressing as unimplemented), the pack directory's absolute path, and any engine code. The last one
 matters and is the answer for the third file the ruling names:
 
@@ -123,7 +123,7 @@ matters and is the answer for the third file the ruling names:
   hash covers a pack's own bytes; the **engine** half of the identity is `api` (§28.5). One consequence has to be
   designed for rather than discovered later: a loadout pick is validated against the **merged** data
   (`shared/protocol.js:149` `checkLoadout`, `:180` `resolveLoadout`), and an id that exists on the server can be an
-  unknown id in a client that has a different pack set — where `lookup` returns `null` (`server/data.js:144-147`) and
+  unknown id in a client that has a different pack set — where `lookup` returns `null` (`server/data.js:152-155`) and
   nothing throws. **Identity must therefore be established at the handshake, before any loadout is exchanged**, and the
   client must refuse to resolve a loadout at all until it has the server's digest.
 
@@ -184,7 +184,7 @@ substance; the first step of the slice carries them, `docs/WORKSHOP.md` §1.2 st
 | collision | the rule | where it is enforced |
 |---|---|---|
 | a **new** id claimed by two packs — a data record | **refused, and the report names the pack that holds it** (neither author's claim can be preferred) | `shared/workshop.js:1104-1108` (`PACK_ID_COLLISION`, `definedBy`) |
-| a new kit id claimed by two packs | **refused, and the report names the pack that holds it** | `server/workshop.js:392-396` (`KIT_ID_COLLISION`, `definedBy`) |
+| a new kit id claimed by two packs | **refused, and the report names the pack that holds it** | `server/workshop.js:1229-1233` (`KIT_ID_COLLISION`, `definedBy`) |
 | two packs **overriding the same existing record** (an official id, or a record another pack contributed) | **the smaller pack id wins + the conflict is reported** (`definedBy` names the pack that was passed over) | `shared/workshop.js:1104-1108` and `:986-990` |
 | an icon / item icon / art entry claimed by two packs | **the smaller pack id wins**; the loser is reported and named | `shared/workshop.js:1479-1483`, `:1429-1433`, `:1578-1582` |
 | `overrides` declares the replacement of an **OFFICIAL** id | **allowed, and the declaration is what makes it allowed** | `shared/workshop.js:14-16`, `:986-990` |
@@ -219,7 +219,7 @@ pack id that holds the record, or the string `official`. The text says the same 
 - official: `"<id>" already exists in the official data — add "<file>:<id>" to pack.json overrides to replace it` (`OFFICIAL_ID_COLLISION`)
 - against another pack: `"<id>" is already contributed by pack "<X>" — the pack with the smaller id keeps it (DESIGN
   §28.3). Rename this record, or let "<X>" drop it; an "overrides" entry does not win against another pack` (`PACK_ID_COLLISION`)
-- kit: `kit "<id>" is already defined by pack "<X>"` (`KIT_ID_COLLISION`, `server/workshop.js:392-396`)
+- kit: `kit "<id>" is already defined by pack "<X>"` (`KIT_ID_COLLISION`, `server/workshop.js:1229-1233`)
 - icon / art: `another pack (<X>) already ships …` (`ASSET_COLLISION`, with `definedBy` as well)
 
 Why it matters enough to be a section: the data path used to say "**official** data" for both cases, because the
@@ -370,9 +370,9 @@ inventing a timer.
 
 ### 28.5 Versioning (gap 4)
 
-`gameVersion` is metadata and nothing reads it (`docs/WORKSHOP.md:447` records version alignment, dependency
-declaration and content addressing as unimplemented), while the editor writes the string `'0.2.1'` in ten places
-(`editor/server.mjs:1928` and nine siblings, `tools/workshop-scaffold.mjs:82`, `editor/ui/pack.js:94`). Two problems,
+`gameVersion` is metadata and nothing reads it (`docs/WORKSHOP.md:597` records version alignment, dependency
+declaration and content addressing as unimplemented), while the editor writes the string `'0.2.2'` in seven places
+(`editor/server.mjs:1986` and six siblings, `tools/workshop-scaffold.mjs:82`, `editor/ui/pack.js:94`). Two problems,
 one shape.
 
 **Declare two ranges, and reuse the machinery that already exists.** `shared/packs.js` already implements exactly what
@@ -408,13 +408,14 @@ while writing this section.
    the source and requires the symbols to still be declared there (`test/kitAuthoring.test.js`).
 2. `docs/WORKSHOP.md` §4.3 carried the same stale citation. **Fixed**, and the guard above now covers that file too.
 3. `docs/prompts/kit.md` cites `server/sim/Battle.js:113` for "`battle.flags` is a construction-time input" in three
-   places, while `this.flags` is assigned at `server/sim/Battle.js:124` and line 113 is a statement about `this.rect`.
+   places, while `this.flags` is assigned at `server/sim/Battle.js:149` and line 113 is a statement about `this.data`.
    The citation guard (`test/promptCitations.test.js`) could not see it: it verified only that the cited line exists and
-   is not blank. **Deliberately not fixed here**: the drift is a consequence of the in-flight 0.2.2 port moving every
-   server-side line number, so the fix belongs to that port rather than to a second branch editing the same file (owner's
-   coordination of 2026-10-09). The upgraded guard below therefore **reports these three today**, each with the line the
-   member really lives on, and turns green by itself when the port changes `:113` to `:124` — no test has to be touched
-   for that. A fourth instance of the same defect, `docs/prompts/kit.md:460`, has no dotted member next to it and is not
+   is not blank. **Deliberately not fixed at the time**: the drift was a consequence of the in-flight 0.2.2 port moving
+   every server-side line number, so the fix belonged to that port rather than to a second branch editing the same file
+   (owner's coordination of 2026-10-09). The upgraded guard below therefore **reported these three**, each with the line
+   the member really lived on, and turned green by itself once the cited line followed the member (`:113` → `:149`) — no
+   test had to be touched for that. A fourth instance of the same defect, `docs/prompts/kit.md:460`, has no dotted member
+   next to it and is not
    judged by the narrow rule below; it needs the same one-line fix and is recorded here so it is not lost.
 
 **The rule now enforced, and its deliberate narrowness.** A `path:line` citation in `docs/prompts/*.md` is judged when
@@ -448,7 +449,7 @@ So verification is a **differential run over the corpus's own scenario generator
 | the pack declares | the check | it fails when |
 |---|---|---|
 | `combat: false` (a performance / refactor mod) | run the fixed scenario list twice in one process — once with the pack's kit map injected (`Battle opts.kits`, `server/sim/content/index.js:112-114`), once without — and require `resultDigest` (`server/sim/spec.js:319-339`) equality per scenario | the pack changes any observable outcome. **This is the enforcement of "a performance mod must be semantically preserving".** |
-| `combat: true` | run the fixed scenario list twice with the pack loaded and require digest equality (the `--twice` idea, `test/golden/README.md:44`), plus the two execution paths the ruling keeps (server headless vs. the browser's module list, `public/js/battle/runner.js:127-145`) | the pack is non-deterministic, or the two paths disagree. |
+| `combat: true` | run the fixed scenario list twice with the pack loaded and require digest equality (the `--twice` idea, `test/golden/README.md:44`), plus the two execution paths the ruling keeps (server headless vs. the browser's module list, `public/js/battle/runner.js:230-233`) | the pack is non-deterministic, or the two paths disagree. |
 
 Both forms reuse what exists: `tools/golden.mjs` builds the scenarios in a fixed order from `data/*.json` and reduces
 each to a digest, and the per-game-second chained snapshot hash inside a digest already says **when** two runs parted
@@ -778,7 +779,7 @@ someone runs it on a machine with Chrome this remains the standing gap recorded 
 **The defect, stated as the code states it.** §28.12 closed the kit *import* surface. The kit **key** surface was still
 one-sided: `server/sim/content/index.js setupUnitKit()` resolves an operator's kit through `kitOf()` (keyed by
 `def.charId` for a 补位 / 自选 piece, else `def.baseId` / `def.id`), and a **summon's** kit through a second, entirely
-separate table — `tokens.kits?.[def.id]` (`tokens.js:1620` builds it from `RAW_KITS`, one entry per official token).
+separate table — `tokens.kits?.[def.id]` (`server/sim/content/tokens.js:1622` builds it from `RAW_KITS`, one entry per official token).
 That table is the engine's: a pack can ship `tokens.json` records, but it cannot put behaviour behind them. The
 consequence is the worst kind — a pack's summon has data and no behaviour layer, and **nothing reports it**.
 

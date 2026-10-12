@@ -94,7 +94,7 @@ server/
       index.js             installs all content into a Battle (kits, bonds, garrisons, items, bands, enemies, devices)
       kits/index.js        operator kit registry keyed by base chessId (guide: kits/README.md)
       kits/ops/*.js        one operator kit (skills + talents) per file, <chessId>-<codename>.js
-      kits/shared/*.js     helpers the kits share (shared/tier1.js: the general ones)
+      kits/shared/*.js     helpers the kits share (kits/shared/tier1.js: the general ones)
       tokens.js            summon/token definitions
       bonds.js             battle side of the 23 bonds
       garrisons.js         battle side (IN_BATTLE) garrison effect keys

@@ -11,7 +11,14 @@
 // **覆盖面 2026-10 扩过一次（`docs/prompts` → 加上 `docs/design`）**：原来只扫 `docs/prompts`，于是
 // `docs/design/mod-layer.md` 里那 **162 处**手写 `文件:行号` **完全在门禁外** —— 而它偏偏是漂移面最大的一份
 // （0.16.0 那一刀就手工重指过 28 处）。这正是「引用会烂而没人知道」的根因：判据存在，但没看着那一份。
-// 扩完当场暴露 19 处既有漂移，登记在下面的 `KNOWN_STALE` 里（**已发现、待修**，不是「允许」）。
+//
+// 扩完当场报 19 处，逐条查下来是**两类**，而且一半以上不是文档的错：
+//   * **10 处文档真错**（`docs/design/mod-layer.md` 9 处 + `overview.md` 1 处）：按**内容**重指到那一行现在真的
+//     在哪（不是加偏移）—— 例：`docs/WORKSHOP.md` 那张「未实现」表从 `:447` 挪到了 `:597`；`KIT_ID_COLLISION`
+//     从 `server/workshop.js:392` 挪到了 `:1229`；`this.flags` 从 `Battle.js:124` 挪到了 `:149`。
+//   * **9 处判据自己的假红**：4 处是**扩展名顺序**（`js` 排在 `json` 前 ⇒ `….json` 被读成 `….js`；见下面 `CITATION`
+//     那一段注释）、5 处是**包内路径**被当成仓库路径（§28.14/§28.15 引的社区包自己的 `server/ops.js` 等；
+//     见 `PACK_INTERNAL_PATHS`）。判据修对了，这 9 处一条文档都没改。
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -32,10 +39,36 @@ const FILES = DIRS
 /** 仓库里真实存在的顶层目录：只有这些开头的裸引用才当作「应该存在」。 */
 const TOP_DIRS = ['server/', 'shared/', 'public/', 'tools/', 'docs/', 'editor/', 'test/', 'scripts/'];
 
-const CITATION = /`([A-Za-z0-9_./-]+\.(?:js|mjs|json|md|css|html)):(\d+)(?:-(\d+))?`/g;
-const BARE = /[A-Za-z0-9_./-]+\.(?:js|mjs|json|md|css|html)/g;
+// ⚠️ **扩展名的顺序有意义**：把 `js` 写在 `json` 前面时，正则会在 `…spines.json` 上先吃掉 `.js` 就收工 ——
+// 于是 `.json` 的文件被读成 `.js` 的文件，门禁凭空报「不存在」（扩到 docs/design 那天实测 4 处假红）。
+// 长的排前面，这条陷阱就没了。
+const CITATION = /`([A-Za-z0-9_./-]+\.(?:json|mjs|js|md|css|html)):(\d+)(?:-(\d+))?`/g;
+const BARE = /[A-Za-z0-9_./-]+\.(?:json|mjs|js|md|css|html)/g;
 
 const lines = (rel) => readFileSync(join(ROOT, rel), 'utf8').split('\n');
+
+/**
+ * 装出来 / git 忽略的东西：新检出里本来就没有它，要求它「存在」是错的（与 `test/docs-paths.test.js` 同一份名单）。
+ * `public/assets/` 是 `npm run setup` 下载的、`.gitignore` 挡着的（AGENTS.md「No game art in git」）。
+ */
+const NOT_IN_A_FRESH_CHECKOUT = ['public/assets/', 'public/vendor/', 'data/local-assets.json'];
+
+/**
+ * **看起来像本仓库的路径、其实不是。** 这几条是**包内**的文件名 —— 社区包自己的 `server/ops.js`、
+ * `server/stats.js`、`server/healthz.js`（§28.14 引它们说明「包的哪些改动这一层表达不了」）、
+ * 包自己的 `public/js/ui/announcementData.js`（§28.15），以及 §28.2 举的「包目录里没人声明的文件」
+ * （`server/rules.mjs`）。判据看不出「这个字符串属于谁」，所以逐条列出来。
+ *
+ * **这份名单只许放这种** —— 不许拿它藏本仓库的真路径；门禁的牙在「真路径必须存在」那一半。
+ * 下面有一条测试核「名单里每一条仍然出现在被扫的文档里」，所以它不会烂在这里。
+ */
+const PACK_INTERNAL_PATHS = Object.freeze([
+  'server/rules.mjs',
+  'server/ops.js',
+  'server/stats.js',
+  'server/healthz.js',
+  'public/js/ui/announcementData.js',
+]);
 
 // ---- 「点进去是别的东西」的判据（见下面那条测试的注释：窄，宁可漏不可误报）-----------------------------------------
 /** 只判这五个引擎语境的根，值 = 该根允许离引用多远（字符）。 */
@@ -107,42 +140,12 @@ function staleMemberClaims(text, name) {
 }
 
 /**
- * **已知漂移台账（临时）** —— 把覆盖面从 `docs/prompts` 扩到 `docs/design` 的那一天，设计文档里这批**既有**的
- * 引用问题当场暴露出来（三条判据合计 19 处，见文件头）。这里登记的是「**已发现、待修**」，**不是**「允许漂移」：
- *   * 某一处被修好 ⇒ 实际数**少于**台账 ⇒ 红（要删掉那条台账，别留着）；
- *   * 出现新的漂移 ⇒ 实际数**多于**台账 ⇒ 红。
- * 所以它不会烂在这里。**修完那批漂移的那一刀把这张表整个删掉**（不是把数改成 0）—— 那时判据回到「一处都不许有」。
- *
- * 按**判据**分档（同一条判据里再按文档分）：三条判据各管一类毛病，混在一起数就说不清是谁的。
- */
-const KNOWN_STALE = Object.freeze({
-  '引用点不到东西': Object.freeze({ 'docs/design/mod-layer.md': 8 }),
-  '这些路径不存在': Object.freeze({
-    'docs/design/client.md': 3,
-    'docs/design/mod-layer.md': 6,
-    'docs/design/overview.md': 1,
-  }),
-  '这些引用点进去是别的东西': Object.freeze({ 'docs/design/mod-layer.md': 1 }),
-});
-
-/**
- * 逐份文档与**该判据那一档**台账对账：每一份的坏引用数**恰好等于**台账里的数（没登记就是 0）。
- * 对完再把登记的那些逐条打出来 —— 报告与修复刀就按这份清单走。
+ * 三条判据共用的收尾断言：**一处都不许有**。
  * @param {Array<{doc: string, msg: string}>} bad
- * @param {keyof typeof KNOWN_STALE} what
+ * @param {string} what
  */
-function assertAgainstLedger(bad, what) {
-  const ledger = KNOWN_STALE[what];
-  const byDoc = new Map();
-  for (const b of bad) byDoc.set(b.doc, (byDoc.get(b.doc) ?? 0) + 1);
-  const wrong = [];
-  for (const rel of FILES) {
-    const got = byDoc.get(rel) ?? 0;
-    const want = ledger[rel] ?? 0;
-    if (got !== want) wrong.push(`${rel}: 实际 ${got} 处，台账 ${want} 处`);
-  }
-  assert.deepEqual(wrong, [], `${what}\n（本文件顶上 KNOWN_STALE 登记的是「已发现、待修」；修好了删条目，新出现的去修）`);
-  if (bad.length) console.log(`\n[${what}] 已登记待修 ${bad.length} 处：\n${bad.map((b) => `  ${b.msg}`).join('\n')}\n`);
+function assertNone(bad, what) {
+  assert.deepEqual(bad.map((b) => b.msg), [], `${what}：\n${bad.map((b) => b.msg).join('\n')}`);
 }
 
 describe('文档里的代码引用（docs/prompts + docs/design，点进去必须有东西）', () => {
@@ -174,7 +177,7 @@ describe('文档里的代码引用（docs/prompts + docs/design，点进去必�
       }
     }
     assert.ok(total > 300, `引用数量看起来不对（只有 ${total} 处）—— 正则是不是失效了？`);
-    assertAgainstLedger(bad, '引用点不到东西');
+    assertNone(bad, '这些引用点不到东西');
   });
 
   test('以仓库顶层目录开头的裸引用（不带行号的那些）也必须存在', () => {
@@ -187,10 +190,13 @@ describe('文档里的代码引用（docs/prompts + docs/design，点进去必�
         if (!TOP_DIRS.some((d) => rel.startsWith(d))) continue;
         if (seen.has(rel)) continue;
         seen.add(rel);
+        // 装出来的目录（判不了它存在）与**包内**路径（不是本仓库的文件）都不判 —— 见上面两份名单的注释。
+        if (NOT_IN_A_FRESH_CHECKOUT.some((e) => rel === e || rel.startsWith(e) || `${rel}/` === e)) continue;
+        if (PACK_INTERNAL_PATHS.includes(rel)) continue;
         if (!existsSync(join(ROOT, rel))) bad.push({ doc: docRel, msg: `${docRel}: 裸引用 ${rel} 不存在` });
       }
     }
-    assertAgainstLedger(bad, '这些路径不存在');
+    assertNone(bad, '这些路径不存在');
   });
 
   // 上面那条只查「点进去有没有东西」。还差一类：**点进去是别的东西** —— 引用指着 `Battle.js:113`，而作者说的事实
@@ -216,7 +222,15 @@ describe('文档里的代码引用（docs/prompts + docs/design，点进去必�
       for (const s of staleMemberClaims(text, docRel)) bad.push({ doc: docRel, msg: s });
     }
     assert.ok(judged >= 8, `只判到 ${judged} 处引用 —— 抽取是不是失效了？`);
-    assertAgainstLedger(bad, '这些引用点进去是别的东西');
+    assertNone(bad, '这些引用点进去是别的东西');
+  });
+
+  // 上面那份「看起来像本仓库、其实是包内路径」的名单不许烂：每一条都得仍然出现在被扫的文档里。
+  // 文档改了、那条不见了 ⇒ 这里红 ⇒ 名单跟着删（否则它会变成一份没人敢碰的豁免表）。
+  test('包内路径名单里的每一条都仍然出现在被扫的文档里', () => {
+    const all = FILES.map((rel) => readFileSync(join(ROOT, rel), 'utf8')).join('\n');
+    const gone = PACK_INTERNAL_PATHS.filter((p) => !all.includes(p));
+    assert.deepEqual(gone, [], '这些已经不在任何被扫文档里了，请从 PACK_INTERNAL_PATHS 删掉');
   });
 
   test('这条判据本身有牙：指错一行的合成引用会被抓出来', () => {
