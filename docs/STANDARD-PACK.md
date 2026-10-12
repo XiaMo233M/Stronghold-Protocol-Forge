@@ -38,6 +38,14 @@
    **不认识的顶层键点名拒绝**（`PACK_UNKNOWN_FIELD`），**绝不读过去** —— 这是这一层最硬的一条纪律。
 3. **必须有"贡献"**：只声明 `variants`（或只有元信息）会被判 **`EMPTY_PACK`** —— 原话是
    「`variants` is NOT a contribution」。要上架就得**至少贡献一样东西**（内容 / 面板 / 规则 / 公告 / 素材…）。
+   **不算贡献项的四个键**（`shared/workshop.js` 的 `notContributions`；只在该包真的声明了它们时才逐字点名）：
+   **`behaviour` · `variants` · `support` · `playtest`** —— 它们**都只是「怎么跑」的声明，自己不往对局里带任何东西**
+   （`behaviour` 选规则档、`variants` 选口径、`support` 只决定助战卡池里放谁、`playtest` 只是试玩时直接发手牌）。
+   ⚠️ **声明行为开关的包必须另带一样真贡献**：`content` / `client` / `notices` / `routes` … 里至少要有一个，
+   否则整包被拒（`EMPTY_PACK` 的文案会逐字写「`"behaviour"` is NOT a contribution — a pack that declares it
+   alone brings nothing into a match」）。**今天 `behaviour` 还多一道**：`shared/behaviour.js` 的
+   `BEHAVIOUR_SWITCHES` 是空表 ⇒ 任何声明都先被 `BEHAVIOUR_UNKNOWN_SWITCH` 拒（首格与它的引擎实现点同刀）；
+   等有一格之后，上面那条「另带一样真贡献」照样管着它。
 4. **版本范围与 `combat`**：
    - `api` 要落在 `MOD_API_VERSION` 相容范围内（今天 `MOD_API_VERSION = 1`，写法 `">=1 <2"`）；
      **不写 `api` 不比对**，但写了就得对。
