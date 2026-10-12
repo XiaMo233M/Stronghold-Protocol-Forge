@@ -36,6 +36,9 @@ import * as sources from '../public/js/resources/sources.js';
 // 写哪几个开关 / 哪几个选项」的那张表 —— 写错的名字被 `BEHAVIOUR_UNKNOWN_SWITCH` 点名整包拒，所以它必须被锚住，
 // 与 `FORM_TABLES` / `ASSETS_MIRROR_FIELDS` 同一条纪律。
 import * as behaviour from '../shared/behaviour.js';
+// `enabled` 一格住在自己的模块里（与 `behaviour` / `packForms` 同一条做法：判据与它自己的解析器在一起），
+// 所以锚点写清 `module: 'enabled'`，这里把它登记进 `ANCHOR_MODULES` 让守卫认识它。
+import * as enabledModule from '../shared/enabled.js';
 import {
   MOD_SURFACE, MOD_SURFACE_IDS, MOD_SURFACE_FROZEN, surfaceLedgerIssues,
 } from '../shared/modSurface.js';
@@ -260,7 +263,7 @@ const MOD_LAYER_MD = readFileSync(new URL('../docs/design/mod-layer.md', import.
 
 /** 锚点符号住在哪个模块。默认是 schema（`shared/workshop.js`）；kit import 面住 `shared/kitImports.js`；
  *  客户端那一格（`ctx.me` / 宿主键）住 `public/js/ui/extensions.js`（引擎自己那一端的契约表）。 */
-const ANCHOR_MODULES = { schema: workshopSchema, kitImports, extensions, packForms, hostMetrics, routeMount, modModules, sources, behaviour };
+const ANCHOR_MODULES = { schema: workshopSchema, kitImports, extensions, packForms, hostMetrics, routeMount, modModules, sources, behaviour, enabled: enabledModule };
 
 test('表面清单：每一条的锚点符号都还在它声明的模块里，成员一个不少', () => {
   assert.ok(MOD_SURFACE.length > 0, '表面清单不能是空的');

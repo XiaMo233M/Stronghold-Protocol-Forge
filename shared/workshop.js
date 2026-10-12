@@ -29,6 +29,8 @@ import { parseVariantsDecl } from './variants.js';
 // 行为开关层（DESIGN §28.43）：与口径**同一形状、不同一张表**，判据只有一份在 `shared/behaviour.js`。同样不在这里
 // 重判一遍闭枚举 —— 而且这一层的表今天是**空的**（通道 + 守卫先落，第一格与它的引擎实现点一起落）。
 import { parseBehaviourDecl } from './behaviour.js';
+// 启用声明（DESIGN §28.44）：装好 ≠ 生效。判据只有一份在 `shared/enabled.js`。
+import { parseEnabledDecl } from './enabled.js';
 
 /** Data files a pack may contribute to. Deliberately a conservative subset of data/: `config` is excluded because a
  * pack that rewrote the economy or the round schedule would change the rules rather than the content.
@@ -135,6 +137,8 @@ export const PACK_FIELDS = Object.freeze([
   'notices',
   // 行为开关（**不是**贡献项）
   'playtest',
+  // 启用声明（DESIGN §28.44）：装好 ≠ 生效。`false` = 装载期跳过（见 `shared/enabled.js`）。**不是**贡献项。
+  'enabled',
   // 变体 / 口径声明（DESIGN §28.39）：这个包要哪一套口径（练度 / 部署位）。**不是**贡献项，也**不是**一条
   // 数值覆盖通道 —— 它只能声明轴的闭枚举里有的选项名，值由引擎自己给（`shared/variants.js`）。
   'variants',
@@ -2143,6 +2147,11 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // 它自己不带来任何内容。所以一个只带 `behaviour` 的包照旧 `EMPTY_PACK`（文案里点名它）。
   const behaviourParsed = raw.behaviour === undefined ? null : parseBehaviourDecl(raw.behaviour, opts.behaviourSwitches);
   if (behaviourParsed && !behaviourParsed.ok) return behaviourParsed;
+  // 启用声明（DESIGN §28.44）：`false` = 这个包装好了但现在不参与。**不是贡献项**（与 `variants` 同一个语义）：
+  // 一个只写 `"enabled": true` 的包什么都没带来，照旧 `EMPTY_PACK`；而 `"enabled": false` 的包连装载都不进
+  // （`server/workshop.js loadWorkshop` 在归一化之后读它），所以它也到不了 `EMPTY_PACK` 那一行。
+  const enabledParsed = raw.enabled === undefined ? null : parseEnabledDecl(raw.enabled);
+  if (enabledParsed && !enabledParsed.ok) return enabledParsed;
   // 一条声明只有在清单里**真的写了这个键**时才进归一化结果。这一条是本刀最容易做坏的地方：无条件写进去会让
   // 每一个已存在的包（它们没有这些键）的归一化清单多出四个键，于是内容哈希全变、`identifyPack` 的
   // `manifest` 与 `hash` 也跟着变 —— 房间的摘要闸门会开始误判（DESIGN §28.2）。
@@ -2156,6 +2165,12 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (noticesParsed) declared.push(['notices', noticesParsed.decl]);
   if (formsParsed) declared.push(['forms', formsParsed.decl]);
   if (fxParsed) declared.push(['fx', fxParsed.decl]);
+  // `enabled` 比 `variants` / `behaviour` 多一条约束（§28.44 的判据 2：**缺省 = 引擎今天的行为**）：
+  // 无条件写进去会让 `"enabled": true` 与「没写」在**数据上**不再等价 —— 而 `identifyPack` 哈希的正是
+  // `canonicalJson(pack)`（`server/workshop.js` step 1），于是写了 `true` 的包会换掉包身份、房间摘要跟着漂，
+  // 而它做的事与没写一字不差。所以**只有 `false` 才进清单**：那是这一格唯一真正改变行为的取值，
+  // 「装好了但不参与」必须进身份（两台机器摘要相同 ⇒ 行为相同）；`true` 与缺席在数据上逐字等价。
+  if (enabledParsed && enabledParsed.value === false) declared.push(['enabled', false]);
   /** 一条声明算不算「贡献」：归一化后的值里有没有东西。`routes: []` 与 `client: { panels: [], requires: [] }`
    *  都是**合法但什么都不做**的声明（与 `voices: {}` / `art: { chars: {} }` 同一个语义），照旧不算贡献 ——
    *  所以「一个只写了 `routes: []` 的包」仍然是空包。反向的那条同样载重：`assets` / `client.panels` /

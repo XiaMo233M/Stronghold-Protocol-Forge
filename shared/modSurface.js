@@ -312,6 +312,28 @@ export const MOD_SURFACE = Object.freeze([
     tests: ['test/packBehaviour.test.js'],
     spec: '§28.43',
   },
+  {
+    id: 'enabled',
+    layer: 'B',
+    // 装好 ≠ 生效（§28.44）。与 `variants` / `behaviour` 同一形状：包声明的是**一个布尔**，不是数值、不是路径。
+    // 补的缺口是「留着这个包但现在不要它生效」在今天没有表达方式 —— 只能删目录，而删目录与停用是两件事。
+    decl: 'pack.json.enabled = true | false',
+    anchors: [
+      { symbol: 'PACK_FIELDS', members: ['enabled'] },
+      { symbol: 'ENABLED_BAD_SHAPE', module: 'enabled' },
+    ],
+    requires: [
+      '**只有布尔**：`"false"` / `0` / `null` 一律 `ENABLED_BAD_SHAPE` 整包拒 —— 一个被 JS 真值表放行的假布尔是静默失效',
+      '**缺省 = 引擎今天的行为**：不写 `enabled` 的包与今天逐字相同；写了 `true` 同样逐字相同',
+      '**不是贡献项**：只带 `"enabled": true` 的包照旧 `EMPTY_PACK`（与 `variants` / `playtest` 同一条）',
+      '`false` 的包**不进入**已加载集合，进 `loadWorkshop` 的 `errors`（`ENABLED_FALSE`）—— 跳过必须响亮，一个静默消失的包更难查',
+      '不声明 ⇒ 归一化清单里**不长出这个键**（否则所有已发布包的内容哈希改变，§28.2）；声明了**必须**进包身份哈希',
+      '**不是热更新**：装载期读一次，改它要重启（DESIGN §28.4 的「No hot reload」不受影响）',
+    ],
+    files: ['shared/workshop.js', 'shared/enabled.js', 'server/workshop.js'],
+    tests: ['test/packEnabled.test.js'],
+    spec: '§28.44',
+  },
   // ------------------------------------------------------------------ C 层：客户端界面
   {
     id: 'client.panels',
