@@ -31,18 +31,22 @@
 ## 二、标准包的四条硬要求
 
 1. **`pack.json` 在 ZIP 根**（② 请重压）。
-2. **键必须在闭集内**：`PACK_FIELDS` 共 **33 键**，完整清单见 `shared/workshop.js`：
+2. **键必须在闭集内**：`PACK_FIELDS` 共 **35 键**，完整清单见 `shared/workshop.js`：
    `id name version author license description gameVersion game api layer combat` ·
    `content overrides` · `voices voiceLangs bondIcons itemIcons art skins support operators i18n` ·
-   `forms fx` · `notices playtest` · `variants behaviour` · `assets client server routes` · `target`。
+   `forms fx` · `notices playtest` · `variants behaviour` · `assets client server routes` · `target` ·
+   `dependencies conflicts`。
    **不认识的顶层键点名拒绝**（`PACK_UNKNOWN_FIELD`），**绝不读过去** —— 这是这一层最硬的一条纪律。
    `target`（§28.46）是**唯一一格可以带出本引擎的键**：`"stardust"` 的包是给 Stardust 宿主的**声明型包**，
    本引擎只认识、不装载（`server/workshop.js` 的 `foreign`）；**不写 `target` 的包一个字节都不受影响**。
+   `dependencies` / `conflicts`（§28.48）是**包之间的关系**声明（`[{ id, range? }]`，`id` 是另一个工坊包）：
+   形状在这里判，**语义在装载期裁决**（缺失依赖 / 版本不合 / 互斥 / 级联 / 循环，全部具名拒绝）。
 3. **必须有"贡献"**：只声明 `variants`（或只有元信息）会被判 **`EMPTY_PACK`** —— 原话是
    「`variants` is NOT a contribution」。要上架就得**至少贡献一样东西**（内容 / 面板 / 规则 / 公告 / 素材…）。
-   **不算贡献项的四个键**（`shared/workshop.js` 的 `notContributions`；只在该包真的声明了它们时才逐字点名）：
-   **`behaviour` · `variants` · `support` · `playtest`** —— 它们**都只是「怎么跑」的声明，自己不往对局里带任何东西**
-   （`behaviour` 选规则档、`variants` 选口径、`support` 只决定助战卡池里放谁、`playtest` 只是试玩时直接发手牌）。
+   **不算贡献项的六个键**（`shared/workshop.js` 的 `notContributions`；只在该包真的声明了它们时才逐字点名）：
+   **`behaviour` · `variants` · `support` · `playtest` · `dependencies` · `conflicts`** —— 它们**都只是「怎么跑」或
+   「和别的包什么关系」的声明，自己不往对局里带任何东西**（`behaviour` 选规则档、`variants` 选口径、`support` 只决定
+   助战卡池里放谁、`playtest` 只是试玩时直接发手牌、`dependencies` / `conflicts` 只说包之间的关系）。
    ⚠️ **声明行为开关的包必须另带一样真贡献**：`content` / `client` / `notices` / `routes` … 里至少要有一个，
    否则整包被拒（`EMPTY_PACK` 的文案会逐字写「`"behaviour"` is NOT a contribution — a pack that declares it
    alone brings nothing into a match」）。**今天 `behaviour` 还多一道**：`shared/behaviour.js` 的

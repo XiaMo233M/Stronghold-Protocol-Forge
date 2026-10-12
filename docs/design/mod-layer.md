@@ -69,7 +69,7 @@ what `welcome`, `/healthz`, the BattleSpec and a bug report all quote, so four d
 **What participates in the hash.** Not "the directory": a manifest of `(relative path, sha256)` pairs, sorted by path,
 over exactly the bytes the loader reads and the browser will be served:
 
-1. `pack.json` — hashed **after** `normalizePackManifest` (`shared/workshop.js:339`), so the hash covers the pack's
+1. `pack.json` — hashed **after** `normalizePackManifest` (`shared/workshop.js:344`), so the hash covers the pack's
    effective declaration (normalized `overrides`, `content`, icon tables, `art`, `support`, `voices`), not its
    whitespace. Two spellings of the same pack then hash the same, and a declaration the loader silently dropped
    (`shared/workshop.js:1724-1726` filters a malformed `overrides` entry in silence today) cannot hide behind the hash.
@@ -188,7 +188,7 @@ substance; the first step of the slice carries them, `docs/WORKSHOP.md` §1.2 st
 | two packs **overriding the same existing record** (an official id, or a record another pack contributed) | **the smaller pack id wins + the conflict is reported** (`definedBy` names the pack that was passed over) | `shared/workshop.js:1131-1135` and `:1013-1017` |
 | an icon / item icon / art entry claimed by two packs | **the smaller pack id wins**; the loser is reported and named | `shared/workshop.js:1506-1510`, `:1456-1460`, `:1605-1609` |
 | `overrides` declares the replacement of an **OFFICIAL** id | **allowed, and the declaration is what makes it allowed** | `shared/workshop.js:14-16`, `:986-990` |
-| anything, between two packs | **the smaller pack id wins — on every face** | one comparator: `shared/workshop.js:787` `byPackId` |
+| anything, between two packs | **the smaller pack id wins — on every face** | one comparator: `shared/workshop.js:792` `byPackId` |
 
 Two rules, not three, and they are the only two:
 
@@ -209,7 +209,7 @@ back door: the bigger-id pack could take the record by adding one line to `pack.
 Rule 2 needed one comparator, not five implementations. It used to be five: `applyWorkshop` trusted the **array order**
 it was handed, the icon and art paths each re-sorted with their own inline compare, and the kit loader used yet another
 one — they agreed only because the production loader sorts directory names (`server/workshop.js:34-37`) and the manifest
-rule forces `id === directory`. `byPackId` (`shared/workshop.js:787`) is now exported and used by every face, including
+rule forces `id === directory`. `byPackId` (`shared/workshop.js:792`) is now exported and used by every face, including
 the kit loader (`server/workshop.js:381`), so the winner is a property of the pack ids and not of who called the merge.
 The two in-memory callers that can pass any order — the tests, and the editor — no longer decide anything by accident.
 
@@ -224,7 +224,7 @@ pack id that holds the record, or the string `official`. The text says the same 
 
 Why it matters enough to be a section: the data path used to say "**official** data" for both cases, because the
 variable holding "official + every pack merged so far" was called `official` (it is `prior` at
-`shared/workshop.js:1034` now). The author's next move was to open `data/chess.json` and look for a record that is not
+`shared/workshop.js:1039` now). The author's next move was to open `data/chess.json` and look for a record that is not
 there. Both defects — the wrong attribution and the unnamed kit holder — are fixed in the first step of the slice.
 
 **Cross-pack conflicts are reported once, at load, in one shape.** The report used to be split across three carriers
@@ -487,8 +487,8 @@ per row:
 | a hook name nothing emits never fires and nothing reports it (`server/sim/battle/hooks.js:17-25`, `:57-59`) | the static check already suggests a near miss (`HOOK_UNKNOWN_EVENT`, `shared/kitAuthoring.js:235-237`), but it is text analysis. Add a **runtime** report: `on` keeps the registration in `this._hooks[name]` (`server/sim/battle/hooks.js:20`), so at `battleEnd` the bus can name every pack-owned hook that was registered and never emitted. A typo then costs one battle instead of one bug report. |
 | non-determinism is a warning (`shared/kitAuthoring.js:222-227`) | an error for layer B (§28.4), and the refusal quotes the construct *and* its source line, so it stops being "a reason that looks nothing like 'you used Math.random'" (`shared/kitAuthoring.js:13-17`). |
 | a kit that returns no `skill` leaves the operator with no skill (`docs/WORKSHOP.md:611`) | the loader knows both facts — a kit was injected *and* `skillSource` says where the skill came from (`server/sim/content/index.js:214`, `:219`). A pack kit with no skill becomes a validation error the editor shows before saving, not a live surprise. |
-| a `chess.assets.spine` that points at an uninstalled model draws a flat portrait and logs nothing (`shared/workshop.js:1178-1194`) | already solved by `report.looks` (logged at `server/data.js:97`) — generalise it: every field that degrades silently gets a `looks`-style check, and the editor surface must show it, not only the server log. |
-| the editor deliberately does not import author files (`editor/server.mjs:428-431`) | **do not change this.** An HTTP endpoint that executes author code is a code-execution surface. Instead expose the verifier of §28.6 as an explicit action that runs in the **playtest subprocess** (`server/index.js:71-75` `SP_WORKSHOP`), which is already a separate process. |
+| a `chess.assets.spine` that points at an uninstalled model draws a flat portrait and logs nothing (`shared/workshop.js:1183-1199`) | already solved by `report.looks` (logged at `server/data.js:97`) — generalise it: every field that degrades silently gets a `looks`-style check, and the editor surface must show it, not only the server log. |
+| the editor deliberately does not import author files (`editor/server.mjs:428-431`) | **do not change this.** An HTTP endpoint that executes author code is a code-execution surface. Instead expose the verifier of §28.6 as an explicit action that runs in the **playtest subprocess** (`server/index.js:72-76` `SP_WORKSHOP`), which is already a separate process. |
 | runtime errors land in a 100-entry array reachable only through `m.simErrorLog` (`server/match/Match.js:127-129`, `server/sim/battle/hooks.js:167-185`) | per-owner counters (§28.4), plus the room's mod digest on every error line, so a player's bug report carries the identity of the content it came from. |
 
 ### 28.8 Layer C and the client: a minimal registration point
@@ -3050,12 +3050,137 @@ Forge 自己的包是对的，但对**同一份清单要给两个宿主读**的�
 2. **闭集就地延长**：`PACK_FIELDS` 32 → 33（`test/packBehaviour.test.js` 的计数与 `docs/STANDARD-PACK.md` 同步）。
    副作用要如实说：`PACK_UNKNOWN_FIELD` 的错误文案里**列出全部键**，所以每一个未知键的报错文案都变了 —— 那是文案，
    不是判据。
-3. **`stardust` 包的作者可见面（如实披露，本刀未接线）**：本引擎只在**启动日志**里具名说一句。
-   `tools/workshop-validate.mjs` 只读 `loaded.errors` 与 `loaded.packs`，**不读 `foreign`** ⇒ 一个 stardust 包在验证器
-   报告里**完全不出现**（既不报错、也不列出）；`tools/workshop-pack.mjs list` 把它打成 `REFUSED（null）`
-   （`packSummary` 没有这一支）。这两处是**已知缺口**，必须在收下这一格之前接上，否则复刻的正是 §1.1 那条教训
-   （「磁盘上在、编辑器里在、却永远进不了游戏，没有任何报错」）。
+3. **`stardust` 包的作者可见面（本刀未接线，已由紧随其后的一刀接上）**：§28.46 落地时本引擎只在**启动日志**里
+   具名说一句 —— `tools/workshop-validate.mjs` 不读 `loaded.foreign` ⇒ 一个 stardust 包在验证器报告里**完全不出现**
+   （既不报错、也不列出）；`tools/workshop-pack.mjs list` 把它打成 `REFUSED（null）`（`packSummary` 没有这一支）。
+   那是**已知缺口**，而复刻的正是 §1.1 那条教训（「磁盘上在、编辑器里在、却永远进不了游戏，没有任何报错」），
+   所以紧接着的一刀把**三面**都接上了：验证器给它一行具名 `PACK_FOREIGN` warning（外加收尾那句
+   `NOTE: N pack(s) target another host ("stardust") …`）、`packSummary` 新增 `foreign` 档且 **`reason` 有值**
+   （列表打 `FOREIGN（本引擎不装载：…）`，不再是 `REFUSED（null）`）、编辑器列表行与详情页各一个 `foreign` 分支
+   （用 `warn` 而不是「被拒」—— 清单合法、作者没写错任何东西；中英双语）。三面各有契约测试钉住
+   （`test/modTarget.test.mjs` 的 ⑤①–⑤④），**去掉任一面 ⇒ 该面当场红**。
 
 **测试**：`test/modTarget.test.mjs` —— 缺省逐字节不变（一袋 17 个语料包的摘要**冻结**成字面量，移植前实测）、
 `target: "forge"` 下 `type` / `capabilities` 仍被拒、`PACK_TARGET_UNKNOWN` / `STARDUST_TARGET_BAD_TYPE` /
 `STARDUST_TARGET_BAD_CAPABILITIES` 逐条、能力认领字段跟着能力走、装载器 `foreign` 具名且不进目录、两个版本号不动。
+
+---
+
+### 28.47 mod registry：一份登记册，装过什么 / 操作者启停过什么
+
+**要解决的问题。** 一个包**在磁盘上**、清单**一字不错**、却什么都没装载 —— 这是本仓库反复判过死刑的结局
+（§1.1）。在「管理器」出现之前，包只有「装」与「没装」两种状态，所以没有第三种可能。管理器一旦能**启用 / 禁用**
+一个已存在的包，就多出第三种状态：**装了但不装载**。这一格必须（a）有一个**唯一事实**说清它今天是什么状态，
+（b）**结果上与装载失败一模一样** —— 没有 hook、没有订阅、没有面板、没有字节进数据叠加层，而（c）文件**留在
+磁盘上**，一条 `enable` 就回来。
+
+**唯一事实：`mod-registry.json`（登记册）。** 它在**状态根**（`server/modModules.js` 的 `stateRootFor`，即
+`<repo>/var` 或 `SP_STATE_DIR`），与 `server.modules` 写的是同一棵树，**永远不在** `workshop/` 包根里 ——
+那里是加载器扫描的地方，一个状态文件放进去会被当成一个包。形状：
+
+```json
+{ "version": 1,
+  "packs": { "<包 id>": { "state": "enabled" | "disabled",
+                          "installedAt": "<ISO 日期>", "source": "<文件名|目录名>", "digest": "<sha256>",
+                          "previous": { "digest": "<sha256>", "backup": "<包内相对留底目录>" } } } }
+```
+
+CLI、编辑器、服务器读的都是这一个文件，**谁都不留第二份副本**。写入是**原子**的（同目录临时文件 + rename）：
+半个登记册比没有登记册更坏。
+
+**方向：不在册 = 启用。** 这一条是故意选的。装一个包就该立刻能用（所有现存的安装方式都依赖这一点），
+「禁用」是操作者的一次**明确动作**。反过来的话，这个文件一旦丢了（或换了机器），所有包都会**静默消失** ——
+又是一个静默方向。`applyModRegistry` 把被禁用的包在**任何载荷算出来之前**移出集合，所以它与装载失败的包
+在结果上不可区分。
+
+**删除的两道闸（本节的硬规矩）。**
+
+1. **ownership —— 只卸载本管理器登记过的包。** 登记册里没有记录的包可能是仓库自带、手工放置或者旧版装的。
+   这个管理器**不认识**它，就没有资格处置它；`uninstall` 点名拒绝，要删请手动。
+2. **留底 —— 卸载不销毁字节。** 卸载与回滚都是 `fs.renameSync` 把整个包目录挪进
+   `<root>/.mod-backups/<id>/uninstall-<时间戳>/`（或 `pre-rollback-<时间戳>/`），**不是 `unlink`**。目录名点开头
+   ⇒ `loadWorkshop` 不扫描 ⇒ 它**立刻**"不在"，但一个字节都没丢；手滑、后悔、想查证原包长什么样都有地方找回来，
+   CLI 会把留底路径打出来。升级（`import --force`）也走这条路：被顶掉的旧版进 `.mod-backups/`，
+   旧摘要随登记进 `previous`，`rollback` 靠它回去。
+
+**三条硬边界（本节的第二组硬规矩）。** ① 只 rename **这个包自己的目录**（`findPackDir(root, id)` 的结果）；
+② 引擎文件 / `data/` / `test/golden/` **一律不碰**；③ **越界删除必须被拦，而且要有测试证明**。
+第 ③ 条分两层，两层都测：**入口层**是 `findPackDir` 的 `PACK_ID_RE`（`^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$`）——
+`../../x` / `..` / `a/../../b` / `C:\Windows` 这类写法当场 exit=2 具名拒绝，所以 `path.join` 拿到的永远是一个
+纯 slug。但**只测入口是不够的**：登记册里那个**会被拼成路径**的 `previous.backup` 是外部数据，所以
+`normalizePackEntry` 是第二层闸 —— 它只接受**包内相对的留底目录**，含 `..` 的、绝对路径的**整格丢掉并具名报出**。
+于是「即使 id 合法、即使登记册被人手改过，删除也只落在工坊根之内、只落在那个包自己的目录上」是可以证明的。
+证明的方式是**逐字节比对目录树**（`test/modRegistry.test.mjs` 的三条「越界」测试）：
+
+* 越界① 一棵「像仓库」的树（`data/`、`test/golden/`、`server/` 哨兵 + root 的同级哨兵）里跑一次 `uninstall`：
+  包自己的目录走了、留底里有完整的包，而四棵树**逐个哈希不变**，root 的同级目录也**没有多出任何条目**；
+* 越界② 手改登记册把 `previous.backup` 指向 `../outside-marker` ⇒ 读的时候那一格就被点名丢掉 ⇒ `rollback`
+  只能拒；工坊根之外一字节不变，包还在原位；
+* 越界③ `data`（**合法 id**、也确实在工坊根下有一份 `pack.json`，即**过了入口那道闸**）没有安装登记 ⇒
+  `uninstall` 拒绝，被拒的目录（含引擎的 `data/gamedata.json`）一字节不变，连 `.mod-backups/` 都不该被建出来。
+
+**与作者可见面的衔接。** 一个被禁用的包在 `tools/workshop-pack.mjs list` 里带 `· DISABLED（不装载）` 后缀 ——
+它与 `FOREIGN`（§28.46）那一格**正交**：禁用的包**可以**同时是 `VALID`（清单没问题，是操作者把它关掉了），
+所以两个后缀分开说。不说出来就是又一次「在磁盘上、在列表里、却永远进不了游戏、没有报错」。
+
+**不抬版本**：`MOD_API_VERSION` 仍是 `1`、`PROTOCOL_VERSION` 仍是 `2`。这一节**没有**动 `PACK_FIELDS`，
+登记册是**操作者的状态**、不是包能声明的字段。
+
+**测试**：`test/modRegistry.test.mjs`（登记册形状 / 越界与绝对路径的 `previous` 逐条丢掉 / 不在册即启用 /
+disabled 具名离开集合 / import 记录 install / `--force` 升级留底 + `rollback` 还原 / uninstall 留底 /
+未登记包的 ownership 拒绝 / 原子写不留临时文件 / 上面三条越界证明）。
+
+---
+
+### 28.48 `pack.json.dependencies` / `conflicts`：装载期的跨包裁决
+
+**要解决的问题。** 一个包声明「我依赖 `lib`」「我和 `beta` 互斥」时，这句话**只有在真的装了哪些包之后**才成立。
+作者交上来的是一份 `pack.json`，他看不到别人的 `workshop/` 里有什么。所以「缺依赖」不是他写错了，而是
+**这台机器上这个组合不成立** —— 这正是**装载期**的判断，形状层判不了它。
+
+**形状（`shared/workshop.js` 的 `parseModRefsDecl`）。** `[{ id, range? }]`：`id` 是**另一个工坊包**的 id
+（`PACK_ID_RE` 同一套字符集 —— 一个 `../escape` 在这一层就被点名拒，绝不留到装载期去拼路径），`range` 是那个包
+`version` 的区间（`shared/packs.js` 的同一套语法，缺省 = 任意版本）。两条形状纪律：**逐字重复的条目去重**
+（输出按 `(id, range)` 排序，归一化确定）；**同一个 id 配两个不同的 range 点名拒绝**
+（`*_CONFLICTING_RANGES`）—— 哪个区间算数？作者没说，猜一个就等于替他做了一个会影响装载的决定。
+错误码：`DEPENDENCIES_` / `CONFLICTS_` 前缀的 `BAD_SHAPE` / `BAD_ENTRY` / `UNKNOWN_FIELD` / `BAD_ID` /
+`BAD_RANGE` / `CONFLICTING_RANGES`。
+
+**与 `content` 白名单无关、不是贡献项。** 两个键都进 `PACK_FIELDS` 闭集（§28.1），都**不在**
+`WORKSHOP_CONTENT_FILES` 里，都进 `notContributions` —— 一个只声明依赖的包自己**不带来任何内容**，与
+`support` / `playtest` / `variants` / `behaviour` 同一条，照旧 `EMPTY_PACK`（文案里逐字点名它）。
+「写了才进归一化结果」照旧：没声明的包哈希逐字节不变（§28.2）。
+
+**五条裁决规则（在 `adjudicatePackGraph`，纯函数、确定性、全部具名）。**
+
+1. **缺失依赖** ⇒ 依赖方被拒（`missing dependency "x"`）；
+2. **版本不合** ⇒ 依赖方被拒（`dependency "x" version 1.0.0 does not satisfy ">=2.0.0"`）。
+   **依赖包自己没写 `version` 时视为满足** —— 它的 version 是「未声明」，不是「不匹配」。
+   机制上：`normalizePackManifest` 把没写 `version` 的包归一化成 `0.0.0`，所以装载期看到的是一个字符串、
+   分不出「没写」与「写了 `0.0.0`」，本仓库的口径是把 `0.0.0` 当作「未声明」（`declaredVersion`）。
+   ⚠️ **这一条与社区 PR 自带的测试相反**：那条测试断言「未声明 ⇒ `0.0.0` ⇒ `>=2.0.0` 不合 ⇒ 拒」，
+   而 PR 自己的文档规则（以及业主裁决）是「未声明 ⇒ 视为满足」。本移植按**规则**实现，并按规则写测试；
+   冲突已记进 commit 消息的差异清单，翻回去是一行的事（`declaredVersion` 那一行返回 `target.version` 即可）；
+3. **互斥** ⇒ **包 id 大的那个**被拒（`conflicts with "alpha" (declared by "alpha")`）。与既有裁决「同 id 抢占按
+   包 id 排序」同一条确定性来源；双方都声明时同一条边只裁决一次，结论一样。带 `range` 时只有**区间匹配**
+   （按第 2 条的口径）才互斥；
+4. **级联** ⇒ 被拒的依赖让它的依赖方也无法工作，**迭代到不动点**（理由链完整：`depends on "x", which was refused`）。
+   一次迭代不够：`top → mid → low → (缺失)` 要迭代三轮才把三个都收进来；
+5. **循环** ⇒ 幸存集合里的依赖边成环，**环上全体被拒**（`dependency cycle: a → b → c → a`）。它与级联不同：
+   环上每个包自己的依赖都「在」，但这份声明本身是死锁，没有任何一个能先装载。
+
+**为什么是纯函数 + 排序。** 迭代顺序按包 id 排序、输出按 id 排序 ⇒ 同一份输入永远同一份输出，与输入顺序无关；
+不改输入。`kept` 就是真正装载的集合，`refused` 由 `server/index.js` 变成具名的启动日志，并**同时进
+`excludePacks`** —— 数据叠加层与装载器是同一次裁剪，否则被拒的包会留下一个「谁都不认识的干员」。
+
+**裁剪点的顺序（`server/index.js` 的装配流水线）。** 登记册（§28.47）在最上游，紧接着是这一节的裁决，
+二者都排在**任何载荷装载之前**（hooks / meta / server modules / battle / room）。理由与 §28.13 那些裁剪点
+同一条：一个「包照旧加载、只是它的效果不在」的结局，会让运维以为自己有一道不存在的闸门。
+
+**不抬版本**：`MOD_API_VERSION` 仍是 `1`、`PROTOCOL_VERSION` 仍是 `2`。闭集就地延长：顶层键 33 → 35
+（`test/packBehaviour.test.js` 的计数与 `docs/STANDARD-PACK.md` 同步）。副作用如实说：`PACK_UNKNOWN_FIELD` 的
+错误文案里**列出全部键**，所以每一个未知键的报错文案都变了 —— 那是文案，不是判据。**不需要 `golden:update`**：
+没写这两个键的包一个字节不动。
+
+**测试**：`test/modDependencies.test.mjs` —— 形状（去重 / 排序 / 六种点名拒）、归一化纪律（没写就不长键）、
+五条规则逐条、级联迭代到不动点、循环具名成链、纯函数（输入不改、顺序无关、拒绝表按 id 排序）。

@@ -26,6 +26,11 @@ import { loadWorkshop } from '../server/workshop.js';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const quiet = { info() {}, warn() {}, error() {}, debug() {} };
 
+// 管理器登记册（DESIGN §28.47）落在**状态根**（`server/modModules.js` 的 `stateRootFor`：`SP_STATE_DIR`，
+// 缺省 `<仓库>/var`）。`import` 那条路会往那里记一条安装记录，所以这一层必须把它重定向到临时目录 ——
+// 否则跑一次测试就会在**仓库里**留下一个 `var/mod-registry.json`（那是本机状态，不是这个仓库的产物）。
+process.env.SP_STATE_DIR = fs.mkdtempSync(join(tmpdir(), 'sp-workshop-pack-state-'));
+
 let tmp;
 let ws;
 let ws2;

@@ -14,11 +14,14 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   normalizePackManifest, normalizeContentFile, byPackId, playtestUnknownIds, WORKSHOP_PANEL_PREFIX,
-  ASSETS_FILE_CODES,
+  ASSETS_FILE_CODES, adjudicatePackGraph,
   // i18n（fanpack G-04）：**形状**在 shared/workshop.js 判（`parseI18nDecl`），**值**用同一个 `mergeWorkshopI18n` 判
   // —— 校验与合并是同一个函数，所以不可能出现「校验器放行的值，合并时被丢掉」。
   mergeWorkshopI18n, parsePackI18n,
 } from '../shared/workshop.js';
+// 依赖 / 冲突的装载期裁决随装载器一起暴露（`server/index.js` 从这里拿，与 `loadWorkshop` 同一个模块边界）：
+// 它作用的对象就是 `loadWorkshop` 的产物，从别处 import 会让「谁负责装载」这件事有两个答案。
+export { adjudicatePackGraph };
 import { sha256Hex, canonicalJson, modManifestDigest } from '../shared/modIdentity.js';
 // `intercepts` 的运行时判据就是**真的装在这个服务器上的那份协议**（DESIGN §28.13）：A 段在形状层判过一次，这里再判
 // 一次 —— 一份包声明可以比协议活得久（协议收窄了、包还是老写法），那时要在加载期点名拒绝，而不是「装了但拦不住」。

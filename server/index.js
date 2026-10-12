@@ -25,7 +25,8 @@
 import http from 'node:http';
 import path from 'node:path';
 import { getData, loadData } from './data.js';
-import { loadWorkshop, loadWorkshopKits, loadWorkshopHooks, loadWorkshopPanels, workshopThemeFor, dropUnavailablePreDispatchPacks, WORKSHOP_DIR } from './workshop.js';
+import { loadWorkshop, loadWorkshopKits, loadWorkshopHooks, loadWorkshopPanels, workshopThemeFor, dropUnavailablePreDispatchPacks, adjudicatePackGraph, WORKSHOP_DIR } from './workshop.js';
+import { readModRegistry, applyModRegistry } from './modRegistry.js';
 import { loadMetaModules } from './match/metaPack.js';
 import { loadBattleInstallers } from './battlePack.js';
 import { loadRoomInstallers } from './roomPack.js';
@@ -106,15 +107,26 @@ export async function startServer(opts = {}) {
   // 就把「声明了钩子却装不上」的包从已加载集合里**裁掉**（`dropUnavailablePreDispatchPacks`），再用裁剪后的数组
   // 喂给下面每一个读者：数据叠加层、身份清单、kits、面板、资源表、Lobby/Network。B1 段这里是「包照旧加载、只是
   // 钩子没装上」—— 那种结局让运维以为自己有一道不存在的闸门，而它的内容却已经并进了游戏数据。
+  const stateRoot = stateRootFor(ROOT);
   const loadedOnce = loadWorkshop(workshopDir, { log });
-  const workshopHooks = await loadWorkshopHooks(loadedOnce, { log });
+  // 启用 / 禁用（DESIGN §28.47，`server/modRegistry.js`）：操作者的开关在这条装配流水线的**最上游**生效 ——
+  // 被禁用的包连它的服务端载荷都不会被装载（没有 hook、没有订阅、没有字节），文件留在磁盘上，一条
+  // `enable` 命令就回来。被禁用的 id 同时进 `excludePacks`，数据叠加层与这里是同一次裁剪。
+  const modRegistry = readModRegistry(stateRoot, { log });
+  const registryApplied = applyModRegistry(loadedOnce.packs, modRegistry);
+  for (const d of registryApplied.disabled) log.warn(`[mod-registry] "${d.id}" disabled (${d.where}) — not loaded`);
+  // 依赖 / 冲突的装载期裁决（DESIGN §28.48）：缺失依赖、版本不合、互斥、级联与循环，全部在这一步**具名拒绝**
+  // —— 一个依赖链断裂的包，和它依赖的那个一样「不在」。与上一条同一个裁剪点：裁决出来的集合喂给下面每一个读者。
+  const adjudicated = adjudicatePackGraph(registryApplied.packs);
+  for (const r of adjudicated.refused) log.warn(`[mod-registry] "${r.id}" refused: ${r.reason}`);
+  const loadedForPayloads = { ...loadedOnce, packs: adjudicated.kept };
+  const workshopHooks = await loadWorkshopHooks(loadedForPayloads, { log });
   // 包声明的**对局元注册表**模块（`pack.json.server.meta`, DESIGN §29，B 段）：与钩子同一条纪律 —— 声明了却装不上
   //（源码里带非确定性的东西、没有 `registerMeta` 导出、import 失败）的包**整包移出已加载集合**，而不是「包照旧
   // 加载、只是它的效果不在」。所以它必须在**数据叠加层之前**跑完，与钩子合在同一个裁剪点上。
-  const workshopMeta = await loadMetaModules(loadedOnce, { log });
+  const workshopMeta = await loadMetaModules(loadedForPayloads, { log });
   // 包的**服务端模块**（`server.modules`, DESIGN §28.14）：与上面两条同一个裁剪点 —— 模块文件不在、import 失败、
   // 没有 `registerServer`、或者它挂了一个自己没声明的挂载点，都让**这个包**整份移出已加载集合。
-  const stateRoot = stateRootFor(ROOT);
   // 账号与战绩（docs/RECORDS.md）。**开关是显式的 `SP_ACCOUNTS=1`**（业主裁令）：不能让「某个文件恰好存在」悄悄
   // 改掉握手语义。没有它时下面两件**都不构造**，`Network` 收到 `accounts: null`、`Lobby` 收到 `records: null`，
   // `hello` 与会话建立走的还是今天那条路，逐字节不变。
@@ -132,15 +144,15 @@ export async function startServer(opts = {}) {
     log.info(`[accounts] enabled (SP_ACCOUNTS): ${accounts.byName.size} account(s) in ${accountConfig.accountsFile}; `
       + `match records in ${accountConfig.recordsFile}`);
   }
-  const serverModules = await loadServerModules(loadedOnce, { log, stateRoot });
+  const serverModules = await loadServerModules(loadedForPayloads, { log, stateRoot });
   // 包声明的**战斗逻辑**模块（`pack.json.server.battle`, DESIGN §28.17）：与上面三条同一个裁剪点 —— 源码里带非确定性
   // 的东西、import 越界、没有 `install` 导出、模块文件不在，都让**这个包**整份移出已加载集合。
-  const battlePack = await loadBattleInstallers(loadedOnce, { log });
+  const battlePack = await loadBattleInstallers(loadedForPayloads, { log });
   // 包声明的**房间级钩子**（`pack.json.server.room`, DESIGN §28.20）：与上面四条同一个裁剪点 —— 源码里带非确定性的
   // 东西、import 越界、没有 `install` 导出、模块文件不在，都让**这个包**整份移出已加载集合。与 `server.battle` 的
   // 差别只有一处：这一层**只在服务端**跑，所以没有一份「送浏览器的 URL 清单」。
-  const roomPack = await loadRoomInstallers(loadedOnce, { log });
-  const pruned = dropUnavailablePreDispatchPacks(loadedOnce, [...workshopHooks.errors, ...workshopMeta.errors, ...serverModules.errors, ...battlePack.errors, ...roomPack.errors]);
+  const roomPack = await loadRoomInstallers(loadedForPayloads, { log });
+  const pruned = dropUnavailablePreDispatchPacks(loadedForPayloads, [...workshopHooks.errors, ...workshopMeta.errors, ...serverModules.errors, ...battlePack.errors, ...roomPack.errors]);
   if (pruned.removed.length) {
     log.warn(`[workshop] dropped ${pruned.removed.length} pack(s) whose declared server-side payload cannot be installed: `
       + pruned.removed.map((r) => `"${r.pack}" (${r.code})`).join(', '));
@@ -156,7 +168,7 @@ export async function startServer(opts = {}) {
   // 房间级钩子同理：被别的声明裁掉的包不该继续在大厅里说话（它的 `install(room)` 与事件钩子一起消失）。
   const roomInstallers = roomPack.installers.filter((m) => survivors.has(m.id));
   const modMount = mountServerModules(serverModulesLive, { log });
-  const excludedPacks = new Set(pruned.removed.map((r) => r.pack));
+  const excludedPacks = new Set([...pruned.removed.map((r) => r.pack), ...registryApplied.disabled.map((d) => d.id), ...adjudicated.refused.map((r) => r.id)]);
   // The process-wide singleton serves the default data dir; a custom dir (tests) gets its own copy. The 创意工坊 overlay
   // is applied inside the loader (server/data.js), i.e. whichever way the data is obtained, it is already merged.
   // SP_WORKSHOP (editor/playtest.mjs) lets the Forge editor's 试玩 subprocess read the workshop root the editor was
@@ -175,7 +187,7 @@ export async function startServer(opts = {}) {
   //   * workshopKits.kits the behaviour layer (a per-battle kit map) for battles the server itself runs;
   //   * workshopKitFiles  the URLs serving those same kit modules to the browser, which must rebuild the identical map,
   //                       or its client-simulated battle would disagree with the server's verification.
-  const workshopLoaded = { ...loadedOnce, packs: pruned.packs, errors: pruned.errors };
+  const workshopLoaded = { ...loadedForPayloads, packs: pruned.packs, errors: pruned.errors };
   // 作者自备 CDN 的语音素材（`pack.json.voices` / `voiceLangs` 里的 `{ url, sha256, file }` 条目，DESIGN §28.33）：
   // 在**合并语音表之前**把字节取到本地缓存并按作者声明的 sha256 核对。四条纪律见 `server/voiceCdn.js`；
   // 这里负责两件事 —— **逐条点名**（失败绝不静默）与**把取不到的那几条从语音表里摘掉**（宁可回落到默认配音，
