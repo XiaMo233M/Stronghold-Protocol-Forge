@@ -80,6 +80,7 @@ export {
  *   heavyPerSec?: number, heavyBurst?: number, trustProxy?: 'auto' | boolean, soloReconnectWindowMs?: number,
  *   accounts?: boolean, accountsFile?: string, recordsFile?: string,
  *   wsLanes?: readonly import('./http/wsLanes.js').WsLane[],
+ *   httpLanes?: readonly import('./http/httpLanes.js').HttpLane[],
  * }} [opts]
  * @returns {Promise<{ port: number, host: string, url: string, server: http.Server, wss: import('ws').WebSocketServer,
  *                     lobby: import('./lobby.js').Lobby, network: import('./net.js').Network,
@@ -336,6 +337,7 @@ export async function startServer(opts = {}) {
 
   const server = http.createServer(createRequestHandler({ serveStatic, health: { startedAt, network, registry, lobby, modHealth: () => modMount.healthz() }, log,
     records, accounts,
+    httpLanes: opts.httpLanes, publicDir,
     modsCatalog: (req, res) => serveMods(req, res, MODS_CATALOG_URL, '', modsJson) }));
   server.on('clientError', answerClientError);
   const wss = attachWebSocket(server, { network, log, lanes: opts.wsLanes, perMessageDeflate: transport.perMessageDeflate });
