@@ -33,13 +33,13 @@ written as if they conflicted:
 - `docs/PACKS.md:131-139` — "the maintainers' study of mods, 2026-10-07": server-side only for gameplay; a content hash
   in the handshake (`welcome`, `/healthz`, the BattleSpec) before data packs ship; **no third-party code** ("a pack type
   that runs code is a separate decision of the owner's"); golden stays on the original content.
-- `docs/WORKSHOP.md:449` — the behaviour layer **is** an owner decision, taken later: "scripts run in the client
+- `docs/WORKSHOP.md:612` — the behaviour layer **is** an owner decision, taken later: "scripts run in the client
   (default `SP_COMBAT=client`), and `SP_VERIFY` can only recompute the result, not stop the script".
 
 The ruling resolves them: **B runs on the server, so the `docs/PACKS.md:137-138` objection no longer applies** (the
-owner has now taken that separate decision), and the `docs/WORKSHOP.md:449` warning stops being a permanent hazard
+owner has now taken that separate decision), and the `docs/WORKSHOP.md:612` warning stops being a permanent hazard
 because a room containing a B pack is no longer simulated in the player's tab (§28.4). The three-channel distribution
-(`docs/WORKSHOP.md:449`) stays.
+(`docs/WORKSHOP.md:612`) stays.
 
 What already exists, and must not be rebuilt: the two event buses (`server/sim/battle/hooks.js:17` `on`, `:57` `emit`;
 `server/match/effectsMeta.js:48-52` the 19 meta hooks), the kit injection point `Battle opts.kits`
@@ -112,7 +112,7 @@ hash too. Before this, `catalogFiles` dropped that row (its file read failed), s
 is complete" and "the download list looks complete".
 
 What deliberately does **not** participate: the mtime "version" that currently versions kit URLs
-(`server/workshop.js:414` — a version credential that is not a content hash, and the reason `docs/WORKSHOP.md:597`
+(`server/workshop.js:414` — a version credential that is not a content hash, and the reason `docs/WORKSHOP.md:610`
 records content addressing as unimplemented), the pack directory's absolute path, and any engine code. The last one
 matters and is the answer for the third file the ruling names:
 
@@ -314,7 +314,7 @@ The entry points are the official-record lists the operator and monster pages al
 ### 28.4 Isolation (gap 3)
 
 **Server authority.** The behaviour layer runs in the player's browser by default today (`server/match/Match.js:107`, `:202-203`),
-and `docs/WORKSHOP.md:449` records the consequence honestly. Under the ruling, a room whose mod set contains any
+and `docs/WORKSHOP.md:612` records the consequence honestly. Under the ruling, a room whose mod set contains any
 `layer: B` pack runs with `clientCombat = false` for **that room**: the decision moves from the process-level
 `SP_COMBAT` environment variable to the room's mod set (`server/match/Match.js:262` is where the flag is resolved). Player tabs then
 never execute pack code, and the `docs/PACKS.md:137-138` objection is answered rather than waived. Layer A keeps
@@ -370,7 +370,7 @@ inventing a timer.
 
 ### 28.5 Versioning (gap 4)
 
-`gameVersion` is metadata and nothing reads it (`docs/WORKSHOP.md:597` records version alignment, dependency
+`gameVersion` is metadata and nothing reads it (`docs/WORKSHOP.md:610` records version alignment, dependency
 declaration and content addressing as unimplemented), while the editor writes the string `'0.2.2'` in seven places
 (`editor/server.mjs:1986` and six siblings, `tools/workshop-scaffold.mjs:82`, `editor/ui/pack.js:94`). Two problems,
 one shape.
@@ -486,7 +486,7 @@ per row:
 |---|---|
 | a hook name nothing emits never fires and nothing reports it (`server/sim/battle/hooks.js:17-25`, `:57-59`) | the static check already suggests a near miss (`HOOK_UNKNOWN_EVENT`, `shared/kitAuthoring.js:235-237`), but it is text analysis. Add a **runtime** report: `on` keeps the registration in `this._hooks[name]` (`server/sim/battle/hooks.js:20`), so at `battleEnd` the bus can name every pack-owned hook that was registered and never emitted. A typo then costs one battle instead of one bug report. |
 | non-determinism is a warning (`shared/kitAuthoring.js:222-227`) | an error for layer B (§28.4), and the refusal quotes the construct *and* its source line, so it stops being "a reason that looks nothing like 'you used Math.random'" (`shared/kitAuthoring.js:13-17`). |
-| a kit that returns no `skill` leaves the operator with no skill (`docs/WORKSHOP.md:611`) | the loader knows both facts — a kit was injected *and* `skillSource` says where the skill came from (`server/sim/content/index.js:214`, `:219`). A pack kit with no skill becomes a validation error the editor shows before saving, not a live surprise. |
+| a kit that returns no `skill` leaves the operator with no skill (`docs/WORKSHOP.md:2332`) | the loader knows both facts — a kit was injected *and* `skillSource` says where the skill came from (`server/sim/content/index.js:214`, `:219`). A pack kit with no skill becomes a validation error the editor shows before saving, not a live surprise. |
 | a `chess.assets.spine` that points at an uninstalled model draws a flat portrait and logs nothing (`shared/workshop.js:1178-1194`) | already solved by `report.looks` (logged at `server/data.js:97`) — generalise it: every field that degrades silently gets a `looks`-style check, and the editor surface must show it, not only the server log. |
 | the editor deliberately does not import author files (`editor/server.mjs:428-431`) | **do not change this.** An HTTP endpoint that executes author code is a code-execution surface. Instead expose the verifier of §28.6 as an explicit action that runs in the **playtest subprocess** (`server/index.js:71-75` `SP_WORKSHOP`), which is already a separate process. |
 | runtime errors land in a 100-entry array reachable only through `m.simErrorLog` (`server/match/Match.js:127-129`, `server/sim/battle/hooks.js:167-185`) | per-owner counters (§28.4), plus the room's mod digest on every error line, so a player's bug report carries the identity of the content it came from. |
@@ -550,7 +550,7 @@ cannot bypass.
 
 ### 28.9 Distribution (the 5th gap)
 
-Two channels, already decided (`docs/WORKSHOP.md:449`): the official bundle stays clean (`docs/PACKS.md:133-134`,
+Two channels, already decided (`docs/WORKSHOP.md:612`): the official bundle stays clean (`docs/PACKS.md:133-134`,
 `:139`), workshop content ships separately through the existing zip path (`shared/zip.js`,
 `tools/workshop-pack.mjs`). What is missing is the player-visible half of `docs/PACKS.md:135-136`, and it is four
 surfaces quoting one string:
