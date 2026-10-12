@@ -16,6 +16,7 @@ import { MAX_SEATS } from '../../shared/constants.js';
 // 变体 / 口径层（DESIGN §28.39）：`opts.variants` → 这一局的 `config` 覆盖。值与轴表都在 `shared/variants.js`，
 // 这里只消费它的判决（`null` = 什么都不用改，缺省路径逐字节不变）。
 import { variantDataPatch, variantValue } from '../../shared/variants.js';
+import { morphPairingOf } from '../../shared/morph.js';
 import { formView, isEliteForm } from '../../shared/formProjection.js';
 import { isShopItem } from '../sim/simdata.js';
 import { standInRecord } from '../../shared/standIn.js';
@@ -135,6 +136,13 @@ export class GameData {
      * @type {{ economy?: { deployCap?: number } } | null}
      */
     this.variantPatch = variantDataPatch(opts?.variants ?? null);
+    /**
+     * 行为开关 `morphPairing` 的档位（DESIGN §28.43.1）：`GameData` 是**这一局**的读取视图（prep 侧的
+     * `pieceBonds` 从它读），所以档位也挂在这里、由 `Match` 建它时传进来 —— 与 `variants` 那条口径同一条分工
+     * （改的是这一局的读取，不是 `data/*.json` 那份基线）。没声明 ⇒ `'official'`，也就是引擎今天的行为。
+     * @type {'official'|'plus'}
+     */
+    this.morphPairing = morphPairingOf(opts?.behaviour ?? null);
     /** 口径给出的部署位；没有口径 ⇒ `null`（`deployCap` 落到数据 / DEFAULTS 那两级）。 */
     const cap = this.variantPatch?.economy?.deployCap;
     this._deployCap = Number.isInteger(cap) && cap > 0 ? cap : null;

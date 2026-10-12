@@ -53,7 +53,7 @@ import { ProjectileSystem } from './projectiles.js';
 import { remainingDistance } from './ai.js';
 import { toDataSource, normalizeRoute, normalizeStage } from './simdata.js';
 import { installContent } from './content/index.js';
-import { withGameData } from './content/support/index.js';
+import { withGameData, withMorphPairing } from './content/support/index.js';
 import { BattlePlayers } from './battle/players.js';
 import { BattleLifecycle } from './battle/lifecycle.js';
 import { BattleHooks } from './battle/hooks.js';
@@ -89,7 +89,8 @@ export class Battle {
   constructor(opts = {}) {
     // 对局自己的数据作用域（W-B, DESIGN §28.16）：构造期与每一步都是同步的，而 content/support 的记录读取走
     // `gameData()` —— 不套这一层，一个只声明了部分包的房间仍会读到进程级那份（装了全部包）的盟约 / 道具 / 策略。
-    withGameData(dataObjectOf(opts.data), () => this._init(opts));
+    // 行为开关 `morphPairing`（DESIGN §28.43.1）走**同一条作用域纪律**：`unitBonds` 读它，所以构造期与每一步都要压上。
+    withGameData(dataObjectOf(opts.data), () => withMorphPairing(opts.morphPairing, () => this._init(opts)));
   }
 
   _init(opts = {}) {
@@ -255,7 +256,9 @@ for (const name of ['start', 'step', 'runToEnd', 'forceEnd', 'result']) {
   const inner = desc.value;
   Object.defineProperty(Battle.prototype, name, {
     ...desc,
-    value: function scopedEntry(...args) { return withGameData(dataObjectOf(this.data), () => inner.apply(this, args)); },
+    value: function scopedEntry(...args) {
+      return withGameData(dataObjectOf(this.data), () => withMorphPairing(this.opts?.morphPairing, () => inner.apply(this, args)));
+    },
   });
 }
 

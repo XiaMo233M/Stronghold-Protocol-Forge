@@ -3,6 +3,25 @@
 import { int, isObj } from './shared.js';
 import { diyPicks } from './diy.js';
 import { t } from '../../../../shared/i18n.js';
+// 行为开关 `morphPairing`（DESIGN §28.43.1）：判据本体在 `shared/morph.js`，客户端与服务端/战斗调的是同一个函数。
+import { grantedBondsByMorph } from '../../../../shared/morph.js';
+
+/**
+ * 这一页的 `morphPairing` 档位（房间的包声明里派生的**有效档位**）。`setMorphPairing()` 由
+ * `public/js/roomMods.js` 在 `welcome.mods` 变化时写一次；没写过（干净安装 / 没声明这一格）⇒ `null`，
+ * `morphPairingOf(null)` 给出缺省档 `official`，也就是引擎今天的行为。
+ * @type {string|null}
+ */
+let morphPairing = null;
+/**
+ * 记下这一页的有效档位（由 `roomMods.js` 从 `welcome.mods.packs[].behaviour` 合成后调用）。
+ * @param {string|null|undefined} option
+ */
+export function setMorphPairing(option) {
+  morphPairing = typeof option === 'string' && option ? option : null;
+}
+/** 当前档位（null = 没声明 ⇒ 缺省档）。 */
+export function morphOption() { return morphPairing; }
 
 
 // ---- bonds -------------------------------------------------------------------------------------------
@@ -53,20 +72,20 @@ export function nextThreshold(count, thresholds) {
 /**
  * Bonds granted by 变形同构体: an item with `canGiveBond` worn together with an item that has a `giveBondId` makes the
  * wearer a member of that other item's bond (band 变形者集群 "与特定装备一同装备时装备者将视为特定盟约成员"; the item's
- * talent, character_table trap_1073_acarm073, lists the 14 pairings). The same rule as the server's count
- * (server/match/bondsMeta.js pieceBonds) and the battle's (server/sim/content/support unitBonds).
+ * talent, character_table trap_1073_acarm073, lists the 14 pairings). **The rule itself is one shared pure function**
+ * (`shared/morph.js` `grantedBondsByMorph`，行为开关 `morphPairing`，DESIGN §28.43.1）—— 服务端的
+ * `server/match/bondsMeta.js pieceBonds` 与战斗里的 `server/sim/content/support unitBonds` 调的是**同一个函数**；
+ * 三处各写一份循环正是这条规则历史上最容易分叉的地方（一份改了、另两份没改，卡片与服务端计数就打架）。
+ *
+ * 档位从 `morphOption()` 读（这一页的有效档位；没有声明 ⇒ `'official'` = 引擎今天的行为）。
  * @param {Array<string|{id:string}>|null|undefined} items the carried items (ids or { id } pieces)
  * @param {(id:string)=>any} [getItem] items.json lookup
  * @returns {string[]}
  */
 export function grantedBonds(items, getItem = () => null) {
   const list = Array.isArray(items) ? items : [];
-  if (list.length < 2) return [];
   const recs = list.map((it) => getItem(typeof it === 'string' ? it : it?.id)).filter(isObj);
-  if (!recs.some((r) => r.canGiveBond)) return [];
-  const out = [];
-  for (const r of recs) if (!r.canGiveBond && typeof r.giveBondId === 'string' && r.giveBondId && !out.includes(r.giveBondId)) out.push(r.giveBondId);
-  return out;
+  return grantedBondsByMorph(recs, { morphed: morphOption() });
 }
 
 /**

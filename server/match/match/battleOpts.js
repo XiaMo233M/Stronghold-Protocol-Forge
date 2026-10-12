@@ -48,6 +48,9 @@ export function battleOptsFromMatch(owner, opts = {}) {
   if (owner.workshopTokenKits && !full.tokenKits) full.tokenKits = owner.workshopTokenKits;
   if (Array.isArray(owner.battleInstallers) && owner.battleInstallers.length && !full.battleInstallers) full.battleInstallers = owner.battleInstallers;
   if (owner.bossHitLimit !== undefined && full.bossHitLimit === undefined) full.bossHitLimit = owner.bossHitLimit;
+  // 行为开关 `morphPairing`（DESIGN §28.43.1）：只在**非缺省档**才写这个键 —— 缺省档（`official`）一个键都不多，
+  // 于是没声明这一格的战斗与从前逐字节相同（KEY DISCIPLINE）。战斗里 `Battle` 把它压进 `withMorphPairing`。
+  if (owner.morphPairing && owner.morphPairing !== 'official' && full.morphPairing === undefined) full.morphPairing = owner.morphPairing;
   return full;
 }
 

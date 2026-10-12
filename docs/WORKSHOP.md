@@ -2071,12 +2071,13 @@ URL **一次都不被请求**。一个包把加载源改坏了，关掉这一格
 **本版那张表里有实现好的格 —— 这一点与第 4 刀那一版不同。** 第 4 刀交的是「**通道 + 守卫**」本身（当时表是空的：
 任何一条 `behaviour` 声明都被 `BEHAVIOUR_UNKNOWN_SWITCH` **点名整包拒**，文案里写清「本版一个开关都没有，因为没有
 实现点」）。**首格与它的引擎实现点一起落**，由业主点名；**加一格的门槛**因此比 §1.20 的加轴纪律更严：那一格必须
-**已经在引擎里有实现点**（`docs/design/mod-layer.md` §28.43.1 逐格列出）。今天有 **2 格**，下表就是那两格。
+**已经在引擎里有实现点**（`docs/design/mod-layer.md` §28.43.1 逐格列出）。今天有 **3 格**，下表就是那三格。
 
 | 开关 | 选项 | 缺省 | 引擎侧的读取点 | 投稿 |
 |---|---|---|---|---|
 | `shopBias` | `official` · `bondBias` | `official` | `bondBiasPreference`（`server/match/pool.js`）→ `bondBiasBonds`（`server/match/player/economy.js`）→ `PlayerEconomy._rollItemSlot` | `b293e061b38f` |
 | `prepLoadout` | `locked` · `prep` | `locked` | `LOADOUT_PHASES` / `loadoutPhasesFor`（`server/match/match/platform.js`）→ `Match.setLoadout` 的相位闸门 | `8b4e5da55c58` |
+| `morphPairing` | `official` · `plus` | `official` | 判据本体 `grantedBondsByMorph`（`shared/morph.js`），三处读取点同判：`bondsMeta.pieceBonds` · `support/index.unitBonds` · 客户端 `gameLogic/bonds.grantedBonds` | `19ea65909cf6` |
 
 **每一格的三件事写清**：**缺省档 = 引擎今天的行为**（不声明 / 选缺省 ⇒ 逐字节不变，所以没有任何 `golden:update`）；
 **非缺省档由引擎实现**（包给不出数字、路径或模块）；**那一格的 `effect` 逐字说明它到底动了什么**。
@@ -2103,6 +2104,20 @@ URL **一次都不被请求**。一个包把加载源改坏了，关掉这一格
   当前配发 —— 整份替换会让一个只带一名干员的面板提交把其余干员静默打回默认。
 * `INFO_CHECK` 那一半**不看** `ready`（今天也不看）：两个相位是两条独立的门。
 
+#### `morphPairing` —— 变形同构体的配对规则
+
+* `official`：**引擎今天的行为** —— 少于两件装备就**不配对**（变形同构体占一个装备位），配上了就**每一件**
+  `giveBondId` 装备都授予。
+* `plus`：投稿 `19ea65909cf6` 的那一套 —— **一件就够**（不要求两件），且**只取装备行里最左边**那一件能授予盟约的。
+* **判据只有一份**：`shared/morph.js` 的 `grantedBondsByMorph`。prep 侧（`bondsMeta.pieceBonds`）、战斗里
+  （`support/index.unitBonds`，档位由 `withMorphPairing` 的作用域给）与客户端
+  （`gameLogic/bonds.grantedBonds`，档位由 `roomMods.js` 从 `welcome.mods` 合成后写入）**都调它** ——
+  投稿原件是把这三处各自覆盖一份，而三处各写一份循环正是这条规则最容易分叉的地方。
+* **本版**未实现**的那一条（如实披露）**：投稿还要求「不占装备位、每名干员只能装一件、第三件装备永远顶掉真占格的
+  那两件」的**槽位**语义。本刀**没做**那些：它们落在装备位与替换的既有实现
+  （`server/match/player/items.js` 与 `gamedata.equipPerChess`）上；这一格今天只改「配对授予哪些盟约」。
+  `effect` 逐字写明这一点，`test/morphPairing.test.js` 把边界钉住。
+
 **新增一格怎么做**：先把**引擎侧的读取点**实现好（照这一格），再把那一格加进 `BEHAVIOUR_SWITCHES`
 （`label` / `options` / `default` / `optionLabels` / `effect` / `actions` 一件都不能少 —— `behaviourSwitchIssues`
 逐格检查），最后补一节文档与一个测试文件（并把读取点登记进 `shared/modSurface.js` 的那一格锚点）。
@@ -2112,8 +2127,8 @@ URL **一次都不被请求**。一个包把加载源改坏了，关掉这一格
 （不声明就不长键）。**不新增协议消息、不改默认游戏行为 ⇒ 不需要 `golden:update`**。
 
 **站侧含义（照实写）**：空表在站上**真的挡过投稿** —— `e3a5d09eb6d3`（第 4 刀那一份跨版本安装包，已批准公开）
-按 `pack.json.behaviour` 声明时拿到 `BEHAVIOUR_UNKNOWN_SWITCH`，文案就是「Known switches: none yet …」。这两格落了
-之后，`b293e061b38f` / `8b4e5da55c58` 两条**有了可声明的档**（仍要按包格式重写，见 §1.1）。
+按 `pack.json.behaviour` 声明时拿到 `BEHAVIOUR_UNKNOWN_SWITCH`，文案就是「Known switches: none yet …」。这三格落了
+之后，`b293e061b38f` / `8b4e5da55c58` / `19ea65909cf6` 三条**有了可声明的档**（仍要按包格式重写，见 §1.1）。
 另一条实测约束：`11746baa0662` 只声明 `pack.json.variants` 会拿到 `EMPTY_PACK`（`"variants" is NOT a contribution`）
 —— **口径与开关都不是贡献项**，一个只带它们的包不构成一份包。
 

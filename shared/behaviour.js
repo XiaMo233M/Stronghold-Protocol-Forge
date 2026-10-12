@@ -125,6 +125,31 @@ export const BEHAVIOUR_SWITCHES = Object.freeze({
     }),
     actions: (option) => (option === 'prep' ? [{ kind: 'loadout.allowDuringPrep', value: true }] : []),
   },
+  /**
+   * 变形同构体的配对规则（投稿 `19ea65909cf6`，其原件整份覆盖 `shared/morph.js` 与三处读取点）。**改结果**
+   * ⇒ 声明它必须 `combat: true`：配对出的盟约决定谁算成员、层数与战斗里的加成。
+   *
+   * 两档的**判据只有一份**（`shared/morph.js` 的 `grantedBondsByMorph`），三处读取点调的是同一个函数：
+   * prep 的 `bondsMeta.pieceBonds`、战斗的 `support/index.unitBonds`、客户端的 `gameLogic/bonds.grantedBonds`。
+   *
+   * `official` = **引擎今天的行为**：变形同构体**占一个装备位**（少于两件装备就不配对），并与**每一件**
+   * `giveBondId` 装备配对（全部授予）。`plus` = 投稿那一套：**不占装备位**（一件也能配对）、每名干员**只能装
+   * 一件**（多的由 `morphCarrierIndexes` 暴露给调用方）、只取装备行里**最左边**能授予盟约的那一件。
+   */
+  morphPairing: {
+    label: '变形同构体的配对规则',
+    options: Object.freeze(['official', 'plus']),
+    default: 'official',
+    optionLabels: Object.freeze({
+      official: '官方读数：占一个装备位，配上的都授予',
+      plus: '加强：不占装备位，只取最左边那一件',
+    }),
+    effect: Object.freeze({
+      official: 'the reading this engine has always had: fewer than two carried items pair with nothing (the 变形同构体 takes one of the two equipment slots), and EVERY giveBondId item it is worn with grants its bond',
+      plus: 'the submission\'s GRANT rule: one carried item is enough for the pairing to count (no two-item precondition), and ONLY the leftmost giveBondId item in the equipment row grants its bond. NOT implemented in this build: the slot semantics the submission also asks for (no equipment slot, at most one carrier, a third item always displacing a real one) — those live in the equipment-slot code and are the next cut',
+    }),
+    actions: (option) => (option === 'plus' ? [{ kind: 'morph.pairingPlus', value: true }] : []),
+  },
 });
 
 /** 开关名，按声明顺序（界面 / 错误文案按它排）。 */

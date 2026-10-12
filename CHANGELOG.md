@@ -240,6 +240,21 @@
   逐字相同（只有 `INFO_CHECK`），**不需要 `golden:update`**。
 * **测试**：新增 `test/shopBias.test.js`（9 条）+ `test/prepLoadout.test.js`（8 条：形状 / 两档 / 缺省与今天
   逐字相同 / `prep` 档的合并语义 / `ready` 后仍拒 / 别的相位照旧 `WRONG_PHASE` / 协议面一个字节不动）。
+* **`morphPairing`**：`official`（缺省，今天的行为：少于两件装备不配对、配上了就每一件 `giveBondId` 都授予）·
+  `plus`（投稿 `19ea65909cf6` 那一套：**一件起配**、只取装备行里**最左边**那一件）。**判据只有一份** ——
+  `shared/morph.js` 的 `grantedBondsByMorph`：投稿原件是把**三处读取点各覆盖一份**
+  （`bondsMeta.js` / `sim/content/support/index.js` / `public/js/ui/gameLogic/bonds.js`），三处各写一份循环正是
+  这条规则最容易分叉的地方。本刀把那三处收成一个纯函数：prep 侧从 `GameData.morphPairing` 读（`Match` 建
+  `GameData` 时传进去），战斗侧由 `withMorphPairing` 的作用域给（与 `withGameData` 同一条同步作用域纪律，
+  `Battle` 构造期与每一步都压上），客户端由 `roomMods.js` 从 `welcome.mods` 合成后写入
+  （`setMorphPairing`，合并规则直接调 `mergeBehaviourDecls`，不自己实现一遍）。BattleSpec 与
+  `battleOptsFromMatch` 各带一个 `morphPairing` 键，**只在非缺省档才出现**。缺省档一个键都不多 ⇒ 逐字节不变。
+* **`morphPairing` 的一条如实边界**：投稿还要求**槽位**语义（不占装备位、每名干员只一件、第三件顶掉真占格那两件）。
+  本版**只**实现「配对授予哪些盟约」；槽位那半落在 `server/match/player/items.js` 与 `gamedata.equipPerChess` 上，
+  **未做**（缺 golden 授权的环境不改槽位判定）。那一格的 `effect` 逐字写明，`test/morphPairing.test.js` 有两条
+  断言钉住这条边界（`effect` 不许声称改了槽位、槽位判定不许读这一格）。
+* **测试**：`test/morphPairing.test.js`（8 条：形状 / 档位归一化 / 判据本体两档 / prep 读取点 / 战斗读取点的
+  缓存按档位失效 / **三处读取点同判**（逐行遍历两档）/ 三处共用同一份判据的源码级断言 / 未实现那一条的边界）。
 * **`test/packBehaviour.test.js` 原地改了三处（换语义，不放松）**：①「本版是空表」→「真表里每一格都通过形状守卫、
   每一格至少两档且有非缺省档」；②「空表也响亮」→「不认识的开关也响亮」（被拒的名字从 `shopBias` 换成真表外的名字，
   并新增「文案必须列出真表里的每一个开关」）；③「真表（空）下包装不上」→「真表下不认识的开关装不上」+ 新增

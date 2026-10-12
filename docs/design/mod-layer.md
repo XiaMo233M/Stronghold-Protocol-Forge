@@ -3002,6 +3002,11 @@ i18n-ignore），差别只在**表是另一张**、每格多一个 `actions`。
 |---|---|---|---|
 | `shopBias` | `official`（缺省）· `bondBias` | `bondBiasPreference`（`server/match/pool.js`）→ `bondBiasBonds`（`server/match/player/economy.js`）→ `PlayerEconomy._rollItemSlot` | `b293e061b38f` |
 | `prepLoadout` | `locked`（缺省）· `prep` | `LOADOUT_PHASES` / `loadoutPhasesFor` + `MatchPlatform.setLoadout`（`server/match/match/platform.js`）：`locked` 只有 `INFO_CHECK`（与从前逐字相同），`prep` 另加 `PREP` 且只在这个座位还没准备时；`PREP` 那一次走 `mergeLoadoutEntries`（只覆盖写了的干员） | `8b4e5da55c58` |
+| `morphPairing` | `official`（缺省）· `plus` | 判据本体 `grantedBondsByMorph`（`shared/morph.js`），三处读取点**同判**：`pieceBonds`（`server/match/bondsMeta.js`）· `unitBonds`（`server/sim/content/support/index.js`，档位经 `withMorphPairing` 的作用域）· `grantedBonds`（`public/js/ui/gameLogic/bonds.js`，档位经 `roomMods.js` 从 `welcome.mods` 合成）。`official` = 今天的行为（两件起配、全部授予）；`plus` = 一件起配、只取最左那一件 | `19ea65909cf6` |
+
+**`morphPairing` 的一条如实边界**：投稿还要求槽位语义（不占装备位、每名干员只一件、第三件顶掉真占格那两件）。
+本版**只**实现「配对授予哪些盟约」这一条；槽位那半落在 `server/match/player/items.js` 与 `gamedata.equipPerChess`
+上，**未做**，`effect` 与 `test/morphPairing.test.js` 都写明这一点（缺 golden 授权的环境不改槽位判定）。
 
 **每加一格照这三条做**（这一刀起）：**缺省 = 引擎今天的行为，逐字节不变**（缺省路径与从前同一份代码路径，
 所以**没有任何 `golden:update`**，已发布包一个字节不动）；**非缺省档由引擎实现**（包给不出数字、路径、模块，

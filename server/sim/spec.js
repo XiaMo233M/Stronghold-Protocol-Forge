@@ -104,6 +104,10 @@ export function buildBattleSpec(o = {}) {
     // this spec (server/match/fields.js specBounds), so a result computed under a DIFFERENT mod set has to be
     // distinguishable from one computed under this one.
     mods: o.mods && typeof o.mods === 'object' ? JSON.parse(JSON.stringify(o.mods)) : null,
+    // 行为开关 `morphPairing` 的档位（DESIGN §28.43.1）：这一场战斗的**配对规则**，judged by the same single helper
+    // (`shared/morph.js`) the server's prep side and the client's card use. **只在非缺省档才出现这个键** ——
+    // 没声明这一格的 spec 与从前逐字节相同（spec 的键纪律与 `server/match/match/battleOpts.js` 同一条）。
+    ...(o.morphPairing && o.morphPairing !== 'official' ? { morphPairing: o.morphPairing } : {}),
     // 包声明的**战斗逻辑**模块（`pack.json.server.battle`, DESIGN §28.17）：与 `workshopKits` 逐字同形 —— 一条
     // JSON 安全的 `{ id, pack, hash, url }`，浏览器按 URL 加载同一段代码并跑 `install(battle)`，服务端复算用的是同
     // 一个包的同一份字节。空数组 = 没有包声明它（干净安装），此时 spec 里这个键照旧存在但什么都不做。
@@ -205,6 +209,9 @@ export function createBattleFromSpec(spec, dataSource, opts = {}) {
   // without one, i.e. the BOSS_HIT_LIMIT default, which is the behaviour of every existing spec.
   if (s.bossHitLimit === null && Object.hasOwn(s, 'bossHitLimit')) battleOpts.bossHitLimit = Infinity;
   else if (typeof s.bossHitLimit === 'number') battleOpts.bossHitLimit = s.bossHitLimit;
+  // 行为开关 `morphPairing`（DESIGN §28.43.1）：spec 上带了这个键就递给这一场 Battle（`opts.morphPairing`），战斗把
+  // 它压进 `withMorphPairing` 的作用域、`unitBonds` 从那里读。缺省的 spec 没有这个键 ⇒ 战斗与从前逐字节相同。
+  if (opts.morphPairing === undefined && typeof s.morphPairing === 'string' && s.morphPairing) battleOpts.morphPairing = s.morphPairing;
   // 工坊行为层 (docs/WORKSHOP.md §4): a per-battle kit map injected through the sanctioned hook — `Battle opts.kits`
   // takes precedence over the built-in registry (server/sim/content/index.js setupUnitKit). The server passes the map it
   // loaded from the packs; the browser passes the map it built from `spec.workshopKits`.
