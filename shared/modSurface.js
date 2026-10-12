@@ -312,6 +312,30 @@ export const MOD_SURFACE = Object.freeze([
     tests: ['test/packBehaviour.test.js'],
     spec: '§28.43',
   },
+  {
+    id: 'target',
+    layer: 'A',
+    // 与 `content` / `notices` 同一类：一个**清单字段**，不是执行面。它的特殊性在值指向**另一个宿主**：
+    // `stardust` 的包本引擎只认识、不装载（`server/workshop.js` 的 `foreign`），所以它既不是贡献项，也不进
+    // 数据叠加层。这一格的判据是「闭枚举 + 闭集例外」—— `PACK_TARGETS` 与 `STARDUST_TARGET_FIELDS` 各是一条名单，
+    // 加一格必须同时进本清单与 docs/MOD-SURFACE.md。
+    decl: 'pack.json.target = "forge" | "stardust"',
+    anchors: [
+      { symbol: 'PACK_TARGETS' },
+      { symbol: 'STARDUST_TARGET_FIELDS' },
+      { symbol: 'PACK_FIELDS', members: ['target'] },
+    ],
+    requires: [
+      '闭枚举：只许 `PACK_TARGETS` 里有的（`PACK_TARGET_UNKNOWN`，整包拒，不是忽略）',
+      '缺省 `forge`；不写 ⇒ 归一化清单里**不长出这个键**（无条件写会让所有已发布包的内容哈希改变，§28.2）',
+      '`stardust` 是**声明型包**：本引擎认识、不装载、不进数据叠加层，启动日志一行具名（`server/workshop.js` 的 `foreign`）',
+      '`stardust` 目标额外放行 `STARDUST_TARGET_FIELDS`，以及**声明过的能力自己认领的字段**（`STARDUST_CAPABILITY_FIELDS`）；`forge` 一个都不放行',
+      '`stardust` 的包不受 `EMPTY_PACK` 约束（它没有 Forge 贡献项是正常形态）',
+    ],
+    files: ['shared/workshop.js', 'server/workshop.js'],
+    tests: ['test/modTarget.test.mjs'],
+    spec: '§28.46',
+  },
   // ------------------------------------------------------------------ C 层：客户端界面
   {
     id: 'client.panels',

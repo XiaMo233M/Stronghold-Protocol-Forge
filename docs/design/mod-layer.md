@@ -72,7 +72,7 @@ over exactly the bytes the loader reads and the browser will be served:
 1. `pack.json` — hashed **after** `normalizePackManifest` (`shared/workshop.js:339`), so the hash covers the pack's
    effective declaration (normalized `overrides`, `content`, icon tables, `art`, `support`, `voices`), not its
    whitespace. Two spellings of the same pack then hash the same, and a declaration the loader silently dropped
-   (`shared/workshop.js:1681-1683` filters a malformed `overrides` entry in silence today) cannot hide behind the hash.
+   (`shared/workshop.js:1724-1726` filters a malformed `overrides` entry in silence today) cannot hide behind the hash.
 2. every declared content file, after `normalizeContentFile` — the same normalized records the loader merges.
 3. **every other regular file under the pack directory** — its bytes, byte for byte. That is `kits/**`, `assets/**`, the
    declared panel modules and stylesheets, the `server.meta` / `battle` / `room` / `modules[*].entry` modules, the i18n
@@ -183,10 +183,10 @@ substance; the first step of the slice carries them, `docs/WORKSHOP.md` §1.2 st
 
 | collision | the rule | where it is enforced |
 |---|---|---|
-| a **new** id claimed by two packs — a data record | **refused, and the report names the pack that holds it** (neither author's claim can be preferred) | `shared/workshop.js:1104-1108` (`PACK_ID_COLLISION`, `definedBy`) |
+| a **new** id claimed by two packs — a data record | **refused, and the report names the pack that holds it** (neither author's claim can be preferred) | `shared/workshop.js:1131-1135` (`PACK_ID_COLLISION`, `definedBy`) |
 | a new kit id claimed by two packs | **refused, and the report names the pack that holds it** | `server/workshop.js:1229-1233` (`KIT_ID_COLLISION`, `definedBy`) |
-| two packs **overriding the same existing record** (an official id, or a record another pack contributed) | **the smaller pack id wins + the conflict is reported** (`definedBy` names the pack that was passed over) | `shared/workshop.js:1104-1108` and `:986-990` |
-| an icon / item icon / art entry claimed by two packs | **the smaller pack id wins**; the loser is reported and named | `shared/workshop.js:1479-1483`, `:1429-1433`, `:1578-1582` |
+| two packs **overriding the same existing record** (an official id, or a record another pack contributed) | **the smaller pack id wins + the conflict is reported** (`definedBy` names the pack that was passed over) | `shared/workshop.js:1131-1135` and `:1013-1017` |
+| an icon / item icon / art entry claimed by two packs | **the smaller pack id wins**; the loser is reported and named | `shared/workshop.js:1506-1510`, `:1456-1460`, `:1605-1609` |
 | `overrides` declares the replacement of an **OFFICIAL** id | **allowed, and the declaration is what makes it allowed** | `shared/workshop.js:14-16`, `:986-990` |
 | anything, between two packs | **the smaller pack id wins — on every face** | one comparator: `shared/workshop.js:787` `byPackId` |
 
@@ -229,7 +229,7 @@ there. Both defects — the wrong attribution and the unnamed kit holder — are
 
 **Cross-pack conflicts are reported once, at load, in one shape.** The report used to be split across three carriers
 with three shapes: the overlay's `report.errors` (logged by `server/data.js:95`), the icon and art collisions on that
-same array, and `loadWorkshopKits`' own `errors` (`server/workshop.js:478`) — no single line an author could grep. Every
+same array, and `loadWorkshopKits`' own `errors` (`server/workshop.js:488`) — no single line an author could grep. Every
 one of them now carries a `code`, and the four `MANIFEST_MISSING` cases (`data/assets.json` or `data/support.json` not
 produced by the asset pipeline) are distinguishable from a collision without reading prose. The ordering contract is
 documented for authors in `docs/WORKSHOP.md` §1.2 and summarized in the §1.7 status table, because a rule an author
@@ -3021,3 +3021,41 @@ i18n-ignore），差别只在**表是另一张**、每格多一个 `actions`。
 （走装载器同一份 `identifyPack`）、投影那一行真的在 `server/index.js` 里（源码级断言）、以及 `PACK_FIELDS` 的闭集
 计数就地延长。**不需要 `golden:update`**：缺省路径一个字节不动。
 
+
+### 28.46 `pack.json.target`：一份清单，两个宿主读得懂（`forge` 缺省 / `stardust` 声明型）
+
+**要解决的问题。** `pack.json` 的顶层键是**闭集**（§28.1 那条最硬的纪律：不认识的键点名拒绝，绝不读过去）。这条纪律对
+Forge 自己的包是对的，但对**同一份清单要给两个宿主读**的场景是一个死结：Stardust 宿主认识的键（`type` / `capabilities` /
+`englishName` / `authors` / `app`，以及能力自己认领的 `announcements`）在 Forge 这一侧会被 `PACK_UNKNOWN_FIELD` 整包拒。
+作者于是被迫维护两份几乎一样的清单 —— 而那正是「同一份 pack.json 两端各自读得懂」要消灭的东西。
+
+**这一格的形状。** `pack.json.target`：`"forge"`（缺省）或 `"stardust"`（`PACK_TARGETS`，闭枚举）。写别的值
+`PACK_TARGET_UNKNOWN` 整包拒。
+
+**`forge`（缺省）这一支：一个字节都不动。** 不写 `target` ⇒ 归一化清单里**不长出这个键**（与 `skins` / `variants` /
+`behaviour` 同一条「写了才进清单」的纪律）⇒ 包身份哈希（`identifyPack` 的 `canonicalJson(pack)`）、
+`/mods/catalog.json`、`PROTOCOL_VERSION` 与 `MOD_API_VERSION` 全部逐字节不变。显式写 `target: "forge"` 是**一条声明**，
+它进清单、也进哈希 —— 这是对的：两份行为可能不同的包不该共用一个摘要。
+
+**`stardust` 这一支：本引擎只认识、不装载。** 判定在 `shared/workshop.js` 的形状层（`type` 必须是 `"mod"`、
+`capabilities` 是能力 id 列表、闭集例外只对**声明过的能力**放行），装载在 `server/workshop.js`：`target === 'stardust'`
+的包进 `foreign` 列表（一行具名 INFO 日志），**不进** `packs`、**不进**数据叠加层、**不进** `/mods/catalog.json`。
+它也不需要任何 Forge 贡献项 ⇒ `EMPTY_PACK` 对它不适用。
+
+**三条裁决（本刀的口径）。**
+
+1. **不抬版本**：加一格字段、且缺省路径逐字节不变 ⇒ `MOD_API_VERSION` 仍是 `1`、`PROTOCOL_VERSION` 仍是 `2`。
+   先例是 §28.39 / §28.43 / `server.modules` 的 `metrics`·`route`。抬世代的三种情形（已有声明改语义 / 新声明复用
+   老引擎会按旧语义执行的键 / 删改名任何一格）一条都不成立。
+2. **闭集就地延长**：`PACK_FIELDS` 32 → 33（`test/packBehaviour.test.js` 的计数与 `docs/STANDARD-PACK.md` 同步）。
+   副作用要如实说：`PACK_UNKNOWN_FIELD` 的错误文案里**列出全部键**，所以每一个未知键的报错文案都变了 —— 那是文案，
+   不是判据。
+3. **`stardust` 包的作者可见面（如实披露，本刀未接线）**：本引擎只在**启动日志**里具名说一句。
+   `tools/workshop-validate.mjs` 只读 `loaded.errors` 与 `loaded.packs`，**不读 `foreign`** ⇒ 一个 stardust 包在验证器
+   报告里**完全不出现**（既不报错、也不列出）；`tools/workshop-pack.mjs list` 把它打成 `REFUSED（null）`
+   （`packSummary` 没有这一支）。这两处是**已知缺口**，必须在收下这一格之前接上，否则复刻的正是 §1.1 那条教训
+   （「磁盘上在、编辑器里在、却永远进不了游戏，没有任何报错」）。
+
+**测试**：`test/modTarget.test.mjs` —— 缺省逐字节不变（一袋 17 个语料包的摘要**冻结**成字面量，移植前实测）、
+`target: "forge"` 下 `type` / `capabilities` 仍被拒、`PACK_TARGET_UNKNOWN` / `STARDUST_TARGET_BAD_TYPE` /
+`STARDUST_TARGET_BAD_CAPABILITIES` 逐条、能力认领字段跟着能力走、装载器 `foreign` 具名且不进目录、两个版本号不动。

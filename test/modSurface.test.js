@@ -333,6 +333,9 @@ test('表面清单：引擎里每一个「包可声明的名单」都被某条�
     // `BEHAVIOUR_UNKNOWN_SWITCH` 点名拒绝），所以它必须被某一格表面锚住。它住在自己的模块里（不是 schema），
     // 与 `packForms` 同一条做法：表与它自己的解析器在一起，锚点写清 `module`。
     ['BEHAVIOUR_SWITCHES', 'behaviour'],
+    // §28.46：目标引擎的两条名单 —— 与 `PACK_FIELDS` / `CLIENT_PANEL_SLOTS` 同一类（写错的值被
+    // `PACK_TARGET_UNKNOWN` 点名拒绝），所以两条都必须被 `target` 那一格锚住。
+    ['PACK_TARGETS', 'schema'], ['STARDUST_TARGET_FIELDS', 'schema'],
     ['HOST_METRICS_FIELDS', 'hostMetrics'], ['BOOT_CONFIG_ENV_KEYS', 'modModules'],
     ['RESERVED_ROUTE_PREFIXES', 'routeMount'], ['DYNAMIC_ROUTE_CACHE_POLICIES', 'routeMount'],
   ];

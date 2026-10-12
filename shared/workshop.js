@@ -144,7 +144,34 @@ export const PACK_FIELDS = Object.freeze([
   'behaviour',
   // 中间层四组能力声明（DESIGN §28.13）
   'assets', 'client', 'server', 'routes',
+  // 目标引擎（DESIGN §28.46）：`forge`（缺省，本引擎自己装）或 `stardust`（给 Stardust 宿主的**声明型包** ——
+  // 本引擎不装载它，但认识它、不拒绝它、也不把它算进数据叠加层；同一份 pack.json 两端各自读得懂）。
+  // `target: "stardust"` 的包额外允许 Stardust profile 的几格（见 `STARDUST_TARGET_FIELDS`）。
+  'target',
 ]);
+
+/** `pack.json.target` 的闭枚举：`forge`（缺省）本引擎装载；`stardust` 是给 Stardust 宿主的声明型包（本引擎只认识、不装载）。 */
+export const PACK_TARGETS = Object.freeze(['forge', 'stardust']);
+/** `target: "stardust"` 的包额外允许的 Stardust profile 字段（本引擎自己的闭集里没有的那些拼法）：
+ *  `type`（必须是 `mod`）与 `capabilities` 是必须的两格；`englishName` / `authors` / `app` 是**同一个东西的
+ *  Stardust 拼法**（本引擎叫 `name` / `author` / `gameVersion`）—— 放行它们只为一件事：「同一份 pack.json
+ *  两端各自读得懂」不该逼作者在两种拼法里二选一。`target: "forge"`（含缺省）一个都不放行。 */
+export const STARDUST_TARGET_FIELDS = Object.freeze(['type', 'capabilities', 'englishName', 'authors', 'app']);
+/**
+ * **能力认领的字段**（`target: "stardust"`）：Stardust 宿主的 profile 里，一个能力可以额外收下它自己的字段
+ * （例如 `announcements` 能力收 `announcements` 列表）。本引擎不装载这些包、也不解释那些字段 —— 但**必须认识它们**，
+ * 否则「同一份 pack.json 两端各自读得懂」在这张闭集前就断了：作者会看到本引擎报 `PACK_UNKNOWN_FIELD`。
+ * （注意名字：Stardust 用的字段叫 `announcements` **不是** `notices` —— 本引擎自己已经有一个 `notices`（DESIGN
+ * §28.15 的纯文本声明，形状是一个对象），同一个键不能对两个宿主说两种形状。）
+ *
+ * 这张表是**手抄的镜像**（与 Stardust 的 `shared/modPacks.js MOD_CAPABILITY_FIELDS` 对应），故意的：
+ * 一份远端仓库的表没法在这里被 import；漂移的代价是「本引擎拒装一份它其实该放行的包」——两端对照由作者侧的
+ * `chain-test.mjs`（同一份 pack.json 两个宿主各自读）盯着，改一边就要改另一边。字段本身**不做语义校验**：
+ * 它是 Stardust 的 profile 要判的东西，本引擎只看形状（必须是那份能力认领的名字）。
+ */
+export const STARDUST_CAPABILITY_FIELDS = Object.freeze({
+  announcements: Object.freeze(['announcements']),
+});
 
 /** 未知顶层键的拒绝码（见 `PACK_FIELDS`）。 */
 export const PACK_UNKNOWN_FIELD_CODE = 'PACK_UNKNOWN_FIELD';
@@ -1675,10 +1702,26 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // 顶层键闭集（`PACK_FIELDS`）：一个我们不认识的键**点名拒绝**，绝不读过去。这是本刀那条共通纪律的落点 ——
   // 三个社区 mod 里的 `variants` / `skins` / `i18n` 全都是「写了等于没写」的静默丢，而作者从错误文案里
   // 得不到任何线索。判据放在最前面：一个连键都不认识的清单，后面的字段级判据都是在猜它想说什么。
+  //
+  // 例外只有一条：`target: "stardust"` 的包（给 Stardust 宿主的**声明型包**）额外允许 Stardust profile 的几格
+  // （`type` / `capabilities` / `englishName` / `authors` / `app`），以及**那格里声明的能力自己认领的字段**
+  // （`STARDUST_CAPABILITY_FIELDS`，例如 `announcements` 能力的 `announcements`）—— 同一份 pack.json 两端各自
+  // 读得懂，谁都不许把对方认识的键当成笔误。
+  const starTarget = raw.target === 'stardust';
+  // 能力认领的字段只对**声明了那个能力**的包放行：`announcements` 字段跟着 `capabilities: ["announcements"]` 走
+  // （与 Stardust 侧 `MOD_CAPABILITY_NOT_DECLARED` 同一条规则，本引擎这边只管形状）。
+  const starClaimed = new Set();
+  if (starTarget && Array.isArray(raw.capabilities)) {
+    for (const cap of raw.capabilities) {
+      for (const name of STARDUST_CAPABILITY_FIELDS[cap] || []) starClaimed.add(name);
+    }
+  }
   for (const key of Object.keys(raw)) {
     if (PACK_FIELDS.includes(key)) continue;
+    if (starTarget && STARDUST_TARGET_FIELDS.includes(key)) continue;
+    if (starClaimed.has(key)) continue;
     return fail(PACK_UNKNOWN_FIELD_CODE,
-      `pack.json: "${key.length > MAX_KEY_SHOWN ? `${key.slice(0, MAX_KEY_SHOWN)}…` : key}" is not a field of this pack format (${PACK_FIELDS.join(', ')}). A key this loader does not know is never read: write it as one of the fields above, or drop it — a declaration that is ignored is worse than a refusal`);
+      `pack.json: "${key.length > MAX_KEY_SHOWN ? `${key.slice(0, MAX_KEY_SHOWN)}…` : key}" is not a field of this pack format (${PACK_FIELDS.join(', ')}${starTarget ? `, plus ${STARDUST_TARGET_FIELDS.join(', ')} (and the fields a declared Stardust capability claims) for target "stardust"` : ''}). A key this loader does not know is never read: write it as one of the fields above, or drop it — a declaration that is ignored is worse than a refusal`);
   }
   const id = typeof raw.id === 'string' && raw.id ? raw.id : dirName;
   if (!PACK_ID_RE.test(id)) return fail('BAD_PACK_ID', `"${id}" is not a valid pack id (letters, digits, _ and - only)`);
@@ -2143,6 +2186,22 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // 它自己不带来任何内容。所以一个只带 `behaviour` 的包照旧 `EMPTY_PACK`（文案里点名它）。
   const behaviourParsed = raw.behaviour === undefined ? null : parseBehaviourDecl(raw.behaviour, opts.behaviourSwitches);
   if (behaviourParsed && !behaviourParsed.ok) return behaviourParsed;
+  // 目标引擎（`target`，DESIGN §28.46）：缺省 `forge`（本引擎自己装）。`stardust` 的包是**声明型**的 ——
+  // 本引擎认识它、不装载它（server/workshop.js 记一行 foreign），所以它不需要任何 Forge 贡献项
+  // （EMPTY_PACK 对它不适用），`type` / `capabilities` 两格按 Stardust profile 校验。写了才进归一化结果。
+  const target = raw.target === undefined ? 'forge' : raw.target;
+  if (!PACK_TARGETS.includes(target)) {
+    return fail('PACK_TARGET_UNKNOWN', `target: ${JSON.stringify(raw.target)} is not one of ${PACK_TARGETS.join(' / ')}`);
+  }
+  let starProfile = null;
+  if (target === 'stardust') {
+    if (raw.type !== 'mod') return fail('STARDUST_TARGET_BAD_TYPE', `target "stardust" needs "type": "mod" (got ${JSON.stringify(raw.type ?? null)}) — it is the type the Stardust host loads`);
+    const caps = raw.capabilities === undefined ? [] : raw.capabilities;
+    if (!Array.isArray(caps) || caps.some((c) => typeof c !== 'string' || !/^[a-z][A-Za-z0-9_.-]{0,63}$/.test(c))) {
+      return fail('STARDUST_TARGET_BAD_CAPABILITIES', 'capabilities must be a list of capability ids (lowercase first, then letters/digits/._-)');
+    }
+    starProfile = { capabilities: [...new Set(caps)].sort() };
+  }
   // 一条声明只有在清单里**真的写了这个键**时才进归一化结果。这一条是本刀最容易做坏的地方：无条件写进去会让
   // 每一个已存在的包（它们没有这些键）的归一化清单多出四个键，于是内容哈希全变、`identifyPack` 的
   // `manifest` 与 `hash` 也跟着变 —— 房间的摘要闸门会开始误判（DESIGN §28.2）。
@@ -2176,7 +2235,9 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // `playtest` **不是**贡献项：它是行为开关，一个只带它的包仍然什么都没带来，照旧 EMPTY_PACK
   // （test/playtestDirectToHand.test.js 有断言钉住这一点）。四组新声明的贡献语义见上面 `contributes` 的注释：
   // A 段把提案的语义落死（B 段实现行为时不用再改），而「只带 `playtest` 照旧被拒」这条既有裁决一字未动。
-  if (!content.length && !Object.keys(voiceLines).length && !Object.keys(orderedLangLines).length
+  // `target: "stardust"` 的包**不是**本引擎的包：它的价值在 Stardust 宿主那一侧，本引擎只看形状、不装载
+  //（server/workshop.js 记一行 foreign），所以「没有 Forge 贡献项」是它的正常形态，EMPTY_PACK 对它不适用。
+  if (target !== 'stardust' && !content.length && !Object.keys(voiceLines).length && !Object.keys(orderedLangLines).length
     && !Object.keys(bondIconFiles).length && !Object.keys(itemIconFiles).length && !Object.keys(artEntries).length
     && !skinEntries.length
     && !Object.keys(orderedOperators).length && !declared.some(contributesDecl)) {
@@ -2333,6 +2394,10 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
       // 四组新声明：**只在声明过时才存在**（见上面 `declared` 的注释）。哈希覆盖它们靠的就是这一条 ——
       // `identifyPack` 哈希的是这份归一化清单的 `canonicalJson`（server/workshop.js）。
       ...Object.fromEntries(declared),
+      // 目标引擎与 Stardust profile（同一条「写了才进归一化结果」的纪律）：`target: "forge"` 显式写出来时也进
+      // （那是一个声明），`type` / `capabilities` 只在 stardust 目标下存在。
+      ...(raw.target !== undefined ? { target } : {}),
+      ...(starProfile ? { type: 'mod', capabilities: starProfile.capabilities } : {}),
     },
   };
 }

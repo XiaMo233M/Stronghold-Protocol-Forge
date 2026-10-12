@@ -2087,6 +2087,40 @@ URL **一次都不被请求**。一个包把加载源改坏了，关掉这一格
 
 ---
 
+### 1.23 目标引擎（`target`）：一份 `pack.json`，两个宿主各自读得懂
+
+`pack.json` 的顶层键是**闭集**：不认识的键点名拒绝（`PACK_UNKNOWN_FIELD`）。这条纪律对 Forge 自己的包是对的，但当同一份
+清单要给**另一个宿主**（Stardust）读时，它就成了死结 —— 那边认识的键（`type` / `capabilities` / `englishName` /
+`authors` / `app`，以及能力自己认领的 `announcements`）在 Forge 这一侧会被整包拒。
+
+`target` 就是这一格的出口：
+
+```json
+{ "id": "sd-pack", "name": "…", "version": "1.0.0", "license": "CC0-1.0",
+  "target": "stardust", "type": "mod", "capabilities": ["announcements"],
+  "announcements": [ … ] }
+```
+
+* **`"forge"`（缺省）**：本引擎自己装。**不写 `target` 时一个字节都不动** —— 归一化清单里不长这个键，包身份哈希、
+  `/mods/catalog.json`、`PROTOCOL_VERSION`、`MOD_API_VERSION` 全部逐字节不变。显式写 `target: "forge"` 是一条**声明**，
+  它进清单、也进哈希。
+* **`"stardust"`**：给 Stardust 宿主的**声明型包**。本引擎**只认识、不装载** —— 它不进 `packs`、不进数据叠加层、
+  不进 `/mods/catalog.json`，启动日志里留一行具名（`server/workshop.js` 的 `foreign`）。它不需要任何 Forge 贡献项，
+  所以 `EMPTY_PACK` 对它不适用。`type` 必须是 `"mod"`，`capabilities` 是能力 id 列表；能力自己认领的字段只对
+  **声明过那个能力**的包放行。
+* 写别的值：`PACK_TARGET_UNKNOWN`，整包拒。
+
+**已知缺口（收下这一格之前必须接上）**：`node tools/workshop-validate.mjs` 今天不读 `foreign`，所以一个 `stardust` 包在
+验证器报告里**完全不出现**；`node tools/workshop-pack.mjs list` 把它打成 `REFUSED（null）`。两处都是「磁盘上在、
+报告里没有」的静默方向，与 §1.1 那条教训同一类。
+
+**不抬版本**：`MOD_API_VERSION` 仍是 `1`、`PROTOCOL_VERSION` 仍是 `2`（加一格字段不抬世代）。闭集就地延长：
+顶层键 32 → 33（`docs/STANDARD-PACK.md` §二.2 同步）。**不需要 `golden:update`**：缺省路径一个字节不动。
+
+完整规范见 [docs/design/mod-layer.md](design/mod-layer.md) §28.46。
+
+---
+
 ## 2. 助战
 
 ### 2.1 配置：`data/support.json`

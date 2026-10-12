@@ -31,11 +31,13 @@
 ## 二、标准包的四条硬要求
 
 1. **`pack.json` 在 ZIP 根**（② 请重压）。
-2. **键必须在闭集内**：`PACK_FIELDS` 共 **32 键**，完整清单见 `shared/workshop.js`：
+2. **键必须在闭集内**：`PACK_FIELDS` 共 **33 键**，完整清单见 `shared/workshop.js`：
    `id name version author license description gameVersion game api layer combat` ·
    `content overrides` · `voices voiceLangs bondIcons itemIcons art skins support operators i18n` ·
-   `forms fx` · `notices playtest` · `variants behaviour` · `assets client server routes`。
+   `forms fx` · `notices playtest` · `variants behaviour` · `assets client server routes` · `target`。
    **不认识的顶层键点名拒绝**（`PACK_UNKNOWN_FIELD`），**绝不读过去** —— 这是这一层最硬的一条纪律。
+   `target`（§28.46）是**唯一一格可以带出本引擎的键**：`"stardust"` 的包是给 Stardust 宿主的**声明型包**，
+   本引擎只认识、不装载（`server/workshop.js` 的 `foreign`）；**不写 `target` 的包一个字节都不受影响**。
 3. **必须有"贡献"**：只声明 `variants`（或只有元信息）会被判 **`EMPTY_PACK`** —— 原话是
    「`variants` is NOT a contribution」。要上架就得**至少贡献一样东西**（内容 / 面板 / 规则 / 公告 / 素材…）。
    **不算贡献项的四个键**（`shared/workshop.js` 的 `notContributions`；只在该包真的声明了它们时才逐字点名）：

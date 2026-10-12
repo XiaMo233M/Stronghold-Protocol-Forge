@@ -73,6 +73,7 @@
 | `routes` | `routes = [{ path, cache }]` | 路径与缓存策略都在允许集合内 | §28.13 |
 | `assets` | `assets = { container, manifest, serverPolicy?, verify?, mirrors? }`；`mirrors[] = { id, base, sha256 }` | 装载期核对摘要；`server: serve \| cache-only`；`mirrors` **只镜像本包自己的容器**：`base` 必须绝对 `https://`（有主机、无凭据、无查询、尾斜杠）、id 唯一且 ≤ 4 条、`sha256` 必须等于装载期从包内文件算出的容器摘要（对不上的那条**停用并点名**，不拒包）；声明 `mirrors` 必须写 `license`（`ASSETS_MIRROR_NEEDS_LICENSE`：素材的再分发者是作者，授权问题不因为换了一台主机就消失，与 §28.36 的 `VOICE_CDN_NEEDS_LICENSE` 同一条理由）；**服务端不为这一格发一次网络请求**（取字节的是客户端） | §28.13 / §28.40 |
 | `behaviour` | `behaviour = [{ switch, option?, name?, desc? }]` | **闭枚举**：开关名与选项名都只许取 `BEHAVIOUR_SWITCHES` 里有的（`BEHAVIOUR_UNKNOWN_SWITCH` / `BEHAVIOUR_UNKNOWN_OPTION`，整包拒，不是忽略）；**包里没有数值、也没有路径** —— 动作（`{ kind, value }`）由引擎构造，`module` / `entry` / `file` / `path` / `value` / `key` 这类键在形状层**点名拒**（这一格永远不是一条数值 / 文件覆盖通道，那就是安装器）；必须 `combat: true`（`BEHAVIOUR_NEEDS_COMBAT`）；**不是贡献项**（只带它的包照旧 `EMPTY_PACK`）；不声明 ⇒ 归一化清单里不长这个键，而声明了**必须**进包身份哈希、**不进** `modDigest`（只哈希 `[id, hash]`）；**今天表是空的** ⇒ 任何声明都被点名整包拒（首格与它的引擎实现点一起落，加一格必须已有实现点） | §28.43 |
+| `target` | `target = "forge" \| "stardust"`（缺省 `forge`） | **闭枚举**：只许取 `PACK_TARGETS` 里有的（`PACK_TARGET_UNKNOWN`，整包拒）；缺省 `forge`，不写 ⇒ 归一化清单里**不长这个键**（老包身份哈希逐字节不变），显式写就是一条声明、**进**包身份哈希；`stardust` 是给 Stardust 宿主的**声明型包**：本引擎认识、**不装载**（`server/workshop.js` 的 `foreign`，启动日志一行具名）、不进数据叠加层、不进 `/mods/catalog.json`，也不受 `EMPTY_PACK` 约束；`stardust` 目标额外放行 `STARDUST_TARGET_FIELDS`（`type` 必须是 `"mod"`；`capabilities` 是能力 id 列表）与**声明过的能力自己认领的字段**（`STARDUST_CAPABILITY_FIELDS`），`forge` 一个都不放行 | §28.46 |
 
 ### C 层：客户端界面
 
