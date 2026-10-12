@@ -211,6 +211,8 @@ applied, so it is refused instead of ignored
 `docs/img/intro/` 下是一组可以直接拿去分享的介绍图。图里的界面、数值与分支清单都是**真实截图**（临时起一个工坊包跑出来的），
 不是示意图；底图与游戏画面来自本仓库的 `public/assets/` 与 `docs/img/`，版权与使用限制同下方声明 —— **不适用 GPL，仅供非商业展示**。
 
+> 前面那三张**自绘的能力图**（`docs/img/cap-01-layers.svg` · `docs/img/cap-02-pack-lifecycle.svg` · `docs/img/cap-03-submission-pipeline.svg`）与这里不同：它们只由本项目自己的文字与方框组成，**适用 GPL-3.0-or-later**。
+
 <p align="center">
   <img src="docs/img/intro/01-cover.jpg" alt="卫戍协议 · Forge 创意工坊编辑器" width="380">
 </p>
