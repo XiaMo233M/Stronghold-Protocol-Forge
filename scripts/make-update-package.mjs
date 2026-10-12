@@ -13,6 +13,9 @@
 //      UPDATE.json 放在 `app/UPDATE.json`，改动的文件放在 `app/<app 相对路径>`；
 //   2. 包根与 `node/` 下的文件**不进** UPDATE.json（机制管不到它们），但它们会照常随包带出去覆盖同名文件；
 //      如果新版本**删掉**了这类文件，这里会拒绝出包并点名 —— 那种情况只能换完整包。
+//   3. **工作区必须干净**（与 scripts/make-windows-bundle.mjs 同一条纪律，同一份判据）：`--bundle` 目录里
+//      的文件是打包脚本从**工作区磁盘**拷出来的，而更新包的「从哪来、到哪去」靠包内 `app/package.json` 的
+//      `release` 与 MANIFEST.json 认。脏工作区打出的更新包会把工作区那份内容当成「这一版」，与 tag 对不上。
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,6 +26,10 @@ import { fileURLToPath } from 'node:url';
 // 而发行标识是 `0.15.0-0.2.4` 这种两段串，喂给它只会抛 not a version。
 import { compareVersions, diffBases, readZip, updateText } from '../tools/package-update.mjs';
 import { MANIFEST_FILE, UPDATE_FILE, digestFile, parseManifest, parseUpdate, removalProblem } from '../server/update.js';
+// 工作区守卫与本仓库的打包脚本**共用同一份实现**（`worktreeStatus` / `assertCleanWorktree` /
+// `worktreeGuardExit`）：两个脚本说的是同一条纪律（清单来自 git、内容来自磁盘），判据分家就会漂。
+// import 那个模块只会定义常量与函数 —— 它的 `main()` 由 `isMain()` 挡着，import 时不会跑。
+import { worktreeGuardExit } from './make-windows-bundle.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MB = (n) => `${(n / (1024 * 1024)).toFixed(1)} MB`;
@@ -109,13 +116,14 @@ export function identityLabel(b) {
 }
 
 function main(argv) {
-  const o = { out: null, from: [], bundle: null, force: false };
+  const o = { out: null, from: [], bundle: null, force: false, allowDirty: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--bundle') o.bundle = argv[++i];
     else if (a === '--from') o.from.push(argv[++i]);
     else if (a === '--out') o.out = argv[++i];
     else if (a === '--force') o.force = true;
+    else if (a === '--allow-dirty') o.allowDirty = true;
     else if (a === '--help' || a === '-h') { console.log(HELP); return 0; }
     else { console.error(`不认识的参数：${a}`); return 2; }
   }
@@ -229,8 +237,21 @@ const HELP = `用法：node scripts/make-update-package.mjs --bundle <新 bundle
 
   --bundle  打包脚本（scripts/make-windows-bundle.mjs）产出的目录，里面必须有 app/MANIFEST.json
   --from    上一版的完整发行 zip（或它解压出来的目录）；可以给多个，一个更新包同时适用于它们
-  --out     输出路径（默认与 bundle 同级的 <bundle>-update.zip）`;
+  --out     输出路径（默认与 bundle 同级的 <bundle>-update.zip）
+  --force   产物已存在时覆盖
+  --allow-dirty
+            **危险**：工作区有未提交改动也照旧出包。默认拒绝 —— bundle 里的文件来自**工作区磁盘**，
+            而更新包的身份（release + MANIFEST 指纹）认的是「这一版」，脏工作区打出的包与它的 tag 对不上。
+            只在本机验证时用；要发出去就先 commit 或 stash。`;
 
 const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
-if (invokedDirectly) process.exit(main(process.argv.slice(2)));
+if (invokedDirectly) {
+  // **工作区守卫是第一件事**，而且只在命令行这条路上：`main()` 也被测试当函数调（用临时目录里的假
+  // bundle），把守卫塞进 `main()` 会让那些调用在开发者自己的脏工作区上莫名失败 —— 那测的不是它们。
+  const argv = process.argv.slice(2);
+  const guardCode = argv.includes('--help') || argv.includes('-h')
+    ? 0
+    : worktreeGuardExit({ allowDirty: argv.includes('--allow-dirty') });
+  process.exit(guardCode !== 0 ? guardCode : main(argv));
+}
 export { main };

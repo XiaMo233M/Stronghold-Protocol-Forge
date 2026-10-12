@@ -6,10 +6,13 @@
 //   * `--force` 只肯删「空目录」或「上一次打的便携包」，认不出来就不许动；
 //   * 素材是整树复制的，点开头的条目（打包机器的 .DS_Store）与符号链接不该跟着进包；
 //   * 按清单复制时，缺失的源文件跳过而不是抛错（素材可能还没下载）；
+//   * **工作区必须干净**：文件名清单来自 `git ls-files`（已提交的树），内容却从**工作区磁盘**读 ——
+//     有未提交改动时包里装的就是「tag 指向的树里没有的那份内容」，而旧实现没有任何守卫会拦（发布时真踩到过）；
 //   * 包内说明的措辞：不能声称「不访问外网」（Google Fonts 外链没改），`--no-node` 时也不能说不用装 Node。
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import childProcess from 'node:child_process';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
@@ -332,6 +335,103 @@ describe('make-windows-bundle.mjs: 素材整树复制', () => {
       assert.equal(fs.existsSync(path.join(dst, 'public')), false, '没有文件就不该建空目录');
     } finally {
       await fsp.rm(base, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('make-windows-bundle.mjs: 工作区必须干净（清单来自 git ls-files、内容来自工作区磁盘）', () => {
+  /**
+   * 造一个一次性的 git 仓库：出包守卫要在**脏**仓库上被证明会拦，不能拿真仓库当试验场。
+   * @param {string} dir
+   */
+  const initRepo = (dir) => {
+    const git = (...args) => {
+      const r = childProcess.spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
+      assert.equal(r.status, 0, `git ${args.join(' ')} 失败：${r.stderr}`);
+    };
+    git('init', '-q');
+    git('config', 'user.email', 't@example.invalid');
+    git('config', 'user.name', 'test');
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'one\n');
+    git('add', 'a.txt');
+    git('commit', '-q', '-m', 'init');
+  };
+
+  test('干净 ⇒ 放行；脏 ⇒ 抛错，点名每一处改动、并写明「commit 或 stash」与放行开关', async () => {
+    const { worktreeStatus, assertCleanWorktree } = await mod('scripts/make-windows-bundle.mjs');
+    const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'sp-dirtyguard-'));
+    try {
+      initRepo(base);
+      assert.equal(worktreeStatus(base).clean, true, '刚提交完是干净的');
+      assert.doesNotThrow(() => assertCleanWorktree({ root: base }), '干净工作区必须放行');
+
+      // 改一个**受跟踪**的文件 —— 这正是发布时踩到的那一刀：清单里有它，内容却是未提交的那份。
+      fs.writeFileSync(path.join(base, 'a.txt'), 'two\n');
+      const st = worktreeStatus(base);
+      assert.equal(st.clean, false, '改过受跟踪文件 ⇒ 不干净');
+      assert.equal(st.entries.length, 1);
+      assert.match(st.entries[0], /a\.txt/);
+
+      let err = null;
+      try { assertCleanWorktree({ root: base }); } catch (e) { err = e; }
+      assert.ok(err, '脏工作区必须拒绝出包（抛错 ⇒ main 里变成 ✖ + 退出码 1）');
+      assert.match(err.message, /未提交改动/);
+      assert.match(err.message, /a\.txt/, '要点名到底哪一处改动，别只说「有改动」');
+      assert.match(err.message, /commit|stash/, '要写明怎么办');
+      assert.match(err.message, /allow-dirty/, '要写明放行开关');
+
+      // 未跟踪的新文件同样算脏：它**进不了** app\（那个清单来自 git ls-files），却会让人以为「已经打进去了」。
+      fs.writeFileSync(path.join(base, 'untracked.txt'), 'x\n');
+      assert.equal(worktreeStatus(base).clean, false, '未跟踪文件也算脏');
+      assert.equal(worktreeStatus(base).entries.length, 2);
+
+      // 逃生开关：只有显式给了才放行，而且必须打出风险提示（不许静默放行）。
+      const warned = [];
+      const original = console.warn;
+      console.warn = (...a) => warned.push(a.join(' '));
+      let allowed = null;
+      try { allowed = assertCleanWorktree({ allowDirty: true, root: base }); } finally { console.warn = original; }
+      assert.equal(allowed.ok, true, '--allow-dirty 要放行');
+      assert.equal(allowed.clean, false, '但要如实报告它不干净');
+      assert.equal(warned.length, 2, '两条风险提示');
+      assert.ok(warned.some((w) => /tag/.test(w)) && warned.some((w) => /对不上/.test(w)), '提示里要写明「与 tag 对不上」这个后果');
+
+      // 已暂存也算脏（staged 与工作区一样会和 tag 分家）。
+      fs.rmSync(path.join(base, 'untracked.txt'));
+      childProcess.spawnSync('git', ['add', 'a.txt'], { cwd: base });
+      fs.writeFileSync(path.join(base, 'a.txt'), 'one\n');
+      assert.equal(worktreeStatus(base).clean, false, '暂存区有改动也算脏');
+    } finally {
+      await fsp.rm(base, { recursive: true, force: true });
+    }
+  });
+
+  test('真的跑一次脚本：脏工作区必须在**动任何东西之前**就被拦下（✖ + 退出码 1）', async () => {
+    // 这一条在**本仓库上跑真脚本**：本仓库的 import 图（shared/ / server/ / tools/）与素材都不需要存在，
+    // 因为守卫是 main() 里**第一件**事 —— 脏的时候它连 out 目录都不该建出来就退 1。把脚本拷到别处跑
+    // 做不到（import 解析不到），所以这里直接对着仓库跑，并断言「产物目录没被建出来」这一条不变式。
+    const out = path.join(os.tmpdir(), `sp-guardrun-${process.pid}-${Date.now()}`);
+    try {
+      const dirty = fs.existsSync(path.join(ROOT, '.git')) && childProcess
+        .spawnSync('git', ['-C', ROOT, 'status', '--porcelain'], { encoding: 'utf8' })
+        .stdout.trim().length > 0;
+      const r = childProcess.spawnSync(
+        process.execPath,
+        [path.join(ROOT, 'scripts', 'make-windows-bundle.mjs'), '--out', out, '--no-node'],
+        { cwd: ROOT, encoding: 'utf8' },
+      );
+      const all = `${r.stdout}${r.stderr}`;
+      if (dirty) {
+        assert.equal(r.status, 1, '本仓库当前是脏的 ⇒ 必须非零退出');
+        assert.match(all, /拒绝出包/, '要有一句明确的拒绝');
+      } else {
+        // 干净时不该出现「拒绝出包」，而是明说一句、继续往下（随后会因为缺素材 / --out 落在仓库里而失败）。
+        assert.doesNotMatch(all, /拒绝出包/, '干净的工作区不许报「拒绝出包」');
+        assert.match(all, /工作区干净/, '干净时要明确说一句');
+      }
+      assert.equal(fs.existsSync(out), false, '不管哪条路，守卫都不该让产物目录先被建出来');
+    } finally {
+      await fsp.rm(out, { recursive: true, force: true });
     }
   });
 });

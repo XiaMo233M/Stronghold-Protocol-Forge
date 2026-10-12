@@ -391,6 +391,11 @@ services:
 且必须比当前版本旧）；`scripts/make-update-package.mjs` 只收**便携包 zip**，靠包内 `app/package.json` 的 `release`
 （`0.14.0-0.2.3` 这种两段串）认身份 —— 只抬上游、本仓库版本不变时，光看 `version` 分不出两版，所以没有 `release` 字段的旧包会被直接拒绝。
 
+> **出包前两个便携包脚本都要求工作区干净**（`scripts/make-windows-bundle.mjs` 与 `scripts/make-update-package.mjs`，
+> 共用同一份守卫）：文件**清单**来自 `git ls-files`（已提交的树），**内容**却从工作区磁盘读 —— 有未提交改动时，
+> 打出的包与它的 tag 对不上。`git status --porcelain` 非空即拒绝（非零退出、逐条点名改动）；只在本机验证时
+> 才用 `--allow-dirty`，它会打印风险提示后继续。细节见 [WINDOWS.md](WINDOWS.md) §2 / §3。
+
 Releases 的 zip（完整包、精简包，0.2.1 起还有更新包）由 `tools/package.mjs` 生成，在**源码仓库**里运行（整合包里没有这个工具）：
 
 ```bash

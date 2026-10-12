@@ -22,6 +22,10 @@
 //   3. node.exe **每次都从校验过的官方 zip 重新解压**：下载的 zip 缓存进仓库的 .cache\，解压目录是
 //      新建的临时目录、用完即删。旧实现「临时目录里那个 node.exe 还在就直接用」，和校验过的 zip 没有
 //      对应关系 —— 上次解压中断留下的残缺文件会被打进包，共享的 /tmp 也不安全。
+//   4. **工作区必须干净**：文件名清单来自 `git ls-files`（**已提交**的那份树），文件内容却从**工作区磁盘**
+//      `copyFile` 读（见 `copyFiles`）。两者说的不是同一件事：一旦有未提交改动，包里装的就是「tag 指向的树
+//      里没有的那份内容」—— 发出去的包与 tag 对不上，而且**没有任何守卫会拦**（这是发布时真踩到的坑）。
+//      所以出包前先 `git status --porcelain`，非空就拒绝；确实要拿脏工作区出包，显式给 `--allow-dirty`。
 
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -101,7 +105,7 @@ function readDefaultDub(root = ROOT) {
 }
 
 function parseArgs(argv) {
-  const o = { out: '', node: true, force: false, nodeSpec: '', sha256: '', allDubs: false, release: '' };
+  const o = { out: '', node: true, force: false, nodeSpec: '', sha256: '', allDubs: false, release: '', allowDirty: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const [k, v] = a.split('=');
@@ -113,6 +117,7 @@ function parseArgs(argv) {
     else if (a === '--no-node') o.node = false;
     else if (a === '--force') o.force = true;
     else if (a === '--all-dubs') o.allDubs = true;
+    else if (a === '--allow-dirty') o.allowDirty = true;
     else if (a === '-h' || a === '--help') o.help = true;
   }
   return o;
@@ -152,11 +157,15 @@ const HELP = `node scripts/make-windows-bundle.mjs — 生成 Windows 开箱即�
   --all-dubs         把 public/assets/audio/voice/ 下的**全部**配音都打进包（默认只带清单里的默认配音，
                      其余走 release 的语音包，见 scripts/make-voice-pack.mjs）
   --force            目录已存在时先删掉（只肯删空目录，或上一次打的便携包；其余情况拒绝）
+  --allow-dirty      **危险**：工作区有未提交改动也照旧出包。默认拒绝 —— 文件名清单来自「git ls-files」
+                     （已提交的树），内容却从工作区磁盘读，所以脏工作区打出的包**与它的 tag 对不上**。
+                     只在本机验证时用；要发出去就先 commit 或 stash。
   --node-version X   换一个 Node 版本（默认 ${NODE_PIN.version}）；换版本必须同时给 --sha256
   --sha256 <hash>    该版本 win-x64.zip 的 sha256（取自官方 SHASUMS256.txt）
 
   app\\ 里只放 git 跟踪的文件 + 生产依赖（npm ci --omit=dev）+ public/{assets,fonts,vendor}；
   因此 .env / .venv / .claude / scripts/service.env.cmd 这些本机文件不会被打进去。
+  出包前要求**工作区干净**（git status --porcelain 为空），否则拒绝 —— 见 --allow-dirty。
   data/local-assets.json 存在时（本机提取过 3D 棋盘贴图）会一起收，否则贴图进了包也用不上。
 
   不压缩、不改 index.html、不装开始界面：包里的 启动游戏.bat 就是
@@ -232,6 +241,56 @@ export function forceDeleteVerdict(dir) {
   const looksLikeBundle = BUNDLE_MARKERS.every((n) => entries.some((e) => e.name === n))
     && !!app && (app.isDirectory() || app.isSymbolicLink());
   return looksLikeBundle ? 'bundle' : 'refuse';
+}
+
+/**
+ * `git status --porcelain` 的原始输出（工作区 + 索引相对 HEAD 的差异）。
+ *
+ * 这是「工作区必须干净」那条守卫的判据本体。用 NUL 分隔读（`-z`），中文 / 空格 / 带引号的文件名不会被
+ * git 转义成看不懂的样子。**只读**，不改工作区、不动索引。
+ * @param {string} [root]
+ * @returns {{clean: boolean, entries: string[], lines: string[]}}
+ */
+export function worktreeStatus(root = ROOT) {
+  const r = spawnSync('git', ['-C', root, 'status', '--porcelain', '-z'], { maxBuffer: 64 * 1024 * 1024 });
+  if (r.error || r.status !== 0) {
+    throw new Error('git status 失败：出包前要确认工作区干净，请在完整的 git 仓库里运行');
+  }
+  // porcelain -z：每条记录以 NUL 分隔，**重命名 / 复制**那条后面还跟着一个 NUL 分隔的原路径，
+  // 所以先按 NUL 切开再丢掉空段即可（原路径那一段也是一条，但它同样是「有改动」的证据，留着无害）。
+  const entries = r.stdout.toString('utf8').split('\0').filter(Boolean);
+  return { clean: entries.length === 0, entries, lines: entries };
+}
+
+/**
+ * 出包前的工作区守卫：**有未提交改动就拒绝产包**（`--allow-dirty` 可显式放行）。
+ *
+ * 为什么必须有这一条：`app\` 的文件**清单**来自 `git ls-files`（已提交的树），**内容**却从工作区磁盘
+ * `copyFile` 读。有未提交改动时，包里装的是「tag 指向的树里没有的那份内容」—— 包与 tag 对不上，
+ * 而旧实现没有任何地方会发现这件事（发布时真踩到过）。
+ * @param {{allowDirty?: boolean, root?: string}} [opts]
+ * @returns {{ok: true, clean: true}}
+ * @throws {Error} 工作区不干净（且没有放行）时抛出，消息里写明怎么处理与放行的风险
+ */
+export function assertCleanWorktree({ allowDirty = false, root = ROOT } = {}) {
+  const st = worktreeStatus(root);
+  if (st.clean) return { ok: true, clean: true };
+  const shown = st.entries.slice(0, 20).map((l) => `      ${l}`);
+  const more = st.entries.length > shown.length ? `\n      …还有 ${st.entries.length - shown.length} 条` : '';
+  const detail = `${shown.join('\n')}${more}`;
+  if (allowDirty) {
+    console.warn(`  ! --allow-dirty：工作区有 ${st.entries.length} 处未提交改动，照旧出包：\n${detail}`);
+    console.warn('    ⚠️ 风险：包里的内容来自**工作区**，而文件名清单来自 `git ls-files`（已提交的树）。'
+      + '\n       于是这份包与它对应的 tag **对不上** —— 别人按 tag 复现不出你发出去的字节。只在本机验证时用它。');
+    return { ok: true, clean: false };
+  }
+  throw new Error(
+    `工作区有 ${st.entries.length} 处未提交改动，拒绝出包：\n${detail}\n`
+    + '  为什么：包的文件**清单**来自「git ls-files」（已提交的树），**内容**却从工作区磁盘读 —— 有未提交改动时，\n'
+    + '  打出来的就是「tag 指向的树里没有的那份内容」，包与它的 tag 对不上。\n'
+    + '  怎么办：先把改动 **commit** 或「git stash」，再重新出包。\n'
+    + '  确实要拿脏工作区出包（**只在本机验证时**）：加 --allow-dirty，它会打印风险提示后继续。',
+  );
 }
 
 /**
@@ -616,6 +675,27 @@ ${tree}
 `;
 }
 
+/**
+ * 工作区守卫的 CLI 落点：脏就打印 `✖` 并返回 1，干净就打印一行、返回 0。
+ *
+ * **只有命令行入口调它**（`if (isMain())` 那一段），不放进 `main()`：`main()` 也被测试与别的工具
+ * import 着当函数跑（`test/release-identity.test.js` 直接调它来验身份判断，用的还是**临时目录**里假
+ * bundle），把守卫塞进 `main()` 会让那些调用在**开发者自己的脏工作区**上莫名失败 —— 那测的不是它们。
+ * 出包的**命令行**这条路一定经过这里，所以「有未提交改动 ⇒ 拒绝出包」这条纪律不会漏。
+ * @param {{allowDirty?: boolean}} opts
+ * @returns {number} 进程退出码（0 = 放行，1 = 拒绝）
+ */
+export function worktreeGuardExit({ allowDirty = false } = {}) {
+  try {
+    const st = assertCleanWorktree({ allowDirty });
+    if (st.clean) console.log('  · 工作区干净（git status --porcelain 为空）');
+    return 0;
+  } catch (e) {
+    console.error(`✖ ${e.message}`);
+    return 1;
+  }
+}
+
 async function main() {
   const o = parseArgs(process.argv.slice(2));
   if (o.help) { console.log(HELP); return 0; }
@@ -795,4 +875,13 @@ function isMain() {
   } catch { return false; }
 }
 
-if (isMain()) main().then((code) => { process.exitCode = code ?? 0; }, (e) => { console.error(e?.stack || e); process.exitCode = 1; });
+// **工作区守卫是第一件事**，而且只在命令行这条路上（见 `worktreeGuardExit` 的注释）：脏工作区必须
+// 在动任何东西之前就被拦下。
+if (isMain()) {
+  const argv = process.argv.slice(2);
+  const guardCode = argv.includes('--help') || argv.includes('-h')
+    ? 0                                        // --help 只是打印用法，不碰文件
+    : worktreeGuardExit({ allowDirty: argv.includes('--allow-dirty') });
+  if (guardCode !== 0) process.exitCode = guardCode;
+  else main().then((code) => { process.exitCode = code ?? 0; }, (e) => { console.error(e?.stack || e); process.exitCode = 1; });
+}
