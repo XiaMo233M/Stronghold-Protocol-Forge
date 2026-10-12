@@ -3076,7 +3076,7 @@ listener owned by untrusted code) and its own version policy — it is deliberat
 (`lanes: opts.wsLanes`), and the guard plus hand-over in `websocket.js`. Per `docs/MOD-SURFACE.md`'s policy this
 adds no pack-facing surface at all, so `MOD_API_VERSION` does not move and no published pack is refused.
 Numbering: `main` 到 0.15.1 那一刀写到 **§28.37**（§28.30–§28.37 是「服务端四格能力 + 面板第二批读面」那一批），
-**本仓库此后又往后落了若干格，现存最大是 §28.43.4**；而 §28.23（#2）与 §28.26–§28.27（#3）仍在两个待审 PR 手里，
+**本仓库此后又往后落了若干格，现存最大是 §28.43**；而 §28.23（#2）与 §28.26–§28.27（#3）仍在两个待审 PR 手里，
 所以这一格往后接 **§28.44**，不插进那条被占用的连号 —— 与 §28.28/29 当年的放法同一条。
 
 Tests: `test/wsLanes.test.js` (8) — the shape layer (`isLanePath`, the five refusals by name, the empty-table
@@ -3133,7 +3133,7 @@ analysis and version policy rather than being folded in here.
 **Cost and blast radius.** One new file (`server/http/httpLanes.js`), the table lookup in `routes.js` (which keeps the
 single `handleRequest` and therefore the single order of decisions), and one option threaded through `startServer`.
 Nothing is added to the pack-facing surface, so `MOD_API_VERSION` does not move and no published pack is refused.
-Numbering: `main` 到 0.15.1 那一刀写到 **§28.37**，**本仓库此后又往后落了若干格，现存最大是 §28.43.4**；
+Numbering: `main` 到 0.15.1 那一刀写到 **§28.37**，**本仓库此后又往后落了若干格，本格之前现存最大是 §28.44（姊妹格升级路径表），再往前是 §28.43**；
 而 §28.23（#2）与 §28.26–§28.27（#3）仍在待审 PR 手里，所以这一格接 **§28.45**，紧挨着它的姊妹格升级路径表
 （**§28.44**）—— 两条都不插进那条被占用的连号。
 
