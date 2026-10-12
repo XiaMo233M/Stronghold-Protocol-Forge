@@ -251,7 +251,7 @@ describe('助战: 进商店，按阶级像普通棋子一样买与卖 (match eng
   });
 
   test('本局被随机禁用的干员，作为助战照样进池（禁用抽卡 ≠ 禁用助战）', () => {
-    // A visible chess is banned iff every one of its bonds is in the match's disabled set (server/match/pool.js:25-43),
+    // A visible chess is banned iff every one of its bonds is in the match's disabled set (server/match/pool.js:27-45),
     // and a banned chess simply has no pool copies. Forcing that statically (through the mode's inactiveBondIds) makes
     // this deterministic instead of hunting for a seed that happens to ban the support.
     const banned = TIER5.find((id) => Array.isArray(DATA.chess[id]?.bonds) && DATA.chess[id].bonds.length > 0);
