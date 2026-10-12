@@ -144,7 +144,7 @@ matters and is the answer for the third file the ruling names:
   pinned to `1` by `test/version.test.js:24`) does not move.
 - `shared/protocol.js` `S2C` (`:402-414`) — the list the client displays as the "modded" mark. It is delivered through
   `welcome`, which the lobby already extends per-server without touching the protocol module
-  (`server/net.js:666-667` builds it from `handler.welcomeInfo()`), so the client knows the server's mod set the moment
+  (`server/net.js:796-797` builds it from `handler.welcomeInfo()`), so the client knows the server's mod set the moment
   it connects, not when it joins a room. `/healthz` (`server/http/routes.js:24`) carries the same digest, which is what
   `docs/PACKS.md:135-136` asks for and what a bug report needs.
 - `server/sim/spec.js` — the per-battle identity, because the spec is the only object both execution paths already
@@ -555,7 +555,7 @@ Two channels, already decided (`docs/WORKSHOP.md:449`): the official bundle stay
 `tools/workshop-pack.mjs`). What is missing is the player-visible half of `docs/PACKS.md:135-136`, and it is four
 surfaces quoting one string:
 
-1. `welcome` (from the lobby's `welcomeInfo()`, `server/net.js:666-667`) — what the server is running;
+1. `welcome` (from the lobby's `welcomeInfo()`, `server/net.js:796-797`) — what the server is running;
 2. `/healthz` (`server/http/routes.js:24`) — the same digest for a bug report and for the client's build guard;
 3. the BattleSpec (`server/sim/spec.js:79-81`) — what *this field* ran with;
 4. the room/lobby UI — the "modded" mark, and the refusal when a client cannot confirm the digest (`room.join.mods`,
@@ -2034,7 +2034,7 @@ Three properties, each deliberate:
 > §28.25、`docs/design/network.md:23` 引的 §28.27 同为松引用（`test/docs-paths.test.js` 只判「号是否出现过」，
 > 不核对所指内容）。**二者不是同一节**，互不替代。
 
-The second half of the same gap. The `welcome` frame (`shared/protocol.js` S2C; assembled in `server/net.js:713` from
+The second half of the same gap. The `welcome` frame (`shared/protocol.js` S2C; assembled in `server/net.js:797` from
 `welcomeInfo()`) is the server's identity: protocol version, the pack set it runs (`mods { digest, packs }`), the
 operator catalogue, the seat ceiling. A panel could already subscribe to it (`ctx.net.on('welcome', fn)`, an engine type
 passes through unchanged), **but the frame that mounts the panel is the same one it would have to subscribe to** — the

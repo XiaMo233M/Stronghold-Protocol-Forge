@@ -137,7 +137,7 @@ W_worst     = max(W_keepalive, W_ask) + RTT ≈ 3.2 s + RTT
 | 把 `PUBLIC_FULL_EVERY` / `PUBLIC_THROTTLE` / `PUBLIC_FULL_ASK_MS` 调大调小 | 不必 | 帧的形状没变 |
 | 把第一帧从全量改成增量 | **必须顶** | 直接违反「joiner/reconnect 先拿全量」，旧页面读错 |
 
-代价要说清：顶号的后果是**所有陈旧标签页在握手时被拒**（`server/net.js:676-677`，
+代价要说清：顶号的后果是**所有陈旧标签页在握手时被拒**（`server/net.js:715-716`，
 `error BAD_MSG` + `detail: version mismatch: server <n>`，前端翻成「客户端版本与服务器不一致，请刷新页面」），
 即「刷新一次」。这比让玩家看错名册便宜，所以本次顶了。
 

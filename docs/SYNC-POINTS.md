@@ -113,6 +113,24 @@
 > （段号、导出名、函数名）。`docs/prompts/` 与 `docs/design/` 里的行号引用**已经**受
 > `test/promptCitations.test.js` 门禁看着。
 
+### 一笔记在案的旧账（对账用）
+
+`v0.16.0-0.2.4` 的 **release 正文**里写着「既有 **5 处**漂移未修、留待单独重数」。**release 正文是已发布的
+冻结件，不改**；但那句话对今天的仓库已经不准了 —— 那 5 处**已全部收掉**：
+
+| release 里记的 5 处 | 现状 |
+|---|---|
+| `server/data.js:144` | 已按内容重指：`lookup` 的 null 分支现在是 `server/data.js:152-155` |
+| `server/workshop.js:392`（记了两处） | 已按内容重指：`KIT_ID_COLLISION` + `definedBy` 现在是 `server/workshop.js:1229-1233` |
+| `public/js/battle/runner.js:127` | 已按内容重指：浏览器那份模块清单现在是 `public/js/battle/runner.js:230-233` |
+| `server/net.js:676` | 已收掉：`:676-677` 是 `}` 与一句注释；真正做那件事的是 `server/net.js:715-716`（`version mismatch: server <PROTOCOL_VERSION>`），`docs/NET-TUNING.md` 已重指 |
+
+**别再拿旧 release 的说法对账** —— 以本文件与 `test/promptCitations.test.js` 为准。
+
+> ⚠️ **还有一处**：`docs/NET-TUNING.md` 自己有 **56 处**手写 `文件:行号`（`docs/` 根下最多的一份），
+> 而它**不在**上面那条门禁里（门禁只扫 `docs/prompts/` 与 `docs/design/`）。改网络参数时**手工核对**它。
+> 同样在门禁外的还有 `docs/PS100-MIGRATION.md`（9 处）、`docs/EDITOR.md`（2 处）、`docs/DEPLOY.md`（1 处）。
+
 ---
 
 ## 7. 改「表面」（表面清单是给社区 mod 的冻结接口）
