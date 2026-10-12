@@ -21,6 +21,7 @@
 // （与 `shared/variants.js` 的 `mergeVariantDecls` 逐字同一条「包 id 字典序小的赢」）。
 import { mergeBehaviourDecls, behaviourValue } from '../../shared/behaviour.js';
 import { setMorphPairing } from './ui/gameLogic/bonds.js';
+import { setUnequipAllowed } from './ui/gameActions.js';
 
 /** @typedef {{ id: string, hash: string, layer: string, combat: boolean, api?: string }} ModEntry */
 
@@ -54,10 +55,12 @@ export function setWelcomeMods(msg) {
   const same = sameSet(welcomeModSet, next);
   welcomeModSet = next;
   if (!same) selectedModIds = [];
-  // 行为开关的有效档位（DESIGN §28.43.1）：包 id 字典序小的赢 —— 与 `shared/behaviour.js` 的 `mergeBehaviourDecls`
-  // **同一条规则**。客户端不自己实现一遍：`mergeBehaviourDecls` 就是那个纯函数，这里直接调它（缺省 ⇒ `[]`）。
-  // 卡片 / 列表的 变形同构体 读数（`ui/gameLogic/bonds.js` 的 `grantedBonds`）读的就是它。
-  setMorphPairing(behaviourValue(mergeBehaviourDecls(packs).decl, 'morphPairing'));
+  // 行为开关的有效档位（DESIGN §28.43）：客户端不自己实现合并规则，直接调 `shared/behaviour.js` 那**一份**纯函数
+  // （与 `shared/variants.js` 的 `mergeVariantDecls` 逐字同一条「包 id 字典序小的赢」）。三处读数都走它：
+  // `morphPairing`（详情卡 / 列表的 变形同构体 读数）、`unequip`（画不画「卸下」按钮）。
+  const decl = mergeBehaviourDecls(packs).decl;
+  setMorphPairing(behaviourValue(decl, 'morphPairing'));
+  setUnequipAllowed(behaviourValue(decl, 'unequip') === 'allow');
   return same;
 }
 

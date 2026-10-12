@@ -3052,3 +3052,53 @@ i18n-ignore），差别只在**表是另一张**、每格多一个 `actions`。
 （走装载器同一份 `identifyPack`）、投影那一行真的在 `server/index.js` 里（源码级断言）、以及 `PACK_FIELDS` 的闭集
 计数就地延长。**不需要 `golden:update`**：缺省路径一个字节不动。
 
+### 28.43.2 第 8 刀：第四格 `unequip`（装备拆卸）与**新增一条 C2S 意图**的完整落点
+
+投稿 `79de9ff03518`（「装备拆卸mod」）把这件事做成了安装器：`files.json.copy` **整份覆盖** `shared/protocol.js`、
+`server/match/match/intents.js`、`server/match/player/items.js` 与六个客户端文件，并自己加了一个
+`g.unequip {itemUid}` 意图与 `PlayerState.unequip()`。本刀照 §28.43 收成一格：
+
+| 开关 | 选项 / 缺省 | 引擎侧读取点 | 投稿 |
+|---|---|---|---|
+| `unequip` | `official`（缺省）· `allow` | `unequipAllowed(decl)`（`server/match/player/items.js`，模块层纯函数）← `PlayerState.unequip` / `PlayerItems.unequip`；客户端另一处读 `unequipAllowed()`（`public/js/ui/gameActions.js`，由 `roomMods.js` 从 `welcome.mods` 合成）决定**画不画**「卸下」按钮 | `79de9ff03518` |
+
+**这是本层第一条「开关 + 新意图」的格子**，所以五处落点在这里点名（将来加意图照抄这份清单）：
+
+1. **协议表**（`shared/protocol.js` 的 `C2S`）：`'g.unequip': { itemUid: isUid }`，与 `g.destroy` / `g.equip.itemUid`
+   **同一个 `isUid` 子**。**`PROTOCOL_VERSION` 不动** —— 新增类型不是改已有形状（先例 `records.mine`）：老客户端
+   不发它就一切照旧。**不新增 S2C 消息**（结果走既有的 `dirty()` / 私有视图推送）。
+2. **意图路由**（`server/match/match/intents.js`）：`case 'g.unequip': return ps.unequip(msg.itemUid);`。
+3. **状态机**（`server/match/player/items.js`）：`unequip(itemUid)` —— 与 `destroy` 同一条 `_gate()`；必须
+   `kind === 'item'` 且 `area === 'equipped'`。
+4. **客户端发送点**（`public/js/ui/gameActions.js`）：意图→音效表 + `unequip: (itemUid) => act('g.unequip', { itemUid })`
+   —— 复用既有 `act()`，不另造发送路径。UI 那一半在 `detailPanel.js` 的 `ItemRow`（`onUnequip` 穿透 +
+   `screen/game.js` 接线）。
+5. **判据读取点**：一格一个模块层纯函数（`unequipAllowed`），于是它是 `shared/modSurface.js` 里 `behaviour`
+   那一格可锚的导出名。
+
+**缺省档逐字节不变**：`unequipAllowed` 为假 ⇒ 回 `ERR.BAD_TARGET` + 文案 `'equipped items are locked'`，
+**与 `destroy`（`items.js` 里今天那一句）逐字同一句** ⇒ 一个不声明这一格的房间在 `g.unequip` 上的行为与
+「这条意图不存在」等价，**没有任何 `golden:update`**；客户端**一个按钮都不画**（`ItemRow` 的 `canDetach` 要求
+`onUnequip` 且 `unequipAllowed()`），`ItemDetail` 那句「配发后无法取下」也**只在 `allow` 档**换成不带那半句的版本
+（官方档那句话是对的，`test/unequip.test.js` 用源码级断言钉住它还在，并钉住四个 i18n 包都有两个新词条）。
+
+**原子性（这一格最容易做坏的地方）**：`_detach` 之后 `stow(piece, { allowTemp: true })` 可能返回 `null`
+（手牌与临时整备区都满）。那时按**原下标**把它塞回 `holder.items` 并回 `ERR.HAND_FULL` —— 先摘后塞没有回滚的话
+装备会**凭空消失**。用 `HAND_FULL` 而不是 `BAD_TARGET`：「没地方放」是一件独立、可行动的错误。
+
+**池不变式照旧**：装备只是从**装备位**移到**手牌 / 临时**，`piece` 与 `uid` 都不变 ⇒ `SharedItemPool.held()`
+（遍历 `hand` / `temp` / `board` 以及 `p.items`）前后都数得到它 ⇒ `held` / `cap` / `left` 全不变，不变式
+`raw left + Σ held == cap` 一字不动。**这一格没有「归还」这回事**（与 `destroy` / `sell` 不同：那两者才真让池子少一件）。
+
+**刻意的决定：第一版不发内容钩子。** `HOOKS` 那 19 个是**契约面**（进 `META`），而「卸下」用哪一个都不贴切
+（不是 `onDestroy`、不是 `onEquip`），**今天也没有任何包需要被通知**。将来真有包需要，**另立一刀**并按 `META`
+契约面扩展 —— 写在这里是为了让后人知道这是**决定**，不是漏做。
+
+**测试**：`test/unequip.test.js` —— 真表那一格的形状与两档、`C2S` 登记与 `validateC2S` 的拒绝（**在这里钉
+「形状错 ⇒ `BAD_MSG`」**：`validateC2S` 返回原因串、`server/net.js` 的 onFrame 把它折成 `ERR.BAD_MSG`，
+`Match.handle` 只认过了它的消息 ⇒ 意图层对形状错回的是 `BAD_TARGET`，测试两层都钉）、缺省档
+`g.destroy` 与 `g.unequip` 回**同一句**且一个字节不落地、`allow` 档三分支（手牌 / 临时 / 两者都满 ⇒ 原子回滚 +
+`HAND_FULL` 且**下标与失败前相同**）、池快照与 `checkInvariants` 前后一致、`recompute` 后盟约人数真的变了
+（用 `test/match/morph-bonds.test.js` 的「变形同构体 + 一件授予盟约的装备」配方，1 → 0）、客户端源码级断言
+（发送点 / 缺省 `unequipOn = false` / 按钮判据 / 官方那句提示还在 / 游戏屏接线）。
+

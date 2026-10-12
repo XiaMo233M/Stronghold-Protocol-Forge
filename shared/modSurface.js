@@ -307,6 +307,7 @@ export const MOD_SURFACE = Object.freeze([
       { symbol: 'loadoutPhasesFor', module: 'platform' },
       { symbol: 'MORPH_PAIRING_OPTIONS', module: 'morph' },
       { symbol: 'grantedBondsByMorph', module: 'morph' },
+      { symbol: 'unequipAllowed', module: 'items' },
     ],
     requires: [
       '闭枚举：开关名与选项名都只许取 `BEHAVIOUR_SWITCHES` 里有的（`BEHAVIOUR_UNKNOWN_SWITCH` / `BEHAVIOUR_UNKNOWN_OPTION`，整包拒，不是忽略）',
@@ -316,8 +317,8 @@ export const MOD_SURFACE = Object.freeze([
       '不声明 ⇒ 归一化清单里**不长出这个键**（无条件写 `behaviour: []` 会让所有已发布包的内容哈希改变，§28.2）；**必须**进包身份哈希（`server/workshop.js` 的 `canonicalJson(pack)`），**不进** `modDigest`（只哈希 `[id, hash]`）',
       '加一格的门槛：**那一格必须已经在引擎里有实现点**（比 `VARIANT_AXES` 的加轴纪律更严）—— 本版那三格就是按这条落的，每一格都有一处具名读取点与一个测试文件',
     ],
-    files: ['shared/workshop.js', 'shared/behaviour.js', 'shared/morph.js', 'server/index.js', 'server/match/pool.js', 'server/match/player/economy.js', 'server/match/match/platform.js'],
-    tests: ['test/packBehaviour.test.js', 'test/shopBias.test.js', 'test/prepLoadout.test.js', 'test/morphPairing.test.js'],
+    files: ['shared/workshop.js', 'shared/behaviour.js', 'shared/morph.js', 'server/index.js', 'server/match/pool.js', 'server/match/player/economy.js', 'server/match/match/platform.js', 'server/match/player/items.js'],
+    tests: ['test/packBehaviour.test.js', 'test/shopBias.test.js', 'test/prepLoadout.test.js', 'test/morphPairing.test.js', 'test/unequip.test.js'],
     spec: '§28.43',
   },
   // ------------------------------------------------------------------ C 层：客户端界面

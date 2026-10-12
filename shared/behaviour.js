@@ -150,6 +150,31 @@ export const BEHAVIOUR_SWITCHES = Object.freeze({
     }),
     actions: (option) => (option === 'plus' ? [{ kind: 'morph.pairingPlus', value: true }] : []),
   },
+  /**
+   * 装备拆卸（投稿 `79de9ff03518`，「装备拆卸mod」）。**改结果** ⇒ 声明它必须 `combat: true`：装备离开干员会改
+   * 盟约人数（`bondsMeta.pieceBonds` 读装备行）与战斗里的数值，所以它进房间摘要闸门与 golden 语料。
+   *
+   * `official` = **引擎今天的行为**：装备装上之后只能靠精英化 / 合成 / 卖出离开（`g.destroy` 对已装备品回
+   * `'equipped items are locked'`）。`allow` = 休整期可以用 `g.unequip {itemUid}` 把一件已装备的装备取下，退回
+   * **手牌**（右→左优先），手牌满则进**临时整备区**；两者都满 ⇒ 整件事**原子拒绝**（`HAND_FULL`），装备留在原处。
+   *
+   * 缺省档下 `g.unequip` 回的就是 `g.destroy` 今天那句 `'equipped items are locked'` ⇒ **缺省逐字节不变**
+   * （不需要 `golden:update`）。
+   */
+  unequip: {
+    label: '装备拆卸',
+    options: Object.freeze(['official', 'allow']),
+    default: 'official',
+    optionLabels: Object.freeze({
+      official: '官方：装上后只能靠精英化 / 合成 / 卖出离开',
+      allow: '休整期可以把装备卸下（退回手牌 / 临时区）',
+    }),
+    effect: Object.freeze({
+      official: 'the official rule: an equipped item leaves its operator only on promotion, merge or sale — g.destroy refuses equipped items with "equipped items are locked"',
+      allow: 'g.unequip takes one equipped item off its operator during prep and stows it (the hand right-to-left first, then the temporary slots); if neither has room the whole action is refused with HAND_FULL and nothing moves',
+    }),
+    actions: (option) => (option === 'allow' ? [{ kind: 'items.allowUnequip', value: true }] : []),
+  },
 });
 
 /** 开关名，按声明顺序（界面 / 错误文案按它排）。 */

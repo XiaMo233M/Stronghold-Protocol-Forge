@@ -262,6 +262,50 @@
   不是顶层键）。`test/modSurface.test.js` 的 `ANCHOR_MODULES` 多登记三个模块（`pool` / `economy` / `platform`）
   —— 那是**判据的登记**，不是放松：新增的锚点照样逐条被验。
 
+### 第 8 刀第四格 `unequip`：装备拆卸，以及本层**第一条「开关 + 新意图」**
+
+**投稿 `79de9ff03518`（「装备拆卸mod」）要的那件事收成引擎里一格开关 + 一条新意图（DESIGN §28.43.2）。**
+原件同样是安装器：`files.json` 的 `copy` **整份覆盖** `shared/protocol.js`、`server/match/match/intents.js`、
+`server/match/player/items.js` 与六个客户端文件，并自加 `g.unequip {itemUid}` 意图。
+
+* **`unequip`**：`official`（缺省，今天的行为：装上之后只能靠精英化 / 合成 / 卖出离开）· `allow`（休整期可以
+  把一件已装备的装备**退回手牌**，右→左优先；手牌满则进**临时整备区**）。读取点：
+  `unequipAllowed(decl)`（`server/match/player/items.js`，模块层纯函数）→ `PlayerState.unequip`；客户端同一判据
+  读它决定**画不画**「卸下」按钮。
+* **第一条「开关 + 新意图」的五处落点**（将来加意图照抄这份清单）：① `shared/protocol.js` 的 `C2S` 表
+  `'g.unequip': { itemUid: isUid }`（与 `g.equip.itemUid` / `g.destroy.uid` **同一个 `isUid` 子**）；
+  ② `server/match/match/intents.js` 一行分支；③ `PlayerState.unequip`；④ 客户端发送点（`gameActions.js` 复用
+  既有 `act()`）+ UI（`detailPanel.js` 的 `ItemRow` 的「卸下」+ `game.js` 接线）；⑤ 一处可锚的判据导出。
+  **`PROTOCOL_VERSION` 不动**（新增类型不是改已有形状，先例 `records.mine`）；**不新增 S2C 消息**。
+* **缺省档逐字节不变**：`unequipAllowed` 为假 ⇒ 回 `ERR.BAD_TARGET` + `'equipped items are locked'`，
+  **与 `destroy` 今天那一句逐字相同**；客户端**一个按钮都不画**（判据是「有人传 `onUnequip` 且 `unequipAllowed()`」），
+  `ItemDetail` 那句「配发后无法取下」**只在 `allow` 档**换成不带那半句的版本 ⇒ **不需要 `golden:update`**。
+* **原子性**（这一格最容易做坏的地方）：`_detach` 之后 `stow(piece, { allowTemp: true })` 可能返回 `null`
+  （手牌与临时都满）。那时按**原下标**塞回 `holder.items` 并回 `ERR.HAND_FULL` —— 先摘后塞没有回滚的话装备会
+  **凭空消失**。用 `HAND_FULL` 而不是 `BAD_TARGET`：「没地方放」是独立、可行动的错误。
+* **池不变式照旧**：装备只是从**装备位**移到**手牌 / 临时**（同一个 `piece`、同一个 `uid`）⇒
+  `SharedItemPool.held()` 前后都数得到它 ⇒ `held` / `cap` / `left` 全不变。**没有「归还」这回事**
+  （`destroy` / `sell` 才真让池子少一件）。
+* **刻意的决定：本格不发内容钩子。** `HOOKS` 那 19 个是**契约面**（进 `META`），「卸下」用哪一个都不贴切
+  （不是 `onDestroy`、不是 `onEquip`），今天也没有包需要被通知；将来真有需要就**另立一刀**按契约面扩展。
+  写进 §28.43.2 是为了让后人知道这是**决定**，不是漏做。
+* **i18n**：新增两个词条（`卸下`、以及不带「无法取下」的那半句），**四个包都补齐**（en / ja / ko / zh-TW）。
+  `node tools/i18n.mjs check --all --strict` 的 msgid 数 **1283 → 1285**，en 仍 **100 %**，ja / ko / zh-TW 的
+  **57 个缺失与基线逐字相同**（那是既有缺口，不是本刀引入的）。
+* **测试**：新增 `test/unequip.test.js`（10 条：真表那一格 / `C2S` 登记与 `validateC2S` 的拒绝（**两层都钉**：
+  `validateC2S` 返回原因串、`server/net.js` 折成 `BAD_MSG`，而 `Match.handle` 只认过了它的消息）/ 缺省档
+  `g.destroy` 与 `g.unequip` 回**同一句**且一个字节不落地 / `allow` 档三分支（手牌 / 临时 / 两者都满 ⇒
+  原子回滚 + `HAND_FULL` 且**下标与失败前相同**）/ 池快照与 `checkInvariants` 前后一致 / `recompute` 后盟约人数
+  真的变了（1 → 0，用 `morph-bonds.test.js` 的配方）/ 客户端源码级断言 / 四个 i18n 包的两个新词条）。
+  `test/modSurface.test.js` 的 `ANCHOR_MODULES` 多登记一个模块（`items`）—— 同样是**判据的登记**，不是放松。
+* **`test/match/fuzz.test.js` 必须同时教一遍**（这一次全量跑出来的真事）：那个模糊测试按 `C2S` 表逐个类型造随机
+  载荷，并有 `assert.equal(validateC2S(msg), null, …)` 钉住「造出来的每一条都是合法消息」。新类型没进它的
+  `switch` 就会掉进 `default`（`{ t }`，缺字段）⇒ **当场两条红**。补法是加一行
+  `case 'g.unequip': return { t, itemUid: uid() };` —— **断言一字未动**，而新意图这下真的进了模糊覆盖
+  （随机 uid 会打到 `BAD_TARGET` / 缺省档那句，都被 `assert.ok(res.ok || ERR[res.error])` 接住）。
+  ⇒ **记在这里**：这一层将来再加意图，`fuzz.test.js` 的 `randomIntent` 是必须同步的第三处（协议表、`intents.js`、
+  它的 `switch`）。
+
 ## 0.15.3-0.2.4 — 2026-10-12
 
 **变体 / 口径层：`pack.json.variants`（DESIGN §28.39，docs/WORKSHOP.md §1.20）。** 三个社区 mod「写了等于没写」

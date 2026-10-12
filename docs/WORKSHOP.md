@@ -2078,6 +2078,7 @@ URL **一次都不被请求**。一个包把加载源改坏了，关掉这一格
 | `shopBias` | `official` · `bondBias` | `official` | `bondBiasPreference`（`server/match/pool.js`）→ `bondBiasBonds`（`server/match/player/economy.js`）→ `PlayerEconomy._rollItemSlot` | `b293e061b38f` |
 | `prepLoadout` | `locked` · `prep` | `locked` | `LOADOUT_PHASES` / `loadoutPhasesFor`（`server/match/match/platform.js`）→ `Match.setLoadout` 的相位闸门 | `8b4e5da55c58` |
 | `morphPairing` | `official` · `plus` | `official` | 判据本体 `grantedBondsByMorph`（`shared/morph.js`），三处读取点同判：`bondsMeta.pieceBonds` · `support/index.unitBonds` · 客户端 `gameLogic/bonds.grantedBonds` | `19ea65909cf6` |
+| `unequip` | `official` · `allow` | `official` | `unequipAllowed`（`server/match/player/items.js`）→ `PlayerState.unequip`（新意图 `g.unequip { itemUid }`）；客户端同一判据读它决定画不画「卸下」按钮 | `79de9ff03518` |
 
 **每一格的三件事写清**：**缺省档 = 引擎今天的行为**（不声明 / 选缺省 ⇒ 逐字节不变，所以没有任何 `golden:update`）；
 **非缺省档由引擎实现**（包给不出数字、路径或模块）；**那一格的 `effect` 逐字说明它到底动了什么**。
@@ -2117,6 +2118,23 @@ URL **一次都不被请求**。一个包把加载源改坏了，关掉这一格
   那两件」的**槽位**语义。本刀**没做**那些：它们落在装备位与替换的既有实现
   （`server/match/player/items.js` 与 `gamedata.equipPerChess`）上；这一格今天只改「配对授予哪些盟约」。
   `effect` 逐字写明这一点，`test/morphPairing.test.js` 把边界钉住。
+
+#### `unequip` —— 已装备的装备能不能卸下
+
+* `official`：**引擎今天的行为** —— 装备装上之后只能靠**精英化 / 合成 / 卖出**离开干员；`g.destroy` 对已装备的
+  装备回 `equipped items are locked`。
+* `allow`：休整期可以用**新意图 `g.unequip { itemUid }`** 把一件已装备的装备取下，退回**手牌**（右→左优先），
+  手牌满则进**临时整备区**；两者都满 ⇒ 整件事**原子拒绝**（`HAND_FULL`），装备**留在原处、下标不变**。
+* **这是本层第一格「开关 + 新意图」**，五处落点（协议表 / `intents.js` / `PlayerState.unequip` / 客户端发送点 /
+  判据读取点 `unequipAllowed`）在 `docs/design/mod-layer.md` §28.43.2 里逐条点名。
+* **`PROTOCOL_VERSION` 不动**：新增一个类型不是改已有形状（先例 `records.mine`），老客户端不发它就一切照旧。
+* **缺省档逐字节不变**：缺省回的就是 `destroy` 今天那句 `'equipped items are locked'`，客户端**一个按钮都不画**
+  （`ItemRow` 的判据是「有人传 `onUnequip` **且** `unequipAllowed()`」），`ItemDetail` 那句「配发后无法取下」
+  **只在 `allow` 档**换成不带那半句的版本 —— 所以**不需要 `golden:update`**，已发布包一个字节不动。
+* **池不变式**：装备只是从**装备位**移到**手牌 / 临时**（同一个 `piece`、同一个 `uid`）⇒ `held` / `cap` / `left`
+  全不变，**没有「归还」这回事**（`destroy` / `sell` 才真让池子少一件）。
+* **刻意的决定**：本格**不发内容钩子**（`HOOKS` 是 `META` 契约面，「卸下」用哪个都不贴切，今天也没有包需要被
+  通知）；将来真有需要就**另立一刀**按契约面扩展。写在这里是为了让后人知道这是决定，不是漏做。
 
 **新增一格怎么做**：先把**引擎侧的读取点**实现好（照这一格），再把那一格加进 `BEHAVIOUR_SWITCHES`
 （`label` / `options` / `default` / `optionLabels` / `effect` / `actions` 一件都不能少 —— `behaviourSwitchIssues`

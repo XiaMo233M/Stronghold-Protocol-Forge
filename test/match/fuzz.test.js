@@ -31,6 +31,10 @@ function randomIntent(rng, m, ps) {
     case 'g.sell': case 'g.destroy': return { t, uid: uid() };
     case 'g.move': return { t, uid: uid(), to: to() };
     case 'g.equip': return { t, itemUid: uid(), targetUid: uid() };
+    // 第 8 刀第四格（DESIGN §28.43.2）：`g.unequip { itemUid }` 只带一个字段，与 `g.equip.itemUid` 同一个判据。
+    // 少了这一行它会掉进 `default`（`{ t }` 缺字段）⇒ 这一条断言当场红 —— 这正是它该做的事：**表里加了类型
+    // 就必须同时教会这里怎么造合法载荷**，否则新意图永远进不了模糊测试的覆盖。
+    case 'g.unequip': return { t, itemUid: uid() };
     case 'g.art': return { t, itemUid: uid(), row: rng.int(19), col: rng.int(21) };
     case 'g.reward': case 'g.choice': return { t, idx: rng.int(6) };
     case 'g.ready': return { t, ready: rng() < 0.4 };
