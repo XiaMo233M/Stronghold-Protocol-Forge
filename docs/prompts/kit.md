@@ -381,8 +381,8 @@ talents: [{
   `server/sim/content/kits/ops/chess_char_1_06-vendla.js:57`（`tags: ['counter']` + `byEnemyAttack` 跳过
   `counter` / `reflect`）。
 - **手写 AoE 用哪个查询**：`battle.foesInRadius(x, y, r, centre)` 是「一次范围效果**能选中**的敌人」（剔除不可选中与
-  隐匿，`server/sim/battle/queries.js:175`），`battle.enemiesInRadius(...)` 是「位置在半径里」的（含不可选中，
-  `server/sim/battle/queries.js:154`）。写伤害用前者，写光环 / 碰撞用后者。德克萨斯 S2 的两段伤害 + 眩晕在
+  隐匿，`server/sim/battle/queries.js:176`），`battle.enemiesInRadius(...)` 是「位置在半径里」的（含不可选中，
+  `server/sim/battle/queries.js:155`）。写伤害用前者，写光环 / 碰撞用后者。德克萨斯 S2 的两段伤害 + 眩晕在
   `server/sim/content/kits/ops/chess_char_1_08-texas.js:30`。
 - **额外伤害要不要乘 `unit.s.atkScaleMul`**：它是「技能伤害倍率」桶（`server/sim/units.js:166`），官方 kit 的追加伤害
   会乘（`server/sim/content/kits/ops/op-judge.js:164`）。
@@ -510,13 +510,13 @@ const def = battle.tokenDef('token_ws_my_drone', unit);
     自动回到原格）。要复刻就用 `unit.mem` 记持有数 + `battle.every` 轮询 + `battle.redeploy`。
 - **引擎不提供「凭空造一个任意单位」**：`spawnToken` 必须给 tokenId + def；`spawnDevice` 造的是**不可攻击**的装置
   （它的 profile 被钉成 `{ noAttack: true, maxTargets: 0 }`：`server/sim/battle/summons.js:97`）。要一个「能被自己人打」的
-  单位，用 `battle.setAllyTarget(unit, true)` 把己方单位注册成可攻击目标（`server/sim/battle/queries.js:77`）。
+  单位，用 `battle.setAllyTarget(unit, true)` 把己方单位注册成可攻击目标（`server/sim/battle/queries.js:78`）。
 
 ### 8.7 范围改写（rangeGrid）
 
 **技能自己的范围**用 SkillSpec 的 `targeting.rangeGrid`（相对格，朝 RIGHT 编写，引擎按 `unit.dir` 旋转：
 `server/sim/dir.js:6`）。**运行中改范围**要在改完 `unit.rangeGrid` 之后调 `battle.refreshRange(unit)`
-（`server/sim/battle/queries.js:262`）—— 不调的话 `unit.rangeKeys` 还是旧的（`server/sim/battle/queries.js:243`）：
+（`server/sim/battle/queries.js:263`）—— 不调的话 `unit.rangeKeys` 还是旧的（`server/sim/battle/queries.js:244`）：
 
 ```js
 install(battle, unit) {
@@ -535,16 +535,16 @@ install(battle, unit) {
 
 | 想要的效果 | 用什么 | 证据 |
 |---|---|---|
-| 「攻击范围 +1」 | buff 的 `mods.rangeExtend`（永久的那部分进初始范围） | `server/sim/units.js:141`、`server/sim/buffs.js:183`、`server/sim/battle/queries.js:252` |
+| 「攻击范围 +1」 | buff 的 `mods.rangeExtend`（永久的那部分进初始范围） | `server/sim/units.js:141`、`server/sim/buffs.js:183`、`server/sim/battle/queries.js:253` |
 | 换掉整个范围形状 | `unit.rangeGrid = 副本` + `battle.refreshRange` | `server/sim/content/kits/ops/chess_char_5_15-thorn2.js:168`、`…/op-cgbird.js:149` |
-| 只多几个「打得到」的格子（不改形状） | `battle.setExtraRange(unit, keys)`，key 是绝对 tile key（`row * COLS + col`，`COLS` 是**画布**宽度 —— 一张图是画布里的一个窗口，`shared/constants.js:216` 的 `CANVAS_COLS`，`server/sim/constants.js:18`） | `server/sim/battle/queries.js:273`、用法 `…/ops/chess_char_6_01-lemuen.js:201` |
+| 只多几个「打得到」的格子（不改形状） | `battle.setExtraRange(unit, keys)`，key 是绝对 tile key（`row * COLS + col`，`COLS` 是**画布**宽度 —— 一张图是画布里的一个窗口，`shared/constants.js:216` 的 `CANVAS_COLS`，`server/sim/constants.js:18`） | `server/sim/battle/queries.js:274`、用法 `…/ops/chess_char_6_01-lemuen.js:201` |
 | 技能范围与自己的范围不同 | `targeting.rangeGrid` | `docs/SIM.md:1025` |
-| 技能范围**不**吃单位的攻击距离加成 | `targeting.noRangeExtend` | `server/sim/battle/queries.js:240` |
-| 范围只用来选目标、不改卡面上的范围 | `targeting.showOwnRange` | `server/sim/battle/queries.js:249` |
+| 技能范围**不**吃单位的攻击距离加成 | `targeting.noRangeExtend` | `server/sim/battle/queries.js:241` |
+| 范围只用来选目标、不改卡面上的范围 | `targeting.showOwnRange` | `server/sim/battle/queries.js:250` |
 | 「不靠普攻触发技能」的额外范围 | `trigger: { rule: 'SKILL_RANGE', grid }`，或 `unit.skill.addTriggerRange(fn)`（回调返回格 key 数组或 `{ keys, profile }`） | `server/sim/skills.js:146`、`:130` |
 | 临时换自动释放规则 | `unit.skill.setTrigger(rule, grid)` | `server/sim/skills.js:138` |
 
-**不要**直接改 `unit.rangeKeys` / `unit.rangeKeySet`（每次 rebuild 都会重建，`server/sim/battle/queries.js:237`），
+**不要**直接改 `unit.rangeKeys` / `unit.rangeKeySet`（每次 rebuild 都会重建，`server/sim/battle/queries.js:238`），
 也**不要**往 `unit.rangeGrid` 里 `push`：初始那个数组就是冻结的 `def.rangeGrid`（`server/sim/battle/players.js:199`
 + `server/sim/simdata.js:518`），写它会抛异常。官方 kit 一律先复制：`server/sim/content/kits/shared/tier5.js:181`。
 
@@ -562,8 +562,8 @@ battle.addBuff(ally, { key: 'ws:artsbarrier', shield: 2000, duration: 10, shield
 battle.addBuff(ally, { key: 'ws:onelayer', shieldHits: 1, visible: true });                      // 挡下一次伤害：server/sim/damage.js:246
 
 // 选治疗目标
-const hurt = battle.lowestHpAllyInRange(unit) ?? unit;        // server/sim/battle/queries.js:109
-const list = battle.alliesFor(unit);                          // 会跳过「孤立」：server/sim/battle/queries.js:145
+const hurt = battle.lowestHpAllyInRange(unit) ?? unit;        // server/sim/battle/queries.js:110
+const list = battle.alliesFor(unit);                          // 会跳过「孤立」：server/sim/battle/queries.js:146
 ```
 
 - 盾的数据模型就是 buff 的 `shield`（吸收量）与 `shieldHits`（免疫次数）（`server/sim/buffs.js:167`、`:168`），
@@ -590,16 +590,16 @@ skill: { kind: 'duration', targeting: { maxTargets: 3, priority: 'elite', canHit
 trait: { priority: 'lowDef', maxTargets: 2, splashRadius: 1.2 },
 ```
 
-- **`priority` 是固定词表**（`server/sim/targeting.js:176`）：`fly` `lowDef` `highDef` `ranged` `lowestHp` `highestHp`
+- **`priority` 是固定词表**（`server/sim/targeting.js:177`）：`fly` `lowDef` `highDef` `ranged` `lowestHp` `highestHp`
   `lowestHpRatio` `highestAtk` `boss` `elite` `notBurst` `ground` `heaviest`，另外 `nearest` / `farthest` 由引擎特判
-  （`server/sim/targeting.js:203`）。用法例子：`server/sim/content/kits/ops/chess_char_1_01-inside.js:21`（`ranged`）、
+  （`server/sim/targeting.js:204`）。用法例子：`server/sim/content/kits/ops/chess_char_1_01-inside.js:21`（`ranged`）、
   `…/chess_char_6_13-angel2.js:50`（`fly`）、`…/op-cerber.js:91`（`highDef`）。
 - **`maxTargets` 是上限，不是下限**：引擎按 `prof.maxTargets` 截断候选（`hitAllBlocked` 的档案改用阻挡数），
   再加上 buff 的 `mods.maxTargets`（`server/sim/ai.js:178` 数目标数，`:163` 与 `:158` 才真正切片）。
 - **打不打空军**：`targeting.canHitFly` / `trait.canHitFly`（`server/sim/ai.js:68`）；「只打地面」用 `groundOnly`
-  （`server/sim/targeting.js:88`）。
-- **自己挑人**（技能/天赋里手写选取）用 `battle.enemiesInKeys(keys, unit, profile)`（`server/sim/battle/queries.js:34`），
-  `keys` 是**绝对** tile key。工坊里要自己旋转范围格 —— 引擎的 `absoluteRangeKeys`（`server/sim/targeting.js:25`）不能
+  （`server/sim/targeting.js:89`）。
+- **自己挑人**（技能/天赋里手写选取）用 `battle.enemiesInKeys(keys, unit, profile)`（`server/sim/battle/queries.js:35`），
+  `keys` 是**绝对** tile key。工坊里要自己旋转范围格 —— 引擎的 `absoluteRangeKeys`（`server/sim/targeting.js:26`）不能
   import，照抄 `server/sim/dir.js:39` 那张表：
 
 ```js
@@ -613,15 +613,15 @@ const gridKeys = (unit, grid) => grid.map(([dr, dc]) => {
 const foes = battle.enemiesInKeys(gridKeys(unit, def.skill.rangeGrid), unit, { canHitFly: false });
 ```
 
-- **「范围效果能选中」的语义**用 `foesInRadius`（`server/sim/battle/queries.js:175`，剔除不可选中 / 隐匿），
+- **「范围效果能选中」的语义**用 `foesInRadius`（`server/sim/battle/queries.js:176`，剔除不可选中 / 隐匿），
   「谁在半径里」用 `enemiesInRadius`（`:154`）。
 - **友方**：`battle.alliesFor(unit)` / `battle.alliesInGrid(unit)` / `battle.alliesInRadius(...)` 都会跳过「孤立」单位
-  （`server/sim/battle/queries.js:140`）；`battle.injuredAlliesInKeys(keys, healer)` 专挑需要治疗的人（`:92`）。
+  （`server/sim/battle/queries.js:141`）；`battle.injuredAlliesInKeys(keys, healer)` 专挑需要治疗的人（`:92`）。
 - **每个受害者各一次**用 `attack.onEachHit(ctx)`（`ctx.kind` = `'main'` / `'splash'` / `'chain'`，还带
   `dealt` / `isSplash` / `isChain` / `main` / `attackId`：`server/sim/ai.js:279`）；**每次攻击一次、只给主目标**用
   `attack.onHit(ctx)`（`server/sim/ai.js:346`，它的 `ctx.dealt` 是这次攻击对**所有**目标造成的总伤害）。
 - **引擎不提供**：改不了敌人「怎么挑我」（那是敌人的 profile / data），只能靠 `taunt`（`server/sim/units.js:148`）或
-  `battle.setAllyTarget` 把友军注册成可攻击目标（`server/sim/battle/queries.js:77`）。
+  `battle.setAllyTarget` 把友军注册成可攻击目标（`server/sim/battle/queries.js:78`）。
 
 ### 8.10 与盟约、天赋、数据层交互的边界
 
@@ -662,8 +662,8 @@ const foes = battle.enemiesInKeys(gridKeys(unit, def.skill.rangeGrid), unit, { c
 | 在 `hit` 里加伤却不判 `isAttack` / 不排元素损伤 | 技能伤害、持续伤害、反伤、元素损伤都会被加成 | `if (!ctx.dmg.isAttack) return;`（`server/sim/content/kits/ops/chess_char_4_10-aroma.js:38`、`:73`） |
 | 在 `damaged` 里 `dealDamage` 却不打 tag / 不跳过自己的 tag | 与自己的输出乒乓递归，嵌套守卫触发后连 `kill` / `death` 一起被跳过（`docs/SIM.md:810`） | 打 tag 并跳过它（`server/sim/content/kits/ops/chess_char_1_06-vendla.js:62`） |
 | 想用 `import` 拿官方辅助函数 | `KIT_IMPORT` 错误（`shared/kitAuthoring.js:195`）：服务端按路径、浏览器按 URL，跨环境路径不可能同时对 | 内联（§8.1） |
-| 改完 `unit.rangeGrid` 忘了 `refreshRange` | `unit.rangeKeys` / `rangeKeySet` 仍是旧格子，攻击与技能触发都用不上新范围 | 改完立刻 `battle.refreshRange(unit)`（`server/sim/battle/queries.js:262`） |
-| 用 `unit.rangeKeys` 当「范围定义」缓存起来 | 它是快照，部署、换方向、范围重建后都会变（`server/sim/battle/queries.js:237`） | 每次重新读，或读 `unit.rangeKeySet` |
+| 改完 `unit.rangeGrid` 忘了 `refreshRange` | `unit.rangeKeys` / `rangeKeySet` 仍是旧格子，攻击与技能触发都用不上新范围 | 改完立刻 `battle.refreshRange(unit)`（`server/sim/battle/queries.js:263`） |
+| 用 `unit.rangeKeys` 当「范围定义」缓存起来 | 它是快照，部署、换方向、范围重建后都会变（`server/sim/battle/queries.js:238`） | 每次重新读，或读 `unit.rangeKeySet` |
 
 ### 8.12 引擎确实不提供的那些东西（汇总）
 
@@ -675,7 +675,7 @@ const foes = battle.enemiesInKeys(gridKeys(unit, def.skill.rangeGrid), unit, { c
 | 运行时改全局规则 / 经济 / 回合表 | `battle.flags` 是构造期输入（`server/sim/Battle.js:150`）；包也不能贡献 `config`（`docs/WORKSHOP.md:56`） | 改自己的单位、自己 `battle.emit` 命名空间事件 |
 | 让敌人改路线 / 换 AI | 没有接口 | 位移 `battle.push` / `pull` / `pullToFront`（`server/sim/battle/displacement.js:60`、`:97`、`:131`）与状态 `fear` / `attract`（`server/sim/buffs.js:85`、`:121`） |
 | 独立的护盾槽 / 多个盾各吸一类伤害 | 没有：盾就是 buff 的 `shield` / `shieldHits`（`server/sim/buffs.js:167`、`:168`） | 一个 key 一个盾，用 `shieldType` 限定吸收类型（`server/sim/damage.js:243`） |
-| 改「治疗落在谁身上」 | `heal` 钩子只能改 `amount`（`server/sim/damage.js:598`） | 自己选目标（`server/sim/battle/queries.js:92`、`:109`） |
+| 改「治疗落在谁身上」 | `heal` 钩子只能改 `amount`（`server/sim/damage.js:598`） | 自己选目标（`server/sim/battle/queries.js:93`、`:109`） |
 | 读存档 / 准备区 / 商店 / 装备栏 | sim 里没有这些对象 | `battle.getPlayer(playerId)` 给的是战场视图（`docs/SIM.md:843`），`battle.data` 给的是本局数据（`server/sim/Battle.js:114`） |
 | 给包加一份 `tokens.json` 之外的新数据种类 | 只有 14 个内容文件可贡献（`shared/workshop.js:44`） | 贡献 `tokens.json`（`shared/workshop.js:48`），或用 `spawnToken` 的 `opts.def` 内联定义（`server/sim/simdata.js:304`） |
 | 在联防 / boss 战场里加盟约层数 | `addLayers` 只在 `flags.layerGainsEnabled` 时生效（`server/sim/battle/economy.js:23`），只有普通战场是 `true`（`server/sim/Battle.js:150`） | 没有替代：那两种战场里加层是 no-op |
