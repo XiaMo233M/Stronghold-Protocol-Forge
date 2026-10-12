@@ -82,7 +82,8 @@
 
 ### 门槛（发布前全绿）
 
-`node --test` **8573 条 / 8568 通过 / 0 失败 / 5 跳过** · `npm run golden` exit 0（六份语料 **49 / 46 / 22 / 20 / 10 / 140**
+`node --test` **8638 条 / 8632 通过 / 0 失败 / 6 跳过**（三条支线整合后的实测；跳过全是 Chromium / 素材门控：批2 带进来的
+`test/ui/bond-audio.e2e.test.js` 就是 `5 跳过` → `6 跳过` 的那一条） · `npm run golden` exit 0（六份语料 **49 / 46 / 22 / 20 / 10 / 140**
 全部 match；本版重算 66 个场景，与上游两 tag 的差集逐条一致，见 §32.34）· `--twice`（第二遍倒序）identical ·
 `GOLDEN_FULL=1` 9/9。
 
