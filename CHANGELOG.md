@@ -306,6 +306,40 @@
   ⇒ **记在这里**：这一层将来再加意图，`fuzz.test.js` 的 `randomIntent` 是必须同步的第三处（协议表、`intents.js`、
   它的 `switch`）。
 
+### 第 8 刀第二格的**客户端半**：修掉一句写了很久的谎话（投稿 `8b4e5da55c58`）
+
+第二格的服务端半（`Match.setLoadout` 读 `LOADOUT_PHASES`）第 8 刀就落了，客户端半一直没落。取证发现它**不是**
+"少一个发送点"，而是**客户端在撒谎**：
+
+* **发送链路整套早就有**：`public/js/ui/loadoutSync.js` 的 `installLoadoutSync` 早在发 `room.loadout { entries, ops }`
+  （500 ms 去抖、面板关闭立刻冲刷、`WRONG_PHASE`/`ROOM_STARTED` ⇒ `'locked'` + 提示）；单干员编辑的纯函数也早在
+  （`loadoutModel.setChoice`，缺键即删 entry，与 `mergeLoadoutEntries` 的"只覆盖写了的干员"天然对齐）。
+  ⇒ **本刀不新造发送链路、不新增协议消息、不动 `PROTOCOL_VERSION`。**
+* **缺的是客户端自己的相位判据，而它写死在两处**（`screens/loadout.js`）：
+  1. 「本局已锁定 · 下一局生效」那句的 `locked`（原来"在局中、相位不是 `INFO_CHECK` 就算锁定"）—— 实测它
+     **只喂两处文案、不 disable 任何控件** ⇒ 声明 `prep` 的房间出现「**服务端收得下、界面却说锁着**」；
+  2. `shouldAutoClose` 的简报那一支 ⇒ 玩家刚进 `PREP`（正是服务端允许改调配的那一段）面板被**自动收走**。
+* **做法**：把那份判据收成"一份两档的表 + 一个纯函数"。`loadoutSync.js` 导出 `LOADOUT_CLIENT_PHASES` /
+  `loadoutLockPhases(option)` / `currentLoadoutLockPhases()` / `setPrepLoadout(option)`；`roomMods.js` 在**同一处**
+  （与 `morphPairing` / `unequip` 并列）用**同一份合并规则**（`mergeBehaviourDecls` + `behaviourValue`）喂档位。
+* **两张表的关系**：客户端的表与服务端的 `LOADOUT_PHASES` 是两张表（客户端不能 `import server/**`），这是这一层
+  既有的做法 —— **客户端副本 + 一个测试把两张表钉在一起**（与 `CLIENT_WRAP_COMPONENTS`↔`MOD_COMPONENT_IDS`、
+  `CLIENT_PANEL_SLOTS`↔`MOD_PANEL_SLOTS` 逐字同一条）。
+* **缺省逐字节不变**：缺省 / 没声明 / 不认识的档位 ⇒ 只含 `INFO_CHECK`；两处的旧表达式与新判据
+  **逐相位遍历同一个布尔** ⇒ 界面一个字节不变，**没有任何 `golden:update`**。
+* ⚠️ **还没做的一件（如实披露，`docs/design/mod-layer.md` §28.43.4 记账）**：`PREP` 里**没有入口**能打开干员调配
+  面板 —— `LoadoutButton` 只在大厅 / 房间 / 简报（只活在 `INFO_CHECK`）里出现，`screens/game.js` 里一个都没有
+  ⇒ 在贴一个 `PREP` 入口之前，"服务端开了"与"玩家改得了"之间还差最后一步。那是**在对局屏新增一个可见控件**，
+  属"新渲染分支"，本轮不做、记账待裁。
+* **顺带排查（同类写死相位 / 写死能力，只记录不改）**：`screens/support.js` 的 `shouldAutoClose` 同形，但助战
+  **没有开关**且服务端 `room.support` 同样只在 `INFO_CHECK` 收 ⇒ **两边一致、不是缺陷**（将来若要"休整期换助战"，
+  那就是第 5 格开关）；`ui/equipReplace.js` 的 `if (equipped.length < 2) return null;` 与
+  `ui/gameLogic/placement.js` 的 `items.length < 2` 把**装备位写死 2** ⇒ **与第 7 段（槽位语义）直接相关**，
+  第 7 段必须一并交代（否则客户端对话框的触发判据会与服务端的 `equipPerChess` 对不上）。
+* **测试**：新增 `test/prepLoadoutClient.test.js`（10 条：缺省档相位表逐字相等 / 默认状态不许"默认开" /
+  **逐相位遍历**新旧判据同判 / `prep` 档只放开 `PREP` 一个相位 / **两张表逐档逐字相等** / 源码级（那一行读函数、
+  旧写死消失、`ownLocked` 原样保留）/ `shouldAutoClose` 两档行为 / `roomMods` 接线 / **客户端半不新造发送链路**）。
+
 ## 0.15.3-0.2.4 — 2026-10-12
 
 **变体 / 口径层：`pack.json.variants`（DESIGN §28.39，docs/WORKSHOP.md §1.20）。** 三个社区 mod「写了等于没写」

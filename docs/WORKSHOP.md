@@ -2104,6 +2104,12 @@ URL **一次都不被请求**。一个包把加载源改坏了，关掉这一格
   意图；它另加的那个 `g.loadout` 我们不需要）。**合并语义**：这一次提交**只覆盖它写了的那些干员**，没写的保留
   当前配发 —— 整份替换会让一个只带一名干员的面板提交把其余干员静默打回默认。
 * `INFO_CHECK` 那一半**不看** `ready`（今天也不看）：两个相位是两条独立的门。
+* **客户端半（DESIGN §28.43.3）**：客户端的"是否锁定"现在**跟着这一格走** —— `screens/loadout.js` 里那两处
+  写死的相位判据（"本局已锁定"那句 + `shouldAutoClose`）改成读 `loadoutSync.currentLoadoutLockPhases()`，
+  档位由 `roomMods.js` 从 `welcome.mods` 合成。缺省 ⇒ 只含 `INFO_CHECK`，**与从前逐字等价**。
+  编辑本身**不需要新发送点**：`loadoutSync` 早就在发既有的 `room.loadout`。
+* ⚠️ **`PREP` 里的入口还没做**（§28.43.4 记账）：对局屏（`screens/game.js`）没有任何 `LoadoutButton`，
+  所以在贴一个 `PREP` 入口之前，这一格在实战里还差最后一步。
 
 #### `morphPairing` —— 变形同构体的配对规则
 

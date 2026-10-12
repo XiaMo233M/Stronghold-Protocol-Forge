@@ -22,6 +22,8 @@
 import { mergeBehaviourDecls, behaviourValue } from '../../shared/behaviour.js';
 import { setMorphPairing } from './ui/gameLogic/bonds.js';
 import { setUnequipAllowed } from './ui/gameActions.js';
+// 第二格 `prepLoadout` 的客户端半（DESIGN §28.43.3）：干员调配屏"是否锁定"的那份相位判据住在 loadoutSync。
+import { setPrepLoadout } from './ui/loadoutSync.js';
 
 /** @typedef {{ id: string, hash: string, layer: string, combat: boolean, api?: string }} ModEntry */
 
@@ -56,11 +58,13 @@ export function setWelcomeMods(msg) {
   welcomeModSet = next;
   if (!same) selectedModIds = [];
   // 行为开关的有效档位（DESIGN §28.43）：客户端不自己实现合并规则，直接调 `shared/behaviour.js` 那**一份**纯函数
-  // （与 `shared/variants.js` 的 `mergeVariantDecls` 逐字同一条「包 id 字典序小的赢」）。三处读数都走它：
-  // `morphPairing`（详情卡 / 列表的 变形同构体 读数）、`unequip`（画不画「卸下」按钮）。
+  // （与 `shared/variants.js` 的 `mergeVariantDecls` 逐字同一条「包 id 字典序小的赢」）。四处读数都走它：
+  // `morphPairing`（详情卡 / 列表的 变形同构体 读数）、`unequip`（画不画「卸下」按钮）、
+  // `prepLoadout`（干员调配屏画不画「本局已锁定」那句 —— 服务端早已按它收 `PREP`，客户端原来在撒谎）。
   const decl = mergeBehaviourDecls(packs).decl;
   setMorphPairing(behaviourValue(decl, 'morphPairing'));
   setUnequipAllowed(behaviourValue(decl, 'unequip') === 'allow');
+  setPrepLoadout(behaviourValue(decl, 'prepLoadout'));
   return same;
 }
 

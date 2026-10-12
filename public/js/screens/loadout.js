@@ -36,7 +36,7 @@ import {
   changedCount, skillLabel, moduleBadge, attrRows, skillTags, quickSkillTags, traitLines, serializeExport, parseImport, LOADOUT_IMPORT_MAX_BYTES,
   opsOf, setOps, resetOps, moduleRecord,
 } from '../ui/loadoutModel.js';
-import { loadoutStore, openLoadout, closeLoadout, setEntries, setOpsMap, applyLoadoutEntries, setNotOwned, applyOwnershipImport, setDiyPicks, applyDiyImport } from '../ui/loadoutSync.js';
+import { loadoutStore, openLoadout, closeLoadout, setEntries, setOpsMap, applyLoadoutEntries, setNotOwned, applyOwnershipImport, setDiyPicks, applyDiyImport, currentLoadoutLockPhases } from '../ui/loadoutSync.js';
 import { OperatorVoice } from '../ui/operatorVoice.js';
 import { CultivationSelects, CultivationSection } from './cultivation.js';
 import { cultivationCharIds } from '../../../shared/protocol.js';
@@ -483,7 +483,16 @@ function LoadoutScreen({ st }) {
   const selId = st.sel && roster.some((c) => c.chessId === st.sel) ? st.sel : list[0]?.chessId || roster[0]?.chessId || null;
   const { base, golden } = selId ? recordsOf(selId, getChess) : { base: null, golden: null };
   const nChanged = changedCount(st.entries, getChess, st.ops, roster);
-  const locked = (inMatch && phase && phase !== PHASE.INFO_CHECK && phase !== PHASE.LOBBY) || st.sync === 'locked';
+  // 行为开关 `prepLoadout` 的客户端半（DESIGN §28.43.3）：**这里的相位判据不再写死**。原来它是"在局中、相位不是
+  // INFO_CHECK 就算锁定"（顺手把 LOBBY 也排掉）—— 于是一律算"锁定"，而服务端（`Match.setLoadout` 读
+  // `LOADOUT_PHASES`）在声明了 `prep` 时**是收 `PREP` 的** ⇒ 界面在撒谎（服务端收得下、界面却说"本局已锁定 ·
+  // 下一局生效"）。
+  //
+  // ⚠️ **方向**：`currentLoadoutLockPhases()` 给出的是这一档下 `room.loadout` **收**（= 改了就本局生效）的相位，
+  // 与服务端 `LOADOUT_PHASES` **同名同义**（两张表由 `test/prepLoadoutClient.test.js` 逐档钉在一起）⇒ 这个
+  // 「锁定」徽标是它的**取反**。缺省档只含 `INFO_CHECK` ⇒ `!includes` 与写死之前**逐相位同判**；`phase !==
+  // PHASE.LOBBY` 那一半照旧留着（它是原来那一行的另一半：`inMatch` 为真而相位回到 `LOBBY` 时不多画一个徽标）。
+  const locked = (inMatch && phase && phase !== PHASE.LOBBY && !currentLoadoutLockPhases().includes(phase)) || st.sync === 'locked';
   const gridRef = useRef(null);
   const fileRef = useRef(null);                            // hidden <input type=file> of the 导入 dialog
   const [narrowDetail, setNarrowDetail] = useState(false); // phones: the detail slides over the roster
@@ -744,11 +753,16 @@ function LoadoutScreen({ st }) {
 /**
  * Whether the overlay must close because its context moved on: opened from the briefing and the match left INFO_CHECK
  * (the strategy draft needs the player), or opened from the lobby / room and a match started (its briefing takes over).
+ *
+ * **行为开关 `prepLoadout` 的客户端半之二**（DESIGN §28.43.3）：简报那一支原来写死 `phase !== PHASE.INFO_CHECK` ——
+ * 于是在声明了 `prep` 的房间，玩家刚进 `PREP`（正是服务端允许改调配的那一段）面板就被**自动收走**了。
+ * 现在两支都读同一份相位表 `currentLoadoutLockPhases()`（缺省 ⇒ `[INFO_CHECK]`，与写死**逐相位等价**：
+ * 它列的正是这一档"收得下"的相位，所以"该关"= 取反）。
  * @param {{ open: boolean, from: string|null }} st @param {string|null} phase @param {boolean} inMatch @param {boolean} wasInMatch
  */
 export function shouldAutoClose(st, phase, inMatch, wasInMatch) {
   if (!st || !st.open) return false;
-  if (st.from === 'briefing') return !!phase && phase !== PHASE.INFO_CHECK;
+  if (st.from === 'briefing') return !!phase && !currentLoadoutLockPhases().includes(phase);
   return inMatch && !wasInMatch;
 }
 

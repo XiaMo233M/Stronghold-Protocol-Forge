@@ -3116,3 +3116,70 @@ i18n-ignore），差别只在**表是另一张**、每格多一个 `actions`。
 （用 `test/match/morph-bonds.test.js` 的「变形同构体 + 一件授予盟约的装备」配方，1 → 0）、客户端源码级断言
 （发送点 / 缺省 `unequipOn = false` / 按钮判据 / 官方那句提示还在 / 游戏屏接线）。
 
+### 28.43.3 第二格 `prepLoadout` 的**客户端半**：一句写了很久的谎话，与两处同类的写死相位
+
+第 8 刀第二格（§28.43.1）只落了**服务端**那一半：`Match.setLoadout` 读 `LOADOUT_PHASES`，`locked`（缺省）只收
+`INFO_CHECK`，`prep` 另收 `PREP`。**客户端那一半一直没落**，而它的缺失形态不是"少一个发送点"，是**客户端在撒谎**：
+
+* 发送链路**整套早就有** —— `public/js/ui/loadoutSync.js` 的 `installLoadoutSync` 早就在发
+  `room.loadout { entries, ops }`（500 ms 去抖、面板关闭时立刻冲刷、`WRONG_PHASE`/`ROOM_STARTED` ⇒
+  `setState('locked')` + 提示、`room.state.inMatch` 变假时自动解锁重试）；单干员编辑的纯函数也早就有
+  （`loadoutModel.setChoice(entries, base, golden, { skill?, module? })`，缺键即删那条 entry，与
+  `mergeLoadoutEntries` 的"只覆盖写了的干员"天然对齐）。**所以这一刀不新造任何发送链路、不新增协议消息。**
+* 缺的是**客户端自己的相位判据**，而它**写死在两个地方**：
+  1. `screens/loadout.js` 的 `locked`（原来："在局中、相位不是 `INFO_CHECK` 就算锁定"，顺手把 `LOBBY` 也排掉）
+     ⇒ 画「本局已锁定 · 下一局生效」与详情里那句「修改将在下一局生效」。**实测这个 `locked` 只喂那两处文案、
+     不 disable 任何控件** ⇒ 声明了 `prep` 的房间会出现「**服务端收得下、界面却说锁着**」的自相矛盾。
+  2. `screens/loadout.js` 的 `shouldAutoClose`（原来简报那一支写死"相位不是 `INFO_CHECK` 就关"）⇒ 玩家刚进
+     `PREP`——**正是服务端允许改调配的那一段**——面板被**自动收走**。
+
+**做法**：把那份相位判据收成"一份两档的表 + 一个纯函数"，屏幕只读它、不再自己比相位。
+`public/js/ui/loadoutSync.js` 导出 `LOADOUT_CLIENT_PHASES` / `loadoutLockPhases(option)` /
+`currentLoadoutLockPhases()` / `setPrepLoadout(option)`；`roomMods.js` 在**同一处**（与 `morphPairing` /
+`unequip` 并列）用**同一份合并规则**（`mergeBehaviourDecls` + `behaviourValue`）喂档位。
+
+**两张表的关系**：客户端的 `LOADOUT_CLIENT_PHASES` 与服务端的 `LOADOUT_PHASES` 是**两张表** —— 客户端不能
+`import server/**`（导入边界）。这是这一层既有的做法：**客户端副本 + 一个测试把两张表钉在一起**（与
+`CLIENT_WRAP_COMPONENTS`↔`MOD_COMPONENT_IDS`、`CLIENT_PANEL_SLOTS`↔`MOD_PANEL_SLOTS` 逐字同一条）。
+钉它的是 `test/prepLoadoutClient.test.js` 里那条"逐档逐字相等"。
+
+**缺省逐字节不变**（这一层的设计不变式）：缺省 / 没声明 / 不认识的档位 ⇒ 只含 `INFO_CHECK`。
+`locked` 那两处的旧表达式与新判据**逐相位遍历同一个布尔**，`shouldAutoClose` 那一处也**逐相位同判** ⇒
+一个不声明这一格的房间，界面一个字节不变，**没有任何 `golden:update`**。
+
+**还没做的那一件（如实披露，见 §28.43.4）**：`PREP` 里**没有入口**能打开干员调配面板 —— `LoadoutButton` 只在
+大厅（`from="lobby"`）、房间（`room`）与简报（`briefing`，只活在 `INFO_CHECK`）里出现，`screens/game.js` 里
+**一个都没有**。所以在贴一个 `PREP` 入口之前，"服务端开了"与"玩家改得了"之间还差最后一步。
+
+**同类的写死相位（本轮只记录，不改）**：
+
+| 位置 | 形态 | 与某格开关相关？ |
+|---|---|---|
+| `screens/support.js` 的 `shouldAutoClose` | 与 `loadout.js` 那一处**同形**（相位一离开 `INFO_CHECK` 就收走助战面板） | **无关**：助战**没有**开关，而服务端 `platform.js` 的 `room.support` 同样只在 `INFO_CHECK` 收（`WRONG_PHASE`）⇒ **两边一致，不是缺陷**。将来若有投稿要"休整期换助战"，那就是**第 5 格开关**，两处一起改 |
+| `ui/equipReplace.js` 的 `if (equipped.length < 2) return null;` | 客户端把**装备位写死 2**（换装对话框的触发判据） | **与第 7 段（槽位语义）直接相关**：`morphPairing: 'plus'` 若改槽位计数，这一处与服务端的 `equipPerChess` 就会**对不上** |
+| `ui/gameLogic/placement.js` 的 `if (targetPiece.items.length < 2) return false;` | 同上（拖拽配发的预判） | 同上 |
+| `ui/detailPanel.js` 的 `EQUIP n/2` 与"最多 2 件"文案 | 纯显示 | 第 7 段若要"不占装备格"，分子要换成 `equipSlotsUsed`（投稿 `bdb` 的那半就是这个形状，见 §28.43.2 末尾的 diff 记录） |
+
+### 28.43.4 待办（本轮**刻意不做**）：`PREP` 里的干员调配入口
+
+§28.43.3 把客户端的相位判据扶正之后，**"服务端收得下"与"玩家改得了"之间还差最后一步**：`PREP` 里没有入口。
+
+**证据**：`LoadoutButton` 只有三个宿主 —— `screens/lobby.js`（`from="lobby"`）、`screens/room.js`（`from="room"`）、
+`screens/briefing.js`（`from="briefing"`，而简报只活在 `INFO_CHECK`）。`screens/game.js`（对局的屏）里**没有**
+任何入口；`shouldAutoClose` 的 `lobby`/`room` 那一支又会在对局开始时把面板收走。⇒ 声明 `prepLoadout: "prep"` 的
+房间，玩家仍然没有地方点开那个面板。
+
+**为什么不在 §28.43.3 里顺手加**：那是**在对局屏上新增一个可见控件**（不是修一句判据），属于"新渲染分支"，
+要单独裁。两个候选形状：
+
+1. **贴一个入口**：`screens/game.js` 加一个 `<LoadoutButton from="game" />`，**只在 `prepLoadoutAllowed()` 且
+   `editable` 时画**。便宜且**不需要新 i18n 词条**（`LoadoutButton` 的默认 label 就是既有的 `t('干员调配')`），
+   缺省（没声明）⇒ **一个按钮都不画** ⇒ 缺省渲染逐字节不变。
+2. **投稿 `8b4e5da55c58` 的 UX**：在详情面板的技能 / 模组段里直接加切换按钮（它那份 `detailPanel.js` 的
+   `dloadout-pick`）。更贴近投稿，但要**新 i18n 词条**（「切换为 {name}」「当前技能」…四个包都要写）+ 一个新的
+   `prep` 档渲染分支。
+
+**状态**：**未做，记账在此**（业主"站上 8 条全部做"的口径由"记账 + 待办"满足，不让它悄悄丢掉）。做的时候
+**必须**遵守 §28.43.1 那三条（缺省 = 引擎今天的行为、非缺省档由引擎实现、一格一个测试文件 + 一节文档）与
+§28.43.2 的「加意图清单」（若同时要发送新的东西）。
+
