@@ -3209,3 +3209,117 @@ bug（`server/match/invariants.js` 写的是收棋子的形状、其余写的是
 **必须**遵守 §28.43.1 那三条（缺省 = 引擎今天的行为、非缺省档由引擎实现、一格一个测试文件 + 一节文档）与
 §28.43.2 的「加意图清单」（若同时要发送新的东西）。
 
+### 28.44 The upgrade-path table: a second protocol on the same port (implemented)
+
+**The gap, stated as a hard-coded comparison.** `server/http/websocket.js` answered exactly one WebSocket path — the
+line was `if (!parts || parts.rawPath !== '/ws') { reject(404, …) }` — because one server ran one game and one
+protocol. Everything else about the upgrade was already data (`WS_MAX_PAYLOAD`, `NET_DEFAULTS`, the peer map): the
+path was the only routing rule in the file that could not be expressed as configuration. That stops being harmless
+the moment a host wants to serve a **self-contained game mode** next to Stronghold: a mode that brings its own
+message shapes, its own rooms and — the reason this cell exists — often its own process. Without a table the only
+way to get there is editing the pinned comparison, and a fork that edits it owns a merge conflict on the file that
+guards its own front door.
+
+**The ruling.** The paths a server answers become a **table the host process registers**, decided from data before
+the socket exists:
+
+```js
+startServer({ wsLanes: [{ id: 'lobby', path: '/duel/lobby', summary: '…', onUpgrade }] });
+```
+
+Four properties, each one closing a way this could quietly go wrong:
+
+1. **The game's `/ws` is not a lane.** It stays where it was, and `validateLanes` refuses a lane that claims it
+   (`LANE_RESERVED`). A table therefore *adds* endpoints; it cannot move, rename or shadow the one the client's
+   reconnect logic names (`public/js/net.js`), and a server started with no lanes — the default, and the only thing
+   `npm start` has — answers byte-for-byte as before: `/ws` accepted, everything else 404.
+2. **Exact paths, never a subtree.** `resolveLane` compares the whole `rawPath`, so `/duel` cannot silently take
+   over `/duelx`, and a query string or fragment is refused by `isLanePath` rather than being parsed differently in
+   two places. One listener (`websocket.js`'s `'upgrade'`) still owns the whole decision, so the order of parse →
+   resolve → admit → hand over cannot differ between the game and a lane.
+3. **A lane gets no privileges, and is never a fallback.** `Network.admission` runs for a lane exactly as for `/ws`
+   — registering a path is not a way to serve more sockets per address (`maxConnectionsPerAddr`) or past a full
+   server (`maxConnections`). A lane that throws has its socket closed and is named in the log; it does not fall
+   through to `/ws`, because "ask for the mode, land in a match" is the failure this cell exists to prevent.
+4. **A bad table fails at boot, naming every problem.** `attachWebSocket` throws with the whole `problems` list
+   rather than starting with the lanes it happened to like. This is the silent-revert shape this family has been
+   burned by before (an overlay that stops matching, no error, the feature simply gone): an operator who asked for
+   `/duel/lobby` and got a permanent 404 is worse off than a server that refused to start.
+
+**What this does *not* open — read this before proposing the next cell.** A lane is registered by **the host process,
+from code the operator installed**. Nothing here gives a **pack** a socket, a port, a route or a listener: packs
+still get no `fetch`/`WebSocket`, no timers and no child processes (`shared/kitAuthoring.js`, §28.13.1), the static
+channels stay `.json`-only (§28.13), and `C2S` is still a closed set a pack cannot extend (`server/net.js`). Letting
+a pack declare a lane is a separate ruling with its own surface cell, its own abuse analysis (a lane is a network
+listener owned by untrusted code) and its own version policy — it is deliberately not folded into this one.
+
+**Cost and blast radius.** One new file (`server/http/wsLanes.js`), one call site in `server/index.js`
+(`lanes: opts.wsLanes`), and the guard plus hand-over in `websocket.js`. Per `docs/MOD-SURFACE.md`'s policy this
+adds no pack-facing surface at all, so `MOD_API_VERSION` does not move and no published pack is refused.
+Numbering: `main` 到 0.15.1 那一刀写到 **§28.37**（§28.30–§28.37 是「服务端四格能力 + 面板第二批读面」那一批），
+**本仓库此后又往后落了若干格，现存最大是 §28.43.4**；而 §28.23（#2）与 §28.26–§28.27（#3）仍在两个待审 PR 手里，
+所以这一格往后接 **§28.44**，不插进那条被占用的连号 —— 与 §28.28/29 当年的放法同一条。
+
+Tests: `test/wsLanes.test.js` (8) — the shape layer (`isLanePath`, the five refusals by name, the empty-table
+identity, exact-match resolution) and, unlike a pure shape-layer test, **a real `http.Server` with real `ws`
+handshakes**: a lane answers its own path while `/ws` still reaches `Network.handleConnection`; a refused admission
+never reaches the lane's handler; a throwing lane closes its socket, is named, and does not become a game connection.
+
+### 28.45 The request-path table: a mode's own page and its own POST (implemented)
+
+**The gap, stated as three fates.** `server/http/routes.js` knew exactly three outcomes for a request: 405 for any
+method but `GET`/`HEAD`, the engine's own exact paths (`/healthz`, the mods catalogue), and the static files. A
+self-contained game mode needs things none of those provide — a page of its own under a namespace, its own assets
+behind that namespace, and usually a **POST** endpoint (a report, a receipt). The only way to get them was to edit the
+method gate, which is the same trap §28.44 describes for the upgrade path: every fork owns a private copy of the rule
+that guards the front door.
+
+**The ruling.** A second table, held by the host process, decided before the response is written:
+
+```js
+startServer({ httpLanes: [{ id: 'duel', prefix: '/duel/', methods: ['GET', 'HEAD', 'POST'], onRequest }] });
+```
+
+Four properties, and the first one is what makes a *prefix* table safe to have at all:
+
+1. **A lane cannot overlap the engine's URL space, and that is checked against the engine's own constants.**
+   `ENGINE_HTTP_RESERVED` is a **union of two imported truths**: `RESERVED_ROUTE_PREFIXES` + `DYNAMIC_ROUTE_PREFIX`
+   (`server/http/routeMount.js` — the engine's own top-level namespaces, which §28.35 already keeps as one reusable
+   list, `/mod/` `/i18n` `/data.js` `/shared` `/ws` `/healthz` included), and the constants the handlers actually serve:
+   `MODS_CATALOG_URL` / `MOD_FILE_PREFIX` (`server/http/mods.js`), `PACKS_URL`
+   (`shared/packs.js`), `MEDIA_PREFIX` (`shared/media.js`), `ROOM_DATA_PREFIX` / `WORKSHOP_BATTLE_PREFIX`
+   (`server/http/static.js`), the three `WORKSHOP_*_PREFIX` names (`shared/workshop.js`) — plus the literals the
+   static handler holds without exporting (`/data/`, `/sim/`, `/assets/`, `/fonts/`, `/workshop-kits/`, the public
+   root `/`). Importing instead of re-typing is the point: the reserve list cannot drift away from the
+   routes it protects. `/mod/` in particular is the namespace a pack's `host.route()` endpoints live in, so a host
+   that claimed it would shadow pack content invisibly. Claiming a folder that actually exists inside `publicDir` is also refused
+   (`LANE_SHADOWS_PUBLIC`) — registering `/assets/` would silently steal art the client loads from disk.
+2. **The engine's three fates are untouched for every request a lane does not claim.** A lane is consulted after URL
+   parsing and before the method gate, so `POST /healthz` is still the 405 it always was (a lane can never own that
+   path, rule 1), and an unknown path still ends in the static handler. No lanes — the default, and the only shape a
+   plain `npm start` has — is the same table as an empty one.
+3. **Only three methods exist here.** `GET`/`HEAD`/`POST` (§28.13's static channels stay `.json`-only; this is not a
+   way to smuggle a write API into the game's own surface). Anything else is still the flat 405.
+4. **A lane owns its response and its own failures.** It reads any body, sets its own content type; a throw is caught
+   by the listener, answers 500 only if nothing was written yet, and is logged **by lane id** — it never falls through
+   into the game's static space. The security headers (`common.js`) are set before the lane is asked, so a lane cannot
+   drop them. A bad table fails at boot, naming every problem — §28.44's rule, same reason.
+
+**What this does *not* open.** Same boundary as §28.44: a lane is code **the operator installed**, not something a
+pack declares. A pack's `routes` stay `.json`-only (§28.13), packs still get no `fetch`/`WebSocket`, no timers, no
+child processes (`shared/kitAuthoring.js`), and `C2S` is still the engine's closed set. Whether a pack may register a
+lane is a separate ruling — a lane is a network listener handed to untrusted code, and that needs its own abuse
+analysis and version policy rather than being folded in here.
+
+**Cost and blast radius.** One new file (`server/http/httpLanes.js`), the table lookup in `routes.js` (which keeps the
+single `handleRequest` and therefore the single order of decisions), and one option threaded through `startServer`.
+Nothing is added to the pack-facing surface, so `MOD_API_VERSION` does not move and no published pack is refused.
+Numbering: `main` 到 0.15.1 那一刀写到 **§28.37**，**本仓库此后又往后落了若干格，本格之前现存最大是 §28.44（姊妹格升级路径表），再往前是 §28.43.4**；
+而 §28.23（#2）与 §28.26–§28.27（#3）仍在待审 PR 手里，所以这一格接 **§28.45**，紧挨着它的姊妹格升级路径表
+（**§28.44**）—— 两条都不插进那条被占用的连号。
+
+Tests: `test/httpLanes.test.js` (9) — every reserved URL proven unclaimable from the imported list, the
+`publicDir` overlap, the method closure and the five refusals by name, then **real `fetch` requests against a real
+server**: a lane answers its subtree including POST, `POST /healthz` is still 405, an unclaimed path still reaches the
+static handler, and a throwing lane answers a named 500 without reaching the game.
+

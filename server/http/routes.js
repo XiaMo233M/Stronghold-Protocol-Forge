@@ -2,13 +2,16 @@
 // (i18n-ignore-file: the error pages are bilingual by design, 中文 · English — docs/I18N.md)
 //
 //   * a URL longer than 4096 characters → 414; one that does not parse → 400;
-//   * any method but GET / HEAD → 405 with `Allow: GET, HEAD`;
+//   * any method but GET / HEAD → 405 with `Allow: GET, HEAD`, unless a lane claimed that method for that path;
 //   * GET /healthz → JSON status (protocol `version`, release `app`, uptime, the served `build`, sockets, sessions,
 //     rooms, matches), never cached;
 //   * GET /api/rooms → 公开房间数，**一个整数，不是列表**（见下「房间目录」）；
 //   * GET /api/records/<CODE> → the latest finished match of that 4-letter room code;
 //   * GET /api/records/account/<NAME> → that account's OWN row from its latest finished match (name → playerId → row);
 //     404 when the server runs without accounts (`SP_ACCOUNTS` unset) — an absent feature, not an empty one;
+//   * a path inside a host-registered request lane (DESIGN §28.45, httpLanes.js) → that lane, for a method the lane
+//     claimed. No lanes (the default, and the only thing a plain `npm start` has) ⇒ every rule below is exactly as it
+//     was: any method but GET / HEAD 405, everything else the static files;
 //   * everything else → the static files (static.js).
 // A route that throws is logged and answers 500.
 //
@@ -57,12 +60,14 @@
 // （尤其**不引入** `ACTIVITY_TYPES` / `user.activity` / `lastInputAt`），`PROTOCOL_VERSION` / `MOD_API_VERSION`
 // 不抬。将来的 `room.list` 若真要做，HTTP 面与协议面互不干扰。
 
+import { existsSync } from 'node:fs';
 import { PROTOCOL_VERSION, APP_VERSION } from '../../shared/constants.js';
 import { buildTag } from './buildTag.js';
 import { setSecurityHeaders, sendError, sendJson, splitUrl } from './common.js';
 import { MODS_CATALOG_URL } from './mods.js';
 import { VIEW } from '../matchRecords.js';
 import { TokenBucket } from '../net.js';
+import { validateHttpLanes, resolveHttpLane } from './httpLanes.js';
 
 const MAX_URL_LENGTH = 4096;
 /** 账号名按**码点**算长度（`[...s].length`），与昵称那条 `NAME_MAX_LEN` 是同一条思路；这里只防一条超长 URL。 */
@@ -129,10 +134,11 @@ export function healthReport({ startedAt, network, registry, lobby, modHealth = 
  *           health: Parameters<typeof healthReport>[0], log: object,
  *           records?: import('../matchRecords.js').MatchRecords|null,
  *           accounts?: import('../accounts.js').AccountStore|null,
- *           modsCatalog?: (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => boolean }} deps
+ *           modsCatalog?: (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => boolean,
+ *           httpLanes?: readonly import('./httpLanes.js').HttpLane[], publicDir?: string }} deps
  * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => void}
  */
-export function createRequestHandler({ serveStatic, health, log, records = null, accounts = null, modsCatalog }) {
+export function createRequestHandler({ serveStatic, health, log, records = null, accounts = null, modsCatalog, httpLanes, publicDir }) {
   /** @type {Map<string, TokenBucket>} 客户端地址 → 只读战绩路由的桶（见文件头那条「已知边界」） */
   const recordBuckets = new Map();
 
@@ -158,12 +164,32 @@ export function createRequestHandler({ serveStatic, health, log, records = null,
     sendJson(req, res, 429, { error: 'RATE' });
     return false;
   }
+  // A bad table fails at boot, naming every problem — same ruling as the upgrade table (§28.44), same reason: a lane
+  // that silently never answers is worse than a server that refuses to start.
+  const table = validateHttpLanes(httpLanes ?? [], { publicDir, existsSync });
+  if (table.problems.length) throw new Error(`bad http lane table: ${table.problems.join('; ')}`);
+  if (table.lanes.length) log.info(`[http] lanes: ${table.lanes.map((l) => l.prefix + l.methods.join('|')).join(', ')}`);
 
   async function handleRequest(req, res) {
     const url = req.url || '/';
     if (url.length > MAX_URL_LENGTH) { sendError(req, res, 414, '请求地址过长 · URI too long'); return; }
     const parts = splitUrl(url);
     if (!parts) { sendError(req, res, 400, '请求地址无效 · Bad request'); return; }
+    // A lane is asked before anything else, because it is the only rule here that knows about methods the game does
+    // not serve (POST). It cannot reach the engine's own paths: `validateHttpLanes` refuses any prefix that overlaps
+    // them, including `/healthz` and the catalogue, so the order below is untouched for every request a lane does not
+    // claim — including a POST to `/healthz`, which stays the 405 it always was.
+    const lane = resolveHttpLane(req.method || 'GET', parts.rawPath, table.lanes);
+    if (lane) {
+      try {
+        await lane.onRequest(req, res, { rawPath: parts.rawPath, query: parts.query, log, lane });
+      } catch (e) {
+        // Named, and never a fall-through into the game's static space: a half-written lane response stays half-written.
+        log.error(`[http] lane ${lane.id} failed`, e);
+        if (!res.headersSent) sendError(req, res, 500, '玩法服务出错 · Mode error');
+      }
+      return;
+    }
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.setHeader('Allow', 'GET, HEAD');
       sendError(req, res, 405, '不支持的请求方法 · Method not allowed');
