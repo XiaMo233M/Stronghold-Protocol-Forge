@@ -375,6 +375,19 @@ services:
 
 ## 7. 打包发布（维护者）
 
+出包在仓库里有**两条各自独立的路径**，各一个命令行工具；第三个文件**不是工具**，是它们共用的库。混用不会当场报错，
+只会打出一个对不上布局的包，所以先认这张表：
+
+| 文件 | 是什么 | 什么时候用 |
+|---|---|---|
+| `tools/package.mjs` | 命令行工具：本仓库的发行 zip（完整包 / 精简包 / 更新包）。zip 根只有一个 `Stronghold-Protocol/` 文件夹，`package.json` 与 `MANIFEST.json`、`UPDATE.json` 都在根 | 发本仓库的 Release，命令见本节下面 |
+| `tools/package-update.mjs` | **库，没有命令行入口**（没有 `main`、不读 `process.argv`）：读一个旧包 → 逐文件比大小 + sha256 → 写 `MANIFEST.json` / `UPDATE.json` 的正文 | **不单独运行**。上面那条与 `scripts/make-update-package.mjs` 都 import 它 —— 全仓库只有这一份「读旧包 / 算差异 / 写清单」的实现 |
+| `scripts/make-update-package.mjs` | 命令行工具：**整合包**（`node/` + `app/` + 三个 `.bat`）布局的增量包。`--bundle` 指打包脚本产出的目录，`--from` 指上一版的 `…-win-x64.zip` | 发 Windows 便携包的更新包，见 [WINDOWS.md](WINDOWS.md) §2.1 |
+
+两条路径的基准包**不能互换**：`tools/package.mjs --update` 只收**本仓库的完整包**（精简包与更新包都不收，每个版本只能给一次，
+且必须比当前版本旧）；`scripts/make-update-package.mjs` 只收**便携包 zip**，靠包内 `app/package.json` 的 `release`
+（`0.14.0-0.2.3` 这种两段串）认身份 —— 只抬上游、本仓库版本不变时，光看 `version` 分不出两版，所以没有 `release` 字段的旧包会被直接拒绝。
+
 Releases 的 zip（完整包、精简包，0.2.1 起还有更新包）由 `tools/package.mjs` 生成，在**源码仓库**里运行（整合包里没有这个工具）：
 
 ```bash

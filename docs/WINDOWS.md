@@ -84,6 +84,10 @@ node scripts/make-update-package.mjs --bundle <上面那个目录> --from <上�
 里面的路径都是 **app 相对的**；所以更新包里改动的文件放在 `app\<app 相对路径>`，包根与 `node\` 下的文件机制管不到
 （它们照常随包覆盖，但新版本若**删掉**这类文件，生成器会直接拒绝出包 —— 那种情况只能换完整包）。
 
+> 本仓库的发行 zip（`tools/package.mjs`）、这个便携包的增量包（`scripts/make-update-package.mjs`）以及它们共用的库
+> （`tools/package-update.mjs`，没有命令行入口）各管什么、什么时候用哪个：见 [DEPLOY.md](DEPLOY.md) §7 开头那张表。
+> 两条路径的基准包不能互换。
+
 ## 3. 包里放了什么、没放什么
 
 `app\` 的文件清单来自 **`git ls-files`**，不是手写的跳过表。因此被 `.gitignore` 挡在版本库外的本机文件
