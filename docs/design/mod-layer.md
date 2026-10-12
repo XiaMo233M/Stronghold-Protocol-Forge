@@ -3076,6 +3076,20 @@ i18n-ignore），差别只在**表是另一张**、每格多一个 `actions`。
 5. **判据读取点**：一格一个模块层纯函数（`unequipAllowed`），于是它是 `shared/modSurface.js` 里 `behaviour`
    那一格可锚的导出名。
 
+**加意图清单（同步点全表 —— ①② 是设计，③④⑤ 是「漏了就红 / 就哑」的机械同步点）**：
+
+| # | 同步点 | 漏了会怎样 |
+|---|---|---|
+| ① | `shared/protocol.js` 的 `C2S` 表（字段 + 判据子） | 传输层的 `validateC2S` 回 `unknown type …` ⇒ 这条意图**根本进不来**（`platform.js` 的 `GAME_TYPES` 从 `C2S` 的键派生） |
+| ② | `server/match/match/intents.js` 的 `switch` 分支 | 类型认了、**没人处理**（静默丢弃，客户端一直等到超时） |
+| ③ | **`test/match/fuzz.test.js` 的 `randomIntent`** | **全量当场两条红**：它按 `C2S` 表逐个类型造随机载荷，并钉住「造出来的每一条都合法」；新类型没进它的 `switch` 就掉进 `default`（`{t}`，缺字段）⇒ `validateC2S` 回 `bad field …`。补一行 `case`（**断言一字不用动**）之后这条意图才真的进模糊覆盖 —— 第 8 刀第四格 `g.unequip` 就是这么被抓住的 |
+| ④ | 客户端**意图→动作映射**（`public/js/ui/gameActions.js` 的音效表 + `act()` 包装） | 类型通了、UI 发不出去（或发出去了没有成功反馈） |
+| ⑤ | 若带新文案 ⇒ **i18n 词条**（`public/i18n/*.json`，`node tools/i18n.mjs check --all --strict`） | 新字面量的 msgid 不进包 ⇒ `check` 报 missing。**这是加类型的第一个隐藏成本**（第二个是 ③） |
+
+⇒ ⑤ 的规模要说清：本刀为 `g.unequip` 加了两个词条（按钮文案 + 去掉半句的提示），**四个包都要写**
+（en / ja / ko / zh-TW）。基线本来就 ja / ko / zh-TW 各缺 57 条（**既有缺口**，不是本层造成的），但
+**新词条必须四个包齐全**，否则缺失数就从基线往上走。
+
 **缺省档逐字节不变**：`unequipAllowed` 为假 ⇒ 回 `ERR.BAD_TARGET` + 文案 `'equipped items are locked'`，
 **与 `destroy`（`items.js` 里今天那一句）逐字同一句** ⇒ 一个不声明这一格的房间在 `g.unequip` 上的行为与
 「这条意图不存在」等价，**没有任何 `golden:update`**；客户端**一个按钮都不画**（`ItemRow` 的 `canDetach` 要求
