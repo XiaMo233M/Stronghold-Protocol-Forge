@@ -716,6 +716,7 @@
   "冻结商店（下回合保留） · {key}": "Freeze Shop (kept next round) · {key}",
   "解冻": "Unfreeze",
   "刷新商店 · {key}": "Refresh Shop · {key}",
+  "正在刷新…": "Refreshing…",
   "免费 ×{free}": "Free ×{free}",
   "查看 {name} 的战场": "View {name}'s Battlefield",
   "与你在同一战场": "On your field",
