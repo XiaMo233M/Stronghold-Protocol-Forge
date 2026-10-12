@@ -3001,6 +3001,7 @@ i18n-ignore），差别只在**表是另一张**、每格多一个 `actions`。
 | 开关 | 选项 / 缺省 | 引擎侧读取点 | 投稿 |
 |---|---|---|---|
 | `shopBias` | `official`（缺省）· `bondBias` | `bondBiasPreference`（`server/match/pool.js`）→ `bondBiasBonds`（`server/match/player/economy.js`）→ `PlayerEconomy._rollItemSlot` | `b293e061b38f` |
+| `prepLoadout` | `locked`（缺省）· `prep` | `LOADOUT_PHASES` / `loadoutPhasesFor` + `MatchPlatform.setLoadout`（`server/match/match/platform.js`）：`locked` 只有 `INFO_CHECK`（与从前逐字相同），`prep` 另加 `PREP` 且只在这个座位还没准备时；`PREP` 那一次走 `mergeLoadoutEntries`（只覆盖写了的干员） | `8b4e5da55c58` |
 
 **每加一格照这三条做**（这一刀起）：**缺省 = 引擎今天的行为，逐字节不变**（缺省路径与从前同一份代码路径，
 所以**没有任何 `golden:update`**，已发布包一个字节不动）；**非缺省档由引擎实现**（包给不出数字、路径、模块，

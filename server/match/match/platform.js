@@ -6,11 +6,55 @@
 
 import { C2S } from '../../../shared/protocol.js';
 import { PHASE, ERR } from '../../../shared/constants.js';
+import { behaviourIsDefault } from '../../../shared/behaviour.js';
 import { syntheticResult } from '../fields.js';
 import { FLOW_TICKER_PRIORITY, OK, fail } from './common.js';
 import { msg } from '../../../shared/i18n.js';
 
 const GAME_TYPES = new Set(Object.keys(C2S).filter((t) => Object.hasOwn(C2S, t) && (t.startsWith('g.') || t.startsWith('b.'))));
+
+/**
+ * 行为开关 `prepLoadout` 的两个档位各收哪些相位（`Match.setLoadout`）—— 这一格的**引擎侧读取点**：
+ * `locked`（缺省）只有 `INFO_CHECK`，与从前逐字相同；`prep` 另加 `PREP`（休整期）。
+ *
+ * 写成模块层的**不可变表 + 一个纯函数**：一是 `Match.setLoadout` 只查表、不写死相位，二是它是
+ * `shared/modSurface.js` 里 `behaviour` 那一格可锚的一个导出名（改名 / 挪走 = 打断所有声明这一格的包）。
+ */
+export const LOADOUT_PHASES = Object.freeze({ locked: Object.freeze([PHASE.INFO_CHECK]), prep: Object.freeze([PHASE.INFO_CHECK, PHASE.PREP]) });
+
+/**
+ * 这一局的声明允许在哪些相位收 `room.loadout`。没声明这一格 / 声明成 `locked` ⇒ `LOADOUT_PHASES.locked`
+ * （**引擎今天的行为**）；`prep` ⇒ 另加休整期。**只读**这一格的归一化声明，不改任何东西。
+ * @param {Array<{ switch: string, option: string }>|null|undefined} decl 本局合成后的行为声明
+ * @returns {readonly string[]}
+ */
+export function loadoutPhasesFor(decl) {
+  // 判据只有一份（`shared/behaviour.js`）：与 `variants` 的 `variantValue` 同一个分工 —— 读取点问的是「哪一档」。
+  return behaviourIsDefault(decl, 'prepLoadout') ? LOADOUT_PHASES.locked : LOADOUT_PHASES.prep;
+}
+
+/**
+ * 休整期那一次提交的**合并**语义（行为开关 `prepLoadout: "prep"` 才有的一步）：在**当前配发**之上只覆盖这次
+ * 写了的那些干员，没写的保留。
+ *
+ * 为什么不是整份替换：`room.loadout` 的 `entries` 是「本浏览器的干员调配」，而休整期的面板只会提交它**改过**的
+ * 那几个座位 —— 整份替换会把其余干员默默打回默认（那是一个静默的规则改动，正是这一层要消灭的失败方向）。
+ *
+ * 形状上只做**浅**合并：**只**接受「对象、且每个值都是对象」的条目（其余原样交给
+ * `PlayerState.setLoadout` 去拒 —— 这里不替它判合法性，判据只有那一份）。
+ * @param {Record<string, any>|null|undefined} current 当前配发（`PlayerState.loadout`，已冻结的那一份）
+ * @param {any} incoming 这一次提交的条目（原始形状）
+ * @returns {Record<string, any>}
+ */
+export function mergeLoadoutEntries(current, incoming) {
+  const out = { ...(current && typeof current === 'object' ? current : {}) };
+  if (incoming && typeof incoming === 'object' && !Array.isArray(incoming)) {
+    for (const [id, entry] of Object.entries(incoming)) {
+      if (entry && typeof entry === 'object' && !Array.isArray(entry)) out[id] = entry;
+    }
+  }
+  return out;
+}
 
 export class MatchPlatform {
   start() {
@@ -58,9 +102,13 @@ export class MatchPlatform {
   }
 
   /**
-   * room.loadout during the match (DESIGN §16): only while INFO_CHECK runs (the briefing's 干员调配 entry); the lobby
-   * already checked it against the data (PlayerState.setLoadout re-checks it). `ops` (0.2.2): the per-operator 潜能 /
-   * 练度 that come with it (undefined = unchanged).
+   * room.loadout during the match (DESIGN §16): only while INFO_CHECK runs (the briefing's 干员调配 entry) — 行为开关
+   * `prepLoadout: "prep"`（DESIGN §28.43.1）在休整期也收一次；the lobby already checked it against the data
+   * (PlayerState.setLoadout re-checks it). `ops` (0.2.2): the per-operator 潜能 / 练度 that come with it
+   * (undefined = unchanged).
+   *
+   * **缺省档（`locked`）走的是从前那一条路**：相位不是这一格允许的那几个就 `WRONG_PHASE`，`loadout` 原样交给
+   * `PlayerState.setLoadout`（整份替换）。只有 `prep` 档在 `PREP` 上多走一步 `mergeLoadoutEntries`（见那里的注释）。
    * @param {string} playerId
    * @param {Record<string, { skill: number, module: string|null }> | null} loadout
    * @param {Record<string, { potential: number, cultivate: number }> | null} [ops]
@@ -69,10 +117,16 @@ export class MatchPlatform {
   setLoadout(playerId, loadout, ops = undefined) {
     const ps = this.players.get(playerId);
     if (!ps || ps.isBot || ps.left) return fail(ERR.NOT_IN_ROOM);
-    if (this.disposed || this.ended || this.phase !== PHASE.INFO_CHECK) return fail(ERR.WRONG_PHASE, 'loadout locked for this match');
+    if (this.disposed || this.ended) return fail(ERR.WRONG_PHASE, 'loadout locked for this match');
+    const phases = loadoutPhasesFor(this.behaviour);
+    const inPrep = this.phase === PHASE.PREP && phases.includes(PHASE.PREP);
+    if (!phases.includes(this.phase)) return fail(ERR.WRONG_PHASE, 'loadout locked for this match');
+    // 休整期里「准备就绪」等于把这一轮的配发定下来（`g.ready` 之后不再收）—— 缺省档根本走不到这里。
+    if (inPrep && ps.ready) return fail(ERR.WRONG_PHASE, 'loadout locked for this match (this seat has readied up)');
+    const entries = inPrep ? mergeLoadoutEntries(ps.loadout, loadout) : loadout;
     let res = OK;
     this.guard(() => {
-      if (!ps.setLoadout(loadout, ops)) { res = fail(ERR.BAD_TARGET, 'loadout does not match the game data'); return; }
+      if (!ps.setLoadout(entries, ops)) { res = fail(ERR.BAD_TARGET, 'loadout does not match the game data'); return; }
       this.markPrivate(ps);
     });
     return res;

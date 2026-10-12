@@ -102,6 +102,29 @@ export const BEHAVIOUR_SWITCHES = Object.freeze({
     }),
     actions: (option) => (option === 'bondBias' ? [{ kind: 'shop.biasActiveBonds', value: true }] : []),
   },
+  /**
+   * 休整期可更换技能与模组（投稿 `8b4e5da55c58`）。**改结果** ⇒ 声明它必须 `combat: true`：技能与模组决定战斗里
+   * 打出来的是什么。**不新增协议消息** —— 走的就是既有那条 `room.loadout { entries, ops? }`（投稿原件也是复用
+   * 既有意图，我们连它自己那个 `g.loadout` 都不需要）。
+   *
+   * `locked` = 引擎今天的行为（`Match.setLoadout` 只收 `INFO_CHECK`：briefing 的干员调配，之后锁死）；
+   * `prep` = 休整期（`PHASE.PREP`）里、且**这个座位还没准备**时也收一次。合并语义：这一次提交**只覆盖它写了的
+   * 那些干员**，没写的保留当前配发（否则一个只带一名干员的面板提交会把整份配发抹掉）。
+   */
+  prepLoadout: {
+    label: '休整期可更换技能与模组',
+    options: Object.freeze(['locked', 'prep']),
+    default: 'locked',
+    optionLabels: Object.freeze({
+      locked: '官方：干员调配锁定后不再可改',
+      prep: '休整期也能改（本座位未准备时）',
+    }),
+    effect: Object.freeze({
+      locked: 'the official rule: room.loadout is accepted only during INFO_CHECK (the briefing\'s 干员调配) and the loadout is frozen afterwards',
+      prep: 'room.loadout is accepted during PREP as well, while this seat has not readied up; the submission merges into the current loadout (operators it does not mention keep theirs), and nothing else about the loadout changes',
+    }),
+    actions: (option) => (option === 'prep' ? [{ kind: 'loadout.allowDuringPrep', value: true }] : []),
+  },
 });
 
 /** 开关名，按声明顺序（界面 / 错误文案按它排）。 */

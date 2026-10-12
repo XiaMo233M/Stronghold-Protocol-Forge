@@ -213,12 +213,12 @@
   `behaviour` 声明都会被 `BEHAVIOUR_UNKNOWN_SWITCH` **点名整包拒**。那是刻意的：**格子先立起来、开关逐个按需加**
   （首格与它的引擎实现点一起落）。**第 8 刀按这条落了前三格，见下。**
 
-### 行为开关的第一格（第 8 刀）
+### 行为开关的第一批格（第 8 刀）
 
-**投稿 `b293e061b38f`（「商店刷新盟约装备几率提升」）要的那件事，收成引擎里一格实现好的开关（DESIGN §28.43.1）。**
-原件把它做成了**安装器**（`files.json` 的 `copy` 整份覆盖 `data/items.json`、`server/match/bondsMeta.js`、
-`server/match/pool.js` 与 `server/match/player/economy.js`）。本刀不采纳安装器：**引擎实现一格，任何包声明它**
-（`docs/WORKSHOP.md` §1.22 / §1.23）。
+**投稿 `b293e061b38f`（「商店刷新盟约装备几率提升」）与 `8b4e5da55c58`（「休整期可更换技能和模组」）要的那两件事，
+收成引擎里两格实现好的开关（DESIGN §28.43.1）。** 两份原件都把它们做成了**安装器**（`files.json` 的 `copy` 整份
+覆盖 `data/items.json`、`server/match/**`、`shared/protocol.js` 与客户端文件）。本刀不采纳安装器：**引擎实现一格，
+任何包声明它**（`docs/WORKSHOP.md` §1.22 / §1.23）。
 
 * **`shopBias`**：`official`（缺省，今天的行为）· `bondBias`（装备槽只在本玩家**已激活**盟约对应的装备里抽，
   **只偏置、不授予**）。读取点 `bondBiasPreference`（`server/match/pool.js`）→ `bondBiasBonds`
@@ -231,13 +231,20 @@
 * **缺省路径逐字节不变**：不声明 / 选缺省 ⇒ `restrict` 为 `null`，与从前同一份代码路径、同一份结果；
   `Match` 只多一行 `mergeBehaviourDecls`（与 `variants` 同一个投影点，**不新增协议消息**）。
   **不需要 `golden:update`**：没有任何一格在缺省时改变一局的结果。
-* **测试**：新增 `test/shopBias.test.js`（9 条：形状 / 闭枚举 / 谓词 / 只缩候选集 / 阶级不变 / 库存闸门 /
-  真实对局里「声明了才生效」/ 缺省档逐次同序列 / 假实现与未读字段的源码级断言）。
+* **`prepLoadout`**：`locked`（缺省，今天的行为）· `prep`（休整期里、且**这个座位还没准备**时，也收一次既有的
+  `room.loadout { entries, ops? }`）。读取点 `LOADOUT_PHASES` / `loadoutPhasesFor`
+  （`server/match/match/platform.js`）→ `MatchPlatform.setLoadout` 的相位闸门。**不新增协议消息**（投稿自己那个
+  `g.loadout` 我们不需要：`room.loadout` 在比赛进行中本来就走到 `Match.setLoadout`）；`PREP` 那一次走
+  `mergeLoadoutEntries`：**只覆盖这次写了的干员**，没写的保留当前配发（整份替换会把其余干员静默打回默认）。
+  `INFO_CHECK` 那一半**不看** `ps.ready`（今天也不看）—— 两个相位是两条独立的门。缺省档读到的相位数组与从前
+  逐字相同（只有 `INFO_CHECK`），**不需要 `golden:update`**。
+* **测试**：新增 `test/shopBias.test.js`（9 条）+ `test/prepLoadout.test.js`（8 条：形状 / 两档 / 缺省与今天
+  逐字相同 / `prep` 档的合并语义 / `ready` 后仍拒 / 别的相位照旧 `WRONG_PHASE` / 协议面一个字节不动）。
 * **`test/packBehaviour.test.js` 原地改了三处（换语义，不放松）**：①「本版是空表」→「真表里每一格都通过形状守卫、
   每一格至少两档且有非缺省档」；②「空表也响亮」→「不认识的开关也响亮」（被拒的名字从 `shopBias` 换成真表外的名字，
   并新增「文案必须列出真表里的每一个开关」）；③「真表（空）下包装不上」→「真表下不认识的开关装不上」+ 新增
   「选了缺省档 = 引擎今天的行为（逐格遍历真表）」。`PACK_FIELDS` 的闭集计数**不变**（这一刀加的是**表里的成员**，
-  不是顶层键）。`test/modSurface.test.js` 的 `ANCHOR_MODULES` 多了两个模块（`pool` / `economy`）
+  不是顶层键）。`test/modSurface.test.js` 的 `ANCHOR_MODULES` 多登记三个模块（`pool` / `economy` / `platform`）
   —— 那是**判据的登记**，不是放松：新增的锚点照样逐条被验。
 
 ## 0.15.3-0.2.4 — 2026-10-12
