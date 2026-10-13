@@ -43,7 +43,7 @@ export const APP_VERSION = '0.18.3';
  * `scripts/make-update-package.mjs` tell "the next release" from "the very release I am building"
  * (a bundle that only names `0.14.0` cannot: 0.14.0-0.2.3 and 0.14.0-0.2.4 look identical to it).
  */
-export const UPSTREAM_VERSION = '0.2.5';
+export const UPSTREAM_VERSION = '0.2.6';
 /** A development build (the public `dev` branch): the title screen, the boot banner and the README say so, and
  * tools/package.mjs refuses to build a release zip from it without --allow-dev. */
 export const DEV_BUILD = /-dev$/.test(APP_VERSION);
