@@ -324,6 +324,18 @@
 .hub-radar-art { position: relative; width: 100%; height: calc(.4 * var(--t)); min-height: 30px; pointer-events: none; opacity: .5; }
 .hub-radar-art .mf-radar { inset: 0; height: 100%; }
 
+/* 矮视口：不挂那两件占掉模式卡上方净空的装饰（业主裁定走「矮视口隐藏」这条路，而不是改引擎既有规则）。
+   阈值 860 的依据（实测，1440 宽）：
+     · 720 高：模式卡底边 732，判据上限 700 ⇒ 差 32px
+     · 768 高：按同一比例约 755，上限 748 ⇒ 也差
+     · 900 高：模式卡底边 818，上限 880 ⇒ 富余 62px，整层可以全挂
+     两件占净空的装饰是 .lobby-proto-stage（28px）与创建框里的 .hub-art--create（24px），合计 52px；
+     860 以下隐藏它们正好补上那 32px 还留余量，860 以上整层照挂。
+   只由 CSS 决定可见性（模块始终挂载，不用 JS 条件挂载），预算法也能量到。 */
+@media (max-height: 860px) {
+  .lobby-proto-stage, .hub-art--create { display: none; }
+}
+
 /* 大厅背景对话框的离场（ui/transitions.js）。引擎的 Modal 是「open=false 即卸载」，它自己没有离场规则
    （.rdialog / .pbanner / .toast 有，.modal 没有）。这里给 ui/screens/lobby.js 用 usePresence 保持挂载的
    那 220ms 配一条：Modal 把自定义 class 加在 .modal__box 上，所以选择器是 .modal__box.is-leaving；

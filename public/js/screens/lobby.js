@@ -658,7 +658,7 @@ export function LobbyScreen() {
               ? html`<span>${roomMode === 'solo' ? t('创建后即可开始模拟') : t('创建后可邀请好友或添加 AI 队友')}</span>`
               : html`<${Spinner} size="sm" label="CONNECTING" />`}
           </div>
-          <div class="hub-art" aria-hidden="true"><${CreateArt} /></div>
+          <div class="hub-art hub-art--create" aria-hidden="true"><${CreateArt} /></div>
         </div>
       </section>
     </div>
