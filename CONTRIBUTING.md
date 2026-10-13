@@ -11,11 +11,41 @@
 git clone https://github.com/sganggs/Stronghold-Protocol.git
 cd Stronghold-Protocol
 npm install        # postinstall 把 pixi / preact / three 复制到 public/vendor
-npm run setup      # 下载美术 / 音频（只跑测试可以不下载，缺素材的用例会自动跳过）
+npm run setup      # 下载美术 / 音频（只跑测试可以不下载：多数用例缺素材会跳过，少数严格判据会硬失败，见本节末）
 npm run dev        # 启动服务器（node --watch，改了服务器代码自动重启）：http://localhost:3000
 ```
 
 `npm run doctor` 检查 Node 版本、素材、端口。官方数据表由 `tools/build-data.mjs` 下载到 `.cache/gamedata/`，改数据时才需要。
+
+### 多 worktree 并行，与缺素材时哪些用例会红
+
+`git worktree add` 出来的新工作树**只带跟踪文件**：`public/assets`、`public/vendor`、fonts 目录（同在 `public/` 下）
+与 `data/local-assets.json` 都是 git-ignored 的，不会跟过来，得自己接上。
+
+| 要接的东西 | 从哪来 |
+|---|---|
+| `public/vendor` | `npm install` 的 postinstall（`tools/vendor.mjs`） |
+| `public/assets` | `node tools/fetch-assets.mjs`，约 270 MB |
+| fonts 目录（同在 `public/` 下） | 同上，`fetch-assets` 一并生成 |
+| `data/local-assets.json` | `tools/local-extract/extract.py`，从本机客户端提取 |
+
+```powershell
+# 示例：把新工作树里的四处接线指回有素材的主树（Windows；macOS / Linux 用 ln -s 代替 mklink /J）
+cmd /c mklink /J  public\vendor            <主树>\public\vendor
+cmd /c mklink /J  public\assets            <主树>\public\assets
+cmd /c mklink /J  public\fonts             <主树>\public\fonts
+cmd /c mklink /H  data\local-assets.json   <主树>\data\local-assets.json
+```
+
+**症状**：不接就跑 `node --test --test-concurrency=4`，会看到 **fail 2** —— `test/editor.test.js:596` 要
+`/data/local-assets.json` 却得到 404，`test/modAssets.test.js:338` 的 `assert.ok(haveBgm && haveFont)` 直接失败 ——
+外加 **skipped 24**。接好这四处，同一份代码回到 **fail 0 / skipped 5**。**结论：这是工作树搭建问题，不是产品缺陷**
+（同一份代码在主树上全绿）。
+
+**缺素材时跳不跳**：多数用例会自己跳过（`test/assets.test.js` 用 `t.skip('fonts not generated …')`），但少数
+**严格判据**缺素材就**硬失败**（`test/modAssets.test.js`：它要拿两份真实文件对照 `/assets` 与 `/fonts` 声明
+`cache-only` 后必须是 412，没有素材就没有对照）。所以只跑测试可以不下载素材；碰到硬失败先 `npm run assets`
+补齐，别当成代码坏了。
 
 ## 2. 运行测试
 
@@ -24,7 +54,7 @@ npm run dev        # 启动服务器（node --watch，改了服务器代码自�
 ```bash
 node --test test/content/op_siege.test.js                        # 一个文件
 node --test --test-name-pattern="S3" test/content/op_siege.test.js  # 文件里的部分用例
-node --test                                                      # 全部（需要浏览器 / 素材的用例自动跳过）
+node --test                                                      # 全部（多数需要浏览器 / 素材的用例自动跳过；少数严格判据缺素材会硬失败，见 §1 末）
 npm run golden                                                   # 黄金结果：整套固定种子的战斗和对局
 GOLDEN_FULL=1 node --test test/golden.test.js                    # 同上，node:test 形式
 npm run golden:update                                            # 有意改变玩法时重新生成
@@ -101,8 +131,13 @@ SIM_E2E=1 node --test 'test/sim/*.browser.test.js'               # 浏览器里�
 
 ## English summary
 
-- **Setup**: Node.js 22 or 24; `npm install`, `npm run setup` (art and audio — optional for tests), `npm run dev`.
+- **Setup**: Node.js 22 or 24; `npm install`, `npm run setup` (art and audio — optional for tests: most suites skip
+  without them, a few strict ones fail hard, see the section above), `npm run dev`.
   The code map is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- **Parallel worktrees**: a new `git worktree` carries only tracked files. Link the four git-ignored locations from an
+  existing checkout — the vendored libraries under `public/vendor`, the downloaded art under `public/assets`, the
+  generated fonts, and `data/local-assets.json` (Windows `mklink /J`, `mklink /H`; `ln -s` elsewhere) — or the full
+  suite reports 2 failures and 24 skips that are not product bugs.
 - **Tests**: run the targeted files (`node --test <file>`, `--test-name-pattern`), then `node --test` and
   `npm run golden` before a pull request; `npm run lint`, `npm run check:imports`, `npm run typecheck`.
   `npm run ci` (or `node tools/ci.mjs`) runs the checks of `.github/workflows/ci.yml` in one go and stops at the first
