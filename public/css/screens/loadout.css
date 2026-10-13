@@ -651,6 +651,29 @@
 
 .diy-choice__tags { display: flex; flex-wrap: wrap; gap: .08rem; color: var(--text-lo); font-size: max(calc(.12 * var(--t)), 10px); }
 
+/* ============================================================================================
+   ui-hub-package-20261013 — lobby.css
+
+   取自 ui-hub-package-20261013（QQ 下载的第三方界面包，sha256 963ff83b2d2573abc2ba46a1425a108d46f135a6da5789846d8426ba1932ed46）的
+   payload/public/css/screens/lobby.css。原件未署名。
+
+   ⚠️ 本段必须位于引擎所有规则之后（文件真末尾）。CSS 同权重下后者胜，只有放末尾才会生效；曾被误插在
+   引擎规则之前，结果引擎的同名规则反过来盖住它 —— 挪动前先读这一句。
+
+   与引擎同名：68 个选择器（lobby）。这不是失误，是「CSS 只能加不能替」的落地方式：不删引擎任何一行，
+   只把新层的观感追加在后。新层专用选择器与引擎零冲突（rseat / proto / pcard / mf- / sw- / hub-bg /
+   hub-radar / bgset / lobby-hub / hub-entry / ally- / rs- / ps- / tr- 这些前缀引擎里一个都没有）。
+   它同时带来新层要用的 [data-hub-theme="…"] 变量块（--sky-0..3 等）—— 那是新层配色的唯一声明处。
+
+   ⚠️ 字号：引擎唯一合法的「文字大小」形状是 calc(<x> * var(--t))（本仓库 lobby.css 自己的 27 处字号全是
+   这一种，0 处 max()）。test/ui/text-scale.test.js 的 plainRem() 对 max(.19rem, 12px) 也返回 true —— 实测
+   确认过，所以包版原生的 max(<rem>, <px>px) 与裸 rem 都过不了那道闸。本段 147 处字号据此改成
+   calc(<x> * var(--t))，px 下限由「文字大小」自己的 40px 布局下限接管（theme.css 的 html clamp）。
+
+   ⚠️ 为什么 lobby 改、loadout 不改：loadout.css 在 test/ui/text-scale.test.js 的 NOT_SCALED_FILES 豁免里，
+   而 test/ui/loadout-stats.test.js 明确要求 .lo-sec--stats / .lo-stats__cap / .lo-minfo--kit 那一组的字号是
+   max(<rem>, <px>px)。两张判据同时成立，唯一解就是「lobby 段改、loadout 段保持包版原样」。
+   ============================================================================================ */
 /* ==========================================================================================
    screens/loadout.css — 干员调配 (Operator loadout, DESIGN §16; js/screens/loadout.js): full-screen overlay with a
    filterable roster of the visible chess (left) and the selected chess's skills, 局内数值 and elite modules (right).
