@@ -16,6 +16,9 @@
 
 // 界面文案走 i18n：t('中文原文') 查英文词典，查不到就原样返回中文（editor/ui/i18n.js 说明了这个取舍）。
 import { t, mountI18n } from './i18n.js';
+// 错误码白话表（A5）：`[EMPTY_PACK] …` 这类原文翻成「一句话人话 + 一条修法」。查不到就回落显示原文，
+// 绝不静默（`errLine` 的行为，test/errHints.test.js 钉住）。表只有这一份，app.js 那条渲染路径也用它。
+import { errLine, explainCode } from './errHints.zh.js';
 
 const $ = (s) => document.querySelector(s);
 
@@ -41,6 +44,9 @@ const state = {
   // （`{ '<charId>': { bonds: 'egirShip', powers: 'egir, iberia' } }`，空格与逗号都当分隔符）。
   // 同样是「重画时从草稿重建」，所以改一个输入框不会把别的行弄丢。
   opPicked: new Set(), opText: {},
+  // 「校验这个包」（B1）：最近一次 `/api/packs/<id>/validate` 的回话，按包 id 存 —— 换包再换回来时
+  // 上一次的结论还在，不必重跑。`undefined` = 这个包还没校验过。
+  checks: {},
 };
 
 const packOf = (id = state.packId) => state.packs.find((p) => p.id === id) ?? null;
@@ -129,7 +135,29 @@ function fillIdChoices(listEl, file) {
  * 列表里和详情里**不可能给出不同的理由**。
  */
 const refusalOf = (p) => p.refusal ?? (p.syntaxError ? { code: p.syntaxError.code, detail: p.syntaxError.detail } : null);
-const refusalText = (p) => refusalOf(p)?.detail ?? p.reason ?? t('（未知原因）');
+/**
+ * 加载器那句**原文**（`[CODE] detail` 里的 detail）。白话表（A5）要的是「码 + 原文」两半，
+ * 而这个函数以前把码吃掉了 —— 只剩 detail 时 `errLine` 就拼不出 `[CODE] 原文` 那条回落行。
+ */
+const refusalDetail = (p) => refusalOf(p)?.detail ?? p.reason ?? t('（未知原因）');
+/** 拒绝理由的码：形状层与装载期两种拒绝都在 `refusal.code` 里，兜底让 `p.reason` 的 `CODE:` 前缀顶上。 */
+const refusalCode = (p) => refusalOf(p)?.code ?? (typeof p.reason === 'string' && p.reason.includes(':') ? p.reason.slice(0, p.reason.indexOf(':')) : 'REFUSED');
+/** 兼容旧名字：详情横幅那三处原来用它取原文。 */
+const refusalText = refusalDetail;
+
+/**
+ * 一个被拒的包的**白话行**（A5）：`[CODE] 一句话人话` + 一行修法，查不到码就回落成 `[CODE] 原文`。
+ *
+ * 为什么要一个函数：列表行、详情横幅、校验面板三处都要这一行，而「查不到回落」这条契约只该写一次
+ * —— 三处各写一遍必然有一天漏掉一处，那一处就会变成空白（`errLine` 的注释里写了这条）。
+ * @param {object} p 一个包的状态（`/api/packs/support` 的 `packs[]` 里那一条）
+ * @returns {string} 至少一行；最坏情况是 `[CODE] 原文`
+ */
+function refusalHintLine(p) {
+  const detail = refusalDetail(p);
+  const line = errLine({ code: refusalCode(p), detail });
+  return line && line.trim() ? line : `[${refusalCode(p)}] ${detail}`;
+}
 
 function renderPackList() {
   const box = $('#packList');  box.replaceChildren();
@@ -169,12 +197,16 @@ function renderPackList() {
       verdict.append(why);
       el.title = p.reason ?? '';
     } else if (p.status !== 'loaded') {
+      // A5：白话表命中时给「一句话人话 + 一条修法」，查不到就回落成 `[CODE] 原文`（`errLine` 的契约）。
+      // 列表里只放第一行（人话）；修法与引擎原文在详情页那条横幅上给全。
       const why = document.createElement('span');
       why.className = 'err';
-      why.textContent = ` ${t('已被拒绝：{0}', refusalText(p)).slice(0, 160)}`;
-      if (p.reason) why.title = p.reason;
+      const line = refusalHintLine(p);
+      why.textContent = ` ${line.split('\n')[0].slice(0, 160)}`;
+      // 悬停看全：一行放不下时（尤其是修法那一句）在这里能读到底
+      why.title = line;
       verdict.append(why);
-      el.title = p.reason ?? '';
+      el.title = line;
     }
     el.append(name, meta, verdict);
     el.addEventListener('click', () => selectPack(p.id));
@@ -389,8 +421,11 @@ function renderDetail() {
     verdict.className = 'banner warn';
     verdict.textContent = t('⚠ 本引擎不装载这个包：{0}。它不是错误 —— pack.json 是合法的，只是这一份清单是给另一个宿主的。', refusalText(p));
   } else {
+    // A5：被拒时不再只贴加载器那句英文原文（那在回答「引擎为什么不收」，不在回答「我该改哪个字」）。
+    // 白话表命中就给「一句话人话 + 一条修法 + 引擎原文」，查不到码回落成 `[CODE] 原文`（`refusalHintLine`）。
     verdict.className = 'banner bad';
-    verdict.textContent = t('✘ 加载器不会使用这个包：{0}', refusalText(p))
+    verdict.style.whiteSpace = 'pre-line';   // errLine 用 \n 分成「人话 / 修法 / 原文」三行
+    verdict.textContent = t('加载器不会使用这个包：{0}', refusalHintLine(p))
       + (p.syntaxError ? t('；pack.json 本身：{0} — {1}', p.syntaxError.code, p.syntaxError.detail) : '');
   }
   box.append(verdict);
@@ -540,13 +575,19 @@ function renderSide() {
   }));
   const dl = document.createElement('button');
   dl.className = 'primary';
-  dl.textContent = state.busy ? t('导出中…') : t('导出 {0}.zip', p ? p.id : t('（先选一个包）'));
+  dl.textContent = state.busy ? t('导出中…') : t('导出投稿件 {0}.zip', p ? p.id : t('（先选一个包）'));
   dl.disabled = !p || state.busy;
   dl.addEventListener('click', exportPack);
   ex.append(dl);
   ex.append(Object.assign(document.createElement('p'), {
     className: 'hint',
     textContent: t('命令行等价：node tools/workshop-pack.mjs export <包id>'),
+  }));
+  // A3（2026-10-13）：这一句堵的是「我要不要再按 README 套一层文件夹？」那个死结 —— 仓库里讲装包（要顶层目录）
+  // 与讲投稿（要扁平）是两份不同的文件，界面上一句话都没说过。导出件**本来就是扁平**的，直接说清。
+  ex.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('⭐ 这个 zip 的形状就是站点要的：pack.json 直接躺在 zip 最外层（没有多余的一层文件夹），上传页直接可用，不要手工重压。本地安装则是另一条路：把它解压到 workshop/<包id>/。'),
   }));
   box.append(ex);
 
@@ -562,7 +603,7 @@ function renderSide() {
   forceLabel.className = 'chk';
   forceLabel.style.display = 'flex';
   forceLabel.style.gap = '6px';
-  forceLabel.append(force, document.createTextNode(t('覆盖同名包（--force）')));
+  forceLabel.append(force, document.createTextNode(t('覆盖机器上同名的包（危险：会先删掉 workshop/<包id>/ 里已有的那一份）')));
   const up = document.createElement('button');
   up.className = 'primary';
   up.textContent = state.busy ? t('导入中…') : t('导入这个 .zip');
@@ -645,7 +686,188 @@ function renderSide() {
     className: 'hint',
     textContent: t('装好的包要重启游戏服务器才会出现在游戏里。这里写 workshop/<包id>/，以及 pack.json 的 support、包元数据与 overrides 字段。'),
   }));
+  // A1（2026-10-13）：这一页以前**没有任何一句话告诉作者「先读哪份」**，而仓库里恰好有一份 200 KB 的
+  // docs/WORKSHOP.md。服务端早就把 /docs/**.md 挂出来了（editor/server.mjs 的 DOC_TYPES 那一条），
+  // 所以这里只是把那条通路接上：没有新请求、没有新依赖、没有外链。
+  help.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('第一次做包？先看《五分钟上手》——四步：复制模板 → 改三处 → 导出 → 上传。'),
+  }));
+  const docRow = document.createElement('div'); docRow.className = 'row docLinks'; docRow.style.marginTop = '4px';
+  for (const [label, href] of [
+    [t('五分钟上手（START-HERE）'), '/docs/START-HERE.md'],
+    [t('错误码白话表'), '/docs/errors.md'],
+    [t('换个立绘'), '/docs/task-01-换个立绘.md'],
+    [t('加个干员'), '/docs/task-02-加个干员.md'],
+    [t('包格式全解（WORKSHOP.md）'), '/docs/WORKSHOP.md'],
+  ]) {
+    const a = document.createElement('a');
+    a.href = href;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = label;
+    docRow.append(a);
+  }
+  help.append(docRow);
+  help.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('这些文档就在本机的 app/docs/ 下（编辑器通过 /docs/ 只读地发出来，不联网）。它们与源码仓库的入门层同源。'),
+  }));
   box.append(help);
+
+  // B1：把「真引擎装载」这一层搬到界面上。它必须**挨着**导出按钮，因为作者最想问的就是「我现在导出的这个
+  // 装不装得上」—— 而这一页以前只有加载器徽标（结论），没有「按一下给我结论」这个动作。
+  box.append(h(t('校验这个包')));
+  box.append(renderCheckPanel(p));
+}
+
+// ---- B1：校验这个包（真引擎装载这一层，2026-10-13）-------------------------------------------------------------
+//
+// 缺口是什么：这一页只有 `加载器接受` / `已被拒绝` 两个**徽标**（结论），没有任何「按一下给我结论」的动作；
+// 而引擎最强的一层检查（第 3 层「真引擎装载」：记录有没有真的并进合并数据、能不能建出棋子 def、精锐链接对不对）
+// **只活在 tools/workshop-validate.mjs 里**。作者要做完包才想得起去敲那条命令。
+//
+// 这一格就是那条命令的界面入口，判据**不复制第二份**：服务端 `/api/packs/<id>/validate` 直接调
+// `shared/workshopValidate.js`（CLI 用的同一个函数），所以界面与 `node tools/workshop-validate.mjs` 不可能
+// 给出不同结论 —— 与这一页「导出/导入走 workshop-pack.mjs」是同一条纪律。
+
+/** 服务端给的 `kind` → 界面上那一小格的中文名。**服务端不认识类型不在这里补**，这里是展示层。 */
+function checkKindLabel(kind) {
+  switch (kind) {
+    case 'pack': return t('包本身');
+    case 'engine': return t('真引擎装载');
+    case 'operator': return t('干员记录');
+    case 'art': return t('外观素材');
+    case 'voice': return t('语音');
+    case 'itemIcon': return t('装备图标');
+    case 'kit': return t('行为层 kit');
+    case 'stage': return t('地图');
+    case 'enemy': return t('怪物');
+    case 'wave': return t('出怪');
+    case 'item': return t('装备');
+    case 'route': return t('静态路由');
+    case 'support': return t('助战声明');
+    default: return String(kind ?? '');
+  }
+}
+
+/**
+ * 一条 checks[] 的渲染：码 + 人话 + 修法（查不到码回落成 `[码] 原文`），加一处「在哪」。
+ *
+ * ⚠ 这里的 `field` 是**引擎给的定位串**（`art.chars.char_x.spine.front`、`kits/a.js · …`），
+ * 它不是界面文案，所以**不进 i18n**：翻它只会让作者对不上引擎的报错原文。
+ */
+function checkItemLine(c) {
+  const line = errLine({ code: c.code, detail: c.message, field: c.field });
+  const hintText = c.hint ? `\n    ${t('引擎提示')}：${c.hint}` : '';
+  return `${c.severity === 'error' ? t('必须修') : t('只需留意')} · ${line}${hintText}`;
+}
+
+function renderCheckPanel(p) {
+  const panel = document.createElement('div'); panel.className = 'panel checkPanel';
+  const running = state.busy || state.checking === true;
+  const result = p ? state.checks?.[p.id] : null;
+
+  panel.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('用引擎自己装载一遍这个包，把结论翻成人话。只读，不写任何文件。'),
+  }));
+
+  const row = document.createElement('div'); row.className = 'row'; row.style.marginTop = '8px';
+  const btn = document.createElement('button');
+  btn.className = 'primary checkRun';
+  btn.textContent = running ? t('校验中…') : t('校验这个包');
+  btn.disabled = !p || running;
+  btn.addEventListener('click', () => runCheck(p?.id));
+  row.append(btn);
+  panel.append(row);
+
+  if (!p || !result) {
+    panel.append(Object.assign(document.createElement('p'), {
+      className: 'hint checkIdle',
+      textContent: t('这条接口只读：只装载、只报告，不写任何文件、不改 pack.json。'),
+    }));
+    return panel;
+  }
+
+  const box = document.createElement('div'); box.className = 'checkResult';
+  if (result.error) {
+    box.append(Object.assign(document.createElement('div'), {
+      className: 'banner bad',
+      textContent: t('校验请求失败：{0}', result.error),
+    }));
+    panel.append(box);
+    return panel;
+  }
+
+  // 「装上了」与「有错误」是两件事（实测：packs=1 errors=1），所以这两条分开说、分开显示 ——
+  // 一条 `bad` 横幅说「没装上」，一条 `warn` 横幅说「装上了但有 N 处问题」。
+  const status = result.status;
+  const loaded = status === 'loaded';
+  const head = document.createElement('div');
+  if (loaded) {
+    head.className = 'banner good';
+    head.textContent = result.errors
+      ? t('⚠ 这个包装上了，但有 {0} 处问题（看下面每一条的修法）。', result.errors)
+      : t('✔ 这个包装得上：引擎校验通过。');
+  } else if (status === 'foreign') {
+    head.className = 'banner warn';
+    head.textContent = t('这个包属于另一个宿主，本引擎认识它但不装载它（不是错误）。');
+  } else {
+    head.className = 'banner bad';
+    head.textContent = t('没有装载：{0}', result.reason ? String(result.reason) : refusalDetail(p));
+  }
+  box.append(head);
+
+  if (loaded) {
+    box.append(Object.assign(document.createElement('p'), {
+      className: 'hint',
+      textContent: t('装载成功：这个包被引擎读进去了，包内记录也会并入实际数据。'),
+    }));
+  }
+
+  const all = Array.isArray(result.checks) ? result.checks : [];
+  const errors = all.filter((c) => c.severity === 'error');
+  const warnings = all.filter((c) => c.severity !== 'error');
+  if (errors.length) {
+    box.append(Object.assign(document.createElement('div'), { className: 'err', textContent: t('{0} 处问题（必须修）', errors.length) }));
+    const ul = document.createElement('ul'); ul.className = 'issues checkErrors';
+    ul.style.whiteSpace = 'pre-line';
+    for (const c of errors) ul.append(Object.assign(document.createElement('li'), { className: 'err', textContent: `[${checkKindLabel(c.kind)}] ${checkItemLine(c)}` }));
+    box.append(ul);
+  }
+  if (warnings.length) {
+    box.append(Object.assign(document.createElement('div'), { className: 'warn', textContent: t('{0} 处警告（不挡你，但去看一眼）', warnings.length) }));
+    const ul = document.createElement('ul'); ul.className = 'issues checkWarnings';
+    ul.style.whiteSpace = 'pre-line';
+    for (const c of warnings) ul.append(Object.assign(document.createElement('li'), { className: 'warn', textContent: `[${checkKindLabel(c.kind)}] ${checkItemLine(c)}` }));
+    box.append(ul);
+  }
+  if (!errors.length && !warnings.length) {
+    box.append(Object.assign(document.createElement('p'), { className: 'ok', textContent: t('{0} error(s), {1} warning(s)', result.errors ?? 0, result.warnings ?? 0) }));
+  }
+  box.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: t('命令行等价：node tools/workshop-validate.mjs <工坊根>（同一份判据，同一个结论）。这一格只读，不写任何文件。'),
+  }));
+  panel.append(box);
+  return panel;
+}
+
+/** 跑一次校验（只读 GET），把回话按包 id 存下来并重画右栏。失败也**不改**上一条结论的可见性。 */
+async function runCheck(packId) {
+  if (!packId) return;
+  state.checking = true;
+  renderSide();
+  try {
+    const r = await api(`/api/packs/${encodeURIComponent(packId)}/validate`);
+    state.checks[packId] = r;
+  } catch (e) {
+    state.checks[packId] = { error: errText(e) };
+  } finally {
+    state.checking = false;
+    renderSide();
+  }
 }
 
 // ---- 动作 ---------------------------------------------------------------------------------------------------------

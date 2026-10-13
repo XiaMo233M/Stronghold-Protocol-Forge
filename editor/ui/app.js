@@ -5,6 +5,9 @@
 // 界面文案走 i18n：t('中文原文') 查英文词典，查不到就原样返回中文（editor/ui/i18n.js 说明了这个取舍）。
 
 import { t, mountI18n, currentLang } from './i18n.js';
+// 错误码白话表（A5）：与包管理页共用同一张表（errHints.zh.js），所以同一条码在两页上给同一句人话。
+// 查不到码回落成 `[CODE] field：原文`（`errLine` 的契约，test/errHints.test.js 钉住）。
+import { errLine } from './errHints.zh.js';
 // 服务端把 /shared/ 也挂给了编辑器界面，所以这几个模块在浏览器与 node 下是同一个文件：
 // 范围与伤害分类的推导规则只有一份（shared/chessAuthoring.js），界面显示的就是引擎真正会用的那份。
 import {
@@ -153,10 +156,16 @@ function renderOps() {
     onclick: () => { state.slug = null; state.spec = blankSpec(); state.preview = null; state.picking = false; state.overridePicking = false; state.official = null; state.playtestDeclared = []; renderShell(); },
   }, h('div', { class: 'n ok' }, t('＋ 新建干员')), h('div', { class: 'm' }, t('从空白表单开始'))));
   // 「以模板新建」是省事的那条路：官方的数值、分支、攻击范围、技能、天赋与外观一次填好，改个 id 与名字就能用。
+  //
+  // A6（2026-10-13）：这**不是**「改官方那位」—— 它复制出一条**新**干员。作者最高频的误操作正是把这两件事
+  // 搞混（想换官方某位的立绘，结果新建了一个同名的新干员，游戏里原来那位一点没变），所以副标题里直接把
+  // 另一半指出来：要改官方本人走「包管理 → 覆盖官方记录」。
   box.append(h('div', {
     class: `item${state.picking ? ' on' : ''}`,
     onclick: () => { state.slug = null; state.spec = null; state.preview = null; state.picking = true; state.overridePicking = false; state.official = null; state.playtestDeclared = []; state.pickQuery = ''; renderShell(); },
-  }, h('div', { class: 'n ok' }, t('⧉ 以模板新建')), h('div', { class: 'm' }, t('复制一个现成干员的数值、范围、技能与外观'))));
+  }, h('div', { class: 'n ok' }, t('⧉ 以模板新建（做一条**新**干员）')), h('div', { class: 'm' }, t('复制一个现成干员的数值、范围、技能与外观'))));
+  box.append(h('div', { class: 'm hint', style: 'padding:0 14px 8px' },
+    t('要改的是**官方那位本人**（换立绘 / 改数值 / 改技能）？那不是这一条 —— 去「包管理 → 覆盖官方记录」声明 overrides，用她自己的 id 打开那条记录。')));
   // 覆盖模式：**不复制**，而是以官方 id 打开那一条记录本身。保存出来的就是官方 id，
   // 加载器按 A2 的按字段合并打补丁 —— 作者只写要改的那几个字段。
   box.append(h('div', {
@@ -1290,7 +1299,14 @@ function renderEditor() {
   else {
     if (pv.errors?.length) {
       panel.append(h('div', { class: 'err' }, t('{0} 个错误（必须修）', pv.errors.length)));
-      panel.append(h('ul', { class: 'issues' }, pv.errors.map((e) => h('li', { class: 'err' }, `${e.field || t('（记录）')} [${e.code}] ${e.message}${e.hint ? ` — ${e.hint}` : ''}`))));
+      // A5：逐记录校验的码也过白话表 —— 一行里只有 `field` 是中文、message/hint 是英文（来自
+      // shared/chessAuthoring.js），而同一张表在 pack.js 那边已经给「加载器拒绝」用着。
+      // 查不到码回落 `[CODE] field：原文 — hint`（`errLine` 的契约），绝不静默。
+      panel.append(h('ul', { class: 'issues' }, pv.errors.map((e) => h('li', { class: 'err', style: 'white-space:pre-line' }, errLine({
+        code: e.code,
+        field: e.field || t('（记录）'),
+        detail: `${e.message}${e.hint ? ` — ${e.hint}` : ''}`,
+      })))));
     }
     if (pv.warnings?.length) {
       panel.append(h('div', { class: 'warn' }, t('{0} 条警告', pv.warnings.length)));

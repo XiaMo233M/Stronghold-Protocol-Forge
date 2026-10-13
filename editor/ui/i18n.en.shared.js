@@ -140,4 +140,15 @@ export const EN_SHARED = Object.freeze({
   '进阶：起手 / 收尾（可选）': 'Advanced: begin / end clips (optional)',
   '（不要起手）': '(no begin clip)',
   '（不要收尾）': '(no end clip)',
+
+  // ---- A2（2026-10-13）：九页顶栏共用的那个「帮助」入口 ----
+  // 它指向包内的 docs/START-HERE.md（编辑器服务端早就把 /docs/**.md 只读地挂出来了），
+  // 所以这是界面里**第一次**出现说明书入口 —— 在此之前全编辑器只有 kit 页链接了一份 md。
+  '帮助（五分钟上手）': 'Help (five-minute start)',
+  '第一次做包先看这份：四步做一个包': 'Making your first pack? Start here: four steps to a pack',
+
+  // ---- A6（2026-10-13）：把「以模板新建」与「覆盖官方记录」的关系说清 ----
+  '⧉ 以模板新建（做一条**新**干员）': '⧉ New from a template (makes a **new** operator)',
+  '要改的是**官方那位本人**（换立绘 / 改数值 / 改技能）？那不是这一条 —— 去「包管理 → 覆盖官方记录」声明 overrides，用她自己的 id 打开那条记录。':
+    'Changing the **official operator herself** (portrait / stats / skills)? That is not this entry — go to “Pack management → Override official records”, declare overrides, and open the record under her own id.',
 });

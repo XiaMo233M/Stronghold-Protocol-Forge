@@ -85,6 +85,40 @@ export const FOLDER = 'Stronghold-Protocol';
 export const ROOT_FILES = ['package.json', 'package-lock.json', 'LICENSE', 'NOTICE.md', 'THIRD-PARTY-NOTICES.md', 'README.md', 'CHANGELOG.md'];
 /** The player docs. `NET-TUNING.md` is the owner's "增量帧可调参数说明书": it ships with the player package. */
 export const PLAYER_DOCS = ['docs/PLAYING.md', 'docs/DEPLOY.md', 'docs/NET-TUNING.md'];
+/**
+ * 创意工坊的**入门层**：owner 2026-10-13「四个包里要包含创意工坊说明」。这五份是**给做包的人**的唯一入口，
+ * 正文都在 `docs/` 顶层（`docs/START-HERE.md` 是四步主文，其余是错误码白话表与两篇单任务）。
+ * 与 Mods 仓同源、两边同步（`docs/START-HERE.md` 顶部写着这条纪律）；`docs/WORKSHOP.md` 早就在 `PLAYER_DOCS`
+ * 之外的 `docs/` 顶层里 —— 见下面 `PLAYER_DOC_DIRS`，入门层只是那条链的第一段。
+ */
+export const PLAYER_WORKSHOP_DOCS = ['docs/START-HERE.md', 'docs/errors.md',
+  'docs/task-01-换个立绘.md', 'docs/task-02-加个干员.md'];
+/**
+ * 整目录随包发出的 `docs/` 子树。
+ *
+ * 为什么需要它：入门层的第 1 步是「**复制这个文件夹**」—— 一个可复制的起点是入门层成立的前提
+ * （`docs/START-HERE.md` 第 1 步、附录 E）。所以 `docs/my-first-pack/`（模板包本体：`pack.json` +
+ * `assets/portrait.png`，一共 438 字节）整棵子树进包。
+ *
+ * ⚠ **模板包不能放进 `docs/examples/`**：那三个目录（clementia / demo-workshop / kit-demo）是**冻结基线** ——
+ * `test/packAssets.test.js`、`test/packRelativeImports.test.js`、`test/workshopAssets.test.js` 都钉着
+ * 「`docs/examples` 里恰好这三份、内容哈希逐字节不变」。多放一份会改动那些基线值，而基线值正是
+ * 「身份哈希没被顺手改坏」的判据。模板包因此有自己的目录（`docs/my-first-pack/`），一个字节都不动那三份。
+ *
+ * `docs/examples/` 仍然进包，但只带那两份 **spec 示例**（`operator-spec.json` / `stage-spec.json` ——
+ * `docs/task-02-加个干员.md` 第 2 步让作者「整份复制过来」，包内断链等于那一步做不到）；
+ * 那三份**示例包**目录（`EXAMPLE_PACK_DIRS`）是给校验器用的冻结夹具，**不随包发出**。
+ */
+export const PLAYER_DOC_DIRS = ['docs/my-first-pack/', 'docs/examples/'];
+/** `docs/examples/` 下**不随包发出**的三份冻结夹具包（见上面 PLAYER_DOC_DIRS 的说明）。 */
+export const EXAMPLE_PACK_DIRS = ['docs/examples/clementia/', 'docs/examples/demo-workshop/', 'docs/examples/kit-demo/'];
+/**
+ * 工坊三份大文档始终随包发出（它们本来就在 `docs/` 顶层，但**不在**按名字列的名单里）。
+ *
+ * 为什么必须显式列：`isPlayerFile` 是按名字/目录白名单收的，`docs/` 顶层默认全在包外。
+ * 入门层指向它们（`docs/START-HERE.md` 附录 C），包内断链等于入门层把读者引到 404。
+ */
+export const PLAYER_WORKSHOP_REFS = ['docs/WORKSHOP.md', 'docs/STANDARD-PACK.md', 'docs/MOD-SURFACE.md', 'docs/EDITOR.md'];
 /** Research tables read at run time: server/sim/nodeData.js (the Node sim's fallback) and tools/fetch-assets.mjs. */
 export const RUNTIME_RESEARCH = ['docs/research/03-operators.json', 'docs/research/05-enemies.json', 'docs/research/05-maps.json', 'docs/research/07-assets.json'];
 /** The start scripts (scripts/make-windows-bundle.mjs is the maintainer's Windows pack, docs/WINDOWS.md). */
@@ -96,6 +130,12 @@ export const PLAYER_TOOLS = ['tools/crop-board-atlas.mjs', 'tools/doctor.mjs', '
 export const PLAYER_TOOL_DIRS = ['tools/assets/', 'tools/local-extract/'];
 /** Whole runtime directories (their tracked files). */
 export const RUNTIME_DIRS = ['server/', 'shared/', 'data/', 'public/', 'packs/'];
+/**
+ * `workshop/` 本身**不随包发**（那是玩家自己放包的地方，包里它是空的）—— 但它的 `README.md` **要发**：
+ * 那是入门层的一个入口（「第一次做包的人请先看 ../docs/START-HERE.md」），而 `docs/START-HERE.md` 又指向它。
+ * 两份都进 `PLAYER_MARKDOWN`，相对链接在 stage 阶段按同一套规则重写。
+ */
+export const PLAYER_WORKSHOP_README = 'workshop/README.md';
 /** Written into the stage, never taken from the checkout: the pack index of the shipped packs. */
 export const GENERATED_PACK_INDEX = 'packs/index.json';
 /** Whether shipped files include a content pack (then the stage gets GENERATED_PACK_INDEX). @param {string[]} files */
@@ -105,7 +145,7 @@ const NOT_TRACKED_SHIP = ['public/dev/', 'public/assets/', 'public/fonts/', 'pub
 /** The npm scripts a player runs: each `node <file>` of them must ship. */
 export const PLAYER_NPM_SCRIPTS = ['start', 'setup', 'doctor', 'launch', 'postinstall', 'vendor', 'assets'];
 /** Markdown copied into the zip. Relative links to anything else are rewritten at stage time. */
-export const PLAYER_MARKDOWN = [...ROOT_FILES, ...PLAYER_DOCS].filter((f) => f.endsWith('.md'));
+export const PLAYER_MARKDOWN = [...ROOT_FILES, ...PLAYER_DOCS, ...PLAYER_WORKSHOP_DOCS, ...PLAYER_WORKSHOP_REFS, PLAYER_WORKSHOP_README].filter((f) => f.endsWith('.md'));
 /** Where a packaged doc link points when the file itself is not in the zip. */
 export const GITHUB_REPO = 'https://github.com/sganggs/Stronghold-Protocol';
 
@@ -164,7 +204,10 @@ export function isPlayerFile(rel) {
   if (!p || isRefused(p) || isJunk(p) || p === 'data/local-assets.json' || p === GENERATED_PACK_INDEX) return false;
   if (NOT_TRACKED_SHIP.some((d) => p.startsWith(d))) return false;
   if (RUNTIME_DIRS.some((d) => p.startsWith(d)) || PLAYER_TOOL_DIRS.some((d) => p.startsWith(d))) return true;
-  return ROOT_FILES.includes(p) || PLAYER_DOCS.includes(p) || RUNTIME_RESEARCH.includes(p) || PLAYER_SCRIPTS.includes(p) || PLAYER_TOOLS.includes(p);
+  if (PLAYER_DOC_DIRS.some((d) => p.startsWith(d)) && !EXAMPLE_PACK_DIRS.some((d) => p.startsWith(d))) return true;
+  return ROOT_FILES.includes(p) || PLAYER_DOCS.includes(p) || PLAYER_WORKSHOP_DOCS.includes(p)
+    || PLAYER_WORKSHOP_REFS.includes(p) || p === PLAYER_WORKSHOP_README
+    || RUNTIME_RESEARCH.includes(p) || PLAYER_SCRIPTS.includes(p) || PLAYER_TOOLS.includes(p);
 }
 
 /**

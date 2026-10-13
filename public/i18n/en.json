@@ -1337,5 +1337,6 @@
   "本房间人数上限": "Player seats in this room",
   "服务器允许最多 {max} 人；本同盟开 {value} 张座位卡": "This server allows up to {max} players; this Alliance opens {value} seats",
   "不能小于同盟内现有人数（含 AI 队友）": "Cannot be lower than the players already in this Alliance (AI teammates included)",
-  "新的人数上限不能小于同盟内现有人数（含 AI 队友）": "The new seat limit cannot be lower than the players already in this Alliance (AI teammates included)"
+  "新的人数上限不能小于同盟内现有人数（含 AI 队友）": "The new seat limit cannot be lower than the players already in this Alliance (AI teammates included)",
+  "{0} → 阶 {1}": "{0} → tier {1}"
 }

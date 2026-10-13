@@ -1,5 +1,11 @@
 # workshop/ — 创意工坊包目录
 
+> **第一次做包的人请先看 [`../docs/START-HERE.md`](../docs/START-HERE.md)**（四步做一个包：复制模板 → 改三处 →
+> 导出 → 上传）。里面第 1 步要复制的模板包就在 [`../docs/my-first-pack/`](../docs/my-first-pack)。
+> 报错看不懂就查 [`../docs/errors.md`](../docs/errors.md)；想改立绘 / 加干员分别见
+> [`../docs/task-01-换个立绘.md`](../docs/task-01-换个立绘.md) 与 [`../docs/task-02-加个干员.md`](../docs/task-02-加个干员.md)。
+> 这一页讲的是**目录约定**，不是教程。
+
 把工坊包放在这个目录下（一个包一个子目录），服务器启动时会自动加载：
 
 ```

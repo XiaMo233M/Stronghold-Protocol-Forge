@@ -69,6 +69,10 @@ import { WORKSHOP_ASSET_TYPES } from '../server/index.js';
 import { normalizePackManifest, WORKSHOP_MEDIA_PREFIX, WORKSHOP_CONTENT_FILES, workshopPlaytestIndex } from '../shared/workshop.js';
 import { VOICE_SLOTS, DIFFICULTIES, VOICE_LANGS, DEFAULT_VOICE_LANG } from '../shared/constants.js';
 import { withForgeMeta, stampForgeHeader, parseForgeHeader } from '../shared/forgeNotice.js';
+// 「校验这个包」（B1，2026-10-13）：判据本体在 shared/workshopValidate.mjs，**与 tools/workshop-validate.mjs
+// 同一个函数** —— 所以界面给绿、命令行给红这种漂移结构上不会发生。`kindOfCode` 把逐记录那批问题（它们只带码，
+// 没有 kind 字段）分到正确的层，界面才分得清「干员记录的问题」与「装备的问题」。
+import { validateWorkshop, kindOfCode } from '../shared/workshopValidate.mjs';
 import {
   HOOK_EVENTS, KIT_FORBIDDEN_GLOBALS, validateKit, kitErrors, hookNamesInSource,
 } from '../shared/kitAuthoring.js';
@@ -2414,6 +2418,64 @@ export async function createEditorServer(opts = {}) {
         // `overrides` 的候选（官方每张表的 id + 名字）与每个包的元数据状态
         overrideCandidates: overrideCandidates(officialTables),
         meta,
+      });
+    }
+
+    // ---- 「校验这个包」（B1，2026-10-13）-------------------------------------------------------------------------
+    //
+    // 缺口：这一页原来只有 `加载器接受` / `已被拒绝` 两个徽标（**结论**），没有任何「按一下给我结论」的动作，
+    // 而引擎最强的一层检查（第 3 层「真引擎装载」：记录有没有真的并进合并数据、能不能建出棋子 def、
+    // 精锐链接对不对）只活在 `tools/workshop-validate.mjs` 里。
+    //
+    // 判据**不复制第二份**：直接调 `shared/workshopValidate.mjs` 的 `validateWorkshop`（CLI 用的同一个函数）。
+    // 为什么搬进 shared/：CLI 是维护者工具，`tools/package.mjs` 的 PLAYER_TOOLS 不收它 —— 玩家包里没有那个
+    // 文件，编辑器 import 它会当场崩。shared/ 是编辑器与游戏共用、且随包发出的一层。
+    //
+    // ⚠ **只读**：`validateWorkshop` 只 load / 只读文件，不写任何东西（没有 `fs.write*`、没有写盘分支）。
+    // 它也只认 GET；`PACK_ID_RE` 挡住 `../` 这类路径穿越（id 会被拼进 `<root>/<id>/pack.json`）。
+    if (p.startsWith('/api/packs/') && p.endsWith('/validate') && method === 'GET') {
+      const packId = p.slice('/api/packs/'.length, -'/validate'.length);
+      if (!PACK_ID_RE.test(packId)) throw refuse(400, '工坊包 id 不合法（只能是字母、数字、下划线和短横线）');
+      if (!fs.existsSync(path.join(root, packId, 'pack.json'))) throw refuse(404, `工坊包 "${packId}" 不存在（没有可读的 pack.json）`);
+      const report = await validateWorkshop({ root, only: packId, log: quietLog });
+      // 装载结论：与 `/api/packs/support` 同一份判据（`loadWorkshop` 的 errors / foreign / packs）。
+      const loadedAgain = loadWorkshop(root, { log: quietLog });
+      const err = (loadedAgain.errors ?? []).find((e) => e.pack === packId) ?? null;
+      const foreign = (loadedAgain.foreign ?? []).find((f) => f.pack === packId) ?? null;
+      const present = (loadedAgain.packs ?? []).some((x) => x.id === packId);
+      const row = report.packs.find((x) => x.pack === packId) ?? null;
+      /** 一条问题 → 界面要的那一格（`kind` 是展示分组，`message` / `hint` 是引擎原文，界面再翻人话）。 */
+      const asCheck = (i, fallbackKind) => ({
+        kind: i.kind ?? fallbackKind,
+        field: i.field ?? '',
+        code: i.code ?? '',
+        severity: i.severity ?? 'error',
+        // 装机期那条带 `detail`（拆掉 `CODE:` 前缀之后的原文）；没有就用整句 `message`。
+        message: i.detail ?? i.message ?? '',
+        hint: i.hint ?? '',
+      });
+      const checks = [
+        // 逐记录 + 路由 + 外观素材 + 装备图标（`packs[].issues`；`kind` 已由装载阶段标好，兜底再推一次）
+        ...((row?.issues ?? []).map((i) => asCheck(i, kindOfCode(i.code, i)))),
+        // 第 3 层真引擎（只留这一个包的）
+        ...(report.engine ?? []).filter((i) => i.pack === packId).map((i) => asCheck(i, 'engine')),
+        // 其余各层（自带 kind；**按包过滤** —— `only` 只筛 `packs[]`，不过滤这两个数组）
+        ...(report.checks ?? []).filter((i) => i.pack === packId).map((i) => asCheck(i, i.kind)),
+      ].map((c, n) => ({ ...c, n }));
+      return sendJson(res, 200, {
+        ok: true,
+        pack: packId,
+        // `loaded` / `foreign` / `refused`：与这一页的徽标同一套口径
+        status: err ? 'refused' : foreign ? 'foreign' : present ? 'loaded' : 'absent',
+        reason: err?.reason ?? foreign?.reason ?? null,
+        checkedAt: Date.now(),
+        // 总数从**这一个包**的 checks 现算：`report.errorCount` 是整根的账，按包查询时不能拿它冒充
+        // （否则界面上会出现「10 处问题」而下面只列出 3 条 —— 那比不报还糟）。
+        errors: checks.filter((c) => c.severity === 'error').length,
+        warnings: checks.filter((c) => c.severity !== 'error').length,
+        checks,
+        // 只读这句话随回话一起给：界面把它显示在结果面板下方，作者不必怀疑「按一下会不会改我的文件」。
+        readOnly: true,
       });
     }
 

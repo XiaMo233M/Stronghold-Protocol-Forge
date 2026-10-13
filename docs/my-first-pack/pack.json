@@ -1,0 +1,16 @@
+{
+  "id": "my-first-pack",
+  "name": "我的第一个包",
+  "version": "1.0.0",
+  "author": "你的名字",
+  "license": "CC-BY-4.0",
+  "description": "把官方干员凯尔希（char_003_kalts）的立绘换成我自己画的一张图。",
+  "api": ">=1 <2",
+  "art": {
+    "chars": {
+      "char_003_kalts": {
+        "portrait": "portrait.png"
+      }
+    }
+  }
+}

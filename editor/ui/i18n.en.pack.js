@@ -50,7 +50,6 @@ export const EN_PACK = Object.freeze({
   '添加': 'Add',
   '候选只是提示，不是白名单：可以直接手输任何 `<文件>:<id>`（官方没有的 id 也能声明，只是不会生效）。': 'The candidates are hints, not a whitelist: you may type any `<file>:<id>` by hand (an id the official data lacks can be declared too — it just does nothing).',
   '✔ 加载器接受这个包（格式与 content 声明都对得上）。改完要重启游戏服务器才会生效。': '✔ The loader accepts this pack (its format and content declaration agree). Restart the game server for changes to take effect.',
-  '✘ 加载器不会使用这个包：{0}': '✘ The loader will not use this pack: {0}',
   '本引擎不装载它：{0}': 'This engine does not load it: {0}',
   '⚠ 本引擎不装载这个包：{0}。它不是错误 —— pack.json 是合法的，只是这一份清单是给另一个宿主的。': '⚠ This engine does not load this pack: {0}. It is not an error — pack.json is valid; this manifest is simply meant for another host.',
   '商店售价': 'Shop price',
@@ -93,13 +92,11 @@ export const EN_PACK = Object.freeze({
   '导出一个包': 'Export a pack',
   '下载 <包id>.zip：pack.json 与包内所有文件（含 assets/ 整个目录）都在 zip 根，所以这个 zip 就是这个包。条目按名字排序、时间戳固定，同样的内容永远得到同样的字节。': 'Downloads <pack id>.zip: pack.json and every file of the pack (the whole assets/ directory included) sit at the zip root, so the zip is the pack. Entries are sorted by name with fixed timestamps, so the same content always gives the same bytes.',
   '导出中…': 'Exporting…',
-  '导出 {0}.zip': 'Export {0}.zip',
   '（先选一个包）': '(pick a pack first)',
   '命令行等价：node tools/workshop-pack.mjs export <包id>': 'CLI equivalent: node tools/workshop-pack.mjs export <pack id>',
 
   // ---- 右栏：导入 ----
   '导入一个包': 'Import a pack',
-  '覆盖同名包（--force）': 'Overwrite a pack of the same name (--force)',
   '导入中…': 'Importing…',
   '导入这个 .zip': 'Import this .zip',
   '.zip 文件': '.zip file',
@@ -191,4 +188,60 @@ export const EN_PACK = Object.freeze({
     'What enters is the **draft roster** tab (four operators picked in the room), not the support pool — the two do not affect each other. Restart the game server for the change to take effect.',
   '已写入 {0} 的 operators：{1} 个{2}': 'Wrote the operators of {0}: {1} entr(ies){2}',
   '{0} 的 operators 没有变化，文件未被改写{1}': 'The operators of {0} are unchanged; the file was not rewritten{1}',
+
+  // ---- 错误码白话表（errHints.zh.js，A5）与「校验这个包」（B1）----
+  // ⚠ 「修法」与「引擎原文」这两个标签**不在词典里**：它们只在 errHints.zh.js 内部用，
+  //   进了词典就会变成死键（源码里没有 `t('修法')` 这种字面量）⇒ test/editorI18n.test.js 的
+  //   「词典里每条带中文的键都还在源码里用着」立刻红。它们的英文写法就写在那两个常量的英文那一半里。
+  // ⚠ 这里**只放新键**：`加载器不会使用这个包…` / `✔ 加载器接受…` / `本引擎不装载…` / `；pack.json 本身：…`
+  //   那几条上面已经有了，重复一条 test/editorI18n.test.js 的「分片之间没有重复键」立刻就红。
+  '校验这个包': 'Validate this pack',
+  '校验中…': 'Validating…',
+  '用引擎自己装载一遍这个包，把结论翻成人话。只读，不写任何文件。': 'Loads this pack with the engine itself and turns the verdict into plain words. Read-only: it writes nothing.',
+  '✔ 这个包装得上：引擎校验通过。': '✔ This pack installs: the engine check passed.',
+  '⚠ 这个包装上了，但有 {0} 处问题（看下面每一条的修法）。': '⚠ This pack installs, but {0} thing(s) need attention (each one below says how to fix it).',
+  '{0} error(s), {1} warning(s)': '{0} error(s), {1} warning(s)',
+  '装载成功：这个包被引擎读进去了，包内记录也会并入实际数据。': 'Loaded: the engine read this pack in, and its records merge into the live data.',
+  '{0} 处问题（必须修）': '{0} problem(s) — must be fixed',
+  '导出投稿件 {0}.zip': 'Export submission file {0}.zip',
+  '覆盖机器上同名的包（危险：会先删掉 workshop/<包id>/ 里已有的那一份）':
+    'Overwrite the same-named pack on this machine (danger: the existing workshop/<pack id>/ is deleted first)',
+  '加载器不会使用这个包：{0}': 'The loader will not use this pack: {0}',
+  '⭐ 这个 zip 的形状就是站点要的：pack.json 直接躺在 zip 最外层（没有多余的一层文件夹），上传页直接可用，不要手工重压。本地安装则是另一条路：把它解压到 workshop/<包id>/。':
+    '⭐ This zip already has the shape the site wants: pack.json sits at the very root of the zip (no extra folder), so the upload page takes it as-is — do not re-zip it by hand. Installing locally is the other route: extract it into workshop/<pack id>/.',
+  '没有装载：{0}': 'Not loaded: {0}',
+  '这个包属于另一个宿主，本引擎认识它但不装载它（不是错误）。': 'This pack belongs to another host: this engine knows it and does not load it (that is not an error).',
+  '校验请求失败：{0}': 'The validation request failed: {0}',
+  '这条接口只读：只装载、只报告，不写任何文件、不改 pack.json。': 'This endpoint is read-only: it loads and reports; it writes no file and no pack.json.',
+  '引擎提示': 'Engine hint',
+  '必须修': 'Must fix',
+  '只需留意': 'Worth a look',
+  '{0} 处警告（不挡你，但去看一眼）': '{0} warning(s) — they do not block you, but take a look',
+  '命令行等价：node tools/workshop-validate.mjs <工坊根>（同一份判据，同一个结论）。这一格只读，不写任何文件。':
+    'Command-line equivalent: node tools/workshop-validate.mjs <workshop root> (the same rules, the same verdict). This panel is read-only and writes nothing.',
+
+  // ---- 说明面板：入门入口（A1）----
+  '第一次做包？先看《五分钟上手》——四步：复制模板 → 改三处 → 导出 → 上传。':
+    'Making your first pack? Start with “Five minutes to your first pack” — four steps: copy the template → change three things → export → upload.',
+  '五分钟上手（START-HERE）': 'Five-minute start (START-HERE)',
+  '错误码白话表': 'Error codes in plain words',
+  '换个立绘': 'Swap a portrait',
+  '加个干员': 'Add an operator',
+  '包格式全解（WORKSHOP.md）': 'The full pack format (WORKSHOP.md)',
+  '这些文档就在本机的 app/docs/ 下（编辑器通过 /docs/ 只读地发出来，不联网）。它们与源码仓库的入门层同源。':
+    'These documents live under app/docs/ on this machine (the editor serves /docs/ read-only, with no network access). They are the same files as the beginner layer in the source repository.',
+
+  // ---- 校验结果里那几格 kind 的名字（展示层；服务端给的是 kind 键）----
+  '包本身': 'The pack itself',
+  '真引擎装载': 'Real engine load',
+  '干员记录': 'Operator records',
+  '外观素材': 'Appearance assets',
+  '语音': 'Voice',
+  '装备图标': 'Item icons',
+  '行为层 kit': 'Behaviour kits',
+  '怪物': 'Monsters',
+  '出怪': 'Spawns',
+  '装备': 'Equipment',
+  '静态路由': 'Static routes',
+  '助战声明': 'Support declarations',
 });

@@ -71,7 +71,10 @@ describe('routes 声明与核心先吃：校验器与服务器同判据（DESIGN
   });
 
   test('判据只此一处：校验器不养第二份保留名单（源码级断言）', () => {
-    const src = fs.readFileSync(path.join(ROOT, 'tools', 'workshop-validate.mjs'), 'utf8');
+    // 2026-10-13：判据本体从 tools/workshop-validate.mjs 搬到了 shared/workshopValidate.mjs
+    // （CLI 是维护者工具、不随玩家包发出，而编辑器界面的「校验这个包」必须用同一份判据）。
+    // 这条断言跟到判据**现在所在**的那个文件上 —— 它钉的是「不另抄一张保留前缀表」，不是某个文件名。
+    const src = fs.readFileSync(path.join(ROOT, 'shared', 'workshopValidate.mjs'), 'utf8');
     assert.match(src, /from '\.\.\/server\/http\/routeMount\.js'/, '必须 import 服务器那一份 coreRouteShadow');
     assert.doesNotMatch(src, /const RESERVED[A-Z_]* = \[/, '不许在校验器里另抄一张保留前缀表');
   });
