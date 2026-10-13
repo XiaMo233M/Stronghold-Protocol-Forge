@@ -15,6 +15,8 @@ import { ResumeMatchButton } from '../ui/resumeMatch.js';
 import { useEffect, useRef, useState } from '../../vendor/hooks.module.js';
 import { DIFFICULTIES, DIFFICULTY_NAMES, DIFFICULTY_COLORS, ROOM_CODE_LEN, MAX_SEATS, MIN_SEATS, MAX_SPECTATORS, modeIdFor, clampSeats, ERR } from '../../../shared/constants.js';
 import { html, Button, Icon, MicroLabel, Panel, TextField, PingPill, AvatarFrame, Tooltip, Spinner, DifficultyIcon, doctorNo } from '../ui/components.js';
+import { Modal } from '../ui/components.js';
+import { useHubBackdrop, HubBackdrop, HubRadar, BackdropSettings, BackdropGlyph, backdropTheme } from '../ui/hubBackdrop.js';
 import { toast, toastError } from '../ui/toasts.js';
 import { GuideButton } from '../ui/guide.js';
 import { openStats } from './stats.js';
@@ -444,6 +446,10 @@ export function LobbyScreen() {
   const [recent] = useState(recentRooms);
   // S.W.E.E.P.报告浮层是否打开 (screens/sweep.js); 只在本地, 不落 pref —— 它是一次查看, 不是设置。
   const [sweepOpen, setSweepOpen] = useState(false);
+  // 大厅背景 (ui/hubBackdrop.js): pref + 自定义图片的 object URL + 设置对话框的动作; bgOpen 是「大厅背景」对话框的开关。
+  // 这一层是纯新增的装饰层, 大厅的既有结构、五件独有功能与 mod 面一行都不碰。
+  const bg = useHubBackdrop();
+  const [bgOpen, setBgOpen] = useState(false);
   const alive = useRef(true);
   const inFlight = useRef(false); // synchronous guard against double clicks (state updates are async)
   useEffect(() => () => { alive.current = false; }, []);
@@ -546,7 +552,8 @@ export function LobbyScreen() {
     store.set((s) => ({ session: { ...s.session, entered: false } }));
   };
 
-  return html`<div class="screen lobby-screen">
+  return html`<div class="screen lobby-screen" data-hub-theme=${backdropTheme(bg)}>
+    <${HubBackdrop} bg=${bg} />
     <header class="topbar">
       <div class="topbar__left">
         <${Button} variant="ghost" size="sm" icon="chevronLeft" onClick=${backToTitle} title=${t('返回标题')}>${t('返回')}<//>
@@ -556,10 +563,13 @@ export function LobbyScreen() {
           <${SettingsButton} class="lobby-settings" variant="secondary" square=${true} />
           <${GuideButton} class="lobby-guide" variant="secondary" square=${true} />
           <${SweepEntry} onClick=${() => setSweepOpen(true)} />
+          <${Button} variant="secondary" size="sm" square=${true} class="hub-bg-btn" onClick=${() => setBgOpen(true)}
+            title=${t('大厅背景')} aria-label=${t('大厅背景')}><${BackdropGlyph} /><//>
           <${PwaInstallButton} class="lobby-pwa" square=${true} />
         </div>
       </div>
       <div class="topbar__center">
+        <${HubRadar} bg=${bg} />
         <${MicroLabel} tone="mint">SIMULATION PROTOCOL SELECT<//>
         <h1 class="topbar__title">${t('选择模拟协议')}</h1>
       </div>
@@ -640,5 +650,8 @@ export function LobbyScreen() {
       </section>
     </div>
     ${sweepOpen ? html`<${SweepReport} onClose=${() => setSweepOpen(false)} />` : null}
+    <${Modal} open=${bgOpen} micro="LOBBY BACKDROP" title=${t('大厅背景')} onClose=${() => setBgOpen(false)}>
+      <${BackdropSettings} bg=${bg} />
+    <//>
   </div>`;
 }
