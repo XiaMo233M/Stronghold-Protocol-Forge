@@ -447,9 +447,9 @@ npm start          # 启动服务器：http://localhost:3000
 - **本机这一份实测**（`data/local-assets.json` 的 `groups` 与磁盘逐项对照，本工作树）：
   - `scene/` **磁盘 92 个文件**（11 个战场场景目录 + `tex/` 30）。⚠️ **清单与磁盘不是同一个口径**：`groups` 是**按组**列的（一个场景目录一组，组内**每个要发出去的文件一个条目**，列的是 `.webp` 那一份），所以**清单条目 57、磁盘文件 92** —— 差的就是原提取物里同名的那一份 `.png`。实测 `scene/act1autochess_m01/`：磁盘 6 个文件（`scene.bin` / `scene.json` / `lm0.png` / `lm0.webp` / `lm1.png` / `lm1.webp`），清单 4 条（`bin` / `scene` / `lm0.webp` / `lm1.webp`）。
   - `guide/` **19 张图**、png + webp 各一份 = **38 个文件**（4 张手册 + 9 张主页 + 6 张商店）。
-  - `spine/token/` **40 个召唤物模型**、每个 **3 个文件**（`.skel` / `.atlas` / `.png`）；仓库里提交的 `tools/assets/local-token-spines.json` 的 `models` 也是 **40 条**，与磁盘**一一对应**（实测无差集）。
+  - `spine/token/` **现状 40 个召唤物模型**、每个 **3 个文件**（`.skel` / `.atlas` / `.png`）；其中 **`token_10031_swire2_gdtrap` 是本轮随 0.2.6 完整包补入的第 40 个（补前 39）** —— 依据是第 1 批资源落地线的实测：相对 0.2.6 完整包，`public/assets/local` 共缺 **114 个文件**，其中一项就是本目录这 **3 个文件**（另两项是 `scene/` 92 与 `guide/` 19 个 webp）。本条可自核的部分：仓库里提交的 `tools/assets/local-token-spines.json` 的 `models` 是 **40 条**，与磁盘 **40 个目录一一对应**（实测无差集）。
   - `spine/enemy/` **2 个**（灼热 / 炽焰源石虫），`models` 同样 2 条。
-  - ⚠️ **待核**：本机另有一个**空目录** `public/assets/local/spine/token_10039_ulpia_block/`（0 个文件），而 `token_10039` **不在**那 40 个模型里 —— 「本轮补入缺的那 1 个模型」这件事**在仓库里核不到痕迹**（清单与磁盘都是 40），所以**没有**写进结论。
+  - ⚠️ **异常观察（待裁；本次没有动它）**：本机另有一个**空壳目录** `public/assets/local/spine/token_10039_ulpia_block/`（0 个文件），而 `token_10039` **不在**上面那 40 个模型里。**它是残留、不是本轮补入的那一个**（本轮补的是 `token_10031_swire2_gdtrap`）。按**零删除**口径，本次**没有动它**；要不要由维护者另裁。
 - **我们包里怎么带**：`npm run package` 打**完整包**时把 `public/assets/local/**` 与 `data/local-assets.json` 一起放进去（`docs/DEPLOY.md:410` 的「完整包再加上…」；`docs/DEPLOY.md:342` 记着实测：`v0.18.1-0.2.5` 完整包里 `app/public/assets/local/**` = 1611 个文件 / 70.3 MB）。**精简包与源码安装不带**；没有客户端的服务器要从**同一版本**的完整包复制这两处（版本必须一致，混用会缺图或用错图）。
 - **版权**：归上海鹰角网络 / Yostar，**不适用 GPL**，仅限非商业使用，**请勿单独再分发**。
 
