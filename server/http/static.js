@@ -54,9 +54,11 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import { MEDIA_PREFIX } from '../../shared/media.js';
+import { splitHashedPath } from '../../shared/assetPaths.js';
 import { ROOT, noopLog } from './config.js';
 import { sendError, sendJson } from './common.js';
-import { MIME, GzipCache, isNotModified, serveFile } from './files.js';
+import { MIME, CompressCache, isNotModified, serveFile, serveBuffer } from './files.js';
+import { ASSET_INDEX_ROOTS, hashedFileOpts } from './assetIndex.js';
 import { serveMedia } from './media.js';
 import { createPackRegistry } from '../packs.js';
 import { PACKS_URL, PACK_INDEX_FILE } from '../../shared/packs.js';
@@ -175,6 +177,9 @@ export function createStaticHandler({
   // `server/voiceCdn.js materializeVoiceCdn` 在装载期建好（已经按作者声明的 sha256 核对过）。空 Map = 没有包声明
   // 过 CDN 素材，assets 分支按原来的包内路径走，逐字不变。
   voiceCdn = null,
+  // 内容哈希（`server/http/assetIndex.js`）与它服务出来的清单（`server/http/assetViews.js`）：null = 没有索引
+  // （`assetIndex: false` / SP_ASSET_INDEX=0），两条 ~hash 路由与两条清单视图整块跳过，行为与从前逐字节相同。
+  assetIndex = null, views = null,
 }) {
   const registry = packs || createPackRegistry({ publicDir, dataDir, packsDir }, { log: /** @type {any} */ (log) });
   // 挂载表只此一处真相（routeMount.js coreMounts）：`workshopRoutesFor` 判「核心先吃」时读的是**同一份**目录表，
@@ -185,7 +190,7 @@ export function createStaticHandler({
   ));
   const shimBody = Buffer.from(DATA_SHIM_JS);
   const shimTag = `"shim-${shimBody.length.toString(16)}"`;
-  const gzipCache = new GzipCache();
+  const gzipCache = new CompressCache(); // brotli and gzip bodies (files.js)
 
   return async function serveStatic(req, res, rawPath, query) {
     let decoded;
@@ -194,6 +199,10 @@ export function createStaticHandler({
       sendError(req, res, 400, '请求地址无效 · Bad request');
       return;
     }
+    // /assets/~<hash>/x → /assets/x (the hash decides the cache policy below)
+    const hashed = splitHashedPath(decoded);
+    const urlHash = hashed.hash;
+    decoded = hashed.path;
     // 客户端 mod 本地缓存 (W-C): the catalogue and the pack-file route (server/http/mods.js). `serveMods` answers
     // synchronously, so an unrelated GET still falls through to the mounts below unchanged.
     if (modsJson && serveMods(req, res, decoded, query, modsJson)) return;
@@ -485,8 +494,16 @@ export function createStaticHandler({
     }
     // Extension-less audio (download-manager avoidance): /media/bgm/act1 → /assets/audio/bgm/act1.mp3
     if (decoded.startsWith(MEDIA_PREFIX)) {
-      await serveMedia(req, res, decoded.slice(MEDIA_PREFIX.length), query, publicDir, gzipCache, log);
+      await serveMedia(req, res, decoded.slice(MEDIA_PREFIX.length), query, publicDir, gzipCache, log, { urlHash, assetIndex });
       return;
+    }
+    // The served manifests: every art URL with its content hash (assetViews.js), once the index is ready
+    if (views && (decoded === '/data/assets.json' || decoded === '/data/local-assets.json')) {
+      const view = await views.get(decoded.slice('/data/'.length));
+      if (view) {
+        await serveBuffer(req, res, { body: view.body, hash: view.hash, type: MIME['.json'], cacheControl: 'no-cache', key: `view:${decoded}`, cache: gzipCache });
+        return;
+      }
     }
     // Bare mount paths (e.g. "/data") → treat as the mount directory.
     const mount = mounts.find((m) => decoded.startsWith(m.prefix) || decoded === m.prefix.slice(0, -1)) || mounts[mounts.length - 1];
@@ -545,6 +562,8 @@ export function createStaticHandler({
       }
       return;
     }
-    await serveFile(req, res, absPath, stat, mount.name, segments, query, gzipCache, log);
+    const indexed = mount.name === 'public' && segments.length > 1 && ASSET_INDEX_ROOTS.includes(segments[0]);
+    const opts = indexed ? hashedFileOpts(assetIndex, segments.join('/'), stat, urlHash) : (urlHash ? { cacheControl: 'no-cache' } : {});
+    await serveFile(req, res, absPath, stat, mount.name, segments, query, gzipCache, log, opts);
   };
 }

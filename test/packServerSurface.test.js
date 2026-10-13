@@ -184,10 +184,15 @@ describe('§28.32 动态只读端点：命名空间、保留路径、缓存策�
 
 // ---------------------------------------------------------------------------------------------------------------
 describe('§28.30 transport：声明式配置 → 生效值', () => {
-  test('没有声明 ⇒ 关；多包声明按包 id 小的赢；生效值如实报', () => {
+  // 0.2.6 进场（上游 WS_DEFLATE）：**缺省改了** —— 从前「没有声明 ⇒ perMessageDeflate: false」，现在是引擎自己的
+  // WS_DEFLATE（1 KB 起、2 KB 窗口、不保留上下文）。包声明仍然是唯一的声明式入口，只是没人声明时引擎自己开。
+  test('没有声明 ⇒ 引擎的 WS_DEFLATE；多包声明按包 id 小的赢；生效值如实报', () => {
     const off = transportPolicy(new Map(), { log: quiet });
-    assert.equal(off.perMessageDeflate, false);
-    assert.deepEqual(off.transport, { deflate: false, params: null, maxPayload: WS_MAX_PAYLOAD, threshold: null });
+    assert.equal(off.perMessageDeflate.threshold, 1024);
+    assert.equal(off.perMessageDeflate.serverNoContextTakeover, true);
+    assert.equal(off.perMessageDeflate.serverMaxWindowBits, 11);
+    assert.equal(off.perMessageDeflate.zlibDeflateOptions.memLevel, 7);
+    assert.deepEqual(off.transport, { deflate: true, params: null, maxPayload: WS_MAX_PAYLOAD, threshold: 1024 });
 
     const said = [];
     const b = new Map([['b-pack', { deflate: true }], ['a-pack', { deflate: true, threshold: 512, level: 6 }]]);

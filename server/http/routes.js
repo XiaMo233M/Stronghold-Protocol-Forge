@@ -67,6 +67,7 @@ import { setSecurityHeaders, sendError, sendJson, splitUrl } from './common.js';
 import { MODS_CATALOG_URL } from './mods.js';
 import { VIEW } from '../matchRecords.js';
 import { TokenBucket } from '../net.js';
+import { clientAddress, isLocalIp } from '../net.js';
 import { validateHttpLanes, resolveHttpLane } from './httpLanes.js';
 
 const MAX_URL_LENGTH = 4096;
@@ -105,10 +106,17 @@ export const PUBLIC_ROOMS_URL = '/api/rooms';
  * 内存 / 循环延迟 / 归档标签这类实时值）或一个现成的对象。返回空对象时**不加这个键** —— 干净安装的 `/healthz`
  * 与从前逐字节相同。**包的摘要**已经在 `lobby.stats()` 里（`mods` / `modPacks`，DESIGN §28.9 第 2 项），所以这里
  * 不重复放一份。
+ *
+ * `withTraffic`（`?traffic=1`，只对 loopback / 内网客户端）加上流量计数与内容哈希索引的状态（traffic.js /
+ * assetIndex.js / assetViews.js）。
  * @param {{ startedAt: number, network: import('../net.js').Network, registry: import('../net.js').SessionRegistry,
- *           lobby: import('../lobby.js').Lobby, modHealth?: (() => Record<string, any>)|null }} health
+ *           lobby: import('../lobby.js').Lobby, modHealth?: (() => Record<string, any>)|null,
+ *           traffic?: ReturnType<typeof import('./traffic.js').createTrafficCounter>,
+ *           assetIndex?: ReturnType<typeof import('./assetIndex.js').createAssetIndex> | null,
+ *           views?: ReturnType<typeof import('./assetViews.js').createManifestViews> | null }} health
+ * @param {boolean} [withTraffic]
  */
-export function healthReport({ startedAt, network, registry, lobby, modHealth = null }) {
+export function healthReport({ startedAt, network, registry, lobby, modHealth = null, traffic, assetIndex, views }, withTraffic = false) {
   /** @type {Record<string, any>} */
   const out = {
     ok: true, version: PROTOCOL_VERSION, app: APP_VERSION, uptimeSec: Math.round((Date.now() - startedAt) / 1000),
@@ -124,8 +132,14 @@ export function healthReport({ startedAt, network, registry, lobby, modHealth = 
     fields = null; // 一个包的 healthz 回调炸了不该让运维拿不到 /healthz
   }
   if (fields && typeof fields === 'object' && Object.keys(fields).length) out.modHealth = fields;
+  if (withTraffic && traffic) out.traffic = traffic.snapshot();
+  // content-hashed asset URLs (assetIndex.js / assetViews.js): off, building, or ready with how many files and URLs
+  if (withTraffic) out.assetHashes = assetIndex ? { ...assetIndex.stats(), views: views ? views.stats() : null } : null;
   return out;
 }
+
+/** Does the query ask for the traffic counters (`traffic`, `traffic=1`, `traffic=true`)? */
+const wantsTraffic = (query) => /(?:^|&)traffic(?:=(?:1|true|yes))?(?:&|$)/i.test(query || '');
 
 /**
  * The request listener for `http.createServer`.
@@ -135,10 +149,12 @@ export function healthReport({ startedAt, network, registry, lobby, modHealth = 
  *           records?: import('../matchRecords.js').MatchRecords|null,
  *           accounts?: import('../accounts.js').AccountStore|null,
  *           modsCatalog?: (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => boolean,
- *           httpLanes?: readonly import('./httpLanes.js').HttpLane[], publicDir?: string }} deps
+ *           httpLanes?: readonly import('./httpLanes.js').HttpLane[], publicDir?: string,
+ *           trustProxy?: 'auto' | boolean }} deps
+ *   trustProxy: whose forwarding headers name the client (net.js clientAddress; the server's TRUST_PROXY)
  * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => void}
  */
-export function createRequestHandler({ serveStatic, health, log, records = null, accounts = null, modsCatalog, httpLanes, publicDir }) {
+export function createRequestHandler({ serveStatic, health, log, records = null, accounts = null, modsCatalog, httpLanes, publicDir, trustProxy = 'auto' }) {
   /** @type {Map<string, TokenBucket>} 客户端地址 → 只读战绩路由的桶（见文件头那条「已知边界」） */
   const recordBuckets = new Map();
 
@@ -228,7 +244,8 @@ export function createRequestHandler({ serveStatic, health, log, records = null,
       return;
     }
     if (parts.rawPath === '/healthz') {
-      sendJson(req, res, 200, healthReport(health));
+      const withTraffic = wantsTraffic(parts.query) && isLocalIp(clientAddress(req, trustProxy).ip);
+      sendJson(req, res, 200, healthReport(health, withTraffic));
       return;
     }
     await serveStatic(req, res, parts.rawPath, parts.query);
@@ -236,6 +253,8 @@ export function createRequestHandler({ serveStatic, health, log, records = null,
 
   return (req, res) => {
     setSecurityHeaders(res);
+    // 每一条回答的体字节都进流量计数（traffic.js），在**写出任何东西之前**接上 —— 与上游同一条纪律。
+    if (health.traffic) health.traffic.meter(res, splitUrl(req.url || '/')?.rawPath || '/');
     handleRequest(req, res).catch((e) => {
       log.error('[http] request failed', e);
       sendError(req, res, 500, '服务器内部错误 · Internal error');
