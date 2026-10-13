@@ -1995,6 +1995,53 @@ pack is refused. The two tests that pin the ctx key set (`test/modClientPanels.t
 Tests: `test/modClientPanels.test.js` — the ctx surface, the frozen-snapshot rule, and the three room states (not in a
 room / seated / spectating), plus "a later store change is visible through the same ctx".
 
+### 28.23 `server.modules[].channels`: the declaration surface of a pack channel (declaration landed)
+
+**The asymmetry this closes.** §1.9.6 gave a pack a channel of its own (`client.panels[].messages` → `pack.msg`): the
+engine fixes the wire type, the pack names the channel, the server validates, rate-limits and relays it. The receiving
+half of that feature is the **match**, and `matchClass` is the only mount point this layer ever granted the power to
+touch one (§28.14) — the hook `handlePackMsg(playerId, msg)` is that inlet. What was missing is not the inlet but the
+**declaration**: nothing in `pack.json` said *which* channels a module receives in a match, so the only statement
+available was the module's whole `matchClass` mount.
+
+**The declaration.** `channels` is an optional `server.modules[]` field:
+
+```jsonc
+"server": { "modules": [ { "id": "xie", "entry": "server/ops.js",
+  "uses": ["matchClass"], "channels": ["borrow", "answer"] } ] }
+```
+
+Four rules, each one a rule this layer already states elsewhere:
+
+1. **One name shape, both halves.** The names use `PACK_CHANNEL_RE` (`shared/workshop.js`) — the *same* regex
+   `client.panels[].messages` uses. Two spellings of "a channel name" would let a pack declare a channel it can never
+   send or one it can never receive; that is exactly the "declared but cannot happen" shape this layer refuses.
+2. **Every name must be reachable.** Each name must also be declared by one of the pack's own panels
+   (`MODULES_UNKNOWN_CHANNEL`, refused as a whole pack). Lobby's `packChannels` whitelist is *derived from the panel
+   list*, so a channel no panel declares could never be sent — storing it would be storing a declaration that cannot
+   occur.
+3. **Channels need a receiver.** A module that declares `channels` must also declare the `matchClass` mount point
+   (`MODULES_CHANNELS_NEED_MATCH`), because the match is what receives them. `matchClass` already requires
+   `combat: true` (`MODULES_NEED_COMBAT`), so the "this can change a result" gate is the existing one, not a new one.
+   Bounded like its panel half: at most 8 (`MODULES_TOO_MANY_CHANNELS`), no duplicates
+   (`MODULES_DUPLICATE_CHANNEL`), non-empty when present (`MODULES_BAD_CHANNELS` — drop the key instead of writing
+   `[]`).
+4. **Undeclared ⇒ byte-for-byte unchanged.** `channels` enters the normalized manifest **only when declared**, and is
+   sorted, so two spellings are one pack (§28.2's hash rule: an undeclared key must not move a pack's identity). The
+   module's bytes were already in the digest.
+
+**What landed here, and what did not.** This cut is the **declaration surface**: the shape layer
+(`shared/workshop.js`), the loader carrying the declared set out (`server/modModules.js`), the surface ledger
+(`shared/modSurface.js`) and `test/modMatchChannels.test.mjs`. The **delivery** path is unchanged — it is §28.14's:
+a pack whose module declares `matchClass` has its subclass's `handlePackMsg(playerId, msg)` called once after the
+rate limit and before the relay, and `test/packMatchMsg.test.js` pins that. Narrowing delivery to "only the declared
+channels" (so that an undeclared pack receives nothing) is a separate cut: it changes what that existing test pins,
+so it does not ride along with the declaration. Nothing here changes the relay, the rate bucket, the wire type or
+`welcome`; `MOD_API_VERSION` does not move (an added optional field, §28.39 / §28.43 precedent).
+
+Tests: `test/modMatchChannels.test.mjs` — the shared name regex, the five named refusals, the sorted
+"only-when-declared" manifest rule, and the loader carrying `channels` out while a module without it grows no key.
+
 ### 28.24 ctx.net.status(): the connection reading a panel cannot take itself
 
 A panel can see a room and its own identity (§28.22), but it could not answer **「这条连接现在怎么样」**. That reading

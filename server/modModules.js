@@ -378,7 +378,10 @@ export async function loadServerModules(loaded, { log = noopLog, stateRoot = nul
         continue;
       }
       mounted.uses = mod.uses;
-      modules.push({ pack: pack.id, id: mod.id, entry: mod.entry, hash: pack.hash || '', dir: pack.dir, uses: mod.uses, write: mod.write, mounted });
+      // 接收通道（`server.modules[].channels`，DESIGN §28.23）：装载结果把它带出来 —— 它是**声明面**的一部分，
+      // 归一化清单里已经进过身份哈希，这里让装载结果与那份清单同形（没声明的模块照样不长这个键）。
+      const channels = Array.isArray(mod.channels) ? [...mod.channels] : [];
+      modules.push({ pack: pack.id, id: mod.id, entry: mod.entry, hash: pack.hash || '', dir: pack.dir, uses: mod.uses, write: mod.write, ...(channels.length ? { channels } : {}), mounted });
     }
   }
   return { modules, errors };

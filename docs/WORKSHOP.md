@@ -1520,6 +1520,20 @@ export function registerServer(host) {
 `MatchClass` 包装器原则上能改对局结果，而「要改结果的必须进房间摘要闸门与 golden 那条线」是业主裁决。只挂
 `boot` / `shutdown` / `healthz` 的模块碰不到对局，不需要它。
 
+**接收通道**（`"channels": ["borrow", …]`，DESIGN §28.23）：声明这个模块在对局里**接收**哪些包通道 —— 玩家从
+包自己的面板（§1.9.6 的 `client.panels[].messages` + `pack.msg`）发出来的消息，在**转发之前**投给本房间进行中的
+对局（`Match.handlePackMsg(playerId, { pack, channel, from, seat, data })`；`from` / `seat` 由平台从会话与座位
+解析，载荷里自称的身份不作数）。四条判据：每条通道名必须与面板那半边**共用同一份名字形状**
+（`PACK_CHANNEL_RE`）并**同时**被本包某个面板声明（否则没人发得出来，`MODULES_UNKNOWN_CHANNEL`）；最多 8 条
+（`MODULES_TOO_MANY_CHANNELS`）；不许重复（`MODULES_DUPLICATE_CHANNEL`）；模块必须挂 `matchClass`（否则没有
+接收人，`MODULES_CHANNELS_NEED_MATCH` ⇒ 整包仍须 `combat: true`）。**声明是可选的**：没写 `channels` 的模块在
+归一化清单里不长这个键，包身份逐字节不变（DESIGN §28.2 的老账）。
+
+**这一格只做声明面**：装载结果把 `channels` 带出来（`server/modModules.js`），而 `pack.msg` 的投递路径今天仍是
+§28.14 那一条 —— `uses` 含 `matchClass` 的包，其子类的 `handlePackMsg(playerId, msg)` 在限流之后、转发之前被调到
+一次（`test/packMatchMsg.test.js` 钉住它）。把投递**收窄**成「声明过的通道才投」是另一刀（PR#2 的另一半），它要
+一起改那份既有断言，所以没有随这一格落地。
+
 **`healthz` 的回执有界**：扁平对象、值只能是字符串/数字/布尔/`null`、最多 12 个字段 / 2KB；嵌套或超限的那一条被
 **点名跳过**（其余字段照旧报到）。端点是给运维看的，不是数据通道。
 
@@ -1536,7 +1550,9 @@ export function registerServer(host) {
 
 **写错的拒绝码**：`MODULES_BAD_SHAPE` / `MODULES_UNKNOWN_FIELD` / `MODULES_BAD_ID` / `MODULES_DUPLICATE_ID` /
 `MODULES_BAD_ENTRY` / `MODULES_BAD_USES` / `MODULES_DUPLICATE_USE` / `MODULES_BAD_WRITE` / `MODULES_TOO_MANY` /
-`MODULES_NEED_COMBAT`（以上在形状层）；装载期与运行期另有 `MODULES_NO_REGISTER` / `MODULES_IMPORT_FAILED` /
+`MODULES_NEED_COMBAT` / `MODULES_BAD_CHANNELS` / `MODULES_BAD_CHANNEL` / `MODULES_DUPLICATE_CHANNEL` /
+`MODULES_TOO_MANY_CHANNELS` / `MODULES_CHANNELS_NEED_MATCH` / `MODULES_UNKNOWN_CHANNEL`（以上在形状层）；
+装载期与运行期另有 `MODULES_NO_REGISTER` / `MODULES_IMPORT_FAILED` /
 `MODULE_USE_UNDECLARED` / `MODULE_IO_BAD_PATH` / `MODULE_BAD_HOOK`。
 
 ### 1.13 `notices`：公告与鸣谢（已实现，服务端 + 声明）

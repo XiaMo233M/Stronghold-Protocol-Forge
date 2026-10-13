@@ -180,8 +180,12 @@ export const MOD_SURFACE = Object.freeze([
   {
     id: 'server.modules',
     layer: 'B',
-    decl: 'pack.json.server.modules = { module, uses[] }',
-    anchors: [{ symbol: 'SERVER_MEMBERS', members: ['modules'] }, { symbol: 'SERVER_MODULE_USES' }],
+    decl: 'pack.json.server.modules = { module, uses[], channels? }',
+    anchors: [
+      { symbol: 'SERVER_MEMBERS', members: ['modules'] },
+      { symbol: 'SERVER_MODULE_USES' },
+      { symbol: 'MAX_SERVER_MODULE_CHANNELS' },
+    ],
     requires: [
       '只允许 uses 里那几个生命周期钩子（闭枚举；加一格不抬世代）',
       '源码过静态确定性扫描（无 process / require / eval）—— **这一条从 2026-10-11 起真的实现了**：' +
@@ -193,11 +197,15 @@ export const MOD_SURFACE = Object.freeze([
       // `handlePackMsg(playerId, msg)` 会在 `pack.msg` 限流之后、转发之前被调到一次；返回 `true` /
       // `{ consumed: true }` = 已消费（不再转发），其余返回值与抛错都按未消费继续转发。
       '`matchClass` 子类上的 `handlePackMsg(playerId, msg)` 是唯一一条由消息驱动的调用点（见 DESIGN §28.14）',
+      // 接收通道声明面（DESIGN §28.23）：`channels` 是**可选**的模块字段，但一旦声明就有四条硬判据 ——
+      // 名字与面板那半边**共用一份判据**（`PACK_CHANNEL_RE`）、每条还必须被本包某个面板的 `messages` 声明过
+      //（`MODULES_UNKNOWN_CHANNEL`，否则客户端根本发不出来），且该模块必须挂 `matchClass`（没有接收人就不许声明）。
+      '`channels`（接收通道，§28.23）的每个名字要同时被本包的 `client.panels[].messages` 声明过，且该模块必须挂 `matchClass` —— 投递进对局 = 改得了结果，所以整包仍须 `combat: true`；发送者身份由平台从会话与座位解析（客户端载荷里自称的 from / seat 不作数）',
       '`uses` 里含 `metrics` / `route` 的两格改不了对局（一个是只读标量快照，一个是只读 GET），所以都**不**要求 `combat: true`（§28.34 / §28.35）',
       '`healthz` 与 `onBoot` 的读数口径见 §28.37：`/healthz` 的 `ok` 恒 true、恒 200（「不 ok 时 503」做不到，如实写在那一节）',
     ],
     files: ['shared/workshop.js', 'server/modModules.js', 'server/hostMetrics.js', 'server/http/routeMount.js', 'server/lobby.js', 'shared/kitAuthoring.js'],
-    tests: ['test/packServerModules.test.js', 'test/packServerModulesWire.test.js', 'test/packMatchMsg.test.js', 'test/packServerSurface.test.js'],
+    tests: ['test/packServerModules.test.js', 'test/packServerModulesWire.test.js', 'test/packMatchMsg.test.js', 'test/packServerSurface.test.js', 'test/modMatchChannels.test.mjs'],
     spec: '§28.14',
   },
   {
