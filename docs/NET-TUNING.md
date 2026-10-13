@@ -37,8 +37,8 @@
 
 | 参数 | 我们的默认值 | 位置（文件:行） | 上游值 |
 | --- | --- | --- | --- |
-| WebSocket 单帧上限 `WS_MAX_PAYLOAD` | `64 * 1024` | `server/http/websocket.js:19`（用在 `:135`） | 同值（`v0.2.4:server/http/websocket.js`） |
-| `perMessageDeflate` | `false`（**可被 `pack.json.server.transport` 声明打开**，2026-10-11：`server/http/websocket.js:43-91` 的 `transportPolicy`） | `server/http/websocket.js:134-135` | 同值（上游没有这条声明通道） |
+| WebSocket 单帧上限 `WS_MAX_PAYLOAD` | `64 * 1024` | `server/http/websocket.js:24`（导出处；用在 `:228` 的 `WebSocketServer` 构造） | 同值（`v0.2.4:server/http/websocket.js`） |
+| `perMessageDeflate` | **开**（0.2.6 起引擎缺省 `WS_DEFLATE`：`threshold:1024` / `serverNoContextTakeover:true` / `serverMaxWindowBits:11` / memLevel 7；可被 `pack.json.server.transport` 声明改） | `server/http/websocket.js:45-50`（`WS_DEFLATE`）、`:93-144`（`transportPolicy`） | 上游 `v0.2.4` 是 `false`，且没有这条声明通道 |
 | 每连接令牌桶 `ratePerSec` / `rateBurst` | `40` / `40` | `server/net.js:50-51` | 同值 |
 | 重负载意图桶 `heavyPerSec` / `heavyBurst` | `2` / `6` | `server/net.js:61-62` | 同值 |
 | `HEAVY_TYPES`（额外吃重负载桶的意图） | `g.watch, g.publicFull, room.loadout, room.ownership, room.diy, room.spectate, room.queue` | `server/net.js:83`（集合；闸门在 `:652`） | 上游 `v0.2.4:server/net.js:70` 的 `HEAVY_TYPES` **少两个**：`room.queue`（野排匹配是我们加的，非本次优化）与 `g.publicFull`（**上游无此意图**，见 §2.1 `PUBLIC_FULL_ASK_MS`） |

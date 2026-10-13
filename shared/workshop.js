@@ -1005,7 +1005,7 @@ export const SERVER_MEMBERS = Object.freeze(['preDispatch', 'meta', 'modules', '
 /**
  * `pack.json.server.transport` —— **声明式的启动期传输配置**（DESIGN §28.30）。
  *
- * 为什么需要它：WebSocket 的 `perMessageDeflate` 今天写死在 `server/http/websocket.js:58`（`false`）。一个包
+ * 为什么需要它：WebSocket 的 `perMessageDeflate` **从前**写死在 `server/http/websocket.js`（`false`）；0.2.6 起引擎缺省**自己开着**（`WS_DEFLATE`，`server/http/websocket.js:45-50`），包依旧只能**声明**。一个包
  * （参考包 `ws-compression-reference`）能拿到的唯一办法是**手改引擎那一行** —— 正是这一层到处在消灭的东西。
  *
  * 为什么它**只是声明**、而不是「包注入服务端代码去改 wss」：
