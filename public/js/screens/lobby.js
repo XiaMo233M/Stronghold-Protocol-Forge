@@ -25,6 +25,7 @@ import { PwaInstallButton } from '../ui/device.js';
 import { LoadoutButton } from './loadout.js';
 import { DEFAULT_DIFFICULTY, parsePlaytestParam } from './lobbyLinks.js';
 import { SweepReport } from './sweep.js';
+import { ProtocolScene } from '../ui/protocolScene.js';
 import { SupportButton } from './support.js';
 import { net, identity } from '../net.js';
 import { store, useStore, shallowEqual, loadPref, savePref } from '../store.js';
@@ -572,6 +573,9 @@ export function LobbyScreen() {
         <${HubRadar} bg=${bg} />
         <${MicroLabel} tone="mint">SIMULATION PROTOCOL SELECT<//>
         <h1 class="topbar__title">${t('选择模拟协议')}</h1>
+        <section class="proto-stage hub-stage" style=${`--d-color:${DIFFICULTY_COLORS[difficulty]}`} aria-hidden="true">
+          <${ProtocolScene} key=${difficulty} difficulty=${difficulty} />
+        </section>
       </div>
       <div class="topbar__right">
         <${ResumeMatchButton} />
