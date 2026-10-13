@@ -1529,10 +1529,13 @@ export function registerServer(host) {
 接收人，`MODULES_CHANNELS_NEED_MATCH` ⇒ 整包仍须 `combat: true`）。**声明是可选的**：没写 `channels` 的模块在
 归一化清单里不长这个键，包身份逐字节不变（DESIGN §28.2 的老账）。
 
-**这一格只做声明面**：装载结果把 `channels` 带出来（`server/modModules.js`），而 `pack.msg` 的投递路径今天仍是
-§28.14 那一条 —— `uses` 含 `matchClass` 的包，其子类的 `handlePackMsg(playerId, msg)` 在限流之后、转发之前被调到
-一次（`test/packMatchMsg.test.js` 钉住它）。把投递**收窄**成「声明过的通道才投」是另一刀（PR#2 的另一半），它要
-一起改那份既有断言，所以没有随这一格落地。
+**投递已收窄到声明过的通道**：装载结果把 `channels` 带出来（`server/modModules.js`），`server/index.js` 再从**裁后**
+的服务端模块推出「包 → 接收通道集合」（`workshop.serverChannels`），大厅在 `pack.msg` 里查它 —— **本包的服务端模块
+声明过这条通道，消息才投给对局**（`Match.handlePackMsg(playerId, msg)`，仍在限流之后、转发之前调，仍是 §28.14 的
+那一次）。只被面板声明、模块没声明的通道**投都不投**：客户端发得出来（面板那半边 §1.9.6），对局收不到 —— 收窄只
+影响「送不送进这一局」，**转发口径一字未动**。通道声明与接收方法两缺一（声明了 `channels` 却没挂 `handlePackMsg`）
+在装载期记一条**点名**日志但**不拒包**：方法可以挂在构造器的实例上，静态看不出来。一个通道都没声明的包没有接收入口
+（投递表里没有它这一行），行为与从前逐字节相同；收窄这一条由 `test/packMatchMsg.test.js` 钉住。
 
 **`healthz` 的回执有界**：扁平对象、值只能是字符串/数字/布尔/`null`、最多 12 个字段 / 2KB；嵌套或超限的那一条被
 **点名跳过**（其余字段照旧报到）。端点是给运维看的，不是数据通道。

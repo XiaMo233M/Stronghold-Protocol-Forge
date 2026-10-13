@@ -1995,7 +1995,7 @@ pack is refused. The two tests that pin the ctx key set (`test/modClientPanels.t
 Tests: `test/modClientPanels.test.js` — the ctx surface, the frozen-snapshot rule, and the three room states (not in a
 room / seated / spectating), plus "a later store change is visible through the same ctx".
 
-### 28.23 `server.modules[].channels`: the declaration surface of a pack channel (declaration landed)
+### 28.23 `server.modules[].channels`: the declaration surface of a pack channel (declaration + delivery landed)
 
 **The asymmetry this closes.** §1.9.6 gave a pack a channel of its own (`client.panels[].messages` → `pack.msg`): the
 engine fixes the wire type, the pack names the channel, the server validates, rate-limits and relays it. The receiving
@@ -2030,17 +2030,31 @@ Four rules, each one a rule this layer already states elsewhere:
    sorted, so two spellings are one pack (§28.2's hash rule: an undeclared key must not move a pack's identity). The
    module's bytes were already in the digest.
 
-**What landed here, and what did not.** This cut is the **declaration surface**: the shape layer
-(`shared/workshop.js`), the loader carrying the declared set out (`server/modModules.js`), the surface ledger
-(`shared/modSurface.js`) and `test/modMatchChannels.test.mjs`. The **delivery** path is unchanged — it is §28.14's:
-a pack whose module declares `matchClass` has its subclass's `handlePackMsg(playerId, msg)` called once after the
-rate limit and before the relay, and `test/packMatchMsg.test.js` pins that. Narrowing delivery to "only the declared
-channels" (so that an undeclared pack receives nothing) is a separate cut: it changes what that existing test pins,
-so it does not ride along with the declaration. Nothing here changes the relay, the rate bucket, the wire type or
-`welcome`; `MOD_API_VERSION` does not move (an added optional field, §28.39 / §28.43 precedent).
+**What landed here.** The declaration surface is the shape layer (`shared/workshop.js`), the loader carrying the
+declared set out (`server/modModules.js`), the surface ledger (`shared/modSurface.js`) and
+`test/modMatchChannels.test.mjs`. The **delivery** is narrowed to exactly what was declared — this section is now the
+whole feature, not half of it:
+
+1. `server/index.js` derives the **delivery table** from the *pruned* server modules: `<pack id>` → the set of channels
+   that pack's `server.modules[]` declared. A pack that declares nothing contributes no row, so the table is empty for
+   every pack published before this cut and the path is byte for byte what it was.
+2. The lobby (`server/lobby.js` `packMsg`) consults that table: `handlePackMsg(playerId, msg)` is called — still after
+   the rate bucket and before the relay, still under `callMatch`'s try/catch and its naming log — **only when this
+   pack's module declared this channel**. Everything else about §28.14 is unchanged: `true` / `{ consumed: true }`
+   consumes the frame, every other return value and a throw relay as before.
+3. A channel that only a panel declares (`client.panels[].messages`) is still **sendable and still relayed** — that
+   half is §1.9.6's, and this cut does not touch it — but it is not an inlet, so the match never sees it.
+4. Failing to receive is a **named warning, not a refusal**: a module that declares `channels` while its `matchClass`
+   layer has no `handlePackMsg` method is logged once at load. The method may be installed by the constructor, which no
+   static check can see, so refusing would reject a legal pack.
+
+Nothing here changes the relay, the rate bucket, the wire type or `welcome`; `MOD_API_VERSION` does not move (an added
+optional field, §28.39 / §28.43 precedent).
 
 Tests: `test/modMatchChannels.test.mjs` — the shared name regex, the five named refusals, the sorted
 "only-when-declared" manifest rule, and the loader carrying `channels` out while a module without it grows no key.
+`test/packMatchMsg.test.js` — the delivery cut itself, with a channel that only the panel declares: the frame still
+reaches the room and the match is never called (removing the table lookup turns that assertion red).
 
 ### 28.24 ctx.net.status(): the connection reading a panel cannot take itself
 
