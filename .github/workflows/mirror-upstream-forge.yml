@@ -30,6 +30,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
 
 concurrency:
   group: mirror-upstream-forge
@@ -127,7 +128,12 @@ jobs:
           for f in "${CONTRACT[@]}"; do
             [ -f "$f" ] || { echo "::error::契约测试文件缺失：$f（那一格被上游删了或改名了）"; exit 1; }
           done
-          node --test "${CONTRACT[@]}" || exit 1
+          # 判据在 .github/sync-gate-check.mjs：**净新增失败才红**，且「跑了 0 条」也算红。
+          # 已知红写在 .github/sync-contract-baseline.json（维护方 main 自己就红的那些，不是同步造成的）。
+          node --test --test-reporter=tap "${CONTRACT[@]}" > "${RUNNER_TEMP}/contract.tap" 2>&1 || true
+          tail -40 "${RUNNER_TEMP}/contract.tap"
+          node .github/sync-gate-check.mjs --tap "${RUNNER_TEMP}/contract.tap" \
+            --baseline .github/sync-contract-baseline.json || exit 1
           # 复算：上游更新本身不该让 golden 移动（移动了 = 我们或上游误改了行为）
           node tools/golden.mjs || { echo "::error::golden 移动了 —— 停下来查，别放行"; exit 1; }
 
@@ -180,7 +186,18 @@ jobs:
             git commit -m "conflict report: upstream $SHORT"
           fi
           git push -f origin "HEAD:refs/heads/$BR"
+          # GITHUB_TOKEN 开同仓 PR 会被拒（实测 GraphQL: Resource not accessible by integration），
+          # 所以「响」这条走 issue —— 同一个 sha 只开一条，不刷屏。
+          if ! gh issue list -R "$GITHUB_REPOSITORY" --state open --search "upstream sync blocked $SHORT in:title" --json number -q 'length' | grep -q '^0$'; then
+            echo "已有针对 $SHORT 的 issue，不再重复开"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" \
+              --title "upstream sync blocked: $SHORT" \
+              --body "$REASON\n\n分支 \`$BR\`（只放清单，没有带冲突标记的树）。处理完重跑 mirror-upstream-forge 即可。" \
+              || echo "::warning::issue 也没建成，看这次运行的摘要与分支 $BR"
+          fi
           gh pr create --base "$TARGET" --head "$BR" \
             --title "upstream sync blocked: $SHORT" \
-            --body "$REASON 处理完重跑 mirror-upstream-forge 即可。" || echo "::warning::PR 未建立，手工看分支 $BR"
+            --body "$REASON 处理完重跑 mirror-upstream-forge 即可。" 2>/dev/null \
+            || echo "::notice::PR 未建立（GITHUB_TOKEN 的已知限制），已改用 issue 通知"
           exit 1
