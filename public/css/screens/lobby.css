@@ -310,6 +310,14 @@
    ============================================================================================ */
 .hub-stage { position: relative; display: block; width: 100%; height: calc(1.5 * var(--t)); min-height: 54px; pointer-events: none; }
 .hub-stage .ps { inset: 0; height: 100%; opacity: .5; }
+
+/* ⚠️ matchFlow（ui/matchFlow.js）的美术件（RadarScene / CreateArt / JoinArt）为什么没有挂进大厅：
+   实测（1440×900，脚本 _up/ab.mjs）——把它们并排挂在 .create-box 与左栏里，.create-box 由 226px 变成
+   304px，.mode-card 由 y=574 落到 y=743（视口高 900 ⇒ 掉到折叠线以下），.lobby-body 的 scrollHeight
+   由 986 涨到 1170。那是「新观感把引擎主内容挤出屏幕」，不是可接受的代价，所以本步选择不挂。
+   三件的样式（.mf-*）与模块都在仓库里，随时可挂，缺的只是高度预算。日后要挂，先解决其中之一：
+   把它们做成绝对定位的纯背景层（不占布局高度），或先削减包版段给 .create-box / .join-panel 的 padding 与 gap。 */
+
 /* ==========================================================================================
    screens/lobby.css — mode cards (独立/同盟/无限火力), difficulty cards, create button, join panel.
    ========================================================================================== */
