@@ -3,7 +3,9 @@
 **这一份 = 索引 + 最近 8 节；更早的按大版本分卷在 [`docs/changelog/`](docs/changelog/)。**
 
 切点**由公告定，不由体积定**：`server/notices.js` 的 `engineAnnouncements` 从**本文件**生成游戏内公告 ——
-它认「`## 0.18.3-0.2.5 — 2026-10-13
+它认「`## <版本> — <日期>`」的节、取**前 8 条**能展示的，所以**顶层留的节数就是公告的条数**。
+
+---
 
 **把「创意工坊说明」真正放进四个包，并把界面里那三个真缺口补上。** 上游游戏本体仍是 **0.2.5**，发行 tag 是
 `v0.18.3-0.2.5`。
@@ -83,8 +85,8 @@ B1 要的是「按一下给我结论」，而那条结论必须与 `node tools/w
 
 | 卷 | 版本（新 → 旧） | 日期 | 文件 |
 |---|---|---|---|
-| **顶层** | 0.18.3-0.2.5 · 0.18.2-0.2.5 · 0.18.1-0.2.5 · 0.18.0-0.2.5 · 0.17.0-0.2.4 · 0.16.0-0.2.4 · 0.15.3-0.2.4 · 0.15.2-0.2.4 | 2026-10-11 – 2026-10-13 | 本文 |
-| 0.15 | 0.15.1-0.2.4 · 0.15.0-0.2.4 | 2026-10-11 | [docs/changelog/0.15.md](docs/changelog/0.15.md) |
+| **顶层** | 0.18.3-0.2.6 · 0.18.3-0.2.5 · 0.18.2-0.2.5 · 0.18.1-0.2.5 · 0.18.0-0.2.5 · 0.17.0-0.2.4 · 0.16.0-0.2.4 · 0.15.3-0.2.4 | 2026-10-11 – 2026-10-13 | 本文 |
+| 0.15 | 0.15.2-0.2.4 · 0.15.1-0.2.4 · 0.15.0-0.2.4 | 2026-10-11 – 2026-10-12 | [docs/changelog/0.15.md](docs/changelog/0.15.md) |
 | 0.14 | 0.14.0-0.2.4 · 0.14.0 | 2026-10-10 – 2026-10-11 | [docs/changelog/0.14.md](docs/changelog/0.14.md) |
 | 0.13 | 0.13.1 · 0.13.0 | 2026-10-10 | [docs/changelog/0.13.md](docs/changelog/0.13.md) |
 | 0.12 | 0.12.1 · 0.12.0 | 2026-10-10 | [docs/changelog/0.12.md](docs/changelog/0.12.md) |
@@ -105,6 +107,84 @@ B1 要的是「按一下给我结论」，而那条结论必须与 `node tools/w
 > 要看就回源码仓库。
 
 ---
+## 0.18.3-0.2.6 — 2026-10-13
+
+**上游底座从 0.2.5 抬到 0.2.6，并按我们自己的分批节奏把这一版整份吃完。** 上游这一版是 **93 个文件 / +5750 −254 行
+/ 58 个提交**（以 `git diff v0.2.5 v0.2.6` 为准；上游更新包 `UPDATE.json` 只记 67 个文件，一律以 diff 为准）。
+本仓库自己的版本仍是 **0.18.3**，发行 tag 是 **`v0.18.3-0.2.6`**；`shared/constants.js` 的 `UPSTREAM_VERSION`
+由 `'0.2.5'` 抬到 `'0.2.6'`，而 `APP_VERSION`（`0.18.3`）、`PROTOCOL_VERSION`（`2`）与
+`MOD_API_VERSION`（`1`）**一个都没动** —— 这一版没有改协议形状，也没有改包的接口面。
+
+### 我们怎么吃的：四批，各自有判据
+
+上游那一版同时动了资源、服务器、客户端渲染与文档，我们的树在这些方向上各有自己的改动，所以没有整份照搬，按四条
+互不重叠的线进场，每条线都真跑判据（不是「文件在、行为是旧的」）：
+
+- **① 美术资源批** —— 上游缺的 **114 个本地客户端文件**落进 `public/assets/local/**`，与完整资源包**逐文件同哈希**
+  （1725 个文件），`data/local-assets.json` 同步更新、各战场官方场景可提取。
+- **② 服务器流量层** —— 取上游新增的 `shared/assetPaths.js` 与
+  `server/http/{assetIndex,assetViews,traffic}.js` 及四个测试；`index / routes / static / websocket / config /
+  files / media` **留我们的骨架、接上游的能力**（流量计数、素材内容哈希、brotli、permessage-deflate 自 1 KB 起、
+  `/healthz?traffic=1`）。判据：`test/{asset-index,asset-paths,traffic,ws-compression}` 全绿 + 既有全量 `fail 0`。
+- **③ 客户端渲染与设置层** —— 本版正文里 §33.5–§33.11 那几件事。`render/{spine,impostor,materials}.js`、
+  `render/app/tune.js`、`screens/bandDraft.js`、`ui/guide.js`、`ui/fieldHost.js`、`ui/gameLogic/phases.js`、
+  `server/sim/**/op-wisdel.js`、`tools/local-extract/extract.py` 与上游**逐字节相同**，直接取；
+  `render/units.js`、`board3d/{scene,layout}.js`、`ui/settings.js`、`ui/gameLogic/settings.js` 与上游 v0.2.5
+  **本来就不一样**（我们有自己的 `formsFor` 形态增量通道、大地图背景缩放、逐干员配音与工坊两个开关），所以做
+  **三方合并**而不是覆盖。**接线层也必须一起走**：`test/render` 的两条判据只认 0.2.6 的 `render/app.js`，而
+  「落地音」需要 `audio.js deployCue`、回合开始重播需要 `screens/game.js` 接 `roundStartReplay`、
+  `ui/gameLogic.js` 要转发 `deployOrder` —— 这几件在上游那一版里同属一条改动，漏一件判据就红。
+  判据：`test/render` **661 条 / 0 红**、`test/ui` **843 条 / 0 红**、**六族 golden 一次没动**（roster 49 /
+  bonds 46 / fields 22 / matches 20 / standins 10 / diy 140 全部 match，**没有跑 `golden:update`**）、
+  全量 **8803 条 / fail 0**、`check-imports` exit 0、mod 闸门 `check-packs.mjs --engine …` exit 0。
+- **④ 文档与版本次**（就是这一节所在的那一批）—— `UPSTREAM_VERSION` 抬号、本文件、`README.md`、
+  `docs/DESIGN.md` 的章节表与版本段落、`docs/history/0.2.6.md`（**§33**）、`docs/prompts/*` 的基线声明，
+  以及上游那几份参考文档里与本版事实有关的部分。
+
+### 我们保留了什么、为什么
+
+- **形态增量通道（`shared/packForms.js formsFor`）**：`render/units.js` 里三处查 `FORMS` 的地方走
+  `formsFor(FORMS, spine)` 而不是直接索引 —— 这是 **§28.29** 的包层能力（包声明 `assets.modForms`，第一方优先
+  合并），上游 0.2.6 把 `units.js` 整份重写了，所以这里做的是「以上游为底、把我方那三处重新贴回」。
+- **工坊与大厅那一层**：`ui/{transitions,hubBackdrop,matchFlow,protocolScene}.js`、`screens/sweep.js`、
+  `public/css/**`、`shared/{workshop,modSurface,enabled}.js`、`server/{lobby,modModules}.js` 本版**一个字没改**。
+  0.2.6 换了客户端渲染底层，所以这一层专门做了 **「UI-B × 0.2.6 联跑」**复验：大厅 / 房间 / 编队三页
+  pageerror **0**、console error **0**，五件独有功能（座位上限滑杆、快速匹配、助战入口、房间模组回显、聊天）
+  逐项实测在位可用，四个导出仍在，三视口预算（1440×900 / 1366×768 / 1280×720）**全 GREEN**。
+- **i18n 走管线，不照抄文件**：我们的语言包比上游多 **122 个键**，直接拿上游的 json 会把这些键整片删掉。上游本版
+  新增的两条（「弹药数量」与它的说明）按 `tools/i18n.mjs` 的规矩补进四个语言包；`en` 100 % / 0 errors，
+  `ja` / `ko` / `zh-TW` 各 58 条缺译是 0.2.5 起就有的既有欠账，与本版无关。
+- **协议与包接口面不动**：`PROTOCOL_VERSION` 仍是 2、`MOD_API_VERSION` 仍是 1 —— 上游这一版没有改推送帧的形状，
+  也没有改包能写的接口，所以按「形状变了才抬号」的规矩不抬。
+
+### 上游这一版带来了什么
+
+规则面只有一条（魂灵之影只落在场上的部署格，#557 / PR #558），其余全是流量、渲染与界面：静音时不下载背景音乐、
+1 KB 以上的 WebSocket 消息压缩、素材地址带内容哈希长期缓存、brotli、教程图 WebP、`/healthz?traffic=1` 与诊断里的
+下载量行、官方场景光照改回官方值（#549）、显示官方场景时补画装置板（#569）、最后一个未选策略的玩家不再看到可点的
+「跳过」（PR #546）、每回合开始按部署顺序重播入场动画与落地音（PR #416）、设置新增「弹药数量」（PR #552，默认关）、
+单位多时缓存画面裁切与残影的修正（#542）。逐条的依据、实测数字与 `[ASSUMED]` 标记写在
+[docs/history/0.2.6.md](docs/history/0.2.6.md)（**§33**；上游自己那一章是它的 §31，我们的章节号是全局且已用到 §32）。
+
+### 3D 棋盘：官方场景在本版真渲染过
+
+第 ① 批落的官方场景本版第一次进浏览器验：`node tools/doctor.mjs` 报「本地客户端美术（可选） 1658 项，3D 棋盘
+可用，**已提取各战场官方场景**」，11 个战场逐个在 headless Edge 里真渲染，**pageerror 0 / console error 0 /
+HTTP≥400 0**，画面落 `_up/up026c-shots/board3d_*.png`。
+
+### 门槛（本版实测）
+
+`test/render` 661 条 / 660 过 / **0 失败** / 1 跳过（`RENDER_E2E=1` 门控）· `test/ui` 843 条 / 839 过 /
+**0 失败** / 4 跳过 · 全量 `node --test --test-concurrency=4` **8803 条 / 8798 过 / 0 失败 / 5 跳过**（531.0 s）·
+`npm run golden` exit 0（六族 **49 / 46 / 22 / 20 / 10 / 140** 全部 match，六份语料逐字节未动）·
+`node tools/check-imports.mjs` exit 0（`server/sim/nodeData.js` 的 3 处 `sim-node` 是既有基线）·
+mod 闸门 `tools/check-packs.mjs --engine …` exit 0（`packs/` 10 个 + `demo/` 3 个全部装上）。
+牙证明：把 `shared/constants.js` 的 `UPSTREAM_VERSION` 改回 `'0.2.5'` ⇒ `test/promptBaseline.test.js` 当场红，
+点名 `README.md:427 / :638 / :680 / :735` 四处「当前基线」与 `docs/prompts/README.md:7`、`docs/prompts/kit.md:22`；
+把 `lobby.js` 里 `seatCapRange` 的接线去掉 ⇒ `test/roomSeatCap.test.js` 红（`max: 4` 对 `max: 20`）。
+
+---
+
 ## 0.18.3-0.2.5 — 2026-10-13
 
 **把「创意工坊说明」真正放进四个包，并把界面里那三个真缺口补上。** 上游游戏本体仍是 **0.2.5**，发行 tag 是
@@ -805,50 +885,3 @@ B1 要的是「按一下给我结论」，而那条结论必须与 `node tools/w
 上；把一名**普通**干员的精锐形态数值投影给它（投稿 `e4fe4d5cf0a0` 的 `training` 一段真正想做的那件事）是另一条
 新规则，不在这一刀。
 
-## 0.15.2-0.2.4 — 2026-10-12
-
-本仓库自己的版本 **0.15.1 → 0.15.2**；打包的上游游戏本体**仍是 0.2.4**（这一批没有任何上游改动）。
-`MOD_API_VERSION` 仍是 **1** —— 这一批全是加法，已发布的包一个都不受影响，也不需要重装已装的包。
-上游游戏本体仍是 **0.2.4**，发行 tag：`v0.15.2-0.2.4`。
-
-**静态 `pack.json.routes` 收紧：核心先吃**（DESIGN §28.13.2 / §28.35，实现见 `server/http/static.js` 与
-`shared/workshop.js` 里那张核心保留表判据）。立场从 `static.js` 那句「声明过的路径就是声明过的路径」改成：包声明与
-核心**真的同名**时，**声明不生效**（核心挂载照旧回答）、**响亮点名**（装载报告一条 `errors` + 启动日志一行
-`log.warn`）、**包不被拒**。判据**按文件探**，不按前缀：先看核心**是不是真的会服务这条路径**（`dataDir` /
-`sharedDir` / `simDir` / `publicDir` 里逐字存在那个文件，或命中常量端点），只有那样才算顶掉。**线上被打到的
-包 = 0**：唯一声明 `routes` 的 `f3711c357e20`（`ws-compression-reference`）声明 `/data/ws-compression.json`，
-而 `data/` 下没有同名文件 ⇒ **照常生效、也不报警**。这是**刻意选的兼容做法**：宁愿少生效一条声明，也不让一个
-已发布的包因为多写一行就装不上；副作用是好的 —— 核心将来真长出那个文件时，同一条声明**自动**让位，不必再改规则。
-
-**席位缺省上限 4 → 20 座**（业主裁令 2026-10-12）。一台**没设任何环境变量**的服务器现在**缺省允许房主把一间同盟房
-开到 20 座**（原来 4 座）：`SP_MAX_SEATS=N`
-可加（`SP_MAX_SEATS=4` 回到官方那一档），解析见 `shared/constants.js maxSeatsFrom`（空 / 不可解析 / < 1 回落到
-`DEFAULT_MAX_SEATS = 20`，小数向下取整）。**`MAX_SEATS = 4` 一个字没动** —— 它是「官方房间 1–4 人」的声明与
-超容变体的参照。快速匹配的**队列门槛固定为「一间官方房」= 4 人，不跟随**这个上限（只有显式配 `queue.size` 才由
-部署方决定）。`welcome.maxSeats` 变成**每次握手都发**（原来只在上限 ≠ 4 时才发），所以「vanilla 握手逐字节不变」
-这条承诺改成「**`SP_MAX_SEATS=4` 时不变**」；老页面不认该字段只会少要（滑杆到 4），服务器不会拒。
-
-**超容变体的闸门改成读「在场参与者数」**（`Match.participants` / `Match.variant`，一场开始时算一次、定死，
-真人 + AI，旁观席不算）：容量 20、只坐 4 人的房**走原来那条代码路径**，5 人起才进「每人独立牌库 / 分小队联防 /
-逐玩家守恒」。`PlayerState.variantOn` / `planUnite` / `collectViolations` 读同一个值。结算帧多一个
-`variant` 字段（`m.result` 是自由形状，客户端忽略未知键），日志在结算时点名人数与路径。
-
-**`ctx.battle.damage()`：逐单位伤害读数，让包自己算 DPS**（DESIGN §28.38，实现见 `public/js/battle/runner.js` +
-`public/js/ui/extensions.js` + `public/js/main.js`）。§28.30 把伤害看板拆成两半，说逐单位那一半「今天读不到」——
-这一节补上：一格**只读**的逐单位 / 逐人累计伤害，外加**时间基准** `gt` / `t0`（`dps = dmg / (gt - t0)`）。它
-**不是新账，是一个读者**：伤害早在模拟里逐次命中就记好了（`server/sim/damage.js`），这一格只把那些数字按面板看得懂
-的形状抄出来（逐人那几行照 `Battle._buildResult()` 的配对写法 —— 座位与账**不是同一个对象**，写错一边会永远读到
-`0`，这条静默错误由 `test/modClientBattleReads.test.js` 钉住）。每次读一份**新的、冻结到第二层**的副本；
-`players[].dmg` 已含 `bossDmg`；`uid` 必须给（面板对名单靠它）。**只给屏上这一场**（队友那几场不在这一格里；全队
-总伤仍走 `m.result`）。拿不到就是 `null`（四种出口各自只记一行；准备期 / 结算期**不记**）。**不新增 `pack.json`
-声明，`MOD_API_VERSION` 不动。**
-
-**这一版起旧页面不需要手动强刷**：`/js`、`/css` 走 `Cache-Control: no-cache` **强校验**
-（`server/http/files.js` 的 `cacheControlFor`），文件变了**刷新一次**就拿新的；开着不动的旧页面由
-`public/js/ui/buildGuard.js` **自己叫刷** —— 不在对局里当场自动重载一次，对局里**不丢这一局**（横幅提示刷新，
-局终自动刷新）。**若只改了服务端**（不进构建标签那几棵树），刷新一次即可。线协议号没动（`PROTOCOL_VERSION`
-仍是 2），握手不拒旧页面。
-
-配套文档见 `docs/NET-TUNING.md` §2.3（怎么设、要同抬 `maxConnectionsPerAddr`、`SP_MAX_CONNS_PER_ADDR`
-**并不存在**）、`docs/META.md` §1.9 / §1.9b、`README.md` 的环境变量表与 `docs/DEPLOY.md`；`ctx.battle.damage()`
-的形状与边界见 DESIGN §28.38。
