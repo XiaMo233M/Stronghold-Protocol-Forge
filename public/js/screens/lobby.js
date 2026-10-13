@@ -1,7 +1,16 @@
-// Lobby screen: pick 独立模拟 / 同盟模拟 and a difficulty (标准/险境/绝境/终极), create a room,
-// or join one with a 同盟密钥 (recent codes remembered) — as a player (加入同盟) or in one of its MAX_SPECTATORS
-// spectator seats (观战: room.spectate, also while its match runs; community report #26, a remake feature — the
-// official room has none). Shows connection status + ping.
+import { AccountMeChip } from '../ui/accounts.js';
+import { isOwnerName, decorateOwnerName } from '../ui/ownerName.js';
+import { enabled as federationEnabled } from '../federation.js';
+import { MatchmakingCount } from '../ui/matchmaking.js';
+import { Emblem } from './title.js';
+import { useHubBackdrop, HubBackdrop, HubRadar, BackdropSettings, BackdropGlyph, backdropTheme } from '../ui/hubBackdrop.js';
+// Lobby screen — a hub (owner's request, 2026-10-13): an original backdrop (ui/hubBackdrop.js: generated night scenes or
+// the player's own picture) with the game's dot-matrix emblem in the middle, a left column (密钥加入 · tips), a right
+// column (缺人同盟 card · S.W.E.E.P.报告 (screens/sweep.js) · 干员调配) and four big entries at the bottom right:
+// 独立模拟 / 同盟模拟 / 无限火力 open the start sheet (difficulty 标准/险境/绝境/终极, 无限火力's variant, private room,
+// 快速匹配, create), 搜寻队友 opens the room list. The 密钥加入 dialog joins with a 同盟密钥 (recent codes remembered) —
+// as a player (加入同盟) or in one of its MAX_SPECTATORS spectator seats (观战: room.spectate, also while its match
+// runs; community report #26). The server is picked on the title screen.
 //
 // Difficulty descriptions come from data/config.json `modes[modeId]` when present, else from the
 // official act2autochess `modeDataDict` texts embedded below (desc + effectDescList), so the
@@ -13,27 +22,44 @@
 
 import { ResumeMatchButton } from '../ui/resumeMatch.js';
 import { useEffect, useRef, useState } from '../../vendor/hooks.module.js';
-import { DIFFICULTIES, DIFFICULTY_NAMES, DIFFICULTY_COLORS, ROOM_CODE_LEN, MAX_SEATS, MIN_SEATS, MAX_SPECTATORS, modeIdFor, clampSeats, ERR } from '../../../shared/constants.js';
+import { DIFFICULTIES, DIFFICULTY_NAMES, DIFFICULTY_COLORS, ROOM_CODE_LEN, MAX_SEATS, MIN_SEATS, MAX_SPECTATORS, modeIdFor, clampSeats, ERR, ERR_TEXT } from '../../../shared/constants.js';
+import { RANDOM_MODE } from '../../../shared/randomMode.js';
 import { html, Button, Icon, MicroLabel, Panel, TextField, PingPill, AvatarFrame, Tooltip, Spinner, DifficultyIcon, doctorNo } from '../ui/components.js';
-import { Modal } from '../ui/components.js';
-import { useHubBackdrop, HubBackdrop, HubRadar, BackdropSettings, BackdropGlyph, backdropTheme } from '../ui/hubBackdrop.js';
-import { usePresence } from '../ui/transitions.js';
 import { toast, toastError } from '../ui/toasts.js';
-import { GuideButton } from '../ui/guide.js';
+import { GuideButton, openGuide } from '../ui/guide.js';
 import { openStats } from './stats.js';
 import { SettingsButton } from '../ui/settings.js';
-import { PwaInstallButton } from '../ui/device.js';
+import { PwaInstallButton, fullscreen } from '../ui/device.js';
 import { LoadoutButton } from './loadout.js';
-import { DEFAULT_DIFFICULTY, parsePlaytestParam } from './lobbyLinks.js';
 import { SweepReport } from './sweep.js';
-import { ProtocolScene } from '../ui/protocolScene.js';
-import { RadarScene, CreateArt, JoinArt } from '../ui/matchFlow.js';
 import { SupportButton } from './support.js';
+import * as roomMods from '../roomMods.js';
+// 地基加固（B 方案 · 2026-10-13）：`DEFAULT_DIFFICULTY` 与 `parsePlaytestParam` 现在住在 screens/lobbyLinks.js，
+// 这里保留同一份绑定并**原样转发导出** —— screens/playtestLink.js 与 test/playtestLink.test.js 都从本模块导入这两个
+// 名字（main.js 静态 import playtestLink.js，链接断掉整个客户端白屏），所以本模块的导出面不许变。
+// 包版 `payload/public/js/screens/lobby.js` 里这两个符号是 0 处 —— 这正是「整份装包会白屏」的原因之一。
+import { DEFAULT_DIFFICULTY, parsePlaytestParam } from './lobbyLinks.js';
+import { ProtocolScene } from '../ui/protocolScene.js';
+import { SearchPanel, RadarScene, CreateArt, JoinArt } from '../ui/matchFlow.js';
+import { useLeave } from '../ui/transitions.js';
+import { C2S } from '../../../shared/protocol.js';
 import { net, identity } from '../net.js';
 import { store, useStore, shallowEqual, loadPref, savePref } from '../store.js';
-import * as roomMods from '../roomMods.js';
 import { getConfig, getMode, getStage, useData } from '../data.js';
 import { t, tc, N_ } from '../../../shared/i18n.js';
+
+// What the server offers: shared/protocol.js is the server's own message list, so a deployment without 搜寻队友 /
+// 快速匹配 (match.queue), 无限火力 (room.setRandom), 私密房间 (room.setPrivate) or the public room list (room.list)
+// gets the hub without those entries and requests (all four exist here).
+const HAS = (type) => !!C2S && Object.hasOwn(C2S, type);
+const CAN_QUEUE = HAS('match.queue');
+const CAN_FIREPOWER = HAS('room.setRandom');
+const CAN_PRIVATE = HAS('room.setPrivate');
+const CAN_LIST = HAS('room.list');
+// 本服务器没有 `match.queue`（那是包版另一条部署的路），但有 `room.queue`/`room.dequeue`/`room.queued`
+// （server/matchmaking.js, docs/META.md §1.6）⇒ 快速匹配那一格按**本服务器的**能力开。
+const CAN_ROOM_QUEUE = HAS('room.queue');
+export { DEFAULT_DIFFICULTY, parsePlaytestParam };
 
 /** Official mode texts (activity_table act2autochess.modeDataDict), fallback when config.json is absent. */
 export const MODE_TEXT = {
@@ -50,6 +76,9 @@ export const MODE_TEXT = {
     ABYSS: { code: 'AC-4', desc: N_('敌方攻击强度到达极限的模拟训练'), effects: [N_('作战环境无比困难'), N_('出现极度危险的敌人')] },
   },
 };
+
+/** One-line name of a pack's layer (DESIGN §28.1): what kind of content the pack brings. */
+export const LAYER_TEXT = { A: N_('数据'), B: N_('逻辑'), C: N_('客户端') };
 
 /** Battlefield pool per difficulty when config.json is absent (the modes' `stages` lists; same for solo and co-op). */
 export const STAGE_POOL = { FUNNY: ['act1autochess_m01'], NORMAL: 8, HARD: 7, ABYSS: 7 };
@@ -93,32 +122,108 @@ const MODE_CARDS = [
   {
     id: 'coop', name: N_('同盟模拟'), en: 'ALLIANCE SIMULATION', icon: 'users',
     desc: N_('与至多 {n} 名博士组成同盟，共享干员池，联防协作抵御敌潮。'), params: { n: MAX_SEATS - 1 },
-    points: [N_('1–{n} 名博士 · 可由 AI 队友补位'), N_('联防阶段 · 最终攻势合并生命值')], pointParams: { n: MAX_SEATS },
-    // ↑ 这两处 `params` 只是**兜底**（= 官方 4 座那一档：3 与 4）：render 时按这台服务器的上限（缺省 20）重算
-    //   —— 19 与 20（见 ModeCard，业主裁令 2026-10-12）。msgid 与参数名一个都没动，四个语言包照旧。
+    points: [N_('1–{n} 名博士 · 邀请真人队友'), N_('联防阶段 · 最终攻势合并生命值')], pointParams: { n: MAX_SEATS },
+  },
+  {
+    id: 'firepower', name: N_('无限火力'), badge: '1.1', en: 'UNLIMITED FIREPOWER', icon: 'dice',
+    desc: N_('强势干员、技能连发，迎战怪潮与悬赏首领，轻松体验阵营成型的快感。'),
+    points: [N_(`1–${MAX_SEATS} 名博士 · 邀请真人队友`), N_(`${RANDOM_MODE.totalRounds} 回合娱乐乱斗 · 推荐标准难度`)],
   },
 ];
+
+/** 无限火力分支（随机模式 variant）：快速突袭 9 回合 / 持久鏖战 13 回合。 */
+const VARIANT_CARDS = [
+  {
+    id: 'blitz', name: N_('快速突袭'), en: 'BLITZ', desc: N_(`固定 ${RANDOM_MODE.totalRounds} 回合短局，紧凑刺激的数值节奏。`),
+  },
+  {
+    id: 'endurance', name: N_('持久鏖战'), en: 'ENDURANCE', desc: N_(`固定 ${RANDOM_MODE.endurance.totalRounds} 回合长局，曲线平滑拉长，供深度养成构筑。`),
+  },
+  { id: 'marathon', name: N_('最长时赛'), en: 'MARATHON', desc: N_(`固定 ${RANDOM_MODE.marathon.totalRounds} 回合超长局，逐回合悬赏，极限养成拉锯。`) },
+];
+
+/** 随机模式分支偏好（localStorage）。 */
+export function firepowerVariantPreference() {
+  const v = loadPref('lobby.firepowerVariant', 'blitz');
+  return v === 'endurance' || v === 'marathon' ? v : 'blitz';
+}
+
+/** A presentation choice; the protocol still uses solo/coop plus Room.random. */
+export function lobbySimulationPreference() {
+  const selected = loadPref('lobby.simulation', null);
+  if (MODE_CARDS.some((c) => c.id === selected)) return selected;
+  // Preserve the old random toggle, including random solo preferences, as the new dedicated mode.
+  if (loadPref('lobby.random', false) === true) return 'firepower';
+  return loadPref('lobby.mode', 'coop') === 'solo' ? 'solo' : 'coop';
+}
+
+function preferredDifficulty(simulation) {
+  const key = simulation === 'firepower' ? 'lobby.firepowerDifficulty' : 'lobby.difficulty';
+  const d = loadPref(key, 'FUNNY');
+  return DIFFICULTIES.includes(d) ? d : 'FUNNY';
+}
+
+/** Keep the explanation tied to the shared balance configuration. */
+export function firepowerFeatures(variant = 'blitz') {
+  const { multipliers, firepower, shop, lowTier, band, rounds, endurance, marathon, evolution, opening } = RANDOM_MODE;
+  const v = variant === 'endurance' ? endurance : variant === 'marathon' ? marathon : { totalRounds: RANDOM_MODE.totalRounds, leaders: rounds.leaders };
+  const leaderRounds = Object.keys(v.leaders).map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+  const bossSpan = leaderRounds.length ? t('第 {0}–{1} 回合', { 0: leaderRounds[0], 1: leaderRounds.at(-1) }) : t('中后段回合');
+  return [
+    { title: t('强势阵营'), text: t('开局逐轮发放无限火力模组：装备后生命与攻击 ×{hpMul}，防御提升 {1}%，每场可复活一次；盟约层数无上限成长。', { hpMul: opening.modBuff.hpMul, 1: Math.round((opening.modBuff.defMul - 1) * 100) }) },
+    { title: t('技能回转'), text: t('全员技力恢复加速 {0}%，保留原生技能轴；再部署缩短 {1}%。', { 0: Math.round((firepower.spRecoveryMul - 1) * 100), 1: Math.round((1 - firepower.redeployMul) * 100) }) },
+    { title: t('开局成型'), text: t('{startLevel} 级商店、{startFunds} 资金开局；干员盲盒 {revealChoices} 选 1，部署上限 9 人，每人 {picksPerPlayer} 个策略。', { startLevel: shop.startLevel, startFunds: shop.startFunds, revealChoices: shop.revealChoices, picksPerPlayer: band.picksPerPlayer }) },
+    { title: t('阶段质变'), text: t('第 {0} 回合休整期三选一：层数共鸣 / 生机坚壁 / 军备充盈。', { 0: evolution.rounds.join('/') }) },
+    { title: t('轻松也有挑战'), text: t('{totalRounds} 回合密集怪潮，{bossSpan}悬赏首领轮换；每回合随机效果，{lowTierMax} 阶及以下干员也有额外强化。', { totalRounds: v.totalRounds, bossSpan, lowTierMax: lowTier.lowTierMax }) },
+  ];
+}
+
+function FirepowerBrief({ variant, onVariant }) {
+  const rounds = variant === 'endurance' ? RANDOM_MODE.endurance.totalRounds : variant === 'marathon' ? RANDOM_MODE.marathon.totalRounds : RANDOM_MODE.totalRounds;
+  return html`<aside class="firepower-brief brackets" aria-label=${t('无限火力模式特点')}>
+    <div class="firepower-brief__head">
+      <span class="firepower-brief__title">${t('无限火力')}</span><span class="mode-beta">1.1</span>
+      <span class="firepower-brief__hint">${t('从标准难度开始，享受阵营成型与技能清场')}</span>
+    </div>
+    <div class="firepower-variants" role="radiogroup" aria-label=${t('模式分支')}>
+      ${VARIANT_CARDS.map((c) => html`<button key=${c.id} type="button" role="radio" aria-checked=${variant === c.id ? 'true' : 'false'}
+          class=${`firepower-variant${variant === c.id ? ' is-selected' : ''}`} onClick=${() => onVariant(c.id)}>
+        <span class="firepower-variant__name">${c.name}<span class="firepower-variant__en">${c.en}</span></span>
+        <span class="firepower-variant__desc">${c.desc}</span>
+      </button>`)}
+    </div>
+    <div class="firepower-features">${firepowerFeatures(variant).map((f) => html`<div key=${f.title} class="firepower-feature">
+      <strong>${f.title}</strong><p>${f.text}</p>
+    </div>`)}</div>
+  </aside>`;
+}
 
 /**
  * Text for a difficulty card, preferring data/config.json.
  * @param {'solo'|'coop'} roomMode
  * @param {string} difficulty
+ * @param {{ random?: boolean, variant?: string }} [opts] 随机模式: the room's random flag + variant — the variant's
+ *   round count (RANDOM_MODE / variantRounds: blitz 9 / endurance 13) replaces the config's lastRound everywhere
+ *   the count is shown.
  * @returns {{ code: string, desc: string, effects: string[], rounds: number, hidden: boolean, stageNote: string }}
  */
-export function difficultyInfo(roomMode, difficulty) {
-  const fallback = MODE_TEXT[roomMode === 'solo' ? 'single' : 'multi'][difficulty] || { code: '', desc: '', effects: [] };
+export function difficultyInfo(roomMode, difficulty, { random = false, variant = 'blitz' } = {}) {
+  const fallback = MODE_TEXT[roomMode === 'single' || roomMode === 'solo' ? 'single' : 'multi'][difficulty] || { code: '', desc: '', effects: [] };
   // modeIdFor() lower-cases the difficulty: never call it with a value the server did not validate.
   const m = DIFFICULTIES.includes(difficulty) ? getMode(modeIdFor(roomMode, difficulty)) : null;
   const effects = Array.isArray(m?.effectDescList)
-    ? m.effectDescList.map((e) => String(e).replace(/^[·•・･\s]+/, '')).filter(Boolean)
-    : fallback.effects.map((e) => t(e));
-  const rounds = Number.isFinite(m?.lastRound) ? m.lastRound : roomMode === 'solo' && difficulty === 'FUNNY' ? 9 : 14;
+    ? m.effectDescList.map((e) => String(e).replace(/^[·•\s]+/, '')).filter(Boolean)
+    : fallback.effects;
+  // 随机模式: the whole run is the variant's rounds (server GameData.applyRandomRounds; variantRounds)
+  const rounds = random
+    ? (variant === 'endurance' ? RANDOM_MODE.endurance.totalRounds : variant === 'marathon' ? RANDOM_MODE.marathon.totalRounds : RANDOM_MODE.totalRounds)
+    : Number.isFinite(m?.lastRound) ? m.lastRound : roomMode === 'solo' && difficulty === 'FUNNY' ? 9 : 14;
   return {
     code: typeof m?.code === 'string' ? m.code : fallback.code,
     desc: typeof m?.desc === 'string' ? m.desc : t(fallback.desc),
     effects,
     rounds,
-    hidden: difficulty !== 'FUNNY',
+    hidden: !random && difficulty !== 'FUNNY',
     stageNote: stageNote(Array.isArray(m?.stages) && m.stages.length ? m.stages : STAGE_POOL[difficulty]),
   };
 }
@@ -169,13 +274,6 @@ export function parseRoomParam(search) {
   }
 }
 
-// 地基加固（B 方案 · 2026-10-13）：`DEFAULT_DIFFICULTY` 与 `parsePlaytestParam` 现在住在 screens/lobbyLinks.js，
-// 这里保留同一份绑定并**原样转发导出** —— screens/playtestLink.js 与 test/playtestLink.test.js 都从本模块导入这两个
-// 名字（main.js 静态 import playtestLink.js，链接断掉整个客户端白屏），所以本模块的导出面不许变。
-// 为什么搬走：本文件正按 ui-hub 包的新结构逐段并进来；把链接面放进独立文件，改观感就碰不到它。
-// 包版 `payload/public/js/screens/lobby.js` 里这两个符号是 0 处 —— 这正是「整份装包会白屏」的原因之一。
-export { DEFAULT_DIFFICULTY, parsePlaytestParam };
-
 /** Recently joined/created co-op room codes (most recent first). */
 export function recentRooms() {
   const list = loadPref('recentRooms', []);
@@ -187,89 +285,6 @@ export function rememberRoom(code) {
   if (!CODE_RE.test(code)) return;
   savePref('recentRooms', [code, ...recentRooms().filter((c) => c !== code)].slice(0, 4));
 }
-
-const FALLBACK_TIPS = [
-  N_('联合模拟在选择策略时可以进行一次跳过'),
-  N_('调度中心即使冻结，依然可以主动刷新'),
-  N_('两件同名装备可以合成一件更强力的装备'),
-  N_('只有达成完美作战的队友可以进行联防'),
-];
-const TIP_ROTATE_MS = 5000; // matchingTipRotateInterval
-
-/** Rotating tactical tips (config.json `tips`, weighted list of { tip, weight }). */
-function TipsPanel() {
-  const cfg = getConfig();
-  const fallback = FALLBACK_TIPS.map((x) => t(x));
-  const tips = Array.isArray(cfg?.tips)
-    ? cfg.tips.map((x) => (typeof x === 'string' ? x : x?.tip)).filter((x) => typeof x === 'string' && x)
-    : fallback;
-  const list = tips.length ? tips : fallback;
-  const [idx, setIdx] = useState(() => Math.floor(Math.random() * list.length));
-  useEffect(() => {
-    const id = setInterval(() => setIdx((i) => i + 1), TIP_ROTATE_MS);
-    return () => clearInterval(id);
-  }, []);
-  const i = ((idx % list.length) + list.length) % list.length;
-  return html`<div class="tips brackets">
-    <div class="tips__head">
-      <${Icon} name="info" />
-      <span>${t('作战提示')}</span>
-      <${MicroLabel}>TACTICAL TIPS<//>
-      <span class="tips__idx num">${String(i + 1).padStart(2, '0')}<span class="t-dim">/${String(list.length).padStart(2, '0')}</span></span>
-      <button type="button" class="tips__nav" onClick=${() => setIdx(i - 1 + list.length)} aria-label=${t('上一条')}><${Icon} name="chevronLeft" /></button>
-      <button type="button" class="tips__nav" onClick=${() => setIdx(i + 1)} aria-label=${t('下一条')}><${Icon} name="chevronRight" /></button>
-    </div>
-    <p key=${i} class="tips__text">${list[i]}</p>
-  </div>`;
-}
-
-function ModeCard({ card, selected, onSelect }) {
-  // 座位数文案 (业主裁令 2026-10-12): the ceiling is THIS server's (`welcome.maxSeats`), not the official 4 — a 20-seat
-  // server's card must not still promise 「至多 3 名博士」. The number is read at render time, so a `welcome` that lands
-  // after the module was evaluated (or a reconnect that changes servers) is reflected; the msgid and its `{n}` params
-  // are unchanged (only the VALUE moves), so every i18n pack keeps working.
-  const seats = card.id === 'coop' ? serverSeatMaxOf() : MAX_SEATS;
-  const params = card.id === 'coop' ? { n: Math.max(1, seats - 1) } : card.params;
-  const pointParams = card.id === 'coop' ? { n: seats } : card.pointParams;
-  return html`<button type="button" class=${`mode-card brackets${selected ? ' is-selected' : ''}`} onClick=${() => onSelect(card.id)}
-      aria-pressed=${selected ? 'true' : 'false'}>
-    <span class="mode-card__bg" aria-hidden="true"></span>
-    <span class="mode-card__icon"><${Icon} name=${card.icon} /></span>
-    <span class="mode-card__text">
-      <${MicroLabel} tone=${selected ? 'mint' : undefined}>${card.en}<//>
-      <span class="mode-card__name">${t(card.name)}</span>
-      <span class="mode-card__desc">${t(card.desc, params)}</span>
-      <span class="mode-card__points">${card.points.map((p) => html`<span key=${p}>${t(p, pointParams)}</span>`)}</span>
-    </span>
-    <span class="mode-card__check" aria-hidden="true"><${Icon} name="check" />${t('已选定')}</span>
-  </button>`;
-}
-
-function DifficultyCard({ roomMode, difficulty, selected, onSelect }) {
-  const info = difficultyInfo(roomMode, difficulty);
-  return html`<button type="button" class=${`diff-card${selected ? ' is-selected' : ''}`}
-      style=${`--d-color:${DIFFICULTY_COLORS[difficulty]}`} onClick=${() => onSelect(difficulty)} aria-pressed=${selected ? 'true' : 'false'}>
-    <span class="diff-card__bar" aria-hidden="true"></span>
-    <span class="diff-card__head">
-      <${DifficultyIcon} difficulty=${difficulty} class="diff-card__glyph" />
-      <span class="diff-card__name">${t(DIFFICULTY_NAMES[difficulty])}</span>
-      <span class="diff-card__code num">${info.code}</span>
-      <span class="diff-card__meta">
-        <span class="num">${info.rounds}</span> ${tc('rounds', '回合')}${info.hidden ? html`<span class="diff-card__hidden">${t('+ 隐秘核心')}</span>` : null}
-      </span>
-    </span>
-    <span class="diff-card__desc">${info.desc}</span>
-    <span class="diff-card__effects">${info.effects.map((e) => html`<span key=${e}>${e}</span>`)}${info.stageNote ? html`<span key="stage" class="diff-card__stage"><${Icon} name="rook" />${info.stageNote}</span>` : null}</span>
-    <span class="diff-card__check" aria-hidden="true"><${Icon} name="check" /><span>${t('已选定')}</span></span>
-  </button>`;
-}
-
-/** One-line name of a pack's layer (DESIGN §28.1): what kind of content the pack brings. */
-export const LAYER_TEXT = { A: N_('数据'), B: N_('逻辑'), C: N_('客户端') };
-
-// ---------------------------------------------------------------------------------------------------
-// 本房座位上限 (业主裁决 B5, docs/META.md §1.9): the host's seat slider
-// ---------------------------------------------------------------------------------------------------
 
 /**
  * The seat ceiling THIS server allows, as `welcome.maxSeats` announced it.
@@ -317,6 +332,206 @@ export function seatCapPayload(mode, pick, serverMax) {
   return cap === max ? {} : { seatCap: cap };
 }
 
+
+const FALLBACK_TIPS = [
+  N_('联合模拟在选择策略时可以进行一次跳过'),
+  N_('调度中心即使冻结，依然可以主动刷新'),
+  N_('两件同名装备可以合成一件更强力的装备'),
+  N_('只有达成完美作战的队友可以进行联防'),
+];
+const TIP_ROTATE_MS = 5000; // matchingTipRotateInterval
+
+/** Rotating tactical tips (config.json `tips`, weighted list of { tip, weight }). */
+function TipsPanel() {
+  const cfg = getConfig();
+  const fallback = FALLBACK_TIPS.map((x) => t(x));
+  const tips = Array.isArray(cfg?.tips)
+    ? cfg.tips.map((x) => (typeof x === 'string' ? x : x?.tip)).filter((x) => typeof x === 'string' && x)
+    : fallback;
+  const list = tips.length ? tips : fallback;
+  const [idx, setIdx] = useState(() => Math.floor(Math.random() * list.length));
+  useEffect(() => {
+    const id = setInterval(() => setIdx((i) => i + 1), TIP_ROTATE_MS);
+    return () => clearInterval(id);
+  }, []);
+  const i = ((idx % list.length) + list.length) % list.length;
+  return html`<div class="tips brackets">
+    <div class="tips__head">
+      <${Icon} name="info" />
+      <span>${t('作战提示')}</span>
+      <${MicroLabel}>TACTICAL TIPS<//>
+      <span class="tips__idx num">${String(i + 1).padStart(2, '0')}<span class="t-dim">/${String(list.length).padStart(2, '0')}</span></span>
+      <button type="button" class="tips__nav" onClick=${() => setIdx(i - 1 + list.length)} aria-label=${t('上一条')}><${Icon} name="chevronLeft" /></button>
+      <button type="button" class="tips__nav" onClick=${() => setIdx(i + 1)} aria-label=${t('下一条')}><${Icon} name="chevronRight" /></button>
+    </div>
+    <p key=${i} class="tips__text">${list[i]}</p>
+  </div>`;
+}
+
+/**
+ * 缺人同盟: public alliance rooms still waiting for doctors, fewest empty seats first (closest to starting), joinable in
+ * one click. A fixed-height card — three rows, or an empty note with a shortcut to create one.
+ */
+export function recruitingRooms(rooms) {
+  return (Array.isArray(rooms) ? rooms : [])
+    .filter((r) => r && typeof r.code === 'string' && !r.inMatch && r.humans > 0 && r.humans < (r.maxSeats || MAX_SEATS))
+    .sort((a, b) => ((a.maxSeats || MAX_SEATS) - a.humans) - ((b.maxSeats || MAX_SEATS) - b.humans) || b.humans - a.humans);
+}
+
+function RecruitCard({ rooms, online, onJoin, onAll, onCreate }) {
+  const open = recruitingRooms(rooms);
+  return html`<section class="hub-recruit" aria-label=${t('缺人同盟')}>
+    <header class="hub-recruit__head">
+      <span class=${`hub-recruit__pulse${open.length ? ' is-live' : ''}`} aria-hidden="true"></span>
+      <span class="hub-recruit__title">${t('缺人同盟')}</span>
+      <span class="hub-recruit__en">RECRUITING</span>
+      <span class="hub-recruit__n num">${open.length}</span>
+      <button type="button" class="hub-recruit__all" onClick=${onAll}>${t('全部')}<${Icon} name="chevronRight" /></button>
+    </header>
+    <div class="hub-recruit__list">
+      ${open.length ? open.slice(0, 3).map((r) => {
+        const max = r.maxSeats || MAX_SEATS;
+        const name = r.name || t('同盟 #{code}', { code: r.code });
+        return html`<div key=${`${r.node || ''}:${r.code}`} class="hub-recruit__row" style=${`--d-color:${DIFFICULTY_COLORS[r.difficulty] || 'var(--mint-500)'}`}>
+          <span class="hub-recruit__info">
+            <span class=${`hub-recruit__name${isOwnerName(r.hostName || r.name) ? ' sp-owner-name' : ''}`}>${name}</span>
+            <span class="hub-recruit__meta">
+              <${DifficultyIcon} difficulty=${r.difficulty} class="diff-glyph" />
+              <span>${DIFFICULTY_NAMES[r.difficulty] ? t(DIFFICULTY_NAMES[r.difficulty]) : r.difficulty}</span>
+              ${r.random ? html`<span class="hub-recruit__fp">${t('无限火力')}</span>` : null}
+              ${r.nodeName ? html`<span class="t-dim">${r.nodeName}</span>` : null}
+            </span>
+          </span>
+          <span class="hub-recruit__seats">
+            <span class="hub-recruit__pips" aria-hidden="true">${Array.from({ length: max }, (_, i) => html`<i key=${i} class=${i < r.humans ? 'is-on' : ''}></i>`)}</span>
+            <span class="hub-recruit__need">${t('缺')}<b class="num">${max - r.humans}</b>${t('人')}</span>
+          </span>
+          <button type="button" class="hub-recruit__join" disabled=${!online} onClick=${() => onJoin(r.code, r.node)}>${t('加入')}</button>
+        </div>`;
+      }) : html`<div class="hub-recruit__empty">
+        <span>${t('暂时没有缺人的同盟')}</span>
+        <button type="button" class="hub-recruit__create" onClick=${onCreate}>${t('创建同盟')}<${Icon} name="chevronRight" /></button>
+      </div>`}
+    </div>
+  </section>`;
+}
+
+/** 全屏 / 退出全屏 in the top bar, styled like its neighbours (hidden where the browser has no element fullscreen). */
+function HubFullscreenButton() {
+  const [on, setOn] = useState(() => fullscreen.active());
+  const [ok] = useState(() => fullscreen.supported());
+  useEffect(() => {
+    const upd = () => setOn(fullscreen.active());
+    document.addEventListener('fullscreenchange', upd);
+    document.addEventListener('webkitfullscreenchange', upd);
+    return () => { document.removeEventListener('fullscreenchange', upd); document.removeEventListener('webkitfullscreenchange', upd); };
+  }, []);
+  if (!ok) return null;
+  const label = on ? t('退出全屏') : t('全屏');
+  return html`<${Button} variant="secondary" size="sm" square=${true} icon=${on ? 'collapse' : 'expand'} class="hub-fs-btn"
+    title=${label} aria-label=${label} aria-pressed=${on ? 'true' : 'false'} onClick=${() => fullscreen.toggle()} />`;
+}
+
+/** Crossed blades in a hexagon: the S.W.E.E.P. plate's glyph (original drawing). */
+function SweepGlyph() {
+  return html`<svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+    <path d="M16 2.5 27.7 9.2v13.6L16 29.5 4.3 22.8V9.2z" fill="none" stroke="currentColor" stroke-width="1.5" />
+    <path d="M9 9l12.5 12.5M23 9 10.5 21.5" stroke="currentColor" stroke-width="2.2" />
+    <path d="M19.2 23.8l4.6-4.6M8.2 19.2l4.6 4.6M21.6 21.6l2.2 2.2M10.4 21.6l-2.2 2.2" stroke="currentColor" stroke-width="1.8" />
+  </svg>`;
+}
+
+/** S.W.E.E.P.报告: opens the report (screens/sweep.js — 盟约报告 / 策略报告 / 敌方资料). */
+function SweepPlate({ onClick }) {
+  return html`<button type="button" class="hub-plate hub-plate--sweep" onClick=${onClick} title=${t('S.W.E.E.P.报告：盟约、策略与敌方资料')}>
+    <span class="hub-plate__glyph"><${SweepGlyph} /></span>
+    <span class="hub-plate__label">S.W.E.E.P.${t('报告')}</span>
+    <span class="hub-plate__tag">REPORT</span>
+  </button>`;
+}
+
+/** One of the four big entries at the bottom right. */
+function HubEntry({ group, name, en, icon, badge, tone = 'mint', count = null, onClick, disabled = false }) {
+  return html`<div class="hub-entry-wrap">
+    ${group ? html`<span class="hub-entry__group"><${Icon} name=${group.icon} />${group.label}</span>` : html`<span class="hub-entry__group hub-entry__group--blank"></span>`}
+    <button type="button" class=${`hub-entry hub-entry--${tone}`} onClick=${onClick} disabled=${disabled}>
+      <span class="hub-entry__icon"><${Icon} name=${icon} /></span>
+      <span class="hub-entry__en">${en}</span>
+      <span class="hub-entry__name">${name}${badge ? html`<span class="mode-beta">${badge}</span>` : null}</span>
+      ${count != null ? html`<span class="hub-entry__count"><${MatchmakingCount} count=${count} /></span>` : null}
+      <span class="hub-entry__corner" aria-hidden="true"></span>
+    </button>
+  </div>`;
+}
+
+/** A small tile of the side column. */
+function HubTile({ icon, label, en, onClick, children }) {
+  return html`<button type="button" class="hub-tile" onClick=${onClick}>
+    <span class="hub-tile__icon"><${Icon} name=${icon} /></span>
+    <span class="hub-tile__text"><span class="hub-tile__label">${label}</span><span class="hub-tile__en">${en}</span></span>
+    ${children}
+  </button>`;
+}
+
+/** Shared frame of the hub's two dialogs (the start sheet, 密钥加入). */
+function HubDialog({ open, micro, title, onClose, wide = false, children }) {
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
+    addEventListener('keydown', onKey);
+    // the lobby chat (z 180, ui/communityChat.js) sits above modals: it steps aside while a hub dialog is open
+    document.body.classList.add('hub-dialog-open');
+    return () => { removeEventListener('keydown', onKey); document.body.classList.remove('hub-dialog-open'); };
+  }, [open]);
+  if (!open) return null;
+  return html`<div class="modal hub-dialog" role="presentation" onMouseDown=${(e) => { if (e.target === e.currentTarget) onClose?.(); }}>
+    <div class=${`modal__box hub-dialog__box brackets${wide ? ' hub-dialog__box--wide' : ''}`} role="dialog" aria-modal="true">
+      <div class="modal__stripe" aria-hidden="true"></div>
+      <header class="hub-dialog__head">
+        <${MicroLabel} tone="mint">${micro}<//>
+        <div class="hub-dialog__title-row">
+          <h2 class="modal__title">${title}</h2>
+          <button type="button" class="mm-modal__close" onClick=${onClose} aria-label=${t('关闭')}><${Icon} name="close" /></button>
+        </div>
+      </header>
+      <div class="hub-dialog__body">${children}</div>
+    </div>
+  </div>`;
+}
+
+function DifficultyCard({ roomMode, difficulty, selected, onSelect, matchmaking, random = false, variant = 'blitz' }) {
+  const info = difficultyInfo(roomMode, difficulty, { random, variant });
+  return html`<button type="button" class=${`diff-card${selected ? ' is-selected' : ''}`}
+      style=${`--d-color:${DIFFICULTY_COLORS[difficulty]}`} onClick=${() => onSelect(difficulty)} aria-pressed=${selected ? 'true' : 'false'}>
+    <span class="diff-card__bar" aria-hidden="true"></span>
+    <span class="diff-card__head">
+      <${DifficultyIcon} difficulty=${difficulty} class="diff-card__glyph" />
+      <span class="diff-card__name">${t(DIFFICULTY_NAMES[difficulty])}</span>
+      <span class="diff-card__code num">${info.code}</span>
+      ${roomMode === 'coop' && !random ? html`<${MatchmakingCount} count=${matchmaking?.byDifficulty?.[difficulty]} />` : null}
+      <span class="diff-card__meta">
+        <span class="num">${info.rounds}</span> ${tc('rounds', '回合')}${info.hidden ? html`<span class="diff-card__hidden">${t('+ 隐秘核心')}</span>` : null}
+      </span>
+    </span>
+    <span class="diff-card__desc">${info.desc}</span>
+    <span class="diff-card__effects">${info.effects.map((e) => html`<span key=${e}>${e}</span>`)}${info.stageNote ? html`<span key="stage" class="diff-card__stage"><${Icon} name="rook" />${info.stageNote}</span>` : null}</span>
+    <span class="diff-card__check" aria-hidden="true"><${Icon} name="check" /><span>${t('已选定')}</span></span>
+  </button>`;
+}
+
+/** The hand-drawn ring of the 已选定 stamp (two loose strokes). */
+function StampRing() {
+  return html`<svg class="pcard__ring" viewBox="0 0 120 100" aria-hidden="true" focusable="false">
+    <path pathLength="1" d="M18 62C6 34 34 8 70 10c34 2 48 30 38 54-10 24-46 32-72 22C20 80 10 66 16 50" />
+    <path pathLength="1" d="M30 20c22-14 62-12 78 10 12 18 4 44-16 54" />
+  </svg>`;
+}
+
+/** 正在加入同盟…: bottom left while the room is being opened, a light running along the bottom edge (css tr-join). */
+function JoinLine({ text }) {
+  return html`<div class="tr-join" role="status"><span class="tr-join__mark" aria-hidden="true"></span>${text}<span class="tr-join__dots" aria-hidden="true"></span></div>`;
+}
+
 /**
  * 房主决定本同盟开几张座位卡 (业主裁决 B5): a range input, with the current value, the server's ceiling and the two
  * ends spelled out. **Only rendered for co-op** (a solo room has no seat count to choose) and only when the range has
@@ -343,6 +558,7 @@ function SeatCapPicker({ value, min, max, onChange }) {
     <div class="seat-cap__note">${t('服务器允许最多 {max} 人；本同盟开 {value} 张座位卡', { max, value })}</div>
   </div>`;
 }
+
 
 /**
  * 本房间使用 mod (W-A, DESIGN §28.9): the host ticks the packs THIS server declared, and the pick travels as
@@ -373,6 +589,7 @@ function ModPicker({ selected, onToggle }) {
   </div>`;
 }
 
+
 /**
  * 野排匹配 (quick match, `room.queue` / `room.dequeue`; server/matchmaking.js, docs/META.md §1.6). The panel is the
  * waiting state: how many others are searching, how many are needed, how long is left, and the cancel button.
@@ -396,44 +613,356 @@ function QuickMatchPanel({ queue, busy, onCancel }) {
   <//>`;
 }
 
-// ---- S.W.E.E.P.报告 入口 (ui-hub-package-20261013, screens/sweep.js) -----------------------------------------------
-// 包版把这个入口画在它自己的「hub 板块」栏里 (ui-hub-package-20261013 的 screens/lobby.js SweepPlate); 本轮按
-// 裁定的 (甲) 路线做「只加不改」: 入口按钮挂在引擎顶栏的工具排里, 报告浮层挂在屏幕末尾, 引擎既有行一行不动。
-// 样式直接复用: sweep.js 与它的 .sw-* 规则、.hub-plate--sweep 的规则都在第 2 步那次提交里已经进仓库。
 
-/** S.W.E.E.P.报告的徽记: 正六边形 + 交叉的双剑 (取自包版 screens/lobby.js SweepGlyph, 未改动一字)。 */
-function SweepGlyph() {
-  return html`<svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-    <path d="M16 2.5 27.7 9.2v13.6L16 29.5 4.3 22.8V9.2z" fill="none" stroke="currentColor" stroke-width="1.5" />
-    <path d="M9 9l12.5 12.5M23 9 10.5 21.5" stroke="currentColor" stroke-width="2.2" />
-    <path d="M19.2 23.8l4.6-4.6M8.2 19.2l4.6 4.6M21.6 21.6l2.2 2.2M10.4 21.6l-2.2 2.2" stroke="currentColor" stroke-width="1.8" />
-  </svg>`;
+/** One difficulty of 选择模拟协议: name, text, effects; the extras (code, rounds, 隐秘核心, battlefields, queue) below. */
+export function ProtoCard({ roomMode, difficulty, selected, onSelect, matchmaking, random, variant }) {
+  const info = difficultyInfo(roomMode, difficulty, { random, variant });
+  return html`<button type="button" class=${`pcard${selected ? ' is-on' : ''}`} style=${`--d-color:${DIFFICULTY_COLORS[difficulty]}`}
+      onClick=${() => onSelect(difficulty)} aria-pressed=${selected ? 'true' : 'false'}>
+    <span class="pcard__glow" aria-hidden="true"></span>
+    <span class="pcard__head">
+      <${DifficultyIcon} difficulty=${difficulty} class="pcard__glyph" />
+      <span class="pcard__name">${t(DIFFICULTY_NAMES[difficulty])}</span>
+      ${roomMode === 'coop' && !random ? html`<${MatchmakingCount} count=${matchmaking?.byDifficulty?.[difficulty]} />` : null}
+    </span>
+    <span class="pcard__desc">${info.desc}</span>
+    <span class="pcard__effects">${info.effects.map((e) => html`<span key=${e}>${e}</span>`)}</span>
+    <span class="pcard__meta">
+      ${info.code ? html`<span class="num">${info.code}</span>` : null}
+      <span><b class="num">${info.rounds}</b> ${tc('rounds', '回合')}${info.hidden ? t(' + 隐秘核心') : ''}</span>
+      ${info.stageNote ? html`<span>${info.stageNote}</span>` : null}
+    </span>
+    <span class="pcard__stamp" aria-hidden="true"><${StampRing} /><span class="pcard__tick"><${Icon} name="check" /></span><span class="pcard__ok">${t('已选定')}</span></span>
+  </button>`;
 }
 
 /**
- * 顶栏的 S.W.E.E.P.报告按钮: 打开 screens/sweep.js 的报告浮层 (盟约报告 / 策略报告 / 敌方资料)。
- * @param {{ onClick: () => void }} props
+ * 选择模拟协议 (2026-10-13, the owner's request: the event's second screen after 独立模拟): full screen, the picture of
+ * the selected difficulty at the left (ui/protocolScene.js, original), the difficulties down the right with the
+ * 已选定 stamp, 开始模拟 at the bottom right. Kept from the old start sheet: 无限火力's variants and notes, the private
+ * room, 快速匹配, the queue counts, rounds / 隐秘核心 / battlefields and the hints. Esc or ‹ returns to the hub.
+ * Comes up from black over the hub (`chained`: straight after 选择同盟方式, already black) and fades back out
+ * (ui/transitions.js); the picture is redrawn for each difficulty.
  */
-function SweepEntry({ onClick }) {
-  return html`<${Button} variant="secondary" square=${true} class="lobby-sweep" onClick=${onClick}
-    title=${t('S.W.E.E.P.报告：盟约、策略与敌方资料')} aria-label=${t('S.W.E.E.P.报告：盟约、策略与敌方资料')}><${SweepGlyph} /><//>`;
+function ProtocolSelect({ card, roomMode, random, variant, difficulty, onDifficulty, onClose, matchmaking, brief, privateRoom, onPrivate,
+  online, maint, busy, isSearching, onCreate, onQueue, purpose = 'create', onSearch, onCancel, mm, onBrowse, chained = false,
+  seatValue, seatRange, onSeatPick, selectedMods, onToggleMod, queue, onQuickMatch, onCancelQuickMatch }) {
+  const [leaving, leave] = useLeave(onClose);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape' && !document.querySelector('.modal, .guide')) leave(); };
+    addEventListener('keydown', onKey);
+    document.body.classList.add('hub-dialog-open');
+    return () => { removeEventListener('keydown', onKey); document.body.classList.remove('hub-dialog-open'); };
+  }, []);
+  const fx = `${leaving ? ' is-leaving' : ''}${chained ? ' is-chained' : ''}`;
+  const search = purpose === 'search';
+  // 座位数文案 (业主裁令 2026-10-12): the ceiling is THIS server's (`welcome.maxSeats`), not the official 4 — a 20-seat
+  // server's card must not still promise 「至多 3 名博士」. The number is read at render time, so a `welcome` that lands
+  // after the module was evaluated (or a reconnect that changes servers) is reflected; the msgid and its `{n}` params
+  // are unchanged (only the VALUE moves), so every i18n pack keeps working.
+  const seats = card.id === 'coop' ? serverSeatMaxOf() : MAX_SEATS;
+  const params = card.id === 'coop' ? { n: Math.max(1, seats - 1) } : card.params;
+  const pointParams = card.id === 'coop' ? { n: seats } : card.pointParams;
+  const info = difficultyInfo(roomMode, difficulty, { random, variant });
+  const label = maint?.active ? t('维护中 · 暂停开局') : search ? t('开始搜寻') : random ? t('创建无限火力') : roomMode === 'solo' ? t('开始模拟') : t('创建同盟');
+  const hint = !online ? t('正在连接服务器…') : maint?.active ? t('服务器即将停机维护，暂时停止开启新的同盟')
+    : search ? t('精确搜寻：只与选择相同难度的博士组成同盟，凑齐 4 人即开始')
+    : isSearching ? t('正在匹配真人队友，AI 补位已暂停') : roomMode === 'solo' ? t('独自调配阵容，按自己的节奏开始模拟') : t('创建后可邀请好友，AI 队友已暂停');
+  // 搜寻队友: while the queue runs, the right column is the 搜寻中 panel (the server's elapsed / matched counts)
+  if (search && isSearching) {
+    const d = mm?.difficulty && DIFFICULTIES.includes(mm.difficulty) ? mm.difficulty : difficulty;
+    return html`<div class=${`proto proto--searching${fx}`} style=${`--d-color:${DIFFICULTY_COLORS[d]}`} data-difficulty=${d} role="dialog" aria-label=${t('搜寻队友')}>
+      <div class="proto__bg" aria-hidden="true"></div>
+      <header class="proto-top">
+        <button type="button" class="proto-back" onClick=${leave} title=${t('返回大厅（继续搜寻）')} aria-label=${t('返回大厅')}>
+          <${Icon} name="chevronLeft" /><span class="proto-back__home"><${Icon} name="rook" /></span>
+        </button>
+      </header>
+      <div class="proto-body">
+        <section class="proto-stage"><${ProtocolScene} key=${d} difficulty=${d} /></section>
+        <section class="proto-side proto-side--search">
+          <${SearchPanel} elapsed=${mm?.elapsed || 0} onStop=${onCancel} stopping=${busy === 'cancel'}
+            note=${t('已找到 {matched}/{target} 名博士', { matched: mm?.matched || 1, target: mm?.target || 4 })}
+            tags=${[{ key: 'mode', label: t('精确搜寻'), icon: html`<${Icon} name="search" />` },
+              { key: 'diff', label: t(DIFFICULTY_NAMES[d]), color: DIFFICULTY_COLORS[d], icon: html`<${DifficultyIcon} difficulty=${d} />` }]} />
+        </section>
+      </div>
+    </div>`;
+  }
+  return html`<div class=${`proto${fx}`} style=${`--d-color:${DIFFICULTY_COLORS[difficulty]}`} data-difficulty=${difficulty} role="dialog" aria-label=${t('选择模拟协议')}>
+    <div class="proto__bg" aria-hidden="true"></div>
+    <header class="proto-top">
+      <button type="button" class="proto-back" onClick=${leave} title=${t('返回大厅 (Esc)')} aria-label=${t('返回大厅')}>
+        <${Icon} name="chevronLeft" /><span class="proto-back__home"><${Icon} name="rook" /></span>
+      </button>
+      <div class="proto-title">
+        <h2>${t('选择模拟协议')}</h2>
+        <span class="proto-title__mode">${search ? t('搜寻队友') : t(card.name)}<i>${search ? 'FIND ALLIES' : card.en}</i></span>
+      </div>
+    </header>
+    <div class="proto-body">
+      <section class="proto-stage">
+        <${ProtocolScene} key=${difficulty} difficulty=${difficulty} />
+        <div class="proto-brief">
+          <span class="proto-brief__code num">${info.code}</span>
+          <b class="proto-brief__name">${t(DIFFICULTY_NAMES[difficulty])}</b>
+          <p>${t(card.desc, params)}</p>
+          ${card.points ? html`<ul class="proto-brief__points">${card.points.map((p) => html`<li key=${p}>${t(p, pointParams)}</li>`)}</ul>` : null}
+        </div>
+        ${brief ? html`<div class="proto-fp">${brief}</div>` : null}
+      </section>
+      <section class="proto-side">
+        <div class="proto-list" role="radiogroup" aria-label=${t('模拟难度')}>
+          ${DIFFICULTIES.map((d) => html`<${ProtoCard} key=${d} roomMode=${roomMode} difficulty=${d} selected=${difficulty === d} onSelect=${onDifficulty}
+            matchmaking=${matchmaking} random=${random} variant=${variant} />`)}
+        </div>
+        <div class="proto-foot">
+          ${search ? html`<div class="proto-opts">
+            <span class="proto-mode-chip"><${Icon} name="search" />${t('精确搜寻')}</span>
+            ${CAN_LIST ? html`<${Button} variant="secondary" size="md" icon="users" onClick=${onBrowse}>${t('浏览公开同盟')}<//>` : null}
+          </div>` : roomMode !== 'solo' ? html`<div class="proto-opts">
+            ${roomMode !== 'solo' && CAN_PRIVATE ? html`<label class="proto-private" title=${t('不在公开大厅显示，仅通过房间码或邀请加入')}>
+              <input type="checkbox" checked=${privateRoom} onChange=${(e) => onPrivate(e.currentTarget.checked)} /><span>${t('私密房间')}</span></label>` : null}
+            ${roomMode === 'coop' && CAN_QUEUE ? html`<${Button} variant="secondary" size="md" icon="refresh" loading=${busy === 'queue'} disabled=${!online || maint?.active || isSearching}
+              onClick=${onQueue}>${t('快速匹配')}<//>` : null}
+            ${roomMode === 'coop' && CAN_ROOM_QUEUE && !CAN_QUEUE ? html`<${Button} variant="secondary" size="md" icon="users" loading=${busy === 'queue'} disabled=${!online || maint?.active || !!queue}
+              onClick=${onQuickMatch}>${t('快速匹配')}<//>` : null}
+          </div>` : null}
+          ${roomMode === 'coop' ? html`<${ModPicker} selected=${selectedMods} onToggle=${onToggleMod} />` : null}
+          ${roomMode === 'coop'
+            ? html`<${SeatCapPicker} value=${seatValue} min=${seatRange.min} max=${seatRange.max} onChange=${onSeatPick} />`
+            : null}
+          ${queue ? html`<${QuickMatchPanel} queue=${queue} busy=${busy} onCancel=${onCancelQuickMatch} />` : null}
+          <p class="proto-hint">${hint}</p>
+          <button type="button" class="proto-start" disabled=${!online || maint?.active || busy === 'create' || busy === 'queue'} onClick=${search ? onSearch : onCreate}>
+            <span class="proto-start__mark" aria-hidden="true"><span class="proto-start__rook"><i>[</i><${Icon} name="rook" /><i>]</i></span><small>STRONGHOLD<br />PROTOCOL</small></span>
+            <span class="proto-start__label">${busy === 'create' || busy === 'queue' ? html`<${Spinner} size="sm" />` : null}${label}</span>
+            <span class="proto-start__deco" aria-hidden="true"></span>
+          </button>
+        </div>
+      </section>
+    </div>
+    ${busy === 'create' ? html`<${JoinLine} text=${roomMode === 'solo' ? t('正在进入模拟') : t('正在建立同盟')} />` : null}
+  </div>`;
+}
+
+/**
+ * 选择同盟方式 (2026-10-13, the owner's request: the event's screen after 同盟模拟, video 5:22–6:29): the radar at the
+ * left (ui/matchFlow.js), 创建同盟 (a room at the remembered difficulty — it is changed in the room) and 加入同盟 (the
+ * key field, 观战, recent keys) at the right, 模拟邀约 (the public alliances) and 搜寻队友 between them, 入门协议 (玩法说明)
+ * at the bottom left. Esc or ‹ returns to the hub.
+ */
+function AllianceSelect({ onClose, code, onCode, codeOk, recent, online, maint, busy, onCreate, onJoin, onSpectate, onBrowse, onSearch, recruiting = 0, difficulty,
+  roomMode, seatValue, seatRange, onSeatPick, selectedMods, onToggleMod, queue, onQuickMatch, onCancelQuickMatch }) {
+  const [leaving, leave] = useLeave(onClose);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape' && !document.querySelector('.modal, .guide')) leave(); };
+    addEventListener('keydown', onKey);
+    document.body.classList.add('hub-dialog-open');
+    return () => { removeEventListener('keydown', onKey); document.body.classList.remove('hub-dialog-open'); };
+  }, []);
+  const joining = busy === 'create' ? t('正在建立同盟') : busy === 'join' ? t('正在加入同盟') : busy === 'spectate' ? t('正在进入观战') : null;
+  return html`<div class=${`proto ally${leaving ? ' is-leaving' : ''}`} role="dialog" aria-label=${t('选择同盟方式')}>
+    <div class="proto__bg ally__bg" aria-hidden="true"></div>
+    <header class="proto-top">
+      <button type="button" class="proto-back" onClick=${leave} title=${t('返回大厅 (Esc)')} aria-label=${t('返回大厅')}>
+        <${Icon} name="chevronLeft" /><span class="proto-back__home"><${Icon} name="rook" /></span>
+      </button>
+      <div class="proto-title"><h2>${t('选择同盟方式')}</h2><span class="proto-title__mode ally__mode">${t('同盟模拟')}<i>ALLIANCE SIMULATION</i></span></div>
+    </header>
+    <div class="proto-body ally-body">
+      <section class="ally-stage"><${RadarScene} />
+        <button type="button" class="ally-guide" onClick=${() => openGuide(0)}><span class="ally-guide__icon"><${Icon} name="book" /></span>${t('入门协议')}</button>
+      </section>
+      <section class="ally-side">
+        ${roomMode === 'coop' ? html`<${ModPicker} selected=${selectedMods} onToggle=${onToggleMod} />` : null}
+        ${roomMode === 'coop'
+          ? html`<${SeatCapPicker} value=${seatValue} min=${seatRange.min} max=${seatRange.max} onChange=${onSeatPick} />`
+          : null}
+        <button type="button" class="ally-card ally-card--create" disabled=${!online || maint?.active || busy === 'create'} onClick=${onCreate}>
+          <span class="ally-card__art"><${CreateArt} /></span>
+          <span class="ally-card__bar"><span class="ally-card__icon"><${Icon} name="plus" /></span>${maint?.active ? t('维护中 · 暂停开局') : t('创建同盟')}
+            ${busy === 'create' ? html`<${Spinner} size="sm" />` : html`<small>${t('难度：{name}（可在同盟内更改）', { name: t(DIFFICULTY_NAMES[difficulty]) })}</small>`}</span>
+        </button>
+        <div class="ally-links">
+          ${CAN_QUEUE ? html`<button type="button" class="ally-pill" onClick=${onSearch}><${Icon} name="search" />${t('搜寻队友')}</button>` : null}
+          ${CAN_ROOM_QUEUE && !CAN_QUEUE ? html`<button type="button" class="ally-pill" disabled=${!online || maint?.active || !!queue} onClick=${onQuickMatch}><${Icon} name="search" />${t('快速匹配')}</button>` : null}
+          ${CAN_LIST ? html`<button type="button" class="ally-pill ally-pill--invite" onClick=${onBrowse}>${t('模拟邀约')}${recruiting ? html`<b class="num">${recruiting}</b>` : null}<span class="ally-pill__mark" aria-hidden="true"></span></button>` : null}
+        </div>
+        ${queue ? html`<${QuickMatchPanel} queue=${queue} busy=${busy} onCancel=${onCancelQuickMatch} />` : null}
+        <div class="ally-card ally-card--join">
+          <span class="ally-card__art"><${JoinArt} /></span>
+          <label class="ally-key"><${Icon} name="search" />
+            <input type="text" value=${code} placeholder=${t('输入同盟密钥')} maxlength="64" autocomplete="off" spellcheck="false"
+              onInput=${(e) => onCode(e.currentTarget.value)} onKeyDown=${(e) => { if (e.key === 'Enter') onJoin(); }} />
+            ${codeOk ? html`<button type="button" class="ally-key__spec" disabled=${!online || busy === 'spectate'} onClick=${onSpectate}
+              title=${t('以观战者身份进入：不占博士席位，只能观看（每个同盟最多 {MAX_SPECTATORS} 名，模拟进行中也可进入）', { MAX_SPECTATORS })}><${Icon} name="eye" />${t('观战')}</button>` : null}
+          </label>
+          ${recent.length ? html`<span class="ally-recent">${recent.map((c) => html`<button key=${c} type="button" class="code-chip num" title=${t('填入密钥（不会直接加入）')} onClick=${() => onCode(c)}>${c}</button>`)}</span>` : null}
+          <button type="button" class="ally-card__bar ally-card__bar--join" disabled=${!codeOk || !online || busy === 'join'} onClick=${() => onJoin()}>
+            <span class="ally-card__icon"><${Icon} name="users" /></span>${t('加入同盟')}${busy === 'join' ? html`<${Spinner} size="sm" />` : null}
+          </button>
+        </div>
+      </section>
+    </div>
+    ${joining ? html`<${JoinLine} text=${joining} />` : null}
+  </div>`;
+}
+
+function MatchmakingModal({ open, onClose, onJoin, onSpectate }) {
+  const lobbyStats = useStore((s) => s.lobbyStats, shallowEqual);
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState(() => ({
+    online: lobbyStats?.online ?? 1,
+    roomsCount: lobbyStats?.roomsCount ?? 0,
+    matchesCount: lobbyStats?.matchesCount ?? 0,
+    rooms: lobbyStats?.rooms ?? [],
+  }));
+
+  useEffect(() => {
+    if (federationEnabled && CAN_LIST) {net.request('room.list').then(r=>setData(r)).catch(()=>{});return;}
+    if (lobbyStats && typeof lobbyStats.online === 'number') {
+      setData({
+        online: lobbyStats.online,
+        roomsCount: lobbyStats.roomsCount,
+        matchesCount: lobbyStats.matchesCount,
+        rooms: lobbyStats.rooms,
+      });
+    }
+  }, [lobbyStats]);
+
+  const fetchRooms = async () => {
+    if (!CAN_LIST) return;
+    setLoading(true);
+    try {
+      const res = await net.request('room.list');
+      if (res && res.ok) {
+        setData(res);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!open) return undefined;
+    fetchRooms();
+    const timer = setInterval(() => { if (!document.hidden) fetchRooms(); }, 4000);
+    return () => clearInterval(timer);
+  }, [open]);
+
+  if (!open) return null;
+
+  return html`<div class="modal mm-modal" role="presentation"
+      onMouseDown=${(e) => { if (e.target === e.currentTarget && onClose) onClose(); }}>
+    <div class="modal__box mm-modal__box brackets" role="dialog" aria-modal="true">
+      <div class="modal__stripe" aria-hidden="true"></div>
+      <header class="modal__head mm-modal__head">
+        <${MicroLabel} tone="mint">MULTIPLAYER MATCHMAKING<//>
+        <div class="mm-modal__title-row">
+          <h2 class="modal__title mm-modal__title">${t('双服统一大厅')}</h2>
+          <button type="button" class="mm-modal__close" onClick=${onClose} aria-label=${t('关闭')}>
+            <${Icon} name="close" />
+          </button>
+        </div>
+      </header>
+
+      <div class="mm-modal__body">
+        <div class="mm-stats-bar">
+          <div class="mm-stats-col">
+            <span class="mm-stats-num mm-stats-num--mint num">${data.online ?? 1}</span>
+            <span class="mm-stats-label">${t('在线博士')}</span>
+          </div>
+          <div class="mm-stats-col">
+            <span class="mm-stats-num num">${data.roomsCount ?? 0}</span>
+            <span class="mm-stats-label">${t('同盟房间')}</span>
+          </div>
+          <div class="mm-stats-col">
+            <span class="mm-stats-num num">${data.matchesCount ?? 0}</span>
+            <span class="mm-stats-label">${t('进行中对局')}</span>
+          </div>
+          <button type="button" class="mm-refresh-btn" onClick=${fetchRooms} disabled=${loading}>
+            <${Icon} name="refresh" class=${loading ? 'is-spinning' : ''} />
+            <span>${t('刷新')}</span>
+          </button>
+        </div>
+
+        ${data.partial ? html`<p>${t('部分节点暂未连通，当前列表可能不完整。')}</p>` : null}
+        <div class="mm-room-list">
+          ${data.rooms && data.rooms.length > 0
+            ? data.rooms.map((r) => html`<div key=${`${r.node || ''}:${r.code}`} class="mm-room-card">
+                <div class="mm-room-code num">${r.code}${r.nodeName ? html`<small style="display:block;font-size:11px">${r.nodeName}</small>` : null}</div>
+                <div class="mm-room-info">
+                  <div class="mm-room-name"><span class=${isOwnerName(r.hostName || r.name) ? "sp-owner-name" : ""}>${r.name || t('同盟 #{code}', { code: r.code })}</span>${["isomer", t('凑鹈鹕'), t('香鹈鹕')].includes(String(r.hostName || r.name || "").trim().toLowerCase()) ? html`<span class="mm-owner-badge" title=${t('服主')} style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;padding:2px 6px;border:1px solid #e4bd60;color:#e4bd60;font-size:11px;line-height:1.4;white-space:nowrap;vertical-align:middle"><${Icon} name="crown" />${t('服主')}</span>` : null}</div>
+                  <div class="mm-room-meta">
+                    <span class="mm-room-diff" style=${`--d-color:${DIFFICULTY_COLORS[r.difficulty] || 'var(--mint)'}`}>
+                      <${DifficultyIcon} difficulty=${r.difficulty} class="diff-glyph" />
+                      <span>${DIFFICULTY_NAMES[r.difficulty] || r.difficulty}</span>
+                    </span>
+                    ${r.random ? html`<span class="mm-room-rm">${t('无限火力 · 1.1 ·')} ${r.variant === 'endurance' ? t('持久鏖战') : r.variant === 'marathon' ? t('最长时赛') : t('快速突袭')}</span>` : null}
+                    <span class="mm-room-players">
+                      <${Icon} name="users" />
+                      <span class="num">${r.humans} / ${r.maxSeats || MAX_SEATS}</span>
+                    </span>
+                    <span class=${`mm-room-status ${r.inMatch ? 'is-in-match' : 'is-waiting'}`}>
+                      ${r.inMatch ? t('进行中') : t('等待中')}
+                    </span>
+                  </div>
+                </div>
+                <div class="mm-room-actions">
+                  <${Button}
+                    variant="primary"
+                    size="md"
+                    icon="users"
+                    class=${`mm-btn-join ${r.inMatch ? 'is-disabled-match' : ''}`}
+                    disabled=${r.inMatch}
+                    onClick=${() => { onClose(); onJoin(r.code,r.node); }}>
+                    ${t('加入')}
+                  <//>
+                  <${Button}
+                    variant="secondary"
+                    size="md"
+                    icon="eye"
+                    class="mm-btn-spectate"
+                    onClick=${() => { onClose(); onSpectate(r.code,r.node); }}>
+                    ${t('观战')}
+                  <//>
+                </div>
+              </div>`)
+            : html`<div class="mm-room-empty">
+                <${Icon} name="search" />
+                <span>${t('暂无公开同盟房间，可创建同盟或使用快速匹配')}</span>
+              </div>`
+          }
+        </div>
+
+        <footer class="mm-modal__foot">
+          <div class="mm-foot-tag"><${MicroLabel}>AUTO-REFRESH 4S<//></div>
+          <div class="mm-foot-text">${t('列表每 4 秒自动刷新；观战不占博士席位，「进行中」的同盟只能观战。')}</div>
+        </footer>
+      </div>
+    </div>
+  </div>`;
 }
 
 /** Lobby screen component. */
 export function LobbyScreen() {
+  const matchmakingCounts = useStore(s => s.presence?.matchmaking);
   const me = useStore((s) => s.me, shallowEqual);
   const conn = useStore((s) => s.connection, shallowEqual);
-  // The host's picks for the room it is about to create (store.roomMods, written by main.js from `welcome.mods`). The
-  // values themselves live in roomMods.js; this slice is only what the picker renders and re-renders from.
-  const selectedMods = useStore((s) => s.roomMods.selected, shallowEqual);
   useData('config');
-  const [roomMode, setRoomMode] = useState(() => (loadPref('lobby.mode', 'coop') === 'solo' ? 'solo' : 'coop'));
-  const [difficulty, setDifficulty] = useState(() => {
-    const d = loadPref('lobby.difficulty', DEFAULT_DIFFICULTY);
-    return DIFFICULTIES.includes(d) ? d : DEFAULT_DIFFICULTY;
-  });
+  const [simulation, setSimulation] = useState(lobbySimulationPreference);
+  const [difficulty, setDifficulty] = useState(() => preferredDifficulty(lobbySimulationPreference()));
+  const [fpVariant, setFpVariant] = useState(firepowerVariantPreference);
+  const roomMode = simulation === 'solo' ? 'solo' : 'coop';
+  const randomMode = simulation === 'firepower';
+  const variant = randomMode ? fpVariant : 'blitz';
   const [code, setCode] = useState('');
+  const [privateRoom, setPrivateRoom] = useState(false);
   const [busy, setBusy] = useState(null);
+  const [recent] = useState(recentRooms);
   // 本房座位上限 (业主裁决 B5): `seatMax` = the ceiling this server announced, `seatPick` = the host's move of the
   // slider. `null` means "not moved": the pick then IS the ceiling, which is the pre-B5 room and sends no field at all
   // (`seatCapPayload`). Keeping the ceiling in state (not a module read at render time) is what makes a reconnect that
@@ -446,17 +975,9 @@ export function LobbyScreen() {
   // 'cancelled' clear it: the first is followed by the room.state that routes into the room, the other two mean the
   // server already took us out of the queue.
   const [queue, setQueue] = useState(null);
-  const [recent] = useState(recentRooms);
-  // S.W.E.E.P.报告浮层是否打开 (screens/sweep.js); 只在本地, 不落 pref —— 它是一次查看, 不是设置。
-  const [sweepOpen, setSweepOpen] = useState(false);
-  // 大厅背景 (ui/hubBackdrop.js): pref + 自定义图片的 object URL + 设置对话框的动作; bgOpen 是「大厅背景」对话框的开关。
-  // 这一层是纯新增的装饰层, 大厅的既有结构、五件独有功能与 mod 面一行都不碰。
-  const bg = useHubBackdrop();
-  const [bgOpen, setBgOpen] = useState(false);
-  // 大厅背景对话框的离场 (ui/transitions.js usePresence): 引擎的 Modal 是「open=false 即卸载」,没有离场动画;
-  // usePresence 把 show=false 后的这一段(220ms)保持挂载,Modal 自带的 .modal.is-leaving 由它的 css 播完再收。
-  // 纯新增:bgOpen 本身仍是唯一状态源,这里只是把「卸载」推迟到动画之后。
-  const [bgShown, bgLeaving] = usePresence(bgOpen);
+  // The host's picks for the room it is about to create (store.roomMods, written by main.js from `welcome.mods`). The
+  // values themselves live in roomMods.js; this slice is only what the picker renders and re-renders from.
+  const selectedMods = useStore((s) => s.roomMods.selected, shallowEqual);
   const alive = useRef(true);
   const inFlight = useRef(false); // synchronous guard against double clicks (state updates are async)
   useEffect(() => () => { alive.current = false; }, []);
@@ -479,11 +1000,64 @@ export function LobbyScreen() {
     return net.on('welcome', sync);
   }, []);
 
-  const online = conn.status === 'online';
+  const resourcesReady = useStore((s) => !s.session.preloadRequired || s.session.preloadReady);
+  const online = conn.status === 'online' && resourcesReady;
   const codeOk = CODE_RE.test(code);
+  const mm = useStore((s) => s.matchmaking, shallowEqual);
+  const maint = useStore((s) => s.maintenance, shallowEqual);
+  const [modalOpen, setModalOpen] = useState(() => new URLSearchParams(location.search).has('modal'));
+  const lobbyStats = useStore((s) => s.lobbyStats, shallowEqual);
+  const [onlineCount, setOnlineCount] = useState(() => lobbyStats?.online ?? 1);
+  const [rooms, setRooms] = useState(() => (federationEnabled ? [] : lobbyStats?.rooms ?? []));
+  const bg = useHubBackdrop();
+  const [bgOpen, setBgOpen] = useState(false);
+  const [sweepOpen, setSweepOpen] = useState(false);
+  // The Android shell can ask the local network who hosts a key, so a guest never types an address: the code is enough.
+  const nativeShell = globalThis.AndroidNative?.isNativeApp?.() ? globalThis.AndroidNative : null;
+  const [lanRoom, setLanRoom] = useState(null);
+  const [lanNote, setLanNote] = useState('');
+  useEffect(() => {
+    if (!nativeShell || roomMode !== 'coop' || !codeOk) { setLanRoom(null); return undefined; }
+    let cancelled = false;
+    setLanRoom(null);
+    setLanNote(t('正在局域网中查找该房间…'));
+    globalThis.__onRoomFound = (list) => {
+      if (cancelled) return;
+      const host = (list || []).find((h) => !h.self);
+      if (host) { setLanRoom(host); setLanNote(t('已找到房主 {ip}（{1} 人在房）· 点「加入同盟」进入', { ip: host.ip, 1: host.humans || 0 })); }
+      else setLanNote(t('局域网里没有这个房间：确认房主已创建同盟模拟房间，且两台设备在同一网络'));
+    };
+    nativeShell.findRoom(code);
+    return () => { cancelled = true; delete globalThis.__onRoomFound; };
+  }, [code, roomMode]);
+  const isSearching = mm?.status === 'searching';
 
-  const pickMode = (m) => { setRoomMode(m); savePref('lobby.mode', m); };
-  const pickDifficulty = (d) => { setDifficulty(d); savePref('lobby.difficulty', d); };
+  useEffect(() => {
+    if (!federationEnabled && lobbyStats && Number.isFinite(lobbyStats.online)) {
+      setOnlineCount(lobbyStats.online);
+    }
+  }, [lobbyStats?.online]);
+  useEffect(() => {
+    if (!federationEnabled && Array.isArray(lobbyStats?.rooms)) setRooms(lobbyStats.rooms);
+  }, [lobbyStats?.rooms]);
+
+  useEffect(() => {
+    if (!online || !CAN_LIST) return undefined;
+    let cancelled = false;
+    const poll = () => {
+      if (document.hidden) return;
+      net.request('room.list').then((res) => {
+        if (!cancelled && res && res.ok && Number.isFinite(res.online)) {
+          setOnlineCount(res.online);
+        }
+        if (!cancelled && res && res.ok && Array.isArray(res.rooms)) setRooms(res.rooms);
+      }).catch(() => {});
+    };
+    poll();
+    const t = setInterval(poll, 10000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [online]);
+
   /** Tick/untick one pack for the next room: roomMods owns the list (it drops ids the server no longer declares). */
   const toggleMod = (id) => {
     const next = roomMods.getSelectedModIds();
@@ -491,6 +1065,19 @@ export function LobbyScreen() {
     if (at >= 0) next.splice(at, 1); else next.push(id);
     const kept = roomMods.setSelectedModIds(next);
     store.set({ roomMods: { ...store.get().roomMods, selected: kept } });
+  };
+  const pickMode = (m) => {
+    if (!MODE_CARDS.some((c) => c.id === m)) return;
+    // Normal modes share their difficulty; firepower remembers its own explicitly chosen difficulty.
+    if ((m === 'firepower') !== randomMode) setDifficulty(preferredDifficulty(m));
+    setSimulation(m);
+    savePref('lobby.simulation', m);
+    savePref('lobby.mode', m === 'solo' ? 'solo' : 'coop');
+    savePref('lobby.random', m === 'firepower');
+  };
+  const pickDifficulty = (d) => {
+    setDifficulty(d);
+    savePref(randomMode ? 'lobby.firepowerDifficulty' : 'lobby.difficulty', d);
   };
 
   const run = async (kind, fn) => {
@@ -503,44 +1090,56 @@ export function LobbyScreen() {
       if (alive.current) setBusy(null);
     }
   };
-  // 本房座位上限 (业主裁决 B5): the host's own cap rides along only when it is a real choice — an untouched slider (and
-  // every solo room) adds no key, so this request is the one this client always sent.
+  const pickVariant = (v) => {
+    setFpVariant(v);
+    savePref('lobby.firepowerVariant', v);
+  };
+
+  // 本房座位上限 (业主裁决 B5) + 本房模组 (W-A): the host's own cap rides along only when it is a real choice — an
+  // untouched slider (and every solo room) adds no key, so this request is the one this client always sent.
   const create = () => run('create', () => net.request('room.create', {
     ...roomMods.buildCreatePayload(roomMode, difficulty),
     ...seatCapPayload(roomMode, seatValue, seatMax),
+    random: randomMode, private: roomMode !== 'solo' && privateRoom, ...(randomMode ? { variant } : {}),
   }));
-  // 野排匹配: enter the queue with the difficulty cards' pick (the server refuses `solo` — a queue of strangers forms a
-  // co-op room; the button is hidden for 独立模拟). `mods` is the same digest gate `room.create` carries, so a modded
-  // server still checks that we know what we are joining; `modIds` is deliberately NOT sent — a quick-matched room runs
-  // the server's default set (docs/META.md §1.6), never a subset this client picked for some other room.
+  const queueMatch = () => run('queue', () => net.request('match.queue', { mode: roomMode, difficulty, random: randomMode, ...(randomMode ? { variant } : {}), fillBots: false }));
+  const cancelMatch = () => run('cancel', () => net.request('match.cancel'));
+  // 野排匹配 (server/matchmaking.js, docs/META.md §1.6): enter the queue with the difficulty cards' pick (the server
+  // refuses `solo` — a queue of strangers forms a co-op room). `mods` is the same digest gate `room.create` carries;
+  // `modIds` is deliberately NOT sent — a quick-matched room runs the server's default set.
   const quickMatch = () => run('queue', async () => {
     const set = roomMods.currentModSet();
     const payload = { mode: 'coop', difficulty, ...(set ? { mods: set.digest } : {}) };
     await net.request('room.queue', payload, { timeout: 20000 });
     // Only a reply that was actually `ok` reaches this line (`run` shows the error otherwise — QUEUE_FULL included).
     // The server's own `room.queued` frame follows for a real queue; until it does, the panel shows the one frame the
-    // protocol lets a client assume. A placement clears it again through the listener above.
-    // 排队人数占位用**官方一间房**（`MAX_SEATS` 4），不是服务器上限：快速匹配的 `size` 是 `MATCHMAKE_DEFAULTS.size`
-    // 的一间官方房，**不跟随 `SP_MAX_SEATS`**（业主裁令 2026-10-12），而真正的 `need` 由服务端的 `room.queued` 覆盖。
+    // protocol lets a client assume (the official room's 4, not this server's ceiling).
     if (alive.current) setQueue((q) => q || { status: 'waiting', position: 1, size: 1, need: MAX_SEATS, deadline: Date.now() + 120000 });
   });
   const cancelQueue = () => run('dequeue', async () => {
     await net.request('room.dequeue', {});
     if (alive.current) setQueue(null);
   });
-  const join = (c = code) => {
+  const join = (c = code, federationNode) => {
     // `onClick=${join}` hands the click EVENT as the first argument, and a default parameter only applies to
     // `undefined` — codeArg keeps an event target out of the key and falls back to the input field
     const k = codeArg(c, code);
-    if (!k) { toast(t('同盟密钥为 {ROOM_CODE_LEN} 位字母或数字', { ROOM_CODE_LEN }), 'warn'); return; }
-    run('join', () => net.request('room.join', roomMods.buildJoinPayload(k)));
+    if (!CODE_RE.test(k)) { toast(t('同盟密钥为 {ROOM_CODE_LEN} 位字母或数字', { ROOM_CODE_LEN }), 'warn'); return; }
+    // A room found on another phone is a different origin: hand the WebView over to it instead of asking the
+    // server we are on, which by definition does not have that room.
+    if (nativeShell && lanRoom) {
+      nativeShell.connectToHost(lanRoom.ip, k);
+      setLanNote(t('正在进入 {ip} 的房间…', { ip: lanRoom.ip }));
+      return;
+    }
+    run('join', () => net.request('room.join', { ...roomMods.buildJoinPayload(k), ...(federationNode ? { federationNode } : {}) }));
   };
   // a spectator seat: no player seat taken, nothing to do but watch (also a match already running)
-  const spectate = (c = code) => {
+  const spectate = (c = code, federationNode) => {
     // same guard as join: `onClick=${spectate}` passes the click event, not a code
     const k = codeArg(c, code);
     if (!k) { toast(t('同盟密钥为 {ROOM_CODE_LEN} 位字母或数字', { ROOM_CODE_LEN }), 'warn'); return; }
-    run('spectate', () => net.request('room.spectate', { code: k }).catch((err) => {
+    run('spectate', () => net.request('room.spectate', { code: k, ...(federationNode ? { federationNode } : {}) }).catch((err) => {
       // Clearer than the bare ERR_TEXT: the usual cause is a code that is not the host's (a remembered one from an
       // earlier room, or another machine's) — the server can only answer "no such room".
       if (err?.code === ERR.ROOM_NOT_FOUND) {
@@ -558,10 +1157,20 @@ export function LobbyScreen() {
     identity.setEntered(false);
     store.set((s) => ({ session: { ...s.session, entered: false } }));
   };
+  // hub dialogs: the start sheet of a picked mode, 密钥加入 (opened by an invite code in the URL too)
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetPurpose, setSheetPurpose] = useState('create'); // 'create' | 'search' (搜寻队友)
+  const [allyOpen, setAllyOpen] = useState(false);            // 选择同盟方式
+  const [sheetChained, setSheetChained] = useState(false);    // opened from 选择同盟方式: no darkening of the hub between
+  const [joinOpen, setJoinOpen] = useState(false);
+  // 同盟模拟 → 选择同盟方式; 独立模拟 / 无限火力 → 选择模拟协议
+  const openMode = (m) => { pickMode(m); if (m === 'coop') setAllyOpen(true); else { setSheetPurpose('create'); setSheetChained(false); setSheetOpen(true); } };
+  const openSearch = () => { pickMode('coop'); setSheetChained(allyOpen); setAllyOpen(false); setSheetPurpose('search'); setSheetOpen(true); };
+  const modeCard = MODE_CARDS.find((c) => c.id === simulation) || MODE_CARDS[0];
 
-  return html`<div class="screen lobby-screen" data-hub-theme=${backdropTheme(bg)}>
+  return html`<div class="screen lobby-screen lobby-hub" data-hub-theme=${backdropTheme(bg)}>
     <${HubBackdrop} bg=${bg} />
-    <header class="topbar">
+    <header class="topbar hub-topbar">
       <div class="topbar__left">
         <${Button} variant="ghost" size="sm" icon="chevronLeft" onClick=${backToTitle} title=${t('返回标题')}>${t('返回')}<//>
         <${PingPill} ms=${conn.ping} online=${online} />
@@ -569,102 +1178,101 @@ export function LobbyScreen() {
         <div class="topbar__tools">
           <${SettingsButton} class="lobby-settings" variant="secondary" square=${true} />
           <${GuideButton} class="lobby-guide" variant="secondary" square=${true} />
-          <${SweepEntry} onClick=${() => setSweepOpen(true)} />
           <${Button} variant="secondary" size="sm" square=${true} class="hub-bg-btn" onClick=${() => setBgOpen(true)}
             title=${t('大厅背景')} aria-label=${t('大厅背景')}><${BackdropGlyph} /><//>
+          <${HubFullscreenButton} />
           <${PwaInstallButton} class="lobby-pwa" square=${true} />
         </div>
       </div>
-      <div class="topbar__center">
-        <${HubRadar} bg=${bg} />
-        <${MicroLabel} tone="mint">SIMULATION PROTOCOL SELECT<//>
-        <h1 class="topbar__title">${t('选择模拟协议')}</h1>
-        <section class="lobby-proto-stage" style=${`--d-color:${DIFFICULTY_COLORS[difficulty]}`} aria-hidden="true">
-          <${ProtocolScene} key=${difficulty} difficulty=${difficulty} />
-        </section>
-      </div>
       <div class="topbar__right">
+        <span class="hub-online"><span class="online-pill__dot"></span><span class="num">${onlineCount}</span><span>${t('名博士在线')}</span></span>
         <${ResumeMatchButton} />
-        <${LoadoutButton} from="lobby" size="sm" class="lobby-loadout" label=${t('干员调配')} />
         <${SupportButton} from="lobby" size="sm" class="lobby-support" />
-        <button type="button" class="me-chip me-chip--btn stats-entry" onClick=${openStats} title=${t('统计数据')} aria-label=${t('统计数据')}>
-          <${AvatarFrame} size="sm" name=${me.name} seat=${0} self=${true} />
-          <span class="me-chip__text">
-            <span class="me-chip__name">${me.name || t('博士')}</span>
-            <${MicroLabel}>${me.playerId != null ? `DOCTOR #${doctorNo(me.playerId)}` : 'DOCTOR'}<//>
-          </span>
-          <${Icon} name="chart" class="me-chip__stats" />
-        </button>
+        <${AccountMeChip} player=${me} onStats=${openStats} />
       </div>
     </header>
 
-    <div class="lobby-body screen__scroll">
-      <section class="lobby-left">
-        <div class="section-label"><span class="section-label__idx num">01</span>${t('模拟方式')}<${MicroLabel}>MODE<//></div>
-        <div class="mode-cards">
-          ${MODE_CARDS.map((c) => html`<${ModeCard} key=${c.id} card=${c} selected=${roomMode === c.id} onSelect=${pickMode} />`)}
-        </div>
+    <main class="hub-stage">
+      <div class="hub-center">
+        <div class="hub-center__mark"><${HubRadar} bg=${bg} /><${Emblem} /></div>
+        <div class="hub-center__en">STRONGHOLD PROTOCOL <b>ALLIANCE</b></div>
+        <h1 class="hub-center__title">${t('卫戍协议：盟约')}</h1>
+      </div>
 
-        <div class="section-label"><span class="section-label__idx num">03</span>${t('加入同盟')}<${MicroLabel}>JOIN WITH ALLIANCE KEY<//></div>
-        <${Panel} class="join-panel" tone="amber">
-          <div class="join-row">
-            <${TextField} size="code" icon="key" value=${code} placeholder=${t('输入同盟密钥 / 粘贴邀请链接')}
-              transform=${normalizeCode} onInput=${(v) => setCode(normalizeCode(v))} onEnter=${() => join()} />
-            <${Button} variant="amber" size="lg" icon="users" loading=${busy === 'join'} disabled=${!codeOk || !online} onClick=${() => join()}>${t('加入同盟')}<//>
-            <${Tooltip} text=${t('以观战者身份进入：不占博士席位，只能观看（每个同盟最多 {MAX_SPECTATORS} 名，模拟进行中也可进入）', { MAX_SPECTATORS })}>
-              <${Button} variant="secondary" size="lg" icon="eye" class="join-spectate" loading=${busy === 'spectate'} disabled=${!codeOk || !online} onClick=${spectate}>${t('观战')}<//>
-            <//>
-          </div>
-          <div class="join-foot">
-            ${recent.length ? html`<span class="t-lo">${t('最近的同盟')}</span>
-              ${recent.map((c) => html`<button key=${c} type="button" class="code-chip num" title=${t('填入密钥（不会直接加入）')}
-                onClick=${() => setCode(c)}>${c}</button>`)}`
-              : html`<span class="t-dim">${t('向同伴索取 {ROOM_CODE_LEN} 位同盟密钥，或直接打开邀请链接', { ROOM_CODE_LEN })}</span>`}
-          </div>
-        <//>
-        <div class="hub-art" aria-hidden="true"><${JoinArt} /></div>
-        <div class="hub-radar-art" aria-hidden="true"><${RadarScene} /></div>
+      <aside class="hub-side">
+        <${HubTile} icon="key" label=${t('密钥加入')} en="JOIN WITH KEY" onClick=${() => setJoinOpen(true)} />
         <${TipsPanel} />
-      </section>
+      </aside>
 
-      <section class="lobby-right">
-        <div class="section-label"><span class="section-label__idx num">02</span>${t('模拟难度')}<${MicroLabel}>DIFFICULTY<//></div>
-        <div class="diff-list">
-          ${DIFFICULTIES.map((d) => html`<${DifficultyCard} key=${d} roomMode=${roomMode} difficulty=${d} selected=${difficulty === d} onSelect=${pickDifficulty} />`)}
+      <aside class="hub-right">
+        <${RecruitCard} rooms=${rooms} online=${online} onJoin=${join} onAll=${() => setModalOpen(true)} onCreate=${() => openMode('coop')} />
+        <div class="hub-right__plates">
+          <${SweepPlate} onClick=${() => setSweepOpen(true)} />
+          <${LoadoutButton} from="lobby" size="lg" class="hub-plate hub-plate--loadout" label=${t('干员调配')} />
         </div>
-        <div class="create-box">
-          <${ModPicker} selected=${selectedMods} onToggle=${toggleMod} />
-          ${roomMode === 'coop'
-            ? html`<${SeatCapPicker} value=${seatValue} min=${seatRange.min} max=${seatRange.max} onChange=${setSeatPick} />`
-            : null}
-          <${Tooltip} block=${true} text=${online ? null : t('正在连接服务器…')}>
-            <${Button} variant="primary" size="xl" block=${true} iconRight="chevrons" loading=${busy === 'create'} disabled=${!online} onClick=${create}>
-              ${roomMode === 'solo' ? t('开始独立模拟') : t('创建同盟')}
-            <//>
-          <//>
-          ${queue
-            ? html`<${QuickMatchPanel} queue=${queue} busy=${busy} onCancel=${cancelQueue} />`
-            : roomMode === 'coop'
-              // No threshold in this label: the queue size is the SERVER's setting (`queue.size`) and the client cannot
-              // read the deployment's options — the waiting panel above shows the real numbers once it is queued.
-              ? html`<${Tooltip} block=${true} text=${t('和陌生人组队：等待的博士凑够人数即自动建房（本房间按服务器默认模组运行）')}>
-                  <${Button} variant="secondary" size="lg" block=${true} icon="users" loading=${busy === 'queue'} disabled=${!online} onClick=${quickMatch}>
-                    ${t('快速匹配')}
-                  <//>
-                <//>`
-              : null}
-          <div class="create-box__hint">
-            ${online
-              ? html`<span>${roomMode === 'solo' ? t('创建后即可开始模拟') : t('创建后可邀请好友或添加 AI 队友')}</span>`
-              : html`<${Spinner} size="sm" label="CONNECTING" />`}
-          </div>
-          <div class="hub-art hub-art--create" aria-hidden="true"><${CreateArt} /></div>
+      </aside>
+
+      <section class="hub-entries" aria-label=${t('模拟方式')}>
+        ${isSearching ? html`<div class="matchmaking-hud brackets hub-searching">
+            <div class="matchmaking-hud__info">
+              <${Spinner} size="sm" />
+              <span class="matchmaking-hud__text">${t('正在匹配同盟 (')}${mm?.matched || 1}/${mm?.target || 4})...</span>
+              <span class="matchmaking-hud__time num">${String(Math.floor((mm?.elapsed || 0) / 60)).padStart(2, '0')}:${String((mm?.elapsed || 0) % 60).padStart(2, '0')}</span>
+            </div>
+            <${Button} variant="danger" size="md" loading=${busy === 'cancel'} onClick=${cancelMatch}>${t('取消匹配')}<//>
+          </div>` : null}
+        ${maint?.active ? html`<div class="hub-maint">${t('服务器即将维护，暂停开启新的模拟')}</div>` : null}
+        <div class="hub-entries__row">
+          <${HubEntry} group=${{ icon: 'user', label: t('独立模拟') }} name=${t('独立模拟')} en="SOLO" icon="user" onClick=${() => openMode('solo')} />
+          <${HubEntry} group=${{ icon: 'users', label: t('同盟模拟') }} name=${t('同盟模拟')} en="ALLIANCE" icon="users" count=${matchmakingCounts?.total} onClick=${() => openMode('coop')} />
+          ${CAN_FIREPOWER ? html`<${HubEntry} name=${t('无限火力')} en="FIREPOWER" icon="dice" badge="1.1" tone="gold" onClick=${() => openMode('firepower')} />` : null}
+          ${CAN_QUEUE ? html`<${HubEntry} name=${t('搜寻队友')} en="FIND ALLIES" icon="search" tone="bright" onClick=${openSearch} />` : null}
         </div>
       </section>
-    </div>
-    ${sweepOpen ? html`<${SweepReport} onClose=${() => setSweepOpen(false)} />` : null}
-    <${Modal} open=${bgOpen || bgShown} class=${bgLeaving ? 'is-leaving' : ''} micro="LOBBY BACKDROP" title=${t('大厅背景')} onClose=${() => setBgOpen(false)}>
+    </main>
+
+    ${sheetOpen ? html`<${ProtocolSelect} card=${modeCard} roomMode=${roomMode} random=${randomMode} variant=${variant} difficulty=${difficulty}
+      onDifficulty=${pickDifficulty} onClose=${() => setSheetOpen(false)} matchmaking=${matchmakingCounts}
+      brief=${randomMode ? html`<${FirepowerBrief} variant=${fpVariant} onVariant=${pickVariant} />` : null}
+      privateRoom=${privateRoom} onPrivate=${setPrivateRoom} online=${online} maint=${maint} busy=${busy} isSearching=${isSearching}
+      onCreate=${create} onQueue=${async () => { await queueMatch(); setSheetOpen(false); }}
+      purpose=${sheetPurpose} onSearch=${queueMatch} onCancel=${cancelMatch} mm=${mm} onBrowse=${() => setModalOpen(true)} chained=${sheetChained}
+      seatValue=${seatValue} seatRange=${seatRange} onSeatPick=${setSeatPick}
+      selectedMods=${selectedMods} onToggleMod=${toggleMod}
+      queue=${queue} onQuickMatch=${quickMatch} onCancelQuickMatch=${cancelQueue} />` : null}
+
+    ${allyOpen ? html`<${AllianceSelect} onClose=${() => setAllyOpen(false)} code=${code} onCode=${(v) => setCode(normalizeCode(v))} codeOk=${codeOk}
+      recent=${recent} online=${online} maint=${maint} busy=${busy} difficulty=${difficulty} recruiting=${recruitingRooms(rooms).length}
+      roomMode=${roomMode} seatValue=${seatValue} seatRange=${seatRange} onSeatPick=${setSeatPick}
+      selectedMods=${selectedMods} onToggleMod=${toggleMod}
+      queue=${queue} onQuickMatch=${quickMatch} onCancelQuickMatch=${cancelQueue}
+      onCreate=${create} onJoin=${() => join()} onSpectate=${() => spectate()} onBrowse=${() => setModalOpen(true)} onSearch=${openSearch} />` : null}
+
+    <${HubDialog} open=${joinOpen} micro="JOIN WITH ALLIANCE KEY" title=${t('密钥加入')} onClose=${() => setJoinOpen(false)}>
+      <div class="join-row">
+        <${TextField} size="code" icon="key" value=${code} placeholder=${t('输入同盟密钥 / 粘贴邀请链接')}
+          transform=${normalizeCode} onInput=${(v) => setCode(normalizeCode(v))} onEnter=${() => join()} />
+      </div>
+      <div class="join-row hub-join__buttons">
+        <${Button} variant="amber" size="lg" icon="users" loading=${busy === 'join'} disabled=${!codeOk || !online} onClick=${() => join()}>${t('加入同盟')}<//>
+        <${Tooltip} text=${t('以观战者身份进入：不占博士席位，只能观看（每个同盟最多 {MAX_SPECTATORS} 名，模拟进行中也可进入）', { MAX_SPECTATORS })}>
+          <${Button} variant="secondary" size="lg" icon="eye" class="join-spectate" loading=${busy === 'spectate'} disabled=${!codeOk || !online} onClick=${spectate}>${t('观战')}<//>
+        <//>
+      </div>
+      ${lanNote && nativeShell ? html`<p class="t-dim">${lanNote}</p>` : null}
+      <div class="join-foot">
+        ${recent.length ? html`<span class="t-lo">${t('最近的同盟')}</span>
+          ${recent.map((c) => html`<button key=${c} type="button" class="code-chip num" title=${t('填入密钥（不会直接加入）')}
+            onClick=${() => setCode(c)}>${c}</button>`)}`
+          : html`<span class="t-dim">${t('向同伴索取 {ROOM_CODE_LEN} 位同盟密钥，或直接打开邀请链接', { ROOM_CODE_LEN })}</span>`}
+      </div>
+    <//>
+
+    <${HubDialog} open=${bgOpen} micro="LOBBY BACKDROP" title=${t('大厅背景')} onClose=${() => setBgOpen(false)}>
       <${BackdropSettings} bg=${bg} />
     <//>
+
+    <${MatchmakingModal} open=${modalOpen} onClose=${() => setModalOpen(false)} onJoin=${join} onSpectate=${spectate} />
+    ${sweepOpen ? html`<${SweepReport} onClose=${() => setSweepOpen(false)} />` : null}
   </div>`;
 }

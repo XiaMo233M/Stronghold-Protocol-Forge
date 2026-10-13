@@ -138,7 +138,8 @@ const EMBLEM = [
   'XXXXXXXXXXXXX',
 ];
 
-function Emblem() {
+// ui-hub-package-20261013 §4.2：包版大厅中央徽标复用它 ⇒ 补导出（只加 export，函数体与调用点未动）。
+export function Emblem() {
   const dots = useMemo(() => {
     const out = [];
     EMBLEM.forEach((row, r) => {

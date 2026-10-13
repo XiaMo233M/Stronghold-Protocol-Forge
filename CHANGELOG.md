@@ -85,8 +85,8 @@ B1 要的是「按一下给我结论」，而那条结论必须与 `node tools/w
 
 | 卷 | 版本（新 → 旧） | 日期 | 文件 |
 |---|---|---|---|
-| **顶层** | 0.18.3-0.2.6 · 0.18.3-0.2.5 · 0.18.2-0.2.5 · 0.18.1-0.2.5 · 0.18.0-0.2.5 · 0.17.0-0.2.4 · 0.16.0-0.2.4 · 0.15.3-0.2.4 | 2026-10-11 – 2026-10-13 | 本文 |
-| 0.15 | 0.15.2-0.2.4 · 0.15.1-0.2.4 · 0.15.0-0.2.4 | 2026-10-11 – 2026-10-12 | [docs/changelog/0.15.md](docs/changelog/0.15.md) |
+| **顶层** | 0.18.4 · 0.18.3-0.2.6 · 0.18.3-0.2.5 · 0.18.2-0.2.5 · 0.18.1-0.2.5 · 0.18.0-0.2.5 · 0.17.0-0.2.4 · 0.16.0-0.2.4 | 2026-10-12 – 2026-10-13 | 本文 |
+| 0.15 | 0.15.3-0.2.4 · 0.15.2-0.2.4 · 0.15.1-0.2.4 · 0.15.0-0.2.4 | 2026-10-11 – 2026-10-12 | [docs/changelog/0.15.md](docs/changelog/0.15.md) |
 | 0.14 | 0.14.0-0.2.4 · 0.14.0 | 2026-10-10 – 2026-10-11 | [docs/changelog/0.14.md](docs/changelog/0.14.md) |
 | 0.13 | 0.13.1 · 0.13.0 | 2026-10-10 | [docs/changelog/0.13.md](docs/changelog/0.13.md) |
 | 0.12 | 0.12.1 · 0.12.0 | 2026-10-10 | [docs/changelog/0.12.md](docs/changelog/0.12.md) |
@@ -107,6 +107,71 @@ B1 要的是「按一下给我结论」，而那条结论必须与 `node tools/w
 > 要看就回源码仓库。
 
 ---
+
+## 0.18.4 — 2026-10-13
+
+**把第三方界面包 `ui-hub-package-20261013` 按它自己的 `AGENTS.md` 完整装进引擎（业主裁定「走 C、不绕远路」），并把
+我们相对上游 v0.2.6 的**全部本地改动**逐条移植进包版 —— 一件都没丢。** 这一版**只动前端界面层**：`APP_VERSION` 由
+`0.18.3` 抬到 `0.18.4`；`UPSTREAM_VERSION` 仍是 `'0.2.6'`（`docs/history/` 不动，因为它与上游那一半一起动）；
+`PROTOCOL_VERSION`（`2`）与 `MOD_API_VERSION`（`1`）**一个都没动** —— 没有新协议消息、没有新包接口面、没有改游戏
+规则，**不需要 `golden:update`**。发行 tag 将是 `v0.18.4-0.2.6`。
+
+### 装了什么：5 个整份替换 + 5 个新增 + 7 个兼容垫片
+
+- `public/js/screens/{lobby,room,loadout}.js` 与 `public/css/screens/{lobby,loadout}.css` 五个文件**整份换成包版**。
+  装前逐份核过包完整性：`MANIFEST.json` 的 10 个 payload 条目 sha256 **十份十对**，`compat/` 7 份、
+  `compat-snippets/` 1 份、`test/` 1 份、`tools/` 2 份齐备。
+- 五个新模块已是逐字节的包版：`public/js/ui/{hubBackdrop,matchFlow,protocolScene,transitions}.js` 与
+  `public/js/screens/sweep.js`；`hubBackdrop.js` 保留我们自己的 i18n 接线（主题名走 `N_()`、文案走 `t()`）。
+- **7 个兼容垫片**按包的 §4.1 只在目标**缺同名模块**时装：`public/js/federation.js`、
+  `public/js/ui/{accounts,matchmaking,ownerName,skinPicker,skins}.js`、`shared/randomMode.js`。
+- §4.2 `public/js/screens/title.js` 的 `Emblem` 补 `export`（包版大厅中央徽标复用它，函数体与调用点未动）。
+- §4.3 `public/js/ui/loadoutModel.js` 追加 `compat-snippets/mergeSkins.js`（导入调配时合并皮肤选择）。
+
+### 方向拨正：包版 CSS 是「底」，我们的是「追加」
+
+上一版把包版 `lobby.css` 整段追加在**引擎规则之后**，于是包版的 `.lobby-body{grid-template-columns:minmax(0,1fr)}`
+反过来压掉引擎的两栏（`lobby.css:359` 压 `:5`），`.section-label` 三个同 class 的高度变成 243/115/25，座席滑杆只剩
+217.9px。本版按 `AGENTS.md:70` 拨正：`lobby.css` = **包版整份**（含本仓库要求的字号形状 `calc(<x> * var(--t))` 换算与
+`color-mix` / `backdrop-filter` 的新旧双写回退）+ 我们自己的增量（`.seat-cap*` / `.quickmatch-*`）**追加在包版末尾**；
+`loadout.css` 直接用包版（它在 `test/ui/text-scale.test.js` 的 `NOT_SCALED_FILES` 豁免里，而
+`test/ui/loadout-stats.test.js` 要求那一组字号是 `max(<rem>, <px>px)`）。
+
+### 零丢失：我们独有的东西逐条移植进包版
+
+- **座位上限滑杆**（业主裁决 B5）：`SeatCapPicker` 进包版的 `ProtocolSelect`（选择模拟协议）创建区、
+  `SeatCapSetter` 进包版的 ⚙「同盟设置」浮层；协议**仍是我们自己的 `room.setSeatCap`**（带 `code`、房主专属），
+  `shared/protocol.js` 一字未动；`serverSeatMaxOf` / `seatCapRange` / `seatCapPayload` 原样导出，
+  「同盟卡按本服务器上限重算 `{n}`」也一并移植（包版只画 desc，本版把被包版闲置的 points 一并画出来用 `pointParams`）。
+- **快速匹配**：包版那一条走 `match.queue`（本服务器没有 ⇒ 按包自己的规则自动隐藏），我们的
+  `room.queue` / `room.dequeue` / `room.queued` 版本（`QuickMatchPanel`）接回同一条创建路径，按 `HAS('room.queue')` 开。
+- **本房模组**：`ModPicker` / `roomMods.buildCreatePayload` / `buildJoinPayload` / `RoomModsPanel` /
+  `mods/align.js` 对齐闸（模组没就绪就不给「准备就绪」按钮）全部移植。
+- **助战 / 聊天**：`SupportButton` 进大厅顶栏与房间顶栏（`test/ui/support.test.js` 钉的三处入口）；`ChatPanel` 回房间。
+- **S.W.E.E.P.报告 / 大厅背景 / 难度示意图 / 转场**：包版自己就有（`SweepPlate`、`HubRadar`、`.proto-stage`、`tr-*`）。
+- **外观链路**：`loadout.js` 的取图仍走 `ui/portraitChain.js`（包版比上游多两处取图点，一并接上）。
+- **`prepLoadout` 客户端半**：`loadout.js` 的两处相位判据仍读 `currentLoadoutLockPhases()`，不回写死 `PHASE.INFO_CHECK`。
+- **`screens/lobby.js` 的导出面**：`DEFAULT_DIFFICULTY` / `parsePlaytestParam` 继续从它转发导出 —— 包版这两个符号是
+  0 处，漏了这一步 `screens/playtestLink.js` 会直接白屏（`main.js` 静态 import 它）。
+
+### 业主需要知情的两件产品级变化
+
+- **包版房间不再提供「添加 AI 队友」入口**：空席位现在是「邀请」与「搜寻中」，AI 补位那条路换成精确搜寻 /
+  matchmaking（包版连 `fillBots: false`）。服务端的 `room.addBot` 仍在，缺的只是界面入口。我们**没有**擅自把旧按钮
+  加回去（那会改包版的房间设计），报业主裁定。
+- **可选件 `optional/room-card` 未装**：它**不是**我们说的「房间模组回显」（那是 `roomMods.js` / `RoomModsPanel`），
+  而是**名片干员同步**（`room.card`，让队友看到彼此选的立绘）。装它要改 `shared/protocol.js` + `server/lobby.js` 并**重启**，
+  与「本次不动协议」「发版由业主走流程」两条冲突，故按包 §0「由主人择时」留待裁定。
+
+### 判据
+
+- `node --test --test-concurrency=2`（全量一次，冻结树上）：`tests 8816 / suites 916 / pass 8811 / fail 0 / cancelled 0 / skipped 5`，用时 **739 s**。并发降到 2 之后原先那三条负载抖动（`test/lobby.test.js:575` websocket、`:593` 限流、`test/packMatchMsg.test.js:247`）**一条都不再红** ⇒ 判为全量并发下的负载抖动，不是回归；每条单独跑也全绿（`test/lobby.test.js` 73/73、`test/packMatchMsg.test.js` 47/47）。**装前基线核不到**（`_up` 里的基线发行包不带 `test/`，无法在装前树跑同一套判据）。
+- `test/roomSeatCap.test.js` 三处断言按新 DOM / 被取代的文案重钉（`.seats--dense` → 包版 `.rs--big`；
+  `.room-bar__opts` → ⚙ 浮层里的 `RoomOptions`；同盟卡那条被包版改写的 msgid），行为断言一条未放松。
+- `node tools/i18n.mjs check --all --strict`：四包 1435/1435（新增 101 条逐条翻译、占位符逐个保留）。
+- `npx eslint`：改动文件 0 error（8 个 warning 全部继承自包版自己的文件）。
+- `npm run check:imports` exit 0；`npm run typecheck` 仍有 6 条既有报错（`shared/formProjection.js` / `shared/morph.js`，
+  这两个文件本次一个字节未动，属装包前既有状态）。
 
 ## 0.18.3-0.2.6 — 2026-10-13
 
@@ -856,35 +921,3 @@ B1 要的是「按一下给我结论」，而那条结论必须与 `node tools/w
 * **测试**：新增 `test/prepLoadoutClient.test.js`（10 条：缺省档相位表逐字相等 / 默认状态不许"默认开" /
   **逐相位遍历**新旧判据同判 / `prep` 档只放开 `PREP` 一个相位 / **两张表逐档逐字相等** / 源码级（那一行读函数、
   旧写死消失、`ownLocked` 原样保留）/ `shouldAutoClose` 两档行为 / `roomMods` 接线 / **客户端半不新造发送链路**）。
-
-## 0.15.3-0.2.4 — 2026-10-12
-
-**变体 / 口径层：`pack.json.variants`（DESIGN §28.39，docs/WORKSHOP.md §1.20）。** 三个社区 mod「写了等于没写」
-的键之一（0.10.0 时代 `normalizePackManifest` 从没读过 `variants`，`{content:["chess","variants"]}` 归一化后只剩
-`["chess"]`）现在是一条**真通道**：同一份数据的两套表现 —— **满练度 / 12 部署位** —— 由包声明、由这一局执行。
-
-* **它是闭枚举的口径声明，不是数值覆盖通道。** 包说的是「哪一套」，**不是「改成几」**：轴与选项名都在
-  `shared/variants.js` 的 `VARIANT_AXES` 里，值由引擎自己给。首发两条轴：`training`（`official` / `full`，缺省
-  `full` = 引擎今天的行为）与 `deploy`（`official` = 数据里的官方 8 / `max` = 12）。**一个能指定任意文件覆盖的包
-  格式就是安装器** —— `official` / `config` / `meta` / `shared` / `theme` / `serverModules` 那六格「刻意没有通道」
-  的判断逐字不变。
-* **不认识的声明响亮失败**：`VARIANTS_UNKNOWN_AXIS` / `VARIANTS_UNKNOWN_OPTION` / `VARIANTS_BAD_DEFAULT` /
-  `VARIANTS_BAD_SHAPE` / `VARIANTS_DUPLICATE_AXIS`，每一条都整包拒绝并点名。
-* **`combat: true` 是硬闸门**（`VARIANTS_NEED_COMBAT`）：口径改对局结果，所以必须进房间摘要闸门与 golden 语料
-  —— 与 `server.meta` / `server.battle` / `matches[].uses: ["matchClass"]` 同一条线。
-* **缺省逐字节不变**：不声明 `variants` 的包，归一化清单里不长出这个键（否则所有已发布包的内容哈希全变、房间的
-  摘要闸门误判），`GameData.deployCap` 逐字是数据里那个 8，`data/*.json` 一个字节不动。**`MOD_API_VERSION` 仍是 1**，
-  不新增协议消息，**不改默认游戏行为 ⇒ 不需要 `golden:update`**。
-* **顺手修掉一条既有的静默失败**：`content` 里不认识的条目从前被安静过滤掉（`{content:["config"]}` 只是变成一个
-  空包），现在点名拒 `UNKNOWN_CONTENT_FILE`。
-* **一处收敛**：硬编码在 `server/match/effectsMeta.js` 的部署位天花板 `12` 提成 `shared/constants.js` 的
-  `DEPLOY_CAP_MAX`，与 `deploy: "max"` 口径共用同一个数（一个数只有一个真相）。
-* **口径随 mod 条目走**：`server/index.js` 构建 `welcome.mods` 的条目时带上 `variants`。`modDigest` 只哈希
-  `[id, hash]` 对，所以**任何摘要都不变**（改摘要等于让每个已发布的包在同一条房间里被判成「另一个包」）。漏掉
-  这一步口径会**静默不生效** —— `test/workshopVariants.test.js` 的「装载结果 → 房间 mod 集合 → `Match` 的那条链」
-  钉住它。
-
-**还没做的**：`training` 今天落在引擎**已有的**练度开关（`room.loadout.ops`：潜能 1–6 与 未精英化→精英2 Lv.60）
-上；把一名**普通**干员的精锐形态数值投影给它（投稿 `e4fe4d5cf0a0` 的 `training` 一段真正想做的那件事）是另一条
-新规则，不在这一刀。
-
