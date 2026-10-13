@@ -13,7 +13,8 @@
 
 | 卷 | 版本（新 → 旧） | 日期 | 文件 |
 |---|---|---|---|
-| **顶层** | 0.18.1-0.2.5 · 0.18.0-0.2.5 · 0.17.0-0.2.4 · 0.16.0-0.2.4 · 0.15.3-0.2.4 · 0.15.2-0.2.4 · 0.15.1-0.2.4 · 0.15.0-0.2.4 | 2026-10-11 – 2026-10-13 | 本文 |
+| **顶层** | 0.18.2-0.2.5 · 0.18.1-0.2.5 · 0.18.0-0.2.5 · 0.17.0-0.2.4 · 0.16.0-0.2.4 · 0.15.3-0.2.4 · 0.15.2-0.2.4 · 0.15.1-0.2.4 | 2026-10-11 – 2026-10-13 | 本文 |
+| 0.15 | 0.15.0-0.2.4 | 2026-10-11 | [docs/changelog/0.15.md](docs/changelog/0.15.md) |
 | 0.14 | 0.14.0-0.2.4 · 0.14.0 | 2026-10-10 – 2026-10-11 | [docs/changelog/0.14.md](docs/changelog/0.14.md) |
 | 0.13 | 0.13.1 · 0.13.0 | 2026-10-10 | [docs/changelog/0.13.md](docs/changelog/0.13.md) |
 | 0.12 | 0.12.1 · 0.12.0 | 2026-10-10 | [docs/changelog/0.12.md](docs/changelog/0.12.md) |
@@ -34,6 +35,74 @@
 > 要看就回源码仓库。
 
 ---
+## 0.18.2-0.2.5 — 2026-10-13
+
+**补丁版：把从来没跑过的两套浏览器 E2E 真跑一遍，并修掉渲染套件挡住它们的那处基座缺陷。**上游游戏本体仍是
+**0.2.5**，发行 tag 是 `v0.18.2-0.2.5`。
+
+### 渲染套件的 GPU 基座（本版唯一的代码改动）
+
+- **`test/render/{board3d,fieldview,recovery}.browser.test.js` 原先硬编码 `--use-angle=metal`** —— 那是 macOS 的
+  ANGLE 后端。在 Windows 上这个名字不是一个后端，ANGLE 于是回落到 **Microsoft Basic Render Driver**（WARP，纯
+  软件）；而产品自己的 `webgl2Available()`（`public/js/render/board3d/load.js`）要的是带
+  `failIfMajorPerformanceCaveat` 的上下文，软件设备给不出来 ⇒ `enable3d()` 根本不会被调用 ⇒ 3D 棋盘
+  `on: false` 而 `error` 为空。**38 条 board3d 判据**就是这么红的，报错原文只有一句 `3D board on ()`。
+- **改法只是让基座能在本平台跑起来**：这三处启动参数改用仓库里早就有的 `gpuArgs()`（`tools/perfbench.mjs`；
+  `battle-perf.browser.test.js` 一直用它，`test/perfbench.test.js` 也一直钉它）—— Windows → `d3d11`、
+  macOS → `metal`、Linux 不指定。**断言一个字没动。**
+- **新增基座自检**：`test/helpers/gpu.mjs` 的 `assertRealtimeGpu()` 在三套的 `before()` 里先建一个
+  `failIfMajorPerformanceCaveat` 上下文并读出 `UNMASKED_RENDERER_WEBGL`；拿不到、或后端是 WARP / SwiftShader /
+  llvmpipe 这类软件设备，就**当场响亮失败并点名后端**，不再留一句空 error 让人猜。`test/render/gpu-harness.test.js`
+  用假 Browser 钉住这两条（5 条纯单测，不需要 GPU）。
+- 实测（本机 Edge = Chromium 内核，`Edg/156.0.4314.15`）：改前同一页 `board3d.on=false, error=null, fps 59.8`；
+  改后 **`on=true, calls=9, fps=200`、0 pageerror**，自检打印的后端是 `NVIDIA GeForce RTX 5070 Ti (D3D11)`。
+
+### 两套浏览器 E2E 首次开跑，与逐条归因
+
+- **`RENDER_E2E=1`（29 个文件）**：修基座前 **150 条 / 102 过 / 47 红**；修后 **141 过 / 8 红**（用时 613 s → 540 s）。
+- **`SP_E2E=1`（48 个 `test/ui/*.e2e`）**：**231 条 / 202 过 / 28 红**（这一套不经 `gpuArgs()`，基座改动与它无关）。
+- **`SIM_E2E=1`**：`test/sim/*.browser.test.js` 3 个文件全绿（`morph-bonds` 单跑 3/3）。
+- **不为「全绿」背书**：这两套此前从未在任何机器上跑过（`581ed1cb` 的 commit message 就写着「两条 RENDER_E2E
+  门控文件已搬但本环境未开 RENDER_E2E，未真跑」），所以它们**没有基线**。逐条归因的办法是**把同一批测试文件拿到
+  上游 `v0.2.5` 的树上、同一台机器、同一套基座下再跑一遍**（上游 tag `v0.2.5` = `cf7a940`）：
+  - **渲染侧落下的 8 条全部是「本就如此」**：`forms`（crawling 的 `*_02` 剪辑集）、`feedback1-forms`（`the change
+    clip`、`重生: 'Die'`）、`feedback5-prisoners`（`enemy_1116_liprr warning` 的橙色集）、`held-pose`（`held final
+    frame is pixel-identical to continual updates`）在上游 `v0.2.5` 上**报的是同一句断言**；`fieldview` 的两条
+    4× 降频 50 fps 判据在上游同样红（`boss (3d): 49.5 fps`），本机复跑时它自己在 40.5 / 42.2 / 49.9 fps 之间来回
+    翻（同一条判据这一轮过、下一轮又过 2d 那条）—— 是卡在 50 fps 门线上的**阈值抖动**，不是本仓库引入的性能回退。
+  - 这五个渲染文件里，`forms` / `held-pose` / `feedback1-forms` / `feedback5-prisoners` 与上游 `v0.2.5`
+    **逐字节相同**，`fieldview` 只多 0.18.1 加的那 6 行。
+  - **UI 侧（SP_E2E）**：同样这 10 个文件在上游 `v0.2.5` 的树上也红 **21 条**（我们 28 条）。我们多出来的集中在
+    `loadout.e2e.test.js`（10 条）：它们的 `problems` 里只有 `requestfailed: …/audio/voice/{cn,en,kr}/…  net::ERR_ABORTED`
+    —— 本仓库 **0.7.1 起**的**多语言配音**（`audio.voiceLangs` + 逐干员配音，`public/js/audio.js` 的
+    `voiceLinesFor` / `voiceLangOf`；该文件在 `581ed1cb^` 上就已经有这套模型，比 0.2.5 的合并早得多）会按候选配音
+    取音频，浏览器把没播的那几条标成 `ERR_ABORTED`，而上游后来加的这条「页面没有任何 console / 页面 / 请求错误」
+    判据只认空数组（本仓库自己的 `kitimports.e2e.test.js` 反而显式过滤 `ERR_ABORTED`，可见项目一向把它当良性）。
+    这条是**两位作者的设计差异 + 从未跑过的判据**，不是本版引入的行为变化。
+  - `devices.e2e.test.js`（8 条）是视口 / 触屏版式的 `deepEqual` 与两条导航 `TimeoutError`：该文件本仓库比上游多
+    11 行、少 5 行（本仓库自己扩的设备矩阵），上游那次同跑也红 2 条；`text-scale` 那条只在 48 文件同跑时出现、单独
+    跑 10 文件时不复现（超时类）。`community-controls` 反而是**上游红 13 条、我们红 1 条**。
+  - **结论：75 条红全部有归因，没有一条能归到「本版引入的回退」** —— 本版没有改产品行为。
+- 静态检查（首次逐项对基线）：`npx eslint .` → **0 errors / 218 warnings**（与基线一致）；`npx tsc --noEmit --checkJs
+  -p jsconfig.json` → **6 errors**（`shared/formProjection.js` 4 条 + `shared/morph.js` 2 条，与基线逐条一致）；
+  `node tools/check-imports.mjs` → **3 处**违规（`server/sim/nodeData.js` 的 `node:fs` / `node:path` / `node:url`，
+  与基线一致）。
+
+### 官方战场：两条实测事实
+
+- **没有本机《明日方舟》客户端就提不出场景**（实测）：`node tools/setup.mjs --scenes` 退出码 0 并报「没有本机
+  客户端，不能提取战场场景（贴图仍取自客户端）」；`python tools/local-extract/fetch_scenes.py` 退出码 0、
+  **33/33 个包**、落盘 33 个文件 / **29,714,076 字节**；`tools/local-extract/extract.py --only scene` 退出码 2
+  （`No Arknights install found`），把 `--game` 指到下载目录也只能退出码 1、**落盘 0 个文件**（日志逐条
+  `dependency …arts/maps/… missing`、`mesh #10210: File cab-… not found`）—— 场景的材质与网格取自客户端。
+  没有客户端时游戏照常运行，3D 棋盘用**程序化金属地块**优雅退化。
+- **完整包会自动带上打包机上已提取的本地资产**（实测）：`scripts/make-windows-bundle.mjs` 里 `app/` 的**代码**
+  清单来自 `git ls-files`，但 `public/{assets,fonts,vendor}` 走 `copyDir` **整目录复制**，另有一步显式收
+  `data/local-assets.json`。已发布的 `v0.18.1-0.2.5` 完整包里 `app/public/assets/local/**` 实测 **1611 个文件 /
+  70.3 MB**、`app/data/local-assets.json` 在位（两者都在 `.gitignore` 里）。所以**谁有客户端谁提取，他打出的完整包
+  就自带官方战场**（含 `public/assets/local/scene/`）。打包脚本**未因此改动**；场景本身给完整包增加的体积仍未实测
+  （本机提不出，0 个文件）。
+
 ## 0.18.1-0.2.5 — 2026-10-13
 
 **`v0.18.0-0.2.5` 的补丁版：把那一版的资产里**没有**的三笔补齐** —— ① 池权重数据（洛洛八件加权池 + 焰尾
@@ -705,88 +774,3 @@ URL 与「素材本来就在包里」时逐字相同）、声明了就必须写 
 正是这一层一直在拒绝的能力形态（详见 §28.37）。④ 文档里**既有**的 13 处 `文件:行` 引用漂移（非功能性引用）
 **本批未修**，留作单独一次重数。
 
-## 0.15.0-0.2.4 — 2026-10-11
-
-**`m.public` 改成增量帧**（`docs/design/network.md` §8.2.1，实现见 `server/viewsDelta.js` +
-`server/match/match/messaging.js` + `public/js/matchDelta.js`）。帧现在有两种形态：**全量**（整张视图，仍是首帧与每个
-重置点发的那个）与**增量**（`delta: true`：只带变了的顶层键，`gone: [...]` 列出消失的顶层键，`players` 每个变了的座位
-一条 `{ playerId, 变了的字段… }`、离场座位 `{ playerId, gone: true }`，`fields` 每个变了的场地一条、场地创建/销毁时带
-`fieldsFull: true` 整表替换）。行内的 `null` 表示「这个键没了」、客户端删键；全量帧里行的 `null` 也物化成同一状态。
-
-- **为什么**：40 座房间里每帧重发 40 行是 O(座位数 × 字段数) 的载荷，而单客户端收包的绝大部分就是它。字段级增量让
-  帧的大小只随**真正变化的字段数**增长。
-- **语义不变是验收点**：客户端把增量合进自己那份物化状态后，与全量帧**逐字段相同**。真对局的帧流走浏览器自己的合并
-  再与全量帧对比，4 座与 40 座各一遍（`test/match/public-delta.test.js`、`test/match/public-delta-match.test.js`）。
-- **重置点**（下一帧必为全量）：首帧；任何成员变化（加入 / 离开 / 断线 / 重连 / 观战者 —— 全房共用一条基线，所以整房
-  都收到全量帧，不只是掉队那一个）；某次广播没能送到所有 socket；以及每 `PUBLIC_FULL_EVERY`（32）个连续增量帧的保活。
-  因此新加入者 / 重连 / 观战者**先收到全量再收增量**。
-- **自愈**：客户端合并不了时（没有基线、补丁点不到座位）**不半途应用**，发 `g.publicFull` 要一份全量；服务器也会按保活
-  周期主动补一份全量。两条路各自独立，都有测试。
-- **不再发无用帧**：脏标记没有实际变化时一帧都不发（原样保留）。
-- **客户端时钟**：`serverNow` 每帧都带（增量帧也一样），但它不属于被 diff 的状态。
-- **`PROTOCOL_VERSION` 1 → 2**：这次改的是**帧的形状**，一个**没有合并逻辑的旧页面**会把增量帧的 `players` 当成整份名册
-  读 —— 不是「值旧了」，是**人数与名册显示错**。引擎本来就有一条现成的版本闸门（`hello` 声明线上版本号，不一致时
-  `server/net.js onHelloMsg` 在握手第一步就回 `BAD_MSG` 'version mismatch'、不建会话，浏览器把它渲染成「客户端版本与
-  服务器不一致，请刷新页面」），所以这次只需要把号**顶上去**（`shared/constants.js`，附带说明什么形状变化才需要顶号）：
-  跨部署一直开着的旧标签页会被明确要求刷新，而不是静默进对局显示错名册。测试：
-  `test/match/connection.test.js`「a page from the previous wire format is refused at the handshake…」（旧号被拒、
-  拿不到 `welcome` / 房间 / 任何 `m.public`；新号进局的第一帧是全量且有完整名册）与 `test/version.test.js`。
-- 测试客户机（`test/helpers/wsClient.js`）现在也照浏览器的方式物化 `m.public`（`publicFrames` / `stateOf` 拿到的是物化
-  后的完整视图，`log` 里仍是原始线上帧），所以既有用例读到的仍是完整视图；它握手用的版本号改为读 `PROTOCOL_VERSION`。
-  既有套件里**写死的线上版本号也一并改成读 `PROTOCOL_VERSION`**（`test/lobby.test.js` 的替换连接用例、`test/modPreDispatch.test.js`
-  的三条 preDispatch 帧）—— 写死的 1 在顶号后会被新闸门正确拒掉，那不是回归而是闸门生效；改读常量后这两条用例不再写死格式号。
-- **既有断言语义变化（唯一一条）**：`test/match/connection.test.js` 的 `m.public` 形状检查里，`players[].bandId` /
-  `players[].fieldId` / `players[].ready` 从「**必须有这个键**」改成「**有值或缺席都合法**」（`p[k] == null || k in p`）。
-  为什么必须变：这两个键在引擎里是**显式 null**（未定策略 / 未上场），而增量帧里「未设」与「这个键没了」物化成同一个
-  状态（客户端合并后是缺席的键）—— 否则「全量帧的 null」与「增量帧删掉的键」会materialize成两种不同的行，增量就没法
-  保证「物化后与全量逐字段相同」。改前断言「键必须存在（值可为 null）」，改后断言「键可以有值，也可以缺席」；其余
-  字段（`playerId`/`seat`/`name`/`isBot`/`connected`/`alive`/`lp`/`shopLevel`/`boardCount`/`bonds`/`status`）仍然**必须存在**，
-  断言没有放松（只对这两个「未设」字段更贴近真实语义）。
-
-**行为层 kit 的键空间从「一个」变成「两个」**（`docs/WORKSHOP.md` §4.7，设计见 `docs/design/mod-layer.md` §28.12.1）。
-一个 `kits/<id>.js` 的 id 现在可以是：
-
-- **干员 id** —— 本包 `chess.json` 的记录 id，或**本包声明进自选池的 charId**（`pack.json.operators` 的键；模拟层
-  `kitOf` 对自选干员就是按 `def.charId` 查 kit 的），或 `overrides` 里的 `"chess:<id>"`；
-- **召唤物的 token id** —— 本包 `tokens.json` 的记录 id，或 `overrides` 里的 `"tokens:<id>"`。
-
-这条补上的是那半个缺口：包的召唤物以前只能有**数据**、没有**行为层**（`server/sim/content/tokens.js` 的
-`kits[tokenId]` 是引擎内置的表，包碰不到）。两个键空间的注入点与送达通道与本来的那条逐字对称：
-服务端 `Battle opts.kits`（干员）/ `Battle opts.tokenKits`（召唤物），浏览器从**同一份** `spec.workshopKits`
-清单重建两张表（召唤物那一半带 `kind: 'token'`，缺省即干员，所以老包与老读者一个字节都不变）。
-
-- 归属：本包自己的记录、`pack.json.operators` 的 charId、`overrides` 的声明 —— 三条里满足一条即可，否则
-  `KIT_NO_TARGET`（既有裁决，未放松）；真的存在但**不属于本包**的 id 是 `KIT_OFFICIAL_OVERRIDE_UNDECLARED`。
-- 冲突裁决沿既有规则（§1.2 / §28.3）：**包 id 字典序小的赢**，输的一方被点名（`definedBy`）——改为**按空间各裁一次**。
-- 新增一条拒绝：一个 id **同时**是干员与召唤物（合并后的两张表都有它，现实例子是 `data/tokens.json` 里那两名
-  `char_` 开头的地图角色）⇒ `KIT_TARGET_AMBIGUOUS`。不猜、不静默：干员那一半会赢，召唤物那一半会成一条永远
-  不跑也没有任何报错的 kit。判据是**查表**，不是看名字前缀。
-- 无包对局逐字节不变：`spec.js` / `Match` / `combat.js` 只在有值时设这个键，`lobby.js` 送进去的 `opts` 与从前一致。
-- 文档落在 `docs/WORKSHOP.md` §4.2 / §4.3 / §4.7、`docs/EDITOR.md`、`docs/prompts/kit.md`、
-  `docs/design/mod-layer.md` §28.12.1。测试：`test/workshopKits.test.js`（召唤物通道十条）、
-  `test/kitAuthoring.test.js`（`ownCharIds` / `ownTokenIds` / 歧义）、`test/roomAssets.test.js`。
-
-**`pack.json` 的 `api` / `game` / `gameVersion` 写成非字符串时点名拒绝**（`shared/workshop.js`，文档见
-`docs/WORKSHOP.md` §1.9）。以前这三个键的解析只有 `strField` 一个人，而它把非字符串读成 `null`（「缺省与写错都
-读成没声明」），于是 `api: 1`（JSON 数字）在 `api &&` 的两条校验里都短路、归一化结果 `api: null` —— 包当没声明
-一样通过，作者看到的是「包合法、我写的区间没生效」。失败方向是静默的，正是本仓库那句「写了等于没写」。
-
-- **新增两个拒绝码**：`BAD_API_TYPE`（`api`）与 `BAD_GAME_TYPE`（`game` 与别名 `gameVersion` 同一条判罚）。
-  理由里点名**哪一个键**、写成了**什么类型**、以及「非字符串会被读成没声明」。类型判罚**先于**区间语法：
-  `api: 1` 报的是 `BAD_API_TYPE` 而不是 `BAD_API_RANGE`。
-- **缺键路径逐字节不变**：三个键全缺（或写成 `undefined`）的包不进任何新分支，归一化清单不多出键、身份哈希与
-  今天逐字相同（`test/workshopDeclTypes.test.js` 钉住一个缺键包的身份哈希）。
-- **`null` 与省略同一后果、不是错误**：仓库既有语义就是「`null` = 没有这个键」（编辑器写元数据那一端把 `null`
-  当「删掉这个键」；`layer` 的解析分支对 `undefined || null` 逐字相同），空串与纯空白同理。没有发明「显式 null
-  也算无效声明」这条新语义。
-- **`strField` 的全局行为没有改**：它今天只有 `api` / `game` / `gameVersion` 三个调用点，做法是在调用点前面加一道
-  类型闸门（`declaredString`），而不是让它自己报错。
-- **编辑器元数据页那条是另一件事**：`tools/workshop-pack.mjs` 的 `PACK_META_FIELDS` 不含 `api` / `game`，所以
-  元数据页显示不出它们（只显示 `gameVersion`）—— 本刀**没动**，见 `docs/WORKSHOP.md` §1.9 状态表那一行。
-- 测试：`test/workshopDeclTypes.test.js`（14 条：类型拒绝 / `"1"` 通过 / 缺键逐字节不变 / `null` 与空串语义 /
-  别名与优先级 / 非贡献项）。既有 11 处 mod 相关套件（`workshop*`、`modIdentity*`、`packMeta*`、`packAssets*`）
-  没有因此变红。
-
-**可变座位：房主用滑杆决定本房人数上限**（`shared/constants.js`、`shared/protocol.js`、`server/lobby.js`、`public/js/screens/{lobby,room}.js`，文档见 `docs/META.md` §1.9）。`SP_MAX_SEATS` 仍是**这台服务器允许**的最大座位数（缺省官方 4），房主在建房界面用滑杆选**本房**开几张座位卡（`MIN_SEATS` 2 … 服务器上限，缺省＝不另设上限）。`room.create.seatCap` 只作用于同盟房间，越界或垃圾值**点名拒绝**（`BAD_MSG` / `bad field seatCap`）而不是静默钳制；服务端再用同一个纯函数 `clampSeats` 兜底不走协议的调用方。`welcome.maxSeats` 只在服务器上限 ≠ 4 时才发，滑杆据此定范围。**容量为 4（或缺省）时 `room.state` 与协议帧逐字节不变**。快速匹配不受影响：队列上限就是服务器上限，被建房时还没有房主可问，因此不发 `seatCap`。（**本条的缺省值与队列口径已被 2026-10-12 的裁令更新**：缺省上限 4 → **20**，`welcome.maxSeats` 改成每次握手都发，快速匹配的队列门槛固定为**一间官方房 = 4**、不再跟随服务器上限 —— 见文首「未发布」一节。）
-
-**房主建房后仍可改本房容量**（`room.setSeatCap { code, seatCap }`，`docs/META.md` §1.9a）。房主可在房间里把自己这一房的座位数改大或改小，**守卫是两条**：`新上限 ≥ 房间内现有人数（真人 + AI）` **且** `新上限 > 最高被占座位号`（座位允许有空洞）—— 合起来让缩容只可能砍掉**空**座位，所以**永远不可能踢掉任何人**，也不会移动任何人的座位号。两种拒绝**分得开**：数字本身不合法 ⇒ `BAD_MSG`，数字合法但装不下现有人数 ⇒ 新的 `SEAT_CAP_TOO_SMALL`；一处都**不静默钳制**。另有 `NOT_HOST` / `NOT_IN_ROOM` / `ROOM_STARTED` / `BAD_TARGET`。改完广播 `room.state`，调回 4 时 `seatCap` 键消失 ⇒ 4→8→4 与改之前**逐字节相同**且幂等。房间页给房主一个滑杆（下限跟现有人数走、上限是服务器上限），座位网格与房间版式**一个字节没动**。
