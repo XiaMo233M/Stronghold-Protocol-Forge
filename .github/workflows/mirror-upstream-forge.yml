@@ -39,11 +39,14 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # 同步目标 = 这次运行所在的分支。这样从一次性分支上 dispatch 就只是「演练」，
+    # 绝不会碰 main；而 cron / 默认分支触发时它本来就是 main。
+    env:
+      TARGET: ${{ github.ref_name }}
     steps:
-      - name: Check out main (full history)
+      - name: Check out the triggering branch (full history)
         uses: actions/checkout@v4
         with:
-          ref: main
           fetch-depth: 0
 
       - name: Detect the game-vs-manager gap (we do NOT merge sganggs ourselves)
@@ -79,9 +82,9 @@ jobs:
           SHA="$(git rev-parse FETCH_HEAD)"
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "upstream =$SHA"
-          echo "fork main=$(git rev-parse HEAD)"
+          echo "本分支   =$(git rev-parse HEAD)"
           if git merge-base --is-ancestor "$SHA" HEAD; then
-            echo "上游 $SHA 已在 main 里 —— 无事可做"
+            echo "上游 $SHA 已在 $TARGET 里 —— 无事可做"
             echo "done=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -91,15 +94,17 @@ jobs:
         run: |
           set -uo pipefail
           SHA="${{ steps.up.outputs.sha }}"
+          PRE="$(git rev-parse HEAD)"
+          echo "pre=$PRE" >> "$GITHUB_OUTPUT"
           git config user.name "stronghold-sync-bot"
           git config user.email "actions@users.noreply.github.com"
-          if git merge --no-edit "$SHA" -m "sync: upstream Forge $SHA into main"; then
+          if git merge --no-edit "$SHA" -m "sync: upstream Forge $SHA into $TARGET"; then
             echo "merged=true" >> "$GITHUB_OUTPUT"
           else
             git diff --name-only --diff-filter=U > "${RUNNER_TEMP}/conflicts.txt" || true
             git merge --abort || true
             echo "merged=false" >> "$GITHUB_OUTPUT"
-            echo "::error::上游 $SHA 与 main 合并冲突"
+            echo "::error::上游 $SHA 与 $TARGET 合并冲突"
           fi
 
       - name: GATE — 契约面（我那几格 + 表面账本 + 复算）
@@ -136,16 +141,16 @@ jobs:
           grep -aE '^# fail|^ℹ fail' "${RUNNER_TEMP}/full.log" >> "$GITHUB_STEP_SUMMARY" || true
           grep -a '^✖ ' "${RUNNER_TEMP}/full.log" | sed 's/^✖ //' | sort -u | head -40 >> "$GITHUB_STEP_SUMMARY" || true
 
-      - name: Push main
+      - name: Push the synced branch
         if: steps.merge.outputs.merged == 'true'
         run: |
           set -euo pipefail
-          git push origin HEAD:main
+          git push origin "HEAD:refs/heads/$TARGET"
           {
-            echo "### main 已同步"
+            echo "### $TARGET 已同步"
             echo "- 上游 Forge：\`${{ steps.up.outputs.sha }}\`"
-            echo "- main -> \`$(git rev-parse HEAD)\`"
-            echo "- 本轮合入提交数：$(git rev-list --count HEAD^1..${{ steps.up.outputs.sha }})"
+            echo "- $TARGET -> \`$(git rev-parse HEAD)\`"
+            echo "- 本轮合入提交数：$(git rev-list --count '${{ steps.merge.outputs.pre }}..${{ steps.up.outputs.sha }}')"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail loudly (conflict or red gate -> branch + PR, never a silent green)
@@ -157,13 +162,13 @@ jobs:
           SHA="${{ steps.up.outputs.sha }}"
           SHORT="${SHA:0:8}"
           if [ "${{ steps.merge.outputs.merged }}" = "true" ]; then
-            BR="sync-gatefail/$SHORT"; REASON="上游合进来了但契约面门控红（或全量门控之外失败）——main 未改动。"
+            BR="sync-gatefail/$SHORT-$TARGET"; REASON="上游合进来了但门控红（契约面或复算）—— \`$TARGET\` 未改动。"
             git checkout -B "$BR"
             git commit --allow-empty -m "blocked upstream sync (gate): $SHORT"
           else
-            BR="sync-conflict/$SHORT"; REASON="上游 $SHORT 与 main 冲突，冲突文件见 SYNC-CONFLICTS.md。main 未改动。"
+            BR="sync-conflict/$SHORT-$TARGET"; REASON="上游 $SHORT 与 \`$TARGET\` 冲突，冲突文件清单见 SYNC-CONFLICTS.md。\`$TARGET\` 未改动。"
             {
-              echo "# 上游 $SHA 没能同步进 main"
+              echo "# 上游 $SHA 没能同步进 $TARGET"
               echo
               echo '## 冲突文件'
               echo '```'
@@ -175,7 +180,7 @@ jobs:
             git commit -m "conflict report: upstream $SHORT"
           fi
           git push -f origin "HEAD:refs/heads/$BR"
-          gh pr create --base main --head "$BR" \
+          gh pr create --base "$TARGET" --head "$BR" \
             --title "upstream sync blocked: $SHORT" \
             --body "$REASON 处理完重跑 mirror-upstream-forge 即可。" || echo "::warning::PR 未建立，手工看分支 $BR"
           exit 1
