@@ -152,3 +152,34 @@ It does not diagnose a particular user's GPU or persist a disabled renderer pref
 Community UI and recovery (§31.6): DIY reuses roster stats and skill previews; Swire's coins show current/cap. The lobby player chip opens statistics and the responsive header keeps optional controls from overlapping its title. Settlement's summary scrolls separately from Return. Failed board art can retry, and failed three.js imports use two bounded fresh URLs. Failed engine initialization can remount on online/visibility, at most twice consecutively, cleaning up each previous view; explicit fallback/2D stays selected.
 
 Replacing a field renderer also resets the game screen's entered-view identity. Frames are buffered while the replacement loads; after subscribing, the local runner re-shows full current metadata/snapshot, or the server resends the watched field. Real local and server-streamed battles preserve the same simulation object and clock through recovery, including enemies spawned before the new renderer existed.
+
+### UI-Hub port (ui-hub-package-20261013): shim disposition and what is not enabled (§10)
+
+The lobby's new layer comes from `ui-hub-package-20261013` (a third-party UI replacement package, QQ download, sha256
+`963ff83b…`). It is **not** installed as a package: its five new modules (`ui/transitions.js`, `ui/protocolScene.js`,
+`ui/matchFlow.js`, `ui/hubBackdrop.js`, `screens/sweep.js`), its stylesheets (appended whole to `screens/lobby.css` /
+`screens/loadout.css`) and its i18n keys were brought in one paragraph at a time, and the engine's own exports and
+features were never replaced. The package's own installer is **never** run.
+
+**Its seven compat shims are deliberately not installed.** Each one would be dead code here: this repository imports
+none of the package's `accounts` / `ownerName` / `skins` / `skinPicker` / `federation` / `matchmaking` /
+`randomMode` modules (0 imports each; the package's own `lobby.js` / `room.js` / `loadout.js`, which do import
+them, are not merged body-for-body). Per shim:
+
+| shim | disposition | why |
+|---|---|---|
+| `ui/accounts.js` | not installed; if the room's seat-portrait paragraph is ever merged, install it **with the package's honest semantics** | this engine has no account system (seats carry `name` / `playerId` only): `useAccount()` would return `null` and `AccountTag()` `null` — reporting "unknown", never made-up data |
+| `ui/ownerName.js` | same as `accounts` | there is no "server owner nickname" concept here (the host is `roomFacts(room, myId).isHost`); `isOwnerName()` would return `false` honestly |
+| `federation.js` | **not enabled** | no federation / node data source exists anywhere in this repository — the capability is absent, not merely unwired |
+| `ui/matchmaking.js` | **not enabled** | the package only uses it for a 缺人同盟 online count; this engine has its own quick match (`QuickMatchPanel`) and room list, and that board is not ported |
+| `randomMode` | **not enabled** | the 无限火力 mode does not exist here, so its entry point is not ported |
+| `ui/skins.js`, `ui/skinPicker.js` | pending evidence | to be decided by whether a real skin/appearance data source exists (see the loadout paragraph below) |
+
+**Declared but not enabled.** `matchFlow`'s `SearchPanel` / `FoundPanel` are mounted **in the lobby only**; their
+room-page use (the package's `rs-searchpanel`) is not enabled. `ui/transitions.js`'s `afterLeave` and `useRise` are
+imported nowhere yet (the package uses them for the room's seat rise and a waiting overlay) — only `useLeave` (the
+S.W.E.E.P. report) and `usePresence` (the 大厅背景 dialog's leave) are live. No shim has a single import.
+
+**Sync discipline.** When a later paragraph of the package's `room.js` / `loadout.js` is merged, follow the table
+above: install a shim only when that paragraph actually imports it, keep the honest `null` / `false` semantics rather
+than inventing data, and record any newly enabled or newly excluded capability in this section.
