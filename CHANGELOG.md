@@ -165,7 +165,7 @@ B1 要的是「按一下给我结论」，而那条结论必须与 `node tools/w
 
 ### 判据
 
-- `node --test`（全量一次，加 `--test-timeout=120000` 防止负载下个别 websocket 用例挂住）：`tests 8816 / suites 916 / pass 8808 / fail 2 / cancelled 1 / skipped 5`，用时约 254 s。三条红全在**服务端 / 计时**用例（`test/lobby.test.js:575` websocket lobby、`:593` 限流、`test/packMatchMsg.test.js:247`），逐个单独跑全绿（`test/lobby.test.js` 73/73、`test/packMatchMsg.test.js` 47/47），本次改动一行服务端代码都没碰 ⇒ 判为全量并发下的负载抖动；**装前基线核不到**（`_up` 里的基线发行包不带 `test/`，无法在装前树跑同一套判据）。
+- `node --test --test-concurrency=2`（全量一次，冻结树上）：`tests 8816 / suites 916 / pass 8811 / fail 0 / cancelled 0 / skipped 5`，用时 **739 s**。并发降到 2 之后原先那三条负载抖动（`test/lobby.test.js:575` websocket、`:593` 限流、`test/packMatchMsg.test.js:247`）**一条都不再红** ⇒ 判为全量并发下的负载抖动，不是回归；每条单独跑也全绿（`test/lobby.test.js` 73/73、`test/packMatchMsg.test.js` 47/47）。**装前基线核不到**（`_up` 里的基线发行包不带 `test/`，无法在装前树跑同一套判据）。
 - `test/roomSeatCap.test.js` 三处断言按新 DOM / 被取代的文案重钉（`.seats--dense` → 包版 `.rs--big`；
   `.room-bar__opts` → ⚙ 浮层里的 `RoomOptions`；同盟卡那条被包版改写的 msgid），行为断言一条未放松。
 - `node tools/i18n.mjs check --all --strict`：四包 1435/1435（新增 101 条逐条翻译、占位符逐个保留）。
