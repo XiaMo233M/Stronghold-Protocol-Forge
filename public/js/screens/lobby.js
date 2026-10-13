@@ -17,6 +17,7 @@ import { DIFFICULTIES, DIFFICULTY_NAMES, DIFFICULTY_COLORS, ROOM_CODE_LEN, MAX_S
 import { html, Button, Icon, MicroLabel, Panel, TextField, PingPill, AvatarFrame, Tooltip, Spinner, DifficultyIcon, doctorNo } from '../ui/components.js';
 import { Modal } from '../ui/components.js';
 import { useHubBackdrop, HubBackdrop, HubRadar, BackdropSettings, BackdropGlyph, backdropTheme } from '../ui/hubBackdrop.js';
+import { usePresence } from '../ui/transitions.js';
 import { toast, toastError } from '../ui/toasts.js';
 import { GuideButton } from '../ui/guide.js';
 import { openStats } from './stats.js';
@@ -451,6 +452,10 @@ export function LobbyScreen() {
   // 这一层是纯新增的装饰层, 大厅的既有结构、五件独有功能与 mod 面一行都不碰。
   const bg = useHubBackdrop();
   const [bgOpen, setBgOpen] = useState(false);
+  // 大厅背景对话框的离场 (ui/transitions.js usePresence): 引擎的 Modal 是「open=false 即卸载」,没有离场动画;
+  // usePresence 把 show=false 后的这一段(220ms)保持挂载,Modal 自带的 .modal.is-leaving 由它的 css 播完再收。
+  // 纯新增:bgOpen 本身仍是唯一状态源,这里只是把「卸载」推迟到动画之后。
+  const [bgShown, bgLeaving] = usePresence(bgOpen);
   const alive = useRef(true);
   const inFlight = useRef(false); // synchronous guard against double clicks (state updates are async)
   useEffect(() => () => { alive.current = false; }, []);
@@ -654,7 +659,7 @@ export function LobbyScreen() {
       </section>
     </div>
     ${sweepOpen ? html`<${SweepReport} onClose=${() => setSweepOpen(false)} />` : null}
-    <${Modal} open=${bgOpen} micro="LOBBY BACKDROP" title=${t('大厅背景')} onClose=${() => setBgOpen(false)}>
+    <${Modal} open=${bgOpen || bgShown} class=${bgLeaving ? 'is-leaving' : ''} micro="LOBBY BACKDROP" title=${t('大厅背景')} onClose=${() => setBgOpen(false)}>
       <${BackdropSettings} bg=${bg} />
     <//>
   </div>`;

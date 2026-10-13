@@ -311,6 +311,15 @@
 .hub-stage { position: relative; display: block; width: 100%; height: calc(1.5 * var(--t)); min-height: 54px; pointer-events: none; }
 .hub-stage .ps { inset: 0; height: 100%; opacity: .5; }
 
+/* 大厅背景对话框的离场（ui/transitions.js）。引擎的 Modal 是「open=false 即卸载」，它自己没有离场规则
+   （.rdialog / .pbanner / .toast 有，.modal 没有）。这里给 ui/screens/lobby.js 用 usePresence 保持挂载的
+   那 220ms 配一条：Modal 把自定义 class 加在 .modal__box 上，所以选择器是 .modal__box.is-leaving；
+   动画复用引擎既有的 rd-close（components.css 的确认对话框用的就是它）+ 包版段的 tr-out，不自造关键帧。
+   时长与 usePresence 的默认 220ms 对齐。 */
+.modal__box.is-leaving { animation: rd-close 180ms var(--ease-in-out) forwards; pointer-events: none; }
+.modal:has(> .modal__box.is-leaving) { animation: tr-out 200ms ease-in 20ms forwards; }
+.modal:has(> .modal__box.is-leaving)::before, .modal:has(> .modal__box.is-leaving)::after { display: none; }
+
 /* ⚠️ matchFlow（ui/matchFlow.js）的美术件（RadarScene / CreateArt / JoinArt）为什么没有挂进大厅：
    实测（1440×900，脚本 _up/ab.mjs）——把它们并排挂在 .create-box 与左栏里，.create-box 由 226px 变成
    304px，.mode-card 由 y=574 落到 y=743（视口高 900 ⇒ 掉到折叠线以下），.lobby-body 的 scrollHeight
