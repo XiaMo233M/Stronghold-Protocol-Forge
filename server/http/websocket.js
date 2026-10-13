@@ -202,22 +202,24 @@ function meterSocket(ws, req, traffic) {
  * @param {import('node:http').Server} server
  * @param {{ network: Network, log: object, lanes?: readonly import('./wsLanes.js').WsLane[],
  *   perMessageDeflate?: false|object, traffic?: ReturnType<typeof import('./traffic.js').createTrafficCounter>|null }} deps
- *   `perMessageDeflate` 来自 `transportPolicy(...)`（`pack.json.server.transport`, DESIGN §28.30）。缺省 `false`：调用方
- *   自己关掉这一格（`startServer` 从不这样调 —— 它给的是 `transportPolicy` 的生效值，0.2.6 起缺省是引擎的
- *   `WS_DEFLATE`）。
+ *   `perMessageDeflate` 来自 `transportPolicy(...)`（`pack.json.server.transport`, DESIGN §28.30）。**缺省是引擎自己的
+ *   `WS_DEFLATE`**（0.2.6 的缺省，与上游 `attachWebSocket` 逐字同一条）；只有**显式 `false`** 才关掉这一格 ——
+ *   包的 `server.transport: { deflate: false }` 走的就是这一条。
  *   `lanes` 是宿主的升级路径表（DESIGN §28.44）；缺省没有表 ⇒ 只有 /ws，行为与这一格之前逐字节相同。
  *   `traffic` 是流量计数（traffic.js）；缺省 null ⇒ 不数 socket（`createTrafficCounter` 之外的使用者，例如测试里
  *   那个假 Network）。
  * @returns {WebSocketServer}
  */
-export function attachWebSocket(server, { network, log, lanes, perMessageDeflate = false, traffic = null }) {
+export function attachWebSocket(server, { network, log, lanes, perMessageDeflate = undefined, traffic = null }) {
+  // 未指定 = 引擎缺省（WS_DEFLATE）；显式 false = 关（包声明 deflate:false / 调用方要求）。
+  const deflate = perMessageDeflate === undefined ? { ...WS_DEFLATE } : perMessageDeflate;
   // A bad table is a configuration error, and it fails here — at boot, named — rather than leaving the operator
   // with a lane that answers 404 forever (the silent-revert shape this family has been burned by before).
   const table = validateLanes(lanes ?? []);
   if (table.problems.length) throw new Error(`bad ws lane table: ${table.problems.join('; ')}`);
   if (table.lanes.length) log.info('[ws] lanes: ' + table.lanes.map((l) => `${l.path} (${l.id})`).join(', '));
 
-  const wss = new WebSocketServer({ noServer: true, maxPayload: WS_MAX_PAYLOAD, perMessageDeflate, clientTracking: false });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: WS_MAX_PAYLOAD, perMessageDeflate: deflate, clientTracking: false });
   wss.on('connection', (ws, req) => {
     if (traffic) meterSocket(ws, req, traffic);
     network.handleConnection(ws, req);
