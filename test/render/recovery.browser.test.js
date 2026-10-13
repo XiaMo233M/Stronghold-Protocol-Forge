@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+// 平台修复的第二处：GPU 基座按平台选（原先硬编码 macOS 的 `--use-angle=metal`，在 Windows 上会回落到 WARP 软件
+// 设备，产品自己的 `webgl2Available()` 会拒绝它 ⇒ 3D 棋盘永远开不起来）。只改测试的启动参数，断言一字不动。
+import { assertRealtimeGpu, gpuArgs } from '../helpers/gpu.mjs';
+
 // 截图落盘用 `fileURLToPath`（`new URL(...).pathname` 在 Windows 上给出 `/E:/…` ⇒ puppeteer 解析成 `E:\E:\…`）；
 // 平台缺陷修复，不改任何断言。
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -16,8 +20,9 @@ describe('renderer recovery after transient resource failures', { skip: !enabled
     class RecoveryMatch extends Match { constructor(opts) { super({ ...opts, clientCombat: !serverRun }); } }
     srv = await startServer({ port: 0, host: '127.0.0.1', quiet: true, MatchClass: RecoveryMatch, seedFn: () => 123 });
     const P = (await import('puppeteer-core')).default;
-    browser = await P.launch({ executablePath: CHROME, headless: true,
-      args: ['--no-first-run', '--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+    browser = await P.launch({ executablePath: CHROME, headless: true, args: gpuArgs() });
+    const gpu = await assertRealtimeGpu(browser, 'renderer recovery after transient resource failures');
+    console.log(`     GPU: ${gpu.renderer}`);
     mkdirSync(new URL('../e2e/out/', import.meta.url), { recursive: true });
   });
   after(async () => { await browser?.close(); await srv?.close(); });

@@ -16,6 +16,9 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Platform-picked GPU base (was a hardcoded macOS `--use-angle=metal`; see test/helpers/gpu.mjs). Assertions unchanged.
+import { assertRealtimeGpu, gpuArgs } from '../helpers/gpu.mjs';
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const OUT = path.join(ROOT, 'test/e2e/out');
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -30,7 +33,9 @@ describe('field view features in headless Chrome', { skip }, () => {
     const puppeteer = (await import('puppeteer-core')).default;
     const { startServer } = await import('../../server/index.js');
     srv = await startServer({ port: 0, host: '127.0.0.1', quiet: true });
-    browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ['--no-first-run', '--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+    browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: gpuArgs() });
+    const gpu = await assertRealtimeGpu(browser, 'field view features in headless Chrome');
+    console.log(`     GPU: ${gpu.renderer}`);
     mkdirSync(OUT, { recursive: true });
   });
   after(async () => {

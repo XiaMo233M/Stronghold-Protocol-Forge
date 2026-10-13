@@ -13,6 +13,12 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// The GPU base is chosen per platform (it used to be a hardcoded `--use-angle=metal`, the macOS backend: on Windows
+// ANGLE then falls back to the software WARP device, which the app's own `webgl2Available()` refuses — the 3D board
+// stayed off and reported `on: false` with an EMPTY error). Platform fix in the harness only; no assertion changed.
+// See test/helpers/gpu.mjs.
+import { assertRealtimeGpu, gpuArgs } from '../helpers/gpu.mjs';
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const OUT = path.join(ROOT, 'test/e2e/out');
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -33,7 +39,10 @@ describe('3D board in headless Chrome', { skip }, () => {
     const puppeteer = (await import('puppeteer-core')).default;
     const { startServer } = await import('../../server/index.js');
     srv = await startServer({ port: 0, host: '127.0.0.1', quiet: true });
-    browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ['--no-first-run', '--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+    browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: gpuArgs() });
+    // Fail loudly (naming the backend) instead of letting an unusable GPU surface later as `3D board on ()`.
+    const gpu = await assertRealtimeGpu(browser, '3D board in headless Chrome');
+    console.log(`     GPU: ${gpu.renderer}`);
     mkdirSync(OUT, { recursive: true });
   });
   after(async () => {
