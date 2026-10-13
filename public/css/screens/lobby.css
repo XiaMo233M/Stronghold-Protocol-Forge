@@ -308,7 +308,7 @@
    位置：挂在顶栏中心区（.topbar__center，引擎 components.css:1039 已经是 position:relative），
    宽度跟着中心区走，高度取一个偏矮的值，避免顶栏被撑高。
    ============================================================================================ */
-.lobby-proto-stage { position: relative; display: block; width: 100%; height: calc(.6 * var(--t)); min-height: 45px; pointer-events: none; }
+.lobby-proto-stage { position: relative; display: block; width: 100%; height: calc(.38 * var(--t)); min-height: 28px; pointer-events: none; }
 .lobby-proto-stage .ps { inset: 0; height: 100%; opacity: .5; }
 
 /* matchFlow（ui/matchFlow.js）三件美术。第 4 步第一版按「并列新增」挂上去，实测把 .mode-card 从 y=574
@@ -319,9 +319,9 @@
    - JoinArt 与 RadarScene 落在「加入同盟」面板**之后**，不影响 .mode-card 的可见性；只有 CreateArt
      在创建框里、与顶栏两处会占用模式卡上方的竖向空间
    实测数字见本次 commit message。 */
-.hub-art { position: relative; width: 100%; height: calc(.5 * var(--t)); min-height: 38px; pointer-events: none; opacity: .85; }
+.hub-art { position: relative; width: 100%; height: calc(.32 * var(--t)); min-height: 24px; pointer-events: none; opacity: .85; }
 .hub-art .mf-art { height: 100%; }
-.hub-radar-art { position: relative; width: 100%; height: calc(.6 * var(--t)); min-height: 45px; pointer-events: none; opacity: .5; }
+.hub-radar-art { position: relative; width: 100%; height: calc(.4 * var(--t)); min-height: 30px; pointer-events: none; opacity: .5; }
 .hub-radar-art .mf-radar { inset: 0; height: 100%; }
 
 /* 大厅背景对话框的离场（ui/transitions.js）。引擎的 Modal 是「open=false 即卸载」，它自己没有离场规则
