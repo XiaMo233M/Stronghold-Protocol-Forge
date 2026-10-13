@@ -22,6 +22,7 @@ import { SettingsButton } from '../ui/settings.js';
 import { PwaInstallButton } from '../ui/device.js';
 import { LoadoutButton } from './loadout.js';
 import { DEFAULT_DIFFICULTY, parsePlaytestParam } from './lobbyLinks.js';
+import { SweepReport } from './sweep.js';
 import { SupportButton } from './support.js';
 import { net, identity } from '../net.js';
 import { store, useStore, shallowEqual, loadPref, savePref } from '../store.js';
@@ -390,6 +391,29 @@ function QuickMatchPanel({ queue, busy, onCancel }) {
   <//>`;
 }
 
+// ---- S.W.E.E.P.报告 入口 (ui-hub-package-20261013, screens/sweep.js) -----------------------------------------------
+// 包版把这个入口画在它自己的「hub 板块」栏里 (ui-hub-package-20261013 的 screens/lobby.js SweepPlate); 本轮按
+// 裁定的 (甲) 路线做「只加不改」: 入口按钮挂在引擎顶栏的工具排里, 报告浮层挂在屏幕末尾, 引擎既有行一行不动。
+// 样式直接复用: sweep.js 与它的 .sw-* 规则、.hub-plate--sweep 的规则都在第 2 步那次提交里已经进仓库。
+
+/** S.W.E.E.P.报告的徽记: 正六边形 + 交叉的双剑 (取自包版 screens/lobby.js SweepGlyph, 未改动一字)。 */
+function SweepGlyph() {
+  return html`<svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+    <path d="M16 2.5 27.7 9.2v13.6L16 29.5 4.3 22.8V9.2z" fill="none" stroke="currentColor" stroke-width="1.5" />
+    <path d="M9 9l12.5 12.5M23 9 10.5 21.5" stroke="currentColor" stroke-width="2.2" />
+    <path d="M19.2 23.8l4.6-4.6M8.2 19.2l4.6 4.6M21.6 21.6l2.2 2.2M10.4 21.6l-2.2 2.2" stroke="currentColor" stroke-width="1.8" />
+  </svg>`;
+}
+
+/**
+ * 顶栏的 S.W.E.E.P.报告按钮: 打开 screens/sweep.js 的报告浮层 (盟约报告 / 策略报告 / 敌方资料)。
+ * @param {{ onClick: () => void }} props
+ */
+function SweepEntry({ onClick }) {
+  return html`<${Button} variant="secondary" square=${true} class="lobby-sweep" onClick=${onClick}
+    title=${t('S.W.E.E.P.报告：盟约、策略与敌方资料')} aria-label=${t('S.W.E.E.P.报告：盟约、策略与敌方资料')}><${SweepGlyph} /><//>`;
+}
+
 /** Lobby screen component. */
 export function LobbyScreen() {
   const me = useStore((s) => s.me, shallowEqual);
@@ -418,6 +442,8 @@ export function LobbyScreen() {
   // server already took us out of the queue.
   const [queue, setQueue] = useState(null);
   const [recent] = useState(recentRooms);
+  // S.W.E.E.P.报告浮层是否打开 (screens/sweep.js); 只在本地, 不落 pref —— 它是一次查看, 不是设置。
+  const [sweepOpen, setSweepOpen] = useState(false);
   const alive = useRef(true);
   const inFlight = useRef(false); // synchronous guard against double clicks (state updates are async)
   useEffect(() => () => { alive.current = false; }, []);
@@ -529,6 +555,7 @@ export function LobbyScreen() {
         <div class="topbar__tools">
           <${SettingsButton} class="lobby-settings" variant="secondary" square=${true} />
           <${GuideButton} class="lobby-guide" variant="secondary" square=${true} />
+          <${SweepEntry} onClick=${() => setSweepOpen(true)} />
           <${PwaInstallButton} class="lobby-pwa" square=${true} />
         </div>
       </div>
@@ -612,5 +639,6 @@ export function LobbyScreen() {
         </div>
       </section>
     </div>
+    ${sweepOpen ? html`<${SweepReport} onClose=${() => setSweepOpen(false)} />` : null}
   </div>`;
 }
