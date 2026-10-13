@@ -1520,6 +1520,23 @@ export function registerServer(host) {
 `MatchClass` 包装器原则上能改对局结果，而「要改结果的必须进房间摘要闸门与 golden 那条线」是业主裁决。只挂
 `boot` / `shutdown` / `healthz` 的模块碰不到对局，不需要它。
 
+**接收通道**（`"channels": ["borrow", …]`，DESIGN §28.23）：声明这个模块在对局里**接收**哪些包通道 —— 玩家从
+包自己的面板（§1.9.6 的 `client.panels[].messages` + `pack.msg`）发出来的消息，在**转发之前**投给本房间进行中的
+对局（`Match.handlePackMsg(playerId, { pack, channel, from, seat, data })`；`from` / `seat` 由平台从会话与座位
+解析，载荷里自称的身份不作数）。四条判据：每条通道名必须与面板那半边**共用同一份名字形状**
+（`PACK_CHANNEL_RE`）并**同时**被本包某个面板声明（否则没人发得出来，`MODULES_UNKNOWN_CHANNEL`）；最多 8 条
+（`MODULES_TOO_MANY_CHANNELS`）；不许重复（`MODULES_DUPLICATE_CHANNEL`）；模块必须挂 `matchClass`（否则没有
+接收人，`MODULES_CHANNELS_NEED_MATCH` ⇒ 整包仍须 `combat: true`）。**声明是可选的**：没写 `channels` 的模块在
+归一化清单里不长这个键，包身份逐字节不变（DESIGN §28.2 的老账）。
+
+**投递已收窄到声明过的通道**：装载结果把 `channels` 带出来（`server/modModules.js`），`server/index.js` 再从**裁后**
+的服务端模块推出「包 → 接收通道集合」（`workshop.serverChannels`），大厅在 `pack.msg` 里查它 —— **本包的服务端模块
+声明过这条通道，消息才投给对局**（`Match.handlePackMsg(playerId, msg)`，仍在限流之后、转发之前调，仍是 §28.14 的
+那一次）。只被面板声明、模块没声明的通道**投都不投**：客户端发得出来（面板那半边 §1.9.6），对局收不到 —— 收窄只
+影响「送不送进这一局」，**转发口径一字未动**。通道声明与接收方法两缺一（声明了 `channels` 却没挂 `handlePackMsg`）
+在装载期记一条**点名**日志但**不拒包**：方法可以挂在构造器的实例上，静态看不出来。一个通道都没声明的包没有接收入口
+（投递表里没有它这一行），行为与从前逐字节相同；收窄这一条由 `test/packMatchMsg.test.js` 钉住。
+
 **`healthz` 的回执有界**：扁平对象、值只能是字符串/数字/布尔/`null`、最多 12 个字段 / 2KB；嵌套或超限的那一条被
 **点名跳过**（其余字段照旧报到）。端点是给运维看的，不是数据通道。
 
@@ -1536,7 +1553,9 @@ export function registerServer(host) {
 
 **写错的拒绝码**：`MODULES_BAD_SHAPE` / `MODULES_UNKNOWN_FIELD` / `MODULES_BAD_ID` / `MODULES_DUPLICATE_ID` /
 `MODULES_BAD_ENTRY` / `MODULES_BAD_USES` / `MODULES_DUPLICATE_USE` / `MODULES_BAD_WRITE` / `MODULES_TOO_MANY` /
-`MODULES_NEED_COMBAT`（以上在形状层）；装载期与运行期另有 `MODULES_NO_REGISTER` / `MODULES_IMPORT_FAILED` /
+`MODULES_NEED_COMBAT` / `MODULES_BAD_CHANNELS` / `MODULES_BAD_CHANNEL` / `MODULES_DUPLICATE_CHANNEL` /
+`MODULES_TOO_MANY_CHANNELS` / `MODULES_CHANNELS_NEED_MATCH` / `MODULES_UNKNOWN_CHANNEL`（以上在形状层）；
+装载期与运行期另有 `MODULES_NO_REGISTER` / `MODULES_IMPORT_FAILED` /
 `MODULE_USE_UNDECLARED` / `MODULE_IO_BAD_PATH` / `MODULE_BAD_HOOK`。
 
 ### 1.13 `notices`：公告与鸣谢（已实现，服务端 + 声明）
@@ -2316,6 +2335,41 @@ node tools/workshop-pack.mjs rollback  demo         # 把升级时留底的上�
 **不抬版本**：`MOD_API_VERSION` 仍是 `1`、`PROTOCOL_VERSION` 仍是 `2`；没写这两个键的包**一个字节都不变**。
 
 完整规范见 [docs/design/mod-layer.md](design/mod-layer.md) §28.48。
+
+---
+
+### 1.27 启用声明（`enabled`）：**装好 ≠ 生效**
+
+**一句话**：`pack.json.enabled = true | false`。`false` = 这个包**装好了、但现在不参与** —— 目录留在工坊目录里，
+字节一个不动，装载期跳过它。这是今天没有的第三态：在此之前想让一个包暂时不参与，只能把 `pack.json` 改坏
+（响亮的失败）或把目录搬出去（作者自己都不知道发生了什么）。
+
+**它不是什么，比它是什么更重要**：`enabled` **不是**一条能力通道 —— 它打不开任何引擎里没有的东西
+（包能声明的格子见 [docs/MOD-SURFACE.md](MOD-SURFACE.md)，与本格无关）。它**也不是**热更新：装载期读一次，
+改它要**重启**（[design/mod-layer.md](design/mod-layer.md) §28.4 的「No hot reload」不受影响）。
+
+**形状与判据**（判据只有一份：`shared/enabled.js`）：
+
+```jsonc
+{
+  "enabled": false        // 省略或 true = 引擎今天的行为；false = 装载期跳过
+}
+```
+
+1. **只有布尔**：`"false"` / `0` / `null` / `"true"` 一律 `ENABLED_BAD_SHAPE` **整包拒** —— 一个被 JS 真值表放行的
+   假布尔是**静默失效**（作者写下 `"false"`，引擎读到「启用了」，中间没有人收到错误）。
+2. **缺省 = 今天**：不写 `enabled`，或写 `"enabled": true`，都与**今天逐字相同**。所以只有 `false` 会进包的
+   归一化清单 —— 无条件写 `true` 会让**所有已发布包**的包身份摘要改变（房间的摘要闸门会误判）。
+3. **跳过必须响亮**：`false` 的包不进已加载集合，而是进装载器的 `errors`（`ENABLED_FALSE`）并被逐条点名 warn。
+   一个静默消失的包比一个报错的包难查得多。跳过发生在读任何内容文件之前，所以它连声明的 `chess.json` 都不读。
+4. **不是贡献项**：只带 `"enabled": true` 的包照旧 `EMPTY_PACK`（与 `variants` / `playtest` / `behaviour` 同一条）。
+5. **客户端读不到它**：`welcome.mods[]` 不投影这一格 —— 没进已加载集合的包对房间**不存在**。
+
+**什么时候用它**：一个包内容还想要、但暂时不想让它参与对局（例如等适配下一个版本、或想 A/B 两份配置），
+而你又不想动它的字节。想让一个包**永久**不再参与，正确做法是从工坊目录里删掉它 —— `enabled: false` 是
+**暂停**，不是卸载。
+
+完整规范见 [docs/design/mod-layer.md](design/mod-layer.md) §28.50。
 
 ---
 

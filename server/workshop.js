@@ -32,6 +32,9 @@ import { kitImportDeclarations, kitImportIssues, packRelativePath, rewriteKitImp
 // 公告 / 鸣谢的装载期判据（DESIGN §28.15）：声明的 `.json` 在不在、是不是 JSON。合并体在 `server/index.js` 里经
 // 既有的合并数据通道送出 —— 形状与判据只有一份，这个 import 就是那一份。
 import { noticesIssues } from './notices.js';
+// 启用声明（DESIGN §28.50）：**装好 ≠ 生效**。判据只有一份在 `shared/enabled.js`（`packEnabled`）—— 这里只负责
+// 把它的裁决接进装载器那份 `errors` 报告，不在这里重判一遍布尔。
+import { packEnabled } from '../shared/enabled.js';
 // 包的**文件清单**（DESIGN §28.2, 业主裁决 B）：身份哈希与客户端下载清单读的是同一份 `listPackFiles` —— 两份
 // 清单漂移就等于这个特性没做，所以枚举器与那条保留的合成路径名一起住在 server/packFiles.js。
 import { ASSETS_DIGEST_PATH, listPackFiles } from './packFiles.js';
@@ -125,6 +128,23 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
     // 任何载荷，只在启动日志里说一句它在（那是 Stardust 宿主的包）。
     if (manifest.pack.target === 'stardust') {
       foreign.push({ pack: name, reason: 'target "stardust" — declaration-only, loaded by the Stardust host (not by this engine)' });
+      continue;
+    }
+    // 启用声明（DESIGN §28.50）：`pack.json.enabled === false` = 这个包装好了但现在不参与。放在这里 ——
+    // **归一化之后、读任何内容文件之前** —— 所以一个被关掉的包连 `chess.json` 都不读：它今天不贡献任何东西，
+    // 为它报「缺文件」是噪声。判据只有一份（`shared/enabled.js packEnabled`），这里只负责把它接进同一个
+    // `errors` 报告：一个静默消失的包比一个报错的包更难查，所以跳过必须响亮（与坏包同一个裁剪点）。
+    //
+    // 位置**在 stardust 那一支之后**（与本 PR 的原文相比，这是按内容并的一处偏差）：`target: "stardust"` 的包
+    // 本来就不进本引擎的装载集合（它在 `foreign` 里），「生效与否」是那个宿主的事 —— 把闸门放在它前面会让
+    // 一个被暂停的 stardust 包从 `foreign` 里消失、变成一条 `ENABLED_FALSE` 错误，那既不是它现在的语义，
+    // 也不是这一格要管的那批包（它管的是**本来会被装载**的包）。
+    //
+    // 这一格**不是**热更新（DESIGN §28.4 的「No hot reload」不受影响）：`enabled` 装载期读一次，改它要重启，
+    // 与今天改 `pack.json` 任何一格同一条规矩。
+    const enabled = packEnabled(manifest.pack);
+    if (!enabled.enabled) {
+      errors.push({ pack: name, reason: enabled.reason });
       continue;
     }
     /** @type {Record<string, Record<string, object>>} */

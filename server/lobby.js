@@ -539,6 +539,21 @@ export class Lobby {  /**
       for (const channel of panel.messages) this.packChannels.get(panel.pack).add(channel);
     }
     /**
+     * 包通道的**投递面**（`server.modules[].channels`，DESIGN §28.23 / docs/WORKSHOP.md §1.12）：`<包id>` → 这个包的
+     * 服务端模块声明过的接收通道集合。与上面那张 `packChannels`（客户端能说什么）成对：那张表决定消息**收不收**，
+     * 这张决定消息送不送进**这一局**（`Match.handlePackMsg`）。由 `server/index.js` 从**裁后**的服务端模块装载结果
+     * 推出（没声明 `channels` 的模块不长这个键），这里只做一次浅拷贝。没有包声明它时是空表 ⇒ `pack.msg` 的投递路径
+     * 与从前逐字节相同：**未声明的通道投不进对局**（转发照旧，那是面板那半边 §1.9.6 的判据，这一刀没有动它）。
+     * @type {Map<string, Set<string>>}
+     */
+    this.serverChannels = new Map();
+    const declaredServerChannels = this.workshop && this.workshop.serverChannels;
+    if (declaredServerChannels instanceof Map) {
+      for (const [packId, channels] of declaredServerChannels) {
+        if (typeof packId === 'string' && channels) this.serverChannels.set(packId, new Set(channels));
+      }
+    }
+    /**
      * 快捷短语的服务端白名单（`room.quickMsg`）。与 `packChannels` 同一个形状的「不认识就点名」判据：**表里没有
      * 的 id 不会被转发**，接收端因此永远不必对着一堆不认识的 id 猜文案。默认 `DEFAULT_QUICK_PHRASES`。
      * 用 `options.quickPhrases` 换掉（部署方口径），显式传空数组即「这个服务器不做快捷消息」。
@@ -748,10 +763,12 @@ export class Lobby {  /**
    *   3. 载荷大小由 `validateC2S` 卡过（`PACK_MSG_LIMITS.bytes`），这里再卡**频率**（每会话令牌桶，超了 `ERR.RATE`）；
    *   4. 送回**同一个房间**的成员与旁观者。引擎不解释 `data`，也不判断谁该收到 —— 客户端只把消息交给声明过这个
    *      通道的面板，那是「第二个读者」的判据（`extensions.js` 的 `net.on(channel, …)`）。
-   *   5. 若房间里跑着对局，且它的 `Match` 上有 `handlePackMsg(playerId, msg)`（这是 `server.modules` 的
-   *      `matchClass` 包装器唯一能收到网络消息的地方，DESIGN §28.14），**在限流之后、转发之前**调一次：
+   *   5. 若房间里跑着对局、它的 `Match` 上有 `handlePackMsg(playerId, msg)`（这是 `server.modules` 的
+   *      `matchClass` 包装器唯一能收到网络消息的地方，DESIGN §28.14），**且这个包的服务端模块声明过这个通道**
+   *      （`server.modules[].channels`，§28.23）—— 三条齐了才**在限流之后、转发之前**调一次：
    *      返回 `true` 或 `{ consumed: true }` = **已消费**，不再转发给同房其它人；其余返回值（含 `false` /
-   *      `undefined`）与**抛错**都当作未消费，照旧转发 —— 一条坏消息不能把整个转发打断。
+   *      `undefined`）与**抛错**都当作未消费，照旧转发 —— 一条坏消息不能把整个转发打断。没声明过的通道**投都不投**
+   *      （转发照旧）：`channels` 是接收入口，不是注释。
    * @param {import('./net.js').Session} session
    * @param {{ pack: string, channel: string, data?: any }} msg
    */
@@ -764,11 +781,16 @@ export class Lobby {  /**
     }
     if (!this.packMsgAllowed(session)) return fail(ERR.RATE);
     // 对局子类的触发点（业主裁决 2026-10-10 的 A 方案，DESIGN §28.14）：`matchClass` 包装器本来就能碰到整个 Match，
-    // 这里只补「消息到了」这一下。复用 `callMatch` 已有的 try/catch 与点名日志 ⇒ 钩子抛错时返回 undefined，
-    // 落进下面「未消费」那一条，转发照旧。`session.playerId` **可能是观战者**（`pack.msg` 没有旁观者判据，与
-    // `room.chat` 的 `ERR.SPECTATOR` 不同口径），判不判由包自己决定。
-    const hook = this.callMatch(room, 'handlePackMsg', session.playerId, msg);
-    if (hook === true || (hook !== null && typeof hook === 'object' && hook.consumed === true)) return OK;
+    // 这里只补「消息到了」这一下。**投递收窄到本包服务端模块声明过的通道**（`server.modules[].channels`，§28.23）：
+    // 没声明过的通道没有接收入口，投都不投 —— 这是本格的判据，不是注释，`test/packMatchMsg.test.js` 钉住它。
+    // 转发口径一字未动：这仍然是**面板**那半边（§1.9.6）的事，收窄只影响「送不送进这一局」。复用 `callMatch` 已有的
+    // try/catch 与点名日志 ⇒ 钩子抛错时返回 undefined，落进下面「未消费」那一条，转发照旧。`session.playerId`
+    // **可能是观战者**（`pack.msg` 没有旁观者判据，与 `room.chat` 的 `ERR.SPECTATOR` 不同口径），判不判由包自己决定。
+    const declaredInMatch = this.serverChannels.get(msg.pack);
+    if (declaredInMatch && declaredInMatch.has(msg.channel)) {
+      const hook = this.callMatch(room, 'handlePackMsg', session.playerId, msg);
+      if (hook === true || (hook !== null && typeof hook === 'object' && hook.consumed === true)) return OK;
+    }
     const out = {
       t: 'pack.msg', pack: msg.pack, channel: msg.channel, from: session.playerId,
       ...(msg.data === undefined ? {} : { data: msg.data }),

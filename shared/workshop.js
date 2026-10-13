@@ -29,6 +29,8 @@ import { parseVariantsDecl } from './variants.js';
 // 行为开关层（DESIGN §28.43）：与口径**同一形状、不同一张表**，判据只有一份在 `shared/behaviour.js`。同样不在这里
 // 重判一遍闭枚举 —— 而且这一层的表今天是**空的**（通道 + 守卫先落，第一格与它的引擎实现点一起落）。
 import { parseBehaviourDecl } from './behaviour.js';
+// 启用声明（DESIGN §28.50）：装好 ≠ 生效。判据只有一份在 `shared/enabled.js`（`parseEnabledDecl`）。
+import { parseEnabledDecl } from './enabled.js';
 // 特质授予的盟约（`trait.grantsBonds`，DESIGN §28.49）：装载期那一条点名走**同一份判据**（`traitGrantIssues`），
 // 作者侧的点名在 `shared/chessAuthoring.js` 的 `validateChessRecord` 里读同一个函数。
 import { traitGrantIssues } from './morph.js';
@@ -138,6 +140,8 @@ export const PACK_FIELDS = Object.freeze([
   'notices',
   // 行为开关（**不是**贡献项）
   'playtest',
+  // 启用声明（DESIGN §28.50）：装好 ≠ 生效。`false` = 装载期跳过（见 `shared/enabled.js`）。**不是**贡献项。
+  'enabled',
   // 变体 / 口径声明（DESIGN §28.39）：这个包要哪一套口径（练度 / 部署位）。**不是**贡献项，也**不是**一条
   // 数值覆盖通道 —— 它只能声明轴的闭枚举里有的选项名，值由引擎自己给（`shared/variants.js`）。
   'variants',
@@ -406,11 +410,15 @@ const CLIENT_PANEL_FIELDS = Object.freeze(['id', 'slot', 'module', 'order', 'gat
 /** 一个面板最多声明几条包通道（上限让「通道」这件事有界；今天没有一个真包用到两条以上）。 */
 const CLIENT_MAX_PANEL_MESSAGES = 8;
 /**
- * 一条**包通道**的名字（`client.panels[].messages`，docs/WORKSHOP.md §1.9.6）。作者只写后半段，线上是
- * `<包id>.<名字>` —— 所以这个名字必须是**小写字母开头的短名**：它会出现在线上、会进 `pack.msg` 的字段、
- * 要能被 `^[a-z][a-z0-9_-]{0,63}$` 判死（拼错一个名字就是一条永远收不到的消息，那正是这一层到处在拒绝的形态）。
+ * 一条**包通道**的名字（docs/WORKSHOP.md §1.9.6）。作者只写后半段，线上是 `<包id>.<名字>` —— 所以这个名字必须是
+ * **小写字母开头的短名**：它会出现在线上、会进 `pack.msg` 的字段、要能被 `^[a-z][a-z0-9_-]{0,63}$` 判死（拼错一个
+ * 名字就是一条永远收不到的消息，那正是这一层到处在拒绝的形态）。
+ *
+ * **一份判据，两半共用**（DESIGN §28.23）：`client.panels[].messages`（这个包**说得出**哪些通道）与
+ * `server.modules[].channels`（这个包的对局**收得到**哪些通道）必须是同一批名字 —— 各写一套就等于允许
+ * 「说得出但收不到」或「收得到但说不出」这两种永远不生效的声明。所以它从这里导出，不再各写一份。
  */
-const CLIENT_PANEL_CHANNEL_RE = /^[a-z][a-z0-9_-]{0,63}$/;
+export const PACK_CHANNEL_RE = /^[a-z][a-z0-9_-]{0,63}$/;
 /**
  * 一个面板可以**读**的数据表（业主裁决 2026-10-10 的「数据口」那一半，DESIGN §28.8）。
  *
@@ -520,9 +528,15 @@ const ROOM_MODULE_EXT = '.mjs';
  */
 export const SERVER_MODULE_USES = Object.freeze(['boot', 'shutdown', 'matchClass', 'healthz', 'metrics', 'route']);
 /** `server.modules[*]` 的字段，一个不多一个不少。 */
-const SERVER_MODULE_FIELDS = Object.freeze(['id', 'entry', 'uses', 'write']);
+const SERVER_MODULE_FIELDS = Object.freeze(['id', 'entry', 'uses', 'write', 'channels']);
 /** 一个包最多声明几个服务端模块。 */
 const MAX_SERVER_MODULES = 8;
+/**
+ * 一个服务端模块最多声明几条**接收通道**（`server.modules[].channels`，DESIGN §28.23）：玩家从包自己的面板
+ * （`client.panels[].messages` + `pack.msg`）发出来的消息，由**这一格**声明谁在对局里收。与面板那半边的
+ * `CLIENT_MAX_PANEL_MESSAGES` 同一个数量级 —— 这不是数据通道，是玩法动作的入口，写着是为了让它有界。
+ */
+export const MAX_SERVER_MODULE_CHANNELS = 8;
 /** 服务端模块的扩展名：它是**服务端**加载的 ESM（浏览器不加载，战斗也不加载）。 */
 const SERVER_MODULE_EXT = '.mjs';
 /**
@@ -792,7 +806,7 @@ function parseClientDecl(raw) {
         return fail('CLIENT_BAD_PANEL_MESSAGES', `client.panels["${panel.id}"].messages: at most ${CLIENT_MAX_PANEL_MESSAGES} channels per panel`);
       }
       for (const channel of panel.messages) {
-        if (typeof channel !== 'string' || !CLIENT_PANEL_CHANNEL_RE.test(channel)) {
+        if (typeof channel !== 'string' || !PACK_CHANNEL_RE.test(channel)) {
           return fail('CLIENT_BAD_PANEL_CHANNEL', `client.panels["${panel.id}"].messages: "${String(channel)}" is not a channel name (lowercase letter first, then a-z 0-9 _ -, at most 64 — the wire name is "<this pack's id>.<channel>")`);
         }
       }
@@ -941,12 +955,38 @@ function parseServerModulesDecl(raw) {
     if (mod.write !== undefined && typeof mod.write !== 'boolean') {
       return fail('MODULES_BAD_WRITE', `server.modules["${mod.id}"].write must be true or false (may this module write into its own state directory?)`);
     }
+    // `channels`（DESIGN §28.23）：这个模块在对局里**接收**哪些包通道。判据四条，与面板那半边同一个通道名形状
+    //（`PACK_CHANNEL_RE`）——「客户端能说什么」与「服务端在对局里收什么」必须是同一批名字，不能各写一套。
+    if (mod.channels !== undefined) {
+      if (!Array.isArray(mod.channels) || !mod.channels.length) {
+        return fail('MODULES_BAD_CHANNELS', `server.modules["${mod.id}"].channels must be a non-empty array of channel names (drop the key instead of sending []) — the names are the ones a panel of this pack declares in "messages"`);
+      }
+      if (mod.channels.length > MAX_SERVER_MODULE_CHANNELS) {
+        return fail('MODULES_TOO_MANY_CHANNELS', `server.modules["${mod.id}"].channels: at most ${MAX_SERVER_MODULE_CHANNELS} channels per module (got ${mod.channels.length})`);
+      }
+      for (const channel of mod.channels) {
+        if (typeof channel !== 'string' || !PACK_CHANNEL_RE.test(channel)) {
+          return fail('MODULES_BAD_CHANNEL', `server.modules["${mod.id}"].channels: "${String(channel)}" is not a channel name (^[a-z][a-z0-9_-]{0,63}$ — the same shape client.panels[].messages uses)`);
+        }
+      }
+      if (new Set(mod.channels).size !== mod.channels.length) {
+        return fail('MODULES_DUPLICATE_CHANNEL', `server.modules["${mod.id}"].channels lists the same channel twice`);
+      }
+      // 通道的接收人是**对局**（`Match.handlePackMsg`），而对局只可能是 `matchClass` 包装器交给平台的 —— 所以
+      // 没有 matchClass 的 channels 是一条没有接收人的声明。拒掉，而不是让它永远不生效（本层到处在消灭的形态）。
+      if (!mod.uses.includes('matchClass')) {
+        return fail('MODULES_CHANNELS_NEED_MATCH', `server.modules["${mod.id}"].channels is delivered to the running match (Match.handlePackMsg, DESIGN §28.23), so this module must also declare the "matchClass" mount point — channels without matchClass have no receiver`);
+      }
+    }
     out.push({
       id: mod.id,
       entry: mod.entry,
       // 按闭枚举次序（不按作者书写顺序）：清单字节要稳定，与 `requires` / `registers` 同一条。
       uses: SERVER_MODULE_USES.filter((u) => mod.uses.includes(u)),
       write: mod.write === true,
+      // 只在**声明了的时候**进清单（声明进身份哈希，没声明的包逐字节不变），并且排序：两个书写顺序不同的
+      // 写法必须是同一个包（与 `uses` 按闭枚举次序同一条纪律）。
+      ...(mod.channels === undefined ? {} : { channels: [...mod.channels].sort() }),
     });
   }
   out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -2214,6 +2254,22 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (clientParsed && !clientParsed.ok) return clientParsed;
   const serverParsed = raw.server === undefined ? null : parseServerDecl(raw.server);
   if (serverParsed && !serverParsed.ok) return serverParsed;
+  // 包通道的服务端那一半（DESIGN §28.23）：`server.modules[].channels` 里点名的每一条，必须也被本包的某个面板
+  // 声明过（`client.panels[].messages`）。理由不是洁癖：Lobby 的 `packChannels` 白名单是**从面板清单推出来的**
+  // —— 没有面板声明过的通道，客户端根本发不出来，那是一条「声明了却不可能发生」的声明。
+  if (serverParsed) {
+    const panelChannels = new Set();
+    for (const panel of (clientParsed ? clientParsed.decl.panels : [])) {
+      for (const channel of (panel.messages || [])) panelChannels.add(channel);
+    }
+    for (const m of serverParsed.decl.modules || []) {
+      for (const channel of m.channels || []) {
+        if (!panelChannels.has(channel)) {
+          return fail('MODULES_UNKNOWN_CHANNEL', `server.modules["${m.id}"].channels: "${channel}" is not declared by any of this pack's client.panels[].messages — the engine only lets a pack send the channels its panels declare, so this one could never arrive (add it to a panel's "messages", or drop it here)`);
+        }
+      }
+    }
+  }
   const routesParsed = raw.routes === undefined ? null : parseRoutesDecl(raw.routes);
   if (routesParsed && !routesParsed.ok) return routesParsed;
   // `i18n`（fanpack G-04）：给**已有语种**补词条的声明，形状见 `parseI18nDecl`。它同样遵守上面那条
@@ -2255,6 +2311,11 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // 它自己不带来任何内容。所以一个只带 `behaviour` 的包照旧 `EMPTY_PACK`（文案里点名它）。
   const behaviourParsed = raw.behaviour === undefined ? null : parseBehaviourDecl(raw.behaviour, opts.behaviourSwitches);
   if (behaviourParsed && !behaviourParsed.ok) return behaviourParsed;
+  // 启用声明（DESIGN §28.50）：`false` = 这个包装好了但现在不参与。**不是贡献项**（与 `variants` 同一个语义）：
+  // 一个只写 `"enabled": true` 的包什么都没带来，照旧 `EMPTY_PACK`；而 `"enabled": false` 的包连装载都不进
+  // （`server/workshop.js loadWorkshop` 在归一化之后读它），所以它也到不了 `EMPTY_PACK` 那一行。
+  const enabledParsed = raw.enabled === undefined ? null : parseEnabledDecl(raw.enabled);
+  if (enabledParsed && !enabledParsed.ok) return enabledParsed;
   // 目标引擎（`target`，DESIGN §28.46）：缺省 `forge`（本引擎自己装）。`stardust` 的包是**声明型**的 ——
   // 本引擎认识它、不装载它（server/workshop.js 记一行 foreign），所以它不需要任何 Forge 贡献项
   // （EMPTY_PACK 对它不适用），`type` / `capabilities` 两格按 Stardust profile 校验。写了才进归一化结果。
@@ -2286,6 +2347,12 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (conflictsParsed) declared.push(['conflicts', conflictsParsed.decl]);
   if (formsParsed) declared.push(['forms', formsParsed.decl]);
   if (fxParsed) declared.push(['fx', fxParsed.decl]);
+  // `enabled` 比 `variants` / `behaviour` 多一条约束（§28.50 的判据 2：**缺省 = 引擎今天的行为**）：
+  // 无条件写进去会让 `"enabled": true` 与「没写」在**数据上**不再等价 —— 而 `identifyPack` 哈希的正是
+  // `canonicalJson(pack)`（`server/workshop.js` step 1），于是写了 `true` 的包会换掉包身份、房间摘要跟着漂，
+  // 而它做的事与没写一字不差。所以**只有 `false` 才进清单**：那是这一格唯一真正改变行为的取值，
+  // 「装好了但不参与」必须进身份（两台机器摘要相同 ⇒ 行为相同）；`true` 与缺席在数据上逐字等价。
+  if (enabledParsed && enabledParsed.value === false) declared.push(['enabled', false]);
   /** 一条声明算不算「贡献」：归一化后的值里有没有东西。`routes: []` 与 `client: { panels: [], requires: [] }`
    *  都是**合法但什么都不做**的声明（与 `voices: {}` / `art: { chars: {} }` 同一个语义），照旧不算贡献 ——
    *  所以「一个只写了 `routes: []` 的包」仍然是空包。反向的那条同样载重：`assets` / `client.panels` /
