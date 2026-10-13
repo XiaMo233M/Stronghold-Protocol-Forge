@@ -2,11 +2,12 @@
 //
 //   * session wiring: SessionRegistry (reconnect tokens) → Lobby (rooms, server/lobby.js) → Network (the socket
 //     protocol, server/net.js), built from the startServer() options (config.js decides which go where);
-//   * WebSocket (ws) at /ws, maxPayload 64 KB, per-message deflate OFF unless a pack declares
-//     `pack.json.server.transport` (DESIGN §28.30 — declarative only: a pack never injects server code to change the
-//     socket) → Network.handleConnection. Refused at the upgrade: any other path 404; per-network socket limit for
-//     internet clients (maxConnectionsPerAddr, see net.js clientAddress; local/LAN peers are exempt) 429; server full
-//     (maxConnections) or shutting down 503.
+//   * WebSocket (ws) at /ws, maxPayload 64 KB, permessage-deflate from 1 KB (WS_DEFLATE — the engine's own default
+//     since 0.2.6; the host's lanes and the traffic counters, traffic.js, ride the same listener). A pack may still
+//     only DECLARE it off or re-tune it (`pack.json.server.transport`, DESIGN §28.30 — declarative only: a pack never
+//     injects server code to change the socket) → Network.handleConnection. Refused at the upgrade: any other path 404;
+//     per-network socket limit for internet clients (maxConnectionsPerAddr, see net.js clientAddress; local/LAN peers
+//     are exempt) 429; server full (maxConnections) or shutting down 503.
 //   * the same upgrade event also answers the host's lane table (DESIGN §28.44, server/http/wsLanes.js): other exact
 //     paths the operator registered, each handing the socket to code the operator installed. No lanes (the default,
 //     and the only thing a plain `npm start` has) ⇒ /ws accepted and every other path 404, exactly as before.
@@ -31,10 +32,15 @@ export const WS_MAX_PAYLOAD = 64 * 1024;
  * negotiate it by themselves; a client that offers none gets plain frames. The inflated size of a client frame still
  * counts against WS_MAX_PAYLOAD.
  *
- * 0.2.6 进场（本仓的接法，与上游那一格**并存**）：这一份是「引擎自己的」压缩参数。包仍然只能**声明**
- * （`pack.json.server.transport`, DESIGN §28.30）它要不要开压缩，而 `transportPolicy` 把这一份当作**基线**：
- * 没有包声明 ⇒ 仍走本仓的 `perMessageDeflate: false`（浏览器在 `http://` 的 LAN 地址上不协商，开了也只是白挂一层
- * zlib 状态），包声明 `deflate: true` ⇒ 基线 + 该包声明过的那几个键（`threshold=512` 这类仍然生效）。
+ * 0.2.6 进场（本仓的接法）：这一份是「引擎自己的」压缩参数，也是 `transportPolicy` **没有包声明时的缺省**
+ * （`attachWebSocket` 未指定时同样落在这里）。包依旧只能**声明**（`pack.json.server.transport`, DESIGN §28.30）：
+ *   * 没有包声明 ⇒ 这一份原样生效（0.2.6 改了缺省：从前是 `perMessageDeflate: false`。理由：这是上游 0.2.6
+ *     「服务器流量层」的真实缺省，而流量计数要报的正是「压缩省了多少」；代价：`http://` 的 LAN 地址上浏览器不协商
+ *     `br`/`deflate`，那类客户端只多挂一层 zlib 状态，功能与字节不受影响）；
+ *   * 包声明 `deflate: true` ⇒ 这一份当**基线**，该包声明过的那几个键盖在上面（`threshold=512` 这类仍然生效）；
+ *   * 包声明 `deflate: false` ⇒ **关**（`transportPolicy` 里 `winner.deflate !== true` 那条分支），这是显式关闭的
+ *     唯一入口，不许静默回退成「引擎缺省开着」；
+ *   * `attachWebSocket` 收到显式 `false` 时同样关（只有 `undefined` 才落回这一份缺省）。
  */
 export const WS_DEFLATE = Object.freeze({
   threshold: 1024,
