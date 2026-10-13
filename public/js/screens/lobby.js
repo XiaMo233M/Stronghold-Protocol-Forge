@@ -27,6 +27,7 @@ import { LoadoutButton } from './loadout.js';
 import { DEFAULT_DIFFICULTY, parsePlaytestParam } from './lobbyLinks.js';
 import { SweepReport } from './sweep.js';
 import { ProtocolScene } from '../ui/protocolScene.js';
+import { RadarScene, CreateArt, JoinArt } from '../ui/matchFlow.js';
 import { SupportButton } from './support.js';
 import { net, identity } from '../net.js';
 import { store, useStore, shallowEqual, loadPref, savePref } from '../store.js';
@@ -578,7 +579,7 @@ export function LobbyScreen() {
         <${HubRadar} bg=${bg} />
         <${MicroLabel} tone="mint">SIMULATION PROTOCOL SELECT<//>
         <h1 class="topbar__title">${t('选择模拟协议')}</h1>
-        <section class="proto-stage hub-stage" style=${`--d-color:${DIFFICULTY_COLORS[difficulty]}`} aria-hidden="true">
+        <section class="lobby-proto-stage" style=${`--d-color:${DIFFICULTY_COLORS[difficulty]}`} aria-hidden="true">
           <${ProtocolScene} key=${difficulty} difficulty=${difficulty} />
         </section>
       </div>
@@ -621,6 +622,8 @@ export function LobbyScreen() {
               : html`<span class="t-dim">${t('向同伴索取 {ROOM_CODE_LEN} 位同盟密钥，或直接打开邀请链接', { ROOM_CODE_LEN })}</span>`}
           </div>
         <//>
+        <div class="hub-art" aria-hidden="true"><${JoinArt} /></div>
+        <div class="hub-radar-art" aria-hidden="true"><${RadarScene} /></div>
         <${TipsPanel} />
       </section>
 
@@ -655,6 +658,7 @@ export function LobbyScreen() {
               ? html`<span>${roomMode === 'solo' ? t('创建后即可开始模拟') : t('创建后可邀请好友或添加 AI 队友')}</span>`
               : html`<${Spinner} size="sm" label="CONNECTING" />`}
           </div>
+          <div class="hub-art" aria-hidden="true"><${CreateArt} /></div>
         </div>
       </section>
     </div>

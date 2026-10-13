@@ -308,8 +308,21 @@
    位置：挂在顶栏中心区（.topbar__center，引擎 components.css:1039 已经是 position:relative），
    宽度跟着中心区走，高度取一个偏矮的值，避免顶栏被撑高。
    ============================================================================================ */
-.hub-stage { position: relative; display: block; width: 100%; height: calc(1.5 * var(--t)); min-height: 54px; pointer-events: none; }
-.hub-stage .ps { inset: 0; height: 100%; opacity: .5; }
+.lobby-proto-stage { position: relative; display: block; width: 100%; height: calc(.6 * var(--t)); min-height: 45px; pointer-events: none; }
+.lobby-proto-stage .ps { inset: 0; height: 100%; opacity: .5; }
+
+/* matchFlow（ui/matchFlow.js）三件美术。第 4 步第一版按「并列新增」挂上去，实测把 .mode-card 从 y=574
+   推到 y=743（视口 900 ⇒ 掉出折叠线），当时的裁定是撤下。业主随后裁定**改高度预算**而不是放弃观感，
+   于是这一版把它们挂回来，并把**新层自己的**占位收到最小（引擎既有板块一行不压）：
+   - 顶栏里的 protocolScene 容器 .lobby-proto-stage 由 1.5rem(112.5px) 收到 .6rem(45px) —— 省 67.5px
+   - 三件美术各自 .5rem(38px) / .5rem(38px) / .6rem(45px)，且都 pointer-events:none（不抢点击）
+   - JoinArt 与 RadarScene 落在「加入同盟」面板**之后**，不影响 .mode-card 的可见性；只有 CreateArt
+     在创建框里、与顶栏两处会占用模式卡上方的竖向空间
+   实测数字见本次 commit message。 */
+.hub-art { position: relative; width: 100%; height: calc(.5 * var(--t)); min-height: 38px; pointer-events: none; opacity: .85; }
+.hub-art .mf-art { height: 100%; }
+.hub-radar-art { position: relative; width: 100%; height: calc(.6 * var(--t)); min-height: 45px; pointer-events: none; opacity: .5; }
+.hub-radar-art .mf-radar { inset: 0; height: 100%; }
 
 /* 大厅背景对话框的离场（ui/transitions.js）。引擎的 Modal 是「open=false 即卸载」，它自己没有离场规则
    （.rdialog / .pbanner / .toast 有，.modal 没有）。这里给 ui/screens/lobby.js 用 usePresence 保持挂载的
