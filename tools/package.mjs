@@ -174,8 +174,27 @@ export const REFUSE = ['pv', '3，9，11回合情况', 'review', 'docs/research/
 /** Home-directory paths: macOS / Linux (case as the OS writes them) and Windows (any case; / or \, JSON-escaped too). */
 const HOME_POSIX = /\/Users\/[A-Za-z]|\/home\/[A-Za-z]/;
 const HOME_WIN = /[A-Za-z]:[\\/]{1,2}Users[\\/]{1,2}[A-Za-z]/i;
-/** OS account names too generic to refuse (CI runners, containers). */
-const GENERIC_USERS = new Set(['root', 'user', 'admin', 'node', 'runner', 'ubuntu', 'ci', 'guest', 'app', 'build']);
+/**
+ * OS account names too generic to refuse (CI runners, containers) **and Windows' built-in principal names**.
+ *
+ * 为什么内建主体名要在这里：`scanNames` 拿 `os.userInfo().username` 去扫每一个出货文件的字节，撞上就算「泄露账号名」。
+ * 但 Windows 有一套**内建**主体名，它们出现在**引擎自己的源码里**是正常的事 —— 典型那一处是
+ * `scripts/install-service-windows.ps1` 的 `[Security.Principal.WindowsBuiltInRole]::Administrator`
+ * （PowerShell 的角色常量，不是任何人的账号名）。以管理员身份构建的机器，账号名恰好就是 `Administrator`，
+ * 于是这条闸门**每次都拒**，拒掉的却是一个内建常量 —— 误报，而且是构建机上过不去的那种。
+ *
+ * 修法是把这些**内建**名字列进「太笼统、单独不足以判定为泄露」的那一份，而**不是**关掉账号名扫描：
+ * 扫描照跑、家目录路径（`HOME_POSIX` / `HOME_WIN`）照拒，只是这些内建名字不再单独构成拒绝理由。
+ * 真把账号名写进产物的写法（`C:\Users\Administrator\…` 这类路径）仍会被家目录规则**先**拦下。
+ *
+ * 全部小写：`scanNames` 用 `user.toLowerCase()` 比。
+ */
+const GENERIC_USERS = new Set([
+  'root', 'user', 'admin', 'node', 'runner', 'ubuntu', 'ci', 'guest', 'app', 'build',
+  // Windows 内建主体名（本机以管理员身份构建时，账号名就是第一个）。
+  'administrator', 'system', 'localsystem', 'networkservice', 'localservice',
+  'defaultaccount', 'wdagutilityaccount',
+]);
 
 export const posixRel = (rel) => String(rel).split('\\').join('/');
 
