@@ -179,8 +179,10 @@ HTTP≥400 0**，画面落 `_up/up026c-shots/board3d_*.png`。
 `npm run golden` exit 0（六族 **49 / 46 / 22 / 20 / 10 / 140** 全部 match，六份语料逐字节未动）·
 `node tools/check-imports.mjs` exit 0（`server/sim/nodeData.js` 的 3 处 `sim-node` 是既有基线）·
 mod 闸门 `tools/check-packs.mjs --engine …` exit 0（`packs/` 10 个 + `demo/` 3 个全部装上）。
-牙证明：把 `shared/constants.js` 的 `UPSTREAM_VERSION` 改回 `'0.2.5'` ⇒ `test/promptBaseline.test.js` 当场红，
-点名 `README.md:427 / :638 / :680 / :735` 四处「当前基线」与 `docs/prompts/README.md:7`、`docs/prompts/kit.md:22`；
+牙证明（本批新加的一条判据）：把 `shared/constants.js` 的 `UPSTREAM_VERSION` 改回 `'0.2.5'` ⇒
+`test/docs-paths.test.js` 当场红（`'0.2.5' !== '0.2.6'`：「UPSTREAM_VERSION 是 0.2.5，而 docs/history 里最新的是 0.2.6」）；
+把 `README.md` 的「本仓库当前的底座」改回 0.2.5 ⇒ `test/promptBaseline.test.js` 红，点名 `README.md:638`
+（并会给全 `:427 / :680 / :735` 与 `docs/prompts/README.md:7`、`docs/prompts/kit.md:22` 那几处）；
 把 `lobby.js` 里 `seatCapRange` 的接线去掉 ⇒ `test/roomSeatCap.test.js` 红（`max: 4` 对 `max: 20`）。
 
 ---

@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { designText, DESIGN_DIRS } from './helpers/designDocs.js';
 import { PLAYER_MARKDOWN, rewritePlayerDoc, selectTracked, trackedFiles } from '../tools/package.mjs';
 import { CHANGELOG_DIR, changelogSections, changelogVolumeFiles } from './helpers/changelog.js';
+import { UPSTREAM_VERSION } from '../shared/constants.js';
 import { engineAnnouncements, NOTICE_LIMITS } from '../server/notices.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -186,6 +187,24 @@ test('CHANGELOG: every `## x.y.z — date` section sits exactly once in the inde
   const list = engineAnnouncements({ changelogPath: join(ROOT, 'CHANGELOG.md') });
   assert.equal(list.length, NOTICE_LIMITS.announcements,
     `顶层只发得出 ${list.length} 条公告（上限 ${NOTICE_LIMITS.announcements}）—— 再往下切就会静默少发，把节挪回顶层`);
+});
+
+// `shared/constants.js UPSTREAM_VERSION`（打包的上游游戏本体）与 `docs/history/` 里**最新**那一小节必须是同一个
+// 版本 —— 抬底座的两半（常量 + 历史那一节）分两次落地时，中间那次 README / docs/prompts 的「当前基线」声明
+// 由 test/promptBaseline.test.js 点名；这一条补的是**另一头**：常量本身回退（或历史小节漏写）时当场红，
+// 不再需要靠别处的声明间接发现。命名形状：`0.2.5.md`（只有版本的历史小节）与 `0.2.6.md`（带日期的，标题里有版本）。
+test('UPSTREAM_VERSION matches the newest docs/history section', () => {
+  const semver = /^\d+\.\d+\.\d+\.md$/;
+  const versions = readdirSync(join(ROOT, 'docs/history')).filter((f) => semver.test(f)).map((f) => f.slice(0, -3))
+    .sort((a, b) => { const [x, y] = [a.split('.').map(Number), b.split('.').map(Number)]; return (x[0] - y[0]) || (x[1] - y[1]) || (x[2] - y[2]); });
+  assert.ok(versions.length >= 3, `docs/history 里只找到 ${versions.length} 个版本小节 —— 目录是不是读错了？`);
+  const newest = versions[versions.length - 1];
+  assert.equal(UPSTREAM_VERSION, newest,
+    `shared/constants.js 的 UPSTREAM_VERSION 是 ${UPSTREAM_VERSION}，而 docs/history 里最新的是 ${newest} —— 抬底座的两半要一起动`);
+  // 那一节的标题必须真的是这个版本（防「文件在、内容还是上一版」那种安静地落库）
+  const heading = readFileSync(join(ROOT, 'docs/history', `${newest}.md`), 'utf8').split('\n')[0];
+  assert.match(heading, new RegExp(`^# DESIGN §\\d+ — ${newest.replace(/\./g, '\\.')}\\b`),
+    `docs/history/${newest}.md 的标题是「${heading}」—— 它没有点名 ${newest}`);
 });
 
 test('shipped markdown: a source link exists or is releases/latest, and the packaged copy only links to shipped files', () => {
