@@ -1,0 +1,181 @@
+name: mirror-upstream-forge
+
+# 把维护方 `XiaMo233M/Stronghold-Protocol-Forge:main` 合进本 fork 的 `main`。
+# 语义照本工作区已实测跑通的 `sp-sync/repo/.github/workflows/mirror-master.yml`：
+#   1. **merge，不 reset** —— `main` 上自有的控制面提交（就包括本文件）不会被上游盖掉。
+#   2. **门控在 push 之前** —— 用 GITHUB_TOKEN 推 main 不会再触发 `ci.yml`，所以测试必须在这里跑。
+#   3. **失败必须响** —— 冲突或门控红：推 `sync-conflict/<sha8>`（只放一份清单，不推带 `<<<<<<<` 的树）
+#      + 开 PR + `exit 1`。绝不出现「job 绿但其实什么都没做」（旧 `sync-upstream.yml:66-70` 就是这么骗人的）。
+#
+# ⚠ 节拍：本仓是 fork，GitHub **默认禁用 fork 的 scheduled workflows**（同级 fork 实测
+#   `event=schedule` 运行数 0，`PUT .../enable` 救不回来）。真节拍靠外部打 `workflow_dispatch`
+#   或 `repository_dispatch`（types: `mirror-upstream-forge`）。schedule 这段保留，脱离 fork 后自动生效。
+#
+# ⚠ 闸门判据是「**我那一格还在 + 复算没动**」，**不是「上游全绿」**。
+#   2026-10-13 实测维护方 `main` 自己的基线是 `8773 tests / fail 8` 且 `Lint` 红
+#   （`打包失败（需要 bsdtar 的 tar）`、素材未取、3D 预览一族）——拿它当闸门等于闸门永远红、然后人人忽略。
+#   全量套件这里只作 advisory 打印失败名集合，供人和基线对照（判净新增要比名称集合，不是比总数）。
+#
+# ⚠ 游戏本体 `sganggs/Stronghold-Protocol` **不由本工作流直接合并**：那是维护方的活
+#   （他已到 UPSTREAM_VERSION 0.2.6；我们与 sganggs v0.2.2 基线在 671 个交集文件里有 123 个内容不同，
+#   而近 30 天 `public/js/screens/game.js` 被他改过 72 次）。这里只**探测落差并喊人**。
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [mirror-upstream-forge]
+  schedule:
+    - cron: '23 2,8,14,20 * * *'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: mirror-upstream-forge
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out main (full history)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Detect the game-vs-manager gap (we do NOT merge sganggs ourselves)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          gh api repos/XiaMo233M/Stronghold-Protocol-Forge/contents/shared/constants.js --jq .content | base64 -d > /tmp/mgr.js
+          gh api repos/sganggs/Stronghold-Protocol/contents/shared/constants.js?ref=master --jq .content | base64 -d > /tmp/game.js
+          MGR=$(grep -oE "APP_VERSION = '[^']+'" /tmp/mgr.js | head -1 | cut -d"'" -f2)
+          EATEN=$(grep -oE "UPSTREAM_VERSION = '[^']+'" /tmp/mgr.js | head -1 | cut -d"'" -f2)
+          GAME=$(grep -oE "APP_VERSION = '[^']+'" /tmp/game.js | head -1 | cut -d"'" -f2)
+          echo "维护方 Forge $MGR · 它吃到的游戏 $EATEN · 游戏本体现在 $GAME"
+          {
+            echo "### 版本落差"
+            echo "- 维护方 Forge：\`$MGR\`（底座游戏 \`$EATEN\`）"
+            echo "- sganggs 游戏本体：\`$GAME\`"
+            if [ "$EATEN" = "$GAME" ]; then
+              echo "- 维护方已吃完这一版 ⇒ 没有需要我们自己扛的上游落差"
+            else
+              echo "- ⚠ 维护方还没吃到 \`$GAME\`。**不要自己去合 sganggs**（那是 123 文件级的重做）；"
+              echo "  要么等他一刀，要么按 \`docs/UPSTREAM-UPGRADE.md\` 走单点取用 + 锚点校验"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Resolve upstream, short-circuit if already merged
+        id: up
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/XiaMo233M/Stronghold-Protocol-Forge.git 2>/dev/null \
+            || git remote set-url upstream https://github.com/XiaMo233M/Stronghold-Protocol-Forge.git
+          git fetch --no-tags upstream main
+          SHA="$(git rev-parse FETCH_HEAD)"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "upstream =$SHA"
+          echo "fork main=$(git rev-parse HEAD)"
+          if git merge-base --is-ancestor "$SHA" HEAD; then
+            echo "上游 $SHA 已在 main 里 —— 无事可做"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge upstream into main (never reset)
+        if: steps.up.outputs.done != 'true'
+        id: merge
+        run: |
+          set -uo pipefail
+          SHA="${{ steps.up.outputs.sha }}"
+          git config user.name "stronghold-sync-bot"
+          git config user.email "actions@users.noreply.github.com"
+          if git merge --no-edit "$SHA" -m "sync: upstream Forge $SHA into main"; then
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+          else
+            git diff --name-only --diff-filter=U > "${RUNNER_TEMP}/conflicts.txt" || true
+            git merge --abort || true
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            echo "::error::上游 $SHA 与 main 合并冲突"
+          fi
+
+      - name: GATE — 契约面（我那几格 + 表面账本 + 复算）
+        if: steps.merge.outputs.merged == 'true'
+        run: |
+          set -uo pipefail
+          npm ci --no-audit --no-fund
+          # 这些测试就是我交给上游的功能被钉住的地方（PR #2/#3/#4/#5/#6）。文件不见了 = 那一格被挪走/删掉，
+          # 必须当场红 —— 否则闸门会在「什么都没跑」的情况下报绿。
+          CONTRACT=(
+            test/modMatchChannels.test.mjs
+            test/modSurface.test.js
+            test/modRegistry.test.mjs
+            test/wsLanes.test.js
+            test/httpLanes.test.js
+            test/workshopValidateRoutes.test.js
+            test/workshopValidateOverrides.test.js
+            test/workshopValidateArtTables.test.js
+          )
+          for f in "${CONTRACT[@]}"; do
+            [ -f "$f" ] || { echo "::error::契约测试文件缺失：$f（那一格被上游删了或改名了）"; exit 1; }
+          done
+          node --test "${CONTRACT[@]}" || exit 1
+          # 复算：上游更新本身不该让 golden 移动（移动了 = 我们或上游误改了行为）
+          node tools/golden.mjs || { echo "::error::golden 移动了 —— 停下来查，别放行"; exit 1; }
+
+      - name: GATE — 全量套件（advisory，不当闸门）
+        if: steps.merge.outputs.merged == 'true'
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          node --test 2>&1 | tee "${RUNNER_TEMP}/full.log"
+          echo "--- 失败名集合（与维护方基线 fail 8 对照，比名称不比总数）---" >> "$GITHUB_STEP_SUMMARY"
+          grep -aE '^# fail|^ℹ fail' "${RUNNER_TEMP}/full.log" >> "$GITHUB_STEP_SUMMARY" || true
+          grep -a '^✖ ' "${RUNNER_TEMP}/full.log" | sed 's/^✖ //' | sort -u | head -40 >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Push main
+        if: steps.merge.outputs.merged == 'true'
+        run: |
+          set -euo pipefail
+          git push origin HEAD:main
+          {
+            echo "### main 已同步"
+            echo "- 上游 Forge：\`${{ steps.up.outputs.sha }}\`"
+            echo "- main -> \`$(git rev-parse HEAD)\`"
+            echo "- 本轮合入提交数：$(git rev-list --count HEAD^1..${{ steps.up.outputs.sha }})"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail loudly (conflict or red gate -> branch + PR, never a silent green)
+        if: always() && steps.up.outputs.done != 'true' && (steps.merge.outputs.merged != 'true' || failure())
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          SHA="${{ steps.up.outputs.sha }}"
+          SHORT="${SHA:0:8}"
+          if [ "${{ steps.merge.outputs.merged }}" = "true" ]; then
+            BR="sync-gatefail/$SHORT"; REASON="上游合进来了但契约面门控红（或全量门控之外失败）——main 未改动。"
+            git checkout -B "$BR"
+            git commit --allow-empty -m "blocked upstream sync (gate): $SHORT"
+          else
+            BR="sync-conflict/$SHORT"; REASON="上游 $SHORT 与 main 冲突，冲突文件见 SYNC-CONFLICTS.md。main 未改动。"
+            {
+              echo "# 上游 $SHA 没能同步进 main"
+              echo
+              echo '## 冲突文件'
+              echo '```'
+              cat "${RUNNER_TEMP}/conflicts.txt" 2>/dev/null || echo '(空：可能是改名/子模块冲突)'
+              echo '```'
+            } > SYNC-CONFLICTS.md
+            git checkout -B "$BR"
+            git add SYNC-CONFLICTS.md
+            git commit -m "conflict report: upstream $SHORT"
+          fi
+          git push -f origin "HEAD:refs/heads/$BR"
+          gh pr create --base main --head "$BR" \
+            --title "upstream sync blocked: $SHORT" \
+            --body "$REASON 处理完重跑 mirror-upstream-forge 即可。" || echo "::warning::PR 未建立，手工看分支 $BR"
+          exit 1
