@@ -326,7 +326,9 @@ describe('serverPolicy：serve（默认）不变，cache-only 只在声明时生
   });
 
   test('真服务器：声明 `cache-only` ⇒ `/assets/…` 与 `/fonts/…` 412，且短路在文件系统之前', async () => {
-    // 用**本机真的存在**的两份素材做对照（`tools/fetch-assets.mjs` 的产物，git-ignored；本机没有就跳过）：
+    // 用**本机真的存在**的两份素材做对照（`tools/fetch-assets.mjs` 的产物，git-ignored）。缺素材**硬失败、不跳过**是
+    // 有意的：跳过等于让这条判据在最需要它的机器上静默消失。缺文件先跑 `npm run assets` 补齐（docs/ASSETS.md
+    // §Running），再跑本文件。
     // 它们平时是 200，声明 `cache-only` 之后必须变成 412 —— 这是「不回源」最直接的证据：走文件系统就只能是
     // 200 或 404（缺文件），绝不可能是 412。412 只可能由本刀那个分支产生。
     const BGM = '/assets/audio/bgm/m_bat_abyssalhunters_intro.mp3';
