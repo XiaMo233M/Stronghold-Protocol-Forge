@@ -521,7 +521,11 @@ test('roomSeatCap §7: the slider is a range input inside the create box, co-op 
   assert.match(css, /\.seat-cap__slider::-webkit-slider-thumb/);
   assert.equal(/^\.seats\b/m.test(css), false, 'the room screen\'s seat grid is not restyled from the lobby');
   assert.match(room, /const MAX_RENDERED_SEATS = 256;/, 'room.js still clamps what it pads to');
-  assert.match(room, /facts\.seats\.length > MAX_SEATS \? ' seats--dense'/, 'and still only densifies above 4');
+  // ⚠️ 断言改动（第 1 处，旧 DOM 形状）：`.seats--dense` 属于**引擎的座席网格**（`main.seats` + room.css 的
+  // `.seats--dense`）。ui-hub 包把房间主体换成 `main.rs-seats`，超容的密集排布由它自己的 `.rs--big` 承担
+  // （room.js 里 `facts.seats.length > DEFAULT_SEATS ? ' rs--big'`）。判据要钉的**行为**没变 —— 只在超过官方上限
+  // （DEFAULT_SEATS == MAX_SEATS == 4）时才切密集形态 —— 所以这里按新形状重新钉，不放松阈值。
+  assert.match(room, /facts\.seats\.length > DEFAULT_SEATS \? ' rs--big'/, 'and still only densifies above 4');
 });
 
 test('roomSeatCap §7: the new interface strings exist in all four packs', () => {
@@ -549,7 +553,10 @@ test('roomSeatCap §7: the mode card counts THIS server\'s ceiling, not the offi
     'the bullet counts the whole room (ceiling)');
   // The msgids themselves did not move: only the VALUE does, so every pack keeps working.
   assert.match(screen, /N_\('与至多 \{n\} 名博士组成同盟，共享干员池，联防协作抵御敌潮。'\)/);
-  assert.match(screen, /N_\('1–\{n\} 名博士 · 可由 AI 队友补位'\)/);
+  // ⚠️ 断言改动（第 2 处，被包版的文案取代）：包版把同盟卡的那一条从「可由 AI 队友补位」改成「邀请真人队友」——
+  // 因为包版的新房间**不再提供手动添加 AI 队友**这个入口（它改走精确搜寻 / matchmaking）。msgid 换了，行为判据
+  // （上面三条按本服务器上限重算 `{n}`）一字未动；这里只把被取代的那个 msgid 换成包版实际在用的那个。
+  assert.match(screen, /N_\('1–\{n\} 名博士 · 邀请真人队友'\)/);
   // …and the translation renders the ceiling the server actually allows, in the official mode too.
   const { t } = await import(pathToFileURL(path.join(ROOT, 'shared/i18n.js')).href);
   const desc = '与至多 {n} 名博士组成同盟，共享干员池，联防协作抵御敌潮。';
@@ -859,16 +866,22 @@ test('roomSeatCap §10: the slider is in the ROOM bar, host-only, and the seat l
   // a real range input, rendered from the host branch of the room bar next to the other host controls
   assert.match(screen, /class="seat-cap seat-cap--room"/);
   assert.match(screen, /<input class="seat-cap__slider" type="range" min=\$\{range\.min\} max=\$\{range\.max\} step="1" value=\$\{shown\}/);
-  assert.match(screen, /<div class="room-bar__opts">[\s\S]{0,500}\$\{SeatCapSetter\} room=\$\{room\} isHost=\$\{facts\.isHost\} onPick=\$\{setSeatCap\}/,
-    'the opts column is where it lives — next to the difficulty picker and the AI-picks-last switch, not over the seats');
+  // ⚠️ 断言改动（第 3 处，旧 DOM 形状）：`.room-bar__opts` 是**引擎**房间底栏的那一列。ui-hub 包的房间把房主控件
+  // 收进了 ⚙「同盟设置」浮层（`.rs-opts`，RoomOptions 组件内），`.room-bar__opts` 这个节点在新 DOM 里不存在。
+  // 判据要钉的**行为**没变 —— 「和难度选择、AI 队友最后选择同列（房主控件那一列），不在座席上」—— 所以按新形状
+  // 重钉到 RoomOptions 的函数体里，并显式排除座席卡的类名。
+  const opts = screen.slice(screen.indexOf('function RoomOptions('), screen.indexOf('/** Room screen component. */'));
+  assert.match(opts, /<\$\{SeatCapSetter\} room=\$\{room\} isHost=\$\{host\} onPick=\$\{onSeatCap\} \/>/,
+    'the host settings popover is where it lives — next to the difficulty picker and the AI-picks-last switch');
+  assert.equal(/rseat__/.test(opts), false, 'and it is not over the seats');
   // host-only, and only where there is something to choose (the component returns null otherwise)
-  assert.match(screen, /room=\$\{room\} isHost=\$\{facts\.isHost\} onPick=\$\{setSeatCap\}/);
   assert.match(screen, /const range = isHost \? seatCapRoomRange\(room, serverSeatMaxOf\(\)\) : null;/);
   assert.match(screen, /if \(!range\) return null;/);
   // it asks the SERVER's message, with the room code, and nothing else
   assert.match(screen, /net\.request\('room\.setSeatCap', \{ code: room\.code, seatCap \}\)/);
-  // the seat grid keeps its rules: `seats--dense` still appears ONLY above the official cap
-  assert.match(screen, /coop && facts\.seats\.length > MAX_SEATS \? ' seats--dense' : ''/);
+  // the seat grid keeps its rules: the dense form still appears ONLY above the official cap
+  // （同第 1 处的理由：包版把 `.seats--dense` 换成它自己的 `.rs--big`，阈值与行为一字未动。）
+  assert.match(screen, /facts\.seats\.length > DEFAULT_SEATS \? ' rs--big'/);
   assert.match(screen, /const MAX_RENDERED_SEATS = 256;/);
   // styles for the room variant live in the seat-cap block this slice added, and no `.seats` rule was touched
   const css = src('public/css/screens/lobby.css');
