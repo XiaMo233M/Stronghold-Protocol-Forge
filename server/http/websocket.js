@@ -108,7 +108,7 @@ export function transportPolicy(policies, { log = null } = {}) {
     log?.warn?.(`[workshop] server.transport declared by "${id}" is ignored: "${winnerId}" declares it too and the smaller pack id wins (DESIGN §28.3)`);
   }
   if (winner.deflate !== true) {
-    log?.info?.(`[workshop] server.transport: "${winnerId}" declares deflate: false — per-message deflate stays off (that is also the engine default; the declaration is named so the choice is visible)`);
+    log?.info?.(`[workshop] server.transport: "${winnerId}" declares deflate: false — per-message deflate stays OFF (the engine default since 0.2.6 is ON, so this declaration is what turns it off; the declaration is named so the choice is visible)`);
     return {
       perMessageDeflate: false,
       transport: { deflate: false, params: null, maxPayload: WS_MAX_PAYLOAD, threshold: null },

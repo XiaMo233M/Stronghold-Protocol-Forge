@@ -2453,7 +2453,7 @@ export function mount(ctx) {
 
 §28.32 说的是客户端那一格读数（`ctx.net.transport()`）；这一节说的是**它读的那个字段从哪来**。
 
-**问题。** WebSocket 的 `perMessageDeflate` 写死在 `server/http/websocket.js`（`false`）。参考包
+**问题。** WebSocket 的 `perMessageDeflate` **从前**写死在 `server/http/websocket.js`（`false`；0.2.6 起引擎缺省自己开着，`WS_DEFLATE`）。参考包
 `ws-compression-reference` 想开压缩，唯一办法是手改引擎那一行 —— 正是这一层到处在消灭的东西。
 
 **两条路，业主裁决选第二条（`D 声明式足够就不做`）。**
