@@ -121,7 +121,7 @@
 | release 里记的 5 处 | 现状 |
 |---|---|
 | `server/data.js:144` | 已按内容重指：`lookup` 的 null 分支现在是 `server/data.js:156-159` |
-| `server/workshop.js:392`（记了两处） | 已按内容重指：`KIT_ID_COLLISION` + `definedBy` 现在是 `server/workshop.js:1229-1233` |
+| `server/workshop.js:412`（记了两处） | 已按内容重指：`KIT_ID_COLLISION` + `definedBy` 现在是 `server/workshop.js:1249-1253` |
 | `public/js/battle/runner.js:127` | 已按内容重指：浏览器那份模块清单现在是 `public/js/battle/runner.js:230-233` |
 | `server/net.js:676` | 已收掉：`:676-677` 是 `}` 与一句注释；真正做那件事的是 `server/net.js:715-716`（`version mismatch: server <PROTOCOL_VERSION>`），`docs/NET-TUNING.md` 已重指 |
 

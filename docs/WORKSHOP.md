@@ -2338,6 +2338,41 @@ node tools/workshop-pack.mjs rollback  demo         # 把升级时留底的上�
 
 ---
 
+### 1.27 启用声明（`enabled`）：**装好 ≠ 生效**
+
+**一句话**：`pack.json.enabled = true | false`。`false` = 这个包**装好了、但现在不参与** —— 目录留在工坊目录里，
+字节一个不动，装载期跳过它。这是今天没有的第三态：在此之前想让一个包暂时不参与，只能把 `pack.json` 改坏
+（响亮的失败）或把目录搬出去（作者自己都不知道发生了什么）。
+
+**它不是什么，比它是什么更重要**：`enabled` **不是**一条能力通道 —— 它打不开任何引擎里没有的东西
+（包能声明的格子见 [docs/MOD-SURFACE.md](MOD-SURFACE.md)，与本格无关）。它**也不是**热更新：装载期读一次，
+改它要**重启**（[design/mod-layer.md](design/mod-layer.md) §28.4 的「No hot reload」不受影响）。
+
+**形状与判据**（判据只有一份：`shared/enabled.js`）：
+
+```jsonc
+{
+  "enabled": false        // 省略或 true = 引擎今天的行为；false = 装载期跳过
+}
+```
+
+1. **只有布尔**：`"false"` / `0` / `null` / `"true"` 一律 `ENABLED_BAD_SHAPE` **整包拒** —— 一个被 JS 真值表放行的
+   假布尔是**静默失效**（作者写下 `"false"`，引擎读到「启用了」，中间没有人收到错误）。
+2. **缺省 = 今天**：不写 `enabled`，或写 `"enabled": true`，都与**今天逐字相同**。所以只有 `false` 会进包的
+   归一化清单 —— 无条件写 `true` 会让**所有已发布包**的包身份摘要改变（房间的摘要闸门会误判）。
+3. **跳过必须响亮**：`false` 的包不进已加载集合，而是进装载器的 `errors`（`ENABLED_FALSE`）并被逐条点名 warn。
+   一个静默消失的包比一个报错的包难查得多。跳过发生在读任何内容文件之前，所以它连声明的 `chess.json` 都不读。
+4. **不是贡献项**：只带 `"enabled": true` 的包照旧 `EMPTY_PACK`（与 `variants` / `playtest` / `behaviour` 同一条）。
+5. **客户端读不到它**：`welcome.mods[]` 不投影这一格 —— 没进已加载集合的包对房间**不存在**。
+
+**什么时候用它**：一个包内容还想要、但暂时不想让它参与对局（例如等适配下一个版本、或想 A/B 两份配置），
+而你又不想动它的字节。想让一个包**永久**不再参与，正确做法是从工坊目录里删掉它 —— `enabled: false` 是
+**暂停**，不是卸载。
+
+完整规范见 [docs/design/mod-layer.md](design/mod-layer.md) §28.50。
+
+---
+
 ## 2. 助战
 
 ### 2.1 配置：`data/support.json`

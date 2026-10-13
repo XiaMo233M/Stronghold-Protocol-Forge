@@ -496,8 +496,8 @@ const def = battle.tokenDef('token_ws_my_drone', unit);
 - **找格子**：`battle.grid.inRect(r, c)` + `!battle.isReservedTile(r, c)`（`server/sim/battle/tiles.js:66`，预留格 = 站着人、
   或某个还没部署 / 等再部署的干员的落点）+ `battle.grid.canStand(r, c, { ranged })`（`server/sim/grid.js:209`）。战场的
   固定点位用 `battle.findTacticalPoint(unit)`（`server/sim/battle/tiles.js:130`）。
-- **本包自带 token 记录**：`tokens.json` 是允许工坊贡献的数据文件之一（`shared/workshop.js:44`，形状与 `data/tokens.json`
-  同形，记录里的 `tokenId` 字段必须等于键：`shared/workshop.js:48`），放进 `pack.json.content` 里声明即可。
+- **本包自带 token 记录**：`tokens.json` 是允许工坊贡献的数据文件之一（`shared/workshop.js:46`，形状与 `data/tokens.json`
+  同形，记录里的 `tokenId` 字段必须等于键：`shared/workshop.js:50`），放进 `pack.json.content` 里声明即可。
 - **召回 / 让召唤物离场**：`battle.retreat(token, { reason: 'retreat' })`（`server/sim/battle/deploy.js:98`）；
   让它原地回来：`battle.redeploy(token, { free: false, tile: [r, c] })`（`server/sim/battle/deploy.js:202`）。
 - **召唤物的击杀**：引擎发 `summonKill` `{ token, owner, victim }`（`server/sim/content/tokens.js:1749`），
@@ -677,7 +677,7 @@ const foes = battle.enemiesInKeys(gridKeys(unit, def.skill.rangeGrid), unit, { c
 | 独立的护盾槽 / 多个盾各吸一类伤害 | 没有：盾就是 buff 的 `shield` / `shieldHits`（`server/sim/buffs.js:167`、`:168`） | 一个 key 一个盾，用 `shieldType` 限定吸收类型（`server/sim/damage.js:243`） |
 | 改「治疗落在谁身上」 | `heal` 钩子只能改 `amount`（`server/sim/damage.js:655`） | 自己选目标（`server/sim/battle/queries.js:93`、`:109`） |
 | 读存档 / 准备区 / 商店 / 装备栏 | sim 里没有这些对象 | `battle.getPlayer(playerId)` 给的是战场视图（`docs/SIM.md:843`），`battle.data` 给的是本局数据（`server/sim/Battle.js:114`） |
-| 给包加一份 `tokens.json` 之外的新数据种类 | 只有 14 个内容文件可贡献（`shared/workshop.js:44`） | 贡献 `tokens.json`（`shared/workshop.js:48`），或用 `spawnToken` 的 `opts.def` 内联定义（`server/sim/simdata.js:304`） |
+| 给包加一份 `tokens.json` 之外的新数据种类 | 只有 14 个内容文件可贡献（`shared/workshop.js:46`） | 贡献 `tokens.json`（`shared/workshop.js:50`），或用 `spawnToken` 的 `opts.def` 内联定义（`server/sim/simdata.js:304`） |
 | 在联防 / boss 战场里加盟约层数 | `addLayers` 只在 `flags.layerGainsEnabled` 时生效（`server/sim/battle/economy.js:23`），只有普通战场是 `true`（`server/sim/Battle.js:150`） | 没有替代：那两种战场里加层是 no-op |
 | 我方单位的「攻击前摇开始」事件 | 没有：`beforeAttack` 在目标已选定之后才触发（`server/sim/ai.js:207-209`） | 用 `beforeAttack` 清 `ctx.targets` 取消这次攻击；敌人的起手另有 `enemyAttackStart`（`server/sim/ai.js:832`） |
 | 「技能召唤物做成手牌」那套现成流程 | `releaseSkillSummon` 在 content 模块里，工坊不能 import（`server/sim/content/tokens.js:388`） | 自己 `battle.spawnToken`；手牌形式要走 `tokens.json` 的 `placeable` |

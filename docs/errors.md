@@ -21,7 +21,7 @@
 | | |
 |---|---|
 | **现在报什么** | `ASSETS_NEED_LICENSE: this pack has an assets/ folder, so pack.json must declare a license (e.g. "CC0-1.0", "CC-BY-4.0", or "see assets/LICENSE.txt")` |
-| **在哪** | `Stronghold-Protocol/shared/workshop.js:1857-1859` |
+| **在哪** | `Stronghold-Protocol/shared/workshop.js:1861-1863` |
 | **小白会怎么想** | 「我没有要卖钱啊，为什么管我要 license？而且 license 是什么、写在哪、写什么？」英文句子会在第一眼就劝退一部分人 |
 | **改成什么** | **「你的包里有图片。请在 `pack.json` 里加一行告诉别人这张图能不能转发：`"license": "CC-BY-4.0"`（保留你的署名即可）或 `"CC0-1.0"`（随便用）。」** |
 | **修法** | ① 打开 `pack.json`<br>② 在 `"author"` 那一行下面加一行 `"license": "CC-BY-4.0"`<br>③ 重跑校验 |
@@ -31,7 +31,7 @@
 | | |
 |---|---|
 | **现在报什么** | `PACK_ID_MISMATCH: pack.json id "some-other-id" does not match its directory "my-first-pack"` |
-| **在哪** | `Stronghold-Protocol/shared/workshop.js:1826-1827` |
+| **在哪** | `Stronghold-Protocol/shared/workshop.js:1830-1831` |
 | **小白会怎么想** | 「id 是哪个？目录名叫什么我改过啊？」—— 它说了两边不一样，但**没说改哪边** |
 | **改成什么** | **「文件夹名和 `pack.json` 里的 `"id"` 必须是同一个词，现在一个是 `my-first-pack`、一个是 `some-other-id`。挑一个：把文件夹改名成 `some-other-id`，或者把 `pack.json` 里的 `"id"` 改成 `my-first-pack`。」** |
 | **修法** | ① 看错误里那两个词<br>② 决定以哪个为准<br>③ 把另一个改成一致 |
@@ -41,7 +41,7 @@
 | | |
 |---|---|
 | **现在报什么** | `PACK_UNKNOWN_FIELD: pack.json: "type" is not a field of this pack format (id, name, version, author, license, description, gameVersion, game, api, layer, combat, content, overrides, voices, voiceLangs, bondIcons, itemIcons, art, skins, support, operators, i18n, forms, fx, notices, playtest, variants, behaviour, assets, client, server, routes, target, dependencies, conflicts). A key this loader does not know is never read: write it as one of the fields above, or drop it — a declaration that is ignored is worse than a refusal` |
-| **在哪** | `Stronghold-Protocol/shared/workshop.js:1821-1822` |
+| **在哪** | `Stronghold-Protocol/shared/workshop.js:1825-1826` |
 | **小白会怎么想** | 「35 个合法字段一次性全砸过来，我怎么知道 `type` 该换成哪个？」后半句「a declaration that is ignored is worse than a refusal」是**纯设计哲学**，对用户零信息量 |
 | **改成什么** | **「`pack.json` 里不能有 `"type"` 这个字段。包的类型不用你写 —— 引擎会看你声明了什么自己判断。把这一行删掉就行。」** |
 | **修法** | ① 删掉报出来那个字段所在的一行<br>② 如果那个字段其实是想表达别的意思，按下面的高频对照换：`type` → 删掉；`app` → `client` / `server`；`authors` → `author`；`englishName` → `name`；`target` → `api` + `game`；`capabilities` → 具体声明<br>③ 重跑校验 |
@@ -53,7 +53,7 @@
 | | |
 |---|---|
 | **现在报什么** | `BAD_API_TYPE: "api" must be a string (a version range such as ">=1 <2" or "1.x"), got number — a non-string declaration would be read as "not declared"` |
-| **在哪** | `Stronghold-Protocol/shared/workshop.js:2405` |
+| **在哪** | `Stronghold-Protocol/shared/workshop.js:2420` |
 | **小白会怎么想** | 「什么是 version range？`>=1 <2` 中间那个空格是什么？」 |
 | **改成什么** | **「`"api"` 后面必须加引号。写 `"api": ">=1 <2"`，不要写 `"api": 1`。」** |
 | **修法** | ① 找到 `"api"` 那一行<br>② 给值两边加上双引号，照抄 `">=1 <2"`<br>③ 重跑校验 |
@@ -63,7 +63,7 @@
 | | |
 |---|---|
 | **现在报什么** | `EMPTY_PACK: content must name at least one of: chess, units, items, enemies, stages, waves, tokens, bosses, factions, garrisons, bands, bonds, effects, choices — or the pack must declare voices / voiceLangs / bondIcons / itemIcons / art / skins / operators / assets / client / server.preDispatch / server.meta / server.battle / server.room / server.modules / server.transport / routes / i18n / notices / forms / fx (note: "support" is NOT a contribution — a pack that declares it alone brings nothing into a match)` |
-| **在哪** | `Stronghold-Protocol/shared/workshop.js:2381` |
+| **在哪** | `Stronghold-Protocol/shared/workshop.js:2396` |
 | **小白会怎么想** | 这是**全文档最难读的一条**。33 个候选名、混合大小写与点号、还带一段 `NOT a contribution` 的辩解。小白读不完，也不知道自己「想干的那件事」对应哪个词 |
 | **改成什么** | **「这个包什么都没带，装上去不会有任何变化，所以引擎不收。它至少要带一样东西。你想做什么？换素材（立绘 / 图标 / 语音）→ 用 `art`；改数据（干员 / 装备）→ 用 `content`；加界面 → 用 `client`；发公告 → 用 `notices`。另外：只写 `support` 不算 —— 那只是说「谁能进助战池」，不是内容本身。」** |
 | **修法** | ① 想清你这个包到底要带来什么<br>② 按上面的对照挑一个字段补上<br>③ 如果做的是「换立绘」这类素材包，用 `art` 并**同时**建 `assets/` 文件夹（见第 1 条与第 6 条）<br>④ 重跑校验 |
@@ -73,7 +73,7 @@
 | | |
 |---|---|
 | **现在报什么** | `ART_NEEDS_ASSETS: a pack that declares art must put the files in its assets/ folder (e.g. assets/art/…)` |
-| **在哪** | `Stronghold-Protocol/shared/workshop.js:2055-2056` |
+| **在哪** | `Stronghold-Protocol/shared/workshop.js:2059-2060` |
 | **小白会怎么想** | 「我放了文件啊？」—— 问题多半是文件夹**名字**或**位置**，而这句话只重复了一遍要求，没告诉他「引擎到底在找什么路径」 |
 | **改成什么** | **「引擎在包目录下找 `assets` 这个文件夹（全小写，和 `pack.json` 同一层），没找到。请新建一个名为 `assets` 的文件夹，把图片放进去。」** |
 | **修法** | ① 打开包文件夹<br>② 在 `pack.json` 旁边新建文件夹，名字**全小写**：`assets`<br>③ 把图片放进这个文件夹<br>④ 重跑校验 |
@@ -83,7 +83,7 @@
 | | |
 |---|---|
 | **现在报什么** | `[my-first-pack] chess.json is declared in pack.json but missing` |
-| **在哪** | `Stronghold-Protocol/server/workshop.js:139` |
+| **在哪** | `Stronghold-Protocol/server/workshop.js:159` |
 | **小白会怎么想** | 「我知道不在啊，我要问的是怎么办。」**没有错误码、没有前缀、格式和其它错误不一样** —— 在一堆 `CODE: reason` 里夹着一句裸英文，看不出严重度 |
 | **改成什么** | **「`pack.json` 的 `"content"` 里写了 `chess`，但包里没有 `chess.json`。要么把那个文件放进来，要么把 `"content"` 里的 `chess` 删掉。」** |
 | **修法** | ① 看错误里点名的文件名<br>② 要么把那个文件放进包文件夹，要么从 `"content"` 里删掉这个名字<br>③ 重跑校验 |
