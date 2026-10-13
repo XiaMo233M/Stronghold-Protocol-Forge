@@ -21,6 +21,7 @@ import { openStats } from './stats.js';
 import { SettingsButton } from '../ui/settings.js';
 import { PwaInstallButton } from '../ui/device.js';
 import { LoadoutButton } from './loadout.js';
+import { DEFAULT_DIFFICULTY, parsePlaytestParam } from './lobbyLinks.js';
 import { SupportButton } from './support.js';
 import { net, identity } from '../net.js';
 import { store, useStore, shallowEqual, loadPref, savePref } from '../store.js';
@@ -162,30 +163,12 @@ export function parseRoomParam(search) {
   }
 }
 
-/** The lobby's normal default difficulty (no saved preference): what `?playtest=` without a usable key falls back to. */
-export const DEFAULT_DIFFICULTY = 'FUNNY';
-
-/**
- * One-click playtest from a deep link (`?playtest=1[&difficulty=KEY]`, the Forge 一键试玩 button).
- * Any non-empty value other than `0` / `false` turns it on, so `?playtest=1`, `?playtest=true` and a bare `?playtest=`
- * with no value never crash. The difficulty is validated against the shared DIFFICULTIES list: anything unknown
- * (a stale bookmark, a hand-edited URL) falls back to the lobby's own default — an invalid key must never reach the
- * server, where `room.create` answers with BAD_MSG instead of a match.
- * @param {string} search e.g. location.search
- * @returns {{ mode: 'solo', difficulty: string }|null} null = no playtest requested; `difficulty` is always valid
- */
-export function parsePlaytestParam(search) {
-  try {
-    const p = new URLSearchParams(search || '');
-    const raw = p.get('playtest');
-    if (raw == null) return null;
-    if (['', '0', 'false'].includes(String(raw).trim().toLowerCase())) return null;
-    const want = String(p.get('difficulty') || '').trim().toUpperCase();
-    return { mode: 'solo', difficulty: DIFFICULTIES.includes(want) ? want : DEFAULT_DIFFICULTY };
-  } catch {
-    return null;
-  }
-}
+// 地基加固（B 方案 · 2026-10-13）：`DEFAULT_DIFFICULTY` 与 `parsePlaytestParam` 现在住在 screens/lobbyLinks.js，
+// 这里保留同一份绑定并**原样转发导出** —— screens/playtestLink.js 与 test/playtestLink.test.js 都从本模块导入这两个
+// 名字（main.js 静态 import playtestLink.js，链接断掉整个客户端白屏），所以本模块的导出面不许变。
+// 为什么搬走：本文件正按 ui-hub 包的新结构逐段并进来；把链接面放进独立文件，改观感就碰不到它。
+// 包版 `payload/public/js/screens/lobby.js` 里这两个符号是 0 处 —— 这正是「整份装包会白屏」的原因之一。
+export { DEFAULT_DIFFICULTY, parsePlaytestParam };
 
 /** Recently joined/created co-op room codes (most recent first). */
 export function recentRooms() {
