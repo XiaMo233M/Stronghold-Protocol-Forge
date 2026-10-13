@@ -450,7 +450,11 @@ npm start          # 启动服务器：http://localhost:3000
 
 #### 版本号怎么读
 
-发行 tag 写成 **`v<forge>-<上游>`**：`v0.18.3-0.2.6` = 本仓库（Forge 工坊编辑器）**0.18.3** + 上游游戏（[sganggs/Stronghold-Protocol](https://github.com/sganggs/Stronghold-Protocol)）**0.2.6**。程序里显示的版本（标题页、启动横幅、`/healthz`）只是前半部分，因为仓库自己的元数据检查要求它是三段普通 semver —— 详见 [CHANGELOG.md](CHANGELOG.md) 与 `test/version.test.js`。
+发行 tag 写成 **`v<forge>-<上游>`**（两半就是下面那两个常量，中间一个连字符）。程序里显示的版本（标题页、启动横幅、`/healthz`）只是前半部分，因为仓库自己的元数据检查要求它是三段普通 semver —— 详见 [CHANGELOG.md](CHANGELOG.md) 与 `test/version.test.js`。
+
+> ⚠️ **源码 vs 发行版**：这一节说的是**本仓库源码今天的状态**（`shared/constants.js` 的实值）。
+> **可下载的发行版（完整包 / 精简包 / 更新包）由 [Releases](../../releases/latest) 页提供** ——
+> 本文**不写**具体的 tag 名与资产文件名，那几个名字以 Releases 页为准。
 
 四个常量是这一层的**机器口径**，都在 `shared/constants.js`：
 
