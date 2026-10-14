@@ -9,13 +9,15 @@
     ".github/release-verify.mjs",
     ".github/sync-contract-baseline.json",
     ".github/sync-gate-check.mjs",
+    ".github/game-overlap-check.mjs",
     ".github/workflows/mirror-upstream-forge.yml",
     ".github/workflows/pack-compat.yml",
     ".github/workflows/release-manager.yml",
     "tools/package-server.mjs",
     "test/package-server-profile.test.js",
     "docs/DEPLOY-SERVER.md",
-    "docs/ENGINE-COMPAT-STARDUST-AUDIT.md"
+    "docs/ENGINE-COMPAT-STARDUST-AUDIT.md",
+    "docs/UPSTREAM-PR-LEDGER.md"
   ],
   "patches": [
     {

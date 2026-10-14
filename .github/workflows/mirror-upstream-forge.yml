@@ -203,6 +203,20 @@ jobs:
           fi
           exit $rc
 
+      - name: GATE — 与卫戍协议本体的路径交集（结构性不冲突判据）
+        if: steps.merge.outputs.merged == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          # 判的是「我增量里的文件，游戏本体仓 sganggs 是否也有同名路径」——交集必须为 0。
+          # 非 0 = 维护方下次吃 sganggs 必撞我（或我那份静默覆盖上游行为）⇒ 拦同步。
+          # 退出码 3 = 本体清单这会儿取不到（可用性问题）：出 warning、不拦合并，但**不印**「不冲突成立」。
+          node .github/game-overlap-check.mjs --work . --up ../up
+          rc=$?
+          if [ "$rc" = 3 ]; then echo "::warning::本轮没能核对与本体仓的路径交集（清单取不到）—— 合并照旧放行，事后补看"; exit 0; fi
+          exit $rc
+
       - name: GATE — 全量套件（advisory，不当闸门）
         if: steps.merge.outputs.merged == 'true'
         continue-on-error: true
