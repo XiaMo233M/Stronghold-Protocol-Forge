@@ -366,7 +366,7 @@ services:
 | SW 脚本在哪 | `/resource-sw.js`（引擎文件，`public/resource-sw.js`），由 `public/js/resources/worker.js` 用 `type:'module'`、`scope:'/'`、`updateViaCache:'none'` 注册。**只有包声明了 `assets` 才会注册**（`welcome.modAssets` 到达时才加载那套流程） |
 | 为什么不需要 `Service-Worker-Allowed` | 脚本落在站点**根**上，它自己的最大作用域就是 `/`。把站点部署在**子路径**下（反代前缀、静态托管的子目录）时脚本会变成 `/<前缀>/resource-sw.js`，那时 `scope:'/'` 会被浏览器拒绝；要么把前缀下的 `/resource-sw.js` 反代到根，要么给这个响应加 `Service-Worker-Allowed: /`，并同步改 `public/js/resources/common.js` 的 `SW_URL` |
 | 容器从哪来 | 玩家本地导入（离线分发），或浏览器自己从 `/workshop-resources/<包id>/<声明路径>` 取一次（`importFromServer`）。两条来路喂的是同一条流程；取回来的字节逐文件核对 `SHA-1[0:12]` 之后才进 `CacheStorage` |
-| 怎么回滚 / 怎么让玩家清掉 | 服务器侧：删掉包或把 `serverPolicy` 改回 `serve` 后重启（不留持久状态）。玩家侧那半**不在服务器上**：`CacheStorage` 里的几百 MB 与已注册的 SW 会一直留着。同一个站点**同源**下换一次部署不会自动清掉它，需要 `navigator.serviceWorker.getRegistrations()` + `registration.unregister()`（或站点数据/清除浏览器数据）才会消失 —— 回滚脚本要自己带上这一步 |
+| 怎么回滚 / 怎么让玩家清掉 | 服务器侧：删掉包或把 `serverPolicy` 改回 `serve` 后重启（不留持久状态）。玩家侧那半**不在服务器上**，但**现在会自己清**：缓存名带版本（`public/js/resources/common.js` 的 `CACHE_NAME`），SW 的 `activate` 把本引擎家族里不是当前名字的缓存全删掉；服务器下一次握手不再发 `welcome.modAssets` 时，页面的自愈阀（`public/js/resources/release.js`，挂在 `public/js/main.js` 的注册点旁边）注销本引擎的 SW 并删掉它的缓存。**这两条都要求页面还能被服务器欢迎一次**：离线打开、或页面脚本自己都起不来时，仍只有站点数据/清除浏览器数据（或 `navigator.serviceWorker.getRegistrations()` + `registration.unregister()`）这一条路 —— 回滚脚本可以只兜底那一种情况 |
 
 容器是流式的、可以到数百 MB：`cache-only` 的部署里那次下载是**玩家唯一需要的一次网络传输**（此后 `/assets`
 与 `/fonts` 都由 SW 本地回答）。反向代理/前置缓存不需要为 `/workshop-resources/` 配置任何特殊规则（它已经是

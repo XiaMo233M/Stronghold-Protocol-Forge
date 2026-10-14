@@ -5,8 +5,9 @@
 //     (level 6) — browsers offer brotli on HTTPS pages and localhost only (small files are compressed once per
 //     encoding and cached in memory); strong ETag + Last-Modified with 304s — the ETag is the content hash
 //     when the caller has one (assetIndex.js), else size + mtime; Cache-Control (html & code/data: no-cache +
-//     revalidate; public/assets|fonts|vendor: 1 day; a URL whose content-hash segment matches the file (static.js,
-//     media.js): immutable for a year; any `?v=` URL: immutable); single byte-range requests (206/416, used by <audio>).
+//     revalidate; public/fonts|vendor: 1 day; public/assets — hashed URL or `?v=` only: immutable for a year, else
+//     no-cache; a URL whose content-hash segment matches the file (static.js, media.js): immutable for a year); single
+//     byte-range requests (206/416, used by <audio>).
 
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -75,11 +76,17 @@ const GZIP_CACHE_MAX_TOTAL = 96 << 20;    // both encodings together
  */
 export const BROTLI_QUALITY = 5;
 // A plain asset URL (no content-hash segment) names a file tools/fetch-assets.mjs / tools/vendor.mjs can rewrite in
-// place (atlas + png + skel must stay consistent), so "long" is one day; revalidation after that is a cheap 304. A
-// content-hashed URL whose hash names the file is immutable (static.js, media.js).
+// place (atlas + png + skel must stay consistent). It used to be "long" (one day); `/assets/**` is not any more, because
+// those URLs do not change when the content does **and** the root-scope resource SW (public/resource-sw.js) answers that
+// whole tree from its locally imported bytes: a copy the browser keeps for a day (or an index the SW keeps forever) shows
+// up as a missing picture, not a slow one — the owner's "icons and 3D scenes are gone after an upgrade, Ctrl+Shift+R
+// fixes it". `no-cache` + the content ETag costs one cheap 304 (isNotModified) and is what makes an upgrade reach a
+// browser that is already open. `fonts` / `vendor` keep the day: they are outside that SW's interception surface and do
+// not participate in "a new pack means new URLs". A content-hashed URL whose hash names the file is immutable
+// (assetIndex.js, media.js) and stays that way.
 export const LONG_CACHE = 'public, max-age=86400';          // 1 day
 export const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable';
-const LONG_CACHE_DIRS = ['assets', 'fonts', 'vendor']; // first path segment under public/
+const LONG_CACHE_DIRS = ['fonts', 'vendor']; // first path segment under public/
 
 const gzipAsync = promisify(zlib.gzip);
 const brotliAsync = promisify(zlib.brotliCompress);

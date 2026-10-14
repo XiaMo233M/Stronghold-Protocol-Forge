@@ -85,7 +85,7 @@ B1 要的是「按一下给我结论」，而那条结论必须与 `node tools/w
 
 | 卷 | 版本（新 → 旧） | 日期 | 文件 |
 |---|---|---|---|
-| **顶层** | 0.18.4 · 0.18.3-0.2.6 · 0.18.3-0.2.5 · 0.18.2-0.2.5 · 0.18.1-0.2.5 · 0.18.0-0.2.5 · 0.17.0-0.2.4 · 0.16.0-0.2.4 | 2026-10-12 – 2026-10-13 | 本文 |
+| **顶层** | 0.18.5 · 0.18.4 · 0.18.3-0.2.6 · 0.18.3-0.2.5 · 0.18.2-0.2.5 · 0.18.1-0.2.5 · 0.18.0-0.2.5 · 0.17.0-0.2.4 · 0.16.0-0.2.4 | 2026-10-12 – 2026-10-14 | 本文 |
 | 0.15 | 0.15.3-0.2.4 · 0.15.2-0.2.4 · 0.15.1-0.2.4 · 0.15.0-0.2.4 | 2026-10-11 – 2026-10-12 | [docs/changelog/0.15.md](docs/changelog/0.15.md) |
 | 0.14 | 0.14.0-0.2.4 · 0.14.0 | 2026-10-10 – 2026-10-11 | [docs/changelog/0.14.md](docs/changelog/0.14.md) |
 | 0.13 | 0.13.1 · 0.13.0 | 2026-10-10 | [docs/changelog/0.13.md](docs/changelog/0.13.md) |
@@ -107,6 +107,67 @@ B1 要的是「按一下给我结论」，而那条结论必须与 `node tools/w
 > 要看就回源码仓库。
 
 ---
+
+## 0.18.5 — 2026-10-14
+
+**修掉「升级后图标 / 立绘 / 3D 场景大片空白、只能强刷」那一场：根作用域 Service Worker 一次注册变成永久劫持。**
+`APP_VERSION` 由 `0.18.4` 抬到 `0.18.5` —— 抬它**就是**修复的一半：`CACHE_NAME` 认这个数，旧缓存因此自然换名。
+`UPSTREAM_VERSION` 仍是 `'0.2.6'`（`docs/history/` 不动，它与上游那一半一起动）；`PROTOCOL_VERSION`（`2`）与
+`MOD_API_VERSION`（`1`）**一个都没动** —— 没有新协议消息、没有新包接口面、没有改游戏规则，**不需要
+`golden:update`**。发行 tag 将是 `v0.18.5-0.2.6`。
+
+### 现象与根因（实测坐实，不是推断）
+
+干净 profile 实测：6 条探针（盟约图、立绘、`local/scene/scene.json`、`scene.bin`、`.obj`、一个**不存在**的文件）
+5×200 + 1×404，S.W.E.E.P. 屏 `<img>` **35**；手工注册 `/resource-sw.js` 之后同 6 条**全 412**（连不存在的那个也是
+412）、`<img>` **0**。根因是三件事叠在一起：
+
+- SW 只从「本地导入并逐文件校验过的字节」回答，命不中一律 **412 且绝不回源**
+  （`public/js/resources/service.js`），而它管的正是 `/assets`、`/fonts`、`/media` 三棵树；
+- 缓存名是**固定串** `sp-workshop-resources-v1-all`（不含版本），`activate` 只有 `skipWaiting` +
+  `clients.claim`，全仓 `public/js/**` 没有任何 `caches.delete`/`unregister`；
+- 服务器只在包声明 `assets` 时才发 `welcome.modAssets`，页面只在那一刻注册 —— 于是「删掉包 / 换回不声明资源包的
+  发行包」之后，页面不再注册，**老 SW 却还控制着页面**。
+
+结果就是「一次注册 = 永久劫持」，只有强刷 / 清站点数据能解除（与业主口径完全吻合）。未带 `~hash` 的 `/assets/**`
+吃一天长缓存，是同一场里浏览器那一半的推手。
+
+### 三道闸
+
+1. **缓存名带版本 + 激活清旧**：`CACHE_NAME = sp-workshop-resources-v1-<APP_VERSION>-all`；`activate` 删掉本引擎
+   家族里**不是当前名字**的缓存（`common.js staleCacheNames`：别人的缓存与当前那个都不动 —— 当前那个装着玩家本地
+   导入的几百 MB，删了他没有任何办法拿回来）。
+2. **自愈阀**：服务器这次**没有**声明 `welcome.modAssets` 而本页被一个 SW 控制着 ⇒ 页面主动注销本引擎那条注册
+   并删掉它的缓存（`public/js/resources/release.js`，落点在 `main.js` 的注册点旁边）。它是**动态** import：从没装
+   过 SW 的干净环境不多取一个字节，「不声明 assets ⇒ 无新请求」仍是结构性的。
+3. **未带 `~hash` 的 `/assets/**` 不再吃一天长缓存**：`server/http/files.js LONG_CACHE_DIRS` 去掉 `assets`
+   （改 `no-cache` + 原内容 ETag，`fonts`/`vendor` 不动；带指纹的三条路 —— 内容哈希 URL、Spine 模型组、`?v=` ——
+   仍然 `immutable`）。
+
+另修一处复现中揪出来的残留：`service.js` 在缓存**根本不存在**时不再 `caches.open()` 建一个空缓存。被注销却仍控制
+着页面的那一个 SW 每答一次 412 就会把它建回来，于是「注销成功、`caches.keys()` 却永远非空、看着像装过资源包」。
+
+### 判据
+
+- 新判据 **6 条**（`test/modAssets.test.js:977` 的 describe 5 条 + `test/asset-index.test.js:285` 1 条），并就地翻转
+  3 处同族断言（`test/asset-index.test.js:276`、`:315`、`test/lobby.test.js:277`）。**带牙证明**：对着 `HEAD` 的旧
+  源逐条核对 ⇒ **6/6 红**；改后 ⇒ **6/6 绿**。改前真跑（`node --test test/modAssets.test.js test/asset-index.test.js
+  test/lobby.test.js`）`tests 88 / pass 83 / fail 5`，改后 `tests 143 / suites 27 / pass 143 / fail 0`。
+- `node --test --test-concurrency=2`（全量）：`tests 8824 / suites 917 / pass 8818 / fail 1 / cancelled 0 /
+  skipped 5`。那一条失败是 `test/package.test.js`「真实跟踪树」：新文件 `public/js/resources/release.js` 当时**未被
+  跟踪**（`plan()` 读 `git ls-files`），提交后自绿（`isPlayerFile()` 实测为 `true`，`resolveSpecifier()` 也对得上）。
+  与 0.18.4 记的冻结树 8816/8811 的差额里，**+6 是本次新判据**（`git show HEAD:` 逐文件计数：modAssets 53→58、
+  asset-index 13→14、lobby 72→72），另 +2 来自 0.18.4 之后、本次改动之外的提交，未逐条归因。
+- **真实浏览器复现**（headless Edge + CDP，直接对着主树，不是包版）：干净 **200×5+404 / img 35** → 注册 SW 后
+  reload **412×6 / img 0**（与改前基线逐字相同）→ 自愈阀在同一页的欢迎那一刻落地（`regs:[] caches:[]`，2 ms 内
+  查到）→ 再 reload **200×5+404 / img 35**、`navigator.serviceWorker.controller` 变 **null**、`caches.keys()` 里
+  `sp-workshop-resources-*` 消失。另测「新版本 SW 首次 activate 时缓存里摆着旧名」：`sp-workshop-resources-v1-0.18.4-all`
+  与历史旧名 `sp-workshop-resources-v1-all` 两条被删，`unrelated-cache` 原样保留。
+
+### 玩家侧应急（README 顶部同时留了一行）
+
+升级后若图标 / 立绘 / 3D 场景空白：先按 `Ctrl+Shift+R` 强制刷新；仍然不行 ⇒ 地址栏站点设置里「清除此站点数据」
+后重开页面。**已发布的 0.18.4 仍带这个 bug**，其 Release 正文另加了一条醒目提示。
 
 ## 0.18.4 — 2026-10-13
 

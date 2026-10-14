@@ -271,10 +271,12 @@ describe('static http server', () => {
     assert.equal((await httpReq(srv.port, '/js/app.js', { headers: { 'accept-encoding': 'br', 'if-none-match': brEtag } })).status, 304);
     assert.equal((await httpReq(srv.port, '/js/app.js', { headers: { 'accept-encoding': 'gzip', 'if-none-match': brEtag } })).status, 200, 'not the gzip variant');
 
-    // unversioned art/fonts/vendor: cached for a day (files can be rewritten in place by the asset tools); the art and
-    // fonts carry their content hash as ETag (server/http/assetIndex.js), so a rewrite with the same bytes is a 304
+    // unversioned art: never cached for a day (an upgrade would leave the old bytes behind — and the root-scope
+    // resource SW answers /assets/**, so a stale copy is a missing picture, not a slow one). A font is not in that SW's
+    // interception surface, so fonts and vendor keep the day. The art carries its content hash as ETag
+    // (server/http/assetIndex.js), so a rewrite with the same bytes is a 304.
     const asset = await httpReq(srv.port, '/assets/img/a.png');
-    assert.equal(asset.headers['cache-control'], 'public, max-age=86400');
+    assert.equal(asset.headers['cache-control'], 'no-cache');
     assert.match(asset.headers.etag, /^"[0-9a-f]{16}"$/);
     const font = await httpReq(srv.port, '/fonts/f.woff2');
     assert.equal(font.headers['cache-control'], 'public, max-age=86400');

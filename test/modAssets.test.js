@@ -49,9 +49,12 @@ import { makePack } from '../tools/make-spresources.mjs';
 // 客户端资源流程（引擎自带）：这几个模块在 Node 下**真跑** —— 它们只依赖 URL / MIME / Cache Storage / WebCrypto
 // 这几件标准件（`caches` 由本文件给一个假的，其余用 Node 自己的 `Response` / `crypto.subtle`）。
 import {
-  CACHE_NAME, indexUrl, receiptUrl, absoluteUrl, MEDIA_PREFIX, AUDIO_EXTS,
-  validateManifest, mediaCandidates, isResourcePath, isResourceUrl, rangeResponse,
+  CACHE_NAME, CACHE_PREFIX, indexUrl, receiptUrl, absoluteUrl, MEDIA_PREFIX, AUDIO_EXTS, SW_URL,
+  validateManifest, mediaCandidates, isResourcePath, isResourceUrl, rangeResponse, staleCacheNames,
 } from '../public/js/resources/common.js';
+// 自愈阀（劫持修复 ②）：页面在「服务器没有声明 assets 而本页被一个根作用域 SW 控制着」时走的那条支路。
+import { releaseResourceWorker } from '../public/js/resources/release.js';
+import { APP_VERSION } from '../shared/constants.js';
 import {
   importResourcePack, fetchManifest, fetchContainer, importedReceipt, revokeImport, sha256, computeManifestVersion,
 } from '../public/js/resources/bundle.js';
@@ -545,6 +548,10 @@ function fakeCaches() {
         async delete(key) { return map.delete(String(key)); },
       };
     },
+    // 清旧缓存那一条路要用的两件（真 `CacheStorage` 也有）：列名字、按名字整份删掉。
+    async keys() { return [...stores.keys()]; },
+    async delete(name) { return stores.delete(name); },
+    async has(name) { return stores.has(name); },
   };
 }
 
@@ -951,6 +958,92 @@ describe('SW：只用本地校验过的缓存回答，命不中 412 且绝不回
     } finally {
       await srv.close();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// 6b. 劫持修复：一次注册不许变成永久劫持（业主现象：升级后图标 / 立绘 / 3D 场景不出来，「强刷即好」）
+// ---------------------------------------------------------------------------------------------------
+// 根因链（实测坐实）：根作用域 SW 一装就永久接管 `/assets|/fonts|/media`，而它只从「本地导入过的字节」回答，
+// 命不中一律 412 且**绝不回源**（`service.js`）。`CACHE_NAME` 不带版本 ⇒ 换版后 `caches.open()` 拿到的还是上一版
+// 那份缓存与索引；`activate` 只有 `skipWaiting` + `clients.claim`、没有任何清理；只剩「删包」这一条路时服务器不再
+// 发 `welcome.modAssets`，页面于是**再也不注册**，可那个 SW 还控制着页面 —— 这就是「只能强刷 / 清站点数据」。
+//
+// 三道闸各自单独可红（改前红 / 改后绿）：
+//   ① 缓存名带本版版本号 + `activate` 删掉所有旧的 `sp-workshop-resources-*`；
+//   ② 自愈阀：服务器这次没有声明 assets 而本页被控制着 ⇒ 注销本引擎的 SW 并删掉它的缓存；
+//   ③ 未带 `~hash` 的 `/assets/**` 不再吃一天长缓存（`no-cache` + ETag）—— 判据在 `test/asset-index.test.js`
+//      与 `test/lobby.test.js`（同一批静态缓存断言的既有归宿）。
+describe('劫持修复：缓存名带版本 + activate 清旧 + 无声明时自愈放行', () => {
+  const SW_SOURCE = fs.readFileSync(join(ROOT, 'public/resource-sw.js'), 'utf8');
+  const MAIN_SOURCE = fs.readFileSync(join(ROOT, 'public/js/main.js'), 'utf8');
+  /** 那条自愈支路在 `main.js` 里的落点：注册点旁边、`welcome` 的同一个处理器里。 */
+  const VALVE_ANCHOR = '} else if (navigator.serviceWorker?.controller) {';
+
+  test('① `CACHE_NAME` 带本版版本号（不再是那个固定串），`activate` 真的删掉旧的 `sp-workshop-resources-*`', () => {
+    assert.equal(CACHE_NAME, `${CACHE_PREFIX}${APP_VERSION}-all`, '缓存名必须跟着版本走：不换名字，换版也命中上一版');
+    assert.notEqual(CACHE_NAME, 'sp-workshop-resources-v1-all', '那个不带版本的固定名就是「一次注册永久劫持」的载体');
+    assert.deepEqual(
+      staleCacheNames(['sp-workshop-resources-v1-all', CACHE_NAME, 'some-other-app-cache', 'sp-workshop-resources-v1-9.9.9-all']),
+      ['sp-workshop-resources-v1-all', 'sp-workshop-resources-v1-9.9.9-all'],
+      '只删本引擎家族的旧缓存：当前那个与别人的缓存都不动');
+    assert.deepEqual(staleCacheNames([CACHE_NAME]), [], '当前那个不许删（删了就是每次 activate 都把本地导入的字节丢掉）');
+    assert.match(SW_SOURCE, /staleCacheNames\(/, 'activate 必须调用清旧逻辑（改前只有 skipWaiting + claim）');
+    assert.match(SW_SOURCE, /caches\.delete\(/, '而且必须真的删（`caches.delete`），不是只换个名字');
+  });
+
+  /** 一个够真的 `navigator.serviceWorker` 桩：一条本引擎的注册 + 一条别人的（别人的一个字节都不许碰）。 */
+  function fakeNav() {
+    const calls = { unregister: [] };
+    const reg = (scriptURL, scope) => ({ scope, active: { scriptURL }, unregister: async () => { calls.unregister.push(scriptURL); return true; } });
+    const mine = reg('http://site/resource-sw.js', 'http://site/');
+    const theirs = reg('http://site/other-sw.js', 'http://site/other/');
+    return { calls, controller: mine.active, registrations: [mine, theirs], async getRegistrations() { return this.registrations; } };
+  }
+
+  test('② 自愈阀真跑：`release.js` 注销本引擎那条注册、删掉本引擎的缓存，别人的一概不动', async () => {
+    const nav = fakeNav();
+    const storage = fakeCaches();
+    const OLD = 'sp-workshop-resources-v1-all'; // 历史部署留下的那一个（不带版本）
+    await storage.open(CACHE_NAME);
+    await storage.open(OLD);
+    await storage.open('some-other-app-cache');
+    const out = await releaseResourceWorker({ nav, caches: storage });
+    assert.deepEqual(nav.calls.unregister, ['http://site/resource-sw.js'], '只注销 `scriptURL` 以 SW_URL 收尾的那条');
+    assert.deepEqual(out.unregistered, ['http://site/'], '回报也点名注销了哪条');
+    assert.deepEqual([...out.deletedCaches].sort(), [OLD, CACHE_NAME].sort(), '本引擎家族的缓存（含当前那个）全删');
+    assert.deepEqual(await storage.keys(), ['some-other-app-cache'], '别人的缓存必须原封不动');
+    assert.equal(out.hadController, true);
+  });
+
+  test('② 注销之后不许留下「空缓存」这个残影：没有缓存时回答 412 也不写一个空缓存进去', async () => {
+    // 实测场景：自愈阀删掉缓存之后，还控制着页面的那一个 SW 每答一次 412 就 `caches.open()` 把空缓存建回来，
+    // `caches.keys()` 于是永远非空（`sp-workshop-resources-*` 看着像装过资源包，其实一个文件都没有）。
+    const storage = fakeCaches();
+    const req = new Request('http://site/assets/demo-0.bin');
+    assert.equal((await handleResourceRequest(req, { caches: storage })).status, 412);
+    assert.equal(storage._stores.has(CACHE_NAME), false, '回答 412 的路上不许建缓存');
+    assert.deepEqual(await storage.keys(), []);
+    // 缓存真的存在（哪怕索引不在）时行为不变：照旧 412，而且不往里写东西
+    await storage.open(CACHE_NAME);
+    assert.equal((await handleResourceRequest(req, { caches: storage })).status, 412);
+    assert.equal(storage._stores.get(CACHE_NAME).size, 0, '索引不在 ⇒ 一个条目都不写');
+  });
+
+  test('② `main.js` 的注册点旁边就是那条自愈支路，而且用**动态** import（干净环境下不多一条请求）', () => {
+    const at = MAIN_SOURCE.indexOf(VALVE_ANCHOR);
+    assert.ok(at > 0, `welcome 处理器里必须有这一格：${VALVE_ANCHOR}`);
+    const branch = MAIN_SOURCE.slice(at, at + 900);
+    assert.match(branch, /import\('\.\/resources\/release\.js'\)/, '那一格必须真的去注销（动态 import：没有 SW 的机器一个字节都不多取）');
+    // 声明了 assets 的那一格照旧注册（两条支路互斥：一条注册、一条放行）
+    const declared = MAIN_SOURCE.slice(MAIN_SOURCE.indexOf('Array.isArray(msg && msg.modAssets)'), at);
+    assert.match(declared, /resources\/host\.js/, '有声明时那句注册一个字都不许动');
+  });
+
+  test('② 注册参数与放行都以 SW_URL 为准：两处引用的是同一个常量（不抄第二份字符串）', () => {
+    assert.equal(SW_URL, '/resource-sw.js');
+    assert.match(SW_SOURCE, /isResourcePath/, 'SW 的拦截面仍由 `common.js` 那一份判定');
+    assert.ok(MAIN_SOURCE.includes('navigator.serviceWorker?.controller'), '自愈阀的判据就是「本页确实被一个 SW 控制着」');
   });
 });
 

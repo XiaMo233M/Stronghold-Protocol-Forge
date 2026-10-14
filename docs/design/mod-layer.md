@@ -1280,10 +1280,50 @@ registry and the resource tables alike. Two details are load-bearing:
 fields are still open, and the reference mod's rewritten pack still lives in `_up/` rather than in a release. The
 browser path is **not verified**: this machine has no Chrome, so the real worker lifecycle and scope, real `caches`
 quota behaviour, a real `<input type=file>` `File`, the panel module's real `import()` and the rendered UI are written
-as **skipped placeholders** in `test/modAssets.test.js` §10 and are recorded as unresolved in the B4 report. Everything
-decidable without a browser is exercised for real in Node against a fake `CacheStorage` but real `Response`,
-`Request`, `Headers` and `crypto.subtle` — including the container byte-for-byte agreement between this repository's
-writer, the reference writer and both parsers.
+as **skipped placeholders** in `test/modAssets.test.js` §10 and are recorded as unresolved in the B4 report. (The
+lifecycle itself has since been measured in a real browser — 0.18.5, headless Edge over CDP against the source tree:
+registration and scope, the 412 surface, the self-heal path and the cache-name switch; the §10 placeholders themselves
+are still unimplemented.) Everything decidable without a browser is exercised for real in Node against a fake
+`CacheStorage` but real `Response`, `Request`, `Headers` and `crypto.subtle` — including the container byte-for-byte
+agreement between this repository's writer, the reference writer and both parsers.
+
+**Revision (2026-10-14, 0.18.5): the worker must not become a permanent hijack.** Owner-visible symptom: after an
+upgrade the bond icons, the portraits and the 3D scenes were blank, and only `Ctrl+Shift+R` brought them back. Measured
+on a clean profile, the six probes below were 200 ×5 + 404 (the sixth is a file that does not exist, so the server was
+telling the truth) with 35 `<img>` on the S.W.E.E.P. screen; after registering `/resource-sw.js` the same six are all
+**412** and the count is **0**. The worker was doing exactly what this section specifies — 412, never the origin — and
+that is the defect: nothing ever gave the interception back. `CACHE_NAME` was the fixed `sp-workshop-resources-v1-all`,
+`activate` only claimed clients, and `welcome.modAssets` only ever *registers*. So once a declaring pack was removed
+(or the deployment returned to a release that declares none), the page stopped registering while the old root-scope
+worker kept answering 412 for `/assets`, `/fonts` and `/media` — one registration, permanent hijack, clearable only by
+a hard reload or by wiping site data. The probes: `/assets/bond/arcaneShip.png`, `/assets/char/portrait/…png`,
+`/assets/local/scene/act1autochess_m01/scene.json`, `…/scene.bin`, `/assets/local/mesh/…/pPlane1.obj` and a
+nonexistent name.
+
+Three rules, each red on its own before the change and green after (`test/modAssets.test.js` §6b,
+`test/asset-index.test.js`):
+
+* **The cache name carries `APP_VERSION`** (`sp-workshop-resources-v1-<version>-all`) and `activate` deletes every
+  cache of this engine's family whose name is not the current one (`common.js staleCacheNames`). Another application's
+  caches are never touched, and neither is the current one: it holds the player's imported bytes, and `service.js`
+  will not fetch them again.
+* **The page heals itself.** When a `welcome` arrives with no `modAssets` while `navigator.serviceWorker.controller` is
+  set, `main.js` lets the worker go: `resources/release.js` unregisters this engine's registration (matched on
+  `scriptURL` ending in `SW_URL`) and deletes this engine's caches. It is a **dynamic** import, so the invariant above
+  ("no declaring pack ⇒ no field, no request, no DOM, no global") stays structural rather than becoming an `if`; the
+  owner's emergency line (`Ctrl+Shift+R`, then clear site data) now only covers a page that cannot be welcomed at all.
+* **An unhashed `/assets/**` URL revalidates** instead of being cached for a day (`server/http/files.js
+  LONG_CACHE_DIRS` drops `assets`; `fonts` / `vendor` keep the day, and every content-hashed path — the `~hash`
+  segment, a Spine model group, `?v=` — stays `immutable`). Those URLs do not change when the bytes do, and the root
+  worker answers that whole tree, so a day-old copy shows up as a missing picture rather than a slow one.
+
+The reproduction itself turned up one residue, fixed with it: answering 412 used to call `caches.open(CACHE_NAME)`
+first, which **creates** an empty cache. A worker that has just been unregistered but still controls the page
+re-created it on every request, so `caches.keys()` never emptied — "unregistered, yet it still looks like a resource
+pack was imported". `service.js` now returns early when that cache does not exist (`caches.has`).
+
+One more thing worth stating in this section: the version bump is part of the fix, not bookkeeping. `CACHE_NAME` reads
+`APP_VERSION`, so raising it is what renames the cache for players who already have the old one on disk.
 
 #### 28.13.6 `i18n`: adding strings to an existing language (B5 段)
 
