@@ -70,4 +70,6 @@ jobs:
             .pack-compat/report.json
             .pack-compat/*.stdout.txt
             .pack-compat/*.stderr.txt
+          # `.pack-compat` 是隐藏目录：glob 默认排除隐藏文件，不打开这道门现场永远传不上来
+          include-hidden-files: true
           if-no-files-found: warn
