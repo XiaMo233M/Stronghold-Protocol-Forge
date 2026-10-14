@@ -183,3 +183,31 @@ S.W.E.E.P. report) and `usePresence` (the 大厅背景 dialog's leave) are live.
 **Sync discipline.** When a later paragraph of the package's `room.js` / `loadout.js` is merged, follow the table
 above: install a shim only when that paragraph actually imports it, keep the honest `null` / `false` semantics rather
 than inventing data, and record any newly enabled or newly excluded capability in this section.
+
+### UI package 20261014: the base/append rule and the one narrowed assertion (§10)
+
+`ui-package-20261014.zip` (`MANIFEST.basedOn = 0.2.6`) replaced the same five files again. Two rules are worth keeping
+in the design record.
+
+**The package's stylesheet is the BASE; this repository's increment is appended at its END** — the rule the package's own
+`AGENTS.md` §4 states (named without a line number: that file ships inside the package, and this repository's root
+`AGENTS.md` is a different, much shorter document). The 0.18.4 symptom (the lobby's columns collapsing, `.section-label` heights 243/115/25, the seat
+slider down to 217.9 px) came from doing it the other way round: the package's whole stylesheet appended *after* the
+engine's rules, so its `.lobby-body{grid-template-columns:minmax(0,1fr)}` outranked the engine's columns. The increment
+this round is 50 lines at the end of `screens/lobby.css`, plus two mechanical passes over the package's OWN
+declarations: `font-size` onto the four text steps (150 declarations, `max(<n>rem, <m>px)` and bare `<n>rem` →
+`calc(<n> * var(--t))`, the shape `test/ui/text-scale.test.js` requires of every stylesheet outside
+`NOT_SCALED_FILES`), and the `color-mix()` / `-webkit-backdrop-filter` fallbacks `test/client-static.test.js` requires.
+
+**One assertion was narrowed, never relaxed.** `test/ui/text-scale.test.js` used to forbid *any* definition of `--t`
+outside `theme.css`. The new package pins `--t: 1rem` **inside one subtree**: `screens/lobby.css`'s `.ach__box`, the
+成就统计 panel, which is laid out to the design's own pixel sizes (its own comment records why: the 文字大小 boost made
+the plate and the mode table overlap). The assertion now forbids a definition only on a whole-document selector
+(`:root` / `html` / `body`). What it guards is unchanged — no second stylesheet may move the text root for the whole page.
+
+**Capability gaps are recorded, not papered over.** `ui/seatArt.js` reads `room.card` / `room.state.seats[].card`, and
+this repository's `shared/protocol.js` has no `room.card`: the module loads and stays inert rather than erroring (the
+local `CARD_PREF` preference is still written; the fallback portrait is picked from the player id). `ui/trophies.js`
+needs the medal art (`data/assets.json` `ui['medalIcon/trophy_level<n>_icon']`) and falls back to its inline SVG rook
+when the pack lacks it. `ui/lobbyMusic.js` (IndexedDB `sp-lobby-music`) and the package's new video backdrop ask the
+server for nothing.

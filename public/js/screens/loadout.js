@@ -456,7 +456,7 @@ export function OpCard({ m, chess, golden, entries, ops = {}, selected = false, 
   const standInNote = notOwned ? t('未持有（干员持有）：由替补干员上场，替补干员没有潜能与练度') : null;
   return html`<div role="listitem" data-chess=${chess.chessId}
       class=${cx('lo-op', `lo-op--t${chess.tier}`, selected && 'is-sel', changed && 'is-changed', notOwned && 'is-standin', quick && 'is-quick')}>
-    <div class="lo-op__card">
+    <div class="lo-op__card" onClick=${(e) => { if (!e.target.closest?.('button, select, input')) onPick(chess.chessId); }}>
       <div class="lo-op__rail">
         <${TierChip} tier=${chess.tier} size="sm" class="lo-op__tier" />
         <span class="lo-op__lv" title=${t('普通 / 精锐等级')}>
@@ -510,6 +510,43 @@ function DiyDeckCard({ m, tier, slots, picks, onOpen }) {
 }
 
 /**
+ * Mouse drag scrolls a sideways deck (a desktop has no swipe): past a few pixels the press becomes a drag and the click
+ * that ends it is swallowed, so a card is not picked by letting go. Touch and pen keep the browser's own scrolling.
+ */
+function useDragScroll() {
+  const drag = useRef(null), swallow = useRef(false);
+  const end = (e) => {
+    const d = drag.current;
+    drag.current = null;
+    if (!d?.moved) return;
+    e.currentTarget.classList.remove('is-dragging');
+    swallow.current = true;
+    setTimeout(() => { swallow.current = false; }, 0);
+  };
+  return {
+    onPointerDown: (e) => {
+      if (e.pointerType !== 'mouse' || e.button !== 0 || e.target?.closest?.('select, input, textarea, .lo-op__quick--cult')) return;
+      drag.current = { id: e.pointerId, x: e.clientX, left: e.currentTarget.scrollLeft, moved: false };
+    },
+    onPointerMove: (e) => {
+      const d = drag.current;
+      if (!d || d.id !== e.pointerId) return;
+      const dx = e.clientX - d.x;
+      if (!d.moved) {
+        if (Math.abs(dx) < 6) return;
+        d.moved = true;
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+        e.currentTarget.classList.add('is-dragging');
+      }
+      e.currentTarget.scrollLeft = d.left - dx;
+    },
+    onPointerUp: end,
+    onPointerCancel: end,
+    onClickCapture: (e) => { if (swallow.current) { swallow.current = false; e.stopPropagation(); e.preventDefault(); } },
+  };
+}
+
+/**
  * The deck: one group per tier present in `list` (a tall marker, then the cards flowing in two rows), the 甄选 card closing
  * tiers 5 / 6. A vertical wheel scrolls it sideways; `onTier` reports the tier group at the left edge (the bottom bar).
  */
@@ -517,6 +554,7 @@ function DeckView({ m, list, getChess, st, selId, quick, onPick, onChange, onOps
   const groups = TIERS.map((tier) => ({ tier, items: list.filter((c) => c.tier === tier) }))
     .filter((g) => g.items.length || (!filtered && diySlots.some((s) => s.tier === g.tier)));
   const raf = useRef(0);
+  const dragScroll = useDragScroll();
   const onScroll = (e) => {
     const el = e.currentTarget;
     cancelAnimationFrame(raf.current);
@@ -535,7 +573,7 @@ function DeckView({ m, list, getChess, st, selId, quick, onPick, onChange, onOps
     e.preventDefault();
   };
   if (!groups.length) return html`<div class="lo-deck lo-deck--empty" ref=${deckRef}><p class="lo-empty t-dim">${t('没有符合条件的干员')}</p></div>`;
-  return html`<div class=${cx('lo-deck', drawer && 'has-drawer', quick && 'is-quick')} ref=${deckRef} onScroll=${onScroll} onWheel=${onWheel} role="list" aria-label=${t('干员列表')}>
+  return html`<div class=${cx('lo-deck', drawer && 'has-drawer', quick && 'is-quick')} ref=${deckRef} onScroll=${onScroll} onWheel=${onWheel} ...${dragScroll} role="list" aria-label=${t('干员列表')}>
     ${groups.map((g) => html`<section key=${g.tier} class=${cx('lo-tgroup', `lo-tgroup--t${g.tier}`)} data-tier=${g.tier}>
       <div class=${cx('lo-tmark', `tier--${g.tier}`)} aria-hidden="true">
         <span class="lo-tmark__no">NO.</span>
@@ -563,6 +601,7 @@ export function codexItems(items) {
 function ItemCodex({ m, items, deckRef, onOpen, onTier }) {
   const groups = TIERS.map((tier) => ({ tier, items: items.filter((x) => x.tier === tier) })).filter((g) => g.items.length);
   const raf = useRef(0);
+  const dragScroll = useDragScroll();
   const onScroll = (e) => {
     const el = e.currentTarget;
     cancelAnimationFrame(raf.current);
@@ -580,7 +619,7 @@ function ItemCodex({ m, items, deckRef, onOpen, onTier }) {
   };
   if (!items.length) return html`<div class="lo-deck lo-deck--empty" ref=${deckRef}><p class="lo-empty t-dim">${t('装备数据载入中…')}</p></div>`;
   let n = -1;
-  return html`<div class="lo-deck lo-deck--items" ref=${deckRef} onScroll=${onScroll} onWheel=${onWheel} role="list" aria-label=${t('装备一览')}>
+  return html`<div class="lo-deck lo-deck--items" ref=${deckRef} onScroll=${onScroll} onWheel=${onWheel} ...${dragScroll} role="list" aria-label=${t('装备一览')}>
     ${groups.map((g) => html`<section key=${g.tier} class=${cx('lo-tgroup', `lo-tgroup--t${g.tier}`)} data-tier=${g.tier}>
       <div class=${cx('lo-tmark', `tier--${g.tier}`)} aria-hidden="true">
         <span class="lo-tmark__no">NO.</span><b class="lo-tmark__n">${ROMAN[g.tier]}</b><span class="lo-tmark__cnt num">${g.items.length}</span>

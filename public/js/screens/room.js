@@ -1,4 +1,5 @@
 import { useAccount, AccountTag } from '../ui/accounts.js';
+import { TrophyBadge } from '../ui/trophies.js';
 import { isOwnerName, decorateOwnerName } from '../ui/ownerName.js';
 import { enabled as federationEnabled, currentNode } from '../federation.js';
 // Room screen (同盟等待室). 2026-10-13 (the owner's request: the event's room, video 5:22–6:29): tall seat cards side by
@@ -36,6 +37,8 @@ import { toast, toastError } from '../ui/toasts.js';
 import { copyText } from '../ui/clipboard.js';
 import { GuideButton } from '../ui/guide.js';
 import { openStats } from './stats.js';
+import { openFriends } from '../ui/friends.js';
+import { NameCardLayer } from '../ui/namecards.js';
 import { SettingsButton } from '../ui/settings.js';
 import { LoadoutButton } from './loadout.js';
 import { SupportButton } from './support.js';
@@ -46,7 +49,8 @@ import { loadCatalog, planAlignment, alignRoom, missingPackIds, storeFor } from 
 import { net } from '../net.js';
 import { store, useStore, shallowEqual, emptyMatch, isSpectating, serverNow, loadPref, savePref } from '../store.js';
 import { data, useData } from '../data.js';
-import { chessPortraitUrl, chessAvatarUrl } from '../ui/assetUrls.js';
+import { chessAvatarUrl } from '../ui/assetUrls.js';
+import { CARD_PREF, cardOperators, seatPortrait } from '../ui/seatArt.js';
 import { C2S } from '../../../shared/protocol.js';
 import { difficultyInfo, ProtoCard, LAYER_TEXT, serverSeatMaxOf } from './lobby.js';
 import { ProtocolScene } from '../ui/protocolScene.js';
@@ -147,49 +151,14 @@ export function inviteLink(code) {
  */
 export { copyText };
 
-/** FNV-1a of a string (the portrait pick: the same operator for a player on every client). */
-function hash32(s) {
-  let h = 0x811c9dc5;
-  for (const ch of String(s)) { h ^= ch.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; }
-  return h >>> 0;
-}
-
-/** 名片干员: the player's own pick (localStorage; sent as room.card where the server knows it). */
-export const CARD_PREF = 'room.card';
+// 名片干员 portraits (the pick, else one chosen by the player id): ui/seatArt.js, shared with the strategy draft's rows
+export { CARD_PREF, cardOperators, seatPortrait };
 /** The server takes room.card (shared/protocol.js of the 10-seat package on): teammates then see one's pick. */
 export const CARD_SYNC = !!C2S && Object.hasOwn(C2S, 'room.card');
 // what else the server offers (its own shared/protocol.js): 开始搜寻 needs match.queue, 私密房间 room.setPrivate
 const CAN_QUEUE = !!C2S && Object.hasOwn(C2S, 'match.queue');
 const CAN_PRIVATE = !!C2S && Object.hasOwn(C2S, 'room.setPrivate');
 
-/**
- * The operators a seat card can show: one record per charId (the elite form for its E2 art), 6★ first.
- * @param {any[]} chessList chess.json records
- * @returns {any[]}
- */
-export function cardOperators(chessList) {
-  const by = new Map();
-  for (const c of Array.isArray(chessList) ? chessList : []) {
-    if (!c || c.isDiy || c.visible === false || typeof c.charId !== 'string') continue;
-    const prev = by.get(c.charId);
-    if (!prev || (c.isGolden && !prev.isGolden)) by.set(c.charId, c);
-  }
-  return [...by.values()].sort((a, b) => ((b.rarity ?? 0) - (a.rarity ?? 0)) || String(a.name).localeCompare(String(b.name), 'zh'));
-}
-
-/**
- * The seat card's portrait: the operator the player picked (room.state seats[].card, or one's own pick), else one of
- * the 5★/6★ operators chosen by the player id — the same on every client (null before the data loads).
- * @param {any} seat room.state seat @param {{ pool: any[], byChar: Map<string, any>, m: any, myId: any, myCard: string }} ctx
- */
-export function seatPortrait(seat, { pool, byChar, m, myId, myCard }) {
-  if (!seat || seat.playerId == null) return null;
-  const pick = (seat.playerId === myId && myCard) || seat.card;
-  const rec = pick && byChar ? byChar.get(pick) : null;
-  if (rec) return chessPortraitUrl(m, rec);
-  if (!Array.isArray(pool) || !pool.length) return null;
-  return chessPortraitUrl(m, pool[hash32(seat.playerId) % pool.length]);
-}
 
 /** 名片干员 picker: search, rarity, the operators' avatars; 默认 clears the pick. */
 function CardPicker({ current, list, m, onPick, onClose }) {
@@ -336,11 +305,12 @@ function SeatCard({ seat, index, room, facts, myId, busy, onKick, onInvite, sear
       onClick=${() => onKick(index, seat.name, seat.playerId)} title=${t('将该博士移出同盟')} aria-label=${t('移出该博士')}><${Icon} name="user" /><${Icon} name="close" /></button>` : null}
     ${seat.isBot && facts.isHost && onRemoveBot ? html`<button type="button" class="rseat__kick rseat__kick--bot" disabled=${busy === `rm${index}`}
       onClick=${() => onRemoveBot(index)} title=${t('移除 AI 队友')} aria-label=${t('移除 AI 队友')}><${Icon} name="robot" /><${Icon} name="close" /></button>` : null}
-    <div class="rseat__plate">
+    <div class=${`rseat__plate${seatAccount?.card ? ' has-nc' : ''}`}>
+      <${NameCardLayer} card=${seatAccount?.card} />
       ${isMe ? html`<span class="rseat__me" title=${t('你')}><${Icon} name="info" /></span>` : null}
       <${AvatarFrame} size="sm" name=${seat.name} src=${seatAccount?.avatar || undefined} seat=${index} bot=${seat.isBot} self=${isMe} />
       <span class="rseat__who">
-        <b class=${`rseat__name${owner ? ' sp-owner-name' : ''}`}>${seat.name || t('博士')}</b><${AccountTag} playerId=${seat.isBot ? null : seat.playerId} />
+        <${TrophyBadge} count=${seatAccount?.trophies} class="tbadge--inline" /><b class=${`rseat__name${owner ? ' sp-owner-name' : ''}`}>${seat.name || t('博士')}</b><${AccountTag} playerId=${seat.isBot ? null : seat.playerId} />
         ${owner ? html`<span class="sp-owner-badge">${t('服主')}</span>` : null}
       </span>
       <small class="rseat__doc">${seat.isBot ? 'AUTONOMOUS UNIT' : `DOCTOR #${doctorNo(seat.playerId)}`}</small>
@@ -729,6 +699,7 @@ export function RoomScreen() {
         </div>
         <div class="rs-tools">
           <${Button} variant="secondary" size="sm" square=${true} icon="chart" class="stats-entry" onClick=${openStats} title=${t('统计数据')} aria-label=${t('统计数据')} />
+          ${coop && !openFriends.unavailable ? html`<${Button} variant="secondary" size="sm" square=${true} icon="users" class="rs-friends" onClick=${() => openFriends()} title=${t('好友 · 邀请好友加入')} aria-label=${t('好友')} />` : null}
           <${SettingsButton} class="room-settings" variant="secondary" square=${true} />
           <${GuideButton} class="room-guide" variant="secondary" square=${true} />
         </div>
@@ -741,6 +712,7 @@ export function RoomScreen() {
           <b class="rs-key__code num selectable" aria-label=${t('同盟密钥 {code}', { code: room.code })}>${room.code}</b>
           <button type="button" class="rs-key__copy" onClick=${() => copy('code')}>${t('复制')}</button>
           <button type="button" class="rs-key__link" onClick=${() => copy('link')} title=${t('复制邀请链接')} aria-label=${t('复制邀请链接')}><${Icon} name="link" /></button>
+          ${openFriends.unavailable ? null : html`<button type="button" class="rs-key__friends" onClick=${() => openFriends('list')} title=${t('从好友列表邀请好友加入同盟')}><${Icon} name="users" /><span>${t('邀请好友')}</span></button>`}
         </div>` : html`<div class="rs-key rs-key--solo"><${MicroLabel}>SINGLE OPERATOR<//><span>${t('仅限 1 名博士')}</span></div>`}
       </div>
     </header>
