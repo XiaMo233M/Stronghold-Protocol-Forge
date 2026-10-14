@@ -877,6 +877,83 @@ two spreads to empty objects turns two of those tests red. `test/battleOpts.test
 instead: the helper's own truth table (a key only when the match has it, an explicit per-battle option wins), and — on a
 real match driven to COMBAT — that both paths' `Battle opts` are field-for-field equal and are what the helper returned.
 
+### 28.12.2 按文件开放官方 ops kit：`@ops/` 是命名空间，准入判据仍是那张表（2026-10-14）
+
+**The defect, stated as the code states it.** §28.12 的表把包能 import 的东西收成两类：kit SDK（`@kit/tier1..6` +
+`@kit/summoner.js`）与三个纯函数模块（`@sim/constants` `dir` `targeting`）。它**没有**给「复用引擎自带的官方 ops kit」
+留路，而工坊包 `rimbilliton`（雷姆必拓）正是这一类：它的 4 张棋子卡就是 4 名官方干员换皮，作者的 kit 是极薄的委派 ——
+
+```js
+import opShwaz from '@ops/op-shwaz.js';        // ← 引擎里根本没有这个 specifier
+export default (bb, chess, def) => {
+  const k = opShwaz.char_340_shwaz(bb, chess);
+  const sid = (def?.raw?.skills ?? []).find((s) => s.isDefault)?.skillId ?? null;
+  if (sid && k.skills?.[sid]) { k.skill = k.skills[sid]; delete k.skills[sid]; }
+  return k;
+};
+```
+
+作者自己的文件头写着「import 白名单：`@kit/` `@sim/` `@ops/`」—— 他假设了一条不存在的通道。这与同一个包里
+`pack.json` 那个不存在的 `stripDiyOverlaps` 是**同一类错误的两个实例**。装载器与校验器（同一份 `kitImportIssues`）
+把这 4 个 kit 逐个拒掉：包本身还能装，但那 4 名干员的战斗行为缺失，而校验器报的是 **error**（`errors = 4`）。
+
+**当时唯一「不改引擎」的出路，以及实测出来的那个数字。** 把 ops kit 复制进包就得连它的依赖一起复制：传递闭包
+**18 个文件 / 513 KB**，含 `sim/content/tokens.js`（召唤物注册表，107 KB）、`sim/ai.js`（索敌，58 KB）、
+`sim/simdata.js`、`sim/professions.js`、`sim/damage.js` 与 `shared/i18n.js`（浏览器 i18n 运行时，25 KB）。
+那不是「搬几个 helper」，是**把引擎子系统在包内冻结一份**：引擎日后更新这些模块，包仍跑旧副本，而且**没有任何东西会报**。
+
+**The ruling: 按文件指名，不开前缀（业主 2026-10-14）。** `KIT_IMPORT_FILES` 加四行：
+
+| specifier | file |
+|---|---|
+| `@ops/op-shwaz.js` | `server/sim/content/kits/ops/op-shwaz.js` |
+| `@ops/op-ray.js` | `server/sim/content/kits/ops/op-ray.js` |
+| `@ops/op-aglna2.js` | `server/sim/content/kits/ops/op-aglna2.js` |
+| `@ops/op-thumpy.js` | `server/sim/content/kits/ops/op-thumpy.js` |
+
+**「前缀」与「准入」是两件事，这里刻意把它们分开。** `KIT_IMPORT_PREFIXES` 里加了 `@ops/`，因为浏览器侧的 import map
+是**按前缀**生成的（`kitImportMap()`），而且错误文案必须能说「模块名未开放（前缀合法）」而不是「未知前缀」——
+否则作者看到的是「这个命名空间不存在」，真相却是「它在，只是这个文件没开」。**准入判据始终是 `KIT_IMPORT_FILES`**：
+`kitImportIssues` 走的是 `targets.has(specifier)`，所以 `@ops/op-siege.js`、`@ops/op-chen.js` 这类**同前缀、未列名**
+的文件今天仍然被拒。这条界线由 `test/kitImports.test.js` §⑥ 钉住（其中一条就断言那几个文件仍被拒、且理由说的是
+「前缀合法」）。这正是 §28.12 那句「the boundary should be visible in a diff, not implied by a path」的同一个做法：
+开的是 **4 行**，不是 1 个前缀。
+
+**为什么这 4 行两端都不需要改写文件（所以也别去改写它）。** 靠的是同一个性质：**两端都是按真实位置加载它**。
+
+- 服务端：`loadWorkshopKits` 把 specifier 窄重写成 `pathToFileURL(path.join(ROOT, file))` 之后 import；该文件
+  **自己的**相对 import（`../shared/tier1.js`、`../../../body.js`、`../../tokens.js` …）由 Node 按它的**真实路径**
+  原样解析。
+- 浏览器：import map 把 `@ops/` 指向 `/sim/content/kits/ops/`，而 `/sim/` 与磁盘 `server/sim/` **同构**
+  （`server/http/static.js`，只服务 `.js`）⇒ 该文件的 `../../../body.js` 原样解析成 `/sim/body.js`，与磁盘上的
+  `server/sim/body.js` 是同一个文件。
+
+⚠️ 所以 `@ops/` 这一族**不做任何 import 改写**：`rewriteKitImports` 只重写它认得的白名单 specifier，给 ops kit 做
+内部改写会把它的相对路径弄坏（`data:` 模块没有目录 —— 正是 §28.12 那条理由的反面）。
+
+**What deliberately did not change.**
+
+- **`MOD_API_VERSION` 不抬。** 这四行是**纯加白名单**：不新增字段、不改既有 specifier 的含义、不改变任何**已经**
+  判定过的包的结论（此前 `@ops/*` 一律被拒 ⇒ 没有任何在册包依赖它的旧行为）。加白名单不打断谁，所以不需要新的
+  API 版本号。
+- **`@sim/` 那三个文件的门、`@battle/` 的门都没动。** 唯一跟着变的是**说清拒绝理由**那一处：
+  `KNOWN_IMPORT_PREFIXES` 现在从两份前缀常量算出来，不再在 `kitImportUnavailableReason` 里抄第二份 ——
+  抄了就会在前缀表变动时给出错的那一句（`@ops/` 进表时正是这条分支要跟着改）。
+- **包的哈希与 `./…` 规则一字未动**，与 §28.12 逐条相同。
+
+**What is verified.** `test/kitImports.test.js` §⑥（5 条）：这 4 条逐条在表里、指向真实文件、浏览器 URL 落在 `/sim/`
+上；`@ops/` 下 5 个**未列名**的文件仍被拒且理由是「前缀合法」；`kitImportMap()` 为 `@ops/` 给出的前缀与
+`index.html` 一致；**加载器口径与校验器同源**（真的让 `loadWorkshopKits` 加载一个 `import "@ops/op-shwaz.js"` 的夹具
+kit，断言零 error），且同前缀未列名的夹具仍被拒（`test/workshopKits.test.js` 那类真加载，不是在文本上比对）。
+另有一条把**包真正调用的那个 `default` 成员**（`default.char_340_shwaz` / `char_4117_ray` / `char_1015_aglna2` /
+`char_4235_thumpy`）钉成函数 —— 这 4 个文件的具名导出很少（两个是空的），§①b 那条具名导出下限对它们等于空转，
+所以下限必须记在 `default` 的成员上。
+
+**这一段判据是先红后绿的**（这是"有牙齿"的证法）：加这四行**之前**跑
+`node --test --test-name-pattern='按文件开放官方 ops kit' test/kitImports.test.js` 是 `pass 0 / fail 4`
+（失败信息就是 `@ops/op-shwaz.js 必须在 KIT_IMPORT_FILES 里…` 与 `未知前缀 "@ops/"`）；加完之后整个文件
+`pass 41 / fail 0`（含这一段 5 条）。
+
 ### 28.13 The four capability declarations: `assets`, `client`, `server.preDispatch`, `routes` + the top-level key closure and `i18n` (A 段 + B1 段 + B2 段 + B3a 段 + B4 段 + B5 段)
 
 **The gap, stated by its own verdict.** A third-party mod ("full resource pack: import, verify, server admission") was

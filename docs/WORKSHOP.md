@@ -2594,9 +2594,14 @@ export default function kit(bb, chess, def) { /* … */ }
 | `@sim/constants.js` | `server/sim/constants.js` | `COLS` / `ROWS` / `TICK` … |
 | `@sim/dir.js` | `server/sim/dir.js` | `dirVec` / `offsetTile` |
 | `@sim/targeting.js` | `server/sim/targeting.js` | `absoluteRangeKeys` / `sortEnemyTargets` |
+| `@ops/op-shwaz.js` · `@ops/op-ray.js` · `@ops/op-aglna2.js` · `@ops/op-thumpy.js` | `server/sim/content/kits/ops/op-*.js` | **复用官方 ops kit**：包里的棋子就是某名官方干员换皮时，直接调它 `default` 上的那个成员（如 `opShwaz.char_340_shwaz(bb, chess)`），不必把引擎子系统复制进包。**按文件开、只此 4 个** —— `@ops/` 是命名空间不是放行：`@ops/op-siege.js` 这类同前缀未列名的文件仍然被拒（2026-10-14 业主裁定） |
 
 一个文件只开一个名字；加一行就是同时给两端开一个模块（表在 `shared/kitImports.js`，浏览器那张 import map 由
 `kitImportMap()` 生成、`test/kitImports.test.js` 钉住两者一致 —— 改表就要改 `public/index.html`，否则测试会红）。
+
+⚠️ 这 4 个 ops kit **不要**做 import 改写、也不要复制进包：它们自己的 `../shared/tier1.js`、`../../../body.js`
+由两端**按真实位置**解析（服务端按真实路径；浏览器按 `/sim/` 与磁盘 `server/sim/` 同构的 URL，见
+`server/http/static.js`），原样写 `@ops/…` 就能用。包文件一多，那 4 个文件的依赖闭包是 18 个文件 / 513 KB。
 
 #### 4.5.2 白名单之外：全部仍是 `KIT_IMPORT`（error）
 

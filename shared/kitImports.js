@@ -33,8 +33,16 @@
 // verdict as the VALIDATOR: `server/workshop.js` imports `kitImportIssues()` from this file, so the editor cannot pass
 // something the loader then refuses (docs/design/mod-layer.md §28.3).
 
-/** The only prefixes a kit may import through. A specifier that starts with neither is refused. */
-export const KIT_IMPORT_PREFIXES = Object.freeze(['@kit/', '@sim/']);
+/**
+ * 一个 kit **可以 import 的命名空间**。不带这里任何一个前缀的 specifier 一律被拒 —— 但反过来不成立：
+ * 前缀只说明「这个命名空间是开着的」，**具体哪个文件能 import 由下面 `KIT_IMPORT_FILES` 决定**
+ * （裁决走 `kitImportIssues` 的 `targets.has(specifier)`）。
+ *
+ * `@ops/` 就是这条纪律的例子（2026-10-14，业主裁定）：它进了这张前缀表，因为浏览器侧的 import map 是**按前缀**
+ * 生成的（`kitImportMap`）、错误文案也要能说"模块没开"而不是"未知前缀"；但表里**只有 4 个**官方 ops kit ——
+ * `@ops/op-siege.js` 这类同前缀、未列名的文件今天仍然被拒（`test/kitImports.test.js` §⑥ 把这条界线钉住）。
+ */
+export const KIT_IMPORT_PREFIXES = Object.freeze(['@kit/', '@sim/', '@ops/']);
 
 /**
  * 包**战斗逻辑**模块（`pack.json.server.battle`, DESIGN §28.17）允许的两个前缀：`@battle/`（战斗内容层的辅助函数，
@@ -45,6 +53,13 @@ export const KIT_IMPORT_PREFIXES = Object.freeze(['@kit/', '@sim/']);
  * 两个前缀，而不是把 kit 的名单撑大。
  */
 export const BATTLE_IMPORT_PREFIXES = Object.freeze(['@battle/', '@sim/']);
+
+/**
+ * kit 与 battle 两份前缀的并集。只用于**说清拒绝理由**：「前缀合法、只是那个模块没开」与「前缀根本不存在」
+ * 是两句不同的话 —— 前者能指路（同一个命名空间里有能用的写法），后者只能告负。从两份常量算出来、不抄第二份：
+ * 抄了就会在前缀表变动时给出错的那一句（`@ops/` 进表时正是这条分支要跟着改）。
+ */
+const KNOWN_IMPORT_PREFIXES = Object.freeze([...new Set([...KIT_IMPORT_PREFIXES, ...BATTLE_IMPORT_PREFIXES])]);
 
 /**
  * The whitelist. `specifier` is what the author writes; `file` is the real path, workspace-relative and POSIX — the
@@ -68,6 +83,23 @@ export const KIT_IMPORT_FILES = Object.freeze([
   // （`content/bonds/*.js`、`content/garrisons/*.js`）用的同一份。它已经在浏览器侧被服务（`/sim/content/support/`，
   // 客户端战斗本来就要加载它），所以两端都能解。
   { specifier: '@battle/index.js', file: 'server/sim/content/support/index.js' },
+  // ⭐ **复用官方 ops kit**（2026-10-14，业主裁定）：社区包常常就是「同一名官方干员，换一张 mod 棋子卡」。
+  // 此前它唯一的出路是把引擎子系统复制进包 —— 实测那条路要内联 **18 个文件 / 513 KB**，里面包含
+  // `content/tokens.js`（召唤物注册表）、`sim/ai.js`（索敌）、`simdata.js`、`professions.js` 与
+  // `shared/i18n.js`（浏览器 i18n 运行时）：那是**包内一份会静默漂移的冻结副本**（引擎更新了它还跑旧的）。
+  // 这 4 行把「已经装好的官方 kit」**按文件**指给包用：零复制、零漂移。前缀 `@ops/` 没有整体放开 ——
+  // 准入判据始终是这张表，`@ops/` 下别的文件仍然被拒（`test/kitImports.test.js` §⑥）。
+  //
+  // ⚠️ 这两端都成立、且**一个字都不用改写**，因为两端都是「按真实位置加载这个文件」：
+  //   · 服务端 `loadWorkshopKits` 把 specifier 窄重写成 `file:` URL 后 import，该文件**自己的**相对 import
+  //     由 Node 按它的真实路径原样解析；
+  //   · 浏览器按 import map 取 `/sim/content/kits/ops/op-shwaz.js`，它自己的 `../../../body.js` 原样解析成
+  //     `/sim/body.js`（`/sim/` 与磁盘 `server/sim/` 同构，见 `server/http/static.js`）。
+  //   所以**不要**给 ops kit 做任何 import 改写 —— 那会把它的内部相对路径弄坏。
+  { specifier: '@ops/op-shwaz.js', file: 'server/sim/content/kits/ops/op-shwaz.js' },
+  { specifier: '@ops/op-ray.js', file: 'server/sim/content/kits/ops/op-ray.js' },
+  { specifier: '@ops/op-aglna2.js', file: 'server/sim/content/kits/ops/op-aglna2.js' },
+  { specifier: '@ops/op-thumpy.js', file: 'server/sim/content/kits/ops/op-thumpy.js' },
 ]);
 
 /** 战斗逻辑模块允许的名单（它不比 kit 多一个前缀，只是指向另一组文件）。 */
@@ -324,7 +356,7 @@ export function kitImportUnavailableReason(specifier, { allowedText = kitImportA
   }
   if (s.startsWith('.')) return `相对路径无法同时在服务端与浏览器成立（只有 "./…" 这种向下的包相对形式可以，见 §28.18）；${allowedBoth}`;
   if (s.startsWith('/')) return `绝对路径无法同时在服务端与浏览器成立；${allowedBoth}`;
-  if (s.startsWith('@kit/') || s.startsWith('@sim/') || s.startsWith('@battle/')) {
+  if (KNOWN_IMPORT_PREFIXES.some((p) => s.startsWith(p))) {
     return `模块名 "${s.slice(s.indexOf('/') + 1)}" 未开放（前缀合法，但这个文件不在白名单里）；${allowedBoth}`;
   }
   if (s.startsWith('@')) return `未知前缀 "${s.slice(0, s.indexOf('/') + 1 || undefined)}"；${allowedBoth}`;
