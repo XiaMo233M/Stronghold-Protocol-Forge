@@ -36,7 +36,7 @@ concurrency:
 jobs:
   compat:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
         with:

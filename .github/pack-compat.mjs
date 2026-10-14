@@ -114,14 +114,16 @@ for (const m of target) {
   }
   fs.rmSync(raw, { recursive: true, force: true });
   const root = stageRoot;                                        // 一个根里只装这一个包，目录名 = 包 id
+  // 大包（几百条告警级）在 Actions 上实测会顶到 300 s ⇒ 崩溃被误记成「包的问题」。
+  // 给到 15 分钟，并把 stderr 留下，崩了也要能看出是超时还是判据。
   const v = spawnSync(process.execPath, [path.join(ROOT, 'tools/workshop-validate.mjs'), root, '--json'],
-    { encoding: 'utf8', cwd: ROOT, maxBuffer: 64 * 1024 * 1024, timeout: 300000 });
+    { encoding: 'utf8', cwd: ROOT, maxBuffer: 64 * 1024 * 1024, timeout: 900000, killSignal: 'SIGKILL' });
   let rep = null;
   try { rep = JSON.parse(v.stdout); } catch { /* 下面按崩溃记 */ }
   if (!rep) {
-    rec.stage = 'VALIDATOR_CRASH';
-    rec.notes.push(String(v.stderr || v.stdout || '').split('\n').slice(0, 2).join(' / ').slice(0, 200));
-    rows.push(rec); console.log(`✗ ${m.id} 校验器崩溃`); continue;
+    rec.stage = v.signal === 'SIGKILL' ? 'VALIDATOR_TIMEOUT' : 'VALIDATOR_CRASH';
+    rec.notes.push(`signal=${v.signal ?? '-'} status=${v.status} :: ` + String(v.stderr || v.stdout || '').split('\n').slice(0, 2).join(' / ').slice(0, 200));
+    rows.push(rec); console.log(`✗ ${m.id} 校验器${v.signal === 'SIGKILL' ? '超时(900s)' : '崩溃'}`); continue;
   }
   rec.stage = v.status === 0 ? 'VALID' : (v.status === 1 ? 'REJECTED' : `EXIT_${v.status}`);
   rec.errors = rep.errorCount ?? rep.errors ?? 0;
