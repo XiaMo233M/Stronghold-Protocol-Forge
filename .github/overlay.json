@@ -1,0 +1,64 @@
+{
+  "note": "本仓 master 相对上游的**叠加层唯一真相**。同步时 `.github/overlay-check.mjs` 逐条验：`mine` 少一个文件就红、`patches` 的锚点丢了也红（我方补丁被同步弄丢是最危险的静默故障）；上游如果自己收了我的修复 ⇒ 退出码 2，只提示不拦（那是好事，该减我方叠加层）。",
+  "upstream": "XiaMo233M/Stronghold-Protocol-Forge",
+  "branches": { "mirror": "main", "product": "master", "default": "master" },
+  "mine": [
+    ".github/overlay.json",
+    ".github/overlay-check.mjs",
+    ".github/pack-compat.mjs",
+    ".github/release-verify.mjs",
+    ".github/sync-contract-baseline.json",
+    ".github/sync-gate-check.mjs",
+    ".github/workflows/mirror-upstream-forge.yml",
+    ".github/workflows/pack-compat.yml",
+    ".github/workflows/release-manager.yml",
+    "tools/package-server.mjs",
+    "test/package-server-profile.test.js",
+    "docs/DEPLOY-SERVER.md",
+    "docs/ENGINE-COMPAT-STARDUST-AUDIT.md"
+  ],
+  "patches": [
+    {
+      "file": "tools/workshop-validate.mjs",
+      "why": "大份 JSON（184 条棋子的包 ≈ 240 KB）在 POSIX 管道上是**异步写**，`process.exit()` 会在 flush 前截断 —— 下游拿到半截 JSON，看起来像「校验器崩溃」。Windows 管道同步写所以本机不复现。改成 `exitCode` + 自然退出，退出码语义一个字没变。",
+      "anchors": [
+        "process.exitCode = report.errors ? 1 : 0;",
+        "// 同 json 分支：大份报告在 POSIX 管道上是异步写"
+      ],
+      "problemPattern": "process.exit(report.errors ? 1 : 0);",
+      "retireWhen": "上游那份里 `problemPattern` 不再出现（或已出现我的 anchors）⇒ 修复被采纳，删掉这一条 patches 并按 `overlay-check` 复跑。"
+    }
+  ],
+  "release": {
+    "profile": "tools/package-server.mjs（server profile）",
+    "why": "只发**纯 mod 管理器**：核心运行时 + Mod API。不含游戏素材、内容包、示例夹具，也不含 `editor/`、`test/`、`.github/`、我这线的网络调优 lane 附加与 perf-lite UI。",
+    "excludePrefixes": [
+      "Stronghold-Protocol/public/assets/",
+      "Stronghold-Protocol/public/fonts/",
+      "Stronghold-Protocol/packs/",
+      "Stronghold-Protocol/editor/",
+      "Stronghold-Protocol/test/",
+      "Stronghold-Protocol/.github/",
+      "Stronghold-Protocol/types/",
+      "Stronghold-Protocol/docs/examples/",
+      "Stronghold-Protocol/docs/my-first-pack/",
+      "Stronghold-Protocol/mod-xie/",
+      "Stronghold-Protocol/_validate/"
+    ],
+    "mustContain": [
+      "Stronghold-Protocol/server/index.js",
+      "Stronghold-Protocol/server/modRegistry.js",
+      "Stronghold-Protocol/shared/workshop.js",
+      "Stronghold-Protocol/MANIFEST.json",
+      "Stronghold-Protocol/package.json",
+      "Stronghold-Protocol/docs/DEPLOY-SERVER.md"
+    ],
+    "tag": "modmgr-v<APP_VERSION>-<UPSTREAM_VERSION>（取 shared/constants.js 两个常量；不撞上游的 v<...>-<...>）",
+    "idempotent": "同 tag 已存在 ⇒ 跳过，不覆盖、不重传资产。"
+  },
+  "gate": {
+    "contract": "判**净新增失败名称集合**（.github/sync-gate-check.mjs + .github/sync-contract-baseline.json），不比总数；跑了 0 条也算红。",
+    "knownRedIsNotMine": "维护方 main 自己就有 fail 8 + Lint 红（zip 分支缺产物校验一类）——那是他的基线，不是同步造成的。",
+    "zip": "打包器的 `zipFolder` zip 分支不校验产物 ⇒ 发布 job 自己 `unzip -t` + 条目断言（.github/release-verify.mjs）。"
+  }
+}
