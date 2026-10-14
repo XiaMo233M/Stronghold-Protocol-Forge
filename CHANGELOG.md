@@ -174,7 +174,7 @@ B1 要的是「按一下给我结论」，而那条结论必须与 `node tools/w
 - **只在装载期生效**：补丁在 `applyWorkshop` 里合进数据，**不接管运行时练度开关** —— 房间里点不点满练度、
   走哪条轴，仍由原有的运行时开关与 `pack.json.variants` 声明决定，本通道没有改它。
 - 判据：`test/workshopVariantsData.test.js` **16 pass / 0 fail**（红 15 → 绿 16）。
-- 全量：`node --test --test-concurrency=2` → **8866 tests · 8861 pass · 0 fail · 5 skipped**（exit 0）。
+- 全量：`node --test --test-concurrency=2` → **8867 tests · 8862 pass · 0 fail · 5 skipped**（exit 0）。
 - 真包：对真实工坊包跑 `node tools/workshop-validate.mjs` → **0 error / 84 warning · VALID**；
   **32 条记录 / 4019 个值 / 与官方口径不一致 0**。
 - 文档：`docs/design/mod-layer.md` §28.51、`docs/WORKSHOP.md` §1.20.1、`docs/MOD-SURFACE.md` 14 → 15 张表、
