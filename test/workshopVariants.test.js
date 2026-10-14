@@ -11,8 +11,10 @@
 //   3. **真生效 + 进摘要**：`deploy: "max"` 把这一局的部署位抬到 `DEPLOY_CAP_MAX`；只差口径的两份包**摘要必须
 //      不同**（一个口径改的是对局结果，同一个摘要下两种行为是不允许的）。
 //
-// 另有一条**既有静默失败**的回归：`content: ["chess", "variants"]` 从前被 `normalizePackManifest` 静默过滤成
-// `["chess"]`，作者看到「包合法、我写的那件事没发生」。本刀把它改成点名拒（`UNKNOWN_CONTENT_FILE`）。
+// 另有一条**既有静默失败**的回归：`content` 里不认识的条目从前被 `normalizePackManifest` 静默过滤掉，作者看到
+// 「包合法、我写的那件事没发生」。本刀把它改成点名拒（`UNKNOWN_CONTENT_FILE`），而这一版举的例子是仍然**刻意
+// 没有通道**的 `config` —— 0.18.6 给 `variants` 开了**口径数据通道**（DESIGN §28.51，判据在
+// `test/workshopVariantsData.test.js`），所以它不再是「不认识的条目」。
 //
 // Run: node --test test/workshopVariants.test.js
 import { describe, test, before, after } from 'node:test';
@@ -95,10 +97,16 @@ describe('轴表：闭枚举，一个轴只有一个值', () => {
     }
   });
 
-  test('`variants` 是顶层键闭集的一员，且**不**在 content 白名单里（口径不是数据文件）', () => {
+  test('`variants` 是顶层键闭集的一员，**也**是 content 白名单的一员（0.18.6：口径数据通道，DESIGN §28.51）', () => {
     assert.ok(PACK_FIELDS.includes('variants'));
-    assert.equal(WORKSHOP_CONTENT_FILES.includes('variants'), false,
-      '口径走 pack.json.variants；把它当数据文件就是开一条「包可以覆盖任意数值」的通道');
+    // 本刀之前这里是 `assert.equal(…, false)`，理由是「把它当数据文件就是开一条『包可以覆盖任意数值』的通道」。
+    // 那条理由今天仍然成立，所以通道落地的**同时**带上了三条守卫（不能发明记录 / 不能发明字段 / 不能发明轴，
+    // 见 `test/workshopVariantsData.test.js`）。**声明**（`pack.json.variants`，哪一套口径）与**数值**
+    // （`variants.json`，这套口径下每一条记录读几）从这一版起是两件事、两个落点。
+    assert.equal(WORKSHOP_CONTENT_FILES.includes('variants'), true,
+      '口径数值走 content 的 "variants" 数据文件；它只改已有记录的字段，一条记录都发明不出来');
+    // 而 `config` 依旧**没有**通道：它改的是规则，不是内容（这条判据一个字都没放松）
+    assert.equal(WORKSHOP_CONTENT_FILES.includes('config'), false);
   });
 
   test('只声明轴不写 default ⇒ 用这个轴的缺省；写了就照写（缺省选项也如实写出来）', () => {
@@ -180,21 +188,26 @@ describe('拒绝路径逐条：每个码点名，绝不静默丢', () => {
   });
 
   test('**既有的静默失败一并修掉**：`content` 里不认识的条目从前被安静过滤，现在点名拒', () => {
-    const r = mk({ content: ['chess', 'variants'] });
+    // 本刀之前这里举的例子是 `["chess","variants"]`（那时 `variants` 没有通道）。0.18.6 给它建了通道
+    // （DESIGN §28.51），所以「不认识的条目」改用仍然**刻意没有通道**的 `config` 举例 —— 判据本身一个字没放松。
+    const r = mk({ content: ['chess', 'config'] });
     assert.equal(r.ok, false, '一个不认识的 content 条目不许再被静默丢掉');
     assert.equal(r.error, 'UNKNOWN_CONTENT_FILE');
-    assert.match(r.detail, /"variants"/);
+    assert.match(r.detail, /"config"/);
     assert.match(r.detail, /NO content channel/);
-    // `config` 同样点名（`docs/WORKSHOP.md` §1.1 说它「刻意没有通道」）
-    assert.equal(mk({ content: ['config'] }).error, 'UNKNOWN_CONTENT_FILE');
+    // 拼错的表名同样点名（不存在的表一个字都不许被读）
+    assert.equal(mk({ content: ['ches'] }).error, 'UNKNOWN_CONTENT_FILE');
     // 非字符串条目也拒，而不是被 filter 吃掉
     assert.equal(mk({ content: [7] }).error, 'UNKNOWN_CONTENT_FILE');
     // `content` 本身不是数组 ⇒ 另一条码（不是「空数组」那个合法形状）
     assert.equal(mk({ content: 'chess' }).error, 'BAD_CONTENT_LIST');
-    // 合法的 content 一字不变
+    // 合法的 content 一字不变（含本刀新开的 `variants`，它排序后落在末尾）
     const good = normalizePackManifest({ id: 'p', name: 'p', content: ['chess', 'items'] }, 'p');
     assert.equal(good.ok, true, good.detail);
     assert.deepEqual(good.pack.content, ['chess', 'items']);
+    const withVariants = normalizePackManifest({ id: 'p', name: 'p', content: ['variants', 'chess'] }, 'p');
+    assert.equal(withVariants.ok, true, withVariants.detail);
+    assert.deepEqual(withVariants.pack.content, ['chess', 'variants']);
   });
 });
 

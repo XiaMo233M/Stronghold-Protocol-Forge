@@ -50,19 +50,19 @@ const quiet = { info() {}, warn() {}, error() {}, debug() {} };
  * 注：`checks[]` 的条目自带 `kind`；`packs[].issues` 那批里，逐记录的那几条由装载时按 `LAYER_KIND` 标好，
  * 路由 / 外观素材 / 装备图标那几条由 `kindOfCode()` 从错误码现推（同一条问题只存一份，见收尾自检的注释）。
  */
-export const CHECK_KINDS = Object.freeze(['pack', 'operator', 'engine', 'art', 'voice', 'itemIcon', 'kit', 'stage', 'enemy', 'wave', 'item', 'route', 'support']);
+export const CHECK_KINDS = Object.freeze(['pack', 'operator', 'engine', 'art', 'voice', 'itemIcon', 'kit', 'stage', 'enemy', 'wave', 'item', 'route', 'support', 'variants']);
 
 /**
  * 一张内容文件 → 它属于哪一层（`packs[].issues` 里逐记录那批的 `kind`）。
  * 界面按层分组用它；加一张数据表就在这里补一行。
  */
-const LAYER_KIND = { chess: 'operator', items: 'item', stages: 'stage', enemies: 'enemy', waves: 'wave', kits: 'kit', bonds: 'operator', tokens: 'operator', units: 'operator' };
+const LAYER_KIND = { chess: 'operator', items: 'item', stages: 'stage', enemies: 'enemy', waves: 'wave', kits: 'kit', bonds: 'operator', tokens: 'operator', units: 'operator', variants: 'variants' };
 
 /**
  * 错误码 → 层名。**只有从码推得出来的那些**才在这里（`packs[].issues` 里没带 `kind` 的那几条用）。
  *
  * 为什么按前缀推而不是再存一份 `kind`：一条问题在两个数组里各存一份，代价是一个「数了两遍」的账；
- * 而码前缀是引擎自己定的命名约定（`ART_*` / `ROUTE_*` / `VOICE_*` / `ITEM_ICON*` / …），本来就带这一层信息。
+ * 而码前缀是引擎自己定的命名约定（`ART_*` / `ROUTE_*` / `VOICE_*` / `ITEM_ICON*` / `VARIANTS_*` / …），本来就带这一层信息。
  * 推不出来的落在 `'operator'`（逐记录那批本来就都带 `kind`，这个分支只是兜底）。
  * @param {unknown} code
  * @param {{ kind?: string }} [issue] 带 `kind` 的条目直接用它（存在优先于推断）
@@ -75,6 +75,9 @@ export function kindOfCode(code, issue) {
   if (c.startsWith('ROUTE_')) return 'route';
   if (c.startsWith('VOICE_')) return 'voice';
   if (c.startsWith('ITEM_ICON')) return 'itemIcon';
+  // 口径数据通道（DESIGN §28.51）自己的一层：`variants.json` 的补丁问题归到这里，而不是兜底的 `'operator'`
+  // ——「包的口径表坏了」与「干员记录坏了」是两件事，混在一格里作者会去改错文件。
+  if (c.startsWith('VARIANTS_')) return 'variants';
   if (c.startsWith('PACK_') || c.startsWith('ASSETS_') || c === 'EMPTY_PACK' || c === 'BAD_API_TYPE'
     || c === 'BAD_GAME_TYPE' || c === 'PACK_LOAD' || c === 'PACK_FOREIGN') return 'pack';
   if (c === 'NOT_MERGED' || c === 'NOT_SHOP_ELIGIBLE' || c === 'ELITE_LINK' || c === 'SIM_NO_DEF' || c === 'SIM_THREW') return 'engine';

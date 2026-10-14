@@ -235,6 +235,14 @@ const KIT_IMPORT_EXPORTS = {
     "playerOps", "rowMates", "setGameData", "sideTiles", "tierOf", "tileKey", "topActiveBond", "unitBonds",
     "withGameData",
   ],
+  // 复用官方 ops kit（2026-10-14）：这 4 个文件的**对外接口是 `default` 导出里的那一个成员**
+  // （`default.char_340_shwaz` 等），具名导出只有少数几个。所以这里如实记下限 ——
+  // 「包真正调用的那个 default 成员还在不在」由 §⑥ 的另一条测试钉住：只记具名导出的话
+  // op-shwaz / op-thumpy 会是空集，那条守卫就等于不存在。
+  "server/sim/content/kits/ops/op-shwaz.js": [],
+  "server/sim/content/kits/ops/op-ray.js": ["SANDBEAST", "SPECIAL_TAG"],
+  "server/sim/content/kits/ops/op-aglna2.js": ["MARKER"],
+  "server/sim/content/kits/ops/op-thumpy.js": [],
 };
 
 describe('kit import 白名单：每个文件的导出名下限（⊇，不是相等）', () => {
@@ -485,5 +493,88 @@ describe('kit import：验收 —— 社区 kit 的 5 条 import 等价改写', 
     const msg = kitImportIssues("import { x } from '@kit/evil.js';\n")[0].reason;
     assert.ok(msg.includes(kitImportAllowedText()), 'reason 必须内嵌白名单文本');
     assert.match(msg, /evil\.js/);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// ⑥ 复用官方 ops kit：**按文件**开表（不是把 `@ops/` 前缀整个放开）
+//
+// 背景（2026-10-14，工坊包 `rimbilliton` 雷姆必拓）：包里有 4 个 kit 想复用引擎自带的官方 ops kit
+// （同一名官方干员的实现，换一张 mod 棋子卡）。此前唯一的出路是把引擎子系统复制进包 ——
+// 实测那条路要内联 18 个文件 / 513 KB，其中包含 `content/tokens.js`（召唤物注册表）、`ai.js`（索敌）、
+// `simdata.js`、`professions.js`、`shared/i18n.js`（浏览器 i18n 运行时）：那是**包内一份冻结副本**，
+// 引擎日后更新这些模块时它会静默漂移。业主裁定改为**在表里按文件指名这 4 个 file**。
+//
+// 本节就是那次裁定的**有牙齿的判据**（改前必红、加完必绿），并且把「按文件」与「开前缀」的分界线钉住：
+//   · `KIT_IMPORT_PREFIXES` 里会出现 `@ops/`（浏览器 import map 需要它、错误文案也需要它），
+//   · 但**准入判据始终是 `KIT_IMPORT_FILES`**（`kitImportIssues` 走 `targets.has(specifier)`）——
+//     所以 `@ops/op-siege.js` 这类**同前缀、未列名**的文件今天仍然被拒，第 2 条测试盯着这件事。
+// ---------------------------------------------------------------------------------------------------
+describe('kit import 白名单：按文件开放官方 ops kit（复用官方干员的唯一通道）', () => {
+  /** specifier → 引擎里的真实文件。这就是"按文件"的全部内容：4 条，一条不多。 */
+  const OPS_REUSE = [
+    ['@ops/op-shwaz.js', 'server/sim/content/kits/ops/op-shwaz.js'],
+    ['@ops/op-ray.js', 'server/sim/content/kits/ops/op-ray.js'],
+    ['@ops/op-aglna2.js', 'server/sim/content/kits/ops/op-aglna2.js'],
+    ['@ops/op-thumpy.js', 'server/sim/content/kits/ops/op-thumpy.js'],
+  ];
+
+  test('这 4 个官方 ops kit 逐条在表里、指向真实文件、浏览器 URL 落在 /sim/ 上', () => {
+    for (const [spec, file] of OPS_REUSE) {
+      assert.equal(KIT_IMPORT_TARGETS.get(spec), file, `${spec} 必须在 KIT_IMPORT_FILES 里指向 ${file}`);
+      assert.ok(fs.existsSync(path.join(ROOT, file)), `${file} 不存在`);
+      assert.equal(kitImportBrowserUrl(file), `/sim/content/kits/ops/${spec.slice('@ops/'.length)}`);
+    }
+  });
+
+  test('没有把 @ops/ 整个前缀放开：这 4 个之外，@ops/ 下任何文件仍被拒', () => {
+    const others = ['@ops/op-siege.js', '@ops/op-chen.js', '@ops/op-shining.js', '@ops/index.js', '@ops/op-shwaz.mjs'];
+    for (const spec of others) {
+      assert.equal(KIT_IMPORT_TARGETS.has(spec), false, `${spec} 不该在表里`);
+      const issues = kitErrors(validateKit(`import * as m from '${spec}';\nexport default () => ({});\n`, OPTS));
+      const hit = issues.find((e) => e.code === 'KIT_IMPORT');
+      assert.ok(hit, `${spec} 必须仍被拒`);
+      // 理由必须说"前缀合法、这个文件没开"，而不是"未知前缀"——后者会让作者以为整个命名空间都不存在
+      assert.match(hit.message, /前缀合法/, `${spec} 的 reason 必须说"前缀合法、模块没开"，今天说的是：${hit.message}`);
+      assert.ok(hit.hint.includes('@ops/op-shwaz.js'), `${spec} 的 hint 必须给出真正可用的写法`);
+    }
+  });
+
+  test('两端一致：这 4 条经 kitImportMap() 解析后落到同一个文件', () => {
+    const map = kitImportMap();
+    assert.equal(map['@ops/'], '/sim/content/kits/ops/', 'import map 必须为 @ops/ 声明前缀（index.html 与它同源）');
+    for (const [spec, file] of OPS_REUSE) {
+      assert.equal(map['@ops/'] + spec.slice('@ops/'.length), kitImportBrowserUrl(file), spec);
+    }
+  });
+
+  test('包真正调用的那个 default 成员仍在（改导出形状 = 静默打断所有复用它的包）', async () => {
+    // 这 4 个 ops kit 的具名导出很少（两个甚至是空的），**对外接口全在 `default` 上**：
+    // 包写的是 `opShwaz.char_340_shwaz(bb, chess)`。所以下限必须记在 default 的成员上，
+    // 否则 §①b 那条具名导出守卫对这 4 个文件等于空转。
+    const USED = [
+      ['server/sim/content/kits/ops/op-shwaz.js', 'char_340_shwaz'],
+      ['server/sim/content/kits/ops/op-ray.js', 'char_4117_ray'],
+      ['server/sim/content/kits/ops/op-aglna2.js', 'char_1015_aglna2'],
+      ['server/sim/content/kits/ops/op-thumpy.js', 'char_4235_thumpy'],
+    ];
+    for (const [file, member] of USED) {
+      const mod = await import(new URL(`../${file}`, import.meta.url).href);
+      assert.equal(typeof mod.default?.[member], 'function',
+        `${file} 的 default.${member} 必须仍是函数 —— 复用它的包调用的就是这个成员`);
+    }
+  });
+
+  test('加载器口径与校验器同源：@ops/ 那 4 条零错误，同前缀未列名的仍被拒', async () => {
+    const good = makePack("import opShwaz from '@ops/op-shwaz.js';\nexport default () => ({});\n");
+    const bad = makePack("import opSiege from '@ops/op-siege.js';\nexport default () => ({});\n");
+    try {
+      assert.deepEqual((await loadOne(good)).errors, [], '包 kit import @ops/op-shwaz.js 必须零错误');
+      const badInfo = await loadOne(bad);
+      assert.ok(badInfo.errors.some((e) => e.code === 'KIT_IMPORT'), JSON.stringify(badInfo.errors));
+    } finally {
+      fs.rmSync(good.dir, { recursive: true, force: true });
+      fs.rmSync(bad.dir, { recursive: true, force: true });
+    }
   });
 });

@@ -244,4 +244,5 @@ export const EN_PACK = Object.freeze({
   '装备': 'Equipment',
   '静态路由': 'Static routes',
   '助战声明': 'Support declarations',
+  '口径表': 'Variant data tables',
 });

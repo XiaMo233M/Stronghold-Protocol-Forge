@@ -37,6 +37,8 @@ workshop/<packId>/
   units.json        内容文件：{ [charId]: record }，与 data/backups.json 的 units[charId] 同形（新干员的干员记录）
   items.json  enemies.json  stages.json  waves.json  tokens.json  bosses.json
   factions.json  garrisons.json  bands.json  bonds.json  effects.json  choices.json
+  variants.json     内容文件，但**不是记录表**：`{ [轴]: { [文件]: { [id]: 补丁 } } }`，只给**已有**记录写另一套
+                    口径数值（DESIGN §28.51）—— 不新增记录、不写新键、不发明轴
 ```
 
 > `units.json` 是唯一一个**文件名与落点不同名**的内容文件：`data/` 里没有顶层 `units.json`，那条干员记录住在
@@ -1940,6 +1942,9 @@ node --test test/packForms.test.js
 **它不是什么**（这一条比上面那条更重要）：**它不是一个「包可以覆盖任意数值」的通道**。一个能指定任意文件覆盖的
 包格式就是安装器 —— `official` / `config` / `meta` / `shared` / `theme` / `serverModules` 那六格的判断逐字适用。
 所以这一层收成**闭枚举的口径声明**：包说的是「哪一套」，**不是「改成几」**。
+（**0.18.6 起有半个例外**：包可以给它**自己带来的**记录写另一套口径**数值** —— 走 `content: ["variants"]` +
+`variants.json`，三条守卫见下面的 §1.20.1 与 [design/mod-layer.md](design/mod-layer.md) §28.51。官方记录的数值
+仍然只能由引擎自己给。）
 
 ```jsonc
 {
@@ -2002,6 +2007,52 @@ node --test test/packForms.test.js
 [docs/design/mod-layer.md](design/mod-layer.md) §28.41）。
 
 完整规范见 [docs/design/mod-layer.md](design/mod-layer.md) §28.39（口径层）与 §28.41（形态投影）。
+
+#### 1.20.1 口径**数值**：`content: ["variants"]` + `variants.json`（0.18.6，DESIGN §28.51）
+
+上面那一层只让包说「**哪一套**口径」，值由引擎自己给。它对**官方记录**够用，对**包自己带来的记录**不够：
+一个新棋子 / 新召唤物是作者手写的，引擎没有它的第二套数值（`potDown` 只能从满潜往下降）。这一格补的就是
+那半个缺口 —— 投稿 `c26a6ed4c1e7`（卡兹戴尔多功能）的 `variants.json`（`training.chess` 28 条 +
+`training.tokens` 4 条）走的正是它。
+
+```jsonc
+// pack.json
+{ "content": ["chess", "tokens", "variants"],
+  "combat": true,                                  // 与 §1.20 同一个硬闸门
+  "overrides": ["chess:chess_char_6_12_a"],         // 撞官方 id 的仍要走 overrides
+  "variants": [{ "axis": "training", "default": "full" }] }
+
+// variants.json —— 三层闭合枚举 + 字段级补丁
+{ "training": {                    // ① 轴名：VARIANT_AXES 的键，而且**这个包必须声明过它**
+    "chess": {                     // ② 数据文件：WORKSHOP_CONTENT_FILES 的名字
+      "chess_char_9_01_a": {       // ③ 记录 id：装载期必须已经在合并后的数据里
+        "stats": { "atk": 676 } } } } }   // ④ 只许写目标记录**已经有**的键
+```
+
+**它**不是**什么，比它是什么更重要**：它**不是**一条「包可以覆盖任意数值」的通道（§1.1 那张表对 `official` /
+`config` 的判断逐字仍成立）。三条守卫每一条都是**具名整条拒绝**，不是忽略：
+
+1. **不能发明记录** —— 目标 `<文件>:<id>` 必须已在合并后的数据里，否则 `VARIANTS_TARGET_MISSING`。
+   要新增记录请走 `content`（新 id）或 `overrides`（官方 id）。
+2. **不能发明字段** —— 补丁只能写目标记录已有的键（与 `overrides` 的 `UNKNOWN_OVERRIDE_FIELD` **同一份**判据
+   `unknownOverrideKeys`），否则 `VARIANTS_UNKNOWN_KEY`。
+3. **不能发明轴** —— 表名不在 `VARIANT_AXES` ⇒ `VARIANTS_UNKNOWN_AXIS`；表名合法但这个包**没有**在
+   `pack.json.variants` 里声明它 ⇒ `VARIANTS_UNDECLARED_AXIS`（一张没人声明过的表永远不会被应用，
+   那正是本层要消灭的失败方向，所以它是拒绝而不是跳过）。写错的数据文件名 ⇒ `VARIANTS_UNKNOWN_FILE`。
+
+**合并语义**：**覆盖**（字段级），不追加。补丁走引擎**同一份** `mergeRecord`（对象递归、`OVERRIDE_REPLACE_KEYS`
+与数组整块替换、`talents` 一类按身份键合）。**生效条件**是既有的那条：这个轴按「包 id 字典序小的赢」落到
+**这个包**头上；被别的包抢掉时这张表不应用，但会**具名**记进装载报告的 `variantPatches`（启动日志里
+「写进去的 N 条」与「被抢掉的 N 张」分开印）。
+
+**不是**贡献项这条不再成立：口径**数值**是真的往对局里带数值，所以 `content: ["variants"]` 的包**不是**
+`EMPTY_PACK`；只声明轴、不带 `variants.json` 的包仍然是（与 `support` / `playtest` 同一条语义）。
+
+**它只在装载期生效**，不接管玩家自己的「干员调配」练度开关（`training` 轴今天的行为一字未改）。
+
+完整规范见 [docs/design/mod-layer.md](design/mod-layer.md) §28.51（含两处如实写下的边界：投稿原件的 patch 是
+**深层合并**、引擎的 `mergeRecord` 对 `skill` 一类是**整块替换**，所以「按本通道装包」要把那些分支写成完整值；
+以及 `talents` 按 `index` 合会留下官方的潜能链）。
 
 ### 1.21 素材加载源：`assets.mirrors[]` + `sources(ctx)`（第 5 刀，`0.16.0`）
 
@@ -2594,9 +2645,14 @@ export default function kit(bb, chess, def) { /* … */ }
 | `@sim/constants.js` | `server/sim/constants.js` | `COLS` / `ROWS` / `TICK` … |
 | `@sim/dir.js` | `server/sim/dir.js` | `dirVec` / `offsetTile` |
 | `@sim/targeting.js` | `server/sim/targeting.js` | `absoluteRangeKeys` / `sortEnemyTargets` |
+| `@ops/op-shwaz.js` · `@ops/op-ray.js` · `@ops/op-aglna2.js` · `@ops/op-thumpy.js` | `server/sim/content/kits/ops/op-*.js` | **复用官方 ops kit**：包里的棋子就是某名官方干员换皮时，直接调它 `default` 上的那个成员（如 `opShwaz.char_340_shwaz(bb, chess)`），不必把引擎子系统复制进包。**按文件开、只此 4 个** —— `@ops/` 是命名空间不是放行：`@ops/op-siege.js` 这类同前缀未列名的文件仍然被拒（2026-10-14 业主裁定） |
 
 一个文件只开一个名字；加一行就是同时给两端开一个模块（表在 `shared/kitImports.js`，浏览器那张 import map 由
 `kitImportMap()` 生成、`test/kitImports.test.js` 钉住两者一致 —— 改表就要改 `public/index.html`，否则测试会红）。
+
+⚠️ 这 4 个 ops kit **不要**做 import 改写、也不要复制进包：它们自己的 `../shared/tier1.js`、`../../../body.js`
+由两端**按真实位置**解析（服务端按真实路径；浏览器按 `/sim/` 与磁盘 `server/sim/` 同构的 URL，见
+`server/http/static.js`），原样写 `@ops/…` 就能用。包文件一多，那 4 个文件的依赖闭包是 18 个文件 / 513 KB。
 
 #### 4.5.2 白名单之外：全部仍是 `KIT_IMPORT`（error）
 

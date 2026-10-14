@@ -19,6 +19,7 @@ import { spawnSync } from 'node:child_process';
 import {
   exportPack, installZip, readPackSupport, writePackSupport, packSummary, listPackIds,
   packFilesRecursive, readPackDir, runCli, assertEntryName,
+  readPackMeta, writePackOverrides,
 } from '../tools/workshop-pack.mjs';
 import { zipWrite, zipRead } from '../shared/zip.js';
 import { loadWorkshop } from '../server/workshop.js';
@@ -348,6 +349,34 @@ describe('workshop-pack: pack.json.support', () => {
     assert.equal(s.status, 'loaded', 'the loader is the judge');
     assert.equal(s.reason, null);
     assert.deepEqual(listPackIds(ws), ['demo'], 'a hidden directory (a leftover temp dir) is not a pack');
+  });
+});
+
+// ---- overrides -----------------------------------------------------------------------------------------------------
+
+describe('workshop-pack: pack.json.overrides', () => {
+  test('`variants` 不是可覆盖目标：写入端拒，读取端也不把它算成内容文件', async () => {
+    const root = join(tmp, 'overrides');
+    fs.mkdirSync(root, { recursive: true });
+    const dir = writeDemoPack(root, 'demo');
+
+    // 写入端：`variants` 是补丁表（给已有记录写字段级补丁），没有 `<文件>:<id>` 可以覆盖 ⇒ 拒，理由具名
+    await assert.rejects(() => writePackOverrides(root, 'demo', ['variants:foo']), /OVERRIDE_BAD_FILE/);
+    // 形状合法、但不是这个格式的数据文件 ⇒ 同样拒（同一份判据的另一半）
+    await assert.rejects(() => writePackOverrides(root, 'demo', ['bogus:foo']), /OVERRIDE_BAD_FILE/);
+    // 真的记录 ⇒ 过
+    const ok = await writePackOverrides(root, 'demo', ['chess:chess_ws_demo_a']);
+    assert.deepEqual(ok.overrides.map((o) => o.entry), ['chess:chess_ws_demo_a']);
+
+    // 读取端：手写进 pack.json 的 `variants:foo` 不许显示成「是内容文件」。读写两端必须是**同一份判据**
+    // （`isOverridableContentFile`）—— 否则界面说「这条没问题」而写入端说「拒」，同一件事两个答案。
+    const manifest = JSON.parse(fs.readFileSync(join(dir, 'pack.json'), 'utf8'));
+    manifest.overrides = ['variants:foo', 'chess:chess_ws_demo_a'];
+    fs.writeFileSync(join(dir, 'pack.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+    const byEntry = Object.fromEntries(readPackMeta(root, 'demo').overrides.map((o) => [o.entry, o]));
+    assert.equal(byEntry['variants:foo'].isContentFile, false, '`variants` 是数据文件，但不是可覆盖目标 —— 读端不许说它是');
+    assert.equal(byEntry['chess:chess_ws_demo_a'].isContentFile, true, '真记录仍然是可覆盖目标');
+    fs.rmSync(root, { recursive: true, force: true });
   });
 });
 

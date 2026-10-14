@@ -747,6 +747,7 @@ function checkKindLabel(kind) {
     case 'item': return t('装备');
     case 'route': return t('静态路由');
     case 'support': return t('助战声明');
+    case 'variants': return t('口径表');
     default: return String(kind ?? '');
   }
 }
