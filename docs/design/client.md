@@ -190,7 +190,8 @@ than inventing data, and record any newly enabled or newly excluded capability i
 in the design record.
 
 **The package's stylesheet is the BASE; this repository's increment is appended at its END** — the rule the package's own
-`AGENTS.md:70` states. The 0.18.4 symptom (the lobby's columns collapsing, `.section-label` heights 243/115/25, the seat
+`AGENTS.md` §4 states (named without a line number: that file ships inside the package, and this repository's root
+`AGENTS.md` is a different, much shorter document). The 0.18.4 symptom (the lobby's columns collapsing, `.section-label` heights 243/115/25, the seat
 slider down to 217.9 px) came from doing it the other way round: the package's whole stylesheet appended *after* the
 engine's rules, so its `.lobby-body{grid-template-columns:minmax(0,1fr)}` outranked the engine's columns. The increment
 this round is 50 lines at the end of `screens/lobby.css`, plus two mechanical passes over the package's OWN
