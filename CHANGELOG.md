@@ -157,8 +157,6 @@ B1 要的是「按一下给我结论」，而那条结论必须与 `node tools/w
   具名导出下限对它们等于空转，所以下限必须记在 `default` 的成员上。
 - 全量：`node --test --test-concurrency=2` → **8850 tests · 8845 pass · 0 fail · 5 skipped**（exit 0）。
 
-全量：`node --test --test-concurrency=2` → **8850 tests · 8845 pass · 0 fail · 5 skipped**（exit 0）。
-
 文档：`docs/design/mod-layer.md` 新增 **§28.12.2**、`docs/WORKSHOP.md` §4.5.1 加这 4 行，
 以及模组仓 `SKILL.md` / `AGENTS.md` 的白名单一节（11 → 15 条，写明 `@ops/` 是命名空间不是放行）。
 

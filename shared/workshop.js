@@ -52,6 +52,21 @@ export const WORKSHOP_CONTENT_FILES = Object.freeze([
   'chess', 'units', 'items', 'enemies', 'stages', 'waves', 'tokens', 'bosses', 'factions', 'garrisons', 'bands', 'bonds', 'effects', 'choices', 'variants',
 ]);
 
+/**
+ * 一张数据文件能不能当 `pack.json.overrides` 的目标（`"<文件>:<id>"`）。
+ *
+ * **只此一份**：装载期那条 `VARIANTS_UNKNOWN_FILE` 的判据、编辑器读取端（`readPackMeta` 的 `isContentFile`）
+ * 与写入端（`writePackOverrides`）都调它。三处各写一遍 `.filter((f) => f !== 'variants')` 的代价不是多打几个
+ * 字：界面会说「这条没问题」而写入端说「拒」—— 同一件事两个答案，作者按哪个都错（DESIGN §28.51）。
+ *
+ * `variants` 是**内容文件，但不是可覆盖目标**：它装的是给已有记录写的字段级补丁，没有 `<文件>:<id>` 这种
+ * 「一条记录」可以被覆盖，所以它一律不算（与 `VARIANTS_UNKNOWN_FILE` 的文案同一条理由）。
+ * @param {unknown} file
+ */
+export function isOverridableContentFile(file) {
+  return typeof file === 'string' && file !== 'variants' && WORKSHOP_CONTENT_FILES.includes(file);
+}
+
 /** Files whose records are keyed by an id field that must equal the map key (catches copy-paste mistakes in a pack). */
 const ID_FIELD_BY_FILE = Object.freeze({
   chess: 'chessId', units: 'charId', items: 'id', enemies: 'key', stages: 'stageId', waves: 'templateId',
@@ -2624,8 +2639,8 @@ export function normalizeVariantDataFile(json) {
     /** @type {Record<string, Record<string, object>>} */
     const files = {};
     for (const [file, records] of Object.entries(byFile)) {
-      if (file === 'variants' || !WORKSHOP_CONTENT_FILES.includes(file)) {
-        return fail('VARIANTS_UNKNOWN_FILE', `variants.json["${axis}"]["${file}"] is not a data file of this pack format (${WORKSHOP_CONTENT_FILES.filter((f) => f !== 'variants').join(', ')}). A patch can only target a record of a table this format really merges; a name the loader does not know would patch nothing`);
+      if (!isOverridableContentFile(file)) {
+        return fail('VARIANTS_UNKNOWN_FILE', `variants.json["${axis}"]["${file}"] is not a data file of this pack format (${WORKSHOP_CONTENT_FILES.filter(isOverridableContentFile).join(', ')}). A patch can only target a record of a table this format really merges; a name the loader does not know would patch nothing`);
       }
       if (!isPlainObj(records) || !Object.keys(records).length) {
         return fail('VARIANTS_BAD_SHAPE', `variants.json["${axis}"]["${file}"] must be an object of { "<id>": patch } with at least one record`);

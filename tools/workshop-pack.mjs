@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createHash } from 'node:crypto';
 
-import { normalizePackManifest, normalizeContentFile, workshopSupportEntries, WORKSHOP_CONTENT_FILES, OVERRIDE_ENTRY_RE, playtestUnknownIds } from '../shared/workshop.js';
+import { normalizePackManifest, normalizeContentFile, workshopSupportEntries, WORKSHOP_CONTENT_FILES, isOverridableContentFile, OVERRIDE_ENTRY_RE, playtestUnknownIds } from '../shared/workshop.js';
 import { loadWorkshop, WORKSHOP_DIR } from '../server/workshop.js';
 // 管理器登记册（DESIGN §28.47）：装过什么、操作者启停过什么 —— CLI、编辑器、服务器读的是**同一份**状态文件。
 import { stateRootFor } from '../server/modModules.js';
@@ -719,7 +719,9 @@ export function readPackMeta(root, packId, { isOfficial = null } = {}) {
       entry: raw,
       file,
       id,
-      isContentFile: WORKSHOP_CONTENT_FILES.includes(file),
+      // `isContentFile` 的名字沿用给界面读，语义是「这条能不能当覆盖目标」—— 与写入端**同一份判据**
+      // （`isOverridableContentFile`）：`variants` 是数据文件但不是可覆盖目标，读端也不许说它是。
+      isContentFile: isOverridableContentFile(file),
       inUse: Object.hasOwn(pack.files[file] ?? {}, id),
       official: isOfficial ? !!isOfficial(file, id) : null,
     });
@@ -796,7 +798,9 @@ export async function writePackMeta(root, packId, patch, { isOfficial = null } =
  *
  * 允许任何形状合法的 `<文件>:<id>`，包括官方根本没有的 id、以及本包没有那条记录的 id：它们只是**不生效**，
  * 不是错误，而界面必须能删掉它们（否则作者又被自己写坏的一行锁在门外 —— 与图标清单同一条规矩）。
- * 真正会被拒绝的只有形状：正则与加载器同一份（`OVERRIDE_ENTRY_RE`），文件那一段必须是包能声明的数据文件。
+ * 真正会被拒绝的有**两条**：① 形状（正则与加载器同一份 `OVERRIDE_ENTRY_RE`）；② 文件那一段必须是**可覆盖
+ * 目标**（`isOverridableContentFile`）—— 是包能声明的数据文件，且**不是 `variants`**（它是补丁表，没有
+ * `<文件>:<id>` 这种记录可以被覆盖）。判据只此一份，读端（`readPackMeta` 的 `isContentFile`）调的是同一个。
  *
  * @param {unknown} list `"<文件>:<id>"` 的数组
  */
@@ -815,8 +819,8 @@ export async function writePackOverrides(root, packId, list, { isOfficial = null
     if (m[1] === 'variants') {
       throw refuse('OVERRIDE_BAD_FILE："variants" 是口径数据文件，内容是补丁不是记录，没有 "<文件>:<id>" 可以覆盖（要给已有记录写另一套数值请用 variants.json，见 DESIGN §28.51）');
     }
-    if (!WORKSHOP_CONTENT_FILES.includes(m[1])) {
-      throw refuse(`OVERRIDE_BAD_FILE："${m[1]}" 不是包能声明的数据文件（可用的是 ${WORKSHOP_CONTENT_FILES.filter((f) => f !== 'variants').join('、')}）`);
+    if (!isOverridableContentFile(m[1])) {
+      throw refuse(`OVERRIDE_BAD_FILE："${m[1]}" 不是包能声明的数据文件（可用的是 ${WORKSHOP_CONTENT_FILES.filter(isOverridableContentFile).join('、')}）`);
     }
     if (!clean.includes(entry)) clean.push(entry);
   }
