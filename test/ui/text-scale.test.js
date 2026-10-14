@@ -167,9 +167,18 @@ describe('文字大小: the CSS text root', () => {
     for (const [attr, value] of [['md', /--t: max\(1rem, 64px\)/], ['lg', /--t: max\(calc\(1rem \* 1\.15\), 76px\)/], ['xl', /--t: max\(calc\(1rem \* 1\.3\), 88px\)/]]) {
       assert.match(theme, new RegExp(`:root\\[data-text="${attr}"\\] \\{ ${value.source}; \\}`), `the ${attr} step`);
     }
+    // `--t` may only be defined for the WHOLE document, and only by theme.css's four steps. A rule-scoped pin is a
+    // different thing and is allowed: screens/lobby.css `.ach__box` (成就统计, the UI package of 2026-10-14) pins
+    // `--t: 1rem` for its own subtree because that panel is laid out to the design's pixel sizes — the 文字大小 boost
+    // made its plate and its mode table overlap (the package's own note at that rule). The behaviour this test guards
+    // is unchanged and still enforced: no second stylesheet may move the text root for the whole page.
     for (const { rel, src } of sheets) {
       if (rel === `${CSS}/theme.css`) continue;
-      assert.doesNotMatch(src, /--t\s*:/, `${rel}: --t is defined in theme.css only`);
+      for (const { selector, body } of cssRules(src)) {
+        if (!/--t\s*:/.test(body)) continue;
+        assert.doesNotMatch(selector, /(^|,)\s*(:root|html|body)\b/,
+          `${rel}: '${selector.trim()}' defines --t for the whole document — theme.css only`);
+      }
     }
   });
 

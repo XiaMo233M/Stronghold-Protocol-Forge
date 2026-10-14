@@ -147,14 +147,28 @@ B1 要的是「按一下给我结论」，而那条结论必须与 `node tools/w
 另修一处复现中揪出来的残留：`service.js` 在缓存**根本不存在**时不再 `caches.open()` 建一个空缓存。被注销却仍控制
 着页面的那一个 SW 每答一次 412 就会把它建回来，于是「注销成功、`caches.keys()` 却永远非空、看着像装过资源包」。
 
+### 界面：按第三方 UI 包 20261014 换新（与上面那条修复同一版发出）
+
+`ui-package-20261014.zip`（`MANIFEST.basedOn = 0.2.6`，34 条目）按它自己的 `AGENTS.md` 装上。**口径：包版作底，我们的增量追加在末尾。**
+
+- **整份替换 5 个**：`screens/{lobby.js,lobby.css,room.js,loadout.js,loadout.css}` —— 替换**前**先把我们相对 `ui-hub-package-20261013` 的本地改动逐条移植进包版（不是替换后再补）。**包版那两个我们服务器没有的闸门**（`match.queue`、`room.setMaxSeats`）因此自动隐藏，能力由我们自己的入口提供。
+- **新增 8 个**：`ui/{lobbyMusic,screenFit,seatArt,trophies}.js`、`compat/ui/{achievements,friends,namecards}.js`（垫片**只在目标没有同名模块时装**；目标已有的 7 个一律不覆盖）、`test/ui/sweep.test.js`。
+- **三个 patch feature 照 `tools/patches.mjs` 的规则手工落**（该工具本身**不执行**，`install.mjs` 同样不执行）：`settings.js` 两处锚点（异形屏适配段）· `devices.css` 末尾追加 `patches/devices-screenfit.css` · `fieldHost.js` 6 处必需锚点（唯一可选锚点不在 ⇒ 按 optional 语义跳过）· `audio.js` 的 `playBgm` 两处 BGM 钩子；`roundNumber` 在无 `gtop` 顶栏的部署上记 `n/a`。
+- **CSS 方向**：包版 `lobby.css`（1013→1014 涨 38,958 B）是底，我们那 50 行增量追加到**它的末尾**（`AGENTS.md:70`）。另外把包版新的 `font-size` 全部接上四档文字大小（150 处 `max(<n>rem, <m>px)` / 裸 `<n>rem` → `calc(<n> * var(--t))`，与引擎头同一形状），并按 `test/client-static.test.js` 的契约补 9 处 `color-mix()` 前置回退与 `-webkit-backdrop-filter` 孪生。
+- **移植回我们独有的七项**：座席上限滑杆（`room.setSeatCap`）· 快速匹配（`room.queue`/`room.dequeue`）· 房间模组回显 · 助战 · 聊天 · 添加/移除 AI 队友（`room.addBot`/`room.removeBot`）· i18n 包装（新增 50 条 msgid，四个语言包 100%）。
+- **协议一字未动**：没有新消息，`PROTOCOL_VERSION`（`2`）与 `MOD_API_VERSION`（`1`）都不动 ⇒ 同样**不需要 `golden:update`**。
+- **一处判据收窄（只收窄，不放松）**：`test/ui/text-scale.test.js` 原断言「`--t` 只在 `theme.css` 里定义」。包版在 `screens/lobby.css` 的 `.ach__box`（成就统计面板）**子树内**钉了 `--t: 1rem`（包作者的注释：文字大小放大后徽标与模式表会重叠）⇒ 改为**只禁止 `:root`/`html`/`body` 级定义**。守的行为不变：全局文字根仍只由 `theme.css` 的四档决定。红→绿两次输出：改前红（`public/css/screens/lobby.css: --t is defined in theme.css only`），改后 10/10 绿。
+
 ### 判据
 
+- **本版界面换新的判据**：`test/ui/**` `tests 846 / pass 842 / fail 0 / skipped 4`。**逐项真点**（headless Edge + CDP，对着主树）：座席滑杆拖到 8 ⇒ 建房 ⇒ WS `room.state` 里 `"seatCap":8` + 房内 **8 张席位卡**；快速匹配 ⇒ 等待面板出现（`1/4`）⇒ 取消 ⇒ 面板消失，WS 依次 `room.queued waiting` / `cancelled`；添加 AI 队友 ⇒ `room.state` 中出现 `{"name":"AI·华法琳","isBot":true}` 的席位 ⇒ 移除后该席位回到 `null`；助战 / 聊天（真发一条 ⇒ `chat.msg` 回显）/ S.W.E.E.P. 三页签 / 干员调配 112 张卡各自打开确有其物。**四视口**（1280/1536/1600/1920）console 错误 **0**、未捕获异常 **0**、HTTP ≥ 400 **0**；`.hub-stage` 三栏、座席滑杆 458/550/573/688 px，与改前**逐像素相同**。**房间模组回显本机看不到**：那台服务器没有声明任何工坊包（`welcome.mods.packs` 为空），`RoomModsPanel` 按设计不渲染 —— 行为由 `roomModIndependence` / `roomModSet` / `modAlign` 三条判据钉住。
 - 新判据 **6 条**（`test/modAssets.test.js:977` 的 describe 5 条 + `test/asset-index.test.js:285` 1 条），并就地翻转
   3 处同族断言（`test/asset-index.test.js:276`、`:315`、`test/lobby.test.js:277`）。**带牙证明**：对着 `HEAD` 的旧
   源逐条核对 ⇒ **6/6 红**；改后 ⇒ **6/6 绿**。改前真跑（`node --test test/modAssets.test.js test/asset-index.test.js
   test/lobby.test.js`）`tests 88 / pass 83 / fail 5`，改后 `tests 143 / suites 27 / pass 143 / fail 0`。
-- `node --test --test-concurrency=2`（全量）：`tests 8824 / suites 917 / pass 8818 / fail 1 / cancelled 0 /
-  skipped 5`。那一条失败是 `test/package.test.js`「真实跟踪树」：新文件 `public/js/resources/release.js` 当时**未被
+- `node --test --test-concurrency=2`（全量，**本版最终**，含界面换新新增的 17 条判据）：`tests 8841 / suites 917 /
+  pass 8835 / fail 1 / cancelled 0 / skipped 5`。那一条失败是 `test/package.test.js`「真实跟踪树」：新文件
+  （`public/js/resources/release.js`，以及本版界面换新的 7 个 UI 模块与 `test/ui/sweep.test.js`）当时**未被
   跟踪**（`plan()` 读 `git ls-files`），提交后自绿（`isPlayerFile()` 实测为 `true`，`resolveSpecifier()` 也对得上）。
   与 0.18.4 记的冻结树 8816/8811 的差额里，**+6 是本次新判据**（`git show HEAD:` 逐文件计数：modAssets 53→58、
   asset-index 13→14、lobby 72→72），另 +2 来自 0.18.4 之后、本次改动之外的提交，未逐条归因。

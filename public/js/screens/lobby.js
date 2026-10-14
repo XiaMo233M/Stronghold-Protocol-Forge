@@ -1,3 +1,4 @@
+import { LobbyMusicButton } from '../ui/lobbyMusic.js';
 import { AccountMeChip } from '../ui/accounts.js';
 import { isOwnerName, decorateOwnerName } from '../ui/ownerName.js';
 import { enabled as federationEnabled } from '../federation.js';
@@ -28,6 +29,8 @@ import { html, Button, Icon, MicroLabel, Panel, TextField, PingPill, AvatarFrame
 import { toast, toastError } from '../ui/toasts.js';
 import { GuideButton, openGuide } from '../ui/guide.js';
 import { openStats } from './stats.js';
+import { AchievementEntry, AchievementPanel } from '../ui/achievements.js';
+import { FriendsTile } from '../ui/friends.js';
 import { SettingsButton } from '../ui/settings.js';
 import { PwaInstallButton, fullscreen } from '../ui/device.js';
 import { LoadoutButton } from './loadout.js';
@@ -42,16 +45,16 @@ import { DEFAULT_DIFFICULTY, parsePlaytestParam } from './lobbyLinks.js';
 import { ProtocolScene } from '../ui/protocolScene.js';
 import { SearchPanel, RadarScene, CreateArt, JoinArt } from '../ui/matchFlow.js';
 import { useLeave } from '../ui/transitions.js';
-import { C2S } from '../../../shared/protocol.js';
 import { net, identity } from '../net.js';
 import { store, useStore, shallowEqual, loadPref, savePref } from '../store.js';
 import { getConfig, getMode, getStage, useData } from '../data.js';
 import { t, tc, N_ } from '../../../shared/i18n.js';
+import { C2S as SERVER_C2S } from '../../../shared/protocol.js';
 
 // What the server offers: shared/protocol.js is the server's own message list, so a deployment without 搜寻队友 /
 // 快速匹配 (match.queue), 无限火力 (room.setRandom), 私密房间 (room.setPrivate) or the public room list (room.list)
 // gets the hub without those entries and requests (all four exist here).
-const HAS = (type) => !!C2S && Object.hasOwn(C2S, type);
+const HAS = (type) => !!SERVER_C2S && Object.hasOwn(SERVER_C2S, type);
 const CAN_QUEUE = HAS('match.queue');
 const CAN_FIREPOWER = HAS('room.setRandom');
 const CAN_PRIVATE = HAS('room.setPrivate');
@@ -719,7 +722,7 @@ function ProtocolSelect({ card, roomMode, random, variant, difficulty, onDifficu
         <div class="proto-foot">
           ${search ? html`<div class="proto-opts">
             <span class="proto-mode-chip"><${Icon} name="search" />${t('精确搜寻')}</span>
-            ${CAN_LIST ? html`<${Button} variant="secondary" size="md" icon="users" onClick=${onBrowse}>${t('浏览公开同盟')}<//>` : null}
+            <${Button} variant="secondary" size="md" icon="users" onClick=${onBrowse}>${t('浏览公开同盟')}<//>
           </div>` : roomMode !== 'solo' ? html`<div class="proto-opts">
             ${roomMode !== 'solo' && CAN_PRIVATE ? html`<label class="proto-private" title=${t('不在公开大厅显示，仅通过房间码或邀请加入')}>
               <input type="checkbox" checked=${privateRoom} onChange=${(e) => onPrivate(e.currentTarget.checked)} /><span>${t('私密房间')}</span></label>` : null}
@@ -820,7 +823,7 @@ function MatchmakingModal({ open, onClose, onJoin, onSpectate }) {
   }));
 
   useEffect(() => {
-    if (federationEnabled && CAN_LIST) {net.request('room.list').then(r=>setData(r)).catch(()=>{});return;}
+    if (federationEnabled) {net.request('room.list').then(r=>setData(r)).catch(()=>{});return;}
     if (lobbyStats && typeof lobbyStats.online === 'number') {
       setData({
         online: lobbyStats.online,
@@ -832,10 +835,9 @@ function MatchmakingModal({ open, onClose, onJoin, onSpectate }) {
   }, [lobbyStats]);
 
   const fetchRooms = async () => {
-    if (!CAN_LIST) return;
     setLoading(true);
     try {
-      const res = await net.request('room.list');
+      const res = CAN_LIST ? await net.request('room.list') : null;
       if (res && res.ok) {
         setData(res);
       }
@@ -862,7 +864,7 @@ function MatchmakingModal({ open, onClose, onJoin, onSpectate }) {
       <header class="modal__head mm-modal__head">
         <${MicroLabel} tone="mint">MULTIPLAYER MATCHMAKING<//>
         <div class="mm-modal__title-row">
-          <h2 class="modal__title mm-modal__title">${t('双服统一大厅')}</h2>
+          <h2 class="modal__title mm-modal__title">${t('三服统一大厅')}</h2>
           <button type="button" class="mm-modal__close" onClick=${onClose} aria-label=${t('关闭')}>
             <${Icon} name="close" />
           </button>
@@ -1042,10 +1044,10 @@ export function LobbyScreen() {
   }, [lobbyStats?.rooms]);
 
   useEffect(() => {
-    if (!online || !CAN_LIST) return undefined;
+    if (!online) return undefined;
     let cancelled = false;
     const poll = () => {
-      if (document.hidden) return;
+      if (document.hidden || !CAN_LIST) return;
       net.request('room.list').then((res) => {
         if (!cancelled && res && res.ok && Number.isFinite(res.online)) {
           setOnlineCount(res.online);
@@ -1163,6 +1165,7 @@ export function LobbyScreen() {
   const [allyOpen, setAllyOpen] = useState(false);            // 选择同盟方式
   const [sheetChained, setSheetChained] = useState(false);    // opened from 选择同盟方式: no darkening of the hub between
   const [joinOpen, setJoinOpen] = useState(false);
+  const [achOpen, setAchOpen] = useState(false);              // 成就统计 (ui/achievements.js)
   // 同盟模拟 → 选择同盟方式; 独立模拟 / 无限火力 → 选择模拟协议
   const openMode = (m) => { pickMode(m); if (m === 'coop') setAllyOpen(true); else { setSheetPurpose('create'); setSheetChained(false); setSheetOpen(true); } };
   const openSearch = () => { pickMode('coop'); setSheetChained(allyOpen); setAllyOpen(false); setSheetPurpose('search'); setSheetOpen(true); };
@@ -1181,6 +1184,7 @@ export function LobbyScreen() {
           <${Button} variant="secondary" size="sm" square=${true} class="hub-bg-btn" onClick=${() => setBgOpen(true)}
             title=${t('大厅背景')} aria-label=${t('大厅背景')}><${BackdropGlyph} /><//>
           <${HubFullscreenButton} />
+          <${LobbyMusicButton} />
           <${PwaInstallButton} class="lobby-pwa" square=${true} />
         </div>
       </div>
@@ -1200,7 +1204,9 @@ export function LobbyScreen() {
       </div>
 
       <aside class="hub-side">
+        <${AchievementEntry} key=${achOpen ? 'open' : 'shut'} onOpen=${() => setAchOpen(true)} />
         <${HubTile} icon="key" label=${t('密钥加入')} en="JOIN WITH KEY" onClick=${() => setJoinOpen(true)} />
+        <${FriendsTile} />
         <${TipsPanel} />
       </aside>
 
@@ -1273,6 +1279,7 @@ export function LobbyScreen() {
     <//>
 
     <${MatchmakingModal} open=${modalOpen} onClose=${() => setModalOpen(false)} onJoin=${join} onSpectate=${spectate} />
+    ${achOpen ? html`<${AchievementPanel} me=${me} onClose=${() => setAchOpen(false)} />` : null}
     ${sweepOpen ? html`<${SweepReport} onClose=${() => setSweepOpen(false)} />` : null}
   </div>`;
 }

@@ -2426,7 +2426,7 @@ export function mount(ctx) {
   发出去的那一份。`byChar[charId] ?? global` 就是播放时用的那个语言 —— 最后一档「默认配音」被
   `sanitizeSettings` 保证不会露出来（store 里的 `voiceLang` 一定是词表成员）。
 * **第二个读者**：形状不是 `char_…` 的键、值不在 `VOICE_LANGS` 里的，都不进快照 —— 面板画出来的不该与
-  `public/js/audio.js:1020` / `:1026` 播放的不一致。
+  `public/js/audio.js:1022` / `:1028` 播放的不一致。
 * **拿不到就是 `null`**（没注入设置库 / 不成形 / `get()` 抛）：不抛、不编造，面板画空态。
 * **不进 `me.snapshot()`**：那三格来自**一次** `store.get()`（「一次取全」才不撕裂），这一格来自另一个 store。
 
@@ -2436,7 +2436,7 @@ export function mount(ctx) {
 
 * **只此一格**：只写 `voiceLangByChar` 的**一个键**，其它设置（音量 / 静音 / 画质 / 文字大小 / 快捷键 /
   工坊外观开关）一个字节都不动；
-* **只影响本地**：配音在**播放时**解析（`public/js/audio.js:1274` 的 `voiceLangOf` → `ui/gameLogic/settings.js
+* **只影响本地**：配音在**播放时**解析（`public/js/audio.js:1082` 的 `voiceLangOf` → `ui/gameLogic/settings.js
   voiceLangFor`：覆盖 → 全局 → 默认），整个写口是纯 localStorage 偏好 —— 不发帧、不落对局、改不了任何人的战果；
 * **闭枚举**：值只收 `VOICE_LANGS` 的成员，或 `''` / `null`（= 清掉这一格，回到跟随全局；与
   `public/js/ui/detailPanel.js:519` 的「跟随默认」同一个含义）。`VOICE_LANGS` 本身一个字也不许改；

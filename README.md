@@ -355,6 +355,15 @@ npm run editor                                                                  
 - 哪些垫片被丢掉、哪些**声明了但未启用**，逐条记在 [docs/design/client.md](docs/design/client.md):156-178（§10）。
 - **三视口预算**：这一层的高度预算按 **1440 宽下的 720 / 768 / 900 三档高**实测钉住 —— 720 高时模式卡底边 732、判据上限 700（差 32 px），900 高时富余 62 px；所以 **`max-height: 860px` 以下不挂**两件占掉净空的装饰（`.lobby-proto-stage` 与创建框里的 `.hub-art--create`，合计 52 px），860 以上整层照挂。数字、理由与「只由 CSS 决定可见性」写在 `public/css/screens/lobby.css:327-337`。
 
+**2026-10-14：换成 `ui-package-20261014`（同一口径：包版作底、我们的增量追加在它的末尾）。** 包版把整份替换的五个文件又推进了一版（它的 `lobby.css` 涨了 38,958 B），我们独有的七项（座席上限滑杆 / 快速匹配 / 房间模组回显 / 助战 / 聊天 / 添加·移除 AI 队友 / i18n 包装）逐条移植回去，**`shared/protocol.js` 一字未动**。新能力四项：
+
+- **大厅自定义 BGM**（`public/js/ui/lobbyMusic.js`）：玩家在大厅顶栏 ♫ 里导入一首音乐当大厅 BGM（≤ 20 MB，存本机 IndexedDB），大厅 / 房间 / 战前信息 / 选人时续播，进战场淡出并交回游戏 BGM。它靠 `public/js/audio.js` 的 `playBgm` 里两条**可选钩子**接管；模块不加载时钩子是空的，游戏 BGM 行为与原来逐字相同。
+- **异形屏适配**（`public/js/ui/screenFit.js` + `public/css/devices.css` 末尾一段）：刘海 / 圆角屏玩家在设置里按四条边各调 ±100 px（50 = 不调整），只存本机（`sp.pref.screenFit`）；它写在 `<html data-fit>` 上，`.app-root` 因此成为内缩盒。
+- **成就奖杯等级徽章**（`public/js/ui/trophies.js`）：按累计奖杯数取官方棋子徽章。**本仓库没有账号服务**（`ui/achievements.js` 是返回 `null` 的垫片）⇒ 没有奖杯数来源时该徽章不显示；美术缺失时回退自带 SVG 车。
+- **名片立绘 / 名片背景 / 好友 / 成就面板**：这些模块已按包的规范装上，但依赖本仓库不存在的账号与协议面 —— **`ui/seatArt.js` 的「名片干员」需要协议 `room.card`，而本仓库的 `shared/protocol.js` 里没有这一条 ⇒ 该模块静默不启用**（不报错，只用按玩家 id 选出的回退立绘）；`ui/namecards.js` / `ui/friends.js` / `ui/achievements.js` 则是返回 `null` 的垫片，界面上不出现对应入口。
+
+逐条口径记在 [docs/design/client.md](docs/design/client.md)（§10 末尾）与 [CHANGELOG.md](CHANGELOG.md) 的 `0.18.5` 节。
+
 ## 本仓库完整包含上游游戏
 
 下面是本仓库**一并附带**的上游游戏：**卫戍协议：盟约 · Stronghold Protocol: Alliance**（非官方同人复刻）。它是这套编辑器的创作对象 —— 编辑器写出的内容，最终在这里跑起来。
