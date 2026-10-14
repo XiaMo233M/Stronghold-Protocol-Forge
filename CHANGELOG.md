@@ -124,37 +124,38 @@ B1 要的是「按一下给我结论」，而那条结论必须与 `node tools/w
 （同一份 `kitImportIssues`）把这 4 个 kit 逐个拒掉 —— 校验器报的是 **error**（`errors = 4`），
 包本身还能装，但那 4 名干员的战斗行为缺失。
 
-当时唯一「不改引擎」的出路是内联，实测那条路的传递闭包是 **18 个文件 / 513 KB**：里面是
-`sim/content/tokens.js`（召唤物注册表，107 KB）、`sim/ai.js`（索敌，58 KB）、`sim/simdata.js`、
-`sim/professions.js` 与 `shared/i18n.js`（浏览器 i18n 运行时，25 KB）。那不是「搬几个 helper」，
-是把**引擎子系统在包内冻结一份** —— 引擎日后更新它们时包仍跑旧副本，而且**没有任何东西会报**。
+- 当时唯一「不改引擎」的出路是内联，实测那条路的传递闭包是 **18 个文件 / 513 KB**：`sim/content/tokens.js`
+  （召唤物注册表，107 KB）、`sim/ai.js`（索敌，58 KB）、`sim/simdata.js`、`sim/professions.js` 与
+  `shared/i18n.js`（浏览器 i18n 运行时，25 KB）。
+- 那不是「搬几个 helper」，是把**引擎子系统在包内冻结一份** —— 引擎日后更新它们时包仍跑旧副本，
+  而且**没有任何东西会报**。
 
 ### 改了什么：4 行，不是一个前缀
 
-`shared/kitImports.js KIT_IMPORT_FILES` 加四行：`@ops/op-shwaz.js` · `@ops/op-ray.js` ·
-`@ops/op-aglna2.js` · `@ops/op-thumpy.js` → `server/sim/content/kits/ops/op-*.js`。
-`KIT_IMPORT_PREFIXES` 里加了 `@ops/`，因为浏览器那张 import map 是**按前缀**生成的（`kitImportMap()`，
-`public/index.html` 同步加了 `"@ops/": "/sim/content/kits/ops/"`），而且错误文案必须能说
-「模块名未开放（前缀合法）」而不是「未知前缀」—— 否则作者看到的是「这个命名空间不存在」，真相却是
-「它在，只是这个文件没开」。**准入判据始终是那张表**：`@ops/op-siege.js`、`@ops/op-chen.js` 这类
-**同前缀、未列名**的文件今天仍然被拒 —— 这正是「按文件开」与「开前缀」的分界线。
-
-这 4 条**两端都不需要改写文件**，也不用把它复制进包：服务端把它窄重写成 `file:` URL 之后 import，
-该文件**自己的**相对 import（`../shared/tier1.js`、`../../../body.js`、`../../tokens.js` …）由 Node 按它的
-**真实路径**原样解析；浏览器按 import map 取 `/sim/content/kits/ops/op-shwaz.js`，它自己的 `../../../body.js`
-原样解析成 `/sim/body.js`（`/sim/` 与磁盘 `server/sim/` 同构，`server/http/static.js`）。
-所以 `rewriteKitImports` 一个字都没动。
+- `shared/kitImports.js` 的 `KIT_IMPORT_FILES` 加四行：`@ops/op-shwaz.js` · `@ops/op-ray.js` ·
+  `@ops/op-aglna2.js` · `@ops/op-thumpy.js` → `server/sim/content/kits/ops/op-*.js`。
+- `KIT_IMPORT_PREFIXES` 里加了 `@ops/`，因为浏览器那张 import map 是**按前缀**生成的（`kitImportMap()`，
+  `public/index.html` 同步加了 `"@ops/": "/sim/content/kits/ops/"`），而且错误文案必须能说「模块名未开放
+  （前缀合法）」而不是「未知前缀」—— 否则作者看到的是「这个命名空间不存在」，真相却是「它在，只是这个文件没开」。
+- **准入判据始终是那张表**：`@ops/op-siege.js`、`@ops/op-chen.js` 这类**同前缀、未列名**的文件今天仍然被拒
+  —— 这正是「按文件开」与「开前缀」的分界线。
+- 这 4 条**两端都不需要改写文件**，也不用把它复制进包：服务端把它窄重写成 `file:` URL 之后 import，该文件
+  **自己的**相对 import（`../shared/tier1.js`、`../../../body.js`、`../../tokens.js` …）由 Node 按它的
+  **真实路径**原样解析；浏览器按 import map 取 `/sim/content/kits/ops/op-shwaz.js`，它自己的 `../../../body.js`
+  原样解析成 `/sim/body.js`（`/sim/` 与磁盘 `server/sim/` 同构，`server/http/static.js`）。所以
+  `rewriteKitImports` 一个字都没动。
 
 ### 判据：先红后绿
 
-加这四行**之前**跑 `node --test --test-name-pattern='按文件开放官方 ops kit' test/kitImports.test.js`
-得到 **4 个 failure**（失败信息就是 `@ops/op-shwaz.js 必须在 KIT_IMPORT_FILES 里…` 与 `未知前缀 "@ops/"`）；
-加完之后 `test/kitImports.test.js` **41 pass / 0 fail**。新增的 5 条判据里，除了「表里逐条指向真实文件」
-「`@ops/` 下未列名的仍被拒且理由是『前缀合法』」「`kitImportMap()` 与 `index.html` 同源」之外，还有两条：
-**加载器口径与校验器同源**（真的让 `loadWorkshopKits` 加载一个 `import "@ops/op-shwaz.js"` 的夹具 kit，
-断言零 error），以及把**包真正调用的那个 `default` 成员**（`default.char_340_shwaz` / `char_4117_ray` /
-`char_1015_aglna2` / `char_4235_thumpy`）钉成函数 —— 这 4 个文件的具名导出很少（两个是空的），
-原有的具名导出下限对它们等于空转，所以下限必须记在 `default` 的成员上。
+- 加这四行**之前**跑 `node --test --test-name-pattern='按文件开放官方 ops kit' test/kitImports.test.js`
+  得到 **4 个 failure**（失败信息就是 `@ops/op-shwaz.js 必须在 KIT_IMPORT_FILES 里…` 与 `未知前缀 "@ops/"`）。
+- 加完之后 `test/kitImports.test.js` **41 pass / 0 fail**。新增的 5 条判据里，除了「表里逐条指向真实文件」
+  「`@ops/` 下未列名的仍被拒且理由是『前缀合法』」「`kitImportMap()` 与 `index.html` 同源」之外，还有两条：
+  **加载器口径与校验器同源**（真的让 `loadWorkshopKits` 加载一个 `import "@ops/op-shwaz.js"` 的夹具 kit，
+  断言零 error），以及把**包真正调用的那个 `default` 成员**（`default.char_340_shwaz` / `char_4117_ray` /
+  `char_1015_aglna2` / `char_4235_thumpy`）钉成函数 —— 这 4 个文件的具名导出很少（两个是空的），原有的
+  具名导出下限对它们等于空转，所以下限必须记在 `default` 的成员上。
+- 全量：`node --test --test-concurrency=2` → **8850 tests · 8845 pass · 0 fail · 5 skipped**（exit 0）。
 
 全量：`node --test --test-concurrency=2` → **8850 tests · 8845 pass · 0 fail · 5 skipped**（exit 0）。
 
