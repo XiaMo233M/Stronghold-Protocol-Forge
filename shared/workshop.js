@@ -47,25 +47,10 @@ import { traitGrantIssues } from './morph.js';
  *   2. **不能发明字段**：补丁只能写目标记录**已经有**的键（`unknownOverrideKeys` 的闭合世界）⇒ 否则点名拒；
  *   3. **不能发明轴**：表名必须是 `shared/variants.js` 的 `VARIANT_AXES` 里的轴，而且该包必须**声明**了它。
  * `config` 仍然**没有**通道（它改的是规则，不是内容）；`variants` 有通道是因为它改的是**内容的值**，不是规则。
- * 解析与合并都在本文件（`normalizeVariantDataFile` / `applyVariantDataPatches`）—— 只用**一份** `mergeRecord`。 */
+ * 解析与合并都在本文件（`normalizeVariantDataFile` / `applyVariantDataPatches`）—— 只用**一份** `mergeRecord`。「能不能当 `overrides` 目标」的判据也只有一份：`isOverridableContentFile`（在**本文件末尾**，那里写了为什么不在这一行旁边）。 */
 export const WORKSHOP_CONTENT_FILES = Object.freeze([
   'chess', 'units', 'items', 'enemies', 'stages', 'waves', 'tokens', 'bosses', 'factions', 'garrisons', 'bands', 'bonds', 'effects', 'choices', 'variants',
 ]);
-
-/**
- * 一张数据文件能不能当 `pack.json.overrides` 的目标（`"<文件>:<id>"`）。
- *
- * **只此一份**：装载期那条 `VARIANTS_UNKNOWN_FILE` 的判据、编辑器读取端（`readPackMeta` 的 `isContentFile`）
- * 与写入端（`writePackOverrides`）都调它。三处各写一遍 `.filter((f) => f !== 'variants')` 的代价不是多打几个
- * 字：界面会说「这条没问题」而写入端说「拒」—— 同一件事两个答案，作者按哪个都错（DESIGN §28.51）。
- *
- * `variants` 是**内容文件，但不是可覆盖目标**：它装的是给已有记录写的字段级补丁，没有 `<文件>:<id>` 这种
- * 「一条记录」可以被覆盖，所以它一律不算（与 `VARIANTS_UNKNOWN_FILE` 的文案同一条理由）。
- * @param {unknown} file
- */
-export function isOverridableContentFile(file) {
-  return typeof file === 'string' && file !== 'variants' && WORKSHOP_CONTENT_FILES.includes(file);
-}
 
 /** Files whose records are keyed by an id field that must equal the map key (catches copy-paste mistakes in a pack). */
 const ID_FIELD_BY_FILE = Object.freeze({
@@ -4676,4 +4661,24 @@ export function adjudicatePackGraph(packs) {
     .sort((a, b) => (a[0] < b[0] ? -1 : 1))
     .map(([id, reason]) => ({ id, reason }));
   return { kept, refused: refusedList };
+}
+
+/**
+ * 一张数据文件能不能当 `pack.json.overrides` 的目标（`"<文件>:<id>"`）。
+ *
+ * **只此一份**：装载期那条 `VARIANTS_UNKNOWN_FILE` 的判据、编辑器读取端（`readPackMeta` 的 `isContentFile`）
+ * 与写入端（`writePackOverrides`）都调它。三处各写一遍 `.filter((f) => f !== 'variants')` 的代价不是多打几个
+ * 字：界面会说「这条没问题」而写入端说「拒」—— 同一件事两个答案，作者按哪个都错（DESIGN §28.51）。
+ *
+ * `variants` 是**内容文件，但不是可覆盖目标**：它装的是给已有记录写的字段级补丁，没有 `<文件>:<id>` 这种
+ * 「一条记录」可以被覆盖，所以它一律不算（与 `VARIANTS_UNKNOWN_FILE` 的文案同一条理由）。
+ *
+ * **为什么定义在文件末尾、而不是 `WORKSHOP_CONTENT_FILES` 旁边**：这份文件被文档引用了 30 多处
+ * `shared/workshop.js:<行号>`（`test/promptCitations.test.js` 钉着它们）。插在上面会让下面每一处引用静默
+ * 漂 15 行 —— 而那条判据只报「引到的那一行是空的」，其余会变成「点得开、但点错了地方」，没人会知道。
+ * 放在末尾，一个字节都不动它们。
+ * @param {unknown} file
+ */
+export function isOverridableContentFile(file) {
+  return typeof file === 'string' && file !== 'variants' && WORKSHOP_CONTENT_FILES.includes(file);
 }
