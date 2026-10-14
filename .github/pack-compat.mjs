@@ -118,12 +118,24 @@ for (const m of target) {
   // 给到 15 分钟，并把 stderr 留下，崩了也要能看出是超时还是判据。
   const v = spawnSync(process.execPath, [path.join(ROOT, 'tools/workshop-validate.mjs'), root, '--json'],
     { encoding: 'utf8', cwd: ROOT, maxBuffer: 64 * 1024 * 1024, timeout: 900000, killSignal: 'SIGKILL' });
+  const so = String(v.stdout ?? '');
+  const se = String(v.stderr ?? '');
   let rep = null;
-  try { rep = JSON.parse(v.stdout); } catch { /* 下面按崩溃记 */ }
+  try { rep = JSON.parse(so); } catch { /* 下面按崩溃记 */ }
   if (!rep) {
     rec.stage = v.signal === 'SIGKILL' ? 'VALIDATOR_TIMEOUT' : 'VALIDATOR_CRASH';
-    rec.notes.push(`signal=${v.signal ?? '-'} status=${v.status} :: ` + String(v.stderr || v.stdout || '').split('\n').slice(0, 2).join(' / ').slice(0, 200));
-    rows.push(rec); console.log(`✗ ${m.id} 校验器${v.signal === 'SIGKILL' ? '超时(900s)' : '崩溃'}`); continue;
+    // 崩溃/超时档位必须留下**可机读的现场**：两次口径相同却一绿一红的平台差异，只靠「崩溃」二字无法定位。
+    // 体量（区分截断 vs 空输出）、spawn 级错误（区分 ENOBUFS 一类的启动失败）、两口尾部（区分半截 JSON vs
+    // 杂讯）都写进 note，并把两口原文落盘随 artifact 上传（见 pack-compat.yml）。
+    const spawnErr = v.error ? ` spawn=${v.error.code ?? v.error.message}` : '';
+    rec.notes.push(`signal=${v.signal ?? '-'} status=${v.status} stdout=${so.length}B stderr=${se.length}B${spawnErr}`);
+    rec.notes.push(`stdout-tail: ${so.slice(-240).replace(/\s+/g, ' ')}`);
+    rec.notes.push(`stderr-tail: ${se.slice(-240).replace(/\s+/g, ' ')}`);
+    try {
+      fs.writeFileSync(path.join(WORK, `${m.id}.stdout.txt`), so);
+      fs.writeFileSync(path.join(WORK, `${m.id}.stderr.txt`), se);
+    } catch { /* 现场落盘失败不影响判定 */ }
+    rows.push(rec); console.log(`✗ ${m.id} 校验器${v.signal === 'SIGKILL' ? '超时(900s)' : '崩溃'}（stdout=${so.length}B stderr=${se.length}B）`); continue;
   }
   rec.stage = v.status === 0 ? 'VALID' : (v.status === 1 ? 'REJECTED' : `EXIT_${v.status}`);
   rec.errors = rep.errorCount ?? rep.errors ?? 0;

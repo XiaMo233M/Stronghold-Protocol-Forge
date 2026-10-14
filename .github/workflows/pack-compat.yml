@@ -66,5 +66,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: pack-compat-report
-          path: .pack-compat/report.json
+          path: |
+            .pack-compat/report.json
+            .pack-compat/*.stdout.txt
+            .pack-compat/*.stderr.txt
           if-no-files-found: warn
