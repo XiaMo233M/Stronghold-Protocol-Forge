@@ -25,7 +25,9 @@
 
 // 变体 / 口径层（DESIGN §28.39）：轴的闭枚举与解析只有一份，`shared/variants.js`。这一层**不**在这里重新判一遍
 // —— 一个轴表有两份实现，就是一个「哪个才算数」的问题。
-import { parseVariantsDecl } from './variants.js';
+// 口径**数据**通道（DESIGN §28.51）把同一张轴表当**闭枚举**用：`variants` 内容文件的表名必须是这里的一个轴，
+// 生效与否由 `variantValue` / `mergeVariantDecls`（同一份「包 id 字典序小的赢」）裁决 —— 依然只有一份实现。
+import { parseVariantsDecl, isVariantAxis, VARIANT_AXIS_NAMES, variantValue, mergeVariantDecls } from './variants.js';
 // 行为开关层（DESIGN §28.43）：与口径**同一形状、不同一张表**，判据只有一份在 `shared/behaviour.js`。同样不在这里
 // 重判一遍闭枚举 —— 而且这一层的表今天是**空的**（通道 + 守卫先落，第一格与它的引擎实现点一起落）。
 import { parseBehaviourDecl } from './behaviour.js';
@@ -38,12 +40,16 @@ import { traitGrantIssues } from './morph.js';
 /** Data files a pack may contribute to. Deliberately a conservative subset of data/: `config` is excluded because a
  * pack that rewrote the economy or the round schedule would change the rules rather than the content.
  *
- * `variants`（变体 / 口径层，DESIGN §28.39）**也不在这张表里**，理由与 `config` 同一条但更强：一个口径不是一张
- * 数据表，而是一个**闭枚举的选项名**（`shared/variants.js` 的 `VARIANT_AXES`）。把它写成一张 `{ id: record }`
- * 的数据文件就等于开一条「包可以覆盖任意数值」的通道 —— 那就是把安装器做进引擎（`docs/WORKSHOP.md` §1.1 对
- * `official` / `config` 的判断逐字成立）。所以口径走 `pack.json.variants` 这一格，值由引擎自己给。 */
+ * `variants`（DESIGN §28.51）**在这张表里，但它不是一张数据表** —— 它是**口径数据通道**：文件里没有一条新记录，
+ * 只有「给**已经存在**的记录写一份**字段级补丁**」的表，归属到 `pack.json.variants` 声明的那条口径轴上。
+ * 三条守卫让它不是「包可以覆盖任意数值」那条通道（`docs/WORKSHOP.md` §1.1 对 `official` / `config` 的判断）：
+ *   1. **不能发明记录**：目标 `<文件>:<id>` 必须已经在合并后的数据里（官方或别的包贡献的）⇒ 否则点名拒；
+ *   2. **不能发明字段**：补丁只能写目标记录**已经有**的键（`unknownOverrideKeys` 的闭合世界）⇒ 否则点名拒；
+ *   3. **不能发明轴**：表名必须是 `shared/variants.js` 的 `VARIANT_AXES` 里的轴，而且该包必须**声明**了它。
+ * `config` 仍然**没有**通道（它改的是规则，不是内容）；`variants` 有通道是因为它改的是**内容的值**，不是规则。
+ * 解析与合并都在本文件（`normalizeVariantDataFile` / `applyVariantDataPatches`）—— 只用**一份** `mergeRecord`。 */
 export const WORKSHOP_CONTENT_FILES = Object.freeze([
-  'chess', 'units', 'items', 'enemies', 'stages', 'waves', 'tokens', 'bosses', 'factions', 'garrisons', 'bands', 'bonds', 'effects', 'choices',
+  'chess', 'units', 'items', 'enemies', 'stages', 'waves', 'tokens', 'bosses', 'factions', 'garrisons', 'bands', 'bonds', 'effects', 'choices', 'variants',
 ]);
 
 /** Files whose records are keyed by an id field that must equal the map key (catches copy-paste mistakes in a pack). */
@@ -1843,7 +1849,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     if (typeof f === 'string' && WORKSHOP_CONTENT_FILES.includes(f)) continue;
     const shown = typeof f === 'string' ? (f.length > MAX_KEY_SHOWN ? `${f.slice(0, MAX_KEY_SHOWN)}…` : f) : (Array.isArray(f) ? 'an array' : typeof f);
     return fail('UNKNOWN_CONTENT_FILE',
-      `content: "${shown}" is not a data file of this pack format (${WORKSHOP_CONTENT_FILES.join(', ')}). A name this loader does not know is never read: a pack that wrote it would ship a file nothing merges — "variants" and "config" in particular have NO content channel (see docs/WORKSHOP.md §1.1); a 口径 is declared as pack.json.variants instead`);
+      `content: "${shown}" is not a data file of this pack format (${WORKSHOP_CONTENT_FILES.join(', ')}). A name this loader does not know is never read: a pack that wrote it would ship a file nothing merges — "config" in particular has NO content channel (see docs/WORKSHOP.md §1.1), and a 口径 is declared as pack.json.variants (its VALUES go in the "variants" content file, DESIGN §28.51)`);
   }
   const content = Array.isArray(raw.content)
     ? [...new Set(raw.content.filter((f) => typeof f === 'string' && WORKSHOP_CONTENT_FILES.includes(f)))].sort()
@@ -2573,16 +2579,90 @@ export function playtestUnknownIds(declared, overrides, ownChessIds) {
 }
 
 /**
+ * **口径数据通道**（DESIGN §28.51）：解析一个包的 `variants.json`。这是**唯一**一份形状判据（装载器
+ * `server/workshop.js`、编辑器与 `npm run workshop:validate` 都走 `normalizeContentFile` 这一个入口）。
+ *
+ * 收的形状 —— 与投稿 `c26a6ed4c1e7` 的原件（`payload/packs/fanpack/variants.json`）**逐层 1:1**，只把它的
+ * `{ $: value }` 叶子解成原生值（那一层是它自己安装器的 patch 方言，引擎的 `mergeRecord` 不需要它）：
+ * ```jsonc
+ * { "training": {                   // ① 轴名 —— `VARIANT_AXES` 的键（不许新增轴）
+ *     "chess": {                    // ② 数据文件 —— `WORKSHOP_CONTENT_FILES` 的名字（不许未知键）
+ *       "chess_char_9_01_a": {      // ③ 记录 id —— 装载期必须在合并后的数据里已有（不许发明记录）
+ *         "stats": { "atk": 676 } } } } }   // ④ 字段级补丁 —— 只许写目标记录已有的键
+ * ```
+ *
+ * 这里只判**形状与闭枚举**（① ② ③ 的 id 合法性 ④ 是对象）；「目标存不存在」「补丁的键存不存在」要读**合并后**
+ * 的数据，所以那一半在 `applyVariantDataPatches`（同样是唯一一份）。拒绝码：
+ *   * `VARIANTS_BAD_SHAPE`   —— 不是对象 / 某一层不是对象或为空 / 记录 id 不合法 / 补丁不是非空对象；
+ *   * `VARIANTS_UNKNOWN_AXIS`—— 表名不是 `VARIANT_AXES` 的轴（文案里列出全部合法轴）；
+ *   * `VARIANTS_UNKNOWN_FILE`—— 第二层不是 `WORKSHOP_CONTENT_FILES` 的名字（也不许是 `variants` 自己）；
+ *   * `EMPTY_CONTENT`        —— 一个什么都不补的 `variants.json`（正是这条通道存在的理由要消灭的失败方向）。
+ *
+ * @param {any} json parsed `variants.json`
+ * @returns {{ ok: true, records: Record<string, Record<string, Record<string, object>>> }
+ *          | { ok: false, error: string, detail: string }}
+ */
+export function normalizeVariantDataFile(json) {
+  if (!isPlainObj(json)) {
+    return fail('VARIANTS_BAD_SHAPE', 'variants.json must be a JSON object of { "<axis>": { "<file>": { "<id>": { …patch } } } } — it holds 口径 values, not records');
+  }
+  const axes = Object.keys(json);
+  if (!axes.length) {
+    return fail('EMPTY_CONTENT', 'variants.json declares no 口径 axis — a file that patches nothing is exactly the failure mode this channel exists to prevent');
+  }
+  /** @type {Record<string, Record<string, Record<string, object>>>} */
+  const tables = {};
+  for (const axis of axes) {
+    if (!isVariantAxis(axis)) {
+      const shown = axis.length > MAX_KEY_SHOWN ? `${axis.slice(0, MAX_KEY_SHOWN)}…` : axis;
+      return fail('VARIANTS_UNKNOWN_AXIS', `variants.json["${shown}"] is not an axis of this 口径 format. Known axes: ${VARIANT_AXIS_NAMES.map((a) => `"${a}"`).join(', ')} — a table the loader does not know is never applied, so it is refused instead of ignored (declare the axis in pack.json.variants and name it here, DESIGN §28.51)`);
+    }
+    const byFile = json[axis];
+    if (!isPlainObj(byFile) || !Object.keys(byFile).length) {
+      return fail('VARIANTS_BAD_SHAPE', `variants.json["${axis}"] must be an object of { "<file>": { "<id>": patch } } with at least one data file`);
+    }
+    /** @type {Record<string, Record<string, object>>} */
+    const files = {};
+    for (const [file, records] of Object.entries(byFile)) {
+      if (file === 'variants' || !WORKSHOP_CONTENT_FILES.includes(file)) {
+        return fail('VARIANTS_UNKNOWN_FILE', `variants.json["${axis}"]["${file}"] is not a data file of this pack format (${WORKSHOP_CONTENT_FILES.filter((f) => f !== 'variants').join(', ')}). A patch can only target a record of a table this format really merges; a name the loader does not know would patch nothing`);
+      }
+      if (!isPlainObj(records) || !Object.keys(records).length) {
+        return fail('VARIANTS_BAD_SHAPE', `variants.json["${axis}"]["${file}"] must be an object of { "<id>": patch } with at least one record`);
+      }
+      /** @type {Record<string, object>} */
+      const out = {};
+      for (const [id, patch] of Object.entries(records)) {
+        if (!RECORD_ID_RE.test(id)) {
+          return fail('VARIANTS_BAD_SHAPE', `variants.json["${axis}"]["${file}"] key "${id.length > MAX_KEY_SHOWN ? `${id.slice(0, MAX_KEY_SHOWN)}…` : id}" is not a valid record id`);
+        }
+        if (!isPlainObj(patch) || !Object.keys(patch).length) {
+          return fail('VARIANTS_BAD_SHAPE', `variants.json["${axis}"]["${file}"]["${id}"] must be a non-empty object of the fields to patch`);
+        }
+        out[id] = patch;
+      }
+      files[file] = out;
+    }
+    tables[axis] = files;
+  }
+  return { ok: true, records: tables };
+}
+
+/**
  * Validate one content file of a pack: a `{ [id]: record }` map, every key a safe id, every value a JSON object, and —
  * when the record carries its own id field — that field equal to the key.
  *
  * `units`（新干员的干员记录）**另外**要过一遍「下游用得上吗」：见 `UNIT_REQUIRED_FIELDS` 的长注释 —— 我们只查那
  * 六个字段，其余一律照抄，不复制官方 schema。
+ *
+ * `variants`（口径数据通道，DESIGN §28.51）**不是** `{ [id]: record }`：它的形状判据只有一份，就是
+ * `normalizeVariantDataFile`，这里只负责转发 —— 一个形状有两份判据，就是一个「哪个才算数」的问题。
  * @param {string} file data file basename, e.g. 'chess'
  * @param {any} json parsed file
  * @returns {{ ok: true, records: Record<string, object> } | { ok: false, error: string, detail: string }}
  */
 export function normalizeContentFile(file, json) {
+  if (file === 'variants') return normalizeVariantDataFile(json);
   if (!isPlainObj(json)) return fail('BAD_CONTENT', `${file}.json must be a JSON object of { id: record }`);
   const field = ID_FIELD_BY_FILE[file] || null;
   /** @type {Record<string, object>} */
@@ -3204,6 +3284,100 @@ function baseContainerFor(base, file) {
 }
 
 /**
+ * **口径数据通道的执行点**（DESIGN §28.51）：把每个包 `variants.json` 的表合到**已经并完**的数据上。这一层
+ * 一条记录都不新增 —— 它只改**已经在 `out` 里**的记录，所以它是「字段级补丁」而不是「第二条 content 通道」。
+ *
+ * 三条判据，每条都点名（绝不静默丢）：
+ *   1. `VARIANTS_UNDECLARED_AXIS` —— 表写了一条轴，而这个包**没有**在 `pack.json.variants` 里声明它。这是这条
+ *      通道最容易踩的坑（「写了等于没写」正是本层要消灭的失败方向），所以它是**拒绝**，不是跳过。
+ *   2. `VARIANTS_TARGET_MISSING`  —— 目标 `<文件>:<id>` 在合并后的数据里不存在。要发明记录请用 `content`
+ *      （新 id）或 `overrides`（官方 id）—— 那是那两条通道的活，这一条只负责「已有记录的另一套数值」。
+ *   3. `VARIANTS_UNKNOWN_KEY`     —— 补丁写了目标记录**没有**的键。闭合世界与 `overrides` 的
+ *      `UNKNOWN_OVERRIDE_FIELD` **逐字同一条判据**（`unknownOverrideKeys`），层级也一样（记录顶层）。
+ *
+ * **生效条件**：轴在 `mergeVariantDecls`（既有规则：包 id 字典序小的赢）里落到**这个包声明的那个选项**上。
+ * 别的包赢了同一个轴 ⇒ 这个包的表**不应用**，但**具名**记进 `report.variantPatches`（`status: 'overridden'`）
+ * —— 与 `mergeVariantDecls.overridden` 同一条「输的一方必须看到一行字」的纪律。
+ *
+ * @param {Record<string, any>} out 合并中的顶层数据（会被就地补出新对象，绝不改到 `data/` 的冻结对象）
+ * @param {Array<{ id: string, variants?: Array<{ axis: string, default: string }>|null, files?: Record<string, any> }>} packs
+ * @param {{ errors: Array<object>, variantPatches?: object[] }} report
+ * @returns {number} 真正写进去的补丁条数
+ */
+function applyVariantDataPatches(out, packs, report) {
+  report.variantPatches = [];
+  const sorted = (Array.isArray(packs) ? packs : [])
+    .filter((p) => p && typeof p === 'object' && typeof p.id === 'string' && p.id)
+    .slice()
+    .sort(byPackId);
+  // 轴 → **赢了那个轴的包 id**（不是选项名）：两个包可以声明同一个选项，那时「谁的表生效」只能由赢家决定。
+  const won = new Map(mergeVariantDecls(sorted).decl.map((e) => [e.axis, e.by]));
+  let applied = 0;
+  for (const pack of sorted) {
+    const tables = pack.files && pack.files.variants;
+    if (!isPlainObj(tables)) continue;
+    for (const [axis, byFile] of Object.entries(tables)) {
+      const own = variantValue(pack.variants, axis);
+      if (own === null) {
+        report.errors.push({
+          pack: pack.id, file: 'variants', id: axis, code: 'VARIANTS_UNDECLARED_AXIS',
+          reason: `variants.json patches the 口径 axis "${axis}", but pack.json does not declare that axis — a table whose axis nobody declared is never applied, so it is refused instead of silently ignored (add { "axis": "${axis}", "default": "<option>" } to pack.json.variants)`,
+        });
+        continue;
+      }
+      const holder = won.get(axis);
+      if (holder !== pack.id) {
+        report.variantPatches.push({
+          pack: pack.id, axis, option: own, status: 'overridden', lostTo: holder ?? null,
+          reason: `pack "${holder ?? '(none)'}" declares the 口径 axis "${axis}" and wins it (the smaller pack id wins, DESIGN §28.3) — this pack's table for that axis is not applied`,
+        });
+        continue;
+      }
+      // 落盘位置与 content 那一条**同一张表**（`units` 进 `backups.units`，其余同名），而且同样**逐层浅复制**：
+      // 路径之外的同层兄弟原样留着，`data/*.json` 一个字节都不动。
+      for (const [file, records] of Object.entries(byFile)) {
+        const path = OVERLAY_TARGET_BY_FILE[file] || [file];
+        const chain = [];
+        let cur = out;
+        for (const seg of path.slice(0, -1)) {
+          const inner = isPlainObj(cur[seg]) ? { ...cur[seg] } : {};
+          chain.push({ owner: cur, key: seg, value: inner });
+          cur = inner;
+        }
+        const leaf = path[path.length - 1];
+        const prior = isPlainObj(cur[leaf]) ? { ...cur[leaf] } : {};
+        for (const [id, patch] of Object.entries(records)) {
+          const target = prior[id];
+          if (!isPlainObj(target)) {
+            report.errors.push({
+              pack: pack.id, file, id, code: 'VARIANTS_TARGET_MISSING',
+              reason: `variants.json patches "${file}:${id}", which is not in the merged data — the 口径 data channel can only give an EXISTING record another set of values; add the record with content ("${file}") for a new id, or with overrides ("${file}:${id}") to replace an official one`,
+            });
+            continue;
+          }
+          const unknown = unknownOverrideKeys(target, patch);
+          if (unknown && unknown.length) {
+            report.errors.push({
+              pack: pack.id, file, id, code: 'VARIANTS_UNKNOWN_KEY', definedBy: 'the record it patches',
+              reason: `variants.json["${axis}"]["${file}"]["${id}"] names ${unknown.map((k) => `"${k}"`).join(', ')}, which the record it patches does not have — a 口径 patch may only change keys that exist (the same closed world as an "overrides" entry)`,
+            });
+            continue;
+          }
+          prior[id] = mergeRecord(target, patch);
+          applied++;
+          report.variantPatches.push({
+            pack: pack.id, axis, option: own, status: 'applied', file, id, keys: Object.keys(patch).sort(),
+          });
+        }
+        cur[leaf] = prior;
+        for (let i = chain.length - 1; i >= 0; i--) chain[i].owner[chain[i].key] = chain[i].value;
+      }
+    }
+  }
+  return applied;
+}
+
+/**
  * Apply every pack's content on top of the official data and return a NEW top-level object (the input is never
  * mutated; the caller freezes the result). Official ids are only replaced when the pack declared them in `overrides`;
  * a collision that was not declared is a reported error and the record already in place is kept.
@@ -3219,7 +3393,7 @@ function baseContainerFor(base, file) {
  */
 export function applyWorkshop(base, packs) {
   const out = { ...(isPlainObj(base) ? base : {}) };
-  const report = { packs: [], added: {}, overridden: {}, errors: [] };
+  const report = { packs: [], added: {}, overridden: {}, errors: [], variantPatches: [] };
   const push = (bag, file, id) => { (bag[file] ||= []).push(id); };
   /** 工坊新增/覆盖的每一条干员记录（供 `chessLookIssues` 事后判断它有没有模型）。 */
   const looked = [];
@@ -3235,6 +3409,10 @@ export function applyWorkshop(base, packs) {
     const declared = new Set(Array.isArray(pack.overrides) ? pack.overrides : []);
     const entry = { id: pack.id, name: pack.name || pack.id, files: {} };
     for (const [file, records] of Object.entries(pack.files || {})) {
+      // 口径数据通道（DESIGN §28.51）：`variants` **不是**一张记录表，所以它不走这一层。它必须等**所有包**的
+      // 内容都并完之后才应用（目标可能是另一个包贡献的记录），见下面 `applyVariantDataPatches`。漏掉这一句的后果
+      // 很具体：`overlayContentFile` 会把 `{chess:{…}}` 当成「一条 id 叫 chess 的记录」并进 `out.variants`。
+      if (file === 'variants') continue;
       // 落盘位置由 `overlayContentFile` 决定（`units` 并进 `data.backups.units`，其余文件就是 `out[file]`）。
       // `priorMap` 是 **官方数据 + 这个包之前已经并进去的每一个包**（变量曾经叫 `official`，把它当成「只有官方」
       // 正是那条把作者引到 `data/` 去找一条其实属于另一个包的记录的错误文案）。
@@ -3283,6 +3461,9 @@ export function applyWorkshop(base, packs) {
     }
     report.packs.push(entry);
   }
+  // 口径数据通道（DESIGN §28.51）：必须在**所有包**的内容都并完之后 —— 它的目标可以是另一个包贡献的记录。
+  // 也必须在 `linkWorkshopStages` 之前：那一步读 `stages` 记录之间的引用，补丁改的是那些记录本身。
+  applyVariantDataPatches(out, packs, report);
   linkWorkshopStages(out, report);
   mergeWorkshopVoices(out, packs, report);
   mergeWorkshopBondIcons(out, packs, report);
@@ -4337,6 +4518,16 @@ export function workshopSummary(report) {
     if (support) bits.push(`助战 +${support.length}`);
     const operators = report.operators && report.operators[p.id];
     if (operators) bits.push(`自选池 +${operators.length}`);
+    // 口径数据通道（DESIGN §28.51）：**写进去的**与**被别的包抢掉的**分开数 —— 一个 `variants.json` 被抢掉时
+    // 启动日志里只剩 "nothing"，读日志的人会去查一个其实装对了的包。两边都点名。
+    const patched = (report.variantPatches || []).filter((v) => v.pack === p.id && v.status === 'applied');
+    const patchedOver = (report.variantPatches || []).filter((v) => v.pack === p.id && v.status === 'overridden');
+    if (patched.length) {
+      const byAxis = new Map();
+      for (const v of patched) byAxis.set(v.axis, (byAxis.get(v.axis) || 0) + 1);
+      bits.push(`口径数值 ${[...byAxis].map(([a, n]) => `${a} ${n}`).join(', ')} 条`);
+    }
+    if (patchedOver.length) bits.push(`${patchedOver.length} 张口径表被别的包抢掉了（该轴由更小的包 id 声明）`);
     // 特质授予的盟约写歪了 / 指向不存在的盟约（`trait.grantsBonds`，DESIGN §28.49）：与「没有模型」分开数 ——
     // 把两件事糊成一句 `N 个干员…`，读日志的人会去 assets.chars 里找一个盟约 id。
     const grantIssues = (report.traitGrants || []).filter((g) => g.pack === p.id).length;

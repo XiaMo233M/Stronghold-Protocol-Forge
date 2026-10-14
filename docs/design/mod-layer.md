@@ -23,7 +23,7 @@ The owner's ruling of 2026-10-09 fixes three layers:
 
 | layer | what it is | who executes it | when it may change a battle result |
 |---|---|---|---|
-| **A** content | declarative data, no code: the workshop pack of today (`shared/workshop.js:3220` `applyWorkshop`) | nobody — it is merged into the data every consumer reads (`server/data.js:92`) | always, and never detectably by the golden corpus (the corpus is generated from the official `data/*.json`, `test/golden/README.md:8-10`) |
+| **A** content | declarative data, no code: the workshop pack of today (`shared/workshop.js:3394` `applyWorkshop`) | nobody — it is merged into the data every consumer reads (`server/data.js:92`) | always, and never detectably by the golden corpus (the corpus is generated from the official `data/*.json`, `test/golden/README.md:8-10`) |
 | **B** server logic | hooks and kits: the code of `workshop/<pack>/kits/<id>.js` (`server/workshop.js:390` `loadWorkshopKits`) — one file-name rule over **two key spaces**, operator and summon (§28.12.1) | **the server only** — this is new | only through the hooks it registers, and only after a declared intent passes deterministic verification |
 | **C** client UI | rendering, themes, panels | the player's tab | never |
 
@@ -51,7 +51,7 @@ is, who wins when two of them want the same id, and what has to be true before i
 ### 28.2 Identity (gap 1)
 
 Today a pack has an `id` (the directory name, `shared/workshop.js:377-379`) and free-text metadata
-(`shared/workshop.js:694-697`), and the BattleSpec carries only `SPEC_VERSION = 1` (`server/sim/spec.js:39`, written at
+(`shared/workshop.js:700-703`), and the BattleSpec carries only `SPEC_VERSION = 1` (`server/sim/spec.js:39`, written at
 `:61`) plus a list of kit **URLs** (`server/sim/spec.js:79-81`; produced by `server/workshop.js:491`). There is nowhere
 in the wire, in the data or in the match for "which content is this room running".
 
@@ -72,7 +72,7 @@ over exactly the bytes the loader reads and the browser will be served:
 1. `pack.json` — hashed **after** `normalizePackManifest` (`shared/workshop.js:1802`), so the hash covers the pack's
    effective declaration (normalized `overrides`, `content`, icon tables, `art`, `support`, `voices`), not its
    whitespace. Two spellings of the same pack then hash the same, and a declaration the loader silently dropped
-   (`shared/workshop.js:1853` filters a malformed `overrides` entry in silence today) cannot hide behind the hash.
+   (`shared/workshop.js:1859` filters a malformed `overrides` entry in silence today) cannot hide behind the hash.
 2. every declared content file, after `normalizeContentFile` — the same normalized records the loader merges.
 3. **every other regular file under the pack directory** — its bytes, byte for byte. That is `kits/**`, `assets/**`, the
    declared panel modules and stylesheets, the `server.meta` / `battle` / `room` / `modules[*].entry` modules, the i18n
@@ -186,7 +186,7 @@ substance; the first step of the slice carries them, `docs/WORKSHOP.md` §1.2 st
 | a **new** id claimed by two packs — a data record | **refused, and the report names the pack that holds it** (neither author's claim can be preferred) | `shared/workshop.js:3251-3254` (`PACK_ID_COLLISION`, `definedBy`) |
 | a new kit id claimed by two packs | **refused, and the report names the pack that holds it** | `server/workshop.js:1249-1253` (`KIT_ID_COLLISION`, `definedBy`) |
 | two packs **overriding the same existing record** (an official id, or a record another pack contributed) | **the smaller pack id wins + the conflict is reported** (`definedBy` names the pack that was passed over) | `shared/workshop.js:3251-3254`, `:3251-3254` |
-| an icon / item icon / art entry claimed by two packs | **the smaller pack id wins**; the loser is reported and named | `shared/workshop.js:3582`, `:3657`, `:3994` |
+| an icon / item icon / art entry claimed by two packs | **the smaller pack id wins**; the loser is reported and named | `shared/workshop.js:3763`, `:3838`, `:4175` |
 | `overrides` declares the replacement of an **OFFICIAL** id | **allowed, and the declaration is what makes it allowed** | `shared/workshop.js:14-16`, `:3251-3254` |
 | anything, between two packs | **the smaller pack id wins — on every face** | one comparator: `shared/workshop.js:2894` `byPackId` |
 
@@ -224,7 +224,7 @@ pack id that holds the record, or the string `official`. The text says the same 
 
 Why it matters enough to be a section: the data path used to say "**official** data" for both cases, because the
 variable holding "official + every pack merged so far" was called `official` (it is `prior` at
-`shared/workshop.js:3180` now). The author's next move was to open `data/chess.json` and look for a record that is not
+`shared/workshop.js:3260` now). The author's next move was to open `data/chess.json` and look for a record that is not
 there. Both defects — the wrong attribution and the unnamed kit holder — are fixed in the first step of the slice.
 
 **Cross-pack conflicts are reported once, at load, in one shape.** The report used to be split across three carriers
@@ -682,7 +682,7 @@ reach the same content".
 - **No sandbox for layer B.** The ruling is "the server executes it", not "untrusted code executes safely". A pack with
   a `while(true)` is refused by the load-time budget check (§28.4), not contained.
 - **No hot reload.** The pack set is fixed for the process; a digest that can change mid-match is worse than a restart.
-- **No code signing, no author identity.** `pack.json`'s `author` stays metadata (`shared/workshop.js:694-697`); the
+- **No code signing, no author identity.** `pack.json`'s `author` stays metadata (`shared/workshop.js:700-703`); the
   hash proves *which* bytes, not *whose*.
 - **No WASM kernel decision.** That is the performance benchmark's call, and it is a different layer: a faster kernel is
   a `combat: false` change and would be verified by §28.6 like any other.
@@ -3778,4 +3778,83 @@ count +1 ⇒ **层数自然上去**。这是一条**纯数据**通道：不需�
 被关掉的包不读内容文件、开着但缺文件照旧报缺文件（这一格不放宽任何既有校验）、只带 `true` 的包 `EMPTY_PACK`、
 `identifyPack` 摘要三档对照（`false` ≠ 缺席 = `true`，走装载器同一份 `identifyPack`）。
 **不需要 `golden:update`**：缺省路径一个字节不动。
+
+### 28.51 口径数据通道：`variants.json`（已有记录的**另一套数值**）
+
+**它补上 §28.39 剩下的那半个缺口。** §28.39 把「哪一套口径」收成闭枚举声明（`pack.json.variants`），并立下判据 2：
+**包里没有数值**，值由引擎自己写。那条判据对**官方记录**成立（`data/chess.json` 266 条按 `shared/potential.js`
+的 `potDown` 反推），但对**包自己带来的记录**不成立：一个包新增的棋子 / 召唤物是它手写的，引擎没有它们的
+「另一套口径」—— `potDown` 只能从满潜**往下降**，一个按官方口径写就的记录没有任何东西能把它抬上去。
+
+投稿 `c26a6ed4c1e7`（卡兹戴尔多功能）的 `payload/packs/fanpack/variants.json` 正是这件事：
+`training.chess` **28 条** + `training.tokens` **4 条**，是它自带记录在满练度口径下的数值。它的语义记在自己那份
+该投稿自己的 `dataVariants.js`（安装器那一半的 patch 语义）：**patch 格式 `{ [switch]: { [section]: patch } }`，叶子是 `{ $: value }`，
+对象递归、数组与其余整块替换；开关打开时合到同名数据节上。**
+
+**它为什么不是 §28.39 判据 2 的例外。** 那一条要挡住的是「包可以覆盖任意数值」（＝把安装器做进引擎）。
+本刀开的通道**三条守卫**逐条对上那个危险，而且三条都是**具名整条拒绝**，不是忽略：
+
+1. **不能发明记录**（`VARIANTS_TARGET_MISSING`）：目标 `<文件>:<id>` 必须在**合并后**的数据里已经存在。要新增一条
+   记录请走 `content`（新 id）或 `overrides`（官方 id）—— 这一条通道只做「已有记录的另一套数值」。
+2. **不能发明字段**（`VARIANTS_UNKNOWN_KEY`）：补丁只能写目标记录**已经有**的键，判据是**同一份**
+   `unknownOverrideKeys`（`overrides` 的 `UNKNOWN_OVERRIDE_FIELD` 用的就是它，层级也一样：记录顶层）。
+3. **不能发明轴**（`VARIANTS_UNKNOWN_AXIS` / `VARIANTS_UNDECLARED_AXIS`）：表名必须是 `shared/variants.js` 的
+   `VARIANT_AXES` 里的轴，**并且这个包必须自己在 `pack.json.variants` 里声明过它**。后半条是**防静默**：
+   一张没人声明过的表永远不会被应用，那正是这一层要消灭的失败方向，所以它是拒绝。
+
+**七个码就是这一刀的全部**（`shared/workshop.js` 里出现的每一个 `VARIANTS_*`；闭枚举，加一个都要先改这里）。
+数据文件那一半：`VARIANTS_BAD_SHAPE`（形状 —— 不是对象 / 某一层不是对象或为空 / 记录 id 不合法 / 补丁不是非空
+对象）、`VARIANTS_UNKNOWN_AXIS`、`VARIANTS_UNKNOWN_FILE`、`VARIANTS_TARGET_MISSING`、`VARIANTS_UNKNOWN_KEY`、
+`VARIANTS_UNDECLARED_AXIS`；声明那一半：`VARIANTS_NEED_COMBAT`（声明了轴就必须标 `combat: true`，§28.39）。
+声明形状自己的那三个码（`VARIANTS_UNKNOWN_OPTION` / `VARIANTS_BAD_DEFAULT` / `VARIANTS_DUPLICATE_AXIS`）属于
+§28.39，不在这一刀里。
+
+**形状**（判据只有一份：`shared/workshop.js` 的 `normalizeVariantDataFile`，与投稿原件**逐层 1:1**）：
+
+```jsonc
+{
+  "training": {                    // ① 轴名 —— VARIANT_AXES 的键（闭合）
+    "chess": {                     // ② 数据文件 —— WORKSHOP_CONTENT_FILES 的名字（闭合，且不许是 variants 自己）
+      "chess_char_9_01_a": {       // ③ 记录 id —— 装载期必须已在合并后的数据里
+        "stats": { "atk": 676 } } } } }   // ④ 字段级补丁 —— 只许写目标记录已有的键
+```
+
+**它怎么落地**（`shared/workshop.js` 的 `applyVariantDataPatches`，`applyWorkshop` 里**唯一**的执行点）：
+
+* `variants` 是 `WORKSHOP_CONTENT_FILES` 的第 15 个名字，所以整条既有机件**零改动**就到位：`content` 白名单、
+  `identifyPack` 内容哈希（只差口径数值的两份包摘要必须不同）、`EMPTY_PACK`（口径数值**是**贡献项：它真的
+  往对局里带了数值）、编辑器的通用枚举、`tools/workshop-pack.mjs` 的通用读取。**不是**一个新的 `pack.json`
+  顶层键 —— 见 `PACK_FIELDS` 的「加字段的规矩」，加顶层键要同时给编辑器界面。
+* 目标容器按 `OVERLAY_TARGET_BY_FILE`（与 `content` 同一张表：`units` → `backups.units`，其余同名），路径上
+  **逐层浅复制**，所以 `data/` 的冻结对象一个字节都不动，路径之外的同层兄弟原样留着。
+* 补丁走**同一份** `mergeRecord`（字段级：对象递归、`OVERRIDE_REPLACE_KEYS` 与数组整块替换、
+  `OVERRIDE_KEYED_LISTS` 按身份键合）—— 一条判据只有一份实现。
+* **生效条件**：该轴在 `mergeVariantDecls`（既有规则：**包 id 字典序小的赢**，§28.3）里落到**这个包**头上。
+  别的包赢了同一个轴 ⇒ 这张表**不应用**，但**具名**记进 `report.variantPatches`（`status: 'overridden'`，
+  与 `mergeVariantDecls.overridden` 同一条「输的一方必须看到一行字」的纪律）；启动日志里「写进去的」与
+  「被抢掉的」分开数（`workshopSummary`）。
+* **必须在所有包的内容都并完之后**（目标可以是另一个包贡献的记录），**在 `linkWorkshopStages` 之前**
+  （那一步读 `stages` 记录之间的引用，补丁改的正是那些记录）。
+
+**披露（本节明确不做）**：本通道在**装载期**生效，口径条件由 `pack.json.variants` 的声明给出。它**不接管**
+运行时「玩家 `room.loadout.ops` 练度开关」—— `training` 轴今天的行为与 `variantDataPatch()`
+（`shared/variants.js:228`）一字未改。这不是缩水：包自带记录的满练度数值引擎**结构上**推不出来，而官方记录的
+数值仍然由 `shared/potential.js` 给；把包自带数值塞进运行时练度开关，等于让包的数值去覆盖玩家自己的设置。
+
+**两处如实写下的边界**（都实测过，见下）：
+
+* 投稿原件的 patch 语义是**深层字段合并**（它自己的 `applyPatch`），引擎的 `mergeRecord` 对
+  `OVERRIDE_REPLACE_KEYS`（含 `skill` / `modules`）是**整块替换**。所以「按本通道装进标准包」这一步必须把
+  那些分支写成**完整值**：实测直接把半份 `skill` 交上去，合并后丢 `skillType` / `spType` / `initSp`，
+  `workshop-validate` 报 6 个 `BAD_ENUM` / `BAD_NUMBER`。这是**表示层**换算，数值一个不动。
+* `mergeRecord` 对 `talents` 按 `index` **合**（`OVERRIDE_KEYED_LISTS`），作者没写的 `potMin` / `potBelow`
+  官方潜能链会**留**在合并结果里 —— 引擎刻意如此（「作者没写的字段必须留着」）。判据因此落在「作者写下的
+  每一个值都在」，而不是「合并结果逐字节等于作者的数组」。
+
+**测试**：`test/workshopVariantsData.test.js`（形状与闭枚举逐码、三条守卫各自具名、字段级而非整块、
+`tokens` 的 owner 变体同一条路、缺省逐字节不变、进内容哈希、落盘 → `loadWorkshop` → `loadData` 端到端），
+以及就地翻转的 `test/workshopVariants.test.js`（`content:["variants"]` 从「点名拒」变成合法；
+**不认识的条目仍点名拒**，例子改用仍然没有通道的 `config`）。`test/packAssets.test.js` 里 `FOUR_KEYS` 那一条
+一个字没动。
+**不需要 `golden:update`**：不声明 `variants.json` 的包与不装包的两条路径，数据逐字节相同、记录是同一个对象。
 

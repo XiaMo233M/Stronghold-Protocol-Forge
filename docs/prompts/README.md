@@ -241,15 +241,15 @@ node tools/workshop-validate.mjs <包目录> --json    # 机器可读：每条�
 
 | 规则 | 说明 |
 |---|---|
-| **语言只有四个** | `cn` `jp` `en` `kr`（`shared/constants.js` 的 `VOICE_LANGS`）。写别的整包被拒：`VOICE_LANG_UNKNOWN`（`shared/workshop.js:1971`） |
-| **默认语种 `jp` 不能写进 `voiceLangs`** | 默认语种那批台词写在 `voices` 里；写进 `voiceLangs["jp"]` 会被拒：`VOICE_LANG_DEFAULT`（`shared/workshop.js:1974`）。理由是同一批台词有两个写法的话，「客户端到底读哪一份」就成了作者猜不出来的事 |
-| **一个语种至少要有一个干员** | 空表被拒：`VOICE_LANG_EMPTY`（`shared/workshop.js:1978`）；整个 `voiceLangs` 不是对象是 `VOICE_LANG_BAD_SHAPE`（`shared/workshop.js:1962`） |
-| **路径与授权规则同 `voices`** | 相对 `assets/`、不许绝对路径 / `..` / `.` / 反斜杠 / 盘符（`VOICE_PATH_UNSAFE`，`shared/workshop.js:1943`）；有 `assets/` 就必须有 `license`（`VOICE_NEEDS_ASSETS`，`shared/workshop.js:1882`） |
-| **只配一种语言也合法** | `voiceLangs` 本身就算「这个包贡献了什么」（`shared/workshop.js:3490` 的 `packDeclaresVoices`，此处认的是 `voiceLangs` 键本身），所以 `content: []` + 只写 `voiceLangs` 不会被当成空包 |
-| **写法顺序不影响产物** | 合并前按 `VOICE_LANGS` 的固定顺序重排（`shared/workshop.js:1983` 的 `orderedLangLines`），`pack.json` 里先写 `cn` 还是 `en` 都一样 |
+| **语言只有四个** | `cn` `jp` `en` `kr`（`shared/constants.js` 的 `VOICE_LANGS`）。写别的整包被拒：`VOICE_LANG_UNKNOWN`（`shared/workshop.js:1977`） |
+| **默认语种 `jp` 不能写进 `voiceLangs`** | 默认语种那批台词写在 `voices` 里；写进 `voiceLangs["jp"]` 会被拒：`VOICE_LANG_DEFAULT`（`shared/workshop.js:1980`）。理由是同一批台词有两个写法的话，「客户端到底读哪一份」就成了作者猜不出来的事 |
+| **一个语种至少要有一个干员** | 空表被拒：`VOICE_LANG_EMPTY`（`shared/workshop.js:1984`）；整个 `voiceLangs` 不是对象是 `VOICE_LANG_BAD_SHAPE`（`shared/workshop.js:1968`） |
+| **路径与授权规则同 `voices`** | 相对 `assets/`、不许绝对路径 / `..` / `.` / 反斜杠 / 盘符（`VOICE_PATH_UNSAFE`，`shared/workshop.js:1949`）；有 `assets/` 就必须有 `license`（`VOICE_NEEDS_ASSETS`，`shared/workshop.js:1888`） |
+| **只配一种语言也合法** | `voiceLangs` 本身就算「这个包贡献了什么」（`shared/workshop.js:3671` 的 `packDeclaresVoices`，此处认的是 `voiceLangs` 键本身），所以 `content: []` + 只写 `voiceLangs` 不会被当成空包 |
+| **写法顺序不影响产物** | 合并前按 `VOICE_LANGS` 的固定顺序重排（`shared/workshop.js:1989` 的 `orderedLangLines`），`pack.json` 里先写 `cn` 还是 `en` 都一样 |
 
 **送达与回退**：默认语种的台词并进 `assets.audio.voice`，其它语种并进 `assets.audio.voiceLangs[<lang>]`
-（`shared/workshop.js:3461` 的 `appendVoiceLines`，两处调用在 `:3511` 与 `:3528`；是**追加**，不替换官方已有的台词，客户端仍在这些台词里随机）。播放侧按玩家选的配音语言取
+（`shared/workshop.js:3642` 的 `appendVoiceLines`，两处调用在 `:3692` 与 `:3709`；是**追加**，不替换官方已有的台词，客户端仍在这些台词里随机）。播放侧按玩家选的配音语言取
 台词 —— `public/js/audio.js:390` 的 `voiceLinesFor(manifest, charId, slot, lang)`：先看
 `audio.voiceLangs[lang][charId][slot]`，**该语种没有这个干员的这个槽位时回退到默认配音那一档**（`audio.voice`），
 两者都没有才算没台词。所以「给某个干员单独配一种语言」是正常用法：其它干员在那个语种下照旧播默认那一档。
