@@ -23,11 +23,23 @@
 //      那是给「先前的无哈希布局」留的兼容口，本仓没有那个布局）。
 
 import { MEDIA_PREFIX, AUDIO_EXTS } from '../../../shared/media.js';
+// 缓存名要跟着**本版版本号**走，所以版本从它唯一的那一处来（`shared/constants.js APP_VERSION`，与标题屏、诊断页
+// 读的是同一个数）。浏览器侧 import 它已经有三处先例（`public/js/diag.js`、`screens/title.js`、`bundle.js` 的调用方），
+// 这里不新造第二套版本串。
+import { APP_VERSION } from '../../../shared/constants.js';
 
 /** 本引擎拥有的 Cache Storage 名。一个缓存装所有包的所有文件：条目按 URL 覆盖写，换包只重下变了的文件。 */
 export const CACHE_PREFIX = 'sp-workshop-resources-v1-';
+/**
+ * 缓存名里的版本段：**换版就换名**。
+ *
+ * 这是「一次注册 = 永久劫持」那一场的根因修补（见 `public/resource-sw.js` 的 `activate`）：名字不换，换版之后
+ * `caches.open(CACHE_NAME)` 拿到的还是上一版那份缓存与那份索引，索引里作保的 URL 指向旧字节、指纹也对得上，
+ * 于是 SW 用旧素材回答新页面 —— 而服务器已经换了包，两边都不肯自己转过来。
+ */
+export const CACHE_VERSION = APP_VERSION;
 /** 文件与索引共用的那一个缓存（索引也在里面：它描述的东西与它同生共死）。 */
-export const CACHE_NAME = CACHE_PREFIX + 'all';
+export const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}-all`;
 /** 那条合成条目：绝对 URL → 已校验的 `sha1[0:12]`。SW 的**白名单 + 期望指纹**就是它。 */
 export const INDEX_PATH = '/__sp-resource-index__';
 /** 导入收据（按包）：这份缓存是为哪份容器导入的、装着第几版清单、几个文件。 */
@@ -57,6 +69,21 @@ export const RESOURCE_MIME = Object.freeze({
   css: 'text/css; charset=utf-8', json: 'application/json; charset=utf-8', atlas: 'text/plain; charset=utf-8',
   obj: 'text/plain; charset=utf-8', skel: 'application/octet-stream', bin: 'application/octet-stream',
 });
+
+/**
+ * `caches.keys()` 里**该删掉**的那些：本引擎家族的缓存（`sp-workshop-resources-*`）里不是当前那一个的名字。
+ *
+ * 版本进了名字之后，上一版留下的缓存不会自己消失（`CacheStorage` 与站点同寿），所以 SW 的 `activate` 拿这个函数
+ * 列名单。两个边界都是有意的：别人的缓存（别的工具、别的站点装的）一个都不碰；**当前那个也不删** —— 删了就等于
+ * 每次 `activate` 都把玩家本地导入的几百 MB 丢掉，而他没有任何办法再拿回来（`service.js` 不回源）。
+ * @param {unknown} names `caches.keys()` 的结果
+ * @param {string} [current] 当前缓存名（测试注入用）
+ * @returns {string[]}
+ */
+export function staleCacheNames(names, current = CACHE_NAME) {
+  return (Array.isArray(names) ? names : [])
+    .filter((n) => typeof n === 'string' && n.startsWith(CACHE_PREFIX) && n !== current);
+}
 
 /** 一个 URL 的 MIME，或 `null`（扩展名不是资源类型）。 */
 export function resourceType(url) {

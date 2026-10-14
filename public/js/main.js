@@ -349,6 +349,17 @@ function wireNet() {
           recordError('mod-assets', err, 'resource host failed to load');
           toast(t('加载模组资源模块失败：{error}', { error: describeError(err) }).slice(0, 160), 'error', { ttl: 8000 });
         });
+    } else if (navigator.serviceWorker?.controller) {
+      // 自愈阀（劫持修复 ②）：这次握手服务器**没有**声明任何 assets，而本页确实被一个根作用域 SW 控制着 ⇒ 那个
+      // SW 现在只会对 `/assets|/fonts|/media` 回 412（`resources/service.js` 绝不回源），必须是它让路。业主现象：
+      // 升级后图标 / 立绘 / 3D 场景全不出来、强刷才好 —— 那是「一次注册 = 永久劫持」：服务器不再声明，页面就
+      // 不再注册，可老 SW 还控制着页面。
+      // 动态 import 是刻意的：从没装过 SW 的干净环境不会因为这一格多取一个字节（「不声明 assets ⇒ 无新请求」仍是
+      // 结构性的，而不是靠一个 `if` 拦出来的）。失败只记诊断，不打断任何东西。
+      import('./resources/release.js')
+        .then((release) => release.releaseResourceWorker())
+        .then((r) => { if (r.unregistered.length) console.info(`[mod-assets] released resource worker (${r.unregistered.join(', ')})`); })
+        .catch((err) => recordError('mod-assets', err, 'resource worker release failed'));
     }
     if (Array.isArray(msg && msg.modPanels) && msg.modPanels.length) modPanels.apply(msg.modPanels);
     // 包写的主题变量（业主裁决 2026-10-10）：与 `modPanels` 同一条不变量 —— 服务端没有包声明主题就没有这个字段，

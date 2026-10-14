@@ -728,7 +728,10 @@ export function DataMissing({ files }) {
 
 /** The overlay screen (`leaving`: closed, fading out). */
 function LoadoutScreen({ st, leaving = false }) {
-  const ready = useData('chess', 'bonds', 'assets', 'local', 'backups', 'garrisons', 'effects', 'skins');
+  // `skins` 不在 useData 里：本仓库没有 data/skins.json（干员皮肤由工坊外观提供者给出，见 ui/portraitChain.js），
+  // 列进来只会每次开干员调配打一次 GET /data/skins.json -> 404 + 一条 console 警告。包版自己也不读这个文件
+  // （只有导出/导入用 skinsStore），且 useData 的 `missing` 本来就算已结算，所以去掉它不改任何可见行为。
+  const ready = useData('chess', 'bonds', 'assets', 'local', 'backups', 'garrisons', 'effects');
   const phase = useStore((s) => s.match?.public?.phase || null);
   const inMatch = useStore((s) => !!s.room?.inMatch);
   // co-op briefing (INFO_CHECK, 25 s): the overlay covers the briefing's own countdown, so it shows the time left — the

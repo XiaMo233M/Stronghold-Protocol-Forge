@@ -262,7 +262,7 @@ describe('content-hashed URLs through a real server', () => {
     assert.deepEqual(JSON.parse((await get(srv.port, '/data/local-assets.json')).body).groups, {});
   });
 
-  test('a hashed URL: immutable with a content ETag when the hash names the file; the current file with no-cache otherwise; plain URLs as before', async () => {
+  test('a hashed URL: immutable with a content ETag when the hash names the file; the current file with no-cache otherwise; plain URLs revalidate', async () => {
     const v = await view();
     const ok = await get(srv.port, v.chars.c.avatar);
     assert.equal(ok.status, 200);
@@ -273,13 +273,30 @@ describe('content-hashed URLs through a real server', () => {
     assert.deepEqual(old.body, png, 'an old page still gets the file');
     assert.equal(old.headers['cache-control'], 'no-cache');
     const plain = await get(srv.port, '/assets/char/a.png');
-    assert.equal(plain.headers['cache-control'], 'public, max-age=86400');
+    assert.equal(plain.headers['cache-control'], 'no-cache', 'an unhashed /assets/** URL never gets the one-day cache');
     assert.equal(plain.headers.etag, `"${sha16(png)}"`, 'a content ETag on the plain URL too (an mtime change alone is a 304)');
     assert.equal((await get(srv.port, '/assets/char/a.png', { 'if-none-match': `"${sha16(png)}"` })).status, 304);
     const font = await get(srv.port, v.fonts.faces.f.woff2);
     assert.equal(font.headers['cache-control'], IMMUTABLE);
     const query = await get(srv.port, '/assets/char/a.png?v=1');
     assert.match(query.headers['cache-control'], /immutable/, 'the old ?v= rule is kept');
+  });
+
+  test('劫持修复：未带 ~hash 的 /assets/** 与 /media/** 一律 no-cache + ETag，带指纹的两条路仍然 immutable', async () => {
+    // 一天长缓存 + 服务端根作用域 SW（public/resource-sw.js）合起来就是那场「升级后素材不出来、强刷才好」：
+    // 字节被浏览器留着、SW 又只从本地导入的索引回答，两半都不会自己转过来。带指纹的 URL 换版即换 URL，
+    // 所以它们**必须**继续 immutable（这条修复不许把它们也拖下水）。
+    const plain = await get(srv.port, '/assets/char/a.png');
+    assert.equal(plain.headers['cache-control'], 'no-cache');
+    assert.match(plain.headers.etag, /^"[0-9a-f]{16}"$/, '回源很便宜：ETag 还在，没变就是 304');
+    assert.equal((await get(srv.port, '/assets/char/a.png', { 'if-none-match': plain.headers.etag })).status, 304);
+    // 带指纹：内容哈希命名的文件 / 模型组 / `?v=` 三条路各自仍然 immutable
+    const v = await view();
+    assert.equal((await get(srv.port, v.chars.c.avatar)).headers['cache-control'], IMMUTABLE);
+    assert.equal((await get(srv.port, v.chars.c.spine.front.skel)).headers['cache-control'], IMMUTABLE);
+    assert.match((await get(srv.port, '/assets/char/a.png?v=1')).headers['cache-control'], /immutable/);
+    // fonts 与 vendor 不在资源 SW 的拦截面里，一天长缓存照旧（这一刀没有扩大战线）
+    assert.equal((await get(srv.port, '/fonts/f.woff2')).headers['cache-control'], 'public, max-age=86400');
   });
 
   test('a Spine model: skeleton, atlas, page and the atlas derived from the skeleton URL are immutable under the model hash; a file derived beside them is no-cache', async () => {
@@ -312,7 +329,7 @@ describe('content-hashed URLs through a real server', () => {
     assert.deepEqual(range.body, mp3.subarray(0, 10));
     assert.equal((await get(srv.port, loop)).headers['cache-control'], IMMUTABLE, 'the .mp3 fallback URL too');
     assert.equal((await get(srv.port, '/media/~0000000000000000/bgm/lobby')).headers['cache-control'], 'no-cache');
-    assert.equal((await get(srv.port, '/media/bgm/lobby')).headers['cache-control'], 'public, max-age=86400');
+    assert.equal((await get(srv.port, '/media/bgm/lobby')).headers['cache-control'], 'no-cache');
   });
 
   test('the segment never opens a way out of the served folders', async () => {

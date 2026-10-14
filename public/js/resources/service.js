@@ -47,6 +47,10 @@ export async function handleResourceRequest(request, { caches = globalThis.cache
   // 没有 Cache Storage（隐私模式 / 老浏览器）= 没有本地导入这件事：明说，不偷偷回源。
   if (!caches) return missingResponse();
   try {
+    // 缓存**根本不存在**时连开都不开：`caches.open(CACHE_NAME)` 会顺手建一个空缓存，而一个没有索引的空缓存什么都
+    // 回答不了（下面照样 412），只会在 `caches.keys()` 里留下一个「看着像装过资源包」的名字 —— 自愈阀刚把它删掉，
+    // 还在控制着页面的那一个 SW 又把它建回来（实测：注销成功、缓存却一直不消失）。`has` 缺席的桩照旧往下走。
+    if (typeof caches.has === 'function' && !(await caches.has(CACHE_NAME))) return missingResponse();
     const cache = await caches.open(CACHE_NAME);
     const index = await (await cache.match(indexUrl(url.origin)))?.json();
     const known = index && index.format === 1 && index.files && typeof index.files === 'object' ? index.files : null;
