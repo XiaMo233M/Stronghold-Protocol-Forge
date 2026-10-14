@@ -75,6 +75,13 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: 判据先行（窄档 profile 测试 —— 发布口径变了就先红，别把包做出来再发现）
+        if: steps.v.outputs.exists != 'true'
+        run: |
+          set -euo pipefail
+          node --version
+          node --test test/package-server-profile.test.js
+
       - name: 构建（server profile）
         if: steps.v.outputs.exists != 'true'
         env:
