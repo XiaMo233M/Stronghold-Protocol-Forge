@@ -162,6 +162,26 @@ B1 要的是「按一下给我结论」，而那条结论必须与 `node tools/w
 文档：`docs/design/mod-layer.md` 新增 **§28.12.2**、`docs/WORKSHOP.md` §4.5.1 加这 4 行，
 以及模组仓 `SKILL.md` / `AGENTS.md` 的白名单一节（11 → 15 条，写明 `@ops/` 是命名空间不是放行）。
 
+### 口径数据通道（§28.51）：包可以带上自己那套口径数值
+
+包此前只有两条路：`content` **新增记录**、`overrides` **替换官方记录**。作者要让「同一名干员在满练度下的
+口径数值」也随包走时，没有通道 —— 本版加第 15 张数据表 `variants`。
+
+- `pack.json` 写 `content:["variants"]`，包内放 `variants.json`。它是**三层闭枚举**
+  `{ <轴>: { <数据文件>: { <记录 id>: <字段级补丁> } } }`：轴必须在 `pack.json.variants` 里声明过
+  （`VARIANTS_UNDECLARED_AXIS`），文件必须是加载器认识的数据表（`VARIANTS_UNKNOWN_FILE`，且不许补
+  `variants` 自己），补丁只能改目标记录**已有**的键（`VARIANTS_UNKNOWN_KEY`，与 `overrides` 同一套闭合世界）。
+- **覆盖、不追加**：补丁只落在**已有记录**上，id 不存在时报 `VARIANTS_TARGET_MISSING` 而不是被创建 ——
+  口径表**不能发明记录**。新增记录仍然只有 `content`，替换官方记录仍然只有 `overrides`。
+- **只在装载期生效**：补丁在 `applyWorkshop` 里合进数据，**不接管运行时练度开关** —— 房间里点不点满练度、
+  走哪条轴，仍由原有的运行时开关与 `pack.json.variants` 声明决定，本通道没有改它。
+- 判据：`test/workshopVariantsData.test.js` **16 pass / 0 fail**（红 15 → 绿 16）。
+- 全量：`node --test --test-concurrency=2` → **8866 tests · 8861 pass · 0 fail · 5 skipped**（exit 0）。
+- 真包：对真实工坊包跑 `node tools/workshop-validate.mjs` → **0 error / 84 warning · VALID**；
+  **32 条记录 / 4019 个值 / 与官方口径不一致 0**。
+- 文档：`docs/design/mod-layer.md` §28.51、`docs/WORKSHOP.md` §1.20.1、`docs/MOD-SURFACE.md` 14 → 15 张表、
+  `docs/prompts/README.md` +14 行；校验器与编辑器同步认这一层（`CHECK_KINDS` 与 `checkKindLabel` 加 `variants`）。
+
 ## 0.18.5 — 2026-10-14
 
 **修掉「升级后图标 / 立绘 / 3D 场景大片空白、只能强刷」那一场：根作用域 Service Worker 一次注册变成永久劫持。**

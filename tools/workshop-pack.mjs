@@ -809,8 +809,14 @@ export async function writePackOverrides(root, packId, list, { isOfficial = null
     const entry = raw.trim();
     const m = OVERRIDE_ENTRY_RE.exec(entry);
     if (!m) throw refuse(`OVERRIDE_BAD_SHAPE："${entry}" 不是 "<文件>:<id>" 的形状（例：chess:chess_char_1_01_a）`);
+    // `variants` 是数据文件，但它的内容是**补丁**不是记录：没有 `<文件>:<id>` 可以覆盖，所以 `variants:<id>`
+    // 是一条永远不会生效的声明。理由与 `variants.json` 自己的第二层同一份（`VARIANTS_UNKNOWN_FILE` 的文案：
+    // 一个加载器不认识的名字什么都改不到）。写入端宁可拒绝写进去，也不留下一行没作用又删不掉的声明。
+    if (m[1] === 'variants') {
+      throw refuse('OVERRIDE_BAD_FILE："variants" 是口径数据文件，内容是补丁不是记录，没有 "<文件>:<id>" 可以覆盖（要给已有记录写另一套数值请用 variants.json，见 DESIGN §28.51）');
+    }
     if (!WORKSHOP_CONTENT_FILES.includes(m[1])) {
-      throw refuse(`OVERRIDE_BAD_FILE："${m[1]}" 不是包能声明的数据文件（可用的是 ${WORKSHOP_CONTENT_FILES.join('、')}）`);
+      throw refuse(`OVERRIDE_BAD_FILE："${m[1]}" 不是包能声明的数据文件（可用的是 ${WORKSHOP_CONTENT_FILES.filter((f) => f !== 'variants').join('、')}）`);
     }
     if (!clean.includes(entry)) clean.push(entry);
   }
