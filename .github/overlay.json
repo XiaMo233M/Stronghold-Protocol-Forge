@@ -206,28 +206,44 @@
         "id: 'server.room.hold',"
       ],
       "retireWhen": "上游自己登记了这一格 ⇒ 删这条 patches。"
+    },
+    {
+      "file": "docs/prompts/README.md",
+      "why": "「本版基线」那一行抬到 0.18.8。`test/promptBaseline.test.js` 判的就是这一行的「本仓库 x.y.z」必须等于 `package.json` 的 `version` —— 它是**机器判据**，不是散文：抬版本却不动这里 ⇒ CI 当场红（0.18.7 那版就是这么红过一次）。",
+      "anchors": [
+        "本仓库 **0.18.8** / 打包的上游游戏本体 **0.2.6**"
+      ],
+      "retireWhen": "上游自己抬了同一行 ⇒ 删这条 patches；下次抬版本时必须一起改。"
+    },
+    {
+      "file": "docs/prompts/kit.md",
+      "why": "同上：这一份的「本版基线」行读的是本仓库版本 + 上游版本，`test/promptBaseline.test.js` 同一判据。本文其余内容（钩子词表）一字未动 —— 上游这一版没有增删任何钩子。",
+      "anchors": [
+        "本仓库 **0.18.8** / 上游游戏本体 **0.2.6**"
+      ],
+      "retireWhen": "同上。"
     }
   ],
   "bodyPaths": [
     {
       "file": "shared/constants.js",
-      "why": "发布版本号是我方自有路线必须自己推进的一格（`test/version.test.js` 把 APP_VERSION 与 package.json / lock / CHANGELOG 首节四处钉成同源；不抬它就撞已存在的 modmgr-v0.18.6-0.2.6 tag）。这一格只改 `APP_VERSION` 一个值 —— `PROTOCOL_VERSION` / `MOD_API_VERSION` 一字未动。",
-      "anchors": ["export const APP_VERSION = '0.18.7';"]
+      "why": "发布版本号是我方自有路线必须自己推进的一格（`test/version.test.js` 把 APP_VERSION 与 package.json / lock / CHANGELOG 首节四处钉成同源；不抬它就撞已存在的 modmgr-v0.18.7-0.2.6 tag）。这一格只改 `APP_VERSION` 一个值 —— `PROTOCOL_VERSION` / `MOD_API_VERSION` 一字未动。",
+      "anchors": ["export const APP_VERSION = '0.18.8';"]
     },
     {
       "file": "package.json",
       "why": "同上：版本同源的第二处。",
-      "anchors": ["\"version\": \"0.18.7\""]
+      "anchors": ["\"version\": \"0.18.8\""]
     },
     {
       "file": "package-lock.json",
       "why": "同上：版本同源的第三、四处（根 `version` 与 `packages[\"\"].version`）。",
-      "anchors": ["\"version\": \"0.18.7\""]
+      "anchors": ["\"version\": \"0.18.8\""]
     },
     {
       "file": "CHANGELOG.md",
-      "why": "0.18.7 那一节（三格新能力 + 两条红线口径变更 + 判据）。游戏内公告由本文件的前若干节生成，所以这一节同时是发布公告；`test/version.test.js` 要求首个 `## x.y.z` 与 APP_VERSION 同半。",
-      "anchors": ["## 0.18.7 — 2026-10-15"]
+      "why": "0.18.8 那一节（§28.55 空席回收裁决 + 第一次动本体路径的登记 + 门面文档跟上代码）。游戏内公告由本文件的前 8 节生成，所以这一节同时是发布公告；`test/version.test.js` 要求首个 `## x.y.z` 与 APP_VERSION 同半，`test/docs-paths.test.js` 要求顶层那一段仍发得出 8 条公告（少一节是**静默**变少）。上一版（0.18.7）漏了 README 徽章与 `docs/prompts/*` 的「本版基线」行 —— 那两处由 `test/promptBaseline.test.js` 判，本版抬齐。",
+      "anchors": ["## 0.18.8 — 2026-10-15"]
     },
     {
       "file": "server/lobby.js",
@@ -240,12 +256,13 @@
     },
     {
       "file": "README.md",
-      "why": "门面文档跟着代码走（本仓的常驻纪律「Docs follow the code」）：那一页有两处**今天已经是假的**的陈述必须改 —— 「`server.modules` 6 种用途」（今天 7 种，`lane`）与「把一段路径交给宿主自己的代码 ⇒ ⛔ 包不能声明」（今天包可以按 §28.54 申请一条 lane）。同时补上 §28.52 / §28.53 / §28.55 三行、把热装载那一行改成「报告 + 受监督重启（`server/modServer.js`；`server/index.js` 那条路一个监听器都不建）」的真实形状，并把英文段里「36 top-level keys」改成实测的 37。登记为受控例外而不是「不写」：README 是外人第一站读的东西，留假数字比留空白更糟。",
+      "why": "门面文档跟着代码走（本仓的常驻纪律「Docs follow the code」）：那一页有两处**今天已经是假的**的陈述必须改 —— 「`server.modules` 6 种用途」（今天 7 种，`lane`）与「把一段路径交给宿主自己的代码 ⇒ ⛔ 包不能声明」（今天包可以按 §28.54 申请一条 lane）。同时补上 §28.52 / §28.53 / §28.55 三行、把热装载那一行改成「报告 + 受监督重启（`server/modServer.js`；`server/index.js` 那条路一个监听器都不建）」的真实形状，并把英文段里「36 top-level keys」改成实测的 37。另外这一页有**四处版本声明**由测试判（顶部 shields 徽章、「版本号怎么读」的 `APP_VERSION` 那一行、中文那行「本仓库自己的版本是」、英文 `this repo's own version is`）—— 0.18.7 那版漏抬了它们，`test/version.test.js` / `test/promptBaseline.test.js` 当场判红，本版抬齐并在这里锚住徽章。登记为受控例外而不是「不写」：README 是外人第一站读的东西，留假数字比留空白更糟。",
       "anchors": [
         "**closed set of 37 top-level keys**",
         "**7 种用途**",
         "| 人走空了但**这一局不作废**（志愿者冻结） |",
-        "There is **no in-process code swap**"
+        "There is **no in-process code swap**",
+        "badge/version-0.18.8-"
       ]
     }
   ],
