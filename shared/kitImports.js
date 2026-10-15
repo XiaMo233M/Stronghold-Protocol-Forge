@@ -38,9 +38,10 @@
  * 前缀只说明「这个命名空间是开着的」，**具体哪个文件能 import 由下面 `KIT_IMPORT_FILES` 决定**
  * （裁决走 `kitImportIssues` 的 `targets.has(specifier)`）。
  *
- * `@ops/` 就是这条纪律的例子（2026-10-14，业主裁定）：它进了这张前缀表，因为浏览器侧的 import map 是**按前缀**
- * 生成的（`kitImportMap`）、错误文案也要能说"模块没开"而不是"未知前缀"；但表里**只有 4 个**官方 ops kit ——
- * `@ops/op-siege.js` 这类同前缀、未列名的文件今天仍然被拒（`test/kitImports.test.js` §⑥ 把这条界线钉住）。
+ * `@ops/` 就是这条纪律的例子（2026-10-14，业主裁定；2026-10-15 由 4 个加到 8 个）：它进了这张前缀表，因为浏览器
+ * 侧的 import map 是**按前缀**生成的（`kitImportMap`）、错误文案也要能说"模块没开"而不是"未知前缀"；但表里
+ * **只有列了名的那几个**官方 ops kit —— `@ops/op-siege.js` 这类同前缀、未列名的文件今天仍然被拒
+ * （`test/kitImports.test.js` §⑥ 把这条界线钉住，含一条按前缀计数的断言）。
  */
 export const KIT_IMPORT_PREFIXES = Object.freeze(['@kit/', '@sim/', '@ops/']);
 
@@ -75,20 +76,38 @@ export const KIT_IMPORT_FILES = Object.freeze([
   { specifier: '@kit/tier5.js', file: 'server/sim/content/kits/shared/tier5.js' },
   { specifier: '@kit/tier6.js', file: 'server/sim/content/kits/shared/tier6.js' },
   { specifier: '@kit/summoner.js', file: 'server/sim/content/kits/shared/summoner.js' },
-  // the three pure engine helpers the SDK is built on (and the ones a community kit already imported by relative path)
+  // the pure engine helpers the SDK is built on (and the ones a community kit already imported by relative path)
   { specifier: '@sim/constants.js', file: 'server/sim/constants.js' },
   { specifier: '@sim/dir.js', file: 'server/sim/dir.js' },
   { specifier: '@sim/targeting.js', file: 'server/sim/targeting.js' },
+  // ⭐ `@sim/detmath.js`（2026-10-15，交接文档 §2 的 W1：**上游单有、我们缺**的一条）。
+  //   AGENTS.md 的确定性硬规矩要求 `server/sim/` 里的代码**不许**直接用 `Math.sin` / `Math.cos` / `Math.atan2` /
+  //   `Math.hypot` / `Math.pow` 这类「两端可能不一致」的函数（`tools/check-imports.mjs` 与
+  //   `test/sim/detmath.test.js` 一起钉这件事）。包里的 kit 若要算几何（射程、方向、距离），**唯一**的正当
+  //   写法就是 import 这个模块 —— 不开放它，作者只能自己抄一份 `Math.*`，那正是这条硬规矩要挡的东西。
+  //
+  //   ⚠️ **准入口径（写在这里，免得后人以为「白名单里可以有状态」）**：它不是「零模块级变量」，而是
+  //   「**无可观察状态、每个导出都是纯函数**」—— 文件里确有模块级暂存缓冲（`const F64 = new Float64Array(1)`
+  //   与 `I32`），但每次调用**先写后读、不跨调用保留**，所以从外面看它没有状态、调用序不影响结果。
+  //   这与 `@sim/tokens.js`（召唤物注册表）· `@sim/body.js`（棋盘实体）那类**有状态引擎内部**不是一回事：
+  //   那两个文件读的是**当前对局**的注册表 / 棋盘，放进白名单等于给包一条够到对局状态的通道。
+  //   ⇒ 那两条**不加**（`rainbow-squad` 要它们，那是另一件事，见报告里记的 SDK 需求单）。
+  { specifier: '@sim/detmath.js', file: 'server/sim/detmath.js' },
   // 战斗逻辑模块的 SDK：**战斗内容层的辅助函数**（`server/sim/content/support/index.js`）—— 官方内容模块
   // （`content/bonds/*.js`、`content/garrisons/*.js`）用的同一份。它已经在浏览器侧被服务（`/sim/content/support/`，
   // 客户端战斗本来就要加载它），所以两端都能解。
   { specifier: '@battle/index.js', file: 'server/sim/content/support/index.js' },
-  // ⭐ **复用官方 ops kit**（2026-10-14，业主裁定）：社区包常常就是「同一名官方干员，换一张 mod 棋子卡」。
-  // 此前它唯一的出路是把引擎子系统复制进包 —— 实测那条路要内联 **18 个文件 / 513 KB**，里面包含
-  // `content/tokens.js`（召唤物注册表）、`sim/ai.js`（索敌）、`simdata.js`、`professions.js` 与
-  // `shared/i18n.js`（浏览器 i18n 运行时）：那是**包内一份会静默漂移的冻结副本**（引擎更新了它还跑旧的）。
-  // 这 4 行把「已经装好的官方 kit」**按文件**指给包用：零复制、零漂移。前缀 `@ops/` 没有整体放开 ——
-  // 准入判据始终是这张表，`@ops/` 下别的文件仍然被拒（`test/kitImports.test.js` §⑥）。
+  // ⭐ **复用官方 ops kit**（2026-10-14 起 4 个，2026-10-15 加到 8 个，业主裁定）：社区包常常就是「同一名官方
+  // 干员，换一张 mod 棋子卡」。此前它唯一的出路是把引擎子系统复制进包 —— 实测那条路要内联 **18 个文件 /
+  // 513 KB**，里面包含 `content/tokens.js`（召唤物注册表）、`sim/ai.js`（索敌）、`simdata.js`、
+  // `professions.js` 与 `shared/i18n.js`（浏览器 i18n 运行时）：那是**包内一份会静默漂移的冻结副本**
+  // （引擎更新了它还跑旧的）。这几行把「已经装好的官方 kit」**按文件**指给包用：零复制、零漂移。
+  // 前缀 `@ops/` 没有整体放开 —— 准入判据始终是这张表，`@ops/` 下别的文件仍然被拒
+  // （`test/kitImports.test.js` §⑥ 把这条界线钉住，含一条按前缀计数的断言）。
+  //
+  // 2026-10-15 加的 4 个（`op-aphris` / `op-heyak` / `op-jesca2` / `op-nasti`）来自投稿 `rimbilliton`：它自己
+  // 那 8 个 kit 里有 4 个是「同一名官方干员换一张 mod 棋子卡」。加它们**不打断任何在册包**：此前 `@ops/*`
+  // 一律被拒，所以没有任何已发布的包依赖「这 4 个被拒」这个旧行为。
   //
   // ⚠️ 这两端都成立、且**一个字都不用改写**，因为两端都是「按真实位置加载这个文件」：
   //   · 服务端 `loadWorkshopKits` 把 specifier 窄重写成 `file:` URL 后 import，该文件**自己的**相对 import
@@ -100,6 +119,10 @@ export const KIT_IMPORT_FILES = Object.freeze([
   { specifier: '@ops/op-ray.js', file: 'server/sim/content/kits/ops/op-ray.js' },
   { specifier: '@ops/op-aglna2.js', file: 'server/sim/content/kits/ops/op-aglna2.js' },
   { specifier: '@ops/op-thumpy.js', file: 'server/sim/content/kits/ops/op-thumpy.js' },
+  { specifier: '@ops/op-aphris.js', file: 'server/sim/content/kits/ops/op-aphris.js' },
+  { specifier: '@ops/op-heyak.js', file: 'server/sim/content/kits/ops/op-heyak.js' },
+  { specifier: '@ops/op-jesca2.js', file: 'server/sim/content/kits/ops/op-jesca2.js' },
+  { specifier: '@ops/op-nasti.js', file: 'server/sim/content/kits/ops/op-nasti.js' },
 ]);
 
 /** 战斗逻辑模块允许的名单（它不比 kit 多一个前缀，只是指向另一组文件）。 */
