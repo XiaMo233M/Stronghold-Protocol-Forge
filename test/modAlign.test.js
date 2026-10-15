@@ -236,8 +236,15 @@ describe('接线（源码级；界面本身没有 DOM 测试，这里钉的是�
     assert.match(src, /from '\.\.\/mods\/align\.js'/, '面板必须从 W-D 那个模块拿对齐逻辑');
     assert.match(src, /planAlignment\(/, '进房间时要问一次「本机有没有这个房间的包」');
     assert.match(src, /alignRoom\(/, '缺件要能补齐（进度由 sync 的事件驱动）');
-    assert.ok(src.includes('<${RoomModsPanel} room=${room} onAlignment=${setAlign}'), '面板要把结论交回房间界面');
-    assert.ok(src.includes('align && align.needed && !align.ok'), '未就绪时不给准备就绪这个按钮');
+    // 面板要把对齐结论**交回**房间界面：`onAlignment` 的回调就是房间自己的 `setAlign`（`myId` 是 ⑥/W-D 之后面板
+    // 自己判「谁有权改本房间的包」用的）。钉**整行**而不是钉一个片段 —— 结论不再交回房间（回调换了读者）必须判红。
+    assert.ok(src.includes('<${RoomModsPanel} room=${room} myId=${me.playerId} onAlignment=${setAlign} />'), '面板要把结论交回房间界面');
+    // 准备就绪按钮**带对齐门**，而且门只有一份实现：`isAlignBlocked(align)`（room.js:440 —— `checking` 也一并算挡住，
+    // 非房主的「准备就绪」与 solo 房主的「开始模拟」读的是同一条）。两条一起钉：先钉门的来处，再把门**真的挂在
+    // 「准备就绪」那个按钮上**这件事钉住（`onClick=${toggleReady}` 是那个按钮，非房主那一支）—— 把 `|| alignBlocked`
+    // 从它的 `disabled` 里摘掉，第二条必红；只钉「门存在」是钉不住的（算了不用也是一个绿）。
+    assert.match(src, /const alignBlocked = isAlignBlocked\(align\);/, '门要由房间自己按 isAlignBlocked 从面板交回的结论算');
+    assert.match(src, /disabled=\$\{[^}]*\balignBlocked\b[^}]*\}[\s\S]{0,160}?onClick=\$\{toggleReady\}/, '未就绪时不给准备就绪这个按钮');
   });
 
   test('战斗模拟：浏览器那一份 runner 按 spec 选数据面，且按数据面缓存', () => {
