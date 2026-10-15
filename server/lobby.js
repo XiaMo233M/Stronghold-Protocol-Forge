@@ -132,6 +132,11 @@ import { buildRoomRegistry } from './match/metaPack.js';
 import { createRoomHooks, holdDecision, releaseRoomHolds } from './roomPack.js';
 import { getDefaultRegistry } from './match/effectsMeta.js';
 import { KITTED_CHARS } from './sim/content/kits/index.js';
+// 由计划派生物推出的**小结构**（重构版，DESIGN 重构计划 §一 原则 2）：纯函数、语义被 test/modDerive.test.js
+// 钉住（就地循环钉不住），构造器里不再各自实现一遍。
+import { derivePackChannels, deriveServerChannels } from './mod-manager/derive.js';
+// 官方插件的房间钩子接上**同一条**房间总线（Phase 7 第一项）：没有官方插件时是空数组 ⇒ 逐元素相同。
+import { officialRoomInstallers } from './mod-manager/officialHost.js';
 import { MatchmakeQueue } from './matchmaking.js';
 
 /** Room code alphabet: uppercase letters without I and O (and no digits, so no 0/1). */
@@ -534,12 +539,7 @@ export class Lobby {  /**
      * 是同一批数据的两个读者。没有包声明 `client` 时它是空表，`pack.msg` 一律回 `BAD_MSG`。
      * @type {Map<string, Set<string>>}
      */
-    this.packChannels = new Map();
-    for (const panel of (this.workshop && Array.isArray(this.workshop.panels) ? this.workshop.panels : [])) {
-      if (!panel || typeof panel.pack !== 'string' || !Array.isArray(panel.messages)) continue;
-      if (!this.packChannels.has(panel.pack)) this.packChannels.set(panel.pack, new Set());
-      for (const channel of panel.messages) this.packChannels.get(panel.pack).add(channel);
-    }
+    this.packChannels = derivePackChannels(this.workshop && this.workshop.panels);
     /**
      * 包通道的**投递面**（`server.modules[].channels`，DESIGN §28.23 / docs/WORKSHOP.md §1.12）：`<包id>` → 这个包的
      * 服务端模块声明过的接收通道集合。与上面那张 `packChannels`（客户端能说什么）成对：那张表决定消息**收不收**，
@@ -548,13 +548,7 @@ export class Lobby {  /**
      * 与从前逐字节相同：**未声明的通道投不进对局**（转发照旧，那是面板那半边 §1.9.6 的判据，这一刀没有动它）。
      * @type {Map<string, Set<string>>}
      */
-    this.serverChannels = new Map();
-    const declaredServerChannels = this.workshop && this.workshop.serverChannels;
-    if (declaredServerChannels instanceof Map) {
-      for (const [packId, channels] of declaredServerChannels) {
-        if (typeof packId === 'string' && channels) this.serverChannels.set(packId, new Set(channels));
-      }
-    }
+    this.serverChannels = deriveServerChannels(this.workshop && this.workshop.serverChannels);
     /**
      * 快捷短语的服务端白名单（`room.quickMsg`）。与 `packChannels` 同一个形状的「不认识就点名」判据：**表里没有
      * 的 id 不会被转发**，接收端因此永远不必对着一堆不认识的 id 猜文案。默认 `DEFAULT_QUICK_PHRASES`。
@@ -587,7 +581,12 @@ export class Lobby {  /**
      * `install` / `fire` 都早退，房间的每一步与从前逐字节相同。
      */
     this.roomHooks = createRoomHooks({
-      installers: this.workshop && Array.isArray(this.workshop.roomHooks) ? this.workshop.roomHooks : [],
+      installers: [
+        ...(this.workshop && Array.isArray(this.workshop.roomHooks) ? this.workshop.roomHooks : []),
+        // 官方档的房间钩子（Phase 7）：`officialRoomInstallers` 在没插件时给**空数组**，
+        // 所以展开之后与从前**逐元素相同**；桥本身用真总线验过（test/modOfficialRoomBridge.test.js）。
+        ...officialRoomInstallers(this.workshop && this.workshop.officialModules),
+      ],
       log: this.log,
       now: this.now,
     });

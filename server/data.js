@@ -23,12 +23,18 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadWorkshop, WORKSHOP_DIR } from './workshop.js';
 import { applyWorkshop, workshopSummary } from '../shared/workshop.js';
+// 官方档（`sp:sdk@1`）的**声明式内容**（DESIGN 重构计划 Phase 3 的接线）：装载器 + 合并器。
+import { loadOfficialPlugins, OFFICIAL_PLUGINS_DIR } from './mod-manager/officialLoader.js';
+import { collectOfficialContent, mergeDeclarativeContent } from './mod-manager/content.js';
 
 /** Repository root (…/Stronghold-Protocol). */
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /** Default data directory. */
 export const DATA_DIR = path.join(ROOT, 'data');
+
+/** 官方插件根（默认 `plugins/`；目录不存在 ⇒ 官方档整块**不生效**）。 */
+export const PLUGINS_DIR = path.join(ROOT, OFFICIAL_PLUGINS_DIR);
 
 /** Files the game expects (a warning lists the missing ones). */
 export const DATA_FILES = Object.freeze([
@@ -64,7 +70,7 @@ export function deepFreeze(root) {
  *   assembly path** (`server/index.js`) already decided are NOT loaded. See the comment at the overlay below.
  * @returns {Readonly<Record<string, any>>}
  */
-export function loadData(dir = DATA_DIR, { log = console, expected = DATA_FILES, workshopDir = WORKSHOP_DIR, excludePacks = null } = {}) {
+export function loadData(dir = DATA_DIR, { log = console, expected = DATA_FILES, workshopDir = WORKSHOP_DIR, excludePacks = null, pluginsDir = PLUGINS_DIR } = {}) {
   /** @type {Record<string, any>} */
   const out = {};
   let names = [];
@@ -109,6 +115,27 @@ export function loadData(dir = DATA_DIR, { log = console, expected = DATA_FILES,
       for (const g of report.traitGrants || []) log.warn?.(`[workshop] ${g.pack}: ${g.code}: ${g.reason}`);
     }
   }
+  // 官方档的**声明式内容**（`sp:sdk@1`, DESIGN 重构计划 Phase 3）：与 Forge 叠加层**同一个位置、同一条纪律**
+  // —— 在 `deepFreeze` 之前合并，下游一行都不用知道 mod 存在。三条与 Forge 逐字相同的前提：
+  //   * 目录不存在 / 没传 ⇒ 整块跳过，**一个字节都不变**（现网默认，也是干净安装）；
+  //   * `excludePacks` **同样**作用于它（被禁用 / 被裁 / 模式不许 / 未同意的插件，内容也**不许**进叠加层）；
+  //   * 冲突**具名**报出，绝不静默覆盖（`mergeDeclarativeContent` 的纪律）。
+  // 只写回**被贡献过的表**：没被碰的表保持同一个对象引用，改动面最小。
+  if (pluginsDir) {
+    const official = loadOfficialPlugins(pluginsDir, { log });
+    for (const e of official.errors) log.warn?.(`[official] ${e.pack}: ${e.code}: ${e.reason}`);
+    const activePlugins = excludePacks && excludePacks.size ? official.plugins.filter((p) => !excludePacks.has(p.id)) : official.plugins;
+    if (activePlugins.length) {
+      const { contributions, errors } = collectOfficialContent(activePlugins);
+      for (const e of errors) log.warn?.(`[official] ${e.pack}: ${e.code}: ${e.reason}`);
+      if (contributions.length) {
+        const { tables, conflicts } = mergeDeclarativeContent(out, contributions);
+        for (const table of new Set(contributions.map((c) => c.table))) out[table] = tables[table];
+        for (const c of conflicts) log.warn?.(`[official] ${c.packId}: ${c.code}: ${c.reason}`);
+        log.info?.(`[official] applied declarative content: ${contributions.map((c) => `${c.packId}:${c.table}`).join(', ')}`);
+      }
+    }
+  }
   return deepFreeze(out);
 }
 
@@ -120,8 +147,8 @@ let singleton = null;
  * @param {{ dir?: string, log?: object, workshopDir?: string|null, excludePacks?: Set<string>|null }} [opts]
  * @returns {Readonly<Record<string, any>>}
  */
-export function getData({ dir = DATA_DIR, log = console, workshopDir = WORKSHOP_DIR, excludePacks = null } = {}) {
-  if (!singleton) singleton = loadData(dir, { log, workshopDir, excludePacks });
+export function getData({ dir = DATA_DIR, log = console, workshopDir = WORKSHOP_DIR, excludePacks = null, pluginsDir = PLUGINS_DIR } = {}) {
+  if (!singleton) singleton = loadData(dir, { log, workshopDir, excludePacks, pluginsDir });
   return singleton;
 }
 
