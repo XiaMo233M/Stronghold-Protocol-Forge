@@ -137,7 +137,7 @@ export function fromForgeManifest(pack) {
 export const OFFICIAL_MANIFEST_FIELDS = Object.freeze([
   'manifestVersion', 'id', 'name', 'version', 'author', 'license', 'description',
   'sdk', 'profile', 'entry', 'apis', 'capabilities', 'combat', 'content', 'assets', 'i18n', 'notices',
-  'overrides', 'permissions', 'dependencies', 'conflicts', 'budget', 'target',
+  'overrides', 'permissions', 'dependencies', 'conflicts', 'budget', 'target', 'metaRegisters',
 ]);
 
 /** 官方 manifest 里**不许出现**的 Forge 私有字段（出现即拒）。 */
@@ -214,6 +214,16 @@ export function fromOfficialManifest(raw) {
   if (!combat && combatOnly.length) {
     issues.push(sdkError(SDK_ERROR_CODES.COMBAT_REQUIRED, `official manifest declares combat-only capabilities (${combatOnly.join(', ')}) without "combat: true"`));
   }
+  // `metaRegisters`：白名单，和 Forge 档 `pack.json.server.meta.registers` 逐字同义（「没声明就等于不许」）。
+  // 声明了 `meta` 就必须给出它；没声明 `meta` 却写了它 ⇒ 也拒（一个不该存在的半成品字段比缺字段更难查）。
+  const metaRegisters = raw.metaRegisters === undefined ? [] : raw.metaRegisters;
+  if (!Array.isArray(metaRegisters) || metaRegisters.some((k) => typeof k !== 'string' || !k)) {
+    issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, '"metaRegisters" must be an array of non-empty key strings like "<class>:<id>" (or a "<class>:*" prefix)'));
+  } else if (capabilities.includes('meta') && !metaRegisters.length) {
+    issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, 'this manifest declares the "meta" api but no "metaRegisters" — a pack may register only the keys it declared'));
+  } else if (!capabilities.includes('meta') && metaRegisters.length) {
+    issues.push(sdkError(SDK_ERROR_CODES.UNKNOWN_FIELD, '"metaRegisters" is declared without the "meta" api — remove one of the two'));
+  }
 
   const permissions = [];
   const perm = (p) => { if (!permissions.includes(p)) permissions.push(p); };
@@ -242,6 +252,7 @@ export function fromOfficialManifest(raw) {
     permissions: Object.freeze([...permissions].sort()),
     dependencies: Object.freeze(Array.isArray(raw.dependencies) ? raw.dependencies.slice() : []),
     conflicts: Object.freeze(Array.isArray(raw.conflicts) ? raw.conflicts.slice() : []),
+    metaRegisters: Object.freeze(Array.isArray(metaRegisters) ? metaRegisters.map(String) : []),
     budget: Object.freeze({ ...OFFICIAL_DEFAULT_BUDGET, ...(isObj(raw.budget) ? raw.budget : {}) }),
     // 官方包的字节摘要由官方装载器算出后回填；本适配器只描述。
     contentDigest: typeof raw.contentDigest === 'string' ? raw.contentDigest : null,
@@ -261,6 +272,7 @@ export function fromOfficialManifest(raw) {
 const DESCRIPTOR_FIELDS = Object.freeze([
   'id', 'version', 'origin', 'sdk', 'profile', 'layer', 'combat', 'api', 'entrypoints', 'content', 'assets',
   'capabilities', 'permissions', 'dependencies', 'conflicts', 'budget', 'contentDigest', 'activationPolicy', 'compatibility',
+  'metaRegisters',
 ]);
 
 export function normalizeDescriptor(raw) {

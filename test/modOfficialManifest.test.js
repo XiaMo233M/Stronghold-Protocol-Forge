@@ -60,12 +60,18 @@ test('硬边界：官方 manifest 不许带 Forge 私有字段，Forge 档不许
   assert.equal(SDK_FORGE_LEGACY === SDK_OFFICIAL, false);
 });
 
-test('combat-only 能力缺 combat:true ⇒ 拒', () => {
+test('combat-only 能力缺 combat:true ⇒ 拒；声明 meta 还要给 metaRegisters', () => {
   const r = fromOfficialManifest({ ...base, apis: ['meta.register'] });
   assert.equal(r.descriptor, null);
   assert.ok(r.issues.some((i) => i.code === 'SDK_COMBAT_REQUIRED'));
-  const ok = fromOfficialManifest({ ...base, combat: true, apis: ['meta.register'] });
+  // 声明了 meta ⇒ 必须给白名单（「没声明就等于不许」，与 Forge 档 server.meta.registers 同义）
+  const noRegs = fromOfficialManifest({ ...base, combat: true, apis: ['meta.register'] });
+  assert.equal(noRegs.descriptor, null);
+  assert.ok(noRegs.issues.some((i) => i.code === 'SDK_BAD_DESCRIPTOR' && /metaRegisters/.test(i.reason)));
+
+  const ok = fromOfficialManifest({ ...base, combat: true, apis: ['meta.register'], metaRegisters: ['item:x'] });
   assert.equal(ok.descriptor.combat, true);
+  assert.deepEqual(ok.descriptor.metaRegisters, ['item:x']);
   assert.ok(ok.descriptor.permissions.includes('host.process'));
 });
 

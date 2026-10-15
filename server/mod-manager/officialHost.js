@@ -18,15 +18,36 @@ import { pathToFileURL } from 'node:url';
 import { serverModuleSourceIssues, checkHealthzFields } from '../modModules.js';
 // 房间事件闭集（与 Forge 档 `server.room` 同一张表、同一份语义：**只读观察**，返回值一律丢弃）。
 import { ROOM_HOOK_EVENTS } from '../roomPack.js';
+// 确定性那条线（`meta` / `battle`）：与 Forge 档 `server.battle` / `server.meta` 用**同一张**禁表、同一个扫描器。
+import { KIT_FORBIDDEN_GLOBALS, stripComments, mentionsIdentifier } from '../../shared/kitAuthoring.js';
 
 /** 需要**运行时面**的能力（其余是纯声明，数据走 manifest）。 */
-export const HOST_CAPABILITIES = Object.freeze(['modules', 'storage', 'health', 'routes', 'metrics', 'lane', 'room']);
+export const HOST_CAPABILITIES = Object.freeze(['modules', 'storage', 'health', 'routes', 'metrics', 'lane', 'room', 'meta', 'battle']);
 /**
- * 这一层**不接**的能力：`meta` / `battle` 改对局结果，要等确定性运行时那条线。
- * `room` **不在**这里 —— 它的契约是只读观察（DESIGN §28.20），能改结果的只有它的 `hold` 子字段，
- * 而官方档目前没有那一格。
+ * 声明了这些能力 ⇒ 源码扫描要**并上** kit 那张表（时钟 / 随机 / DOM / 计时器）：它们在对局循环里跑，
+ * 同一个种子必须在两端打出同一个结果。与 `server/battlePack.js` / `server/match/metaPack.js` 逐字同一条纪律。
  */
-export const COMBAT_HOST_CAPABILITIES = Object.freeze(['meta', 'battle']);
+export const DETERMINISTIC_SCAN_CAPABILITIES = Object.freeze(['meta', 'battle']);
+
+/**
+ * 一个官方插件的源码判据（**在 import 之前**跑）。
+ *   * 永远走**严格档**（含 `globalThis`、`process`、`require`、`eval`）；
+ *   * 声明了 `meta` / `battle` ⇒ 再并上 kit 的确定性表（`Math.random` / `Date.now` / `setTimeout` …）。
+ * @param {string} source
+ * @param {string} pluginId
+ * @param {{ capabilities?: string[] }} [opts]
+ */
+export function officialPluginSourceIssues(source, pluginId = '', { capabilities = [] } = {}) {
+  const out = serverModuleSourceIssues(source, pluginId, 'entry', { profile: 'module' });
+  if (!DETERMINISTIC_SCAN_CAPABILITIES.some((c) => capabilities.includes(c))) return out;
+  const code = stripComments(String(source ?? ''));
+  for (const [needle, why] of KIT_FORBIDDEN_GLOBALS) {
+    if (mentionsIdentifier(code, needle)) {
+      out.push({ code: 'PLUGIN_BAD_SOURCE', reason: `"${needle}" is not allowed in a plugin that declares ${DETERMINISTIC_SCAN_CAPABILITIES.filter((c) => capabilities.includes(c)).join(' / ')} ("${pluginId}"): ${why}` });
+    }
+  }
+  return out;
+}
 
 /** 一个插件的 `registerPlugin(host)` 抛出这个（与 `ModuleRefused` 同形，带 `code`）。 */
 export class PluginRefused extends Error {
@@ -51,11 +72,6 @@ const noopLog = { info() {}, warn() {}, error() {}, debug() {} };
 export function createOfficialModuleHost({ pluginId, capabilities = [], stateRoot = null, log = noopLog, mounted, metrics = null }) {
   const has = (c) => capabilities.includes(c);
   const deny = (c) => { throw new PluginRefused('PLUGIN_USE_UNDECLARED', `plugin "${pluginId}" did not declare the "${c}" capability (declared: ${capabilities.join(', ') || 'none'})`); };
-
-  // 声明了却不在这一层的面 ⇒ 明确说「等确定性运行时」，而不是给一个半成品
-  for (const c of COMBAT_HOST_CAPABILITIES) {
-    if (has(c)) throw new PluginRefused('PLUGIN_CAPABILITY_NOT_IN_THIS_LAYER', `plugin "${pluginId}" declares "${c}", which changes match results and is not provided by the in-process module runtime yet`);
-  }
 
   const host = {};
   Object.defineProperty(host, 'id', { value: pluginId, enumerable: true });
@@ -166,6 +182,38 @@ export function createOfficialModuleHost({ pluginId, capabilities = [], stateRoo
     }),
   });
 
+  // 对局元注册表（声明 `meta`，**必须 combat: true** —— 形状层已判）：登记映射到**同一条**引擎契约
+  // `registry.register(key, handler)`，由 `officialMetaModules()` 在每局装配时重放。这里只**记录**，
+  // 白名单（`registers`）由引擎那条受限注册表执行 —— 与 Forge 档 `server.meta` 逐字同一条纪律。
+  Object.defineProperty(host, 'meta', {
+    enumerable: true,
+    value: Object.freeze({
+      register: has('meta')
+        ? (key, handler) => {
+          if (typeof key !== 'string' || !key) throw new PluginRefused('PLUGIN_BAD_META_KEY', 'meta.register(key, handler) needs a non-empty string key like "<class>:<id>"');
+          if (handler === undefined || handler === null) throw new PluginRefused('PLUGIN_BAD_META_KEY', `meta.register(${JSON.stringify(key)}, …) needs a handler`);
+          mounted.meta.push({ key, handler });
+          return true;
+        }
+        : () => deny('meta'),
+    }),
+  });
+
+  // 战斗逻辑（声明 `battle`，**必须 combat: true**）：与官方内容模块**逐字同形**的 `install(battle)`，
+  // 由 `officialBattleInstallers()` 把这一场声明过的插件逐个跑一遍（每个包单独 try/catch 由引擎那侧负责）。
+  Object.defineProperty(host, 'battle', {
+    enumerable: true,
+    value: Object.freeze({
+      install: has('battle')
+        ? (fn) => {
+          if (typeof fn !== 'function') throw new PluginRefused('PLUGIN_BAD_BATTLE_INSTALL', 'battle.install(battle) needs a function — the same shape the official content modules use');
+          mounted.battle.push(fn);
+          return true;
+        }
+        : () => deny('battle'),
+    }),
+  });
+
   // 声明了但没有**运行时面**的那些（content / assets / i18n / notices / overrides / matchKinds…）：
   // 数据走 manifest，宿主上**不长这些键**——包拿不到多余的面。
   return Object.freeze(host);
@@ -203,6 +251,49 @@ export function officialRoomInstallers(modules) {
     }));
 }
 
+/**
+ * **官方档 meta / battle → 既有引擎契约**的两个桥（Phase 7 的高风险能力那一格）。
+ *
+ * 与房间桥同一条做法：**不新造语义**，只把官方插件在装载期登记的调用，重放成引擎**本来就在用**的那两个形状 ——
+ *   * `registerMeta(registry)`（引擎每局递进一个**受限**注册表，白名单由 `registers` 执行）；
+ *   * `install(battle)`（与官方内容模块逐字同形）。
+ * 于是官方插件与 Forge 包走进**同一条**装配路径、同一份逐包 try/catch 隔离、同一份房间摘要闸门。
+ *
+ * 没有声明对应能力的插件 ⇒ **空数组**，调用方展开后与从前逐元素相同。
+ * @param {Array<any>} modules `loadOfficialModules(...)` 的 `modules`
+ */
+export function officialMetaModules(modules) {
+  return (Array.isArray(modules) ? modules : [])
+    .filter((m) => m && typeof m.pack === 'string' && m.mounted && Array.isArray(m.mounted.meta) && m.mounted.meta.length)
+    .slice()
+    .sort((a, b) => (a.pack < b.pack ? -1 : a.pack > b.pack ? 1 : 0))
+    .map((m) => ({
+      id: m.pack,
+      hash: m.hash || '',
+      registers: Array.isArray(m.registers) ? [...m.registers] : [],
+      dir: m.dir || '',
+      registerMeta(registry) {
+        for (const { key, handler } of m.mounted.meta) registry.register(key, handler);
+      },
+    }));
+}
+
+/** 见上。产出 `{ id, hash, pack, install }` —— 与 `loadBattleInstallers` 的 installers 同形。 */
+export function officialBattleInstallers(modules) {
+  return (Array.isArray(modules) ? modules : [])
+    .filter((m) => m && typeof m.pack === 'string' && m.mounted && Array.isArray(m.mounted.battle) && m.mounted.battle.length)
+    .slice()
+    .sort((a, b) => (a.pack < b.pack ? -1 : a.pack > b.pack ? 1 : 0))
+    .map((m) => ({
+      id: m.pack,
+      pack: m.pack,
+      hash: m.hash || '',
+      install(battle) {
+        for (const fn of m.mounted.battle) fn(battle);
+      },
+    }));
+}
+
 /** 一个插件的入口绝对路径（必须在插件目录之内）。 */
 function entryAbs(plugin, entry) {
   const abs = path.join(plugin.dir, ...String(entry).split('/'));
@@ -230,11 +321,11 @@ export async function loadOfficialModules(plugins, { log = noopLog, stateRoot = 
     }
     let source;
     try { source = fs.readFileSync(abs, 'utf8'); } catch (e) { errors.push({ pack: plugin.id, code: 'PLUGIN_BAD_ENTRY', reason: `entry is not readable: ${e && e.message ? e.message : e}` }); continue; }
-    // **严格档扫描必须在 import 之前**（含 `globalThis`）。
-    const issues = serverModuleSourceIssues(source, plugin.id, 'entry', { profile: 'module' });
+    // **严格档扫描必须在 import 之前**（`meta` / `battle` 还并上 kit 那张确定性表）。
+    const issues = officialPluginSourceIssues(source, plugin.id, { capabilities: caps });
     if (issues.length) { errors.push({ pack: plugin.id, code: 'PLUGIN_BAD_SOURCE', reason: issues[0].reason }); log?.warn?.(`[official] ${plugin.id}: ${issues[0].reason}`); continue; }
 
-    const mounted = { boot: [], shutdown: [], healthz: [], route: [], room: [] };
+    const mounted = { boot: [], shutdown: [], healthz: [], route: [], room: [], meta: [], battle: [] };
     const url = `${pathToFileURL(abs).href}?v=${encodeURIComponent(plugin.hash || '')}`;
     let ns;
     try { ns = await importModule(url); } catch (e) { errors.push({ pack: plugin.id, code: 'PLUGIN_IMPORT_FAILED', reason: `entry failed to load: ${e && e.message ? e.message : e}` }); continue; }
@@ -248,7 +339,13 @@ export async function loadOfficialModules(plugins, { log = noopLog, stateRoot = 
       errors.push({ pack: plugin.id, code: e instanceof PluginRefused ? e.code : 'PLUGIN_REGISTER_THREW', reason: `registerPlugin(host): ${e && e.message ? e.message : e}` });
       continue;
     }
-    modules.push({ pack: plugin.id, id: 'entry', entry: ep.entry, hash: plugin.hash || '', uses: caps.filter((c) => HOST_CAPABILITIES.includes(c)), mounted });
+    modules.push({
+      pack: plugin.id, id: 'entry', entry: ep.entry, hash: plugin.hash || '', dir: plugin.dir,
+      // `registers`：这个包**声明**允许注册的 meta 键（白名单；形状层已判）。引擎那条受限注册表按它执行。
+      registers: Array.isArray(plugin.descriptor.metaRegisters) ? [...plugin.descriptor.metaRegisters] : [],
+      uses: caps.filter((c) => HOST_CAPABILITIES.includes(c)),
+      mounted,
+    });
   }
   return { modules, errors };
 }

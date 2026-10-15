@@ -6,7 +6,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { loadOfficialPlugins, OFFICIAL_PLUGIN_MANIFEST } from '../server/mod-manager/officialLoader.js';
-import { loadOfficialModules, PluginRefused, HOST_CAPABILITIES, COMBAT_HOST_CAPABILITIES } from '../server/mod-manager/officialHost.js';
+import { loadOfficialModules, PluginRefused, HOST_CAPABILITIES } from '../server/mod-manager/officialHost.js';
 import { mountServerModules } from '../server/modModules.js';
 import { SDK_OFFICIAL } from '../shared/sdk/sdkConstants.js';
 
@@ -93,14 +93,14 @@ test('没有 registerPlugin 导出 / 入口不在插件内 ⇒ 具名拒', async
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test('战斗类能力（meta/battle）在这一层具名拒；room 是只读观察、放行；storage 路径越界被拒', async () => {
+test('战斗类能力（meta/battle）**必须 combat: true**（形状层拒）；storage 路径越界被拒', async () => {
   const root = fs.mkdtempSync(path.join(tmpdir(), 'sp-host5-'));
   try {
-    makePlugin(root, 'fighter', { apis: ['battle'], combat: true, entry: 'plugin.mjs', entryBody: 'export function registerPlugin(host) {}' });
-    const a = await loadOfficialModules(loadOfficialPlugins(root, { log: quiet }).plugins, { log: quiet });
-    const fa = a.errors.find((e) => e.pack === 'fighter');
-    assert.equal(fa.code, 'PLUGIN_CAPABILITY_NOT_IN_THIS_LAYER');
-    assert.match(fa.reason, /battle/);
+    // 没写 combat: true ⇒ 形状层就拒（Phase 7 落地后这一层**支持** meta/battle，但闸门在形状层）
+    makePlugin(root, 'fighter', { apis: ['battle'], entry: 'plugin.mjs', entryBody: 'export function registerPlugin(host) {}' });
+    const a0 = loadOfficialPlugins(root, { log: quiet });
+    assert.deepEqual(a0.plugins, []);
+    assert.equal(a0.errors.find((e) => e.pack === 'fighter').code, 'SDK_COMBAT_REQUIRED');
 
     makePlugin(root, 'badpath', { apis: ['storage'], entry: 'plugin.mjs', entryBody: `export function registerPlugin(host) { host.storage.read('../escape.txt'); }` });
     const b = await loadOfficialModules(loadOfficialPlugins(root, { log: quiet }).plugins, { log: quiet, stateRoot: path.join(root, 'var') });
@@ -143,10 +143,7 @@ test('room：没声明就碰 host.room ⇒ PLUGIN_USE_UNDECLARED', async () => {
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test('HOST_CAPABILITIES 是运行时面的闭集：room 在内、meta/battle 不在', () => {
-  assert.deepEqual([...HOST_CAPABILITIES], ['modules', 'storage', 'health', 'routes', 'metrics', 'lane', 'room']);
-  assert.equal(HOST_CAPABILITIES.includes('meta'), false);
-  assert.equal(HOST_CAPABILITIES.includes('battle'), false);
-  assert.deepEqual([...COMBAT_HOST_CAPABILITIES], ['meta', 'battle']);
+test('HOST_CAPABILITIES 是运行时面的闭集：room / meta / battle 都在内', () => {
+  assert.deepEqual([...HOST_CAPABILITIES], ['modules', 'storage', 'health', 'routes', 'metrics', 'lane', 'room', 'meta', 'battle']);
   assert.equal(typeof PluginRefused, 'function');
 });

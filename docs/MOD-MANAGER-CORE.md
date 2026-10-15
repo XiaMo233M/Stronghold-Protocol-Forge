@@ -163,7 +163,19 @@ CLI/程序接口：`setConsent` / `clearConsent` / `setPin` / `clearPin` / `setP
   注册落在 `mounted.room`；**已接线**：`server/index.js` 装载官方 module（喂进计划、只把**激活**的交给大厅）→
   `server/lobby.js` 用 `officialRoomInstallers` 把它的房间钩子并进**同一条** `createRoomHooks` 总线
   （没官方插件时展开的是空数组 ⇒ 逐元素相同；桥用**真总线**验过：`test/modOfficialRoomBridge.test.js`）。
-  `meta` / `battle` 仍**具名拒**（它们改对局结果，要等确定性运行时）。
+  `meta` / `battle` **也已落地并接线**（见下），不再被拒。
+* **官方 `meta` / `battle`**（Phase 7 的高风险那一格）已落地**运行时 + 接线**：
+  * 宿主面 `host.meta.register(key, handler)` 与 `host.battle.install(fn)`，**都要求 `combat: true`**（形状层判）；
+  * 声明 `meta` 的 manifest **必须**给 `metaRegisters`（白名单，与 Forge 档 `server.json.server.meta.registers` 同义：
+    「没声明就等于不许」）；
+  * **确定性那条线**：声明 `meta`/`battle` 的插件，源码扫描在严格档之外**再并上 kit 那张表**
+    （`Math.random` / `Date.now` / `setTimeout` …），与 `server/battlePack.js` / `server/match/metaPack.js` 同一张表、同一个扫描器；
+  * 两个桥 `officialMetaModules()` / `officialBattleInstallers()` 把装载期登记**重放成引擎本来就在用的那两个形状**
+    （`registerMeta(registry)` / `install(battle)`）—— 不新造语义，于是官方插件走进**同一条**装配路径、
+    同一份逐包 try/catch 隔离、**同一份房间摘要闸门与受限注册表白名单**
+    （`test/modOfficialCombat.test.js` 用**真的** `buildRoomRegistry` 验过：声明过的键注册成功、没声明的键被点名拒并逐包回滚）；
+  * **未接线的一小格**：Forge 档`battleModules` 会把战斗模块的 URL 送到浏览器（客户端跑同一段代码）；
+    官方插件**还没有**这条投递路径 ⇒ 官方战斗模块目前只服务端生效。这一格要等官方资源投递面那条线。
 * **协议适配层**（Phase 5）已落地**骨架**：`server/mod-manager/eventRouter.js`（进站消息分流成
   `room.mod.handshake` / `resource.admission` / `sdk.intercept` / `pack.msg` / `plain`，按固定顺序派发、
   钩子抛异常只记日志不吞后面的）+ `server/mod-manager/admission.js`（集合摘要准入 / 单包准入 / 房间子集）。

@@ -39,7 +39,7 @@ import { budgetMapFromEnv } from './mod-manager/budget.js';
 import { modPolicyFromEnv } from './mod-manager/policy.js';
 // 官方档（`sp:sdk@1`）的装载器：默认目录 `plugins/` 不存在 ⇒ 下面整块**不生效**（现网逐字节不变）。
 import { loadOfficialPlugins, OFFICIAL_PLUGINS_DIR } from './mod-manager/officialLoader.js';
-import { loadOfficialModules } from './mod-manager/officialHost.js';
+import { loadOfficialModules, officialRoomInstallers, officialMetaModules, officialBattleInstallers } from './mod-manager/officialHost.js';
 import { loadMetaModules } from './match/metaPack.js';
 import { loadBattleInstallers } from './battlePack.js';
 import { loadRoomInstallers } from './roomPack.js';
@@ -226,6 +226,10 @@ export async function startServer(opts = {}) {
   });
   // 只有**计划里激活**的插件，它的 module 才会被交给大厅（被禁用/被裁的插件，房间钩子也不许跑）。
   const officialModulesLive = officialModules.modules.filter((m) => officialPlan.activatedSet.has(m.pack));
+  // Phase 7 的高风险能力：官方 `meta` / `battle` 走**同一套**引擎契约（registerMeta / install），
+  // 由这两个桥重放；没有声明对应能力的插件 ⇒ 空数组，下面的展开与从前逐元素相同。
+  const officialMetaLive = officialMetaModules(officialModulesLive);
+  const officialBattleLive = officialBattleInstallers(officialModulesLive);
   for (const w of officialPlan.warnings) log.warn(`[mod-plan] official ${w.id ? `"${w.id}" ` : ''}${w.code}: ${w.reason}`);
   if (official.plugins.length) {
     log.info?.(`[official] ${officialPlan.activated.length} plugin(s) activated / ${officialPlan.excluded.length} excluded; `
@@ -427,7 +431,7 @@ export async function startServer(opts = {}) {
       accounts,
       records,
       ...(matchWrappers.length ? { MatchClass } : {}),
-      workshop: { kits: workshopKits.kits, tokenKits: workshopKits.tokenKits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme, meta: metaModules, roomAssets, battle: battleModules, battleInstallers, roomHooks: roomInstallers, transport: transport.transport, serverChannels: serverChannelMap, officialModules: officialModulesLive },
+      workshop: { kits: workshopKits.kits, tokenKits: workshopKits.tokenKits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme, meta: [...metaModules, ...officialMetaLive], roomAssets, battle: battleModules, battleInstallers: [...battleInstallers, ...officialBattleLive], roomHooks: roomInstallers, transport: transport.transport, serverChannels: serverChannelMap, officialModules: officialModulesLive },
     },
     { data, log },
   );
