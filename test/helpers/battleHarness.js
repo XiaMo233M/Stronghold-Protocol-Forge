@@ -257,6 +257,9 @@ export function makeBattle(opts = {}) {
     content: opts.content ?? 'full', recordEvents: opts.recordEvents !== false, logger: opts.logger ?? quietLogger(opts.verbose),
     quiet: opts.verbose ? false : true, devices: opts.devices,
     autoFinish: opts.autoFinish ?? spawns.length > 0, kits: opts.kits, extraContent: opts.extraContent,
+    // kit 的**归属**与**预算**（DESIGN §28.52 的 kit 那一半）：测试可以直接把装载器产出的那两张表递给战场，
+    // 于是「逐单位回调归到哪本账上」可以在不建整局比赛的情况下被钉住。
+    kitOwners: opts.kitOwners, tokenKitOwners: opts.tokenKitOwners, kitBudgets: opts.kitBudgets,
     // 包声明的战斗逻辑（`server.battle`, DESIGN §28.17）：测试可以把装载器交出来的 installer 直接递给战场。
     battleInstallers: opts.battleInstallers,
     setup: (b) => {

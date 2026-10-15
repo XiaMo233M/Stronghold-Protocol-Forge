@@ -46,6 +46,12 @@ export function battleOptsFromMatch(owner, opts = {}) {
   // so the battle is byte-for-byte the one a plain install runs
   if (owner.workshopKits && !full.kits) full.kits = owner.workshopKits;
   if (owner.workshopTokenKits && !full.tokenKits) full.tokenKits = owner.workshopTokenKits;
+  // kit 的**归属**与**预算**（DESIGN §28.52 的 kit 那一半）：`kits` / `tokenKits` 不带所属包，所以「逐单位回调归到
+  // 哪本账上」要靠这三张表（两张 owner 表 + 一张「包 id → 生效 max」）。与上面两行逐字同一条 KEY DISCIPLINE：只有
+  // 这一局真的装了包、且装载器真的产出了那张表时才写这个键 —— 干净安装的战斗拿不到它们，形状与从前逐字节相同。
+  if (owner.workshopKitOwners && !full.kitOwners) full.kitOwners = owner.workshopKitOwners;
+  if (owner.workshopTokenKitOwners && !full.tokenKitOwners) full.tokenKitOwners = owner.workshopTokenKitOwners;
+  if (owner.workshopKitBudgets && !full.kitBudgets) full.kitBudgets = owner.workshopKitBudgets;
   if (Array.isArray(owner.battleInstallers) && owner.battleInstallers.length && !full.battleInstallers) full.battleInstallers = owner.battleInstallers;
   if (owner.bossHitLimit !== undefined && full.bossHitLimit === undefined) full.bossHitLimit = owner.bossHitLimit;
   // 行为开关 `morphPairing`（DESIGN §28.43.1）：只在**非缺省档**才写这个键 —— 缺省档（`official`）一个键都不多，

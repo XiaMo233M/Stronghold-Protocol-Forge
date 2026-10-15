@@ -24,6 +24,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { KIT_FORBIDDEN_GLOBALS, SERVER_CODE_FORBIDDEN_GLOBALS, stripComments, mentionsIdentifier } from '../shared/kitAuthoring.js';
+import { effectivePackCallBudget } from '../shared/callBudget.js';
 import {
   BATTLE_IMPORT_TARGETS, battleImportAllowedText, kitImportDeclarations, kitImportIssues, rewriteKitImports,
 } from '../shared/kitImports.js';
@@ -125,7 +126,8 @@ export async function loadBattleInstallers(loaded, { log = null, baseUrl = '/wor
     // 同时挂到 `installers[]`（服务端真函数）与 `modules[]`（送到浏览器的那份 URL 清单）。建房路径
     // （`server/lobby.js` 的 `room.create` / 房间建立流程）里一个字都没有：上游实测过「探测期大厅暂停」。
     // 为什么不必再探一次：包的内容哈希覆盖了这一刻的声明（`shared/callBudget.js` 的约束 2），同 hash ⇒ 同预算。
-    const budget = pack.callBudget && Number.isInteger(pack.callBudget.max) ? pack.callBudget.max : null;
+    // 「包 → 生效 max」只有一份实现（`effectivePackCallBudget`）：`kits/` 那一半的装载器读的是同一个符号。
+    const budget = effectivePackCallBudget(pack);
     installers.push({ id: pack.id, hash: pack.hash || '', install, ...(budget === null ? {} : { callBudget: budget }) });
     modules.push({ id: pack.id, pack: pack.id, hash: pack.hash || '', url: `${baseUrl}/${encodeURIComponent(pack.id)}/${rel.split('/').map(encodeURIComponent).join('/')}?v=${v}`, ...(budget === null ? {} : { callBudget: budget }) });
   }

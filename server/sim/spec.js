@@ -94,6 +94,10 @@ export function buildBattleSpec(o = {}) {
         pack: typeof m.pack === 'string' ? m.pack : null,
         url: m.url,
         ...(typeof m.hash === 'string' ? { hash: m.hash } : {}),
+        // 调用预算（`pack.json.callBudget`, DESIGN §28.52）的 kit 那一半：**同一个数字**由装载期算好后随这份清单
+        // 过线，浏览器读它、不再自己算一次（`public/js/battle/runner.js loadSpecKits` 的 `kitBudgets`）。没声明
+        // 的包不长这个键 —— 与 `workshopBattle` 那份逐字同形（老客户端读不懂这个键时也只是不带账，不会读错）。
+        ...(Number.isInteger(m.callBudget) ? { callBudget: m.callBudget } : {}),
         // 召唤物的行为层（docs/WORKSHOP.md §4.7）：**同一份清单**里的另一条通道，`kind: 'token'` 标记它属于
         // token 键空间（`Battle opts.tokenKits` 而不是 `opts.kits`）。干员 kit 照旧不带这个键 —— 线上格式对
         // 已经存在的读者（包括老客户端）逐字节不变，而两个键空间在装载器里是**分开裁决**的，所以必须分开送达。
@@ -118,6 +122,11 @@ export function buildBattleSpec(o = {}) {
         pack: typeof m.pack === 'string' ? m.pack : null,
         url: m.url,
         ...(typeof m.hash === 'string' ? { hash: m.hash } : {}),
+        // 调用预算的 `server.battle` 那一半：**这个键过去在这张投影里被丢掉了** —— 装载期把生效 max 挂上了
+        // `modules[]`（server/battlePack.js），但 spec 这一层按显式键重建对象时没带上它，于是浏览器那半永远
+        // 建不了账、而服务端复算那半会回滚 ⇒ 两端在**不同**的调用次数上停（`loadSpecBattleInstallers` 读的就是
+        // `m.callBudget`）。两端同规则是这一格的硬要求，所以这一行与 `workshopKits` 那份逐字同形地补上。
+        ...(Number.isInteger(m.callBudget) ? { callBudget: m.callBudget } : {}),
       })),
   };
   const out = JSON.parse(JSON.stringify(spec, specReplacer));
@@ -219,6 +228,12 @@ export function createBattleFromSpec(spec, dataSource, opts = {}) {
   // 召唤物的行为层（docs/WORKSHOP.md §4.7）：另一张表，另一个键空间（token 记录 id，`content/index.js` 的
   // `tokens.kits?.[def.id]`）。与上面一行同一条纪律：没有包声明它时这个键根本不出现，战斗与从前逐字节相同。
   if (opts.tokenKits && typeof opts.tokenKits === 'object') battleOpts.tokenKits = opts.tokenKits;
+  // kit 的**归属**与**预算**（DESIGN §28.52 的 kit 那一半）：与上面两个键逐字对称 —— 服务端那条路（`specBattleOpts`）
+  // 与浏览器那条路（`public/js/battle/runner.js` 从 spec 的模块清单重建）都必须交进来，否则 kit 的逐单位回调一端
+  // 归账、另一端不归账，两端就在**不同**的调用次数上停。没有包声明它们时这几个键根本不出现（逐字节同前）。
+  if (opts.kitOwners instanceof Map) battleOpts.kitOwners = opts.kitOwners;
+  if (opts.tokenKitOwners instanceof Map) battleOpts.tokenKitOwners = opts.tokenKitOwners;
+  if (opts.kitBudgets instanceof Map) battleOpts.kitBudgets = opts.kitBudgets;
   // 包声明的战斗逻辑（`server.battle`, DESIGN §28.17）：服务端把**这一场**要跑的 installer 直接递进来（一个函数过不了
   // 线），浏览器那边按 `spec.workshopBattle` 的 URL 自己加载出同一批。没有包声明时不传这个键 —— Match 与 Battle
   // 的行为与从前逐字节相同。

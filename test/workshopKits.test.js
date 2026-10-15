@@ -526,8 +526,13 @@ describe('行为层: delivery to the browser', () => {
     // 上游 0.2.1 把战斗启动重写成「待处理表 + prepare()」，参数从 `msg` 变成条目 `e`：
     // 这条断言钉的是**工坊 kits 必须挂在真正构造战斗的那一处**（否则工坊行为层会静默失效）。两张表（干员 / 召唤物）
     // 都必须挂在那里：少一个，那一半的包效果在浏览器侧就静默消失，服务端复算会把玩家的结果判为不一致。
-    assert.match(src, /createBattleFromSpec\(e\.spec, sim\.ds, \{ logger, kits, tokenKits/);
-    assert.match(src, /const \{ kits, tokenKits \} = await loadSpecKits\(e\.spec\)/);
+    assert.match(src, /createBattleFromSpec\(e\.spec, sim\.ds, \{[\s\S]{0,240}?logger, kits, tokenKits/);
+    // kit 的**归属**与**预算**（DESIGN §28.52 的 kit 那一半）走的是**同一个落点**：它们与两张 kit 表一起交给
+    // `createBattleFromSpec`，否则浏览器侧 kit 的逐单位回调不归账、而服务端复算那半会回滚 —— 两端在**不同**的
+    // 调用次数上停，玩家算出来的战果会被判为不一致。空表不写这几个键（KEY DISCIPLINE）。
+    assert.match(src, /kitOwners\.size \? \{ kitOwners \} : \{\}/);
+    assert.match(src, /kitBudgets\.size \? \{ kitBudgets \} : \{\}/);
+    assert.match(src, /const \{ kits, tokenKits, kitOwners, tokenKitOwners, kitBudgets \} = await loadSpecKits\(e\.spec\)/);
     assert.match(src, /m\.kind === 'token' \? tokenKits : kits/);
     assert.match(src, /import\(\/\* @vite-ignore \*\/ m\.url\)/);
     // 包声明的**战斗逻辑**（`server.battle`, DESIGN §28.17）走同一个落点：没有它，一个包的整场效果在浏览器侧会静默消失。

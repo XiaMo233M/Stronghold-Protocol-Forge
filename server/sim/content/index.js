@@ -75,16 +75,48 @@ export function isDiyDef(def) {
 const isOtherBody = (def) => isStandInDef(def) || isDiyDef(def);
 
 /**
+ * `kitOf` 命中的那个**键**（`null` = 没命中）。**键顺序只有这一份**：`kitOf` 与「这个 kit 属于哪个包」的读者必须
+ * 命中同一个键，两处各写一遍就是两处会漂的判断。`??` 的语义逐字保留：第一个**非 `null` / `undefined`** 的值胜出
+ * （所以 `reg[undefined]` 这种病态命中与从前同答）。
+ */
+export function kitKeyOf(def, reg) {
+  if (!def || !reg) return null;
+  if (isOtherBody(def)) return Object.prototype.hasOwnProperty.call(reg, def.charId) ? def.charId : null;
+  const bare = String(def.baseId ?? def.id ?? '').replace(/_[ab]$/, '');
+  for (const k of [def.baseId, def.id, bare]) if (reg[k] != null) return k;
+  return null;
+}
+
+/**
  * The kit builder of an operator def in `reg` ({ [key]: (bb, chess, def) => Kit }), or undefined. A stand-in's and a
  * 自选 piece's kit is keyed by its charId (`char_609_acguad`, `char_112_siege`) and by nothing else: the chess id it keeps
  * names the replaced operator's kit (a DIY slot has none). Any other def: baseId (`…_a`, data/SIM.md), the exact id, or
  * the suffix-less id of DESIGN §5.6's example.
  */
 export function kitOf(def, reg) {
-  if (!def || !reg) return undefined;
-  if (isOtherBody(def)) return Object.prototype.hasOwnProperty.call(reg, def.charId) ? reg[def.charId] : undefined;
-  const bare = String(def.baseId ?? def.id ?? '').replace(/_[ab]$/, '');
-  return reg[def.baseId] ?? reg[def.id] ?? reg[bare];
+  const k = kitKeyOf(def, reg);
+  return k === null ? undefined : reg[k];
+}
+
+/**
+ * 包提供的 Kit → 它属于哪个包（DESIGN §28.52 的 kit 那一半：`kits/<id>.js` 的逐单位回调要归到那个包的账上）。
+ *
+ * 为什么用 `WeakMap` 而不是给 Kit 加一个字段：`Kit` 是**包自己返回的对象**，往上加字段就是改包的返回值（会漏进
+ * `kitShape` 之类的比对，也可能落在包自己冻结的对象上）。为什么不在这里按 `def` 重算一次：那会成为第二份「哪个
+ * kit 胜出」的实现（`kitKeyOf` 的键顺序 + mode 分支 + 命中后返回假值时的回退），两份写法迟早漂。这张表只按
+ * **对象身份**记：写它的地方就是选中那个 kit 的那一行，读它的地方是 `_setupUnit`（包的回调真正注册的地方）。
+ */
+const KIT_PACK = new WeakMap();
+
+/** 这个 Kit 由哪个包提供（`null` = 引擎自己的 / 官方内容 —— 于是它一行预算都不记）。 @param {any} kit */
+export function kitPackOf(kit) { return (kit && KIT_PACK.get(kit)) || null; }
+
+/** `Battle opts.kitOwners` / `tokenKitOwners` 里这个 kit id 的包（表缺席、或这个 id 不在表里 ⇒ `null`）。 */
+function packOfKit(battle, key, id) {
+  const map = battle && battle.opts ? battle.opts[key] : null;
+  if (!map || typeof map.get !== 'function' || id == null) return null;
+  const owner = map.get(id);
+  return typeof owner === 'string' && owner ? owner : null;
 }
 
 /** The generic kit of an operator def; a stand-in's / 自选 piece's also carries the talents generic.js can apply exactly. */
@@ -114,7 +146,10 @@ export function setupUnitKit(battle, unit, mode = 'full') {
       : undefined;
     const tk = packTok ?? (mode === 'full' ? (tokens.kits?.[def.id] ?? tokens.default?.[def.id]) : null);
     if (typeof tk === 'function') {
-      try { const k = tk(bb, raw, def); if (k) return k; } catch (e) { battle._handlerError(`tokenKit:${def.id}`, unit, e); }
+      // 这个 kit 是包给的 ⇒ 记下它的包（`_setupUnit` 应用它时把它的逐单位回调记到那本账上）。内建那一半命中时
+      // 归属是 null（引擎自己的内容），与从前逐字节相同。
+      const owner = packTok ? packOfKit(battle, 'tokenKitOwners', def.id) : null;
+      try { const k = tk(bb, raw, def); if (k) { if (owner) KIT_PACK.set(k, owner); return k; } } catch (e) { battle._handlerError(`tokenKit:${def.id}`, unit, e); }
     }
     return def.skill ? genericKit(bb, raw, def) : {};
   }
@@ -123,9 +158,13 @@ export function setupUnitKit(battle, unit, mode = 'full') {
   if (mode === 'full' || injected) {
     const f = kitOf(def, injected) ?? (mode === 'full' ? kitOf(def, KITS) : undefined);
     if (typeof f === 'function') {
+      // 归属：**包给的那一份**才有 owner（键顺序与 `kitOf` 是同一份 `kitKeyOf`，命中的是同一个键）；`f` 来自内建
+      // 注册表时它是 null。记在返回的那个对象上（`selectSkillSpec` 可能返回一个新对象），`_setupUnit` 读它。
+      const key = injected ? kitKeyOf(def, injected) : null;
+      const owner = key === null ? null : packOfKit(battle, 'kitOwners', key);
       try {
         const k = f(bb, raw, def);
-        if (k) return selectSkillSpec(k, bb, raw, def);
+        if (k) { const out = selectSkillSpec(k, bb, raw, def); if (owner) KIT_PACK.set(out, owner); return out; }
       } catch (e) {
         battle._handlerError(`kit:${isOtherBody(def) ? def.charId : def.baseId}`, unit, e);
       }
@@ -283,6 +322,15 @@ export function installContent(battle, { mode = 'full', extra = null, installers
     const packId = m.id || '?';
     if (Number.isInteger(m.callBudget)) battle._declarePackBudget(packId, m.callBudget);
     try { battle._withPackScope(packId, () => m.install(battle)); } catch (e) { battle._handlerError(`content:pack:${packId}`, null, e); }
+  }
+  // kit 那一半的账（DESIGN §28.52）：上面那个循环只给**声明了 `server.battle`** 的包开账，而一个包的另一半战斗行为
+  // 住在 `kits/<id>.js` —— 只带 `kits/` 的包过去根本建不了账，它的逐单位回调（每 tick 一次、每次又挂一批计时器）
+  // 正是这一格要挡的那类回调。装载器（`server/workshop.js loadWorkshopKits`）已经把「包 id → 生效 max」算好一次
+  // （`effectivePackCallBudget` 是唯一一份「包 → 生效 max」），这里只开账。同一个包两处都开时写的是同一个数字，
+  // 而 `_declarePackBudget` 是幂等的；没有那张表时这一行一个字节都不多跑（干净安装 / 没包声明预算）。
+  const kitBudgets = battle.opts && battle.opts.kitBudgets;
+  if (kitBudgets && typeof kitBudgets.forEach === 'function') {
+    kitBudgets.forEach((max, packId) => { battle._declarePackBudget(packId, max); });
   }
   for (const m of extra || []) {
     try { (typeof m === 'function' ? m : m.install)?.(battle); } catch (e) { battle._handlerError('content:extra', null, e); }

@@ -143,9 +143,10 @@ export const SIM_DATA_FILES = Object.freeze(['chess', 'enemies', 'tokens', 'stag
  * This function is the reason the behaviour layer cannot be server-only: the server re-computes a client's battle result
  * with the SAME kits, so a browser that silently fell back to the generic kit would produce a result the server rejects.
  * A module that fails to load is reported and skipped rather than hidden.
- * @param {{ workshopKits?: Array<{ id: string, url: string, kind?: string }> }|null} spec
- * @returns {Promise<{ kits: Record<string, Function>, tokenKits: Record<string, Function> }>} `{}`-valued maps when the
- *   field needs no workshop kits (both maps are always objects, so a caller never has to test for undefined)
+ * @param {{ workshopKits?: Array<{ id: string, url: string, kind?: string, pack?: string, callBudget?: number }> }|null} spec
+ * @returns {Promise<{ kits: Record<string, Function>, tokenKits: Record<string, Function>, kitOwners: Map<string, string>,
+ *   tokenKitOwners: Map<string, string>, kitBudgets: Map<string, number> }>} `{}`-valued maps when the field needs no
+ *   workshop kits (both maps are always objects, so a caller never has to test for undefined)
  */
 export async function loadSpecKits(spec) {
   const list = Array.isArray(spec && spec.workshopKits) ? spec.workshopKits : [];
@@ -153,7 +154,21 @@ export async function loadSpecKits(spec) {
   const kits = {};
   /** @type {Record<string, Function>} */
   const tokenKits = {};
-  if (!list.length) return { kits, tokenKits };
+  // kit 的**归属**与**预算**（DESIGN §28.52 的 kit 那一半）：`pack` 与 `callBudget` 本来就在这份清单上（服务端装载期
+  // 写好一次），这里只把它们**读**出来交给战斗 —— **不在这里算一次**：两端读的必须是同一个数字，各算一次就是两端
+  // 会漂的两个答案。归属与预算不取决于 import 成不成功，所以这两个表在下面的循环之前就建好。
+  /** @type {Map<string, string>} */
+  const kitOwners = new Map();
+  /** @type {Map<string, string>} */
+  const tokenKitOwners = new Map();
+  /** @type {Map<string, number>} */
+  const kitBudgets = new Map();
+  for (const m of list) {
+    if (!m || typeof m.id !== 'string' || typeof m.pack !== 'string' || !m.pack) continue;
+    (m.kind === 'token' ? tokenKitOwners : kitOwners).set(m.id, m.pack);
+    if (Number.isInteger(m.callBudget) && !kitBudgets.has(m.pack)) kitBudgets.set(m.pack, m.callBudget);
+  }
+  if (!list.length) return { kits, tokenKits, kitOwners, tokenKitOwners, kitBudgets };
   for (const m of list) {
     // only a same-origin, root-relative URL is ever imported (the server built this list itself)
     if (!m || typeof m.id !== 'string' || typeof m.url !== 'string' || !m.url.startsWith('/')) continue;
@@ -166,7 +181,7 @@ export async function loadSpecKits(spec) {
       console.warn('[runner] workshop kit failed to load', m.id, err);
     }
   }
-  return { kits, tokenKits };
+  return { kits, tokenKits, kitOwners, tokenKitOwners, kitBudgets };
 }
 
 /**
@@ -814,10 +829,19 @@ export function createBattleRunner(deps) {
       try {
         // 工坊行为层: rebuild the very kits the server verifies this field with (see loadSpecKits). Both key spaces —
         // operators (`kits`) and summons (`tokenKits`) — from that ONE module list; an empty map changes nothing.
-        const { kits, tokenKits } = await loadSpecKits(e.spec);
+        // 同一份清单还带着每个 kit 的**归属包**与那个包的**生效预算**（DESIGN §28.52 的 kit 那一半）：它们与 kits
+        // 一起交给战斗，kit 的逐单位回调因此与服务端落在**同一本账**、**同一个数字**上。空表不写这几个键
+        // （KEY DISCIPLINE：没有包时 Battle opts 的形状与从前逐字节相同）。
+        const { kits, tokenKits, kitOwners, tokenKitOwners, kitBudgets } = await loadSpecKits(e.spec);
         // 包声明的战斗逻辑（`server.battle`, DESIGN §28.17）：同一场战斗、同一段代码（见 loadSpecBattleInstallers）
         const battleInstallers = await loadSpecBattleInstallers(e.spec);
-        battle = sim.spec.createBattleFromSpec(e.spec, sim.ds, { logger, kits, tokenKits, ...(battleInstallers ? { battleInstallers } : {}) });
+        battle = sim.spec.createBattleFromSpec(e.spec, sim.ds, {
+          logger, kits, tokenKits,
+          ...(kitOwners.size ? { kitOwners } : {}),
+          ...(tokenKitOwners.size ? { tokenKitOwners } : {}),
+          ...(kitBudgets.size ? { kitBudgets } : {}),
+          ...(battleInstallers ? { battleInstallers } : {}),
+        });
       } catch (err) {
         console.warn('[runner] battle construction failed', err);
         recordError('runner', err, 'battle construction failed');

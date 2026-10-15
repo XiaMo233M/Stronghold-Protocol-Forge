@@ -346,6 +346,17 @@ export class Match {
      * @type {Record<string, Function>|null}
      */
     this.workshopTokenKits = opts.workshopTokenKits && typeof opts.workshopTokenKits === 'object' ? opts.workshopTokenKits : null;
+    /**
+     * kit 的**归属**与**预算**（DESIGN §28.52 的 kit 那一半）：`kits` / `tokenKits` 只是 `id → 函数`，不带所属包，而
+     * 「这个 kit 的逐单位回调归到哪本账上」正是靠这两张表。两张 owner 表与一张「包 id → 生效 max」表都在**装载期**
+     * 由 `server/workshop.js loadWorkshopKits` 产出一次；干净安装时它们是 `null` ⇒ 战斗拿不到这几个键，行为逐字节同前。
+     * @type {Map<string, string>|null}
+     */
+    this.workshopKitOwners = opts.workshopKitOwners instanceof Map ? opts.workshopKitOwners : null;
+    /** @type {Map<string, string>|null} 召唤物那一半（第二个键空间，与 `tokenKits` 逐字对称）。 */
+    this.workshopTokenKitOwners = opts.workshopTokenKitOwners instanceof Map ? opts.workshopTokenKitOwners : null;
+    /** @type {Map<string, number>|null} 包 id → 生效的每局调用上限（只装带 kit 的包）。 */
+    this.workshopKitBudgets = opts.workshopKitBudgets instanceof Map ? opts.workshopKitBudgets : null;
     /** @type {Array<{ id: string, pack: string, hash?: string, url: string }>} */
     this.workshopKitModules = Array.isArray(opts.workshopKitModules) ? opts.workshopKitModules : [];
     /**

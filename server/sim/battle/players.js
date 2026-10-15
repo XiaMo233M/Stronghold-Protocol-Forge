@@ -11,7 +11,7 @@ import { SkillRuntime } from '../skills.js';
 import { resolveProfile } from '../professions.js';
 import { normalizeToken } from '../simdata.js';
 import { isPotential, isCultivate } from '../../../shared/potential.js';
-import { setupUnitKit } from '../content/index.js';
+import { setupUnitKit, kitPackOf } from '../content/index.js';
 import { installTraitAttackSpeed } from '../content/traitMods.js';
 import { clone } from './util.js';
 
@@ -223,6 +223,12 @@ export class BattlePlayers {
       try { kit = setupUnitKit(this, u, this.contentMode); } catch (e) { this._internalError('setupUnitKit', e); kit = null; }
     }
     u.kit = kit || {};
+    // kit 的**归属包**（DESIGN §28.52 的 kit 那一半）：`kits/<id>.js` 的逐单位回调真正注册的地方就是下面两行
+    // （`talents[].install` / `kit.install`），所以包的标记要在**这里**盖 —— 只把 `setupUnitKit` 里那次构造调用
+    // 包进作用域是空转（包通常在 `install` 里挂钩子）。`kitPackOf` 是装载期那张归属表的唯一读者；`null` = 引擎
+    // 自己的内容（或调用方直接递进来的 kit，例如包在回调里 `_setupUnit(t, kit)` 生成的召唤物 —— 那时 `_safe` 的
+    // 第四个参数是 null，作用域会落到**当前**那个包上，正是我们要的）。
+    const pack = kitPackOf(u.kit);
     u.profile = resolveProfile(u.def, u.kit.trait || null);
     if (u.def.untargetable) this.addBuff(u, { key: 'trait:untargetable', flags: { untargetable: true }, persist: true, allowDead: true });
     // abnormal effects a summon holds (tokens.json `abnormal`, PRTS; user playtest #6 item 18): 禁疗 — no heal reaches it;
@@ -241,9 +247,9 @@ export class BattlePlayers {
       this._safe(() => u.profile.install(this, u), 'profile.install', u);
     }
     for (const t of u.kit.talents || []) {
-      if (t && typeof t.install === 'function') this._safe(() => t.install(this, u), 'talent.install', u);
+      if (t && typeof t.install === 'function') this._safe(() => t.install(this, u), 'talent.install', u, pack);
     }
-    if (typeof u.kit.install === 'function') this._safe(() => u.kit.install(this, u), 'kit.install', u);
+    if (typeof u.kit.install === 'function') this._safe(() => u.kit.install(this, u), 'kit.install', u, pack);
     // trait lines the ENGINE owns for every operator (content/traitMods.js: the module attack-speed riders whose
     // condition is a pure function of the field — 「攻击范围内存在N名及以上敌人时攻击速度+X」). Runs after kit.install:
     // a kit that implements its own line for this trait is never double-counted — traitMods.js refuses every condition

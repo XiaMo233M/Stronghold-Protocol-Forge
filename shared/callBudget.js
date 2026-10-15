@@ -65,6 +65,21 @@ export const PACK_CALL_BUDGET_DEFAULT = 8000;
 /** 这一格里的键：闭集。加一格要同时进 `shared/modSurface.js` 与 `docs/MOD-SURFACE.md`（并且不抬 `MOD_API_VERSION`）。 */
 export const CALL_BUDGET_FIELDS = Object.freeze(['max']);
 
+/**
+ * 一个包**生效**的每局调用上限（`pack.json.callBudget.max`），没声明就是 `null`。
+ *
+ * **只有这一份**：装载期读它的地方有两处 —— `server/battlePack.js`（`server.battle` 模块那一半）与
+ * `server/workshop.js loadWorkshopKits`（`kits/` 那一半）—— 「包 → 生效 max」这个问题在两条装载线上必须只有一个
+ * 答案，两处各写一次比较就是两处会漂的判断。传进来的是 `normalizePackManifest` 之后那份清单（形状层已经判过：
+ * 只有 `{ max }`、只许收紧），所以这里只做「声明过没有」这一步。
+ * @param {{ callBudget?: { max?: number } }|null|undefined} pack
+ * @returns {number|null}
+ */
+export function effectivePackCallBudget(pack) {
+  const decl = pack && pack.callBudget;
+  return decl && Number.isInteger(decl.max) ? decl.max : null;
+}
+
 /** 这一格在 `pack.json` 里的键名（`PACK_FIELDS` 与 `shared/modSurface.js` 的锚点都用它）。 */
 export const CALL_BUDGET_FIELD = 'callBudget';
 
@@ -158,6 +173,9 @@ export function callBudgetPackId(owner) {
 export function callBudgetExhaustedReason(packId, max) {
   return `pack "${packId}" exhausted its per-match call budget of ${max} call(s) (pack.json.callBudget.max): `
     + 'its hooks and timers were rolled back and the buffs it marked were removed — the match continues without this pack. '
-    + `Raise the cap by tightening nothing (the engine default is ${PACK_CALL_BUDGET_DEFAULT}); lower it in pack.json.callBudget, `
-    + 'and look for a callback that runs every tick or one that schedules more work inside itself';
+    // 这一句过去写成「Raise the cap by tightening nothing …」，与同一份文件上面那条口径（只许收紧；`max` 高于缺省就是
+    // `CALL_BUDGET_TOO_HIGH`）自相矛盾：照着它去改的作者会撞一个「不许抬高」的拒绝。**名不副实比不说更坏** —— 所以
+    // 文案只说这条路怎么走：要更多就不写 `callBudget`，留在 module 档。
+    + `The cap can only be lowered, never raised (the engine default is ${PACK_CALL_BUDGET_DEFAULT}): a pack that needs more must drop "callBudget" and stay in the module tier. `
+    + 'Look for a callback that runs every tick or one that schedules more work inside itself';
 }

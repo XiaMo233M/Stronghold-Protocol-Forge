@@ -35,6 +35,7 @@ import { noticesIssues } from './notices.js';
 // 启用声明（DESIGN §28.50）：**装好 ≠ 生效**。判据只有一份在 `shared/enabled.js`（`packEnabled`）—— 这里只负责
 // 把它的裁决接进装载器那份 `errors` 报告，不在这里重判一遍布尔。
 import { packEnabled } from '../shared/enabled.js';
+import { effectivePackCallBudget } from '../shared/callBudget.js';
 // 包的**文件清单**（DESIGN §28.2, 业主裁决 B）：身份哈希与客户端下载清单读的是同一份 `listPackFiles` —— 两份
 // 清单漂移就等于这个特性没做，所以枚举器与那条保留的合成路径名一起住在 server/packFiles.js。
 import { ASSETS_DIGEST_PATH, listPackFiles } from './packFiles.js';
@@ -1199,7 +1200,7 @@ function relativeModuleUrl(baseDir, specifier) {
  *   target. Pass BOTH and a kit for an id nothing carries is reported as dead code; pass only one and the other space's
  *   verdict is left to the ownership rule, because a single table cannot speak for the space it does not know. A caller
  *   that passes NEITHER still gets the ownership rule, exactly as before.
- * @returns {{ kits: Record<string, Function>, tokenKits: Record<string, Function>, modules: Array<{ id: string, pack: string, url: string, kind?: 'token' }>, owners: Map<string, string>, tokenOwners: Map<string, string>, errors: Array<{ pack: string, id: string, code: string, definedBy?: string, reason: string }> }}
+ * @returns {{ kits: Record<string, Function>, tokenKits: Record<string, Function>, modules: Array<{ id: string, pack: string, url: string, kind?: 'token', callBudget?: number }>, owners: Map<string, string>, tokenOwners: Map<string, string>, budgets: Map<string, number>, errors: Array<{ pack: string, id: string, code: string, definedBy?: string, reason: string }> }}
  */
 export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/workshop-kits', knownIds = null, knownTokenIds = null } = {}) {
   /** @type {Record<string, Function>} */
@@ -1212,6 +1213,9 @@ export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/worksho
   const errors = [];
   /** kit id → the pack that loaded it, so a collision can name the holder instead of "another pack" (DESIGN §28.3). */
   const kitOwner = new Map();
+  /** 包 id → **生效**的每局调用上限（`pack.json.callBudget.max`，DESIGN §28.52）：只装**带 kit 的**包。
+   *  @type {Map<string, number>} */
+  const budgets = new Map();
   /** token kit id → the pack that loaded it; the two spaces arbitrate **independently** (a token id is never an operator kit). */
   const tokenKitOwner = new Map();
   // 两个键空间是**分开裁决**的：`kits/<id>.js` 里的 id 落在「干员」（`def.charId` / `def.baseId`）或「召唤物」
@@ -1232,6 +1236,11 @@ export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/worksho
   for (const pack of ((loaded && loaded.packs) || []).slice().sort(byPackId)) {
     const kitDir = path.join(pack.dir, 'kits');
     if (!fs.existsSync(kitDir)) continue;
+    // 这个包的**生效调用预算**（`pack.json.callBudget`，DESIGN §28.52）的 kit 那一半：只带 `kits/`、没有
+    // `server.battle` 的包过去建不了账（开账只发生在 installer 那一趟），它的逐单位回调因此不归账 —— 这一行把
+    // 那半补上。「包 → 生效 max」只有一份实现（`effectivePackCallBudget`），`server/battlePack.js` 读同一个符号。
+    const budget = effectivePackCallBudget(pack);
+    if (budget !== null && !budgets.has(pack.id)) budgets.set(pack.id, budget);
     /** Chess ids this pack itself contributes, and the official ids it declared it may replace. */
     const ownChess = new Set(Object.keys((pack.files && pack.files.chess) || {}));
     // **The other two ways a pack owns a kit target** (the same two the key space above names):
@@ -1336,7 +1345,11 @@ export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/worksho
         // the browser is supposed to be served, not just where to fetch them from. `kind: 'token'` marks the summon half
         // for the SECOND loader (`public/js/battle/runner.js loadSpecKits` rebuilds both maps from this one list); an
         // operator kit keeps the historical shape with no `kind`, so every existing reader of `modules` is untouched.
-        modules.push({ id, pack: pack.id, hash: pack.hash, url: `${baseUrl}/${pack.id}/${name}?v=${v}`, ...(space === 'token' ? { kind: 'token' } : {}) });
+        // 调用预算（`pack.json.callBudget`, DESIGN §28.52）的 **kit 那一半**：一个包的另一半战斗行为住在 `kits/`，
+        // 它的 `install(battle, unit)` / `talents[].install` 是「每 tick 触发一次」最自然的落点，所以生效 max 必须
+        // 随**这一份模块清单**一起交出去 —— 服务端按 `budgets` 开账，浏览器按同一份清单上的同一个数字开账
+        // （`spec.workshopKits` → `loadSpecKits`）。没声明 ⇒ 这个键不长（KEY DISCIPLINE，与 `server.battle` 那份逐字同形）。
+        modules.push({ id, pack: pack.id, hash: pack.hash, url: `${baseUrl}/${pack.id}/${name}?v=${v}`, ...(space === 'token' ? { kind: 'token' } : {}), ...(budget === null ? {} : { callBudget: budget }) });
       } catch (e) {
         errors.push({ pack: pack.id, id, code: 'KIT_IMPORT_FAILED', reason: `import failed: ${String(e && e.message ? e.message : e)}` });
       }
@@ -1346,7 +1359,9 @@ export async function loadWorkshopKits(loaded, { log = null, baseUrl = '/worksho
   // `owners`（kit id → 包 id）随结果一起交出去：**按房间物化**（W-B，DESIGN §28.16）要知道某个 kit 属于哪个包，
   // 才能给一个只声明了子集的房间只带它那几个包的 kit。没有它，唯一的选择是把进程级那一份整份发下去 ——
   // 那正是 W-B 要修的事。token 那一半同理（`tokenOwners`）：两半各自按包裁剪，谁也不能靠别人的声明混进来。
-  return { kits, tokenKits, modules, owners: kitOwner, tokenOwners: tokenKitOwner, errors };
+  // `budgets`（包 id → 生效 max）与 `owners` 同一个理由、同一条纪律：kit 的逐单位回调要归账，战斗层就得知道
+  // 「这个 kit 属于哪个包、那个包的预算多少」；两件事都在**装载期**决定一次，房间里不再探。
+  return { kits, tokenKits, modules, owners: kitOwner, tokenOwners: tokenKitOwner, budgets, errors };
 }
 
 /**

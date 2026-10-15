@@ -1739,6 +1739,13 @@ export class Lobby {  /**
         // 同一份模块清单重建。没有包声明 summon kit 时它是 `{}`，`Battle opts.tokenKits` 因此是空对象、什么都不做
         //（`content/index.js` 只在命中时用它），所以这条线的存在不改变任何一场无包对局。
         workshopTokenKits: assets ? assets.tokenKits : (this.workshop && this.workshop.tokenKits ? this.workshop.tokenKits : null),
+        // kit 的**归属**与**预算**（DESIGN §28.52 的 kit 那一半）：kit 函数表本身不带所属包，而「逐单位回调归到哪本
+        // 账上」正是靠这两张表 —— 与 `workshopKits` 同一条纪律：只在真的装了包时才有值，没包时 Match 拿不到这个键。
+        // 两张 owner 表是**进程级**的（kit id → 包 id 与房间声明哪些包无关）；预算表同理，多带的那些包这一局没有
+        // 任何回调，账是空的、一行都不多跑。
+        ...(this.workshop && this.workshop.kitOwners ? { workshopKitOwners: this.workshop.kitOwners } : {}),
+        ...(this.workshop && this.workshop.tokenKitOwners ? { workshopTokenKitOwners: this.workshop.tokenKitOwners } : {}),
+        ...(this.workshop && this.workshop.kitBudgets ? { workshopKitBudgets: this.workshop.kitBudgets } : {}),
         // …and the identity of that content, which every BattleSpec of this match carries (DESIGN §28.2). The room's own
         // set when it declared one — that IS what this match runs — else the process set, byte for byte as before.
         mods: room.modSet || this.modSet,

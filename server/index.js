@@ -366,7 +366,7 @@ export async function startServer(opts = {}) {
       accounts,
       records,
       ...(matchWrappers.length ? { MatchClass } : {}),
-      workshop: { kits: workshopKits.kits, tokenKits: workshopKits.tokenKits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme, meta: metaModules, roomAssets, battle: battleModules, battleInstallers, roomHooks: roomInstallers, transport: transport.transport, serverChannels: serverChannelMap },
+      workshop: { kits: workshopKits.kits, tokenKits: workshopKits.tokenKits, modules: workshopKits.modules, kitOwners: workshopKits.owners, tokenKitOwners: workshopKits.tokenOwners, kitBudgets: workshopKits.budgets, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme, meta: metaModules, roomAssets, battle: battleModules, battleInstallers, roomHooks: roomInstallers, transport: transport.transport, serverChannels: serverChannelMap },
     },
     { data, log },
   );
