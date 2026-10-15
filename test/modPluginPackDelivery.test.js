@@ -300,7 +300,7 @@ describe('交付包：形状层与装载期的三处读者一致', () => {
 });
 
 describe('交付包：C 层注册点真的把这些面板挂起来', () => {
-  test('九个宿主都挂上，模块被真的 import，wraps 注册成链，样式注入一次', async () => {
+  test('这个交付包声明的九个面板都挂上，模块被真的 import，wraps 注册成链，样式注入一次', async () => {
     if (!HAS_PACK) return skip();
     const { panels, files } = loadOnce();
     const doc = makeDocument();

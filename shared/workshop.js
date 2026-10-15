@@ -394,7 +394,7 @@ export const CLIENT_PANEL_SLOTS = Object.freeze([
  */
 export const CLIENT_PANEL_REPEATABLE = Object.freeze(['screen.game.shopCard']);
 /**
- * 引擎**具名组件**的闭枚举（`client.panels[].wraps[].component`，DESIGN §28.19）。九个挂载点说的是「插进哪个
+ * 引擎**具名组件**的闭枚举（`client.panels[].wraps[].component`，DESIGN §28.19）。十个挂载点说的是「插进哪个
  * 位置」，这一张说的是「**哪个组件本身**被改写」—— 一个槽位永远表达不了「这个界面现在长得不一样了」。
  *
  * 名字与 `CLIENT_PANEL_SLOTS` 是**两个**命名空间（`game.bondStrip` vs `screen.game.bondStrip`）：前者是组件，

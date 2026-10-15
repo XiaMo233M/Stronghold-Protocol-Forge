@@ -86,9 +86,11 @@ npm run ci
 每个 id 在 `public/js/**` 里正好**一处** `modComponent('<id>', impl)`。上游改组件名 ⇒ 两边一起改。
 有一条守卫盯着「枚举里的每个 id 在客户端真的有实现」。
 
-### 2.3 宿主与挂载点（九个槽位）
+### 2.3 宿主与挂载点（十个槽位）
 
-`CLIENT_PANEL_SLOTS` 指向的九个宿主容器（`[data-mod-slot]`）。上游改动对局屏结构 ⇒ 核这九个还在不在。
+`CLIENT_PANEL_SLOTS` 指向的十个宿主容器（`[data-mod-slot]`）。上游改动对局屏结构 ⇒ 核这十个还在不在
+（前四个是引擎按需创建的浮层，后六个由组件自己渲染：`screens/game.js`、`ui/bondStrip.js`、`ui/detailPanel.js`、
+`ui/shopBar.js`、`screens/room.js`）。
 **注意**：注入面**刻意**不给 store / 对局对象 / battleRunner（面板可以画错，但不能算错）——
 不要因为上游改了内部结构就顺手把这些开出去。
 
