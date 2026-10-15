@@ -321,7 +321,8 @@ export const MOD_SURFACE = Object.freeze([
       '**必须进内容摘要**（`identifyPack` 的 `canonicalJson(pack)`）；**不声明 ⇒ 归一化清单里不长这个键**（无条件补一个 `{ max: 8000 }` 会让所有已发布包的哈希全变，§28.2）',
       '**不是贡献项**：只带 `callBudget` 的包照旧 `EMPTY_PACK`',
       '**两端确定性**：计数与回滚只有一份实现（`server/sim/battle/hooks.js`，它在 Node 与浏览器里是同一段字节），常量与规则只有一份（`shared/callBudget.js`）；预算这条路径里**不许有端特有分支**',
-      '**探测不进建房路径**：判决在装载期一次（`server/battlePack.js`），`server/lobby.js` 里没有这一格',
+      '**`kits/*.js` 的逐单位回调也归账**：注册点在 `server/sim/battle/players.js` `_setupUnit` 的 `_safe(…, pack)`（不是 `setupUnitKit` 里那次构造调用），归属按**对象身份**记（`WeakMap`），与 `install(battle)` 那一半落进同一本账',
+      '**探测不进建房路径**：判决在装载期一次，`server/battlePack.js`（`server.battle` 那一半）与 `server/workshop.js loadWorkshopKits`（`kits/` 那一半，只带 `kits/` 的包也建账）读同一个 `effectivePackCallBudget`，浏览器从**同一份模块清单**上读同一个数字（不自己算、不新造 wire 字段）；`server/lobby.js` 里没有这一格',
     ],
     files: [
       'shared/callBudget.js', 'shared/workshop.js', 'shared/modSurface.js', 'server/battlePack.js',

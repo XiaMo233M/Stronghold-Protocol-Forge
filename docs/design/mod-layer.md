@@ -3913,12 +3913,38 @@ count +1 ⇒ **层数自然上去**。这是一条**纯数据**通道：不需�
   然后记一笔 `plugin:<包id>` 的错（进 `battle.errors`，日志一行 `[sim] plugin:<id> …`）。撤 buff 时**不跑
   `onRemove`**：正在拆的就是这个包自己的东西，让它在回滚途中再跑一轮只是给它一次机会。
 
+**`kits/*.js` 的逐单位回调也在同一本账上。** 一个包的战斗行为有两半：`server.battle` 的 `install(battle)`，与
+`kits/<id>.js` 的 `install(battle, unit)` / `talents[].install` —— 后者才是「每 tick 触发一次、每次又挂一批计时器」
+最自然的落点，所以它必须归账。kit 函数表（`Battle opts.kits` / `tokenKits`）本身**不带所属包**，于是**归属**与
+**生效上限**分两张表随 `Battle opts` 走（`kitOwners` / `tokenKitOwners` / `kitBudgets`，只在这一局真的有包时才有
+这几个键）：
+
+* 归属在 `server/sim/content/index.js` `setupUnitKit` **选中那个 kit 的那一行**按**对象身份**记进一张 `WeakMap`
+  （`kitPackOf`）—— 不给 `Kit` 加字段（那是**包自己返回的对象**，加字段就是改包的返回值、也会漏进 `kitShape` 之类的
+  比对），也不在别处按 `def` 重算一遍（那就是第二份「哪个 kit 胜出」：`kitKeyOf` 的键顺序 + mode 分支 + 命中后返回
+  假值时的回退）。键顺序与 `kitOf` 共用同一份 `kitKeyOf`，`kitOf` 的行为逐字不变。
+* **注册点在 `server/sim/battle/players.js` `_setupUnit`**，不在 `setupUnitKit` 里那次**构造**调用：包通常在
+  `install` 里挂钩子，只把构造调用包进作用域是**空转**（通道通了没人用）。那两行把包喂进**已有的**
+  `_safe(fn, label, owner, pack)`（`pack ?? this._packScope`，并在回调期间设 `_packScope`），于是 `talents[].install` /
+  `kit.install` 里挂的 hook / 计时器 / buff 自然盖上 `pack`，与 `install(battle)` 那一半落进同一本账。调用方直接递进来
+  的 kit（包在回调里 `_setupUnit(t, kit)` 生成的召唤物）留 `null`，作用域落到**当前**那个包上 —— 那是我们要的。
+
+**只带 `kits/`、没有 `server.battle` 的包也建账。** 开账不只发生在 installer 那一趟（`server/sim/content/index.js`
+的 `installers` 循环只覆盖声明了 `server.battle` 的包），所以「包 id → 生效 max」还随**同一份 kit 模块清单**交出去：
+`server/workshop.js loadWorkshopKits` 把生效值挂到 kit 模块条目上（`callBudget`，与 `workshopBattle` 那份逐字同形）
+并交出一张 `budgets` 表，服务端按它开账、浏览器那半 `public/js/battle/runner.js loadSpecKits` 从**同一份清单**上读
+**同一个数字**（它不自己算一次），**没有新造 wire 字段**。「包 → 生效 max」只有一份实现
+（`shared/callBudget.js` 的 `effectivePackCallBudget`），两个装载器都读它。同理，spec 的投影必须把这个键带过线：
+`buildBattleSpec` 的 `workshopKits` / `workshopBattle` 两份清单都要写 `callBudget` —— 漏一份，浏览器那半就建不了账
+而服务端复算那半会回滚，两端在**不同**的调用次数上停（`loadSpecBattleInstallers` 读的就是它）。
+
 记账的口径：`max` 是**可用次数**（第 `max` 次仍放行，第 `max + 1` 次不放行并触发回滚）；计数**按插件聚合**
 （hook、`after` / `every` 排的计时器、标了记号的 buff 的 `onTick` / `onExpire` 同一本账）。
 
 **探测不进建房路径。** 判决「这个包用不用得上预算」发生在**装载期一次**：`server/battlePack.js`
-`loadBattleInstallers` 读出 `pack.callBudget.max`，把生效值**同时**挂到 `installers[]`（服务端真函数）与
-`modules[]`（送到浏览器那份 URL 清单）；浏览器那一半 `public/js/battle/runner.js loadSpecBattleInstallers`
+`loadBattleInstallers` 读 `effectivePackCallBudget(pack)`，把生效值**同时**挂到 `installers[]`（服务端真函数）与
+`modules[]`（送到浏览器那份 URL 清单）；`server/workshop.js loadWorkshopKits` 对 `kits/` 那一半做同一件事
+（见上一条）。浏览器那一半 `public/js/battle/runner.js loadSpecBattleInstallers` / `loadSpecKits`
 原样带进 `createBattleFromSpec` —— **两端唯一的差别就是「谁去 import」，预算不在这条差别里**。
 `server/lobby.js`（`room.create` / 房间建立流程）里一个字都没有，判据用源码反射钉死：上游实测过「探测期大厅暂停」。
 为什么不必再探一次：那一刻的声明已经进了包的内容哈希（上面那一条），同 hash ⇒ 同字节 ⇒ 同预算。
@@ -3927,7 +3953,9 @@ count +1 ⇒ **层数自然上去**。这是一条**纯数据**通道：不需�
 （或更小）—— 它就从 module 档进了沙箱档。哪些包进沙箱档由**站的声明**决定，本刀不替站侧决定。
 
 **测试**：`test/callBudget.test.js`（形状与唯一常量、缺省下内容哈希仍是改动前那个字面量、超预算回滚四件套、
-两端同一个数字与同一次调用上回滚且预算路径**无端特有分支**、`server/lobby.js` 里没有探测）。
+两端同一个数字与同一次调用上回滚且预算路径**无端特有分支**、`server/lobby.js` 里没有探测；**kit 那一半**：
+不声明预算时 kit 回调逐字节等于今天（改动前跑出来的基线字面量）、超预算时它的逐单位回调被回滚、`owner` 语义
+一字节不改、只带 `kits/` 的包也建账且浏览器从同一份清单上读到同一个数字、三张表真的被转发进 `Battle opts`）。
 **不需要 `golden:update`**：不声明 `callBudget` 的包归一化清单不长键、`BattleHooks` 的记账对没有账的回调立刻放行，
 所以不装包与不声明预算两条路径的**战果逐字节相同**（实测见交付说明）。
 

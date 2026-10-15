@@ -104,7 +104,7 @@
 
 | id | 声明 | requires | 设计稿 |
 |---|---|---|---|
-| `callBudget` | `pack.json.callBudget = { max? }` | **每局每插件**的调用次数上限（沙箱档的运行时保护，缺省 8000，**只许收紧不许放宽** —— `CALL_BUDGET_TOO_HIGH`）；**不是闸门**（那是 `combat`），也不要求 `combat: true`（它只收紧、不授权）；**必须进内容摘要**、**不声明就不长键**、**不是贡献项**；计数与回滚**只有一份实现**（`server/sim/battle/hooks.js` 两端同一段字节），预算路径里**不许有端特有分支**；判决在**装载期一次**（`server/battlePack.js`），**不进建房路径** | §28.52 |
+| `callBudget` | `pack.json.callBudget = { max? }` | **每局每插件**的调用次数上限（沙箱档的运行时保护，缺省 8000，**只许收紧不许放宽** —— `CALL_BUDGET_TOO_HIGH`）；**不是闸门**（那是 `combat`），也不要求 `combat: true`（它只收紧、不授权）；**必须进内容摘要**、**不声明就不长键**、**不是贡献项**；计数与回滚**只有一份实现**（`server/sim/battle/hooks.js` 两端同一段字节），预算路径里**不许有端特有分支**；`kits/*.js` 的逐单位回调**也归账**（注册点在 `battle/players.js` 的 `_safe(…, pack)`，归属按对象身份记）；判决在**装载期一次**（`server/battlePack.js` 与 `server/workshop.js loadWorkshopKits` 读同一个 `effectivePackCallBudget`，只带 `kits/` 的包也建账；浏览器从同一份模块清单读同一个数字），**不进建房路径** | §28.52 |
 | `mods.catalog` | 客户端 mod 目录 + 房间 `modIds` | 房间声明了集合时只有点名的包参与（W-B）；两端字节要能对齐（W-D） | §28.16 |
 
 ## 加一格表面的清单
