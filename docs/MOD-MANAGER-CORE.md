@@ -174,8 +174,11 @@ CLI/程序接口：`setConsent` / `clearConsent` / `setPin` / `clearPin` / `setP
     （`registerMeta(registry)` / `install(battle)`）—— 不新造语义，于是官方插件走进**同一条**装配路径、
     同一份逐包 try/catch 隔离、**同一份房间摘要闸门与受限注册表白名单**
     （`test/modOfficialCombat.test.js` 用**真的** `buildRoomRegistry` 验过：声明过的键注册成功、没声明的键被点名拒并逐包回滚）；
-  * **未接线的一小格**：Forge 档`battleModules` 会把战斗模块的 URL 送到浏览器（客户端跑同一段代码）；
-    官方插件**还没有**这条投递路径 ⇒ 官方战斗模块目前只服务端生效。这一格要等官方资源投递面那条线。
+  * **投递面已补齐**：`officialBattleModules()` 产出与 Forge 档 `battleModules` 同形的条目，URL 走**同一条**约定
+    `/workshop-battle/<包id>/<入口>`（常量取自 `server/http/static.js`，两边不可能各写一套），只是根目录是 `plugins/`；
+    `server/index.js` 把它与 Forge 那张表并成**一张**「URL → 磁盘文件」表（键冲突**不静默覆盖**，点名告警）。
+    客户端因此能加载**同一段代码**，与服务端复算一致 —— `test/modOfficialCombat.test.js` 直验投递表指到真实文件、
+    且越界路径解不出来。
 * **协议适配层**（Phase 5）已落地**骨架**：`server/mod-manager/eventRouter.js`（进站消息分流成
   `room.mod.handshake` / `resource.admission` / `sdk.intercept` / `pack.msg` / `plain`，按固定顺序派发、
   钩子抛异常只记日志不吞后面的）+ `server/mod-manager/admission.js`（集合摘要准入 / 单包准入 / 房间子集）。

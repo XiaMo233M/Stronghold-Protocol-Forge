@@ -9,7 +9,8 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { loadOfficialPlugins, OFFICIAL_PLUGIN_MANIFEST } from '../server/mod-manager/officialLoader.js';
-import { loadOfficialModules, officialMetaModules, officialBattleInstallers, officialPluginSourceIssues } from '../server/mod-manager/officialHost.js';
+import { loadOfficialModules, officialMetaModules, officialBattleInstallers, officialBattleModules, officialPluginSourceIssues } from '../server/mod-manager/officialHost.js';
+import { workshopBattleFilesFor } from '../server/http/workshop.js';
 import { buildRoomRegistry } from '../server/match/metaPack.js';
 import { MetaRegistry } from '../server/match/effectsMeta.js';
 import { SDK_OFFICIAL } from '../shared/sdk/sdkConstants.js';
@@ -126,10 +127,35 @@ test('battle 桥：重放成 install(battle)，与 Forge 的 installers 同形',
   } finally { fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
 });
 
-test('没有 meta/battle 的插件 ⇒ 两个桥都给空数组（展开后逐元素相同）', () => {
+test('battle 投递面：URL 走同一条约定，且**真表**指向插件目录里的那个文件', async () => {
+  const root = fs.mkdtempSync(path.join(tmpdir(), 'sp-combat6-'));
+  try {
+    makePlugin(root, 'b', { apis: ['battle'], combat: true, entry: 'plugin.mjs' },
+      `export function registerPlugin(host) { host.battle.install(() => {}); }`);
+    const { modules } = await loadOfficialModules(loadOfficialPlugins(root, { log: quiet }).plugins, { log: quiet });
+    const list = officialBattleModules(modules);
+    assert.equal(list.length, 1);
+    assert.match(list[0].url, /^\/workshop-battle\/b\/plugin\.mjs\?v=/);
+    assert.equal(list[0].pack, 'b');
+
+    // 投递表：与 Forge 档同一张表，只是根目录换成插件根
+    const files = workshopBattleFilesFor(list, root);
+    const url = list[0].url.split('?')[0];
+    assert.equal(files.size, 1);
+    assert.equal(files.get(url), path.join(root, 'b', 'plugin.mjs'));
+    assert.ok(fs.existsSync(files.get(url)), '投递表指的必须是一个真实存在的文件');
+    // 越界解不出来（同一条纪律：只在包里解）
+    assert.equal(workshopBattleFilesFor([{ id: 'b', pack: 'b', url: '/workshop-battle/b/..%2F..%2Fsecret.mjs' }], root).size, 0);
+  } finally { fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+});
+
+test('没有 meta/battle 的插件 ⇒ 三个桥都给空数组（展开后逐元素相同）', () => {
   assert.deepEqual(officialMetaModules([]), []);
   assert.deepEqual(officialBattleInstallers(null), []);
-  const plain = [{ pack: 'p', hash: 'h', mounted: { meta: [], battle: [] } }];
+  assert.deepEqual(officialBattleModules(null), []);
+  assert.deepEqual(officialBattleModules([]), []);
+  const plain = [{ pack: 'p', hash: 'h', entry: 'e.mjs', mounted: { meta: [], battle: [] } }];
   assert.deepEqual(officialMetaModules(plain), []);
   assert.deepEqual(officialBattleInstallers(plain), []);
+  assert.deepEqual(officialBattleModules(plain), [], '没有 battle ⇒ 不进投递表');
 });

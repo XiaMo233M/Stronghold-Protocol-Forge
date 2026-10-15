@@ -20,6 +20,9 @@ import { serverModuleSourceIssues, checkHealthzFields } from '../modModules.js';
 import { ROOM_HOOK_EVENTS } from '../roomPack.js';
 // 确定性那条线（`meta` / `battle`）：与 Forge 档 `server.battle` / `server.meta` 用**同一张**禁表、同一个扫描器。
 import { KIT_FORBIDDEN_GLOBALS, stripComments, mentionsIdentifier } from '../../shared/kitAuthoring.js';
+// 战斗模块送浏览器的**同一条 URL 约定**（`/workshop-battle/`）：从 `server/http/static.js` 取常量，
+// 保证「客户端要加载的那条路径」与「服务端会服务的那条路径」不可能各写一套。
+import { WORKSHOP_BATTLE_PREFIX } from '../http/static.js';
 
 /** 需要**运行时面**的能力（其余是纯声明，数据走 manifest）。 */
 export const HOST_CAPABILITIES = Object.freeze(['modules', 'storage', 'health', 'routes', 'metrics', 'lane', 'room', 'meta', 'battle']);
@@ -291,6 +294,30 @@ export function officialBattleInstallers(modules) {
       install(battle) {
         for (const fn of m.mounted.battle) fn(battle);
       },
+    }));
+}
+
+/**
+ * **战斗模块送浏览器**的那一份（Forge 档叫 `battleModules`）：只服务端跑是不够的 —— 客户端必须能加载**同一段代码**，
+ * 否则浏览器算出来的战果与服务端复算的对不上，玩家的成绩会被拒。
+ *
+ * URL 走的是**同一条**约定 `/workshop-battle/<包id>/<入口>`（常量取自 `server/http/static.js`），
+ * 只是根目录不同：Forge 包在 `workshop/`，官方插件在 `plugins/`。调用方把它交给
+ * `workshopBattleFilesFor(modules, pluginsDir)` 就能得到「URL → 磁盘文件」那张表，静态服务那一格**一行不用改**。
+ * 没有声明 `battle` 的插件 ⇒ 空数组。
+ * @param {Array<any>} modules `loadOfficialModules(...)` 的 `modules`
+ */
+export function officialBattleModules(modules) {
+  return (Array.isArray(modules) ? modules : [])
+    .filter((m) => m && typeof m.pack === 'string' && typeof m.entry === 'string' && m.entry
+      && m.mounted && Array.isArray(m.mounted.battle) && m.mounted.battle.length)
+    .slice()
+    .sort((a, b) => (a.pack < b.pack ? -1 : a.pack > b.pack ? 1 : 0))
+    .map((m) => ({
+      id: m.pack,
+      pack: m.pack,
+      hash: m.hash || '',
+      url: `${WORKSHOP_BATTLE_PREFIX}${encodeURIComponent(m.pack)}/${m.entry.split('/').map(encodeURIComponent).join('/')}?v=${encodeURIComponent(m.hash || '')}`,
     }));
 }
 

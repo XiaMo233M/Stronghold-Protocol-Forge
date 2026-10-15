@@ -39,7 +39,7 @@ import { budgetMapFromEnv } from './mod-manager/budget.js';
 import { modPolicyFromEnv } from './mod-manager/policy.js';
 // 官方档（`sp:sdk@1`）的装载器：默认目录 `plugins/` 不存在 ⇒ 下面整块**不生效**（现网逐字节不变）。
 import { loadOfficialPlugins, OFFICIAL_PLUGINS_DIR } from './mod-manager/officialLoader.js';
-import { loadOfficialModules, officialRoomInstallers, officialMetaModules, officialBattleInstallers } from './mod-manager/officialHost.js';
+import { loadOfficialModules, officialRoomInstallers, officialMetaModules, officialBattleInstallers, officialBattleModules } from './mod-manager/officialHost.js';
 import { loadMetaModules } from './match/metaPack.js';
 import { loadBattleInstallers } from './battlePack.js';
 import { loadRoomInstallers } from './roomPack.js';
@@ -230,6 +230,8 @@ export async function startServer(opts = {}) {
   // 由这两个桥重放；没有声明对应能力的插件 ⇒ 空数组，下面的展开与从前逐元素相同。
   const officialMetaLive = officialMetaModules(officialModulesLive);
   const officialBattleLive = officialBattleInstallers(officialModulesLive);
+  // 战斗模块送浏览器（Forge 有 `battleModules`，官方这一格原来缺失）：同一条 URL 约定、不同的根目录。
+  const officialBattleModuleList = officialBattleModules(officialModulesLive);
   for (const w of officialPlan.warnings) log.warn(`[mod-plan] official ${w.id ? `"${w.id}" ` : ''}${w.code}: ${w.reason}`);
   if (official.plugins.length) {
     log.info?.(`[official] ${officialPlan.activated.length} plugin(s) activated / ${officialPlan.excluded.length} excluded; `
@@ -328,6 +330,12 @@ export async function startServer(opts = {}) {
   // 包声明的战斗逻辑模块送到浏览器（`/workshop-battle/<包>/<模块>`）：与 kits 逐字同一条通道 —— 只服务装载器登记过的
   // URL，客户端战斗必须跑同一段代码（否则浏览器算出的战果与服务端复算的对不上）。
   const workshopBattleFiles = workshopBattleFilesFor(battleModules, workshopDir);
+  // 官方插件的战斗模块走**同一张表**（URL 约定相同，只是根目录是 `plugins/`）。键冲突（同一个包 id 两边都有）
+  // 一律**不静默覆盖**：官方那一条被丢掉并点名 —— 一个 URL 指向两份代码是本仓库最恨的那种形状。
+  for (const [url, abs] of workshopBattleFilesFor(officialBattleModuleList, pluginsDir)) {
+    if (workshopBattleFiles.has(url)) { log.warn(`[official] battle module URL "${url}" is already served by a Forge pack — the official plugin's copy is not served (pack ids must not collide across origins)`); continue; }
+    workshopBattleFiles.set(url, abs);
+  }
   // 按房间物化（W-B，DESIGN §28.9）：房间声明的集合要真的决定这一局跑什么。只在**装了包**时建它 ——
   // 干净安装既不需要官方那一份的第二次读取，也没有任何集合会比「进程级那一份」更小。
   const roomAssets = (workshopLoaded.packs || []).length
@@ -431,7 +439,7 @@ export async function startServer(opts = {}) {
       accounts,
       records,
       ...(matchWrappers.length ? { MatchClass } : {}),
-      workshop: { kits: workshopKits.kits, tokenKits: workshopKits.tokenKits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme, meta: [...metaModules, ...officialMetaLive], roomAssets, battle: battleModules, battleInstallers: [...battleInstallers, ...officialBattleLive], roomHooks: roomInstallers, transport: transport.transport, serverChannels: serverChannelMap, officialModules: officialModulesLive },
+      workshop: { kits: workshopKits.kits, tokenKits: workshopKits.tokenKits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme, meta: [...metaModules, ...officialMetaLive], roomAssets, battle: [...battleModules, ...officialBattleModuleList], battleInstallers: [...battleInstallers, ...officialBattleLive], roomHooks: roomInstallers, transport: transport.transport, serverChannels: serverChannelMap, officialModules: officialModulesLive },
     },
     { data, log },
   );
