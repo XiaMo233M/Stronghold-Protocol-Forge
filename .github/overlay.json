@@ -1,0 +1,53 @@
+{
+  "note": "本文件是「叠加层 / 发行物」的唯一真相，被三个只读检查器共同消费：`.github/manager-only-check.mjs`（判「我方增量是否只含控制面或已登记叠层」）、`.github/game-overlap-check.mjs`（判「增量里的路径，游戏本体是否有同名文件」）、`.github/release-verify.mjs`（判「发行物条目清单是否符合 release 段」）。改任何一格都要同时改这里的对应条目 —— 三处判据读同一份清单，就不会出现「闸门说绿、文档说白」。",
+  "upstream": "sganggs/Stronghold-Protocol",
+  "gameRef": "master",
+  "branches": {
+    "product": "main",
+    "managerOnly": "manager-only"
+  },
+  "branchesNote": "`managerOnly` 是本清单要保护的那条性质：**一条只含 mod 管理器的发行线**（服务端运行时 + Mod API + 装载/登记/校验），不含游戏美术载荷、内容包、样例夹具、`editor/`、`test/`、`.github/`，也不含任何站点/工坊 UI 附加。它由 `tools/package-server.mjs` 的 profile 产出，由下面 `release` 段的条目判据当场核。",
+  "mine": [
+    ".github/overlay.json",
+    ".github/manager-only-check.mjs",
+    ".github/game-overlap-check.mjs",
+    ".github/release-verify.mjs",
+    ".github/workflows/release-manager.yml",
+    "tools/package-server.mjs",
+    "test/package-server-profile.test.js",
+    "docs/DEPLOY-SERVER.md"
+  ],
+  "patches": [],
+  "bodyPaths": [],
+  "bodyPathsNote": "受控例外登记处：每一格是**确实改了、而游戏本体 sganggs 也有同名路径**的文件。必填 file / why / anchors（至少一条，且锚点必须能在我们的树里逐字找到）—— 锚点当场找不到就拦同步。空数组 = 当前与本体零交集，这是更强的那条性质，别为了填东西往里塞。登记之后对外只能说「N 处受控例外，锚点在位」，**不能**再说「零交集」。",
+  "release": {
+    "profile": "tools/package-server.mjs（server profile）",
+    "why": "只发**纯 mod 管理器**：核心服务端运行时 + Mod API。不含游戏素材、内容包、示例夹具，也不含 `editor/`、`test/`、`.github/`。",
+    "excludePrefixes": [
+      "Stronghold-Protocol/public/assets/",
+      "Stronghold-Protocol/public/fonts/",
+      "Stronghold-Protocol/packs/",
+      "Stronghold-Protocol/editor/",
+      "Stronghold-Protocol/test/",
+      "Stronghold-Protocol/.github/",
+      "Stronghold-Protocol/types/",
+      "Stronghold-Protocol/docs/examples/",
+      "Stronghold-Protocol/docs/my-first-pack/"
+    ],
+    "mustContain": [
+      "Stronghold-Protocol/server/index.js",
+      "Stronghold-Protocol/server/modRegistry.js",
+      "Stronghold-Protocol/shared/workshop.js",
+      "Stronghold-Protocol/MANIFEST.json",
+      "Stronghold-Protocol/package.json",
+      "Stronghold-Protocol/docs/DEPLOY-SERVER.md"
+    ],
+    "tag": "modmgr-v<APP_VERSION>-<UPSTREAM_VERSION>（取 shared/constants.js 两个常量；前缀与游戏本体的 v<...> 分开，同 tag 已存在就跳过）",
+    "idempotent": "同 tag 已存在 ⇒ 跳过，不覆盖、不重传资产。"
+  },
+  "gate": {
+    "contract": "判**净新增失败名称集合**（`sync-gate-check.mjs` + `sync-contract-baseline.json`），不比总数；跑了 0 条也算红。这一格是可选的：没有同步流就没有基线可比，两个只读检查器本身不依赖它。",
+    "zip": "打包器的 `zipFolder` 在 zip 分支**不校验产物** ⇒ 发布 job 自己 `unzip -t`（整档 CRC）+ `.github/release-verify.mjs`（条目清单）两关都过才发。",
+    "runner": "构建机上必须 `SP_PACKAGE_SCAN_USER=0`：私密路径扫描会拒绝「产物里出现本机账户名」，而 runner 的账户名 `runner` 是常见词（`tools/package.mjs` 的注释就为这种情况留了这个开关）。真实发布机不要设。"
+  }
+}
