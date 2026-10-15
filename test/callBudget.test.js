@@ -207,8 +207,6 @@ describe('判据②：超预算 ⇒ 回滚', () => {
   });
 
   test('回滚：hook 不再被调、计时器被撤、标记 buff 被撤、记一笔 plugin:<id>', () => {
-    const r = { installers: null };
-    const loaded = loadWorkshop(root, { log: quiet });
     const h = makeBudgetBattle([{ id: 'greedy-pack', callBudget: 3, install: (b) => {
       const bump = () => { b.__testCalls = (b.__testCalls || 0) + 1; };
       // buff 只能挂在**活着的**单位上（`addBuff` 对 `!alive && !allowDead` 直接返回 null），而装机那一刻
