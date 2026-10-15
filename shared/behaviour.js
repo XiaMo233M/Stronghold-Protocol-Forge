@@ -181,6 +181,39 @@ export const BEHAVIOUR_SWITCHES = Object.freeze({
     }),
     actions: (option) => (option === 'allow' ? [{ kind: 'items.allowUnequip', value: true }] : []),
   },
+  /**
+   * 自选池重叠（投稿 `stripDiyOverlaps`，三件都带这个顶层键：`columbia` / `rimbilliton` / `rainbow-squad`）。
+   * **改结果** ⇒ 声明它必须 `combat: true`（三件投稿本来就已经标了）。
+   *
+   * 这一格要解决的那件事，唯一对应物就是 `shared/workshop.js` 的 **`stripPackOperators`**（fanpack G-16）：
+   * 一个包把一名**官方干员**做成自己的棋子，而这位干员**本来就在自选池**（`data/backups.json`
+   * `diy.ownedPool`）里 ⇒ 他**能被上两次**，而且**自选槽绕过棋子自己的盟约**。实测（`apply:false`、
+   * `ownedPool` 规模 72）：`columbia` 4 条、`rimbilliton` 4 条、`rainbow-squad` 0 条。
+   *
+   * `report` = **引擎今天的行为**：`stripPackOperators` 逐条点名那位干员、池子一个字节不动（加载器报告里的
+   * `overlaps` / `strippedPool`）。`strip` = 把这个包**自己**做成棋子的、又在池里的干员**摘出名单** ——
+   * 摘的是 `diy.ownedPool` 这一份名单，不是 `diy.operators` 那条记录（理由见 `stripPackOperators` 的注释）。
+   *
+   * ⚠️ **这一格是全表第一格「按包读取」的开关，它刻意不走 `mergeBehaviourDecls`**（其余四格读的是 `Match` /
+   * `roomMods` 里那一份**合并后**的 decl，包 id 小者赢）。理由是一条硬语义：这一格说的是「**本包**做成的棋子」，
+   * 不是一条全局口径。若照其余四格那样先合并成一个值，那么「A 包声明 `strip`」会连 **B 包**的重叠一起摘掉 ——
+   * 而 B 从没声明过这件事。所以读取点（`stripPackOperators`）逐个包读**它自己**的 `pack.behaviour`
+   * （判据仍然是同一份 `behaviourValue`，闭枚举仍然是这一张表）。后人若在这里「顺手补上 merge」，那是**改错**。
+   */
+  diyPoolOverlap: {
+    label: '自选池重叠（本包做成棋子的干员又在自选池里）',
+    options: Object.freeze(['report', 'strip']),
+    default: 'report',
+    optionLabels: Object.freeze({
+      report: '官方读数：逐条点名记录，池子不变（他能被上两次）',
+      strip: '把本包做成棋子的那几名干员从自选池摘掉',
+    }),
+    effect: Object.freeze({
+      report: 'the reading this engine has always had: stripPackOperators names every operator this pack turns into a chess piece who is also in the 自选 pool (diy.ownedPool) and removes nobody — the pool still offers him, he can be fielded twice, and the 自选 slot bypasses the piece\'s own bond',
+      strip: 'the operators THIS pack turns into chess pieces are removed from diy.ownedPool itself (the same removal a loader run passes { apply: true } for), so the pool offers that many fewer operators and the golden corpus moves with it; the diy.operators record stays, because the UI still reads it by id outside the pool',
+    }),
+    actions: (option) => (option === 'strip' ? [{ kind: 'diy.stripPackOverlaps', value: true }] : []),
+  },
 });
 
 /** 开关名，按声明顺序（界面 / 错误文案按它排）。 */

@@ -335,9 +335,12 @@ export const MOD_SURFACE = Object.freeze([
     layer: 'B',
     // 与 `variants`（§28.39）是**同一形状、不同一张表**：包声明的是「哪一格开关、哪一档」，不是「改成几」、
     // 更不是「改哪个文件」。第 4 刀落这一格时表是**空的**（通道 + 守卫本身）；第 8 刀起表里有实现好的格
-    // （`shopBias` / `prepLoadout` / `morphPairing`），随后 `unequip` 也带着自己的读取点落了进来 —— 今天
-    // **4 格**，每一格都带**引擎侧的读取点** —— 所以这里锚的是**表、顶层键，以及这四格的读取点**：
-    // 表里加一格必须同时进本清单、进 docs/MOD-SURFACE.md，并补一节文档。
+    // （`shopBias` / `prepLoadout` / `morphPairing`），随后 `unequip` 也带着自己的读取点落了进来，
+    // `diyPoolOverlap`（第 5 格）同样 —— 今天 **5 格**，每一格都带**引擎侧的读取点** —— 所以这里锚的是
+    // **表、顶层键，以及这五格的读取点**：表里加一格必须同时进本清单、进 docs/MOD-SURFACE.md，并补一节文档。
+    // ⚠️ `diyPoolOverlap` 的读取点（`stripPackOperators`）是**按包读取**的（逐个包读它自己的 `pack.behaviour`，
+    // **刻意不走** `mergeBehaviourDecls`，理由见 §28.43.1 与 `docs/WORKSHOP.md` §1.23 该格那一段）——
+    // 所以它的锚点只有这一个符号，没有「合并规则」那一半。
     decl: 'pack.json.behaviour = [{ switch, option?, name?, desc? }]',
     anchors: [
       { symbol: 'BEHAVIOUR_SWITCHES', module: 'behaviour' },
@@ -358,6 +361,12 @@ export const MOD_SURFACE = Object.freeze([
       { symbol: 'PLUS_SLOT_POLICY', module: 'morph' },
       { symbol: 'equipSlotsUsed', module: 'morph' },
       { symbol: 'unequipAllowed', module: 'items' },
+      // 第 5 格（`diyPoolOverlap`）：读取点与**维护者总开关**是同一个函数（`{ apply: true }` 是今天的口径，
+      // 包级声明是第二条通道，两条落到同一个动作上）。它在 `shared/workshop.js` —— 而这张锚点表给
+      // `shared/workshop.js` 起的名字是 `schema`（`test/modSurface.test.js` 的 `ANCHOR_MODULES`：
+      // `schema: workshopSchema`），所以这里写 `module: 'schema'`，**不新造 `'workshop'` 键**：
+      // 一个模块只许有一个名字，多一个别名就是第二份真相。
+      { symbol: 'stripPackOperators', module: 'schema' },
     ],
     requires: [
       '闭枚举：开关名与选项名都只许取 `BEHAVIOUR_SWITCHES` 里有的（`BEHAVIOUR_UNKNOWN_SWITCH` / `BEHAVIOUR_UNKNOWN_OPTION`，整包拒，不是忽略）',
@@ -365,10 +374,10 @@ export const MOD_SURFACE = Object.freeze([
       '**不是贡献项**：一个只带 `behaviour` 的包照旧 `EMPTY_PACK`（与 `variants` / `support` / `playtest` 同一条）',
       '必须 `combat: true`（第五条硬闸门 `BEHAVIOUR_NEEDS_COMBAT`）：一格的入场券本就是「它改一条规则」⇒ 必须进房间摘要闸门与 golden 语料',
       '不声明 ⇒ 归一化清单里**不长出这个键**（无条件写 `behaviour: []` 会让所有已发布包的内容哈希改变，§28.2）；**必须**进包身份哈希（`server/workshop.js` 的 `canonicalJson(pack)`），**不进** `modDigest`（只哈希 `[id, hash]`）',
-      '加一格的门槛：**那一格必须已经在引擎里有实现点**（比 `VARIANT_AXES` 的加轴纪律更严）—— 本版那 4 格就是按这条落的，每一格都有一处具名读取点与一个测试文件',
+      '加一格的门槛：**那一格必须已经在引擎里有实现点**（比 `VARIANT_AXES` 的加轴纪律更严）—— 本版那 5 格就是按这条落的，每一格都有一处具名读取点与一个测试文件',
     ],
     files: ['shared/workshop.js', 'shared/behaviour.js', 'shared/morph.js', 'server/index.js', 'server/match/pool.js', 'server/match/player/economy.js', 'server/match/match/platform.js', 'server/match/player/items.js'],
-    tests: ['test/packBehaviour.test.js', 'test/shopBias.test.js', 'test/prepLoadout.test.js', 'test/morphPairing.test.js', 'test/unequip.test.js'],
+    tests: ['test/packBehaviour.test.js', 'test/shopBias.test.js', 'test/prepLoadout.test.js', 'test/morphPairing.test.js', 'test/unequip.test.js', 'test/diyPoolOverlap.test.js'],
     spec: '§28.43',
   },
   {

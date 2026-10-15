@@ -29,8 +29,9 @@
 // 生效与否由 `variantValue` / `mergeVariantDecls`（同一份「包 id 字典序小的赢」）裁决 —— 依然只有一份实现。
 import { parseVariantsDecl, isVariantAxis, VARIANT_AXIS_NAMES, variantValue, mergeVariantDecls } from './variants.js';
 // 行为开关层（DESIGN §28.43）：与口径**同一形状、不同一张表**，判据只有一份在 `shared/behaviour.js`。同样不在这里
-// 重判一遍闭枚举 —— 而且这一层的表今天是**空的**（通道 + 守卫先落，第一格与它的引擎实现点一起落）。
-import { parseBehaviourDecl } from './behaviour.js';
+// 重判一遍闭枚举 —— 这里只调它的解析器（`parseBehaviourDecl`）与**具名读取器**（`behaviourValue`）。那张表今天有
+// 5 格（`shopBias` / `prepLoadout` / `morphPairing` / `unequip` / `diyPoolOverlap`）。
+import { parseBehaviourDecl, behaviourValue } from './behaviour.js';
 // 启用声明（DESIGN §28.50）：装好 ≠ 生效。判据只有一份在 `shared/enabled.js`（`parseEnabledDecl`）。
 import { parseEnabledDecl } from './enabled.js';
 // 特质授予的盟约（`trait.grantsBonds`，DESIGN §28.49）：装载期那一条点名走**同一份判据**（`traitGrantIssues`），
@@ -152,8 +153,9 @@ export const PACK_FIELDS = Object.freeze([
   // 数值覆盖通道 —— 它只能声明轴的闭枚举里有的选项名，值由引擎自己给（`shared/variants.js`）。
   'variants',
   // 行为开关声明（DESIGN §28.43）：这个包要哪一格开关、哪一档。**不是**贡献项，也**不是**一条数值 / 文件覆盖
-  // 通道 —— 它只能声明开关的闭枚举里有的选项名，**动作由引擎构造**（`shared/behaviour.js`）。那张表今天有 4 格
-  // （`shopBias` / `prepLoadout` / `morphPairing` / `unequip`，每格与实现点同刀落地），声明表里没有的仍被点名拒。
+  // 通道 —— 它只能声明开关的闭枚举里有的选项名，**动作由引擎构造**（`shared/behaviour.js`）。那张表今天有 5 格
+  // （`shopBias` / `prepLoadout` / `morphPairing` / `unequip` / `diyPoolOverlap`，每格与实现点同刀落地），
+  // 声明表里没有的仍被点名拒。
   'behaviour',
   // 中间层四组能力声明（DESIGN §28.13）
   'assets', 'client', 'server', 'routes',
@@ -2841,28 +2843,46 @@ export function workshopI18nFiles(packs, readFile, readBase) {
  * 干员声明进 `operators` 时**不会**让池里出现第二条 —— 但「他本来就在池里、现在又被这个包变成棋子」这件事
  * 以前**没有任何地方说出来**，这个函数就是那句话。
  *
- * @param {Array<{ id?: string, operators?: Record<string, unknown>, files?: Record<string, Record<string, object>> }>} packs
+ * @param {Array<{ id?: string, operators?: Record<string, unknown>, behaviour?: Array<{ switch: string, option: string }>, files?: Record<string, Record<string, object>> }>} packs
  * @param {Readonly<Record<string, any>>} data 合并后的数据（`data.backups.units` / `data.backups.diy.ownedPool`）
- * @param {{ apply?: boolean }} [opts] `apply: true` 时**真的摘除**（见下）；默认 false = 只报告（今天的口径）
- * @returns {{ overlaps: Array<{ pack: string, charId: string, inPoolBefore: boolean, poolEntry: boolean, entryFrom: string, note: string }>, stripped: string[], applied: boolean }}
- *   `overlaps` 逐条点名（`inPoolBefore` = 官方池里本来就有他，`poolEntry` = 他是这个包声明进池的）；
- *   `stripped` 是**被摘掉**的 id（`apply: false` 时这一列是「如果摘会是哪些」，好让改动面一目了然）；
+ * @param {{ apply?: boolean }} [opts] `apply: true` = 维护者总开关，**所有**包的这类重叠都摘（见下）；默认 false 时
+ *   只摘**自己声明了** `behaviour: [{ switch: 'diyPoolOverlap', option: 'strip' }]` 的那些包的
+ * @returns {{ overlaps: Array<{ pack: string, charId: string, inPoolBefore: boolean, poolEntry: boolean, entryFrom: string, strip: boolean, note: string }>, stripped: string[], declaredStripped: string[], applied: boolean }}
+ *   `overlaps` 逐条点名（`inPoolBefore` = 官方池里本来就有他，`poolEntry` = 他是这个包声明进池的，
+ *   `strip` = **这一条**这一次到底摘没摘）；
+ *   `stripped` 是**候选**名单（`apply: false` 时这一列是「如果按维护者开关摘会是哪些」，语义与从前逐字相同）；
+ *   `declaredStripped` 是**被包自己的声明摘掉**的 id（与 `apply` 无关：声明了就算，好让报告点名到 char id ——
+ *   「摘了谁必须能被点名」这条不因为通道从维护者换成作者而放松）；
  *   `applied` 说明这一次到底改没改数据。
  *
  * **为什么默认不摘**：摘掉一份已经在池里的干员 = 池子变小、可挑的干员变少、`tools/golden.mjs` 给池里每一位
  * 配的那个精锐场景整个消失（实测 fanpack 那份数据里 8 名，`ownedPool` 71 → 63）。按 `AGENTS.md` 的 golden 规矩，
  * 一次**有意的玩法改动**必须在同一个提交里跑 `golden:update` 并逐条点名移动了哪些场景 —— 而那不是一个
- * 加载器函数有权替维护者决定的事。所以这里给的是**开关**：`apply: true` 才摘，且摘了谁必须能被点名。
+ * 加载器函数有权替维护者决定的事。
+ *
+ * 摘除因此有**两条通道**，落到同一个动作上：
+ *   ① **维护者总开关** `{ apply: true }`（今天的口径，语义一字未动）；
+ *   ② **包级声明** `behaviour: [{ switch: 'diyPoolOverlap', option: 'strip' }]`（DESIGN §28.43 的第 5 格）——
+ *      作者自己说「把**本包**做成棋子的那几名干员从自选池摘掉」。**通道②刻意按包读取**：合并成一个全局值之后
+ *      「A 包声明 strip」会连 B 包的重叠一起摘掉，而 B 从没声明过（理由写在 `shared/behaviour.js` 那一格的注释里）。
+ * 不声明的包（今天的 golden 语料）落 `report` 那一档 ⇒ 逐字节不变。
  */
 export function stripPackOperators(packs, data, { apply = false } = {}) {
   const backups = isPlainObj(data) && isPlainObj(data.backups) ? data.backups : {};
   const ownedPool = Array.isArray(backups.diy?.ownedPool) ? backups.diy.ownedPool : [];
   const inPool = new Set(ownedPool);
-  /** @type {Array<{ pack: string, charId: string, inPoolBefore: boolean, poolEntry: boolean, entryFrom: string, note: string }>} */
+  /** @type {Array<{ pack: string, charId: string, inPoolBefore: boolean, poolEntry: boolean, entryFrom: string, strip: boolean, note: string }>} */
   const overlaps = [];
   /** @type {string[]} */
   const stripped = [];
+  /** @type {string[]} 被**包自己的声明**摘掉的 id（与维护者开关 `apply` 无关：声明了就算，报告要能点名到 char id） */
+  const declaredStripped = [];
   for (const pack of (Array.isArray(packs) ? packs : []).filter((p) => p && typeof p.id === 'string' && p.id).sort(byPackId)) {
+    // ⚠️ 这一格按**包自己**的 decl 读，**刻意不走** `mergeBehaviourDecls`（读法全表就此一格，理由见
+    // `shared/behaviour.js` 的 `diyPoolOverlap` 注释）：合并成一个全局值之后，A 包声明 `strip` 会把 **B 包**的重叠
+    // 也摘掉，而 B 根本没声明过 —— 这一格说的是「**本包**做成的棋子」，不是一条全局口径。判据仍是同一份
+    // `behaviourValue`，闭枚举仍是同一张表，所以「只有一份实现」没有破。
+    const byDecl = behaviourValue(pack.behaviour, 'diyPoolOverlap') === 'strip';
     /** @type {Map<string, string>} charId → 这个包把它变成棋子的那条记录 id */
     const chessByChar = new Map();
     for (const [chessId, rec] of Object.entries(isPlainObj(pack.files?.chess) ? pack.files.chess : {})) {
@@ -2875,27 +2895,37 @@ export function stripPackOperators(packs, data, { apply = false } = {}) {
       const poolEntry = Object.hasOwn(declared, charId);
       if (!inPoolBefore && !poolEntry) continue;
       if (inPoolBefore) stripped.push(charId);
+      // 这一条到底摘不摘：维护者总开关（`apply`，今天的口径）**或**这个包自己的声明。
+      const strip = inPoolBefore && (apply || byDecl);
+      if (inPoolBefore && byDecl) declaredStripped.push(charId);
+      const strippedTail = ' Stripped from the pool (opt-in): the pool offers one fewer operator and the golden corpus moves with it';
+      const keptTail = ' Stripping him from the pool changes what the pool offers, so it is the maintainer\'s call — pass { apply: true } to do it, or let this pack declare behaviour "diyPoolOverlap": "strip" (see the loader report)';
+      const declaredTail = ' Stripped from the pool by this pack\'s OWN "diyPoolOverlap": "strip" declaration (pack.json behaviour): the pool offers one fewer operator and the golden corpus moves with it';
       overlaps.push({
         pack: pack.id, charId, inPoolBefore, poolEntry,
         entryFrom: chessByChar.get(charId),
+        strip,
         note: inPoolBefore
-          ? `"${charId}" is in the 自选 pool (data/backups.json diy.ownedPool) AND this pack turns him into the chess piece "${chessByChar.get(charId)}" — he can be fielded twice, and the 自选 slot bypasses the piece's own bond.${apply ? ' Stripped from the pool (opt-in): the pool offers one fewer operator and the golden corpus moves with it' : ' Stripping him from the pool changes what the pool offers, so it is the maintainer\'s call — pass { apply: true } to do it (see the loader report)'}`
+          ? `"${charId}" is in the 自选 pool (data/backups.json diy.ownedPool) AND this pack turns him into the chess piece "${chessByChar.get(charId)}" — he can be fielded twice, and the 自选 slot bypasses the piece's own bond.${apply ? strippedTail : byDecl ? declaredTail : keptTail}`
           : `this pack puts "${charId}" into the 自选 pool through pack.json operators AND ships the chess piece "${chessByChar.get(charId)}" for the same operator — one operator with two ways in`,
       });
     }
   }
   // 真的摘除：只动 `ownedPool` 这一份名单（`diy.operators` 那一条记录留着 —— 它在池外也仍被界面按 id 读，
   // 摘掉名单条目就够了，删记录反而会让别的引用找不到它）。摘除是**就地**改一个拷贝，调用方决定要不要采用。
+  // 摘谁：维护者开关打开时是**全部候选**（今天的口径），否则是**被包自己声明**的那一批。
   let applied = false;
-  if (apply && stripped.length && isPlainObj(backups.diy)) {
-    const drop = new Set(stripped);
-    const remaining = ownedPool.filter((id) => !drop.has(id));
-    if (remaining.length !== ownedPool.length) {
-      data.backups = { ...backups, diy: { ...backups.diy, ownedPool: remaining } };
-      applied = true;
+  if (isPlainObj(backups.diy)) {
+    const drop = new Set(apply ? stripped : declaredStripped);
+    if (drop.size) {
+      const remaining = ownedPool.filter((id) => !drop.has(id));
+      if (remaining.length !== ownedPool.length) {
+        data.backups = { ...backups, diy: { ...backups.diy, ownedPool: remaining } };
+        applied = true;
+      }
     }
   }
-  return { overlaps, stripped, applied };
+  return { overlaps, stripped, declaredStripped, applied };
 }
 
 /**
@@ -3499,16 +3529,19 @@ export function applyWorkshop(base, packs) {
   // `workshopSummary` 也分开数）。必须排在内容文件那一层之后 —— 它要读**合并后**的 `out.chess` 与 `out.bonds`
   // （盟约可能是另一个包加进来的）。**不改数据、不拒包**：坏 id 由读取点的 `hasBond` 挡在计数之外。
   report.traitGrants = traitGrantWarnings(out, looked);
-  // `stripPackOperators`（fanpack G-16）：**只记录，不摘除**。一个被包变成棋子的干员同时还在自选池里这件事，
-  // 以前没有任何地方说出来；而「真的把他摘出池」会改变自选槽能挑到的干员（= 改对局结果），
-  // 与「`test/golden/*.json` 一个字节不动」的验收不能同时成立 —— 所以它是一条**待裁决**的记录，
-  // 不是一次静默的行为差异（理由与实测数字见 `stripPackOperators` 的注释）。
-  // 摘除是**开关**（`{ apply: true }`），这条默认路径不摘：`applied` 与 `stripped` 照实带出来，好让报告说清
-  // 「如果摘会是哪些」与「这一次到底改没改」。默认路径下 `applied` 恒为 false。
+  // `stripPackOperators`（fanpack G-16）：**记录 + 包级声明通道**。一个被包变成棋子的干员同时还在自选池里这件事，
+  // 以前没有任何地方说出来；而「真的把他摘出池」会改变自选槽能挑到的干员（= 改对局结果）——所以**默认不摘**，
+  // 这是 `stripPackOperators` 的缺省档（理由与实测数字见它的注释）。
+  // 摘除有两条通道：① 维护者总开关 `{ apply: true }`（这条装载路径**不**传它）；② 包自己声明
+  // `behaviour: [{ switch: 'diyPoolOverlap', option: 'strip' }]`（DESIGN §28.43 的第 5 格）—— 这条路径**走**，
+  // 因为那正是「通道通了」：作者声明了，装载出来的池子就该是他声明的样子。不声明的包逐字节不变。
+  // 报告三样照实带出来：`overlaps` 逐条点名、`strippedPool`（如果按维护者开关摘会是哪些）、
+  // `strippedByPack`（**被声明**摘掉的，可点名到 char id）、`poolStripped`（这一次到底改没改）。
   {
     const pool = stripPackOperators(packs, out);
     report.overlaps = pool.overlaps;
     report.strippedPool = pool.stripped;
+    report.strippedByPack = pool.declaredStripped;
     report.poolStripped = pool.applied;
   }
   for (const list of Object.values(report.added)) list.sort();
