@@ -202,7 +202,7 @@ describe('四组声明: 形状合法 ⇒ 接受，并如实出现在解析结果
       panels: [{ id: 'sp-resource-import', slot: 'root.overlays', module: 'resources/preloadModal.js', order: 10, gate: 'session.preloadRequired' }],
       requires: ['serviceWorker', 'cacheStorage', 'webCrypto'],   // 闭枚举的次序，不是书写次序
     });
-    // 挂载点是**闭枚举**：前四个是 0.11.0 的浮层，后五个是业主 2026-10-10 裁决里「插进已存在的组件」那一半
+    // 挂载点是**闭枚举**：前四个是 0.11.0 的浮层，后六个是业主 2026-10-10 裁决里「插进已存在的组件」那一半
     //（`screen.game.shopCard` 是可重复宿主，每张商店卡一个容器）。
     assert.deepEqual(CLIENT_PANEL_SLOTS, ['root.overlays', 'root.guide', 'screen.game.aside', 'screen.result.footer',
       'screen.game.shopCard', 'screen.game.bondStrip', 'screen.game.hud', 'screen.game.overlay', 'screen.loadout.detail']);

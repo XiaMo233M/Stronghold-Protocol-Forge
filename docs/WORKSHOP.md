@@ -674,7 +674,7 @@ node tools/workshop-validate.mjs my-pack
 | 字段 | 形状 | 要点 |
 |---|---|---|
 | `assets` | `{ container, manifest, serverPolicy?, verify? }` | `container` 是包内相对路径、必须以 `.spresources` 结尾（`tools/make-spresources.mjs` 的产物）；`manifest` 是包内相对路径、必须 `.json`（客户端要验的扁平文件表）；`serverPolicy` 缺省 `"serve"`，可选 `"cache-only"`（后者让服务器对 `/assets`、`/fonts` 回 412，见 §1.9.4）；`verify` 缺省 `"sha256"`，按旁挂 `<container>.sha256` 校验 |
-| `client` | `{ panels: [{ id, slot, module, order?, gate?, styles?, data?, messages?, wraps? }], requires?, theme? }` | 面板按 `id` 排序后才进清单；`module` 是包内相对路径，**不是 URL**；`slot` 是闭枚举的九个宿主（四个浮层 + 五个既有组件里的宿主，见 §1.9.3）；`styles` 是这个面板自带的 `.css`、`data` 是它要读的数据表、`messages` 是它要收发的**包通道**（四者见 §1.9.3 的数据口 / §1.9.5 / §1.9.6）；`wraps` 是它要**包裹 / 替换**的引擎具名组件（见 §1.9.7）；`requires` 只能取 `serviceWorker` / `cacheStorage` / `webCrypto` —— 缺一即「浏览器不支持」，不是「装了但静默不工作」；`theme.vars` 是包写的 CSS 变量（见 §1.9.5） |
+| `client` | `{ panels: [{ id, slot, module, order?, gate?, styles?, data?, messages?, wraps? }], requires?, theme? }` | 面板按 `id` 排序后才进清单；`module` 是包内相对路径，**不是 URL**；`slot` 是闭枚举的十个宿主（四个浮层 + 六个既有组件里的宿主，见 §1.9.3）；`styles` 是这个面板自带的 `.css`、`data` 是它要读的数据表、`messages` 是它要收发的**包通道**（四者见 §1.9.3 的数据口 / §1.9.5 / §1.9.6）；`wraps` 是它要**包裹 / 替换**的引擎具名组件（见 §1.9.7）；`requires` 只能取 `serviceWorker` / `cacheStorage` / `webCrypto` —— 缺一即「浏览器不支持」，不是「装了但静默不工作」；`theme.vars` 是包写的 CSS 变量（见 §1.9.5） |
 | `server` | `{ preDispatch: { module, policy, intercepts } }` | `module` 必须 `.mjs`（服务端加载，浏览器不加载）；`policy` 必须 `.json`；`intercepts` 每一项**必须**存在于 `shared/protocol.js C2S`（从协议反推，不在这里另抄一份名单 —— 抄一份就是第二个会漂移的真相） |
 | `routes` | `[{ path, file, cache? }]` | `path` 是 `/` 开头的绝对 HTTP 路径；`file` 是包内相对路径且必须 `.json`（`.js` / `.html` 一律不在此通道：那是代码执行面）；`cache` 缺省 `"no-cache"`，可选 `"no-store"` / `"public"` |
 | `i18n` | `{ "<语种>": "<包内相对 .json>" }` | 给**已有语种**（`en` / `ja` / `ko` / `zh-TW` …）补界面词条；语种码必须是常用大小写、不能是源语言 `zh`；文件里是 `{ "<中文 msgid>": "<译文>" }`。**已有键绝不覆盖**、冲突点名报告 —— 见 **§1.10** |
@@ -915,7 +915,7 @@ export function mount(ctx) {
 `default` 导出同一个函数也行。**模块源码进包的身份哈希**：改了面板的字节就是换了一个包（DESIGN §28.8），所以不
 用担心「摘要一样、界面不一样」。
 
-**九个挂载点**（闭枚举，写别的整包被拒：`CLIENT_BAD_PANEL_SLOT`）：
+**十个挂载点**（闭枚举，写别的整包被拒：`CLIENT_BAD_PANEL_SLOT`）：
 
 | `slot` | 位置 | 容器谁创建 |
 |---|---|---|
@@ -928,11 +928,12 @@ export function mount(ctx) {
 | `screen.game.hud` | 对局 HUD 层里 | 组件渲染 |
 | `screen.game.overlay` | 对局画面之上（整屏覆盖层） | 组件渲染 |
 | `screen.loadout.detail` | 干员详情面板里（插一节） | 组件渲染 |
+| `screen.room.aside` | 房间屏（等待开局的那一屏）的旁栏 | 组件渲染 |
 
 前四个是**固定浮层**：与当前在哪个界面无关，面板挂一次就一直在，容器由注册点在面板真的挂载时创建（没有包声明
 `client` 时页面上一个容器都没有）。
 
-后五个是**既有组件里的宿主**（业主裁决 2026-10-10），容器由**组件自己**渲染 `[data-mod-slot]`。三条性质：
+后六个是**既有组件里的宿主**（业主裁决 2026-10-10），容器由**组件自己**渲染 `[data-mod-slot]`。三条性质：
 
 - **空闲时零影响**：容器 `display: contents`（不产生盒子），里面的面板默认 `pointer-events: none`（不吃点击）。
   想让标记/手势/一节接收输入，在你自己的样式表里打开 `pointer-events: auto` —— 默认绝不能是「一层看不见的东西
@@ -1261,7 +1262,7 @@ export function registerServer(host) {
 
 #### 1.9.7 组件级改写：`client.panels[].wraps`（DESIGN §28.19）
 
-**它解决的是什么**：§1.9.3 的九个槽位说的是「插进这个位置」—— 你在引擎**已经画出来的容器**里画你自己的东西。
+**它解决的是什么**：§1.9.3 的十个槽位说的是「插进这个位置」—— 你在引擎**已经画出来的容器**里画你自己的东西。
 但「这一屏现在长得不一样了」不是插入：那要改的是**引擎自己那个组件**。所以面板还可以声明 `wraps`，
 每个条目点名一个**引擎具名组件**和一个方式：
 

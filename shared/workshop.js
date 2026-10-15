@@ -376,14 +376,14 @@ export const ASSETS_FILE_CODES = Object.freeze({
  * `client.panels[*].slot`（DESIGN §28.8）：**闭枚举**。写成自由字符串的话，一个拼错的挂载点就是一个永远不出现的
  * 界面 —— 而挂载点是设计稿里已经数得清的那些。
  *
- * 前四个是 0.11.0 的**浮层**（引擎按需创建容器、`position: fixed`）。后五个是业主 2026-10-10 裁决里
+ * 前四个是 0.11.0 的**浮层**（引擎按需创建容器、`position: fixed`）。后六个是业主 2026-10-10 裁决里
  * 「插进**已存在**的组件」那一半：容器由**组件自己**渲染（`[data-mod-slot]`），面板因此能往商店卡加一个角标、
- * 给盟约条加一个手势、往干员详情插一节 —— 而不是只能挂在浮层上。
+ * 给盟约条加一个手势、往干员详情插一节、往房间屏的旁栏放一块（`screen.room.aside`）—— 而不是只能挂在浮层上。
  */
 export const CLIENT_PANEL_SLOTS = Object.freeze([
   'root.overlays', 'root.guide', 'screen.game.aside', 'screen.result.footer',
   'screen.game.shopCard', 'screen.game.bondStrip', 'screen.game.hud', 'screen.game.overlay',
-  'screen.loadout.detail',
+  'screen.loadout.detail', 'screen.room.aside',
 ]);
 /**
  * **可重复的宿主**：引擎在这些位置渲染*多个*容器（每张商店卡一个），一个面板会挂进**每一个**，并通过

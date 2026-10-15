@@ -461,7 +461,7 @@ export const MOD_SURFACE = Object.freeze([
     layer: 'C',
     decl: 'pack.json.client.panels[] = { id, slot, module, order, gate }',
     anchors: [{ symbol: 'CLIENT_PANEL_SLOTS' }, { symbol: 'CLIENT_PANEL_REPEATABLE' }],
-    requires: ['slot 必须是引擎渲染得出的宿主（九个之一）', '一个声明用不了就点名丢掉整个面板，不挂半个'],
+    requires: ['slot 必须是引擎渲染得出的宿主（十个之一）', '一个声明用不了就点名丢掉整个面板，不挂半个'],
     files: ['shared/workshop.js', 'server/workshop.js', 'server/http/workshop.js', 'public/js/ui/extensions.js'],
     tests: ['test/modClientPanels.test.js', 'test/modClientHosts.test.js'],
     spec: '§28.8',

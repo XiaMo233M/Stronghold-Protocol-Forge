@@ -14,7 +14,7 @@
 
 所以每一格表面都被钉住三件事：
 
-1. **锚点符号还在**（`SERVER_MEMBERS` 里还有 `battle`、`CLIENT_PANEL_SLOTS` 还是那九个……）；
+1. **锚点符号还在**（`SERVER_MEMBERS` 里还有 `battle`、`CLIENT_PANEL_SLOTS` 还是那十个……）；
 2. **实现文件与测试文件还在**；
 3. **设计稿与本文档里那一节还在**。
 

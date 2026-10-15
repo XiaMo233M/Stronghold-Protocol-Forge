@@ -42,7 +42,7 @@ describe('宿主枚举：形状层与客户端两份名单钉在一起', () => {
     const base = { id: 'p', name: 'p', version: '1.0.0', license: 'CC0-1.0', description: 'x', gameVersion: '0.2.x' };
     const r = normalizePackManifest({ ...base, client: { panels: [{ id: 'p1', slot: 'screen.game.shopcard', module: 'a.js' }] } }, 'p', { hasAssets: false });
     assert.equal(r.ok, false);
-    assert.equal(r.error, 'CLIENT_BAD_PANEL_SLOT', '大小写写错也算不在枚举里，理由里会列出九个');
+    assert.equal(r.error, 'CLIENT_BAD_PANEL_SLOT', '大小写写错也算不在枚举里，理由里会列出十个');
     assert.match(r.detail, /screen\.game\.shopCard/);
     const ok = normalizePackManifest({ ...base, client: { panels: [{ id: 'p1', slot: 'screen.game.shopCard', module: 'a.js' }] } }, 'p', { hasAssets: false });
     assert.equal(ok.ok, true);

@@ -79,9 +79,10 @@ const S2C_TYPES = new Set(S2C);
 
 /**
  * The mount points (DESIGN §28.8). The first four are 0.11.0's **overlays** — the registry creates their container on
- * demand and `public/css/components.css` fixes them. The last five live **inside components the engine already renders**
+ * demand and `public/css/components.css` fixes them. The last six live **inside components the engine already renders**
  * (the owner's ruling of 2026-10-10): the component renders `[data-mod-slot="…"]` and the panel fills it, which is how a
- * pack marks a shop card, adds a gesture to the bond strip or inserts a section into 操作员详情.
+ * pack marks a shop card, adds a gesture to the bond strip, inserts a section into 操作员详情 or hangs a block in the
+ * room screen's aside (`screen.room.aside`, 房间屏的旁栏).
  *
  * Kept here as its own table because importing `shared/workshop.js` would pull the whole pack schema into the page; a
  * test pins the two tables together, the same way `test/kitImports.test.js` pins the import map to the whitelist.
@@ -89,7 +90,7 @@ const S2C_TYPES = new Set(S2C);
 export const MOD_PANEL_SLOTS = Object.freeze([
   'root.overlays', 'root.guide', 'screen.game.aside', 'screen.result.footer',
   'screen.game.shopCard', 'screen.game.bondStrip', 'screen.game.hud', 'screen.game.overlay',
-  'screen.loadout.detail',
+  'screen.loadout.detail', 'screen.room.aside',
 ]);
 
 /**

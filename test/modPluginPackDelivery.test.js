@@ -1,5 +1,5 @@
 // test/modPluginPackDelivery.test.js — C 层注册点对着**业主侧那份真实交付包**跑一遍
-// （`client.panels[]` 的九个宿主 / `wraps` / `styles` / `data` / `messages`，DESIGN §28.8 / §28.19）。
+// （`client.panels[]` 的十个宿主 / `wraps` / `styles` / `data` / `messages`，DESIGN §28.8 / §28.19）。
 //
 // 这份测试是**为改写插件包 v0.2.1 写的验证**，它钉的是「交付包真的能被装载器与客户端注册点吃下去」，
 // 不是仓库自身的功能 —— 因此它有一条硬前置：**交付包不在本机就整体跳过**（照 `test/packMetaFanpack.test.js`
@@ -316,7 +316,7 @@ describe('交付包：C 层注册点真的把这些面板挂起来', () => {
       // 组件渲染出来的宿主：这里造一份（商店卡每张一个 `data-mod-slot-key`）。
       const cardHost = doc.createElement('span');
       cardHost.setAttribute('data-mod-slot-key', 'chess_test_1');
-      // 后五个宿主**由组件自己渲染**（注册点只查不造）—— 所以这里替引擎的组件把它们的容器先渲染出来，
+      // 后六个宿主**由组件自己渲染**（注册点只查不造）—— 所以这里替引擎的组件把它们的容器先渲染出来，
       // 正是引擎在真实渲染里做的事（`screens/game.js` / `bondStrip.js` / `detailPanel.js` 的 `[data-mod-slot]`）。
       const componentHosts = new Map();
       for (const slot of ['screen.game.hud', 'screen.game.overlay', 'screen.loadout.detail']) {

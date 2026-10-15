@@ -1,6 +1,6 @@
 // test/modPanelWraps.test.js — 组件级改写：`pack.json.client.panels[].wraps`（DESIGN §28.19, docs/WORKSHOP.md §1.9.7）。
 //
-// 槽位（九个 `[data-mod-slot]` 宿主）只能表达「插进这个位置」。一个包要表达的是「**这个界面现在长得不一样了**」——
+// 槽位（十个 `[data-mod-slot]` 宿主）只能表达「插进这个位置」。一个包要表达的是「**这个界面现在长得不一样了**」——
 // 所以面板还可以**包裹**（`wrap`）或**替换**（`replace`）引擎的一个**具名组件**。本文件逐条钉住这件事：
 //
 //   1. 声明：`[{ component, mode }]`，闭枚举 + 三种点名拒绝码（`CLIENT_WRAP_UNKNOWN_COMPONENT` /

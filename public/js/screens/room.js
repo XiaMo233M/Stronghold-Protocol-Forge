@@ -732,6 +732,14 @@ export function RoomScreen() {
         </ul>
       </aside>`}
     </main>
+    ${/*
+      房间屏的**旁栏**宿主（`screen.room.aside`，docs/WORKSHOP.md §1.9.3 的第 10 槽）：容器由**组件自己**渲染
+      （`[data-mod-slot]`），**不在** `extensions.js MOD_PANEL_CREATED` 的四个浮层里 —— 它不是浮层，是这一屏的一块
+      地方；注册点对这一格只查不造（`test/modClientHosts.test.js` 逐槽位钉住「枚举里每一个组件渲染的宿主都必须
+      真的有人渲染它」）。`.mod-host` 是 `display: contents`：引擎只给地址、不给样子，定位与观感是包自己 `styles`
+      的事（与 `game.js` 的 `screen.game.hud` / `screen.game.overlay` 同一种写法）。
+    */ null}
+    <div class="mod-host" data-mod-slot="screen.room.aside"></div>
     <${RoomModsPanel} room=${room} onAlignment=${setAlign} />
     <${ChatPanel} />
     <${SpectatorBar} facts=${facts} myId=${me.playerId} busy=${busy} onRemove=${removeSpectator} onSit=${sit} />
