@@ -41,6 +41,7 @@ import { modPolicyFromEnv } from './mod-manager/policy.js';
 import { loadOfficialPlugins, OFFICIAL_PLUGINS_DIR } from './mod-manager/officialLoader.js';
 import { loadOfficialModules, officialRoomInstallers, officialMetaModules, officialBattleInstallers, officialBattleModules } from './mod-manager/officialHost.js';
 import { buildOfficialCatalog, mergeCatalog } from './mod-manager/officialCatalog.js';
+import { officialPanels } from './mod-manager/officialPanels.js';
 import { loadMetaModules } from './match/metaPack.js';
 import { loadBattleInstallers } from './battlePack.js';
 import { loadRoomInstallers } from './roomPack.js';
@@ -373,7 +374,17 @@ export async function startServer(opts = {}) {
   // C 层注册点（`pack.json.client.panels`, DESIGN §28.8）：面板清单（随 `welcome` 推到客户端）与这些模块的服务表。
   // 没有包声明 `client` 时两者都是空的，`welcome` 不多一个字段、`/workshop-panels/` 不服务任何东西。
   const workshopPanels = loadWorkshopPanels(workshopLoaded, { log });
-  const workshopPanelFiles = workshopPanelFilesFor(workshopPanels.panels, workshopDir);
+  // 官方档的客户端面板（C 档）：与 Forge 面板**同一批槽位、同一条 URL 约定**，只是根目录是 `plugins/`。
+  // 一条坏声明只丢那一个面板并点名（面板不是「整包」级的东西），与 `loadWorkshopPanels` 的口径一致。
+  const officialPanelList = officialPanels(officialPluginsLive);
+  for (const e of officialPanelList.errors) log.warn(`[official] ${e.pack} ${e.id}: ${e.code}: ${e.reason}`);
+  const allPanels = [...workshopPanels.panels, ...officialPanelList.panels];
+  const workshopPanelFiles = new Map(workshopPanelFilesFor(workshopPanels.panels, workshopDir));
+  for (const [url, abs] of workshopPanelFilesFor(officialPanelList.panels, pluginsDir)) {
+    if (workshopPanelFiles.has(url)) { log.warn(`[official] panel URL "${url}" is already served by a Forge pack — the official panel is not served (pack ids must not collide across origins)`); continue; }
+    workshopPanelFiles.set(url, abs);
+  }
+  if (allPanels.length) log.info?.(`[workshop] ${allPanels.length} client panel(s) mounted (${officialPanelList.panels.length} from official plugins)`);
   // 包写的主题变量（`pack.json.client.theme.vars`, 业主裁决 2026-10-10）：合并成**一份** `{ vars }`，随 `welcome` 送到
   // 客户端。没有包声明主题时是 `null` ⇒ `welcome` 里没有这个字段、页面不多一条自定义属性（与 `modPanels` 同一条不变量）。
   const workshopTheme = workshopThemeFor(workshopLoaded, { log });
@@ -452,7 +463,7 @@ export async function startServer(opts = {}) {
       accounts,
       records,
       ...(matchWrappers.length ? { MatchClass } : {}),
-      workshop: { kits: workshopKits.kits, tokenKits: workshopKits.tokenKits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme, meta: [...metaModules, ...officialMetaLive], roomAssets, battle: [...battleModules, ...officialBattleModuleList], battleInstallers: [...battleInstallers, ...officialBattleLive], roomHooks: roomInstallers, transport: transport.transport, serverChannels: serverChannelMap, officialModules: officialModulesLive },
+      workshop: { kits: workshopKits.kits, tokenKits: workshopKits.tokenKits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: allPanels, assets: workshopModAssets, theme: workshopTheme.theme, meta: [...metaModules, ...officialMetaLive], roomAssets, battle: [...battleModules, ...officialBattleModuleList], battleInstallers: [...battleInstallers, ...officialBattleLive], roomHooks: roomInstallers, transport: transport.transport, serverChannels: serverChannelMap, officialModules: officialModulesLive },
     },
     { data, log },
   );

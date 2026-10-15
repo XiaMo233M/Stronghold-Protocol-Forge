@@ -137,7 +137,7 @@ export function fromForgeManifest(pack) {
 export const OFFICIAL_MANIFEST_FIELDS = Object.freeze([
   'manifestVersion', 'id', 'name', 'version', 'author', 'license', 'description',
   'sdk', 'profile', 'entry', 'apis', 'capabilities', 'combat', 'content', 'assets', 'i18n', 'notices',
-  'overrides', 'permissions', 'dependencies', 'conflicts', 'budget', 'target', 'metaRegisters',
+  'overrides', 'permissions', 'dependencies', 'conflicts', 'budget', 'target', 'metaRegisters', 'panels',
 ]);
 
 /** 官方 manifest 里**不许出现**的 Forge 私有字段（出现即拒）。 */
@@ -188,6 +188,27 @@ export function fromOfficialManifest(raw) {
   const apis = raw.apis === undefined ? [] : raw.apis;
   if (!Array.isArray(apis)) issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, '"apis" must be an array of declared host API names'));
 
+  // `panels`（客户端 UI 面板，C 档）—— **必须在能力块之前声明**：下面的 `add('panels')` 要用它。
+  //   这里只判形状；**槽位**（`CLIENT_PANEL_SLOTS` 那张闭枚举）由服务端的桥
+  //   `server/mod-manager/officialPanels.js` 判 —— 那个常量住在 `shared/workshop.js`，而该文件被
+  //   `jsconfig.json` 排除在 typecheck 切片外，从本文件 import 会把整棵它拖回切片（那正是它被排除的原因）。
+  const panels = raw.panels === undefined ? [] : raw.panels;
+  if (!Array.isArray(panels)) {
+    issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, '"panels" must be an array of { id, slot, module, messages?, styles? }'));
+  } else {
+    for (const [i, p] of panels.entries()) {
+      if (!isObj(p)) { issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, `panels[${i}] must be an object`)); continue; }
+      if (!str(p.slot)) issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, `panels[${i}].slot must be a non-empty string (the slot list is checked when the plugin is loaded)`));
+      const mod = str(p.module);
+      if (!mod || mod.startsWith('/') || mod.includes('..')) {
+        issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, `panels[${i}].module must be a pack-relative path inside the plugin (got ${JSON.stringify(p.module)})`));
+      }
+      if (p.messages !== undefined && !(Array.isArray(p.messages) && p.messages.every((m) => typeof m === 'string' && m))) {
+        issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, `panels[${i}].messages must be an array of non-empty channel names`));
+      }
+    }
+  }
+
   const capabilities = [];
   const add = (c) => { if (CAPABILITIES.includes(c) && !capabilities.includes(c)) capabilities.push(c); };
   for (const name of (Array.isArray(apis) ? apis : [])) {
@@ -200,6 +221,7 @@ export function fromOfficialManifest(raw) {
     else add(c);
   }
   if (Array.isArray(raw.content) && raw.content.length) add('content');
+  if (panels.length) add('panels');
   if (raw.notices) add('notices');
   if (raw.i18n) add('i18n');
   if (isObj(raw.overrides) && Object.keys(raw.overrides).length) add('overrides');
@@ -224,7 +246,6 @@ export function fromOfficialManifest(raw) {
   } else if (!capabilities.includes('meta') && metaRegisters.length) {
     issues.push(sdkError(SDK_ERROR_CODES.UNKNOWN_FIELD, '"metaRegisters" is declared without the "meta" api — remove one of the two'));
   }
-
   const permissions = [];
   const perm = (p) => { if (!permissions.includes(p)) permissions.push(p); };
   if (['modules', 'meta', 'battle', 'room'].some((c) => capabilities.includes(c))) perm('host.process');
@@ -237,10 +258,10 @@ export function fromOfficialManifest(raw) {
   if (issues.length) return { descriptor: null, issues };
 
   // `layer`（A 内容 / B 服务端逻辑 / C 客户端 UI）：官方 manifest 不声明它 —— 但 mod 集合的身份条目**要求**它
-  // （`shared/modIdentity.js isModEntry`）。所以**由能力推出来**：有服务端载荷 ⇒ B，否则 A。官方档目前没有
-  // 客户端 UI 能力（面板），所以不产生 C；将来加了再在这一行扩。
+  // （`shared/modIdentity.js isModEntry`）。所以**由能力推出来**：服务端载荷优先（B），否则有客户端面板就 C，
+  // 再否则 A。与 Forge 档 `pack.json.layer` 的语义逐字相同。
   const SERVER_SIDE_CAPS = ['modules', 'meta', 'battle', 'room', 'preDispatch', 'storage', 'health', 'routes', 'metrics', 'lane'];
-  const layer = capabilities.some((c) => SERVER_SIDE_CAPS.includes(c)) ? 'B' : 'A';
+  const layer = capabilities.some((c) => SERVER_SIDE_CAPS.includes(c)) ? 'B' : (capabilities.includes('panels') ? 'C' : 'A');
 
   const descriptor = Object.freeze({
     id: raw.id,
@@ -259,6 +280,13 @@ export function fromOfficialManifest(raw) {
     dependencies: Object.freeze(Array.isArray(raw.dependencies) ? raw.dependencies.slice() : []),
     conflicts: Object.freeze(Array.isArray(raw.conflicts) ? raw.conflicts.slice() : []),
     metaRegisters: Object.freeze(Array.isArray(metaRegisters) ? metaRegisters.map(String) : []),
+    panels: Object.freeze((Array.isArray(panels) ? panels : []).map((p) => Object.freeze({
+      id: str(p && p.id) || null,
+      slot: p && p.slot,
+      module: str(p && p.module),
+      ...(Array.isArray(p && p.messages) ? { messages: Object.freeze([...p.messages]) } : {}),
+      ...(Array.isArray(p && p.styles) ? { styles: Object.freeze(p.styles.slice()) } : {}),
+    }))),
     budget: Object.freeze({ ...OFFICIAL_DEFAULT_BUDGET, ...(isObj(raw.budget) ? raw.budget : {}) }),
     // 官方包的字节摘要由官方装载器算出后回填；本适配器只描述。
     contentDigest: typeof raw.contentDigest === 'string' ? raw.contentDigest : null,

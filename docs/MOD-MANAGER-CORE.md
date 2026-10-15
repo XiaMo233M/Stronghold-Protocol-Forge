@@ -149,7 +149,11 @@ CLI/程序接口：`setConsent` / `clearConsent` / `setPin` / `clearPin` / `setP
   的叠加层（`test/modOfficialOverlay.test.js` 直验：目录不存在 ⇒ 逐字节不变）。
   **一致性（Phase 7 收口）**：官方插件**进进程级 mod 集合** —— 它们的 `meta`/`battle` 会改对局结果，
   所以身份必须被**房间摘要闸门**覆盖。随之而来的三件配套都已落地：
-  ① 描述符**按能力推出 `layer`**（A 内容 / B 服务端逻辑，`isModEntry` 要求它）；
+  ① 描述符**按能力推出 `layer`**：服务端载荷 ⇒ `B`，否则有客户端面板 ⇒ `C`，再否则 `A`（`isModEntry` 要求它）；
+     **客户端 UI 面板**（C 档）也已落地：官方 manifest 的 `panels: [{ id, slot, module, messages?, styles? }]`，
+     槽位走引擎**同一张**闭枚举 `CLIENT_PANEL_SLOTS`、URL 走**同一条** `/workshop-panels/<包>/<模块>` 约定，
+     于是 `welcome.modPanels`、投递表、以及 Lobby 从面板推出来的 `packChannels`（`pack.msg` 的「收不收」）
+     **一行都不用改**（`test/modOfficialPanels.test.js` 直验投递表指到插件里的真实文件、坏面板只丢那一个并点名）；
   ② `server/mod-manager/officialCatalog.js` 产出与 `buildModCatalog` **逐字同形**的客户端目录，
      `test/modOfficialCatalog.test.js` 直接断言那条不变量 —— **客户端用同一个算法能重建出发布的 `hash`**；
   ③ 目录与 `/mods/file/<包>/<路径>` 和 Forge 的并成**一份**（同 id 不静默覆盖，点名丢弃），
