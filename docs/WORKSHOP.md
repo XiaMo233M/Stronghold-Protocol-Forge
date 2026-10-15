@@ -427,6 +427,12 @@ workshop/*/ ──┘        （冻结之前）              └─→ /data/<fi
 > （与 `art.weapons`、单数 `art.bond` 逐字同一格，`shared/workshop.js` 的 `parseArtDecl`）——
 > **不是** `PACK_UNKNOWN_FIELD`：那个码管的是 `pack.json` 的**顶层键**闭集。判据在
 > `test/workshopArt.test.js` 的「每一种写法错误都被拒」那一格。
+>
+> **表名闭集排在「有没有 `assets/`」之前**（这条顺序本身是诊断性的一部分，2026-10-13 修）：写错表名的包
+> **就算没有 `assets/` 目录**，得到的也是 `ART_UNKNOWN_TABLE`，而不会先撞一句「请把文件放进 `assets/`」——
+> 后者会把作者支去建一个解决不了问题的目录，真因（这张表不存在）没人说。反过来，**表名写对、只是没建
+> `assets/`** 的包照旧报 `ART_NEEDS_ASSETS`（对照：`art: { audio: … }` 且没有 `assets/` ⇒ `ART_UNKNOWN_TABLE`；
+> `art: { chars: … }` 且没有 `assets/` ⇒ `ART_NEEDS_ASSETS`）。三面都有判据：`test/workshopArt.test.js` 的拒绝表。
 
 **写这两个字段的图形入口是编辑器的第七个页面 `/voice.html`**（`docs/EDITOR.md` §语音）：先在语言下拉里选要编辑哪一档
 （默认配音 = `voices`，或 cn / en / kr = `voiceLangs[<lang>]`），再就地改对应的表；其余字段、键序与缩进原样保留，

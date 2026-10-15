@@ -73,7 +73,8 @@
 | | |
 |---|---|
 | **现在报什么** | `ART_NEEDS_ASSETS: a pack that declares art must put the files in its assets/ folder (e.g. assets/art/…)` |
-| **在哪** | `Stronghold-Protocol/shared/workshop.js:2059-2060` |
+| **在哪** | `Stronghold-Protocol/shared/workshop.js:2065-2081`（`parseArtDecl`：① 形状 → ② **表名闭集** → ③ 这一条） |
+| **先看这一条** | **表名写错时先报的是 `ART_UNKNOWN_TABLE`，不是这一条**（2026-10-13 把表名闭集挪到这条之前）：`art` 只认 `chars` / `enemies` / `tokens` / `skills` / `profSub` / `bonds` / `bands` —— 写 `art.audio` / `art.weapons` / 单数 `art.bond` 的包，**哪怕也没有 `assets/`**，先得到的是「这张表不存在」。音频不走 `art`：它走 `voices` / `voiceLangs`（`docs/WORKSHOP.md` §1.4）。 |
 | **小白会怎么想** | 「我放了文件啊？」—— 问题多半是文件夹**名字**或**位置**，而这句话只重复了一遍要求，没告诉他「引擎到底在找什么路径」 |
 | **改成什么** | **「引擎在包目录下找 `assets` 这个文件夹（全小写，和 `pack.json` 同一层），没找到。请新建一个名为 `assets` 的文件夹，把图片放进去。」** |
 | **修法** | ① 打开包文件夹<br>② 在 `pack.json` 旁边新建文件夹，名字**全小写**：`assets`<br>③ 把图片放进这个文件夹<br>④ 重跑校验 |

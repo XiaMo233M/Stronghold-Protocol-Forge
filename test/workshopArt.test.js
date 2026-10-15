@@ -239,6 +239,11 @@ describe('工坊外观素材：声明（pack.json 的 art）', () => {
       // 素材住在包自己的 assets/ 里
       [{ art: { chars: { c: { avatar: 'a.png' } } } }, { hasAssets: false }, 'ART_NEEDS_ASSETS'],
       [{ art: { enemies: { e: { icon: 'a.png' } } } }, { hasAssets: false }, 'ART_NEEDS_ASSETS'],
+      // 表名闭集排在「有没有 assets/」**之前**（2026-10-13 修的是**顺序**，不是判据）：两者是两件独立的事，
+      // 而真因优先。写得对但没 assets/ ⇒ 仍是 `ART_NEEDS_ASSETS`（上面两条）；**表名根本不存在**时即便
+      // 没有 assets/ 也必须报 `ART_UNKNOWN_TABLE` —— 从前这里报的是 `ART_NEEDS_ASSETS`，于是作者会去建一个
+      // 解决不了问题的目录，而「这张表不存在」从头到尾没人告诉他（一次名不副实的诊断）。
+      [{ art: { audio: { voice: { char_ws_x: { select: ['a.mp3'] } } } } }, { hasAssets: false }, 'ART_UNKNOWN_TABLE'],
     ];
     for (const [extra, opts, error] of cases) refused(extra, opts, error);
   });

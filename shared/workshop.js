@@ -2064,6 +2064,14 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // 都写在那一张表里，校验、索引与并表三处共用，不会各自漂移。
   const art = raw.art === undefined ? {} : raw.art;
   if (!isPlainObj(art)) return fail('ART_BAD_SHAPE', 'art must be an object: { chars|enemies|tokens: { "<id>": { … } } }');
+  // ① 形状 → ② **表名闭集** → ③ `ART_NEEDS_ASSETS`：**表名合不合法与有没有 assets/ 是两件独立的事**，
+  // 所以闭集排在素材目录那条闸之前（2026-10-13 修的是**顺序**，判据一条没动）。为什么顺序是诊断性的一部分：
+  // 作者把音频写成 `art.audio` 时，若先撞 `ART_NEEDS_ASSETS`，他看到的是一句「请把文件放进 assets/」——
+  // 于是去建目录、重跑、还是同一句话，而**真因（这张表根本不存在）从头到尾没有人告诉他**。
+  // 闭集先报，报的才是他要改的那一处；而表名写对、只是没建 assets/ 的包照旧得到 `ART_NEEDS_ASSETS`。
+  for (const table of Object.keys(art)) {
+    if (!ART_TABLES[table]) return fail('ART_UNKNOWN_TABLE', `"${table}" is not an art table (one of: ${Object.keys(ART_TABLES).join(', ')})`);
+  }
   if (Object.keys(art).length && opts.hasAssets !== true) {
     return fail('ART_NEEDS_ASSETS', 'a pack that declares art must put the files in its assets/ folder (e.g. assets/art/…)');
   }
@@ -2071,6 +2079,8 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   const artEntries = {};
   for (const [table, entries] of Object.entries(art)) {
     const shape = ART_TABLES[table];
+    // 第二道闸：上面那趟闭集已经按**同一个表**判过（上面拒了就到不了这里）。留着它是为了后面那句 `shape.flat` /
+    // `shape.spine` —— 表名若不认识，缺了这条守卫就会变成一句 `TypeError`，而不是一条点名到表名的拒绝。
     if (!shape) return fail('ART_UNKNOWN_TABLE', `"${table}" is not an art table (one of: ${Object.keys(ART_TABLES).join(', ')})`);
     if (!isPlainObj(entries)) return fail('ART_BAD_SHAPE', `art.${table} must be an object: { "<id>": { … } }`);
     const clean = {};
