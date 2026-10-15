@@ -223,6 +223,31 @@
         "本仓库 **0.18.8** / 上游游戏本体 **0.2.6**"
       ],
       "retireWhen": "同上。"
+    },
+    {
+      "file": "shared/kitImports.js",
+      "why": "2026-10-15 新开三格纯 helper：`@sim/detmath.js`、`@sim/body.js`、`@sim/professions.js`。判据不是「想让包碰内核」，而是实测到的 workaround —— 一份第三方字节补丁为了用 `roundHalfEven` / `bodyInKeys` / `resolveProfile`，把这三个文件的相关段落**抄进了包内**，那是一份会静默漂移的冻结副本。规则一字未动：按文件指名、不开前缀，`@sim/skills.js` / `@sim/ai.js` / `@sim/snapshot.js` 仍然被 `KIT_IMPORT` 拒（已实测）。丢了这三行 = 包退回「内联副本」那条路，正是 §28.54 的 `@ops/` 那格当初要消灭的东西。",
+      "anchors": [
+        "  { specifier: '@sim/detmath.js', file: 'server/sim/detmath.js' },",
+        "  { specifier: '@sim/professions.js', file: 'server/sim/professions.js' },"
+      ],
+      "retireWhen": "上游自己放开同一批 specifier ⇒ 删这条 patches；若上游改成「按前缀放开 @sim/」，必须复核 `SIM_PRIVATE` 那份拒服清单与确定性判据（这三个文件都是零 import、零模块级可变状态才进的表）。"
+    },
+    {
+      "file": "test/kitImports.test.js",
+      "why": "导出名下限表必须跟着白名单走 —— 这条守卫本身就是「白名单加文件不记账」的红闸门（`KIT_IMPORT_EXPORTS` 的键集合与 `KIT_IMPORT_FILES` 的 file 集合逐字相等）。新加的三个文件各记一行下限（超集判据：加导出不红，删名/改名才红）。",
+      "anchors": [
+        "  \"server/sim/detmath.js\": ["
+      ],
+      "retireWhen": "上游自己收了这三个文件（它那份表里也有） ⇒ 删这条 patches。"
+    },
+    {
+      "file": "docs/design/mod-layer.md",
+      "why": "白名单那一节（§28.18 附近的「a prefix whitelist, resolved on both ends」）补了三行名单与开表理由 —— 文档只写「允许什么」而不写「为什么是这三个」，下一次就有人按前缀整个放开。",
+      "anchors": [
+        "- `@sim/detmath.js`, `@sim/body.js`, `@sim/professions.js` — three more engine modules opened **by file** on 2026-10-15,"
+      ],
+      "retireWhen": "上游自己写了这一段 ⇒ 删这条 patches。"
     }
   ],
   "bodyPaths": [

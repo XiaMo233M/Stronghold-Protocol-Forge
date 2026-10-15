@@ -728,6 +728,11 @@ problem: the browser really does import pack kits.
   (`server/sim/content/kits/shared/`);
 - `@sim/constants.js`, `@sim/dir.js`, `@sim/targeting.js` — the three pure helpers that SDK is built on, and the ones
   the community kit reached for.
+- `@sim/detmath.js`, `@sim/body.js`, `@sim/professions.js` — three more engine modules opened **by file** on 2026-10-15,
+  for the same reason the ops kits were: a measured third-party byte-patch was **copying these three into the pack**
+  (`roundHalfEven`, `bodyInKeys`, `resolveProfile`), which is a frozen copy that silently drifts. All three import
+  nothing outside the whitelist and hold no module-level mutable state, so both ends load them exactly like the row
+  above. The rule is unchanged: **files are named, prefixes are not opened** — every other `@sim/` path still refuses.
 
 Everything else is still `KIT_IMPORT`: relative paths, absolute paths, `..` traversal, a legal prefix with an
 unlisted module name, bare specifiers, `require()`, dynamic `import()`, and `export … from`. Every refusal names the

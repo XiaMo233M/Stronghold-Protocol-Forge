@@ -153,7 +153,7 @@ describe('kit import 白名单：表与两端解析', () => {
 // ---------------------------------------------------------------------------------------------------
 // ①b 白名单文件的**导出名下限**守卫
 //
-// 白名单把 tier1..tier6 + summoner + 三个 @sim/ helper 变成了**对外接口**：作者包 import 的就是这些名字。
+// 白名单把 tier1..tier6 + summoner + 六个 @sim/ helper 变成了**对外接口**：作者包 import 的就是这些名字。
 // 所以这里把每个白名单文件当前的**具名导出名集合**记下来，断言「这些名字仍然都被导出」——
 //   · 用**超集**（⊇）而不是相等：**加**一个导出永远不会打断任何 mod（老包不 import 它），**删**或**改名**才会。
 //     相等断言会把「加导出」也判红，那是把守卫变成噪声。
@@ -223,6 +223,18 @@ const KIT_IMPORT_EXPORTS = {
     "absoluteRangeKeys", "aggroCmp", "areaSelectable", "auraSelectable", "canTargetAlly", "canTargetEnemy",
     "enemyStealthed", "evadesGround", "extendedGrid", "sortAllyTargets", "sortEnemyTargets", "stealthOffKey",
     "tileKeyOf",
+  ],
+  // 2026-10-15 新开三格：包为了这三个文件里的名字，此前唯一的出路是**整份抄进包里**（一份会静默漂移的副本）。
+  // 记的是当前**全部**具名导出，判据仍是超集 —— 加导出不打断任何包，删名或改名才会。
+  "server/sim/detmath.js": [
+    "atan2", "cos", "hypot", "powi", "roundHalfEven", "sin",
+  ],
+  "server/sim/body.js": [
+    "bodyDist", "bodyInKeys", "bodyInRadius", "bodyKeys", "bodyOnTile", "bodyTileReach", "hitRect", "normHitArea",
+  ],
+  "server/sim/professions.js": [
+    "BARD_REGEN_DUR", "BARD_REGEN_IV", "DOLL_SWITCH", "KNOWN_SUBPROFESSIONS", "PROFESSION_DEFAULTS", "SUB",
+    "bardRegen", "resolveProfile",
   ],
   // 战斗逻辑模块（`server.battle`, DESIGN §28.17）的 SDK：官方内容模块用的那一份辅助函数。
   "server/sim/content/support/index.js": [
