@@ -210,6 +210,12 @@ describe('工坊外观素材：声明（pack.json 的 art）', () => {
       [{ art: { tokens: { t: { owner: '' } } } }, { hasAssets: true }, 'ART_BAD_SHAPE'],
       // 表 / 字段 / 侧
       [{ art: { weapons: { x: { avatar: 'a.png' } } } }, { hasAssets: true }, 'ART_UNKNOWN_TABLE'],
+      // 音频**没有** art 表：它走 `voices` / `voiceLangs`（落点 `assets.audio.voice` /
+      // `assets.audio.voiceLangs[<lang>]`，docs/WORKSHOP.md §1.4）。作者照着 `data/assets.json` 里那个
+      // `assets.audio` 写 `art.audio` 时，被拒的码是**表名闭集**这一个（与 `art.weapons`、单数 `art.bond`
+      // 逐字同一格），不是顶层的 `PACK_UNKNOWN_FIELD` —— 后者管的是 `pack.json` 的**顶层键**。
+      // 2026-10-13 实测：这一条**本来就拒**（`ART_UNKNOWN_TABLE`），判据此前没有钉它，所以补上。
+      [{ art: { audio: { voice: { char_ws_x: { select: ['a.mp3'] } } } } }, { hasAssets: true }, 'ART_UNKNOWN_TABLE'],
       [{ art: { chars: { c: { nickname: 'x' } } } }, { hasAssets: true }, 'ART_UNKNOWN_FIELD'],
       [{ art: { chars: { c: { spine: { side: { skel: 'a.skel', atlas: 'a.atlas' } } } } } }, { hasAssets: true }, 'ART_UNKNOWN_FIELD'],
       [{ art: { chars: { c: { spine: { front: { skel: 'a.skel', atlas: 'a.atlas', nope: 1 } } } } } }, { hasAssets: true }, 'ART_UNKNOWN_FIELD'],

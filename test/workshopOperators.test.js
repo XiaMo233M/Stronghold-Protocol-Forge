@@ -26,7 +26,8 @@ import {
   normalizePackManifest, normalizeContentFile, applyWorkshop, workshopSummary, WORKSHOP_CONTENT_FILES,
   UNIT_REQUIRED_FIELDS, ART_TABLES, unknownOverrideKeys,
 } from '../shared/workshop.js';
-import { requiredUnitForms } from '../shared/diy.js';
+import { requiredUnitForms, diySlot } from '../shared/diy.js';
+import { statusKey } from '../shared/standIn.js';
 import { loadWorkshop, workshopTouchedFiles } from '../server/workshop.js';
 import { loadData } from '../server/data.js';
 import { buildWorkshopDataFiles, startServer } from '../server/index.js';
@@ -318,6 +319,35 @@ describe('干员包: pack.json.operators（自选池声明）', () => {
     // 齐了就过一次
     const ok = applyWorkshop(baseData(), [pack('p1', { units: { char_ws_new: unitRec('char_ws_new') } }, { operators: { char_ws_new: {} } })]);
     assert.deepEqual(ok.report.errors, []);
+  });
+
+  test('「普通」与「精锐」各要一条档位：判定来自 `diy.slots` 的两条记录，不来自声明的次序或名字', () => {
+    // 口径（docs/WORKSHOP.md §1.4 的 `OPERATOR_FORM_MISSING` 一行）：一个自选槽是**一对** chess 记录 ——
+    // 槽位自己的 id（`_a`，`chess[id].isGolden === false`）是**普通**，`diy.slots[id].goldenId`（`_b`，
+    // `isGolden === true`）是**精锐**；两条记录的 `status` 各变成一个 `forms` 档位键（`shared/standIn.js statusKey`），
+    // 而 `requiredUnitForms` 取的是这一对（以及每个槽位那一对）的**并集**。
+    // 这条判据钉的是「缺哪一条就点名哪一条」——**两个方向都钉**：既有那条用例只摘掉最后一档（精锐），
+    // 这里把普通那一档也摘一次。写反、或者「只要求一条就够」的改动会在这里红。
+    const data = { chess: load('chess'), backups: load('backups') };
+    const slot = diySlot('chess_char_6_diy1_a', data);
+    assert.ok(slot && slot.normal && slot.golden, '6★ 自选槽那一对记录必须在（否则这条判据没有牙）');
+    const normalKey = statusKey(slot.normal.status);
+    const eliteKey = statusKey(slot.golden.status);
+    assert.notEqual(normalKey, eliteKey, '普通与精锐是两个不同的档位');
+    assert.deepEqual([normalKey, eliteKey], ['2/1/4/0', '2/60/7/3'],
+      `实测（data/chess.json）：6★ 槽位的 _a 是 2/1/4/0（E2 Lv1 / 技能4 / 模组0）、_b 是 2/60/7/3；实际 ${normalKey} / ${eliteKey}`);
+    assert.equal(slot.normal.isGolden, false, '普通那一半不是 golden');
+    assert.equal(slot.golden.isGolden, true, '精锐那一半由 `isGolden` 标记（不是靠 id 后缀认）');
+    for (const missingKey of [normalKey, eliteKey]) {
+      const forms = Object.fromEntries(Object.entries(ALL_FORMS).filter(([k]) => k !== missingKey));
+      const { data: out, report } = applyWorkshop(baseData(), [
+        pack('p1', { units: { char_ws_new: unitRec('char_ws_new', { forms }) } }, { operators: { char_ws_new: {} } }),
+      ]);
+      assert.equal(out.backups.diy.ownedPool.length, OFFICIAL_POOL, `缺 ${missingKey} 就是不进池`);
+      const errs = errorsOf(report, 'OPERATOR_FORM_MISSING');
+      assert.equal(errs.length, 1, `缺 ${missingKey} 应当恰好报一条，实际 ${JSON.stringify(report.errors)}`);
+      assert.match(errs[0].reason, new RegExp(missingKey.replace(/[/\\]/g, '\\$&')), `点名的必须是缺的那一条 ${missingKey}`);
+    }
   });
 
   test('两个包声明同一个干员：最小包 id 赢，池子只多一个 id，两条面都点名', () => {

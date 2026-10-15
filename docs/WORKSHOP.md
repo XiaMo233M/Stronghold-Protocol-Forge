@@ -206,13 +206,40 @@ workshop/<packId>/
 | `OPERATOR_NO_UNIT` | 声明了一个本包没有 `units` 记录的干员 → 拒绝 + 点名。没有记录就没有名字与职业，进池等于一个空槽 |
 | `OPERATOR_NOT_SIX` | `rarity !== 6` → 拒绝。**自选池就是六星那条路**；5★ 及以下请走工坊棋子注册表（`content.chess` + `kits/<chessId>.js`），那里才有商店阶级 |
 | `OPERATOR_BOND_UNKNOWN` | `bonds` 里某个 id 不在 `data/bonds.json` → 拒绝 + 点名。**这条必须拒**：盟约 id 写错时那条盟约条**永远不会出现**（没有图标、没有阈值），而作者只会以为「盟约没生效」—— 一次完全静默的失效 |
-| `OPERATOR_FORM_MISSING` | `forms` 没覆盖自选槽要的档位 → 拒绝 + 点名缺的那一档。自选槽的**普通与精锐两条记录各自**要求一个档位（`shared/diy.js` `checkDiyPick` 同时解析两条），缺一个这个干员就挑不上；更重的是 `tools/golden.mjs` 会给池里每位配一个精锐场景，所以缺档位会让**语料生成抛异常**，`golden` / `ci` 全线挂。要求的那一组**从 `diy.slots` 的两条记录派生**（`requiredUnitForms`），不是硬编码 `2/60/7/3` |
+| `OPERATOR_FORM_MISSING` | `forms` 没覆盖自选槽要的档位 → 拒绝 + 点名缺的那一档。自选槽的**普通与精锐两条记录各自**要求一个档位（`shared/diy.js` `checkDiyPick` 同时解析两条；**哪两条算这一对**见下面那一节），缺一个这个干员就挑不上；更重的是 `tools/golden.mjs` 会给池里每位配一个精锐场景，所以缺档位会让**语料生成抛异常**，`golden` / `ci` 全线挂。要求的那一组**从 `diy.slots` 的两条记录派生**（`requiredUnitForms`），不是硬编码 `2/60/7/3` |
 | `OPERATOR_BAD_SHAPE` | `operators` 不是对象、某一条不是对象、`bonds`/`powers` 不是字符串数组、干员 id 不合法 → 拒绝 |
 | **两个包给同一个 charId** | 内容文件那一层就按 §1.2 裁决：**包 id 字典序最小者赢**，输的一方得到一条点名报告（`units:<id>`），它的自选池声明随之作废（它其实没有可供声明的记录）。`ownedPool` 因此只会多一个 id |
 | **`data/*.json` 一个字节都不改** | 叠加发生在 `deepFreeze` 之前（§1.3）。所以「作者能加」与「生成器是唯一来源」同时成立：磁盘上的 `ownedPool` 仍是生成器写的那份，`test/backups.test.js` 对**文件**的断言完全不受影响；把包删掉，游戏立刻回到原样 |
 | **入池顺序只由包 id 排序决定** | 与目录扫描顺序无关（`byPackId`，DESIGN §28.3）—— 同样的包集合永远得到同样的 `ownedPool` |
 | **潜能注解（`potDown` / `potMin` / `potBelow`）不写 = 潜能对它无效** | 包干员通常没有这些注解，0.2.2 引擎的行为是：**不报错、天赋不丢，但属性与天赋数值不随潜能缩放**（潜能 1 与潜能 6 真建局逐字节相同；官方带注解的干员会缩放）。要让它随潜能变，就得照官方记录把注解一并抄进 `forms` |
 | 编辑器入口 | 包管理 → **自选池声明**（§1.1）。干员记录本身由干员页写成 `units.json`；**「新建一个干员」的表单不在本轮**，见 DESIGN §28.11 |
+
+#### 哪条档位算「普通」、哪条算「精锐」（`units.json` 的 `forms` 键）
+
+`OPERATOR_FORM_MISSING` 要求的是「自选槽的普通与精锐两条记录各自的档位」。**这两条记录是官方数据给定的
+一对**，不是包在 `forms` 里怎么写的：
+
+| | 是哪一条 | 依据 |
+|---|---|---|
+| **普通** | 槽位自己的 id（`chess_char_6_diy1_a`；`data/chess.json` 里 `isGolden: false`） | `shared/diy.js diySlot()` 的 `normal`，从 `diy.slots` 的键取 |
+| **精锐** | `data/backups.json` 的 `diy.slots[<槽位>].goldenId`（`…_b`；`isGolden: true`） | `shared/diy.js diySlot()` 的 `golden`；这一对来自**官方** `shop.goldenChessId`（`tools/build-data.mjs`，slot 只收 `isDiy && !isGolden` 那条、精锐由它的 `goldenId` 指过去） |
+
+两条记录各自的 `status` 变成一个 `forms` 键：`${phase}/${level}/${skillLevel}/${equipLevel}`
+（`shared/standIn.js statusKey`），而**两条都要在** —— `requiredUnitForms()`（`shared/diy.js`）取每个槽位
+那一对的**并集**，装载器拿它判 `OPERATOR_FORM_MISSING`（缺哪一条就点名哪一条）。实测（`data/chess.json` /
+`data/backups.json`，2026-10-13）：4 个官方槽位的 `_a` 都是 `2/1/4/0`（E2 Lv1 / 技能 4 / 模组 0），
+`_b` 是 `2/60/7/1`（tier 5 的槽位，模组 1）或 `2/60/7/3`（tier 6 的槽位，模组 3）——
+`requiredUnitForms()` 就是这三个键的并集，判据在 `test/workshopOperators.test.js`。
+
+**引擎里没有「按名字或按书写次序给 `forms` 分普通与精锐」这回事**，也不该有：分类的唯一来源是 `diy.slots`
+指向的那两条记录。所以一个包干员要进自选池，正确做法是照官方那两条记录把**两个档位**都抄进 `forms`，
+而不是猜「第一条是普通」或者「键里带 60 的那条是精锐」。
+
+> `[ASSUMED]`：「**普通 / 精锐**」这两个词是**本项目**对自选槽那一对记录的叫法（`diySlot().elite`，
+> 代码与本文档里一直这么用）；官方词表里没有这两个词，Forge（上游工坊工具）也没有为「包声明的
+> `forms` 里哪条算普通、哪条算精锐」下过定义。有依据的是「哪两条记录的 `status` 必须都在 `forms` 里」
+> （上面那张表，一路上溯到官方 `shop.goldenChessId`）；**没有依据**的是「官方口径里哪一条叫普通、
+> 哪一条叫精锐」—— 那一步请以数据为准，不要按名字或键序猜。
 
 #### 技能图标与分支图标（`art.skills` / `art.profSub`）
 
@@ -391,6 +418,15 @@ workshop/*/ ──┘        （冻结之前）              └─→ /data/<fi
 配音语言查的那两张表，所以**播放侧一行代码都不用改**。该语种没有这个干员的条目时，客户端回退到默认配音那一档，
 玩家不会因为某个语种缺文件而突然没声音。任何一边非空，`assets.json` 都进「被触及的数据文件」集合
 （`workshopTouchedFiles`）；一个语种都没有的包**不会**让清单长出一个空的 `voiceLangs`。
+
+> ⚠️ **音频没有 `art` 表：`art.audio` 会被拒（2026-10-13 实测）。** `data/assets.json` 里那张 `assets.audio`
+> 是**生成物**（`tools/assets/audio.mjs` 从官方素材写的），不是 `pack.json` 的一条素材通道 —— 包的音频入口
+> **只有** `voices`（默认配音 ⇒ `assets.audio.voice`）与 `voiceLangs`（其它语种 ⇒ `assets.audio.voiceLangs[<lang>]`）
+> 这两个顶层字段。`ART_TABLES` 的表名闭集是 `chars` / `enemies` / `tokens` / `skills` / `profSub` / `bonds` /
+> `bands`，所以照着清单里的 `assets.audio` 写 `art.audio` 时被点名的码是 **`ART_UNKNOWN_TABLE`**
+> （与 `art.weapons`、单数 `art.bond` 逐字同一格，`shared/workshop.js` 的 `parseArtDecl`）——
+> **不是** `PACK_UNKNOWN_FIELD`：那个码管的是 `pack.json` 的**顶层键**闭集。判据在
+> `test/workshopArt.test.js` 的「每一种写法错误都被拒」那一格。
 
 **写这两个字段的图形入口是编辑器的第七个页面 `/voice.html`**（`docs/EDITOR.md` §语音）：先在语言下拉里选要编辑哪一档
 （默认配音 = `voices`，或 cn / en / kr = `voiceLangs[<lang>]`），再就地改对应的表；其余字段、键序与缩进原样保留，
@@ -1872,6 +1908,10 @@ export function install(room) {
 **引擎里第一方那张表一个字节不动，你的声明只做增量**。
 
 #### `pack.json.forms` —— 形态（clip set）
+
+> ⚠️ 这一节的 `forms` 与 `units.json` 里那组 `forms`（干员的**档位**，`2/1/4/0` 那种键，见 §1.4 的「哪条档位算
+> 普通、哪条算精锐」）**不是同一件东西**，只是同名的两个字段：这一节说的是**渲染用的 clip 集**
+> （`spine id → 形态名 → roles`），与 `diy.slots` 那一对记录没有任何关系。
 
 引擎里 `public/js/render/units.js` 的 `FORMS` 是一张**冻结的常量**：按 spine id（就是 `assets.spine` / 怪物 /
 召唤物自己的 id）键，值是「形态名 → `{ change, end, leave, next, roles }`」。sim 发一条 `'phase'` 特效带
