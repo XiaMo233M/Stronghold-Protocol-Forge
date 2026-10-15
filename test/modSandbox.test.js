@@ -52,8 +52,8 @@ test('看门狗：死循环的 handler 被超时杀掉，宿主不受影响，�
     host.routes.add({ path: '/mod/demo/ok', handler: () => ({ body: 'fine' }) });
   }`);
   try {
-    // 500ms 超时：够 fork 起来，不够跑完那个 60s 死循环
-    const r = await run(p, { timeoutMs: 1500, stateRoot: path.join(p.dir, 'var') });
+    // 单次调用 1.5s 超时（对付那个 60s 死循环），但**起进程**给足 8s —— CI 上 fork+import 比本机慢得多
+    const r = await run(p, { timeoutMs: 1500, readyTimeoutMs: T, stateRoot: path.join(p.dir, 'var') });
     assert.equal(r.ok, true, JSON.stringify(r.errors));
     const { runner } = r;
     // 宿主进程显然还活着（我们正跑在这一行）；现在让那个死循环的调用超时
@@ -95,7 +95,7 @@ test('入口越界 / 不存在 / registerPlugin 抛异常 ⇒ 具名拒，宿主
     assert.equal(missing.ok, false);
     assert.equal(missing.errors[0].code, 'PLUGIN_BAD_ENTRY');
 
-    const r = await run(p, { timeoutMs: 1500 });
+    const r = await run(p, { timeoutMs: 1500, readyTimeoutMs: T });
     assert.equal(r.ok, false, 'registerPlugin 抛异常 ⇒ 起不来');
     assert.equal(r.errors[0].code, 'SANDBOX_START_FAILED');
   } finally { fs.rmSync(p.dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); }

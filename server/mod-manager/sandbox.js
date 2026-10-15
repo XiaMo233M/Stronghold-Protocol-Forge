@@ -25,6 +25,32 @@ import { createBudgetTracker, UNLIMITED_BUDGET } from './budget.js';
 const noopLog = { info() {}, warn() {}, error() {}, debug() {} };
 const RUNTIME = path.join(path.dirname(fileURLToPath(import.meta.url)), 'sandboxRuntime.js');
 
+/**
+ * 不 `unref` 的定时器：**门控 promise 的定时器绝不能 unref** —— 一旦它是唯一还活着的句柄，
+ * 事件循环会直接排空，Node 报 `Promise resolution is still pending but the event loop has already resolved`
+ * （在 Linux 上必现；Windows 上常被子进程句柄兜住，所以本机测试看不出来）。CI 抓到的就是这个。
+ */
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * 轮询等待一个条件（**不 unref**，到点或条件成立就清掉 interval）。
+ * @param {() => boolean} predicate
+ * @param {number} ms
+ * @param {number} [step]
+ */
+function waitFor(predicate, ms, step = 5) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    const tick = () => {
+      if (predicate()) { clearInterval(iv); clearTimeout(tm); resolve(true); return; }
+      if (Date.now() - t0 > ms) { clearInterval(iv); clearTimeout(tm); resolve(false); }
+    };
+    const iv = setInterval(tick, step);
+    const tm = setTimeout(() => { clearInterval(iv); resolve(false); }, ms + step);
+    tick();
+  });
+}
+
 /** 父侧对子进程做的每一件事都可能失败，且都必须**具名**。 */
 export class SandboxError extends Error {
   constructor(code, message) {
@@ -46,8 +72,11 @@ export class SandboxError extends Error {
  */
 export async function createSandboxRunner({
   pluginId, entry, dir, stateRoot = null, log = noopLog,
-  timeoutMs = 5000, budget = UNLIMITED_BUDGET, execPath = process.execPath, forkImpl = fork,
+  timeoutMs = 5000, readyTimeoutMs = null, budget = UNLIMITED_BUDGET, execPath = process.execPath, forkImpl = fork,
 }) {
+  // 「起进程要等多久」与「一次调用等多久」是两件事：CI 上 fork + import 可能比本机慢一个数量级，
+  // 用同一个数会把慢机器误判成「插件起不来」。不传则保持旧语义（两者相同）。
+  const startMs = readyTimeoutMs === null ? timeoutMs : readyTimeoutMs;
   const abs = path.join(dir, ...String(entry || '').split('/'));
   if (!(abs === dir || abs.startsWith(dir + path.sep))) {
     return { ok: false, errors: [{ code: 'PLUGIN_BAD_ENTRY', reason: `entry ${JSON.stringify(entry)} escapes the plugin directory` }] };
@@ -140,17 +169,9 @@ export async function createSandboxRunner({
 
   spawn();
   // 握手：等 `ready`（或一条 error），带超时。子进程的顶层副作用在这一步就已经发生了。
-  const ready = await new Promise((resolve) => {
-    const t0 = Date.now();
-    const timer = setInterval(() => {
-      if (state.status === 'ready') { clearInterval(timer); resolve(true); }
-      else if (state.status === 'error' || state.status === 'crashed') { clearInterval(timer); resolve(false); }
-      else if (Date.now() - t0 > timeoutMs) { clearInterval(timer); kill(); state.status = 'timeout'; resolve(false); }
-    }, 5);
-    timer.unref?.();
-    child.once('error', () => { clearInterval(timer); resolve(false); });
-  });
-  if (!ready) {
+  const ready = await waitFor(() => state.status !== 'starting', startMs);
+  if (!ready || state.status !== 'ready') {
+    if (state.status === 'starting') state.status = 'timeout';
     kill();
     return { ok: false, errors: [{ code: state.status === 'timeout' ? 'SANDBOX_TIMEOUT' : 'SANDBOX_START_FAILED', reason: `sandbox for "${pluginId}" did not become ready (${state.status})` }] };
   }
@@ -170,7 +191,7 @@ export async function createSandboxRunner({
       const c = child;
       try { if (child) await call({ type: 'shutdown' }, Math.min(timeoutMs, 2000)); } catch { /* 下面兜底 */ }
       kill();
-      if (c) await new Promise((resolve) => { if (c.exitCode !== null || c.signalCode) return resolve(); c.once('exit', () => resolve()); setTimeout(resolve, 1000).unref?.(); });
+      if (c) await new Promise((resolve) => { if (c.exitCode !== null || c.signalCode) return resolve(); c.once('exit', () => resolve()); setTimeout(resolve, 1000); });
       state.status = 'closed';
       return { ok: true };
     },
@@ -178,19 +199,12 @@ export async function createSandboxRunner({
     async restart() {
       if (state.status === 'ready') return { ok: true, already: true };
       kill();
-      await new Promise((r) => setTimeout(r, 50).unref?.() ?? setTimeout(r, 50));
+      await sleep(50);
       closing = false;
       state.status = 'starting';
       spawn();
-      const ok = await new Promise((resolve) => {
-        const t0 = Date.now();
-        const timer = setInterval(() => {
-          if (state.status === 'ready') { clearInterval(timer); resolve(true); }
-          else if (Date.now() - t0 > timeoutMs) { clearInterval(timer); kill(); resolve(false); }
-        }, 5);
-        timer.unref?.();
-      });
-      return ok ? { ok: true } : { ok: false, code: 'SANDBOX_START_FAILED' };
+      const ok = await waitFor(() => state.status !== 'starting', startMs);
+      return ok && state.status === 'ready' ? { ok: true } : { ok: false, code: 'SANDBOX_START_FAILED' };
     },
   };
   return { ok: true, runner };

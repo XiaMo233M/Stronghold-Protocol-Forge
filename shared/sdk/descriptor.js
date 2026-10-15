@@ -163,7 +163,7 @@ export const OFFICIAL_DEFAULT_BUDGET = Object.freeze({
 });
 
 /**
- * @param {unknown} raw
+ * @param {any} raw
  * @returns {{ descriptor: object|null, issues: Array<{code:string,reason:string}> }}
  */
 export function fromOfficialManifest(raw) {
