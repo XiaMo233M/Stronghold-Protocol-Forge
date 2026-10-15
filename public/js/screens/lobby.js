@@ -592,6 +592,23 @@ function ModPicker({ selected, onToggle }) {
   </div>`;
 }
 
+/**
+ * 「本房间使用的模组」选择器要不要出现（G3）。**一格判据、两个建房屏共用**
+ * （`ProtocolScreen` 与 `AllianceSelect`）—— 两份判据就是两个会漂的真相。
+ *
+ * 判据**不是房间模式，而是「这台服务器声明过包吗」**：那件事由 `ModPicker` 自己收尾
+ * （`available.length === 0` 就返回 null），所以干净安装逐字节不变；这里只列**真的会建房间**的两个模式。
+ *
+ * **为什么 solo 也要有**：服务端从不按 mode 分支 —— `server/lobby.js` 的 `resolveRoomModSet` 在 `create` 里
+ * 无条件跑，结果写进 `room.modIds` / `room.modSet`；而 W-B 让声明的集合**真的决定这一局跑什么**
+ * （`startMatch` 里 `roomAssets.forRoom(room.modSet)` 供出这一局的数据 / kit 清单，`mods` 又进 BattleSpec）。
+ * 单人房声明集合因此不是装饰 —— 从前只是**客户端没给入口**，服务端一直收得下。
+ * @param {string} roomMode 'solo' | 'coop'
+ * @returns {boolean}
+ */
+export const ROOM_MOD_PICKER_MODES = Object.freeze(['solo', 'coop']);
+export function hasRoomModPicker(roomMode) { return ROOM_MOD_PICKER_MODES.includes(roomMode); }
+
 
 /**
  * 野排匹配 (quick match, `room.queue` / `room.dequeue`; server/matchmaking.js, docs/META.md §1.6). The panel is the
@@ -731,7 +748,7 @@ function ProtocolSelect({ card, roomMode, random, variant, difficulty, onDifficu
             ${roomMode === 'coop' && CAN_ROOM_QUEUE && !CAN_QUEUE ? html`<${Button} variant="secondary" size="md" icon="users" loading=${busy === 'queue'} disabled=${!online || maint?.active || !!queue}
               onClick=${onQuickMatch}>${t('快速匹配')}<//>` : null}
           </div>` : null}
-          ${roomMode === 'coop' ? html`<${ModPicker} selected=${selectedMods} onToggle=${onToggleMod} />` : null}
+          ${hasRoomModPicker(roomMode) ? html`<${ModPicker} selected=${selectedMods} onToggle=${onToggleMod} />` : null}
           ${roomMode === 'coop'
             ? html`<${SeatCapPicker} value=${seatValue} min=${seatRange.min} max=${seatRange.max} onChange=${onSeatPick} />`
             : null}
@@ -778,7 +795,7 @@ function AllianceSelect({ onClose, code, onCode, codeOk, recent, online, maint, 
         <button type="button" class="ally-guide" onClick=${() => openGuide(0)}><span class="ally-guide__icon"><${Icon} name="book" /></span>${t('入门协议')}</button>
       </section>
       <section class="ally-side">
-        ${roomMode === 'coop' ? html`<${ModPicker} selected=${selectedMods} onToggle=${onToggleMod} />` : null}
+        ${hasRoomModPicker(roomMode) ? html`<${ModPicker} selected=${selectedMods} onToggle=${onToggleMod} />` : null}
         ${roomMode === 'coop'
           ? html`<${SeatCapPicker} value=${seatValue} min=${seatRange.min} max=${seatRange.max} onChange=${onSeatPick} />`
           : null}

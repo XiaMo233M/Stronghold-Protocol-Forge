@@ -1124,6 +1124,23 @@ describe('screen helpers', () => {
     assert.equal(stageLabel('nope'), '');
   });
 
+  test('G3: solo 房也拿得到模组选择器（房主能声明本房间的集合）', async () => {
+    const source = readFileSync(path.join(PUBLIC, 'js/screens/lobby.js'), 'utf8');
+    // ① 两个建房屏（选择模拟协议 / 选择同盟方式）各有一个渲染点，且**都不再由房间模式挡住**
+    assert.equal((source.match(/<[$]\{ModPicker\}/g) || []).length, 2, '两个建房屏各一处 ModPicker');
+    assert.equal(source.includes("roomMode === 'coop' ? html`<${ModPicker}"), false,
+      'ModPicker 不再被 coop 分支挡住 —— 改前这一条红（solo 房拿不到 picker）');
+    // ② 判据只有一处：两个渲染点共用同一个谓词（闭枚举/判据只有一份实现）
+    assert.equal((source.match(/\$\{hasRoomModPicker\(roomMode\) \? html/g) || []).length, 2, '两个渲染点共用同一个判据');
+    const { hasRoomModPicker, ROOM_MOD_PICKER_MODES } = await mod('screens/lobby.js');
+    assert.deepEqual([...ROOM_MOD_PICKER_MODES], ['solo', 'coop'], '两种会建房间的模式都要能声明集合');
+    assert.equal(hasRoomModPicker('solo'), true, 'solo 房要拿得到 picker');
+    assert.equal(hasRoomModPicker('coop'), true);
+    assert.equal(hasRoomModPicker('bogus'), false, '别的模式照旧不给（不是「一律给」）');
+    // ③ 干净安装逐字节不变：选择器自己按「这台服务器声明过包吗」收尾
+    assert.match(source, /if \(!available\.length\) return null;/, '没有包时 ModPicker 自己返回 null');
+  });
+
   test('room: normalizeSeats / roomFacts / inviteLink', async () => {
     const { normalizeSeats, roomFacts, inviteLink } = await mod('screens/room.js');
     const room = {
