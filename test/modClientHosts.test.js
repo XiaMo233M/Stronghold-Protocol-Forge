@@ -38,6 +38,17 @@ describe('宿主枚举：形状层与客户端两份名单钉在一起', () => {
     assert.deepEqual(MOD_PANEL_SLOTS.filter((s) => MOD_PANEL_CREATED.includes(s)).length, 4, '恰好四个浮层是引擎创建的');
   });
 
+  test('第 10 槽 `screen.room.aside` 是**组件渲染**的房间旁栏，不是浮层也不是可重复宿主', () => {
+    // 两侧同改的纪律：少一侧 = 形状层放行、客户端不认识（或反过来），面板静默不出现
+    assert.ok(MOD_PANEL_SLOTS.includes('screen.room.aside'), '客户端那一份要有');
+    assert.ok(CLIENT_PANEL_SLOTS.includes('screen.room.aside'), '形状层那一份要有');
+    // 它是「插进已存在组件」那一半：容器由组件（`public/js/screens/room.js`）自己渲染 `[data-mod-slot]` ——
+    // 注册点对这一格**只查不造**（下面那条「每个组件渲染的宿主都必须真的有人渲染它」正是这么钉的）。
+    assert.equal(MOD_PANEL_CREATED.includes('screen.room.aside'), false, '旁栏不是浮层：容器不由注册点按需创建');
+    // 一个房间屏只有一个旁栏（与商店卡那种「每张卡一个」的宿主不同），所以它不进可重复名单。
+    assert.equal(MOD_PANEL_REPEATABLE.includes('screen.room.aside'), false, '不是可重复宿主');
+  });
+
   test('枚举之外的 slot 照旧点名拒绝', () => {
     const base = { id: 'p', name: 'p', version: '1.0.0', license: 'CC0-1.0', description: 'x', gameVersion: '0.2.x' };
     const r = normalizePackManifest({ ...base, client: { panels: [{ id: 'p1', slot: 'screen.game.shopcard', module: 'a.js' }] } }, 'p', { hasAssets: false });
