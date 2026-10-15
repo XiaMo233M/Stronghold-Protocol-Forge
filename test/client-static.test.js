@@ -1141,6 +1141,30 @@ describe('screen helpers', () => {
     assert.match(source, /if \(!available\.length\) return null;/, '没有包时 ModPicker 自己返回 null');
   });
 
+  test('G1/G2 客户端：房间屏里房主改集合的入口判据与发送点（与服务端守卫同一份读法）', async () => {
+    const { canEditRoomMods } = await mod('screens/room.js');
+    const seat = (playerId, over = {}) => ({ seat: 0, playerId, name: playerId, isBot: false, ready: false, connected: true, ...over });
+    const room = (over = {}) => ({
+      code: 'ABCD', hostId: 'h', mode: 'coop', inMatch: false,
+      seats: [seat('h', { seat: 0 }), seat('g', { seat: 1 })], spectators: [], ...over,
+    });
+    assert.equal(canEditRoomMods(room(), 'h'), true, '房主、未开局、没人就绪 ⇒ 能改');
+    assert.equal(canEditRoomMods(room(), 'g'), false, '非房主（服务端 NOT_HOST）');
+    assert.equal(canEditRoomMods(room({ inMatch: true }), 'h'), false, '已开局（服务端 MOD_SET_LOCKED）');
+    assert.equal(canEditRoomMods(room({ seats: [seat('h', { seat: 0 }), seat('g', { seat: 1, ready: true })] }), 'h'), false,
+      '已有真人就绪（服务端 MOD_SET_LOCKED）');
+    // AI 座位天生 ready（server/lobby.js addBot）—— 与服务端同一处收窄：它从不对齐任何字节，不是这条守卫的对象
+    assert.equal(canEditRoomMods(room({ seats: [seat('h', { seat: 0 }), seat('ai_1', { seat: 1, isBot: true, ready: true })] }), 'h'), true,
+      'AI 座位不算「有人已就绪」（否则房主一加 AI 队友就再也改不了集合）');
+    assert.equal(canEditRoomMods(null, 'h'), false);
+
+    const source = readFileSync(path.join(PUBLIC, 'js/screens/room.js'), 'utf8');
+    assert.match(source, /net\.request\('room\.mods', \{ modIds: picked \}\)/, 'G1 的客户端发送点真的在房间屏里');
+    assert.match(source, /export function canEditRoomMods/, '判据导出为纯函数（能被真跑，不是只写在注释里）');
+    // 集合一变就先锁住准备就绪：`checking` 是那道硬门的一部分，不是一句提示
+    assert.match(source, /align\.checking \|\| \(align\.needed && !align\.ok\)/, 'checking 也挡住准备就绪');
+  });
+
   test('room: normalizeSeats / roomFacts / inviteLink', async () => {
     const { normalizeSeats, roomFacts, inviteLink } = await mod('screens/room.js');
     const room = {

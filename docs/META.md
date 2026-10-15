@@ -547,6 +547,44 @@ solo 帧。
 * **不变量（测试钉死）**：改容量前后，`seats` 里非空条目的**集合与座位号都不变**、没有人被移出、没有人的 `seat` 号
   变化（`test/roomSeatCap.test.js` §9「THE INVARIANT」对 4→8→5→4→6→4 每一步都验一遍）。
 
+### 1.9c 房内改本房间的模组集合 (`room.mods`, G1/G2)
+
+**房主可以在房间里改自己这一房声明的模组集合**（`room.mods { modIds }`）。建房的 picker（`room.create.modIds`，
+docs/WORKSHOP.md §1.9.3 / DESIGN §28.9）是**一次性**的：点错了、或者开好房才发现这一房要跑哪几个包，此前唯一的
+办法是解散重开 —— 而重开会把已经坐进来的博士全赶出去。这一格让「改集合」不再等于「重开房」。
+
+* **形状与 `room.create.modIds` 逐字同形**（同一格判据、同一个 `MAX_ROOM_MODS` 上限），但**必填**：这条消息的全部
+  内容就是「换成这几个」，缺了它，「声明空集合」与「消息坏了」就分不开 —— 而这两种情况的修法正好相反。
+  `modIds: []` = 改回「不声明」（这一局按服务器加载的全部模组跑，与 `room.create` 缺省同一义）。
+* **解析只有一份实现**：服务端复用建房的 `resolveRoomModSet`（`server/lobby.js`）—— ids 必须点名这台服务器**真的
+  装着的**包（否则 `MOD_UNKNOWN`，`detail` 同时列出未知与可用的），摘要是 `modSetOf` 算的那一个，改完立刻
+  `roomAssets.forRoom` 物化新摘要的数据面（广播之前它就存在了）。
+* **三道守卫**（全部点名拒绝，一条都不静默）：`NOT_HOST`（只有房主）；对局已开 ⇒ `MOD_SET_LOCKED`（正在跑的那一局
+  拿的是开局那一刻的集合）；**任一真人座位已就绪** ⇒ `MOD_SET_LOCKED`（那个人的客户端是按旧集合对齐完才点准备
+  就绪的）。**AI 座位不算**：`addBot` 建出来的座位天生 `ready: true`，而 AI 从不对齐任何字节 —— 照字面收进这条
+  判据，房主一加 AI 队友就再也改不了集合。
+* **为什么新造 `MOD_SET_LOCKED` 而不复用 `NOT_READY`**：`NOT_READY` 说的是「还有玩家没准备好，所以开不了局」，
+  这一格说的是「集合已经锁住了，改不了」—— 两句话在界面上正好相反，复用会让玩家读到一个与事实相反的理由。
+* **双检**：进 handler 先判一次，**真正应用之前再判一次**（借 Ave-Mujica 的设计，对方注释原文「another session
+  may have opened a room」）。今天这个 handler 从头到尾是同步的，所以第二次判不可能被别的会话插进来 —— 但守卫与
+  改动之间的距离是这段代码唯一的脆弱点，任何未来的异步化（读盘 / 物化 / 钩子）都会让它立刻变成真的，所以第二次判
+  紧挨着那两行赋值。
+* **集合变更后加入者怎么重新对齐（两边都要）**：服务端把**所有真人**（房主除外）退回未就绪并广播 `room.state`；
+  客户端那一半是 W-D 的准备就绪硬门 —— `public/js/screens/room.js` 的 `RoomModsPanel` 按 `room.state.mods.digest`
+  重跑 `planAlignment`，而且**摘要一变就先报 `checking`**：异步核对出结论之前，上一份摘要的 `ok: true` 不是关于这
+  一份集合的结论，所以那一段窗口里准备就绪是**挡住**的（不是提示）。
+* **房间级钩子的边界**：包声明的 `server.room` 钩子在 `install(room)` 那一刻拿到的 `ctx.room.modIds` 是**快照**
+  （DESIGN §28.20）。新集合里该装的钩子包与已经装上的不一致时，改集合会让某个包的观察面与房间的真实集合对不上 ⇒
+  `BAD_MSG` + 点名两边名单，而不是让它偷偷漂。只改「不含房间钩子的那几个包」时这条判据不挡路。
+* **`PROTOCOL_VERSION` 不抬**：这一刀只**新增**一条 C2S，`room.state` 的形状一个字没变（`mods` 这个键 W-A 起就在，
+  且仍然「不声明就没有」）—— 按 `shared/constants.js` 那条逐字口径（只有**推送帧形状变了、旧页面会读错**才抬；先例
+  `records.mine`），新增一条客户端消息不在其中：旧页面永远不发它，新页面也不会跑去连旧服务端。
+* **UI**：房间屏的 `RoomModsPanel`（`public/js/screens/room.js`）在房主这一侧多一个「更改本房间模组」——可选列表就是
+  `welcome.mods.packs`（服务器声明过的那一份），勾选后发这一条消息；入口给不给由纯函数 `canEditRoomMods` 判（与服务端
+  守卫同一份读法，`test/client-static.test.js` 真跑它）。
+* **面板也能发这一条**：`PANEL_SEND_TYPES`（`public/js/ui/extensions.js`）多了 `room.mods` —— 面板能不能发它是**闭
+  枚举**说了算，而 `room.create` **不在**里面（面板能改对局状态的那一天，就是这一层失效的那一天）。
+
 ---
 
 ## 2. Effect registry (content API)

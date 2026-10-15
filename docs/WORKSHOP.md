@@ -962,10 +962,19 @@ export function mount(ctx) {
 | `host` | 属于这次挂载的 `<div>`；往里画界面 |
 | `session.setPreload({ required, ready })` | **唯一**的 store 写口：入口闸门那两个状态位（见下） |
 | `net.on(type, fn)` / `net.sendResourceMessage(msg)` | **唯一**的网络口；见下 |
+| `session.send(type, fields)` | 发一条**引擎消息**：白名单是**闭枚举** `PANEL_SEND_TYPES`（今天 `room.appearance` 与 `room.mods`），形状再过一遍 `shared/protocol.js` 的 C2S。⚠️ 这是 `ctx.session` 上那一格 —— `ctx.net.send(channel, data)` 是**你自己的通道**（§1.9.6，先在 `messages` 里声明过才发得出去），两者不是同一条路 |
 | `data.get('<表>')` / `data.tables()` | **只读快照**：你在 `data` 里声明过的那些表（见下） |
 
 **没有** store 句柄、没有 `net` 对象本身、没有对局对象、没有 `Match`/`Battle`，也**不能**自己注册
 `socket.on('message')`。所以面板能画错，**改不了对局结果**。
+
+**`PANEL_SEND_TYPES` 为什么只有两条**（`public/js/ui/extensions.js`）：它是「面板能**主动发起**的引擎消息」的**闭
+枚举**，而这一层的历史立场是「只列**展示**类：面板能改对局状态的那一天，就是这一层失效的那一天」。今天两条：
+`room.appearance`（只改别人看到的外观、不碰战果）与 `room.mods`（房间级、**只有房主**、开局前且没人就绪才收，
+`docs/META.md` §1.9c）—— 后者是**唯一**一条能改变「这一局跑哪几个包」的消息，之所以放进来，是因为它改的是
+**房间声明的集合**（一个已经被 `MOD_SET_LOCKED` 锁在开局前的房间级设置），而不是某一场对局里的任何数值。
+**`room.create` 不在里面，也永远不该在**：面板能替玩家建房，就是它能改对局状态。加一条要同时改这张表、那条消息的
+C2S 形状、以及一条测试（`test/modClientPanels.test.js` 那一组）。
 
 **数据口（`client.panels[].data`，业主裁决 2026-10-10）**：要在卡上按数据画标记，就声明你要读哪几张表，然后用
 `ctx.data.get('chess')` 拿一份**冻结的深拷贝**：

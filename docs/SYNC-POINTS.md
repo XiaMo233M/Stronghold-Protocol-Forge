@@ -30,6 +30,11 @@
 >
 > **`C2S` 是作者可见的表面**：`server/modDispatch.js` 把它复制进交给包的 `c2s`。表里漏一条，
 > 包就会把一个合法消息判成缺字段。
+>
+> **`room.*`（房间级意图）的落点不一样**：②落在 `server/lobby.js` 的 `onMessage`（不是 `intents.js` —— 那里只收对局内
+> 的 `g.*`），③不适用（`test/match/fuzz.test.js` 的 `GAME` 只从 `g.*` 里取），④落在房间屏
+> （`public/js/screens/room.js`，不是 `gameActions.js`），⑤照旧（玩家可见文案要进四个语言包）。先例：`room.setSeatCap`
+> （`docs/META.md` §1.9a）与 `room.mods`（§1.9c）。
 
 ---
 
@@ -75,7 +80,7 @@
 
 | # | 同步点 | 漏了会怎样 |
 |---|---|---|
-| ① | `shared/workshop.js` 的 **`CLIENT_PANEL_SLOTS`**（**今天 9 个**）；宿主若可重复还要登记 **`CLIENT_PANEL_REPEATABLE`**（今天 1 个：`screen.game.shopCard`） | 槽位是**闭枚举**：拼错 / 未登记的槽位 ⇒ 面板**永远不出现**，而且**没有任何错误** |
+| ① | `shared/workshop.js` 的 **`CLIENT_PANEL_SLOTS`**（**今天 10 个**）；宿主若可重复还要登记 **`CLIENT_PANEL_REPEATABLE`**（今天 1 个：`screen.game.shopCard`） | 槽位是**闭枚举**：拼错 / 未登记的槽位 ⇒ 面板**永远不出现**，而且**没有任何错误** |
 | ② | **客户端渲染点**：该槽位的宿主元素。两档 —— **组件自己渲染** `[data-mod-slot="…"]`（如 `public/js/screens/game.js`、`public/js/ui/bondStrip.js`、`public/js/ui/detailPanel.js`、`public/js/ui/shopBar.js`）；**浮层**那一档由 `public/js/ui/extensions.js` 的 `MOD_PANEL_SLOTS` 与注册点负责 | 面板挂到一个**不存在的容器**上 ⇒ 静默不显示 |
 | ③ | `test/modPanelWraps.test.js` | 两处名单（形状层副本 / 客户端真相）没人钉在一起 ⇒ 可以各说各话 |
 
