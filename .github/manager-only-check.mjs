@@ -27,7 +27,13 @@ if (!fs.existsSync(ovPath)) { console.log('::warning::叠层清单读不到，�
 let ov;
 try { ov = JSON.parse(fs.readFileSync(ovPath, 'utf8')); } catch (e) { console.error(`::error::清单不是合法 JSON：${e.message}`); process.exit(3); }
 
-const allow = new Set([...(ov.mine ?? []), ...(ov.patches ?? []).map((p) => p.file)]);
+// 允许集 = 自有文件 ∪ 已登记的叠层（patches：改上游拥有的文件）∪ 已登记的受控例外（bodyPaths：改本体也有的文件）。
+// 三者都是「留了证据的改动」；没登记的才叫越界。
+const allow = new Set([
+  ...(ov.mine ?? []),
+  ...(ov.patches ?? []).map((p) => p.file),
+  ...(ov.bodyPaths ?? []).map((b) => b.file),
+]);
 const CONTROL_PREFIXES = ['.github/'];
 
 const walk = (root, rel = '', out = new Set()) => {

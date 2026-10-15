@@ -167,7 +167,28 @@
       "retireWhen": "上游自己收了 lane ⇒ 删这条 patches。"
     }
   ],
-  "bodyPaths": [],
+  "bodyPaths": [
+    {
+      "file": "shared/constants.js",
+      "why": "发布版本号是我方自有路线必须自己推进的一格（`test/version.test.js` 把 APP_VERSION 与 package.json / lock / CHANGELOG 首节四处钉成同源；不抬它就撞已存在的 modmgr-v0.18.6-0.2.6 tag）。这一格只改 `APP_VERSION` 一个值 —— `PROTOCOL_VERSION` / `MOD_API_VERSION` 一字未动。",
+      "anchors": ["export const APP_VERSION = '0.18.7';"]
+    },
+    {
+      "file": "package.json",
+      "why": "同上：版本同源的第二处。",
+      "anchors": ["\"version\": \"0.18.7\""]
+    },
+    {
+      "file": "package-lock.json",
+      "why": "同上：版本同源的第三、四处（根 `version` 与 `packages[\"\"].version`）。",
+      "anchors": ["\"version\": \"0.18.7\""]
+    },
+    {
+      "file": "CHANGELOG.md",
+      "why": "0.18.7 那一节（三格新能力 + 两条红线口径变更 + 判据）。游戏内公告由本文件的前若干节生成，所以这一节同时是发布公告；`test/version.test.js` 要求首个 `## x.y.z` 与 APP_VERSION 同半。",
+      "anchors": ["## 0.18.7 — 2026-10-15"]
+    }
+  ],
   "bodyPathsNote": "受控例外登记处（2026-10-15 起）：每一格是我方**确实改了、而游戏本体 sganggs 也有同名路径**的文件。必填：file / why / anchors（至少一条，且必须能在我们的树里找到 —— `.github/game-overlap-check.mjs` 逐条核对，锚点丢了就拦同步）。空数组 = 当前与本体零交集，这是更强的那条性质，别为了填东西往里塞。",
   "release": {
     "profile": "tools/package-server.mjs（server profile）",
