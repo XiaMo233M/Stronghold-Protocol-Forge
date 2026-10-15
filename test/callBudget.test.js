@@ -35,7 +35,7 @@ import { stripComments } from '../shared/kitAuthoring.js';
 import { loadWorkshop, loadWorkshopKits } from '../server/workshop.js';
 import { loadBattleInstallers } from '../server/battlePack.js';
 import { loadSpecBattleInstallers, loadSpecKits } from '../public/js/battle/runner.js';
-import { buildBattleSpec } from '../server/sim/spec.js';
+import { buildBattleSpec, createBattleFromSpec } from '../server/sim/spec.js';
 import { makeBattle, chessRec, hashOf } from './helpers/battleHarness.js';
 
 const quiet = { info() {}, warn() {}, error() {}, debug() {} };
@@ -597,5 +597,23 @@ describe('判据⑤：只带 kits/ 的包也建账', () => {
     assert.equal(unit.findBuff('kitpack:cb'), null, '回滚必须撤掉它标的 buff');
     assert.ok(b.errors.some((e) => e.label === `plugin:${KIT_ONLY_PACK_ID}`),
       `只带 kits/ 的包也必须被点名回滚，实际：${JSON.stringify(b.errors.map((e) => e.label))}`);
+  });
+
+  test('浏览器那条路真的把三张表交进 Battle opts（spec → createBattleFromSpec）', async () => {
+    // `loadSpecKits` 只是把清单**读**出来；真正把它们交给战斗的是 `createBattleFromSpec` 的 opts 转发。这一段用
+    // 一个只记构造参数的替身驱动**真的** `createBattleFromSpec`：漏了这三个键，浏览器侧的 kit 逐单位回调就一条都
+    // 不归账、而服务端复算那半会回滚 —— 两端在**不同**的调用次数上停（这就是「通道通了但没人用」）。
+    const spec = buildBattleSpec({ workshopKits: info.modules });
+    const { kits, tokenKits, kitOwners, tokenKitOwners, kitBudgets } = await loadSpecKits(spec);
+    class OptsSpy { constructor(opts) { this.opts = opts; } }
+    const b = createBattleFromSpec(spec, null, { BattleClass: OptsSpy, kits, tokenKits, kitOwners, tokenKitOwners, kitBudgets });
+    assert.equal(b.opts.kitOwners, kitOwners, '归属表必须到 Battle opts');
+    assert.equal(b.opts.tokenKitOwners, tokenKitOwners, '召唤物那一半的归属表同理');
+    assert.equal(b.opts.kitBudgets, kitBudgets, '预算表必须到 Battle opts（两端读同一个数字）');
+    // 没有包时这三个键根本不出现（KEY DISCIPLINE：干净安装的 Battle opts 形状与从前逐字节相同）。
+    const plain = createBattleFromSpec(buildBattleSpec({}), null, { BattleClass: OptsSpy });
+    for (const k of ['kitOwners', 'tokenKitOwners', 'kitBudgets']) {
+      assert.equal(k in plain.opts, false, `无包时不该有 ${k}`);
+    }
   });
 });
