@@ -3930,3 +3930,52 @@ count +1 ⇒ **层数自然上去**。这是一条**纯数据**通道：不需�
 两端同一个数字与同一次调用上回滚且预算路径**无端特有分支**、`server/lobby.js` 里没有探测）。
 **不需要 `golden:update`**：不声明 `callBudget` 的包归一化清单不长键、`BattleHooks` 的记账对没有账的回调立刻放行，
 所以不装包与不声明预算两条路径的**战果逐字节相同**（实测见交付说明）。
+
+### 28.53 房间同意 + 服主 pin：把「信任」从作者自觉挪到**每名真人的表态**与**字节**上
+
+我们的信任原来压在「审查 + 作者自觉」上：`checkModSet`（§28.9）让客户端回一个**进程集合**的摘要，回了就放行。
+那是一个**握手**（客户端证明它读到了服务器装着哪些包），不是**表态** —— 一位博士可以在一句提示都没看到的情况下
+进到一个跑别人写的战斗逻辑的房间里。这一节补两件事，**都不换掉既有守卫**，是在它们旁边加一道：
+
+**① 每名真人须同意。** 新的错误码 `MOD_CONSENT_REQUIRED`（`shared/constants.js`），C2S `room.join` 多一格
+**可选**的 `consent: true`（`shared/protocol.js`）。判据两处：进房（占**玩家座位**之前，所以没同意的人**进不去**，
+不是「进来了只能看着」）与开局（`room.start`，所以集合中途改过之后**没有人重新 join** 也拦得住）。同意的内容是
+**一份字节指纹**：`seat.modConsent === room.modSet.digest` 才算同意过 —— 集合一变，摘要就不同，同意自动作废
+（`setRoomMods` 里还会显式清空一次，那是第二层保险）。比「同意过一次就一直算」诚实：他当初同意的是另一份字节。
+
+三条边界是**判断**不是漏判，与既有那些判据**逐字同一条口径**：
+
+* **房主不受它约束**：`room.create` 报出的 `modIds` 就是他在钉这一份字节（`create` 据此把房主的座位写成
+  `modConsent = digest`）。要求一个人对自己刚钉下的东西再点一次同意，不增加任何信息。
+* **AI 座位不算**：`addBot` 建出来的座位天生 `ready: true`，而 AI 从不对齐任何字节、也没有客户端 —— 与
+  `roomModsRefusal` 只数 `!seat.isBot` 是同一条口径。
+* **观战者不算**：他们不走 `join`、不占玩家座位、不参与开局门槛（`activeHumans`）。他们不跑这一房的内容。
+
+**② 服主 pin = 房间的字节指纹。** pin 不是一个新的对象：**`room.modSet.digest` 就是它**（`modSetOf` 算的
+`[id, hash]` 排序对 sha256，§28.2）。「指纹变了」只有两种形态，两种都复用**早就在这台机器上**的那两道守卫：
+
+| 漂移 | 判据（`shared/modIdentity.js modSetDrift`） | 复用哪个码 |
+|---|---|---|
+| 包没了 | `missing: [id]` | `MOD_UNKNOWN`（「本服务器没有这个包」本来就是这件事） |
+| 包被换了（同 id、另一 hash） | `changed: [{ id, was, now }]` | `MOD_SET_LOCKED` + 一句说真话的 detail |
+
+判决点两个：`server/lobby.js` 的 `join` 与 `start`（都走 `modPinRefusal`）。**没有第二套「pin 对象」**，也没有
+第二个算摘要的地方 —— `modSetDrift` 住在 `shared/modIdentity.js`，与算摘要的代码同一个文件、同一条 `[id, hash]`
+口径。没声明集合的房间（`room.modSet === null`）在这两个判决点都是第一行早退。
+
+**加了哪一格、没抬什么版本。** `consent` 是**加性可选字段**，所以 `PROTOCOL_VERSION` **不抬**（先例：`records.mine`）。
+抬版本的判据是「推送帧的**形状**变了、旧页面会读错」；这里变的是 **C2S**，而且老客户端一个字节都不发 —— 它的
+`room.join` 与今天逐字节相同，服务器只在目标房间**声明了集合**时才会回它一句能照着改的 `MOD_CONSENT_REQUIRED`。
+理由写在 `shared/protocol.js` 那一格，与提交信息里同一段。
+
+**客户端那条链路。** 「拒绝 ⇒ 照 `detail` 问一次 ⇒ 带 `consent: true` 重发」三处入口（大厅按密钥加入、房间里从
+观战入座、`?room=` 深链自动入座）**共用同一处**决定「重发什么」（`public/js/roomMods.js` 的
+`consentRetryPayload`）；屏幕只负责**问**（`confirmDialog`）。为什么它必须是一处：三处各写一遍就是三个会漂的真相，
+而漂的方向是某一处悄悄不带 `consent` 重发 —— 那等于把同意退化成一次自动重试。同一条 `room.join` 也是**已经坐在
+里面的人重新表态**的通道（幂等分支会补上同意），所以他不必退出再进。
+
+**测试**：`test/roomConsent.test.js`（未同意进不去 / 不能开始、同意后照常、两种漂移各点各的包、不声明集合的房间
+`room.state` 不带 `mods` 且 join 只要 `{ code }`，以及**跑真 Net + 真 roomMods 打真服务器**的那条重发链路）；
+`test/modIdentityWire.test.js` 与 `test/roomModSet.test.js` 的 `$optional` 断言按新形状**故意改写**，
+`test/roomKeep.test.js` 与 `test/roomModSet.test.js` 里进「声明了集合的房」的夹具 join 显式带上 `consent: true`。
+**不声明模组的房间逐字节等于今天**（那条没有第二个答案）。

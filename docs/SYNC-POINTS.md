@@ -35,6 +35,11 @@
 > 的 `g.*`），③不适用（`test/match/fuzz.test.js` 的 `GAME` 只从 `g.*` 里取），④落在房间屏
 > （`public/js/screens/room.js`，不是 `gameActions.js`），⑤照旧（玩家可见文案要进四个语言包）。先例：`room.setSeatCap`
 > （`docs/META.md` §1.9a）与 `room.mods`（§1.9c）。
+>
+> **给一条既有意图加一个可选字段**（比新意图轻，但那条「两条路都要留」的摩擦一样）：① 同一格加判据 + 登记进
+> `$optional`；② 不动（handler 只是多解一个字段）；③ 不动；④ 落在那条意图真正的发出点；⑤ 只有产生玩家可见文字时
+> 才要。**加性可选字段不抬 `PROTOCOL_VERSION`**（判据是「推送帧的形状变了」；先例 `records.mine`）—— 但要在
+> `shared/protocol.js` 那一格把理由写下来。先例：`room.join.consent`（W7, `docs/design/mod-layer.md` §28.53）。
 
 ---
 
@@ -62,7 +67,7 @@
 
 | # | 同步点 | 漏了会怎样 |
 |---|---|---|
-| ① | `shared/workshop.js` 的 **`PACK_FIELDS`**（**今天 35 键**） | 作者写它 ⇒ `PACK_UNKNOWN_FIELD` **整包拒**；字段在这一层就是**闭集** |
+| ① | `shared/workshop.js` 的 **`PACK_FIELDS`**（**今天 37 键**） | 作者写它 ⇒ `PACK_UNKNOWN_FIELD` **整包拒**；字段在这一层就是**闭集** |
 | ② | 同文件的 **`normalizePackManifest`** 加解析分支 | 键合法了、**归一化时被丢掉** ⇒ 作者看到「pack.json 合法、包加载了、可我写的那件事没发生」 |
 | ③ | `server/workshop.js` 的 **`identifyPack`** 的哈希清单 | **能改变一端行为的声明不进哈希** ⇒ 同一个摘要下出现两种行为（§28.2） |
 | ④ | `docs/MOD-SURFACE.md` 那一行（表面清单） | 文档与实现分叉；`test/modSurface.test.js` 红 |
