@@ -188,10 +188,14 @@ export const MOD_SURFACE = Object.freeze([
     ],
     requires: [
       '只允许 uses 里那几个生命周期钩子（闭枚举；加一格不抬世代）',
-      '源码过静态确定性扫描（无 process / require / eval）—— **这一条从 2026-10-11 起真的实现了**：' +
+      '源码过静态确定性扫描（无 process / globalThis / require / eval）—— **这一条从 2026-10-11 起真的实现了**：' +
         '`server/modModules.js serverModuleSourceIssues` 在 `import()` **之前**跑 `stripComments` + `mentionsIdentifier`，' +
-        '取 `SERVER_CODE_FORBIDDEN_GLOBALS`（与 server.meta / battle / room 三处**同一张共享表**）**去掉 `globalThis` 一格**：' +
-        '承诺逐字是那三个名字，而仓库里有一个能用的 server.modules 模块用 `globalThis` 与同进程测试通信（判死它就会裁掉那个合法包）。' +
+        '取 `SERVER_CODE_FORBIDDEN_GLOBALS`（与 server.meta / battle / room 三处**同一张共享表、同一段名单**）。' +
+        '`globalThis` 那一格 2026-10-13 **回归**：它曾被拿掉，为保住那个拿 `globalThis` 与同进程测试通信的合法模块；' +
+        '那个用例现在走**引擎显式注入**的 `host.io`（包声明 `write: true`，目录限定在 `<状态目录>/mod/<包id>/`），' +
+        '于是这一格没有留下的理由 —— 开着它时 `globalThis.process` 绕得过 `process` 那一格。' +
+        '与那三处逐字同一句免责：这是**启发式，不是沙箱**（把名字拼成两段绕得过），兜底的是内容哈希与' +
+        '「只给 uses 里声明过的那几样」。' +
         'kit 那一段（时钟 / 随机 / DOM / 计时器）**刻意不取**：这一层的挂载点都在对局之外跑，要读进程信息请用 host.metrics',
       // 这一格唯一的**网络触发点**：`uses` 含 `matchClass`（⇒ 必须 `combat: true`）的包，其 MatchClass 子类上的
       // `handlePackMsg(playerId, msg)` 会在 `pack.msg` 限流之后、转发之前被调到一次；返回 `true` /

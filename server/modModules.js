@@ -241,23 +241,8 @@ function entryAbs(pack, mod) {
 }
 
 /**
- * `server.modules` 源码里**不许出现**的名字。
- *
- * 取 `SERVER_CODE_FORBIDDEN_GLOBALS`（与那三处**同一张共享表**、同一个扫描器），但**去掉 `globalThis` 一格** ——
- * 这一条是实测出来的，不是拍的：
- *   * 这一格的承诺（`shared/modSurface.js`）**逐字**是「无 `process` / `require` / `eval`」，`globalThis` 不在其中；
- *   * 仓库里**已经有一个能用的 `server.modules` 模块**（`test/packMatchMsg.test.js` 的 fixture）用 `globalThis`
- *     与同进程的测试通信 —— 把 `globalThis` 判死会让那个**合法**模块连带整包被裁掉。业主的规矩是「先查有没有现存包
- *     会被新扫描拒，真有 ⇒ 停下报我，别硬装」，所以这里收窄到承诺里那三个名字（+ `new Function`，`eval` 的同一族）。
- *
- * 诚实的一句：这仍然是**启发式，不是沙箱**。`globalThis['pro'+'cess']` 与 `globalThis['ev'+'al']` 绕得过它 —— 那三处
- * （meta / battle / room）也一样绕得过，它们的表里虽然有 `globalThis`，但拼字符串一样能绕。真正兜底的是
- * 「同一份包字节 ⇒ 同一份服务端代码」的内容哈希 + 模块只能拿到 `uses` 里声明过的那几样东西。
- */
-const MODULE_FORBIDDEN_GLOBALS = Object.freeze(SERVER_CODE_FORBIDDEN_GLOBALS.filter(([name]) => name !== 'globalThis'));
-
-/**
- * 静态判定一个 `server.modules` 模块的源码，**在 `import()` 之前**。
+ * 静态判定一个 `server.modules` 模块的源码，**在 `import()` 之前**（2026-10-13 起 `globalThis` 也在名单里 —
+ * 它曾经被整体拿掉过，`globalThis.process` 因此是这份扫描最明显的一条缺口；来龙去脉见下面的那一段）。
  *
  * 这一条是**补上的欠账**：`shared/modSurface.js` 的 `server.modules` 那一格从第一天起就写着
  * 「源码过静态确定性扫描（无 `process` / `require` / `eval`）」，而 `loadServerModules` 只检查了「文件读得到」，
@@ -267,22 +252,35 @@ const MODULE_FORBIDDEN_GLOBALS = Object.freeze(SERVER_CODE_FORBIDDEN_GLOBALS.fil
  *
  * 判据刻意与那三处**同机制、同来源**：同一份共享表（`shared/kitAuthoring.js`）、同一个扫描器
  * （`stripComments` + `mentionsIdentifier`）、同一个「先判源码再 import」的次序、同一种「一条 `{code, reason}`
- * 回到裁剪点」的失败形状。**唯一的差别是取哪一段名单**：
+ * 回到裁剪点」的失败形状，**名单也是逐字同一段**（`SERVER_CODE_FORBIDDEN_GLOBALS`）。
+ *
+ * 差的只是**取哪几段名单**：
  *   * 那三处取 `KIT_FORBIDDEN_GLOBALS + SERVER_CODE_FORBIDDEN_GLOBALS`，因为它们跑在**对局循环**里
  *     （`Date.now` / `Math.random` 会让同一个种子在两端打出不同结果）；
- *   * 这里取 `SERVER_CODE_FORBIDDEN_GLOBALS` 那一段（`process` / `globalThis` / `require` / `eval` /
- *     `new Function`）—— 与这一格的承诺**逐字对应**，而 kit 那一段（时钟、随机、DOM、计时器）**故意不取**：
+ *   * 这里只取 `SERVER_CODE_FORBIDDEN_GLOBALS`（`process` / `globalThis` / `require` / `eval` /
+ *     `new Function`）—— kit 那一段（时钟、随机、DOM、计时器）**故意不取**：
  *     `boot` / `shutdown` / `healthz` 都在对局之外跑，一个给停机快照盖时间戳的模块用 `Date.now` 是正当的，
  *     本层没有任何契约要求它确定（确定性那条线是 `server.battle` / `server.meta` 的事）。
  *     唯一在对局里跑的挂载点是 `matchClass`，而它单独要求 `combat: true`（`MODULES_NEED_COMBAT`），
  *     进的是房间摘要闸门与 golden 那条线 —— 那条线上另有判据，不靠这一份扫描兼职。
+ *
+ * **`globalThis` 那一格的来龙去脉（2026-10-13）**：它曾经被**整体拿掉**过，理由是一个真实用例而不是手滑 ——
+ * 仓库里有一个能用的 `server.modules` fixture 拿 `globalThis` 与**同进程**的测试通信
+ * （`test/packMatchMsg.test.js`），把它判死会连带把那个合法模块所在的**整包**裁掉。业主口径是「先查有没有
+ * 现存包会被新扫描拒，真有 ⇒ 停下报我」，所以当时收窄到承诺里那三个名字。
+ * 现在那个用例改成了**引擎显式注入**：包声明 `write: true` 拿到 `host.io`（`ioFacade`，被限定在
+ * `<状态目录>/mod/<包id>/` 里），把观察点写在**引擎交给它的**门面上，不再去够全局 —— 于是这一格回到
+ * `SERVER_CODE_FORBIDDEN_GLOBALS` 里：开着它时 `globalThis.process` 绕得过 `process` 那一格（读 env、
+ * `process.exit` 都走得通），那是这份扫描最明显的一类缺口。这一格也**不再持派生表**：同一份规则在两处各自
+ * 过滤，正是「同一个摘要下有几种行为」的种子。
  *
  * 这是启发式，不是沙箱（与那三处逐字同一句免责）：真正兜底的是「同一份包字节 ⇒ 同一份服务端代码」的内容哈希、
  * 以及模块只能拿到 `uses` 里声明过的那几样东西。但它必须挡在 import 前面 —— 一个模块的顶层副作用在 import
  * 那一刻就已经发生了。
  *
  * 拒绝的替代路径要能指出来，否则作者只会看到「我的包没了」：读进程信息不要用 `process`，用宿主给的
- * `host.metrics`（`server/hostMetrics.js`，只读标量快照；它正是为这一条存在的）。
+ * `host.metrics`（`server/hostMetrics.js`，只读标量快照；它正是为这一条存在的）；别的东西也都落在**引擎
+ * 交进来的那个宿主对象**上（`log` / `io` / `route` / `healthz` / `matchClass`），而不是某个全局。
  * @param {string} source
  * @param {string} packId
  * @param {string} moduleId
@@ -291,11 +289,11 @@ const MODULE_FORBIDDEN_GLOBALS = Object.freeze(SERVER_CODE_FORBIDDEN_GLOBALS.fil
 export function serverModuleSourceIssues(source, packId = '', moduleId = '') {
   const code = stripComments(String(source ?? ''));
   const out = [];
-  for (const [needle, why] of MODULE_FORBIDDEN_GLOBALS) {
+  for (const [needle, why] of SERVER_CODE_FORBIDDEN_GLOBALS) {
     if (mentionsIdentifier(code, needle)) {
       out.push({
         code: 'MODULES_BAD_SOURCE',
-        reason: `"${needle}" is not allowed in a server.modules module${packId ? ` ("${packId}/${moduleId}")` : ''}: ${why}. This module is loaded into the server's own process, so the scan runs before the import — read process values through host.metrics (uses: ["metrics"]) instead of the global`,
+        reason: `"${needle}" is not allowed in a server.modules module${packId ? ` ("${packId}/${moduleId}")` : ''}: ${why}. This module is loaded into the server's own process, so the scan runs before the import — read process values through host.metrics (uses: ["metrics"]) instead of the global, and keep anything else on the host object the engine hands you (log / io / route / healthz / matchClass)`,
       });
     }
   }

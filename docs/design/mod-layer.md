@@ -1484,16 +1484,22 @@ readable before `import()`-ing it into the server's own process (`server/modModu
 have the scan (`server/match/metaPack.js`, `server/battlePack.js`, `server/roomPack.js`) are the template:
 `serverModuleSourceIssues` runs `stripComments` + `mentionsIdentifier` over the source **before** the import and returns
 one `{ code: 'MODULES_BAD_SOURCE', reason }` per hit. The table it reads is `SERVER_CODE_FORBIDDEN_GLOBALS`
-(`process` / `globalThis` / `require` / `eval` / `new Function`) **minus `globalThis`** — the promise names exactly
-`process` / `require` / `eval`, and this repository already contains a *working* `server.modules` module that uses plain
-`globalThis` to talk to an in-process test (`test/packMatchMsg.test.js`), so banning it would prune a legitimate pack
-(the owner's rule: measure first, and if a real pack would be rejected, narrow the rule rather than force it). It is a
-heuristic, not a sandbox: `globalThis['pro'+'cess']` slips past this scan exactly as it slips past the other three.
+(`process` / `globalThis` / `require` / `eval` / `new Function`) — the whole table, `globalThis` included again since
+2026-10-13. It was **removed from this one site** for a while, and the reason was a real use case, not an oversight:
+this repository contains a *working* `server.modules` module that used plain `globalThis` to talk to an in-process test
+(`test/packMatchMsg.test.js`), so banning it would have pruned a legitimate pack (the owner's rule: measure first, and
+if a real pack would be rejected, narrow the rule rather than force it). That use case now goes through the engine's
+**explicit injection** instead — the pack declares `write: true` and records into `host.io`, a facade confined to
+`<state dir>/mod/<pack id>/` — so the exemption has no reason to exist: with it open, `globalThis.process` walked past
+the `process` row (reading the environment, `process.exit`), the most obvious hole in this scan. No derived table is
+kept here any more: the same rule filtered in two places is how one digest ends up with two behaviours.
+It is a heuristic, not a sandbox: `globalThis['pro'+'cess']` slips past this scan exactly as it slips past the other three.
 `KIT_FORBIDDEN_GLOBALS` (clocks, randomness, DOM, timers) is **deliberately not applied**:
 `boot` / `shutdown` / `healthz` / `metrics` / `route` all run outside the match loop, so a snapshot module stamping
 `Date.now()` is legitimate, and the one mount point that does run inside a match (`matchClass`) already carries
 `combat: true` and the digest/golden gate. An author who needs a process reading has a sanctioned replacement —
-`host.metrics` — and the refusal text names it, so the refusal is not a dead end.
+`host.metrics` — and the refusal text names it (and the host object the engine hands the module: `log` / `io` /
+`route` / `healthz` / `matchClass`), so the refusal is not a dead end.
 
 **Two deliberate asymmetries, recorded rather than implied:**
 

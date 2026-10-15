@@ -35,8 +35,8 @@ const sha256 = (s) => createHash('sha256').update(s).digest('hex');
 
 // ---------------------------------------------------------------------------------------------------------------
 describe('§28.14 补账：`server.modules` 的源码静态扫描在 import 之前', () => {
-  test('禁的是服务端代码那一段：process / require / eval / new Function（`globalThis` 刻意不在内，见实测）', () => {
-    for (const needle of ['process', 'require', 'eval', 'new Function']) {
+  test('禁的是服务端代码那一段：process / globalThis / require / eval / new Function', () => {
+    for (const needle of ['process', 'globalThis', 'require', 'eval', 'new Function']) {
       const src = `export function registerServer(host) { const x = ${needle}; }\n`;
       const issues = serverModuleSourceIssues(src, 'p', 'm');
       assert.equal(issues.length, 1, `${needle} 应当被拒`);
@@ -45,10 +45,20 @@ describe('§28.14 补账：`server.modules` 的源码静态扫描在 import 之�
       // 拒绝文案必须指出**替代路径**，否则作者只知道「我的包没了」。
       assert.match(issues[0].reason, /host\.metrics/);
     }
-    // `globalThis` **不在**这一格的名单里：承诺逐字是「无 process / require / eval」，而仓库里有一个能用的
-    // `server.modules` 模块（test/packMatchMsg.test.js 的 fixture）拿 `globalThis` 与同进程的测试通信 ——
-    // 判死它就会连带把那个合法模块所在的整包裁掉。这是收窄，不是放松：`process` 仍然被拒。
-    assert.deepEqual(serverModuleSourceIssues('const c = globalThis.__x = [];\n', 'p', 'm'), []);
+  });
+
+  test('`globalThis` 那一格：`globalThis.process` 被点名拒（这份扫描最明显的缺口）', () => {
+    // 这一格曾经被**拿掉**过：仓库里那个 `server.modules` fixture 拿 `globalThis` 与同进程的测试通信，
+    // 于是「禁掉 globalThis」会把一个合法模块连带整包裁掉。现在那个用例走**引擎显式注入**的 `host.io`
+    // （`test/packMatchMsg.test.js`，那个包的 `server.modules[].write: true`），所以 `globalThis` 没有存在理由：
+    // 它开着的时候 `globalThis.process` 绕得过 `process` 那一格 —— 这是整份扫描里最明显的一条缺口。
+    const issues = serverModuleSourceIssues('export function registerServer(host) { return globalThis.process.env; }\n', 'p', 'm');
+    assert.equal(issues.length, 1, '`globalThis.process` 必须被拒（改前这里一条都不报）');
+    assert.equal(issues[0].code, 'MODULES_BAD_SOURCE');
+    assert.match(issues[0].reason, /globalThis/, '点名的必须是 `globalThis` 那一格');
+    // 诚实的一句照旧：这仍然是**启发式，不是沙箱** —— 把名字拼成两段就绕得过（那三处也一样绕得过，
+    // 见 docs/design/mod-layer.md §28.14 的那段免责）。
+    assert.deepEqual(serverModuleSourceIssues("const g = global['global' + 'This'];\n", 'p', 'm'), []);
   });
 
   test('不误伤：注释里的 process 不算，时钟 / 随机不在这一格的名单里（它不在对局循环里跑）', () => {
@@ -70,6 +80,23 @@ describe('§28.14 补账：`server.modules` 的源码静态扫描在 import 之�
       assert.deepEqual(modules, []);
       assert.equal(errors[0].code, 'MODULES_BAD_SOURCE');
       assert.match(errors[0].reason, /process/);
+    } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  });
+
+  test('装载期：一个用 `globalThis.process` 的模块同样让整包被拒（改前这一条是绿的 = 缺口开着）', async () => {
+    const tmp = fs.mkdtempSync(path.join(tmpdir(), 'sp-srcscan-gt-'));
+    try {
+      const dir = path.join(tmp, 'p');
+      fs.mkdirSync(path.join(dir, 'server'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'pack.json'), JSON.stringify({
+        id: 'p', name: 'P', version: '1.0.0', license: 'CC0-1.0', description: 'x', gameVersion: '0.2.2',
+        server: { modules: [{ id: 'm', entry: 'server/m.mjs', uses: ['boot'] }] },
+      }));
+      fs.writeFileSync(path.join(dir, 'server', 'm.mjs'), 'export function registerServer(host) { host.log.info(globalThis.process.pid); }\n');
+      const { modules, errors } = await loadServerModules(loadWorkshop(tmp, { log: quiet }), { log: quiet, stateRoot: path.join(tmp, 'var') });
+      assert.deepEqual(modules, [], '走 globalThis 摸到 process 的模块不该被装载');
+      assert.equal(errors[0].code, 'MODULES_BAD_SOURCE');
+      assert.match(errors[0].reason, /globalThis/);
     } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   });
 });

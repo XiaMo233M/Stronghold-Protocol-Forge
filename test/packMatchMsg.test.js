@@ -23,6 +23,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { startServer } from '../server/index.js';
+import { moduleStateDir } from '../server/modModules.js';
 import { TestClient } from './helpers/wsClient.js';
 
 const HOOK_PACK = 'hook-pack';
@@ -35,13 +36,20 @@ const CHANNELS = ['chat', 'skins', 'obj', 'boom', 'no'];
  */
 const PANEL_ONLY = 'watch';
 
-/** 包的服务端模块：把每一次调用记在 `globalThis.__packMsgCalls` 上（测试与服务端同一个进程，直接读）。 */
+/**
+ * 包的服务端模块：把每一次调用**追加成一行 JSON** 到自己包的状态目录里（`host.io`，包声明 `write: true`）。
+ *
+ * 这里从前用 `globalThis.__packMsgCalls` 与同进程的测试通信 —— 那正是「服务端模块源码不许碰 `globalThis`」
+ * 这道扫描的**唯一**合法用例，也是那一格当初被拿掉的理由。现在这条观察点走**引擎显式注入**的宿主对象
+ * （`server/modModules.js` 的 `ioFacade`：目录被限定在 `<状态目录>/mod/<包id>/`，包爬不出去），
+ * 所以 `globalThis` 回到禁止名单里也不会裁掉任何合法包：包要留下观察点，用引擎交给它的东西，别去够全局。
+ */
 const HOOK_SRC = [
-  'const calls = globalThis.__packMsgCalls || (globalThis.__packMsgCalls = []);',
   'export function registerServer(host) {',
+  "  const note = (o) => host.io.append('calls.jsonl', JSON.stringify(o) + \"\\n\");",
   '  host.matchClass((Base) => class extends Base {',
   '    handlePackMsg(playerId, msg) {',
-  '      calls.push({ playerId, t: msg.t, pack: msg.pack, channel: msg.channel, data: msg.data });',
+  '      note({ playerId, t: msg.t, pack: msg.pack, channel: msg.channel, data: msg.data });',
   "      if (msg.channel === 'skins') return true;",                    // 已消费
   "      if (msg.channel === 'obj') return { consumed: true };",        // 已消费（另一种写法）
   "      if (msg.channel === 'boom') throw new Error('hook boom');",    // 抛错 ⇒ 未消费
@@ -70,10 +78,26 @@ describe('对局子类收到包通道消息（DESIGN §28.14 的唯一网络触�
   let bare;
   let digest;
   let bareDigest;
+  /** 模块写盘的状态根（`SP_STATE_DIR`；`server/index.js` 用 `stateRootFor` 读它）。 */
+  let stateRoot;
+  /** 这个文件之前 `SP_STATE_DIR` 的值（跑完还原，别把这个进程的用法漏给别人）。 */
+  let prevStateDir;
   /** 记一切的日志替身：`callMatch` 的点名日志落在这里。 */
   const lines = { info: [], warn: [], error: [] };
   const clients = [];
-  const calls = () => globalThis.__packMsgCalls || [];
+  /** 模块那一个包自己的状态目录里的记录文件（与 `moduleStateDir` 逐字同一份判据）。 */
+  const callsFile = () => path.join(moduleStateDir(stateRoot, HOOK_PACK), 'calls.jsonl');
+  /**
+   * 模块记下来的每一次调用：一行一条 JSON（`host.io.append`）。
+   *
+   * 为什么读盘而不是读一个全局数组：这是那个合法用例改成**引擎显式注入**后的样子 —— 包只能用引擎交给它的
+   * 东西（这里是有 `write: true` 才拿得到的 `host.io`），所以「同进程直接读」这件事没了，测试读的是它写下的文件。
+   */
+  const calls = () => {
+    try { return fs.readFileSync(callsFile(), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; }
+  };
+  /** 清空记录（每条用例开头重置；模块只管往后追加，删文件是测试这一侧的事）。 */
+  const resetCalls = () => { fs.rmSync(callsFile(), { force: true }); };
 
   before(async () => {
     tmp = fs.mkdtempSync(path.join(tmpdir(), 'sp-packmatchmsg-'));
@@ -82,7 +106,9 @@ describe('对局子类收到包通道消息（DESIGN §28.14 的唯一网络触�
     const hookRoot = path.join(tmp, 'hook');
     const hookDir = writePack(hookRoot, HOOK_PACK, {
       combat: true,
-      server: { modules: [{ id: 'hook', entry: 'server/hook.mjs', uses: ['matchClass'], channels: CHANNELS }] },
+      // `write: true` 是那个观察点的**代价**：`host.io` 是有这一格才拿得到的门面（`MODULE_USE_UNDECLARED` 否则），
+      // 而它被限定在 `<状态目录>/mod/<包id>/` 里 —— 这比「谁都能写的 globalThis」小得多。
+      server: { modules: [{ id: 'hook', entry: 'server/hook.mjs', uses: ['matchClass'], channels: CHANNELS, write: true }] },
       client: { panels: [{ id: 'chat', slot: 'root.overlays', module: 'ui/chat.js', messages: [...CHANNELS, PANEL_ONLY] }] },
     });
     fs.mkdirSync(path.join(hookDir, 'server'), { recursive: true });
@@ -93,7 +119,11 @@ describe('对局子类收到包通道消息（DESIGN §28.14 的唯一网络触�
     writePack(bareRoot, PLAIN_PACK, {
       client: { panels: [{ id: 'chat', slot: 'root.overlays', module: 'ui/chat.js', messages: ['chat', 'skins'] }] },
     });
-    globalThis.__packMsgCalls = [];
+    // 状态根指到自己的临时目录：模块写的记录落在 tmp 里，跑完跟着 tmp 一起删（仓库里什么都不留）。
+    // `stateRootFor`（server/modModules.js）读的就是这个变量，所以必须在 startServer **之前**设好。
+    stateRoot = path.join(tmp, 'state');
+    prevStateDir = process.env.SP_STATE_DIR;
+    process.env.SP_STATE_DIR = stateRoot;
     const log = {
       info: (...a) => lines.info.push(a.map(String).join(' ')),
       warn: (...a) => lines.warn.push(a.map(String).join(' ')),
@@ -109,7 +139,7 @@ describe('对局子类收到包通道消息（DESIGN §28.14 的唯一网络触�
     for (const c of clients) { try { await c.close(); } catch { /* already closed */ } }
     if (srv) await srv.close();
     if (bare) await bare.close();
-    delete globalThis.__packMsgCalls;
+    if (prevStateDir === undefined) delete process.env.SP_STATE_DIR; else process.env.SP_STATE_DIR = prevStateDir;
     if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
   });
 
@@ -146,7 +176,7 @@ describe('对局子类收到包通道消息（DESIGN §28.14 的唯一网络触�
 
   test('钩子被调到一次，参数就是 `playerId` 与那条 `pack.msg` 原样；返回 undefined ⇒ 照旧转发', async () => {
     const { a, b, playerId } = await started();
-    calls().length = 0;
+    resetCalls();
     a.send({ t: 'pack.msg', pack: HOOK_PACK, channel: 'chat', data: { text: '你好', n: 3 } });
     const got = await b.waitFor('pack.msg');
     assert.equal(calls().length, 1, '钩子恰好被调到一次');
@@ -162,7 +192,7 @@ describe('对局子类收到包通道消息（DESIGN §28.14 的唯一网络触�
 
   test('返回 `true` = 已消费：同房其它人收不到，发送者也收不到今天的那个回显', async () => {
     const { a, b } = await started();
-    calls().length = 0;
+    resetCalls();
     const r = await a.request({ t: 'pack.msg', pack: HOOK_PACK, channel: 'skins', data: 1 });
     assert.equal(r.t, 'ok', `已消费不是错误：${JSON.stringify(r)}`);
     assert.equal(calls().length, 1, '钩子跑过了');
@@ -172,7 +202,7 @@ describe('对局子类收到包通道消息（DESIGN §28.14 的唯一网络触�
 
   test('返回 `{ consumed: true }` 同样算已消费', async () => {
     const { a, b } = await started();
-    calls().length = 0;
+    resetCalls();
     a.send({ t: 'pack.msg', pack: HOOK_PACK, channel: 'obj', data: { k: 2 } });
     await b.expectNone('pack.msg', () => true, 300);
     assert.equal(calls().length, 1, '钩子跑过了，只是这次它消费掉了');
@@ -180,7 +210,7 @@ describe('对局子类收到包通道消息（DESIGN §28.14 的唯一网络触�
 
   test('返回 `false` = 未消费，转发照旧', async () => {
     const { a, b, playerId } = await started();
-    calls().length = 0;
+    resetCalls();
     a.send({ t: 'pack.msg', pack: HOOK_PACK, channel: 'no', data: 'x' });
     assert.deepEqual(await b.waitFor('pack.msg'),
       { t: 'pack.msg', pack: HOOK_PACK, channel: 'no', from: playerId, data: 'x' });
@@ -189,7 +219,7 @@ describe('对局子类收到包通道消息（DESIGN §28.14 的唯一网络触�
 
   test('投递收窄：只被**面板**声明、模块没声明的通道投不进对局，但照旧转发', async () => {
     const { a, b, playerId } = await started();
-    calls().length = 0;
+    resetCalls();
     a.send({ t: 'pack.msg', pack: HOOK_PACK, channel: PANEL_ONLY, data: { panelOnly: true } });
     // 转发是**面板**那半边（§1.9.6）的判据：面板声明过，帧照旧送达同房的人（收窄没有动这一条）。
     assert.deepEqual(await b.waitFor('pack.msg'),
@@ -202,7 +232,7 @@ describe('对局子类收到包通道消息（DESIGN §28.14 的唯一网络触�
 
   test('钩子抛错：点名日志一条，转发照旧（坏消息不外溢）', async () => {
     const { a, b, code, playerId } = await started();
-    calls().length = 0;
+    resetCalls();
     const before = lines.error.length;
     a.send({ t: 'pack.msg', pack: HOOK_PACK, channel: 'boom', data: 7 });
     assert.deepEqual(await b.waitFor('pack.msg'),
@@ -219,7 +249,7 @@ describe('对局子类收到包通道消息（DESIGN §28.14 的唯一网络触�
     const { a, b, code, playerId } = await started(bare, bareDigest);
     assert.equal(typeof bare.lobby.getRoom(code).match.handlePackMsg, 'undefined',
       '没有任何包声明 matchClass 时，MatchClass 不该多出这个方法');
-    calls().length = 0;
+    resetCalls();
     a.send({ t: 'pack.msg', pack: PLAIN_PACK, channel: 'chat', data: { hi: true } });
     assert.deepEqual(await b.waitFor('pack.msg'),
       { t: 'pack.msg', pack: PLAIN_PACK, channel: 'chat', from: playerId, data: { hi: true } });
@@ -228,7 +258,7 @@ describe('对局子类收到包通道消息（DESIGN §28.14 的唯一网络触�
 
   test('既有判据排在钩子前面：面板没声明的通道、不在房间都到不了对局', async () => {
     const { a } = await started();
-    calls().length = 0;
+    resetCalls();
     const bad = await a.request({ t: 'pack.msg', pack: HOOK_PACK, channel: 'nope', data: {} });
     assert.equal(bad.t, 'error');
     assert.equal(bad.code, 'BAD_MSG');
@@ -246,7 +276,7 @@ describe('对局子类收到包通道消息（DESIGN §28.14 的唯一网络触�
 
   test('限流排在钩子前面：回 `ok` 的条数 === 钩子被调到的次数（不依赖计时）', async () => {
     const { a } = await started();
-    calls().length = 0;
+    resetCalls();
     let ok = 0;
     for (let i = 0; i < 23; i++) {
       const r = await a.request({ t: 'pack.msg', pack: HOOK_PACK, channel: 'chat', data: { i } });
