@@ -1,7 +1,8 @@
 // server/modServer.js — 认「包声明 lane」与「工坊目录热装载」的启动入口（DESIGN §28.54 + docs/DEPLOY-SERVER.md）。
 //
-// 它存在的理由只有一条：**不改 `server/index.js`**。那是游戏本体 `sganggs/Stronghold-Protocol` 拥有的路径，
-// 改它就越过「我方增量与本体路径交集必须为 0」那条红线（`.github/game-overlap-check.mjs` 会按设计拦下同步）。
+// 它存在的一条理由就是**不必改 `server/index.js`**：那是游戏本体 `sganggs/Stronghold-Protocol` 拥有的路径
+// （`.github/game-overlap-check.mjs` 从 2026-10-15 起判「每处与本体的交集都必须是 `overlay.json` 的 `bodyPaths`
+// 里已登记、锚点在位的受控例外」——能不走这条路就不走）。
 // 而这两件事要的三样东西 —— 工坊目录、`close()`、进程退出码 —— 在进程入口这一层本来就都有：
 //   * lane：`startServer(opts)` 的签名今天已经有 `opts.wsLanes`（`server/index.js:92`），这里只是把
 //     `server/modLanes.js` 那份**活表**交进去，装载期认领的路径因此一定在宿主快照之前就在表里；

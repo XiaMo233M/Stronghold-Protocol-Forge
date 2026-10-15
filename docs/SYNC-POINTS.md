@@ -144,7 +144,7 @@
 **钉它的测试**：`test/modSurface.test.js` —— 它会断言**锚点符号还在声明的模块里**、**实现文件与测试文件都还在**、
 **文档的那一行还在**，以及**引擎里每一个「包可声明的名单」都被某条表面引用**（加了一格却没进清单**也红**）。
 
-## 7. 加一格 `server.modules` 的挂载点（`SERVER_MODULE_USES` 闭枚举）—— **6 处**
+## 8. 加一格 `server.modules` 的挂载点（`SERVER_MODULE_USES` 闭枚举）—— **6 处**
 
 以 §28.54 的 `lane` 为实例（今天闭枚举 7 格：`boot` / `shutdown` / `matchClass` / `healthz` / `metrics` / `route` / `lane`）。
 
@@ -157,11 +157,26 @@
 | ⑤ | `shared/modSurface.js` + `docs/MOD-SURFACE.md` + `docs/WORKSHOP.md` 各一行/一节 | `test/modSurface.test.js` 红；文档与实现分叉 |
 | ⑥ | 新测试加进 `test/` **并且**加进 `.github/workflows/mirror-upstream-forge.yml` 的 `CONTRACT` 数组；同时把改过的上游文件登记进 `.github/overlay.json` 的 `patches`（带锚点） | 闸门会在「什么都没跑」的情况下报绿；下一次同步把我方那一格**静默吃掉**（新增文件丢了自己会响，插入体丢了是静默的） |
 
-## 8. 加一格客户端整屏声明（`client.screens` 这类「C 层新声明面」）—— **4 处**
+## 9. 加一格客户端整屏声明（`client.screens` 这类「C 层新声明面」）—— **4 处**
 
 | # | 同步点 | 漏了会怎样 |
 |---|---|---|
 | ① | `shared/workshop.js`：闭枚举（`CLIENT_SCREEN_ROUTES`）+ 字段闭集 + 解析分支 + **`client` 块的「至少说出一件能用的事」判据** | 声明进不了清单，或反过来 —— 一个只声明空 `client` 的包被当成「有客户端界面」 |
 | ② | `server/workshop.js`：装载期的文件判据（`panelModuleIssues` 现在同时收 panels 与 screens）与**投递**（合成同一份线表）；`identifyPack` 里源码字节进摘要 | 包合法、URL 永远 404；或两份不同的界面共用同一个摘要 |
 | ③ | `public/js/ui/extensions.js`：**客户端那份名单**（`MOD_SCREEN_ROUTES` / `MOD_PANEL_SLOTS`）+ 挂载 / 卸载 / 失败方向 | 两处名单各说各话 —— 作者写出「声明合法、客户端永远不调用」的死格子。所以 `test/modClientScreens.test.mjs` 直接读源码文本把两份钉成同一份 |
-| ④ | `docs/MOD-SURFACE.md` + `shared/modSurface.js` + `docs/WORKSHOP.md` + `test/`（并进 `CONTRACT`）+ `overlay.json` 登记 | 同 §7 的 ⑤⑥ |
+| ④ | `docs/MOD-SURFACE.md` + `shared/modSurface.js` + `docs/WORKSHOP.md` + `test/`（并进 `CONTRACT`）+ `overlay.json` 登记 | 同 §8 的 ⑤⑥ |
+
+## 10. 越一次本体路径（`.github/overlay.json` 的 `bodyPaths` 受控例外）—— **5 处**
+
+以 §28.55 为实例（`server/lobby.js`：「空席就销毁房间」那句话住在大厅里，没有别的挂载点）。这条红线的判据
+2026-10-15 从「与本体 `sganggs` 的路径交集**必须为 0**」改成「每一处交集都必须是**已登记且锚点在位**的受控例外」——
+放宽的是**证明方式**，不是红线本身，而且它**不放松**另外两条（`manager-only-check` 仍然要求增量属于管理器那一层）。
+
+| # | 同步点 | 漏了会怎样 |
+|---|---|---|
+| ① | 先问「**有没有不改本体的现成入口**」：`startServer(opts)` 那类参数（§28.54 就是靠 `opts.wsLanes` 才没动 `server/index.js`）、包自己的 `install(room)`、`server/modServer.js` 那类启动器 | 跳过这一步，本体路径会越描越多，最后每一格都得靠登记活着 |
+| ② | 改法必须是**最小替换**，且**默认路径与从前逐字相同**（§28.55：两处 `disposeRoom(room, 'empty')` ⇒ `reapEmptyRoom(room)`，没人申请时后者**就是**原来那一行） | 「登记过」变成一张空白支票：一个能力悄悄改掉宿主默认行为，而读登记的人看不出来 |
+| ③ | `.github/overlay.json` 的 `bodyPaths`：`file` + `why` + **至少一条 `anchors`**，且锚点要取**我方插入体里独有的那段文本**（不是上下文里本来就有的行） | 锚点丢了 ⇒ 下一次同步把我方插入体弄掉而没人知道（`.github/game-overlap-check.mjs` 逐条核对，丢了拦同步）；抄来的锚点恒真 = 等于没锚 |
+| ④ | `docs/design/mod-layer.md` 那一节**写明为什么必须动它**（§28.55 末尾那段），`shared/modSurface.js` 的 `requires` 里带 ⚠ 那一条 | 后来人只看到「本体路径被改了」，看不到「为什么没有第二条路」，于是要么回退要么再开一格 |
+| ⑤ | 对外口径跟着改：闸门输出行是「N 处受控例外，锚点在位」，**不能**再写「与本体零交集」 | 报告里引用成 0 就是伪造证据 |
+

@@ -2886,3 +2886,41 @@ import 的。所以认领在 import **之前**，处理器 import 完才挂。�
 **入口**：要用这一格，进程得由 `node server/modServer.js` 起（它把 lane 表交给 `startServer({ wsLanes })`）。
 **不改 `node server/index.js` 那条路**，那条路的行为与字节都照旧 —— 详见 `docs/DEPLOY-SERVER.md`。
 **测试**：`test/modPackLane.test.mjs`。**不需要 `golden:update`**：不进模拟。
+
+### 1.31 空席房间的回收裁决（`server.room.hold`）：人走空了，但这一局不作废（DESIGN §28.55）
+
+**它是什么**：默认行为是「房间里真人全部退出 ⇒ 宿主立刻销毁这个房间」（`disposeRoom(room, 'empty')`）。自带玩法的包
+（§28.52 那种）想要的常常是另一件事：**志愿者冻结** —— 人暂时走空了，这一局还留着等他们回来。这一格给你的就是
+那**一票**，而且只有这一票：留不留由你申请，**留多久由宿主定**（上限 `ROOM_HOLD_MAX_MS` = 15 分钟），到点重新判一次。
+
+```jsonc
+{ "combat": true,
+  "server": { "room": { "module": "server/room.mjs", "hold": true } } }
+```
+
+```js
+// server/room.mjs —— 还是 §28.20 那个只读观察面，只是多了一件申请权
+export function install(room) {
+  // 每次回收判定时被叫一次：投「留」就返回 { hold: true, until: <epoch ms> }，投「不留」返回 { hold: false }
+  room.canHold((snapshot) => ({ hold: true, until: Date.now() + 5 * 60_000 }));
+}
+```
+
+**四道判据，全是响的**：
+- `hold: true` 必须配包级 `combat: true`，否则 `ROOM_HOLD_NEEDS_COMBAT`。§28.20 明说房间钩子**不是** combat 闸门，
+  因为它的契约里没有任何一条能改对局；而「这一局会不会被回收掉」就是对局结果的一部分 —— 这一格就是那句话里预留的
+  那个例外，判据是**能力**不是意图。
+- `server.room` 的闭字段是 `{ module, hold }`：写错名字 `ROOM_UNKNOWN_FIELD`，写非布尔 `ROOM_BAD_HOLD`。
+- 没声明 `hold` 就调 `room.canHold(...)` ⇒ `ROOM_HOLD_UNDECLARED` 点名并返回 `false`（**不是**静默收下——静默收下
+  就是「写了等于没写」那一类故障）。
+- `until` 越界一律被宿主夹回上限（你不能自己决定留多久）；谓词抛异常 ⇒ 这一票作废 + `ROOM_HOOK_THREW` 点名，
+  别的包的票照算。
+
+**语义**：多包是 **OR**（谁申请留就留），时限取**最早**的那一票（最早到点就该重新判）。到点重新判时若还空着 ⇒ 销毁，
+若有人回来了 ⇒ 什么都不做（加入路径本来就会广播状态）。裁决表按**房间码**存，随房间销毁一起收回 —— 房间码会被复用，
+留着条目就是让下一个同码房间继承上一个的裁决。
+
+**留置期间房间对客户端一字未变**：不新增 `C2S` 意图、不动 `PROTOCOL_VERSION` / `MOD_API_VERSION`，成员重连走的还是
+那条既有路径；`hold` **只在写出来时**才进归一化清单，所以没用它的包摘要逐字节不变。**测试**：
+`test/modRoomHold.test.mjs`。**不需要 `golden:update`**：不进模拟。
+

@@ -18,6 +18,7 @@
     "test/modMatchKinds.test.mjs",
     "test/modClientScreens.test.mjs",
     "test/modPackLane.test.mjs",
+    "test/modRoomHold.test.mjs",
     "server/modLanes.js",
     "server/modServer.js",
     "server/modHotReload.js",
@@ -113,32 +114,35 @@
     },
     {
       "file": "docs/MOD-SURFACE.md",
-      "why": "§28.52 / §28.53 / §28.54 三行表面清单。`test/modSurface.test.js` 判「文档那一行还在」，丢了它是响的；但登记它仍然必要 —— 否则下一次同步把这三行合掉时没人解释为什么。",
+      "why": "§28.52 / §28.53 / §28.54 / §28.55 四行表面清单。`test/modSurface.test.js` 判「文档那一行还在」，丢了它是响的；但登记它仍然必要 —— 否则下一次同步把这几行合掉时没人解释为什么。",
       "anchors": [
         "| `client.screens` |",
         "| `server.modules.lane` |",
-        "| `matchKinds` |"
+        "| `matchKinds` |",
+        "| `server.room.hold` |"
       ],
       "retireWhen": "上游自己列了这三格 ⇒ 删这条 patches，并把 wording 并到上游那一份。"
     },
     {
       "file": "docs/WORKSHOP.md",
-      "why": "作者面三节（1.28 / 1.29 / 1.30）。丢了它们，包作者就只能从代码里猜判据 —— 这一层反复强调「作者的失败方向必须是响的」。",
+      "why": "作者面四节（1.28 / 1.29 / 1.30 / 1.31）。丢了它们，包作者就只能从代码里猜判据 —— 这一层反复强调「作者的失败方向必须是响的」。",
       "anchors": [
         "### 1.28 对局种类（`matchKinds`）",
         "### 1.29 整屏替换（`client.screens`）",
-        "### 1.30 包自带 WebSocket 通道"
+        "### 1.30 包自带 WebSocket 通道",
+        "### 1.31 空席房间的回收裁决"
       ],
       "retireWhen": "上游自己写了对应小节 ⇒ 删这条 patches。"
     },
     {
       "file": "docs/SYNC-POINTS.md",
-      "why": "§7（加一格 `uses` 闭枚举 = 6 处）与 §8（加一格 C 层声明面 = 4 处）。这一份是「漏一处会静默什么」的唯一清单，抄丢了它，下一次加格子就会漏投递点或漏 CONTRACT。",
+      "why": "§8（加一格 `uses` 闭枚举 = 6 处）、§9（加一格 C 层声明面 = 4 处）与 §10（越一次本体路径 = 5 处，2026-10-15 随 bodyPaths 受控例外口径新加）。这一份是「漏一处会静默什么」的唯一清单，抄丢了它，下一次加格子就会漏投递点或漏 CONTRACT。⚠ 编号在 2026-10-15 被纠正过一次：我方先前误用 7 / 8，与本体那份自带的「## 7. 改「表面」」撞号，现已顺成 8 / 9 / 10。",
       "anchors": [
-        "## 7. 加一格 `server.modules` 的挂载点",
-        "## 8. 加一格客户端整屏声明"
+        "## 8. 加一格 `server.modules` 的挂载点",
+        "## 9. 加一格客户端整屏声明",
+        "## 10. 越一次本体路径"
       ],
-      "retireWhen": "上游自己补了同两节 ⇒ 删这条 patches。"
+      "retireWhen": "上游自己补了这几节 ⇒ 删这条 patches。"
     },
     {
       "file": "shared/modSurface.js",
@@ -165,6 +169,43 @@
         "assert.deepEqual(SERVER_MODULE_USES, ['boot', 'shutdown', 'matchClass', 'healthz', 'metrics', 'route', 'lane']);"
       ],
       "retireWhen": "上游自己收了 lane ⇒ 删这条 patches。"
+    },
+    {
+      "file": "shared/workshop.js",
+      "why": "§28.55 的形状层：`server.room` 的闭字段从 `{ module }` 扩成 `{ module, hold }`（导出 `ROOM_FIELDS` 让 `shared/modSurface.js` 能锚它），并加上「`hold: true` 必须配 `combat: true`」那道包级闸门。少了它，包写下 `hold` 会被 `ROOM_UNKNOWN_FIELD` 拒 —— 作者看到的是一个「引擎不认这格」的假象，而真实缺口在我方这一格。",
+      "anchors": [
+        "export const ROOM_FIELDS = Object.freeze(['module', 'hold']);",
+        "return fail('ROOM_HOLD_NEEDS_COMBAT',"
+      ],
+      "retireWhen": "维护方自己收了空席回收 ⇒ 删这条 patches，并复核 `combat` 闸门有没有跟着来（那是 §28.20 那句「能力判据」的唯一例外）。"
+    },
+    {
+      "file": "server/roomPack.js",
+      "why": "§28.55 的裁决那半边：`canHold` 只在包声明过 `hold` 时才收（否则 `ROOM_HOLD_UNDECLARED` 点名）、`holdDecision` 的 OR + 最早时限 + 宿主 15 分钟硬夹、谓词抛异常只作废这一票、以及随房间销毁收回那张表。丢了它，包侧的声明进得了摘要却没人问它 —— 正是本层到处在拒的「写了等于没写」。",
+      "anchors": [
+        "export const ROOM_HOLD_MAX_MS = 15 * 60_000;",
+        "export function holdDecision(room, { now = Date.now, log = null } = {}) {",
+        "export function releaseRoomHolds(roomCode) { holdRegistry.delete(roomCode); }",
+        "hold: !!(pack.server && pack.server.room && pack.server.room.hold === true) });",
+        "canHold(fn) {"
+      ],
+      "retireWhen": "上游自己给了回收裁决 ⇒ 删这条 patches；若它换了时限口径，必须与 `server/lobby.js` 那一格和 `test/modRoomHold.test.mjs` 一起改。"
+    },
+    {
+      "file": "docs/design/mod-layer.md",
+      "why": "§28.55 那一节：含「这一格是 §28.20 那句『房间钩子不是 combat 闸门』的唯一例外」与「包决定留不留、宿主决定留多久」两条只有写下来才不会被人回退的判据。",
+      "anchors": [
+        "### 28.55 `server.room.hold`"
+      ],
+      "retireWhen": "上游自己写了同一节 ⇒ 删这条 patches，把两版差异人工合到保留的那一份。"
+    },
+    {
+      "file": "shared/modSurface.js",
+      "why": "§28.55 那条机器可读登记（`id: 'server.room.hold'`，锚在 `ROOM_FIELDS` 的 `hold` 成员上）。`test/modSurface.test.js` 靠它把「表面清单 ↔ 锚点符号 ↔ 文档那一行 ↔ 测试文件」钉在一起；丢了它是响的，但登记它仍然必要 —— 否则下一次同步没人解释为什么这一格要求 `combat`。",
+      "anchors": [
+        "id: 'server.room.hold',"
+      ],
+      "retireWhen": "上游自己登记了这一格 ⇒ 删这条 patches。"
     }
   ],
   "bodyPaths": [
@@ -187,6 +228,25 @@
       "file": "CHANGELOG.md",
       "why": "0.18.7 那一节（三格新能力 + 两条红线口径变更 + 判据）。游戏内公告由本文件的前若干节生成，所以这一节同时是发布公告；`test/version.test.js` 要求首个 `## x.y.z` 与 APP_VERSION 同半。",
       "anchors": ["## 0.18.7 — 2026-10-15"]
+    },
+    {
+      "file": "server/lobby.js",
+      "why": "§28.55 的挂载点。回收那句话（真人全退 ⇒ `disposeRoom(room, 'empty')`）住在大厅里，**没有第二条路可走**：`server.modules` 的 `boot` 拿不到房间生命周期，而 `server.room` 的观察面按 §28.20 的契约不能改对局 —— 所以要给包那一票，就必须在大厅里问一次。改法是最小替换：两处调用点 ⇒ `reapEmptyRoom(room)`，**没有任何包申请时它逐字就是原来那一行**；`disposeRoom` 只多了「清定时器 + 收回裁决表」。不动 `C2S`、不动 `PROTOCOL_VERSION` / `MOD_API_VERSION`、不改房间对客户端的形状。判据在 `test/modRoomHold.test.mjs`，口径在 `docs/SYNC-POINTS.md` §10。",
+      "anchors": [
+        "if (room.activeHumans().length === 0) this.reapEmptyRoom(room);",
+        "reapEmptyRoom(room) {",
+        "releaseRoomHolds(room.code);"
+      ]
+    },
+    {
+      "file": "README.md",
+      "why": "门面文档跟着代码走（本仓的常驻纪律「Docs follow the code」）：那一页有两处**今天已经是假的**的陈述必须改 —— 「`server.modules` 6 种用途」（今天 7 种，`lane`）与「把一段路径交给宿主自己的代码 ⇒ ⛔ 包不能声明」（今天包可以按 §28.54 申请一条 lane）。同时补上 §28.52 / §28.53 / §28.55 三行、把热装载那一行改成「报告 + 受监督重启（`server/modServer.js`；`server/index.js` 那条路一个监听器都不建）」的真实形状，并把英文段里「36 top-level keys」改成实测的 37。登记为受控例外而不是「不写」：README 是外人第一站读的东西，留假数字比留空白更糟。",
+      "anchors": [
+        "**closed set of 37 top-level keys**",
+        "**7 种用途**",
+        "| 人走空了但**这一局不作废**（志愿者冻结） |",
+        "There is **no in-process code swap**"
+      ]
     }
   ],
   "bodyPathsNote": "受控例外登记处（2026-10-15 起）：每一格是我方**确实改了、而游戏本体 sganggs 也有同名路径**的文件。必填：file / why / anchors（至少一条，且必须能在我们的树里找到 —— `.github/game-overlap-check.mjs` 逐条核对，锚点丢了就拦同步）。空数组 = 当前与本体零交集，这是更强的那条性质，别为了填东西往里塞。",

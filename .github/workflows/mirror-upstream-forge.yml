@@ -178,6 +178,7 @@ jobs:
             test/modMatchKinds.test.mjs
             test/modClientScreens.test.mjs
             test/modPackLane.test.mjs
+            test/modRoomHold.test.mjs
             test/mod-hot-reload.test.mjs
           )
           for f in "${CONTRACT[@]}"; do
