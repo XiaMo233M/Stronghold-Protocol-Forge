@@ -76,7 +76,7 @@ workshop/<packId>/
 | `forms` | 贡献项之一 | 这个包自带的干员 / 怪物**自己的形态（clip set）**，见 §1.19：`{ chars / enemies / tokens: { "<spine id>": { "<形态名>": { change?, end?, leave?, next?, roles } } } }`。**第一方已有的形态名不许覆盖**（`FORMS_FIRST_PARTY_OVERLAP` 整包拒绝） | ⛔ 本轮无图形入口（作者手写 `pack.json`） |
 | `fx` | 贡献项之一（空数组除外） | 包自己的**静态相位**：`{ "silentPhases": ["<phase kind>", …] }`，命中的 `'phase'` 特效不放通用特效，见 §1.19。与第一方那两个**并集**（取消不了） | ⛔ 本轮无图形入口 |
 | `variants` | 否（声明，**不是**贡献项） | 这个包要的**变体 / 口径**（满练度 / 12 部署位这类可切换口径），见 §1.20：`[{ axis, default? }]`，轴与选项名都是**闭枚举**（`shared/variants.js`），值由引擎自己给。声明了就必须标 `combat: true`（`VARIANTS_NEED_COMBAT`） | ⛔ 本轮无图形入口（作者手写 `pack.json`） |
-| `behaviour` | 否（声明，**不是**贡献项） | 这个包要的**行为开关**（引擎里**已经实现**的一条规则按哪一档跑），见 §1.22：`[{ switch, option?, name?, desc? }]`，开关名与选项名都是**闭枚举**（`shared/behaviour.js`），**动作由引擎构造**。声明了就必须标 `combat: true`（`BEHAVIOUR_NEEDS_COMBAT`）。**本版那张表有 4 格**（`shopBias` / `prepLoadout` / `morphPairing` / `unequip`，见 §1.22 与 §1.23）⇒ 声明表里没有的开关（或选项）仍被 `BEHAVIOUR_UNKNOWN_SWITCH` / `BEHAVIOUR_UNKNOWN_OPTION` 点名整包拒 | ⛔ 本轮无图形入口（作者手写 `pack.json`） |
+| `behaviour` | 否（声明，**不是**贡献项） | 这个包要的**行为开关**（引擎里**已经实现**的一条规则按哪一档跑），见 §1.22：`[{ switch, option?, name?, desc? }]`，开关名与选项名都是**闭枚举**（`shared/behaviour.js`），**动作由引擎构造**。声明了就必须标 `combat: true`（`BEHAVIOUR_NEEDS_COMBAT`）。**本版那张表有 5 格**（`shopBias` / `prepLoadout` / `morphPairing` / `unequip` / `diyPoolOverlap`，见 §1.22 与 §1.23）⇒ 声明表里没有的开关（或选项）仍被 `BEHAVIOUR_UNKNOWN_SWITCH` / `BEHAVIOUR_UNKNOWN_OPTION` 点名整包拒 | ⛔ 本轮无图形入口（作者手写 `pack.json`） |
 
 **每个字段都有图形入口**（0.8.1 起，最后补上的是元数据与 `overrides`；`operators` 的入口见 §1.2）：写进 `pack.json`
 的东西必须能在界面上增删改，包括**陈旧/没人用的条目**（它们只是不生效，不是错误，但要能删掉）。唯一没有入口的是 `id`：它必须等于目录名。
@@ -2192,7 +2192,7 @@ URL **一次都不被请求**。一个包把加载源改坏了，关掉这一格
 **本版那张表里有实现好的格 —— 这一点与第 4 刀那一版不同。** 第 4 刀交的是「**通道 + 守卫**」本身（当时表是空的：
 任何一条 `behaviour` 声明都被 `BEHAVIOUR_UNKNOWN_SWITCH` **点名整包拒**，文案里写清「本版一个开关都没有，因为没有
 实现点」）。**首格与它的引擎实现点一起落**，由业主点名；**加一格的门槛**因此比 §1.20 的加轴纪律更严：那一格必须
-**已经在引擎里有实现点**（`docs/design/mod-layer.md` §28.43.1 逐格列出）。今天有 **4 格**，下表就是那四格。
+**已经在引擎里有实现点**（`docs/design/mod-layer.md` §28.43.1 逐格列出）。今天有 **5 格**，下表就是那五格。
 
 | 开关 | 选项 | 缺省 | 引擎侧的读取点 | 投稿 |
 |---|---|---|---|---|
@@ -2200,6 +2200,7 @@ URL **一次都不被请求**。一个包把加载源改坏了，关掉这一格
 | `prepLoadout` | `locked` · `prep` | `locked` | `LOADOUT_PHASES` / `loadoutPhasesFor`（`server/match/match/platform.js`）→ `Match.setLoadout` 的相位闸门 | `8b4e5da55c58` |
 | `morphPairing` | `official` · `plus` | `official` | 判据本体 `grantedBondsByMorph`（`shared/morph.js`），三处读取点同判：`bondsMeta.pieceBonds` · `support/index.unitBonds` · 客户端 `gameLogic/bonds.grantedBonds`；**装备位语义**那半条是 `morphSlotPolicy`（`shared/morph.js`），六处读取点同判：`player/items.js` · `player/acquire.js` · `bot.js` · `invariants.js` · 客户端 `ui/detailPanel.js` · `ui/gameLogic/placement.js` | `19ea65909cf6` |
 | `unequip` | `official` · `allow` | `official` | `unequipAllowed`（`server/match/player/items.js`）→ `PlayerState.unequip`（新意图 `g.unequip { itemUid }`）；客户端同一判据读它决定画不画「卸下」按钮 | `79de9ff03518` |
+| `diyPoolOverlap` | `report` · `strip` | `report` | `stripPackOperators`（`shared/workshop.js`）—— ⚠️ **按包读取**：逐个包读**它自己**的 `pack.behaviour`，**刻意不走** `mergeBehaviourDecls`（理由见 §1.23 该格那一段） | `stripDiyOverlaps`（`rimbilliton` / `columbia` / `rainbow-squad`） |
 
 **每一格的三件事写清**：**缺省档 = 引擎今天的行为**（不声明 / 选缺省 ⇒ 逐字节不变，所以没有任何 `golden:update`）；
 **非缺省档由引擎实现**（包给不出数字、路径或模块）；**那一格的 `effect` 逐字说明它到底动了什么**。
@@ -2272,6 +2273,34 @@ URL **一次都不被请求**。一个包把加载源改坏了，关掉这一格
   全不变，**没有「归还」这回事**（`destroy` / `sell` 才真让池子少一件）。
 * **刻意的决定**：本格**不发内容钩子**（`HOOKS` 是 `META` 契约面，「卸下」用哪个都不贴切，今天也没有包需要被
   通知）；将来真有需要就**另立一刀**按契约面扩展。写在这里是为了让后人知道这是决定，不是漏做。
+
+#### `diyPoolOverlap` —— 自选池重叠（本包做成棋子的干员又在自选池里）
+
+* 要解决的那件事：一个包把一名**官方干员**做成自己的棋子（`chess.json` 里那条记录的 `charId` 是他），而这位
+  干员**本来就在自选池**（`data/backups.json` 的 `diy.ownedPool`）里 ⇒ 他**能被上两次**，而且**自选槽绕过棋子
+  自己的盟约**。唯一对应物是 `shared/workshop.js` 的 **`stripPackOperators`**（fanpack G-16）。
+* `report`：**引擎今天的行为** —— 逐条点名那位干员（加载器报告里的 `overlaps`），池子**一个字节不动**；
+  「如果按维护者开关摘会是哪些」照旧列在 `report.strippedPool` 里。
+* `strip`：把这个包**自己**做成棋子的、又在池里的干员**摘出名单**。摘的是 `diy.ownedPool` 这一份**名单**，
+  **不是** `diy.operators` 那条记录（界面在池外仍按 id 读它，删记录反而会让别的引用找不到它）。
+  报告里被摘掉的那些进 `report.strippedByPack`（可点名到 char id），`report.poolStripped` 说明这一次到底改没改。
+* ⚠️ **这一格是全表第一格「按包读取」的开关，它刻意不走 `mergeBehaviourDecls`**（其余四格读的是 `Match` /
+  `roomMods` 里那一份**合并后**的 decl，包 id 小者赢）。理由是一条硬语义：这一格说的是「**本包**做成的棋子」，
+  不是一条全局口径。若照其余四格那样先合并成一个值，那么「A 包声明 `strip`」会连 **B 包**的重叠一起摘掉 ——
+  而 B 从没声明过这件事。所以读取点（`stripPackOperators`）逐个包读**它自己**的 `pack.behaviour`
+  （判据仍然是同一份 `behaviourValue`，闭枚举仍然是同一张表）。**后人若在这里「顺手补上 merge」，那是改错。**
+  `test/diyPoolOverlap.test.js` 判据③（两包 A/B 只 A 声明）与⑤（源码级：`stripPackOperators` 里不许出现
+  `mergeBehaviourDecls` 调用）把这条钉住。
+* **摘除有两条通道，落到同一个动作上**：① **维护者总开关** `stripPackOperators(packs, data, { apply: true })` ——
+  今天的口径，语义一字未动，**只**由维护者调用；② **包级声明**（本格）。装载路径 `applyWorkshop` 走的是 ②，
+  所以作者声明了、装载出来的池子就是他声明的样子；不声明的包逐字节不变。
+* **为什么缺省不摘**（这条是这一格存在的前提）：摘掉一份已经在池里的干员 = 池子变小、可挑的干员变少、
+  `tools/golden.mjs` 给池里每一位配的那个精锐场景整个消失 —— 一次**有意的玩法改动**按 `AGENTS.md` 的 golden
+  规矩必须在同一个提交里跑 `golden:update` 并逐条点名移动了哪些场景。那是**包作者**声明之后才发生的事，
+  不是加载器替维护者决定的事；所以缺省档（今天的 golden 语料）**逐字节不变、不需要 `golden:update`**。
+* 实测（本机那份真投稿、`apply:false`、`ownedPool` 规模 72）：`rimbilliton` 4 条、`columbia` 4 条、
+  `rainbow-squad` 0 条。`test/diyPoolOverlap.test.js` 拿真装载器把 `rimbilliton`（声明 ⇒ 池 72→68，被摘的
+  正是它复用的 4 个官方 ops kit 的干员）与 `rainbow-squad`（声明了但 0 重叠 ⇒ `applied:false`、池不变）逐条钉住。
 
 **新增一格怎么做**：先把**引擎侧的读取点**实现好（照这一格），再把那一格加进 `BEHAVIOUR_SWITCHES`
 （`label` / `options` / `default` / `optionLabels` / `effect` / `actions` 一件都不能少 —— `behaviourSwitchIssues`
