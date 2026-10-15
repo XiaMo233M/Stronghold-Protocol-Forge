@@ -180,3 +180,24 @@
 | ④ | `docs/design/mod-layer.md` 那一节**写明为什么必须动它**（§28.55 末尾那段），`shared/modSurface.js` 的 `requires` 里带 ⚠ 那一条 | 后来人只看到「本体路径被改了」，看不到「为什么没有第二条路」，于是要么回退要么再开一格 |
 | ⑤ | 对外口径跟着改：闸门输出行是「N 处受控例外，锚点在位」，**不能**再写「与本体零交集」 | 报告里引用成 0 就是伪造证据 |
 
+## 11. 抬一次发行版本号（`APP_VERSION`）—— **9 处**（0.18.7 那一版漏了两处，CI 当场判红）
+
+tag 是 `modmgr-v<APP_VERSION>-<UPSTREAM_VERSION>`；`test/version.test.js` 判「四处同源 + CHANGELOG 首节 + README 徽章」，
+`test/promptBaseline.test.js` 把 README 与 `docs/prompts/*` 里每一条「本仓库 x.y.z」/「this repo's own version is x」都当声明来判。
+
+| # | 同步点 | 谁拦 / 漏了会怎样 |
+|---|---|---|
+| ① | `shared/constants.js` 的 `APP_VERSION` | `test/version.test.js`（四处同源的第一处） |
+| ②③④ | `package.json` 的 `version` + `package-lock.json` 的**根 `version`** 与 `packages[""].version` | 同上；只改一处 = lock 与包名版本自相矛盾，`npm ci` 会按 lock 走 |
+| ⑤ | `CHANGELOG.md` 新加一节 `## x.y.z — 日期`（**顶层那一段必须仍能发满 8 条公告**） | `test/version.test.js` 判首节 == `APP_VERSION`；`test/docs-paths.test.js` 判顶层仍能发满 `NOTICE_LIMITS.announcements`；少一节是**静默**少一条玩家公告 |
+| ⑥ | `README.md` 顶部 shields 徽章 `badge/version-<x.y.z>-`（`-` 要写成 `--`） | `test/version.test.js` 用正则按 `APP_VERSION` 重建徽章名 —— 这一处最容易漏 |
+| ⑦ | `README.md`「版本号怎么读」表里 `APP_VERSION` 那一行的**取值** | 值本身被 `promptBaseline` 判；⚠ 同一格里那个常量**行号引用**（`` `:34` ``）**没有任何测试判** —— 往 `shared/constants.js` 上面插一行就会静默漂错，是这九处里唯一的纯静默面 |
+| ⑧ | `README.md` 中文「本仓库自己的版本是 x.y.z」+ 英文段 `this repo's own version is **x.y.z**` 与那行的 tag 示例 `v<x>-<上游>` | `test/promptBaseline.test.js`（两类都扫）；只改中文不改英文 ⇒ 英文那条判据红 |
+| ⑨ | `docs/prompts/README.md` 与 `docs/prompts/kit.md` 的「**本版基线**」行 | `test/promptBaseline.test.js`；这两格在 0.18.7 那版就是漏抬的，CI 红过一次 |
+
+⚠ ①–④ 与 ⑤ 都在**本体也有的路径**上（`shared/constants.js` / `package.json` / `package-lock.json` / `CHANGELOG.md` / `README.md`）
+⇒ 抬版本本身就是「每轮同步都要复核的受控例外」：`.github/overlay.json` 的 `bodyPaths` 锚点写的就是这些新值，
+抬完不改锚点 ⇒ `game-overlap-check` 拦同步（那是有意的：**没留下证据的越线**才算越线）。
+`UPSTREAM_VERSION` 那一半**不在这里** —— 它与 `docs/history/` 最新一节由 `test/docs-consistency.test.js` 钉在一起。
+
+
