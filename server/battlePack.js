@@ -121,8 +121,13 @@ export async function loadBattleInstallers(loaded, { log = null, baseUrl = '/wor
       errors.push({ pack: pack.id, code: 'BATTLE_NO_INSTALL', reason: `server.battle.module "${rel}" does not export an install(battle) function — the same shape the official content modules use` });
       continue;
     }
-    installers.push({ id: pack.id, hash: pack.hash || '', install });
-    modules.push({ id: pack.id, pack: pack.id, hash: pack.hash || '', url: `${baseUrl}/${encodeURIComponent(pack.id)}/${rel.split('/').map(encodeURIComponent).join('/')}?v=${v}` });
+    // 调用预算（`pack.json.callBudget`, DESIGN §28.52）：**判决就在这一行**，也就是**装载期一次** —— 这份生效值
+    // 同时挂到 `installers[]`（服务端真函数）与 `modules[]`（送到浏览器的那份 URL 清单）。建房路径
+    // （`server/lobby.js` 的 `room.create` / 房间建立流程）里一个字都没有：上游实测过「探测期大厅暂停」。
+    // 为什么不必再探一次：包的内容哈希覆盖了这一刻的声明（`shared/callBudget.js` 的约束 2），同 hash ⇒ 同预算。
+    const budget = pack.callBudget && Number.isInteger(pack.callBudget.max) ? pack.callBudget.max : null;
+    installers.push({ id: pack.id, hash: pack.hash || '', install, ...(budget === null ? {} : { callBudget: budget }) });
+    modules.push({ id: pack.id, pack: pack.id, hash: pack.hash || '', url: `${baseUrl}/${encodeURIComponent(pack.id)}/${rel.split('/').map(encodeURIComponent).join('/')}?v=${v}`, ...(budget === null ? {} : { callBudget: budget }) });
   }
   return { installers, modules, errors };
 }

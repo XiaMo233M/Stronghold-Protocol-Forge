@@ -152,6 +152,9 @@ export function makeBuff(b) {
   return {
     key: String(b.key ?? 'buff'),
     source: b.source ?? null,
+    // 调用预算的标记（DESIGN §28.52）：这个 buff 是哪個包加上去的（`Battle` 的 `_packScope` 在 `addBuff` 里盖）。
+    // 缺省 `null` = 引擎 / 官方内容，永远不受预算影响 —— 既有 buff 的字段一个不多，行为逐字节不变。
+    pack: b.pack ?? null,
     duration: Number.isFinite(duration) || duration === Infinity ? duration : Infinity,
     timeLeft: Number.isFinite(duration) || duration === Infinity ? duration : Infinity,
     stacks: Math.max(1, b.stacks ?? 1),

@@ -3864,3 +3864,69 @@ count +1 ⇒ **层数自然上去**。这是一条**纯数据**通道：不需�
 一个字没动。
 **不需要 `golden:update`**：不声明 `variants.json` 的包与不装包的两条路径，数据逐字节相同、记录是同一个对象。
 
+
+### 28.52 调用预算 `pack.json.callBudget`：每局每插件的次数上限（沙箱档的运行时保护）
+
+**这一格补的缺口是「闸门 ≠ 上限」。** 我们只有 `combat: true` 这一道**闸门** —— 它回答「这个包能不能改对局
+结果」，那是一句**意图声明**。它回答不了「它这一局能跑多久、能被调多少次」。于是一个诚实声明了 `combat: true`
+的包（或者一个每 tick 触发一次、每次又挂一批计时器的回调）可以把整局拖住：上游的做法是每局每插件一个次数
+上限（缺省 8000），耗尽即回滚该回调、撤掉它的计时器与标记 buff、记一笔点名到插件 id 的错。本格就是那件事。
+
+**与 module 档并存，不替换它**（业主口径；`docs/MOD-SURFACE.md` 的「刻意不是表面的东西」一节同理）：**module 档
+保留现状**（内容文件 + kit 白名单 + `server.meta` / `server.battle` 全能力），沙箱档**新增运行时保护**。所以预算
+**按档启用**：**只有声明了 `pack.json.callBudget` 的包才建账**（见下面的「怎么启用」）。没声明的包一行都不多跑。
+
+**形状**（判据只有一份：`shared/callBudget.js` 的 `parseCallBudgetDecl`）：
+
+```jsonc
+"callBudget": { "max": 400 }   // 可省略 max（= 引擎缺省 8000）；只能比 8000 小
+```
+
+四个码：`CALL_BUDGET_BAD_SHAPE`（不是一个对象）、`CALL_BUDGET_UNKNOWN_FIELD`（闭集外的键）、
+`CALL_BUDGET_BAD_MAX`（不是 ≥ 1 的整数 —— 字符串 `"8000"` 也在这里被拒，真值表放行就是静默失效）、
+`CALL_BUDGET_TOO_HIGH`（**比缺省值大**）。
+
+**只许收紧、不许放宽**：`max > PACK_CALL_BUDGET_DEFAULT` 是**点名拒绝**，文案里把理由说出来 ——「一个能把上限
+调高的声明等于没有上限」；作者真的需要更多，说明他要的是**没有上限**，那件事在这一格里不存在（不写 `callBudget`
+就是留在 module 档）。这一条也是这一格不必要求 `combat: true` 的原因：与 `variants` / `behaviour` 那两条
+`*_NEEDS_COMBAT` 的区别是**方向** —— 那两格**授予能力**（所以必须声明意图），这一格**只收紧**，它永远不能让一个
+包变得更有能力，要求 `combat: true` 只会把诚实的内容包挡在沙箱档外面。
+
+**它必须进内容摘要。** `callBudget` 是 `pack.json` 的顶层键（`PACK_FIELDS`），且**只在声明过时才进**归一化清单
+（与 `variants` / `behaviour` 逐字同形）—— 后半条是硬性的：给每个包补一个 `callBudget: { max: 8000 }` 会让
+**所有已发布包的内容哈希全变**，而哈希是房间身份与 W-D 对齐的依据（§28.2）。进了清单就有两件事同时成立：
+**不声明 ⇒ 逐字节等于今天**；**两份只差预算的包是两个身份**（一个会截断回调、一个不截，共用摘要就等于房间闸门
+放行两种玩法）。**不是贡献项**：只带 `callBudget` 的包照旧 `EMPTY_PACK`（文案里点名它）。
+
+**运行时落在哪：`server/sim/battle/hooks.js` —— 两端**同一段字节**。** 这是这一格最容易做坏的地方。计数与回滚
+不能一端一份：两端若在**不同的调用次数**上回滚，之后的状态就分叉了，而「同一份摘要 ⇒ 同一份行为」正是这个中间层
+存在的理由。所以规则（缺省值、什么算一次、回滚记什么错）住在 `shared/callBudget.js`（`PACK_CALL_BUDGET_DEFAULT`
+只有这一份、`packCallAllowed` 是那条唯一的规则），而**记账与回滚**住在 `BattleHooks` —— `server/sim` 在 Node 与
+浏览器里跑的是同一段字节。两个刻意的形状选择：
+
+* **只盖 `pack` 字段，不动 `owner`。** 既有的 `owner` 语义（`offOwner(unit)` 撤掉一个干员的全部 hook 与计时器、
+  `professions.js` 的 `{ owner: unit }`、`spec.js` 的 `owner: 'lpMeter'`）一个字节都不改；预算账记在**另一个字段**上。
+  `install(battle)` 在 `_withPackScope(packId, …)` 里跑，所以这一趟挂上的 hook / 计时器 / buff 都带上 `pack`；
+  在一个包的 hook 里**再**注册的回调也归它（作用域会传下去）—— 否则「在被限的回调里再挂一批回调」就是自造第二本账。
+* **回滚复用 `offOwner` 那一套清扫**（键从 `owner` 换成 `pack`），撤掉它全部 hook 与计时器、撤掉它**标的** buff
+  （`makeBuff` / `addBuff` 上的 `pack` 字段就是「标记 buff」，缺省 `null` = 引擎 / 官方内容，永远不受影响），
+  然后记一笔 `plugin:<包id>` 的错（进 `battle.errors`，日志一行 `[sim] plugin:<id> …`）。撤 buff 时**不跑
+  `onRemove`**：正在拆的就是这个包自己的东西，让它在回滚途中再跑一轮只是给它一次机会。
+
+记账的口径：`max` 是**可用次数**（第 `max` 次仍放行，第 `max + 1` 次不放行并触发回滚）；计数**按插件聚合**
+（hook、`after` / `every` 排的计时器、标了记号的 buff 的 `onTick` / `onExpire` 同一本账）。
+
+**探测不进建房路径。** 判决「这个包用不用得上预算」发生在**装载期一次**：`server/battlePack.js`
+`loadBattleInstallers` 读出 `pack.callBudget.max`，把生效值**同时**挂到 `installers[]`（服务端真函数）与
+`modules[]`（送到浏览器那份 URL 清单）；浏览器那一半 `public/js/battle/runner.js loadSpecBattleInstallers`
+原样带进 `createBattleFromSpec` —— **两端唯一的差别就是「谁去 import」，预算不在这条差别里**。
+`server/lobby.js`（`room.create` / 房间建立流程）里一个字都没有，判据用源码反射钉死：上游实测过「探测期大厅暂停」。
+为什么不必再探一次：那一刻的声明已经进了包的内容哈希（上面那一条），同 hash ⇒ 同字节 ⇒ 同预算。
+
+**怎么启用（本刀只做机制，不改任何现存包）**：给某个包的 `pack.json` 加一行 `"callBudget": { "max": 8000 }`
+（或更小）—— 它就从 module 档进了沙箱档。哪些包进沙箱档由**站的声明**决定，本刀不替站侧决定。
+
+**测试**：`test/callBudget.test.js`（形状与唯一常量、缺省下内容哈希仍是改动前那个字面量、超预算回滚四件套、
+两端同一个数字与同一次调用上回滚且预算路径**无端特有分支**、`server/lobby.js` 里没有探测）。
+**不需要 `golden:update`**：不声明 `callBudget` 的包归一化清单不长键、`BattleHooks` 的记账对没有账的回调立刻放行，
+所以不装包与不声明预算两条路径的**战果逐字节相同**（实测见交付说明）。

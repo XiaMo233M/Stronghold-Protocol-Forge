@@ -301,6 +301,37 @@ export const MOD_SURFACE = Object.freeze([
     spec: '§28.20',
   },
   {
+    id: 'callBudget',
+    layer: 'B',
+    // 与 `variants` / `behaviour` **同一形状、不同一档**：包声明的是**一个上限**（`{ max? }`），不是数值、不是路径、
+    // 更不是「改成几」。它不是闸门（那是 `combat`）而是**预算** —— 一个诚实声明了 `combat: true` 的包可以把整局
+    // 拖住，而闸门回答不了「它能被调多少次」。业主口径 §4b 的「并存沙箱档」：**module 档保留现状**，沙箱档新增
+    // 运行时保护，所以预算**按档启用**（声明过才建账，没声明一行都不多跑）。
+    decl: 'pack.json.callBudget = { max? }',
+    anchors: [
+      { symbol: 'CALL_BUDGET_FIELDS', module: 'callBudget' },
+      // 缺省值只有一份，而且它是这一格里**唯一会被两端各读一遍**的那个数字（第 `max` 次放行、第 `max + 1` 次
+      // 回滚），所以必须锚住它 —— 改名或改值都是打断「两端同规则」。
+      { symbol: 'PACK_CALL_BUDGET_DEFAULT', module: 'callBudget' },
+      { symbol: 'PACK_FIELDS', members: ['callBudget'] },
+    ],
+    requires: [
+      '闭枚举 + 只许收紧不许放宽：`max ≤ PACK_CALL_BUDGET_DEFAULT`（8000），调高是 `CALL_BUDGET_TOO_HIGH` 点名拒绝 —— 一个能把上限调高的声明等于没有上限',
+      '**不是闸门、也不要求 `combat: true`**：与 `variants` / `behaviour` 的 `*_NEEDS_COMBAT` 的区别是**方向** —— 那两格授予能力，这一格**只收紧**，它永远不能让一个包更有能力',
+      '**必须进内容摘要**（`identifyPack` 的 `canonicalJson(pack)`）；**不声明 ⇒ 归一化清单里不长这个键**（无条件补一个 `{ max: 8000 }` 会让所有已发布包的哈希全变，§28.2）',
+      '**不是贡献项**：只带 `callBudget` 的包照旧 `EMPTY_PACK`',
+      '**两端确定性**：计数与回滚只有一份实现（`server/sim/battle/hooks.js`，它在 Node 与浏览器里是同一段字节），常量与规则只有一份（`shared/callBudget.js`）；预算这条路径里**不许有端特有分支**',
+      '**探测不进建房路径**：判决在装载期一次（`server/battlePack.js`），`server/lobby.js` 里没有这一格',
+    ],
+    files: [
+      'shared/callBudget.js', 'shared/workshop.js', 'shared/modSurface.js', 'server/battlePack.js',
+      'server/sim/Battle.js', 'server/sim/battle/hooks.js', 'server/sim/buffs.js', 'server/sim/battle/status.js',
+      'server/sim/content/index.js', 'public/js/battle/runner.js',
+    ],
+    tests: ['test/callBudget.test.js', 'test/packBattle.test.js'],
+    spec: '§28.52',
+  },
+  {
     id: 'routes',
     layer: 'B',
     decl: 'pack.json.routes = [{ path, cache }]',

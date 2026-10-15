@@ -177,6 +177,13 @@ export class Battle {
     this._frameName = new Array(MAX_HOOK_DEPTH).fill(null);   // open hook/callback frames (diagnostics, _chain)
     this._frameOwner = new Array(MAX_HOOK_DEPTH).fill(null);
     this._frameCtx = new Array(MAX_HOOK_DEPTH).fill(null);
+    // 每局每插件的调用预算（DESIGN §28.52）：一本账 = 一个声明了 `pack.json.callBudget` 的包。没声明的包不在
+    // `_packBudget` 里 ⇒ 记账那一步立刻放行，module 档一行都不多跑（这是「按档启用」的落点）。
+    // `_packScope` = 当前正在装机 / 正在跑的那个包；`on` / `after` / `every` / `addBuff` 据此给新东西盖 `pack` 标记。
+    this._packBudget = new Map();
+    this._packUsed = new Map();
+    this._packRolled = new Set();
+    this._packScope = null;
     this._toRelease = [];   // permanently removed units whose hooks / periodic timers are dropped at step end
     this._sched = [];
     this._evq = [];

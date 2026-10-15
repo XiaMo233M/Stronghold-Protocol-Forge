@@ -176,21 +176,27 @@ export async function loadSpecKits(spec) {
  * 为什么必须在浏览器里也跑一遍：与服务端复算同一场战斗的两个执行路径必须跑**同一段代码**（kit 那条通道的同一个
  * 理由，见 loadSpecKits）。一个加载不上的模块照实报出来，而不是悄悄少一个包的效果 —— 少了它，服务端算出来的战果
  * 会与客户端不一致，玩家的成绩会被拒。
- * @param {{ workshopBattle?: Array<{ id: string, url: string }> }|null} spec
- * @returns {Promise<Array<{ id: string, install: Function }>|undefined>} undefined when the field needs none
+ * @param {{ workshopBattle?: Array<{ id: string, url: string, callBudget?: number }> }|null} spec
+ * @param {{ importModule?: (url: string) => Promise<any> }} [opts] `importModule` 与 `server/battlePack.js`
+ *   `loadBattleInstallers` 的同名参数是同一个注入点：**两端唯一的差别就是「谁去 import」**，而预算不在这条
+ *   差别里（`callBudget` 由服务端装载期算好、随清单过来，两端读同一个数字）。
+ * @returns {Promise<Array<{ id: string, callBudget?: number, install: Function }>|undefined>} undefined when the field needs none
  */
-export async function loadSpecBattleInstallers(spec) {
+export async function loadSpecBattleInstallers(spec, { importModule = (url) => import(/* @vite-ignore */ url) } = {}) {
   const list = Array.isArray(spec && spec.workshopBattle) ? spec.workshopBattle : [];
   if (!list.length) return undefined;
-  /** @type {Array<{ id: string, install: Function }>} */
+  /** @type {Array<{ id: string, callBudget?: number, install: Function }>} */
   const out = [];
   for (const m of list) {
     // only a same-origin, root-relative URL is ever imported (the server built this list itself)
     if (!m || typeof m.id !== 'string' || typeof m.url !== 'string' || !m.url.startsWith('/')) continue;
+    // 调用预算（`pack.json.callBudget`, DESIGN §28.52）：服务端装载期算好的生效值，原样带进 installer —— 两端
+    // 因此在**同一个数字**上记账、在**同一次调用**上回滚。清单上没有这个键（包没声明）⇒ 这里也不带。
+    const budget = Number.isInteger(m.callBudget) ? { callBudget: m.callBudget } : {};
     try {
-      const mod = await import(/* @vite-ignore */ m.url);
+      const mod = await importModule(m.url);
       const install = typeof mod.install === 'function' ? mod.install : (typeof mod.default === 'function' ? mod.default : null);
-      if (typeof install === 'function') out.push({ id: m.id, install });
+      if (typeof install === 'function') out.push({ id: m.id, ...budget, install });
       else console.warn('[runner] workshop battle module has no exported install function', m.id);
     } catch (err) {
       console.warn('[runner] workshop battle module failed to load', m.id, err);

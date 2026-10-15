@@ -13,6 +13,9 @@ export class BattleStatus {
   addBuff(unit, b) {
     if (!unit || (!unit.alive && !b.allowDead)) return null;
     const buff = makeBuff(b);
+    // 调用预算的标记（DESIGN §28.52）：这个 buff 是哪个包加上去的。`_packScope` 只在跑某个包的 `install(battle)`
+    // 或它自己的回调时非空，所以官方内容与引擎自己全程拿到 `null`，一个字节都不变。
+    buff.pack = b.pack ?? this._packScope ?? null;
     const list = unit.buffs;
     let idx = -1;
     for (let i = 0; i < list.length; i++) if (list[i].key === buff.key) { idx = i; break; }
@@ -80,7 +83,7 @@ export class BattleStatus {
       const key = b.status ?? b.key;
       if (!unit.buffs.some((x) => (x.status ?? x.key) === key)) this._ev(['status', unit.id, key, 0]);
     }
-    if (callRemove && b.onRemove) this._safe(() => b.onRemove({ battle: this, unit, buff: b }), 'buff.onRemove', unit);
+    if (callRemove && b.onRemove) this._safe(() => b.onRemove({ battle: this, unit, buff: b }), 'buff.onRemove', unit, b.pack);
   }
 
   _tickBuffs(dt) {
@@ -99,9 +102,9 @@ export class BattleStatus {
               let n = 0;
               while (b._acc >= b.interval - 1e-9 && n++ < 8) {
                 b._acc -= b.interval;
-                this._safe(() => b.onTick({ battle: this, unit: u, buff: b, dt: b.interval }), 'buff.onTick', u);
+                this._safe(() => b.onTick({ battle: this, unit: u, buff: b, dt: b.interval }), 'buff.onTick', u, b.pack);
               }
-            } else this._safe(() => b.onTick({ battle: this, unit: u, buff: b, dt }), 'buff.onTick', u);
+            } else this._safe(() => b.onTick({ battle: this, unit: u, buff: b, dt }), 'buff.onTick', u, b.pack);
           }
           if (b.timeLeft !== Infinity) {
             b.timeLeft -= dt;
@@ -109,7 +112,7 @@ export class BattleStatus {
               const i = u.buffs.indexOf(b);
               if (i >= 0) {
                 this._removeBuffAt(u, i, false);
-                if (b.onExpire) this._safe(() => b.onExpire({ battle: this, unit: u, buff: b }), 'buff.onExpire', u);
+                if (b.onExpire) this._safe(() => b.onExpire({ battle: this, unit: u, buff: b }), 'buff.onExpire', u, b.pack);
               }
             }
           }

@@ -34,6 +34,10 @@ import { parseVariantsDecl, isVariantAxis, VARIANT_AXIS_NAMES, variantValue, mer
 import { parseBehaviourDecl, behaviourValue } from './behaviour.js';
 // 启用声明（DESIGN §28.50）：装好 ≠ 生效。判据只有一份在 `shared/enabled.js`（`parseEnabledDecl`）。
 import { parseEnabledDecl } from './enabled.js';
+// 调用预算（DESIGN §28.52，沙箱档的运行时保护）：每局每插件的次数上限。判据与常量只有一份在
+// `shared/callBudget.js` —— 形状层（这里）、运行层（`server/sim/battle/hooks.js`，两端同一段字节）与装载层
+// （`server/battlePack.js`）读的是同一个 `parseCallBudgetDecl` / `PACK_CALL_BUDGET_DEFAULT`。
+import { parseCallBudgetDecl } from './callBudget.js';
 // 特质授予的盟约（`trait.grantsBonds`，DESIGN §28.49）：装载期那一条点名走**同一份判据**（`traitGrantIssues`），
 // 作者侧的点名在 `shared/chessAuthoring.js` 的 `validateChessRecord` 里读同一个函数。
 import { traitGrantIssues } from './morph.js';
@@ -149,6 +153,9 @@ export const PACK_FIELDS = Object.freeze([
   'playtest',
   // 启用声明（DESIGN §28.50）：装好 ≠ 生效。`false` = 装载期跳过（见 `shared/enabled.js`）。**不是**贡献项。
   'enabled',
+  // 调用预算（DESIGN §28.52，沙箱档的运行时保护）：每局每插件的调用次数上限，与 `combat` **同一级**（都是顶层
+  // 声明、都进身份哈希）。**不是**贡献项；不要求 `combat: true`（它只收紧、不授权，见下面那一处的注释）。
+  'callBudget',
   // 变体 / 口径声明（DESIGN §28.39）：这个包要哪一套口径（练度 / 部署位）。**不是**贡献项，也**不是**一条
   // 数值覆盖通道 —— 它只能声明轴的闭枚举里有的选项名，值由引擎自己给（`shared/variants.js`）。
   'variants',
@@ -2334,6 +2341,14 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // （`server/workshop.js loadWorkshop` 在归一化之后读它），所以它也到不了 `EMPTY_PACK` 那一行。
   const enabledParsed = raw.enabled === undefined ? null : parseEnabledDecl(raw.enabled);
   if (enabledParsed && !enabledParsed.ok) return enabledParsed;
+  // 调用预算（DESIGN §28.52，沙箱档的运行时保护）：`{ max? }`，缺省 8000，**只许收紧不许放宽**。
+  // 这一格**不是贡献项**（与 `variants` / `behaviour` / `enabled` 同一个语义）：它不带来任何内容，也不改引擎的规则
+  // ——它给的是**上限**，一个只带 `callBudget` 的包照旧 `EMPTY_PACK`。它**也**不要求 `combat: true`：与
+  // `variants` / `behaviour` 那两条 `*_NEEDS_COMBAT` 的区别是**方向** —— 那两格授予能力（所以必须声明意图），
+  // 这一格**只收紧**（`max ≤ 默认值`），它永远不能让一个包变得更有能力，要求 `combat: true` 只会把诚实的
+  // 内容包挡在沙箱档外面。但它**必须**进身份哈希：一个会截断回调、一个不截，是两种对局行为（见下面的归一化位置）。
+  const callBudgetParsed = raw.callBudget === undefined ? null : parseCallBudgetDecl(raw.callBudget);
+  if (callBudgetParsed && !callBudgetParsed.ok) return callBudgetParsed;
   // 目标引擎（`target`，DESIGN §28.46）：缺省 `forge`（本引擎自己装）。`stardust` 的包是**声明型**的 ——
   // 本引擎认识它、不装载它（server/workshop.js 记一行 foreign），所以它不需要任何 Forge 贡献项
   // （EMPTY_PACK 对它不适用），`type` / `capabilities` 两格按 Stardust profile 校验。写了才进归一化结果。
@@ -2404,7 +2419,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     // 只声明助战的包今天整包被拒（plugin-pack G6：一个 `support: [...]` + `content: []` 的包得到的就是这一条），
     // 而原来的文案里**没有** `support` 这个词，作者只能对着 `EMPTY_PACK` 猜。`support` 只决定**助战卡池**里放谁，
     // 干员本体还是由 `content: ["chess"]` 带进来的 —— 所以放宽它不是这一刀的活（那是既有裁决），把话说明白才是。
-    const notContributions = ['support', 'playtest', 'variants', 'behaviour', 'dependencies', 'conflicts']
+    const notContributions = ['support', 'playtest', 'variants', 'behaviour', 'dependencies', 'conflicts', 'callBudget']
       .filter((n) => raw[n] !== undefined);
     const names = [...WORKSHOP_CONTENT_FILES, 'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'skins', 'operators',
       'assets', 'client', 'server.preDispatch', 'server.meta', 'server.battle', 'server.room', 'server.modules', 'server.transport', 'routes', 'i18n', 'notices', 'forms', 'fx'];
@@ -2549,6 +2564,11 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
       // 包都加一个 `behaviour: []` 会让**所有已发布包的哈希全部改变**。而它**必须**进哈希：一条开关改的是引擎的
       // 规则，两份只差开关的包共用同一个摘要，房间的摘要闸门就会放行两种不同的行为（DESIGN §28.2）。
       ...(behaviourParsed ? { behaviour: behaviourParsed.decl } : {}),
+      // 调用预算（DESIGN §28.52）：**只在声明过时才存在**，与 `variants` / `behaviour` / `skins` 同一条纪律、
+      // 理由逐字相同 —— `identifyPack` 哈希的就是这份归一化清单的 `canonicalJson`（`server/workshop.js`），给每个
+      // 包都补一个 `callBudget: { max: 8000 }` 会让**所有已发布包的哈希全部改变**；而它**必须**进哈希：一份会截断
+      // 回调的包与一份不截的包是两种对局行为，共用同一个摘要就等于房间闸门放行两种玩法（DESIGN §28.2）。
+      ...(callBudgetParsed ? { callBudget: callBudgetParsed.decl } : {}),
       // 四组新声明：**只在声明过时才存在**（见上面 `declared` 的注释）。哈希覆盖它们靠的就是这一条 ——
       // `identifyPack` 哈希的是这份归一化清单的 `canonicalJson`（server/workshop.js）。
       ...Object.fromEntries(declared),

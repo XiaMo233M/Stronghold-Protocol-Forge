@@ -274,9 +274,15 @@ export function installContent(battle, { mode = 'full', extra = null, installers
   // 包声明的**战斗逻辑**（`pack.json.server.battle`, DESIGN §28.17）：每个包单独一层 try/catch，报错点名是哪个包。
   // 一个包抛异常只记一条内容错误，绝不让整个战场起不来 —— 与 kits 逐单位隔离同一条口径。**没有包声明时这里是空的**，
   // 所以干净安装与从前逐字节相同（golden 语料不动）。
+  //
+  // 调用预算（`pack.json.callBudget`, DESIGN §28.52）：声明过的包在这里**开账**，而且它的 `install` 在
+  // `_withPackScope` 里跑 —— 这一趟挂上的 hook / 计时器 / buff 因此都带上 `pack` 标记，这一局就按那本账计。
+  // 没声明 `callBudget` 的 installer 上面那个键根本不存在 ⇒ 两个动作都不做，module 档一行都不多跑。
   for (const m of installers || []) {
     if (!m || typeof m.install !== 'function') continue;
-    try { m.install(battle); } catch (e) { battle._handlerError(`content:pack:${m.id || '?'}`, null, e); }
+    const packId = m.id || '?';
+    if (Number.isInteger(m.callBudget)) battle._declarePackBudget(packId, m.callBudget);
+    try { battle._withPackScope(packId, () => m.install(battle)); } catch (e) { battle._handlerError(`content:pack:${packId}`, null, e); }
   }
   for (const m of extra || []) {
     try { (typeof m === 'function' ? m : m.install)?.(battle); } catch (e) { battle._handlerError('content:extra', null, e); }
