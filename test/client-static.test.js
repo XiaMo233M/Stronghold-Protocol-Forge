@@ -1162,7 +1162,33 @@ describe('screen helpers', () => {
     assert.match(source, /net\.request\('room\.mods', \{ modIds: picked \}\)/, 'G1 的客户端发送点真的在房间屏里');
     assert.match(source, /export function canEditRoomMods/, '判据导出为纯函数（能被真跑，不是只写在注释里）');
     // 集合一变就先锁住准备就绪：`checking` 是那道硬门的一部分，不是一句提示
-    assert.match(source, /align\.checking \|\| \(align\.needed && !align\.ok\)/, 'checking 也挡住准备就绪');
+    assert.match(source, /align\.checking \|\| \(align\.needed && !align\.ok\)/, 'checking 也挡住准备就绪（判据本体在 isAlignBlocked）');
+  });
+
+  test('⑥ solo 房主的「开始模拟」也走对齐硬门（缺件挡住 / 补齐可开；非 solo 口径不动）', async () => {
+    const source = readFileSync(path.join(PUBLIC, 'js/screens/room.js'), 'utf8');
+    // ① 判据只有一份实现：`checking` 与 `needed/ok` 的那条表达式住在 isAlignBlocked 里，两个门都读它
+    assert.match(source, /export function isAlignBlocked\(align\) \{[\s\S]{0,140}?align\.checking \|\| \(align\.needed && !align\.ok\)/,
+      '对齐判据本体只有这一处');
+    assert.match(source, /const alignBlocked = isAlignBlocked\(align\);/, '非房主那一格读它');
+    assert.match(source, /const soloAlignBlocked = hostStartAlignBlocked\(\{ solo: !coop, align \}\);/, 'solo 那一格也读它');
+    // ② 结构：开始模拟那个按钮真的把 solo 那一格算进 disabled（改前这一条红 —— 明知缺件也能开局）
+    assert.match(source, /disabled=\$\{!facts\.canStart \|\| !online \|\| busy === 'start' \|\| soloAlignBlocked\}/,
+      'solo 房主缺件时开始按钮被挡（改前红）');
+    assert.match(source, /title=\$\{soloAlignBlocked \?/, '挡住的理由要说出来（不能只有一个灰按钮）');
+    // ③ 行为：纯函数真跑
+    const { isAlignBlocked, hostStartAlignBlocked } = await mod('screens/room.js');
+    assert.equal(isAlignBlocked({ ok: false, needed: true, missing: 2 }), true, '缺件 ⇒ 挡');
+    assert.equal(isAlignBlocked({ ok: false, needed: true, missing: 0, checking: true }), true, '还在核对 ⇒ 也挡');
+    assert.equal(isAlignBlocked({ ok: true, needed: true, missing: 0 }), false, '补齐 ⇒ 不挡');
+    assert.equal(isAlignBlocked(null), false, '房间没声明集合 ⇒ 不挡');
+    assert.equal(hostStartAlignBlocked({ solo: true, align: { ok: false, needed: true, missing: 1 } }), true,
+      'solo 房主缺件 ⇒ 挡住「开始模拟」');
+    assert.equal(hostStartAlignBlocked({ solo: true, align: { ok: true, needed: true, missing: 0 } }), false,
+      '补齐之后 ⇒ 开得起来');
+    assert.equal(hostStartAlignBlocked({ solo: true, align: null }), false, 'solo 房没声明集合 ⇒ 照旧能开');
+    assert.equal(hostStartAlignBlocked({ solo: false, align: { ok: false, needed: true, missing: 1 } }), false,
+      '非 solo（co-op）的既有口径一个字不改');
   });
 
   test('room: normalizeSeats / roomFacts / inviteLink', async () => {

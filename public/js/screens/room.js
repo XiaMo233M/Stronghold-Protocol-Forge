@@ -425,6 +425,39 @@ export function canEditRoomMods(room, myId) {
 }
 
 /**
+ * **对齐硬门**的那一条判据（W-D）：本机现在算不算「按这个房间声明的集合对齐好了」。
+ *
+ * 三种状态都算挡住：
+ *   * `checking` —— 摘要刚变、`planAlignment` 还没出结论（上一份摘要的 `ok: true` **不是关于这一份集合的结论**）；
+ *   * `needed && !ok` —— 核过了，缺件（或房间点名了本服务器没有的包）；
+ *   * 其它（`null` = 这个房间没声明集合、或 `ok: true`）⇒ 放行。
+ *
+ * **只有一份实现**：非房主的「准备就绪」与（⑥ 起）solo 房主的「开始模拟」都读它 —— 两份写法就是两个会漂的真相，
+ * 而漂的方向是「一边放行、另一边挡住」。
+ * @param {{ ok: boolean, needed: boolean, missing: number, checking?: boolean }|null} align
+ * @returns {boolean}
+ */
+export function isAlignBlocked(align) {
+  return !!(align && (align.checking || (align.needed && !align.ok)));
+}
+
+/**
+ * 房主的**开始模拟**要不要被对齐挡住（⑥）。**只作用于 solo**。
+ *
+ * co-op 房主的开始**不看**自己本机的对齐 —— 这是 W-D 定的口径，改它等于换一条开局政策：另几位博士各自被自己的
+ * 「准备就绪」挡着，而他们的就绪本来就是房主开局的依据。
+ *
+ * solo 房不一样：`server/lobby.js start` 对 solo 要求**恰好一个真人、零 AI** ⇒ 场上没有第二个人的「准备就绪」
+ * 能替他挡；而 G3 之后 solo 房**也能声明集合**了 ⇒ 「本机缺件」与「点得动开始」同时成立，开局之后也没有任何人
+ * 能拦。所以这一格补上：缺件（或还在核对）时开始按钮被挡住，补齐即可开。
+ * @param {{ solo?: boolean, align: { ok: boolean, needed: boolean, missing: number, checking?: boolean }|null }} o
+ * @returns {boolean}
+ */
+export function hostStartAlignBlocked({ solo, align }) {
+  return solo === true && isAlignBlocked(align);
+}
+
+/**
  * 本房间使用 mod (W-A/W-D, DESIGN §28.16): the set THIS room declared, shown to every member and spectator from
  * `room.state.mods`, ALONG WITH whether this client really holds it. Absent when the room declared none, in which case
  * this component returns nothing — a room on a plain install (or one whose host ticked nothing) looks exactly as it did
@@ -679,7 +712,9 @@ export function RoomScreen() {
   const myReady = !!facts.mine?.ready;
   // 对齐硬门（W-D，加上 G2 的 `checking`）：集合一变，`RoomModsPanel` 先把状态报成「正在核对」——在那之前，
   // 上一份摘要的结论**不是关于这一份集合的**，所以这一段也挡住准备就绪（否则会有一次「拿旧结论点下去」的窗口）。
-  const alignBlocked = !!(align && (align.checking || (align.needed && !align.ok)));
+  const alignBlocked = isAlignBlocked(align);
+  // ⑥：同一道门也作用于 solo 房主的「开始模拟」（只作用于 solo —— 非 solo 一个字不改，见 `hostStartAlignBlocked`）。
+  const soloAlignBlocked = hostStartAlignBlocked({ solo: !coop, align });
   const info = difficultyInfo(room.mode, room.difficulty, { random: firepower, variant });
   const variantName = variant === 'endurance' ? t('持久鏖战') : variant === 'marathon' ? t('最长时赛') : t('快速突袭');
   const modeName = firepower ? `${RANDOM_MODE_NAME} · ${variantName}` : coop ? t('同盟模拟') : t('独立模拟');
@@ -852,8 +887,8 @@ export function RoomScreen() {
           ? html`<button type="button" class="rs-search" disabled=${!online || busy === 'match'} onClick=${queueMatch}>
               <${Icon} name="search" />${t('开始搜寻')}${busy === 'match' ? html`<${Spinner} size="sm" />` : null}</button>` : null}
         ${facts.isHost
-          ? html`<button type="button" class="proto-start rs-go" disabled=${!facts.canStart || !online || busy === 'start'} onClick=${start}
-              title=${facts.canStart ? undefined : t('仍有博士未准备就绪')}>
+          ? html`<button type="button" class="proto-start rs-go" disabled=${!facts.canStart || !online || busy === 'start' || soloAlignBlocked} onClick=${start}
+              title=${soloAlignBlocked ? (align.checking ? t('正在核对本房间的模组文件…') : t('模组未就绪：先补齐本房间的模组文件')) : facts.canStart ? undefined : t('仍有博士未准备就绪')}>
               <span class="proto-start__mark" aria-hidden="true"><span class="proto-start__rook"><i>[</i><${Icon} name="rook" /><i>]</i></span><small>STRONGHOLD<br />PROTOCOL</small></span>
               <span class="proto-start__label">${busy === 'start' ? html`<${Spinner} size="sm" />` : null}${t('开始模拟')}</span>
               <span class="proto-start__deco" aria-hidden="true"></span></button>`
