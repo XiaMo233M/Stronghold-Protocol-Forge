@@ -285,6 +285,18 @@ function resolveRoomModSet(requested, catalogue) {
   return { ok: true, modIds: Object.freeze(ids.slice().sort()), modSet };
 }
 
+/**
+ * 两份「房间声明的模组 id 列表」是不是**同一份**（`null` = 不声明）。`resolveRoomModSet` 交给房间的列表已经排序
+ * 去重，所以逐位比较就够。
+ *
+ * 为什么需要它：`room.mods` 要能认出「你发的就是我现在的这一份」——那不是一个变更，不该广播、不该把别人的就绪
+ * 状态清掉。判的是**同一份集合**，不是同一批字节（后者是摘要的事，`modSetOf` 已经保证一致）。
+ */
+function sameModIds(a, b) {
+  if (!a || !b) return !a && !b;
+  return a.length === b.length && a.every((id, i) => id === b[i]);
+}
+
 /** One room: `seatCap` seat slots (the server's ceiling, 20 by default, LOBBY_DEFAULTS.maxSeats), host, difficulty,
  * optional running match. */
 export class Room {
@@ -727,6 +739,8 @@ export class Lobby {  /**
       case 'room.setDifficulty': return this.setDifficulty(session, msg);
       case 'room.setSeatCap': return this.setSeatCap(session, msg);
       case 'room.setAiPicksLast': return this.setAiPicksLast(session, msg);
+      // 房间内改本房间的模组集合（G1/G2，docs/WORKSHOP.md §1.9.3）：房主、开局前、且没有真人已就绪
+      case 'room.mods': return this.setRoomMods(session, msg);
       case 'room.addBot': return this.addBot(session);
       case 'room.removeBot': return this.removeBot(session, msg);
       case 'room.kick': return this.kick(session, msg);
@@ -1186,6 +1200,98 @@ export class Lobby {  /**
       this.broadcastState(room);
     }
     return OK;
+  }
+
+  /**
+   * `room.mods { modIds }` —— **房主在房间里改本房间的模组集合**（G1；docs/WORKSHOP.md §1.9.3）。
+   *
+   * 为什么需要它：建房的 picker（`room.create.modIds`）是**一次性**的 —— 房主点错了、或者开好房才发现这一房要跑
+   * 哪几个包，此前唯一的办法是解散重开，而重开会把已经坐进来的博士全赶出去。这一格让「改集合」不再等于「重开房」。
+   *
+   * 集合本身由 `resolveRoomModSet` 解析 —— **与 `room.create` 同一个函数**（W-A 起就是唯一真相）：ids 必须点名这台
+   * 服务器**真的装着的**包（`MOD_UNKNOWN` 同时列出未知与可用的），摘要是 `modSetOf` 算的那一个（不是第二份口径）。
+   * 改完**立刻物化**这一份（`roomAssets.forRoom`），所以新摘要的数据面在广播出去之前就已经有了。
+   *
+   * **三道守卫**（全部点名拒绝，一条都不静默）：
+   *   1. 只有房主（`NOT_HOST`）—— 集合是这一房所有人的共同前提，不是谁都能改的；
+   *   2. 对局已开 ⇒ `MOD_SET_LOCKED`：正在跑的那一局拿的是**开局那一刻**的集合（`startMatch` 已经把它交给
+   *      Match / BattleSpec），现在改只会让「声明的」与「正在跑的」变成两个真相；
+   *   3. **任一真人座位 `ready === true`** ⇒ `MOD_SET_LOCKED`：那个人是按**旧集合**对齐完才点的准备就绪
+   *      （W-D 的客户端硬门），他的字节可能正好缺新集合里的包。**AI 座位不算**：`addBot` 建出来的座位天生
+   *      `ready: true`，而 AI 从不对齐任何字节 —— 照字面把它收进这条判据，房主一加 AI 队友就再也改不了集合，
+   *      而那条拒绝说的还是一句与事实无关的话。
+   *
+   * **双检**（借 Ave-Mujica 的设计：进 handler 先判一次，真正应用之前再判一次）。今天这个 handler 从头到尾是
+   * **同步**的（没有 await、没有回调），所以第二次判**不可能**被别的会话插进来 —— 但「守卫」与「改动」之间的距离
+   * 是这段代码唯一的脆弱点，而「另一个会话刚刚让某个座位就绪 / 开了局」在任何**未来**的异步化（读盘、物化、钩子）
+   * 里会立刻变成真的。所以第二次判写在这里，并且紧挨着那两行赋值：谁把它挪远，谁就把这条不变量挪走了。
+   *
+   * **房间级钩子的边界**（DESIGN §28.20）：包声明的 `server.room` 钩子在 `install(room)` 那一刻拿到的
+   * `ctx.room.modIds` 是**快照**。新集合里该装的那几个钩子包与**已经装上的**不一致时，改集合会让某个包的观察面
+   * 与房间的真实集合对不上（它按旧集合装上，却继续看着一个不再声明它的房间）⇒ 点名拒绝，而不是让它偷偷漂。
+   * 只改「不含房间钩子的那几个包」时这条判据不挡路（两边算出来的钩子包名单相同）。
+   * @param {import('./net.js').Session} session
+   * @param {{ modIds: string[] }} msg
+   */
+  setRoomMods(session, { modIds }) {
+    const room = this.roomOf(session);
+    if (!room) return fail(ERR.NOT_IN_ROOM);
+    if (room.hostId !== session.playerId) return fail(ERR.NOT_HOST);
+    const early = this.roomModsRefusal(room);
+    if (early) return early;
+    const resolved = resolveRoomModSet(Array.isArray(modIds) ? modIds : [], this.workshop?.mods);
+    if (!resolved.ok) {
+      const unknown = resolved.unknown.length ? resolved.unknown.join(', ') : '(none)';
+      const available = resolved.available.length ? resolved.available.join(', ') : '(none)';
+      return fail(ERR.MOD_UNKNOWN, `this server does not run the mod pack(s) (${unknown}); available: ${available}`);
+    }
+    const nextIds = resolved.modIds.length ? resolved.modIds : null;
+    // 幂等：同一份集合（含「两边都不声明」）不是一个变更 —— 不广播、不重物化，也不动别人的就绪状态。
+    if (sameModIds(room.modIds, nextIds)) return OK;
+    const hookIds = (this.workshop && Array.isArray(this.workshop.roomHooks) ? this.workshop.roomHooks : [])
+      .filter((h) => h && typeof h.id === 'string' && typeof h.install === 'function')
+      .map((h) => h.id);
+    if (hookIds.length) {
+      const nextDeclared = resolved.modSet ? new Set(resolved.modSet.packs.map((p) => p.id)) : null;
+      const wanted = hookIds.filter((id) => !nextDeclared || nextDeclared.has(id)).sort();
+      const installed = this.roomHooks.packsFor(room).slice().sort();
+      if (wanted.length !== installed.length || wanted.some((id, i) => id !== installed[i])) {
+        return fail(ERR.BAD_MSG, `this room's server.room hooks are installed for (${installed.join(', ') || 'none'}), and this set needs (${wanted.join(', ') || 'none'}) — a hook sees the room's modIds as a snapshot taken at install, so which packs have hooks must be decided when the room is created`);
+      }
+    }
+    // 第二次判（双检）：紧挨着下面两行赋值，见上面那段。
+    const late = this.roomModsRefusal(room);
+    if (late) return late;
+    this.dropReplay(room, session.playerId);
+    room.modIds = nextIds;
+    room.modSet = resolved.modSet;
+    if (room.modSet && this.workshop && this.workshop.roomAssets) this.workshop.roomAssets.forRoom(room.modSet);
+    // 集合变了 ⇒ 所有**真人**座位（房主除外，他就是改的人）重新回到未就绪：他们可能缺新集合的文件。这是
+    // 「集合变更后加入者如何重新对齐」的服务端那一半；客户端那一半是 W-D 的准备就绪硬门 ——
+    // `public/js/screens/room.js` 的 RoomModsPanel 按 `room.state.mods.digest` 重跑 planAlignment，没对齐完
+    // 就点不了准备就绪（客户端在这一刀里也补上了「摘要一变就先锁住，别拿旧结论放行」）。
+    for (const s of room.seats) if (s && !s.isBot && s.playerId !== room.hostId) s.ready = false;
+    this.log.info(`[lobby] ${room.code} mod set is now ${room.modSet ? room.modSet.packs.map((p) => p.id).join(', ') : '(none)'} by ${session.name}`);
+    this.broadcastState(room);
+    return OK;
+  }
+
+  /**
+   * `room.mods` 的两条「改不了」判据（G2）。返回 `null` = 通过，否则是要回给客户端的 `fail(...)` 结果。
+   *
+   * 单独一个函数是为了**双检**（见 `setRoomMods`）：同一个判据调两次，中间不许出现第二份写法 —— 两份写法就是
+   * 两个会漂的真相，而漂的方向是「第一次放行、第二次放行、中间那一瞬的状态谁都没看」。
+   * @param {Room} room
+   * @returns {{ error: string, detail?: string }|null}
+   */
+  roomModsRefusal(room) {
+    if (room.match) return fail(ERR.MOD_SET_LOCKED, 'the running match took this room\'s mod set when it started');
+    for (const seat of room.seats) {
+      if (seat && !seat.isBot && seat.ready === true) {
+        return fail(ERR.MOD_SET_LOCKED, `${seat.name || seat.playerId} is ready — that client aligned to this room\'s current set`);
+      }
+    }
+    return null;
   }
 
   addBot(session) {

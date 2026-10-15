@@ -180,6 +180,7 @@
   "模拟已开始": "Simulation already started",
   "只有房主可以操作": "Only the host can do that",
   "仍有玩家未就绪": "Some players are not ready",
+  "本房间的模组集合已锁定（模拟已开始，或已有博士准备就绪），要改请重开房间": "This room's mod set is locked (the match has started, or a player is ready) — create a new room to change it",
   "当前阶段无法进行该操作": "Cannot do that in this phase",
   "资金不足": "Insufficient Funds",
   "整备区已满": "Bench is full",

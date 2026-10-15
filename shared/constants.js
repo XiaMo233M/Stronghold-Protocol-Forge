@@ -361,6 +361,10 @@ export const ERR = Object.freeze({
   // 与「数字合法、但这个房间现在装不下」这两件事在客户端可分辨 —— 前者改数字，后者先请人离开。
   SEAT_CAP_TOO_SMALL: 'SEAT_CAP_TOO_SMALL',
   MOD_UNKNOWN: 'MOD_UNKNOWN',     // room.create named a pack id this server does not have loaded (DESIGN §28.9, W-A)
+  // 房间内改集合（G1/G2, docs/WORKSHOP.md §1.9.3）: `room.mods` 到得太晚 —— 对局已经开了，或者**已经有真人点了
+  // 准备就绪**（那个人的客户端是按旧集合对齐的）。与 `NOT_READY` **分开**：`NOT_READY` 说的是「还有玩家没准备好，
+  // 所以开不了局」，这里是「集合已经锁住了，改不了」—— 两句话在界面上正好相反，复用会让玩家读到与事实相反的理由。
+  MOD_SET_LOCKED: 'MOD_SET_LOCKED',
   // 野排匹配 (quick match, server/matchmaking.js): the queue already holds its limit of waiting players
   QUEUE_FULL: 'QUEUE_FULL',
   // 野排匹配: room.dequeue from a player who is not in the queue (nothing to cancel)
@@ -386,6 +390,7 @@ export const ERR_TEXT = {
   BAD_TILE: N_('无法部署在该位置'), BAD_TARGET: N_('无效的目标'), SOLD_OUT: N_('已售出'), MAX_LEVEL: N_('调度中心已达最高等级'),
   NOT_YOUR_TURN: N_('尚未轮到你'), ALREADY: N_('已完成该操作'), TEMP_NOT_EMPTY: N_('临时整备区不为空'), ELIMINATED: N_('你已被淘汰'),
   SPECTATOR: N_('观战中无法进行该操作'), MOD_UNKNOWN: N_('房间指定了本服务器没有的模组包'), INTERNAL: N_('服务器内部错误'),
+  MOD_SET_LOCKED: N_('本房间的模组集合已锁定（模拟已开始，或已有博士准备就绪），要改请重开房间'),
   CHAT_MODE: N_('该房间的聊天设置不允许这条消息'),
   SEAT_CAP_TOO_SMALL: N_('新的人数上限不能小于同盟内现有人数（含 AI 队友）'),
   QUEUE_FULL: N_('正在搜寻的博士已满，请稍后再试'), QUEUE_EMPTY: N_('你不在快速匹配队列中'), QUEUED: N_('你已在同盟中：先离开同盟，才能开始快速匹配'),

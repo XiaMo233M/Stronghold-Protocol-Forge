@@ -29,7 +29,7 @@ import { createStore, initialState, selectRoute, entryGateBlocked } from '../pub
 import { Net, RESOURCE_MSG_TYPES } from '../public/js/net.js';
 import {
   createPanelRegistry, capabilityIssues, readGate, slotSelector, browserSlotHost,
-  MOD_PANEL_SLOTS, MOD_PANEL_PREFIX, MOD_PANEL_REQUIRES,
+  MOD_PANEL_SLOTS, MOD_PANEL_PREFIX, MOD_PANEL_REQUIRES, PANEL_SEND_TYPES,
 } from '../public/js/ui/extensions.js';
 import { portraitEntry, clearAppearanceLookup, currentAppearanceLookup } from '../public/js/ui/portraitChain.js';
 // 素材加载源的排序面（第 5 刀，DESIGN §28.40）：与外观提供者同族的另一块注册面，见下面 4c 那一组。
@@ -964,5 +964,54 @@ describe('客户端缺口：资源消息 / 入口闸门 / wasEntered 旁路', ()
     const sp = src.match(/globalThis\.__SP__ = \{([^}]*)\}/);
     assert.ok(sp);
     assert.doesNotMatch(sp[1], /panel/i);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// 面板能主动发的引擎消息：`PANEL_SEND_TYPES` 是闭枚举（加一条要同时改表 + 那条消息的 C2S 形状 + 一条测试）
+// ---------------------------------------------------------------------------------------------------
+describe('面板发送白名单：room.mods 放得出去，room.create 依旧被拒（G4）', () => {
+  /** 最小宿主元素（注册点只 setAttribute / appendChild）。 */
+  const hostEl = () => ({
+    className: '', attributes: {}, children: [],
+    setAttribute(k, v) { this.attributes[k] = v; },
+    appendChild(c) { this.children.push(c); return c; },
+  });
+
+  test('表：只多 room.mods 一条 —— room.create 绝不进去', () => {
+    assert.deepEqual([...PANEL_SEND_TYPES], ['room.appearance', 'room.mods']);
+    assert.equal(PANEL_SEND_TYPES.includes('room.create'), false,
+      '面板能改对局状态的那一天，就是这一层失效的那一天（extensions.js 的原文）');
+  });
+
+  test('行为：形状合法的 room.mods 真的发到网上；坏形状与 room.create 一条都不发，各自点名', async () => {
+    const frames = [];
+    let ctx = null;
+    const registry = createPanelRegistry({
+      store: createStore(initialState),
+      net: { on: () => () => {}, send: (msg) => { frames.push(msg); return true; }, sendResourceMessage: () => true },
+      log: { info() {}, warn() {}, error() {} },
+      importModule: async () => ({ mount: (c) => { ctx = c; return {}; } }),
+      createElement: () => hostEl(),
+      slotHost: () => hostEl(),
+    });
+    registry.apply([wire()]);
+    await settle();
+    assert.ok(ctx && ctx.session && ctx.net, '面板挂上了，拿到了 ctx.session / ctx.net');
+
+    // ① 「发一条引擎消息」的入口是 **ctx.session.send**（NetFacade 上那个同名 send 走的是包通道那条路，见 ④）。
+    //    房主改集合那条消息先过客户端的形状判据（与服务端同一份 `shared/protocol.js`）再发出去。
+    assert.equal(ctx.session.send('room.mods', { modIds: ['alpha-pack'] }), true);
+    assert.deepEqual(frames, [{ t: 'room.mods', modIds: ['alpha-pack'] }], '过的是真实线上形状（含 t）');
+    // ② 坏形状：不发出去，点名 CLIENT_SEND_BAD_SHAPE（而不是等一个 error 帧回来）
+    assert.equal(ctx.session.send('room.mods', { modIds: 'alpha-pack' }), false, 'modIds 必须是数组');
+    // ③ room.create 仍在白名单之外：一条都不发 —— 面板改不了对局状态
+    assert.equal(ctx.session.send('room.create', { mode: 'solo', difficulty: 'NORMAL' }), false);
+    assert.equal(frames.length, 1, '只有那一条合法消息出去了');
+    // ④ 两个 facade 上是两条不同的路：`ctx.net.send` 是**这个包自己的通道**，名字没在 `messages` 里声明过 ⇒ 点名
+    assert.equal(ctx.net.send('room.mods', {}), false, 'ctx.net.send 不是引擎消息那条路');
+    assert.deepEqual(registry.refusals().map((r) => r.code),
+      ['CLIENT_SEND_BAD_SHAPE', 'CLIENT_SEND_NOT_ALLOWED', 'CLIENT_CHANNEL_UNDECLARED'],
+      `点名拒绝：${JSON.stringify(registry.refusals())}`);
   });
 });

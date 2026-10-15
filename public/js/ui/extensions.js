@@ -126,7 +126,7 @@ export const MOD_PANEL_CREATED = Object.freeze(['root.overlays', 'root.guide', '
  */
 export const PREFS_MAX_KEY = 64;
 export const PREFS_MAX_VALUE = 512;
-export const PANEL_SEND_TYPES = Object.freeze(['room.appearance']);
+export const PANEL_SEND_TYPES = Object.freeze(['room.appearance', 'room.mods']);
 
 /**
  * **面板能写设置的那一格**（`ctx.session.setVoiceLang(charId, lang)`，业主裁决 2026-10-11：「能优化就优化，

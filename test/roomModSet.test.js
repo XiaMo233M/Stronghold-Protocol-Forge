@@ -15,12 +15,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { startServer } from '../server/index.js';
 import { loadWorkshop } from '../server/workshop.js';
 import { modSetOf } from '../shared/modIdentity.js';
 import { validateC2S, C2S, MAX_ROOM_MODS } from '../shared/protocol.js';
-import { ERR } from '../shared/constants.js';
+import { ERR, ERR_TEXT } from '../shared/constants.js';
 import { Net } from '../public/js/net.js';
 import * as roomMods from '../public/js/roomMods.js';
 import { runSoloPlaytest } from '../public/js/playtestLink.js';
@@ -486,6 +487,208 @@ describe('入座门判的是**进程**集合（W-A 定的，W-B 也故意不改�
       assert.equal(viaRoom.code, ERR.BAD_MSG, 'W-A: a room set does not open the gate');
     } finally {
       await c.terminate();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// room.mods: 房主在房间里改本房间的集合（G1）+ 守卫（G2）
+// ---------------------------------------------------------------------------------------------------
+describe('room.mods：房主在房间里改集合（G1），守卫与对齐（G2）', () => {
+  test('房主改集合成功：room.state 广播新集合、digest 与 modSetOf 一致、其它真人被退回未就绪', async () => {
+    const a = await player(modded, 'Host');
+    const b = await player(modded, 'Guest');
+    try {
+      assert.equal((await a.request({ t: 'room.create', mode: 'coop', difficulty: 'NORMAL', mods: digest, modIds: ['alpha-pack'] })).t, 'ok');
+      const created = await a.waitFor('room.state', (s) => s.code && s.mods);
+      assert.deepEqual(created.mods.packs.map((p) => p.id), ['alpha-pack']);
+      const guestJoined = b.waitFor('room.state', (s) => s.code === created.code && s.seats.some((x) => x && x.playerId === b.id));
+      assert.equal((await b.request({ t: 'room.join', code: created.code, mods: digest })).t, 'ok');
+      await guestJoined;
+
+      // 客人先就绪、又自己取消（「有人 ready 后改被拒」另有用例）—— 这里要的是干净的一次变更
+      assert.equal((await b.request({ t: 'room.ready', ready: true })).t, 'ok');
+      assert.equal((await b.request({ t: 'room.ready', ready: false })).t, 'ok');
+
+      const changedP = a.waitFor('room.state', (s) => s.mods && s.mods.packs.length === 2);
+      const guestChangedP = b.waitFor('room.state', (s) => s.mods && s.mods.packs.length === 2);
+      assert.equal((await a.request({ t: 'room.mods', modIds: ['zeta-pack', 'alpha-pack'] })).t, 'ok', '房主改集合成功');
+      const changed = await changedP;
+      assert.deepEqual(changed.mods.packs.map((p) => p.id), ['alpha-pack', 'zeta-pack'], '与 room.create 同一条口径：按 id 排序');
+      assert.equal(changed.mods.digest, modSetOf(changed.mods.packs).digest, '摘要就是 modSetOf 算的那一个');
+      assert.equal(changed.mods.packs.find((p) => p.id === 'zeta-pack').combat, true, '包的 combat 标志随集合一起走');
+
+      // 另一位真人（另一条连接）真的收到了新集合 —— 集合是**广播**的，不是只回给改的人
+      const guestState = await guestChangedP;
+      assert.deepEqual(guestState.mods, changed.mods);
+      assert.equal(guestState.seats.find((s) => s && s.playerId === b.id).ready, false, '集合变了 ⇒ 那位真人回到未就绪（要重新对齐）');
+    } finally {
+      await a.terminate();
+      await b.terminate();
+    }
+  });
+
+  test('非房主改被拒 NOT_HOST；不在房间里改被拒 NOT_IN_ROOM；两次都一字未动', async () => {
+    const a = await player(modded, 'Host');
+    const b = await player(modded, 'Guest');
+    const c = await player(modded, 'Stranger');
+    try {
+      assert.equal((await a.request({ t: 'room.create', mode: 'coop', difficulty: 'NORMAL', mods: digest, modIds: ['alpha-pack'] })).t, 'ok');
+      const created = await a.waitFor('room.state', (s) => s.code && s.mods);
+      const guestJoined = b.waitFor('room.state', (s) => s.code === created.code && s.seats.some((x) => x && x.playerId === b.id));
+      assert.equal((await b.request({ t: 'room.join', code: created.code, mods: digest })).t, 'ok');
+      await guestJoined;
+      const byGuest = await b.request({ t: 'room.mods', modIds: ['zeta-pack'] });
+      assert.equal(byGuest.t, 'error', JSON.stringify(byGuest));
+      assert.equal(byGuest.code, ERR.NOT_HOST, '集合只有房主能改');
+      const byStranger = await c.request({ t: 'room.mods', modIds: ['zeta-pack'] });
+      assert.equal(byStranger.code, ERR.NOT_IN_ROOM);
+      // 「一字未动」的可观察判据：房主再发**现在这一份**会被当成幂等（不高广播）⇒ 说明那两次拒绝真的没改到东西
+      const idem = await a.request({ t: 'room.mods', modIds: ['alpha-pack'] });
+      assert.equal(idem.t, 'ok', JSON.stringify(idem));
+      const probe = await a.request({ t: 'room.mods', modIds: ['zeta-pack'] });
+      assert.equal(probe.t, 'ok');
+      const state = await a.waitFor('room.state', (s) => s.mods && s.mods.packs.length === 1 && s.mods.packs[0].id === 'zeta-pack');
+      assert.deepEqual(state.mods.packs.map((p) => p.id), ['zeta-pack'], '那两次拒绝之后集合仍是房主说的那一份');
+    } finally {
+      await a.terminate();
+      await b.terminate();
+      await c.terminate();
+    }
+  });
+
+  test('已开局改被拒 MOD_SET_LOCKED（不是 NOT_READY），且正在跑的那一局不受影响', async () => {
+    const a = await player(modded, 'SoloHost');
+    try {
+      assert.equal((await a.request({ t: 'room.create', mode: 'solo', difficulty: 'NORMAL', mods: digest, modIds: ['alpha-pack'] })).t, 'ok');
+      const created = await a.waitFor('room.state', (s) => s.code && s.mods);
+      assert.equal((await a.request({ t: 'room.start', })).t, 'ok', 'solo 房直接开局');
+      const running = await a.waitFor('room.state', (s) => s.code === created.code && s.inMatch === true);
+      assert.equal(running.mods.packs.length, 1, '开局之后 room.state 里的集合还是开局那一刻那一份');
+      const late = await a.request({ t: 'room.mods', modIds: ['zeta-pack'] });
+      assert.equal(late.t, 'error', JSON.stringify(late));
+      assert.equal(late.code, ERR.MOD_SET_LOCKED, '锁住的是这一格：对局已开始');
+      assert.notEqual(late.code, ERR.NOT_READY, '不能复用一句与事实相反的话（NOT_READY 是「还有玩家没准备好」）');
+      assert.match(String(late.detail), /match/i);
+    } finally {
+      await a.terminate();
+    }
+  });
+
+  test('有人 ready 后改被拒 MOD_SET_LOCKED；那人取消就绪后又能改（同一条连接、同一个房间）', async () => {
+    const a = await player(modded, 'Host');
+    const b = await player(modded, 'Guest');
+    try {
+      assert.equal((await a.request({ t: 'room.create', mode: 'coop', difficulty: 'NORMAL', mods: digest, modIds: ['alpha-pack'] })).t, 'ok');
+      const created = await a.waitFor('room.state', (s) => s.code && s.mods);
+      const guestJoined = b.waitFor('room.state', (s) => s.code === created.code && s.seats.some((x) => x && x.playerId === b.id));
+      assert.equal((await b.request({ t: 'room.join', code: created.code, mods: digest })).t, 'ok');
+      await guestJoined;
+      const guestReady = b.waitFor('room.state', (s) => s.seats.some((x) => x && x.playerId === b.id && x.ready === true));
+      assert.equal((await b.request({ t: 'room.ready', ready: true })).t, 'ok');
+      await guestReady;
+
+      const blocked = await a.request({ t: 'room.mods', modIds: ['zeta-pack'] });
+      assert.equal(blocked.code, ERR.MOD_SET_LOCKED, '有人按旧集合对齐完并点了准备就绪 ⇒ 集合锁住');
+      assert.notEqual(blocked.code, ERR.NOT_READY);
+      assert.match(String(blocked.detail), /Guest/, '点名是谁还在就绪状态');
+
+      // 他取消就绪 ⇒ 集合又改得动（守卫不是「一旦有人 ready 就永久锁死」）
+      const guestBack = b.waitFor('room.state', (s) => s.seats.some((x) => x && x.playerId === b.id && x.ready === false));
+      assert.equal((await b.request({ t: 'room.ready', ready: false })).t, 'ok');
+      await guestBack;
+      const changedP = a.waitFor('room.state', (s) => s.mods && s.mods.packs.length === 1 && s.mods.packs[0].id === 'zeta-pack');
+      assert.equal((await a.request({ t: 'room.mods', modIds: ['zeta-pack'] })).t, 'ok');
+      const changed = await changedP;
+      assert.deepEqual(changed.mods.packs.map((p) => p.id), ['zeta-pack']);
+      assert.equal(changed.mods.digest, modSetOf(changed.mods.packs).digest);
+    } finally {
+      await a.terminate();
+      await b.terminate();
+    }
+  });
+
+  test('AI 队友不算「有人已就绪」：加过 AI 的房间照样改得动（否则房主一加 AI 就再也改不了）', async () => {
+    const a = await player(modded, 'Host');
+    try {
+      assert.equal((await a.request({ t: 'room.create', mode: 'coop', difficulty: 'NORMAL', mods: digest, modIds: ['alpha-pack'] })).t, 'ok');
+      const created = await a.waitFor('room.state', (s) => s.code && s.mods);
+      const botIn = a.waitFor('room.state', (s) => s.code === created.code && s.seats.some((x) => x && x.isBot));
+      assert.equal((await a.request({ t: 'room.addBot' })).t, 'ok');
+      const withBot = await botIn;
+      assert.equal(withBot.seats.find((s) => s && s.isBot).ready, true, 'AI 座位在天生就绪（addBot 建出来的）');
+      const changedP = a.waitFor('room.state', (s) => s.mods && s.mods.packs.length === 2);
+      assert.equal((await a.request({ t: 'room.mods', modIds: ['alpha-pack', 'zeta-pack'] })).t, 'ok', 'addBot 的 ready 不是这条守卫要保护的对象');
+      await changedP;
+    } finally {
+      await a.terminate();
+    }
+  });
+
+  test('未知包名 ⇒ MOD_UNKNOWN（点名未知与可用），集合一字未动', async () => {
+    const a = await player(modded, 'Host');
+    try {
+      assert.equal((await a.request({ t: 'room.create', mode: 'coop', difficulty: 'NORMAL', mods: digest, modIds: ['alpha-pack'] })).t, 'ok');
+      const created = await a.waitFor('room.state', (s) => s.code && s.mods);
+      const bad = await a.request({ t: 'room.mods', modIds: ['alpha-pack', 'nope-pack'] });
+      assert.equal(bad.t, 'error', JSON.stringify(bad));
+      assert.equal(bad.code, ERR.MOD_UNKNOWN);
+      assert.match(String(bad.detail), /nope-pack/);
+      assert.match(String(bad.detail), /zeta-pack/);
+      // 一条干净的、可观察的「没有动过」：换成 []（= 不声明）会真的把 mods 键拿掉
+      const clearedP = a.waitFor('room.state', (s) => s.code === created.code && !s.mods);
+      assert.equal((await a.request({ t: 'room.mods', modIds: [] })).t, 'ok', '空列表 = 改回「不声明」（跑服务器加载的全部）');
+      const cleared = await clearedP;
+      assert.equal('mods' in cleared, false, '不声明就没有这个键（与 room.create 缺省逐字相同）');
+    } finally {
+      await a.terminate();
+    }
+  });
+
+  test('同一份集合是幂等的：不广播、不重置别人的就绪状态', async () => {
+    const c = await browserClient(modded, 'IdemHost');
+    try {
+      roomMods.setWelcomeMods(c.welcome);
+      const createdP = nextFrame(c.net, 'room.state', (s) => s.code && s.mods);
+      assert.equal((await c.net.request('room.create', { mode: 'coop', difficulty: 'NORMAL', mods: digest, modIds: ['alpha-pack'] })).t, 'ok');
+      const state = await createdP;
+      assert.deepEqual(state.mods.packs.map((p) => p.id), ['alpha-pack']);
+      // 同一份集合（同序、乱序、重复都算同一份）：幂等 = 没有 room.state 广播
+      assert.equal((await c.net.request('room.mods', { modIds: ['alpha-pack'] })).t, 'ok');
+      await assert.rejects(nextFrame(c.net, 'room.state', () => true, 150), /timeout/, '同一份集合不是一个变更：没有广播');
+      assert.equal((await c.net.request('room.mods', { modIds: ['alpha-pack', 'alpha-pack'] })).t, 'ok');
+      await assert.rejects(nextFrame(c.net, 'room.state', () => true, 150), /timeout/, '重复的 id 还是同一份集合');
+      // 反例：换一份就一定有广播（否则上面两条「没有广播」什么也没证明）
+      const changedP = nextFrame(c.net, 'room.state', (s) => s.mods && s.mods.packs.length === 2);
+      assert.equal((await c.net.request('room.mods', { modIds: ['alpha-pack', 'zeta-pack'] })).t, 'ok');
+      assert.equal((await changedP).mods.packs.length, 2);
+    } finally {
+      await c.close();
+    }
+  });
+
+  test('协议形状：modIds 必填、上限与条目形状与 room.create 那一格逐字相同', () => {
+    assert.equal(validateC2S({ t: 'room.mods', modIds: [] }), null, '空列表合法 = 改回「不声明」');
+    assert.equal(validateC2S({ t: 'room.mods', modIds: ['alpha-pack'] }), null);
+    assert.equal(validateC2S({ t: 'room.mods' }), 'bad field modIds', '必填：缺了它，「不声明」与「坏了」就分不开');
+    assert.equal(validateC2S({ t: 'room.mods', modIds: 'alpha-pack' }), 'bad field modIds');
+    assert.equal(validateC2S({ t: 'room.mods', modIds: ['..bad'] }), 'bad field modIds');
+    assert.equal(validateC2S({ t: 'room.mods', modIds: [42] }), 'bad field modIds');
+    assert.equal(validateC2S({ t: 'room.mods', modIds: Array.from({ length: MAX_ROOM_MODS }, (_, i) => `p${i}`) }), null, '在上限');
+    assert.equal(validateC2S({ t: 'room.mods', modIds: Array.from({ length: MAX_ROOM_MODS + 1 }, (_, i) => `p${i}`) }), 'bad field modIds');
+    assert.equal(Object.hasOwn(C2S['room.mods'], '$optional'), false, '这一条没有可选字段：形状就是 { modIds }');
+    // 与 room.create 那一格是**同一个判据**（不是抄一份）：上限同源、条目同源
+    assert.deepEqual(C2S['room.mods'].modIds([]), C2S['room.create'].modIds([]));
+    assert.deepEqual(C2S['room.mods'].modIds(['alpha-pack']), C2S['room.create'].modIds(['alpha-pack']));
+  });
+
+  test('MOD_SET_LOCKED 是一个真的错误码：ERR / ERR_TEXT 都有，且四个语言包都有它的文案', () => {
+    assert.equal(ERR.MOD_SET_LOCKED, 'MOD_SET_LOCKED');
+    assert.equal(ERR_TEXT[ERR.MOD_SET_LOCKED], '本房间的模组集合已锁定（模拟已开始，或已有博士准备就绪），要改请重开房间');
+    const i18nDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'i18n');
+    for (const lang of ['en', 'ja', 'ko', 'zh-TW']) {
+      const pack = JSON.parse(fs.readFileSync(path.join(i18nDir, `${lang}.json`), 'utf8'));
+      assert.equal(typeof pack[ERR_TEXT[ERR.MOD_SET_LOCKED]], 'string', `${lang} 缺 MOD_SET_LOCKED 的文案`);
     }
   });
 });
