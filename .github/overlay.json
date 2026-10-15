@@ -15,6 +15,14 @@
     ".github/workflows/release-manager.yml",
     "tools/package-server.mjs",
     "test/package-server-profile.test.js",
+    "test/modMatchKinds.test.mjs",
+    "test/modClientScreens.test.mjs",
+    "test/modPackLane.test.mjs",
+    "server/modLanes.js",
+    "server/modServer.js",
+    "server/modHotReload.js",
+    ".github/manager-only-check.mjs",
+    "test/mod-hot-reload.test.mjs",
     "docs/DEPLOY-SERVER.md",
     "docs/ENGINE-COMPAT-STARDUST-AUDIT.md",
     "docs/UPSTREAM-PR-LEDGER.md"
@@ -29,8 +37,138 @@
       ],
       "problemPattern": "process.exit(report.errors ? 1 : 0);",
       "retireWhen": "上游那份里 `problemPattern` 不再出现（或已出现我的 anchors）⇒ 修复被采纳，删掉这一条 patches 并按 `overlay-check` 复跑。"
+    },
+    {
+      "file": "shared/workshop.js",
+      "why": "§28.52 的 `pack.json.matchKinds` 声明面（DESIGN 2026-10-15 授权：这一格可以由我方先落，允许与维护方 Forge 冲突）。三个锚点少任何一个都=我的那一格被同步弄丢了：闭字段、解析器、以及「没有 matchClass 就没有执行者」那条点名拒。",
+      "anchors": [
+        "export const MATCH_KIND_FIELDS = Object.freeze(['id', 'seats', 'label']);",
+        "function parseMatchKindsDecl(raw) {",
+        "return fail('MATCHKINDS_NEED_MATCH_CLASS',"
+      ],
+      "retireWhen": "上游那份出现同一批 anchors（它自己收了这一格）⇒ 删掉这条 patches，并把 `test/modMatchKinds.test.mjs` 并进上游的契约面复跑一遍。"
+    },
+    {
+      "file": "server/modModules.js",
+      "why": "§28.52 的门面那半边：`host.matchKinds()` 交出深度冻结的只读数据、且没声明 `matchClass` 就抛。丢了它，包侧声明进得了摘要却读不到 —— 正是本层到处在拒的「写了等于没写」。",
+      "anchors": [
+        "matchKinds: declared('matchClass') ? () => matchKindsValue : () => say('matchClass'),",
+        "matchKinds: pack.matchKinds || null,",
+        "import { claimPackLane, attachPackLaneHandler } from './modLanes.js';",
+        "lane: declared('lane') ? (fn) => {"
+      ],
+      "retireWhen": "同上：上游出现同一批 anchors ⇒ 删这条 patches。"
+    },
+    {
+      "file": "docs/design/mod-layer.md",
+      "why": "§28.52 那一节（含「MatchClass 是进程级一次包装 ⇒ 包装器必须原样把 Base 交回」这条只有读码才撞得上的坑）。文档丢了，`test/docs-paths.test.js` 会因为代码里引用 DESIGN §28.52 而红 —— 那是响亮故障，不是静默，但仍要登记。",
+      "anchors": [
+        "### 28.52 `pack.json.matchKinds`"
+      ],
+      "retireWhen": "上游自己写了同一节 ⇒ 删这条 patches，并把两版的差异人工合到保留的那一份上。"
+    },
+    {
+      "file": "shared/workshop.js",
+      "why": "§28.53 的形状层：`client.screens` 的闭枚举路由与字段判据（整屏替换的声明面）。少了它，包作者写 screens 会被 `PACK_UNKNOWN_FIELD` 之外的路径静默丢掉。",
+      "anchors": [
+        "export const CLIENT_SCREEN_ROUTES = Object.freeze(['title', 'lobby', 'room', 'game']);",
+        "function parseMatchKindsDecl(raw) {",
+        "const MODULE_LANE_FIELDS = Object.freeze(['path', 'summary']);",
+        "if (mod.uses.includes('lane') && mod.lane === undefined) {"
+      ],
+      "retireWhen": "上游自己收了 client.screens ⇒ 删这条 patches；路由枚举若被上游扩，必须与客户端那份一起改（test/modClientScreens.test.mjs 钉住两份同源）。"
+    },
+    {
+      "file": "server/workshop.js",
+      "why": "§28.53 的投递那半边：装载器把 panels 与 screens 合成同一份线表、屏条目的源码字节进身份摘要。丢了它，包声明了整屏但客户端永远收不到。",
+      "anchors": [
+        "const declaredScreens = decl && Array.isArray(decl.screens) ? decl.screens : [];"
+      ],
+      "retireWhen": "上游收了同一批投递 ⇒ 删这条 patches。"
+    },
+    {
+      "file": "public/js/ui/extensions.js",
+      "why": "§28.53 的运行时那半边：整屏挂载/卸载与「任何一步失败就保住宿主原生界面」的方向。另外这一格在来源分支上是**坏的**（enter(rawName) 的字符类被写成 caret 记法字面文本 ⇒ 反向区间，模块连 node --check 都过不去），我方按意图修成 [\\u0000-\\u001f\\u007f-\\u009f]。",
+      "anchors": [
+        "export const MOD_SCREEN_ROUTES = Object.freeze(['title', 'lobby', 'room', 'game']);",
+        "async function syncActiveScreen()"
+      ],
+      "retireWhen": "上游自己实现整屏替换 ⇒ 删这条 patches，并复核那个控制码字符类的修法有没有被带回去。"
+    },
+    {
+      "file": "docs/design/mod-layer.md",
+      "why": "§28.53 那一节（含「路由只有四条、结算与干员调配是路由内部视图」这条只有读 selectRoute 才撞得上的判据）。",
+      "anchors": [
+        "### 28.53 `client.screens`"
+      ],
+      "retireWhen": "上游自己写了同一节 ⇒ 删这条 patches。"
+    },
+    {
+      "file": "editor/ui/i18n.en.pack.js",
+      "why": "维护方 `main` **自带**一条 lint 错误（`no-dupe-keys`：'语音' 在同一字面量里出现两次 —— 一次是编辑器页签、一次是校验 kind 名），CI 的 `Lint (warnings allowed)` 因此每次都红。这里不删键、不改名（改名会破词典一致性检查，那条分支的第一版就是这么错的），只就地豁免并写清理由。",
+      "anchors": [
+        "// eslint-disable-next-line no-dupe-keys"
+      ],
+      "retireWhen": "上游自己豁免这一格、或把两份词条拆成两个对象 ⇒ 删这条 patches。"
+    },
+    {
+      "file": "docs/MOD-SURFACE.md",
+      "why": "§28.52 / §28.53 / §28.54 三行表面清单。`test/modSurface.test.js` 判「文档那一行还在」，丢了它是响的；但登记它仍然必要 —— 否则下一次同步把这三行合掉时没人解释为什么。",
+      "anchors": [
+        "| `client.screens` |",
+        "| `server.modules.lane` |",
+        "| `matchKinds` |"
+      ],
+      "retireWhen": "上游自己列了这三格 ⇒ 删这条 patches，并把 wording 并到上游那一份。"
+    },
+    {
+      "file": "docs/WORKSHOP.md",
+      "why": "作者面三节（1.28 / 1.29 / 1.30）。丢了它们，包作者就只能从代码里猜判据 —— 这一层反复强调「作者的失败方向必须是响的」。",
+      "anchors": [
+        "### 1.28 对局种类（`matchKinds`）",
+        "### 1.29 整屏替换（`client.screens`）",
+        "### 1.30 包自带 WebSocket 通道"
+      ],
+      "retireWhen": "上游自己写了对应小节 ⇒ 删这条 patches。"
+    },
+    {
+      "file": "docs/SYNC-POINTS.md",
+      "why": "§7（加一格 `uses` 闭枚举 = 6 处）与 §8（加一格 C 层声明面 = 4 处）。这一份是「漏一处会静默什么」的唯一清单，抄丢了它，下一次加格子就会漏投递点或漏 CONTRACT。",
+      "anchors": [
+        "## 7. 加一格 `server.modules` 的挂载点",
+        "## 8. 加一格客户端整屏声明"
+      ],
+      "retireWhen": "上游自己补了同两节 ⇒ 删这条 patches。"
+    },
+    {
+      "file": "shared/modSurface.js",
+      "why": "三条机器可读登记项（matchKinds / client.screens / server.modules.lane）。`test/modSurface.test.js` 靠它把「表面清单 ↔ 锚点符号 ↔ 文档那一行」钉在一起。",
+      "anchors": [
+        "id: 'client.screens',",
+        "id: 'server.modules.lane',",
+        "id: 'matchKinds',"
+      ],
+      "retireWhen": "上游自己登记了这三格 ⇒ 删这条 patches。"
+    },
+    {
+      "file": "test/packBehaviour.test.js",
+      "why": "`PACK_FIELDS` 的闭集计数被这条断言钉死（我方加 matchKinds ⇒ 就地延长，不放松）。这一格丢了不会让功能坏，只会让**下一格加进来时没人被迫记账** —— 正是这条断言存在的全部意义。",
+      "anchors": [
+        "assert.equal(PACK_FIELDS.length, 37,"
+      ],
+      "retireWhen": "上游自己收了 matchKinds（它那份也是 37 或更多且含这一格）⇒ 删这条 patches。"
+    },
+    {
+      "file": "test/packServerModules.test.js",
+      "why": "`SERVER_MODULE_USES` 的精确清单断言（`lane` 加在末尾，所以现存包的 uses 字节不变）。同上一条：这条断言是「加格子必须记账」的那道门。",
+      "anchors": [
+        "assert.deepEqual(SERVER_MODULE_USES, ['boot', 'shutdown', 'matchClass', 'healthz', 'metrics', 'route', 'lane']);"
+      ],
+      "retireWhen": "上游自己收了 lane ⇒ 删这条 patches。"
     }
   ],
+  "bodyPaths": [],
+  "bodyPathsNote": "受控例外登记处（2026-10-15 起）：每一格是我方**确实改了、而游戏本体 sganggs 也有同名路径**的文件。必填：file / why / anchors（至少一条，且必须能在我们的树里找到 —— `.github/game-overlap-check.mjs` 逐条核对，锚点丢了就拦同步）。空数组 = 当前与本体零交集，这是更强的那条性质，别为了填东西往里塞。",
   "release": {
     "profile": "tools/package-server.mjs（server profile）",
     "why": "只发**纯 mod 管理器**：核心运行时 + Mod API。不含游戏素材、内容包、示例夹具，也不含 `editor/`、`test/`、`.github/`、我这线的网络调优 lane 附加与 perf-lite UI。",

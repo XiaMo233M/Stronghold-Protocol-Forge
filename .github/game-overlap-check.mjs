@@ -4,14 +4,16 @@
 //   node .github/game-overlap-check.mjs --work <master树> --up <上游树>
 //        [--game-repo sganggs/Stronghold-Protocol --game-ref master]
 //
-// 判的是什么：我方相对上游（维护方 Forge）的**增量文件清单**，与游戏本体仓 `sganggs` 的文件清单，
-// 两者**路径交集必须为 0**。交集非空 = 我改了本体也有的那个路径 ⇒ 维护方下次吃 sganggs 时
-// 一定会撞我，或者更糟：我那一份静默覆盖上游的行为。实测 2026-10-14：交集 = 0
-// （我唯一改的上游文件 `tools/workshop-validate.mjs` 在本体仓里根本不存在这个路径）。
+// 判的是什么：我方相对上游（维护方 Forge）的**增量文件清单**，与游戏本体仓 `sganggs` 的文件清单。
+// 2026-10-15 起判据从「路径交集必须为 0」改成「**每一处交集都必须是登记过的受控例外**」—— 因为服主定的路线
+// 是管理器由我方自行演进、不再向维护方/上游提 PR，能力越往引擎里走越不可能全部躲开本体路径。
+// 放宽的**不是红线本身，而是它的证明方式**：越线要在 `.github/overlay.json` 的 `bodyPaths` 里逐格写
+// `why` + 锚点，锚点当场找不到就拦同步（否则「登记」只是口头授权，下一次同步把我方插入体弄掉时没人知道）。
 //
 // 退出码：
-//   0 = 交集为 0（结构性不冲突成立）
-//   1 = 有交集 ⇒ **拦下同步**，要把东西挪到管理器命名空间或改走适配层
+//   0 = 无交集（结构性不冲突，更强的那条性质），或全部交集都是「已登记 + 锚点在位」的受控例外
+//       —— 输出行会明说这不是零交集，**别按零交集对外表述**
+//   1 = 有交集，且其中至少一格未登记 / 没锚点 / 锚点丢了 ⇒ **拦下同步**
 //   3 = 判不了（目录缺失 / 本体清单取不到）⇒ 出 ::warning:: 不拦（那是可用性问题，不是我的代码撞了），
 //       但绝不印「✓ 不冲突」。
 import fs from 'node:fs';
@@ -62,9 +64,39 @@ try {
 console.log(`游戏本体 ${GAME}@${REF} = ${game.size} 个条目`);
 
 const hit = delta.filter((p) => game.has(p));
-if (hit.length) {
-  for (const p of hit.slice(0, 20)) console.log(`✗ 本体仓也有这个路径：${p}`);
-  console.error(`::error::我方增量与卫戍协议本体有 ${hit.length} 处路径交集 —— 同步不放行：挪到管理器命名空间（shared/、server/ 下另起文件）或改走适配层`);
+if (!hit.length) {
+  console.log(`✓ 路径交集 0 / ${delta.length} —— 维护方吃 sganggs 时结构上撞不到我的代码`);
+  process.exit(0);
+}
+
+// 2026-10-15 起这条红线的语义变了（服主定：管理器由我方自行演进，不提上游 PR，以后还要大改）。
+// 原来它是「交集必须为 0」；现在是「**每一处交集都必须是登记过的受控例外**」：
+//   * 每一格必须在 `.github/overlay.json` 的 `bodyPaths` 里有一项，写清 `why`；
+//   * 必须带**至少一条锚点**，而且锚点当场能在我们的树里找到 —— 否则「登记」只是一句口头授权，
+//     下一次同步把我方插入体弄掉时没人知道（那正是本层最恨的静默故障）。
+// 换句话说：越线不再是「不许」，而是「必须留证据」。但对外**不能再说「与本体零交集」**，只能说
+// 「N 处受控例外，锚点在位」—— 这条口径由下面的输出行负责，别在 PR 里引用成 0。
+let ov = { bodyPaths: [] };
+try {
+  ov = JSON.parse(fs.readFileSync(path.join(work, '.github/overlay.json'), 'utf8'));
+} catch (e) {
+  console.log(`::warning::读不到叠层清单（${e.message}）—— 有 ${hit.length} 处交集却无从核对登记，按未登记处理`);
+}
+const reg = new Map((ov.bodyPaths ?? []).map((b) => [b && b.file, b]));
+const bad = [];
+for (const p of hit) {
+  const r = reg.get(p);
+  if (!r) { bad.push(`${p}：未登记 —— 要越这条线就先进 overlay.json 的 bodyPaths 写清 why + 锚点`); continue; }
+  const anchors = Array.isArray(r.anchors) ? r.anchors : [];
+  if (!anchors.length) { bad.push(`${p}：登记了但一条锚点都没有 —— 受控例外必须可被机器核对`); continue; }
+  const txt = fs.readFileSync(path.join(work, p), 'utf8');
+  const missing = anchors.filter((a) => !txt.includes(a));
+  if (missing.length) { bad.push(`${p}：${missing.length}/${anchors.length} 条锚点找不到 —— 我方插入体可能已被同步吃掉（逐条：${missing.map((m) => JSON.stringify(String(m).slice(0, 40))).join(', ')}）`); continue; }
+  console.log(`⚑ 受控例外 ${p}（${anchors.length} 条锚点在位）${r.why ? ` —— ${String(r.why).slice(0, 100)}` : ''}`);
+}
+if (bad.length) {
+  for (const b of bad) console.log(`✗ ${b}`);
+  console.error(`::error::与本体有 ${hit.length} 处路径交集，其中 ${bad.length} 处不是「已登记且锚点在位」的受控例外 —— 同步不放行`);
   process.exit(1);
 }
-console.log(`✓ 路径交集 0 / ${delta.length} —— 维护方吃 sganggs 时结构上撞不到我的代码`);
+console.log(`✓ 本体路径交集 ${hit.length} 处，全部为已登记且锚点在位的受控例外（**这不是「零交集」，别按零交集对外表述**）`);

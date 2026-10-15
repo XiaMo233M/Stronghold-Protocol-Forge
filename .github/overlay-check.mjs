@@ -9,8 +9,10 @@
 //   3 = 用法/清单错（清单读不到、目录不存在）⇒ 绝不报绿
 //
 // 与工坊站那条线（`sync-upstream-mods`）同一套判据形状，但那边管的是「挂载点」（在上游文件体内插入的代码），
-// 这边管的是「补丁」：管理器线相对上游只改了 `tools/workshop-validate.mjs` 一个文件的两处收尾，
-// 其余全是新增文件 —— 所以 `patches` 用「锚点存在 + 上游那份是否还有我要绕的形态」两条来判。
+// 这边管的是「补丁」：从 2026-10-15 起，管理器线相对上游不再只有新增文件 —— 服主明确允许与**维护方 Forge**
+// 冲突（唯一保留的硬红线是与游戏本体 `sganggs` 的路径交集，那条由 `game-overlap-check.mjs` 拦）。所以
+// `patches` 现在同时登记「上游文件里我方插入的每一格」（`shared/workshop.js` 的 §28.52、`server/modModules.js`
+// 的门面、`docs/design/mod-layer.md` 的那一节），锚点丢了就红 —— 新增文件丢了自己会响，插入体丢了是静默的。
 import fs from 'node:fs';
 import path from 'node:path';
 

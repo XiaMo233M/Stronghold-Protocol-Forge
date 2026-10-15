@@ -157,6 +157,9 @@ export const PACK_FIELDS = Object.freeze([
   'behaviour',
   // 中间层四组能力声明（DESIGN §28.13）
   'assets', 'client', 'server', 'routes',
+  // 对局种类声明（DESIGN §28.52）：这个包的 `matchClass` 包装器**在什么条件下**把一局换成另一种玩法。它只是声明
+  // 与协商面 —— 管理器不认玩法名，判定住在包自己的模块里（`server/modModules.js` 的 `host.matchKinds()`）。
+  'matchKinds',
   // 目标引擎（DESIGN §28.46）：`forge`（缺省，本引擎自己装）或 `stardust`（给 Stardust 宿主的**声明型包** ——
   // 本引擎不装载它，但认识它、不拒绝它、也不把它算进数据叠加层；同一份 pack.json 两端各自读得懂）。
   // `target: "stardust"` 的包额外允许 Stardust profile 的几格（见 `STARDUST_TARGET_FIELDS`）。
@@ -413,6 +416,11 @@ export const CLIENT_WRAP_MODES = Object.freeze(['wrap', 'replace']);
 /** 面板的字段：四个 + `styles`（这个面板自带的样式表）+ `data`（它要读的数据表）+ `messages`（它要收发的通道）
  *  + `wraps`（它要包裹 / 替换的引擎组件）。 */
 const CLIENT_PANEL_FIELDS = Object.freeze(['id', 'slot', 'module', 'order', 'gate', 'styles', 'data', 'messages', 'wraps']);
+/** Fixed routes the compatibility runtime can replace without modifying the host router. */
+export const CLIENT_SCREEN_ROUTES = Object.freeze(['title', 'lobby', 'room', 'game']);
+/** Closed fields accepted by pack.json.client.screens[]. */
+export const CLIENT_SCREEN_FIELDS = Object.freeze(['id', 'route', 'module', 'order', 'styles', 'data', 'messages']);
+const CLIENT_MAX_SCREEN_STYLES = 8;
 /** 一个面板最多声明几条包通道（上限让「通道」这件事有界；今天没有一个真包用到两条以上）。 */
 const CLIENT_MAX_PANEL_MESSAGES = 8;
 /**
@@ -532,9 +540,16 @@ const ROOM_MODULE_EXT = '.mjs';
  * 对局：`metrics` 交出的是一份**深冻结的标量快照**（读，不是写），`route` 交出的是**只读 GET/HEAD 的公开 JSON**
  * （它甚至进不了对局进程 —— 它在 HTTP 处理器里跑）。判据是**能力**而不是意图，与 `server.room` 同一条。
  */
-export const SERVER_MODULE_USES = Object.freeze(['boot', 'shutdown', 'matchClass', 'healthz', 'metrics', 'route']);
+export const SERVER_MODULE_USES = Object.freeze(['boot', 'shutdown', 'matchClass', 'healthz', 'metrics', 'route', 'lane']);
 /** `server.modules[*]` 的字段，一个不多一个不少。 */
-const SERVER_MODULE_FIELDS = Object.freeze(['id', 'entry', 'uses', 'write', 'channels']);
+const SERVER_MODULE_FIELDS = Object.freeze(['id', 'entry', 'uses', 'write', 'channels', 'lane']);
+/**
+ * 一条 lane 的声明字段（DESIGN §28.53）：刻意只两格。路径**语法**不在这里判 —— 那份判据只有
+ * `server/http/wsLanes.js` 的 `isLanePath` / `validateLanes` 一处，装载期由 `server/modLanes.js` 调它；
+ * 这里再抄一遍就是第二个会漂的真相。限额（每进程 lane 总数、每包 lane 数）也归宿主的表管，作者能声明的
+ * 只有「我要哪条路径」与「后面跑的是什么」。
+ */
+const MODULE_LANE_FIELDS = Object.freeze(['path', 'summary']);
 /** 一个包最多声明几个服务端模块。 */
 const MAX_SERVER_MODULES = 8;
 /**
@@ -709,11 +724,11 @@ const isSafeServerModulePath = (p) =>
  */
 function parseClientDecl(raw) {
   if (!isPlainObj(raw)) {
-    return fail('CLIENT_DECL_BAD_SHAPE', 'client must be an object: { panels: [...], requires: [...] }');
+    return fail('CLIENT_DECL_BAD_SHAPE', 'client must be an object: { panels?: [...], screens?: [...], requires?: [...], theme?: { vars } }');
   }
   for (const key of Object.keys(raw)) {
-    if (key !== 'panels' && key !== 'requires' && key !== 'theme') {
-      return fail('CLIENT_UNKNOWN_FIELD', `client: "${key}" is not a declared field (panels, requires, theme)`);
+    if (key !== 'panels' && key !== 'screens' && key !== 'requires' && key !== 'theme') {
+      return fail('CLIENT_UNKNOWN_FIELD', `client: "${key}" is not a declared field (panels, screens, requires, theme)`);
     }
   }
   // `client` 至少要声明**一件能用的东西**：面板，或主题变量。业主裁决 2026-10-10 之后主题可以单独存在 —— 一个只想
@@ -722,8 +737,10 @@ function parseClientDecl(raw) {
   // 「这个包有客户端界面」这句话变成假的）。
   if (raw.panels !== undefined && !Array.isArray(raw.panels)) return fail('CLIENT_BAD_PANELS', 'client.panels must be an array of panel declarations');
   if (Array.isArray(raw.panels) && !raw.panels.length) return fail('CLIENT_BAD_PANELS', 'client.panels must declare at least one panel (drop the key instead of sending [])');
-  if (raw.panels === undefined && raw.theme === undefined) {
-    return fail('CLIENT_BAD_PANELS', 'client must declare at least one of: panels (client interfaces), theme (CSS variables) — a client block that declares neither, or only requires, says nothing at all');
+  if (raw.screens !== undefined && !Array.isArray(raw.screens)) return fail('CLIENT_BAD_SCREENS', 'client.screens must be an array of whole-screen declarations');
+  if (Array.isArray(raw.screens) && !raw.screens.length) return fail('CLIENT_BAD_SCREENS', 'client.screens must declare at least one screen (drop the key instead of sending [])');
+  if (raw.panels === undefined && raw.screens === undefined && raw.theme === undefined) {
+    return fail('CLIENT_BAD_PANELS', 'client must declare at least one of: panels, screens (whole-screen routes), theme (CSS variables) — a client block that declares neither, or only requires, says nothing at all');
   }
   const panels = [];
   const seen = new Set();
@@ -860,6 +877,55 @@ function parseClientDecl(raw) {
     }
     panels.push(clean);
   }
+  const screens = [];
+  const screenRoutes = new Set();
+  for (const [i, screen] of (Array.isArray(raw.screens) ? raw.screens : []).entries()) {
+    if (!isPlainObj(screen)) return fail('CLIENT_BAD_SCREEN', `client.screens[${i}] must be an object: { id, route, module, order?, styles?, data?, messages? }`);
+    for (const key of Object.keys(screen)) {
+      if (!CLIENT_SCREEN_FIELDS.includes(key)) return fail('CLIENT_SCREEN_UNKNOWN_FIELD', `client.screens[${i}]: "${key}" is not a screen field (${CLIENT_SCREEN_FIELDS.join(', ')})`);
+    }
+    if (typeof screen.id !== 'string' || !RECORD_ID_RE.test(screen.id)) return fail('CLIENT_BAD_SCREEN_ID', `client.screens[${i}].id: "${String(screen.id)}" is not a valid screen id`);
+    if (seen.has(screen.id)) return fail('CLIENT_SCREEN_DUPLICATE_ID', `client.screens: "${screen.id}" is already used by a panel or screen (ids share one pack namespace)`);
+    seen.add(screen.id);
+    if (!CLIENT_SCREEN_ROUTES.includes(screen.route)) return fail('CLIENT_BAD_SCREEN_ROUTE', `client.screens["${screen.id}"].route must be one of: ${CLIENT_SCREEN_ROUTES.join(', ')}`);
+    if (screenRoutes.has(screen.route)) return fail('CLIENT_SCREEN_DUPLICATE_ROUTE', `client.screens: route "${screen.route}" is declared twice in one pack (one pack may provide at most one screen per route)`);
+    screenRoutes.add(screen.route);
+    if (!isSafeModulePath(screen.module)) return fail('CLIENT_BAD_SCREEN_MODULE', `client.screens["${screen.id}"].module must be a relative path inside the pack ending in .js (e.g. "screens/lobby.js")`);
+    if (screen.order !== undefined && !Number.isInteger(screen.order)) return fail('CLIENT_BAD_SCREEN_ORDER', `client.screens["${screen.id}"].order must be an integer`);
+    const clean = { id: screen.id, route: screen.route, module: screen.module };
+    if (screen.order !== undefined) clean.order = screen.order;
+    if (screen.styles !== undefined) {
+      if (!Array.isArray(screen.styles) || !screen.styles.length) return fail('CLIENT_BAD_SCREEN_STYLES', `client.screens["${screen.id}"].styles must be a non-empty array of pack-relative .css paths (drop the key instead of sending [])`);
+      if (screen.styles.length > CLIENT_MAX_SCREEN_STYLES) return fail('CLIENT_BAD_SCREEN_STYLES', `client.screens["${screen.id}"].styles: at most ${CLIENT_MAX_SCREEN_STYLES} stylesheets per screen`);
+      const styles = [];
+      for (const style of screen.styles) {
+        if (typeof style !== 'string' || !isSafeRelativePath(style) || !style.endsWith(CLIENT_PANEL_STYLES_EXT) || style.length <= CLIENT_PANEL_STYLES_EXT.length) {
+          return fail('CLIENT_BAD_SCREEN_STYLE', `client.screens["${screen.id}"].styles: "${String(style)}" must be a pack-relative .css path`);
+        }
+        styles.push(style);
+      }
+      if (new Set(styles).size !== styles.length) return fail('CLIENT_DUPLICATE_SCREEN_STYLE', `client.screens["${screen.id}"].styles lists a stylesheet twice`);
+      clean.styles = styles.sort();
+    }
+    if (screen.data !== undefined) {
+      if (!Array.isArray(screen.data) || !screen.data.length || screen.data.length > CLIENT_MAX_PANEL_DATA_TABLES) return fail('CLIENT_BAD_SCREEN_DATA', `client.screens["${screen.id}"].data must be a non-empty list of readable table names`);
+      for (const table of screen.data) {
+        if (!CLIENT_PANEL_DATA_TABLES.includes(table)) return fail('CLIENT_BAD_SCREEN_DATA', `client.screens["${screen.id}"].data: "${String(table)}" is not a readable data table`);
+      }
+      if (new Set(screen.data).size !== screen.data.length) return fail('CLIENT_DUPLICATE_SCREEN_DATA', `client.screens["${screen.id}"].data lists the same table twice`);
+      clean.data = CLIENT_PANEL_DATA_TABLES.filter((name) => screen.data.includes(name));
+    }
+    if (screen.messages !== undefined) {
+      if (!Array.isArray(screen.messages) || !screen.messages.length || screen.messages.length > CLIENT_MAX_PANEL_MESSAGES) return fail('CLIENT_BAD_SCREEN_MESSAGES', `client.screens["${screen.id}"].messages must be a non-empty list of at most ${CLIENT_MAX_PANEL_MESSAGES} pack channels`);
+      for (const channel of screen.messages) {
+        if (typeof channel !== 'string' || !PACK_CHANNEL_RE.test(channel)) return fail('CLIENT_BAD_SCREEN_CHANNEL', `client.screens["${screen.id}"].messages: "${String(channel)}" is not a valid pack channel name`);
+      }
+      if (new Set(screen.messages).size !== screen.messages.length) return fail('CLIENT_DUPLICATE_SCREEN_CHANNEL', `client.screens["${screen.id}"].messages lists the same channel twice`);
+      clean.messages = stableStringList(screen.messages);
+    }
+    screens.push(clean);
+  }
+  screens.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const rawRequires = raw.requires === undefined ? [] : raw.requires;
   if (!Array.isArray(rawRequires)) {
     return fail('CLIENT_BAD_REQUIRES', `client.requires must be an array (one of: ${CLIENT_REQUIRES.join(', ')})`);
@@ -911,7 +977,7 @@ function parseClientDecl(raw) {
     theme = { vars };
   }
   // requires 按闭枚举次序，不按作者书写顺序：同一个包两处写法不同的清单必须是同一份字节（DESIGN §28.2）
-  return { ok: true, decl: { panels, requires: CLIENT_REQUIRES.filter((c) => requires.includes(c)), ...(theme ? { theme } : {}) } };
+  return { ok: true, decl: { panels, ...(raw.screens === undefined ? {} : { screens }), requires: CLIENT_REQUIRES.filter((c) => requires.includes(c)), ...(theme ? { theme } : {}) } };
 }
 
 /**
@@ -984,6 +1050,32 @@ function parseServerModulesDecl(raw) {
         return fail('MODULES_CHANNELS_NEED_MATCH', `server.modules["${mod.id}"].channels is delivered to the running match (Match.handlePackMsg, DESIGN §28.23), so this module must also declare the "matchClass" mount point — channels without matchClass have no receiver`);
       }
     }
+    // `lane`（DESIGN §28.53）：这个模块向宿主认领一条 WebSocket 升级路径 —— 另一种玩法的联机面。这里只判**形状**
+    // 与「有没有声明挂载点」；路径语法与建表裁决住在 `server/http/wsLanes.js` + `server/modLanes.js`（一份真相）。
+    if (mod.lane !== undefined) {
+      if (!isPlainObj(mod.lane)) {
+        return fail('MODULES_BAD_LANE', `server.modules["${mod.id}"].lane must be an object: { path, summary? } — one lane per module (the table is process-wide, exact-match and bounded, DESIGN §28.44)`);
+      }
+      for (const key of Object.keys(mod.lane)) {
+        if (!MODULE_LANE_FIELDS.includes(key)) {
+          return fail('MODULES_BAD_LANE', `server.modules["${mod.id}"].lane: "${key}" is not a lane field (${MODULE_LANE_FIELDS.join(', ')}) — limits such as peer caps are the host table's business, not a declaration`);
+        }
+      }
+      if (!mod.uses.includes('lane')) {
+        return fail('MODULES_LANE_UNDECLARED', `server.modules["${mod.id}"].lane is declared but "lane" is not in this module's uses — a mount point that is not declared is never mounted`);
+      }
+      if (typeof mod.lane.path !== 'string' || !mod.lane.path) {
+        return fail('MODULES_LANE_BAD_PATH', `server.modules["${mod.id}"].lane.path must be a non-empty string rooted at "/" (e.g. "/mod-ws/<pack-id>/duel") — its syntax is judged once, by server/http/wsLanes.js, at load time`);
+      }
+      if (mod.lane.summary !== undefined && (typeof mod.lane.summary !== 'string' || !mod.lane.summary.trim())) {
+        return fail('MODULES_LANE_BAD_SUMMARY', `server.modules["${mod.id}"].lane.summary must be a non-empty string (it is the boot-log line that says what runs behind this path)`);
+      }
+    }
+    // 反过来的那一条也判：挂了 `lane` 这个挂载点却没给路径，就是一条没有路由可认领的挂载点 —— 装载期点名，
+    // 不留到运行时才发现「模块等着被叫，表里根本没有它这一行」。
+    if (mod.uses.includes('lane') && mod.lane === undefined) {
+      return fail('MODULES_LANE_NEEDS_PATH', `server.modules["${mod.id}"] declares the "lane" mount point but no lane.path — a lane without a path can never be routed to (declare { path, summary? }, or drop "lane" from uses)`);
+    }
     out.push({
       id: mod.id,
       entry: mod.entry,
@@ -993,6 +1085,11 @@ function parseServerModulesDecl(raw) {
       // 只在**声明了的时候**进清单（声明进身份哈希，没声明的包逐字节不变），并且排序：两个书写顺序不同的
       // 写法必须是同一个包（与 `uses` 按闭枚举次序同一条纪律）。
       ...(mod.channels === undefined ? {} : { channels: [...mod.channels].sort() }),
+      // lane 同样**只在声明时**才进清单（§28.53）：路径是行为声明，两份只差路径的包共用同一个摘要，
+      // 客户端就会连到一条服务端根本没有的进程上（§28.2 同一条理由）。字段顺序固定，`summary` 没写就不存在。
+      ...(mod.lane === undefined ? {} : { lane: mod.lane.summary === undefined
+        ? { path: mod.lane.path }
+        : { path: mod.lane.path, summary: mod.lane.summary } }),
     });
   }
   out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -1288,6 +1385,76 @@ function parseRoomDecl(raw) {
     return fail('ROOM_BAD_MODULE', `server.room.module must be a "${ROOM_MODULE_EXT}" module — the server loads it, the browser never does (unlike server.battle, which both ends run)`);
   }
   return { ok: true, decl: { room: { module: raw.module } } };
+}
+
+/** 对局种类声明（DESIGN §28.52）的闭字段与上界。座位上界取 12：比宿主最大房间还宽的「玩法」没人能组局。 */
+export const MATCH_KIND_FIELDS = Object.freeze(['id', 'seats', 'label']);
+/** 种类 id 与包通道同一套字符集 —— 两条通道说的是同一件事（作者起的、有界的名字），不该各定一套拼法。 */
+export const MATCH_KIND_ID_RE = /^[a-z][a-z0-9_-]{0,63}$/;
+export const MAX_PACK_MATCH_KINDS = 4;
+export const MATCH_KIND_SEATS_MAX = 12;
+
+/**
+ * `pack.json.matchKinds` —— 这个包的 `matchClass` 包装器**在什么条件下**把一局换成另一种玩法（DESIGN §28.52）。
+ * 它是声明与协商面，不是分派表：管理器**不认玩法名**，判定住在包自己的模块里（`host.matchKinds()`）。两条判据
+ * 都照本层既有的形状，因为它们的失败方向都是「写了等于没写」：必须有 `matchClass` 作接收人（与
+ * `MODULES_CHANNELS_NEED_MATCH` 同形）；且**只在写出来时**才进归一化结果（没声明的包哈希逐字节不变，与
+ * `variants` / `behaviour` 同一条纪律）。
+ * @returns {{ ok: true, decl: object[] } | { ok: false, error: string, detail: string }}
+ */
+function parseMatchKindsDecl(raw) {
+  if (!Array.isArray(raw)) return fail('MATCHKINDS_BAD_SHAPE', 'matchKinds must be an array of { id, seats?: { min, max }, label? }');
+  if (!raw.length) return fail('MATCHKINDS_EMPTY', 'matchKinds must declare at least one kind (drop the key instead of sending [])');
+  if (raw.length > MAX_PACK_MATCH_KINDS) {
+    return fail('MATCHKINDS_TOO_MANY', `matchKinds: at most ${MAX_PACK_MATCH_KINDS} kinds per pack (got ${raw.length})`);
+  }
+  const out = [];
+  const seen = new Set();
+  for (const [i, kind] of raw.entries()) {
+    if (!isPlainObj(kind)) return fail('MATCHKINDS_BAD_SHAPE', `matchKinds[${i}] must be an object: { id, seats?: { min, max }, label? }`);
+    for (const key of Object.keys(kind)) {
+      if (!MATCH_KIND_FIELDS.includes(key)) {
+        return fail('MATCHKINDS_UNKNOWN_FIELD', `matchKinds[${i}]: "${key}" is not a kind field (${MATCH_KIND_FIELDS.join(', ')})`);
+      }
+    }
+    if (typeof kind.id !== 'string' || !MATCH_KIND_ID_RE.test(kind.id)) {
+      return fail('MATCHKINDS_BAD_ID', `matchKinds[${i}].id: "${String(kind.id)}" is not a valid kind id (^[a-z][a-z0-9_-]{0,63}$ — the same shape pack channels use)`);
+    }
+    if (seen.has(kind.id)) return fail('MATCHKINDS_DUPLICATE_ID', `matchKinds: "${kind.id}" is declared twice (one id, one kind)`);
+    seen.add(kind.id);
+    const clean = { id: kind.id };
+    if (kind.seats !== undefined) {
+      if (!isPlainObj(kind.seats)) {
+        return fail('MATCHKINDS_BAD_SEATS', `matchKinds["${kind.id}"].seats must be { min, max } (integers from 1 to ${MATCH_KIND_SEATS_MAX})`);
+      }
+      for (const key of Object.keys(kind.seats)) {
+        if (key !== 'min' && key !== 'max') {
+          return fail('MATCHKINDS_BAD_SEATS', `matchKinds["${kind.id}"].seats: "${key}" is not a seat bound (min, max)`);
+        }
+      }
+      for (const name of ['min', 'max']) {
+        const v = kind.seats[name];
+        if (!Number.isInteger(v) || v < 1 || v > MATCH_KIND_SEATS_MAX) {
+          return fail('MATCHKINDS_BAD_SEATS', `matchKinds["${kind.id}"].seats.${name} must be an integer from 1 to ${MATCH_KIND_SEATS_MAX}, got ${String(v)}`);
+        }
+      }
+      if (kind.seats.min > kind.seats.max) {
+        return fail('MATCHKINDS_BAD_SEATS', `matchKinds["${kind.id}"].seats: min ${kind.seats.min} is larger than max ${kind.seats.max}`);
+      }
+      clean.seats = { min: kind.seats.min, max: kind.seats.max };
+    }
+    if (kind.label !== undefined) {
+      const label = strField(kind.label, 60);
+      if (!label) {
+        return fail('MATCHKINDS_BAD_LABEL', `matchKinds["${kind.id}"].label must be a non-empty string of at most 60 characters (author-facing text, not a player-visible string — so it takes no i18n entry)`);
+      }
+      clean.label = label;
+    }
+    out.push(clean);
+  }
+  // 按 id 排序而不是书写顺序：两份书写顺序不同的清单必须是同一份字节（与 `requires` / `registers` 同一条纪律）。
+  out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return { ok: true, decl: out };
 }
 
 /**
@@ -2265,19 +2432,21 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // —— 没有面板声明过的通道，客户端根本发不出来，那是一条「声明了却不可能发生」的声明。
   if (serverParsed) {
     const panelChannels = new Set();
-    for (const panel of (clientParsed ? clientParsed.decl.panels : [])) {
+    for (const panel of [...(clientParsed ? clientParsed.decl.panels : []), ...(clientParsed ? (clientParsed.decl.screens || []) : [])]) {
       for (const channel of (panel.messages || [])) panelChannels.add(channel);
     }
     for (const m of serverParsed.decl.modules || []) {
       for (const channel of m.channels || []) {
         if (!panelChannels.has(channel)) {
-          return fail('MODULES_UNKNOWN_CHANNEL', `server.modules["${m.id}"].channels: "${channel}" is not declared by any of this pack's client.panels[].messages — the engine only lets a pack send the channels its panels declare, so this one could never arrive (add it to a panel's "messages", or drop it here)`);
+          return fail('MODULES_UNKNOWN_CHANNEL', `server.modules["${m.id}"].channels: "${channel}" is not declared by any of this pack's client.panels[].messages or client.screens[].messages — the engine only lets a pack send declared channels, so this one could never arrive (add it to a panel or screen "messages", or drop it here)`);
         }
       }
     }
   }
   const routesParsed = raw.routes === undefined ? null : parseRoutesDecl(raw.routes);
   if (routesParsed && !routesParsed.ok) return routesParsed;
+  const matchKindsParsed = raw.matchKinds === undefined ? null : parseMatchKindsDecl(raw.matchKinds);
+  if (matchKindsParsed && !matchKindsParsed.ok) return matchKindsParsed;
   // `i18n`（fanpack G-04）：给**已有语种**补词条的声明，形状见 `parseI18nDecl`。它同样遵守上面那条
   // 「只在清单真的写了这个键时才进归一化结果」的纪律 —— 没声明 i18n 的包（今天所有的包）哈希逐字节不变。
   const i18nParsed = raw.i18n === undefined ? null : parseI18nDecl(raw.i18n);
@@ -2392,7 +2561,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     // 只声明助战的包今天整包被拒（plugin-pack G6：一个 `support: [...]` + `content: []` 的包得到的就是这一条），
     // 而原来的文案里**没有** `support` 这个词，作者只能对着 `EMPTY_PACK` 猜。`support` 只决定**助战卡池**里放谁，
     // 干员本体还是由 `content: ["chess"]` 带进来的 —— 所以放宽它不是这一刀的活（那是既有裁决），把话说明白才是。
-    const notContributions = ['support', 'playtest', 'variants', 'behaviour', 'dependencies', 'conflicts']
+    const notContributions = ['support', 'playtest', 'variants', 'behaviour', 'dependencies', 'conflicts', 'matchKinds']
       .filter((n) => raw[n] !== undefined);
     const names = [...WORKSHOP_CONTENT_FILES, 'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'skins', 'operators',
       'assets', 'client', 'server.preDispatch', 'server.meta', 'server.battle', 'server.room', 'server.modules', 'server.transport', 'routes', 'i18n', 'notices', 'forms', 'fx'];
@@ -2468,6 +2637,29 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (serverParsed && (serverParsed.decl.modules || []).some((m) => m.uses.includes('matchClass')) && raw.combat !== true) {
     return fail('MODULES_NEED_COMBAT', 'a server module whose uses includes "matchClass" wraps the match itself, so this pack must declare "combat": true — that is what puts it into the room digest gate and the golden corpus (DESIGN §28.14); a module that only mounts boot / shutdown / healthz does not need it');
   }
+  // `matchKinds`（DESIGN §28.52）的接收人闸门，形状照 `MODULES_CHANNELS_NEED_MATCH`：种类声明说的是「这一局换成
+  // 另一种玩法」，而全场只有 `matchClass` 包装器能换掉对局；没有它这句话没有执行者，所以点名拒，不许留一条
+  // 永远不发生的效果。`combat` **不在这里重复判** —— 合法的 matchKinds 必须有 matchClass 包装器，而上面那条
+  // §28.14 已经先一步拦下「有包装器却不肯认 combat」；再写一条就是永远不会命中的死格子。
+  if (matchKindsParsed) {
+    const kindWrappers = serverParsed ? (serverParsed.decl.modules || []).filter((m) => m.uses.includes('matchClass')) : [];
+    if (!kindWrappers.length) {
+      return fail('MATCHKINDS_NEED_MATCH_CLASS', 'pack.json.matchKinds has no executor: only a server module whose uses includes "matchClass" can replace the match (server/index.js wraps MatchClass with it), so this pack must either mount one or drop the kind declarations — a kind nothing reads is the silent failure this layer keeps refusing');
+    }
+  }
+  // lane 的**命名空间**（DESIGN §28.53）：一条 lane 是全进程精确匹配的，两个包抢同一条路径必须在建表之前就
+  // 分开，而不是靠先到先得。规则只有一条、且只需要包 id：路径必须是 `/mod-ws/<本包id>` 或它的直接子路径。
+  // 语法本身不在这里判（`isLanePath` / `LANE_RESERVED` 那份判据只在 `server/http/wsLanes.js` 一处）。
+  if (serverParsed) {
+    const lanePrefix = `/mod-ws/${id}`;
+    for (const m of serverParsed.decl.modules || []) {
+      if (!m.lane) continue;
+      const p = m.lane.path;
+      if (p !== lanePrefix && !p.startsWith(`${lanePrefix}/`)) {
+        return fail('MODULES_LANE_BAD_NAMESPACE', `server.modules["${m.id}"].lane.path "${p}" must live under this pack's own namespace "${lanePrefix}" (one path per lane, the table is process-wide and exact-match — squatting outside your namespace would let this pack shadow another pack's or the engine's endpoint)`);
+      }
+    }
+  }
   // 变体 / 口径（DESIGN §28.39）**也**要 `combat: true`，理由与上面三条逐字同构：一个口径改的就是**对局的结果**
   // —— `deploy: "max"` 把 `config.economy.deployCap` 从官方的 8 抬到 12（场上同时多站四个人），
   // `training` 说的是这一局用哪一套练度。判据是**能力**而不是意图：一条**能**改结果的口径声明，必须进房间摘要
@@ -2537,6 +2729,10 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
       // 包都加一个 `behaviour: []` 会让**所有已发布包的哈希全部改变**。而它**必须**进哈希：一条开关改的是引擎的
       // 规则，两份只差开关的包共用同一个摘要，房间的摘要闸门就会放行两种不同的行为（DESIGN §28.2）。
       ...(behaviourParsed ? { behaviour: behaviourParsed.decl } : {}),
+      // 对局种类声明（DESIGN §28.52）：**只在声明过时才存在**，与 `variants` / `behaviour` 同一条纪律、理由逐字
+      // 相同 —— `identifyPack` 哈希的就是这份归一化清单；它决定「这一局由谁算什么」，两份只差种类声明的包共用
+      // 同一个摘要，就是摘要闸门放行两种行为（DESIGN §28.2）。
+      ...(matchKindsParsed ? { matchKinds: matchKindsParsed.decl } : {}),
       // 四组新声明：**只在声明过时才存在**（见上面 `declared` 的注释）。哈希覆盖它们靠的就是这一条 ——
       // `identifyPack` 哈希的是这份归一化清单的 `canonicalJson`（server/workshop.js）。
       ...Object.fromEntries(declared),

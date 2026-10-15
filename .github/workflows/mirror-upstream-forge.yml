@@ -175,6 +175,10 @@ jobs:
             test/workshopValidateOverrides.test.js
             test/workshopValidateArtTables.test.js
             test/package-server-profile.test.js
+            test/modMatchKinds.test.mjs
+            test/modClientScreens.test.mjs
+            test/modPackLane.test.mjs
+            test/mod-hot-reload.test.mjs
           )
           for f in "${CONTRACT[@]}"; do
             [ -f "$f" ] || { echo "::error::契约测试文件缺失：$f（那一格被上游删了或改名了）"; exit 1; }
@@ -209,12 +213,24 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
-          # 判的是「我增量里的文件，游戏本体仓 sganggs 是否也有同名路径」——交集必须为 0。
-          # 非 0 = 维护方下次吃 sganggs 必撞我（或我那份静默覆盖上游行为）⇒ 拦同步。
+          # 判的是「我增量里的文件，游戏本体仓 sganggs 是否也有同名路径」。2026-10-15 起：交集**不再是零容忍**，
+          # 而是每一格都必须在 overlay.json 的 bodyPaths 里登记 why + 锚点，锚点当场找不到就拦（把「受控例外」
+          # 变成能被机器核对的东西，而不是一句口头授权）。无交集时它照样报「0 / N」。
           # 退出码 3 = 本体清单这会儿取不到（可用性问题）：出 warning、不拦合并，但**不印**「不冲突成立」。
           node .github/game-overlap-check.mjs --work . --up ../up
           rc=$?
           if [ "$rc" = 3 ]; then echo "::warning::本轮没能核对与本体仓的路径交集（清单取不到）—— 合并照旧放行，事后补看"; exit 0; fi
+          exit $rc
+
+      - name: GATE — 分支只有 mod 管理器（增量必须都是控制面或已登记叠层）
+        if: steps.merge.outputs.merged == 'true'
+        run: |
+          set -uo pipefail
+          # 与上一条是**两条不同的红线**：game-overlap 判「会不会撞游戏本体」，这一格判「还是不是 mod 管理器」。
+          # 退出码 3 = 判不了（目录/清单缺失）⇒ 出 warning 不拦，但绝不印「成立」。
+          node .github/manager-only-check.mjs --work . --up ../up
+          rc=$?
+          if [ "$rc" = 3 ]; then echo "::warning::本轮没能判定增量是否只含管理器这一层 —— 合并照旧放行，事后补看"; exit 0; fi
           exit $rc
 
       - name: GATE — 全量套件（advisory，不当闸门）

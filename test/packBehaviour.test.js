@@ -128,7 +128,7 @@ describe('表：闭枚举，一格开关只有一个值', () => {
     assert.ok(PACK_FIELDS.includes('behaviour'));
     assert.equal(PACK_FIELDS[PACK_FIELDS.indexOf('variants') + 1], 'behaviour',
       '新格紧挨着口径那一格：两张表逐字同形，读起来是同一套东西');
-    assert.equal(PACK_FIELDS.length, 36, '顶层键是闭集：加一格必须就地延长这个计数，不许放松它');
+    assert.equal(PACK_FIELDS.length, 37, '顶层键是闭集：加一格必须就地延长这个计数，不许放松它');
     assert.equal(WORKSHOP_CONTENT_FILES.includes('behaviour'), false,
       '行为开关走 pack.json.behaviour；把它当数据文件就是开一条「包可以覆盖任意数值 / 任意文件」的通道');
     // 第 1 刀的口径表**一字不动**（它已随 v0.15.3 发布）

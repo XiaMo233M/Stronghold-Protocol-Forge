@@ -51,3 +51,16 @@ npm run golden
 ```
 
 上线前还须用 Mod 仓库当前的 30 个包逐个进行运行时装载、协议通道、房间/对局和 UI 面板验收。Mod 索引里的旧加载记录不是新引擎上的复验结果；详见 [引擎兼容审计](ENGINE-COMPAT-STARDUST-AUDIT.md)。
+
+## 换入口：`node server/modServer.js`（可选，认两件事）
+
+默认入口 `node server/index.js` 的行为与字节**不变**。`server/modServer.js` 是给需要这两件事的部署用的可选入口，
+它存在的唯一理由是不改 `server/index.js`（那是游戏本体拥有的路径，改它就越过「与本体路径交集必须为 0」那条红线）：
+
+| 能力 | 怎么开 | 不开会怎样 |
+|---|---|---|
+| 包声明的 WebSocket lane（DESIGN §28.54） | 包在 `server.modules[].lane.path` 声明 `/mod-ws/<包id>/…`，模块里 `host.lane(onUpgrade)` | 那条 lane 根本不在宿主的升级表里，客户端连过去是 404 —— 不是 503，是查无此路 |
+| 工坊目录热装载（监听 + 精确 diff + 可选受监督重启） | `SP_HOT_RELOAD=report`（缺省，只报告）或 `SP_HOT_RELOAD=restart` + `SP_HOT_RELOAD_EXIT_CODE=<n>` 交给外部 supervisor | 包改动不会被报出来；服务本身不受任何影响（异常一律只记日志） |
+
+启动时这一入口会多打一行 `[mod-lane] N pack lane(s): /mod-ws/<包id>/… (NO HANDLER)` —— 运维要能确认这个进程
+到底开了哪几条包通道，而不是靠猜。`workshop/` 的位置仍由 `SP_WORKSHOP` 或 `opts.workshopDir` 决定，与默认入口一致。

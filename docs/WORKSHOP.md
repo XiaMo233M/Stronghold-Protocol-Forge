@@ -2801,3 +2801,88 @@ export default function kit(bb, raw, def) {
 }
 ```
 
+
+### 1.28 对局种类（`matchKinds`）：告诉管理器「这一局我可以换成另一种玩法」（DESIGN §28.52）
+
+**它是什么**：一份**声明**，不是分派表。管理器**不认玩法名** —— 它只知道你这个包提供哪些种类、边界在哪。
+真正判「这一局是不是我的」的是你的 `matchClass` 包装器（`host.matchKinds()` 把这份声明原样交还给你）。
+
+```jsonc
+// pack.json
+{
+  "combat": true,                       // 必须：能换对局 = 能换结果（§28.14 同一条线）
+  "server": { "modules": [ { "id": "football", "entry": "server/football.mjs", "uses": ["matchClass"] } ] },
+  "matchKinds": [ { "id": "football_3v3", "seats": { "min": 6, "max": 6 }, "label": "阵地足球" } ]
+}
+```
+
+**判据（写错会当场点名，不会静默）**：id 形状与包通道同一套（`^[a-z][a-z0-9_-]{0,63}$`）；一个包最多 4 种；
+`seats.min/max` 是 1..12 的整数且 `min <= max`；`label` 非空 ≤60 且**只给作者看**（不经 `t()` ⇒ 不占语言包）；
+**没有 `matchClass` 接收人就整包拒**（`MATCHKINDS_NEED_MATCH_CLASS`）；`combat` 那一格不在这里重复判 —— 上面那条
+§28.14 的 `MODULES_NEED_COMBAT` 会先拦，所以这里再写一遍就是永远不会命中的死格子。
+
+**包装器必须知道的两件事**（只有读码才撞得上）：
+
+1. `MatchClass` 是**进程级一次**包装的（`server/index.js` 换类一次，之后所有房间共用）。所以你的包装器
+   **命中才换、否则原样把 Base 交回** —— 忘了这一条就是把所有塔防房间一起换掉。
+2. 房间侧**读不到口径轴** `variants`（`server/lobby.js` 的 `resolveRoomModSet` 重建条目时只留
+   `{id,hash,layer,combat,api}`，§28.47）。能用的选择器只有 `opts.mods.packs[].id`（建房时装了哪个包），
+   开局之后可以再用包通道细分到具体 kind。
+
+**不需要 `golden:update`**：不声明的包与不装包逐字节相同。**测试**：`test/modMatchKinds.test.mjs`。
+
+### 1.29 整屏替换（`client.screens`）：把大厅 / 房间 / 对局这一屏交给包（DESIGN §28.53）
+
+**它是什么**：§1.9.3 的面板只能往引擎已经渲染的组件里**插**东西；这一格让**整屏由你出**。
+形状与面板共用判据（`module` / `styles` / `data` / `messages` 同一套装载期文件判据、同一批闭枚举）。
+
+```jsonc
+{ "client": { "screens": [ { "id": "lobby_v2", "route": "lobby", "module": "screens/lobby.js", "styles": ["screens/lobby.css"] } ] } }
+```
+
+**route 只有四条，而且这不是偷懒**：`public/js/store.js` 的 `selectRoute` 与 `public/js/main.js` 的 `SCREENS`
+都只到 `title | lobby | room | game`。**结算与干员调配是路由内部的视图，不是路由** —— 你想要「换结算页」，
+做法是换 `game` 那一屏并自己渲染结算。声明表里没有的值 ⇒ `CLIENT_BAD_SCREEN_ROUTE` 点名拒。
+
+**判据**：`id` 与面板共用一个包内命名空间（撞了 ⇒ `CLIENT_SCREEN_DUPLICATE_ID`）；一个包同一条路由只能有一份
+（`CLIENT_SCREEN_DUPLICATE_ROUTE`）；屏模块与样式表的源码字节**进包身份摘要**（不算进去，两份不同的整屏就能
+共用同一个摘要，而那份摘要声称「同一份界面」）；没声明 `screens` 的包摘要逐字节不变。
+
+**你的模块要导出什么**：`mountScreen(ctx)`（或 `default`）。`ctx` 给三样别的格没有的东西 ——
+`ctx.screen`（`route` / `currentRoute()` / `active()` / `snapshot()` / `subscribe(fn)`）、
+`ctx.actions`（`request(type, fields)` 走前缀白名单 + 共享 `validateC2S`；`enter(name)` 只在 `title` 路由有效）、
+`ctx.ui`（`h` / `Fragment` / `render(vnode)` / `clear()`）。
+**失败方向是宿主原生界面保持可见**：样式装不上 / import 失败 / 没导出挂载函数 / 挂载抛错，四种都点名并把
+这个 key 拉黑，绝不做「白屏但看起来成功了」。退出时对称回收（订阅、样式、根属性）。
+**测试**：`test/modClientScreens.test.mjs`（含「两份路由名单钉成同一份」那条）。
+
+### 1.30 包自带 WebSocket 通道（`server.modules[].lane`）：宿主替它开，按声明开（DESIGN §28.54）
+
+**它是什么**：§28.44 那张升级路径表今天只有宿主自己能登记。这一格让你**声明一条路径**，由宿主替你开。
+结构性保证一个字没改：包**仍然**拿不到监听套接字、新端口、定时器、子进程。
+
+```jsonc
+{ "server": { "modules": [ { "id": "football-net", "entry": "server/football.mjs",
+  "uses": ["lane"], "lane": { "path": "/mod-ws/<本包id>/duel", "summary": "阵地足球的房间通道" } } ] } }
+```
+
+```js
+// server/football.mjs
+export function registerServer(host) {
+  host.lane((req, socket, head, ctx) => { /* 自己完成 101，或 ctx.reject(status, text) —— 与 §28.44 逐字同形 */ });
+}
+```
+
+**判据**：路径必须落在 `/mod-ws/<本包id>` 之下（`MODULES_LANE_BAD_NAMESPACE`）；语法与保留名**只有一份判据**，
+住在 `server/http/wsLanes.js`（`isLanePath` / `LANE_RESERVED` / `MAX_WS_LANES`），形状层不抄第二遍；
+`{ path, summary? }` 之外的字段一律 `MODULES_BAD_LANE`（限额是宿主的表预算，不许作者声明）；
+`lane` 与 `uses:["lane"]` 必须成对（`MODULES_LANE_UNDECLARED` / `MODULES_LANE_NEEDS_PATH`）。
+
+**为什么必须「路径同步认领 + 处理器惰性挂」**：宿主在 `server/index.js:392` 就快照那张表，而你的模块是异步
+import 的。所以认领在 import **之前**，处理器 import 完才挂。没挂上就有人连 ⇒ 明确 `503` 并点名；
+认领失败（语法 / 抢 `/ws` / 与别的模块撞同一条路径 / 一个模块两条 / 表满）⇒ **整包装载期被拒并点名**，
+照 §28.44 那句「一条安静地从不应答的 lane 比没有 boot 更糟」。
+
+**入口**：要用这一格，进程得由 `node server/modServer.js` 起（它把 lane 表交给 `startServer({ wsLanes })`）。
+**不改 `node server/index.js` 那条路**，那条路的行为与字节都照旧 —— 详见 `docs/DEPLOY-SERVER.md`。
+**测试**：`test/modPackLane.test.mjs`。**不需要 `golden:update`**：不进模拟。

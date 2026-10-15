@@ -57,7 +57,7 @@
 
 | # | 同步点 | 漏了会怎样 |
 |---|---|---|
-| ① | `shared/workshop.js` 的 **`PACK_FIELDS`**（**今天 35 键**） | 作者写它 ⇒ `PACK_UNKNOWN_FIELD` **整包拒**；字段在这一层就是**闭集** |
+| ① | `shared/workshop.js` 的 **`PACK_FIELDS`**（**今天 37 键**） | 作者写它 ⇒ `PACK_UNKNOWN_FIELD` **整包拒**；字段在这一层就是**闭集** |
 | ② | 同文件的 **`normalizePackManifest`** 加解析分支 | 键合法了、**归一化时被丢掉** ⇒ 作者看到「pack.json 合法、包加载了、可我写的那件事没发生」 |
 | ③ | `server/workshop.js` 的 **`identifyPack`** 的哈希清单 | **能改变一端行为的声明不进哈希** ⇒ 同一个摘要下出现两种行为（§28.2） |
 | ④ | `docs/MOD-SURFACE.md` 那一行（表面清单） | 文档与实现分叉；`test/modSurface.test.js` 红 |
@@ -143,3 +143,25 @@
 
 **钉它的测试**：`test/modSurface.test.js` —— 它会断言**锚点符号还在声明的模块里**、**实现文件与测试文件都还在**、
 **文档的那一行还在**，以及**引擎里每一个「包可声明的名单」都被某条表面引用**（加了一格却没进清单**也红**）。
+
+## 7. 加一格 `server.modules` 的挂载点（`SERVER_MODULE_USES` 闭枚举）—— **6 处**
+
+以 §28.54 的 `lane` 为实例（今天闭枚举 7 格：`boot` / `shutdown` / `matchClass` / `healthz` / `metrics` / `route` / `lane`）。
+
+| # | 同步点 | 漏了会怎样 |
+|---|---|---|
+| ① | `shared/workshop.js` 的 **`SERVER_MODULE_USES`**，**加在末尾** | 作者写它 ⇒ `MODULES_BAD_USES` 整包拒。加在末尾是因为归一化结果按这张表的次序输出（`uses: SERVER_MODULE_USES.filter(...)`）—— 插在中间会**改掉现存包的摘要** |
+| ② | 同文件 **`SERVER_MODULE_FIELDS`** + 解析分支（新声明字段时） | 键合法但被丢掉 ⇒ 「包加载了、我写的那件事没发生」；`MODULES_UNKNOWN_FIELD` 也就永远不会替作者纠错 |
+| ③ | `server/modModules.js`：`moduleHost` 上的门面 + 装载循环里的登记（**没声明就抛 `MODULE_USE_UNDECLARED`**，不是 `undefined`） | 交出一个 `undefined` 只会变成一行 `TypeError: not a function`，作者分不清是「没声明」还是「拼错了」 |
+| ④ | **能力闸门**：这一格能不能改对局结果？能 ⇒ 必须要求 `combat: true`（照 `MODULES_NEED_COMBAT` / `MATCHKINDS_NEED_COMBAT` 的写法） | 「不声明 combat 的包改不了结果」从结构性保证退化成一句口号 |
+| ⑤ | `shared/modSurface.js` + `docs/MOD-SURFACE.md` + `docs/WORKSHOP.md` 各一行/一节 | `test/modSurface.test.js` 红；文档与实现分叉 |
+| ⑥ | 新测试加进 `test/` **并且**加进 `.github/workflows/mirror-upstream-forge.yml` 的 `CONTRACT` 数组；同时把改过的上游文件登记进 `.github/overlay.json` 的 `patches`（带锚点） | 闸门会在「什么都没跑」的情况下报绿；下一次同步把我方那一格**静默吃掉**（新增文件丢了自己会响，插入体丢了是静默的） |
+
+## 8. 加一格客户端整屏声明（`client.screens` 这类「C 层新声明面」）—— **4 处**
+
+| # | 同步点 | 漏了会怎样 |
+|---|---|---|
+| ① | `shared/workshop.js`：闭枚举（`CLIENT_SCREEN_ROUTES`）+ 字段闭集 + 解析分支 + **`client` 块的「至少说出一件能用的事」判据** | 声明进不了清单，或反过来 —— 一个只声明空 `client` 的包被当成「有客户端界面」 |
+| ② | `server/workshop.js`：装载期的文件判据（`panelModuleIssues` 现在同时收 panels 与 screens）与**投递**（合成同一份线表）；`identifyPack` 里源码字节进摘要 | 包合法、URL 永远 404；或两份不同的界面共用同一个摘要 |
+| ③ | `public/js/ui/extensions.js`：**客户端那份名单**（`MOD_SCREEN_ROUTES` / `MOD_PANEL_SLOTS`）+ 挂载 / 卸载 / 失败方向 | 两处名单各说各话 —— 作者写出「声明合法、客户端永远不调用」的死格子。所以 `test/modClientScreens.test.mjs` 直接读源码文本把两份钉成同一份 |
+| ④ | `docs/MOD-SURFACE.md` + `shared/modSurface.js` + `docs/WORKSHOP.md` + `test/`（并进 `CONTRACT`）+ `overlay.json` 登记 | 同 §7 的 ⑤⑥ |
