@@ -208,3 +208,38 @@ export function modSetOf(packs) {
   const sorted = [...list].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return { digest: modDigest(sorted), packs: sorted };
 }
+
+/**
+ * 一份**钉住的**房间集合（`room.modSet`）与这台机器今天还跑得动的那几个包之间的漂移（W7 的服主 pin，DESIGN §28.53）。
+ *
+ * 为什么住在这个文件：pin 判的就是摘要判的那件事 —— 同一条 `[id, hash]` 口径、同一份身份。放别处就是第二个真相，
+ * 而两个真相最终一定会对「这个房间钉的是不是这一份字节」给出不同答案。
+ *
+ * 两种漂移各自**复用既有守卫**（业主口径：能复用就复用，别造第二套），所以这里只回答「漂了没有、漂在哪」，
+ * 不决定错误码 —— 决定权在 `server/lobby.js`，它把 `missing` 交给 `MOD_UNKNOWN`（那句「本服务器没有这个包」本来
+ * 就是这个意思）、把 `changed` 交给 `MOD_SET_LOCKED`（房间钉住的那份锁住了，字节已经不是它）。
+ *
+ * @param {{ digest?: string, packs?: Array<{ id: string, hash?: string }> }|null} pinned 房间钉住的那一份
+ * @param {Array<{ id?: string, hash?: string }>} loaded 这台机器**现在**装着的包（`workshop.mods`）
+ * @returns {{ ok: boolean, missing: string[], changed: Array<{ id: string, was: string, now: string }> }}
+ */
+export function modSetDrift(pinned, loaded) {
+  const pinnedList = pinned && Array.isArray(pinned.packs) ? pinned.packs.filter((p) => isObj(p) && isModId(p.id)) : [];
+  if (!pinnedList.length) return { ok: true, missing: [], changed: [] };
+  /** @type {Map<string, string>} */
+  const now = new Map();
+  for (const p of Array.isArray(loaded) ? loaded : []) {
+    if (isObj(p) && isModId(p.id) && typeof p.hash === 'string') now.set(p.id, p.hash);
+  }
+  const missing = [];
+  const changed = [];
+  for (const p of pinnedList) {
+    const was = typeof p.hash === 'string' ? p.hash : '';
+    if (!now.has(p.id)) { missing.push(p.id); continue; }
+    const is = now.get(p.id) || '';
+    // 摘要为空的一方不比：那不是「换了字节」，是「说不出是哪一份字节」（装载器从不产出空 hash，所以真发生
+    // 在别处时那是另一个问题，不该在这里被误报成一次换包）。
+    if (was && is && was !== is) changed.push({ id: p.id, was, now: is });
+  }
+  return { ok: missing.length === 0 && changed.length === 0, missing: missing.sort(), changed: changed.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)) };
+}

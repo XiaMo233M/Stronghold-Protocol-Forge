@@ -26,7 +26,7 @@ import { enabled as federationEnabled, currentNode } from '../federation.js';
 // Texts go through t() (docs/I18N.md).
 
 import { useEffect, useMemo, useRef, useState } from '../../vendor/hooks.module.js';
-import { DIFFICULTIES, DIFFICULTY_NAMES, DIFFICULTY_COLORS, MIN_SEATS, MAX_SPECTATORS } from '../../../shared/constants.js';
+import { DIFFICULTIES, DIFFICULTY_NAMES, DIFFICULTY_COLORS, MIN_SEATS, MAX_SPECTATORS, ERR_TEXT } from '../../../shared/constants.js';
 // seat counts through the namespace: the live constants (before the 10-seat package) have MAX_SEATS 4 and no DEFAULT_SEATS
 import * as SEAT_CONST from '../../../shared/constants.js';
 import { RANDOM_MODE, RANDOM_MODE_NAME } from '../../../shared/randomMode.js';
@@ -760,9 +760,22 @@ export function RoomScreen() {
   const removeBot = (seat) => run(`rm${seat}`, () => net.request('room.removeBot', { seat }));
   const setDifficulty = (difficulty) => run('diff', async () => { await net.request('room.setDifficulty', { difficulty }); setPicker(false); });
   const setAiLast = (on) => run('ailast', () => net.request('room.setAiPicksLast', { on }));
-  // spectator seats: the host frees one; a spectator takes a free player seat with room.join of this room
+  // spectator seats: the host frees one; a spectator takes a free player seat with room.join of this room.
   const removeSpectator = (playerId) => run(`rs${playerId}`, () => net.request('room.removeSpectator', { playerId }));
-  const sit = () => run('sit', () => net.request('room.join', roomMods.buildJoinPayload(room.code)));
+  // W7（DESIGN §28.53）：入座就是**占玩家座位**，所以这个房间声明了集合时要先同意 —— 拒绝的 detail 里就是那串
+  // 包名，问一次再带 `consent: true` 重发（重发什么由 roomMods 那一处决定，三个入口共用）。同一个入口也是
+  // 「集合中途改过、已经坐在里面的人重新表态」的唯一通道（幂等 join 会补上同意），所以他不必退出再进。
+  const sit = () => run('sit', async () => {
+    try {
+      await net.request('room.join', roomMods.buildJoinPayload(room.code));
+    } catch (err) {
+      const retry = roomMods.consentRetryPayload(err, room.code);
+      if (!retry) throw err;
+      const ok = await confirmDialog({ title: t(ERR_TEXT.MOD_CONSENT_REQUIRED), text: String(err.detail || ''), micro: 'ROOM MODS' });
+      if (!ok) throw err;
+      await net.request('room.join', retry);
+    }
+  });
   const copy = async (what) => {
     const modeLabel = firepower ? `${RANDOM_MODE_NAME} · ` : '';
     const ok = await copyText(what === 'code' ? room.code : t('{0} {name}邀请你加入卫戍协议：盟约【{modeLabel}{3}】', { 0: inviteLink(room.code), name: me.name, modeLabel, 3: DIFFICULTY_NAMES[room.difficulty] }));

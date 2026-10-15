@@ -365,6 +365,11 @@ export const ERR = Object.freeze({
   // 准备就绪**（那个人的客户端是按旧集合对齐的）。与 `NOT_READY` **分开**：`NOT_READY` 说的是「还有玩家没准备好，
   // 所以开不了局」，这里是「集合已经锁住了，改不了」—— 两句话在界面上正好相反，复用会让玩家读到与事实相反的理由。
   MOD_SET_LOCKED: 'MOD_SET_LOCKED',
+  // 房间同意（W7, DESIGN §28.53）：进一个**声明了模组集合**的房间时，真人玩家必须明确同意才继续 ——
+  // 未同意 ⇒ 进不去（`room.join`），已经进去了（集合中途改过）⇒ 开不了局（`room.start`）。与 `MOD_SET_LOCKED`
+  // **分开**：那句是「集合锁住了、改不了」，这句是「你还没对**这一份**字节表过态」—— 前者要重开房间，后者只要点一下
+  // 同意，在界面上正好是两件事。AI 座位与观战者不适用（见 `server/lobby.js` 的 `modConsentRefusal`）。
+  MOD_CONSENT_REQUIRED: 'MOD_CONSENT_REQUIRED',
   // 野排匹配 (quick match, server/matchmaking.js): the queue already holds its limit of waiting players
   QUEUE_FULL: 'QUEUE_FULL',
   // 野排匹配: room.dequeue from a player who is not in the queue (nothing to cancel)
@@ -391,6 +396,7 @@ export const ERR_TEXT = {
   NOT_YOUR_TURN: N_('尚未轮到你'), ALREADY: N_('已完成该操作'), TEMP_NOT_EMPTY: N_('临时整备区不为空'), ELIMINATED: N_('你已被淘汰'),
   SPECTATOR: N_('观战中无法进行该操作'), MOD_UNKNOWN: N_('房间指定了本服务器没有的模组包'), INTERNAL: N_('服务器内部错误'),
   MOD_SET_LOCKED: N_('本房间的模组集合已锁定（模拟已开始，或已有博士准备就绪），要改请重开房间'),
+  MOD_CONSENT_REQUIRED: N_('本房间声明了模组：请先确认同意加载这些模组，再进入/开始'),
   CHAT_MODE: N_('该房间的聊天设置不允许这条消息'),
   SEAT_CAP_TOO_SMALL: N_('新的人数上限不能小于同盟内现有人数（含 AI 队友）'),
   QUEUE_FULL: N_('正在搜寻的博士已满，请稍后再试'), QUEUE_EMPTY: N_('你不在快速匹配队列中'), QUEUED: N_('你已在同盟中：先离开同盟，才能开始快速匹配'),

@@ -25,7 +25,7 @@ import { ResumeMatchButton } from '../ui/resumeMatch.js';
 import { useEffect, useRef, useState } from '../../vendor/hooks.module.js';
 import { DIFFICULTIES, DIFFICULTY_NAMES, DIFFICULTY_COLORS, ROOM_CODE_LEN, MAX_SEATS, MIN_SEATS, MAX_SPECTATORS, modeIdFor, clampSeats, ERR, ERR_TEXT } from '../../../shared/constants.js';
 import { RANDOM_MODE } from '../../../shared/randomMode.js';
-import { html, Button, Icon, MicroLabel, Panel, TextField, PingPill, AvatarFrame, Tooltip, Spinner, DifficultyIcon, doctorNo } from '../ui/components.js';
+import { html, Button, Icon, MicroLabel, Panel, TextField, PingPill, AvatarFrame, Tooltip, Spinner, DifficultyIcon, doctorNo, confirmDialog } from '../ui/components.js';
 import { toast, toastError } from '../ui/toasts.js';
 import { GuideButton, openGuide } from '../ui/guide.js';
 import { openStats } from './stats.js';
@@ -1139,6 +1139,23 @@ export function LobbyScreen() {
     await net.request('room.dequeue', {});
     if (alive.current) setQueue(null);
   });
+  /**
+   * 进房（W7, DESIGN §28.53）：先按**没同意**发一次 —— 一个多余字段都不发。服务端说 `MOD_CONSENT_REQUIRED` 时，
+   * 把它的 `detail`（里面就是这一房声明的包名与摘要）交给玩家问一次；玩家点了确认才带 `consent: true` 重发。
+   * 重发什么由 `roomMods.consentRetryPayload` 一处决定（三个入口共用同一份），这里只负责**问**。
+   * 不是那条拒绝 ⇒ 原样抛，`run` 的 catch 照旧 toast。
+   */
+  const joinWithConsent = async (k, extra = {}) => {
+    try {
+      return await net.request('room.join', { ...roomMods.buildJoinPayload(k), ...extra });
+    } catch (err) {
+      const retry = roomMods.consentRetryPayload(err, k);
+      if (!retry) throw err;
+      const ok = await confirmDialog({ title: t(ERR_TEXT.MOD_CONSENT_REQUIRED), text: String(err.detail || ''), micro: 'ROOM MODS' });
+      if (!ok) throw err;
+      return net.request('room.join', { ...retry, ...extra });
+    }
+  };
   const join = (c = code, federationNode) => {
     // `onClick=${join}` hands the click EVENT as the first argument, and a default parameter only applies to
     // `undefined` — codeArg keeps an event target out of the key and falls back to the input field
@@ -1151,7 +1168,7 @@ export function LobbyScreen() {
       setLanNote(t('正在进入 {ip} 的房间…', { ip: lanRoom.ip }));
       return;
     }
-    run('join', () => net.request('room.join', { ...roomMods.buildJoinPayload(k), ...(federationNode ? { federationNode } : {}) }));
+    run('join', () => joinWithConsent(k, federationNode ? { federationNode } : {}));
   };
   // a spectator seat: no player seat taken, nothing to do but watch (also a match already running)
   const spectate = (c = code, federationNode) => {

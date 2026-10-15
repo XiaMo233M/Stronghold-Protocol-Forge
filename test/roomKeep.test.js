@@ -28,6 +28,11 @@ const servers = [];
 let tmp = null;
 let digest = null;
 
+// ▸ W7（DESIGN §28.53）**故意改写了本文件里的 join**：本文件的房间都声明了 `keep-pack` 这个集合，而进一个声明了
+//   集合的房间现在要**每名真人明确同意** —— 所以客人那几处 join 显式带上 `consent: true`（表达的是「这个人同意
+//   了」，不是把判据放松：未同意被拒这一格由 `test/roomConsent.test.js` 正面钉住）。房主的 `room.create` 一个字
+//   没动：他 `modIds` 钉下这一份字节就是他自己的表态。
+
 /** A minimal layer-A pack: one new operator record, no code (test/roomModSet.test.js writes the same shape). */
 function writePack(root, id, name) {
   const dir = path.join(root, id);
@@ -100,7 +105,7 @@ async function playOneMatch(srv, players) {
   const host = players[0];
   await ok(host, { t: 'room.create', mode: 'coop', difficulty: 'HARD', mods: digest, modIds: ['keep-pack'] });
   const created = await host.waitFor('room.state', (s) => s.code && s.mods);
-  for (const p of players.slice(1)) await ok(p, { t: 'room.join', code: created.code, mods: digest });
+  for (const p of players.slice(1)) await ok(p, { t: 'room.join', code: created.code, mods: digest, consent: true });
   for (const p of players) await p.waitFor('room.state', (s) => s.code === created.code && s.seats.filter(Boolean).length === players.length);
   // room.start needs every OTHER human connected and ready; the host's own start counts as its ready
   for (const p of players.slice(1)) await ok(p, { t: 'room.ready', ready: true });
@@ -257,7 +262,7 @@ test('a non-host human can leave a retained room without tearing it down for the
     assert.equal(state.inMatch, false);
     assert.deepEqual(state.mods.packs.map((p) => p.id), ['keep-pack'], 'the room set survived the leave too');
     // the freed seat is a normal free seat: somebody else may take it
-    await ok(d, { t: 'room.join', code, mods: digest });
+    await ok(d, { t: 'room.join', code, mods: digest, consent: true });
     assert.equal(kept(srv, code).activeHumans().length, 3);
     await ok(d, { t: 'room.leave' });
     assert.deepEqual(errors, []);

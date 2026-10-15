@@ -120,7 +120,7 @@
 import { randomBytes, randomInt } from 'node:crypto';
 import { ERR, MAX_SEATS, MIN_SEATS, MAX_SPECTATORS, ROOM_CODE_LEN, modeIdFor, maxSeatsFrom, clampSeats } from '../shared/constants.js';
 import { checkLoadout, checkLoadoutOps, cultivationCharIds, checkNotOwned, checkDiyPicks, PACK_MSG_LIMITS, CHAT_LIMITS } from '../shared/protocol.js';
-import { modSetOf, isModId } from '../shared/modIdentity.js';
+import { modSetOf, isModId, modSetDrift } from '../shared/modIdentity.js';
 import { normalizeSupportConfig, checkSupport, supportPicker, supportCapacity, supportTiers } from '../shared/support.js';
 import { encode, isDroppable, isErrCode, sendRaw, sendSession } from './net.js';
 import { getData as defaultGetData, lookup } from './data.js';
@@ -191,7 +191,8 @@ const noopLog = { info() {}, warn() {}, error() {}, debug() {} };
  * @typedef {{ seat: number, playerId: string, name: string, isBot: boolean, ready: boolean,
  *             connected: boolean, left: boolean, loadout?: Record<string, { skill: number, module: string|null }> | null,
  *             ops?: Readonly<Record<string, { potential: number, cultivate: number }>> | null,
- *             notOwned?: readonly string[] | null, diy?: Readonly<Record<string, DiyLoadout>> | null }} Seat
+ *             notOwned?: readonly string[] | null, diy?: Readonly<Record<string, DiyLoadout>> | null,
+ *             modConsent?: string | null }} Seat
  * @typedef {{ charId: string, skillIndex: number, uniEquipId: string|null }} DiyLoadout
  */
 
@@ -1021,6 +1022,9 @@ export class Lobby {  /**
     if (room.modSet && this.workshop && this.workshop.roomAssets) this.workshop.roomAssets.forRoom(room.modSet);
     room.seats[0] = this.humanSeat(0, session);
     room.hostId = session.playerId;
+    // 房主的**同意**就是他钉下的这一份（W7, DESIGN §28.53）：`modIds` 是他自己报的，那份集合的摘要就是他的表态。
+    // 没声明集合（`modSet === null`）⇒ 保持 `null`，那一格整条判据都不适用。
+    room.seats[0].modConsent = room.modSet ? room.modSet.digest : null;
     this.rooms.set(code, room);
     session.roomCode = code;
     session.notice = null;
@@ -1034,22 +1038,46 @@ export class Lobby {  /**
     return OK;
   }
 
-  join(session, { code, mods }) {
+  join(session, { code, mods, consent }) {
     const gate = this.checkModSet({ mods });
     if (!gate.ok) return gate;
     const norm = String(code).trim().toUpperCase();
     const room = norm.length === ROOM_CODE_LEN ? this.rooms.get(norm) : undefined;
     if (!room) return fail(ERR.ROOM_NOT_FOUND);
     const cur = this.roomOf(session);
-    // idempotent for members; a spectator of this room goes on below: it may take a free player seat (header)
-    if (cur === room && !room.spectatorOf(session.playerId)) { this.sendState(room, session); return OK; }
+    // 服主 pin（W7）：这个房间钉住的那几个包的**字节**还在不在机器上。判在「认不认得出这个房间」之后、「占不占座」
+    // 之前 —— 一份已经不在的内容，占了座也是白占。没声明集合的房间在第一行早退。
+    const pin = this.modPinRefusal(room);
+    if (pin) return pin;
+    // 幂等：已经是本房成员（不是观战者）。但**同意可以在这里补**（W7）：集合中途改过之后，已经在座的人不该被逼着
+    // 「退出再进」才能表态 —— 而他们**必须**能表态，否则这一房永远开不了局（`start` 会拦下来）。所以这一条幂等
+    // 早退也要先判同意。
+    if (cur === room && !room.spectatorOf(session.playerId)) {
+      const seat = room.seatOf(session.playerId);
+      if (room.modSet && seat && seat.modConsent !== room.modSet.digest) {
+        if (consent !== true) return this.modConsentRefusal(room, seat);
+        seat.modConsent = room.modSet.digest;
+        this.log.info(`[lobby] ${room.code} ${session.name} agreed to the room's mod set (${room.modSet.digest.slice(0, 12)}…)`);
+      }
+      this.sendState(room, session);
+      return OK;
+    }
     if (cur && cur.match) return fail(ERR.ROOM_STARTED, 'leave your running match first');
     if (room.match) return fail(ERR.ROOM_STARTED);
     if (room.mode === 'solo') return fail(ERR.ROOM_FULL, 'solo room');
+    // 每名真人须同意（W7, DESIGN §28.53）：**占了玩家座位**就要先对**这一份**字节表态。判在占座**之前**，所以
+    // 没同意的人进不去（不是「进来了但只能看着」）。AI 与观战者不在这一条线上（他们走不到这里：AI 由 `addBot`
+    // 建座位，观战者走 `spectate`）。
+    if (room.modSet && consent !== true) {
+      return fail(ERR.MOD_CONSENT_REQUIRED,
+        `this room declares the mod set (${room.modSet.packs.map((p) => p.id).join(', ')} · ${room.modSet.digest.slice(0, 12)}…) — send "consent": true with room.join to enter it`);
+    }
     const idx = room.freeSeat();
     if (idx < 0) return fail(ERR.ROOM_FULL);
     if (cur) this.removeMember(cur, session.playerId);
     room.seats[idx] = this.humanSeat(idx, session);
+    // 同意落在**座位**上（不是会话上）：同意的是「这一房的这一份字节」，换一房要重新表态。
+    room.seats[idx].modConsent = room.modSet ? room.modSet.digest : null;
     session.roomCode = room.code;
     session.notice = null;
     session.pendingResult = null;
@@ -1270,7 +1298,13 @@ export class Lobby {  /**
     // 「集合变更后加入者如何重新对齐」的服务端那一半；客户端那一半是 W-D 的准备就绪硬门 ——
     // `public/js/screens/room.js` 的 RoomModsPanel 按 `room.state.mods.digest` 重跑 planAlignment，没对齐完
     // 就点不了准备就绪（客户端在这一刀里也补上了「摘要一变就先锁住，别拿旧结论放行」）。
-    for (const s of room.seats) if (s && !s.isBot && s.playerId !== room.hostId) s.ready = false;
+    //
+    // **同意也一起作废**（W7, DESIGN §28.53）：他们同意的是**旧的那一份字节**，而 pin 的是新的。不清空的话
+    // 「同意过」会退化成「点过一次就一直算」，那正是这一格要消灭的那种谎话。房主的座位写上新摘要 —— 他刚用这条
+    // 消息把新集合钉下来（`room.mods` 就是他的表态），除非他改回「不声明」（那时这一格整条不适用，写 `null`）。
+    for (const s of room.seats) if (s && !s.isBot && s.playerId !== room.hostId) { s.ready = false; s.modConsent = null; }
+    const hostSeat = room.seatOf(room.hostId);
+    if (hostSeat && !hostSeat.isBot) hostSeat.modConsent = room.modSet ? room.modSet.digest : null;
     this.log.info(`[lobby] ${room.code} mod set is now ${room.modSet ? room.modSet.packs.map((p) => p.id).join(', ') : '(none)'} by ${session.name}`);
     this.broadcastState(room);
     return OK;
@@ -1292,6 +1326,63 @@ export class Lobby {  /**
       }
     }
     return null;
+  }
+
+  /**
+   * **服主 pin 的字节指纹漂了没有**（W7, DESIGN §28.53）。
+   *
+   * pin 就是房间自己的字节指纹 `room.modSet.digest` —— `modSetOf` 算的那个（`[id, hash]` 排序对的 sha256），没有
+   * 第二套「pin」对象：一个房间声明了集合，那份 `modSet` 就是它钉住的东西。所以「指纹变了」只有两种形态，两种都
+   * **复用既有守卫**（业主口径：能复用就复用，别造第二套），本函数只负责点名到包：
+   *
+   *   * 包**没了** ⇒ `MOD_UNKNOWN`（既有那句「本服务器没有这个包」本来就是这件事）；
+   *   * 包**被换了**（同一 id、另一个 hash）⇒ `MOD_SET_LOCKED` + 一句说真话的 detail：房间钉的是**字节**，字节
+   *     变了就是另一份内容，已经在座 / 已经对齐过的人对不上，要重开房间让所有人重新对齐。
+   *
+   * 判据本身住在 `shared/modIdentity.js modSetDrift`（算摘要的同一个文件、同一条 `[id, hash]` 口径）。
+   * 没声明集合的房间（`modSet === null`）走第一行早退 —— 那种房间与从前逐字节相同。
+   * @param {Room} room
+   * @returns {{ error: string, detail?: string }|null}
+   */
+  modPinRefusal(room) {
+    if (!room || !room.modSet) return null;
+    const loaded = this.workshop && Array.isArray(this.workshop.mods) ? this.workshop.mods : [];
+    const drift = modSetDrift(room.modSet, loaded);
+    if (drift.missing.length) {
+      return fail(ERR.MOD_UNKNOWN, `this room pinned the mod pack(s) (${drift.missing.join(', ')}) and this server no longer runs them — reopen the room`);
+    }
+    if (drift.changed.length) {
+      const shown = drift.changed.map((c) => `${c.id} (${c.was.slice(0, 12)}… → ${c.now.slice(0, 12)}…)`).join(', ');
+      return fail(ERR.MOD_SET_LOCKED, `this room pinned the mod pack byte(s) of (${shown}) and those bytes changed on this server since — reopen the room so every client re-aligns`);
+    }
+    return null;
+  }
+
+  /**
+   * **每名真人须同意**的判据（W7, DESIGN §28.53）。返回 `null` = 通过，否则是要回给客户端的 `fail(...)`。
+   *
+   * 同意的内容就是**这一份字节指纹**：`seat.modConsent === room.modSet.digest` 才算同意过。集合一变，两个摘要就
+   * 不同 ⇒ 自动作废、必须重新表态（`setRoomMods` 里显式清空，下面那一句是第二层保险）。这比「同意过一次就永远算」
+   * 诚实：他当初同意的是另一份字节。
+   *
+   * 三条边界都是**判断**，不是漏判：
+   *   * **房主不受它约束**：他 `room.create` 报出的 `modIds` 就是在钉这一份字节（`create` 据此把他的座位写成
+   *     `modConsent = digest`）—— 要求一个人对自己刚钉下的东西再点一次同意，不增加任何信息。
+   *   * **AI 座位不算**：`addBot` 建出来的座位天生 `ready: true`，而 AI 从不对齐任何字节、也没有客户端 ——
+   *     与 `roomModsRefusal` 只数 `!seat.isBot` **逐字同一条口径**。
+   *   * **观战者不算**：他们不走 `join`、不占玩家座位、不参与开局门槛（`activeHumans`）—— 他们不跑这一房的内容。
+   *
+   * `detail` 点名到**人**与**包**：4 人房里一句「还有博士没同意」等于没说，而客户端正需要那串包名来告诉玩家他
+   * 要同意的是什么。
+   * @param {Room} room @param {Seat|null} seat
+   * @returns {{ error: string, detail?: string }|null}
+   */
+  modConsentRefusal(room, seat) {
+    if (!room || !room.modSet) return null;
+    if (!seat || seat.isBot) return null;
+    if (seat.modConsent === room.modSet.digest) return null;
+    return fail(ERR.MOD_CONSENT_REQUIRED,
+      `${seat.name || seat.playerId} has not agreed to this room's mod set (${room.modSet.packs.map((p) => p.id).join(', ') || 'none'} · ${room.modSet.digest.slice(0, 12)}…)`);
   }
 
   addBot(session) {
@@ -1357,6 +1448,16 @@ export class Lobby {  /**
     const humans = room.activeHumans();
     for (const s of humans) {
       if (s.playerId !== room.hostId && (!s.connected || !s.ready)) return fail(ERR.NOT_READY);
+    }
+    // 服主 pin + 每名真人须同意（W7, DESIGN §28.53）—— 顺序在 `NOT_READY` 之**后**：一句「还有人没准备就绪」说的是
+    // 「现在还不能开」，而这一条说的是「现在能开，但这一房的字节你还没认过」。两句话在界面上是两个动作，所以两个码。
+    // 判据放在这里（开局那一刻）而不是只放在 join：集合可以中途被房主改掉（`room.mods`），改完所有真人的同意
+    // 都会作废 —— 那时**没有任何人重新 join 过**，所以只有开局这一道能拦住它。
+    const drift = this.modPinRefusal(room);
+    if (drift) return drift;
+    for (const s of humans) {
+      const refused = this.modConsentRefusal(room, s);
+      if (refused) return refused;
     }
     const bots = room.seats.filter((s) => s && s.isBot);
     if (humans.length < 1 || (room.mode === 'solo' && (humans.length !== 1 || bots.length > 0))) {
@@ -1937,6 +2038,9 @@ export class Lobby {  /**
       ops: session.ops || null,
       notOwned: session.notOwned || null,
       diy: session.diy || null,
+      // 房间同意（W7, DESIGN §28.53）：这个真人**明确同意过的那一份字节指纹**（`room.modSet.digest`），没同意过是
+      // `null`。它是「这个座位对着哪一份内容表的态」—— 集合一变就作废，因为那时他同意的是另一份字节。
+      modConsent: null,
     };
   }
 

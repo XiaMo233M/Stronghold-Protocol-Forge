@@ -1608,5 +1608,6 @@
   "左侧": "Left",
   "右侧": "Right",
   "顶部": "Top",
-  "底部": "Bottom"
+  "底部": "Bottom",
+  "本房间声明了模组：请先确认同意加载这些模组，再进入/开始": "This room declares mods: agree to loading them before you enter or start"
 }

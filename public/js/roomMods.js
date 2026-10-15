@@ -141,14 +141,48 @@ export function buildCreatePayload(mode, difficulty) {
 /**
  * The `room.join` fields: the same digest, and nothing else — a room's declared set is the room's business, not
  * something a joiner may propose. On a plain install this is exactly `{ code }`.
- * @param {string} code
- * @returns {{ code: string, mods?: string }}
+ *
+ * `consent`（W7, DESIGN §28.53）是**另一个**表态，与 `mods` 不是同一件事：`mods` 是**握手**（「我读到了服务器装着
+ * 哪些包」，由 `welcome` 自动填，人不必知情），`consent` 是**表态**（「我同意跑这个房间声明的那一份字节」，只有玩家
+ * 点过同意才发）。服务端只对**声明了集合的房间**要它，缺了就是 `MOD_CONSENT_REQUIRED`（一句能照着改的错）。
+ *
+ * 它只在 `welcome` 报过模组集合时才可能出现 —— 没有包的服务器上 `modSet` 是 `null`，房间也就无法声明任何集合
+ * （`resolveRoomModSet` 只收这台机器装载过的 id），所以那条拒绝在纯安装上不存在，这个键也永远不出现。
+ * @param {string} code @param {{ consent?: boolean }} [opts]
+ * @returns {{ code: string, mods?: string, consent?: true }}
  */
-export function buildJoinPayload(code) {
-  /** @type {{ code: string, mods?: string }} */
+export function buildJoinPayload(code, { consent = false } = {}) {
+  /** @type {{ code: string, mods?: string, consent?: true }} */
   const fields = { code };
-  if (welcomeModSet) fields.mods = welcomeModSet.digest;
+  if (welcomeModSet) {
+    fields.mods = welcomeModSet.digest;
+    if (consent === true) fields.consent = true;
+  }
   return fields;
+}
+
+/**
+ * 服务端拒了一条 `room.join`：这是不是「还没同意」那一条？（W7, DESIGN §28.53）
+ * @param {any} err
+ */
+export function isConsentRefusal(err) {
+  return !!err && err.code === 'MOD_CONSENT_REQUIRED';
+}
+
+/**
+ * 「服务端拒绝 ⇒ 按 `detail` 问玩家一次 ⇒ 同意就带 `consent` 重发」这条链路里**唯一**一处「重发什么」。
+ *
+ * 为什么它是一个具名函数、而不是散在三个屏幕里的一段 `if`：这条链路有三处入口（大厅按密钥加入、房间里从观战
+ * 入座、URL 直连的自动入座），三处各写一遍就是三个会漂的真相 —— 而漂的方向是**某一处悄悄不带 `consent` 重发**，
+ * 那等于把「同意」退化成一次自动重试，正是这一格最不该发生的事。屏幕那边只负责**问**（`confirmDialog`），
+ * 这里只负责**重发什么**。
+ * @param {any} err 那一条拒绝
+ * @param {string} code
+ * @returns {{ code: string, mods?: string, consent?: true }|null} `null` = 不是这条拒绝，调用方原样抛
+ */
+export function consentRetryPayload(err, code) {
+  if (!isConsentRefusal(err)) return null;
+  return buildJoinPayload(code, { consent: true });
 }
 
 /**

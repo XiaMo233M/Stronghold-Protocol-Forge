@@ -560,7 +560,23 @@ export const C2S = {
     seatCap: (v) => v === undefined || v === null || isInt(v, MIN_SEATS, SEAT_CAP),
     $optional: ['mods', 'modIds', 'chatMode', 'seatCap'],
   },
-  'room.join': { code: (v) => isStr(v, ROOM_CODE_LEN + 2) && /^[A-Za-z0-9]+$/.test(v), mods: (v) => v == null || isModDigest(v), $optional: ['mods'] },
+  // 房间同意（W7, DESIGN §28.53）：进一个**声明了模组集合**的房间（`room.state.mods`）时，真人玩家必须**明确
+  // 同意**才继续 —— 这是「我知道这一局要跑别人写的内容」那句话的落点。它与 `checkModSet` 要客户端回一个摘要
+  // **不是同一件事**：回摘要是**握手**（客户端证明它读到了服务器装了哪些包），同意是**表态**（人对着那一串包名
+  // 点一下）。房主不受这条约束：他 `room.create` 报出 `modIds` 就是在钉这一份字节（见 `server/lobby.js`
+  // 的 `modConsentRefusal`）。
+  //
+  // **加性可选字段 ⇒ 与 `records.mine` 同一条先例，`PROTOCOL_VERSION` 不抬**：抬版本的判据是「推送帧的形状变了、
+  // 旧页面会读错」。这里变的是 **C2S**，而且是一个**可选**字段 —— 老客户端一个字节都不发，它的 `room.join` 与今天
+  // 逐字节相同；服务器只在目标房间**声明了集合**时才会回 `MOD_CONSENT_REQUIRED`，那是一句能照着改的错，不是协议
+  // 不兼容。`hello.version` 也不动。缺席与显式 `null` 都按「没同意」处理（判据里 `$optional` 管「键没出现」，
+  // 这一行的 `v === null` 管「显式给了 null」，与 `room.create.seatCap` 同一处写法）。
+  'room.join': {
+    code: (v) => isStr(v, ROOM_CODE_LEN + 2) && /^[A-Za-z0-9]+$/.test(v),
+    mods: (v) => v == null || isModDigest(v),
+    consent: (v) => v === undefined || v === null || v === true,
+    $optional: ['mods', 'consent'],
+  },
   'room.leave': {},
   // 上局战绩（`SP_ACCOUNTS=1`, server/matchRecords.js, docs/RECORDS.md）：空消息，答案走 `records.latest`
   // 给**请求者本人**。开着账号时它是「我这个账号的最近一局」；关着账号时按会话 playerId 查（每次连接的新 id，

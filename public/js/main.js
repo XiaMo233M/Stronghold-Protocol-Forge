@@ -40,7 +40,7 @@
 import './ui/compat.js';
 import { render } from '../vendor/preact.module.js';
 import { useErrorBoundary } from '../vendor/hooks.module.js';
-import { html, UiHosts, Button, MicroLabel, closeAllDialogs } from './ui/components.js';
+import { html, UiHosts, Button, MicroLabel, closeAllDialogs, confirmDialog } from './ui/components.js';
 import { ConnectionBanner } from './ui/connBanner.js';
 import { ToastHost, toast, toastError, describeError } from './ui/toasts.js';
 import { net, identity, NetError } from './net.js';
@@ -73,6 +73,9 @@ import { installSupportSync } from './ui/supportSync.js';
 import { startBuildGuard } from './ui/buildGuard.js';
 import { initLang, useLang, tickerText } from './ui/lang.js';
 import { t, N_, translateWire } from '../../shared/i18n.js';
+// W7（DESIGN §28.53）：深链自动入座撞上「本房间声明了模组」时，弹窗的标题就是这条错的文案本身
+// （`ERR_TEXT` 那一份，与 `toastError` 走的是同一个 msgid —— 一句话只有一种说法）。
+import { ERR_TEXT } from '../../shared/constants.js';
 import { recordError, installTrafficMeter } from './diag.js';
 import { createPanelRegistry } from './ui/extensions.js';
 
@@ -207,7 +210,14 @@ function schedulePendingJoin() {
     try {
       await net.request('room.join', roomMods.buildJoinPayload(code));
     } catch (err) {
-      toastError(err);
+      // W7（DESIGN §28.53）：`?room=` 深链落地时房间声明了模组 ⇒ 服务端回 `MOD_CONSENT_REQUIRED`。深链是**自动**
+      // 入座，所以这里必须问一次（与大厅、房间里那两处共用 `roomMods.consentRetryPayload` 决定的重发载荷）；
+      // 不弹窗、直接重发就等于把「同意」退化成一次静默重试。
+      const retry = roomMods.consentRetryPayload(err, code);
+      if (!retry) { toastError(err); return; }
+      const ok = await confirmDialog({ title: t(ERR_TEXT.MOD_CONSENT_REQUIRED), text: String(err.detail || ''), micro: 'ROOM MODS' });
+      if (!ok) { toastError(err); return; }
+      try { await net.request('room.join', retry); } catch (again) { toastError(again); }
     } finally {
       joinInFlight = false;
       clearPendingJoin();

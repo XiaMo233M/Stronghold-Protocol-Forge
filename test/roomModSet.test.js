@@ -8,8 +8,13 @@
 //     (`public/js/net.js`, with only its socket replaced by a fake that forwards to a real server) and asserts on the
 //     message objects that came out of the socket.
 //   * W-A does NOT make a room's declared set decide what the simulation runs. That is W-B. The last describe block pins
-//     today's behaviour so the change cannot happen by accident: when W-B lands, those assertions MUST be rewritten on
+//     today's behaviour so the change cannot happen accidentally: when W-B lands, those assertions MUST be rewritten on
 //     purpose.
+//
+// ▸ W7（DESIGN §28.53）**故意改写了本文件里的 join**：进一个**声明了集合**的房间要**每名真人明确同意**，所以这些
+//   夹具里「客人进房」的那几处都显式带上 `consent: true`。这不是把判据放松 —— 新的一格由 `test/roomConsent.test.js`
+//   正面钉住（未同意 ⇒ `MOD_CONSENT_REQUIRED`，未必同意先占座位），这里只是让既有夹具表达「这个人同意了」。
+//   `room.create` 那几处一个字没动：房主 `modIds` 就是他钉下的这一份字节，他的座位在 create 那一刻就已经表态。
 import { describe, test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -270,7 +275,7 @@ describe('room.create { modIds } declares the room set (W-A, DESIGN §28.9)', ()
 
       // the joiner is handed the ROOM's set (the state frame broadcast to the members, not `welcome`'s)
       const guestP = b.waitFor('room.state', (s) => s.code === hostState.code && s.seats.some((x) => x && x.playerId === b.id));
-      const joined = await b.request({ t: 'room.join', code: hostState.code, mods: digest });
+      const joined = await b.request({ t: 'room.join', code: hostState.code, mods: digest, consent: true });
       assert.equal(joined.t, 'ok', JSON.stringify(joined));
       const guestState = await guestP;
       assert.deepEqual(guestState.mods, hostState.mods, 'a joiner is told the ROOM set, not the server set');
@@ -395,7 +400,10 @@ describe('room.create { modIds } declares the room set (W-A, DESIGN §28.9)', ()
     assert.equal(validateC2S({ ...base, modIds: Array.from({ length: MAX_ROOM_MODS + 1 }, (_, i) => `p${i}`) }), 'bad field modIds');
     // 本房座位上限 (业主裁决 B5, docs/META.md §1.9) 再加 `seatCap`: 房主建的这个房间开几张座位卡。
     assert.deepEqual(C2S['room.create'].$optional, ['mods', 'modIds', 'chatMode', 'seatCap']);
-    assert.deepEqual(C2S['room.join'].$optional, ['mods'], 'room.join takes no modIds: the set is the host\'s to declare');
+    // W7（§28.53）多了一格**可选**的 `consent`：进一个声明了集合的房间要每名真人明确同意。它与 `mods` 是**两种
+    // 表态**（`mods` = 「我读到了服务器装着哪些包」的握手回执，`consent` = 「我同意跑这一房声明的那一份字节」），
+    // 所以两格并列而不是合成一格；形状见 shared/protocol.js 那一处。
+    assert.deepEqual(C2S['room.join'].$optional, ['mods', 'consent'], 'room.join takes no modIds: the set is the host\'s to declare');
   });
 });
 
@@ -461,7 +469,7 @@ describe('入座门判的是**进程**集合（W-A 定的，W-B 也故意不改�
       // `room.state` — what the room really runs is decided per room (server/roomAssets.js) and alignment to it is the
       // client's job before it readies up (W-D).
       const stateP = b.waitFor('room.state', (s) => s.code === created.code && s.seats.some((x) => x && x.playerId === b.id));
-      const joined = await b.request({ t: 'room.join', code: created.code, mods: digest });
+      const joined = await b.request({ t: 'room.join', code: created.code, mods: digest, consent: true });
       assert.equal(joined.t, 'ok', JSON.stringify(joined));
       const state = await stateP;
       assert.deepEqual(state.mods, created.mods, 'the joiner sees the room set, and got in on the process digest');
@@ -503,7 +511,7 @@ describe('room.mods：房主在房间里改集合（G1），守卫与对齐（G2
       const created = await a.waitFor('room.state', (s) => s.code && s.mods);
       assert.deepEqual(created.mods.packs.map((p) => p.id), ['alpha-pack']);
       const guestJoined = b.waitFor('room.state', (s) => s.code === created.code && s.seats.some((x) => x && x.playerId === b.id));
-      assert.equal((await b.request({ t: 'room.join', code: created.code, mods: digest })).t, 'ok');
+      assert.equal((await b.request({ t: 'room.join', code: created.code, mods: digest, consent: true })).t, 'ok');
       await guestJoined;
 
       // 客人先就绪、又自己取消（「有人 ready 后改被拒」另有用例）—— 这里要的是干净的一次变更
@@ -536,7 +544,7 @@ describe('room.mods：房主在房间里改集合（G1），守卫与对齐（G2
       assert.equal((await a.request({ t: 'room.create', mode: 'coop', difficulty: 'NORMAL', mods: digest, modIds: ['alpha-pack'] })).t, 'ok');
       const created = await a.waitFor('room.state', (s) => s.code && s.mods);
       const guestJoined = b.waitFor('room.state', (s) => s.code === created.code && s.seats.some((x) => x && x.playerId === b.id));
-      assert.equal((await b.request({ t: 'room.join', code: created.code, mods: digest })).t, 'ok');
+      assert.equal((await b.request({ t: 'room.join', code: created.code, mods: digest, consent: true })).t, 'ok');
       await guestJoined;
       const byGuest = await b.request({ t: 'room.mods', modIds: ['zeta-pack'] });
       assert.equal(byGuest.t, 'error', JSON.stringify(byGuest));
@@ -582,7 +590,7 @@ describe('room.mods：房主在房间里改集合（G1），守卫与对齐（G2
       assert.equal((await a.request({ t: 'room.create', mode: 'coop', difficulty: 'NORMAL', mods: digest, modIds: ['alpha-pack'] })).t, 'ok');
       const created = await a.waitFor('room.state', (s) => s.code && s.mods);
       const guestJoined = b.waitFor('room.state', (s) => s.code === created.code && s.seats.some((x) => x && x.playerId === b.id));
-      assert.equal((await b.request({ t: 'room.join', code: created.code, mods: digest })).t, 'ok');
+      assert.equal((await b.request({ t: 'room.join', code: created.code, mods: digest, consent: true })).t, 'ok');
       await guestJoined;
       const guestReady = b.waitFor('room.state', (s) => s.seats.some((x) => x && x.playerId === b.id && x.ready === true));
       assert.equal((await b.request({ t: 'room.ready', ready: true })).t, 'ok');
