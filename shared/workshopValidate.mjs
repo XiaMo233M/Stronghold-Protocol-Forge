@@ -248,7 +248,12 @@ export async function validateWorkshop({ root = WORKSHOP_DIR, only = null, log =
   const packs = only ? loaded.packs.filter((p) => p.id === only) : loaded.packs;
   if (only && packs.length === 0) {
     // 「磁盘上没有这个包」与「这个包有错」是两件事，调用方靠 `missing` 区分（界面上是两句话）。
-    return { ...report, missing: true };
+    // ⚠️ 但**装载期就被拒**的包也走这一条（`pack.json` 有闭集外的键、JSON 非法、目录名 ≠ 包 id …）——
+    // 这时只回一句 `missing` 会把**真因**丢掉：2026-10-15 实测，作者看到「没有这个包」，
+    // 而他真正的问题是 `PACK_UNKNOWN_FIELD`。所以把装载器记下的错**一并回显**（`loadErrors`）：
+    // `missing` 保持原义（磁盘上找不到那个 id），真因另给一格，界面与 CLI 都能据它说话。
+    const loadErrors = (loaded.errors ?? []).filter((e) => e.pack === only);
+    return { ...report, missing: true, loadErrors };
   }
 
   // 合并后的数据只在真的需要时读一次（覆盖官方记录时逐记录校验必须判这一份）。
@@ -559,9 +564,17 @@ export async function validateWorkshop({ root = WORKSHOP_DIR, only = null, log =
       const ownTokenIdsList = Object.keys((pack.files && pack.files.tokens) || {});
       const ownCharIdsList = Object.keys(pack.operators || {});
       for (const name of fs.readdirSync(kitDir).sort()) {
-        if (!name.endsWith('.js')) continue;
+        // ⚠️ 与装载器**同判**（`server/workshop.js:1249-1253`，逐字同形）：`_` 前缀的是**共享件**不是 kit；
+        // 不是普通文件（子目录、socket、坏链接）也不是 kit。2026-10-15 实测的缺陷：这里原来只判 `.js` 后缀 ⇒
+        // `kits/_helper.js` 被报 `KIT_NO_TARGET`、一个名为 `x.js` 的**目录**让 `readFileSync` 当场抛 EISDIR，
+        // 而装载器两种情况都会安静跳过 —— 校验器比装载器严，作者会看到一条**永远修不掉**的错。
+        if (!name.endsWith('.js') || name.startsWith('_')) continue;
+        const file = path.join(kitDir, name);
+        let st;
+        try { st = fs.statSync(file); } catch { continue; }
+        if (!st.isFile()) continue;
         const id = name.slice(0, -'.js'.length);
-        const issues = validateKit(fs.readFileSync(path.join(kitDir, name), 'utf8'), {
+        const issues = validateKit(fs.readFileSync(file, 'utf8'), {
           id, ownChessIds, ownCharIds: ownCharIdsList, ownTokenIds: ownTokenIdsList, overrides: pack.overrides, ambiguousIds,
         }).map((i) => ({ ...i, packId: pack.id, field: `kits/${pack.id}/${name}${i.field && i.field !== 'source' ? ` · ${i.field}` : ''}` }));
         if (issues.some((i) => i.severity === 'error')) explained.add(`${pack.id}/${id}`);

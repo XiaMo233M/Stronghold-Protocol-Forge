@@ -71,7 +71,15 @@ async function main() {
   // workshop/ directory and could print a green VALID for the wrong tree. It now wins over the positional argument.
   const { root, only } = resolveRoots(args.workshop ?? args.dir);
   const report = await validateWorkshop({ root, only, log: quiet });
-  if (report.missing) throw new Error(`no loadable pack named "${only}" under ${root}`);
+  // ⚠️ `missing` 有两种真相：「磁盘上没这个 id」与「这个包**装载期就被拒**」。从前两种都只喊一句
+  // `no loadable pack`，作者看不到真因（2026-10-15 实测：真实原因是 `PACK_UNKNOWN_FIELD`）。
+  // `validateWorkshop` 现在把装载器的错一并回在 `loadErrors` 里，这里把它接进那句话。
+  if (report.missing) {
+    // 装载器的错形状是 `{ pack, reason }`（码**嵌在 reason 前缀里**，例如 `PACK_UNKNOWN_FIELD: …`），
+    // 与 `packVerdict` 读法一致 —— 所以这里只取 `reason`，别去假设一个不存在的 `code` 字段。
+    const detail = (report.loadErrors ?? []).map((e) => e.reason ?? String(e)).join(' · ');
+    throw new Error(`no loadable pack named "${only}" under ${root}${detail ? `（装载错误：${detail}）` : ''}`);
+  }
 
   if (args.json) {
     console.log(JSON.stringify(report, null, 2));
