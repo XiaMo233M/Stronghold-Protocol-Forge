@@ -45,8 +45,13 @@
 //   * 回滚 = 撤掉它全部 hook 与计时器 + 撤掉它标的 buff + 记一笔 `plugin:<包id>` 的错（`callBudgetOwner`）。
 //     名字就叫 `plugin:<id>`：作者一眼看得出被停的是哪个插件，日志里也能直接 grep。
 
-/** 具名失败的统一形状（`ok: false` 是**字面量**，好让 `@returns` 联合类型收得住）。 */
+/** 具名失败的统一形状（`ok: false` 是**字面量**，好让下面那条 `@returns` 联合类型收得住 —— 与
+ *  `shared/enabled.js` 的 `fail` 逐字同一条注解，漏了它 `tsc` 会报 `boolean` 收不进 `false`）。
+ *  @type {(error: string, detail: string) => { ok: false, error: string, detail: string }} */
 const fail = (error, detail) => ({ ok: false, error, detail });
+
+/** 一个已经过了 `isPlainObj` 的值（`isPlainObj` 只回 boolean，不是类型守卫，所以这里显式收窄一次）。 */
+const asRecord = (v) => /** @type {Record<string, unknown>} */ (v);
 
 /**
  * 一个插件**每局**可用的调用次数缺省值 —— **只有这一份**（上游 8000）。
@@ -97,7 +102,8 @@ export function parseCallBudgetDecl(raw) {
       `"callBudget.${key}" is not a field of this declaration (${CALL_BUDGET_FIELDS.join(', ')}). A key this loader does not know is never read: `
       + 'a declaration that is ignored is worse than a refusal');
   }
-  const max = raw.max === undefined ? PACK_CALL_BUDGET_DEFAULT : raw.max;
+  const declared = asRecord(raw).max;
+  const max = declared === undefined ? PACK_CALL_BUDGET_DEFAULT : declared;
   if (typeof max !== 'number' || !Number.isInteger(max) || max < 1) {
     const shown = typeof max === 'string' ? JSON.stringify(max) : String(max);
     return fail(CALL_BUDGET_BAD_MAX,
