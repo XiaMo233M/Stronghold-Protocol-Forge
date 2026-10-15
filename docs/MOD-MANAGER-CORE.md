@@ -147,8 +147,13 @@ CLI/程序接口：`setConsent` / `clearConsent` / `setPin` / `clearPin` / `setP
   **已接线**：`server/index.js` 在启动流水线里装载 `plugins/`、建立官方 `ActivationPlan`（`srv.officialPlan`）、
   把它的 excluded 并进**同一份** `excludePacks` 交给数据层；官方插件的**声明式内容**由此并进 `server/data.js`
   的叠加层（`test/modOfficialOverlay.test.js` 直验：目录不存在 ⇒ 逐字节不变）。
-  **仍未接线**：官方插件**不进进程级 mod 集合**（`welcome.mods` / `modDigest`）—— 在官方运行时参与对局之前，
-  并进去会让 `plan.digest.modDigest` 与 `welcome.mods` 出现两个答案，那正是本层最恨的形状。
+  **一致性（Phase 7 收口）**：官方插件**进进程级 mod 集合** —— 它们的 `meta`/`battle` 会改对局结果，
+  所以身份必须被**房间摘要闸门**覆盖。随之而来的三件配套都已落地：
+  ① 描述符**按能力推出 `layer`**（A 内容 / B 服务端逻辑，`isModEntry` 要求它）；
+  ② `server/mod-manager/officialCatalog.js` 产出与 `buildModCatalog` **逐字同形**的客户端目录，
+     `test/modOfficialCatalog.test.js` 直接断言那条不变量 —— **客户端用同一个算法能重建出发布的 `hash`**；
+  ③ 目录与 `/mods/file/<包>/<路径>` 和 Forge 的并成**一份**（同 id 不静默覆盖，点名丢弃），
+     所以**客户端一行都不用改**，下载与对齐走的就是既有那条链。
 * **官方 module 运行时**（进程内）已落地：`server/mod-manager/officialHost.js` —— **只注入声明过的 capability**
   （碰没声明的那个**抛** `PLUGIN_USE_UNDECLARED`，不是 undefined）、**严格档源码扫描在 import 之前**（含
   `globalThis`）、战斗类能力（`meta`/`battle`/`room`）在这一层**具名拒**、`storage` 限本插件目录、`routes` 限

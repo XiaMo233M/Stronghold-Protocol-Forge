@@ -40,6 +40,7 @@ import { modPolicyFromEnv } from './mod-manager/policy.js';
 // 官方档（`sp:sdk@1`）的装载器：默认目录 `plugins/` 不存在 ⇒ 下面整块**不生效**（现网逐字节不变）。
 import { loadOfficialPlugins, OFFICIAL_PLUGINS_DIR } from './mod-manager/officialLoader.js';
 import { loadOfficialModules, officialRoomInstallers, officialMetaModules, officialBattleInstallers, officialBattleModules } from './mod-manager/officialHost.js';
+import { buildOfficialCatalog, mergeCatalog } from './mod-manager/officialCatalog.js';
 import { loadMetaModules } from './match/metaPack.js';
 import { loadBattleInstallers } from './battlePack.js';
 import { loadRoomInstallers } from './roomPack.js';
@@ -204,12 +205,14 @@ export async function startServer(opts = {}) {
       + `modDigest=${modPlan.digest.modDigest || 'none'} activationDigest=${modPlan.digest.activationDigest}`);
   }
   const survivors = new Set(modPlan.activated);
-  // ── 官方档接线（`sp:sdk@1`, DESIGN 重构计划 Phase 2/3）────────────────────────────────────────────────────────
+  // ── 官方档接线（`sp:sdk@1`, DESIGN 重构计划 Phase 2/3/7）──────────────────────────────────────────────────
   // 目录不存在（现网默认）⇒ `present:false`、零包零错 —— 这一段**一个字节都不改**既有启动路径。
-  // 两条刻意的边界（都写进 docs/MOD-MANAGER-CORE.md §7）：
-  //   * 官方插件**不进进程级 mod 集合**：它们还没有运行时接线，并进去会让 `plan.digest.modDigest` 与
-  //     `welcome.mods` 出现**两个答案**（本层最恨的形状）；
-  //   * 它们的**声明式内容**会经 `excludePacks` **同一份裁剪**进数据叠加层（`server/data.js` 的官方块）。
+  // 三条边界：
+  //   * 官方插件**进进程级 mod 集合**（Phase 7 一致性）：它们的 meta/battle 会改对局结果，所以身份必须被
+  //     房间摘要闸门覆盖 —— 与之配套的**客户端目录**（`/mods/catalog.json` + `/mods/file/…`）由
+  //     `mod-manager/officialCatalog.js` 产出同形条目，客户端**一行都不用改**；
+  //   * 它们的**声明式内容**经 `excludePacks` **同一份裁剪**进数据叠加层（`server/data.js` 的官方块）；
+  //   * 只有 `plan` 里**激活**的插件参与运行时与身份。
   const pluginsDir = path.join(ROOT, OFFICIAL_PLUGINS_DIR);
   const official = loadOfficialPlugins(pluginsDir, { log });
   for (const e of official.errors) log.warn(`[official] ${e.pack}: ${e.code}: ${e.reason}`);
@@ -224,7 +227,8 @@ export async function startServer(opts = {}) {
     unavailable: [...official.errors, ...officialModules.errors],
     options: { origin: 'official', requireConsentForHost: modPolicy.requireConsentForHost },
   });
-  // 只有**计划里激活**的插件，它的 module 才会被交给大厅（被禁用/被裁的插件，房间钩子也不许跑）。
+  // 只有**计划里激活**的插件才参与运行时与身份（被禁用/被裁的插件：房间钩子、meta、battle、目录都不给）。
+  const officialPluginsLive = official.plugins.filter((p) => officialPlan.activatedSet.has(p.id));
   const officialModulesLive = officialModules.modules.filter((m) => officialPlan.activatedSet.has(m.pack));
   // Phase 7 的高风险能力：官方 `meta` / `battle` 走**同一套**引擎契约（registerMeta / install），
   // 由这两个桥重放；没有声明对应能力的插件 ⇒ 空数组，下面的展开与从前逐元素相同。
@@ -317,11 +321,16 @@ export async function startServer(opts = {}) {
   // 行为开关声明（DESIGN §28.43）走**同一条路、同一个投影点**：漏掉它 = 服务端装载器读到了声明、`Match` 却读到
   // `undefined` ⇒ 开关**静默不生效**（§28.39 把这一处记成「这一层最容易做坏的地方」）。同样不进 `modDigest`
   // （它只哈希 `[id, hash]`），而它**必须**进包身份哈希 —— 那一半由 `server/workshop.js` 的 `canonicalJson(pack)` 管。
-  const workshopMods = (workshopLoaded.packs || []).map((p) => ({
-    id: p.id, hash: p.hash, layer: p.layer, combat: p.combat, api: p.api,
-    ...(Array.isArray(p.variants) && p.variants.length ? { variants: p.variants } : {}),
-    ...(Array.isArray(p.behaviour) && p.behaviour.length ? { behaviour: p.behaviour } : {}),
-  }));
+  const workshopMods = [
+    ...(workshopLoaded.packs || []).map((p) => ({
+      id: p.id, hash: p.hash, layer: p.layer, combat: p.combat, api: p.api,
+      ...(Array.isArray(p.variants) && p.variants.length ? { variants: p.variants } : {}),
+      ...(Array.isArray(p.behaviour) && p.behaviour.length ? { behaviour: p.behaviour } : {}),
+    })),
+    // 官方插件（Phase 7 一致性）：与 Forge 包进**同一份**身份清单，于是 `modDigest` / `welcome.mods` /
+    // 房间摘要闸门一起覆盖它们。身份条目要求 `layer`（官方描述符已按能力推出）与 `combat`。
+    ...officialPluginsLive.map((p) => ({ id: p.id, hash: p.hash, layer: p.descriptor.layer, combat: p.descriptor.combat === true })),
+  ];
   const workshopKitFiles = workshopKitFilesFor(workshopKits.modules, workshopDir);
   // 行为层相对 import 的服务面（§28.18）：包 id → 它的 `kits/` 目录。`/workshop-kits/` 靠它才服务得了一个 kit
   // 用 `./lib/util.js` import 的兄弟文件 —— URL 里没有 `kits/` 这一段，所以路由要把这一段加回去（server/http/static.js
@@ -400,7 +409,11 @@ export async function startServer(opts = {}) {
   // `workshopLoaded` that produced `workshopMods` above — which is the **裁剪后**的那一份（B4 段把装不上钩子的包移出了
   // 已加载集合），所以「不在身份清单里的包」也不会出现在目录里。Empty on a plain install, and then the two /mods
   // routes answer `{ packs: [] }` / 404 and nothing else.
-  const modsJson = createModsRoute(workshopLoaded, buildModCatalog(workshopLoaded));
+  // 客户端目录：Forge 包与官方插件并成**一份**（同形的条目 → 客户端与那两条路由一行都不用改）。
+  // 包 id 在两侧都有 ⇒ **不静默覆盖**，官方那一条不发布并点名。
+  const { catalog: modsCatalog, collisions: catalogCollisions } = mergeCatalog(buildModCatalog(workshopLoaded), buildOfficialCatalog(officialPluginsLive));
+  for (const id of catalogCollisions) log.warn(`[official] pack id "${id}" exists in both a Forge pack and an official plugin — the official copy is not published under /mods (pack ids must not collide across origins)`);
+  const modsJson = createModsRoute({ ...workshopLoaded, packs: [...(workshopLoaded.packs || []), ...officialPluginsLive] }, modsCatalog);
   // 包声明服务端模块时，它可以给对局套一层 `MatchClass` 包装器（`uses: ['matchClass']`，DESIGN §28.14）。按**包 id**
   // 次序层层套上（`mountServerModules` 已经排过序），任何一层抛异常或返回非函数都只记日志并跳过那一层 ——
   // 一个包不该让服务器起不来。没有包声明时 `MatchClass` 就是原来的那一个（连字段都不多传）。

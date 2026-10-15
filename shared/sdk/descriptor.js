@@ -236,13 +236,19 @@ export function fromOfficialManifest(raw) {
 
   if (issues.length) return { descriptor: null, issues };
 
+  // `layer`（A 内容 / B 服务端逻辑 / C 客户端 UI）：官方 manifest 不声明它 —— 但 mod 集合的身份条目**要求**它
+  // （`shared/modIdentity.js isModEntry`）。所以**由能力推出来**：有服务端载荷 ⇒ B，否则 A。官方档目前没有
+  // 客户端 UI 能力（面板），所以不产生 C；将来加了再在这一行扩。
+  const SERVER_SIDE_CAPS = ['modules', 'meta', 'battle', 'room', 'preDispatch', 'storage', 'health', 'routes', 'metrics', 'lane'];
+  const layer = capabilities.some((c) => SERVER_SIDE_CAPS.includes(c)) ? 'B' : 'A';
+
   const descriptor = Object.freeze({
     id: raw.id,
     version: str(raw.version) || null,
     origin: 'official',
     sdk: SDK_OFFICIAL,
     profile,
-    layer: null,
+    layer,
     combat,
     api: null,
     entrypoints: Object.freeze(entry ? [{ kind: profile === 'sandbox' ? 'sandboxModule' : 'module', id: String(raw.id), entry }] : []),
