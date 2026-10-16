@@ -278,12 +278,16 @@ export function createBattleRunner(deps) {
   const setIv = deps.setInterval || ((fn, ms) => globalThis.setInterval(fn, ms));
   const clearIv = deps.clearInterval || ((h) => globalThis.clearInterval(h));
   const doc = deps.doc !== undefined ? deps.doc : (typeof document !== 'undefined' ? document : null);
-  // 我们的数据面加载器（W-D, DESIGN §28.16）在前、上游的内容集加载（DESIGN §32.6）在后：`content` 给了就用它那份
-  // **已校验**的数据（content.js contentFor），没给就还是按数据面抓 —— 干净安装 / 没声明集合的房间与从前逐字节相同。
-  const loadSim = deps.loadSim || ((dataBase, content) => (content
-    ? loadBrowserSim({ data: content.data, cs: content.cs, bounds: content.bounds ?? null, scripts: content.scripts || [], hashInput: content.hashInput, nativeVerified: content.nativeVerified })
-    : loadBrowserSim({ dataBase })));
-  const dataBaseFor = deps.dataBaseFor || (() => '/data/');
+  // 两条加载契约的缝合处（见 ensureSim 的头注释）：`deps.dataBaseFor` **注入与否**决定 `loadSim` 的第一个参数是什么 ——
+  // 注入（浏览器那一份就是 `dataBaseForBattle`，W-D, DESIGN §28.16）⇒ `loadSim(dataBase, content?)`；没注入
+  // ⇒ 上游 0.3.0 的 `loadSim(content?)`。两种情况下 `content` 给了都用它那份**已校验**的数据（content.js
+  // contentFor），没给就按数据面 / 默认面抓 —— 干净安装 / 没声明集合的房间与从前逐字节相同。
+  const perFace = typeof deps.dataBaseFor === 'function';
+  const dataBaseFor = perFace ? deps.dataBaseFor : (() => '/data/');
+  const browserSim = (content) => loadBrowserSim({ data: content.data, cs: content.cs, bounds: content.bounds ?? null, scripts: content.scripts || [], hashInput: content.hashInput, nativeVerified: content.nativeVerified });
+  const loadSim = deps.loadSim || (perFace
+    ? (dataBase, content) => (content ? browserSim(content) : loadBrowserSim({ dataBase }))
+    : (content) => (content ? browserSim(content) : loadBrowserSim()));
   const logger = deps.logger || SIM_LOGGER;
   // 内容集（DESIGN §32.6）：本页持有的房间内容集（content.js contentFor / simContent）与服务器那一份原始内容的 cs
   const contentFor = deps.contentFor || appContentFor;
@@ -368,20 +372,20 @@ export function createBattleRunner(deps) {
    * Whether `cs` (a b.start spec's content) is a content this page can be the authority of. A spec with no `cs` is always
    * accepted — that is every spec of a server with no content identity, exactly as before (DESIGN §32). The server names
    * the content in every spec once it has one (`welcome.content.vanilla`, Lobby.welcomeInfo), and the page keeps that
-   * identity in `store.content` — **written by `main.js` from `welcome`**, which is not merged yet, so today it is always
-   * null and this page cannot tell one content from another.
+   * identity in `store.content` — `main.js` writes it from `welcome`（本批合入）。
    *
-   * ⚠️ **D24 (待裁)**: upstream returns false when the identity is unknown (it could not tell which data to simulate on),
-   * and that would make the page non-authoritative for *every* battle of a content-identity server until `main.js`
-   * lands. The marked line below therefore accepts, which is what this tree did before the content identity existed;
-   * flip it to `return false` in the same batch that merges `main.js`. A named `cs` that IS known to be another content
-   * is refused either way.
+   * **D24 已翻（本批）**：身份不知道时 `return false` —— 这是上游的写法，也正是
+   * `test/ui/plugins-content.test.js`「a page that does not know the original content's cs is no authority of a spec
+   * naming one」钉的那条：页面说不出该在哪份数据上模拟，就不该当这一场的权威。上一批曾**暂定 `return true`**
+   * （那时 `main.js` 还没合，`store.content` 恒为 null，照上游写会让每一个带 cs 的 spec 都变非权威 —— 真回归）；
+   * 本批把 `main.js` 的 `welcome.content.vanilla` 落进 store 之后翻回 false，这个分歧只活了那一批。
+   * 已知是**另一个**内容集时两种写法都拒绝。
    * @param {unknown} cs @param {{ loading?: boolean }} [opts]
    */
   function csAccepted(cs, { loading = false } = {}) {
     if (typeof cs !== 'string' || cs === '') return true;
     const vanilla = vanillaCs();
-    if (vanilla == null) return true; // D24: upstream returns false here (see the header)
+    if (vanilla == null) return false; // D24 已翻：上游的写法（见上）
     if (cs === vanilla) return true;
     const held = heldContent();
     return (!!held && held.cs === cs) || (loading && loadingContent() === cs);
@@ -396,6 +400,12 @@ export function createBattleRunner(deps) {
    * 两条都在、key 分开缓存，所以干净安装 / 没声明集合的房间的加载器与从前逐字节相同
    * (`test/match/runnerDataBase.test.js` 钉的就是这条)。上游的 `deps.loadSim ? 本页加载 : remote` 判据照搬：
    * 没有注入加载器（浏览器）时，房间内容集交给 Worker 宿主；注入了（测试 / 注入面）就在本页建。
+   *
+   * **`loadSim` 的两个契约（`perFace`）**：注入 `deps.dataBaseFor` 的调用方是在要「按数据面加载」那条能力，它的
+   * `loadSim` 因此是 `(dataBase, content?)`（我们的契约，`runnerDataBase.test.js` 钉着）；没注入的调用方（干净页面、
+   * 只关心内容集的注入面）拿到的是**上游 0.3.0 的 `loadSim(content?)`**（`plugins-content.test.js` 钉着）。
+   * 两个契约不能合成一个参数位（一个要面、一个要 content），所以按「有没有要数据面」分开 —— 这不是给测试开的后门，
+   * 而是这次合并里唯一能把两条来源都留下的形状；`content` 给定时两条都进同一个 `browserSim`。
    */
   function ensureSim(spec = null) {
     const base = dataBaseFor(spec);
@@ -408,9 +418,9 @@ export function createBattleRunner(deps) {
       p = (want
         ? contentFor(want).then((content) => {
           if (!content || content.cs !== want) throw new Error(`the content set ${want.slice(0, 8)} is not loaded on this page`);
-          return deps.loadSim ? loadSim(base, content) : { content, cs: want, remote: true };
+          return deps.loadSim ? (perFace ? loadSim(base, content) : loadSim(content)) : { content, cs: want, remote: true };
         })
-        : loadSim(base, null)).catch((err) => { sims.delete(key); throw err; });
+        : (perFace ? loadSim(base, null) : loadSim(null))).catch((err) => { sims.delete(key); throw err; });
       sims.set(key, p);
     }
     return p;
