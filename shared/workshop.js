@@ -430,6 +430,23 @@ export const CLIENT_WRAP_MODES = Object.freeze(['wrap', 'replace']);
 /** 面板的字段：四个 + `styles`（这个面板自带的样式表）+ `data`（它要读的数据表）+ `messages`（它要收发的通道）
  *  + `wraps`（它要包裹 / 替换的引擎组件）。 */
 const CLIENT_PANEL_FIELDS = Object.freeze(['id', 'slot', 'module', 'order', 'gate', 'styles', 'data', 'messages', 'wraps']);
+/**
+ * 整屏声明的字段（`client.screens[]`，DESIGN §28.55）：`id` / `route` / `module` 三格必填，其余四格可选，
+ * 与面板**共用同一批判据**（同一条装载期文件判据、同一批数据表闭枚举、同一套通道名形状）。
+ * 刻意**没有** `wraps`：整屏替换的是**整条路由**，不是包裹引擎的某个组件 —— 那是面板那一格的活。
+ */
+export const CLIENT_SCREEN_FIELDS = Object.freeze(['id', 'route', 'module', 'order', 'styles', 'data', 'messages']);
+/**
+ * 整屏能替换的**路由闭枚举**（DESIGN §28.55）。
+ *
+ * 为什么只有四条：`selectRoute`（`public/js/store.js`）与 `main.js` 的 `SCREENS` 都只到这四个值 ——
+ * 结算与干员调配是路由**内部**的视图，不是路由。所以写成自由字符串没有意义：第五条不是「以后再支持」，
+ * 是一条永远不会命中的死格子。客户端那份镜像（`public/js/ui/extensions.js` 的 `MOD_SCREEN_ROUTES`）由
+ * `test/modClientScreens.test.mjs` 钉在一起，两处各说各话就是第二个会漂的真相。
+ */
+export const CLIENT_SCREEN_ROUTES = Object.freeze(['title', 'lobby', 'room', 'game']);
+/** 一份整屏最多带几份样式表 —— 与 `CLIENT_MAX_PANEL_STYLES` 同一个量级：注入这件事必须有界。 */
+const CLIENT_MAX_SCREEN_STYLES = 8;
 /** 一个面板最多声明几条包通道（上限让「通道」这件事有界；今天没有一个真包用到两条以上）。 */
 const CLIENT_MAX_PANEL_MESSAGES = 8;
 /**
@@ -726,11 +743,11 @@ const isSafeServerModulePath = (p) =>
  */
 function parseClientDecl(raw) {
   if (!isPlainObj(raw)) {
-    return fail('CLIENT_DECL_BAD_SHAPE', 'client must be an object: { panels: [...], requires: [...] }');
+    return fail('CLIENT_DECL_BAD_SHAPE', 'client must be an object: { panels?: [...], screens?: [...], requires?: [...], theme?: { vars } }');
   }
   for (const key of Object.keys(raw)) {
-    if (key !== 'panels' && key !== 'requires' && key !== 'theme') {
-      return fail('CLIENT_UNKNOWN_FIELD', `client: "${key}" is not a declared field (panels, requires, theme)`);
+    if (key !== 'panels' && key !== 'screens' && key !== 'requires' && key !== 'theme') {
+      return fail('CLIENT_UNKNOWN_FIELD', `client: "${key}" is not a declared field (panels, screens, requires, theme)`);
     }
   }
   // `client` 至少要声明**一件能用的东西**：面板，或主题变量。业主裁决 2026-10-10 之后主题可以单独存在 —— 一个只想
@@ -739,8 +756,11 @@ function parseClientDecl(raw) {
   // 「这个包有客户端界面」这句话变成假的）。
   if (raw.panels !== undefined && !Array.isArray(raw.panels)) return fail('CLIENT_BAD_PANELS', 'client.panels must be an array of panel declarations');
   if (Array.isArray(raw.panels) && !raw.panels.length) return fail('CLIENT_BAD_PANELS', 'client.panels must declare at least one panel (drop the key instead of sending [])');
-  if (raw.panels === undefined && raw.theme === undefined) {
-    return fail('CLIENT_BAD_PANELS', 'client must declare at least one of: panels (client interfaces), theme (CSS variables) — a client block that declares neither, or only requires, says nothing at all');
+  // 整屏与面板一样是「一件能用的事」：空数组照旧被拒（与不写没区别，却会让「这个包有整屏界面」这句话变成假的）。
+  if (raw.screens !== undefined && !Array.isArray(raw.screens)) return fail('CLIENT_BAD_SCREENS', 'client.screens must be an array of whole-screen declarations');
+  if (Array.isArray(raw.screens) && !raw.screens.length) return fail('CLIENT_BAD_SCREENS', 'client.screens must declare at least one screen (drop the key instead of sending [])');
+  if (raw.panels === undefined && raw.screens === undefined && raw.theme === undefined) {
+    return fail('CLIENT_BAD_PANELS', 'client must declare at least one of: panels, screens (whole-screen routes), theme (CSS variables) — a client block that declares neither, or only requires, says nothing at all');
   }
   const panels = [];
   const seen = new Set();
@@ -877,6 +897,61 @@ function parseClientDecl(raw) {
     }
     panels.push(clean);
   }
+  // 整屏声明（`client.screens[]`，DESIGN §28.55）：与面板**共用同一批判据**，因为两者在客户端走同一条投递路径
+  // （`welcome.modPanels` 一份线表，服务端只多给一个 `kind: 'screen'`）。刻意共用的还有 `seen`：`id` 是**一个**
+  // 包内命名空间 —— 面板与整屏同名就是两份声明抢一个 key，客户端只会挂上其中一份，而作者以为挂了两份。
+  const screens = [];
+  const screenRoutes = new Set();
+  for (const [i, screen] of (Array.isArray(raw.screens) ? raw.screens : []).entries()) {
+    if (!isPlainObj(screen)) return fail('CLIENT_BAD_SCREEN', `client.screens[${i}] must be an object: { id, route, module, order?, styles?, data?, messages? }`);
+    for (const key of Object.keys(screen)) {
+      if (!CLIENT_SCREEN_FIELDS.includes(key)) return fail('CLIENT_SCREEN_UNKNOWN_FIELD', `client.screens[${i}]: "${key}" is not a screen field (${CLIENT_SCREEN_FIELDS.join(', ')})`);
+    }
+    if (typeof screen.id !== 'string' || !RECORD_ID_RE.test(screen.id)) return fail('CLIENT_BAD_SCREEN_ID', `client.screens[${i}].id: "${String(screen.id)}" is not a valid screen id`);
+    if (seen.has(screen.id)) return fail('CLIENT_SCREEN_DUPLICATE_ID', `client.screens: "${screen.id}" is already used by a panel or screen (ids share one pack namespace)`);
+    seen.add(screen.id);
+    if (!CLIENT_SCREEN_ROUTES.includes(screen.route)) return fail('CLIENT_BAD_SCREEN_ROUTE', `client.screens["${screen.id}"].route must be one of: ${CLIENT_SCREEN_ROUTES.join(', ')}`);
+    // 一个包一条路由只许一份：两份就是「哪一份赢」这个没人能回答的问题（**跨包**那一层由客户端按
+    // order → 包 id → 声明 id 确定性裁决，见 `public/js/ui/extensions.js` 的 `syncActiveScreen`）。
+    if (screenRoutes.has(screen.route)) return fail('CLIENT_SCREEN_DUPLICATE_ROUTE', `client.screens: route "${screen.route}" is declared twice in one pack (one pack may provide at most one screen per route)`);
+    screenRoutes.add(screen.route);
+    if (!isSafeModulePath(screen.module)) return fail('CLIENT_BAD_SCREEN_MODULE', `client.screens["${screen.id}"].module must be a relative path inside the pack ending in .js (e.g. "screens/lobby.js")`);
+    if (screen.order !== undefined && !Number.isInteger(screen.order)) return fail('CLIENT_BAD_SCREEN_ORDER', `client.screens["${screen.id}"].order must be an integer`);
+    const clean = { id: screen.id, route: screen.route, module: screen.module };
+    if (screen.order !== undefined) clean.order = screen.order;
+    if (screen.styles !== undefined) {
+      if (!Array.isArray(screen.styles) || !screen.styles.length) return fail('CLIENT_BAD_SCREEN_STYLES', `client.screens["${screen.id}"].styles must be a non-empty array of pack-relative .css paths (drop the key instead of sending [])`);
+      if (screen.styles.length > CLIENT_MAX_SCREEN_STYLES) return fail('CLIENT_BAD_SCREEN_STYLES', `client.screens["${screen.id}"].styles: at most ${CLIENT_MAX_SCREEN_STYLES} stylesheets per screen`);
+      const styles = [];
+      for (const style of screen.styles) {
+        if (typeof style !== 'string' || !isSafeRelativePath(style) || !style.endsWith(CLIENT_PANEL_STYLES_EXT) || style.length <= CLIENT_PANEL_STYLES_EXT.length) {
+          return fail('CLIENT_BAD_SCREEN_STYLE', `client.screens["${screen.id}"].styles: "${String(style)}" must be a pack-relative .css path`);
+        }
+        styles.push(style);
+      }
+      if (new Set(styles).size !== styles.length) return fail('CLIENT_DUPLICATE_SCREEN_STYLE', `client.screens["${screen.id}"].styles lists a stylesheet twice`);
+      clean.styles = styles.sort();
+    }
+    if (screen.data !== undefined) {
+      if (!Array.isArray(screen.data) || !screen.data.length || screen.data.length > CLIENT_MAX_PANEL_DATA_TABLES) return fail('CLIENT_BAD_SCREEN_DATA', `client.screens["${screen.id}"].data must be a non-empty list of readable table names`);
+      for (const table of screen.data) {
+        if (!CLIENT_PANEL_DATA_TABLES.includes(table)) return fail('CLIENT_BAD_SCREEN_DATA', `client.screens["${screen.id}"].data: "${String(table)}" is not a readable data table`);
+      }
+      if (new Set(screen.data).size !== screen.data.length) return fail('CLIENT_DUPLICATE_SCREEN_DATA', `client.screens["${screen.id}"].data lists the same table twice`);
+      clean.data = CLIENT_PANEL_DATA_TABLES.filter((name) => screen.data.includes(name));
+    }
+    if (screen.messages !== undefined) {
+      if (!Array.isArray(screen.messages) || !screen.messages.length || screen.messages.length > CLIENT_MAX_PANEL_MESSAGES) return fail('CLIENT_BAD_SCREEN_MESSAGES', `client.screens["${screen.id}"].messages must be a non-empty list of at most ${CLIENT_MAX_PANEL_MESSAGES} pack channels`);
+      for (const channel of screen.messages) {
+        if (typeof channel !== 'string' || !PACK_CHANNEL_RE.test(channel)) return fail('CLIENT_BAD_SCREEN_CHANNEL', `client.screens["${screen.id}"].messages: "${String(channel)}" is not a valid pack channel name`);
+      }
+      if (new Set(screen.messages).size !== screen.messages.length) return fail('CLIENT_DUPLICATE_SCREEN_CHANNEL', `client.screens["${screen.id}"].messages lists the same channel twice`);
+      clean.messages = stableStringList(screen.messages);
+    }
+    screens.push(clean);
+  }
+  // 按 id 排序，与面板同一条理由：键序是清单字节的一部分，不能随作者书写顺序变（DESIGN §28.2）。
+  screens.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const rawRequires = raw.requires === undefined ? [] : raw.requires;
   if (!Array.isArray(rawRequires)) {
     return fail('CLIENT_BAD_REQUIRES', `client.requires must be an array (one of: ${CLIENT_REQUIRES.join(', ')})`);
@@ -928,7 +1003,11 @@ function parseClientDecl(raw) {
     theme = { vars };
   }
   // requires 按闭枚举次序，不按作者书写顺序：同一个包两处写法不同的清单必须是同一份字节（DESIGN §28.2）
-  return { ok: true, decl: { panels, requires: CLIENT_REQUIRES.filter((c) => requires.includes(c)), ...(theme ? { theme } : {}) } };
+  // `screens` **只在写出来时**才进清单（与 `variants` / `behaviour` 同一条纪律）：`identifyPack` 哈希的就是这份
+  // 归一化清单，给每个包都补一个 `screens: []` 会让**所有已发布包的哈希全部改变**。而它**必须**进哈希：屏模块与
+  // 样式表的源码字节进身份摘要（`server/workshop.js identifyPack`），两份不同的整屏共用同一个摘要就等于
+  // 房间的摘要闸门放行两份不同的界面（DESIGN §28.2）。
+  return { ok: true, decl: { panels, ...(raw.screens === undefined ? {} : { screens }), requires: CLIENT_REQUIRES.filter((c) => requires.includes(c)), ...(theme ? { theme } : {}) } };
 }
 
 /**
@@ -2372,18 +2451,19 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   if (clientParsed && !clientParsed.ok) return clientParsed;
   const serverParsed = raw.server === undefined ? null : parseServerDecl(raw.server);
   if (serverParsed && !serverParsed.ok) return serverParsed;
-  // 包通道的服务端那一半（DESIGN §28.23）：`server.modules[].channels` 里点名的每一条，必须也被本包的某个面板
-  // 声明过（`client.panels[].messages`）。理由不是洁癖：Lobby 的 `packChannels` 白名单是**从面板清单推出来的**
-  // —— 没有面板声明过的通道，客户端根本发不出来，那是一条「声明了却不可能发生」的声明。
+  // 包通道的服务端那一半（DESIGN §28.23）：`server.modules[].channels` 里点名的每一条，必须也被本包的某个**声明面**
+  // 声明过（`client.panels[].messages` **或** `client.screens[].messages`）。理由不是洁癖：Lobby 的 `packChannels`
+  // 白名单是**从面板清单推出来的** —— 没有声明面声明过的通道，客户端根本发不出来，那是一条「声明了却不可能发生」
+  // 的声明。整屏与面板一起算：两者在客户端是同一份线表，谁都不该被漏掉。
   if (serverParsed) {
     const panelChannels = new Set();
-    for (const panel of (clientParsed ? clientParsed.decl.panels : [])) {
+    for (const panel of [...(clientParsed ? clientParsed.decl.panels : []), ...(clientParsed ? (clientParsed.decl.screens || []) : [])]) {
       for (const channel of (panel.messages || [])) panelChannels.add(channel);
     }
     for (const m of serverParsed.decl.modules || []) {
       for (const channel of m.channels || []) {
         if (!panelChannels.has(channel)) {
-          return fail('MODULES_UNKNOWN_CHANNEL', `server.modules["${m.id}"].channels: "${channel}" is not declared by any of this pack's client.panels[].messages — the engine only lets a pack send the channels its panels declare, so this one could never arrive (add it to a panel's "messages", or drop it here)`);
+          return fail('MODULES_UNKNOWN_CHANNEL', `server.modules["${m.id}"].channels: "${channel}" is not declared by any of this pack's client.panels[].messages or client.screens[].messages — the engine only lets a pack send declared channels, so this one could never arrive (add it to a panel or screen "messages", or drop it here)`);
         }
       }
     }

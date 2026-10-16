@@ -546,6 +546,21 @@ export const MOD_SURFACE = Object.freeze([
     spec: '§28.8',
   },
   {
+    id: 'client.screens',
+    layer: 'C',
+    decl: 'pack.json.client.screens[] = { id, route, module, order?, styles?, data?, messages? }',
+    anchors: [{ symbol: 'CLIENT_SCREEN_ROUTES' }, { symbol: 'CLIENT_SCREEN_FIELDS' }],
+    requires: [
+      'route 是**闭枚举且只有引擎真的有的四条**（`title` / `lobby` / `room` / `game`）：`selectRoute`（`public/js/store.js`）与 `main.js` 的 `SCREENS` 都只到这四个值，结算与干员调配是路由**内部**的视图 —— 多写一条就是永远不会命中的死格子（`test/modClientScreens.test.mjs` 把两份名单钉在一起）',
+      '`module` / `styles` / `data` / `messages` 与面板**共用同一批判据**（同一条装载期文件判据、同一批数据表闭枚举、同一套通道名形状）；`id` 与面板共用一个包内命名空间，一个包同一条路由只能有一份',
+      '屏模块与样式表的源码字节进 `identifyPack`（不算进去，两份不同的整屏就能共用同一个摘要，而那份摘要声称「同一份界面」）；没声明 `screens` 的包摘要逐字节不变',
+      '失败方向是**宿主原生界面保持可见**：样式装不上 / import 失败 / 没导出 `mountScreen` / `mountScreen` 抛错，四种都点名并把该 key 拉黑，不做「白屏但看起来成功了」；卸载对称，路由所有权按 `order / pack / id` 确定性裁决',
+    ],
+    files: ['shared/workshop.js', 'server/workshop.js', 'server/http/workshop.js', 'public/js/ui/extensions.js'],
+    tests: ['test/modClientScreens.test.mjs', 'test/modClientPanels.test.js'],
+    spec: '§28.55',
+  },
+  {
     id: 'client.panels.me',
     layer: 'C',
     decl: '（无声明：`ctx.me` 是引擎**总是**给的那一格只读会话态）',
