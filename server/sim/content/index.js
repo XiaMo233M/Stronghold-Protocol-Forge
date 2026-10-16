@@ -27,6 +27,8 @@
 // registerAllMeta(registry) — calls each domain module's registerMeta(registry) (prep side, server boot).
 
 import { genericKit, genericTalents } from './generic.js';
+// 官方档 SDK 的注册表（`sp.kits.register` 等最终落到这里；0.3.0 的同一份实现，vendor 自上游）。
+import { installExtensions, registerExtensionMeta } from './extensions.js';
 import { withUnitLoadouts } from '../simdata.js';
 import { isPotential } from '../../../shared/potential.js';
 
@@ -281,6 +283,9 @@ export function installContent(battle, { mode = 'full', extra = null, installers
   for (const m of extra || []) {
     try { (typeof m === 'function' ? m : m.install)?.(battle); } catch (e) { battle._handlerError('content:extra', null, e); }
   }
+  // 官方档 SDK（`sp.content.register` / `sp.kits.register`…）登记的扩展在这里装进战场。
+  // `installExtensions` 自己逐条 try/catch（报错点名 `plugin:<id>`），一个插件炸不了战场。
+  try { installExtensions(battle); } catch (e) { battle._handlerError?.('plugin-extensions', null, e); }
 }
 
 /** Prep-side registration of every domain module (server boot). */
@@ -289,4 +294,6 @@ export function registerAllMeta(registry) {
     if (typeof mod.registerMeta !== 'function') continue;
     try { mod.registerMeta(registry); } catch (e) { console.error(`[content] ${name}.registerMeta failed:`, e); }
   }
+  // 官方档 SDK 的 `sp.meta.register` 落点（0.3.0 同一份实现）。
+  try { registerExtensionMeta(registry); } catch (e) { console.error('[content] extension meta failed:', e); }
 }

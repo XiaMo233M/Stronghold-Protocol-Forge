@@ -18,8 +18,10 @@ import { pathToFileURL } from 'node:url';
 import { serverModuleSourceIssues, checkHealthzFields } from '../modModules.js';
 // 房间事件闭集（与 Forge 档 `server.room` 同一张表、同一份语义：**只读观察**，返回值一律丢弃）。
 import { ROOM_HOOK_EVENTS } from '../roomPack.js';
-// 确定性那条线（`meta` / `battle`）：与 Forge 档 `server.battle` / `server.meta` 用**同一张**禁表、同一个扫描器。
+// 确定性那条线（`meta` / `sim`）：与 Forge 档 `server.battle` / `server.meta` 用**同一张**禁表、同一个扫描器。
 import { KIT_FORBIDDEN_GLOBALS, stripComments, mentionsIdentifier } from '../../shared/kitAuthoring.js';
+// 上游 0.3.0 的 `setup(sp)` SDK 表面（`sp:sdk@1`）：注册落到 extensions 注册表。
+import { createSDK } from './officialSdk.js';
 // 战斗模块送浏览器的**同一条 URL 约定**（`/workshop-battle/`）：从 `server/http/static.js` 取常量，
 // 保证「客户端要加载的那条路径」与「服务端会服务的那条路径」不可能各写一套。
 import { WORKSHOP_BATTLE_PREFIX } from '../http/static.js';
@@ -51,6 +53,9 @@ export function officialPluginSourceIssues(source, pluginId = '', { capabilities
   }
   return out;
 }
+
+/** 上游 0.3.0 的 SDK 表面里，哪些内部能力对应「改对局结果的代码」（确定性那条线的判据）。 */
+export const SDK_SETUP_SCAN = Object.freeze(['sim', 'meta']);
 
 /** 一个插件的 `registerPlugin(host)` 抛出这个（与 `ModuleRefused` 同形，带 `code`）。 */
 export class PluginRefused extends Error {
@@ -356,8 +361,32 @@ export async function loadOfficialModules(plugins, { log = noopLog, stateRoot = 
     const url = `${pathToFileURL(abs).href}?v=${encodeURIComponent(plugin.hash || '')}`;
     let ns;
     try { ns = await importModule(url); } catch (e) { errors.push({ pack: plugin.id, code: 'PLUGIN_IMPORT_FAILED', reason: `entry failed to load: ${e && e.message ? e.message : e}` }); continue; }
+    // **入口双契约**：`setup(sp)`（上游 0.3.0，`sp = { kit, math, constants, settings, kits/enemies/content/meta.register, log }`）
+    // 或 `registerPlugin(host)`（我方扩展契约，多出 Forge 独有的面）。两者都没有才拒。
+    // 上游契约的导出形态是 **`export default function setup(sp)`**（`docs/PLUGINS.md:756`），
+    // 也接受具名 `setup` / `activate`（与 `officialSdk.runSetup` 同一判定）。
+    const setupFn = ns && (typeof ns.default === 'function' ? ns.default : (typeof ns.setup === 'function' ? ns.setup : (typeof ns.activate === 'function' ? ns.activate : null)));
+    if (setupFn) {
+      const sp = createSDK(plugin.descriptor, { log: (...a) => log?.info?.(...a) });
+      try {
+        setupFn(sp);
+      } catch (e) {
+        errors.push({ pack: plugin.id, code: e && e.code === 'PLUGIN_PERMISSION_MISSING' ? 'PLUGIN_PERMISSION_MISSING' : 'PLUGIN_REGISTER_THREW', reason: `setup(sp): ${e && e.message ? e.message : e}` });
+        log?.warn?.(`[official] ${plugin.id}: setup(sp) failed: ${e && e.message ? e.message : e}`);
+        continue;
+      }
+      // `setup(sp)` 的登记都落进了 extensions 注册表；`entry.server` 声明过 ⇒ sim 侧已由 installContent 接。
+      modules.push({
+        pack: plugin.id, id: 'entry', entry: ep.entry, hash: plugin.hash || '', dir: plugin.dir,
+        registers: Array.isArray(plugin.descriptor.metaRegisters) ? [...plugin.descriptor.metaRegisters] : [],
+        uses: caps.filter((c) => HOST_CAPABILITIES.includes(c)),
+        mounted,
+        sdk: true,
+      });
+      continue;
+    }
     if (!ns || typeof ns.registerPlugin !== 'function') {
-      errors.push({ pack: plugin.id, code: 'PLUGIN_NO_REGISTER', reason: `entry does not export a registerPlugin(host) function` });
+      errors.push({ pack: plugin.id, code: 'PLUGIN_NO_REGISTER', reason: 'the entry exports neither setup(sp) (upstream contract) nor registerPlugin(host) (the Forge extension contract)' });
       continue;
     }
     try {
