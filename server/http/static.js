@@ -57,11 +57,23 @@ import { MEDIA_PREFIX } from '../../shared/media.js';
 import { splitHashedPath } from '../../shared/assetPaths.js';
 import { ROOT, noopLog } from './config.js';
 import { sendError, sendJson } from './common.js';
-import { MIME, CompressCache, isNotModified, serveFile, serveBuffer } from './files.js';
+import { MIME, CompressCache, IMMUTABLE_CACHE, isNotModified, serveFile, serveBuffer } from './files.js';
 import { ASSET_INDEX_ROOTS, hashedFileOpts } from './assetIndex.js';
 import { serveMedia } from './media.js';
 import { createPackRegistry } from '../packs.js';
+// The plugin registry (server/plugins/registry.js): 0.3.0 把包注册表并进插件注册表，`server/packs.js` 现在只是它的
+// 一个别名再导出。这里按上游的形态用 `createPluginRegistry` 起缺省实例，`sameIdentity` / `statIdentity` 供 `/p/` 的路由
+// 判断「磁盘上还是不是扫描时那一份字节」。
+import { createPluginRegistry, sameIdentity, statIdentity } from '../plugins/registry.js';
+import { computeVanillaContent } from '../plugins/identity.js';
+import { createVisualSets } from '../plugins/visualSet.js';
+import { isStudioPath } from '../studio/paths.js';
 import { PACKS_URL, PACK_INDEX_FILE } from '../../shared/packs.js';
+import { PLUGINS_URL, PLUGIN_INDEX_VERSION, buildPluginIndex, extOf, isPackPath, isPluginId } from '../../shared/plugins/manifest.js';
+import { csUrlPart } from '../../shared/plugins/identity.js';
+import { FILE_URL_DIGITS, PLUGIN_AUDIO_EXTS, PLUGIN_FILES_URL, VISUAL_DOC_FILE, VISUAL_SETS_URL, VS_URL_DIGITS } from '../../shared/plugins/visual.js';
+import { SIM_WORKER_CSP } from './csp.js';
+import { UI_FRAME_CSP } from '../../shared/plugins/ui.js';
 import { WORKSHOP_ASSET_PREFIX, WORKSHOP_ASSET_TYPES, ROUTE_CACHE_HEADERS, isCacheOnlyPath } from './workshop.js';
 import { WORKSHOP_PANEL_PREFIX, WORKSHOP_RESOURCE_PREFIX } from '../../shared/workshop.js';
 import { serveMods } from './mods.js';
@@ -93,6 +105,19 @@ export const WORKSHOP_BATTLE_PREFIX = '/workshop-battle/';
 /** Optional per-machine art manifest (tools/local-extract) and the empty stand-in served when it is absent. */
 const LOCAL_ART_MANIFEST = 'local-assets.json';
 const EMPTY_LOCAL_ART = Buffer.from(JSON.stringify({ version: 1, source: 'none', count: 0, groups: {} }));
+
+/** 0.3.0（上游 DESIGN §32/§33）新增的第二份本机清单：官方特效的本地文件（tools/local-extract）。
+ *  它缺席时同样以一个空清单作答，理由与 local-assets.json 一模一样（免得每次开页都在控制台留一条 404）。 */
+const LOCAL_ART_MANIFESTS = new Set([LOCAL_ART_MANIFEST, 'local-fx.json']);
+
+/** The content-set manifest's cache policy: its URL names its content (the `cs`), so it never changes. */
+const IMMUTABLE_JSON = 'public, max-age=31536000, immutable';
+/** /vs/<vs16>/overlay.json */
+const VISUAL_DOC = new RegExp(`^${VISUAL_SETS_URL}([0-9a-f]{${VS_URL_DIGITS}})/${VISUAL_DOC_FILE.replace('.', '\\.')}$`);
+/** A plugin file URL's hash segment. */
+const FILE_HASH = new RegExp(`^[0-9a-f]{${FILE_URL_DIGITS}}$`);
+/** /cs/<cs16>/<path> of a content set with gameplay plugins (DESIGN §32.6). */
+const CS_FILE = /^\/cs\/([0-9a-f]{16})\/([A-Za-z0-9._\/-]{1,200})$/;
 
 /**
  * `/workshop-kits/<pack>/<rel>` → `<packDir>/kits/<rel>` (DESIGN §28.18), or null when this URL must not be answered.
@@ -150,7 +175,8 @@ function resolvePackRelativeKit(decoded, kitDirs) {
  */
 export function createStaticHandler({
   publicDir, dataDir, sharedDir, simDir = path.join(ROOT, 'server', 'sim'),
-  packsDir = path.join(ROOT, 'packs'), packs = null, log = noopLog,
+  packsDir = path.join(ROOT, 'packs'), pluginsDir = path.join(path.dirname(path.resolve(packsDir)), 'plugins'),
+  packs = null, content = null, log = noopLog,
   // 创意工坊 (server/http/workshop.js): the merged /data bodies, the pack kit modules, the C-layer panel modules, the
   // packs with an assets/ folder, the read-only routes the packs declare (`pack.json.routes`) and the URLs serving a
   // pack's declared resource container / manifest (`pack.json.assets`). All of them are empty maps on a plain install,
@@ -180,8 +206,16 @@ export function createStaticHandler({
   // 内容哈希（`server/http/assetIndex.js`）与它服务出来的清单（`server/http/assetViews.js`）：null = 没有索引
   // （`assetIndex: false` / SP_ASSET_INDEX=0），两条 ~hash 路由与两条清单视图整块跳过，行为与从前逐字节相同。
   assetIndex = null, views = null,
+  // 视觉集（server/plugins/visualSet.js，DESIGN §32 P1a）与「带玩法插件的内容集」（server/plugins/contentSets.js，
+  // DESIGN §32.6）：两者缺省都是从上文的 `registry` 现起（内容集没有 `contents` 时只答原生那一份 /cs/ 清单）。
+  visual = null, contents = null,
 }) {
-  const registry = packs || createPackRegistry({ publicDir, dataDir, packsDir }, { log: /** @type {any} */ (log) });
+  const registry = packs || createPluginRegistry({ publicDir, dataDir, packsDir, pluginsDir }, { log: /** @type {any} */ (log) });
+  // 视觉集只在注册表真的有 pluginFile 时起（0.2.0 形态的自建注册表没有它 ⇒ /vs/ 与 /p/ 一律 404）
+  const sets = visual || (typeof registry.pluginFile === 'function' ? createVisualSets({ registry, log }) : null);
+  // 原生内容集（server/plugins/identity.js）：第一次用到时才算，算完缓存在闭包里。
+  let vanilla = content;
+  const vanillaContent = () => (vanilla ||= computeVanillaContent({ simDir, sharedDir, dataDir, shim: DATA_SHIM_JS, log: /** @type {any} */ (log) }));
   // 挂载表只此一处真相（routeMount.js coreMounts）：`workshopRoutesFor` 判「核心先吃」时读的是**同一份**目录表，
   // 所以「谁先吃」与「谁真的住在这里」不会各说各话。
   const mounts = coreMounts({ publicDir, dataDir, sharedDir, simDir }).map((m) => (
@@ -222,6 +256,76 @@ export function createStaticHandler({
     if (resourcePolicy === 'cache-only' && isCacheOnlyPath(decoded)) {
       sendError(req, res, 412, '资源需先从客户端导入 · Resource pack required',
         'This server serves /assets and /fonts only from a locally imported resource pack · 本服务器要求先导入完整资源包');
+      return;
+    }
+    // 插件目录（server/plugins/registry.js, DESIGN §32）与原生内容集的清单。整块取自上游 0.3.0 的 /packs/ 之前的四段
+    // 新路由：`/plugins/index.json` 目录、`/cs/…` 内容集、`/vs/…` 视觉集、`/p/<id>/<hash8>/<path>` 插件文件。它们与
+    // 工坊那几条路由（workshop-*、/mods/、/room-data/）**前缀互不重叠**，所以顺序上不互相遮蔽。
+    if (decoded === `${PLUGINS_URL}index.json`) {
+      const c = vanillaContent().cs;
+      // a registry of 0.2.0's shape (a caller's own `packs`) has no catalogue: an empty one
+      sendJson(req, res, 200, typeof registry.pluginIndex === 'function' ? registry.pluginIndex({ vanilla: c }) : buildPluginIndex([], { vanilla: c }));
+      return;
+    }
+    if (decoded.startsWith('/cs/')) {
+      const c = vanillaContent();
+      if (decoded !== `/cs/${csUrlPart(c.cs)}/index.json`) {
+        // a content set with gameplay plugins (DESIGN §32.6, server/plugins/contentSets.js): its manifest and its patched
+        // data files — a URL naming its content, so cached for good; 404 for a set this server does not keep
+        const m = CS_FILE.exec(decoded);
+        const f = m && contents && !m[2].split('/').some((s) => s === '' || s === '.' || s === '..' || s.startsWith('.')) ? contents.file(m[1], m[2]) : null;
+        if (!f) { sendError(req, res, 404, '页面不存在 · Not found', decoded.length <= 200 ? decoded : ''); return; }
+        await serveBuffer(req, res, { body: f.body, hash: `cs-${m[1]}-${(f.sha256 || 'index').slice(0, 8)}`, type: f.type || MIME['.json'], cacheControl: IMMUTABLE_JSON, key: `cs:${decoded}`, cache: gzipCache });
+        return;
+      }
+      const body = Buffer.from(JSON.stringify(c.index));
+      const tag = `"cs-${csUrlPart(c.cs)}-v${PLUGIN_INDEX_VERSION}"`;
+      const headers = { 'Content-Type': MIME['.json'], 'Cache-Control': IMMUTABLE_JSON, ETag: tag, 'Content-Length': body.length };
+      if (isNotModified(req, tag, new Date(0))) { delete headers['Content-Length']; res.writeHead(304, headers); res.end(); return; }
+      res.writeHead(200, headers);
+      res.end(req.method === 'HEAD' ? undefined : body);
+      return;
+    }
+    // Visual sets (server/plugins/visualSet.js): a set's composition and writes
+    if (decoded.startsWith(VISUAL_SETS_URL)) {
+      const m = VISUAL_DOC.exec(decoded);
+      const doc = m && sets ? await sets.doc(m[1]) : null;
+      if (!doc) { sendError(req, res, 404, '页面不存在 · Not found', decoded.length <= 200 ? decoded : ''); return; }
+      await serveBuffer(req, res, { body: doc.body, hash: doc.hash, type: MIME['.json'], cacheControl: 'no-cache', key: `vs:${decoded}`, cache: gzipCache });
+      return;
+    }
+    // A cosmetic plugin's files, or a ui plugin's frame files, at the hash of their bytes (see the header)
+    if (decoded.startsWith(PLUGIN_FILES_URL)) {
+      const [id, hash, ...segments] = decoded.slice(PLUGIN_FILES_URL.length).split('/');
+      const rel = segments.join('/');
+      const ok = isPluginId(id) && FILE_HASH.test(hash || '') && segments.length > 0 && isPackPath(rel)
+        && !segments.some((x) => x === '' || x === '.' || x === '..' || x.startsWith('.'));
+      let f = ok && sets ? sets.file(id, rel) : null;
+      // extension-less audio (download managers: shared/media.js): the listed audio file of that name — the one whose
+      // hash the URL names when there are two
+      if (!f && ok && sets && !extOf(rel)) {
+        const found = PLUGIN_AUDIO_EXTS.map((e) => sets.file(id, rel + e)).filter(Boolean);
+        f = found.find((x) => x.urlHashes.has(hash)) || found[0] || null;
+      }
+      // the very file the scan hashed: a symbolic link put in its place is never followed (wherever it leads — another
+      // file of the folder, a dot file, outside), nor is one put in place of a folder on its way (its real path changed)
+      const st = f ? await fsp.lstat(f.abs).catch(() => null) : null;
+      const real = st && st.isFile() ? await fsp.realpath(f.abs).catch(() => null) : null;
+      if (!st || !st.isFile() || !real || real !== f.real) { sendError(req, res, 404, '页面不存在 · Not found', decoded.length <= 200 ? decoded : ''); return; }
+      // still the bytes that were hashed: the same size, mtime, inode and ctime (registry.js statIdentity) — else the
+      // current file goes out with no-cache and the folders are read again
+      const same = sameIdentity(statIdentity(st), f);
+      if (!same) sets.noteChanged();
+      await serveFile(req, res, f.abs, st, 'plugins', segments, query, gzipCache, log, {
+        // the ETag: the content hash of the bytes the scan hashed — of a changed file, its stat identity (size and mtime
+        // alone would revalidate a rewrite that kept them: a 304 for other bytes)
+        contentHash: same ? f.sha256.slice(0, 16) : `${st.size.toString(16)}-${Math.floor(st.mtimeMs).toString(16)}-${st.ino.toString(16)}-${Math.floor(st.ctimeMs * 1000).toString(16)}`,
+        cacheControl: same && f.urlHashes.has(hash) ? IMMUTABLE_CACHE : 'no-cache',
+        // [ASSUMED] the frame CSP is only on a ui plugin's /p/ files (f.frame), including its sandbox
+        // allow-scripts (no allow-same-origin). serveFile puts it on 200, 206 and 304. 'self' may not match
+        // the opaque origin.
+        headers: f.frame ? { 'Content-Security-Policy': UI_FRAME_CSP } : null,
+      });
       return;
     }
     // 包声明的只读路由 (`pack.json.routes`, DESIGN §28.13 / docs/WORKSHOP.md §1.9)。刻意放在核心挂载之前：`path`
