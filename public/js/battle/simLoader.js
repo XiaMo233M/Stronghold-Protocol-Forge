@@ -1,4 +1,4 @@
-// Browser/Worker engine loader. Workers receive data and never fetch it (DESIGN §32.11).
+// Browser/Worker engine loader. Workers receive data and never fetch it (DESIGN §34.11).
 export const SIM_DATA_FILES = Object.freeze(['chess', 'enemies', 'tokens', 'stages', 'waves', 'bonds', 'items', 'garrisons', 'bands', 'effects', 'backups']);
 
 function deepFreeze(root) {
@@ -16,7 +16,7 @@ function deepFreeze(root) {
  * Browser sim loader: the /sim/ modules + the data files (own frozen copies — the server's data is frozen too, so a
  * content bug that writes into a record fails identically on both sides). `raw` is that frozen data: the rehearsal
  * worker (battle/rehearsal.js) is handed the page's official copy once instead of fetching the files again. `data`
- * (DESIGN §32.6): the files of a room's content set the page checked (public/js/content.js) instead of fetching
+ * (DESIGN §34.6): the files of a room's content set the page checked (public/js/content.js) instead of fetching
  * /data/; `cs` names what was loaded; `bounds` its official-bounds snapshot (installSimBounds).
  */
 let loadedScripts = false;
@@ -53,7 +53,7 @@ export async function loadBrowserSim({ base = '/sim/', dataBase = '/data/', fetc
 }
 
 /**
- * The official-bounds table of the engine's plugin caps (shared/plugins/officialBounds.js, DESIGN §32.5): the original
+ * The official-bounds table of the engine's plugin caps (shared/plugins/officialBounds.js, DESIGN §34.5): the original
  * content's page scans the data it loaded (no request); a room's content set installs the snapshot its index lists
  * (public/js/content.js loads and checks it beside the data files) — the one the server validated against and its match
  * host installs too, so both simulate a modded battle with the same caps. A content set without one runs on the floor,

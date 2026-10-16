@@ -1,12 +1,12 @@
-// ui/pluginTag.js — the room's plugin tag and the small facts the screens show of plugins (DESIGN §32 P1a): kept apart
+// ui/pluginTag.js — the room's plugin tag and the small facts the screens show of plugins (DESIGN §34 P1a): kept apart
 // from the 插件 panel (ui/pluginPanel.js), which loads only when it opens, so the title page and the room carry just this.
 //
 //   * PluginTag — the tag at the top of the room (screens/room.js): 「原版」, or 「插件 ×N」 once its host switched plugins
-//     on — marked unofficial (「非官方」) when they change gameplay (a content set of its own, DESIGN §32.6); a tap loads
+//     on — marked unofficial (「非官方」) when they change gameplay (a content set of its own, DESIGN §34.6); a tap loads
 //     the panel (ui/pluginPanel.js PluginPanel) and opens it.
 //   * roomPluginFacts — what the room's plugins are for this player; pluginTagText, sizeText, pluginMicro — their words.
 //   * UnofficialMark — the small 「非官方」 / MOD mark of a match with gameplay plugins (the briefing, the HUD corner, the
-//     result; DESIGN §32.6, the design study's §7.4); nothing for the original game (cosmetic plugins only included).
+//     result; DESIGN §34.6, the design study's §7.4); nothing for the original game (cosmetic plugins only included).
 // Texts go through t() (docs/I18N.md).
 
 import { useState } from '../../vendor/hooks.module.js';
@@ -37,7 +37,7 @@ export function roomPluginFacts(room, myId) {
     inMatch: !!room?.inMatch,
     warnings: Array.isArray(c?.warnings) ? c.warnings.filter((w) => w && typeof w.code === 'string') : [],
     vs: typeof c?.vs === 'string' ? c.vs : null,
-    // gameplay plugins (DESIGN §32.6): the room plays a content set of its own — unofficial
+    // gameplay plugins (DESIGN §34.6): the room plays a content set of its own — unofficial
     modded: !!c && c.vanilla === false,
     cs: typeof c?.cs === 'string' ? c.cs : null,
     modes: Array.isArray(c?.modes) ? c.modes.filter((m) => m && typeof m.id === 'string') : [],
@@ -46,7 +46,7 @@ export function roomPluginFacts(room, myId) {
   };
 }
 
-/** Does the room play gameplay plugins (a content set of its own: unofficial — DESIGN §32.6)? @param {any} room */
+/** Does the room play gameplay plugins (a content set of its own: unofficial — DESIGN §34.6)? @param {any} room */
 export const isModdedRoom = (room) => !!room?.content && room.content.vanilla === false;
 
 /**

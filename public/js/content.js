@@ -1,4 +1,4 @@
-// content.js — what this page shows beyond the installation's own art (DESIGN §32 P1a, docs/PLUGINS.md §9): the room's
+// content.js — what this page shows beyond the installation's own art (DESIGN §34 P1a, docs/PLUGINS.md §9): the room's
 // visual set — the cosmetic plugins its host switched on, named by room.state.content.vs — and the player's personal
 // cosmetic plugins (设置 → 外观插件, kept in this browser only: `sp.pref.cosmetics`), laid over the art manifest every
 // screen reads (cosmetics.js `cosmetics`; data.js shows `assets` through them, so `data.get('assets')` is the art the room
@@ -27,7 +27,7 @@
 //     /vs/<vs16>/overlay.json of its catalogue `vs`, checked the same way (side by side) and applied after the room's,
 //     in that order. A plugin this server does not have is skipped and stays switched on here (it shows again when the
 //     server has it).
-//   * The room's content set (DESIGN §32.6, P1c): when room.state.content names a content set with gameplay plugins
+//   * The room's content set (DESIGN §34.6, P1c): when room.state.content names a content set with gameplay plugins
 //     (`vanilla: false`, its own cs), the page downloads /cs/<cs16>/index.json and every data file it lists — a file the
 //     set did not change at its plain /data/<file>?v=<8 hex> URL (cached for good), a patched one at /cs/<cs16>/… — and
 //     checks them: every file's BYTES hash to its entry (shared/sha256.js, before decoding: `res.text()` would drop a

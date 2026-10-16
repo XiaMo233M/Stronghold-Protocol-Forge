@@ -1,8 +1,8 @@
-// ui/pluginPanel.js — the room's 插件 panel (DESIGN §32 P1a; the design study's §7.1) and the list of a server's plugins.
+// ui/pluginPanel.js — the room's 插件 panel (DESIGN §34 P1a; the design study's §7.1) and the list of a server's plugins.
 // Loaded only when one of them opens (the room's tag, ui/pluginTag.js; the title screen's button, screens/title.js), so
 // the title page and the room carry none of it:
 //
-//   * PluginPanel — the cosmetic and (P1c, DESIGN §32.6) content plugins this server has for rooms (the catalogue:
+//   * PluginPanel — the cosmetic and (P1c, DESIGN §34.6) content plugins this server has for rooms (the catalogue:
 //     content.js loadCatalog — fetched when the panel opens, and only on a server that has plugins: content.plugins > 0),
 //     each with its
 //     switch for the host and its state for everybody else (the other players and the spectators read it), its version,
@@ -15,7 +15,7 @@
 //     match stays out of the statistics overview); one made for other game versions cannot be switched on. With gameplay
 //     plugins the panel also shows the room's mode — the official one of the difficulty or a mode a plugin adds
 //     (room.setMode; the host picks, the others read it) — and this page's download and check of the room's content set
-//     (content.js contentSet: its progress, ready, or failed — 「请刷新页面」). Below them (P4, DESIGN §32.8) the
+//     (content.js contentSet: its progress, ready, or failed — 「请刷新页面」). Below them (P4, DESIGN §34.8) the
 //     interface plugins of the server — each player switches them in 设置; the host may mark one 推荐 — and the
 //     room.panel slot.
 //   * InstalledPlugins — the title screen's 「本服务器安装了 N 个插件」 (screens/title.js; §7.4): every unofficial plugin
@@ -131,7 +131,7 @@ export function PluginPanel({ open, room, myId, onClose }) {
     }
   };
   const toggle = (id, on) => send(nextChoice(f.chosen, id, on, offeredIds), id);
-  // the room's mode (room.setMode, DESIGN §32.6)
+  // the room's mode (room.setMode, DESIGN §34.6)
   const pickMode = async (modeId) => {
     if (inFlight.current || !f.editable) return;
     inFlight.current = true;

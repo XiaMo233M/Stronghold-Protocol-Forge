@@ -27,12 +27,12 @@
 // switch notifies the subscribers of every loaded file, so `useData` components re-render. `localeName(zh)` maps a
 // Chinese game-data name to the current language (server messages name operators / items in Chinese).
 //
-// Views (DESIGN §32 P1a): `setView(name, fn)` shows a file through `fn` from then on — `get(name)` returns fn(the file);
+// Views (DESIGN §34 P1a): `setView(name, fn)` shows a file through `fn` from then on — `get(name)` returns fn(the file);
 // `getRaw`, `lookup` and `list` do not — and tells the file's subscribers. public/js/content.js shows the art manifest
 // (`assets`) this way: with the room's cosmetic plugins and the player's own laid over it (public/js/assets.js
 // cosmetics.apply), so every `data.get('assets')` of the interface draws what the room draws.
 //
-// Content sets (DESIGN §32.6 P1c): `setContent({ id, values, overlay })` makes the files of `values` (name → the JSON a
+// Content sets (DESIGN §34.6 P1c): `setContent({ id, values, overlay })` makes the files of `values` (name → the JSON a
 // page checked: public/js/content.js, every byte against the set's /cs/<cs16>/index.json) the store's files — `get`,
 // `lookup`, `list` and every getter read the room's content set — and `overlay(lang)` the source of a language's game
 // texts (the set's own i18n/<lang>.json: a plugin's operators named in that language); `setContent(null)` gives the

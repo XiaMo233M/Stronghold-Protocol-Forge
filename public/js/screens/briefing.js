@@ -29,7 +29,7 @@ export function BriefingScreen() {
   const priv = useStore((s) => s.match.private);
   const myId = useStore((s) => s.me.playerId);
   const solo = useStore((s) => s.room?.mode === 'solo') || String(pub?.modeId || '').includes('single');
-  // gameplay plugins (DESIGN §32.6): the briefing says the match is unofficial
+  // gameplay plugins (DESIGN §34.6): the briefing says the match is unofficial
   const room = useStore((s) => s.room);
   const gd = useGameData();
   const [exit, setExit] = useState(false);

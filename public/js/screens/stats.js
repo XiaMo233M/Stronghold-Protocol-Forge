@@ -121,7 +121,7 @@ function Section({ children, class: cls }) {
 
 /**
  * 「含插件对局」: the aggregates take in the matches with gameplay plugins too (ui/stats.js aggregateStats `modded`;
- * DESIGN §32.6 — off by default: such a match is unofficial). Shown once there is one.
+ * DESIGN §34.6 — off by default: such a match is unofficial). Shown once there is one.
  */
 function ModdedSwitch({ agg }) {
   const on = useStore((s) => s.withModded, Object.is, statsStore);

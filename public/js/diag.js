@@ -19,7 +19,7 @@
 //   diagnosticsText({ state, settings, attachBattle, personal })  the report of this page (this browser, the battle on screen)
 //
 // Report keys are English on purpose: the text is read by developers and searched in issues, whatever the UI language.
-// The second line names the content the page plays (contentLine, DESIGN §32): `vanilla cs=<64 hex>` — the original
+// The second line names the content the page plays (contentLine, DESIGN §34): `vanilla cs=<64 hex>` — the original
 // content of that exact code and data —, with ` cosmetic vs=<64 hex> plugins=…` in a room with cosmetic plugins (the
 // battles are still the original ones: P1a) and ` personal=…` for the player's own cosmetic plugins; or, in a room with
 // gameplay plugins (P1c), `MODDED cs=… plugins=…`.
@@ -256,7 +256,7 @@ const isCs = (v) => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
 const PLUGINS_SHOWN = 32;
 
 /**
- * What the report says the page plays (DESIGN §32): the room's content set (room.state.content), else the server's
+ * What the report says the page plays (DESIGN §34): the room's content set (room.state.content), else the server's
  * vanilla content (welcome.content, the store's `content`) — `vanilla cs=<64 hex>`; in a room whose plugins are all
  * cosmetic (its `cs` still the vanilla one) `vanilla cs=<64 hex> cosmetic vs=<64 hex> plugins=<id>@<version>(<first 8
  * digits of its hash>),…`; `MODDED cs=<64 hex> plugins=…` (a room with gameplay plugins — its own content set, DESIGN

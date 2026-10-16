@@ -18,7 +18,7 @@ import { sanitizeVoiceLangByChar, voiceLangFor as voiceLangForSettings } from '.
 export { VOICE_LANGS, DEFAULT_VOICE_LANG };
 
 /**
- * 上游 0.3.0 加的那两张**派生表**（DESIGN §32 的多语种配音）：
+ * 上游 0.3.0 加的那两张**派生表**（DESIGN §34 的多语种配音）：
  *  · `VOICE_TREES`：非中文各配音在清单里的树名（中文那一棵是 `audio.voice`）；
  *  · `VOICE_PICKS`：**逐干员覆盖**允许取的值 —— 四个全局语种，再加 `'native'`（该干员自己的母语配音；它不是全局语种）。
  * ⚠️ 语言表本身仍然只有 `shared/constants.js` 那一份（见文件头）：这里只加"树名"与"可取值"两张派生表，不另存一份词表。

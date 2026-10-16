@@ -281,7 +281,7 @@ export async function createFieldView(host, options = {}) {
   let mountainsUrl = null;
   /**
    * The backdrop's mountain silhouette (optional art): asked again whenever the manifest names another one — it arrived
-   * late, or a cosmetic plugin changed it (DESIGN §32 P1a); none named any more: none drawn.
+   * late, or a cosmetic plugin changed it (DESIGN §34 P1a); none named any more: none drawn.
    */
   function loadMountains() {
     const url = assets.ui ? assets.ui('entry/bg_mountains_tiled') : null;
@@ -2017,7 +2017,7 @@ export async function createFieldView(host, options = {}) {
   // ---- late assets, hidden tabs (public issue #8 item 5: operators drawn as image-less placeholders) ----------------------
   // The asset manifest (or the local-client one) arrived after views were built — a reload whose manifest fetch was slow or
   // failed — or changed under them — a room's cosmetic plugins, a personal one switched during a match, a plugin file that
-  // fell back (DESIGN §32 P1a) — (assets.js onChange): every view re-resolves what it draws (UnitView.retryAssets: what it
+  // fell back (DESIGN §34 P1a) — (assets.js onChange): every view re-resolves what it draws (UnitView.retryAssets: what it
   // could not draw, and a picture or model the manifest no longer names), the backdrop and the shadow follow the manifest
   // and the prep pieces re-read their item icons. The tab shown again: a manifest still missing is asked for again and
   // views without a model load it again at once (their bounded retries never run while hidden: no frames).

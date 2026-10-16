@@ -14,7 +14,7 @@
 // 导入素材包 (ui/assetImport.js — the player's own folder or zip, no server download) side by side, so an import never
 // opens the download (docs/history/0.3.0.md §32.14.39).
 //
-// Plugins (DESIGN §32 P1a, the design study's §7.4): when the server has unofficial plugins (content.plugins of /healthz or
+// Plugins (DESIGN §34 P1a, the design study's §7.4): when the server has unofficial plugins (content.plugins of /healthz or
 // welcome — content.js installedCount), the footer says 「本服务器安装了 N 个插件」 — a button that loads the list
 // (ui/pluginPanel.js InstalledPlugins, which fetches the catalogue when it opens); nothing on a server without any, which
 // the page never asks for its catalogue — and the title page loads none of the panel's code.

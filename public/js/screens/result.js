@@ -120,7 +120,7 @@ export function ResultScreen() {
  * The settlement view of one m.result payload — the live screen above, and the stats page's re-view of a stored match
  * (screens/stats.js, which hands it the payload recordToResult rebuilt; `quiet`: no settlement jingle).
  * `content`: the room's content (room.state.content, or a stats record's) — gameplay plugins mark the result unofficial
- * (DESIGN §32.6).
+ * (DESIGN §34.6).
  * @param {{ res: any, pub?: any, myId?: string|null, backLabel: string, onBack: () => void, quiet?: boolean, content?: any }} props
  */
 export function ResultView({ res, pub = null, myId = null, backLabel, onBack, quiet = false, content = null }) {

@@ -1,4 +1,4 @@
-// ui/pluginFrame.js — the host side of an interface plugin (DESIGN §32.8, shared/plugins/ui.js).
+// ui/pluginFrame.js — the host side of an interface plugin (DESIGN §34.8, shared/plugins/ui.js).
 // Imported for its effect from screens/game.js (the match already loads the battle runner). It does not import the
 // art compositor, the plugin panel or the asset store. With no interface plugin switched on, and on a server that
 // reports none, it does not ask for the catalogue.
@@ -381,7 +381,7 @@ function onWindowMessage(ev) {
   // The child's script runs before the parent's load event, and postMessage is queued before that load.
   // Applying the message on the next turn lets a navigation that already queued its load destroy the frame first,
   // so ready on the new document does not pull state. A task that was queued even earlier can still post once
-  // (DESIGN §32.8 [ASSUMED]).
+  // (DESIGN §34.8 [ASSUMED]).
   setTimeout(() => {
     if (frames.get(rec.id) !== rec || rec.closed) return;
     if (frameLoadDecision(rec.loads) === 'destroy') { stopForLeaving(rec.id); return; }

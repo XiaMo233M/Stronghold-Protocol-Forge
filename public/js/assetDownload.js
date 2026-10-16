@@ -9,7 +9,7 @@ import { listImportedPaths } from './assetCache.js';
  * The served 0.3.0 views are walked as they are: hashed `/assets/~…` and `/fonts/~…` URLs, the extra dub banks
  * (`voiceEn` / `voiceKr` / `voiceNative`), statistics-page art, and local groups such as the 射击台 mesh. A cosmetic
  * plugin's own files are `/p/<id>/<hash8>/…` and are not in these manifests, so they are not queued here. The official
- * battle effects (DESIGN §33) come in their own manifest, /data/local-fx.json, read the same way when the host has them.
+ * battle effects (DESIGN §35) come in their own manifest, /data/local-fx.json, read the same way when the host has them.
  */
 export function collectAssetUrls(...manifests) {
   const urls = new Set();
@@ -98,7 +98,7 @@ export function createAssetDownload({ fetch: doFetch = (...args) => globalThis.f
         // Sequential manifest reads keep cancellation simple and never leave a rejected sibling promise.
         const assets = await request('/data/assets.json', true);
         const local = await request('/data/local-assets.json', true, true);
-        // the official battle effects' files (DESIGN §33): optional, like the local manifest
+        // the official battle effects' files (DESIGN §35): optional, like the local manifest
         const fx = await request('/data/local-fx.json', true, true);
         if (!assets || typeof assets !== 'object' || Array.isArray(assets)
           || (local !== null && (!local || typeof local !== 'object' || !local.groups))

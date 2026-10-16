@@ -1,4 +1,4 @@
-// ui/uiPlugins.js — this browser's interface plugins (DESIGN §32.8). Kept in localStorage, never sent:
+// ui/uiPlugins.js — this browser's interface plugins (DESIGN §34.8). Kept in localStorage, never sent:
 //   sp.pref.ui-plugins     the ids the player turned on (设置 → 界面插件)
 //   sp.pref.ui-recommend   the ids the host marked 推荐 on this browser
 // A recommendation does not turn a plugin on. Another player's page cannot see this browser's mark until the protocol

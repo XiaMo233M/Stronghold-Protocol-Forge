@@ -1,4 +1,4 @@
-// cosmetics.js — the cosmetic layers of the art a page draws with (DESIGN §32 P1a, docs/PLUGINS.md §9): the room's
+// cosmetics.js — the cosmetic layers of the art a page draws with (DESIGN §34 P1a, docs/PLUGINS.md §9): the room's
 // visual set and the player's personal cosmetic plugins, laid over the installation's art manifest (/data/assets.json as
 // the page loaded it). public/js/content.js sets them; data.js's view of `assets` (every screen) and the asset store of
 // the battlefield (public/js/assets.js `createAssets({ cosmetics })`) read them; audio.js reports the sounds that fail.

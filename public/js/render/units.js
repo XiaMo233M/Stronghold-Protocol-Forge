@@ -12,7 +12,7 @@
 // after a reload whose manifest was slow or failed, every operator stayed the image-less placeholder for good) — and
 // whenever the manifest changes under a view that is already drawn (a room's cosmetic plugins arriving after the board
 // was built — a reconnect, a spectator joining a match —, a personal plugin switched during a match, a plugin file that
-// failed and fell back: DESIGN §32 P1a): a picture or model other than the one the manifest names now is loaded again
+// failed and fell back: DESIGN §34 P1a): a picture or model other than the one the manifest names now is loaded again
 // (the new model replaces the old in place, like a Front ⇄ Back swap); a load begun while the tab was hidden and still
 // in flight SPINE_STUCK_MS after it is shown again is started again (assets.js spine.restart: GitHub #68, such a load
 // may never settle — its view stayed the placeholder). Every bar is a tinted Texture.WHITE sprite, so HUDs batch into
@@ -866,7 +866,7 @@ export class UnitView {
   }
 
   /**
-   * Re-resolve what this view draws (public issue #8 item 5; DESIGN §32 P1a): the picture when it has none (no avatar URL —
+   * Re-resolve what this view draws (public issue #8 item 5; DESIGN §34 P1a): the picture when it has none (no avatar URL —
    * the asset manifest arrived after the view was built — or the image failed) or when the manifest names another one now,
    * and, at once, the Spine model when none is shown and none is loading (no manifest entry then, or a load that failed /
    * timed out) or when the manifest names another model than the one shown or loading — a room's cosmetic plugins that

@@ -1,4 +1,4 @@
-// C4 simulation hosts (DESIGN §32.11). The clock belongs to runner.js. Only the vanilla host has a Battle on the page.
+// C4 simulation hosts (DESIGN §34.11). The clock belongs to runner.js. Only the vanilla host has a Battle on the page.
 import { loadBrowserSim } from './simLoader.js';
 import { unitStatsEntry } from '../../../shared/protocol.js';
 

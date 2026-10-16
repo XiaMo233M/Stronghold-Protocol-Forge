@@ -292,7 +292,7 @@ function installPrefSync({ net, timers, target, notify, key, stateKey, msgType, 
   });
   // a match leaving INFO_CHECK locks the loadout; a new match (the room back in LOBBY / a new INFO_CHECK) accepts it again
   const offRoom = net.on('room.state', (msg) => { if (msg && !msg.inMatch && target.get()[stateKey] === 'locked') { lastSent = null; schedule(); } });
-  // the room's content set arrived or went (DESIGN §32.6): sent again, checked against the data the room plays now
+  // the room's content set arrived or went (DESIGN §34.6): sent again, checked against the data the room plays now
   let contentKey = content ? `${content.get().cs}|${content.get().status}` : '';
   const offContent = content ? content.subscribe((c) => {
     const k = `${c.cs}|${c.status}`;
@@ -371,7 +371,7 @@ export function installOwnershipSync({ net, timers, target = loadoutStore, notif
  *   notify?: (text: string) => void }} deps
  */
 export function installDiySync({ net, timers, target = loadoutStore, notify, content = appContentSet } = {}) {
-  // the picker's list: welcome's, and the operators the room's content set adds while it plays one (DESIGN §32.6)
+  // the picker's list: welcome's, and the operators the room's content set adds while it plays one (DESIGN §34.6)
   let welcomeList = null;
   let joined = { base: null, extra: null, list: null };
   const pickList = () => {

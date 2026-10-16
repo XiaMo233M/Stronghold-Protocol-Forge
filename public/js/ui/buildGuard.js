@@ -17,7 +17,7 @@
 // only after two checks in a row report the SAME one, so a deploy that is still copying files cannot ping-pong a page.
 //
 // The same `/healthz` body carries what else a page reads of the server before it says hello: `onHealth(body)` is told
-// every body a check reads (main.js: how many plugins the server has, for the title screen — DESIGN §32 P1a).
+// every body a check reads (main.js: how many plugins the server has, for the title screen — DESIGN §34 P1a).
 //
 // Kept dependency-free and injectable (fetch / reload / inMatch / timers) so test/ui/buildGuard.test.js can drive it.
 

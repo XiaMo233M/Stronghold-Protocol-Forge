@@ -26,11 +26,11 @@
 // and a write the browser refuses shrinks the list further instead of failing. Teammates' display names are part of
 // the newest records and of an export file: they stay on this device unless the player exports them.
 //
-// The art (DESIGN §32 P1a): every record names the room's visual set `vs` — the cosmetic plugins its host switched on
+// The art (DESIGN §34 P1a): every record names the room's visual set `vs` — the cosmetic plugins its host switched on
 // (room.state.content.vs; null without any). The overview does not filter on it: a match with only cosmetic plugins
 // counts as the original game (the owner's decision of 2026-10-13: its gameplay and numbers are unchanged). A player's
 // personal plugins never matter and are not recorded.
-// Gameplay plugins (DESIGN §32.6, P1c): every record names the room's content set when it played one — `content`
+// Gameplay plugins (DESIGN §34.6, P1c): every record names the room's content set when it played one — `content`
 // `{ cs, plugins: ['<id>@<version>' …] }` (room.state.content with `vanilla: false`), null for the original game
 // (cosmetic plugins only included; a record from before 0.3.0: null — format v2, MIGRATIONS[1]). Such a match is
 // unofficial: the aggregates leave it out unless asked to take it in (aggregateStats `modded` — the overview's
@@ -246,7 +246,7 @@ export function normalizeRecord(raw) {
 /**
  * The MIGRATIONS chain: `MIGRATIONS[v]` upgrades a v-envelope to v+1, for v = STATS_VERSION and down — every stored /
  * imported envelope walks the whole chain.
- *   1 → 2 (0.3.0, DESIGN §32.6): records name the room's content set (`content`); a record from before played the
+ *   1 → 2 (0.3.0, DESIGN §34.6): records name the room's content set (`content`); a record from before played the
  *         original game (null). The same step covers PR #509's fields (§32.14.16): a v1 row has no `creditedKills`
  *         (the actual player kills stay unknown rather than guessed) and a compacted v1 row lost its bonds
  *         (`usedBondIds` stays absent) — nothing to rewrite, the version keeps an older build from stripping them.

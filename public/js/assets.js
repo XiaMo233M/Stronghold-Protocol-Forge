@@ -23,7 +23,7 @@
 // by its view (`spine.restart(entry)`, RefLru.restart); such a fresh load — and any load after a failure — drops PIXI's
 // still-pending requests of that skeleton first (forgetPendingSpine), so it does not join them.
 //
-// Cosmetic plugins (DESIGN §32 P1a, docs/PLUGINS.md §9): the manifest the helpers read is the installation's with the
+// Cosmetic plugins (DESIGN §34 P1a, docs/PLUGINS.md §9): the manifest the helpers read is the installation's with the
 // cosmetic layers laid over it — `cosmetics` (public/js/cosmetics.js createCosmeticLayers; public/js/content.js sets
 // them): the room's visual set, then the player's personal plugins, composed on the page's own manifest (every plugin
 // URL built from a set's checked composition, every reference copied out of that manifest: shared/plugins/visual.js). A
@@ -53,7 +53,7 @@
 // 包声明里的**行为增量**（DESIGN §28.29）：形态（`assets.modForms` → `shared/packForms.js`）与静态相位
 // （`assets.silentPhases` → `render/fx/kinds.js`）。两者都随这份清单到达，所以装包声明挂在这里（见 readyState）。
 import { installPackForms } from '../../shared/packForms.js';
-// 装包声明的**视觉增量**（DESIGN §32 P1a）：`cosmetics` 这一份是页面单例，本文件的 store 只把它当 opts 收下
+// 装包声明的**视觉增量**（DESIGN §34 P1a）：`cosmetics` 这一份是页面单例，本文件的 store 只把它当 opts 收下
 // （createAssets({ cosmetics })）；`createCosmeticLayers` / `EMPTY_MANIFEST` 供复用者与空清单兜底。
 import { cosmetics, createCosmeticLayers, EMPTY_MANIFEST } from './cosmetics.js';
 import { installSilentPhases } from './render/fx/kinds.js';
@@ -262,7 +262,7 @@ export function unitSfxUrl(m, id, kind, skillIndex) {
   return str(u[kind]);
 }
 
-// ---- cosmetic plugins (DESIGN §32 P1a) ---------------------------------------------------------------------------
+// ---- cosmetic plugins (DESIGN §34 P1a) ---------------------------------------------------------------------------
 
 // The layers live in public/js/cosmetics.js (small: the title page loads it, not this store); re-exported for the code
 // and the tests that read them from here.
@@ -886,7 +886,7 @@ export function createAssets(options) {
   });
 
   /**
-   * A file of a cosmetic layer failed to load (DESIGN §32 P1a): its entry falls back to the art beneath it from now on
+   * A file of a cosmetic layer failed to load (DESIGN §34 P1a): its entry falls back to the art beneath it from now on
    * (createCosmeticLayers fail — the listeners re-resolve their art). Whether it was a layer's file.
    */
   const failed = (u) => { try { return !!layers?.fail?.(u); } catch { return false; } };

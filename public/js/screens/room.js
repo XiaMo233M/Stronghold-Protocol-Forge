@@ -23,7 +23,7 @@ import { enabled as federationEnabled, currentNode } from '../federation.js';
 // Spectator seats (community report #26, a remake feature): a co-op room with spectators shows the 观战席 strip under
 // the seats — names, offline marks, the host's ✕ (room.removeSpectator) — and a spectator's own view swaps the ready
 // button for 观战中 and offers 入座 (room.join of the room) while a player seat is free.
-// Plugins (DESIGN §32 P1a): the tag under the title — 「原版」 or 「插件 ×N」 — opens the 插件 panel (ui/pluginPanel.js:
+// Plugins (DESIGN §34 P1a): the tag under the title — 「原版」 or 「插件 ×N」 — opens the 插件 panel (ui/pluginPanel.js:
 // the host switches the room's plugins, everybody else reads them). With gameplay plugins (§32.6: a content set of its
 // own — the tag reads 「非官方」 too) every seat shows whether its page has loaded and checked the room's content
 // (seats[].content: 载入中 / 就绪 / 校验失败), 准备就绪 and 开始模拟 wait for it (the server refuses them before:
@@ -119,7 +119,7 @@ export function roomFacts(room, myId) {
   const isReady = (s) => !!s.ready || s.playerId === room?.hostId;
   const readyHumans = humans.filter(isReady).length;
   const othersReady = others.every((s) => s.ready && s.connected !== false);
-  // a room with gameplay plugins (DESIGN §32.6): every player's page has loaded and checked its content (the host's too)
+  // a room with gameplay plugins (DESIGN §34.6): every player's page has loaded and checked its content (the host's too)
   const modded = isModdedRoom(room);
   const contentReady = !modded || humans.every((s) => s.content === 'ready');
   return {

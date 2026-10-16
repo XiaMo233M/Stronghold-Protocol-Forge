@@ -46,7 +46,7 @@
 // the bond strip of the player on screen — the own one, or a watched teammate's — shows them live (ui/watchBonds.js).
 //
 // The vanilla sim (≈ 0.2–1 ms per tick) runs on the main thread: one battle at a time is stepped for display (plus an
-// authoritative one if it is not the one on screen). Gameplay sets use WorkerSimHost (DESIGN §32.11).
+// authoritative one if it is not the one on screen). Gameplay sets use WorkerSimHost (DESIGN §34.11).
 // stats() exposes the measured cost (Worker cost includes the message round trip).
 //
 //   import { battleRunner } from './battle/runner.js'     (browser singleton wired to net.js + store.js; null in Node)
@@ -269,12 +269,12 @@ const SIM_LOGGER = Object.freeze({
  *   `dataBaseFor`（W-D, DESIGN §28.16）: which data face a spec must be simulated on — `/data/` unless the room that
  *   started this battle declared its own set (`public/js/mods/align.js roomDataBase`). The sim is loaded and cached PER
  *   face, so a page that plays in a subset room and later in a plain one never mixes the two.
- *   `contentFor` / `simContent` / `loadingContent` / `vanillaCs`（DESIGN §32.6）: the room's content set the page holds or
+ *   `contentFor` / `simContent` / `loadingContent` / `vanillaCs`（DESIGN §34.6）: the room's content set the page holds or
  *   is downloading, and the server's original content's cs. Injectable so a Node test drives a content set without a
  *   page; public/js/content.js supplies the browser ones (and `store.content.vanilla`, written by main.js).
  *   `combatMetrics` true/false pins the 作战统计 meter for a test. Omit it and call setCombatMetrics (the settings
  *   screen does; the default is off). A Worker host never attaches the meter.
- *   `createHost`（DESIGN §32.11）: the simulation host to build instead of the two this file picks (public/js/battle/simHost.js).
+ *   `createHost`（DESIGN §34.11）: the simulation host to build instead of the two this file picks (public/js/battle/simHost.js).
  */
 export function createBattleRunner(deps) {
   const net = deps.net;
@@ -296,7 +296,7 @@ export function createBattleRunner(deps) {
     ? (dataBase, content) => (content ? browserSim(content) : loadBrowserSim({ dataBase }))
     : (content) => (content ? browserSim(content) : loadBrowserSim()));
   const logger = deps.logger || SIM_LOGGER;
-  // 内容集（DESIGN §32.6）：本页持有的房间内容集（content.js contentFor / simContent）与服务器那一份原始内容的 cs
+  // 内容集（DESIGN §34.6）：本页持有的房间内容集（content.js contentFor / simContent）与服务器那一份原始内容的 cs
   const contentFor = deps.contentFor || appContentFor;
   const heldContent = deps.simContent || appSimContent;
   /** the content set the page is downloading now (content.js contentSet: its cs while loading), else null */
@@ -346,7 +346,7 @@ export function createBattleRunner(deps) {
   /** @type {Map<string, any>} battleId → entry of a b.start still being prepared (prepare(); `battle` null until built) */
   const pending = new Map();
   let cur = null;              // entry on screen
-  /** data face（W-D, `/data/` 或房间自己那一份）或内容集的 `cs:`（DESIGN §32.6）→ the sim loaded for it（两种 key 分开缓存，
+  /** data face（W-D, `/data/` 或房间自己那一份）或内容集的 `cs:`（DESIGN §34.6）→ the sim loaded for it（两种 key 分开缓存，
    *  一条来自我们的数据面、一条来自上游的内容集；一页可能都遇到） */
   const sims = new Map();
   let startSeq = 0;            // counts the b.starts: the latest one is the view asked for
@@ -377,7 +377,7 @@ export function createBattleRunner(deps) {
 
   /**
    * Whether `cs` (a b.start spec's content) is a content this page can be the authority of. A spec with no `cs` is always
-   * accepted — that is every spec of a server with no content identity, exactly as before (DESIGN §32). The server names
+   * accepted — that is every spec of a server with no content identity, exactly as before (DESIGN §34). The server names
    * the content in every spec once it has one (`welcome.content.vanilla`, Lobby.welcomeInfo), and the page keeps that
    * identity in `store.content` — `main.js` writes it from `welcome`（本批合入）。
    *
@@ -400,7 +400,7 @@ export function createBattleRunner(deps) {
 
   /**
    * The sim a spec must be simulated on: **our data face** (W-D, DESIGN §28.16 — `dataBaseFor`: `/data/` or the room's own
-   * `/room-data/<digest>/`) unless the spec names a content set this page holds or is downloading (DESIGN §32.6) — then
+   * `/room-data/<digest>/`) unless the spec names a content set this page holds or is downloading (DESIGN §34.6) — then
    * that checked set's own data (content.js contentFor). One sim per face / per content set, cached: a page may meet both.
    *
    * ⚠️ 合入缝合处：上游把这一个函数整体换成「只按内容集」。本树保留 W-D 的数据面作为**没有内容集时**的那条来源 ——
@@ -707,7 +707,7 @@ export function createBattleRunner(deps) {
   function deliver(e) {
     if (!net || !e.result || e.delivery === 'pending') return;
     e.delivery = 'pending';
-    // a room's content set names itself in the result (DESIGN §32.6: the server refuses one without it) — the set the
+    // a room's content set names itself in the result (DESIGN §34.6: the server refuses one without it) — the set the
     // battle was actually simulated on (its simulation's `cs`: loadBrowserSim's), never only what the spec claims; the
     // original content's result is what it always was
     const cs = e.sim && typeof e.sim.cs === 'string' && e.sim.cs ? e.sim.cs : null;
@@ -951,7 +951,7 @@ export function createBattleRunner(deps) {
       if (!csAccepted(e.spec.cs)) e.authoritative = false;
       let battle;
       try {
-        // 宿主（DESIGN §32.11）：注入面给的 createHost；否则本页原始内容跑 InPageSimHost、房间的内容集跑 Worker 宿主
+        // 宿主（DESIGN §34.11）：注入面给的 createHost；否则本页原始内容跑 InPageSimHost、房间的内容集跑 Worker 宿主
         e.host = deps.createHost ? deps.createHost(sim, (err) => failWorker(e, err))
           : sim.remote ? new WorkerSimHost({ onFailure: (err) => failWorker(e, err), timeoutMs: deps.workerTimeoutMs })
             : new InPageSimHost();

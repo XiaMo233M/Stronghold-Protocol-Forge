@@ -35,7 +35,7 @@
 // Language (ui/lang.js, docs/I18N.md): chosen before the first render (initLang); App re-renders on a switch (useLang).
 // Server texts are translated on arrival: m.toast / m.ticker frames (msgid + params, or the text as a msgid; a
 // config.broadcasts line from its id + args), error codes (ui/toasts.js describeError) and room.closed reasons.
-// Cosmetic plugins (DESIGN §32 P1a): installContent (content.js) lays the room's visual set and the player's personal
+// Cosmetic plugins (DESIGN §34 P1a): installContent (content.js) lays the room's visual set and the player's personal
 // plugins over the art manifest every screen reads. Gameplay plugins (§32.6): installContentSet (content.js) downloads and
 // checks a room's content set and makes it the data every screen and the battle runner read.
 
@@ -261,7 +261,7 @@ function backToLobby() {
   store.patch('ui', { restoring: false });
 }
 
-/** The unofficial plugins a server counts in welcome / /healthz `content.plugins` (absent: none — DESIGN §32 P1a). */
+/** The unofficial plugins a server counts in welcome / /healthz `content.plugins` (absent: none — DESIGN §34 P1a). */
 const pluginCount = (content) => (content && Number.isInteger(content.plugins) && content.plugins > 0 ? content.plugins : 0);
 
 function onWelcome(msg) {
@@ -283,7 +283,7 @@ function onWelcome(msg) {
   identity.saveName(name);
   store.set({
     me: { playerId: msg.playerId ?? null, name, token: typeof msg.token === 'string' ? msg.token : null },
-    // the server's content identity (DESIGN §32): the diagnostics name it (diag.js contentLine)
+    // the server's content identity (DESIGN §34): the diagnostics name it (diag.js contentLine)
     content: msg.content && typeof msg.content.vanilla === 'string' ? { vanilla: msg.content.vanilla } : null,
     // how many unofficial plugins it has (P1a — absent: none; content.js fetches the catalogue only when there are some)
     installedPlugins: pluginCount(msg.content),
@@ -482,7 +482,7 @@ function wireNet() {
  * data store shares each file's promise).
  */
 function warmGameData() {
-  // a room with gameplay plugins: content.js downloads its content set's files instead (DESIGN §32.6)
+  // a room with gameplay plugins: content.js downloads its content set's files instead (DESIGN §34.6)
   const go = () => { if (store.get().room?.content?.vanilla === false) return; data.loadAll(GAME_FILES).catch(() => {}); };
   if (typeof globalThis.requestIdleCallback === 'function') globalThis.requestIdleCallback(go, { timeout: 2500 });
   else setTimeout(go, 600);
@@ -585,7 +585,7 @@ async function boot() {
   installDiySync({ net });
   // the room's cosmetic plugins and the player's own over the art manifest (content.js; nothing is fetched without them)
   installContent({ toast });
-  // a room with gameplay plugins: its content set downloaded, checked and shown (content.js — DESIGN §32.6)
+  // a room with gameplay plugins: its content set downloaded, checked and shown (content.js — DESIGN §34.6)
   installContentSet({ toast });
   // A bot prep's layout rehearsal the server offers this host's browser (DESIGN §14, SP_BOT_REHEARSAL=host on the
   // server): a same-origin module Worker simulates the candidates off the main thread and answers with its pick; a
@@ -599,7 +599,7 @@ async function boot() {
     getManifest: () => data.get('assets'), subscribe: store.subscribe, getState: store.get, selectRoute,
     settings: settingsStore.get(),
     voiceLangOf: (charId) => voiceLangFor(settingsStore.get(), charId),
-    // a cosmetic plugin's sound that will not load falls back like its art (content.js, DESIGN §32 P1a)
+    // a cosmetic plugin's sound that will not load falls back like its art (content.js, DESIGN §34 P1a)
     onFailed: (url) => cosmetics.fail(url),
   });
   // …and the music follows the art: the screen's track again when the cosmetic layers change its URLs

@@ -400,7 +400,7 @@ export function planFromManifests(assets, local) {
 }
 
 /**
- * The local groups of /data/local-assets.json and /data/local-fx.json (the official battle effects, DESIGN §33) as one
+ * The local groups of /data/local-assets.json and /data/local-fx.json (the official battle effects, DESIGN §35) as one
  * `{ groups }` manifest: their group names never overlap (fx groups are `fx…`); null when the host has neither.
  * @param {object | null} local
  * @param {object | null} fx

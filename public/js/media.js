@@ -14,7 +14,7 @@
 // A served manifest's content-hashed URL keeps its segment (shared/assetPaths.js; host bandwidth, layer 1):
 //
 //     /assets/~0123456789abcdef/audio/bgm/act1.mp3   →   /media/~0123456789abcdef/bgm/act1
-// A cosmetic plugin's audio (DESIGN §32 P1a, docs/PLUGINS.md §9) is served without its extension at its own URL — the
+// A cosmetic plugin's audio (DESIGN §34 P1a, docs/PLUGINS.md §9) is served without its extension at its own URL — the
 // same plugin route, its /p/<id>/<hash8>/ prefix kept (server/http/static.js):
 //
 //     /p/my-skin/0123abcd/voice/s1.mp3   →   /p/my-skin/0123abcd/voice/s1
