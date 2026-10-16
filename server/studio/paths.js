@@ -1,4 +1,4 @@
-// server/studio/paths.js — the plugin studio's URLs (DESIGN §32.9), on their own so that the static file server
+// server/studio/paths.js — the plugin studio's URLs (DESIGN §34.9), on their own so that the static file server
 // (server/http/static.js) can refuse them without loading the studio.
 
 /** The page. */

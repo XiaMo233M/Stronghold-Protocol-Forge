@@ -1,4 +1,4 @@
-// server/studio/index.js — the plugin studio 插件工作台 (DESIGN §32.9, docs/PLUGINS.md §15; the 0.3.0 plan's interface C5):
+// server/studio/index.js — the plugin studio 插件工作台 (DESIGN §34.9, docs/PLUGINS.md §15; the 0.3.0 plan's interface C5):
 // a page in the browser where someone who does not write code makes, previews and packs a cosmetic plugin, and an API
 // that experienced authors and AI agents can use the same way. Only for this machine and the local network
 // (server/studio/gate.js: a request from anywhere else gets the 404 of a page that does not exist); every file it touches

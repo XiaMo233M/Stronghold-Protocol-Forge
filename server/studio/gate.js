@@ -1,4 +1,4 @@
-// server/studio/gate.js — who may use the studio (DESIGN §32.9, docs/PLUGINS.md §15): /studio/ and /studio/api/* answer a
+// server/studio/gate.js — who may use the studio (DESIGN §34.9, docs/PLUGINS.md §15): /studio/ and /studio/api/* answer a
 // request from this machine or the local network only; any other gets the same 404 as a page that does not exist.
 //
 //   1. the client is this machine or the local network (isLocalIp, server/net.js): the socket peer AND every address any

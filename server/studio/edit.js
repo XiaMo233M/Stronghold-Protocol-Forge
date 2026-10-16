@@ -1,4 +1,4 @@
-// server/studio/edit.js — what the studio changes in a plugin (DESIGN §32.9, docs/PLUGINS.md §15): plugin.json and its asset
+// server/studio/edit.js — what the studio changes in a plugin (DESIGN §34.9, docs/PLUGINS.md §15): plugin.json and its asset
 // overlay edited as data, never as text a person has to get right — the basic fields (name, description, version,
 // authors, license, credits, homepage, scope), a slot's value (a file the author dropped, a reference to the
 // installation's art, nothing), and the one-click fixes of the error catalogue (shared/plugins/errors.js `autofix`).

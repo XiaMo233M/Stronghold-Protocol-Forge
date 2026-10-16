@@ -1,4 +1,4 @@
-// server/studio/key.js — the studio's key (DESIGN §32.9, docs/PLUGINS.md §15): every change through the studio's API
+// server/studio/key.js — the studio's key (DESIGN §34.9, docs/PLUGINS.md §15): every change through the studio's API
 // carries it (the header X-SP-Studio), beside the address and Host rules of gate.js. An address cannot tell this machine
 // from a raw TCP tunnel on it (frp tcp, ssh -R …: a visitor's bytes handed over from this machine, with any Host the
 // visitor writes); the key can — only someone who sees the server's window or its files has it. The server prints the

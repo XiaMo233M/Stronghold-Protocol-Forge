@@ -1,4 +1,4 @@
-// server/studio/preview.js — the studio's temporary composition of a plugin as it is now (DESIGN §32.9, docs/PLUGINS.md
+// server/studio/preview.js — the studio's temporary composition of a plugin as it is now (DESIGN §34.9, docs/PLUGINS.md
 // §15; GET /studio/api/plugins/<id>/preview): what the plugin's overlay writes, ready to be laid over the page's own art
 // manifest — also while the plugin still has problems (the registry keeps such a plugin out; the studio shows what it can)
 // and before it is packed (a Spine model's clip data is read from the skeleton itself when the lock lacks it or is stale:

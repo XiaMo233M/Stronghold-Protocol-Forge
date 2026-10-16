@@ -1,4 +1,4 @@
-// server/studio/templates/index.js — the templates a new plugin starts from (DESIGN §32.9, docs/PLUGINS.md §15): the
+// server/studio/templates/index.js — the templates a new plugin starts from (DESIGN §34.9, docs/PLUGINS.md §15): the
 // studio's 新建插件 (POST /studio/api/plugins) and `node tools/plugin.mjs new <template> <id>` read this list. A template
 // is one module: adding one (the data, DSL, script and interface templates of a later step) is adding a file here and
 // its line in TEMPLATES — the studio's page then offers it, with an editor module of its own beside the others

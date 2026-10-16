@@ -1,4 +1,4 @@
-// server/studio/files.js — the studio's file system (DESIGN §32.9, docs/PLUGINS.md §15): every read and write the studio's
+// server/studio/files.js — the studio's file system (DESIGN §34.9, docs/PLUGINS.md §15): every read and write the studio's
 // API makes stays inside one plugin folder, plugins/<id>/.
 //
 //   * the id is a plugin id (shared/plugins/manifest.js isPluginId: lower case, digits, '-'; never '_' templates, never

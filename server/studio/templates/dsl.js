@@ -3,7 +3,7 @@ import { buildOperator } from './operator.js';
 import { dslExample } from '../dslExamples.js';
 // server/studio/templates/dsl.js — the template 「数据插件里的 DSL」 (server/studio/templates/index.js): a content plugin
 // with one operator whose kit is a DSL spec, and one prep spec. No target: the ids are the plugin's own namespace.
-// [ASSUMED] The example operator is a passive +50% attack, and the prep file sets round-1 income to 15 (DESIGN §32.7).
+// [ASSUMED] The example operator is a passive +50% attack, and the prep file sets round-1 income to 15 (DESIGN §34.7).
 
 /** JSON the studio and the tool write (two spaces, a final newline). @param {unknown} value */
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;

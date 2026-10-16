@@ -1,4 +1,4 @@
-// server/studio/watch.js — hot reload of plugins (DESIGN §32.9, docs/PLUGINS.md §15; the design study's §8.3): while the
+// server/studio/watch.js — hot reload of plugins (DESIGN §34.9, docs/PLUGINS.md §15; the design study's §8.3): while the
 // studio is in use, a change in plugins/ (the studio's own writes, or an author saving from Spine, an image editor, a
 // text editor) is seen within a moment: fs.watch over the folder (recursive), the events of DEBOUNCE_MS gathered into one,
 // then the registry reads the folders again (registry.rescan — its listeners follow: the visual sets look at the sets

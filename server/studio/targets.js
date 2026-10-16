@@ -1,4 +1,4 @@
-// server/studio/targets.js — what a cosmetic plugin can change, found by its official name (DESIGN §32.9, docs/PLUGINS.md
+// server/studio/targets.js — what a cosmetic plugin can change, found by its official name (DESIGN §34.9, docs/PLUGINS.md
 // §15): the studio's target picker (GET /studio/api/targets) and `node tools/plugin.mjs new … --target <名字>` search one
 // index built from this installation's game data and art manifest, so an author types 德克萨斯 and never an internal id.
 //
