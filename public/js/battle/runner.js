@@ -80,6 +80,9 @@ import { unitStatsEntry, fxForm } from '../../../shared/protocol.js';
 import { spectateEffects } from './observe.js';
 import { recordError, setBattleSource } from '../diag.js';
 import { roomDataBase } from '../mods/align.js';
+import { loadBrowserSim } from './simLoader.js';
+import { simContent as appSimContent, contentSet as appContentSet } from '../content.js';
+import { t } from '../../../shared/i18n.js';
 import { currentModSet } from '../roomMods.js';
 
 const TICK = 1 / 30;
@@ -279,6 +282,15 @@ export function createBattleRunner(deps) {
 
   /** @type {Map<string, any>} battleId → entry */
   const entries = new Map();
+  /** Compact combat snapshots of locally simulated battles (battle/metrics.js) for the panel's match totals; `clear`
+   *  drops them when the match really restarts. Nothing attaches a meter here yet (`e.combatMetrics` stays null until
+   *  the 作战统计 meter is wired), so this stays empty — the free variable it used to be is what this declaration fixes. */
+  const combatHistory = new Map();
+  const rememberCombat = (e) => {
+    if (!e.combatMetrics) return;
+    const record = e.combatMetrics();
+    if (!(combatHistory.get(e.battleId)?.seconds > record.seconds)) combatHistory.set(e.battleId, record);
+  };
   /** @type {Map<string, any>} battleId → entry of a b.start still being prepared (prepare(); `battle` null until built) */
   const pending = new Map();
   let cur = null;              // entry on screen
@@ -309,6 +321,32 @@ export function createBattleRunner(deps) {
   /** The battle clock: frozen at the pause instant while the solo battle is paused. */
   const clock = () => (pausedAt != null ? pausedAt : now());
   const bossLike = (e) => e.kind === 'boss' || e.kind === 'hidden';
+
+  /**
+   * Whether `cs` (a b.start spec's content) is a content this page can be the authority of. A spec with no `cs` is always
+   * accepted — that is every spec of a server with no content identity, exactly as before (DESIGN §32). The server names
+   * the content in every spec once it has one (`welcome.content.vanilla`, Lobby.welcomeInfo), and the page keeps that
+   * identity in `store.content` — **written by `main.js` from `welcome`**, which is not merged yet, so today it is always
+   * null and this page cannot tell one content from another.
+   *
+   * ⚠️ **D24 (待裁)**: upstream returns false when the identity is unknown (it could not tell which data to simulate on),
+   * and that would make the page non-authoritative for *every* battle of a content-identity server until `main.js`
+   * lands. The marked line below therefore accepts, which is what this tree did before the content identity existed;
+   * flip it to `return false` in the same batch that merges `main.js`. A named `cs` that IS known to be another content
+   * is refused either way.
+   * @param {unknown} cs
+   */
+  function csAccepted(cs) {
+    if (typeof cs !== 'string' || cs === '') return true;
+    let vanilla = null;
+    try { vanilla = store?.get?.()?.content?.vanilla ?? null; } catch { vanilla = null; }
+    if (vanilla == null) return true; // D24: upstream returns false here (see the header)
+    if (cs === vanilla) return true;
+    const held = appSimContent();
+    if (held && held.cs === cs) return true;
+    const loading = appContentSet.get();
+    return !!loading && loading.status === 'loading' && loading.cs === cs;
+  }
 
   function ensureSim(spec = null) {
     const base = dataBaseFor(spec);
