@@ -155,14 +155,13 @@ import { ImpostorAtlas } from './impostor.js';
 import { stepClipBounds } from './spine.js';
 import { loadThree, loadBoardPack, loadScenePack, webgl2Available, boardArtListed } from './board3d/load.js';
 import { BoardScene } from './board3d/scene.js';
-import { unionAreas } from './board3d/layout.js';
 import { layoutPen, penSignature } from './pen.js';
 import { IDENTITY, bossPrepField, tilesToDisp, leaderStand } from './prepfield.js';import { pickOnTile, pickBattle, hitTiles } from './pick.js';
 import { promotionsOf } from './promote.js';
 import { ensurePixi } from './app/pixi.js';
 import { pieceDirOf, pickUnitOf } from './app/pick.js';
 import { CAMERA_MS, BOARD3D_STABLE_MS, BOARD3D_RETRY_MS, PEN_CAMERA_MS, RANGE_GROUPS, LEADER_HIT_STYLE, DRAG_HOLD_TILES, CHAIN_KINDS, DROP_PENDING_MS, DEPLOY_REPLAY_MS } from './app/tune.js';
-import { boardPreference, switchableBox, bandFor, fieldRows, boardArea, viewKind, restView, flightView, penShown, leaderShown } from './app/view.js';
+import { boardPreference, switchableBox, bandFor, fieldRows, boardArea, viewKind, restView, flightView } from './app/view.js';
 import { OfficialFx } from './vfx/system.js';
 import { FxWiring } from './vfx/wiring.js';
 import { projSpeed } from './fx/speeds.js';
@@ -616,14 +615,14 @@ export async function createFieldView(host, options = {}) {
     });
   }
 
-  // rows drawn per camera kind: module `bandFor`; the active field rows: module `fieldRows`
+  // what a camera shows and builds (the 3D area, the drawn 2D rows, the active field rows, the pen's figures, the boss-prep
+  // leader): module `restView` at rest, `flightView` while it flies — the pen with the prep and pen cameras (`showsPen`)
 
   function setCamera(kind, options) {
     if (destroyed) return false;
     let o = options && typeof options === 'object' ? options : {};
     const L = layout();
     const prevView = viewKind(camKind, camOpts, L);
-    const prevBand = bandFor(prevView, L), prevField = fieldRows(prevView, L);
     const nextKind = typeof kind === 'string' ? kind : 'normal';
     // the enemy pen is a detour of the prep camera: remember where it came from; the same kind asked again without
     // framing options goes back to exactly that camera (Final Assault half, shop state…)
@@ -640,28 +639,29 @@ export async function createFieldView(host, options = {}) {
     if (vk === 'prep') setPrepField(IDENTITY);
     else if (vk === 'bossPrep') setPrepField(bossPrepField(camOpts.side === 'R' ? 'R' : 'L', L));
     const target = targetCamera(camKind, camOpts);
-    const band = bandFor(vk, L);
-    const field = fieldRows(vk, L);
+    const rest = restView(vk, L);
     const focus = camRect();
     board3d?.setFocus(focus);
     camMs = Number.isFinite(o.ms) && o.ms >= 0 ? o.ms : (vk === 'pen' || prevView === 'pen' ? PEN_CAMERA_MS : CAMERA_MS);
     if (o.instant || camMs === 0 || mode === 'idle' && !camTo) {
-      board3d?.setArea(boardArea(vk, L));
+      board3d?.setArea(rest.area);
       cam = target; camFrom = camTo = null;
-      tiles.setView(band, focus, field);
-      setPenHidden(!penShown(vk));
-      setLeaderHidden(!leaderShown(vk));
+      tiles.setView(rest.band, focus, rest.field);
+      setPenHidden(!rest.pen);
+      setLeaderHidden(!rest.leader);
       pendingView = null;
     } else {
       camFrom = cam.clone();
       camTo = target;
       camT0 = performance.now();
-      // keep both fields drawn (and lit) while the camera flies between them
-      tiles.setView([Math.min(prevBand[0], band[0]), Math.max(prevBand[1], band[1])], focus, [Math.min(prevField[0], field[0]), Math.max(prevField[1], field[1])]);
-      board3d?.setArea(unionAreas(boardArea(prevView, L), boardArea(vk, L)));
-      setPenHidden(!penShown(vk, prevView));
-      setLeaderHidden(!leaderShown(vk, prevView));
-      pendingView = { band, focus, field, area: boardArea(vk, L), pen: penShown(vk), leader: leaderShown(vk) };
+      // keep both fields drawn (and lit) while the camera flies between them; the pen as flightView says (a flight from
+      // the prep camera into a battle drops it at once)
+      const fly = flightView(prevView, vk, L);
+      tiles.setView(fly.band, focus, fly.field);
+      board3d?.setArea(fly.area);
+      setPenHidden(!fly.pen);
+      setLeaderHidden(!fly.leader);
+      pendingView = { ...rest, focus };
     }
     return true;
   }
