@@ -76,12 +76,14 @@
 
 import { net as appNet } from '../net.js';
 import { store as appStore } from '../store.js';
-import { unitStatsEntry, fxForm } from '../../../shared/protocol.js';
+import { fxForm } from '../../../shared/protocol.js';
 import { spectateEffects } from './observe.js';
 import { recordError, setBattleSource } from '../diag.js';
 import { roomDataBase } from '../mods/align.js';
 import { loadBrowserSim } from './simLoader.js';
-import { simContent as appSimContent, contentSet as appContentSet } from '../content.js';
+import { InPageSimHost, WorkerSimHost } from './simHost.js';
+import { trackCombat, combineCombat } from './metrics.js';
+import { simContent as appSimContent, contentSet as appContentSet, contentFor as appContentFor } from '../content.js';
 import { t } from '../../../shared/i18n.js';
 import { currentModSet } from '../roomMods.js';
 
@@ -250,13 +252,22 @@ const SIM_LOGGER = Object.freeze({
 });
 
 /**
- * @param {{ net: any, store: any, loadSim?: (dataBase: string) => Promise<{ spec: any, ds: any }>,
- *   dataBaseFor?: (spec: any) => string, now?: () => number,
+ * @param {{ net: any, store: any, loadSim?: (dataBase: string, content?: object|null) => Promise<{ spec: any, ds: any }>,
+ *   dataBaseFor?: (spec: any) => string, contentFor?: (cs: string) => Promise<object|null>,
+ *   simContent?: () => object|null, loadingContent?: () => string|null, vanillaCs?: () => string|null, now?: () => number,
  *   raf?: (fn: (t: number) => void) => any, caf?: (h: any) => void, setInterval?: Function, clearInterval?: Function,
- *   doc?: { hidden?: boolean, addEventListener?: Function } | null, logger?: object }} deps
+ *   doc?: { hidden?: boolean, addEventListener?: Function } | null, logger?: object,
+ *   combatMetrics?: boolean, createHost?: Function, toast?: (text: string, kind?: string) => void,
+ *   workerTimeoutMs?: number }} deps
  *   `dataBaseFor`（W-D, DESIGN §28.16）: which data face a spec must be simulated on — `/data/` unless the room that
  *   started this battle declared its own set (`public/js/mods/align.js roomDataBase`). The sim is loaded and cached PER
  *   face, so a page that plays in a subset room and later in a plain one never mixes the two.
+ *   `contentFor` / `simContent` / `loadingContent` / `vanillaCs`（DESIGN §32.6）: the room's content set the page holds or
+ *   is downloading, and the server's original content's cs. Injectable so a Node test drives a content set without a
+ *   page; public/js/content.js supplies the browser ones (and `store.content.vanilla`, written by main.js).
+ *   `combatMetrics` true/false pins the 作战统计 meter for a test. Omit it and call setCombatMetrics (the settings
+ *   screen does; the default is off). A Worker host never attaches the meter.
+ *   `createHost`（DESIGN §32.11）: the simulation host to build instead of the two this file picks (public/js/battle/simHost.js).
  */
 export function createBattleRunner(deps) {
   const net = deps.net;
@@ -267,9 +278,19 @@ export function createBattleRunner(deps) {
   const setIv = deps.setInterval || ((fn, ms) => globalThis.setInterval(fn, ms));
   const clearIv = deps.clearInterval || ((h) => globalThis.clearInterval(h));
   const doc = deps.doc !== undefined ? deps.doc : (typeof document !== 'undefined' ? document : null);
-  const loadSim = deps.loadSim || ((dataBase) => loadBrowserSim({ dataBase }));
+  // 我们的数据面加载器（W-D, DESIGN §28.16）在前、上游的内容集加载（DESIGN §32.6）在后：`content` 给了就用它那份
+  // **已校验**的数据（content.js contentFor），没给就还是按数据面抓 —— 干净安装 / 没声明集合的房间与从前逐字节相同。
+  const loadSim = deps.loadSim || ((dataBase, content) => (content
+    ? loadBrowserSim({ data: content.data, cs: content.cs, bounds: content.bounds ?? null, scripts: content.scripts || [], hashInput: content.hashInput, nativeVerified: content.nativeVerified })
+    : loadBrowserSim({ dataBase })));
   const dataBaseFor = deps.dataBaseFor || (() => '/data/');
   const logger = deps.logger || SIM_LOGGER;
+  // 内容集（DESIGN §32.6）：本页持有的房间内容集（content.js contentFor / simContent）与服务器那一份原始内容的 cs
+  const contentFor = deps.contentFor || appContentFor;
+  const heldContent = deps.simContent || appSimContent;
+  /** the content set the page is downloading now (content.js contentSet: its cs while loading), else null */
+  const loadingContent = deps.loadingContent || (() => { const c = appContentSet.get(); return c.status === 'loading' ? c.cs : null; });
+  const vanillaCs = deps.vanillaCs || (() => { try { return store?.get?.()?.content?.vanilla ?? null; } catch { return null; } });
 
   const listeners = new Map();
   const emit = (type, payload) => {
@@ -283,18 +304,39 @@ export function createBattleRunner(deps) {
   /** @type {Map<string, any>} battleId → entry */
   const entries = new Map();
   /** Compact combat snapshots of locally simulated battles (battle/metrics.js) for the panel's match totals; `clear`
-   *  drops them when the match really restarts. Nothing attaches a meter here yet (`e.combatMetrics` stays null until
-   *  the 作战统计 meter is wired), so this stays empty — the free variable it used to be is what this declaration fixes. */
+   *  drops them when the match really restarts（`keepMetrics`）—— 换一轮 prep 仍然留，离开对局才清。 */
   const combatHistory = new Map();
   const rememberCombat = (e) => {
     if (!e.combatMetrics) return;
     const record = e.combatMetrics();
     if (!(combatHistory.get(e.battleId)?.seconds > record.seconds)) combatHistory.set(e.battleId, record);
   };
+  // Opt-in (设置「作战统计」, default off). A boolean deps.combatMetrics pins a test and ignores setCombatMetrics.
+  // Otherwise screens/game.js pushes the settings store. A Worker host never attaches: its page battle is wire state.
+  let metricsWanted = false;
+  const metricsEnabled = () => (typeof deps.combatMetrics === 'boolean' ? deps.combatMetrics : metricsWanted);
+  const detachCombat = (e) => {
+    if (!e?.combatMetrics) return;
+    rememberCombat(e);
+    try { e.combatMetrics.stop?.(); } catch { /* the reader is already gone */ }
+    e.combatMetrics = null;
+  };
+  function setCombatMetrics(on) {
+    if (typeof deps.combatMetrics === 'boolean') return;
+    const next = on === true;
+    if (next === metricsWanted) return;
+    metricsWanted = next;
+    // [ASSUMED] turning the meter on does not backfill a battle already prepared: the hooks would have missed the
+    // damage already dealt. The next prepare attaches. Turning it off detaches at once.
+    if (next) return;
+    for (const e of entries.values()) detachCombat(e);
+    for (const e of pending.values()) detachCombat(e);
+  }
   /** @type {Map<string, any>} battleId → entry of a b.start still being prepared (prepare(); `battle` null until built) */
   const pending = new Map();
   let cur = null;              // entry on screen
-  /** data face → the sim loaded for it (W-D: a room's own face, or `/data/`; a page may meet both) */
+  /** data face（W-D, `/data/` 或房间自己那一份）或内容集的 `cs:`（DESIGN §32.6）→ the sim loaded for it（两种 key 分开缓存，
+   *  一条来自我们的数据面、一条来自上游的内容集；一页可能都遇到） */
   const sims = new Map();
   let startSeq = 0;            // counts the b.starts: the latest one is the view asked for
   let loading = null;          // the pending entry of the latest b.start (shown when prepared)
@@ -334,26 +376,42 @@ export function createBattleRunner(deps) {
    * lands. The marked line below therefore accepts, which is what this tree did before the content identity existed;
    * flip it to `return false` in the same batch that merges `main.js`. A named `cs` that IS known to be another content
    * is refused either way.
-   * @param {unknown} cs
+   * @param {unknown} cs @param {{ loading?: boolean }} [opts]
    */
-  function csAccepted(cs) {
+  function csAccepted(cs, { loading = false } = {}) {
     if (typeof cs !== 'string' || cs === '') return true;
-    let vanilla = null;
-    try { vanilla = store?.get?.()?.content?.vanilla ?? null; } catch { vanilla = null; }
+    const vanilla = vanillaCs();
     if (vanilla == null) return true; // D24: upstream returns false here (see the header)
     if (cs === vanilla) return true;
-    const held = appSimContent();
-    if (held && held.cs === cs) return true;
-    const loading = appContentSet.get();
-    return !!loading && loading.status === 'loading' && loading.cs === cs;
+    const held = heldContent();
+    return (!!held && held.cs === cs) || (loading && loadingContent() === cs);
   }
 
+  /**
+   * The sim a spec must be simulated on: **our data face** (W-D, DESIGN §28.16 — `dataBaseFor`: `/data/` or the room's own
+   * `/room-data/<digest>/`) unless the spec names a content set this page holds or is downloading (DESIGN §32.6) — then
+   * that checked set's own data (content.js contentFor). One sim per face / per content set, cached: a page may meet both.
+   *
+   * ⚠️ 合入缝合处：上游把这一个函数整体换成「只按内容集」。本树保留 W-D 的数据面作为**没有内容集时**的那条来源 ——
+   * 两条都在、key 分开缓存，所以干净安装 / 没声明集合的房间的加载器与从前逐字节相同
+   * (`test/match/runnerDataBase.test.js` 钉的就是这条)。上游的 `deps.loadSim ? 本页加载 : remote` 判据照搬：
+   * 没有注入加载器（浏览器）时，房间内容集交给 Worker 宿主；注入了（测试 / 注入面）就在本页建。
+   */
   function ensureSim(spec = null) {
     const base = dataBaseFor(spec);
-    let p = sims.get(base);
+    const cs = spec && spec.cs;
+    const vanilla = vanillaCs();
+    const want = typeof cs === 'string' && cs !== '' && vanilla != null && cs !== vanilla ? cs : null;
+    const key = want ? `cs:${want}` : base;
+    let p = sims.get(key);
     if (!p) {
-      p = loadSim(base).catch((err) => { sims.delete(base); throw err; });
-      sims.set(base, p);
+      p = (want
+        ? contentFor(want).then((content) => {
+          if (!content || content.cs !== want) throw new Error(`the content set ${want.slice(0, 8)} is not loaded on this page`);
+          return deps.loadSim ? loadSim(base, content) : { content, cs: want, remote: true };
+        })
+        : loadSim(base, null)).catch((err) => { sims.delete(key); throw err; });
+      sims.set(key, p);
     }
     return p;
   }
@@ -872,47 +930,64 @@ export function createBattleRunner(deps) {
         return;
       }
       if (!wanted()) return;
+      // the content the simulation holds must still be the spec's (the room could have changed it meanwhile)
+      if (!csAccepted(e.spec.cs)) e.authoritative = false;
       let battle;
       try {
-        // 工坊行为层: rebuild the very kits the server verifies this field with (see loadSpecKits). Both key spaces —
-        // operators (`kits`) and summons (`tokenKits`) — from that ONE module list; an empty map changes nothing.
-        // 同一份清单还带着每个 kit 的**归属包**与那个包的**生效预算**（DESIGN §28.52 的 kit 那一半）：它们与 kits
-        // 一起交给战斗，kit 的逐单位回调因此与服务端落在**同一本账**、**同一个数字**上。空表不写这几个键
-        // （KEY DISCIPLINE：没有包时 Battle opts 的形状与从前逐字节相同）。
-        const { kits, tokenKits, kitOwners, tokenKitOwners, kitBudgets } = await loadSpecKits(e.spec);
-        // 包声明的战斗逻辑（`server.battle`, DESIGN §28.17）：同一场战斗、同一段代码（见 loadSpecBattleInstallers）
-        const battleInstallers = await loadSpecBattleInstallers(e.spec);
-        battle = sim.spec.createBattleFromSpec(e.spec, sim.ds, {
-          logger, kits, tokenKits,
-          ...(kitOwners.size ? { kitOwners } : {}),
-          ...(tokenKitOwners.size ? { tokenKitOwners } : {}),
-          ...(kitBudgets.size ? { kitBudgets } : {}),
-          ...(battleInstallers ? { battleInstallers } : {}),
-        });
+        // 宿主（DESIGN §32.11）：注入面给的 createHost；否则本页原始内容跑 InPageSimHost、房间的内容集跑 Worker 宿主
+        e.host = deps.createHost ? deps.createHost(sim, (err) => failWorker(e, err))
+          : sim.remote ? new WorkerSimHost({ onFailure: (err) => failWorker(e, err), timeoutMs: deps.workerTimeoutMs })
+            : new InPageSimHost();
+        if (e.host.remote) {
+          await e.host.load(sim.cs, sim.content);
+          if (!wanted()) return;
+          await e.host.start(e.spec);
+        } else {
+          // 工坊行为层: rebuild the very kits the server verifies this field with (see loadSpecKits). Both key spaces —
+          // operators (`kits`) and summons (`tokenKits`) — from that ONE module list; an empty map changes nothing.
+          // 同一份清单还带着每个 kit 的**归属包**与那个包的**生效预算**（DESIGN §28.52 的 kit 那一半）：它们与 kits
+          // 一起交给战斗，kit 的逐单位回调因此与服务端落在**同一本账**、**同一个数字**上。空表不写这几个键
+          // （KEY DISCIPLINE：没有包时 Battle opts 的形状与从前逐字节相同）。
+          const { kits, tokenKits, kitOwners, tokenKitOwners, kitBudgets } = await loadSpecKits(e.spec);
+          // 包声明的战斗逻辑（`server.battle`, DESIGN §28.17）：同一场战斗、同一段代码（见 loadSpecBattleInstallers）
+          const battleInstallers = await loadSpecBattleInstallers(e.spec);
+          // ⚠️ 我们这条 sim 是按**数据面**（W-D）自己加载好的，所以这里不走 host.load()，直接交付给宿主
+          e.host.sim = sim;
+          e.host.start(e.spec, {
+            logger, kits, tokenKits,
+            ...(kitOwners.size ? { kitOwners } : {}),
+            ...(tokenKitOwners.size ? { tokenKitOwners } : {}),
+            ...(kitBudgets.size ? { kitBudgets } : {}),
+            ...(battleInstallers ? { battleInstallers } : {}),
+          });
+        }
+        battle = e.host.battle;
       } catch (err) {
-        console.warn('[runner] battle construction failed', err);
-        recordError('runner', err, 'battle construction failed');
+        if (e.host?.remote) failWorker(e, err);
+        else { console.warn('[runner] battle construction failed', err); recordError('runner', err, 'battle construction failed'); }
         return;
       }
+      if (!wanted() || e.failed) return;
       stats.battles++;
       e.sim = sim;
       e.battle = battle;
-      e.meter = sim.spec.attachLpMeter(battle);
+      e.meter = e.host.meter;
+      // The Worker page holds wire state only (time, ids): no `damaged` hook and no `heal`, so trackCombat cannot
+      // run there. An in-page Battle gets the meter only when 作战统计 is on (default off; a test may pin it).
+      if (metricsEnabled() && !e.host.remote) e.combatMetrics = trackCombat(battle);
       e.t0 = clock() - (e.elapsed / e.speed) * 1000;
-      if (lastPool && battle.sharedBoss && typeof battle.sharedBoss.sync === 'function') {
-        battle.sharedBoss.sync(lastPool.hp, lastPool.acked ? lastPool.acked[e.fieldId] : undefined);
-      }
-      if (e.endReason) endBattle(e);
+      if (lastPool) await e.host.syncPool(lastPool.hp, lastPool.acked ? lastPool.acked[e.fieldId] : undefined);
+      if (e.endReason) await endBattle(e);
       // silent catch-up to the field's clock before it is shown (a reconnect / observing a running field) — for the view
       // asked for; a superseded authority catches up in the background (advance)
       while (!battle.finished && e.seq === startSeq && targetTick(e, clock()) - battle.tickCount > ticksPerFrameCap(e.speed)) {
         const n = Math.min(PREPARE_SLICE, targetTick(e, clock()) - battle.tickCount);
-        stepEntry(e, n);
+        await stepEntry(e, n);
         try { battle.drainEvents(); } catch { /* ignore */ }
         noteLeaks(e);
         progress(e);
         await yieldFrame();
-        if (!wanted()) return;
+        if (!wanted() || e.failed) return;
       }
       pending.delete(e.battleId);
       entries.set(e.battleId, e);
@@ -1010,16 +1085,23 @@ export function createBattleRunner(deps) {
   }
   // phase changes: combat fields live until the next prep; leaving the match drops everything
   let lastPhase = null;
+  let lastRound = 0;
   if (store && typeof store.subscribe === 'function') {
     offs.push(store.subscribe((s) => {
       const pub = s && s.match && s.match.public ? s.match.public : null;
+      const round = Number(pub?.round) || 0;
+      // a fresh match (m.public gone), a rewound round or a return to a lobby-like phase resets the combat totals
+      const resetMetrics = (!pub && lastPhase != null) || round < lastRound
+        || (pub?.phase !== lastPhase && ['LOBBY', 'INFO_CHECK', 'BAND_DRAFT', 'BATTLE_CHECK'].includes(pub?.phase));
+      if (resetMetrics) combatHistory.clear();
+      lastRound = round;
       // solo pause (DESIGN §14): the local battle clocks follow m.public.paused
       setPaused(!!(pub && pub.paused));
       const phase = pub ? pub.phase : null;
-      if (phase === lastPhase) return;
+      if (phase === lastPhase && !resetMetrics) return;
       lastPhase = phase;
       if (!phase || ['PREP', 'ROUND_START', 'SP_DRAFT', 'RESULT', 'LOBBY', 'INFO_CHECK', 'BAND_DRAFT', 'BATTLE_CHECK'].includes(phase)) {
-        if (entries.size || pending.size) clear();
+        if (entries.size || pending.size) clear({ keepMetrics: !resetMetrics });
       }
       // warm the simulation up as soon as a match runs (the first b.start then starts at once)
       if (phase && phase !== 'LOBBY' && sims.size === 0) ensureSim().catch(() => {});
@@ -1037,6 +1119,33 @@ export function createBattleRunner(deps) {
       return () => listeners.get(type)?.delete(fn);
     },
     state,
+    /**
+     * 设置「作战统计」. Ignored when `deps.combatMetrics` pins the runner. Off detaches meters already attached.
+     * On does not attach to a battle that was prepared while the meter was off.
+     * @param {boolean} on
+     */
+    setCombatMetrics,
+    /**
+     * Local-only damage/healing accounting (battle/metrics.js) for the 作战统计 panel: the own current battle
+     * (`battle`) or every battle simulated so far in this match (`match`), each restricted to `ownerId` when given.
+     * Read on demand by the panel — never sent to the server.
+     * @param {{ scope?: 'battle'|'match', ownerId?: string|null }} [opts]
+     */
+    combatMetrics({ scope = 'match', ownerId = null } = {}) {
+      const localEntries = [...entries.values(), ...pending.values()];
+      if (scope === 'battle') {
+        // scouting another field must not replace the player's own current battle statistics
+        const e = ownerId == null ? cur : localEntries.filter((entry) => entry.members.includes(ownerId))
+          .sort((a, b) => b.seq - a.seq)[0];
+        return combineCombat(e?.combatMetrics ? [e.combatMetrics()] : [], ownerId);
+      }
+      const records = new Map(combatHistory);
+      for (const e of localEntries) if (e.combatMetrics) {
+        const record = e.combatMetrics();
+        if (!(records.get(e.battleId)?.seconds > record.seconds)) records.set(e.battleId, record);
+      }
+      return combineCombat(records.values(), ownerId);
+    },
     /**
      * **本地播放倍速**（玩家按的 ×1/×2/×3/×4）。
      *
@@ -1080,10 +1189,10 @@ export function createBattleRunner(deps) {
     unitStats(unitId, fieldId = null) {
       const e = cur;
       if (!e || !Number.isInteger(unitId) || (fieldId != null && e.fieldId !== fieldId)) return null;
-      let u = null;
-      try { u = typeof e.battle.unitById === 'function' ? e.battle.unitById(unitId) : null; } catch { u = null; }
-      if (!u) return null;
-      try { return unitStatsEntry(u, u._s || null); } catch { return null; }
+      // 读数由宿主给：`simHost.js:44-47` 的 InPageSimHost.unitStats 就是原来那份 unitStatsEntry(u, u._s || null) 逐字
+      // 搬过去的（能力没丢、只是换了位置），Worker 宿主的同一读数走 RPC 缓存。`e.host` 在 prepare() 里必被赋值
+      // （注入面 / Worker / 本页三种之一，每种都有 unitStats），所以这里没有第二条回退路。
+      try { return e.host.unitStats(unitId); } catch { return null; }
     },
     /**
      * **逐单位伤害读数**（DESIGN §28.38）：本场战斗里每个单位的累计伤害与每个人自己的累计伤害，连同一个**时间
