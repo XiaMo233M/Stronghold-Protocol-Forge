@@ -44,6 +44,34 @@ export const APP_VERSION = '0.18.6';
  * (a bundle that only names `0.14.0` cannot: 0.14.0-0.2.3 and 0.14.0-0.2.4 look identical to it).
  */
 export const UPSTREAM_VERSION = '0.3.0';
+/**
+ * The version a **plugin** manifest's `app` range is judged against — the **upstream half**, NOT `APP_VERSION`.
+ *
+ * The two numbers answer two different questions, and the plugin system's `app` field asks the upstream one: a plugin's
+ * `app` says which **game** it was written for (every template under `plugins/_template/` — and every manifest upstream
+ * 0.3.0 ships — declares `>=0.3.0 <0.4.0`), while this fork's `APP_VERSION` is **this fork's release number**. Judging a
+ * release number against a game-version range is a category error: `0.18.6 ∉ [0.3.0, 0.4.0)` refused **every** upstream
+ * plugin as `PLUGIN_INCOMPATIBLE`. The plugin **API** level is a separate field (`api`; `PLUGIN_API` below) and keeps its
+ * own gate, so nothing about "this fork's API diverges from upstream" stops being checked.
+ *
+ * **One source.** `shared/plugins/manifest.js appVersionMatches`'s default parameter, and every reader of a plugin or
+ * plugin-system pack manifest (`shared/plugins/manifest.js`, `shared/plugins/catalog.js`, `server/plugins/registry.js`,
+ * `server/studio/templates/index.js appRangeNow`), take the app version from here.
+ *
+ * **What deliberately does NOT read it.**
+ *   * `server/plugins/identity.js computeVanillaContent` / `shared/plugins/identity.js`: the content-set `cs` hashes
+ *     `app` as an **identity** input (which bytes this content is), not as a compat gate — it stays on `APP_VERSION`
+ *     (`test/plugins/identity.test.js` pins that), so no content hash and no golden result moves.
+ *   * `shared/packs.js` / `shared/workshop.js`: this fork's **own** mod-pack layer. Those packs target this fork, so they
+ *     keep `APP_VERSION`. (`shared/packs.js` re-exports `appVersionMatches`; its callers pass the version explicitly.)
+ *   * `tools/i18n.mjs appRange` (the i18n skeleton generator): pinned to `APP_VERSION` by `test/i18n-packs.test.js`. The
+ *     language packs it writes declare `>=0.2.0`, which both halves satisfy, and `lang` manifests take an `app` mismatch
+ *     as a warning (`PLUGIN_APP_MISMATCH`), never a refusal.
+ *   * `server/studio/index.js` (the studio `info` payload's `app`): "which build is this server" — an identity, not a
+ *     compat gate; `test/playtestEditor.test.js` pins it. The studio's **template generator** (`appRangeNow`, what a new
+ *     plugin declares) reads `PLUGIN_APP_VERSION` instead, so the studio never scaffolds a plugin this loader refuses.
+ */
+export const PLUGIN_APP_VERSION = UPSTREAM_VERSION;
 /** A development build (the public `dev` branch): the title screen, the boot banner and the README say so, and
  * tools/package.mjs refuses to build a release zip from it without --allow-dev. */
 export const DEV_BUILD = /-dev$/.test(APP_VERSION);

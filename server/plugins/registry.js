@@ -45,7 +45,7 @@ import { readContentData } from './contentData.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { APP_VERSION, PLUGIN_API } from '../../shared/constants.js';
+import { PLUGIN_APP_VERSION, PLUGIN_API } from '../../shared/constants.js';
 import { PACK_TYPES, PACK_MANIFEST, PACKS_URL, normalizeManifest, packIndexEntry, buildPackIndex } from '../../shared/packs.js';
 import { SOURCE_LANG, isLangCode, countStrings } from '../../shared/i18nPacks.js';
 import {
@@ -428,7 +428,7 @@ function readUiFrame(dir, manifest, listed, { vanilla, hashCache }) {
  * @returns {{ plugin: Plugin | null, problems: string[], warnings: string[], issues: PluginIssue[] }}
  *   issues: the problems and warnings with their codes (shared/plugins/errors.js)
  */
-export function readPluginFolder(dir, { app = APP_VERSION, api = PLUGIN_API, where, vanilla = { manifest: null, sha256: null }, hashCache = new Map() } = {}) {
+export function readPluginFolder(dir, { app = PLUGIN_APP_VERSION, api = PLUGIN_API, where, vanilla = { manifest: null, sha256: null }, hashCache = new Map() } = {}) {
   const id = path.basename(dir);
   const at = where ?? `plugins/${id}/`;
   const list = issueList();
@@ -524,7 +524,7 @@ export function readPluginFolder(dir, { app = APP_VERSION, api = PLUGIN_API, whe
  *   vanilla: the art manifest read for this scan (null when no cosmetic or ui plugin needed it); a warning's `issue`: it with
  *   its code (shared/plugins/errors.js)
  */
-export function scanPlugins({ publicDir, dataDir, packsDir, pluginsDir }, { app = APP_VERSION, api = PLUGIN_API, hashCache = new Map(), vanilla = null, artCache = new Map() } = {}) {
+export function scanPlugins({ publicDir, dataDir, packsDir, pluginsDir }, { app = PLUGIN_APP_VERSION, api = PLUGIN_API, hashCache = new Map(), vanilla = null, artCache = new Map() } = {}) {
   let art = vanilla;
   const getArt = () => (art ||= readVanillaAssets(dataDir, artCache));
   /** @type {Plugin[]} */
@@ -675,7 +675,7 @@ export function scanPlugins({ publicDir, dataDir, packsDir, pluginsDir }, { app 
  * @param {{ app?: string }} [opts]
  * @returns {{ packs: Pack[], skipped: Skipped[], warnings: { where: string, warning: string }[] }}
  */
-export function scanPacks(dirs, { app = APP_VERSION } = {}) {
+export function scanPacks(dirs, { app = PLUGIN_APP_VERSION } = {}) {
   const { plugins, skipped, warnings } = scanPlugins(dirs, { app });
   return { packs: plugins.filter((p) => p.supported), skipped, warnings };
 }
@@ -685,7 +685,7 @@ export function scanPacks(dirs, { app = APP_VERSION } = {}) {
  * @param {Pack[]} packs
  * @param {{ app?: string }} [opts]
  */
-export function packIndexOf(packs, { app = APP_VERSION } = {}) {
+export function packIndexOf(packs, { app = PLUGIN_APP_VERSION } = {}) {
   const entries = packs.filter((p) => p.supported).map((p) => packIndexEntry(p.manifest, {
     files: Object.fromEntries(Object.entries(p.files).map(([role, f]) => [role, f.url])),
     strings: p.strings,
@@ -698,7 +698,7 @@ export function packIndexOf(packs, { app = APP_VERSION } = {}) {
  * @param {Plugin[]} plugins
  * @param {{ app?: string, vanilla?: string | null }} [opts] vanilla: this server's vanilla content hash
  */
-export function pluginIndexOf(plugins, { app = APP_VERSION, vanilla = null } = {}) {
+export function pluginIndexOf(plugins, { app = PLUGIN_APP_VERSION, vanilla = null } = {}) {
   return buildPluginIndex(plugins, { app, vanilla });
 }
 
@@ -750,7 +750,7 @@ function signature({ publicDir, dataDir, packsDir, pluginsDir }) {
  * @param {{ log?: { info: Function, warn: Function }, app?: string, recheckMs?: number }} [opts]
  *   recheckMs: how long a scan stays trusted before the folders are looked at again (default 1000; 0 = every call)
  */
-export function createPluginRegistry(dirs, { log = { info: noop, warn: noop }, app = APP_VERSION, recheckMs = 1000, scriptHost = '0.0.0.0', scriptMode = process.env.SP_PLUGIN_SCRIPTS } = {}) {
+export function createPluginRegistry(dirs, { log = { info: noop, warn: noop }, app = PLUGIN_APP_VERSION, recheckMs = 1000, scriptHost = '0.0.0.0', scriptMode = process.env.SP_PLUGIN_SCRIPTS } = {}) {
   let sig = null;
   let checkedAt = -Infinity;
   /** @type {ReturnType<typeof scanPlugins> & { packs: Plugin[], index: ReturnType<typeof packIndexOf>, byId: Map<string, Plugin> }} */

@@ -17,7 +17,7 @@
 // game, no picture): an empty entry is a valid plugin until the author fills a slot. A template with build() also
 // writes its own files (the dsl template: one operator and one prep spec). check and pack pass on either as it is.
 
-import { APP_VERSION, PLUGIN_API } from '../../../shared/constants.js';
+import { PLUGIN_APP_VERSION, PLUGIN_API } from '../../../shared/constants.js';
 import { isPluginId } from '../../../shared/plugins/manifest.js';
 import art from './art.js';
 import spine from './spine.js';
@@ -51,7 +51,7 @@ export const TEMPLATES = Object.freeze([art, spine, voice, audio, numbers, opera
 export const templateById = (id) => TEMPLATES.find((t) => t.id === id) || null;
 
 /** The game versions a new plugin is made for: this release's minor line (0.3.0-dev → ">=0.3.0 <0.4.0"). */
-export function appRangeNow(version = APP_VERSION) {
+export function appRangeNow(version = PLUGIN_APP_VERSION) {
   const m = /^(\d+)\.(\d+)\./.exec(String(version));
   return m ? `>=${m[1]}.${m[2]}.0 <${m[1]}.${Number(m[2]) + 1}.0` : '*';
 }
