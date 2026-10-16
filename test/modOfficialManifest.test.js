@@ -1,93 +1,117 @@
-// test/modOfficialManifest.test.js — 官方档 `sp:sdk@1` 的 manifest 适配器（provisional）。
+// test/modOfficialManifest.test.js — 官方档 manifest 适配器，**按上游 0.3.0 的真词表**。
+//
+// 身份仍是 `sp:sdk@1`（业主口径：以官方身份出现、同时兼容 Forge），但**声明面**逐字对齐上游：
+// `manifest:2` / `class` / `api` / `app` / `permissions`(闭集) / `entry{sim,meta,client,server}` / `slots` /
+// `requires` / `overrides`。能力**由它们派生**（下游只认派生出来的那一层）。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  fromOfficialManifest, describePacks, OFFICIAL_DEFAULT_BUDGET, OFFICIAL_API_MAP,
+  fromOfficialManifest, describePacks, OFFICIAL_DEFAULT_BUDGET,
+  OFFICIAL_CLASSES, OFFICIAL_PERMISSIONS, CAPABILITIES_BY_PERMISSION,
 } from '../shared/sdk/descriptor.js';
 import { SDK_OFFICIAL, SDK_FORGE_LEGACY } from '../shared/sdk/sdkConstants.js';
 
-const base = { id: 'hello', name: 'Hello', version: '1.0.0', sdk: SDK_OFFICIAL };
+const base = { manifest: 2, id: 'hello', name: 'Hello', version: '1.0.0', api: 1 };
 
-test('合法 module 档：apis → capabilities，权限与缺省预算（8000 次）派生正确', () => {
+test('content 档：能力由 class + permissions + parts **派生**（不再由调用方声明）', () => {
   const { descriptor, issues } = fromOfficialManifest({
-    ...base, apis: ['content', 'storage', 'health', 'http.route', 'lobby.on'],
+    ...base, class: 'content', permissions: ['data.patch', 'dsl'], data: ['items.json'],
   });
   assert.deepEqual(issues, []);
   assert.equal(descriptor.origin, 'official');
-  assert.equal(descriptor.sdk, SDK_OFFICIAL);
+  assert.equal(descriptor.sdk, SDK_OFFICIAL, '身份仍是 sp:sdk@1（业主口径）');
+  assert.equal(descriptor.klass, 'content');
+  assert.equal(descriptor.api, 1);
+  assert.deepEqual(descriptor.capabilities, ['content'], 'class/permission/part 三条路都指向 content，去重');
+  assert.deepEqual(descriptor.officialPermissions, ['data.patch', 'dsl'], '官方权限原样留一份');
+  assert.deepEqual(descriptor.permissions, ['host.content'], '内部权限是派生出来的另一层');
+  assert.equal(descriptor.layer, 'A', '没有任何服务端载荷 ⇒ A 档');
+  assert.equal(descriptor.combat, false);
   assert.equal(descriptor.profile, 'module');
-  assert.deepEqual(descriptor.capabilities, ['content', 'health', 'lobby', 'routes', 'storage']);
-  assert.deepEqual(descriptor.permissions, ['host.http', 'host.storage', 'lobby.observe']);
-  assert.equal(descriptor.budget.maxCalls, 8000, '文档里的「8000 次插件预算」是官方档缺省');
-  assert.equal(descriptor.activationPolicy.requiresConsent, true, 'module 档跑在宿主进程 ⇒ 默认要求同意');
-  assert.equal(descriptor.contentDigest, null, '字节摘要由官方装载器回填');
 });
 
-test('sandbox 档：必须有 entry；且 sandbox 不默认要求同意（隔离运行时）', () => {
-  const noEntry = fromOfficialManifest({ ...base, profile: 'sandbox' });
-  assert.equal(noEntry.descriptor, null);
-  assert.ok(noEntry.issues.some((i) => i.code === 'SDK_BAD_DESCRIPTOR' && /entry/.test(i.reason)));
-
-  const ok = fromOfficialManifest({ ...base, profile: 'sandbox', entry: 'plugin.mjs', apis: ['health'] });
-  assert.deepEqual(ok.issues, []);
-  assert.equal(ok.descriptor.profile, 'sandbox');
-  assert.equal(ok.descriptor.activationPolicy.requiresConsent, false);
-  assert.equal(ok.descriptor.entrypoints[0].kind, 'sandboxModule');
+test('script 档：profile=sandbox、combat 由 sim.code 派生、entry 对象进 entrypoints', () => {
+  const { descriptor, issues } = fromOfficialManifest({
+    ...base, class: 'script', permissions: ['sim.code'], entry: { sim: 'sim/index.js' },
+  });
+  assert.deepEqual(issues, []);
+  assert.equal(descriptor.profile, 'sandbox', 'script 走隔离沙箱（上游 SES Compartment）');
+  assert.equal(descriptor.combat, true, 'sim.code 能改对局结果 —— 上游没有 combat 标志，判据是能力');
+  assert.equal(descriptor.layer, 'B');
+  assert.deepEqual(descriptor.capabilities, ['kits', 'modules', 'sim'], 'script 档 = 宿主进程壳 + 战斗内代码(+kits)');
+  assert.deepEqual(descriptor.entrypoints, [{ kind: 'module', id: 'sim', entry: 'sim/index.js' }]);
+  assert.equal(descriptor.activationPolicy.requiresConsent, false, '沙箱档不需要逐玩家同意（与上游一致）');
 });
 
-test('未知名 / 未知 api 都点名拒绝（不猜）', () => {
-  const a = fromOfficialManifest({ ...base, bogus: 1 });
-  assert.equal(a.descriptor, null);
-  assert.ok(a.issues.some((i) => i.code === 'SDK_UNKNOWN_FIELD' && /bogus/.test(i.reason)));
-
-  const b = fromOfficialManifest({ ...base, apis: ['notify'] });
-  assert.equal(b.descriptor, null);
-  assert.ok(b.issues.some((i) => i.code === 'SDK_UNKNOWN_CAPABILITY' && /notify/.test(i.reason)));
+test('trusted 档：进宿主进程 ⇒ 默认要求同意', () => {
+  const { descriptor, issues } = fromOfficialManifest({
+    ...base, class: 'trusted', permissions: ['trusted.server'], entry: { server: 'server.js' },
+  });
+  assert.deepEqual(issues, []);
+  assert.equal(descriptor.profile, 'module');
+  assert.equal(descriptor.activationPolicy.requiresConsent, true);
+  assert.ok(descriptor.permissions.includes('host.process'));
 });
 
-test('硬边界：官方 manifest 不许带 Forge 私有字段，Forge 档不许自称 sp:sdk@1', () => {
+test('ui 档：panels 由 `entry.client` + `slots` 派生（槽位合法性留给装载桥判）', () => {
+  const { descriptor, issues } = fromOfficialManifest({
+    ...base, class: 'ui', permissions: ['ui.frame'], entry: { client: 'ui/index.html' }, slots: ['screen.game.hud'],
+  });
+  assert.deepEqual(issues, []);
+  assert.equal(descriptor.layer, 'C');
+  assert.deepEqual(descriptor.capabilities, ['panels']);
+  assert.deepEqual(descriptor.slots, ['screen.game.hud']);
+  assert.deepEqual(descriptor.panels, [{ id: 'hello:0', slot: 'screen.game.hud', module: 'ui/index.html' }]);
+  assert.deepEqual(descriptor.permissions, ['client.frame']);
+});
+
+test('0.3.0 的版本闸门：manifest 必须是 2、api 必须在 [1,1]、越界**拒载**', () => {
+  assert.ok(fromOfficialManifest({ ...base, class: 'content', manifest: 1 }).issues.some((i) => /manifest/.test(i.reason)));
+  assert.equal(fromOfficialManifest({ ...base, class: 'content', manifest: 1 }).descriptor, null);
+  const badApi = fromOfficialManifest({ ...base, class: 'content', api: 2 });
+  assert.equal(badApi.descriptor, null);
+  assert.ok(badApi.issues.some((i) => /api/.test(i.reason)));
+  const noApi = fromOfficialManifest({ manifest: 2, id: 'x', version: '1.0.0', class: 'content' });
+  assert.equal(noApi.descriptor, null);
+  assert.ok(noApi.issues.some((i) => /"api"/.test(i.reason)));
+});
+
+test('点名拒绝：未知字段 / 未知 class / 未知 permission / 未知 entry 键', () => {
+  assert.ok(fromOfficialManifest({ ...base, class: 'content', bogus: 1 }).issues.some((i) => i.code === 'SDK_UNKNOWN_FIELD' && /bogus/.test(i.reason)));
+  assert.ok(fromOfficialManifest({ ...base, class: 'nope' }).issues.some((i) => /"class"/.test(i.reason)));
+  assert.ok(fromOfficialManifest({ ...base, class: 'content', permissions: ['notify'] }).issues.some((i) => i.code === 'SDK_UNKNOWN_CAPABILITY' && /notify/.test(i.reason)));
+  assert.ok(fromOfficialManifest({ ...base, class: 'ui', entry: { wrong: 'x.js' } }).issues.some((i) => /entry\.wrong/.test(i.reason)));
+  // `budget` 不是官方字段（上游没有它）⇒ 同样点名拒
+  assert.ok(fromOfficialManifest({ ...base, class: 'content', budget: { maxCalls: 100 } }).issues.some((i) => /budget/.test(i.reason)));
+});
+
+test('硬边界：官方 manifest 不许带 Forge 私有字段（Forge 包走 origin "forge"）', () => {
   for (const field of ['server', 'client', 'variants', 'behaviour', 'bonds', 'garrisons', 'kits']) {
-    const r = fromOfficialManifest({ ...base, [field]: {} });
+    const r = fromOfficialManifest({ ...base, class: 'content', [field]: {} });
     assert.equal(r.descriptor, null, `${field} 必须被拒`);
     assert.ok(r.issues.some((i) => i.code === 'SDK_UNKNOWN_FIELD' && /Forge-only/.test(i.reason)), `${field}: 理由要点名 Forge-only`);
   }
-  // 官方档的 profile 只能是 module/sandbox
-  const legacyProfile = fromOfficialManifest({ ...base, profile: 'legacy' });
-  assert.equal(legacyProfile.descriptor, null);
-  assert.ok(legacyProfile.issues.some((i) => i.code === 'SDK_PROFILE_NOT_FOR_ORIGIN'));
-  // 官方标识不可冒充（sdk 与 origin 必须一致）
-  assert.equal(SDK_FORGE_LEGACY === SDK_OFFICIAL, false);
+  assert.equal(SDK_FORGE_LEGACY === SDK_OFFICIAL, false, '两个身份不相等');
 });
 
-test('combat-only 能力缺 combat:true ⇒ 拒；声明 meta 还要给 metaRegisters', () => {
-  const r = fromOfficialManifest({ ...base, apis: ['meta.register'] });
-  assert.equal(r.descriptor, null);
-  assert.ok(r.issues.some((i) => i.code === 'SDK_COMBAT_REQUIRED'));
-  // 声明了 meta ⇒ 必须给白名单（「没声明就等于不许」，与 Forge 档 server.meta.registers 同义）
-  const noRegs = fromOfficialManifest({ ...base, combat: true, apis: ['meta.register'] });
-  assert.equal(noRegs.descriptor, null);
-  assert.ok(noRegs.issues.some((i) => i.code === 'SDK_BAD_DESCRIPTOR' && /metaRegisters/.test(i.reason)));
-
-  const ok = fromOfficialManifest({ ...base, combat: true, apis: ['meta.register'], metaRegisters: ['item:x'] });
-  assert.equal(ok.descriptor.combat, true);
-  assert.deepEqual(ok.descriptor.metaRegisters, ['item:x']);
-  assert.ok(ok.descriptor.permissions.includes('host.process'));
+test('overrides → metaRegisters（上游用 overrides 表达「能覆盖哪些官方 id」）', () => {
+  const { descriptor } = fromOfficialManifest({
+    ...base, class: 'script', permissions: ['sim.code', 'meta.code'], entry: { sim: 's.js', meta: 'm.js' }, overrides: ['item:x'],
+  });
+  assert.deepEqual(descriptor.metaRegisters, ['item:x']);
+  assert.equal(descriptor.combat, true);
 });
 
-test('显式 budget 覆盖缺省，只覆盖给出的字段', () => {
-  const { descriptor } = fromOfficialManifest({ ...base, budget: { maxCalls: 100 } });
-  assert.equal(descriptor.budget.maxCalls, 100);
-  assert.equal(descriptor.budget.maxConcurrentCalls, OFFICIAL_DEFAULT_BUDGET.maxConcurrentCalls);
-});
+test('闭集常量本身就是契约；describePacks 分域；缺省预算只在内部', () => {
+  assert.deepEqual([...OFFICIAL_CLASSES], ['lang', 'cosmetic', 'content', 'script', 'ui', 'trusted']);
+  assert.deepEqual([...OFFICIAL_PERMISSIONS].sort(), ['assets.add', 'assets.override', 'data.add', 'data.patch', 'dsl', 'meta.code', 'mode.code', 'sim.code', 'theme', 'trusted.page', 'trusted.server', 'ui.frame']);
+  assert.ok(Object.values(CAPABILITIES_BY_PERMISSION).every((v) => typeof v === 'string' && v.length));
+  assert.equal(OFFICIAL_DEFAULT_BUDGET.maxCalls, 8000, '内部缺省（上游 manifest 没有 budget 字段）');
 
-test('describePacks 走 official 适配器；官方包与 Forge 包分域', () => {
-  const official = describePacks([{ ...base, apis: ['content'] }], { origin: 'official' });
+  const official = describePacks([{ ...base, class: 'content' }], { origin: 'official' });
   assert.equal(official.descriptors.length, 1);
   assert.equal(official.descriptors[0].origin, 'official');
-  // Forge 档描述符永远不会带 sp:sdk@1
   const forge = describePacks([{ id: 'f', hash: 'a'.repeat(64) }], { origin: 'forge' });
-  assert.equal(forge.descriptors[0].sdk, SDK_FORGE_LEGACY);
-  // api 表是闭集，键都是能力名
-  assert.ok(Object.values(OFFICIAL_API_MAP).every((v) => typeof v === 'string' && v.length));
+  assert.equal(forge.descriptors[0].sdk, SDK_FORGE_LEGACY, 'Forge 档描述符永远不会带 sp:sdk@1');
 });

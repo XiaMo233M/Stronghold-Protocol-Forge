@@ -25,12 +25,12 @@ import { KIT_FORBIDDEN_GLOBALS, stripComments, mentionsIdentifier } from '../../
 import { WORKSHOP_BATTLE_PREFIX } from '../http/static.js';
 
 /** 需要**运行时面**的能力（其余是纯声明，数据走 manifest）。 */
-export const HOST_CAPABILITIES = Object.freeze(['modules', 'storage', 'health', 'routes', 'metrics', 'lane', 'room', 'meta', 'battle']);
+export const HOST_CAPABILITIES = Object.freeze(['modules', 'sim', 'kits', 'storage', 'health', 'routes', 'metrics', 'lane', 'room', 'meta', 'panels']);
 /**
  * 声明了这些能力 ⇒ 源码扫描要**并上** kit 那张表（时钟 / 随机 / DOM / 计时器）：它们在对局循环里跑，
  * 同一个种子必须在两端打出同一个结果。与 `server/battlePack.js` / `server/match/metaPack.js` 逐字同一条纪律。
  */
-export const DETERMINISTIC_SCAN_CAPABILITIES = Object.freeze(['meta', 'battle']);
+export const DETERMINISTIC_SCAN_CAPABILITIES = Object.freeze(['sim', 'meta']);
 
 /**
  * 一个官方插件的源码判据（**在 import 之前**跑）。
@@ -207,7 +207,7 @@ export function createOfficialModuleHost({ pluginId, capabilities = [], stateRoo
   Object.defineProperty(host, 'battle', {
     enumerable: true,
     value: Object.freeze({
-      install: has('battle')
+      install: (has('battle') || has('sim'))
         ? (fn) => {
           if (typeof fn !== 'function') throw new PluginRefused('PLUGIN_BAD_BATTLE_INSTALL', 'battle.install(battle) needs a function — the same shape the official content modules use');
           mounted.battle.push(fn);

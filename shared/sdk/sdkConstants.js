@@ -74,7 +74,8 @@ export const CAPABILITIES = Object.freeze([
   'lane',       // 包自带 WebSocket 通道
   'matchClass', // MatchClass 包装器（改对局）
   'matchKinds', // 声明自己参与哪些对局种类
-  'lobby',      // 房间生命周期事件（官方档 api.lobby.on）
+  'lobby',      // 房间生命周期事件
+  'sim',        // 官方档 sim.code / entry.sim 派生出来的名字（战斗内代码）
 ]);
 
 /** 需要 `combat: true` 才允许声明的能力（能改对局结果的载荷）。 */

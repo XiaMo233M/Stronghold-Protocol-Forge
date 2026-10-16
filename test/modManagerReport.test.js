@@ -50,7 +50,7 @@ test('官方插件目录：一个插件被装成候选包并激活（同一份�
   try {
     const p = path.join(dir, 'hello');
     fs.mkdirSync(p, { recursive: true });
-    fs.writeFileSync(path.join(p, OFFICIAL_PLUGIN_MANIFEST), JSON.stringify({ id: 'hello', name: 'Hello', version: '1.0.0', sdk: SDK_OFFICIAL, apis: ['health'] }));
+    fs.writeFileSync(path.join(p, OFFICIAL_PLUGIN_MANIFEST), JSON.stringify({ manifest: 2, api: 1, id: 'hello', name: 'Hello', version: '1.0.0', class: 'trusted', permissions: ['trusted.server'], entry: { server: 'plugin.mjs' } }));
 
     const r = runTool(['--workshop', EXAMPLES, '--plugins', dir, '--json', '--state', path.join(tmpdir(), `sp-report-plug-${process.pid}`)]);
     assert.equal(r.status, 0, r.stderr);
@@ -59,7 +59,7 @@ test('官方插件目录：一个插件被装成候选包并激活（同一份�
     assert.equal(off.packages[0].id, 'hello');
     assert.equal(off.packages[0].sdk, 'sp:sdk@1');
     assert.equal(off.packages[0].profile, 'module');
-    assert.ok(off.packages[0].capabilities.includes('health'));
+    assert.ok(off.packages[0].capabilities.includes('modules'), 'trusted 档派生 modules（+health+routes）');
     assert.match(off.packages[0].contentDigest, /^[0-9a-f]{64}$/);
   } finally { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
 });

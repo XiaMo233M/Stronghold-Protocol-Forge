@@ -1,4 +1,4 @@
-// test/modOfficialLoader.test.js — 官方档装载器：目录 → (描述符, 内容摘要) → ActivationPlan。
+// test/modOfficialLoader.test.js — 官方档装载器：目录 → (描述符, 内容摘要) → ActivationPlan（0.3.0 词表）。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -9,6 +9,7 @@ import { loadOfficialPlugins, listPluginFiles, OFFICIAL_PLUGIN_MANIFEST } from '
 import { buildActivationPlan } from '../server/mod-manager/plan.js';
 import { modDigest, modManifestDigest } from '../shared/sdk/digest.js';
 import { SDK_OFFICIAL } from '../shared/sdk/sdkConstants.js';
+import { contentPlugin, simPlugin, trustedPlugin } from './helpers/officialManifest2.js';
 
 const quiet = { info() {}, warn() {}, error() {}, debug() {} };
 
@@ -30,8 +31,8 @@ function makeRoot(plugins) {
 
 test('装载两个合法插件：描述符 + 64 位内容摘要 + 文件清单', () => {
   const root = makeRoot([
-    { name: 'hello', manifest: { id: 'hello', name: 'Hello', version: '1.0.0', sdk: SDK_OFFICIAL, apis: ['content', 'health'] }, files: { 'data/chess.json': '{"a":1}' } },
-    { name: 'world', manifest: { id: 'world', name: 'World', version: '2.0.0', sdk: SDK_OFFICIAL, profile: 'sandbox', entry: 'plugin.mjs' }, files: { 'plugin.mjs': 'export default {};' } },
+    { name: 'hello', manifest: contentPlugin('hello'), files: { 'items.json': '{"a":1}' } },
+    { name: 'world', manifest: simPlugin('world', { version: '2.0.0' }), files: { 'plugin.mjs': 'export default () => {};' } },
   ]);
   try {
     const { present, plugins, errors } = loadOfficialPlugins(root, { log: quiet });
@@ -40,21 +41,26 @@ test('装载两个合法插件：描述符 + 64 位内容摘要 + 文件清单',
     assert.deepEqual(plugins.map((p) => p.id), ['hello', 'world']);
 
     const hello = plugins[0];
-    assert.equal(hello.descriptor.sdk, SDK_OFFICIAL);
+    assert.equal(hello.descriptor.sdk, SDK_OFFICIAL, '身份仍是 sp:sdk@1');
+    assert.equal(hello.descriptor.klass, 'content');
     assert.equal(hello.descriptor.profile, 'module');
-    assert.deepEqual(hello.descriptor.capabilities, ['content', 'health']);
+    assert.deepEqual(hello.descriptor.capabilities, ['content']);
     assert.match(hello.hash, /^[0-9a-f]{64}$/);
-    assert.deepEqual(hello.files.map((f) => f.path), ['data/chess.json', OFFICIAL_PLUGIN_MANIFEST]);
+    assert.deepEqual(hello.files.map((f) => f.path), ['items.json', OFFICIAL_PLUGIN_MANIFEST]);
     // 摘要就是「插件全部文件」的归一化哈希（同一份字节 ⇒ 同一份摘要）
     assert.equal(hello.hash, modManifestDigest(hello.files));
     assert.equal(hello.descriptor.contentDigest, hello.hash, '内容摘要必须回填进描述符');
+
+    const world = plugins[1];
+    assert.equal(world.descriptor.profile, 'sandbox', 'script 档走隔离沙箱');
+    assert.equal(world.descriptor.combat, true, 'sim.code 派生 combat');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test('官方插件进同一份 ActivationPlan：两个都激活，集合摘要与独立重算一致', () => {
+test('官方插件进同一份 ActivationPlan：都激活，集合摘要与独立重算一致', () => {
   const root = makeRoot([
-    { name: 'hello', manifest: { id: 'hello', name: 'Hello', version: '1.0.0', sdk: SDK_OFFICIAL, apis: ['content'] }, files: {} },
-    { name: 'world', manifest: { id: 'world', name: 'World', version: '1.0.0', sdk: SDK_OFFICIAL, apis: ['health'] }, files: {} },
+    { name: 'hello', manifest: contentPlugin('hello'), files: {} },
+    { name: 'world', manifest: trustedPlugin('world'), files: { 'plugin.mjs': 'export const x = 1;' } },
   ]);
   try {
     const { plugins } = loadOfficialPlugins(root, { log: quiet });
@@ -71,9 +77,9 @@ test('官方插件进同一份 ActivationPlan：两个都激活，集合摘要�
 
 test('一条用不了的声明：具名拒整包，且**不进**计划', () => {
   const root = makeRoot([
-    { name: 'good', manifest: { id: 'good', name: 'G', version: '1.0.0', sdk: SDK_OFFICIAL, apis: ['health'] }, files: {} },
-    { name: 'forgey', manifest: { id: 'forgey', name: 'F', version: '1.0.0', sdk: SDK_OFFICIAL, server: { modules: [] } }, files: {} },
-    { name: 'mismatch', manifest: { id: 'not-the-dirname', name: 'M', version: '1.0.0', sdk: SDK_OFFICIAL }, files: {} },
+    { name: 'good', manifest: contentPlugin('good'), files: {} },
+    { name: 'forgey', manifest: { ...contentPlugin('forgey'), server: { modules: [] } }, files: {} },
+    { name: 'mismatch', manifest: contentPlugin('not-the-dirname'), files: {} },
     { name: 'broken' }, // 没有 plugin.json
   ]);
   try {

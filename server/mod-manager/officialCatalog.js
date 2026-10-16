@@ -53,7 +53,7 @@ export function buildOfficialCatalog(plugins, { readFile = (abs) => fs.readFileS
         hash: p.hash,
         layer: p.descriptor.layer,
         combat: p.descriptor.combat === true,
-        api: null,
+        api: Number.isInteger(p.descriptor.api) ? p.descriptor.api : null,
         files,
       };
     });

@@ -63,9 +63,9 @@ test('collectOfficialContent：读得到就贡献，读不到/坏 JSON 都**具�
     fs.writeFileSync(path.join(p, 'bad.json'), '{nope');
 
     const plugins = [
-      { id: 'p1', dir: p, descriptor: { content: ['items'] } },
-      { id: 'p2', dir: path.join(dir, 'nope'), descriptor: { content: ['items'] } },
-      { id: 'p3', dir: p, descriptor: { content: ['bad'] } },
+      { id: 'p1', dir: p, descriptor: { content: ['items.json'] } },
+      { id: 'p2', dir: path.join(dir, 'nope'), descriptor: { content: ['items.json'] } },
+      { id: 'p3', dir: p, descriptor: { content: ['bad.json'] } },
     ];
     const { contributions, errors } = collectOfficialContent(plugins);
     assert.deepEqual(contributions, [{ packId: 'p1', table: 'items', data: { a: 1 } }]);

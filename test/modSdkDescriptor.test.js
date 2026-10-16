@@ -67,12 +67,15 @@ test('Forge 适配器：`content` 是文件名数组（loader 的归一化形状
   assert.deepEqual(descriptor.content, ['chess', 'items']);
 });
 
-test('官方适配器：缺 sdk / 带 Forge 私有字段 / 未知名 → 具名拒绝', () => {
-  assert.equal(fromOfficialManifest({ id: 'x' }).descriptor, null, '缺 sdk ⇒ 拒');
-  const forgeField = fromOfficialManifest({ id: 'x', sdk: SDK_OFFICIAL, server: {} });
+test('官方适配器：0.3.0 词表 —— 缺 manifest / 带 Forge 私有字段 / 未知名 → 具名拒绝', () => {
+  assert.equal(fromOfficialManifest({ id: 'x' }).descriptor, null, '缺 manifest:2 / class / api ⇒ 拒');
+  const base = { manifest: 2, api: 1, id: 'x', version: '1.0.0', class: 'content' };
+  const forgeField = fromOfficialManifest({ ...base, server: {} });
   assert.ok(forgeField.issues.some((i) => i.code === 'SDK_UNKNOWN_FIELD' && /Forge-only/.test(i.reason)));
-  const unknown = fromOfficialManifest({ id: 'x', sdk: SDK_OFFICIAL, bogus: 1 });
+  const unknown = fromOfficialManifest({ ...base, bogus: 1 });
   assert.ok(unknown.issues.some((i) => i.code === 'SDK_UNKNOWN_FIELD'));
+  // `sdk` 不是官方 manifest 的字段（上游由 `import 'sp:sdk@1'` 决定身份）⇒ 写了它也是未知键
+  assert.ok(fromOfficialManifest({ ...base, sdk: SDK_OFFICIAL }).issues.some((i) => i.code === 'SDK_UNKNOWN_FIELD'));
 });
 
 test('normalizeDescriptor：未知字段点名拒绝、跨域 profile 拒绝、sdk 必须与 origin 一致', () => {

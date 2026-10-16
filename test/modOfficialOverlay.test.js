@@ -10,7 +10,6 @@ import { tmpdir } from 'node:os';
 
 import { loadData, DATA_DIR, PLUGINS_DIR } from '../server/data.js';
 import { OFFICIAL_PLUGIN_MANIFEST } from '../server/mod-manager/officialLoader.js';
-import { SDK_OFFICIAL } from '../shared/sdk/sdkConstants.js';
 
 const quiet = { info() {}, warn() {}, error() {}, debug() {} };
 const NONE = path.join(tmpdir(), `sp-overlay-none-${process.pid}-${Date.now()}`);
@@ -20,7 +19,8 @@ const makePluginRoot = (id, table, payload) => {
   const dir = path.join(root, id);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, OFFICIAL_PLUGIN_MANIFEST), JSON.stringify({
-    id, name: id, version: '1.0.0', sdk: SDK_OFFICIAL, content: [table],
+    // 上游 0.3.0 词表：parts 是**文件路径**，表名由文件名决定
+    manifest: 2, api: 1, id, name: id, version: '1.0.0', class: 'content', permissions: ['data.patch'], data: [`${table}.json`],
   }));
   fs.writeFileSync(path.join(dir, `${table}.json`), JSON.stringify(payload));
   return root;
@@ -63,7 +63,7 @@ test('坏清单的插件被具名拒（不贡献、不影响其它插件、也�
   try {
     const bad = path.join(root, 'bad');
     fs.mkdirSync(bad, { recursive: true });
-    fs.writeFileSync(path.join(bad, OFFICIAL_PLUGIN_MANIFEST), JSON.stringify({ id: 'bad', sdk: SDK_OFFICIAL, server: {} })); // Forge-only 字段
+    fs.writeFileSync(path.join(bad, OFFICIAL_PLUGIN_MANIFEST), JSON.stringify({ manifest: 2, api: 1, id: 'bad', version: '1.0.0', class: 'content', server: {} })); // Forge-only 字段
     const merged = loadData(DATA_DIR, { log: quiet, workshopDir: null, pluginsDir: root });
     assert.ok('spOverlayProbe' in merged.items, '好插件照常生效');
   } finally { fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }

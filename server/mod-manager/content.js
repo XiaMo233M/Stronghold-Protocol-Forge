@@ -105,11 +105,13 @@ export function collectOfficialContent(plugins, { readFile = null } = {}) {
   const contributions = [];
   const errors = [];
   for (const plugin of Array.isArray(plugins) ? plugins : []) {
-    for (const table of plugin?.descriptor?.content || []) {
-      const abs = path.join(plugin.dir, `${table}.json`);
+    for (const rel of plugin?.descriptor?.content || []) {
+      // 官方 0.3.0 的 parts 是**文件路径**（`data: ['items.json']`）：目标表名 = 文件名去掉 `.json`。
+      const abs = path.join(plugin.dir, ...String(rel).split('/'));
+      const table = path.basename(String(rel)).replace(/\.json$/i, '');
       let raw;
-      try { raw = read(abs); } catch (e) { errors.push({ pack: plugin.id, code: 'CONTENT_FILE_MISSING', reason: `"${table}.json" is declared in the manifest but not readable (${e && e.message ? e.message : e})` }); continue; }
-      try { contributions.push({ packId: plugin.id, table, data: JSON.parse(raw) }); } catch (e) { errors.push({ pack: plugin.id, code: 'CONTENT_FILE_BAD_JSON', reason: `"${table}.json" is not valid JSON (${e && e.message ? e.message : e})` }); }
+      try { raw = read(abs); } catch (e) { errors.push({ pack: plugin.id, code: 'CONTENT_FILE_MISSING', reason: `"${rel}" is declared in the manifest but not readable (${e && e.message ? e.message : e})` }); continue; }
+      try { contributions.push({ packId: plugin.id, table, data: JSON.parse(raw) }); } catch (e) { errors.push({ pack: plugin.id, code: 'CONTENT_FILE_BAD_JSON', reason: `"${rel}" is not valid JSON (${e && e.message ? e.message : e})` }); }
     }
   }
   return { contributions, errors };

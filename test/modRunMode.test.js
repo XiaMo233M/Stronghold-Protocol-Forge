@@ -7,7 +7,8 @@ import { RUN_MODES, DEFAULT_RUN_MODE, isRunMode } from '../shared/sdk/sdkConstan
 
 const H = (c) => c.repeat(64).slice(0, 64);
 const forgePack = (id) => ({ id, hash: H('a') });
-const officialPlugin = (id) => ({ id, hash: H('b'), manifest: { id, name: id, version: '1.0.0', sdk: 'sp:sdk@1', apis: ['health'] } });
+// 官方档的 manifest 用 0.3.0 词表（`class` + `permissions` + `entry`），能力由它们派生
+const officialPlugin = (id) => ({ id, hash: H('b'), manifest: { manifest: 2, api: 1, id, name: id, version: '1.0.0', class: 'trusted', permissions: ['trusted.server'], entry: { server: 'plugin.mjs' } } });
 
 test('缺省 = legacy-compatible：两种 origin 都放行，且不产生任何 mode 判定（行为不变）', () => {
   assert.equal(DEFAULT_RUN_MODE, 'legacy-compatible');

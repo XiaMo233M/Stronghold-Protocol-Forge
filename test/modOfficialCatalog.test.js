@@ -20,7 +20,7 @@ function makeRoot(plugins) {
   for (const p of plugins) {
     const dir = path.join(root, p.name);
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, OFFICIAL_PLUGIN_MANIFEST), JSON.stringify({ id: p.name, name: p.name, version: '1.0.0', sdk: SDK_OFFICIAL, ...p.manifest }));
+    fs.writeFileSync(path.join(dir, OFFICIAL_PLUGIN_MANIFEST), JSON.stringify({ manifest: 2, api: 1, id: p.name, name: p.name, version: '1.0.0', ...p.manifest }));
     for (const [rel, body] of Object.entries(p.files || {})) {
       const abs = path.join(dir, rel);
       fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -31,7 +31,7 @@ function makeRoot(plugins) {
 }
 
 test('目录条目与 Forge 那份同形，且**客户端重建的摘要 == 发布的 hash**（逐文件 canonical 口径）', () => {
-  const root = makeRoot([{ name: 'hello', manifest: { apis: ['content', 'health'] }, files: { 'items.json': '{"a":1}', 'data/extra.txt': 'xyz' } }]);
+  const root = makeRoot([{ name: 'hello', manifest: { class: 'trusted', permissions: ['trusted.server'], entry: { server: 'plugin.mjs' } }, files: { 'items.json': '{"a":1}', 'data/extra.txt': 'xyz' } }]);
   try {
     const { plugins } = loadOfficialPlugins(root, { log: quiet });
     const { packs } = buildOfficialCatalog(plugins);
@@ -39,9 +39,9 @@ test('目录条目与 Forge 那份同形，且**客户端重建的摘要 == 发�
     const e = packs[0];
     assert.equal(e.id, 'hello');
     assert.equal(e.hash, plugins[0].hash);
-    assert.equal(e.layer, 'B', '有服务端载荷（health）⇒ B 档');
+    assert.equal(e.layer, 'B', 'trusted 档派生 modules ⇒ B 档');
     assert.equal(e.combat, false);
-    assert.equal(e.api, null);
+    assert.equal(e.api, 1, '目录条目带上官方 api 等级');
     assert.deepEqual(e.files.map((f) => f.path).sort(), ['data/extra.txt', 'items.json', OFFICIAL_PLUGIN_MANIFEST]);
 
     for (const row of e.files) {
@@ -55,7 +55,7 @@ test('目录条目与 Forge 那份同形，且**客户端重建的摘要 == 发�
 });
 
 test('读不到的文件 ⇒ 那一行不进目录（宁可少一行，也不给复算不出来的哈希）', () => {
-  const root = makeRoot([{ name: 'hello', manifest: { apis: ['content'] }, files: { 'items.json': '{}' } }]);
+  const root = makeRoot([{ name: 'hello', manifest: { class: 'content', permissions: ['data.patch'] }, files: { 'items.json': '{}' } }]);
   try {
     const { plugins } = loadOfficialPlugins(root, { log: quiet });
     const { packs } = buildOfficialCatalog(plugins, { readFile: () => { throw new Error('nope'); } });
@@ -75,11 +75,17 @@ test('mergeCatalog：并集、按 id 排序、**同 id 不静默覆盖**（官�
   assert.deepEqual(mergeCatalog({ packs: [] }, { packs: [] }).collisions, []);
 });
 
-test('描述符 layer 由能力推出：纯内容 ⇒ A；任何服务端载荷 ⇒ B', () => {
-  const a = fromOfficialManifest({ id: 'x', sdk: SDK_OFFICIAL, content: ['items'] });
+test('描述符 layer 由**派生出来的能力**推出：纯内容 ⇒ A；任何服务端载荷 ⇒ B', () => {
+  const a = fromOfficialManifest({ manifest: 2, api: 1, id: 'x', version: '1.0.0', class: 'content', permissions: ['data.patch'], data: ['items.json'] });
   assert.equal(a.descriptor.layer, 'A');
-  for (const api of ['health', 'storage', 'meta', 'battle', 'room', 'http.route', 'lane', 'modules']) {
-    const m = fromOfficialManifest({ id: 'x', sdk: SDK_OFFICIAL, combat: true, apis: [api], ...(api === 'meta' ? { metaRegisters: ['item:x'] } : {}) });
-    assert.equal(m.descriptor.layer, 'B', `api ${api} ⇒ B 档`);
+  // 0.3.0 里能进服务端的三种声明：script（sim.code）、trusted（trusted.server）、meta.code
+  const serverPayloads = [
+    { class: 'script', permissions: ['sim.code'], entry: { sim: 's.js' } },
+    { class: 'trusted', permissions: ['trusted.server'], entry: { server: 's.js' } },
+    { class: 'script', permissions: ['sim.code', 'meta.code'], entry: { sim: 's.js', meta: 'm.js' } },
+  ];
+  for (const extra of serverPayloads) {
+    const m = fromOfficialManifest({ manifest: 2, api: 1, id: 'x', version: '1.0.0', ...extra });
+    assert.equal(m.descriptor.layer, 'B', `${extra.class}/${extra.permissions.join('+')} ⇒ B 档`);
   }
 });

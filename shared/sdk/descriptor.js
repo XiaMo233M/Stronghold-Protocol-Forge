@@ -133,135 +133,168 @@ export function fromForgeManifest(pack) {
  * 出现了就**具名拒绝**，而不是静默当官方能力。反过来，Forge 档也不许声明 `sp:sdk@1`。
  */
 
-/** 官方 manifest 的字段闭集（provisional）。未列出的键**点名拒绝**。 */
+/** 官方 manifest 的字段闭集 —— **逐字对齐上游 0.3.0**（`schemas/plugin.schema.json` + `shared/plugins/manifest.js:172`）。 */
 export const OFFICIAL_MANIFEST_FIELDS = Object.freeze([
-  'manifestVersion', 'id', 'name', 'version', 'author', 'license', 'description',
-  'sdk', 'profile', 'entry', 'apis', 'capabilities', 'combat', 'content', 'assets', 'i18n', 'notices',
-  'overrides', 'permissions', 'dependencies', 'conflicts', 'budget', 'target', 'metaRegisters', 'panels',
+  '$schema', 'manifest', 'id', 'name', 'englishName', 'description', 'version', 'app', 'api', 'class', 'scope',
+  'authors', 'credits', 'license', 'homepage', 'sourceLang', 'requires', 'optional', 'conflicts',
+  'loadAfter', 'loadBefore', 'priority', 'settings', 'permissions', 'entry', 'slots', 'files', 'overrides',
+  'assets', 'theme', 'data', 'operators', 'enemies', 'modes', 'stages', 'dsl', 'i18n', 'lang', 'base',
+  'fallback', 'complete', 'machineTranslated', 'numberUnits',
 ]);
 
-/** 官方 manifest 里**不许出现**的 Forge 私有字段（出现即拒）。 */
+/** `class` 闭集（上游 `shared/plugins/manifest.js:102-109`）。 */
+export const OFFICIAL_CLASSES = Object.freeze(['lang', 'cosmetic', 'content', 'script', 'ui', 'trusted']);
+
+/** `permissions` 闭集（上游 `manifest.js:130-143`）—— 与 Forge 自己的 capability 词表**不是**一套。 */
+export const OFFICIAL_PERMISSIONS = Object.freeze([
+  'assets.override', 'assets.add', 'theme', 'data.patch', 'data.add', 'dsl',
+  'sim.code', 'meta.code', 'mode.code', 'ui.frame', 'trusted.page', 'trusted.server',
+]);
+
+/** `entry` 的键闭集（上游 `entry: { sim, meta, client, server }`）。 */
+export const OFFICIAL_ENTRY_KEYS = Object.freeze(['sim', 'meta', 'client', 'server']);
+
+/** 官方 API 等级（上游 `PLUGIN_API = { current: 1, min: 1 }`，越界**拒载**）。 */
+export const OFFICIAL_API = Object.freeze({ current: 1, min: 1 });
+
+/** manifest 判别值（上游自称 "manifest 2"）。 */
+export const OFFICIAL_MANIFEST_VERSION = 2;
+
+/** `class` → 我们内部的能力名（下游 plan/host/catalog 读的是这一层）。 */
+export const CAPABILITIES_BY_CLASS = Object.freeze({
+  lang: ['i18n'], cosmetic: ['assets'], content: ['content'], script: ['modules', 'sim'], ui: ['panels'], trusted: ['modules', 'health', 'routes', 'room'],
+});
+
+/** 官方 `permissions` → 内部能力名。 */
+export const CAPABILITIES_BY_PERMISSION = Object.freeze({
+  'assets.override': 'assets', 'assets.add': 'assets', theme: 'assets',
+  'data.patch': 'content', 'data.add': 'content', dsl: 'content',
+  'sim.code': 'sim', 'meta.code': 'meta', 'mode.code': 'content',
+  'ui.frame': 'panels', 'trusted.page': 'panels', 'trusted.server': 'modules',
+});
+
+/** 官方 manifest 里**不许出现**的 Forge 私有字段（出现即拒）：Forge 包走 origin "forge"，不冒充官方档。 */
 export const FORGE_ONLY_FIELDS = Object.freeze([
   'server', 'client', 'variants', 'behaviour', 'forms', 'fx', 'bonds', 'garrisons', 'kits', 'playtest',
 ]);
 
-/** `apis[]` → 归一化能力名。未列出的 api **具名拒绝**（不猜）。 */
-export const OFFICIAL_API_MAP = Object.freeze({
-  content: 'content', assets: 'assets', i18n: 'i18n', notices: 'notices', overrides: 'overrides',
-  storage: 'storage', health: 'health', metrics: 'metrics',
-  route: 'routes', 'http.route': 'routes',
-  lane: 'lane', room: 'room',
-  meta: 'meta', 'meta.register': 'meta',
-  battle: 'battle', modules: 'modules',
-  lobby: 'lobby', 'lobby.on': 'lobby',
-  matchKinds: 'matchKinds',
-});
-
-/** 官方档缺省预算：即文档里的「8000 次插件预算」。 */
+/**
+ * 官方档的内部缺省预算。**注意**：上游 manifest **没有** `budget` 字段（那是它文档里的 `[ASSUMED]` 数字），
+ * 所以它只是我们内部给官方档的缺省记账上限，不从 manifest 读。
+ */
 export const OFFICIAL_DEFAULT_BUDGET = Object.freeze({
   maxCalls: 8000, maxBytesIn: 0, maxBytesOut: 0, maxWallTimeMs: 0, maxCpuMs: 0, maxConcurrentCalls: 1,
 });
 
-/**
- * @param {any} raw
- * @returns {{ descriptor: object|null, issues: Array<{code:string,reason:string}> }}
- */
 export function fromOfficialManifest(raw) {
   const issues = [];
   if (!isObj(raw)) return { descriptor: null, issues: [sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, 'an official manifest must be a JSON object')] };
   for (const key of Object.keys(raw)) {
     if (FORGE_ONLY_FIELDS.includes(key)) {
-      issues.push(sdkError(SDK_ERROR_CODES.UNKNOWN_FIELD, `official manifest must not carry the Forge-only field "${key}" — the official SDK and the Forge extension layer are separate domains`));
+      issues.push(sdkError(SDK_ERROR_CODES.UNKNOWN_FIELD, `official manifest must not carry the Forge-only field "${key}" — a Forge pack is loaded as origin "forge", it never claims to be an sp:sdk@1 plugin`));
       continue;
     }
     if (!OFFICIAL_MANIFEST_FIELDS.includes(key)) {
       issues.push(sdkError(SDK_ERROR_CODES.UNKNOWN_FIELD, `official manifest field "${key}" is not in the closed set (${OFFICIAL_MANIFEST_FIELDS.join(', ')})`));
     }
   }
-  if (!str(raw.id)) issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, 'official manifest "id" must be a non-empty string'));
-  if (raw.sdk !== SDK_OFFICIAL) issues.push(sdkError(SDK_ERROR_CODES.BAD_ORIGIN, `official manifest "sdk" must be "${SDK_OFFICIAL}" (got ${JSON.stringify(raw.sdk)})`));
-  const profile = raw.profile === undefined ? 'module' : raw.profile;
-  if (!profileAllowedFor('official', profile)) {
-    issues.push(sdkError(SDK_ERROR_CODES.PROFILE_NOT_FOR_ORIGIN, `profile ${JSON.stringify(raw.profile)} is not allowed for an official manifest (module / sandbox)`));
+  if (raw.manifest !== OFFICIAL_MANIFEST_VERSION) {
+    issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, `official manifest field "manifest" must be ${OFFICIAL_MANIFEST_VERSION} (got ${JSON.stringify(raw.manifest)})`));
   }
-  const entry = str(raw.entry);
-  const apis = raw.apis === undefined ? [] : raw.apis;
-  if (!Array.isArray(apis)) issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, '"apis" must be an array of declared host API names'));
+  if (!str(raw.id)) issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, 'official manifest "id" must be a non-empty string'));
+  if (!str(raw.version)) issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, 'official manifest "version" must be a non-empty string'));
+  const klass = str(raw.class);
+  if (!OFFICIAL_CLASSES.includes(klass)) {
+    issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, `official manifest "class" must be one of ${OFFICIAL_CLASSES.join(' / ')} (got ${JSON.stringify(raw.class)})`));
+  }
+  if (raw.api === undefined) {
+    issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, 'official manifest "api" must declare the plugin API level'));
+  } else if (!Number.isInteger(raw.api) || raw.api < OFFICIAL_API.min || raw.api > OFFICIAL_API.current) {
+    issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, `official manifest "api" must be an integer within [${OFFICIAL_API.min}, ${OFFICIAL_API.current}] (got ${JSON.stringify(raw.api)}) — outside that range a plugin is refused, not run unverified`));
+  }
+  if (raw.app !== undefined && !str(raw.app)) issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, '"app" must be a version-range string when present'));
 
-  // `panels`（客户端 UI 面板，C 档）—— **必须在能力块之前声明**：下面的 `add('panels')` 要用它。
-  //   这里只判形状；**槽位**（`CLIENT_PANEL_SLOTS` 那张闭枚举）由服务端的桥
-  //   `server/mod-manager/officialPanels.js` 判 —— 那个常量住在 `shared/workshop.js`，而该文件被
-  //   `jsconfig.json` 排除在 typecheck 切片外，从本文件 import 会把整棵它拖回切片（那正是它被排除的原因）。
-  const panels = raw.panels === undefined ? [] : raw.panels;
-  if (!Array.isArray(panels)) {
-    issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, '"panels" must be an array of { id, slot, module, messages?, styles? }'));
-  } else {
-    for (const [i, p] of panels.entries()) {
-      if (!isObj(p)) { issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, `panels[${i}] must be an object`)); continue; }
-      if (!str(p.slot)) issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, `panels[${i}].slot must be a non-empty string (the slot list is checked when the plugin is loaded)`));
-      const mod = str(p.module);
-      if (!mod || mod.startsWith('/') || mod.includes('..')) {
-        issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, `panels[${i}].module must be a pack-relative path inside the plugin (got ${JSON.stringify(p.module)})`));
-      }
-      if (p.messages !== undefined && !(Array.isArray(p.messages) && p.messages.every((m) => typeof m === 'string' && m))) {
-        issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, `panels[${i}].messages must be an array of non-empty channel names`));
-      }
+  const permissionsRaw = raw.permissions === undefined ? [] : raw.permissions;
+  if (!Array.isArray(permissionsRaw)) {
+    issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, '"permissions" must be an array of declared permission names'));
+  }
+  for (const perm of Array.isArray(permissionsRaw) ? permissionsRaw : []) {
+    if (!OFFICIAL_PERMISSIONS.includes(perm)) {
+      issues.push(sdkError(SDK_ERROR_CODES.UNKNOWN_CAPABILITY, `permission ${JSON.stringify(perm)} is not in the closed set (${OFFICIAL_PERMISSIONS.join(', ')})`));
     }
   }
 
+  const entryRaw = raw.entry === undefined ? {} : raw.entry;
+  if (!isObj(entryRaw)) issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, '"entry" must be an object { sim, meta, client, server }'));
+  for (const [k, v] of Object.entries(isObj(entryRaw) ? entryRaw : {})) {
+    if (!OFFICIAL_ENTRY_KEYS.includes(k)) { issues.push(sdkError(SDK_ERROR_CODES.UNKNOWN_FIELD, `entry.${k} is not one of ${OFFICIAL_ENTRY_KEYS.join(' / ')}`)); continue; }
+    const rel = str(v);
+    if (!rel || rel.startsWith('/') || rel.includes('..')) issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, `entry.${k} must be a plugin-relative path (got ${JSON.stringify(v)})`));
+  }
+
+  const slotsRaw = raw.slots === undefined ? [] : raw.slots;
+  if (!Array.isArray(slotsRaw) || slotsRaw.some((s) => !str(s))) {
+    issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, '"slots" must be an array of non-empty slot names (the closed slot list is checked when the plugin is loaded)'));
+  }
+
+  const permissions = (Array.isArray(permissionsRaw) ? permissionsRaw : []).filter((perm) => OFFICIAL_PERMISSIONS.includes(perm));
+  const entry = isObj(entryRaw) ? entryRaw : {};
+  const slots = Array.isArray(slotsRaw) ? slotsRaw.filter((s) => str(s)) : [];
+
+  // ---- 能力：由 `class` + `permissions` + `entry` + parts **派生**（下游只认这一层）------------------------------
   const capabilities = [];
   const add = (c) => { if (CAPABILITIES.includes(c) && !capabilities.includes(c)) capabilities.push(c); };
-  for (const name of (Array.isArray(apis) ? apis : [])) {
-    const c = OFFICIAL_API_MAP[name];
-    if (!c) { issues.push(sdkError(SDK_ERROR_CODES.UNKNOWN_CAPABILITY, `api ${JSON.stringify(name)} is not a known sp:sdk@1 host API (${Object.keys(OFFICIAL_API_MAP).join(', ')})`)); continue; }
-    add(c);
-  }
-  for (const c of Array.isArray(raw.capabilities) ? raw.capabilities : []) {
-    if (!CAPABILITIES.includes(c)) issues.push(sdkError(SDK_ERROR_CODES.UNKNOWN_CAPABILITY, `capability ${JSON.stringify(c)} is not in the closed set`));
-    else add(c);
-  }
-  if (Array.isArray(raw.content) && raw.content.length) add('content');
-  if (panels.length) add('panels');
-  if (raw.notices) add('notices');
+  for (const c of CAPABILITIES_BY_CLASS[klass] || []) add(c);
+  for (const perm of permissions) { const c = CAPABILITIES_BY_PERMISSION[perm]; if (c) add(c); }
+  if (str(entry.sim)) { add('modules'); add('sim'); add('kits'); }
+  if (str(entry.meta)) add('meta');
+  if (str(entry.server)) add('modules');
+  if (str(entry.client)) add('panels');
+  for (const part of ['data', 'operators', 'enemies', 'modes', 'stages']) if (raw[part]) add('content');
   if (raw.i18n) add('i18n');
-  if (isObj(raw.overrides) && Object.keys(raw.overrides).length) add('overrides');
-  if (raw.assets) add('assets');
-  if (entry && profile === 'module') add('modules');
-  if (profile === 'sandbox' && !entry) {
-    issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, 'a sandbox-profile manifest needs an "entry" module to run in the isolated runtime'));
+  if (raw.assets || raw.theme) add('assets');
+  if (slots.length) add('panels');
+
+  // `panels` 从 `entry.client` + `slots` **派生**（`server/mod-manager/officialPanels.js` 读的是它）；
+  // 槽位是否合法由那个桥判（闭枚举住在 shared/workshop.js）。
+  const panels = [];
+  const clientEntry = str(entry.client);
+  if (clientEntry && slots.length) {
+    for (const [i, slot] of slots.entries()) panels.push({ id: `${raw.id}:${i}`, slot, module: clientEntry });
   }
 
-  const combat = !!raw.combat;
-  const combatOnly = capabilities.filter((c) => COMBAT_CAPABILITIES.includes(c));
-  if (!combat && combatOnly.length) {
-    issues.push(sdkError(SDK_ERROR_CODES.COMBAT_REQUIRED, `official manifest declares combat-only capabilities (${combatOnly.join(', ')}) without "combat: true"`));
+  // 上游**没有** `combat` 标志：能改对局结果的是 `sim.code` / `meta.code` 这两个权限（判据是能力，不是意图）。
+  const combat = permissions.includes('sim.code') || permissions.includes('meta.code');
+
+  // 执行档位：`script` 走隔离沙箱（上游 SES Compartment），`trusted` 走宿主进程，其余类不执行代码。
+  const profile = klass === 'script' ? 'sandbox' : 'module';
+
+  // 声明式内容：上游用 parts（**文件路径**，`data: ['items.json']`）而不是表名清单 —— 这里记下
+  // **哪些 part** 被声明（`contentParts`）与**展开后的文件清单**（`content`，路径）。
+  const contentParts = ['data', 'operators', 'enemies', 'modes', 'stages', 'dsl']
+    .filter((part) => raw[part] !== undefined);
+  const contentFiles = [];
+  for (const part of contentParts) {
+    const v = raw[part];
+    for (const rel of (Array.isArray(v) ? v : [v])) { const s = str(rel); if (s) contentFiles.push(s); }
   }
-  // `metaRegisters`：白名单，和 Forge 档 `pack.json.server.meta.registers` 逐字同义（「没声明就等于不许」）。
-  // 声明了 `meta` 就必须给出它；没声明 `meta` 却写了它 ⇒ 也拒（一个不该存在的半成品字段比缺字段更难查）。
-  const metaRegisters = raw.metaRegisters === undefined ? [] : raw.metaRegisters;
-  if (!Array.isArray(metaRegisters) || metaRegisters.some((k) => typeof k !== 'string' || !k)) {
-    issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, '"metaRegisters" must be an array of non-empty key strings like "<class>:<id>" (or a "<class>:*" prefix)'));
-  } else if (capabilities.includes('meta') && !metaRegisters.length) {
-    issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, 'this manifest declares the "meta" api but no "metaRegisters" — a pack may register only the keys it declared'));
-  } else if (!capabilities.includes('meta') && metaRegisters.length) {
-    issues.push(sdkError(SDK_ERROR_CODES.UNKNOWN_FIELD, '"metaRegisters" is declared without the "meta" api — remove one of the two'));
+
+  const entrypoints = [];
+  for (const k of OFFICIAL_ENTRY_KEYS) {
+    if (str(entry[k])) entrypoints.push({ kind: k === 'client' ? 'panel' : (k === 'meta' ? 'meta' : 'module'), id: k, entry: str(entry[k]) });
   }
-  const permissions = [];
-  const perm = (p) => { if (!permissions.includes(p)) permissions.push(p); };
-  if (['modules', 'meta', 'battle', 'room'].some((c) => capabilities.includes(c))) perm('host.process');
-  if (capabilities.includes('storage')) perm('host.storage');
-  if (capabilities.includes('routes')) perm('host.http');
-  if (capabilities.includes('lane')) perm('host.ws');
-  if (capabilities.includes('lobby')) perm('lobby.observe');
-  for (const p of Array.isArray(raw.permissions) ? raw.permissions : []) perm(p);
+
+  const permissionsOut = [];
+  const permOut = (p) => { if (!permissionsOut.includes(p)) permissionsOut.push(p); };
+  if (['script', 'trusted'].includes(klass)) permOut('host.process');
+  if (permissions.includes('data.patch') || permissions.includes('data.add')) permOut('host.content');
+  if (permissions.includes('assets.override') || permissions.includes('assets.add')) permOut('host.assets');
+  if (klass === 'ui') permOut('client.frame');
+
+  const layering = ['modules', 'meta', 'battle', 'room'].some((c) => capabilities.includes(c)) ? 'B'
+    : (capabilities.includes('panels') ? 'C' : 'A');
 
   if (issues.length) return { descriptor: null, issues };
-
-  // `layer`（A 内容 / B 服务端逻辑 / C 客户端 UI）：官方 manifest 不声明它 —— 但 mod 集合的身份条目**要求**它
-  // （`shared/modIdentity.js isModEntry`）。所以**由能力推出来**：服务端载荷优先（B），否则有客户端面板就 C，
-  // 再否则 A。与 Forge 档 `pack.json.layer` 的语义逐字相同。
-  const SERVER_SIDE_CAPS = ['modules', 'meta', 'battle', 'room', 'preDispatch', 'storage', 'health', 'routes', 'metrics', 'lane'];
-  const layer = capabilities.some((c) => SERVER_SIDE_CAPS.includes(c)) ? 'B' : (capabilities.includes('panels') ? 'C' : 'A');
 
   const descriptor = Object.freeze({
     id: raw.id,
@@ -269,44 +302,38 @@ export function fromOfficialManifest(raw) {
     origin: 'official',
     sdk: SDK_OFFICIAL,
     profile,
-    layer,
+    layer: layering,
     combat,
-    api: null,
-    entrypoints: Object.freeze(entry ? [{ kind: profile === 'sandbox' ? 'sandboxModule' : 'module', id: String(raw.id), entry }] : []),
-    content: Object.freeze(Array.isArray(raw.content) ? raw.content.map(String) : []),
-    assets: Object.freeze(Array.isArray(raw.assets) ? raw.assets.map(String) : []),
+    api: Number.isInteger(raw.api) ? raw.api : null,
+    app: str(raw.app) || null,
+    klass: klass || null,
+    scope: Object.freeze(Array.isArray(raw.scope) ? raw.scope.map(String) : []),
+    entrypoints: Object.freeze(entrypoints),
+    content: Object.freeze(contentFiles),
+    contentParts: Object.freeze(contentParts),
+    assets: Object.freeze([]),
     capabilities: Object.freeze([...capabilities].sort()),
-    permissions: Object.freeze([...permissions].sort()),
-    dependencies: Object.freeze(Array.isArray(raw.dependencies) ? raw.dependencies.slice() : []),
+    permissions: Object.freeze(permissionsOut.sort()),
+    officialPermissions: Object.freeze([...permissions]),
+    dependencies: Object.freeze(Array.isArray(raw.requires) ? raw.requires.slice() : []),
     conflicts: Object.freeze(Array.isArray(raw.conflicts) ? raw.conflicts.slice() : []),
-    metaRegisters: Object.freeze(Array.isArray(metaRegisters) ? metaRegisters.map(String) : []),
-    panels: Object.freeze((Array.isArray(panels) ? panels : []).map((p) => Object.freeze({
-      id: str(p && p.id) || null,
-      slot: p && p.slot,
-      module: str(p && p.module),
-      ...(Array.isArray(p && p.messages) ? { messages: Object.freeze([...p.messages]) } : {}),
-      ...(Array.isArray(p && p.styles) ? { styles: Object.freeze(p.styles.slice()) } : {}),
-    }))),
-    budget: Object.freeze({ ...OFFICIAL_DEFAULT_BUDGET, ...(isObj(raw.budget) ? raw.budget : {}) }),
-    // 官方包的字节摘要由官方装载器算出后回填；本适配器只描述。
+    metaRegisters: Object.freeze(Array.isArray(raw.overrides) ? raw.overrides.map(String) : []),
+    panels: Object.freeze(panels.map((p) => Object.freeze({ ...p }))),
+    slots: Object.freeze([...slots]),
+    budget: OFFICIAL_DEFAULT_BUDGET,
+    // 官方包的字节摘要由装载器算出后回填（`officialLoader.js` 用插件全部文件的归一化哈希）。
     contentDigest: typeof raw.contentDigest === 'string' ? raw.contentDigest : null,
-    // 非隔离档（module）跑在宿主进程里 ⇒ 默认要求**逐包同意**（文档里的「房间逐玩家同意 / 服主 SHA-256 pin」）。
-    activationPolicy: Object.freeze({ requiresConsent: profile === 'module', pinnable: true }),
-    compatibility: Object.freeze({ origin: 'official', sdk: SDK_OFFICIAL }),
+    // `script` 走沙箱 ⇒ 不要求逐玩家同意；`trusted` 进宿主进程 ⇒ 默认要求（与上游的信任档一致）。
+    activationPolicy: Object.freeze({ requiresConsent: klass === 'trusted', pinnable: true }),
+    compatibility: Object.freeze({ origin: 'official', sdk: SDK_OFFICIAL, manifest: OFFICIAL_MANIFEST_VERSION }),
   });
   return { descriptor, issues };
 }
 
-/**
- * 校验并冻结一份**已经归一化**的描述符（适配器产出的、或调用方手工构造的）。
- * 未知字段被**点名拒绝**（与 `pack.json` 的 41 键闭集同一条纪律）。
- * @param {any} raw
- * @returns {{ descriptor: object|null, issues: Array<{code:string,reason:string}> }}
- */
 const DESCRIPTOR_FIELDS = Object.freeze([
   'id', 'version', 'origin', 'sdk', 'profile', 'layer', 'combat', 'api', 'entrypoints', 'content', 'assets',
   'capabilities', 'permissions', 'dependencies', 'conflicts', 'budget', 'contentDigest', 'activationPolicy', 'compatibility',
-  'metaRegisters',
+  'metaRegisters', 'contentParts', 'slots', 'klass', 'officialPermissions', 'app', 'scope', 'panels',
 ]);
 
 export function normalizeDescriptor(raw) {
