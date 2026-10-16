@@ -30,10 +30,10 @@
 // `cultivate` (练度 0–3: the effects.json CHAR_MAP aceffect_char_1…4 — a ×ATK / ×DEF / ×max HP of the unit, its own
 // multiplier); each kept only when well-formed and never on a stand-in. Absent: full potential and no 练度 (a raw
 // unit — the match always states both for an owned operator: PlayerState.battleInput).
-// Content identity (DESIGN §32): `cs`, the content hash of the room's content set (shared/plugins/identity.js; 64 hex
+// Content identity (DESIGN §34): `cs`, the content hash of the room's content set (shared/plugins/identity.js; 64 hex
 // digits), is kept when well-formed and left out otherwise — a spec built without one is what it always was. The sim
 // never reads it: it names what the battle runs on — a browser that has not loaded that content is no authority of the
-// battle and a b.result naming another one is refused (P1c, DESIGN §32.6) —, the diagnostics and replays. `vs` (P1c), the
+// battle and a b.result naming another one is refused (P1c, DESIGN §34.6) —, the diagnostics and replays. `vs` (P1c), the
 // room's visual set of cosmetic plugins (shared/plugins/visual.js; 64 hex digits), likewise: kept when well-formed, never
 // read by the sim — a replay or a bug report names the art the battle was drawn with.
 

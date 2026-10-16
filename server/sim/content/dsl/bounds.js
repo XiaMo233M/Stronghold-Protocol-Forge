@@ -1,4 +1,4 @@
-// DSL numbers use the same official-bounds snapshot as data plugins (DESIGN §32.7).
+// DSL numbers use the same official-bounds snapshot as data plugins (DESIGN §34.7).
 // [ASSUMED] A DSL field is not an official blackboard key. The table below is the correspondence:
 //   mods atkPct / atkFlat → bb atk; defPct / defFlat → bb def; maxHpPct / maxHpFlat / hpFlat → bb max_hp;
 //   resPct / resFlat → bb magic_resistance; aspd / attackSpeed → bb attack_speed;

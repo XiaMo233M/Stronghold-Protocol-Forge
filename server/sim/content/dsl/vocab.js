@@ -1,4 +1,4 @@
-// server/sim/content/dsl/vocab.js — closed vocabulary of the P2 DSL (DESIGN §32.7, docs/PLUGIN-DSL.md).
+// server/sim/content/dsl/vocab.js — closed vocabulary of the P2 DSL (DESIGN §34.7, docs/PLUGIN-DSL.md).
 //
 // Triggers, conditions, actions, targets and value expressions. No loops and no state outside the battle:
 // cooldown and the hpBelow latch live in the handler closure installed on that unit. Every action goes through
@@ -157,7 +157,7 @@ export function resolveMods(mods, env, rt = null) {
   if (!mods || typeof mods !== 'object') return out;
   for (const [k, v] of Object.entries(mods)) {
     const n = typeof v === 'number' ? v : resolveValue(v, env, rt);
-    // Action-time buffs resolve here, after compile. The same clamp as compile.js (DESIGN §32.7).
+    // Action-time buffs resolve here, after compile. The same clamp as compile.js (DESIGN §34.7).
     if (finite(n)) out[k] = clampDsl(`mods.${k}`, n);
   }
   return out;

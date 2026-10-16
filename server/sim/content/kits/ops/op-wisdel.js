@@ -227,7 +227,7 @@ export default {
   char_1035_wisdel: (bb, chess) => {
     const tb = traitBb(chess);
     const shockScale = num(tb['attack@append_atk_scale'], 0.5);
-    // [ASSUMED] DESIGN §32.5: shock count follows attack@times. The enable_third_attack branch is the constant 2.
+    // [ASSUMED] DESIGN §34.5: shock count follows attack@times. The enable_third_attack branch is the constant 2.
     const rawCount = num(tb['attack@enable_third_attack']) > 0 ? 2 : Math.max(1, Math.floor(num(tb['attack@times'], 2)) - 1);
     const count = Math.min(bbCap('attack@times'), rawCount);
     const t0 = talentBb(chess, 0);

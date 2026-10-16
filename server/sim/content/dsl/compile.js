@@ -1,4 +1,4 @@
-// server/sim/content/dsl/compile.js — compile a P2 DSL spec into a Kit (DESIGN §32.7).
+// server/sim/content/dsl/compile.js — compile a P2 DSL spec into a Kit (DESIGN §34.7).
 //
 // C2: compileDsl(spec, { bb, chess, def }) → Kit, the same shape a kit function returns. kitOf dispatches
 // def.raw.dsl to this compiler. Tests call

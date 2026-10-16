@@ -64,7 +64,7 @@ function kitExposeOnDeath(ab) {
  */
 function kitBlackCloud(ab, e) {
   const k = ab.sk.KillOthers, f = ab.sk.FireWeapon;
-  // [ASSUMED] DESIGN §32.5: salvo length is sp.maxSp. Official 黑云 maxSp is 3.
+  // [ASSUMED] DESIGN §34.5: salvo length is sp.maxSp. Official 黑云 maxSp is 3.
   const maxAmmo = Math.min(fieldCap('enemy.sp.maxSp'), Math.max(1, num(e.def.raw && e.def.raw.sp && e.def.raw.sp.maxSp, 3)));
   const grabR = (k ? num(k.bb.range_radius, 1.5) : 1.5) * GRAB_RADIUS_SCALE;
   const dur = k ? num(k.bb.duration, 4) : 4;

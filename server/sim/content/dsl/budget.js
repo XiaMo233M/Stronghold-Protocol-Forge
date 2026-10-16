@@ -1,4 +1,4 @@
-// server/sim/content/dsl/budget.js — per-battle, per-plugin action budget (DESIGN §32.7).
+// server/sim/content/dsl/budget.js — per-battle, per-plugin action budget (DESIGN §34.7).
 //
 // The count is executions of action nodes, not time and not targets: one node that fans out to N units costs 1.
 // Past the limit only this plugin stops for the rest of this battle (its timers are cancelled, buffs it tagged

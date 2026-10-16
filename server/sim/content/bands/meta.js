@@ -41,7 +41,7 @@ import { metaBonds } from '../support/meta.js';
 import * as garrisons from '../garrisons.js';
 
 const int = (v, d = 0) => Math.trunc(num(v, d));
-// [ASSUMED] DESIGN §32.5: bb.count grant and slot loops share the official `count` cap. Read at call time.
+// [ASSUMED] DESIGN §34.5: bb.count grant and slot loops share the official `count` cap. Read at call time.
 const timesOf = (v, d = 1) => Math.min(bbCap('count'), Math.max(1, int(v, d)));
 const list = (s) => String(s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
 const hasBond = (ctx, id, bond) => { const c = ctx.gd.chess(id); return !!(c && Array.isArray(c.bonds) && c.bonds.includes(bond)); };

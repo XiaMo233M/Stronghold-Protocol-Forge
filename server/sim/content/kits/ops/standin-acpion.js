@@ -82,7 +82,7 @@ export default {
     }
     if (r3) {
       const b3 = r3.bb ?? {};
-      // [ASSUMED] DESIGN §32.5: cap before the timer loop and lastAt, so 1e9 does not schedule 1e9 slashes. Official is 8.
+      // [ASSUMED] DESIGN §34.5: cap before the timer loop and lastAt, so 1e9 does not schedule 1e9 slashes. Official is 8.
       const times = Math.min(bbCap('times'), Math.max(1, Math.floor(num(b3.times, 8)))), scale = num(b3.atk_scale, 1), pen = num(b3.def_penetrate, 0);
       const grid = r3.rangeGrid?.length ? r3.rangeGrid : null;
       const lastAt = SLASH_FIRST + (times - 1) * SLASH_GAP;

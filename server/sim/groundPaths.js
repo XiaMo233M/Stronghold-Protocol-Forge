@@ -1,4 +1,4 @@
-// Shared build-time ground paths, using the exact sim Grid (DATA §12, DESIGN §32.5).
+// Shared build-time ground paths, using the exact sim Grid (DATA §12, DESIGN §34.5).
 import { Grid } from './grid.js';
 const PAIRS = [
   [[9, 10], [9, 2]], [[12, 10], [9, 2]], [[9, 18], [9, 2]], [[12, 18], [9, 2]],

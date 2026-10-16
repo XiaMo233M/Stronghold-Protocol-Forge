@@ -428,7 +428,7 @@ function kitWarden(ab) {
     hitOut(c) { if (P.killer && P.power && c.dmg.isAttack) c.dmg.defIgnorePct = Math.min(1, (c.dmg.defIgnorePct || 0) + pen()); },
     dealt(c, b, e) {
       if (!P.killer || !P.power || !pierce) return;
-      // [ASSUMED] DESIGN §32.5: extra pierce hits share the `times` cap. Official values stay at or below 12.
+      // [ASSUMED] DESIGN §34.5: extra pierce hits share the `times` cap. Official values stay at or below 12.
       const pierceTimes = Math.min(bbCap('times'), typeof pierce.bb.times === 'number' && Number.isFinite(pierce.bb.times) ? pierce.bb.times : 1);
       for (let i = 1; i < pierceTimes && c.target.alive; i++) b.dealDamage(e, c.target, { amount: e.s.atk, type: 'phys', defIgnorePct: pen(), canDodge: true, isSkill: true, tags: ['enemyAbility', 'armorPiercing'] });
     },

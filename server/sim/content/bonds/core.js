@@ -699,7 +699,7 @@ export function payHammers(ctx) {
   const step = Math.floor(num(p?.layer, 0));
   if (!p || !(step > 0)) return 0;
   const due = Math.floor(ctx.layers('victoriaShip') / step);
-  // [ASSUMED] DESIGN §32.5: each milestone pays at most the official `count` cap. Official count is 1.
+  // [ASSUMED] DESIGN §34.5: each milestone pays at most the official `count` cap. Official count is 1.
   const count = Math.min(bbCap('count'), Math.max(0, Math.floor(num(p.count, 1))));
   let granted = 0;
   // re-read the counter every milestone: grantItem dispatches onGain, which re-enters this function (nested payments

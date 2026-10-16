@@ -1,4 +1,4 @@
-// server/sim/content/dsl/validate.js — structural check of a P2 DSL spec (DESIGN §32.7).
+// server/sim/content/dsl/validate.js — structural check of a P2 DSL spec (DESIGN §34.7).
 //
 // Returns problems; it does not throw. compileDsl / compileDslMeta throw an Error whose message contains the
 // PLUGIN_DSL_* code. The shared catalogue in shared/plugins/errors.js explains every code.

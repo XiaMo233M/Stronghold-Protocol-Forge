@@ -378,7 +378,7 @@ export function resolveHit(b, u, prof, target, info, x, y) {
     const attachedFunnel = !!prof.funnelMul && prof.funnelBodyHits !== 0;
     if (!attachedFunnel) mulT *= funnelMul;
     // (a count from a kit, a trait or text is capped here too: an attack of a target that takes no damage would otherwise
-    // loop as often as it says — DESIGN §32.5; official counts stay far below PLUGIN_TIMES_MAX)
+    // loop as often as it says — DESIGN §34.5; official counts stay far below PLUGIN_TIMES_MAX)
     const hits = Math.min(PLUGIN_TIMES_MAX, prof.hitsFn ? prof.hitsFn(b, u, info) : Math.max(1, prof.hits || 1));
     // `hitDmgMul` (professions.js header): each instance's 伤害倍率 — the DamageInfo `mul`, after DEF / RES — and only the
     // first instance may give 受击回复 (砾's two 50 % hits, PRTS 砾 特性备注)
