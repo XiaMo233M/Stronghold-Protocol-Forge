@@ -700,7 +700,7 @@ node tools/workshop-validate.mjs my-pack
 这四组字段是给「包不只是数据」这件事开的口子：一个包可以说它要一个客户端资源容器、一个挂载点、一个分发前准入钩子、
 一条只读路由。**A 段只做格式**：解析形状、点名拒绝、把声明并进身份哈希；**B1 段把其中两组落成行为** ——
 `server.preDispatch` 的钩子真的挂在分发路径上（§1.9.1），`routes` 的只读路由真的被服务（§1.9.2）；**B2 段把
-`client` 落成行为** —— 包内的面板模块真的被送到浏览器并挂上四个宿主（§1.9.3），而「声明了却用不了的声明」从此
+`client` 落成行为** —— 包内的面板模块真的被送到浏览器并挂上十个宿主（四个浮层 + 六个既有组件里的宿主，见 §1.9.3），而「声明了却用不了的声明」从此
 **拒绝整个包**（§1.9.3 末尾的那条纪律）；**B3a 段把最后那一组 `assets` 落成服务端行为** —— 容器与清单在
 `/workshop-resources/` 上被服务（流式，不整读进内存）、`verify` 按声明校验容器、`serverPolicy` 决定 `/assets` /
 `/fonts` 还回不回（§1.9.4），并且**把 B1 的 `server.preDispatch` 对齐到同一条纪律**（声明不可用 ⇒ 整包拒绝）。
@@ -798,7 +798,7 @@ node tools/workshop-validate.mjs my-pack
 | 分发前钩子被挂上、能拦消息 | ✅ 已实现（B1：`server/workshop.js loadWorkshopHooks`、`server/modDispatch.js`、`server/net.js`；`test/modPreDispatch.test.js`） |
 | `resource.*` 三个 `C2S` 类型 | ✅ 已实现（B1：`shared/protocol.js`；`PROTOCOL_VERSION` 仍是 1） |
 | 只读路由被注册、被服务 | ✅ 已实现（B1：`server/http/workshop.js workshopRoutesFor`、`server/http/static.js`；`test/modRoutes.test.js`） |
-| C 层面板被注册、被挂载（模块路由 + `welcome.modPanels` + 四个宿主 + `order`/`gate`/`requires`） | ✅ 已实现（B2：`server/workshop.js loadWorkshopPanels`、`server/http/workshop.js workshopPanelFilesFor`、`public/js/ui/extensions.js`、`server/lobby.js welcomeInfo`；`test/modClientPanels.test.js`） |
+| C 层面板被注册、被挂载（模块路由 + `welcome.modPanels` + 十个宿主（四个浮层 + 六个既有组件里的宿主，见 §1.9.3） + `order`/`gate`/`requires`） | ✅ 已实现（B2：`server/workshop.js loadWorkshopPanels`、`server/http/workshop.js workshopPanelFilesFor`、`public/js/ui/extensions.js`、`server/lobby.js welcomeInfo`；`test/modClientPanels.test.js`） |
 | **组件级改写**（`client.panels[].wraps`：包裹 / 替换一个具名引擎组件，链按 §28.3 次序合成） | ✅ 已实现（DESIGN §28.19：`shared/workshop.js` 的闭枚举 + `public/js/ui/modComponents.js` + `extensions.js` 的注册与失败隔离；`test/modPanelWraps.test.js`） |
 | `assets` 的容器与清单被服务（`/workshop-resources/`，流式、只服务注册过的 URL、`?v=` 缓存键） | ✅ 已实现（B3a：`server/workshop.js assetsIssues`、`server/http/workshop.js workshopResourceFilesFor`、`server/http/static.js`；`test/modAssets.test.js`） |
 | `serverPolicy`：`serve`（缺省）/ `cache-only`（`/assets`、`/fonts` 回 412 且不回源） | ✅ 已实现（B3a：`server/http/workshop.js resourceServerPolicy`、`server/http/static.js`；只在包显式声明时生效） |
