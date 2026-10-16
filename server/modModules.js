@@ -132,7 +132,14 @@ function ioFacade(dir) {
  * 为什么要抛而不是给 `undefined`：`host.healthz?.(...)` 与 `host.healthz(...)` 的区别只对写代码的人有意义，
  * 而作者看到的是「没生效」；带码的异常会直接说出「你没在 uses 里声明它」。
  */
-export function moduleHost({ packId, moduleId, hash, dir, uses, write, stateRoot, log = noopLog, registry = null }) {
+export function moduleHost({ packId, moduleId, hash, dir, uses, write, stateRoot, log = noopLog, registry = null, matchKinds = null }) {
+  // 种类声明交出去之前先冻成只读数据（DESIGN §28.54）：包拿到的是**值**，不是指向归一化清单的可变句柄 ——
+  // 那份清单是 `identifyPack` 摘要的输入，能被就地改写就等于摘要能被改。
+  const matchKindsValue = Object.freeze((Array.isArray(matchKinds) ? matchKinds : [])
+    .map((kind) => Object.freeze({
+      ...kind,
+      ...(kind && kind.seats ? { seats: Object.freeze({ ...kind.seats }) } : {}),
+    })));
   const declared = (use) => Array.isArray(uses) && uses.includes(use);
   const say = (use) => {
     throw new ModuleRefused('MODULE_USE_UNDECLARED',
@@ -193,6 +200,13 @@ export function moduleHost({ packId, moduleId, hash, dir, uses, write, stateRoot
     healthz: mount('healthz'),
     /** 用一层包装器包住 `MatchClass`（`fn(Base) => Subclass`）；只有这一项要求包声明 `combat: true`。 */
     matchClass: mount('matchClass'),
+    /**
+     * 这个包声明的**对局种类**（DESIGN §28.54）：一份冻结的只读数据，不是分派器。管理器**不认玩法名** ——
+     * 判定住在包装器自己的构造里（能用的信号只有房间那侧的包集合与开局后的包通道），命中才换实现，
+     * 否则**必须原样把 Base 交回**：`MatchClass` 是进程级一次性的包装（`server/index.js`），
+     * 换错了类就是把**所有**房间一起换掉。没声明 `matchClass` 就抛 —— 与 `io` / `metrics` 同一条「没声明就没有能力」。
+     */
+    matchKinds: declared('matchClass') ? () => matchKindsValue : () => say('matchClass'),
     /**
      * 一份**只读标量快照**（是值，不是句柄）：`{ uptimeSec, rss, heapUsed, elu, loopP50, loopP95, loopP99,
      * loopMax, sampleAgeMs, state }`。**绝不**交 `process` / 定时器句柄 / 函数 —— 一个包要报内存就是报这个值，
@@ -361,6 +375,9 @@ export async function loadServerModules(loaded, { log = noopLog, stateRoot = nul
       const host = moduleHost({
         packId: pack.id, moduleId: mod.id, hash: pack.hash, dir: pack.dir,
         uses: mod.uses, write: mod.write, stateRoot, log,
+        // 种类声明按包交给模块（DESIGN §28.54）：包装器用它判「这一局是不是我的」，管理器不猜。
+        // 包没声明时交 `null`，由 `moduleHost` 归一成空数组 —— 调用方不必再判一次。
+        matchKinds: pack.matchKinds || null,
         registry: Object.assign(
           (use, fn) => { mounted[use].push(fn); return true; },
           { route: (entry) => { mounted.route.push(entry); return true; } },

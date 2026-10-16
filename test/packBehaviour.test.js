@@ -128,17 +128,17 @@ describe('表：闭枚举，一格开关只有一个值', () => {
     assert.ok(PACK_FIELDS.includes('behaviour'));
     assert.equal(PACK_FIELDS[PACK_FIELDS.indexOf('variants') + 1], 'behaviour',
       '新格紧挨着口径那一格：两张表逐字同形，读起来是同一套东西');
-    // 37 = 36 + `callBudget`（§28.52，沙箱档的每局每插件调用预算：`{ max? }`，只许收紧不许放宽）。它不是
-    // 行为开关那一族（那一族改的是引擎里已有的某条规则），而是一条**上限**声明，所以它不挨着 `behaviour`。
-    assert.equal(PACK_FIELDS.length, 37, '顶层键是闭集：加一格必须就地延长这个计数，不许放松它');
+    // 38 = 36 + `callBudget`（§28.52，沙箱档的每局每插件调用预算：`{ max? }`，只许收紧不许放宽）+ `matchKinds`
+    // （§28.54，第二种对局的声明面）。`callBudget` 不是行为开关那一族（那一族改的是引擎里已有的某条规则），
+    // 而是一条**上限**声明，所以它不挨着 `behaviour`。
+    assert.equal(PACK_FIELDS.length, 38, '顶层键是闭集：加一格必须就地延长这个计数，不许放松它');
     // ⚠️ 只钉总数是不够的：两条独立的线各自加过一格，数字**碰巧都是 37**、加的却**不是同一格**
     // （我们加 `callBudget`，吸收进来的下游加 `matchKinds`）。这种「数字相同但不是同一格」一旦按数字
     // 取一边，就会**静默丢格**、而总数断言照样是绿的。所以这里逐格点名：并线之后两格都必须还在。
     assert.ok(PACK_FIELDS.includes('callBudget'),
       '调用预算那格（§28.52）不能被并线时的「数字一样取一边」丢掉');
-    // `matchKinds`（§28.54，第二种对局的声明面）随「吸收下游 matchKinds」那一刀落地时，把下面这行解注、
-    // 并把上面的 37 改成 38（38 = 36 + callBudget + matchKinds）。
-    // assert.ok(PACK_FIELDS.includes('matchKinds'), '对局种类声明那格同样不能被丢掉');
+    assert.ok(PACK_FIELDS.includes('matchKinds'),
+      '对局种类声明那格（§28.54）同样不能被丢掉 —— 它与 callBudget 是两条线各自加的，不是同一格');
     assert.equal(WORKSHOP_CONTENT_FILES.includes('behaviour'), false,
       '行为开关走 pack.json.behaviour；把它当数据文件就是开一条「包可以覆盖任意数值 / 任意文件」的通道');
     // 第 1 刀的口径表**一字不动**（它已随 v0.15.3 发布）

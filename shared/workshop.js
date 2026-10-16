@@ -166,6 +166,14 @@ export const PACK_FIELDS = Object.freeze([
   'behaviour',
   // 中间层四组能力声明（DESIGN §28.13）
   'assets', 'client', 'server', 'routes',
+  // 对局种类声明（DESIGN §28.54，第二种对局的**声明面**）：这个包的 `matchClass` 包装器**在什么条件下**把一局
+  // 换成另一种玩法。它是声明与协商面，不是分派表 —— 管理器**不认玩法名**，判定住在包自己的模块里
+  // （`server/modModules.js` 的 `host.matchKinds()`）。
+  //
+  // ⚠️ 它与本表里别的格子不是一种加法：它既**不是**「往某个既有闭枚举里多一个成员」，也不是纯数据文件 ——
+  // 它是「顶层键闭集多一个合法键」**加上**一个新引入的、只属于它自己的字段闭枚举（`MATCH_KIND_FIELDS`）。
+  // 对**在册老包**零影响：不写这个键 ⇒ 既不触碰那个新枚举、也不进归一化清单（见下面 `matchKindsParsed` 那段）。
+  'matchKinds',
   // 目标引擎（DESIGN §28.46）：`forge`（缺省，本引擎自己装）或 `stardust`（给 Stardust 宿主的**声明型包** ——
   // 本引擎不装载它，但认识它、不拒绝它、也不把它算进数据叠加层；同一份 pack.json 两端各自读得懂）。
   // `target: "stardust"` 的包额外允许 Stardust profile 的几格（见 `STARDUST_TARGET_FIELDS`）。
@@ -1300,6 +1308,91 @@ function parseRoomDecl(raw) {
 }
 
 /**
+ * 对局种类声明（DESIGN §28.54）的闭字段与上界。
+ *
+ * ⚠️ 符号名以**实物**为准：`MATCH_KIND_FIELDS` 是**单数** `KIND`（曾有一次笔误写成复数
+ * `MATCH_KINDS_FIELDS`，以这一行为准），因为 `shared/modSurface.js` 的能力条目按这个名字登记符号，
+ * 两处必须逐字对上 —— 拼错就是一条永远对不上的登记。
+ *
+ * 座位上界取 12：比宿主最大房间还宽的「玩法」根本没人能组局，写进去只会成为一条永不满足的声明。
+ */
+export const MATCH_KIND_FIELDS = Object.freeze(['id', 'seats', 'label']);
+/** 种类 id 与包通道同一套字符集 —— 两条通道说的是同一件事（作者起的、有界的名字），不该各定一套拼法。 */
+export const MATCH_KIND_ID_RE = /^[a-z][a-z0-9_-]{0,63}$/;
+/** 一个包最多声明几种对局。**有界**：种类声明会进包的归一化清单（见下面解析点），无界就是无界摘要。 */
+export const MAX_PACK_MATCH_KINDS = 4;
+/** 每种对局的座位上下界（1..12，与宿主最大房间同宽）。 */
+export const MATCH_KIND_SEATS_MAX = 12;
+
+/**
+ * `pack.json.matchKinds` —— 这个包的 `matchClass` 包装器**在什么条件下**把一局换成另一种玩法（DESIGN §28.54）。
+ *
+ * 它是**声明与协商面，不是分派表**：管理器**不认玩法名**，判定住在包自己的模块里（`host.matchKinds()`）。
+ * 两条判据都照本层既有的形状，因为它们的失败方向都是「写了等于没写」：
+ *   * 必须有 `matchClass` 作接收人（与 `MODULES_CHANNELS_NEED_MATCH` 同形，判在下面归一化流程里）；
+ *   * 且**只在写出来时**才进归一化结果（没声明的包哈希逐字节不变，与 `variants` / `behaviour` 同一条纪律）。
+ *
+ * ⚠️ 「只在写出来时才进」不是风格问题：`identifyPack` 哈希的就是这份归一化清单，给**所有**包补一个
+ * `matchKinds: []` 会改掉**每一个已发布包**的摘要。
+ * @returns {{ ok: true, decl: object[] } | { ok: false, error: string, detail: string }}
+ */
+function parseMatchKindsDecl(raw) {
+  if (!Array.isArray(raw)) return fail('MATCHKINDS_BAD_SHAPE', 'matchKinds must be an array of { id, seats?: { min, max }, label? }');
+  if (!raw.length) return fail('MATCHKINDS_EMPTY', 'matchKinds must declare at least one kind (drop the key instead of sending [])');
+  if (raw.length > MAX_PACK_MATCH_KINDS) {
+    return fail('MATCHKINDS_TOO_MANY', `matchKinds: at most ${MAX_PACK_MATCH_KINDS} kinds per pack (got ${raw.length})`);
+  }
+  const out = [];
+  const seen = new Set();
+  for (const [i, kind] of raw.entries()) {
+    if (!isPlainObj(kind)) return fail('MATCHKINDS_BAD_SHAPE', `matchKinds[${i}] must be an object: { id, seats?: { min, max }, label? }`);
+    for (const key of Object.keys(kind)) {
+      if (!MATCH_KIND_FIELDS.includes(key)) {
+        return fail('MATCHKINDS_UNKNOWN_FIELD', `matchKinds[${i}]: "${key}" is not a kind field (${MATCH_KIND_FIELDS.join(', ')})`);
+      }
+    }
+    if (typeof kind.id !== 'string' || !MATCH_KIND_ID_RE.test(kind.id)) {
+      return fail('MATCHKINDS_BAD_ID', `matchKinds[${i}].id: "${String(kind.id)}" is not a valid kind id (^[a-z][a-z0-9_-]{0,63}$ — the same shape pack channels use)`);
+    }
+    if (seen.has(kind.id)) return fail('MATCHKINDS_DUPLICATE_ID', `matchKinds: "${kind.id}" is declared twice (one id, one kind)`);
+    seen.add(kind.id);
+    const clean = { id: kind.id };
+    if (kind.seats !== undefined) {
+      if (!isPlainObj(kind.seats)) {
+        return fail('MATCHKINDS_BAD_SEATS', `matchKinds["${kind.id}"].seats must be { min, max } (integers from 1 to ${MATCH_KIND_SEATS_MAX})`);
+      }
+      for (const key of Object.keys(kind.seats)) {
+        if (key !== 'min' && key !== 'max') {
+          return fail('MATCHKINDS_BAD_SEATS', `matchKinds["${kind.id}"].seats: "${key}" is not a seat bound (min, max)`);
+        }
+      }
+      for (const name of ['min', 'max']) {
+        const v = kind.seats[name];
+        if (!Number.isInteger(v) || v < 1 || v > MATCH_KIND_SEATS_MAX) {
+          return fail('MATCHKINDS_BAD_SEATS', `matchKinds["${kind.id}"].seats.${name} must be an integer from 1 to ${MATCH_KIND_SEATS_MAX}, got ${String(v)}`);
+        }
+      }
+      if (kind.seats.min > kind.seats.max) {
+        return fail('MATCHKINDS_BAD_SEATS', `matchKinds["${kind.id}"].seats: min ${kind.seats.min} is larger than max ${kind.seats.max}`);
+      }
+      clean.seats = { min: kind.seats.min, max: kind.seats.max };
+    }
+    if (kind.label !== undefined) {
+      const label = strField(kind.label, 60);
+      if (!label) {
+        return fail('MATCHKINDS_BAD_LABEL', `matchKinds["${kind.id}"].label must be a non-empty string of at most 60 characters (author-facing text, not a player-visible string — so it takes no i18n entry)`);
+      }
+      clean.label = label;
+    }
+    out.push(clean);
+  }
+  // 按 id 排序而不是书写顺序：两份书写顺序不同的清单必须是同一份字节（与 `requires` / `registers` 同一条纪律）。
+  // ⚠️ 这条不是美化：这份清单进包的归一化摘要，**书写顺序能改摘要就是摘要闸门能被绕过**。
+  out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return { ok: true, decl: out };
+}
+
+/**
  * `pack.json.routes` —— 包能声明的**只读** HTTP 路由（§28.13）。刻意窄：绝对路径、包内 `.json`、三种缓存语义。
  *   * `path` 必须是 `/` 开头的绝对路径：一条相对路径落到哪个前缀上是路由表说了算，作者不该猜；
  *   * `file` 必须以 `.json` 结尾：`.js` / `.html` 一律不在此通道（那与 `/workshop-assets` 拒绝它们同一个理由
@@ -2331,6 +2424,10 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // —— 口径选的是引擎已有的另一套表现，不是内容。所以它不进 `contributesDecl`，一个只带它的包照旧 `EMPTY_PACK`。
   const variantsParsed = raw.variants === undefined ? null : parseVariantsDecl(raw.variants);
   if (variantsParsed && !variantsParsed.ok) return variantsParsed;
+  // 对局种类声明（DESIGN §28.54）：形状（数组 / 闭字段 / 上界 / 去重 / 排序）都在 `parseMatchKindsDecl` 判。
+  // 接收人闸门（`MATCHKINDS_NEED_MATCH_CLASS`）判在下面归一化流程里 —— 它要读**已解析完的** `server.modules`。
+  const matchKindsParsed = raw.matchKinds === undefined ? null : parseMatchKindsDecl(raw.matchKinds);
+  if (matchKindsParsed && !matchKindsParsed.ok) return matchKindsParsed;
   // 行为开关声明（DESIGN §28.43）：形状与闭枚举都在 `shared/behaviour.js` 判，这里只负责「写了才进清单」。
   // **不是贡献项**（与 `variants` / `playtest` 同一个语义）：行为开关改的是引擎里**已经实现**的一条规则，
   // 它自己不带来任何内容。所以一个只带 `behaviour` 的包照旧 `EMPTY_PACK`（文案里点名它）。
@@ -2419,7 +2516,7 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
     // 只声明助战的包今天整包被拒（plugin-pack G6：一个 `support: [...]` + `content: []` 的包得到的就是这一条），
     // 而原来的文案里**没有** `support` 这个词，作者只能对着 `EMPTY_PACK` 猜。`support` 只决定**助战卡池**里放谁，
     // 干员本体还是由 `content: ["chess"]` 带进来的 —— 所以放宽它不是这一刀的活（那是既有裁决），把话说明白才是。
-    const notContributions = ['support', 'playtest', 'variants', 'behaviour', 'dependencies', 'conflicts', 'callBudget']
+    const notContributions = ['support', 'playtest', 'variants', 'behaviour', 'dependencies', 'conflicts', 'callBudget', 'matchKinds']
       .filter((n) => raw[n] !== undefined);
     const names = [...WORKSHOP_CONTENT_FILES, 'voices', 'voiceLangs', 'bondIcons', 'itemIcons', 'art', 'skins', 'operators',
       'assets', 'client', 'server.preDispatch', 'server.meta', 'server.battle', 'server.room', 'server.modules', 'server.transport', 'routes', 'i18n', 'notices', 'forms', 'fx'];
@@ -2478,6 +2575,19 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   const layer = raw.layer === undefined || raw.layer === null ? null : String(raw.layer).trim().toUpperCase();
   if (layer !== null && !MOD_LAYERS.includes(layer)) return fail('BAD_LAYER', `"layer": "${raw.layer}" is not one of ${MOD_LAYERS.join(' / ')}`);
   if (raw.combat !== undefined && typeof raw.combat !== 'boolean') return fail('BAD_COMBAT', '"combat" must be true or false (may this pack change a battle result?)');
+  // `matchKinds`（DESIGN §28.54）的接收人闸门，形状照 `MODULES_CHANNELS_NEED_MATCH`：种类声明说的是「这一局换成
+  // 另一种玩法」，而全场只有 `matchClass` 包装器能换掉对局（`server/index.js` 用它包住 `MatchClass`）；没有它，
+  // 这句话没有执行者，所以点名拒 —— 不许留一条**永远不会发生**的效果（本层到处在消灭的形态）。
+  //
+  // ⚠️ `combat` **不在这里重复判**：合法的 `matchKinds` 必须有 `matchClass` 包装器，而上面 §28.14 那条
+  // `MODULES_NEEDS_COMBAT` 已经先一步拦下「有包装器却不肯认 combat」。在这里再写一条就是**永远不会命中的死格子**
+  // （判据是能力，不是意图 —— 见 §28.20 的闸门分类规则）。
+  if (matchKindsParsed) {
+    const kindWrappers = serverParsed ? (serverParsed.decl.modules || []).filter((m) => m.uses.includes('matchClass')) : [];
+    if (!kindWrappers.length) {
+      return fail('MATCHKINDS_NEED_MATCH_CLASS', 'pack.json.matchKinds has no executor: only a server module whose uses includes "matchClass" can replace the match (server/index.js wraps MatchClass with it), so this pack must either mount one or drop the kind declarations — a kind nothing reads is the silent failure this layer keeps refusing');
+    }
+  }
   // `server.meta` 改的是**对局结果**，所以按业主裁决（2026-10-10）它必须声明 `combat: true` —— 那正是「要改
   // 对局结果的包进入房间摘要闸门 + golden 语料」这条线的入口（DESIGN §28.13.1 与 §29）。**硬闸门，不是警告**：
   // 一个能改结果却把自己标成 `combat: false` 的包，会让「不声明 combat 的包改不了结果」这句话从**结构性保证**
@@ -2569,6 +2679,12 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
       // 包都补一个 `callBudget: { max: 8000 }` 会让**所有已发布包的哈希全部改变**；而它**必须**进哈希：一份会截断
       // 回调的包与一份不截的包是两种对局行为，共用同一个摘要就等于房间闸门放行两种玩法（DESIGN §28.2）。
       ...(callBudgetParsed ? { callBudget: callBudgetParsed.decl } : {}),
+      // 对局种类声明（DESIGN §28.54）：**只在声明过时才存在**，与 `variants` / `behaviour` / `callBudget` 同一条
+      // 纪律、理由逐字相同 —— `identifyPack` 哈希的就是这份归一化清单的 `canonicalJson`（`server/workshop.js`），
+      // 给每个包都补一个 `matchKinds: []` 会让**所有已发布包的哈希全部改变**。
+      // ⚠️ 而它**必须**进哈希：种类声明决定「这一局由谁算」（换玩法 = 换对局结果），两份只差种类声明的包共用
+      // 同一个摘要，就等于房间的摘要闸门放行两种不同的玩法（DESIGN §28.2）。
+      ...(matchKindsParsed ? { matchKinds: matchKindsParsed.decl } : {}),
       // 四组新声明：**只在声明过时才存在**（见上面 `declared` 的注释）。哈希覆盖它们靠的就是这一条 ——
       // `identifyPack` 哈希的是这份归一化清单的 `canonicalJson`（server/workshop.js）。
       ...Object.fromEntries(declared),

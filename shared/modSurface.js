@@ -348,6 +348,40 @@ export const MOD_SURFACE = Object.freeze([
     spec: '§28.13',
   },
   {
+    id: 'matchKinds',
+    layer: 'B',
+    decl: 'pack.json.matchKinds = [{ id, seats?: { min, max }, label? }]',
+    anchors: [
+      { symbol: 'PACK_FIELDS', members: ['matchKinds'] },
+      // ⚠️ 符号名是**单数** `KIND`（以 `shared/workshop.js` 的导出实名为准）：这里登记的符号名与那边必须逐字
+      // 对上，拼错就是一条永远对不上的登记。
+      { symbol: 'MATCH_KIND_FIELDS' },
+      { symbol: 'MATCH_KIND_ID_RE' },
+      { symbol: 'MAX_PACK_MATCH_KINDS' },
+      { symbol: 'MATCH_KIND_SEATS_MAX' },
+    ],
+    requires: [
+      '必须有接收人：本包至少要有一个 `server.modules` 条目挂 `matchClass`，否则 `MATCHKINDS_NEED_MATCH_CLASS` 点名拒'
+        + '（形状照 §28.23 的 `MODULES_CHANNELS_NEED_MATCH`）；`combat: true` **不在这一格重复判** —— §28.14 那条已经'
+        + '先拦下「有包装器却不肯认 combat」，再写一遍就是永远不会命中的死格子',
+      '只在写出来时才进归一化结果（同 `variants` / `behaviour` / `callBudget`）：`identifyPack` 哈希的就是这份清单，'
+        + '给所有包都加 `matchKinds: []` 会改掉**每一个已发布包**的摘要；而它必须进摘要 —— 这一格决定「这一局由谁算什么」'
+        + '（§28.2），两份只差种类声明的包共用摘要就是摘要闸门放行两种玩法',
+      '管理器**不认玩法名**：`host.matchKinds()` 交出深度冻结的只读数据，判定住在包装器自己的构造里。`MatchClass` 是'
+        + '进程级一次性的包装（`server/index.js`），所以包装器命中才换、否则**必须原样把 Base 交回**',
+      '有界：每包 ≤4 种、座位 1..12、`label` ≤60 且是作者可见文本（不经 `t()` ⇒ **不占 i18n 词条**，与 §28.15 那条'
+        + '「给作者读的说明不进语言包」同口径）；种类 id 与包通道**共用一套字符集**',
+      '清单按 id 排序后进摘要（不按书写顺序）：两份只差书写顺序的声明必须是同一份字节 —— 否则书写顺序就能改摘要，'
+        + '那等于摘要闸门可以被绕过',
+      '不新增 `C2S` 意图、不动 `PROTOCOL_VERSION` / `MOD_API_VERSION`：加一格字段不抬版本',
+    ],
+    files: ['shared/workshop.js', 'server/modModules.js'],
+    tests: ['test/modMatchKinds.test.mjs', 'test/packBehaviour.test.js', 'test/modSurface.test.js'],
+    // ⚠️ 节号以我方为准（上游）：它在下游 fork 里是 §28.52，与我方既有的 §28.52（`callBudget`）撞号，
+    // 所以排到我方现有最大号之后。改号按能力归一，别处引用一并跟着改。
+    spec: '§28.54',
+  },
+  {
     id: 'assets',
     layer: 'B',
     decl: 'pack.json.assets = { container, manifest, serverPolicy?, verify?, mirrors? }',
