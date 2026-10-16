@@ -275,6 +275,72 @@ describe('kit import 白名单：每个文件的导出名下限（⊇，不是�
 });
 
 // ---------------------------------------------------------------------------------------------------
+// ①c 白名单文件的**可变状态不出边界**守卫
+//
+// 为什么需要这一条：白名单（`shared/kitImports.js`）决定「包能 import 什么」，它是一道**安全边界**。
+// 放开 `@sim/body.js` 与 `@sim/professions.js` 之前做的那次审计结论是：
+//   · `body.js` —— 模块级 `let`/`var` = 0、可变容器 = 0，导出全是纯函数（文件自述
+//     「Pure functions of (x, y, hitArea); no battle state」，`body.js:29`）⇒ 放开它是安全的，无需守卫。
+//   · `professions.js` —— **确实有** 3 个模块级容器/对象：`DOLL_SWITCH_IMMUNE`（`new Set`）、`TUNE`、
+//     `PRIORITY_ALIASES`（后两个连 `Object.freeze` 都没有）。放开它**之所以仍然安全**，靠三条实测事实：
+//     ① 三者**全部不是导出**（ESM 里非导出绑定没有外部句柄，包拿不到引用）；
+//     ② 三者**从未被写**（源码里只在 `:284` / `:681` / `:698` 被读）；
+//     ③ 能到包的那一侧全是不可变形态（`PROFESSION_DEFAULTS` / `SUB` / `KNOWN_SUBPROFESSIONS` 都 frozen，
+//        其余是数值常量）。
+//
+// ⚠️ 这三条是**放开白名单的安全前提**，而「前提今天成立」不能靠记性：白名单是永久开放的入口，
+// 将来任何人顺手写一个 `export` 就会把可变容器递到包手里、且没有任何东西会红。
+// 所以把前提钉成判据 —— 与 ①b「导出名下限」同一种做法，只是这条守的是**不该出现的东西**。
+// 判据是能给红的：把 `DOLL_SWITCH_IMMUNE` 临时加进 `professions.js` 的导出表，本用例即 `not ok`。
+// ---------------------------------------------------------------------------------------------------
+/** 白名单里**含模块级可变状态**的文件，以及「让它保持安全」必须成立的三件事。 */
+const KIT_IMPORT_MUTABLE_GUARD = {
+  'server/sim/professions.js': {
+    /** ① 这些名字带可变状态（`Set` / 未 freeze 的对象），**不得**被导出。 */
+    notExported: ['DOLL_SWITCH_IMMUNE', 'TUNE', 'PRIORITY_ALIASES'],
+    /** ② 它们在源码里的写入形态一个都不许出现。 */
+    writePatterns: [
+      /\bDOLL_SWITCH_IMMUNE\s*\.\s*(?:add|delete|clear|set)\b/,
+      /\bTUNE\s*\[[^\]]*\]\s*=/,
+      /\bPRIORITY_ALIASES\s*\[[^\]]*\]\s*=/,
+    ],
+    /** ③ 能到包的那一侧必须冻结。 */
+    frozen: ['PROFESSION_DEFAULTS', 'SUB', 'KNOWN_SUBPROFESSIONS'],
+  },
+};
+
+describe('kit import 白名单：可变状态不出边界（放开 professions.js 的安全前提）', () => {
+  for (const [file, guard] of Object.entries(KIT_IMPORT_MUTABLE_GUARD)) {
+    test(`${file} 的模块级可变绑定不被导出`, async () => {
+      const mod = await import(new URL(`../${file}`, import.meta.url).href);
+      const leaked = guard.notExported.filter((name) => name in mod);
+      assert.deepEqual(
+        leaked,
+        [],
+        `${file} 导出了带可变状态的 ${leaked.join('、')} —— 白名单一放开，包就拿到了一个**共享可写句柄**`
+        + '（改一次影响所有对局）。要么不给它加 export，要么先把它改成 Object.freeze 后的只读形态。',
+      );
+    });
+
+    test(`${file} 的模块级可变绑定从未被写（源码里没有写入形态）`, () => {
+      const src = fs.readFileSync(path.join(ROOT, file), 'utf8');
+      const hits = guard.writePatterns.flatMap((re) => src.match(re) ?? []);
+      assert.deepEqual(hits, [], `${file} 出现了写入形态：${hits.join('、')} —— 模块级共享状态被就地改写会跨对局串味`);
+    });
+
+    test(`${file} 能到包的那一侧全是不可变形态（frozen 或数值常量）`, async () => {
+      const mod = await import(new URL(`../${file}`, import.meta.url).href);
+      const mutable = guard.frozen.filter((name) => !Object.isFrozen(mod[name]));
+      assert.deepEqual(
+        mutable,
+        [],
+        `${file} 的 ${mutable.join('、')} 不是 frozen —— 包拿到它就能就地改写引擎的默认值表`,
+      );
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------------------------------
 // ② 校验器口径（编辑器/CLI 走这一条）
 // ---------------------------------------------------------------------------------------------------
 describe('kit import：校验器口径', () => {
