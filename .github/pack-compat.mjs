@@ -41,7 +41,7 @@ const { zipRead } = await import(pathToFileURL(`${ROOT}/shared/zip.js`).href);
 const { PACK_ID_RE } = await import(pathToFileURL(`${ROOT}/shared/workshop.js`).href);
 
 const get = (u, dest) => {
-  const r = spawnSync('curl', ['-sL', '-m', '240', '-o', dest, u], { encoding: 'utf8' });
+  const r = spawnSync('curl', ['-sL', '-m', '240', '-o', dest, u], { encoding: 'utf8', windowsHide: true });
   return r.status === 0 && fs.existsSync(dest) && fs.statSync(dest).size > 0;
 };
 /**
@@ -142,7 +142,7 @@ for (const m of target) {
   // 大包（几百条告警级）在 Actions 上实测会顶到 300 s ⇒ 崩溃被误记成「包的问题」。
   // 给到 15 分钟，并把 stderr 留下，崩了也要能看出是超时还是判据。
   const v = spawnSync(process.execPath, [path.join(ROOT, 'tools/workshop-validate.mjs'), root, '--json'],
-    { encoding: 'utf8', cwd: ROOT, maxBuffer: 64 * 1024 * 1024, timeout: 900000, killSignal: 'SIGKILL' });
+    { encoding: 'utf8', cwd: ROOT, maxBuffer: 64 * 1024 * 1024, timeout: 900000, killSignal: 'SIGKILL', windowsHide: true });
   const so = String(v.stdout ?? '');
   const se = String(v.stderr ?? '');
   let rep = null;
@@ -183,7 +183,7 @@ const transport = rows.filter((x) => x.stage === 'TRUNCATED_DOWNLOAD');
 console.log('汇总:', JSON.stringify(tally));
 if (transport.length) console.log(`⚠ ${transport.length} 条**下载不完整**：这些不出兼容性结论（不代表兼容，也不代表不兼容）`);
 
-const md = ['### 线上包 × 本引擎 兼容性', `- 引擎：本仓 checkout（` + spawnSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).stdout.trim() + '）',
+const md = ['### 线上包 × 本引擎 兼容性', `- 引擎：本仓 checkout（` + spawnSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8', windowsHide: true }).stdout.trim() + '）',
   `- 清单可见 mods ${mods.length} + flagged ${flagged.length} = ${all.length}，本轮判定 ${target.length}，成判 ${rows.length}`,
   `- 结果：${Object.entries(tally).map(([k, v]) => `${k} ${v}`).join(' · ')}`,
   bad.length ? `\n不通过/异常（第三方只报告，不拦）：\n\n| id | src | stage | codes | 名称 | 作者 |\n|---|---|---|---|---|---|\n`
