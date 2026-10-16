@@ -57,7 +57,7 @@
 
 | # | 同步点 | 漏了会怎样 |
 |---|---|---|
-| ① | `shared/workshop.js` 的 **`PACK_FIELDS`**（**今天 35 键**） | 作者写它 ⇒ `PACK_UNKNOWN_FIELD` **整包拒**；字段在这一层就是**闭集** |
+| ① | `shared/workshop.js` 的 **`PACK_FIELDS`**（**今天 37 键**） | 作者写它 ⇒ `PACK_UNKNOWN_FIELD` **整包拒**；字段在这一层就是**闭集** |
 | ② | 同文件的 **`normalizePackManifest`** 加解析分支 | 键合法了、**归一化时被丢掉** ⇒ 作者看到「pack.json 合法、包加载了、可我写的那件事没发生」 |
 | ③ | `server/workshop.js` 的 **`identifyPack`** 的哈希清单 | **能改变一端行为的声明不进哈希** ⇒ 同一个摘要下出现两种行为（§28.2） |
 | ④ | `docs/MOD-SURFACE.md` 那一行（表面清单） | 文档与实现分叉；`test/modSurface.test.js` 红 |
@@ -143,3 +143,61 @@
 
 **钉它的测试**：`test/modSurface.test.js` —— 它会断言**锚点符号还在声明的模块里**、**实现文件与测试文件都还在**、
 **文档的那一行还在**，以及**引擎里每一个「包可声明的名单」都被某条表面引用**（加了一格却没进清单**也红**）。
+
+## 8. 加一格 `server.modules` 的挂载点（`SERVER_MODULE_USES` 闭枚举）—— **6 处**
+
+以 §28.54 的 `lane` 为实例（今天闭枚举 7 格：`boot` / `shutdown` / `matchClass` / `healthz` / `metrics` / `route` / `lane`）。
+
+| # | 同步点 | 漏了会怎样 |
+|---|---|---|
+| ① | `shared/workshop.js` 的 **`SERVER_MODULE_USES`**，**加在末尾** | 作者写它 ⇒ `MODULES_BAD_USES` 整包拒。加在末尾是因为归一化结果按这张表的次序输出（`uses: SERVER_MODULE_USES.filter(...)`）—— 插在中间会**改掉现存包的摘要** |
+| ② | 同文件 **`SERVER_MODULE_FIELDS`** + 解析分支（新声明字段时） | 键合法但被丢掉 ⇒ 「包加载了、我写的那件事没发生」；`MODULES_UNKNOWN_FIELD` 也就永远不会替作者纠错 |
+| ③ | `server/modModules.js`：`moduleHost` 上的门面 + 装载循环里的登记（**没声明就抛 `MODULE_USE_UNDECLARED`**，不是 `undefined`） | 交出一个 `undefined` 只会变成一行 `TypeError: not a function`，作者分不清是「没声明」还是「拼错了」 |
+| ④ | **能力闸门**：这一格能不能改对局结果？能 ⇒ 必须要求 `combat: true`（照 `MODULES_NEED_COMBAT` / `MATCHKINDS_NEED_COMBAT` 的写法） | 「不声明 combat 的包改不了结果」从结构性保证退化成一句口号 |
+| ⑤ | `shared/modSurface.js` + `docs/MOD-SURFACE.md` + `docs/WORKSHOP.md` 各一行/一节 | `test/modSurface.test.js` 红；文档与实现分叉 |
+| ⑥ | 新测试加进 `test/` **并且**加进 `.github/workflows/mirror-upstream-forge.yml` 的 `CONTRACT` 数组；同时把改过的上游文件登记进 `.github/overlay.json` 的 `patches`（带锚点） | 闸门会在「什么都没跑」的情况下报绿；下一次同步把我方那一格**静默吃掉**（新增文件丢了自己会响，插入体丢了是静默的） |
+
+## 9. 加一格客户端整屏声明（`client.screens` 这类「C 层新声明面」）—— **4 处**
+
+| # | 同步点 | 漏了会怎样 |
+|---|---|---|
+| ① | `shared/workshop.js`：闭枚举（`CLIENT_SCREEN_ROUTES`）+ 字段闭集 + 解析分支 + **`client` 块的「至少说出一件能用的事」判据** | 声明进不了清单，或反过来 —— 一个只声明空 `client` 的包被当成「有客户端界面」 |
+| ② | `server/workshop.js`：装载期的文件判据（`panelModuleIssues` 现在同时收 panels 与 screens）与**投递**（合成同一份线表）；`identifyPack` 里源码字节进摘要 | 包合法、URL 永远 404；或两份不同的界面共用同一个摘要 |
+| ③ | `public/js/ui/extensions.js`：**客户端那份名单**（`MOD_SCREEN_ROUTES` / `MOD_PANEL_SLOTS`）+ 挂载 / 卸载 / 失败方向 | 两处名单各说各话 —— 作者写出「声明合法、客户端永远不调用」的死格子。所以 `test/modClientScreens.test.mjs` 直接读源码文本把两份钉成同一份 |
+| ④ | `docs/MOD-SURFACE.md` + `shared/modSurface.js` + `docs/WORKSHOP.md` + `test/`（并进 `CONTRACT`）+ `overlay.json` 登记 | 同 §8 的 ⑤⑥ |
+
+## 10. 越一次本体路径（`.github/overlay.json` 的 `bodyPaths` 受控例外）—— **5 处**
+
+以 §28.55 为实例（`server/lobby.js`：「空席就销毁房间」那句话住在大厅里，没有别的挂载点）。这条红线的判据
+2026-10-15 从「与本体 `sganggs` 的路径交集**必须为 0**」改成「每一处交集都必须是**已登记且锚点在位**的受控例外」——
+放宽的是**证明方式**，不是红线本身，而且它**不放松**另外两条（`manager-only-check` 仍然要求增量属于管理器那一层）。
+
+| # | 同步点 | 漏了会怎样 |
+|---|---|---|
+| ① | 先问「**有没有不改本体的现成入口**」：`startServer(opts)` 那类参数（§28.54 就是靠 `opts.wsLanes` 才没动 `server/index.js`）、包自己的 `install(room)`、`server/modServer.js` 那类启动器 | 跳过这一步，本体路径会越描越多，最后每一格都得靠登记活着 |
+| ② | 改法必须是**最小替换**，且**默认路径与从前逐字相同**（§28.55：两处 `disposeRoom(room, 'empty')` ⇒ `reapEmptyRoom(room)`，没人申请时后者**就是**原来那一行） | 「登记过」变成一张空白支票：一个能力悄悄改掉宿主默认行为，而读登记的人看不出来 |
+| ③ | `.github/overlay.json` 的 `bodyPaths`：`file` + `why` + **至少一条 `anchors`**，且锚点要取**我方插入体里独有的那段文本**（不是上下文里本来就有的行） | 锚点丢了 ⇒ 下一次同步把我方插入体弄掉而没人知道（`.github/game-overlap-check.mjs` 逐条核对，丢了拦同步）；抄来的锚点恒真 = 等于没锚 |
+| ④ | `docs/design/mod-layer.md` 那一节**写明为什么必须动它**（§28.55 末尾那段），`shared/modSurface.js` 的 `requires` 里带 ⚠ 那一条 | 后来人只看到「本体路径被改了」，看不到「为什么没有第二条路」，于是要么回退要么再开一格 |
+| ⑤ | 对外口径跟着改：闸门输出行是「N 处受控例外，锚点在位」，**不能**再写「与本体零交集」 | 报告里引用成 0 就是伪造证据 |
+
+## 11. 抬一次发行版本号（`APP_VERSION`）—— **9 处**（0.18.7 那一版漏了两处，CI 当场判红）
+
+tag 是 `modmgr-v<APP_VERSION>-<UPSTREAM_VERSION>`；`test/version.test.js` 判「四处同源 + CHANGELOG 首节 + README 徽章」，
+`test/promptBaseline.test.js` 把 README 与 `docs/prompts/*` 里每一条「本仓库 x.y.z」/「this repo's own version is x」都当声明来判。
+
+| # | 同步点 | 谁拦 / 漏了会怎样 |
+|---|---|---|
+| ① | `shared/constants.js` 的 `APP_VERSION` | `test/version.test.js`（四处同源的第一处） |
+| ②③④ | `package.json` 的 `version` + `package-lock.json` 的**根 `version`** 与 `packages[""].version` | 同上；只改一处 = lock 与包名版本自相矛盾，`npm ci` 会按 lock 走 |
+| ⑤ | `CHANGELOG.md` 新加一节 `## x.y.z — 日期`（**顶层那一段必须仍能发满 8 条公告**） | `test/version.test.js` 判首节 == `APP_VERSION`；`test/docs-paths.test.js` 判顶层仍能发满 `NOTICE_LIMITS.announcements`；少一节是**静默**少一条玩家公告 |
+| ⑥ | `README.md` 顶部 shields 徽章 `badge/version-<x.y.z>-`（`-` 要写成 `--`） | `test/version.test.js` 用正则按 `APP_VERSION` 重建徽章名 —— 这一处最容易漏 |
+| ⑦ | `README.md`「版本号怎么读」表里 `APP_VERSION` 那一行的**取值** | 值本身被 `promptBaseline` 判；⚠ 同一格里那个常量**行号引用**（`` `:34` ``）**没有任何测试判** —— 往 `shared/constants.js` 上面插一行就会静默漂错，是这九处里唯一的纯静默面 |
+| ⑧ | `README.md` 中文「本仓库自己的版本是 x.y.z」+ 英文段 `this repo's own version is **x.y.z**` 与那行的 tag 示例 `v<x>-<上游>` | `test/promptBaseline.test.js`（两类都扫）；只改中文不改英文 ⇒ 英文那条判据红 |
+| ⑨ | `docs/prompts/README.md` 与 `docs/prompts/kit.md` 的「**本版基线**」行 | `test/promptBaseline.test.js`；这两格在 0.18.7 那版就是漏抬的，CI 红过一次 |
+
+⚠ ①–④ 与 ⑤ 都在**本体也有的路径**上（`shared/constants.js` / `package.json` / `package-lock.json` / `CHANGELOG.md` / `README.md`）
+⇒ 抬版本本身就是「每轮同步都要复核的受控例外」：`.github/overlay.json` 的 `bodyPaths` 锚点写的就是这些新值，
+抬完不改锚点 ⇒ `game-overlap-check` 拦同步（那是有意的：**没留下证据的越线**才算越线）。
+`UPSTREAM_VERSION` 那一半**不在这里** —— 它与 `docs/history/` 最新一节由 `test/docs-consistency.test.js` 钉在一起。
+
+

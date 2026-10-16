@@ -1,0 +1,328 @@
+{
+  "note": "本仓 master 相对上游的**叠加层唯一真相**。同步时 `.github/overlay-check.mjs` 逐条验：`mine` 少一个文件就红、`patches` 的锚点丢了也红（我方补丁被同步弄丢是最危险的静默故障）；上游如果自己收了我的修复 ⇒ 退出码 2，只提示不拦（那是好事，该减我方叠加层）。",
+  "upstream": "XiaMo233M/Stronghold-Protocol-Forge",
+  "branches": { "mirror": "main", "product": "master", "default": "master" },
+  "mine": [
+    ".github/overlay.json",
+    ".github/overlay-check.mjs",
+    ".github/pack-compat.mjs",
+    ".github/release-verify.mjs",
+    ".github/sync-contract-baseline.json",
+    ".github/sync-gate-check.mjs",
+    ".github/game-overlap-check.mjs",
+    ".github/workflows/mirror-upstream-forge.yml",
+    ".github/workflows/pack-compat.yml",
+    ".github/workflows/release-manager.yml",
+    "tools/package-server.mjs",
+    "test/package-server-profile.test.js",
+    "test/modMatchKinds.test.mjs",
+    "test/modClientScreens.test.mjs",
+    "test/modPackLane.test.mjs",
+    "test/modRoomHold.test.mjs",
+    "server/modLanes.js",
+    "server/modServer.js",
+    "server/modHotReload.js",
+    ".github/manager-only-check.mjs",
+    "test/mod-hot-reload.test.mjs",
+    "docs/DEPLOY-SERVER.md",
+    "docs/ENGINE-COMPAT-STARDUST-AUDIT.md",
+    "docs/UPSTREAM-PR-LEDGER.md"
+  ],
+  "patches": [
+    {
+      "file": "tools/workshop-validate.mjs",
+      "why": "大份 JSON（184 条棋子的包 ≈ 240 KB）在 POSIX 管道上是**异步写**，`process.exit()` 会在 flush 前截断 —— 下游拿到半截 JSON，看起来像「校验器崩溃」。Windows 管道同步写所以本机不复现。改成 `exitCode` + 自然退出，退出码语义一个字没变。",
+      "anchors": [
+        "process.exitCode = report.errors ? 1 : 0;",
+        "// 同 json 分支：大份报告在 POSIX 管道上是异步写"
+      ],
+      "problemPattern": "process.exit(report.errors ? 1 : 0);",
+      "retireWhen": "上游那份里 `problemPattern` 不再出现（或已出现我的 anchors）⇒ 修复被采纳，删掉这一条 patches 并按 `overlay-check` 复跑。"
+    },
+    {
+      "file": "shared/workshop.js",
+      "why": "§28.52 的 `pack.json.matchKinds` 声明面（DESIGN 2026-10-15 授权：这一格可以由我方先落，允许与维护方 Forge 冲突）。三个锚点少任何一个都=我的那一格被同步弄丢了：闭字段、解析器、以及「没有 matchClass 就没有执行者」那条点名拒。",
+      "anchors": [
+        "export const MATCH_KIND_FIELDS = Object.freeze(['id', 'seats', 'label']);",
+        "function parseMatchKindsDecl(raw) {",
+        "return fail('MATCHKINDS_NEED_MATCH_CLASS',"
+      ],
+      "retireWhen": "上游那份出现同一批 anchors（它自己收了这一格）⇒ 删掉这条 patches，并把 `test/modMatchKinds.test.mjs` 并进上游的契约面复跑一遍。"
+    },
+    {
+      "file": "server/modModules.js",
+      "why": "§28.52 的门面那半边：`host.matchKinds()` 交出深度冻结的只读数据、且没声明 `matchClass` 就抛。丢了它，包侧声明进得了摘要却读不到 —— 正是本层到处在拒的「写了等于没写」。",
+      "anchors": [
+        "matchKinds: declared('matchClass') ? () => matchKindsValue : () => say('matchClass'),",
+        "matchKinds: pack.matchKinds || null,",
+        "import { claimPackLane, attachPackLaneHandler } from './modLanes.js';",
+        "lane: declared('lane') ? (fn) => {"
+      ],
+      "retireWhen": "同上：上游出现同一批 anchors ⇒ 删这条 patches。"
+    },
+    {
+      "file": "docs/design/mod-layer.md",
+      "why": "§28.52 那一节（含「MatchClass 是进程级一次包装 ⇒ 包装器必须原样把 Base 交回」这条只有读码才撞得上的坑）。文档丢了，`test/docs-paths.test.js` 会因为代码里引用 DESIGN §28.52 而红 —— 那是响亮故障，不是静默，但仍要登记。",
+      "anchors": [
+        "### 28.52 `pack.json.matchKinds`"
+      ],
+      "retireWhen": "上游自己写了同一节 ⇒ 删这条 patches，并把两版的差异人工合到保留的那一份上。"
+    },
+    {
+      "file": "shared/workshop.js",
+      "why": "§28.53 的形状层：`client.screens` 的闭枚举路由与字段判据（整屏替换的声明面）。少了它，包作者写 screens 会被 `PACK_UNKNOWN_FIELD` 之外的路径静默丢掉。",
+      "anchors": [
+        "export const CLIENT_SCREEN_ROUTES = Object.freeze(['title', 'lobby', 'room', 'game']);",
+        "function parseMatchKindsDecl(raw) {",
+        "const MODULE_LANE_FIELDS = Object.freeze(['path', 'summary']);",
+        "if (mod.uses.includes('lane') && mod.lane === undefined) {"
+      ],
+      "retireWhen": "上游自己收了 client.screens ⇒ 删这条 patches；路由枚举若被上游扩，必须与客户端那份一起改（test/modClientScreens.test.mjs 钉住两份同源）。"
+    },
+    {
+      "file": "server/workshop.js",
+      "why": "§28.53 的投递那半边：装载器把 panels 与 screens 合成同一份线表、屏条目的源码字节进身份摘要。丢了它，包声明了整屏但客户端永远收不到。",
+      "anchors": [
+        "const declaredScreens = decl && Array.isArray(decl.screens) ? decl.screens : [];"
+      ],
+      "retireWhen": "上游收了同一批投递 ⇒ 删这条 patches。"
+    },
+    {
+      "file": "public/js/ui/extensions.js",
+      "why": "§28.53 的运行时那半边：整屏挂载/卸载与「任何一步失败就保住宿主原生界面」的方向。另外这一格在来源分支上是**坏的**（enter(rawName) 的字符类被写成 caret 记法字面文本 ⇒ 反向区间，模块连 node --check 都过不去），我方按意图修成 [\\u0000-\\u001f\\u007f-\\u009f]。",
+      "anchors": [
+        "export const MOD_SCREEN_ROUTES = Object.freeze(['title', 'lobby', 'room', 'game']);",
+        "async function syncActiveScreen()"
+      ],
+      "retireWhen": "上游自己实现整屏替换 ⇒ 删这条 patches，并复核那个控制码字符类的修法有没有被带回去。"
+    },
+    {
+      "file": "docs/design/mod-layer.md",
+      "why": "§28.53 那一节（含「路由只有四条、结算与干员调配是路由内部视图」这条只有读 selectRoute 才撞得上的判据）。",
+      "anchors": [
+        "### 28.53 `client.screens`"
+      ],
+      "retireWhen": "上游自己写了同一节 ⇒ 删这条 patches。"
+    },
+    {
+      "file": "editor/ui/i18n.en.pack.js",
+      "why": "维护方 `main` **自带**一条 lint 错误（`no-dupe-keys`：'语音' 在同一字面量里出现两次 —— 一次是编辑器页签、一次是校验 kind 名），CI 的 `Lint (warnings allowed)` 因此每次都红。这里不删键、不改名（改名会破词典一致性检查，那条分支的第一版就是这么错的），只就地豁免并写清理由。",
+      "anchors": [
+        "// eslint-disable-next-line no-dupe-keys"
+      ],
+      "retireWhen": "上游自己豁免这一格、或把两份词条拆成两个对象 ⇒ 删这条 patches。"
+    },
+    {
+      "file": "docs/MOD-SURFACE.md",
+      "why": "§28.52 / §28.53 / §28.54 / §28.55 四行表面清单。`test/modSurface.test.js` 判「文档那一行还在」，丢了它是响的；但登记它仍然必要 —— 否则下一次同步把这几行合掉时没人解释为什么。",
+      "anchors": [
+        "| `client.screens` |",
+        "| `server.modules.lane` |",
+        "| `matchKinds` |",
+        "| `server.room.hold` |"
+      ],
+      "retireWhen": "上游自己列了这三格 ⇒ 删这条 patches，并把 wording 并到上游那一份。"
+    },
+    {
+      "file": "docs/WORKSHOP.md",
+      "why": "作者面四节（1.28 / 1.29 / 1.30 / 1.31）。丢了它们，包作者就只能从代码里猜判据 —— 这一层反复强调「作者的失败方向必须是响的」。",
+      "anchors": [
+        "### 1.28 对局种类（`matchKinds`）",
+        "### 1.29 整屏替换（`client.screens`）",
+        "### 1.30 包自带 WebSocket 通道",
+        "### 1.31 空席房间的回收裁决"
+      ],
+      "retireWhen": "上游自己写了对应小节 ⇒ 删这条 patches。"
+    },
+    {
+      "file": "docs/SYNC-POINTS.md",
+      "why": "§8（加一格 `uses` 闭枚举 = 6 处）、§9（加一格 C 层声明面 = 4 处）、§10（越一次本体路径 = 5 处，2026-10-15 随 bodyPaths 受控例外口径新加）与 §11（抬一次发行版本号 = 9 处；0.18.7 那版漏抬 README 徽章与 `docs/prompts/*` 的「本版基线」行，CI 判红，所以把清单补成可查的）。这一份是「漏一处会静默什么」的唯一清单，抄丢了它，下一次加格子就会漏投递点或漏 CONTRACT。⚠ 编号在 2026-10-15 被纠正过一次：我方先前误用 7 / 8，与本体那份自带的「## 7. 改「表面」」撞号，现已顺成 8 / 9 / 10。",
+      "anchors": [
+        "## 8. 加一格 `server.modules` 的挂载点",
+        "## 9. 加一格客户端整屏声明",
+        "## 10. 越一次本体路径",
+        "## 11. 抬一次发行版本号"
+      ],
+      "retireWhen": "上游自己补了这几节 ⇒ 删这条 patches。"
+    },
+    {
+      "file": "shared/modSurface.js",
+      "why": "三条机器可读登记项（matchKinds / client.screens / server.modules.lane）。`test/modSurface.test.js` 靠它把「表面清单 ↔ 锚点符号 ↔ 文档那一行」钉在一起。",
+      "anchors": [
+        "id: 'client.screens',",
+        "id: 'server.modules.lane',",
+        "id: 'matchKinds',"
+      ],
+      "retireWhen": "上游自己登记了这三格 ⇒ 删这条 patches。"
+    },
+    {
+      "file": "test/packBehaviour.test.js",
+      "why": "`PACK_FIELDS` 的闭集计数被这条断言钉死（我方加 matchKinds ⇒ 就地延长，不放松）。这一格丢了不会让功能坏，只会让**下一格加进来时没人被迫记账** —— 正是这条断言存在的全部意义。",
+      "anchors": [
+        "assert.equal(PACK_FIELDS.length, 37,"
+      ],
+      "retireWhen": "上游自己收了 matchKinds（它那份也是 37 或更多且含这一格）⇒ 删这条 patches。"
+    },
+    {
+      "file": "test/packServerModules.test.js",
+      "why": "`SERVER_MODULE_USES` 的精确清单断言（`lane` 加在末尾，所以现存包的 uses 字节不变）。同上一条：这条断言是「加格子必须记账」的那道门。",
+      "anchors": [
+        "assert.deepEqual(SERVER_MODULE_USES, ['boot', 'shutdown', 'matchClass', 'healthz', 'metrics', 'route', 'lane']);"
+      ],
+      "retireWhen": "上游自己收了 lane ⇒ 删这条 patches。"
+    },
+    {
+      "file": "shared/workshop.js",
+      "why": "§28.55 的形状层：`server.room` 的闭字段从 `{ module }` 扩成 `{ module, hold }`（导出 `ROOM_FIELDS` 让 `shared/modSurface.js` 能锚它），并加上「`hold: true` 必须配 `combat: true`」那道包级闸门。少了它，包写下 `hold` 会被 `ROOM_UNKNOWN_FIELD` 拒 —— 作者看到的是一个「引擎不认这格」的假象，而真实缺口在我方这一格。",
+      "anchors": [
+        "export const ROOM_FIELDS = Object.freeze(['module', 'hold']);",
+        "return fail('ROOM_HOLD_NEEDS_COMBAT',"
+      ],
+      "retireWhen": "维护方自己收了空席回收 ⇒ 删这条 patches，并复核 `combat` 闸门有没有跟着来（那是 §28.20 那句「能力判据」的唯一例外）。"
+    },
+    {
+      "file": "server/roomPack.js",
+      "why": "§28.55 的裁决那半边：`canHold` 只在包声明过 `hold` 时才收（否则 `ROOM_HOLD_UNDECLARED` 点名）、`holdDecision` 的 OR + 最早时限 + 宿主 15 分钟硬夹、谓词抛异常只作废这一票、以及随房间销毁收回那张表。丢了它，包侧的声明进得了摘要却没人问它 —— 正是本层到处在拒的「写了等于没写」。",
+      "anchors": [
+        "export const ROOM_HOLD_MAX_MS = 15 * 60_000;",
+        "export function holdDecision(room, { now = Date.now, log = null } = {}) {",
+        "export function releaseRoomHolds(roomCode) { holdRegistry.delete(roomCode); }",
+        "hold: !!(pack.server && pack.server.room && pack.server.room.hold === true) });",
+        "canHold(fn) {"
+      ],
+      "retireWhen": "上游自己给了回收裁决 ⇒ 删这条 patches；若它换了时限口径，必须与 `server/lobby.js` 那一格和 `test/modRoomHold.test.mjs` 一起改。"
+    },
+    {
+      "file": "docs/design/mod-layer.md",
+      "why": "§28.55 那一节：含「这一格是 §28.20 那句『房间钩子不是 combat 闸门』的唯一例外」与「包决定留不留、宿主决定留多久」两条只有写下来才不会被人回退的判据。",
+      "anchors": [
+        "### 28.55 `server.room.hold`"
+      ],
+      "retireWhen": "上游自己写了同一节 ⇒ 删这条 patches，把两版差异人工合到保留的那一份。"
+    },
+    {
+      "file": "shared/modSurface.js",
+      "why": "§28.55 那条机器可读登记（`id: 'server.room.hold'`，锚在 `ROOM_FIELDS` 的 `hold` 成员上）。`test/modSurface.test.js` 靠它把「表面清单 ↔ 锚点符号 ↔ 文档那一行 ↔ 测试文件」钉在一起；丢了它是响的，但登记它仍然必要 —— 否则下一次同步没人解释为什么这一格要求 `combat`。",
+      "anchors": [
+        "id: 'server.room.hold',"
+      ],
+      "retireWhen": "上游自己登记了这一格 ⇒ 删这条 patches。"
+    },
+    {
+      "file": "docs/prompts/README.md",
+      "why": "「本版基线」那一行抬到 0.18.8。`test/promptBaseline.test.js` 判的就是这一行的「本仓库 x.y.z」必须等于 `package.json` 的 `version` —— 它是**机器判据**，不是散文：抬版本却不动这里 ⇒ CI 当场红（0.18.7 那版就是这么红过一次）。",
+      "anchors": [
+        "本仓库 **0.18.8** / 打包的上游游戏本体 **0.2.6**"
+      ],
+      "retireWhen": "上游自己抬了同一行 ⇒ 删这条 patches；下次抬版本时必须一起改。"
+    },
+    {
+      "file": "docs/prompts/kit.md",
+      "why": "同上：这一份的「本版基线」行读的是本仓库版本 + 上游版本，`test/promptBaseline.test.js` 同一判据。本文其余内容（钩子词表）一字未动 —— 上游这一版没有增删任何钩子。",
+      "anchors": [
+        "本仓库 **0.18.8** / 上游游戏本体 **0.2.6**"
+      ],
+      "retireWhen": "同上。"
+    },
+    {
+      "file": "shared/kitImports.js",
+      "why": "2026-10-15 新开三格纯 helper：`@sim/detmath.js`、`@sim/body.js`、`@sim/professions.js`。判据不是「想让包碰内核」，而是实测到的 workaround —— 一份第三方字节补丁为了用 `roundHalfEven` / `bodyInKeys` / `resolveProfile`，把这三个文件的相关段落**抄进了包内**，那是一份会静默漂移的冻结副本。规则一字未动：按文件指名、不开前缀，`@sim/skills.js` / `@sim/ai.js` / `@sim/snapshot.js` 仍然被 `KIT_IMPORT` 拒（已实测）。丢了这三行 = 包退回「内联副本」那条路，正是 §28.54 的 `@ops/` 那格当初要消灭的东西。",
+      "anchors": [
+        "  { specifier: '@sim/detmath.js', file: 'server/sim/detmath.js' },",
+        "  { specifier: '@sim/professions.js', file: 'server/sim/professions.js' },"
+      ],
+      "retireWhen": "上游自己放开同一批 specifier ⇒ 删这条 patches；若上游改成「按前缀放开 @sim/」，必须复核 `SIM_PRIVATE` 那份拒服清单与确定性判据（这三个文件都是零 import、零模块级可变状态才进的表）。"
+    },
+    {
+      "file": "test/kitImports.test.js",
+      "why": "导出名下限表必须跟着白名单走 —— 这条守卫本身就是「白名单加文件不记账」的红闸门（`KIT_IMPORT_EXPORTS` 的键集合与 `KIT_IMPORT_FILES` 的 file 集合逐字相等）。新加的三个文件各记一行下限（超集判据：加导出不红，删名/改名才红）。",
+      "anchors": [
+        "  \"server/sim/detmath.js\": ["
+      ],
+      "retireWhen": "上游自己收了这三个文件（它那份表里也有） ⇒ 删这条 patches。"
+    },
+    {
+      "file": "docs/design/mod-layer.md",
+      "why": "白名单那一节（§28.18 附近的「a prefix whitelist, resolved on both ends」）补了三行名单与开表理由 —— 文档只写「允许什么」而不写「为什么是这三个」，下一次就有人按前缀整个放开。",
+      "anchors": [
+        "- `@sim/detmath.js`, `@sim/body.js`, `@sim/professions.js` — three more engine modules opened **by file** on 2026-10-15,"
+      ],
+      "retireWhen": "上游自己写了这一段 ⇒ 删这条 patches。"
+    }
+  ],
+  "bodyPaths": [
+    {
+      "file": "shared/constants.js",
+      "why": "发布版本号是我方自有路线必须自己推进的一格（`test/version.test.js` 把 APP_VERSION 与 package.json / lock / CHANGELOG 首节四处钉成同源；不抬它就撞已存在的 modmgr-v0.18.7-0.2.6 tag）。这一格只改 `APP_VERSION` 一个值 —— `PROTOCOL_VERSION` / `MOD_API_VERSION` 一字未动。",
+      "anchors": ["export const APP_VERSION = '0.18.8';"]
+    },
+    {
+      "file": "package.json",
+      "why": "同上：版本同源的第二处。",
+      "anchors": ["\"version\": \"0.18.8\""]
+    },
+    {
+      "file": "package-lock.json",
+      "why": "同上：版本同源的第三、四处（根 `version` 与 `packages[\"\"].version`）。",
+      "anchors": ["\"version\": \"0.18.8\""]
+    },
+    {
+      "file": "CHANGELOG.md",
+      "why": "0.18.8 那一节（§28.55 空席回收裁决 + 第一次动本体路径的登记 + 门面文档跟上代码）。游戏内公告由本文件的前 8 节生成，所以这一节同时是发布公告；`test/version.test.js` 要求首个 `## x.y.z` 与 APP_VERSION 同半，`test/docs-paths.test.js` 要求顶层那一段仍发得出 8 条公告（少一节是**静默**变少）。上一版（0.18.7）漏了 README 徽章与 `docs/prompts/*` 的「本版基线」行 —— 那两处由 `test/promptBaseline.test.js` 判，本版抬齐。",
+      "anchors": ["## 0.18.8 — 2026-10-15"]
+    },
+    {
+      "file": "server/lobby.js",
+      "why": "§28.55 的挂载点。回收那句话（真人全退 ⇒ `disposeRoom(room, 'empty')`）住在大厅里，**没有第二条路可走**：`server.modules` 的 `boot` 拿不到房间生命周期，而 `server.room` 的观察面按 §28.20 的契约不能改对局 —— 所以要给包那一票，就必须在大厅里问一次。改法是最小替换：两处调用点 ⇒ `reapEmptyRoom(room)`，**没有任何包申请时它逐字就是原来那一行**；`disposeRoom` 只多了「清定时器 + 收回裁决表」。不动 `C2S`、不动 `PROTOCOL_VERSION` / `MOD_API_VERSION`、不改房间对客户端的形状。判据在 `test/modRoomHold.test.mjs`，口径在 `docs/SYNC-POINTS.md` §10。",
+      "anchors": [
+        "if (room.activeHumans().length === 0) this.reapEmptyRoom(room);",
+        "reapEmptyRoom(room) {",
+        "releaseRoomHolds(room.code);"
+      ]
+    },
+    {
+      "file": "README.md",
+      "why": "门面文档跟着代码走（本仓的常驻纪律「Docs follow the code」）：那一页有两处**今天已经是假的**的陈述必须改 —— 「`server.modules` 6 种用途」（今天 7 种，`lane`）与「把一段路径交给宿主自己的代码 ⇒ ⛔ 包不能声明」（今天包可以按 §28.54 申请一条 lane）。同时补上 §28.52 / §28.53 / §28.55 三行、把热装载那一行改成「报告 + 受监督重启（`server/modServer.js`；`server/index.js` 那条路一个监听器都不建）」的真实形状，并把英文段里「36 top-level keys」改成实测的 37。另外这一页有**四处版本声明**由测试判（顶部 shields 徽章、「版本号怎么读」的 `APP_VERSION` 那一行、中文那行「本仓库自己的版本是」、英文 `this repo's own version is`）—— 0.18.7 那版漏抬了它们，`test/version.test.js` / `test/promptBaseline.test.js` 当场判红，本版抬齐并在这里锚住徽章。登记为受控例外而不是「不写」：README 是外人第一站读的东西，留假数字比留空白更糟。",
+      "anchors": [
+        "**closed set of 37 top-level keys**",
+        "**7 种用途**",
+        "| 人走空了但**这一局不作废**（志愿者冻结） |",
+        "There is **no in-process code swap**",
+        "badge/version-0.18.8-"
+      ]
+    }
+  ],
+  "bodyPathsNote": "受控例外登记处（2026-10-15 起）：每一格是我方**确实改了、而游戏本体 sganggs 也有同名路径**的文件。必填：file / why / anchors（至少一条，且必须能在我们的树里找到 —— `.github/game-overlap-check.mjs` 逐条核对，锚点丢了就拦同步）。空数组 = 当前与本体零交集，这是更强的那条性质，别为了填东西往里塞。",
+  "release": {
+    "profile": "tools/package-server.mjs（server profile）",
+    "why": "只发**纯 mod 管理器**：核心运行时 + Mod API。不含游戏素材、内容包、示例夹具，也不含 `editor/`、`test/`、`.github/`、我这线的网络调优 lane 附加与 perf-lite UI。",
+    "excludePrefixes": [
+      "Stronghold-Protocol/public/assets/",
+      "Stronghold-Protocol/public/fonts/",
+      "Stronghold-Protocol/packs/",
+      "Stronghold-Protocol/editor/",
+      "Stronghold-Protocol/test/",
+      "Stronghold-Protocol/.github/",
+      "Stronghold-Protocol/types/",
+      "Stronghold-Protocol/docs/examples/",
+      "Stronghold-Protocol/docs/my-first-pack/",
+      "Stronghold-Protocol/mod-xie/",
+      "Stronghold-Protocol/_validate/"
+    ],
+    "mustContain": [
+      "Stronghold-Protocol/server/index.js",
+      "Stronghold-Protocol/server/modRegistry.js",
+      "Stronghold-Protocol/shared/workshop.js",
+      "Stronghold-Protocol/MANIFEST.json",
+      "Stronghold-Protocol/package.json",
+      "Stronghold-Protocol/docs/DEPLOY-SERVER.md"
+    ],
+    "tag": "modmgr-v<APP_VERSION>-<UPSTREAM_VERSION>（取 shared/constants.js 两个常量；不撞上游的 v<...>-<...>）",
+    "idempotent": "同 tag 已存在 ⇒ 跳过，不覆盖、不重传资产。"
+  },
+  "gate": {
+    "contract": "判**净新增失败名称集合**（.github/sync-gate-check.mjs + .github/sync-contract-baseline.json），不比总数；跑了 0 条也算红。",
+    "knownRedIsNotMine": "维护方 main 自己就有 fail 8 + Lint 红（zip 分支缺产物校验一类）——那是他的基线，不是同步造成的。",
+    "zip": "打包器的 `zipFolder` zip 分支不校验产物 ⇒ 发布 job 自己 `unzip -t` + 条目断言（.github/release-verify.mjs）。"
+  }
+}

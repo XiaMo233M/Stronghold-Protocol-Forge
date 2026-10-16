@@ -19,11 +19,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+// 包声明的 WebSocket lane（DESIGN §28.54）：认领路径是**同步**的，挂处理器是 import 之后的事。
+import { claimPackLane, attachPackLaneHandler } from './modLanes.js';
 
 import { SERVER_MODULE_USES } from '../shared/workshop.js';
 import { SERVER_CODE_FORBIDDEN_GLOBALS, stripComments, mentionsIdentifier } from '../shared/kitAuthoring.js';
 import { DYNAMIC_ROUTE_CACHE_POLICIES, createDynamicRoutes, dynamicRoutePathIssue } from './http/routeMount.js';
 import { hostMetrics } from './hostMetrics.js';
+// 统一调用预算（重构版，审计 GAP-3）：`mountServerModules` 用它给每个包的每个回调套上记账与上限。缺省不传
+// ⇒ 逐字节保持旧行为（裸 try/catch、不限），收紧是显式配置的事。
+import { guarded } from './mod-manager/budget.js';
 
 /** 静默的日志替身（装载期不需要日志时用）。 */
 const noopLog = { info() {}, warn() {}, error() {}, debug() {} };
@@ -132,8 +137,14 @@ function ioFacade(dir) {
  * 为什么要抛而不是给 `undefined`：`host.healthz?.(...)` 与 `host.healthz(...)` 的区别只对写代码的人有意义，
  * 而作者看到的是「没生效」；带码的异常会直接说出「你没在 uses 里声明它」。
  */
-export function moduleHost({ packId, moduleId, hash, dir, uses, write, stateRoot, log = noopLog, registry = null }) {
+export function moduleHost({ packId, moduleId, hash, dir, uses, write, stateRoot, log = noopLog, registry = null, matchKinds = null }) {
   const declared = (use) => Array.isArray(uses) && uses.includes(use);
+  // 种类声明交出去之前先冻成只读数据（DESIGN §28.52）：包拿到的是**值**，不是指向归一化清单的可变句柄。
+  const matchKindsValue = Object.freeze((Array.isArray(matchKinds) ? matchKinds : [])
+    .map((kind) => Object.freeze({
+      ...kind,
+      ...(kind && kind.seats ? { seats: Object.freeze({ ...kind.seats }) } : {}),
+    })));
   const say = (use) => {
     throw new ModuleRefused('MODULE_USE_UNDECLARED',
       `server.modules["${moduleId}"].uses does not include "${use}" — a module gets exactly the mount points it declared (declared: ${(uses || []).join(', ') || 'none'})`);
@@ -202,6 +213,25 @@ export function moduleHost({ packId, moduleId, hash, dir, uses, write, stateRoot
     metrics: declared('metrics') ? (opts) => hostMetrics({ ...(opts || {}), log: log || noopLog }) : () => say('metrics'),
     /** 一条只读动态端点：`route(path, fn, { cache? }?)`，路径必须在 `/mod/<包id>/…` 里。 */
     route,
+    /**
+     * 这个包声明的**对局种类**（DESIGN §28.52）：一份冻结的只读数据，不是分派器。管理器**不认玩法名** ——
+     * 判定住在包装器自己的构造里（能用的信号只有 `opts.mods.packs[].id` 与开局后的包通道），命中才换实现，
+     * 否则**必须原样把 Base 交回**：`MatchClass` 是进程级一次性的包装（`server/index.js`），换错了类就是把所有
+     * 塔防房间一起换掉。没声明 `matchClass` 就抛 —— 与 `io` / `metrics` 同一条「没声明就没有能力」。
+     */
+    matchKinds: declared('matchClass') ? () => matchKindsValue : () => say('matchClass'),
+    /**
+     * 一条包自己的 WebSocket lane（DESIGN §28.54）：`host.lane(onUpgrade)`，签名与宿主的 lane 表逐字相同
+     * —— `onUpgrade(req, socket, head, ctx)`，`ctx` 里除了宿主的 `reject` / `log` 再多给一个 `lane`（这条行的
+     * `{ id, path, summary }`，用于日志与自我标识）。**这条通道由宿主拥有并升级**：包拿不到监听套接字、拿不到
+     * 新端口，也不因为挂了一条 lane 就获得定时器 —— 「包不能自己开口」这条结构性保证一个字没改，
+     * 改的是「宿主替它开、按它声明的路径开、并替它记账」。
+     */
+    lane: declared('lane') ? (fn) => {
+      const r = attachPackLaneHandler(packId, moduleId, fn);
+      if (!r.ok) throw new ModuleRefused(r.code, `server.modules["${moduleId}"]: ${r.reason}`);
+      return true;
+    } : () => say('lane'),
   });
 }
 
@@ -257,6 +287,25 @@ function entryAbs(pack, mod) {
 const MODULE_FORBIDDEN_GLOBALS = Object.freeze(SERVER_CODE_FORBIDDEN_GLOBALS.filter(([name]) => name !== 'globalThis'));
 
 /**
+ * **严格档**的禁止表（重构版，审计 GAP-1）：`module` / `sandbox` 这两个**官方档** profile 用它 —— 也就是
+ * `SERVER_CODE_FORBIDDEN_GLOBALS` 的**原样**（含 `globalThis`）。官方档的契约是「只注入明确 capability，
+ * 不暴露宿主全局」，所以那一格的豁免**只在 Forge legacy 档保留**（DESIGN 重构计划 §四 高风险 2 的分档处置）。
+ *
+ * 分档的理由（而不是一刀切禁掉 `globalThis`）：仓库里已有一个**合法**的 `server.modules` fixture
+ * （`test/packMatchMsg.test.js`）用 `globalThis` 与同进程的测试通信 —— 把它判死会让那个合法模块连带整包被裁掉，
+ * 而「先查现存包、别硬装」是业主的规矩。所以：**档位决定用哪张表**，默认档（legacy）逐字节不变。
+ */
+export const MODULE_FORBIDDEN_GLOBALS_STRICT = SERVER_CODE_FORBIDDEN_GLOBALS;
+
+/** 哪些 profile 走严格表（官方进程内 module / 隔离 sandbox）。 */
+export const STRICT_SCAN_PROFILES = Object.freeze(['module', 'sandbox']);
+
+/** profile 是否走严格档。缺省 `legacy` ⇒ false（旧行为）。 */
+export function isStrictProfile(profile) {
+  return STRICT_SCAN_PROFILES.includes(profile);
+}
+
+/**
  * 静态判定一个 `server.modules` 模块的源码，**在 `import()` 之前**。
  *
  * 这一条是**补上的欠账**：`shared/modSurface.js` 的 `server.modules` 那一格从第一天起就写着
@@ -288,14 +337,16 @@ const MODULE_FORBIDDEN_GLOBALS = Object.freeze(SERVER_CODE_FORBIDDEN_GLOBALS.fil
  * @param {string} moduleId
  * @returns {Array<{ code: string, reason: string }>}
  */
-export function serverModuleSourceIssues(source, packId = '', moduleId = '') {
+export function serverModuleSourceIssues(source, packId = '', moduleId = '', { profile = 'legacy' } = {}) {
   const code = stripComments(String(source ?? ''));
+  const strict = isStrictProfile(profile);
+  const table = strict ? MODULE_FORBIDDEN_GLOBALS_STRICT : MODULE_FORBIDDEN_GLOBALS;
   const out = [];
-  for (const [needle, why] of MODULE_FORBIDDEN_GLOBALS) {
+  for (const [needle, why] of table) {
     if (mentionsIdentifier(code, needle)) {
       out.push({
         code: 'MODULES_BAD_SOURCE',
-        reason: `"${needle}" is not allowed in a server.modules module${packId ? ` ("${packId}/${moduleId}")` : ''}: ${why}. This module is loaded into the server's own process, so the scan runs before the import — read process values through host.metrics (uses: ["metrics"]) instead of the global`,
+        reason: `"${needle}" is not allowed in a server.modules module${packId ? ` ("${packId}/${moduleId}")` : ''}${strict ? ` [profile ${profile}]` : ''}: ${why}. This module is loaded into the server's own process, so the scan runs before the import — read process values through host.metrics (uses: ["metrics"]) instead of the global`,
       });
     }
   }
@@ -312,7 +363,7 @@ export function serverModuleSourceIssues(source, packId = '', moduleId = '') {
  * @param {{ log?: any, stateRoot?: string, importModule?: (url: string) => Promise<any> }} [opts]
  * @returns {Promise<{ modules: Array<any>, errors: Array<{ pack: string, code: string, reason: string }> }>}
  */
-export async function loadServerModules(loaded, { log = noopLog, stateRoot = null, importModule = (url) => import(url) } = {}) {
+export async function loadServerModules(loaded, { log = noopLog, stateRoot = null, importModule = (url) => import(url), profile = 'legacy' } = {}) {
   const modules = [];
   const errors = [];
   const packs = (loaded && Array.isArray(loaded.packs) ? loaded.packs : [])
@@ -339,11 +390,25 @@ export async function loadServerModules(loaded, { log = noopLog, stateRoot = nul
         errors.push({ pack: pack.id, code: 'MODULES_BAD_ENTRY', reason: `server.modules["${mod.id}"].entry "${mod.entry}" is not readable: ${e && e.message ? e.message : e}` });
         continue;
       }
-      const sourceIssues = serverModuleSourceIssues(source, pack.id, mod.id);
+      const sourceIssues = serverModuleSourceIssues(source, pack.id, mod.id, { profile });
       if (sourceIssues.length) {
         errors.push({ pack: pack.id, code: sourceIssues[0].code, reason: sourceIssues[0].reason });
         log.warn?.(`[workshop] ${sourceIssues[0].code}: ${pack.id}/${mod.id}: ${sourceIssues[0].reason}`);
         continue;
+      }
+      // lane 的**路径在这里认领**（DESIGN §28.54），不是等模块 import 完 —— 宿主在 `attachWebSocket` 那一刻快照
+      // 那张表，晚一步声明的路径就会变成「包合法、表里却没有这一行」的哑格子。坏配置整包拒并点名，
+      // 照 §28.44 那句「一条安静地从不应答的 lane 比没有 boot 更糟」。
+      if (mod.uses.includes('lane')) {
+        const claimed = claimPackLane({
+          packId: pack.id, moduleId: mod.id,
+          path: mod.lane && mod.lane.path, summary: mod.lane && mod.lane.summary,
+        });
+        if (!claimed.ok) {
+          errors.push({ pack: pack.id, code: claimed.code, reason: `server.modules["${mod.id}"]: ${claimed.reason}` });
+          log.warn?.(`[workshop] ${claimed.code}: ${pack.id}/${mod.id}: ${claimed.reason}`);
+          continue;
+        }
       }
       // 模块 URL 带包摘要：包换了一版（目录里的字节变了）就是另一条 URL，动态 import 缓存不会把旧模块交回来。
       const url = `${pathToFileURL(abs).href}?v=${encodeURIComponent(pack.hash || '')}&m=${encodeURIComponent(mod.id)}`;
@@ -363,6 +428,8 @@ export async function loadServerModules(loaded, { log = noopLog, stateRoot = nul
       const host = moduleHost({
         packId: pack.id, moduleId: mod.id, hash: pack.hash, dir: pack.dir,
         uses: mod.uses, write: mod.write, stateRoot, log,
+        // 种类声明按包交给模块（DESIGN §28.52）：包装器用它判「这一局是不是我的」，管理器不猜。
+        matchKinds: pack.matchKinds || null,
         registry: Object.assign(
           (use, fn) => { mounted[use].push(fn); return true; },
           { route: (entry) => { mounted.route.push(entry); return true; } },
@@ -393,8 +460,17 @@ export async function loadServerModules(loaded, { log = noopLog, stateRoot = nul
  * 顺序按**包 id**（`loadServerModules` 已经排过），所以「多个包同时给 `/healthz` 加字段 / 包同一层 MatchClass」时
  * 结果不随目录读取顺序变（DESIGN §28.3 的同一条规则）。
  */
-export function mountServerModules(modules, { log = noopLog, config = null } = {}) {
+export function mountServerModules(modules, { log = noopLog, config = null, budget = null, now = () => Date.now() } = {}) {
   const list = Array.isArray(modules) ? modules.slice() : [];
+  // 预算（可选，审计 GAP-3）：给了 `budget`（`createBudgetMap(...)` 的产物）就逐包套上记账与上限；
+  // **不给则逐字节保持旧行为**——每个回调照旧裸 try/catch、失败只记日志、从不拒绝下一次。
+  const trackerOf = (packId) => (budget && typeof budget.trackerFor === 'function' ? budget.trackerFor(packId) : null);
+  /** 记录器：**不改变返回值语义**，只把一次调用的耗时记进该包的预算（matchClass / route handler 用它）。 */
+  const meter = (packId, fn) => {
+    const tracker = trackerOf(packId);
+    if (!tracker) return fn;
+    return (...a) => { const t0 = now(); try { return fn(...a); } finally { tracker.record(now() - t0); } };
+  };
   return {
     /**
      * 服务起来之后：每个挂了 `boot` 的模块跑一次；抛异常只记日志（一个包不该让服务起不来）。
@@ -405,7 +481,10 @@ export function mountServerModules(modules, { log = noopLog, config = null } = {
       const cfg = configOverride || config;
       for (const m of list) {
         for (const fn of m.mounted.boot) {
-          try { fn(cfg); } catch (e) { log.error?.(`[workshop] ${m.pack}/${m.id} onBoot threw`, e); }
+          const tracker = trackerOf(m.pack);
+          if (!tracker) { try { fn(cfg); } catch (e) { log.error?.(`[workshop] ${m.pack}/${m.id} onBoot threw`, e); } continue; }
+          const r = guarded(fn, { tracker, label: `${m.pack}/${m.id} onBoot`, log, now })(cfg);
+          if (!r.ok && r.error && !r.budgetExceeded) log.error?.(`[workshop] ${m.pack}/${m.id} onBoot threw`, r.error);
         }
       }
     },
@@ -413,7 +492,10 @@ export function mountServerModules(modules, { log = noopLog, config = null } = {
     shutdown() {
       for (const m of list) {
         for (const fn of m.mounted.shutdown) {
-          try { fn(); } catch (e) { log.error?.(`[workshop] ${m.pack}/${m.id} onShutdown threw`, e); }
+          const tracker = trackerOf(m.pack);
+          if (!tracker) { try { fn(); } catch (e) { log.error?.(`[workshop] ${m.pack}/${m.id} onShutdown threw`, e); } continue; }
+          const r = guarded(fn, { tracker, label: `${m.pack}/${m.id} onShutdown`, log, now })();
+          if (!r.ok && r.error && !r.budgetExceeded) log.error?.(`[workshop] ${m.pack}/${m.id} onShutdown threw`, r.error);
         }
       }
     },
@@ -427,7 +509,15 @@ export function mountServerModules(modules, { log = noopLog, config = null } = {
       for (const m of list) {
         for (const fn of m.mounted.healthz) {
           let value;
-          try { value = fn(); } catch (e) { log.warn?.(`[workshop] ${m.pack}/${m.id} healthz threw: ${e && e.message ? e.message : e}`); continue; }
+          const tracker = trackerOf(m.pack);
+          if (!tracker) {
+            try { value = fn(); } catch (e) { log.warn?.(`[workshop] ${m.pack}/${m.id} healthz threw: ${e && e.message ? e.message : e}`); continue; }
+          } else {
+            const r = guarded(fn, { tracker, label: `${m.pack}/${m.id} healthz`, log, now })();
+            if (!r.ok && !r.budgetExceeded) { log.warn?.(`[workshop] ${m.pack}/${m.id} healthz threw: ${r.error && r.error.message ? r.error.message : r.error}`); continue; }
+            if (r.budgetExceeded) continue;
+            value = r.value;
+          }
           const checked = checkHealthzFields(value, `${m.pack}/${m.id}`);
           if (!checked.ok) { log.warn?.(`[workshop] ${checked.reason}`); continue; }
           if (!checked.fields) continue;
@@ -439,7 +529,7 @@ export function mountServerModules(modules, { log = noopLog, config = null } = {
     /** `MatchClass` 的包装器：按包 id 次序层层套上（第一个包的包装器在最里层）。 */
     matchClassWrappers() {
       const out = [];
-      for (const m of list) for (const fn of m.mounted.matchClass) out.push({ pack: m.pack, id: m.id, fn });
+      for (const m of list) for (const fn of m.mounted.matchClass) out.push({ pack: m.pack, id: m.id, fn: meter(m.pack, fn) });
       return out;
     },
     /**
@@ -453,7 +543,7 @@ export function mountServerModules(modules, { log = noopLog, config = null } = {
       const reg = createDynamicRoutes();
       for (const m of list) {
         for (const entry of m.mounted.route || []) {
-          const r = reg.register({ pack: m.pack, module: m.id, path: entry.path, handler: entry.handler, cache: entry.cache });
+          const r = reg.register({ pack: m.pack, module: m.id, path: entry.path, handler: meter(m.pack, entry.handler), cache: entry.cache });
           if (!r.ok) log.warn?.(`[workshop] ${m.pack}/${m.id} route "${entry.path}": ${r.reason}`);
         }
       }

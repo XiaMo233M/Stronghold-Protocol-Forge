@@ -79,6 +79,16 @@ export const KIT_IMPORT_FILES = Object.freeze([
   { specifier: '@sim/constants.js', file: 'server/sim/constants.js' },
   { specifier: '@sim/dir.js', file: 'server/sim/dir.js' },
   { specifier: '@sim/targeting.js', file: 'server/sim/targeting.js' },
+  // ⭐ 三个**同样纯**的引擎 helper（2026-10-15，按实测的 workaround 开表）。开表的理由不是「想让包碰内核」，
+  // 而是「包已经在整份复制它们了」：一份实测的第三方字节补丁为了用 `roundHalfEven` / `bodyInKeys` /
+  // `resolveProfile`，把 `server/sim/detmath.js`、`server/sim/body.js`、`server/sim/professions.js` 的
+  // 相关段落抄进了包内 —— 抄出来的是一份**会静默漂移的副本**（引擎改了它不会跟）。
+  // 三个文件都**零 import**（自身不依赖白名单外的东西）、**零模块级可变状态**，所以两端按真实位置加载与
+  // 上面那三个 helper 完全同构；`professions.js` 交出的是 `resolveProfile` 与那几张默认值表（只读数据 + 纯解析）。
+  // 与 `@ops/` 同一条纪律：**按文件指名，不开前缀**，`@sim/` 下别的文件仍然被 `KIT_IMPORT` 拒。
+  { specifier: '@sim/detmath.js', file: 'server/sim/detmath.js' },
+  { specifier: '@sim/body.js', file: 'server/sim/body.js' },
+  { specifier: '@sim/professions.js', file: 'server/sim/professions.js' },
   // 战斗逻辑模块的 SDK：**战斗内容层的辅助函数**（`server/sim/content/support/index.js`）—— 官方内容模块
   // （`content/bonds/*.js`、`content/garrisons/*.js`）用的同一份。它已经在浏览器侧被服务（`/sim/content/support/`，
   // 客户端战斗本来就要加载它），所以两端都能解。

@@ -1,0 +1,26 @@
+{
+  "note": "契约门控的「已知红」基线。这些用例在维护方自己的 main 上就是红的，不是同步动作造成的；门控只拦「净新增失败」，并且「跑了 0 条」也算红（防「什么都没跑却报绿」）。",
+  "capturedFrom": {
+    "upstream": "XiaMo233M/Stronghold-Protocol-Forge @ 19b0e8ef566d (APP_VERSION 0.18.3 / UPSTREAM_VERSION 0.2.6)",
+    "dryrun": "jingjiangze/Stronghold-Protocol-Forge actions run 38454472055 (GATE 契约面 => fail 1)",
+    "upstreamOwnBaseline": "run 38425009965: 8773 tests / fail 8 + tooling Lint 红",
+    "date": "2026-10-14"
+  },
+  "contract": [
+    "normalizePackEntry: previous.backup 是**安全闸** —— 越界与绝对路径都点名丢掉"
+  ],
+  "fullSuiteKnownRed": [
+    "--cache-dir / SP_CACHE_DIR: relative is from the repository root, absolute is used as it is, default is .cache",
+    "the game modules, three.js, the manifest and the board art are served",
+    "workshop editor: the 3D preview mounts (read-only, and narrow)",
+    "真服务器：声明 `cache-only` ⇒ `/assets/…` 与 `/fonts/…` 412，且短路在文件系统之前",
+    "serverPolicy：serve（默认）不变，cache-only 只在声明时生效",
+    "normalizePackEntry: previous.backup 是**安全闸** —— 越界与绝对路径都点名丢掉",
+    "更新包的身份判断（出包侧）",
+    "正面：基准包是真实的 0.2.3 形态（只有 version、没有 release）⇒ 必须能出包",
+    "正面：只抬上游（同一 Forge 版本线 0.2.3 → 0.2.4）⇒ 必须能出包",
+    "反面：旧 → 旧（基准包是没有 release 的旧包）不得误杀",
+    "基准包是一个 zip（顶层唯一文件夹）时同样认得出身份"
+  ],
+  "cause": "主因是环境而非逻辑：素材不入库（CI 不跑 tools/fetch-assets.mjs）与 ubuntu runner 缺 bsdtar（报错原文「打包失败（需要 bsdtar 的 tar）」）。normalizePackEntry 那条要单独定性。判净新增一律比名称集合，不比总数。"
+}

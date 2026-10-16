@@ -209,6 +209,44 @@ export const MOD_SURFACE = Object.freeze([
     spec: '§28.14',
   },
   {
+    id: 'matchKinds',
+    layer: 'B',
+    decl: 'pack.json.matchKinds = [{ id, seats?: { min, max }, label? }]',
+    anchors: [
+      { symbol: 'PACK_FIELDS', members: ['matchKinds'] },
+      { symbol: 'MATCH_KIND_FIELDS' },
+      { symbol: 'MATCH_KIND_ID_RE' },
+      { symbol: 'MAX_PACK_MATCH_KINDS' },
+      { symbol: 'MATCH_KIND_SEATS_MAX' },
+    ],
+    requires: [
+      '必须有接收人：本包至少要有一个 `server.modules` 条目挂 `matchClass`，否则 `MATCHKINDS_NEED_MATCH_CLASS` 点名拒（形状照 §28.23 的 `MODULES_CHANNELS_NEED_MATCH`）；`combat: true` **不在这一格重复判** —— §28.14 那条已经先拦，再写一遍就是永远不会命中的死格子',
+      '只在写出来时才进归一化结果（同 `variants` / `behaviour`）：`identifyPack` 哈希的就是这份清单，给所有包都加 `matchKinds: []` 会改掉每一个已发布包的摘要；而它必须进摘要 —— 这一格决定「这一局由谁算什么」（§28.2）',
+      '管理器**不认玩法名**：`host.matchKinds()` 交出深度冻结的只读数据，判定住在包装器自己的构造里。`MatchClass` 是进程级一次性的包装（`server/index.js`），所以包装器命中才换、否则**必须原样把 Base 交回**；房间侧读得到的信号只有 `opts.mods.packs[].id`（口径轴 `variants` 在 `resolveRoomModSet` 重建条目时被剪掉，见 §28.47）',
+      '有界：每包 ≤4 种、座位 1..12、`label` ≤60 且是作者可见文本（不经 `t()` ⇒ **不占 i18n 词条**，与 §28.15 那条「给作者读的说明不进语言包」同口径）；种类 id 与包通道**共用一套字符集**（`PACK_CHANNEL_RE` 那一套）',
+      '不新增 `C2S` 意图、不动 `PROTOCOL_VERSION` / `MOD_API_VERSION`：输入走 `pack.msg`（≤4096 B / 5 每秒 / burst 20 / ≤8 条），下行复用 `m.public` 的自定义顶层键，结局仍按 `m.result` + `onEnd(summary)` 且 `summary.players` 非空才写战绩',
+    ],
+    files: ['shared/workshop.js', 'server/modModules.js', 'server/index.js', 'server/lobby.js', 'public/js/matchDelta.js'],
+    tests: ['test/modMatchKinds.test.mjs', 'test/packBehaviour.test.js', 'test/modSurface.test.js'],
+    spec: '§28.52',
+  },
+  {
+    id: 'server.modules.lane',
+    layer: 'B',
+    decl: 'server.modules[].uses 含 "lane" ⇒ host.lane(onUpgrade)，配 lane = { path, summary? }',
+    anchors: [{ symbol: 'SERVER_MODULE_USES' }, { symbol: 'MAX_SERVER_MODULES' }],
+    requires: [
+      '包**不**因此获得监听套接字、新端口、定时器或子进程：改的是「谁能登记一条 lane」，`onUpgrade(req, socket, head, ctx)` 的签名与 §28.44 那张表的行逐字相同（外加 `ctx.lane` 这条行自己的 `{ id, path, summary }`），准入 / 背压 / 心跳透传 / 消息顺序 / 按名字记日志全部沿用宿主那一侧',
+      '路径按声明**同步认领**（`server/modLanes.js claimPackLane`，在 import 之前），处理器 import 完成后才挂（`host.lane(fn)`）—— 因为宿主在 `server/index.js:392` 就快照那张表，晚一步的路径会变成「包合法、表里没这行」的哑格子。没挂上就升级 ⇒ `ctx.reject(503)` + 按名字点名；认领失败（坏语法 / 抢 `/ws` / 撞别人的路径 / 一模块两条 / 表满）⇒ 整包在装载期被拒并点名',
+      '判据只有一份：路径语法与保留名直接调 `server/http/wsLanes.js` 的 `isLanePath` / `LANE_RESERVED` / `MAX_WS_LANES`，形状层**不抄第二遍**；形状层只管命名空间（必须在 `/mod-ws/<本包id>` 之下，`MODULES_LANE_BAD_NAMESPACE`）。限额是宿主的表预算，所以 lane 的闭字段只有 `{ path, summary? }`',
+      '四条互拒：`lane` 无 `uses:[lane]` ⇒ `MODULES_LANE_UNDECLARED`；有 `uses:[lane]` 无路径 ⇒ `MODULES_LANE_NEEDS_PATH`；坏路径 / 空白 summary / 未知字段 ⇒ `MODULES_LANE_BAD_PATH` / `MODULES_LANE_BAD_SUMMARY` / `MODULES_BAD_LANE`。**只在声明时**才进归一化清单 ⇒ 没用的包摘要逐字节不变，用了就进摘要（同一份房间摘要必须对应同一份会被连上的路径，§28.2）',
+      '入口是 `server/modServer.js`（把 `packLaneTable()` 交给 `startServer({ wsLanes })`），**不改 `server/index.js`** —— 那是本体拥有的路径，而 `index.js` 已经有 `opts.wsLanes` 这个现成入口，能不改就不改（越本体路径要走 `.github/overlay.json` 的 `bodyPaths` 受控例外登记，见 §28.55 那一格）；不认 lane 的部署照旧 `node server/index.js`，行为与字节都不变',
+    ],
+    files: ['shared/workshop.js', 'server/modModules.js', 'server/modLanes.js', 'server/modServer.js', 'server/http/wsLanes.js', 'server/http/websocket.js'],
+    tests: ['test/modPackLane.test.mjs', 'test/wsLanes.test.js'],
+    spec: '§28.54',
+  },
+  {
     id: 'server.transport',
     layer: 'B',
     decl: 'pack.json.server.transport = { deflate, threshold?, level?, memLevel?, concurrencyLimit?, … }',
@@ -295,6 +333,26 @@ export const MOD_SURFACE = Object.freeze([
     files: ['shared/workshop.js', 'shared/kitImports.js', 'server/roomPack.js', 'server/workshop.js', 'server/lobby.js'],
     tests: ['test/packRoom.test.js'],
     spec: '§28.20',
+  },
+  {
+    id: 'server.room.hold',
+    layer: 'B',
+    decl: 'pack.json.server.room.hold = true ⇒ room.canHold(fn)',
+    anchors: [{ symbol: 'ROOM_FIELDS', members: ['hold'] }, { symbol: 'SERVER_MEMBERS', members: ['room'] }],
+    requires: [
+      '**这一格是 §28.20 那条「房间钩子不是 combat 闸门」的唯一例外**：它能决定「空席的房间还留不留」= 能决定一局会不会被回收，'
+        + '所以按 §28.14 / §28.52 同一条**能力判据**要求包声明 `combat: true`（`ROOM_HOLD_NEEDS_COMBAT`）。同一格里的观察面成员照旧不受闸门',
+      '申请必须显式：`hold` 没写成 `true` 就调 `room.canHold(fn)` ⇒ `ROOM_HOLD_UNDECLARED` 点名并返回 false（不是静默收下）。'
+        + '`hold` **只在写出来时**才进归一化清单 ⇒ 没用它的那些包摘要逐字节不变，写了就进摘要（§28.2：同一份房间摘要必须对应同一份回收语义）',
+      '包只决定**留不留**，宿主决定**留多久**：`ROOM_HOLD_MAX_MS`（15 分钟）是宿主侧硬时限，谓词返回的 `until` 越界一律夹回来。'
+        + '多包语义 OR、时限取最早那一票，到点重新判一次；谓词抛异常 ⇒ 这一票作废 + `ROOM_HOOK_THREW` 点名，别的包照算',
+      '裁决表按**房间码**存，`disposeRoom` 里与定时器一起 `releaseRoomHolds(code)` 收回（房间码会被复用，留着条目 = 让下一个同码房间继承上一个的裁决，与 §28.20 对钩子表同一条理由）',
+      '⚠ 回收那句话住在 `server/lobby.js` —— 那是本体（sganggs）也有的路径，因此这一格是 `.github/overlay.json` 的 `bodyPaths` 里的**受控例外**（why + 锚点，`.github/game-overlap-check.mjs` 逐条核对，锚点丢了拦同步）。改法是最小替换：两处 `disposeRoom(room,\'empty\')` ⇒ `reapEmptyRoom(room)`，没人申请时它**就是**原来那一行',
+      '不新增 `C2S` 意图、不动 `PROTOCOL_VERSION` / `MOD_API_VERSION`、不进模拟 ⇒ 不需要 `golden:update`；留置期间房间对客户端的形状一字未动',
+    ],
+    files: ['shared/workshop.js', 'server/roomPack.js', 'server/lobby.js'],
+    tests: ['test/modRoomHold.test.mjs', 'test/modSurface.test.js'],
+    spec: '§28.55',
   },
   {
     id: 'routes',
@@ -465,6 +523,21 @@ export const MOD_SURFACE = Object.freeze([
     files: ['shared/workshop.js', 'server/workshop.js', 'server/http/workshop.js', 'public/js/ui/extensions.js'],
     tests: ['test/modClientPanels.test.js', 'test/modClientHosts.test.js'],
     spec: '§28.8',
+  },
+  {
+    id: 'client.screens',
+    layer: 'C',
+    decl: 'pack.json.client.screens[] = { id, route, module, order?, styles?, data?, messages? }',
+    anchors: [{ symbol: 'CLIENT_SCREEN_ROUTES' }, { symbol: 'CLIENT_SCREEN_FIELDS' }],
+    requires: [
+      'route 是**闭枚举且只有引擎真的有的四条**（`title` / `lobby` / `room` / `game`）：`selectRoute` 与 `main.js` 的 `SCREENS` 都只到这四个值，结算与干员调配是路由内部的视图 —— 多写一条就是永远不会命中的死格子（`test/modClientScreens.test.mjs` 把两份名单钉在一起）',
+      '`module` / `styles` / `data` / `messages` 与面板**共用同一批判据**（同一条装载期文件判据、同一批数据表闭枚举、同一套通道名形状）；`id` 与面板共用一个包内命名空间，一个包同一条路由只能有一份',
+      '屏模块与样式表的源码字节进 `identifyPack`（不算进去，两份不同的整屏就能共用同一个摘要，而那份摘要声称「同一份界面」）；没声明 `screens` 的包摘要逐字节不变',
+      '失败方向是**宿主原生界面保持可见**：样式装不上 / import 失败 / 没导出 `mountScreen` / `mountScreen` 抛错，四种都点名并把该 key 拉黑，不做「白屏但看起来成功了」；卸载对称，路由所有权按 `order / pack / id` 确定性裁决',
+    ],
+    files: ['shared/workshop.js', 'server/workshop.js', 'server/http/workshop.js', 'public/js/ui/extensions.js'],
+    tests: ['test/modClientScreens.test.mjs', 'test/modClientPanels.test.js'],
+    spec: '§28.53',
   },
   {
     id: 'client.panels.me',

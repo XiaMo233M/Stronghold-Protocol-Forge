@@ -17,7 +17,11 @@
 //                             "installedAt": "<ISO 日期>",       // 管理器在 import 时记下的
 //                             "source": "<文件名|目录名>",        // 字节从哪来
 //                             "digest": "<sha256>",             // 回执点名的 pack.json 摘要
-//                             "previous": { "digest": "<sha256>", "backup": "<相对留底目录>" } } } }
+//                             "previous": { "digest": "<sha256>", "backup": "<相对留底目录>" },
+//                             // —— 重构版新增（全部可选、旧文件照读；见 server/mod-manager/consent.js）——
+//                             "profile": "module"|"sandbox"|"legacy"|"host",   // 操作者指定的执行档位
+//                             "consent": { "digest": "<sha256>", "at": "<ISO>" },  // 对**某一版字节**的同意
+//                             "pin":     { "digest": "<sha256>", "at": "<ISO>" } } } }  // 钉版（字节一变即失效）
 //
 // **不在登记册里的包 = 启用**。这是故意选的方向：装一个包就该立刻能用（所有现存的安装方式都依赖这一点），
 // 「禁用」是操作者的一次**明确动作**。反过来的话，这个文件一旦丢了（或换了机器）所有包都会静默消失。
@@ -28,6 +32,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { PACK_ID_RE } from '../shared/workshop.js';
 import { stateRootFor } from './modModules.js';
+// 同意 / 钉版 / 档位（重构版，DESIGN 重构计划 §四 高风险 4）：**只在这里读形状**，写盘仍旧走本文件唯一的 mutate。
+import { normalizeConsent, normalizePin } from './mod-manager/consent.js';
 
 /** 登记册文件在状态根里的名字。 */
 export const MOD_REGISTRY_FILE = 'mod-registry.json';
@@ -71,11 +77,22 @@ export function normalizePackEntry(raw) {
       issues.push('"previous": must be { digest, backup } with a pack-relative backup directory (dropped)');
     } else entry.previous = { digest: p.digest.trim(), backup: p.backup.trim() };
   }
+  if (raw.profile !== undefined) {
+    if (typeof raw.profile !== 'string' || !raw.profile.trim()) issues.push(`"profile": ${JSON.stringify(raw.profile)} is not a non-empty string (dropped)`);
+    else entry.profile = raw.profile.trim();
+  }
+  const consent = normalizeConsent(raw.consent);
+  issues.push(...consent.issues);
+  if (consent.record) entry.consent = consent.record;
+  const pin = normalizePin(raw.pin);
+  issues.push(...pin.issues);
+  if (pin.record) entry.pin = pin.record;
   return { entry, issues };
 }
 
 /**
- * 校验一整份登记册文件。不认识的包 id（不是合法 id / 不是对象）按名字丢掉。
+ * 校验一整份登记册文件。
+ * 不认识的包 id（不是合法 id / 不是对象）按名字丢掉。
  * @returns {{ registry: { version: number, packs: Record<string, object> }, issues: string[] }}
  */
 export function normalizeRegistry(raw) {
@@ -145,6 +162,37 @@ export function recordBackup(stateRoot, id, { digest, backup }) {
 }
 /** 丢掉一个包的记录（uninstall 那条路；文件由调用方处理）。 */
 export function forgetPack(stateRoot, id) { return mutate(stateRoot, id, () => null); }
+
+// ----------------------------------------------------------------------------------------------------------------
+// 同意 / 钉版 / 档位（重构版；形状与判据在 server/mod-manager/consent.js）。写盘走本文件唯一的 mutate，
+// **不新增第二份状态文件**——「这个管理器装过什么、准了什么」永远只有一份事实。
+
+/** 记下操作者对**这一版字节**的同意（digest 是那一版的 contentDigest）。 */
+export function setConsent(stateRoot, id, digest, at = new Date().toISOString()) {
+  return mutate(stateRoot, id, (e) => ({ ...e, state: e.state || 'enabled', consent: { digest, at } }));
+}
+/** 撤销同意（不删文件；与 disable 是两件事）。 */
+export function clearConsent(stateRoot, id) {
+  return mutate(stateRoot, id, (e) => {
+    const { consent, ...rest } = e;
+    return rest;
+  });
+}
+/** 钉住一版字节：内容一变，这一格自动失效（判据在 consent.js 的 pinMatches）。 */
+export function setPin(stateRoot, id, digest, at = new Date().toISOString()) {
+  return mutate(stateRoot, id, (e) => ({ ...e, state: e.state || 'enabled', pin: { digest, at } }));
+}
+/** 解除钉版（此后内容变化不再拦）。 */
+export function clearPin(stateRoot, id) {
+  return mutate(stateRoot, id, (e) => {
+    const { pin, ...rest } = e;
+    return rest;
+  });
+}
+/** 显式指定一个包的执行档位（module/sandbox/legacy/host）；缺省由 origin 推出。 */
+export function setProfile(stateRoot, id, profile) {
+  return mutate(stateRoot, id, (e) => ({ ...e, state: e.state || 'enabled', profile }));
+}
 
 /**
  * **纯函数**那一半：把登记册作用到一份已加载的包集合上。

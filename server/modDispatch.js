@@ -28,6 +28,9 @@
 // 加载期（server/workshop.js loadWorkshopHooks）该做的事 —— 那里一个坏声明是**点名拒绝**的。
 
 import { C2S } from '../shared/protocol.js';
+// 进站消息的**分流骨架**（DESIGN 重构计划 Phase 5）：钩子总线成为它的第一个消费者，而不是自己写一遍
+// 「按包 id 顺序、`=== true` 短接、抛错不吞后面的」那套循环 —— 那套语义与 `eventRouter.route` 逐条相同。
+import { createEventRouter } from './mod-manager/eventRouter.js';
 
 const noopLog = { info() {}, warn() {}, error() {}, debug() {} };
 
@@ -146,25 +149,50 @@ export function createModDispatch({ hooks, send, log = noopLog, now = Date.now, 
   }
 
   /**
+   * 每个连接的**路由器**（与 `instancesFor` 一样按连接隔离；建一次，之后每帧复用 —— 这是一条热路径，
+   * 每帧新建一个路由器等于每帧一次分配）。
+   *
+   * 拦截器**不带 `kinds` / `types` 过滤**：现行语义是「每一条通过协议校验的消息都会交给每一个钩子」，
+   * `intercepts` 是**钩子自己**判断要不要闸的名单（框架把它原样注入）。加过滤会改变行为，所以不加；
+   * 分类结果（`kind` / `type`）仍然会随 `ctx` 传下去，供将来的适配器使用。
+   */
+  const perConnectionRouter = new WeakMap();
+  function routerFor(conn) {
+    let router = perConnectionRouter.get(conn);
+    if (router) return router;
+    const map = instancesFor(conn);
+    router = createEventRouter({
+      // 日志由下面按 `results` 逐条补（要保住既有那条**逐字**的错误文案，测试钉着它）⇒ 这里不高亮。
+      log: null,
+      interceptors: list.map((hook) => ({
+        pack: hook.pack,
+        fn: (msg, ctx) => {
+          const inst = map.get(hook.pack);
+          if (!inst) return false; // 该钩子在这条连接上不存在（工厂抛了 / 没返回函数）⇒ 不消费，与旧循环一致
+          return inst.preDispatch(ctx.conn, msg) === true;
+        },
+      })),
+    });
+    perConnectionRouter.set(conn, router);
+    return router;
+  }
+
+  /**
    * 分发前调用（server/net.js onFrame）。**每一条通过协议校验的消息都会走这里**，不只是 `intercepts` 里那些：
    * 钩子总线自己的三个 `resource.*` 类型不在任何 `intercepts` 里（它们不是「进入一局」的入口），却必须到达钩子。
    * `intercepts` 是**钩子自己**用来判断「要不要闸」的名单（框架把它原样注入，并在加载期按协议校验过）。
+   *
+   * 派发本身交给 `mod-manager/eventRouter.js`（固定顺序 = 包 id 次序、`=== true` 短接、抛错只记日志不吞后面的）
+   * —— 与这段代码从前的内联循环**逐条等价**，`test/modDispatchRouter.test.js` 对着旧语义钉住。
    * @returns {boolean} true = 这条消息已被消费，不要再交给大厅
    */
   function preDispatch(conn, msg) {
-    const map = instancesFor(conn);
-    for (const hook of list) {
-      const inst = map.get(hook.pack);
-      if (!inst) continue;
-      let taken = false;
-      try {
-        taken = inst.preDispatch(conn, msg) === true;
-      } catch (e) {
-        logger.error(`[mod] ${hook.pack}: preDispatch(${msg && msg.t}) crashed — the message is not consumed`, e);
-      }
-      if (taken) return true;
+    const out = routerFor(conn).route(msg, { conn });
+    // 逐条把失败喊出来：文案与旧循环**逐字**相同（`[mod] <包>: preDispatch(<类型>) crashed — the message is not consumed`）。
+    for (const r of out.results) {
+      if (!r.ok) logger.error(`[mod] ${r.pack}: preDispatch(${msg && msg.t}) crashed — the message is not consumed`, r.error);
     }
-    return false;
+    return out.handled;
   }
 
   // 报告面（日志与测试读它）：装了哪些包、全部 `intercepts` 的并集（去重排序，与 A 段的归一化同一口径）
