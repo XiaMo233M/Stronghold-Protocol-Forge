@@ -53,6 +53,9 @@
 // 包声明里的**行为增量**（DESIGN §28.29）：形态（`assets.modForms` → `shared/packForms.js`）与静态相位
 // （`assets.silentPhases` → `render/fx/kinds.js`）。两者都随这份清单到达，所以装包声明挂在这里（见 readyState）。
 import { installPackForms } from '../../shared/packForms.js';
+// 装包声明的**视觉增量**（DESIGN §32 P1a）：`cosmetics` 这一份是页面单例，本文件的 store 只把它当 opts 收下
+// （createAssets({ cosmetics })）；`createCosmeticLayers` / `EMPTY_MANIFEST` 供复用者与空清单兜底。
+import { cosmetics, createCosmeticLayers, EMPTY_MANIFEST } from './cosmetics.js';
 import { installSilentPhases } from './render/fx/kinds.js';
 
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
