@@ -4121,3 +4121,83 @@ C1 控制码）。`#` 与零宽字符的合法性归**服务端**判 —— 前�
 **节号说明（我方口径）**：本节内容吸收自下游 fork，在那里编号是 §28.53；按「我们是上游、编号以我方为准」
 排到我方现有最大号之后，定为 **§28.55**。代码与文档里对它的引用一律按**能力**归一到 §28.55，
 不做机械的号段平移。
+
+---
+
+### 28.56 `server.modules[].lane`：包自带一条 WebSocket 通道（宿主开、按声明开、替它记账）
+
+**要解决的问题**：§28.44 把升级路径做成了一张表，但那张表**只有宿主进程自己**能登记 —— 文件头逐字写着
+「这一格不是给内容包开端口或跑自己的服务器的通道」。于是一个自带玩法的包（另一种对局、另一种协议、自己的
+房间语义）今天只有两条路：把权威塞进宿主的 `Match`（§28.54 那条），或者在宿主之外再跑一个进程（那就是运维
+多一个进程、多一套 TLS/域名/准入，不是 mod）。这一格开第三条：**包声明一条路径，宿主替它开**。
+
+**结构性保证一个字没改**：包仍然拿不到监听套接字、新端口、定时器或子进程。改的是「谁能登记一条 lane」和
+「登记要走什么判据」。lane 的 `onUpgrade(req, socket, head, ctx)` 签名与 §28.44 那张表的行**逐字相同**（外加
+`ctx.lane` 这条行自己的 `{ id, path, summary }`），所以宿主那一侧的准入、背压、心跳透传、消息顺序、按名字
+记日志的口径全都沿用现成的，没有第二条实现。
+
+**为什么必须「活表 + 惰性查处理器」**：`server/index.js` 在 `:188` 装载服务端模块、在 `:432` 才把
+`opts.wsLanes` 交给 `attachWebSocket`，而模块源码是异步 import 的。所以两步分开：
+
+* **路径按声明同步认领**（`server/modLanes.js claimPackLane`，在 import 之前）—— 保证快照那一刻路径一定在表里；
+* **处理器 import 完成后挂上**（`host.lane(fn)` → `attachPackLaneHandler`）。
+
+两条各自的失败方向都是响的：没挂上就升级 ⇒ `ctx.reject(503, 'pack lane not ready')` 并按名字记一条 warn；
+认领失败（坏语法 / 抢 `/ws` / 与别的模块撞同一条路径 / 一个模块认领两条 / 表满）⇒ **整包在装载期被拒并点名**，
+照 §28.44 那句「一条安静地从不应答的 lane 比没有 boot 更糟」。
+
+**判据只有一份**：路径语法与保留名不在这个包里再抄一遍 —— `claimPackLane` 直接调 `server/http/wsLanes.js` 的
+`isLanePath` / `LANE_RESERVED` / `MAX_WS_LANES`。形状层（`shared/workshop.js`）只管另一件事：**命名空间**。
+路径必须落在 `/mod-ws/<本包id>` 或其子路径（`MODULES_LANE_BAD_NAMESPACE`）。这一条只需要包 id，不需要语法，
+所以两处判据不重叠、也不互相抄。限额（每进程 lane 总数、每模块一条）是宿主的表预算，**不许**作者声明 ——
+所以 `lane` 的闭字段只有 `{ path, summary? }`。
+
+**形状层的四条互拒**：`lane` 而无 `uses:['lane']` ⇒ `MODULES_LANE_UNDECLARED`；挂了 `lane` 而无路径 ⇒
+`MODULES_LANE_NEEDS_PATH`；路径不是字符串 / 空白 summary / 未知字段 ⇒ `MODULES_LANE_BAD_PATH` /
+`MODULES_LANE_BAD_SUMMARY` / `MODULES_BAD_LANE`。`lane` 与 `summary` **只在声明时**才进归一化清单 ⇒ 没用它
+的包摘要逐字节不变；用了就进摘要（同一份房间摘要必须对应同一份会被连上的路径，§28.2 同一条）。
+
+**闭枚举的性质（这一格与 §28.54 / §28.55 不是同一种加法）**：它是**往允许集合里增成员** ——
+`SERVER_MODULE_USES` **6 → 7**（末尾 + `lane`）、`SERVER_MODULE_FIELDS` **5 → 6**（+ `lane`），另新引入一个只属于
+它的字段闭枚举 `MODULE_LANE_FIELDS = ['path','summary']`。对**在册老包零影响**：不写 `lane` ⇒ 既不触碰那个新
+枚举、也不进归一化清单。`MOD_API_VERSION` **不动**（加一格不抬世代，抬了只会把写了 `api: "1.x"` 的老包判成
+`MOD_API_INCOMPATIBLE`）。
+
+**判据（闭枚举扩张必须带的那一条）**：**不声明 `lane` 的老包，`normalizePackManifest` 的输出与改动前
+`deepEqual`** —— `test/modPackLane.test.mjs` 把整条 `server.modules[]` 条目钉成完整期望值，
+另断言 `SERVER_MODULE_USES` 的**逐字**取值（末尾就是 `lane`）。
+
+**入口**：`server/modServer.js` 把 `packLaneTable()` 交给 `startServer({ wsLanes })`。它存在的全部理由就是
+**不改 `server/index.js`** —— 那是游戏本体拥有的路径，而 `index.js` 已经有 `opts.wsLanes` 这个现成入口，
+能不改就不改（本体路径的判据是「越线必须留证据，不是『不许』」）。不认 lane 的部署照旧 `node server/index.js`，
+行为与字节都不变；要换入口只改启动命令（`docs/DEPLOY-SERVER.md`），启动时多打一行 `[mod-lane] ...` 让运维能确认
+这个进程到底开了哪几条包通道，而不是靠猜。
+
+**同一入口还带进了热装载 —— 它只交付「安全的那一半」**：`server/modServer.js` 的第二个能力是工坊目录的
+变更监听 + 精确 diff + 可选受监督重启（`server/modHotReload.js`）。**这一格不承诺「原地换包」**：本引擎的装配
+是一次性的（`startServer()` 在 `listen` 之前把工坊、钩子、服务端模块、战斗、房间、数据叠加层全部烘进对象里），
+真正原地换包要先把那段装配抽成可重入的 `applyWorkshop()` —— 那是另一件事，写在 `server/modHotReload.js` 的文件头
+里免得后人误读。所以缺省 `SP_HOT_RELOAD` 未设 ⇒ `report`（**只报告、不动服务**），要生效用 `restart` 交给外部
+supervisor 拉起；**缺省路径的行为与字节零变化**，且任何异常一律只记日志（一个坏包绝不能让服务器变成起不来）。
+
+**这一格与 §28.54 / §28.55 的分工**：§28.54 换「这一局由谁算」，§28.55 换「这一屏由谁画」，这一格给「这一种
+玩法自己怎么说话」。三者互不依赖，也都**不新增 `C2S` 意图、不动 `PROTOCOL_VERSION` / `MOD_API_VERSION`**。
+**不需要 `golden:update`**：不进模拟。
+
+**移动端 / 移植口径**：这一格是**纯服务端协议面** —— 它不渲染任何界面，因此**没有像素、没有视口假设**，
+也不引入平台特有依赖（`server/modLanes.js` 只 import 宿主自己的 `server/http/wsLanes.js`）。客户端要连这条
+通道，用的是同一个 `WebSocket` 构造与同一条已声明的路径，移动端与桌面端走的是同一段代码。
+
+**判据与证据**：`test/modPackLane.test.mjs`（闭枚举逐字取值、形状层每条拒绝码逐条走、以及「纯的那半」——
+认领 / 撞车 / 限额 / 处理器还没就位时 503 / 处理器就位后转发并多带 `ctx.lane`）、
+`test/mod-hot-reload.test.mjs`（防抖合并、精确 diff、坏包不炸、`restart` 只在 `mode=restart` 时调用）、
+`test/wsLanes.test.js`（§28.44 那份语法判据没被改）、`test/modSurface.test.js` 的锚点。
+
+**⚠️ 来源分支的四处错标（合并时抓到，记在这里免得再踩）**：成员树的 `shared/workshop.js` 有**四处**把 lane 的
+设计稿节号写成 **§28.53**（那是 `client.screens` 的号）—— 分别是 `MODULE_LANE_FIELDS` 的文档注释、形状层
+`lane` 那一段、归一化清单那一段、以及命名空间闸门那一段。合并时**按能力归一到 §28.56**，不做机械的号段平移
+（机械 +2 会得到 §28.55，那是 client.screens 的号 —— 正好错位）。同一次合并里还抓到 `public/js/ui/extensions.js`
+的 `isPanelId` 也把控制码写成 caret 记法（见 §28.55 末尾那条），**未吸收**。
+
+**节号说明（我方口径）**：本节内容吸收自下游 fork，在那里编号是 §28.54；按「我们是上游、编号以我方为准」
+排到我方现有最大号之后，定为 **§28.56**。代码与文档里对它的引用一律按**能力**归一到 §28.56。

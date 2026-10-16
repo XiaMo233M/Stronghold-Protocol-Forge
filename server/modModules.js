@@ -19,6 +19,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+// 包声明的 WebSocket lane（DESIGN §28.56）：认领路径是**同步**的，挂处理器是 import 之后的事。
+import { claimPackLane, attachPackLaneHandler } from './modLanes.js';
 
 import { SERVER_MODULE_USES } from '../shared/workshop.js';
 import { SERVER_CODE_FORBIDDEN_GLOBALS, stripComments, mentionsIdentifier } from '../shared/kitAuthoring.js';
@@ -216,6 +218,18 @@ export function moduleHost({ packId, moduleId, hash, dir, uses, write, stateRoot
     metrics: declared('metrics') ? (opts) => hostMetrics({ ...(opts || {}), log: log || noopLog }) : () => say('metrics'),
     /** 一条只读动态端点：`route(path, fn, { cache? }?)`，路径必须在 `/mod/<包id>/…` 里。 */
     route,
+    /**
+     * 一条包自己的 WebSocket lane（DESIGN §28.56）：`host.lane(onUpgrade)`，签名与宿主的 lane 表逐字相同
+     * —— `onUpgrade(req, socket, head, ctx)`，`ctx` 里除了宿主的 `reject` / `log` 再多给一个 `lane`（这条行的
+     * `{ id, path, summary }`，用于日志与自我标识）。**这条通道由宿主拥有并升级**：包拿不到监听套接字、拿不到
+     * 新端口，也不因为挂了一条 lane 就获得定时器 —— 「包不能自己开口」这条结构性保证一个字没改，
+     * 改的是「宿主替它开、按它声明的路径开、并替它记账」。没声明 `lane` 就抛，与 `io` / `metrics` 同一条。
+     */
+    lane: declared('lane') ? (fn) => {
+      const r = attachPackLaneHandler(packId, moduleId, fn);
+      if (!r.ok) throw new ModuleRefused(r.code, `server.modules["${moduleId}"]: ${r.reason}`);
+      return true;
+    } : () => say('lane'),
   });
 }
 
@@ -356,6 +370,20 @@ export async function loadServerModules(loaded, { log = noopLog, stateRoot = nul
         errors.push({ pack: pack.id, code: sourceIssues[0].code, reason: sourceIssues[0].reason });
         log.warn?.(`[workshop] ${sourceIssues[0].code}: ${pack.id}/${mod.id}: ${sourceIssues[0].reason}`);
         continue;
+      }
+      // lane 的**路径在这里认领**（DESIGN §28.56），不是等模块 import 完 —— 宿主在 `attachWebSocket` 那一刻
+      // 快照那张表（我方 `server/index.js:432`），晚一步声明的路径就会变成「包合法、表里却没有这一行」的哑格子。
+      // 坏配置整包拒并点名，照 §28.44 那句「一条安静地从不应答的 lane 比没有 boot 更糟」。
+      if (mod.uses.includes('lane')) {
+        const claimed = claimPackLane({
+          packId: pack.id, moduleId: mod.id,
+          path: mod.lane && mod.lane.path, summary: mod.lane && mod.lane.summary,
+        });
+        if (!claimed.ok) {
+          errors.push({ pack: pack.id, code: claimed.code, reason: `server.modules["${mod.id}"]: ${claimed.reason}` });
+          log.warn?.(`[workshop] ${claimed.code}: ${pack.id}/${mod.id}: ${claimed.reason}`);
+          continue;
+        }
       }
       // 模块 URL 带包摘要：包换了一版（目录里的字节变了）就是另一条 URL，动态 import 缓存不会把旧模块交回来。
       const url = `${pathToFileURL(abs).href}?v=${encodeURIComponent(pack.hash || '')}&m=${encodeURIComponent(mod.id)}`;

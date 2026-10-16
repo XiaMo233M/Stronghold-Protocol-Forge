@@ -382,6 +382,27 @@ export const MOD_SURFACE = Object.freeze([
     spec: '§28.54',
   },
   {
+    id: 'server.modules.lane',
+    layer: 'B',
+    decl: 'server.modules[].uses 含 "lane" ⇒ host.lane(onUpgrade)，配 lane = { path, summary? }',
+    // 锚在**闭枚举那一格**上（`members: ['lane']`）：这一格的全部内容就是「`SERVER_MODULE_USES` 多了 `lane`」
+    // —— 闭枚举里少一个成员，包写下的 `uses: ["lane"]` 就会被 `MODULES_BAD_USES` 拒掉。
+    anchors: [{ symbol: 'SERVER_MODULE_USES', members: ['lane'] }, { symbol: 'MAX_SERVER_MODULES' }],
+    requires: [
+      '包**不**因此获得监听套接字、新端口、定时器或子进程：改的是「谁能登记一条 lane」，`onUpgrade(req, socket, head, ctx)` 的签名与 §28.44 那张表的行逐字相同（外加 `ctx.lane` 这条行自己的 `{ id, path, summary }`），准入 / 背压 / 心跳透传 / 消息顺序 / 按名字记日志全部沿用宿主那一侧',
+      '路径按声明**同步认领**（`server/modLanes.js claimPackLane`，在 import 之前），处理器 import 完成后才挂（`host.lane(fn)`）—— 因为宿主在 `server/index.js:432` 就快照那张表，晚一步的路径会变成「包合法、表里没这行」的哑格子。没挂上就升级 ⇒ `ctx.reject(503)` + 按名字点名；认领失败（坏语法 / 抢 `/ws` / 撞别人的路径 / 一模块两条 / 表满）⇒ 整包在装载期被拒并点名',
+      '判据只有一份：路径语法与保留名直接调 `server/http/wsLanes.js` 的 `isLanePath` / `LANE_RESERVED` / `MAX_WS_LANES`，形状层**不抄第二遍**；形状层只管命名空间（必须在 `/mod-ws/<本包id>` 之下，`MODULES_LANE_BAD_NAMESPACE`）。限额是宿主的表预算，所以 lane 的闭字段只有 `{ path, summary? }`',
+      '四条互拒：`lane` 无 `uses:[lane]` ⇒ `MODULES_LANE_UNDECLARED`；有 `uses:[lane]` 无路径 ⇒ `MODULES_LANE_NEEDS_PATH`；坏路径 / 空白 summary / 未知字段 ⇒ `MODULES_LANE_BAD_PATH` / `MODULES_LANE_BAD_SUMMARY` / `MODULES_BAD_LANE`。**只在声明时**才进归一化清单 ⇒ 没用的包摘要逐字节不变，用了就进摘要（同一份房间摘要必须对应同一份会被连上的路径，§28.2）',
+      '入口是 `server/modServer.js`（把 `packLaneTable()` 交给 `startServer({ wsLanes })`），**不改 `server/index.js`** —— 那是本体拥有的路径，而 `index.js` 已经有 `opts.wsLanes` 这个现成入口，能不改就不改（越本体路径要走 `.github/overlay.json` 的 `bodyPaths` 受控例外登记）；不认 lane 的部署照旧 `node server/index.js`，行为与字节都不变',
+    ],
+    files: ['shared/workshop.js', 'server/modModules.js', 'server/modLanes.js', 'server/modServer.js', 'server/http/wsLanes.js', 'server/http/websocket.js'],
+    tests: ['test/modPackLane.test.mjs', 'test/wsLanes.test.js'],
+    // ⚠️ 节号以我方为准（上游）：它在下游 fork 里是 §28.54，我方按**能力**排到现有最大号之后。
+    // ⚠️ 来源分支的 `shared/workshop.js` 里有**四处**把它错标成 §28.53（那是 `client.screens` 的号），
+    // 合并时按能力归一到 §28.56，不做机械的号段平移。
+    spec: '§28.56',
+  },
+  {
     id: 'assets',
     layer: 'B',
     decl: 'pack.json.assets = { container, manifest, serverPolicy?, verify?, mirrors? }',

@@ -64,8 +64,10 @@ npm run golden
 
 | 能力 | 怎么开 | 不开会怎样 |
 |---|---|---|
-| 包声明的 WebSocket lane（DESIGN §28.54） | 包在 `server.modules[].lane.path` 声明 `/mod-ws/<包id>/…`，模块里 `host.lane(onUpgrade)` | 那条 lane 根本不在宿主的升级表里，客户端连过去是 404 —— 不是 503，是查无此路 |
+| 包声明的 WebSocket lane（DESIGN §28.56） | 包在 `server.modules[].lane.path` 声明 `/mod-ws/<包id>/…`，模块里 `host.lane(onUpgrade)` | 那条 lane 根本不在宿主的升级表里，客户端连过去是 404 —— 不是 503，是查无此路 |
 | 工坊目录热装载（监听 + 精确 diff + 可选受监督重启） | `SP_HOT_RELOAD=report`（缺省，只报告）或 `SP_HOT_RELOAD=restart` + `SP_HOT_RELOAD_EXIT_CODE=<n>` 交给外部 supervisor | 包改动不会被报出来；服务本身不受任何影响（异常一律只记日志） |
+
+⚠️ 热装载只交付**安全的那一半**：它**不**承诺「原地换包」。这个引擎的装配是一次性的（`startServer()` 在 `listen` 之前把工坊、钩子、服务端模块、战斗、房间、数据叠加层全部烘进对象里），真正原地换包要先把那段装配抽成可重入的 `applyWorkshop()` —— 那是另一件事。所以缺省 `report` 只报告不动服务，要生效请用 `restart` 交给外部 supervisor 拉起；**缺省路径的行为与字节零变化**。
 
 启动时这一入口会多打一行 `[mod-lane] N pack lane(s): /mod-ws/<包id>/… (NO HANDLER)` —— 运维要能确认这个进程
 到底开了哪几条包通道，而不是靠猜。`workshop/` 的位置仍由 `SP_WORKSHOP` 或 `opts.workshopDir` 决定，与默认入口一致。

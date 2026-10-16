@@ -566,11 +566,26 @@ const ROOM_MODULE_EXT = '.mjs';
  * 对局：`metrics` 交出的是一份**深冻结的标量快照**（读，不是写），`route` 交出的是**只读 GET/HEAD 的公开 JSON**
  * （它甚至进不了对局进程 —— 它在 HTTP 处理器里跑）。判据是**能力**而不是意图，与 `server.room` 同一条。
  */
-export const SERVER_MODULE_USES = Object.freeze(['boot', 'shutdown', 'matchClass', 'healthz', 'metrics', 'route']);
+export const SERVER_MODULE_USES = Object.freeze(['boot', 'shutdown', 'matchClass', 'healthz', 'metrics', 'route', 'lane']);
 /** `server.modules[*]` 的字段，一个不多一个不少。 */
-const SERVER_MODULE_FIELDS = Object.freeze(['id', 'entry', 'uses', 'write', 'channels']);
-/** 一个包最多声明几个服务端模块。 */
-const MAX_SERVER_MODULES = 8;
+const SERVER_MODULE_FIELDS = Object.freeze(['id', 'entry', 'uses', 'write', 'channels', 'lane']);
+/**
+ * 一条 lane 的声明字段（DESIGN §28.56）：刻意只两格。路径**语法**不在这里判 —— 那份判据只有
+ * `server/http/wsLanes.js` 的 `isLanePath` / `validateLanes` 一处，装载期由 `server/modLanes.js` 调它；
+ * 这里再抄一遍就是第二个会漂的真相。限额（每进程 lane 总数、每包 lane 数）也归宿主的表管 —— 作者能声明的
+ * 只有「我要哪条路径」与「后面跑的是什么」。
+ *
+ * ⚠️ 来源分支里这一格的注释写的是 §28.53（那是 `client.screens` 的号）—— 合并时按**能力**归一到 §28.56，
+ * 不做机械的号段平移（同一份来源文件里有四处同样的错标，都改了）。
+ */
+const MODULE_LANE_FIELDS = Object.freeze(['path', 'summary']);
+/**
+ * 一个包最多声明几个服务端模块。**导出**它是因为 `shared/modSurface.js` 的 `server.modules.lane` 那一格把它
+ * 当锚点用（「lane 的条数是宿主的表预算，作者能声明的只有路径与说明」这句话的守卫）—— 锚在一个没导出的名字上
+ * 是一条**永远对不上**的登记（来源分支就是这么写的，`test/modSurface.test.js` 因此恒红）。导出不改变任何行为：
+ * 它本来就在校验路径上被读。
+ */
+export const MAX_SERVER_MODULES = 8;
 /**
  * 一个服务端模块最多声明几条**接收通道**（`server.modules[].channels`，DESIGN §28.23）：玩家从包自己的面板
  * （`client.panels[].messages` + `pack.msg`）发出来的消息，由**这一格**声明谁在对局里收。与面板那半边的
@@ -1080,6 +1095,33 @@ function parseServerModulesDecl(raw) {
         return fail('MODULES_CHANNELS_NEED_MATCH', `server.modules["${mod.id}"].channels is delivered to the running match (Match.handlePackMsg, DESIGN §28.23), so this module must also declare the "matchClass" mount point — channels without matchClass have no receiver`);
       }
     }
+    // `lane`（DESIGN §28.56）：这个模块向宿主认领一条 WebSocket 升级路径 —— 另一种玩法的联机面。这里只判
+    // **形状**与「有没有声明挂载点」；路径语法与建表裁决住在 `server/http/wsLanes.js` + `server/modLanes.js`
+    // （一份真相，不在这一层抄第二遍）。
+    if (mod.lane !== undefined) {
+      if (!isPlainObj(mod.lane)) {
+        return fail('MODULES_BAD_LANE', `server.modules["${mod.id}"].lane must be an object: { path, summary? } — one lane per module (the table is process-wide, exact-match and bounded, DESIGN §28.44)`);
+      }
+      for (const key of Object.keys(mod.lane)) {
+        if (!MODULE_LANE_FIELDS.includes(key)) {
+          return fail('MODULES_BAD_LANE', `server.modules["${mod.id}"].lane: "${key}" is not a lane field (${MODULE_LANE_FIELDS.join(', ')}) — limits such as peer caps are the host table's business, not a declaration`);
+        }
+      }
+      if (!mod.uses.includes('lane')) {
+        return fail('MODULES_LANE_UNDECLARED', `server.modules["${mod.id}"].lane is declared but "lane" is not in this module's uses — a mount point that is not declared is never mounted`);
+      }
+      if (typeof mod.lane.path !== 'string' || !mod.lane.path) {
+        return fail('MODULES_LANE_BAD_PATH', `server.modules["${mod.id}"].lane.path must be a non-empty string rooted at "/" (e.g. "/mod-ws/<pack-id>/duel") — its syntax is judged once, by server/http/wsLanes.js, at load time`);
+      }
+      if (mod.lane.summary !== undefined && (typeof mod.lane.summary !== 'string' || !mod.lane.summary.trim())) {
+        return fail('MODULES_LANE_BAD_SUMMARY', `server.modules["${mod.id}"].lane.summary must be a non-empty string (it is the boot-log line that says what runs behind this path)`);
+      }
+    }
+    // 反过来的那一条也判：挂了 `lane` 这个挂载点却没给路径，就是一条没有路由可认领的挂载点 —— 装载期点名，
+    // 不留到运行时才发现「模块等着被叫，表里根本没有它这一行」。
+    if (mod.uses.includes('lane') && mod.lane === undefined) {
+      return fail('MODULES_LANE_NEEDS_PATH', `server.modules["${mod.id}"] declares the "lane" mount point but no lane.path — a lane without a path can never be routed to (declare { path, summary? }, or drop "lane" from uses)`);
+    }
     out.push({
       id: mod.id,
       entry: mod.entry,
@@ -1089,6 +1131,11 @@ function parseServerModulesDecl(raw) {
       // 只在**声明了的时候**进清单（声明进身份哈希，没声明的包逐字节不变），并且排序：两个书写顺序不同的
       // 写法必须是同一个包（与 `uses` 按闭枚举次序同一条纪律）。
       ...(mod.channels === undefined ? {} : { channels: [...mod.channels].sort() }),
+      // lane 同样**只在声明时**才进清单（§28.56）：路径是行为声明，两份只差路径的包共用同一个摘要，
+      // 客户端就会连到一条服务端根本没有的进程上（§28.2 同一条理由）。字段顺序固定，`summary` 没写就不存在。
+      ...(mod.lane === undefined ? {} : { lane: mod.lane.summary === undefined
+        ? { path: mod.lane.path }
+        : { path: mod.lane.path, summary: mod.lane.summary } }),
     });
   }
   out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -2684,6 +2731,19 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // 只挂 `boot` / `shutdown` / `healthz` 的模块不在此列 —— 那三件碰不到对局。
   if (serverParsed && (serverParsed.decl.modules || []).some((m) => m.uses.includes('matchClass')) && raw.combat !== true) {
     return fail('MODULES_NEED_COMBAT', 'a server module whose uses includes "matchClass" wraps the match itself, so this pack must declare "combat": true — that is what puts it into the room digest gate and the golden corpus (DESIGN §28.14); a module that only mounts boot / shutdown / healthz does not need it');
+  }
+  // lane 的**命名空间**（DESIGN §28.56）：一条 lane 是全进程精确匹配的，两个包抢同一条路径必须在建表之前就
+  // 分开，而不是靠先到先得。规则只有一条、且只需要包 id：路径必须是 `/mod-ws/<本包id>` 或它的直接子路径。
+  // 语法本身不在这里判（`isLanePath` / `LANE_RESERVED` 那份判据只在 `server/http/wsLanes.js` 一处）。
+  if (serverParsed) {
+    const lanePrefix = `/mod-ws/${id}`;
+    for (const m of serverParsed.decl.modules || []) {
+      if (!m.lane) continue;
+      const p = m.lane.path;
+      if (p !== lanePrefix && !p.startsWith(`${lanePrefix}/`)) {
+        return fail('MODULES_LANE_BAD_NAMESPACE', `server.modules["${m.id}"].lane.path "${p}" must live under this pack's own namespace "${lanePrefix}" (one path per lane, the table is process-wide and exact-match — squatting outside your namespace would let this pack shadow another pack's or the engine's endpoint)`);
+      }
+    }
   }
   // 变体 / 口径（DESIGN §28.39）**也**要 `combat: true`，理由与上面三条逐字同构：一个口径改的就是**对局的结果**
   // —— `deploy: "max"` 把 `config.economy.deployCap` 从官方的 8 抬到 12（场上同时多站四个人），
