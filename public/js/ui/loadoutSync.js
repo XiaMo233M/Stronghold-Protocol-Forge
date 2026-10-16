@@ -19,7 +19,8 @@
 import { createStore, loadPref, savePref } from '../store.js';
 import { data } from '../data.js';
 import { LOADOUT_PREF, parseStored, parseStoredOps, toStored, sanitizeEntries, sanitizeOps } from './loadoutModel.js';
-import { cultivationCharIds } from '../../../shared/protocol.js';
+import { cultivationCharIds, charPotentialChanges } from '../../../shared/protocol.js';
+import { contentSet as appContentSet } from '../content.js';
 import { PHASE } from '../../../shared/constants.js';
 import { OWNERSHIP_PREF, parseStoredOwnership, toStoredOwnership, cleanIds, sanitizeNotOwned } from './ownershipModel.js';
 import { DIY_PREF, parseStoredDiy, toStoredDiy, cleanPicks, sanitizeDiyPicks } from './diyModel.js';

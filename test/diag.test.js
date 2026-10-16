@@ -5,7 +5,7 @@ import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   recordError, errorLog, errorCount, clearErrorLog, messageOf, stackOf, stripHosts, redact, redactValues, secretsOf, buildDiagnostics,
-  setBattleSource, currentBattle, LOG_MAX, STACK_LINES,
+  setBattleSource, currentBattle, LOG_MAX, STACK_LINES, contentLine,
 } from '../public/js/diag.js';
 import { APP_VERSION } from '../shared/constants.js';
 

@@ -21,7 +21,10 @@
 // Only font-size declarations read `--t`, so the board, the HUD bands the prep camera keeps clear and the detail
 // card's side do not move — the field is sized from the host element's clientWidth (render/app.js).
 
-import { useLayoutEffect, useRef, useState } from '../../vendor/hooks.module.js';
+import { useLayoutEffect, useEffect, useRef, useState } from '../../vendor/hooks.module.js';
+import { personalApplied } from '../content.js';
+import { fxAvailable } from '../render/vfx/available.js';
+import { resolveOfficialFx } from '../render/vfx/tier.js';
 import { html, Modal, Button, Icon, MicroLabel } from './components.js';
 import { createStore, useStore, loadPref, savePref, store } from '../store.js';
 import { GIcon } from './gameComponents.js';

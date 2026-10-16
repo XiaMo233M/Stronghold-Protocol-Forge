@@ -87,6 +87,8 @@ const LEGAL_FILES = ['LICENSE', 'NOTICE.md', 'THIRD-PARTY-NOTICES.md'];
  * 可用 —— 只带贴图不带清单，玩家拿到的是 68 MB 用不上的文件。它存在时就一起收。
  */
 const LOCAL_ASSET_MANIFEST = path.join('data', 'local-assets.json');
+/** The official battle-fx manifest (tools/setup.mjs --local extracts it; the files live under public/assets/local/fx). */
+const LOCAL_FX_MANIFEST = path.join('data', 'local-fx.json');
 
 /** The 配音 folders present on this machine (`public/assets/audio/voice/<lang>`), sorted. */
 function listVoiceDubs(root = ROOT) {

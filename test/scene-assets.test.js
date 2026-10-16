@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { artPlan, formatSummary, isPlayerFile, isRefused } from '../tools/package.mjs';
+import { artPlan, formatSummary, isPlayerFile, isRefused, FULL_ZIP_FX } from '../tools/package.mjs';
 import { localGaps, sceneInstallPlan } from '../tools/setup.mjs';
 
 // `new URL(import.meta.url).pathname` keeps the leading slash before a Windows drive letter (`/E:/…`) and

@@ -16,7 +16,7 @@ import {
   DEVICE_H, RAISED_FOOT,
 } from '../../public/js/render/board3d/layout.js';
 import { layoutOf, mapSize } from '../../public/js/render/layout.js';
-import { BoardScene, gatePulse, DIR_TURNS, boxData, LIGHTING } from '../../public/js/render/board3d/scene.js';
+import { BoardScene, gatePulse, DIR_TURNS, boxData, LIGHTING, GATE_TINT } from '../../public/js/render/board3d/scene.js';
 import { loadBoardPack, loadThree, resetBoardPack, PACK_IMAGES } from '../../public/js/render/board3d/load.js';
 import { parseStage } from '../../public/js/render/tiles.js';
 import { TILE_H } from '../../public/js/render/style.js';

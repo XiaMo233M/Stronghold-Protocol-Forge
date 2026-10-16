@@ -245,6 +245,11 @@ export function isRefused(rel) {
   return REFUSE.some((r) => p === r || p.startsWith(`${r}/`));
 }
 
+/** The plugin tree's own files (the readme, the agent notes, the templates): refused/shipped as plugin resources. */
+export const isPluginResource = (rel) => rel === 'plugins/README.md' || rel === 'plugins/AGENTS.md' || rel.startsWith('plugins/_template/');
+/** The author-facing test harness that ships with the player package (the only test file a release carries). */
+export const AUTHOR_TEST_FILES = ['test/helpers/battleHarness.js'];
+
 /** OS / editor / Python clutter that never ships (the old rsync excludes). */
 export function isJunk(rel) {
   const parts = posixRel(rel).split('/');

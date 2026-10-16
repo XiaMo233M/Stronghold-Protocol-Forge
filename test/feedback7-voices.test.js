@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { buildPlan, VOICE_JP_LANG } from '../tools/assets/plan.mjs';
 import { indexAudio, VOICE_DIRS } from '../tools/assets/audio.mjs';
 import { RAW } from '../tools/assets/sources.mjs';
-import { artPlan, FULL_ZIP_JP_VOICE, JP_VOICE_DIR } from '../tools/package.mjs';
+import { artPlan, FULL_ZIP_JP_VOICE, JP_VOICE_DIR, FULL_ZIP_OPTIONAL_VOICE, OPTIONAL_VOICE_DIRS } from '../tools/package.mjs';
 import { DEFAULT_SETTINGS, VOICE_LANGS, sanitizeSettings } from '../public/js/ui/gameLogic.js';
 import { DEFAULT_VOICE_LANG } from '../shared/constants.js';
 
