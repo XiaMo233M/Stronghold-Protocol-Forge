@@ -9,7 +9,7 @@ import {createContentSets} from '../../server/plugins/contentSets.js';
 import {createMatchHosts} from '../../server/match/host/index.js';
 import {buildContentSet,contentSetFiles} from '../../server/plugins/contentSet.js';
 import {getData,ROOT} from '../../server/data.js';
-import {loadBrowserSim} from '../../public/js/battle/runner.js';
+import {loadBrowserSim} from '../../public/js/battle/simLoader.js'
 import {loadContentSet} from '../../public/js/content.js';
 import {makeBattle} from '../helpers/battleHarness.js';
 import {buildBattleSpec,resultDigest} from '../../server/sim/spec.js';
@@ -37,7 +37,7 @@ test('same script battle is bit-identical in match child and loadBrowserSim, spe
  const spectator=await loadContentSet(built.cs,{fetch,retryDelays:[]});assert.equal(spectator.canSim,false);assert.equal(spectator.scripts.length,0);assert.ok(!calls.some(x=>x.includes('/scripts/')));
  const accepted=await loadContentSet(built.cs,{fetch,consent:true,retryDelays:[]});assert.equal(accepted.scripts.length,1);
  const runtime=path.join(f.root,'runtime');fs.mkdirSync(path.join(runtime,'server'),{recursive:true});
- fs.cpSync('server/sim',path.join(runtime,'server/sim'),{recursive:true,filter:src=>!src.endsWith('/nodeData.js')});
+ fs.cpSync('server/sim',path.join(runtime,'server/sim'),{recursive:true,filter:src=>!src.replace(/\\/g, '/').endsWith('/nodeData.js')});
  fs.cpSync('shared',path.join(runtime,'shared'),{recursive:true});
  fs.writeFileSync(path.join(runtime,'package.json'),'{"type":"module"}');fs.writeFileSync(path.join(runtime,'server/data.js'),DATA_SHIM_JS);
  const base=pathToFileURL(path.join(runtime,'server/sim')).href+'/';
@@ -87,5 +87,7 @@ test('CLI test runs the template harness with composed data',t=>{
  fs.writeFileSync(path.join(f.pluginsDir,'config.json'),JSON.stringify({trusted:{'script-demo':'wrong-pin'}}));
  const env={...process.env,SP_PLUGIN_SCRIPTS:'sandbox'};delete env.NODE_TEST_CONTEXT;
  const r=spawnSync(process.execPath,['tools/plugin.mjs','test','script-demo','--root',f.root],{encoding:'utf8',timeout:20000,env});
- assert.equal(r.status,0,r.stdout+r.stderr);assert.match(r.stdout,/# pass 1/);
+ // The plugin's own test really passed one case. Node 24 prints the spec summary by default (`ℹ pass 1`), older Node TAP
+ // (`# pass 1`); `tools/plugin.mjs test` names no reporter, so accept either layout.
+ assert.equal(r.status,0,r.stdout+r.stderr);assert.match(r.stdout,/^(?:#|ℹ) pass 1$/m);
 });

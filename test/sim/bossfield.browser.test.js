@@ -196,7 +196,7 @@ describe('Final Assault / Hidden Core fields in the browser sim', { skip }, () =
     await page.setBypassCSP(true);
     await page.goto(`http://127.0.0.1:${srv.port}/sim/spec.js`);
     const chrome = await page.evaluate(async (all, src, maxSeconds) => {
-      const { loadBrowserSim } = await import('/js/battle/runner.js');
+      const { loadBrowserSim } = await import('/js/battle/simLoader.js')
       const { spec: S, ds } = await loadBrowserSim();
       const run = new Function(`return (${src})`)();
       return all.map((spec) => run(S, ds, spec, maxSeconds));

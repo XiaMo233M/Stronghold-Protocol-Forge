@@ -10,7 +10,7 @@ import { DataSource } from '../../server/sim/simdata.js';
 import { setGameData, gameData, bondRecord, itemRecord, bandRecord, garrisonRecord, effectRecord, chessRecord } from '../../server/sim/content/support/index.js';
 import { GameData } from '../../server/match/gamedata.js';
 import { DATA_SHIM_JS } from '../../server/http/static.js';
-import { loadBrowserSim } from '../../public/js/battle/runner.js';
+import { loadBrowserSim } from '../../public/js/battle/simLoader.js'
 import { buildBattleSpec, createBattleFromSpec, resultDigest } from '../../server/sim/spec.js';
 import { compileDsl } from '../../server/sim/content/dsl/compile.js';
 const close = (a,b) => assert.ok(Math.abs(a-b) < 1e-7, `${a} != ${b}`);
@@ -70,7 +70,7 @@ test('merged data reaches every support lookup and a real battle, through Node a
   }
   assert.equal(gameData(), set.data);
   const runtime = path.join(dir, 'runtime'); fs.mkdirSync(path.join(runtime, 'server'), { recursive: true });
-  fs.cpSync('server/sim', path.join(runtime,'server/sim'), { recursive: true, filter: src => !src.endsWith('/nodeData.js') });
+  fs.cpSync('server/sim', path.join(runtime,'server/sim'), { recursive: true, filter: src => !src.replace(/\\/g, '/').endsWith('/nodeData.js') });
   fs.cpSync('shared', path.join(runtime,'shared'), { recursive: true });
   fs.writeFileSync(path.join(runtime,'package.json'), '{"type":"module"}');
   fs.writeFileSync(path.join(runtime,'server/data.js'), DATA_SHIM_JS);

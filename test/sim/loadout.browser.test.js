@@ -56,7 +56,7 @@ describe('operator loadouts in the browser sim', { skip }, () => {
     page.on('response', (r) => { if (r.status() >= 400 && !/favicon/.test(r.url())) problems.push(`HTTP ${r.status()} ${r.url()}`); });
     await page.goto(`http://127.0.0.1:${srv.port}/sim/spec.js`);
     const out = await page.evaluate(async (s) => {
-      const { loadBrowserSim } = await import('/js/battle/runner.js');
+      const { loadBrowserSim } = await import('/js/battle/simLoader.js')
       const { spec: S, ds } = await loadBrowserSim();
       const b = S.createBattleFromSpec(s, ds, { quiet: true, recordEvents: false });
       const units = b.allyUnits.map((u) => [u.uid, u.def.skill?.id ?? null, u.base.maxHp, u.base.atk]);

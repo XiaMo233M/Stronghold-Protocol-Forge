@@ -11,7 +11,7 @@ import { buildContentSet, contentSetFiles } from '../../server/plugins/contentSe
 import { DataSource } from '../../server/sim/simdata.js';
 import { setGameData } from '../../server/sim/content/support/index.js';
 import { DATA_SHIM_JS } from '../../server/http/static.js';
-import { loadBrowserSim } from '../../public/js/battle/runner.js';
+import { loadBrowserSim } from '../../public/js/battle/simLoader.js';
 import { buildBattleSpec, createBattleFromSpec, resultDigest } from '../../server/sim/spec.js';
 import { budgetUsed } from '../../server/sim/content/dsl/budget.js';
 import { kitOf, selectSkillSpec } from '../../server/sim/content/index.js';
@@ -95,7 +95,7 @@ test('a data-plugin DSL operator fights the same battle on the server and in the
 
   const runtime = path.join(f.dir, 'runtime');
   fs.mkdirSync(path.join(runtime, 'server'), { recursive: true });
-  fs.cpSync('server/sim', path.join(runtime, 'server/sim'), { recursive: true, filter: (src) => !src.endsWith('/nodeData.js') });
+  fs.cpSync('server/sim', path.join(runtime, 'server/sim'), { recursive: true, filter: (src) => !src.replace(/\\/g, '/').endsWith('/nodeData.js') });
   fs.cpSync('shared', path.join(runtime, 'shared'), { recursive: true });
   fs.writeFileSync(path.join(runtime, 'package.json'), '{"type":"module"}');
   fs.writeFileSync(path.join(runtime, 'server/data.js'), DATA_SHIM_JS);

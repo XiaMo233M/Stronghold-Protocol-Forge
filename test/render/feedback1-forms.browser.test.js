@@ -51,7 +51,7 @@ async function runInPage(page, port, s, enemyKey, secs, actSrc) {
   await page.waitForFunction('window.__demo && (window.__demo.ready || window.__demo.error)', { timeout: 30000 });
   return page.evaluate(async (spec, key, secs, actSrc) => {
     const act = new Function('b', 'e', 'ally', 'state', actSrc);
-    const { loadBrowserSim } = await import('/js/battle/runner.js');
+    const { loadBrowserSim } = await import('/js/battle/simLoader.js')
     const { data } = await import('/js/data.js');
     const { spec: S, ds } = await loadBrowserSim();
     const b = S.createBattleFromSpec(spec, ds, { quiet: true });
@@ -96,7 +96,7 @@ async function lateViewInPage(page, port, s, atSecs, setupSrc) {
   await page.waitForFunction('window.__demo && (window.__demo.ready || window.__demo.error)', { timeout: 30000 });
   return page.evaluate(async (spec, atSecs, setupSrc) => {
     const setup = new Function('b', 'ally', setupSrc);
-    const { loadBrowserSim } = await import('/js/battle/runner.js');
+    const { loadBrowserSim } = await import('/js/battle/simLoader.js')
     const { data } = await import('/js/data.js');
     const { spec: S, ds } = await loadBrowserSim();
     const b = S.createBattleFromSpec(spec, ds, { quiet: true });

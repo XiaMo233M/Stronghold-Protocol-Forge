@@ -67,7 +67,7 @@ describe('a delegated bot rehearsal in the browser', { skip }, () => {
     await page.goto(`http://127.0.0.1:${srv.port}/sim/spec.js`);
     const answers = await page.evaluate(async (frames) => {
       // the page's own loader (the worker is handed exactly the data the page simulates with) and its installer
-      const { loadBrowserSim } = await import('/js/battle/runner.js');
+      const { loadBrowserSim } = await import('/js/battle/simLoader.js')
       const sim = await loadBrowserSim();
       const { installRehearsal } = await import('/js/battle/rehearsal.js');
       const sent = [];

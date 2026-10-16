@@ -25,7 +25,7 @@ const SCRIPT = `import { startBuildGuard } from '/js/ui/buildGuard.js';
 import { Net } from '/js/net.js';
 import { store, selectRoute, emptyMatch } from '/js/store.js';
 import { PHASE } from '/shared/constants.js';
-import { loadBrowserSim } from '/js/battle/runner.js';
+import { loadBrowserSim } from '/js/battle/simLoader.js'
 
 const boots = Number(sessionStorage.getItem('boots') || 0) + 1;
 sessionStorage.setItem('boots', String(boots));

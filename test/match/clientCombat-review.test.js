@@ -400,7 +400,7 @@ test('fitResult: an oversized b.result is trimmed under the frame budget without
 // ---- browser loader (runs last: it injects the data into this process' sim like a page does) ------------------------
 
 test('loadBrowserSim: a data file that cannot be fetched fails the loader (no battle on partial data); all files → a working sim', async () => {
-  const { loadBrowserSim, SIM_DATA_FILES } = await import('../../public/js/battle/runner.js');
+  const { loadBrowserSim, SIM_DATA_FILES } = await import('../../public/js/battle/simLoader.js')
   const base = new URL('../../server/sim/', import.meta.url).href;
   const served = (fail = new Set()) => async (url) => {
     const name = String(url).replace(/^.*\//, '').replace(/\.json$/, '');

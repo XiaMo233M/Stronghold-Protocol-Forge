@@ -58,7 +58,7 @@ describe('enemy model sizes and the 萨科塔 flutter (headless Chrome, real sim
       await page.goto(`http://127.0.0.1:${srv.port}/dev/render-demo.html?scene=normal-m01&paused=1&panel=0`);
       await page.waitForFunction('window.__demo && (window.__demo.ready || window.__demo.error)', { timeout: 30000 });
       const log = await page.evaluate(async (spec) => {
-        const { loadBrowserSim } = await import('/js/battle/runner.js');
+        const { loadBrowserSim } = await import('/js/battle/simLoader.js')
         const { data } = await import('/js/data.js');
         const { spec: S, ds } = await loadBrowserSim();
         const b = S.createBattleFromSpec(spec, ds, { quiet: true });

@@ -86,7 +86,10 @@ test('generated script harness runs with tools/plugin.mjs test, with SDK registr
   for (const name of ['data', 'test', 'server', 'shared']) fs.symlinkSync(path.resolve(name), path.join(f.dir, name));
   const run = spawnSync(process.execPath, ['tools/plugin.mjs', 'test', 'harness-demo', '--root', f.dir], { encoding: 'utf8', timeout: 25000 });
   assert.equal(run.status, 0, run.stdout + run.stderr);
-  assert.match(run.stdout, /# pass 1/);
+  // The plugin's own test really passed one case. Node 24 made `node --test` print the **spec** summary by default
+  // (`ℹ pass 1`); older Node printed TAP (`# pass 1`). The point is that the case passed, not the reporter's layout —
+  // `tools/plugin.mjs test` passes no `--test-reporter`, so accept either.
+  assert.match(run.stdout, /^(?:#|ℹ) pass 1$/m);
 });
 
 test('mode wizard economy, DP and round timers reach GameData while the base mode stays unchanged', async t => {

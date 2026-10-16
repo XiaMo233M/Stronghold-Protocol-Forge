@@ -47,7 +47,7 @@ describe('converted bonds in the actual browser battle', { skip: !enabled }, () 
   after(async () => { await browser?.close(); await srv?.close(); });
   async function inspect(f) {
     return page.evaluate(async ({ spec, uid }) => {
-      const { loadBrowserSim } = await import('/js/battle/runner.js');
+      const { loadBrowserSim } = await import('/js/battle/simLoader.js')
       const { spec: S, ds } = await loadBrowserSim();
       const { unitBonds, isMember } = await import('/sim/content/support/index.js');
       const b = S.createBattleFromSpec(spec, ds, { quiet: true, recordEvents: false });

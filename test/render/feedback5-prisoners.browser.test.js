@@ -77,7 +77,7 @@ describe('the 孤岛风云 prisoners draw confined → warning → freed (headle
         if (board === '3d' && !on3d) { t.skip('no 3D board here (local board art or WebGL2 missing)'); return; }
         assert.equal(on3d, board === '3d', 'the board mode asked for');
         await page.evaluate(async (spec) => {
-          const { loadBrowserSim } = await import('/js/battle/runner.js');
+          const { loadBrowserSim } = await import('/js/battle/simLoader.js')
           const { data } = await import('/js/data.js');
           const { spec: S, ds } = await loadBrowserSim();
           const b = S.createBattleFromSpec(spec, ds, { quiet: true });
