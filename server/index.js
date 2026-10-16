@@ -6,7 +6,12 @@
 //   http/websocket.js  session wiring (SessionRegistry → Lobby → Network) and the WebSocket at /ws (maxPayload 64 KB;
 //                      refused at upgrade with 404 / 429 per network / 503)
 //   http/static.js     the static mounts (/ → public/, /data/, /shared/, /sim/ `.js` only), the /data.js browser stand-in,
-//                      the content packs (/packs/index.json, /packs/<id>/<file> — the registry is packs.js)
+//                      the language packs (/packs/index.json, /packs/<id>/<file>) and the plugin catalogue
+//                      (/plugins/index.json — the registry is plugins/registry.js), the vanilla content set's manifest
+//                      (/cs/<cs16>/index.json — plugins/identity.js), the visual sets of cosmetic plugins
+//                      (/vs/<vs16>/…, plugins/visualSet.js), their files (/p/<id>/<hash8>/…) and the content sets of
+//                      gameplay plugins (/cs/<cs16>/…, plugins/contentSets.js)
+//   http/csp.js        the site CSP of the served pages (SP_CSP=off leaves it out; routes.js)
 //   http/media.js      /media/bgm/act1 → public/assets/audio/bgm/act1.mp3 (audio addressed without its extension)
 //   http/files.js      one file → response: MIME, brotli / gzip + memory cache, ETag / Last-Modified / 304, Cache-Control, ranges
 //   http/assetIndex.js the content hashes of public/assets and public/fonts (built in the background, cached in
@@ -14,7 +19,8 @@
 //   http/assetViews.js the served /data/assets.json and /data/local-assets.json: every art URL with its hash segment
 //                      (/assets/~<hash>/…, immutable when the hash matches); the committed files stay unchanged
 //   http/buildTag.js   the build tag of the served browser runtime (/healthz `build`, public/js/ui/buildGuard.js)
-//   http/routes.js     the request listener: security headers, 414 / 400 / 405, GET /healthz → JSON status, else static
+//   http/routes.js     the request listener: security headers, 414 / 400, the plugin studio (/studio/, studio/index.js —
+//                      this machine and the local network only), 405, GET /healthz → JSON status, else static
 //   http/traffic.js    the traffic counters: bytes sent per category (assets / audio / code / data) and on the
 //                      WebSocket, since the start (GET /healthz?traffic=1)
 //   http/common.js     what every answer shares: security headers, URL split, error page, JSON replies, bare 400
