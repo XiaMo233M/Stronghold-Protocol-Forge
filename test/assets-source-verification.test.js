@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, writeFile, rm, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SourceVerifier } from '../tools/assets/source-verifier.mjs';
-import { Downloader } from '../tools/assets/downloader.mjs';
+import { Downloader, MIN_RESUMABLE_BYTES } from '../tools/assets/downloader.mjs';
 import { cachedJson } from '../tools/assets/cache.mjs';
 import { collectLeaves, downloadLeaves, resolveTemplate } from '../tools/assets/manifest.mjs';
 import { normalizeAtlas } from '../tools/assets/atlas.mjs';
@@ -351,4 +352,52 @@ test('user invalid snapshots and incompatible CLI modes reject clearly', () => {
   assert.throws(() => parseArgs(['--source-snapshot=']), /requires a path/);
   assert.throws(() => new SourceVerifier({ 'o/r@main': { commit: 'short', tree } }), /invalid source snapshot/);
   assert.equal(parseArgs(['--source-snapshot=a=b.json']).sourceSnapshot, 'a=b.json');
+});
+
+test('user a streamed download is verified against the pinned blob before it is renamed into place', async (t) => {
+  // The two transports do not fail alike, so the in-memory cases above cannot stand in for the streamed one: a job of at
+  // least MIN_RESUMABLE_BYTES from a direct source writes its body straight into `<file>.part` and only then checks it.
+  // This case pins that transport down, with a payload of exactly the declared size and a valid format, so the only
+  // thing that can reject it is the pinned blob.
+  const size = MIN_RESUMABLE_BYTES;
+  const good = Buffer.alloc(size, 0x41);
+  const wrong = Buffer.alloc(size, 0x42);
+  const root = await mkdtemp(join(tmpdir(), 'sp-source-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const part = join(root, 'big.bin.part');
+  // Observed while the body is being read: the streamed transport has already opened `<file>.part`, the in-memory one
+  // never creates that file at all (it writes the final path only after the body it verified). `Response` primes a
+  // ReadableStream with one eager pull at construction, before the downloader opens anything, so the test asks that at
+  // least one pull saw the part rather than that every pull did.
+  const partExistedWhileReading = [];
+  const fetchImpl = async (url) => {
+    if (url.startsWith('https://api.github.com/')) {
+      return Response.json({ truncated: false, tree: [{ path: 'big.bin', type: 'blob', sha: digest(good) }] });
+    }
+    let pulls = 0;
+    const body = new ReadableStream({
+      pull(controller) {
+        partExistedWhileReading.push(existsSync(part));
+        pulls++;
+        if (pulls === 1) controller.enqueue(wrong);
+        else controller.close();
+      },
+    });
+    return new Response(body, { status: 200 });
+  };
+  const verifier = new SourceVerifier({ 'o/r@main': { commit, tree } }, { fetchImpl, token: 'test-api-token' });
+  const dl = new Downloader({ root, ledgerPath: join(root, 'ledger.json'), verifier, fetchImpl, retries: 1, backoffMs: 0, log: quiet });
+  // When that payload streams down.
+  const result = await dl.run([{ rel: 'big.bin', urls: [raw + 'big.bin'], kind: 'bin', bytes: size }]);
+  // Then the transport really was the streamed one, and the bytes were rejected by provenance.
+  assert.ok(partExistedWhileReading.some(Boolean),
+    'the streamed transport writes to <file>.part before any check runs');
+  assert.equal(result.get('big.bin').status, 'error');
+  assert.match(result.get('big.bin').error, /source blob mismatch/);
+  // And a right-sized, well-formed but unpinned body neither reaches its final path nor stays behind as a resume point.
+  assert.equal(existsSync(join(root, 'big.bin')), false);
+  assert.equal(existsSync(part), false, 'a body that contradicts the snapshot is not resumed against');
+  assert.equal(dl.written.has('big.bin'), false);
+  assert.deepEqual(dl.preserved.has('big.bin'), true, 'the rejected file is still protected from pruning');
+  assert.equal(dl.accepted.has('big.bin'), false, 'rejected bytes are never published');
 });

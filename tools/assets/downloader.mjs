@@ -188,8 +188,16 @@ export class Downloader {
    * @param {string} [o.proxyPrefix] HTTPS prefix for GitHub downloads
    * @param {string} [o.assetBase] alternative download base (--asset-base / SP_ASSET_BASE); '' = today's URLs
    * @param {MirrorPolicy} [o.mirrorPolicy] invocation-wide policy and mirror circuit breaker
+   * @param {import('./source-verifier.mjs').SourceVerifier} [o.verifier] verify every accepted raw byte against the
+   *   pinned Git blob of a source snapshot (fetch-assets --source-snapshot). A verified run trusts the snapshot for both
+   *   index and file bytes: an existing file is kept only when its bytes match the pinned blob, so `keepExisting`
+   *   (--add-only), which keeps files as they are, cannot be combined with it.
    */
-  constructor({ root, ledgerPath, concurrency = 16, retries = 3, timeoutMs = 120000, force = false, keepExisting = false, log = console.log, fetchImpl = globalThis.fetch, backoffMs = 400, source = 'direct', proxyPrefix, assetBase = '', mirrorPolicy }) {
+  constructor({ root, ledgerPath, concurrency = 16, retries = 3, timeoutMs = 120000, force = false, keepExisting = false, log = console.log, fetchImpl = globalThis.fetch, backoffMs = 400, source = 'direct', proxyPrefix, assetBase = '', mirrorPolicy, verifier }) {
+    // `keepExisting` never re-reads an existing file, so a verified run could not reject bytes that differ from the
+    // snapshot: the two modes contradict each other rather than merely interacting.
+    if (verifier && keepExisting) throw new Error('source verification is incompatible with keepExisting');
+    this.verifier = verifier;
     this.root = root;
     this.ledgerPath = ledgerPath;
     this.concurrency = Math.max(1, Math.min(64, Number(concurrency) || 16));
@@ -279,9 +287,10 @@ export class Downloader {
    * @param {string} url
    * @param {string} kind
    * @param {{start:number, total:number|null}|null} resume
+   * @param {{blob:string, commit:string, url:string}|null} [verifiedSource] pinned Git blob this body must match
    * @returns {Promise<{buf:Buffer, status:number, total:number|null}|{notFound:true}|{skipped:true}|{error:string}>}
    */
-  async fetchParsed(url, kind, resume) {
+  async fetchParsed(url, kind, resume, verifiedSource = null) {
     if (this.network.skip(url)) return { skipped: true };
     let lastErr = 'unknown error';
     const attempts = this.network.isProxy(url) ? 1 : this.retries;
@@ -328,6 +337,10 @@ export class Downloader {
           throw new Error(`truncated body ${buf.length}/${len} ${url}`);
         }
         if (!validate(kind, buf)) throw new Error(`invalid ${kind} payload (${buf.length} B) ${url}`);
+        // Format validity is not provenance: with a source snapshot the bytes must also be the pinned Git blob. The
+        // check sits inside the attempt loop (like every other rejection), so a mirror that serves stale bytes is
+        // retried and then falls through to the next candidate instead of being written.
+        if (verifiedSource) this.verifier.verify(buf, verifiedSource);
         this.network.succeeded(url);
         return { buf, status: res.status, total: null };
       } catch (e) {
@@ -341,10 +354,13 @@ export class Downloader {
 
   /**
    * Fetch one URL with retries.
+   * @param {string} url
+   * @param {string} kind
+   * @param {{blob:string, commit:string, url:string}|null} [verifiedSource] pinned Git blob this body must match
    * @returns {Promise<{buf:Buffer}|{notFound:true}|{skipped:true}|{error:string}>}
    */
-  async fetchWithRetries(url, kind) {
-    const r = await this.fetchParsed(url, kind, null);
+  async fetchWithRetries(url, kind, verifiedSource = null) {
+    const r = await this.fetchParsed(url, kind, null, verifiedSource);
     if (r.buf) return { buf: r.buf };
     if (r.notFound) return { notFound: true };
     if (r.skipped) return { skipped: true };
@@ -419,13 +435,14 @@ export class Downloader {
    * @param {Response} res
    * @param {string} abs final path
    * @param {string} part stable temp path
-   * @param {{expectSize?:number|null, expectHash?:string|null, expectTotal?:number|null, startAt?:number, kind?:string}} [o] what the
+   * @param {{expectSize?:number|null, expectHash?:string|null, expectTotal?:number|null, startAt?:number, kind?:string,
+   *   verifiedSource?:{blob:string, commit:string, url:string}|null}} [o] what the
    *   finished payload must be: `expectSize` the bytes written, `expectTotal` the size of the assembled file (a resumed
    *   body is only the tail), `expectHash` the content hash, `startAt` the offset that tail begins at, `kind` the asset
-   *   kind whose format the file must still pass.
+   *   kind whose format the file must still pass, `verifiedSource` the pinned Git blob the assembled file must match.
    * @returns {Promise<{ok:true, bytes:number, sha256:string}|{ok:false, error:string}>}
    */
-  async writeStreamed(res, abs, part, { expectSize = null, expectHash = null, expectTotal = null, startAt = 0, kind = null } = {}) {
+  async writeStreamed(res, abs, part, { expectSize = null, expectHash = null, expectTotal = null, startAt = 0, kind = null, verifiedSource = null } = {}) {
     await mkdir(dirname(abs), { recursive: true });
     if (startAt > 0) {
       // Resume: keep what the earlier run already wrote.
@@ -455,6 +472,14 @@ export class Downloader {
     // The same payload check the in-memory path runs, on the parts of the file that decide its format: a big body is not
     // written just because it is big (an HTML error page or a truncated PNG is rejected here as well).
     if (kind && !await validFile(kind, part, startAt + bytes)) return { ok: false, error: `invalid ${kind} payload (${startAt + bytes} B)` };
+    // A streamed body gets the same provenance check as the in-memory one: a large file is not accepted just because its
+    // size and format fit. This is the whole assembled file, so a resumed tail is verified together with the bytes it
+    // was appended to (`startAt + bytes` is that whole length). The read is the same one `fileSha256` below already
+    // performs, so the check adds no new memory profile. It comes before the hash so a rejected body is never renamed.
+    if (verifiedSource) {
+      try { this.verifier.verify(await readFile(part), verifiedSource); }
+      catch (e) { return { ok: false, error: e.message }; }
+    }
     const sha256 = await fileSha256(part);
     if (sha256 === null) return { ok: false, error: 'cannot hash the downloaded file' };
     if (expectHash && expectHash !== sha256) return { ok: false, error: `content differs from the ledger sha256 (${sha256.slice(0, 12)}≠${expectHash.slice(0, 12)}—` };
@@ -479,7 +504,10 @@ export class Downloader {
     if (!isSafeRel(job.rel)) {
       return { status: 'error', bytes: 0, error: `unsafe asset path outside ${this.root}: ${job.rel}` };
     }
-    const kept = await this.existingSize(job);
+    // A verified run decides from the pinned snapshot, never from the ledger of an earlier run: `verifiedCandidate`
+    // below proves the bytes on disk against the blob this source revision pins, and any other bytes are re-fetched.
+    // The {url, bytes} → sha256 ledger healing just below therefore belongs to the unverified path only.
+    const kept = this.verifier ? -1 : await this.existingSize(job);
     if (kept >= 0) {
       const led = this.lastLedgerHint;
       // Extending an old {url, bytes} entry with the hash heals the library one file per run without ever forcing a
@@ -502,7 +530,17 @@ export class Downloader {
     const mayStream = (job.bytes ?? Infinity) >= MIN_RESUMABLE_BYTES;
     let lastError = null;
     for (const url of job.urls) {
-      const sources = this.network.urls(url);
+      // The snapshot turns the logical URL into the blob this revision pins, and the transport URL into the pinned one:
+      // a branch that moved since the snapshot can then never serve other bytes. A URL the snapshot does not list is
+      // not downloadable in a verified run, so the next alternative is tried instead.
+      let verifiedSource = null;
+      if (this.verifier) {
+        const candidate = await this.verifiedCandidate(job, url);
+        if (candidate.result) return candidate.result;
+        verifiedSource = candidate.source;
+        if (!verifiedSource) continue;
+      }
+      const sources = this.network.urls(verifiedSource?.pinnedUrl ?? url);
       for (const src of sources) {
         if (this.network.skip(src)) continue;
         if (mayStream && !this.network.isProxy(src)) {
@@ -528,21 +566,24 @@ export class Downloader {
             startAt: resumeFrom,
             expectHash: resumeFrom > 0 ? ledHash : null,
             kind: job.kind,
+            verifiedSource,
           });
           try { await streamed.res.body?.cancel(); } catch { /* ignore */ }
-          if (done.ok) return this.done(job, src, done.bytes, done.sha256);
+          if (done.ok) return this.done(job, src, done.bytes, done.sha256, verifiedSource);
           // A payload that fails its length or hash check is not a file: the `.part` stays for the next attempt when
           // resuming (that is how a half-written body turns into a resume instead of a corrupt asset), but a body that
-          // contradicts what the source promised is thrown away rather than resumed against forever.
+          // contradicts what the source promised is thrown away rather than resumed against forever. A failed source
+          // verification is that same class — the bytes are provably not the pinned ones, so resuming them would only
+          // extend the wrong file.
           if (resumeFrom > 0) {
-            if (/sha256/.test(done.error)) { try { await unlink(part); } catch { /* ignore */ } }
-          } else if (/truncated|sha256|invalid|empty response/.test(done.error)) {
+            if (/sha256|blob mismatch/.test(done.error)) { try { await unlink(part); } catch { /* ignore */ } }
+          } else if (/truncated|sha256|invalid|empty response|blob mismatch/.test(done.error)) {
             try { await unlink(part); } catch { /* ignore */ }
           }
           lastError = done.error;
           continue;
         }
-        const whole = await this.fetchParsed(src, job.kind, null);
+        const whole = await this.fetchParsed(src, job.kind, null, verifiedSource);
         if (whole.notFound || whole.skipped) continue;
         if (whole.error) { lastError = whole.error; continue; }
         // The proven in-memory path, plus the content hash the ledger records so the next run can verify the file.
@@ -554,11 +595,67 @@ export class Downloader {
           try { await unlink(part); } catch { /* ignore */ }
           return { status: 'error', bytes: 0, error: `write failed: ${e.message}` };
         }
-        return this.done(job, src, whole.buf.length, sha256(whole.buf));
+        return this.done(job, src, whole.buf.length, sha256(whole.buf), verifiedSource);
       }
     }
     if (lastError) this.network.directFailureHint();
     return lastError ? { status: 'error', bytes: 0, error: lastError } : { status: 'miss', bytes: 0, error: 'not found (404) on all sources' };
+  }
+
+  /**
+   * Resolve today's candidate before considering old bytes or ledger provenance.
+   *
+   * Two outcomes. A file already on disk that *is* the pinned blob is kept, and its ledger entry is re-anchored on the
+   * snapshot (logical URL, pinned blob/commit and the local sha256 in one write), which is what makes a re-run after
+   * moving between revisions cheap without trusting the previous ledger. Any other bytes — missing, rejected, or simply
+   * a different revision — return the resolved source so the caller fetches *this* candidate instead of an old URL.
+   * An `--force` run skips the inspection and refetches, exactly as the unverified path does.
+   *
+   * A resolution that fails is an error result, not a miss: an unreachable snapshot API means "unknown", and treating it
+   * as "absent upstream" would silently drop assets.
+   * @param {Job} job
+   * @param {string} url logical branch URL of the candidate
+   * @returns {Promise<{result?: JobResult, source?: {blob:string, commit:string, url:string, pinnedUrl:string}}>}
+   */
+  async verifiedCandidate(job, url) {
+    let source;
+    try { source = await this.verifier.resolve(url); } catch (e) {
+      return { result: { status: 'error', bytes: 0, error: e.message } };
+    }
+    if (!source) return {};
+    if (!this.force && !job.mutable) {
+      try {
+        const buf = await readFile(join(this.root, job.rel));
+        this.verifier.verify(buf, source);
+        if (validate(job.kind, buf)) {
+          this.ledger.files[job.rel] = { url, bytes: buf.length, sha256: sha256(buf), blob: source.blob, commit: source.commit };
+          this.dirty++;
+          return { result: { status: 'skip', bytes: buf.length, url } };
+        }
+      } catch { /* Missing or rejected bytes: fetch this candidate, not an old ledger URL. */ }
+    }
+    return { source };
+  }
+
+  /**
+   * Claim an existing file for pruning protection after a failed fetch, and report whether it may still be *published*
+   * (used by the manifest). Protection is unconditional: source absence does not invalidate the bytes on disk, and
+   * deleting them because the network failed would replace "retry next run" with data loss. Publication is stricter —
+   * only a file whose bytes prove to be the ledger's pinned blob (and that still passes its format check) is accepted,
+   * so a stale or corrupt leftover is protected from pruning but never served to the client.
+   * @param {Job} job
+   * @returns {Promise<boolean>} true when the file is verified and usable
+   */
+  async retainExisting(job) {
+    this.preserved.add(job.rel);
+    const led = this.ledger.files[job.rel];
+    if (!led?.blob) return false;
+    try {
+      const buf = await readFile(join(this.root, job.rel));
+      this.verifier.verify(buf, { blob: led.blob, url: led.url || job.rel });
+      return validate(job.kind, buf);
+    } catch { /* No verified fallback is available. */ }
+    return false;
   }
 
   /**
@@ -630,11 +727,21 @@ export class Downloader {
     return { error: lastErr };
   }
 
-  /** Record a finished file in the ledger and the run totals. */
-  done(job, src, bytes, sha256 = null) {
+  /**
+   * Record a finished file in the ledger and the run totals.
+   *
+   * A verified run records the pinned `blob`/`commit` beside the local `sha256`, and records the *logical* branch URL
+   * rather than the pinned transport URL that served it: later steps derive their requests from the ledger URL (a Spine
+   * atlas' `page.png`, an optional font original) and must keep deriving from the branch, never from one commit. The
+   * `sha256` stays too, so a later unverified run keeps the hash-hardened `existingSize` fast path.
+   */
+  done(job, src, bytes, sha256 = null, verifiedSource = null) {
     const prev = this.ledger.files[job.rel];
     const hash = sha256 ?? prev?.sha256 ?? null;
-    this.ledger.files[job.rel] = hash ? { url: src, bytes, sha256: hash } : { url: src, bytes };
+    const url = verifiedSource ? verifiedSource.url : src;
+    const entry = hash ? { url, bytes, sha256: hash } : { url, bytes };
+    if (verifiedSource) { entry.blob = verifiedSource.blob; entry.commit = verifiedSource.commit; }
+    this.ledger.files[job.rel] = entry;
     this.written.add(job.rel);
     this.dirty++;
     const sizeChanged = !!(job.bytes && job.bytes !== bytes && !job.mutable);
