@@ -46,7 +46,7 @@ describe('mediaUrl: 音频地址去掉扩展名（躲开下载器嗅探）', () 
     assert.equal(mediaUrl('/assets/audio/bgm/../x.mp3', ORIGIN), '/media/x');
   });
 
-  test('外观插件的音频（/p/<id>/<hash8>/…）同样去掉扩展名，留在插件自己的路由上（DESIGN §32 P1a）', () => {
+  test('外观插件的音频（/p/<id>/<hash8>/…）同样去掉扩展名，留在插件自己的路由上（DESIGN §34 P1a）', () => {
     assert.equal(mediaUrl('/p/my-skin/0123abcd/voice/s1.mp3', ORIGIN), '/p/my-skin/0123abcd/voice/s1');
     assert.equal(mediaUrl('/p/my-skin/0123abcd/bgm/loop.ogg', ORIGIN), '/p/my-skin/0123abcd/bgm/loop');
     assert.equal(mediaUrl(`${ORIGIN}/p/my-skin/0123abcd/v/a%20b.mp3`, ORIGIN), '/p/my-skin/0123abcd/v/a%20b', '编码过的路径段原样保留');

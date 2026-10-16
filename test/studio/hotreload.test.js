@@ -1,4 +1,4 @@
-// test/studio/hotreload.test.js — hot reload of plugins while the studio is in use (DESIGN §32.9; server/studio/watch.js,
+// test/studio/hotreload.test.js — hot reload of plugins while the studio is in use (DESIGN §34.9; server/studio/watch.js,
 // server/lobby.js refreshPlugins): a file of a plugin changes on disk (the studio's write or an author's own tool) → the
 // watch (fs.watch, gathered over 300 ms) → registry.rescan() → the visual sets see the set a room holds changed → a room
 // whose host is the author (a game session the studio's page named) or whose host is its only player applies the same

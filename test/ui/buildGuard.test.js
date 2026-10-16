@@ -137,7 +137,7 @@ test('startBuildGuard: stop() ends the watch', async () => {
   assert.equal(BUILD_CHECK_MS, 60_000);
 });
 
-test('onHealth: told every /healthz body a check reads — what else the page reads of the server before any hello (DESIGN §32 P1a)', async () => {
+test('onHealth: told every /healthz body a check reads — what else the page reads of the server before any hello (DESIGN §34 P1a)', async () => {
   const bodies = [];
   const fetchFn = async () => ({ ok: true, json: async () => ({ build: 'aaa', content: { vanilla: 'c'.repeat(64), sets: 0, plugins: 2 } }) });
   assert.equal(await fetchBuild(fetchFn, { onHealth: (b) => bodies.push(b) }), 'aaa');

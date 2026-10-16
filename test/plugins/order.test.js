@@ -1,4 +1,4 @@
-// test/plugins/order.test.js — which plugins a set holds and in what order (DESIGN §32, shared/plugins/order.js): the
+// test/plugins/order.test.js — which plugins a set holds and in what order (DESIGN §34, shared/plugins/order.js): the
 // requirements switched on with a plugin (`auto`), a missing or out-of-range requirement and a conflict refused, the
 // order by requires / optional / loadAfter / loadBefore, then priority, then id — the same on every machine —, a cycle
 // refused.

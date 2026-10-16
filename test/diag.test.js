@@ -166,7 +166,7 @@ describe('the report', () => {
     assert.deepEqual(json, { t: 'b.start', battleId: spec.battleId, fieldId: 'u', kind: 'unite', spec });
   });
 
-  test('the content line: the room\'s content set, else the server\'s vanilla hash; MODDED with its plugins (DESIGN §32)', () => {
+  test('the content line: the room\'s content set, else the server\'s vanilla hash; MODDED with its plugins (DESIGN §34)', () => {
     const cs = 'ab'.repeat(32);
     const other = 'cd'.repeat(32);
     assert.equal(contentLine({}), 'unknown');

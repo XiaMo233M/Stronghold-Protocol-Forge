@@ -1,4 +1,4 @@
-// Browser check for 从 Forge 包导入 (DESIGN §32.12). Opt-in:
+// Browser check for 从 Forge 包导入 (DESIGN §34.12). Opt-in:
 //   SP_E2E=1 node --test test/ui/forge-import.e2e.test.js
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';

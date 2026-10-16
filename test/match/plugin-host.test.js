@@ -1,4 +1,4 @@
-// test/match/plugin-host.test.js — the match hosts of rooms with gameplay plugins (DESIGN §32.6, P1c;
+// test/match/plugin-host.test.js — the match hosts of rooms with gameplay plugins (DESIGN §34.6, P1c;
 // server/match/host/): a content set's matches run in a match host of their own — a child process by default, a worker
 // thread with SP_MATCH_HOST=worker (or the `transport: 'worker'` option).
 //

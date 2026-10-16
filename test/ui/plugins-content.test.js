@@ -1,4 +1,4 @@
-// test/ui/plugins-content.test.js — the browser side of a room's content set (DESIGN §32.6, P1c):
+// test/ui/plugins-content.test.js — the browser side of a room's content set (DESIGN §34.6, P1c):
 //   * content.js fetchChecked / loadContentSet: a real content set (the content builder over a data plugin) fetched as bytes —
 //     every file checked against its manifest entry before it is decoded (a BOM stays part of the bytes), the manifest's
 //     composition (its translation files' hashes too) against cs; refused: a byte changed, a wrong size, a manifest that
@@ -116,7 +116,7 @@ describe('loading and checking a room\'s content set (public/js/content.js)', ()
     // a manifest that names a file another hash: the composition no longer hashes to cs
     await assert.rejects(loadContentSet(CS, { fetch: serverFetch({ edit: rewrite((i) => ({ ...i, data: { ...i.data, bonds: { ...i.data.bonds, sha256: 'cd'.repeat(32) } } })) }).fetchFn, wait: noWait }), /does not hash/);
     await assert.rejects(loadContentSet(CS, { fetch: serverFetch({ edit: rewrite((i) => ({ ...i, data: { ...i.data, bonds: { ...i.data.bonds, url: 'https://elsewhere.example/bonds.json' } } })) }).fetchFn, wait: noWait }), /outside this server/);
-    // its translation files: the cs covers their hashes (DESIGN §32.5), their addresses are this server's too
+    // its translation files: the cs covers their hashes (DESIGN §34.5), their addresses are this server's too
     const lang = Object.keys((await loadContentSet(CS, { fetch: serverFetch().fetchFn, wait: noWait })).index.i18n || {})[0];
     assert.ok(lang, 'the set lists the server\'s translation files');
     await assert.rejects(loadContentSet(CS, { fetch: serverFetch({ edit: rewrite((i) => ({ ...i, i18n: { ...i.i18n, [lang]: { ...i.i18n[lang], sha256: 'cd'.repeat(32) } } })) }).fetchFn, wait: noWait }), /does not hash/);
@@ -124,7 +124,7 @@ describe('loading and checking a room\'s content set (public/js/content.js)', ()
     await assert.rejects(loadContentSet(CS, { fetch: serverFetch({ edit: rewrite((i) => ({ ...i, i18n: { ...i.i18n, [lang]: { ...i.i18n[lang], url: 'https://elsewhere.example/en.json' } } })) }).fetchFn, wait: noWait }), /outside this server/);
   });
 
-  test('loadContentSet: the official-bounds snapshot the manifest lists comes with the set, checked by its bytes — the table the server\'s match host installs (DESIGN §32.5)', async () => {
+  test('loadContentSet: the official-bounds snapshot the manifest lists comes with the set, checked by its bytes — the table the server\'s match host installs (DESIGN §34.5)', async () => {
     const { fetchFn, seen } = serverFetch();
     const set = await loadContentSet(CS, { fetch: fetchFn, wait: noWait });
     assert.equal(set.bounds?.v, 1);

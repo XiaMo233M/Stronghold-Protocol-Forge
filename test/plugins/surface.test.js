@@ -1,4 +1,4 @@
-// test/plugins/surface.test.js — the frozen plugin API v1 (DESIGN §32.13, docs/PLUGIN-API.md).
+// test/plugins/surface.test.js — the frozen plugin API v1 (DESIGN §34.13, docs/PLUGIN-API.md).
 // Three things must agree: the markdown table, buildSurface(), and the closed sets themselves (enumerated in this
 // file, not by calling buildSurface's helpers). A new export means a new member of one of those sets — a manifest
 // field, permission, class, patch op, compact-record field, overlay leaf, DSL word, postMessage name, slot, studio

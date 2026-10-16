@@ -2,7 +2,7 @@
 //
 // 为什么需要这条判据：本树同时留着两条「在哪份数据上模拟」的来源 ——
 //   · 我们的数据面（W-D, DESIGN §28.16：`dataBaseFor` → `/data/` 或 `/room-data/<摘要>/`），和
-//   · 上游 0.3.0 的内容集（DESIGN §32.6：`contentFor` / `simContent` / `vanillaCs`）。
+//   · 上游 0.3.0 的内容集（DESIGN §34.6：`contentFor` / `simContent` / `vanillaCs`）。
 // 两边的调用方对 `deps.loadSim` 的**第一个参数**要求不同，不可能共用一个参数位：
 //   · `test/match/runnerDataBase.test.js`（我们的 W-D）要 `loadSim(dataBase)`；
 //   · `test/ui/plugins-content.test.js`（上游）要 `loadSim(content?)`（它的 loader 是

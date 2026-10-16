@@ -1,4 +1,4 @@
-// Interface-plugin browser test (DESIGN §32.8). Not part of the default run.
+// Interface-plugin browser test (DESIGN §34.8). Not part of the default run.
 //   SP_E2E=1 node --test test/ui/ui-plugins.e2e.test.js
 //
 // Copies plugins/_template/ui into a temp id `damage-meter`, turns it on in this browser

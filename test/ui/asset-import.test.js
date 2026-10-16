@@ -436,7 +436,7 @@ test('a file the manifest does not list is skipped, and a bad zip stops the impo
   assert.equal(imp.get().accepted, 1);
   assert.ok(imp.get().skipped >= 2);
   assert.deepEqual([...store.keys()].filter((url) => url !== IMPORTED_INDEX_URL).length, 1);
-  assert.equal(calls.length, 3);   // assets.json, local-assets.json, local-fx.json (DESIGN §33)
+  assert.equal(calls.length, 3);   // assets.json, local-assets.json, local-fx.json (DESIGN §35)
   assert.equal(imp.get().localMissing, undefined);
 
   const broken = createAssetImport({ fetch, caches });
@@ -630,7 +630,7 @@ test('site CSP keeps worker-src self and blob, and the sim worker policy does no
   assert.equal(importSupport({}, true).ok, false);
 });
 
-test('mergeLocalManifests: the effects manifest\'s groups join the local ones for the import plan (DESIGN §33)', async () => {
+test('mergeLocalManifests: the effects manifest\'s groups join the local ones for the import plan (DESIGN §35)', async () => {
   const { mergeLocalManifests } = await import('../../public/js/assetPack.js');
   assert.equal(mergeLocalManifests(null, null), null);
   const merged = mergeLocalManifests({ groups: { scene: { a: { path: '/assets/~0123456789abcdef/local/scene/a.bin' } } } },

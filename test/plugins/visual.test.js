@@ -1,4 +1,4 @@
-// test/plugins/visual.test.js — the cosmetic plugins' format (DESIGN §32 P1a, shared/plugins/visual.js): an asset overlay
+// test/plugins/visual.test.js — the cosmetic plugins' format (DESIGN §34 P1a, shared/plugins/visual.js): an asset overlay
 // read into ops (the containers and fields of data/assets.json, a plugin's own files by extension, Spine models next to
 // their atlas, whole-record and field references to the installation's manifest — a missing one is a problem —, the
 // permissions a write needs), plugin.lock.json and a model's clip data (a stale lock refused), the browser's composition

@@ -1,4 +1,4 @@
-// test/plugins/forgeImport.test.js — Forge workshop import (DESIGN §32.12, docs/PLUGINS.md §16).
+// test/plugins/forgeImport.test.js — Forge workshop import (DESIGN §34.12, docs/PLUGINS.md §16).
 // The three packs under test/fixtures/forge/ are written for this test (no official art, nothing copied from Forge).
 // The chess, official-kit and kit packs of round 43 are written inline into temporary folders: a kit is a .js file,
 // and `node --test` runs every .js under test/ (an `@kit/…` import would fail it there). Their numbers are made up;

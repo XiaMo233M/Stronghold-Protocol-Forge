@@ -1,4 +1,4 @@
-// test/content/dsl.test.js — P2 DSL-lite (DESIGN §32.7): the validator agrees with schemas/dsl.schema.json,
+// test/content/dsl.test.js — P2 DSL-lite (DESIGN §34.7): the validator agrees with schemas/dsl.schema.json,
 // compileDsl throws the PLUGIN_DSL_* code, five official effects match the official kit on the same battle,
 // the action budget stops only that plugin, and a dsl-tagged hit does not re-enter hitDealt.
 import { test } from 'node:test';

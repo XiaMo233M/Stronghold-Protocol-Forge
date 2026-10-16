@@ -1,4 +1,4 @@
-// test/plugins/registry.test.js — the plugin registry (DESIGN §32, server/plugins/registry.js): one scan over the
+// test/plugins/registry.test.js — the plugin registry (DESIGN §34, server/plugins/registry.js): one scan over the
 // language folders, packs/ and plugins/ — manifest 1 read as before, manifest 2 by class (lang and cosmetic loaded —
 // P1a —, content loaded, code disabled by default), broken manifests, stray files and links, duplicate ids (across packs/ and
 // plugins/, any case) and languages skipped with a reason, `_` templates and top-level files never read; the

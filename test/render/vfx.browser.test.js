@@ -1,4 +1,4 @@
-// test/render/vfx.browser.test.js — the official battle effects (render/vfx, DESIGN §33) in headless Chrome through
+// test/render/vfx.browser.test.js — the official battle effects (render/vfx, DESIGN §35) in headless Chrome through
 // the dev viewer (public/dev/fx-viewer.html): a few extracted effects played with fixed seeds and hand-stepped frames
 // on a flat grey stand-in for the board → screenshots test/e2e/out/vfx-<name>.png; each picture must show the effect
 // (pixels changed around its anchor) and blend as its materials say: the additive hits only brighten the board, the

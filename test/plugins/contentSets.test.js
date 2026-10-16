@@ -1,4 +1,4 @@
-// test/plugins/contentSets.test.js — server/plugins/contentSets.js, the content sets rooms hold (DESIGN §32.6, P1c), over
+// test/plugins/contentSets.test.js — server/plugins/contentSets.js, the content sets rooms hold (DESIGN §34.6, P1c), over
 // an injected builder (the real C1 builder: test/plugins/contentSet.test.js, test/lobby-plugins.test.js):
 //   * the same plugins in the same state with the same settings are not built again; a changed plugin file (a new
 //     content hash), another manifest or other settings are — settings as the builder reads them (normalizeSettings: a

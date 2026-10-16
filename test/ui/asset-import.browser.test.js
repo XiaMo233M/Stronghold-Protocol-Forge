@@ -84,7 +84,7 @@ test('import has its own dialog that requests nothing on opening; imported art i
     const url = req.url.split('?')[0];
     requests.push(url);
     if (req.url.startsWith('/healthz')) probes++;
-    // (local-fx.json: the host's official battle effects, DESIGN §33 — none in this fixture)
+    // (local-fx.json: the host's official battle effects, DESIGN §35 — none in this fixture)
     if (url === '/data/assets.json' || url === '/data/local-assets.json' || url === '/data/local-fx.json') {
       res.setHeader('Content-Type', 'application/json');
       res.setHeader('Cache-Control', 'no-store');

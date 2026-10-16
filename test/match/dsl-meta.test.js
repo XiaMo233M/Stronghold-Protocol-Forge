@@ -1,4 +1,4 @@
-// test/match/dsl-meta.test.js — prep half of the P2 DSL (DESIGN §32.7). 老鲤's income is a MetaRegistry
+// test/match/dsl-meta.test.js — prep half of the P2 DSL (DESIGN §34.7). 老鲤's income is a MetaRegistry
 // dispatch, not a battle, so this file does not use battleHarness. The spec is built from the band's own
 // give_coin_in_round rows. A second case checks funds / layers / gainItem on a fresh registry.
 import { test } from 'node:test';

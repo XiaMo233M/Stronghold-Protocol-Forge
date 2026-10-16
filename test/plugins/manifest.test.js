@@ -1,4 +1,4 @@
-// test/plugins/manifest.test.js — the plugin manifest (DESIGN §32, shared/plugins/manifest.js): manifest 2 read and
+// test/plugins/manifest.test.js — the plugin manifest (DESIGN §34, shared/plugins/manifest.js): manifest 2 read and
 // normalised (classes, parts, permissions, settings, dependencies, the lang class), manifest 1 read exactly as the
 // content packs of 0.2.0 (shared/packs.js normalizeManifest forwards to it), the problems that keep a plugin out and
 // the warnings that do not, the file rules and limits (types by class, documents, sizes, links, the paths a manifest

@@ -1,4 +1,4 @@
-// Interface plugins (DESIGN §32.8): message shape and rate, storage quota, slot allocation, the registry accepting
+// Interface plugins (DESIGN §34.8): message shape and rate, storage quota, slot allocation, the registry accepting
 // and refusing a ui manifest, the /p/ CSP header, and a ui plugin leaving `cs` alone (it does count toward `vs`).
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';

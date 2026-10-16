@@ -1,4 +1,4 @@
-// test/studio/forge.test.js — the studio's Forge import (DESIGN §32.12). The gate is the studio's own. The body is a
+// test/studio/forge.test.js — the studio's Forge import (DESIGN §34.12). The gate is the studio's own. The body is a
 // zip or a file list, never a path on the server. Preview writes nothing; import writes plugins/<id>/ after the report.
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';

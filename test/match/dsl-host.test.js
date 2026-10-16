@@ -1,4 +1,4 @@
-// Prep DSL from a content set runs inside the match host (DESIGN §32.7, PLUGIN-DSL.md §9).
+// Prep DSL from a content set runs inside the match host (DESIGN §34.7, PLUGIN-DSL.md §9).
 // Helpers are local, as in test/match/plugin-host.test.js.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';

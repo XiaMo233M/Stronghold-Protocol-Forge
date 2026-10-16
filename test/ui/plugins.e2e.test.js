@@ -1,4 +1,4 @@
-// Real-server browser E2E — cosmetic plugins (DESIGN §32 P1a; opt-in, ~40 s):
+// Real-server browser E2E — cosmetic plugins (DESIGN §34 P1a; opt-in, ~40 s):
 //   SP_E2E=1 node --test test/ui/plugins.e2e.test.js
 //
 // A server with a plugins folder of its own (art made on the spot: a red and a green 8 × 8 square; no file of the game):
@@ -11,7 +11,7 @@
 // when this checkout has none.
 // A match already drawn (the fast server's starter kit placed on the board): a personal plugin switched on during the
 // match changes the picture the piece already on the board draws (render/units.js retryAssets — the field view's
-// pieceArt introspection), and switched off brings the installation's back (DESIGN §32 P1a review round 2).
+// pieceArt introspection), and switched off brings the installation's back (DESIGN §34 P1a review round 2).
 // A server without plugins: its page never asks for the catalogue, a visual set or a plugin file — the title shows no
 // count, the room's 插件 panel says there is none, 设置 has no 外观插件 (/healthz and welcome send no count) — and its title
 // page loads none of the plugin panel, the asset store or what composes a set (the panel's code only once it opens).

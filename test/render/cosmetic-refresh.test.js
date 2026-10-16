@@ -1,5 +1,5 @@
 // test/render/cosmetic-refresh.test.js — views already on the board follow the art manifest when it changes under them
-// (DESIGN §32 P1a review round 2): a room's cosmetic plugins arriving after the board was drawn (a reconnect, a spectator
+// (DESIGN §34 P1a review round 2): a room's cosmetic plugins arriving after the board was drawn (a reconnect, a spectator
 // joining a match), a personal plugin switched during a match, the set taken away again. render/units.js retryAssets —
 // which render/app.js calls on every assets.onChange — loads a picture or a Spine model the manifest names now when it
 // is not the one shown or loading (the new model replaces the old in place and the old one is released; a load in

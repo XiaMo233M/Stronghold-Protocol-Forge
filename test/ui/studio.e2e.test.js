@@ -1,4 +1,4 @@
-// Real-server browser E2E — the plugin studio (DESIGN §32.9; opt-in, ~30 s):
+// Real-server browser E2E — the plugin studio (DESIGN §34.9; opt-in, ~30 s):
 //   SP_E2E=1 node --test test/ui/studio.e2e.test.js
 //
 // A server with a plugins folder of its own: the studio's page at the address the server prints (/studio/#key=…: the key

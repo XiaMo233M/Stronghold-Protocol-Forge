@@ -1,4 +1,4 @@
-// test/ui/cosmetics-lazy.test.js — public/js/cosmetics.js before what composes a set's document is loaded (DESIGN §32 P1a
+// test/ui/cosmetics-lazy.test.js — public/js/cosmetics.js before what composes a set's document is loaded (DESIGN §34 P1a
 // review round 3): the title page carries the layers without shared/plugins/visual.js; a layer laid before it is there
 // (content.js loads it first, so only a careless caller) is laid once it is, the last one wins, and the art beneath is
 // untouched meanwhile. Its own file: node --test gives it a fresh process, so the module is really not loaded yet.

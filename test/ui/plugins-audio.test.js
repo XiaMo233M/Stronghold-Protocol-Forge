@@ -1,4 +1,4 @@
-// test/ui/plugins-audio.test.js — a cosmetic plugin's sound (DESIGN §32 P1a review round 2): fetched without its
+// test/ui/plugins-audio.test.js — a cosmetic plugin's sound (DESIGN §34 P1a review round 2): fetched without its
 // extension first (public/js/media.js mediaUrl — the plugin route, for the download managers /media/ avoids), with the
 // URL that has it as the fallback; a sound that will not load either way is reported (AudioManager onFailed → the
 // cosmetic layers, public/js/assets.js), its entry falls back to the installation's, and the entry the manifest names

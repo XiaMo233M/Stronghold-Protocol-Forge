@@ -2,7 +2,7 @@
 //   * server/http/assetIndex.js — SHA-256 (16 hex) of every file under public/assets and public/fonts, cached by path +
 //     size + mtime in a JSON file, never trusted for a file whose size or mtime changed; Spine models share one hash;
 //   * server/http/assetViews.js — the served data/assets.json / data/local-assets.json / data/local-fx.json (the official
-//     effects' file list, DESIGN §33.1) with every art URL carrying its hash segment, the committed files untouched;
+//     effects' file list, DESIGN §35.1) with every art URL carrying its hash segment, the committed files untouched;
 //   * the ~hash routes of static.js / media.js — the segment stripped, `immutable` only when it names the file's bytes,
 //     the current file with `no-cache` otherwise; content ETags; the plain URLs as before.
 import { test, describe, before, after } from 'node:test';

@@ -1,4 +1,4 @@
-// test/ui/plugins-client.test.js — the browser side of the cosmetic plugins (DESIGN §32 P1a): the cosmetic layers of
+// test/ui/plugins-client.test.js — the browser side of the cosmetic plugins (DESIGN §34 P1a): the cosmetic layers of
 // public/js/assets.js (the installation's manifest → the room's visual set → the personal plugins on top, composed on the
 // page's own manifest: every plugin URL built from a set's composition, a URL in a document never drawn, a write that
 // does not fit left out and told once, a plugin file that failed to load falling back to the art beneath it; the same

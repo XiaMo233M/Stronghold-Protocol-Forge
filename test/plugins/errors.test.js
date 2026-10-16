@@ -1,4 +1,4 @@
-// test/plugins/errors.test.js — the plugin error catalogue (shared/plugins/errors.js, DESIGN §32.9, the 0.3.0 plan's C6):
+// test/plugins/errors.test.js — the plugin error catalogue (shared/plugins/errors.js, DESIGN §34.9, the 0.3.0 plan's C6):
 // every PLUGIN_* code the code names is in the catalogue with its plain words in Chinese and English, what to do and a
 // document anchor that exists; the room's refusal codes are the ERR codes (with their translated ERR_TEXT); every
 // one-click fix it names exists (server/studio/edit.js FIXES, the API's own); the checks report coded issues beside their

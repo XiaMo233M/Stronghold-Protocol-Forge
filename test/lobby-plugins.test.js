@@ -1,4 +1,4 @@
-// test/lobby-plugins.test.js — the room's plugins (DESIGN §32 P1a, server/lobby.js setPlugins; shared/protocol.js
+// test/lobby-plugins.test.js — the room's plugins (DESIGN §34 P1a, server/lobby.js setPlugins; shared/protocol.js
 // room.setPlugins): the host switches cosmetic plugins on before the match — room.state.content names the set (`vs`, the
 // plugins, their warnings and size) while `cs` stays the vanilla one (art never changes a battle: the match and its
 // BattleSpecs get the vanilla cs), the other humans are un-readied, the same set again changes nothing, an empty list
@@ -254,7 +254,7 @@ describe('room.setPlugins (P1a: cosmetic plugins)', () => {
   });
 });
 
-// ---- P1c (DESIGN §32.6): room content sets — gameplay plugins in a room ----------------------------------------------
+// ---- P1c (DESIGN §34.6): room content sets — gameplay plugins in a room ----------------------------------------------
 // room.setPlugins with content plugins gives the room a content set of its own (its own cs, `vanilla: false`), served at
 // /cs/<cs16>/ (the manifest recomputes cs; a patched file's bytes hash to its entry), seats[].content until every page
 // checked it (room.contentReady: ready and start wait — CONTENT_NOT_READY), the match in that set's match host worker

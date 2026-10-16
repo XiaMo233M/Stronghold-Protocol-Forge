@@ -1,4 +1,4 @@
-// test/plugins/install.test.js — install a plugin zip (DESIGN §32.13, docs/PLUGINS.md §17).
+// test/plugins/install.test.js — install a plugin zip (DESIGN §34.13, docs/PLUGINS.md §17).
 // Downloads use an injected fetch. Nothing here contacts the public network. The production cap
 // INSTALL_MAX_BYTES is asserted equal to PLUGIN_LIMITS.pluginBytes; oversized cases pass a small maxBytes
 // or declare an uncompressed size over the real cap before inflate.

@@ -23,7 +23,7 @@ test('homepage download, visible failure/retry, pause, cache reuse, and the two 
     if (url === '/data/assets.json' || url === '/data/local-assets.json' || url === '/data/local-fx.json') {
       res.setHeader('Content-Type', 'application/json');
       res.setHeader('Cache-Control', 'no-store');
-      // (local-fx.json: the host's official battle effects, DESIGN §33 — none in this fixture)
+      // (local-fx.json: the host's official battle effects, DESIGN §35 — none in this fixture)
       res.end(JSON.stringify(url === '/data/assets.json' ? { files: [image, missing] } : { groups: {} }));
       return;
     }

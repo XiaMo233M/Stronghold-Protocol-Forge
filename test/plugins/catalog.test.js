@@ -1,4 +1,4 @@
-// test/plugins/catalog.test.js — a community catalogue (DESIGN §32.13, docs/PLUGINS.md §17).
+// test/plugins/catalog.test.js — a community catalogue (DESIGN §34.13, docs/PLUGINS.md §17).
 // schemas/catalog.schema.json and shared/plugins/catalog.js readCatalog agree on one fixture set: a document is
 // accepted exactly when the check finds neither a problem nor a warning. That set includes duplicate ids (the
 // repository validator's uniqueItemProperties), an app string that is not a version range, an empty app, and a

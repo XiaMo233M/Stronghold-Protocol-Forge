@@ -174,7 +174,7 @@ describe('local stats: replay dedupe', () => {
   });
 });
 
-describe('local stats: the room\'s cosmetic plugins (DESIGN §32 P1a review round 2)', () => {
+describe('local stats: the room\'s cosmetic plugins (DESIGN §34 P1a review round 2)', () => {
   const VS = 'ab'.repeat(32);
   test('every record names the room\'s visual set vs (null without plugins); a cosmetic-only match counts like any (the owner\'s decision of 2026-10-13)', () => {
     const plain = buildRecord(baseResult(), { myId: 'p1', now: 1 });

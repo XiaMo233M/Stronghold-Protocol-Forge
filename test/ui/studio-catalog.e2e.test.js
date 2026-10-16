@@ -1,4 +1,4 @@
-// Real-server browser E2E — 「从目录安装」(DESIGN §32.13; opt-in):
+// Real-server browser E2E — 「从目录安装」(DESIGN §34.13; opt-in):
 //   SP_E2E=1 node --test test/ui/studio-catalog.e2e.test.js
 //
 // The page reads a catalogue file (it does not download the zip) and posts the text. Install asks the server to

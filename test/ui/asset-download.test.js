@@ -160,7 +160,7 @@ test('a completed check reads updated manifests and downloads newly supplied fil
   assert.deepEqual(calls, ['/assets/a', '/assets/a', '/assets/b']);
 });
 
-test('the official battle effects manifest (/data/local-fx.json, DESIGN §33) is queued when the host has it', async () => {
+test('the official battle effects manifest (/data/local-fx.json, DESIGN §35) is queued when the host has it', async () => {
   const got = [];
   const queue = createAssetDownload({
     lookupImported: async () => new Set(),

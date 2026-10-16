@@ -1,5 +1,5 @@
 // test/match/waves-plugin-bounds.test.js — a data plugin's factions.generation numbers stay within one wave action's units
-// (DESIGN §32.6, the P1c review's HIGH-1): a minReplacedEnemyCount of 4e7 (an integer under the plugin JSON limit of 1e9)
+// (DESIGN §34.6, the P1c review's HIGH-1): a minReplacedEnemyCount of 4e7 (an integer under the plugin JSON limit of 1e9)
 // became every replaced placeholder action's unit count and then `new Array(own).fill(…)` in the bounty plan — the
 // allocation that aborts a worker thread's whole process. server/match/waves.js now clamps replacedCount's min / max and
 // the bounty plan's own units to templateSpawns' 50; the official 1 / 5 give what they gave.

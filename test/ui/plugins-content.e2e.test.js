@@ -1,4 +1,4 @@
-// Real-server browser E2E — a room's content set (DESIGN §32.6 P1c; opt-in, ~1 min):
+// Real-server browser E2E — a room's content set (DESIGN §34.6 P1c; opt-in, ~1 min):
 //   SP_E2E=1 node --test test/ui/plugins-content.e2e.test.js   (SP_E2E_VERBOSE=1: the server's log too)
 //
 // A server with a data plugin of its own (bond-def: a bond value patched — no file of the game) and two browsers: the

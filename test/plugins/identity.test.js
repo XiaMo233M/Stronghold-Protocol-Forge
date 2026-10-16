@@ -1,4 +1,4 @@
-// test/plugins/identity.test.js — the content identity (DESIGN §32): shared/sha256.js (the FIPS 180-2 vectors, node:crypto
+// test/plugins/identity.test.js — the content identity (DESIGN §34): shared/sha256.js (the FIPS 180-2 vectors, node:crypto
 // on every length and in pieces, UTF-8 like TextEncoder, and the same digests in a bare JavaScript realm — no Node
 // API, as in a browser), the composition of `cs` (shared/plugins/identity.js: canonical JSON), the vanilla content of a
 // server (server/plugins/identity.js): the same input gives the same `cs`, the Node and the browser hash agree, the

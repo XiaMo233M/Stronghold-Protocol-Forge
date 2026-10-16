@@ -1,4 +1,4 @@
-// test/studio/studio.test.js — the plugin studio's server side (server/studio/, DESIGN §32.9, the 0.3.0 plan's C5):
+// test/studio/studio.test.js — the plugin studio's server side (server/studio/, DESIGN §34.9, the 0.3.0 plan's C5):
 //   * who may use it (gate.js): this machine and the local network, a local Host name (no DNS rebinding), the
 //     X-SP-Studio header and the studio's own origin on a change — anyone else gets the 404 of a page that does not exist,
 //     at the page and at every API route, whatever the method;

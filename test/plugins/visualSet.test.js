@@ -1,4 +1,4 @@
-// test/plugins/visualSet.test.js — the visual sets of a server and the files of cosmetic plugins (DESIGN §32 P1a,
+// test/plugins/visualSet.test.js — the visual sets of a server and the files of cosmetic plugins (DESIGN §34 P1a,
 // server/plugins/visualSet.js, server/http/static.js /vs/ and /p/): a set resolved for a room or a player (loaded
 // cosmetic plugins of the scope, their requirements switched on, in load order, within the size limit — refused
 // otherwise), its vs stable for the same files and new for one changed byte; GET /vs/<vs16>/overlay.json — the set's

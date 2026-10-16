@@ -1,4 +1,4 @@
-// test/plugins/tool.test.js — tools/plugin.mjs pack and the cosmetic template (DESIGN §32 P1a): pack writes
+// test/plugins/tool.test.js — tools/plugin.mjs pack and the cosmetic template (DESIGN §34 P1a): pack writes
 // plugin.lock.json — every file's SHA-256 and size, each Spine model's clip data parsed from the skeleton the way the
 // game's own models are (roles, durations, events, hits, bounds) — and checks the folder; an atlas page `textures` does
 // not name refuses the lock; a skeleton changed after the pack is refused until it is packed again; `check` follows a

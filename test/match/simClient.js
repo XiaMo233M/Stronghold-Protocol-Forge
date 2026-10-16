@@ -11,7 +11,7 @@
 // share the pool with other fields); 'paced' steps every field at `speed` game-s per real second in 250 ms slices.
 // Test knobs: `tamper(result, spec) → result` edits the outgoing result, `mute: true` never reports, `stall: true`
 // reports progress but no result, `delayMs` delays the first slice, `withCs` names the content in b.result like the
-// browser does in a room with gameplay plugins (true: the spec's `cs`; a function (spec) → cs: another one — DESIGN §32.6).
+// browser does in a room with gameplay plugins (true: the spec's `cs`; a function (spec) → cs: another one — DESIGN §34.6).
 // `log` keeps every sent frame; `battles` every local battle by battleId.
 
 import assert from 'node:assert/strict';

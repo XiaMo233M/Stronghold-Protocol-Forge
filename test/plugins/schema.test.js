@@ -1,5 +1,5 @@
 // test/plugins/schema.test.js — the JSON Schemas of plugins (schemas/plugin.schema.json, schemas/overlay.schema.json;
-// DESIGN §32.9, the 0.3.0 plan's C7) say what the checks say: on one set of manifests and one set of asset overlays —
+// DESIGN §34.9, the 0.3.0 plan's C7) say what the checks say: on one set of manifests and one set of asset overlays —
 // valid ones and ones broken in every way a schema can describe — a fixture is accepted by the schema exactly when the
 // checks (shared/plugins/manifest.js readPluginManifest, shared/plugins/visual.js readAssetOverlay) find neither a problem
 // nor a warning in it. What only the checks can see (the folder and its files, the running game's version against

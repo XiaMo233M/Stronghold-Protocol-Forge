@@ -1,4 +1,4 @@
-// Interface-plugin navigation browser test (DESIGN §32.8): a plugin page that navigates its own frame after the
+// Interface-plugin navigation browser test (DESIGN §34.8): a plugin page that navigates its own frame after the
 // handshake loses the frame and the feed, and a plugin page opened at the top level has an opaque origin (no site
 // storage). Not part of the default run.
 //   SP_E2E=1 node --test test/ui/ui-plugins-nav.e2e.test.js

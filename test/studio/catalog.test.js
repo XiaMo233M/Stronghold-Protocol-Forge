@@ -1,4 +1,4 @@
-// test/studio/catalog.test.js — POST /studio/api/catalog and /catalog/install (DESIGN §32.13).
+// test/studio/catalog.test.js — POST /studio/api/catalog and /catalog/install (DESIGN §34.13).
 // The download is an injected fetch. A request that is not local, or that carries no studio key, gets the 404
 // page and does not download. The timeout case waits for the real zip timeout (60 s) because the route does not
 // take a shorter one.
