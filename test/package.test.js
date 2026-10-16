@@ -375,7 +375,7 @@ test('the personal scan reads bytes, never reports the matched text, and skips f
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
-// --assets: the example asset pack for the title screen's 导入素材包 (docs/history/0.3.0.md §32.14.39). The selection is
+// --assets: the example asset pack for the title screen's 导入素材包 (docs/history/0.3.0.md §34.14.39). The selection is
 // the importer's own plan of the served manifests; the built zip goes through the real importer (assetPack.js) below.
 
 test('importableArt: what the import checks — files, whole Spine models with their default page, local groups and effects; nothing it skips', () => {

@@ -8,7 +8,7 @@
 // or nearer than 0.25 tile ("特殊修正"). The remake pushed her targets radially at
 // full force, so an enemy behind her centre — one that walked through her tile while her block was full and that she
 // grabbed once a push freed it (the hand-over, DESIGN §19.2), or one coming at her back — was thrown 1.7–2.14 tiles
-// the other way, towards the protection objective. Round 40 (the maintainer's first-hand report, §32.14.9): a target
+// the other way, towards the protection objective. Round 40 (the maintainer's first-hand report, §34.14.9): a target
 // behind her — including one about to leave the tile — is not reversed. `keepDir` keeps her attack direction and still
 // applies the −2 level (0.12 tile). Beside her, or nearer than 0.25 tile, the push stays the official radial −2.
 // Audit (direction only): 琳琅诗怀雅 S3's coin push "向前推开" is radial — PRTS 备注 "推开效果为径向推动"; client

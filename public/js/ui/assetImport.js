@@ -1,4 +1,4 @@
-// The title screen's 导入素材包 (docs/history/0.3.0.md §32.14.23, §32.14.39): its own button and dialog beside 下载完整素材
+// The title screen's 导入素材包 (docs/history/0.3.0.md §34.14.23, §34.14.39): its own button and dialog beside 下载完整素材
 // (ui/assetDownload.js), so a player who only imports never starts the server download.
 //
 // Opening the dialog reads nothing from the server: no art, not the manifests (assetPack.js reads the three served

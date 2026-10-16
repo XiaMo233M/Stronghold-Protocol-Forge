@@ -196,7 +196,7 @@ and marks. Leaving clears that source's state without clearing another still-dep
 凯尔希·思衡托 S2 uses its mixed attack/heal target condition for automatic activation: either an injured, healable ally
 or a selectable enemy in its expanded running range; operation cooldown and other controls still apply (§28.10).
 
-### Enemy passengers (§32.14.4, #564)
+### Enemy passengers (§34.14.4, #564)
 
 伊利昂的木驮兽 / “越长尘” load up to 5 / 4 non-leader, non-machine ground enemy units within 0.5 tiles
 (PRTS 载客半径; ordinary and elite enemies of any faction and mass qualify). Hidden enemies cannot board. A carrier

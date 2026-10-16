@@ -20,7 +20,7 @@ export default {
   //      skill range 生命回复速度 +ATK × ratio while it runs (PRTS 技能2 备注 "生命恢复的提供方式为基于自己的攻击力，增加目标的
   //      “生命回复速度”属性，不受治疗加成和禁疗影响": an hpRegen buff, no heal — GitHub #137). While S2 runs, a sleeping
   //      ground enemy on the rotated x-1 is extra attack range; 1-1 itself is unchanged and an awake enemy in the diamond
-  //      is not [ASSUMED] (community 2026-10-14, §32.14.8);
+  //      is not [ASSUMED] (community 2026-10-14, §34.14.8);
   //      精锐 module GUA-X: her heals on allies under hp_ratio HP × heal_scale
   chess_char_3_12_a: (bb, chess, def) => {
     const d = defOf(chess, def);

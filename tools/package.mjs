@@ -61,7 +61,7 @@
 // personal-info scan; it must hold exactly that) before it is zipped. --dry-run reads and checks the bases; the
 // comparison needs the built stage.
 //
-// --assets (docs/history/0.3.0.md §32.14.39) writes one folder, Stronghold-Protocol-v<version>-assets/, holding public/assets/…
+// --assets (docs/history/0.3.0.md §34.14.39) writes one folder, Stronghold-Protocol-v<version>-assets/, holding public/assets/…
 // and public/fonts/… and README.txt (what the pack is, the version whose manifests it matches, how to import it). The
 // art is what public/js/assetPack.js accepts from a host that has every listed file: its own plan of the three served
 // manifests (data/assets.json, data/local-assets.json, data/local-fx.json; importableArt), with the full zip's voice and

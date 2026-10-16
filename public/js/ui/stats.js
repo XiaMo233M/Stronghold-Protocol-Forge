@@ -247,7 +247,7 @@ export function normalizeRecord(raw) {
  * The MIGRATIONS chain: `MIGRATIONS[v]` upgrades a v-envelope to v+1, for v = STATS_VERSION and down — every stored /
  * imported envelope walks the whole chain.
  *   1 → 2 (0.3.0, DESIGN §34.6): records name the room's content set (`content`); a record from before played the
- *         original game (null). The same step covers PR #509's fields (§32.14.16): a v1 row has no `creditedKills`
+ *         original game (null). The same step covers PR #509's fields (§34.14.16): a v1 row has no `creditedKills`
  *         (the actual player kills stay unknown rather than guessed) and a compacted v1 row lost its bonds
  *         (`usedBondIds` stays absent) — nothing to rewrite, the version keeps an older build from stripping them.
  * @type {Record<number, (stats: any) => any>}

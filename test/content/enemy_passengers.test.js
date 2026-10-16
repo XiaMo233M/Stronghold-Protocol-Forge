@@ -1,4 +1,4 @@
-// 载客: 伊利昂的木驮兽 / “越长尘” (content/enemies/passengers.js, §32.14.4).
+// 载客: 伊利昂的木驮兽 / “越长尘” (content/enemies/passengers.js, §34.14.4).
 // Cases follow PR #592, plus the passenger's own route, retained HP, and same-seed unload.
 
 import { test } from 'node:test';
