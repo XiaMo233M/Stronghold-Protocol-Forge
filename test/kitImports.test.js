@@ -224,6 +224,16 @@ const KIT_IMPORT_EXPORTS = {
     "enemyStealthed", "evadesGround", "extendedGrid", "sortAllyTargets", "sortEnemyTargets", "stealthOffKey",
     "tileKeyOf",
   ],
+  // 2026-10-15 新开两格。记的是当前**全部**具名导出，判据仍是超集 —— 加导出不打断任何包，删名或改名才会。
+  // 两格都按「按文件指名、不开前缀」放开：`@sim/` 下别的文件（`ai.js`、`pairing.js` 等）仍然被拒。
+  "server/sim/body.js": [
+    "bodyDist", "bodyInKeys", "bodyInRadius", "bodyInRange", "bodyInRangeTile", "bodyKeys", "bodyOnTile",
+    "bodyTileReach", "colliderKeys", "hitRect", "normHitArea",
+  ],
+  "server/sim/professions.js": [
+    "BARD_REGEN_DUR", "BARD_REGEN_IV", "DOLL_SWITCH", "KNOWN_SUBPROFESSIONS", "PROFESSION_DEFAULTS", "SUB",
+    "bardRegen", "resolveProfile",
+  ],
   // 战斗逻辑模块（`server.battle`, DESIGN §28.17）的 SDK：官方内容模块用的那一份辅助函数。
   // `@sim/detmath.js`（2026-10-15 加进白名单）：确定性数学的**唯一**入口（`Math.sin` 这类在两端可能不一致，
   // `tools/check-imports.mjs` 与 `test/sim/detmath.test.js` 一起钉这件事）。它导出的是 6 个纯函数。
@@ -605,17 +615,19 @@ describe('kit import 白名单：按文件开放官方 ops kit（复用官方干
     }
   });
 
-  test('白名单加后总条数就是 20：这个数是契约，加一行必须是有意为之（连这条一起改）', () => {
+  test('白名单加后总条数就是 22：这个数是契约，加一行必须是有意为之（连这条一起改）', () => {
     // 为什么断言一个**硬数字**：白名单是「两端唯一的真相」，也是这个格式**唯一**的准入面。一个没有条数的表
     // 会在下一次「顺手加一行」时静默变宽 —— 而白名单每宽一格，第三方包能碰到的引擎面就多一格。
     // 所以加行这件事必须是**改了这条断言**的有意行为（本节 §⑥ 与 `docs/WORKSHOP.md` 的白名单表同步改）。
-    // 20 = 7（`@kit/`：tier1..tier6 + summoner）+ 4（`@sim/`：constants / dir / targeting / detmath）
-    //      + 1（`@battle/`：support/index）+ 8（`@ops/`）。
-    assert.equal(KIT_IMPORT_FILES.length, 20, `白名单条数变了（现在 ${KIT_IMPORT_FILES.length}）—— 加/删一行都要连这条与文档一起改`);
+    // 22 = 7（`@kit/`：tier1..tier6 + summoner）+ 6（`@sim/`：constants / dir / targeting / detmath
+    //      / body / professions）+ 1（`@battle/`：support/index）+ 8（`@ops/`）。
+    // ⚠️ `@sim/` 从 4 涨到 6 是 2026-10-15 有意为之（`body.js` + `professions.js`，理由见
+    // `shared/kitImports.js` 里「包已经在整份复制它们了」那两段）：这个数**不是**「取一边」，两边加起来才是它。
+    assert.equal(KIT_IMPORT_FILES.length, 22, `白名单条数变了（现在 ${KIT_IMPORT_FILES.length}）—— 加/删一行都要连这条与文档一起改`);
     const byPrefix = (p) => KIT_IMPORT_FILES.filter((e) => e.specifier.startsWith(p)).length;
     assert.deepEqual(
       { '@kit/': byPrefix('@kit/'), '@sim/': byPrefix('@sim/'), '@battle/': byPrefix('@battle/'), '@ops/': byPrefix('@ops/') },
-      { '@kit/': 7, '@sim/': 4, '@battle/': 1, '@ops/': 8 },
+      { '@kit/': 7, '@sim/': 6, '@battle/': 1, '@ops/': 8 },
       '按前缀的分布也是契约的一部分（`@ops/` 只是命名空间，不是整体放行）',
     );
   });
