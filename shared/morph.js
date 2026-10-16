@@ -26,8 +26,19 @@
 // 这一份是**纯**的（`shared/` 的纪律）：没有 `process`、没有状态、没有文件系统，服务端与浏览器读到同一个判决。
 
 /** 行为开关 `morphPairing` 的档位名。 */
+/** @typedef {'official'|'plus'} MorphPairing */
+/** @type {readonly string[]} */
 export const MORPH_PAIRING_OPTIONS = Object.freeze(['official', 'plus']);
 export const MORPH_PAIRING_DEFAULT = 'official';
+
+/**
+ * `v` 是不是一个认得的档位。`MORPH_PAIRING_OPTIONS` 是 `readonly string[]`（`Object.freeze` 的推断结果），
+ * 所以 `OPTIONS.includes(x)` 收窄不了 `x` —— 用这个类型谓词让 `morphPairingOf` 的返回类型真的落在
+ * `'official'|'plus'` 上。运行时不改一字。
+ * @param {unknown} v
+ * @returns {v is MorphPairing}
+ */
+const isPairing = (v) => MORPH_PAIRING_OPTIONS.includes(/** @type {string} */ (v));
 
 /** 这件装备是不是变形同构体本身（数据标记 `canGiveBond`）。 */
 export const isMorphCarrier = (rec) => !!(rec && rec.canGiveBond);
@@ -49,10 +60,10 @@ export const grantsBond = (rec) => !!(rec && !rec.canGiveBond && typeof rec.give
  * @returns {'official'|'plus'}
  */
 export function morphPairingOf(decl) {
-  if (typeof decl === 'string') return MORPH_PAIRING_OPTIONS.includes(decl) ? decl : MORPH_PAIRING_DEFAULT;
+  if (typeof decl === 'string') return isPairing(decl) ? decl : MORPH_PAIRING_DEFAULT;
   if (!Array.isArray(decl)) return MORPH_PAIRING_DEFAULT;
   const hit = decl.find((e) => e && e.switch === 'morphPairing');
-  return hit && MORPH_PAIRING_OPTIONS.includes(hit.option) ? hit.option : MORPH_PAIRING_DEFAULT;
+  return hit && isPairing(hit.option) ? hit.option : MORPH_PAIRING_DEFAULT;
 }
 
 /**

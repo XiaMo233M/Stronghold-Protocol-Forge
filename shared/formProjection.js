@@ -48,7 +48,7 @@ export const isEliteForm = (value) => value === FORM_ELITE;
  * `_a`（不是精锐），`goldenIdOf` / `baseIdOf` / 合成 / 商店都照旧看得见它。
  *
  * @template T
- * @param {T} rec 要投影的记录（`_a`）
+ * @param {T & { chessId?: string, id?: string, baseId?: string }} rec 要投影的记录（`_a`）
  * @param {any} donor 它的精锐兄弟（`_b`）
  * @returns {any} 新对象；`rec` 与 `donor` 都不被改动
  */
@@ -72,7 +72,7 @@ export function projectElite(rec, donor) {
  * 一条都不动 —— 一个没有 owner 变体的召唤物本来就不随 owner 的形态变。
  *
  * @template T
- * @param {T} rec 召唤物记录
+ * @param {T & { variants?: Record<string, unknown> }} rec 召唤物记录
  * @param {(id: string) => any} chessOf 棋子记录查询（投影后的那一份）
  * @returns {T} 原对象（无需投影）、或一份 `variants` 已换过的新对象
  */
