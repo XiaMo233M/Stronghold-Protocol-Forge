@@ -373,8 +373,15 @@ const KIT_ID = 'chess_char_1_01_a';
 /**
  * 这一刀**之前**、用下面 `kitBattle()` 那同一段夹具跑出来的战场摘要（`kitDigest`）。它红了就是「没声明预算的包
  * 一切照旧」这句话被打破：kit 回调的调用次数、计时器、标记 buff 或错误清单变了一个字节。
+ *
+ * ⚠️ **2026-10-16 随 0.3.0 合入重算**：摘要里的 `result()` 多了 `perPlayer[*].creditedKills`
+ * （PR #509，`server/sim/battle/lifecycle.js` 的 `pp.creditedKills = ps.units.reduce(...)`）⇒
+ * 旧基线 `1095e400` 是「0.2.6 时代的 result 形状」，已不可重建。逐项核过：去掉 `creditedKills`
+ * 这一个字段，哈希**精确**回到 `1095e400`（无第二个来源）；`calls` / `sched` / `buffs` / `errors`
+ * 四项与旧基线同源、未变。`creditedKills` 在 `shared/protocol.js:146` 是 `optional(...)`
+ * ⇒ 纯加法，`PROTOCOL_VERSION`(2) 与 `MOD_API_VERSION`(1) 都不抬。
  */
-const KIT_BASELINE = '1095e400';
+const KIT_BASELINE = '64884f67';
 
 /**
  * 一个「包提供的」kit：像真 kit 一样在 `install(battle, unit)` 里注册**逐单位**的 hook 与计时器，并在第一个 tick
