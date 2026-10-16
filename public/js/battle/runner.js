@@ -252,13 +252,20 @@ const SIM_LOGGER = Object.freeze({
 });
 
 /**
- * @param {{ net: any, store: any, loadSim?: (dataBase: string, content?: object|null) => Promise<{ spec: any, ds: any }>,
+ * @param {{ net: any, store: any,
+ *   loadSim?: ((dataBase: string, content?: object|null) => Promise<{ spec: any, ds: any }>)
+ *     | ((content?: object|null) => Promise<{ spec: any, ds: any }>),
  *   dataBaseFor?: (spec: any) => string, contentFor?: (cs: string) => Promise<object|null>,
  *   simContent?: () => object|null, loadingContent?: () => string|null, vanillaCs?: () => string|null, now?: () => number,
  *   raf?: (fn: (t: number) => void) => any, caf?: (h: any) => void, setInterval?: Function, clearInterval?: Function,
  *   doc?: { hidden?: boolean, addEventListener?: Function } | null, logger?: object,
  *   combatMetrics?: boolean, createHost?: Function, toast?: (text: string, kind?: string) => void,
  *   workerTimeoutMs?: number }} deps
+ *   ⚠️ **`loadSim` 有两个契约，按 `dataBaseFor` 注入与否区分**（见 `ensureSim`）：
+ *   **注入了 `dataBaseFor`** ⇒ 你的 `loadSim` 必须是 `(dataBase, content?)`（我们的数据面契约：第一个参数是
+ *   `/data/` 或 `/room-data/<摘要>/`，第二个是内容集那份已校验的数据或 null）；**没注入** ⇒ 必须是上游 0.3.0 的
+ *   `(content?)`（干净页面 / 只要内容集的注入面；第一个参数就是内容集或 null）。两套调用形状由
+ *   `test/match/runnerLoadSimContract.test.js` 钉住 —— 调换或删掉任一边，那条判据就红。
  *   `dataBaseFor`（W-D, DESIGN §28.16）: which data face a spec must be simulated on — `/data/` unless the room that
  *   started this battle declared its own set (`public/js/mods/align.js roomDataBase`). The sim is loaded and cached PER
  *   face, so a page that plays in a subset room and later in a plain one never mixes the two.
