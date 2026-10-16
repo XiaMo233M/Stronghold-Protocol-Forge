@@ -79,6 +79,9 @@ export const emptyMatch = () => ({ public: null, private: null, field: null, res
 export const initialState = Object.freeze({
   connection: { status: 'idle', ping: null, attempt: 0, retryAt: 0, lastError: null, everOnline: false },
   me: { playerId: null, name: '', token: null },
+  content: null,
+  // how many unofficial plugins the server has (DESIGN §32 P1a: /healthz or welcome `content.plugins`; content.js)
+  installedPlugins: 0,
   // `preloadRequired` / `preloadReady` are the resource-pack entry gate (缺口 3, DESIGN §28.13.3): a C-layer panel
   // raises the first and lowers the second, and `selectRoute` holds the title screen while
   // `preloadRequired && !preloadReady`. Both default to `false`, so with no pack declaring one the gate is inert and
