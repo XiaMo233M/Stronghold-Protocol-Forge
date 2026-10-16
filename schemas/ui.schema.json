@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://stronghold.local/schemas/ui.schema.json",
   "title": "Interface plugin postMessage API v1",
-  "description": "Messages between the host page and a sandboxed ui plugin (DESIGN §32.8). A plugin cannot send a match intent. This file is the contract; shared/plugins/ui.js is what the server and the page enforce. No JSON-schema library is required.",
+  "description": "Messages between the host page and a sandboxed ui plugin (DESIGN §34.8). A plugin cannot send a match intent. This file is the contract; shared/plugins/ui.js is what the server and the page enforce. No JSON-schema library is required.",
   "$defs": {
     "slot": {
       "type": "string",

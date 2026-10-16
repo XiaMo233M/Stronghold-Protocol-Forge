@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Write schemas/records.schema.json from the runtime RECORDS_SCHEMA (DESIGN §32.5, PLUGINS §10).
+// Write schemas/records.schema.json from the runtime RECORDS_SCHEMA (DESIGN §34.5, PLUGINS §10).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

@@ -32,7 +32,7 @@ the original in the game's own preview, try gameplay changes with the battle com
 On the command line: `node tools/plugin.mjs new art my-skin --target 德克萨斯` makes a folder from a template, `check` explains
 every finding in plain words, `pack <dir> --zip` writes the `plugin.lock.json` a plugin with Spine models needs and the zip.
 `_template/cosmetic/` is an example made of references to the installation's own art, no files.
-`_template/ui/` is an interface plugin: a damage tally in a sandboxed frame (DESIGN §32.8).
+`_template/ui/` is an interface plugin: a damage tally in a sandboxed frame (DESIGN §34.8).
 
 For data, copy `_template/content/` to `data-demo/` (PLUGINS.md §10: a bond patch and a kitRef operator); a server owner
 may limit what rooms take in `config.json` here (PLUGINS.md §11, DEPLOY.md). The same file's `allowDownloadHosts`

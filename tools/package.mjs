@@ -188,7 +188,7 @@ export const OPTIONAL_VOICE_DIRS = Object.freeze(['public/assets/audio/voice/en/
 /** Extracted official battlefield scenes (0.2.5 asset pack). Already ignored with public/assets/. */
 const SCENE_ART_PREFIX = 'public/assets/local/scene/';
 /**
- * The official battle effects (tools/local-extract/fx.py, DESIGN §33: public/assets/local/fx/ and their file list
+ * The official battle effects (tools/local-extract/fx.py, DESIGN §35: public/assets/local/fx/ and their file list
  * data/local-fx.json; the `used` set is ~12,000 files, ~190 MB on disk, ~53 MB in a zip). true (the maintainer's decision
  * of 2026-10-15): the full zip — and an update zip built from it — ships the folder and data/local-fx.json when this
  * machine extracted them, so a host of the full package has the 设置「官方特效」 without its own client. false: they

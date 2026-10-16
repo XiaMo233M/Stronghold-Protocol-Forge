@@ -1,6 +1,6 @@
 # PACKS.md — content packs
 
-> **Since 0.3.0 the general mechanism is the plugin system: [PLUGINS.md](PLUGINS.md)** (DESIGN §32). A content pack is
+> **Since 0.3.0 the general mechanism is the plugin system: [PLUGINS.md](PLUGINS.md)** (DESIGN §34). A content pack is
 > its manifest 1, the language pack its class `lang`, and the planned types `assets` / `data` became the plugin classes
 > `cosmetic` / `content` (`plugins/<id>/plugin.json`, manifest 2). Language packs work exactly as described below.
 

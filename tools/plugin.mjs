@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// tools/plugin.mjs — the plugins of a checkout (DESIGN §32, docs/PLUGINS.md §8 and §15; the registry the server runs is
+// tools/plugin.mjs — the plugins of a checkout (DESIGN §34, docs/PLUGINS.md §8 and §15; the registry the server runs is
 // server/plugins/registry.js, the format shared/plugins/manifest.js, the checks and the packer server/plugins/pack.js,
 // the explanations shared/plugins/errors.js):
 //

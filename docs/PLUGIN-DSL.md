@@ -1,6 +1,6 @@
 # 插件 DSL（P2）
 
-给插件作者。这里只描述数据，不执行任何插件代码。编译器是 `server/sim/content/dsl/compile.js` 的 `compileDsl(spec, { bb, chess, def })`，返回的东西和官方 kit 函数返回的 Kit 相同。备战效果走 `server/match/dslMeta.js`。词表的机器可读副本是 `schemas/dsl.schema.json`。设计记录在 DESIGN §32.7。
+给插件作者。这里只描述数据，不执行任何插件代码。编译器是 `server/sim/content/dsl/compile.js` 的 `compileDsl(spec, { bb, chess, def })`，返回的东西和官方 kit 函数返回的 Kit 相同。备战效果走 `server/match/dslMeta.js`。词表的机器可读副本是 `schemas/dsl.schema.json`。设计记录在 DESIGN §34.7。
 
 原版对局不读这些文件。数据插件把战斗规格放在干员记录的 `dsl` 上，`kitOf` 用同一个 `compileDsl` 编译；备战规格在清单的 `dsl` 部件里，由 match 宿主登记。见第 9 节。测试仍可以把编译结果放进 `makeBattle({ kits })`。
 

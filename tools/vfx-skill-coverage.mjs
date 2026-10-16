@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // tools/vfx-skill-coverage.mjs — how many skills of this game's roster get an official-effects plan
-// (public/js/render/vfx/skills.js, DESIGN §33 — 0.3.0 Phase 3a), per role, and what stays unmapped and why; and what the
+// (public/js/render/vfx/skills.js, DESIGN §35 — 0.3.0 Phase 3a), per role, and what stays unmapped and why; and what the
 // battle view plays of them (render/vfx/skillfx.js, Phase 3b: every role on its signal; `targets` split into the
 // attack-borne buffs it places, the status loops the status wiring draws and the rest; the `pulse` rows a kit's own fx
 // can stand for; FX_BINDINGS; the 秘术师 charge); with index version 3 (Phase 3d) the units' talents and abilities by

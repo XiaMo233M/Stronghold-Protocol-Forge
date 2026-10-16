@@ -2,7 +2,7 @@
 
 A **plugin** is a folder a server owner puts into `plugins/`: a manifest, `plugins/<id>/plugin.json`, next to the files
 it names. The interface calls them 「插件」, never 「模组」 (that word is the operators' modules). The design and its
-phases are DESIGN §32 (`docs/history/0.3.0.md`); this file is the reference.
+phases are DESIGN §34 (`docs/history/0.3.0.md`); this file is the reference.
 
 **Status — 0.3.0: content sets, scripts and sandbox execution.** The server finds, checks and lists plugins and names its content
 with a hash (P0); a room's host switches the server's cosmetic plugins on for the whole room, a player switches them on
@@ -563,7 +563,7 @@ Counts read from skill, talent or trait text go through `textCount` (`shared/plu
 finite and at most `max(10 × the official maximum of that phrase, 64)`, or 64 when vanilla text never matches it.
 A matched run that is not finite clamps to the cap. Official phrases do not change: every scanned maximum is at most
 15, so the cold floor of 64 does not move them either. Percents and durations use `textFinite` and are not forced
-down to a count cap (`持续120秒` stays 120). `parseN` and `textNum` are `textFinite`. The phrase table is DESIGN §32.5.
+down to a count cap (`持续120秒` stays 120). `parseN` and `textNum` are `textFinite`. The phrase table is DESIGN §34.5.
 
 A subtract loop whose interval, period or per-step cost comes from plugin data uses `stepOf`. A positive value at or
 above the official minimum of that key is unchanged, including official `interval` 0.03 and `atk_interval` 0.025,
@@ -582,7 +582,7 @@ the same caps in the page and on the server. A set without the snapshot runs on 
 data. [ASSUMED] Direct `new Battle` still skips validation. The numbers of `factions` the wave generator reads
 (`generation`, each type's `count` and `weight`, each entry's `weight`) follow the same rule; the replaced-enemy counts
 also stay within 50, the generator's own clamp. The round-type schedule stops at 256. The full loop list, the floors
-that were left as they were, and the other residuals are DESIGN §32.5.
+that were left as they were, and the other residuals are DESIGN §34.5.
 
 Author-facing `PLUGIN_DATA_BOUND` text stays Chinese and is not a player string. `officialBounds.js` is marked
 `i18n-ignore-file`. The `联防` diagnostic in `validate.js` keeps its line ignore. The shared error catalogue
@@ -627,7 +627,7 @@ The room then plays a **content set** of its own: the vanilla data with those pl
 its own `cs`. Every member's page downloads that set and checks it byte by byte, and the room's matches run in a match
 host of that set, a child process (or, when the server owner asks for it, a worker thread) of its own. Such a match is **unofficial**: marked in the room,
 the briefing, the result and the HUD, and left out of the statistics overview unless a player counts it. A room with
-cosmetic plugins only still plays the vanilla `cs` and counts as the original game (§9). DESIGN §32.6 keeps the
+cosmetic plugins only still plays the vanilla `cs` and counts as the original game (§9). DESIGN §34.6 keeps the
 decisions, the measurements and the open points.
 
 | File | Role |
@@ -688,7 +688,7 @@ its messages one at a time on a queue of its own, and a vanilla room never queue
 out of memory ends that set's matches only: each room goes back to its lobby and its members read why. Each host has a
 768 MB heap; at most `maxWorkers` (4) run at once, and an idle one stops after 10 minutes [ASSUMED, all three].
 `SP_MATCH_HOST=worker` runs a worker thread instead of a child process — not on a public server: one large allocation
-in a worker thread aborts the whole server process (measured, DESIGN §32.6; `docs/DEPLOY.md`).
+in a worker thread aborts the whole server process (measured, DESIGN §34.6; `docs/DEPLOY.md`).
 
 **The battle's authority.** A page simulates its battle on the set it checked, and its `b.result` names that `cs`. A page
 that holds another content set, or none, for a battle of the room's set is never the authority: it sends no result and
@@ -712,7 +712,7 @@ are served from memory with `Cache-Control: immutable` while a room holds the se
 [ASSUMED]; the vanilla `/cs/<vanilla cs16>/index.json` is unchanged. `/healthz` counts the content sets in use
 (`content.sets`).
 
-**Remaining limitation**: `allowIncompatible` cannot override the builder's incompatible-plugin refusal (DESIGN §32.6). Settings controls and changed-file notices are implemented (§15); DSL in data plugins is §12.
+**Remaining limitation**: `allowIncompatible` cannot override the builder's incompatible-plugin refusal (DESIGN §34.6). Settings controls and changed-file notices are implemented (§15); DSL in data plugins is §12.
 
 ## 12. DSL
 
@@ -733,7 +733,7 @@ cannot write `dsl` or `pluginId`. The runtime validator rejects unknown fields t
 (`content:dsl` in `battle.errors`, `result.errors > 0`). It does not continue with an empty kit or the generic kit.
 The player sees the ordinary 战斗结束 box. A hashed set that skipped the builder still fails host boot (`boot-error`,
 room `plugin-start`, `PLUGIN_DSL_META`). The host supplies the plugin id (an author id cannot take another plugin's
-budget; omitting the author's id is allowed). Prep keys are `effect:<that id>:<local>`. DESIGN §32.7. A vanilla
+budget; omitting the author's id is allowed). Prep keys are `effect:<that id>:<local>`. DESIGN §34.7. A vanilla
 battle does not load the compiler. Direct literals use the official-bounds cap (`max(10 × official max, 64)`); an expression
 result is clamped to that cap. `duration`, action amounts and `rangeExtend` are not in that table [ASSUMED].
 
@@ -744,7 +744,7 @@ result is clamped to that cap. `duration`, action amounts and `rangeExtend` are 
 P3a is **trusted execution**, disabled by default; P3b sandbox mode is described below. The static `sandboxable: true` label says that a script uses the
 portable API; it does not make that script safe. Native imports can fully control the page or execute server code.
 Only enable code the server owner and every player trust. The adopted sources are the owner's 0.3.0 plan C2/C3 and
-the plugin design §3.4, §3.6, §5 and §7.6; DESIGN §32.10 records the implementation choices.
+the plugin design §3.4, §3.6, §5 and §7.6; DESIGN §34.10 records the implementation choices.
 
 A `script` manifest has `entry.sim` and/or `entry.meta` (one self-contained `.js` module each), their `sim.code` and
 `meta.code` permissions, and optionally the same data and art parts as a content plugin. A shared entry runs once.
@@ -908,7 +908,7 @@ a Worker escape. Node 22 permissions do not restrict network and are not a malic
 escape can probe the server's network or read its allowed install tree and targets of links inside it.
 Do not put links pointing outside inside the installation root; use a network namespace/container to restrict network. Prefer a low-privilege account/container
 with outbound-network and OS resource limits. Chrome regression coverage includes CSP and sandbox behavior;
-Firefox and Safari have not had dedicated sandbox verification. See [DESIGN §32.11](history/0.3.0.md#3211-p3b--worker-simulation-ses-and-csp)
+Firefox and Safari have not had dedicated sandbox verification. See [DESIGN §34.11](history/0.3.0.md#3411-p3b--worker-simulation-ses-and-csp)
 and [deployment](DEPLOY.md).
 
 
@@ -966,7 +966,7 @@ message. The host may toggle it during a match because it changes no match.
 ## 15. The studio and the tools
 
 Someone who does not write code makes, previews and packs cosmetic and gameplay plugins in the browser; someone who does gets a
-schema, findings in plain words and hot reload. The design is DESIGN §32.9; the beginner's guide (Chinese) is
+schema, findings in plain words and hot reload. The design is DESIGN §34.9; the beginner's guide (Chinese) is
 [PLUGIN-GUIDE.md](PLUGIN-GUIDE.md), the guide for AI agents `plugins/AGENTS.md`.
 
 **The studio 插件工作台** — `http://<server>/studio/` of a running server (`server/studio/`, its page `public/studio/`):
