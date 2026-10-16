@@ -22,6 +22,8 @@ import { ROOM_HOOK_EVENTS } from '../roomPack.js';
 import { KIT_FORBIDDEN_GLOBALS, stripComments, mentionsIdentifier } from '../../shared/kitAuthoring.js';
 // 上游 0.3.0 的 `setup(sp)` SDK 表面（`sp:sdk@1`）：注册落到 extensions 注册表。
 import { createSDK } from './officialSdk.js';
+// 错误码对齐：出口统一换成**上游认识的码**（原码保留进 `forge`，不丢信息）。
+import { alignFailure } from '../../shared/sdk/errorCodes.js';
 // 战斗模块送浏览器的**同一条 URL 约定**（`/workshop-battle/`）：从 `server/http/static.js` 取常量，
 // 保证「客户端要加载的那条路径」与「服务端会服务的那条路径」不可能各写一套。
 import { WORKSHOP_BATTLE_PREFIX } from '../http/static.js';
@@ -44,14 +46,14 @@ export const DETERMINISTIC_SCAN_CAPABILITIES = Object.freeze(['sim', 'meta']);
  */
 export function officialPluginSourceIssues(source, pluginId = '', { capabilities = [] } = {}) {
   const out = serverModuleSourceIssues(source, pluginId, 'entry', { profile: 'module' });
-  if (!DETERMINISTIC_SCAN_CAPABILITIES.some((c) => capabilities.includes(c))) return out;
+  if (!DETERMINISTIC_SCAN_CAPABILITIES.some((c) => capabilities.includes(c))) return out.map(alignFailure);
   const code = stripComments(String(source ?? ''));
   for (const [needle, why] of KIT_FORBIDDEN_GLOBALS) {
     if (mentionsIdentifier(code, needle)) {
       out.push({ code: 'PLUGIN_BAD_SOURCE', reason: `"${needle}" is not allowed in a plugin that declares ${DETERMINISTIC_SCAN_CAPABILITIES.filter((c) => capabilities.includes(c)).join(' / ')} ("${pluginId}"): ${why}` });
     }
   }
-  return out;
+  return out.map(alignFailure);
 }
 
 /** 上游 0.3.0 的 SDK 表面里，哪些内部能力对应「改对局结果的代码」（确定性那条线的判据）。 */
@@ -403,5 +405,5 @@ export async function loadOfficialModules(plugins, { log = noopLog, stateRoot = 
       mounted,
     });
   }
-  return { modules, errors };
+  return { modules, errors: errors.map(alignFailure) };
 }

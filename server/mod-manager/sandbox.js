@@ -21,6 +21,8 @@ import { fileURLToPath } from 'node:url';
 
 import { serverModuleSourceIssues } from '../modModules.js';
 import { createBudgetTracker, UNLIMITED_BUDGET } from './budget.js';
+// 错误码对齐：出口统一换成上游认识的码，原名留进 `forge` 字段（不丢信息）。
+import { alignErrorCode, alignFailure } from '../../shared/sdk/errorCodes.js';
 
 const noopLog = { info() {}, warn() {}, error() {}, debug() {} };
 const RUNTIME = path.join(path.dirname(fileURLToPath(import.meta.url)), 'sandboxRuntime.js');
@@ -56,7 +58,9 @@ export class SandboxError extends Error {
   constructor(code, message) {
     super(message);
     this.name = 'SandboxError';
-    this.code = code;
+    const aligned = alignErrorCode(code);
+    this.code = aligned;
+    if (aligned !== code) this.forge = code;
   }
 }
 
@@ -79,17 +83,17 @@ export async function createSandboxRunner({
   const startMs = readyTimeoutMs === null ? timeoutMs : readyTimeoutMs;
   const abs = path.join(dir, ...String(entry || '').split('/'));
   if (!(abs === dir || abs.startsWith(dir + path.sep))) {
-    return { ok: false, errors: [{ code: 'PLUGIN_BAD_ENTRY', reason: `entry ${JSON.stringify(entry)} escapes the plugin directory` }] };
+    return { ok: false, errors: [alignFailure({ code: 'PLUGIN_BAD_ENTRY', reason: `entry ${JSON.stringify(entry)} escapes the plugin directory` })] };
   }
   let source;
   try {
     source = fs.readFileSync(abs, 'utf8');
   } catch (e) {
-    return { ok: false, errors: [{ code: 'PLUGIN_BAD_ENTRY', reason: `entry is not readable: ${e && e.message ? e.message : e}` }] };
+    return { ok: false, errors: [alignFailure({ code: 'PLUGIN_BAD_ENTRY', reason: `entry is not readable: ${e && e.message ? e.message : e}` })] };
   }
   // **严格档扫描在 fork 之前**：被拒的插件连子进程都不起。
   const issues = serverModuleSourceIssues(source, pluginId, 'entry', { profile: 'sandbox' });
-  if (issues.length) return { ok: false, errors: [{ code: 'PLUGIN_BAD_SOURCE', reason: issues[0].reason }] };
+  if (issues.length) return { ok: false, errors: [alignFailure({ code: 'PLUGIN_BAD_SOURCE', reason: issues[0].reason })] };
 
   const tracker = createBudgetTracker(budget);
   const state = { status: 'starting', exits: 0, lastExit: null, calls: 0, timeouts: 0 };
@@ -173,7 +177,7 @@ export async function createSandboxRunner({
   if (!ready || state.status !== 'ready') {
     if (state.status === 'starting') state.status = 'timeout';
     kill();
-    return { ok: false, errors: [{ code: state.status === 'timeout' ? 'SANDBOX_TIMEOUT' : 'SANDBOX_START_FAILED', reason: `sandbox for "${pluginId}" did not become ready (${state.status})` }] };
+    return { ok: false, errors: [alignFailure({ code: state.status === 'timeout' ? 'SANDBOX_TIMEOUT' : 'SANDBOX_START_FAILED', reason: `sandbox for "${pluginId}" did not become ready (${state.status})` })] };
   }
 
   const runner = {

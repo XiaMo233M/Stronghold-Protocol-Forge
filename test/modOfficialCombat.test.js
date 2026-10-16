@@ -44,7 +44,7 @@ test('宿主面：`meta` 面按 meta.code 派生；未声明的面（content 档
     makePlugin(root, 'c', { class: 'content', permissions: ['data.patch'], entry: { sim: 'plugin.mjs' } },
       `export function registerPlugin(host) { host.meta.register('item:x', () => 1); }`);
     const b = await loadOfficialModules(loadOfficialPlugins(root, { log: quiet }).plugins.filter((p) => p.id === 'c'), { log: quiet });
-    assert.equal(b.errors[0].code, 'PLUGIN_USE_UNDECLARED');
+    assert.equal(b.errors[0].code, 'PLUGIN_PERMISSION_MISSING');
     assert.match(b.errors[0].reason, /meta/);
   } finally { fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
 });
@@ -55,7 +55,7 @@ test('确定性那条线：声明 sim / meta 的插件**并上** kit 表（Math.
   assert.deepEqual(officialPluginSourceIssues('const t = Date.now();', 'p', { capabilities: ['health'] }), []);
   // script(sim) / meta ⇒ 并上 kit 表
   const a = officialPluginSourceIssues('const t = Date.now();', 'p', { capabilities: ['sim'] });
-  assert.equal(a[0].code, 'PLUGIN_BAD_SOURCE');
+  assert.equal(a[0].code, 'PLUGIN_SCRIPT_CHECK');
   assert.match(a[0].reason, /Date.now/);
   const b = officialPluginSourceIssues('const r = Math.random();', 'p', { capabilities: ['meta'] });
   assert.match(b[0].reason, /Math.random/);

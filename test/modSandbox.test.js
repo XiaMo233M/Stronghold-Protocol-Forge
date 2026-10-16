@@ -57,7 +57,7 @@ test('看门狗：死循环的 handler 被超时杀掉，宿主不受影响，�
     assert.equal(r.ok, true, JSON.stringify(r.errors));
     const { runner } = r;
     // 宿主进程显然还活着（我们正跑在这一行）；现在让那个死循环的调用超时
-    await assert.rejects(() => runner.request('/mod/demo/hang', {}), (e) => e instanceof SandboxError && e.code === 'SANDBOX_TIMEOUT');
+    await assert.rejects(() => runner.request('/mod/demo/hang', {}), (e) => e instanceof SandboxError && e.code === 'PLUGIN_WORKER_TIMEOUT');
     assert.ok(['timeout', 'crashed', 'starting'].includes(runner.state.status), `status=${runner.state.status}`);
     assert.equal(runner.state.timeouts, 1);
     // 重启之后同一个入口又能用了（字节没变 ⇒ 代码没变）
@@ -75,11 +75,11 @@ test('严格档扫描在 fork **之前**：globalThis / process 的插件连子�
   try {
     const a = await run(g);
     assert.equal(a.ok, false);
-    assert.equal(a.errors[0].code, 'PLUGIN_BAD_SOURCE');
+    assert.equal(a.errors[0].code, 'PLUGIN_SCRIPT_CHECK');
     assert.match(a.errors[0].reason, /globalThis/);
     const b = await run(p);
     assert.equal(b.ok, false);
-    assert.equal(b.errors[0].code, 'PLUGIN_BAD_SOURCE');
+    assert.equal(b.errors[0].code, 'PLUGIN_SCRIPT_CHECK');
     assert.match(b.errors[0].reason, /process/);
   } finally { fs.rmSync(g.dir, { recursive: true, force: true }); fs.rmSync(p.dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); }
 });
@@ -89,15 +89,15 @@ test('入口越界 / 不存在 / registerPlugin 抛异常 ⇒ 具名拒，宿主
   try {
     const escaped = await createSandboxRunner({ pluginId: 'e', entry: '../outside.mjs', dir: p.dir, log: quiet });
     assert.equal(escaped.ok, false);
-    assert.equal(escaped.errors[0].code, 'PLUGIN_BAD_ENTRY');
+    assert.equal(escaped.errors[0].code, 'PLUGIN_ENTRY');
 
     const missing = await createSandboxRunner({ pluginId: 'm', entry: 'nope.mjs', dir: p.dir, log: quiet });
     assert.equal(missing.ok, false);
-    assert.equal(missing.errors[0].code, 'PLUGIN_BAD_ENTRY');
+    assert.equal(missing.errors[0].code, 'PLUGIN_ENTRY');
 
     const r = await run(p, { timeoutMs: 1500, readyTimeoutMs: T });
     assert.equal(r.ok, false, 'registerPlugin 抛异常 ⇒ 起不来');
-    assert.equal(r.errors[0].code, 'SANDBOX_START_FAILED');
+    assert.equal(r.errors[0].code, 'PLUGIN_WORKER_FAILED');
   } finally { fs.rmSync(p.dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); }
 });
 
@@ -110,7 +110,7 @@ test('预算：用完就不再放行（与另外两档同一份记账）', async
     assert.equal(r.ok, true, JSON.stringify(r.errors));
     const first = await r.runner.request('/mod/demo/x', {});
     assert.equal(first.ok, true);
-    await assert.rejects(() => r.runner.request('/mod/demo/x', {}), (e) => e instanceof SandboxError && e.code === 'SDK_BUDGET_EXCEEDED');
+    await assert.rejects(() => r.runner.request('/mod/demo/x', {}), (e) => e instanceof SandboxError && e.code === 'PLUGIN_DSL_BUDGET');
     assert.equal(r.runner.state.budget.calls, 1);
     await r.runner.shutdown();
   } finally { fs.rmSync(p.dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); }

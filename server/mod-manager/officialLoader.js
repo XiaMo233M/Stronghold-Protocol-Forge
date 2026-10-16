@@ -18,6 +18,7 @@ import { createHash } from 'node:crypto';
 
 import { fromOfficialManifest } from '../../shared/sdk/descriptor.js';
 import { modManifestDigest } from '../../shared/sdk/digest.js';
+import { alignFailure } from '../../shared/sdk/errorCodes.js';
 
 /** 官方插件的清单文件名（provisional；与仓库自己的 `MANIFEST.json` 刻意不同名，避免混淆）。 */
 export const OFFICIAL_PLUGIN_MANIFEST = 'plugin.json';
@@ -58,7 +59,7 @@ export function loadOfficialPlugins(root, { log = null } = {}) {
     dirents = fs.readdirSync(root, { withFileTypes: true });
   } catch (e) {
     if (e && e.code !== 'ENOENT') log?.warn?.(`[official] cannot read ${root}: ${e.message}`);
-    return { present: false, plugins, errors };
+    return { present: false, plugins, errors: errors.map(alignFailure) };
   }
   for (const entry of dirents.slice().sort((a, b) => a.name.localeCompare(b.name))) {
     if (!entry.isDirectory()) continue;
@@ -93,5 +94,5 @@ export function loadOfficialPlugins(root, { log = null } = {}) {
     const hash = modManifestDigest(files);
     plugins.push({ id: descriptor.id, dir, manifest: raw, descriptor: Object.freeze({ ...descriptor, contentDigest: hash }), hash, files });
   }
-  return { present: true, plugins, errors };
+  return { present: true, plugins, errors: errors.map(alignFailure) };
 }

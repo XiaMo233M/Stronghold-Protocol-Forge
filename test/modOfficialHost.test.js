@@ -37,7 +37,7 @@ test('trusted 档：boot + health 面可用；**storage 不是官方能力** ⇒
     const { plugins } = loadOfficialPlugins(root, { log: quiet });
     const { modules, errors } = await loadOfficialModules(plugins, { log: quiet, stateRoot: path.join(root, 'var') });
     assert.deepEqual(modules, []);
-    assert.equal(errors[0].code, 'PLUGIN_USE_UNDECLARED');
+    assert.equal(errors[0].code, 'PLUGIN_PERMISSION_MISSING');
     assert.match(errors[0].reason, /storage/, '官方档没有 storage 权限 ⇒ 那一格不可达');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
@@ -67,7 +67,7 @@ test('没派生的面碰一下就是具名错误（content 档没有 routes）',
     const { plugins } = loadOfficialPlugins(root, { log: quiet });
     const { modules, errors } = await loadOfficialModules(plugins, { log: quiet });
     assert.deepEqual(modules, []);
-    assert.equal(errors[0].code, 'PLUGIN_USE_UNDECLARED');
+    assert.equal(errors[0].code, 'PLUGIN_PERMISSION_MISSING');
     assert.match(errors[0].reason, /routes/);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
@@ -82,7 +82,7 @@ test('严格档源码扫描在 import **之前**：`globalThis` 的插件整包�
     const { plugins } = loadOfficialPlugins(root, { log: quiet });
     const { modules, errors } = await loadOfficialModules(plugins, { log: quiet });
     assert.deepEqual(modules, [], '严格档拒 globalThis');
-    assert.equal(errors[0].code, 'PLUGIN_BAD_SOURCE');
+    assert.equal(errors[0].code, 'PLUGIN_SCRIPT_CHECK');
     assert.match(errors[0].reason, /globalThis/);
     assert.equal(globalThis.__leak, undefined, '被拒的模块**没有**被 import（顶层副作用没发生）');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
@@ -96,7 +96,7 @@ test('没有 registerPlugin 导出 / 入口越界 ⇒ 具名拒', async () => {
     const { plugins, errors: loadErrors } = loadOfficialPlugins(root, { log: quiet });
     const { errors } = await loadOfficialModules(plugins, { log: quiet });
     const byPack = Object.fromEntries(errors.map((e) => [e.pack, e]));
-    assert.equal(byPack.noreg.code, 'PLUGIN_NO_REGISTER');
+    assert.equal(byPack.noreg.code, 'PLUGIN_ENTRY');
     // `entry` 越界在**形状层**就被拒（`entry.server must be a plugin-relative path`）⇒ 根本进不了装载
     assert.ok(loadErrors.some((e) => e.pack === 'escapes' && /plugin-relative/.test(e.reason)));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
@@ -136,7 +136,7 @@ test('room：trusted 档的只读观察面（`api.lobby.on` 的归一），事�
 
     makePlugin(root, 'typo', { entry: 'plugin.mjs', entryBody: `export function registerPlugin(host) { host.room.on('matchend', () => {}); }` });
     const t = await loadOfficialModules(loadOfficialPlugins(root, { log: quiet }).plugins.filter((p) => p.id === 'typo'), { log: quiet });
-    assert.equal(t.errors[0].code, 'PLUGIN_BAD_ROOM_EVENT');
+    assert.equal(t.errors[0].code, 'PLUGIN_MANIFEST_SHAPE');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -149,7 +149,7 @@ test('content 档没有 room 面 ⇒ 碰一下就抛 PLUGIN_USE_UNDECLARED', asy
       entryBody: `export function registerPlugin(host) { host.room.on('create', () => {}); }`,
     });
     const { errors } = await loadOfficialModules(loadOfficialPlugins(root, { log: quiet }).plugins, { log: quiet });
-    assert.equal(errors[0].code, 'PLUGIN_USE_UNDECLARED');
+    assert.equal(errors[0].code, 'PLUGIN_PERMISSION_MISSING');
     assert.match(errors[0].reason, /room/);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

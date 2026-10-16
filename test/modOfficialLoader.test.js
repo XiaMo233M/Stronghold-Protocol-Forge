@@ -86,10 +86,10 @@ test('一条用不了的声明：具名拒整包，且**不进**计划', () => {
     const { plugins, errors } = loadOfficialPlugins(root, { log: quiet });
     assert.deepEqual(plugins.map((p) => p.id), ['good']);
     const byPack = Object.fromEntries(errors.map((e) => [e.pack, e]));
-    assert.equal(byPack.forgey.code, 'SDK_UNKNOWN_FIELD');
+    assert.equal(byPack.forgey.code, 'PLUGIN_FIELD_UNKNOWN');
     assert.match(byPack.forgey.reason, /Forge-only/);
-    assert.equal(byPack.mismatch.code, 'OFFICIAL_ID_MISMATCH');
-    assert.equal(byPack.broken.code, 'OFFICIAL_BAD_MANIFEST');
+    assert.equal(byPack.mismatch.code, 'PLUGIN_ID_MISMATCH');
+    assert.equal(byPack.broken.code, 'PLUGIN_NO_MANIFEST');
 
     const plan = buildActivationPlan({ packs: plugins, options: { origin: 'official' } });
     assert.deepEqual(plan.activated, ['good'], '被拒的插件不在计划里');

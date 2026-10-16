@@ -99,7 +99,7 @@ test('入口双契约：既无 setup(sp) 也无 registerPlugin(host) ⇒ 具名�
       class: 'trusted', permissions: ['trusted.server'], entry: { server: 'plugin.mjs' },
     }, 'export const x = 1;');
     const a = await loadOfficialModules(loadOfficialPlugins(root, { log: quiet }).plugins.filter((p) => p.id === 'neither'), { log: quiet });
-    assert.equal(a.errors[0].code, 'PLUGIN_NO_REGISTER');
+    assert.equal(a.errors[0].code, 'PLUGIN_ENTRY');
     assert.match(a.errors[0].reason, /setup\(sp\)/, '错误信息要点出两条契约的名字');
 
     makePlugin(root, 'both', {
