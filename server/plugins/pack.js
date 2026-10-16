@@ -1,4 +1,4 @@
-// server/plugins/pack.js — checking and packing a plugin folder (DESIGN §34.3 and §32.9, docs/PLUGINS.md §8 / §15): the
+// server/plugins/pack.js — checking and packing a plugin folder (DESIGN §34.3 and §34.9, docs/PLUGINS.md §8 / §15): the
 // code behind `node tools/plugin.mjs check / pack` and the studio's 校验 / 打包 (server/studio/), here because the server
 // ships and tools/plugin.mjs does not (tools/package.mjs).
 //

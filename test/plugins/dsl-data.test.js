@@ -1,5 +1,5 @@
 // A data plugin's DSL operator fights on the server and through the browser-style loader, and a bad spec
-// refuses the content set (DESIGN §34.5 / §32.7, PLUGIN-DSL.md §9).
+// refuses the content set (DESIGN §34.5 / §34.7, PLUGIN-DSL.md §9).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

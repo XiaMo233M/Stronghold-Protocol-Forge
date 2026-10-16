@@ -92,7 +92,7 @@ export function createVisualSets({ registry, log = noopLog, limits = VISUAL_LIMI
   const snapshot = (p) => ({ id: p.id, hash: p.visual.hash, ops: p.visual.ops });
   /**
    * Is `p` a loaded cosmetic plugin with an overlay (of `scope`, when given)? A room's set also takes a content plugin's
-   * own art (its `assets`, read like a cosmetic overlay — DESIGN §34.5 / §32.6: server/plugins/roomSets.js); never a
+   * own art (its `assets`, read like a cosmetic overlay — DESIGN §34.5 / §34.6: server/plugins/roomSets.js); never a
    * player's personal set (a content plugin is a room's only).
    */
   const usable = (p, scope) => !!p && (p.class === 'cosmetic' || (['content','script','trusted'].includes(p.class) && scope !== 'personal')) && p.status === 'loaded'

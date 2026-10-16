@@ -106,7 +106,7 @@ export const WORKSHOP_BATTLE_PREFIX = '/workshop-battle/';
 const LOCAL_ART_MANIFEST = 'local-assets.json';
 const EMPTY_LOCAL_ART = Buffer.from(JSON.stringify({ version: 1, source: 'none', count: 0, groups: {} }));
 
-/** 0.3.0（上游 DESIGN §34/§33）新增的第二份本机清单：官方特效的本地文件（tools/local-extract）。
+/** 0.3.0（上游 DESIGN §34/§35）新增的第二份本机清单：官方特效的本地文件（tools/local-extract）。
  *  它缺席时同样以一个空清单作答，理由与 local-assets.json 一模一样（免得每次开页都在控制台留一条 404）。 */
 const LOCAL_ART_MANIFESTS = new Set([LOCAL_ART_MANIFEST, 'local-fx.json']);
 

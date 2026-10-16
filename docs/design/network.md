@@ -126,7 +126,7 @@ Piece = { uid, kind: 'chess'|'item'|'token', id, golden: bool, tier, items: [ { 
 `flags` bitmask: 1 blocked, 2 stunned, 4 frozen, 8 stealth (an ally's 隐匿 or 迷彩 — §20.2; an enemy's only while its 隐匿 is on: not blocked, not revealed — drawn solid otherwise, §21.4), 16 skillActive, 32 shielded, 64 invulnerable, 128 cold, 256 sleep, 512 flying.
 `anim` small int: 0 idle, 1 move, 2 attack, 3 skill, 4 die, 5 stun, 6 deploy.
 
-### 8.4 Content identity (0.3.0, the plugin system — §32)
+### 8.4 Content identity (0.3.0, the plugin system — §34)
 
 Every server names the content its rooms play with the content hash **`cs`** (64 lowercase hex digits;
 `shared/plugins/identity.js` the composition, `server/plugins/identity.js` this server's vanilla content, computed once

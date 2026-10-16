@@ -126,7 +126,7 @@ public/
                            tooltip.js, choiceOverlay.js, rewardOverlay.js, ticker.js, emotes.js, settings.js, toasts.js,
                            gameLogic.js (barrel; gameLogic/*.js placement, bonds, phases, shop, loadout)
     render/                app.js (field view; app/*.js helpers), projection.js, tiles.js, units.js, spine.js, fx.js (effects; fx/*.js), interp.js, drag.js, pick.js, promote.js (API §9);
-                           vfx/*.js (the official battle effects from the local client: interpreter, WebGL2 renderer, wiring; §9, §33)
+                           vfx/*.js (the official battle effects from the local client: interpreter, WebGL2 renderer, wiring; §9, §35)
   vendor/                  pixi, pixi-spine, preact, hooks, htm (copied from node_modules by tools/vendor.mjs)
   assets/                  downloaded art/audio (git-ignored), see docs/ASSETS.md
   fonts/                   self-hosted fonts
