@@ -83,6 +83,21 @@ export function makeMatch(o = {}) {
     // simulation work of full-match suites; test/match/bot.test.js covers it
     botRehearsal: o.botRehearsal ?? 0,
     botSliceMs: o.botSliceMs,
+    // ⚠️ The delegated bot rehearsal (DESIGN §14) reaches Match through these five — the header above promises them,
+    // and `Match.delegateRehearsal` reads every one of them:
+    //   hostId                  → the executor a task is offered to (Match.js `this.hostId`; absent ⇒ null ⇒ no host
+    //                             ⇒ delegation is silently off, which is what made all of
+    //                             test/match/rehearsal-delegate.test.js assert on an empty `host.tasks`)
+    //   botRehearsalDelegate / Ms → the flag itself and the host's answer budget
+    //   cs / requireCs          → the gameplay-plugin gate (`delegateRehearsal` refuses a requireCs room; the setup
+    //                             takes priority over the first four entries above, so pass them through the same way
+    //                             the lobby hands them to a real Match)
+    // `requireCs` is derived by Match (`opts.requireCs === true && !!this.cs`), so `cs` must travel with it.
+    hostId: o.hostId,
+    ...(o.botRehearsalDelegate != null ? { botRehearsalDelegate: o.botRehearsalDelegate } : {}),
+    ...(o.botRehearsalDelegateMs != null ? { botRehearsalDelegateMs: o.botRehearsalDelegateMs } : {}),
+    ...(o.cs != null ? { cs: o.cs } : {}),
+    ...(o.requireCs != null ? { requireCs: o.requireCs } : {}),
     // 工坊行为层 (test/workshopKits.test.js): a pack's kit map / module list, passed through to the battles. Both kit
     // key spaces travel the same way: `workshopKits` (operators) and `workshopTokenKits` (summons, §4.7).
     workshopKits: o.workshopKits,
