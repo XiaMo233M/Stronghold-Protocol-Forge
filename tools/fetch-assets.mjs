@@ -137,6 +137,9 @@ const HELP = `Usage: node tools/fetch-assets.mjs [options]
                     audio.voiceJp (upstream 0.2.2's 日本語 tree) is planned as well and is always the JP dub.
   --voice-all       plan every official voice slot, including the prep-only lines no battle plays
                     (干员报到 / 编入队伍 / 任命队长; 360 files / 19.3 MB more per run — off by default)
+  --optional-voice  also plan upstream 0.3.0's extra dub trees beside audio.voiceLangs: audio.voiceEn / voiceKr /
+                    voiceNative (the operator's own-language dub) and audio.voiceNativeLangType. Off by default
+                    (--no-optional-voice is accepted for an upstream command line and means the same "off")
   --prune           delete files under public/assets that the manifest no longer references
                     (public/assets/local/** of tools/local-extract is never deleted); implies --allow-shrink
   --allow-shrink    write data/assets.json even when it loses entries the current one has
@@ -186,13 +189,13 @@ function envFlag(value) {
  * today's behaviour; a supplied base URL is validated here, so `--asset-base=https:/cdn` is refused by name instead of
  * being ignored silently. `parseArgs` never touches the network (tests import it).
  * @param {string[]} argv
- * @returns {{concurrency:number, force:boolean, offline:boolean, dryRun:boolean, refreshIndex:boolean, prune:boolean, allowShrink:boolean, strict:boolean, addOnly:boolean, localSpines:boolean, voiceLang:string, voiceLangs:string[], voiceAll:boolean, help:boolean, source:string, assetBase:string, indexBase:string, indexTtl:number, cacheDir:string}}
+ * @returns {{concurrency:number, force:boolean, offline:boolean, dryRun:boolean, refreshIndex:boolean, prune:boolean, allowShrink:boolean, strict:boolean, addOnly:boolean, localSpines:boolean, voiceLang:string, voiceLangs:string[], voiceAll:boolean, optionalVoice:boolean, help:boolean, source:string, assetBase:string, indexBase:string, indexTtl:number, cacheDir:string}}
  */
 export function parseArgs(argv) {
   // `jp` is the default dub since 0.9.0 (the released bundle ships Japanese; shared/constants.js DEFAULT_VOICE_LANG):
   // a plain `npm run setup` must plan the same default the committed manifest names, or the two disagree.
   // `strict` 是上游 0.2.3 新增的（PR #421）：把「清单里有、磁盘上没有」的条目从警告升成退出码 1。
-  const o = { concurrency: 16, force: false, offline: false, dryRun: false, refreshIndex: false, prune: false, allowShrink: false, strict: envFlag(process.env.SP_ASSETS_STRICT), addOnly: false, localSpines: false, voiceLang: 'jp', voiceLangs: [], voiceAll: false, help: false, source: process.env.SP_ASSET_SOURCE || 'direct', assetBase: normalizeAssetBase(process.env.SP_ASSET_BASE, 'SP_ASSET_BASE'), indexBase: normalizeAssetBase(process.env.SP_INDEX_BASE, 'SP_INDEX_BASE'), indexTtl: parseTtl(process.env.SP_INDEX_TTL, 'SP_INDEX_TTL'), cacheDir: process.env.SP_CACHE_DIR || DEFAULT_CACHE_DIR, sourceSnapshot: '' };
+  const o = { concurrency: 16, force: false, offline: false, dryRun: false, refreshIndex: false, prune: false, allowShrink: false, strict: envFlag(process.env.SP_ASSETS_STRICT), addOnly: false, localSpines: false, voiceLang: 'jp', voiceLangs: [], voiceAll: false, optionalVoice: false, help: false, source: process.env.SP_ASSET_SOURCE || 'direct', assetBase: normalizeAssetBase(process.env.SP_ASSET_BASE, 'SP_ASSET_BASE'), indexBase: normalizeAssetBase(process.env.SP_INDEX_BASE, 'SP_INDEX_BASE'), indexTtl: parseTtl(process.env.SP_INDEX_TTL, 'SP_INDEX_TTL'), cacheDir: process.env.SP_CACHE_DIR || DEFAULT_CACHE_DIR, sourceSnapshot: '' };
   for (const a of argv) {
     const [k, v] = a.split('=');
     if (k === '--concurrency') o.concurrency = Math.max(1, Math.min(64, parseInt(v, 10) || 16));
@@ -222,6 +225,11 @@ export function parseArgs(argv) {
       o.voiceLangs = [...new Set(list)];
     }
     else if (k === '--voice-all') o.voiceAll = true;
+    // upstream 0.3.0's extra dub trees (plan.mjs optionalVoice → audio.voiceEn / voiceKr / voiceNative). Off by default:
+    // our manifest is the `voiceLangs` one, and turning these on adds the four dub trees to it (~180 MB on disk). The
+    // upstream spelling is accepted too, so a command line written against upstream reads the same and means "off".
+    else if (k === '--optional-voice') o.optionalVoice = true;
+    else if (k === '--no-optional-voice') o.optionalVoice = false;
     else if (k === '--help' || k === '-h') o.help = true;
     else throw new Error(`unknown option ${a}\n${HELP}`);
   }
@@ -533,6 +541,8 @@ async function main() {
     voiceLangs: opts.voiceLangs,
     // default: only the slots a battle can play (plan.mjs VOICE_BATTLE_SLOTS); --voice-all takes the whole official set
     voiceSlots: opts.voiceAll ? null : undefined,
+    // --optional-voice: plan upstream's extra dub trees beside our `voiceLangs` model (off by default: see parseArgs)
+    optionalVoice: opts.optionalVoice,
     extraEnemyIds: Object.keys(dataEnemies || {}),
     extraTokenIds: [...Object.keys(dataTokens || {}), ...extras.tokenIds],
     extraHandbook,
@@ -600,6 +610,9 @@ async function main() {
   });
   const body = resolved.value;
   tidyManifest(body);
+  // --optional-voice: drop a dub tree that resolved to nothing, and a voiceNativeLangType whose operator lost its tree
+  // (a no-op without the flag: the keys are absent, so there is nothing to tidy).
+  tidyVoiceTrees(body);
   const fontFaces = {};
   for (const [name, f] of Object.entries(fonts.files)) fontFaces[name] = f;
   body.fonts = opts.addOnly && current?.fonts ? current.fonts

@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildPlan, VOICE_JP_LANG } from '../tools/assets/plan.mjs';
+import { buildPlan, VOICE_JP_LANG, VOICE_OPTIONAL_TREES } from '../tools/assets/plan.mjs';
 import { indexAudio, VOICE_DIRS } from '../tools/assets/audio.mjs';
 import { RAW } from '../tools/assets/sources.mjs';
 import { artPlan, FULL_ZIP_JP_VOICE, JP_VOICE_DIR, FULL_ZIP_OPTIONAL_VOICE, OPTIONAL_VOICE_DIRS } from '../tools/package.mjs';
@@ -65,9 +65,16 @@ test('plan: audio.voiceJp is the JP dub (ArknightsAssets2 voice/) of the very sl
   assert.equal(jp.start.alts[0].rel, 'audio/voice/jp/char_263_skadi/cn_019.mp3');
   assert.equal(t.audio.voiceJp.char_602_cdfend, undefined, 'an operator the game does not field (a stand-in) gets neither tree');
   assert.equal(t.audio.voice.char_602_cdfend, undefined);
-  assert.deepEqual(Object.keys(t.audio), ['bgm', 'bossBgm', 'voice', 'voiceJp', 'voiceLang', 'voiceLangs', 'sfx'],
+  // A bare plan declares NEITHER `voiceLang` nor `voiceLangs` — the rule our workshop side already states ("a manifest
+  // never grows an empty voiceLangs": test/voiceEditor.test.js, test/workshopVoices.test.js). The keys appear only when
+  // another dub is actually asked for, which is also what upstream's assets.test.js expects of `plan({})`. The intent
+  // below is unchanged: when they are written, `voiceLang` still names the dub `audio.voice` holds.
+  assert.deepEqual(Object.keys(t.audio), ['bgm', 'bossBgm', 'voice', 'voiceJp', 'sfx'],
+    'no other dub asked for: neither `voiceLang` nor `voiceLangs` is written (an empty voiceLangs is never emitted)');
+  const withOthers = plan({ voiceLangs: ['cn'] }).audio;
+  assert.deepEqual(Object.keys(withOthers), ['bgm', 'bossBgm', 'voice', 'voiceJp', 'voiceLang', 'voiceLangs', 'sfx'],
     'this repo adds `voiceLang` (which dub `voice` holds) and `voiceLangs` (the other dubs) after upstream\'s `voiceJp`');
-  assert.equal(t.audio.voiceLang, DEFAULT_VOICE_LANG, 'audio.voice holds the manifest default dub');
+  assert.equal(withOthers.voiceLang, DEFAULT_VOICE_LANG, 'audio.voice holds the manifest default dub');
   assert.equal(DEFAULT_VOICE_LANG, 'jp', 'the released bundle ships the Japanese dub (owner decision, 0.9.0)');
   assert.equal(def.start.alts[0].rel, 'audio/voice/jp/char_263_skadi/cn_019.mp3', '… so a bare plan() is the JP tree');
   // --voice-lang puts another dub in audio.voice; voiceJp stays the JP one; voiceJp: false plans no JP tree
@@ -224,4 +231,29 @@ test('选中干员 on every card tap (review of fb7-voices): two shop / reward c
   } finally {
     globalThis.fetch = origFetch;
   }
+});
+
+// D31: upstream 0.3.0 adds its own dub trees (`optionalVoice` → `audio.voiceEn` / `voiceKr` / `voiceNative`, plus
+// `voiceNativeLangType`). They are an ADDITIVE path beside our `voiceLangs` model, and on the dubs the two share — the
+// `VOICE_DIRS` languages cn / jp / en / kr — the two paths must describe the very same lines, or the client would play
+// one table while a package ships the other. This pins that agreement; it is built to fail if either path drifts.
+test('plan: upstream optionalVoice trees and this repo voiceLangs agree line-for-line on every shared dub', () => {
+  const both = buildPlan({ assets07: {}, ops03: {}, enemies05: {}, maps05: {}, audio: indexAudio({}), modelsData: {},
+    charword: CHARWORD, extraOperators: OPS,
+    optionalVoice: true, voiceLangs: ['cn', 'en', 'kr'] }).template.audio;
+  for (const [key, lang] of Object.entries(VOICE_OPTIONAL_TREES)) {
+    if (lang === 'native') continue;               // the own-language dub has no `voiceLangs` counterpart (voice_custom/)
+    assert.ok(both[key], `optionalVoice plans audio.${key}`);
+    assert.deepEqual(both[key], both.voiceLangs[lang],
+      `shared dub ${lang}: audio.${key} and audio.voiceLangs.${lang} must be the same table`);
+  }
+  // The check above is only worth something while the tables are non-empty and differ per dub: an empty or
+  // language-independent table would satisfy every equality and hide a broken path. This half fails in that case.
+  assert.ok(Object.keys(both.voiceLangs.en).length > 0, 'the EN table is not empty (a bare {} must not pass the check)');
+  assert.notDeepEqual(both.voiceLangs.en, both.voiceKr, 'two dubs are not the same table (they differ by folder)');
+  assert.equal(both.voiceEn.char_263_skadi.start.alts[0].rel, 'audio/voice/en/char_263_skadi/cn_019.mp3');
+  // `native` is deliberately NOT shared: upstream's tree lives under voice_custom/<word key>, a dir `voiceLangs` has no
+  // concept of, so the two paths must differ there rather than silently agree.
+  assert.ok(both.voiceNative.char_263_skadi === undefined, 'this operator has no own-language dub');
+  if (both.voiceLangs.native) assert.notDeepEqual(both.voiceNative, both.voiceLangs.native);
 });
