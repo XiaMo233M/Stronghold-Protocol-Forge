@@ -591,7 +591,13 @@ async function main() {
   });
 
   // Manifest
-  const resolved = resolveTemplate(plan.template, { root: ASSETS, spine: spine.entries, assetBase: opts.assetBase, sourceOf: (rel) => dl.ledger.files[rel]?.url });
+  const resolved = resolveTemplate(plan.template, {
+    root: ASSETS, spine: spine.entries, assetBase: opts.assetBase, sourceOf: (rel) => dl.ledger.files[rel]?.url,
+    // A verified run publishes only what it verified. Bytes kept on disk from an earlier revision — or kept because the
+    // snapshot API was down — stay as a retry, never as a URL the client is served (manifest.mjs `available`). Without a
+    // snapshot every file on disk is published, exactly as before: `dl.accepted` is only consulted under a verifier.
+    ...(verifier ? { available: (rel) => dl.accepted.has(rel) } : null),
+  });
   const body = resolved.value;
   tidyManifest(body);
   const fontFaces = {};
