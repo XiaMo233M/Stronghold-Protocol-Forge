@@ -185,7 +185,7 @@ import { buildRoomRegistry } from './match/metaPack.js';
 // 包声明的**房间级钩子**（`pack.json.server.room`, DESIGN §28.20）：装载路径在 `server/roomPack.js`（启动时一次），
 // 这里只做**装配** —— 房间建起来时装一次、每个生命周期点触发一次。没有包声明 `server.room` 时 `install` 与 `fire`
 // 都是一次早退（`byRoom` 里没有条目），所以干净安装与从前逐字节相同。
-import { createRoomHooks } from './roomPack.js';
+import { createRoomHooks, holdDecision, releaseRoomHolds } from './roomPack.js';
 import { getDefaultRegistry } from './match/effectsMeta.js';
 import { KITTED_CHARS } from './sim/content/kits/index.js';
 import { MatchmakeQueue } from './matchmaking.js';
@@ -415,6 +415,8 @@ export class Room {
     this.matchKey = null;
     this.createdAt = now;
     this.disposed = false;
+    /** §28.57：包申请了「空席也先别销毁」时的重判定时器（销毁房间时必须一起清掉）。 */
+    this.holdTimer = null;
     /**
      * The content set the room plays (DESIGN §32): `{ cs, vanilla, plugins }` — the server's vanilla set, or with the
      * cosmetic plugins its host switched on (header "The room's plugins": `vs`, `warnings`, `bytes` beside them), or a
@@ -2390,7 +2392,7 @@ export class Lobby {  /**
     for (const s of room.spectators) if (!s.connected) this.startGrace(room, s);
     const host = room.hostId ? room.seatOf(room.hostId) : null;
     if (!host || host.isBot || host.left) this.migrateHost(room);
-    if (room.activeHumans().length === 0) this.disposeRoom(room, 'empty');
+    if (room.activeHumans().length === 0) this.reapEmptyRoom(room);
     else {
       this.broadcastState(room);
       // its plugins changed on disk during the match: the host can apply them again now
@@ -2673,7 +2675,7 @@ export class Lobby {  /**
     }
     if (room.disposed) return; // onLeave may have ended the match and emptied the room
     if (room.hostId === playerId) this.migrateHost(room);
-    if (room.activeHumans().length === 0) this.disposeRoom(room, 'empty');
+    if (room.activeHumans().length === 0) this.reapEmptyRoom(room);
     else this.broadcastState(room);
   }
 
@@ -2728,12 +2730,38 @@ export class Lobby {  /**
   }
 
   /**
+   * 空席房间的回收裁决（DESIGN §28.57）。默认行为与从前逐字相同：**没有包申请留，就照旧销毁**。
+   * 有包申请（`server.room.hold` + `room.canHold`）则把房间留到裁决给出的时限（宿主夹到
+   * `ROOM_HOLD_MAX_MS` 之内），到点重新判一次：那时若还空着就销毁，有人回来了就什么都不做（加入路径本来就会
+   * 广播状态）。房间留在 `this.rooms` 里、不广播新事件 —— 对成员而言它还是那个等着重连的房间。
+   *
+   * 为什么是「最小替换」：没有包申请时这一行**就是**原来那行 `disposeRoom(room, 'empty')`，逐字相同。
+   * 定时器 `unref()`：一个等重连的房间不该把进程吊住（与 `startGrace` 同一个口径）。
+   */
+  reapEmptyRoom(room) {
+    if (room.disposed) return;
+    const want = holdDecision(room, { log: this.log });
+    if (!want.hold) { this.disposeRoom(room, 'empty'); return; }
+    if (room.holdTimer) clearTimeout(room.holdTimer);
+    room.holdTimer = setTimeout(() => {
+      room.holdTimer = null;
+      if (room.disposed || room.activeHumans().length > 0) return;
+      this.disposeRoom(room, 'empty');
+    }, Math.max(0, want.until - Date.now()));
+    room.holdTimer.unref?.();
+    this.log.info(`[lobby] ${room.code} held for reconnect until ${new Date(want.until).toISOString()} (${want.packs.join('+')})`);
+  }
+
+  /**
    * Delete a room, detach its members (room.closed unless the room simply emptied) and dispose its match.
    * @param {Room} room @param {string} reason
    */
   disposeRoom(room, reason) {
     if (room.disposed) return;
     room.disposed = true;
+    // 回收裁决的定时器与谓词表随房间消失（§28.57）：房间码会被复用，留着就是让下一个同码房间继承上一个的裁决。
+    if (room.holdTimer) { clearTimeout(room.holdTimer); room.holdTimer = null; }
+    releaseRoomHolds(room.code);
     if (this.rooms.get(room.code) === room) { this.trustedRuntime?.event('roomClosed',{room:room.toState()}); this.rooms.delete(room.code); }
     const ctx = room.matchCtx;
     room.match = null;

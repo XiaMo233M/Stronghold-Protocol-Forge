@@ -301,6 +301,27 @@ export const MOD_SURFACE = Object.freeze([
     spec: '§28.20',
   },
   {
+    id: 'server.room.hold',
+    layer: 'B',
+    decl: 'pack.json.server.room.hold = true ⇒ room.canHold(fn)',
+    anchors: [{ symbol: 'ROOM_FIELDS', members: ['hold'] }, { symbol: 'SERVER_MEMBERS', members: ['room'] }],
+    requires: [
+      '**这一格是 §28.20 那条「房间钩子不是 combat 闸门」的唯一例外**：它能决定「空席的房间还留不留」= 能决定一局会不会被回收，'
+        + '所以按 §28.14 / §28.54 同一条**能力判据**要求包声明 `combat: true`（`ROOM_HOLD_NEEDS_COMBAT`）。同一格里的观察面成员照旧不受闸门',
+      '申请必须显式：`hold` 没写成 `true` 就调 `room.canHold(fn)` ⇒ `ROOM_HOLD_UNDECLARED` 点名并返回 false（不是静默收下）。'
+        + '`hold` **只在写出来时**才进归一化清单 ⇒ 没用它的那些包摘要逐字节不变，写了就进摘要（§28.2：同一份房间摘要必须对应同一份回收语义）',
+      '包只决定**留不留**，宿主决定**留多久**：`ROOM_HOLD_MAX_MS`（15 分钟，**具名常量不是魔法数**）是宿主侧硬时限，谓词返回的 `until` 越界一律夹回来。'
+        + '多包语义 OR、时限取最早那一票，到点重新判一次；谓词抛异常 ⇒ 这一票作废 + `ROOM_HOOK_THREW` 点名，别的包照算',
+      '裁决表按**房间码**存，`disposeRoom` 里与定时器一起 `releaseRoomHolds(code)` 收回（房间码会被复用，留着条目 = 让下一个同码房间继承上一个的裁决，与 §28.20 对钩子表同一条理由）。定时器 `unref()`：等重连的房间不该把进程吊住',
+      '⚠ 回收那句话住在 `server/lobby.js`，改法必须是**最小替换**：两处 `disposeRoom(room, \'empty\')` ⇒ `reapEmptyRoom(room)`，**没有包申请时它逐字就是原来那一行**；`disposeRoom` 只多了「清定时器 + 收回裁决表」。房间留在 `this.rooms` 里、不广播新事件 ⇒ 留置期间房间对客户端的形状一字未动',
+      '不新增 `C2S` 意图、不动 `PROTOCOL_VERSION` / `MOD_API_VERSION`、不进模拟 ⇒ 不需要 `golden:update`',
+    ],
+    files: ['shared/workshop.js', 'server/roomPack.js', 'server/lobby.js'],
+    tests: ['test/modRoomHold.test.mjs', 'test/modSurface.test.js'],
+    // ⚠️ 节号以我方为准（上游）：它在下游 fork 里是 §28.55，我方按**能力**排到现有最大号之后。
+    spec: '§28.57',
+  },
+  {
     id: 'callBudget',
     layer: 'B',
     // 与 `variants` / `behaviour` **同一形状、不同一档**：包声明的是**一个上限**（`{ max? }`），不是数值、不是路径、

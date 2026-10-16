@@ -63,6 +63,55 @@ export const ROOM_HOOK_EVENTS = Object.freeze([
 /** 事件名的集合形式（`on` 的判据）。 */
 const EVENT_SET = new Set(ROOM_HOOK_EVENTS);
 
+// ---- 空席回收裁决（DESIGN §28.57）--------------------------------------------------------------------------
+//
+// 与上面八个事件的区别只有一条：事件是**观察**（返回值一律丢弃），这一格是**裁决**（返回值被采纳）。
+// 采纳它就必须同时交代清楚它改的是什么：它不动对局内部，但它决定「最后一个真人走了，这一局还留不留」——
+// 也就是决定这局会不会以回收收场。所以形状层要求包声明 `combat: true`（`ROOM_HOLD_NEEDS_COMBAT`），
+// 而宿主在这里放一道**硬时限**：包只能把房间留到 `ROOM_HOLD_MAX_MS` 之内，越界一律夹回来。
+// 一张表都按房间码存，随 `releaseRoomHolds` 与房间一起消失（房间码会被复用，留旧条目 = 让下一个同码房间
+// 继承上一个的裁决，与 §28.20 对钩子表同一条理由）。
+/** 宿主允许包把空席房间留住的**上限**：15 分钟。包只能更短，不能更长（越界夹回来，不拒包）。 */
+export const ROOM_HOLD_MAX_MS = 15 * 60_000;
+/** @type {Map<string, Map<string, Function>>} roomCode -> (packId -> predicate) */
+const holdRegistry = new Map();
+
+/**
+ * 回收裁决：问这个房间装过的每一个**声明了 `hold`** 的包。语义是 OR（谁申请留就留），时限取**最早**的那个
+ * （最早到点就该重新判一次），并夹到宿主上限。抛异常 / 返回怪形状 = 该包这一票按「不留」处理并点名 ——
+ * 一个包炸了不该把别的包的票一起作废，也不该让房间永远留着。
+ * @param {any} room @param {{ now?: () => number, log?: any }} [opts]
+ * @returns {{ hold: boolean, until: number, packs: string[] }}
+ */
+export function holdDecision(room, { now = Date.now, log = null } = {}) {
+  const code = room && room.code;
+  const preds = code ? holdRegistry.get(code) : null;
+  const packs = [];
+  let until = 0;
+  if (preds) {
+    for (const [packId, fn] of preds) {
+      let got = null;
+      try { got = fn(room.hookSnapshot ? room.hookSnapshot() : { id: code }); } catch (e) {
+        log?.warn?.(`[workshop] ROOM_HOOK_THREW: server.room hold "${packId}" threw: ${e && e.message ? e.message : String(e)}`);
+        continue;
+      }
+      if (!got || got.hold !== true) continue;
+      const want = typeof got.until === 'number' && Number.isFinite(got.until) ? got.until : now() + ROOM_HOLD_MAX_MS;
+      packs.push(packId);
+      until = until === 0 ? want : Math.min(until, want);
+    }
+  }
+  if (!packs.length) return { hold: false, until: 0, packs };
+  const ceiling = now() + ROOM_HOLD_MAX_MS;
+  return { hold: true, until: Math.min(Math.max(until, now()), ceiling), packs };
+}
+
+/** 房间销毁时收回它的裁决表（幂等）。 */
+export function releaseRoomHolds(roomCode) { holdRegistry.delete(roomCode); }
+
+/** 测试与热重载用：清空整张裁决表。 */
+export function clearRoomHolds() { holdRegistry.clear(); }
+
 /**
  * 静态判定一个房间钩子模块的源码，**在 import 之前**（与 `battleSourceIssues` 同一套纪律、同一张表）。
  *
@@ -151,7 +200,10 @@ export async function loadRoomInstallers(loaded, { log = null, importModule = (u
       errors.push({ pack: pack.id, code: 'ROOM_NO_INSTALL', reason: `server.room.module "${rel}" does not export an install(room) function` });
       continue;
     }
-    installers.push({ id: pack.id, hash: pack.hash || '', pack: pack.id, install });
+    installers.push({ id: pack.id, hash: pack.hash || '', pack: pack.id, install,
+      // §28.57：这个包有没有**申请**「空席房间先别销毁」的资格（形状层已要求它同时声明 `combat: true`）。
+      // `canHold` 只认这一格 —— 没声明的包调它就是点名拒（`ROOM_HOLD_UNDECLARED`），不是静默收下。
+      hold: !!(pack.server && pack.server.room && pack.server.room.hold === true) });
   }
   return { installers, errors };
 }
@@ -251,6 +303,26 @@ export function createRoomHooks({ installers = [], log = null, now = Date.now } 
       player: (seat) => frozenPlayers.find((p) => p.seat === seat) || NO_PLAYER,
       phase: () => (room.match ? 'match' : 'lobby'),
       now: () => now(),
+      /**
+       * 申请「这个房间空了以后先别回收」（§28.57）。**只有**在 `pack.json.server.room.hold` 里声明过的包能调；
+       * 没声明就点名 `ROOM_HOLD_UNDECLARED` 并返回 false（不是静默收下）。谓词每次回收判定时被叫一次，
+       * 拿到的是只读快照；返回 `{ hold: true, until: <epoch ms> }` 才算一票，时限被宿主夹到
+       * `ROOM_HOLD_MAX_MS` 之内 —— **包决定留不留，宿主决定留多久**。
+       */
+      canHold(fn) {
+        const inst = list.find((i) => i.id === packId);
+        if (!inst || inst.hold !== true) {
+          hookError(packId, 'canHold', new Error('ROOM_HOLD_UNDECLARED: room.canHold(...) needs "hold": true in pack.json.server.room — the host only asks packs that declared it'));
+          return false;
+        }
+        if (typeof fn !== 'function') {
+          hookError(packId, 'canHold', new Error('room.canHold(...) needs a predicate function'));
+          return false;
+        }
+        if (!holdRegistry.has(room.code)) holdRegistry.set(room.code, new Map());
+        holdRegistry.get(room.code).set(packId, fn);
+        return true;
+      },
       // 订阅 / 退订（本包自己的，永远只在本进程内）
       on(event, fn) {
         if (typeof event !== 'string' || !EVENT_SET.has(event)) {

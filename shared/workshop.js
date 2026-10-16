@@ -546,8 +546,15 @@ const BATTLE_MODULE_EXT = '.mjs';
  * 结果 —— `install(room)` 拿到的是一个只读的观察面（成员快照、阶段、事件），没有 store、没有战场句柄、没有 socket、
  * 没有文件系统，返回值被忽略。判据是**能力**而不是意图：等哪一天这一层真的交出一件能改「谁在玩 / 装了什么 / 这一局
  * 的结果」的东西，那件东西必须 `combat: true`（§28.20 的闸门分类规则）。
+ *
+ * 那一天到了，就是 `hold`（§28.57）：它能决定「空席的房间还留不留」= 能决定一局会不会被回收 ⇒ 单独要求
+ * `combat: true`（`ROOM_HOLD_NEEDS_COMBAT`，见 `normalizePackManifest` 那道门）。同一份契约里的其余成员
+ * （快照 / 访问器 / 订阅）照旧不受 combat 闸门 —— 被 gate 的是那一件能力，不是整格载荷，正是上面那句话的口径。
+ *
+ * **导出**它是因为 `shared/modSurface.js` 的 `server.room.hold` 那一格把它当锚点用（「`hold` 真的在闭字段里」
+ * 这句话的守卫）—— 锚在一个没导出的名字上是一条**永远对不上**的登记。
  */
-const ROOM_FIELDS = Object.freeze(['module']);
+export const ROOM_FIELDS = Object.freeze(['module', 'hold']);
 /** 房间钩子模块的扩展名：它只由**服务端**加载（浏览器与战场都不加载），所以是 `.mjs`，与 `server.meta` 同一条。 */
 const ROOM_MODULE_EXT = '.mjs';
 /**
@@ -1430,7 +1437,13 @@ function parseRoomDecl(raw) {
   if (!raw.module.endsWith(ROOM_MODULE_EXT) || raw.module.length <= ROOM_MODULE_EXT.length) {
     return fail('ROOM_BAD_MODULE', `server.room.module must be a "${ROOM_MODULE_EXT}" module — the server loads it, the browser never does (unlike server.battle, which both ends run)`);
   }
-  return { ok: true, decl: { room: { module: raw.module } } };
+  // `hold`（DESIGN §28.57）：这个包要**申请**「空席房间先别销毁」。它不改对局内部，但它能决定一局会不会
+  // 因为「没真人了」而被回收 —— 那是对局结果的一部分，所以按 §28.14 / §28.52 同一条纪律要求 `combat: true`
+  // （闸门在 `normalizePackManifest` 里，因为它要读包级声明）。**只在写出来时**才进清单：没写的包逐字节不变。
+  if (raw.hold !== undefined && raw.hold !== true && raw.hold !== false) {
+    return fail('ROOM_BAD_HOLD', `server.room.hold must be true or false (may this pack ask the host to keep an emptied room alive), got ${typeof raw.hold}`);
+  }
+  return { ok: true, decl: { room: { module: raw.module, ...(raw.hold === undefined ? {} : { hold: raw.hold === true }) } } };
 }
 
 /**
@@ -2736,6 +2749,13 @@ export function normalizePackManifest(raw, dirName = '', opts = {}) {
   // 分开，而不是靠先到先得。规则只有一条、且只需要包 id：路径必须是 `/mod-ws/<本包id>` 或它的直接子路径。
   // 语法本身不在这里判（`isLanePath` / `LANE_RESERVED` 那份判据只在 `server/http/wsLanes.js` 一处）。
   if (serverParsed) {
+    // `server.room.hold: true` 要 `combat: true`（§28.57）：能决定「空席的房间还留不留」就是能决定一局
+    // 会不会被回收掉 —— 与 `matchClass` / `matchKinds` 同一条「能力判据而非意图」。位置在这里是因为它要读
+    // **包级**的 `combat`，而 `server` 的形状已经解析完了。
+    const holdDecl = serverParsed.decl.room && serverParsed.decl.room.hold === true;
+    if (holdDecl && raw.combat !== true) {
+      return fail('ROOM_HOLD_NEEDS_COMBAT', 'server.room.hold lets this pack keep an emptied room alive, which decides whether a running match is reclaimed at all, so the pack must declare "combat": true — that is what puts it into the room digest gate and the golden corpus (DESIGN §28.57)');
+    }
     const lanePrefix = `/mod-ws/${id}`;
     for (const m of serverParsed.decl.modules || []) {
       if (!m.lane) continue;
