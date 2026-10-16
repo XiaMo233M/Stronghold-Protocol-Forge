@@ -89,7 +89,7 @@
 //     and a change while it runs is stored for the next match (ROOM_STARTED 'stored for the next match'). Every
 //     `welcome` carries `diyKitted` (welcomeInfo): the operators a DIY slot may field, so the client's picker offers
 //     exactly what the server accepts.
-//   * Content identity (DESIGN §32, the plugin system's first step): the lobby is given the server's vanilla content
+//   * Content identity (DESIGN §34, the plugin system's first step): the lobby is given the server's vanilla content
 //     (server/plugins/identity.js; none in unit tests that build a Lobby without it). Every `welcome` carries
 //     `content: { vanilla: <cs> }` — and `plugins: <n>` when this server has n > 0 unofficial plugins (every class but a
 //     language: the title screen's 「本服务器安装了 N 个插件」; a page fetches the catalogue only when n > 0 and something
@@ -97,7 +97,7 @@
 //     `{ cs, vanilla: true, plugins: [] }` while it has
 //     no plugin, and the match receives `cs`, which it copies into every BattleSpec (the sim never reads it;
 //     diagnostics and replays name the content with it).
-//   * The room's plugins (DESIGN §32 P1a — cosmetic plugins only): room.setPlugins { plugins: [{ id }] } — host-only,
+//   * The room's plugins (DESIGN §34 P1a — cosmetic plugins only): room.setPlugins { plugins: [{ id }] } — host-only,
 //     before the match, and ▸ like a difficulty change it un-readies the other humans. The lobby asks the server's
 //     visual sets (server/plugins/visualSet.js resolve: loaded cosmetic plugins of scope `room`, their requirements
 //     switched on, in load order, within the size limit — PLUGIN_UNKNOWN / PLUGIN_BLOCKED / PLUGIN_DEPENDENCY /
@@ -117,11 +117,11 @@
 //     it (the visual sets' onStale, after the registry read the folders again), the host is told once (an m.toast: apply
 //     the room's plugins again — the panel's 「重新应用」 sends the same list, which resolves to the set of the files as
 //     they are now) — during a match, once the room is back in its lobby (onMatchEnd), when it can be done; nothing
-//     changes by itself — ▸ but in a room the plugin studio names (DESIGN §32.9: `autoApplyPlugins`, set by
+//     changes by itself — ▸ but in a room the plugin studio names (DESIGN §34.9: `autoApplyPlugins`, set by
 //     server/studio/index.js — a room whose host is the plugin's author or whose host is its only player) the same choice
 //     is applied again at once, during a match too (refreshPlugins: art never changes a battle, the `cs` stays the vanilla
 //     one; nobody is un-readied), and the host is told only when that fails.
-//   * Gameplay plugins (DESIGN §32.6, P1c): room.setPlugins also takes the server's content plugins (data: numbers,
+//   * Gameplay plugins (DESIGN §34.6, P1c): room.setPlugins also takes the server's content plugins (data: numbers,
 //     records, modes). The lobby's `plugins` (server/plugins/roomSets.js) closes the list over its requirements, refuses
 //     conflicts, other classes and scopes, what the server owner's plugins/config.json does not allow and — unless it
 //     allows them — gameplay plugins made for other game versions (PLUGIN_INCOMPATIBLE), and builds the room's content set:
@@ -418,7 +418,7 @@ export class Room {
     /** §28.57：包申请了「空席也先别销毁」时的重判定时器（销毁房间时必须一起清掉）。 */
     this.holdTimer = null;
     /**
-     * The content set the room plays (DESIGN §32): `{ cs, vanilla, plugins }` — the server's vanilla set, or with the
+     * The content set the room plays (DESIGN §34): `{ cs, vanilla, plugins }` — the server's vanilla set, or with the
      * cosmetic plugins its host switched on (header "The room's plugins": `vs`, `warnings`, `bytes` beside them), or a
      * content set with gameplay plugins (header "Gameplay plugins": `vanilla: false`, its own cs, `dataBytes`, `modes`,
      * `modeId`); null when the lobby has no content identity (room.state then carries none).

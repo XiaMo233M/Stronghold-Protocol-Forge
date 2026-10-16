@@ -106,7 +106,7 @@ export const WORKSHOP_BATTLE_PREFIX = '/workshop-battle/';
 const LOCAL_ART_MANIFEST = 'local-assets.json';
 const EMPTY_LOCAL_ART = Buffer.from(JSON.stringify({ version: 1, source: 'none', count: 0, groups: {} }));
 
-/** 0.3.0（上游 DESIGN §32/§33）新增的第二份本机清单：官方特效的本地文件（tools/local-extract）。
+/** 0.3.0（上游 DESIGN §34/§33）新增的第二份本机清单：官方特效的本地文件（tools/local-extract）。
  *  它缺席时同样以一个空清单作答，理由与 local-assets.json 一模一样（免得每次开页都在控制台留一条 404）。 */
 const LOCAL_ART_MANIFESTS = new Set([LOCAL_ART_MANIFEST, 'local-fx.json']);
 
@@ -116,7 +116,7 @@ const IMMUTABLE_JSON = 'public, max-age=31536000, immutable';
 const VISUAL_DOC = new RegExp(`^${VISUAL_SETS_URL}([0-9a-f]{${VS_URL_DIGITS}})/${VISUAL_DOC_FILE.replace('.', '\\.')}$`);
 /** A plugin file URL's hash segment. */
 const FILE_HASH = new RegExp(`^[0-9a-f]{${FILE_URL_DIGITS}}$`);
-/** /cs/<cs16>/<path> of a content set with gameplay plugins (DESIGN §32.6). */
+/** /cs/<cs16>/<path> of a content set with gameplay plugins (DESIGN §34.6). */
 const CS_FILE = /^\/cs\/([0-9a-f]{16})\/([A-Za-z0-9._\/-]{1,200})$/;
 
 /**
@@ -206,8 +206,8 @@ export function createStaticHandler({
   // 内容哈希（`server/http/assetIndex.js`）与它服务出来的清单（`server/http/assetViews.js`）：null = 没有索引
   // （`assetIndex: false` / SP_ASSET_INDEX=0），两条 ~hash 路由与两条清单视图整块跳过，行为与从前逐字节相同。
   assetIndex = null, views = null,
-  // 视觉集（server/plugins/visualSet.js，DESIGN §32 P1a）与「带玩法插件的内容集」（server/plugins/contentSets.js，
-  // DESIGN §32.6）：两者缺省都是从上文的 `registry` 现起（内容集没有 `contents` 时只答原生那一份 /cs/ 清单）。
+  // 视觉集（server/plugins/visualSet.js，DESIGN §34 P1a）与「带玩法插件的内容集」（server/plugins/contentSets.js，
+  // DESIGN §34.6）：两者缺省都是从上文的 `registry` 现起（内容集没有 `contents` 时只答原生那一份 /cs/ 清单）。
   visual = null, contents = null,
 }) {
   const registry = packs || createPluginRegistry({ publicDir, dataDir, packsDir, pluginsDir }, { log: /** @type {any} */ (log) });
@@ -265,7 +265,7 @@ export function createStaticHandler({
         'This server serves /assets and /fonts only from a locally imported resource pack · 本服务器要求先导入完整资源包');
       return;
     }
-    // 插件目录（server/plugins/registry.js, DESIGN §32）与原生内容集的清单。整块取自上游 0.3.0 的 /packs/ 之前的四段
+    // 插件目录（server/plugins/registry.js, DESIGN §34）与原生内容集的清单。整块取自上游 0.3.0 的 /packs/ 之前的四段
     // 新路由：`/plugins/index.json` 目录、`/cs/…` 内容集、`/vs/…` 视觉集、`/p/<id>/<hash8>/<path>` 插件文件。它们与
     // 工坊那几条路由（workshop-*、/mods/、/room-data/）**前缀互不重叠**，所以顺序上不互相遮蔽。
     if (decoded === `${PLUGINS_URL}index.json`) {
@@ -277,7 +277,7 @@ export function createStaticHandler({
     if (decoded.startsWith('/cs/')) {
       const c = vanillaContent();
       if (decoded !== `/cs/${csUrlPart(c.cs)}/index.json`) {
-        // a content set with gameplay plugins (DESIGN §32.6, server/plugins/contentSets.js): its manifest and its patched
+        // a content set with gameplay plugins (DESIGN §34.6, server/plugins/contentSets.js): its manifest and its patched
         // data files — a URL naming its content, so cached for good; 404 for a set this server does not keep
         const m = CS_FILE.exec(decoded);
         const f = m && contents && !m[2].split('/').some((s) => s === '' || s === '.' || s === '..' || s.startsWith('.')) ? contents.file(m[1], m[2]) : null;

@@ -1,4 +1,4 @@
-// server/match/host/proxy.js — the lobby's side of a match that runs in a match host (DESIGN §32.6, P1c; the
+// server/match/host/proxy.js — the lobby's side of a match that runs in a match host (DESIGN §34.6, P1c; the
 // design study's §6.4 方案 B): a MatchProxy is what server/lobby.js holds as `room.match` for a room with gameplay plugins.
 // It implements the MATCH INTERFACE of server/match/Match.js towards the lobby and forwards everything to the worker
 // (server/match/host/entry.js), which runs the real Match on the room's content set:

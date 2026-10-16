@@ -54,7 +54,7 @@ export class MatchReports {
     const f = this._fieldByBattle(msg.battleId);
     if (!f || f.done || f.heldResult || f.verifyJob || f.mode !== 'client' || f.authority !== ps.playerId) return OK;
     const bossLike = f.kind === 'boss' || f.kind === 'hidden';
-    // a room with gameplay plugins (opts.requireCs, DESIGN §32.6): the result must name the content set the battle runs
+    // a room with gameplay plugins (opts.requireCs, DESIGN §34.6): the result must name the content set the battle runs
     // on — one without `cs`, or with another, came from a page that did not run this content: refused like an
     // implausible result (the server simulates the battle)
     const v = this.requireCs && msg.cs !== this.cs

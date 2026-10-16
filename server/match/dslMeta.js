@@ -1,4 +1,4 @@
-// server/match/dslMeta.js — prep-phase minimum of a P2 DSL spec (DESIGN §32.7).
+// server/match/dslMeta.js — prep-phase minimum of a P2 DSL spec (DESIGN §34.7).
 //
 // roundStart / income / buy / sell / refresh / merge / levelUp / battleResult map onto MetaRegistry hooks.
 // Actions are funds / layers / gainItem, through the ctx helpers (addFunds / addLayers / grantItem).

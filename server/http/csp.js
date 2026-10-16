@@ -1,4 +1,4 @@
-// Site policy (DESIGN §32.11). Hash only import maps, never arbitrary inline script. Worker/UI policies are independent.
+// Site policy (DESIGN §34.11). Hash only import maps, never arbitrary inline script. Worker/UI policies are independent.
 // worker-src 'self' is the asset service worker at /sw.js. blob: stays for workers the page already creates
 // (the simulation worker). Do not add a remote worker origin. SIM_WORKER_CSP is that worker's own policy and
 // must not gain the asset worker.

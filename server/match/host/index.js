@@ -1,4 +1,4 @@
-// server/match/host/index.js — where a room's match runs (DESIGN §32.6, P1c; the design study's §6.4 方案 B):
+// server/match/host/index.js — where a room's match runs (DESIGN §34.6, P1c; the design study's §6.4 方案 B):
 //
 //   * the vanilla content set — and a room whose plugins are all cosmetic (its cs is the vanilla one) — runs its match in
 //     this process exactly as before: server/lobby.js does `new MatchClass(opts)` itself and never asks the hosts;

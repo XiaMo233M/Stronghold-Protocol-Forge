@@ -1,5 +1,5 @@
 // server/packs.js — the content-pack registry of 0.2.0 (docs/PACKS.md), kept as a compatibility export. Since the plugin
-// system (DESIGN §32, docs/PLUGINS.md) the registry is server/plugins/registry.js: it reads the same folders the same
+// system (DESIGN §34, docs/PLUGINS.md) the registry is server/plugins/registry.js: it reads the same folders the same
 // way — the single-file language packs of public/i18n/ (+ data/i18n/), the pack folders of packs/ — and plugins/ when
 // it is given one, answers /packs/index.json exactly as before and serves only what a lang manifest names.
 //

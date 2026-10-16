@@ -49,7 +49,7 @@ import { ROOT, listenAddress, bindCandidates, serveDirs, makeLogger, parseTrustP
 import { WS_MAX_PAYLOAD, createSessionStack, attachWebSocket, transportPolicy } from './http/websocket.js';
 import { DATA_SHIM_JS, createStaticHandler } from './http/static.js';
 import { createPackRegistry } from './packs.js';
-// 0.3.0（上游 DESIGN §32）的插件面：包注册表并进插件注册表（`server/packs.js` 现在只是它的别名再导出），
+// 0.3.0（上游 DESIGN §34）的插件面：包注册表并进插件注册表（`server/packs.js` 现在只是它的别名再导出），
 // 加原生内容集、视觉集、仅服务端生效的插件策略 / 房间集合、以及「一局一进程」的对局宿主与可信脚本运行器。
 import { createPluginRegistry } from './plugins/registry.js';
 import { computeVanillaContent } from './plugins/identity.js';
@@ -124,7 +124,7 @@ export async function startServer(opts = {}) {
   // `createStaticHandler` 的 `/sim/` 默认值，这里显式取同一个 —— 「核心先吃」要看到引擎真正会读的那个目录。
   const simDir = opts.simDir || path.join(ROOT, 'server', 'sim');
 
-  // 原生内容哈希 `cs`（DESIGN §32，上游 0.3.0）：**现在**把服务出去的那份 sim / shared 代码与游戏数据读一次算出
+  // 原生内容哈希 `cs`（DESIGN §34，上游 0.3.0）：**现在**把服务出去的那份 sim / shared 代码与游戏数据读一次算出
   // 摘要 —— 与对局用的数据、下面的构建标记同一条纪律（一次读、之后引用同一个值）。它进 /plugins/index.json 与
   // /cs/<cs16>/index.json，也交给 Lobby 作为「这一局的底座」。
   const content = computeVanillaContent({ simDir, sharedDir, dataDir, shim: DATA_SHIM_JS, log });
@@ -305,9 +305,9 @@ export async function startServer(opts = {}) {
     : null;
   // `/room-data/<摘要>/<文件>.json` 那一面（同一个物化缓存；没有装包时这一面根本不存在）。
   const roomDataFace = roomAssets ? (digest) => roomAssets.byDigest(digest) : null;
-  // 上游 0.3.0 的插件流水线（DESIGN §32.6）：服务端主人的策略（plugins/config.json）·「带玩法插件的内容集」
+  // 上游 0.3.0 的插件流水线（DESIGN §34.6）：服务端主人的策略（plugins/config.json）·「带玩法插件的内容集」
   // （服务在 /cs/<cs16>/…）· 房间级那一层把前两者合起来 · 以及「有玩法插件的房间真的跑在哪个宿主里」。
-  // 视觉集（DESIGN §32 P1a）与它同源：一套 cosmetic 插件合成的那个集合，服务在 /vs/ 与 /p/。
+  // 视觉集（DESIGN §34 P1a）与它同源：一套 cosmetic 插件合成的那个集合，服务在 /vs/ 与 /p/。
   const visual = createVisualSets({ registry: packs, log });
   const policy = createPluginPolicy({ pluginsDir, log });
   const contents = createContentSets({ registry: packs, vanillaData: data, log, maxSets: () => policy.get().maxSets });
@@ -411,7 +411,7 @@ export async function startServer(opts = {}) {
   const assetIndex = indexOptions ? createAssetIndex({ publicDir, log, ...indexOptions }) : null;
   const views = assetIndex ? createManifestViews({ dataDir, index: assetIndex, log }) : null;
   const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, simDir, packsDir, pluginsDir, packs, content, log, workshopJson, workshopKitFiles, workshopKitDirs, workshopPanelFiles, workshopAssets, workshopRoutes, workshopResourceFiles, resourcePolicy, workshopI18n, modsJson, roomData: roomDataFace, workshopBattleFiles, modRoutes, voiceCdn: voiceCdn.overrides, assetIndex, views, visual, contents });
-  // 插件工坊（DESIGN §32.9）：它自己的页面与 API，只对本机与本地网开放（路由层另一道门）。它只在被用到之后才
+  // 插件工坊（DESIGN §34.9）：它自己的页面与 API，只对本机与本地网开放（路由层另一道门）。它只在被用到之后才
   // 盯 plugins/（热重载），而「房主是作者或独自一人」的房间自己跟随插件的改动。`studio: false` 关掉它。
   const studio = opts.studio === false ? null : createStudio({ publicDir, pluginsDir, dataDir, registry: packs, lobby, sessions: registry, log, fetch: opts.fetch });
   // 可信插件脚本的运行器（上游 0.3.0）：它只在**绑到的地址确实允许**时才留着（见下面 bind 之后的 trustedHostAllowed）。

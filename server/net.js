@@ -34,9 +34,9 @@
 //   onHello(session, { resumed, repeat })  after `welcome` was sent
 //   welcomeInfo() → object (optional)      extra fields of every `welcome` (never one of its own keys): the lobby's
 //                                          `diyKitted` (0.2.0 自选编队 — which operators a DIY slot may field) and
-//                                          `content` ({ vanilla: <cs> }, the server's content hash — DESIGN §32)
+//                                          `content` ({ vanilla: <cs> }, the server's content hash — DESIGN §34)
 //   onMessage(session, msg) → { ok: true } | { error: ERR code, detail?: string } | undefined — or a Promise of one
-//                                          (a room whose match runs in a match host worker, DESIGN §32.6: the reply
+//                                          (a room whose match runs in a match host worker, DESIGN §34.6: the reply
 //                                          goes out when it settles; a rejection is INTERNAL)
 //   routeGame(session, msg) → same (optional): client-side combat reports `b.progress` / `b.result` (DESIGN §14) go
 //                                          straight to the running match through it; without it they reach onMessage
@@ -700,7 +700,7 @@ export class Network {
       res = { error: ERR.INTERNAL };
     }
     if (res && typeof res.then === 'function') {
-      // an answer that has to wait (DESIGN §32.6: a room whose match runs in a match host worker answers once the worker
+      // an answer that has to wait (DESIGN §34.6: a room whose match runs in a match host worker answers once the worker
       // has — server/lobby.js keeps each such room's messages in order): sent when it settles; a rejection is INTERNAL.
       // A vanilla room never answers this way, so its replies go out exactly as before
       Promise.resolve(res).then((r) => this.answer(conn, msg, rid, r), (e) => {

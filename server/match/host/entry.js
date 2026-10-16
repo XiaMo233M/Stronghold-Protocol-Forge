@@ -1,4 +1,4 @@
-// server/match/host/entry.js — a match host (DESIGN §32.6, P1c; the design study's §6.4 方案 B): one child process — or,
+// server/match/host/entry.js — a match host (DESIGN §34.6, P1c; the design study's §6.4 方案 B): one child process — or,
 // with the `worker` transport (SP_MATCH_HOST=worker), one worker thread (server/match/host/index.js) — per content set
 // with gameplay plugins, running every match of that set. Either has its own module table ("worker" below means either),
 // so the process-wide singletons of the server's code — server/data.js getData(), the content modules' gameData(), the
@@ -14,7 +14,7 @@
 //      anything else: 'boot-error' and the worker exits (the room's match ends with 'plugin-start');
 //   3. the files are parsed and installed with server/data.js setData — before anything that reads the data is imported —
 //      and `bounds`, the official-bounds snapshot the main process validated the set against (shared/plugins/officialBounds.js,
-//      DESIGN §32.5), with installOfficialBounds: the engine's plugin caps are the ones the set's pages install (none: the floor);
+//      DESIGN §34.5), with installOfficialBounds: the engine's plugin caps are the ones the set's pages install (none: the floor);
 //   4. when the set carries data.dsl, each prep spec is registered on this process's MetaRegistry
 //      (getDefaultRegistry + registerDslMeta) and remembered as a prep-only grant;
 //   5. server/match/Match.js is imported (options.matchModule instead: tests only, like the lobby's MatchClass) and
@@ -91,7 +91,7 @@ const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
  * Register every prep spec on this process's MetaRegistry and return the keys to grant.
  * A throw fails the boot: a match must not start with a dropped prep effect.
  * [ASSUMED] A content-set DSL meta spec is on for every player of that set. Authors cannot register global:
- * (DESIGN §32.7). The grant itself is applied when the match constructs its players.
+ * (DESIGN §34.7). The grant itself is applied when the match constructs its players.
  */
 async function installPrepDsl(data) {
   const table = data && data.dsl;
@@ -163,7 +163,7 @@ async function boot() {
   const mod = await import(typeof options.matchModule === 'string' && options.matchModule ? pathToFileURL(options.matchModule).href : '../Match.js');
   const Inner = mod.Match || mod.default;
   if (typeof Inner !== 'function') throw new Error('the match module exports no Match');
-  // [ASSUMED] Grant the prep EffectRefs after super(), once players exist (DESIGN §32.7).
+  // [ASSUMED] Grant the prep EffectRefs after super(), once players exist (DESIGN §34.7).
   MatchClass = class ContentMatch extends Inner {
     constructor(opts) { super(opts); grantPrepDsl(this, dslGrants); }
   };

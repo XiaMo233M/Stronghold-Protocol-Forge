@@ -39,12 +39,12 @@
 //   opts.seed        uint32                     master seed for all match randomness
 //   opts.matchNo     integer ≥ 1 (optional)     the room's match number (lobby: room.matchCount + 1); with the seed it
 //                                              makes this match's battleIds unique within the room (DESIGN §14)
-//   opts.cs          string (optional)          the content hash of the room's content set (DESIGN §32,
+//   opts.cs          string (optional)          the content hash of the room's content set (DESIGN §34,
 //                                              server/plugins/identity.js; 64 hex digits): copied into every BattleSpec
 //                                              as `cs` — the sim never reads it; absent (or malformed) ⇒ specs carry none
-//   opts.vs          string (optional)          the room's visual set of cosmetic plugins (DESIGN §32.6; 64 hex digits):
+//   opts.vs          string (optional)          the room's visual set of cosmetic plugins (DESIGN §34.6; 64 hex digits):
 //                                              copied into every BattleSpec as `vs` (replays name the art) — never read
-//   opts.requireCs   boolean (optional)         a room with gameplay plugins (DESIGN §32.6; the lobby sets it, the match
+//   opts.requireCs   boolean (optional)         a room with gameplay plugins (DESIGN §34.6; the lobby sets it, the match
 //                                              then runs in a match host, server/match/host/): a b.result whose
 //                                              `cs` is missing or not opts.cs is refused like an implausible one — the
 //                                              server simulates that battle itself

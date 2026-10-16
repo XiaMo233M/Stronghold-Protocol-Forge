@@ -1,5 +1,5 @@
 // P3b: defence in depth around SES. Node 22 permissions are NOT a malicious-code security boundary and do not
-// restrict network. Deploy with OS/container isolation (DESIGN §32.11, DEPLOY.md).
+// restrict network. Deploy with OS/container isolation (DESIGN §34.11, DEPLOY.md).
 import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
