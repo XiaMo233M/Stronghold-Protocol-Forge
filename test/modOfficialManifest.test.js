@@ -5,9 +5,9 @@ import assert from 'node:assert/strict';
 import {
   fromOfficialManifest, describePacks, OFFICIAL_DEFAULT_BUDGET, OFFICIAL_API_MAP,
 } from '../shared/sdk/descriptor.js';
-import { SDK_UPSTREAM, SDK_FORGE_EXT } from '../shared/sdk/sdkConstants.js';
+import { SDK_OFFICIAL, SDK_FORGE_LEGACY } from '../shared/sdk/sdkConstants.js';
 
-const base = { id: 'hello', name: 'Hello', version: '1.0.0', sdk: SDK_UPSTREAM };
+const base = { id: 'hello', name: 'Hello', version: '1.0.0', sdk: SDK_OFFICIAL };
 
 test('合法 module 档：apis → capabilities，权限与缺省预算（8000 次）派生正确', () => {
   const { descriptor, issues } = fromOfficialManifest({
@@ -15,7 +15,7 @@ test('合法 module 档：apis → capabilities，权限与缺省预算（8000 �
   });
   assert.deepEqual(issues, []);
   assert.equal(descriptor.origin, 'official');
-  assert.equal(descriptor.sdk, SDK_UPSTREAM);
+  assert.equal(descriptor.sdk, SDK_OFFICIAL);
   assert.equal(descriptor.profile, 'module');
   assert.deepEqual(descriptor.capabilities, ['content', 'health', 'lobby', 'routes', 'storage']);
   assert.deepEqual(descriptor.permissions, ['host.http', 'host.storage', 'lobby.observe']);
@@ -57,7 +57,7 @@ test('硬边界：官方 manifest 不许带 Forge 私有字段，Forge 档不许
   assert.equal(legacyProfile.descriptor, null);
   assert.ok(legacyProfile.issues.some((i) => i.code === 'SDK_PROFILE_NOT_FOR_ORIGIN'));
   // 官方标识不可冒充（sdk 与 origin 必须一致）
-  assert.equal(SDK_FORGE_EXT === SDK_UPSTREAM, false);
+  assert.equal(SDK_FORGE_LEGACY === SDK_OFFICIAL, false);
 });
 
 test('combat-only 能力缺 combat:true ⇒ 拒；声明 meta 还要给 metaRegisters', () => {
@@ -87,7 +87,7 @@ test('describePacks 走 official 适配器；官方包与 Forge 包分域', () =
   assert.equal(official.descriptors[0].origin, 'official');
   // Forge 档描述符永远不会带 sp:sdk@1
   const forge = describePacks([{ id: 'f', hash: 'a'.repeat(64) }], { origin: 'forge' });
-  assert.equal(forge.descriptors[0].sdk, SDK_FORGE_EXT);
+  assert.equal(forge.descriptors[0].sdk, SDK_FORGE_LEGACY);
   // api 表是闭集，键都是能力名
   assert.ok(Object.values(OFFICIAL_API_MAP).every((v) => typeof v === 'string' && v.length));
 });

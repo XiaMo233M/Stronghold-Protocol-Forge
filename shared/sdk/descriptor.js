@@ -10,7 +10,7 @@
 // 它不做 IO、不装载代码、不判 consent/pin（那是 `server/mod-manager/` 的事）。
 
 import {
-  CAPABILITIES, COMBAT_CAPABILITIES, SDK_ERROR_CODES, SDK_FORGE_EXT, SDK_UPSTREAM, sdkError,
+  CAPABILITIES, COMBAT_CAPABILITIES, SDK_ERROR_CODES, SDK_FORGE_LEGACY, SDK_OFFICIAL, sdkError,
   isOrigin, profileAllowedFor, sdkForOrigin, defaultProfileFor,
 } from './sdkConstants.js';
 
@@ -116,7 +116,7 @@ export function fromForgeManifest(pack) {
     budget: DEFAULT_BUDGET,
     contentDigest: str(pack.hash) || null,
     activationPolicy: Object.freeze({ requiresConsent: profile === 'host', pinnable: true }),
-    compatibility: Object.freeze({ origin: 'forge', sdk: SDK_FORGE_EXT }),
+    compatibility: Object.freeze({ origin: 'forge', sdk: SDK_FORGE_LEGACY }),
   });
   return { descriptor, issues };
 }
@@ -179,7 +179,7 @@ export function fromOfficialManifest(raw) {
     }
   }
   if (!str(raw.id)) issues.push(sdkError(SDK_ERROR_CODES.BAD_DESCRIPTOR, 'official manifest "id" must be a non-empty string'));
-  if (raw.sdk !== SDK_UPSTREAM) issues.push(sdkError(SDK_ERROR_CODES.BAD_ORIGIN, `official manifest "sdk" must be "${SDK_UPSTREAM}" (got ${JSON.stringify(raw.sdk)})`));
+  if (raw.sdk !== SDK_OFFICIAL) issues.push(sdkError(SDK_ERROR_CODES.BAD_ORIGIN, `official manifest "sdk" must be "${SDK_OFFICIAL}" (got ${JSON.stringify(raw.sdk)})`));
   const profile = raw.profile === undefined ? 'module' : raw.profile;
   if (!profileAllowedFor('official', profile)) {
     issues.push(sdkError(SDK_ERROR_CODES.PROFILE_NOT_FOR_ORIGIN, `profile ${JSON.stringify(raw.profile)} is not allowed for an official manifest (module / sandbox)`));
@@ -267,7 +267,7 @@ export function fromOfficialManifest(raw) {
     id: raw.id,
     version: str(raw.version) || null,
     origin: 'official',
-    sdk: SDK_UPSTREAM,
+    sdk: SDK_OFFICIAL,
     profile,
     layer,
     combat,
@@ -292,7 +292,7 @@ export function fromOfficialManifest(raw) {
     contentDigest: typeof raw.contentDigest === 'string' ? raw.contentDigest : null,
     // 非隔离档（module）跑在宿主进程里 ⇒ 默认要求**逐包同意**（文档里的「房间逐玩家同意 / 服主 SHA-256 pin」）。
     activationPolicy: Object.freeze({ requiresConsent: profile === 'module', pinnable: true }),
-    compatibility: Object.freeze({ origin: 'official', sdk: SDK_UPSTREAM }),
+    compatibility: Object.freeze({ origin: 'official', sdk: SDK_OFFICIAL }),
   });
   return { descriptor, issues };
 }

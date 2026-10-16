@@ -8,14 +8,14 @@ import { tmpdir } from 'node:os';
 import { loadOfficialPlugins, OFFICIAL_PLUGIN_MANIFEST } from '../server/mod-manager/officialLoader.js';
 import { loadOfficialModules, PluginRefused, HOST_CAPABILITIES } from '../server/mod-manager/officialHost.js';
 import { mountServerModules } from '../server/modModules.js';
-import { SDK_UPSTREAM } from '../shared/sdk/sdkConstants.js';
+import { SDK_OFFICIAL } from '../shared/sdk/sdkConstants.js';
 
 const quiet = { info() {}, warn() {}, error() {}, debug() {} };
 
 function makePlugin(root, name, { apis = [], entry = null, entryBody = '', combat = false } = {}) {
   const dir = path.join(root, name);
   fs.mkdirSync(dir, { recursive: true });
-  const manifest = { id: name, name, version: '1.0.0', sdk: SDK_UPSTREAM, apis, ...(combat ? { combat: true } : {}) };
+  const manifest = { id: name, name, version: '1.0.0', sdk: SDK_OFFICIAL, apis, ...(combat ? { combat: true } : {}) };
   if (entry) manifest.entry = entry;
   fs.writeFileSync(path.join(dir, OFFICIAL_PLUGIN_MANIFEST), JSON.stringify(manifest));
   if (entry && entryBody) fs.writeFileSync(path.join(dir, entry), entryBody);

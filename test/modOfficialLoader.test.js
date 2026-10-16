@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { loadOfficialPlugins, listPluginFiles, OFFICIAL_PLUGIN_MANIFEST } from '../server/mod-manager/officialLoader.js';
 import { buildActivationPlan } from '../server/mod-manager/plan.js';
 import { modDigest, modManifestDigest } from '../shared/sdk/digest.js';
-import { SDK_UPSTREAM } from '../shared/sdk/sdkConstants.js';
+import { SDK_OFFICIAL } from '../shared/sdk/sdkConstants.js';
 
 const quiet = { info() {}, warn() {}, error() {}, debug() {} };
 
@@ -30,8 +30,8 @@ function makeRoot(plugins) {
 
 test('装载两个合法插件：描述符 + 64 位内容摘要 + 文件清单', () => {
   const root = makeRoot([
-    { name: 'hello', manifest: { id: 'hello', name: 'Hello', version: '1.0.0', sdk: SDK_UPSTREAM, apis: ['content', 'health'] }, files: { 'data/chess.json': '{"a":1}' } },
-    { name: 'world', manifest: { id: 'world', name: 'World', version: '2.0.0', sdk: SDK_UPSTREAM, profile: 'sandbox', entry: 'plugin.mjs' }, files: { 'plugin.mjs': 'export default {};' } },
+    { name: 'hello', manifest: { id: 'hello', name: 'Hello', version: '1.0.0', sdk: SDK_OFFICIAL, apis: ['content', 'health'] }, files: { 'data/chess.json': '{"a":1}' } },
+    { name: 'world', manifest: { id: 'world', name: 'World', version: '2.0.0', sdk: SDK_OFFICIAL, profile: 'sandbox', entry: 'plugin.mjs' }, files: { 'plugin.mjs': 'export default {};' } },
   ]);
   try {
     const { present, plugins, errors } = loadOfficialPlugins(root, { log: quiet });
@@ -40,7 +40,7 @@ test('装载两个合法插件：描述符 + 64 位内容摘要 + 文件清单',
     assert.deepEqual(plugins.map((p) => p.id), ['hello', 'world']);
 
     const hello = plugins[0];
-    assert.equal(hello.descriptor.sdk, SDK_UPSTREAM);
+    assert.equal(hello.descriptor.sdk, SDK_OFFICIAL);
     assert.equal(hello.descriptor.profile, 'module');
     assert.deepEqual(hello.descriptor.capabilities, ['content', 'health']);
     assert.match(hello.hash, /^[0-9a-f]{64}$/);
@@ -53,8 +53,8 @@ test('装载两个合法插件：描述符 + 64 位内容摘要 + 文件清单',
 
 test('官方插件进同一份 ActivationPlan：两个都激活，集合摘要与独立重算一致', () => {
   const root = makeRoot([
-    { name: 'hello', manifest: { id: 'hello', name: 'Hello', version: '1.0.0', sdk: SDK_UPSTREAM, apis: ['content'] }, files: {} },
-    { name: 'world', manifest: { id: 'world', name: 'World', version: '1.0.0', sdk: SDK_UPSTREAM, apis: ['health'] }, files: {} },
+    { name: 'hello', manifest: { id: 'hello', name: 'Hello', version: '1.0.0', sdk: SDK_OFFICIAL, apis: ['content'] }, files: {} },
+    { name: 'world', manifest: { id: 'world', name: 'World', version: '1.0.0', sdk: SDK_OFFICIAL, apis: ['health'] }, files: {} },
   ]);
   try {
     const { plugins } = loadOfficialPlugins(root, { log: quiet });
@@ -71,9 +71,9 @@ test('官方插件进同一份 ActivationPlan：两个都激活，集合摘要�
 
 test('一条用不了的声明：具名拒整包，且**不进**计划', () => {
   const root = makeRoot([
-    { name: 'good', manifest: { id: 'good', name: 'G', version: '1.0.0', sdk: SDK_UPSTREAM, apis: ['health'] }, files: {} },
-    { name: 'forgey', manifest: { id: 'forgey', name: 'F', version: '1.0.0', sdk: SDK_UPSTREAM, server: { modules: [] } }, files: {} },
-    { name: 'mismatch', manifest: { id: 'not-the-dirname', name: 'M', version: '1.0.0', sdk: SDK_UPSTREAM }, files: {} },
+    { name: 'good', manifest: { id: 'good', name: 'G', version: '1.0.0', sdk: SDK_OFFICIAL, apis: ['health'] }, files: {} },
+    { name: 'forgey', manifest: { id: 'forgey', name: 'F', version: '1.0.0', sdk: SDK_OFFICIAL, server: { modules: [] } }, files: {} },
+    { name: 'mismatch', manifest: { id: 'not-the-dirname', name: 'M', version: '1.0.0', sdk: SDK_OFFICIAL }, files: {} },
     { name: 'broken' }, // 没有 plugin.json
   ]);
   try {
