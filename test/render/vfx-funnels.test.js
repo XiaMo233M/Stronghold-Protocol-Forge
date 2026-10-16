@@ -1,8 +1,8 @@
-// test/render/vfx-funnels.test.js — the 驭械术士's floating units (浮游单元, DESIGN §33.18) through render/vfx/funnels.js,
+// test/render/vfx-funnels.test.js — the 驭械术士's floating units (浮游单元, DESIGN §35.18) through render/vfx/funnels.js,
 // funnelfx.js and the wiring on a synthetic version-3 index shaped like the client's (round 46): the plan (mode
 // attacks' units with their FunnelEffectEmitter loops and hit groups, a general funnel shot with its cast and its
 // passive look, a skill's own shot, the dispersed units of a Whitw2Skill3FunnelRangedAttack); home loops that follow
-// the Special point where the model draws its bone (mounts.js, DESIGN §32.14.36); an attached attack (the units leave, each lands with its damage after the body hit,
+// the Special point where the model draws its bone (mounts.js, DESIGN §34.14.36); an attached attack (the units leave, each lands with its damage after the body hit,
 // then comes back); several targets of one attack; a funnel shot from its mount; remote units on the kit's 'drone' fx
 // (the hit groups in turn, the overload, the return, the skill's end); the dispersed units ('drones', 'droneLock',
 // latch, hits, a lost target, the skill's end, the release without its fx); the kit fx the units stand for (the
@@ -170,7 +170,7 @@ const RECS = {
 
 /**
  * A view's drawn model as render/units.js UnitView.boneOffset reads it (render/vfx/mounts.js follows a BoneFollower
- * point there, DESIGN §32.14.36): `bones` name → { x (tiles right of the feet, before the facing), up (tiles up the
+ * point there, DESIGN §34.14.36): `bones` name → { x (tiles right of the feet, before the facing), up (tiles up the
  * model), angle }, drawn with sign `flip`.
  */
 function boneView(bones, flip = 1) {
@@ -492,7 +492,7 @@ describe('the floating units in a battle (funnelfx.js)', () => {
     const v = view(1, 'char_902_uav', { skill: 1 });
     const skin = w.idx.skins.char_902_uav;
     const at = mountPoint(skin, 6, w.pose(v)).map((x) => +x.toFixed(3));
-    // the summary's FollowMountPoint (SPECIAL_1): on its point from the first frame, as a loaded one (DESIGN §32.14.36)
+    // the summary's FollowMountPoint (SPECIAL_1): on its point from the first frame, as a loaded one (DESIGN §34.14.36)
     const h = w.playOn('late_tok', v, { follow: true, loop: true });
     assert.ok(h);
     assert.deepEqual(h.place.pos.map((x) => +x.toFixed(3)), at, 'its FollowMountPoint, not the HitPoint');
@@ -510,7 +510,7 @@ describe('the floating units in a battle (funnelfx.js)', () => {
   });
 });
 
-describe('a floating unit on its bone (mounts.js, DESIGN §32.14.36)', () => {
+describe('a floating unit on its bone (mounts.js, DESIGN §34.14.36)', () => {
   test('a home loop follows its Special point where the model draws the bone — up the plane the camera faces, mirrored for a unit facing left', async () => {
     const { w, view, frame, handles } = await setup();
     const C = Math.cos(SKELETON_TILT * Math.PI / 180), S = Math.sin(SKELETON_TILT * Math.PI / 180);

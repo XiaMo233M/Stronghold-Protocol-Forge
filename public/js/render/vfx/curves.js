@@ -1,4 +1,4 @@
-// render/vfx/curves.js — Unity value encodings of the official battle effects (DESIGN §33.3): AnimationCurve,
+// render/vfx/curves.js — Unity value encodings of the official battle effects (DESIGN §35.3): AnimationCurve,
 // MinMaxCurve, Gradient and MinMaxGradient, evaluated the way Unity does. Pure math (Node tests use it as is).
 //
 //   evalCurve(keys, t)               an AnimationCurve: cubic Hermite between keys (tangents outSlope·Δ / inSlope·Δ),

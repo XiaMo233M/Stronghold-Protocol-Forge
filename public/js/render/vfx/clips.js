@@ -1,4 +1,4 @@
-// render/vfx/clips.js — Animator / legacy Animation clips of the official battle effects (DESIGN §33.10): the decoded
+// render/vfx/clips.js — Animator / legacy Animation clips of the official battle effects (DESIGN §35.10): the decoded
 // keyframes of a clip sampled at the clip time and applied to the effect instance's nodes, renderers and systems.
 //
 //   const c = compileClip(clip)               the curves grouped by target (shared per descriptor)

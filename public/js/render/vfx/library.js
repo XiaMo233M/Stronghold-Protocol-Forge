@@ -1,4 +1,4 @@
-// render/vfx/library.js — the official effects' files (DESIGN §33.1): the file list, index.json, textures.json, the
+// render/vfx/library.js — the official effects' files (DESIGN §35.1): the file list, index.json, textures.json, the
 // prefab descriptors (compiled once, render/vfx/effect.js), meshes and textures, loaded on demand and cached.
 //
 //   const lib = new FxLibrary({ assets })        assets: the asset store (public/js/assets.js) — its local-art manifest
@@ -11,7 +11,7 @@
 //   await lib.preload(keys, { half })            descriptors + their meshes and textures (a battle's set)
 //   lib.mesh(key), lib.texture(key, half)        loaded data or null (and a load is started)
 //
-// Keys are lower case (§33.1). Built-in Unity meshes ('builtin:Quad', 'builtin:Plane', 'builtin:Cube',
+// Keys are lower case (§35.1). Built-in Unity meshes ('builtin:Quad', 'builtin:Plane', 'builtin:Cube',
 // 'builtin:Sphere') are generated here.
 
 import { compileEffect } from './effect.js';
@@ -64,7 +64,7 @@ export function builtinMesh(name) {
 
 /**
  * A loaded mesh made ready for the runtime: vertex colours as 0…1 floats (the extracted files write them as bytes,
- * 0…255 — DESIGN §33.9 says 0…1; both are accepted).
+ * 0…255 — DESIGN §35.9 says 0…1; both are accepted).
  */
 export function normalizeMesh(m) {
   if (!m || !Array.isArray(m.positions)) return null;

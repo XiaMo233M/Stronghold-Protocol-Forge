@@ -1,4 +1,4 @@
-// test/render/vfx-skill-casts.test.js — round 46's skill-plan fixes (history §32.14.43, DESIGN §33.16) on a synthetic
+// test/render/vfx-skill-casts.test.js — round 46's skill-plan fixes (history §34.14.43, DESIGN §35.16) on a synthetic
 // index and a fake effects layer: a buff template's facing variants are one effect picked by the owner's facing (仇白 S2,
 // R7); a lasting skill's own cast at its start is no normal attack (缄默德克萨斯 S2's appear strike, R8); the kit's hits of
 // a skill without an attack event, the final attack at the skill's end, an instant attack of another kind, a

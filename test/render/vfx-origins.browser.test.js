@@ -1,4 +1,4 @@
-// test/render/vfx-origins.browser.test.js — where official shots and weapon effects leave a unit (DESIGN §32.14.36), in a
+// test/render/vfx-origins.browser.test.js — where official shots and weapon effects leave a unit (DESIGN §34.14.36), in a
 // real battle in headless Chrome (public/dev/battle-perf.html: a custom lineup against hard-normal-r13's wave, 官方特效
 // 完整): 灰毫's shell leaves her raised barrel (its bone at the strike frame — the skin's static Muzzle lay below her
 // feet) and lobs about one tile (ParacurveMovement — it rose six); 安洁莉娜's S2 orbs leave her staff held over her head

@@ -1,5 +1,5 @@
 // test/render/vfx-procedural.test.js — when the official layer stands for the field view's procedural looks (the 0.3.0
-// official-effects audit R10 / R11, history §32.14.44, DESIGN §33.13): a skill whose official plan has no cast rows shows
+// official-effects audit R10 / R11, history §34.14.44, DESIGN §35.13): a skill whose official plan has no cast rows shows
 // no procedural burst; a kit fx is skipped while a skill that covers it lasts (FX_COVER), bound to the official prefab
 // the client plays there (FX_BINDINGS `during`, `hold: 'fx'`, `keys`, owner 'skill'), or repeated by a summon's official
 // birth effect — and every procedural look stays with 官方特效 off or the effects not installed.

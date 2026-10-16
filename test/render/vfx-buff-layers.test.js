@@ -1,5 +1,5 @@
 // test/render/vfx-buff-layers.test.js — the buff-state effects of the 0.3.0 official-effects audit (round 46, R2 / R6 /
-// R17; DESIGN §33.11 / §33.16): PauseAnotherEffect (effect.js def.pauses, system.js pausing an owner's effects), the
+// R17; DESIGN §35.11 / §35.16): PauseAnotherEffect (effect.js def.pauses, system.js pausing an owner's effects), the
 // per-layer loops of a talent shown by the sim's hit-negating layers (b.snap `layers`, talentfx.js), the `[eff_cond]`
 // state loops of a charge skill (skills.js COND_BUFFS, b.snap `charges`, skillfx.js), 泡泡 S2's counter bound to its
 // official hit on the attacker (FX_BINDINGS), and the two display-only snapshot readouts (sim snapshot.js, interp.js).

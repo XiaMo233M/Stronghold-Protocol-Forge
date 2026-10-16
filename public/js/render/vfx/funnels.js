@@ -1,4 +1,4 @@
-// render/vfx/funnels.js — the 驭械术士's floating units (浮游单元, DESIGN §33.18) of a battle unit, read from index.json:
+// render/vfx/funnels.js — the 驭械术士's floating units (浮游单元, DESIGN §35.18) of a battle unit, read from index.json:
 // what floats beside the operator in which attack mode and where, how each unit attacks (a shot flown from its mount, or
 // AttachToTarget at the target with its hit groups), what plays as it leaves and comes back, and 荒芜拉普兰德 S3's dispersed
 // wolves. Pure logic over index.json: no GL, no DOM, Node-importable; render/vfx/funnelfx.js plays the plan.

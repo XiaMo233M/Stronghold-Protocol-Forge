@@ -1,4 +1,4 @@
-// test/render/vfx-effect.test.js — official effect instances and their surroundings (render/vfx, DESIGN §33.4–§33.12):
+// test/render/vfx-effect.test.js — official effect instances and their surroundings (render/vfx, DESIGN §35.4–§35.12):
 // the lifecycle (delay to play, FxDelay, clips on m_IsActive, loops and stop, linger, max lifetime), direction helpers
 // (`_rotationZ` replaced, `_rotationY` flips, mirrors), draw items, the material compiler (families, blend states,
 // fallbacks, the light tier), the library (file list, Phase 1a fallback, built-in meshes, byte mesh colours), the tier
@@ -435,7 +435,7 @@ describe('wiring', () => {
   });
 });
 
-test('a −30° Graphic tilt and the +30° effect tilt cancel (the pre-tilted content of §33.2)', () => {
+test('a −30° Graphic tilt and the +30° effect tilt cancel (the pre-tilted content of §35.2)', () => {
   const v = quatRotate([0.258819, 0, 0, 0.965926], quatRotate([-0.258819, 0, 0, 0.965926], [0, 1, 0]));
   assert.ok(Math.abs(v[1] - 1) < 1e-5);
 });

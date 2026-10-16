@@ -1,4 +1,4 @@
-// test/render/vfx-curves.test.js — the official effects' value encodings (render/vfx/curves.js, DESIGN §33.3):
+// test/render/vfx-curves.test.js — the official effects' value encodings (render/vfx/curves.js, DESIGN §35.3):
 // AnimationCurve (Hermite, stepped, weighted, clamping), the baked lookups, MinMaxCurve modes, Gradient (blend /
 // fixed) and MinMaxGradient modes.
 

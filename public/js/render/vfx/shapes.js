@@ -1,4 +1,4 @@
-// render/vfx/shapes.js — the ShapeModule of a Unity ParticleSystem (DESIGN §33.5): where a particle is born and the
+// render/vfx/shapes.js — the ShapeModule of a Unity ParticleSystem (DESIGN §35.5): where a particle is born and the
 // direction it starts along, in the system's local space. Unity's geometry: the cone and the hemisphere open along
 // the shape's local +Z, the circle / donut / rectangle lie in its local XY plane, the edge runs along local X, the box
 // is the unit cube scaled by the shape's own scale; the result goes through the shape's own transform (m_Position,

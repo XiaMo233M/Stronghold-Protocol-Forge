@@ -1,4 +1,4 @@
-// render/vfx/system.js — the official battle effects layer (设置「官方特效」; client docs: the fx layer, DESIGN §33):
+// render/vfx/system.js — the official battle effects layer (设置「官方特效」; client docs: the fx layer, DESIGN §35):
 // owns the effect instances, their library (render/vfx/library.js) and the WebGL2 renderer (render/vfx/gl.js), and
 // draws them as two Pixi display objects of the field view — a ground pass under the units (flat ranges / decals) and
 // an over pass above them — with the shared battle camera (render/projection.js; the prefabs are authored for it).
@@ -230,7 +230,7 @@ export class OfficialFx {
   }
 
   /**
-   * PauseAnotherEffect (effect.js `def.pauses`, DESIGN §33.11): an effect playing on a unit (`owner`, FxWiring.playOn)
+   * PauseAnotherEffect (effect.js `def.pauses`, DESIGN §35.11): an effect playing on a unit (`owner`, FxWiring.playOn)
    * pauses that unit's effects of the keys it names once its `_preDelay` has passed, until it stops — the client's way to
    * show one variant of a stack (泥岩's and 鼠王's shield layers: the top layer's effect pauses the lower ones) or to put
    * a skill's range in place of a talent's aura (塑心 S3, 调香师 S2). A paused effect keeps running but is not drawn

@@ -1,5 +1,5 @@
 """The official battle effects (特效) of 卫戍协议：盟约 from a locally installed client
-(DESIGN §33, docs/design/vfx-format.md: the format every file below follows).
+(DESIGN §35, docs/design/vfx-format.md: the format every file below follows).
 
 Run through extract.py (needs the client and .venv-extract; nothing is extracted on a plain `extract.py` run):
   .venv/bin/python tools/local-extract/extract.py --only fx                 the Phase 1a sample (FX_SAMPLE_*)
@@ -50,11 +50,11 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 FX_SUB = 'fx'
-FORMAT_VERSION = 1      # the descriptors and textures.json (§33.4–§33.8)
-MESH_VERSION = 2        # the meshes (§33.9): 2 since Phase 1c — vertex colours 0…1 (version 1 wrote the bytes, 0…255)
-INDEX_VERSION = 3       # index.json (§33.12): 2 since Phase 1c, 3 since Phase 1d (2026-10-15) — vfx-format.md's changelog
+FORMAT_VERSION = 1      # the descriptors and textures.json (§35.4–§35.8)
+MESH_VERSION = 2        # the meshes (§35.9): 2 since Phase 1c — vertex colours 0…1 (version 1 wrote the bytes, 0…255)
+INDEX_VERSION = 3       # index.json (§35.12): 2 since Phase 1c, 3 since Phase 1d (2026-10-15) — vfx-format.md's changelog
 FX_MANIFEST = 'local-fx.json'                           # data/local-fx.json: every fx file, served as a hashed view
-FX_GROUPS = ('fx', 'fx/prefabs', 'fx/tex', 'fx/mesh')   # its groups (§33.1; none of them in data/local-assets.json)
+FX_GROUPS = ('fx', 'fx/prefabs', 'fx/tex', 'fx/mesh')   # its groups (§35.1; none of them in data/local-assets.json)
 
 # effect prefabs: battle/prefabs/effects/<prefix>.ab holds the keys `<prefix>_…`; the enemy / token / map effects are
 # grouped in pkgrps packs (looked up through the container index)
@@ -84,7 +84,7 @@ FX_SAMPLE_KEYS = [
 ]
 FX_SAMPLE_UNITS = ['char_498_inside', 'char_253_greyy', 'char_108_silent', 'char_134_ifrit', 'char_180_amgoat',
                    'enemy_1041_lazerd', 'enemy_1041_lazerd_2', 'enemy_1161_tidmag', 'enemy_1161_tidmag_2']
-# one prefab per rare feature (DESIGN §33.13): mesh shape, ribbon / particle trails, rate over
+# one prefab per rare feature (DESIGN §35.13): mesh shape, ribbon / particle trails, rate over
 # distance, orbital velocity, velocity alignment, horizontal billboard, custom-data shader, clips on GameObject.active /
 # ParticleSystem / LineRenderer, LineRenderer, birth / death sub-emitters, prewarm
 FX_COVERAGE_KEYS = [
@@ -172,7 +172,7 @@ SKIN_FIELDS = ('m_Mesh', 'm_Bones', 'm_RootBone', 'm_Quality', 'm_UpdateWhenOffs
 SKIP_FIELDS = {'m_GameObject', 'm_Script', 'm_Name', 'm_Enabled'}
 MOUNT_NAME = re.compile(r'(Point|Muzzle|Anchor|^Special)', re.I)
 
-# ---- Torappu enums of the skills' effect fields (il2cpp metadata, DESIGN §33.12) ------------------------------------
+# ---- Torappu enums of the skills' effect fields (il2cpp metadata, DESIGN §35.12) ------------------------------------
 # Torappu.Battle.AbilityStandard/Event: an UberEffectEmitter row's _startEvent / _endEvent, the play / stop events of the
 # channeling and range emitters
 ABILITY_EVENTS = ('ON_ATTACHED', 'ON_DETACHED', 'ON_CAST_START', 'ON_CAST_END', 'ON_SPELL_ON', 'ON_SPELL_END',
@@ -207,7 +207,7 @@ BUFF_EVENTS = (
     'ON_PROJECTILE_HIT_TARGET')
 BUFF_TEMPLATES = 'config/buff_template_holder.ab'   # Torappu BuffTemplateHolder: templateKey → effectKey + action graphs
 
-# A skill's effect roles (index.json skills[id].roles; §33.12): start (once, when the skill — or its one cast — starts),
+# A skill's effect roles (index.json skills[id].roles; §35.12): start (once, when the skill — or its one cast — starts),
 # loop (while it, or the buff carrying the effect, lasts), range (its area), cast (each ability use of a buff's owner),
 # hit (each target hit), end (when it ends), ready (while it is ready to cast), trigger (a buff's periodic or reactive
 # event), other (an effect the extractor cannot place in time)
@@ -256,7 +256,7 @@ BUFF_EVENT_ROLES = {'ON_BUFF_START': 'start', 'ON_BUFF_ENABLE': 'start', 'ON_BUF
 # fields that hold animation / audio names, never effect keys (a name may equal a key by chance)
 NOT_EFFECT_FIELDS = re.compile(r'anim|audio|signal', re.I)
 
-# ---- the units' abilities and emitters (index.json units[id]: modes' attack / combat, charge, enemy skills; §33.12) ----
+# ---- the units' abilities and emitters (index.json units[id]: modes' attack / combat, charge, enemy skills; §35.12) ----
 # the base UberEffectEmitter's own fields: a subclass's other fields are its settings (attack.emitters[]); the three
 # timing fields are not exported (as before Phase 1c)
 EMITTER_BASE_FIELDS = frozenset(EMIT_LISTS) | {'_convertCastEndToAttachFinish', '_recalculatePlaybackSpeed', '_preDelayFactor'}
@@ -285,7 +285,7 @@ MOUNT_POINT_TYPES = ('FOOT', 'HIT', 'MUZZLE', 'HEAD', 'UI', 'SPECIAL_0', 'SPECIA
 SKILL_BASE_FIELDS = ('_canSilenced', '_attachSignalIds')
 ENEMY_SKILL_CLASS = re.compile(r'EnemySkill$')
 
-# ---- Phase 1d (index.json v3, DESIGN §33.17): talents, common / general abilities, abilities' projectiles, buff lives -
+# ---- Phase 1d (index.json v3, DESIGN §35.17): talents, common / general abilities, abilities' projectiles, buff lives -
 # Torappu.LifeType (il2cpp metadata): a BuffData's lifeTimeType / triggerLifeType — the buff templates' Odin data spell
 # the same fields out by name ("lifeTimeType": "INFINITY"), the prefabs write the numbers
 LIFE_TYPES = ('IMMEDIATELY', 'LIMITED', 'INFINITY', 'CUSTOM')
@@ -947,7 +947,7 @@ class Exporter:
             doc['colors'] = [f6(x) for x in norm_channel(flat(h.m_Colors, 4), color_format(m, h))]
         doc['submeshes'] = [[i for tri in sub for i in tri] for sub in h.get_triangles()]
         bone_i, bone_w = skin_rows(h.m_BoneIndices, h.m_BoneWeights, h.m_VertexCount)
-        if bone_i:                                            # four influences per vertex (skin_rows; §33.9)
+        if bone_i:                                            # four influences per vertex (skin_rows; §35.9)
             doc['boneWeights'] = bone_w
             doc['boneIndices'] = bone_i
             doc['bindPoses'] = [[f6(bp.get(f'e{r}{c}', 0)) for r in range(4) for c in range(4)] for bp in (self.env.tt(o).get('m_BindPose') or [])]
@@ -1597,7 +1597,7 @@ def norm_channel(values, fmt):
 
 
 def skin_rows(indices, weights, count):
-    """A skinned mesh's bone influences as §33.9 writes them: four (index, weight) pairs per vertex, flat —
+    """A skinned mesh's bone influences as §35.9 writes them: four (index, weight) pairs per vertex, flat —
     (boneIndices, boneWeights), or (None, None) without bone indices. UnityPy hands the vertex channels over as they
     are stored: a Unity 2019+ mesh keeps 1–4 influences per vertex (the BlendIndices / BlendWeight channels' dimension —
     2 for 铃兰 S3's fox tails, 琴柳's flags, 森蚺 S2) and drops the BlendWeight channel when every vertex follows a
@@ -1716,7 +1716,7 @@ def ability_when(ability_cls, classes):
 
 def prefab_anchor(nodes):
     """(spawn, follow) of an exported descriptor's nodes: the first enabled ParticleEffect / EmptyEffect's
-    `_spawnLocation` (SpawnLocation, §33.11) and the first enabled FollowMountPoint's `_mountPointType` (MountPointType),
+    `_spawnLocation` (SpawnLocation, §35.11) and the first enabled FollowMountPoint's `_mountPointType` (MountPointType),
     None when absent."""
     spawn = follow = None
     for n in nodes:
@@ -1825,7 +1825,7 @@ def buffs_in(v):
 
 
 def buff_life(b):
-    """The life of a BuffData (§33.17): {type (LIFE_TYPES: IMMEDIATELY — applied and gone at once, LIMITED — for a time,
+    """The life of a BuffData (§35.17): {type (LIFE_TYPES: IMMEDIATELY — applied and gone at once, LIMITED — for a time,
     INFINITY — until removed: its ability ends, the target leaves an aura, …; CUSTOM), time? (`lifeTime` s, when set),
     key? (`durationKey`, a LIMITED / CUSTOM buff's: the blackboard key its time is read from — our data records'
     blackboards carry the values), db? (`loadFromDB`: the client's buff table may override these), tick?
@@ -2074,7 +2074,7 @@ def roles_of(uses):
 
 
 def parse_unit(env, rel, name, kind):
-    """A unit prefab (charpack / enemy / token) → its index.json unit (§33.12) before the keys are checked: the modes
+    """A unit prefab (charpack / enemy / token) → its index.json unit (§35.12) before the keys are checked: the modes
     (attack, combat: ability_entry), start / dead effects, the Graphic transform, the chargeable groups (`charge`), the
     Spine-event effects (`spineEffects`, v3), and for crawl_units `_enemySkills` (its EnemySkill nodes: name, GameObject,
     path, mode name), `_strings` (every string of its behaviours), `_paths` (GameObject → path), `_roots` (unit_roots:
@@ -2122,7 +2122,7 @@ def parse_unit(env, rel, name, kind):
         """[(class, rows, settings)] of the emitters on a GameObject (emitter_export)."""
         return [(cls,) + emitter_export(cls, d) for cls, o, d in mbs_of.get(gkey(go), []) if is_emitter(cls, d)]
 
-    # the chargeable groups (§33.12 Charge) first: the modes' attacks name their abilities (attack.charge)
+    # the chargeable groups (§35.12 Charge) first: the modes' attacks name their abilities (attack.charge)
     charge, charge_at = [], {}
     for go, p in gos:
         for cls, o, d in mbs_of.get(gkey(go), []):
@@ -2295,7 +2295,7 @@ def parse_unit(env, rel, name, kind):
 
 
 def unit_roots(env, root, gos, mbs_of, gkey, go_of, deref, head, general_of, claimed, mode_of):
-    """The roots of a unit's v3 entries (§33.17), for crawl_units' node_entry walks: [{kind ('talent' | 'trait' |
+    """The roots of a unit's v3 entries (§35.17), for crawl_units' node_entry walks: [{kind ('talent' | 'trait' |
     'common' | 'general'), go, path, name (the GameObject's name: a talent's prefab key, an ability's name), alias (the
     ability's namedAsAlias), classes, talent (its Talent class), ability (main_ability), mode (the mode holding the
     node) or modes (a general ability: the modes listing it), fields (the Talent's and the toggle checkers' typetrees),
@@ -2719,7 +2719,7 @@ def crawl_units(ab_root, cabs, unit_ids, gd, eff, enemy_idx, token_idx, log):
             out[key] = e0
         return out
 
-    # v3 (§33.17): the buff template actions that cast / stop an ability, by the ability's name
+    # v3 (§35.17): the buff template actions that cast / stop an ability, by the ability's name
     by_ability = {}
     for tkey, t in templates.items():
         for ev, typ, name, kind in t.get('abilities') or []:
@@ -2742,7 +2742,7 @@ def crawl_units(ab_root, cabs, unit_ids, gd, eff, enemy_idx, token_idx, log):
                 if k not in SKIP_FIELDS and not k.startswith('m_') and isinstance(v, (int, float, str)) and not isinstance(v, bool)}
 
     def own_entries(uid, u, env, roots, paths, own_tpls, own_named):
-        """units[uid].talents and .abilities (v3, §33.17) from parse_unit's roots: one node_entry per root (its subtree
+        """units[uid].talents and .abilities (v3, §35.17) from parse_unit's roots: one node_entry per root (its subtree
         without the other roots and the claimed nodes); the triggers are the actions of the buff templates related to
         the unit (reached from its prefab's and its skills' buffs, or named after its code) that name the root's
         GameObject or alias."""
@@ -3067,7 +3067,7 @@ def game_data(root):
 
 
 def talent_keys(ids, char_table, equip_table, uniequip_table):
-    """Our data's talent ids → the units' talent prefab keys (v3, §33.17; operators and tokens): {id: {base: {talent
+    """Our data's talent ids → the units' talent prefab keys (v3, §35.17; operators and tokens): {id: {base: {talent
     index: [prefab keys]} (data/chess.json / data/tokens.json `talents[].index` — the official character_table's
     talents, whose candidates name their Talents/<prefabKey> node), trait?: [prefab keys] (the trait's: always on),
     modules?: {uniEquipId: {talent index: [prefab keys]}} (a module's talents — our data's `fromModule` talents, index

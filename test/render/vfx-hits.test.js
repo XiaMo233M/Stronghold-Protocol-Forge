@@ -1,5 +1,5 @@
 // test/render/vfx-hits.test.js — the official effects' hit paths fixed after the 0.3.0 effects audit (round 46, DESIGN
-// §33.12 / history §32.14.41) through render/vfx/wiring.js on a synthetic index: an official shot covers the damage the
+// §35.12 / history §34.14.41) through render/vfx/wiring.js on a synthetic index: an official shot covers the damage the
 // sim lands before its drawn flight ends (R3) and the heal the sim lands at the attack (R9), a damage long before the
 // arrival stays the procedural one's; a direct ranged attack with official rows draws no procedural shot, one with none
 // keeps it (R4); a projectile attack's own hit rows play with its hit, a timer projectile's too (R12); a chain's bounces

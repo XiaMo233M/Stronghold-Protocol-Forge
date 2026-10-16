@@ -39,7 +39,7 @@ aklz4.py registers a decoder for it. This script pulls the art the web sources l
     scene.json + scene.bin + lightmap pages and scene/tex/ (the materials' albedo textures). The scene bundles ship
     only while the season runs: they are read from the client when it has them, else from --scenes <dir> (default
     .cache/official-scenes/*, filled by tools/local-extract/fetch_scenes.py)
-  - the official battle effects (特效) of the mode's operators, enemies and tokens (fx.py, DESIGN §33)
+  - the official battle effects (特效) of the mode's operators, enemies and tokens (fx.py, DESIGN §35)
     → fx/index.json, fx/textures.json, fx/prefabs/*.json, fx/tex/**.webp, fx/mesh/*.json, listed in their own
     data/local-fx.json (next to --manifest; data/local-assets.json has no fx group);
     only with an explicit --only fx (a plain run leaves them out): the Phase 1a sample by default, --fx-set used for
@@ -69,7 +69,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import scenes  # noqa: E402  (the battlefield scene table and exporter; imports UnityPy only when it runs)
-import fx  # noqa: E402  (the official battle effects, DESIGN §33; imports UnityPy only when it runs)
+import fx  # noqa: E402  (the official battle effects, DESIGN §35; imports UnityPy only when it runs)
 
 ROOT = Path(__file__).resolve().parents[2]
 HOME = Path.home()
@@ -532,7 +532,7 @@ def webp_only(out_root, manifest_path, log):
 
 def ran_groups(old_groups, new_groups, fx_ran=False):
     """The groups a run replaces: the ones it wrote, and after an fx run the fx / fx/* groups an earlier fx run left in
-    the manifest (the fx files have their own list, data/local-fx.json, since 0.3.0's Phase 1b — DESIGN §33.1)."""
+    the manifest (the fx files have their own list, data/local-fx.json, since 0.3.0's Phase 1b — DESIGN §35.1)."""
     ran = set(new_groups)
     if fx_ran:
         ran |= {g for g in (old_groups or {}) if g == fx.FX_SUB or g.startswith(fx.FX_SUB + '/')}

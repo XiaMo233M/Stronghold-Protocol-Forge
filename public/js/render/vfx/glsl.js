@@ -1,4 +1,4 @@
-// render/vfx/glsl.js — GLSL ES 3.0 programs of the official battle effects' shader families (DESIGN §33.7; client
+// render/vfx/glsl.js — GLSL ES 3.0 programs of the official battle effects' shader families (DESIGN §35.7; client
 // docs: the official effects layer). Our own GLSL: each family reproduces the computation of the client's particle
 // shaders as documented for the runtime (official shader source is never part of the repository).
 //

@@ -1,5 +1,5 @@
-// test/render/vfx-talents.test.js — the official talent and ability effects (index.json version 3, DESIGN §33.17; the
-// runtime: §33.16, 0.3.0 Phase 3d) through render/vfx/talents.js, talentfx.js and the wiring on a synthetic version-3
+// test/render/vfx-talents.test.js — the official talent and ability effects (index.json version 3, DESIGN §35.17; the
+// runtime: §35.16, 0.3.0 Phase 3d) through render/vfx/talents.js, talentfx.js and the wiring on a synthetic version-3
 // index: which talents are in force (the record's talents → talentKeys, a module's, the equipped skill), each `when` —
 // deploy (once per life, its loops while standing), passive (a mode's copy only in that mode, a general ability's
 // modes), toggle (HP ratio, blocked, 隐匿, a restore delay; on and off), reborn (the knock-out's handler loops until the

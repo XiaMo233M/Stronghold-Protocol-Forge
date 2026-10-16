@@ -1,7 +1,7 @@
-// tools/local-extract/fx.py (DESIGN §33, docs/design/vfx-format.md): the encodings of the official battle effects'
+// tools/local-extract/fx.py (DESIGN §35, docs/design/vfx-format.md): the encodings of the official battle effects'
 // descriptors — curves, gradients, render states, decoded animation clips, mount-point matrices, the file names of
 // effect keys —, the units' emitters, charge groups and skills of index.json, its v3 talents, common / general
-// abilities, abilities' projectiles, buff lives and group choice (§33.17), and extract.py's opt-in fx run. The
+// abilities, abilities' projectiles, buff lives and group choice (§35.17), and extract.py's opt-in fx run. The
 // Python helpers run without UnityPy (pure functions; plain python3). When the effects were extracted on this machine
 // (data/local-fx.json, the list of the fx files, exists), the output is checked for consistency: every listed file
 // exists, the index and the list agree, every key the index names has a descriptor, and data/local-assets.json holds
@@ -149,7 +149,7 @@ print(json.dumps({'lists': fx.emitter_lists(f), 'live': fx.est_live(ps)}))`);
     assert.equal(out.live, 11, '10/s × 0.6 s + a burst of 5');
   });
 
-  test('skin_rows: four (index, weight) pairs per vertex whatever the client stores (§33.9) — 2 per vertex, 1 without weights, the legacy 4', () => {
+  test('skin_rows: four (index, weight) pairs per vertex whatever the client stores (§35.9) — 2 per vertex, 1 without weights, the legacy 4', () => {
     const out = py(`print(json.dumps([fx.skin_rows([(10, 9), (3, 0)], [(0.503710, 0.496290), (1.0, 0.0)], 2),
                   fx.skin_rows([(4,), (7,)], None, 2), fx.skin_rows([(1, 2, 3, 4)], [(0.25, 0.25, 0.25, 0.25)], 1),
                   fx.skin_rows(None, None, 3), fx.skin_rows([(5,)], None, 2)]))`);
@@ -266,7 +266,7 @@ print(json.dumps([fx.token_skill_ids(rec), fx.mount_names([6, 8, 9, 5, 10, 29, 3
   });
 });
 
-describe('fx.py skill effect roles (index.json skills, DESIGN §33.12)', { skip: !PY && 'no python3' }, () => {
+describe('fx.py skill effect roles (index.json skills, DESIGN §35.12)', { skip: !PY && 'no python3' }, () => {
   const EK = `KEYS = {'ifrit_skill_02_start', 'ifrit_skill_02_range', 'common_firemagic_hit_01', 'buff_burn', 'x_skill_buff',
   'x_skill_end', 'x_hit', 'x_start_up', 'x_start', 'x_start_down', 'x_hook', 'x_ready', 'x_tpl_start', 'x_tpl_finish', 'x_tpl_derived'}
 ek = lambda s: s.lower() if isinstance(s, str) and s.lower() in KEYS else None`;
@@ -338,7 +338,7 @@ print(json.dumps({'u1': u1, 'u2': u2, 'u3': u3, 'u4': u4, 'roles': fx.roles_of(u
   });
 });
 
-describe('fx.py Phase 1d (index.json v3, DESIGN §33.17): buff lives, ability links, talents, group choice', { skip: !PY && 'no python3' }, () => {
+describe('fx.py Phase 1d (index.json v3, DESIGN §35.17): buff lives, ability links, talents, group choice', { skip: !PY && 'no python3' }, () => {
   test('buff_life: Torappu.LifeType names (numbers in prefabs, names in templates), time, the duration key of a timed buff, DB, tick', () => {
     const out = py(`
 B = lambda **kw: {'buffKey': 'b', 'overrideEffectKey': '', **kw}

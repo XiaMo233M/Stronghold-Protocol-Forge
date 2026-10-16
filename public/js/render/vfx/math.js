@@ -1,10 +1,10 @@
-// render/vfx/math.js — the small 3D math of the official battle effects (DESIGN §33.2), in Unity's conventions:
+// render/vfx/math.js — the small 3D math of the official battle effects (DESIGN §35.2), in Unity's conventions:
 // left-handed axes, quaternions (x, y, z, w), Euler degrees applied as Quaternion.Euler (about Z, then X, then Y:
 // q = qy · qx · qz), TRS matrices T · R · S. Matrices are column-major Float32Array(16) (WebGL's layout).
 //
 // Frames: effects are built in the battle's Unity frame (x = column − 10, y = row − 9, z = −height); the board frame
 // of render/projection.js is (x = column, y = row, z = height). `unityToBoard` is the map between them:
-// C = diag(1, 1, −1) plus the centre's translation (C is its own inverse; it flips winding — DESIGN §33.2).
+// C = diag(1, 1, −1) plus the centre's translation (C is its own inverse; it flips winding — DESIGN §35.2).
 // Pure math, no allocation in the per-particle helpers (they write into `out`).
 
 export const DEG = Math.PI / 180;

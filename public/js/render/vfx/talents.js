@@ -1,5 +1,5 @@
-// render/vfx/talents.js — a battle unit's talents and abilities (index.json version 3, DESIGN §33.17; the runtime's
-// reading: §33.16) as bindings render/vfx/talentfx.js plays: which talents are in force (the data record's talents →
+// render/vfx/talents.js — a battle unit's talents and abilities (index.json version 3, DESIGN §35.17; the runtime's
+// reading: §35.16) as bindings render/vfx/talentfx.js plays: which talents are in force (the data record's talents →
 // `talentKeys`, the trait; every one of an enemy), each talent node's and ability's uses planned like a skill's
 // (skills.js planUses — the same shape) and bound by `when`. Pure logic over index.json and our data: no GL, no DOM,
 // Node-importable.
@@ -177,7 +177,7 @@ function bbValue(bb, prefix, key) {
 }
 
 /**
- * Whether a binding's toggle checkers hold for view v (index v3 `toggle`, DESIGN §33.17): HpRatioToggleChecker — the HP
+ * Whether a binding's toggle checkers hold for view v (index v3 `toggle`, DESIGN §35.17): HpRatioToggleChecker — the HP
  * ratio within [min, max] (`useLTForMax`: below max), the bounds from the record's blackboard when it says so;
  * BlockedToggleChecker — blocking (an operator) / blocked (an enemy): UF.BLOCKED for a minimum of 1 or more, its absence
  * for a 0–0 range [ASSUMED: the snapshot has the flag, not the count]; AdvancedCompoundToggleChecker — 隐匿 (the node

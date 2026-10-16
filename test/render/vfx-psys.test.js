@@ -1,5 +1,5 @@
 // test/render/vfx-psys.test.js — the ParticleSystem interpreter of the official effects (render/vfx/psys.js,
-// render/vfx/shapes.js, DESIGN §33.5): emission (rate over time, rate over distance, bursts with cycles / interval /
+// render/vfx/shapes.js, DESIGN §35.5): emission (rate over time, rate over distance, bursts with cycles / interval /
 // probability, start delay, duration, looping, prewarm, the max-particles cap), shape sampling, forces / limit
 // velocity, the scaling modes, birth / death sub-emitters and the per-particle trails.
 

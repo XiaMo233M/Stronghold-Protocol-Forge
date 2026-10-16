@@ -1,5 +1,5 @@
 // test/render/vfx-skills.browser.test.js — the official skill, talent and charge effects (render/vfx/skillfx.js, DESIGN
-// §33 Phase 3b) in headless Chrome through the dev viewer's skill demo (public/dev/fx-viewer.html ?skilldemo): real
+// §35 Phase 3b) in headless Chrome through the dev viewer's skill demo (public/dev/fx-viewer.html ?skilldemo): real
 // operators' skills from the local extraction played through the wiring with hand-stepped frames on a flat grey board →
 // screenshots test/e2e/out/vfx-skill-<name>.png. Each picture must show the skill's own effects (their keys live, pixels
 // changed where they sit): 克莱门莎 S1's cast and hit (an instant skill with its attack), her S3 mark on the dummy's
@@ -249,7 +249,7 @@ describe('official skill effects in headless Chrome', { skip }, () => {
     assert.ok(changed(r.img, r.src.x, r.src.y, 120) > 300);
   });
 
-  // round 46 (history §32.14.38): the maintainer's reports of 2026-10-15
+  // round 46 (history §34.14.38): the maintainer's reports of 2026-10-15
   test('溯光星源 S3 (char_1047_halo2): her lightning falls on the target from the upper left, the range lies on her range', async () => {
     const r = await shot('halo2-s3', 'char_1047_halo2', { s: 2, kind: 'bolt', dist: 2 }, [['on'], 20, ['attack'], 12]);
     for (const k of ['halo2_skill_03_trail_01', 'halo2_skill_03_range_01', 'halo2_skill_03_buff_03']) assert.ok(r.keys.includes(k), `${k} in ${r.keys}`);
@@ -286,7 +286,7 @@ describe('official skill effects in headless Chrome', { skip }, () => {
     assert.ok(where.over.some((n) => n.startsWith('wildmn_skill_02_buff/suduxian')), 'its speed lines (order 2) stay over the units');
   });
 
-  // (merged with §32.14.36: a chain's line is not flown — the client draws it between the chain's targets as the shot
+  // (merged with §34.14.36: a chain's line is not flown — the client draws it between the chain's targets as the shot
   // reaches them —; a harpoon's rope runs from the shooter to the head)
   test('异客 (char_472_pasngr): the shot flies its own trail, never its chain line', async () => {
     const r = await shot('pasngr-chain', 'char_472_pasngr', { s: 0, kind: 'bolt', dist: 3 }, [['attack'], 6]);

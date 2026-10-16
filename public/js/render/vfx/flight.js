@@ -1,4 +1,4 @@
-// render/vfx/flight.js — how an official projectile flies (DESIGN §33.12 Projectile; the client's movement classes,
+// render/vfx/flight.js — how an official projectile flies (DESIGN §35.12 Projectile; the client's movement classes,
 // read from its native code): which effect flies and which line goes with it, the lobbed arc of a ParacurveMovement and
 // the wobble of an AmiyaS2Movement. The wiring (render/vfx/wiring.js `_fly`) keeps the sim's flight time; these give the
 // path's shape. Pure functions (Node tests).
@@ -12,7 +12,7 @@
 const lc = (k) => (typeof k === 'string' && k ? k.toLowerCase() : null);
 
 /**
- * A projectile's parts by role (index.json Projectile, DESIGN §33.12), read from the behaviours the entry lists:
+ * A projectile's parts by role (index.json Projectile, DESIGN §35.12), read from the behaviours the entry lists:
  * `main` — the flying effect, the `_mainEffect` of its projectile class (SimpleProjectile, HarpoonProjectile,
  * LassoProjectile, LaserProjectile …; null when that class names none: 溯光星源 S3's timer, a rope alone); `rope` — a
  * HarpoonRenderer's line, which the client stretches every tick from the shooter's point to the head

@@ -1,5 +1,5 @@
 // render/vfx/skills.js — the official skill, talent and charge effects of a battle unit as plans the wiring plays
-// (DESIGN §33.12 `skills`, §33.16; 0.3.0 Phase 3a–3c). Pure logic over index.json and our data: no GL, no DOM,
+// (DESIGN §35.12 `skills`, §35.16; 0.3.0 Phase 3a–3c). Pure logic over index.json and our data: no GL, no DOM,
 // Node-importable.
 //
 //   resolveSkill(idx, { info, rec })        → { unitKey, skillId, skill, via, reason } — the official skill a unit uses
@@ -50,7 +50,7 @@
 //     start, loop, end, ready, range,      skill-level: on the owner
 //     attacks: [{ node, ability, cast, range, aim, hit, when? }],  the skill prefab's own attack abilities (each attack
 //                                          while on; `when` 'start' / 'end': the skill's own cast at its start / end —
-//                                          tagCasts, history §32.14.43 —, never a normal attack)
+//                                          tagCasts, history §34.14.43 —, never a normal attack)
 //     each: { cast, hit },                 any attack of the owner while on (buff template actions)
 //     trigger,                             reactive: the owner taking damage while on
 //     cond,                                `[eff_cond]` state loops on the owner (COND_BUFFS, condState)
@@ -83,7 +83,7 @@
 // `rootClass`: a ReplacementSkill* is 'instant' whatever the record (its single attack is the skill), a PassiveSkill
 // without a record 'passive'.
 //
-// How a use of index.json (skills[id].uses) is placed — the extractor's roles (DESIGN §33.12) refined by its fields:
+// How a use of index.json (skills[id].uses) is placed — the extractor's roles (DESIGN §35.12) refined by its fields:
 //   * emitter rows (a use with `ability`, the ability the emitter serves): an attack ability (/Attack|Heal/, not
 //     Channeling*) → `attacks` — `start` / `loop` / `end` rows to `cast` (on each attack's cast; a non-one-shot row is
 //     held for that cast), `range` rows to its `range`, `hit` rows to `hit` (MultiHitUberEffectEmitter._hitGroups → hit
@@ -195,7 +195,7 @@
 //     5, 6, 8, 9, 10), every 3 merge (_mergeSize) into a 转置能量 slot (…_rank_02[_k] + …_rank_02_change[_k]); her kit
 //     (op-veen.js) keeps its own store: no signal either.
 //
-// Version 2 exports them (Phase 1c, DESIGN §33.12 Charge): `chargeSource` turns `units[id].charge` (the chargeable
+// Version 2 exports them (Phase 1c, DESIGN §35.12 Charge): `chargeSource` turns `units[id].charge` (the chargeable
 // groups) into CHARGE_EMITTERS' shape (chargeFromIndex: the reference store ability is the one whose `modes` hold
 // Default — its emitters' and the group node's groups are the slots, at its `mountPointForProjectiles`; the ex emitters
 // at `exMounts` the elite slots, a `forceExCharge` ability's for its modes; `mergeSize` the merged slots; each ability's
@@ -221,7 +221,7 @@
 // cast (a skill-level begin effect for the skill); buff loops on the owner last the skill (a buff's own duration is not
 // in index.json); hit groups beyond the last repeat the last; passive skills' loops follow the deploy.
 
-/** Torappu.Battle.AbilityStandard/Event (DESIGN §33.12): index.json's skill uses write the names, units' Emit rows the numbers. */
+/** Torappu.Battle.AbilityStandard/Event (DESIGN §35.12): index.json's skill uses write the names, units' Emit rows the numbers. */
 export const ABILITY_EVENTS = Object.freeze({
   ON_ATTACHED: 0, ON_DETACHED: 1, ON_CAST_START: 2, ON_CAST_END: 3, ON_SPELL_ON: 4, ON_SPELL_END: 5, ON_ATTACK_FINISH: 6,
   ON_ATTACK_CHECK_POINT: 7, ON_OVERLOAD: 8,
@@ -390,7 +390,7 @@ export function hitOptsOf(rows) {
   return { indexed: rows.some((r) => Number.isInteger(r.group)), loop: f('useLoopHitEffect'), random: f('useRandomHitEffect'), once: f('oncePerTarget') };
 }
 
-/** SpawnLocation names (ParticleEffect._spawnLocation, DESIGN §33.11 metadata). */
+/** SpawnLocation names (ParticleEffect._spawnLocation, DESIGN §35.11 metadata). */
 export const SPAWN_LOCATIONS = Object.freeze(['NONE', 'FOOT_POINT', 'HIT_POINT', 'MUZZLE_POINT', 'HEAD_POINT', 'GROUND_CENTER',
   'MUZZLE_POINT_WITHOUT_ROTATION', 'GROUND_CENTER_WITH_ZERO_HEIGHT', 'MP_SPECIAL_0', 'MP_SPECIAL_1', 'MP_SPECIAL_2', 'MP_SPECIAL_3',
   'CAMERA', 'MP_SPECIAL_4', 'MP_SPECIAL_5', 'MP_SPECIAL_6', 'MP_SPECIAL_7', 'TILE_CENTER', 'MP_SPECIAL_8', 'MP_SPECIAL_9',
@@ -398,7 +398,7 @@ export const SPAWN_LOCATIONS = Object.freeze(['NONE', 'FOOT_POINT', 'HIT_POINT',
   'MP_SPECIAL_16', 'MP_SPECIAL_17', 'MP_SPECIAL_18', 'MP_SPECIAL_19', 'MP_SPECIAL_20', 'MP_SPECIAL_21', 'MP_SPECIAL_22',
   'MP_SPECIAL_23', 'GROUND_CENTER_WITH_HIGHLAND_HEIGHT']);
 
-/** A FollowMountPoint MountPointType's name (DESIGN §33.11 metadata: 0 FOOT, 1 HIT, 2 MUZZLE, 3 HEAD, 4 UI, 5 SPECIAL_0 …). */
+/** A FollowMountPoint MountPointType's name (DESIGN §35.11 metadata: 0 FOOT, 1 HIT, 2 MUZZLE, 3 HEAD, 4 UI, 5 SPECIAL_0 …). */
 export function mountPointName(t) {
   if (!Number.isInteger(t) || t < 0) return null;
   const fixed = ['FOOT', 'HIT', 'MUZZLE', 'HEAD', 'UI', 'SPECIAL_0', 'SPECIAL_1', 'GROUND', 'SPECIAL_2', 'SPECIAL_3'];
@@ -491,7 +491,7 @@ const PULSE = new Set(['tick', 'channel-hit', 'hit-no-attack']);
 const DIR_SUFFIX = /^(.*?)_(up|down|left|right|back|front)$/;
 
 /**
- * Facing variants among a list of uses (history §32.14.43): the rows of one buff template action — same `from`, `event`,
+ * Facing variants among a list of uses (history §34.14.43): the rows of one buff template action — same `from`, `event`,
  * `action`, `buff`, `node`, `on`, `role` and `mode`, no emitter `ability` — whose keys are one effect's variants by name
  * (`<base>_up` / `_down` / `_left` / `_right`, `_back` for a unit facing up, `_front`, and the plain `<base>`) are one
  * effect picked by the owner's facing: one use with `slots` (0 UP, 1 RIGHT, 2 DOWN, 3 LEFT; a facing without a variant of
@@ -544,7 +544,7 @@ export function dirFamilies(uses) {
 const END_ATTACK = /^(?:Final|End)(?:[A-Z_]\w*)?$/;
 
 /**
- * The skill's own casts among its attack abilities (history §32.14.43) — `when` on plan.attacks: 'end' for a final
+ * The skill's own casts among its attack abilities (history §34.14.43) — `when` on plan.attacks: 'end' for a final
  * attack (END_ATTACK, or one whose cast rows are all `end`: 灵知 S3, 薄荷 S2, 歌蕾蒂娅 S3, 锏 S3), 'start' for the attacks
  * of a lasting / passive skill whose root ability is a sequence (AbilitySequenceGroup: the skill runs it once as it
  * starts — 缄默德克萨斯 S2 / S3's appear strike, 仇白 S2's sword split, 余 S2's teleport, 焰影苇草 S2's fire balls); the
@@ -623,7 +623,7 @@ export function mountPointType(name) {
 }
 
 /**
- * The shots of an attack ability (index v3, DESIGN §33.17): where its projectile leaves (`mount`, a `mountGroup`'s
+ * The shots of an attack ability (index v3, DESIGN §35.17): where its projectile leaves (`mount`, a `mountGroup`'s
  * points taken in turn or at random) and the follow-up shots of a multi attack (`additionalTimes` after the first, every
  * `triggerDelta` s, flying `additionalProjectile(s)` — one key for all, one per shot — else the attack's own); null for
  * a plain one-shot from the muzzle.
@@ -648,7 +648,7 @@ export function shotOf(ab, projs = {}) {
 }
 
 /**
- * Fill `plan` from a list of uses — a skill's, a talent node's, an ability's: the same shape (DESIGN §33.12, §33.17).
+ * Fill `plan` from a list of uses — a skill's, a talent node's, an ability's: the same shape (DESIGN §35.12, §35.17).
  * opts.mode: the copy of an enemy skill held in several modes (default 'Default': that copy's uses and the ones without
  * a `mode`; null keeps every use — a talent node's uses name the mode that holds the node); opts.abilities: the prefab's
  * attack abilities (index v3 `abilities`: an attack's projectile, mount and follow-up shots; one firing a projectile
@@ -870,7 +870,7 @@ export function attackFx(plan, { heal = false, ranged = false } = {}) {
 }
 
 /**
- * How long a buff an entry carries lasts (index v3 `life`, DESIGN §33.17 Buff lives): { s } for a LIMITED buff — its
+ * How long a buff an entry carries lasts (index v3 `life`, DESIGN §35.17 Buff lives): { s } for a LIMITED buff — its
  * `time`, else our record's blackboard value of its `key` (`srec.bb[key]`; an enemy talent's `${bb}.${key}`) —, { skill:
  * true } for INFINITY (while the skill or its carrier lasts), { once: true } for IMMEDIATELY (its effect plays once);
  * null without a life or for a LIMITED one whose time no blackboard gives (the caller keeps its own rule).
@@ -1109,7 +1109,7 @@ function chargeSlotsOf(emitters, effects, casts, mounts, prefabs) {
 }
 
 /**
- * Index v2's chargeable groups of a unit (`units[id].charge`: the 秘术师's stored energies, DESIGN §33.12 Charge) in
+ * Index v2's chargeable groups of a unit (`units[id].charge`: the 秘术师's stored energies, DESIGN §35.12 Charge) in
  * CHARGE_EMITTERS' shape: per energy the group node's and the store ability's emitter groups (`chargeEffectGroups` /
  * `chargeCastGroups`; the normal ones — 黑键's `isExEffectEmitter` emitter gives `elite`, an ability with
  * `forceExCharge` `eliteS3`, 维伊's merged groups `merged`), the mounts of the ability the Default mode releases (its
@@ -1240,10 +1240,10 @@ export function chargeKeys(plan) {
  *   cover       fx kinds of the same owner at that tile that the reached effect draws (skipped while it plays)
  *   during      only while the skill lasts (SkillFx._lasts: on, its activation frame, COVER_AFTER_S after its end, or a
  *               binding of its owner still held — a lasting area's strikes); another fx of that kind is the kit's own
- * or, instead of a projectile (history §32.14.43):
+ * or, instead of a projectile (history §34.14.43):
  *   attack      the node of the plan attack the fx stands for: its cast / range rows play on the owner at the fx, its hit
  *               groups and aims on the damage the fx's frame deals after it (SkillFx kit hits)
- * The R11 entries (0.3.0 official-effects audit, history §32.14.44) bind a kit area or strike to the official prefab
+ * The R11 entries (0.3.0 official-effects audit, history §34.14.44) bind a kit area or strike to the official prefab
  * the client plays there: the areas are the skill projectiles' reached effects (the projectile stays where it lands —
  * AuraHitBehaviour — for the area's life), the strikes their hit effects.
  */
@@ -1329,7 +1329,7 @@ export const BOUND_BY_SKILL = Object.freeze((() => {
  * Kit 'fx' kinds a skill's official effects stand for although no official effect is placed at the fx (render/vfx/
  * skillfx.js rule 5: with 官方特效 on and the skill's plan drawable, the procedural fx is skipped while the skill lasts —
  * the client shows the skill's own effects then, and no such cue). By skill id; decided per case from the client data
- * (0.3.0 official-effects audit R11, history §32.14.44). Areas, locks and links stay procedural where the client shows
+ * (0.3.0 official-effects audit R11, history §34.14.44). Areas, locks and links stay procedural where the client shows
  * such a cue that is not placed here (引星棘刺 S2's drifting unit, 余 S3's wall segments, 新约能天使's strikes, 扎罗's
  * fear cage on its targets — open), and so do the cues of a talent (刺玫's and 雪猎's) or 泡泡 S2's counter (R17).
  */

@@ -1,4 +1,4 @@
-// render/vfx/wiring.js — the battle's events → official effects, generated from index.json (DESIGN §33.12): every
+// render/vfx/wiring.js — the battle's events → official effects, generated from index.json (DESIGN §35.12): every
 // unit's normal attack (its mode `Default`, or the mode its skill switches to while the skill is on — the skill plan's
 // `modeName`, else `S<n>` for skill n; a mode's facing variant for the unit's facing) casts its `cast` effects at their
 // spawn location or FollowMountPoint's point on the unit (a point a BoneFollower keeps on a Spine bone — the muzzle, a
@@ -12,7 +12,7 @@
 // (R3 / R9: `_expect`); a chain's bounces draw its lightning line between the targets (`chain`, R14); a melee
 // attack's `hit` effects play when its damage lands; status loops (generic.status by the sim's status names) follow the
 // unit's mount point while the status lasts; deaths and deploys play the unit's own dead / start effect or the generic
-// one. Index version 2 (DESIGN §33.16): a blocked (or blocking) unit's melee blow plays its mode's `combat`, a group
+// one. Index version 2 (DESIGN §35.16): a blocked (or blocking) unit's melee blow plays its mode's `combat`, a group
 // attack the sub-abilities that fire (pickAttacks), a MultiHit emitter's hit groups by the hit's order (skillfx.js
 // pickGroup), an UberAnimation emitter's replace groups with their animation, an InCertainMode emitter's rows in its mode
 // only (_rowOk). The skill, talent and charge effects (render/vfx/skills.js plans) are played by `this.skills`
@@ -28,7 +28,7 @@
 //   kind, time) / w.damage(v, type, src, time) / w.heal(v, time) / w.status(v, name, on) / w.death(v) / w.deploy(v) /
 //   w.skill(v, on) / w.enemyCast(v, slot) / w.sync(views) / w.simFx(kind, x, y, extra) / w.clear()
 //
-// The cast rows follow their ability events (DESIGN §33.12, resolved): ON_CAST_START rows play when the attack's wind-up
+// The cast rows follow their ability events (DESIGN §35.12, resolved): ON_CAST_START rows play when the attack's wind-up
 // begins (render/app.js starts the attacker's Spine clip ahead of the 'atk' event: `castStart`), ON_SPELL_ON rows at the
 // strike (the 'atk' event), a looping row until the attack clip ends; NONE rows play their first slot, directional rows
 // the slot for the owner's facing; `onlyOnce` and `hookEffectAfterFirstAttack` count the unit's attacks.
@@ -114,7 +114,7 @@ function abilityFits(a, kind, depth = 0) {
 }
 
 /**
- * The attacks one 'atk' plays of an ability (index v2 / v3, DESIGN §33.12, §33.17): the ability itself and, of a group,
+ * The attacks one 'atk' plays of an ability (index v2 / v3, DESIGN §35.12, §35.17): the ability itself and, of a group,
  * the sub-abilities that fire. Index v3's `select` says how: `parallel` (and a `sequence`'s steps) — every one, its
  * `main` first (its projectile is the attack's); `random` — a seeded pick (unit id × attack count: the same in a
  * replay; `diffFromLast` — never the previous one, `mem` keeping it per unit; weights by `probKeys` are not read: equal
@@ -165,7 +165,7 @@ export function pickAttacks(a, kind, seed = 0, depth = 0, nth = 0, mem = null) {
  * The mode `name` (with an attack) of `modes`, or its facing variant (MODE_VARIANT) for `facing` — DOWN: [Down] / [D] /
  * (D), UP: [Up] / (U), LEFT / RIGHT: (LR) — when the unit has one; `variantsOnly`: a variant or nothing (a plain
  * mode is the plan's to name). [ASSUMED] the variants are per facing, by their names (the skill data that switches
- * between them is not exported); before DESIGN §32.14.36 only the plain name counted.
+ * between them is not exported); before DESIGN §34.14.36 only the plain name counted.
  * @param {any[]} modes
  * @param {string} name
  * @param {string} facing 'UP' | 'DOWN' | 'LEFT' | 'RIGHT'
@@ -459,7 +459,7 @@ export class FxWiring {
    * important, skip, data }): at its FollowMountPoint's point when it has one — the client keeps it there from its first
    * frame, with the point's rotation unless `_keepOriginRotation` (a weapon effect rides its bone: 安洁莉娜's staff glow,
    * 灰毫's muzzle flash; a 驭械术士's floating unit its Special point) —, else at its spawn location (MUZZLE_POINT and the
-   * Special points with the point's rotation; DESIGN §33.11). `follow`: a held effect (a status, an aura, a skill's or
+   * Special points with the point's rotation; DESIGN §35.11). `follow`: a held effect (a status, an aura, a skill's or
    * a talent's loop) keeps to the unit — a FollowOwner / FollowTileHeight one to its feet, any other moves with it as
    * a `_holdByOwner` prefab does —; `stick`: the effect keeps to the view's spawn point while it lives (what a projectile
    * places on its target); `strike`: the points as the attack clip poses them at its strike frame. A prefab not loaded
@@ -594,7 +594,7 @@ export class FxWiring {
   }
 
   /**
-   * The keys an emitter row plays now (index.json Emit, DESIGN §33.12): nothing after the unit's first attack for an
+   * The keys an emitter row plays now (index.json Emit, DESIGN §35.12): nothing after the unit's first attack for an
    * `onlyOnce` row, `hookEffectAfterFirstAttack` from its second attack on; directionType 0 (NONE) its first slot; a
    * directional row its slot for the owner's facing (`slots`, Torappu.SharedConsts.Direction: 0 UP, 1 RIGHT, 2 DOWN,
    * 3 LEFT; null = nothing), its first key without `slots` (an index written before Phase 1b).
@@ -655,7 +655,7 @@ export class FxWiring {
   }
 
   /**
-   * What one 'atk' of a unit plays from its mode (index v2, DESIGN §33.12): the mode's `combat` — the blow on a blocker —
+   * What one 'atk' of a unit plays from its mode (index v2, DESIGN §35.12): the mode's `combat` — the blow on a blocker —
    * for a melee blow of a unit that blocks or is blocked (UF.BLOCKED) or when the mode has no `attack`, else its
    * `attack`; the attacks that fire (pickAttacks: a group's sub-abilities); their rows as their emitters allow (_rowOk);
    * a MultiHit emitter's grouped hit rows as the hit groups (with its loop / random / once settings; its rows without a
@@ -909,7 +909,7 @@ export class FxWiring {
   }
 
   /**
-   * A projectile's flight (DESIGN §33.12 Projectile, render/vfx/flight.js): its own flying effect (projectileParts
+   * A projectile's flight (DESIGN §35.12 Projectile, render/vfx/flight.js): its own flying effect (projectileParts
    * `main`: the projectile class's `_mainEffect`) from the shot's mount point as the attacker's model draws it now — the
    * muzzle bone at the strike frame (o.mount: a MountPointType instead — a 秘术师's stored energy leaves its slot, a
    * mount group's point) — to the target's HitPoint in the sim's flight time, homing on it; a ParacurveMovement lobs it

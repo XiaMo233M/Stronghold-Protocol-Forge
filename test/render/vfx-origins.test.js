@@ -1,4 +1,4 @@
-// test/render/vfx-origins.test.js — where official shots and weapon effects leave a unit (DESIGN §32.14.36): a skin point
+// test/render/vfx-origins.test.js — where official shots and weapon effects leave a unit (DESIGN §34.14.36): a skin point
 // a BoneFollower keeps on a Spine bone is the bone where the model draws it (render/vfx/mounts.js, UnitView.boneOffset) —
 // for a shot as the attack clip poses it at its strike frame —; the mount point's rotation (the Graphic tilt, the facing
 // turn, the bone's angle) for MUZZLE_POINT / Special-point spawns and FollowMountPoint without `_keepOriginRotation`;
@@ -169,7 +169,7 @@ describe('mount points on the drawn model (mounts.js)', () => {
 
 describe('projectile flights (flight.js)', () => {
   test('the projectile behaviour\'s own effect flies; a chain line or a harpoon rope is no flying effect', () => {
-    // (merged with §32.14.38's reader: one projectileParts in flight.js, which also gives the projectile class's life)
+    // (merged with §34.14.38's reader: one projectileParts in flight.js, which also gives the projectile class's life)
     const b = (cls, k) => ({ class: cls, node: 'p', fields: { _mainEffect: k } });
     // as the extractor writes them: `main` is the last `_mainEffect` (projectile_leizi, projectile_chr_glady_s2)
     assert.deepEqual({ ...projectileParts({ main: 'leizi_attack_02_line', behaviours: [b('SimpleProjectile', 'leizi_attack_01_trail'), b('ChainLightningEffectBehaviour', 'leizi_attack_02_line')] }) },

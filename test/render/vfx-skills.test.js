@@ -1,4 +1,4 @@
-// test/render/vfx-skills.test.js — render/vfx/skills.js, the official skill / talent / charge effect plans (DESIGN §33,
+// test/render/vfx-skills.test.js — render/vfx/skills.js, the official skill / talent / charge effect plans (DESIGN §35,
 // 0.3.0 Phase 3a), and tools/vfx-skill-coverage.mjs:
 //   * synthetic fixtures (always run): unit / skill resolution from the view's info and our records, the placement rules
 //     (buff loops by carrier, emitter rows by the ability they serve, hit groups, hooks, template events, ready, paths,

@@ -1,4 +1,4 @@
-// render/vfx/skillfx.js — the official skill, talent and charge effects in a battle (DESIGN §33, 0.3.0 Phase 3b, 3c):
+// render/vfx/skillfx.js — the official skill, talent and charge effects in a battle (DESIGN §35, 0.3.0 Phase 3b, 3c):
 // the plans of render/vfx/skills.js played on the signals the field view already receives. render/vfx/wiring.js owns one
 // (`FxWiring.skills`) and calls it from its event entry points; client only — no sim, protocol or golden change.
 //
@@ -29,7 +29,7 @@
 //     a survey of every kit) plays the cast and range of the attack that fits what its kit hit (a heal ability for heals)
 //     once — a ReplacementSkill's at the frame's end, as its replaced attack may follow the 0 in that frame and carry
 //     the skill. The skill's own casts (skills.js tagCasts: `when` 'start' / 'end') play their rows at its start / 0.
-//   * Kit hits (history §32.14.43): 'dmg' names no source; an instant activation, a 'start' cast and a kit fx bound to a
+//   * Kit hits (history §34.14.43): 'dmg' names no source; an instant activation, a 'start' cast and a kit fx bound to a
 //     plan attack open a window for the rest of the frame, and an HP 'dmg' on the owner's enemies (a heal ability's:
 //     a 'heal' on its side) that no attack owns is a hit of that attack — its group by the target's hit count, its aims
 //     and buffs on the first — standing for the procedural spark; a final attack's hits are the 0's frame's damage
@@ -162,7 +162,7 @@ export function fitsAttack(ability, { heal = false, ranged = false } = {}) {
 const mix = (seed, k) => { const h = Math.imul((seed >>> 0) ^ Math.imul(k + 1, 2654435761), 2246822519); return (h ^ (h >>> 13)) >>> 0; };
 
 /**
- * The group hit k (0-based, of one cast on one target) plays (DESIGN §33.12, MultiHit — assumed engine code): group
+ * The group hit k (0-based, of one cast on one target) plays (DESIGN §35.12, MultiHit — assumed engine code): group
  * min(k, last); with `loop` group k mod n; with `random` a seeded random one; with `once` only the first hit plays.
  */
 export function pickGroup(groups, k, opts = {}, seed = 0) {
@@ -412,7 +412,7 @@ export class SkillFx {
     return U.drawsStart;
   }
 
-  // ---- the skill's own casts and the kit's hits (history §32.14.43) ------------------------------------------------
+  // ---- the skill's own casts and the kit's hits (history §34.14.43) ------------------------------------------------
 
   /** The next mark of the frame's event order (a new frame empties the hit log and closes the kit-hit windows). */
   _mark() {

@@ -1,10 +1,10 @@
 // test/render/vfx-skill-fixes.test.js — the maintainer's skill-effect reports of 2026-10-15 (round 46, history
-// §32.14.38) and the shared causes the audit fixed in render/vfx: skinned meshes with the client's 1–2 bone influences
+// §34.14.38) and the shared causes the audit fixed in render/vfx: skinned meshes with the client's 1–2 bone influences
 // per vertex (铃兰 S3's fox tails: a strip across the board), renderers that sort before the units (野鬃 S2's ring of
 // lances drawn over her body), a projectile's effects on its target and tile and a timer projectile's hit (溯光星源
 // S3's lightning: only her shot straight up was drawn), a projectile's own flying effect (the index's `main` named the
 // chain or the rope) and a harpoon's rope — a chain's line is not flown (the client draws it between the chain's
-// targets as the shot reaches them: the merge with §32.14.36) —, world-space LineRenderers' placeholder points, and the
+// targets as the shot reaches them: the merge with §34.14.36) —, world-space LineRenderers' placeholder points, and the
 // attach rows of a skill's mode (溯光星源 S3's range).
 
 import { test, describe } from 'node:test';
@@ -48,7 +48,7 @@ describe('skinned meshes: the client keeps 1–4 bone influences per vertex (铃
   };
   const want = [[0.5, 1, 0], [2, 0, 0], [0, 3, 0]];
 
-  test('four influences per vertex (§33.9, the fixed extractor): Σ w · (bone · bind pose) · v', () => {
+  test('four influences per vertex (§35.9, the fixed extractor): Σ w · (bone · bind pose) · v', () => {
     const md = { ...base, boneIndices: [0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0], boneWeights: [0.5, 0.5, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0] };
     assert.equal(skinStride(md), 4);
     assert.deepEqual(verts(md), want);
@@ -131,7 +131,7 @@ describe('projectiles: the flying effect, the link line, the effects on the targ
   const simple = (main, life = 10, type = 1) => ({ class: 'SimpleProjectile', node: 'p', fields: { _mainEffect: main, _lifeTimeType: type, _lifeTime: life } });
 
   test('projectileParts: the projectile class\'s _mainEffect and life; a chain\'s and a harpoon\'s lines by their class (the index\'s `main` named them)', () => {
-    // (render/vfx/flight.js since the merge with §32.14.36: `link` became `rope` — drawn in flight — and `chain` — not)
+    // (render/vfx/flight.js since the merge with §34.14.36: `link` became `rope` — drawn in flight — and `chain` — not)
     const chain = { main: 'pasngr_attack_line', lifeTime: null, behaviours: [simple('pasngr_attack_trail'), { class: 'ChainLightningEffectBehaviour', node: 'p', fields: { _mainEffect: 'pasngr_attack_line' } }] };
     assert.deepEqual({ ...projectileParts(chain) }, { main: 'pasngr_attack_trail', rope: null, chain: 'pasngr_attack_line', life: 10 });
     const harpoon = { main: 'glady_skill_01_line', behaviours: [{ class: 'HarpoonProjectile', node: 'p', fields: { _mainEffect: 'glady_skill_01_trail', _lifeTimeType: 1, _lifeTime: 5 } }, { class: 'HarpoonRenderer', node: 'p', fields: { _mainEffect: 'glady_skill_01_line' } }] };

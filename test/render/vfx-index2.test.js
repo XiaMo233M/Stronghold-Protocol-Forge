@@ -1,4 +1,4 @@
-// test/render/vfx-index2.test.js — the official effects on index.json version 2 (DESIGN §33.12 / §33.15, 0.3.0 Phase 3c)
+// test/render/vfx-index2.test.js — the official effects on index.json version 2 (DESIGN §35.12 / §35.15, 0.3.0 Phase 3c)
 // through render/vfx/wiring.js and render/vfx/skillfx.js on a synthetic version-2 index: MultiHit hit groups of a mode
 // attack (min(k, last), an empty group, loop, random, once, the plain rows on every hit), UberAnimation replace groups
 // (in turn for loopType 1, by the model's animation else), sub-abilities (Random, Parallel, Selectable by the attack's

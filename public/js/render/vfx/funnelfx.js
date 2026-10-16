@@ -1,4 +1,4 @@
-// render/vfx/funnelfx.js — the 驭械术士's floating units (浮游单元) in a battle (DESIGN §33.18): the plans of
+// render/vfx/funnelfx.js — the 驭械术士's floating units (浮游单元) in a battle (DESIGN §35.18): the plans of
 // render/vfx/funnels.js played on the signals the field view already receives. render/vfx/wiring.js owns one
 // (`FxWiring.funnels`) and calls it from its entry points; client only — no sim, protocol or golden change.
 //
@@ -12,7 +12,7 @@
 //
 // What plays when (funnels.js header for the client's structure):
 //   * Home. While a unit is home, its loop follows its Special point (the prefab's FollowMountPoint, with the point's
-//     rotation) where the model draws the point's bone (render/vfx/mounts.js, UnitView.boneOffset — DESIGN §32.14.36:
+//     rotation) where the model draws the point's bone (render/vfx/mounts.js, UnitView.boneOffset — DESIGN §34.14.36:
 //     the wiring follows every FollowMountPoint so): in a mode whose attack holds units, the first n of them with an
 //     idle loop — n: the units the skill releases (1 + its blackboard attack@cnt, the sim kit's count), else the units
 //     one attack showed (荒芜拉普兰德: her normal attack's hits after the body hit; before the first, 1 + the equipped

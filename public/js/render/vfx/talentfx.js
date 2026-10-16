@@ -1,5 +1,5 @@
-// render/vfx/talentfx.js — the official talent and ability effects in a battle (DESIGN §33.16; index.json version 3,
-// §33.17): the bindings of render/vfx/talents.js played on the signals the field view already receives.
+// render/vfx/talentfx.js — the official talent and ability effects in a battle (DESIGN §35.16; index.json version 3,
+// §35.17): the bindings of render/vfx/talents.js played on the signals the field view already receives.
 // render/vfx/wiring.js owns one (`FxWiring.talents`) and calls it from its entry points; client only — no sim, protocol
 // or golden change.
 //
@@ -134,7 +134,7 @@ export class TalentFx {
   }
 
   /**
-   * The layer order of a binding's per-layer loops (DESIGN §33.16), bottom to top, or null: loops its buffs create with
+   * The layer order of a binding's per-layer loops (DESIGN §35.16), bottom to top, or null: loops its buffs create with
    * CreateBuff(s) at a buff event whose prefabs pause one another (PauseAnotherEffect — 泥岩's talent: mudrok_t_1[init] /
    * [recharge] create a buff per 护盾 layer, mudrok_buff_01_start pauses _02 and _03, _02 pauses _03: the bottom one
    * pauses none). undefined while a prefab still loads (asked again next frame).

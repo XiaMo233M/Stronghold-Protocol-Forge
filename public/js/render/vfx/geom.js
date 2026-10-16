@@ -1,23 +1,23 @@
-// render/vfx/geom.js — per-frame geometry of the official battle effects (DESIGN §33.6): particles as instanced quads
+// render/vfx/geom.js — per-frame geometry of the official battle effects (DESIGN §35.6): particles as instanced quads
 // or instanced meshes, particle trails / ribbons, TrailRenderers, LineRenderers, MeshRenderers and skinned meshes as
 // CPU-built triangles. Everything is written in Unity battle-frame world space into the frame's shared buffers
 // (`FrameData`); render/vfx/gl.js uploads them once per pass and draws ranges of them.
 //
-// Billboards (DESIGN §33.6 renderAlignment): view = the camera plane; facing = towards the camera position; world =
+// Billboards (DESIGN §35.6 renderAlignment): view = the camera plane; facing = towards the camera position; world =
 // the world XY plane (the board); local = the system's own XY plane; velocity = across the velocity; horizontal
 // billboards lie in the world XZ plane and vertical ones turn about world Y — Unity's literal geometry in this frame,
-// whose ground is XY. The roll of a billboard turns it clockwise on screen for positive angles (ROLL_SIGN, §33.5:
+// whose ground is XY. The roll of a billboard turns it clockwise on screen for positive angles (ROLL_SIGN, §35.5:
 // assumed, Unity's behaviour, which no data of the client confirms). Stretched billboards run along the velocity from the particle (the head) back by
 // size × lengthScale + speed × velocityScale, the texture's u along the stretch (u = 1 at the head) [ASSUMED: the
 // streak textures are horizontal]. Mesh particles: the mesh × the 3D size, turned by the particle's Euler rotation
 // inside the alignment frame. Texture sheets: frame 0 is the top-left tile; frame index =
-// floor(frac(startFrame + frameOverTime(frac(t · cycles))) · frames) (§33.5, resolved: the authored curves end at
+// floor(frac(startFrame + frameOverTime(frac(t · cycles))) · frames) (§35.5, resolved: the authored curves end at
 // 0.9999 so that the last frame does not wrap to the first).
 
 import { hashRand, RF } from './rng.js';
 import { quatEuler, mat4Point, mat4Dir } from './math.js';
 
-/** Sign of a billboard's roll: −1 = positive angles turn clockwise on screen (Unity, §33.5, assumed). */
+/** Sign of a billboard's roll: −1 = positive angles turn clockwise on screen (Unity, §35.5, assumed). */
 export const ROLL_SIGN = -1;
 
 export const QUAD_STRIDE = 27;   // center 3, ax 3, ay 3, color 4, uvr 4, t0 2, t1 4, t2 4
@@ -512,7 +512,7 @@ export function buildParticleTrails(ps, cam, fd, tint) {
 let _trailPts = new Float32Array(75);
 
 /**
- * The bone influences per vertex of a skinned mesh file (§33.9 writes four; an extraction made before the fix of
+ * The bone influences per vertex of a skinned mesh file (§35.9 writes four; an extraction made before the fix of
  * 2026-10-15 wrote the client's own count — 2 for 铃兰 S3's fox tails, 琴柳's flags —, which read as four put every
  * vertex on the wrong bones and weights: a long strip across the board). 0 when the file has no usable skin.
  */

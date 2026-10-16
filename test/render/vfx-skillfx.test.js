@@ -1,5 +1,5 @@
 // test/render/vfx-skillfx.test.js — the official skill, talent and charge effects in a battle (render/vfx/skillfx.js
-// through render/vfx/wiring.js, DESIGN §33 Phase 3b) on a synthetic index and a fake effects layer: a skill's start /
+// through render/vfx/wiring.js, DESIGN §35 Phase 3b) on a synthetic index and a fake effects layer: a skill's start /
 // range / loop / end on its events, loops of a view built mid-battle (UF.SKILL), passives (deploy-driven, or timed by
 // their kit), ready loops, the attack rows while on (the skill's own ability replacing the mode's, the look-ahead's
 // wind-up, the skill projectile, aim), hit groups by the frame's damage order, the mode from the plan, trigger, the

@@ -1,4 +1,4 @@
-// test/render/vfx-follow.test.js — official effects on walking units and projectile bodies at the hit (DESIGN §32.14.40,
+// test/render/vfx-follow.test.js — official effects on walking units and projectile bodies at the hit (DESIGN §34.14.40,
 // the 0.3.0 effects audit's R1 and R5): a held loop without a FollowMountPoint (a status, an aura) and a `_holdByOwner`
 // prefab move with their unit (render/vfx/wiring.js playOn `keep`), a hit and a range not held stay where they started,
 // a chained OnPlayEmitter effect keeps to its own FollowMountPoint or moves with the unit as its prefab says; effect.js

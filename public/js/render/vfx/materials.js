@@ -1,4 +1,4 @@
-// render/vfx/materials.js — the official effects' materials (DESIGN §33.7) compiled for render/vfx/gl.js: the
+// render/vfx/materials.js — the official effects' materials (DESIGN §35.7) compiled for render/vfx/gl.js: the
 // shader family of render/vfx/glsl.js, the uniform values (floats, colours / vectors, textures with their _ST), the
 // render state of the material's first pass (blend factors, blend op, ZTest, ZWrite, cull, colour mask) and its queue.
 //

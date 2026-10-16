@@ -1,6 +1,6 @@
-// render/vfx/effect.js — one official effect prefab (DESIGN §33.4) as a playing instance: its node hierarchy with
+// render/vfx/effect.js — one official effect prefab (DESIGN §35.4) as a playing instance: its node hierarchy with
 // Unity's TRS order, the particle systems (render/vfx/psys.js), the clips (render/vfx/clips.js), the trail / line /
-// mesh renderers and the behaviours of §33.11, on the battle clock.
+// mesh renderers and the behaviours of §35.11, on the battle clock.
 //
 //   const def = compileEffect(descriptor, lib)          shared per prefab (curves baked, materials compiled lazily)
 //   const fx = new Effect(def, { seed, lite, emission, hooks })
@@ -165,11 +165,11 @@ export function compileEffect(desc, lib = {}) {
         case 'SwitchableRightEffect': def.switchable = { ...(def.switchable || {}), right: f._rightEffect ? String(f._rightEffect).toLowerCase() : null, reverse: on(f._reverseLeftRight) }; break;
         case 'SwitchableEffectByFaceDirection': def.switchable = { ...(def.switchable || {}), up: f._upEffect ? String(f._upEffect).toLowerCase() : null, down: f._downEffect ? String(f._downEffect).toLowerCase() : null, left: f._leftEffect ? String(f._leftEffect).toLowerCase() : null }; break;
         case 'ColorModifier': if (Array.isArray(f._color)) def.colorMod = f._color.map((x) => num(x, 1)); break;
-        // PauseAnotherEffect (§33.11): while this effect plays it pauses its owner's effects of the key `_effect` (after
+        // PauseAnotherEffect (§35.11): while this effect plays it pauses its owner's effects of the key `_effect` (after
         // `_preDelay`): 泥岩's shield layers (mudrok_buff_01_start pauses _02 and _03), 塑心 S3's range over her talent's aura
         case 'PauseAnotherEffect': if (f._effect) def.pauses.push({ key: String(f._effect).toLowerCase(), delay: Math.max(0, num(f._preDelay, 0)) }); break;
         case 'PauseEffectIf': {
-          // each _check… is a PauseEffectIf.CheckType (§33.11): 0 NOT_CHECK, 1 CHECK_YES (pause while the condition
+          // each _check… is a PauseEffectIf.CheckType (§35.11): 0 NOT_CHECK, 1 CHECK_YES (pause while the condition
           // holds), 2 CHECK_NO (pause while it does not); the value a check tests counts only when it is 1 or 2. Kept:
           // the owner conditions a client view can answer — its facing, its abnormal flags (in / not in) and the
           // SLEEPING combo; immunities, the other combos, buffs, modes, blackboard keys and states are not visible to
@@ -347,7 +347,7 @@ export class Effect {
   /**
    * The game's end points of the prefab's LineRenderers (world space, Unity frame): every line runs from → to (a
    * harpoon's rope from the shooter's mount point to the head, render/vfx/wiring.js `_fly`). Their authored points are
-   * the editor's placeholders (§33.6), which a world-space line never draws (gather).
+   * the editor's placeholders (§35.6), which a world-space line never draws (gather).
    */
   linkLines(from, to) {
     const def = this.def;
@@ -731,7 +731,7 @@ export class Effect {
         if (mat) sink(entry('trail', i, 0, mat, ov, tr.order, tr.layer, dist, behindUnits(tr.layer, tr.order), this, null));
       }
       const ln = def.line[i];
-      // a world-space line's authored points are the editor's placeholders — fixed spots of the authoring scene (§33.6;
+      // a world-space line's authored points are the editor's placeholders — fixed spots of the authoring scene (§35.6;
       // 溯光星源 S1's chain at world (5, 4) → (6, 3)): drawn only once the game set its end points (linkLines)
       if (ln && ln.enabled && ln.mats[0] != null && (!ln.world || this.linePts.has(i))) {
         const pts = this.linePts.get(i) || ln.points;

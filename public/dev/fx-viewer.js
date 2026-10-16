@@ -1,4 +1,4 @@
-// public/dev/fx-viewer.js — dev viewer of the official battle effects (render/vfx, DESIGN §33): plays any extracted
+// public/dev/fx-viewer.js — dev viewer of the official battle effects (render/vfx, DESIGN §35): plays any extracted
 // prefab key on the board camera (the official battle camera of render/projection.js) with play / pause / step, 1× / 2×
 // (the battle clock), the 完整 / 精简 tiers, a left / right facing and an optional unit whose skin's mount points place
 // the effect (its `_spawnLocation`) — markers show the points. A 2D canvas under the transparent Pixi canvas stands in

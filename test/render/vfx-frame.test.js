@@ -1,4 +1,4 @@
-// test/render/vfx-frame.test.js — the official effects' frames and clips (DESIGN §33.2, §33.10): the Unity battle
+// test/render/vfx-frame.test.js — the official effects' frames and clips (DESIGN §35.2, §35.10): the Unity battle
 // frame ↔ board frame map, the effects' view-projection against render/projection.js's camera (the pixels must agree),
 // Euler / quaternion conventions, clip sampling (transform, active, material, renderer and system bindings; wrap and
 // hold), the mount points of a unit's skin and the board heightfield of the depth pre-pass.

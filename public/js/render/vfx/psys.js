@@ -1,4 +1,4 @@
-// render/vfx/psys.js — a small Unity ParticleSystem interpreter (DESIGN §33.5) for the official battle effects.
+// render/vfx/psys.js — a small Unity ParticleSystem interpreter (DESIGN §35.5) for the official battle effects.
 //
 //   const def = compileSystem(node.particleSystem, node.particleSystemRenderer, res)   shared, immutable per descriptor node
 //   const ps = new PSys(def, { seed, emission })                                        one per effect instance
@@ -298,7 +298,7 @@ export class PSys {
 
   get alive() { return this.playing && (this.emitting || this.count > 0 || this.orphans.length > 0 || this.pending.length > 0); }
 
-  /** Replace a curve field for this instance only (clip bindings, §33.10 'ParticleSystem' paths). */
+  /** Replace a curve field for this instance only (clip bindings, §35.10 'ParticleSystem' paths). */
   overrideField(path, value) {
     const v = num(value, 0);
     const set = (src, key) => {

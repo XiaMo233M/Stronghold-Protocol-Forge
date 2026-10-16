@@ -1,4 +1,4 @@
-// test/render/vfx-funnels.browser.test.js — the 驭械术士's floating units (浮游单元, render/vfx/funnelfx.js, DESIGN §33.18)
+// test/render/vfx-funnels.browser.test.js — the 驭械术士's floating units (浮游单元, render/vfx/funnelfx.js, DESIGN §35.18)
 // in headless Chrome through the dev viewer's skill demo (public/dev/fx-viewer.html ?skilldemo): the real operators'
 // units from the local extraction played through the wiring with hand-stepped frames on a flat grey board →
 // screenshots test/e2e/out/vfx-funnel-<name>.png. Each picture must show the unit's own effects (their keys live,

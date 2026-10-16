@@ -36,7 +36,7 @@ describe('extract.py helpers (no UnityPy needed)', { skip: !PY && 'no python3' }
     assert.deepEqual(mesh.map((j) => j.bundle), [
       'arts/maps/map_autochess/bkg_mesh.ab', 'arts/maps/common/meshes/s_background_common.ab',
       'arts/maps/common/meshes/s_common_box_01.ab', 'arts/maps/common/meshes/s_wind_device.ab',
-      // the official 射击台 model (round 40, DESIGN §32.14.10): only trap_1106_achplat of the 卫戍协议 device bundle
+      // the official 射击台 model (round 40, DESIGN §34.14.10): only trap_1106_achplat of the 卫戍协议 device bundle
       'arts/maps/common/trap/trap_110.ab',
     ]);
     for (const j of mesh) assert.deepEqual(j.kinds, ['GameObject', 'Material', 'Mesh', 'Texture2D']);

@@ -1,4 +1,4 @@
-// render/vfx/mounts.js — where an official effect sits on a unit (DESIGN §33.11 `_spawnLocation`, §33.12 skins): the
+// render/vfx/mounts.js — where an official effect sits on a unit (DESIGN §35.11 `_spawnLocation`, §35.12 skins): the
 // mount points of the unit's skin (in its root frame: Unity axes, through its Graphic node and FaceSwitcher scale),
 // mirrored for a left-facing unit and taken from the Back skeleton for one facing up, placed at the unit's feet in the
 // battle's Unity frame. A point a BoneFollower keeps on a Spine bone (the skin's `bone`: Muzzle, the Special points —
@@ -14,7 +14,7 @@
 //                                        angle, or the point's own rotation when its BoneFollower does not follow it)
 //   POINT_NAMES                          the skin point names tried per point kind (names vary by skin)
 
-/** Point names per kind, in the order tried (§33.12: HitPoint, HeadPoint / HeadAnchor, Muzzle / MuzzlePoint, …). */
+/** Point names per kind, in the order tried (§35.12: HitPoint, HeadPoint / HeadAnchor, Muzzle / MuzzlePoint, …). */
 export const POINT_NAMES = Object.freeze({
   hit: ['HitPoint', 'Hit', 'hitPoint'],
   muzzle: ['Muzzle', 'MuzzlePoint', 'muzzle'],
@@ -49,7 +49,7 @@ export function spawnKind(spawn) {
 }
 
 /**
- * The point kind whose rotation a spawn location also takes (DESIGN §33.11; the client's
+ * The point kind whose rotation a spawn location also takes (DESIGN §35.11; the client's
  * Effect._InitLocationFromEntity): MUZZLE_POINT (3) and the MP_SPECIAL points (_SetPosAndRotToMountPoint) set the
  * effect's rotation to the mount point's; FOOT, HIT, HEAD and MUZZLE_POINT_WITHOUT_ROTATION keep the unit's own
  * (unturned) rotation — their prefabs are pre-tilted for the camera — and the others are no mount point.
@@ -86,7 +86,7 @@ export function setIndexVersion(v) { indexVersion = Number.isInteger(v) && v > 0
  * 10 tokens, 2 operators — are shifted by one constant x / y per skin: the prefab's Spine / FaceSwitcher placement,
  * which the client resets at run time, is part of the extracted composition) is moved back: its HitPoint over the feet
  * at the height it has (y = −0.9 z, the slope of the well-placed skins' hit points), every point by the same shift.
- * [ASSUMED] the shift. Index version 2 drops that placement (DESIGN §33.12 Skin, changelog (9)): nothing to move then.
+ * [ASSUMED] the shift. Index version 2 drops that placement (DESIGN §35.12 Skin, changelog (9)): nothing to move then.
  */
 export function skinShift(skin) {
   if (!skin || !skin.points || indexVersion >= 2) return null;
