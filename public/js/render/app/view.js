@@ -1,10 +1,26 @@
 // public/js/render/app/view.js — which field a camera shows, and the board box that follows it.
 
-import { AREAS, areaFor } from '../board3d/layout.js';
+import { AREAS, areaFor, unionAreas } from '../board3d/layout.js';
 import { layoutOf, mapSize } from '../layout.js';
 import { normRect } from '../projection.js';
 
 const VIEW_KINDS = new Set(['prep', 'normal', 'unite', 'boss', 'bossPrep', 'pen']);
+
+/**
+ * The view kinds that show the enemy preview pen — its 3D block, its 2D rows, its two red gates and its figures: the pen
+ * camera, and the prep camera of the own normal field. In 休整期 the next round's enemies wait in the pen behind the
+ * upper gate, at the top right of the prep view (research 09 §2.1; the maintainer's recording of the official game and
+ * decision of 2026-10-15, which supersedes user playtest #2 item 6 "the pen with the pen camera only"), so 🔍▶▶ pans to
+ * what is already in view. The battle, 联防, boss and hidden cameras never show it (the round's enemies spawn on the
+ * field); nor does the Final Assault / Hidden Core prep ('bossPrep'): its camera frames the boss field, and the pen rows
+ * lie far beyond the top edge of that frame (render/projection.js: at 1280 × 720 pen row 14 projects at y ≈ −170).
+ */
+const PEN_VIEWS = new Set(['prep', 'pen']);
+/** The battle cameras: a flight from the prep camera into one of them drops the pen at once (see `penShown`). */
+const BATTLE_VIEWS = new Set(['normal', 'unite', 'boss']);
+
+/** Does a view kind (viewKind) show the enemy preview pen? */
+export const showsPen = (vk) => PEN_VIEWS.has(vk);
 
 /**
  * The field a camera request actually shows — what render/projection.js presetCamera frames: 'hidden' → 'boss';
@@ -38,8 +54,8 @@ const areaNoPen = (layout) => ({
  */
 export function boardArea(vk, layout = null) {
   const L = layout || layoutOf(null);
-  if (vk === 'pen') return areaFor('normal', L);
-  if (vk === 'prep' || vk === 'normal') {
+  if (vk === 'pen' || vk === 'prep') return areaFor('normal', L);
+  if (vk === 'normal') {
     const a = areaNoPen(L).normal;
     return a.length ? a : areaFor('normal', L);
   }
@@ -61,7 +77,7 @@ export function bandFor(kind, layout = null) {
   const R = L.size[0];
   const wall = bossWallRow(L);
   if (kind === 'boss' || kind === 'hidden' || kind === 'bossPrep') return [0, L.battle.normal.r1 + 1];
-  return kind === 'pen' ? [wall, R - 1] : [wall, L.battle.normal.r1 + 1];
+  return kind === 'pen' || kind === 'prep' ? [wall, R - 1] : [wall, L.battle.normal.r1 + 1];
 }
 
 /**
@@ -73,18 +89,57 @@ export function bandFor(kind, layout = null) {
 export function fieldRows(kind, layout = null) {
   const L = layout || layoutOf(null);
   if (kind === 'boss' || kind === 'hidden' || kind === 'bossPrep') return [L.battle.boss.r0, L.battle.normal.r1 + 1];
-  const top = kind === 'pen' ? L.pen.r1 : L.battle.normal.r1 + 1;
+  const top = kind === 'pen' || kind === 'prep' ? L.pen.r1 : L.battle.normal.r1 + 1;
   return [bossWallRow(L), top];
 }
 
 /** The wall row under the bench, above the boss field (official row 6): `bossDispMaxRow(layout)`. */
 const bossWallRow = (L) => L.battle.boss.r1 + 1;
 
-/** Are the pen's figures shown for a view kind (a camera flight shows them when either end is the pen)? */
-export const penShown = (vk, prevVk = null) => vk === 'pen' || prevVk === 'pen';
+/**
+ * Are the pen's figures (and its block, rows and gates) shown for a view kind — with `prevVk`, during a camera flight
+ * from it? A flight shows the pen when either end does, except a flight from the prep camera into a battle camera: the
+ * pen goes with the battle start (the maintainer: hidden 「最后进入战斗」 — a real battle also empties its figures,
+ * render/app.js enterBattle), not at the end of the flight. A flight away from the pen camera itself keeps it while it
+ * lasts (the camera starts there), and the next prep's flight brings it back at once.
+ */
+export const penShown = (vk, prevVk = null) => showsPen(vk) || prevVk === 'pen' || (prevVk === 'prep' && !BATTLE_VIEWS.has(vk));
 
 /** Is the prep's leader on the boss field shown for a view kind (a flight shows it when either end is the boss-field prep)? */
 export const leaderShown = (vk, prevVk = null) => vk === 'bossPrep' || prevVk === 'bossPrep';
+
+/**
+ * What a camera at rest on view kind `vk` builds and draws: the 3D area (`area`), the drawn 2D rows (`band`), the 2D
+ * board's active field rows (`field`), and whether the pen's figures (`pen`) and the boss-prep leader (`leader`) show.
+ * `layout` is the map's own window (shared/layout.js), as in `boardArea` / `bandFor` / `fieldRows`.
+ * @param {string} vk @param {any} [layout]
+ */
+export function restView(vk, layout = null) {
+  return { area: boardArea(vk, layout), band: bandFor(vk, layout), field: fieldRows(vk, layout), pen: showsPen(vk), leader: leaderShown(vk) };
+}
+
+/**
+ * The same while a camera flies from view kind `prevVk` to `vk`: both ends' areas and rows, so neither field pops out
+ * of view mid-flight — the pen only as `penShown(vk, prevVk)` says (dropped at once by a flight from the prep camera
+ * into a battle). The camera at rest on `vk` applies `restView(vk)` when the flight ends.
+ * @param {string} prevVk @param {string} vk @param {any} [layout]
+ */
+export function flightView(prevVk, vk, layout = null) {
+  const L = layout || layoutOf(null);
+  // 去掉 pen 的那一刀切在**普通场的下缘**（`AREA_NO_PEN.normal` 用的就是它），不是 boss 墙（那是更上面那一行）
+  const noPenRow = L.battle.normal.r1 + 1;
+  const pen = penShown(vk, prevVk);
+  const from = restView(prevVk, L), to = restView(vk, L);
+  const noPen = (r) => [r[0], Math.min(r[1], noPenRow)];
+  const fromArea = pen ? from.area : from.area.filter((a) => a.r1 <= noPenRow);
+  const fb = pen ? from.band : noPen(from.band), ff = pen ? from.field : noPen(from.field);
+  return {
+    area: unionAreas(fromArea, to.area),
+    band: [Math.min(fb[0], to.band[0]), Math.max(fb[1], to.band[1])],
+    field: [Math.min(ff[0], to.field[0]), Math.max(ff[1], to.field[1])],
+    pen, leader: leaderShown(vk, prevVk),
+  };
+}
 
 /** '2d' | '3d' | 'auto' board preference: `?board=` in the page URL (dev), else the view option. */
 export function boardPreference(opt) {

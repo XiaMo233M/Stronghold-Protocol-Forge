@@ -13,7 +13,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { presetCamera, OFFICIAL_PARAMS, parseCameraParam } from '../../public/js/render/projection.js';
-import { bandFor, boardArea, penShown, viewKind, fieldRows } from '../../public/js/render/app.js';
+import { bandFor, fieldRows, boardArea, showsPen, penShown, flightView, viewKind } from '../../public/js/render/app.js';
 import { AREAS } from '../../public/js/render/board3d/layout.js';
 import { underframeRect, warmPlateMasks } from '../../public/js/ui/underframe.js';
 import { panelSide, panelSlots, chessLoadout, prepCamera, bondPopupPlace, BPOP } from '../../public/js/ui/gameLogic.js';
