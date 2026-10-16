@@ -199,6 +199,10 @@ export class Downloader {
     this.keepExisting = !!keepExisting;
     /** @type {Set<string>} the files (paths under root) this run wrote */
     this.written = new Set();
+    /** @type {Set<string>} failed replacements protected from pruning, even without blob provenance */
+    this.preserved = new Set();
+    /** @type {Set<string>} the files (paths under root) this run's bytes were accepted for */
+    this.accepted = new Set();
     this.log = log;
     this.fetch = guardDefaultFetch(fetchImpl);
     // The policy owns the normalized base; a bare assetBase is only used when no shared policy was passed.

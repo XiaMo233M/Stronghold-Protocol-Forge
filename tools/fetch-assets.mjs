@@ -91,6 +91,8 @@ import {
 import { collectLeaves, downloadLeaves, resolveTemplate, totalBytes, contentHash, droppedEntries, MANIFEST_VERSION } from './assets/manifest.mjs';
 import { fontJobs, buildFonts } from './assets/fonts.mjs';
 import { skelParserAvailable } from './assets/skel.mjs';
+import { statsTemplateJobs } from './assets/stats-template.mjs';
+import { SourceVerifier } from './assets/source-verifier.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ASSETS = join(ROOT, 'public', 'assets');
@@ -190,11 +192,12 @@ export function parseArgs(argv) {
   // `jp` is the default dub since 0.9.0 (the released bundle ships Japanese; shared/constants.js DEFAULT_VOICE_LANG):
   // a plain `npm run setup` must plan the same default the committed manifest names, or the two disagree.
   // `strict` 是上游 0.2.3 新增的（PR #421）：把「清单里有、磁盘上没有」的条目从警告升成退出码 1。
-  const o = { concurrency: 16, force: false, offline: false, dryRun: false, refreshIndex: false, prune: false, allowShrink: false, strict: envFlag(process.env.SP_ASSETS_STRICT), addOnly: false, localSpines: false, voiceLang: 'jp', voiceLangs: [], voiceAll: false, help: false, source: process.env.SP_ASSET_SOURCE || 'direct', assetBase: normalizeAssetBase(process.env.SP_ASSET_BASE, 'SP_ASSET_BASE'), indexBase: normalizeAssetBase(process.env.SP_INDEX_BASE, 'SP_INDEX_BASE'), indexTtl: parseTtl(process.env.SP_INDEX_TTL, 'SP_INDEX_TTL'), cacheDir: process.env.SP_CACHE_DIR || DEFAULT_CACHE_DIR };
+  const o = { concurrency: 16, force: false, offline: false, dryRun: false, refreshIndex: false, prune: false, allowShrink: false, strict: envFlag(process.env.SP_ASSETS_STRICT), addOnly: false, localSpines: false, voiceLang: 'jp', voiceLangs: [], voiceAll: false, help: false, source: process.env.SP_ASSET_SOURCE || 'direct', assetBase: normalizeAssetBase(process.env.SP_ASSET_BASE, 'SP_ASSET_BASE'), indexBase: normalizeAssetBase(process.env.SP_INDEX_BASE, 'SP_INDEX_BASE'), indexTtl: parseTtl(process.env.SP_INDEX_TTL, 'SP_INDEX_TTL'), cacheDir: process.env.SP_CACHE_DIR || DEFAULT_CACHE_DIR, sourceSnapshot: '' };
   for (const a of argv) {
     const [k, v] = a.split('=');
     if (k === '--concurrency') o.concurrency = Math.max(1, Math.min(64, parseInt(v, 10) || 16));
     else if (k === '--asset-source') o.source = v;
+    else if (k === '--source-snapshot') { if (!v) throw new Error('--source-snapshot requires a path'); o.sourceSnapshot = a.slice(k.length + 1); }
     else if (k === '--force') o.force = true;
     else if (k === '--offline') o.offline = true;
     else if (k === '--dry-run') o.dryRun = true;
@@ -223,6 +226,7 @@ export function parseArgs(argv) {
     else throw new Error(`unknown option ${a}\n${HELP}`);
   }
   if (o.addOnly && (o.prune || o.force)) throw new Error(`--add-only never deletes or rewrites files: not with --prune / --force\n${HELP}`);
+  if (o.sourceSnapshot && (o.offline || o.addOnly || o.localSpines)) throw new Error('--source-snapshot is incompatible with --offline / --add-only / --local-spines');
   // An untrusted base (a plaintext mirror on the network) must not combine with a flag that shrinks the committed
   // manifest: --prune deletes files and implies --allow-shrink, so untrusted bytes would be allowed to cost every other
   // install the entries of data/assets.json. HTTPS or a loopback source keeps both flags available.
@@ -508,9 +512,10 @@ async function main() {
     readJson('docs/research/05-maps.json'),
   ]);
   const proxyPrefix = resolveProxyPrefix(opts.source, opts.offline);
-  const source = await selectDownloadSource({ mode: opts.source, offline: opts.offline, proxyPrefix, log });
+  const verifier = opts.sourceSnapshot ? new SourceVerifier(JSON.parse(await readFile(opts.sourceSnapshot, 'utf8'))) : undefined;
+  const source = await selectDownloadSource({ mode: opts.source, offline: opts.offline, proxyPrefix, log, verified: !!verifier });
   const mirrorPolicy = new MirrorPolicy({ source, proxyPrefix, assetBase: opts.assetBase, log });
-  const network = { source, proxyPrefix, mirrorPolicy };
+  const network = { source, proxyPrefix, mirrorPolicy, verifier };
   const { audioData, modelsData, charword } = await loadIndexes(ROOT, { refresh: opts.refreshIndex && !opts.offline, offline: opts.offline, ttlHours: opts.indexTtl, indexBase: opts.indexBase, cacheDir: CACHE, log, ...network });
   const audio = indexAudio(audioData);
   // The game data built by tools/build-data.mjs (when present) may reference more
@@ -522,6 +527,7 @@ async function main() {
   for (const b of Object.values(dataBosses || {})) if (b?.enemyKey && typeof b.handbookId === 'string') extraHandbook[b.enemyKey] = b.handbookId;
   const localEnemySpines = await syncLocalSpines(opts, 'enemy');
   const localTokenSpines = await syncLocalSpines(opts, 'token');
+  const statsTemplate = await statsTemplateJobs(ROOT, { offline: opts.offline || opts.dryRun, log });
   const plan = buildPlan({
     assets07, ops03, enemies05, maps05, audio, modelsData, charword, voiceLang: opts.voiceLang,
     voiceLangs: opts.voiceLangs,

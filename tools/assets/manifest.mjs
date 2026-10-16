@@ -101,7 +101,7 @@ export async function downloadLeaves(leaves, dl, root, label = 'files') {
  *   manifest loses here (a subset of `misses`, which also names the unresolved Spine models) — what a caller reports
  *   as dropped, and what --strict fails on.
  */
-export function resolveTemplate(template, { root, spine, sourceOf = () => undefined, assetBase = '' }) {
+export function resolveTemplate(template, { root, spine, sourceOf = () => undefined, assetBase = '', available = () => true }) {
   const misses = [];
   const droppedLeaves = [];
   const fallbacks = [];
@@ -112,7 +112,7 @@ export function resolveTemplate(template, { root, spine, sourceOf = () => undefi
     if (isLeaf(node)) {
       for (let i = 0; i < node.alts.length; i++) {
         const a = node.alts[i];
-        if (existsSync(join(root, a.rel))) {
+        if (available(a.rel) && existsSync(join(root, a.rel))) {
           const src = sourceOf(a.rel);
           // Provenance only: disabling/changing a proxy or a CDN base does not change the
           // identity of a previously downloaded asset. The candidates are compared on both
