@@ -11,7 +11,7 @@ import { zipFiles } from '../../server/plugins/zip.js';
 
 const ENABLED = process.env.SP_E2E === '1' && hasChrome();
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const SKIN = path.join(ROOT, 'test', 'fixtures', 'forge', 'skin-pack');
+const SKIN = path.join(ROOT, 'test-data', 'forge', 'skin-pack');
 
 describe('Forge import in the studio page', { skip: !ENABLED && 'set SP_E2E=1 (and have Chrome)' }, () => {
   test('open the dialog, preview a zip, confirm, and see the plugin in the list', { timeout: 120000 }, async () => {

@@ -1,5 +1,8 @@
 // test/plugins/forgeImport.test.js — Forge workshop import (DESIGN §34.12, docs/PLUGINS.md §16).
-// The three packs under test/fixtures/forge/ are written for this test (no official art, nothing copied from Forge).
+// The three packs under test-data/forge/ are written for this test (no official art, nothing copied from Forge).
+// They live OUTSIDE test/ on purpose: `node --test` collects every .js under test/, and these packs carry deliberate
+// bait files (`kits/boom.js` etc.) that write to /tmp when executed — a real .js kit that a Forge import must never
+// run. Under test/ the runner would execute them itself and the suite would report ENOENT for /tmp.
 // The chess, official-kit and kit packs of round 43 are written inline into temporary folders: a kit is a .js file,
 // and `node --test` runs every .js under test/ (an `@kit/…` import would fail it there). Their numbers are made up;
 // only official ids (skills, kits, bonds, garrisons) are real.
@@ -27,7 +30,7 @@ import { DataSource } from '../../server/sim/simdata.js';
 import { setGameData } from '../../server/sim/content/support/index.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const FIXTURES = path.join(ROOT, 'test', 'fixtures', 'forge');
+const FIXTURES = path.join(ROOT, 'test-data', 'forge');
 const BAIT = '/tmp/sp-forge-bait-wp-h.txt';
 const vanilla = readVanillaAssets(path.join(ROOT, 'data'));
 

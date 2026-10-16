@@ -11,7 +11,7 @@ import { startServer } from '../../server/index.js';
 import { zipFiles } from '../../server/plugins/zip.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const SKIN = path.join(ROOT, 'test', 'fixtures', 'forge', 'skin-pack');
+const SKIN = path.join(ROOT, 'test-data', 'forge', 'skin-pack');
 
 function packZip(dir) {
   const files = [];
