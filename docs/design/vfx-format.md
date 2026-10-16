@@ -1,4 +1,4 @@
-# DESIGN §33 — Official battle effects (特效): the extracted format
+# DESIGN §35 — Official battle effects (特效): the extracted format
 
 Part of [DESIGN.md](../DESIGN.md) (the index; section numbers are global).
 
@@ -104,7 +104,7 @@ Part of [DESIGN.md](../DESIGN.md) (the index; section numbers are global).
   changed.
 * **2026-10-14 — Phase 1a**: the format and the sample.
 
-## 33. Official battle effects — the extracted format (0.3.0, Phase 1a–1d)
+## 35. Official battle effects — the extracted format (0.3.0, Phase 1a–1d)
 
 The official battle effects (hit sparks, projectiles, cast flashes, status loops, skill effects) are Unity prefabs of
 ParticleSystems, meshes, trails and small behaviour scripts. `tools/local-extract/fx.py` (run as `extract.py --only fx`)

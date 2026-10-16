@@ -40,5 +40,7 @@ normative lines it rewrote).
 | §31 | [history/0.2.4.md](history/0.2.4.md) | 0.2.4 — after the 0.2.3 release (2026-10-11) |
 | §32 | [history/0.2.5.md](history/0.2.5.md) | 0.2.5 — after the 0.2.4 release (2026-10-12) |
 | §33 | [history/0.2.6.md](history/0.2.6.md) | 0.2.6 — after the 0.2.5 release (2026-10-13) |
+| §34 | [history/0.3.0.md](history/0.3.0.md) | 0.3.0 — the plugin system (2026-10-14) |
+| §35 | [design/vfx-format.md](design/vfx-format.md) | Official battle effects: the extracted format (0.3.0, Phase 1a–1d) |
 
 Supplementary (no section numbers of its own): [RECORDS.md](RECORDS.md) — 对局战绩与可选账号（`SP_ACCOUNTS=1`）。
