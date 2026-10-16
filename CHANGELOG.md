@@ -75,7 +75,7 @@
 
 | 卷 | 版本（新 → 旧） | 日期 | 文件 |
 |---|---|---|---|
-| **顶层** | 0.18.6 · 0.18.5 · 0.18.4 · 0.18.3-0.2.6 · 0.18.3-0.2.5 · 0.18.2-0.2.5 · 0.18.1-0.2.5 · 0.18.0-0.2.5 · 0.17.0-0.2.4 · 0.16.0-0.2.4 | 2026-10-12 – 2026-10-14 | 本文 |
+| **顶层** | 0.19.0 · 0.18.6 · 0.18.5 · 0.18.4 · 0.18.3-0.2.6 · 0.18.3-0.2.5 · 0.18.2-0.2.5 · 0.18.1-0.2.5 · 0.18.0-0.2.5 · 0.17.0-0.2.4 · 0.16.0-0.2.4 | 2026-10-12 – 2026-10-16 | 本文 |
 | 0.15 | 0.15.3-0.2.4 · 0.15.2-0.2.4 · 0.15.1-0.2.4 · 0.15.0-0.2.4 | 2026-10-11 – 2026-10-12 | [docs/changelog/0.15.md](docs/changelog/0.15.md) |
 | 0.14 | 0.14.0-0.2.4 · 0.14.0 | 2026-10-10 – 2026-10-11 | [docs/changelog/0.14.md](docs/changelog/0.14.md) |
 | 0.13 | 0.13.1 · 0.13.0 | 2026-10-10 | [docs/changelog/0.13.md](docs/changelog/0.13.md) |
@@ -97,6 +97,101 @@
 > 要看就回源码仓库。
 
 ---
+
+## 0.19.0 — 2026-10-16
+
+**上游游戏本体从 0.2.6 抬到 0.3.0：插件系统与官方战斗特效两套能力整份进来，节号随之与上游永久分叉。**
+`APP_VERSION` 由 `0.18.6` 抬到 `0.19.0`（`CACHE_NAME` 认这个数，旧缓存因此自然换名）。
+`UPSTREAM_VERSION` 由 `'0.2.6'` 抬到 `'0.3.0'`（`docs/history/0.3.0.md` 随之落地，见下）。
+`PROTOCOL_VERSION`（`2`）与 `MOD_API_VERSION`（`1`）**一个都没动** —— 本版是**新增能力与吸收下游改动**，
+没有改推送帧的形状，**不需要 `golden:update`**。发行 tag 将是 `v0.19.0-0.3.0`。
+
+### 上游 0.3.0 全份合入（`0bfe3727`）
+
+- 上游这一版是 **909 个文件 / +119621 −9324 行**（以 `git diff` 为准）。上游更新包 `UPDATE.json` 只记一部分，
+  一律以 diff 为准（与 0.18.3-0.2.6 那一节同口径）。
+- **两套新能力落进本仓**：**插件系统**（上游 `§32` = 我们 **§34**）与**官方战斗特效**（上游 `§33` = 我们 **§35**）。
+  前者是「一个自带入口的功能包」，后者是官方特效文件的提取格式；两份章节分别在
+  [docs/history/0.3.0.md](docs/history/0.3.0.md) 与 [docs/design/vfx-format.md](docs/design/vfx-format.md)，
+  索引在 [docs/DESIGN.md](docs/DESIGN.md) 的章节表。
+
+### 节号与上游永久分叉：我们比上游大 2
+
+- ⚠️ **我们自己的章节号是全局的，且从插入的 `§28` / `§29` 起就比上游大 2** ——
+  上游 `§N` 是**我们**的 `§(N+2)`。所以上游 `§32`（插件系统）在这里是 **§34**、
+  上游 `§33`（官方特效）在这里是 **§35**。**引用一律用我们的号**。
+- 本版把散在代码、测试与文档里的 `§32` / `§33` 引用**逐条改号成 `§34` / `§35`**
+  （带 `§` 前缀的 **310 条**账 + 裸号 **123 条**），并**新增「标题号唯一性」守卫**：
+  [test/docs-paths.test.js](test/docs-paths.test.js) 断言每个 `N` / `N.M` / `N.M.K` 标题号**只有一个家**
+  —— 改号最怕的是两个号撞进同一篇，这条判据就是为了让它当场红，而不是等读者发现。
+
+### 吸收下游 fork 的四格声明面
+
+下游分支先做了、本版吸收进来的四条（每条都有设计稿与判据）：
+
+- **`pack.json.matchKinds`**（**§28.54**）—— 第二种对局的**声明面**，不是分派表：管理器不认玩法名，
+  `host.matchKinds()` 只交出冻结的只读数据，判定住在包自己的 `matchClass` 包装器里。
+- **`pack.json.client.screens[]`**（**§28.55**）—— 包可以自带整屏界面（`{ id, route, module, order?, styles?, data?, messages? }`）。
+- **`server.modules[].lane`**（**§28.56**）—— 服务端模块多一种挂载点，`SERVER_MODULE_USES` 因此 **6 → 7**。
+- **`server.room.hold`**（**§28.57**）—— 房间侧的新声明面。
+
+### mod 层契约面扩大（都是实测数）
+
+- **kit 白名单 20 → 22 条**：新开 `@sim/body.js` 与 `@sim/professions.js`；
+  官方 ops kit 的 **8 条一条不少**（`@ops/` 是命名空间，准入始终按文件）。
+- **`PACK_FIELDS` 37 → 38**：`pack.json` 的顶层键闭集多一格。
+- **`SERVER_MODULE_USES` 6 → 7**：尾巴就是上面那条 `lane`。
+
+### i18n：四语各补 540 条（`b13d80b6`）
+
+- 合入漏掉的译文一次补齐：`en` / `ja` / `ko` / `zh-TW` **各 +540 条**（`b13d80b6`：4 个文件 `+2164 −4`）。
+- 现在四语种各自 **2096 条 msgid，翻译 100 %**：`node tools/i18n.mjs check --all --strict` **exit 0**
+  （`2096/2096`，`0 missing / 0 errors`）。
+- ⭐ **并修回合入过程中从界面条目里删掉的两条**：`[撤退选中干员]` 与 `[出售选中干员]` —— 缺了它们，
+  界面上会直接露原文；两条已在四个语言包里补齐。
+
+### 合入的丢失账：新增行零丢失，被删条目曾丢 2 条、已还原
+
+- **对新增行零丢失**：上游这一版带进来的每一行都在。
+- ⚠️ **对被删条目曾丢 2 条**：合入过程中有两条既有条目被上游的删除带走了，**已还原** ——
+  就是上面 i18n 那一节的那两条。**不写「零丢失」**：账要按这两个方向分开记。
+
+### 兼容性：合入前后对照实测，未发现兼容性回归
+
+口径是**合入前后的对照**（同一批包，改前跑一遍、改后跑一遍，比结果）：
+
+- **线上真包闸门**（[`.github/pack-compat.mjs`](.github/pack-compat.mjs)）：我方包 `--mine-only`（34 条）⇒ `{"VALID":34}`、**exit 0**；
+  全量 functional（60 条）⇒ `{"VALID":58,"NO_PACK_JSON":1,"ZIP_REFUSED":1}`、**exit 0**。
+- **本机 mod 库 before/after**（**91 条共同 id**）：`class` 变化 **0** · `errors`/`warnings` 变化 **0** ·
+  `firstErrorCode` 变化 **0** · `sha256` 变化 **0**。
+- **官方素材派生**（`GAME_ASSET` 6 条）：**全部 `pack-clean`**，前后一字未变。
+
+⇒ 结论按实测写：**未发现兼容性回归**（不是「零回归」——那是对未测面的断言）。
+
+### 工具与文档
+
+- [`.github/pack-compat.mjs`](.github/pack-compat.mjs)：把 `flagged` 的包**一起测**（此前漏测）、
+  id 规则**改用引擎的 `PACK_ID_RE`**（别再在工具里抄一份）、并给 3 处 `spawnSync` 补 `windowsHide: true`
+  —— 最后这条修的是**工具自身的弹窗根因**。
+- [tools/package-server.mjs](tools/package-server.mjs)：**服务器轻量发行**（只有游戏运行时与 Mod API，
+  不带本机素材、不带随包内容）。
+- 三份新文档：[docs/DEPLOY-SERVER.md](docs/DEPLOY-SERVER.md)（怎么跑服务器发行）、
+  [docs/UPSTREAM-PR-LEDGER.md](docs/UPSTREAM-PR-LEDGER.md)（我们发给上游的、以及回来的）、
+  [docs/ENGINE-COMPAT-STARDUST-AUDIT.md](docs/ENGINE-COMPAT-STARDUST-AUDIT.md)（Forge / Stardust 兼容审计）。
+
+### 判据与已知的既存红灯
+
+- 版本与文档闸门（本版直接相关）：`node --test --test-concurrency=4 test/version.test.js
+  test/docs-consistency.test.js test/promptBaseline.test.js test/docs-paths.test.js` ⇒
+  **47 tests · 47 pass · 0 fail**（exit 0）。**golden 六族零差异**（`node tools/golden.mjs --jobs 4` ⇒
+  `roster 49 · bonds 46 · fields 22 · matches 21 · standins 10 · diy 140`，**288 个场景全部 match**，exit 0）。
+- 全量：`node --test --test-concurrency=4` ⇒ **10273 tests · 10181 pass · 74 fail · 18 skipped**。
+- ⚠️ **那 74 条不是本版引入的**：把本版的改动整份移开、在**同一个 HEAD（`f7936199`）**上重跑，
+  得到**逐条同名**的 **89 个失败用例**（同名集合完全一致，只有耗时不同）—— 也就是说这些红灯在
+  0.3.0 合入时就已存在，本版既没加重也没修掉它们。**这里如实记下来，不粉饰**。
+- 同类既存红灯还有 CI 的 `typecheck`：`tools/ci.mjs --only …` 的 `setup` / `smoke` / `lint` / `imports`
+  四步 **ok**，`typecheck` 报 **6 个既存 TS 错**（`shared/formProjection.js` 4 个、`shared/morph.js` 2 个），
+  移开本版改动后**逐条相同** ⇒ 同样是既存问题，与本版无关。
 
 ## 0.18.6 — 2026-10-14
 
