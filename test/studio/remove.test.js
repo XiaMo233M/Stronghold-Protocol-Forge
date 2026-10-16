@@ -1,4 +1,4 @@
-// test/studio/remove.test.js — the studio's 删除所选 (POST /studio/api/plugins/remove; DESIGN §32.14.34, docs/PLUGINS.md
+// test/studio/remove.test.js — the studio's 删除所选 (POST /studio/api/plugins/remove; DESIGN §34.14.34, docs/PLUGINS.md
 // §15): each plugin folder named moves to plugins/_removed/<id>-<time>/ (nothing deleted: moving it back restores it) and
 // the registry no longer lists it; several go at once; an id that is no plugin folder right inside plugins/ (an invalid id,
 // a missing folder, another case of a name, a '_' or dot folder, a symbolic link), a plugin an open room uses — its match

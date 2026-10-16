@@ -137,7 +137,7 @@ export const ASSET_CONTAINERS = Object.freeze(/** @type {AssetContainer[]} */ ([
   { path: ['audio', 'bossBgm'], record: 'track' },
   { path: ['audio', 'voice'], record: { each: 'audioList', key: SLOT } },
   { path: ['audio', 'voiceJp'], record: { each: 'audioList', key: SLOT } },
-  // the other official dubs of round 40 (DESIGN §32.14.11): English, Korean, the operator's own-language dub
+  // the other official dubs of round 40 (DESIGN §34.14.11): English, Korean, the operator's own-language dub
   { path: ['audio', 'voiceEn'], record: { each: 'audioList', key: SLOT } },
   { path: ['audio', 'voiceKr'], record: { each: 'audioList', key: SLOT } },
   { path: ['audio', 'voiceNative'], record: { each: 'audioList', key: SLOT } },

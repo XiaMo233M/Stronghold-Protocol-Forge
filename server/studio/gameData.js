@@ -56,7 +56,7 @@ export const jsonText = value => `${JSON.stringify(value, null, 2)}\n`;
 export const clone = value => JSON.parse(JSON.stringify(value));
 export const localId = id => id.replaceAll('-', '_');
 export function templateFile(folder, rel) {
-  // [ASSUMED] SP_PLUGIN_RESOURCES selects bundled author resources outside the writable plugins volume (DESIGN §32.9.2).
+  // [ASSUMED] SP_PLUGIN_RESOURCES selects bundled author resources outside the writable plugins volume (DESIGN §34.9.2).
   if (process.env.SP_PLUGIN_RESOURCES) return fs.readFileSync(path.join(process.env.SP_PLUGIN_RESOURCES, '_template', folder, rel), 'utf8');
   return fs.readFileSync(new URL(`../../plugins/_template/${folder}/${rel}`, import.meta.url), 'utf8');
 }

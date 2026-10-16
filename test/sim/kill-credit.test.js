@@ -30,7 +30,7 @@ test('actual kill credit follows the killer, including another player\'s leaked 
     assert.equal(result.perPlayer.helper.killed, 0, 'existing wave-owned count unchanged');
     if (kind !== 'unite') assert.equal(result.perPlayer.other.killed, 1);
     assert.equal(compactResult(result).perPlayer.helper.creditedKills, 1);
-    // statistics only: the verification digest leaves the credit out (DESIGN §32.14.16), so it never splits two digests
+    // statistics only: the verification digest leaves the credit out (DESIGN §34.14.16), so it never splits two digests
     assert.equal(resultDigest(result).hash, resultDigest({ ...result, perPlayer: { ...result.perPlayer, helper: { ...result.perPlayer.helper, creditedKills: 2 } } }).hash);
   }
 });

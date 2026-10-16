@@ -1,4 +1,4 @@
-// test/match/bond-light-up.test.js — onActiveBonds (docs/META.md §2.2, DESIGN §32.14.31): PlayerState.recompute reports
+// test/match/bond-light-up.test.js — onActiveBonds (docs/META.md §2.2, DESIGN §34.14.31): PlayerState.recompute reports
 // a change of the set of active bonds, and the layer milestones owed while a bond was inactive pay as soon as it lights
 // up. The maintainer's report of 2026-10-15: with 25+ 维多利亚 layers gathered while the bond was off, the 维式重锤
 // came only at a later hook (often the prep end); in the official game it arrives the moment the bond lights up — here

@@ -2,7 +2,7 @@
 // 维多利亚 pays 战栗维式重锤 when a <休整期结束时> layer gain (刺玫 / 薄绿 / 维娜, 助力) crosses a milestone while it is active;
 // merging in that call used to detach the equipped copy before the fight. [ASSUMED] every grant while that dispatch is
 // on the stack, not only this hammer. (Milestones owed while it was inactive pay as soon as it lights up — onActiveBonds,
-// DESIGN §32.14.31, test/match/bond-light-up.test.js — so a prep-end payment is one that a prep-end gain crosses.)
+// DESIGN §34.14.31, test/match/bond-light-up.test.js — so a prep-end payment is one that a prep-end gain crosses.)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRegistry } from '../../server/match/effectsMeta.js';

@@ -1,4 +1,4 @@
-// public/studio/js/remove.js — 删除所选 (DESIGN §32.14.34, docs/PLUGINS.md §15): the plugins checked in the list move to
+// public/studio/js/remove.js — 删除所选 (DESIGN §34.14.34, docs/PLUGINS.md §15): the plugins checked in the list move to
 // plugins/_removed/ after a confirmation that names them (POST /studio/api/plugins/remove — nothing is deleted: moving a
 // folder back restores it); a plugin the server leaves where it is (one a room uses, a symbolic link, one already gone) is
 // shown with its reason from the error catalogue (shared/plugins/errors.js). The list's checkboxes are main.js's.

@@ -244,7 +244,7 @@ export class PlayerEconomy {
     if (free) this.shop.freeRefreshes--;
     else this.spend(price);
     // A manual refresh cancels the freeze: the new cards are not frozen (official, the owner's play of 2026-10-14;
-    // GitHub #584, DESIGN §32.14.7). A refresh that fails (funds, phase) returns above and leaves the freeze on.
+    // GitHub #584, DESIGN §34.14.7). A refresh that fails (funds, phase) returns above and leaves the freeze on.
     this.shop.frozen = false;
     this.rollShop({ keepFrozen: false });
     this.stats.refreshes++;

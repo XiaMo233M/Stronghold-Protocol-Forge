@@ -309,7 +309,7 @@ describe('in-match UI (mock harness, headless Chrome)', { skip: !ENABLED && 'set
     } finally { await page.close(); }
   });
 
-  // Q / X act on the HOVERED operator (PR #629, DESIGN §32.14.22): no click needed, a selection alone does nothing
+  // Q / X act on the HOVERED operator (PR #629, DESIGN §34.14.22): no click needed, a selection alone does nothing
   test('prep: Q retreats and X sells only the hovered operator', async () => {
     const { page, problems } = await open('phase=PREP', { render: 'fallback' });
     const initial = await mockState(page);

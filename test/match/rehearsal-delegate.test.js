@@ -383,7 +383,7 @@ test('the task carries the server\'s own candidates: seeds, wave, cap and the sc
     assert.equal(spec.players.length, 1);
     assert.equal(spec.players[0].playerId, frame.playerId);
     assert.ok(spec.spawns.length > 0 && spec.routes.length > 0);
-    // 0.3.0 preview inputs (DESIGN §32.14.5): the normal field seed and layer gains, not the 0.2.6 rehearse: seed
+    // 0.3.0 preview inputs (DESIGN §34.14.5): the normal field seed and layer gains, not the 0.2.6 rehearse: seed
     const bot = h.m.players.get(frame.playerId);
     assert.equal(spec.seed, deriveSeed(h.m.seed, `n:${h.m.round}:${bot.seat}`));
     assert.equal(spec.flags.layerGainsEnabled, true);

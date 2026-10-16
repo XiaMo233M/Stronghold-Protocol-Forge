@@ -1140,7 +1140,7 @@ function distinctPlans(plans) {
 
 /**
  * One candidate's battle options: the round's enemies against a detached copy of the plan's board.
- * `Match._normalOpts(..., { preview: true })` (DESIGN §32.14.5): the normal field seed, start effects, enemy
+ * `Match._normalOpts(..., { preview: true })` (DESIGN §34.14.5): the normal field seed, start effects, enemy
  * replacements and layer gains, on an isolated dispatcher. The live board, funds, layers and the room's script
  * budget are not touched. A delegated rehearsal turns the same object into a BattleSpec.
  * @returns {object}

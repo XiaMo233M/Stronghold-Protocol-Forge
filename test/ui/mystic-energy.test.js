@@ -1,4 +1,4 @@
-// test/ui/mystic-energy.test.js — 设置「秘术师能量」 (PR #636 by @zasx77771, GitHub #633, DESIGN §32.14.28): a 秘术师's
+// test/ui/mystic-energy.test.js — 设置「秘术师能量」 (PR #636 by @zasx77771, GitHub #633, DESIGN §34.14.28): a 秘术师's
 // stored attack energies as stored/cap under the bars are not part of the official HUD — the client shows them as an
 // effect on the operator — so the count is an option, off by default (the maintainer's decision of 2026-10-15, like
 // 「弹药数量」). Settings normalisation, the dialog's toggle and its hint in every language pack, the field view's live

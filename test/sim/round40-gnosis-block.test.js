@@ -67,7 +67,7 @@ test('灵知 does not hit the tile behind 魔王 (offset [-1, -2] is outside y-6
 });
 
 test('the video: the enemy held on 魔王\'s gate side; 灵知 one column right of her misses it, 灵知 above her hits it', () => {
-  // round 40 (DESIGN §32.14.9): the red heavy sat on 魔王's gate side at contact (x ≈ 3.3, tile (9,3))
+  // round 40 (DESIGN §34.14.9): the red heavy sat on 魔王's gate side at contact (x ≈ 3.3, tile (9,3))
   const video = layout(5, 'left');
   assert.ok(Math.abs(video.dx + 0.7) < 0.05, `dx ${video.dx}`);
   assert.equal(video.tileC, 3);

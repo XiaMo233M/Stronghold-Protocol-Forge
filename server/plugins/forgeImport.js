@@ -961,7 +961,7 @@ export function planForgeImport(files, { id: idOverride, contentId, dataDir, van
   if (isObj(pack.voiceLangs)) {
     for (const [lang, block] of Object.entries(pack.voiceLangs)) {
       const code = canonicalLang(lang);
-      // the dubs with a table here (round 40, DESIGN §32.14.11): 中文 audio.voice, 日本語 voiceJp, English voiceEn, 한국어 voiceKr
+      // the dubs with a table here (round 40, DESIGN §34.14.11): 中文 audio.voice, 日本語 voiceJp, English voiceEn, 한국어 voiceKr
       const tree = code === 'zh' || code === 'cn' ? 'voice' : code === 'ja' || code === 'jp' ? 'voiceJp' : code === 'en' ? 'voiceEn'
         : code === 'ko' || code === 'kr' ? 'voiceKr' : null;
       if (tree === 'voice') {

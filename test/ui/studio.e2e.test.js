@@ -10,7 +10,7 @@
 // sees the plugins with the bar that asks for it; pasting the printed address there makes the page whole. The same page
 // through a public address — a tunnel or proxy on this machine forwarding a visitor — and through a foreign Host name is
 // the 404 page. No console or page error.
-// 删除所选 (DESIGN §32.14.34): plugins checked in the list (a click, the keyboard, 全选 / 清除选择) → the confirmation names
+// 删除所选 (DESIGN §34.14.34): plugins checked in the list (a click, the keyboard, 全选 / 清除选择) → the confirmation names
 // them and where they go (Escape cancels, nothing moves) → confirmed: they move to plugins/_removed/, the list follows,
 // the one open on the right closes, the note above the list says what went and takes the focus; one a room uses stays,
 // shown with its reason (the room's code), and stays checked.
