@@ -35,6 +35,14 @@ __pycache__/
 # (the server answers /packs/index.json itself; tools/package.mjs writes this file into the release zips) -----------
 packs/index.json
 
+# --- plugins (docs/PLUGINS.md): a server's own plugins and its policy file live in plugins/ and are never committed;
+# only the folder's readme, its guide for AI agents (AGENTS.md) and the templates (plugins/_template/, from P1) are tracked — and
+# so ship (tools/package.mjs); plugins/_dist/ (packed zips) and plugins/_moved/ (files the studio moved out) stay ignored
+plugins/*
+!plugins/README.md
+!plugins/AGENTS.md
+!plugins/_template/
+
 # --- tests & logs ----------------------------------------------------------------------------------
 test/e2e/out/
 logs/

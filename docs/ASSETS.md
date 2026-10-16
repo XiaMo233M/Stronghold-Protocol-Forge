@@ -83,6 +83,60 @@ npm run assets       # = node tools/vendor.mjs && node tools/fetch-assets.mjs
 | `--add-only` | For a checkout whose `public/assets/` and `public/fonts/` are shared with another one (a git worktree with symlinked asset folders): download only the files missing on disk and never re-download, rewrite or delete an existing file — atlases already on disk are left as they are, the fonts are not rebuilt (the manifest keeps its current `fonts`). Not with `--prune` / `--force`. |
 | `--local-spines` | Rewrite `tools/assets/local-enemy-spines.json` and `tools/assets/local-token-spines.json` (the metadata of the enemy and token models only the local client has, see "Enemy aliases" and "Token models from the local client") from the models `tools/local-extract/extract.py` extracted to `public/assets/local/spine/enemy/` and `public/assets/local/spine/token/`. Run it after a game update changed them; without it the committed files are used and a differing extraction only gets a warning. |
 
+### Source snapshot verification
+
+`node tools/fetch-assets.mjs --source-snapshot=/path/to/sources.json` enables content verification for upstream
+downloads and cached JSON indexes. Without it, the existing size/format reuse policy is unchanged.
+The snapshot is supplied by the caller, with one entry for each source repository and branch used by the current plan:
+
+```json
+{
+  "owner/repo@branch": {
+    "commit": "1111111111111111111111111111111111111111",
+    "tree": "2222222222222222222222222222222222222222"
+  }
+}
+```
+
+Both identifiers must be full 40-character hexadecimal Git SHAs. The caller must supply the root tree belonging to
+that commit. Candidate URLs and their order still come from the generator, not from an old ledger. GitHub's tree API
+resolves each candidate to a blob at the supplied tree; truncated recursive results are discarded and lookup walks
+complete nonrecursive subtrees (at most 64 path segments). Complete trees are memoized within the run.
+Failed nonrecursive lookups can retry on the next lookup; failed recursive probes remain cached and use the subtree fallback.
+Payload requests use the pinned commit through the selected direct/mirror policy. A payload must pass both existing
+format checks and `SHA1("blob " + byteLength + "\0" + rawBytes)` comparison with the authoritative blob. A same-size
+stale mirror response is rejected and the next transport is tried. Matching untransformed local bytes are reused,
+including across source revisions, and the ledger is updated even on a skip. Ledger URLs retain the logical source
+branch for cache grouping and Spine page lookup, rather than the mirror or pinned transport URL.
+
+JSON indexes are verified before parsing or planning. Missing snapshot entries, unsupported source URLs, malformed
+API responses and API failures fail closed; they do not allow stale indexes to drive the plan. Failed asset replacements,
+including confirmed source absence and HTTP 404/410, preserve existing bytes and ledger records. `--prune` protects
+these paths across all consumers, even when an older ledger has no blob record. Preservation alone does not authorize
+publication: only files matching the current source blob or revalidated against a previous ledger blob can enter the
+rebuilt manifest. Legacy files without that proof remain on disk for retry, excluded from the manifest and post-processing.
+When a transient error blocks later alternatives, `--prune` preserves their cached files without publication approval.
+Unattempted cached alternatives cannot enter the rebuilt manifest. A verified run exits 1 on
+download errors or font-generation errors; missing optional sources still follow the existing fallback/drop rules,
+and `--strict` rejects dropped leaves. The manifest shrink guard remains in effect.
+
+Mutable atlases are downloaded and verified in raw form on each verified run, then normalized by the existing Spine
+pipeline. Atlas page discovery, normalization and skeleton parsing (including parse-cache reuse) require accepted inputs;
+every texture page must also be accepted. A previously normalized atlas that no longer matches its raw blob is preserved
+on failure but cannot be used until a verified raw replacement arrives. Pruning defers deletion within a failed model's
+directory, preserving old extra pages without using a rejected atlas for page discovery.
+Font originals use the same verifier and accepted file set. Accepted originals reuse matching WOFF2 outputs;
+rejected originals keep existing WOFF2 files on disk but do not enter the new font manifest or generated CSS.
+If no font is accepted, the existing `fonts.css` is left untouched and no CSS is published in the new manifest.
+When accepted fonts generate CSS, replacement is atomic and includes only those fonts.
+Local-client extraction overlays are not upstream downloads and are outside this check.
+
+`--offline`, `--add-only` and `--local-spines` are incompatible with verification. `--dry-run` still verifies the indexes
+needed to produce the plan, but does not verify asset payloads. `GH_TOKEN`, when set, authenticates only requests to
+`api.github.com`; API redirects are rejected and the token is never sent to raw sources or mirrors.
+
+### Manifest guards and default download policy
+
 **The manifest never shrinks by accident.** An entry whose files are missing on this machine is left out of a rebuilt
 manifest, so a run where some downloads failed (or whose upstream audio / model index lost them) would drop entries that
 every other install still has from the committed `data/assets.json` (a pull request once carried such a manifest, 42
@@ -245,6 +299,7 @@ node tools/fetch-assets.mjs --cache-dir=D:\sp-cache  # an absolute path
 | Band (strategy) icons | AA2 `…/arts/bandicon/` | `band/{bandId}.png` |
 | Profession, sub-profession and battle-card icons | AA2 `arts/profession_hub`, `arts/ui/subprofessionicon`, `ui_battle_new/battlecard` | `prof/icon_{p}.png`, `prof/large_{p}.png`, `prof/battlecard_{p}.png`, `prof/sub/{subProfessionId}.png` |
 | UI sprites (see below) | AA2 `ui/autochess/**`, `arts/**`, `activity/[uc]act2autochess/**`, `battle/[pack]common/sprites` | `ui/{group}/{key}.png` |
+| Statistics artwork and fonts | [Official statistics template](https://ak-webview.hypergryph.com/autoChess/act1autochess) | `ui/statistics/`; fetched by asset setup, or separately with `node tools/fetch-stats-assets.mjs` |
 | The 36 battle emotes and the 19 玩法说明 (tutorial) pages, which `tools/local-extract` also extracts (GitHub issue #42: without the local client a server showed default emote icons) | AA2 `cn` `ui/emoticon/theme/[uc]{themeId}/icon/{picId}.png` (`shared/constants.js EMOTE_CATALOG`) and `arts/guidebookpages/[pack]autochess/{key}.png` (1024², shown at 16:9 like the local copies) | `ui/emoticon/{dir}/{picId}.png`, `ui/guide/{key}.png` |
 | Operator battle Spine (Front, Back) | fexli/ArknightsResource `spine/{id}/{id}/{Front,Back}/` | `spine/op/{charId}/{front,back}/{stem}.{skel,atlas,png}` |
 | Token Spine | fexli: the default model, or else the first skin variant (`spine/{tokenId}/{variant}/Spine/`) | `spine/token/{tokenId}/{stem}.*` |
@@ -315,7 +370,9 @@ All paths are URL paths relative to the site root, for example `/assets/char/ava
   hash: 'a1b2c3d4e5f6',             // content hash (cache busting)
   generator: 'tools/fetch-assets.mjs',
   stats: { files, bytes, chars, charsWithBack, enemies, enemiesWithSpine, tokens, tokensWithSpine,
-           spineModels, bonds, items, bands, skills, modules, ui, sfxUnits, voiceChars, voiceJpChars },
+           spineModels, bonds, items, bands, skills, modules, ui, sfxUnits, voiceChars, voiceJpChars,
+           voiceEnChars, voiceKrChars, voiceNativeChars },
+           // voiceEnChars / voiceKrChars / voiceNativeChars count the extra dubs; 0 until those trees are fetched
   chars:   { [charId]: { avatar, avatarE2?, portrait, portraitE2?, spine: { front: Spine, back?: Spine } } },
   enemies: { [enemyId]: { icon, spine?: Spine, spineAliasOf?: enemyId,
                           spineLocal?: { group, skel, atlas, textures, …Spine } } },
@@ -377,6 +434,17 @@ All paths are URL paths relative to the site root, for example `/assets/char/ava
                            // player picks 日本語 (settings 语音语言, not tied to the interface language) and falls back to
                            // `voice` for a slot it lacks or a file the host does not have (public/js/audio.js voiceLine);
                            // the full zip ships it unless tools/package.mjs FULL_ZIP_JP_VOICE is off
+    voiceEn?: { [charId]: { …the slots of `voice` } },
+    voiceKr?: { [charId]: { …the slots of `voice` } },
+    voiceNative?: { [charId]: { …the slots of `voice` } },
+                           // English (`voice_en/`), Korean (`voice_kr/`) and the operator's own-language dub
+                           // (`voice_custom/<wordkey>/`, under /assets/audio/voice/native/). Same slots and file names.
+                           // Optional until `fetch-assets` has downloaded them (`--no-optional-voice` leaves them out).
+                           // A missing line falls back to the Chinese file of the same name (public/js/audio.js voiceLine).
+                           // The full zip ships them unless tools/package.mjs FULL_ZIP_OPTIONAL_VOICE is off (default: on).
+    voiceNativeLangType?: { [charId]: 'ITA' | 'GER' | 'RUS' | 'FRE' | 'SPA' | 'CN_TOPOLECT' },
+                           // the official voiceLangType of that operator's own-language dub, only when voiceNative
+                           // has the operator. The per-operator dropdown uses it as the option's name.
     sfx: {
       ui:     { click, back, confirm, tab, pick, drop, error, buy, sell, income, refresh, freeze, levelup,
                 merge, equip, itemMerge, bondUp, artPlace, ready, timer, draft, yourTurn, yourTurnCircle,
@@ -563,7 +631,7 @@ Other renderer rules from research 07 §5.4–5.5:
   - Without a Spine (and without its local-client model, "Token models from the local client"), draw the avatar sprite with a bob tween.
   - `spineVariant` names the skin-variant model that stands in for the missing default model.
 - **Enemies without a spine** (for example `enemy_9016_acstmr`): draw `icon` in a diamond. Enemies with no manifest entry at all (`enemy_5601_entlec` 心烛): draw a procedural glyph.
-- **Battle effects** (projectiles per kind, hit sparks and slashes, skill bursts and auras, 蕾缪安's lock reticles and shells, 回环射手 boomerangs — DESIGN §17.3) are procedural: the FX atlas is drawn at run time (`public/js/render/textures.js`), so they need no downloaded or local art. The local client does have battle effect art — `battle/[pack]common.ab` holds per-weapon projectile sprites (`projectile_arrow(_new)`, `projectile_crossbow(_new)`, `projectile_yuki`, `img_fx_light_01/02`, `trail_11`), and the per-character `battle/prefabs/effects/*.ab` are particle systems whose textures live in other bundles — but none of it is extracted: the sim's `arrow` also covers gun snipers, and friends joining a game may not have the local art.
+- **Battle effects** (projectiles per kind, hit sparks and slashes, skill bursts and auras, 蕾缪安's lock reticles and shells, 回环射手 boomerangs — DESIGN §17.3) are procedural by default: the FX atlas is drawn at run time (`public/js/render/textures.js`), so they need no downloaded or local art. Since 0.3.0 the official battle effects can be extracted from the local client (`tools/local-extract/extract.py --only fx --fx-set used`, opt-in; the files under `public/assets/local/fx/` with their own file list `data/local-fx.json`, DESIGN §33). When the served list names effects, 设置「官方特效」 appears and the 3D board draws them in WebGL2 (`public/js/render/vfx/`, DESIGN §9 "Official battle effects"): normal attacks' casts, projectiles and hits (a multi-hit attack's hit groups, an enemy's blow on a blocker), heals, status loops, deaths and deploys, the operators' and summons' skills, passive ones included (their start, loop, end, ready and range effects, the skill attacks' casts, hit groups and projectiles, the buffs on their targets), the enemies' skills (the sim names each use), the units' talents and abilities (deploy, passive, toggled and 重生 effects) and 深靛's stored energies. They come from the server's files, so every player of that server sees them, whatever client they have. Effects the battle gives no moment for (a buff template's cast at an event the client never sees), a unit the effects' index does not list, the 2D and simplified boards, a browser without WebGL2 and an install without the files keep the procedural effects; a missing texture or mesh leaves that part of an effect undrawn. The older sprites of `battle/[pack]common.ab` (`projectile_arrow(_new)`, `projectile_crossbow(_new)`, `projectile_yuki`, `img_fx_light_01/02`, `trail_11`) are still not extracted: the sim's `arrow` also covers gun snipers.
 - **Spine memory** (`public/js/assets.js`): skeletons are refcounted in an LRU with an idle budget (`SPINE_IDLE_BYTES`, 48 MB) and a 15 s grace; eviction runs `SPINE_EVICT_DELAY_MS` (1 s) after a release, the "no scene on screen" budget (0 bytes) applies after `SPINE_QUIET_DELAY_MS` (3 s) with nothing referenced, and a skeleton whose unload is still in flight is never handed out again — a new load waits for the unload (DESIGN §17.1; it used to leave operators invisible after a battle → prep switch).
 
 ### Looking up `data/chess.json` asset ids

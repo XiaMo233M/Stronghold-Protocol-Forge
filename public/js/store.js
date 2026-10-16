@@ -3,6 +3,7 @@
 // One app-wide store holds everything the UI renders from:
 //   connection  – socket status + latency (fed by net.js via main.js)
 //   me          – { playerId, name, token } from `welcome`
+//   content     – `welcome.content`: the server's content identity { vanilla: <cs> } (DESIGN §32), or null
 //   session     – { entered } (the player pressed 开始 on the title screen in this tab)
 //   room        – last `room.state` payload (without `t`) or null
 //   match       – { public, private, field, result } from the `m.*` pushes; `battle` = the local battle runner's

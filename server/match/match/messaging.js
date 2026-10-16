@@ -184,7 +184,8 @@ export class MatchMessaging {
       this._pubFrames = 0;
     }
     try { this._lastPubJson = json != null ? json : JSON.stringify(full); } catch { this._lastPubJson = null; }
-    this._lastPubAt = now;
+    // Snapshot building / serialization can take time; throttle from the actual broadcast, not its start.
+    this._lastPubAt = this.sched.now();
     // the engine's clock rides EVERY frame (the client's clock sync reads it), and it is not part of the diffed state:
     // a delta carries it explicitly, since `publicDelta` never puts `serverNow` in the patch
     frame.serverNow = full.serverNow;

@@ -1,0 +1,16 @@
+diff a/test/diag.test.js b/test/diag.test.js	(rejected hunks)
+@@ -1,11 +1,12 @@
+ // test/diag.test.js — the client's error log and bug-report diagnostics (public/js/diag.js; 设置 → 问题反馈): what an
+ // entry keeps (message, a short stack without the page's host), repeats counted on one entry, the cap, the report's
+-// lines, the battle attached as a replayable b.start, and the player names / room code / token never in the text.
++// lines, the battle attached as a replayable b.start, the player names / room code / token never in the text, and the
++// content line (DESIGN §32: the room's content set, else the server's vanilla content hash).
+ import { test, describe, beforeEach } from 'node:test';
+ import assert from 'node:assert/strict';
+ import {
+   recordError, errorLog, errorCount, clearErrorLog, messageOf, stackOf, stripHosts, redact, redactValues, secretsOf, buildDiagnostics,
+-  setBattleSource, currentBattle, LOG_MAX, STACK_LINES, recordResourceEntry, trafficSummary, trafficLine, clearTraffic, installTrafficMeter,
++  setBattleSource, currentBattle, contentLine, LOG_MAX, STACK_LINES, recordResourceEntry, trafficSummary, trafficLine, clearTraffic, installTrafficMeter,
+ } from '../public/js/diag.js';
+ import { APP_VERSION } from '../shared/constants.js';
+ 

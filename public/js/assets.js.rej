@@ -1,0 +1,10 @@
+diff a/public/js/assets.js b/public/js/assets.js	(rejected hunks)
+@@ -42,6 +50,8 @@
+ // so it can be unit tested without a browser. Helpers never throw on unknown ids — they return null and the
+ // caller falls back (docs/ASSETS.md "Other fallbacks").
+ 
++import { cosmetics, createCosmeticLayers, EMPTY_MANIFEST } from './cosmetics.js';
++
+ const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+ const str = (v) => (typeof v === 'string' && v ? v : null);
+ const get = (o, k) => (isObj(o) && Object.hasOwn(o, k) ? o[k] : undefined);

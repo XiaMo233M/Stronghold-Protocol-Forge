@@ -89,6 +89,62 @@
 //     and a change while it runs is stored for the next match (ROOM_STARTED 'stored for the next match'). Every
 //     `welcome` carries `diyKitted` (welcomeInfo): the operators a DIY slot may field, so the client's picker offers
 //     exactly what the server accepts.
+//   * Content identity (DESIGN §32, the plugin system's first step): the lobby is given the server's vanilla content
+//     (server/plugins/identity.js; none in unit tests that build a Lobby without it). Every `welcome` carries
+//     `content: { vanilla: <cs> }` — and `plugins: <n>` when this server has n > 0 unofficial plugins (every class but a
+//     language: the title screen's 「本服务器安装了 N 个插件」; a page fetches the catalogue only when n > 0 and something
+//     needs it, so a server without plugins sends exactly what it sent before) —, every room's `room.state.content` is
+//     `{ cs, vanilla: true, plugins: [] }` while it has
+//     no plugin, and the match receives `cs`, which it copies into every BattleSpec (the sim never reads it;
+//     diagnostics and replays name the content with it).
+//   * The room's plugins (DESIGN §32 P1a — cosmetic plugins only): room.setPlugins { plugins: [{ id }] } — host-only,
+//     before the match, and ▸ like a difficulty change it un-readies the other humans. The lobby asks the server's
+//     visual sets (server/plugins/visualSet.js resolve: loaded cosmetic plugins of scope `room`, their requirements
+//     switched on, in load order, within the size limit — PLUGIN_UNKNOWN / PLUGIN_BLOCKED / PLUGIN_DEPENDENCY /
+//     PLUGIN_CONFLICT / PLUGIN_LIMIT otherwise; none given to the Lobby → PLUGIN_UNKNOWN) and the room's content becomes
+//     `{ cs, vanilla: true, vs, plugins: [{ id, version, class, hash, auto? }], warnings, bytes }`: `cs` stays the vanilla
+//     one — art never changes a battle, so the match, its BattleSpecs and the golden results are those of the original
+//     content and ▸ such a match counts as the original game in the statistics overview (the owner's decision of
+//     2026-10-13: gameplay and numbers unchanged) —, `vs` names the
+//     art every member's page draws with (/vs/<vs16>/overlay.json, composed by public/js/content.js on the page's own
+//     manifest). An empty list brings back
+//     exactly the vanilla shape above. The set is the room's: kept across its matches and a host change, held in the
+//     visual sets while the room uses it (hold / release) and gone with the room. The same set again (the same `vs`)
+//     un-readies nobody; ▸ when only its 「自动」 marks changed (a plugin first switched on automatically is now chosen, or
+//     the other way round) the new state is broadcast without un-readying. A request that changes nothing (the same `vs`
+//     and the same marks) — or a refused one — leaves the host's result replay (a settlement screen still open:
+//     dropReplay; a change is the host moving on). ▸ When a plugin of the room's set changes on disk while the room holds
+//     it (the visual sets' onStale, after the registry read the folders again), the host is told once (an m.toast: apply
+//     the room's plugins again — the panel's 「重新应用」 sends the same list, which resolves to the set of the files as
+//     they are now) — during a match, once the room is back in its lobby (onMatchEnd), when it can be done; nothing
+//     changes by itself — ▸ but in a room the plugin studio names (DESIGN §32.9: `autoApplyPlugins`, set by
+//     server/studio/index.js — a room whose host is the plugin's author or whose host is its only player) the same choice
+//     is applied again at once, during a match too (refreshPlugins: art never changes a battle, the `cs` stays the vanilla
+//     one; nobody is un-readied), and the host is told only when that fails.
+//   * Gameplay plugins (DESIGN §32.6, P1c): room.setPlugins also takes the server's content plugins (data: numbers,
+//     records, modes). The lobby's `plugins` (server/plugins/roomSets.js) closes the list over its requirements, refuses
+//     conflicts, other classes and scopes, what the server owner's plugins/config.json does not allow and — unless it
+//     allows them — gameplay plugins made for other game versions (PLUGIN_INCOMPATIBLE), and builds the room's content set:
+//     a `cs` of its own (server/plugins/contentSets.js; at most limits.maxSets such sets held by rooms at once, else
+//     PLUGIN_BUSY). The room's content is then `{ cs, vanilla: false, plugins: [{ id, version, class, hash, auto? }],
+//     warnings, bytes, dataBytes, vs?, modes?, modeId? }` and ▸ the room is held to it like to a visual set (holdContent /
+//     releaseContent). Its members' pages load and check that set (/cs/<cs16>/…, public/js/content.js) and say so with
+//     room.contentReady { cs } — `seats[].content` (and `spectators[].content`) is 'loading' | 'ready' | 'failed' in such a
+//     room only, reset to 'loading' when the set changes and when the member's socket drops (a reloaded page loads it
+//     again); room.ready { ready: true } and room.start wait for every player's 'ready' (CONTENT_NOT_READY). A new room
+//     starts with the policy's `default` plugins (none: the original game).
+//     room.setMode { modeId } (host, before the match): an official mode of the room's type sets the difficulty; a mode
+//     of the room's content set (content.modes, same room type) becomes content.modeId — the match's modeId — until the
+//     host picks a difficulty or the set no longer has it; ▸ like a difficulty change it un-readies the other humans.
+//     The match of such a room runs in that set's match host (server/match/host/ — a child process, a worker thread with
+//     SP_MATCH_HOST=worker: hosts.create — the match is a MatchProxy whose answers are Promises), with opts.cs = the set's cs, opts.requireCs (a b.result naming another
+//     content is refused) and opts.vs; ▸ every message and event of such a room is handled in order, one at a time, on
+//     the room's own queue (serial): a request waits for the previous one's answer. A vanilla room never queues — its
+//     match is in this process and answers at once, exactly as before. A loadout, 干员持有 list or 自选 roster stored while
+//     the player was in a room of another content is filtered to the room's data when its match starts (an id the set
+//     does not know is dropped, the rest kept — design study §6.9), and room.loadout / room.ownership / room.diy are
+//     checked against the room's own data (and its 自选 list). When the worker stops (a crash, the watchdog), the match
+//     ends with summary.reason 'plugin-crash' | 'plugin-hang' | 'plugin-start' and the room is back in its lobby.
 //   * Spectator seats (community report #26, owner's decision 2026-10-04 — a remake feature, the official room has none):
 //     room.spectate { code } takes one of a co-op room's MAX_SPECTATORS (2) spectator seats, in its lobby or while its
 //     match runs (▸ solo rooms: ROOM_FULL). A spectator is not a player: never in `seats`, never counted for the 1–4 players
@@ -720,12 +776,77 @@ export class Lobby {  /**
   }
 
   /**
-   * Validated client message from an identified session.
+   * Validated client message from an identified session. A room whose match runs in a match host handles its
+   * messages one at a time, in order (serial; header "Gameplay plugins"): the answer is then a Promise (server/net.js
+   * replies when it settles).
    * @param {import('./net.js').Session} session
    * @param {any} msg
-   * @returns {{ ok: true } | { error: string, detail?: string }}
+   * @returns {{ ok: true } | { error: string, detail?: string } | Promise<{ ok: true } | { error: string, detail?: string }>}
    */
   onMessage(session, msg) {
+    const room = this.queuedRoom(session);
+    if (!room) return this.handleMessage(session, msg);
+    // a queued room.contentReady speaks for the page that sent it: the seat and its generation now — a disconnect in
+    // between bumps it, and the page that comes back checks the set again (contentReady)
+    const ctx = msg && msg.t === 'room.contentReady' ? { from: this.seatGen(room, session.playerId) } : null;
+    return this.serial(room, () => this.handleMessage(session, msg, ctx));
+  }
+
+  /** A seat (or spectator seat) of `room` and its content generation (header "Gameplay plugins"), or null. */
+  seatGen(room, playerId) {
+    const seat = room.seatOf(playerId) || room.spectatorOf(playerId);
+    return seat ? { seat, gen: seat.contentGen || 0 } : null;
+  }
+
+  /**
+   * The room of `session` when its messages go through the room's queue: its match runs in a match host
+   * (MatchProxy `hosted`), or something of the room is still pending. Null for every vanilla room.
+   * @param {import('./net.js').Session} session
+   */
+  queuedRoom(session) {
+    const room = session.roomCode ? this.rooms.get(session.roomCode) : null;
+    return room && !room.disposed && (room.queue.pending > 0 || room.match?.hosted === true) ? room : null;
+  }
+
+  /**
+   * Run `fn` on the room's queue (header "Gameplay plugins"): at once when nothing of the room is pending — a synchronous
+   * answer stays synchronous —, else after everything before it has settled. An answer that is a Promise keeps the room's
+   * queue busy until it settles.
+   * @template T
+   * @param {Room} room @param {() => T} fn
+   * @returns {T | Promise<Awaited<T>>}
+   */
+  serial(room, fn) {
+    const q = room.queue;
+    if (q.pending === 0) {
+      const r = fn();
+      if (!r || typeof /** @type {any} */ (r).then !== 'function') return r;
+      q.pending++;
+      const done = Promise.resolve(r).finally(() => { q.pending--; });
+      q.tail = done.then(() => {}, () => {});
+      return /** @type {any} */ (done);
+    }
+    q.pending++;
+    const done = q.tail.then(() => fn()).finally(() => { q.pending--; });
+    q.tail = done.then(() => {}, () => {});
+    return /** @type {any} */ (done);
+  }
+
+  /** An event of the room (a disconnect, a resync, an expiry) on its queue: nothing waits for it; a failure is logged. */
+  queueEvent(room, fn) {
+    let r;
+    try { r = this.serial(room, fn); } catch (e) { this.log.error(`[lobby] ${room.code} a room event failed`, e); return; }
+    if (r && typeof r.then === 'function') r.then(null, (e) => this.log.error(`[lobby] ${room.code} a room event failed`, e));
+  }
+
+  /**
+   * One message (onMessage), now. `ctx`: what onMessage noted when it queued the message (a contentReady's seat
+   * generation), else null.
+   * @param {import('./net.js').Session} session
+   * @param {any} msg
+   * @param {{ from?: { seat: Seat, gen: number } | null } | null} [ctx]
+   */
+  handleMessage(session, msg, ctx = null) {
     switch (msg.t) {
       case 'room.create': return this.create(session, msg);
       case 'room.join': return this.join(session, msg);
@@ -932,8 +1053,19 @@ export class Lobby {  /**
     const player = room.seatOf(session.playerId);
     const seat = player || room.spectatorOf(session.playerId);
     seat.connected = false;
+    // the page may come back as a new one (a reload): it loads and checks the room's content again (header "Gameplay
+    // plugins") — and a room.contentReady of the page that went, still on the room's queue, no longer counts (seatGen)
+    if (room.modded) seat.content = null;
+    seat.contentGen = (seat.contentGen || 0) + 1;
     // a spectator's seat is kept like a player's (nothing to tell the match: it plays no field)
-    if (room.match) { if (player) this.callMatch(room, 'onDisconnect', session.playerId); } else this.startGrace(room, seat);
+    if (room.match) {
+      if (player) {
+        // a match in a match host hears it in order with the room's messages (header "Gameplay plugins") — not at
+        // all when the player is back by then (the resync after the reconnect tells it onReconnect)
+        if (this.queuedRoom(session)) this.queueEvent(room, () => { if (!session.connected) this.callMatch(room, 'onDisconnect', session.playerId); });
+        else this.callMatch(room, 'onDisconnect', session.playerId);
+      }
+    } else this.startGrace(room, seat);
     this.broadcastState(room);
   }
 
@@ -1149,6 +1281,8 @@ export class Lobby {  /**
     if (room.match) return fail(ERR.ROOM_STARTED);
     this.dropReplay(room, session.playerId);
     const seat = room.seatOf(session.playerId);
+    // a room with gameplay plugins: ready once the page has loaded and checked its content (header "Gameplay plugins")
+    if (ready && room.modded && seat.content !== 'ready') return fail(ERR.CONTENT_NOT_READY);
     if (seat.ready !== ready) {
       seat.ready = ready;
       this.broadcastState(room);
@@ -1162,8 +1296,10 @@ export class Lobby {  /**
     if (room.hostId !== session.playerId) return fail(ERR.NOT_HOST);
     if (room.match) return fail(ERR.ROOM_STARTED);
     this.dropReplay(room, session.playerId);
-    if (room.difficulty !== difficulty) {
+    // a plugin mode chosen (header "Gameplay plugins") carries its own difficulty: picking one leaves it
+    if (room.difficulty !== difficulty || room.content?.modeId) {
       room.difficulty = difficulty;
+      if (room.content?.modeId) { const rest = { ...room.content }; delete rest.modeId; room.content = Object.freeze(rest); }
       for (const s of room.seats) if (s && !s.isBot && s.playerId !== room.hostId) s.ready = false;
       this.broadcastState(room);
     }
@@ -1512,10 +1648,9 @@ export class Lobby {  /**
       this.log.error(`[lobby] ${room.code} match.setLoadout threw`, e);
       return fail(ERR.INTERNAL);
     }
-    if (r && typeof r === 'object' && r.error) {
-      return fail(isErrCode(r.error) ? r.error : ERR.INTERNAL, typeof r.detail === 'string' ? r.detail : undefined);
-    }
-    return OK;
+    // a match in a match host answers later (header "Gameplay plugins")
+    if (r && typeof r.then === 'function') return Promise.resolve(r).then(matchAnswer, () => fail(ERR.INTERNAL));
+    return matchAnswer(r);
   }
 
   /**
@@ -1835,7 +1970,11 @@ export class Lobby {  /**
     const host = room.hostId ? room.seatOf(room.hostId) : null;
     if (!host || host.isBot || host.left) this.migrateHost(room);
     if (room.activeHumans().length === 0) this.disposeRoom(room, 'empty');
-    else this.broadcastState(room);
+    else {
+      this.broadcastState(room);
+      // its plugins changed on disk during the match: the host can apply them again now
+      if (room.pluginsChanged) this.tellPluginsChanged(room);
+    }
   }
 
   /** Match unicast; m.result frames are also kept for the replay. */
@@ -1914,6 +2053,16 @@ export class Lobby {  /**
     if (!session.connected || this.registry.byId(session.playerId) !== session) return;
     const room = this.roomOf(session);
     if (!room) return;
+    // in order with the room's messages when its match runs in a match host (header "Gameplay plugins")
+    if (this.queuedRoom(session)) { this.queueEvent(room, () => this.resyncNow(session)); return; }
+    this.resyncNow(session);
+  }
+
+  /** runResync, now. @param {import('./net.js').Session} session */
+  resyncNow(session) {
+    if (!session.connected || this.registry.byId(session.playerId) !== session) return;
+    const room = this.roomOf(session);
+    if (!room) return;
     session.resyncAt = this.now();
     if (room.match) {
       this.callMatch(room, room.spectatorOf(session.playerId) ? 'addSpectator' : 'onReconnect', session.playerId);
@@ -1941,6 +2090,13 @@ export class Lobby {  /**
     this.log.warn(`[lobby] ${text}${more}`);
   }
 
+  /** A warning logged once per text (the default plugins that cannot be applied …). @param {string} line */
+  warnOnce(line) {
+    if (this.told.has(line)) return;
+    if (this.told.size < 256) this.told.add(line);
+    this.log.warn(line);
+  }
+
   /** Number of rooms matching a predicate. */
   countRooms(pred) {
     let n = 0;
@@ -1948,8 +2104,17 @@ export class Lobby {  /**
     return n;
   }
 
-  /** Route a 'g.*' intent to the running match. */
+  /**
+   * Route a 'g.*' intent or a 'b.*' report (server/net.js) to the running match — on the room's queue when its match runs
+   * in a match host (header "Gameplay plugins").
+   */
   routeGame(session, msg) {
+    const room = this.queuedRoom(session);
+    return room ? this.serial(room, () => this.routeGameNow(session, msg)) : this.routeGameNow(session, msg);
+  }
+
+  /** routeGame, now. */
+  routeGameNow(session, msg) {
     const room = this.roomOf(session);
     if (!room) return fail(ERR.NOT_IN_ROOM);
     if (!room.match) return fail(ERR.WRONG_PHASE, 'no running match');
@@ -1967,15 +2132,19 @@ export class Lobby {  /**
       return fail(ERR.INTERNAL);
     }
     if (res && typeof res.then === 'function') {
+      // a match in a match host answers later (header "Gameplay plugins"): the reply waits for it
+      if (room.match?.hosted === true) {
+        return Promise.resolve(res).then((r) => matchAnswer(r), (e) => {
+          this.log.error(`[lobby] ${room.code} match.handle(${msg.t}) rejected`, e);
+          return fail(ERR.INTERNAL);
+        });
+      }
       // Contract violation (handle must be synchronous): never let the rejection go unhandled.
       this.log.error(`[lobby] ${room.code} match.handle(${msg.t}) returned a Promise; it must be synchronous`);
       Promise.resolve(res).catch((e) => this.log.error(`[lobby] ${room.code} match.handle(${msg.t}) rejected`, e));
       return OK;
     }
-    if (res && typeof res === 'object' && res.error) {
-      return fail(isErrCode(res.error) ? res.error : ERR.INTERNAL, typeof res.detail === 'string' ? res.detail : undefined);
-    }
-    return OK;
+    return matchAnswer(res);
   }
 
   /** Call an optional match hook without letting it throw. onLeave falls back to onDisconnect. */
@@ -2104,6 +2273,9 @@ export class Lobby {  /**
     const prev = room.hostId;
     room.hostId = pick ? pick.playerId : null;
     if (pick && prev !== pick.playerId) this.log.info(`[lobby] ${room.code} host → ${pick.name}`);
+    // a running match follows the host change: its delegated bot rehearsals fall back to the server and later ones ask
+    // the new host (DESIGN §14, Match.setHost)
+    if (room.match && room.hostId !== prev) this.callMatch(room, 'setHost', room.hostId);
   }
 
   startGrace(room, seat) {
@@ -2137,7 +2309,7 @@ export class Lobby {  /**
   disposeRoom(room, reason) {
     if (room.disposed) return;
     room.disposed = true;
-    if (this.rooms.get(room.code) === room) this.rooms.delete(room.code);
+    if (this.rooms.get(room.code) === room) { this.trustedRuntime?.event('roomClosed',{room:room.toState()}); this.rooms.delete(room.code); }
     const ctx = room.matchCtx;
     room.match = null;
     room.matchCtx = null;

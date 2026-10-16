@@ -43,10 +43,17 @@ export const APP_VERSION = '0.18.6';
  * `scripts/make-update-package.mjs` tell "the next release" from "the very release I am building"
  * (a bundle that only names `0.14.0` cannot: 0.14.0-0.2.3 and 0.14.0-0.2.4 look identical to it).
  */
-export const UPSTREAM_VERSION = '0.2.6';
+export const UPSTREAM_VERSION = '0.3.0';
 /** A development build (the public `dev` branch): the title screen, the boot banner and the README say so, and
  * tools/package.mjs refuses to build a release zip from it without --allow-dev. */
 export const DEV_BUILD = /-dev$/.test(APP_VERSION);
+/**
+ * The plugin API levels this build supports (DESIGN **§34** — 上游原文写的是它自己的 `§32`，按内容判据改写成我们的段号；
+ * 见 `docs/DESIGN.md` 的索引表，上游 §N ↔ 我们 §(N+2)：`shared/plugins/manifest.js`): a manifest 2 states the level it
+ * is written for (`api`); a level outside min…current keeps the plugin out. The level rises when the data shapes, the
+ * DSL vocabulary or the SDK a plugin relies on change incompatibly (CHANGELOG says how to migrate). [ASSUMED]
+ */
+export const PLUGIN_API = Object.freeze({ current: 1, min: 1 });
 
 /**
  * The voice slots a pack may ship lines for (角色语音台词) — the ONE copy of this vocabulary: the workshop validator
@@ -384,6 +391,29 @@ export const ERR = Object.freeze({
   BAD_CREDENTIALS: 'BAD_CREDENTIALS', // 账号不存在或口令不匹配（**故意不区分**：区分即账号枚举）
   NAME_TAKEN: 'NAME_TAKEN',           // 注册时该账号名已被占用（大小写不敏感）
   WEAK_PASSWORD: 'WEAK_PASSWORD',     // 口令不满足长度 / 字符集门槛
+  // room.setPlugins (DESIGN **§34**，上游原文 `§32`；按内容判据改写 —— 插件架构那一节): a plugin this server has not
+  // installed; one a room cannot switch on in this version (not a cosmetic or content plugin it loads, not of the room's
+  // scope, or not allowed by the server owner's plugins/config.json); a requirement missing or out of range, or a
+  // load-order cycle; two plugins in conflict; a set over the art size limit
+  PLUGIN_SCRIPT_CONFLICT: 'PLUGIN_SCRIPT_CONFLICT',
+  PLUGIN_SCRIPT_OVERRIDE: 'PLUGIN_SCRIPT_OVERRIDE',
+  PLUGIN_SCRIPT_CHECK: 'PLUGIN_SCRIPT_CHECK',
+  PLUGIN_SCRIPTS_DISABLED: 'PLUGIN_SCRIPTS_DISABLED',
+  PLUGIN_TRUST_PIN: 'PLUGIN_TRUST_PIN',
+  PLUGIN_TRUST_PUBLIC: 'PLUGIN_TRUST_PUBLIC',
+  PLUGIN_CONSENT: 'PLUGIN_CONSENT',
+  PLUGIN_UNKNOWN: 'PLUGIN_UNKNOWN',
+  PLUGIN_BLOCKED: 'PLUGIN_BLOCKED',
+  PLUGIN_DEPENDENCY: 'PLUGIN_DEPENDENCY',
+  PLUGIN_CONFLICT: 'PLUGIN_CONFLICT',
+  PLUGIN_LIMIT: 'PLUGIN_LIMIT',
+  // P1c (DESIGN **§34.6**，上游原文 `§32.6`): a gameplay plugin made for other game versions or another plugin API
+  // (refused unless the server owner allows it: plugins/config.json allowIncompatible); the server already runs as many
+  // plugin content sets as its limit allows (plugins/config.json limits.maxSets); room.ready / room.start before every
+  // player's page has loaded and checked the room's content (room.contentReady)
+  PLUGIN_INCOMPATIBLE: 'PLUGIN_INCOMPATIBLE',
+  PLUGIN_BUSY: 'PLUGIN_BUSY',
+  CONTENT_NOT_READY: 'CONTENT_NOT_READY',
   INTERNAL: 'INTERNAL',
 });
 
@@ -402,6 +432,17 @@ export const ERR_TEXT = {
   QUEUE_FULL: N_('正在搜寻的博士已满，请稍后再试'), QUEUE_EMPTY: N_('你不在快速匹配队列中'), QUEUED: N_('你已在同盟中：先离开同盟，才能开始快速匹配'),
   AUTH_REQUIRED: N_('本服务器需要账号：请登录或注册'), BAD_CREDENTIALS: N_('账号名或口令不正确'),
   NAME_TAKEN: N_('该代号已被占用'), WEAK_PASSWORD: N_('口令至少 8 位，且不能含控制字符'),
+  PLUGIN_UNKNOWN: N_('本服务器没有安装该插件'), PLUGIN_BLOCKED: N_('该插件不能在房间中启用'), PLUGIN_DEPENDENCY: N_('缺少该插件需要的其他插件'),
+  PLUGIN_CONFLICT: N_('所选插件互相冲突'), PLUGIN_LIMIT: N_('所选插件的素材总量超出本服务器的上限'),
+  PLUGIN_INCOMPATIBLE: N_('该插件不适配本服务器的游戏版本'), PLUGIN_BUSY: N_('本服务器同时运行的插件组合已达上限，请稍后再试'),
+  PLUGIN_CONSENT: N_('还有玩家未同意运行受信任插件'),
+  PLUGIN_SCRIPTS_DISABLED: N_('服主没有启用脚本插件'),
+  PLUGIN_TRUST_PIN: N_('插件的锁文件或文件内容与服主钉住的哈希不符'),
+  PLUGIN_TRUST_PUBLIC: N_('公网监听默认禁止受信任插件'),
+  PLUGIN_SCRIPT_CONFLICT: N_('两个插件注册了同一个效果'),
+  PLUGIN_SCRIPT_OVERRIDE: N_('插件未声明要替换的官方技能'),
+  PLUGIN_SCRIPT_CHECK: N_('脚本未通过兼容性检查'),
+  CONTENT_NOT_READY: N_('仍有博士未载入房间的插件内容'),
 };
 
 // ---- Emotes (交流, research 09 §4) -----------------------------------------------------------------------------

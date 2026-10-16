@@ -219,7 +219,7 @@ const DEVICE_ROLES = new Set(['crate', 'platform', 'mound', 'blower', 'turret', 
 /** Textured box props: role → { size (tiles), height, top / side materials }. */
 export const DEVICE_BOX = Object.freeze({
   crate: { size: 0.84, height: 0.74, top: 'crateTop', side: 'crateSide' },
-  platform: { size: 0.94, height: 0.26, top: 'platformTop', side: 'forbidSide' },
+  platform: { size: 0.94, height: TILE_H.platform, top: 'platformTop', side: 'forbidSide' },
   waterPlatform: { size: 0.94, height: 0.2, top: 'platformTop', side: 'lowSide' },
   sealedFloor: { size: 0.92, height: 0.05, top: 'sealed', side: 'forbidSide' },
   blower: { size: 0.86, height: 0.28, top: 'blowerTop', side: 'forbidSide' },
@@ -367,7 +367,8 @@ export class TileField {
     for (const d of this._stageDevices()) {
       const t = this.grid[d.pos[0]]?.[d.pos[1]];
       if (!t) continue;
-      if (d.role === 'platform' || d.role === 'mound') t.devH = TILE_H.platform;
+      if (d.role === 'platform') t.devH = TILE_H.platform;
+      else if (d.role === 'mound') t.devH = TILE_H.mound;
       else if (d.role === 'waterPlatform') t.devH = DEVICE_BOX.waterPlatform.height;
     }
     const hs = new Set([0]);

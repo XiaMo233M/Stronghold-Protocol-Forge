@@ -10,21 +10,22 @@ import { planUnite } from '../unite.js';
 import { FieldRunner, DeadBattle } from '../fields.js';
 import { DELAYS } from './common.js';
 import { battleOptsFromMatch } from './battleOpts.js';
+import { previewPlayer } from '../preview.js';
 
 export class MatchCombat {
   /** Construct a battle; a constructor failure yields a finished stand-in (clean result) and is logged. */
-  newBattle(opts) {
+  newBattle(opts, { preview = false } = {}) {
     // The assembly both Battle paths share (server/match/match/battleOpts.js): `this.ds` / `this.battleContent` /
     // `this.log` under the caller's own options, then the match's kit tables (`kits`, `tokenKits` — docs/WORKSHOP.md
     // §4 / §4.7, the room-trimmed `roomAssets.forRoom(room.modSet)` maps), the pack's battle installers
     // (DESIGN §28.17) and the 限伤 override. An explicit opts.<key> always wins; a match without packs sets no key, so
     // a plain install builds byte-for-byte the battle it built before each feature landed. `_specBattle` (复算) calls
     // the same helper, so a sixth key cannot reach one path and stop at the other.
-    const full = battleOptsFromMatch(this, opts);
+    const full = { ...battleOptsFromMatch(this, opts), ...(preview ? { logger: {}, quiet: true } : {}) };
     try {
       return new this.BattleClass(full);
     } catch (e) {
-      this.reportError(`battle ${opts.fieldId} construct`, e);
+      if (!preview) this.reportError(`battle ${opts.fieldId} construct`, e);
       return new DeadBattle(full, 'forced');
     }
   }
@@ -49,13 +50,16 @@ export class MatchCombat {
   _normalBattle(ps) { return this.newBattle(this._normalOpts(ps)); }
 
   /** Battle options of a player's normal field (after the onBattleStart handlers). */
-  _normalOpts(ps) {
-    const wave = this.wave;
+  _normalOpts(ps, { preview = false, board = ps.board } = {}) {
+    const wave = preview ? structuredClone(this.wave) : this.wave;
+    if (preview) ps = previewPlayer(ps, board);
     const input = ps.battleInput({ side: 'L', colOffset: 0 });
     // the client's list: bounty units inserted among their host action's own units, which are re-timed around them
     const spawns = withBounties(this.gd, this.round, wave, ps.bounties, ps.playerId).map((s) => ({ ...s, ownerPlayerId: ps.playerId }));
-    const ev = { input, kind: 'normal', round: this.round, spawns };
-    this.dispatch(ps, 'onBattleStart', ev);
+    const ev = { input, kind: 'normal', round: this.round, spawns, ...(preview ? { preview: true } : {}) };
+    // Preview construction failures go to the rehearsal's discard path, never Match.dispatch's live error sink.
+    if (preview) this.dispatcher.dispatch(ps, 'onBattleStart', ev);
+    else this.dispatch(ps, 'onBattleStart', ev);
     return {
       seed: deriveSeed(this.seed, `n:${this.round}:${ps.seat}`),
       kind: 'normal',

@@ -71,7 +71,7 @@
 // Usage: node tools/fetch-assets.mjs [--concurrency=16] [--force] [--offline]
 //                                    [--dry-run] [--refresh-index] [--prune]
 //                                    [--allow-shrink] [--add-only] [--strict]
-//                                    [--local-spines] [--help]
+//                                    [--local-spines] [--no-optional-voice] [--help]
 
 import { readFile, writeFile, mkdir, rename, readdir, unlink } from 'node:fs/promises';
 import { existsSync, realpathSync } from 'node:fs';
@@ -122,6 +122,8 @@ const HELP = `Usage: node tools/fetch-assets.mjs [options]
   --concurrency=N   parallel downloads (default 16)
   --asset-source=M  direct (default) or mirror (opt-in; no public-IP lookup)
   --force           re-download files even when present
+  --source-snapshot=PATH verify raw bytes against pinned Git trees in a JSON snapshot
+                    (incompatible with --offline / --add-only / --local-spines)
   --offline         no network: post-process what is on disk and rebuild data/assets.json
   --dry-run         print the plan and exit
   --refresh-index   re-download the audio_data.json / charword_table.json / models_data.json indexes
@@ -396,6 +398,21 @@ function tidyManifest(m) {
   for (const c of Object.values(m.chars || {})) if (c.spine && !Object.keys(c.spine).length) delete c.spine;
 }
 
+/**
+ * The extra dub trees (plan.mjs VOICE_OPTIONAL_TREES), resolved against the disk: a tree with no line on disk is
+ * dropped, and `audio.voiceNativeLangType` keeps only the operators whose own-language dub landed.
+ * @param {any} m resolved manifest body (mutated)
+ */
+export function tidyVoiceTrees(m) {
+  const a = m?.audio;
+  if (!a || typeof a !== 'object') return;
+  for (const key of Object.keys(VOICE_OPTIONAL_TREES)) if (a[key] && !Object.keys(a[key]).length) delete a[key];
+  if (a.voiceNativeLangType) {
+    for (const id of Object.keys(a.voiceNativeLangType)) if (!a.voiceNative?.[id]) delete a.voiceNativeLangType[id];
+    if (!Object.keys(a.voiceNativeLangType).length) delete a.voiceNativeLangType;
+  }
+}
+
 function countStats(m, bytes, files) {
   const vals = (o) => Object.values(o || {});
   const spines = new Set();
@@ -517,6 +534,7 @@ async function main() {
     localTokenSpines,
     extraOperators: extras.extraOperators,
     moduleTypes: extras.moduleTypes,
+    statsTemplate,
   });
   const leaves = collectLeaves(plan.template);
   log(`[plan] ${leaves.length} files + ${plan.models.size} Spine models ` +
@@ -545,14 +563,19 @@ async function main() {
 
   // Fonts (--add-only: not rebuilt — public/fonts may be another checkout's; the manifest keeps its current entry)
   let fontErrors = [];
+  let acceptedFonts;
   if (!opts.offline && !opts.addOnly) {
     const fdl = new Downloader({ root: FONTS, ledgerPath: join(CACHE, 'fonts-ledger.json'), concurrency: 4, force: opts.force, log, ...network });
     await fdl.loadLedger();
     await fdl.run(fontJobs(), 'fonts');
+    acceptedFonts = fdl.accepted;
     dl.totals.bytesDownloaded += fdl.totals.bytesDownloaded;
     for (const k of ['ok', 'skip', 'miss', 'error']) dl.totals[k] += fdl.totals[k];
   }
-  const fonts = opts.addOnly ? { files: {}, errors: [] } : await buildFonts(FONTS, log);
+  const fonts = opts.addOnly ? { files: {}, errors: [] } : await buildFonts(FONTS, log, {
+    verified: !!verifier,
+    ...(verifier ? { available: (rel) => acceptedFonts.has(rel) } : null),
+  });
   fontErrors = fonts.errors;
 
   // Spine
@@ -581,7 +604,7 @@ async function main() {
   if (guard.write) await writeJsonAtomic(MANIFEST, manifest);
 
   // Orphans: files on disk that the manifest does not reference (e.g. after a mapping change).
-  const orphans = orphanFiles(await listFiles(ASSETS), resolved.files);
+  const orphans = orphanFiles(await listFiles(ASSETS), new Set([...resolved.files, ...dl.preserved]));
   if (opts.prune) for (const r of orphans) { try { await unlink(join(ASSETS, r)); } catch { /* ignore */ } }
 
   const charIds = Object.keys(assets07.operators || {});
@@ -653,6 +676,7 @@ async function main() {
     log(strictLeafDropError(droppedLeaves));
     log('  a plain run downloads them again (--refresh-index if the upstream index lost them); without --strict / SP_ASSETS_STRICT this is only a warning');
   }
+  if (verifier && (dl.totals.error || fontErrors.length || downloadErrors.length)) return 1;
   return runExitCode({ requiredMisses: required.length, droppedLeaves: droppedLeaves.length, strict: opts.strict, manifestWritten: guard.write });
 }
 

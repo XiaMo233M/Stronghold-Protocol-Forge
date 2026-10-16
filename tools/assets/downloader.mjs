@@ -666,6 +666,12 @@ export class Downloader {
         let r;
         try { r = await this.runJob(job); } catch (e) { r = { status: 'error', bytes: 0, error: e?.message || String(e) }; }
         results.set(job.rel, r);
+        // Source absence does not invalidate local bytes. Keep them on disk even
+        // without provenance, but publish only a revalidated fallback.
+        const succeeded = r.status === 'ok' || r.status === 'skip';
+        if (succeeded) this.preserved.delete(job.rel);
+        if (succeeded || (this.verifier && await this.retainExisting(job))) this.accepted.add(job.rel);
+        else this.accepted.delete(job.rel);
         counts[r.status]++;
         this.totals[r.status]++;
         if (r.status === 'ok') { bytes += r.bytes; this.totals.bytesDownloaded += r.bytes; }

@@ -192,6 +192,8 @@ describe('Final Assault / Hidden Core fields in the browser sim', { skip }, () =
     // (a failed request is reported by the response handler with its URL; the favicon 404 is not a problem)
     page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) problems.push(`console: ${m.text()}`); });
     page.on('response', (r) => { if (r.status() >= 400 && !/favicon/.test(r.url())) problems.push(`HTTP ${r.status()} ${r.url()}`); });
+    // the test rebuilds runField from its source inside the page (new Function); the site's CSP (0.3.0) allows no eval
+    await page.setBypassCSP(true);
     await page.goto(`http://127.0.0.1:${srv.port}/sim/spec.js`);
     const chrome = await page.evaluate(async (all, src, maxSeconds) => {
       const { loadBrowserSim } = await import('/js/battle/runner.js');
@@ -205,7 +207,9 @@ describe('Final Assault / Hidden Core fields in the browser sim', { skip }, () =
     const copies = ['', ' +催泪瓦斯', ' +heavy hitters', ' +transfer window'];
     runs.forEach((spec, i) => {
       const at = `${spec.kind} ${spec.fieldId} ${spec.bossId}${copies[Math.floor(i / specs.length)]}`;
-      assert.equal(node[i].reason, 'cleared', `${at}: the 999-layer pair clears the field`);
+      // the copy with the damage bonds held at 1 layer exists to cost the leader 无来源 HP; it may run to the time limit on a
+      // field (0.3.0's bots: Hidden Core b1 keeps ~5.4 M pool HP after 1200 s) — Chrome and Node must still agree
+      if (i < 3 * specs.length) assert.equal(node[i].reason, 'cleared', `${at}: the 999-layer pair clears the field`);
       assert.equal(chrome[i].json, node[i].json, `${at}: browser and Node results are identical`);
       assert.equal(chrome[i].hash, node[i].hash, at);
       assert.equal(chrome[i].poolHp, node[i].poolHp, `${at}: same local pool`);

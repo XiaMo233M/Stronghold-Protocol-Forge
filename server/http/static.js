@@ -199,6 +199,8 @@ export function createStaticHandler({
       sendError(req, res, 400, '请求地址无效 · Bad request');
       return;
     }
+    // the plugin studio's page is never a static file (server/studio/index.js isStudioPath: any spelling of /studio/)
+    if (isStudioPath(decoded)) { sendError(req, res, 404, '页面不存在 · Not found', decoded.length <= 200 ? decoded : ''); return; }
     // /assets/~<hash>/x → /assets/x (the hash decides the cache policy below)
     const hashed = splitHashedPath(decoded);
     const urlHash = hashed.hash;
@@ -498,7 +500,7 @@ export function createStaticHandler({
       return;
     }
     // The served manifests: every art URL with its content hash (assetViews.js), once the index is ready
-    if (views && (decoded === '/data/assets.json' || decoded === '/data/local-assets.json')) {
+    if (views && (decoded === '/data/assets.json' || decoded === '/data/local-assets.json' || decoded === '/data/local-fx.json')) {
       const view = await views.get(decoded.slice('/data/'.length));
       if (view) {
         await serveBuffer(req, res, { body: view.body, hash: view.hash, type: MIME['.json'], cacheControl: 'no-cache', key: `view:${decoded}`, cache: gzipCache });
@@ -547,7 +549,7 @@ export function createStaticHandler({
         if (mount.deny.has(path.basename(real).toLowerCase())) throw Object.assign(new Error('private'), { code: 'ENOENT' });
       }
     } catch (e) {
-      if (e && e.code === 'ENOENT' && mount.name === 'data' && segments.length === 1 && segments[0] === LOCAL_ART_MANIFEST) {
+      if (e && e.code === 'ENOENT' && mount.name === 'data' && segments.length === 1 && LOCAL_ART_MANIFESTS.has(segments[0])) {
         // Optional local-client art (DESIGN §13): an install without it gets an empty manifest instead of a 404,
         // so browsers don't log an error on every page load. Clients treat empty groups as "no local art".
         res.writeHead(200, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-cache', 'Content-Length': EMPTY_LOCAL_ART.length });
@@ -561,6 +563,18 @@ export function createStaticHandler({
         sendError(req, res, 500, '服务器内部错误 · Internal error');
       }
       return;
+    }
+    const first = segments[0] || '';
+    if (mount.name === 'public' && (first.toLowerCase().startsWith('studio') || /[^\x00-\x7f]/.test(first))) {
+      const studio = await studioRealPath();
+      const real = studio ? await fsp.realpath(absPath).catch(() => null) : null;
+      if (studio && (!real || real === studio || real.startsWith(studio + path.sep))) { sendError(req, res, 404, '页面不存在 · Not found', decoded.length <= 200 ? decoded : ''); return; }
+    }
+    // Compare the actual file, including case-insensitive / encoded aliases, before every 200/206/304.
+    if (mount.name === 'public' && path.basename(absPath).toLowerCase() === 'simworker.js') {
+      const real = await fsp.realpath(absPath);
+      const worker = await fsp.realpath(path.join(publicDir, 'js/battle/simWorker.js')).catch(() => null);
+      if (real === worker) res.setHeader('Content-Security-Policy', SIM_WORKER_CSP);
     }
     const indexed = mount.name === 'public' && segments.length > 1 && ASSET_INDEX_ROOTS.includes(segments[0]);
     const opts = indexed ? hashedFileOpts(assetIndex, segments.join('/'), stat, urlHash) : (urlHash ? { cacheControl: 'no-cache' } : {});

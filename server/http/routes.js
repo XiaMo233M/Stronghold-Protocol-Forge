@@ -116,13 +116,32 @@ export const PUBLIC_ROOMS_URL = '/api/rooms';
  *           views?: ReturnType<typeof import('./assetViews.js').createManifestViews> | null }} health
  * @param {boolean} [withTraffic]
  */
-export function healthReport({ startedAt, network, registry, lobby, modHealth = null, traffic, assetIndex, views }, withTraffic = false) {
+/** `{ plugins: n }` when the server has n > 0 unofficial plugins (the lobby's visual sets count them), else nothing. */
+function pluginCount(lobby) {
+  let n;
+  try { n = Number(lobby?.plugins?.unofficial?.()) || 0; } catch { n = 0; }
+  return n > 0 ? { plugins: n } : {};
+}
+
+/** The content sets with gameplay plugins rooms hold now (DESIGN **§34.6**，上游原文 `§32.6`; 0 without any). */
+function contentSets(lobby) {
+  try { return Number(lobby?.plugins?.contentInUse?.()) || 0; } catch { return 0; }
+}
+
+/**
+ * **D19（取并集）**：上游的 `content` / `trusted` 照加法接；**我们的 `modHealth` 保留**。
+ */
+export function healthReport({ startedAt, network, registry, lobby, modHealth = null, content = null, traffic, assetIndex, views, trusted }, withTraffic = false) {
   /** @type {Record<string, any>} */
   const out = {
     ok: true, version: PROTOCOL_VERSION, app: APP_VERSION, uptimeSec: Math.round((Date.now() - startedAt) / 1000),
     // the runtime the server is serving right now (public/js/ui/buildGuard.js): a page whose own build is
     // older than this reloads itself, so a deploy reaches clients that never reload
     build: buildTag(),
+    // what its rooms play (DESIGN **§34**，上游原文 `§32`): the vanilla content hash, and how many content sets with
+    // gameplay plugins rooms hold now (P1c, §34.6 — a room's cosmetic plugins leave its cs the vanilla one); how many
+    // unofficial plugins it has, when it has some (a page's title screen says so; P1a)
+    ...(content ? { content: { vanilla: content.cs, sets: contentSets(lobby), ...pluginCount(lobby) } } : {}),
     sockets: network.connectionCount, sessions: registry.size, ...lobby.stats(),
   };
   let fields = null;
@@ -132,6 +151,7 @@ export function healthReport({ startedAt, network, registry, lobby, modHealth = 
     fields = null; // 一个包的 healthz 回调炸了不该让运维拿不到 /healthz
   }
   if (fields && typeof fields === 'object' && Object.keys(fields).length) out.modHealth = fields;
+  if (trusted && Object.keys(trusted).length) out.plugins = trusted;
   if (withTraffic && traffic) out.traffic = traffic.snapshot();
   // content-hashed asset URLs (assetIndex.js / assetViews.js): off, building, or ready with how many files and URLs
   if (withTraffic) out.assetHashes = assetIndex ? { ...assetIndex.stats(), views: views ? views.stats() : null } : null;
@@ -154,7 +174,7 @@ const wantsTraffic = (query) => /(?:^|&)traffic(?:=(?:1|true|yes))?(?:&|$)/i.tes
  *   trustProxy: whose forwarding headers name the client (net.js clientAddress; the server's TRUST_PROXY)
  * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => void}
  */
-export function createRequestHandler({ serveStatic, health, log, records = null, accounts = null, modsCatalog, httpLanes, publicDir, trustProxy = 'auto' }) {
+export function createRequestHandler({ serveStatic, health, log, records = null, accounts = null, modsCatalog, httpLanes, publicDir, trustProxy = 'auto', studio = null, csp = null, trustedRuntime = null }) {
   /** @type {Map<string, TokenBucket>} 客户端地址 → 只读战绩路由的桶（见文件头那条「已知边界」） */
   const recordBuckets = new Map();
 
@@ -191,6 +211,10 @@ export function createRequestHandler({ serveStatic, health, log, records = null,
     if (url.length > MAX_URL_LENGTH) { sendError(req, res, 414, '请求地址过长 · URI too long'); return; }
     const parts = splitUrl(url);
     if (!parts) { sendError(req, res, 400, '请求地址无效 · Bad request'); return; }
+    // 受信任插件的精确路径（server/plugins/trustedApi.js，上游 §34.13）：只接 /x/<id>/…，不传活请求/套接字
+    if (trustedRuntime && parts.rawPath.startsWith('/x/') && await trustedRuntime.route(req, res, parts.rawPath)) return;
+    // 插件工作台（server/studio/index.js）：只给本机与局域网；其他客户端走 404 页
+    if (studio && studio.handles(parts.rawPath)) { await studio.handle(req, res, parts.rawPath, parts.query); return; }
     // A lane is asked before anything else, because it is the only rule here that knows about methods the game does
     // not serve (POST). It cannot reach the engine's own paths: `validateHttpLanes` refuses any prefix that overlaps
     // them, including `/healthz` and the catalogue, so the order below is untouched for every request a lane does not
@@ -253,6 +277,7 @@ export function createRequestHandler({ serveStatic, health, log, records = null,
 
   return (req, res) => {
     setSecurityHeaders(res);
+    if (csp) res.setHeader('Content-Security-Policy', csp);
     // 每一条回答的体字节都进流量计数（traffic.js），在**写出任何东西之前**接上 —— 与上游同一条纪律。
     if (health.traffic) health.traffic.meter(res, splitUrl(req.url || '/')?.rawPath || '/');
     handleRequest(req, res).catch((e) => {

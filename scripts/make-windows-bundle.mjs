@@ -647,6 +647,7 @@ ${voiceNote}
 \`\`\`
 本机当服务器   双击 启动游戏.bat：在这台电脑开服，浏览器自动打开；
                控制台会打印「发给朋友」的局域网地址（形如 http://192.168.1.23:3000）
+用脚本插件     双击 启动游戏-插件沙箱.bat：同上，脚本插件在沙箱里运行（房主在房间里选中才生效）
 连别人的服务器 不需要这个包，直接用浏览器打开对方的网址就行
 \`\`\`
 
@@ -829,6 +830,12 @@ async function main() {
   } else if (fs.existsSync(localTextures)) {
     console.log(`    ! 有 public/assets/local 但没有 ${LOCAL_ASSET_MANIFEST}：贴图进了包也用不上，`
       + '先跑 node tools/setup.mjs --local 生成清单（或删掉该目录）');
+  }
+  // 2c) 官方战斗特效的清单（本机提取过才有）：特效文件随 public/assets/local/fx 进包，靠这份 JSON 才会被采用。
+  const fxManifest = path.join(ROOT, LOCAL_FX_MANIFEST);
+  if (fs.existsSync(fxManifest)) {
+    await fsp.copyFile(fxManifest, path.join(appDir, LOCAL_FX_MANIFEST));
+    console.log(`    带上 ${LOCAL_FX_MANIFEST}（官方战斗特效的清单，文件本体在 public/assets/local/fx）`);
   }
 
   // 3) 生产依赖

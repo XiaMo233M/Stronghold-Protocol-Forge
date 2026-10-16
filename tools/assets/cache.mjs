@@ -83,7 +83,9 @@ export async function cachedJson({ cacheFile, url, refresh = false, offline = fa
           }
           throw new Error(`HTTP ${res.status}`);
         }
-        text = (await network.readBody(src, res)).toString('utf8');
+        const buf = await network.readBody(src, res);
+        if (verifier) verifier.verify(buf, verifiedSource);
+        text = buf.toString('utf8');
         json = JSON.parse(text);
       } catch (e) {
         lastErr = e;

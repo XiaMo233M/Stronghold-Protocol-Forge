@@ -16,7 +16,8 @@
 //   board.resize(w, h, dpr) · board.stats() · board.destroy()
 //
 // Draw calls: board (tiles + blocks + platforms, merged, MT_autochess), the pen's glass hatches (glassMaterial),
-// static crates (merged, same material),
+// static crates (merged, same material), the 射击台 as the official model (trap_1106_achplat, merged, trapMaterial —
+// the slab of layout.js stays the fallback without the local art),
 // decals (MT_autochess_common), fence pipes, blowers (merged, unlit), gate boxes (additive + alpha, merged per
 // material), cyan field edges, terrain overlays (≤ 4), background plane + its shadow catcher — ~12–16 in total.
 // An official scene replaces the tiles, glass, decals, pipes and background (all but the device slabs, layout.js
@@ -29,10 +30,11 @@ import { layoutOf, mapSize } from '../layout.js';
 import { surfaceUV } from './atlas.js';
 import {
   focusUniforms, makeTexture, boardMaterial, glassMaterial, decalMaterial, pipeMaterial, unlitMaterial, gateMaterial, glowMaterial,
-  waterMaterial, mireMaterial, infectionMaterial, smogMaterial, dashTexture, environmentMap, sceneMaterial, sceneWaterMaterial,
+  waterMaterial, mireMaterial, infectionMaterial, smogMaterial, dashTexture, environmentMap, sceneMaterial, sceneWaterDecalMaterial,
+  sceneEnvTexture, applyWaterMaterial, trapMaterial,
 } from './materials.js';
 import { syncThreeCamera } from '../projection.js';
-import { mergeSceneChunks, sceneMaterialKey } from './load.js';
+import { mergeSceneChunks, sceneMaterialKey, sceneWaterInfo, isSceneWater } from './load.js';
 
 /** Lighting rig (tuned against the official screenshots: bright even tops, darker sides, soft shadows). */
 export const LIGHTING = Object.freeze({
@@ -51,13 +53,28 @@ export const LIGHTING = Object.freeze({
   bg: { z: -8, size: 43.16, color: 0.713, dim: 0.8, tiles: 3 },
 });
 
-/** Additive gain of the gate boxes at the curve's mean (tuned against the official screenshots). */
-export const GATE_GAIN = 0.6;
+/**
+ * The gate boxes' _TintColor, from the client's 2 s clip (arts/effects/[pack]map.ab, controller `starting`,
+ * `UVAnimation`): one renderer red (1, 0, 0) with alpha 0.134 → 0.229 → 0.134, the other blue (0, 0.0897, 1) with alpha
+ * 0.16 → 0.097 → 0.16. The alpha-blended part has the material's own (1, 1, 1, 1).
+ * [ASSUMED] the clip's renderer paths are hashes that match no name in the bundle: red is read as the start gate,
+ * blue as the objective.
+ */
+export const GATE_TINT = Object.freeze({
+  start: { rgb: [1, 0, 0], alpha: [0.134, 0.229] },
+  end: { rgb: [0, 0.0897, 1], alpha: [0.16, 0.097] },
+  endAb: { rgb: [1, 1, 1], alpha: [1, 1] },
+});
 
-/** Gate pulse: the official clip's _TintColor.a curve (2 s loop, 0.134 → 0.229 → 0.134) scaled to our intensity. */
-export function gatePulse(t, phase = 0) {
-  const k = 0.5 - 0.5 * Math.cos(((t / 2 + phase) % 1) * Math.PI * 2);
-  return 0.134 + (0.229 - 0.134) * k;
+/**
+ * Gate pulse: a _TintColor.a curve [at 0 s and 2 s, at 1 s] of the 2 s loop. The clip's streamed keys are cubic
+ * segments a·x³ + b·x² + c·x + d with flat ends (red: −0.19, 0.285, 0, 0.134 on 0–1 s, then the mirror), i.e. a
+ * smoothstep between the two values.
+ */
+export function gatePulse(t, [from, mid] = GATE_TINT.start.alpha) {
+  const u = ((t % 2) + 2) % 2;
+  const x = u < 1 ? u : 2 - u;
+  return from + (mid - from) * x * x * (3 - 2 * x);
 }
 
 /**
@@ -169,9 +186,10 @@ export class BoardScene {
     this.tex = {
       D: makeTexture(T, img.D, { aniso }), N: makeTexture(T, img.N, { srgb: false, aniso }), R: makeTexture(T, img.R, { srgb: false, aniso }),
       E: makeTexture(T, img.E, { aniso }), common: makeTexture(T, img.common, { aniso }), commonE: makeTexture(T, img.commonE, { aniso }),
-      BG: makeTexture(T, img.BG, { aniso }), wind: makeTexture(T, img.wind, { aniso }), gate: makeTexture(T, img.gate, {}),
+      BG: makeTexture(T, img.BG, { aniso }), wind: makeTexture(T, img.wind, { aniso }), gate: makeTexture(T, img.gate, { srgb: false }),
       waterN: makeTexture(T, img.waterN, { srgb: false, repeat: true }), caustics: makeTexture(T, img.caustics, { srgb: false, repeat: true }),
       noise: makeTexture(T, img.noise, { srgb: false, repeat: true }),
+      platform: makeTexture(T, img.platform, { aniso }),
     };
     if (this.tex.BG) { this.tex.BG.wrapS = T.MirroredRepeatWrapping; this.tex.BG.wrapT = T.MirroredRepeatWrapping; }
     this.mat = {
@@ -181,15 +199,16 @@ export class BoardScene {
       pipe: pipeMaterial(T, this.focus),
       bg: this.tex.BG ? unlitMaterial(T, this.tex.BG, new T.Color().setScalar(LIGHTING.bg.color * LIGHTING.bg.dim)) : new T.MeshBasicMaterial({ color: 0x1a1d1f }),
       wind: this.tex.wind ? unlitMaterial(T, this.tex.wind) : null,
-      gateStartAdd: this.tex.gate ? gateMaterial(T, this.tex.gate, { additive: true }) : null,
-      gateEndAdd: this.tex.gate ? gateMaterial(T, this.tex.gate, { additive: true }) : null,
-      gateEndAb: this.tex.gate ? gateMaterial(T, this.tex.gate, { additive: false }) : null,
+      gateStartAdd: this.tex.gate ? gateMaterial(T, this.tex.gate, { additive: true, tint: GATE_TINT.start.rgb }) : null,
+      gateEndAdd: this.tex.gate ? gateMaterial(T, this.tex.gate, { additive: true, tint: GATE_TINT.end.rgb }) : null,
+      gateEndAb: this.tex.gate ? gateMaterial(T, this.tex.gate, { additive: false, tint: GATE_TINT.endAb.rgb }) : null,
       edge: glowMaterial(T, dashTexture(T)),
       water: waterMaterial(T, this.tex, this.focus),
       mire: mireMaterial(T, this.tex, this.focus),
       infection: infectionMaterial(T, this.tex, this.focus),
       smog: smogMaterial(T, this.tex, this.focus),
       shadowCatcher: new T.ShadowMaterial({ opacity: 0.32, color: 0x000000 }),
+      platform: this.tex.platform ? trapMaterial(T, this.tex.platform, this.focus, pack?.materials?.trap?.MT_trap_1106_achplat || null, LIGHTING.key.dir) : null,
     };
     this.mat.crateFade = null;
     // lights
@@ -233,6 +252,7 @@ export class BoardScene {
     this.frames = 0;
     this.lastMs = 0;
     this._crateGeom = null;
+    this._platformGeom = undefined;
   }
 
   // ---- geometry ----------------------------------------------------------------------------------------------
@@ -278,6 +298,17 @@ export class BoardScene {
     this._crateGeom = boxProjectUV(base, uv.crateTop || { src: 'D', rect: [1222, 1938, 134, 108] }, uv.crateSide || { src: 'D', rect: [1087, 1938, 134, 108] });
     this._crateGeom.color = null;
     return this._crateGeom;
+  }
+
+  /**
+   * The official 射击台 model in board space (trap_1106_achplat at its prefab scale 0.01: 1.05 tiles square, 0.465
+   * high — render/style.js TILE_H.platform is its top), or null without the local art (layout.js draws the slab).
+   */
+  platformGeometry() {
+    if (this._platformGeom !== undefined) return this._platformGeom;
+    const obj = this.pack?.meshes?.platform;
+    this._platformGeom = obj && obj.normal && obj.uv && this.mat.platform ? objToBoard(obj, 0.01) : null;
+    return this._platformGeom;
   }
 
   /** Built areas (inclusive tile rects): rebuilds when they change. */
@@ -345,10 +376,11 @@ export class BoardScene {
     if (res) return res;
     const T = this.THREE;
     const aniso = Math.min(8, this.renderer.capabilities?.getMaxAnisotropy?.() || 1);
-    const tex = {}, lm = [];
+    const tex = {}, data = {}, lm = [];
     for (const [name, img] of Object.entries(pack.images?.tex || {})) tex[name] = makeTexture(T, img, { aniso, repeat: true });
+    for (const [name, img] of Object.entries(pack.images?.data || {})) data[name] = makeTexture(T, img, { srgb: false, aniso, repeat: true });
     for (const img of pack.images?.lm || []) lm.push(img ? makeTexture(T, img, { srgb: false }) : null);
-    res = { tex, lm, mats: new Map() };
+    res = { tex, data, lm, env: sceneEnvTexture(T, pack.images?.env, pack.doc?.env), mats: new Map() };
     this.sceneRes.set(pack.key, res);
     return res;
   }
@@ -357,7 +389,7 @@ export class BoardScene {
     const res = this.sceneRes.get(pack.key);
     if (!res) return;
     for (const m of res.mats.values()) m.dispose();
-    for (const t of [...Object.values(res.tex), ...res.lm]) t?.dispose?.();
+    for (const t of [...Object.values(res.tex), ...Object.values(res.data), ...res.lm, res.env]) t?.dispose?.();
     this.sceneRes.delete(pack.key);
   }
 
@@ -383,14 +415,18 @@ export class BoardScene {
     for (const [mk, bucket] of buckets) {
       const c = mergeSceneChunks(bucket.chunks);
       const info = bucket.info;
-      const water = info?.kind === 'water';
+      const surface = isSceneWater(info, c.material);
+      const water = surface || info?.kind === 'water';
       let mat = res.mats.get(mk);
       if (!mat) {
-        mat = water
-          ? sceneWaterMaterial(T, this.tex, this.focus, info)
+        mat = surface
+          ? waterMaterial(T, this.tex, this.focus, info, { env: res.env, envRange: pack.doc?.env?.range, envMips: pack.doc?.env?.mips })
+          : water ? sceneWaterDecalMaterial(T, this.tex, this.focus, info)
           : sceneMaterial(T, {
             map: res.tex[info?.map] || null, lightMap: c.lightmap >= 0 ? (res.lm[c.lightmap] || null) : null, info,
-            light: pack.doc?.light || null, lightRange: pack.doc?.lightRange,
+            light: pack.doc?.light || null, lightRange: pack.doc?.lightRange, lightEncoding: pack.doc?.lightEncoding,
+            normalMap: res.data[info?.normalMap] || null, glossMap: res.data[info?.glossMap] || null,
+            env: res.env, envRange: pack.doc?.env?.range,
           }, this.focus);
         res.mats.set(mk, mat);
       }
@@ -414,11 +450,18 @@ export class BoardScene {
   }
 
   _buildDevices(board) {
-    const crates = [], blowers = [];
+    const crates = [], blowers = [], platforms = [];
     this.staticCrates = [];
     const wind = this.pack?.meshes?.blower ? objToBoard(this.pack.meshes.blower, 1) : null;
+    const plat = this.platformGeometry();
+    if (plat) {
+      // lit by the official scene's own key light when one is drawn, else by the procedural board's
+      const dir = this.official?.doc?.light?.dir;
+      this.mat.platform.uniforms.uLightDir.value.set(...(Array.isArray(dir) && dir.length === 3 ? dir : LIGHTING.key.dir)).normalize();
+    }
     for (const d of board.devices) {
       if (d.kind === 'crate') this.staticCrates.push(d);
+      else if (d.kind === 'platform' && plat) platforms.push(placeMesh(plat, { x: d.c, y: d.r, z: d.z0 }));
       else if (d.kind === 'blower' && wind && this.mat.wind) blowers.push(placeMesh(wind, { x: d.c, y: d.r, z: d.z0 + 0.078, rot: DIR_TURNS[d.dir] ?? 0 }));
       else if (d.kind === 'blower' || d.kind === 'turret') crates.push(placeMesh(boxWithTop(this.pack?.uv, d.kind), { x: d.c, y: d.r, z: d.z0 }));
       else if (d.kind === 'mound') crates.push(placeMesh(this.crateGeometry(), { x: d.c, y: d.r, z: d.z0, s: 0.95, sz: 0.55 }));
@@ -426,6 +469,7 @@ export class BoardScene {
     }
     if (blowers.length) this.meshes.blowers = this._mesh(mergeInto(blowers), this.mat.wind, { receive: false });
     if (crates.length) this.meshes.props = this._mesh(mergeInto(crates), this.mat.board);
+    if (platforms.length) this.meshes.platforms = this._mesh(mergeInto(platforms), this.mat.platform);
     this._rebuildCrates();
   }
 
@@ -512,7 +556,9 @@ export class BoardScene {
     const opt = { cast: false, receive: false, order: 2 };
     if (T.water.length) this.meshes.water = this._mesh(quads(T.water, -0.035), this.mat.water, opt);
     if (T.mire.length) this.meshes.mire = this._mesh(quads(T.mire, 0.006, 0.02), this.mat.mire, opt);
-    if (T.infection.length) this.meshes.infection = this._mesh(quads(T.infection, 0.007, 0.02), this.mat.infection, opt);
+    // The infection (活性源石) glow is our own flat patch; an official scene already carries that floor in its own
+    // geometry and textures, so drawing ours on top just overlaps it (#549).
+    if (T.infection.length && !this.official) this.meshes.infection = this._mesh(quads(T.infection, 0.007, 0.02), this.mat.infection, opt);
     if (T.smog.length) {
       // two crossed haze cards per grille tile, standing up
       const pos = [], uv = [], idx = [];
@@ -666,11 +712,10 @@ export class BoardScene {
       if (Math.abs(F.x - tg[0]) + Math.abs(F.y - tg[1]) + Math.abs(F.z - tg[2]) + Math.abs(F.w - tg[3]) > 40) F.set(tg[0], tg[1], tg[2], tg[3]);
       else F.set(F.x + (tg[0] - F.x) * k, F.y + (tg[1] - F.y) * k, F.z + (tg[2] - F.z) * k, F.w + (tg[3] - F.w) * k);
     }
-    // gate pulses (official 2 s curve → additive intensity), objective leak flashes
-    const pulse = gatePulse(t);
-    if (this.mat.gateStartAdd) this.mat.gateStartAdd.uniforms.uPulse.value = GATE_GAIN * pulse / 0.18;
-    if (this.mat.gateEndAdd) this.mat.gateEndAdd.uniforms.uPulse.value = GATE_GAIN * gatePulse(t, 0.5) / 0.18;
-    if (this.mat.gateEndAb) this.mat.gateEndAb.uniforms.uPulse.value = 0.9;
+    // gate pulses (the official clip's _TintColor.a curves), objective leak flashes
+    if (this.mat.gateStartAdd) this.mat.gateStartAdd.uniforms.uAlpha.value = gatePulse(t, GATE_TINT.start.alpha);
+    if (this.mat.gateEndAdd) this.mat.gateEndAdd.uniforms.uAlpha.value = gatePulse(t, GATE_TINT.end.alpha);
+    if (this.mat.gateEndAb) this.mat.gateEndAb.uniforms.uAlpha.value = gatePulse(t, GATE_TINT.endAb.alpha);
     let flash = 0;
     for (let i = this.flashes.length - 1; i >= 0; i--) { const f = this.flashes[i]; f.t += dt; if (f.t > 1.2) this.flashes.splice(i, 1); else flash = Math.max(flash, 1 - f.t / 1.2); }
     for (const m of [this.mat.gateEndAdd, this.mat.gateEndAb]) if (m) m.uniforms.uFlash.value.setRGB(flash, flash * 0.12, flash * 0.1);

@@ -185,6 +185,11 @@
 .seat__state--waiting { color: var(--text-lo); }
 .seat__state--offline { color: var(--orange-hi); }
 .seat__state--host { color: var(--gold-2); }
+/* a room with gameplay plugins (DESIGN §32.6): whether the seat's page has loaded and checked the room's content */
+.seat__content { display: block; padding: 0 .12rem; font-size: calc(.13 * var(--t)); color: var(--text-lo); letter-spacing: .04em; }
+.seat__content.is-ready { color: var(--mint-400); }
+.seat__content.is-failed { color: var(--orange-hi); }
+.room-mode { margin-left: .1rem; padding: 0 .08rem; border: 1px solid rgba(255, 106, 61, .6); color: #ff8a5c; font-size: calc(.16 * var(--t)); vertical-align: middle; }
 
 .seat.is-ready { --bk-c: var(--mint-500); border-color: var(--mint-800); }
 .seat.is-ready::before { background: var(--mint-500); box-shadow: 0 0 .12rem rgba(23, 249, 183, .6); }

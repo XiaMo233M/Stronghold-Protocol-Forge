@@ -34,7 +34,7 @@ export class BattleHooks {
     const h = { name, fn, priority: Number(opts.priority) || 0, owner: opts.owner ?? null, pack: opts.pack ?? this._packScope ?? null, seq: ++hookSeq, removed: false, once: !!opts.once };
     const list = this._hooks[name] ?? (this._hooks[name] = []);
     let i = list.length;
-    while (i > 0 && list[i - 1].priority < h.priority) i--;
+    while (i > 0 && list[i - 1].priority < h.priority) i--; // loop-cap: hook list length
     list.splice(i, 0, h);
     return h;
   }
@@ -155,7 +155,7 @@ export class BattleHooks {
       if (s.cancelled) continue;
       if (s.interval > 0) {
         let n = 0;
-        while (s.due <= now && !s.cancelled && n++ < 8) {
+        while (s.due <= now && !s.cancelled && n++ < 8) { // loop-cap: battle.every at most 8 per tick
           // 预算由 `_safe` 记（它是每个内容回调的唯一入口 —— 在这里再记一次就是同一趟调两个数）。
           // 到顶时 `_rollbackPack` 已经把这个计时器 `cancelled` 掉，所以循环条件自己会停。
           s.count++;

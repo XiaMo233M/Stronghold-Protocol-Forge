@@ -1,0 +1,55 @@
+diff a/docs/SIM.md b/docs/SIM.md	(rejected hunks)
+@@ -553,8 +564,15 @@ that died, became hidden / uncarryable or cannot path to the next cabin position
+ returns their current `weight` (including modifiers). The same tick's count and weight limits use that cleaned
+ list and budget (DESIGN §28.27); this is local to the kit, not a change to general displacement.
+ 
+-**Hit areas (`body.js`, user playtest #5 item 10).** A regular enemy is a point: in a grid range when the tile of its
+-position (`roundHalfEven(y)`, `roundHalfEven(x)` — PRTS 作战机制 "四舍六入五成双"; `Math.round` would take 2.5 to 3) is a range tile, in a radius when its position is (DESIGN §3). An enemy held on the field edge is inset by `FIELD_EDGE_INSET` (1/1048576) [ASSUMED] so that rounding keeps it on the edge tile; movement, knockback and a unit's standing tile for range keys still use `Math.round` (§30.27). A huge enemy (巨型单位:
++**Hit areas (`body.js`, user playtest #5 item 10).** A regular enemy is a point with a collider: in an operator-side
++grid range (an attack range, a skill's or trait's range grid, the skill-range trigger, an aura over a range, a strike
++area) when its circle of radius 0.1 (`ENEMY_COLLIDER_RADIUS`, the client's CircleCollider2D; PRTS 作战机制 "索敌抬手等均使用
++碰撞箱"; the owner's decision of 2026-10-14) overlaps a range tile — `colliderKeys` / `bodyInRange`, the range buckets of
++`Battle.enemiesInKeys` / `anyEnemyInKeys` / `unitsInGrid` —; on a tile for a tile rule (格子判定: terrain and tile
++states, traps, "所在格" effects, the PRTS notes that say so, a `rangeTiles` profile — 谬因) when the tile of its position
++(`roundHalfEven(y)`, `roundHalfEven(x)` — PRTS 作战机制 "四舍六入五成双"; `Math.round` would take 2.5 to 3) is that tile —
++`bodyKeys` / `bodyInKeys` / `bodyOnTile`, `Battle.enemiesOnTiles` —; in a radius when its position is (DESIGN §3), or,
++for the radius effects PRTS marks 碰撞判定, when its circle overlaps the radius (`Battle.foesInColliderRadius`). An enemy held on the field edge is inset by `FIELD_EDGE_INSET` (1/1048576) [ASSUMED] so that rounding keeps it on the edge tile; movement, knockback and a unit's standing tile for range keys still use `Math.round` (§30.27). A huge enemy (巨型单位:
+ `enemy.hitArea` from data/enemies.json `hitArea` — 假想敌：胄 / 管 / 盐风主教昆图斯 / 阿利斯泰尔 / “萨米的意志”, PRTS
+ "受击判定区域为长4.95、宽2.95的长方形，向上偏移1.0") is hit anywhere on a rectangle `w` × `h` tiles centred on its position
+ moved `dx` columns right / `dy` rows up: it occupies every tile the rectangle overlaps (`bodyKeys` — 5 × 3 tiles; PRTS
+@@ -1610,9 +1649,18 @@ yet — enemy content must pick one); 抵抗 covers the control statuses of `RES
+ entering another pulse. This retains the lethal-hit pulse and prevents valid high hit-count chains from tripping the
+ general hook guard. The queue is emptied in `finally`; it introduces no timer or simulation RNG.
+ 
++### Player kill credit
++
++`BattleResult.perPlayer[playerId].creditedKills` totals that player's operator and summon kill counters before
++compacting unitStats. The compact report preserves this number, including teammates' leaked enemies killed during
++联防; the verification digest (`resultDigest`) leaves it out — statistics only, it must not split a client's and the
++server's digests (DESIGN §32.14.16). The match adds phase credits into its single-match total; combat rules and wave-owned
++`killed` remain unchanged.
++
+ ### Community follow-up contracts (DESIGN §29)
+ 
+ - Optional snapshot `coins: [[id, balance, cap]]` comes from `snapshot.js coinView`: a live allied Swire skill's nonnegative integer balance and blackboard cap, including zero. Invalid/missing entries are omitted; interpolation clears absent values.
++- Optional snapshot `energy: [[id, stored, cap]]` comes from `snapshot.js mysticView` (GitHub #633): a 秘术师's stored attack energies — the trait's `trait.stored` against its `profile.storeMax` (3 by default, 4 with 深靛's MSC-X module) — including zero. Invalid/missing entries are omitted; interpolation clears absent values. A kit whose store is its own (维伊's 转置能量, 黑键's elite energies) keeps no `trait.stored` and reports no row.
+ - Raid's one reselect after a revive orders by taunt, then remaining route distance, then id, and jumps while the operator is not blocking (contact on the current tile is refreshed first). Ordinary polls keep remaining-distance order and the empty-range prerequisite.
+ - Healing skill activation includes elemental-only injury when the operator's heal profile can cure it. Pinecone S2 growth is deployment-local. Skadi S1 and Stead preserve redirect ancestry and take both shares from the pre-redirect hit, so the total damage is conserved.
+ 
+@@ -1621,3 +1669,16 @@ general hook guard. The queue is emptied in `finally`; it introduces no timer or
+ 维什戴尔's `shadowTile` requires `Battle.onFieldBoard` before ranking summon candidates: a board of this field (a
+ teammate's half), never a boss field's hand / 临时整备区 rows or an empty half (§31.10). `grid.inRect` alone also admits
+ those bench rows. See [DESIGN §3](design/geometry-time.md#3-coordinates-fields-and-geometry) for the deployment boundary.
++
++
++### Browser simulation hosts (DESIGN §32.11)
++
++`public/js/battle/simHost.js` is C4: `load(cs, content?)`, `start(spec, opts)`,
++`step(n, opts?) → { snap, ev, state }`, `unitStats(id)`, `ownerOps(pid)`, `stop()`.
++Worker methods return Promises; the runner preserves a synchronous cached stats/read API for UI consumers.
++The original content runs in-page. Every gameplay content set runs in a dedicated Worker with its checked data and
++`bounds` snapshot. Worker steps are capped at 600 ticks per RPC; only the main-thread runner controls pacing.
++A 2 s configurable watchdog [ASSUMED] covers blocked hooks and construction; no watchdog clock enters sim state.
++Only sandbox script Workers/children run SES lockdown, before engine import. Both native and sandbox paths verify
++`@script` descriptors and use `createSDK(plugin, { settings, log })` plus the production extension registry/budget.
++SDK-owned return records are immutable copies; live Battle/Unit callback objects remain mutable.

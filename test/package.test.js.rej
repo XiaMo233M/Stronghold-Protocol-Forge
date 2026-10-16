@@ -1,0 +1,24 @@
+diff a/test/package.test.js b/test/package.test.js	(rejected hunks)
+@@ -41,7 +46,7 @@ test('selection: runtime files in; tests, maintainer tools, other docs, dev page
+     'data/chess.json', 'data/i18n/en.json', 'tools/setup.mjs', 'tools/vendor.mjs', 'tools/fetch-assets.mjs', 'tools/doctor.mjs',
+     'tools/crop-board-atlas.mjs', 'tools/assets/plan.mjs', 'tools/assets/local-enemy-spines.json', 'tools/assets/local-token-spines.json',
+     'tools/local-extract/extract.py',
+-    'tools/local-extract/LICENSE-Ark-Unpacker.txt', 'scripts/start.sh', 'scripts/start-windows.bat', 'scripts/launch.mjs',
++    'tools/local-extract/LICENSE-Ark-Unpacker.txt', 'scripts/start.sh', 'scripts/start-windows.bat', 'scripts/start-windows-sandbox.bat', 'scripts/launch.mjs',
+     'scripts/install-service-windows.ps1', 'docs/PLAYING.md', 'docs/DEPLOY.md', ...RUNTIME_RESEARCH, 'package.json',
+     'package-lock.json', 'LICENSE', 'NOTICE.md', 'THIRD-PARTY-NOTICES.md', 'README.md', 'CHANGELOG.md',
+     // out
+@@ -55,11 +60,11 @@ test('selection: runtime files in; tests, maintainer tools, other docs, dev page
+     'public/.DS_Store', 'tools/local-extract/.venv-extract/x.py', 'node_modules/ws/index.js',
+   ]);
+   for (const f of ['server/index.js', 'public/i18n/en.json', 'data/i18n/en.json', 'tools/assets/local-enemy-spines.json',
+-    'tools/assets/local-token-spines.json', 'tools/local-extract/LICENSE-Ark-Unpacker.txt', 'scripts/install-service-windows.ps1',
++    'tools/assets/local-token-spines.json', 'tools/local-extract/LICENSE-Ark-Unpacker.txt', 'scripts/install-service-windows.ps1', 'scripts/start-windows-sandbox.bat',
+     'docs/research/07-assets.json', 'CHANGELOG.md']) {
+     assert.ok(keep.includes(f), `keeps ${f}`);
+   }
+-  assert.equal(keep.length, 35, keep.join(' '));
++  assert.equal(keep.length, 36, keep.join(' '));
+   assert.equal(drop.length, 40, drop.join(' '));
+   assert.ok(!keep.some((f) => drop.includes(f)));
+ });

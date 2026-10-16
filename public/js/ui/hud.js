@@ -415,6 +415,7 @@ export const TopBar = modComponent('game.hud.topBar', function TopBar({ pub, pri
           <${SpectatorPill} spectators=${spectators} myId=${myId} isHost=${isHost} onRemove=${onRemoveSpectator} />
         </div>
         ${pub?.difficulty ? html`<${DifficultyTag} difficulty=${pub.difficulty} size="sm" />` : null}
+        <${UnofficialMark} room=${room} compact=${true} class="gtop__mod" />
       </div>
     </div>
 

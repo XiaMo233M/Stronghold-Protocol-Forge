@@ -1,0 +1,42 @@
+diff a/test/feedback7-voices.test.js b/test/feedback7-voices.test.js	(rejected hunks)
+@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
+ import { buildPlan, VOICE_JP_LANG } from '../tools/assets/plan.mjs';
+ import { indexAudio, VOICE_DIRS } from '../tools/assets/audio.mjs';
+ import { RAW } from '../tools/assets/sources.mjs';
+-import { artPlan, FULL_ZIP_JP_VOICE, JP_VOICE_DIR } from '../tools/package.mjs';
++import { artPlan, FULL_ZIP_JP_VOICE, JP_VOICE_DIR, FULL_ZIP_OPTIONAL_VOICE, OPTIONAL_VOICE_DIRS } from '../tools/package.mjs';
+ import { DEFAULT_SETTINGS, VOICE_LANGS, sanitizeSettings } from '../public/js/ui/gameLogic.js';
+ 
+ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+@@ -91,18 +91,26 @@ test('data/assets.json: voiceJp gives every voiced operator the JP twin of each
+   if (fs.existsSync(dir)) for (const u of lines) assert.ok(fs.statSync(path.join(ROOT, 'public', u)).size > 0, u);
+ });
+ 
+-test('settings 语音语言: 中文 by default, 日本語 kept, nothing else; the row is translated in every language pack', () => {
+-  assert.deepEqual([...VOICE_LANGS], ['cn', 'jp']);
+-  assert.equal(DEFAULT_SETTINGS.voiceLang, 'cn', 'not tied to the interface language: 中文 until the player picks 日本語');
++test('settings 语音语言: 中文 by default, 日本語 / English / 한국어 kept, nothing else; the row is translated in every language pack', () => {
++  assert.deepEqual([...VOICE_LANGS], ['cn', 'jp', 'en', 'kr']);
++  assert.equal(DEFAULT_SETTINGS.voiceLang, 'cn', 'not tied to the interface language: 中文 until the player picks another dub');
++  assert.equal(DEFAULT_SETTINGS.voiceNative, false);
+   assert.equal(sanitizeSettings({}).voiceLang, 'cn');
+   assert.equal(sanitizeSettings({ voiceLang: 'jp' }).voiceLang, 'jp');
+-  assert.equal(sanitizeSettings({ voiceLang: 'en' }).voiceLang, 'cn', 'no English / Korean dub');
++  assert.equal(sanitizeSettings({ voiceLang: 'en' }).voiceLang, 'en');
++  assert.equal(sanitizeSettings({ voiceLang: 'kr' }).voiceLang, 'kr');
++  assert.equal(sanitizeSettings({ voiceLang: 'native' }).voiceLang, 'cn', 'the own-language dub is a per-operator pick, not a global');
++  assert.equal(sanitizeSettings({ voiceNative: true }).voiceNative, true);
++  assert.equal(sanitizeSettings({ voiceNative: 'yes' }).voiceNative, false);
+   const ui = fs.readFileSync(path.join(ROOT, 'public/js/ui/settings.js'), 'utf8');
+   assert.match(ui, /updateSettings\(\{ voiceLang: id \}\)/);
+-  assert.match(ui, /const VOICE_LANG_NAMES = \{ cn: '中文', jp: '日本語' \};/, 'each dub named in its own language');
++  assert.match(ui, /const VOICE_LANG_NAMES = \{ cn: '中文', jp: '日本語', en: 'English', kr: '한국어' \};/, 'each dub named in its own language');
++  assert.match(ui, /updateSettings\(\{ voiceNative: !s\.voiceNative \}\)/);
++  assert.match(ui, /audio\.setVoiceLang\(s\.voiceLang, s\.voiceOverrides\)/);
+   for (const code of ['en', 'ja', 'ko', 'zh-TW']) {
+     const pack = readJson(`public/i18n/${code}.json`);
+     assert.ok(typeof pack['语音语言'] === 'string' && pack['语音语言'] && pack['语音语言'] !== '语音语言', `${code}: 语音语言`);
++    for (const id of ['voice-lang::本土语言', '有本土语言配音时使用', '试听']) assert.ok(typeof pack[id] === 'string' && pack[id], `${code}: ${id}`);
+   }
+ });
+ 
