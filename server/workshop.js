@@ -294,11 +294,15 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
 export function panelModuleIssues(pack, packDir) {
   /** @type {Array<{ id: string, code: string, reason: string }>} */
   const out = [];
-  const panels = pack && pack.client && Array.isArray(pack.client.panels) ? pack.client.panels : [];
-  if (!panels.length || typeof packDir !== 'string' || !packDir) return out;
+  const client = pack && pack.client;
+  const panels = client && Array.isArray(client.panels) ? client.panels : [];
+  // 整屏与面板走**同一条**装载期文件判据（DESIGN §28.55）：两者在客户端是同一份线表，一条声明读不到的文件
+  // 就是「签了名却拿不出东西」—— 面板那一半本来就这么判，整屏没有理由更松。
+  const screens = client && Array.isArray(client.screens) ? client.screens : [];
+  if ((!panels.length && !screens.length) || typeof packDir !== 'string' || !packDir) return out;
   const dir = path.resolve(packDir);
   /** 一个声明的包内相对文件是否真的在包里（模块与样式表走同一条判据，只有扩展名不同）。 */
-  const fileIssue = (panelId, field, rel, ext, what) => {
+  const fileIssue = (entry, kind, field, rel, ext, what) => {
     const segments = String(rel).split('/');
     const abs = path.join(dir, ...segments);
     // `..` cannot build a path outside the pack that is also inside it: the join is re-checked, the same way
@@ -306,31 +310,40 @@ export function panelModuleIssues(pack, packDir) {
     const bad = !rel || path.isAbsolute(rel) || !String(rel).endsWith(ext)
       || segments.some((s) => !s || s === '..' || s === '.' || s.startsWith('.'))
       || (abs !== dir && !abs.startsWith(dir + path.sep));
+    // 拒绝码与文案跟着**声明面**走：作者写的 `client.screens[...]` 不该收到一句 `client.panels[...]` 的报错。
+    const prefix = kind === 'screen' ? 'client.screens' : 'client.panels';
+    const code = kind === 'screen'
+      ? (field === 'module' ? 'CLIENT_BAD_SCREEN_MODULE' : 'CLIENT_BAD_SCREEN_STYLE')
+      : (field === 'module' ? 'CLIENT_BAD_PANEL_MODULE' : 'CLIENT_BAD_PANEL_STYLE');
     if (bad) {
       return {
-        id: panelId, code: field === 'module' ? 'CLIENT_BAD_PANEL_MODULE' : 'CLIENT_BAD_PANEL_STYLE',
-        reason: `client.panels["${panelId}"].${field} "${rel}" is not a pack-relative ${ext} file inside the pack (this channel serves ${what}, and only the pack's own)`,
+        id: entry.id, code,
+        reason: `${prefix}["${entry.id}"].${field} "${rel}" is not a pack-relative ${ext} file inside the pack (this channel serves ${what}, and only the pack's own)`,
       };
     }
     let isFile = false;
     try { isFile = fs.statSync(abs).isFile(); } catch { /* stays false: no such file */ }
     if (!isFile) {
       return {
-        id: panelId, code: field === 'module' ? 'CLIENT_BAD_PANEL_MODULE' : 'CLIENT_BAD_PANEL_STYLE',
-        reason: `client.panels["${panelId}"].${field} "${rel}" is declared in pack.json but is not a readable file inside the pack`,
+        id: entry.id, code,
+        reason: `${prefix}["${entry.id}"].${field} "${rel}" is declared in pack.json but is not a readable file inside the pack`,
       };
     }
     return null;
   };
-  for (const panel of panels) {
-    const id = panel && typeof panel.id === 'string' ? panel.id : '';
-    const issue = fileIssue(id, 'module', panel && typeof panel.module === 'string' ? panel.module : '', '.js', 'code');
+  // 面板与整屏合成一张工作清单：下面每一处只判「这一条声明能不能用」，判据不因为 kind 而分叉。
+  const declarations = [
+    ...panels.map((entry) => ({ entry, kind: 'panel' })),
+    ...screens.map((entry) => ({ entry, kind: 'screen' })),
+  ];
+  for (const { entry, kind } of declarations) {
+    const issue = fileIssue(entry, kind, 'module', entry && typeof entry.module === 'string' ? entry.module : '', '.js', 'code');
     if (issue) { out.push(issue); continue; }
     // 面板自带的样式表（业主裁决 2026-10-10）：同一个口径 —— 声明了一份读不到/不在包里的样式表，就是**签了名却
     // 拿不出东西**，那一份样式会静默不生效、界面看着像「包没装对」。所以它也是整包被拒，而不是少注入一份。
-    const styles = panel && Array.isArray(panel.styles) ? panel.styles : [];
+    const styles = entry && Array.isArray(entry.styles) ? entry.styles : [];
     for (const style of styles) {
-      const styleIssue = fileIssue(id, 'styles', typeof style === 'string' ? style : '', '.css', 'a stylesheet');
+      const styleIssue = fileIssue(entry, kind, 'styles', typeof style === 'string' ? style : '', '.css', 'a stylesheet');
       if (styleIssue) { out.push(styleIssue); break; }
     }
   }
@@ -803,7 +816,14 @@ export function loadWorkshopPanels(loaded, { log = null, baseUrl = WORKSHOP_PANE
   const base = String(baseUrl).replace(/\/+$/, '');
   for (const pack of ((loaded && loaded.packs) || []).slice().sort(byPackId)) {
     const decl = pack && pack.client;
-    const list = decl && Array.isArray(decl.panels) ? decl.panels : [];
+    // 面板与整屏合成同一份线表（DESIGN §28.55）：客户端只有一条分派路径，屏条目靠 `kind: 'screen'` 认。
+    // 不新开 wire 字段、不新开通道 —— 老客户端读到未知 kind 会点名拒绝，而不是静默挂错。
+    const declaredPanels = decl && Array.isArray(decl.panels) ? decl.panels : [];
+    const declaredScreens = decl && Array.isArray(decl.screens) ? decl.screens : [];
+    const list = [
+      ...declaredPanels.map((entry) => ({ entry, kind: 'panel' })),
+      ...declaredScreens.map((entry) => ({ entry, kind: 'screen' })),
+    ];
     if (!list.length) continue;
     const dir = path.resolve(pack.dir || path.join(WORKSHOP_DIR, pack.id));
     // Defence in depth: loadWorkshop already refused a pack with an unusable panel, but this reader may see a
@@ -815,7 +835,7 @@ export function loadWorkshopPanels(loaded, { log = null, baseUrl = WORKSHOP_PANE
     }
     const requires = Object.freeze(Array.isArray(decl.requires) ? [...decl.requires] : []);
     const hash = typeof pack.hash === 'string' ? pack.hash : '';
-    for (const panel of list) {
+    for (const { entry: panel, kind } of list) {
       const fileUrl = (rel) => `${base}/${encodeURIComponent(pack.id)}/${rel.split('/').map(encodeURIComponent).join('/')}?v=${hash.slice(0, 12)}`;
       const url = fileUrl(panel.module);
       // 面板自带的样式表（业主裁决 2026-10-10）：`path` 是包内相对路径（服务表用它定位文件），`url` 是浏览器注入用的
@@ -823,7 +843,11 @@ export function loadWorkshopPanels(loaded, { log = null, baseUrl = WORKSHOP_PANE
       const styles = (Array.isArray(panel.styles) ? panel.styles : [])
         .map((rel) => ({ path: rel, url: fileUrl(rel) }));
       panels.push({
-        id: panel.id, pack: pack.id, slot: panel.slot, module: panel.module,
+        id: panel.id, pack: pack.id,
+        // 屏条目的 `slot` 固定落在 `root.overlays`：保留它是为了让客户端只有一条分派路径，
+        // 不是因为屏真的挂在那个容器上（屏由自己的全屏宿主承载）。
+        ...(kind === 'screen' ? { kind: 'screen', route: panel.route, slot: 'root.overlays' } : { slot: panel.slot }),
+        module: panel.module,
         order: Number.isInteger(panel.order) ? panel.order : 0,
         gate: typeof panel.gate === 'string' && panel.gate ? panel.gate : null,
         url, hash, requires,
@@ -965,7 +989,12 @@ export function identifyPack(packDir, pack, files, { assetsDigest = null } = {})
   //    字节同样能 —— 不把面板源码算进身份，两份不同的面板就会共用同一个摘要（那份摘要将不再描述浏览器真的会
   //    执行的代码）。两个面板共用同一个文件时只算一次（按声明路径去重），并且只有在包真的声明了面板时才加：
   //    没声明 `client` 的包（今天所有的包）哈希逐字节不变。
-  const panelFiles = [...new Set(((pack.client && Array.isArray(pack.client.panels)) ? pack.client.panels : [])
+  //    整屏声明（`client.screens[]`，DESIGN §28.55）与面板合在同一个集合里：屏模块同样决定浏览器真的执行什么，
+  //    不算进去就是让两份不同的整屏共用同一个摘要（而那份摘要声称「同一份界面」）。没声明的包逐字节不变。
+  const clientPanels = (pack.client && Array.isArray(pack.client.panels)) ? pack.client.panels : [];
+  const clientScreens = (pack.client && Array.isArray(pack.client.screens)) ? pack.client.screens : [];
+  const clientDeclarations = [...clientPanels, ...clientScreens];
+  const panelFiles = [...new Set(clientDeclarations
     .map((p) => (p && typeof p.module === 'string' ? p.module : ''))
     .filter(Boolean))].sort();
   for (const rel of panelFiles) {
@@ -979,7 +1008,7 @@ export function identifyPack(packDir, pack, files, { assetsDigest = null } = {})
   // 5b. 面板自带样式表的源码（`client.panels[].styles[]`, 业主裁决 2026-10-10）：与模块逐字相同的理由 —— 一份样式表
   //     改变的是**界面长什么样**，不把它算进身份，两份不同的样式就会共用同一个摘要（而那份摘要声称「同一份界面」）。
   //     同样按声明路径去重、同样只在包真的声明了样式表时才加：没声明的包哈希逐字节不变。
-  const styleFiles = [...new Set(((pack.client && Array.isArray(pack.client.panels)) ? pack.client.panels : [])
+  const styleFiles = [...new Set(clientDeclarations
     .flatMap((p) => (p && Array.isArray(p.styles) ? p.styles : []))
     .filter((s) => typeof s === 'string' && s))].sort();
   for (const rel of styleFiles) {

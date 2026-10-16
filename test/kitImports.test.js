@@ -224,6 +224,16 @@ const KIT_IMPORT_EXPORTS = {
     "enemyStealthed", "evadesGround", "extendedGrid", "sortAllyTargets", "sortEnemyTargets", "stealthOffKey",
     "tileKeyOf",
   ],
+  // 2026-10-15 新开两格。记的是当前**全部**具名导出，判据仍是超集 —— 加导出不打断任何包，删名或改名才会。
+  // 两格都按「按文件指名、不开前缀」放开：`@sim/` 下别的文件（`ai.js`、`pairing.js` 等）仍然被拒。
+  "server/sim/body.js": [
+    "bodyDist", "bodyInKeys", "bodyInRadius", "bodyInRange", "bodyInRangeTile", "bodyKeys", "bodyOnTile",
+    "bodyTileReach", "colliderKeys", "hitRect", "normHitArea",
+  ],
+  "server/sim/professions.js": [
+    "BARD_REGEN_DUR", "BARD_REGEN_IV", "DOLL_SWITCH", "KNOWN_SUBPROFESSIONS", "PROFESSION_DEFAULTS", "SUB",
+    "bardRegen", "resolveProfile",
+  ],
   // 战斗逻辑模块（`server.battle`, DESIGN §28.17）的 SDK：官方内容模块用的那一份辅助函数。
   // `@sim/detmath.js`（2026-10-15 加进白名单）：确定性数学的**唯一**入口（`Math.sin` 这类在两端可能不一致，
   // `tools/check-imports.mjs` 与 `test/sim/detmath.test.js` 一起钉这件事）。它导出的是 6 个纯函数。
@@ -269,6 +279,72 @@ describe('kit import 白名单：每个文件的导出名下限（⊇，不是�
         missing,
         [],
         `${file}（${specifier}）少导出这些名字：${missing.join('、')} —— 白名单文件是对外接口，删名或改名会打断所有 import 它的工坊包`,
+      );
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------------------------------
+// ①c 白名单文件的**可变状态不出边界**守卫
+//
+// 为什么需要这一条：白名单（`shared/kitImports.js`）决定「包能 import 什么」，它是一道**安全边界**。
+// 放开 `@sim/body.js` 与 `@sim/professions.js` 之前做的那次审计结论是：
+//   · `body.js` —— 模块级 `let`/`var` = 0、可变容器 = 0，导出全是纯函数（文件自述
+//     「Pure functions of (x, y, hitArea); no battle state」，`body.js:29`）⇒ 放开它是安全的，无需守卫。
+//   · `professions.js` —— **确实有** 3 个模块级容器/对象：`DOLL_SWITCH_IMMUNE`（`new Set`）、`TUNE`、
+//     `PRIORITY_ALIASES`（后两个连 `Object.freeze` 都没有）。放开它**之所以仍然安全**，靠三条实测事实：
+//     ① 三者**全部不是导出**（ESM 里非导出绑定没有外部句柄，包拿不到引用）；
+//     ② 三者**从未被写**（源码里只在 `:284` / `:681` / `:698` 被读）；
+//     ③ 能到包的那一侧全是不可变形态（`PROFESSION_DEFAULTS` / `SUB` / `KNOWN_SUBPROFESSIONS` 都 frozen，
+//        其余是数值常量）。
+//
+// ⚠️ 这三条是**放开白名单的安全前提**，而「前提今天成立」不能靠记性：白名单是永久开放的入口，
+// 将来任何人顺手写一个 `export` 就会把可变容器递到包手里、且没有任何东西会红。
+// 所以把前提钉成判据 —— 与 ①b「导出名下限」同一种做法，只是这条守的是**不该出现的东西**。
+// 判据是能给红的：把 `DOLL_SWITCH_IMMUNE` 临时加进 `professions.js` 的导出表，本用例即 `not ok`。
+// ---------------------------------------------------------------------------------------------------
+/** 白名单里**含模块级可变状态**的文件，以及「让它保持安全」必须成立的三件事。 */
+const KIT_IMPORT_MUTABLE_GUARD = {
+  'server/sim/professions.js': {
+    /** ① 这些名字带可变状态（`Set` / 未 freeze 的对象），**不得**被导出。 */
+    notExported: ['DOLL_SWITCH_IMMUNE', 'TUNE', 'PRIORITY_ALIASES'],
+    /** ② 它们在源码里的写入形态一个都不许出现。 */
+    writePatterns: [
+      /\bDOLL_SWITCH_IMMUNE\s*\.\s*(?:add|delete|clear|set)\b/,
+      /\bTUNE\s*\[[^\]]*\]\s*=/,
+      /\bPRIORITY_ALIASES\s*\[[^\]]*\]\s*=/,
+    ],
+    /** ③ 能到包的那一侧必须冻结。 */
+    frozen: ['PROFESSION_DEFAULTS', 'SUB', 'KNOWN_SUBPROFESSIONS'],
+  },
+};
+
+describe('kit import 白名单：可变状态不出边界（放开 professions.js 的安全前提）', () => {
+  for (const [file, guard] of Object.entries(KIT_IMPORT_MUTABLE_GUARD)) {
+    test(`${file} 的模块级可变绑定不被导出`, async () => {
+      const mod = await import(new URL(`../${file}`, import.meta.url).href);
+      const leaked = guard.notExported.filter((name) => name in mod);
+      assert.deepEqual(
+        leaked,
+        [],
+        `${file} 导出了带可变状态的 ${leaked.join('、')} —— 白名单一放开，包就拿到了一个**共享可写句柄**`
+        + '（改一次影响所有对局）。要么不给它加 export，要么先把它改成 Object.freeze 后的只读形态。',
+      );
+    });
+
+    test(`${file} 的模块级可变绑定从未被写（源码里没有写入形态）`, () => {
+      const src = fs.readFileSync(path.join(ROOT, file), 'utf8');
+      const hits = guard.writePatterns.flatMap((re) => src.match(re) ?? []);
+      assert.deepEqual(hits, [], `${file} 出现了写入形态：${hits.join('、')} —— 模块级共享状态被就地改写会跨对局串味`);
+    });
+
+    test(`${file} 能到包的那一侧全是不可变形态（frozen 或数值常量）`, async () => {
+      const mod = await import(new URL(`../${file}`, import.meta.url).href);
+      const mutable = guard.frozen.filter((name) => !Object.isFrozen(mod[name]));
+      assert.deepEqual(
+        mutable,
+        [],
+        `${file} 的 ${mutable.join('、')} 不是 frozen —— 包拿到它就能就地改写引擎的默认值表`,
       );
     });
   }
@@ -539,17 +615,19 @@ describe('kit import 白名单：按文件开放官方 ops kit（复用官方干
     }
   });
 
-  test('白名单加后总条数就是 20：这个数是契约，加一行必须是有意为之（连这条一起改）', () => {
+  test('白名单加后总条数就是 22：这个数是契约，加一行必须是有意为之（连这条一起改）', () => {
     // 为什么断言一个**硬数字**：白名单是「两端唯一的真相」，也是这个格式**唯一**的准入面。一个没有条数的表
     // 会在下一次「顺手加一行」时静默变宽 —— 而白名单每宽一格，第三方包能碰到的引擎面就多一格。
     // 所以加行这件事必须是**改了这条断言**的有意行为（本节 §⑥ 与 `docs/WORKSHOP.md` 的白名单表同步改）。
-    // 20 = 7（`@kit/`：tier1..tier6 + summoner）+ 4（`@sim/`：constants / dir / targeting / detmath）
-    //      + 1（`@battle/`：support/index）+ 8（`@ops/`）。
-    assert.equal(KIT_IMPORT_FILES.length, 20, `白名单条数变了（现在 ${KIT_IMPORT_FILES.length}）—— 加/删一行都要连这条与文档一起改`);
+    // 22 = 7（`@kit/`：tier1..tier6 + summoner）+ 6（`@sim/`：constants / dir / targeting / detmath
+    //      / body / professions）+ 1（`@battle/`：support/index）+ 8（`@ops/`）。
+    // ⚠️ `@sim/` 从 4 涨到 6 是 2026-10-15 有意为之（`body.js` + `professions.js`，理由见
+    // `shared/kitImports.js` 里「包已经在整份复制它们了」那两段）：这个数**不是**「取一边」，两边加起来才是它。
+    assert.equal(KIT_IMPORT_FILES.length, 22, `白名单条数变了（现在 ${KIT_IMPORT_FILES.length}）—— 加/删一行都要连这条与文档一起改`);
     const byPrefix = (p) => KIT_IMPORT_FILES.filter((e) => e.specifier.startsWith(p)).length;
     assert.deepEqual(
       { '@kit/': byPrefix('@kit/'), '@sim/': byPrefix('@sim/'), '@battle/': byPrefix('@battle/'), '@ops/': byPrefix('@ops/') },
-      { '@kit/': 7, '@sim/': 4, '@battle/': 1, '@ops/': 8 },
+      { '@kit/': 7, '@sim/': 6, '@battle/': 1, '@ops/': 8 },
       '按前缀的分布也是契约的一部分（`@ops/` 只是命名空间，不是整体放行）',
     );
   });

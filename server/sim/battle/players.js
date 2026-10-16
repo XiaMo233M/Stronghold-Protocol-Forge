@@ -220,7 +220,11 @@ export class BattlePlayers {
   /** Resolve kit/profile/skill for a unit (called by content/index.js; safe to call again). */
   _setupUnit(u, kit = null) {
     if (!kit) {
-      try { kit = setupUnitKit(this, u, this.contentMode); } catch (e) { this._internalError('setupUnitKit', e); kit = null; }
+      try { kit = setupUnitKit(this, u, this.contentMode); } catch (e) {
+        if (e?.contentFault || this.contentFault) throw e;
+        this._internalError('setupUnitKit', e);
+        kit = null;
+      }
     }
     u.kit = kit || {};
     // kit 的**归属包**（DESIGN §28.52 的 kit 那一半）：`kits/<id>.js` 的逐单位回调真正注册的地方就是下面两行

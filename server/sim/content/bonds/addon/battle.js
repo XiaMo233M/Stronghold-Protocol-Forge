@@ -73,7 +73,7 @@
 
 import { canTargetEnemy, enemyStealthed, extendedGrid } from '../../../targeting.js';
 import { normDir, rotateOffset, localOrder, localBefore } from '../../../dir.js';
-import { bodyKeys, bodyInKeys } from '../../../body.js';
+import { bodyKeys, bodyInRange } from '../../../body.js';
 import { applyRedirectCut, isHpLoss, redirectShare } from '../../../damage.js';
 // 本仓库把 `COLS` 改成了「画布步长」(GEO.CANVAS_COLS = 33，百人线留的余量)，官方的 19×21 图幅另有 `FIELD_COLS`
 // (= GEO.COLS = 21)。上游 0.2.4 的 `raidBoard` 是在上游 `COLS === GEO.COLS` 的前提下写的，于是那里的 COLS 是
@@ -321,13 +321,23 @@ function raidTile(battle, u, e, reach) {
   const er = Math.round(e.y), ec = Math.round(e.x);
   const ranged = u.def?.position === 'RANGED';
   const body = bodyKeys(e);
+  // The window is measured to the tiles the enemy occupies, never to the tile its position rounds to: a huge unit's
+  // hitArea offset and its route anchor split the same body differently (enemy_9021_acduml dx 0 from col 10 and
+  // enemy_9021_acduml_2 dx 1 from col 9 are one body, cols 8–12), and the anchor-relative window dropped every landing
+  // on the far side of that body — the hidden round's leader then stopped being jumped to at all.
+  let bR0 = Infinity, bR1 = -1, bC0 = Infinity, bC1 = -1;
+  for (const k of body) {
+    const br = Math.floor(k / COLS), bc = k - br * COLS;
+    bR0 = Math.min(bR0, br); bR1 = Math.max(bR1, br); bC0 = Math.min(bC0, bc); bC1 = Math.max(bC1, bc);
+  }
   const path = !ranged && u.s.blockCnt > 0 ? battle.groundPathTiles() : null;
   let best = null, bp = 2, bd = Infinity, bo = null;
   for (const k of body) {
     const br = Math.floor(k / COLS), bc = k - br * COLS;
     for (let i = 0; i < reach.length; i += 2) {
       const r = br - reach[i], c = bc - reach[i + 1], dr = r - er, dc = c - ec;
-      if (Math.abs(dr) > RAID_SEARCH || Math.abs(dc) > RAID_SEARCH) continue;
+      const wr = Math.min(Math.max(r, bR0), bR1) - r, wc = Math.min(Math.max(c, bC0), bC1) - c;   // gap to the body
+      if (Math.abs(wr) > RAID_SEARCH || Math.abs(wc) > RAID_SEARCH) continue;
       if (!battle.grid.inRect(r, c) || !raidBoard(battle, r, c) || !battle.grid.canStand(r, c, { ranged }) || battle.isReservedTile(r, c)) continue;
       const t = r * COLS + c;
       const p = path && battle.grid.tile(r, c).pass === 'ALL' && (path.has(t) || body.includes(t)) ? 0 : 1;   // its block applies
@@ -359,7 +369,7 @@ function raidGroundEnemy(u, e) {
 function raidStealthInRange(battle, u) {
   const keys = u.rangeKeySet || u.rangeKeys;
   if (!keys) return false;
-  for (const e of battle.enemies) if (e.alive && enemyStealthed(e) && raidGroundEnemy(u, e) && bodyInKeys(e, keys)) return true;
+  for (const e of battle.enemies) if (e.alive && enemyStealthed(e) && raidGroundEnemy(u, e) && bodyInRange(e, keys)) return true;
   return false;
 }
 

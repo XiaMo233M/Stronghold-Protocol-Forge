@@ -1,0 +1,11 @@
+diff a/test/sim/bossfield.browser.test.js b/test/sim/bossfield.browser.test.js	(rejected hunks)
+@@ -20,7 +20,8 @@
+ // stock (DESIGN §29.8) re-drafted seed 22: the 999-layer boards now clear in tens of seconds, before a drone is killed
+ // on every field and before a blade takes a transferable hit (a forced replace is not damage). The transfer path is
+ // unchanged — the 0.2.3 specs of this seed still lose leader HP on every field under this sim. The copy keeps the
+-// drafted operators and holds 维多利亚 / 精准 / 奥术 / 卡西米尔 / 绝技 at 1 layer so the fight lasts long enough.
++// drafted operators and holds 维多利亚 / 精准 / 奥术 / 卡西米尔 / 绝技 at 1 layer so the fight lasts long enough (0.3.0's bots
++// re-drafted seed 22 again: one of those fields now runs to the time limit, which that copy is allowed to).
+ //
+ // Opt-in (starts Chrome): SIM_E2E=1 node --test test/sim/bossfield.browser.test.js   (or RENDER_E2E=1)
+ // Run browser test files one at a time. Chrome path: $CHROME_PATH or the macOS default.

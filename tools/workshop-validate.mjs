@@ -83,7 +83,13 @@ async function main() {
 
   if (args.json) {
     console.log(JSON.stringify(report, null, 2));
-    process.exit(report.errors ? 1 : 0);
+    // 别用 process.exit() 收尾：POSIX 上 stdout 到管道是**异步写**，一次 240 KB 级的 JSON（184 条棋子的包）
+    // 会在 flush 完成前被 exit 截断 —— 下游拿到的就是半截 JSON，看起来像「校验器崩溃」（Windows 的管道是
+    // 同步写，所以本机不复现）。exitCode + 自然退出是 Node 文档针对这个坑的写法，退出码语义不变。
+    // ⚠️ 这个 return 不能省：process.exit() 会**终止进程**，而设 exitCode 只是记下退出码；少了 return 会继续
+    // 往下跑下面那段人类可读报告，同一份报告被打两遍。
+    process.exitCode = report.errors ? 1 : 0;
+    return;
   }
 
   console.log(`workshop root: ${root}`);
@@ -134,7 +140,9 @@ async function main() {
   if (report.foreign.length) {
     console.log(`NOTE: ${report.foreign.length} pack(s) target another host ("stardust") — this engine recognises them but does not load them (see the WARN lines above).`);
   }
-  process.exit(report.errors ? 1 : 0);
+  // 同 --json 分支：大份报告在 POSIX 管道上是异步写，process.exit() 会截断 —— 用 exitCode 自然退出。
+  // 这里不需要 return：本行已是 main() 的最后一句。
+  process.exitCode = report.errors ? 1 : 0;
 }
 
 main().catch((e) => {

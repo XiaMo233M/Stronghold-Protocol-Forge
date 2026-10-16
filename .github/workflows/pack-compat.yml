@@ -1,0 +1,76 @@
+name: pack-compat
+
+# 拿**工坊站线上在跑的包**喂给本仓引擎自己的校验器（`tools/workshop-validate.mjs`）+ 引擎自己的 zip 读侧
+# （`shared/zip.js` 的默认上限 64 MiB / 4096 条 / 单文件 32 MiB），回答「引擎抬版本后，玩家现有的包还装不装得上」。
+#
+# 不排期：一轮要按 59 条 functional 从站上拉约 60+ MB 存档。默认站点就是**本仓自己的**工坊站，
+# 不需要凭据（本脚本对站只做 GET）。只在「这个工具本身变了」或人工 dispatch 时跑。
+# 清单取不到 / 一条都没判成 ⇒ **退出码 2**，绝不报绿。
+# 判定口径：**我方（author/compatAuthor 含 Mo233）不通过 = 红**；第三方不通过只作报告，不拦。
+
+on:
+  workflow_dispatch:
+    inputs:
+      site_base:
+        description: '工坊站地址'
+        default: 'http://47.103.14.217:25570'
+      mine_only:
+        description: '只验我方的包（省流量）'
+        type: boolean
+        default: false
+  push:
+    paths:
+      - '.github/pack-compat.mjs'
+      - '.github/workflows/pack-compat.yml'
+  pull_request:
+    paths:
+      - '.github/pack-compat.mjs'
+      - '.github/workflows/pack-compat.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pack-compat
+  cancel-in-progress: true
+
+jobs:
+  compat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install (npm ci → postinstall copies public/vendor)
+        run: npm ci --no-audit --no-fund
+
+      - name: 校验线上包
+        env:
+          SITE: ${{ inputs.site_base || 'http://47.103.14.217:25570' }}
+          MINE_ONLY: ${{ inputs.mine_only == true && '1' || '' }}
+        run: |
+          set -uo pipefail
+          ARGS=(--base "$SITE")
+          [ -n "$MINE_ONLY" ] && ARGS+=(--mine-only)
+          # 不接 `|| true`、不接 echo 收尾：判定器的退出码就是这个 job 的退出码
+          node .github/pack-compat.mjs "${ARGS[@]}"
+
+      - name: 上传判定原始结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pack-compat-report
+          path: |
+            .pack-compat/report.json
+            .pack-compat/*.stdout.txt
+            .pack-compat/*.stderr.txt
+          # `.pack-compat` 是隐藏目录：glob 默认排除隐藏文件，不打开这道门现场永远传不上来
+          include-hidden-files: true
+          if-no-files-found: warn

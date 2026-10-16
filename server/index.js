@@ -49,6 +49,19 @@ import { ROOT, listenAddress, bindCandidates, serveDirs, makeLogger, parseTrustP
 import { WS_MAX_PAYLOAD, createSessionStack, attachWebSocket, transportPolicy } from './http/websocket.js';
 import { DATA_SHIM_JS, createStaticHandler } from './http/static.js';
 import { createPackRegistry } from './packs.js';
+// 0.3.0（上游 DESIGN §34）的插件面：包注册表并进插件注册表（`server/packs.js` 现在只是它的别名再导出），
+// 加原生内容集、视觉集、仅服务端生效的插件策略 / 房间集合、以及「一局一进程」的对局宿主与可信脚本运行器。
+import { createPluginRegistry } from './plugins/registry.js';
+import { computeVanillaContent } from './plugins/identity.js';
+import { createVisualSets } from './plugins/visualSet.js';
+import { createContentSets } from './plugins/contentSets.js';
+import { createPluginPolicy } from './plugins/policy.js';
+import { createRoomSets } from './plugins/roomSets.js';
+import { createMatchHosts } from './match/host/index.js';
+import { createTrustedRuntime } from './plugins/trustedRuntime.js';
+import { trustedHostAllowed } from './plugins/trusted.js';
+import { createStudio } from './studio/index.js';
+import { siteCsp } from './http/csp.js';
 import { MIME, COMPRESSIBLE, acceptsGzip, pickEncoding, parseRange } from './http/files.js';
 import { BUILD_INPUTS, computeBuildTag, buildTag, resetBuildTag } from './http/buildTag.js';
 import { createRequestHandler } from './http/routes.js';
@@ -107,9 +120,21 @@ export {
 export async function startServer(opts = {}) {
   const { port, host } = listenAddress(opts);
   const log = opts.log || makeLogger(!!opts.quiet);
-  const { publicDir, dataDir, sharedDir, packsDir } = serveDirs(opts);
+  const { publicDir, dataDir, sharedDir, packsDir, pluginsDir } = serveDirs(opts);
   // `createStaticHandler` 的 `/sim/` 默认值，这里显式取同一个 —— 「核心先吃」要看到引擎真正会读的那个目录。
   const simDir = opts.simDir || path.join(ROOT, 'server', 'sim');
+
+  // 原生内容哈希 `cs`（DESIGN §34，上游 0.3.0）：**现在**把服务出去的那份 sim / shared 代码与游戏数据读一次算出
+  // 摘要 —— 与对局用的数据、下面的构建标记同一条纪律（一次读、之后引用同一个值）。它进 /plugins/index.json 与
+  // /cs/<cs16>/index.json，也交给 Lobby 作为「这一局的底座」。
+  const content = computeVanillaContent({ simDir, sharedDir, dataDir, shim: DATA_SHIM_JS, log });
+  log.info(`[content] vanilla ${content.cs.slice(0, 16)} (${Object.keys(content.simFiles).length} code files, ${Object.keys(content.data).length} data files)`);
+  // 语言包与插件（docs/PACKS.md · docs/PLUGINS.md）：启动时扫一次（启动日志点名），之后文件夹一变再扫。
+  // 缺省就是上游的 createPluginRegistry —— `server/packs.js` 现在只是它的别名再导出，registry.index() / servable()
+  // 的语义与 0.2.x 逐字相同，所以工坊那一整层读它读到的还是同一份东西。
+  const scriptMode = process.env.SP_PLUGIN_SCRIPTS;
+  const packs = createPluginRegistry({ publicDir, dataDir, packsDir, pluginsDir }, { log, scriptHost: host, scriptMode });
+  packs.refresh(true);
 
   // The process-wide singleton serves the default data dir; a custom dir (tests) gets its own copy. The 创意工坊 overlay
   // is applied inside the loader (server/data.js), i.e. whichever way the data is obtained, it is already merged.
@@ -280,6 +305,17 @@ export async function startServer(opts = {}) {
     : null;
   // `/room-data/<摘要>/<文件>.json` 那一面（同一个物化缓存；没有装包时这一面根本不存在）。
   const roomDataFace = roomAssets ? (digest) => roomAssets.byDigest(digest) : null;
+  // 上游 0.3.0 的插件流水线（DESIGN §34.6）：服务端主人的策略（plugins/config.json）·「带玩法插件的内容集」
+  // （服务在 /cs/<cs16>/…）· 房间级那一层把前两者合起来 · 以及「有玩法插件的房间真的跑在哪个宿主里」。
+  // 视觉集（DESIGN §34 P1a）与它同源：一套 cosmetic 插件合成的那个集合，服务在 /vs/ 与 /p/。
+  const visual = createVisualSets({ registry: packs, log });
+  const policy = createPluginPolicy({ pluginsDir, log });
+  const contents = createContentSets({ registry: packs, vanillaData: data, log, maxSets: () => policy.get().maxSets });
+  const roomSets = createRoomSets({ registry: packs, visual, contents, policy });
+  // 一个内容集一个子进程；SP_MATCH_HOST=worker 改成 worker 线程（match/host/index.js 的文件头说明了取舍：
+  // worker 线程里一次 out-of-memory 会带走整个服务器，所以缺省是子进程）。
+  const matchHostTransport = String(process.env.SP_MATCH_HOST || '').trim().toLowerCase() === 'worker' ? 'worker' : 'process';
+  const hosts = createMatchHosts({ contents, log, options: { transport: matchHostTransport, maxWorkers: Math.max(1, policy.get().maxSets), ...(opts.matchHost || {}) } });
   const workshopAssets = workshopAssetsFor(workshopLoaded, workshopDir);
   // 包声明的只读路由（`pack.json.routes`, DESIGN §28.13）：绝对路径 → 包内 `.json`，带声明的 `Cache-Control`。
   // `mount` 让「核心先吃」这条判据（DESIGN §28.35）读到**真正的**核心挂载目录：与 createStaticHandler 那份同一组
@@ -368,25 +404,29 @@ export async function startServer(opts = {}) {
       ...(matchWrappers.length ? { MatchClass } : {}),
       workshop: { kits: workshopKits.kits, tokenKits: workshopKits.tokenKits, modules: workshopKits.modules, kitOwners: workshopKits.owners, tokenKitOwners: workshopKits.tokenOwners, kitBudgets: workshopKits.budgets, mods: workshopMods, hooks: workshopHooks.hooks, panels: workshopPanels.panels, assets: workshopModAssets, theme: workshopTheme.theme, meta: metaModules, roomAssets, battle: battleModules, battleInstallers, roomHooks: roomInstallers, transport: transport.transport, serverChannels: serverChannelMap },
     },
-    { data, log },
+    { data, log, content, plugins: roomSets, hosts },
   );
-  // content packs (docs/PACKS.md): scanned now — the start log names them — and again whenever their folders change
-  const packs = createPackRegistry({ publicDir, dataDir, packsDir }, { log });
-  packs.refresh(true);
   // the content hashes of the art (built in the background once listening) and the manifests served with them
   const indexOptions = assetIndexOptionsFrom(opts, publicDir);
   const assetIndex = indexOptions ? createAssetIndex({ publicDir, log, ...indexOptions }) : null;
   const views = assetIndex ? createManifestViews({ dataDir, index: assetIndex, log }) : null;
-  const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, simDir, packsDir, packs, log, workshopJson, workshopKitFiles, workshopKitDirs, workshopPanelFiles, workshopAssets, workshopRoutes, workshopResourceFiles, resourcePolicy, workshopI18n, modsJson, roomData: roomDataFace, workshopBattleFiles, modRoutes, voiceCdn: voiceCdn.overrides, assetIndex, views });
+  const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, simDir, packsDir, pluginsDir, packs, content, log, workshopJson, workshopKitFiles, workshopKitDirs, workshopPanelFiles, workshopAssets, workshopRoutes, workshopResourceFiles, resourcePolicy, workshopI18n, modsJson, roomData: roomDataFace, workshopBattleFiles, modRoutes, voiceCdn: voiceCdn.overrides, assetIndex, views, visual, contents });
+  // 插件工坊（DESIGN §34.9）：它自己的页面与 API，只对本机与本地网开放（路由层另一道门）。它只在被用到之后才
+  // 盯 plugins/（热重载），而「房主是作者或独自一人」的房间自己跟随插件的改动。`studio: false` 关掉它。
+  const studio = opts.studio === false ? null : createStudio({ publicDir, pluginsDir, dataDir, registry: packs, lobby, sessions: registry, log, fetch: opts.fetch });
+  // 可信插件脚本的运行器（上游 0.3.0）：它只在**绑到的地址确实允许**时才留着（见下面 bind 之后的 trustedHostAllowed）。
+  const trustedRuntime = await createTrustedRuntime({ registry: packs, log });
+  lobby.trustedRuntime = trustedRuntime;
   const startedAt = Date.now();
   // The tag is per process (see buildTag): read the browser runtime once, here, not on every /healthz.
   resetBuildTag();
   buildTag();
 
   const traffic = createTrafficCounter();
-  const server = http.createServer(createRequestHandler({ serveStatic, health: { startedAt, network, registry, lobby, modHealth: () => modMount.healthz(), traffic, assetIndex, views }, log,
+  const server = http.createServer(createRequestHandler({ serveStatic, csp: process.env.SP_CSP === 'off' ? null : siteCsp(publicDir), health: { startedAt, network, registry, lobby, modHealth: () => modMount.healthz(), content, traffic, assetIndex, views, trusted: trustedRuntime?.health }, log,
     records, accounts,
     httpLanes: opts.httpLanes, publicDir, trustProxy: network.opts.trustProxy,
+    studio, trustedRuntime,
     modsCatalog: (req, res) => serveMods(req, res, MODS_CATALOG_URL, '', modsJson) }));
   server.on('clientError', answerClientError);
   const wss = attachWebSocket(server, { network, log, lanes: opts.wsLanes, perMessageDeflate: transport.perMessageDeflate, traffic });
@@ -420,9 +460,19 @@ export async function startServer(opts = {}) {
     }
     if (bound === null) throw lastError;
     boundHost = bound;
+    // Check the kernel's address too: aliases/DNS and bind fallback cannot weaken the owner gate.
+    const actual = server.address();
+    const scriptHost = actual && typeof actual === 'object' ? actual.address : '';
+    packs.setScriptHost(scriptHost);
+    if (!trustedHostAllowed(scriptHost, scriptMode)) {
+      lobby.trustedRuntime = null;
+      await trustedRuntime?.close();
+    }
   } catch (e) {
     network.close(); // stop heartbeat/sweep timers of the half-built server
     assetIndex?.close();
+    studio?.close();
+    await trustedRuntime?.close();
     throw e;
   }
   server.on('error', (e) => log.error('[http] server error', e));
@@ -444,8 +494,13 @@ export async function startServer(opts = {}) {
       try { lobby.shutdown('shutdown'); } catch (e) { log.error('[shutdown] lobby', e); }
       // 包的服务端模块的 `onShutdown`（例如停机播报 + 快照留档）：与 `onBoot` 同一条，失败只记日志、不阻塞停机。
       try { modMount.shutdown(); } catch (e) { log.error('[shutdown] mod modules', e); }
+      // 对局宿主（一个内容集一个子进程 / worker）· 插件工坊 · 可信脚本运行器：与上面两条同一条纪律，
+      // 每一件单独 try —— 一件关不掉不该拖住停机。
+      try { hosts.close(); } catch (e) { log.error('[shutdown] match hosts', e); }
       network.close();
       assetIndex?.close();
+      studio?.close();
+      await trustedRuntime?.close();
       await new Promise((resolve) => {
         server.close(() => resolve());
         server.closeIdleConnections?.();
@@ -458,7 +513,7 @@ export async function startServer(opts = {}) {
 
   // `accounts` / `records` 也交出来（两份都是 `null` 时表示没开 `SP_ACCOUNTS`）：运维与测试要能确认
   // 「这个进程到底有没有账号」，而不是靠猜 `hello` 的回复。
-  return { port: actualPort, host: boundHost, url, server, wss, lobby, network, registry, packs, accounts, records, traffic, assetIndex, views, close };
+  return { port: actualPort, host: boundHost, url, server, wss, lobby, network, registry, packs, content, visual, contents, hosts, accounts, records, traffic, assetIndex, views, studio, close };
 }
 
 // `node server/index.js` / npm start: listen, print the banner, stop on SIGINT / SIGTERM (http/boot.js).

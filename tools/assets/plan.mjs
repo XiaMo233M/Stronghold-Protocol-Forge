@@ -23,7 +23,7 @@
 
 import { RAW, joinUrl, safeName, urlBase, urlDir } from './sources.mjs';
 import { kindOf } from './formats.mjs';
-import { pickUnitSfx, pickModeAttacks, pickModeHits, skillModeLetter, SLOT_MODE_LETTER, UI_SFX, BATTLE_SFX, resolveSpec, indexVoice, VOICE_DIRS, VOICE_BATTLE_SLOTS } from './audio.mjs';
+import { pickUnitSfx, pickModeAttacks, pickModeHits, skillModeLetter, SLOT_MODE_LETTER, UI_SFX, BATTLE_SFX, resolveSpec, indexVoice, nativeVoiceDirs, VOICE_DIRS, VOICE_BATTLE_SLOTS, VOICE_CUSTOM_DIR } from './audio.mjs';
 import { literal } from './manifest.mjs';
 import { EMOTE_CATALOG, DEFAULT_VOICE_LANG } from '../../shared/constants.js';
 
@@ -41,6 +41,15 @@ const VOICE_ID_LANG = 'CN';
  * request of 2026-10-08 「全套的日配语音」: the JP dub of every line the game plays, beside the Chinese one.
  */
 export const VOICE_JP_LANG = 'jp';
+
+/**
+ * The extra dub trees beside `audio.voiceJp` (`optionalVoice`, on by default in fetch-assets.mjs): the EN and KR
+ * dubs (`voice_en/`, `voice_kr/`) and each operator's own-language dub (`voice_custom/<wordkey>/`, audio.mjs
+ * nativeVoiceDirs) — the same slots and file names, under `audio/voice/<en|kr|native/<dir>>/`. public/js/audio.js
+ * VOICE_TREES plays them; tools/package.mjs FULL_ZIP_OPTIONAL_VOICE decides whether the full zip ships them
+ * (default: yes, so the 0.3.0 full zip includes them).
+ */
+export const VOICE_OPTIONAL_TREES = Object.freeze({ voiceEn: 'en', voiceKr: 'kr', voiceNative: 'native' });
 
 /**
  * Enemies whose Spine no community dump carries: the web model is another enemy's (research 07 §5.6). Their official
@@ -151,6 +160,14 @@ function voiceAlt(asset, lang) {
   if (!charId || !voiceId || !/^[a-z0-9_]+$/i.test(charId) || !/^[a-z]{2}_\d+$/i.test(voiceId)) return null;
   const file = `${charId}/${voiceId.toLowerCase()}.mp3`;
   return alt(`audio/voice/${lang}/${file}`, joinUrl(RAW.aa2voice, `${VOICE_DIRS[lang]}/${file}`));
+}
+
+/** The same line from an operator's own-language dub (audio.mjs nativeVoiceDirs) → `audio/voice/native/<dir>/cn_023.mp3`. */
+function nativeVoiceAlt(asset, dir) {
+  const voiceId = String(asset).split('/')[1];
+  if (!dir || !/^[a-z0-9_]+$/.test(dir) || !voiceId || !/^[a-z]{2}_\d+$/i.test(voiceId)) return null;
+  const file = `${dir}/${voiceId.toLowerCase()}.mp3`;
+  return alt(`audio/voice/native/${file}`, joinUrl(RAW.aa2voice, `${VOICE_CUSTOM_DIR}/${file}`));
 }
 
 /** Sound path under sound_beta_2 → alternative under public/assets/audio/<sub>. */
@@ -328,12 +345,18 @@ export function collectEnemyIds({ assets07, enemies05, maps05, ops03 }) {
  *   operators from patternOperator
  * @param {string[]} [p.moduleTypes] module type icon ids (`typeIcon`, e.g. 'sol-x') → manifest `modules[typeIcon]`, the
  *   official type icon (arts/ui/uniequiptype) the 干员调配 / 自选 module tiles draw when the local-client art lacks it
+ * @param {Array<{name:string,rel:string,urls:string[],kind:string}>} [p.statsTemplate] official statistics UI assets
+ *   (tools/assets/stats-template.mjs jobs, tools/fetch-assets.mjs `statsTemplate`): planned under `statistics/<name>`
+ * @param {boolean} [p.optionalVoice] also plan upstream's extra dub trees (VOICE_OPTIONAL_TREES): `audio.voiceEn` /
+ *   `audio.voiceKr` / `audio.voiceNative`, plus `audio.voiceNativeLangType`. Off by default, so a bare plan stays the
+ *   two trees it always was (`audio.voice` + `audio.voiceJp`); the EN and KR trees are the very same `voiceTable` the
+ *   `voiceLangs` model above uses, so the two paths can never disagree on a shared dub.
  * @returns {{ template: any, models: Map<string, any>, notes: string[] }}
  */
 export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsData, charword = null, voiceLang = DEFAULT_VOICE_LANG,
-  voiceLangs = null, voiceJp = true, voiceSlots = VOICE_BATTLE_SLOTS,
+  voiceLangs = null, voiceJp = true, voiceSlots = VOICE_BATTLE_SLOTS, optionalVoice = false,
   extraEnemyIds = [], extraTokenIds = [], extraHandbook = {}, localEnemySpines = {}, localTokenSpines = {}, extraOperators = {},
-  moduleTypes = [] }) {
+  moduleTypes = [], statsTemplate = [] }) {
   const notes = [];
   /** @type {Map<string, any>} */
   const models = new Map();
@@ -595,6 +618,7 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
     }
   }
   for (const [group, key, path] of UI_EXTRAS) addUi(group, key, joinUrl(RAW.aa2, path));
+  for (const { name, ...job } of statsTemplate) ui[`statistics/${name}`] = { alts: [job] };
 
   // --- audio ----------------------------------------------------------------
   const bgmLeaf = (bankName) => {
@@ -706,6 +730,37 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
     if (!Object.keys(t).length) notes.push(`battle voice: ${lang} has no slots (index missing?)`);
   }
 
+  // upstream 0.3.0's extra dub trees (VOICE_OPTIONAL_TREES), additive beside the `voiceLangs` model above and off unless
+  // asked for. EN and KR are the two dubs `voiceLangs` also knows, and they are built from the very same `voiceTable`,
+  // so the two paths cannot drift apart on a shared dub; `voiceNative` is the operator's own-language dub, which has no
+  // `voiceLangs` counterpart (its folder is `voice_custom/<word key>`, audio.mjs nativeVoiceDirs, not `voice/<lang>`).
+  // `voiceNativeLangType` names each own-language dub's official voiceLangType, for the operators this game can field
+  // that also have a line in `voice` (a `literal`: metadata, not a file to download).
+  const optionalTrees = {};
+  if (optionalVoice) {
+    const nativeDirs = nativeVoiceDirs(charword);
+    for (const [key, lang] of Object.entries(VOICE_OPTIONAL_TREES)) {
+      if (lang !== 'native') { optionalTrees[key] = voiceTable(lang); continue; }
+      const tree = {};
+      for (const [charId, slots] of indexVoice(charword, VOICE_ID_LANG, voiceSlots)) {
+        if (!chars[charId]) continue;              // only the operators this game can field, as everywhere above
+        const dir = nativeDirs.get(charId)?.dir;
+        if (!dir) continue;                        // no own-language dub: no entry for this operator
+        const v = {};
+        for (const [slot, assets] of Object.entries(slots)) {
+          const lines = assets.map((a) => leaf(nativeVoiceAlt(a, dir))).filter(Boolean);
+          if (!lines.length) continue;
+          v[slot] = lines.length === 1 ? lines[0] : lines;
+        }
+        if (Object.keys(v).length) tree[charId] = v;
+      }
+      optionalTrees[key] = tree;
+    }
+    const types = {};
+    for (const [charId, n] of nativeDirs) if (chars[charId] && voice[charId]) types[charId] = n.type;
+    optionalTrees.voiceNativeLangType = literal(types);
+  }
+
   const template = {
     chars, enemies, tokens, bonds, items, bands, skills, skillsById, modules, ui, prof,
     audio: {
@@ -715,9 +770,11 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
       // upstream 0.2.2's second tree for the Japanese dub (VOICE_JP_LANG): the memoised `jp` table, so this key costs
       // no extra plan; off with `voiceJp: false`
       ...(voiceJp ? { voiceJp: voiceTable(VOICE_JP_LANG) } : {}),
-      // which dub `voice` holds (the client's fallback reads it) and the other dubs beside it
-      voiceLang,
-      voiceLangs: voiceLangsTable,
+      // which dub `voice` holds (the client's fallback reads it) and the other dubs beside it. Written only when other
+      // dubs were asked for: a manifest never grows an empty `voiceLangs` — the rule the workshop side already states
+      // (tools/voice-editor: "a pack that declares only `voices` must not make the manifest grow an empty voiceLangs").
+      ...(extraLangs.length ? { voiceLang, voiceLangs: voiceLangsTable } : {}),
+      ...optionalTrees,
       sfx: { ui: sfxUi, battle: sfxBattle, units: unitsSfx },
     },
   };

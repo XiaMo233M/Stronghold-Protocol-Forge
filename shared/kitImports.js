@@ -92,7 +92,33 @@ export const KIT_IMPORT_FILES = Object.freeze([
   //   这与 `@sim/tokens.js`（召唤物注册表）· `@sim/body.js`（棋盘实体）那类**有状态引擎内部**不是一回事：
   //   那两个文件读的是**当前对局**的注册表 / 棋盘，放进白名单等于给包一条够到对局状态的通道。
   //   ⇒ 那两条**不加**（`rainbow-squad` 要它们，那是另一件事，见报告里记的 SDK 需求单）。
+  //
+  //   ⚠️ **上一段对 `@sim/body.js` 的判断已于 2026-10-15 更正**（复核人：上游维护方；原文保留在上面，便于看清
+  //   「当时为什么那样判断」与「今天为什么改」）。原文把 `body.js` 与 `tokens.js` 并列为「读当前对局的棋盘 / 注册表
+  //   的有状态引擎内部」，实物复核**三条都不成立**：
+  //     ① 它只有两行 import —— `./constants.js` 与 `./detmath.js`，**两个都已经在本表里**，所以放开它不会
+  //        拖进任何未开放的传递依赖（这条是当年没核、只凭文件位置猜的）；
+  //     ② 全文件搜 `battleStore|registry|tokens\.|battle\.|store\.` **零命中**（只有 `:21` / `:155` 两处**注释**
+  //        在说「与 `Battle.enemiesInRadius` 同一个判据」）；它的 11 个导出全是 `f(u, …)` 形状，**读的是调用方
+  //        传进来的那个单位对象**，不是引擎的共享棋盘 —— 「棋盘实体」指的是**入参**，不是可达状态；
+  //     ③ 文件自述与之一致：`:29`「Pure functions of (x, y, hitArea); no battle state」。
+  //   ⇒ 按本段开头那条准入口径（「无可观察状态、每个导出都是纯函数」），`body.js` **通过**，与 `detmath.js`
+  //      同类，因此随这次把 `@sim/body.js` 加进本表。
+  //   ⚠️ **并列的 `@sim/tokens.js` 这一次没有一起改口径**：我方仓里**不存在** `server/sim/tokens.js`（`Test-Path`
+  //      为假），所以「它是不是读当前对局注册表」这件事**今天无法核对**，原文按未复核对待、继续不加。将来它若被
+  //      引入，那段判断要重新复核一次，不能因为这份更正而顺带成立。
+  //   ⚠️ 「够不到」这件事**已经有判据守着**，不靠这段注释的记忆：`test/kitImports.test.js` 的 ①b（白名单文件导出名
+  //      下限）与 ①c（可变状态不出边界：不得导出、不得被写、能到包的一侧必须 frozen）会把越界判红。
   { specifier: '@sim/detmath.js', file: 'server/sim/detmath.js' },
+  // ⭐ 另外两个**同样纯**的引擎 helper（2026-10-15）。开表的理由不是「想让包碰内核」，而是「包已经在整份复制它们了」：
+  //   一份实测的第三方补丁为了用 `bodyInKeys` / `resolveProfile`，把 `server/sim/body.js`、`server/sim/professions.js`
+  //   的相关段落抄进了包内 —— 抄出来的是一份**会静默漂移的副本**（引擎改了它不会跟）。与 `@ops/` 同一条纪律：
+  //   **按文件指名，不开前缀**，`@sim/` 下别的文件仍然被拒。
+  //   `professions.js` 的放开另有前提：它**确实有** 3 个模块级容器/对象（`DOLL_SWITCH_IMMUNE` / `TUNE` /
+  //   `PRIORITY_ALIASES`），之所以仍然安全，靠的是「三者都不导出、都不被写、能到包的一侧全是 frozen」—— 这三条
+  //   **由 `test/kitImports.test.js` ①c 逐条钉住**（各条独立能给红），所以它是「有判据的放开」，不是「看着没事」。
+  { specifier: '@sim/body.js', file: 'server/sim/body.js' },
+  { specifier: '@sim/professions.js', file: 'server/sim/professions.js' },
   // 战斗逻辑模块的 SDK：**战斗内容层的辅助函数**（`server/sim/content/support/index.js`）—— 官方内容模块
   // （`content/bonds/*.js`、`content/garrisons/*.js`）用的同一份。它已经在浏览器侧被服务（`/sim/content/support/`，
   // 客户端战斗本来就要加载它），所以两端都能解。

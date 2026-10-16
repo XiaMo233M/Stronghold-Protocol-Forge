@@ -1,0 +1,11 @@
+diff a/public/js/render/tiles.js b/public/js/render/tiles.js	(rejected hunks)
+@@ -719,7 +720,8 @@ export class TileField {
+     for (const b of this.boxes) b.g.destroy();
+     this.boxes = [];
+     // the field's gates / objectives, and the enemy preview pen's two gates (the red cubes behind which the next
+-    // round's enemies wait, also while the pen is dim scenery behind the prep board)
++    // round's enemies wait) whenever the pen's rows are drawn — the prep and pen cameras (render/app/view.js bandFor),
++    // also as dim scenery
+     const pen = parsePenRect(this.stage?.config?.enemy_place_rect) || PEN_RECT;
+     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+       const tile = this.grid[r][c];

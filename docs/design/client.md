@@ -94,12 +94,14 @@ Explicit false and unmarked raw displacements face the travel direction. Normal 
 
 ### Local preferences and recovery (§28.14, §28.18–20)
 
-Settings persist `textSize` (sm/md/lg/xl; default sm) and `voiceOverrides` (charId → cn/jp; default empty) alongside the
-existing global `voiceLang`. CSS text uses `--t`; the layout rem, camera and board geometry stay unchanged. Larger text
-and translated controls wrap within the settings modal. The normal roster detail and chosen DIY cards expose each
-operator's voice preference, shared across that charId's forms. An absent override follows the global preference;
-missing Japanese lines retain the existing Chinese fallback. Overrides are local listening preferences, absent from
-room loadouts and their exports.
+Settings persist `textSize` (sm/md/lg/xl; default sm), `voiceLang` (cn/jp/en/kr; default cn), `voiceNative` (the
+本土语言 switch; default false) and `voiceOverrides` (charId → cn/jp/en/kr/native; default empty). CSS text uses `--t`;
+the layout rem, camera and board geometry stay unchanged. Larger text and translated controls wrap within the settings
+modal. The normal roster detail and chosen DIY cards expose each operator's voice preference, shared across that
+charId's forms, listing only the dubs this server has and offering a preview. An absent override follows the global
+preference, then the own-language dub when the switch is on and the operator has one, then Chinese. A missing line
+falls back to the Chinese file of the same name. Changing the global language does not clear per-operator choices.
+Overrides are local listening preferences, absent from room loadouts and their exports.
 
 The title and lobby offer explicit recovery of a previously saved local match seat. `sp.matches` stores bounded name /
 room-code metadata indexed by token hash; the existing four-entry `sp.tokens` ring remains the authority. Recovery
@@ -128,8 +130,10 @@ The same master supplies 16/32/48 px PNG / ICO favicons and the 180 px Apple tou
 These project-owned assets live in `public/icons/` and ship in full and lite packages; ASSETS.md records their provenance.
 The install button appears only for a live browser install offer and hides
 in standalone/fullscreen windows or after installation. Every offer is consumed before awaiting the prompt, including
-cancellation or failure. No service worker, offline cache or persistent server is introduced; HTTPS or localhost and
-browser support still govern installation.
+cancellation or failure. The install button does not register a service worker and does not make the server available
+offline. A separate asset-only worker (`public/sw.js`) may be registered on HTTPS or localhost to serve imported
+hashed art from Cache Storage; it does not intercept the page, scripts, `/data/`, `/sim/` or `/ws`. HTTPS or
+localhost and browser support still govern installation.
 
 ### Skill-mode sound and delayed models (§28.17, §28.22)
 

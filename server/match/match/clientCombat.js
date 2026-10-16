@@ -41,7 +41,7 @@ export class MatchClientCombat {
     // `opts.tokenKits` from it (docs/WORKSHOP.md §4.7) — the two spaces are arbitrated separately in the loader.
     // workshopBattle: the same thing one level up (DESIGN §28.17) — the packs' battle-level `install(battle)` modules.
     // mods: the identity of that content (DESIGN §28.2), so the field carries what it ran with.
-    const spec = buildBattleSpec({ ...opts, battleId, fieldId, kind, content: this.battleContent, boss, workshopKits: this.workshopKitModules, workshopBattle: this.workshopBattleModules, mods: this.mods, morphPairing: this.morphPairing });
+    const spec = buildBattleSpec({ ...opts, battleId, fieldId, kind, content: this.battleContent, boss, workshopKits: this.workshopKitModules, workshopBattle: this.workshopBattleModules, mods: this.mods, morphPairing: this.morphPairing, cs: this.cs, vs: this.vs });
     let total = 0;
     for (const x of spec.spawns) if (x && x.tag !== 'boss' && x.tag !== 'part' && x.countInTotal !== false) total += Math.max(1, Math.floor(Number(x.count) || 1));
     return {

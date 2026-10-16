@@ -60,15 +60,21 @@ export function collectLeaves(node, path = '', out = []) {
 export async function downloadLeaves(leaves, dl, root, label = 'files') {
   const tried = new Map(leaves.map((l) => [l, 0]));
   const blocked = new Set();
-  const satisfied = (l) => l.leaf.alts.slice(0, tried.get(l)).some((a) => existsSync(join(root, a.rel)));
+  const satisfied = (l) => l.leaf.alts.slice(0, tried.get(l)).some((a) =>
+    (!dl.verifier || dl.accepted.has(a.rel)) && existsSync(join(root, a.rel)));
   let last = new Map();
   for (let round = 0; round < 8; round++) {
     const jobs = [];
     for (const l of leaves) {
       const t = tried.get(l);
       if (blocked.has(l)) continue;
+      if (t > 0 && last.get(l.leaf.alts[t - 1].rel)?.status === 'error') {
+        blocked.add(l);
+        // A failed primary cannot establish that untried cached alternatives are orphans.
+        if (dl.verifier) for (const a of l.leaf.alts.slice(t)) dl.preserved.add(a.rel);
+        continue;
+      }
       if (t > 0 && satisfied(l)) continue;
-      if (t > 0 && last.get(l.leaf.alts[t - 1].rel)?.status === 'error') { blocked.add(l); continue; }
       if (t >= l.leaf.alts.length) continue;
       jobs.push(l.leaf.alts[t]);
       tried.set(l, t + 1);
@@ -95,7 +101,7 @@ export async function downloadLeaves(leaves, dl, root, label = 'files') {
  *   manifest loses here (a subset of `misses`, which also names the unresolved Spine models) — what a caller reports
  *   as dropped, and what --strict fails on.
  */
-export function resolveTemplate(template, { root, spine, sourceOf = () => undefined, assetBase = '' }) {
+export function resolveTemplate(template, { root, spine, sourceOf = () => undefined, assetBase = '', available = () => true }) {
   const misses = [];
   const droppedLeaves = [];
   const fallbacks = [];
@@ -106,7 +112,7 @@ export function resolveTemplate(template, { root, spine, sourceOf = () => undefi
     if (isLeaf(node)) {
       for (let i = 0; i < node.alts.length; i++) {
         const a = node.alts[i];
-        if (existsSync(join(root, a.rel))) {
+        if (available(a.rel) && existsSync(join(root, a.rel))) {
           const src = sourceOf(a.rel);
           // Provenance only: disabling/changing a proxy or a CDN base does not change the
           // identity of a previously downloaded asset. The candidates are compared on both

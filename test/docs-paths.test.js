@@ -29,7 +29,7 @@ const TOP = /^(?:server|shared|public|data|tools|test|docs|types|scripts|\.githu
 /** … or is one of these root files (README.md is left out: a bare `README.md` often means a folder's own). */
 const ROOT_FILES = new Set(['package.json', 'eslint.config.js', 'jsconfig.json', 'CHANGELOG.md', 'CONTRIBUTING.md']);
 /** Git-ignored or made at install time. */
-const EXEMPT = ['public/assets/', 'public/vendor/', 'data/local-assets.json'];
+const EXEMPT = ['public/assets/', 'public/fonts/', 'public/vendor/', 'data/local-assets.json'];
 
 /** Repository paths named in a Markdown text (inline code and fenced blocks), without duplicates. */
 function namedPaths(md) {
@@ -94,6 +94,10 @@ test('the path extraction: placeholders, globs, directories and the exemptions',
   assert.deepEqual(namedPaths(md).sort(), ['data/*.json', 'public/assets/', 'server/sim/content/kits/ops/op-<codename>.js', 'test/golden.test.js', 'tools/golden.mjs'].sort());
   assert.deepEqual(fixedPart('server/sim/content/kits/ops/op-<codename>.js'), { path: 'server/sim/content/kits/ops/', dir: true });
   assert.equal(missing('public/assets/'), null);
+  for (const path of ['public/fonts', 'public/fonts/', 'public/fonts/fonts.css', 'public/fonts/*.woff2']) {
+    assert.equal(missing(path), null, `${path} is downloaded, not required in a checkout`);
+  }
+  assert.equal(missing('public/fonts-missing/'), 'public/fonts-missing/: not found');
   assert.equal(missing('server/no-such-file.js'), 'server/no-such-file.js: not found');
   assert.equal(missing('server/index.js/'), 'server/index.js/: not a directory');
 });
@@ -148,6 +152,20 @@ test('DESIGN: every "DESIGN §N" cited in the repository (code comments, tests, 
   }
   assert.ok(cited >= 700, `only ${cited} citations found — is the scan broken?`);
   assert.deepEqual(bad, [], 'citations of a section or subsection with no heading');
+});
+
+test('DESIGN: no heading number is used twice — every `N` / `N.M` / `N.M.K` has exactly one home', () => {
+  // 为什么这一条必须单独存在（2026-10-15 的 §32/§33 撞车就是它抓的）：
+  // 上面那条引用守卫只判「引用的号**存不存在**」。两个小节**同时**定义 `### 32.1` 时，引用「存在」
+  // ⇒ 守卫恒绿，而其中一半引用其实指错了节 —— 这正是「静默指错」，比悬空更难发现。
+  // `designText()` 只对**顶层**号做唯一性（`## N.` 重复会抛），子标题它不管；这一条把它补齐。
+  // 它也是「插入新节导致 +2 偏移」这条约定唯一的自动守卫：偏移做漏一处，这里当场红。
+  const seen = new Map();
+  for (const m of designText(ROOT).matchAll(/^(#{2,4}) (\d+(?:\.\d+)*)[. ]/gm)) {
+    seen.set(m[2], (seen.get(m[2]) || 0) + 1);
+  }
+  const dup = [...seen].filter(([, c]) => c > 1).map(([n, c]) => `§${n} ×${c}`);
+  assert.deepEqual(dup, [], '同一个标题号出现在两处：引用「存在」，但它指哪一处没有答案');
 });
 
 test('CHANGELOG: every `## x.y.z — date` section sits exactly once in the index or a volume, the index names each volume\'s sections, and the top file still yields a full page of announcements', () => {

@@ -4007,3 +4007,252 @@ count +1 ⇒ **层数自然上去**。这是一条**纯数据**通道：不需�
 `test/modIdentityWire.test.js` 与 `test/roomModSet.test.js` 的 `$optional` 断言按新形状**故意改写**，
 `test/roomKeep.test.js` 与 `test/roomModSet.test.js` 里进「声明了集合的房」的夹具 join 显式带上 `consent: true`。
 **不声明模组的房间逐字节等于今天**（那条没有第二个答案）。
+
+---
+
+### 28.54 `pack.json.matchKinds`：第二种对局的声明面（管理器不认玩法名）
+
+**要解决的问题**：§28.14 的 `matchClass` 是**唯一**能碰到对局的挂载点，而它的检查只有「返回值是个函数」——
+一个包装器原则上可以把 `Match` 换成任何行为完全不同的类。今天真要做这件事的包（另一种玩法，不是塔防的
+一套数值）只能靠「这个包被装进了房间」这一句隐式信号来表达「这一局归我算」。隐式信号在两个方向上都是坏的：
+装了包、但这一局不是我的玩法时，包装器仍然要跑；反过来，作者写了「我这包提供 3v3 足球」这句话，管理器里
+**没有任何一格存得下它**，于是它既不进摘要、也不进编辑器、也没有人判它。这一格把那句话写成数据。
+
+**这一格给什么**：`pack.json.matchKinds = [{ id, seats?: { min, max }, label? }]`。它是**声明与协商面**，
+不是分派表 —— 管理器不认玩法名，判定住在包自己的模块里（`host.matchKinds()` 交出冻结的只读数据）。四条判据：
+
+1. **必须有接收人**：合法的 `matchKinds` 要求本包至少有一个 `server.modules` 条目挂 `matchClass`
+   （`MATCHKINDS_NEED_MATCH_CLASS`）。形状照 §28.23 的 `MODULES_CHANNELS_NEED_MATCH` —— 一句没有执行者的话
+   点名拒，而不是让它哑着通过。`combat: true` **不在这里重复判**：有 `matchClass` 就必须认 `combat`，那是
+   §28.14 已经拦住的一条线，再写一遍就是永远不会命中的死格子（这一点由测试钉住，见下）。
+2. **只在写出来时才进归一化结果**（与 `variants` / `behaviour` / `callBudget` 逐字同一条纪律）：`identifyPack`
+   哈希的就是这份归一化清单的 `canonicalJson`，所以给每个包都加一个 `matchKinds: []` 会把**所有已发布包的摘要**
+   改掉。它又**必须**进摘要：这一格决定「这一局由谁算什么」，两份只差种类声明的包共用同一个摘要，房间摘要闸门
+   就放行两种行为（§28.2）。
+3. **种类 id 排序，不按书写顺序**：两份书写顺序不同的清单必须是同一份字节（与 `requires` / `registers` 同一条）。
+   id 的字符集**与包通道共用**（`MATCH_KIND_ID_RE` = `PACK_CHANNEL_RE` 那一套 `^[a-z][a-z0-9_-]{0,63}$`）——
+   两条通道说的是同一件事（作者起的、有界的名字），不该各定一套拼法。
+   ⚠️ 这一条不是美化：排序决定的是摘要，**书写顺序能改摘要就是摘要闸门能被绕过**。
+4. **有界**：每包最多 4 种（`MAX_PACK_MATCH_KINDS`），座位 1..12（`MATCH_KIND_SEATS_MAX` —— 比宿主最大房间还宽的
+   「玩法」没人能组局），`label` ≤ 60 且是**作者可见**文本（编辑器/清单里的名字），因此**不占 i18n 词条**：
+   它不经过 `t()`，不是玩家界面串（§28.15 那条「给作者读的规则说明不进语言包」的同一条口径）。
+
+**包装器怎么用（这一节最需要写下来的部分，因为坑不在形状层）**：`MatchClass` 是**进程级一次**包装的
+（`server/index.js` 在装载时把类换掉一次，之后所有房间都用同一份），所以包装器**不能**按房间换类 —— 只能在
+子类的构造里判「这一局是不是我的」，命中就返回自己的实现，否则**必须原样把 Base 交回**。判得着的数据只有两样：
+
+* `opts.mods.packs[].id`（房间自己的 mod 集合，由 `room.create.modIds` 经 `server/lobby.js` 的
+  `resolveRoomModSet` 解析进来）；
+* 开局之后的包通道投递（`handlePackMsg`，§28.23）—— 适合「同一批包里选具体哪一种 kind」。
+
+**`opts.mods` 里读不到 `variants`**：房间自己声明集合时 `resolveRoomModSet` 重建条目只留
+`{id,hash,layer,combat,api}`（§28.47 的那半边），所以把 kind 藏进口径轴是行不通的 —— 这也是本格不提供
+「轴」而只提供「种类清单」的原因。
+
+**这一格明确不给的东西**：不新增 `C2S` 意图、不动 `PROTOCOL_VERSION` / `MOD_API_VERSION`、不开新的消息类型。
+玩法自己的输入走既有的 `pack.msg`（≤4096 B / 每会话 5 每秒 / burst 20 / ≤8 条通道，§28.23），下行复用
+`m.public` 的自定义顶层键。结局仍要按既有形状产出：`m.result` + `onEnd(summary)`，且 `summary.players`
+非空数组才写战绩，塔防专属读数缺失按 0 降级、不抛。客户端那半边今天能用的最大挂载面是 `client.panels` 的
+**10** 个槽（`root.overlays` 是全屏层，§28.8）。
+
+**判据与证据**：`test/modMatchKinds.test.mjs`（合法形状与排序稳定性、未声明时逐字节不变、`MATCHKINDS_*`
+每条拒绝码逐条走、**以及「`combat` 这一格不该重复判」那条可执行的注记** —— 它断言的是
+`MODULES_NEED_COMBAT` 先命中，而不是我自己的码命中）、`test/packBehaviour.test.js` 的 `PACK_FIELDS` 闭集计数
+（**37 → 38**：那 38 是两条线各自加的一格 —— 我们的 `callBudget`（§28.52）与这一格 —— 相加而来，
+**不是**「数字一样取一边」）、`test/modSurface.test.js` 的锚点。
+
+**节号说明（我方口径）**：本节内容吸收自下游 fork，在那里编号是 §28.52；它与我方既有的 §28.52
+（`callBudget`）撞号，所以按「我们是上游、编号以我方为准」排到我方现有最大号之后，定为 **§28.54**。
+代码与文档里对它的引用一律按**能力**归一到 §28.54，不做机械的号段平移。
+
+---
+
+### 28.55 `client.screens`：整屏替换（路由闭枚举 = 引擎真的有的那四个）
+
+**要解决的问题**：§28.8 的面板槽位是**插进引擎已经渲染的组件**里的十格，它换不掉那一屏本身。第三方界面包
+（整套大厅 / 房间 / 对局界面）要落地，只有两条路：改本体拥有的 `public/js/screens/*.js`，或者由引擎提供一个
+「这一屏由包出」的注册面。这一格选后者，并且**闭枚举只收引擎真的存在的路由**。
+
+**为什么只有四条**：路由的真相在 `public/js/store.js` 的 `selectRoute` 与 `public/js/main.js` 的 `SCREENS`，
+两处都只有 `title | lobby | room | game`。结算与干员调配是**路由内部**的视图（`selectRoute` 只看
+`match.public.phase` 与 `room.inMatch`），不是路由。所以 `CLIENT_SCREEN_ROUTES` 与客户端的
+`MOD_SCREEN_ROUTES` 都是这四条 —— 加一条 `result` 或 `loadout` 就是造一个永远不会命中的死声明，
+正是本层到处在拒的那一类（两份名单必须同源，由 `test/modClientScreens.test.mjs` 钉住，与 §28.8 那两张表同一条纪律）。
+
+**形状**：`client.screens[] = { id, route, module, order?, styles?, data?, messages? }`。字段与面板**共用判据**：
+`module` 必须是包内相对 `.js`、`styles` 同一条装载期判据（`server/workshop.js panelModuleIssues` 现在同时收
+panels 与 screens），`data` / `messages` 走同一批闭枚举；`id` 与面板**共用一个包内命名空间**
+（`CLIENT_SCREEN_DUPLICATE_ID`），一条路由在一个包里只能有一份（`CLIENT_SCREEN_DUPLICATE_ROUTE`）。
+服务端把两类声明合成同一份线表，屏条目落成 `{ kind: 'screen', route, slot: 'root.overlays' }` ——
+`slot` 保留是为了让客户端只有一条分派路径，不是因为屏真的挂在那个容器上。
+
+**身份**：`identifyPack` 把 `client.screens[].module` 与 `styles[]` 的源码字节算进摘要（与面板逐字同一条理由：
+不算进去，两份不同的整屏就能共用同一个摘要，而那份摘要声称「同一份界面」）。没声明 `screens` 的包摘要
+**逐字节不变** —— 归一化清单里只在写出来时才有这个键（`variants` / `behaviour` 同一条纪律）。
+
+**运行时的失败方向**（`public/js/ui/extensions.js`）：装载在常规面板之后调和（`flush` 末尾一次
+`syncActiveScreen`），宿主原生界面**在任何一步失败时都保持可见** —— 样式装不上、`import` 失败、模块没导出
+`mountScreen`/`default`、`mountScreen` 抛错，四种都拉黑该 key 并点名，不做「白屏但看起来成功了」。卸载是对称的：
+还原 `data-mod-screen-*` 的前值、逐订阅回收、只有当前活跃条目才撤基样式。路由所有权按
+`order / pack / id` 确定性裁决，输的一方点名拒。
+
+**移动端口径**：这一格**没有写死像素、也没有桌面视口假设**。路由是**语义名闭枚举**，本身不含任何尺寸；
+全屏宿主用 `position: fixed` + `inset: 0`（四边贴合视口，不是固定宽高）与 `overflow: auto`，背景取
+`var(--screen-background, …)` 让宿主主题说话；基样式只有一条 `display: none`，同样是布局无关的。
+唯一一个魔数是 `zIndex`（它不是尺寸、也不假设桌面）。所以这一格在移动端可用，移植时不必改。
+
+**来源分支里有一格是坏的（合并时抓到，记在这里免得再踩）**：`title` 路由的 `enter(rawName)` 那行，作者把控制码
+写成了 **caret 记法的字面文本**（`^@-^_`），源码里没有真控制字符 ⇒ 字符类变成 U+005E 到 U+0040 的**反向区间**，
+整个模块连 `node --check` 都过不去。合并时按显然的意图改成 `[\u0000-\u001f\u007f-\u009f]`（C0 控制码、DEL、
+C1 控制码）。`#` 与零宽字符的合法性归**服务端**判 —— 前端不是鉴权边界。
+
+⚠ **同一份来源文件里还有第二处 caret 记法没被修**：`isPanelId` 的字符类写成 `[\s^@-^_]`，那是一个**合法但语义错**
+的正则（`@-^` 是反向区间）—— 它会拒掉所有含**大写字母或下划线**的面板 id。合并时**保留我方正确的
+`[\s\u0000-\u001f]`**，不吸收那一处。
+
+**这一格与 §28.54 的分工**：§28.54 管「这一局由谁算」（服务端对局的种类），这一格管「这一屏由谁画」。两者互不
+依赖：换屏不换协议，换种类不开新消息类型。
+**不需要 `golden:update`**：这一格完全不进模拟。
+
+**判据与证据**：`test/modClientScreens.test.mjs`（路由闭枚举、两份名单同源、每条拒绝码逐条走、
+以及「没声明 `screens` 的包归一化结果里不长这个键」）、`test/modClientPanels.test.js`（面板那半未受影响）、
+`test/modSurface.test.js` 的锚点。
+
+**节号说明（我方口径）**：本节内容吸收自下游 fork，在那里编号是 §28.53；按「我们是上游、编号以我方为准」
+排到我方现有最大号之后，定为 **§28.55**。代码与文档里对它的引用一律按**能力**归一到 §28.55，
+不做机械的号段平移。
+
+---
+
+### 28.56 `server.modules[].lane`：包自带一条 WebSocket 通道（宿主开、按声明开、替它记账）
+
+**要解决的问题**：§28.44 把升级路径做成了一张表，但那张表**只有宿主进程自己**能登记 —— 文件头逐字写着
+「这一格不是给内容包开端口或跑自己的服务器的通道」。于是一个自带玩法的包（另一种对局、另一种协议、自己的
+房间语义）今天只有两条路：把权威塞进宿主的 `Match`（§28.54 那条），或者在宿主之外再跑一个进程（那就是运维
+多一个进程、多一套 TLS/域名/准入，不是 mod）。这一格开第三条：**包声明一条路径，宿主替它开**。
+
+**结构性保证一个字没改**：包仍然拿不到监听套接字、新端口、定时器或子进程。改的是「谁能登记一条 lane」和
+「登记要走什么判据」。lane 的 `onUpgrade(req, socket, head, ctx)` 签名与 §28.44 那张表的行**逐字相同**（外加
+`ctx.lane` 这条行自己的 `{ id, path, summary }`），所以宿主那一侧的准入、背压、心跳透传、消息顺序、按名字
+记日志的口径全都沿用现成的，没有第二条实现。
+
+**为什么必须「活表 + 惰性查处理器」**：`server/index.js` 在 `:188` 装载服务端模块、在 `:432` 才把
+`opts.wsLanes` 交给 `attachWebSocket`，而模块源码是异步 import 的。所以两步分开：
+
+* **路径按声明同步认领**（`server/modLanes.js claimPackLane`，在 import 之前）—— 保证快照那一刻路径一定在表里；
+* **处理器 import 完成后挂上**（`host.lane(fn)` → `attachPackLaneHandler`）。
+
+两条各自的失败方向都是响的：没挂上就升级 ⇒ `ctx.reject(503, 'pack lane not ready')` 并按名字记一条 warn；
+认领失败（坏语法 / 抢 `/ws` / 与别的模块撞同一条路径 / 一个模块认领两条 / 表满）⇒ **整包在装载期被拒并点名**，
+照 §28.44 那句「一条安静地从不应答的 lane 比没有 boot 更糟」。
+
+**判据只有一份**：路径语法与保留名不在这个包里再抄一遍 —— `claimPackLane` 直接调 `server/http/wsLanes.js` 的
+`isLanePath` / `LANE_RESERVED` / `MAX_WS_LANES`。形状层（`shared/workshop.js`）只管另一件事：**命名空间**。
+路径必须落在 `/mod-ws/<本包id>` 或其子路径（`MODULES_LANE_BAD_NAMESPACE`）。这一条只需要包 id，不需要语法，
+所以两处判据不重叠、也不互相抄。限额（每进程 lane 总数、每模块一条）是宿主的表预算，**不许**作者声明 ——
+所以 `lane` 的闭字段只有 `{ path, summary? }`。
+
+**形状层的四条互拒**：`lane` 而无 `uses:['lane']` ⇒ `MODULES_LANE_UNDECLARED`；挂了 `lane` 而无路径 ⇒
+`MODULES_LANE_NEEDS_PATH`；路径不是字符串 / 空白 summary / 未知字段 ⇒ `MODULES_LANE_BAD_PATH` /
+`MODULES_LANE_BAD_SUMMARY` / `MODULES_BAD_LANE`。`lane` 与 `summary` **只在声明时**才进归一化清单 ⇒ 没用它
+的包摘要逐字节不变；用了就进摘要（同一份房间摘要必须对应同一份会被连上的路径，§28.2 同一条）。
+
+**闭枚举的性质（这一格与 §28.54 / §28.55 不是同一种加法）**：它是**往允许集合里增成员** ——
+`SERVER_MODULE_USES` **6 → 7**（末尾 + `lane`）、`SERVER_MODULE_FIELDS` **5 → 6**（+ `lane`），另新引入一个只属于
+它的字段闭枚举 `MODULE_LANE_FIELDS = ['path','summary']`。对**在册老包零影响**：不写 `lane` ⇒ 既不触碰那个新
+枚举、也不进归一化清单。`MOD_API_VERSION` **不动**（加一格不抬世代，抬了只会把写了 `api: "1.x"` 的老包判成
+`MOD_API_INCOMPATIBLE`）。
+
+**判据（闭枚举扩张必须带的那一条）**：**不声明 `lane` 的老包，`normalizePackManifest` 的输出与改动前
+`deepEqual`** —— `test/modPackLane.test.mjs` 把整条 `server.modules[]` 条目钉成完整期望值，
+另断言 `SERVER_MODULE_USES` 的**逐字**取值（末尾就是 `lane`）。
+
+**入口**：`server/modServer.js` 把 `packLaneTable()` 交给 `startServer({ wsLanes })`。它存在的全部理由就是
+**不改 `server/index.js`** —— 那是游戏本体拥有的路径，而 `index.js` 已经有 `opts.wsLanes` 这个现成入口，
+能不改就不改（本体路径的判据是「越线必须留证据，不是『不许』」）。不认 lane 的部署照旧 `node server/index.js`，
+行为与字节都不变；要换入口只改启动命令（`docs/DEPLOY-SERVER.md`），启动时多打一行 `[mod-lane] ...` 让运维能确认
+这个进程到底开了哪几条包通道，而不是靠猜。
+
+**同一入口还带进了热装载 —— 它只交付「安全的那一半」**：`server/modServer.js` 的第二个能力是工坊目录的
+变更监听 + 精确 diff + 可选受监督重启（`server/modHotReload.js`）。**这一格不承诺「原地换包」**：本引擎的装配
+是一次性的（`startServer()` 在 `listen` 之前把工坊、钩子、服务端模块、战斗、房间、数据叠加层全部烘进对象里），
+真正原地换包要先把那段装配抽成可重入的 `applyWorkshop()` —— 那是另一件事，写在 `server/modHotReload.js` 的文件头
+里免得后人误读。所以缺省 `SP_HOT_RELOAD` 未设 ⇒ `report`（**只报告、不动服务**），要生效用 `restart` 交给外部
+supervisor 拉起；**缺省路径的行为与字节零变化**，且任何异常一律只记日志（一个坏包绝不能让服务器变成起不来）。
+
+**这一格与 §28.54 / §28.55 的分工**：§28.54 换「这一局由谁算」，§28.55 换「这一屏由谁画」，这一格给「这一种
+玩法自己怎么说话」。三者互不依赖，也都**不新增 `C2S` 意图、不动 `PROTOCOL_VERSION` / `MOD_API_VERSION`**。
+**不需要 `golden:update`**：不进模拟。
+
+**移动端 / 移植口径**：这一格是**纯服务端协议面** —— 它不渲染任何界面，因此**没有像素、没有视口假设**，
+也不引入平台特有依赖（`server/modLanes.js` 只 import 宿主自己的 `server/http/wsLanes.js`）。客户端要连这条
+通道，用的是同一个 `WebSocket` 构造与同一条已声明的路径，移动端与桌面端走的是同一段代码。
+
+**判据与证据**：`test/modPackLane.test.mjs`（闭枚举逐字取值、形状层每条拒绝码逐条走、以及「纯的那半」——
+认领 / 撞车 / 限额 / 处理器还没就位时 503 / 处理器就位后转发并多带 `ctx.lane`）、
+`test/mod-hot-reload.test.mjs`（防抖合并、精确 diff、坏包不炸、`restart` 只在 `mode=restart` 时调用）、
+`test/wsLanes.test.js`（§28.44 那份语法判据没被改）、`test/modSurface.test.js` 的锚点。
+
+**⚠️ 来源分支的四处错标（合并时抓到，记在这里免得再踩）**：成员树的 `shared/workshop.js` 有**四处**把 lane 的
+设计稿节号写成 **§28.53**（那是 `client.screens` 的号）—— 分别是 `MODULE_LANE_FIELDS` 的文档注释、形状层
+`lane` 那一段、归一化清单那一段、以及命名空间闸门那一段。合并时**按能力归一到 §28.56**，不做机械的号段平移
+（机械 +2 会得到 §28.55，那是 client.screens 的号 —— 正好错位）。同一次合并里还抓到 `public/js/ui/extensions.js`
+的 `isPanelId` 也把控制码写成 caret 记法（见 §28.55 末尾那条），**未吸收**。
+
+**节号说明（我方口径）**：本节内容吸收自下游 fork，在那里编号是 §28.54；按「我们是上游、编号以我方为准」
+排到我方现有最大号之后，定为 **§28.56**。代码与文档里对它的引用一律按**能力**归一到 §28.56。
+
+---
+
+### 28.57 `server.room.hold`：空席房间的回收裁决（谁同意把这一局留着）
+
+**要解决的问题**：§28.20 那一层的契约是**观察与声明**，它改不了对局 —— 这一条到今天仍然成立。但它旁边有一件
+事确实不在这一层里，而在大厅里：真人全部退出、而对局还在跑（等重连、或等「志愿者冻结」里那些还没回来的队友）时，
+宿主默认直接把房间销毁 —— `server/lobby.js` 的两处 `if (room.activeHumans().length === 0) this.disposeRoom(room, 'empty')`。
+一个自带玩法的包（§28.54 那种）要「人走空了但这一局不作废」，就必须能参与**这一个**决定。这一格只开这一个决定权，
+别的什么都没开。
+
+**默认路径与从前逐字相同**：没有任何包登记 ⇒ `holdDecision()` 返回 `{ hold: false, until: 0 }` ⇒ `reapEmptyRoom`
+落回原来那一行 `disposeRoom(room, 'empty')`。一个包都没声明 `server.room` 时，进程里连一张表都不建（与 §28.16
+「干净安装与从前逐字节相同」同一条不变量）。
+
+**申请必须显式**：只有 `pack.json.server.room.hold = true` 的包能调 `room.canHold(fn)`；没声明就调 ⇒
+`ROOM_HOLD_UNDECLARED` 点名（**不是**静默收下 —— 静默收下就是「写了等于没写」那一类）。`hold` **只在写出来时**
+才进归一化清单，所以没用它的那些包摘要逐字节不变；写出来就进摘要（同一份房间摘要必须对应同一份回收语义，§28.2 同一条）。
+
+**能力判据 ⇒ 这一格要 `combat: true`**：§28.20 明说房间钩子不是 combat 闸门，因为它的契约里没有任何一条能改对局。
+`hold` 破的就是那条前提 —— 它能决定一局会不会因为「没真人了」而被回收掉，那是对局结果的一部分。所以按 §28.14 /
+§28.54 同一条纪律要求包声明 `combat: true`（`ROOM_HOLD_NEEDS_COMBAT`，闸门在 `normalizePackManifest`，因为它要读
+包级声明）。判据仍然是**能力**而不是意图：`isOverridableContentFile` 那套「谁能改数值谁进摘要」的口径在这里换成
+「谁能决定回收谁进 combat 闸门」。
+
+**包决定「留不留」，宿主决定「留多久」**：`ROOM_HOLD_MAX_MS = 15 分钟` 是宿主侧的硬时限（**具名常量，不是魔法数** ——
+它是一条对外承诺的上界，散在代码里就没人能改对），谓词返回的 `until` 越界一律夹回来
+（`Math.min(until, now() + ROOM_HOLD_MAX_MS)`，也夹不早于当前时刻）。多包语义是 **OR**（谁申请留就留），时限取**最早**
+的那一票 —— 最早到点就该重新判一次，而不是让一个包把房间锁满 15 分钟。到点重新判时若已空 ⇒ 销毁，若有人回来了 ⇒
+什么都不做（加入路径本来就会广播状态）。
+
+**失败方向全是响的**：谓词抛异常 ⇒ 这一票作废并 `ROOM_HOOK_THREW` 点名（别的包照算，与 §28.20 逐钩子 try/catch
+同一个口径）；谓词返回 `{hold:true}` 以外的一切 ⇒ 视为不留。裁决表按**房间码**存，`disposeRoom` 里 `releaseRoomHolds(code)`
+与定时器一起收回 —— 房间码会被复用，留着条目就是让下一个同码房间继承上一个的裁决（§28.20 对钩子表逐字相同的理由）。
+定时器 `unref()`：一个等重连的房间不该把进程吊住（与 `startGrace` 同一个口径）。
+
+**为什么这里动 `server/lobby.js`**：回收那句话住在大厅，没有别的挂载点 —— `server.modules` 的 `boot` 拿不到房间
+生命周期，而 `server.room` 的观察面按契约不能改对局。改法是最小替换：两处 `disposeRoom(room,'empty')` ⇒
+`reapEmptyRoom(room)`，后者在没人申请时**就是**原来那一行；`disposeRoom` 只多了「清定时器 + 收表」。
+⚠ **这一格是本批唯一动到房间生命周期的地方**，所以它的验收**必须真起一次服务器**，并与房间相关的既有测试一起跑
+（`test/roomModSet.test.js` / `test/roomKeep.test.js` / `test/lobby*.test.js` / `test/roomModIndependence.test.js`），
+确认它与房间 mod 集合 / 同意路径（`ERR.MOD_SET_LOCKED` / `MOD_CONSENT_REQUIRED`）**共存** —— 这两条判据都住在
+房间生命周期上，而这一格正好在同一个生命周期点上插了一次裁决。
+
+**不新增 `C2S`、不动协议号、不进模拟** ⇒ 不需要 `golden:update`；房间对客户端的形状一字未动（留置期间对成员来说，
+它还是那个等着重连的房间）。判据在 `test/modRoomHold.test.mjs`（形状层 4 条 + 聚合语义 5 条，含「不声明 `hold` 的包
+归一化结果**逐字节不变**」）与 `test/modSurface.test.js` 的锚点。
+
+**节号说明（我方口径）**：本节内容吸收自下游 fork，在那里编号是 §28.55；按「我们是上游、编号以我方为准」
+排到我方现有最大号之后，定为 **§28.57**。代码与文档里对它的引用一律按**能力**归一到 §28.57。
+
+⚠ **来源分支那一格的两段引用没有带进来**：成员把这一格登记在 `.github/overlay.json` 的 `bodyPaths` 里，由
+`.github/game-overlap-check.mjs` 逐条核对。那两个文件是**他们那条分支**的受控例外机制，我方树里没有 ——
+带进来就是指向不存在文件的悬空引用。我方这一格的判据落在 `test/modRoomHold.test.mjs` 与
+`test/roomModSet.test.js` / `test/roomKeep.test.js` 那一组房间测试上。

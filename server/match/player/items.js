@@ -30,6 +30,17 @@ export function unequipAllowed(decl) {
 
 export class PlayerItems {
   /**
+   * A copy that actually leaves the match repays shared-item debt first (#624). Equipping, selling a carrier
+   * (the item returns to the hand) and a merge that keeps the golden do not call this.
+   * @param {any} piece
+   * @returns {number} copies repaid
+   */
+  releaseItemStock(piece) {
+    if (!piece || piece.kind !== 'item' || !this.m?.itemPool) return 0;
+    return this.m.itemPool.repay(piece.id, this.m.itemPool.need(piece.id));
+  }
+
+  /**
    * g.equip {itemUid, targetUid, replaceUid?}. A third item on a carrier with both slots used replaces the equipped item
    * the player picked in the replace dialog (`replaceUid`, research 09 §1.2 UseEquipUp.unloadInstId; absent ⇒ the
    * oldest); the replaced item is destroyed. A `replaceUid` that is not one of the target's equipped items is refused.
@@ -80,7 +91,10 @@ export class PlayerItems {
         if (off) target.items.splice(Math.min(off.idx, target.items.length), 0, off.piece);
         return fail(ERR[ev.error] ? ev.error : ERR.BAD_TARGET, typeof ev.detail === 'string' ? ev.detail : undefined);
       }
-      if (off) this.m.dispatchItem(this, off.piece, target, 'onDestroy', { item: off.piece, holder: target, reason: 'replace' });
+      if (off) {
+        this.m.dispatchItem(this, off.piece, target, 'onDestroy', { item: off.piece, holder: target, reason: 'replace' });
+        this.releaseItemStock(off.piece);
+      }
       // the handler may have destroyed the target (信标) — resolve the item again
       const again = this.find(item.uid);
       if (again && again.area !== 'equipped') this._detach(again);
@@ -88,6 +102,8 @@ export class PlayerItems {
         const holder = this.find(target.uid);
         if (holder && holder.piece.kind === 'chess') this._attach(holder.piece, item);
       }
+      // !ev.keep, or the carrier is gone: the consumed item left play. A kept item is on the carrier.
+      if (!this.find(item.uid)) this.releaseItemStock(item);
       this.stats.itemsEquipped++;
       this.checkItemMerges();
       this.recompute();
@@ -120,11 +136,15 @@ export class PlayerItems {
     target.items = target.items || [];
     const policy = matchSlotPolicy(this.m);
     const used = () => policy.slotsUsed(target.items, (id) => this.gd.item(id));
-    while (used() >= this.gd.equipPerChess) {
+    while (used() >= this.gd.equipPerChess) { // loop-cap: splices one item each pass
       const i = policy.replacedIndex(target.items, replaceUid, (id) => this.gd.item(id));
       const [old] = target.items.splice(i >= 0 ? i : 0, 1);
       replaceUid = null;
       this.m.dispatchItem(this, old, target, 'onDestroy', { item: old, holder: target, reason: 'replace' });
+      // D15：上游 0.3.0 的加法（#624 共享装备欠账的偿还）。**我们的 `matchSlotPolicy`（第 7 段）保留为来源** ——
+      // 上游那一版用的是裸 `target.items.length >= equipPerChess`，取它会丢掉 `plus` 档的两条（变形同构体不占位、
+      // 每名干员最多一件）。⇒ 结构取上游、判定仍走我们的策略。
+      this.releaseItemStock(old);
     }
     target.items.push(item);
   }
@@ -169,6 +189,7 @@ export class PlayerItems {
     if (ev.used !== false) {
       const again = this.find(itemUid);
       if (again) this._detach(again);
+      this.releaseItemStock(loc.piece);
       this.round.arts++;
     }
     this.recompute();
@@ -185,6 +206,7 @@ export class PlayerItems {
     if (!loc || loc.piece.kind !== 'item') return fail(ERR.BAD_TARGET, 'only items can be destroyed');
     if (loc.area === 'equipped') return fail(ERR.BAD_TARGET, 'equipped items are locked');
     this._detach(loc);
+    this.releaseItemStock(loc.piece);
     this.m.dispatchItem(this, loc.piece, loc.holder || null, 'onDestroy', { item: loc.piece, holder: loc.holder || null, reason: 'player' });
     this.recompute();
     return OK;

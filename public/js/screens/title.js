@@ -9,9 +9,20 @@
 // Backdrop art: if data/assets.json lists a UI backdrop (`ui.titleBackdrop`, or one of the
 // entry/loading illustration names) it is layered under the CSS art; otherwise the screen is
 // pure CSS/SVG (radar, ridgelines, glow), so it never issues a request that can 404.
+//
+// The full art, under the login box: 下载完整素材 (ui/assetDownload.js — its dialog downloads from this server) and
+// 导入素材包 (ui/assetImport.js — the player's own folder or zip, no server download) side by side, so an import never
+// opens the download (docs/history/0.3.0.md §34.14.39).
+//
+// Plugins (DESIGN §34 P1a, the design study's §7.4): when the server has unofficial plugins (content.plugins of /healthz or
+// welcome — content.js installedCount), the footer says 「本服务器安装了 N 个插件」 — a button that loads the list
+// (ui/pluginPanel.js InstalledPlugins, which fetches the catalogue when it opens); nothing on a server without any, which
+// the page never asks for its catalogue — and the title page loads none of the panel's code.
 
 import { ResumeMatchButton } from '../ui/resumeMatch.js';
-import { useMemo, useState } from '../../vendor/hooks.module.js';
+import { AssetDownloadButton } from '../ui/assetDownload.js';
+import { AssetImportButton } from '../ui/assetImport.js';
+import { useEffect, useMemo, useState } from '../../vendor/hooks.module.js';
 import { NAME_MAX_LEN, APP_VERSION, DEV_BUILD } from '../../../shared/constants.js';
 import { html, Button, Icon, MicroLabel, TextField, PingPill } from '../ui/components.js';
 import { GuideButton } from '../ui/guide.js';
@@ -27,49 +38,10 @@ import { t, N_ } from '../../../shared/i18n.js';
 import { scriptOf } from '../../../shared/i18nPacks.js';
 import { GIcon } from '../ui/gameComponents.js';
 import { SettingsModal } from '../ui/settings.js';
+import { installedCount } from '../content.js';
+import { sanitizeName, isValidName } from '../ui/playerName.js';
 
-// Same character classes as server/net.js sanitizeName (control, zero-width, bidi, BOM), so a name
-// the client accepts is never rejected by the server's hello validation.
-const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g;
-// Lone surrogates are removed by a scan, not a regex: the lookbehind such a regex needs is a *syntax error* in Safari
-// < 16.4, which would stop the whole client from loading there.
-export function stripLoneSurrogates(str) {
-  let out = '';
-  for (let i = 0; i < str.length; i++) {
-    const c = str.charCodeAt(i);
-    if (c >= 0xd800 && c <= 0xdbff) {
-      const n = i + 1 < str.length ? str.charCodeAt(i + 1) : 0;
-      if (n >= 0xdc00 && n <= 0xdfff) { out += str[i] + str[i + 1]; i++; }
-      continue;
-    }
-    if (c >= 0xdc00 && c <= 0xdfff) continue;
-    out += str[i];
-  }
-  return out;
-}
-
-/**
- * Normalise a nickname like the server does (NFC, strip lone surrogates / control / invisible /
- * bidi characters, collapse whitespace, trim), then clamp to NAME_MAX_LEN UTF-16 code units — the
- * protocol's `hello.name` limit — without splitting a surrogate pair.
- * @param {any} raw
- * @returns {string}
- */
-export function sanitizeName(raw) {
-  let s = String(raw ?? '');
-  try { s = s.normalize('NFC'); } catch { /* keep as is */ }
-  s = stripLoneSurrogates(s).replace(/\s+/g, ' ').replace(CONTROL_CHARS, '').replace(/ {2,}/g, ' ').trim();
-  if (s.length > NAME_MAX_LEN) {
-    s = s.slice(0, NAME_MAX_LEN);
-    // Don't leave half a surrogate pair at the end.
-    if (/[\ud800-\udbff]$/.test(s)) s = s.slice(0, -1);
-    s = s.trim();
-  }
-  return s;
-}
-
-/** @param {any} raw @returns {boolean} */
-export const isValidName = (raw) => sanitizeName(raw).length > 0;
+export { stripLoneSurrogates, sanitizeName, isValidName } from '../ui/playerName.js';
 
 /**
  * Enter the game shell with a nickname (title → lobby).

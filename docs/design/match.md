@@ -76,18 +76,46 @@ The offer is recipient-private, including after reconnect, and never enters `m.p
 - 变形同构体: an operator wearing it together with an item that has a `giveBondId` is a member of that bond — counted like any member (BOARD: on the board only; once per operator), in the battle, and in the client's member list (tagged 同构) and bond chips (§21.11).
 - `tier` from thresholds; `active = tier ≥ 1`.
 - `layers[bondId]` persist all match; gains come from garrisons/bands/items/choices/bond effects; IN_BATTLE gains are collected from `BattleResult.layerGains` at SETTLE (disabled in unite/boss/hidden).
+- Layer milestones (维多利亚's 维式重锤 every 25, 远见's funds every 10 and its 80 / 150 discounts, 奇迹's funds every 100) pay only while the bond is active; those owed for layers gained while it was off pay as soon as it lights up — `PlayerState.recompute` dispatches `onActiveBonds` whenever the set of active bonds changes, so placing the third 维多利亚 member in prep grants the hammer at once (the maintainer's report of the official game, 2026-10-15; §34.14.31). Each milestone pays once, however often the bond goes off and on.
 - A bond holds at most `BOND_LAYER_CAP` = 999 layers (the client's `MAX_GARRISON_STACK`, §20.12): every writer — `PlayerState.addLayers`, the SETTLE merge, `Battle.addLayers`, the dev tools — adds `layerGainRoom(before, n)` = min(n, 999 − before); a gain at the cap adds 0 and dispatches nothing (no onLayers, no `layerGain` hook, no 'layer' event), so the per-N milestones stop with the count.
 - Σ activated layers (hidden-core check) = Σ layers over bonds that are active at the moment of the check (end of R14 prep, per research).
 
 ### 6.4 Prep-phase effect dispatcher (effectsMeta.js)
 
-A registry mapping **effect keys** → handler objects `{ onRoundStart, onPrepEnd, onGain(piece), onSold(piece), onRefresh, onPrice(slot), onBuy, onMerge, onLevelUp, onBattleResult }`. Sources: garrison `SERVER_*` keys (per chess on board or hand as the key requires), band effects, item meta effects, bond meta effects (助力, 远见, 奇迹, 投资人…), choice/team cards. Content owners register handlers; the dispatcher owns ordering and the 投资人 "获得时 ×2/×3" multiplier. `onBuy` = a shop purchase (`g.buy`) only: a free pick or a grant never counts as 购买 (休露丝, 玛恩纳, 升华, 整备; §21.21). Equipped items run from a snapshot — the owned chess and each holder's items as that step begins (every [holder, item] pair, taken before the first item runs) — each only while it is still equipped on its still-owned holder (handlers move and destroy pieces: 突变细胞, 博士投影; §21.25).
+A registry mapping **effect keys** → handler objects `{ onRoundStart, onPrepEnd, onGain(piece), onSold(piece), onRefresh, onPrice(slot), onBuy, onMerge, onLevelUp, onBattleResult }`. Sources: garrison `SERVER_*` keys (per chess on board or hand as the key requires), band effects, item meta effects, bond meta effects (助力, 远见, 奇迹, 投资人…), choice/team cards. Content owners register handlers; the dispatcher owns ordering and the 投资人 "获得时 ×2/×3" multiplier, and only while that bond is active (标准 lists `investShip` inactive; copies of one investor are one member — §34.14.8). 娜仁图亚 见者有份 draws `pool_equip_narant` with no tier cap: every shop-eligible equip, uniform [ASSUMED] (§34.14.8). `onBuy` = a shop purchase (`g.buy`) only: a free pick or a grant never counts as 购买 (休露丝, 玛恩纳, 升华, 整备; §21.21). Equipped items run from a snapshot — the owned chess and each holder's items as that step begins (every [holder, item] pair, taken before the first item runs) — each only while it is still equipped on its still-owned holder (handlers move and destroy pieces: 突变细胞, 博士投影; §21.25).
 
 ### 6.5 Waves (waves.js)
 
 Per match: pick stage (weighted among the mode's `config.modes[m].stages`, weight 50 each: 标准 FUNNY = 战场#01 `act1autochess_m01` only, 险境 NORMAL = 8 stages, 绝境 / 终极 = 7 without 战场#01 — `waves.js setupMatchWaves`, `test/match/stagepick.test.js`), 3 of 6 typed enemy factions, disabled bond set (3 core + 4 add-on for NORMAL+, per research), boss (weighted), hidden boss. Per round: wave template (by mode & round) → replace placeholders per research 05 §3.2 algorithm → apply stat multipliers (research 00-INDEX §5 `atk ×base×1.1^k`, `hp ×base×1.2^k`, ABYSS speed ×1.15 from R3) → `SpawnSpec[]` + routes resolved on the stage. *(Superseded by the official generator — §14 "Corrections from research 08/09" and the waves.js header.)* A player's normal battle (and the bot rehearsal) runs `withBounties(gd, round, wave, bounties, playerId)`: the bounty units inserted among their host action's own units, which are re-timed around them (client order); `previewOf` keeps one entry per action (`wave.spawns` + `bountySpawns`).
 
 ### 6.6 AI players (bot.js)
+
+After the greedy layout is complete, `planLayoutSteps` rechecks self-range guards on enemy-road tiles. An isolated
+guard may move to a free legal road tile with allied damage covering both it and the preceding tile of every incoming
+ground route. Different routes may have different supporting allies. The exposure score must not decrease [ASSUMED],
+regardless of seat count. Supported guards and guards without such an alternative keep their positions.
+These placement assumptions are tracked in [issue #315](https://github.com/sganggs/Stronghold-Protocol/issues/315).
+
+[ASSUMED] Blocking medics prefer legal tiles outside the enemy road, then road tiles supported by allied damage,
+then any legal fallback when neither exists (#577). The supported-road test is the same as the guard repair above:
+every incoming ground route needs an ally covering both the medic's tile and its preceding contact tile; different
+routes may use different allies, and healing never counts as fire support. Within each preference group the existing
+exposure score chooses the tile. On boss rounds (no rehearsal), wider healing ranges are placed first; equal exposure
+scores prefer estimated allied DPS **not already covered by a previously placed medic**, before the tile-noise tie-break.
+
+[ASSUMED] Purchase scores within `1e-9` tie in favour of the cheaper offer; genuine score advantages still win.
+Pre-emptive hand shedding only sells when the owned operator count exceeds the deploy cap. Lineup evaluation counts
+BOARD_AND_DECK members withdrawn from the board only while hand slots remain, in the same order as arrangement
+(withdrawals before deployments). A purchase reserves its own hand slot first; members forced to be sold do not count.
+
+[ASSUMED] Layout rehearsals use normal battle inputs and the normal field seed, including battle-start effects,
+enemy replacements, teammate effects and in-battle layer gains. Each candidate uses an independent copy of the current
+meta RNG. Candidate boards and events are detached; preview contexts expose copied reads and no-op state writers,
+including contexts reached through teammates/player. A separate dispatcher owns the preview script budget and drops
+preview errors; no live script quota, diagnostics or settlement is affected. Actual starts retain the original RNG
+and dispatch. Rehearsals estimate current prep state, not later prep actions or other players' random choices.
+These three bot policies are tracked in [issue #315](https://github.com/sganggs/Stronghold-Protocol/issues/315);
+combat blocking, healing and damage rules are unchanged.
 
 Pending Pointing Stick offers use the existing bounty scorer at bot prep entry, immediately after a successful cast,
 and before Ready. The prep's deadline — and the scheduler's fallback when a step of a bot's prep fails — randomly resolves any remaining offer before temp and Ready; a seat that left is eliminated and its offer dropped.

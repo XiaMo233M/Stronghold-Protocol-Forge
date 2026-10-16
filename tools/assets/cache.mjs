@@ -51,22 +51,33 @@ export async function cacheExpired(cacheFile, ttlHours) {
  * @param {MirrorPolicy} [o.mirrorPolicy] shared invocation-wide mirror circuit breaker
  * @param {number} [o.timeoutMs]
  * @param {number} [o.backoffMs]
+ * @param {import('./source-verifier.mjs').SourceVerifier} [o.verifier] verify raw bytes against pinned Git trees
  * @returns {Promise<any>} parsed JSON
  */
-export async function cachedJson({ cacheFile, url, refresh = false, offline = false, ttlHours = 0, log = console.log, source = 'direct', proxyPrefix, fetchImpl = globalThis.fetch, mirrorPolicy, timeoutMs = 180000, backoffMs = 500 }) {
+export async function cachedJson({ cacheFile, url, refresh = false, offline = false, ttlHours = 0, log = console.log, source = 'direct', proxyPrefix, fetchImpl = globalThis.fetch, mirrorPolicy, timeoutMs = 180000, backoffMs = 500, verifier }) {
+  if (verifier && offline) throw new Error('source verification is incompatible with --offline');
+  let verifiedSource;
+  if (verifier) {
+    verifiedSource = await verifier.resolve(url);
+    if (!verifiedSource) throw new Error(`source index missing ${url}`);
+  }
   // Same rule as the file downloader: a configured proxy must not be skipped.
   const fetchFn = guardDefaultFetch(fetchImpl);
   // --index-ttl alone is what makes an old cache stale: without it `refresh` is the only trigger, as before.
   const expired = !refresh && !offline && await cacheExpired(cacheFile, ttlHours);
   if (expired) log(`[cache] ${cacheFile} is older than ${ttlHours} h (--index-ttl): re-downloading`);
   if (!refresh && !expired || offline) {
-    try { return JSON.parse(await readFile(cacheFile, 'utf8')); } catch (e) {
+    try {
+      const buf = await readFile(cacheFile);
+      if (verifier) verifier.verify(buf, verifiedSource);
+      return JSON.parse(buf.toString('utf8'));
+    } catch (e) {
       if (offline) throw new Error(`--offline: cached index ${cacheFile} is missing or corrupt (${e.message}); run once online`);
     }
   }
   const network = mirrorPolicy ?? new MirrorPolicy({ source, proxyPrefix, log });
   let lastErr = null;
-  for (const src of network.urls(url)) {
+  for (const src of network.urls(verifiedSource?.pinnedUrl ?? url)) {
     if (network.skip(src)) continue;
     const attempts = network.isProxy(src) ? 1 : 3;
     for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -83,7 +94,9 @@ export async function cachedJson({ cacheFile, url, refresh = false, offline = fa
           }
           throw new Error(`HTTP ${res.status}`);
         }
-        text = (await network.readBody(src, res)).toString('utf8');
+        const buf = await network.readBody(src, res);
+        if (verifier) verifier.verify(buf, verifiedSource);
+        text = buf.toString('utf8');
         json = JSON.parse(text);
       } catch (e) {
         lastErr = e;

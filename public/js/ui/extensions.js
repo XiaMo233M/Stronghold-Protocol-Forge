@@ -57,7 +57,7 @@
 // the browser half is the opt-in `SP_E2E=1` path, see docs/WORKSHOP.md §4.4 for the same standing gap).
 
 import { t } from '../../../shared/i18n.js';
-import { validateC2S } from '../../../shared/protocol.js';
+import { C2S, validateC2S } from '../../../shared/protocol.js';
 // 立绘解析链的**唯一 hook**（皮肤层第 1 步）：核心只认识「有一个函数可能回答这个 id」，不认识「皮肤」。
 import { setAppearanceLookup, clearAppearanceLookup } from './portraitChain.js';
 // 素材加载源的**排序面**（DESIGN §28.40）：与外观提供者逐字同构的一条注册链 —— 一个提供者、最多一个、点名拒绝。
@@ -66,6 +66,10 @@ import { setSourceOrder, clearSourceOrder } from '../resources/sources.js';
 // 引擎已经定义好的服务端→客户端类型（`shared/protocol.js S2C`）。**不在这里抄一份**：抄一份就是第二个会漂的真相，
 // 而漂的方向是「一个面板订阅了一个引擎其实不会发的名字」—— 那正是这一层到处在拒绝的形态。
 import { S2C } from '../../../shared/protocol.js';
+import { NAME_MAX_LEN } from '../../../shared/constants.js';
+import { identity } from '../net.js';
+import { selectRoute } from '../store.js';
+import { h, Fragment, render as preactRender } from '../../vendor/preact.module.js';
 // 配音词表（`shared/constants.js VOICE_LANGS`，编辑器 / CLI / 工坊校验器都读它）。**不在这里抄一份**：抄一份
 // 就是第二个会漂的真相，而漂的方向是「面板写了一个引擎不认识的配音」—— 那正是这一层到处在拒绝的形态。
 // 这个模块是纯数据，所以 `extensions.js` 仍然能在 Node 里整套跑（`test/modClientPanels.test.js` 就是这么跑的）。
@@ -100,6 +104,13 @@ export const MOD_PANEL_SLOTS = Object.freeze([
  * other copy; a test pins them together.
  */
 export const MOD_PANEL_REPEATABLE = Object.freeze(['screen.game.shopCard']);
+/**
+ * 整屏能替换的**路由闭枚举**：镜像形状层的 `CLIENT_SCREEN_ROUTES`（DESIGN §28.55）。
+ * 为什么必须只有四条：`selectRoute` 与 `main.js` 的 `SCREENS` 都只到这四个值，结算与干员调配是路由**内部**的
+ * 视图 —— 多写一条就是永远不会命中的死格子。两份名单由 `test/modClientScreens.test.mjs` 钉在一起，
+ * 各说各话就是第二个会漂的真相。
+ */
+export const MOD_SCREEN_ROUTES = Object.freeze(['title', 'lobby', 'room', 'game']);
 
 /** The URL prefix a panel module is served under: `shared/workshop.js WORKSHOP_PANEL_PREFIX` (pinned by a test). */
 export const MOD_PANEL_PREFIX = '/workshop-panels/';
@@ -204,6 +215,29 @@ export function readonlySnapshot(value) {
     for (const [k, v] of Object.entries(value)) copy[k] = readonlySnapshot(v);
   }
   return Object.freeze(copy);
+}
+
+const SCREEN_PRIVATE_KEYS = new Set(['token', 'accesstoken', 'refreshtoken', 'sessiontoken', 'playertoken',
+  'auth', 'authorization', 'password', 'secret', 'credential', 'credentials', 'csrf', 'csrftoken']);
+function screenSafeCopy(value, seen = new WeakSet()) {
+  if (value === null || typeof value !== 'object') return value;
+  if (seen.has(value)) return null;
+  seen.add(value);
+  const copy = Array.isArray(value) ? [] : {};
+  if (Array.isArray(value)) {
+    for (const item of value) copy.push(screenSafeCopy(item, seen));
+  } else {
+    for (const [key, item] of Object.entries(value)) {
+      const normalized = key.replace(/[-_]/g, '').toLowerCase();
+      if (SCREEN_PRIVATE_KEYS.has(normalized)) continue;
+      copy[key] = screenSafeCopy(item, seen);
+    }
+  }
+  seen.delete(value);
+  return copy;
+}
+function screenSnapshot(value) {
+  return value === undefined ? undefined : readonlySnapshot(screenSafeCopy(value));
 }
 
 /** 组件已经渲染出来的全部该宿主的容器（可重复宿主会有多个）；浏览器里是 `querySelectorAll`。 */
@@ -335,6 +369,10 @@ export function createPanelRegistry(deps) {
     || ((tag) => (globalThis.document ? globalThis.document.createElement(tag) : null));
   const env = deps.env || browserEnv();
   const styleHost = deps.styleHost || browserStyleHost;
+  const screenHost = deps.screenHost || (() => globalThis.document && (globalThis.document.body || globalThis.document.documentElement));
+  const screenRoot = deps.screenRoot || (() => globalThis.document && globalThis.document.documentElement);
+  const renderView = typeof deps.renderView === 'function' ? deps.renderView : ((vnode, el) => preactRender(vnode, el));
+  const screenIdentity = deps.identity || identity;
   const themeHost = deps.themeHost || browserThemeHost;
   const slotHosts = deps.slotHosts || browserSlotHosts;
   /** 客户端数据层（`public/js/data.js`）。注入而不是 import：那是浏览器模块（fetch / location），
@@ -371,6 +409,12 @@ export function createPanelRegistry(deps) {
 
   /** @type {Array<any>} */
   let panels = [];
+  /** 整屏声明与面板走**同一份** `welcome.modPanels` 线表：服务端只多给一个 `kind: 'screen'`，
+   *  不新开通道、不加 wire 字段 —— 老客户端读到未知 kind 会点名拒绝，而不是静默挂错。 */
+  let screens = [];
+  let activeScreen = null;
+  let screenBaseStyleEl = null;
+  const screenSubscriptions = new Map();
   /** panel key -> { rec, host, unmount } while mounted (or being mounted). Repeatable hosts key by
    *  `<panel>#<hostKey>` — one entry per container the panel mounted into. */
   const mounted = new Map();
@@ -486,7 +530,17 @@ export function createPanelRegistry(deps) {
     if (!isPanelId(id)) { refuse('CLIENT_BAD_PANEL_ID', `panel id ${JSON.stringify(id)} is not a usable id`); return null; }
     if (typeof pack !== 'string' || !pack) { refuse('CLIENT_BAD_PANEL_ID', `panel "${id}" has no pack id`); return null; }
     const key = `${pack}/${id}`;
-    if (!MOD_PANEL_SLOTS.includes(raw.slot)) {
+    const isScreen = raw.kind === 'screen';
+    if (raw.kind !== undefined && !isScreen) {
+      refuse('CLIENT_BAD_DECL_KIND', `declaration "${key}" has unknown kind ${JSON.stringify(raw.kind)}`);
+      return null;
+    }
+    if (isScreen) {
+      if (!MOD_SCREEN_ROUTES.includes(raw.route)) {
+        refuse('CLIENT_BAD_SCREEN_ROUTE', `screen "${key}" declares route ${JSON.stringify(raw.route)} — not one of ${MOD_SCREEN_ROUTES.join(', ')}`);
+        return null;
+      }
+    } else if (!MOD_PANEL_SLOTS.includes(raw.slot)) {
       refuse('CLIENT_BAD_PANEL_SLOT', `panel "${key}" declares slot ${JSON.stringify(raw.slot)} — not one of ${MOD_PANEL_SLOTS.join(', ')}`);
       return null;
     }
@@ -558,7 +612,8 @@ export function createPanelRegistry(deps) {
       }
     }
     return {
-      key, id, pack, slot: raw.slot, url,
+      key, id, pack, slot: isScreen ? 'root.overlays' : raw.slot, url,
+      ...(isScreen ? { kind: 'screen', screenRoute: raw.route } : {}),
       wraps,
       order: Number.isInteger(raw.order) ? raw.order : 0,
       gate: typeof raw.gate === 'string' && raw.gate ? raw.gate : null,
@@ -680,6 +735,7 @@ export function createPanelRegistry(deps) {
    * added, and there is still no store, no engine and no match state).
    */
   function panelContext(rec, host, hostKey = null, extra = null) {
+    const declarationPath = rec.kind === 'screen' ? 'client.screens' : 'client.panels';
     const scoped = Object.freeze({
       info: (...a) => log?.info?.(`[mod ${rec.key}]`, ...a),
       warn: (...a) => log?.warn?.(`[mod ${rec.key}]`, ...a),
@@ -914,7 +970,7 @@ export function createPanelRegistry(deps) {
         if (typeof type !== 'string' || typeof fn !== 'function') return () => {};
         if (S2C_TYPES.has(type)) return net && typeof net.on === 'function' ? net.on(type, fn) : () => {};
         if (!rec.messages.includes(type)) {
-          refuse('CLIENT_CHANNEL_UNDECLARED', `panel "${rec.key}" subscribes to "${type}" without declaring it — add it to client.panels["${rec.id}"].messages (declared: ${rec.messages.join(', ') || 'none'}), or use an engine message type`);
+          refuse('CLIENT_CHANNEL_UNDECLARED', `panel "${rec.key}" subscribes to "${type}" without declaring it — add it to ${declarationPath}["${rec.id}"].messages (declared: ${rec.messages.join(', ') || 'none'}), or use an engine message type`);
           return () => {};
         }
         if (!net || typeof net.on !== 'function') return () => {};
@@ -936,7 +992,7 @@ export function createPanelRegistry(deps) {
       send(channel, data) {
         if (typeof channel !== 'string' || !channel) return false;
         if (!rec.messages.includes(channel)) {
-          refuse('CLIENT_CHANNEL_UNDECLARED', `panel "${rec.key}" sends on "${channel}" without declaring it — add it to client.panels["${rec.id}"].messages (declared: ${rec.messages.join(', ') || 'none'})`);
+          refuse('CLIENT_CHANNEL_UNDECLARED', `panel "${rec.key}" sends on "${channel}" without declaring it — add it to ${declarationPath}["${rec.id}"].messages (declared: ${rec.messages.join(', ') || 'none'})`);
           return false;
         }
         if (!net || typeof net.send !== 'function') return false;
@@ -1148,6 +1204,128 @@ export function createPanelRegistry(deps) {
      * 与别处的拒绝同一个出口：控制台一行 + `refusals()`）。不抛异常是有意的：一个包多读一行不该让整个界面消失，
      * 但这件事必须看得见 —— 「静默拿到 undefined」才是要消灭的那一种。
      */
+    const screenFacade = rec.kind === 'screen' ? Object.freeze({
+      route: rec.screenRoute,
+      currentRoute: () => selectRoute(store.get()),
+      active: () => !!activeScreen && activeScreen.rec.key === rec.key && !activeScreen.closed
+        && selectRoute(store.get()) === rec.screenRoute,
+      snapshot: () => screenSnapshot(store.get()),
+      subscribe(fn) {
+        if (typeof fn !== 'function' || disposed || !activeScreen || activeScreen.rec.key !== rec.key || activeScreen.closed) return () => {};
+        let released = false;
+        let off = null;
+        const release = () => {
+          if (released) return;
+          released = true;
+          if (typeof off === 'function') {
+            try { off(); } catch (err) { log?.warn?.(`[mod-screen] ${rec.key} unsubscribe failed`, err); }
+          }
+          const entries = screenSubscriptions.get(rec.key);
+          if (entries) { entries.delete(release); if (!entries.size) screenSubscriptions.delete(rec.key); }
+        };
+        try {
+          off = store.subscribe(() => {
+            if (disposed || released || !activeScreen || activeScreen.rec.key !== rec.key || activeScreen.closed
+              || selectRoute(store.get()) !== rec.screenRoute) return;
+            try { fn(screenSnapshot(store.get())); }
+            catch (err) { refuse('CLIENT_SCREEN_SUBSCRIBER_THREW', `screen "${rec.key}" subscriber threw: ${err && err.message ? err.message : String(err)}`); }
+          });
+          if (typeof off === 'function') {
+            if (!screenSubscriptions.has(rec.key)) screenSubscriptions.set(rec.key, new Set());
+            screenSubscriptions.get(rec.key).add(release);
+          }
+        } catch (err) {
+          refuse('CLIENT_SCREEN_SUBSCRIBE_FAILED', `screen "${rec.key}" could not subscribe: ${err && err.message ? err.message : String(err)}`);
+          return () => {};
+        }
+        return release;
+      },
+    }) : null;
+    const screenNet = rec.kind === 'screen' ? Object.freeze({
+      on(type, fn) {
+        if (typeof fn !== 'function') return () => {};
+        const unsub = netFacade.on(type, (...args) => fn(...args.map((value) => screenSnapshot(value))));
+        if (typeof unsub !== 'function') return () => {};
+        let released = false;
+        const release = () => {
+          if (released) return;
+          released = true;
+          try { unsub(); } catch (err) { log?.warn?.(`[mod-screen] ${rec.key} message unsubscribe failed`, err); }
+          const entries = screenSubscriptions.get(rec.key);
+          if (entries) { entries.delete(release); if (!entries.size) screenSubscriptions.delete(rec.key); }
+        };
+        if (!screenSubscriptions.has(rec.key)) screenSubscriptions.set(rec.key, new Set());
+        screenSubscriptions.get(rec.key).add(release);
+        return release;
+      },
+      send: (...args) => netFacade.send(...args),
+      sendResourceMessage: (...args) => netFacade.sendResourceMessage(...args),
+      status: () => screenSnapshot(netFacade.status()),
+      welcome: () => screenSnapshot(netFacade.welcome()),
+      transport: () => screenSnapshot(netFacade.transport()),
+    }) : null;
+    const screenActions = rec.kind === 'screen' ? Object.freeze({
+      request(type, fields = {}) {
+        const reject = (code, detail) => {
+          refuse(code, `screen "${rec.key}" ${detail}`);
+          return Promise.reject(new Error(code));
+        };
+        if (!activeScreen || activeScreen.rec.key !== rec.key || activeScreen.closed || selectRoute(store.get()) !== rec.screenRoute) {
+          return reject('CLIENT_SCREEN_ACTION_INACTIVE', 'tried a request while inactive');
+        }
+        const allowedPrefix = ['room.', 'g.', 'support.', 'loadout.', 'records.'];
+        if (typeof type !== 'string' || !allowedPrefix.some((prefix) => type.startsWith(prefix))
+          || !Object.prototype.hasOwnProperty.call(C2S, type)) {
+          return reject('CLIENT_SCREEN_ACTION_NOT_ALLOWED', `message type ${JSON.stringify(type)} is not in the screen action allowlist`);
+        }
+        if (!isPlainObj(fields)) return reject('CLIENT_SCREEN_ACTION_BAD_FIELDS', 'request fields must be a plain object');
+        for (const key of Object.keys(fields)) {
+          const normalized = key.replace(/[-_]/g, '').toLowerCase();
+          if (key === 't' || key === 'rid' || SCREEN_PRIVATE_KEYS.has(normalized)) {
+            return reject('CLIENT_SCREEN_ACTION_BAD_FIELDS', `request attempted to supply reserved field "${key}"`);
+          }
+        }
+        const bad = validateC2S({ t: type, ...fields });
+        if (bad) return reject('CLIENT_SCREEN_ACTION_BAD_SHAPE', `request "${type}" failed the shared C2S validator: ${bad}`);
+        if (!net || typeof net.request !== 'function') return reject('CLIENT_SCREEN_ACTION_NO_NET', 'the host did not provide request()');
+        try { return net.request(type, { ...fields }); }
+        catch (err) { return reject('CLIENT_SCREEN_ACTION_FAILED', `request "${type}" failed: ${err && err.message ? err.message : String(err)}`); }
+      },
+      enter(rawName) {
+        if (rec.screenRoute !== 'title' || !activeScreen || activeScreen.rec.key !== rec.key || activeScreen.closed) {
+          refuse('CLIENT_SCREEN_ENTER_NOT_ALLOWED', `screen "${rec.key}" may enter only on the active title route`);
+          return false;
+        }
+        // 这一格在来源分支上是**坏的**：作者写成了 caret 记法的字面文本（^@-^_），源码里没有真控制字符 ⇒ 字符类变成
+        // U+005E 到 U+0040 的反向区间，整个模块连 node --check 都过不去。这里按显然的意图写成显式转义：剥掉 C0 控制码、
+        // DEL 与 C1 控制码。`#` 与零宽字符的合法性归服务端判（前端不是鉴权边界，见 docs/WORKSHOP.md）。
+        const name = String(rawName ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim().slice(0, NAME_MAX_LEN);
+        if (!name) { refuse('CLIENT_SCREEN_ENTER_BAD_NAME', `screen "${rec.key}" tried to enter with an empty nickname`); return false; }
+        if (!screenIdentity || typeof screenIdentity.saveName !== 'function' || typeof screenIdentity.setEntered !== 'function'
+          || !net || typeof net.setName !== 'function') {
+          refuse('CLIENT_SCREEN_ENTER_UNAVAILABLE', `screen "${rec.key}" cannot enter: the session boundary is unavailable`);
+          return false;
+        }
+        screenIdentity.saveName(name);
+        screenIdentity.setEntered(true);
+        store.set((state) => ({ me: { ...state.me, name }, session: { ...state.session, entered: true } }));
+        net.setName(name);
+        return true;
+      },
+    }) : null;
+    const screenUi = rec.kind === 'screen' ? Object.freeze({
+      h, Fragment,
+      render(vnode) {
+        if (!host || !activeScreen || activeScreen.rec.key !== rec.key || activeScreen.closed) return false;
+        try { renderView(vnode, host); return true; }
+        catch (err) { refuse('CLIENT_SCREEN_RENDER_FAILED', `screen "${rec.key}" render failed: ${err && err.message ? err.message : String(err)}`); return false; }
+      },
+      clear() {
+        if (!host) return false;
+        try { renderView(null, host); return true; }
+        catch (err) { refuse('CLIENT_SCREEN_RENDER_FAILED', `screen "${rec.key}" clear failed: ${err && err.message ? err.message : String(err)}`); return false; }
+      },
+    }) : null;
     const dataFacade = Object.freeze({
       /**
        * 一张表的**只读快照**（冻结的深拷贝；同一个包多次调用拿到同一份），或 `null`。
@@ -1157,7 +1335,7 @@ export function createPanelRegistry(deps) {
       get(name) {
         if (typeof name !== 'string' || !name) return null;
         if (!rec.data.includes(name)) {
-          refuse('CLIENT_DATA_UNDECLARED', `panel "${rec.key}" reads the data table "${name}" without declaring it — add it to client.panels["${rec.id}"].data (declared: ${rec.data.join(', ') || 'none'})`);
+          refuse('CLIENT_DATA_UNDECLARED', `panel "${rec.key}" reads the data table "${name}" without declaring it — add it to ${declarationPath}["${rec.id}"].data (declared: ${rec.data.join(', ') || 'none'})`);
           return null;
         }
         if (!dataSnapshots.has(name)) {
@@ -1172,10 +1350,10 @@ export function createPanelRegistry(deps) {
     });
     return Object.freeze({
       id: rec.id, pack: rec.pack, slot: rec.slot, order: rec.order, gate: rec.gate,
-      host, hostKey, session, net: netFacade, data: dataFacade, log: scoped,
-      // 战斗读数（DESIGN §28.38）：这一场战斗的逐单位 / 逐人累计伤害 + 时间基准，供包自己算 DPS。
-      // 仍然没有 runner 句柄、没有 Battle、没有 match 对象 —— 只有这一格冻结读数。
-      battle: battleFacade,
+      host, hostKey, session, net: screenNet || netFacade, data: dataFacade, log: scoped,
+      // 整屏模块拿到的是 screen / actions / ui 三面显式门面；普通面板的契约一字未动。
+      // 为什么整屏**没有** battle：它能替换掉对局屏，给它战斗读数就是让它同时握住「怎么画」与「算出来是什么」。
+      ...(rec.kind === 'screen' ? { screen: screenFacade, actions: screenActions, ui: screenUi } : { battle: battleFacade }),
       // 只读会话态（`playerId` / `name` / `room` 快照）：面板答不出来的那几件事实，由引擎告知。
       // 它是**活的只读读数**（每次读取当前 store），没有 store 句柄、没有 match / battle / runner / audio。
       me: meFacade,
@@ -1256,6 +1434,173 @@ export function createPanelRegistry(deps) {
       styleEls.push(el);
     }
     return true;
+  }
+
+  function removeStyleList(els) {
+    for (const el of els || []) {
+      if (el && typeof el.remove === 'function') {
+        try { el.remove(); } catch { /* best effort */ }
+      }
+      const at = styleEls.indexOf(el);
+      if (at >= 0) styleEls.splice(at, 1);
+    }
+  }
+
+  function installScreenBaseStyle() {
+    if (screenBaseStyleEl) return true;
+    const parent = styleHost();
+    if (!parent || typeof parent.appendChild !== 'function') return false;
+    const el = createElement('style');
+    if (!el) return false;
+    el.setAttribute?.('data-mod-screen-compat', 'true');
+    el.textContent = 'html[data-mod-screen-active="true"] .app-root > .screen:not(.crash) { display: none !important; }';
+    parent.appendChild(el);
+    screenBaseStyleEl = el;
+    return true;
+  }
+
+  function restoreRootAttr(root, name, before) {
+    if (!root || typeof root.setAttribute !== 'function') return;
+    if (before === null || before === undefined) {
+      if (typeof root.removeAttribute === 'function') root.removeAttribute(name);
+      else root.setAttribute(name, '');
+    } else root.setAttribute(name, before);
+  }
+
+  function unmountScreenEntry(entry) {
+    if (!entry || entry.closed) return;
+    entry.closed = true;
+    const ownsActive = activeScreen === entry;
+    if (typeof entry.cleanup === 'function' && !entry.cleanupCalled) {
+      entry.cleanupCalled = true;
+      try {
+        const result = entry.cleanup();
+        if (result && typeof result.then === 'function') result.catch((err) => log?.error?.(`[mod-screen] ${entry.rec.key} async unmount failed`, err));
+      } catch (err) { log?.error?.(`[mod-screen] ${entry.rec.key} unmount failed`, err); }
+    }
+    if (entry.host) {
+      try { renderView(null, entry.host); } catch (err) { log?.warn?.(`[mod-screen] ${entry.rec.key} render cleanup failed`, err); }
+    }
+    const subscriptions = screenSubscriptions.get(entry.rec.key);
+    if (subscriptions) for (const off of [...subscriptions]) off();
+    screenSubscriptions.delete(entry.rec.key);
+    if (entry.hidden) {
+      const root = entry.root;
+      const stillOwnsAttrs = root && typeof root.getAttribute === 'function'
+        && root.getAttribute('data-mod-screen-active') === 'true'
+        && root.getAttribute('data-mod-screen-route') === entry.rec.screenRoute;
+      if (stillOwnsAttrs) {
+        restoreRootAttr(root, 'data-mod-screen-active', entry.rootBeforeActive);
+        restoreRootAttr(root, 'data-mod-screen-route', entry.rootBeforeRoute);
+      }
+    }
+    if (entry.host && typeof entry.host.remove === 'function') {
+      try { entry.host.remove(); } catch { /* best effort */ }
+    }
+    removeStyleList(entry.styleEls);
+    styled.delete(entry.rec.key);
+    const current = mounted.get(entry.rec.key);
+    if (current && current.screenEntry === entry) mounted.delete(entry.rec.key);
+    if (ownsActive) {
+      activeScreen = null;
+      if (screenBaseStyleEl && typeof screenBaseStyleEl.remove === 'function') {
+        try { screenBaseStyleEl.remove(); } catch { /* best effort */ }
+      }
+      screenBaseStyleEl = null;
+    }
+  }
+
+  function screenFailure(rec, entry, code, detail) {
+    blockedPanels.add(rec.key);
+    refuse(code, `screen "${rec.key}" ${detail}`);
+    if (entry) unmountScreenEntry(entry);
+  }
+
+  async function syncActiveScreen() {
+    if (disposed) return;
+    const route = selectRoute(store.get());
+    const desired = screens.find((rec) => rec.screenRoute === route && !blockedPanels.has(rec.key)) || null;
+    if (activeScreen && (!desired || activeScreen.rec.key !== desired.rec.key || activeScreen.rec.url !== desired.rec.url
+      || activeScreen.rec.screenRoute !== route)) {
+      unmountScreenEntry(activeScreen);
+    }
+    if (!desired || activeScreen) return;
+    const parent = screenHost();
+    const root = screenRoot();
+    if (!parent || typeof parent.appendChild !== 'function' || !root || typeof root.setAttribute !== 'function') {
+      screenFailure(desired, null, 'CLIENT_SCREEN_NO_HOST', 'cannot replace a route because no screen host/root is available');
+      return;
+    }
+    const entry = {
+      rec: desired, route, host: null, root, hidden: false, closed: false,
+      cleanup: null, cleanupCalled: false, styleEls: [],
+      rootBeforeActive: typeof root.getAttribute === 'function' ? root.getAttribute('data-mod-screen-active') : null,
+      rootBeforeRoute: typeof root.getAttribute === 'function' ? root.getAttribute('data-mod-screen-route') : null,
+    };
+    activeScreen = entry;
+    const styleStart = styleEls.length;
+    if (!injectStylesOnce(desired)) {
+      entry.styleEls = styleEls.slice(styleStart);
+      screenFailure(desired, entry, 'CLIENT_SCREEN_STYLE_FAILED', 'could not inject its declared stylesheets; native screen remains visible');
+      return;
+    }
+    entry.styleEls = styleEls.slice(styleStart);
+    if (!installScreenBaseStyle()) {
+      screenFailure(desired, entry, 'CLIENT_SCREEN_STYLE_HOST', 'cannot install the native-screen fallback style');
+      return;
+    }
+    const host = createElement('div');
+    if (!host) {
+      screenFailure(desired, entry, 'CLIENT_SCREEN_NO_HOST', 'could not create the full-screen host; native screen remains visible');
+      return;
+    }
+    entry.host = host;
+    host.className = 'mod-screen-host';
+    host.setAttribute?.('data-mod-screen-host', desired.screenRoute);
+    host.setAttribute?.('data-mod-screen-pack', desired.pack);
+    host.setAttribute?.('data-mod-screen-id', desired.id);
+    if (!host.style) host.style = {};
+    Object.assign(host.style, {
+      position: 'fixed', inset: '0', zIndex: '2147483000', overflow: 'auto',
+      background: 'var(--screen-background, #080d12)', visibility: 'hidden',
+    });
+    parent.appendChild(host);
+    let module;
+    try { module = await importModule(desired.url); }
+    catch (err) {
+      screenFailure(desired, entry, 'CLIENT_SCREEN_IMPORT_FAILED', `could not import ${desired.url}: ${err && err.message ? err.message : String(err)}; native screen remains visible`);
+      return;
+    }
+    const mountScreen = module && (typeof module.mountScreen === 'function'
+      ? module.mountScreen : (typeof module.default === 'function' ? module.default : null));
+    if (!mountScreen) {
+      screenFailure(desired, entry, 'CLIENT_SCREEN_NO_MOUNT', 'module must export mountScreen(ctx) or a default function; native screen remains visible');
+      return;
+    }
+    let result;
+    try { result = await mountScreen(panelContext(desired, host, null)); }
+    catch (err) {
+      screenFailure(desired, entry, 'CLIENT_SCREEN_MOUNT_FAILED', `mountScreen(ctx) threw: ${err && err.message ? err.message : String(err)}; native screen remains visible`);
+      return;
+    }
+    entry.cleanup = typeof result === 'function' ? result
+      : result && typeof result.unmount === 'function' ? () => result.unmount() : null;
+    if (entry.closed || disposed || activeScreen !== entry || selectRoute(store.get()) !== desired.screenRoute) {
+      if (entry.cleanup && !entry.cleanupCalled) {
+        entry.cleanupCalled = true;
+        try {
+          const result2 = entry.cleanup();
+          if (result2 && typeof result2.then === 'function') result2.catch((err) => log?.error?.(`[mod-screen] ${desired.key} stale cleanup failed`, err));
+        } catch (err) { log?.error?.(`[mod-screen] ${desired.key} stale cleanup failed`, err); }
+      }
+      unmountScreenEntry(entry);
+      return;
+    }
+    root.setAttribute('data-mod-screen-active', 'true');
+    root.setAttribute('data-mod-screen-route', desired.screenRoute);
+    entry.hidden = true;
+    host.style.visibility = 'visible';
+    mounted.set(desired.key, { rec: desired, host, unmount: () => unmountScreenEntry(entry), key: null, screenEntry: entry });
   }
 
   async function mountOne(rec, host, mk, hostKey) {
@@ -1412,6 +1757,9 @@ export function createPanelRegistry(deps) {
           await mountOne(rec, host, mk, key);
         }
       }
+      // 整屏的路由对账排在**所有**普通面板判完之后：任何一步失败都保住宿主原生界面，
+      // 而不是先遮住原生界面再发现包挂不上（那会留下一块白屏，正是这一格要消灭的失败方向）。
+      await syncActiveScreen();
       // 链在**所有**面板都判过之后重建一次：`panels` 的次序就是链的次序，没声明 wraps 时这里什么都不做。
       syncWrapChains();
     } finally {
@@ -1442,10 +1790,22 @@ export function createPanelRegistry(deps) {
         const rec = normalize(raw);
         if (rec && !incoming.some((p) => p.key === rec.key)) incoming.push(rec);
       }
-      panels = incoming.sort(comparePanels);
-      if (panels.length) subscribe();
+      const ordered = incoming.sort(comparePanels);
+      panels = ordered.filter((rec) => rec.kind !== 'screen');
+      screens = [];
+      const routeOwners = new Map();
+      for (const rec of ordered.filter((item) => item.kind === 'screen')) {
+        const owner = routeOwners.get(rec.screenRoute);
+        if (owner) {
+          refuse('CLIENT_SCREEN_ROUTE_CONFLICT', `screen route "${rec.screenRoute}" is already owned by "${owner.key}"; "${rec.key}" lost the deterministic order/pack-id/id tie-break`);
+          continue;
+        }
+        routeOwners.set(rec.screenRoute, rec);
+        screens.push(rec);
+      }
+      if (panels.length || screens.length) subscribe();
       void flush();
-      return { accepted: panels.length };
+      return { accepted: panels.length + screens.length };
     },
     /** The panel keys currently mounted (test / diagnostic surface). */
     mounted: () => [...mounted.keys()].sort(),
@@ -1517,12 +1877,16 @@ export function createPanelRegistry(deps) {
     /** Unmount every panel and stop following the store. */
     dispose() {
       if (disposed) return;
+      if (activeScreen) unmountScreenEntry(activeScreen);
       disposed = true;
       for (const [key, entry] of mounted) {
         if (typeof entry.unmount !== 'function') continue;
         try { entry.unmount(); } catch (err) { log?.error?.(`[mod-panels] ${key} unmount failed`, err); }
       }
       mounted.clear();
+      screens = [];
+      for (const subscriptions of screenSubscriptions.values()) for (const off of [...subscriptions]) off();
+      screenSubscriptions.clear();
       // 外观提供者随注册点一起收回：链回到「没有 hook」那条路径（与今天逐字相同），而不是留着一个指向
       // 已经拆掉的模块的函数 —— 那会让立绘继续解析到一套已经没人管的素材上。
       clearAppearanceLookup();

@@ -35,6 +35,14 @@ __pycache__/
 # (the server answers /packs/index.json itself; tools/package.mjs writes this file into the release zips) -----------
 packs/index.json
 
+# --- plugins (docs/PLUGINS.md): a server's own plugins and its policy file live in plugins/ and are never committed;
+# only the folder's readme, its guide for AI agents (AGENTS.md) and the templates (plugins/_template/, from P1) are tracked — and
+# so ship (tools/package.mjs); plugins/_dist/ (packed zips) and plugins/_moved/ (files the studio moved out) stay ignored
+plugins/*
+!plugins/README.md
+!plugins/AGENTS.md
+!plugins/_template/
+
 # --- tests & logs ----------------------------------------------------------------------------------
 test/e2e/out/
 logs/
@@ -63,3 +71,7 @@ desktop.ini
 .claude/
 # tools/sim-check.mjs: the corpus and its Node traces for /dev/sim-check.html
 public/dev/simcheck/data/
+# .github/pack-compat.mjs 的工作目录（它的默认 --work 就是这里）：线上包清单、zip 与判定现场。
+# 那是本机 / CI 的临时产物，不是仓库内容；不忽略的话每跑一次都会在 `git status` 里冒出一堆未跟踪文件，
+# 把「工作区到底干净不干净」这个判据淹掉。
+.pack-compat/
