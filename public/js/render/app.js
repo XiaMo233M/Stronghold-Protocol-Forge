@@ -1731,13 +1731,21 @@ export async function createFieldView(host, options = {}) {
         // without its telegraph, its closing clip shortened by the lateness.
         const form = fxForm(e);
         const late = form !== undefined ? LATE.get(e) || 0 : 0;
+        let officialForm = false;
         if (form !== undefined) {
           const inf = infos.get(e[4].id);
           if (inf && (form === null || formsFor(FORMS, inf.spine || inf.defId)?.[form])) inf.form = form;
           const x = late > 0 ? { ...e[4], late, ...(Number(e[4].dur) > 0 ? { dur: Math.max(0, Number(e[4].dur) - late) } : {}) } : e[4];
-          views.get(e[4].id)?.setForm?.(form, x);
+          const fv = views.get(e[4].id);
+          fv?.setForm?.(form, x);
+          // the unit's attack mode from now on and its talents' 重生 rows (render/vfx/wiring.js form, talentfx.js): when the
+          // official layer stands for this form change, the procedural kit fx for it below is not drawn as well
+          if (fv) officialForm = wiring.form(fv, form, x);
         }
-        if (!(late > 0)) fx.simFx(e[1], Number(e[2]), Number(e[3]), e[4]);
+        // a kit fx the official skill / talent effects stand for (render/vfx/skillfx.js, talentfx.js) is not drawn
+        // procedurally: the official layer already played it
+        const official = !(late > 0) && wiring.simFx(e[1], Number(e[2]), Number(e[3]), e[4]);
+        if (!(late > 0) && !official && !officialForm) fx.simFx(e[1], Number(e[2]), Number(e[3]), e[4]);
         break;
       }
       case 'layer': {
@@ -2202,15 +2210,15 @@ export async function createFieldView(host, options = {}) {
       return {
         fps: Math.round(fps * 10) / 10, frameMs: Math.round(frameMs * 100) / 100, cpuMs: Math.round(cpuMs * 100) / 100, renderMs: Math.round(renderMs * 100) / 100, mode, units: views.size, impostor: impInterval, impostorAtlas: { ...impostors.stats }, boardArt: !!tiles.atlas.art,
         board3d: board3d ? { on: true, ...board3d.stats(), losses: recover.count } : { on: false, error: board3dError, recovering: !!recover.timer, losses: recover.count },
-        pen: penViews.size, prepField: prepXf.kind === 'bossPrep' ? prepXf.side : null, lod: loadLevel, culled: culledCount,
-        ...fx.counts, spine: assets.spine?.stats ? assets.spine.stats() : null, renderT: interp.renderT, rate: interp.rate,
+        pen: penViews.size, penHidden, prepField: prepXf.kind === 'bossPrep' ? prepXf.side : null, lod: loadLevel, culled: culledCount,
+        ...fx.counts, officialFx: ofx.stats(), spine: assets.spine?.stats ? assets.spine.stats() : null, renderT: interp.renderT, rate: interp.rate,
         buffered: interp.size, camera: cam.params(),
       };
     },
     get mode() { return mode; },
     /** Dev hooks (demo / tests). */
     debug: {
-      app, get cam() { return cam; }, get board3d() { return board3d; }, tiles, views, penViews, get leader() { return leader; }, interp, fx, ctx, drag, get camKind() { return viewKind(camKind, camOpts, layout()); },
+      app, get cam() { return cam; }, get board3d() { return board3d; }, tiles, views, penViews, get leader() { return leader; }, interp, fx, ofx, wiring, ctx, drag, get camKind() { return viewKind(camKind, camOpts, layout()); },
       get layout() { return layout(); },
       promotions, landings, get replaying() { return !!replayTimer; },
       // picking (render/pick.js) at canvas px: the prep piece / battle view / pen view there, the ground tile under it
