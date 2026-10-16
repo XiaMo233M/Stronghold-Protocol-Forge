@@ -130,7 +130,7 @@ field names marked *metadata* come from the client's il2cpp metadata
 (`Arknights_Data/il2cpp_data/Metadata/global-metadata.dat`, version 29, not encrypted: type and field names, nested
 types, the enum constants with their values; method bodies are native code and not read).
 
-### 33.1 Files, the file list and the extractor run
+### 35.1 Files, the file list and the extractor run
 
 ```
 .venv/bin/python tools/local-extract/extract.py --only fx                        the Phase 1a sample (§33.13)
@@ -196,7 +196,7 @@ takes ~3 minutes; the sample (126 prefabs, 290 textures, 43 meshes, 6.8 MB) ~17 
 prefab lists: 606 effect bundles read once, then cached in `.cache/fx/`). The prefab export costs ~0.18 s CPU per
 prefab; libwebp effort 4 (`WEBP_METHOD`; effort 6 is ~90× slower here for 4.5 % smaller files).
 
-### 33.2 Conventions
+### 35.2 Conventions
 
 **Numbers.** Floats have 6 significant digits; `-0` is `0`; NaN and ±∞ are `null` (in curve keys, `null` slopes mean
 stepped, §33.3). Integers stay integers. Booleans are JSON booleans where Unity serializes a bool, else Unity's 0 / 1
@@ -237,7 +237,7 @@ plane — on screen that reads as falling down.
 in step with the Spine clips. The client simulates particles in steps of at most 1/30 s (TimeManager "Maximum Particle
 Timestep" 0.0333): a runtime that wants the same drag / limit-velocity results sub-steps the same way.
 
-### 33.3 Value encodings (curves, gradients, references)
+### 35.3 Value encodings (curves, gradients, references)
 
 **AnimationCurve** (`keys`): `[[time, value, inSlope, outSlope], …]`, sorted by time; a weighted key appends
 `weightedMode, inWeight, outWeight` (weightedMode: 1 in, 2 out, 3 both). Evaluate as Unity does: between keys k0, k1
@@ -292,7 +292,7 @@ MinMaxCurve).
 | `{ asset, name }` | any other asset (type, name) — informational |
 | `null` | no reference (Unity's null), or a reference the extractor could not resolve |
 
-### 33.4 The prefab descriptor (`prefabs/<file>.json`)
+### 35.4 The prefab descriptor (`prefabs/<file>.json`)
 
 ```
 { format: 'fx-prefab', version: 1, key, bundle, root: 0,
@@ -328,7 +328,7 @@ The usual layout: the root carries the controlling behaviour (`ParticleEffect`, 
 ParticleSystem whose renderer is disabled (`Default-Particle` material) — it only times its children (in Unity, playing
 a system plays its child systems) → the visible systems, quads, trails. Note the children's +30° X tilt (§33.2).
 
-### 33.5 ParticleSystem (`node.particleSystem`)
+### 35.5 ParticleSystem (`node.particleSystem`)
 
 Only enabled modules are written (InitialModule always); a missing module is off. Field names are Unity's serialized
 names (`ParticleSystem` in a Unity YAML scene); the enum values are Unity's.
@@ -422,7 +422,7 @@ Emission 83 %, Color 76 %, Size 69 %, Shape 41 % (cone 5,791, sphere 1,904, box 
 ClampVelocity 28 %, UV 16 %, CustomData 11 %, Rotation 11 %, Velocity 9 %, Noise 8 %, Force 3 %, Trail 2 %,
 Sub 1 %, InheritVelocity 1 %; 23 % loop, 3,019 prewarm, 16 % simulate in world space, 89 % use scaling mode Local.
 
-### 33.6 Renderers
+### 35.6 Renderers
 
 All renderers carry `m_Enabled`, `m_SortingLayerID` / `m_SortingLayer`, `m_SortingOrder` and `materials` (indices
 into the descriptor's `materials`, `null` for a missing one — draw nothing with it).
@@ -489,7 +489,7 @@ unit — behind it (野鬃 S2's ring of lances at −3, a bubble's back half at 
 renderers) —, a positive order after them, and order 0 by distance with them. The web runtime draws the first kind in
 its pass under the units (`render/vfx/effect.js` `behindUnits`) along with the renderers lying flat on the ground.
 
-### 33.7 Materials (`descriptor.materials[]`)
+### 35.7 Materials (`descriptor.materials[]`)
 
 ```
 { name, shader (the shader's name, e.g. 'Torappu/Particles/Additive'),
@@ -524,7 +524,7 @@ source never enters it. The common pattern: output = 2 × vertex colour × `_Tin
 0.5 grey is neutral), Dissolve variants cut the alpha by a noise texture against `_Amount` with a soft `_BorderWidth`,
 Disturb variants offset the main UVs by a scrolled distortion texture.
 
-### 33.8 Textures (`textures.json`, `tex/`)
+### 35.8 Textures (`textures.json`, `tex/`)
 
 `textures.json` = `{ format: 'fx-textures', version: 1, textures: { key: Texture } }`:
 
@@ -539,7 +539,7 @@ different bundles share one file (`star_02` alone exists ~50 times in the client
 (written as RGB). Textures are straight (not premultiplied) alpha; the half-size copy is resized premultiplied (no dark
 fringes). `srgb` is informational: render in gamma space (§33.2). Built-in textures appear as `builtin:<path id>`.
 
-### 33.9 Meshes (`mesh/<key>.json`)
+### 35.9 Meshes (`mesh/<key>.json`)
 
 ```
 { format: 'fx-mesh', version: 2, name, vertexCount,
@@ -557,7 +557,7 @@ colours), version 2 writes them as 0…1 floats (the bytes ÷ 255), as this sect
 particles are small (`Plane003`, `Cone001`, `Torus001`, `Sphere001`: 4–200 vertices; 435 meshes / 57k vertices in the
 whole used set).
 
-### 33.10 Animation clips (`descriptor.clips[]`, `node.animator`, `node.animation`)
+### 35.10 Animation clips (`descriptor.clips[]`, `node.animator`, `node.animation`)
 
 `node.animator` = `{ controller, clips: [clip index…], default, enabled, cullingMode, updateMode }`: the Animator plays
 `default` from time 0 when the effect starts (every effect controller of the sample has one clip). `node.animation`
@@ -586,7 +586,7 @@ keys at the clip time (§33.3; looping clips wrap at `length`, others hold their
 Unresolvable properties would read `crc:<n>` (none in the sample). Clips are decoded from Unity's streamed (Hermite
 segments), dense (sampled; written as linear keys) and constant tracks; legacy clips from their explicit curves.
 
-### 33.11 Behaviours (`node.behaviours[]`)
+### 35.11 Behaviours (`node.behaviours[]`)
 
 `{ class, namespace, enabled, fields }` — every MonoBehaviour with its serialized fields (Unity names, references
 resolved per §33.3; `_bodyTransofrm` is the client's spelling). Disabled behaviours (`enabled: false`) do nothing.
@@ -708,7 +708,7 @@ scaled by that share). A light tier can apply it.
 **Others**: `ColorModifier` (`_color` tint), `FunnelHitEffect` (`_randomRange`), `OnPlayAudioPlayer` (`_audioSignal`:
 a sound — the runtime's audio may play it), and the long tail (55 classes in the used set; most occur once or twice).
 
-### 33.12 `index.json`
+### 35.12 `index.json`
 
 ```
 { format: 'fx-index', version: 3, set: 'sample' | 'used' | 'keys', source: { root, client },
@@ -1016,7 +1016,7 @@ names them): the hit by damage type, deaths, deploy, and the status loops by the
 and `follow` = its first enabled `FollowMountPoint`'s `_mountPointType`, §33.11, when it has them — where the effect
 sits on its owner without loading the descriptor).
 
-### 33.13 The Phase 1a sample (a subset of the full set, §33.14)
+### 35.13 The Phase 1a sample (a subset of the full set, §33.14)
 
 `extract.py --only fx` exports (client 26-09-13, `set: 'sample'`) 126 prefabs from 32 bundles, 290 textures (each with
 a half-size copy), 43 meshes, 9 units, 11 projectiles, 12 skills — 6.8 MB (descriptors 2.2 MB, textures 3.9 MB, meshes
@@ -1047,7 +1047,7 @@ Checked on the output: clip decoding against known values (`buff_stun` z 0 → �
 `_PremultiplyAlpha`, default SrcAlpha), mount points against the transforms they compose, every clip binding resolved
 (675 curves, no `crc:` property; 50 name objects their prefab lacks), every key the index names has a descriptor.
 
-### 33.14 Phase 1b: the full set
+### 35.14 Phase 1b: the full set
 
 `extract.py --only fx --fx-set used` (Windows client 26-09-13, 8 processes on the maintainer's Mac) exports 516 units
 (210 operators, 243 enemies, 57 tokens and the 6 enemy aliases), 538 projectiles, 529 skills and 4,253 effect prefabs
@@ -1066,7 +1066,7 @@ effect of their own but switch to a mode, whose attacks carry their effects; 10 
 `skchr_wang_1`: what the client shows for them comes from what they place (tokens, traps), the unit's own animation, or
 nothing. 333 skills have a mode (221 from their data, 112 by name).
 
-### 33.15 Phase 1c: index.json and the meshes version 2
+### 35.15 Phase 1c: index.json and the meshes version 2
 
 `extract.py --only fx --fx-set used` with the Phase 1c extractor (Windows client 26-09-13, 8 processes on the
 maintainer's Mac) exports 516 units, 541 projectiles (+3), 596 skills (+67: 65 summons' `sktok_*` and two `skcom_*` of
@@ -1107,7 +1107,7 @@ Still outside the index after Phase 1c: the effect emitters of talents (deploy e
 abilities (stand switches, revives) and a few modes' general abilities (funnels, an aura) — 33 units, 47 nodes. Phase 1d
 exports them (§33.17: 42 of the 47; the other 5 are attacks no mode references).
 
-### 33.16 The runtime's skill wiring (0.3.0 Phase 3b, 3c, 3d)
+### 35.16 The runtime's skill wiring (0.3.0 Phase 3b, 3c, 3d)
 
 The field view plays a skill's effects from its `uses` (`render/vfx/skills.js skillPlan`: each use placed by its
 role, its ability, its events and its carrier — the module header; `render/vfx/skillfx.js` plays the plan, DESIGN §9
@@ -1369,7 +1369,7 @@ toggles 41 / 47, reborn 13 / 13, deploy 6 / 12, abilities 37 / 51); the others n
 (unmapped rows 76, no effects 51, targets only 31) or have no signal (a template trigger 21, a toggle 6, a talent attack
 5).
 
-### 33.17 Phase 1d: talents, common and general abilities, the abilities' projectiles, buff lives (index.json version 3)
+### 35.17 Phase 1d: talents, common and general abilities, the abilities' projectiles, buff lives (index.json version 3)
 
 `extract.py --only fx --fx-set used` with the Phase 1d extractor (Windows client 26-09-13, 8 processes on the
 maintainer's Mac) exports what the units do outside their attacks and skills: every talent node, common ability,
@@ -1524,7 +1524,7 @@ in `projectiles`, not tied to an ability; the 5 unreferenced `Combat` nodes; tem
 CreateBuff data is not read for `life`); talents and abilities whose nodes name no effect (stat buffs, card plugins:
 nothing to draw).
 
-### 33.18 The 驭械术士's floating units (0.3.0, round 46)
+### 35.18 The 驭械术士's floating units (0.3.0, round 46)
 
 The floating units (浮游单元) of the 驭械术士 branch (subProfessionId `funnel`: 荒芜拉普兰德, 洛洛, 至简, 耶拉 and the 自选 澄闪 in
 the mode's pool) are no unit of their own — no token, and no image of the operator's Spine model draws them (洛洛's

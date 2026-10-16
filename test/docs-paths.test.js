@@ -154,6 +154,20 @@ test('DESIGN: every "DESIGN §N" cited in the repository (code comments, tests, 
   assert.deepEqual(bad, [], 'citations of a section or subsection with no heading');
 });
 
+test('DESIGN: no heading number is used twice — every `N` / `N.M` / `N.M.K` has exactly one home', () => {
+  // 为什么这一条必须单独存在（2026-10-15 的 §32/§33 撞车就是它抓的）：
+  // 上面那条引用守卫只判「引用的号**存不存在**」。两个小节**同时**定义 `### 32.1` 时，引用「存在」
+  // ⇒ 守卫恒绿，而其中一半引用其实指错了节 —— 这正是「静默指错」，比悬空更难发现。
+  // `designText()` 只对**顶层**号做唯一性（`## N.` 重复会抛），子标题它不管；这一条把它补齐。
+  // 它也是「插入新节导致 +2 偏移」这条约定唯一的自动守卫：偏移做漏一处，这里当场红。
+  const seen = new Map();
+  for (const m of designText(ROOT).matchAll(/^(#{2,4}) (\d+(?:\.\d+)*)[. ]/gm)) {
+    seen.set(m[2], (seen.get(m[2]) || 0) + 1);
+  }
+  const dup = [...seen].filter(([, c]) => c > 1).map(([n, c]) => `§${n} ×${c}`);
+  assert.deepEqual(dup, [], '同一个标题号出现在两处：引用「存在」，但它指哪一处没有答案');
+});
+
 test('CHANGELOG: every `## x.y.z — date` section sits exactly once in the index or a volume, the index names each volume\'s sections, and the top file still yields a full page of announcements', () => {
   const top = readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf8');
   const files = ['CHANGELOG.md', ...changelogVolumeFiles(ROOT).map((f) => `${CHANGELOG_DIR}/${f}`)];
