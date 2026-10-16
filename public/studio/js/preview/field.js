@@ -1,4 +1,4 @@
-// public/studio/js/preview/field.js — the studio's live model preview (DESIGN §32.9): the game's own battlefield view
+// public/studio/js/preview/field.js — the studio's live model preview (DESIGN §34.9): the game's own battlefield view
 // (render/app.js createFieldView — PixiJS, pixi-spine, the official board when installed) with the original on the left
 // and the plugin's version on the right, on the board of the preparation phase or in a battle, playing the role the
 // author picks: 待机, 移动, 攻击, 技能 (S1–S3), 眩晕, 倒下, 部署 — fed exactly as a real battle feeds it (b.snap tuples

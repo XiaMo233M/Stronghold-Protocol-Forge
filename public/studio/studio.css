@@ -1,4 +1,4 @@
-/* public/studio/studio.css — the plugin studio's page (DESIGN §32.9). The game's theme (css/theme.css: 1rem is the layout
+/* public/studio/studio.css — the plugin studio's page (DESIGN §34.9). The game's theme (css/theme.css: 1rem is the layout
    root, about 1/19.2 of the window width) and components (css/components.css, the game panels for the detail card) come
    first; this file lays out the studio and its own pieces (st-*). Unlike the game, the page scrolls and its text can be
    selected. */
@@ -219,7 +219,7 @@ body.studio { overflow: auto; height: auto; min-height: 100%; -webkit-user-selec
 .st-trial pre { max-height: 3rem; overflow: auto; }
 .plugin-settings { display: grid; gap: .06rem; border-top: 1px solid var(--line); padding-top: .08rem; }
 @media (max-width: 900px) { .st-trial-pair, .st-stat-grid, .st-trial-options { grid-template-columns: 1fr; } }
-/* ---- catalogue install (DESIGN §32.13) -------------------------------------------------------------------------- */
+/* ---- catalogue install (DESIGN §34.13) -------------------------------------------------------------------------- */
 .st-catalog { display: flex; flex-direction: column; gap: .12rem; padding: .2rem .24rem; max-width: 10rem; }
 .st-catalog h2 { font-size: calc(.2 * var(--t)); color: var(--text-hi); }
 .st-catalog__row { display: flex; flex-wrap: wrap; align-items: center; gap: .08rem .12rem; }

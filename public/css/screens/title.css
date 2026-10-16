@@ -316,7 +316,7 @@ html[data-script="alphabetic"] .title-login .btn--xl { letter-spacing: .3em; }
   font-weight: 700;
   letter-spacing: .02em;
 }
-/* the server's plugins (DESIGN §32 P1a): 「本服务器安装了 N 个插件」, a button listing them (ui/pluginPanel.js InstalledPlugins) */
+/* the server's plugins (DESIGN §34 P1a): 「本服务器安装了 N 个插件」, a button listing them (ui/pluginPanel.js InstalledPlugins) */
 .title-plugins {
   display: inline-flex; align-items: center; gap: .06rem; padding: .03rem .1rem;
   border: 1px solid rgba(255, 159, 67, .5); color: #ffb066; background: rgba(255, 159, 67, .08); font-size: inherit;

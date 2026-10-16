@@ -267,7 +267,7 @@
   color: var(--text-lo); border: 1px solid var(--line-2); white-space: nowrap;
 }
 .st-chip.is-modded { color: #ff8a5c; border-color: rgba(255, 106, 61, .55); }
-/* 「含插件对局」 (DESIGN §32.6): the overview takes the matches with gameplay plugins in */
+/* 「含插件对局」 (DESIGN §34.6): the overview takes the matches with gameplay plugins in */
 .st-modded { display: inline-flex; align-items: center; gap: .08rem; margin-bottom: .1rem; color: var(--text-md); font-size: calc(.14 * var(--t)); cursor: pointer; }
 .st-table tr.is-excluded td { opacity: .6; }
 .st-table tr.is-clickable { cursor: pointer; }

@@ -1,4 +1,4 @@
-// public/studio/js/main.js — the plugin studio 插件工作台 (DESIGN §32.9, docs/PLUGINS.md §15, docs/PLUGIN-GUIDE.md): the page
+// public/studio/js/main.js — the plugin studio 插件工作台 (DESIGN §34.9, docs/PLUGINS.md §15, docs/PLUGIN-GUIDE.md): the page
 // at /studio/ of a running server (this machine and the local network only: server/studio/gate.js). Someone who does
 // not write code makes a cosmetic plugin here — 新建插件 from a template and a target found by its official name, files
 // dropped on their places, the plugin's findings in plain words beside them with one-click fixes, a live preview drawn by

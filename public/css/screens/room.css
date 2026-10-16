@@ -185,7 +185,7 @@
 .seat__state--waiting { color: var(--text-lo); }
 .seat__state--offline { color: var(--orange-hi); }
 .seat__state--host { color: var(--gold-2); }
-/* a room with gameplay plugins (DESIGN §32.6): whether the seat's page has loaded and checked the room's content */
+/* a room with gameplay plugins (DESIGN §34.6): whether the seat's page has loaded and checked the room's content */
 .seat__content { display: block; padding: 0 .12rem; font-size: calc(.13 * var(--t)); color: var(--text-lo); letter-spacing: .04em; }
 .seat__content.is-ready { color: var(--mint-400); }
 .seat__content.is-failed { color: var(--orange-hi); }

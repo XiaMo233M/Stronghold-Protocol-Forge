@@ -1,4 +1,4 @@
-// public/studio/js/preview/sound.js — the sounds of a plugin beside the original ones (DESIGN §32.9): every voice line, a
+// public/studio/js/preview/sound.js — the sounds of a plugin beside the original ones (DESIGN §34.9): every voice line, a
 // music track (its intro and loop), a sound — each file with a play button, the installation's on the left, the plugin's
 // on the right (the preview layers' `<key>~plugin` entries, ./layers.js). One sound plays at a time.
 

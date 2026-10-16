@@ -1,4 +1,4 @@
-// public/studio/js/preview/layers.js — the art the studio's preview draws (DESIGN §32.9): the installation's manifest as the
+// public/studio/js/preview/layers.js — the art the studio's preview draws (DESIGN §34.9): the installation's manifest as the
 // page loaded it (/data/assets.json) and, beside each entry the plugin changes, the same entry with the plugin's writes
 // laid over it under a key of its own (`<key>~plugin`), so one renderer and one interface draw the original and the
 // plugin side by side — the game's own field view (render/app.js, its asset store public/js/assets.js createAssets) and

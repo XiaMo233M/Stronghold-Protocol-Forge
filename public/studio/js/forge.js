@@ -1,4 +1,4 @@
-// public/studio/js/forge.js — 从 Forge 包导入 (DESIGN §32.12). A zip or a folder becomes a preview of the import report
+// public/studio/js/forge.js — 从 Forge 包导入 (DESIGN §34.12). A zip or a folder becomes a preview of the import report
 // (POST /studio/api/forge/preview); confirming writes plugins/<id>/ (POST /studio/api/forge/import). The server never
 // receives a path on its disk, and it never runs a script from the pack. The same studio key as every other change.
 // A read clears the previous payload and report immediately. A late FileReader or a late preview cannot confirm.

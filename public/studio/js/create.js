@@ -1,4 +1,4 @@
-// public/studio/js/create.js — 新建插件 (DESIGN §32.9): pick a template (换头像 / 立绘, 换 Spine 模型, 换语音, 换音乐 / 音效),
+// public/studio/js/create.js — 新建插件 (DESIGN §34.9): pick a template (换头像 / 立绘, 换 Spine 模型, 换语音, 换音乐 / 音效),
 // pick what it changes by its official name, give it a name — the id is made from it (GET /studio/api/suggest-id: a
 // legal id nobody has; editable), an author and a licence if wanted — and the server makes the folder from the template
 // (POST /studio/api/plugins: plugin.json and a README, no file of the game).

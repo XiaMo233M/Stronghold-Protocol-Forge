@@ -1,4 +1,4 @@
-// public/studio/js/preview/cards.js — pictures in the game's own interface, original beside plugin (DESIGN §32.9): an
+// public/studio/js/preview/cards.js — pictures in the game's own interface, original beside plugin (DESIGN §34.9): an
 // operator's card picture (ui/gameComponents.js UnitThumb — the shop, the bench, the 干员调配 card), its E2 one, and its
 // portrait in the detail card (ui/detailPanel.js ChessDetail) — drawn through data.js's view of `assets` (the preview
 // layers: the plugin's entry under `<key>~plugin`, ./layers.js); a summon's card; and for every other picture (an

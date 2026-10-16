@@ -1,4 +1,4 @@
-// public/studio/js/picker.js — finding what to change by its official name (DESIGN §32.9): a search box over the server's
+// public/studio/js/picker.js — finding what to change by its official name (DESIGN §34.9): a search box over the server's
 // target index (GET /studio/api/targets — server/studio/targets.js: operators, summons, enemies, items, bonds, strategies,
 // interface pictures, music, sounds), each result with its picture, its name and its kind; the author never types an
 // internal id (it is shown small for those who want it).

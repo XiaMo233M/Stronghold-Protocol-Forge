@@ -1,4 +1,4 @@
-// public/studio/js/info.js — a plugin's other tabs in the studio (DESIGN §32.9): 信息 (the basic fields — name, description,
+// public/studio/js/info.js — a plugin's other tabs in the studio (DESIGN §34.9): 信息 (the basic fields — name, description,
 // version, authors, licence, credits for where the art comes from, homepage, who may switch it on: POST …/meta), 文件
 // (every file of the folder, the ones nothing uses marked, each removable), 清单 (plugin.json itself, for those who
 // prefer to write it — PUT …/manifest; the same checks answer).

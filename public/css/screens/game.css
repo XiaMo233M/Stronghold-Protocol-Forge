@@ -30,7 +30,7 @@
 .gtop > * { pointer-events: auto; }
 .gtop__left { display: flex; align-items: center; gap: .16rem; }
 .gtop__meta { display: flex; flex-direction: column; align-items: flex-start; gap: .06rem; }
-/* a match with gameplay plugins (DESIGN §32.6): the HUD corner's MOD mark */
+/* a match with gameplay plugins (DESIGN §34.6): the HUD corner's MOD mark */
 .gtop__mod { pointer-events: auto; }
 /* the latency pill and, beside it, the 观战席 capsule (ui/hud.js SpectatorPill: an eye + how many are watching; opens the roster) */
 .gtop__net { display: flex; align-items: center; gap: .08rem; }
@@ -646,7 +646,7 @@
 /* 快捷键 (ui/settings.js HotkeySection): each shortcut with its key — click the key, press the new one; two columns,
    one under 768 px (phones in landscape) */
 .set-keys { display: flex; flex-direction: column; gap: .08rem; padding-top: .1rem; border-top: 1px solid var(--line); }
-/* 外观插件 (DESIGN §32 P1a, ui/settings.js CosmeticSection): laid out like 快捷键 — a head, a hint, one switch per plugin */
+/* 外观插件 (DESIGN §34 P1a, ui/settings.js CosmeticSection): laid out like 快捷键 — a head, a hint, one switch per plugin */
 .set-plugins { display: flex; flex-direction: column; gap: .08rem; padding-top: .1rem; border-top: 1px solid var(--line); }
 .set-keys__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .12rem; min-height: .44rem; }
 .set-keys__list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .06rem .14rem; margin: 0; padding: 0; list-style: none; }

@@ -1,4 +1,4 @@
-// public/studio/js/catalog.js — 「从目录安装」(DESIGN §32.13, docs/PLUGINS.md §17). The owner gives a catalogue
+// public/studio/js/catalog.js — 「从目录安装」(DESIGN §34.13, docs/PLUGINS.md §17). The owner gives a catalogue
 // address or a catalogue file this browser already has. The file is read here and posted as text. The zip is not
 // downloaded by the browser and not uploaded: POST /studio/api/catalog/install tells the server the https address and
 // the sha256, and the server downloads, checks and installs it (server/plugins/install.js). Nothing in the package runs.
