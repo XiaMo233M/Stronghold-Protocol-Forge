@@ -162,7 +162,9 @@ export const BEHAVIOUR_SWITCHES = Object.freeze({
    *
    * `official` = **引擎今天的行为**：装备装上之后只能靠精英化 / 合成 / 卖出离开（`g.destroy` 对已装备品回
    * `'equipped items are locked'`）。`allow` = 休整期可以用 `g.unequip {itemUid}` 把一件已装备的装备取下，退回
-   * **手牌**（右→左优先），手牌满则进**临时整备区**；两者都满 ⇒ 整件事**原子拒绝**（`HAND_FULL`），装备留在原处。
+   * **手牌**（右→左优先），手牌满则进**临时整备区**。0.3.0 起临时整备区是**无界队列**（五个显示格满了就排队追加，
+   * 上游 `docs/PLAYING.md` §位置上限：「进入可扩容的临时整备区，只显示前面的 5 格；超出的…排队保留」）⇒
+   * **「两处都满 ⇒ 拒绝」不再可达**，这条意图在 `allow` 档下总是成功（装备不会丢）。
    *
    * 缺省档下 `g.unequip` 回的就是 `g.destroy` 今天那句 `'equipped items are locked'` ⇒ **缺省逐字节不变**
    * （不需要 `golden:update`）。
@@ -177,7 +179,7 @@ export const BEHAVIOUR_SWITCHES = Object.freeze({
     }),
     effect: Object.freeze({
       official: 'the official rule: an equipped item leaves its operator only on promotion, merge or sale — g.destroy refuses equipped items with "equipped items are locked"',
-      allow: 'g.unequip takes one equipped item off its operator during prep and stows it (the hand right-to-left first, then the temporary slots); if neither has room the whole action is refused with HAND_FULL and nothing moves',
+      allow: 'g.unequip takes one equipped item off its operator during prep and stows it (the hand right-to-left first, then the temporary slots); since 0.3.0 the temporary area is an unbounded queue (five visible slots, the rest waits behind them), so the item always has a place to go and the action succeeds',
     }),
     actions: (option) => (option === 'allow' ? [{ kind: 'items.allowUnequip', value: true }] : []),
   },

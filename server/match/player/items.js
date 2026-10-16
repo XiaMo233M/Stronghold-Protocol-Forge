@@ -242,6 +242,9 @@ export class PlayerItems {
     const piece = loc.piece;
     this._detach(loc);
     if (!this.stow(piece, { allowTemp: true })) {
+      // ⚠️ 0.3.0 起此分支**不可达**：临时整备区成了无界队列（`pieces.js` stow：「Five visible slots are a window,
+      // not a capacity limit」），`allowTemp` 为真时 `stow` 不再返回 null ⇒ 保留了回滚（无害的防御），
+      // 但「两处都满 ⇒ HAND_FULL」不再是 `allow` 档能走到的结局。合入前（temp 是 `freeSlot` 有界）它是真的。
       // 没地方放 ⇒ 原子回滚（原下标）并点名。装备不会消失。
       if (holder && Array.isArray(holder.items)) holder.items.splice(idx < 0 ? 0 : Math.min(idx, holder.items.length), 0, piece);
       return fail(ERR.HAND_FULL);

@@ -225,6 +225,8 @@ export class PlayerBasics {
         if (piece.kind !== kind || this._legal(piece, r, c)) continue;
         const key = tileKey(r, c);
         this.board.delete(key);
+        // ⚠️ `allowTemp: true` ⇒ 0.3.0 起 `stow` 不返回 null（临时区无界，见 server/match/player/pieces.js）
+        // ⇒ 干员这一支的 `ok` 恒真（`_returnToken` 那一支仍可为假：它的 `allowTemp` 由调用方决定）。
         const ok = kind === 'chess' ? !!this.stow(piece, { allowTemp: true }) : this._returnToken(piece);
         if (!ok) { this.board.set(key, piece); continue; }
         moved++;

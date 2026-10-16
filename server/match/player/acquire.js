@@ -107,6 +107,8 @@ export class PlayerAcquire {
     const deployed = consumed.filter((l) => l.key && !this.board.has(l.key)).map((l) => ({ key: l.key, dir: pieceDir(l.piece) }));
     const toTile = (t) => { elite.dir = parseDir(t.dir) || 'RIGHT'; this.board.set(t.key, elite); return 'board'; };
     const tile = mergeTile(deployed, (r, c) => this._legal(elite, r, c));
+    // ⚠️ 0.3.0 起 `allowTemp: true` 的 `stow` 不返回 null（临时区无界）⇒ 没有格子时 `where` 恒为 'temp'，
+    // 'hand' 只来自真的有空位那一次（见 pieces.js stow）。
     const where = tile ? toTile(tile) : this.stow(elite, { allowTemp: true });
     for (const it of items) this.stow(it, { allowTemp: true });
     // the returned equipment follows the auto-merge rule like any other gain ("已拥有2件同一初始装备时…自动合并")

@@ -707,6 +707,9 @@ export function makeCtx(m, ps, source, hook, ev = null, preview = null) {
         ps.removeTokensOf(l.piece.uid);
         const lost = [];
         for (const it of l.piece.items || []) {
+          // ⚠️ 0.3.0 起 `stow` 在 allowTemp 为真时**不返回 null**（临时区无界，见 server/match/player/pieces.js）
+          // ⇒ `lost` 恒为空、下面那趟 `releaseItemStock` 与这个数组都成了不可达的防御。保留：装备永远有地方放，
+          // 这让「退回的装备因无处可去而被销毁」这条坏事再也不会发生（合入前 temp 有界时它是可达的）。
           if (!ps.stow(it, { allowTemp: true })) lost.push(it);
         }
         l.piece.items = [];

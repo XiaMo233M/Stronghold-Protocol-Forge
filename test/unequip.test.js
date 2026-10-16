@@ -8,8 +8,8 @@
 // 四件事在这里被钉住：
 //   1. **缺省档逐字不变**：`g.destroy` 与 `g.unequip` 对已装备品回**同一句** `'equipped items are locked'`，
 //      且一个字节都没落地。
-//   2. **`allow` 档的三条分支**：手牌有位置 ⇒ 进手牌；手牌满 ⇒ 进临时整备区；两者都满 ⇒ **原子拒绝**
-//      （`HAND_FULL`），装备留在干员身上、**下标与失败前相同**。
+//   2. **`allow` 档的分支**：手牌有位置 ⇒ 进手牌；手牌满 ⇒ 进临时整备区（0.3.0 起**无界**：
+//      五个显示格满了就排队追加，见分支三的注释与上游 `docs/PLAYING.md` §位置上限）。
 //   3. **池不变式**：装备只是从装备位移到手牌 / 临时，`piece` 与 `uid` 不变 ⇒ `held` / `cap` / `left` 全不变
 //      （没有「归还」这回事）。
 //   4. **协议面**：C2S 登记 `g.unequip`、**不新增 S2C**、`PROTOCOL_VERSION` 不动、客户端映射表与发送点接上，
@@ -23,6 +23,7 @@ import { BEHAVIOUR_SWITCHES, parseBehaviourDecl, behaviourActions, behaviourIsDe
 import { unequipAllowed } from '../server/match/player/items.js';
 import { C2S, validateC2S } from '../shared/protocol.js';
 import { ERR } from '../shared/constants.js';
+import { TEMP_SIZE } from '../server/match/player/common.js';
 import { makeMatch, DATA, give, giveItem, legalTileFor, checkInvariants } from './match/harness.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -185,23 +186,37 @@ test('`allow` 档 · 分支二：手牌满 ⇒ 进临时整备区', () => {
   h.invariants();
 });
 
-test('`allow` 档 · 分支三：手牌与临时都满 ⇒ **原子拒绝**（HAND_FULL），装备留在原处、下标不变', () => {
+// ⚠️ 0.3.0 起**临时整备区是无界队列**：`stow(..., { allowTemp: true })` 在五个显示格满了之后
+// **追加到队列尾部**（`pieces.js` stow：「Five visible slots are a window, not a capacity limit」；上游
+// `docs/PLAYING.md` §位置上限 逐字写明「进入**可扩容的**临时整备区，只显示前面的 5 格；超出的…**排队保留**…
+// **不会因为超过 15 个而丢失**」）。所以在 0.3.0 之后「手牌与临时都满 ⇒ HAND_FULL」**不再可达** ——
+// 这条在 0.3.0 合入前（合入前 `stow` 的 temp 分支是 `freeSlot(this.temp)`，满则 `return null`）是真的。
+// 因此本用例改为**钉住新语义**：手牌满 ⇒ 进无界的临时整备区（追加在 5 个显示格之后），装备不丢、手牌一位不动。
+test('`allow` 档 · 分支三（0.3.0 起）：手牌满且 5 个显示格也满 ⇒ 追加进**无界**的临时整备区', () => {
   const h = prep();
   const { m } = h; const ps = h.ps('p_0');
   const { piece, itemUid } = wearer(h);
   const needHand = ps.hand.filter((x) => x == null).length;
   assert.equal(fill(m, ps, 'hand', needHand), needHand, '手牌填满');
   const needTemp = ps.temp.filter((x) => x == null).length;
-  assert.equal(fill(m, ps, 'temp', needTemp), needTemp, '临时区填满');
-  assert.equal(ps.hand.some((x) => x == null) || ps.temp.some((x) => x == null), false, '两个区都满了');
+  assert.equal(fill(m, ps, 'temp', needTemp), needTemp, '临时区的显示格填满');
+  assert.equal(ps.hand.some((x) => x == null), false, '手牌满了');
+  assert.equal(ps.temp.slice(0, TEMP_SIZE).some((x) => x == null), false, '前 5 个显示格也满了');
   const idxBefore = piece.items.findIndex((x) => x.uid === itemUid);
   const hand = ps.hand.map((x) => x && x.uid);
+  const tempBefore = ps.temp.length;
 
   m.behaviour = declOf('allow');
-  assert.deepEqual(m.handle('p_0', { t: 'g.unequip', itemUid }), { error: ERR.HAND_FULL });
-  assert.equal(piece.items.some((x) => x.uid === itemUid), true, '装备不会凭空消失');
-  assert.equal(piece.items.findIndex((x) => x.uid === itemUid), idxBefore, '下标与失败前相同');
+  assert.deepEqual(m.handle('p_0', { t: 'g.unequip', itemUid }), { ok: true }, '无界队列 ⇒ 绝不失败');
+  assert.equal(piece.items.some((x) => x.uid === itemUid), false, '装备离开了干员');
+  const at = ps.temp.findIndex((x) => x && x.uid === itemUid);
+  assert.ok(at >= TEMP_SIZE, `装备排在 5 个显示格之后（下标 ${at} ≥ ${TEMP_SIZE}）`);
+  assert.equal(ps.temp.length, tempBefore + 1, '队列增长了一格，五格窗口之外');
   assert.deepEqual(ps.hand.map((x) => x && x.uid), hand, '手牌一位都没动');
+  assert.equal(piece.items.includes(undefined), false, '装备行没有留下空位');
+  // 失败路径不再可达 ⇒ 装备的下标也不会因回滚而变（那里已无回滚可走）
+  assert.equal(piece.items.findIndex((x) => x.uid === itemUid), -1, '装备已不在干员身上（不是失败后的原下标）');
+  assert.equal(idxBefore >= 0, true, '夹具前提：它原本确实装在干员身上');
   h.invariants();
 });
 

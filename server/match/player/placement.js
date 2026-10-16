@@ -221,6 +221,7 @@ export class PlayerPlacement {
   _putBack(loc, piece) {
     if (loc.area === 'hand' && this.hand[loc.idx] == null) { this.hand[loc.idx] = piece; return true; }
     if (loc.area === 'temp' && this.temp[loc.idx] == null) { this._putTemp(loc.idx, piece); return true; }
+    // ⚠️ 0.3.0 起 `allowTemp: true` 的 `stow` 不返回 null（临时区无界）⇒ 这一行恒真（见 pieces.js stow）。
     return !!this.stow(piece, { allowTemp: true });
   }
 
@@ -234,6 +235,8 @@ export class PlayerPlacement {
     if (stack) { stack.count = (stack.count || 1) + (tok.count || 1); return true; }
     tok.count = tok.count || 1;
     if (preferLoc && preferLoc.area === 'hand' && this.hand[preferLoc.idx] == null) { this.hand[preferLoc.idx] = tok; return true; }
+    // `allowTemp: false`（玩家自己撤回召唤物）时手牌满 ⇒ 这里仍会返回 null ⇒ `false` 是活的结局。
+    // ⚠️ 但 `allowTemp: true`（别人给的默认）在 0.3.0 起不返回 null（临时区无界）⇒ 那一支恒真。
     return !!this.stow(tok, { allowTemp });
   }
 
