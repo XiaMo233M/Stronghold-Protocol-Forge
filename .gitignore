@@ -18,6 +18,9 @@ third-party/bundle/
 # public/assets/ above). Downloaded bundles live in .cache/official-scenes/ (already ignored by .cache/ below).
 # The repository never stores those official files.
 data/local-assets.json
+# tools/local-extract/extract.py --only fx → the official battle effects' per-machine file list, written next to
+# data/local-assets.json and gitignored for the same reason (docs/design/vfx-format.md §35.1)
+data/local-fx.json
 # download caches, upstream tables, ledgers, reports, setup state
 .cache/
 # per-machine runtime state (`server/modModules.js` stateRootFor: SP_STATE_DIR, else <repo>/var): server-module
