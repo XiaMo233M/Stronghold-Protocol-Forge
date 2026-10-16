@@ -76,6 +76,9 @@
 import { PHASE } from '../../shared/constants.js';
 import { mediaUrl } from './media.js';
 import { unhashedUrl } from '../../shared/assetPaths.js';
+// The manifest tree of each non-Chinese dub (`voiceLine`): the table itself lives in voicePrefs.js / shared/constants.js.
+import { VOICE_TREES } from './voicePrefs.js';
+export { VOICE_TREES } from './voicePrefs.js';
 
 const MAX_VOICES = 8;
 const UNIT_COOLDOWN_MS = 160;
@@ -569,6 +572,9 @@ export class AudioManager {
    */
   constructor(opts = {}) {
     this.getManifest = typeof opts.getManifest === 'function' ? opts.getManifest : () => null;
+    this.onFailed = typeof opts.onFailed === 'function' ? opts.onFailed : null;
+    /** sounds whose failure made the manifest fall back (a cosmetic plugin's file): a caller picks its entry again */
+    this.fellBack = new Set();
     /** The dub a unit speaks (settings 配音语言, per-operator overrides included): injected by main.js; null ⇒ default. */
     this.voiceLangOf = typeof opts.voiceLangOf === 'function' ? opts.voiceLangOf : () => null;
     this.random = typeof opts.random === 'function' ? opts.random : Math.random;   // a unit sound's chance (mix.p)
@@ -1156,7 +1162,7 @@ export class AudioManager {
    * cannot be loaded (the chosen dub's file the host lacks → the default dub's line of the same slot, voiceLinesFor /
    * voiceLine) — same token, same gate.
    */
-  _playVoice(url, token, volume, fallback = null) {
+  _playVoice(url, token, volume, fallback = null, again = null) {
     // `token` is the line's own `voiceToken`. Every deferred step below — the decode, a failed fetch, `onended` and the
     // safety timer — can land AFTER this line was taken over or stopped: `voiceToken` has moved on and the channel then
     // belongs to the line that replaced it. So each step re-checks its token and, when it is stale, touches NOTHING:
