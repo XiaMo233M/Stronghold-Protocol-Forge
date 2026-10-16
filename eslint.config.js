@@ -76,9 +76,10 @@ export default [
     rules,
   },
   {
-    // Browser: `public/js/**` and the engine's own Service Worker (`public/resource-sw.js`, DESIGN §28.13.5 —
-    // a worker global scope, so it needs the same browser globals and its own file pattern).
-    files: ['public/js/**/*.js', 'public/*.js'],
+    // Browser: `public/js/**`, the engine's own Service Worker (`public/resource-sw.js`, DESIGN §28.13.5 —
+    // a worker global scope, so it needs the same browser globals and its own file pattern) and the plugin
+    // studio's page (`public/studio/**`, a browser page too; the header comment above already claimed it).
+    files: ['public/js/**/*.js', 'public/*.js', 'public/studio/**/*.js'],
     languageOptions: {
       ecmaVersion: 2024,
       sourceType: 'module',
