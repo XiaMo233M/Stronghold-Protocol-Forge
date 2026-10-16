@@ -35,6 +35,10 @@ const isMine = (m) => MINE.test(String(m?.author ?? '')) || MINE.test(String(m?.
 
 fs.mkdirSync(WORK, { recursive: true });
 const { zipRead } = await import(pathToFileURL(`${ROOT}/shared/zip.js`).href);
+// 包的 id 规则**由引擎决定**，所以直接读它的 `PACK_ID_RE`（shared/workshop.js:117），别再在这里抄一份：
+// 原来写的是 `/^[a-z0-9][a-z0-9._-]{1,63}$/`，比引擎**既严又松** —— 大写开头的合法 id（如 `dongShip`）
+// 被误判成 BAD_PACK_ID 且**跳过校验**，而 33–64 字符或含 `.` 的 id 反而被放行（引擎会拒）。
+const { PACK_ID_RE } = await import(pathToFileURL(`${ROOT}/shared/workshop.js`).href);
 
 const get = (u, dest) => {
   const r = spawnSync('curl', ['-sL', '-m', '240', '-o', dest, u], { encoding: 'utf8' });
@@ -60,15 +64,26 @@ const getFull = (u, dest, want) => {
 };
 const listPath = path.join(WORK, 'mods.json');
 if (!get(`${BASE}/api/mods`, listPath)) { console.error(`::error::取不到 ${BASE}/api/mods`); process.exit(2); }
-const mods = JSON.parse(fs.readFileSync(listPath, 'utf8')).mods ?? [];
-if (!mods.length) { console.error('::error::线上清单是空的（这不等于「全部兼容」）'); process.exit(2); }
+const doc = JSON.parse(fs.readFileSync(listPath, 'utf8'));
+const mods = doc.mods ?? [];
+// ⚠️ `/api/mods` 有**两个**数组，`flagged` 过去整个被漏掉。它装着被标疑的包，其中有引擎**真拒**的
+// （实测一条 pack.json 带未知顶层字段 ⇒ PACK_UNKNOWN_FIELD，而它又不在 mods 里）—— 只看 mods 的闸门
+// 永远看不到这一类。两个数组一起测。
+const flagged = doc.flagged ?? [];
+if (!mods.length && !flagged.length) { console.error('::error::线上清单是空的（这不等于「全部兼容」）'); process.exit(2); }
+const srcOf = new Map([...mods.map((m) => [m.id, 'mods']), ...flagged.map((m) => [m.id, 'flagged'])]);
+const all = [...mods, ...flagged];
 
-const target = mods.filter((m) => m.packKind === 'functional' && m.download && (!MINE_ONLY || isMine(m)));
-console.log(`清单可见 ${mods.length} 条；本轮校验 functional ${target.length} 条（--mine-only=${MINE_ONLY}）`);
+// `mods` 沿用原来的判据（functional 且可下载）；`flagged` 不看 packKind —— 里面就有 packKind
+// `unknown` / `documentation` 的真包，而循环对「没有 pack.json」本来就会优雅降级成 NO_PACK_JSON。
+const target = all.filter((m) => m.download && (!MINE_ONLY || isMine(m))
+  && (srcOf.get(m.id) === 'flagged' || m.packKind === 'functional'));
+console.log(`清单可见 mods=${mods.length} flagged=${flagged.length}（合计 ${all.length}）；本轮校验 ${target.length} 条`
+  + `（来自 flagged 的 ${target.filter((m) => srcOf.get(m.id) === 'flagged').length} 条，--mine-only=${MINE_ONLY}）`);
 
 const rows = [];
 for (const m of target) {
-  const rec = { id: m.id, name: m.name, kind: m.kind, packId: m.packId ?? null, compatOf: m.compatOf ?? null,
+  const rec = { id: m.id, src: srcOf.get(m.id) ?? null, name: m.name, kind: m.kind, packId: m.packId ?? null, compatOf: m.compatOf ?? null,
     author: m.author ?? null, compatAuthor: m.compatAuthor ?? null, size: m.size, stage: '', codes: [], notes: [] };
   const z = path.join(WORK, `${m.id}.zip`);
   const url = /^https?:/.test(m.download) ? m.download : BASE + m.download;
@@ -107,7 +122,7 @@ for (const m of target) {
   const prefix = packSrc.slice(raw.length + 1).replace(/\\/g, '/');
   let pid;
   try { pid = String(JSON.parse(fs.readFileSync(found[0], 'utf8')).id || ''); } catch (e) { pid = ''; }
-  if (!/^[a-z0-9][a-z0-9._-]{1,63}$/.test(pid)) {
+  if (!PACK_ID_RE.test(pid)) {
     rec.stage = 'BAD_PACK_ID'; rec.codes.push('PACK_ID_UNUSABLE'); rec.notes.push(`pack.json id = ${JSON.stringify(pid).slice(0, 60)}`);
     rows.push(rec); console.log(`✗ ${m.id} pack.json 的 id 不能当目录名：${pid}`); continue;
   }
@@ -169,14 +184,14 @@ console.log('汇总:', JSON.stringify(tally));
 if (transport.length) console.log(`⚠ ${transport.length} 条**下载不完整**：这些不出兼容性结论（不代表兼容，也不代表不兼容）`);
 
 const md = ['### 线上包 × 本引擎 兼容性', `- 引擎：本仓 checkout（` + spawnSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).stdout.trim() + '）',
-  `- 清单可见 ${mods.length}，本轮 functional ${target.length}，判定 ${rows.length}`,
+  `- 清单可见 mods ${mods.length} + flagged ${flagged.length} = ${all.length}，本轮判定 ${target.length}，成判 ${rows.length}`,
   `- 结果：${Object.entries(tally).map(([k, v]) => `${k} ${v}`).join(' · ')}`,
-  bad.length ? `\n不通过/异常（第三方只报告，不拦）：\n\n| id | stage | codes | 名称 | 作者 |\n|---|---|---|---|---|\n`
-    + bad.slice(0, 40).map((x) => `| ${x.id} | ${x.stage} | ${x.codes.join(',')} | ${String(x.name).slice(0, 28)} | ${x.compatAuthor || x.author || '-'} |`).join('\n') : ''];
+  bad.length ? `\n不通过/异常（第三方只报告，不拦）：\n\n| id | src | stage | codes | 名称 | 作者 |\n|---|---|---|---|---|---|\n`
+    + bad.slice(0, 40).map((x) => `| ${x.id} | ${x.src ?? '-'} | ${x.stage} | ${x.codes.join(',')} | ${String(x.name).slice(0, 28)} | ${x.compatAuthor || x.author || '-'} |`).join('\n') : ''];
 const dest = process.env.GITHUB_STEP_SUMMARY;
 if (dest) fs.appendFileSync(dest, md.filter(Boolean).join('\n') + '\n');
 
 if (!rows.length) { console.error('::error::一条都没判成（这不等于兼容）'); process.exit(2); }
 if (transport.length) { console.error(`::error::${transport.length} 条下载不完整 ⇒ 兼容性结论**未定**，不许报绿（这不是「包不兼容」，是传输问题）`); process.exit(1); }
 if (mine.length) { console.error(`::error::**我方**有 ${mine.length} 条包在本引擎上不通过：${mine.map((x) => x.id + ':' + x.stage + '[' + x.codes.join('|') + ']').join(', ')}`); process.exit(1); }
-console.log(`✓ 我方包没有新增不兼容（第三方不通过/异常 ${bad.length} 条只作报告）`);
+console.log(`✓ 我方包没有新增不兼容（第三方不通过/异常 ${bad.length} 条只作报告；其中来自 flagged 的 ${bad.filter((x) => x.src === 'flagged').length} 条）`);
