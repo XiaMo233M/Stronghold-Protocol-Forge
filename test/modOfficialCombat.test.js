@@ -13,14 +13,14 @@ import { loadOfficialModules, officialMetaModules, officialBattleInstallers, off
 import { workshopBattleFilesFor } from '../server/http/workshop.js';
 import { buildRoomRegistry } from '../server/match/metaPack.js';
 import { MetaRegistry } from '../server/match/effectsMeta.js';
-import { SDK_OFFICIAL } from '../shared/sdk/sdkConstants.js';
+import { SDK_UPSTREAM } from '../shared/sdk/sdkConstants.js';
 
 const quiet = { info() {}, warn() {}, error() {}, debug() {} };
 
 function makePlugin(root, name, manifest, entryBody) {
   const dir = path.join(root, name);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, OFFICIAL_PLUGIN_MANIFEST), JSON.stringify({ id: name, name, version: '1.0.0', sdk: SDK_OFFICIAL, ...manifest }));
+  fs.writeFileSync(path.join(dir, OFFICIAL_PLUGIN_MANIFEST), JSON.stringify({ id: name, name, version: '1.0.0', sdk: SDK_UPSTREAM, ...manifest }));
   if (entryBody) fs.writeFileSync(path.join(dir, 'plugin.mjs'), entryBody);
   return dir;
 }

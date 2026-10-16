@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { OFFICIAL_PLUGIN_MANIFEST } from '../server/mod-manager/officialLoader.js';
-import { SDK_OFFICIAL } from '../shared/sdk/sdkConstants.js';
+import { SDK_UPSTREAM } from '../shared/sdk/sdkConstants.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TOOL = path.join(ROOT, 'tools', 'mod-manager-report.mjs');
@@ -26,7 +26,7 @@ test('真实示例工坊：JSON 报告里 3 包全激活、三摘要齐全、退
   assert.equal(forge.counts.activated, 3);
   assert.equal(forge.counts.excluded, 0);
   assert.deepEqual(forge.packages.map((p) => p.id).sort(), ['clementia', 'demo-workshop', 'kit-demo']);
-  assert.ok(forge.packages.every((p) => p.status === 'activated' && p.sdk === 'forge-legacy'));
+  assert.ok(forge.packages.every((p) => p.status === 'activated' && p.sdk === 'forge-ext@1'));
   assert.match(forge.digest.modDigest, /^[0-9a-f]{64}$/);
   assert.match(forge.digest.activationDigest, /^[0-9a-f]{64}$/);
   assert.deepEqual(forge.capabilities, ['assets', 'content']);
@@ -50,7 +50,7 @@ test('官方插件目录：一个插件被装成候选包并激活（同一份�
   try {
     const p = path.join(dir, 'hello');
     fs.mkdirSync(p, { recursive: true });
-    fs.writeFileSync(path.join(p, OFFICIAL_PLUGIN_MANIFEST), JSON.stringify({ id: 'hello', name: 'Hello', version: '1.0.0', sdk: SDK_OFFICIAL, apis: ['health'] }));
+    fs.writeFileSync(path.join(p, OFFICIAL_PLUGIN_MANIFEST), JSON.stringify({ id: 'hello', name: 'Hello', version: '1.0.0', sdk: SDK_UPSTREAM, apis: ['health'] }));
 
     const r = runTool(['--workshop', EXAMPLES, '--plugins', dir, '--json', '--state', path.join(tmpdir(), `sp-report-plug-${process.pid}`)]);
     assert.equal(r.status, 0, r.stderr);

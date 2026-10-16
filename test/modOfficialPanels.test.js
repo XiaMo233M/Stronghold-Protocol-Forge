@@ -11,7 +11,7 @@ import { officialPanels } from '../server/mod-manager/officialPanels.js';
 import { workshopPanelFilesFor } from '../server/http/workshop.js';
 import { fromOfficialManifest } from '../shared/sdk/descriptor.js';
 import { CLIENT_PANEL_SLOTS, WORKSHOP_PANEL_PREFIX } from '../shared/workshop.js';
-import { SDK_OFFICIAL } from '../shared/sdk/sdkConstants.js';
+import { SDK_UPSTREAM } from '../shared/sdk/sdkConstants.js';
 
 const quiet = { info() {}, warn() {}, error() {}, debug() {} };
 
@@ -20,7 +20,7 @@ function makeRoot(plugins) {
   for (const p of plugins) {
     const dir = path.join(root, p.name);
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, OFFICIAL_PLUGIN_MANIFEST), JSON.stringify({ id: p.name, name: p.name, version: '1.0.0', sdk: SDK_OFFICIAL, ...p.manifest }));
+    fs.writeFileSync(path.join(dir, OFFICIAL_PLUGIN_MANIFEST), JSON.stringify({ id: p.name, name: p.name, version: '1.0.0', sdk: SDK_UPSTREAM, ...p.manifest }));
     for (const [rel, body] of Object.entries(p.files || {})) {
       const abs = path.join(dir, rel);
       fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -78,23 +78,23 @@ test('坏声明只丢那一个面板并点名：未知槽位 / 模块不在插�
 });
 
 test('描述符：panels 的形状校验（module 必须是插件内相对路径；messages 必须是字符串数组）', () => {
-  const bad1 = fromOfficialManifest({ id: 'x', sdk: SDK_OFFICIAL, panels: [{ slot: 'root.guide', module: '../escape.js' }] });
+  const bad1 = fromOfficialManifest({ id: 'x', sdk: SDK_UPSTREAM, panels: [{ slot: 'root.guide', module: '../escape.js' }] });
   assert.equal(bad1.descriptor, null);
   assert.ok(bad1.issues.some((i) => /pack-relative/.test(i.reason)));
-  const bad2 = fromOfficialManifest({ id: 'x', sdk: SDK_OFFICIAL, panels: [{ slot: 'root.guide', module: 'a.js', messages: [1] }] });
+  const bad2 = fromOfficialManifest({ id: 'x', sdk: SDK_UPSTREAM, panels: [{ slot: 'root.guide', module: 'a.js', messages: [1] }] });
   assert.equal(bad2.descriptor, null);
   assert.ok(bad2.issues.some((i) => /messages/.test(i.reason)));
-  const bad3 = fromOfficialManifest({ id: 'x', sdk: SDK_OFFICIAL, panels: {} });
+  const bad3 = fromOfficialManifest({ id: 'x', sdk: SDK_UPSTREAM, panels: {} });
   assert.equal(bad3.descriptor, null);
-  const ok = fromOfficialManifest({ id: 'x', sdk: SDK_OFFICIAL, panels: [{ slot: 'root.guide', module: 'a.js' }] });
+  const ok = fromOfficialManifest({ id: 'x', sdk: SDK_UPSTREAM, panels: [{ slot: 'root.guide', module: 'a.js' }] });
   assert.equal(ok.descriptor.layer, 'C');
   assert.equal(ok.descriptor.panels[0].module, 'a.js');
 });
 
 test('layer 优先级：服务端载荷 > 面板 > 纯内容', () => {
-  assert.equal(fromOfficialManifest({ id: 'x', sdk: SDK_OFFICIAL, content: ['items'] }).descriptor.layer, 'A');
-  assert.equal(fromOfficialManifest({ id: 'x', sdk: SDK_OFFICIAL, panels: [{ slot: 'root.guide', module: 'a.js' }] }).descriptor.layer, 'C');
-  assert.equal(fromOfficialManifest({ id: 'x', sdk: SDK_OFFICIAL, apis: ['health'], panels: [{ slot: 'root.guide', module: 'a.js' }] }).descriptor.layer, 'B');
+  assert.equal(fromOfficialManifest({ id: 'x', sdk: SDK_UPSTREAM, content: ['items'] }).descriptor.layer, 'A');
+  assert.equal(fromOfficialManifest({ id: 'x', sdk: SDK_UPSTREAM, panels: [{ slot: 'root.guide', module: 'a.js' }] }).descriptor.layer, 'C');
+  assert.equal(fromOfficialManifest({ id: 'x', sdk: SDK_UPSTREAM, apis: ['health'], panels: [{ slot: 'root.guide', module: 'a.js' }] }).descriptor.layer, 'B');
 });
 
 test('没有面板的插件 ⇒ 空清单（展开后逐元素相同）', () => {

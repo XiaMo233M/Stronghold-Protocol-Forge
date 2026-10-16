@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { loadOfficialPlugins, OFFICIAL_PLUGIN_MANIFEST } from '../server/mod-manager/officialLoader.js';
 import { buildOfficialCatalog, catalogHashHolds, mergeCatalog } from '../server/mod-manager/officialCatalog.js';
 import { fromOfficialManifest } from '../shared/sdk/descriptor.js';
-import { SDK_OFFICIAL } from '../shared/sdk/sdkConstants.js';
+import { SDK_UPSTREAM } from '../shared/sdk/sdkConstants.js';
 
 const quiet = { info() {}, warn() {}, error() {}, debug() {} };
 const sha = (b) => createHash('sha256').update(b).digest('hex');
@@ -20,7 +20,7 @@ function makeRoot(plugins) {
   for (const p of plugins) {
     const dir = path.join(root, p.name);
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, OFFICIAL_PLUGIN_MANIFEST), JSON.stringify({ id: p.name, name: p.name, version: '1.0.0', sdk: SDK_OFFICIAL, ...p.manifest }));
+    fs.writeFileSync(path.join(dir, OFFICIAL_PLUGIN_MANIFEST), JSON.stringify({ id: p.name, name: p.name, version: '1.0.0', sdk: SDK_UPSTREAM, ...p.manifest }));
     for (const [rel, body] of Object.entries(p.files || {})) {
       const abs = path.join(dir, rel);
       fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -76,10 +76,10 @@ test('mergeCatalog：并集、按 id 排序、**同 id 不静默覆盖**（官�
 });
 
 test('描述符 layer 由能力推出：纯内容 ⇒ A；任何服务端载荷 ⇒ B', () => {
-  const a = fromOfficialManifest({ id: 'x', sdk: SDK_OFFICIAL, content: ['items'] });
+  const a = fromOfficialManifest({ id: 'x', sdk: SDK_UPSTREAM, content: ['items'] });
   assert.equal(a.descriptor.layer, 'A');
   for (const api of ['health', 'storage', 'meta', 'battle', 'room', 'http.route', 'lane', 'modules']) {
-    const m = fromOfficialManifest({ id: 'x', sdk: SDK_OFFICIAL, combat: true, apis: [api], ...(api === 'meta' ? { metaRegisters: ['item:x'] } : {}) });
+    const m = fromOfficialManifest({ id: 'x', sdk: SDK_UPSTREAM, combat: true, apis: [api], ...(api === 'meta' ? { metaRegisters: ['item:x'] } : {}) });
     assert.equal(m.descriptor.layer, 'B', `api ${api} ⇒ B 档`);
   }
 });

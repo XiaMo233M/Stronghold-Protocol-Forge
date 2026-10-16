@@ -5,17 +5,25 @@
 // 所以一个包的身份里永远同时有两个正交的东西：
 //
 //   origin:  'official' | 'forge'             ← 这份包按谁家的规范写
-//   sdk:     'sp:sdk@1' | 'forge-legacy'      ← 由 origin 决定，不接受自定义
+//   sdk:     'sp:sdk@1'（**上游的**，本仓只用于识别）| 'forge-ext@1'（**我方扩展档**）
 //   profile: 'module' | 'sandbox' | 'legacy' | 'host'  ← 它以什么方式被执行
 //
 // `profile` 必须属于 `PROFILE_BY_ORIGIN[origin]`——一个 official 包不许声称自己是 `legacy`，
 // 一个 forge 包也不许声称自己是 `sandbox`（那是官方档的隔离运行时）。这条约束在这里只判形状，
 // 真正的执行分派在 `server/mod-manager/` 与运行时层。
 
-/** 官方 SDK 的标识。官方包的 `descriptor.sdk` 只能是它。 */
-export const SDK_OFFICIAL = 'sp:sdk@1';
-/** Forge 扩展档的标识。Forge 包（含所有现存 workshop 包）走它。 */
-export const SDK_FORGE_LEGACY = 'forge-legacy';
+/**
+ * **上游官方**的 SDK 标识（0.3.0 `docs/PLUGINS.md`，`shared/plugins/sdk.js#SDK_ID`）。
+ * **本仓绝不声明它** —— 官方档由上游实现承担，这里只用它来**识别**一份上游插件（互操作边界）。
+ * 常量名刻意叫 UPSTREAM 而不是 OFFICIAL：它是「别人的档」，不是「我这一档的另一个名字」。
+ */
+export const SDK_UPSTREAM = 'sp:sdk@1';
+/**
+ * **我方扩展档**的 SDK 标识（"类官方"的那一档）：声明面的**形状**按 0.3.0 的约定写，
+ * **身份**是 Forge 自己的。这样上游的 manifest 校验会因为不认识这个值/键而拒收 ——
+ * 「不冒充 `sp:sdk@1`」在机械上就成立，而不是靠自觉。
+ */
+export const SDK_FORGE_EXT = 'forge-ext@1';
 
 /** 包规范来源。 */
 export const ORIGINS = Object.freeze(['official', 'forge']);
@@ -30,7 +38,7 @@ export const PROFILE_BY_ORIGIN = Object.freeze({
 });
 
 /** origin → sdk 标识。 */
-export const SDK_BY_ORIGIN = Object.freeze({ official: SDK_OFFICIAL, forge: SDK_FORGE_LEGACY });
+export const SDK_BY_ORIGIN = Object.freeze({ official: SDK_UPSTREAM, forge: SDK_FORGE_EXT });
 
 /** origin → 未声明 profile 时的缺省档位。 */
 export const DEFAULT_PROFILE_BY_ORIGIN = Object.freeze({ official: 'module', forge: 'legacy' });
@@ -103,7 +111,7 @@ export const isOrigin = (v) => typeof v === 'string' && ORIGINS.includes(v);
 /** @param {unknown} v */
 export const isProfile = (v) => typeof v === 'string' && PROFILES.includes(v);
 /** @param {unknown} v */
-export const isSdkId = (v) => v === SDK_OFFICIAL || v === SDK_FORGE_LEGACY;
+export const isSdkId = (v) => v === SDK_UPSTREAM || v === SDK_FORGE_EXT;
 
 /** origin 与 profile 是否相容（跨域声明＝拒）。 */
 export function profileAllowedFor(origin, profile) {

@@ -3,15 +3,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  SDK_OFFICIAL, SDK_FORGE_LEGACY, profileAllowedFor, sdkForOrigin, defaultProfileFor,
+  SDK_UPSTREAM, SDK_FORGE_EXT, profileAllowedFor, sdkForOrigin, defaultProfileFor,
 } from '../shared/sdk/sdkConstants.js';
 import { fromForgeManifest, fromOfficialManifest, normalizeDescriptor, capabilityUnion } from '../shared/sdk/descriptor.js';
 
 const H = (c) => c.repeat(64).slice(0, 64);
 
 test('sdk 标识由 origin 决定，跨域 profile 被拒', () => {
-  assert.equal(sdkForOrigin('official'), SDK_OFFICIAL);
-  assert.equal(sdkForOrigin('forge'), SDK_FORGE_LEGACY);
+  assert.equal(sdkForOrigin('official'), SDK_UPSTREAM);
+  assert.equal(sdkForOrigin('forge'), SDK_FORGE_EXT);
   assert.equal(sdkForOrigin('nope'), null);
   assert.equal(defaultProfileFor('official'), 'module');
   assert.equal(defaultProfileFor('forge'), 'legacy');
@@ -33,7 +33,7 @@ test('Forge 适配器：声明了宿主进程内代码的包 → profile host + 
   const { descriptor, issues } = fromForgeManifest(pack);
   assert.deepEqual(issues, []);
   assert.equal(descriptor.origin, 'forge');
-  assert.equal(descriptor.sdk, SDK_FORGE_LEGACY);
+  assert.equal(descriptor.sdk, SDK_FORGE_EXT);
   assert.equal(descriptor.profile, 'host');
   assert.ok(descriptor.capabilities.includes('modules'));
   assert.ok(descriptor.capabilities.includes('health'));
@@ -69,24 +69,24 @@ test('Forge 适配器：`content` 是文件名数组（loader 的归一化形状
 
 test('官方适配器：缺 sdk / 带 Forge 私有字段 / 未知名 → 具名拒绝', () => {
   assert.equal(fromOfficialManifest({ id: 'x' }).descriptor, null, '缺 sdk ⇒ 拒');
-  const forgeField = fromOfficialManifest({ id: 'x', sdk: SDK_OFFICIAL, server: {} });
+  const forgeField = fromOfficialManifest({ id: 'x', sdk: SDK_UPSTREAM, server: {} });
   assert.ok(forgeField.issues.some((i) => i.code === 'SDK_UNKNOWN_FIELD' && /Forge-only/.test(i.reason)));
-  const unknown = fromOfficialManifest({ id: 'x', sdk: SDK_OFFICIAL, bogus: 1 });
+  const unknown = fromOfficialManifest({ id: 'x', sdk: SDK_UPSTREAM, bogus: 1 });
   assert.ok(unknown.issues.some((i) => i.code === 'SDK_UNKNOWN_FIELD'));
 });
 
 test('normalizeDescriptor：未知字段点名拒绝、跨域 profile 拒绝、sdk 必须与 origin 一致', () => {
-  const bad = normalizeDescriptor({ id: 'p', origin: 'official', sdk: SDK_OFFICIAL, profile: 'legacy', bogus: 1 });
+  const bad = normalizeDescriptor({ id: 'p', origin: 'official', sdk: SDK_UPSTREAM, profile: 'legacy', bogus: 1 });
   assert.equal(bad.descriptor, null);
   const codes = bad.issues.map((i) => i.code);
   assert.ok(codes.includes('SDK_UNKNOWN_FIELD'));
   assert.ok(codes.includes('SDK_PROFILE_NOT_FOR_ORIGIN'));
 
-  const okOfficial = normalizeDescriptor({ id: 'p', origin: 'official', sdk: SDK_OFFICIAL, profile: 'module', capabilities: ['modules'] });
+  const okOfficial = normalizeDescriptor({ id: 'p', origin: 'official', sdk: SDK_UPSTREAM, profile: 'module', capabilities: ['modules'] });
   assert.equal(okOfficial.descriptor.profile, 'module');
-  assert.equal(okOfficial.descriptor.sdk, SDK_OFFICIAL);
+  assert.equal(okOfficial.descriptor.sdk, SDK_UPSTREAM);
 
-  const badSdk = normalizeDescriptor({ id: 'p', origin: 'forge', sdk: SDK_OFFICIAL, profile: 'legacy' });
+  const badSdk = normalizeDescriptor({ id: 'p', origin: 'forge', sdk: SDK_UPSTREAM, profile: 'legacy' });
   assert.equal(badSdk.descriptor, null);
   assert.equal(badSdk.issues[0].code, 'SDK_BAD_ORIGIN');
 });
