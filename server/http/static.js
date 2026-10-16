@@ -215,6 +215,13 @@ export function createStaticHandler({
   const sets = visual || (typeof registry.pluginFile === 'function' ? createVisualSets({ registry, log }) : null);
   // 原生内容集（server/plugins/identity.js）：第一次用到时才算，算完缓存在闭包里。
   let vanilla = content;
+  // the real path of public/studio/ (the plugin studio's page — never a static file, in whatever spelling the disk folds:
+  // /ſtudio/ on a case-insensitive macOS disk, /studio./ on Windows)
+  let studioReal;
+  const studioRealPath = async () => {
+    if (studioReal === undefined) studioReal = await fsp.realpath(path.join(path.resolve(publicDir), 'studio')).catch(() => null);
+    return studioReal;
+  };
   const vanillaContent = () => (vanilla ||= computeVanillaContent({ simDir, sharedDir, dataDir, shim: DATA_SHIM_JS, log: /** @type {any} */ (log) }));
   // 挂载表只此一处真相（routeMount.js coreMounts）：`workshopRoutesFor` 判「核心先吃」时读的是**同一份**目录表，
   // 所以「谁先吃」与「谁真的住在这里」不会各说各话。
