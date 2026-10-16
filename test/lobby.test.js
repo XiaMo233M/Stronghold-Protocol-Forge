@@ -656,19 +656,33 @@ describe('websocket lobby', () => {
     const pongs = replies.filter((m) => m.t === 'pong').length;
     const limited = replies.filter((m) => m.t === 'error' && m.code === ERR.RATE).length;
     assert.equal(pongs + limited, N);
-    assert.ok(pongs >= 39 && pongs <= 45, `pongs ${pongs}`); // hello used one token
-    assert.ok(limited >= 55, `limited ${limited}`);
+    assert.equal(pongs, 39); // hello used one of the 40 tokens
+    assert.equal(limited, 61);
     assert.ok(c.isOpen);
-    await delay(1100);
+    now += 24; // 40/s: less than one token
+    await expectError(c, { t: 'ping', c: 0 }, ERR.RATE);
+    now += 1;
     const ok = await c.request({ t: 'ping', c: 0 });
     assert.equal(ok.t, 'pong');
+    await expectError(c, { t: 'ping', c: 0 }, ERR.RATE);
+    now += 1100; // refill, capped at 40 tokens
+    for (let i = 0; i < 40; i++) assert.equal((await c.request({ t: 'ping', c: i })).t, 'pong');
+    await expectError(c, { t: 'ping', c: 0 }, ERR.RATE);
+    assert.ok(c.isOpen);
   });
 
-  test('flooding far beyond the limit closes the socket (1008)', async () => {
+  test('flooding far beyond the limit closes the socket (1008)', { timeout: 10000 }, async (t) => {
+    const now = Date.now();
+    t.mock.method(srv.network, 'now', () => now);
     const c = await pool.player('Flood');
-    for (let i = 0; i < 600; i++) c.send({ t: 'ping', c: i, rid: null });
+    // Keep one rate window and await replies instead of building a compressed send queue ahead of the close frame.
+    for (let i = 0; i < 39; i++) assert.equal((await c.request({ t: 'ping', c: i })).t, 'pong');
+    for (let i = 0; i < 400; i++) await expectError(c, { t: 'ping', c: i }, ERR.RATE);
+    assert.ok(c.isOpen, '400 drops do not close the socket');
+    c.send({ t: 'ping', c: 400, rid: null });
     const info = await c.closed;
     assert.equal(info.code, 1008);
+    assert.equal(info.reason, 'rate limit');
   });
 
   test('a create that names no cap gets the server ceiling (20 by default)', async () => {
