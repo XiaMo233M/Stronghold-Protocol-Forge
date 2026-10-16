@@ -1,4 +1,4 @@
-// server/plugins/identity.js — the content identity of this server (DESIGN §32; the format: shared/plugins/identity.js):
+// server/plugins/identity.js — the content identity of this server (DESIGN §34; the format: shared/plugins/identity.js):
 // the vanilla content hash `cs`, computed once at start from the bytes the server serves —
 //
 //   /sim/      server/sim/**/*.js but nodeData.js (under any spelling), no dot file — server/http/static.js's rules
@@ -9,7 +9,7 @@
 //              effects —, emotes)
 //
 // Until rooms can choose gameplay plugins (P1c) it is the identity of every room — a room's cosmetic plugins change no
-// battle, so they leave it (DESIGN §32.3): welcome.content, room.state.content, /healthz
+// battle, so they leave it (DESIGN §34.3): welcome.content, room.state.content, /healthz
 // `content`, BattleSpec `cs` (the sim never reads it) and the content line of a diagnostic report. GET
 // /cs/<first 16 hex digits>/index.json answers its manifest (contentIndexOf): every code file's hash, every data file's
 // URL (`?v=` its hash: cached for good), hash and size — what a browser needs to check what it downloaded (P1c).

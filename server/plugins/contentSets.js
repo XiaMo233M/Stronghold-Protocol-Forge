@@ -1,4 +1,4 @@
-// server/plugins/contentSets.js — the content sets of this server (DESIGN §32.6, P1c; the design study's §6.2–§6.4): a
+// server/plugins/contentSets.js — the content sets of this server (DESIGN §34.6, P1c; the design study's §6.2–§6.4): a
 // set of content plugins (gameplay: data patches, new records, modes), closed over their requirements and in load order,
 // merged with the vanilla data into one immutable content set named by its own content hash `cs`
 // (shared/plugins/identity.js) — what a room with gameplay plugins plays, what every member's page downloads and checks
@@ -19,7 +19,7 @@
 //   dataBytes(cs)                          the served bytes of every data file of the set — exactly the bytes the
 //                                          builder hashed — which a match host checks against the set's hash
 //                                          input and parses (server/match/host/entry.js)
-// The builder is C1 (server/plugins/contentSet.js buildContentSet / contentSetFiles, DESIGN §32.5); this file
+// The builder is C1 (server/plugins/contentSet.js buildContentSet / contentSetFiles, DESIGN §34.5); this file
 // adapts its set to what P1c reads: `hashInput` (the contentHashOf input a browser and a worker recompute `cs` from — out
 // of the set's index: its data files', and its translation files', hashes; checked to be the builder's cs), `modes` (only the config.modes entries the vanilla data lacks, as { id, name, roomMode,
 // difficulty }), `warnings` in room.state's `{ code, params }` shape, `dataBytes` (what the members download beyond the
@@ -181,7 +181,7 @@ export function createContentSets({ registry, vanillaData, log = noopLog, maxSet
         : { code: String(w?.code || 'warning'), params: { ...(w || {}) } })),
       served, dataBytes,
       ...(built.scripts?.length ? {execution:built.execution, scripts:built.scripts} : {}),
-      // the official-bounds snapshot (DESIGN §32.5) its match host installs — the one its pages install too
+      // the official-bounds snapshot (DESIGN §34.5) its match host installs — the one its pages install too
       bounds: built.bounds && built.bounds.v === 1 ? built.bounds : null,
     };
   }

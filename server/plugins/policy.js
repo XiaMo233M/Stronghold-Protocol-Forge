@@ -1,4 +1,4 @@
-// server/plugins/policy.js — the server owner's plugin policy (DESIGN §32.6, P1c; the design study's §2.2 / 附录 A):
+// server/plugins/policy.js — the server owner's plugin policy (DESIGN §34.6, P1c; the design study's §2.2 / 附录 A):
 // an optional plugins/config.json next to the plugin folders (the registry never reads a file at the top of plugins/ as a
 // plugin) [ASSUMED format]:
 //

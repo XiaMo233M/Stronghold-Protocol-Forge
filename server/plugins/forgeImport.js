@@ -1,4 +1,4 @@
-// server/plugins/forgeImport.js — import a Forge workshop pack as one or more of our plugins (DESIGN §32.12,
+// server/plugins/forgeImport.js — import a Forge workshop pack as one or more of our plugins (DESIGN §34.12,
 // (i18n-ignore-file: the import report and its reasons are author-facing and bilingual by design, 中文 · English — as
 // shared/plugins/errors.js; never player UI)
 // docs/PLUGINS.md §16). Forge packs are untrusted: this module only reads bytes. It never import()s, eval()s or

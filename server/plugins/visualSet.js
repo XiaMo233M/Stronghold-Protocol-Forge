@@ -1,4 +1,4 @@
-// server/plugins/visualSet.js — the visual sets of this server (DESIGN §32 P1a, docs/PLUGINS.md §9; the format:
+// server/plugins/visualSet.js — the visual sets of this server (DESIGN §34 P1a, docs/PLUGINS.md §9; the format:
 // shared/plugins/visual.js): a set of loaded cosmetic plugins, closed over their requirements and in load order
 // (shared/plugins/order.js), named by its visual hash `vs`, and the document it is served as —
 //
@@ -92,7 +92,7 @@ export function createVisualSets({ registry, log = noopLog, limits = VISUAL_LIMI
   const snapshot = (p) => ({ id: p.id, hash: p.visual.hash, ops: p.visual.ops });
   /**
    * Is `p` a loaded cosmetic plugin with an overlay (of `scope`, when given)? A room's set also takes a content plugin's
-   * own art (its `assets`, read like a cosmetic overlay — DESIGN §32.5 / §32.6: server/plugins/roomSets.js); never a
+   * own art (its `assets`, read like a cosmetic overlay — DESIGN §34.5 / §32.6: server/plugins/roomSets.js); never a
    * player's personal set (a content plugin is a room's only).
    */
   const usable = (p, scope) => !!p && (p.class === 'cosmetic' || (['content','script','trusted'].includes(p.class) && scope !== 'personal')) && p.status === 'loaded'

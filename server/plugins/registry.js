@@ -1,4 +1,4 @@
-// server/plugins/registry.js — this server's plugins and language packs (DESIGN §32, docs/PLUGINS.md; the formats:
+// server/plugins/registry.js — this server's plugins and language packs (DESIGN §34, docs/PLUGINS.md; the formats:
 // shared/plugins/manifest.js, shared/packs.js). One registry over four folders:
 //
 //   public/i18n/<code>.json (+ data/i18n/<code>.json)   single-file language packs — manifest 1, the file's `_meta`

@@ -1,4 +1,4 @@
-// server/plugins/zip.js — a small ZIP writer for packed plugins (DESIGN §32.9, docs/PLUGINS.md §15: the studio's 打包 and
+// server/plugins/zip.js — a small ZIP writer for packed plugins (DESIGN §34.9, docs/PLUGINS.md §15: the studio's 打包 and
 // node tools/plugin.mjs pack --zip). Deterministic: the same files give the same bytes — entries sorted by name, one fixed
 // timestamp (1980-01-01 00:00, the first DOS date), no extra fields — so a zip can be pinned by its SHA-256 (the catalogue
 // and install-by-address of the 0.3.0 plan). Already-compressed media (images, audio, fonts) are stored, everything else

@@ -1,4 +1,4 @@
-// Synchronous C1 registration preflight (DESIGN §32.10); no author imports in the lobby.
+// Synchronous C1 registration preflight (DESIGN §34.10); no author imports in the lobby.
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { canonicalJson } from '../../shared/plugins/identity.js';

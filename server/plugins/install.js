@@ -1,4 +1,4 @@
-// server/plugins/install.js — install a plugin zip into plugins/<id>/ (DESIGN §32.13, docs/PLUGINS.md §17). The CLI
+// server/plugins/install.js — install a plugin zip into plugins/<id>/ (DESIGN §34.13, docs/PLUGINS.md §17). The CLI
 // (tools/plugin.mjs install) and the studio (POST /studio/api/catalog/install) share it. A local zip is installed as it
 // is; an https URL is downloaded by this process (the browser never uploads the zip), and only when a sha256 is given.
 // The hash is checked on the bytes. The zip is extracted with readPluginZip (no traversal, no links, no bombs), written

@@ -1,4 +1,4 @@
-// Shared rules of the experimental trusted IPC bridge (DESIGN §32.10).
+// Shared rules of the experimental trusted IPC bridge (DESIGN §34.10).
 // [ASSUMED] A plugin's health extension is at most 16 KiB of serialized UTF-8 JSON.
 export const TRUSTED_HEALTH_BYTES = 16 * 1024;
 export function trustedRouteAllowed(id, route) {

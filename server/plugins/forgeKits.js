@@ -1,4 +1,4 @@
-// server/plugins/forgeKits.js — Forge kit files (`kits/<id>.js`) → the one sim entry of a script plugin (DESIGN §32.12,
+// server/plugins/forgeKits.js — Forge kit files (`kits/<id>.js`) → the one sim entry of a script plugin (DESIGN §34.12,
 // (i18n-ignore-file: the reasons are author-facing and bilingual by design, 中文 · English — as forgeImport.js)
 // docs/PLUGINS.md §16). Original code. A pack is untrusted: its files are parsed with acorn and rewritten by source
 // offsets. Nothing is import()ed, eval()ed or require()d here, and nothing runs during the import.

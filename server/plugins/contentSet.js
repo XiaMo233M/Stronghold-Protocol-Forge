@@ -1,4 +1,4 @@
-// C1 immutable content compositions (DESIGN §32.5). HTTP and room ownership are handled by contentSets.js and roomSets.js.
+// C1 immutable content compositions (DESIGN §34.5). HTTP and room ownership are handled by contentSets.js and roomSets.js.
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, DATA_DIR, deepFreeze } from '../data.js';

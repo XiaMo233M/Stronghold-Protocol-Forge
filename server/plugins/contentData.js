@@ -25,7 +25,7 @@ export function readContentData(dir, manifest) {
     return doc;
   };
   try {
-    // [ASSUMED] Pin manifest text and translation bytes too: one cs serves one immutable snapshot (DESIGN §32.5).
+    // [ASSUMED] Pin manifest text and translation bytes too: one cs serves one immutable snapshot (DESIGN §34.5).
     read('plugin.json');
     for (const part of ['data', 'operators', 'enemies', 'modes', 'stages', 'dsl']) for (const rel of manifest.parts[part]?.files ?? []) {
       const doc = read(rel);
@@ -35,7 +35,7 @@ export function readContentData(dir, manifest) {
           const p = checked.problems[0];
           throw problem(p.code, p.path ? `${rel}.${p.path}` : rel, p.zh);
         }
-        // [ASSUMED] A manifest dsl file is a prep spec and must carry meta. A battle kit lives on the operator record (DESIGN §32.7).
+        // [ASSUMED] A manifest dsl file is a prep spec and must carry meta. A battle kit lives on the operator record (DESIGN §34.7).
         if (doc.meta == null) throw problem('PLUGIN_DSL_META', rel, 'prep DSL file needs a meta block');
         if (doc.pluginId != null && doc.pluginId !== manifest.id) throw problem('PLUGIN_DSL_PLUGIN_ID', rel, 'spec pluginId must match the host plugin');
       }
