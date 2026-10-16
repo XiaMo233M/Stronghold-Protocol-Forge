@@ -1,4 +1,4 @@
-// API v1 lexical check. This is a portability check, NOT a security boundary (DESIGN §32.10).
+// API v1 lexical check. This is a portability check, NOT a security boundary (DESIGN §34.10).
 const banned = new Set(['eval', 'Function', 'require', 'process', 'globalThis', 'fetch', 'XMLHttpRequest',
   'WebSocket', 'Date', 'window', 'document', 'localStorage', 'sessionStorage', 'setTimeout', 'setInterval',
   'Worker', 'navigator']);

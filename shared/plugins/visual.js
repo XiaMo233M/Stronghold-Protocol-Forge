@@ -1,4 +1,4 @@
-// shared/plugins/visual.js — the cosmetic plugins (DESIGN §32 P1a, docs/PLUGINS.md §9): the asset overlay a cosmetic
+// shared/plugins/visual.js — the cosmetic plugins (DESIGN §34 P1a, docs/PLUGINS.md §9): the asset overlay a cosmetic
 // plugin carries — its `assets` part, written in the shape of data/assets.json (docs/ASSETS.md "Manifest schema") with
 // the plugin's own files and references to the installation's entries — read and checked (readAssetOverlay), merged in
 // load order with a warning where two plugins change the same thing (mergePluginOps); the visual hash `vs` that names a

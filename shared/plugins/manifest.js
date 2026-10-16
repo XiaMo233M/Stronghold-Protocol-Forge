@@ -1,4 +1,4 @@
-// shared/plugins/manifest.js — the plugin manifest (DESIGN §32, docs/PLUGINS.md; the design study's §4): one format
+// shared/plugins/manifest.js — the plugin manifest (DESIGN §34, docs/PLUGINS.md; the design study's §4): one format
 // for everything a server picks up from a folder — language packs, art and data plugins, and later code. No Node
 // builtin: the server's registry (server/plugins/registry.js), the tools (tools/plugin.mjs, tools/packs.mjs) and the
 // browser share it. shared/packs.js keeps the language-pack index on top of it.
@@ -18,7 +18,7 @@
 //   ui         interface widgets in a sandboxed frame                        loaded (P4): personal, read-only postMessage,
 //                                                                            never a match intent (shared/plugins/ui.js)
 //   trusted    page or server code with full trust                           experimental, owner gated (P3a)
-// Script/server code requires the P3a owner gates (DESIGN §32.10). A ui plugin's page (P4, DESIGN §32.8)
+// Script/server code requires the P3a owner gates (DESIGN §34.10). A ui plugin's page (P4, DESIGN §34.8)
 // runs only inside the sandboxed frame and cannot send a match intent. Everything but `lang` is marked unofficial
 // wherever it is shown: the original content stays the default.
 //
@@ -195,7 +195,7 @@ export const isPackId = (v) => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9.
 export const isPluginId = (v) => typeof v === 'string' && /^[a-z0-9][a-z0-9-]{1,31}$/.test(v);
 
 /**
- * The slots a ui plugin may ask the host for (DESIGN §32.8). [ASSUMED] these four; the host mounts at most one plugin
+ * The slots a ui plugin may ask the host for (DESIGN §34.8). [ASSUMED] these four; the host mounts at most one plugin
  * in each (shared/plugins/ui.js).
  */
 export const UI_SLOT_IDS = Object.freeze(['hud.right', 'result.tab', 'stats.tab', 'room.panel']);

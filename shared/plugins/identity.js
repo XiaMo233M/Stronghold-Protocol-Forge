@@ -1,4 +1,4 @@
-// shared/plugins/identity.js — the content identity of the plugin system (DESIGN §32, docs/PLUGINS.md): the format of
+// shared/plugins/identity.js — the content identity of the plugin system (DESIGN §34, docs/PLUGINS.md): the format of
 // the content hash `cs` that names exactly what a room plays — the simulation's code, the game data and (from P1 on)
 // the plugins and their settings. No Node builtin: the server (server/plugins/identity.js reads the files it serves),
 // the browser (it will check what it downloaded, P1c) and the tools compute it alike, with shared/sha256.js.

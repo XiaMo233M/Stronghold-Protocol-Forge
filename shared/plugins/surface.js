@@ -1,4 +1,4 @@
-// shared/plugins/surface.js — the frozen plugin API v1 as data (DESIGN §32.13, docs/PLUGIN-API.md). No Node builtin
+// shared/plugins/surface.js — the frozen plugin API v1 as data (DESIGN §34.13, docs/PLUGIN-API.md). No Node builtin
 // and no import of server/: the browser, the CLI and the test share it. Closed sets live in the modules that own
 // them. The DSL vocabulary and the studio routes are passed in (`buildSurface({ dsl, studioRoutes })`) because those
 // modules are server-side; this file does not load them.

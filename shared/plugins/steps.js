@@ -1,4 +1,4 @@
-// Minimum step and per-tick iteration cap for plugin-controlled subtract loops (DESIGN §32.5).
+// Minimum step and per-tick iteration cap for plugin-controlled subtract loops (DESIGN §34.5).
 // Shared code does not import the server. STEP_TICK is 1/30, the same value as server/sim/constants.js TICK.
 
 import { dataBound, isStepKey } from './limits.js';
@@ -16,7 +16,7 @@ export const STEP_PER_TICK = 8;
  * A positive value at or above the official minimum positive of `key` is unchanged, even when it is
  * shorter than one tick (official `interval` 0.03 and `atk_interval` 0.025). Anything smaller is raised
  * to max(one tick, official minimum / 10). When that minimum has not been installed, only a step below
- * a tenth of a tick is raised, so a cold cache does not move an official 0.03. [ASSUMED] DESIGN §32.5.
+ * a tenth of a tick is raised, so a cold cache does not move an official 0.03. [ASSUMED] DESIGN §34.5.
  * @param {string} key
  * @param {unknown} value
  * @param {unknown} [fallback] used only when `value` is not finite

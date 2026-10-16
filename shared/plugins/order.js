@@ -1,4 +1,4 @@
-// shared/plugins/order.js — which plugins a set holds and in what order (DESIGN §32, docs/PLUGINS.md; the design
+// shared/plugins/order.js — which plugins a set holds and in what order (DESIGN §34, docs/PLUGINS.md; the design
 // study's §4.8): the plugins a host asked for, with the ones they require switched on too, refused when one conflicts
 // with another or needs one that is missing, sorted the same way on every machine. No Node builtin: the server's
 // visual sets use it (server/plugins/visualSet.js, P1a), the content sets of the data plugins will (P1b, P1c).

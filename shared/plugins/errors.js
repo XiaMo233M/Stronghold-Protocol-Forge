@@ -1,4 +1,4 @@
-// shared/plugins/errors.js — the plugin error catalogue (DESIGN §32.9, docs/PLUGINS.md §15; the 0.3.0 plan's shared
+// shared/plugins/errors.js — the plugin error catalogue (DESIGN §34.9, docs/PLUGINS.md §15; the 0.3.0 plan's shared
 // interface C6): every code a check of a plugin can report — the manifest and file rules (shared/plugins/manifest.js),
 // a cosmetic plugin's asset overlay and lock (shared/plugins/visual.js), the registry's scan (server/plugins/registry.js),
 // the packer (server/plugins/pack.js), a room's refusals (the ERR codes PLUGIN_UNKNOWN … PLUGIN_LIMIT, shared/constants.js),
@@ -474,7 +474,7 @@ export const PLUGIN_ERRORS = Object.freeze({
     fix: { zh: '关掉正在使用这个插件里文件的程序（图片编辑器、Spine 等），确认服务器能写 plugins/ 文件夹后再试；也可以自己把这个文件夹移出 plugins/。', en: 'Close programs that hold files of this plugin open (an image editor, Spine …), make sure the server may write the plugins/ folder and try again — or move the folder out of plugins/ yourself.' },
   },
 
-  // ---- a data plugin (class content, P1b — DESIGN §32.5, PLUGINS §10) -------------------------------------------------
+  // ---- a data plugin (class content, P1b — DESIGN §34.5, PLUGINS §10) -------------------------------------------------
   PLUGIN_CONTENT_FILE: {
     level: 'problem', doc: D.data,
     zh: '数据文件「{where}」读不了：{detail}', en: 'The data file “{where}” cannot be read: {detail}',
@@ -600,7 +600,7 @@ export const PLUGIN_ERRORS = Object.freeze({
     zh: '插件的翻译文件不对（{where}）：{detail}', en: 'A translation file of the plugin is not right ({where}): {detail}',
     fix: { zh: '翻译文件写 { "version": 1, "lang": "en", "files": { … } }，lang 和文件名一致；只能替换已有的文字，不能新增字段。', en: 'A translation file is { "version": 1, "lang": "en", "files": { … } } with lang matching its name; it replaces existing text only, never adds a field.' },
   },
-  // ---- an interface plugin's manifest (class ui, DESIGN §32.8) -------------------------------------------------------
+  // ---- an interface plugin's manifest (class ui, DESIGN §34.8) -------------------------------------------------------
   PLUGIN_UI_SLOTS: {
     level: 'problem', doc: D.ui,
     zh: '界面插件的 "slots" 写得不对：{detail}', en: 'The "slots" of a ui plugin are not right: {detail}',
@@ -639,7 +639,7 @@ export const PLUGIN_ERRORS = Object.freeze({
     fix: { zh: '每条消息都是 { "v": 1, "t": 类型, … }，类型只能是 ready、slot、resize、storage、notice、stats，一条不超过 8 KB；格式见 schemas/ui.schema.json。', en: 'Every message is { "v": 1, "t": <type>, … } with a type of ready, slot, resize, storage, notice or stats, at most 8 KB; schemas/ui.schema.json has the shapes.' },
   },
 
-  // ---- a DSL spec (P2, DESIGN §32.7; the explanations of server/sim/content/dsl/validate.js are Chinese) -------------
+  // ---- a DSL spec (P2, DESIGN §34.7; the explanations of server/sim/content/dsl/validate.js are Chinese) -------------
   PLUGIN_DSL_SHAPE: {
     level: 'problem', doc: D.dsl,
     zh: 'DSL 规格的整体写法不对：{detail}', en: 'The DSL spec is not shaped right: {detail}',

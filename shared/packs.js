@@ -1,5 +1,5 @@
 // shared/packs.js — content packs (docs/PACKS.md): the language packs and their index. The owner's decision of 2026-10-07
-// made the language pack the first type of a general mechanism; since the plugin system (DESIGN §32, docs/PLUGINS.md)
+// made the language pack the first type of a general mechanism; since the plugin system (DESIGN §34, docs/PLUGINS.md)
 // that mechanism is the plugin manifest (shared/plugins/manifest.js): a pack.json is its manifest 1, type "lang" is its
 // class lang, and the planned types "assets" and "data" became the classes cosmetic and content of manifest 2
 // (plugins/<id>/plugin.json). This file keeps what the language menu reads — GET /packs/index.json, exactly as in
@@ -38,7 +38,7 @@ import { SOURCE_LANG, isLangCode, languageName, langFields } from './i18nPacks.j
 import { PACK_TYPES, PACK_MANIFEST, isPackId, isPackPath, isVersionRange, appVersionMatches, readPackManifest } from './plugins/manifest.js';
 
 // The manifest itself — its types, ids, paths, app ranges and reading — lives in shared/plugins/manifest.js since the
-// plugin system (DESIGN §32): a pack.json is its manifest 1, read exactly as before. Re-exported for the callers of
+// plugin system (DESIGN §34): a pack.json is its manifest 1, read exactly as before. Re-exported for the callers of
 // this file.
 export { PACK_TYPES, PACK_MANIFEST, isPackId, isPackPath, isVersionRange, appVersionMatches };
 

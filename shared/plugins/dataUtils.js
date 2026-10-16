@@ -1,4 +1,4 @@
-// Plain-data helpers for P1b (DESIGN §32.5). No evaluation and no prototype paths.
+// Plain-data helpers for P1b (DESIGN §34.5). No evaluation and no prototype paths.
 export const object = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 export const own = (v, k) => v != null && Object.hasOwn(v, k);
 export const forbidden = k => ['__proto__', 'prototype', 'constructor'].includes(String(k));
@@ -55,7 +55,7 @@ export function mergeData(base, changes) {
   return out;
 }
 
-// [ASSUMED] Additional table prefixes extend the design's chess/char/enemy/mode/skill namespaces (DESIGN §32.5).
+// [ASSUMED] Additional table prefixes extend the design's chess/char/enemy/mode/skill namespaces (DESIGN §34.5).
 export const RECORD_MAPS = Object.freeze({
   chess: ['chess_x', 'chessId'], enemies: ['enemy_x', 'key'], items: ['item_x', 'id'],
   bands: ['band_x', 'bandId'], garrisons: ['garrison_x', 'garrisonId'], effects: ['effect_x', 'effectId'],

@@ -1,4 +1,4 @@
-// Shared DATA.md reference checks, extracted verbatim from build-data (DESIGN §32.5).
+// Shared DATA.md reference checks, extracted verbatim from build-data (DESIGN §34.5).
 import { statusKey, standInRecord, unitForm } from '../standIn.js';
 /** Recursively find non-finite numbers (NaN/Infinity would silently become null in JSON). */
 function findNonFinite(obj, path, out) {
@@ -286,7 +286,7 @@ function checkData(data, { kitExists = null, vanilla = null, owners = null, vali
     }
   }
   // Systematic cap against the official tables. Runs even when an earlier limit already fired, so a 1e9
-  // enemy `times` reports PLUGIN_DATA_BOUND as well as PLUGIN_DATA_LIMIT. [ASSUMED] DESIGN §32.5.
+  // enemy `times` reports PLUGIN_DATA_BOUND as well as PLUGIN_DATA_LIMIT. [ASSUMED] DESIGN §34.5.
   if (vanilla) appendOfficialBounds(data, vanilla, bad);
   if (problems.length) return problems;
   try { for (const message of validateReferences(data, { officialOwnedSkills: false })) bad('data', message, 'PLUGIN_DATA_REFERENCE'); }

@@ -307,7 +307,7 @@ export function cultivationCharIds(chess, backups = null) {
 /**
  * Whether a non-default potential changes this operator. Official characters always may: a PRESET without `potDown`
  * (char_616_pithst) is stored as written and changes no stat, and that stays allowed. A plugin `char_x_` with no
- * `potDown` and no chained talent curve does not. [ASSUMED] only the plugin prefix is restricted (DESIGN §32.5).
+ * `potDown` and no chained talent curve does not. [ASSUMED] only the plugin prefix is restricted (DESIGN §34.5).
  * @param {{ chess?: Record<string, any>, backups?: any }|null|undefined} data
  * @param {string} charId
  */
@@ -818,8 +818,8 @@ export const C2S = {
     leaksBy: (v) => isMap(v, RESULT_LIMITS.players, isId, (x) => isNum(x, 0, 1e6)),
     $optional: ['resolved', 'leaks', 'bossDmg', 'by', 'done', 'left', 'leaksBy'],
   },
-  // `cs` (DESIGN §32, optional): the content hash the reporting browser ran the battle on — its spec's `cs`. In a room
-  // with gameplay plugins (P1c, DESIGN §32.6) the match refuses a result without it or with another one (and runs the
+  // `cs` (DESIGN §34, optional): the content hash the reporting browser ran the battle on — its spec's `cs`. In a room
+  // with gameplay plugins (P1c, DESIGN §34.6) the match refuses a result without it or with another one (and runs the
   // battle itself); a vanilla room's browser sends none
   'b.result': { battleId: isId, result: isBattleResult, cs: isContentHash, $optional: ['cs'] },
   // A delegated bot layout rehearsal (DESIGN §14): the match's current host answers the candidates it was handed with

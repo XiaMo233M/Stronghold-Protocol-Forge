@@ -1,10 +1,10 @@
-// Compact records → the existing DATA.md shapes (DESIGN §32.5). No official record is replaced here.
+// Compact records → the existing DATA.md shapes (DESIGN §34.5). No official record is replaced here.
 import { RECORD_SCHEMA } from './recordsSchema.js';
 import { composeUnitRecord, statusKey } from '../standIn.js';
 import { clone, object, own, problem, jsonProblems, mergeData, recordId, namespace, RECORD_MAPS } from './dataUtils.js';
 import { validateSkillSpec, matchesSchema, MODS_SCHEMA } from './skillSpec.js';
 
-// [ASSUMED] Simple playable defaults for new operators only; explicit form values win (DESIGN §32.5).
+// [ASSUMED] Simple playable defaults for new operators only; explicit form values win (DESIGN §34.5).
 const stats = { maxHp: 1000, atk: 100, def: 0, res: 0, cost: 10, blockCnt: 1, bat: 1, aspd: 100,
   respawnTime: 70, spRecovery: 1, hpRecoveryPerSec: 0, moveSpeed: 1, tauntLevel: 0, massLevel: 0, deployLimit: 1, deckStack: 0 };
 // Compact text follows the builder's {bb:0%} convention; gameplay numbers remain untouched.
@@ -33,7 +33,7 @@ function behavior(kit, talentMods, pluginId, validateDsl) {
     out.skillSpec = kit.spec;
   } else if (kit.dsl != null) {
     // [ASSUMED] Omitting spec.pluginId is allowed. A written one must be this host: it cannot spend another
-    // plugin's budget. The builder stamps the host id on the record and does not rewrite the author's spec (DESIGN §32.7).
+    // plugin's budget. The builder stamps the host id on the record and does not rewrite the author's spec (DESIGN §34.7).
     // (the DSL validator is the sim's — server/sim/content/dsl/validate.js — handed in by the content-set builder:
     // shared code does not import the engine)
     if (typeof validateDsl !== 'function') fail('PLUGIN_RECORD_TYPE', 'kit.dsl', 'a DSL kit needs the content-set builder (no validator given)');
@@ -162,7 +162,7 @@ function record(data, r, pluginId) {
   if (['items', 'bands'].includes(r.file)) {
     if (!source || map[source].effectRef) fail('PLUGIN_DATA_REFERENCE', r.id, 'effectRef/base must name an existing official record');
     rec.effectRef = source;
-    // [ASSUMED] Compact items are single, non-merging records; complete pairs use add patches (DESIGN §32.5).
+    // [ASSUMED] Compact items are single, non-merging records; complete pairs use add patches (DESIGN §34.5).
     if (r.file === 'items') {
       rec.baseId = r.id; rec.goldenId = null; rec.isGolden = false; rec.upgradeNum = 0;
       rec.upgradeChessId = null; rec.mergeable = false;

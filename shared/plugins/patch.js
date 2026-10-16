@@ -1,8 +1,8 @@
-// Data patches, DESIGN §32.5 / PLUGINS §10. Atomic, pure, shared by Node and browsers.
+// Data patches, DESIGN §34.5 / PLUGINS §10. Atomic, pure, shared by Node and browsers.
 import { clone, object, own, forbidden, problem, jsonProblems, mergeData, recordId, RECORD_MAPS } from './dataUtils.js';
 import { canonicalJson } from './identity.js';
 
-/** Data-patch operations (DESIGN §32.5). Closed: a new op belongs in the frozen API table. */
+/** Data-patch operations (DESIGN §34.5). Closed: a new op belongs in the frozen API table. */
 export const PATCH_OPS = Object.freeze(['set', 'merge', 'add', 'append', 'remove']);
 
 const kind = v => v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v;

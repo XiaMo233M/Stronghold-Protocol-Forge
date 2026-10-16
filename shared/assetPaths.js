@@ -61,7 +61,7 @@ export const TRAFFIC_CATEGORIES = Object.freeze(['assets', 'audio', 'code', 'dat
 /**
  * The traffic category of a request path (the content-hash segment does not matter): `audio` (/media/,
  * /assets/audio/, a cosmetic plugin's .mp3 / .ogg at /p/ — also without the extension), `assets` (/assets/, /fonts/,
- * /icons/, the art of a content pack, a cosmetic plugin's other files at /p/ — DESIGN §32), `data` (/data/*.json, the
+ * /icons/, the art of a content pack, a cosmetic plugin's other files at /p/ — DESIGN §34), `data` (/data/*.json, the
  * UI language packs /i18n/, the pack index, a visual set /vs/…json, other JSON), `code` (the page, scripts, styles: /,
  * *.js, *.css, *.html, /vendor/, /sim/, /shared/), `other` (/healthz, error pages for anything else).
  * @param {string} path a URL path (no query)

@@ -1,4 +1,4 @@
-// One reader for numbers taken out of description text (DESIGN §32.5). Counts are capped. Percents and
+// One reader for numbers taken out of description text (DESIGN §34.5). Counts are capped. Percents and
 // durations stay finite and are not forced down to the count floor.
 
 import { dataBound } from './limits.js';
@@ -48,7 +48,7 @@ export function textCount(text, re, fallback, patternId) {
     if (Object.prototype.hasOwnProperty.call(CN_DIGIT, raw)) return Math.min(cap, CN_DIGIT[raw]);
     const n = Number(raw);
     // A matched run that is not finite (a string of nines) is still a count: clamp it, do not
-    // fall through to the official fallback. [ASSUMED] DESIGN §32.5.
+    // fall through to the official fallback. [ASSUMED] DESIGN §34.5.
     if (!Number.isFinite(n)) return cap;
     if (n < 0) return 0;
     return Math.min(cap, n);

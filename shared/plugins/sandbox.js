@@ -1,4 +1,4 @@
-// SES isolation shared by a browser module Worker and the permission-limited match child (DESIGN §32.11).
+// SES isolation shared by a browser module Worker and the permission-limited match child (DESIGN §34.11).
 // Never import this from the vanilla boot path. The real SDK owns registration and callback budgets; live engine
 // arguments belong to kit callbacks, not SDK data. Files are checked snapshots, never URLs to import/fetch.
 import { sha256Hex } from '../sha256.js';

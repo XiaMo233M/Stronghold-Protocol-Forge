@@ -1,4 +1,4 @@
-// Count phrases read out of skill / talent / trait text (DESIGN §32.5). Official maxima are scanned from
+// Count phrases read out of skill / talent / trait text (DESIGN §34.5). Official maxima are scanned from
 // vanilla tables only. A pattern that is not a count (a percent, a duration) does not belong here.
 
 /** @type {readonly {id: string, re: RegExp}[]} */

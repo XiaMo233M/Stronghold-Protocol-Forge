@@ -1,6 +1,6 @@
 // shared/sha256.js — SHA-256 (FIPS 180-4) in plain JavaScript: the same digest in Node and in every browser, without
 // crypto.subtle (it exists only in a secure context, and a LAN page at http://192.168.x.x is not one) and without a Node
-// API. The content identity of the plugin system hashes with it (shared/plugins/identity.js, DESIGN §32); the server
+// API. The content identity of the plugin system hashes with it (shared/plugins/identity.js, DESIGN §34); the server
 // may hash file bytes with node:crypto for speed — test/plugins/identity.test.js checks that both agree.
 //
 //   sha256Hex(input)   → 64 lowercase hex digits

@@ -4,10 +4,10 @@ export const MOD_KEYS = 'atkFlat atkPct atkFinal defFlat defPct hpFlat hpPct res
 export const FLAG_KEYS = 'stun freeze sleep silence disarm stealth invulnerable unblockable levitate fear cold reveal bind noHeal untargetable blockFly noMove noSp burstLock hidden noBlock tremble hitCount hitCountArts attract float noDisplace isolated camou liftoff selfBound healFree stealthOff groundbind'.split(' ');
 const enums = s => ({ enum: s.split(' ') });
 const number = { type: 'number', minimum: 0, maximum: 1e9 }, signed = { type: 'number', minimum: -1e9, maximum: 1e9 };
-const count = { type: 'integer', minimum: 1, maximum: 100 }; // [ASSUMED] bounded per-attack work, DESIGN §32.5.
+const count = { type: 'integer', minimum: 1, maximum: 100 }; // [ASSUMED] bounded per-attack work, DESIGN §34.5.
 const bool = { type: 'boolean' };
 const shape = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
-// [ASSUMED] Range work bound: 1024 tile offsets, each within ±64 (DESIGN §32.5).
+// [ASSUMED] Range work bound: 1024 tile offsets, each within ±64 (DESIGN §34.5).
 export const GRID_SCHEMA = { type: 'array', maxItems: 1024, items: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'integer', minimum: -64, maximum: 64 } } };
 export const MODS_SCHEMA = shape(Object.fromEntries(MOD_KEYS.map(k => [k, signed])));
 const flags = shape(Object.fromEntries(FLAG_KEYS.map(k => [k, bool])));

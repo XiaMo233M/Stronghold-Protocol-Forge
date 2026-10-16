@@ -1,4 +1,4 @@
-// shared/plugins/catalog.js — a community plugin catalogue (DESIGN §32.13, docs/PLUGINS.md §17). No Node builtin:
+// shared/plugins/catalog.js — a community plugin catalogue (DESIGN §34.13, docs/PLUGINS.md §17). No Node builtin:
 // the CLI, the studio page and the schema test share it. A catalogue is a document someone else publishes. This project
 // does not host plugins and does not run a market; installing still means the server downloads one https zip and checks
 // its SHA-256 (server/plugins/install.js). Nothing here fetches or runs a package.

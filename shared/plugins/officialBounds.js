@@ -1,6 +1,6 @@
 // (i18n-ignore-file: author-facing PLUGIN_DATA_BOUND text stays Chinese until the integrator merges the code; not player UI)
 // Official absolute maxima for plugin blackboard values and the few non-blackboard fields that drive loops
-// (DESIGN §32.5). Official data is immutable, so the table is cached by object identity. The battle reads the
+// (DESIGN §34.5). Official data is immutable, so the table is cached by object identity. The battle reads the
 // same cache; a direct kit built before getData() falls back to PLUGIN_BOUND_FLOOR, which still sits at or
 // above every official input of the clamped loops. [ASSUMED] factor 10 and floor 64.
 // Minima of step keys and maxima of description-text counts live in the same cache. A content set ships the
@@ -314,7 +314,7 @@ export function appendOfficialBounds(data, vanilla, bad) {
 }
 
 /**
- * The numbers of `config` the game reads as counts (DESIGN §32.5): the pick-one offer's count — at most the slots
+ * The numbers of `config` the game reads as counts (DESIGN §34.5): the pick-one offer's count — at most the slots
  * an offer shows (PLUGIN_OFFER_SLOTS, the game data's own cap), a positive whole number.
  * @param {object} data @param {(path: string, message: string, code?: string) => void} bad
  */
@@ -330,7 +330,7 @@ function appendConfigBounds(data, bad) {
 /**
  * The numbers of `factions` the wave generator reads as counts and weights (server/match/waves.js): every number of
  * `generation` (maxLevelCnt, specialEnemyNum, the typeSlots, the replaced counts, beFactors …), each type's count and
- * weight, each entry's weight — the same rule, from the official `factions` (integration note 11, DESIGN §32.5). The
+ * weight, each entry's weight — the same rule, from the official `factions` (integration note 11, DESIGN §34.5). The
  * replaced counts also stay within PLUGIN_ACTION_UNITS, the generator's own clamp. A value that is not a finite number
  * is out of bounds too (a patch can write 1e400).
  * @param {object} data @param {object} vanilla @param {(path: string, message: string, code?: string) => void} bad

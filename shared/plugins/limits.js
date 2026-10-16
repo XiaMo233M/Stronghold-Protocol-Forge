@@ -1,4 +1,4 @@
-// Shared numeric bounds for data plugins (DESIGN §32.5). The battle imports these same numbers so a later
+// Shared numeric bounds for data plugins (DESIGN §34.5). The battle imports these same numbers so a later
 // writer cannot bypass validateData. [ASSUMED] each cap is above every official table and far below ±1e9.
 
 /** Spawn rows in one wave, or in one branch phase. Official waves stay at or below 28. */
@@ -31,7 +31,7 @@ export const PLUGIN_GAIN_COUNT_KEYS = Object.freeze([
 ]);
 /**
  * Systematic cap for every other numeric blackboard key and the loop fields in officialBounds.js.
- * [ASSUMED] DESIGN §32.5: `|v| ≤ max(10 × official absolute max, 64)`. A key the official tables never
+ * [ASSUMED] DESIGN §34.5: `|v| ≤ max(10 × official absolute max, 64)`. A key the official tables never
  * have uses the floor. Official inputs of the clamped loops are at or below 55, so the floor alone does
  * not change a vanilla fight.
  */
