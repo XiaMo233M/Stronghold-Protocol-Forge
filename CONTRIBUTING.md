@@ -5,15 +5,19 @@
 
 ## 1. 准备环境
 
-需要 Node.js 22 或 24（CI 在这两个版本上跑）。
+需要 Node.js 22 或 24。CI 在 ubuntu 与 windows 两个系统上、按这两个 Node 版本跑矩阵（`.github/workflows/ci.yml`）。
 
 ```bash
-git clone https://github.com/sganggs/Stronghold-Protocol.git
-cd Stronghold-Protocol
+git clone https://github.com/XiaMo233M/Stronghold-Protocol-Forge.git
+cd Stronghold-Protocol-Forge
 npm install        # postinstall 把 pixi / preact / three 复制到 public/vendor
 npm run setup      # 下载美术 / 音频（只跑测试可以不下载：多数用例缺素材会跳过，少数严格判据会硬失败，见本节末）
 npm run dev        # 启动服务器（node --watch，改了服务器代码自动重启）：http://localhost:3000
 ```
+
+**本仓是 [sganggs/Stronghold-Protocol](https://github.com/sganggs/Stronghold-Protocol) 底座之上的非官方改版。**
+贡献提到**本仓**（`XiaMo233M/Stronghold-Protocol-Forge`），不要提到上游原作；往上游客提过的 PR 记在
+[docs/UPSTREAM-PR-LEDGER.md](docs/UPSTREAM-PR-LEDGER.md)。
 
 `npm run doctor` 检查 Node 版本、素材、端口。官方数据表由 `tools/build-data.mjs` 下载到 `.cache/gamedata/`，改数据时才需要。
 
@@ -37,10 +41,10 @@ cmd /c mklink /J  public\fonts             <主树>\public\fonts
 cmd /c mklink /H  data\local-assets.json   <主树>\data\local-assets.json
 ```
 
-**症状**：不接就跑 `node --test --test-concurrency=4`，会看到 **fail 2** —— `test/editor.test.js:596` 要
-`/data/local-assets.json` 却得到 404，`test/modAssets.test.js:338` 的 `assert.ok(haveBgm && haveFont)` 直接失败 ——
-外加 **skipped 24**。接好这四处，同一份代码回到 **fail 0 / skipped 5**。**结论：这是工作树搭建问题，不是产品缺陷**
-（同一份代码在主树上全绿）。
+**症状**：不接就跑 `node --test`，会看到两类失败 —— `test/editor.test.js:596` 要 `/data/local-assets.json` 却得到
+404，`test/modAssets.test.js:341` 的 `assert.ok(haveBgm && haveFont)` 直接失败 —— 外加一批跳过（缺素材的用例自己
+跳过）。接好这四处之后，这两条失败就不再出现。**结论：这是工作树搭建问题，不是产品缺陷**
+（它们报的是接线缺失，不是代码缺陷）。
 
 **缺素材时跳不跳**：多数用例会自己跳过（`test/assets.test.js` 用 `t.skip('fonts not generated …')`），但少数
 **严格判据**缺素材就**硬失败**（`test/modAssets.test.js`：它要拿两份真实文件对照 `/assets` 与 `/fonts` 声明
@@ -62,8 +66,8 @@ npm run lint && npm run check:imports && npm run typecheck       # 代码检查�
 ```
 
 提交 PR 前可以一条命令跑一遍 GitHub CI（`.github/workflows/ci.yml`）的全部检查：`npm run ci`（或 `node tools/ci.mjs`）。
-依次是 setup 检查、`node --test`、服务器冒烟测试（在空闲端口启动、请求 `/healthz` 和首页、运行 doctor，然后关掉）、lint、导入边界、
-类型；第一步失败就停下并打印每步结果和耗时。`--keep-going` 失败后继续，`--only lint,test` 只跑指定步骤，`--list` 列出步骤。
+它按顺序跑 `setup` → `test` → `smoke` → `lint` → `imports` → `typecheck`（`tools/ci.mjs` 里的 `STEPS`），
+第一步失败就停下并打印每步结果和耗时。`--keep-going` 失败后继续，`--only lint,test` 只跑指定步骤，`--list` 列出步骤。
 不包含 `npm ci`（依赖请自己装），也不跑 Node 版本 × 系统的矩阵。
 
 浏览器测试默认不跑，需要本机 Chrome（路径不标准时设置 `CHROME_PATH`），用环境变量打开：
@@ -78,6 +82,11 @@ SIM_E2E=1 node --test 'test/sim/*.browser.test.js'               # 浏览器里�
 **黄金结果**（[test/golden/README.md](test/golden/README.md)）：只重构、不改玩法的提交不能改变
 `test/golden/*.json`；有意改变玩法时运行 `npm run golden:update`，把新文件和改动放在同一个提交里，并在提交说明里写清
 哪些场景变了、为什么。
+
+**另一条不跟着 `npm run ci` 跑的闸门**：`node .github/pack-compat.mjs` 把**工坊站线上在跑的包**喂给本仓自己的校验器，
+回答「引擎抬版本之后，玩家手上的包还装不装得上」。工作流 `.github/workflows/pack-compat.yml` 只在**这个工具自己变了**
+或人工触发时跑它（一轮要从站上拉 60+ MB 存档）。退出码 0 = 我方的包没有新增不兼容，1 = 有，2 = 清单取不到
+（**取不到绝不报绿**）。默认站点是本仓自己的工坊站，脚本对站只做 GET，不需要凭据。
 
 ## 3. 忠实原则
 
@@ -105,6 +114,10 @@ SIM_E2E=1 node --test 'test/sim/*.browser.test.js'               # 浏览器里�
 - 规则改了，相关文档一起改：`docs/design/` 里对应的规则（章节号与文件见 docs/DESIGN.md 的索引）、`docs/history/` 里当前版本的
   修订记录、docs/SIM.md、docs/META.md、docs/DATA.md 等。
   `test/docs-consistency.test.js` 固定了文档里的一些句子，改文档后跑一下。
+- **节号写我们的号**：`docs/DESIGN.md` 是唯一的索引。我们这边插入了 §28 / §29，所以从那里起节号比上游**大 2**
+  —— 上游 `§N` 是我们的 `§(N+2)`（上游 §32 插件系统 = 我们的 §34，上游 §33 官方特效 = 我们的 §35）。
+  `node --test test/docs-paths.test.js` 守这一条：引用的 `DESIGN §N` 必须是真标题，且同一个标题号
+  （`N` / `N.M` / `N.M.K`）不许出现两次。
 - 代码和注释用英文；玩家文档（README、PLAYING、DEPLOY）用简体中文，技术文档用英文。界面上的文字写中文并用 `t('…')`
   包起来，英文放进 `public/i18n/en.json`（[docs/I18N.md](docs/I18N.md)）。
 - 翻译成新的语言：一个语言就是 `public/i18n/` 里的一个文件，不用改代码。`node tools/i18n.mjs template <语言代码>` 生成骨架，
@@ -125,26 +138,45 @@ SIM_E2E=1 node --test 'test/sim/*.browser.test.js'               # 浏览器里�
    跑 `node --test test/content/kits_layout.test.js`，再 `npm run golden:update`（只应新增 `test/golden/diy.json` 的场景）。
 5. PR 里逐项勾选 README 里的「Fidelity checklist」。
 
-目前池子里的 71 名干员都已经有 kit；改进现有的 kit 也按同样的清单来。相关讨论见 GitHub issue #136。
+自选池里的每一名干员都已经有 kit —— 没有 kit 文件的干员不会被列为自选（`server/sim/content/kits/index.js` 的
+`OPERATOR_KIT_FILES`，现在 72 条）；改进现有的 kit 也按同样的清单来。相关讨论见 GitHub issue #136。
+
+## 6. 打包与分发
+
+- **服务器轻量发行**：`node tools/package-server.mjs` 打出「只要游戏运行时与 Mod API、不带本机美术、不带内置内容包」的
+  服务器包。`--dry-run` 先看清单，`--list` 列文件，`--out <目录>` 指定输出。部署与运维读
+  [docs/DEPLOY-SERVER.md](docs/DEPLOY-SERVER.md)。
+- **完整整合包**：`npm run package`（`tools/package.mjs`）。
+- **包格式与兼容审计**：[docs/WORKSHOP.md](docs/WORKSHOP.md) 是工坊包格式的规则；
+  [docs/ENGINE-COMPAT-STARDUST-AUDIT.md](docs/ENGINE-COMPAT-STARDUST-AUDIT.md) 是 Forge / Stardust 的兼容审计。
+  插件另有一套入口：[docs/PLUGINS.md](docs/PLUGINS.md) 与 [plugins/AGENTS.md](plugins/AGENTS.md)。
 
 ---
 
 ## English summary
 
-- **Setup**: Node.js 22 or 24; `npm install`, `npm run setup` (art and audio — optional for tests: most suites skip
-  without them, a few strict ones fail hard, see the section above), `npm run dev`.
-  The code map is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- **Setup**: Node.js 22 or 24 (CI runs the matrix on ubuntu and windows). Clone
+  `https://github.com/XiaMo233M/Stronghold-Protocol-Forge.git` — this repository; the upstream original is
+  [sganggs/Stronghold-Protocol](https://github.com/sganggs/Stronghold-Protocol), and pull requests sent upstream are
+  logged in [docs/UPSTREAM-PR-LEDGER.md](docs/UPSTREAM-PR-LEDGER.md). Then `npm install`, `npm run setup` (art and
+  audio — optional for tests: most suites skip without them, a few strict ones fail hard, see the section above),
+  `npm run dev`. The code map is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - **Parallel worktrees**: a new `git worktree` carries only tracked files. Link the four git-ignored locations from an
   existing checkout — the vendored libraries under `public/vendor`, the downloaded art under `public/assets`, the
-  generated fonts, and `data/local-assets.json` (Windows `mklink /J`, `mklink /H`; `ln -s` elsewhere) — or the full
-  suite reports 2 failures and 24 skips that are not product bugs.
+  generated fonts, and `data/local-assets.json` (Windows `mklink /J`, `mklink /H`; `ln -s` elsewhere) — or two suites
+  fail for reasons that are not product bugs: `test/editor.test.js:596` gets a 404 for `/data/local-assets.json`, and
+  `test/modAssets.test.js:341` fails its `haveBgm && haveFont` assertion. Linking the four makes those two go away.
 - **Tests**: run the targeted files (`node --test <file>`, `--test-name-pattern`), then `node --test` and
   `npm run golden` before a pull request; `npm run lint`, `npm run check:imports`, `npm run typecheck`.
-  `npm run ci` (or `node tools/ci.mjs`) runs the checks of `.github/workflows/ci.yml` in one go and stops at the first
-  failure (`--keep-going`, `--only <steps>`, `--list`); it does not run `npm ci`. Browser suites
-  are opt-in: `SP_E2E=1`, `SP_REAL_E2E=1` (needs downloaded art), `RENDER_E2E=1`, `SIM_E2E=1` (a local Chrome,
-  `CHROME_PATH`). A refactor never changes `test/golden/*.json`; an intended gameplay change runs
-  `npm run golden:update` and commits the digests with the change, naming the scenarios that moved.
+  `npm run ci` (or `node tools/ci.mjs`) runs the steps of `.github/workflows/ci.yml` in order — `setup`, `test`,
+  `smoke`, `lint`, `imports`, `typecheck` — and stops at the first failure (`--keep-going`, `--only <steps>`, `--list`);
+  it does not run `npm ci`, and it does not run the OS × Node matrix. Browser suites are opt-in: `SP_E2E=1`,
+  `SP_REAL_E2E=1` (needs downloaded art), `RENDER_E2E=1`, `SIM_E2E=1` (a local Chrome, `CHROME_PATH`). A refactor never
+  changes `test/golden/*.json`; an intended gameplay change runs `npm run golden:update` and commits the digests with the
+  change, naming the scenarios that moved. Separate from `npm run ci`: `node .github/pack-compat.mjs` feeds the packs
+  live on the workshop site to this repository's own validator — "do the packs players already have still install?" The
+  workflow `.github/workflows/pack-compat.yml` runs it when the tool itself changes or on a manual dispatch, and exit
+  code 2 (the catalogue could not be fetched) is never green.
 - **Fidelity**: the official tables (`.cache/gamedata/excel/`) and PRTS (including the 备注 notes) are the sources;
   numbers come from the blackboards. Anything no source settles is marked `[ASSUMED]` in the code and the pull
   request; owner decisions are cited with their date; deliberate deviations are the owner's call and go into the design
@@ -155,11 +187,21 @@ SIM_E2E=1 node --test 'test/sim/*.browser.test.js'               # 浏览器里�
   message saying what changed, with the issue number; no attribution trailers such as `Co-Authored-By:` or
   `Generated with …` (the maintainers' convention) — merged pull requests are credited in the CHANGELOG. Describe the
   sources, the `[ASSUMED]` items, the tests and the golden scenarios that moved; update the docs a rule change makes
-  wrong. Code and comments in English; player-facing text in Chinese through `t('…')` with the English in
+  wrong. Section numbers are **ours**: `docs/DESIGN.md` is the only index, and from the inserted §28 / §29 our numbering
+  runs two ahead of upstream, so upstream `§N` is our `§(N+2)` (upstream §32 = our §34, upstream §33 = our §35).
+  `node --test test/docs-paths.test.js` requires every `DESIGN §N` citation to be a real heading, and every heading
+  number to be unique. Code and comments in English; player-facing text in Chinese through `t('…')` with the English in
   `public/i18n/en.json`. A new language is one file in `public/i18n/` and no code: `node tools/i18n.mjs template <code>`,
   translate, `node tools/i18n.mjs check <code>` (docs/I18N.md "Adding a language"; packs in general: docs/PACKS.md).
   Code is GPL-3.0-or-later; no monetisation features.
 - **Adding an operator (自选)**: follow "How to add an operator (自选)" in
   [server/sim/content/kits/README.md](server/sim/content/kits/README.md): `op-<codename>.js` keyed by the charId,
   registered in `OPERATOR_KIT_FILES`, a test `test/content/op_<codename>.test.js`, the fidelity checklist in the pull
-  request. All 71 operators of the current pool have kits; improvements follow the same checklist (GitHub issue #136).
+  request. Every operator of the 自选 pool already has a kit — an operator without a kit file is never offered as a pick
+  (`OPERATOR_KIT_FILES` in `server/sim/content/kits/index.js`, 72 entries today); improvements follow the same checklist
+  (GitHub issue #136).
+- **Packaging**: `node tools/package-server.mjs` builds the server-only distribution — the game runtime and the Mod API,
+  without local art and without bundled content packs (`--dry-run`, `--list`, `--out <dir>`; guide:
+  [docs/DEPLOY-SERVER.md](docs/DEPLOY-SERVER.md)); `npm run package` builds the full bundle. Workshop pack format:
+  [docs/WORKSHOP.md](docs/WORKSHOP.md). The plugin system has its own entry points
+  ([docs/PLUGINS.md](docs/PLUGINS.md), [plugins/AGENTS.md](plugins/AGENTS.md)).
