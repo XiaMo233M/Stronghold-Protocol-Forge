@@ -348,6 +348,10 @@
 
 .room-bar .btn--xl { min-width: 3.2rem; letter-spacing: .2em; }
 
+.trusted-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 90; padding: 5px 16px; background: #9b202b; color: #fff; display: flex; justify-content: space-between; gap: 12px; }
+.trusted-banner button { color: inherit; text-decoration: underline; }
+.trusted-hash { overflow-wrap: anywhere; font-family: monospace; }
+
 /* 本房间使用 mod (W-A/W-D, DESIGN §28.16): the room's declared set, plus whether THIS client holds it and a button that
    fetches exactly those packs. One row per pack, one line of state per row; the fill line only exists while something
    is missing. */
