@@ -103,14 +103,27 @@ describe('§28.14 补账：`server.modules` 的源码静态扫描在 import 之�
 
 // ---------------------------------------------------------------------------------------------------------------
 describe('§28.14 boot(config)：冻结的只读配置快照', () => {
-  test('白名单就是引擎真读的那几个 SP_*，多余的看不见', () => {
+  test('白名单就是包能观察的那几个 SP_*，多余的看不见；引擎私有的一律不给包看', () => {
+    // ① **包可见**白名单：恰好这四个。它们都是"只读观察"性质（表情开关 / 舞台 / 状态目录 / 工坊目录）——
+    //    `onBoot` 快照的 `env` 只带这些（shared/modSurface.js：包只能观察不能设值，也永远不能声明启动变量）。
     assert.deepEqual([...BOOT_CONFIG_ENV_KEYS], ['SP_BOT_EMOTES', 'SP_STAGE', 'SP_STATE_DIR', 'SP_WORKSHOP']);
-    // 反射源码：引擎里读过的 `process.env.SP_*` 必须全在名单里（新读一个而名单没跟上就红）。
+    // ② **引擎私有 / 安全边界参数**：引擎确实读它们，但**故意不给包看**。
+    //    `SP_CSP` = 站点 CSP 响应头开关（server/index.js，`off` 才关闭）；`SP_MATCH_HOST` = 对局宿主用子进程还是
+    //    worker 线程；`SP_PLUGIN_SCRIPTS` = 插件脚本模式（沙箱开不开）。三者都是运维/安全面，包读到没有正当用途。
+    //    ⚠️ **不要"好心"把它们加进上面的白名单** —— 尤其 `SP_PLUGIN_SCRIPTS` 是沙箱开关。
+    const ENGINE_PRIVATE_SP = ['SP_CSP', 'SP_MATCH_HOST', 'SP_PLUGIN_SCRIPTS'];
+    // 反射源码：引擎里读过的 `process.env.SP_*` 必须两份都归类（新读一个而没归类就红）。
     const src = [path.join(ROOT, 'server/index.js'), path.join(ROOT, 'server/modModules.js'),
       path.join(ROOT, 'server/match/Match.js'), path.join(ROOT, 'server/match/botEmotes.js')]
       .map((f) => fs.readFileSync(f, 'utf8')).join('\n');
     const read = [...new Set([...src.matchAll(/process\.env\.(SP_[A-Z_]+)/g)].map((m) => m[1]))].sort();
-    assert.deepEqual(read, [...BOOT_CONFIG_ENV_KEYS].sort(), '引擎读的 SP_* 与快照白名单必须逐字相同');
+    // ③ 引擎读到的 = 包可见 ∪ 引擎私有。任何一侧漏分类 ⇒ 这条红。
+    assert.deepEqual(read, [...BOOT_CONFIG_ENV_KEYS, ...ENGINE_PRIVATE_SP].sort(),
+      '引擎读的每个 SP_* 都必须在「包可见白名单」或「引擎私有」里显式归类');
+    // 且两者不相交：私有的一旦漏进白名单，包就能读到安全边界参数。
+    for (const k of ENGINE_PRIVATE_SP) {
+      assert.ok(!BOOT_CONFIG_ENV_KEYS.includes(k), `${k} 是引擎私有/安全边界参数，不该给包看`);
+    }
   });
 
   test('深冻结、值不是句柄、env 只带白名单里的', () => {
