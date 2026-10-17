@@ -33,6 +33,7 @@
 | 改数值与平衡 | [BALANCE.md](BALANCE.md) · [PLAYING.md](PLAYING.md) |
 | 动生成的游戏数据 | [DATA.md](DATA.md) — **永不手改** `data/*.json` |
 | 部署、打包、发版 | [DEPLOY.md](DEPLOY.md) · [WINDOWS.md](WINDOWS.md) · [UPSTREAM-UPGRADE.md](UPSTREAM-UPGRADE.md) |
+| **打发行包、发 release** | [BUILD-RECORD.md](BUILD-RECORD.md) — 发版八步、四个资产的产出命令、踩过的坑、历史版本的实测基线 |
 | 素材从哪来、怎么授权 | [ASSETS.md](ASSETS.md) |
 | **加东西**（意图 / 开关 / 包字段 / 槽位 / i18n） | [SYNC-POINTS.md](SYNC-POINTS.md) — 要一起改哪几处、漏了怎样、谁拦 |
 | 对局战绩与账号 | [RECORDS.md](RECORDS.md) |
@@ -65,6 +66,7 @@
 | [PLAYING.md](PLAYING.md) | 玩法指南（给玩家） |
 | [DEPLOY.md](DEPLOY.md) | 部署指南（长期开服） |
 | [WINDOWS.md](WINDOWS.md) | Windows 便携包（零安装方案） |
+| [BUILD-RECORD.md](BUILD-RECORD.md) | **发布流程与构建记录**：发版八步、四个资产各自怎么产、踩过的坑、各版本的实测基线与资产 sha256 |
 | [RECORDS.md](RECORDS.md) | 对局战绩与可选账号（`SP_ACCOUNTS=1`） |
 | [SYNC-POINTS.md](SYNC-POINTS.md) | **加东西时的同步点清单**：意图 / `behaviour` 开关 / 包字段 / 槽位 / i18n 各要一起改哪几处、漏了怎样、谁拦 |
 | [UPSTREAM-UPGRADE.md](UPSTREAM-UPGRADE.md) | 上游更新校对清单：上游发新版后照它走一遍 |
