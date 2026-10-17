@@ -61,8 +61,21 @@ test('a plugin sound is fetched without its extension; one that will not load fa
   const fw = fakeWindow();
   const origFetch = globalThis.fetch;
   const urls = [];
-  // the plugin's files are gone from the server (with or without the extension); the installation's are there
-  globalThis.fetch = async (u) => { urls.push(u); return String(u).startsWith('/p/') ? { ok: false, status: 404, headers: { get: () => 'text/html' } } : { ok: true, arrayBuffer: async () => new ArrayBuffer(8) }; };
+  // The plugin's files are gone from the server (with or without the extension); the installation's are there.
+  // ⚠️ mock 要照**真实服务器**的行为造，否则被测分支根本走不到：
+  //   · `/p/…`（插件文件）与 `/media/…`（无扩展名的那一跳）都 404；
+  //   · 真实 server/http/media.js 走 sendError ⇒ 404 **带** `Content-Type: text/html; charset=utf-8`
+  //     （server/http/common.js:28）。少了 content-type，audio.js 的 isAudioResponse 会因 `!type` 判成"可用"
+  //     （public/js/audio.js:564 `return !type || …`），于是 _buffer 的回落分支（:802）永不触发 —— 这条测试
+  //     要验的就是回落，所以 mock 必须把 content-type 带上。
+  //   · 安装版自己的 `/assets/audio/…` 是真的存在 ⇒ 200 + audio/mpeg。
+  const notFound = { ok: false, status: 404, headers: { get: () => 'text/html; charset=utf-8' } };
+  globalThis.fetch = async (u) => {
+    urls.push(u);
+    const s = String(u);
+    if (s.startsWith('/p/') || s.startsWith('/media/')) return notFound;
+    return { ok: true, status: 200, headers: { get: () => 'audio/mpeg' }, arrayBuffer: async () => new ArrayBuffer(8) };
+  };
   try {
     const layers = createCosmeticLayers();
     layers.setRoom(doc);
@@ -84,11 +97,21 @@ test('a plugin sound is fetched without its extension; one that will not load fa
     for (let i = 0; i < 3; i++) await tick();
     assert.ok(failed.includes(url('b/buy.mp3')));
     assert.ok(urls.includes(mediaUrl(BASE.audio.sfx.ui.buy)), 'then the installation\'s sound');
-    // a voice line of the same slot
+    // A voice line of the same slot. ⚠️ 这里**不能**期望它回落到安装版 —— 语音本来就没有那条路：
+    //   · bgm / sfx：URL 由插件层替换，但 `_buffer`（public/js/audio.js:800-805）先试无扩展名、失败再试原 URL，
+    //     而 `onFailed` → `layers.fail(url)` 让插件的那条写入被丢弃 ⇒ 下次 `layers.apply(BASE)` 给回安装版 URL，
+    //     于是能回落到安装版。
+    //   · voice：`_playVoice` 的第 4 参 `fallback` 的语义是「**所选配音语言**缺这句 ⇒ 用**默认配音同名的文件**」
+    //     （public/js/audio.js:1145-1148；上游 0.3.0 的 voiceLine :351-363 逐字同义 —— cn.find(file === file(dub))），
+    //     **它不覆盖"插件素材坏了"**。url 已被插件整体替换成 /p/tunes/…/b/sel.ogg，mediaUrl 只去掉扩展名（同一个文件），
+    //     fallback 又为空 ⇒ **两条路都到不了安装版** ⇒ 这一槽就是没声音。
+    //   上游 0.3.0 亦同（它的 voice() 传的 fallback 同样是配音语言的回落）。
+    // ⚠️ 所以这里验的是：**失败被报告**（`onFailed` 收到它 ⇒ 界面上看得见，不是静默），且没有音频在播。
+    //    「插件语音坏了就听不到」这个缺口已记档（0.19.1 候选：作为独立特性评估，含"回落会掩盖作者错误"的副作用）。
     assert.equal(a.voice('char_a', 'select'), true);
     for (let i = 0; i < 3; i++) await tick();
-    assert.ok(failed.includes(url('b/sel.ogg')));
-    assert.equal(a.voiceNode?.url, BASE.audio.voice.char_a.select);
+    assert.ok(failed.includes(url('b/sel.ogg')), 'the broken plugin line is reported, not silently swallowed');
+    assert.equal(a.voiceNode?.url, undefined, 'no fallback to the installation\'s line — see the note above');
     // the bond cue (its own channel: _playBondCue)
     a.sfx('bondUp');
     for (let i = 0; i < 3; i++) await tick();

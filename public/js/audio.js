@@ -609,6 +609,7 @@ export class AudioManager {
     this.startVoiceDone = false; // 行动出发 of this field (the first operator deployed says it)
     this.uiVoices = 0;
     this.wantBgm = null;      // desired key (kept while locked)
+    this.lastBgmKey = null;   // the key the screen asked for last (refreshBgm)
     this.bgm = null;          // { key, loopUrl, nodes: [{src, gain}], gain }
     this.bgmToken = 0;
     this.units = new Map();   // battle unit id → defId
@@ -866,6 +867,7 @@ export class AudioManager {
    */
   playBgm(key) {
     try {
+      this.lastBgmKey = key;
       if (this.lobbyMusicOverride?.(key)) { this.wantBgm = null; ++this.bgmToken; this._fadeOutBgm(); return; }
       if (!this.ctx) { this.wantBgm = key; return; }
       if (this.bgmSilent) {
