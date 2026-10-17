@@ -15,6 +15,7 @@ import {
   rangeGridBox, shortcutFor, sanitizeSettings, DEFAULT_SETTINGS, normalizeResult, cycleField, fieldLabel, homeFieldId,
   activeBubbles, sortedPlayers, tileKey, prepCapsuleLabel, prepCamera, dropFailureReason, terrainInfo,
 } from '../../public/js/ui/gameLogic.js';
+import { OFFICIAL_FX_MODES } from '../../public/js/ui/gameLogic/settings.js';
 import { PHASE, GEO, DEFAULT_VOICE_LANG } from '../../shared/constants.js';
 import { setLang, setMessages } from '../../shared/i18n.js';
 
@@ -722,8 +723,21 @@ describe('keyboard & settings', () => {
   test('sanitizeSettings', () => {
     assert.deepEqual(sanitizeSettings(null), { ...DEFAULT_SETTINGS });
     assert.deepEqual(sanitizeSettings({ bgm: 3, sfx: -1, voice: 2, muted: 'yes', damageNumbers: false, quality: 'ultra' }),
-      { bgm: 1, sfx: 0, voice: 1, muted: false, damageNumbers: false, officialDamageNumbers: false, ammoCount: false, workshopSkins: true, workshopSources: true, quality: 'high', textSize: 'sm', keys: { ...DEFAULT_SETTINGS.keys }, voiceLang: DEFAULT_VOICE_LANG, voiceLangByChar: {} },
+      { bgm: 1, sfx: 0, voice: 1, muted: false, damageNumbers: false, officialDamageNumbers: false, ammoCount: false, mysticEnergy: false, workshopSkins: true, workshopSources: true, quality: 'high', officialFx: 'auto', textSize: 'sm', keys: { ...DEFAULT_SETTINGS.keys }, voiceLang: DEFAULT_VOICE_LANG, voiceLangByChar: {} },
       'a saved profile without `keys` (before 0.2.0) gets the default key map (test/ui/feedback5-hotkeys.test.js)');
+    // 官方特效 (officialFx, 0.3.0 render/vfx): 'auto' is the default — the desktop resolves it to 完整 and a touch
+    // device to 精简 (render/vfx/tier.js). The 设置 row offers 关 / 精简 / 完整, so `off` MUST survive: dropping it
+    // was the bug (the control snapped back to the resolved tier, so the player could not turn the effects off).
+    assert.equal(DEFAULT_SETTINGS.officialFx, 'auto', 'default is the automatic tier, not a fixed one');
+    assert.deepEqual([...OFFICIAL_FX_MODES], ['auto', 'off', 'lite', 'full']);
+    assert.equal(sanitizeSettings({ bgm: 0.5 }).officialFx, 'auto', 'a profile saved before the setting existed');
+    assert.equal(sanitizeSettings({ officialFx: 'off' }).officialFx, 'off', 'the hard acceptance point: 点「关」真的能关');
+    for (const pick of ['lite', 'full', 'auto']) {
+      assert.equal(sanitizeSettings({ officialFx: pick }).officialFx, pick, `${pick} survives`);
+    }
+    for (const bad of ['ultra', 'OFF', true, 1, null, {}]) {
+      assert.equal(sanitizeSettings({ officialFx: bad }).officialFx, 'auto', `junk ${JSON.stringify(bad)} falls back to the default`);
+    }
     // 工坊外观 (workshopSkins): a boolean, default ON, and only a real boolean survives — a hand-edited
     // localStorage must not turn the gate into something the chain reads as "off" by accident.
     assert.equal(DEFAULT_SETTINGS.workshopSkins, true, 'default on: an installed outfit that does nothing is worse');

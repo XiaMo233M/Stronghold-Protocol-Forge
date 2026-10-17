@@ -21,6 +21,8 @@ export const TEXT_SIZES = Object.freeze(['sm', 'md', 'lg', 'xl']);
  * ammoCount: 设置「弹药数量」 — the rounds left / the magazine under an ammo skill's bar (render/units.js; PR #552),
  *   off by default: the official HUD has no such number (the maintainer's decision of 2026-10-13).
  * textSize: TEXT_SIZES (css/theme.css `--t`, applied by ui/settings.js applyTextSize).
+ * officialFx: 设置「官方特效」 (0.3.0, render/vfx) —— OFFICIAL_FX_MODES：`auto` 按设备取档，其余三档由玩家点选
+ *   (ui/settings.js 的「官方特效」分段控件；render/app.js 交给 render/vfx/tier.js resolveOfficialFx)。
  * workshopSkins: 工坊时装（`pack.json.skins` + 一个注册了的外观提供者）要不要生效 —— 见
  *   `public/js/ui/portraitChain.js` 的步骤 0。默认 **true**：装了一套时装却什么都不发生，比「能关掉」
  *   更让人困惑。关掉时解析链与「这一版之前」逐字相同（那条不变量由 `test/ui/portraitChain.test.js` 钉住）。
@@ -29,7 +31,7 @@ export const TEXT_SIZES = Object.freeze(['sm', 'md', 'lg', 'xl']);
  *   关掉时导入路径与「没有这一格」逐字相同（走包内那条 `/workshop-resources/…` URL），也就是这一格的**一键回退**：
  *   一个包把加载源改坏了，玩家关掉这一格就回到原样（不变量由 `test/modAssetsMirrors.test.js` 钉住）。
  */
-export const DEFAULT_SETTINGS = Object.freeze({ bgm: 0.6, sfx: 0.8, voice: 0.8, muted: false, damageNumbers: true, officialDamageNumbers: false, ammoCount: false, mysticEnergy: false, workshopSkins: true, workshopSources: true, quality: 'high', textSize: 'sm', keys: DEFAULT_HOTKEYS, voiceLang: DEFAULT_VOICE_LANG, voiceLangByChar: Object.freeze({}) });
+export const DEFAULT_SETTINGS = Object.freeze({ bgm: 0.6, sfx: 0.8, voice: 0.8, muted: false, damageNumbers: true, officialDamageNumbers: false, ammoCount: false, mysticEnergy: false, workshopSkins: true, workshopSources: true, quality: 'high', officialFx: 'auto', textSize: 'sm', keys: DEFAULT_HOTKEYS, voiceLang: DEFAULT_VOICE_LANG, voiceLangByChar: Object.freeze({}) });
 
 /**
  * The 配音语言 vocabulary (settings 语音语言) under upstream 0.2.2's name: the canonical list is shared/constants.js
@@ -42,6 +44,12 @@ export const DEFAULT_SETTINGS = Object.freeze({ bgm: 0.6, sfx: 0.8, voice: 0.8, 
  */
 export { VOICE_LANGS };
 const QUALITIES = ['high', 'medium', 'low'];
+/**
+ * 设置「官方特效」(0.3.0, render/vfx) 的取值。`auto` 是自动档：桌面取 `full`、触屏取 `lite`
+ * (render/vfx/tier.js resolveOfficialFx)，所以界面只有 关 / 精简 / 完整 三个按钮，没有 `auto` 那一格。
+ * sanitizeSettings 必须收下 `off` —— 否则玩家点「关」会被丢掉、控件立刻弹回（与 lastBgmKey 同型）。
+ */
+export const OFFICIAL_FX_MODES = Object.freeze(['auto', 'off', 'lite', 'full']);
 /** A charId an override may name (the same shape the workshop validator accepts for a voice line). */
 const CHAR_ID = /^char_[A-Za-z0-9_]{1,64}$/;
 /** Overrides kept at most: a full roster is ~200 operators — a file that grew past this was not written by this UI. */
@@ -115,6 +123,7 @@ export function sanitizeSettings(raw) {
     workshopSkins: typeof r.workshopSkins === 'boolean' ? r.workshopSkins : DEFAULT_SETTINGS.workshopSkins,
     workshopSources: typeof r.workshopSources === 'boolean' ? r.workshopSources : DEFAULT_SETTINGS.workshopSources,
     quality: QUALITIES.includes(r.quality) ? r.quality : DEFAULT_SETTINGS.quality,
+    officialFx: OFFICIAL_FX_MODES.includes(r.officialFx) ? r.officialFx : DEFAULT_SETTINGS.officialFx,
     textSize: TEXT_SIZES.includes(r.textSize) ? r.textSize : DEFAULT_SETTINGS.textSize,
     keys: sanitizeHotkeys(r.keys),
     voiceLang: VOICE_LANGS.includes(r.voiceLang) ? r.voiceLang : DEFAULT_SETTINGS.voiceLang,
