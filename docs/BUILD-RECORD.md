@@ -161,6 +161,24 @@ node scripts/make-update-package.mjs --bundle <out>\bundle --from <上一版完�
 - **正解**：**不加 `--prefix`**。核法：读已发布 zip 的**前几个 entry 名**，
   若首个是 `.dockerignore` 这类文件名（而不是目录），说明那一版无前缀。
 
+### 坑 8：设置项「读了但没存」⇒ 功能静默不存在
+- **症状**：某个设置项在设置页里**看不见**；或看得见但**不生效**；或相关面板/数字**永远不出现**。
+- **根因**：运行时（渲染侧、`screens/*.js`、`diag.js`）早就在读某个键 `s?.X === true`，
+  而**设置侧的四样**（`DEFAULT_SETTINGS` 键 / `sanitizeSettings` 归一 / 设置页的控件 / i18n 文案）
+  **一项都没落地**。那个键因此永远不存在 ⇒ 读到的恒为 `undefined` / `false` ⇒ 该功能静默不存在。
+  ⚠️ 这类缺口**没有报错、没有红测试**，只有"这个功能好像没有"的主观印象。
+- **三个实例**（本项目都出现过，都已补落）：
+  · `mysticEnergy`（秘术师能量）—— 渲染侧与 HUD 读它，设置侧四样全缺
+  · `officialFx`（官方特效）—— 读写链路缺赋值，控件动了不生效
+  · `combatMetrics`（作战统计）—— `screens/game.js` 读 `useSettings().combatMetrics === true`，
+    键不存在 ⇒ 面板永远不显示
+- **排查法**：⭐ 怀疑某个设置不生效时，**先核渲染侧有没有 `s?.X === true` 这类读法，
+  再核 `DEFAULT_SETTINGS` 有没有 X** —— 两者对不上就是这里。
+- **已加的门禁**：`test/ui/settings-keys.test.js` 守「`updateSettings({ X: … })` 写入的 X
+  必须在 `DEFAULT_SETTINGS` 里」，防"加了 Toggle 却忘了加键"。
+  ⚠️ **它抓不住「连控件都没有」的那种**（上面三个实例补落前的状态）——
+  那一半只能靠审 `*.rej` 与上面那条排查法。⚠️ **别以为"有测试了就不会再犯"。**
+
 ---
 
 ## 4. 实测基线
@@ -174,6 +192,7 @@ node scripts/make-update-package.mjs --bundle <out>\bundle --from <上一版完�
 | `golden --jobs 4` | 六族全 match（roster 49 · bonds 46 · fields 22 · matches 21 · standins 10 · diy 140）· 未用 `golden:update` |
 | `node tools/i18n.mjs check --all --strict` | 四语各 2101 / 2101（100 %）· 0 missing · 0 errors |
 | 内容集身份 `cs` | 随 `APP_VERSION` 变（`0.19.0` → `aefa6e90…`，`0.19.1` → `d8050e8b…`） |
+| `settings-keys` 门禁 | 绿（20 个写入点 / 17 个唯一键 / `DEFAULT_SETTINGS` 17 个键 —— 两边键集合相等） |
 
 ⚠️ **`cs` 的诚实局限**：只核到 identity 那条链
 （`server/plugins/identity.js` 的 `computeVanillaContent` → `shared/plugins/identity.js` 的 `contentHashInput`，
