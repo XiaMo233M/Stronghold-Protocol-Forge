@@ -77,7 +77,7 @@ import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { crc32 } from './zip.js';
-import { checkPluginFolder, packPlugin } from './pack.js';
+import { packPlugin, skeletonClipData } from './pack.js';
 import { createPluginRegistry } from './registry.js';
 import { buildContentSet } from './contentSet.js';
 import { createVisualSets } from './visualSet.js';
@@ -2192,6 +2192,64 @@ function publicReport({ meta, products, primaryId, wrote, dryRun, check, issues 
   return report;
 }
 
+function removeSpineValue(node, skel) {
+  if (!node || typeof node !== 'object') return;
+  if (Array.isArray(node)) { for (const item of node) removeSpineValue(item, skel); return; }
+  for (const k of Object.keys(node)) {
+    const v = node[k];
+    if (isObj(v) && v.skel === skel) delete node[k];
+    else removeSpineValue(v, skel);
+  }
+}
+
+function pruneEmptyObjects(node) {
+  if (!isObj(node)) return;
+  for (const k of Object.keys(node)) {
+    pruneEmptyObjects(node[k]);
+    if (isObj(node[k]) && !Object.keys(node[k]).length) delete node[k];
+  }
+}
+
+/**
+ * Parse each Spine model the way `plugin.mjs pack` does. A skeleton that yields no clip entry is removed from the
+ * overlay and named; the other models stay. The lock is written afterwards by packPlugin.
+ * @param {string} dir the staged plugin folder
+ * @returns {{ path: string, zh: string, en: string }[]}
+ */
+function dropUnreadableModels(dir) {
+  const assetsPath = path.join(dir, 'assets.json');
+  if (!fs.existsSync(assetsPath)) return [];
+  let assets;
+  try { assets = JSON.parse(fs.readFileSync(assetsPath, 'utf8')); } catch { return []; }
+  const has = (rel) => { try { return fs.statSync(path.join(dir, ...String(rel).split('/'))).isFile(); } catch { return false; } };
+  const ov = readAssetOverlay(assets, { has, permissions: ['assets.add', 'assets.override'] });
+  /** @type {Map<string, { spine: { skel: string, atlas: string, textures: string[] }, containers: Set<string> }>} */
+  const models = new Map();
+  for (const op of ov.ops || []) {
+    if (!op.spine) continue;
+    if (!models.has(op.spine.skel)) models.set(op.spine.skel, { spine: op.spine, containers: new Set() });
+    models.get(op.spine.skel).containers.add(op.at[0]);
+  }
+  /** @type {{ path: string, zh: string, en: string }[]} */
+  const dropped = [];
+  for (const { spine, containers } of models.values()) {
+    const clip = skeletonClipData(dir, spine, containers);
+    if (clip.entry) continue;
+    const why = clip.problems[0] || `${spine.skel}: unreadable`;
+    removeSpineValue(assets, spine.skel);
+    dropped.push({
+      path: spine.skel,
+      zh: `读不了骨架 ${spine.skel}（${why}），只丢掉这个模型，其余照常导入。`,
+      en: `Could not read skeleton ${spine.skel} (${why}); only this model was dropped.`,
+    });
+  }
+  if (dropped.length) {
+    pruneEmptyObjects(assets);
+    fs.writeFileSync(assetsPath, `${JSON.stringify(assets, null, 2)}\n`);
+  }
+  return dropped;
+}
+
 function writeTree(dir, files, manifest) {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, PLUGIN_MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -2272,10 +2330,11 @@ export async function importForge(source, opts = {}) {
       for (const p of built.products) {
         const dir = path.join(stage, p.id);
         writeTree(dir, p.files, p.manifest);
-        const checked = checkPluginFolder(dir, `plugins/${p.id}/`, { vanilla: vanilla || undefined });
-        if (checked.problems.length || checked.warnings.length) {
-          for (const text of [...checked.problems, ...checked.warnings]) issues.push({ code: 'PLUGIN_INVALID', detail: `${p.id}: ${text}` });
-        }
+        // Clip data has to exist before the strict check. packPlugin reads each skeleton the same way
+        // `node tools/plugin.mjs pack` does and writes plugin.lock.json. An unreadable skeleton is removed first.
+        if (p.class === 'cosmetic') for (const row of dropUnreadableModels(dir)) planned.meta.skipped.push(row);
+        // No checkPluginFolder before this point: the staged folder has no plugin.lock.json yet, so its clip check
+        // would fail for every model. packPlugin writes the lock and returns that same check as `packed.check`.
         const packed = packPlugin(dir, { vanilla: vanilla || undefined, where: `plugins/${p.id}/` });
         if (!packed.wrote || packed.build.problems.length) {
           for (const text of packed.build.problems) issues.push({ code: 'PLUGIN_INVALID', detail: `${p.id}: ${text}` });
