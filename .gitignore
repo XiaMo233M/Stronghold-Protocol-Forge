@@ -23,6 +23,14 @@ data/local-assets.json
 data/local-fx.json
 # download caches, upstream tables, ledgers, reports, setup state
 .cache/
+# a worktree that LINKS these folders instead of holding them: git sees a symlink as a file, which the patterns
+# above (trailing slash: directories only) do not match. Anchored, so a same-named folder deeper in the tree is
+# still covered by the unanchored patterns above.
+/node_modules
+/public/vendor
+/public/assets
+/public/fonts
+/.cache
 # per-machine runtime state (`server/modModules.js` stateRootFor: SP_STATE_DIR, else <repo>/var): server-module
 # state, account/record files, and the mod registry (DESIGN §28.47). Never a repository artifact — the CLI and the
 # server both write here, so a git checkout stays clean only if this is ignored.

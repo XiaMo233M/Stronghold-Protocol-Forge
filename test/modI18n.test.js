@@ -7,8 +7,8 @@
 //   2. **装载期**：声明的文件必须真的在包里、是 JSON 对象、每个值都是字符串 —— 否则**整个包不加载**（与 `assets`
 //      / `client` / `server.preDispatch` 同一条纪律，DESIGN §28.13.3）。
 //   3. **合并规则**：**已有键绝不覆盖**、冲突**点名报告**（键 + 语种 + 包 id + 双方的值）、值相同的重叠不算冲突。
-//      真实用例是 plugin-pack 那份 74 键的补丁：它只有 `语音语言` 这一条与我们重叠，而 `en` 的值不同
-//      （`Voice language` vs `Voice Language`），ja / ko / zh-TW 三份逐字相同。
+//      真实用例是 plugin-pack 那份 74 键的补丁：现在有 **6 条**与我们重叠（`语音语言` / `快速匹配` / `发送` /
+//      `取消匹配` / `数值` / `正在读取…`），其中值不同的按语种分别是 en 3 / ja 1 / ko 1 / zh-TW 0。
 //
 // 后半段走**真的 HTTP 服务器**：`/i18n/<code>.json` 送的是合并体，而 `public/i18n/<code>.json` 一个字节都不改。
 import { describe, test, before, after } from 'node:test';
@@ -159,12 +159,17 @@ describe('i18n: merging into an existing language', () => {
     //                  **en / ja 与补丁不同**（我们 "Cancel match" / "マッチング中止"），ko / zh-TW 逐字相同
     //                  ⇒ en、ja 各多一条真冲突。这一条是**事实变了**，不是判据被放松：下面那三条断言
     //                  （重叠集合 / 逐语种冲突表 / added 与 skippedSame 的算术）一条没少。
-    // 合并规则是「已有键绝不覆盖 + 值不同就点名」，所以 added 恒为 70，冲突按语种分别是 en 2 / ja 1 / ko 1 / zh-TW 0。
+    // 合并规则是「已有键绝不覆盖 + 值不同就点名」。重叠从 4 条变成 **6 条**：b13d80b6（i18n 补齐 0.3.0 漏掉的译文，
+    // 在 v0.19.0-0.3.0 之内）把 `数值`（Number）与 `正在读取…`（Loading…）也加进了引擎自带那批，
+    // 而补丁里也有这两条 ⇒ 现在 74 − 6 = **68** 条是新增；冲突按语种是 en 3 / ja 1 / ko 1 / zh-TW 0。
+    // `数值` 两边值不同（补丁 Stats，我们 Number）⇒ 按本测试自己的规则计进 en 的冲突表；`正在读取…` 同值，不算冲突。
     const QUICK_MATCH_KEY = '快速匹配';
     const SEND_KEY = '发送';
     const CANCEL_KEY = '取消匹配';
-    const SHARED = [COLLIDING_KEY, QUICK_MATCH_KEY, SEND_KEY, CANCEL_KEY];
-    const CONFLICTS = { en: [COLLIDING_KEY, CANCEL_KEY], ja: [CANCEL_KEY], ko: [SEND_KEY], 'zh-TW': [] };
+    const STATS_KEY = '数值';
+    const LOADING_KEY = '正在读取…';
+    const SHARED = [COLLIDING_KEY, QUICK_MATCH_KEY, SEND_KEY, CANCEL_KEY, STATS_KEY, LOADING_KEY];
+    const CONFLICTS = { en: [COLLIDING_KEY, CANCEL_KEY, STATS_KEY], ja: [CANCEL_KEY], ko: [SEND_KEY], 'zh-TW': [] };
     const src = join(ROOT, 'test', 'fixtures', 'plugin-pack-i18n');
     for (const code of ['en', 'ja', 'ko', 'zh-TW']) {
       const entries = JSON.parse(fs.readFileSync(join(src, `${code}.json`), 'utf8'));
@@ -181,7 +186,7 @@ describe('i18n: merging into an existing language', () => {
       }
       const r = mergeWorkshopI18n(ours, entries, { pack: 'quickchat-en', lang: code });
       assert.equal(r.ok, true, r.detail);
-      assert.equal(r.added.length, 70, `${code}: 补上 70 条（74 键里 4 键我们已有）`);
+      assert.equal(r.added.length, 68, `${code}: 补上 68 条（74 键里 6 键我们已有）`);
       assert.equal(r.conflicts.length, expected.length, `${code}: 冲突条数`);
       assert.equal(r.skippedSame, SHARED.length - expected.length, `${code}: 值相同而不计的条数`);
       for (const k of expected) {
@@ -192,7 +197,7 @@ describe('i18n: merging into an existing language', () => {
         assert.equal(c.official, 'Voice Language');
         assert.equal(c.packValue, 'Voice language');
       }
-      assert.equal(Object.keys(r.merged).length, Object.keys(ours).length + 70);
+      assert.equal(Object.keys(r.merged).length, Object.keys(ours).length + 68);
     }
   });
 

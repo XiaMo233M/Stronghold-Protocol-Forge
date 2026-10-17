@@ -260,7 +260,7 @@ describe('交付包：形状层与装载期的三处读者一致', () => {
     assert.equal(norm.ok, true, norm.detail);
   });
 
-  test('i18n 四语种真的合并（74 键里 70 条新增；重叠 4 条，其中 4 条是各语种的真冲突）', async () => {
+  test('i18n 四语种真的合并（74 键里 68 条新增；重叠 6 条，其中 en 3 / ja 1 / ko 1 / zh-TW 0 是真冲突）', async () => {
     if (!HAS_PACK) return skip();
     const { mergeWorkshopI18n } = await import('../shared/workshop.js');
     const { panels } = loadOnce();
@@ -272,9 +272,12 @@ describe('交付包：形状层与装载期的三处读者一致', () => {
     //                  **ko 不同**（我们对 "전송"，补丁对 "보내기"）⇒ ko 多一条真冲突；
     //   * `取消匹配` —— **0.18.4 装 ui-hub 包时进我们四包的一条**（包版快速匹配那一格用它）：**en / ja 不同**
     //                  （我们 "Cancel match" / "マッチング中止"），ko / zh-TW 逐字相同 ⇒ en、ja 各多一条真冲突。
-    // 合并规则是「已有键绝不覆盖 + 值不同就点名」：所以 added 恒为 70，冲突按语种分别是 en 2 / ja 1 / ko 1 / zh-TW 0。
-    const SHARED = ['语音语言', '快速匹配', '发送', '取消匹配'];
-    const CONFLICTS = { en: ['语音语言', '取消匹配'], ja: ['取消匹配'], ko: ['发送'], 'zh-TW': [] };
+    //   * `数值` / `正在读取…` —— **b13d80b6**（i18n 补齐 0.3.0 漏掉的译文，在 v0.19.0-0.3.0 之内）之后引擎自带，
+    //                  补丁里也有 ⇒ 重叠从 4 条变 6 条。`数值` 两边不同（补丁 Stats，我们 Number）⇒ 计进 en 的冲突表；
+    //                  `正在读取…` 同值（Loading…），不算冲突。
+    // 合并规则是「已有键绝不覆盖 + 值不同就点名」：所以 added 是 74 − 6 = **68**，冲突按语种是 en 3 / ja 1 / ko 1 / zh-TW 0。
+    const SHARED = ['语音语言', '快速匹配', '发送', '取消匹配', '数值', '正在读取…'];
+    const CONFLICTS = { en: ['语音语言', '取消匹配', '数值'], ja: ['取消匹配'], ko: ['发送'], 'zh-TW': [] };
     for (const code of Object.keys(decl.i18n)) {
       const ours = JSON.parse(fs.readFileSync(path.join(ROOT, 'public/i18n', `${code}.json`), 'utf8'));
       const theirs = JSON.parse(fs.readFileSync(path.join(PACK_DIR, decl.i18n[code]), 'utf8'));
@@ -290,7 +293,7 @@ describe('交付包：形状层与装载期的三处读者一致', () => {
       }
       const r = mergeWorkshopI18n(ours, theirs, { pack: 'plugin-pack', lang: code });
       assert.equal(r.ok, true, `${code}: ${r.detail}`);
-      assert.equal(r.added.length, 70, `${code}: 74 键里 4 键引擎已有`);
+      assert.equal(r.added.length, 68, `${code}: 74 键里 6 键引擎已有`);
       assert.equal(r.conflicts.length, expected.length, `${code}: 冲突条数`);
       for (const k of expected) {
         assert.equal(r.conflicts.find((c) => c.key === k)?.key, k, `${code}: 冲突必须点名 "${k}"`);
