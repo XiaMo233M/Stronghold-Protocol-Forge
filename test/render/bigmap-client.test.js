@@ -99,37 +99,58 @@ describe('客户端渲染层的窗口：官方记录 = 历史数字，大图 = �
   });
 
   test('带位（bandFor / fieldRows）：官方与历史一致，大图跟着自己的分区上移', () => {
-    for (const kind of ['prep', 'normal', 'unite']) {
+    // ⚠️ D29（23568577「prep 相机也看 preview pen」，采纳上游维护者 2026-10-15 的决定，取代 playtest #2 item 6）
+    // 之后 **prep 与 pen 共用同一条带**：prep 视野里要能看见休整期下一轮的敌人与那两道红闸（就在右上角），
+    // 所以 🔍▶▶ 才是"移到已经看得见的东西上"。上游 0.3.0 的实现逐字同形：
+    //     return kind === 'pen' || kind === 'prep' ? [6, 18] : [6, 13];
+    // ⇒ 本用例原来把 prep 和 normal 一起期望成 [6, 13]，是 D29 漏改的那一处（D29 只改了
+    //    public/js/render/app/view.js 与 test/ui/playtest2.test.js）。
+    for (const kind of ['normal', 'unite']) {
       assert.deepEqual(bandFor(kind), [6, 13], kind);
       assert.deepEqual(fieldRows(kind), [6, 13], kind);
     }
     assert.deepEqual(bandFor('boss'), [0, 13]);
     assert.deepEqual(fieldRows('bossPrep'), [0, 13], 'boss 准备区的行带到板凳下的墙');
-    assert.deepEqual(bandFor('pen'), [6, 18]);
-    assert.deepEqual(fieldRows('pen'), [6, 18]);
+    // ⭐ prep 与 pen 同带（D29 之后）—— 反向断言：谁把它们拆开，或让 prep 退回普通带，这两条立刻红。
+    for (const kind of ['prep', 'pen']) {
+      assert.deepEqual(bandFor(kind), [6, 18], kind);
+      assert.deepEqual(fieldRows(kind), [6, 18], kind);
+    }
+    assert.deepEqual(bandFor('prep'), bandFor('pen'), 'D29 之后 prep 与 pen 共用一条带');
+    assert.notDeepEqual(bandFor('prep'), bandFor('normal'), 'prep 带 ≠ 普通带（prep 含 pen 带）');
     // 行带的下界是板凳下那堵墙（官方第 6 行 = boss 带 0–5 上方一行），上界跟着这张图的等待区 / 普通带
     assert.equal(bandFor('prep')[0], OFFICIAL_LAYOUT.battle.boss.r1 + 1);
     assert.equal(fieldRows('prep')[0], OFFICIAL_LAYOUT.battle.boss.r1 + 1);
     assert.equal(bandFor('prep', BIG_L)[0], BIG_L.battle.boss.r1 + 1, '大图的墙仍是第 6 行（boss 带没有动）');
     assert.equal(bandFor('pen', BIG_L)[1], BIG_L.pen.r1, '笔带的底 = 这张图等待区的底');
-    // 23×27：普通带 13–16（上隔墙 17），等待区 18–22，boss 带 0–5 + 墙 6
-    assert.deepEqual(bandFor('prep', BIG_L), [6, 17]);
-    assert.deepEqual(fieldRows('prep', BIG_L), [6, 17]);
+    // 23×27：普通带 13–16（上隔墙 17），等待区 18–22，boss 带 0–5 + 墙 6 ⇒ prep/pen 的底 = 等待区的底
+    assert.deepEqual(bandFor('normal', BIG_L), [6, 17]);
+    assert.deepEqual(bandFor('prep', BIG_L), [6, 22]);
+    assert.deepEqual(fieldRows('prep', BIG_L), [6, 22]);
     assert.deepEqual(bandFor('boss', BIG_L), [0, 17]);
     assert.deepEqual(fieldRows('boss', BIG_L), [0, 17]);
     assert.deepEqual(bandFor('pen', BIG_L), [6, 22]);
     assert.deepEqual(fieldRows('pen', BIG_L), [6, 22]);
+    assert.deepEqual(bandFor('prep', BIG_L), bandFor('pen', BIG_L), '大图上 prep 与 pen 仍同带');
   });
 
   test('boardArea：官方返回历史矩形，大图平移出它自己的场与笔', () => {
-    assert.deepEqual(boardArea('prep'), [{ r0: 6, r1: 13, c0: 0, c1: 10 }]);
+    // D29：prep 相机带 pen 块 ⇒ `boardArea('prep')` 与 `boardArea('pen')` 一样是「普通区 + pen 区」两块。
+    assert.deepEqual(boardArea('prep'), [
+      { r0: 6, r1: 13, c0: 0, c1: 10 }, { r0: 13, r1: 18, c0: 6, c1: 14 },
+    ]);
+    assert.deepEqual(boardArea('prep'), boardArea('pen'), 'D29 之后 prep 与 pen 建同一块区域');
+    assert.deepEqual(boardArea('normal'), [{ r0: 6, r1: 13, c0: 0, c1: 10 }], '普通相机不带 pen 块');
     assert.deepEqual(boardArea('boss'), [{ r0: 0, r1: 6, c0: 0, c1: 20 }]);
     assert.deepEqual(boardArea('pen'), [
       { r0: 6, r1: 13, c0: 0, c1: 10 }, { r0: 13, r1: 18, c0: 6, c1: 14 },
     ]);
     assert.deepEqual(boardArea('unite'), [{ r0: 6, r1: 13, c0: 0, c1: 20 }]);
-    // 大图：行上移 4，列加宽 6
-    assert.deepEqual(boardArea('prep', BIG_L), [{ r0: 10, r1: 17, c0: 0, c1: 16 }]);
+    // 大图：行上移 4，列加宽 6。⚠️ D29 之后 prep 也带 pen 块（与 pen 相机同一块区域），见上一段的说明。
+    assert.deepEqual(boardArea('prep', BIG_L), [
+      { r0: 10, r1: 17, c0: 0, c1: 16 }, { r0: 17, r1: 22, c0: 6, c1: 20 },
+    ]);
+    assert.deepEqual(boardArea('prep', BIG_L), boardArea('pen', BIG_L), '大图上 prep 与 pen 仍建同一块区域');
     assert.deepEqual(boardArea('boss', BIG_L), [{ r0: 4, r1: 10, c0: 0, c1: 26 }]);
     assert.deepEqual(boardArea('pen', BIG_L), [
       { r0: 10, r1: 17, c0: 0, c1: 16 }, { r0: 17, r1: 22, c0: 6, c1: 20 },
