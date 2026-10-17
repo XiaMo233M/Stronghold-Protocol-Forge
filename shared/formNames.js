@@ -44,6 +44,7 @@ export const FIRST_PARTY_FORM_NAMES = Object.freeze({
   enemy_2025_syufo:    Object.freeze(['crawl']),
   enemy_9008_acbunn:   Object.freeze(['revealed']),
   enemy_9010_acpupp:   Object.freeze(['husk', 'revived']),
+  enemy_9011_acrefr:   Object.freeze(['stopped']),
 });
 
 /**
