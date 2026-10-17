@@ -1,7 +1,7 @@
 // The ONE judgement that decides whether a plugin is made for this server: its manifest `app` range against
 // `PLUGIN_APP_VERSION` — the UPSTREAM game version — never against this fork's release number `APP_VERSION`.
 //
-// This file is the pin for that rule. Point any of these readers back at `APP_VERSION` (0.19.0, while every plugin template
+// This file is the pin for that rule. Point any of these readers back at `APP_VERSION` (0.19.1, while every plugin template
 // and every upstream 0.3.0 manifest declares `>=0.3.0 <0.4.0`) and these tests go red. That is not hypothetical: when the
 // 0.3.0 plugin pipeline first landed, `shared/plugins/contentSet.js composeContentSet`'s `usable()` reads
 // `manifest.compatible`, so an incompatible plugin was not merely "not loaded" — it was *unknown* (`PLUGIN_UNKNOWN`),
