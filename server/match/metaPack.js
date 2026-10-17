@@ -47,6 +47,8 @@ function importSpecifiers(code) {
 function climbOf(spec) {
   let n = 0;
   let rest = spec;
+  // loop-cap: rest.length / 3 —— 每轮 slice(3)，rest 必短 3 ⇒ 上界就是初始长度除以 3，
+  // 不可能死循环（test/plugins/loopCaps.test.js 要求每个 while 点名它的预算）。
   while (rest.startsWith('../')) { n++; rest = rest.slice(3); }
   return n;
 }

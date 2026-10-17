@@ -164,9 +164,13 @@ test('the module card reads its talent changes at the operator\'s 潜能, as 局
   assert.ok(lines.some((x) => x.includes('每攻击到一个敌人回复自身<@ba.kw>50</>生命')), lines.join(' | '));
   assert.ok(lines.some((x) => x === '攻击范围内存在2名及以上敌人时攻击速度<@ba.kw>+12</>'));
   // the detail hands the operator's 潜能 to it — the stored one (cultivationView: opsOf(ops, charId).potential) when the
-  // operator has a 潜能 curve; a data plugin's operator without one gets none, the full-potential text (DESIGN §34.5)
+  // operator has a 潜能 curve; a data plugin's operator without one gets none, the full-potential text (DESIGN §34.5).
+  // 钉语义不钉排版：`ModuleInfo` 必须收到一个 `potential`，且它的值来自 `opsOf(ops, charId).potential`
+  // （0.3.0 之后模板里直接读 `opsOf(...)`；从前是 `cv.potentialOn ? cv.potential : null` 这层包装 —— 两者语义相同，
+  // 所以这里只要求"有 potential 属性 + 来源是 opsOf(ops, charId).potential"，属性顺序与其它 props 不再钉死）。
   const src = readFileSync(path.join(ROOT, 'public/js/screens/loadout.js'), 'utf8');
-  assert.match(src, /<\$\{ModuleInfo\} m=\$\{m\} golden=\$\{golden\} opt=\$\{modOpt\} potential=\$\{cv\.potentialOn \? cv\.potential : null\} \/>/);
+  assert.match(src, /<\$\{ModuleInfo\}[\s\S]{0,200}?potential=\$\{opsOf\(ops, [\w.]*charId\)\.potential\}/,
+    'ModuleInfo 收到 potential，且来自 opsOf(ops, charId).potential');
   const cult = readFileSync(path.join(ROOT, 'public/js/screens/cultivation.js'), 'utf8');
   assert.match(cult, /const cur = opsOf\(ops, charId\);\n  const potentialOn = potentialEditable\(charId, tables\);\n  return \{\n    potential: cur\.potential,/);
 });

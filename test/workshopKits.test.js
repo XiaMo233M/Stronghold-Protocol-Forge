@@ -523,12 +523,14 @@ describe('行为层: delivery to the browser', () => {
     const src = fs.readFileSync(join(ROOT, 'public/js/battle/runner.js'), 'utf8');
     assert.match(src, /export async function loadSpecKits/);
     assert.match(src, /spec\s*&&\s*spec\.workshopKits|spec\.workshopKits/);
-    // 上游 0.2.1 把战斗启动重写成「待处理表 + prepare()」，参数从 `msg` 变成条目 `e`：
-    // 这条断言钉的是**工坊 kits 必须挂在真正构造战斗的那一处**（否则工坊行为层会静默失效）。两张表（干员 / 召唤物）
-    // 都必须挂在那里：少一个，那一半的包效果在浏览器侧就静默消失，服务端复算会把玩家的结果判为不一致。
-    assert.match(src, /createBattleFromSpec\(e\.spec, sim\.ds, \{[\s\S]{0,240}?logger, kits, tokenKits/);
+    // 上游 0.2.1 把战斗启动重写成「待处理表 + prepare()」，参数从 `msg` 变成条目 `e`；0.3.0 又把**真正构造战斗的
+    // 那一步**交给宿主（`e.host.start(spec, opts)`），于是 kits 不再内联进 `createBattleFromSpec(...)` 的实参。
+    // 这条断言钉的是**工坊 kits 必须挂在真正构造战斗的那一处**（否则工坊行为层会静默失效），不是某个函数名。
+    // 两张表（干员 / 召唤物）都必须挂在那里：少一个，那一半的包效果在浏览器侧就静默消失，服务端复算会把玩家的
+    // 结果判为不一致。
+    assert.match(src, /e\.host\.start\(e\.spec, \{[^}]*\blogger, kits, tokenKits\b/);
     // kit 的**归属**与**预算**（DESIGN §28.52 的 kit 那一半）走的是**同一个落点**：它们与两张 kit 表一起交给
-    // `createBattleFromSpec`，否则浏览器侧 kit 的逐单位回调不归账、而服务端复算那半会回滚 —— 两端在**不同**的
+    // 构造战斗的那一处，否则浏览器侧 kit 的逐单位回调不归账、而服务端复算那半会回滚 —— 两端在**不同**的
     // 调用次数上停，玩家算出来的战果会被判为不一致。空表不写这几个键（KEY DISCIPLINE）。
     assert.match(src, /kitOwners\.size \? \{ kitOwners \} : \{\}/);
     assert.match(src, /kitBudgets\.size \? \{ kitBudgets \} : \{\}/);

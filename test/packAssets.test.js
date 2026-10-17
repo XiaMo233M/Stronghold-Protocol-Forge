@@ -203,9 +203,12 @@ describe('四组声明: 形状合法 ⇒ 接受，并如实出现在解析结果
       requires: ['serviceWorker', 'cacheStorage', 'webCrypto'],   // 闭枚举的次序，不是书写次序
     });
     // 挂载点是**闭枚举**：前四个是 0.11.0 的浮层，后六个是业主 2026-10-10 裁决里「插进已存在的组件」那一半
-    //（`screen.game.shopCard` 是可重复宿主，每张商店卡一个容器）。
+    //（`screen.game.shopCard` 是可重复宿主，每张商店卡一个容器）；第 10 个 `screen.room.aside` 由 G4(1)（87646c98）
+    // 加进来（房间页侧栏宿主），那一笔同一口径改了 `modClientHosts` / `modPanelWraps` 两侧的 pin 与 docs 槽位表 ——
+    // 本文件这条 pin 当时漏改。
     assert.deepEqual(CLIENT_PANEL_SLOTS, ['root.overlays', 'root.guide', 'screen.game.aside', 'screen.result.footer',
-      'screen.game.shopCard', 'screen.game.bondStrip', 'screen.game.hud', 'screen.game.overlay', 'screen.loadout.detail']);
+      'screen.game.shopCard', 'screen.game.bondStrip', 'screen.game.hud', 'screen.game.overlay', 'screen.loadout.detail',
+      'screen.room.aside']);
     assert.deepEqual(CLIENT_PANEL_REPEATABLE, ['screen.game.shopCard']);
     assert.deepEqual(CLIENT_REQUIRES, ['serviceWorker', 'cacheStorage', 'webCrypto']);
     // 可选字段不写就不出现（不然「没声明」与「声明成 undefined」会是两种字节）

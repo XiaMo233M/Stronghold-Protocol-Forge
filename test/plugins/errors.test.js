@@ -39,8 +39,12 @@ function codeFiles() {
 
 test('every PLUGIN_* code the code names (as a string) is in the catalogue, every ERR PLUGIN_* code too', () => {
   const used = new Map();
+  // 只扫**代码**，不扫注释：文档注释里为了「提到」某个名字而写成的 `PLUGIN_APP_VERSION`（shared/constants.js 第 72 行）
+  // 不是错误码 —— 它是版本常量（第 74 行 `export const PLUGIN_APP_VERSION = UPSTREAM_VERSION;`），本就不该进目录。
+  // 把注释剥掉再扫，比维护一份"例外名单"稳：以后注释里再提到别的常量名也不会误报。
+  const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
   for (const f of codeFiles()) {
-    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    const src = stripComments(fs.readFileSync(path.join(ROOT, f), 'utf8'));
     for (const m of src.matchAll(/['"`](PLUGIN_[A-Z0-9_]+)['"`]/g)) if (!used.has(m[1])) used.set(m[1], f);
   }
   assert.ok(used.size >= 40, `${used.size} codes found`);
