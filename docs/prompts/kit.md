@@ -399,7 +399,7 @@ talents: [{
 
 | 你要的效果 | 钩子 | 为什么不是别的 |
 |---|---|---|
-| 取消 / 改这一次攻击的目标 | `beforeAttack` `{ attacker, targets, isSkill, profile }` | 目标已选定、还没结算：清空 `ctx.targets` 就是取消（`server/sim/ai.js:265`） |
+| 取消 / 改这一次攻击的目标 | `beforeAttack` `{ attacker, targets, isSkill, profile }` | 目标已选定、还没结算：清空 `ctx.targets` 就是取消（`server/sim/ai.js:107`） |
 | 「每次攻击」计数 / 特效 | `attack` `{ attacker, targets, isSkill }` | 伤害已发出、溅射与连锁还没走完（`server/sim/ai.js:231`） |
 | 改这一下伤害 | `hit` `{ source, target, dmg, credit }` | 在减伤之前，唯一能改 `dmg.mul` / `defIgnore*` / `cancel` 的位置（`server/sim/damage.js:340`） |
 | 附伤 / 反伤 / 回技力 / 叠层 | `damaged` `{ source, target, amount, type, dmg, credit }` | 伤害真的落地之后（`server/sim/damage.js:436`）；`amount` 可能为 0（全被盾吃掉） |
@@ -621,7 +621,7 @@ const foes = battle.enemiesInKeys(gridKeys(unit, def.skill.rangeGrid), unit, { c
   `dealt` / `isSplash` / `isChain` / `main` / `attackId`：`server/sim/ai.js:290`）；**每次攻击一次、只给主目标**用
   `attack.onHit(ctx)`（`server/sim/ai.js:373`，它的 `ctx.dealt` 是这次攻击对**所有**目标造成的总伤害）。
 - **引擎不提供**：改不了敌人「怎么挑我」（那是敌人的 profile / data），只能靠 `taunt`（`server/sim/units.js:148`）或
-  `battle.setAllyTarget` 把友军注册成可攻击目标（`server/sim/battle/queries.js:78`）。
+  `battle.setAllyTarget` 把友军注册成可攻击目标（`server/sim/battle/queries.js:135`）。
 
 ### 8.10 与盟约、天赋、数据层交互的边界
 
@@ -654,7 +654,7 @@ const foes = battle.enemiesInKeys(gridKeys(unit, def.skill.rangeGrid), unit, { c
 | 在 kit 里改全局状态：`bb.atk = 2`、`def.rangeGrid.push(…)`、`battle.flags.dpPerSec = 5` | `bb` / `def` 深度冻结会当场抛异常（`server/sim/simdata.js:518`）；`battle.flags` 是构造期输入（`server/sim/Battle.js:150`），运行中改它没有文档保证，而且服务端复算与浏览器两头都得改才一致 | `addBuff`（数值）、`unit.rangeGrid` 副本 + `refreshRange`（范围）、`setExtraRange`（补格子） |
 | 依赖执行时序：「我的 `hit` 一定在别人之后 / 之前跑」 | 顺序 = `priority` 降序 + 注册顺序（`server/sim/battle/hooks.js:34`），同一份文件里换个写法就变，而且官方 kit 的 priority 你看不到 | 用自己的标记判断（官方例子：`server/sim/content/kits/ops/op-judge.js:158` 用 `WeakSet` 认自己的那次伤害） |
 | 写死数值：`mods: { atkPct: 0.6 }` | 干员升级、精英、模组换了数值它**永远不变**，还不报错 | 从黑板读：`num(bb.atk, 0)` —— 数字只从黑板来是硬规矩（`server/sim/content/kits/README.md:268`） |
-| `Math.random()` / `Date.now()` / `setTimeout` | 服务端复算结果不同 → 玩家成绩被拒，而报错看起来与随机数无关（`shared/kitAuthoring.js:41`） | `battle.rng()` / `battle.after` / `battle.every`（`server/sim/battle/hooks.js:112`） |
+| `Math.random()` / `Date.now()` / `setTimeout` | 服务端复算结果不同 → 玩家成绩被拒，而报错看起来与随机数无关（`shared/kitAuthoring.js:41`） | `battle.rng()` / `battle.after`（`server/sim/battle/hooks.js:133`）/ `battle.every`（`server/sim/battle/hooks.js:140`） |
 | 模块级可变变量记状态：`let hits = 0;` | 同一份文件在服务端与浏览器各加载一次，两边的变量不是一份（`server/sim/content/kits/README.md:84`） | `unit.mem`（`server/sim/units.js:83`）或按 `battle` 作键的 `WeakMap`（`server/sim/content/kits/shared/tier1.js:146`） |
 | `battle.on(…)` 不写 `{ owner: unit }` | 单位退场后钩子还在，反复部署越挂越多、效果翻倍（`server/sim/battle/hooks.js:46`） | 每个 `on` 都带 `owner` |
 | 在 `tick` 里做重活或每帧分配大对象 | 一局 30 fps × 玩家数，卡的是主机 | `battle.every(0.5, …)`（`server/sim/battle/hooks.js:119`） |
@@ -673,7 +673,7 @@ const foes = battle.enemiesInKeys(gridKeys(unit, def.skill.rangeGrid), unit, { c
 | 运行时换掉战斗档案（攻击方式、弹道、治疗模式） | 没有公开接口：`kit.trait` 只在构造期合并一次（`server/sim/battle/players.js:213`、`server/sim/professions.js:710`） | 技能期间用 SkillSpec 的 `attack` / `targeting`（`server/sim/skills.js:572` 是它的生效判定），或改 `ctx.dmg` |
 | 直接设操作者的面板属性 | 没有接口（只有召唤物能用 `spawnToken` 的 `opts.stats`：`server/sim/battle/summons.js:60`） | `mods` |
 | 运行时改全局规则 / 经济 / 回合表 | `battle.flags` 是构造期输入（`server/sim/Battle.js:150`）；包也不能贡献 `config`（`docs/WORKSHOP.md:56`） | 改自己的单位、自己 `battle.emit` 命名空间事件 |
-| 让敌人改路线 / 换 AI | 没有接口 | 位移 `battle.push` / `pull` / `pullToFront`（`server/sim/battle/displacement.js:60`、`:97`、`:131`）与状态 `fear` / `attract`（`server/sim/buffs.js:85`、`:121`） |
+| 让敌人改路线 / 换 AI | 没有接口 | 位移 `battle.push` / `pull` / `pullToFront`（`server/sim/battle/displacement.js:63`、`:103`、`:137`）与状态 `fear` / `attract`（`server/sim/buffs.js:85`、`:121`） |
 | 独立的护盾槽 / 多个盾各吸一类伤害 | 没有：盾就是 buff 的 `shield` / `shieldHits`（`server/sim/buffs.js:167`、`:168`） | 一个 key 一个盾，用 `shieldType` 限定吸收类型（`server/sim/damage.js:243`） |
 | 改「治疗落在谁身上」 | `heal` 钩子只能改 `amount`（`server/sim/damage.js:655`） | 自己选目标（`server/sim/battle/queries.js:93`、`:109`） |
 | 读存档 / 准备区 / 商店 / 装备栏 | sim 里没有这些对象 | `battle.getPlayer(playerId)` 给的是战场视图（`docs/SIM.md:843`），`battle.data` 给的是本局数据（`server/sim/Battle.js:114`） |
