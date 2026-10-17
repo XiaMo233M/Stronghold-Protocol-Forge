@@ -22,7 +22,9 @@
 // card's side do not move — the field is sized from the host element's clientWidth (render/app.js).
 
 import { useLayoutEffect, useEffect, useRef, useState } from '../../vendor/hooks.module.js';
-import { personalApplied } from '../content.js';
+import { catalog, personalApplied, cosmeticPlugins, installedCount, loadCatalog, personal, personalSet, pluginName, setPersonalPlugin } from '../content.js';
+import { describeError, toast } from './toasts.js';
+import { pluginMicro } from './pluginTag.js';
 import { fxAvailable } from '../render/vfx/available.js';
 import { resolveOfficialFx } from '../render/vfx/tier.js';
 import { html, Modal, Button, Icon, MicroLabel } from './components.js';
@@ -314,6 +316,37 @@ function DiagSection() {
  * radiogroup and never a 全部 hero — and a missing dub is named instead of silently offered.
  * @param {{ value: string }} props the settings' voiceLang
  */
+function CosmeticSection() {
+  const cat = useStore((s) => s, Object.is, catalog);
+  const ids = useStore((s) => s.ids, Object.is, personal);
+  const installed = useStore(installedCount);
+  useEffect(() => { if (installed) loadCatalog({ force: true }); }, [installed]);
+  const list = installed ? cosmeticPlugins(cat.plugins, 'personal') : [];
+  if (!list.length) return null;
+  const set = personalSet(ids, list.filter((p) => typeof p.vs === 'string'));
+  const applied = new Set(set.order);
+  const auto = new Set(set.auto);
+  const flip = (id, on) => { const r = setPersonalPlugin(id, on); if ('error' in r) toast(describeError(r.error), 'warn'); };
+  return html`<section class="set-plugins" aria-labelledby="set-plugins-title" data-testid="personal-plugins">
+    <div class="set-keys__head">
+      <span class="set-row__label" id="set-plugins-title">${t('外观插件')}<${MicroLabel}>COSMETIC PLUGINS<//></span>
+    </div>
+    <p class="set-hint">${t('只改变你自己看到的画面和声音，不影响其他博士，也不影响战斗；插件为非官方制作。')}</p>
+    ${list.map((p) => {
+      // on: applied (chosen, or 「自动」: another one needs it) — or chosen but left out now (a conflict): switch it off
+      const skipped = set.skipped.includes(p.id);
+      const on = applied.has(p.id) || skipped;
+      const isAuto = auto.has(p.id);
+      return html`<div key=${p.id} class="set-row" data-plugin=${p.id}>
+        <span class="set-row__label">${pluginName(p)}${isAuto ? html` <span class="plugrow__badge">${t('自动')}</span>` : null}<${MicroLabel}>${pluginMicro(p)}<//>
+          ${skipped ? html`<span class="set-hint is-warn">${t('与其他已开启的插件冲突或缺少所需插件，没有生效')}</span>` : null}</span>
+        <button type="button" class=${`set-toggle${on ? ' is-on' : ''}`} role="switch" aria-checked=${on ? 'true' : 'false'} aria-label=${pluginName(p)}
+          disabled=${isAuto && !ids.includes(p.id)} onClick=${() => flip(p.id, !on)}><i></i><span>${on ? tc('toggle', '开启') : tc('toggle', '关闭')}</span></button>
+      </div>`;
+    })}
+  </section>`;
+}
+
 function VoiceLangRow({ value }) {
   useData('assets');
   const all = availableVoiceLangs(data.get('assets'));
@@ -409,6 +442,7 @@ export function SettingsModal({ open, onClose }) {
       <p class="set-hint set-textsize-note">${t('调整界面文字大小，棋盘保持原比例。')}</p>
       <${ScreenFitSection} />
       <${HotkeySection} keys=${s.keys} touchUi=${touchUi} />
+      <${CosmeticSection} />
       <${DiagSection} />
       <p class="set-hint">${touchUi ? t('触屏操作：点击单位选中（撤退 / 出售）· 长按单位或卡牌查看详情 · 拖动部署后滑动选择朝向') : t('右键查看详情')}</p>
     </div>

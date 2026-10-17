@@ -2178,5 +2178,9 @@
   "房间的插件内容无法启动模拟": "The room's plugin content could not start the simulation",
   "房间的插件内容出错，本局模拟已结束": "The room's plugin content failed; the simulation has ended",
   "秘术师能量": "Mystic Energy",
-  "在秘术师的血条下方显示储存的攻击能量 / 上限（如 2/3）。官方用干员身上的特效表示，没有这个数字。": "Shows a Mystic Caster's stored attack energy / its maximum under the HP bar (e.g. 2/3). The official game shows it as an effect on the operator, without a number."
+  "在秘术师的血条下方显示储存的攻击能量 / 上限（如 2/3）。官方用干员身上的特效表示，没有这个数字。": "Shows a Mystic Caster's stored attack energy / its maximum under the HP bar (e.g. 2/3). The official game shows it as an effect on the operator, without a number.",
+  "外观插件": "Cosmetic plugins",
+  "与其他已开启的插件冲突或缺少所需插件，没有生效": "Conflicts with another plugin that is on, or needs a plugin that is missing: not in effect",
+  "只改变你自己看到的画面和声音，不影响其他博士，也不影响战斗；插件为非官方制作。": "Changes only what you see and hear — not for the other Doctors, and never the battles. Plugins are unofficial.",
+  "本服务器安装了 {n} 个插件": "This server has {n} {n|plugin|plugins} installed"
 }
