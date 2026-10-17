@@ -21,6 +21,12 @@ const { hudBands } = await import('../../public/js/ui/fieldHost.js');
 const { presetCamera } = await import('../../public/js/render/projection.js');
 const { FOLD_CAMERA_MS, CAMERA_MS } = await import('../../public/js/render/app/tune.js');
 
+// prep 相机取的是**地图自己的 prep 带**（`shared/layout.js` 的 `battle.prep`；官方 19×21 解出来是
+// `{ r0: 7, r1: 12, c0: 0, c1: 10 }` —— 整备区一行 + 普通带四行，论证见 render/layout.js `mapRectOf` 的注释）。
+// ⚠️ 它**不是** `GEO.NORMAL_RECT`（那是普通带，r0 = 9）：差的正是头顶那一行整备区。
+// 与 issue5-fold-camera.test.js:30 的 `PREP_RECT` 同一口径。
+const PREP_RECT = { r0: GEO.HAND_ROW, r1: GEO.NORMAL_RECT.r1, c0: GEO.NORMAL_RECT.c0, c1: GEO.NORMAL_RECT.c1 };
+
 // ---- the choice (gameLogic deployFoldsShop) -----------------------------------------------------------------------
 
 describe('deployFoldsShop: the deploy interaction temporarily folds the shop', () => {
@@ -49,7 +55,12 @@ describe('deployFoldsShop: the deploy interaction temporarily folds the shop', (
   test('the zoom it causes is exactly issue #5\'s folded-shop camera, on the boss prep half too', () => {
     const pl = (id, seat) => ({ playerId: id, seat, alive: true });
     const pub = { round: 6, bossRound: 14, hiddenRound: 15, players: [pl('a', 0), pl('b', 1)] };
-    assert.deepEqual(prepCameraFor(pub, 'a', true), { kind: 'prep', opts: { rect: { ...GEO.NORMAL_RECT }, side: 'L', shop: false } });
+    assert.deepEqual(prepCameraFor(pub, 'a', true), { kind: 'prep', opts: { rect: { ...PREP_RECT }, side: 'L', shop: false } });
+    // ⚠️ 反向断言：prep 带必须**不等于**普通带。将来若有谁把 prepCamera 改回 `GEO.NORMAL_RECT`
+    // （丢掉头顶那行整备区，prep 视野会矮一行），这条会立刻红 —— 只钉"等于某个数字"是抓不到这种回退的。
+    const prepRect = prepCameraFor(pub, 'a', true).opts.rect;
+    assert.notDeepEqual(prepRect, { ...GEO.NORMAL_RECT }, 'prep 带 ≠ 普通带（前者含整备区那一行）');
+    assert.equal(prepRect.r0, GEO.HAND_ROW, 'prep 带的上界 = 整备区那一行');
     const boss = { ...pub, round: 14 };
     assert.deepEqual(prepCameraFor(boss, 'b', true), { kind: 'bossPrep', opts: { side: 'R', shop: false } });
   });
@@ -111,7 +122,8 @@ function withDom({ rem }, fn) {
 describe('the deploy fold zooms the phone board like 收起, and ending it asks for the shop camera again', () => {
   test('844×390 touch viewport: tiles grow while dragging; the end state is the exact shop camera', () => {
     const [w, h] = [844, 390];
-    const opts = { rect: { ...GEO.NORMAL_RECT }, side: 'L' };
+    // 这条量的是 prep 相机（`hudBands('prep', …)` / `presetCamera('prep', …)`）⇒ rect 用 prep 带，不是普通带。
+    const opts = { rect: { ...PREP_RECT }, side: 'L' };
     withDom({ rem: 40 }, () => {
       const openHud = hudBands('prep', { width: w, height: h }, { shop: true });
       const foldHud = hudBands('prep', { width: w, height: h }, { shop: false });
