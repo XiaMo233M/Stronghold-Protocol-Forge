@@ -179,6 +179,39 @@ node scripts/make-update-package.mjs --bundle <out>\bundle --from <上一版完�
   ⚠️ **它抓不住「连控件都没有」的那种**（上面三个实例补落前的状态）——
   那一半只能靠审 `*.rej` 与上面那条排查法。⚠️ **别以为"有测试了就不会再犯"。**
 
+### 坑 9：两条打包路径对 `test/` 的处理不一致（⚠️ **记档，不是已修**）
+- **事实**：
+  · **npm 发行包**（`tools/package.mjs` 的 `isPlayerFile`）**收** `test/helpers/battleHarness.js`
+    ——设计意图写在 `tools/package.mjs` 的 `AUTHOR_TEST_FILES` 注释里：
+    「the author-facing test harness that **ships with the player package**（**the only test file a release carries**）」。
+    `Dockerfile` / `.dockerignore` 也都按这个路径放行它。
+  · **Windows 便携包**（`scripts/make-windows-bundle.mjs` 的 `SKIP_TRACKED = ['test/']`）**整目录跳过** `test/`
+    ——连 `battleHarness.js` 一起跳掉。
+- **⚠️ 一个反证**（说明便携包那条可能是故意的）：0.19.0 的构建日志写「略过 **1037** 个 test/ 文件」，
+  若 `battleHarness.js` 该带，数字应是「1036 个 test/ + 1 个豁免」。
+- **状态**：⚠️ **两条并存，本版未修。** 哪条是对的属**产品裁决**（"便携包该不该带作者工具"）。
+- **提示**：`test/plugin-package.test.js` 那条走的是 `plan()`（npm 发行包路径），**不覆盖便携包**
+  ——所以这一致性问题没有任何测试盯着。
+
+### 坑 10：`core.autocrlf=true` 让测试读到的行尾与 git 里不同（⚠️ **第二次踩**）
+- **症状**：断言某几行"在文件里"，逐条打印却发现确实在 ⇒ 但 `includes()` 全 false。
+- **根因**：`core.autocrlf=true` 的 Windows 检出把 git 里的 **LF** 变成工作区的 **CRLF**。
+  测试若 `readFileSync(...).split('\n')`，切出来的每行末尾带 `\r`，
+  于是 `lines.includes('node_modules')` 实际比的是 `'node_modules\r'` ⇒ false。
+  ⚠️ **git 里一切正常**（`git show` 看不到 `\r`，`git status` 也干净）—— **只有测试读工作区时才暴露**。
+- **两次实例**：
+  · ① `docs/design/mod-layer.md` 被写成 CRLF ⇒ `test/docs-paths.test.js` 红
+  · ② `.dockerignore` 检出即 CRLF ⇒ `test/plugin-package.test.js` 的 14 条规则**全部 MISS**（本版才修）
+- **修法**：读仓库文件时用 `split(/\r?\n/)`。
+  ⚠️ **切法兼容两种行尾，断言的规则仍逐条精确比较 —— 这不是放宽判据。**
+  反向验证：把 `.dockerignore` 里的 `node_modules` 删掉 ⇒ 断言照样红。
+- **⚠️ 还剩两处已知风险**（当前绿，但**靠断言形态的侥幸，不是设计**）：
+  · `test/docs-paths.test.js:223` —— `split('\n')[0]` 取首行，`\r` 落在 `\b` 之后仍成立
+  · `test/promptCitations.test.js:48` —— 按行取引用，只用到行内部分字段
+  ⇒ ⭐ **若将来把 `\r` 纳入比较（例如改成整行相等），这两处会突然红。**
+  ⇒ 全仓 `.split('\n')` 共 76 处，只有这 2 处读**仓库文件**（其余读运行时产物或源码 banner，行尾不受影响），
+    故**本版不改它们**（没有红，改了属无依据的预防性改动）。
+
 ---
 
 ## 4. 实测基线

@@ -80,7 +80,9 @@ test('offline release stage runs plugin CLI, native author harness and sandbox t
       run(['tools/plugin.mjs', 'check', `release-${template}`, '--strict']);
       run(['tools/plugin.mjs', 'pack', `release-${template}`, '--zip']);
     }
-    assert.match(run(['tools/plugin.mjs', 'test', 'release-script']), /# fail 0/);
+    // Node 22 and earlier print `# fail 0`; Node 24's reporters print `ℹ fail 0`. 仍然只认 fail 0 ——
+    // 换前缀是格式兼容，不是放宽判据（把 0 改成 1 照样红）。
+    assert.match(run(['tools/plugin.mjs', 'test', 'release-script']), /^(?:#|ℹ)\s*fail 0$/m);
     run(['--input-type=module', '-e', `
       import assert from 'node:assert/strict';
       import { createPluginRegistry } from './server/plugins/registry.js';
@@ -116,7 +118,9 @@ test('offline release stage runs plugin CLI, native author harness and sandbox t
 
 test('Docker copies real production dependencies and separate author resources with narrow context exceptions', () => {
   const docker = fs.readFileSync(path.join(ROOT, 'Dockerfile'), 'utf8');
-  const ignore = fs.readFileSync(path.join(ROOT, '.dockerignore'), 'utf8').split('\n');
+  // ⚠️ `core.autocrlf=true` 的 Windows 检出把这个文件变成 CRLF：按 `\n` 切会留下行尾的 `\r`，
+  // 下面那 14 条规则就逐条匹配不上（而它们明明都在文件里）。切法兼容两种行尾，规则仍逐条精确比较。
+  const ignore = fs.readFileSync(path.join(ROOT, '.dockerignore'), 'utf8').split(/\r?\n/);
   assert.match(docker, /npm ci --omit=dev --ignore-scripts/);
   assert.match(docker, /COPY --from=deps \/app\/node_modules \.\/node_modules/);
   assert.match(docker, /SP_PLUGIN_RESOURCES=\/app\/plugin-resources/);
