@@ -575,7 +575,7 @@ function readJsonBuf(buf, label) {
   if (buf.length > PLUGIN_LIMITS.jsonBytes) fail('PLUGIN_FORGE_JSON', `${label}: larger than ${PLUGIN_LIMITS.jsonBytes} bytes`);
   let value;
   try { value = JSON.parse(buf.toString('utf8')); } catch (e) { fail('PLUGIN_FORGE_JSON', `${label}: ${e instanceof SyntaxError ? e.message : e.code || 'unreadable'}`); }
-  const bad = checkJsonLimits(value);
+  const bad = checkJsonLimits(value, { numbers: 'safe' });
   if (bad) fail('PLUGIN_FORGE_JSON', `${label}: ${bad}`);
   assertSafeKeys(value, label);
   return value;
@@ -691,12 +691,37 @@ function sameJson(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+/** A finite number outside ±1e9 anywhere under an array leaf. Non-finite values stay on the scalar path. */
+function containsOversizedNumber(value) {
+  const stack = [value];
+  while (stack.length) {
+    const cur = stack.pop();
+    if (typeof cur === 'number') {
+      if (Number.isFinite(cur) && Math.abs(cur) > PLUGIN_LIMITS.number) return true;
+      continue;
+    }
+    if (!cur || typeof cur !== 'object') continue;
+    if (Array.isArray(cur)) {
+      for (let i = 0; i < cur.length; i++) stack.push(cur[i]);
+    } else {
+      for (const k of Object.keys(cur)) {
+        if (DANGER_KEYS.has(k)) continue;
+        stack.push(cur[k]);
+      }
+    }
+  }
+  return false;
+}
+
 function leafOps(vanilla, partial, path, out, notes, unsupported) {
   if (out.length > 2000) return;
   if (Array.isArray(partial)) {
     if (!Array.isArray(vanilla)) { notes.push(path.join('.') || '(root)'); return; }
     const key = path.length ? String(path[path.length - 1]) : '';
     if (INDEX_MERGE_ARRAYS.has(key)) { unsupported.push(path.join('.') || key); return; }
+    // A matching array is one set. A finite number past ±1e9 inside it would be stored and then reject the pack
+    // (checkJsonLimits). Omit the op and name the path, the same as a scalar leaf, so the rest of the record imports.
+    if (containsOversizedNumber(partial)) { notes.push(path.join('.') || '(root)'); return; }
     if (path.length && !sameJson(partial, vanilla)) out.push({ path, value: partial });
     return;
   }

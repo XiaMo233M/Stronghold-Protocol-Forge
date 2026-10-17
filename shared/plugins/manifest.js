@@ -805,16 +805,24 @@ export function checkPluginFiles(manifest, files) {
 
 /**
  * The limits of a JSON value a plugin carries (see the header): nesting depth, numbers finite (JSON.parse reads 1e999
- * as Infinity) and within ±1e9. [ASSUMED] P1b's schema will name the fields allowed beyond ±1e9.
+ * as Infinity) and within ±1e9. Written plugin JSON uses that window. Forge pack JSON is read with `numbers: 'safe'`:
+ * a safe integer past ±1e9 (a Unix timestamp on a field this importer does not write) does not reject the file.
+ * [ASSUMED] a non-integer past ±1e9, and any magnitude past Number.MAX_SAFE_INTEGER, is still refused — it is not a
+ * timestamp and it does not round-trip. Values that enter game data keep ±1e9 (and the tighter field caps).
  * @param {unknown} value a parsed JSON value
+ * @param {{ numbers?: 'bound' | 'safe' }} [opts] bound (default): ±1e9. safe: ±1e9, or a safe integer beyond it.
  * @returns {string | null} the first problem, or null
  */
-export function checkJsonLimits(value) {
+export function checkJsonLimits(value, { numbers = 'bound' } = {}) {
   const stack = [{ v: value, depth: 0, at: '$' }];
   while (stack.length) {
     const { v, depth, at } = /** @type {{ v: any, depth: number, at: string }} */ (stack.pop());
     if (typeof v === 'number') {
       if (!Number.isFinite(v)) return `${at}: a number that is not finite`;
+      if (numbers === 'safe') {
+        if (Math.abs(v) > PLUGIN_LIMITS.number && !Number.isSafeInteger(v)) return `${at}: ${v} is not a safe integer`;
+        continue;
+      }
       if (Math.abs(v) > PLUGIN_LIMITS.number) return `${at}: ${v} is beyond ±${PLUGIN_LIMITS.number}`;
       continue;
     }
