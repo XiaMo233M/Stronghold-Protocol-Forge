@@ -1,7 +1,11 @@
 {
   "note": "本仓 master 相对上游的**叠加层唯一真相**。同步时 `.github/overlay-check.mjs` 逐条验：`mine` 少一个文件就红、`patches` 的锚点丢了也红（我方补丁被同步弄丢是最危险的静默故障）；上游如果自己收了我的修复 ⇒ 退出码 2，只提示不拦（那是好事，该减我方叠加层）。",
   "upstream": "XiaMo233M/Stronghold-Protocol-Forge",
-  "branches": { "mirror": "main", "product": "master", "default": "master" },
+  "branches": {
+    "mirror": "main",
+    "product": "master",
+    "default": "master"
+  },
   "mine": [
     ".github/overlay.json",
     ".github/overlay-check.mjs",
@@ -254,22 +258,30 @@
     {
       "file": "shared/constants.js",
       "why": "发布版本号是我方自有路线必须自己推进的一格（`test/version.test.js` 把 APP_VERSION 与 package.json / lock / CHANGELOG 首节四处钉成同源；不抬它就撞已存在的 modmgr-v0.18.7-0.2.6 tag）。这一格只改 `APP_VERSION` 一个值 —— `PROTOCOL_VERSION` / `MOD_API_VERSION` 一字未动。",
-      "anchors": ["export const APP_VERSION = '0.18.8';"]
+      "anchors": [
+        "export const APP_VERSION = '0.19.0';"
+      ]
     },
     {
       "file": "package.json",
       "why": "同上：版本同源的第二处。",
-      "anchors": ["\"version\": \"0.18.8\""]
+      "anchors": [
+        "\"version\": \"0.19.0\""
+      ]
     },
     {
       "file": "package-lock.json",
       "why": "同上：版本同源的第三、四处（根 `version` 与 `packages[\"\"].version`）。",
-      "anchors": ["\"version\": \"0.18.8\""]
+      "anchors": [
+        "\"version\": \"0.19.0\""
+      ]
     },
     {
       "file": "CHANGELOG.md",
       "why": "0.18.8 那一节（§28.55 空席回收裁决 + 第一次动本体路径的登记 + 门面文档跟上代码）。游戏内公告由本文件的前 8 节生成，所以这一节同时是发布公告；`test/version.test.js` 要求首个 `## x.y.z` 与 APP_VERSION 同半，`test/docs-paths.test.js` 要求顶层那一段仍发得出 8 条公告（少一节是**静默**变少）。上一版（0.18.7）漏了 README 徽章与 `docs/prompts/*` 的「本版基线」行 —— 那两处由 `test/promptBaseline.test.js` 判，本版抬齐。",
-      "anchors": ["## 0.18.8 — 2026-10-15"]
+      "anchors": [
+        "## 0.19.0 — 2026-10-17"
+      ]
     },
     {
       "file": "server/lobby.js",
@@ -288,7 +300,7 @@
         "**7 种用途**",
         "| 人走空了但**这一局不作废**（志愿者冻结） |",
         "There is **no in-process code swap**",
-        "badge/version-0.18.8-"
+        "badge/version-0.19.0-"
       ]
     }
   ],
