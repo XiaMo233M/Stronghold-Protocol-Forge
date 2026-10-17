@@ -132,8 +132,14 @@ export function compactHeld(list) {
   });
   return list.filter((x, i) => (x[0] === 'status' ? last.get(`s:${x[1]}:${x[2]}`) === i : x[0] === 'skill' ? last.get(`k:${x[1]}`) === i : true));
 }
-/** Data files the simulation reads (DataSource + content/support gameData()). */
-export const SIM_DATA_FILES = Object.freeze(['chess', 'enemies', 'tokens', 'stages', 'waves', 'bonds', 'items', 'garrisons', 'bands', 'effects', 'backups']);
+/**
+ * Data files the simulation reads (DataSource + content/support gameData()).
+ *
+ * 0.3.0: the list lives in the loader the Worker shares (`simLoader.js`) and this module re-exports it, so the browser
+ * runner and the Worker can never disagree about which files the sim needs. Before this it was defined twice, with
+ * identical contents — re-exporting keeps the behaviour unchanged.
+ */
+export { SIM_DATA_FILES } from './simLoader.js';
 
 /**
  * 工坊行为层 (docs/WORKSHOP.md §4): build the per-battle kit maps from `spec.workshopKits` — the JSON-safe module list the
