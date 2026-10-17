@@ -2176,5 +2176,7 @@
   "房间插件「{names}」的文件在服务器上变了，请在插件面板中点「重新应用」": "The files of the room's plugin “{names}” changed on the server — open the Plugins panel and press “Apply again”",
   "房间的插件内容长时间无响应，本局模拟已结束": "The room's plugin content stopped responding; the simulation has ended",
   "房间的插件内容无法启动模拟": "The room's plugin content could not start the simulation",
-  "房间的插件内容出错，本局模拟已结束": "The room's plugin content failed; the simulation has ended"
+  "房间的插件内容出错，本局模拟已结束": "The room's plugin content failed; the simulation has ended",
+  "秘术师能量": "Mystic Energy",
+  "在秘术师的血条下方显示储存的攻击能量 / 上限（如 2/3）。官方用干员身上的特效表示，没有这个数字。": "Shows a Mystic Caster's stored attack energy / its maximum under the HP bar (e.g. 2/3). The official game shows it as an effect on the operator, without a number."
 }

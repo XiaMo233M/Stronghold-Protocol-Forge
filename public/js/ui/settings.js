@@ -378,6 +378,8 @@ export function SettingsModal({ open, onClose }) {
       <p class="set-hint">${t('只显示达到官方暴击条件的红色数字。关闭时仍显示每一次命中。')}</p>
       <${Toggle} label=${t('弹药数量')} micro="AMMO COUNT" value=${s.ammoCount} onChange=${(v) => updateSettings({ ammoCount: v })} />
       <p class="set-hint">${t('弹药类技能开启时，在弹药条下方显示剩余弹药 / 总弹药数（如 13/14）。官方界面没有这个数字。')}</p>
+      <${Toggle} label=${t('秘术师能量')} micro="STORED ENERGY" value=${s.mysticEnergy} onChange=${(v) => updateSettings({ mysticEnergy: v })} />
+      <p class="set-hint">${t('在秘术师的血条下方显示储存的攻击能量 / 上限（如 2/3）。官方用干员身上的特效表示，没有这个数字。')}</p>
       <${Toggle} label=${t('工坊外观')} micro="WORKSHOP SKINS" value=${s.workshopSkins} onChange=${(v) => updateSettings({ workshopSkins: v })} />
       <p class="set-hint">${t('工坊外观由已加载的包提供，缺哪一套时回落原版立绘。')}</p>
       <${Toggle} label=${t('工坊素材源')} micro="WORKSHOP LOAD SOURCES" value=${s.workshopSources} onChange=${(v) => updateSettings({ workshopSources: v })} />

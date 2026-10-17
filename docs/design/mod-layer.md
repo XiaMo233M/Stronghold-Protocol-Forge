@@ -449,7 +449,7 @@ So verification is a **differential run over the corpus's own scenario generator
 | the pack declares | the check | it fails when |
 |---|---|---|
 | `combat: false` (a performance / refactor mod) | run the fixed scenario list twice in one process — once with the pack's kit map injected (`Battle opts.kits`, `server/sim/content/index.js:112-114`), once without — and require `resultDigest` (`server/sim/spec.js:319-339`) equality per scenario | the pack changes any observable outcome. **This is the enforcement of "a performance mod must be semantically preserving".** |
-| `combat: true` | run the fixed scenario list twice with the pack loaded and require digest equality (the `--twice` idea, `test/golden/README.md:44`), plus the two execution paths the ruling keeps (server headless vs. the browser's module list, `public/js/battle/runner.js:230-233`) | the pack is non-deterministic, or the two paths disagree. |
+| `combat: true` | run the fixed scenario list twice with the pack loaded and require digest equality (the `--twice` idea, `test/golden/README.md:44`), plus the two execution paths the ruling keeps (server headless vs. the browser's module list, `public/js/battle/runner.js:298-303`) | the pack is non-deterministic, or the two paths disagree. |
 
 Both forms reuse what exists: `tools/golden.mjs` builds the scenarios in a fixed order from `data/*.json` and reduces
 each to a digest, and the per-game-second chained snapshot hash inside a digest already says **when** two runs parted
@@ -2509,7 +2509,7 @@ export function mount(ctx) {
   发出去的那一份。`byChar[charId] ?? global` 就是播放时用的那个语言 —— 最后一档「默认配音」被
   `sanitizeSettings` 保证不会露出来（store 里的 `voiceLang` 一定是词表成员）。
 * **第二个读者**：形状不是 `char_…` 的键、值不在 `VOICE_LANGS` 里的，都不进快照 —— 面板画出来的不该与
-  `public/js/audio.js:1077` / `:1094` 播放的不一致。
+  `public/js/audio.js:1079` / `:1096` 播放的不一致。
 * **拿不到就是 `null`**（没注入设置库 / 不成形 / `get()` 抛）：不抛、不编造，面板画空态。
 * **不进 `me.snapshot()`**：那三格来自**一次** `store.get()`（「一次取全」才不撕裂），这一格来自另一个 store。
 
