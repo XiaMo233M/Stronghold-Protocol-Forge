@@ -79,3 +79,6 @@
 .result__foot .btn { min-width: 3.4rem; }
 /* 「上局战绩」与返回键同排：返回键吃满剩余宽度，战绩键按内容宽（它是次要动作，不该跟主键一样大） */
 .result__foot .btn--primary { flex: 1; }
+
+/* a match with gameplay plugins (DESIGN §32.6): the unofficial mark under the headline */
+.result__modmark { align-self: flex-start; margin-top: .06rem; }
