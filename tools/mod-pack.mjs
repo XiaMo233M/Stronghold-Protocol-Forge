@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 
 import { zipWrite, zipRead, ZIP_LIMITS } from '../shared/zip.js';
 import { normalizePackManifest, PACK_ID_RE } from '../shared/workshop.js';
-import { packFilesRecursive, manifestPrefix, refuse, usageError, mb } from './workshop-pack.mjs';
+import { manifestPrefix, refuse, usageError, mb } from './workshop-pack.mjs';
 
 const USAGE = [
   'usage:',

@@ -156,7 +156,7 @@ function processZip(root, filePath, { stateRoot } = {}) {
 function pendingZips(root) {
   const out = [];
   for (const dir of inboxDirs(root)) {
-    let names = [];
+    let names;
     try {
       names = fs.readdirSync(dir, { withFileTypes: true })
         .filter((d) => d.isFile() && d.name.toLowerCase().endsWith('.zip') && !d.name.startsWith('.'))
