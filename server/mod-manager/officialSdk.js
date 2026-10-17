@@ -33,6 +33,15 @@ export const SANDBOX_LIMITS = Object.freeze({ files: 64, bytes: 1024 * 1024 });
 export function createSDK(plugin, { settings = {}, log = (..._args) => {} } = {}) {
   let lines = 0;
   const permissions = Array.isArray(plugin.officialPermissions) ? plugin.officialPermissions : [];
+  // `overrides` 是上游 manifest 里「我可以替换哪些官方 id」的**白名单**：`extensions.js` 的 `reserve()` 用它判断
+  // 一个 kit 覆盖是否被授权（`plugin.overrides`，见 `extensions.js:89`）。描述符把它映射成 `metaRegisters`
+  // （meta 键那一半），所以这里**必须同时投影出 `overrides`** —— 否则一个声明了 `overrides: ['chess_x']` 的
+  // 官方插件覆盖官方 kit 时会永远撞 `PLUGIN_SCRIPT_OVERRIDE`（「声明了却永远不生效」）。
+  const projected = Object.freeze({
+    id: plugin.id,
+    ...(Array.isArray(plugin.metaRegisters) && plugin.metaRegisters.length ? { overrides: [...plugin.metaRegisters] } : {}),
+    ...(plugin.budget ? { budget: plugin.budget } : {}),
+  });
   const need = (permission) => {
     if (!permissions.includes(permission)) {
       throw Object.assign(new Error(`${plugin.id}: ${permission} required`), { code: 'PLUGIN_PERMISSION_MISSING' });
@@ -43,10 +52,10 @@ export function createSDK(plugin, { settings = {}, log = (..._args) => {} } = {}
     math,
     constants,
     settings: Object.freeze(JSON.parse(JSON.stringify(settings))),
-    kits: Object.freeze({ register: (id, fn) => { need('sim.code'); return registerKit(plugin, id, fn); } }),
-    enemies: Object.freeze({ register: (id, fn) => { need('sim.code'); return registerEnemy(plugin, id, fn); } }),
-    content: Object.freeze({ register: (mod) => { if (mod && mod.install) need('sim.code'); if (mod && mod.registerMeta) need('meta.code'); return registerContent(plugin, mod); } }),
-    meta: Object.freeze({ register: (id, h) => { need('meta.code'); return registerMeta(plugin, id, h); } }),
+    kits: Object.freeze({ register: (id, fn) => { need('sim.code'); return registerKit(projected, id, fn); } }),
+    enemies: Object.freeze({ register: (id, fn) => { need('sim.code'); return registerEnemy(projected, id, fn); } }),
+    content: Object.freeze({ register: (mod) => { if (mod && mod.install) need('sim.code'); if (mod && mod.registerMeta) need('meta.code'); return registerContent(projected, mod); } }),
+    meta: Object.freeze({ register: (id, h) => { need('meta.code'); return registerMeta(projected, id, h); } }),
     log: (...args) => { if (lines++ < 20) log(`[plugin:${plugin.id}]`, ...args.map((x) => String(x).slice(0, 500))); },
   });
 }

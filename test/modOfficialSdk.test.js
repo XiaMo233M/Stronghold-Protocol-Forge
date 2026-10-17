@@ -149,3 +149,16 @@ test('房间范围：`installExtensions(battle, { packs })` 只装集合内插�
     assert.deepEqual(reg.keys().sort(), ['item:b']);
   } finally { resetExtensions(); }
 });
+
+test('`overrides` 投影到注册表：声明的官方 kit 可覆盖，没声明的一律 PLUGIN_SCRIPT_OVERRIDE', () => {
+  resetExtensions();
+  try {
+    // 没声明 overrides ⇒ 覆盖官方 kit 被拒（「没声明就等于不许」）
+    const plain = createSDK({ id: 'plain', officialPermissions: ['sim.code'] });
+    assert.throws(() => plain.kits.register('chess_char_1_01_a', () => ({})), (e) => e.code === 'PLUGIN_SCRIPT_OVERRIDE');
+
+    // 声明了 overrides ⇒ 同一个 kit 覆盖被授权（描述符把 overrides 映射成 metaRegisters，SDK 必须投影回来）
+    const allowed = createSDK({ id: 'allowed', officialPermissions: ['sim.code'], metaRegisters: ['chess_char_1_01_a'] });
+    assert.doesNotThrow(() => allowed.kits.register('chess_char_1_01_a', () => ({})));
+  } finally { resetExtensions(); }
+});
