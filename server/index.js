@@ -290,6 +290,13 @@ export async function startServer(opts = {}) {
   // 是**同一次**裁剪，且这个集合现在只有一个来源（`modPlan`），不再由三处手搓并集。
   // 官方档的 excluded 也并进来：被禁用/被裁/未同意的**官方插件**，它的声明式内容同样不许进叠加层。
   const excludedPacks = new Set([...modPlan.excluded, ...officialPlanFinal.excluded]);
+  // **准入视图**：房间可以点名**任一 origin** 的包（身份清单 `workshopMods` 两边都收），所以 `roomSubset` 必须
+  // 看到两份计划的并集 —— 只喂 Forge 那份，会把一个合法的官方插件判成 `ADMISSION_NOT_ACTIVATED`。
+  // 这是一个**只读投影**，不是第三份计划：activatedSet 与 descriptorById 都是并集，判据仍只有 plan.js 一处。
+  const admissionPlan = Object.freeze({
+    activatedSet: new Set([...modPlan.activatedSet, ...officialPlanFinal.activatedSet]),
+    descriptorById: new Map([...modPlan.descriptorById, ...officialPlanFinal.descriptorById]),
+  });
   // The process-wide singleton serves the default data dir; a custom dir (tests) gets its own copy. The 创意工坊 overlay
   // is applied inside the loader (server/data.js), i.e. whichever way the data is obtained, it is already merged.
   // SP_WORKSHOP (editor/playtest.mjs) lets the Forge editor's 试玩 subprocess read the workshop root the editor was
@@ -502,7 +509,7 @@ export async function startServer(opts = {}) {
       // 它的钩子能 `return true` 吃掉 `room.create` / `room.join`（唯一能「否决消息」的包能力），所以它必须和别的
       // 读者看同一份集合。`modPlan` 一并交给 Lobby：房间声明子集的准入判据（`roomSubset`）只读这一份计划。
       workshop: { kits: workshopKits.kits, tokenKits: workshopKits.tokenKits, modules: workshopKits.modules, mods: workshopMods,
-        hooks: (workshopHooks.hooks || []).filter((h) => survivors.has(h.pack)), panels: allPanels, assets: workshopModAssets, theme: workshopTheme.theme, meta: [...metaModules, ...officialMetaLive], roomAssets, battle: [...battleModules, ...officialBattleModuleList], battleInstallers: [...battleInstallers, ...officialBattleLive], roomHooks: roomInstallers, transport: transport.transport, serverChannels: serverChannelMap, officialModules: officialModulesLive, modPlan },
+        hooks: (workshopHooks.hooks || []).filter((h) => survivors.has(h.pack)), panels: allPanels, assets: workshopModAssets, theme: workshopTheme.theme, meta: [...metaModules, ...officialMetaLive], roomAssets, battle: [...battleModules, ...officialBattleModuleList], battleInstallers: [...battleInstallers, ...officialBattleLive], roomHooks: roomInstallers, transport: transport.transport, serverChannels: serverChannelMap, officialModules: officialModulesLive, modPlan: admissionPlan },
     },
     { data, log },
   );
