@@ -16,8 +16,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeBattle, flatStage, chessRec, checkInvariants } from '../helpers/battleHarness.js';
 import { bodyKeys } from '../../server/sim/body.js';
+// ⚠️ 解码 `bodyKeys()` 必须用**同一个 COLS**：它返回的 key 是 `row * COLS + col`，而那个 COLS 是
+// server/sim/body.js 从 server/sim/constants.js 取的（= `GEO.CANVAS_COLS`，画布坐标系），**不是 stage 的列数**。
+// 这里原先硬编码 21（那是 `flatStage` 造的 21 列场景宽度），解码全错：同一个 15 格矩形被解成三段互不连通的格
+// （[5,2]–[5,6] + [6,14]–[6,18] + [8,5]–[8,9]）。改用引擎导出的常量 ⇒ 编码/解码对称，也不会再漂。
+import { COLS } from '../../server/sim/constants.js';
 
-const COLS = 21;
 const BONDS = { raidShip: { count: 2, active: true, tier: 1, layers: 0 } };
 const PROBE = 'raidProbe';
 const GUARD = 'raidGuard';
