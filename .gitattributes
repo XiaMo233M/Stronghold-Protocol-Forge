@@ -15,6 +15,16 @@
 *.json text eol=lf
 *.md   text eol=lf
 *.yml  text eol=lf
+# Extension-less text files (dotfiles, Dockerfile, LICENSE). Without these lines `* text=auto` checks them out
+# with CRLF on Windows (core.autocrlf=true) and a test that reads one line by line then fails there:
+# test/plugin-package.test.js compares .dockerignore's 14 rules against a split('\n') result, and on a CRLF
+# checkout every line carries a trailing \r.
+.dockerignore          text eol=lf
+.gitignore             text eol=lf
+.gitattributes         text eol=lf
+.git-blame-ignore-revs text eol=lf
+Dockerfile             text eol=lf
+LICENSE                text eol=lf
 # binary assets
 *.png binary
 *.jpg binary
