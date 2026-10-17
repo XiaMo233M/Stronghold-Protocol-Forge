@@ -17,6 +17,15 @@ function plugin(f, id = 'bench-op', options = {}) {
 }
 function bench(f, extra = {}) { return createTrialBench({ registry: f.registry, files: createPluginFiles(path.join(f.dir, 'plugins')), ...extra }); }
 
+/**
+ * Is the OS process gone? `process.kill(pid, 0)` only probes — it sends no signal; ESRCH means "no such process".
+ * Used instead of Node's `child.killed`, which is an internal flag that stays false when the platform reaper
+ * (`taskkill` on Windows) killed the process instead of `child.kill()`.
+ */
+function dead(pid) {
+  try { process.kill(pid, 0); return false; } catch (e) { return e && e.code === 'ESRCH' ? true : false; }
+}
+
 test('trial child: vanilla and plugin repeated bit for bit, real frames, changed damage, unsaved draft and bad plugin refusal', { timeout: 60000 }, async t => {
   const f = fixture(t); const id = plugin(f, 'bench-op', { normal: { atk: 800 } });
   const b = bench(f); t.after(() => b.close());
@@ -94,7 +103,15 @@ test('watchdog kills a real non-responsive child process and allows the next job
   const b = bench(f, { spawn: (_entry, args, options) => (child = fork(entry, args, options)), limits: { ...TRIAL_LIMITS, timeoutMs: 400 } });
   t.after(() => b.close());
   await assert.rejects(b.run({ id }), { code: 'PLUGIN_STUDIO_TRIAL_TIMEOUT' });
-  assert.equal(child.killed, true); assert.equal(b.active(), 0);
+  // ⚠️ 不能断言 `child.killed`：它是 Node 的**内部标志**，只在 `child.kill()` **成功发出信号**时才置 true。
+  // 而 server/studio/trial.js 在 Windows 上先走 `taskkill /PID <pid> /T /F`（:42，连整棵进程树一起杀），
+  // 到 :45 的 `child.kill('SIGKILL')` 时进程早已退出 ⇒ 那是 no-op ⇒ Windows 上 `killed` **恒为 false**；
+  // Linux/macOS 走 `process.kill(-pid)` 后 :45 仍会真的发一次信号，所以那边可能是 true。两种平台本就不一致。
+  // 这里验的是真正要保证的两件事：
+  //   ① 那个不响应的进程**确实死了** —— 用 pid 是否还在来判（比内部标志可靠，且跨平台同义）
+  //   ② 这一趟没占着额度 —— `active()` 回到 0，下一个 job 能跑
+  assert.equal(dead(child.pid), true, 'the hung child is really gone');
+  assert.equal(b.active(), 0, 'the slot is free for the next job');
 });
 
 test('wizard API creates each class, saves with revision, validates DSL, and keeps executable files off studio GET', async t => {
