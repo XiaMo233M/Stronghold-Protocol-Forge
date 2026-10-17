@@ -334,19 +334,28 @@ export class BoardScene {
     const [R, C] = mapSize(layoutOf(stage));
     this.bgScale = LIGHTING.bg.tiles * Math.max(1, R / 19, C / 21);
     this._clear();
-    if (!stage) return;
-    const board = buildBoard(stage, { uv: this.pack?.uv || null, area: this.area });
+    // 水面材质与 official 标记跟着**这一张**stage 走（0.3.0 语义）：预载另一个 stage 不得给在场的地板上色；
+    // `setScenePack` 会重建当前 stage，所以"替换 / 移除"两条路径也各自把参数与 cube defines 还原。
+    this.sceneWater = [];
+    this.official = null;
+    if (!stage) { applyWaterMaterial(this.mat.water, null); return; }
+    const board = buildBoard(stage, { uv: this.pack?.uv || null, area: this.area, platformMesh: !!this.platformGeometry() });
     this.board = board;
     const M = this.meshes = {};
     this.official = official && this._buildScene(official) ? official : null;
+    // Apply only the active, successfully built pack: preloading another stage must not recolour this board.
+    const waterPack = this.official;
+    applyWaterMaterial(this.mat.water, sceneWaterInfo(waterPack?.doc), waterPack ? {
+      env: this._sceneResources(waterPack).env, envRange: waterPack.doc?.env?.range, envMips: waterPack.doc?.env?.mips,
+    } : {});
     if (!this.official) {
       M.board = this._mesh(board.buckets.board, this.mat.board);
       M.glass = this._mesh(board.buckets.glass, this.mat.glass);
       M.decal = this._mesh(board.buckets.decal, this.mat.decal, { cast: false });
       M.pipe = this._mesh(board.buckets.pipe, this.mat.pipe);
     } else {
-      // the scene has no device slabs: the 射击台 / 特制水上平台 / 封印的地面 slabs stay drawn on it (units stand
-      // on them at tiles.js heightAt; GitHub #569)
+      // the scene has no device slabs: the 特制水上平台 / 封印的地面 slabs（以及**没有模型时的** 射击台）stay
+      // drawn on it (units stand on them at tiles.js heightAt; GitHub #569)
       M.raised = this._mesh(board.buckets.raised, this.mat.board);
       M.raisedDecal = this._mesh(board.buckets.raisedDecal, this.mat.decal, { cast: false });
     }
