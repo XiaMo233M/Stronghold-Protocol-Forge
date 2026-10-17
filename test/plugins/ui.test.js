@@ -122,12 +122,22 @@ describe('the postMessage contract', () => {
     assert.equal(nested.reason, 'intent');
     const buy = validatePluginMessage({ v: 1, t: 'g.buy', slot: 0 });
     assert.equal(buy.reason, 'intent');
-    for (const key of Object.keys(C2S)) {
-      assert.equal(isIntentType(key), true, key);
+    // ⚠️ 不能对 `Object.keys(C2S)` 全键断言"都是意图"：C2S 是一张**共享的**客户端→服务端消息表，
+    // 里面除了对局意图（hello / ping / room.* / g.* / b.*）还有**非对局**消息 —— 查战绩 `records.mine`、
+    // 资源挑战 `resource.challenge.request` / `resource.reset` / `resource.proof`、包间消息 `pack.msg`。
+    // 它们本来就不该被 isIntentType 认成意图（实测这几个走的是 `shape` 分支，不是 `intent`）。
+    // 所以只对**真正的意图键**断言；判定用 isIntentType 自己 ⇒ C2S 增长时不会漂，也不用在这里抄一份名单。
+    const intents = Object.keys(C2S).filter((k) => isIntentType(k));
+    assert.ok(intents.length > 0, 'C2S 里应当有对局意图');
+    for (const key of intents) {
       const r = validatePluginMessage({ v: 1, t: key });
       assert.equal(r.ok, false, key);
       assert.equal(r.reason, 'intent', key);
     }
+    // ⭐ 反向断言：C2S 里**必须**还有非意图消息。若有人把 C2S 全塞进意图（或把 isIntentType 放宽到
+    // 匹配一切），这条会红 —— 它守的是"分类没被破坏"，而不是某几个具体键名。
+    assert.ok(Object.keys(C2S).some((k) => !isIntentType(k)),
+      'C2S 里应有非对局消息（records / resource / pack 等）；全成意图说明分类坏了');
     assert.equal(validatePluginMessage({ v: 1, t: 'welcome' }).reason, 'shape');
   });
 
