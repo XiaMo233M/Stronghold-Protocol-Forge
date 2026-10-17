@@ -31,11 +31,11 @@
 ## 二、标准包的四条硬要求
 
 1. **`pack.json` 在 ZIP 根**（② 请重压）。
-2. **键必须在闭集内**：`PACK_FIELDS` 共 **35 键**，完整清单见 `shared/workshop.js`：
+2. **键必须在闭集内**：`PACK_FIELDS` 共 **38 键**（真源 `shared/workshop.js:134`；本文与代码不一致时以代码为准）：
    `id name version author license description gameVersion game api layer combat` ·
    `content overrides` · `voices voiceLangs bondIcons itemIcons art skins support operators i18n` ·
    `forms fx` · `notices playtest` · `variants behaviour` · `assets client server routes` · `target` ·
-   `dependencies conflicts`。
+   `dependencies conflicts` · `phase enabled`。
    **不认识的顶层键点名拒绝**（`PACK_UNKNOWN_FIELD`），**绝不读过去** —— 这是这一层最硬的一条纪律。
    `target`（§28.46）是**唯一一格可以带出本引擎的键**：`"stardust"` 的包是给 Stardust 宿主的**声明型包**，
    本引擎只认识、不装载（`server/workshop.js` 的 `foreign`）；**不写 `target` 的包一个字节都不受影响**。

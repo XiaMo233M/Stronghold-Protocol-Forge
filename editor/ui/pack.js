@@ -1341,7 +1341,14 @@ async function importPack(file, force) {
     if (data.content.length) bits.push(t('内容 {0}', data.content.join('/')));
     if (data.voiceLines) bits.push(t('语音 {0}', t('{0} 条', data.voiceLines)));
     if (data.support.length) bits.push(t('助战 {0}', t('{0} 个', data.support.length)));
-    state.message = { kind: 'ok', text: t('已安装 {0}：{1}。重启游戏服务器后生效。', data.pack, listJoin(bits)) };
+    // 装上 ≠ 启用：带服务端代码的包被显式登记为 disabled（它的代码会在游戏服务端进程里跑）。
+    // 这里必须说实话 —— 一句笼统的"已安装"会让人以为它已经在跑了。
+    state.message = {
+      kind: 'ok',
+      text: data.enabled === false
+        ? t('已安装 {0}：{1}。它带服务端代码，已登记为禁用 —— 在包里启用后重启游戏服务器生效。', data.pack, listJoin(bits))
+        : t('已安装 {0}：{1}。重启游戏服务器后生效。', data.pack, listJoin(bits)),
+    };
     state.packId = data.pack;
     // 刚装进来的包：元数据草稿要换成它的（state.packId 已经等于 data.pack，靠 id 比较认不出这一次切换）
     await load(data.pack, { resetDraft: true });

@@ -192,8 +192,9 @@ export function exportPack(root, packId, { limits = ZIP_LIMITS } = {}) {
 
 // ---- 导入 ---------------------------------------------------------------------------------------------------------
 
-/** 归档里清单所在的前缀：'' 表示 pack.json 就在根，否则是那唯一的顶层目录。 */
-function manifestPrefix(names) {
+/** 归档里清单所在的前缀：'' 表示 pack.json 就在根，否则是那唯一的顶层目录。
+ *  导出给 `tools/mod-pack.mjs`：作者侧校验一个别人发来的 zip 时，布局判定必须与安装器**同一份**。 */
+export function manifestPrefix(names) {
   if (names.includes('pack.json')) return '';
   const tops = new Set();
   for (const name of names) tops.add(name.split('/')[0]);

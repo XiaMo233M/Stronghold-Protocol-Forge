@@ -44,7 +44,9 @@
     "editor": "node tools/workshop-editor.mjs",
     "workshop:validate": "node tools/workshop-validate.mjs",
     "workshop:scaffold": "node tools/workshop-scaffold.mjs",
-    "forms:names": "node tools/build-form-names.mjs"
+    "forms:names": "node tools/build-form-names.mjs",
+    "pack:mod": "node tools/mod-pack.mjs",
+    "mod": "node tools/mod-manager.mjs"
   },
   "engines": {
     "node": ">=22"

@@ -56,6 +56,10 @@ import {
   readPackOperators, writePackOperators,
 } from '../tools/workshop-pack.mjs';
 import { ZIP_MAX_TOTAL_BYTES } from '../shared/zip.js';
+// 启用/禁用登记册：与游戏服务器**同一份文件、同一批纯函数**（`applyModRegistry` 在装载期裁掉 disabled 的包）。
+// 导入端点装完要在这里落一条 `disabled`（见路由里的「装上 ≠ 启用」）。
+import { disablePack } from '../server/modRegistry.js';
+import { stateRootFor } from '../server/modModules.js';
 // 外观素材（pack.json.art）的「文件系统 + 骨架/图谱」体检要用与客户端**同一个** Spine 解析器与图谱阅读器：
 // 这两份实现本来就是素材管线用的（tools/assets/），抄一遍必然漂移，所以直接复用。
 import { parseSkel } from '../tools/assets/skel.mjs';
@@ -88,7 +92,32 @@ const SLUG_RE = /^[a-z0-9][a-z0-9_]{0,31}$/;
 const BODY_LIMIT = 1 << 20; // 1 MB is far beyond any spec
 /** 导入一个 .zip 的上限：就是 shared/zip.js 的总量上限（压缩包不可能比它解开后的内容还大）。 */
 const ZIP_BODY_LIMIT = ZIP_MAX_TOTAL_BYTES;
+/**
+ * 导入端点接受的 Content-Type。**这不是洁癖，是一道安全闸**：浏览器在 `no-cors` 模式下只能发
+ * CORS-safelisted 的 Content-Type（`text/plain` / `application/x-www-form-urlencoded` / `multipart/form-data`），
+ * 所以「只收 octet-stream 与 zip」直接掐掉了「随便哪个网页用 no-cors 往 127.0.0.1:3311 POST 一个 zip」那条路。
+ * 它和 `guardWrite` 的 Origin 判据互相独立：一道按请求头判来源，一道按请求体判形态。
+ */
+const ZIP_CONTENT_TYPES = new Set(['application/octet-stream', 'application/zip', 'application/x-zip-compressed']);
 const quietLog = { info() {}, warn() {}, error() {}, debug() {} };
+
+/**
+ * 这个包声明了**在游戏服务端进程里执行的代码**吗？（`pack.json.server` 的四个面）
+ *
+ * 为什么只问这一句：登记册的语义是「不在册 = 启用」，所以「装完要不要落 disabled」取决于它有没有需要**同意**
+ * 的执行面。纯数据包（只声明 chess/items/assets…）没有这种东西，给它写一条 disabled 只会让运维多一步无意义操作。
+ * `server.routes` 是 GET/HEAD 的只读端点，不算「跑代码」，所以不在这一组里。
+ */
+function declaresServerCode(manifest) {
+  const s = manifest && typeof manifest === 'object' ? manifest.server : null;
+  if (!s || typeof s !== 'object') return false;
+  for (const key of ['modules', 'battle', 'meta', 'room']) {
+    const v = s[key];
+    if (Array.isArray(v) ? v.length > 0 : !!v) return true;
+  }
+  return false;
+}
+
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.md': 'text/markdown; charset=utf-8' };
 
 /** What the 3D preview may pull from `public/` (modules and their data) — never an arbitrary client file. */
@@ -1794,6 +1823,9 @@ export async function createEditorServer(opts = {}) {
   // The data dir and the support file are injectable so a test never rewrites the real data/support.json.
   const dataDir = path.resolve(opts.dataDir ?? DATA_DIR);
   const supportFile = path.resolve(opts.supportFile ?? path.join(dataDir, 'support.json'));
+  // 启用/禁用登记册（`<stateRoot>/mod-registry.json`）——与游戏服务器读的是**同一份**文件。
+  // 同样可注入：一个测试不该把开发机上真实的登记册改掉（那会让下次 `npm start` 少装几个包）。
+  const stateRoot = path.resolve(opts.stateDir ?? stateRootFor(REPO_ROOT));
   const log = opts.log ?? quietLog;
   // 一键试玩（docs/EDITOR.md §试玩）。控制器建在这里，是因为它要知道**这个编辑器实例**的工坊根；
   // 测试可以注入 `opts.playtest` 换成假的，免得每个编辑器测试都真的起一个游戏服务器。
@@ -1885,6 +1917,45 @@ export async function createEditorServer(opts = {}) {
     return [...modelSpines].map((id) => ({ id, name: named.get(id) ?? id })).sort((a, b) => a.id.localeCompare(b.id));
   })();
 
+  // ---- 写请求的来源闸（CSRF / DNS rebinding）----------------------------------------------------------
+  // 为什么需要：编辑器默认绑在 **固定端口** 127.0.0.1:3311，而它是全仓唯一会往 workshop/ 写盘的东西。
+  // 一个包可以声明 `server.modules` / `server.battle`（在游戏服务端进程里执行的代码），所以
+  // 「任何网页都能往这个端口 POST 一个 zip」等于「任何网页都能往你的服务器进程里装代码」。
+  // 浏览器的跨站请求**一定**带 `Origin`（表单 POST、fetch、no-cors 都一样），现代浏览器还带 `Sec-Fetch-Site`；
+  // 而 node/curl 这类非浏览器调用两者都没有。所以判据是：
+  //   * 带了 `Origin`（或 `Sec-Fetch-Site`）⇒ 必须与本次请求的 Host **同源**，否则 403；
+  //   * 两者都没带 ⇒ 视为非浏览器调用，放行（否则既有的 CLI/测试全会被误杀，而且它们本来就没有 CSRF 面）。
+  // `Host` 头单独再判一次本机地址：DNS rebinding 会让 `Host` 变成攻击者的域名。
+  const bindHost = opts.host ?? '127.0.0.1';
+  let boundPort = opts.port ?? 0;
+  const loopbackOnly = bindHost !== '0.0.0.0' && bindHost !== '::';
+
+  /** @returns {string|null} 拒绝原因（null = 放行）。 */
+  function writeRefusal(req) {
+    const host = String(req.headers.host || '');
+    if (loopbackOnly) {
+      const ok = boundPort > 0
+        ? [`127.0.0.1:${boundPort}`, `localhost:${boundPort}`, `[::1]:${boundPort}`]
+        : ['127.0.0.1', 'localhost', '[::1]'];
+      if (!ok.includes(host)) return `this editor only accepts writes addressed to ${ok.join(' / ')} (got Host "${host || 'none'}")`;
+    }
+    const site = String(req.headers['sec-fetch-site'] || '');
+    if (site && site !== 'same-origin' && site !== 'none') return `cross-site write refused (Sec-Fetch-Site: ${site})`;
+    const originHeader = req.headers.origin;
+    const referer = req.headers.referer;
+    let declared = typeof originHeader === 'string' ? originHeader : '';
+    if (!declared && typeof referer === 'string') {
+      try { declared = new URL(referer).origin; } catch { declared = ''; }
+    }
+    // 没有 Origin 也没有 Referer：非浏览器调用（CLI / 测试 / curl），没有 CSRF 面
+    if (!declared && !site) return null;
+    if (!declared) return 'a write from a browser must carry an Origin header';
+    let declaredHost;
+    try { declaredHost = new URL(declared).host; } catch { return `Origin is not a URL: ${JSON.stringify(declared)}`; }
+    if (declaredHost !== host) return `cross-origin write refused (Origin ${declared} vs Host ${host})`;
+    return null;
+  }
+
   const server = http.createServer((req, res) => {
     handle(req, res).catch((e) => {
       const status = e && e.status ? e.status : 500;
@@ -1897,6 +1968,10 @@ export async function createEditorServer(opts = {}) {
     const url = new URL(req.url || '/', 'http://localhost');
     const p = url.pathname;
     const method = req.method || 'GET';
+    if (method !== 'GET' && method !== 'HEAD') {
+      const why = writeRefusal(req);
+      if (why) throw Object.assign(new Error(why), { status: 403 });
+    }
 
     // ---- API ---------------------------------------------------------------------------------------
     if (p === '/api/state' && method === 'GET') {
@@ -2668,15 +2743,30 @@ export async function createEditorServer(opts = {}) {
 
     // 导入一个 .zip：原始字节（页面用 application/octet-stream 上传），先装到临时目录再搬进 workshop/
     if (p === '/api/packs/import' && method === 'POST') {
+      // 先把 Content-Type 卡住：`text/plain` 这类 CORS-safelisted 的形态是浏览器 `no-cors` 唯一能发的，
+      // 拦掉它就等于拦掉「随便哪个网页往这个端口塞一个 zip」那半条路（另一半在 `writeRefusal`）。
+      const ct = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+      if (!ZIP_CONTENT_TYPES.has(ct)) {
+        throw Object.assign(new Error(`POST /api/packs/import takes the raw zip bytes with Content-Type ${[...ZIP_CONTENT_TYPES].join(' / ')} (got ${JSON.stringify(ct || 'none')})`), { status: 415 });
+      }
       // 独立的、有上限的读取器：模块的 readBody 是 1 MB 的 JSON 体，一个带素材的包可以大得多。
       // 上限就是 shared/zip.js 的总量常量，而且**在缓冲整个请求之前**就按 Content-Length 先拒一次。
       const buffer = await readRawBody(req, ZIP_BODY_LIMIT);
       const force = ['1', 'true', 'yes'].includes(String(url.searchParams.get('force') ?? '').toLowerCase());
       let installed;
       try {
-        installed = installZip({ root, buffer, force });
+        // `backup: true`：覆盖时把旧版留进 `.mod-backups/`，这样 `rollback` 才有东西可回
+        installed = installZip({ root, buffer, force, backup: true });
       } catch (e) {
         throw packRefusal(e);
+      }
+      // **装上 ≠ 启用**：登记册的语义是「不在册 = 启用」（server/modRegistry.js:26），而一个包可以声明
+      // `server.modules` / `server.battle` —— 那些代码在游戏服务端进程里跑。所以只要新包带**服务端代码**，
+      // 装完就显式落一条 `disabled`，让「启用」成为一次刻意的动作（与 mod-manager 的 consent 同一条纪律）。
+      // 纯数据包不写登记册：它没有需要同意的执行面，写了反而多一条无意义的状态。
+      const enabled = declaresServerCode(installed.manifest) ? false : null;
+      if (enabled === false) {
+        try { disablePack(stateRoot, installed.id); } catch (e) { log.warn?.(`[editor] could not record "${installed.id}" as disabled: ${e && e.message ? e.message : e}`); }
       }
       return sendJson(res, 200, {
         ok: true,
@@ -2687,6 +2777,8 @@ export async function createEditorServer(opts = {}) {
         content: installed.content,
         voiceLines: installed.voiceLines,
         support: installed.support,
+        // `false` = 已显式禁用（要再启用）；`null` = 纯数据包，不登记册（按缺省即启用）
+        enabled,
         summary: packSummary(root, installed.id, loadWorkshop(root, { log: quietLog }), { supportFile }),
       });
     }
@@ -3820,13 +3912,14 @@ export async function createEditorServer(opts = {}) {
     res.end(body);
   }
 
-  const port = opts.port ?? 0;
-  const host = opts.host ?? '127.0.0.1';
+  const port = boundPort === 0 ? 0 : boundPort;
+  const host = bindHost;
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, resolve);
   });
   const actual = server.address().port;
+  boundPort = actual; // 守卫要用**真实**端口判 Host（绑 0 时预先不知道）
   return {
     port: actual,
     host,
