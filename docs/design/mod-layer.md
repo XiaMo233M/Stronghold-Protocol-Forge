@@ -23,7 +23,7 @@ The owner's ruling of 2026-10-09 fixes three layers:
 
 | layer | what it is | who executes it | when it may change a battle result |
 |---|---|---|---|
-| **A** content | declarative data, no code: the workshop pack of today (`shared/workshop.js:3394` `applyWorkshop`) | nobody — it is merged into the data every consumer reads (`server/data.js:92`) | always, and never detectably by the golden corpus (the corpus is generated from the official `data/*.json`, `test/golden/README.md:8-10`) |
+| **A** content | declarative data, no code: the workshop pack of today (`shared/workshop.js:3394` `applyWorkshop`) | nobody — it is merged into the data every consumer reads (`server/data.js:106`) | always, and never detectably by the golden corpus (the corpus is generated from the official `data/*.json`, `test/golden/README.md:8-10`) |
 | **B** server logic | hooks and kits: the code of `workshop/<pack>/kits/<id>.js` (`server/workshop.js:390` `loadWorkshopKits`) — one file-name rule over **two key spaces**, operator and summon (§28.12.1) | **the server only** — this is new | only through the hooks it registers, and only after a declared intent passes deterministic verification |
 | **C** client UI | rendering, themes, panels | the player's tab | never |
 
@@ -33,13 +33,13 @@ written as if they conflicted:
 - `docs/PACKS.md:131-139` — "the maintainers' study of mods, 2026-10-07": server-side only for gameplay; a content hash
   in the handshake (`welcome`, `/healthz`, the BattleSpec) before data packs ship; **no third-party code** ("a pack type
   that runs code is a separate decision of the owner's"); golden stays on the original content.
-- `docs/WORKSHOP.md:612` — the behaviour layer **is** an owner decision, taken later: "scripts run in the client
+- `docs/WORKSHOP.md:672` — the behaviour layer **is** an owner decision, taken later: "scripts run in the client
   (default `SP_COMBAT=client`), and `SP_VERIFY` can only recompute the result, not stop the script".
 
 The ruling resolves them: **B runs on the server, so the `docs/PACKS.md:137-138` objection no longer applies** (the
-owner has now taken that separate decision), and the `docs/WORKSHOP.md:612` warning stops being a permanent hazard
+owner has now taken that separate decision), and the `docs/WORKSHOP.md:672` warning stops being a permanent hazard
 because a room containing a B pack is no longer simulated in the player's tab (§28.4). The three-channel distribution
-(`docs/WORKSHOP.md:612`) stays.
+(`docs/WORKSHOP.md:672`) stays.
 
 What already exists, and must not be rebuilt: the two event buses (`server/sim/battle/hooks.js:17` `on`, `:57` `emit`;
 `server/match/effectsMeta.js:48-52` the 19 meta hooks), the kit injection point `Battle opts.kits`
@@ -51,7 +51,7 @@ is, who wins when two of them want the same id, and what has to be true before i
 ### 28.2 Identity (gap 1)
 
 Today a pack has an `id` (the directory name, `shared/workshop.js:377-379`) and free-text metadata
-(`shared/workshop.js:700-703`), and the BattleSpec carries only `SPEC_VERSION = 1` (`server/sim/spec.js:39`, written at
+(`shared/workshop.js:700-703`), and the BattleSpec carries only `SPEC_VERSION = 1` (`server/sim/spec.js:46`, written at
 `:61`) plus a list of kit **URLs** (`server/sim/spec.js:79-81`; produced by `server/workshop.js:491`). There is nowhere
 in the wire, in the data or in the match for "which content is this room running".
 
@@ -82,7 +82,7 @@ over exactly the bytes the loader reads and the browser will be served:
 
 **The one enumerator, and why there is exactly one** (业主裁决 B, 2026-10-11). "Which files does this pack have" is one
 function, `server/packFiles.js listPackFiles` (`:42`): recursive, sorted by path, symlinks neither followed nor listed,
-`[]` when the directory is not there. `identifyPack` (`server/workshop.js:911`) builds the manifest from it, and
+`[]` when the directory is not there. `identifyPack` (`server/workshop.js:949`) builds the manifest from it, and
 `server/modCatalog.js catalogFiles` (`:174`) refuses to publish a row the same call does not return. **The list the pack
 hash is taken over IS the client's download list** (`GET /mods/catalog.json`, §28.9): one list, two consumers, so the two
 cannot drift. The failure B was decided to remove is not "the digest is a little off": a file that a declared module
@@ -314,7 +314,7 @@ The entry points are the official-record lists the operator and monster pages al
 ### 28.4 Isolation (gap 3)
 
 **Server authority.** The behaviour layer runs in the player's browser by default today (`server/match/Match.js:107`, `:202-203`),
-and `docs/WORKSHOP.md:612` records the consequence honestly. Under the ruling, a room whose mod set contains any
+and `docs/WORKSHOP.md:672` records the consequence honestly. Under the ruling, a room whose mod set contains any
 `layer: B` pack runs with `clientCombat = false` for **that room**: the decision moves from the process-level
 `SP_COMBAT` environment variable to the room's mod set (`server/match/Match.js:262` is where the flag is resolved). Player tabs then
 never execute pack code, and the `docs/PACKS.md:137-138` objection is answered rather than waived. Layer A keeps
@@ -352,7 +352,7 @@ while the result is still accepted. Two decisions:
   accepting it. That is the same shape as the existing suspicion path for engine errors
   (`server/sim/battle/hooks.js:176-184`), applied per owner.
 
-**`battle.errors` is full at 100 and the rest is lost.** `server/sim/battle/hooks.js:170-172` deduplicates by `label|who|message` and
+**`battle.errors` is full at 100 and the rest is lost.** `server/sim/battle/hooks.js:268-271` deduplicates by `label|who|message` and
 `:173` stops at 100 entries; a battle spammed by a mod therefore silently loses every error after the first hundred,
 and they are only reachable through `m.simErrorLog` (`server/match/Match.js:127-129`) or `tools/matchrun.mjs --errors`. The cap is
 right (it is a memory and wire budget) so the design keeps it and adds what the cap omits: **per-owner counters** —
@@ -395,7 +395,7 @@ the intended policy — *outside the range the pack still loads, what it lacks f
 | verdict | when | what happens |
 |---|---|---|
 | **refuse** | a `layer: B` pack whose `api` range excludes this build | not loaded at all; the reason names the declared range and the installed API. A hook written against a different bus cannot be shown to be safe, and running it is exactly "a declaration without verification". |
-| **degrade** | a `layer: A` pack whose `game` range excludes the installed game version | load only the records that still pass the existing per-record validators — the same functions `tools/workshop-validate.mjs` already runs as layers 2–8 (`:482`, `:511`, `:551`, `:578`, `:592`, `:609`) — report every dropped record by id, and mark the pack `compatible: false` in the sense `shared/packs.js:167-168` already uses. |
+| **degrade** | a `layer: A` pack whose `game` range excludes the installed game version | load only the records that still pass the existing per-record validators — the same functions `tools/workshop-validate.mjs` already runs as layers 2–8 (`:482`, `:511`, `:551`, `:578`, `:592`, `:609`) — report every dropped record by id, and mark the pack `compatible: false` in the sense `shared/packs.js:148-149` already uses. |
 | **warn** | anything else: no declared range, or a range that includes this build | load normally; flag the absence of a declaration in the boot report. |
 
 **Citations that rot, and the guard that checks the claim.** This is not hypothetical: three instances of it turned up
@@ -467,7 +467,7 @@ pack "abyss": roster/chess_char_3_18_a diverged from vanilla at game s 42.3 (tic
    (`kits` is layer 4, `:511-524`), returning the same `{ field, code, severity, message, hint }` shape the editor and
    an AI self-correction loop already consume.
 2. **The server at load** (`server/index.js:88-90`), which must **refuse** a pack whose verification fails *before*
-   `applyWorkshop` merges anything (`server/data.js:92`). "Verification fails → the pack is not loaded" is the owner's
+   `applyWorkshop` merges anything (`server/data.js:106`). "Verification fails → the pack is not loaded" is the owner's
    wording, and load time is the only moment where refusing is still cheap.
 3. **CI**, over the repository's own fixtures (`docs/examples/kit-demo`, `docs/examples/demo-workshop`) — CI has no
    third-party packs, so this is a regression check on the harness, not a review of anyone's mod.
@@ -494,7 +494,7 @@ per row:
 ### 28.8 Layer C and the client: a minimal registration point
 
 The client has no plugin surface: `public/js/main.js:75` is a frozen `SCREENS` object, `:311` resolves a route as
-`SCREENS[route] || LobbyScreen`, and the routes themselves come from `selectRoute` (`public/js/store.js:118-128`). What
+`SCREENS[route] || LobbyScreen`, and the routes themselves come from `selectRoute` (`public/js/store.js:126-136`). What
 it does have is the pattern this design copies: **hosts mounted once at the root** — `UiHosts` (`public/js/main.js:345`,
 `public/js/ui/components.js:866`), `GuideHost` (`:318`, `public/js/ui/guide.js:106`), `LoadoutHost`, `SupportHost`.
 
@@ -550,7 +550,7 @@ cannot bypass.
 
 ### 28.9 Distribution (the 5th gap)
 
-Two channels, already decided (`docs/WORKSHOP.md:612`): the official bundle stays clean (`docs/PACKS.md:133-134`,
+Two channels, already decided (`docs/WORKSHOP.md:672`): the official bundle stays clean (`docs/PACKS.md:133-134`,
 `:139`), workshop content ships separately through the existing zip path (`shared/zip.js`,
 `tools/workshop-pack.mjs`). What is missing is the player-visible half of `docs/PACKS.md:135-136`, and it is four
 surfaces quoting one string:
@@ -2430,7 +2430,7 @@ node --test test/modSurface.test.js
 | 面板读得到的 | 既有 S2C 帧 | 帧里的哪一格 | 粒度 |
 |---|---|---|---|
 | **每人总伤害** | `m.result`（`shared/protocol.js:780`） | `players[].stats.dmgDealt`（同处还有 `bossDamage` / `healingDone` / `kills` / `leaks` / `perfectRounds`；`server/match/results.js:156-161` 组装，`ui/stats.js` 与 `screens/result.js` 的战绩页读的就是它） | 整场**结算时**一次，按玩家 |
-| **实时领袖伤害** | `b.pool`（`shared/protocol.js:786`） | `acked[fieldId]` = 那一场累计计入的领袖伤害（`server/match/match/bossRounds.js:382` `_broadcastPool`「to everyone」，≤ 4 Hz） | 首领 / 隐藏回合，按**场**，≤ 4 Hz |
+| **实时领袖伤害** | `b.pool`（`shared/protocol.js:786`） | `acked[fieldId]` = 那一场累计计入的领袖伤害（`server/match/match/bossRounds.js:384` `_broadcastPool`「to everyone」，≤ 4 Hz） | 首领 / 隐藏回合，按**场**，≤ 4 Hz |
 | 共享池血量 / 队伍 LP | 同一条 `b.pool` | `hp` / `max` / `teamLp` | 同上 |
 
 所以「总伤看板」是一个**今天就能发**的包：订阅 `m.result` 排个序就够了。
@@ -2509,7 +2509,7 @@ export function mount(ctx) {
   发出去的那一份。`byChar[charId] ?? global` 就是播放时用的那个语言 —— 最后一档「默认配音」被
   `sanitizeSettings` 保证不会露出来（store 里的 `voiceLang` 一定是词表成员）。
 * **第二个读者**：形状不是 `char_…` 的键、值不在 `VOICE_LANGS` 里的，都不进快照 —— 面板画出来的不该与
-  `public/js/audio.js:1022` / `:1028` 播放的不一致。
+  `public/js/audio.js:1077` / `:1094` 播放的不一致。
 * **拿不到就是 `null`**（没注入设置库 / 不成形 / `get()` 抛）：不抛、不编造，面板画空态。
 * **不进 `me.snapshot()`**：那三格来自**一次** `store.get()`（「一次取全」才不撕裂），这一格来自另一个 store。
 
@@ -2880,7 +2880,7 @@ JSON 可序列化值**的回调。
 2. **缺省逐字节不变**。不声明 `variants` 的包归一化清单里**不长出这个键**（无条件写进去会让**所有**已发布包的
    内容哈希改变，房间的摘要闸门随即误判，§28.2）—— 与 `skins` / `voiceCdn` / `assets` 同一条纪律。
    `GameData` 拿不到口径时 `deployCap` 逐字是 `posIntOr(economy.deployCap, DEFAULTS.deployCap)`。
-3. **声明了必须进身份哈希**。`identifyPack` 哈希的是归一化清单的 `canonicalJson`（`server/workshop.js:920`），
+3. **声明了必须进身份哈希**。`identifyPack` 哈希的是归一化清单的 `canonicalJson`（`server/workshop.js:958`），
    所以只要第 2 条那条「写了才进清单」成立，这一条自动成立 —— 而它**必须**成立：只差口径的两份包摘要若相同，
    同一个摘要下就有两种对局行为（§28.2）。
 4. **必须 `combat: true`**（`VARIANTS_NEED_COMBAT`）。判据是**能力**而不是意图，与 `server.meta`
