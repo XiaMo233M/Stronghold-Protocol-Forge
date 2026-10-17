@@ -177,6 +177,11 @@
   `SKIP_TRACKED = ['test/']` —— 打包**复制全部 git 跟踪文件、只略过 `test/`**，
   所以 82 个里 `test/` 之外的 **62** 个跟着进了包。
   ⚠️ **不是 npm 白名单**（`isPlayerFile` 只判 38 个）—— 两个口径不同，别混。
+- ⚠️ **一条时序型 flaky**：`test/ui/plugins-content.test.js:372`
+  「a content set still loading when the b.start comes (a reconnect): the authority once it is there」
+  —— 失败形态是 `TypeError: Cannot read properties of undefined (reading 'authoritative')`（`:380`）；
+  实测单独重跑 3 次 **1 红 2 绿**，且 `run6`（本版之前）就已记录 ⇒ **非本版引入**，待单独修。
+  ⚠️ 本版**没有**动它（单独改它属「为变绿而动测试」，不在本轮范围）—— **记档，不是忽略**。
 
 ---
 
