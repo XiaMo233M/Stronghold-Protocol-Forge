@@ -257,6 +257,46 @@ export const PLUGIN_ERRORS = Object.freeze({
     zh: '这个版本还不应用 "theme"（只应用 "assets" 里的素材）', en: 'This version does not apply "theme" yet (only the art of "assets")',
     fix: { zh: '可以先留着，以后的版本会用上；或者删掉它，提示就没了。', en: 'Keep it for a later version, or remove it to silence the note.' },
   },
+  PLUGIN_THEME_NAME: {
+    level: 'problem', doc: D.cosmetic,
+    zh: '主题变量「{where}」不是本安装的设计变量', en: '“{where}” is not a design token of this installation',
+    fix: { zh: '只能设置 public/css/theme.css 里 :root 的颜色、时间和缓动变量，例如 --text-hi、--t-fast、--ease-out。', en: 'Set only a colour, time or easing custom property of :root in public/css/theme.css, such as --text-hi, --t-fast or --ease-out.' },
+  },
+  PLUGIN_THEME_VALUE: {
+    level: 'problem', doc: D.cosmetic,
+    zh: '主题变量「{where}」的值不是这种变量允许的颜色、时间或缓动', en: '“{where}” is not a colour, a time or an easing this token allows',
+    fix: { zh: '颜色用 #rgb、#rgba、#rrggbb、#rrggbbaa 或 rgb()/rgba()/hsl()/hsla()；时间用 0–2000ms 或 0–2s；缓动用关键字或 cubic-bezier()。不能写网址、引号或表达式。', en: 'A colour is #rgb, #rgba, #rrggbb, #rrggbbaa or rgb()/rgba()/hsl()/hsla(). A time is 0–2000ms or 0–2s. An easing is a keyword or cubic-bezier(). No URL, quotes or expression.' },
+  },
+  PLUGIN_THEME_LIMIT: {
+    level: 'problem', doc: D.cosmetic,
+    zh: '主题变量超过了 64 个', en: 'There are more than 64 theme variables',
+    fix: { zh: '一个插件最多写 64 个主题变量。', en: 'One plugin sets at most 64 theme variables.' },
+  },
+  PLUGIN_THEME_SHAPE: {
+    level: 'problem', doc: D.cosmetic,
+    zh: '主题「{where}」不是变量表', en: '“{where}” is not a theme variable map',
+    fix: { zh: '写成 "theme": { "vars": { "--text-hi": "#f4faf7" } }。键都是 -- 开头的扁平对象也可以。', en: 'Write "theme": { "vars": { "--text-hi": "#f4faf7" } }. A flat object whose every key starts with -- is also accepted.' },
+  },
+  PLUGIN_NOTICE_SHAPE: {
+    level: 'problem', doc: D.manifest,
+    zh: '公告「{where}」的写法不对', en: '“{where}” is not a notice',
+    fix: { zh: 'notices 是列表，每条有 id（小写字母、数字和 -）、title、body，可以有 date（YYYY-MM-DD）和 i18n。', en: 'notices is a list. Each item has id (lower-case letters, digits and -), title and body, and may have date (YYYY-MM-DD) and i18n.' },
+  },
+  PLUGIN_NOTICE_LIMIT: {
+    level: 'problem', doc: D.manifest,
+    zh: '公告超过了条数或字数上限', en: 'A notice exceeds the count or the length limit',
+    fix: { zh: '一个插件最多 20 条公告，标题最多 80 字，正文最多 2000 字。', en: 'One plugin has at most 20 notices, a title of at most 80 characters and a body of at most 2000.' },
+  },
+  PLUGIN_NOTICE_TEXT: {
+    level: 'problem', doc: D.manifest,
+    zh: '公告「{where}」的标题或正文不是纯文本，或是空的', en: '“{where}” has a title or a body that is empty or not plain text',
+    fix: { zh: '标题和正文都要有字。正文可以换行。不要写控制字符。链接就当普通文字写。', en: 'Title and body must both contain text. The body may contain newlines. No control characters. Write a link as text.' },
+  },
+  PLUGIN_NOTICE_LANG: {
+    level: 'problem', doc: D.manifest,
+    zh: '公告「{where}」的语言代码不认识', en: '“{where}” names a language this game does not know',
+    fix: { zh: 'i18n 的键用本游戏认识的语言代码，例如 en、ja、ko、zh-TW。', en: 'An i18n key is a language code this game knows, such as en, ja, ko or zh-TW.' },
+  },
   PLUGIN_ENTRY: {
     level: 'problem', doc: D.manifest,
     zh: '入口 "entry" 写得不对，或者这个类别不能有入口：{where}', en: 'An entry point is not right, or this class has none: {where}',

@@ -236,6 +236,14 @@ node tools/plugin.mjs pack my-texas --zip
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_ASSET_FILE` | 素材「{where}」写的文件不对：不是插件文件夹里的路径，或者不是这个位置要的文件类型 | 写插件文件夹里的相对路径，例如 art/avatar.png。图片位置用 .png .jpg .webp，声音位置用 .mp3 .ogg，模型用 .skel 和 .atlas（贴图 .png）。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_THEME_URL` | 主题 "theme" 里写了网址 | 主题只能写颜色、长度和插件自带的字体名，不能引用网址（这是为了防止泄露数据）。 |
 | 插件能用，但检查时有提示 | `PLUGIN_THEME_UNUSED` | 这个版本还不应用 "theme"（只应用 "assets" 里的素材） | 可以先留着，以后的版本会用上；或者删掉它，提示就没了。 |
+| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_THEME_NAME` | 主题变量「{where}」不是本安装的设计变量 | 只能设置 public/css/theme.css 里 :root 的颜色、时间和缓动变量，例如 --text-hi、--t-fast、--ease-out。 |
+| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_THEME_VALUE` | 主题变量「{where}」的值不是这种变量允许的颜色、时间或缓动 | 颜色用 #rgb、#rgba、#rrggbb、#rrggbbaa 或 rgb()/rgba()/hsl()/hsla()；时间用 0–2000ms 或 0–2s；缓动用关键字或 cubic-bezier()。不能写网址、引号或表达式。 |
+| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_THEME_LIMIT` | 主题变量超过了 64 个 | 一个插件最多写 64 个主题变量。 |
+| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_THEME_SHAPE` | 主题「{where}」不是变量表 | 写成 "theme": { "vars": { "--text-hi": "#f4faf7" } }。键都是 -- 开头的扁平对象也可以。 |
+| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_NOTICE_SHAPE` | 公告「{where}」的写法不对 | notices 是列表，每条有 id（小写字母、数字和 -）、title、body，可以有 date（YYYY-MM-DD）和 i18n。 |
+| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_NOTICE_LIMIT` | 公告超过了条数或字数上限 | 一个插件最多 20 条公告，标题最多 80 字，正文最多 2000 字。 |
+| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_NOTICE_TEXT` | 公告「{where}」的标题或正文不是纯文本，或是空的 | 标题和正文都要有字。正文可以换行。不要写控制字符。链接就当普通文字写。 |
+| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_NOTICE_LANG` | 公告「{where}」的语言代码不认识 | i18n 的键用本游戏认识的语言代码，例如 en、ja、ko、zh-TW。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_ENTRY` | 入口 "entry" 写得不对，或者这个类别不能有入口：{where} | 外观插件不需要 "entry"，删掉它。界面插件写 "entry": { "client": "ui/index.html" }（插件文件夹里的一个 .html 文件）。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_LANG_ONLY` | 「{where}」只属于语言包（lang 类），{class} 插件不能写 | 删掉它；要做语言包的话，把 class 改成 "lang"。（工作台可一键修复） |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_PERMISSION` | 权限写得不对：「{where}」不认识，或者 {class} 插件不能有 | 外观插件能用的权限：assets.override（替换本安装已有的素材）、assets.add（新增一个本安装没有的条目）、theme；界面插件用 ui.frame。"permissions" 要写成列表。 |
