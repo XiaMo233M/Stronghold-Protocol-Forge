@@ -102,7 +102,7 @@ test('没有 registerPlugin 导出 / 入口越界 ⇒ 具名拒', async () => {
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test('script 档必须给 `entry.sim`（`sim.code` 声明的代码插件）', async () => {
+test('装载门：`script` 档具名拒（沙箱没接线），`trusted` 档才是进程内执行的那一档', async () => {
   const root = fs.mkdtempSync(path.join(tmpdir(), 'sp-host5-'));
   try {
     makePlugin(root, 'nocode', { klass: 'script', permissions: ['sim.code'] }); // 没有 entry
@@ -110,8 +110,10 @@ test('script 档必须给 `entry.sim`（`sim.code` 声明的代码插件）', as
     assert.deepEqual(a0.plugins.length, 1, '形状层不要求 script 一定有 entry（上游也没强制）');
     const a1 = await loadOfficialModules(a0.plugins, { log: quiet });
     assert.deepEqual(a1.modules, [], '没有 entry ⇒ 不装载任何模块');
+    assert.equal(a1.errors.length, 1);
+    assert.equal(a1.errors[0].code, 'PLUGIN_SANDBOX_UNAVAILABLE', 'script = profile sandbox，本版没接沙箱 ⇒ 具名拒');
 
-    makePlugin(root, 'ok', { klass: 'script', permissions: ['sim.code'], entry: 'plugin.mjs', entryBody: 'export function registerPlugin(host) {}' });
+    makePlugin(root, 'ok', { klass: 'trusted', permissions: ['trusted.server'], entry: 'plugin.mjs', entryBody: 'export function registerPlugin(host) {}' });
     const b = await loadOfficialModules(loadOfficialPlugins(root, { log: quiet }).plugins.filter((p) => p.id === 'ok'), { log: quiet });
     assert.deepEqual(b.errors, []);
     assert.equal(b.modules.length, 1);

@@ -10,8 +10,11 @@
 //     `SDK_NOT_CONSENTED`）。钉版失效（`SDK_PIN_STALE`）**任何情况下都拦**，与本开关无关。
 //   * `SP_MOD_STRICT_GLOBALS=1` —— `server.modules` 的源码扫描走**严格档**（含 `globalThis`）。
 //   * `SP_MOD_BUDGET='{...}'` —— 统一调用预算（解析在 `budget.js`）。
+//   * `SP_MOD_RUN_MODE=official-only|official-preferred|legacy-compatible` —— 运行模式（Phase 8）。缺省
+//     `legacy-compatible` ⇒ 不产生任何一条 mode 判定，行为与重构前逐字节相同。认不出的值（含空串）一律退回缺省。
 
 import { budgetMapFromEnv } from './budget.js';
+import { DEFAULT_RUN_MODE, isRunMode } from '../../shared/sdk/sdkConstants.js';
 
 const truthy = (v) => /^(1|true|yes)$/i.test(String(v ?? ''));
 
@@ -20,15 +23,21 @@ const truthy = (v) => /^(1|true|yes)$/i.test(String(v ?? ''));
  * 一套跑在 CI 上的测试不该随 shell 环境变形。
  * @param {Record<string, string|undefined>} [env]
  * @param {{ log?: any, now?: () => number }} [opts]
- * @returns {{ strictGlobals: boolean, requireConsentForHost: boolean, scanProfile: 'legacy'|'module',
+ * @returns {{ strictGlobals: boolean, requireConsentForHost: boolean, mode: string, scanProfile: 'legacy'|'module',
  *             budget: ReturnType<typeof budgetMapFromEnv> }}
  */
 export function modPolicyFromEnv(env = process.env, { log = null, now } = {}) {
   const strictGlobals = truthy(env.SP_MOD_STRICT_GLOBALS);
   const requireConsentForHost = truthy(env.SP_MOD_REQUIRE_CONSENT);
+  const rawMode = env.SP_MOD_RUN_MODE;
+  const mode = isRunMode(rawMode) ? rawMode : DEFAULT_RUN_MODE;
+  if (rawMode !== undefined && rawMode !== '' && !isRunMode(rawMode)) {
+    log?.warn?.(`[mod-policy] SP_MOD_RUN_MODE=${JSON.stringify(rawMode)} is not a known run mode — falling back to "${DEFAULT_RUN_MODE}"`);
+  }
   return Object.freeze({
     strictGlobals,
     requireConsentForHost,
+    mode,
     // 严格档的档位名：官方进程内 module。legacy 是**缺省**（旧行为，`globalThis` 豁免保留）。
     scanProfile: strictGlobals ? 'module' : 'legacy',
     budget: budgetMapFromEnv(env, { log, ...(now ? { now } : {}) }),

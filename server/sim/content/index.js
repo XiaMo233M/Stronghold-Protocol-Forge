@@ -258,7 +258,7 @@ export function skillSpecSource(def, kits = KITS) {
  * (simdata withUnitLoadouts over its players' inputs), so summons spawned during the battle (`getToken(id, owner)`)
  * and every other id-only lookup resolve the owner's selected skill / module there too (DESIGN §16).
  */
-export function installContent(battle, { mode = 'full', extra = null, installers = null } = {}) {
+export function installContent(battle, { mode = 'full', extra = null, installers = null, packs = null } = {}) {
   try {
     const view = withUnitLoadouts(battle.data, (battle.players || []).map((p) => p && p.input));
     if (view && view !== battle.data) battle.data = view;
@@ -285,15 +285,17 @@ export function installContent(battle, { mode = 'full', extra = null, installers
   }
   // 官方档 SDK（`sp.content.register` / `sp.kits.register`…）登记的扩展在这里装进战场。
   // `installExtensions` 自己逐条 try/catch（报错点名 `plugin:<id>`），一个插件炸不了战场。
-  try { installExtensions(battle); } catch (e) { battle._handlerError?.('plugin-extensions', null, e); }
+  // `packs`（可选）把安装范围收到**这一局声明的那几个插件**：这些注册是进程级全局的，一个带 `modSet` 的房间
+  // 不该让集合外的插件跟着生效。不传 ⇒ 全装（既有调用点逐字节不变）。
+  try { installExtensions(battle, { packs }); } catch (e) { battle._handlerError?.('plugin-extensions', null, e); }
 }
 
 /** Prep-side registration of every domain module (server boot). */
-export function registerAllMeta(registry) {
+export function registerAllMeta(registry, { packs = null } = {}) {
   for (const [name, mod] of MODULES) {
     if (typeof mod.registerMeta !== 'function') continue;
     try { mod.registerMeta(registry); } catch (e) { console.error(`[content] ${name}.registerMeta failed:`, e); }
   }
-  // 官方档 SDK 的 `sp.meta.register` 落点（0.3.0 同一份实现）。
-  try { registerExtensionMeta(registry); } catch (e) { console.error('[content] extension meta failed:', e); }
+  // 官方档 SDK 的 `sp.meta.register` 落点（0.3.0 同一份实现）。`packs` 语义同上：房间声明了集合就只装集合里的。
+  try { registerExtensionMeta(registry, { packs }); } catch (e) { console.error('[content] extension meta failed:', e); }
 }

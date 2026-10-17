@@ -198,7 +198,7 @@ export async function startServer(opts = {}) {
     registry: modRegistry,
     refused: adjudicated.refused,
     unavailable: pruned.removed,
-    options: { origin: 'forge', requireConsentForHost: modPolicy.requireConsentForHost },
+    options: { origin: 'forge', requireConsentForHost: modPolicy.requireConsentForHost, mode: modPolicy.mode },
   });
   for (const w of modPlan.warnings) log.warn(`[mod-plan] ${w.id ? `"${w.id}" ` : ''}${w.code}: ${w.reason}`);
   if (modPlan.discovered.length) {
@@ -215,32 +215,53 @@ export async function startServer(opts = {}) {
   //   * 它们的**声明式内容**经 `excludePacks` **同一份裁剪**进数据叠加层（`server/data.js` 的官方块）；
   //   * 只有 `plan` 里**激活**的插件参与运行时与身份。
   const pluginsDir = path.join(ROOT, OFFICIAL_PLUGINS_DIR);
+  // **只解析，不执行**（Phase 2 契约）：`loadOfficialPlugins` 读 `plugin.json`、算摘要，一个字节的插件代码都不跑。
   const official = loadOfficialPlugins(pluginsDir, { log });
   for (const e of official.errors) log.warn(`[official] ${e.pack}: ${e.code}: ${e.reason}`);
-  // 官方 **module** 运行时（Phase 4）：声明了 `modules` 的插件在这里被装起来（**严格档扫描在 import 之前**）。
-  // 目录不存在 / 没有声明 `modules` 的插件 ⇒ 空表、零错，与上面同一条「现网逐字节不变」。
-  const officialModules = await loadOfficialModules(official.plugins, { log, stateRoot });
-  for (const e of officialModules.errors) log.warn(`[official] ${e.pack}: ${e.code}: ${e.reason}`);
+  // ── 装载门（DESIGN 重构计划 §二.1 的「一个装载门」）──────────────────────────────────────────────────────
+  // **顺序是这个模块最重要的一条不变量**：plan 必须**先于**任何插件代码执行。
+  // 旧顺序（解析 → 无条件 import/执行 → plan）意味着「被判禁止的插件，它的顶层副作用早就发生了」，
+  // 而 extensions 注册表是**模块级全局**、没有回滚 API ⇒ 被禁用的插件照样对每个房间生效。
+  // 现在：解析 → plan → **只 import plan 里激活的**。不在计划里的插件，字节永远不进入本进程。
+  //
+  // `unavailable` 在这一次 plan 里只含**清单层**的失败（`official.errors`）；装载期的失败（import 失败 /
+  // 没有入口导出）在下一次 plan 里回填 —— 见下面 `officialPlanFinal`。
   const officialPlan = buildActivationPlan({
     packs: official.plugins,
     registry: modRegistry,
-    // 装不上模块的插件与「清单本身就坏」的一视同仁：整包移出（与 Forge 档 dropUnavailablePreDispatchPacks 同一条纪律）
-    unavailable: [...official.errors, ...officialModules.errors],
-    options: { origin: 'official', requireConsentForHost: modPolicy.requireConsentForHost },
+    unavailable: [...official.errors],
+    options: { origin: 'official', requireConsentForHost: modPolicy.requireConsentForHost, mode: modPolicy.mode },
   });
+  for (const w of officialPlan.warnings) log.warn(`[mod-plan] official ${w.id ? `"${w.id}" ` : ''}${w.code}: ${w.reason}`);
+  // 只有**计划里激活**的插件才被 import：`filter` 就是那道门（`officialHost.loadOfficialModules`）。
+  const officialModules = await loadOfficialModules(official.plugins, {
+    log, stateRoot,
+    filter: (p) => officialPlan.activatedSet.has(p.id),
+  });
+  for (const e of officialModules.errors) log.warn(`[official] ${e.pack}: ${e.code}: ${e.reason}`);
+  // **第二次** plan：把装载期失败并回 `unavailable`，让「装不上的插件」与「清单坏掉的插件」在**同一份计划**里
+  // 一视同仁地移出（同一份 `activatedSet` 仍是唯一权威）。`official.errors` 与 `officialModules.errors` 无交集
+  // （前者在装载前就 `continue` 了），所以两轮之间不会有重复条目。
+  const officialPlanFinal = officialModules.errors.length
+    ? buildActivationPlan({
+      packs: official.plugins,
+      registry: modRegistry,
+      unavailable: [...official.errors, ...officialModules.errors],
+      options: { origin: 'official', requireConsentForHost: modPolicy.requireConsentForHost, mode: modPolicy.mode },
+    })
+    : officialPlan;
   // 只有**计划里激活**的插件才参与运行时与身份（被禁用/被裁的插件：房间钩子、meta、battle、目录都不给）。
-  const officialPluginsLive = official.plugins.filter((p) => officialPlan.activatedSet.has(p.id));
-  const officialModulesLive = officialModules.modules.filter((m) => officialPlan.activatedSet.has(m.pack));
+  const officialPluginsLive = official.plugins.filter((p) => officialPlanFinal.activatedSet.has(p.id));
+  const officialModulesLive = officialModules.modules.filter((m) => officialPlanFinal.activatedSet.has(m.pack));
   // Phase 7 的高风险能力：官方 `meta` / `battle` 走**同一套**引擎契约（registerMeta / install），
   // 由这两个桥重放；没有声明对应能力的插件 ⇒ 空数组，下面的展开与从前逐元素相同。
   const officialMetaLive = officialMetaModules(officialModulesLive);
   const officialBattleLive = officialBattleInstallers(officialModulesLive);
   // 战斗模块送浏览器（Forge 有 `battleModules`，官方这一格原来缺失）：同一条 URL 约定、不同的根目录。
   const officialBattleModuleList = officialBattleModules(officialModulesLive);
-  for (const w of officialPlan.warnings) log.warn(`[mod-plan] official ${w.id ? `"${w.id}" ` : ''}${w.code}: ${w.reason}`);
   if (official.plugins.length) {
-    log.info?.(`[official] ${officialPlan.activated.length} plugin(s) activated / ${officialPlan.excluded.length} excluded; `
-      + `${officialModulesLive.length} module(s); activationDigest=${officialPlan.digest.activationDigest}`);
+    log.info?.(`[official] ${officialPlanFinal.activated.length} plugin(s) activated / ${officialPlanFinal.excluded.length} excluded; `
+      + `${officialModulesLive.length} module(s); activationDigest=${officialPlanFinal.digest.activationDigest}`);
   }
   const metaModules = workshopMeta.modules.filter((m) => survivors.has(m.id));
   const serverModulesLive = serverModules.modules.filter((m) => survivors.has(m.pack));
@@ -268,7 +289,7 @@ export async function startServer(opts = {}) {
   // 同一份 plan 里的 excluded（= 被操作者禁用 ∪ 被裁决拒绝 ∪ 装不上被裁 ∪ 未同意/钉失效）——数据叠加层与这里
   // 是**同一次**裁剪，且这个集合现在只有一个来源（`modPlan`），不再由三处手搓并集。
   // 官方档的 excluded 也并进来：被禁用/被裁/未同意的**官方插件**，它的声明式内容同样不许进叠加层。
-  const excludedPacks = new Set([...modPlan.excluded, ...officialPlan.excluded]);
+  const excludedPacks = new Set([...modPlan.excluded, ...officialPlanFinal.excluded]);
   // The process-wide singleton serves the default data dir; a custom dir (tests) gets its own copy. The 创意工坊 overlay
   // is applied inside the loader (server/data.js), i.e. whichever way the data is obtained, it is already merged.
   // SP_WORKSHOP (editor/playtest.mjs) lets the Forge editor's 试玩 subprocess read the workshop root the editor was
@@ -287,7 +308,19 @@ export async function startServer(opts = {}) {
   //   * workshopKits.kits the behaviour layer (a per-battle kit map) for battles the server itself runs;
   //   * workshopKitFiles  the URLs serving those same kit modules to the browser, which must rebuild the identical map,
   //                       or its client-simulated battle would disagree with the server's verification.
-  const workshopLoaded = { ...loadedForPayloads, packs: pruned.packs, errors: pruned.errors };
+  // ── 单一裁剪（DESIGN 重构计划 §一 原则 2 的落点）──────────────────────────────────────────────────────────
+  // 从这一行起，**每一个**下游读者（数据叠加层 / 身份清单 / kits / 面板 / 资源表 / 目录 / 房间物化）看到的都是
+  // 同一份 `pruned.packs` **且**过完 `modPlan.activatedSet` 的那一份。以前 `survivors` 只过滤了 5 处（meta /
+  // serverModules / battle / room），而身份清单、kits、面板、目录、roomAssets 直读 `pruned.packs` —— 默认配置下
+  // 二者逐元素相同所以看不出差别，一旦开 `SP_MOD_REQUIRE_CONSENT=1`、钉版失效或传了 run mode，就会出现
+  // 「plan 说这个包不在、可它的 kit/面板/身份还在/healthz 上说话」。
+  // 官方插件并进同一份：它们的声明式内容与身份同样受这一次裁剪（`excludedPacks` 见下）。
+  const workshopLoaded = {
+    ...loadedForPayloads,
+    packs: (pruned.packs || []).filter((p) => survivors.has(p.id)),
+    errors: pruned.errors,
+    excludedPacks,
+  };
   // 作者自备 CDN 的语音素材（`pack.json.voices` / `voiceLangs` 里的 `{ url, sha256, file }` 条目，DESIGN §28.33）：
   // 在**合并语音表之前**把字节取到本地缓存并按作者声明的 sha256 核对。四条纪律见 `server/voiceCdn.js`；
   // 这里负责两件事 —— **逐条点名**（失败绝不静默）与**把取不到的那几条从语音表里摘掉**（宁可回落到默认配音，
@@ -350,7 +383,9 @@ export async function startServer(opts = {}) {
   // 干净安装既不需要官方那一份的第二次读取，也没有任何集合会比「进程级那一份」更小。
   const roomAssets = (workshopLoaded.packs || []).length
     ? createRoomAssets({
-      official: loadData(dataDir, { log, workshopDir: null }),
+      // 注意 `official` 这一份也要吃同一次裁剪（`excludePacks` + `pluginsDir`）：缺了它，一个被禁用/被裁的官方插件
+    // 的声明式内容会从**房间物化**这条路回流进房间数据（进程级那一份走 `data`，这里走第二次读取）。
+      official: loadData(dataDir, { log, workshopDir: null, excludePacks: excludedPacks, pluginsDir }),
       processData: data,
       packs: workshopLoaded.packs,
       kits: workshopKits.kits,
@@ -463,7 +498,11 @@ export async function startServer(opts = {}) {
       accounts,
       records,
       ...(matchWrappers.length ? { MatchClass } : {}),
-      workshop: { kits: workshopKits.kits, tokenKits: workshopKits.tokenKits, modules: workshopKits.modules, mods: workshopMods, hooks: workshopHooks.hooks, panels: allPanels, assets: workshopModAssets, theme: workshopTheme.theme, meta: [...metaModules, ...officialMetaLive], roomAssets, battle: [...battleModules, ...officialBattleModuleList], battleInstallers: [...battleInstallers, ...officialBattleLive], roomHooks: roomInstallers, transport: transport.transport, serverChannels: serverChannelMap, officialModules: officialModulesLive },
+      // 分发前钩子（`pack.json.server.preDispatch`, DESIGN §28.13）：**同一份裁剪** —— 一个装好钩子却被计划裁掉的包，
+      // 它的钩子能 `return true` 吃掉 `room.create` / `room.join`（唯一能「否决消息」的包能力），所以它必须和别的
+      // 读者看同一份集合。`modPlan` 一并交给 Lobby：房间声明子集的准入判据（`roomSubset`）只读这一份计划。
+      workshop: { kits: workshopKits.kits, tokenKits: workshopKits.tokenKits, modules: workshopKits.modules, mods: workshopMods,
+        hooks: (workshopHooks.hooks || []).filter((h) => survivors.has(h.pack)), panels: allPanels, assets: workshopModAssets, theme: workshopTheme.theme, meta: [...metaModules, ...officialMetaLive], roomAssets, battle: [...battleModules, ...officialBattleModuleList], battleInstallers: [...battleInstallers, ...officialBattleLive], roomHooks: roomInstallers, transport: transport.transport, serverChannels: serverChannelMap, officialModules: officialModulesLive, modPlan },
     },
     { data, log },
   );
@@ -555,7 +594,7 @@ export async function startServer(opts = {}) {
 
   // `accounts` / `records` 也交出来（两份都是 `null` 时表示没开 `SP_ACCOUNTS`）：运维与测试要能确认
   // 「这个进程到底有没有账号」，而不是靠猜 `hello` 的回复。
-  return { port: actualPort, host: boundHost, url, server, wss, lobby, network, registry, packs, accounts, records, traffic, assetIndex, views, modPlan, officialPlan, close };
+  return { port: actualPort, host: boundHost, url, server, wss, lobby, network, registry, packs, accounts, records, traffic, assetIndex, views, modPlan, officialPlan: officialPlanFinal, close };
 }
 
 // `node server/index.js` / npm start: listen, print the banner, stop on SIGINT / SIGTERM (http/boot.js).

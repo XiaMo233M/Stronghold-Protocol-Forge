@@ -31,6 +31,12 @@ import { WORKSHOP_BATTLE_PREFIX } from '../http/static.js';
 /** 需要**运行时面**的能力（其余是纯声明，数据走 manifest）。 */
 export const HOST_CAPABILITIES = Object.freeze(['modules', 'sim', 'kits', 'storage', 'health', 'routes', 'metrics', 'lane', 'room', 'meta', 'panels']);
 /**
+ * 本版**没有接线的 profile**：`sandbox` 的 runner（`mod-manager/sandbox.js` 的 `createSandboxRunner`）存在但
+ * **生产零调用**，所以 `script` 档只能二选一 —— 要么真在沙箱里跑，要么**具名拒**。绝不退回进程内执行：
+ * 一个声明"我要被隔离"的插件，在宿主进程里跑，是「声明与语义相反」，本仓库最恨的那种形状。
+ */
+export const UNWIRED_PROFILES = Object.freeze(['sandbox']);
+/**
  * 声明了这些能力 ⇒ 源码扫描要**并上** kit 那张表（时钟 / 随机 / DOM / 计时器）：它们在对局循环里跑，
  * 同一个种子必须在两端打出同一个结果。与 `server/battlePack.js` / `server/match/metaPack.js` 逐字同一条纪律。
  */
@@ -338,14 +344,29 @@ function entryAbs(plugin, entry) {
  * 装载官方插件里**声明了 `modules`** 的那些：严格档扫描 → 动态 import → `registerPlugin(host)`。
  * 失败**不抛**，一条 `{ pack, code, reason }` 回到调用方（与 Forge 档同一个裁剪点语义）。
  *
+ * **装载门（`filter`）**：`loadOfficialModules` 会**执行插件代码**（顶层副作用 + `setup(sp)` / `registerPlugin`），
+ * 所以它必须是「计划之后」的一步 —— 调用方先算出 `officialPlan`，再用 `filter` 只放行**激活**的插件。
+ * 缺省 `filter` 全通过（既有单测与「先装后裁」的旧顺序语义不变），但生产路径**必须**传。
+ * 被 `filter` 拦下的插件**既不扫描也不 import**：它的字节永远不进入本进程。
+ *
  * @param {Array<any>} plugins `loadOfficialPlugins(...)` 的产物
- * @param {{ log?: any, stateRoot?: string|null, metrics?: any, importModule?: (url: string) => Promise<any> }} [opts]
+ * @param {{ log?: any, stateRoot?: string|null, metrics?: any, filter?: (plugin: any) => boolean, importModule?: (url: string) => Promise<any> }} [opts]
  */
-export async function loadOfficialModules(plugins, { log = noopLog, stateRoot = null, metrics = null, importModule = (url) => import(url) } = {}) {
+export async function loadOfficialModules(plugins, { log = noopLog, stateRoot = null, metrics = null, filter = null, importModule = (url) => import(url) } = {}) {
   const modules = [];
   const errors = [];
   for (const plugin of Array.isArray(plugins) ? plugins : []) {
     const caps = plugin?.descriptor?.capabilities || [];
+    // **装载门**：不在计划里的插件，连源码都不读 —— 它的顶层副作用不可能发生。
+    if (typeof filter === 'function' && !filter(plugin)) continue;
+    // **未接线的 profile 具名拒**（在能力判据之前）：`script` 档声明的是「隔离运行」，而本版没有把它接进
+    // 运行时 —— 退回进程内执行等于**违背它自己的声明**。拒载时点名 profile 与理由。
+    const profile = plugin?.descriptor?.profile || null;
+    if (profile && UNWIRED_PROFILES.includes(profile)) {
+      errors.push({ pack: plugin.id, code: 'PLUGIN_SANDBOX_UNAVAILABLE', reason: `plugin "${plugin.id}" declares profile "${profile}" (class "${plugin.descriptor?.klass || '?'}"), but this build wires no sandbox runner into the runtime — refusing rather than running isolated code in-process` });
+      log?.warn?.(`[official] ${plugin.id}: profile "${profile}" is not wired into this build — declined`);
+      continue;
+    }
     if (!caps.includes('modules')) continue;
     const ep = (plugin.descriptor.entrypoints || []).find((e) => e.kind === 'module');
     const abs = ep && entryAbs(plugin, ep.entry);

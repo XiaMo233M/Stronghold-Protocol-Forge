@@ -14,8 +14,9 @@
 //   `setup(sp)`（上游契约）→ `registerPlugin(host)`（我方契约）→ 都没有才拒。
 //
 // 诚实边界：本实现是**进程内**执行 —— 与上游 `trusted` 档同级，**不是** `script` 档的 SES `Compartment` 沙箱
-// （SES 需要 `ses`/`acorn` 依赖与子进程隔离，未在本仓引入）。所以 `loadOfficialModules` 只对
-// `class: 'trusted'` 的 `setup(sp)` 插件放行，`script` 档被具名拒（`PLUGIN_SANDBOX_UNAVAILABLE`）。
+// （SES 需要 `ses`/`acorn` 依赖与子进程隔离，未在本仓引入）。`script` 档（描述符 profile = `sandbox`）由
+// `loadOfficialModules` 的**装载门**具名拒载（`PLUGIN_SANDBOX_UNAVAILABLE`，见 `officialHost.js` 的
+// `UNWIRED_PROFILES`）—— 绝不把「声明隔离」的插件放进宿主进程跑。
 
 import { kit, math, constants } from '../sim/content/sdkData.js';
 import { registerKit, registerEnemy, registerContent, registerMeta } from '../sim/content/extensions.js';

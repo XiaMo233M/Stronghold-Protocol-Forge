@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { loadOfficialPlugins, OFFICIAL_PLUGIN_MANIFEST } from '../server/mod-manager/officialLoader.js';
 import { loadOfficialModules } from '../server/mod-manager/officialHost.js';
 import { createSDK, SANDBOX_LIMITS } from '../server/mod-manager/officialSdk.js';
-import { installExtensions, resetExtensions } from '../server/sim/content/extensions.js';
+import { installExtensions, registerExtensionMeta, registerContent, registerMeta, resetExtensions } from '../server/sim/content/extensions.js';
 import { buildRoomRegistry } from '../server/match/metaPack.js';
 import { MetaRegistry } from '../server/match/effectsMeta.js';
 
@@ -124,4 +124,28 @@ test('settings 与 log：manifest 的 settings 冻结透传；log 封顶 20 行'
 
 test('SANDBOX_LIMITS 是上游同款数字（64 文件 / 1MiB）', () => {
   assert.deepEqual({ ...SANDBOX_LIMITS }, { files: 64, bytes: 1024 * 1024 });
+});
+
+test('房间范围：`installExtensions(battle, { packs })` 只装集合内插件登记的东西', () => {
+  resetExtensions();
+  try {
+    const a = { id: 'a' };
+    const b = { id: 'b' };
+    registerContent(a, { id: 'ca', install: (battle) => { battle.ran.push('a'); } });
+    registerContent(b, { id: 'cb', install: (battle) => { battle.ran.push('b'); } });
+    registerMeta(a, 'item:a', { run: () => 'a' });
+    registerMeta(b, 'item:b', { run: () => 'b' });
+
+    const all = { ran: [], on() {}, _handlerError() {} };
+    installExtensions(all);
+    assert.deepEqual(all.ran, ['a', 'b'], '不传 packs ⇒ 全装（既有行为）');
+
+    const scoped = { ran: [], on() {}, _handlerError() {} };
+    installExtensions(scoped, { packs: new Set(['a']) });
+    assert.deepEqual(scoped.ran, ['a'], '房间声明了集合 ⇒ 集合外的插件不生效');
+
+    const reg = new MetaRegistry();
+    registerExtensionMeta(reg, { packs: new Set(['b']) });
+    assert.deepEqual(reg.keys().sort(), ['item:b']);
+  } finally { resetExtensions(); }
 });

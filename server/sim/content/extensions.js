@@ -117,17 +117,26 @@ export function registerContent(plugin, module) {
   // Resolve registration now so conflicts fail composition, not the first match.
   module.registerMeta?.(Object.freeze({ register: (key, h) => registerMeta(plugin,key,h) }));
 }
-export function installExtensions(battle) {
+export function installExtensions(battle, { packs = null } = {}) {
+  // `packs`（可选）：只装**集合里那几个插件**登记的东西。缺省 `null` ⇒ 全装（与从前逐字节相同）。
+  // 为什么需要它：这些注册落在**模块级全局表**里（进程级），而一场战斗只是**某个房间**的 —— 一个房间声明的
+  // 子集不该让别的房间的插件跟着生效。房间侧由 `startMatch` 把本局 `roomIds` 传下来（与 meta/battle 同一条纪律）。
+  const allow = packs ? (id) => packs.has(id) : () => true;
   for (const { plugin, install } of content.values()) {
+    if (!allow(plugin.id)) continue;
     try { install?.(battle); } catch (e) { battle._handlerError('plugin:'+plugin.id,null,e); }
   }
   if (enemies.size) battle.on('enemySpawn', ({enemy}) => {
     const r = enemies.get(enemy.defId) || enemies.get(enemy.def?.key) || enemies.get(enemy.def?.id);
-    if (r) r.guard.invoke(() => r.guard.wrap(r.builder(enemy.def)).install?.(r.guard.view(battle),enemy), battle, enemy, null, []);
+    if (r && allow(r.plugin.id)) r.guard.invoke(() => r.guard.wrap(r.builder(enemy.def)).install?.(r.guard.view(battle),enemy), battle, enemy, null, []);
   }, { priority: 1000 });
 }
-export function registerExtensionMeta(registry) {
-  for (const [id, {handler}] of meta) registry.register(id,handler);
+export function registerExtensionMeta(registry, { packs = null } = {}) {
+  const allow = packs ? (id) => packs.has(id) : () => true;
+  for (const [id, { plugin, handler }] of meta) {
+    if (!allow(plugin.id)) continue;
+    registry.register(id, handler);
+  }
 }
 export function resetExtensions() {
   for (const k of Object.keys(EXTENSIONS)) delete EXTENSIONS[k];

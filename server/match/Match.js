@@ -355,6 +355,13 @@ export class Match {
      * @type {Array<{ id: string, install: Function }>|null}
      */
     this.battleInstallers = Array.isArray(opts.battleInstallers) && opts.battleInstallers.length ? opts.battleInstallers : null;
+    /**
+     * 这一局**声明过的包 id 集合**（`room.modSet` 推出的 `Set`，房间没声明集合时是 null）。
+     * 用途：官方档 SDK（`sp.*.register`）的登记落在**进程级全局表**里，一场战斗只是某个房间的 ——
+     * 装了集合外的插件不该让它在**这一局**生效。`null` ⇒ 不设范围（既有行为逐字节相同）。
+     * @type {Set<string>|null}
+     */
+    this.battleModIds = opts.battleModIds instanceof Set ? opts.battleModIds : null;
     /** @type {Array<{ id: string, pack: string, hash?: string, url: string }>} */
     this.workshopBattleModules = Array.isArray(opts.workshopBattleModules) ? opts.workshopBattleModules : [];
     this.timerScale = Number.isFinite(opts.timerScale) && opts.timerScale >= 0 ? opts.timerScale : 1;

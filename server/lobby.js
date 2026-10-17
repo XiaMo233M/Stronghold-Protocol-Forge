@@ -130,13 +130,15 @@ import { buildRoomRegistry } from './match/metaPack.js';
 // 这里只做**装配** —— 房间建起来时装一次、每个生命周期点触发一次。没有包声明 `server.room` 时 `install` 与 `fire`
 // 都是一次早退（`byRoom` 里没有条目），所以干净安装与从前逐字节相同。
 import { createRoomHooks, holdDecision, releaseRoomHolds } from './roomPack.js';
-import { getDefaultRegistry } from './match/effectsMeta.js';
+import { getDefaultRegistry, createRegistry } from './match/effectsMeta.js';
 import { KITTED_CHARS } from './sim/content/kits/index.js';
 // 由计划派生物推出的**小结构**（重构版，DESIGN 重构计划 §一 原则 2）：纯函数、语义被 test/modDerive.test.js
 // 钉住（就地循环钉不住），构造器里不再各自实现一遍。
 import { derivePackChannels, deriveServerChannels } from './mod-manager/derive.js';
 // 官方插件的房间钩子接上**同一条**房间总线（Phase 7 第一项）：没有官方插件时是空数组 ⇒ 逐元素相同。
 import { officialRoomInstallers } from './mod-manager/officialHost.js';
+// 房间子集的**准入判据**（Phase 5）：只读 ActivationPlan 与登记册，判断房间点名的包此刻能不能跑。
+import { roomSubset } from './mod-manager/admission.js';
 import { MatchmakeQueue } from './matchmaking.js';
 
 /** Room code alphabet: uppercase letters without I and O (and no digits, so no 0/1). */
@@ -966,6 +968,20 @@ export class Lobby {  /**
       const available = resolved.available.length ? resolved.available.join(', ') : '(none)';
       return fail(ERR.MOD_UNKNOWN, `this server does not run the mod pack(s) (${unknown}); available: ${available}`);
     }
+    // **准入判据**（`mod-manager/admission.js` 的 `roomSubset`）：房间点名的包必须在这份 ActivationPlan 里
+    // **被激活**（不是「装上了」—— 被禁用 / 被裁决拒绝 / 装不上 / 未同意 / 钉版失效的包都不算）。身份清单
+    //（`this.workshop.mods`）只说明「这个服务器认识它」，计划才说明「它此刻真的能跑」。缺了这一步，房间可以
+    // 点名一个已被禁用的包，然后靠 `roomAssets.forRoom` 拿到它的数据 —— 而进程级的扩展注册仍然在跑。
+    // 没有计划（老调用点 / 单测）⇒ 跳过，行为与从前逐字节相同。
+    if (resolved.modIds.length && this.workshop && this.workshop.modPlan) {
+      const { refused } = roomSubset(this.workshop.modPlan, resolved.modIds, {
+        requireConsent: this.opts && this.opts.requireConsentForMods === true,
+        registry: this.workshop.modRegistry || null,
+      });
+      if (refused.length) {
+        return fail(ERR.MOD_UNKNOWN, `this server will not run the mod pack(s) (${refused.map((r) => r.id).join(', ')}): ${refused[0].reason}`);
+      }
+    }
     if (this.rooms.size >= this.opts.maxRooms) return fail(ERR.INTERNAL, 'too many rooms');
     const key = session.limitKey || null;
     if (key && this.opts.maxRoomsPerAddr > 0) {
@@ -1501,7 +1517,13 @@ export class Lobby {  /**
       .filter((m) => !roomIds || (m && roomIds.has(m.pack)));
     let roomRegistry = null;
     if (metaModules.length) {
-      const built = buildRoomRegistry({ packs: metaModules, base: getDefaultRegistry(), log: this.log });
+      // `base` 也要按房间收范围：官方档 SDK（`sp.meta.register`）登记的处理器同样落在**进程级全局表**里，
+      // 直接拿 `getDefaultRegistry()` 当基底会让集合外的插件在这一局照样说话。房间声明了集合 ⇒ 只装配集合内的；
+      // 没声明（`roomIds` 为 null）⇒ 传 null，与从前逐字节相同。
+      const base = roomIds
+        ? createRegistry({ log: this.log, packs: roomIds })
+        : getDefaultRegistry();
+      const built = buildRoomRegistry({ packs: metaModules, base, log: this.log });
       roomRegistry = built.registry;
       for (const e of built.errors) this.log.warn?.(`[workshop] meta ${e.pack}: ${e.code}: ${e.reason}`);
     }
@@ -1539,6 +1561,9 @@ export class Lobby {  /**
         // 包声明的**战斗逻辑**（`server.battle`, DESIGN §28.17）：两个字段都只在真的有包声明时出现 —— 干净安装
         // （或一个都没点名的房间）送进去的 opts 与从前逐字节相同，`Battle` 也拿不到 `battleInstallers` 这个键。
         ...(battleInstallers.length ? { battleInstallers } : {}),
+        // 房间声明的包 id 集合（有集合时才有这个键）：官方档 SDK 的扩展注册是进程级全局的，这一局的
+        // `installContent` 靠它把范围收到房间点名的插件上。没声明集合的房间与从前逐字节相同。
+        ...(roomIds ? { battleModIds: roomIds } : {}),
         ...(battleModules.length ? { workshopBattleModules: battleModules } : {}),
         // 这一局自己的元注册表副本：**没有包声明 `server.meta` 时这个字段根本不出现**，Match 照旧用进程级那一份
         //（`opts.registry` 的缺省）—— 于是干净安装的行为与从前逐字节相同。

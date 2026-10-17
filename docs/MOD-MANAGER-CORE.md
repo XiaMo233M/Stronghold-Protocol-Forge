@@ -26,6 +26,56 @@ activated, capabilities, consent, digest:{contentDigestOf, modDigest, activation
 `lobby.js` 里 `packChannels` / `serverChannels` / `modSet` / 每房间过滤分散判断的根因。
 `lobby.js` 的两张通道表已改为调用 `server/mod-manager/derive.js` 的纯函数（见 §7）。
 
+### 1.1 一个装载门：计划先于任何插件代码执行
+
+**这是本层最重要的一条顺序不变量。** 旧顺序是「解析 → 无条件 import/执行 → 算计划」，意味着一个
+被禁用 / 被裁 / 未同意的插件，它的**顶层副作用与注册早就发生了**；而 `server/sim/content/extensions.js`
+的注册表是**模块级全局**、没有回滚 API，于是它照样对**每一个房间**生效（「plan 说不在、运行时说在」）。
+
+现在的顺序（`server/index.js`）：
+
+```text
+loadOfficialPlugins（只读 manifest、算摘要，不执行）
+  → buildActivationPlan（清单层失败 → unavailable）
+  → loadOfficialModules({ filter: 激活集合 })   ← 装载门
+  → buildActivationPlan（装载期失败并入 unavailable）
+  → 只把激活的交给运行时
+```
+
+`loadOfficialModules` 的 `filter` 拦下的插件**既不扫描也不 import**——它的字节永远不进入本进程
+（`test/modOfficialCombat.test.js` 用「顶层写文件」的探针插件钉住：标记文件不存在）。
+
+### 1.2 未接线的 profile 具名拒，绝不退回进程内
+
+`class: 'script'` 在上游语义里是 **profile `sandbox`**（SES `Compartment` + 子进程）。本仓**没有**引入
+`ses`/`acorn`，`createSandboxRunner` 也**没有生产调用点**——所以 `officialHost.js` 的 `UNWIRED_PROFILES`
+把它**具名拒载**（`PLUGIN_SANDBOX_UNAVAILABLE`），而不是「悄悄在宿主进程里跑」。
+
+进程内执行的是 `trusted` 档（profile `module`，严格档源码扫描 + 只注入声明过的 capability）。
+一个声明「我要被隔离」的插件在宿主进程里跑，是**声明与语义相反**——本仓库反复判死刑的那种形状。
+
+### 1.3 房间范围：扩展注册不是进程全局的
+
+`sp.content.register` / `sp.meta.register` 的登记落在**进程级**表里，而一场战斗只属于**一个房间**。
+所以 `installExtensions(battle, { packs })` 与 `registerExtensionMeta(registry, { packs })` 接收可选的
+包 id 集合：房间在 `modSet` 里声明了子集 ⇒ 只装集合内的插件；没声明 ⇒ 不传（既有行为逐字节相同）。
+这条集合从 `lobby.startMatch` 经 `Match.battleModIds` 传到 `Battle` opts 再到 `installContent`，
+与 meta / battle 的既有房间过滤**同一条纪律**。
+
+### 1.4 下游读者全部收敛到计划
+
+`server/index.js` 的 `workshopLoaded.packs` 现在同时过 `pruned` 与 `modPlan.activatedSet`，于是
+身份清单（`welcome.mods` / `modDigest`）、kits、面板、资源表、`/mods/catalog.json`、`roomAssets`
+**一处过滤、全部受控**。`preDispatch` 钩子总线同样按激活集合过滤（它是唯一能 `return true` 否决
+`room.create` / `room.join` 的包能力，漏它就是漏一道闸门）。`roomAssets` 的**官方基底**也补上了
+`excludePacks`——否则被裁官方插件的声明式内容会从房间物化这条路回流。
+
+### 1.5 房间子集准入
+
+`server/lobby.js` 的 `room.create` 在 `resolveRoomModSet` 之后调用 `admission.js` 的 `roomSubset`：
+房间点名的包必须在计划里**被激活**才放行。身份清单只能说明「这个服务器认识它」，计划才说明
+「它此刻真的能跑」（启用 / 未被裁决拒绝 / 装载成功 / 已同意 / 钉版未失效）。
+
 ## 2. 三个摘要（不是一个）
 
 | 摘要 | 含义 | 用途 | 位置 |
@@ -143,7 +193,24 @@ CLI/程序接口：`setConsent` / `clearConsent` / `setPin` / `clearPin` / `setP
 
 ## 7. 未完成（诚实清单）
 
-* **官方档 `sp:sdk@1`**：manifest 适配器、**装载器**、module 运行时、sandbox 运行时都已落地（provisional，见 §3）。
+* **SES 沙箱没有接线**（唯一的功能性缺口）：`server/mod-manager/sandbox.js` 的 `createSandboxRunner` 实现完整
+  （fork + watchdog + 预算 + restart，实测 `while(true)` 被超时杀掉而宿主不受影响），但**生产零调用**。
+  于是 `class: 'script'`（profile `sandbox`）在装载门被**具名拒载**（见 §1.2）——这是**有意的**：宁可拒，
+  也不把声明隔离的代码放进宿主进程。要真沙箱需要引入 `ses`/`acorn` 并重生成 `package-lock.json`，
+  这一步必须在能跑 `npm install` 的环境（CI / 维护者机器）里做，本机无法验证。
+* **上游协议面的 `cs` / `room.setPlugins` / `room.consent` / `room.contentReady` 未复制**：Forge 已有等价且
+  更早的房间级闸门（`modSet.digest` + `checkModSet` + 本节 §1.5 的 `roomSubset`）。再补一套就是
+  「同一个问题回答两遍」——本仓库反复判死刑的形状。真要逐字对齐上游那是**替换**（服务端+客户端协议核心），
+  不能在本机验证，属于独立一轮。
+* **`forgeImport` 反向互操作**（上游 `server/plugins/forgeImport.js` 把 Forge 包转成官方插件）**未做**：
+  本仓的方向是「官方 manifest 只作为输入格式」（§1.1/§1.4），与上游的转换方向相反；两边同时存在会是
+  两条互逆的转换链，容易产生「同一份字节、两个身份」。
+* **`assets` / `theme` 叠加进渲染树未做**：官方 manifest 的 `assets`/`theme` 目前只参与能力派生与摘要，
+  没有并入 `workshopAssets` / `workshopTheme` 的产物。
+
+## 7.1 已落地（本轮之前/本轮）
+
+* **官方档 `sp:sdk@1`**：manifest 适配器、**装载器**、module 运行时、sandbox 运行时（已实现，未接线，见 §7）都已落地。
   **已接线**：`server/index.js` 在启动流水线里装载 `plugins/`、建立官方 `ActivationPlan`（`srv.officialPlan`）、
   把它的 excluded 并进**同一份** `excludePacks` 交给数据层；官方插件的**声明式内容**由此并进 `server/data.js`
   的叠加层（`test/modOfficialOverlay.test.js` 直验：目录不存在 ⇒ 逐字节不变）。
@@ -160,7 +227,8 @@ CLI/程序接口：`setConsent` / `clearConsent` / `setPin` / `clearPin` / `setP
      所以**客户端一行都不用改**，下载与对齐走的就是既有那条链。
 * **官方 module 运行时**（进程内）已落地：`server/mod-manager/officialHost.js` —— **只注入声明过的 capability**
   （碰没声明的那个**抛** `PLUGIN_USE_UNDECLARED`，不是 undefined）、**严格档源码扫描在 import 之前**（含
-  `globalThis`）、战斗类能力（`meta`/`battle`/`room`）在这一层**具名拒**、`storage` 限本插件目录、`routes` 限
+  `globalThis`）、战斗类能力（`meta`/`battle`/`room`）在这一层**具名拒**（本轮起 `meta`/`battle` 已由桥重放，见下）、
+  `storage` 限本插件目录、`routes` 限
   `/mod/<插件id>/`。装出来的模块与 Forge 档**共用同一个** `mountServerModules`（boot/shutdown/healthz/route）。
 * **官方 sandbox 运行时**（子进程 / watchdog 的真实隔离）已落地：`server/mod-manager/sandbox.js` +
   `sandboxRuntime.js` —— 严格档扫描**在 fork 之前**（被拒的插件连子进程都不起）、每次调用有墙钟超时

@@ -24,9 +24,11 @@ function makePlugin(root, name, manifest, entryBody) {
   return dir;
 }
 
-/** 0.3.0 里「有代码」的声明：class script + sim.code（+ meta.code 表示还要挂 meta 面）。 */
+/** 0.3.0 里「有代码」的声明：class trusted + sim.code（+ meta.code 表示还要挂 meta 面）。
+ *  用 `trusted` 而不是 `script`：本版**没有把沙箱接进运行时**，`script`（profile `sandbox`）在装载门被具名拒
+ *  （见 `test/modOfficialManifest.test.js` 的拒载用例）—— 进程内执行的是 `trusted` 档。 */
 const script = (extra = {}) => ({
-  class: 'script', permissions: ['sim.code', ...(extra.meta ? ['meta.code'] : [])],
+  class: 'trusted', scope: 'server', permissions: ['sim.code', ...(extra.meta ? ['meta.code'] : [])],
   entry: { sim: 'plugin.mjs', ...(extra.meta ? { meta: 'plugin.mjs' } : {}) },
   ...(extra.overrides ? { overrides: extra.overrides } : {}),
 });
@@ -139,4 +141,37 @@ test('没有 meta / 战斗登记的插件 ⇒ 三个桥都给空数组（展开�
   assert.deepEqual(officialMetaModules(plain), []);
   assert.deepEqual(officialBattleInstallers(plain), []);
   assert.deepEqual(officialBattleModules(plain), [], '没有战斗登记 ⇒ 不进投递表');
+});
+
+test('装载门：`class: script`（profile sandbox）被**具名拒载**，源码永不 import', async () => {
+  const root = fs.mkdtempSync(path.join(tmpdir(), 'sp-combat7-'));
+  try {
+    // 顶层副作用探针：真的被 import 了，文件系统上就会留下这个标记
+    const marker = path.join(root, 'imported.marker');
+    makePlugin(root, 's', { class: 'script', permissions: ['sim.code'], entry: { sim: 'plugin.mjs' } },
+      `import fs from 'node:fs';\nfs.writeFileSync(${JSON.stringify(marker)}, 'x');\nexport function registerPlugin(host) { host.battle.install(() => {}); }`);
+    const { modules, errors } = await loadOfficialModules(loadOfficialPlugins(root, { log: quiet }).plugins, { log: quiet });
+    assert.deepEqual(modules, [], '沙箱档不被装载');
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0].code, 'PLUGIN_SANDBOX_UNAVAILABLE');
+    assert.equal(errors[0].pack, 's');
+    assert.match(errors[0].reason, /sandbox/);
+    assert.equal(fs.existsSync(marker), false, '被拒的插件连字节都不该进这一进程（顶层副作用没发生）');
+  } finally { fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+});
+
+test('装载门：`filter` 拦下的插件**既不扫描也不 import**（计划之外的代码永不执行）', async () => {
+  const root = fs.mkdtempSync(path.join(tmpdir(), 'sp-combat8-'));
+  try {
+    const marker = path.join(root, 'imported2.marker');
+    makePlugin(root, 'keep', { class: 'trusted', scope: 'server', permissions: ['sim.code'], entry: { sim: 'plugin.mjs' } },
+      `export function registerPlugin(host) { host.battle.install(() => {}); }`);
+    makePlugin(root, 'drop', { class: 'trusted', scope: 'server', permissions: ['sim.code'], entry: { sim: 'plugin.mjs' } },
+      `import fs from 'node:fs';\nfs.writeFileSync(${JSON.stringify(marker)}, 'x');\nexport function registerPlugin(host) { host.battle.install(() => {}); }`);
+    const plugins = loadOfficialPlugins(root, { log: quiet }).plugins;
+    const { modules, errors } = await loadOfficialModules(plugins, { log: quiet, filter: (p) => p.id === 'keep' });
+    assert.deepEqual(errors, []);
+    assert.deepEqual(modules.map((m) => m.pack), ['keep'], '只有计划里的插件被装载');
+    assert.equal(fs.existsSync(marker), false, '被 filter 拦下的插件，顶层副作用没发生');
+  } finally { fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
 });

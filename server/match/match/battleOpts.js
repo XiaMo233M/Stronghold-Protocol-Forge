@@ -47,6 +47,9 @@ export function battleOptsFromMatch(owner, opts = {}) {
   if (owner.workshopKits && !full.kits) full.kits = owner.workshopKits;
   if (owner.workshopTokenKits && !full.tokenKits) full.tokenKits = owner.workshopTokenKits;
   if (Array.isArray(owner.battleInstallers) && owner.battleInstallers.length && !full.battleInstallers) full.battleInstallers = owner.battleInstallers;
+  // 房间声明的包 id 集合（官方档 SDK 的扩展注册是进程级全局的，一轮战斗只属于一个房间）——
+  // 只在**真有声明**时写这个键，没有集合的安装与从前逐字节相同（KEY DISCIPLINE）。
+  if (owner.battleModIds instanceof Set && full.battleModIds === undefined) full.battleModIds = owner.battleModIds;
   if (owner.bossHitLimit !== undefined && full.bossHitLimit === undefined) full.bossHitLimit = owner.bossHitLimit;
   // 行为开关 `morphPairing`（DESIGN §28.43.1）：只在**非缺省档**才写这个键 —— 缺省档（`official`）一个键都不多，
   // 于是没声明这一格的战斗与从前逐字节相同（KEY DISCIPLINE）。战斗里 `Battle` 把它压进 `withMorphPairing`。

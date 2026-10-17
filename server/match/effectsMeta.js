@@ -138,13 +138,13 @@ export class MetaRegistry {
 let defaultRegistry = null;
 
 /** Build a registry: engine built-ins first, then every content module's registerMeta (content wins). */
-export function createRegistry({ builtins = true, content = true, log = console } = {}) {
+export function createRegistry({ builtins = true, content = true, log = console, packs = null } = {}) {
   const reg = new MetaRegistry();
   if (builtins) {
     try { registerBuiltins(reg); } catch (e) { log.error?.('[meta] registerBuiltins failed', e); }
   }
   if (content) {
-    try { registerAllMeta(reg); } catch (e) { log.error?.('[meta] registerAllMeta failed', e); }
+    try { registerAllMeta(reg, { packs }); } catch (e) { log.error?.('[meta] registerAllMeta failed', e); }
   }
   if (reg.warnings.length) log.warn?.(`[meta] ${reg.warnings.length} handler method(s) are not hooks and will never run, e.g. ${reg.warnings.slice(0, 3).join('; ')}`);
   return reg;
