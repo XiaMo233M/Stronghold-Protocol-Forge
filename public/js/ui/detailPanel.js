@@ -437,7 +437,11 @@ export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bond
   // a chosen skill the manifest has no icon for (only the default skills' icons are fetched): its slot letter
   const skIcon = sk && lo && !lo.defaultSkill ? skillRecordIconUrl(m, sk, { empty: false }) : skillIconUrl(m, body);
   const skSlot = sk && Number.isInteger(sk.index) ? `S${sk.index + 1}` : null;
-  const garrison = Array.isArray(c.garrisonIds) && c.garrisonIds[0] ? data.lookup('garrisons', c.garrisonIds[0]) : null;
+  // 特质那一格画**几条**（上游 0.3.1 §36.16 的自定义特质）：官方那条（不带 `operatorTrait`）在前，
+  // 这个干员这一精英段位上声明过的自定义特质跟在后面 —— 全是官方数据的干员就只有一条，逐字等于从前。
+  const nativeTrait = (c.garrisonIds ?? []).map(id => data.lookup('garrisons', id)).find(g => g && !g.operatorTrait);
+  const customTraits = Object.values(data.get('garrisons') ?? {}).filter(g => g.operatorTrait?.charId === body.charId && g.operatorTrait.elite === golden);
+  const garrisons = [...(nativeTrait ? [nativeTrait] : []), ...customTraits];
   const items = Array.isArray(piece?.items) ? piece.items : [];
   // the bonds the unit counts for: its own + a 变形同构体 pairing's (its piece's items; without one: `unitItems` — a
   // teammate's unit's UnitInfo items, a bond popup 同构 row's wearer's)
@@ -476,7 +480,9 @@ export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bond
         <${BondChips} bondIds=${bondIds} bonds=${bonds} off=${offBonds} onBond=${onBond} granted=${grantedIds} />
       </div>
     </div>`;
-  blocks.garrison = garrison ? html`<${GarrisonBlock} key="garrison" garrison=${garrison} m=${m} />` : null;
+  blocks.garrison = garrisons.length > 1
+    ? garrisons.map(garrison => html`<${GarrisonBlock} key=${garrison.garrisonId} garrison=${garrison} m=${m} />`)
+    : garrisons[0] ? html`<${GarrisonBlock} key="garrison" garrison=${garrisons[0]} m=${m} />` : null;
   blocks.trait = body.trait?.desc ? html`<p key="trait" class="dtrait"><${Icon} name="info" /><${RichText} text=${traitText(body, golden, lo)} /></p>` : null;
   // (`fr` is the body the unit fights with — a stand-in's record for a 补位 chess; `chess` is only the range's fallback)
   blocks.stats = chessStatsBlock({ rec: fr, chess: c, live });

@@ -243,7 +243,9 @@ export function harmonyMembers(priv, getChess = () => null) {
  */
 export function bondMembers(bond, priv, banned = [], getChess = () => null, getItem = () => null, pieceRecord = null, hasBond = null) {
   const bannedSet = banned instanceof Set ? banned : new Set(Array.isArray(banned) ? banned : []);
-  const members = Array.isArray(bond?.visibleMembers) && bond.visibleMembers.length ? bond.visibleMembers : (Array.isArray(bond?.members) ? bond.members : []);
+  // visibleMembers 只要是数组就用它 —— **包括空数组**（一个盟约的目录成员全是隐藏的时候，
+  // 它一行都不该画）。members 仍然给「授予」那条路留下那些隐藏 id。缺 visibleMembers（老载荷）才退回 members。
+  const members = Array.isArray(bond?.visibleMembers) ? bond.visibleMembers : (Array.isArray(bond?.members) ? bond.members : []);
   const baseOf = (id) => getChess(id)?.baseId || (typeof id === 'string' ? id.replace(/_b$/, '_a') : id);
   const onBoard = new Set();
   const owned = new Set();

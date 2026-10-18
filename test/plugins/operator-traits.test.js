@@ -2,12 +2,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 import { schemaValidator } from '../helpers/jsonSchema.js';
 import { checkOperatorTraitRuntime } from '../../public/js/battle/simLoader.js';
 import { installServerOperatorTraits } from '../../server/plugins/operatorTraits.js';
 import { applyRecordOverlay } from '../../shared/i18nData.js';
 import { contentSetFiles } from '../../server/plugins/contentSet.js';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import { fixture, guard } from '../helpers/contentFixtures.js';
 import { buildContentSet } from '../../server/plugins/contentSet.js';
 import { validateTraitSpec } from '../../server/plugins/operatorTraits.js';
@@ -336,7 +337,9 @@ test('production match host and an isolated browser module tree agree', { timeou
   const root = f.dir + '/runtime';
   fs.mkdirSync(root + '/server', { recursive: true });
   // Browser /sim has no Node loader: including it creates a cycle through the data shim.
-  fs.cpSync('server/sim', root + '/server/sim', { recursive: true, filter: src => !src.endsWith('/nodeData.js') });
+  // filter 收到的是**平台路径**（Windows 用反斜杠），所以按 basename 判，不能按 '/nodeData.js' 判 ——
+  // 漏掉那个文件会把 Node 专用的数据装载器一起复制进浏览器树，循环依赖 + 顶层 await = 死锁。
+  fs.cpSync('server/sim', root + '/server/sim', { recursive: true, filter: src => path.basename(src).toLowerCase() !== 'nodedata.js' });
   fs.cpSync('shared', root + '/shared', { recursive: true });
   fs.writeFileSync(root + '/package.json', '{"type":"module"}'); fs.writeFileSync(root + '/server/data.js', DATA_SHIM_JS);
   const sim = await loadBrowserSim({ base: pathToFileURL(root + '/server/sim/').href, data: set.data, bounds: set.bounds, cs: set.cs });
@@ -345,7 +348,7 @@ test('production match host and an isolated browser module tree agree', { timeou
   assert.equal(battle.getPlayer('p1').bonds.egirShip.layers, 3);
   const errors = [];
   const hosts = createMatchHosts({ contents, log: { info() {}, warn() {}, error: (...a) => errors.push(a) },
-    options: { matchModule: new URL('./fixtures/scriptBattleMatch.js', import.meta.url).pathname, matchOptions: { scriptSpec: spec } } });
+    options: { matchModule: fileURLToPath(new URL('./fixtures/scriptBattleMatch.js', import.meta.url)), matchOptions: { scriptSpec: spec } } });
   t.after(() => hosts.close());
   let deliver, timer;
   const done = new Promise((resolve, reject) => { deliver = resolve; timer = setTimeout(() => reject(new Error(JSON.stringify(errors))), 20000); });
