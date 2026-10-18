@@ -399,11 +399,12 @@ describe('room.create { modIds } declares the room set (W-A, DESIGN §28.9)', ()
     assert.equal(validateC2S({ ...base, modIds: Array.from({ length: MAX_ROOM_MODS }, (_, i) => `p${i}`) }), null, 'at the limit');
     assert.equal(validateC2S({ ...base, modIds: Array.from({ length: MAX_ROOM_MODS + 1 }, (_, i) => `p${i}`) }), 'bad field modIds');
     // 本房座位上限 (业主裁决 B5, docs/META.md §1.9) 再加 `seatCap`: 房主建的这个房间开几张座位卡。
-    assert.deepEqual(C2S['room.create'].$optional, ['mods', 'modIds', 'chatMode', 'seatCap']);
+    // 上游 0.3.1 又加了 test（测试房间）：判据跟着事实走
+    assert.deepEqual(C2S['room.create'].$optional, ['mods', 'modIds', 'chatMode', 'seatCap', 'test']);
     // W7（§28.53）多了一格**可选**的 `consent`：进一个声明了集合的房间要每名真人明确同意。它与 `mods` 是**两种
     // 表态**（`mods` = 「我读到了服务器装着哪些包」的握手回执，`consent` = 「我同意跑这一房声明的那一份字节」），
     // 所以两格并列而不是合成一格；形状见 shared/protocol.js 那一处。
-    assert.deepEqual(C2S['room.join'].$optional, ['mods', 'consent'], 'room.join takes no modIds: the set is the host\'s to declare');
+    assert.deepEqual(C2S['room.join'].$optional, ['mods', 'consent', 'testAck'], 'room.join takes no modIds: the set is the host\'s to declare');
   });
 });
 

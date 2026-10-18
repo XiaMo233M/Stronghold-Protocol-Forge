@@ -673,7 +673,9 @@ export const C2S = {
     // `$optional` 管「键根本没出现」，判据里的 `v === undefined || v === null` 管「显式给了 null」。
     // 缺省 / `null`（= 旧客户端根本不发）⇒ 服务器缺省上限（缺省 20 座）。
     seatCap: (v) => v === undefined || v === null || isInt(v, MIN_SEATS, SEAT_CAP),
-    $optional: ['mods', 'modIds', 'chatMode', 'seatCap'],
+    // test 房间（DESIGN §36.8，上游 0.3.1）：只认字面 true；普通房间不发这个键
+    test: (v) => v === true,
+    $optional: ['mods', 'modIds', 'chatMode', 'seatCap', 'test'],
   },
   // 房间同意（W7, DESIGN §28.53）：进一个**声明了模组集合**的房间（`room.state.mods`）时，真人玩家必须**明确
   // 同意**才继续 —— 这是「我知道这一局要跑别人写的内容」那句话的落点。它与 `checkModSet` 要客户端回一个摘要
@@ -690,12 +692,12 @@ export const C2S = {
     code: (v) => isStr(v, ROOM_CODE_LEN + 2) && /^[A-Za-z0-9]+$/.test(v),
     mods: (v) => v == null || isModDigest(v),
     consent: (v) => v === undefined || v === null || v === true,
-    $optional: ['mods', 'consent'],
+    // testAck：进测试房间时的确认（上游 0.3.1）
+    testAck: (v) => v === true,
+    $optional: ['mods', 'consent', 'testAck'],
   },
   // test: only the literal true (DESIGN §36.8). Omit it for a normal room — `false` is a bad field, so a
   // string cannot sneak in as "not a test". The server still refuses it unless SP_TEST_MODE is on.
-  'room.create': { mode: (v) => v === 'solo' || v === 'coop', difficulty: (v) => DIFFICULTIES.includes(v), test: (v) => v === true, $optional: ['test'] },
-  'room.join': { $optional: ['testAck'], testAck: (v) => v === true, code: (v) => isStr(v, ROOM_CODE_LEN + 2) && /^[A-Za-z0-9]+$/.test(v) },
   'room.leave': {},
   // 上局战绩（`SP_ACCOUNTS=1`, server/matchRecords.js, docs/RECORDS.md）：空消息，答案走 `records.latest`
   // 给**请求者本人**。开着账号时它是「我这个账号的最近一局」；关着账号时按会话 playerId 查（每次连接的新 id，
@@ -874,7 +876,6 @@ export const C2S = {
   // server/match/player/items.js）。形状只有一个字段，与 `g.equip.itemUid` / `g.destroy.uid` 同一个 `isUid`。
   'g.unequip': { itemUid: isUid },
   // unequip (DESIGN §36.15): one equipped item back to the hand, else the visible temp window. Official rooms refuse it.
-  'g.unequip': { itemUid: isUid },
   'g.reward': { idx: (v) => isInt(v, 0, 5) },
   'g.choice': { idx: (v) => isInt(v, 0, 5), choiceId: isId, $optional: ['choiceId'] },
   // a plugin interaction window (PLUGIN API v2, docs/PLUGINS.md §10b): offerId is the window's declared id, idx the
