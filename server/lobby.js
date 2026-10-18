@@ -2191,13 +2191,20 @@ export class Lobby {  /**
     const contentInfo = this.vanilla
       ? { content: n > 0 ? { vanilla: this.vanilla.cs, plugins: n } : { vanilla: this.vanilla.cs } }
       : {};
+    // 目录元信息：只在有已加载插件发布公告时带上，从不进房间或对局（上游 0.3.1 的 notices 提示）
+    if (contentInfo.content) {
+      let hasNotices = false;
+      try { hasNotices = this.plugins?.hasNotices?.() === true; } catch { /* optional catalogue hint */ }
+      if (hasNotices) contentInfo.content.notices = true;
+    }
     return {
       diyKitted: KITTED_CHARS,
       ...contentInfo,
       // 本房座位上限 (业主裁令 2026-10-12): **总是发** —— 缺省上限已经是 20（不是官方 `MAX_SEATS`），没有「官方那一档」
       // 可以省掉它了。`SP_MAX_SEATS=4` 的部署会拿到 `maxSeats: 4`，而它的 `room.state` 帧照旧逐字节不变
       //（`toState` 只在容量 ≠ `MAX_SEATS` 时才带 `seatCap`）。
-      maxSeats: this.opts.maxSeats,
+      // ⚠️ `this.opts` 在单元测试里可能没有（测试直接调 `welcomeInfo.call({ vanilla, plugins })`）⇒ 那时不发这个字段。
+      ...(this.opts ? { maxSeats: this.opts.maxSeats } : {}),
       ...(this.modSet ? { mods: this.modSet } : {}),
       ...(panels.length ? { modPanels: panels } : {}),
       ...(assets.length ? { modAssets: assets } : {}),

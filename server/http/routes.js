@@ -120,7 +120,10 @@ export const PUBLIC_ROOMS_URL = '/api/rooms';
 function pluginCount(lobby) {
   let n;
   try { n = Number(lobby?.plugins?.unofficial?.()) || 0; } catch { n = 0; }
-  return n > 0 ? { plugins: n } : {};
+  // 目录元信息：只在有已加载插件发布公告时带上，从不进房间或对局
+  let notices = false;
+  try { notices = lobby?.plugins?.hasNotices?.() === true; } catch { /* optional catalogue hint */ }
+  return { ...(n > 0 ? { plugins: n } : {}), ...(notices ? { notices: true } : {}) };
 }
 
 /** The content sets with gameplay plugins rooms hold now (DESIGN **§34.6**，上游原文 `§32.6`; 0 without any). */
