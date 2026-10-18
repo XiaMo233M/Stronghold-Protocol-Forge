@@ -1,6 +1,6 @@
 // server/match/match/platform.js — Match methods: the platform interface of the server/match/Match.js header
 // (server/lobby.js ⇄ Match) — start, handle (validation, error isolation, flush; the intents themselves: intents.js
-// _handle), setLoadout (INFO_CHECK only), onDisconnect / onReconnect and the full resync of one human, onLeave and 中途退出
+// _handle), setLoadout (INFO_CHECK; rule-enabled PREP), onDisconnect / onReconnect and the full resync of one human, onLeave and 中途退出
 // = elimination (_quit), dispose.
 // Installed on Match.prototype by server/match/Match.js (a method container: never instantiated; `this` is the match).
 
@@ -10,6 +10,7 @@ import { behaviourIsDefault } from '../../../shared/behaviour.js';
 import { syntheticResult } from '../fields.js';
 import { FLOW_TICKER_PRIORITY, OK, fail } from './common.js';
 import { msg } from '../../../shared/i18n.js';
+import { ruleOption } from '../../../shared/plugins/rules.js';
 
 const GAME_TYPES = new Set(Object.keys(C2S).filter((t) => Object.hasOwn(C2S, t) && (t.startsWith('g.') || t.startsWith('b.'))));
 
@@ -83,6 +84,18 @@ export class MatchPlatform {
     // a spectator seat only watches (the platform routes nothing else of it) — resyncing its own view of the public
     // state is part of watching, so it may ask for that too (DESIGN §8.2, incremental frame)
     if (ps.spectator && (!msg || (msg.t !== 'g.watch' && msg.t !== 'g.publicFull'))) return fail(ERR.SPECTATOR);
+    // a spectator seat only watches (the platform routes nothing else of it)
+    if (ps.spectator && (!msg || msg.t !== 'g.watch')) {
+      // g.test shares the host's rate bucket (applyTestCommand audits SPECTATOR after the stamp).
+      if (this.test && msg?.t === 'g.test') {
+        let res;
+        try { res = this.applyTestCommand(ps, msg); }
+        catch (e) { this.reportError('handle g.test', e); res = fail(ERR.INTERNAL); }
+        try { this.flush(); } catch (e) { this.reportError('flush', e); }
+        return res && res.error ? res : OK;
+      }
+      return fail(ERR.SPECTATOR);
+    }
     if (this.disposed || this.ended) {
       // A report that crossed the match end (the last b.progress of a field, a delegated rehearsal's answer) is stale:
       // ignored, never an error (DESIGN §14 — an error frame without a rid would surface as a toast in the browser).
@@ -110,6 +123,10 @@ export class MatchPlatform {
    *
    * **缺省档（`locked`）走的是从前那一条路**：相位不是这一格允许的那几个就 `WRONG_PHASE`，`loadout` 原样交给
    * `PlayerState.setLoadout`（整份替换）。只有 `prep` 档在 `PREP` 上多走一步 `mergeLoadoutEntries`（见那里的注释）。
+   * room.loadout during the match (DESIGN §16): only while INFO_CHECK runs (the briefing's 干员调配 entry); the lobby
+   * already checked it against the data (PlayerState.setLoadout re-checks it). `ops` (0.2.2): the per-operator 潜能 /
+   * 练度 that come with it (undefined = unchanged). A room whose prepLoadout rule is prep also accepts one merge
+   * during PREP while that seat has not pressed 准备 (DESIGN §36.15). INFO_CHECK stays a full replace.
    * @param {string} playerId
    * @param {Record<string, { skill: number, module: string|null }> | null} loadout
    * @param {Record<string, { potential: number, cultivate: number }> | null} [ops]
@@ -145,10 +162,46 @@ export class MatchPlatform {
     const ps = this.players.get(playerId);
     if (!ps || ps.isBot || ps.left) return fail(ERR.NOT_IN_ROOM);
     if (this.disposed || this.ended || this.phase !== PHASE.INFO_CHECK) return fail(ERR.WRONG_PHASE, 'support locked for this match');
+    const prep = this.phase === PHASE.PREP && ruleOption(this.rules, 'prepLoadout') === 'prep';
+    if (this.disposed || this.ended || (this.phase !== PHASE.INFO_CHECK && !prep)) return fail(ERR.WRONG_PHASE, 'loadout locked for this match');
+    if (prep && ps.ready) return fail(ERR.WRONG_PHASE, 'loadout locked for this match');
+    let res = OK;
+    this.guard(() => {
+      const before = prep ? ps.allChess().map((owner) => ({ owner, loadout: ps.loadoutFor(ps.gd.chess(owner.id)) })) : [];
+      if (!ps.setLoadout(loadout, ops, prep ? { merge: true } : undefined)) { res = fail(ERR.BAD_TARGET, 'loadout does not match the game data'); return; }
+      if (prep) {
+        for (const { owner, loadout: previous } of before) {
+          const next = ps.loadoutFor(ps.gd.chess(owner.id));
+          if (['skillIndex', 'moduleId', 'potential', 'cultivate'].some((key) => previous[key] !== next[key])) ps._reconcileTokensFor(owner);
+        }
+        ps.recompute();
+      } else this.markPrivate(ps);
+    });
+    return res;
+  }
+
+  /**
+   * room.skins during the match (docs/SKINS.md): accepted in ANY phase, unlike the loadout just above. The loadout is
+   * locked at INFO_CHECK because it changes what a unit does; a skin changes only what it looks like, and it is public —
+   * a teammate picking a different model mid-match is harmless, so `markPublic` carries it to everyone on the next
+   * broadcast. The lobby already filtered the shape (freezeSkins); PlayerState.setSkins re-checks it and refuses a
+   * bad map without clearing the choice already stored.
+   * @param {string} playerId
+   * @param {Record<string, string> | null} skins
+   * @returns {{ ok: true } | { error: string, detail?: string }}
+   */
+  setSkins(playerId, skins) {
+    const ps = this.players.get(playerId);
+    if (!ps || ps.isBot || ps.left) return fail(ERR.NOT_IN_ROOM);
     let res = OK;
     this.guard(() => {
       if (!ps.setSupport(entries)) { res = fail(ERR.BAD_TARGET, 'support does not match the server pool'); return; }
+      // an empty selection is a valid one: it clears every skin. A bad map leaves the stored choice alone.
+      if (!ps.setSkins(skins)) { res = fail(ERR.BAD_MSG, 'bad skin selection'); return; }
+      // [ASSUMED] Live cosmetic changes refresh every existing prep view, using the same dirty path as a move.
+      // The public choice also reaches current battle renderers; no running sim or BattleSpec is changed.
       this.markPrivate(ps);
+      this.markPublic();
     });
     return res;
   }
@@ -284,6 +337,7 @@ export class MatchPlatform {
     }
     ps.lp = 0;
     ps.eliminate(passedRound);
+    this.offersChanged();
     this.tickerText(msg('{name}博士中途退出了模拟', { name: ps.name }), FLOW_TICKER_PRIORITY);
     if (this.bossWaves && (phase === PHASE.ROUND_START || phase === PHASE.SP_DRAFT || phase === PHASE.PREP)) {
       // before the boss fight: pair the players left again (the prep preview shows the new partner / template); a
@@ -310,6 +364,8 @@ export class MatchPlatform {
     if (this.runner) { try { this.runner.stop(); } catch { /* ignore */ } }
     this._stopClientCombat();
     this._cancelRehearsal();
+    // a plugin interaction window's own deadline timer (MatchOffers); the tracked timers below cover the rest
+    if (typeof this.offersDispose === 'function') { try { this.offersDispose(); } catch { /* ignore */ } }
     for (const h of this._timers) { try { this.sched.clearTimeout(h); } catch { /* ignore */ } }
     this._timers.clear();
     if (this._pubTimer) { try { this.sched.clearTimeout(this._pubTimer); } catch { /* ignore */ } this._pubTimer = null; }

@@ -165,17 +165,16 @@ export class SharedPool {
    * Item roll for the shop's item slot: tier by the chess tier shares at this level, uniform item within the tier,
    * falling back to lower tiers when a tier has no item. Returns an item id or null.
    *
-   * `restrict`（可选，行为开关 `shopBias: "bondBias"`）：`(id, stock) => boolean`，**只缩小候选集、不加权**。抽到
-   * 的阶级照旧由棋子份额决定（那一半一字不动）；三类扫描（本阶级 → 更低阶级 → 更高阶级）里，先在这一级的
-   * **官方候选**（≥1 件）上挑一件**合偏向且库存拿得动**的；挑不出来就照旧用这一级的官方名单 —— 于是「偏向」
-   * 永远不会把商店的装备槽变成空的，也不会改变候选阶级（`shopBias` 的 `effect` 逐字这么写）。
-   * 不给谓词 ⇒ `restrict` 为 null，每一步都走官方名单，与从前同一份结果。
+   * `bias`（行为开关 `shopBias: "bondBias"`，上游 0.3.1 的写法）：**生效盟约 id 的 Set**。某一级里只要有
+   * `giveBondId` 落在这个 Set 里的装备、且库存拿得动，就在这些装备里挑；挑不出来（该级全被拿空或不含偏向）
+   * 就照旧用这一级的官方名单 —— 于是「偏向」永远不会把商店的装备槽变成空的，也不改变候选阶级。
+   * `null` 或空 Set ⇒ 与从前同一份 rng 消耗（一次抽阶级、一次抽装备）。偏向不会凭空给装备。
    *
    * @param {() => number} rng @param {number} maxTier
    * @param {{ canGain: (id: string) => boolean, pick: (rng: () => number, list: string[]) => string }|null} [stock]
-   * @param {((id: string, stock: any) => boolean)|null} [restrict]
+   * @param {Set<string>|null} [bias]
    */
-  rollItem(rng, maxTier, stock = null, restrict = null) {
+  rollItem(rng, maxTier, stock = null, bias = null) {
     const shares = this.tierShares(maxTier);
     const tiers = Object.keys(shares).map(Number).sort((a, b) => a - b);
     let tier = null;
@@ -186,34 +185,28 @@ export class SharedPool {
     } else {
       tier = 1 + Math.floor(rng() * Math.max(1, maxTier));
     }
+    const useBias = bias instanceof Set && bias.size > 0;
+    const gated = (t) => (this.gd.shopItemsByTier[t] || []).filter((id) => !stock || stock.canGain(id));
+    const pick = (list) => (stock ? stock.pick(rng, list) : list[Math.floor(rng() * list.length)]);
+    const choose = (t) => {
+      const list = gated(t);
+      if (!list.length) return null;
+      if (!useBias) return pick(list);
+      const biased = list.filter((id) => {
+        const rec = this.gd.item(id);
+        return !!(rec && typeof rec.giveBondId === 'string' && bias.has(rec.giveBondId));
+      });
+      return pick(biased.length ? biased : list);
+    };
     for (let t = tier; t >= 1; t--) {
-      const id = this._pickItemTier(rng, t, stock, restrict);
+      const id = choose(t);
       if (id) return id;
     }
     for (let t = tier + 1; t <= 6; t++) {
-      const id = this._pickItemTier(rng, t, stock, restrict);
+      const id = choose(t);
       if (id) return id;
     }
     return null;
-  }
-
-  /**
-   * One tier of `rollItem`: the official candidate list of that tier (`stock.canGain`), then — when a 偏向 is
-   * declared — the same list narrowed to it. `pick` is asked FIRST on the narrowed list and only then on the official
-   * one, so a tier whose entire stock is held still falls through to the next tier exactly as it does today.
-   */
-  _pickItemTier(rng, t, stock, restrict) {
-    const all = (this.gd.shopItemsByTier[t] || []).filter(id => !stock || stock.canGain(id));
-    if (!all.length) return null;
-    const draw = (list) => (stock ? stock.pick(rng, list) : list[Math.floor(rng() * list.length)]);
-    if (restrict) {
-      const narrowed = all.filter(id => restrict(id, stock));
-      if (narrowed.length) {
-        const hit = draw(narrowed);
-        if (hit) return hit;
-      }
-    }
-    return draw(all);
   }
 
   /** { baseId: left } snapshot (tests / diagnostics). */

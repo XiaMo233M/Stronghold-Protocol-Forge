@@ -12,6 +12,7 @@ const SUCCESS_SFX = {
   'g.move': 'drop', 'g.equip': 'equip', 'g.art': 'artPlace', 'g.reward': 'pick', 'g.choice': 'pick',
   'g.band': 'confirm', 'g.bandSkip': 'back', 'g.infoReady': 'ready', 'g.emote': 'emote', 'g.destroy': 'back',
   'g.unequip': 'back',
+  'g.band': 'confirm', 'g.bandSkip': 'back', 'g.infoReady': 'ready', 'g.emote': 'emote', 'g.destroy': 'back', 'g.unequip': 'back',
 };
 
 /**
@@ -106,7 +107,9 @@ export const actions = {
   // 装备拆卸（行为开关 `unequip: "allow"`）：把一件已装备的装备退回手牌 / 临时整备区。缺省档下服务端回
   // `'equipped items are locked'`，而界面**根本不画**这个按钮（`unequipAllowed()`），所以它正常只在 `allow` 档出现。
   unequip: (itemUid) => act('g.unequip', { itemUid }),
+  unequip: (itemUid) => act('g.unequip', { itemUid }),
   reward: (idx) => act('g.reward', { idx }),
+  offer: (offer, idx, refresh = false, cardId) => act(refresh ? 'g.offerRefresh' : 'g.offer', { offerId: offer.id, pluginId: offer.pluginId, seq: offer.seq, idx, cardId }),
   choice: (idx, choiceId) => act('g.choice', choiceId === undefined ? { idx } : { idx, choiceId }),
   ready: (ready) => act('g.ready', { ready }, { sfx: ready ? 'ready' : 'back' }),
   emote: (id) => act('g.emote', { id }, { quiet: true }),

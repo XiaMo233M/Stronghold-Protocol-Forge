@@ -90,6 +90,7 @@ test('generated script harness runs with tools/plugin.mjs test, with SDK registr
   // (`ℹ pass 1`); older Node printed TAP (`# pass 1`). The point is that the case passed, not the reporter's layout —
   // `tools/plugin.mjs test` passes no `--test-reporter`, so accept either.
   assert.match(run.stdout, /^(?:#|ℹ) pass 1$/m);
+  assert.match(run.stdout, /ℹ pass 1\b/); // the spec report on every Node version (Node 22's default here would be TAP)
 });
 
 test('mode wizard economy, DP and round timers reach GameData while the base mode stays unchanged', async t => {

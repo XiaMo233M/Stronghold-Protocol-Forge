@@ -112,6 +112,12 @@ test('watchdog kills a real non-responsive child process and allows the next job
   //   ② 这一趟没占着额度 —— `active()` 回到 0，下一个 job 能跑
   assert.equal(dead(child.pid), true, 'the hung child is really gone');
   assert.equal(b.active(), 0, 'the slot is free for the next job');
+  // the child never exits by itself, and the job ends on its exit: it was killed. On Windows the watchdog's
+  // taskkill /T /F ends the tree first, so child.kill() finds it gone and `killed` stays false — look at the process
+  assert.ok(child.exitCode !== null || child.signalCode !== null, 'the job ended after the child exited');
+  assert.throws(() => process.kill(child.pid, 0), { code: 'ESRCH' });
+  if (process.platform !== 'win32') assert.equal(child.killed, true);
+  assert.equal(b.active(), 0);
 });
 
 test('wizard API creates each class, saves with revision, validates DSL, and keeps executable files off studio GET', async t => {

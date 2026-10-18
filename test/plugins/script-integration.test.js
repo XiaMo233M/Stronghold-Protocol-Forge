@@ -38,6 +38,10 @@ test('same script battle is bit-identical in match child and loadBrowserSim, spe
  const accepted=await loadContentSet(built.cs,{fetch,consent:true,retryDelays:[]});assert.equal(accepted.scripts.length,1);
  const runtime=path.join(f.root,'runtime');fs.mkdirSync(path.join(runtime,'server'),{recursive:true});
  fs.cpSync('server/sim',path.join(runtime,'server/sim'),{recursive:true,filter:src=>!src.replace(/\\/g, '/').endsWith('/nodeData.js')});
+ // as the browser gets /sim/: no Node loader (by file name: cpSync passes `\` paths on Windows), else a cyclic import
+ // simdata.js → nodeData.js → the data.js shim → simdata.js deadlocks loadBrowserSim
+ fs.cpSync('server/sim',path.join(runtime,'server/sim'),{recursive:true,filter:src=>path.basename(src)!=='nodeData.js'});
+ assert.equal(fs.existsSync(path.join(runtime,'server/sim/nodeData.js')),false);
  fs.cpSync('shared',path.join(runtime,'shared'),{recursive:true});
  fs.writeFileSync(path.join(runtime,'package.json'),'{"type":"module"}');fs.writeFileSync(path.join(runtime,'server/data.js'),DATA_SHIM_JS);
  const base=pathToFileURL(path.join(runtime,'server/sim')).href+'/';
@@ -90,4 +94,5 @@ test('CLI test runs the template harness with composed data',t=>{
  // The plugin's own test really passed one case. Node 24 prints the spec summary by default (`ℹ pass 1`), older Node TAP
  // (`# pass 1`); `tools/plugin.mjs test` names no reporter, so accept either layout.
  assert.equal(r.status,0,r.stdout+r.stderr);assert.match(r.stdout,/^(?:#|ℹ) pass 1$/m);
+ assert.equal(r.status,0,r.stdout+r.stderr);assert.match(r.stdout,/ℹ pass 1\b/); // spec on every Node version
 });

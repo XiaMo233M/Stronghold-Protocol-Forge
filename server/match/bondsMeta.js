@@ -25,6 +25,7 @@
 
 import { layerGainRoom } from '../../shared/constants.js';
 import { memberBonds } from '../../shared/morph.js';
+import { grantedBondsByMorph, ruleOption } from '../../shared/plugins/rules.js';
 
 export const HARMONY_BOND = 'maniShip';
 export const DEPUTY_BOND = 'deputShip';
@@ -36,9 +37,10 @@ export const DEPUTY_BOND = 'deputShip';
  * `GameData`，`Match` 建它时把 `Match.morphPairing` 传了进去）读。
  * @param {import('./gamedata.js').GameData} gd
  * @param {{ id: string, items?: Array<{ id: string }> }} piece
+ * @param {Record<string, string>|null} [rules] the room's rule switches; omitted keeps the official pairing
  * @returns {string[]}
  */
-export function pieceBonds(gd, piece) {
+export function pieceBonds(gd, piece, rules = null) {
   const c = gd.chess(piece.id);
   const items = Array.isArray(piece.items) ? piece.items : [];
   const recs = items.map((it) => gd.item(it.id)).filter(Boolean);
@@ -51,6 +53,11 @@ export function pieceBonds(gd, piece) {
     morphed: gd.morphPairing,
     hasBond: (id) => !!gd.bond(id),
   });
+  const mode = ruleOption(rules, 'morphPairing');
+  for (const b of grantedBondsByMorph(items, (id) => gd.item(id), { mode, bondOk: (id) => !!gd.bond(id) })) {
+    if (!out.includes(b)) out.push(b);
+  }
+  return out;
 }
 
 /**
@@ -68,11 +75,11 @@ function membership(gd, ps) {
   for (const p of boardChess) {
     const base = gd.baseIdOf(p.id);
     const golden = gd.isGolden(p.id);
-    for (const b of pieceBonds(gd, p)) { add(onBoard, b, base); add(onBoardVariant, b, `${base}|${golden ? 1 : 0}`); }
+    for (const b of pieceBonds(gd, p, ps.m?.rules)) { add(onBoard, b, base); add(onBoardVariant, b, `${base}|${golden ? 1 : 0}`); }
   }
   for (const p of handChess) {
     const base = gd.baseIdOf(p.id);
-    for (const b of pieceBonds(gd, p)) add(inHand, b, base);
+    for (const b of pieceBonds(gd, p, ps.m?.rules)) add(inHand, b, base);
   }
   return { onBoard, onBoardVariant, inHand, goldenOnBoard: boardChess.filter((p) => gd.isGolden(p.id)).length };
 }

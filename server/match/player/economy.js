@@ -6,8 +6,9 @@
 
 import { ERR, PHASE, layerGainRoom } from '../../../shared/constants.js';
 import { behaviourIsDefault } from '../../../shared/behaviour.js';
+import { ruleOption } from '../../../shared/plugins/rules.js';
 import { freeSlot } from '../board.js';
-import { bondBiasPreference } from '../pool.js';
+import { computeBonds } from '../bondsMeta.js';
 import { OK, fail } from './common.js';
 
 /**
@@ -128,11 +129,20 @@ export class PlayerEconomy {
   }
 
   _rollItemSlot() {
-    // 行为开关 `shopBias`（DESIGN §28.43.1）：只有这一局的声明把那一格选成 `bondBias` 时，装备槽才拿这条
-    // 偏向谓词去缩候选集。`shopBiasBonds()` 在缺省档返回 null ⇒ 这一行与从前**同一份结果**、同一条代码路径。
-    const bonds = this.shopBiasBonds();
-    const restrict = bonds ? bondBiasPreference(this.gd, bonds) : null;
-    const id = this.m.pool.rollItem(this.m.rngShop, this.shop.level, this.m.itemPool, restrict);
+    // 装备槽的盟约偏向（`shopBias: 'bondBias'`），两条来源并存：
+    //   ① 上游 0.3.1 的房间规则：内容插件声明 `rules.shopBias = 'bondBias'` ⇒ 按本局**生效盟约**偏。
+    //      startRound 在 recompute 之前就抽商店，所以缓存的 this.bonds 可能差一轮 ⇒ 这里现算 computeBonds（不吃 rng）。
+    //   ② 我们自有的模块层 behaviour.shopBias（DESIGN §28.43.1）⇒ `shopBiasBonds()` 给出同一个 Set。
+    // 两者都产出 Set，`rollItem` 只认 Set；缺省档两者都为 null ⇒ 与从前**同一份结果**、同一条 rng 消耗。
+    let bias = null;
+    if (ruleOption(this.m?.rules, 'shopBias') === 'bondBias') {
+      const bonds = computeBonds(this.gd, this);
+      bias = new Set();
+      for (const [id, st] of Object.entries(bonds)) if (st && st.active) bias.add(id);
+    } else {
+      bias = this.shopBiasBonds();
+    }
+    const id = this.m.pool.rollItem(this.m.rngShop, this.shop.level, this.m.itemPool, bias);
     return id ? { kind: 'item', id, basePrice: this.gd.itemPrice(id), frozen: false, sold: false } : null;
   }
 

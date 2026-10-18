@@ -87,7 +87,12 @@ export const initialState = Object.freeze({
   // `preloadRequired && !preloadReady`. Both default to `false`, so with no pack declaring one the gate is inert and
   // every route decision is exactly what it was — the fields are additive, nothing else reads them.
   session: { entered: false, preloadRequired: false, preloadReady: false },
+  // A language-only installation may have announcements without an unofficial plugin count.
+  installedNotices: false,
+  session: { entered: false },
   room: null,
+  // welcome.testMode (DESIGN §36.8). The server omits the key when the switch is off; the client cannot set it.
+  testMode: false,
   match: emptyMatch(),
   ticker: [],
   emotes: [],

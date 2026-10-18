@@ -5,6 +5,7 @@
 // Installed on PlayerState.prototype by server/match/PlayerState.js (a method container: never instantiated; `this` is
 // the player state).
 
+import { hasTraitFor } from '../operatorTraits.js';
 import { pieceDir, parseDir, mergeTile } from '../board.js';
 import { MAX_OFFER_SLOTS } from './common.js';
 import { onMerge } from '../botEmotes.js';
@@ -54,6 +55,9 @@ export class PlayerAcquire {
       this.stow(piece, { allowTemp: true, toTemp });
     }
     this.recompute();
+    // [ASSUMED] Custom gain fires for the acquired copy, not the elite produced by a merge.
+    // Silent setup acquisitions are still acquisitions; official gain behavior stays unchanged.
+    if (hasTraitFor(this.gd, rec.charId)) this.m.dispatch(this, 'onTraitGain', { piece, kind: 'chess', source });
     if (!silent) this.m.dispatch(this, 'onGain', { piece: owned, kind: 'chess', source });
     this.recompute();
     return owned;
@@ -170,6 +174,8 @@ export class PlayerAcquire {
     this.returnCopies(piece);
     // its equipment comes off first (the returned pair auto-merges, which may free a slot for the gain).
     // D13：同 merge 那条 —— 只 `stow(..., { allowTemp: true })`，每条装备的归宿是 手牌 或 无界临时队列，不丢件。
+    // Returned equipment is stowed. morphSlotPolicy is not applied: this path does not check equip slots
+    // (the workshop names a recycle read point this codebase does not have).
     for (const it of items) this.stow(it, { allowTemp: true });
     this.checkItemMerges();
     // 获得一名…干员: gained like any other gained operator
