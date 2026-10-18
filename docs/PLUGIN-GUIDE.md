@@ -184,6 +184,7 @@ node tools/plugin.mjs pack my-texas --zip
 | 工作台里的操作被拒绝，旁边显示原因 | `PLUGIN_STUDIO_TRIAL_TIMEOUT` | 这次对战超过了试验台的时间上限 | 缩短场景时长，减少单位或检查插件效果。 |
 | 工作台里的操作被拒绝，旁边显示原因 | `PLUGIN_STUDIO_TRIAL_FAILED` | 试验台子进程未能完成对战 | 重新检查插件；如果仍失败，请查看服务器日志。 |
 | 工作台里的操作被拒绝，旁边显示原因 | `PLUGIN_STUDIO_TRIAL_LIMIT` | 这次对战的回放超过了大小上限 | 缩短对战时长或减少单位和特效。 |
+| 工作台里的操作被拒绝，旁边显示原因 | `PLUGIN_STUDIO_CONSOLE_SCENARIO` | 测试场景无效：{path}（{reason}） | 检查场景字段、合法部署位置、所属干员与波次；不支持的字段不能运行。 |
 | 工作台里的操作被拒绝，旁边显示原因 | `PLUGIN_STUDIO_TRIAL_SCENARIO` | 这个试验场景不能运行 | 选择有效的干员、波次和 1–120 秒时长；界面插件用沙箱预览。 |
 | 房间里开不了这个插件，面板弹出提示 | `PLUGIN_CONSENT` | 还有玩家未同意运行受信任插件 | 每个在座玩家须亲自确认当前内容组合的风险提示。 |
 | 房间里开不了这个插件，面板弹出提示 | `PLUGIN_TRUST_PUBLIC` | 公网监听默认禁止受信任插件 | 改为监听本机或局域网；确认风险后可显式使用 trusted-force。 |
@@ -207,6 +208,8 @@ node tools/plugin.mjs pack my-texas --zip
 | 房间里开不了这个插件，面板弹出提示 | `PLUGIN_BLOCKED` | 这个插件不能在这里启用：这个版本不应用它的类别，或者它的作用范围不包括这里 | 外观插件的 class 写 "cosmetic"；scope 写 ["room"]（房主给整个房间开）或 ["personal"]（玩家只给自己开），两样都要就都写上。 |
 | 房间里开不了这个插件，面板弹出提示 | `PLUGIN_DEPENDENCY` | 缺少这个插件需要的其他插件（或者版本不对），或者几个插件的加载顺序互相指向、成了一个圈 | 安装 requires 里写的插件（版本要在写的范围内）；或者删掉 loadAfter / loadBefore 里互相指向的那几条。 |
 | 房间里开不了这个插件，面板弹出提示 | `PLUGIN_CONFLICT` | 选中的插件互相冲突，不能一起用 | 关掉其中一个；插件的 conflicts 写着它和谁不能一起用。 |
+| 房间里开不了这个插件，面板弹出提示 | `PLUGIN_RULE_CONFLICT` | 两个插件把同一个规则开关设成了不同的选项（{path}） | 只保留其中一个插件，或让它们选择同一个选项。 |
+| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_RULES` | 清单里的 rules 写错了：开关或选项不在规定的四种里，或者这个类别的插件不能声明规则 | rules 只能写 shopBias、prepLoadout、morphPairing、unequip，每个用规定的两个选项；只有 content、script、trusted 可以写。 |
 | 房间里开不了这个插件，面板弹出提示 | `PLUGIN_LIMIT` | 超出了本服务器的上限：{detail} | 少开几个插件，或者让插件小一点（压缩图片和声音、删掉没用到的文件、少用整条引用）。 |
 | 房间里开不了这个插件，面板弹出提示 | `PLUGIN_INCOMPATIBLE` | 这个玩法插件不适配本服务器的游戏版本（或插件接口版本） | 换一个适配本版本的插件版本（清单的 "app" 写着它适配的游戏版本），或者请作者更新。 |
 | 房间里开不了这个插件，面板弹出提示 | `PLUGIN_BUSY` | 本服务器同时运行的插件组合已达上限 | 稍后再试，或者和正在用插件的房间选同样的插件；服主可以在 plugins/config.json 里调高 maxSets。 |
@@ -234,8 +237,8 @@ node tools/plugin.mjs pack my-texas --zip
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_PART_CLASS` | 「{where}」不是 {class} 插件能带的东西 | 外观插件只带 "assets"（素材）和 "theme"（主题）；界面插件带 "entry.client" 和 "slots"；改数值、加干员之类的要做成 content 插件。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_PART_SHAPE` | 「{where}」的写法不对 | 写成插件文件夹里的一个 .json 文件路径（或这些路径的列表）；"assets" 和 "theme" 也可以直接写成 { … } 对象。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_ASSET_FILE` | 素材「{where}」写的文件不对：不是插件文件夹里的路径，或者不是这个位置要的文件类型 | 写插件文件夹里的相对路径，例如 art/avatar.png。图片位置用 .png .jpg .webp，声音位置用 .mp3 .ogg，模型用 .skel 和 .atlas（贴图 .png）。 |
-| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_THEME_URL` | 主题 "theme" 里写了网址 | 主题只能写颜色、长度和插件自带的字体名，不能引用网址（这是为了防止泄露数据）。 |
-| 插件能用，但检查时有提示 | `PLUGIN_THEME_UNUSED` | 这个版本还不应用 "theme"（只应用 "assets" 里的素材） | 可以先留着，以后的版本会用上；或者删掉它，提示就没了。 |
+| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_THEME_URL` | 主题「{where}」里写了网址 | 主题变量只能写颜色、时间或缓动，不能写网址、var() 或其他表达式。 |
+| 插件能用，但检查时有提示 | `PLUGIN_THEME_UNUSED` | 这条提示来自旧版本：这一版会在玩家自己的画面上应用主题变量 | 这一版不再发出这条提示。主题变量写在 theme.vars 里，只能用本安装的设计变量。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_THEME_NAME` | 主题变量「{where}」不是本安装的设计变量 | 只能设置 public/css/theme.css 里 :root 的颜色、时间和缓动变量，例如 --text-hi、--t-fast、--ease-out。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_THEME_VALUE` | 主题变量「{where}」的值不是这种变量允许的颜色、时间或缓动 | 颜色用 #rgb、#rgba、#rrggbb、#rrggbbaa 或 rgb()/rgba()/hsl()/hsla()；时间用 0–2000ms 或 0–2s；缓动用关键字或 cubic-bezier()。不能写网址、引号或表达式。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_THEME_LIMIT` | 主题变量超过了 64 个 | 一个插件最多写 64 个主题变量。 |
@@ -261,7 +264,7 @@ node tools/plugin.mjs pack my-texas --zip
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_LANG_FILES` | 语言包的文件表 "files" 写得不对：{where} | "files" 写 { "ui": "ui.json" }（必填）和可选的 { "data": "data.json" }，都是包里的 .json 文件。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_PACK` | 旧式内容包（pack.json）写得不对，或者这个版本不加载它的类型：{where} | packs/ 里只加载语言包（"type": "lang"）。外观和数据请做成 plugins/ 里的插件（plugin.json，"manifest": 2）。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_ASSETS_SHAPE` | 素材表 "assets" 的写法不对：{where} | 按 data/assets.json 的样子写：chars → 干员 id → avatar / portrait / spine …，声音在 audio 里。用工作台的模板就不用手写。 |
-| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_ASSET_KEY` | 「{where}」不是素材条目的名字 | 条目名是干员、敌人等的内部 id（例如 char_102_texas，只有字母、数字、_ . / -）。在工作台按官方名字搜索，就不用自己找 id。 |
+| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_ASSET_KEY` | 「{where}」不是这个位置能用的键名 | 键名怎么写由它所在的位置决定：容器的键是条目的内部 id（字母、数字、_ . / -，例如 char_102_texas）；`skins` 这一层的键额外允许 @ # +，最多 64 个字符（条目的键最多 128 个）。照抄本安装清单里的名字，或按这个字符集取一个新名字。 |
 | 插件能用，但检查时有提示 | `PLUGIN_ASSET_IGNORED` | 「{where}」不是外观插件能改的位置，被忽略了 | 检查拼写；外观插件能改的位置见 PLUGINS.md §9 的表（头像、立绘、模型、图标、界面图、语音、音效、音乐）。（工作台可一键修复） |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_REF` | 引用「{where}」不对：写法不对，或者本安装没有它指向的素材 | { "ref": "char_112_siege" } 借用本安装已有的同类条目。在工作台点「用已有的素材」从列表里选，就不会写错；或者删掉这条。（工作台可一键修复） |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_SPINE` | Spine 模型「{where}」写得不对 | .skel 和 .atlas 放在同一个文件夹、用同一个名字（t.skel + t.atlas），贴图 .png 放在 atlas 旁边并写进 textures；动画数据不要手写，点「打包」自动生成。 |
@@ -293,6 +296,7 @@ node tools/plugin.mjs pack my-texas --zip
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_DATA_PATH` | 「{where}」用了不允许的键名 | __proto__、prototype、constructor 这类键名不能用（它们能改坏程序里的对象），换一个名字。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_DATA_BOUND` | 数值超出了插件允许的范围（{where}）：{detail} | 每个数值最多是原版同一个键最大值的 10 倍（至少允许到 64）；间隔、周期、费用这类步长不能小于原版最小值的十分之一。把数字改小一点——原版 3 倍以内的创意数值都能用。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_DATA_REQUIRED` | 合并后的数据缺东西或者写坏了（{where}）：{detail} | 补丁不要删掉游戏必需的字段或者整张表；按后面的英文原文找到是哪一处。 |
+| 插件能用，但检查时有提示 | `PLUGIN_BOSS_CENTRE_DEPLOYABLE` | 地图「{stage}」的首领战中央列 10 可部署（战场行 {rows}）；双方会重叠部署，开战时只部署第一名干员 | 将这些格子的有效 buildable 设为 NONE，移走中央列的部署平台；这是提示，不会改变插件规则。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_DATA_REFERENCE` | 「{where}」引用了不存在的东西：{detail} | 检查拼写：引用的盟约、敌人、干员、效果等 id 要在原版或这个插件里存在（大小写一致）。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_DATA_PAIR` | 干员棋子的普通卡和精英卡对不上（{where}） | 新干员要成对：…_a 是普通卡、…_b 是精英卡（isGolden: true），两张的 charId 和 tier 一样；用紧凑记录（records 文件）写，工具会替你生成这一对。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_PATCH_OP` | 不认识的补丁操作（{where}） | "op" 只能是 set、merge、add、append、remove 之一。 |
@@ -303,6 +307,10 @@ node tools/plugin.mjs pack my-texas --zip
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_RECORD_EXISTS` | 要新增的记录已经存在（{where}） | 改已有的记录用补丁（patch 文件里的 set / merge）；新增的记录要起一个新的 id。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_RECORD_DELETE` | 插件不能删除记录（{where}） | 想让一个干员或敌人不出现，就改它在卡池、关卡或波次里的数据，不要删记录本身。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_RECORD_ID` | 新记录的 id 不在这个插件的命名空间里（{where}）：{detail} | 新记录的 id 要带上插件 id：插件 my-mod 的新干员写 char_x_my_mod_名字（插件 id 里的 - 换成 _），技能写 skx_my_mod_…；用 kitRef 借官方技能时可以保留官方技能 id。 |
+| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_RECORD_HIDDEN` | 隐藏标记必须是布尔值（{where}） | chess.hidden 写 true 或 false。 |
+| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_RECORD_PAIR` | 普通和精锐 id 配对不正确（{where}） | chess.ids 写本插件命名空间内不同的 normal 和 elite，不能同时写 chess.id。 |
+| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_RECORD_ART` | 美术引用格式不正确（{where}） | art.ref 或 art.assets 写素材 id，不能写路径或网址。 |
+| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_RECORD_ORIGIN` | 来源记录不存在或不一致（{where}） | origin 写本安装官方 charId 或 chessId，两个都写时必须匹配。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_RECORD_TYPE` | 紧凑记录的写法不对（{where}）：{detail} | 干员要写 charId、名字、职业、位置、稀有度（1–6）；kit 只能选一种来源：generic、ref（借官方 kit）、dsl 或一份 JSON 技能规格。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_RECORD_SKILLS` | 干员的技能列表不对（{where}）：{detail} | 技能列表里正好有一个默认技能（default: true），而且它和 "skill" 写的是同一个；改技能说明里的次数时，两处一起改。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_KIT_REF` | "kitRef" 写的官方 kit 不存在（{where}） | kitRef 写官方干员的 id（例如 char_102_texas），它的技能逻辑会照搬过来；拼写要和官方一致。 |
@@ -311,11 +319,15 @@ node tools/plugin.mjs pack my-texas --zip
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_I18N` | 插件的翻译文件不对（{where}）：{detail} | 翻译文件写 { "version": 1, "lang": "en", "files": { … } }，lang 和文件名一致；只能替换已有的文字，不能新增字段。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_UI_SLOTS` | 界面插件的 "slots" 写得不对：{detail} | "slots" 是列表，从 hud.right、result.tab、stats.tab、room.panel 里选，每个最多写一次。 |
 | 插件能用，但检查时有提示 | `PLUGIN_UI_NO_SLOT` | 界面插件没有要任何位置，页面不会显示出来 | 在 "slots" 里写上它要放的位置，例如 ["hud.right"]。 |
-| 界面插件的页面收到拒绝（ok: false、rejected 或 limit 消息） | `PLUGIN_SLOT` | 界面插件要的位置没有给它：清单的 "slots" 里没有这个位置，或者别的插件已经占了 | 在 plugin.json 的 "slots" 里写上这个位置（hud.right、result.tab、stats.tab、room.panel）。一个位置只放一个插件，先开的先得。 |
+| 界面插件的页面收到拒绝（ok: false、rejected 或 limit 消息） | `PLUGIN_SLOT` | 界面插件要的位置没有给它：清单的 "slots" 里没有这个位置，或者别的插件已经占了 | 在 plugin.json 的 "slots" 里写上这个位置（hud.right、result.tab、stats.tab、room.panel）。协议表同一时间只挂一个插件；同一个位置有多个时，对局里用标签切换。 |
+| 插件能用，但检查时有提示 | `PLUGIN_UI_SLOT_SHARED` | 同一个位置有多个界面插件（{detail}）。对局里用标签切换，一次只显示一个 | 这不是错误：玩家可以在这个位置里切换。若要各自独立显示，把它们写成不同的 slots。 |
 | 界面插件的页面收到拒绝（ok: false、rejected 或 limit 消息） | `PLUGIN_RATE` | 界面插件发消息太快，被限流了 | 每个插件每秒最多 20 条（连发最多 40 条）。把要发的东西攒一攒再发，或者只在数据变了的时候发。 |
 | 界面插件的页面收到拒绝（ok: false、rejected 或 limit 消息） | `PLUGIN_STORAGE` | 界面插件的存储请求被拒绝：键名不合规，或者超出了容量 | 键名 1–64 个字符，只用字母、数字和 . _ -；一个值的 JSON 不超过 4096 字节；每个插件最多 32 个键、一共 32 KB。 |
 | 界面插件的页面收到拒绝（ok: false、rejected 或 limit 消息） | `PLUGIN_INTENT` | 界面插件想发对局操作，被拒绝了 | 界面插件只能看，不能操作对局（它不能成为自动操作或作弊工具）：不要发 hello、ping、room.*、g.*、b.* 这类消息，也不要把它们夹在别的消息里。 |
 | 界面插件的页面收到拒绝（ok: false、rejected 或 limit 消息） | `PLUGIN_SHAPE` | 界面插件发来的消息格式不对，被丢弃了 | 每条消息都是 { "v": 1, "t": 类型, … }，类型只能是 ready、slot、resize、storage、notice、stats，一条不超过 8 KB；格式见 schemas/ui.schema.json。 |
+| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_OFFER_REFERENCE` | 交互窗口引用了不可用的记录：{detail} | 只使用官方数据或本插件在房间内容集内声明的物品、棋子和羁绊。 |
+| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_OFFER_SHAPE` | 这个交互窗口的写法不对：{detail} | 一份 offers/*.json 是 { "offer": 1, "id": "窗口名", "when": { "at": ["battleCheck" 或 "prep"], "rounds": 轮次 }, "windowSec": 秒数, "slots": 1–6, "options": { "source": "插件里的 .json" } }；windowSec 缺省 0（不开窗、不阻塞）。 |
+| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_OFFER_ROUNDS` | 这个交互窗口的轮次表达式看不懂：{detail} | 轮次写成 1–99 的列表（如 [1, 3, 6, 11]）、"any"（每一轮）、{ "every": N }（每 N 轮）或 { "from": R, "to": R }；窗口在该轮开始之前打开，任何一轮都可以，不必是官方固定节奏里的轮次。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_DSL_SHAPE` | DSL 规格的整体写法不对：{detail} | 整份规格是一个对象：{ "dsl": 1, "pluginId": "插件 id", 然后是 "skill"、"skills"、"talents" 或 "meta" }。 |
 | 插件没出现在列表里（被跳过）；check 指出 DSL 版本 | `PLUGIN_DSL_VERSION` | 这个版本只认 "dsl": 1 | 在规格最外层写 "dsl": 1。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_DSL_PLUGIN_ID` | DSL 规格写的插件 id 和装着它的插件对不上：{detail} | "pluginId" 写装着这份规格的插件自己的 id（插件文件夹名），或者不写，由服务器填上。一个插件不能用别的插件的动作预算。 |
@@ -350,10 +362,12 @@ node tools/plugin.mjs pack my-texas --zip
 | 工作台里的操作被拒绝，旁边显示原因 | `PLUGIN_INSTALL_EXISTS` | plugins/ 里已经有这个 id：{detail} | 不加 --force 就不会覆盖。--force 会把旧文件夹挪到 plugins/_replaced/，不会删除。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_FORGE_INPUT` | 这不是一份能读的 Forge 包：{detail} | 选一个含 pack.json 的工坊包目录，或那个目录打出来的 zip。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_FORGE_ZIP` | 这个包的文件不安全，没有解压：{detail} | 路径不能跳出包目录，不能有符号链接，单个包最多 5000 个文件、一共 200 MB。换一份包再导入。 |
-| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_FORGE_JSON` | 包里的 JSON 读不了：{detail} | JSON 要能解析，不超过 8 MB，嵌套不超过 64 层，数字在 ±1e9 以内。 |
+| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_FORGE_JSON` | 包里的 JSON 读不了：{detail} | JSON 要能解析，不超过 8 MB，嵌套不超过 64 层。读 Forge 包时，±1e9 以内的有限数和安全整数都可以；非有限数和超出安全整数范围的数仍然拒绝。写进插件或游戏数据的数仍须在 ±1e9 以内。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_FORGE_ID` | 这个包的 id 变不成插件 id：{detail} | 用 --id 指定一个插件 id：2–32 位小写字母、数字和 -，例如 rose-skin。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_FORGE_EXISTS` | 目标文件夹已经存在，没有写入：{detail} | 换一个 --out 或 --id，或者把已有的插件文件夹挪走后再导入。 |
-| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_FORGE_SCRIPT` | 包里的脚本没有导入，也没有执行：{detail} | kits/<id>.js 的 id 是包里导入的记录（或 overrides 里声明的官方 id），import 又能映射到 sp:sdk@1（@kit/tier1.js、@sim/constants.js、@sim/detmath.js、包里的 ./ 文件）时，会变成沙箱里的脚本插件；不然就把技能逻辑改写成 JSON SkillSpec、DSL 或脚本插件。导入器不会运行包里的 .js。 |
+| 插件能用，但检查时有提示 | `PLUGIN_FORGE_MOUNT` | 面板挂载点需要人工适配：{detail} | 按报告建议的插槽改写面板；建议位置不是原挂载点。 |
+| 插件能用，但检查时有提示 | `PLUGIN_FORGE_PANEL_SCRIPT` | 面板脚本没有复制：{detail} | 用 postMessage API v1 重写面板脚本；导入时没有执行脚本。 |
+| 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_FORGE_SCRIPT` | 包里的脚本没有导入，也没有执行：{detail} | kits/<id>.js 的 id 是包里导入的记录（或 overrides 里声明的官方 id），import 又能映射到 sp:sdk@1（@kit/tier1.js、@sim/constants.js、@sim/detmath.js、@sim/dir.js 与 @sim/targeting.js 的安全子集、包里的 ./ 文件）时，会变成沙箱里的脚本插件；不然就把技能逻辑改写成 JSON SkillSpec、DSL 或脚本插件。导入器不会运行包里的 .js。 |
 | 插件没出现在列表里（被跳过）；启动日志和 check 写着原因 | `PLUGIN_INVALID` | 插件有问题：{detail} | 看后面的英文原文；看不懂的话，可以到 GitHub 提问并附上这段文字。 |
 <!-- plugin-errors:end -->
 

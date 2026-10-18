@@ -90,6 +90,10 @@ import { annotateCatalog, readCatalog } from '../shared/plugins/catalog.js';
 import { installFromFile, installFromUrl, installedPluginVersion, isRemoteAddress, loadCatalogText } from '../server/plugins/install.js';
 import { buildSurface, surfaceMarkdown, SURFACE_MARKERS } from '../shared/plugins/surface.js';
 import { importForge } from '../server/plugins/forgeImport.js';
+// 上游 0.3.1：表面表还要带上玩法记录、插件特效与干员特质三组（surface --write 与测试用同一份构造）
+import { TRAIT_SURFACE } from '../server/plugins/operatorTraits.js';
+import { GAMEPLAY_RECORD_SURFACE } from '../server/plugins/gameplayRecords.js';
+import { pluginFxSurface } from '../public/js/render/vfx/pluginFormat.js';
 
 export { checkPluginFolder, buildPluginLock };
 
@@ -397,7 +401,7 @@ export async function main(argv) {
 
   if (cmd === 'surface') {
     const vocab = await import('../server/sim/content/dsl/vocab.js');
-    const rows = buildSurface({ dsl: vocab, studioRoutes: STUDIO_ROUTES });
+    const rows = [...buildSurface({ dsl: vocab, studioRoutes: STUDIO_ROUTES }), ...GAMEPLAY_RECORD_SURFACE, ...pluginFxSurface(), ...TRAIT_SURFACE];
     const table = surfaceMarkdown(rows);
     if (!flags.has('write')) { console.log(table); return 0; }
     const abs = path.join(root, 'docs/PLUGIN-API.md');

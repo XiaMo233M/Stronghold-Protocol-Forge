@@ -81,7 +81,7 @@ export const DEV_BUILD = /-dev$/.test(APP_VERSION);
  * is written for (`api`); a level outside min…current keeps the plugin out. The level rises when the data shapes, the
  * DSL vocabulary or the SDK a plugin relies on change incompatibly (CHANGELOG says how to migrate). [ASSUMED]
  */
-export const PLUGIN_API = Object.freeze({ current: 1, min: 1 });
+export const PLUGIN_API = Object.freeze({ current: 2, min: 1 });
 
 /**
  * The voice slots a pack may ship lines for (角色语音台词) — the ONE copy of this vocabulary: the workshop validator
@@ -442,6 +442,10 @@ export const ERR = Object.freeze({
   PLUGIN_INCOMPATIBLE: 'PLUGIN_INCOMPATIBLE',
   PLUGIN_BUSY: 'PLUGIN_BUSY',
   CONTENT_NOT_READY: 'CONTENT_NOT_READY',
+  PLUGIN_RULE_CONFLICT: 'PLUGIN_RULE_CONFLICT',
+  TEST_CONFIRM: 'TEST_CONFIRM',
+  TEST_DISABLED: 'TEST_DISABLED',
+  TEST_FORBIDDEN: 'TEST_FORBIDDEN',
   INTERNAL: 'INTERNAL',
 });
 
@@ -471,6 +475,10 @@ export const ERR_TEXT = {
   PLUGIN_SCRIPT_OVERRIDE: N_('插件未声明要替换的官方技能'),
   PLUGIN_SCRIPT_CHECK: N_('脚本未通过兼容性检查'),
   CONTENT_NOT_READY: N_('仍有博士未载入房间的插件内容'),
+  PLUGIN_RULE_CONFLICT: N_('两个插件把同一个规则开关设成了不同的选项'),
+  TEST_CONFIRM: N_('这是测试房间，不计入任何记录。确认加入？'),
+  TEST_DISABLED: N_('测试模式未开启'),
+  TEST_FORBIDDEN: N_('这不是测试房间'),
 };
 
 // ---- Emotes (交流, research 09 §4) -----------------------------------------------------------------------------
