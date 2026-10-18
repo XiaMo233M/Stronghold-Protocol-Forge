@@ -38,7 +38,6 @@ export class MatchIntents {
       // 缺省档下 `PlayerState.unequip` 回的就是 `destroy` 那句 `'equipped items are locked'` ⇒ 这一行在缺省档与
       // 「意图不存在」**行为等价**。
       case 'g.unequip': return ps.unequip(msg.itemUid);
-      case 'g.unequip': return ps.unequip(msg.itemUid);
       case 'g.reward': return ps.pickReward(msg.idx);
       case 'g.choice': return msg.choiceId !== undefined
         ? this.pickPersonalChoice(ps, msg.idx, msg.choiceId)

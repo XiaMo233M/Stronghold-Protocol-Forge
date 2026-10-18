@@ -11,17 +11,13 @@ import { FieldRunner, DeadBattle } from '../fields.js';
 import { DELAYS } from './common.js';
 import { battleOptsFromMatch } from './battleOpts.js';
 import { previewPlayer } from '../preview.js';
+import { morphBattleOpt } from '../../../shared/plugins/rules.js';
 
 export class MatchCombat {
   /** Construct a battle; a constructor failure yields a finished stand-in (clean result) and is logged. */
   newBattle(opts, { preview = false } = {}) {
-    // The assembly both Battle paths share (server/match/match/battleOpts.js): `this.ds` / `this.battleContent` /
-    // `this.log` under the caller's own options, then the match's kit tables (`kits`, `tokenKits` — docs/WORKSHOP.md
-    // §4 / §4.7, the room-trimmed `roomAssets.forRoom(room.modSet)` maps), the pack's battle installers
-    // (DESIGN §28.17) and the 限伤 override. An explicit opts.<key> always wins; a match without packs sets no key, so
-    // a plain install builds byte-for-byte the battle it built before each feature landed. `_specBattle` (复算) calls
-    // the same helper, so a sixth key cannot reach one path and stop at the other.
-    const full = { ...battleOptsFromMatch(this, opts), ...(preview ? { logger: {}, quiet: true } : {}) };
+      const full = { ...battleOptsFromMatch(this, opts), ...morphBattleOpt(this.rules),
+        ...(preview ? { logger: {}, quiet: true } : {}) };
     try {
       return new this.BattleClass(full);
     } catch (e) {
