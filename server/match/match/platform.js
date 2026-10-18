@@ -24,12 +24,16 @@ const GAME_TYPES = new Set(Object.keys(C2S).filter((t) => Object.hasOwn(C2S, t) 
 export const LOADOUT_PHASES = Object.freeze({ locked: Object.freeze([PHASE.INFO_CHECK]), prep: Object.freeze([PHASE.INFO_CHECK, PHASE.PREP]) });
 
 /**
- * 这一局的声明允许在哪些相位收 `room.loadout`。没声明这一格 / 声明成 `locked` ⇒ `LOADOUT_PHASES.locked`
- * （**引擎今天的行为**）；`prep` ⇒ 另加休整期。**只读**这一格的归一化声明，不改任何东西。
+ * 这一局的声明允许在哪些相位收 `room.loadout`。**两条来源**：上游 0.3.1 的房间规则
+ * `rules.prepLoadout === 'prep'` 优先；否则读我们自有的模块层 `behaviour.prepLoadout`
+ * （没声明 / 声明成 `locked` ⇒ `LOADOUT_PHASES.locked`，即引擎今天的行为；`prep` ⇒ 另加休整期）。
+ * **只读**，不改任何东西。
  * @param {Array<{ switch: string, option: string }>|null|undefined} decl 本局合成后的行为声明
+ * @param {Record<string, string>|null|undefined} [rules] 本局的内容插件规则
  * @returns {readonly string[]}
  */
-export function loadoutPhasesFor(decl) {
+export function loadoutPhasesFor(decl, rules = null) {
+  if (ruleOption(rules, 'prepLoadout') === 'prep') return LOADOUT_PHASES.prep;
   // 判据只有一份（`shared/behaviour.js`）：与 `variants` 的 `variantValue` 同一个分工 —— 读取点问的是「哪一档」。
   return behaviourIsDefault(decl, 'prepLoadout') ? LOADOUT_PHASES.locked : LOADOUT_PHASES.prep;
 }
@@ -136,7 +140,7 @@ export class MatchPlatform {
     const ps = this.players.get(playerId);
     if (!ps || ps.isBot || ps.left) return fail(ERR.NOT_IN_ROOM);
     if (this.disposed || this.ended) return fail(ERR.WRONG_PHASE, 'loadout locked for this match');
-    const phases = loadoutPhasesFor(this.behaviour);
+    const phases = loadoutPhasesFor(this.behaviour, this.rules);
     const inPrep = this.phase === PHASE.PREP && phases.includes(PHASE.PREP);
     if (!phases.includes(this.phase)) return fail(ERR.WRONG_PHASE, 'loadout locked for this match');
     // 休整期里「准备就绪」等于把这一轮的配发定下来（`g.ready` 之后不再收）—— 缺省档根本走不到这里。
