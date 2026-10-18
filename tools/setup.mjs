@@ -536,7 +536,7 @@ export function doctorLocalDetail(local, clientUsable) {
  * `hasScenes` means every expected scene group is present, including scene/tex — not merely a scene/act prefix.
  * A partial set (some scene groups present and some missing, not force/yes) warns when the fetch is blocked
  * and asks otherwise. That ask defaults to no, and a yes on it does not start extract.py — only `--scenes`
- * (force) or `--yes` does (§34.11). A version-only gap (every scene group present, record version stale) uses
+ * (force) or `--yes` does (§36.11). A version-only gap (every scene group present, record version stale) uses
  * the same ask and also defaults to no. A typed yes there is not partial: the caller runs extract.py --only scene
  * the same way as a first-time yes. A 否 is remembered.
  * With no usable client the partial detail is the copy sentence, not `--scenes` (the old branch returned
@@ -580,8 +580,8 @@ export function sceneInstallPlan(o = {}) {
 
 /**
  * Some battlefield groups are on disk and some expected scene groups are not.
- * A version-stale extract that still has every scene group is not this (§34.12).
- * §34.11 / #665: this prompt defaults to no, and a typed yes does not start extract.py.
+ * A version-stale extract that still has every scene group is not this (§36.12).
+ * §36.11 / #665: this prompt defaults to no, and a typed yes does not start extract.py.
  */
 export function sceneFilesPartial(local) {
   const missing = local?.missingSceneGroups;
@@ -607,7 +607,7 @@ export function sceneAskDefault(existing) {
 
 /**
  * May this run start extract.py --only scene against the client?
- * `--scenes` (force) and `--yes` may. `partial` means some scene groups are missing (§34.11 / #665):
+ * `--scenes` (force) and `--yes` may. `partial` means some scene groups are missing (§36.11 / #665):
  * that prompt never starts extract.py, including a typed yes. A version-only gap is not partial: the
  * caller passes partial false, so a typed yes runs, the same as a first-time yes. A 否 (answer false)
  * does not run; the caller remembers it as sceneDeclined.
@@ -852,7 +852,7 @@ async function main() {
   // 6. local client (optional)
   const local = checkLocal();
   const state = loadState();
-  // §34.28: resolve art consent before a full run; its ordinary default-yes prompt is only for vanilla art.
+  // §36.28: resolve art consent before a full run; its ordinary default-yes prompt is only for vanilla art.
   const missingArt = checkPluginArt();
   const artClient = opts.local === 'no' ? null : findClient(opts.game);
   const artKey = missingArt.join(',');

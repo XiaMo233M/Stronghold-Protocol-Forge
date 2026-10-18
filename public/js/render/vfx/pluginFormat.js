@@ -1,4 +1,4 @@
-// Presentation-only plugin contract (§34.18). Shared by the loader and the browser, outside the sim identity.
+// Presentation-only plugin contract (§36.18). Shared by the loader and the browser, outside the sim identity.
 export const PLUGIN_FX_LIMITS = Object.freeze({ files: 256, bytes: 32 * 1024 * 1024, jsonBytes: 1024 * 1024,
   units: 64, effects: 128, nodes: 64, systems: 16, particles: 1024, emitters: 32, textureSize: 2048, frames: 256 }); // [ASSUMED]
 export const FX_PHASES = Object.freeze(['skillStart', 'skillLoop', 'skillEnd', 'attack', 'hit', 'projectile']);

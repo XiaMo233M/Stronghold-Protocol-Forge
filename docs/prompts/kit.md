@@ -19,7 +19,7 @@ npm run editor                                      # 图形化等价物：编�
 > 真实代码范本：`server/sim/content/kits/shared/tier1.js` … `tier6.js`（官方 200 多个 kit 共用的辅助函数，
 > 单个干员的 kit 在同级的 `ops/` 下）。
 >
-> **本版基线**：本仓库 **0.19.1** / 上游游戏本体 **0.3.0**。上游这一版**没有增删任何钩子**，本文的词表就是引擎现在
+> **本版基线**：本仓库 **0.19.1** / 上游游戏本体 **0.3.1**。上游这一版**没有增删任何钩子**，本文的词表就是引擎现在
 > emit 的全部事件；但它把官方干员的数值口径改成了**按干员按玩家在运行时输入**（缺省满潜能、精英阶段2-60级）——
 > 你读到的 `unit.s.atk` 之类的数是**各自主人的设置算出来的**，所以数值**永远从 `bb` 读**这条硬规矩比以前更要紧。
 
@@ -453,7 +453,7 @@ battle.addBuff(unit, { key: 'ws:count', refresh: 'stack', maxStacks: 99, duratio
 ```
 
 - **封顶要自己判**。`maxStacks` 只管 buff 的层数，不管你的效果逻辑；超了要在加之前 `return`
-  （官方例子：`server/sim/content/kits/ops/chess_char_3_04-swire2.js:243`）。
+  （官方例子：`server/sim/content/kits/ops/chess_char_3_04-swire2.js:120`）。
 - **要不要跨部署保留**：写 `persist: true, allowDead: true` 就留着（`server/sim/buffs.js:173`）；不写就随单位退场消失。
   死亡时想清干净，在 `death` 里 `battle.removeBuff(unit, key)`（`server/sim/battle/deploy.js:153`）。
 - **层数状态挂在 buff 上，不要自己数**：`unit.findBuff(key).stacks` 就是唯一真相；`duration: Infinity` + `refresh: 'stack'`

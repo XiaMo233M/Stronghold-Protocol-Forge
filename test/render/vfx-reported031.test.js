@@ -1,4 +1,4 @@
-// Original synthetic fixtures for §34.31; no extracted official files or artwork.
+// Original synthetic fixtures for §36.31; no extracted official files or artwork.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { FxWiring } from '../../public/js/render/vfx/wiring.js';
@@ -127,7 +127,7 @@ test('Manifold SpineActor keeps A/B clips across skill toggles and model creatio
 
 test('the lance streak pivot projects forward for both facings and both vertical directions', async () => {
   // Original geometric fixture for the failure class: a behind-origin quad with a positive X pivot.
-  // v0.3.0 geom.js:295 subtracted it; §34.6 already fixes the shared math. The authored helper's
+  // v0.3.0 geom.js:295 subtracted it; §36.6 already fixes the shared math. The authored helper's
   // quarter-turn must be REPLACED, not added to ParticleEffect.FaceTo's direction.
   const node = (id, parent, pos = [0, 0, 0]) => ({ id, parent, children: [], active: true, pos, rot: [0, 0, 0, 1], scale: [1, 1, 1] });
   const root = node(0, null), helper = node(1, 0), particle = node(2, 1, [-1, 0, 0]);

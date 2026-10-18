@@ -1,4 +1,4 @@
-// server/testMode.js — whether this process may open test rooms (DESIGN §34.8 phase 2).
+// server/testMode.js — whether this process may open test rooms (DESIGN §36.8 phase 2).
 // The decision uses the address the server bound, never the HTTP peer. An explicit public
 // address stays off unless the owner set SP_TEST_MODE=force. A wildcard bind ('::', '0.0.0.0',
 // and the other unspecified spellings) is judged from the machine's interface addresses: when

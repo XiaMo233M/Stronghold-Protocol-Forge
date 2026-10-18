@@ -43,7 +43,7 @@ export const APP_VERSION = '0.19.1';
  * `scripts/make-update-package.mjs` tell "the next release" from "the very release I am building"
  * (a bundle that only names `0.14.0` cannot: 0.14.0-0.2.3 and 0.14.0-0.2.4 look identical to it).
  */
-export const UPSTREAM_VERSION = '0.3.0';
+export const UPSTREAM_VERSION = '0.3.1';
 /**
  * The version a **plugin** manifest's `app` range is judged against — the **upstream half**, NOT `APP_VERSION`.
  *

@@ -1,4 +1,4 @@
-// #684 / DESIGN §34.24: synthetic complete renderer lists only; no official mesh or texture bytes.
+// #684 / DESIGN §36.24: synthetic complete renderer lists only; no official mesh or texture bytes.
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';

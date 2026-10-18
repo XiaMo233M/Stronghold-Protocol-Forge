@@ -1,4 +1,4 @@
-// §34.31: role logic only, with original small fixtures; no extracted files or artwork.
+// §36.31: role logic only, with original small fixtures; no extracted files or artwork.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -70,7 +70,7 @@ for (const loaded of [false, true]) {
 }
 
 test('an unverified operator keeps its skill clip as the attack clip, even a lone clip without OnAttack', () => {
-  // No generic cast heuristic (the integrator's narrowing, §34.31): only verified mode mappings change a clip.
+  // No generic cast heuristic (the integrator's narrowing, §36.31): only verified mode mappings change a clip.
   const a = actor('char_102_texas', 1, { hits: { Attack_Loop: [0.3], Skill: [] }, index: null });
   a.setSkill(true);
   assert.equal(a._attackClip(), a.roles.skill);

@@ -1,4 +1,4 @@
-// Installed plugin JSON only; never load a plugin module. Extraction is local and optional (§34.18).
+// Installed plugin JSON only; never load a plugin module. Extraction is local and optional (§36.18).
 import fs from 'node:fs';
 import path from 'node:path';
 

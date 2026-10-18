@@ -1,5 +1,5 @@
-// test/ui/ammo-count.test.js — 设置「显示弹药与能量数量」 (0.3.1, §34.3): one switch for the old 「弹药数量」
-// (PR #552 by @IceCodeNew, 0.2.6, DESIGN §31.9) and 「秘术师能量」. Off by default. A saved `ammoCount: true` migrates
+// test/ui/ammo-count.test.js — 设置「显示弹药与能量数量」 (0.3.1, §36.3): one switch for the old 「弹药数量」
+// (PR #552 by @IceCodeNew, 0.2.6, DESIGN §33.9) and 「秘术师能量」. Off by default. A saved `ammoCount: true` migrates
 // on. The dialog, every language pack, the field view and the diagnostics line. What the renderer draws:
 // test/render/hud-readouts.test.js. Migration from `mysticEnergy` alone: test/ui/mystic-energy.test.js.
 // Run: node --test test/ui/ammo-count.test.js

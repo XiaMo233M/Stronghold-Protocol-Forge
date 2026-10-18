@@ -1,4 +1,4 @@
-// Host test console (DESIGN §34.8 phase 2). Shown only when m.public.test is true and the viewer is the
+// Host test console (DESIGN §36.8 phase 2). Shown only when m.public.test is true and the viewer is the
 // room host. Commands go out as g.test; the server applies them. The studio battle sandbox is a different
 // page and does not touch this match.
 //

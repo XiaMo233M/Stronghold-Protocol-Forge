@@ -1,4 +1,4 @@
-// Host test-dock geometry (DESIGN §34.8). Pure: no DOM. The numbers are the HUD's own boxes, also written as
+// Host test-dock geometry (DESIGN §36.8). Pure: no DOM. The numbers are the HUD's own boxes, also written as
 // unitless rem custom properties on `.gm, .testconsole` in css/screens/game.css (keep the two in step).
 //
 // Default home, in rem, then × the layout root (css/theme.css: clamp(40px, min(100vw/19.2, 100svh/10.8), 240px)):

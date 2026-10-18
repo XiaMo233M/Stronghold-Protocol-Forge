@@ -1,4 +1,4 @@
-// Rule switches (DESIGN §34.15): one table, composition, the content hash, and Forge behaviour.
+// Rule switches (DESIGN §36.15): one table, composition, the content hash, and Forge behaviour.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

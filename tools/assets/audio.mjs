@@ -172,7 +172,7 @@ export function skillModeLetter(path) {
   return m ? m[1].toLowerCase() : null;
 }
 
-/** [ASSUMED] Slot fallback for operators without a named activation sound; DESIGN §28.17. */
+/** [ASSUMED] Slot fallback for operators without a named activation sound; DESIGN §30.17. */
 export const SLOT_MODE_LETTER = Object.freeze({ 0: 'd', 1: 'h', 2: 's' });
 
 /**

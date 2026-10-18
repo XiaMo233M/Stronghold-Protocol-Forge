@@ -58,8 +58,8 @@ TEX_SUB = 'scene/tex'
 SCENE_VERSION = 1
 # Manifest `scene` record (kind Scene) of each scene/<stageId> group. scene.json `version` stays SCENE_VERSION so a
 # scene extracted before this still loads. setup / doctor compare this with expected.mjs and ask once when an
-# existing record is older (DESIGN §34.12). 3: emission maps are lossless too, so a version-2 extract (normal and
-# gloss only) is stale and that same prompt asks again. 4: remove exact redundant renderers (#684, §34.24).
+# existing record is older (DESIGN §36.12). 3: emission maps are lossless too, so a version-2 extract (normal and
+# gloss only) is stale and that same prompt asks again. 4: remove exact redundant renderers (#684, §36.24).
 SCENE_EXTRACT_VERSION = 4
 # display-space light value that a lightmap page's 1.0 stands for (decode_rgbm; scene.json lightRange, with
 # lightEncoding 'gamma'). The pages of the eleven scenes stay below 2.8.
@@ -80,7 +80,7 @@ ENV_RGBM = 5.0
 ENV_BLOCK_BYTES = {'ETC2_RGBA8': 16}
 HIDDEN_NAME = re.compile(r'^[A-Z_]+@\d+$')
 WATER_SHADERS = ('StylizedWater', 'StandardWater', 'DynamicWaterTile')
-# [ASSUMED] Maintainer decision, 2026-10-17 (#684, DESIGN §34.24): correct exact source-scene duplicates,
+# [ASSUMED] Maintainer decision, 2026-10-17 (#684, DESIGN §36.24): correct exact source-scene duplicates,
 # keeping the normal bake. This is an art correction, not an official visibility rule. In the official Android
 # 26-04-13-12-31-42_e9b560 m03 scene, renderers 2048 / 2193 are the same rock, one statically batched and one loose;
 # their world matrices are equal and baked/loose positions differ by at most 5.61e-7 tile. 1e-6 absolute (no relative

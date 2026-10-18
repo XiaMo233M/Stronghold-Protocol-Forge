@@ -4,7 +4,7 @@
 // attack). Now a skill with an idle clip of its own (anims skill.idle ≠ skill.loop) stands in that idle between attacks,
 // plays the loop only on attacks, and goes back to the idle after a spell of attacks (its End clip only when the skill
 // ends). Skills whose loop IS their idle (蕾缪安 S3) are unchanged. A skill without an idle (宴 S1) still begins into
-// its loop; an attack during it no longer closes through End (DESIGN §34.4). Real manifest entries,
+// its loop; an attack during it no longer closes through End (DESIGN §36.4). Real manifest entries,
 // headless fake PIXI (test/render/fakepixi.js).
 
 import { test, before, after } from 'node:test';
@@ -77,7 +77,7 @@ test('the other skills with an own idle clip follow the same rule (史尔特尔 
   assert.equal(n.current, 'Skill_3_Idle');
 });
 
-test('a loop that is the skill idle (蕾缪安 S3) is unchanged; 宴 S1 holds its loop through an attack (DESIGN §34.4)', () => {
+test('a loop that is the skill idle (蕾缪安 S3) is unchanged; 宴 S1 holds its loop through an attack (DESIGN §36.4)', () => {
   const l = actor('char_4193_lemuen', 2);
   l.setSkill(true);
   assert.deepEqual(l.log, [['set', 'Skill_3_Begin', false], ['queue', 'Skill_3_Idle', true]]);

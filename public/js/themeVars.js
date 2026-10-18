@@ -1,4 +1,4 @@
-// Theme variables of the player's switched-on cosmetic plugins (DESIGN §34.14).
+// Theme variables of the player's switched-on cosmetic plugins (DESIGN §36.14).
 // Applied on this page only, with element.style.setProperty — no stylesheet, so a page's CSP stays as it is.
 // A value is checked again here (shared/plugins/theme.js) before it is written. Switching a plugin off removes
 // the properties it was the last to set. Nothing here is sent to the server or to another player.

@@ -1,4 +1,4 @@
-// Match-level rule switches (DESIGN §34.15). Synthetic rooms only: no pack files.
+// Match-level rule switches (DESIGN §36.15). Synthetic rooms only: no pack files.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

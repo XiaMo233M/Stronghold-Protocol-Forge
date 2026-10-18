@@ -191,7 +191,7 @@ export class PlayerPieces {
   }
 
   /**
-   * A validated prep loadout change reconciles only the affected owner's board / hand / temp summons (§34.15).
+   * A validated prep loadout change reconciles only the affected owner's board / hand / temp summons (§36.15).
    * [ASSUMED] Keep legal types up to their new limit in board reading order, then hand and temp index order;
    * remove obsolete/excess copies before granting missing cards. Valid placements and UIDs survive.
    * The caller recomputes after every owner is reconciled, returning newly out-of-range summons to their stack.

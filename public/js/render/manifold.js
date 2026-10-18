@@ -1,4 +1,4 @@
-// 流形 presentation only (§34.31). Official token prefab: Default is the unprefixed model,
+// 流形 presentation only (§36.31). Official token prefab: Default is the unprefixed model,
 // Melee / Melee_S3 replace its animation keys with A_*, Range / Range_S2 with B_*.
 export const MANIFOLD = 'token_10030_mlyss_wtrman';
 export const isManifold = (info) => (info?.spine || info?.defId) === MANIFOLD;

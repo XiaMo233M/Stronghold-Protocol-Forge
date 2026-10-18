@@ -1,5 +1,5 @@
 // A local extract that is missing groups this version writes, or whose fx catalog disagrees,
-// must be reported (GitHub #665, DESIGN §34.3). The expected set is tools/local-extract/expected.mjs,
+// must be reported (GitHub #665, DESIGN §36.3). The expected set is tools/local-extract/expected.mjs,
 // kept equal to `extract.py --print-jobs` (no game client). These tests never call checkLocal(),
 // so they do not read the machine's data/local-assets.json or data/local-fx.json.
 
@@ -398,7 +398,7 @@ test('a typed yes on a version-only gap extracts; a missing-scene set still does
   const both = assessLocal(bothDoc, null);
   assert.ok(both.missingSceneGroups.includes('scene/tex'));
   assert.equal(both.sceneVersionStale, true);
-  assert.equal(sceneFilesPartial(both), true, 'missing scenes keep the §34.11 rule even when the version is old');
+  assert.equal(sceneFilesPartial(both), true, 'missing scenes keep the §36.11 rule even when the version is old');
   assert.equal(sceneVersionOnlyGap(both), false);
   assert.equal(sceneClientExtractAllowed({ partial: sceneFilesPartial(both), answer: true }), false);
 

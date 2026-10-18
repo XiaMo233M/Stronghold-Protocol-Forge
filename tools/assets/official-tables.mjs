@@ -1,4 +1,4 @@
-// Import/setup only. Maintainer decision 2026-10-17, DESIGN §34.33: fetch on demand, never in gameplay.
+// Import/setup only. Maintainer decision 2026-10-17, DESIGN §36.33: fetch on demand, never in gameplay.
 // Shapes/sizes: .cache/gamedata/excel, Kengxxiao/ArknightsGameData zh_CN (2026-10-17 inspection).
 import fs from 'node:fs';
 import path from 'node:path';

@@ -7,7 +7,7 @@
 //     settlement — 获得卫戍认证 +N and 每日防卫目标 (data/config.json rewards) filling the LV bar — then 下一步.
 //   同盟 (TeamPage): one card per seat (its ace operator's art, the 评语, the rounds passed, the player plate, the
 //     trophies), the team's outcome and rounds, the match time and date, 数据详情 (the full report: screens/result.js
-//     ResultView) and 返回同盟 / 返回大厅. A match with gameplay plugins carries the 「非官方」 mark (DESIGN §32.6) and
+//     ResultView) and 返回同盟 / 返回大厅. A match with gameplay plugins carries the 「非官方」 mark (DESIGN §34.6) and
 //     leaves the level alone; the 结算 tab plugin slot (result.tab) sits on this page.
 // The LV is counted from this device's match records (ui/stats.js): the 卫戍认证 of each settled official match (its
 // settlement row's `reward`) and the 每日防卫目标 bonus of each day that reached it, against the levels of
@@ -408,7 +408,7 @@ function Medal({ m, i }) {
   </span>`;
 }
 
-/** The 测试 mark of a match of the 「测试」 mode (0.3.1, DESIGN §34.8) with its command count, as on the detail view. */
+/** The 测试 mark of a match of the 「测试」 mode (0.3.1, DESIGN §36.8) with its command count, as on the detail view. */
 function SettleTestMark({ res }) {
   if (res?.test !== true) return null;
   return html`<span class="settle__test" data-testid="settle-test"><${TestMark} /> ${t('测试对局')}${Number.isInteger(res.testActions) ? html` · ${t('测试指令 {n} 次', { n: res.testActions })}` : null}</span>`;
@@ -563,7 +563,7 @@ function TeamPage({ r, res, gd, myId, at: when, content, backLabel, onBack, onDe
 
 /**
  * The settlement of one m.result: intro → 个人战报 → 同盟; 数据详情 opens the full report over it.
- * `content`: the room's content (room.state.content) — gameplay plugins mark the match unofficial (DESIGN §32.6).
+ * `content`: the room's content (room.state.content) — gameplay plugins mark the match unofficial (DESIGN §34.6).
  * @param {{ res: any, pub?: any, myId?: string|null, content?: any, backLabel: string, onBack: () => void }} props
  */
 export function SettleFlow({ res, pub = null, myId = null, content = null, backLabel, onBack }) {

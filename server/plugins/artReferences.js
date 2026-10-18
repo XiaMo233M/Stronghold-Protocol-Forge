@@ -1,4 +1,4 @@
-// Optional local art for installed official operators outside the shipped roster (§34.28).
+// Optional local art for installed official operators outside the shipped roster (§36.28).
 // Uses W5's bounded JSON-only reader, including disabled plugins; never loads plugin code.
 import fs from 'node:fs';
 import path from 'node:path';

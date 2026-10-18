@@ -1,4 +1,4 @@
-// Host-dock formatting for a test-command audit row (DESIGN §34.8). Plain ESM, no DOM.
+// Host-dock formatting for a test-command audit row (DESIGN §36.8). Plain ESM, no DOM.
 import { t } from '../../../shared/i18n.js';
 import { ERR_TEXT } from '../../../shared/constants.js';
 

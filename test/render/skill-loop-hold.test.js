@@ -1,4 +1,4 @@
-// test/render/skill-loop-hold.test.js — DESIGN §34.4. A skill with Begin / Loop / End and no idle of its own
+// test/render/skill-loop-hold.test.js — DESIGN §36.4. A skill with Begin / Loop / End and no idle of its own
 // plays Begin once, holds the loop for the whole skill, and plays End only when the skill ends. An attack during it
 // plays a same-prefix attack clip when the skeleton has one (焰影苇草 S3 Skill_3_Attack) and then the loop again.
 // A loop that itself has OnAttack is that strike (送葬人 S2): windUp runs, strikePose is that frame, and the clip
@@ -151,7 +151,7 @@ test('送葬人 S2: the loop\'s OnAttack is the strike — windUp, strikePose, s
 });
 
 test('夕 S2: OnAttack at the first frame does not wind up; the attack still scales the loop and sets strikePose', () => {
-  // [ASSUMED] DESIGN §34.4.1: hit time 0 has no wind-up (windUp requires hit > 0). The shot still uses that frame.
+  // [ASSUMED] DESIGN §36.4.1: hit time 0 has no wind-up (windUp requires hit > 0). The shot still uses that frame.
   const a = actor('char_2015_dusk', 1);
   const loop = 'Skill2_Loop';
   const iv = 2.071;

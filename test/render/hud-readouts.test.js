@@ -233,7 +233,7 @@ describe('UnitView: the ammo skill\'s segmented bar', () => {
   });
 });
 
-// 设置「弹药数量」 (PR #552 by @IceCodeNew, DESIGN §31.9): the official HUD has no number under the ammo bar, so the count is an
+// 设置「弹药数量」 (PR #552 by @IceCodeNew, DESIGN §33.9): the official HUD has no number under the ammo bar, so the count is an
 // option, off by default (the maintainer's decision of 2026-10-13); the settings side is test/ui/ammo-count.test.js
 describe('UnitView: the optional ammo count under the bar (设置「弹药数量」)', () => {
   const counting = (on = true) => view({}, { settings: { damageNumbers: true, quality: 'high', ammoEnergyCount: on } });

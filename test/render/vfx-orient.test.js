@@ -1,5 +1,5 @@
 // test/render/vfx-orient.test.js — official effects that stand, start at the weapon or come back (the maintainer's report
-// of 2026-10-16, DESIGN §34.6): the prefab root's authored transform is no part of the effect (the client sets the root
+// of 2026-10-16, DESIGN §36.6): the prefab root's authored transform is no part of the effect (the client sets the root
 // where it plays it: 安洁莉娜 S2's orbs flew 0.94 tile above their path); an effect spawned at FOOT_POINT / HIT_POINT /
 // HEAD_POINT takes the unit's Graphic tilt (荒芜拉普兰德 S3's seal and 能天使 S3's light bars stand facing the camera), the
 // ground and NONE spawns the identity, FLIP_TWO_SIDE still flips the tilted ones, a FollowMountPoint keeps or follows; a
@@ -95,7 +95,7 @@ test("the local client: 安洁莉娜 S2's flying orb is drawn at its projectile,
   nearV(worldX(fx, trail), [-1, 0, 0], 1e-4, 'turned along the flight');
 });
 
-// ---- the spawn location's rotation (DESIGN §33.11, the client's Effect._InitLocationFromEntity) ------------------------
+// ---- the spawn location's rotation (DESIGN §35.11, the client's Effect._InitLocationFromEntity) ------------------------
 
 const GRAPHIC = [-0.258819, 0, 0, 0.965926];
 /** The battle camera's view direction in the Unity frame (30° from straight down, towards +row). */
@@ -226,7 +226,7 @@ describe('the rotation an effect takes from its spawn location', () => {
   });
 });
 
-// ---- the renderer's pivot (DESIGN §33.6 m_Pivot) ---------------------------------------------------------------------
+// ---- the renderer's pivot (DESIGN §35.6 m_Pivot) ---------------------------------------------------------------------
 
 const CAM = cameraBasis(30, [0, -5, -8], 720, 0.7);
 const QUAD = builtinMesh('Quad');
@@ -279,7 +279,7 @@ describe("a renderer's pivot", () => {
   });
 });
 
-// ---- a local-space particle's size follows its node's scale (DESIGN §33.5 scaling modes) -------------------------------
+// ---- a local-space particle's size follows its node's scale (DESIGN §35.5 scaling modes) -------------------------------
 
 describe("the scaling mode's scale, as it is now", () => {
   /** A prefab whose clip grows node 1 from 0 to 1 over 0.5 s (荒芜拉普兰德 S3's seal discs: `s3_buffstart`). */

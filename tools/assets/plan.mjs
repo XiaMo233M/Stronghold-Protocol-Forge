@@ -780,3 +780,31 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
   };
   return { template, models, notes };
 }
+
+export function charModesFromIndex(index) {
+  const units = index?.units;
+  const map = new Map();
+  if (!units || typeof units !== 'object') return map;
+  const resolve = (id, seen = new Set()) => {
+    let u = units[id];
+    while (u?.aliasOf && typeof u.aliasOf === 'string' && !seen.has(u.aliasOf)) {
+      seen.add(u.aliasOf);
+      u = units[u.aliasOf];
+    }
+    return u || null;
+  };
+  for (const id of Object.keys(units)) {
+    if (!/^char_/.test(id)) continue;
+    const u = resolve(id);
+    if (!Array.isArray(u?.modes)) continue;
+    const skillMode = new Map();
+    for (const [sid, sk] of Object.entries(u.skills || {})) {
+      skillMode.set(sid, Number.isInteger(sk?.mode) ? sk.mode : null);
+    }
+    map.set(id, {
+      modes: u.modes.map((m) => ({ name: typeof m?.name === 'string' ? m.name : '' })),
+      skillMode,
+    });
+  }
+  return map;
+}

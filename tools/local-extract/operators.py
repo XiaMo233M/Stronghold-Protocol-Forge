@@ -1,4 +1,4 @@
-"""Local official art for plugin references outside our roster (DESIGN §34.28).
+"""Local official art for plugin references outside our roster (DESIGN §36.28).
 The official client's sprite packs and defaultskin prefab supply the pictures and Front/Back models.
 No downloads, plugin imports, skin packs or changes to gameplay data. Partial/missing installs keep fallbacks.
 """

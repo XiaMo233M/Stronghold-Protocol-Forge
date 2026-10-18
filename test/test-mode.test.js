@@ -1,4 +1,4 @@
-// Gate, protocol shape, lobby marking and stats exclusion for match test mode (DESIGN §34.8).
+// Gate, protocol shape, lobby marking and stats exclusion for match test mode (DESIGN §36.8).
 // No listeners: Lobby and MatchProxy are in-process.
 
 import { test } from 'node:test';

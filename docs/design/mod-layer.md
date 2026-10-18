@@ -327,7 +327,7 @@ default. The design answers with two changes that do not require the operator to
 (a) a room whose mod set declares `combat: true` runs server-authoritative **and** with `verify = 'all'` for that room
 (the path already exists: `server/match/match/reports.js:113` `_verifyResult` re-runs the field, `:120` compares
 `resultDigest`); (b) a room with no mod set is untouched. The cost is real and is stated rather than hidden: the server
-now runs those fields itself, sliced by the existing wall-clock budget (`server/match/Match.js:265`, default 8 ms per callback).
+now runs those fields itself, sliced by the existing wall-clock budget (`server/match/Match.js:443`, default 8 ms per callback).
 That is the price of the guarantee, and it is why `combat: false` packs matter: they keep the cheap path.
 
 **No file system, no network.** `KIT_IMPORT` is an error for anything outside the kit import whitelist

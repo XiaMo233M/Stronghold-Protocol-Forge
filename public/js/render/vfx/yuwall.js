@@ -1,4 +1,4 @@
-// Yu S3's controller prefabs (§34.31). Official YuS3EffectBehaviour.OnPlay creates a root on
+// Yu S3's controller prefabs (§36.31). Official YuS3EffectBehaviour.OnPlay creates a root on
 // every grid in the owner's row (UP/DOWN) or column (LEFT/RIGHT). WithEdgeBehaviour offsets
 // the visible pieces 0.4 in the deploy direction, chooses vertical art by camera side, and
 // adds caps on invalid neighbouring tiles. Source/root are controllers, not one-shot casts.

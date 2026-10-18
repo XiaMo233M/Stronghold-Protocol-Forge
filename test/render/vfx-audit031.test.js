@@ -1,5 +1,5 @@
 // test/render/vfx-audit031.test.js — 0.3.1's fixes of the 0.3.0 effects audit's low findings (history 0.3.1, DESIGN
-// §33.16 / §33.6) on a synthetic index and a fake effects layer: a token's skill record from its owners' variants (R18:
+// §35.16 / §35.6) on a synthetic index and a fake effects layer: a token's skill record from its owners' variants (R18:
 // 诅咒娃娃's aura), the 狼群's buff-bound cast rows (R19), an ability action's target effect on the unit a kit fx names
 // (R20: 归溟幽灵鲨 S1), a skill's own start effect replacing the deploy effect (R21: 缄默德克萨斯, 斯卡蒂 S2), a
 // stretched billboard's Y size along its velocity (风笛's lance), an effect authored behind its unit drawn under it (瑕光 S3).

@@ -1,5 +1,5 @@
 // server/match/match/testCommands.js — Match methods: g.test, the host's test-mode commands
-// (DESIGN §34.8 phase 2). Installed on Match.prototype by server/match/Match.js.
+// (DESIGN §36.8 phase 2). Installed on Match.prototype by server/match/Match.js.
 //
 // Every command calls a primitive the real match already uses (addFunds, acquireChess,
 // acquireItem, addLayers, pickBand, startRound, levelUp, addBounty, pickCard,
