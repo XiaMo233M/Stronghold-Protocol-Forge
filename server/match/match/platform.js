@@ -139,17 +139,24 @@ export class MatchPlatform {
   setLoadout(playerId, loadout, ops = undefined) {
     const ps = this.players.get(playerId);
     if (!ps || ps.isBot || ps.left) return fail(ERR.NOT_IN_ROOM);
-    if (this.disposed || this.ended) return fail(ERR.WRONG_PHASE, 'loadout locked for this match');
     const phases = loadoutPhasesFor(this.behaviour, this.rules);
-    const inPrep = this.phase === PHASE.PREP && phases.includes(PHASE.PREP);
-    if (!phases.includes(this.phase)) return fail(ERR.WRONG_PHASE, 'loadout locked for this match');
+    const prep = this.phase === PHASE.PREP && phases.includes(PHASE.PREP);
+    if (this.disposed || this.ended || !phases.includes(this.phase)) return fail(ERR.WRONG_PHASE, 'loadout locked for this match');
     // 休整期里「准备就绪」等于把这一轮的配发定下来（`g.ready` 之后不再收）—— 缺省档根本走不到这里。
-    if (inPrep && ps.ready) return fail(ERR.WRONG_PHASE, 'loadout locked for this match (this seat has readied up)');
-    const entries = inPrep ? mergeLoadoutEntries(ps.loadout, loadout) : loadout;
+    if (prep && ps.ready) return fail(ERR.WRONG_PHASE, 'loadout locked for this match (this seat has readied up)');
     let res = OK;
     this.guard(() => {
-      if (!ps.setLoadout(entries, ops)) { res = fail(ERR.BAD_TARGET, 'loadout does not match the game data'); return; }
-      this.markPrivate(ps);
+      // 休整期这一次是**合并**（`{ merge: true }`，由 PlayerState.setLoadout 只覆盖这次写了的干员），
+      // 并只对**这一件换装影响到的主人**重算召唤（上游 0.3.1 §36.15）：技能 / 模组 / 潜能 / 练度变了才重算。
+      const before = prep ? ps.allChess().map((owner) => ({ owner, loadout: ps.loadoutFor(ps.gd.chess(owner.id)) })) : [];
+      if (!ps.setLoadout(loadout, ops, prep ? { merge: true } : undefined)) { res = fail(ERR.BAD_TARGET, 'loadout does not match the game data'); return; }
+      if (prep) {
+        for (const { owner, loadout: previous } of before) {
+          const next = ps.loadoutFor(ps.gd.chess(owner.id));
+          if (['skillIndex', 'moduleId', 'potential', 'cultivate'].some((key) => previous[key] !== next[key])) ps._reconcileTokensFor(owner);
+        }
+        ps.recompute();
+      } else this.markPrivate(ps);
     });
     return res;
   }
@@ -166,20 +173,10 @@ export class MatchPlatform {
     const ps = this.players.get(playerId);
     if (!ps || ps.isBot || ps.left) return fail(ERR.NOT_IN_ROOM);
     if (this.disposed || this.ended || this.phase !== PHASE.INFO_CHECK) return fail(ERR.WRONG_PHASE, 'support locked for this match');
-    const prep = this.phase === PHASE.PREP && ruleOption(this.rules, 'prepLoadout') === 'prep';
-    if (this.disposed || this.ended || (this.phase !== PHASE.INFO_CHECK && !prep)) return fail(ERR.WRONG_PHASE, 'loadout locked for this match');
-    if (prep && ps.ready) return fail(ERR.WRONG_PHASE, 'loadout locked for this match');
     let res = OK;
     this.guard(() => {
-      const before = prep ? ps.allChess().map((owner) => ({ owner, loadout: ps.loadoutFor(ps.gd.chess(owner.id)) })) : [];
-      if (!ps.setLoadout(loadout, ops, prep ? { merge: true } : undefined)) { res = fail(ERR.BAD_TARGET, 'loadout does not match the game data'); return; }
-      if (prep) {
-        for (const { owner, loadout: previous } of before) {
-          const next = ps.loadoutFor(ps.gd.chess(owner.id));
-          if (['skillIndex', 'moduleId', 'potential', 'cultivate'].some((key) => previous[key] !== next[key])) ps._reconcileTokensFor(owner);
-        }
-        ps.recompute();
-      } else this.markPrivate(ps);
+      if (!ps.setSupport(entries)) { res = fail(ERR.BAD_TARGET, 'support does not match the server pool'); return; }
+      this.markPrivate(ps);
     });
     return res;
   }

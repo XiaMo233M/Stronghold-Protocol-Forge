@@ -18,6 +18,7 @@
 //     `PlayerBattleInput.contentInfo`, written by the `global:contentb_info` meta handler (support/meta.js).
 
 import { getData } from '../../../data.js';
+import { grantedBondsByMorph } from '../../../../shared/plugins/rules.js';
 import { COLS, DIRECT_BONUS_STACKING } from '../../constants.js';
 import { memberBonds } from '../../../../shared/morph.js';
 import { frontOf, offsetTile } from '../../dir.js';
@@ -271,7 +272,7 @@ export function tierOf(u) {
  */
 export const isGroundOp = (u) => isOp(u) && u.def?.position === 'MELEE';
 /** Base (normal) chess id of an operator (normal and elite share it). */
-export const baseChessId = (u) => String(u?.def?.baseId ?? u?.defId ?? '').replace(/_b$/, '_a');
+export const baseChessId = (u) => u?.def?.baseId ?? String(u?.defId ?? '').replace(/_b$/, '_a');
 
 /** Equipment ids carried by a unit (golden ids when merged). */
 export const itemsOf = (u) => (u && Array.isArray(u.items) ? u.items : EMPTY);
@@ -290,7 +291,9 @@ export function unitBonds(u) {
   if (!isOp(u)) return EMPTY;
   const cached = BONDS.get(u);
   const items = itemsOf(u);
-  const morphed = currentMorphPairing();
+  // 档位两条来源：先读玩家身上记下的那一份（Battle 构造时按 opts.morphPairing 压进 ps.morphPairing，
+  // 作用域外调用 unitBonds 也读得到），没有就退回当前作用域。
+  const morphed = u.player?.morphPairing === 'plus' ? 'plus' : currentMorphPairing();
   const key = `${items.join('|')}#${morphed}`;
   if (cached && cached.key === key) return cached.bonds;
   // 成员资格的**合并**在 `shared/morph.js` 的 `memberBonds`（一处判据、三处同源）：自己的 `bonds` ∪ 装备授予 ∪

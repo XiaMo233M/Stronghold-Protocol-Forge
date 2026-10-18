@@ -11,6 +11,7 @@ import { buildBattleSpec, createBattleFromSpec } from '../../sim/spec.js';
 import { specBattleOpts } from './battleOpts.js';
 import { testSlice } from '../testTrace.js';
 import { morphBattleOpt } from '../../../shared/plugins/rules.js';
+import { ruleOption } from '../../../shared/plugins/rules.js';
 
 export class MatchClientCombat {
   /** Stop every client-combat timer and the headless pacer (phase end, finish, dispose). */
@@ -38,7 +39,7 @@ export class MatchClientCombat {
     const seq = `${this.battlePrefix}.${this.round}.${++this._battleSeq}`;
     // protocol ids are ≤ 64 chars (shared/protocol.js isId): the field id is informational, the sequence is unique
     const battleId = seq.length + 1 + String(fieldId).length <= 64 ? `${seq}.${fieldId}` : seq;
-      const spec = buildBattleSpec({ ...opts, ...morphBattleOpt(this.rules), battleId, fieldId, kind, content: this.battleContent, boss, workshopKits: this.workshopKitModules, workshopBattle: this.workshopBattleModules, mods: this.mods, morphPairing: this.morphPairing, cs: this.cs, vs: this.vs });
+      const spec = buildBattleSpec({ ...opts, battleId, fieldId, kind, content: this.battleContent, boss, workshopKits: this.workshopKitModules, workshopBattle: this.workshopBattleModules, mods: this.mods, morphPairing: (ruleOption(this.rules, 'morphPairing') !== 'official' ? ruleOption(this.rules, 'morphPairing') : this.morphPairing), cs: this.cs, vs: this.vs });
     let total = 0;
     for (const x of spec.spawns) if (x && x.tag !== 'boss' && x.tag !== 'part' && x.countInTotal !== false) total += Math.max(1, Math.floor(Number(x.count) || 1));
     return {
