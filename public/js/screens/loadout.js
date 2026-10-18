@@ -1,4 +1,4 @@
-import { skinsStore, setSkins } from '../ui/skins.js';
+import { skinsStore, setSkins, SKINS_KEY } from '../ui/skins.js';
 import { SkinSection } from '../ui/skinPicker.js';
 // 干员调配 (Operator loadout, DESIGN §16): choose the equipped skill of every chess and the module of its elite before a
 // match (official rule: "开始游戏前无法调整干员的等级，但可调整其所携带的技能和模组"). A full-screen overlay opened
@@ -880,7 +880,7 @@ function LoadoutScreen({ st, leaving = false }) {
   const openExport = () => setIo(tab === 'ownership'
     ? { mode: 'export', kind: 'ownership', text: serializeOwnership(loadoutStore.get().notOwned) }
     : tab === 'diy' ? { mode: 'export', kind: 'diy', text: serializeDiy(loadoutStore.get().diy) }
-      : { mode: 'export', kind: 'loadout', text: serializeExport(loadoutStore.get().entries, { ops: loadoutStore.get().ops, skins: skinsStore.get().entries }) });
+      : { mode: 'export', kind: 'loadout', text: serializeExport(loadoutStore.get().entries, { ops: loadoutStore.get().ops, skins: skinsStore.get()[SKINS_KEY] }) });
   const openImport = () => setIo({ mode: 'import', kind: tab, text: '' });
   const ioCopy = async () => {
     const ok = await copyText(ioText);
@@ -931,7 +931,7 @@ function LoadoutScreen({ st, leaving = false }) {
     const { applied, dropped } = r;
     const nOps = r.ops ?? 0;
     const skinsApplied = res.skins ? Object.keys(res.skins).length : 0;
-    if (skinsApplied) setSkins(mergeSkins(skinsStore.get().entries, res.skins));
+    if (skinsApplied) setSkins(mergeSkins(skinsStore.get()[SKINS_KEY], res.skins));
     // nothing survived sanitising (unknown chess, or every choice already the default): keep the current loadout
     if (!applied && !nOps && !skinsApplied) { toast(t('导入失败：这份数据在当前版本没有可用的调配，未做任何改动'), 'error'); return; }
     setIo(null);
