@@ -1,0 +1,10 @@
+diff a/eslint.config.js b/eslint.config.js	(rejected hunks)
+@@ -75,7 +76,7 @@ export default [
+     rules,
+   },
+   {
+-    files: ['public/js/**/*.js'],
++    files: ['public/js/**/*.js', 'public/studio/**/*.js'],
+     languageOptions: {
+       ecmaVersion: 2024,
+       sourceType: 'module',

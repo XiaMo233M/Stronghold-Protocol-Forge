@@ -1,0 +1,27 @@
+diff a/test/e2e/client.mjs b/test/e2e/client.mjs	(rejected hunks)
+@@ -339,18 +422,13 @@ export class Client {
+     }, row, col);
+   }
+ 
+-  /** Press at `from`, move in steps to `to`, optionally screenshot mid-drag, release. */
+-  async drag(from, to, { steps = 14, midShot = null } = {}) {
+-    const m = this.page.mouse;
+-    await m.move(from.x, from.y);
+-    await m.down();
+-    for (let i = 1; i <= steps; i++) {
+-      await m.move(from.x + ((to.x - from.x) * i) / steps, from.y + ((to.y - from.y) * i) / steps);
+-      await sleep(14);
+-    }
+-    await sleep(160);
+-    if (midShot) await this.shot(midShot);
+-    await m.up();
++  /**
++   * Press at `from`, move in steps to `to`, optionally screenshot mid-drag, release. `to` read before the press is
++   * re-aimed after the pickup: the own prep board's deploy fold zooms the board (`aimedDrag`, GitHub #602); `retarget`
++   * gives a DOM target the fold moved instead.
++   */
++  async drag(from, to, { steps = 14, midShot = null, retarget = null } = {}) {
++    return aimedDrag(this.page, from, to, { steps, settle: 160, retarget, before: midShot ? () => this.shot(midShot) : null });
+   }
+ 
+   /**
