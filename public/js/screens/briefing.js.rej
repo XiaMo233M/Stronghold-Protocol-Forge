@@ -1,9 +1,0 @@
-diff a/public/js/screens/briefing.js b/public/js/screens/briefing.js	(rejected hunks)
-@@ -11,6 +11,7 @@ import { useGameData, Img, RichText } from '../ui/gameComponents.js';
- import { StepHeader, ExitModal } from '../ui/matchChrome.js';
- import { MatchInfo, matchInfoModel } from '../ui/matchInfo.js';
- import { LoadoutButton } from './loadout.js';
-+import { UnofficialMark } from '../ui/pluginTag.js';
- import { SetupReroll } from '../ui/setupReroll.js';
- import { actions } from '../ui/gameActions.js';
- import { factionTypes, sortedPlayers, phaseTotalSeconds } from '../ui/gameLogic.js';

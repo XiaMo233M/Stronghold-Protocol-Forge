@@ -1,9 +1,0 @@
-diff a/public/css/screens/room.css b/public/css/screens/room.css	(rejected hunks)
-@@ -313,3 +318,7 @@
- .ready-count__icons .icon.is-on { color: var(--mint-400); filter: drop-shadow(0 0 4px var(--mint-glow)); }
- 
- .room-bar .btn--xl { min-width: 3.2rem; letter-spacing: .2em; }
-+
-+.trusted-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 90; padding: 5px 16px; background: #9b202b; color: #fff; display: flex; justify-content: space-between; gap: 12px; }
-+.trusted-banner button { color: inherit; text-decoration: underline; }
-+.trusted-hash { overflow-wrap: anywhere; font-family: monospace; }
