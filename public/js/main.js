@@ -638,7 +638,11 @@ async function boot() {
       inMatch: () => selectRoute(store.get()) === 'game',
       onStale: ({ waiting }) => { if (waiting) store.patch('ui', { buildStale: true }); },
       // the same /healthz names how many plugins the server has: the title screen shows it before any hello
-      onHealth: (h) => { const n = pluginCount(h.content); if (n !== store.get().installedPlugins) store.set({ installedPlugins: n }); },
+      // 同一个 /healthz 也说了服务器装了几个插件、有没有公告：标题屏在任何 hello 之前就要显示它们
+      onHealth: (h) => {
+        const n = pluginCount(h.content), notices = h.content?.notices === true;
+        if (n !== store.get().installedPlugins || notices !== store.get().installedNotices) store.set({ installedPlugins: n, installedNotices: notices });
+      },
     });
   } catch (err) {
     console.warn('[app] build guard failed to start', err);

@@ -127,10 +127,10 @@ export function grantedBonds(items, getItem = () => null) {
  * @param {((id:string)=>boolean)|null} hasBond bonds.json lookup（拿不到权威名单时给 null）
  * @returns {string[]}
  */
-const grantedBondsOf = (own, trait, items, getItem, hasBond) => {
+const grantedBondsOf = (own, trait, items, getItem, hasBond, mode = null) => {
   const list = Array.isArray(items) ? items : [];
   const recs = list.map((it) => getItem(typeof it === 'string' ? it : it?.id)).filter(isObj);
-  return memberBonds(own, { trait, recs, morphed: morphOption(), hasBond });
+  return memberBonds(own, { trait, recs, morphed: mode ?? morphOption(), hasBond });
 };
 
 /**
@@ -140,9 +140,12 @@ const grantedBondsOf = (own, trait, items, getItem, hasBond) => {
  * @param {((id:string)=>boolean)|null} [hasBond] bonds.json lookup（挡掉数据里不存在的盟约 id）
  * @returns {string[]}
  */
-export function pieceBondIds(chess, items, getItem = () => null, hasBond = null) {
+export function pieceBondIds(chess, items, getItem = () => null, modeOrHasBond = 'official', hasBond = null) {
   const own = (Array.isArray(chess?.bonds) ? chess.bonds : []).filter((b) => typeof b === 'string');
-  return grantedBondsOf(own, chess?.trait, items, getItem, hasBond);
+  // 第 4 参两种形态都收：**字符串 = 这一局的形态档位**（上游 0.3.1 的签名），**函数 = bonds.json 名单**（我们更早的调用方）
+  const mode = typeof modeOrHasBond === 'string' ? modeOrHasBond : null;
+  const filter = typeof modeOrHasBond === 'function' ? modeOrHasBond : hasBond;
+  return grantedBondsOf(own, chess?.trait, items, getItem, filter, mode);
 }
 
 /**
