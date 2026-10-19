@@ -81,6 +81,9 @@ import { spectateEffects } from './observe.js';
 import { recordError, setBattleSource } from '../diag.js';
 import { roomDataBase } from '../mods/align.js';
 import { loadBrowserSim } from './simLoader.js';
+// 上游 0.3.1：工作室的控制台要自己拿到浏览器侧的战斗模拟器（public/studio/js/console/view.js），
+// 所以这两个名字从 runner 转出去 —— 它本来就是 simLoader 的门面。
+export { loadBrowserSim } from './simLoader.js';
 import { InPageSimHost, WorkerSimHost } from './simHost.js';
 import { trackCombat, combineCombat } from './metrics.js';
 import { simContent as appSimContent, contentSet as appContentSet, contentFor as appContentFor } from '../content.js';
