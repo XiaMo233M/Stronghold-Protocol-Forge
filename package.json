@@ -25,7 +25,7 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "test": "node --test",
+    "test": "node --test \"test/**/*.test.js\" \"test/e2e/coop.e2e.mjs\" \"plugins/_template/**/*.test.js\"",
     "golden": "node tools/golden.mjs",
     "golden:update": "node tools/golden.mjs --update",
     "vendor": "node tools/vendor.mjs",
