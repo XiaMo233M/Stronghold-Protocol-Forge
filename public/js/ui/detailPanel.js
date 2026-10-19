@@ -251,7 +251,7 @@ function ItemRow({ itemId, uid = null, carried = null, off = null, onUnequip = n
     <${UnitThumb} kind="item" id=${itemId} size="sm" />
     <div class="ditem__text"><b>${it?.name || itemId}</b>${slotless ? html`<span class="dtag dtag-slotless">${t('不占装备格')}</span>` : null}<${RichText} text=${it?.descRaw || it?.desc || ''} class="ditem__desc" />
       ${it?.canGiveBond ? html`<${MorphPairings} off=${off} carried=${carried || []} />` : it?.giveBondId ? html`<${MorphGrantLine} item=${it} off=${off} carried=${carried} />` : null}</div>
-    ${canDetach ? html`<${Button} variant="ghost" size="sm" class="ditem__detach" title=${t('卸下')} aria-label=${t('卸下')} onClick=${() => onUnequip(uid)}>${t('卸下')}<//>` : null}
+    ${canDetach ? html`<${Button} variant="ghost" size="sm" class="ditem__detach" data-testid="unequip" title=${t('卸下')} aria-label=${t('卸下')} onClick=${() => onUnequip(uid)}>${t('卸下')}<//>` : null}
   </div>`;
 }
 
@@ -518,7 +518,7 @@ export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bond
   const carriedUsed = slot.slotsUsed(carried);
   const equipCap = slot.slotCap(2);
   blocks.equip = piece?.kind === 'chess' ? html`<${Section} key="equip" title=${t('装备')} micro=${`EQUIP ${equipUsed}/${equipCap}`} class="dsec--equip">
-      ${items.length ? items.map((it) => html`<${ItemRow} key=${it.uid} itemId=${it.id} uid=${it.uid} carried=${items} off=${offBonds} mode=${morphMode} onUnequip=${editable ? onUnequip : null} />`) : html`<p class="t-dim dempty">${t('拖拽装备至该干员以配发（最多 2 件）')}</p>`}
+      ${items.length ? items.map((it) => html`<${ItemRow} key=${it.uid} itemId=${it.id} uid=${it.uid} carried=${items} off=${offBonds} mode=${morphMode} onUnequip=${onUnequip} />`) : html`<p class="t-dim dempty">${t('拖拽装备至该干员以配发（最多 2 件）')}</p>`}
     <//>`
     // no own piece (a teammate's unit, a bond popup's 变形同构体 row): what it carries, read-only
     : !piece && carried.length ? html`<${Section} key="equip" title=${t('装备')} micro=${`EQUIP ${carriedUsed}/${equipCap}`} class="dsec--equip">
