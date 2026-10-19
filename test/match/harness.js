@@ -96,7 +96,6 @@ export function makeMatch(o = {}) {
     //                             takes priority over the first four entries above, so pass them through the same way
     //                             the lobby hands them to a real Match)
     // `requireCs` is derived by Match (`opts.requireCs === true && !!this.cs`), so `cs` must travel with it.
-    hostId: o.hostId,
     ...(o.botRehearsalDelegate != null ? { botRehearsalDelegate: o.botRehearsalDelegate } : {}),
     ...(o.botRehearsalDelegateMs != null ? { botRehearsalDelegateMs: o.botRehearsalDelegateMs } : {}),
     ...(o.cs != null ? { cs: o.cs } : {}),

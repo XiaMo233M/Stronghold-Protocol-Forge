@@ -93,7 +93,6 @@ export function hudBands(kind, size, opts) {
     rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 100;
     oy = document.querySelector('.gm__field')?.getBoundingClientRect()?.top || 0;
     // 异形屏适配 (ui/screenFit.js): the board's host may not start at the viewport's top — the HUD rects are measured from it
-    const oy = document.querySelector('.gm__field')?.getBoundingClientRect()?.top || 0;
     // the HUD layer starts below the top safe-area inset and ends above the bottom one (css/devices.css .gm__hud)
     const hud = document.querySelector('.gm__hud')?.getBoundingClientRect();
     safeTop = Math.max(0, (hud?.top || 0) - oy);

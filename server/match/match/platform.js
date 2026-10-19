@@ -196,7 +196,6 @@ export class MatchPlatform {
     if (!ps || ps.isBot || ps.left) return fail(ERR.NOT_IN_ROOM);
     let res = OK;
     this.guard(() => {
-      if (!ps.setSupport(entries)) { res = fail(ERR.BAD_TARGET, 'support does not match the server pool'); return; }
       // an empty selection is a valid one: it clears every skin. A bad map leaves the stored choice alone.
       if (!ps.setSkins(skins)) { res = fail(ERR.BAD_MSG, 'bad skin selection'); return; }
       // [ASSUMED] Live cosmetic changes refresh every existing prep view, using the same dirty path as a move.

@@ -1003,10 +1003,6 @@ export class UnitView {
 
   _formSpec() {
     return this.form ? formsFor(FORMS, this.info.spine || this.info.defId)?.[this.form] || null : null;
-    const form = this.form || (isManifold(this.info) ? 'Default' : null);
-    const f = form ? FORMS[this.info.spine || this.info.defId]?.[form] || null : null;
-    if (f?.combat && this._manifoldCombat) return { ...f, roles: { ...f.roles, attack: loop(f.combat), skill: { ...f.roles.skill, loop: f.combat } } };
-    return f;
   }
 
   /** Existing 'copy' fx: select one official form, before its next attack (both board renderers). */

@@ -101,8 +101,6 @@ export class MatchViews {
       combatMode: this.clientCombat ? 'client' : 'server',
       // solo pause (g.pause, DESIGN §14): the battle, its field clock and every deadline are frozen while true
       paused: !!this.paused,
-      players: this.order.map((ps) => this.publicPlayerView(ps)),
-      fields: this.fields.map((f) => this.publicFieldView(f)),
       players: this.order.map((ps) => ({
         playerId: ps.playerId,
         seat: ps.seat,
