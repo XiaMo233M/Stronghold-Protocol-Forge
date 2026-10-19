@@ -112,7 +112,7 @@ hash too. Before this, `catalogFiles` dropped that row (its file read failed), s
 is complete" and "the download list looks complete".
 
 What deliberately does **not** participate: the mtime "version" that currently versions kit URLs
-(`server/workshop.js:434` — a version credential that is not a content hash, and the reason `docs/WORKSHOP.md:610`
+(`server/workshop.js:1345` — a version credential that is not a content hash, and the reason `docs/WORKSHOP.md:610`
 records content addressing as unimplemented), the pack directory's absolute path, and any engine code. The last one
 matters and is the answer for the third file the ruling names:
 
@@ -2155,7 +2155,7 @@ Four rules, each one a rule this layer already states elsewhere:
 
 **What landed here.** The declaration surface is the shape layer (`shared/workshop.js`), the loader carrying the
 declared set out (`server/modModules.js`), the surface ledger (`shared/modSurface.js`) and
-`test/modMatchChannels.test.mjs`. The **delivery** is narrowed to exactly what was declared — this section is now the
+`test/modMatchChannels.test.js`. The **delivery** is narrowed to exactly what was declared — this section is now the
 whole feature, not half of it:
 
 1. `server/index.js` derives the **delivery table** from the *pruned* server modules: `<pack id>` → the set of channels
@@ -2174,7 +2174,7 @@ whole feature, not half of it:
 Nothing here changes the relay, the rate bucket, the wire type or `welcome`; `MOD_API_VERSION` does not move (an added
 optional field, §28.39 / §28.43 precedent).
 
-Tests: `test/modMatchChannels.test.mjs` — the shared name regex, the five named refusals, the sorted
+Tests: `test/modMatchChannels.test.js` — the shared name regex, the five named refusals, the sorted
 "only-when-declared" manifest rule, and the loader carrying `channels` out while a module without it grows no key.
 `test/packMatchMsg.test.js` — the delivery cut itself, with a channel that only the panel declares: the frame still
 reaches the room and the match is never called (removing the table lookup turns that assertion red).
@@ -2491,7 +2491,7 @@ export function mount(ctx) {
 
 面板答不出「这台机器现在用哪套配音」：那个值住在**另一个** store（`public/js/ui/settings.js:50`
 `settingsStore`，与 `ctx.me` 读的 `public/js/store.js` 不是同一个），而注入面里没有 store 句柄。
-干员详情里的切换口（`public/js/ui/detailPanel.js:318` / `:519-522`）能改它，面板不能 —— 所以补一格**读数**加一格
+干员详情里的切换口（`public/js/ui/detailPanel.js:333` / `:544-548`）能改它，面板不能 —— 所以补一格**读数**加一格
 **受限写口**（业主裁决 2026-10-11：「能优化就优化，但要守边界」）。
 
 **1. 注入。** 注册点收 `deps.settings = { get, setVoiceLang }`（`public/js/main.js` 给的就是引擎自己那一对：
@@ -3544,9 +3544,9 @@ Forge 自己的包是对的，但对**同一份清单要给两个宿主读**的�
    `NOTE: N pack(s) target another host ("stardust") …`）、`packSummary` 新增 `foreign` 档且 **`reason` 有值**
    （列表打 `FOREIGN（本引擎不装载：…）`，不再是 `REFUSED（null）`）、编辑器列表行与详情页各一个 `foreign` 分支
    （用 `warn` 而不是「被拒」—— 清单合法、作者没写错任何东西；中英双语）。三面各有契约测试钉住
-   （`test/modTarget.test.mjs` 的 ⑤①–⑤④），**去掉任一面 ⇒ 该面当场红**。
+   （`test/modTarget.test.js` 的 ⑤①–⑤④），**去掉任一面 ⇒ 该面当场红**。
 
-**测试**：`test/modTarget.test.mjs` —— 缺省逐字节不变（一袋 17 个语料包的摘要**冻结**成字面量，移植前实测）、
+**测试**：`test/modTarget.test.js` —— 缺省逐字节不变（一袋 17 个语料包的摘要**冻结**成字面量，移植前实测）、
 `target: "forge"` 下 `type` / `capabilities` 仍被拒、`PACK_TARGET_UNKNOWN` / `STARDUST_TARGET_BAD_TYPE` /
 `STARDUST_TARGET_BAD_CAPABILITIES` 逐条、能力认领字段跟着能力走、装载器 `foreign` 具名且不进目录、两个版本号不动。
 
@@ -3596,7 +3596,7 @@ CLI、编辑器、服务器读的都是这一个文件，**谁都不留第二份
 纯 slug。但**只测入口是不够的**：登记册里那个**会被拼成路径**的 `previous.backup` 是外部数据，所以
 `normalizePackEntry` 是第二层闸 —— 它只接受**包内相对的留底目录**，含 `..` 的、绝对路径的**整格丢掉并具名报出**。
 于是「即使 id 合法、即使登记册被人手改过，删除也只落在工坊根之内、只落在那个包自己的目录上」是可以证明的。
-证明的方式是**逐字节比对目录树**（`test/modRegistry.test.mjs` 的三条「越界」测试）：
+证明的方式是**逐字节比对目录树**（`test/modRegistry.test.js` 的三条「越界」测试）：
 
 * 越界① 一棵「像仓库」的树（`data/`、`test/golden/`、`server/` 哨兵 + root 的同级哨兵）里跑一次 `uninstall`：
   包自己的目录走了、留底里有完整的包，而四棵树**逐个哈希不变**，root 的同级目录也**没有多出任何条目**；
@@ -3612,7 +3612,7 @@ CLI、编辑器、服务器读的都是这一个文件，**谁都不留第二份
 **不抬版本**：`MOD_API_VERSION` 仍是 `1`、`PROTOCOL_VERSION` 仍是 `2`。这一节**没有**动 `PACK_FIELDS`，
 登记册是**操作者的状态**、不是包能声明的字段。
 
-**测试**：`test/modRegistry.test.mjs`（登记册形状 / 越界与绝对路径的 `previous` 逐条丢掉 / 不在册即启用 /
+**测试**：`test/modRegistry.test.js`（登记册形状 / 越界与绝对路径的 `previous` 逐条丢掉 / 不在册即启用 /
 disabled 具名离开集合 / import 记录 install / `--force` 升级留底 + `rollback` 还原 / uninstall 留底 /
 未登记包的 ownership 拒绝 / 原子写不留临时文件 / 上面三条越界证明）。
 
@@ -3668,7 +3668,7 @@ disabled 具名离开集合 / import 记录 install / `--force` 升级留底 + `
 错误文案里**列出全部键**，所以每一个未知键的报错文案都变了 —— 那是文案，不是判据。**不需要 `golden:update`**：
 没写这两个键的包一个字节不动。
 
-**测试**：`test/modDependencies.test.mjs` —— 形状（去重 / 排序 / 六种点名拒）、归一化纪律（没写就不长键）、
+**测试**：`test/modDependencies.test.js` —— 形状（去重 / 排序 / 六种点名拒）、归一化纪律（没写就不长键）、
 五条规则逐条、级联迭代到不动点、循环具名成链、纯函数（输入不改、顺序无关、拒绝表按 id 排序）。
 ### 28.49 `trait.grantsBonds`：把「特质 → 盟约成员资格」写成数据
 
@@ -4055,7 +4055,7 @@ count +1 ⇒ **层数自然上去**。这是一条**纯数据**通道：不需�
 非空数组才写战绩，塔防专属读数缺失按 0 降级、不抛。客户端那半边今天能用的最大挂载面是 `client.panels` 的
 **10** 个槽（`root.overlays` 是全屏层，§28.8）。
 
-**判据与证据**：`test/modMatchKinds.test.mjs`（合法形状与排序稳定性、未声明时逐字节不变、`MATCHKINDS_*`
+**判据与证据**：`test/modMatchKinds.test.js`（合法形状与排序稳定性、未声明时逐字节不变、`MATCHKINDS_*`
 每条拒绝码逐条走、**以及「`combat` 这一格不该重复判」那条可执行的注记** —— 它断言的是
 `MODULES_NEED_COMBAT` 先命中，而不是我自己的码命中）、`test/packBehaviour.test.js` 的 `PACK_FIELDS` 闭集计数
 （**37 → 38**：那 38 是两条线各自加的一格 —— 我们的 `callBudget`（§28.52）与这一格 —— 相加而来，
@@ -4077,7 +4077,7 @@ count +1 ⇒ **层数自然上去**。这是一条**纯数据**通道：不需�
 两处都只有 `title | lobby | room | game`。结算与干员调配是**路由内部**的视图（`selectRoute` 只看
 `match.public.phase` 与 `room.inMatch`），不是路由。所以 `CLIENT_SCREEN_ROUTES` 与客户端的
 `MOD_SCREEN_ROUTES` 都是这四条 —— 加一条 `result` 或 `loadout` 就是造一个永远不会命中的死声明，
-正是本层到处在拒的那一类（两份名单必须同源，由 `test/modClientScreens.test.mjs` 钉住，与 §28.8 那两张表同一条纪律）。
+正是本层到处在拒的那一类（两份名单必须同源，由 `test/modClientScreens.test.js` 钉住，与 §28.8 那两张表同一条纪律）。
 
 **形状**：`client.screens[] = { id, route, module, order?, styles?, data?, messages? }`。字段与面板**共用判据**：
 `module` 必须是包内相对 `.js`、`styles` 同一条装载期判据（`server/workshop.js panelModuleIssues` 现在同时收
@@ -4114,7 +4114,7 @@ C1 控制码）。`#` 与零宽字符的合法性归**服务端**判 —— 前�
 依赖：换屏不换协议，换种类不开新消息类型。
 **不需要 `golden:update`**：这一格完全不进模拟。
 
-**判据与证据**：`test/modClientScreens.test.mjs`（路由闭枚举、两份名单同源、每条拒绝码逐条走、
+**判据与证据**：`test/modClientScreens.test.js`（路由闭枚举、两份名单同源、每条拒绝码逐条走、
 以及「没声明 `screens` 的包归一化结果里不长这个键」）、`test/modClientPanels.test.js`（面板那半未受影响）、
 `test/modSurface.test.js` 的锚点。
 
@@ -4164,7 +4164,7 @@ C1 控制码）。`#` 与零宽字符的合法性归**服务端**判 —— 前�
 `MOD_API_INCOMPATIBLE`）。
 
 **判据（闭枚举扩张必须带的那一条）**：**不声明 `lane` 的老包，`normalizePackManifest` 的输出与改动前
-`deepEqual`** —— `test/modPackLane.test.mjs` 把整条 `server.modules[]` 条目钉成完整期望值，
+`deepEqual`** —— `test/modPackLane.test.js` 把整条 `server.modules[]` 条目钉成完整期望值，
 另断言 `SERVER_MODULE_USES` 的**逐字**取值（末尾就是 `lane`）。
 
 **入口**：`server/modServer.js` 把 `packLaneTable()` 交给 `startServer({ wsLanes })`。它存在的全部理由就是
@@ -4188,9 +4188,9 @@ supervisor 拉起；**缺省路径的行为与字节零变化**，且任何异�
 也不引入平台特有依赖（`server/modLanes.js` 只 import 宿主自己的 `server/http/wsLanes.js`）。客户端要连这条
 通道，用的是同一个 `WebSocket` 构造与同一条已声明的路径，移动端与桌面端走的是同一段代码。
 
-**判据与证据**：`test/modPackLane.test.mjs`（闭枚举逐字取值、形状层每条拒绝码逐条走、以及「纯的那半」——
+**判据与证据**：`test/modPackLane.test.js`（闭枚举逐字取值、形状层每条拒绝码逐条走、以及「纯的那半」——
 认领 / 撞车 / 限额 / 处理器还没就位时 503 / 处理器就位后转发并多带 `ctx.lane`）、
-`test/mod-hot-reload.test.mjs`（防抖合并、精确 diff、坏包不炸、`restart` 只在 `mode=restart` 时调用）、
+`test/mod-hot-reload.test.js`（防抖合并、精确 diff、坏包不炸、`restart` 只在 `mode=restart` 时调用）、
 `test/wsLanes.test.js`（§28.44 那份语法判据没被改）、`test/modSurface.test.js` 的锚点。
 
 **⚠️ 来源分支的四处错标（合并时抓到，记在这里免得再踩）**：成员树的 `shared/workshop.js` 有**四处**把 lane 的
@@ -4246,7 +4246,7 @@ supervisor 拉起；**缺省路径的行为与字节零变化**，且任何异�
 房间生命周期上，而这一格正好在同一个生命周期点上插了一次裁决。
 
 **不新增 `C2S`、不动协议号、不进模拟** ⇒ 不需要 `golden:update`；房间对客户端的形状一字未动（留置期间对成员来说，
-它还是那个等着重连的房间）。判据在 `test/modRoomHold.test.mjs`（形状层 4 条 + 聚合语义 5 条，含「不声明 `hold` 的包
+它还是那个等着重连的房间）。判据在 `test/modRoomHold.test.js`（形状层 4 条 + 聚合语义 5 条，含「不声明 `hold` 的包
 归一化结果**逐字节不变**」）与 `test/modSurface.test.js` 的锚点。
 
 **节号说明（我方口径）**：本节内容吸收自下游 fork，在那里编号是 §28.55；按「我们是上游、编号以我方为准」
@@ -4254,5 +4254,5 @@ supervisor 拉起；**缺省路径的行为与字节零变化**，且任何异�
 
 ⚠ **来源分支那一格的两段引用没有带进来**：成员把这一格登记在 `.github/overlay.json` 的 `bodyPaths` 里，由
 `.github/game-overlap-check.mjs` 逐条核对。那两个文件是**他们那条分支**的受控例外机制，我方树里没有 ——
-带进来就是指向不存在文件的悬空引用。我方这一格的判据落在 `test/modRoomHold.test.mjs` 与
+带进来就是指向不存在文件的悬空引用。我方这一格的判据落在 `test/modRoomHold.test.js` 与
 `test/roomModSet.test.js` / `test/roomKeep.test.js` 那一组房间测试上。

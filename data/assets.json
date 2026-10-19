@@ -20,7 +20,11 @@
     "ui": 602,
     "sfxUnits": 484,
     "voiceChars": 192,
-    "voiceLangs": {},
+    "voiceLangs": {
+      "cn": 192,
+      "en": 182,
+      "kr": 182
+    },
     "voiceJpChars": 192
   },
   "chars": {
@@ -92466,7 +92470,8 @@
           "resultLose": "/assets/audio/voice/kr/char_1050_chen3/cn_032.mp3"
         }
       }
-    }
+    },
+    "voiceLang": "jp"
   },
   "fonts": {
     "css": "/fonts/fonts.css",
