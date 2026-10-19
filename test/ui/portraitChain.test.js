@@ -82,16 +82,16 @@ describe('解析链：没有 hook 时与今天**逐字相同**（开关开与关
     }
   });
 
-  test('头像：与 chessAvatarUrl 一致 —— **包括不看 isGolden 这一条**', () => {
+  test('头像：与 chessAvatarUrl 逐例一致 —— 上游 0.3.1 起头像**也**看 isGolden', () => {
     for (const c of CASES) {
       const got = avatarUrlOf(M, c.chess);
       const want = chessAvatarUrl(M, c.chess);
       assert.equal(got, want, `${c.name}: 头像链 = ${JSON.stringify(got)}，今天 = ${JSON.stringify(want)}`);
     }
-    // 单独钉住那条容易写错的语义：头像**不**因 isGolden 改用 E2 —— 精锐变体由调用方自己传
-    // （`screens/diy.js`：`elite ? unit.assets.avatarGolden : unit.assets.avatar`）。
-    assert.equal(avatarUrlOf(M, { charId: 'char_a', isGolden: true }), 'a/v1.png', '普通头像');
-    assert.equal(portraitEntry(M, { charId: 'char_a', isGolden: true }, { kind: 'portrait' }), 'a/p2.png', '而立绘会走 E2');
+    // 上游 0.3.1 改了这条语义（`chessAvatarUrl` 的 avatarE2 分支）：精锐棋子在该角色条目有 E2 头像时
+    // 用 `avatarE2`，头像与立绘在这一点上**一致**了。0.3.0 的旧约定（精锐变体由调用方自己传）已被上游取消。
+    assert.equal(avatarUrlOf(M, { charId: 'char_a', isGolden: true }), 'a/v2.png', '精锐头像走 avatarE2');
+    assert.equal(portraitEntry(M, { charId: 'char_a', isGolden: true }, { kind: 'portrait' }), 'a/p2.png', '立绘同样走 E2');
   });
 
   test('开关**关掉**时：逐项与今天相同（这是那条最硬的验收点）', () => {

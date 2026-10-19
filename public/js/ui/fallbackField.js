@@ -39,8 +39,8 @@ function unitArt(m, info) {
   if (!m || !id) return null;
   if (info.side === 'enemy' || String(id).startsWith('enemy_')) return enemyIconUrl(m, id);
   if (String(id).startsWith('token_')) return tokenAvatarUrl(m, id);
-  // Same golden rule as chessAvatarUrl: a character-key avatar uses avatarE2 on a golden piece.
-  return chessAvatarUrl(m, { isGolden: !!info.golden, assets: { avatar: id } });
+  // 走统一解析链（0.2.4 起每一个头像 / 立绘消费点都接它）：同一颗棋子在结算页、手牌、补位板上是同一张图。
+  return avatarUrlOf(m, { isGolden: !!info.golden, assets: { avatar: id } }, { lookup: currentAppearanceLookup() });
 }
 
 /** Look of the stage tile (row, col) on the fallback board (stage coordinates). */

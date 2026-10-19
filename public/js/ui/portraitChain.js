@@ -124,14 +124,13 @@ export function portraitEntry(m, chess, opts = {}) {
 
   // 步骤 5：回落这个干员自己的记录。
   //
-  // **立绘与头像在这一点上不同，而且必须保持不同**：
-  //   * 立绘：`isGolden` ⇒ 优先 `portraitE2`（`chessPortraitUrl` 今天的语义 —— 详情页画的是精锐那一张）；
-  //   * 头像：**不看 `isGolden`**。调用方自己传精锐变体（`screens/diy.js` 的
-  //     `elite ? unit.assets.avatarGolden : unit.assets.avatar`），所以这里再叠一次 `isGolden` 会把
-  //     「调用方明确要普通头像」的请求偷偷改成精锐头像 —— 那是**改行为**，不是统一链。
+  // **立绘与头像在这一点的规则由 `chessPortraitUrl` / `chessAvatarUrl` 定义，链照抄它们**：
+  // 上游 0.3.1 起两者**都**看 `isGolden` —— 精锐棋子在该角色条目有 E2 那一张时用 E2
+  // （`avatarE2` / `portraitE2`）。0.3.0 之前只有立绘这样，头像靠调用方自己传精锐变体；
+  // 那条旧约定已经被上游改掉，链跟着改，否则「链 == 今天」这条验收点就假了。
   const byChar = charId ? chars[charId] : null;
   if (!byChar) return null;
-  if (kind === 'portrait' && chess && chess.isGolden) {
+  if (chess && chess.isGolden) {
     const elite = strOf(byChar[f.elite]);
     if (elite) return elite;
   }
