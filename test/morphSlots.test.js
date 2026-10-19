@@ -126,7 +126,8 @@ test('`plus` 档：每名干员**最多一件**变形同构体（第二件当场
   assert.deepEqual(equip(m, give(m, ps, ISO), p), { ok: true });
   const res = equip(m, give(m, ps, ISO), p);
   assert.equal(res.error, 'BAD_TARGET');
-  assert.match(String(res.detail), /slotless item/);
+  // 文案与上游 0.3.1 对齐（test/match/rules.test.js 精确钉住这句）：判据是「第二件被拒、行没动」，不是措辞。
+  assert.match(String(res.detail), /morph already equipped/);
   assert.deepEqual(row(p), [ISO], '第二件没装上');
   // 而另一名干员照旧可以装一件（判据是**每名干员**，不是每局）
   const q = carrier(ps);

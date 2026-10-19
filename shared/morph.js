@@ -308,6 +308,10 @@ export function equipSlotsUsed(items, getItem = null, { morphed = null } = {}) {
 export const OFFICIAL_SLOT_POLICY = Object.freeze({
   active: false,
   isSlotless: () => false,
+  // 与 isSlotless 对偶：官方的 `occupies` 恒真（每一件都占格）。
+  occupies: () => true,
+  // 官方 `accepts` 恒真：官方档没有「这一件进不来」的判据（满了就顶掉最旧的那件）。
+  accepts: () => true,
   slotsUsed: (items) => (items ? [...items].length : 0),
   slotCap: (equipPerChess) => equipPerChess,
   maxItems: (equipPerChess) => equipPerChess,
@@ -330,6 +334,14 @@ export const OFFICIAL_SLOT_POLICY = Object.freeze({
 export const PLUS_SLOT_POLICY = Object.freeze({
   active: true,
   isSlotless: (rec) => isMorphCarrier(rec),
+  /** 与 isSlotless 对偶：变形同构体**不占格**。 */
+  occupies: (rec, getItem = null) => !isMorphCarrier(resolveRec(rec, getItem)),
+  /** 与 canHold 的那个分支同一条答案：变形同构体每名干员最多一件；其余恒真。 */
+  accepts: (items, rec, getItem = null) => {
+    const incoming = resolveRec(rec, getItem);
+    if (!isMorphCarrier(incoming)) return true;
+    return ![...(items || [])].some((it) => isMorphCarrier(resolveRec(it, getItem)));
+  },
   slotsUsed: (items, getItem = null) => {
     let n = 0;
     for (const it of items || []) if (!isMorphCarrier(resolveRec(it, getItem))) n += 1;
