@@ -221,13 +221,15 @@ export class PlayerItems {
     const loc = this.find(itemUid);
     if (!loc || loc.piece.kind !== 'item') return fail(ERR.BAD_TARGET);
     if (loc.area !== 'equipped') return fail(ERR.BAD_TARGET, 'not equipped on an operator');
-    // 归宿只有两种：手牌有空位就回手牌；否则进**无界**的临时整备区（0.3.0 起 5 个显示格只是窗口，
-    // 不是容量上限）—— 所以这一条**永远不会**因为放不下而失败。
+    // 归宿只有两种：手牌有空位就回手牌；否则进临时整备区。**两处都满就 HAND_FULL**（上游 0.3.1 的口径：
+    // 临时整备区有 5 个显示格的上限，不是无界队列）。
     const handAt = freeSlot(this.hand);
+    const tempAt = freeSlot(this.temp.slice(0, GEO.TEMP_SIZE));
+    if (handAt < 0 && tempAt < 0) return fail(ERR.HAND_FULL);
     const piece = loc.piece;
     this._detach(loc);
     if (handAt >= 0) this.hand[handAt] = piece;
-    else this._putTemp(this.temp.length, piece);
+    else this._putTemp(tempAt, piece);
     this.recompute();
     return OK;
   }
