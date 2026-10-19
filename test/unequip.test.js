@@ -254,13 +254,15 @@ test('客户端：发送点接上既有 `act()`、按钮**只在开关开时画*
   const roomMods = readFileSync(join(ROOT, 'public/js/roomMods.js'), 'utf8');
   assert.match(roomMods, /setUnequipAllowed\(behaviourValue\(decl, 'unequip'\) === 'allow'\)/, 'roomMods 从 welcome.mods 派生');
   const panel = readFileSync(join(ROOT, 'public/js/ui/detailPanel.js'), 'utf8');
-  assert.match(panel, /unequipAllowed\(\)/, 'ItemRow / ItemDetail 读它');
-  assert.match(panel, /const canDetach = typeof onUnequip === 'function' && Number\.isInteger\(uid\) && unequipAllowed\(\)/,
-    '「卸下」按钮的判据：有人传 onUnequip + 有 uid + 开关开');
+  assert.match(panel, /const canDetach = typeof onUnequip === 'function' && Number\.isInteger\(uid\);/, 'ItemRow 的按钮判据');
+    // 上游 0.3.1 的判据：组件只看「调用方给没给 onUnequip」+ uid，开关由调用方决定
+    // （game.js 传 `editable && unequipAllow ? ... : null`）—— 两处各问一遍会分叉。
+    assert.match(panel, /const canDetach = typeof onUnequip === 'function' && Number\.isInteger\(uid\)/,
+      '「卸下」按钮的判据：有人传 onUnequip + 有 uid（开关由调用方决定）');
   assert.match(panel, /拖拽至干员身上进行配发（每名干员最多 2 件，配发后无法取下）/, '官方档那句提示**还在**');
   assert.match(panel, /拖拽至干员身上进行配发（每名干员最多 2 件）/, 'allow 档另有一句（不带“无法取下”）');
   const game = readFileSync(join(ROOT, 'public/js/screens/game.js'), 'utf8');
-  assert.match(game, /onUnequip=\$\{\(itemUid\) => actions\.unequip\(itemUid\)\}/, '游戏屏把它接到 DetailPanel');
+  assert.match(game, /onUnequip=\$\{editable && unequipAllow \? \(itemUid\) => actions\.unequip\(itemUid\) : null\}/, '游戏屏按开关决定传不传 onUnequip');
 });
 
 test('客户端：四个 i18n 包都有新词条（`卸下` 与不带“无法取下”的那句）', () => {

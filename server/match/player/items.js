@@ -6,6 +6,7 @@
 
 import { ERR, GEO } from '../../../shared/constants.js';
 import { morphSlotPolicy, ruleOption } from '../../../shared/plugins/rules.js';
+import { behaviourValue } from '../../../shared/behaviour.js';
 import { morphPairingOf } from '../../../shared/morph.js';
 import { tileKey, inField, parseDir, freeSlot } from '../board.js';
 import { offsetTile } from '../../sim/dir.js';
@@ -19,8 +20,12 @@ import { OK, fail } from './common.js';
  * @param {Record<string, string>|null|undefined} rules 这一局的房间规则
  * @returns {boolean}
  */
-export function unequipAllowed(rules) {
-  return ruleOption(rules, 'unequip') === 'allow';
+export function unequipAllowed(rules, decl = null) {
+  // 两种调用形态都收：**传数组 = 模块层的归一化声明**（老调用方 `unequipAllowed(decl)`），
+  // **传对象 = 这一局的房间规则**（新口径，与 `ruleOption` 一致）。
+  if (Array.isArray(rules)) { decl = rules; rules = null; }
+  if (ruleOption(rules, 'unequip') === 'allow') return true;
+  return decl ? behaviourValue(decl, 'unequip') === 'allow' : false;
 }
 
 export class PlayerItems {
@@ -212,16 +217,17 @@ export class PlayerItems {
    */
   unequip(itemUid) {
     const g = this._gate(); if (g) return g;
-    if (ruleOption(this.m?.rules, 'unequip') !== 'allow') return fail(ERR.BAD_TARGET, 'equipped items are locked');
+    if (!unequipAllowed(this.m?.rules, this.m?.behaviour)) return fail(ERR.BAD_TARGET, 'equipped items are locked');
     const loc = this.find(itemUid);
-    if (!loc || loc.piece.kind !== 'item' || loc.area !== 'equipped') return fail(ERR.BAD_TARGET);
+    if (!loc || loc.piece.kind !== 'item') return fail(ERR.BAD_TARGET);
+    if (loc.area !== 'equipped') return fail(ERR.BAD_TARGET, 'not equipped on an operator');
+    // 归宿只有两种：手牌有空位就回手牌；否则进**无界**的临时整备区（0.3.0 起 5 个显示格只是窗口，
+    // 不是容量上限）—— 所以这一条**永远不会**因为放不下而失败。
     const handAt = freeSlot(this.hand);
-    const tempAt = freeSlot(this.temp.slice(0, GEO.TEMP_SIZE));
-    if (handAt < 0 && tempAt < 0) return fail(ERR.HAND_FULL);
     const piece = loc.piece;
     this._detach(loc);
     if (handAt >= 0) this.hand[handAt] = piece;
-    else this._putTemp(tempAt, piece);
+    else this._putTemp(this.temp.length, piece);
     this.recompute();
     return OK;
   }
