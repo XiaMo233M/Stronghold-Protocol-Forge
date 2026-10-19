@@ -16,12 +16,14 @@
 // next match, not an error for the player; anything else is logged. `sync` / `ownSync` / `diySync` ∈ 'idle' |
 // 'pending' | 'sending' | 'synced' | 'locked' | 'error' are mirrored into the store for the screen's status line.
 
-import { createStore, loadPref, savePref } from '../store.js';
+import { createStore, loadPref, savePref, store } from '../store.js';
 import { data } from '../data.js';
 import { LOADOUT_PREF, parseStored, parseStoredOps, toStored, sanitizeEntries, sanitizeOps } from './loadoutModel.js';
-import { cultivationCharIds, charPotentialChanges } from '../../../shared/protocol.js';
+import { cultivationCharIds, charPotentialChanges, loadoutOptions } from '../../../shared/protocol.js';
 import { contentSet as appContentSet } from '../content.js';
 import { PHASE } from '../../../shared/constants.js';
+import { ruleOption } from '../../../shared/plugins/rules.js';
+import { POTENTIAL_DEFAULT, CULTIVATE_DEFAULT } from '../../../shared/potential.js';
 import { OWNERSHIP_PREF, parseStoredOwnership, toStoredOwnership, cleanIds, sanitizeNotOwned } from './ownershipModel.js';
 import { DIY_PREF, parseStoredDiy, toStoredDiy, cleanPicks, sanitizeDiyPicks } from './diyModel.js';
 import { toast } from './toasts.js';
@@ -320,7 +322,7 @@ function installPrefSync({ net, timers, target, notify, key, stateKey, msgType, 
  *   timers?: { setTimeout: Function, clearTimeout: Function }, target?: ReturnType<typeof createStore> }} deps
  * @returns {{ flush: () => Promise<void>, dispose: () => void }}
  */
-export function installLoadoutSync({ net, getChessReady, getBackupsReady, lookupChess, operatorIds, timers, target = loadoutStore, notify } = {}) {
+export function installLoadoutSync({ net, getChessReady, getBackupsReady, lookupChess, operatorIds, timers, target = loadoutStore, notify, matchState = () => store.get() } = {}) {
   const ready = getChessReady || (() => data.load('chess'));
   const readyBackups = getBackupsReady || (() => data.load('backups'));
   const lookup = lookupChess || ((id) => data.lookup('chess', id));
@@ -332,17 +334,34 @@ export function installLoadoutSync({ net, getChessReady, getBackupsReady, lookup
     async prepare() {
       const current = target.get().entries;
       const ops = target.get().ops;
-      const hasOps = !!ops && Object.keys(ops).length > 0;
+      const state = matchState();
+      // 上游 0.3.1：休整期这一次提交是**按名字合并**的，所以「把某一格改回默认」必须把默认值**显式发出去**，
+      // 只把这一格从 entries 里删掉是不行的（服务端会保留它原来那一份）。
+      const prep = state?.match?.public?.phase === PHASE.PREP
+        && (ruleOption(state?.room?.content?.rules, 'prepLoadout') === 'prep' || prepLoadoutAllowed());
+      const live = prep ? state?.match?.private : null;
+      const hasOps = (!!ops && Object.keys(ops).length > 0) || !!Object.keys(live?.ops || {}).length;
       // an empty loadout needs no data (nothing to sanitise): a player who never opened 干员调配 does not download
       // chess.json in the lobby just for this
-      if ((!current || Object.keys(current).length === 0) && !hasOps) return { entries: {}, ops: {} };
+      if ((!current || Object.keys(current).length === 0) && !Object.keys(live?.loadout || {}).length && !hasOps) return { entries: {}, ops: {} };
       const loaded = await ready();
       if (loaded == null) return null;
       const entries = sanitizeEntries(target.get().entries, lookup);
+      if (live) for (const id of Object.keys(live.loadout || {})) {
+        if (Object.hasOwn(entries, id)) continue;
+        const base = lookup(id);
+        if (!base) continue;
+        const opt = loadoutOptions(base, base.goldenId ? lookup(base.goldenId) : null);
+        entries[id] = { skill: opt.defaultSkill, ...(typeof opt.defaultModule === 'string' ? { module: opt.defaultModule } : {}) };
+      }
       if (!hasOps) return { entries, ops: {} };
       if ((await readyBackups()) == null) return null;
       const ids = opIds();
-      return { entries, ops: sanitizeOps(target.get().ops, (id) => ids.has(id), (id) => charPotentialChanges({ chess: data.get('chess'), backups: data.get('backups') }, id)) };
+      const cleanOps = sanitizeOps(target.get().ops, (id) => ids.has(id), (id) => charPotentialChanges({ chess: data.get('chess'), backups: data.get('backups') }, id));
+      if (live) for (const id of Object.keys(live.ops || {})) {
+        if (ids.has(id) && !Object.hasOwn(cleanOps, id)) cleanOps[id] = { potential: POTENTIAL_DEFAULT, cultivate: CULTIVATE_DEFAULT };
+      }
+      return { entries, ops: cleanOps };
     },
   });
 }

@@ -1225,12 +1225,14 @@ function LoadoutScreen({ st, leaving = false }) {
  * (the strategy draft needs the player), or opened from the lobby / room and a match started (its briefing takes over).
  * @param {{ open: boolean, from: string|null }} st @param {string|null} phase @param {boolean} inMatch @param {boolean} wasInMatch
  */
-export function shouldAutoClose(st, phase, inMatch, wasInMatch) {
+export function shouldAutoClose(st, phase, inMatch, wasInMatch, ready = false) {
   if (!st || !st.open) return false;
   // 行为开关 `prepLoadout` 的客户端半之二（DESIGN §28.43.3）：简报那一支原来写死 `phase !== PHASE.INFO_CHECK` ——
   // 于是在声明了 `prep` 的房间，玩家刚进 `PREP`（正是服务端允许改调配的那一段）面板就被自动收走了。现在读同一份
   // 相位表（缺省 ⇒ `[INFO_CHECK]`，与写死逐相位等价）。
   if (st.from === 'briefing') return !!phase && !currentLoadoutLockPhases().includes(phase);
+  // 从休整期那一格打开的：离开 PREP、或者**这一局已经按了准备**就收起来（上游 0.3.1 的第五个参数）。
+  if (st.from === 'prep') return phase !== PHASE.PREP || !!ready;
   return inMatch && !wasInMatch;
 }
 
