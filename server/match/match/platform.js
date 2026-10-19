@@ -86,12 +86,11 @@ export class MatchPlatform {
     const ps = this.players.get(playerId) || this.spectators.get(playerId);
     if (!ps || ps.isBot || ps.left) return fail(ERR.NOT_IN_ROOM);
     // a spectator seat only watches (the platform routes nothing else of it) — resyncing its own view of the public
-    // state is part of watching, so it may ask for that too (DESIGN §8.2, incremental frame)
-    if (ps.spectator && (!msg || (msg.t !== 'g.watch' && msg.t !== 'g.publicFull'))) return fail(ERR.SPECTATOR);
-    // a spectator seat only watches (the platform routes nothing else of it)
-    if (ps.spectator && (!msg || msg.t !== 'g.watch')) {
-      // g.test shares the host's rate bucket (applyTestCommand audits SPECTATOR after the stamp).
-      if (this.test && msg?.t === 'g.test') {
+    // state is part of watching, so it may ask for that too (DESIGN §8.2, incremental frame).
+    // 测试房间的 g.test 必须**先**交给 applyTestCommand：那一条要写审计（testLog）并占限流格子，
+    // 在这里直接拒会让它既不进日志也不占格子（test/test-mode 的 host/spectator 那条正是钉这个）。
+    if (ps.spectator && (!msg || (msg.t !== 'g.watch' && msg.t !== 'g.publicFull'))) {
+      if (ps.spectator && this.test && msg?.t === 'g.test') {
         let res;
         try { res = this.applyTestCommand(ps, msg); }
         catch (e) { this.reportError('handle g.test', e); res = fail(ERR.INTERNAL); }

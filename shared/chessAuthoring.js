@@ -488,6 +488,11 @@ export function deriveChessRecord(spec, overrideIds) {
       ...(typeof m.moduleDesc === 'string' && m.moduleDesc ? {
         moduleDesc: m.moduleDesc,
         moduleDescRaw: typeof m.moduleDescRaw === 'string' && m.moduleDescRaw ? m.moduleDescRaw : m.moduleDesc,
+        // GitHub #700：客户端预览读本地化的模组那行，这两个布尔是**中文原文**的读数
+        // （官方的 data 里就是这么存的，派生时丢掉会让往返比较红）：
+        //   rangeExpand —— 「攻击范围扩大」（莱恩哈特 SPC-X）；modeOnly —— 「集成战略」（空弦 ISW-A）。
+        ...(/攻击范围扩大/.test(m.moduleDesc) ? { rangeExpand: true } : {}),
+        ...(/集成战略/.test(m.moduleDesc) ? { modeOnly: true } : {}),
       } : {}),
     } : null;
     const talentChanges = (m && Array.isArray(m.talentChanges) ? m.talentChanges : []).map((ch, ci) => ({
