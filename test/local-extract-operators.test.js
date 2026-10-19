@@ -6,9 +6,20 @@ import { spawnSync } from 'node:child_process';
 import { fxFixture } from './helpers/fxFixtures.js';
 import { skel } from './helpers/pluginFixtures.js';
 
+/** Windows 上没有 `python3`（只有 `python` / `py`）：按顺序找到第一个能跑的。 */
+function pythonBin() {
+  if (pythonBin.cached !== undefined) return pythonBin.cached;
+  for (const c of ['python3', 'python', 'py']) {
+    const r = spawnSync(c, ['-c', 'import sys; sys.exit(0)'], { encoding: 'utf8' });
+    if (r.status === 0) { pythonBin.cached = c; return c; }
+  }
+  pythonBin.cached = 'python3';
+  return pythonBin.cached;
+}
+
 function py(code) {
   const source = `import sys,json\nsys.path.insert(0, ${JSON.stringify(path.resolve('tools/local-extract'))})\nimport operators as op, extract as ex\n${code}`;
-  const r = spawnSync('python3', ['-B', '-c', source], { encoding: 'utf8' });
+  const r = spawnSync(pythonBin(), ['-B', '-c', source], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout);
 }
@@ -34,6 +45,7 @@ test('full extraction needs --plugin-art; explicit --only plugin-art also author
   const f = fxFixture(t);
   const got = py(`from pathlib import Path
 import contextlib,io
+
 root=Path(${JSON.stringify(f.root)})
 ex.export_bundle=lambda *a: 0
 ex.export_enemy_spines=lambda *a: 0

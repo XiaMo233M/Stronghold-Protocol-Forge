@@ -7,6 +7,17 @@ import { fxFixture } from './helpers/fxFixtures.js';
 import { installedFxReferences, officialFxReferences } from '../server/plugins/fxReferences.js';
 import { checkPluginFx, pluginFxExtractionAllowed } from '../tools/setup.mjs';
 
+/** Windows 上没有 `python3`（只有 `python` / `py`）：按顺序找到第一个能跑的。 */
+function pythonBin() {
+  if (pythonBin.cached !== undefined) return pythonBin.cached;
+  for (const c of ['python3', 'python', 'py']) {
+    const r = spawnSync(c, ['-c', 'import sys; sys.exit(0)'], { encoding: 'utf8' });
+    if (r.status === 0) { pythonBin.cached = c; return c; }
+  }
+  pythonBin.cached = 'python3';
+  return pythonBin.cached;
+}
+
 test('setup notices installed official references absent from data/index, without reading scripts or links', t => {
   const f = fxFixture(t);
   f.put('plugins/demo/plugin.json', { operators: ['ops.json'], assets: 'assets.json', entry: { sim: 'evil.js' } });
@@ -24,7 +35,7 @@ test('setup notices installed official references absent from data/index, withou
   assert.equal(r.status, 0); assert.deepEqual(JSON.parse(r.stdout), ids, 'extractor uses exactly the setup reference reader');
   f.put('.cache/gamedata/excel/character_table.json', { char_4217_makoto: { skills: [{ skillId: 'skcom_synthetic' }] } });
   const source = `import sys, json\nsys.path.insert(0, ${JSON.stringify(path.resolve('tools/local-extract'))})\nimport fx\nprint(json.dumps(fx.game_data(${JSON.stringify(f.root)})))`;
-  const py = spawnSync('python3', ['-c', source], { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
+  const py = spawnSync(pythonBin(), ['-c', source], { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
   assert.equal(py.status, 0, py.stderr);
   const discovered = JSON.parse(py.stdout);
   assert.deepEqual(discovered.chars, ids); assert.deepEqual(discovered.skills.char_4217_makoto, ['skcom_synthetic']);
