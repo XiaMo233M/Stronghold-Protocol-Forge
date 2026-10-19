@@ -63,7 +63,7 @@ export const STEPS = [
   { id: 'setup', ci: { job: 'test', name: 'Setup check (no downloads)' }, describe: 'node tools/setup.mjs --check --no-local' },
   // (the globs quoted: no shell expands them — Node's test runner does, the same on every OS)
   { id: 'test', ci: { job: 'test', name: 'Unit & integration tests' }, npm: 'test',
-    describe: `node --test ${TEST_FILES.map((g) => `"${g}"`).join(' ')}` },
+    describe: `node --test --test-concurrency=1 ${TEST_FILES.map((g) => `"${g}"`).join(' ')}` },
   { id: 'smoke', ci: { job: 'test', name: 'Server smoke test (boot, /healthz, index.html, doctor)' },
     describe: `server on a free port: GET ${SMOKE_PATHS.join(', ')}; node tools/doctor.mjs` },
   { id: 'lint', ci: { job: 'tooling', name: 'Lint (warnings allowed)' }, npm: 'lint', describe: 'eslint .' },
@@ -334,7 +334,9 @@ async function smoke(env) {
 function runStep(step, env) {
   switch (step.id) {
     case 'setup': return node(['tools/setup.mjs', '--check', '--no-local'], env);
-    case 'test': return node(['--test', ...TEST_FILES], env);
+    // 一次只跑一个文件：默认并发会让「起服务器 / 等真实浏览器」的用例互相抢端口与时钟，
+    // 撞上 node:test 的 5 秒默认超时（test/client-identity-session 就是典型）。串行慢但可信。
+    case 'test': return node(['--test', '--test-concurrency=1', ...TEST_FILES], env);
     case 'smoke': return smoke(env);
     case 'lint': return node([binPath('eslint', 'eslint'), '.'], env);
     case 'imports': return node(['tools/check-imports.mjs'], env);

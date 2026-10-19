@@ -24,6 +24,7 @@
 import { useLayoutEffect, useEffect, useRef, useState } from '../../vendor/hooks.module.js';
 import { catalog, personalApplied, isPersonalCosmetic, cosmeticPlugins, installedCount, loadCatalog, personal, personalSet, pluginName, setPersonalPlugin } from '../content.js';
 import { resolveThemeVars, themeVarsOf } from '../../../shared/plugins/theme.js';
+import { hasAnySkinChoices } from './skins.js';
 import { describeError, toast } from './toasts.js';
 import { pluginMicro } from './pluginTag.js';
 import { fxAvailable } from '../render/vfx/available.js';

@@ -77,7 +77,7 @@ test('the commands match ci.yml: the run lines, the npm scripts ci.yml calls, th
 
 test('npm test runs every test file and nothing else under test/: no helper, no child-process entry, no Forge fixture', () => {
   // the test step's command line is package.json's (checked above) and runs node --test over TEST_FILES
-  assert.equal(STEPS.find((s) => s.id === 'test').describe, `node --test ${TEST_FILES.map((g) => `"${g}"`).join(' ')}`);
+  assert.equal(STEPS.find((s) => s.id === 'test').describe, `node --test --test-concurrency=1 ${TEST_FILES.map((g) => `"${g}"`).join(' ')}`);
   // what Node's test runner expands them to (the same glob, node_modules left out the way --test leaves it out)
   const picked = fs.globSync(TEST_FILES, { cwd: ROOT, exclude: (p) => path.basename(String(p?.name ?? p)) === 'node_modules' })
     .map((f) => f.split(path.sep).join('/')).sort();
