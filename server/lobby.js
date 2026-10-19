@@ -2311,6 +2311,8 @@ export class Lobby {  /**
       ...(assets.length ? { modAssets: assets } : {}),
       ...(theme && theme.vars && Object.keys(theme.vars).length ? { modTheme: theme } : {}),
       ...(transport ? { transport } : {}),
+      // 测试房间模式开着才发这一格（上游 0.3.1 §36.8）：客户端据此显示「测试房间」标记
+      ...(this.testEnabled === true ? { testMode: true } : {}),
     };
   }
 
