@@ -239,6 +239,40 @@ node scripts/make-update-package.mjs --bundle <out>\bundle --from <上一版完�
 
 ## 5. 版本记录
 
+### 0.19.1-0.3.1（2026-10-19）
+
+> 本节由 0.3.1 移植发版时的构建记录整理而来。
+
+| 项 | 值 |
+|---|---|
+| `APP_VERSION` / `UPSTREAM_VERSION` | `0.19.1` / `0.3.1` |
+| `PROTOCOL_VERSION` / `MOD_API_VERSION` | `2` / `1`（均未动） |
+| `PLUGIN_API` | `1` → `{ current: 2, min: 1 }`（旧包仍按 `min` 装得上） |
+| commit | `0df1ed21718e2341d48a880ed485d6687738d36d` |
+| tag | `v0.19.1-0.3.1`（annotated，tag 对象 `21b38c8b300cfe840e955e96bb6c2c4acec4bdf7`） |
+| release id | `417373537` · 非 draft · 非 prerelease |
+| release 正文长度 | 3,252 字符（与本地正文源逐字一致） |
+
+三个资产（全部已上传，远端 `size` 与本地逐字一致）：
+
+| 资产 | 大小 (B) | sha256 |
+|---|---|---|
+| `…-src.zip` | 25,765,521 | `a482e4aca999f367853dea8760dbc9ed1c4ab099fb687261139e3fcfc6e5e43c` |
+| `…-voices-cn-en-kr.zip` | 212,041,380 | `0e92aafcc4bd85556008d6de9e0c0a4db022e0ae741d8a36e238729eb09882ac` |
+| `…-win-x64.zip` | 897,655,350 | `785338e98956befb10239664e4c949ddfbe7254db075db5e831e7739fd1d67ea` |
+
+两处差异（都不是缺陷）：
+
+1. **本版没有 `…-update.zip`**（只有三个资产）。增量包要 `--from` 上一版完整包（875 MB），
+   而这个源的大文件走代理连续两次在 23 MB 处被中断 ⇒ 跳过。三件套已足够安装与升级
+   （老用户直接用完整包覆盖，`app/UPDATE.json` 那条链路没被破坏）。下次发版若下载稳定，补一条命令即可。
+2. **`voices` 的字节数与 0.19.0 完全相同（212,041,380）但 sha256 不同** —— 四语配音内容没变，
+   差异只是 zip 里记录的时间戳。`src.zip` 从 24.7 MB 增到 25.8 MB，是 0.3.1 移植新增的文件。
+
+`tools/package.mjs`（上游那套命名）另外生成了 `Stronghold-Protocol-v0.19.1.zip`（810.9 MB）与
+`…-lite.zip`（27.7 MB）。它们**不是**本项目的发行四件套（命名与顶层目录都不同），没有上传；
+要发「压缩包形态」时才用它们。
+
 ### 0.19.1-0.3.0（2026-10-17 首次记录）
 
 > 本节由 0.19.1 发版时的构建记录整理而来。
