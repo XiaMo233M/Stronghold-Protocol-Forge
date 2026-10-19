@@ -23,9 +23,9 @@
 
 import { RAW, joinUrl, safeName, urlBase, urlDir } from './sources.mjs';
 import { kindOf } from './formats.mjs';
-import { pickUnitSfx, pickModeAttacks, pickModeHits, skillModeLetter, SLOT_MODE_LETTER, UI_SFX, BATTLE_SFX, resolveSpec, indexVoice, nativeVoiceDirs, VOICE_DIRS, VOICE_BATTLE_SLOTS, VOICE_CUSTOM_DIR } from './audio.mjs';
+import { pickUnitSfx, assignSkillModeSfx, UI_SFX, BATTLE_SFX, resolveSpec, indexVoice, nativeVoiceDirs, VOICE_DIRS, VOICE_CUSTOM_DIR, VOICE_BATTLE_SLOTS } from './audio.mjs';
 import { literal } from './manifest.mjs';
-import { EMOTE_CATALOG, DEFAULT_VOICE_LANG } from '../../shared/constants.js';
+import { EMOTE_CATALOG } from '../../shared/constants.js';
 
 /**
  * The voice slots are read from the zh_CN charword table, whose voiceIds are always `CN_*`: the other dubs
@@ -142,14 +142,14 @@ const ARTS_GROUPS = Object.freeze({
  * @param {string|string[]} urls
  * @param {number} [bytes] expected size
  */
-export function alt(rel, urls, bytes) {
+function alt(rel, urls, bytes) {
   const a = { rel, urls: [].concat(urls).filter((u) => typeof u === 'string' && u), kind: kindOf(rel) };
   if (Number.isInteger(bytes) && bytes > 0) a.bytes = bytes;
   return a;
 }
 
-/** A leaf with the given alternatives (null alternatives are dropped). Exported for the opt-in voice pipeline. */
-export function leaf(...alts) {
+/** A leaf with the given alternatives (null alternatives are dropped). */
+function leaf(...alts) {
   const list = alts.flat().filter((a) => a && a.urls && a.urls.length);
   return list.length ? { alts: list } : null;
 }
@@ -184,16 +184,23 @@ function soundLeaf(paths, sub = 'sfx', max = 4) {
  * A unit's SFX roles (pickUnitSfx) → { roles: { attack?, hit?, die?, born? } sound leaves, mix: { [role]: { p?, vol? } }
  * | null } — the official play chance / volume of each role's bank (audio.mjs bankMix; community report #30: 猎狗's
  * attack bank is 80 % silence). The caller stores `mix` last in the unit's entry (sfx.units[id].mix).
+ * Attack/hit roles also retain canonical pool references (#680); the parameters live once in sfx.pools.
  */
-function unitSounds(audio, sfx) {
+function unitSounds(audio, sfx, poolRef) {
   const roles = {};
   let mix = null;
+  const pools = {};
   for (const r of ['attack', 'hit', 'die', 'born']) {
     if (!sfx[r]) continue;
     roles[r] = soundLeaf(sfx[r]);
     const m = typeof audio.mixOf === 'function' ? audio.mixOf(sfx[r]) : null;
     if (m) (mix || (mix = {}))[r] = m;
+    if (r === 'attack' || r === 'hit') {
+      const id = poolRef(sfx[r]);
+      if (id) pools[r] = id;
+    }
   }
+  if (Object.keys(pools).length) roles.pools = pools;
   return { roles, mix };
 }
 
@@ -250,6 +257,41 @@ export function patternOperator(id, x = {}) {
  * @param {any} ops03 docs/research/03-operators.json
  * @returns {Map<string, number[]>}
  */
+/**
+ * Compact mode list for {@link assignSkillModeSfx}, from a local fx index (`public/assets/local/fx/index.json`,
+ * not committed). `skills[id].mode` is the mode index the skill switches to. An `aliasOf` unit uses the target's modes.
+ * Operators the index does not list are absent, and the plan keeps the filename-letter fallback for them.
+ * @param {any} index parsed fx index
+ * @returns {Map<string, {modes:{name:string}[], skillMode:Map<string, number|null>}>}
+ */
+export function charModesFromIndex(index) {
+  const units = index?.units;
+  const map = new Map();
+  if (!units || typeof units !== 'object') return map;
+  const resolve = (id, seen = new Set()) => {
+    let u = units[id];
+    while (u?.aliasOf && typeof u.aliasOf === 'string' && !seen.has(u.aliasOf)) {
+      seen.add(u.aliasOf);
+      u = units[u.aliasOf];
+    }
+    return u || null;
+  };
+  for (const id of Object.keys(units)) {
+    if (!/^char_/.test(id)) continue;
+    const u = resolve(id);
+    if (!Array.isArray(u?.modes)) continue;
+    const skillMode = new Map();
+    for (const [sid, sk] of Object.entries(u.skills || {})) {
+      skillMode.set(sid, Number.isInteger(sk?.mode) ? sk.mode : null);
+    }
+    map.set(id, {
+      modes: u.modes.map((m) => ({ name: typeof m?.name === 'string' ? m.name : '' })),
+      skillMode,
+    });
+  }
+  return map;
+}
+
 export function skillIndicesByChar(ops03) {
   const primary = new Map();
   const all = new Map();
@@ -321,13 +363,12 @@ export function collectEnemyIds({ assets07, enemies05, maps05, ops03 }) {
  * @param {ReturnType<import('./audio.mjs').indexAudio>} p.audio indexed audio_data.json
  * @param {any} p.modelsData Ark-Models models_data.json
  * @param {any} [p.charword] parsed excel/charword_table.json — the operators' official voice slots (voice, voiceJp)
- * @param {string} [p.voiceLang] the default voice dub to plan: jp (default, the released bundle's dub since 0.9.0) | cn
- *   | en | kr → `audio.voice`
- * @param {string[]} [p.voiceLangs] further dubs to download into the parallel `audio.voiceLangs[lang][charId][slot]`.
- *   Every dub uses the CN file names under its own folder (voiceAlt); `voiceLang` is never planned twice, and a dub
- *   whose files are missing on this machine is dropped by resolveTemplate, so a partial download degrades gracefully.
- * @param {boolean} [p.voiceJp] plan upstream 0.2.2's second JP tree `audio.voiceJp` (default true): the memoised `jp`
- *   table of the same model, so the JP files are planned once whatever `voiceLang` names
+ * @param {string} [p.voiceLang] voice dump of `audio.voice` (the 中文 setting): cn (default) | jp | en | kr — `audio.voiceJp`
+ *   is the JP dub (`voice/`) whatever it is
+ * @param {boolean} [p.voiceJp] plan the JP tree `audio.voiceJp` (default true)
+ * @param {boolean} [p.optionalVoice] also plan the EN / KR / own-language trees (VOICE_OPTIONAL_TREES: `audio.voiceEn` /
+ *   `audio.voiceKr` / `audio.voiceNative`, plus `audio.voiceNativeLangType`); default false so a plan that only asks
+ *   for the two 0.2.2 trees stays those two. fetch-assets passes true unless `--no-optional-voice`.
  * @param {Iterable<string>|null} [p.voiceSlots] which voice slots to plan: VOICE_BATTLE_SLOTS (default) plans only the
  *   lines a battle can play, null plans every slot of audio.mjs VOICE_SLOTS (`--voice-all`). The prep-only slots
  *   (干员报到 / 编入队伍 / 任命队长) are never requested by the client and cost 360 files / 19.3 MB of downloads.
@@ -346,17 +387,14 @@ export function collectEnemyIds({ assets07, enemies05, maps05, ops03 }) {
  * @param {string[]} [p.moduleTypes] module type icon ids (`typeIcon`, e.g. 'sol-x') → manifest `modules[typeIcon]`, the
  *   official type icon (arts/ui/uniequiptype) the 干员调配 / 自选 module tiles draw when the local-client art lacks it
  * @param {Array<{name:string,rel:string,urls:string[],kind:string}>} [p.statsTemplate] official statistics UI assets
- *   (tools/assets/stats-template.mjs jobs, tools/fetch-assets.mjs `statsTemplate`): planned under `statistics/<name>`
- * @param {boolean} [p.optionalVoice] also plan upstream's extra dub trees (VOICE_OPTIONAL_TREES): `audio.voiceEn` /
- *   `audio.voiceKr` / `audio.voiceNative`, plus `audio.voiceNativeLangType`. Off by default, so a bare plan stays the
- *   two trees it always was (`audio.voice` + `audio.voiceJp`); the EN and KR trees are the very same `voiceTable` the
- *   `voiceLangs` model above uses, so the two paths can never disagree on a shared dub.
+ * @param {Map<string, {modes:{name:string}[], skillMode:Map<string, number|null>}>|null} [p.charModes]
+ *   from {@link charModesFromIndex} (the local fx index). Absent: skill attack slots stay on the filename letter.
  * @returns {{ template: any, models: Map<string, any>, notes: string[] }}
  */
-export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsData, charword = null, voiceLang = DEFAULT_VOICE_LANG,
-  voiceLangs = null, voiceJp = true, voiceSlots = VOICE_BATTLE_SLOTS, optionalVoice = false,
+export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsData, charword = null, voiceLang = 'cn',
+  voiceJp = true, voiceSlots = VOICE_BATTLE_SLOTS, optionalVoice = false,
   extraEnemyIds = [], extraTokenIds = [], extraHandbook = {}, localEnemySpines = {}, localTokenSpines = {}, extraOperators = {},
-  moduleTypes = [], statsTemplate = [] }) {
+  moduleTypes = [], statsTemplate = [], charModes = null }) {
   const notes = [];
   /** @type {Map<string, any>} */
   const models = new Map();
@@ -385,6 +423,14 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
   const skills = {};
   const skillsById = {};
   const unitsSfx = {};
+  const sfxPools = {};
+  const poolRef = (paths) => {
+    const pool = audio.poolOf?.(paths);
+    if (!pool) return null;
+    const { id, ...params } = pool;
+    sfxPools[id] = literal(params);
+    return id;
+  };
   const known = assets07?.operators || {};
   const extraOps = {};
   for (const [id, x] of Object.entries(extraOperators || {})) if (/^char_\d+_[a-z0-9]+$/i.test(id) && !known[id]) extraOps[id] = patternOperator(id, x);
@@ -412,21 +458,33 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
     const short = id.replace(/^char_\d+_/, '');
     const sfx = pickUnitSfx(audio.unitBanks.get(id), { operator: true, projectile: {
       born: audio.bank(`battle.ON_PROJECTILE_BORN.projectile_chr_${short}`), hit: audio.bank(`battle.ON_PROJECTILE_HIT.projectile_chr_${short}`) } });
-    const { roles: u, mix } = unitSounds(audio, sfx);
+    const { roles: u, mix } = unitSounds(audio, sfx, poolRef);
     const skillSfx = {};
-    // Per-skill ATTACK / IMPACT sound (audio.mjs pickModeAttacks / pickModeHits): a skill mode has its own swing and its
-    // own hit sound, and neither may play as the unit's normal attack / impact (银灰, 纯烬艾雅法拉). An operator whose
-    // every attack belongs to a skill mode has no normal bank at all (司霆惊蛰 — 解放者, she only attacks while a skill
-    // runs — the report 「三技能攻击没有音效」); 赤刃明霄陈's S3 slashes swing `p_atk_hljdswd_s` and land `p_imp_hljdswd_s`
-    // where her normal attack uses the `_n` files (the report 「斩击音效应该和普通攻击不一样」). The mode letter of a skill
-    // index is read from that skill's own activation sound (`p_skill_lzxqlkl_s` → s = 技能3); without one (most operators
-    // carry no activation sound) we infer 技能1 / 2 / 3 = d / h / s ([ASSUMED], below). The client plays
-    // them while that skill is active (public/js/audio.js unit()).
-    const modeAttacks = pickModeAttacks(audio.unitBanks.get(id));
-    const modeHits = pickModeHits(audio.unitBanks.get(id));
+    // Per-skill ATTACK / IMPACT sound (audio.mjs assignSkillModeSfx): a skill mode has its own swing and its own hit
+    // sound, and neither may play as the unit's normal attack / impact (银灰, 纯烬艾雅法拉). An operator whose every
+    // attack belongs to a skill mode has no normal bank at all (司霆惊蛰 — 解放者, she only attacks while a skill runs).
+    // With the local fx index, the bank's mode index is the operator's own mode and the skill's `mode` says which one
+    // runs (#679: 玛恩纳's S3 swing is `attack.3`, not the `_s` letter). Without the index the activation sound's
+    // letter, or else d/h/s for slots 1/2/3, stays ([ASSUMED], DESIGN §28.17). The client plays the slot while that
+    // skill is active (public/js/audio.js unit()).
+    const cm = charModes?.get(id) ?? null;
+    const skillRows = [];
+    for (const i of idx) {
+      const s = (o.skills || []).find((k) => k.index === i);
+      if (!s) continue;
+      const start = s.skillId ? audio.skillBanks.get(s.skillId)?.get('ON_SKILL_START') : null;
+      const linked = cm && s.skillId ? cm.skillMode.get(s.skillId) : undefined;
+      skillRows.push({
+        index: i, skillId: s.skillId ?? null,
+        mode: Number.isInteger(linked) ? linked : null,
+        start: start?.[0] ?? null,
+      });
+    }
+    const assigned = assignSkillModeSfx(audio.unitBanks.get(id), skillRows, cm?.modes ?? null, cm?.skillMode ?? null);
     const attacks = {};
     const hits = {};
     const attackMix = {}, hitMix = {};
+    const attackPools = {}, hitPools = {};
     for (const i of idx) {
       const s = (o.skills || []).find((k) => k.index === i);
       if (!s) { notes.push(`${id}: skill index ${i} missing in research data`); continue; }
@@ -435,17 +493,21 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
       if (s.skillId) skillsById[s.skillId] = iconId;
       const ss = audio.skillBanks.get(s.skillId)?.get('ON_SKILL_START');
       if (ss?.length) skillSfx[String(i)] = soundLeaf(ss);
-      // [ASSUMED] Without a named activation mode, infer d/h/s from slot 1/2/3; see DESIGN §28.17.
-      const letter = skillModeLetter(ss?.[0]) ?? SLOT_MODE_LETTER[i];
-      if (letter && modeAttacks[letter]) {
-        attacks[String(i)] = soundLeaf(modeAttacks[letter]);
-        const m = audio.mixOf?.(modeAttacks[letter]);
+      const ak = assigned.attacks[String(i)];
+      if (ak) {
+        attacks[String(i)] = soundLeaf(ak);
+        const m = audio.mixOf?.(ak);
         if (m) attackMix[String(i)] = m;
+        const pool = poolRef(ak);
+        if (pool) attackPools[String(i)] = pool;
       }
-      if (letter && modeHits[letter]) {
-        hits[String(i)] = soundLeaf(modeHits[letter]);
-        const m = audio.mixOf?.(modeHits[letter]);
+      const hk = assigned.hits[String(i)];
+      if (hk) {
+        hits[String(i)] = soundLeaf(hk);
+        const m = audio.mixOf?.(hk);
         if (m) hitMix[String(i)] = m;
+        const pool = poolRef(hk);
+        if (pool) hitPools[String(i)] = pool;
       }
     }
     const primarySkill = skillSfx[String(idx[0])];
@@ -455,6 +517,8 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
     if (Object.keys(hits).length) u.hits = hits;
     if (Object.keys(attackMix).length) u.attackMix = attackMix;
     if (Object.keys(hitMix).length) u.hitMix = hitMix;
+    if (Object.keys(attackPools).length) u.attackPools = attackPools;
+    if (Object.keys(hitPools).length) u.hitPools = hitPools;
     if (mix) u.mix = mix;
     if (Object.keys(u).length) unitsSfx[id] = u;
   }
@@ -495,7 +559,7 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
       notes.push(`${id}: official Spine from the local client when extracted (spineLocal)`);
     }
     tokens[id] = entry;
-    const { roles: u, mix } = unitSounds(audio, pickUnitSfx(audio.unitBanks.get(id)));
+    const { roles: u, mix } = unitSounds(audio, pickUnitSfx(audio.unitBanks.get(id)), poolRef);
     if (mix) u.mix = mix;
     if (Object.keys(u).length) unitsSfx[id] = u;
   }
@@ -566,7 +630,7 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
       if (banks?.size) break;
       if (other) banks = audio.unitBanks.get(other);
     }
-    const { roles: u, mix } = unitSounds(audio, pickUnitSfx(banks));
+    const { roles: u, mix } = unitSounds(audio, pickUnitSfx(banks), poolRef);
     if (mix) u.mix = mix;
     if (Object.keys(u).length) unitsSfx[id] = u;
   }
@@ -680,8 +744,8 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
     modules[t] = leaf(alt(`module/${safeName(t).toLowerCase()}.png`, [...new Set([t, t.toLowerCase()])].map((n) => joinUrl(RAW.aa2, `arts/ui/uniequiptype/${n}.png`))));
   }
 
-  // --- 干员战斗语音 (excel/charword_table.json → audio.voice, audio.voiceLangs, audio.voiceJp) ----------------
-  // The official lines of every operator the mode can field, for the slots a battle can actually play: 行动出发 start /
+  // --- 干员战斗语音 (excel/charword_table.json → audio.voice, audio.voiceJp) ---------------------------------
+  // The official lines of every operator the mode can field, for the slots the client can actually play: 行动出发 start /
   // 行动开始 faceEnemy / 选中干员 select / 部署 place / 作战中1-4 skillN / 结算 result* (charword `placeType`,
   // audio.mjs VOICE_BATTLE_SLOTS). A slot with several lines stays an array — the client draws one at random
   // (public/js/audio.js voice). Operators without official battle voice keep no entry at all: the 17 预备干员
@@ -689,72 +753,41 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
   // The three prep-only slots (干员报到 gacha / 编入队伍 squad / 任命队长 squadFirst) are NOT planned by default: the
   // client never requests them, and downloading them adds 360 files / 19.3 MB to every `npm run assets` — pass --voice-all for
   // the complete official set (`voiceSlots: null`, reviewer note on the voice PR).
-  //
-  // 多语言 (v0.7.1): every dub has the SAME file names under its own folder — the slot numbering is always read from the
-  // zh_CN table (`VOICE_ID_LANG`) and voiceAlt only swaps the folder (`audio/voice/<lang>/…`, CDN `VOICE_DIRS[lang]`).
-  // `voiceLang` is the manifest's default dub and lands in `audio.voice` (the shape every older consumer knows);
-  // `voiceLangs` plans the OTHER dubs into the parallel `audio.voiceLangs[lang][charId][slot]`. A dub whose files are
-  // missing on this machine resolves to nothing and is dropped (`resolveTemplate`), so a partial download degrades —
-  // the client then falls back to the default dub.
-  // `audio.voiceJp` (VOICE_JP_LANG, upstream 0.2.2): the Japanese dub as a second tree of the same slots and file names
-  // (`audio/voice/jp/`, the owner's request of 2026-10-08). It is the memoised `jp` table of this very model, so the JP
-  // files are planned once however `voiceLang` is set; `voiceJp: false` leaves it out.
-  const voiceTables = new Map();
-  const voiceTable = (lang) => {
-    if (voiceTables.has(lang)) return voiceTables.get(lang);
-    const table = {};
-    for (const [charId, slots] of indexVoice(charword, VOICE_ID_LANG, voiceSlots)) {
-      if (!chars[charId]) continue;            // only the operators this game can field (`chars`: the 138 pool charIds and the 自选 picks)
+  // `audio.voiceJp` (VOICE_JP_LANG): the same slots and lines in the Japanese dub, a second tree beside the Chinese one
+  // (the owner's request of 2026-10-08) — same file names, `audio/voice/jp/`.
+  const voiceSlotsByChar = indexVoice(charword, VOICE_ID_LANG, voiceSlots);
+  // `dirOf` (VOICE_OPTIONAL_TREES native): the operator's own-language folder, or nothing when it has no such dub
+  const voiceTree = (lang, dirOf = null) => {
+    const tree = {};
+    for (const [charId, slots] of voiceSlotsByChar) {
+      if (!chars[charId]) continue;          // only the operators this game can field (`chars`: the 138 pool charIds and the 自选 picks)
+      const dir = dirOf ? dirOf(charId) : null;
+      if (dirOf && !dir) continue;
       const v = {};
       for (const [slot, assets] of Object.entries(slots)) {
         // one leaf per line (部署1 / 部署2 …): an array stays an array so the client can draw one — chaining them as
         // alternatives of a single leaf would keep only the first line that landed on disk.
-        const lines = assets.map((a) => leaf(voiceAlt(a, lang))).filter(Boolean);
+        const lines = assets.map((a) => leaf(dir ? nativeVoiceAlt(a, dir) : voiceAlt(a, lang))).filter(Boolean);
         if (!lines.length) continue;
         v[slot] = lines.length === 1 ? lines[0] : lines;
       }
-      if (Object.keys(v).length) table[charId] = v;
+      if (Object.keys(v).length) tree[charId] = v;
     }
-    voiceTables.set(lang, table);
-    return table;
+    return tree;
   };
-  const voice = voiceTable(voiceLang);
+  const voice = voiceTree(voiceLang);
   if (!Object.keys(voice).length) notes.push('battle voice: charword_table.json has no slots (index missing?)');
-  const extraLangs = [...new Set((Array.isArray(voiceLangs) ? voiceLangs : [])
-    .filter((l) => typeof l === 'string' && l in VOICE_DIRS && l !== voiceLang))].sort();
-  const voiceLangsTable = {};
-  for (const lang of extraLangs) {
-    const t = voiceTable(lang);
-    // planned either way (the files are what the client needs); resolveTemplate drops the dub when nothing landed
-    voiceLangsTable[lang] = t;
-    if (!Object.keys(t).length) notes.push(`battle voice: ${lang} has no slots (index missing?)`);
-  }
 
-  // upstream 0.3.0's extra dub trees (VOICE_OPTIONAL_TREES), additive beside the `voiceLangs` model above and off unless
-  // asked for. EN and KR are the two dubs `voiceLangs` also knows, and they are built from the very same `voiceTable`,
-  // so the two paths cannot drift apart on a shared dub; `voiceNative` is the operator's own-language dub, which has no
-  // `voiceLangs` counterpart (its folder is `voice_custom/<word key>`, audio.mjs nativeVoiceDirs, not `voice/<lang>`).
-  // `voiceNativeLangType` names each own-language dub's official voiceLangType, for the operators this game can field
-  // that also have a line in `voice` (a `literal`: metadata, not a file to download).
+  // English, Korean and each operator's own-language dub (VOICE_OPTIONAL_TREES; public/js/audio.js VOICE_TREES):
+  // `audio.voiceEn` / `audio.voiceKr` / `audio.voiceNative`, the same slots and file names. A line missing upstream
+  // stays missing (the client plays the Chinese one), never filled from another dub. `audio.voiceNativeLangType`
+  // names each own-language dub's official voiceLangType (ITA / RUS / …) for operators this game fields who also
+  // have a line in the primary `voice` tree.
+  const nativeDirs = optionalVoice ? nativeVoiceDirs(charword) : new Map();
   const optionalTrees = {};
   if (optionalVoice) {
-    const nativeDirs = nativeVoiceDirs(charword);
     for (const [key, lang] of Object.entries(VOICE_OPTIONAL_TREES)) {
-      if (lang !== 'native') { optionalTrees[key] = voiceTable(lang); continue; }
-      const tree = {};
-      for (const [charId, slots] of indexVoice(charword, VOICE_ID_LANG, voiceSlots)) {
-        if (!chars[charId]) continue;              // only the operators this game can field, as everywhere above
-        const dir = nativeDirs.get(charId)?.dir;
-        if (!dir) continue;                        // no own-language dub: no entry for this operator
-        const v = {};
-        for (const [slot, assets] of Object.entries(slots)) {
-          const lines = assets.map((a) => leaf(nativeVoiceAlt(a, dir))).filter(Boolean);
-          if (!lines.length) continue;
-          v[slot] = lines.length === 1 ? lines[0] : lines;
-        }
-        if (Object.keys(v).length) tree[charId] = v;
-      }
-      optionalTrees[key] = tree;
+      optionalTrees[key] = lang === 'native' ? voiceTree(lang, (id) => nativeDirs.get(id)?.dir) : voiceTree(lang);
     }
     const types = {};
     for (const [charId, n] of nativeDirs) if (chars[charId] && voice[charId]) types[charId] = n.type;
@@ -767,44 +800,10 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
       bgm,
       bossBgm: Object.fromEntries(Object.entries(bossBgm).sort(([a], [b]) => a.localeCompare(b, 'en', { numeric: true }))),
       voice,
-      // upstream 0.2.2's second tree for the Japanese dub (VOICE_JP_LANG): the memoised `jp` table, so this key costs
-      // no extra plan; off with `voiceJp: false`
-      ...(voiceJp ? { voiceJp: voiceTable(VOICE_JP_LANG) } : {}),
-      // which dub `voice` holds (the client's fallback reads it) and the other dubs beside it. Written only when other
-      // dubs were asked for: a manifest never grows an empty `voiceLangs` — the rule the workshop side already states
-      // (tools/voice-editor: "a pack that declares only `voices` must not make the manifest grow an empty voiceLangs").
-      ...(extraLangs.length ? { voiceLang, voiceLangs: voiceLangsTable } : {}),
+      ...(voiceJp ? { voiceJp: voiceTree(VOICE_JP_LANG) } : {}),
       ...optionalTrees,
-      sfx: { ui: sfxUi, battle: sfxBattle, units: unitsSfx },
+      sfx: { ui: sfxUi, battle: sfxBattle, units: unitsSfx, pools: sfxPools },
     },
   };
   return { template, models, notes };
-}
-
-export function charModesFromIndex(index) {
-  const units = index?.units;
-  const map = new Map();
-  if (!units || typeof units !== 'object') return map;
-  const resolve = (id, seen = new Set()) => {
-    let u = units[id];
-    while (u?.aliasOf && typeof u.aliasOf === 'string' && !seen.has(u.aliasOf)) {
-      seen.add(u.aliasOf);
-      u = units[u.aliasOf];
-    }
-    return u || null;
-  };
-  for (const id of Object.keys(units)) {
-    if (!/^char_/.test(id)) continue;
-    const u = resolve(id);
-    if (!Array.isArray(u?.modes)) continue;
-    const skillMode = new Map();
-    for (const [sid, sk] of Object.entries(u.skills || {})) {
-      skillMode.set(sid, Number.isInteger(sk?.mode) ? sk.mode : null);
-    }
-    map.set(id, {
-      modes: u.modes.map((m) => ({ name: typeof m?.name === 'string' ? m.name : '' })),
-      skillMode,
-    });
-  }
-  return map;
 }
