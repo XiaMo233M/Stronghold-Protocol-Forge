@@ -41,6 +41,7 @@ import { attackInterval, rangeGridBox, fmtNum, tileKey, chessLoadout, nextThresh
 import { updateSettings, settingsStore, useSettings } from './settings.js';
 import { dubsInstalled } from '../voiceDubs.js';
 import { VOICE_LANG_NAMES } from '../../../shared/constants.js';
+import { morphSlotPolicy } from '../../../shared/plugins/rules.js';
 import { chessPortraitUrl, skillIconUrl, skillRecordIconUrl, profIconUrl, subProfIconUrl, itemIconUrl, enemyIconUrl, tokenAvatarUrl, factionIconUrl, uiUrl, moduleTypeIconUrl } from './assetUrls.js';
 // 立绘走**统一解析链**（`portraitChain.js`）：同一个干员在详情页 / 手牌 / 商店卡 / 自选池里是同一个函数，
 // 所以不会再出现「卡面是那套外观、详情页是原版」。没有外观提供者时它与 `chessPortraitUrl` 逐字相同。
@@ -242,7 +243,9 @@ function ItemRow({ itemId, uid = null, carried = null, off = null, onUnequip = n
   const it = data.lookup('items', itemId);
   // 装备拆卸（行为开关 `unequip: "allow"`，DESIGN §28.43.1）：`onUnequip` 只在**可编辑的自己人**身上传进来，而
   // `unequipAllowed()` 是这一页从 `welcome.mods` 派生的有效档位 ⇒ **缺省档一个按钮都不画**（缺省界面逐字节不变）。
-  const canDetach = typeof onUnequip === 'function' && Number.isInteger(uid) && unequipAllowed();
+  // 上游 0.3.1 的判定：**只看调用方给没给 `onUnequip`** —— 画不画按钮由调用方（game.js / 详情面板）
+  // 按 `unequipAllow` 决定，这里不再自己再问一遍模块状态（两处判据会分叉）。
+  const canDetach = typeof onUnequip === 'function' && Number.isInteger(uid);
   const slotless = slotPolicy().isSlotless(it);
   return html`<div class="ditem">
     <${UnitThumb} kind="item" id=${itemId} size="sm" />
@@ -414,7 +417,7 @@ function skillTextNote(sk) {
   return note ? html`<p class="dhint dhint--rule" data-skill-note=${sk.skillId}><${Icon} name="info" />${t(note)}</p>` : null;
 }
 
-export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bonds, offBonds = null, loadout, onBond, live = null, hint = null, unitItems = null, standIn = null, diy = null, voiceSettings = null, cultOpts = null, onUnequip = null }) {
+export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bonds, offBonds = null, loadout, onBond, live = null, hint = null, unitItems = null, standIn = null, diy = null, voiceSettings = null, cultOpts = null, morphMode = 'official', onUnequip = null }) {
   const m = data.get('assets');
   const hp = hpOf(live, snapHp);
   // 0.2.0 自选编队: `chess` is then the composed 自选 record (the operator, the slot's tier / price); its skill and module are
@@ -449,7 +452,7 @@ export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bond
   const getItem = (id) => data.lookup('items', id);
   // `hasBond`：数据里不存在的盟约 id 一个都不画（与 prep / 战斗同一条约定，`shared/morph.js` 的
   // `grantedBondsByTrait` 的 `hasBond`）—— 一张卡片上出现一条不存在的盟约，与计数对不上是同一类谎话。
-  const bondIds = pieceBondIds(c, carried, getItem, (id) => !!data.lookup('bonds', id));
+  const bondIds = pieceBondIds(c, carried, getItem, morphMode);
   const grantedIds = bondIds.filter((b) => !(Array.isArray(c.bonds) && c.bonds.includes(b)));
   const sell = c.sellPrice ?? 1;
   const blocks = {};
@@ -509,12 +512,13 @@ export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bond
   // (a 变形同构体 / bond item row shows its pairing against what this operator carries: ItemRow `carried`)
   // 第 7 段：`EQUIP n/2` 的**分子**与分母都走这一页的装备位策略（`shared/morph.js`）。缺省档的策略就是引擎今天那条
   // 算术（分子 = `items.length`、分母 = 2）⇒ 缺省界面逐字不变；`plus` 档下变形同构体不计数、分母写它的上限。
-  const slot = slotPolicy();
-  const equipUsed = slot.slotsUsed(items, getItem);
-  const carriedUsed = slot.slotsUsed(carried, getItem);
+  // 档位从这一页的 `morphMode` 来（上游 0.3.1）：plus 档下变形同构体不计数，分母写它的上限。
+  const slot = morphSlotPolicy(morphMode === 'plus' ? 'plus' : 'official', (it) => !!getItem(typeof it === 'string' ? it : it?.id)?.canGiveBond);
+  const equipUsed = slot.slotsUsed(items);
+  const carriedUsed = slot.slotsUsed(carried);
   const equipCap = slot.slotCap(2);
   blocks.equip = piece?.kind === 'chess' ? html`<${Section} key="equip" title=${t('装备')} micro=${`EQUIP ${equipUsed}/${equipCap}`} class="dsec--equip">
-      ${items.length ? items.map((it) => html`<${ItemRow} key=${it.uid} itemId=${it.id} uid=${it.uid} carried=${items} off=${offBonds} onUnequip=${editable ? onUnequip : null} />`) : html`<p class="t-dim dempty">${t('拖拽装备至该干员以配发（最多 2 件）')}</p>`}
+      ${items.length ? items.map((it) => html`<${ItemRow} key=${it.uid} itemId=${it.id} uid=${it.uid} carried=${items} off=${offBonds} mode=${morphMode} onUnequip=${editable ? onUnequip : null} />`) : html`<p class="t-dim dempty">${t('拖拽装备至该干员以配发（最多 2 件）')}</p>`}
     <//>`
     // no own piece (a teammate's unit, a bond popup's 变形同构体 row): what it carries, read-only
     : !piece && carried.length ? html`<${Section} key="equip" title=${t('装备')} micro=${`EQUIP ${carriedUsed}/${equipCap}`} class="dsec--equip">
