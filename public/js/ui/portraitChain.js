@@ -102,6 +102,16 @@ export function portraitEntry(m, chess, opts = {}) {
       const eliteUrl = eliteRec ? strOf(eliteRec[f.elite]) : null;
       if (eliteUrl) return eliteUrl;
     }
+    // 步骤 2（上游 0.3.1 起**提到后缀之前**）：精确命中 `chars[id]` —— `chessPortraitUrl` 自己也认它了，
+    // 精锐棋子在该条目有 E2 字段时用 E2。
+    const exact = chars[id];
+    if (exact) {
+      const eliteUrl = strOf(exact[f.elite]);
+      if (eliteUrl && chess && chess.isGolden) return eliteUrl;
+      const plainUrl = strOf(exact[f.plain]);
+      if (plainUrl) return plainUrl;
+    }
+    // 步骤 3：`_1` / `_2` 后缀（旧行为的另一支；只在精确键没命中时走）
     if (id.endsWith('_2')) {
       const base = chars[id.slice(0, -2)];
       if (base) return strOf(base[f.elite]) || strOf(base[f.plain]);
@@ -110,9 +120,6 @@ export function portraitEntry(m, chess, opts = {}) {
       const base = chars[id.slice(0, -2)];
       if (base) return strOf(base[f.plain]);
     }
-    // 步骤 3：精确命中（`portraitUrl` 的行为并进来）
-    const exact = chars[id];
-    if (exact) return strOf(exact[f.plain]);
     // 步骤 4：唯一的 hook 点 —— 有外观提供者时它回答这一套；没有时跳过（今天就是没有）
     if (typeof opts.lookup === 'function' && charId) {
       let hit = null;

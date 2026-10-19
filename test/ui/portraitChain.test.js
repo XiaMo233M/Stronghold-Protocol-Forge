@@ -130,7 +130,9 @@ describe('解析链：没有 hook 时与今天**逐字相同**（开关开与关
     const id = portraitEntry(M, { charId: 'char_a', assets: { portrait: 'char_c' } });
     assert.equal(id, 'c/p1.png', '精确命中优先于回落');
     // 也就是说：这一条**有意**与旧的 chessPortraitUrl 不同 —— 差异集中在「id 是 chars 里的精确键」这一种输入上。
-    assert.equal(chessPortraitUrl(M, { charId: 'char_a', assets: { portrait: 'char_c' } }), 'a/p1.png', '旧实现确实忽略它');
+    // 上游 0.3.1 起 `chessPortraitUrl` 自己也认「id 是 chars 里的精确键」了（它多了 E2 那一条分支），
+    // 所以这一条现在与链一致 —— 0.3.0 时旧实现确实忽略它，那条差异已经被上游抹平。
+    assert.equal(chessPortraitUrl(M, { charId: 'char_a', assets: { portrait: 'char_c' } }), 'c/p1.png', '旧实现现在也认精确键');
     // 开了工坊外观也一样：**没有提供者**时这一步整段不存在（这是「默认开」仍然安全的原因）
     assert.equal(portraitEntry(M, { charId: 'char_a', assets: { portrait: 'char_c' } }, { skins: true }), 'c/p1.png');
   });
@@ -186,9 +188,10 @@ describe('提供者先说话（步骤 0）：开关打开且确有提供者', ()
       assert.equal(chessPortraitUrl(M, { charId: 'char_a', assets: { portrait: 'char_a_2' } }), 'a/p2.png', '与旧实现逐字相同');
       assert.equal(portraitEntry(M, { charId: 'char_a', assets: { portrait: 'char_a_1' } }), 'a/p1.png', '点名一阶 ⇒ 官方一阶');
       assert.equal(asked, 0, '点名了版本就不该打扰提供者');
-      // 提供者不认识的那一种输入，后缀分支照旧（去 `_2` 之后命中的是 `char_c`；它没有 `portraitE2`）
-      assert.equal(portraitEntry(M, { charId: 'char_a', assets: { portrait: 'char_c_2' } }), 'c/p1.png');
-      assert.equal(chessPortraitUrl(M, { charId: 'char_a', assets: { portrait: 'char_c_2' } }), 'c/p1.png', '与旧实现逐字相同');
+      // 夹具里的 `char_c_2` 是一条**真实存在的记录**（官方精锐就是这样）：上游 0.3.1 起
+      // `chessPortraitUrl` 也认精确键，所以两边都直接用它自己的 `portrait`，不再走「去掉 _2」那条分支。
+      assert.equal(portraitEntry(M, { charId: 'char_a', assets: { portrait: 'char_c_2' } }), 'c2/p1.png');
+      assert.equal(chessPortraitUrl(M, { charId: 'char_a', assets: { portrait: 'char_c_2' } }), 'c2/p1.png', '与旧实现逐字相同');
     });
   });
 
