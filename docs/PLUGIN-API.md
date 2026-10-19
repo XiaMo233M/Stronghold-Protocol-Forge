@@ -266,6 +266,8 @@ This project does not host plugins and does not run a market. A catalogue (`sche
 | `studio.route.GET /studio/api/info` | stable | 0.3.0 | `server/studio/index.js#STUDIO_ROUTES` |
 | `studio.route.GET /studio/api/trial-options` | stable | 0.3.0 | `server/studio/index.js#STUDIO_ROUTES` |
 | `studio.route.POST /studio/api/trial` | stable | 0.3.0 | `server/studio/index.js#STUDIO_ROUTES` |
+| `studio.route.POST /studio/api/console/options` | stable | 0.3.1 | `server/studio/index.js#STUDIO_ROUTES` |
+| `studio.route.POST /studio/api/console/build` | stable | 0.3.1 | `server/studio/index.js#STUDIO_ROUTES` |
 | `studio.route.GET /studio/api/authoring` | stable | 0.3.0 | `server/studio/index.js#STUDIO_ROUTES` |
 | `studio.route.GET /studio/api/dsl-example` | stable | 0.3.0 | `server/studio/index.js#STUDIO_ROUTES` |
 | `studio.route.POST /studio/api/validate-dsl` | stable | 0.3.0 | `server/studio/index.js#STUDIO_ROUTES` |
