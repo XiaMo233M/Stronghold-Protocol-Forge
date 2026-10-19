@@ -2183,5 +2183,7 @@
   "与其他已开启的插件冲突或缺少所需插件，没有生效": "Conflicts with another plugin that is on, or needs a plugin that is missing: not in effect",
   "只改变你自己看到的画面和声音，不影响其他博士，也不影响战斗；插件为非官方制作。": "Changes only what you see and hear — not for the other Doctors, and never the battles. Plugins are unofficial.",
   "本服务器安装了 {n} 个插件": "This server has {n} {n|plugin|plugins} installed",
-  "打开后，对局左下角可以查看自己干员的伤害、治疗和 DPS / HPS。官方界面没有这个窗口。改变玩法的插件对局在 Worker 里演算，统计不到，按钮不显示。": "When on, the bottom-left of a match shows your operators' damage, healing and DPS / HPS. The official interface has no such panel. A match whose plugins change the rules is simulated in a Worker and is not counted, so the button stays hidden."
+  "打开后，对局左下角可以查看自己干员的伤害、治疗和 DPS / HPS。官方界面没有这个窗口。改变玩法的插件对局在 Worker 里演算，统计不到，按钮不显示。": "When on, the bottom-left of a match shows your operators' damage, healing and DPS / HPS. The official interface has no such panel. A match whose plugins change the rules is simulated in a Worker and is not counted, so the button stays hidden.",
+  "显示弹药与能量数量": "Ammo and Energy Counts",
+  "弹药类技能开启时，在弹药条下方显示剩余弹药 / 总弹药数（如 13/14）；秘术师的血条下方显示储存的攻击能量 / 上限（如 2/3）。官方界面没有这些数字。": "While an ammo skill runs, shows the rounds left / in total under its ammo bar (e.g. 13/14). A Mystic Caster's stored attack energy / its maximum shows under the HP bar (e.g. 2/3). The official interface has neither number."
 }
