@@ -355,6 +355,8 @@ export async function createFieldView(host, options = {}) {
   const heightAt = (r, c) => (tiles ? tiles.heightAt(r, c) : 0);
   const ctx = {
     P, layers, assets, settings, fx: null, shadowTex: shadowTexture(),
+    // 本页自己的座位（docs/SKINS.md）：可能在 welcome 之前就建视图，所以 setMe 之后还能改
+    myPlayerId: typeof opts.myPlayerId === 'string' ? opts.myPlayerId : null,
     audio: opts.audio || null,   // the prep landings' sound (UnitView.land → audio.deployCue)
     cam: () => cam, heightAt,
     animRate: () => (mode === 'battle' ? interp.rate : 1),
@@ -1001,8 +1003,12 @@ export async function createFieldView(host, options = {}) {
     for (const u of units) {
       const info = u && Number.isInteger(u.uid) ? renderInfo({ ...u, id: `m:${u.uid}` }) : null;
       if (!info) continue;
+      // 设置「显示其他玩家的皮肤」（docs/SKINS.md）：这些是别的座位的棋子（boss 搭档那一半）或自己那边的预备医疗，
+      // 所以开关会把这一页**不拥有**的那些的皮肤清掉 —— 与 applyInfo 对战斗单位用的是同一条规则。
+      // `skin` 进签名：已经起来的视图画的是它建起来时 info 指的那个模型。
+      info.skin = shownSkin(info);
       keep.add(info.id);
-      const sig = `${info.defId}|${info.golden ? 1 : 0}|${info.spine || ''}|${info.x},${info.y}|${info.dir || ''}|${(info.items || []).join(',')}`;
+      const sig = `${info.defId}|${info.golden ? 1 : 0}|${info.spine || ''}|${info.skin || ''}|${info.x},${info.y}|${info.dir || ''}|${(info.items || []).join(',')}`;
       let v = views.get(info.id);
       if (v && v._sig !== sig) { dropView(info.id); v = null; }
       if (v) continue;
@@ -1522,7 +1528,7 @@ export async function createFieldView(host, options = {}) {
     else setPenList(null);
     tiles.setBattleRect(rect);
     board3d?.setBattleRect(rect);
-    for (const u of Array.isArray(meta.units) ? meta.units : []) addInfo(u);
+    for (const u of Array.isArray(meta.units) ? meta.units : []) applyInfo(u);
     // the official effects of this battle's units load now (the prep → battle switch), the board's heights for their
     // depth-tested materials
     if (ofx.active && !battleMeta.prep) {
@@ -1532,10 +1538,70 @@ export async function createFieldView(host, options = {}) {
     return true;
   }
 
-  function addInfo(u) {
+  /**
+   * 这一页为某个单位画的**外观**（docs/SKINS.md），从一个给定的偏好出发。
+   *
+   * 设置「显示其他玩家的皮肤」（关掉 = 这个客户端把别人的棋子画成干员自己的模型）：别的座位拥有的单位会失去皮肤 ——
+   * 每个 UnitInfo 上都带 `ownerId`，没有主人的单位（关卡装置、敌人）本来也没有皮肤可失去。这个不对称是刻意的：
+   * **你画什么是你的选择，别人画什么是他们的**，所以关掉只是把「他们的外观」从**你**眼前藏起来，从不改变他们看到的东西。
+   */
+  const skinOf = (info, myId, otherSkins) => {
+    // 设置变化时保留收到的选择不变。正在跑的战斗，它的元数据可能早于 room.skins；
+    // [ASSUMED] 最新的公开选择对干员本体（含补位 / 自选）生效，且只在这一个视图里。
+    let skin = info.sourceSkin === undefined ? info.skin : info.sourceSkin;
+    if (info.kind === 'op' && playerSkins.has(info.ownerId)) {
+      skin = playerSkins.get(info.ownerId)[info.diy?.charId || info.spine] || null;
+    }
+    if (!skin) return null;
+    if (info.ownerId == null || !myId || info.ownerId === myId) return skin;
+    return otherSkins ? skin : null;
+  };
+  const playerSkins = new Map();
+  let skinSelectionKey = null;
+  const shownSkin = (info) => skinOf(info, ctx.myPlayerId, settings.otherSkins);
+
+  /**
+   * 登记一个战斗单位的 info（'spawn' 事件、`m.field` / fieldMeta 的 units），并让它的视图保持诚实：
+   * 外观变了（主人在局中换了皮肤，或者上面那条偏好被切换）就把视图丢掉，让下一次 battleView 用 info 现在指的
+   * 那个模型重建 —— 皮肤是视图模型的一部分（模型、贴图、Front/Back 那一对），已经起来的视图不会中途换掉。
+   */
+  function applyInfo(u) {
     const info = renderInfo(u);
-    if (info) infos.set(info.id, info);
+    if (!info) return null;
+    info.sourceSkin = u.sourceSkin === undefined ? info.skin : u.sourceSkin;
+    const skin = shownSkin(info);
+    const prev = infos.get(info.id);
+    if (prev && prev.skin !== skin) dropView(info.id);
+    info.skin = skin;
+    infos.set(info.id, info);
     return info;
+  }
+
+  /** 哪些棋子是这一页自己的（docs/SKINS.md）：可能晚到（视图可能在 `welcome` 之前就建好）。 */
+  function setMe(playerId) {
+    const id = typeof playerId === 'string' && playerId ? playerId : null;
+    if (ctx.myPlayerId === id) return;
+    ctx.myPlayerId = id;
+    refreshSkins();
+  }
+
+  /** 把公开的皮肤选择应用到已有与将来的单位上，不改战斗、也不重启播放。 */
+  function setSkins(players) {
+    const key = JSON.stringify((players || []).map((p) => [p.playerId, p.skins || {}]));
+    if (key === skinSelectionKey) return;
+    skinSelectionKey = key;
+    playerSkins.clear();
+    for (const p of players || []) if (p?.playerId) playerSkins.set(p.playerId, p.skins || {});
+    refreshSkins();
+  }
+
+  function refreshSkins() {
+    for (const [id, info] of infos) {
+      const next = shownSkin(info);
+      if (next !== info.skin) { dropView(id); info.skin = next; }
+    }
+    // Boss 队友用的是只读的准备视图，不走 infos：它们的签名也要立刻重贴。
+    if (mode === 'prep' && lastPrep) setPrep(lastPrep.ps, lastPrep.o);
   }
 
   // a hand item on a scouted prep board (UnitInfo kind 'item'): the plate's icon and colour resolve client-side,
@@ -1587,7 +1653,7 @@ export async function createFieldView(host, options = {}) {
     let fresh = null;
     for (const e of list) {
       if (!Array.isArray(e) || e[0] !== 'spawn') continue;
-      const info = addInfo(e[1]);
+      const info = applyInfo(e[1]);
       if (info && views.get(info.id)?._unknown) dropView(info.id);
       if (info && ofx.active) (fresh || (fresh = [])).push({ id: info.id, info });
     }
@@ -1636,7 +1702,7 @@ export async function createFieldView(host, options = {}) {
   function handleEvent(e, now) {
     switch (e[0]) {
       case 'spawn': {
-        const info = addInfo(e[1]);
+        const info = applyInfo(e[1]);
         if (!info) break;
         gone.delete(info.id);
         const v = battleView(info.id);
@@ -1851,7 +1917,7 @@ export async function createFieldView(host, options = {}) {
 
   function createUnknown(id, s) {
     if (infos.has(id)) return null;
-    addInfo({ id, kind: 'enemy', side: 'enemy', defId: null, x: s.x, y: s.y, maxHp: s.maxHp });
+    applyInfo({ id, kind: 'enemy', side: 'enemy', defId: null, x: s.x, y: s.y, maxHp: s.maxHp });
     infos.get(id)._unknown = true;
     const v = battleView(id);
     if (v) v._unknown = true;
@@ -2048,6 +2114,8 @@ export async function createFieldView(host, options = {}) {
 
   view = {
     setStage,
+    setMe,
+    setSkins,
     setCamera,
     setPrep,
     replayDeploys,
@@ -2160,6 +2228,12 @@ export async function createFieldView(host, options = {}) {
       if (typeof s.damageNumbers === 'boolean') settings.damageNumbers = s.damageNumbers;
       if (typeof s.officialDamageNumbers === 'boolean') settings.officialDamageNumbers = s.officialDamageNumbers;
       if (typeof s.ammoEnergyCount === 'boolean') settings.ammoEnergyCount = s.ammoEnergyCount;   // the units read it every frame (ctx.settings)
+      // 设置「显示其他玩家的皮肤」（docs/SKINS.md）：已经起来的视图保持它建起来时那个外观，
+      // 所以被这个新选择改变的视图要丢掉、下一帧用它们自己的 info 重建。
+      if (typeof s.otherSkins === 'boolean' && s.otherSkins !== settings.otherSkins) {
+        settings.otherSkins = s.otherSkins;
+        refreshSkins();
+      }
       if (s.quality === 'high' || s.quality === 'medium' || s.quality === 'low') settings.quality = s.quality;
       if (typeof s.officialFx === 'string' && s.officialFx !== settings.officialFx) { settings.officialFx = s.officialFx; syncOfficialFx(); }
       if (q !== settings.quality) { board3d?.setQuality?.(settings.quality); resize(); }
