@@ -1002,7 +1002,12 @@ export class UnitView {
   }
 
   _formSpec() {
-    return this.form ? formsFor(FORMS, this.info.spine || this.info.defId)?.[this.form] || null : null;
+    // 上游 0.3.1 的**流形战斗**那一支：attack 循环换成 combat clip，技能循环也换成它。
+    // 形态本身仍只看 `this.form` —— 上游另有一条 `isManifold ⇒ 'Default'` 的回落，我们这边由
+    // `copyFrom` / `setForm` 显式给形态，不走那条；包带来的增量由 `formsFor` 并进 FORMS。
+    const f = this.form ? formsFor(FORMS, this.info.spine || this.info.defId)?.[this.form] || null : null;
+    if (f?.combat && this._manifoldCombat) return { ...f, roles: { ...f.roles, attack: loop(f.combat), skill: { ...f.roles.skill, loop: f.combat } } };
+    return f;
   }
 
   /** Existing 'copy' fx: select one official form, before its next attack (both board renderers). */
