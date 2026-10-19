@@ -5,7 +5,8 @@
 // Downloaded once when missing (or with --refresh-index), then reused — forever, unless --index-ttl names an age.
 // See docs/ASSETS.md ("Index cache freshness").
 
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { RAW, withAssetBase } from './sources.mjs';
 import { MirrorPolicy } from './network.mjs';
@@ -54,7 +55,7 @@ export async function cacheExpired(cacheFile, ttlHours) {
  * @param {import('./source-verifier.mjs').SourceVerifier} [o.verifier] verify raw bytes against pinned Git trees
  * @returns {Promise<any>} parsed JSON
  */
-export async function cachedJson({ cacheFile, url, refresh = false, offline = false, ttlHours = 0, log = console.log, source = 'direct', proxyPrefix, fetchImpl = globalThis.fetch, mirrorPolicy, timeoutMs = 180000, backoffMs = 500, verifier }) {
+export async function cachedJson({ cacheFile, url, refresh = false, offline = false, ttlHours = 0, log = console.log, source = 'direct', proxyPrefix, fetchImpl = globalThis.fetch, mirrorPolicy, timeoutMs = 180000, backoffMs = 500, verifier, maxBytes = Infinity, validate }) {
   if (verifier && offline) throw new Error('source verification is incompatible with --offline');
   let verifiedSource;
   if (verifier) {
@@ -69,8 +70,12 @@ export async function cachedJson({ cacheFile, url, refresh = false, offline = fa
   if (!refresh && !expired || offline) {
     try {
       const buf = await readFile(cacheFile);
+      if (buf.length > maxBytes) throw new Error(`JSON exceeds ${maxBytes} bytes`);
       if (verifier) verifier.verify(buf, verifiedSource);
-      return JSON.parse(buf.toString('utf8'));
+      const json = JSON.parse(buf.toString('utf8'));
+      // 上游 0.3.1：缓存里的那一份也要过形状校验 —— 坏文件不能被当成「已经下过」继续用。
+      validate?.(json);
+      return json;
     } catch (e) {
       if (offline) throw new Error(`--offline: cached index ${cacheFile} is missing or corrupt (${e.message}); run once online`);
     }
@@ -94,10 +99,11 @@ export async function cachedJson({ cacheFile, url, refresh = false, offline = fa
           }
           throw new Error(`HTTP ${res.status}`);
         }
-        const buf = await network.readBody(src, res);
+        const buf = await network.readBody(src, res, maxBytes);
         if (verifier) verifier.verify(buf, verifiedSource);
         text = buf.toString('utf8');
         json = JSON.parse(text);
+        validate?.(json);
       } catch (e) {
         lastErr = e;
         network.failed(src);
@@ -107,8 +113,11 @@ export async function cachedJson({ cacheFile, url, refresh = false, offline = fa
       network.succeeded(src);
       // A local disk failure is not evidence that the mirror is unhealthy.
       await mkdir(dirname(cacheFile), { recursive: true });
-      await writeFile(cacheFile + '.tmp', text);
-      await rename(cacheFile + '.tmp', cacheFile);
+      const temp = `${cacheFile}.${randomUUID()}.tmp`;
+      try {
+        await writeFile(temp, text, { flag: 'wx' });
+        await rename(temp, cacheFile);
+      } finally { await rm(temp, { force: true }); }
       return json;
     }
   }
