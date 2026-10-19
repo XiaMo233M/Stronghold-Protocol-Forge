@@ -1,4 +1,4 @@
-// test/modMatchChannels.test.mjs — 包通道的**服务端那一半**（`server.modules[].channels`，DESIGN §28.23）：
+// test/modMatchChannels.test.js — 包通道的**服务端那一半**（`server.modules[].channels`，DESIGN §28.23）：
 // 声明面（形状层）与装载面各测一半。
 //
 // 为什么这个文件存在：`client.panels[].messages`（docs/WORKSHOP.md §1.9.6）给了包一条**说得出**的通道，而

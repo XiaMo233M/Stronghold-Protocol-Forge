@@ -1,4 +1,4 @@
-// test/modPackLane.test.mjs — DESIGN §28.56：包声明的 WebSocket lane。
+// test/modPackLane.test.js — DESIGN §28.56：包声明的 WebSocket lane。
 // 两半各自钉住：形状层（pack.json 里那句声明的每条拒绝码）与纯的那半（`server/modLanes.js` 的认领 / 撞车 /
 // 限额 / 「处理器还没就位」）。这一格最怕的失败方向是「包合法、表里没这行、客户端连过去永远没反应」，
 // 所以每一条都判它响不响。

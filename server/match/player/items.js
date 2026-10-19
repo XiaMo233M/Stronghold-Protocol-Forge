@@ -12,6 +12,17 @@ import { offsetTile } from '../../sim/dir.js';
 import { itemKey } from '../gamedata.js';
 import { OK, fail } from './common.js';
 
+/**
+ * 装备拆卸是否被允许（行为开关 `unequip: "allow"`）：**工坊包声明依赖的读取点**
+ * （`shared/modSurface.js` 里 `{ symbol: "unequipAllowed", module: "items" }` 那一条）。
+ * 判据只有一份 —— 玩家状态的 `unequip()` 与它读同一个开关。
+ * @param {Record<string, string>|null|undefined} rules 这一局的房间规则
+ * @returns {boolean}
+ */
+export function unequipAllowed(rules) {
+  return ruleOption(rules, 'unequip') === 'allow';
+}
+
 export class PlayerItems {
   /**
    * A copy that actually leaves the match repays shared-item debt first (#624). Equipping, selling a carrier
@@ -192,6 +203,12 @@ export class PlayerItems {
    * (right→left), else into a free hole of the visible temporary window. Neither free: HAND_FULL and nothing moves.
    * The official rule returns the same lock as destroy. Bots never send this.
    * [ASSUMED] shares the existing prep-intent ready lock; hidden temp overflow is not a free slot. Never calls stow.
+   */
+  /**
+   * 装备拆卸是否被允许（行为开关 `unequip: "allow"`）：**工坊包声明依赖的读取点**（shared/modSurface.js 的
+   * `items` 锚）。判据只有一份 —— `unequip()` 与它都走这里。
+   * @param {Record<string, string>|null|undefined} rules 这一局的房间规则
+   * @returns {boolean}
    */
   unequip(itemUid) {
     const g = this._gate(); if (g) return g;

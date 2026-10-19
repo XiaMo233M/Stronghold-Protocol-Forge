@@ -1,4 +1,4 @@
-// test/modMatchKinds.test.mjs — DESIGN §28.54 的 `pack.json.matchKinds`：形状、两条硬闸门、字节稳定性，
+// test/modMatchKinds.test.js — DESIGN §28.54 的 `pack.json.matchKinds`：形状、两条硬闸门、字节稳定性，
 // 以及 `host.matchKinds()` 那半边「没声明 matchClass 就没有能力」。
 //
 // 与 test/packBehaviour.test.js 同一套打法：合成 raw manifest 直接喂 `normalizePackManifest`，逐个拒绝分支

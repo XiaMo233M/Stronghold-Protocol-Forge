@@ -1,4 +1,4 @@
-// test/modClientScreens.test.mjs — DESIGN §28.55 的 `client.screens`：形状层的每条拒绝码 + 两份路由名单同源。
+// test/modClientScreens.test.js — DESIGN §28.55 的 `client.screens`：形状层的每条拒绝码 + 两份路由名单同源。
 //
 // 与 test/modClientPanels.test.js 同一套打法：合成 pack.json 喂 `normalizePackManifest`，逐个失败分支走一遍。
 // 路由名单那条是这一格最容易出事的地方：形状层的 `CLIENT_SCREEN_ROUTES` 与客户端的 `MOD_SCREEN_ROUTES`

@@ -115,6 +115,9 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
     try {
       rawManifest = JSON.parse(fs.readFileSync(path.join(packDir, 'pack.json'), 'utf8'));
     } catch (e) {
+      // 一个目录如果自己声明了 **plugin.json**，它是插件示例（docs/examples/offers-demo 那种），不是工坊包：
+      // 静默跳过、不记错误 —— 否则「工坊根里放一个插件示例」会被当成坏包。
+      if (e && e.code === 'ENOENT' && fs.existsSync(path.join(packDir, 'plugin.json'))) continue;
       errors.push({ pack: name, reason: e && e.code === 'ENOENT' ? 'pack.json is missing' : `pack.json is unreadable: ${e.message}` });
       continue;
     }

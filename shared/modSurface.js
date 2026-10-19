@@ -209,7 +209,7 @@ export const MOD_SURFACE = Object.freeze([
       '`healthz` 与 `onBoot` 的读数口径见 §28.37：`/healthz` 的 `ok` 恒 true、恒 200（「不 ok 时 503」做不到，如实写在那一节）',
     ],
     files: ['shared/workshop.js', 'server/modModules.js', 'server/hostMetrics.js', 'server/http/routeMount.js', 'server/lobby.js', 'shared/kitAuthoring.js'],
-    tests: ['test/packServerModules.test.js', 'test/packServerModulesWire.test.js', 'test/packMatchMsg.test.js', 'test/packServerSurface.test.js', 'test/modMatchChannels.test.mjs'],
+    tests: ['test/packServerModules.test.js', 'test/packServerModulesWire.test.js', 'test/packMatchMsg.test.js', 'test/packServerSurface.test.js', 'test/modMatchChannels.test.js'],
     spec: '§28.14',
   },
   {
@@ -317,7 +317,7 @@ export const MOD_SURFACE = Object.freeze([
       '不新增 `C2S` 意图、不动 `PROTOCOL_VERSION` / `MOD_API_VERSION`、不进模拟 ⇒ 不需要 `golden:update`',
     ],
     files: ['shared/workshop.js', 'server/roomPack.js', 'server/lobby.js'],
-    tests: ['test/modRoomHold.test.mjs', 'test/modSurface.test.js'],
+    tests: ['test/modRoomHold.test.js', 'test/modSurface.test.js'],
     // ⚠️ 节号以我方为准（上游）：它在下游 fork 里是 §28.55，我方按**能力**排到现有最大号之后。
     spec: '§28.57',
   },
@@ -397,7 +397,7 @@ export const MOD_SURFACE = Object.freeze([
       '不新增 `C2S` 意图、不动 `PROTOCOL_VERSION` / `MOD_API_VERSION`：加一格字段不抬版本',
     ],
     files: ['shared/workshop.js', 'server/modModules.js'],
-    tests: ['test/modMatchKinds.test.mjs', 'test/packBehaviour.test.js', 'test/modSurface.test.js'],
+    tests: ['test/modMatchKinds.test.js', 'test/packBehaviour.test.js', 'test/modSurface.test.js'],
     // ⚠️ 节号以我方为准（上游）：它在下游 fork 里是 §28.52，与我方既有的 §28.52（`callBudget`）撞号，
     // 所以排到我方现有最大号之后。改号按能力归一，别处引用一并跟着改。
     spec: '§28.54',
@@ -417,7 +417,7 @@ export const MOD_SURFACE = Object.freeze([
       '入口是 `server/modServer.js`（把 `packLaneTable()` 交给 `startServer({ wsLanes })`），**不改 `server/index.js`** —— 那是本体拥有的路径，而 `index.js` 已经有 `opts.wsLanes` 这个现成入口，能不改就不改（越本体路径要走 `.github/overlay.json` 的 `bodyPaths` 受控例外登记）；不认 lane 的部署照旧 `node server/index.js`，行为与字节都不变',
     ],
     files: ['shared/workshop.js', 'server/modModules.js', 'server/modLanes.js', 'server/modServer.js', 'server/http/wsLanes.js', 'server/http/websocket.js'],
-    tests: ['test/modPackLane.test.mjs', 'test/wsLanes.test.js'],
+    tests: ['test/modPackLane.test.js', 'test/wsLanes.test.js'],
     // ⚠️ 节号以我方为准（上游）：它在下游 fork 里是 §28.54，我方按**能力**排到现有最大号之后。
     // ⚠️ 来源分支的 `shared/workshop.js` 里有**四处**把它错标成 §28.53（那是 `client.screens` 的号），
     // 合并时按能力归一到 §28.56，不做机械的号段平移。
@@ -513,7 +513,7 @@ export const MOD_SURFACE = Object.freeze([
       '`stardust` 的包不受 `EMPTY_PACK` 约束（它没有 Forge 贡献项是正常形态）',
     ],
     files: ['shared/workshop.js', 'server/workshop.js'],
-    tests: ['test/modTarget.test.mjs'],
+    tests: ['test/modTarget.test.js'],
     spec: '§28.46',
   },
   {
@@ -533,7 +533,7 @@ export const MOD_SURFACE = Object.freeze([
       '不声明 ⇒ 归一化清单里不长这个键（无条件写会让所有已发布包的内容哈希改变，§28.2）',
     ],
     files: ['shared/workshop.js', 'server/workshop.js', 'server/index.js'],
-    tests: ['test/modDependencies.test.mjs'],
+    tests: ['test/modDependencies.test.js'],
     spec: '§28.48',
   },
   {
@@ -551,7 +551,7 @@ export const MOD_SURFACE = Object.freeze([
       '不声明 ⇒ 归一化清单里不长这个键（§28.2）',
     ],
     files: ['shared/workshop.js', 'server/workshop.js', 'server/index.js'],
-    tests: ['test/modDependencies.test.mjs'],
+    tests: ['test/modDependencies.test.js'],
     spec: '§28.48',
   },
   {
@@ -593,13 +593,13 @@ export const MOD_SURFACE = Object.freeze([
     decl: 'pack.json.client.screens[] = { id, route, module, order?, styles?, data?, messages? }',
     anchors: [{ symbol: 'CLIENT_SCREEN_ROUTES' }, { symbol: 'CLIENT_SCREEN_FIELDS' }],
     requires: [
-      'route 是**闭枚举且只有引擎真的有的四条**（`title` / `lobby` / `room` / `game`）：`selectRoute`（`public/js/store.js`）与 `main.js` 的 `SCREENS` 都只到这四个值，结算与干员调配是路由**内部**的视图 —— 多写一条就是永远不会命中的死格子（`test/modClientScreens.test.mjs` 把两份名单钉在一起）',
+      'route 是**闭枚举且只有引擎真的有的四条**（`title` / `lobby` / `room` / `game`）：`selectRoute`（`public/js/store.js`）与 `main.js` 的 `SCREENS` 都只到这四个值，结算与干员调配是路由**内部**的视图 —— 多写一条就是永远不会命中的死格子（`test/modClientScreens.test.js` 把两份名单钉在一起）',
       '`module` / `styles` / `data` / `messages` 与面板**共用同一批判据**（同一条装载期文件判据、同一批数据表闭枚举、同一套通道名形状）；`id` 与面板共用一个包内命名空间，一个包同一条路由只能有一份',
       '屏模块与样式表的源码字节进 `identifyPack`（不算进去，两份不同的整屏就能共用同一个摘要，而那份摘要声称「同一份界面」）；没声明 `screens` 的包摘要逐字节不变',
       '失败方向是**宿主原生界面保持可见**：样式装不上 / import 失败 / 没导出 `mountScreen` / `mountScreen` 抛错，四种都点名并把该 key 拉黑，不做「白屏但看起来成功了」；卸载对称，路由所有权按 `order / pack / id` 确定性裁决',
     ],
     files: ['shared/workshop.js', 'server/workshop.js', 'server/http/workshop.js', 'public/js/ui/extensions.js'],
-    tests: ['test/modClientScreens.test.mjs', 'test/modClientPanels.test.js'],
+    tests: ['test/modClientScreens.test.js', 'test/modClientPanels.test.js'],
     spec: '§28.55',
   },
   {

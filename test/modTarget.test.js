@@ -1,4 +1,4 @@
-// test/modTarget.test.mjs — `pack.json.target`（跨宿主清单）的**契约测试**。
+// test/modTarget.test.js — `pack.json.target`（跨宿主清单）的**契约测试**。
 //
 // 这一份回答的不是「功能对不对」，而是「契约语义有没有变」。四问，每问都有实测的钉子：
 //   ① 缺省逐字节不变：不写 `target` 时，归一化清单与包身份摘要**逐字节**等于移植前实测的那一袋（FROZEN）。
