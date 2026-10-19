@@ -133,7 +133,7 @@ class Obj:
  def read(self): return NS(m_Name=self.name,image=Image())
  def read_typetree(self): return {'synthetic':self.name}
 def load(p):
- if 'chararts/' in p: return NS(objects=[Obj('front','MonoBehaviour',1),Obj('back','MonoBehaviour',2)],container={'dyn/char_9001_test/defaultskin.prefab':Obj('prefab')})
+ if 'chararts' in p: return NS(objects=[Obj('front','MonoBehaviour',1),Obj('back','MonoBehaviour',2)],container={'dyn/char_9001_test/defaultskin.prefab':Obj('prefab')})
  suffix='' if 'avatar' in p else '_1'
  return NS(objects=[Obj('char_9001_test'+suffix),Obj('char_9001_test_2'),Obj('char_9001_test_skin#1'),Obj('char_9002_other')])
 sys.modules['UnityPy']=NS(load=load); sys.modules['aklz4']=NS()

@@ -306,7 +306,8 @@ describe('皮肤: the lobby seat and the match', () => {
       for (const ent of readdirSync(dir, { withFileTypes: true })) {
         const p = path.join(dir, ent.name);
         if (ent.isDirectory()) walk(p);
-        else if (ent.name.endsWith('.js') && readFileSync(p, 'utf8').includes('.skin')) hits.push(path.relative(ROOT, p));
+        // 路径一律按 POSIX 比（Windows 的 path.relative 给反斜杠，断言写的是正斜杠）
+        else if (ent.name.endsWith('.js') && readFileSync(p, 'utf8').includes('.skin')) hits.push(path.relative(ROOT, p).split(path.sep).join('/'));
       }
     };
     walk(root);

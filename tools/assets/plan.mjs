@@ -391,8 +391,8 @@ export function collectEnemyIds({ assets07, enemies05, maps05, ops03 }) {
  *   from {@link charModesFromIndex} (the local fx index). Absent: skill attack slots stay on the filename letter.
  * @returns {{ template: any, models: Map<string, any>, notes: string[] }}
  */
-export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsData, charword = null, voiceLang = 'cn',
-  voiceJp = true, voiceSlots = VOICE_BATTLE_SLOTS, optionalVoice = false,
+export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsData, charword = null, voiceLang = 'jp',
+  voiceLangs = null, voiceJp = true, voiceSlots = VOICE_BATTLE_SLOTS, optionalVoice = false,
   extraEnemyIds = [], extraTokenIds = [], extraHandbook = {}, localEnemySpines = {}, localTokenSpines = {}, extraOperators = {},
   moduleTypes = [], statsTemplate = [], charModes = null }) {
   const notes = [];
@@ -777,6 +777,18 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
   };
   const voice = voiceTree(voiceLang);
   if (!Object.keys(voice).length) notes.push('battle voice: charword_table.json has no slots (index missing?)');
+  // 我们 fork 的并行配音模型（docs/DESIGN）。0.3.1 上游把它换成了 VOICE_OPTIONAL_TREES（voiceEn / voiceKr /
+  // voiceNative），两者**并存**：这套按「干员各选一套」使用（public/js/ui/settings.js 的「干员语音」、
+  // audio.voiceLangs[lang][charId][slot]），上游那套按"整棵树换一套"使用。同一批文件只计划一次。
+  const extraLangs = [...new Set((Array.isArray(voiceLangs) ? voiceLangs : [])
+    .filter((l) => typeof l === 'string' && l in VOICE_DIRS && l !== voiceLang))].sort();
+  const voiceLangsTable = {};
+  for (const lang of extraLangs) {
+    const t = voiceTree(lang);
+    // 计划出来的是客户端要的文件；一批都没落盘时 resolveTemplate 会把这一套丢掉
+    voiceLangsTable[lang] = t;
+    if (!Object.keys(t).length) notes.push(`battle voice: ${lang} has no slots (index missing?)`);
+  }
 
   // English, Korean and each operator's own-language dub (VOICE_OPTIONAL_TREES; public/js/audio.js VOICE_TREES):
   // `audio.voiceEn` / `audio.voiceKr` / `audio.voiceNative`, the same slots and file names. A line missing upstream
@@ -801,6 +813,9 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
       bossBgm: Object.fromEntries(Object.entries(bossBgm).sort(([a], [b]) => a.localeCompare(b, 'en', { numeric: true }))),
       voice,
       ...(voiceJp ? { voiceJp: voiceTree(VOICE_JP_LANG) } : {}),
+      // 哪一套是 `voice`（客户端的回落读它）与它旁边的几套。只有真要求了别的配音才写：
+      // 一份清单永远不长出空的 `voiceLangs`（工坊侧同一条规矩）。
+      ...(extraLangs.length ? { voiceLang, voiceLangs: voiceLangsTable } : {}),
       ...optionalTrees,
       sfx: { ui: sfxUi, battle: sfxBattle, units: unitsSfx, pools: sfxPools },
     },

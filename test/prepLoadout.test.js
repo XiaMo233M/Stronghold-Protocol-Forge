@@ -157,7 +157,9 @@ test('协议面一个字节都不动：`room.loadout` 仍登记在 C2S，lobby �
   const platform = readFileSync(join(ROOT, 'server/match/match/platform.js'), 'utf8');
   const body = platform.slice(platform.indexOf('  setLoadout('), platform.indexOf('  setSupport('));
   assert.ok(body.length > 200, '必须真的切到 setLoadout 那一段');
-  assert.match(body, /loadoutPhasesFor\(this\.behaviour\)/, '相位闸门必须读这一格的声明，而不是写死 INFO_CHECK');
+  // 0.3.1 起这一格是**双来源**：房间规则 rules.prepLoadout 优先，没声明才读我们自有的 behaviour 模块层，
+  // 所以判据是「读声明」而不是「只传一个参数」。
+  assert.match(body, /loadoutPhasesFor\(this\.behaviour[^)]*\)/, '相位闸门必须读这一格的声明，而不是写死 INFO_CHECK');
   assert.equal(/phase\s*!==\s*PHASE\.INFO_CHECK/.test(body), false, 'setLoadout 里写死的相位判据必须已经被那格开关取代');
   assert.match(platform, /setSupport\(playerId, entries\) \{[\s\S]{0,200}PHASE\.INFO_CHECK/,
     '助战那一格的闸门**不动**（它不是这一格）');

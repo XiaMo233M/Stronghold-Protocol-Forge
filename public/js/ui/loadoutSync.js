@@ -26,6 +26,7 @@ import { ruleOption } from '../../../shared/plugins/rules.js';
 import { POTENTIAL_DEFAULT, CULTIVATE_DEFAULT } from '../../../shared/potential.js';
 import { OWNERSHIP_PREF, parseStoredOwnership, toStoredOwnership, cleanIds, sanitizeNotOwned } from './ownershipModel.js';
 import { DIY_PREF, parseStoredDiy, toStoredDiy, cleanPicks, sanitizeDiyPicks } from './diyModel.js';
+import { skinsStore, SKINS_KEY, SKINS_SYNC_KEY, parseStoredSkins } from './skins.js';
 import { toast } from './toasts.js';
 import { t, N_ } from '../../../shared/i18n.js';
 
@@ -363,6 +364,25 @@ export function installLoadoutSync({ net, getChessReady, getBackupsReady, lookup
       }
       return { entries, ops: cleanOps };
     },
+  });
+}
+
+
+/**
+ * 接上干员皮肤同步（docs/SKINS.md）：每次 welcome 与每次编辑之后发 `room.skins { skins }`，
+ * 数据来自 `skinsStore`（ui/skins.js）。
+ *
+ * 选择按存的原样发出去、结构上是干净的（ui/skins.js parseStoredSkins）：它指的那个外观住在**外观插件的
+ * 覆盖层**里，所以只可能「解析不出来」，不会「格式不对」。与上面三个不同，这条**任何相位都收**，
+ * 对局里改了立刻生效（外观是纯客户端的事）。
+ * @param {{ net: any, timers?: { setTimeout: Function, clearTimeout: Function }, target?: ReturnType<typeof createStore>,
+ *   notify?: (text: string) => void }} deps
+ */
+export function installSkinsSync({ net, timers, target = skinsStore, notify } = {}) {
+  return installPrefSync({
+    net, timers, target, notify, key: SKINS_KEY, stateKey: SKINS_SYNC_KEY, msgType: 'room.skins', field: 'skins', tag: 'skins',
+    lockedText: N_('这台服务器不接受皮肤选择，只有本机保存'),
+    prepare: async () => parseStoredSkins(target.get()[SKINS_KEY]),
   });
 }
 

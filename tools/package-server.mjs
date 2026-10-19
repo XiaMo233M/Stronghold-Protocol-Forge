@@ -22,7 +22,9 @@ const isExcluded = (p) => SAMPLE_PREFIXES.some((prefix) => p.startsWith(prefix))
 
 /** A deterministic source allowlist, derived from the maintained player package allowlist. */
 export function selectServerFiles(root, paths = trackedFiles(root)) {
-  const selected = selectTracked(paths).keep.filter((p) => !isExcluded(p));
+  // 玩家包故意带一个作者测试辅助（AUTHOR_TEST_FILES: test/helpers/battleHarness.js），但**服务端版不带 test/**：
+  // 它是纯 mod 管理器，作者工具链那一套发给玩家包就够了。test/package-server-profile.test.js 逐条钉这个。
+  const selected = selectTracked(paths).keep.filter((p) => !isExcluded(p) && !p.startsWith('test/'));
   // Server-specific installation instructions are deliberately shipped with this profile only.
   if (paths.includes(SERVER_GUIDE) && !selected.includes(SERVER_GUIDE)) selected.push(SERVER_GUIDE);
   return [...new Set(selected)].sort();
