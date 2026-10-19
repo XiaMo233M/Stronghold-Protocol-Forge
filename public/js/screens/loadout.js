@@ -346,6 +346,7 @@ function Detail({ m, chess, golden, entries, ops = {}, onChange, onOps, onReset,
     </div>
     <div class="lo-detail__body" ref=${bodyRef}>
       <${OperatorVoice} charId=${chess.charId} />
+      <${SkinSection} charId=${chess.charId} />
       <${CultivationSection} charId=${chess.charId} ops=${ops} onSet=${onOps} standIn=${notOwned} />
       <${LoadoutGarrisons} chess=${level === 'elite' && golden ? golden : chess} m=${m} />
       <section class="lo-sec">
@@ -381,7 +382,6 @@ function Detail({ m, chess, golden, entries, ops = {}, onChange, onOps, onReset,
         </div>
         ${modOpt ? html`<${ModuleInfo} m=${m} golden=${golden} opt=${modOpt} potential=${opsOf(ops, chess.charId).potential} />` : null}
       </section>` : null}
-      <${SkinSection} chess=${chess} />
       ${notOwned ? html`<p class="lo-locknote lo-locknote--standin" data-testid="loadout-standin-note"><${Icon} name="info" />${standInName(chess) ? t('干员持有中标记为未持有：此棋子由替补干员 {name} 上场，技能与模组固定（补位干员技能不可更改）；这里的调配在改回「持有」后生效', { name: standInName(chess) })
         : t('干员持有中标记为未持有：此棋子由替补干员上场，技能与模组固定（补位干员技能不可更改）；这里的调配在改回「持有」后生效')}</p>` : null}
       ${locked ? html`<p class="lo-locknote"><${Icon} name="info" />${t('本局的调配已锁定，修改将在下一局生效')}</p>` : null}
