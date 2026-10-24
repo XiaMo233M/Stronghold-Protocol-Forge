@@ -155,6 +155,7 @@ function Overview({ agg, gd, nickname, records }) {
               class="st-profile__medal" fallback=${html`<${Icon} name="crown" />`} />
             <div><span>${t('获得奖杯')}</span><b class="num">${fmtNum(agg.trophies)}</b></div>
           </div>
+          <div class="mod-host" data-mod-slot="screen.stats.profile"></div>
         </div>
       <table class="st-modegrid"><tbody>
         ${[['solo', N_('独立模拟')], ['coop', N_('联合模拟')]].map(([mode, label]) => {

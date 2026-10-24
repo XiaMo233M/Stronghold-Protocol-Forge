@@ -1242,6 +1242,7 @@ export function LobbyScreen() {
         <${HubTile} icon="key" label=${t('密钥加入')} en="JOIN WITH KEY" onClick=${() => setJoinOpen(true)} />
         <${FriendsTile} />
         <${TipsPanel} />
+        <div class="mod-host" data-mod-slot="screen.lobby.aside"></div>
       </aside>
 
       <aside class="hub-right">

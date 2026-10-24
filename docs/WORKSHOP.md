@@ -957,7 +957,7 @@ export function mount(ctx) {
 `default` 导出同一个函数也行。**模块源码进包的身份哈希**：改了面板的字节就是换了一个包（DESIGN §28.8），所以不
 用担心「摘要一样、界面不一样」。
 
-**十个挂载点**（闭枚举，写别的整包被拒：`CLIENT_BAD_PANEL_SLOT`）：
+**十六个挂载点**（闭枚举，写别的整包被拒：`CLIENT_BAD_PANEL_SLOT`）：
 
 | `slot` | 位置 | 容器谁创建 |
 |---|---|---|
@@ -971,11 +971,17 @@ export function mount(ctx) {
 | `screen.game.overlay` | 对局画面之上（整屏覆盖层） | 组件渲染 |
 | `screen.loadout.detail` | 干员详情面板里（插一节） | 组件渲染 |
 | `screen.room.aside` | 房间屏（等待开局的那一屏）的旁栏 | 组件渲染 |
+| `screen.lobby.aside` | 大厅屏的侧栏 | 组件渲染 |
+| `screen.room.chat` | 房间屏的聊天区 | 组件渲染 |
+| `screen.title.entry` | 标题屏的代号输入 / 开始按钮下方 | 组件渲染 |
+| `screen.stats.profile` | 战绩页的个人资料块里 | 组件渲染 |
+| `screen.loadout.card` | 干员调配屏的列表区上方 | 组件渲染 |
+| `screen.diy.card` | 自选（DIY）屏的卡区上方 | 组件渲染 |
 
 前四个是**固定浮层**：与当前在哪个界面无关，面板挂一次就一直在，容器由注册点在面板真的挂载时创建（没有包声明
 `client` 时页面上一个容器都没有）。
 
-后六个是**既有组件里的宿主**（业主裁决 2026-10-10），容器由**组件自己**渲染 `[data-mod-slot]`。三条性质：
+后十二个是**既有组件里的宿主**（业主裁决 2026-10-10；后六个是 2026-10-24 按社区投稿实际在用的位置补的），容器由**组件自己**渲染 `[data-mod-slot]`。三条性质：
 
 - **空闲时零影响**：容器 `display: contents`（不产生盒子），里面的面板默认 `pointer-events: none`（不吃点击）。
   想让标记/手势/一节接收输入，在你自己的样式表里打开 `pointer-events: auto` —— 默认绝不能是「一层看不见的东西

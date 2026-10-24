@@ -95,6 +95,9 @@ export const MOD_PANEL_SLOTS = Object.freeze([
   'root.overlays', 'root.guide', 'screen.game.aside', 'screen.result.footer',
   'screen.game.shopCard', 'screen.game.bondStrip', 'screen.game.hud', 'screen.game.overlay',
   'screen.loadout.detail', 'screen.room.aside',
+  // 2026-10-24：与 `shared/workshop.js CLIENT_PANEL_SLOTS` 逐字同一份（顺序也要一致 —— 测试 deepEqual 钉住）。
+  'screen.lobby.aside', 'screen.room.chat', 'screen.title.entry',
+  'screen.stats.profile', 'screen.loadout.card', 'screen.diy.card',
 ]);
 
 /**

@@ -1174,6 +1174,7 @@ function LoadoutScreen({ st, leaving = false }) {
       : html`<main class=${cx('lo-body', narrowDetail && 'is-detail')}>
       <section class="lo-roster">
         <${Filters} m=${m} filters=${st.filters} bonds=${bonds} onFilters=${(filters) => loadoutStore.set({ filters })} />
+        <div class="mod-host" data-mod-slot="screen.loadout.card"></div>
         <div class="lo-list" ref=${gridRef}>
           <${RosterHead} />
           <div class="lo-list__rows" role="list" aria-label=${t('干员列表')}>

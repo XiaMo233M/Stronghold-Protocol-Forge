@@ -505,12 +505,14 @@ frame the server already sends**: `welcome.modPanels` (`server/lobby.js welcomeI
 no `client` produces no new request, no new DOM and no new global — the same "a JSON-safe module list, built by the
 server" shape `spec.workshopKits` has for kits (§28.13), and the reason the list is not fetched.
 
-- **Nine slots, in two kinds, and no container exists until something needs one.** The first four are 0.11.0's fixed
+- **Sixteen slots, in two kinds, and no container exists until something needs one.** The first four are 0.11.0's fixed
   overlays: the registry creates the `[data-mod-slot]` container on demand (`browserSlotHost`, styled by
   `public/css/components.css`) and appends a `<div>` of its own inside it — not a Preact child, because Preact owns
   everything under `#app` and a raw child a re-render does not know about is how a pack's UI disappears on the next
-  frame. The other five (owner's ruling 2026-10-10) live **inside components the engine already renders** — a shop card,
-  the bond strip, the HUD layer, a full-screen layer over the game screen, 干员详情 — and there the component renders the
+  frame. The other twelve (owner's ruling 2026-10-10, extended 2026-10-24) live **inside components the engine already
+  renders** — a shop card, the bond strip, the HUD layer, a full-screen layer over the game screen, 干员详情, the room
+  aside, the lobby side column, the room chat area, the title entry, the stats profile block, the loadout list and the
+  DIY card area — and there the component renders the
   `[data-mod-slot]` element itself; the registry only **looks it up** (absent means "not yet", never "failed", and never
   a container invented at a position nobody recognises). `screen.game.shopCard` is **repeatable**: one container per
   card, the panel mounts into every one of them and learns which through `ctx.hostKey`. A page whose packs declare no
@@ -4053,7 +4055,7 @@ count +1 ⇒ **层数自然上去**。这是一条**纯数据**通道：不需�
 玩法自己的输入走既有的 `pack.msg`（≤4096 B / 每会话 5 每秒 / burst 20 / ≤8 条通道，§28.23），下行复用
 `m.public` 的自定义顶层键。结局仍要按既有形状产出：`m.result` + `onEnd(summary)`，且 `summary.players`
 非空数组才写战绩，塔防专属读数缺失按 0 降级、不抛。客户端那半边今天能用的最大挂载面是 `client.panels` 的
-**10** 个槽（`root.overlays` 是全屏层，§28.8）。
+**16** 个槽（`root.overlays` 是全屏层，§28.8）。
 
 **判据与证据**：`test/modMatchKinds.test.js`（合法形状与排序稳定性、未声明时逐字节不变、`MATCHKINDS_*`
 每条拒绝码逐条走、**以及「`combat` 这一格不该重复判」那条可执行的注记** —— 它断言的是

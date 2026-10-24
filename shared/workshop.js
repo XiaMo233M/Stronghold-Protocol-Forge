@@ -401,6 +401,11 @@ export const CLIENT_PANEL_SLOTS = Object.freeze([
   'root.overlays', 'root.guide', 'screen.game.aside', 'screen.result.footer',
   'screen.game.shopCard', 'screen.game.bondStrip', 'screen.game.hud', 'screen.game.overlay',
   'screen.loadout.detail', 'screen.room.aside',
+  // 2026-10-24：后六个按**社区投稿实际在用的位置**补齐（`server-ext` 挂大厅旁栏 / 房间聊天 / 标题入口 /
+  // 战绩页，`skin-picker` 挂配装卡 / DIY 卡）。判据与前面六个逐字相同 —— 宿主由**已存在的组件**自己渲染
+  // `[data-mod-slot]`，引擎不额外创建容器（所以它们都**不进** `CLIENT_PANEL_CREATED`）。
+  'screen.lobby.aside', 'screen.room.chat', 'screen.title.entry',
+  'screen.stats.profile', 'screen.loadout.card', 'screen.diy.card',
 ]);
 /**
  * **可重复的宿主**：引擎在这些位置渲染*多个*容器（每张商店卡一个），一个面板会挂进**每一个**，并通过
@@ -411,7 +416,7 @@ export const CLIENT_PANEL_SLOTS = Object.freeze([
  */
 export const CLIENT_PANEL_REPEATABLE = Object.freeze(['screen.game.shopCard']);
 /**
- * 引擎**具名组件**的闭枚举（`client.panels[].wraps[].component`，DESIGN §28.19）。十个挂载点说的是「插进哪个
+ * 引擎**具名组件**的闭枚举（`client.panels[].wraps[].component`，DESIGN §28.19）。十六个挂载点说的是「插进哪个
  * 位置」，这一张说的是「**哪个组件本身**被改写」—— 一个槽位永远表达不了「这个界面现在长得不一样了」。
  *
  * 名字与 `CLIENT_PANEL_SLOTS` 是**两个**命名空间（`game.bondStrip` vs `screen.game.bondStrip`）：前者是组件，

@@ -899,6 +899,7 @@ export function RoomScreen() {
     <div class="mod-host" data-mod-slot="screen.room.aside"></div>
     <${RoomModsPanel} room=${room} myId=${me.playerId} onAlignment=${setAlign} />
     <${ChatPanel} />
+    <div class="mod-host" data-mod-slot="screen.room.chat"></div>
     <${SpectatorBar} facts=${facts} myId=${me.playerId} busy=${busy} onRemove=${removeSpectator} onSit=${sit} />
 
     <footer class="rs-foot">
