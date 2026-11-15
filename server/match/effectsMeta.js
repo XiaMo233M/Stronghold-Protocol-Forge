@@ -16,7 +16,7 @@
 //   onBattleStart onBattleResult onChoicePick onEquip onArt onDestroy onLayers onActiveBonds
 // (onActiveBonds: the set of active bonds changed — PlayerState.recompute, player/round.js _reportActiveBonds.)
 // Garrisons fire only on the hook of their eventType (SERVER_GAIN→onGain of the gained piece, SERVER_PREP_START→
-// onPrepStart — 「进入休整期时」, after a 机变 draft (DESIGN §35.53; the strategies' grants §35.24) —, SERVER_PREP_FIN→onPrepEnd, SERVER_CHESS_SOLD→onSold of the sold piece, SERVER_PRICE→onPrice of the
+// onPrepStart — 「进入休整期时」, after a 机变 draft (DESIGN §37.53; the strategies' grants §37.24) —, SERVER_PREP_FIN→onPrepEnd, SERVER_CHESS_SOLD→onSold of the sold piece, SERVER_PRICE→onPrice of the
 // slot's chess, SERVER_REFRESH_SHOP→onRefresh); the dispatcher calls `handler[hook] ?? handler.run`. A handler may
 // widen that per garrison with `garrisonHooks(garrison) → hook[]` (e.g. "<进入休整期时><休整期结束时>"). Owned-piece
 // garrisons fire for board pieces, and for hand pieces unless bbStr.conditionkey is 'character_target_inboard'. A
@@ -41,6 +41,9 @@
 
 import { dispatchOperatorTraits, operatorTraitHandler } from './operatorTraits.js';
 import { itemKey } from './gamedata.js';
+// 部署位天花板（`DEPLOY_CAP_MAX`，shared/constants.js）：从前这里是硬编码的 `12`，与 `shared/variants.js` 的
+// `deploy: "max"` 口径各写一遍 —— 一个数两个真相，本刀收到常量里。
+import { DEPLOY_CAP_MAX } from '../../shared/constants.js';
 import { boardOrder, parseKey, tileKey } from './board.js';
 import { pieceBonds as bondsOfPiece } from './bondsMeta.js';
 import { charge } from '../sim/content/dsl/budget.js';
@@ -64,7 +67,7 @@ const HANDLER_EXTRAS = new Set(['run', 'garrisonHooks']);
 /** Garrison eventType → dispatcher hook. */
 export const GARRISON_HOOK = Object.freeze({
   SERVER_GAIN: 'onGain',
-  SERVER_PREP_START: 'onPrepStart',   // 「进入休整期时」: PREP opens, after the 机变 draft (DESIGN §35.53; was onRoundStart)
+  SERVER_PREP_START: 'onPrepStart',   // 「进入休整期时」: PREP opens, after the 机变 draft (DESIGN §37.53; was onRoundStart)
   SERVER_PREP_FIN: 'onPrepEnd',
   SERVER_CHESS_SOLD: 'onSold',
   SERVER_PRICE: 'onPrice',
@@ -105,6 +108,24 @@ export class MetaRegistry {
   get(key) { return this._h.get(key) ?? null; }
   has(key) { return this._h.has(key); }
   keys() { return [...this._h.keys()]; }
+
+  /**
+   * 复制一份注册表：**内容相同、互不影响**（DESIGN §29）。
+   *
+   * 这是「按房间装配」的落点，也是业主裁决里那条「**禁止全局 set/restore**」的实现方式：一个声明了
+   * `server.meta` 的包，它的处理器只能进**这一局**的那一份副本，绝不改进程级那一份（`getDefaultRegistry()`）
+   * —— 否则两台服务器上并发跑着的两个房间会互相串味，而且「开局前设全局、打完恢复」在多局并发下本来就是错的。
+   *
+   * 处理器对象本身是**共享**的（浅拷贝 Map）：官方内容注册的处理器是冻结的模块级常量，包注册的处理器同理不该
+   * 在运行期被改写。要按房间改**行为**，正确做法是注册一个**闭包捕获了房间参数**的处理器，而不是改这个对象。
+   * @returns {MetaRegistry}
+   */
+  fork() {
+    const copy = new MetaRegistry();
+    for (const [k, h] of this._h) copy._h.set(k, h);
+    copy.warnings = [...this.warnings];
+    return copy;
+  }
 
   // sugar
   garrison(effectKey, h) { return this.register(`garrison:${effectKey}`, h); }
@@ -677,6 +698,9 @@ export function makeCtx(m, ps, source, hook, ev = null, preview = null) {
         if (opts.bond) { const c = gd.chess(id); if (!c || !Array.isArray(c.bonds) || !c.bonds.includes(opts.bond)) return false; }
         return typeof opts.filter === 'function' ? !!opts.filter(id) : true;
       };
+      // the DRAW SOURCE: the player's own pool in the 100-seat variant, the shared one today (player/rules.js mainPool;
+      // the identical object when the switch is off — docs/PS100-MIGRATION.md §10-A)
+      const src = typeof ps.mainPool === 'function' ? ps.mainPool() : m.pool;
       let extra = typeof ps.diyStockEntries === 'function' ? ps.diyStockEntries() : null;
       if (Array.isArray(opts.tierExemptChess) && opts.tierExemptChess.length) {
         const exempt = [];
@@ -689,7 +713,7 @@ export function makeCtx(m, ps, source, hook, ev = null, preview = null) {
         }
         if (exempt.length) extra = [...(extra || []), ...exempt];
       }
-      return m.pool.roll(rng, { maxTier: Number.isInteger(opts.maxTier) ? opts.maxTier : 6, tier: Number.isInteger(opts.tier) ? opts.tier : null, filter: f, extra, ignoreCounts: opts.ignoreCounts === true });
+      return src.roll(rng, { maxTier: Number.isInteger(opts.maxTier) ? opts.maxTier : 6, tier: Number.isInteger(opts.tier) ? opts.tier : null, filter: f, extra, ignoreCounts: opts.ignoreCounts === true });
     },
     rollItem: (opts = {}) => rolls.rollItemId(opts),
     /**
@@ -698,8 +722,10 @@ export function makeCtx(m, ps, source, hook, ev = null, preview = null) {
      */
     rollPool: (poolId, opts = {}) => rolls.rollPool(poolId, {
       shopLevel: ps.shop.level,
-      // a shared-pool draw also takes the player's 自选 stock, its bonds read through the player's view (rollChess)
+      // a shared-pool draw also takes the player's 自选 stock, its bonds read through the player's view (rollChess);
+      // the draw source follows the same switch (player/rules.js mainPool)
       extra: typeof ps.diyStockEntries === 'function' ? ps.diyStockEntries() : null, chessOf: (id) => gd.chess(id),
+      pool: typeof ps.mainPool === 'function' ? ps.mainPool() : null,
       ...opts,
     }),
     /**
@@ -752,6 +778,9 @@ export function makeCtx(m, ps, source, hook, ev = null, preview = null) {
         ps.removeTokensOf(l.piece.uid);
         const lost = [];
         for (const it of l.piece.items || []) {
+          // ⚠️ 0.3.0 起 `stow` 在 allowTemp 为真时**不返回 null**（临时区无界，见 server/match/player/pieces.js）
+          // ⇒ `lost` 恒为空、下面那趟 `releaseItemStock` 与这个数组都成了不可达的防御。保留：装备永远有地方放，
+          // 这让「退回的装备因无处可去而被销毁」这条坏事再也不会发生（合入前 temp 有界时它是可达的）。
           if (!ps.stow(it, { allowTemp: true })) lost.push(it);
         }
         l.piece.items = [];
@@ -781,7 +810,7 @@ export function makeCtx(m, ps, source, hook, ev = null, preview = null) {
       return true;
     },
     addDeployCap: (n) => { const v = finiteInt(n); ps.deployCapBonus += v; ps.dirty(); return ps.deployCap; },
-    setDeployCapAtLeast: (n) => { const v = finiteInt(n); if (v > ps.deployCapMin) { ps.deployCapMin = Math.min(v, 12); ps.dirty(); } return ps.deployCap; },
+    setDeployCapAtLeast: (n) => { const v = finiteInt(n); if (v > ps.deployCapMin) { ps.deployCapMin = Math.min(v, DEPLOY_CAP_MAX); ps.dirty(); } return ps.deployCap; },
     setBondCountBonus: (bondId, n) => { if (gd.bond(bondId) && Number.isInteger(n)) { ps.bondCountBonus[bondId] = n; ps.recompute(); } },
     setDeviceActive: (alias, on) => { if (typeof alias === 'string') { ps.deviceOverrides[alias] = !!on; ps.invalidateDeployMap(); ps.dirty(); } },
     setTileOverride: (r, c, cls) => { if (Number.isInteger(r) && Number.isInteger(c) && ['melee', 'ranged', 'none'].includes(cls)) { ps.tileOverrides[`${r},${c}`] = cls; ps.invalidateDeployMap(); ps.dirty(); } },

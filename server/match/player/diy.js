@@ -280,11 +280,6 @@ export class PlayerDiy {
     return this.setDiy(picks, { kitted, allowBot: true });
   }
 
-  /** The copy accounting of base chess `baseId` for this player: its own stock for a slotted DIY slot, else the shared pool. */
-  poolOf(baseId) {
-    return this.diyStock && this.diyStock.has(baseId) ? this.diyStock : this.m.pool;
-  }
-
   /**
    * The stock entries this player's ordinary shop draws from now ([baseId, entry] with copies left and the 调度中心 at
    * the slot's shopLevel), or null (none — the shared pool's roll alone, exactly as without picks). The promotion
