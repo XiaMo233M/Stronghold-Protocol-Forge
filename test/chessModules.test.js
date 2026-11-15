@@ -169,7 +169,8 @@ describe('干员创作层：模组', () => {
     const out = deriveChessRecord(base());
     assert.equal('modules' in out.golden, false);
     assert.deepEqual(out.golden.module, { id: null, name: null, type: null, level: 1, active: false });
-    assert.deepEqual(out.base.module, { id: null, name: null, type: null, level: 1, active: false });
+    // 上游 0.4.0 起：**完全没有模组列表**的普通记录，官方写的是 module: null（不是一堆 null 的对象）
+    assert.equal(out.base.module, null);
     // 有默认模组时，普通记录的指针是 level 0（官方形状）
     const withMod = deriveChessRecord(base({ modules: [{ id: 'm', name: 'M', isDefault: true, attr: { atk: 5 } }] }));
     assert.equal(withMod.base.module.level, 0);
@@ -280,8 +281,9 @@ describe('干员创作层：模组', () => {
 
   // 完整覆盖：**每一位**可见干员都做一次模板往返。这份名单是已知的例外 —— 官方数据在它身上用了 spec 层
   // 没有表达方式的写法（集成战略专属的天赋数组），名单**固定**：出现新名字就说明派生层退化了。
-  test('全量 112 位可见干员的模板往返：只允许 1 位已知例外', () => {
-    const KNOWN = new Set(['chess_char_5_14_a']);
+  test('全量 112 位可见干员的模板往返：零已知例外', () => {
+    // 0.4.0 之后这一位的往返也干净了（容器 token 现在两端都照抄），已知例外清零
+    const KNOWN = new Set([]);
     const offenders = [];
     let checked = 0;
     for (const [id, rec] of Object.entries(CHESS)) {

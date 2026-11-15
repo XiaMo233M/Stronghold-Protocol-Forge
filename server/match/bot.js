@@ -108,6 +108,8 @@ import { isFlyKey, bountySpawns } from './waves.js';
 import { previewPlayer } from './preview.js';
 import { bossPoolHp, SharedBossPool } from './finalAssault.js';
 import { GEO, REHEARSAL_MAX_CANDIDATES } from '../../shared/constants.js';
+// 装备位语义（第 7 段）：AI 判断「还有没有空位」时读这一局的策略（缺省档 ⇒ 官方那条算法）
+import { matchSlotPolicy } from '../../shared/morph.js';
 import { mitigate } from '../sim/attack.js';
 import { HOVER_KEYS } from '../sim/content/enemies.js';
 import { SELF_BOUND, PLUS_STRIKE } from '../sim/content/bosses.js';
@@ -2481,9 +2483,13 @@ function buyOffer(m, ps, index) {
 
 /** §35.14 [ASSUMED]: room for an item only the plan asks for (items.buy): an immediate carrier or 2 free hand slots. */
 function planItemRoom(m, ps, slot) {
+  const policy = matchSlotPolicy(m);
   const free = countFree(ps.equipHand ? ps.temp.slice(0, GEO.TEMP_SIZE) : ps.hand);
   if (!free) return false;
-  const immediate = (ps.gd || m.gd).item(slot.id)?.itemType === 'EQUIP' && !!itemTarget(m, ps, slot);
+  const item = (ps.gd || m.gd).item(slot.id);
+  const immediate = item?.itemType === 'EQUIP' && !!itemTarget(m, ps, slot);
+  // 装备位语义（第 7 段）：`plus` 档下**不占格**的装备（变形同构体那类）一格就够；官方档照旧要两格
+  if (item && policy.active && policy.isSlotless(item)) return true;
   return immediate || free >= 2;
 }
 
