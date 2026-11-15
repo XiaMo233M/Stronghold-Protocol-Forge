@@ -953,7 +953,7 @@
       }
     },
     "coop2-NORMAL-14-standins": {
-      "about": "coop NORMAL, 1 bot seat(s) + 1 human seat (AI 托管) without 9 operators (补位 stand-ins), seed 14",
+      "about": "coop NORMAL, 1 bot seat(s) + 1 human seat (AI 托管) without 12 operators (补位 stand-ins), seed 14",
       "fast": true,
       "mode": "coop",
       "difficulty": "NORMAL",
@@ -1055,7 +1055,7 @@
         }
       },
       "standIns": {
-        "notOwned": ["chess_char_4_16_a","chess_char_5_10_a","chess_char_6_05_a","chess_char_6_06_a"],
+        "notOwned": ["chess_char_3_04_a","chess_char_3_05_a","chess_char_4_16_a","chess_char_5_10_a","chess_char_6_05_a","chess_char_6_06_a"],
         "rounds": [
           [1,""],
           [2,""],
@@ -1202,7 +1202,7 @@
       }
     },
     "coop2-NORMAL-1-coverage-standins": {
-      "about": "coop NORMAL, 1 bot seat(s) + 1 human seat (AI 托管) without 9 operators (补位 stand-ins), seed 1",
+      "about": "coop NORMAL, 1 bot seat(s) + 1 human seat (AI 托管) without 12 operators (补位 stand-ins), seed 1",
       "fast": true,
       "mode": "coop",
       "difficulty": "NORMAL",
@@ -1308,7 +1308,7 @@
         }
       },
       "standIns": {
-        "notOwned": ["chess_char_4_16_a","chess_char_5_10_a","chess_char_6_05_a","chess_char_6_06_a"],
+        "notOwned": ["chess_char_3_04_a","chess_char_3_05_a","chess_char_4_16_a","chess_char_5_10_a","chess_char_6_05_a","chess_char_6_06_a"],
         "rounds": [
           [1,""],
           [2,""],

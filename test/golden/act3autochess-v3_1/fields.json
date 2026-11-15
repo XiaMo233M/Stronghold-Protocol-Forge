@@ -1768,7 +1768,7 @@
       "hooks": [1,57,6000,546,546,1534,1534,1740,39,39,32,27,0,20564,539,15,42,0,1,37,0,0,0],
       "events": {"atk":587,"cast":29,"deploy":15,"die":39,"dmg":1534,"engage":7,"fx":88,"heal":70,"rate":93,"skill":59,"spawn":52,"status":57},
       "fx": {"anchor":5,"aoe":18,"displace":21,"healField":1,"lure":3,"pull":5,"snow":5,"tornado":5,"tornadoPulse":25},
-      "snaps": "acbafe86 52f4759e 3ca7cdfe 13e7e4e7 4059da2a 1c389588 49cec664 1a39937e c8cc0eba eef83782 d1b6fb0e b32e9975 6ecffeb6 8f50e82b c4062834 0641ecd5 7a9b7d2e 0131db17 71abbdbd 4bb5f6b3"
+      "snaps": "acbafe86 52f4759e 3ca7cdfe 13e7e4e7 4059da2a 13bab507 fec50c68 6d15517e 5a3ee900 8af58978 595202d1 87e7c45f 51e6aa82 0df827e9 f24311e4 2cbc119d 7e7f0c00 ce42c360 aa517c72 6dd3f87e"
     },
     "hidden-boss_15-pair": {
       "about": "假想敌：茧 pair pool 15770000: chess_char_5_17_b chess_char_5_16_b chess_char_5_11_b chess_char_5_13_b chess_char_5_14_b chess_char_5_19_b chess_char_5_12_b chess_char_5_15_b chess_char_5_18_b chess_char_5_20_b token_10050_monstr_prosts | chess_char_5_24_b chess_char_4_03_b chess_char_5_21_b chess_char_5_23_b chess_char_5_25_b chess_char_5_26_b chess_char_4_01_b chess_char_4_02_b chess_char_4_04_b chess_char_4_05_b token_10066_closur_ourbase token_10026_bgsnow_subbow token_10009_weedy_cannon",
