@@ -150,7 +150,7 @@ matters and is the answer for the third file the ruling names:
 - `server/sim/spec.js` — the per-battle identity, because the spec is the only object both execution paths already
   share (the server-run field and the client authority both go through `buildBattleSpec`, `server/sim/spec.js:57`):
   `workshopKits` (`:79-81`) gains `hash` per module, and the spec gains a top-level `mods: { digest, packs: [...] }`.
-  This is not bookkeeping: `validateClientResult` (`server/match/fields.js:748`) derives every bound it enforces from
+  This is not bookkeeping: `validateClientResult` (`server/match/fields.js:781`) derives every bound it enforces from
   the spec (`specBounds` `:630`), so a result produced under a different mod set is today checked against the wrong
   bounds — the first thing a mod breaks, and the reason the spec must carry the identity.
 - `server/workshop.js` — the *computation*: sha256 lives here (or in a small helper next to it) because it needs
@@ -408,7 +408,7 @@ while writing this section.
    the source and requires the symbols to still be declared there (`test/kitAuthoring.test.js`).
 2. `docs/WORKSHOP.md` §4.3 carried the same stale citation. **Fixed**, and the guard above now covers that file too.
 3. `docs/prompts/kit.md` cites `server/sim/Battle.js:113` for "`battle.flags` is a construction-time input" in three
-   places, while `this.flags` is assigned at `server/sim/Battle.js:150` and line 113 is a statement about `this.data`.
+   places, while `this.flags` is assigned at `server/sim/Battle.js:152` and line 113 is a statement about `this.data`.
    The citation guard (`test/promptCitations.test.js`) could not see it: it verified only that the cited line exists and
    is not blank. **Deliberately not fixed at the time**: the drift was a consequence of the in-flight 0.2.2 port moving
    every server-side line number, so the fix belonged to that port rather than to a second branch editing the same file
@@ -781,7 +781,7 @@ someone runs it on a machine with Chrome this remains the standing gap recorded 
 **The defect, stated as the code states it.** §28.12 closed the kit *import* surface. The kit **key** surface was still
 one-sided: `server/sim/content/index.js setupUnitKit()` resolves an operator's kit through `kitOf()` (keyed by
 `def.charId` for a 补位 / 自选 piece, else `def.baseId` / `def.id`), and a **summon's** kit through a second, entirely
-separate table — `tokens.kits?.[def.id]` (`server/sim/content/tokens.js:1624` builds it from `RAW_KITS`, one entry per official token).
+separate table — `tokens.kits?.[def.id]` (`server/sim/content/tokens.js:1656` builds it from `RAW_KITS`, one entry per official token).
 That table is the engine's: a pack can ship `tokens.json` records, but it cannot put behaviour behind them. The
 consequence is the worst kind — a pack's summon has data and no behaviour layer, and **nothing reports it**.
 
@@ -2215,7 +2215,7 @@ Three properties, each deliberate:
 
 > **编号注记（只说明，不改号）。** 本仓库这里的 §28.24 / §28.25 是**本节新增的面板读面规范**
 > （`ctx.net.status()` / `ctx.net.welcome()`；只在包内 `PROVENANCE.md` 与代码里同样写作 §28.24 / §28.25，
-> 故两个号一律保持不动，mod 作者才对得上）。`docs/design/engine.md:214` 那个
+> 故两个号一律保持不动，mod 作者才对得上）。`docs/design/engine.md:317` 那个
 > 「Community corrections (2026-10-10, §28.25)」是**另一处松引用标签**，`docs/design/client.md:150` 引的
 > §28.25、`docs/design/network.md:23` 引的 §30.27 同为松引用（`test/docs-paths.test.js` 只判「号是否出现过」，
 > 不核对所指内容）。**二者不是同一节**，互不替代。
@@ -2432,7 +2432,7 @@ node --test test/modSurface.test.js
 | 面板读得到的 | 既有 S2C 帧 | 帧里的哪一格 | 粒度 |
 |---|---|---|---|
 | **每人总伤害** | `m.result`（`shared/protocol.js:780`） | `players[].stats.dmgDealt`（同处还有 `bossDamage` / `healingDone` / `kills` / `leaks` / `perfectRounds`；`server/match/results.js:156-161` 组装，`ui/stats.js` 与 `screens/result.js` 的战绩页读的就是它） | 整场**结算时**一次，按玩家 |
-| **实时领袖伤害** | `b.pool`（`shared/protocol.js:786`） | `acked[fieldId]` = 那一场累计计入的领袖伤害（`server/match/match/bossRounds.js:384` `_broadcastPool`「to everyone」，≤ 4 Hz） | 首领 / 隐藏回合，按**场**，≤ 4 Hz |
+| **实时领袖伤害** | `b.pool`（`shared/protocol.js:786`） | `acked[fieldId]` = 那一场累计计入的领袖伤害（`server/match/match/bossRounds.js:190` `_broadcastPool`「to everyone」，≤ 4 Hz） | 首领 / 隐藏回合，按**场**，≤ 4 Hz |
 | 共享池血量 / 队伍 LP | 同一条 `b.pool` | `hp` / `max` / `teamLp` | 同上 |
 
 所以「总伤看板」是一个**今天就能发**的包：订阅 `m.result` 排个序就够了。

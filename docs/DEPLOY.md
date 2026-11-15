@@ -67,7 +67,7 @@ set "SP_MAX_SEATS=40" && npm start         # cmd
 * **官方 4 座这个常量本身没动**（`MAX_SEATS`）：它是「官方房间 1–4 人」的声明，也是「超过 4 人」才启用
   每人独立牌库 / 分小队联防那条路径的参照。**闸门读的是在场参与者数，不是房间容量** —— 容量 20、只坐 4 人的房
   走的是原来那条代码路径。
-* **抬席位常要同时抬连接上限**：`maxConnectionsPerAddr` 是 `startServer` 的**选项**（`server/http/config.js:20`），
+* **抬席位常要同时抬连接上限**：`maxConnectionsPerAddr` 是 `startServer` 的**选项**（`server/http/config.js:34`），
   **不是环境变量**；注释里出现过的 `SP_MAX_CONNS_PER_ADDR` **代码里并不存在**，别照它去设（`docs/NET-TUNING.md` §2.3、§7）。
 * **部署后让玩家刷新一次页面**：老页面不认新握手里的 `maxSeats`，滑杆只会到 4（只会少要，不会报错），但多人时会少画座位卡。
 * 常驻服务要在各自的环境里加这一条：NSSM 的服务加进 `AppEnvironmentExtra`（第 2 节），systemd 加一行
