@@ -119,9 +119,11 @@ export function loadWorkshop(dir = WORKSHOP_DIR, { log = null, c2s = C2S } = {})
       // 却带了别的东西（上游 0.4.0 的 docs/examples/ui-theme / ui-theme-demo 是界面主题包的示例，清单叫
       // theme.json）——它就不是工坊包：静默跳过、不记错误。只有「有 pack.json 却读不了/解析不了」才算坏包。
       if (e && e.code === 'ENOENT') {
+        // 只有「另一个清单在」时才当它是别的种类（插件示例 / 界面主题示例）而静默跳过；
+        // 空目录没有 pack.json 仍然是坏包 —— `pack.json is missing` 这条错误要照旧报出来。
         const other = ['plugin.json', 'theme.json', 'manifest.json']
           .some((f) => fs.existsSync(path.join(packDir, f)));
-        if (other || !fs.existsSync(path.join(packDir, 'pack.json'))) continue;
+        if (other) continue;
       }
       errors.push({ pack: name, reason: e && e.code === 'ENOENT' ? 'pack.json is missing' : `pack.json is unreadable: ${e.message}` });
       continue;

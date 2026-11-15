@@ -2801,8 +2801,11 @@ export class Lobby {
     const roomAssets = room && room.modSet && this.workshop && this.workshop.roomAssets
       ? this.workshop.roomAssets.forRoom(room.modSet) : null;
     if (roomAssets) return roomAssets.data;
-    const v = room ? room.version : this.defaultVersion();
-    if (v !== DEFAULT_VERSION) {
+    // **没有房间**的会话（或做过房间的机制还没选版本）：数据面就是进程本体 `safeData()` —— 它带着工坊叠加，
+    // 是「进程面复算」的那一份。房间真的选了别的版本时才读版本数据；拿 defaultVersion() 去顶替会让
+    // 无房间会话拿到版本数据、把工坊干员判成未知（test/lobby-room-face.test.js §2 钉着这一条）。
+    const v = room ? room.version : null;
+    if (v && v !== DEFAULT_VERSION) {
       try {
         const d = this.versions?.data(v);
         if (d) return d;
