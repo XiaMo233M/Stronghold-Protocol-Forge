@@ -77,6 +77,7 @@
 
 import { PHASE } from '../../shared/constants.js';
 import { mediaUrl } from './media.js';
+import { voiceDownloadStore, downloadVoiceLanguages } from './voiceDownloads.js';
 import { unhashedUrl } from '../../shared/assetPaths.js';
 // The manifest tree of each non-Chinese dub (`voiceLine`): the table itself lives in voicePrefs.js / shared/constants.js.
 import { VOICE_TREES } from './voicePrefs.js';
@@ -361,7 +362,7 @@ export const VOICE_TAP_SLOTS = Object.freeze(['select']);
  * @param {() => number} [random]
  * @returns {{ url: string, fallback: string|null } | null}
  */
-export function voiceLine(audio, charId, slot, lang = 'cn', random = Math.random) {
+export function voiceLine(audio, charId, slot, lang = 'cn', random = Math.random, allowChinese = true) {
   const lines = (line) => (Array.isArray(line) ? line : [line]).filter((u) => typeof u === 'string' && u);
   const draw = (list) => (list.length ? list[Math.min(list.length - 1, Math.floor(random() * list.length))] : null);
   const cn = lines(audio?.voice?.[charId]?.[slot]);
@@ -369,9 +370,10 @@ export function voiceLine(audio, charId, slot, lang = 'cn', random = Math.random
   const dub = tree ? draw(lines(audio?.[tree]?.[charId]?.[slot])) : null;
   if (dub) {
     const file = (u) => u.slice(u.lastIndexOf('/') + 1);
-    return { url: dub, fallback: cn.find((u) => file(u) === file(dub)) ?? draw(cn) };
+    // 玩家没有勾选中文下载时，中文那一条只是**兜底**：既不当缺配音的替补，也不当缺槽位的替补
+    return { url: dub, fallback: allowChinese ? cn.find((u) => file(u) === file(dub)) ?? draw(cn) : null };
   }
-  const url = draw(cn);
+  const url = allowChinese ? draw(cn) : null;
   return url ? { url, fallback: null } : null;
 }
 
@@ -1382,13 +1384,12 @@ export class AudioManager {
       if (!this.ctx || !this.voiceGain || this.volumes.muted || this.volumes.voice <= 0) return false;
       if (typeof charId !== 'string' || typeof slot !== 'string') return false;
       const lang = (typeof o.lang === 'string' && o.lang) || this.voiceLangOf(charId) || (this.voiceLangSet ? this.voiceLang : null);
-      const line = voiceLinesFor(this.getManifest(), charId, slot, lang);
-      const url = Array.isArray(line) ? line[Math.floor(Math.random() * line.length)] : line;
-      if (typeof url !== 'string' || !url) return false;
+      const line = this._selectedVoiceLine(charId, slot, lang);
+      if (!line || typeof line.url !== 'string' || !line.url) return false;
+      const url = line.url;
       // The default dub's own line for this slot, played when the chosen dub's file is not on this machine (see
       // _playVoice): with no extra dub installed, a player who picked 日文 still hears the operator instead of nothing.
-      const fallbackLine = lang ? voiceLinesFor(this.getManifest(), charId, slot, null) : null;
-      const fallback = Array.isArray(fallbackLine) ? fallbackLine[Math.floor(Math.random() * fallbackLine.length)] : fallbackLine;
+      const fallback = line.fallback ?? null;
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
       const verdict = this.voiceGate.request(slot, o.unitKey ?? null, now);
       if (verdict === 'drop') return false;
@@ -1405,6 +1406,16 @@ export class AudioManager {
    * cannot be loaded (the chosen dub's file the host lacks → the default dub's line of the same slot, voiceLinesFor /
    * voiceLine) — same token, same gate.
    */
+  /**
+   * 选一条配音：语言由调用方给，中文那棵树只有在「玩家勾了中文下载 / 这一条本来就是中文」时才算兜底
+   * （上游 0.4.0 的 voiceDownloads 偏好；没勾中文时，缺的配音宁可静音也不用中文顶替）。
+   */
+  _selectedVoiceLine(charId, slot, lang) {
+    const audio = this.getManifest()?.audio;
+    const allowChinese = lang === 'cn' || downloadVoiceLanguages(voiceDownloadStore.get(), charId, audio).includes('cn');
+    return voiceLine(audio, charId, slot, lang, Math.random, allowChinese);
+  }
+
   _playVoice(url, token, volume, fallback = null, again = null) {
     // `token` is the line's own `voiceToken`. Every deferred step below — the decode, a failed fetch, `onended` and the
     // safety timer — can land AFTER this line was taken over or stopped: `voiceToken` has moved on and the channel then
