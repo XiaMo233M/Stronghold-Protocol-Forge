@@ -1123,3 +1123,11 @@ export function TrustedNotice() {
     <//>
   </aside>`;
 }
+
+// —— 上游 0.4.0 的同名导出（迁移时被补丁漏掉，这里原样补回）——
+export function spectateSwitchReason(room, facts, myId) {
+  if (room?.inMatch) return t('模拟已开始');
+  if ((facts?.spectators?.length || 0) >= MAX_SPECTATORS) return t('观战席已满');
+  if (!facts?.humans?.some((s) => s.playerId !== myId && s.connected)) return t('至少保留一名参赛博士');
+  return '';
+}

@@ -274,3 +274,41 @@ export function serveAgent(decide, input = process.stdin, output = process.stdou
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try { serveAgent(createLLMAgent()); } catch { process.stderr.write('LLM configuration invalid\n'); process.exitCode = 1; }
 }
+
+/** 上游 0.4.0：模型侧的系统提示预算（字符数）。 */
+export const SYSTEM_BUDGET = 50000;
+
+/** 上游 0.4.0：策略草拟那段提示词。 */
+export const BAND_TASK = `Band draft, choice only. bands[] are the offered strategies: lp (starting LP: the leak budget and
+the Final Assault clock), share (the bot's own draft weight in %: LP cubed times its measured strength on 终极), bond (the
+band's core bond; effect says how the band helps it; bondDrawn = drawn this match, its single-bond members are out of the
+pool), forced (the bot's rule pick: Touch once a teammate holds 歌利亚 in co-op 终极; 杰西卡 in solo 终极 when 6 谢拉格 can
+still come). teammates[] are public picks (drafted:false = not picked yet), digest.team their plans and notes. Reply only
+{"why":"one short sentence","choiceName":"<the band's name>","plan":{"choice":"<bands[].choice>"}}, or
+{"why":"...","choiceName":"bot","plan":{"choice":"bot"}} to let the bot pick (its forced pick, else a draw by share). In
+co-op you may add "team":"one line: the role and main you intend". Take a forced pick unless the team clearly needs
+another role. Never draft for the leader.`;
+
+/** 上游 0.4.0 的导出（迁移补丁漏掉的，原样补回）。 */
+export function callKinds(value) {
+  if (value === undefined || value === '') return null;
+  const kinds = String(value).split(',');
+  if (!kinds.every(k => ['band', 'card', 'offer', 'reward', 'prep'].includes(k))) throw new Error('LLM configuration');
+  return new Set(kinds);
+}
+
+/** 上游 0.4.0 的导出（迁移补丁漏掉的，原样补回）。 */
+export function callRounds(value) {
+  if (value === undefined || value === null || String(value).trim() === '') return null;
+  const text = String(value).replace(/\s+/g, '');
+  if (!/^\d{1,2}(,\d{1,2})*$/.test(text)) throw new Error('LLM configuration');
+  const rounds = new Set(text.split(',').map(Number));
+  if ([...rounds].some(r => r < 1)) throw new Error('LLM configuration');
+  return rounds;
+}
+
+/** 上游 0.4.0 的导出（迁移补丁漏掉的，原样补回）。 */
+export function carriedPlan(plan) {
+  const out = { ...(plan?.bonds?.length ? { bonds: structuredClone(plan.bonds) } : {}), ...(plan?.keep?.length ? { keep: plan.keep.slice() } : {}) };
+  return validPlan(out) ? out : {};
+}
