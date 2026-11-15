@@ -25,9 +25,12 @@ const pl = (id, seat, alive = true) => ({ playerId: id, seat, alive });
 const pubAt = (round, players = [pl('a', 0), pl('b', 1)]) => ({ round, bossRound: 14, hiddenRound: 15, players });
 
 describe('the camera choice (gameLogic prepCameraFor / foldCamera)', () => {
+  // the own prep camera frames the MAP's prep band (shared/layout.js `battle.prep`): for an official 19×21 record that
+  // is the historical GEO.NORMAL_RECT with the bench row above it (render/projection.js prep band)
+  const PREP_RECT = { r0: GEO.HAND_ROW, r1: GEO.NORMAL_RECT.r1, c0: GEO.NORMAL_RECT.c0, c1: GEO.NORMAL_RECT.c1 };
   test('prepCameraFor: the own prep camera with the shop state — open = shop camera, folded = shop-collapsed', () => {
-    assert.deepEqual(prepCameraFor(pubAt(6), 'a'), { kind: 'prep', opts: { rect: { ...GEO.NORMAL_RECT }, side: 'L', shop: true } });
-    assert.deepEqual(prepCameraFor(pubAt(6), 'a', true), { kind: 'prep', opts: { rect: { ...GEO.NORMAL_RECT }, side: 'L', shop: false } });
+    assert.deepEqual(prepCameraFor(pubAt(6), 'a'), { kind: 'prep', opts: { rect: { ...PREP_RECT }, side: 'L', shop: true } });
+    assert.deepEqual(prepCameraFor(pubAt(6), 'a', true), { kind: 'prep', opts: { rect: { ...PREP_RECT }, side: 'L', shop: false } });
     // the Final Assault prep: the player's half of the boss field, with the same flag
     assert.deepEqual(prepCameraFor(pubAt(14), 'b', true), { kind: 'bossPrep', opts: { side: 'R', shop: false } });
     assert.deepEqual(prepCameraFor(pubAt(14), 'a'), { kind: 'bossPrep', opts: { side: 'L', shop: true } });
@@ -40,8 +43,8 @@ describe('the camera choice (gameLogic prepCameraFor / foldCamera)', () => {
   });
 
   const base = { pub: pubAt(6), myId: 'a', ownPrep: true, pen: false, busy: false };
-  const open = { kind: 'prep', opts: { rect: { ...GEO.NORMAL_RECT }, side: 'L', shop: true } };
-  const folded = { kind: 'prep', opts: { rect: { ...GEO.NORMAL_RECT }, side: 'L', shop: false } };
+  const open = { kind: 'prep', opts: { rect: { ...PREP_RECT }, side: 'L', shop: true } };
+  const folded = { kind: 'prep', opts: { rect: { ...PREP_RECT }, side: 'L', shop: false } };
 
   test('foldCamera: a fold asks for the shop-collapsed camera, an unfold for the shop camera again, else nothing', () => {
     assert.deepEqual(foldCamera({ ...base, folded: true, current: open }), folded);
@@ -204,11 +207,21 @@ describe('wiring', () => {
     assert.match(app, /hud: hudBands\(vk, sz, \{ shop: o\.shop \?\? true \}\),/);
     assert.match(app, /return opts\.hud\(kind, sz, o\) \|\| null;/);
     const game = read('public/js/screens/game.js');
-    // issue #602 also ORs the deploy interaction's temporary fold into the camera state (issue602-deploy-fold.test.js)
+    // 商店是否折叠 = 玩家自己的收起态 **或** 部署期间临时折叠（0.3.0 引入 `deployFold`，上游 game.js 逐字同形：
+    // `const shopFolded = showShop && (pen ? penRef.current.collapsed : (collapsed || deployFold));`）。
+    // 钉语义：三个输入都必须在 —— 自己的收起态、笔带收起态、部署临时折叠。
     assert.match(game, /const shopFolded = showShop && \(pen \? penRef\.current\.collapsed : \(collapsed \|\| deployFold\)\);/);
+    // entering prep and the boss-prep re-frame take the fold state; a fold / unfold re-frames through foldCamera
+    // (大图: the map's own window rides along as the last argument — shared/layout.js `stageLayout`)
+    assert.equal((game.match(/const pc = prepCameraFor\(pub, myId, shopFolded, stageLayout\);/g) || []).length, 2);
+    // foldCamera 收到的是 fold 态本身，且它进了 `useEffect` 的依赖数组（少了它，折叠变化不会重算镜头）。
+    // 只钉这两点，不钉整段排版（缩进与其它 props 的文字随时会变，钉死会让这条断言一改就红）。
+    assert.match(game, /\}, \[[^\]]*\bshopFolded\b[^\]]*\]\);/);
     // entering prep and the boss-prep re-frame take the fold state; a fold / unfold re-frames through prepDeployCamera
     // (which calls foldCamera, still deferred while busy unless a deploy zoom is being given back — issue #602)
     assert.equal((game.match(/const pc = prepCameraFor\(pub, myId, shopFolded\);/g) || []).length, 2);
     assert.match(game, /const next = prepDeployCamera\(\{\n\s+pub, myId, deployFold, partial: deployPartial, releaseDeploy: step\.release, folded: shopFolded,\n\s+ownPrep: !!view && viewModeRef\.current === 'prep' && showPrep,\n\s+pen, busy: !!drag \|\| !!facing, current: camRef\.current,\n\s+\}\);\n\s+\/\/ a null release because the pen is open stays owed; a null only because the camera already\n\s+\/\/ matches the player's fold spends it\. \[ASSUMED\]\n\s+deployZoomedRef\.current = deployZoomRemember\(step, \{ next, pen \}\);\n\s+\/\/ the fold zoom and the restore fly with the short FOLD_CAMERA_MS, not a generic camera flight\n\s+if \(next\) setCam\(next\.kind, \{ \.\.\.next\.opts, ms: FOLD_CAMERA_MS \}\);/);
+    assert.equal((game.match(/const pc = prepCameraFor\(pub, myId, shopFolded, stageLayout\);/g) || []).length, 2);
+    assert.match(game, /const next = prepDeployCamera\(\{\n\s+pub, myId, deployFold, releaseDeploy: step\.release, folded: shopFolded,\n\s+ownPrep: !!view && viewModeRef\.current === 'prep' && showPrep,\n\s+pen, busy: !!drag \|\| !!facing, current: camRef\.current,\n\s+\}\);\n\s+\/\/ a null release because the pen is open stays owed; a null only because the camera already\n\s+\/\/ matches the player's fold spends it\. \[ASSUMED\]\n\s+deployZoomedRef\.current = deployZoomRemember\(step, \{ next, pen \}\);\n\s+\/\/ the fold zoom and the restore fly with the short FOLD_CAMERA_MS, not a generic camera flight\n\s+if \(next\) setCam\(next\.kind, \{ \.\.\.next\.opts, ms: FOLD_CAMERA_MS \}\);/);
   });
 });

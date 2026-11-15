@@ -30,10 +30,10 @@
 // `cultivate` (练度 0–3: the effects.json CHAR_MAP aceffect_char_1…4 — a ×ATK / ×DEF / ×max HP of the unit, its own
 // multiplier); each kept only when well-formed and never on a stand-in. Absent: full potential and no 练度 (a raw
 // unit — the match always states both for an owned operator: PlayerState.battleInput).
-// Content identity (DESIGN §32): `cs`, the content hash of the room's content set (shared/plugins/identity.js; 64 hex
+// Content identity (DESIGN §34): `cs`, the content hash of the room's content set (shared/plugins/identity.js; 64 hex
 // digits), is kept when well-formed and left out otherwise — a spec built without one is what it always was. The sim
 // never reads it: it names what the battle runs on — a browser that has not loaded that content is no authority of the
-// battle and a b.result naming another one is refused (P1c, DESIGN §32.6) —, the diagnostics and replays. `vs` (P1c), the
+// battle and a b.result naming another one is refused (P1c, DESIGN §34.6) —, the diagnostics and replays. `vs` (P1c), the
 // room's visual set of cosmetic plugins (shared/plugins/visual.js; 64 hex digits), likewise: kept when well-formed, never
 // read by the sim — a replay or a bug report names the art the battle was drawn with.
 
@@ -87,10 +87,59 @@ export function buildBattleSpec(o = {}) {
     waveId: o.waveId ?? null,
     bossId: o.bossId ?? null,
     content: o.content ?? 'full',
+    // 限伤 override (opt-in, shared/constants.js bossHitLimitFrom): the KEY appears only when a deployment set
+    // SP_BOSS_HIT_LIMIT, so a spec built without one is byte-for-byte the old spec. `null` = Infinity (off), because
+    // JSON.stringify turns Infinity into null; createBattleFromSpec turns it back.
+    ...(o.bossHitLimit === undefined ? {} : { bossHitLimit: Number.isFinite(o.bossHitLimit) ? o.bossHitLimit : null }),
     boss: bossLike && o.boss ? { poolHp: Number(o.boss.poolHp) || 0, poolMax: Number(o.boss.poolMax) || 1 } : null,
     // the content set the battle runs on and the art it was drawn with (header): not read by the sim
     ...(isContentHash(o.cs) ? { cs: o.cs } : {}),
     ...(isContentHash(o.vs) ? { vs: o.vs } : {}),
+    // 工坊行为层 (docs/WORKSHOP.md §4): the kit MODULES this field needs, as JSON-safe { id, pack, hash, url } records.
+    // A function cannot cross the wire, so a client-simulated battle imports these URLs and rebuilds the same kit map
+    // the server uses for verification (public/js/battle/runner.js loadSpecKits). Empty for a plain install. `hash` is
+    // the pack's content hash (DESIGN §28.2): the client can tell which bytes the URL is supposed to serve.
+    workshopKits: (Array.isArray(o.workshopKits) ? o.workshopKits : [])
+      .filter((m) => m && typeof m.id === 'string' && typeof m.url === 'string')
+      .map((m) => ({
+        id: m.id,
+        pack: typeof m.pack === 'string' ? m.pack : null,
+        url: m.url,
+        ...(typeof m.hash === 'string' ? { hash: m.hash } : {}),
+        // 调用预算（`pack.json.callBudget`, DESIGN §28.52）的 kit 那一半：**同一个数字**由装载期算好后随这份清单
+        // 过线，浏览器读它、不再自己算一次（`public/js/battle/runner.js loadSpecKits` 的 `kitBudgets`）。没声明
+        // 的包不长这个键 —— 与 `workshopBattle` 那份逐字同形（老客户端读不懂这个键时也只是不带账，不会读错）。
+        ...(Number.isInteger(m.callBudget) ? { callBudget: m.callBudget } : {}),
+        // 召唤物的行为层（docs/WORKSHOP.md §4.7）：**同一份清单**里的另一条通道，`kind: 'token'` 标记它属于
+        // token 键空间（`Battle opts.tokenKits` 而不是 `opts.kits`）。干员 kit 照旧不带这个键 —— 线上格式对
+        // 已经存在的读者（包括老客户端）逐字节不变，而两个键空间在装载器里是**分开裁决**的，所以必须分开送达。
+        ...(m.kind === 'token' ? { kind: 'token' } : {}),
+      })),
+    // The content this field runs with (DESIGN §28.2): `{ digest, packs }`, or null. It is here because the spec is the
+    // only object both execution paths share — and because validateClientResult derives every bound it enforces from
+    // this spec (server/match/fields.js specBounds), so a result computed under a DIFFERENT mod set has to be
+    // distinguishable from one computed under this one.
+    mods: o.mods && typeof o.mods === 'object' ? JSON.parse(JSON.stringify(o.mods)) : null,
+    // 行为开关 `morphPairing` 的档位（DESIGN §28.43.1）：这一场战斗的**配对规则**，judged by the same single helper
+    // (`shared/morph.js`) the server's prep side and the client's card use. **只在非缺省档才出现这个键** ——
+    // 没声明这一格的 spec 与从前逐字节相同（spec 的键纪律与 `server/match/match/battleOpts.js` 同一条）。
+    ...(o.morphPairing && o.morphPairing !== 'official' ? { morphPairing: o.morphPairing } : {}),
+    // 包声明的**战斗逻辑**模块（`pack.json.server.battle`, DESIGN §28.17）：与 `workshopKits` 逐字同形 —— 一条
+    // JSON 安全的 `{ id, pack, hash, url }`，浏览器按 URL 加载同一段代码并跑 `install(battle)`，服务端复算用的是同
+    // 一个包的同一份字节。空数组 = 没有包声明它（干净安装），此时 spec 里这个键照旧存在但什么都不做。
+    workshopBattle: (Array.isArray(o.workshopBattle) ? o.workshopBattle : [])
+      .filter((m) => m && typeof m.id === 'string' && typeof m.url === 'string')
+      .map((m) => ({
+        id: m.id,
+        pack: typeof m.pack === 'string' ? m.pack : null,
+        url: m.url,
+        ...(typeof m.hash === 'string' ? { hash: m.hash } : {}),
+        // 调用预算的 `server.battle` 那一半：**这个键过去在这张投影里被丢掉了** —— 装载期把生效 max 挂上了
+        // `modules[]`（server/battlePack.js），但 spec 这一层按显式键重建对象时没带上它，于是浏览器那半永远
+        // 建不了账、而服务端复算那半会回滚 ⇒ 两端在**不同**的调用次数上停（`loadSpecBattleInstallers` 读的就是
+        // `m.callBudget`）。两端同规则是这一格的硬要求，所以这一行与 `workshopKits` 那份逐字同形地补上。
+        ...(Number.isInteger(m.callBudget) ? { callBudget: m.callBudget } : {}),
+      })),
     ...(o.version && o.version !== DEFAULT_VERSION ? { version: o.version } : {}),
     // morphPairing plus only. An official spec grows no key (identity and extra-field tests).
     ...(o.morphPairing === 'plus' ? { morphPairing: 'plus' } : {}),
@@ -184,6 +233,31 @@ export function createBattleFromSpec(spec, dataSource, opts = {}) {
   if (opts.recordEvents === false) battleOpts.recordEvents = false;
   if (opts.quiet) battleOpts.quiet = true;
   if (opts.resourceNumbers) battleOpts.resourceNumbers = true;
+  // 限伤 override (`spec.bossHitLimit`, shared/constants.js bossHitLimitFrom): a finite number is the rail, `null`
+  // means Infinity (JSON has no Infinity — the browser rebuilds it). The spec/meta KEY being absent leaves the battle
+  // without one, i.e. the BOSS_HIT_LIMIT default, which is the behaviour of every existing spec.
+  if (s.bossHitLimit === null && Object.hasOwn(s, 'bossHitLimit')) battleOpts.bossHitLimit = Infinity;
+  else if (typeof s.bossHitLimit === 'number') battleOpts.bossHitLimit = s.bossHitLimit;
+  // 行为开关 `morphPairing`（DESIGN §28.43.1）：spec 上带了这个键就递给这一场 Battle（`opts.morphPairing`），战斗把
+  // 它压进 `withMorphPairing` 的作用域、`unitBonds` 从那里读。缺省的 spec 没有这个键 ⇒ 战斗与从前逐字节相同。
+  if (opts.morphPairing === undefined && typeof s.morphPairing === 'string' && s.morphPairing) battleOpts.morphPairing = s.morphPairing;
+  // 工坊行为层 (docs/WORKSHOP.md §4): a per-battle kit map injected through the sanctioned hook — `Battle opts.kits`
+  // takes precedence over the built-in registry (server/sim/content/index.js setupUnitKit). The server passes the map it
+  // loaded from the packs; the browser passes the map it built from `spec.workshopKits`.
+  if (opts.kits && typeof opts.kits === 'object') battleOpts.kits = opts.kits;
+  // 召唤物的行为层（docs/WORKSHOP.md §4.7）：另一张表，另一个键空间（token 记录 id，`content/index.js` 的
+  // `tokens.kits?.[def.id]`）。与上面一行同一条纪律：没有包声明它时这个键根本不出现，战斗与从前逐字节相同。
+  if (opts.tokenKits && typeof opts.tokenKits === 'object') battleOpts.tokenKits = opts.tokenKits;
+  // kit 的**归属**与**预算**（DESIGN §28.52 的 kit 那一半）：与上面两个键逐字对称 —— 服务端那条路（`specBattleOpts`）
+  // 与浏览器那条路（`public/js/battle/runner.js` 从 spec 的模块清单重建）都必须交进来，否则 kit 的逐单位回调一端
+  // 归账、另一端不归账，两端就在**不同**的调用次数上停。没有包声明它们时这几个键根本不出现（逐字节同前）。
+  if (opts.kitOwners instanceof Map) battleOpts.kitOwners = opts.kitOwners;
+  if (opts.tokenKitOwners instanceof Map) battleOpts.tokenKitOwners = opts.tokenKitOwners;
+  if (opts.kitBudgets instanceof Map) battleOpts.kitBudgets = opts.kitBudgets;
+  // 包声明的战斗逻辑（`server.battle`, DESIGN §28.17）：服务端把**这一场**要跑的 installer 直接递进来（一个函数过不了
+  // 线），浏览器那边按 `spec.workshopBattle` 的 URL 自己加载出同一批。没有包声明时不传这个键 —— Match 与 Battle
+  // 的行为与从前逐字节相同。
+  if (Array.isArray(opts.battleInstallers) && opts.battleInstallers.length) battleOpts.battleInstallers = opts.battleInstallers;
   const b = new BattleClass(battleOpts);
   b.battleId = s.battleId ?? null;
   return b;

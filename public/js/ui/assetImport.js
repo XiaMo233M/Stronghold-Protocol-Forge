@@ -1,4 +1,12 @@
 // Local import panel in resource management. Unmounting cancels imports; stored bytes remain.
+// The title screen's 导入素材包 (docs/history/0.3.0.md §34.14.23, §34.14.39): its own button and dialog beside 下载完整素材
+// (ui/assetDownload.js), so a player who only imports never starts the server download.
+//
+// Opening the dialog reads nothing from the server: no art, not the manifests (assetPack.js reads the three served
+// manifests only once an import starts) and not the download queue. The dialog: a folder (showDirectoryPicker, else an
+// <input webkitdirectory>) or a zip (a picker, or dropped), cancel, the counts, 清除已导入的素材 after a confirm, the
+// persist note, and why import is unavailable on plain http or in a browser without the APIs. Closing it cancels a
+// running import; what was stored stays, and the download queue skips it (assetDownload.js).
 import { useEffect, useRef, useState } from '../../vendor/hooks.module.js';
 import { html, Button, ProgressBar, confirmDialog } from './components.js';
 import { assetImport } from '../assetPack.js';

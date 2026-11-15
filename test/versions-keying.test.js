@@ -1,11 +1,11 @@
-// Versions M0 (docs/SIM.md §7.2, DESIGN §35.22.3): on another official version's build (config.version) hand-written
+// Versions M0 (docs/SIM.md §7.2, DESIGN §37.22.3): on another official version's build (config.version) hand-written
 // behaviour is found by the operator's charId and the item's effectId, not by the default data's chess / item ids —
 // 上半 (act1autochess) gives 50 of its 100 chess ids and most item ids to other operators and effects. The default data
 // and the plugin content sets built on it (no config.version) keep the by-id lookups of before M0. Every data directory
 // checked here — data/, every data/versions/*/ with a chess.json, and the directories of SP_VERSION_DATA_DIRS
 // (path.delimiter-separated, e.g. a dry build) — must:
 //   * resolve every chess to a kit written for its own charId, or list its charId in PENDING_KIT_CHARS (generic kit;
-//     empty after the 第一期 charId kits, §35.22.9);
+//     empty after the 第一期 charId kits, §37.22.9);
 //   * resolve every 自选 pick (owned pool and prototypes, each slot) and every 补位 stand-in to the kit of its charId, or
 //     be a 预备干员 (GENERIC_KIT_CHARS, generic by design) or a version's 自选 pick listed in PENDING_DIY_KIT_CHARS
 //     (empty after the borrowed tier kits), which the kitted gate (KITTED_CHARS) then drops;
@@ -99,7 +99,7 @@ const DEFAULT_META = Object.freeze({
   scroll: ['chess_item_6_02_m'], customerDestroy: ['chess_item_6_01_m'], cauldron: ['chess_item_6_03_e'],
 });
 const SHANG = Object.freeze({
-  // 自选: the 24 borrowed charId kits (§35.22.9) are kitted; V1_1's owned pool has one operator less (娜斯提)
+  // 自选: the 24 borrowed charId kits (§37.22.9) are kitted; V1_1's owned pool has one operator less (娜斯提)
   kits: { own: 46, tier: 19, op: 31, pending: 0 }, diy: { kitted: 81, generic: 6, pending: 0 }, standIns: { kitted: 64, generic: 68 },
   items: 44, handlers: 22, battleEffect: 68,
   hammers: ['chess_item_2_03_e', 'chess_item_2_04_e', 'chess_item_2_05_e', 'chess_item_2_06_e'],
@@ -304,13 +304,13 @@ for (const dir of DIRS) {
 // The kits' hand-written group lists (character_table groupId; no built record carries it): 深海猎人 for 斯卡蒂 (its own
 // list) and for 歌蕾蒂娅, 浊心斯卡蒂 and the tier-5 kits (归溟幽灵鲨, 乌尔比安; one list, shared/tier5.js abyssalOf), 莱茵生命
 // for 缪尔赛思. Per directory, the shop chess and 自选 operators
-// each list sees, as literals: a roster that brings in a new member fails until the list follows (DESIGN §35.22.4). The
+// each list sees, as literals: a roster that brings in a new member fails until the list follows (DESIGN §37.22.4). The
 // additions of M0 (安哲拉, 星源) apply on a version's build only.
 const GROUPS = Object.freeze({
   'data': { abyssal: ['char_1023_ghost2', 'char_143_ghost', 'char_263_skadi', 'char_4145_ulpia', 'char_474_glady'], rhineMissed: [] },
   'data/versions/act1autochess': {
     abyssal: ['char_1023_ghost2', 'char_143_ghost', 'char_218_cuttle', 'char_263_skadi', 'char_4145_ulpia', 'char_474_glady'],
-    // 伊芙利特 and 淬羽赫默: shop chess in 第一期, 自选 picks today; whether 自选 members count is open (M2, DESIGN §35.22.5)
+    // 伊芙利特 and 淬羽赫默: shop chess in 第一期, 自选 picks today; whether 自选 members count is open (M2, DESIGN §37.22.5)
     rhineMissed: ['char_1031_slent2', 'char_134_ifrit'],
   },
   'data/versions/act1autochess-v1_1': {
@@ -346,7 +346,7 @@ test('深海猎人 lists: on a version\'s build both lists hold the same six ope
 // deploy and battleStart cost cut): a kit reading the version list directly fails here (the golden corpus has no
 // 安哲拉 / 星源 chess)
 test('group lists: a plugin content set on the default data that fields 安哲拉 / 星源 as official operators keeps the lists of before M0', (t) => {
-  // a Forge chess or §34.16 record of an official operator outside the roster carries the charId and no groupId
+  // a Forge chess or §36.16 record of an official operator outside the roster carries the charId and no groupId
   const data = clone(dataOf(DEFAULT_DIR));
   for (const [id, charId] of [['chess_x_t_cuttle_a', 'char_218_cuttle'], ['chess_x_t_halo_a', 'char_135_halo']]) {
     data.chess[id] = { ...data.chess.chess_char_1_02_a, chessId: id, baseId: id, goldenId: null, upgradeChessId: null, charId };
@@ -395,7 +395,7 @@ test('kits: on a version\'s build a chess id given to another operator takes tha
   t.after(() => setGameData(null));
   const ds = new DataSource(dataOf(DEFAULT_DIR), null);
   const yak = ds.getChess('chess_char_1_02_a');
-  // 上半's chess_char_1_02_a is 讯使 (a charId kit, §35.22.9), its chess_char_5_12_a 林 (an op-* kit)
+  // 上半's chess_char_1_02_a is 讯使 (a charId kit, §37.22.9), its chess_char_5_12_a 林 (an op-* kit)
   assert.equal(officialKitKey({ ...yak, charId: 'char_198_blackd' }), 'char_198_blackd');
   assert.equal(officialKitKey({ ...ds.getChess('chess_char_5_12_a'), charId: 'char_4080_lin' }), 'char_4080_lin');
   // 锡人 at tier 2 under another id → chess_char_2_19_a; at an unknown tier → the first one
@@ -739,6 +739,8 @@ test('auto_chess_change_map: Touch\'s map characters have a battle part and coun
  * server/match/gamedata.js band_bldsk / band_cannot). Bond ids are keyed by id too, except the five 规程 bonds whose
  * effect id differs (regulation.js EFFECT_KEYED_BONDS: install() dispatches those by effectId, and a swapped 盟约
  * effect id still runs the 盟约 installer). DESIGN §35.22.4 relies on every other reuse keeping the same band or bond.
+ * server/match/gamedata.js band_bldsk / band_cannot). Bond ids are all keyed by id too (bonds/core.js INSTALLERS,
+ * memberOf(…, 'yanShip'), addon …): DESIGN §37.22.4 relies on a version reusing them only for the same band or bond.
  */
 const CODE_KEYED_BANDS = Object.freeze(['band_cathy', 'band_amedic', 'band_bldsk']);
 /**

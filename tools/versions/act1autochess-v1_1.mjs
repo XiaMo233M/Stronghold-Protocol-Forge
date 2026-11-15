@@ -1,6 +1,6 @@
 // tools/versions/act1autochess-v1_1.mjs — build profile of 第一期上半: 盟约·上半 (act1autochess) in its first
 // sub-version V1_1 (2025-11-14 16:00 → 2025-11-25 16:00), with the 11-18 hotfix (docs/DATA.md "Official versions (M0)";
-// the maintainer's decisions of 2026-10-22, DESIGN §35.22). Pinned to Kengxxiao/ArknightsGameData:
+// the maintainer's decisions of 2026-10-22, DESIGN §37.22). Pinned to Kengxxiao/ArknightsGameData:
 //   default   8303c922 (the launch, data version 25-11-12-14-06-12): the range table, the enemy tables (enemy_database
 //             changed again at 23c99d5d, so there is no separate enemy pin: V1_2's ee2cabff would leak V1_2 enemies) and
 //             the 43 level files (the hotfix changed none; V1_2's 23c99d5d changed the three solo hidden-core levels

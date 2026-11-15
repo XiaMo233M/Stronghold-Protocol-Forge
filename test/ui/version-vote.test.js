@@ -1,4 +1,4 @@
-// test/ui/version-vote.test.js — the room's version vote strip (public/js/ui/versionVote.js, DESIGN §35.23 M1; protocol §4 /
+// test/ui/version-vote.test.js — the room's version vote strip (public/js/ui/versionVote.js, DESIGN §37.23 M1; protocol §4 /
 // §5): room.state.versionVote read tolerantly; a voter who has not agreed gets 同意切换 / 拒绝切换, one who agreed waits, the
 // host gets 取消投票, a spectator (no voter) only reads it; the count, the voters' chips and the countdown; the room's
 // facts with another version (needsContent gates ready and start, not the 非官方 mark); the pill's and the GoButton's
@@ -118,6 +118,8 @@ test('the room screen: the strip between the 观战席 and the footer, the versi
   assert.match(src, /disabled=\$\{!facts\.canStart \|\| !online \|\| busy === 'start' \|\| !!vote\}/);
   // gameplay plugins no longer block a proposal on the page: the server checks their manifest versions
   assert.doesNotMatch(src, /facts\.modded \? t\('请先关闭改变玩法的插件'\)/);
+  assert.match(src, /disabled=\$\{!facts\.canStart \|\| !online \|\| busy === 'start' \|\| !!vote \|\| soloAlignBlocked\}/);
+  assert.match(src, /t\('请先关闭改变玩法的插件'\)/);
   assert.match(src, /data-testid="version-banner"/);
   assert.match(src, /t\('\{name\}邀请你加入卫戍协议：盟约·\{version\}【\{difficulty\}】'/);
   assert.match(src, /net\.request\('room\.proposeVersion', \{ version \}\)/);

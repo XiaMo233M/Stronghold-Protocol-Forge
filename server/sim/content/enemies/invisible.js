@@ -47,7 +47,7 @@ function kitCrossbow(ab) {
         if (bb.stun > 0 && c.target.alive) b.applyStatus(c.target, 'stun', { duration: bb.stun, source: e });
       } });
     }, { owner: e });
-  }, { sil: true, cond: (b, e) => aligned(b, e).length > 0, turn: attackSkillOf('enemy_1404_msnip', 'CrossAttack') })];   // the attack's turn (DESIGN §35.52)
+  }, { sil: true, cond: (b, e) => aligned(b, e).length > 0, turn: attackSkillOf('enemy_1404_msnip', 'CrossAttack') })];   // the attack's turn (DESIGN §37.52)
 }
 
 /**
@@ -89,6 +89,10 @@ function kitJazz(ab, e) {
     // the 10.5 s channel, so counted from the cast the next one would fire the moment this one ends and it would never walk
     // again [ASSUMED "持续施法", as 死亡之眼; PRTS 「同一技能的冷却时间于该技能结束时开始计时」].
     // the attack's turn (RangedAttack: DESIGN §35.52) — while revealed, its trigger the targets in its radius (`own`)
+    // priority: the blocker first), floor(10.6 / 0.5) = 21 ticks at 0.5 … 10.5 s. The channel also ends when that target
+    // is gone, makes no normal attacks meanwhile and is never re-cast over itself — the 10 s cooldown (enemy_database
+    // skill 'fire') runs out mid-channel, the next cast waits for its end [ASSUMED "持续施法", as 死亡之眼].
+    // the attack's turn (RangedAttack: DESIGN §37.52) — while revealed, its trigger the targets in its radius (`own`)
     sil: true, cd: s.cd, icd: s.icd, sk: s, ...attackSkillOf('enemy_10034_cnvsax', 'fire'),
     cond: (b, e2) => revealed(e2) && !(e2.mem.jazzChannel && !e2.mem.jazzChannel.cancelled) && targetsNear(b, e2, r).length > 0,
     fire(b, e2, a) {

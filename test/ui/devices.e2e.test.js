@@ -76,6 +76,7 @@ describe('multi-device (Chrome device emulation)', { skip: !ENABLED && 'set SP_E
     const full = url.startsWith('/') ? `${base}${url}` : `${base}/dev/game-mock.html?shot=1&render=${render}&${url}`;
     await seedReleaseRead(page);
     await page.goto(full, { waitUntil: 'networkidle0' });
+    await page.goto(full, { waitUntil: 'load' });
     await page.waitForFunction(() => !!document.querySelector('.screen:not(.gload)'), { timeout: 20000 });
     await sleep(url.startsWith('/') ? 600 : 1600);
     return { page, problems };
@@ -352,6 +353,7 @@ describe('multi-device (Chrome device emulation)', { skip: !ENABLED && 'set SP_E
           await page.emulate({ viewport: { width: w, height: h, deviceScaleFactor: 1, isMobile: !!touch, hasTouch: !!touch, isLandscape: true }, userAgent: await b.userAgent() });
           await seedReleaseRead(page);
           await page.goto(`${base}/dev/game-mock.html?shot=1&render=fallback&phase=PREP`, { waitUntil: 'networkidle0' });
+          await page.goto(`${base}/dev/game-mock.html?shot=1&render=fallback&phase=PREP`, { waitUntil: 'load' });
           await page.waitForSelector('.ewheel__btn');
           await sleep(300);
           const m = await page.$eval('.ewheel__btn', (btn) => {
@@ -384,6 +386,12 @@ describe('multi-device (Chrome device emulation)', { skip: !ENABLED && 'set SP_E
     await seedReleaseRead(page);
     await page.goto(`${base}/`, { waitUntil: 'networkidle0' });
     await sleep(400);
+    await page.goto(`${base}/`, { waitUntil: 'load' });
+    // `.rotate-hint` visibility is decided by the app AFTER load (touch / UA detection against the viewport shape), so
+    // wait for that decision instead of sleeping and hoping. Each wait is best-effort: the assert after it still runs, so
+    // a genuine regression reports as "desktop keeps the game" rather than a bare timeout.
+    await page.waitForFunction(() => document.querySelector('.rotate-hint') && getComputedStyle(document.querySelector('.rotate-hint')).display === 'grid', { timeout: 8000, polling: 100 })
+      .catch(() => {});
     assert.equal(await page.$eval('.rotate-hint', (el) => getComputedStyle(el).display), 'grid');
     await page.screenshot({ path: path.join(OUT, 'device-portrait-rotate.png') });
     await page.close();
@@ -392,7 +400,10 @@ describe('multi-device (Chrome device emulation)', { skip: !ENABLED && 'set SP_E
     await desk.setViewport({ width: 900, height: 1000 });
     await seedReleaseRead(desk);
     await desk.goto(`${base}/`, { waitUntil: 'networkidle0' });
+    await desk.goto(`${base}/`, { waitUntil: 'load' });
     await desk.waitForSelector('.title-screen', { timeout: 10000 });
+    await desk.waitForFunction(() => document.querySelector('.rotate-hint') && getComputedStyle(document.querySelector('.rotate-hint')).display === 'none', { timeout: 8000, polling: 100 })
+      .catch(() => {});
     assert.equal(await desk.$eval('.rotate-hint', (el) => getComputedStyle(el).display), 'none', 'desktop keeps the game');
     await desk.close();
   });

@@ -5,6 +5,9 @@
 // Pinned since 2026-11-02 (DESIGN §37.91): master's activity_table lost the 盟约 season (CN 2.7.91, 卫戍协议·规程), so
 // every file stays at CN 2.7.81 (the commit data/*.json was built from since 0.2.3) except the operator tables, which
 // bring in the 2.7.91 operators and modules.
+// final state V2_2 (docs/DATA.md "Official versions (M0)", DESIGN §37.22). It is today's build, verbatim: the master
+// tables of Kengxxiao/ArknightsGameData (.cache/gamedata/), the research in docs/research/, the 下半-measured tables of
+// tools/build-data.mjs, and no config.version — data/*.json stays byte-identical (test/versions-default-guard.test.js).
 
 export default Object.freeze({
   id: 'act2autochess',

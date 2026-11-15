@@ -1,4 +1,4 @@
-// server/plugins/roomSets.js — what a room's plugins make (DESIGN §32.6, P1c): the plugins a host switches on, of any
+// server/plugins/roomSets.js — what a room's plugins make (DESIGN §34.6, P1c): the plugins a host switches on, of any
 // class a room takes — cosmetic (art: a visual set named `vs`, server/plugins/visualSet.js — P1a) and content (gameplay: a
 // content set named by its own `cs`, server/plugins/contentSets.js) — closed over their requirements and ordered as one
 // list (shared/plugins/order.js), then split by class. The lobby (server/lobby.js setPlugins) asks it and holds what it
@@ -16,6 +16,9 @@
 //     load order), PLUGIN_INCOMPATIBLE (a gameplay plugin made for other game versions or another plugin API — unless
 //     the policy allows it), PLUGIN_LIMIT (the visual set's art limits), PLUGIN_BUSY (one content set more than the
 //     server runs at once), VERSION_UNSUPPORTED (a gameplay plugin in the closed list does not declare the room's official version).
+//     server runs at once), VERSION_UNSUPPORTED (`gameplay: false` — a room of another official version, DESIGN §37.23:
+//     a content / script / trusted plugin in the closed list, refused before anything is built; gameplay plugins play
+//     第二期下半 only).
 //   hold / release (vs), holdContent / releaseContent (cs), onStale, unofficial — the visual and content sets'.
 //   defaults() → the ids a new room starts with (the policy's `default`; [] for the original game); fixed() → those ids
 //   when every room must play them (rooms: fixed), else null.
@@ -35,7 +38,7 @@ import { resolvePluginOrder } from '../../shared/plugins/order.js';
  *   policy: ReturnType<typeof import('./policy.js').createPluginPolicy> | null }} opts
  */
 export function createRoomSets({ registry, visual, contents, policy }) {
-  /** A content plugin a room may switch on: loaded, its data read (server/plugins/contentData.js; DESIGN §32.5), of the scope. */
+  /** A content plugin a room may switch on: loaded, its data read (server/plugins/contentData.js; DESIGN §34.5), of the scope. */
   const contentUsable = (p, scope) => !!contents && !!p && ['content','script','trusted'].includes(p.class) && p.status === 'loaded' && !!p.content
     && Array.isArray(p.manifest?.scope) && p.manifest.scope.includes(scope);
   const cosmeticUsable = (p, scope) => !!visual && !!p && p.class === 'cosmetic' && p.status === 'loaded' && !!p.visual
@@ -71,7 +74,7 @@ export function createRoomSets({ registry, visual, contents, policy }) {
     const unsupported = entries.find((p) => !pluginSupportsVersion(p.manifest, version));
     if (unsupported) return { error: ERR.VERSION_UNSUPPORTED, detail: `${unsupported.id} does not declare support for ${version} in versions (absent means act2autochess only)` };
     // the art: every cosmetic plugin, and a content plugin's own `assets` (its operators' art: the registry reads it as a
-    // visual snapshot like a cosmetic plugin's; DESIGN §32.5) — one visual set
+    // visual snapshot like a cosmetic plugin's; DESIGN §34.5) — one visual set
     const cosmeticIds = entries.filter((p) => p.class === 'cosmetic' || (['content','script','trusted'].includes(p.class) && p.visual)).map((p) => p.id);
     const contentIds = entries.filter((p) => ['content','script','trusted'].includes(p.class)).map((p) => p.id);
     const warnings = [];

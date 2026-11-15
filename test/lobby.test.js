@@ -14,12 +14,12 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { startServer, parseRange, acceptsGzip, pickEncoding, parseTrustProxy } from '../server/index.js';
 import { loadData, lookup, getChess, getBond, getBand, getMode, getConfig, INDEXED_FILES } from '../server/data.js';
 import * as dataModule from '../server/data.js';
-import { CODE_ALPHABET, BOT_NAMES, DEFAULT_DIFFICULTY } from '../server/lobby.js';
+import { CODE_ALPHABET, BOT_NAMES, DEFAULT_DIFFICULTY, LOBBY_DEFAULTS } from '../server/lobby.js';
 import { sanitizeName, TokenBucket, SessionRegistry, clientAddress, normalizeIp, isLocalIp, limitKeyOf } from '../server/net.js';
 import { StubMatch as Match } from '../server/match/StubMatch.js';
 import { Match as RealMatch } from '../server/match/Match.js';
 import { TestClient } from './helpers/wsClient.js';
-import { ERR, MAX_SEATS, MAX_SPECTATORS, PHASE, EMOTES } from '../shared/constants.js';
+import { ERR, MAX_SEATS, MAX_SPECTATORS, PHASE, EMOTES, PROTOCOL_VERSION } from '../shared/constants.js';
 import { DEFAULT_VERSION, LOBBY_DEFAULT_VERSION, VERSIONS } from '../shared/versions.js';
 
 const CODE_RE = new RegExp(`^[${CODE_ALPHABET}]{4}$`);
@@ -68,10 +68,20 @@ function clientPool(getUrl) {
   };
 }
 
+/**
+ * Create a CO-OP room and wait for its first `room.state`.
+ *
+ * …at the OFFICIAL 4 seats, EXPLICITLY. Since 业主裁令 2026-10-12 the server's ceiling is 20, so a create that names no
+ * cap builds a 20-seat room — and these tests are about the official-room flow (「房满」, seat indices, spectators),
+ * which fills up after four people. Naming 4 keeps them measuring what they were written for; the default ceiling
+ * itself is pinned in test/roomSeatCap.test.js and by 「a create that names no cap gets the server ceiling」 below.
+ * The wait keys on host/mode/difficulty only: a 4-seat frame carries NO `seatCap` key (it equals the official
+ * `MAX_SEATS`), so requiring it there would time out.
+ */
 async function createRoom(c, mode = 'coop', difficulty = 'NORMAL') {
-  const r = await c.request({ t: 'room.create', mode, difficulty });
+  const r = await c.request({ t: 'room.create', mode, difficulty, seatCap: MAX_SEATS });
   assert.equal(r.t, 'ok', JSON.stringify(r));
-  return c.waitFor('room.state', (s) => s.hostId === c.id && s.mode === mode);
+  return c.waitFor('room.state', (s) => s.hostId === c.id && s.mode === mode && s.difficulty === difficulty);
 }
 
 async function joinRoom(c, code) {
@@ -261,10 +271,12 @@ describe('static http server', () => {
     assert.equal((await httpReq(srv.port, '/js/app.js', { headers: { 'accept-encoding': 'br', 'if-none-match': brEtag } })).status, 304);
     assert.equal((await httpReq(srv.port, '/js/app.js', { headers: { 'accept-encoding': 'gzip', 'if-none-match': brEtag } })).status, 200, 'not the gzip variant');
 
-    // unversioned art/fonts/vendor: cached for a day (files can be rewritten in place by the asset tools); the art and
-    // fonts carry their content hash as ETag (server/http/assetIndex.js), so a rewrite with the same bytes is a 304
+    // unversioned art: never cached for a day (an upgrade would leave the old bytes behind — and the root-scope
+    // resource SW answers /assets/**, so a stale copy is a missing picture, not a slow one). A font is not in that SW's
+    // interception surface, so fonts and vendor keep the day. The art carries its content hash as ETag
+    // (server/http/assetIndex.js), so a rewrite with the same bytes is a 304.
     const asset = await httpReq(srv.port, '/assets/img/a.png');
-    assert.equal(asset.headers['cache-control'], 'public, max-age=86400');
+    assert.equal(asset.headers['cache-control'], 'no-cache');
     assert.match(asset.headers.etag, /^"[0-9a-f]{16}"$/);
     const font = await httpReq(srv.port, '/fonts/f.woff2');
     assert.equal(font.headers['cache-control'], 'public, max-age=86400');
@@ -578,7 +590,9 @@ describe('websocket lobby', () => {
     assert.notEqual(other.token, w.token);
 
     await expectError(c, { t: 'hello', name: '   ' }, ERR.BAD_MSG);
-    await expectError(c, { t: 'hello', name: 'x', version: 999 }, ERR.BAD_MSG);
+    // a wire number this build does not speak: refused at the handshake (the stale-page gate, DESIGN §8.2.1)
+    await expectError(c, { t: 'hello', name: 'x', version: PROTOCOL_VERSION + 997 }, ERR.BAD_MSG);
+    await expectError(c, { t: 'hello', name: 'x', version: PROTOCOL_VERSION - 1 }, ERR.BAD_MSG);
     await expectError(c, { t: 'hello', name: 'x'.repeat(13) }, ERR.BAD_MSG);
     // repeated hello updates the name, keeps identity
     const again = await c.hello('Renamed');
@@ -613,7 +627,9 @@ describe('websocket lobby', () => {
     await expectError(c, { t: 'room.join', code: 'AB CD' }, ERR.BAD_MSG);
     await expectError(c, { t: 'room.join', code: { $gt: '' } }, ERR.BAD_MSG);
     await expectError(c, { t: 'room.ready', ready: 'yes' }, ERR.BAD_MSG);
-    await expectError(c, { t: 'room.removeBot', seat: 9 }, ERR.BAD_MSG);
+    // A seat beyond the ceiling is still refused on the wire (`maxSeatsFrom(process.env)`, 20 by default — a seat
+    // inside that range but not in this connection's (empty) room answers NOT_IN_ROOM in the handler instead).
+    await expectError(c, { t: 'room.removeBot', seat: LOBBY_DEFAULTS.maxSeats + 1 }, ERR.BAD_MSG);
     await expectError(c, { t: 'g.buy', slot: -1 }, ERR.BAD_MSG);
     await expectError(c, { t: 'g.move', uid: 1, to: { area: 'moon' } }, ERR.BAD_MSG);
     await expectError(c, { t: 'ping', c: 'x' }, ERR.BAD_MSG);
@@ -686,13 +702,31 @@ describe('websocket lobby', () => {
     assert.equal(info.reason, 'rate limit');
   });
 
+  test('a create that names no cap gets the server ceiling (20 by default)', async () => {
+    // 业主裁令 2026-10-12: the default ceiling moved 4 → 20, and `room.state` says so (the cap differs from the
+    // official 4). A client that draws the frame pads to this number.
+    const wideHost = await pool.player('Wide');
+    const wide = await wideHost.request({ t: 'room.create', mode: 'coop', difficulty: 'HARD' });
+    assert.equal(wide.t, 'ok', JSON.stringify(wide));
+    const wideState = await wideHost.waitFor('room.state', (s) => s.hostId === wideHost.id);
+    assert.equal(wideState.seatCap, LOBBY_DEFAULTS.maxSeats, 'the frame carries the default ceiling');
+    assert.equal(LOBBY_DEFAULTS.maxSeats, 20, 'which is 20, not the official 4');
+    assert.equal(wideState.seats.length, LOBBY_DEFAULTS.maxSeats, 'the room really has 20 slots');
+    assert.deepEqual(wideState.seats[0], { seat: 0, playerId: wideHost.id, name: 'Wide', isBot: false, ready: false, connected: true });
+    assert.deepEqual(wideState.seats.slice(1), new Array(LOBBY_DEFAULTS.maxSeats - 1).fill(null));
+  });
+
   test('create / join / leave', async () => {
     const host = await pool.player('Host');
+    // The official 4-seat room (an explicit pick), which is what these tests exercise: a create that names NOTHING
+    // would build a 20-seat room since 业主裁令 2026-10-12 (pinned by the test above).
     const st = await createRoom(host, 'coop', 'HARD');
     assert.match(st.code, CODE_RE);
     assert.equal(st.mode, 'coop');
     assert.equal(st.difficulty, 'HARD');
     assert.equal(st.inMatch, false);
+    // A 4-seat room carries NO `seatCap` key (it equals the official `MAX_SEATS`): that is the byte-for-byte promise.
+    assert.equal(Object.hasOwn(st, 'seatCap'), false, 'the official 4 hides the cap');
     assert.equal(st.seats.length, MAX_SEATS);
     assert.deepEqual(st.seats[0], { seat: 0, playerId: host.id, name: 'Host', isBot: false, ready: false, connected: true });
     assert.deepEqual(st.seats.slice(1), [null, null, null]);
@@ -1231,8 +1265,10 @@ describe('websocket lobby', () => {
       const a = await pool.player('Twin');
       const before = srv.registry.size;
       const b = await pool.connect();
-      b.send({ t: 'hello', name: 'Twin', token: a.token, version: 1 });
-      for (let k = 0; k < 5; k++) a.send({ t: 'hello', name: 'Ghost', version: 1 });
+      // the wire number this build speaks (`PROTOCOL_VERSION`), never a literal: a deliberate bump must not leave this
+      // suite handshaking with a stale page's number (which the server refuses — DESIGN §8.2.1)
+      b.send({ t: 'hello', name: 'Twin', token: a.token, version: PROTOCOL_VERSION });
+      for (let k = 0; k < 5; k++) a.send({ t: 'hello', name: 'Ghost', version: PROTOCOL_VERSION });
       a.send({ t: 'room.create', mode: 'coop', difficulty: 'NORMAL' });
       const info = await a.closed;
       assert.equal(info.code, 4001);
@@ -1288,9 +1324,85 @@ describe('websocket lobby', () => {
     assert.ok(h.sessions >= 1);
     assert.deepEqual(h.versions.enabled, VERSIONS.map((v) => v.id), 'nothing set enables every version (DESIGN §35.23.11)');
     assert.equal(h.versions.default, LOBBY_DEFAULT_VERSION, 'nothing set preselects 规程·序列Ⅰ');
+    assert.deepEqual(h.versions.enabled, VERSIONS.map((v) => v.id), 'nothing set enables every version (DESIGN §37.23.11)');
+    assert.equal(h.versions.default, DEFAULT_VERSION);
     assert.equal(h.versions.hosts.workers, 0, 'an idle server has forked no version match host');
     assert.equal(h.versions.hosts.matches, 0);
     assert.equal(srv.versionHosts.stats().workers, 0);
+  });
+
+  // --------------------------------------------------------------------------------------------------
+  // 房间目录（公开面）：GET /api/rooms —— 一个数，不是列表（业主裁令）
+  // --------------------------------------------------------------------------------------------------
+
+  test('GET /api/rooms: body is EXACTLY { publicRooms } — one integer, nothing else', async () => {
+    const r = await httpReq(srv.port, '/api/rooms');
+    assert.equal(r.status, 200);
+    assert.match(r.headers['content-type'], /^application\/json/);
+    assert.equal(r.headers['cache-control'], 'no-store', 'sendJson must be the one answering');
+    const body = JSON.parse(r.body.toString());
+    // 唯一整数字段。数 = 在册房间数，而 `rooms` Map 在 disposeRoom 时立刻 delete。
+    assert.deepEqual(body, { publicRooms: srv.lobby.rooms.size });
+    assert.deepEqual(Object.keys(body), ['publicRooms'], '公开面永远只有一个整数字段');
+    assert.ok(Number.isInteger(body.publicRooms));
+  });
+
+  test('GET /api/rooms follows the registry: +1 on create, -1 after the last member leaves', async () => {
+    const before = JSON.parse((await httpReq(srv.port, '/api/rooms')).body.toString()).publicRooms;
+    const host = await pool.player('RoomsHost');
+    const st = await createRoom(host);
+    assert.equal(srv.lobby.rooms.size, before + 1);
+    assert.equal(JSON.parse((await httpReq(srv.port, '/api/rooms')).body.toString()).publicRooms, before + 1);
+    // 离开 ⇒ disposeRoom ⇒ this.rooms.delete ⇒ 计数跟着回来（没有「已销毁但还在数里」的窗口）。
+    await expectOk(host, { t: 'room.leave' });
+    assert.equal(srv.lobby.getRoom(st.code), null);
+    assert.equal(JSON.parse((await httpReq(srv.port, '/api/rooms')).body.toString()).publicRooms, before);
+  });
+
+  test('PRIVACY SENTINEL: no room code and no host name can appear in the /api/rooms response', async () => {
+    // 房号是随机 4 字母 ⇒ 断言「该房号与房主名一个字节都不在响应里」是有效哨兵（哨兵出现就必然是真泄露）。
+    // 房主名必须在 NAME_MAX_LEN(12) 以内，否则 hello 先被 BAD_MSG 挡下、这条测试就测不到东西。
+    const SENTINEL = 'SentHost1234';
+    const host = await pool.player(SENTINEL);
+    const st = await createRoom(host);
+    const r = await httpReq(srv.port, '/api/rooms');
+    const text = r.body.toString();
+    assert.equal(text.includes(st.code), false, '房号不得出现在公开面');
+    assert.equal(text.includes(SENTINEL), false, '房主名不得出现在公开面');
+    // 放宽到「任何 4 字母房号形状」也不许有：响应里只该有一个数字。
+    assert.equal(/[A-Z]{4}/.test(text), false, `响应里不该有任何房号形状的串: ${text}`);
+    assert.deepEqual(JSON.parse(text), { publicRooms: srv.lobby.rooms.size });
+  });
+
+  test('HEAD /api/rooms: 200, same headers, no body', async () => {
+    const r = await httpReq(srv.port, '/api/rooms', { method: 'HEAD' });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.length, 0, 'HEAD 无 body（sendJson 的既有行为）');
+  });
+
+  test('POST /api/rooms: 405 with Allow: GET, HEAD — the method gate runs first', async () => {
+    const r = await httpReq(srv.port, '/api/rooms', { method: 'POST' });
+    assert.equal(r.status, 405);
+    assert.equal(r.headers.allow, 'GET, HEAD');
+  });
+
+  test('roomCounts() and stats() are ONE traversal and ONE truth: rooms/publicRooms never diverge', async () => {
+    const c = await pool.player('SameTruth');
+    await createRoom(c);
+    const counts = srv.lobby.roomCounts();
+    const h = JSON.parse((await httpReq(srv.port, '/healthz')).body.toString());
+    // 今天 publicRooms 与 /healthz 的 rooms 恒等：引擎今天没有「公开 / 私有」这个属性（不预埋 inviteOnly）。
+    assert.equal(counts.publicRooms, counts.total);
+    assert.equal(counts.total, h.rooms, '/healthz.rooms 是运维口径的全部房间数');
+    assert.equal(JSON.parse((await httpReq(srv.port, '/api/rooms')).body.toString()).publicRooms, h.rooms);
+    // stats() 的座位计数来自同一次遍历（roomCounts(out) 的 out）：口径分叉会在这里变红。
+    const seats = {};
+    const again = srv.lobby.roomCounts(seats);
+    assert.equal(seats.humans, h.humans);
+    assert.equal(seats.bots, h.bots);
+    assert.equal(seats.spectators, h.spectators);
+    assert.equal(seats.matches, h.matches);
+    assert.equal(again.publicRooms, h.rooms);
   });
 });
 

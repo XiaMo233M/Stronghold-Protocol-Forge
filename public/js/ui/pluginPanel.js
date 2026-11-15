@@ -1,8 +1,8 @@
-// ui/pluginPanel.js — the room's 插件 panel (DESIGN §32 P1a; the design study's §7.1) and the list of a server's plugins.
+// ui/pluginPanel.js — the room's 插件 panel (DESIGN §34 P1a; the design study's §7.1) and the list of a server's plugins.
 // Loaded only when one of them opens (the room's tag, ui/pluginTag.js; the title screen's button, screens/title.js), so
 // the title page and the room carry none of it:
 //
-//   * PluginPanel — the cosmetic and (P1c, DESIGN §32.6) content plugins this server has for rooms (the catalogue:
+//   * PluginPanel — the cosmetic and (P1c, DESIGN §34.6) content plugins this server has for rooms (the catalogue:
 //     content.js loadCatalog — fetched when the panel opens, and only on a server that has plugins: content.plugins > 0),
 //     each with its
 //     switch for the host and its state for everybody else (the other players and the spectators read it), its version,
@@ -15,10 +15,12 @@
 //     match stays out of the statistics overview); one made for other game versions cannot be switched on. With gameplay
 //     plugins the panel also shows the room's mode — the official one of the difficulty or a mode a plugin adds
 //     (room.setMode; the host picks, the others read it) — and this page's download and check of the room's content set
-//     (content.js contentSet: its progress, ready, or failed — 「请刷新页面」). Below them (P4, DESIGN §32.8) the
+//     (content.js contentSet: its progress, ready, or failed — 「请刷新页面」). Below them (P4, DESIGN §34.8) the
 //     interface plugins of the server — each player switches them in 设置; the host may mark one 推荐 — and the
 //     room.panel slot.
 //     A gameplay switch requires the manifest's versions to include the room's official version; cosmetics carry over.
+//     In a room of another official version (DESIGN §37.23) the gameplay plugins' switches are off — they play 第二期下半
+//     only (the server refuses them: VERSION_UNSUPPORTED) —; the cosmetic ones work as anywhere.
 //   * InstalledPlugins — the title screen's 「本服务器安装了 N 个插件」 (screens/title.js; §7.4): every unofficial plugin
 //     the catalogue lists — any class, with what this version does with it (the catalogue fetched when it opens).
 // The tag and the small facts (roomPluginFacts, sizeText, pluginTagText, pluginMicro) are ui/pluginTag.js's, re-exported
@@ -84,7 +86,7 @@ function warningText(w, nameOf, classOf = () => 'cosmetic') {
 /** This page's download and check of the room's content set (content.js contentSet), as one line. */
 function ContentState({ cs }) {
   const c = useStore((s) => s, Object.is, contentSet);
-  // (a version set the page loads is not the room's plugin content: DESIGN §35.23)
+  // (a version set the page loads is not the room's plugin content: DESIGN §37.23)
   if (!cs || c.cs !== cs || c.kind !== 'plugins') return null;
   if (c.status === 'ready') return html`<p class="set-hint plugpanel__content is-ready" data-testid="content-state">${t('插件内容已载入并通过校验')}</p>`;
   if (c.status === 'failed') return html`<p class="set-hint plugpanel__content is-warn" data-testid="content-state">${t('插件内容未能通过校验，请刷新页面重试')}</p>`;
@@ -133,6 +135,8 @@ export function PluginPanel({ open, room, myId, onClose }) {
   const classOf = (id) => cat.plugins.find((x) => x.id === id)?.class || f.plugins.find((x) => x.id === id)?.class || 'cosmetic';
   const anyContent = f.modded || offered.some((p) => ['content','script','trusted'].includes(p.class));
 
+  // another official version (DESIGN §37.23): gameplay plugins play 第二期下半 only
+  const versionRoom = typeof room?.version === 'string';
   /** room.setPlugins with these ids (one request at a time; `what`: the row — or 'reapply' — that shows it busy). */
   const send = async (ids, what, change = null) => {
     if (inFlight.current || !f.editable) return;
@@ -146,7 +150,7 @@ export function PluginPanel({ open, room, myId, onClose }) {
     }
   };
   const toggle = (id, on) => send(nextChoice(f.chosen, id, on, offeredIds), id);
-  // the room's mode (room.setMode, DESIGN §32.6)
+  // the room's mode (room.setMode, DESIGN §34.6)
   const pickMode = async (modeId) => {
     if (inFlight.current || !f.editable) return;
     inFlight.current = true;

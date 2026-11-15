@@ -2,13 +2,14 @@
 //   .cache/gamedata/excel/audio_data.json     (Kengxxiao/ArknightsGameData, zh_CN)
 //   .cache/gamedata/excel/charword_table.json (same repo: the operators' voice slots and voice assets)
 //   .cache/ark-models/models_data.json        (isHarryh/Ark-Models enemy Spine index)
-// Downloaded once when missing (or with --refresh-index), then reused.
+// Downloaded once when missing (or with --refresh-index), then reused — forever, unless --index-ttl names an age.
+// See docs/ASSETS.md ("Index cache freshness").
 
 import { mkdir, readFile, rename, writeFile, stat, rm } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
-import { RAW } from './sources.mjs';
+import { RAW, withAssetBase } from './sources.mjs';
 import { MirrorPolicy } from './network.mjs';
 import { guardDefaultFetch } from './env-proxy.mjs';
 
@@ -23,11 +24,37 @@ export function localFxIndexPath(root) {
 }
 
 /**
- * Read a cached JSON file, downloading it first when missing or unparsable.
+ * Index cache files older than `ttlHours` are re-downloaded. `0` (the default) means never, so a run without
+ * `--index-ttl` / `SP_INDEX_TTL` behaves exactly as before: a parsable cache is used whatever its timestamp.
+ * @param {number} ttlHours
+ * @returns {boolean}
+ */
+export function ttlEnabled(ttlHours) {
+  return Number.isFinite(ttlHours) && ttlHours > 0;
+}
+
+/**
+ * Is the cached index stale? A missing/unreadable file is always stale (it gets downloaded anyway); without a TTL
+ * nothing is ever stale.
+ * @param {string} cacheFile
+ * @param {number} ttlHours
+ * @returns {Promise<boolean>}
+ */
+export async function cacheExpired(cacheFile, ttlHours) {
+  if (!ttlEnabled(ttlHours)) return false;
+  try {
+    const st = await stat(cacheFile);
+    return Date.now() - st.mtimeMs > ttlHours * 3600000;
+  } catch { return true; }
+}
+
+/**
+ * Read a cached JSON file, downloading it first when missing, unparsable, or older than `ttlHours`.
  * @param {object} o
  * @param {string} o.cacheFile absolute cache path
- * @param {string} o.url raw GitHub URL
+ * @param {string} o.url raw GitHub URL (already rewritten onto --index-base by the caller)
  * @param {boolean} [o.refresh] force re-download
+ * @param {number} [o.ttlHours] re-download when the cache is older than this many hours (0 = never)
  * @param {boolean} [o.offline] never download (throw when the cache is missing)
  * @param {(m:string)=>void} [o.log]
  * @param {'direct'|'mirror'} [o.source]
@@ -36,12 +63,10 @@ export function localFxIndexPath(root) {
  * @param {MirrorPolicy} [o.mirrorPolicy] shared invocation-wide mirror circuit breaker
  * @param {number} [o.timeoutMs]
  * @param {number} [o.backoffMs]
- * @param {number} [o.maxBytes] maximum decoded response/cache size
- * @param {(json:any)=>void} [o.validate] throws before any cache write
- * @param {import('./source-verifier.mjs').SourceVerifier} [o.verifier]
+ * @param {import('./source-verifier.mjs').SourceVerifier} [o.verifier] verify raw bytes against pinned Git trees
  * @returns {Promise<any>} parsed JSON
  */
-export async function cachedJson({ cacheFile, url, refresh = false, offline = false, log = console.log, source = 'direct', proxyPrefix, fetchImpl = globalThis.fetch, mirrorPolicy, timeoutMs = 180000, backoffMs = 500, verifier, maxBytes = Infinity, validate }) {
+export async function cachedJson({ cacheFile, url, refresh = false, offline = false, ttlHours = 0, log = console.log, source = 'direct', proxyPrefix, fetchImpl = globalThis.fetch, mirrorPolicy, timeoutMs = 180000, backoffMs = 500, verifier, maxBytes = Infinity, validate }) {
   if (verifier && offline) throw new Error('source verification is incompatible with --offline');
   let verifiedSource;
   if (verifier) {
@@ -50,13 +75,16 @@ export async function cachedJson({ cacheFile, url, refresh = false, offline = fa
   }
   // Same rule as the file downloader: a configured proxy must not be skipped.
   const fetchFn = guardDefaultFetch(fetchImpl);
-  if (!refresh || offline) {
+  // --index-ttl alone is what makes an old cache stale: without it `refresh` is the only trigger, as before.
+  const expired = !refresh && !offline && await cacheExpired(cacheFile, ttlHours);
+  if (expired) log(`[cache] ${cacheFile} is older than ${ttlHours} h (--index-ttl): re-downloading`);
+  if (!refresh && !expired || offline) {
     try {
-      if ((await stat(cacheFile)).size > maxBytes) throw new Error(`JSON exceeds ${maxBytes} bytes`);
       const buf = await readFile(cacheFile);
       if (buf.length > maxBytes) throw new Error(`JSON exceeds ${maxBytes} bytes`);
       if (verifier) verifier.verify(buf, verifiedSource);
       const json = JSON.parse(buf.toString('utf8'));
+      // 上游 0.3.1：缓存里的那一份也要过形状校验 —— 坏文件不能被当成「已经下过」继续用。
       validate?.(json);
       return json;
     } catch (e) {
@@ -109,18 +137,35 @@ export async function cachedJson({ cacheFile, url, refresh = false, offline = fa
 }
 
 /**
+ * The three index URLs, rewritten onto `--index-base` / `SP_INDEX_BASE` when given (`base` mirrors the
+ * raw.githubusercontent.com layout: the repository path is kept, only the host/base is replaced).
+ * @param {string} indexBase normalized override base ('' = the default RAW literals)
+ * @returns {{ audioData: string, charword: string, modelsData: string }}
+ */
+export function indexUrls(indexBase = '') {
+  return {
+    audioData: withAssetBase(RAW.gamedata + 'excel/audio_data.json', indexBase),
+    charword: withAssetBase(RAW.gamedata + 'excel/charword_table.json', indexBase),
+    modelsData: withAssetBase(RAW.arkModels + 'models_data.json', indexBase),
+  };
+}
+
+/**
  * Load audio_data.json (official), charword_table.json (official voice slots) and Ark-Models models_data.json.
  * @param {string} root project root
- * @param {{refresh?:boolean, offline?:boolean, log?:(m:string)=>void, source?:'direct'|'mirror', proxyPrefix?:string, fetchImpl?:typeof fetch, mirrorPolicy?:MirrorPolicy, verifier?:import('./source-verifier.mjs').SourceVerifier}} [opts]
+ * @param {{refresh?:boolean, offline?:boolean, ttlHours?:number, indexBase?:string, cacheDir?:string, log?:(m:string)=>void, source?:'direct'|'mirror', proxyPrefix?:string, fetchImpl?:typeof fetch, mirrorPolicy?:MirrorPolicy}} [opts]
  * @returns {Promise<{ audioData: any, modelsData: any, charword: any }>}
  */
 export async function loadIndexes(root, opts = {}) {
   const mirrorPolicy = opts.mirrorPolicy ?? new MirrorPolicy(opts);
+  // --index-base == the default literal → the exact URLs of today (withAssetBase returns the input unchanged).
+  const urls = indexUrls(opts.indexBase || '');
+  const cacheDir = opts.cacheDir || join(root, '.cache');
   const audioData = await cachedJson({
     ...opts,
     mirrorPolicy,
-    cacheFile: join(root, '.cache', 'gamedata', 'excel', 'audio_data.json'),
-    url: RAW.gamedata + 'excel/audio_data.json',
+    cacheFile: join(cacheDir, 'gamedata', 'excel', 'audio_data.json'),
+    url: urls.audioData,
     refresh: opts.refresh,
     offline: opts.offline,
     log: opts.log,
@@ -130,8 +175,8 @@ export async function loadIndexes(root, opts = {}) {
   const charword = await cachedJson({
     ...opts,
     mirrorPolicy,
-    cacheFile: join(root, '.cache', 'gamedata', 'excel', 'charword_table.json'),
-    url: RAW.gamedata + 'excel/charword_table.json',
+    cacheFile: join(cacheDir, 'gamedata', 'excel', 'charword_table.json'),
+    url: urls.charword,
     refresh: opts.refresh,
     offline: opts.offline,
     log: opts.log,
@@ -139,8 +184,8 @@ export async function loadIndexes(root, opts = {}) {
   const modelsData = await cachedJson({
     ...opts,
     mirrorPolicy,
-    cacheFile: join(root, '.cache', 'ark-models', 'models_data.json'),
-    url: RAW.arkModels + 'models_data.json',
+    cacheFile: join(cacheDir, 'ark-models', 'models_data.json'),
+    url: urls.modelsData,
     refresh: opts.refresh,
     offline: opts.offline,
     log: opts.log,

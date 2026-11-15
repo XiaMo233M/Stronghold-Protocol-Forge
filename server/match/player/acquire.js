@@ -127,15 +127,23 @@ export class PlayerAcquire {
     const elite = this.newPiece('chess', goldenId, { poolCopies: copies });
     carrySellPrice(elite, consumed.map((l) => l.piece), this.gd.sellPrice(goldenId));
     // the copies are gone; a refresh dispatch that saw them still runs their 刷新时 特质 (effectsMeta.js _garrisons, #627)
+    // D13（裁定：取上游 0.3.0 的写法）：精英与返还装备都只走 `stow(..., { allowTemp: true })`。
+    // 我们 0.2.x 那两条兜底（「塞不下就挂到精锐身上」/「手牌+临时都满则退池 + toast」）**已核为不可达的死代码**：
+    // `pieces.js:84` 只在 `allowTemp: false` 时返回 null，而临时队列是**无界**的（`:86-90` 逐字写着 "Five visible
+    // slots are a window, not a capacity limit"），`_putTemp` 只做 `temp[i] = piece`（空位或追加，永不覆盖）
+    // ⇒ 每件返还装备必然落在 手牌 或 临时队列，**不会丢件**。`matchSlotPolicy`（第 7 段）的能力仍在 bot.js 那条线上。
     for (const l of consumed) if (l.area !== 'new') l.piece.mergedInto = elite.uid;
     const deployed = consumed.filter((l) => l.key && !this.board.has(l.key)).map((l) => ({ key: l.key, dir: pieceDir(l.piece) }));
     const toTile = (t) => { elite.dir = parseDir(t.dir) || 'RIGHT'; this.board.set(t.key, elite); return 'board'; };
     const tile = mergeTile(deployed, (r, c) => this._legal(elite, r, c));
+    // ⚠️ 0.3.0 起 `allowTemp: true` 的 `stow` 不返回 null（临时区无界）⇒ 没有格子时 `where` 恒为 'temp'，
+    // 'hand' 只来自真的有空位那一次（见 pieces.js stow）。
     const where = tile ? toTile(tile) : this.stow(elite, { allowTemp: true });
     for (const it of items) this.stow(it, { allowTemp: true });
     // the returned equipment follows the auto-merge rule like any other gain ("已拥有2件同一初始装备时…自动合并")
     this.checkItemMerges();
-    // A deployed elite receives its summon stacks after the returned equipment.
+    // deployed like any operator placed by hand: its manually deployable summons join the hand (after the returned
+    // equipment, which would be lost in temp — a summon stack removed there comes back at the next round start)
     if (where === 'board') this.grantTokensFor(elite);
     this.stats.merges++;
     this.pushRewardOffer('merge');
@@ -184,16 +192,20 @@ export class PlayerAcquire {
     const loc = this.find(piece.uid);
     if (!loc || loc.piece.kind !== 'chess' || !this.gd.chess(newId) || this.m.chessExcluded(this.gd.chess(newId))) return null;
     // Remove the original carrier, its summons, and its pool occupation.
+    if (!loc || loc.piece.kind !== 'chess' || !this.gd.chess(newId)) return null;
+    // 原干员销毁: off its tile / slot, its summons removed, its copies back to the pool
     this._detach(loc);
     this.removeTokensOf(piece.uid);
     const items = piece.items || [];
     piece.items = [];
     this.returnCopies(piece);
+    // its equipment comes off first (the returned pair auto-merges, which may free a slot for the gain).
+    // D13：同 merge 那条 —— 只 `stow(..., { allowTemp: true })`，每条装备的归宿是 手牌 或 无界临时队列，不丢件。
     // Returned equipment is stowed. morphSlotPolicy is not applied: this path does not check equip slots
     // (the workshop names a recycle read point this codebase does not have).
     for (const it of items) this.stow(it, { allowTemp: true });
     this.checkItemMerges();
-    // The replacement follows the ordinary acquisition path.
+    // 获得一名…干员: gained like any other gained operator
     const np = this.acquireChess(newId, { source: 'transform' });
     this.recompute();
     return np;
@@ -220,7 +232,7 @@ export class PlayerAcquire {
    * The player's slotted 自选 pieces of the reward tier join the draw (player/diy.js diyStockEntries: copies left, then
    * the roll's tier — not the ordinary shop's shopLevel gate). 卫戍协议/帮助 干员晋升 names one temporary refresh one tier
    * above the 调度中心 and no separate pool; the owner decided on 2026-10-12 that the refresh includes 自选 of the newly
-   * reached tier. 0.2.0 had [ASSUMED] the shop-level gate on this refresh too (DESIGN §25); §30.23 reverses that.
+   * reached tier. 0.2.0 had [ASSUMED] the shop-level gate on this refresh too (DESIGN §25); §32.23 reverses that.
    * An offer built from explicit `ids` does not roll.
    */
   pushRewardOffer(source = 'merge', { tier = null, ids = null, label = null, picks = null } = {}) {
@@ -233,7 +245,7 @@ export class PlayerAcquire {
       const fresh = (id) => !list.includes(id);
       for (let i = 0; i < ro.count; i++) { // loop-cap: rewardOffer().count ≤ MAX_OFFER_SLOTS
         let id = null;
-        for (let tt = t; tt >= 1 && !id; tt--) id = this.m.pool.roll(this.m.rngShop, { tier: tt, filter: fresh, extra: this.diyStockEntries() });
+        for (let tt = t; tt >= 1 && !id; tt--) id = this.mainPool().roll(this.m.rngShop, { tier: tt, filter: fresh, extra: this.diyStockEntries() });
         if (id) list.push(id);
       }
     }

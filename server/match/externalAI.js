@@ -21,14 +21,14 @@ export const AI_ACTIONS = Object.freeze({
   prep: ['g.buy', 'g.sell', 'g.move', 'g.refresh', 'g.freeze', 'g.levelUp', 'g.equip', 'g.unequip', 'g.art', 'g.destroy', 'g.reward', 'g.choice', 'g.ready', 'g.offer', 'g.offerRefresh'],
 });
 const clone = value => JSON.parse(JSON.stringify(value));
-// §35.62 [ASSUMED]: a failed or late prep call keeps the last accepted direction (bonds, buy/keep/sell, items,
+// §37.62 [ASSUMED]: a failed or late prep call keeps the last accepted direction (bonds, buy/keep/sell, items,
 // economy preferences) instead of leaving legacy with no weights. Observation-local choice IDs, placements and a
 // one-prep level hold never carry over.
 export function carryPlan(plan) {
   if (!plan) return null;
   const { choice, placements, economy, ...rest } = clone(plan);
   void choice; void placements;
-  // §35.63: only the funds direction carries over. A carried maxRefreshes 0 / level / refreshAbove met a new round's
+  // §37.63: only the funds direction carries over. A carried maxRefreshes 0 / level / refreshAbove met a new round's
   // shop with last round's limits (failed preps lost 1.19 funds each against 0.37 for accepted ones).
   if (economy) {
     const kept = Object.fromEntries(Object.entries(economy).filter(([k]) => ['saveForInterest', 'reserve'].includes(k)));
@@ -45,7 +45,7 @@ export function aiObservation(m, ps, { id, kind, deadline, remaining }, results)
     digest: aiDigest(m, ps, kind, pub, own, pack),
     ...(pack ? { knowledgeVersion: pack.version } : {}),
     context: { kind, phase: m.phase, round: m.round, deadline, remaining, legalActions: AI_ACTIONS[kind],
-      // a non-default official version's match (DESIGN §35.23): its registry id; the default's observation is unchanged
+      // a non-default official version's match (DESIGN §37.23): its registry id; the default's observation is unchanged
       ...(m.version ? { gameVersion: m.version } : {}),
       ...(m.externalAI?.config.mode === 'plan' ? { matchId: m.externalAI.matchId } : {}) }, results });
 }
@@ -249,7 +249,7 @@ export class ExternalAI {
   }
 
   observe(ps, hook, ev) {
-    // §35.11: only completed, own-seat actions/results a human can observe. No inference from missing pieces.
+    // §37.11: only completed, own-seat actions/results a human can observe. No inference from missing pieces.
     const state = this.states.get(ps?.playerId);
     if (!state || state.disabled || ev.preview) return;
     // a helper's 联防 battle starts after its own one: keep the own wave's gates for that battle's report
@@ -405,8 +405,9 @@ export class ExternalAI {
       if (job.state.results.length > this.config.maxIntents) job.state.results.shift();
     }
     // §35.62 [ASSUMED]: in plan mode legacy always continues the decision, so a slow reply (budget elapsed or the
+    // §37.62 [ASSUMED]: in plan mode legacy always continues the decision, so a slow reply (budget elapsed or the
     // agent's {plan: null}) is not a broken adapter: only protocol/transport errors count toward failureLimit, and
-    // the carried plan stays. Direct mode keeps §35.8's rule (every failure counts, the plan is cleared).
+    // the carried plan stays. Direct mode keeps §37.8's rule (every failure counts, the plan is cleared).
     const soft = this.config.mode === 'plan' && reason === 'timeout';
     if (this.config.mode !== 'plan') job.state.plan = null;
     if (!soft) this.countFailure(job);

@@ -1,6 +1,6 @@
 # Regenerating the example advisor's strategy playbook
 
-**Development only for now (maintainer 2026-10-23, §35.66).** This playbook and the example advisor are not in a
+**Development only for now (maintainer 2026-10-23, §37.66).** This playbook and the example advisor are not in a
 release package. A packaged server has no external host.
 
 This is an English strategy method with Chinese game names, for the opt-in example language-model advisor
@@ -23,7 +23,7 @@ Its editable entries, each with a `source`, live in
 | Operators, tiers, prices, bonds and merges | Season `charChessDataDict`, `charShopChessDatas`, `shopLevelDataDict`; `character_table.json`, `skill_table.json`, equipment tables; generated `chess.{visible,isGolden,bonds,tier,price,profession,canHitFly,dmgType,trait,skill,talents,garrisonIds}`, `garrisons.desc`. Normal visible pool members are the baseline; `GameData` resolves mode economy and merge overrides. |
 | Bond thresholds and counting | Season `bondInfoDict`; `bonds.{thresholds,countMode,countsGoldenOnly,noStack}`, `server/match/bondsMeta.js`. Distinct identities count for ordinary bonds, deck-counting bonds include the bench, 绝技 counts elites. Duplicates do not create distinct members. |
 | Shop access | `config.modes[modeId].{upgradePrices,shopSlots,maxShopLevel}`, `config.economy`, `GameData`, `player/economy.js`, `pool.js`; [DATA](DATA.md) §1 and [PLAYING](PLAYING.md) §2. No EXP. Upgrade cost discounts by one at round start since the last upgrade; no R1 discount. Only tiers up to shop level can roll. |
-| Shop probability and shared stock | Existing copy-weighted reconstruction in `pool.js` / [DATA](DATA.md) §1.2 and [history §29.8](history/0.2.4.md): eligible remaining copies determine rolls, **no fixed level-to-tier probability table**. Co-op doubling is the maintainer's 2026-10-15 decision (#650), not a new official claim. The knowledge pack's `initialTierSharesBeforeBans` is a pristine-catalogue baseline, never live odds. |
+| Shop probability and shared stock | Existing copy-weighted reconstruction in `pool.js` / [DATA](DATA.md) §1.2 and [history §31.8](history/0.2.4.md): eligible remaining copies determine rolls, **no fixed level-to-tier probability table**. Co-op doubling is the maintainer's 2026-10-15 decision (#650), not a new official claim. The knowledge pack's `initialTierSharesBeforeBans` is a pristine-catalogue baseline, never live odds. |
 | Enemies and leaders | `enemy_handbook_table.json`, enemy database, season `enemyInfoDict`, `specialEnemyInfoDict`, `specialEnemyRandomTypeDict`, `bossInfoDict`; generated `enemies.{acTypes,isFlyEnemy,stats}`, `factions.types`, `bosses.{enemyKey,abilities,escortsByTemplate}`. Implementation: `server/sim/content/enemies/` and `bosses.js`. |
 | Leader hit limit | Official client `AutoChessBattleConst.MAX_BATTLE_DAMAGE`, documented in [official limits](research/11-limits-official.md) §2; `shared/constants.js BOSS_HIT_LIMIT`, `server/sim/attack/health.js leaderHitCancelled`. |
 
@@ -69,7 +69,7 @@ The maintainer also suggests 罗素 with cheap elites and three 坚守 as the te
 teams have poor early enemy matchups but strong late potential, or 芬 supplying their missing key operators with
 信标. These are **[ASSUMED] strategies based on community testimony**, not guarantees of carrying a team.
 
-The overlay applies to the default data (第二期下半, 盟约·下半 V2_2) only (official versions M0, 0.3.2, DESIGN §35.22).
+The overlay applies to the default data (第二期下半, 盟约·下半 V2_2) only (official versions M0, 0.3.2, DESIGN §37.22).
 Its evidence names default-data ids, and another official version gives those ids to other operators and items (in
 第一期, 盟约·上半, `chess_char_1_02_a` is 讯使, not 角峰). Every non-default build is gated by `config.version`, including
 第二期上半, which reuses no id but lacks 13 of today's shop entries and 4 strategies: `server/ai/playbook.js` gives data
@@ -151,6 +151,11 @@ kept equal by `test/match/llm-adapter-v2.test.js`); the bot's rule pick adds 100
 a teammate holds 歌利亚 and nobody holds Touch; the solo 杰西卡 pick needs the live pool, so only the host can name it).
 A band whose bond the room switches off weighs 0. The direction parts below become `fitParts` / `fit` and only order
 one band's variants; a direction whose main a teammate publicly claims is left out while others remain. In prep,
+subs. At the band draft, return at most eight directions (§37.15). [ASSUMED] Every uncontended
+community/maintainer main that is still a legal draft action is preferred over a second sub-variant of a band
+already listed. When more than eight qualify, keep the eight highest scores, one variant per band and main.
+On the current 绝境 catalogue an empty round-1 draft therefore keeps 佩佩, 潘格尼尼 and 克莱门莎 and cuts
+杜遥夜 (score 28.8, just under the eighth place at 29) and 埃芒加德 (no data bond engine, score 13). In prep,
 generic variants that share a band and a main collapse into one candidate. Its id is `band:main`, so a later
 sub change is not a new direction. `subOptions` lists each `{subs, score}`. Named community builds and cycle
 recipes keep their own ids and may take a free slot. Fewer than two distinct directions are reported explicitly
@@ -205,7 +210,7 @@ At each decision: inspect last outcome and accepted plan → check bans/team cla
 scores and missing coverage → choose a role/main/sub set → verify what the current shop and board can accomplish
 → emit brief `why` and a bounded plan. Keep useful investments, including accumulated layers, through ordinary
 bad shops. Change the primary bond (the highest priority) only with `pivot:true` and a concrete `pivotReason`.
-Adding, removing or reordering sub-bonds is not a pivot (§35.15). Existing plan repair retains
+Adding, removing or reordering sub-bonds is not a pivot (§37.15). Existing plan repair retains
 viable previous targets when a primary change is unexplained. A future main can guide `buy/keep` but cannot be a prioritized
 `plan.bonds` target until the existing held/reachable gate accepts it. An empty plan still delegates to legacy.
 
@@ -498,13 +503,13 @@ keys so a later-stage recommendation cannot imply a free low-level roll.
 
 Scores use 22 recipe points, +16 mechanical-band match, +8 community-main match, +5 per held named member
 (up to five), +14 previous-main continuity, −2 per shop level short, −24 per public teammate main competitor,
-−2 per contested named member, −9 per uncovered announced capability. The §35.15 draft cap of eight and the
+−2 per contested named member, −9 per uncovered announced capability. The §37.15 draft cap of eight and the
 prep collapse still apply. Explicit supplier/safety-net roles retain their existing policy. `core-held` means
 role members are owned and the main bond is active; it does **not** assert correct positioning, equipment,
 skill selection or successful combat. Sources, differences, substitutes and pivot conditions accompany the
 candidate. No gameplay rules, legacy decisions or automatic redeployment/equipment actions change.
 
-## Advisor economy (§35.13)
+## Advisor economy (§37.13)
 
 The maintainer's live 娜仁图亚 / co-op 绝境 diagnosis (2026-10-19) found every plan asking for zero refreshes
 and L1 in R0–2, L2 in R3–6, L3 in R7–8. The executor treated those as hard caps. The maintainer's advice is
@@ -524,9 +529,9 @@ Mechanical sources are the local official `activity_table.json`:
   remaining eligible copies, tier ≤ level, no fixed tier-percentage table. An inaccessible tier has zero
   normal-shop probability. The playbook's shares are public estimates after bans, before purchases.
 - Freeze is free, preserves unsold offers at the next round roll and is then consumed. Manual refresh
-  replaces those offers and cancels freeze (maintainer's official play observation, §32.14.7 / #584).
+  replaces those offers and cancels freeze (maintainer's official play observation, §34.14.7 / #584).
   A full regular hand blocks purchases even if they would merge (PRTS 帮助, §6.2 / #82). Existing displayed
-  offer overdraw remains legal (§29.8); speculative bank buys additionally require available stock.
+  offer overdraw remains legal (§31.8); speculative bank buys additionally require available stock.
 
 **[ASSUMED] recommendations:** ordinary builds aim for access to T2/3/4/5 around R3/5/7/10 (round 65: no L6, the
 bots' §37.38 cap; the T6 step at R13 is gone). The
@@ -576,7 +581,7 @@ All runs have zero match errors and advisor fallbacks. This small sample establi
 check, not superior win rate; rerun for changed content. The knowledge pack labels these measured legacy
 values as a historical reference only for matching vanilla solo/co-op hard modes.
 
-## Advisor input (§35.15)
+## Advisor input (§37.15)
 
 Maintainer playtest 2026-10-20 (coop4 HARD, seed 11, seat 0), played from the same JSON the example model
 receives. The system string was the strategy prompt plus the whole `sp-knowledge/1` pack (about 622000
@@ -602,13 +607,13 @@ when that hook returns a finite number, plus catalogue enemy `hp, def, res, moti
 The exposure model is the legacy planner's, not a new combat rule. Handbook ability rows are `{text, textRaw,
 format}`; joining them used to write `[object Object]`. `effectText` keeps `text` or `desc`.
 
-The prompt also states the plan fields of history §35.14: `items.buy` (at most eight catalogue or current-shop
+The prompt also states the plan fields of history §37.14: `items.buy` (at most eight catalogue or current-shop
 item ids), `economy.freezeSearch`, a one-round `holdLevel` with `economy.why`, exact `keep`/`sell` ids (a `*_b`
 id is the elite), and `buy` only to finish a merge or add a distinct member; `repairPlan` keeps them after
 checking the ids. Activated layers on every bond count; do not bench a stronger unit only to chase a
 6-threshold. Each prep, compare `digest.upcoming` fly and elite counts with `caps.air`.
 
-## 终极 (ABYSS) push (§35.62)
+## 终极 (ABYSS) push (§37.62)
 
 Goal (maintainer, 2026-10-23): LLM-played seats clear the 终极 Final Assault close to always, solo and 4-player
 co-op, and the lessons go back into the bots. Everything below reads seat-visible state only.
@@ -638,7 +643,7 @@ Candidate changes:
 - A candidate's main may lead the plan before any member is owned, so 玛恩纳 can name 卡西米尔 from its first prep.
   An accepted plan's primary core bond becomes legacy's focus (`bondPlan`).
 - A prep that fails or is late keeps the last accepted direction (`carryPlan`), and only protocol errors count toward
-  the seat's `failureLimit` (history §35.62).
+  the seat's `failureLimit` (history §37.62).
 
 Bot changes from the same diagnosis: legacy lineups now reach a 6-member (阿戈尔 5) core bond when the members are
 owned (a climb seeded from the full threshold, +30 for a core bond's second tier) and keep bench members of a core
@@ -650,7 +655,7 @@ several hundred (「400层保底」, BV1ohDNBPEcx comment; 999 谢拉格, BV1xVd
 bot's own layers, wins start around 4–6× (handoff/round51, local). Layer engines, a Final Assault lineup and the
 co-op cover seat are the next levers (cycle 2 below).
 
-### Cycle 2 (§35.63)
+### Cycle 2 (§37.63)
 
 What the LLM seats got wrong on their own (cycle 2 bench, deepseek-flash, plan mode), and the rule each now follows:
 
@@ -682,12 +687,12 @@ development, 41–100 check):
 Result: solo 0 → 2 wins of 100, reached the Final Assault 56 → 64, half the leader pool or more 2 → 12; co-op 0 → 4
 wins, 30 → 35 teams at the Final Assault; FUNNY / NORMAL / HARD wins equal or higher. Plan-seat executor fixes (no
 tier 5/6 or elite sales for 1 fund, a crowded bench frees keep-listed low tiers, the carried plan keeps only its
-funds direction, a quarter of the plan's unit weight in the lineup) are history §35.63.
+funds direction, a quarter of the plan's unit weight in the lineup) are history §37.63.
 
 Still open: winning 终极 near always. Layout and the boss lineup swing one seed's damage from 0.2 to 50 % of the pool.
-The independent-seed rehearsal is §35.64 (counted leaks first; leader damage breaks a leak tie, #315). A few hundred
+The independent-seed rehearsal is §37.64 (counted leaks first; leader damage breaks a leak tie, #315). A few hundred
 more layers on the main remain open. RESEARCH §10 Q1 (co-op leader HP 4× too low) does not hold for the current pools:
-they match `activity_table.json` `bossInfoDict` (§35.64).
+they match `activity_table.json` `bossInfoDict` (§37.64).
 
 
 

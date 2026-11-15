@@ -9,6 +9,15 @@
 // The cue waits while a round plate or another live banner is on screen: at most TURN_CUE_PLATE_WAIT_MS for the round
 // plate, then TURN_CUE_WAIT_MS for any remaining banner. Its owner cancels a pending wait as soon as the turn, phase or
 // match changes.
+// screens/game.js shows it with the 轮到你 sound on a shared draft's own turn and as a solo (独立模拟) draft opens — the
+// maintainer's decision of 2026-10-22 (decision 7 of 2026-10-21 extended: as the strategy draft's 请选择策略 band;
+// [ASSUMED] for solo, the footage shows a co-op draft) —, once the sprites are in (turnPopupArtReady); never with
+// prefers-reduced-motion — the draft's header says 当前轮到你决策. Styles: css/screens/game-panels.css (.sptp).
+// The cue (the disc and its sound) waits while a phase banner or plate is on screen — the 机变阶段 banner opens every
+// 机变 draft, and the disc that started with it played under it, its words hidden (§37.18's leftover) —, at most
+// TURN_CUE_WAIT_MS per banner and TURN_CUE_PLATE_WAIT_MS for the round plate still up from ROUND_START (it holds the
+// banner back: the wait restarts as each one mounts), so a draft that opens on the player's turn shows the plate, the
+// banner, then the disc.
 // [ASSUMED] the sizes and the timing, measured frame by frame from that footage; the rings are plain CSS circles; the
 // order plate → banner → disc and the wait's bounds (the footage shows a turn coming round mid-draft, not a draft opening).
 import { useEffect } from '../../vendor/hooks.module.js';

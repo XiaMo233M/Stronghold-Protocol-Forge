@@ -45,6 +45,7 @@ aklz4.py registers a decoder for it. This script pulls the art the web sources l
     borrows. Each stage's materials come from regulation_scenes.STAGE_DEPS (sand, Syracuse metro, icewild or
     ltny2). Those groups are not in expected_local_groups, so a client without them keeps the metal board
   - the official battle effects (特效) of the mode's operators, enemies and tokens (fx.py, DESIGN §33)
+  - the official battle effects (特效) of the mode's operators, enemies and tokens (fx.py, DESIGN §35)
     → fx/index.json, fx/textures.json, fx/prefabs/*.json, fx/tex/**.webp (or .png), fx/mesh/*.json, listed in their own
     data/local-fx.json (next to --manifest; data/local-assets.json has no fx group);
     only with an explicit --only fx (a plain run leaves them out): the Phase 1a sample by default, --fx-set used for
@@ -90,6 +91,8 @@ import scenes  # noqa: E402  (the battlefield scene table and exporter; imports 
 import regulation_scenes  # noqa: E402  (规程 piece prefabs → the same scene/ group; no UnityPy at import)
 import fx  # noqa: E402  (the official battle effects, DESIGN §33; imports UnityPy only when it runs)
 import operators  # noqa: E402 (installed plugin operators' optional official art, §34.28)
+import fx  # noqa: E402  (the official battle effects, DESIGN §35; imports UnityPy only when it runs)
+import operators  # noqa: E402 (installed plugin operators' optional official art, §36.28)
 import versions  # noqa: E402 (the official-version roster's missing presentation art)
 import autochess_themes  # noqa: E402 (official in-match UI themes; UnityPy only when a theme run executes)
 import season_entry  # noqa: E402 (规程's opening for the title screen; UnityPy only when it runs)
@@ -713,7 +716,7 @@ def webp_only(out_root, manifest_path, log):
 
 def ran_groups(old_groups, new_groups, fx_ran=False):
     """The groups a run replaces: the ones it wrote, and after an fx run the fx / fx/* groups an earlier fx run left in
-    the manifest (the fx files have their own list, data/local-fx.json, since 0.3.0's Phase 1b — DESIGN §33.1)."""
+    the manifest (the fx files have their own list, data/local-fx.json, since 0.3.0's Phase 1b — DESIGN §35.1)."""
     ran = set(new_groups)
     if fx_ran:
         ran |= {g for g in (old_groups or {}) if g == fx.FX_SUB or g.startswith(fx.FX_SUB + '/')}
@@ -1218,6 +1221,13 @@ def extract(args, ab_root):
     fx_on = fx_selected(args.only) if client else False
     # §34.28: a normal full run is not consent for optional plugin art. --only plugin-art is explicit too.
     art_on = client and wants_sub(args.only, operators.SUB) and (bool(args.only) or args.plugin_art)
+    jobs = select_jobs(args.only)
+    enemy_ids = spine_ids(args.only, ENEMY_SPINE_SUB, ENEMY_SPINES)
+    token_ids = spine_ids(args.only, TOKEN_SPINE_SUB, TOKEN_SPINES)
+    stage_ids = scene_ids(args.only)
+    fx_on = fx_selected(args.only)
+    # §36.28: a normal full run is not consent for optional plugin art. --only plugin-art is explicit too.
+    art_on = wants_sub(args.only, operators.SUB) and (bool(args.only) or args.plugin_art)
     art_ids = spine_ids(args.only, operators.SUB, operators.references(Path(args.plugin_root))) if art_on else []
     versions_on = client and (not args.only or 'versions' in args.only)
     entry_on = client and wants_sub(args.only, season_entry.SUB)

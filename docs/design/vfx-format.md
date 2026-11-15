@@ -1,71 +1,36 @@
-# DESIGN §33 — Official battle effects (特效): the extracted format
+# DESIGN §35 — Official battle effects (特效): the extracted format
 
 Part of [DESIGN.md](../DESIGN.md) (the index; section numbers are global).
 
 **Changelog** (for runtimes reading the files; newest first)
 
-* **2026-10-16 — lingering areas: readings from the client's data and code, no format change (0.3.1, the maintainer's
-  report of 2026-10-16; history 0.3.1 §34.5)**. (1) A ground-placed effect's root (`ParticleEffect._spawnLocation` 5,
-  7, 17, 26, 35) sits on its point: the client's Effect._InitLocationFromEntity sets the root's localPosition to the
-  spawn location, so its authored `pos` is no offset (§33.4; the next entry extends this to every root) — 萨卡兹枯朽战士's `enemy_nhpbr_attack_range` is saved with
-  its root 10 tiles under the board. (2) An enemy's kit areas are its talents' and skills' projectiles and rows the
-  index writes without the moment they play (a death talent's projectile, a skill's second projectile, a castTarget row
-  of a skill its kit fires itself): §33.16 reads them for the sim's zone fx (ENEMY_FX_BINDINGS). (3) An enemy skill
-  whose root ability is an attack is that one attack: its kit fx drawn, its window's later attacks are the enemy's own
-  (§33.16 Enemy skills). (4) A talent loop created by a buff at its
-  tick in a mode (水遁忍者's RotateEffect) plays while that mode lasts (§33.16).
-* **2026-10-16 (2) — where an effect stands and how big its particles are, from the client's code and data, no format
-  change (0.3.1: the maintainer's report of 2026-10-16, history §34.6)**. (1) A prefab root's own transform is no part
-  of the effect: the client sets the root's position where it plays it, and a projectile's flying effect sits on the
-  projectile's body (§33.4); 203 prefabs have an authored root position — 安洁莉娜 S2's orbs were drawn 0.94 tile above
-  their path. (2) An effect at FOOT_POINT, HIT_POINT or HEAD_POINT takes the unit's Graphic tilt (−30° about X, its
-  skin animator's rotation), MUZZLE_POINT_WITHOUT_ROTATION, NONE, the ground spawns and an effect played at a map
-  position none (§33.2, §33.11): the effects authored standing (荒芜拉普兰德 S3's seal, 能天使 S3's light bars) stand facing
-  the camera. (3) A renderer's `m_Pivot` moves the particle by + pivot × size along its own axes, a stretched billboard
-  included: pivot.y × the particle's Y size along the velocity and pivot.x × its X size across, not along the stretched
-  length (§33.6). (4) A local-space particle is drawn at its scaling mode's scale as it is now, and a particle's size is × that scale per axis
-  whether or not its system has `size3D` (§33.5). (5) A projectile whose movement has `comeBack` flies back to its
-  source after its hit at the come-back speed toward the HitPoint as it is now (§33.12 Projectile). `delayAfterReached`
-  of 1 on the Paracurve / NarantS3 come-back projectiles is a flag; the wait is `delayTime` 0.01 s, under one sim tick,
-  and the visual turns back on the hit with the sim.
-
-* **2026-10-16 — readings corrected from the client's data and code, no format change (0.3.1: the 0.3.0 effects audit's
-  R18–R21 and its low-confidence observations; history 0.3.1)**. (1) A prefab's root node is active when the effect
-  plays, whatever its `active` (§33.4): 35 prefabs of the used set are saved with an inactive root. (2) A stretched
-  billboard runs the particle's Y size along its velocity and its X size across (§33.6). (3) An effect whose root
-  `static_offset` node lies deeper in the board than its anchor (`pos` z > 0) sorts its order-0 renderers behind the
-  units (§33.6). (4) A `VigilWolfEffectEmitter` row's `buffKey` is a buff its owner must hold when the row plays (§33.12
-  Mode attacks). (5) A token's skill record is its owner variant's (data/tokens.json, §33.16). (6) An AppearSkill's
-  `_overrideStartEffect` use is its unit's deploy effect (§33.12 roles, §33.16). (7) A CreateEffect action of an
-  ability (`…_actions CreateEffect` uses) may target the ability's target, which index v3 does not write (§33.16).
-
-* **2026-10-15 — the skin points' rotation (index.json `skins`, §33.12 Skin)**; no version change, fields added only:
+* **2026-10-15 — the skin points' rotation (index.json `skins`, §35.12 Skin)**; no version change, fields added only:
   every point has `rot` (its local rotation, quaternion x y z w) and every point with a `bone` has `followRot` (its
   BoneFollower's `followBoneRotation`). 54 of the used set's 1,118 bone-followed points do not take their bone's
   rotation and keep `rot`: 洛洛's SpecialPoint1 and 令's SpecialPoint2 (30° about x, cancelling the Graphic's −30°) and
   50 with the identity or a small turn about z (烛煌, 塑心, 焰尾 … and 19 enemies' and 2 tokens' points). A reader of an
   earlier index (no `rot` / `followRot`) takes the bone's angle for every bone-followed point and no turn for the others.
-* **2026-10-15 — corrections after the maintainer's play (history §32.14.38)**; no version changes — the files now
-  match what this text already said, and a reader of the earlier files keeps working. (1) Meshes (§33.9): a skinned
+* **2026-10-15 — corrections after the maintainer's play (history §34.14.38)**; no version changes — the files now
+  match what this text already said, and a reader of the earlier files keeps working. (1) Meshes (§37.9): a skinned
   mesh has four bone influences per vertex. A Unity 2019+ mesh stores 1–4 (its BlendIndices / BlendWeight channels'
   dimension) and no BlendWeight when every vertex follows one bone; earlier runs wrote those rows as they came — 2 per
   vertex for 21 skinned renderers of the used set (铃兰 S3's ninth tail, 琴柳's flags …), no bone data at all for 41
   (伊芙利特 S3's flame tongues, eight of 铃兰's tails …) —, so a reader can infer the count from `boneIndices.length /
-  vertexCount` and must extract again for the second kind. (2) index.json projectiles (§33.12): `main` and `lifeTime`
+  vertexCount` and must extract again for the second kind. (2) index.json projectiles (§35.12): `main` and `lifeTime`
   are the projectile class's own (SimpleProjectile, HarpoonProjectile, …); earlier runs took the last behaviour's
   `_mainEffect` — 30 projectiles named their chain or rope line and lost the flying effect and the life (their
   `behaviours` give both) —; the new `link` names that line (a ChainLightningEffectBehaviour's or a HarpoonRenderer's:
-  `behaviours` say which, and how it is drawn — §33.12 Projectile).
-* **2026-10-15 — readings corrected from the client's code, no format change** (DESIGN §32.14.36). (1) A skin point
-  with a `bone` (§33.12 Skin) has as `pos` that bone in the prefab's edit-time pose (the 0-length `Default` clip), not
+  `behaviours` say which, and how it is drawn — §35.12 Projectile).
+* **2026-10-15 — readings corrected from the client's code, no format change** (DESIGN §34.14.36). (1) A skin point
+  with a `bone` (§35.12 Skin) has as `pos` that bone in the prefab's edit-time pose (the 0-length `Default` clip), not
   where the client reads it in battle — the live transform (`MountPoint.get_mapPositionV3`): read the bone from the
   unit's skeleton. (2) Which spawn locations also take the mount point's rotation, and what FollowMountPoint copies
-  (§33.11, resolved). (3) ParacurveMovement and AmiyaS2Movement (§33.12 Projectile, resolved): the arc tops out
+  (§35.11, resolved). (3) ParacurveMovement and AmiyaS2Movement (§35.12 Projectile, resolved): the arc tops out
   `raiseHeight` above the start. (4) A projectile's `main`, written as the last `_mainEffect` of its behaviours, is for
   a chain-lightning or harpoon projectile (32 of the full set) a line renderer's effect; the flying effect is its
   projectile behaviour's own, and a harpoon's rope runs from the shooter to the head while a chain's lightning joins
-  the chain's targets as the shot reaches them (`behaviours`, §33.12 Projectile; the extractor's fix: the entry above).
-* **2026-10-15 — Phase 1d: `index.json` version 3** (§33.17; the descriptors, `textures.json` and the meshes keep their
+  the chain's targets as the shot reaches them (`behaviours`, §35.12 Projectile; the extractor's fix: the entry above).
+* **2026-10-15 — Phase 1d: `index.json` version 3** (§35.17; the descriptors, `textures.json` and the meshes keep their
   versions, the file list's `fx.index.version` is 3; no field was removed or renamed, and only two mode attacks change
   besides the additions — (6) —: a version-2 reader keeps working). (1) `units[id].talents` — the unit's talents by
   prefab key (`Talents/<key>`: `1`, `2`, `-1`, `Reborn`, …), each with its nodes (Talent class, ability, mode, `when`:
@@ -88,13 +53,13 @@ Part of [DESIGN.md](../DESIGN.md) (the index; section numbers are global).
   FirstSucceed, Sequence; `main` / `burst`); an AbilitySelectableGroup's sub-abilities now follow its `_abilityConfigs`
   (and a BurstAttackGroup's burst attack comes last — 号角 S2's order changes), a funnel attack takes the funnels beside it
   (耶拉 S2 gains its two). (7) Corrected: UberAnimationEffectEmitter's `loopType` is *metadata* LoopType 0 LOOP (the
-  animations in turn), 1 RANDOM — §33.12 assumed 1 meant "in turn"; emitters carry `loopTypeName`, replace-group uses
+  animations in turn), 1 RANDOM — §35.12 assumed 1 meant "in turn"; emitters carry `loopTypeName`, replace-group uses
   `loopType`. (8) Corrected carriers (`on`): an attachment's `_additiveActiveBuffs`, a blocker's `_buffsToBlockee`,
   `_projectileBuffs`, the tile listeners' and LockTargetAbility's buffs are the targets', `_buffsToExistToken` a summon's
   (one skill use changes: `SpawnTokenOnTileByIDAbility._buffsToExistToken`, unknown → token). (9) New effect fields:
   a funnel's `_idleEffect` / `_idleBackEffect` / `_overloadIdleEffect` (loop), `_appearEffect` (start), `_disappearEffect`
-  (end); a reborn talent's `_effects` (start); `ExtraAbilityPreloads._effects` is no use (preloads only). Numbers: §33.17.
-* **2026-10-15 — Phase 1c: `index.json` version 2, meshes version 2** (§33.12, §33.9; the descriptors and
+  (end); a reborn talent's `_effects` (start); `ExtraAbilityPreloads._effects` is no use (preloads only). Numbers: §35.17.
+* **2026-10-15 — Phase 1c: `index.json` version 2, meshes version 2** (§35.12, §37.9; the descriptors and
   `textures.json` stay version 1, the file list's `fx.index.version` is 2; no field was removed or renamed — a version-1
   reader keeps working and simply does not see the additions, except the two corrections (9) and (10)). (1) A mode's
   `attack` takes the rows of every effect emitter on its node, not only an exact `UberEffectEmitter`: its subclasses
@@ -107,7 +72,7 @@ Part of [DESIGN.md](../DESIGN.md) (the index; section numbers are global).
   and a funnel attack's funnels, each an attack of its own. (3) `combat`: the mode's `_combat` (the blow on a blocker)
   when it is another ability than `attack`'s — the only attack of most enemies, whose `attack` is null. (4)
   `units[id].charge` and `attack.charge`: the 秘术师's chargeable groups — per-energy effect groups, store abilities,
-  projectiles and mount points (§33.12 Charge). (5) Skills: `rootClass` / `rootAbility`; the uses of a group list carry
+  projectiles and mount points (§35.12 Charge). (5) Skills: `rootClass` / `rootAbility`; the uses of a group list carry
   `group` / `groups` (a replace group's `anim`, the MultiHit choice flags); a `_replaceGroup`'s `hitEffectOptions` are
   hit uses (they counted as cast uses; none in this client). (6) Enemies' skills: `units[enemy].skills`, keyed by the
   lower-case node name = data/enemies.json `skills[].prefabKey`, with `nodes` / `inModes` (not in `index.skills`: the
@@ -118,28 +83,28 @@ Part of [DESIGN.md](../DESIGN.md) (the index; section numbers are global).
   transform — 90 skins change (78 enemies, 10 tokens, 2 operators: 88 roots authored tiles away, e.g. `enemy_1007_slime`
   at (3, 3, 0), and float noise), their points now sit over the feet; the runtime's `skinShift` (render/vfx/mounts.js),
   which moved 84 of them back, has nothing left to move for an index of version 2 and can go (or skip version ≥ 2). (10)
-  Corrected: a mesh's `colors` are 0…1 as §33.9 says (version 1 wrote the client's bytes, 0…255; a reader that divides
+  Corrected: a mesh's `colors` are 0…1 as §37.9 says (version 1 wrote the client's bytes, 0…255; a reader that divides
   values above 1 by 255 reads both); the mesh files are version 2, and their keys (a hash of the file) all change.
-  Numbers: §33.15.
+  Numbers: §35.15.
 * **2026-10-15 — Phase 1b, the full set.** (1) The file list left `data/local-assets.json`: it is `data/local-fx.json`
-  (§33.1), served at `/data/local-fx.json` with hashed URLs; its groups (`fx`, `fx/prefabs`, `fx/tex`, `fx/mesh`) and
+  (§35.1), served at `/data/local-fx.json` with hashed URLs; its groups (`fx`, `fx/prefabs`, `fx/tex`, `fx/mesh`) and
   entries are the ones `data/local-assets.json` had, which now has no fx group. A worktree that links
   `data/local-assets.json` from another checkout links `data/local-fx.json` too (it is written next to the
-  `--manifest` path as given). (2) `index.json` (§33.12): the six enemy `_2` variants without a prefab of their own
+  `--manifest` path as given). (2) `index.json` (§35.12): the six enemy `_2` variants without a prefab of their own
   are copies of their base unit with `aliasOf`; an emitter row's `effects` is what it plays — directionType 0 (NONE)
   plays only the first slot (the other slots are leftovers: before, they were listed too), a directional row keeps
   every distinct key plus `slots` (the effect per facing); keys the client lacks are dropped; a row may carry only a
-  `hookEffectAfterFirstAttack`. (3) Skills gained `mode` / `modeBy`, `uses`, `roles` and `unclassified` (§33.12),
+  `hookEffectAfterFirstAttack`. (3) Skills gained `mode` / `modeBy`, `uses`, `roles` and `unclassified` (§35.12),
   from the skill prefabs and the client's buff templates. (4) The used set holds the sample's keys too. (5)
   `InheritVelocityModule` / `LifetimeByEmitterSpeedModule` export: their `m_Curve` is a MinMaxCurve (159 prefabs of
-  the full set failed on it). (6) The **[verify]** marks were checked against the client: resolved — ability events (§33.12), vertex stream
-  packing and the custom-data components (§33.6), `FxUVRotation` (§33.11), `PauseEffectIf` (§33.11, the earlier
-  `buff_stun` example was wrong), the texture-sheet frame from the data's `0.9999` ends (§33.5); still assumed —
-  the billboard roll's sign, the Limit Velocity dampen step (§33.5), `FxUVRotation`'s matrix sign. No descriptor field
+  the full set failed on it). (6) The **[verify]** marks were checked against the client: resolved — ability events (§35.12), vertex stream
+  packing and the custom-data components (§35.6), `FxUVRotation` (§35.11), `PauseEffectIf` (§35.11, the earlier
+  `buff_stun` example was wrong), the texture-sheet frame from the data's `0.9999` ends (§35.5); still assumed —
+  the billboard roll's sign, the Limit Velocity dampen step (§35.5), `FxUVRotation`'s matrix sign. No descriptor field
   changed.
 * **2026-10-14 — Phase 1a**: the format and the sample.
 
-## 33. Official battle effects — the extracted format (0.3.0, Phase 1a–1d)
+## 35. Official battle effects — the extracted format (0.3.0, Phase 1a–1d)
 
 The official battle effects (hit sparks, projectiles, cast flashes, status loops, skill effects) are Unity prefabs of
 ParticleSystems, meshes, trails and small behaviour scripts. `tools/local-extract/fx.py` (run as `extract.py --only fx`)
@@ -153,22 +118,22 @@ the descriptor keeps Unity's names so that every field can also be looked up in 
 extractor adds is the resolution of references (other files, other nodes, shaders' render states, clip bindings) and the
 decoding of compressed data (animation clips, textures, meshes).
 
-**Status (Phase 1d).** The extractor and this format cover the full set the mode uses (§33.14; the Phase 1a sample,
-§33.13, is a subset) and, since Phase 1c (§33.15), every emitter of the units' attacks, the charge groups and the
-enemies' and summons' skills; since Phase 1d (§33.17) the units' talents, common and general abilities, which ability
+**Status (Phase 1d).** The extractor and this format cover the full set the mode uses (§35.14; the Phase 1a sample,
+§35.13, is a subset) and, since Phase 1c (§35.15), every emitter of the units' attacks, the charge groups and the
+enemies' and summons' skills; since Phase 1d (§35.17) the units' talents, common and general abilities, which ability
 fires which projectile, the buffs' lives and the groups' choice; the runtime and the skill mapping read them (Phases 2
-and 3; what the runtime does not read yet: §33.17's list), and the 驭械术士's floating units from the funnel attacks, their
-FunnelEffectEmitters and their projectiles (§33.18). Where the client's own
+and 3; what the runtime does not read yet: §35.17's list), and the 驭械术士's floating units from the funnel attacks, their
+FunnelEffectEmitters and their projectiles (§35.18). Where the client's own
 behaviour cannot be read from its data, the text says **assumed** (Unity behaviour the data cannot confirm);
 **resolved** marks what Phase 1b checked against the client (its shader source, il2cpp metadata, prefab data). Enum and
 field names marked *metadata* come from the client's il2cpp metadata
 (`Arknights_Data/il2cpp_data/Metadata/global-metadata.dat`, version 29, not encrypted: type and field names, nested
 types, the enum constants with their values; method bodies are native code and not read).
 
-### 33.1 Files, the file list and the extractor run
+### 35.1 Files, the file list and the extractor run
 
 ```
-.venv/bin/python tools/local-extract/extract.py --only fx                        the Phase 1a sample (§33.13)
+.venv/bin/python tools/local-extract/extract.py --only fx                        the Phase 1a sample (§35.13)
 .venv/bin/python tools/local-extract/extract.py --only fx --fx-set used          every effect the mode's units use
 .venv/bin/python tools/local-extract/extract.py --only fx --fx-keys k1,k2        named prefabs only (a dev aid)
                                                  [--fx-jobs N]  worker processes (default up to 8)
@@ -182,13 +147,13 @@ set, and `SP_FX_ROOT=<dir> node --test test/local-extract-fx.test.js` checks it 
 A plain `extract.py` run (no `--only`) does not run fx. The run reads `data/chess.json`, `data/backups.json`,
 `data/enemies.json` and `data/tokens.json` for the unit list (and the enemies' talent keys), the official
 `character_table.json`, `battle_equip_table.json` and `uniequip_table.json` under `.cache/gamedata/excel/` when setup
-fetched them (our data's talent indexes → the prefabs' talent nodes, §33.17 `talentKeys`; without them the links are
+fetched them (our data's talent indexes → the prefabs' talent nodes, §35.17 `talentKeys`; without them the links are
 left out), caches the bundles' prefab lists under `.cache/fx/` (per bundle size + mtime) and writes, under
 `public/assets/local/fx/`:
 
 | file | content |
 |---|---|
-| `index.json` | §33.12: per unit (operator / enemy / token) the attack modes, skills, talents and common / general abilities (§33.17), projectiles and mount points; the projectiles; the generic keys; one summary per exported prefab |
+| `index.json` | §35.12: per unit (operator / enemy / token) the attack modes, skills, talents and common / general abilities (§35.17), projectiles and mount points; the projectiles; the generic keys; one summary per exported prefab |
 | `textures.json` | §33.8: texture key → size, wrap, filter, alpha, files |
 | `prefabs/<file>.json` | §33.4: one descriptor per effect prefab (effect key → file: `fx_file(key)` — the key itself when it is URL-safe (`[A-Za-z0-9_.-]`), else the safe form + `-` + the key's CRC32 in hex, e.g. `buff_ fragile_01` → `buff__fragile_01-9c1f…`) |
 | `tex/<key>.webp`, `tex/half/<key>.webp` (or `.png`) | §33.8: every texture (WebP q90 by default; optional lossless PNG), and a half-size copy for the light tier (both sides ≥ 64 px) |
@@ -226,15 +191,15 @@ case; the client's own references mix cases (a `SwitchableBackEffect` names `che
 extractor writes (file names, file-list entries, the index, the descriptors' `refs`) is lower case; behaviour fields keep
 the client's spelling — lower-case a key read from them before looking it up.
 
-Timings on the maintainer's Mac (Windows client 26-09-13, 8 processes): the full set (§33.14: 4,253 prefabs, 186 MB)
+Timings on the maintainer's Mac (Windows client 26-09-13, 8 processes): the full set (§35.14: 4,253 prefabs, 186 MB)
 takes ~3 minutes; the sample (126 prefabs, 290 textures, 43 meshes, 6.8 MB) ~17 s; a first run adds ~10 s (the bundles'
 prefab lists: 606 effect bundles read once, then cached in `.cache/fx/`). The prefab export costs ~0.18 s CPU per
 prefab; libwebp effort 4 (`WEBP_METHOD`; effort 6 is ~90× slower here for 4.5 % smaller files).
 
-### 33.2 Conventions
+### 35.2 Conventions
 
 **Numbers.** Floats have 6 significant digits; `-0` is `0`; NaN and ±∞ are `null` (in curve keys, `null` slopes mean
-stepped, §33.3). Integers stay integers. Booleans are JSON booleans where Unity serializes a bool, else Unity's 0 / 1
+stepped, §35.3). Integers stay integers. Booleans are JSON booleans where Unity serializes a bool, else Unity's 0 / 1
 integers are kept (most script fields: `_isLoop: 0`).
 
 **Units.** Lengths are Unity units = tiles (one tile is 1 × 1). Times are seconds of battle time. Angles: radians in the
@@ -259,13 +224,10 @@ two). Direction vectors map with C as well
 frame. Euler angles (transforms, clips, shape rotation) are degrees applied as Unity's `Quaternion.Euler(x, y, z)`:
 rotate about Z, then X, then Y (q = q_y · q_x · q_z).
 
-Why it works out: every unit's `Graphic` node is rotated −30° about X (quaternion `(-0.258819, 0, 0, 0.965926)`), so a
-character's skeleton plane is perpendicular to the camera's view direction, and the client gives an effect it spawns
-at the unit's FOOT, HIT or HEAD point that same rotation (§33.11 `_spawnLocation`, resolved 0.3.1): a plane authored in
-the effect's own XY plane stands facing the camera like the skeleton (荒芜拉普兰德 S3's seal, 能天使 S3's light bars), one
-turned +30° about X under it lies in the board (`common_hit_01`'s `andi`; the deploy ring of `common_char_birth_01`,
-turned −150°, alike), and an effect placed on the ground or at a map position takes no rotation. With our camera being the official one, the
-authored transforms produce the official picture.
+Why it works out: the effects' own geometry is pre-tilted for the battle camera — e.g. every child system of
+`common_hit_01` is rotated +30° about X, and every unit's `Graphic` node is rotated −30° about X (quaternion
+`(-0.258819, 0, 0, 0.965926)`), so a character's skeleton plane is perpendicular to the camera's view direction. With
+our camera being the official one, the authored transforms produce the official picture.
 
 **Gravity.** A ParticleSystem's gravity is `Physics.gravity × gravityModifier` in battle-world space; the client's
 `Physics.gravity` (globalgamemanagers, PhysicsManager) is the default `(0, −9.81, 0)`: towards row 0, in the board's
@@ -275,7 +237,7 @@ plane — on screen that reads as falling down.
 in step with the Spine clips. The client simulates particles in steps of at most 1/30 s (TimeManager "Maximum Particle
 Timestep" 0.0333): a runtime that wants the same drag / limit-velocity results sub-steps the same way.
 
-### 33.3 Value encodings (curves, gradients, references)
+### 35.3 Value encodings (curves, gradients, references)
 
 **AnimationCurve** (`keys`): `[[time, value, inSlope, outSlope], …]`, sorted by time; a weighted key appends
 `weightedMode, inWeight, outWeight` (weightedMode: 1 in, 2 out, 3 both). Evaluate as Unity does: between keys k0, k1
@@ -296,7 +258,7 @@ Outside the keys, clamp to the first / last value (particle curves are evaluated
 emission rate (InitialModule `start*`, `rateOverTime`, burst counts), the particle's age / lifetime for the
 over-lifetime modules, the custom data and the texture-sheet frame. `r` is a random number per particle, drawn when the
 particle is born and kept (Unity keeps one per field). For the start values about 99 % of the systems use Constant or
-TwoConstants (§33.5's table).
+TwoConstants (§35.5's table).
 
 **Gradient**: `{ mode: 'blend' | 'fixed', color: [[t, r, g, b], …], alpha: [[t, a], …] }` (t in 0…1, up to 8 keys each).
 Colour and alpha keys are separate tracks; 'blend' interpolates linearly between keys, 'fixed' holds the key at or
@@ -320,23 +282,23 @@ MinMaxCurve).
 
 | encoding | meaning |
 |---|---|
-| `{ node }` | a GameObject of this prefab (§33.4 node id) |
+| `{ node }` | a GameObject of this prefab (§35.4 node id) |
 | `{ node, component }` | a component on that node (`'Transform'`, `'ParticleSystem'`, …) |
 | `{ material: i }` | `materials[i]` of this descriptor |
-| `{ mesh: key }` | a mesh file (§33.9); `'builtin:Quad'` etc. for Unity's built-in meshes |
-| `{ texture: key }` | a texture (§33.8) |
+| `{ mesh: key }` | a mesh file (§37.9); `'builtin:Quad'` etc. for Unity's built-in meshes |
+| `{ texture: key }` | a texture (§35.8) |
 | `{ clip: i }` | `clips[i]` of this descriptor |
 | `{ builtin: x }` | an asset of Unity's built-in resources (`x`: a built-in mesh name or its path id) |
 | `{ asset, name }` | any other asset (type, name) — informational |
 | `null` | no reference (Unity's null), or a reference the extractor could not resolve |
 
-### 33.4 The prefab descriptor (`prefabs/<file>.json`)
+### 35.4 The prefab descriptor (`prefabs/<file>.json`)
 
 ```
 { format: 'fx-prefab', version: 1, key, bundle, root: 0,
-  nodes: [Node…], materials: [Material…] (§33.7), clips: [Clip…] (§33.10),
+  nodes: [Node…], materials: [Material…] (§35.7), clips: [Clip…] (§35.10),
   textures: [texture key…], meshes: [mesh key…],          the files this prefab needs (preload them)
-  refs: [effect key…],                                     other effects its behaviours name (§33.11: variants by
+  refs: [effect key…],                                     other effects its behaviours name (§35.11: variants by
                                                            facing, chained effects) — exported too
   stats: { nodes, particleSystems, liveParticles, duration, looping } }
 ```
@@ -350,33 +312,23 @@ systems, `duration` the time until every non-looping system has finished (startD
 ```
 { id, name, parent (id | null), children: [id…], active (the GameObject's own activeSelf),
   pos: [x, y, z], rot: [x, y, z, w] (quaternion), scale: [x, y, z],      local transform (Unity)
-  particleSystem?        §33.5          particleSystemRenderer?   §33.6
+  particleSystem?        §35.5          particleSystemRenderer?   §35.6
   meshFilter?            mesh key (or 'builtin:Quad', or null)
-  meshRenderer?, skinnedMeshRenderer?, trailRenderer?, lineRenderer?, spriteRenderer?    §33.6
-  animator?, animation?  §33.10         behaviours?: [Behaviour…]  §33.11
+  meshRenderer?, skinnedMeshRenderer?, trailRenderer?, lineRenderer?, spriteRenderer?    §35.6
+  animator?, animation?  §35.10         behaviours?: [Behaviour…]  §35.11
   ignored?: [component type…]           components the format leaves out (MeshCollider, BoxCollider, …) }
 ```
 
 World matrix of a node = parent's world matrix × T(pos) · R(rot) · S(scale). A node is active when it and all its
 parents are `active` (Unity's activeInHierarchy); an inactive node renders and simulates nothing until something (an
-FxDelay, a clip curve on `m_IsActive`) activates it. A renderer also has its own `m_Enabled`. The root is the
-exception: the client activates an effect's GameObject as it plays it (`Effect._DelayToActiveGameObject` →
-`GameObjectUtil.SetActiveIfNecessary`, GameAssembly.dll of 2026-09-13), so a root saved inactive — 35 prefabs of the
-used set: the 狼群's `vigil_token_sub_attack_1` / `_2`, 伺夜's and 至简's attack starts, 艾雅法拉's hit, 风笛 S3's buff,
-百炼嘉维尔 S2's chainsaw glow … — plays like any other (the runtime drew nothing of them before 0.3.1). The root's own
-transform is the game's too: the client sets the root's position where it plays the effect (`Effect._InitLocation…`,
-its rotation by the spawn location, §33.11), and a projectile's flying effect is a child of the projectile's body,
-which flies the path, with its transform reset (`Misc.Reset`) — so the root's authored `pos` (203 prefabs, 155 of them
-projectile bodies: `aglina_skill_02_trail` at (0.18, 0.74, −0.60), 0.94 tile up the screen) is not added, and a
-projectile body's authored `rot` gives way to its flight (0.3.1, history §34.6).
+FxDelay, a clip curve on `m_IsActive`) activates it. A renderer also has its own `m_Enabled`.
 
-The usual layout: the root carries the controlling behaviour (`ParticleEffect`, `ProjectileEffect`, §33.11) → a node
+The usual layout: the root carries the controlling behaviour (`ParticleEffect`, `ProjectileEffect`, §35.11) → a node
 `static_offset` → a node `fixed` (or `rotation_y` / `rotation_z`, nodes the behaviour turns by direction) holding a
 ParticleSystem whose renderer is disabled (`Default-Particle` material) — it only times its children (in Unity, playing
-a system plays its child systems) → the visible systems, quads, trails. Note the children's tilts against the root's
-spawn rotation (§33.2).
+a system plays its child systems) → the visible systems, quads, trails. Note the children's +30° X tilt (§35.2).
 
-### 33.5 ParticleSystem (`node.particleSystem`)
+### 35.5 ParticleSystem (`node.particleSystem`)
 
 Only enabled modules are written (InitialModule always); a missing module is off. Field names are Unity's serialized
 names (`ParticleSystem` in a Unity YAML scene); the enum values are Unity's.
@@ -387,12 +339,7 @@ Local — particles move with the system's transform, 1 World — they stay wher
 `moveWithCustomTransform` `{node, component}`), `scalingMode` (0 Hierarchy — the full world scale applies, 1 Local —
 only the system's own `scale` applies to its particles: the player's frame is the world rotation with unit axes times
 that scale, and an axis a parent scaled to zero is rebuilt from the other two, mirrored with the effect (history
-§32.14.38), 2 Shape — scale applies to the emission shape only; a particle's size is × the Hierarchy / Local scale per
-axis — x across, y up the particle, z through a mesh — whether or not the system has `size3D` (1,318 systems of 462
-prefabs sit on unevenly scaled nodes: 荒芜拉普兰德 S3's seal tips 1 × 0.7, 娜仁图亚 S3's hit glow a 2.4 × 0.29 streak), and
-a local-space particle is drawn at that scale as it is now, a world-space one at the scale it was born at (a clip that
-grows a node from 0 grows its particles: the seal's discs; 531 systems of 142 prefabs are born at 0 or animated) —
-0.3.1, history §34.6; the remake drew a uniform size × the x scale, as born), `stopAction`, `cullingMode`, `ringBufferMode`,
+§34.14.38), 2 Shape — scale applies to the emission shape only), `stopAction`, `cullingMode`, `ringBufferMode`,
 `ringBufferLoopRange`, `emitterVelocityMode` (0 Transform, 1 Rigidbody: the emitter's velocity for inherit-velocity and
 rate-over-distance), `useUnscaledTime`, `autoRandomSeed`, `randomSeed`.
 
@@ -400,9 +347,9 @@ rate-over-distance), `useUnscaledTime`, `autoRandomSeed`, `randomSeed`.
 `size3D`, `startSize` / `startSizeY` / `startSizeZ` per axis), `startRotation` (radians; with `rotation3D`
 `startRotationX` / `startRotationY` / `startRotation` (Z)) — a billboard's roll about the view axis; Unity turns
 particles clockwise on screen for positive angles, the opposite of a Transform's Z rotation (**assumed**: Unity's
-behaviour, which no data of the client confirms; the transform-driven spins such as `buff_stun`'s are clips, §33.10) —,
+behaviour, which no data of the client confirms; the transform-driven spins such as `buff_stun`'s are clips, §35.10) —,
 `randomizeRotationDirection` (0…1: the share of particles whose rotation and spin are mirrored), `startColor` (MinMaxGradient), `gravityModifier` (MinMaxCurve × Physics.gravity,
-§33.2), `maxNumParticles` (emission stops at this many live particles), `customEmitterVelocity`.
+§35.2), `maxNumParticles` (emission stops at this many live particles), `customEmitterVelocity`.
 
 **ShapeModule** (where particles are born and their initial direction; omitted = emit at the system's origin, direction
 +Z): `type` / `typeName` — `sphere`, `hemisphere`, `cone`, `box`, `mesh`, `coneVolume`, `circle`, `singleSidedEdge`,
@@ -430,7 +377,7 @@ repeatInterval, probability }]` (`m_BurstCount` is their number).
 * `ClampVelocityModule` (Limit Velocity): `magnitude` (or `x` / `y` / `z` with `separateAxis`), `dampen` (the share of
   the excess speed removed per step), `drag` (MinMaxCurve) with `multiplyDragByParticleSize` /
   `multiplyDragByParticleVelocity`, `inWorldSpace`. **Assumed**: Unity applies dampen once per simulation step
-  (sub-steps of ≤ 1/30 s, §33.2); the client's data cannot show the step (engine code).
+  (sub-steps of ≤ 1/30 s, §35.2); the client's data cannot show the step (engine code).
 * `ForceModule`: `x`, `y`, `z` (acceleration), `inWorldSpace`, `randomizePerFrame`.
 * `InheritVelocityModule`: `m_Mode` (0 Initial, 1 Current), `m_Curve`.
 * `LifetimeByEmitterSpeedModule`, `SizeBySpeedModule`, `RotationBySpeedModule`, `ColorBySpeedModule` (`range` = the
@@ -464,7 +411,7 @@ per particle, 1 Ribbon — one strip through the particles in age order), `ratio
 
 **CustomDataModule**: `mode0` / `mode1` (0 disabled, 1 vector, 2 colour), `vectorComponentCount0/1`, `vector0_0…0_3`,
 `vector1_0…1_3` (MinMaxCurves over the particle lifetime), `color0` / `color1`. These values reach the shader only
-through the renderer's custom vertex streams (§33.6) — the `*(CustomData)` shaders read them (dissolve amount, UV
+through the renderer's custom vertex streams (§35.6) — the `*(CustomData)` shaders read them (dissolve amount, UV
 offsets).
 
 **CollisionModule** (66 systems in the used set), **TriggerModule**, **LightsModule**, **ExternalForcesModule**: written
@@ -475,7 +422,7 @@ Emission 83 %, Color 76 %, Size 69 %, Shape 41 % (cone 5,791, sphere 1,904, box 
 ClampVelocity 28 %, UV 16 %, CustomData 11 %, Rotation 11 %, Velocity 9 %, Noise 8 %, Force 3 %, Trail 2 %,
 Sub 1 %, InheritVelocity 1 %; 23 % loop, 3,019 prewarm, 16 % simulate in world space, 89 % use scaling mode Local.
 
-### 33.6 Renderers
+### 35.6 Renderers
 
 All renderers carry `m_Enabled`, `m_SortingLayerID` / `m_SortingLayer`, `m_SortingOrder` and `materials` (indices
 into the descriptor's `materials`, `null` for a missing one — draw nothing with it).
@@ -486,21 +433,9 @@ plane), `world` (1), `local` (2, the system's transform orientation — 9,422 re
 quads are local), `facing` (3, face the camera position), `velocity` (4); `m_SortMode` (0 none, 1 by distance, 2 oldest
 in front, 3 youngest in front), `m_SortingFudge` (bias of the camera distance used to sort this system against
 others), `m_MinParticleSize` / `m_MaxParticleSize` (on-screen size clamp, as a fraction of the viewport height),
-`m_LengthScale` / `m_VelocityScale` / `m_CameraVelocityScale` (stretched billboards: along the velocity the particle's
-Y size × lengthScale + speed × velocityScale, across it its X size — the particle's Y is the stretched axis: of the
-used set's stretched renderers with a pivot, 2,434 set it in Y and 9 in X, against 405 / 379 for plain billboards,
-and 2,130 of the 2,449 stretched systems with unequal X / Y sizes make Y the long one; 风笛's lance thrust, a Y 3.5 /
-X 0.5 flash flying along the thrust, was a vertical needle with the sizes the other way round, 0.3.1),
-`m_FreeformStretching`, `m_RotateWithStretchDirection`, `m_NormalDirection`, `m_Pivot` (in
-particle-size units: the quad or mesh is drawn at position + pivot × size along the particle's own axes, turning with
-its roll — 荒芜拉普兰德 S3's seal tips, Quads with a pivot of −0.5 / −0.81 left of the centre and their twins turned 180°
-about Y right of it, point outward only so, and of the used set's view billboards with a Y pivot 210 lift the quad
-against 22: 艾雅法拉 S2's range flames stand on the ground; a stretched billboard adds the same pivot after its head
-shift, pivot.y × the particle's Y size along the velocity and pivot.x × its X size across — that Y size, not the
-stretched length; 1,754 stretched renderers have |pivot| > 0.2, and the largest shifts are 锏 S3
-`blkkgt_skill_03_start_01` `light` (up to 4.62 tiles), `enemy_mdrock_buff_03_start_02` `shandian` (4.57) and 陈 S2
-`chen_skill_02_start` `renwu_01` (2.77) — 1,291 renderers of 661
-prefabs set one — the remake moved the particle the other way before 0.3.1, and skipped it on a stretch, history §34.6), `m_Flip` (0…1: the share of particles mirrored per axis), `m_AllowRoll`; mesh particles:
+`m_LengthScale` / `m_VelocityScale` / `m_CameraVelocityScale` (stretched billboards: length = size × lengthScale +
+speed × velocityScale), `m_FreeformStretching`, `m_RotateWithStretchDirection`, `m_NormalDirection`, `m_Pivot` (in
+particle-size units), `m_Flip` (0…1: the share of particles mirrored per axis), `m_AllowRoll`; mesh particles:
 `m_Mesh`, `m_Mesh1…3` (`{mesh}` or null), `m_MeshDistribution` (0 uniform, 1 by `m_MeshWeighting*`), `m_MaskInteraction`;
 `materials[0]` draws the particles, `materials[1]` the TrailModule's trails.
 
@@ -516,7 +451,7 @@ vertex inputs are sized to exactly these packings — `TEXCOORD0` half4, `TEXCOO
 in the Disturb / Ram / ZDistort `(CustomData)` families, whose renderers stream `[Position, Normal, Color, UV,
 Custom1XYZW, Custom2XYZW]` (2,301 renderers of the used set: UV 2 + 4 + 4); `TEXCOORD0` + `TEXCOORD1` (8 floats) in
 `Dissolve(CustomData)`, whose renderers stream `[…, UV, Custom1XYZW, Custom2XY]` (653). What the components do there
-(CustomDataModule curves, §33.5) — offsets are added to a texture's UV after its tiling / offset, before the UV
+(CustomDataModule curves, §35.5) — offsets are added to a texture's UV after its tiling / offset, before the UV
 rotation and the scrolling: in `Disturb(CustomData)` Custom1.xy offsets the main texture, Custom1.zw the dissolve
 texture, Custom2.zw the disturb texture (the Ram and ZDistort families add the same three inputs to their own three
 textures), Custom2.x is added to `_Amount` (the dissolve threshold) and Custom2.y to `_IntensityU` / `_IntensityV`
@@ -528,7 +463,7 @@ streams) the components are 0.
 `builtin:Quad` is Unity's quad: vertices (±0.5, ±0.5, 0), normal −Z, UV (0,0) at (−0.5, −0.5).
 
 **`skinnedMeshRenderer`**: `m_Mesh`, `m_Bones` (`[{node, component}]`, the bone transforms), `m_RootBone`, `m_Quality`,
-`m_BlendShapeWeights`; the mesh file carries `boneWeights`, `boneIndices`, `bindPoses` (§33.9). A vertex is
+`m_BlendShapeWeights`; the mesh file carries `boneWeights`, `boneIndices`, `bindPoses` (§37.9). A vertex is
 Σᵢ wᵢ · (boneᵢ world · bindPoseᵢ) · v. 17 prefabs in the used set (Ifrit S3's flame tongues), animated by legacy clips.
 
 **`trailRenderer`**: `m_Time` (trail lifetime, s), `m_MinVertexDistance`, `m_Autodestruct`, `m_Emitting`, `m_Parameters`
@@ -540,13 +475,13 @@ numCapVertices, alignment (0 view, 1 transform Z / local), textureMode (0 Stretc
 `m_Parameters`. The authored positions are placeholders: the effects that use lines (chains, beams) get their end
 points from the game (source and target). 32 of the used set's 34 line prefabs are world-space — their points are
 fixed spots of the authoring scene (溯光星源 S1's chain at world (5, 4) → (6, 3)) and must not be drawn as they are;
-the web runtime draws such a line only once it set its end points (a harpoon's rope, §33.12: from the shooter's point
+the web runtime draws such a line only once it set its end points (a harpoon's rope, §35.12: from the shooter's point
 to the head).
 
 **`spriteRenderer`**: not used by the effects of this mode (written with its materials only).
 
 **Sorting and depth.** Transparent renderers sort by sorting layer, then `m_SortingOrder`, then the material's queue,
-then camera distance (with `m_SortingFudge`). 71 % of the effect materials have ZTest `Disabled` (§33.7): they ignore
+then camera distance (with `m_SortingFudge`). 71 % of the effect materials have ZTest `Disabled` (§35.7): they ignore
 the board's depth; the rest test against it (ground decals, ranges). The units sort among them: an operator's Spine
 renderers (its chararts' `Front` / `Back` / `Spine` MeshRenderers) sit on the Default layer (`m_SortingLayer` 0) at
 order 0, so an effect renderer on a lower layer, or on the Default layer with a negative order, is drawn before every
@@ -566,8 +501,9 @@ the start of `UnitView.root`, sorting after that owner's platform and before its
 and batched independently; finished effects and destroyed owners release the node. Its authored order 0 and its
 siblings' original pass remain unchanged [ASSUMED: a scoped painter-order mapping, not full Unity distance sorting;
 history 0.4.0 §37.106].
+its pass under the units (`render/vfx/effect.js` `behindUnits`) along with the renderers lying flat on the ground.
 
-### 33.7 Materials (`descriptor.materials[]`)
+### 35.7 Materials (`descriptor.materials[]`)
 
 ```
 { name, shader (the shader's name, e.g. 'Torappu/Particles/Additive'),
@@ -602,7 +538,7 @@ source never enters it. The common pattern: output = 2 × vertex colour × `_Tin
 0.5 grey is neutral), Dissolve variants cut the alpha by a noise texture against `_Amount` with a soft `_BorderWidth`,
 Disturb variants offset the main UVs by a scrolled distortion texture.
 
-### 33.8 Textures (`textures.json`, `tex/`)
+### 35.8 Textures (`textures.json`, `tex/`)
 
 `textures.json` = `{ format: 'fx-textures', version: 1, textures: { key: Texture } }`:
 
@@ -615,9 +551,9 @@ Disturb variants offset the main UVs by a scrolled distortion texture.
 A key is the safe Unity name + the first 8 hex digits of the SHA-1 of the decoded pixels, so identical copies in
 different bundles share one file (`star_02` alone exists ~50 times in the client). `alpha` false = every pixel opaque
 (written as RGB). Textures are straight (not premultiplied) alpha; the half-size copy is resized premultiplied (no dark
-fringes). `srgb` is informational: render in gamma space (§33.2). Built-in textures appear as `builtin:<path id>`.
+fringes). `srgb` is informational: render in gamma space (§35.2). Built-in textures appear as `builtin:<path id>`.
 
-Optional PNG textures are documented in history §35.96 (PR #806). WebP quality 90, method 4 is the extraction default, with the existing Pillow options, image bytes and
+Optional PNG textures are documented in history §37.96 (PR #806). WebP quality 90, method 4 is the extraction default, with the existing Pillow options, image bytes and
 metadata. `extract.py --only fx --fx-texture-format png` selects lossless PNG when WebP's RGB artefacts matter.
 Both full and half files use the selected encoding; dimensions, keys, sampler settings and effect descriptors stay
 the same. `format` keeps the original texture's GPU encoding. PNG output adds `encoding: 'png'` to this metadata
@@ -628,7 +564,7 @@ server hashes and serves both suffixes through the existing asset pipeline.
 Encoded sizes depend on the texture and selected format: lossless PNG avoids WebP's RGB loss, while the default
 WebP usually reduces transfer bytes. Both formats use the same decoded image dimensions and GPU memory.
 
-### 33.9 Meshes (`mesh/<key>.json`)
+### 35.9 Meshes (`mesh/<key>.json`)
 
 ```
 { format: 'fx-mesh', version: 2, name, vertexCount,
@@ -646,7 +582,7 @@ colours), version 2 writes them as 0…1 floats (the bytes ÷ 255), as this sect
 particles are small (`Plane003`, `Cone001`, `Torus001`, `Sphere001`: 4–200 vertices; 435 meshes / 57k vertices in the
 whole used set).
 
-### 33.10 Animation clips (`descriptor.clips[]`, `node.animator`, `node.animation`)
+### 35.10 Animation clips (`descriptor.clips[]`, `node.animator`, `node.animation`)
 
 `node.animator` = `{ controller, clips: [clip index…], default, enabled, cullingMode, updateMode }`: the Animator plays
 `default` from time 0 when the effect starts (every effect controller of the sample has one clip). `node.animation`
@@ -659,13 +595,13 @@ Clip = { name, legacy, length, start, loop, sampleRate, wrapMode, events: [{ tim
 
 A curve drives one float of one component of node `node` (`path`: its path from the Animator's / Animation's node;
 `node: null` + `pathHash` when the clip names an object the prefab does not have — Unity ignores those). Evaluate the
-keys at the clip time (§33.3; looping clips wrap at `length`, others hold their end values). `type` and `property`:
+keys at the clip time (§35.3; looping clips wrap at `length`, others hold their end values). `type` and `property`:
 
 | type | property | meaning |
 |---|---|---|
 | `Transform` | `localPosition.x/y/z`, `localScale.x/y/z` | the node's local position / scale |
 | `Transform` | `localRotation.x/y/z/w` | quaternion (normalize after evaluating) |
-| `Transform` | `localEulerAnglesRaw.x/y/z` | Euler degrees (Z, X, Y order, §33.2; e.g. `buff_stun`'s spin: z 0 → −720 over 10.03 s) |
+| `Transform` | `localEulerAnglesRaw.x/y/z` | Euler degrees (Z, X, Y order, §35.2; e.g. `buff_stun`'s spin: z 0 → −720 over 10.03 s) |
 | `GameObject` | `m_IsActive` | > 0.5 = active |
 | `MeshRenderer`, `ParticleSystemRenderer`, `TrailRenderer`, `LineRenderer`, `SkinnedMeshRenderer` | `material.<prop>[.<c>]` (customType 22) | overrides a material property of that renderer only: c = `r g b a` (colours), `x y z w` (vectors — for `_MainTex_ST`: x, y scale, z, w offset), none (floats). Seen: `_TintColor`, `_MainColor`, `_MainTex_ST`, `_Amount`, `_Amount_02`, `_BorderWidth`, `_DissolveTex_ST`, `_DisturTex_ST` |
 | `TrailRenderer` / `LineRenderer` | `m_Parameters.widthMultiplier`, `m_Time`, … (customType 30 / 29) | the renderer field of that path |
@@ -675,10 +611,10 @@ keys at the clip time (§33.3; looping clips wrap at `length`, others hold their
 Unresolvable properties would read `crc:<n>` (none in the sample). Clips are decoded from Unity's streamed (Hermite
 segments), dense (sampled; written as linear keys) and constant tracks; legacy clips from their explicit curves.
 
-### 33.11 Behaviours (`node.behaviours[]`)
+### 35.11 Behaviours (`node.behaviours[]`)
 
 `{ class, namespace, enabled, fields }` — every MonoBehaviour with its serialized fields (Unity names, references
-resolved per §33.3; `_bodyTransofrm` is the client's spelling). Disabled behaviours (`enabled: false`) do nothing.
+resolved per §35.3; `_bodyTransofrm` is the client's spelling). Disabled behaviours (`enabled: false`) do nothing.
 Semantics below are read from the field names, the data and the client's type, field and enum names (*metadata*);
 **resolved** marks what was checked against the client's shader source or metadata, **assumed** what still is not.
 
@@ -687,16 +623,11 @@ Semantics below are read from the field names, the data and the client's type, f
   2 HIT_POINT, 3 MUZZLE_POINT, 4 HEAD_POINT, 5 GROUND_CENTER, 6 MUZZLE_POINT_WITHOUT_ROTATION, 7 GROUND_CENTER_WITH_ZERO_HEIGHT,
   8 MP_SPECIAL_0, 9 MP_SPECIAL_1, 10 MP_SPECIAL_2, 11 MP_SPECIAL_3, 12 CAMERA, 13–16 MP_SPECIAL_4–7, 17 TILE_CENTER,
   18–25 MP_SPECIAL_8–15, 26 GROUND_CENTER_WITH_TILE_HEIGHT, 27–34 MP_SPECIAL_16–23, 35 GROUND_CENTER_WITH_HIGHLAND_HEIGHT.
-  The points are the unit's mount points (§33.12 `skins`): FOOT = the unit's root, HIT = `HitPoint`, MUZZLE = `Muzzle` /
+  The points are the unit's mount points (§35.12 `skins`): FOOT = the unit's root, HIT = `HitPoint`, MUZZLE = `Muzzle` /
   `MuzzlePoint`, HEAD = `HeadPoint`, MP_SPECIAL_n = `Special<n>` / `SpecialPoint<n>`. In the sample: hits use 2, cast
-  flashes 3 / 6 / 8, status loops 1 / 4, ranges 5 / 7. **Resolved** (the client's `Effect._InitLocationFromEntity`;
-  the rotations corrected in 0.3.1, history §34.6): FOOT_POINT, HIT_POINT and HEAD_POINT take the point's position and
-  the rotation of the unit's skin animator — the `Graphic` node's −30° about X, without the FaceSwitcher's turn: an
-  effect authored in its own XY plane stands facing the camera (§33.2; 2,590 prefabs play there, their planar
-  renderers authored standing 7,255 times against 514 lying flat), FLIP_TWO_SIDE mirrors it for a unit facing left —;
-  MUZZLE_POINT_WITHOUT_ROTATION and NONE take no rotation, the ground spawns (GROUND_CENTER…, TILE_CENTER) the unit
-  root's (none), and an effect the game plays at a map position (`Effect._InitLocation`: a kit fx's tile, a
-  projectile's target tile) none; MUZZLE_POINT and the MP_SPECIAL points
+  flashes 3 / 6 / 8, status loops 1 / 4, ranges 5 / 7. **Resolved** (the client's `Effect._InitLocationFromEntity`):
+  FOOT_POINT, HIT_POINT, HEAD_POINT and MUZZLE_POINT_WITHOUT_ROTATION take the point's position and the unit's own
+  (unturned) rotation — these prefabs are pre-tilted for the camera (§35.2) —; MUZZLE_POINT and the MP_SPECIAL points
   (`_SetPosAndRotToMountPoint`) take the point's position and its world rotation: the unit's Graphic tilt (−30° about
   X), the FaceSwitcher's turn for a unit facing left (180° about the skeleton plane's up axis: the client tweens that
   node's rotation to turn a unit) and, for a point a BoneFollower keeps on a bone, the bone's angle — such prefabs are
@@ -708,7 +639,7 @@ Semantics below are read from the field names, the data and the client's type, f
 * `_delayToPlay` (s before the systems start), `_delayToFinish` (s the effect lingers after it is finished, then it is
   recycled), `_maxLifetime` (s, −1 none), `_randomPlayDelay`, `_isLoop`, `_inactiveOnFinish` (`[{node}]` hidden when it
   finishes: when the game stops it or its content has ended, through the linger), `_subFXDelayConfigs`, `_holdByOwner`
-  (its owner holds it: the effect moves with the unit — §33.16 Placement; **assumed** from the client's names
+  (its owner holds it: the effect moves with the unit — §35.16 Placement; **assumed** from the client's names
   `ParticleEffect.holdByOwner`, `Entity.m_holdEffects`, `CreateEffectHoldBySource(…, setAsParent)`: 1 on the attack
   starts, buffs and statuses, 0 on the hits and ground ranges), `_overwriteHeight` / `_heightOffset` (place at this height),
   `_usePlaybackSpeed` / `_limitedPlaybackSpeed` (follow the owner's attack speed, capped), `_preloadCnt` (pool size
@@ -716,12 +647,12 @@ Semantics below are read from the field names, the data and the client's type, f
 * An effect is finished when every non-looping system has ended and has no live particle (and its clips have ended);
   looping effects run until the game stops them (a status ends, a skill ends, a projectile arrives).
 
-**`ProjectileEffect`** (the flying part of a projectile, §33.12): `_mainDir`, `_resetMainDir`, `_rotate180Y`,
+**`ProjectileEffect`** (the flying part of a projectile, §35.12): `_mainDir`, `_resetMainDir`, `_rotate180Y`,
 `_randomAngle`, `_flipIfLeft`, `_delayToFinish`, `_inactiveOnFinish`, `_inactiveOnHit` (`[{node}]` hidden on arrival
 while the rest — trails — fades), `_preloadCnt`, `_allowAutoReuse`. The 172 with an `_inactiveOnFinish` list name their
 body there (崖心's hook and 灰毫's shell `gonggaoban`, 空弦's arrow `gongjian`) with a `_delayToFinish` of 0.5 s for the
 trail: the flight's end finishes the effect (a projectile clears its main effect when it is reached), so the body goes
-as the shot lands (DESIGN §32.14.40; it used to stay on the target until the trail had faded).
+as the shot lands (DESIGN §34.14.40; it used to stay on the target until the trail had faded).
 **`EmptyEffect`**: an effect with no own logic.
 
 **`FxDelay`**: `_delayTime` — the node becomes active that many seconds after the effect starts (its nodes start
@@ -748,10 +679,8 @@ SPECIAL_5–SPECIAL_23 — sample: `buff_frozen` 0, `common_root_01` 1, `enemy_t
 **Resolved** (`FollowMountPoint._FollowMountPoint`): every LateUpdate the effect takes the point's position and,
 unless `_keepOriginRotation`, its world rotation (as MUZZLE_POINT above); `_followScaleSign` copies the sign of the
 point's local scale, `_followScale` the scale itself (× `_scaleMultiplier`). The status loops keep their rotation
-(`buff_stun`, `buff_frozen`, `common_root_01`: `_keepOriginRotation` 1) — the rotation their spawn location gave them
-(`_spawnLocation` above: the Graphic tilt on FOOT / HIT / HEAD, 0.3.1); the weapon effects take it (安洁莉娜's
-`aglina_skill_02_start` on SPECIAL_0, its parts 0.35–0.4 along local +x: up her staff); FOOT's point is the skeleton's
-root, so an effect following it takes the tilt and the facing turn.
+(`buff_stun`, `buff_frozen`, `common_root_01`: `_keepOriginRotation` 1); the weapon effects take it (安洁莉娜's
+`aglina_skill_02_start` on SPECIAL_0, its parts 0.35–0.4 along local +x: up her staff).
 **`FollowDirection`**: turns with the owner's facing (`_useFourDir`, `_useOwnerDirection`, `_useOwnerMoveDirection`,
 `_leftIsDefault`, `_reverseWhenFaceToBack`, `_flipWhenFaceToVertical`, `_onlyFollowOnPlay`, `_useDirectionLerp`,
 `_lerpDuration`, …). **`FollowOwner`**, **`FollowOwnerRootTileHeight`**, **`FollowTileHeight`** (`_followTileHeightSpeed`):
@@ -770,10 +699,10 @@ follow the owner / the height of the tile under it.
 **`OnFinishAnime`** / **`TriggerAnimatorWhenFinish`** (set an Animator trigger at the end), **`PauseAnotherEffect`**
 (`_effect`, `_preDelay`, `_checkUpdate`; 21 prefabs). The runtime starts an OnPlayEmitter's effects with their parent's
 placement and owner (`system.js FxHandle._start`); on a unit a chained effect keeps to its own FollowMountPoint's point,
-else moves with the unit when its parent or its own `_holdByOwner` says so (§32.14.40: before, they all kept their
+else moves with the unit when its parent or its own `_holdByOwner` says so (§34.14.40: before, they all kept their
 parent's placement, and a parent without a FollowMountPoint left them where they started — 能天使 S2's
 `angle_skill_02_buff_02` and 纯烬艾雅法拉 S3's five weapon effects, each on its own Special point in the client, at her
-feet). PauseAnotherEffect is **run** since round 46 (history §32.14.42; `effect.js` `def.pauses`, `system.js
+feet). PauseAnotherEffect is **run** since round 46 (history §34.14.42; `effect.js` `def.pauses`, `system.js
 _pauseOthers`): while the effect plays (after `_preDelay`) the effects of the key `_effect` on the same unit (the
 `owner` FxWiring.playOn gives each effect) are not drawn — they keep running and show again once it stops. It shows one
 variant of a stack — 泥岩's and 鼠王's shield layers (`mudrok_buff_01_start` pauses `_02` and `_03`, `_02` pauses `_03`),
@@ -804,7 +733,7 @@ scaled by that share). A light tier can apply it.
 **Others**: `ColorModifier` (`_color` tint), `FunnelHitEffect` (`_randomRange`), `OnPlayAudioPlayer` (`_audioSignal`:
 a sound — the runtime's audio may play it), and the long tail (55 classes in the used set; most occur once or twice).
 
-### 33.12 `index.json`
+### 35.12 `index.json`
 
 ```
 { format: 'fx-index', version: 3, set: 'sample' | 'used' | 'keys', source: { root, client },
@@ -825,10 +754,10 @@ pkgrps/btl_pfb_tokens_*):
             combat?: Attack }],                its `_combat` (the blow on a blocker), when another ability (v2)
   charge?: [Charge…],                          the chargeable groups (the 秘术师's stored energies, below; v2)
   skills: { skillId: Skill },                  the same objects as index.skills; an enemy's own skills (v2, below)
-  talents?: { key: Talent },                   its talents by prefab key (v3, §33.17)
-  abilities?: [Ability…],                      its common / general abilities and trait (v3, §33.17)
-  talentKeys?: { base, trait?, modules? },     our data's talent indexes → the talents' keys (v3, §33.17)
-  spineEffects?: [Emit…],                      a SpineEffectEmitter's presets (v3, §33.17)
+  talents?: { key: Talent },                   its talents by prefab key (v3, §35.17)
+  abilities?: [Ability…],                      its common / general abilities and trait (v3, §35.17)
+  talentKeys?: { base, trait?, modules? },     our data's talent indexes → the talents' keys (v3, §35.17)
+  spineEffects?: [Emit…],                      a SpineEffectEmitter's presets (v3, §35.17)
   projectiles: [key…], refs: [every effect key the unit uses], skin: id | absent,
   aliasOf?: id }                               a copy of unit `id` (below)
 Attack = { class ('RangedAttack', 'MeleeAttack', 'RangedHeal', 'MultiMeleeAttack', 'AbilityRandomGroup', …), animKey,
@@ -838,8 +767,8 @@ Attack = { class ('RangedAttack', 'MeleeAttack', 'RangedHeal', 'MultiMeleeAttack
            emitters?: [{ class, …settings }],  the node's effect emitters, when not one plain UberEffectEmitter (v2)
            abilities?: [Attack…],              a group's sub-abilities, a funnel attack's funnels (v2)
            charge?: { group, ability, animKey? },    the charge ability it releases: indexes into `charge` (v2)
-           select?: { method, … },             a group's choice of sub-abilities (v3, §33.17)
-           mount?, mountGroup?, additionalTimes?, triggerDelta?, additionalProjectile(s)? }   (v3, §33.17)
+           select?: { method, … },             a group's choice of sub-abilities (v3, §35.17)
+           mount?, mountGroup?, additionalTimes?, triggerDelta?, additionalProjectile(s)? }   (v3, §35.17)
 Emit = { effects: [key…], slots?: [key | null…], directionType, oneshot, startEvent, endEvent, onlyOnce,
          useFourDirectionalFace, hookEffectAfterFirstAttack, …,
          emitter?, group?, anim?, field? }     (v2: below)
@@ -860,7 +789,7 @@ set the units' cast rows start at 2 (662) or 4 (79, the spell — the moment the
 (*metadata* UberEffectEmitter.EffectOptions.DirectionType): 0 NONE, 1 L_OR_R, 2 U_OR_D, 3 FOUR_DIR, 4 UD_OR_LR,
 5 FOUR_DIR_FIXED. `effects` are the keys a row plays: for 0 the first slot only (the client fills the other slots of
 some NONE rows with leftovers — 5 rows of the used set, one naming a key the client lacks — which the game does not
-play; the variants by facing then come from the effect's own `SwitchableEffectByFaceDirection`, §33.11), else every
+play; the variants by facing then come from the effect's own `SwitchableEffectByFaceDirection`, §35.11), else every
 distinct key, and `slots` holds the effect per facing as *metadata* `Torappu.SharedConsts.Direction` indexes it:
 0 UP (the back view), 1 RIGHT, 2 DOWN (the front view), 3 LEFT (null: nothing; L_OR_R rows use 1 / 3, U_OR_D rows
 0 / 2). `hookEffectAfterFirstAttack` (a key or '') replaces the row's effect from the second attack on; a row may have
@@ -902,7 +831,7 @@ each hit. The charge emitters' per-energy groups are no attack rows (Charge, bel
 `AbilityParallelGroup`, `AbilityFirstSucceedGroup`, `BurstAttackGroup` — its `_abilities`) and an attack whose child
 nodes carry abilities of their own (`MultiFunnelRemoteAttack`'s funnels) list them in `abilities`, each an Attack with
 its node, rows, projectile and charge: per cast a Parallel group casts all of them, the others one — v3's `select`
-(§33.17) says how: a random one or each in turn (AbilityRandomGroup), the first in config order whose trigger finds a
+(§35.17) says how: a random one or each in turn (AbilityRandomGroup), the first in config order whose trigger finds a
 target (AbilitySelectableGroup / BurstAttackGroup, whose `abilities` follow `_abilityConfigs` since v3), the first that
 succeeds, one after the other; which one a given cast picks is still the client's choice at run time (a reader without
 that signal may play `abilities[0]`). The group's own `cast` / `hit` lists hold only the group node's emitters (usually
@@ -938,7 +867,7 @@ at ON_SPELL_ON (4), whose loops (`prefabs[key].looping`, a FollowMountPoint on a
 stay while that energy is stored, and the store ability's `chargeEffectGroups` / `chargeCastGroups` at ON_CAST_START
 (2), one-shots; `merged…` the same for 维伊's merged energies (every `mergeSize` stored energies merge into one).
 `isExEffectEmitter` 1 marks 黑键's elite-energy emitter. A release fires the stored energies as projectiles from
-`mounts[k]` (MountPointType names, §33.11 FollowMountPoint; `exMountNames` for 黑键's elite ones; ability without its
+`mounts[k]` (MountPointType names, §35.11 FollowMountPoint; `exMountNames` for 黑键's elite ones; ability without its
 own mounts: its effects' `follow`) to the target — the ability's `projectileKey` (`exProjectileKey`,
 `mergeProjectileKey`). The mode attack that stores and releases names its charge ability: `attack.charge` =
 `{ group, ability }` (indexes into `charge` and its `abilities`) and `animKey`, its store animation (`_chargeAnimKey`).
@@ -954,7 +883,7 @@ skills come from its own prefab, below):
   mode: index into the owner's modes | null, modeBy?: 'data' | 'name',
   uses: [Use…], roles: { start?, loop?, range?, cast?, hit?, end?, ready?, trigger?, other?: [key…] },
   unclassified: [keys found in the prefab that no use places],
-  abilities: [{ node, class, animKey?, projectileKey?, … }],   its attack abilities and projectiles (v3, §33.17)
+  abilities: [{ node, class, animKey?, projectileKey?, … }],   its attack abilities and projectiles (v3, §35.17)
   nodes?, inModes?: [path… / mode name…] }    an enemy's skill: its node(s) and their modes (v2)
 Use = { role, keys: [key…], from ('UberEffectEmitter._castEffects', 'ActiveBuffAbility._buffs',
         'ActiveBuffAbility._buffs → template <templateKey>', …), node (the skill prefab's GameObject),
@@ -965,7 +894,7 @@ Use = { role, keys: [key…], from ('UberEffectEmitter._castEffects', 'ActiveBuf
         event?, action?                                                  (a buff template's action: a Buff event name,
                                                                           the action node: CreateEffect, CreateBuff, …)
         bb?, by? ('name': placed by the key's name), mode? (v2: an enemy skill's copy, below)
-        projectileKey?, extraProjectileKeys?, life?, loopType? }        (v3, §33.17)
+        projectileKey?, extraProjectileKeys?, life?, loopType? }        (v3, §35.17)
 ```
 
 `rootClass` (v2) is the class of the skill root deriving from *metadata* `Torappu.Battle.Skill` — `CastSkill` (900 of
@@ -999,7 +928,7 @@ and gives every effect a role — when the runtime plays it on the sim's skill t
 
 | role | when | from |
 |---|---|---|
-| `start` | once when the skill starts (for a one-cast skill — `ReplacementSkill` — its cast) | one-shot cast rows (start event 2 / 4 / 0), `_beginEffect`, `_overrideStartEffect` (an AppearSkill's: the unit's deploy effect while it fights with that skill — Character.GetStartEffect returns it before the mode's `overrideStartEffect` and the unit's `_startEffect`; 0.3.1), `_startEffect`, `_chantSuccessEffects`, a buff template's action at ON_BUFF_START / ON_SKILL_START |
+| `start` | once when the skill starts (for a one-cast skill — `ReplacementSkill` — its cast) | one-shot cast rows (start event 2 / 4 / 0), `_beginEffect`, `_overrideStartEffect` (summons), `_startEffect`, `_chantSuccessEffects`, a buff template's action at ON_BUFF_START / ON_SKILL_START |
 | `loop` | while the skill lasts (or the buff carrying it: `on` says on whom) | looping cast rows (start → end event), attach rows, a buff's effect (`overrideEffectKey`, else its template's `effectKey`), aura `_effects`, channel emitters, buffs a template creates |
 | `range` | the skill's area marker (loop or one-shot by `oneshot`) | a cast row or a field named `*_range*`, `RangeEffectEmitter`, `_tileEffectKey` |
 | `cast` | each ability use while a buff lasts | a template's action at ON_ABILITY_START / ON_ABILITY_SPELL_ON / ON_BEFORE_ATTACK |
@@ -1019,7 +948,7 @@ A buff's carrier (`on`): `owner` for the buffs a skill gives its unit (`ActiveBu
 — status loops such as `buff_burn` on Ifrit S2's targets; since v3 also an attachment's `_additiveActiveBuffs`, added to
 the owner's attacks, a blocker's `_buffsToBlockee`, `_projectileBuffs`, the tile listeners' and LockTargetAbility's)
 and the selector-driven or aura buffs, `token` for buffs a summon gets (`_buffsToToken`, `_buffsToExistToken`); absent
-when unknown. Every use a buff carries has its `life` since v3 (§33.17). `by: 'name'` marks the few effects (11 in the used set: a buff blackboard's `effect`
+when unknown. Every use a buff carries has its `life` since v3 (§35.17). `by: 'name'` marks the few effects (11 in the used set: a buff blackboard's `effect`
 value, an extra event group) whose field says nothing about time, placed by their names (`*_hit` / `*_heal` → hit,
 `*_buff` / `*_loop` → loop, `*_start` → start, `*_end` → end, `*_range` → range).
 
@@ -1029,7 +958,7 @@ projectile): `modeBy: 'data'` when the skill's data say it (the blackboard `mode
 case-insensitive; where both exist they agree in 204 of 210 skills). So a runtime plays, on the sim's events: skill
 start → `roles.start` (+ `range`), while active → `roles.loop` on `on` (default the owner) and the attacks of
 `modes[mode]`, each hit → `roles.hit` (+ the mode's hit / projectile effects), skill end → `roles.end` (and stops the
-loops). The web runtime reads `uses` (not the flat `roles`) through `render/vfx/skills.js` and plays them as §33.16
+loops). The web runtime reads `uses` (not the flat `roles`) through `render/vfx/skills.js` and plays them as §35.16
 says.
 
 **Projectile** (`[uc]projectiles.ab`):
@@ -1068,18 +997,7 @@ in `randomHeightRange`), 0 when the ground distance is not above `noRaiseHeightT
 + h − end height) and T = distance / speed it climbs at √(2gh) under g = 2(√h + √H)²/T² — it tops out h above its
 start — and after the top g is re-solved each tick to land on the target's current height; `inverseParacurve`
 (`randomInverseParacurve`: a coin) flies the mirror image. As a function of the flight fraction k the height is
-start + 2√h·s·k − s²·k² (s = √h + √H) whatever T is. **Resolved** (0.3.1, history §34.6: their Comeback state): a
-movement with `comeBack` turns, after the hit, into a leg back to the source's HitPoint at `speed` ×
-`comeBackSpeedScale` (跃跃's `projectile_chr_caper` 15 × 0.25 = 3.75 tiles/s, the sim's BOOMERANG_RETURN_SPEED), stepping
-at that speed toward the HitPoint as it is now — a duration locked at the turn would cover a thrower who moves in the
-original time, faster than 3.75 —, a ParacurveMovement along an arc rebuilt only when its start height, end height or
-ground distance changes; the projectile keeps its main effect until it is back and then
-clears it, and a source gone takes nothing back — 10 projectiles (跃跃's, 娜仁图亚's). The pause before that leg is not
-1 s: on a ParacurveMovement / NarantS3Movement `delayAfterReached` is 0 or 1 (a flag) and `delayTime` is the seconds
-(0.01 on `projectile_chr_caper_s2` / `_s2_1` and `projectile_chr_narant_s3` / `_s3_1` / `_s3_2`); on an AdvancedMovement
-`delayAfterReached` itself is the seconds (0.01, or 0 on `narant_s2`). 0.01 s is under one sim tick, the return
-projectile already waits for the next tick, and the visual turns back on the hit so it stays on the sim's catch
-[ASSUMED: the raw float pmUpdateAfterReach waits at +0xec is `delayTime`]. `AmiyaS2Movement` (安洁莉娜 S2): straight and homing in `time` s
+start + 2√h·s·k − s²·k² (s = √h + √H) whatever T is. `AmiyaS2Movement` (安洁莉娜 S2): straight and homing in `time` s
 after a start phase of `startDuration` towards `startDistance` in a random direction, its body at
 (0, sin φ · `yAnimateOffset`, 0) across the flight, φ advancing 2π · `yAnimateSpeed` per second from a random start. The
 sim keeps its own projectile speeds; the visual flies its flying effect along the sim's flight and plays `onHit` at the
@@ -1099,7 +1017,7 @@ on (`F_Muzzle`, `B_Muzzle`, `Muzzle`, `Hip`, …; 125 of the 126 operators' muzz
 `pos` is that bone in the prefab's edit-time pose — the 0-length `Default` clip: 灰毫's Muzzle 16 skeleton units above
 her feet, her cannon lowered; 溯光星源's 2.45 tiles to her right, her Idle's parking spot — while in battle the client
 reads the point's live transform (`MountPoint.get_mapPositionV3`, or the same bone baked per frame): a shot leaves
-where the attack clip holds the muzzle when it fires. A runtime reads the bone from the unit's skeleton (§33.16
+where the attack clip holds the muzzle when it fires. A runtime reads the bone from the unit's skeleton (§35.16
 Placement), `pos` only without one. `rot` is the point's local rotation in its parent (Front / Back / FaceSwitcher —
 none of them turned in an operator's skin; quaternion x y z w). spine-unity's BoneFollower (the point's parent holds
 its skeleton) sets the point's local position from the bone every frame and, with `followBoneRotation` (`followRot`
@@ -1120,10 +1038,10 @@ names them): the hit by damage type, deaths, deploy, and the status loops by the
 
 **prefabs**: key → `{ file, bundle, nodes, particleSystems, liveParticles, duration, looping, refs, spawn?, follow? }`
 (the descriptor's stats and `refs`; v2: `spawn` = its first enabled `ParticleEffect` / `EmptyEffect`'s `_spawnLocation`
-and `follow` = its first enabled `FollowMountPoint`'s `_mountPointType`, §33.11, when it has them — where the effect
+and `follow` = its first enabled `FollowMountPoint`'s `_mountPointType`, §35.11, when it has them — where the effect
 sits on its owner without loading the descriptor).
 
-### 33.13 The Phase 1a sample (a subset of the full set, §33.14)
+### 35.13 The Phase 1a sample (a subset of the full set, §35.14)
 
 `extract.py --only fx` exports (client 26-09-13, `set: 'sample'`) 126 prefabs from 32 bundles, 290 textures (each with
 a half-size copy), 43 meshes, 9 units, 11 projectiles, 12 skills — 6.8 MB (descriptors 2.2 MB, textures 3.9 MB, meshes
@@ -1142,7 +1060,7 @@ a half-size copy), 43 meshes, 9 units, 11 projectiles, 12 skills — 6.8 MB (des
   `chen2_skill_02_range_01`, custom-data shaders `enemy_tgshd_attack_start_01`, clips on GameObject.active
   `crosly_attack_a_start`, on a LineRenderer `aphris_attack_01_line_01`, on a ParticleSystem `buff_yang_conversion_01`,
   birth / collision sub-emitters `enemy_jakill_reborn_03_start` / `irene_skill_03_range_02`, prewarm + lines
-  `enemy_achunt_chain`, skinned meshes + legacy clips `ifrit_skill_03_buff`, and the behaviour classes of §33.11
+  `enemy_achunt_chain`, skinned meshes + legacy clips `ifrit_skill_03_buff`, and the behaviour classes of §35.11
   (`chen2_skill_01_buff_02`, `indigo_skill_01_buff_02`, `angel2_attack_loop_start_01`, `sbell2_ground_01`,
   `lumen_skill_02_hit`, `glady_skill_01_line`, `phatm2_skill_03_buff_02`, `etlchi_innate_hit_01`, `enemy_crstf_buff_01`,
   `yu_skill1_attack_01`, `aglna2_skill_02_buff_weapon_02`);
@@ -1154,7 +1072,7 @@ Checked on the output: clip decoding against known values (`buff_stun` z 0 → �
 `_PremultiplyAlpha`, default SrcAlpha), mount points against the transforms they compose, every clip binding resolved
 (675 curves, no `crc:` property; 50 name objects their prefab lacks), every key the index names has a descriptor.
 
-### 33.14 Phase 1b: the full set
+### 35.14 Phase 1b: the full set
 
 `extract.py --only fx --fx-set used` (Windows client 26-09-13, 8 processes on the maintainer's Mac) exports 516 units
 (210 operators, 243 enemies, 57 tokens and the 6 enemy aliases), 538 projectiles, 529 skills and 4,253 effect prefabs
@@ -1167,13 +1085,13 @@ copy) and 1,201 meshes: 12,023 files, 186 MB — descriptors 118 MB (17 MB gzipp
 (757 s of CPU). No prefab fails, and the consistency test (`test/local-extract-fx.test.js`) passes on the output: every
 key the index names — attack rows, slots, hooks, skill uses — has a descriptor, every listed file exists.
 
-Skills: 497 of the 529 have effect roles (§33.12; 0 keys left unclassified, 11 effects placed by name); 22 more name no
+Skills: 497 of the 529 have effect roles (§35.12; 0 keys left unclassified, 11 effects placed by name); 22 more name no
 effect of their own but switch to a mode, whose attacks carry their effects; 10 name neither — `skchr_doroth_1`–`3`,
 `skchr_prove_1`, `skchr_silent_2`, `skchr_sunbr_1`, `skchr_svrash_1`, `skchr_vodfox_2`, `skchr_vvana_3`,
 `skchr_wang_1`: what the client shows for them comes from what they place (tokens, traps), the unit's own animation, or
 nothing. 333 skills have a mode (221 from their data, 112 by name).
 
-### 33.15 Phase 1c: index.json and the meshes version 2
+### 35.15 Phase 1c: index.json and the meshes version 2
 
 `extract.py --only fx --fx-set used` with the Phase 1c extractor (Windows client 26-09-13, 8 processes on the
 maintainer's Mac) exports 516 units, 541 projectiles (+3), 596 skills (+67: 65 summons' `sktok_*` and two `skcom_*` of
@@ -1183,10 +1101,10 @@ templates' — `doroth_bomb_*`, `cqbw_skill_02_*`, …), 3,323 textures (3,282 h
 (17.3 MB gzipped), `index.json` 6.0 MB (0.33 MB gzipped; 5.4 / 0.29 in version 1), the file list 8,850 entries, 1.2 MB.
 The run takes 152 s (units, skills and buff templates 45 s). 90 skins' points moved (the root transform, changelog (9)):
 every HitPoint of the set is now within 0.33 of the feet across and 1.15 up. The consistency test passes on the output
-(`SP_FX_ROOT`, §33.1), now over every attack, combat, sub-ability, charge group and enemy skill, the skins' hit points
+(`SP_FX_ROOT`, §35.1), now over every attack, combat, sub-ability, charge group and enemy skill, the skins' hit points
 and the meshes' colours as well.
 
-* **Mode attacks.** The subclass emitters (§33.12): 15 MultiCharge attacks of 深靛, 黑键 and 维伊 (维伊's six are the
+* **Mode attacks.** The subclass emitters (§35.12): 15 MultiCharge attacks of 深靛, 黑键 and 维伊 (维伊's six are the
   sub-abilities of an AbilitySelectableGroup), 19 MultiHit attacks with 46 hit groups (8 operators and
   `enemy_1535_wlfmster`), 16 UberAnimation emitters of 10 operators (22 rows with `anim`; 圣聆初雪's and 谬因's name none:
   empty replace groups next to a plain emitter). Operators with attack rows: 202 of 210 (189 in version 1); enemies 197
@@ -1200,7 +1118,7 @@ and the meshes' colours as well.
   energy and 4 + 4 merged groups, 3 store abilities (Default, also released in S1; S2; S3).
 * **Skills.** `rootClass`: CastSkill 369, ReplacementSkill 38, ReplacementSkillFixed 37, PassiveSkill 34,
   CastSkillWithLimitTimes 27, AppearSkill 26, AttachOrDetachSkill 20, CastSkillWithSuspendable 15, MultiAppearSkill 9,
-  CastTokenSkill 7, … The 10 skills with MultiHit groups (§33.12) carry `group`.
+  CastTokenSkill 7, … The 10 skills with MultiHit groups (§35.12) carry `group`.
 * **Enemies' and summons' skills**, against the game's roster (tools/vfx-skill-coverage.mjs's (unit, skill) pairs: 126
   of enemies, 78 of summons): 123 enemy pairs have an entry (120 skill entries on 78 enemies, 91 with uses; the copies
   of 4 bosses' skills differ by mode) and 71 summon pairs (66 summon skills, 22 with uses). Without one:
@@ -1212,14 +1130,14 @@ and the meshes' colours as well.
 
 Still outside the index after Phase 1c: the effect emitters of talents (deploy effects, the bosses' revive loops), common
 abilities (stand switches, revives) and a few modes' general abilities (funnels, an aura) — 33 units, 47 nodes. Phase 1d
-exports them (§33.17: 42 of the 47; the other 5 are attacks no mode references).
+exports them (§35.17: 42 of the 47; the other 5 are attacks no mode references).
 
-### 33.16 The runtime's skill wiring (0.3.0 Phase 3b, 3c, 3d)
+### 35.16 The runtime's skill wiring (0.3.0 Phase 3b, 3c, 3d)
 
 The field view plays a skill's effects from its `uses` (`render/vfx/skills.js skillPlan`: each use placed by its
 role, its ability, its events and its carrier — the module header; `render/vfx/skillfx.js` plays the plan, DESIGN §9
 "Official battle effects", Skills) and a unit's attacks from its modes (`render/vfx/wiring.js`). What it reads of
-index.json — version 1 and the version 2 fields (§33.12, §33.15; Phase 3c) — and what it does with them:
+index.json — version 1 and the version 2 fields (§35.12, §35.15; Phase 3c) — and what it does with them:
 
 * **A unit's skill**: the unit by FxWiring's candidates (a stand-in's or a 自选 pick's operator, the chess' operator,
   the spine, the def id), its skill from our data record's `skills[]` by the loadout's index (`prefabId`, else
@@ -1227,7 +1145,7 @@ index.json — version 1 and the version 2 fields (§33.12, §33.15; Phase 3c) �
   without a record of its skill, the only one its unit has [ASSUMED] (version 2 lists the summons' skills).
 * **Modes**: `skills[id].mode` names the attack mode while the skill is on (`modes[mode].name`). A mode whose name
   ends in `[Down]` / `[D]` / `[DOWN]` / `(D)`, `(U)` or `(LR)` is a facing variant: the unit facing that way attacks in
-  it, else in the plain mode (DESIGN §32.14.36; before, a variant was never chosen) [ASSUMED: by the names]; a skill
+  it, else in the plain mode (DESIGN §34.14.36; before, a variant was never chosen) [ASSUMED: by the names]; a skill
   that names no mode while its unit has only variants of `S<n>` (灰毫 S2: `S2(U)` / `S2(D)` / `S2(LR)`) switches to
   the variant. A unit without a resolved skill keeps `S<n>`. An enemy in a form
   whose name is one of its modes' (case aside; `form2` → `Reborn`) attacks in that mode, and its skills play that
@@ -1238,7 +1156,7 @@ index.json — version 1 and the version 2 fields (§33.12, §33.15; Phase 3c) �
   (UF.BLOCKED) and when `attack` is null, else `attack`; a ranged-kind 'atk' of an operator on an enemy while both show
   UF.BLOCKED and the enemy stands within the sim's block radius of its centre (0.75 / 0.95 tiles, ground / air) is such
   a blow when its mode has both (the 领主s and 伊内丝: the sim names their every attack by the ranged kind; round 46, history
-  §32.14.41) [ASSUMED: the snapshot does not say who blocks whom]. A group ability fires its `abilities` as §33.12 says: a
+  §34.14.41) [ASSUMED: the snapshot does not say who blocks whom]. A group ability fires its `abilities` as §35.12 says: a
   Parallel group all of them, a Random group one picked by a seed of the unit's id and attack count (the same in a
   replay), the other groups the first that fits the attack (a heal: /Heal/, a shot: /Ranged/, a blow: neither; a
   `Blocked…` node — 号角's BlockedRangedAttack — only while the unit blocks, and then first [ASSUMED: the configs'
@@ -1246,15 +1164,9 @@ index.json — version 1 and the version 2 fields (§33.12, §33.15; Phase 3c) �
   its `emitter` allows: an UberAnimation replace group's row (`anim`) when the attack plays that animation — for
   `loopType` 1 the group animations in turn by the unit's attack count [ASSUMED], else the animation the model plays
   (SpineActor.attackAnim), else `sourceAnimKey`; an InCertainMode emitter's rows only in the mode of index
-  `activeMode`; a VigilWolf row bound to a buff of its owner (`buffKey`) while the owner holds that buff — the client's
-  VigilWolfCastEffectOptions.PlayEffect checks Entity.ContainsBuff — read from the 狼群's 狼影 count (b.snap `wolves`
-  [left, max], `wiring.js WOLF_BUFFS`): the 狼群领袖 talent's `vigil_wolf_t_1_enhance[holder]` buffs (one per 狼影 beyond the
-  pack, `[born]` making one at the deploy) each derive a `…[damage]`, held from 2 wolves on (`vigil_token_sub_attack_1`),
-  and `…[trigger_override]` exists while the holders are at max_stack_cnt (all 3 wolves: `vigil_token_sub_attack_2`)
-  [ASSUMED: the sim's count is the client's holders + 1]; a row bound to another buff never (0.3.1, audit R19; before,
-  every buff-bound row was skipped). Version 1's
+  `activeMode`; a VigilWolf row bound to a buff of its owner (`buffKey`) never (no view shows that buff). Version 1's
   attacks carry none of these fields and play as before. Version 3 (Phase 3d): the UberAnimation `loopType` is 0 LOOP
-  (in turn) and 1 RANDOM (a seeded pick — §33.17 resolved it; Phase 3c had taken 1 for in turn); a group's `select`
+  (in turn) and 1 RANDOM (a seeded pick — §35.17 resolved it; Phase 3c had taken 1 for in turn); a group's `select`
   decides its sub-ability — `parallel` all (its `main` first: that one's projectile), `random` a seeded pick
   (`diffFromLast`: never the previous one; `probKeys` weights are not read: equal odds [ASSUMED]), `loop` / `sequential`
   in turn by the unit's attack count, `trigger` / `firstSucceed` the first of the attack's kind, a BurstAttackGroup's
@@ -1264,16 +1176,16 @@ index.json — version 1 and the version 2 fields (§33.12, §33.15; Phase 3c) �
 * **Hit groups**: a MultiHit emitter's grouped rows are the hit groups — every group kept, an empty one too (that hit
   plays nothing); hit k of a blow (its k-th HP 'dmg' or 'heal' on the target in the blow's frame) plays group min(k,
   last), k mod n with `useLoopHitEffect`, a seeded group with `useRandomHitEffect`, only the first with `oncePerTarget`;
-  the attack's rows without a group play on every hit (a MultiHit emitter's own only with `keepBaseHitEffect`, as §33.12
+  the attack's rows without a group play on every hit (a MultiHit emitter's own only with `keepBaseHitEffect`, as §35.12
   says; no emitter of this client has both). A skill's uses carry `group` / `groups` and the emitter's flags the same
-  way (`skills.js hitGroups`, `hitOptsOf`); a version 1 index's flattened rows keep the `_range` rule of §33.12's
+  way (`skills.js hitGroups`, `hitOptsOf`); a version 1 index's flattened rows keep the `_range` rule of §35.12's
   skills.js reading.
 * **Attack abilities of a skill** (`ability` matching /Attack|Heal/, not Channeling*): their rows replace the attack
   mode's while the skill is on; a ranged one flies its ability's projectile — index v3: `skills[id].abilities[]`
   (`projectileKey` by node and class, also an ability with no rows of its own) or a use's `projectileKey` — else one of
   the skill's `projectiles` by the naming rule (the only one, else the shortest named `_s<n>` / `_sk<n>` after the
   skill's number, else the first), with the ability's mount and follow-up shots.
-* **A skill's own casts and its kit's hits** (history §32.14.43): attack abilities of a skill that are no normal
+* **A skill's own casts and its kit's hits** (history §34.14.43): attack abilities of a skill that are no normal
   attack carry `when` on the plan — `'end'` for a final attack (the node `FinalAttack` / `EndAttack` …, or every cast row
   `end`: 灵知 S3, 薄荷 S2, 歌蕾蒂娅 S3, 锏 S3 [ASSUMED: by the names]), `'start'` for the attacks of a lasting or passive
   skill whose root ability is an AbilitySequenceGroup (the skill runs it once as it starts: 缄默德克萨斯 S2 / S3's appear
@@ -1289,7 +1201,7 @@ index.json — version 1 and the version 2 fields (§33.12, §33.15; Phase 3c) �
   a heal), and a ReplacementSkill's replaced attack may follow its 0 in that frame (华法琳 S1): the no-attack fallback
   waits for the frame's end. A kit fx may stand for a plan attack (`FX_BINDINGS` `attack`: 锏 S3's 'slash' is her
   Damage ability).
-* **Facing variants of a buff template** (history §32.14.43): the uses of one template action (same `from`, event,
+* **Facing variants of a buff template** (history §34.14.43): the uses of one template action (same `from`, event,
   action, buff, node, carrier, role) whose keys are one effect's variants by name — `<base>_up` / `_down` / `_left` /
   `_right`, `_back` (facing up), `_front`, the plain `<base>` — are one entry with `slots` picked by the owner's deploy
   direction (`skills.js dirFamilies`; a facing without a variant of its own plays the plain key, else `_front`): the
@@ -1309,27 +1221,6 @@ index.json — version 1 and the version 2 fields (§33.12, §33.15; Phase 3c) �
   (`CHARGE_EMITTERS`), which stays for a version 1 index.
 * **Root class**: a skill's `rootClass` is kept on the plan (`plan.rootClass`); a ReplacementSkill* is one cast (the
   plan's kind `instant`: its single attack is the skill), a PassiveSkill without our record a passive.
-* **A token's skill record** (0.3.1, audit R18; `skills.js skillRecordOf` / `tokenSkillRecord`): data/tokens.json
-  writes only `{ skillId, bb }` at a token's top; the full records (skillType, duration, prefabId) sit in its owners'
-  `variants` — `skill` and `bySkill[i].skill`, one per index of the owner's skill choice, the def the sim merges for
-  the token, whose UnitInfo `skillIndex` is that record's `index`. The plan takes the variant record with the unit's
-  skillIndex (浊心斯卡蒂 S1 / S2 / S3 → her 海嗣's sktok_skadi2_1 / _2 / _3), else the top record with the type fields of
-  the variant record of its id. 诅咒娃娃's PASSIVE record makes its plan a passive: its aura `vodfox_skill_02_buff`
-  loops from the deploy while it stands (the sim sends no skill event for a passive with a duration, and the plan read
-  as instant without a type); the 海嗣's aura loops while it stands too (its PASSIVE token skill). A passive token
-  skill's mode holds from the deploy (every 香槟炸弹 in M2: its ability loop and M2's two hit rows); 流形's MANUAL
-  records make its plan lasting, and only S3's (sktok_mlyss_wtrman_3) has effects. [ASSUMED] the variant record is
-  the first owner's (the base piece `_a`; UnitInfo names no summoner): an elite `_b` owner's record of the same index
-  differs only in level, text, blackboard values and (蜜蜡's 沙之碑) SP cost — the base piece's values, as the top
-  record had.
-* **An AppearSkill's start effect** (0.3.1, audit R21; plan entries with `birth`, `SkillFx.birthOf`): the
-  `_overrideStartEffect` use of an AppearSkill / MultiAppearSkill is the unit's deploy effect while it fights with that
-  skill — the client's Character.GetStartEffect returns it before the mode's `overrideStartEffect` and the unit's own
-  `_startEffect` (else the generic deploy) —, so `FxWiring.deploy` plays no other one: 缄默德克萨斯 S1 shows
-  `texas2_birth_01_start` alone, S2 / S3 (`common_empty`) no deploy effect beside the appear strike, 斯卡蒂 S2 her
-  looping `skadi_skill_02_start` without the generic pillar (弑君者 S2 / S3 alike). A passive plays it with its start
-  one-shots (a looping one held while the unit stands); for another kind the deploy plays it and the skill's start
-  leaves it out.
 * **Enemy skills (v2)**: `units[enemy].skills` by the lower-case `prefabKey` of the enemy's data record's `skills[]`
   (the slot order). A skill's window opens on ['cast', id, slot, dur?] — since Phase 3d the sim sends it (SIM.md,
   `content/enemies/helpers.js castSlot`: a cooldown cast, an SP skill's attack before its 'atk', a kit's own moment) —
@@ -1339,38 +1230,7 @@ index.json — version 1 and the version 2 fields (§33.12, §33.15; Phase 3c) �
   attack's cast and range rows [ASSUMED]), and it ends — its loops stop, its end plays — once the anim leaves SKILL and
   its time is over (the event's `dur`, else 0.3 s [ASSUMED]), or on the enemy's death or leak. A use's `mode` picks the
   copy of the enemy's current mode; `inModes` is not needed. Not drawn: the skill's effects on others (`on: 'targets'`:
-  no event names them). A skill whose root ability is an attack (`rootAbility` …Attack: RangedAttack, MeleeAttack) is
-  that one attack: once the kit's own fx stood for it (an Enemies' areas binding below drew in its window), the enemy's
-  attacks in the rest of the window are its normal ones (0.3.1, history §34.5: the 'cast' of 鼠王's 【沙狱】 carries the
-  debuff's 15 s, and every attack of the boss in it played the sandstorm `mousek_skill_02_range` on its target; a skill
-  whose attack is a later 'atk' — 暴鸰's bomb, 0.27 s after its 'cast' — keeps the window's rows for it) [ASSUMED: the
-  window's `dur` is then the skill's effect's, not a time the attacks change].
-* **Enemies' areas** (0.3.1, the maintainer's report of 2026-10-16, history §34.5; `skills.js ENEMY_FX_BINDINGS`,
-  `skillfx.js _enemyFx`): a zone names no source (`content/enemies/helpers.js zone`: ['fx', 'zone', x, y,
-  { r, dur, kind }]) except 【污染秽蚀】, whose fx carries `pollution`'s src (display only). A binding by the enemy's unit
-  key says how its fx finds the enemy — `id`; `died`: one of that key that died in the fx's frame within OWNER_NEAR (1)
-  tile of its point (a death zone: the sim makes it in the death hook, after the 'die'); `cast`: one whose skill (its
-  prefabKey) was cast in that frame (castSlot comes in the same tick); `near`: a standing one within OWNER_NEAR of it;
-  `any`: the kind is that enemy's alone. Tried as: the unit the zone's id names, then a death within OWNER_NEAR, then a
-  cast the zone does not name, then a unit at the point, then the kind alone [ASSUMED: a zone with no id belongs to the
-  death at the point, else to the cast]. A binding that draws nothing does not claim the fx. A zone plays its prefabs at
-  the fx's point on the ground, the looping ones for its `dur`: 萨卡兹枯朽战士 / 组长's death pool (PollutedDie's
-  `projectile_enemy_nhpbr_polluted`, whose `toTargetOnStart` `enemy_nhpbr_attack_range` loops until the projectile stops
-  — its life the blackboard's `projectile_life_time`), 萨卡兹枯朽战车 / 尖端's 秽蚀轰击 pool (AttackPolluted's
-  `projectile_enemy_nhtank_polluted` reached `enemy_nhtank_attack_range`; the zone's id keeps it when a warrior also died
-  on that tile), 假想敌：蚀裂's cloud on its killer (`projectile_enemy_actoxi` reached `enemy_actoxi_idle`), 咸鳞汁推荐者's
-  barrel zone (BlockedBoom's `projectile_enemy_wintun_range` reached `enemy_wintun_range`), 鼠王's 【沙狱】 (the
-  castTarget row `mousek_skill_02_range` — the sandstorm, a one-shot of 21 s — once on the target). An aura's tick its
-  talent loops stand for (talentfx.js draws them: 深溟巢涌者's 'pulse' — AOE —, 鼎沸's 'boil' — aoe —) skips the
-  procedural pulse, and one unclaimed HP hit in that frame on a unit inside the sim radius that no attack owns plays the
-  aura's buff effects on it (each aura takes at most one per unit, and that hit is offered to every aura in the frame
-  [ASSUMED]: the talent's uses `on: 'targets'` — a trigger once, `enemy_dsubrl_attack_hit`; a loop held AURA_HOLD_S
-  (1.25 s) past the last tick, `enemy_cjhot_debuff`) instead of the procedural spark. A unit past the radius keeps its
-  spark. A mode's loops: 水遁忍者's spin ('telegraph' of kind 'spin') plays its mode M1's RotateEffect loop
-  (`enemy_ymgtop_skill_01_buff_01`, a buff its template creates at its tick, which talents.js leaves unmapped) for its
-  record's `EndRotate.rotate_duration`, until 失衡's 'phase' spinStop or its death [ASSUMED: the loop lasts the sim's
-  spin]. The bound prefabs preload with the battle's units (SkillFx.keys). Layer off, or the prefabs not installed: the
-  procedural fx.
+  no event names them).
 * **Summons' skills** (v2) play like an operator's.
 * **Talents and abilities (v3, Phase 3d)**: `render/vfx/talents.js` plans every talent node and ability of a unit with
   the skills' planner and binds it by `when`; `render/vfx/talentfx.js` plays it. In force: an operator's or a summon's
@@ -1396,8 +1256,8 @@ index.json — version 1 and the version 2 fields (§33.12, §33.15; Phase 3c) �
   `reborn.mode`, a husk's modes, a 傀儡师's 'doll' → the mode its fatal-blow node switches to — 风丸 → Stand, whose attack
   rows then play), else a form named like a mode. An arts barrier's talent (its key names a shield) plays while the
   barrier holds: the sim's 'shieldBreak' ends it, its 'artsBarrier' phase raises it again [ASSUMED]. **Per-layer loops**
-  (round 46, history §32.14.42): a binding's loops that its buffs create with CreateBuff(s) at a buff event and whose
-  prefabs pause one another (PauseAnotherEffect, §33.11) are a stack, bottom (pausing none) to top. An ally plays the
+  (round 46, history §34.14.42): a binding's loops that its buffs create with CreateBuff(s) at a buff event and whose
+  prefabs pause one another (PauseAnotherEffect, §35.11) are a stack, bottom (pausing none) to top. An ally plays the
   lowest n for the n hit-negating layers the sim reports (b.snap `layers`, sim `snapshot.js layerView`: the sum of its
   buffs' `shieldHits`) — 泥岩's talent (client `mudrok_t_1`: the first layer's buff carries `mudrok_buff_03_start`, the
   middle ones `_02`, the last `_01`) shows `_03` / `_02` / `_01` for 1 / 2 / 3 layers and nothing at 0 — and each layer
@@ -1418,45 +1278,31 @@ index.json — version 1 and the version 2 fields (§33.12, §33.15; Phase 3c) �
   its `follow` point (a FollowMountPoint, from the first frame as below), else at its `spawn`, and takes up its
   rotation, direction and pause behaviours once loaded, round 46: it used to sit at the HitPoint for good);
   `mounts.js skinShift` — version 1's guess at a skin exported without its root transform — is off for a version 2
-  index. Since DESIGN §32.14.36: a skin point with a `bone` is read where the unit's model draws that bone
+  index. Since DESIGN §34.14.36: a skin point with a `bone` is read where the unit's model draws that bone
   (`UnitView.boneOffset`: `UNIT.modelScale` from the feet, the facing applied; its `up` along the plane the camera sees
   face-on), for a shot, the strike's cast rows and a projectile's `onStart` as the attack clip poses it at its strike
   frame (its first OnAttack time) — `pos` only without a model or the bone [ASSUMED: the drawn frame; the static points
   keep the client's offsets]; an effect with a FollowMountPoint starts on its point and follows it, with its rotation
-  unless `_keepOriginRotation`, and a MUZZLE_POINT or Special-point spawn takes the point's rotation (§33.11):
+  unless `_keepOriginRotation`, and a MUZZLE_POINT or Special-point spawn takes the point's rotation (§35.11):
   `mounts.js mountRotation` = the Graphic rotation · the facing turn · the point's local rotation: the bone's angle
-  when its BoneFollower follows the bone's rotation (`followRot`, §33.12 Skin; 0 without the drawn bone), else the
+  when its BoneFollower follows the bone's rotation (`followRot`, §35.12 Skin; 0 without the drawn bone), else the
   point's own `rot`. 洛洛's SpecialPoint1 and 令's SpecialPoint2 keep their 30° about X, which cancels the Graphic's
   tilt: 洛洛's drone lies flat at home as the client draws it (turned by F_UVA_01's 90° it stood upright after the
   merge); 50 more points (10 more operators', 19 enemies', 2 tokens') keep the identity or a small turn about Z instead
   of their bone's angle, and 3 static points their 90° about Z. An index without `rot` / `followRot`: the bone's angle
-  for every bone-followed point, no turn for the others, as before. A shot flies along the client's arc (§33.12
-  Projectile; `render/vfx/flight.js`; its parts below). Since DESIGN §32.14.40: an effect its unit holds — a held one
+  for every bone-followed point, no turn for the others, as before. A shot flies along the client's arc (§35.12
+  Projectile; `render/vfx/flight.js`; its parts below). Since DESIGN §34.14.40: an effect its unit holds — a held one
   (`playOn` `follow`: a status loop, an aura, a skill's or a talent's loop) or a `_holdByOwner` prefab — without a
   FollowMountPoint moves with the unit, its offset from the feet as it started (a ground spawn on the ground); a hit or
   a ground range not held stays where it started, a FollowOwner one keeps to the feet only when held, as before
-  [ASSUMED: §33.11 `_holdByOwner`; a status loop whose prefab says 0 — `common_stealth`, `buff_ fragile_01`,
-  `common_invincible_01` — follows its unit all the same]. Since 0.3.1 (history §34.6): the prefab root's authored
-  position is no part of an effect (`compileEffect`; kept as `rootPos`), and its rotation is the spawn location's
-  (`mounts.js spawnRotation`, the effect's `rootRot`): the Graphic tilt for FOOT / HIT / HEAD (`graphicRotation`), none
-  for MUZZLE_POINT_WITHOUT_ROTATION, NONE, the ground spawns and an effect on a point of the ground (a kit fx's tile, a
-  projectile's target tile), the point's rotation (`mountRotation`, above) for MUZZLE_POINT and the Special points; a
-  FollowMountPoint without `_keepOriginRotation` takes its point's, on FOOT the skeleton root's (the tilt and the facing
-  turn), and with it keeps the spawn location's; a chained effect (OnPlayEmitter) takes its own spawn location's; an
-  effect played before its descriptor arrived takes up its rotation once loaded, as above.
+  [ASSUMED: §35.11 `_holdByOwner`; a status loop whose prefab says 0 — `common_stealth`, `buff_ fragile_01`,
+  `common_invincible_01` — follows its unit all the same].
 * **Projectile reached effects**: a skill projectile's `onReached` (else `onHit`) is what `skills.js FX_BINDINGS` plays
   where a kit's fx stands for that projectile (克莱门莎 S3's `projectile_chr_clemnt_s3`). A binding may name its own
   `keys` instead, played once `at: 'target'` on the unit the fx names (round 46: 泡泡 S2's 'counter' →
   `bubble_skill_02_hit` on the attacker, the client's `bubble_s_2` CreateEffect on MODIFIER_SOURCE at ON_TAKE_DAMAGE;
-  the kit's fx carries `target`; another field with the binding's `target`: 0.3.1, audit R20 — 归溟幽灵鲨 S1's
-  'hpShare' names the ally in `to`, and her ExchangeHp ability (AnimatedActionToTargetAbility, [uc]skills.ab) creates
-  `ghost2_skill_01_start` on SOURCE and `ghost2_skill_01_hit` on TARGET). A key bound so is no row on the owner
-  (`skills.js targetBound`, unmapped `bound`): index v3 writes an ability's `_actions` CreateEffect uses without their
-  target, as start rows of the owner. The same cause stays open for 雪猎's talent (`snhunt_talent_01_hit` / `_02` on
-  TARGET, at her skill start; the kit's 'strike' names the target) and 真言 S1 (a 自选 pick: `mantra_skill_01_hit_01`
-  / `mantra_bounce_hit_01` on PROJECTILE_TRACETARGET, the shot's target): the extractor should write each action's
-  `_targetType` (open).
-* **`[eff_cond]` state loops** (round 46, history §32.14.42; `skills.js COND_BUFFS`, `condState`, plan `cond`;
+  the kit's fx carries `target`).
+* **`[eff_cond]` state loops** (round 46, history §34.14.42; `skills.js COND_BUFFS`, `condState`, plan `cond`;
   `skillfx.js _cond`): the buffs a skill's `[eff_cond]` template creates at its ON_BUFF_TRIGGER (every 0.1 s) show a
   condition's state, and index.json lists only their keys. For the templates whose client graph COND_BUFFS transcribes
   (卡涅利安's `billro_s_1/2/3[eff_cond]`, read from config/buff_template_holder.ab) the state's buffs loop on the owner:
@@ -1465,13 +1311,11 @@ index.json — version 1 and the version 2 fields (§33.12, §33.15; Phase 3c) �
   below. The stored charges come from b.snap `charges` (sim `snapshot.js chargeView`, display only). Other
   `[eff_cond]` templates stay unmapped 'conditional'.
 * **The procedural looks the official layer stands for** (round 46, the official-effects audit's R10 / R11; history
-  §32.14.44). With 官方特效 on and the effects installed — never with the layer off or a lite install without them:
+  §34.14.44). With 官方特效 on and the effects installed — never with the layer off or a lite install without them:
   - A skill whose official plan has no cast rows (no start, loop or range row, no attack cast / range row: 赫默 S2,
     巫恋 S2, 古米 S1, 银灰 S1, 塞雷娅 S1, 瑰盐 S1, 流星 S1 / S2, 华法琳 S2, 塑心 S3, 魔王 S2) shows no procedural
     activation burst or aura (`SkillFx.skill` → true): the client shows nothing at that cast. "Installed" is any
-    prefab of the unit's plan, its skill's `effects`, its modes' rows, its `refs` or its `startEffect`. Since 0.3.1
-    (history §34.1.6) the same holds for a passive skill's 0.5 s window at deploy (普罗旺斯 S1, 琳琅诗怀雅 S1):
-    `SkillFx.skill`'s passive branch asks `_noBurst` too.
+    prefab of the unit's plan, its skill's `effects`, its modes' rows, its `refs` or its `startEffect`.
   - A kit fx that stands for an official effect the client plays there is bound to it (`FX_BINDINGS`, now with `keys`
     — prefabs no projectile record lists as reached —, `hold: 'fx'` — the fx's own `duration` / `dur` / `hold` —,
     `during` — only while the skill lasts — and owner `'skill'` for an fx that names no owner): the areas 锡人 S1 / S2,
@@ -1479,7 +1323,7 @@ index.json — version 1 and the version 2 fields (§33.12, §33.15; Phase 3c) �
     effects at the fx's tile for the area's time (the projectile stays where it lands: AuraHitBehaviour); 异客 S3's
     strikes `pasngr_skill_03_hit`; 溯光星源 S2's links the link projectile's hit on each pulled enemy; 焰影苇草 S2's
     fire strikes `reed2_skill_02_hit`; 蕾缪安 S3's lock the aim projectile's crosshair (`lemuen_skill_03_crosshair_range`
-    / `_02`), held as `hold: 'lock'` since 0.3.2 (PR #862, history §35.39): on the locked enemy, at its last spot once
+    / `_02`), held as `hold: 'lock'` since 0.3.2 (PR #862, history §37.39): on the locked enemy, at its last spot once
     it is gone, until the bombard of the shell that claimed it (a `bombardShell` takes her nearest free lock within
     `LOCK_SHELL_NEAR` 3); a lock no shell claims ends `LOCK_T` 5 s after the last sign of her S3, locks with no shell
     end when she is knocked out, at most `MAX_LOCKS` 48, and a tier switch clears them (the 5 s / 48 / 3 are carried
@@ -1511,41 +1355,25 @@ index.json — version 1 and the version 2 fields (§33.12, §33.15; Phase 3c) �
     skill's plan has an installed prefab: 莫斯提马 S2's zone, 白面鸮 S2's and 流明 S1's heal fields (his: the skill's
     buff on the patient, `lumen_skill_01_range`, plays with the heal), 凛御银灰 S2's blast, 远牙 S2's
     and 溯光星源 S3's links, 空弦 S1 / S2's, 流星 S2's and 雪猎 S2's volleys, 信仰搅拌机 S3's counters, 歌蕾蒂娅 S3's
-    tornado pulls, 伺夜 S1's and 迷迭香 S3's summon pillars, 卡涅利安 S2's chains (once her loops are drawable); since 0.3.1
-    浊心斯卡蒂 S3's tide (her Aura `_effects` loops), 银灰 S2's snow (his skill loop), the 自选 picks' 珊比 S3 belt
-    (`thumpy_skill_03_range_01`) and 假日威龙陈 S2 / S3 slime (her attacks' `chen2_skill_0N_range_01` on their targets).
+    tornado pulls, 伺夜 S1's and 迷迭香 S3's summon pillars, 卡涅利安 S2's chains (once her loops are drawable).
   - A summon's pillar ('summon' archetypes, not the floating units' kinds) in the frame its official birth effect was
-    drawn (`FxWiring.deploy`'s key: its skill's own start effect — an AppearSkill's, 0.3.1 —, the mode's override,
-    its own, the generic one) is skipped: 风丸 S2's 替身, 伺夜's
+    drawn (`FxWiring.deploy`'s key: the mode's override, its own, the generic one) is skipped: 风丸 S2's 替身, 伺夜's
     wolves, 夕's and 维娜·维多利亚 S3's summons, 耀骑士临光 S3's sword; a token's arrival burst ('radiantSword',
     'summonStun', 'summonBurst', 'paperDoll', 'obelisk') only with its own birth effect.
   - Kept procedural (the client shows such a cue that is not placed here, or the fx is not the skill's): 引星棘刺 S2's
-    drifting area, 新约能天使's air
+    drifting area, 余 S3's fire wall (the client builds it from `yu_skill3_range_01_*` segments), 新约能天使's air
     strikes (`angel2_skill_N_loop_*` on projectiles not flown), 蕾缪安 S3's falling shells, 扎罗's fear-cage beams (the
     client's `enemy_wlfmster_a_skill_end_buff` on the caged operators is not placed), 缇缇 S3's wake (the fx names no
     owner) and the talents' cues (刺玫's and 雪猎's strikes / counters, 风丸's 替身 burst); 泡泡 S2's counter is its
-    binding above (audit R17). Areas kept so in 0.3.1 (history §34.5): 圣聆初雪's snow layers (`sbell2_ground_0N` per
-    tile — no event carries the tiles' layers), the 自选 picks' 珊比 S2 glue (`thumpy_skill_02_trap_01` per glued tile —
-    the fx gives their centre), 黍's farm tiles (`shu_talent_buff_01` per sown tile), 克莱门莎 S2's vortex (no prefab
-    of its own found), 霍尔海雅 S3's and 斩业星熊 S2's moving areas (projectiles that fly or orbit), 集团军重型火炮's
-    burning zone (its prefab is not in the extracted set — and it is no enemy of the four modes), 炎佑's flame (a lasso
-    line to its target).
-* **A projectile's parts** (2026-10-15, history §32.14.36 and §32.14.38; `flight.js projectileParts`, `wiring.js
+    binding above (audit R17).
+* **A projectile's parts** (2026-10-15, history §34.14.36 and §34.14.38; `flight.js projectileParts`, `wiring.js
   _fly`): the flying effect is the projectile class's own `_mainEffect` and its life that class's LIMITED `_lifeTime`,
   read from `behaviours` (an index written before the correction named a chain's or a rope's line `main` for 30
-  projectiles); it flies from the shot's mount point (Placement above), its root's transform the flight's (0.3.1). A
-  projectile whose movement has `comeBack` (§33.12 Projectile) plays its hit at the target and flies back to the
-  thrower's HitPoint at the sim's return speed for the 回环射手's 'boomerang' (else `speed` ×
-  `comeBackSpeedScale`), stepping that speed toward the HitPoint as it is now, a Paracurve one along an arc rebuilt
-  when its inputs change, its effect removed at the catch; a thrower gone ends it at the
-  hit. The client's `delayAfterReached` of 1 on the Paracurve / NarantS3 come-backs is a flag (`delayTime` 0.01 s, under
-  one tick); the visual does not hang, so the drawn boomerang stays on the sim's catch
-  (`wiring.js _comeBack` / `_turnBack` / `_stepBack`, 0.3.1, history §34.6: it stopped at the target, then a locked
-  return duration rubber-banded a moving thrower). A harpoon's rope (a HarpoonRenderer's
+  projectiles); it flies from the shot's mount point (Placement above). A harpoon's rope (a HarpoonRenderer's
   `_mainEffect`) runs from the shooter's point as it is drawn to the head while it flies — its LineRenderers' end
   points set by the runtime (`effect.js linkLines`; a world-space line without them draws nothing) — and fades once the
   head arrives; a chain's lightning (a ChainLightningEffectBehaviour's) is not flown — the client plays it between the
-  chain's targets as the shot reaches them (§33.12 Projectile): the sim's 'chain' / 'chainHeal' bounces after an official
+  chain's targets as the shot reaches them (§35.12 Projectile): the sim's 'chain' / 'chainHeal' bounces after an official
   shot of such a projectile draw the line from the previous target's HitPoint to the next one's and the projectile's
   `onHit` on the next, when the shot reaches its first target (`wiring.js chain`, round 46) [ASSUMED: every bounce at
   once — `_interval` 0 —, between HitPoints, the looping line shown 0.2 s, `CHAIN_LINE_S`]; a bounce of any other chain
@@ -1554,7 +1382,7 @@ index.json — version 1 and the version 2 fields (§33.12, §33.15; Phase 3c) �
   while it lives) and `toTileOnStart` on the target's tile; a projectile without a flying effect holds its `onHit` for
   its life when that is longer than the sim's flight (up to 1.5 s, `TIMER_HIT_MAX`), the target's damage meanwhile
   drawing no procedural spark [ASSUMED: the sim's damage keeps its own time].
-* **Hits against the sim's timing** (round 46, history §32.14.41; `wiring.js`): the sim moves a shot in its firing tick
+* **Hits against the sim's timing** (round 46, history §34.14.41; `wiring.js`): the sim moves a shot in its firing tick
   and lands it about a tick before the drawn flight (distance ÷ speed) ends, and heals at the 'atk': the HP 'dmg' or
   'heal' on a target with an official hit on its way is that hit's — in the attack's frame, or from 0.2 s before the
   drawn hit (`CLAIM_LEAD`) until 0.35 s after; one entry per target and frame, taken by the first frame's events
@@ -1570,9 +1398,9 @@ index.json — version 1 and the version 2 fields (§33.12, §33.15; Phase 3c) �
   (AttachEffectOptions: attached with the mode) join the plan, held for the skill — `range` for a `*_range*` key, else
   `loop`; a row `onlyAttachOnDummy` (the client's preview dummy) is left out. The enemies' rows in their Default /
   combat modes are not played.
-* **Sorting against the units**: a renderer that sorts before the units (§33.6: a lower sorting layer, or the Default
+* **Sorting against the units**: a renderer that sorts before the units (§35.6: a lower sorting layer, or the Default
   layer with a negative order) draws in the pass under them (`effect.js behindUnits`), with those lying flat on the
-  ground; skinned meshes read the influences per vertex their file stores (`geom.js skinStride`, §33.9).
+  ground; skinned meshes read the influences per vertex their file stores (`geom.js skinStride`, §37.9).
 
 Coverage of the roster (`tools/vfx-skill-coverage.mjs`, version 1 → version 2; version 3 below): operator (unit, skill)
 pairs 547 → 548 of 549 in the index, 501 → 502 with a plan the battle view drives (91.4 %); summons 2 → 71 of 78, 2 → 23
@@ -1592,14 +1420,14 @@ toggles 41 / 47, reborn 13 / 13, deploy 6 / 12, abilities 37 / 51); the others n
 (unmapped rows 76, no effects 51, targets only 31) or have no signal (a template trigger 21, a toggle 6, a talent attack
 5).
 
-### 33.17 Phase 1d: talents, common and general abilities, the abilities' projectiles, buff lives (index.json version 3)
+### 35.17 Phase 1d: talents, common and general abilities, the abilities' projectiles, buff lives (index.json version 3)
 
 `extract.py --only fx --fx-set used` with the Phase 1d extractor (Windows client 26-09-13, 8 processes on the
 maintainer's Mac) exports what the units do outside their attacks and skills: every talent node, common ability,
 general ability and trait of the roster's units (the chess operators, the 补位 / 自选 forms, the enemies, the summons)
-that names an effect or fires a projectile — read with the skills' reader (§33.12: the same `uses`, roles, events,
+that names an effect or fires a projectile — read with the skills' reader (§35.12: the same `uses`, roles, events,
 carriers), so a runtime can feed them to the same planner — and what the data says about when they act. Where a field
-below says *metadata*, the names come from the client's il2cpp metadata (§33).
+below says *metadata*, the names come from the client's il2cpp metadata (§35).
 
 **Talent** (`units[id].talents[key]`: one entry per prefab key — the name of a `Talents/<key>` node, wherever it sits:
 under the root, `Others/Direction/Talents`, a mode, an attack; a node is a talent when it carries a Torappu.Battle.Talent
@@ -1611,7 +1439,7 @@ Talent = { nodes: [TalentNode…],                      every node with that key
                                                        and its effects on two nodes, one copy per mode)
            bb?,                                        an enemy's: the key data/enemies.json talents.bb uses for it
                                                        (`Reborn.duration` → 'Reborn'; case as our data writes it)
-           effects, projectiles, uses, roles, unclassified, abilities }   as a Skill's (§33.12; a use's `node` is the
+           effects, projectiles, uses, roles, unclassified, abilities }   as a Skill's (§35.12; a use's `node` is the
                                                        node's path, `mode` the mode holding it when it sits in one)
 TalentNode = { node (its path in the unit prefab), class (the Talent class), ability (the node's ability class),
                mode? (the mode holding the node), when, skills? (Talent._checkValidBySkillIndex: valid only with these
@@ -1699,7 +1527,7 @@ AbilityRandomGroup.SelectMethod Random / Loop; `probKeys`: the blackboard keys o
 `trigger` (AbilitySelectableGroup, BurstAttackGroup: the first config whose own trigger finds its target; `sequential`
 with `_selectAbilitySequentially`), `firstSucceed`, `parallel` (`main`: the index of `_mainAbility`), `sequence`
 (`loop`: it starts over); `burst`: the index of a BurstAttackGroup's burst attack. The MultiHit groups need no new
-field: their choice flags were exported (§33.12) and the base rule (hit k plays group min(k, last)) is engine code no
+field: their choice flags were exported (§35.12) and the base rule (hit k plays group min(k, last)) is engine code no
 data shows — still **assumed**; `additionalTimes` + 1 is the hits of the attack, against `groups` the groups.
 
 **Numbers** (the full set): 4,518 effect prefabs (+207: the effects the talents' and abilities' buff templates name;
@@ -1710,7 +1538,7 @@ abilities of 119 units: 59 common, 111 general, 5 traits, 291 uses; 57 nodes cas
 blackboard name), 57 with a mode switch, 11 reborn talents (6 with their handler node); `talentKeys` for 210 operators
 and 45 summons (125 of the operators' 126 exported talent keys and all 24 of the summons' are named there; 夕's `2+`
 is not); `bb` on 150 of the enemies' 187 talents (the rest have no blackboard in our data). Of Phase 1c's 47 nodes
-outside the index (§33.15) 42 are exported; the other 5 are `Combat` attacks no mode references (妖怪, 御4, 寒霜:
+outside the index (§35.15) 42 are exported; the other 5 are `Combat` attacks no mode references (妖怪, 御4, 寒霜:
 their mode's `_combat` is `EmptyCombat`; 守墓石像's `Stone` mode has none). Skills: 210 of the 596 list `abilities`
 (104 entries fire a projectile); of the 85 skills with projectiles 76 name all of them through an ability, 9 do not
 (伊内丝 S3, 魔王 S1–S3, 仇白 S1, 菲亚梅塔 S2, 老鲤 S2, 维什戴尔 S1, 克莱门莎 S3: a buff's blackboard or a template's
@@ -1719,7 +1547,7 @@ EmitProjectile action names them); 109 uses carry a `projectileKey`. Mode attack
 the operators' and summons' skills (LIMITED 407 — 268 with a blackboard key, 4 with a time —, INFINITY 286, IMMEDIATELY
 20), 485 of the talents, 252 of the abilities, 71 of the enemies' skills.
 
-**What the runtime does not read yet, and the signals it has** (§33.16 reads skills only; `render/vfx/skills.js` is
+**What the runtime does not read yet, and the signals it has** (§35.16 reads skills only; `render/vfx/skills.js` is
 the runtime's; the sim's client events are docs/SIM.md §9's): `talents` / `abilities` can go through the skill planner
 (their `uses` have the skills' shape), bound per node by `when`: `deploy` → `['deploy', id]` (and a unit's `['spawn',
 …]`); `passive` → from the spawn / deploy to `['die', …]` / `['leak', id]` / the battle's end (a general ability only
@@ -1747,14 +1575,14 @@ in `projectiles`, not tied to an ability; the 5 unreferenced `Combat` nodes; tem
 CreateBuff data is not read for `life`); talents and abilities whose nodes name no effect (stat buffs, card plugins:
 nothing to draw).
 
-### 33.18 The 驭械术士's floating units (0.3.0, round 46)
+### 35.18 The 驭械术士's floating units (0.3.0, round 46)
 
 The floating units (浮游单元) of the 驭械术士 branch (subProfessionId `funnel`: 荒芜拉普兰德, 洛洛, 至简, 耶拉 and the 自选 澄闪 in
 the mode's pool) are no unit of their own — no token, and no image of the operator's Spine model draws them (洛洛's
 skeleton has her drone only in its `Skill_Begin` clip, as she launches it). Each is an effect prefab that an ability of
 the operator's prefab (`charpack/<id>.ab`) shows at a Special point of her skin, and what it does to an enemy is a
 projectile of `[uc]projectiles.ab` (round 46: the four operators' prefabs, their skills and projectiles dumped with
-UnityPy). index.json version 3 carries all of it; nothing was added to the format, and the full set (§33.14) holds every
+UnityPy). index.json version 3 carries all of it; nothing was added to the format, and the full set (§35.14) holds every
 prefab (98 keys for the four, 5.4 MB of their textures).
 
 * **Mode attacks with units.** A mode attack of class MultiFunnelsNormalAttack or MultiFunnelRemoteAttack lists its
@@ -1787,7 +1615,7 @@ prefab (98 keys for the four, 5.4 MB of their textures).
 * **Where they float.** The idle prefabs follow SPECIAL_0 / _1 / _2 (their FollowMountPoint, `prefabs[key].follow`), and
   the skin's point names its bone (`skins[…].points.SpecialPointN.front` / `.back` `.bone`): 荒芜拉普兰德
   F_Funnel_Muzzle_1–3, 洛洛 F_UVA_01, 至简 F_Fly, 耶拉 F_Rock_1 / F_Rock_2, 澄闪 F_DroneA. A skin's point is its bone in the
-  prefab's edit-time pose (§33.12 Skin; for these points the Idle clip's first frame, to within the idle bob): x = the
+  prefab's edit-time pose (§35.12 Skin; for these points the Idle clip's first frame, to within the idle bob): x = the
   bone's x × 0.0027, the height in the Graphic plane the same scale about the skeleton's origin (0.157 under the root),
   the plane turned −30° about x (the four chess operators' skins against their Spine models). The client's
   BoneFollower moves the point with the clips: 洛洛's, 至简's and 耶拉's units bob with the Idle clip, 荒芜拉普兰德's
@@ -1802,11 +1630,11 @@ prefab (98 keys for the four, 5.4 MB of their textures).
 | 澄闪 `char_377_gdglow` (自选) | Default: `gdglow_token_01` at SPECIAL_1 | `projectile_chr_gdglow_funnel` (`gdglow_token_attack_trail_01`) from SPECIAL_1 | S1 / S2: two units, S3 three (idle `gdglow_token_skill_0X`, `gdglow_token_hide_0X` both ways): `gdglow_token_hit_L_01` / `_L_02` / `_R_01` / `_R_02` in turn |
 
 **The runtime** (`render/vfx/funnels.js` plans a unit, `render/vfx/funnelfx.js` plays it — owned by the wiring like
-SkillFx and TalentFx —, the wiring follows the bone as it follows every FollowMountPoint: §33.16 Placement; DESIGN §9
+SkillFx and TalentFx —, the wiring follows the bone as it follows every FollowMountPoint: §35.16 Placement; DESIGN §9
 "Official battle effects"; client only):
 
 * **Home.** The loops of the units that are home follow their prefab's point — its FollowMountPoint, with the point's
-  rotation — where the unit's model draws the point's bone (§33.16 Placement: `UnitView.boneOffset`, the facing applied,
+  rotation — where the unit's model draws the point's bone (§35.16 Placement: `UnitView.boneOffset`, the facing applied,
   up the plane the camera faces; no model or bone: the skin's point). In a mode whose attack holds units, the first n
   with an idle loop: with the skill on, the units it releases (the kit's 'drones' count, else 1 + the skill record's
   blackboard `attack@cnt`); else the units one attack showed (the hits after the body hit), before any attack 1 + a
@@ -1849,46 +1677,8 @@ SkillFx and TalentFx —, the wiring follows the bone as it follows every Follow
 added), 0.85 s before an attached unit is home again and 2 s before a remote one comes back, the appear / disappear
 moments at a skill's start and end, the initial count from the skill's text, the flights' height (0.3 over the ground),
 the S3 pulse correction, the hover radius (the sim kit's 0.9; the client's HoveringInPlaceMovement says 1.25), the
-groups one apart; the units on their bones as the remake's model draws them, with their point's rotation (§33.16
+groups one apart; the units on their bones as the remake's model draws them, with their point's rotation (§35.16
 Placement: 荒芜拉普兰德's wolves face forward on the bones' 87°; 洛洛's drone keeps its point's own 30° about X — its
 BoneFollower does not follow F_UVA_01's rotation — and lies flat). Not drawn: 澄闪's self-destruct (`projectile_chr_gdglow_funnel_s12_3` … — the kit's 'explode' keeps the
 procedural blast), a unit hidden while its owner is stunned (`setActiveFalseWhenPause`: no signal ties a unit's pause
 to a status).
-
-
-### Reported effects after 0.3.0 (§34.31, 2026-10-17)
-
-- **Wild Mane S2:** `CastEffectOptions.useFourDirectionalFace` selects the owner's deploy-direction vector for
-  FOUR_DIRECTION / ANY_DIR casts, independently of `directionType` (which selects a key slot). The unit's S2 cast
-  uses `wildmn_skill_02_start`, `directionType=0`, `useFourDirectionalFace=1`; its hit has both directional flags off.
-  The cast's ParticleEffect is FOUR_DIRECTION, GROUND_CENTER, mainDir RIGHT, with a rotation-Z helper authored at
-  90°. `ParticleEffect.FaceTo` replaces that helper rotation; it does not add another quarter-turn or left mirror.
-  The yellow/white `congci_add` / `congci_cl` quads have positive X pivots: §33.6's positive pivot displacement is
-  required (0.3.0 subtracted it, putting the streak behind the owner; the shared fix is already in §34.6).
-- **Yu S3:** `yuwall.js` interprets the installed source/root controllers. `YuS3EffectBehaviour.OnPlay` creates
-  `yu_skill3_range_01_root` per tile across the owner's row for UP/DOWN, column for LEFT/RIGHT.
-  `YuS3EffectWithEdgeBehaviour` offsets visible pieces by `_offset` (officially 0.4) along the facing direction;
-  horizontal pieces use `_effectWhenHorizontal`, vertical pieces use the left/right variant according to world X
-  relative to the battle camera. Adjacent invalid tiles receive the matching horizontal or vertical end caps
-  (first check 0.05 s, subsequent checks 2 s). No stretching one prefab over the whole board.
-  The source is EmptyEffect; `FinishEffectViaOwnerBuff` holds it for `yu_s_3[effect]`, so it is a skill-held composite,
-  including pending loads. Official `skill_table.skchr_yu_3.levels[*].duration` is 45 s. Skill off, owner death/removal
-  and battle reset stop all children. [ASSUMED] The remake's active field rectangle is the official controller's
-  valid map; the segments are drawn unclipped, the caps on the invalid tiles just past each end, as the maintainer's
-  official recording shows the whole crimson curtain (a world-space clip tried first left flat slivers, because some
-  vertex paths pass local positions as `v_wpos`). The procedural 2D/off fallback holds the same offset footprint until skill end;
-  its 0.16-tile ground-strip width and colour are [ASSUMED] presentation. `firewallBlock` places `yu_skill3_annex_01`
-  once at the eliminated bullet. `yu_skill3_annex_02` requires the ally buff's ON_TAKE_DAMAGE trigger: our sim
-  emits no matching event, so it remains unmapped and is never guessed from unrelated damage.
-- **Manifold:** official `token_10030_mlyss_wtrman` mode animation replacement pairs select A_Idle/A_Attack/A_Combat
-  for Melee and Melee_S3, B_Idle/B_Attack/B_Combat for Range. `UnitView` applies those roles in 2D and 3D and keeps
-  them through skill toggles/model loads; its form also selects the index's mode attack/combat effects. The existing
-  `copy {id,src}` event supplies the copied operator's position. [ASSUMED] If that cosmetic event was missed, or a split
-  clone has none, `atk` reconstructs Melee from `none`, Range from its projectile kind (the current sim's copyInto
-  contract); no change animation is replayed over an attack. This does not invent a recovery/c0 transition or a
-  summoner link. The sim exposes no token-owner skill window for `c2_skill_03_buff_01`; it remains conditional.
-
-Sources: local official v3 index/prefabs; `pkgrps/btl_pfb_tokens_0.ab` mode `_replaceAnimPairs` and
-`SwitchToMelee/Range`; `skill_table.json` (`skchr_wildmn_2`, `skchr_yu_3`, `skchr_mlyss_3`); official client
-`CastEffectOptions.CreateEffect`, `ParticleEffect.FaceTo`, `YuS3EffectBehaviour.OnPlay` and
-`YuS3EffectWithEdgeBehaviour` (addresses and replay evidence in history §34.31). No sim rules change.

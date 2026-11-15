@@ -1,4 +1,7 @@
 // Download transfers are explicit; switching resource-manager sections or closing pauses pending requests.
+// The title screen's 下载完整素材 (docs/history/0.3.0.md §34.14.23): the button, its hint line and the dialog, which starts the
+// download queue (assetDownload.js) as it opens; closing it pauses. The import of a local pack has its own button beside
+// this one (ui/assetImport.js, §34.14.39): a file already imported counts as ready here and is not requested again.
 import { useEffect, useState } from '../../vendor/hooks.module.js';
 import { html, Button, ProgressBar } from './components.js';
 import { assetDownload } from '../assetDownload.js';

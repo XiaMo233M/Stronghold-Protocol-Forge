@@ -5,7 +5,7 @@ The strategy interface selects trusted server-side AI code per match. It keeps t
 legacy's weights, RNG consumption, economy, placement or rehearsal. The framework is PR #673 by
 @HankDUMPLINGZhong. The optional `external` adapter is documented in [External AI API](EXTERNAL_AI.md)
 and the [Chinese server-owner guide](EXTERNAL_AI_ZH.md). Until LLM-played seats clear 终极, that adapter is
-development-only and is not in a release package (maintainer 2026-10-23, §35.66). A packaged server keeps
+development-only and is not in a release package (maintainer 2026-10-23, §37.66). A packaged server keeps
 `legacy` and ignores `SP_BOT_STRATEGY=external`.
 The opt-in `ioleta`, `adaptive` and `ioleta-adaptive` strategies (PR #742) are described below.
 
@@ -130,6 +130,8 @@ configuration, shared by every external seat. Only seats whose strategy is `exte
 `SP_EXTERNAL_AI_SEATS`, when set, still narrows them: an external seat outside that list plays the legacy hooks
 `external` inherits. Startup validates the external configuration when any seat selects it. A release package maps
 `external` back to `legacy` for each seat and logs the one ignore line (§35.66).
+startup. A release package does not register it (§37.66).
+The three opt-in local strategies are also registered. External fallback remains legacy; advisor plans apply only while external owns the match.
 
 Test input journals record the resolved strategy ID as `init.options.botStrategy`, rather than serializing hooks.
 Replay uses that ID, or `legacy` for older journals without it, regardless of the replay host's environment.
@@ -161,14 +163,14 @@ skips the original picker's RNG draw). Regenerate both comparison runs with this
 Keep seeds, difficulty and rehearsal counts
 identical in comparisons; use `--jobs 1` for timing, since parallel load inflates the timings.
 
-终极 (ABYSS) is the hard target for both kinds of seat (history §35.62): compare with
+终极 (ABYSS) is the hard target for both kinds of seat (history §37.62): compare with
 `node tools/botbench.mjs --configs solo:ABYSS,coop4:ABYSS --seeds 20 --seed 1 --json …`, and keep FUNNY / NORMAL /
 HARD from getting worse (`--configs solo:FUNNY,solo:NORMAL,solo:HARD,coop4:FUNNY,coop4:NORMAL,coop4:HARD --seeds 10`).
 A win is clearing the round-14 Final Assault (`victory`); round 15 is the optional Hidden Core. An `external` seat in
-plan mode runs the legacy executor with the plan's weights, so a legacy change moves plan seats too: since §35.62 the
+plan mode runs the legacy executor with the plan's weights, so a legacy change moves plan seats too: since §37.62 the
 plan's primary core bond is legacy's focus, and legacy lineups can field a 6-member core bond.
-Since §35.63 legacy also levels to L5 at R9 and L6 at R11, trades 获得时 layer units (`tradeOnce`), commits to a
-6-member core (`coreGap`), values a healer from R5 and spends expiring funds on refreshes (`spendDown`). Since §35.64
+Since §37.63 legacy also levels to L5 at R9 and L6 at R11, trades 获得时 layer units (`tradeOnce`), commits to a
+6-member core (`coreGap`), values a healer from R5 and spends expiring funds on refreshes (`spendDown`). Since §37.64
 a boss round rehearses the same layout variants against the already-planned wave, on `deriveSeed(0xA11CE, fa:round:seat)`,
 for the visible countdown (`faRehearsalTicks`); counted leaks still rank first. 终极 needs 100
 seeds per mode to separate such rules from noise (seeds 1–40 to develop, the rest to check), and a per-match "share of
@@ -286,5 +288,5 @@ through a gameplay-plugin room, whose rehearsal stays on the server. Measured st
 configuration, seeds, version and commands to reproduce them, are in the
 [strategy summary](research/bot-strategies-summary.md).
 
-Legacy and adaptive prep retain §35.63 `spendDown` between advisor spending and freezing, without another yield.
+Legacy and adaptive prep retain §37.63 `spendDown` between advisor spending and freezing, without another yield.
 [ASSUMED] Ioleta procurement owns its refresh budget and omits that legacy sweep. Framework by @HankDUMPLINGZhong; strategies by @Lidong1793.

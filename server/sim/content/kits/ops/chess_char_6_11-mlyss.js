@@ -16,6 +16,9 @@ import { isVersionData, gameData } from '../../tokens.js';
  * `regulation`) also 淬羽赫默, a shop chess there (`chess_char_4_20`): she stays off the covenant version list, where
  * 第一期 still leaves her out. 伊芙利特 (shop chess in 第一期, a 自选 pick today) and today's other 自选 members stay out
  * until the maintainer decides whether 自选 members count (M2, DESIGN §35.22.5).
+ * keeps. On another version's build (support isVersionData) also 第一期's 星源 (DESIGN §37.22.4). 伊芙利特 and 淬羽赫默
+ * (shop chess in 第一期, 自选 picks today) and today's other 自选 members are left out until the maintainer decides whether
+ * 自选 members count (M2, DESIGN §37.22.5).
  */
 const RHINE = new Set(['char_108_silent', 'char_128_plosis', 'char_202_demkni', 'char_249_mlyss', 'char_1047_halo2']);
 const RHINE_VERSION = new Set([...RHINE, 'char_135_halo']);

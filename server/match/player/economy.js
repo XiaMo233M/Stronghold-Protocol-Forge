@@ -5,11 +5,33 @@
 // the player state).
 
 import { ERR, PHASE, layerGainRoom } from '../../../shared/constants.js';
+import { behaviourIsDefault } from '../../../shared/behaviour.js';
 import { ruleOption } from '../../../shared/plugins/rules.js';
 import { freeSlot } from '../board.js';
 import { computeBonds } from '../bondsMeta.js';
 import { OK, fail } from './common.js';
 import { syncCommand } from '../bandCommands.js';
+
+/**
+ * **行为开关 `shopBias` 的读取点**（DESIGN §28.43.1）：这一局的声明要不要偏向，要偏就给出「偏向哪些盟约」。
+ *
+ * 返回 `null` = **引擎今天的行为**，也就是两条路：没声明这一格 / 声明成 `official`（缺省档），或声明了
+ * `bondBias` 但此刻一个盟约都没激活（空集合 ⇒ 抽出来的商店会变成空的装备槽，那不是「偏向」，是「停发」）。
+ * 返回非空 `Set` = 只在「`giveBondId` 落在这个集合里」的装备里抽，**只偏置、不授予**。
+ *
+ * `behaviourIsDefault` 是这一格唯一的判据来源（`shared/behaviour.js`）：与 `variants` 的 `variantIsDefault`
+ * 同一个分工 —— `behaviourActions` 里那条 `{ kind: 'shop.biasActiveBonds', value: true }` 是这一格的**声明**，
+ * 读取点问的是「哪一档」。写成模块层的**纯**函数，是为了让它能被单测（`test/shopBias.test.js`）也为了它是
+ * `shared/modSurface.js` 里 `behaviour` 那一格可锚的一个导出名（改名 / 挪走 = 打断所有声明这一格的包）。
+ *
+ * @param {{ m: { behaviour: any }, _activeBondIds: () => Set<string> }} ps
+ * @returns {Set<string>|null}
+ */
+export function bondBiasBonds(ps) {
+  if (behaviourIsDefault(ps.m.behaviour, 'shopBias')) return null;
+  const active = ps._activeBondIds();
+  return active.size ? active : null;
+}
 
 export class PlayerEconomy {
   addFunds(n, { reason = '' } = {}) {
@@ -69,20 +91,58 @@ export class PlayerEconomy {
   }
 
   _rollChessSlot() {
-    // the slotted 自选 pieces join the draw once the 调度中心 reaches their slot's level (player/diy.js diyRollEntries)
-    const id = this.m.pool.roll(this.m.rngShop, { maxTier: this.shop.level, extra: this.diyRollEntries() });
-    return id ? { kind: 'chess', id, basePrice: this.gd.chessPrice(id), frozen: false, sold: false } : null;
+    // the slotted 自选 pieces join the draw once the 调度中心 reaches their slot's level (player/diy.js diyRollEntries);
+    // the DRAW SOURCE is the player's own pool in the 100-seat variant and the shared one today (player/rules.js
+    // mainPool — the same object either way when the switch is off, docs/PS100-MIGRATION.md §10-A)
+    const id = this.mainPool().roll(this.m.rngShop, { maxTier: this.shop.level, extra: this.diyRollEntries() });
+    if (!id) return null;
+    // 助战：自己带上场的干员在商店里按 `data/support.json` 的 prices 标价（没配就是它的阶级价），
+    // 卖掉仍按普通棋子的 sellPrice —— 它就是普通棋子，只是「我的商店池里一定有它」（连本局禁用也盖过去）。
+    // 阶级门照旧：六阶助战仍要商店等级 6 才摇得到。
+    const support = this.support.includes(id);
+    const price = support ? (this.gd.supportPrice(id) ?? this.gd.chessPrice(id)) : this.gd.chessPrice(id);
+    return { kind: 'chess', id, basePrice: price, frozen: false, sold: false, ...(support ? { support: true } : {}) };
+  }
+
+  /**
+   * 这个玩家**已激活**盟约的 id 集合（`recompute` 算出来的 `this.bonds`）—— `shopBias: "bondBias"` 的唯一输入。
+   * 缓存按 `this.bonds` 的**对象身份**失效：每一次 `recompute()` 都换一个新对象（`player/round.js`），于是同一个
+   * prep 里的多次刷新只付一次遍历，而变化之后一定重算。
+   * @returns {Set<string>}
+   */
+  _activeBondIds() {
+    if (this._biasBondsAt === this.bonds && this._biasBonds) return this._biasBonds;
+    const out = new Set();
+    for (const [id, state] of Object.entries(this.bonds || {})) if (state && state.active) out.add(id);
+    this._biasBondsAt = this.bonds;
+    this._biasBonds = out;
+    return out;
+  }
+
+  /**
+   * **执行点（`shopBias`）**：这一局的声明要不要偏向，要偏就给出「偏向哪些盟约」。
+   *
+   * 判据本体是模块层的 `bondBiasBonds`（纯函数，`shared/modSurface.js` 的 `behaviour` 那一格锚着它）；这里只把
+   * 这一格的读取点挂到玩家状态上，`_rollItemSlot` 与本文件以外的调用方都走这一个名字。
+   * @returns {Set<string>|null}
+   */
+  shopBiasBonds() {
+    return bondBiasBonds(this);
   }
 
   _rollItemSlot() {
-    // startRound rolls the shop before recompute, so the cached this.bonds can be one round behind.
-    // bondBias therefore calls computeBonds at the roll (no rng). The official rule passes null and
-    // does not call it, so the shop's rng stays today's two draws.
+    // 装备槽的盟约偏向（`shopBias: 'bondBias'`），两条来源并存：
+    //   ① 上游 0.3.1 的房间规则：内容插件声明 `rules.shopBias = 'bondBias'` ⇒ 按本局**生效盟约**偏。
+    //      startRound 在 recompute 之前就抽商店，所以缓存的 this.bonds 可能差一轮 ⇒ 这里现算 computeBonds（不吃 rng）。
+    //   ② 我们自有的模块层 behaviour.shopBias（DESIGN §28.43.1）⇒ `shopBiasBonds()` 给出同一个 Set。
+    // 两者都产出 Set，`rollItem` 只认 Set；缺省档两者都为 null ⇒ 与从前**同一份结果**、同一条 rng 消耗。
     let bias = null;
     if (ruleOption(this.m?.rules, 'shopBias') === 'bondBias') {
       const bonds = computeBonds(this.gd, this);
       bias = new Set();
       for (const [id, st] of Object.entries(bonds)) if (st && st.active) bias.add(id);
+    } else {
+      bias = this.shopBiasBonds();
     }
     const id = this.m.pool.rollItem(this.m.rngShop, this.shop.level, this.m.itemPool, bias);
     return id ? { kind: 'item', id, basePrice: this.gd.itemPrice(id), frozen: false, sold: false } : null;
@@ -160,6 +220,10 @@ export class PlayerEconomy {
    * The defensive fallback handles only corrupted internal state.
    * [ASSUMED] The queue replaces frozen slots too. Absent on a normal match, so this returns false immediately.
    * @returns {boolean} true when the queue was applied
+   * 测试房间排队的下一份商店（`g.test shop`）：替换这一次摇号一次，**不抽 rng**。队列由命令侧校验；
+   * 消费之前升级一直被挡（见 levelUp）。防御性回退只处理内部状态被弄坏的情形。
+   * [ASSUMED] 队列连冻结位一起替换。普通对局里这个键不存在，所以这里立刻返回 false。
+   * @returns {boolean} 队列被应用时为 true
    */
   _consumeTestShop() {
     const queued = this._testShopNext;
@@ -184,14 +248,43 @@ export class PlayerEconomy {
   }
 
   /**
-   * The 调度中心's upgrade opens the new level's extra slots at once — EMPTY: no card is drawn into them (a `null` slot).
-   * The next roll (a manual refresh or the round start) fills them with the other unfrozen slots; the cards already shown
-   * stay where they are (chess slots keep their index, the item slot stays after them). Official: the footage of a 1→2
-   * upgrade (bilibili BV1AXwuzdEys 1:39, GitHub #332 / PR #333 by @2321Robin) shows the new slot appear and stay empty, and
-   * the texts only name the slots — the tutorial's 休整期 page 「升级后将出现更多的商品栏位」, PRTS 帮助 「增加刷新栏位」 —,
-   * never a card that comes with them. 0.2.0 drew a card into each new slot instead (item 19 of the community report of
-   * 2026-10-06, 「升级商店获得新的商店位时用新卡补上，而不是空着」, one uncorroborated remark; its follow-on, that the new card
-   * follows the freeze toggle, was [ASSUMED]); until then the extra slots waited for the next roll as well.
+   * Reroll the shop. keepFrozen → frozen unsold slots survive (round start); otherwise everything is rerolled
+   * (manual refresh). Slot counts follow the current level.
+   */
+  rollShop({ keepFrozen = false } = {}) {
+    // 测试房间排队的商店（g.test shop）替换这一次摇号，且不抽 rng；升级在它被消费前一直被挡
+    if (this._consumeTestShop()) return;
+    const { chess: nChess, item: nItem } = this.gd.shopSlots(this.shop.level);
+    const old = this.shop.slots;
+    const layout = this.shop.layout || { chess: old.length, item: 0 };
+    const oldChess = old.slice(0, layout.chess);
+    const oldItems = old.slice(layout.chess);
+    const keep = (s, kind) => (keepFrozen && s && s.kind === kind && !s.sold && s.frozen ? { ...s } : null);
+    // frozen slots keep their position; sold / empty / unfrozen positions are rerolled
+    const slots = [];
+    for (let i = 0; i < nChess; i++) slots.push(keep(oldChess[i], 'chess') ?? this._rollChessSlot());
+    for (let i = 0; i < nItem; i++) slots.push(keep(oldItems[i], 'item') ?? this._rollItemSlot());
+    this.shop.slots = slots;
+    this.shop.layout = { chess: nChess, item: nItem };
+    for (const s of slots) if (s) s.frozen = this.shop.frozen;
+    this.dirty();
+  }
+
+  /**
+   * The 调度中心's upgrade opens the new level's extra slots — as EMPTY slots.
+   *
+   * The owner's decision of 2026-10-07, report 「升级2本会刷新干员池和加入新干员，升级商店等级加槽位应该是只多一个空位而不是直接多
+   * 一个可购买干员」: an upgrade buys a PLACE for a card, not a card. The extra slots appear empty and the next roll fills
+   * them — a manual 刷新 (rollShop) or the round start's own roll (round.js startRound).
+   *
+   * Upstream 0.2.0 drew a card in at once (§25.19.2, community report item 19 「升级商店获得新的商店位时用新卡补上，而不是空着」,
+   * citing the tutorial's 「升级：…升级后将出现更多的商品栏位、可调度干员以及新装备」). That hands the player a free card the
+   * shop never rolled — from level 2 on, a NEW operator to buy on the spot — which is exactly what the owner reports as
+   * wrong; the tutorial line only promises that more slots appear. 0.2.2 reached the same conclusion on its own: the
+   * footage of a 1→2 upgrade (bilibili BV1AXwuzdEys 1:39, GitHub #332 / PR #333 by @2321Robin) shows the new slot appear
+   * and stay empty, and the texts only name the slots — the tutorial's 休整期 page 「升级后将出现更多的商品栏位」, PRTS 帮助
+   * 「增加刷新栏位」 — never a card that comes with them. The cards already shown stay where they are (chess slots keep
+   * their index, the item slot stays after them).
    */
   _openLevelSlots() {
     const { chess: nChess, item: nItem } = this.gd.shopSlots(this.shop.level);
@@ -200,7 +293,7 @@ export class PlayerEconomy {
     if (nChess <= layout.chess && nItem <= layout.item) return;
     const chess = old.slice(0, layout.chess);
     const items = old.slice(layout.chess);
-    while (chess.length < nChess) chess.push(null); // loop-cap: shopSlots chess max 8
+    while (chess.length < nChess) chess.push(null); // loop-cap: shopSlots chess max 8   // empty: the next roll draws into it
     while (items.length < nItem) items.push(null);
     this.shop.slots = [...chess, ...items];
     this.shop.layout = { chess: chess.length, item: items.length };
@@ -264,7 +357,7 @@ export class PlayerEconomy {
     if (free) this.shop.freeRefreshes--;
     else this.spend(price);
     // A manual refresh cancels the freeze: the new cards are not frozen (official, the owner's play of 2026-10-14;
-    // GitHub #584, DESIGN §32.14.7). A refresh that fails (funds, phase) returns above and leaves the freeze on.
+    // GitHub #584, DESIGN §34.14.7). A refresh that fails (funds, phase) returns above and leaves the freeze on.
     this.shop.frozen = false;
     this.rollShop({ keepFrozen: false });
     this.stats.refreshes++;
@@ -284,6 +377,7 @@ export class PlayerEconomy {
   }
 
   levelUp() {
+    // 测试房间：排队中的商店（`shop` 命令排的那一份）还没被消费时，升级被挡住（上游 0.3.1 §36.8）
     if (this.m.test === true && this._testShopNext) return fail(ERR.WRONG_PHASE);
     const g = this._gate(); if (g) return g;
     if (this.shop.level >= this.gd.maxShopLevel) return fail(ERR.MAX_LEVEL);

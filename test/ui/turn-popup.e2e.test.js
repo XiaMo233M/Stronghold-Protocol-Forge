@@ -1,6 +1,15 @@
 // Real Preact-view regression checks for shared-draft turn cues.
 //   SP_E2E=1 CHROME_PATH=… node --test test/ui/turn-popup.e2e.test.js
 // The browser gets synthetic SVGs and one tiny prefab through request interception; no game art is needed.
+//
+// Through the dev mock's shared 机变 draft: the pick goes to p4, then back to me (p1) — the disc with the official cube
+// shows and leaves; a solo draft shows it (with the 轮到你 sound) as it opens, the same as co-op (the maintainer's
+// decision of 2026-10-22); a draft that opens on my turn (solo, and co-op with me first) plays the 机变阶段 banner, then
+// the disc and its sound — never both on screen, the disc in ≤ TURN_CUE_WAIT_MS (§37.18's leftover) —, also on the
+// server's path from ROUND_START (the round plate, the banner it held back, then the disc; with the draft 2 s, 1.7 s and
+// 1 s after the plate: the wait runs from each overlay on screen, not from the turn), while a turn coming round mid-draft
+// has it at once; none without the art pack or with reduced motion. Static counterpart:
+// test/ui/turn-popup.test.js.
 
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';

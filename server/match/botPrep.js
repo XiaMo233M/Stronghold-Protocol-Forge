@@ -44,6 +44,18 @@ export function createPrepSteps(actions, { maxRefreshes, arrangeBeforeLevel = fa
       if (!ops.hasHandRoom(ps)) ops.freeHandSlot(m, ps);
       // §37.71: nothing re-arranges after the rehearsed layout (the advisor pass of §35.13 here put the unrehearsed
       // default layout back whenever it bought a piece)
+      // Advisor plans (§37.13–35.14): final-placement sales can leave new expiring funds. Recheck before Ready.
+      if (ops.economyPlan(m, ps)) {
+        const before = ps.allChess().map(p => p.uid).join();
+        yield* ops.advisorSpendSteps(m, ps);
+        if (before !== ps.allChess().map(p => p.uid).join()) {
+          ops.takeOffers(m, ps);
+          yield* ops.arrangeSteps(m, ps);
+          ops.equipItems(m, ps);
+          ops.resolveTemp(m, ps);
+        }
+        ops.maybeFreeze(m, ps);
+      }
       ops.rememberOwned(ps);
       m.autoPickPersonalChoice(ps, 'bot');
       ops.ready(ps);

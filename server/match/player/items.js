@@ -1,16 +1,33 @@
 // server/match/player/items.js — PlayerState methods: items — g.equip (default 2 slots; per-form equipSlotNum overrides;
 // consume-on-equip items), g.art (Arts on a tile, rotated by the facing), g.destroy (hand / temp items; equipped
-// ones are locked) and g.unequip (DESIGN §34.15, only when the room's unequip rule is allow).
+// ones are locked) and g.unequip (DESIGN §36.15, only when the room's unequip rule is allow).
 // Installed on PlayerState.prototype by server/match/PlayerState.js (a method container: never instantiated; `this` is
 // the player state).
 
 import { ERR, GEO } from '../../../shared/constants.js';
 import { chessIsDiy, itemForbidsDiy } from '../../../shared/itemRules.js';
 import { morphSlotPolicy, ruleOption } from '../../../shared/plugins/rules.js';
+import { behaviourValue } from '../../../shared/behaviour.js';
+import { matchSlotPolicy } from '../../../shared/morph.js';
 import { tileKey, inField, parseDir, freeSlot } from '../board.js';
 import { offsetTile } from '../../sim/dir.js';
 import { itemKey } from '../gamedata.js';
 import { OK, fail } from './common.js';
+
+/**
+ * 装备拆卸是否被允许（行为开关 `unequip: "allow"`）：**工坊包声明依赖的读取点**
+ * （`shared/modSurface.js` 里 `{ symbol: "unequipAllowed", module: "items" }` 那一条）。
+ * 判据只有一份 —— 玩家状态的 `unequip()` 与它读同一个开关。
+ * @param {Record<string, string>|null|undefined} rules 这一局的房间规则
+ * @returns {boolean}
+ */
+export function unequipAllowed(rules, decl = null) {
+  // 两种调用形态都收：**传数组 = 模块层的归一化声明**（老调用方 `unequipAllowed(decl)`），
+  // **传对象 = 这一局的房间规则**（新口径，与 `ruleOption` 一致）。
+  if (Array.isArray(rules)) { decl = rules; rules = null; }
+  if (ruleOption(rules, 'unequip') === 'allow') return true;
+  return decl ? behaviourValue(decl, 'unequip') === 'allow' : false;
+}
 
 export class PlayerItems {
   /**
@@ -46,7 +63,13 @@ export class PlayerItems {
     if (itemForbidsDiy(rec) && chessIsDiy(this.gd.chess(target.id))) return fail(ERR.BAD_TARGET, 'diy');
     if (replaceUid != null && !(Number.isInteger(replaceUid) && (target.items || []).some((x) => x.uid === replaceUid))) return fail(ERR.BAD_TARGET, 'replace: not equipped on the target');
     const policy = this._slotPolicy();
-    // [ASSUMED] a second 变形同构体 is refused before anything moves. Official accepts() is always true.
+    // 顶替点必须是一件**真占格**的装备：变形同构体不占位，顶掉它等于凭空销毁（plus 档的 [ASSUMED] 口径）。
+    // official 档 `occupies` 恒真，所以这一条对它逐字无影响。
+    if (replaceUid != null) {
+      const picked = (target.items || []).find((x) => x.uid === replaceUid);
+      if (picked && !policy.occupies(picked)) return fail(ERR.BAD_TARGET, 'replace: not a slotted item');
+    }
+    // 每名干员最多一件变形同构体：第二件在**任何东西动之前**就拒（official 档 `accepts` 恒真）。
     if (!policy.accepts(target.items || [], rec)) return fail(ERR.BAD_TARGET, 'morph already equipped');
     const consume = typeof rec.kind === 'string' && rec.kind.startsWith('consume_on_equip');
     if (consume) {
@@ -102,7 +125,26 @@ export class PlayerItems {
    */
   /** The room's equip-slot policy. Official returns the shared frozen singleton, so the numbers stay today's. */
   _slotPolicy() {
-    return morphSlotPolicy(ruleOption(this.m?.rules, 'morphPairing'), (it) => !!this.gd.item(it?.id)?.canGiveBond);
+    // 房间规则（上游 0.3.1）优先；没声明时退到我们自有的模块层 behaviour.morphPairing。
+    // 两条来源都归一成**一份声明**，交给 `matchSlotPolicy`（这一格唯一的对局入口）——
+    // 服务端四处读取点与不变量因此读的是同一个对象，不会各算一套。
+    const rule = ruleOption(this.m?.rules, 'morphPairing');
+    const decl = rule !== 'official' ? [{ switch: 'morphPairing', option: rule }] : (this.m?.behaviour ?? null);
+    const p = matchSlotPolicy({ behaviour: decl });
+    // 这一页的项是**棋子**（带 uid + id，没有 canGiveBond）；判据要的那条信息在 items 记录里。
+    // 把解析器绑进来，调用点就不必各传一次（漏传会静默把变形同构体当成普通装备 —— 真出过一次）。
+    const getItem = (arg) => this.gd.item(arg && typeof arg === 'object' ? arg.id : arg);
+    return {
+      active: p.active,
+      maxItems: p.maxItems,
+      isSlotless: (rec) => p.isSlotless(getItem(rec)),
+      occupies: (rec) => p.occupies(rec, getItem),
+      accepts: (items, rec) => p.accepts(items, rec, getItem),
+      canHold: (items, rec, cap) => p.canHold(items, rec, cap, getItem),
+      slotsUsed: (items) => p.slotsUsed(items, getItem),
+      slotCap: (cap) => p.slotCap(cap),
+      replacedIndex: (items, uid) => p.replacedIndex(items, uid, getItem),
+    };
   }
 
   _attach(target, item, replaceUid = null) {
@@ -192,9 +234,15 @@ export class PlayerItems {
    * The official rule returns the same lock as destroy. Bots never send this.
    * [ASSUMED] shares the existing prep-intent ready lock; hidden temp overflow is not a free slot. Never calls stow.
    */
+  /**
+   * 装备拆卸是否被允许（行为开关 `unequip: "allow"`）：**工坊包声明依赖的读取点**（shared/modSurface.js 的
+   * `items` 锚）。判据只有一份 —— `unequip()` 与它都走这里。
+   * @param {Record<string, string>|null|undefined} rules 这一局的房间规则
+   * @returns {boolean}
+   */
   unequip(itemUid) {
     const g = this._gate(); if (g) return g;
-    if (ruleOption(this.m?.rules, 'unequip') !== 'allow') return fail(ERR.BAD_TARGET, 'equipped items are locked');
+    if (!unequipAllowed(this.m?.rules, this.m?.behaviour)) return fail(ERR.BAD_TARGET, 'equipped items are locked');
     const loc = this.find(itemUid);
     if (!loc || loc.piece.kind !== 'item' || loc.area !== 'equipped') return fail(ERR.BAD_TARGET);
     if (this.equipHand) {
@@ -204,6 +252,10 @@ export class PlayerItems {
       this.recompute();
       return OK;
     }
+    if (!loc || loc.piece.kind !== 'item') return fail(ERR.BAD_TARGET);
+    if (loc.area !== 'equipped') return fail(ERR.BAD_TARGET, 'not equipped on an operator');
+    // 归宿只有两种：手牌有空位就回手牌；否则进临时整备区。**两处都满就 HAND_FULL**（上游 0.3.1 的口径：
+    // 临时整备区有 5 个显示格的上限，不是无界队列）。
     const handAt = freeSlot(this.hand);
     const tempAt = freeSlot(this.temp.slice(0, GEO.TEMP_SIZE));
     if (handAt < 0 && tempAt < 0) return fail(ERR.HAND_FULL);

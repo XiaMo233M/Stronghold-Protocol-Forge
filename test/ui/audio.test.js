@@ -6,11 +6,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bgmKeyFor, resolveBgm, playbackBgmKey, SfxLimiter, AudioManager, normalAttackSfx, installAudio, audio, combatTrackFor, COMBAT_TRACK_SWITCH_ROUND, VoiceGate, resultSpeaker, resultVoiceSlot, VOICE_PRIORITY, VOICE_COOLDOWN_MS, voiceLine, VOICE_TREES, LOCAL_BGM } from '../../public/js/audio.js';
+import { bgmKeyFor, resolveBgm, playbackBgmKey, SfxLimiter, AudioManager, normalAttackSfx, installAudio, audio, combatTrackFor, COMBAT_TRACK_SWITCH_ROUND, VoiceGate, resultSpeaker, resultVoiceSlot, VOICE_PRIORITY, VOICE_COOLDOWN_MS, voiceLine, VOICE_TREES, LOCAL_BGM, voiceLinesFor } from '../../public/js/audio.js';
 import { musicSeason } from '../../public/js/versions.js';
 import { selectRoute } from '../../public/js/store.js';
 import { mediaUrl } from '../../public/js/media.js';
-import { PHASE } from '../../shared/constants.js';
+import { PHASE, DEFAULT_VOICE_LANG } from '../../shared/constants.js';
 import { DEFAULT_VERSION } from '../../shared/versions.js';
 import { makeBattle, chessRec } from '../helpers/battleHarness.js';
 
@@ -504,6 +504,56 @@ describe('operator battle voice', () => {
     assert.equal(g2.request('skill1', 'u1', 10001), 'play', 'a new battle inherits no cooldown');
   });
 
+  test('配音语言 (dubs): the chosen dub wins, a missing one falls back to the manifest default, never silent', async () => {
+    // v0.7.1, owner's request 「不同干员可以切换不同的配音语言」: audio.voice is the manifest's default dub, the other dubs sit
+    // in audio.voiceLangs[lang] with the same file names under their own folder (tools/assets/plan.mjs).
+    const vm = { audio: {
+      voiceLang: 'jp',
+      voice: { char_a: { start: '/v/jp/a_start.mp3', place: ['/v/jp/a_p1.mp3', '/v/jp/a_p2.mp3'] }, char_c: { start: '/v/jp/c_start.mp3' } },
+      voiceLangs: {
+        cn: { char_a: { start: '/v/cn/a_start.mp3', place: '/v/cn/a_p1.mp3' } },
+        en: { char_a: { start: ['/v/en/a_1.mp3', '/v/en/a_2.mp3'] } },
+      },
+      sfx: { ui: {}, battle: {}, units: {} },
+    } };
+    // pure: which lines a dub offers
+    assert.equal(voiceLinesFor(vm, 'char_a', 'start', 'cn'), '/v/cn/a_start.mp3');
+    assert.deepEqual(voiceLinesFor(vm, 'char_a', 'start', 'en'), ['/v/en/a_1.mp3', '/v/en/a_2.mp3']);
+    assert.equal(voiceLinesFor(vm, 'char_a', 'start', null), '/v/jp/a_start.mp3', 'no dub chosen ⇒ the manifest default');
+    assert.equal(voiceLinesFor(vm, 'char_a', 'start', 'kr'), '/v/jp/a_start.mp3', 'a dub the build lacks ⇒ the default, never silent');
+    assert.equal(voiceLinesFor(vm, 'char_a', 'faceEnemy', 'cn'), null, 'a slot neither table has ⇒ null (the caller stays silent)');
+    assert.equal(voiceLinesFor(vm, 'char_c', 'start', 'cn'), '/v/jp/c_start.mp3', 'an operator the dub lacks ⇒ the default');
+    assert.equal(voiceLinesFor(vm, 'char_zz', 'start', 'cn'), null);
+    // the manager reads the injected setting (main.js voiceLangFor) at play time
+    const fw = fakeWindow();
+    const origFetch = globalThis.fetch;
+    const urls = [];
+    globalThis.fetch = async (u) => { urls.push(u); return { ok: true, arrayBuffer: async () => new ArrayBuffer(8) }; };
+    try {
+      let lang = null;
+      const a = new AudioManager({ win: fw.win, getManifest: () => vm, voiceLangOf: (charId) => (charId === 'char_a' ? lang : null) });
+      a.voiceGate = new VoiceGate({ gapMs: 0 });
+      a.install();
+      fw.fire('pointerdown');
+      await new Promise((r) => setTimeout(r, 10));
+      assert.equal(a.voice('char_a', 'start', { unitKey: 1 }), true);
+      await new Promise((r) => setTimeout(r, 10));
+      assert.ok(asked(urls, '/v/jp/a_start.mp3'), 'no dub chosen yet: the default');
+      a._stopVoice(); a.voiceGate.reset();
+      lang = 'cn';
+      assert.equal(a.voice('char_a', 'start', { unitKey: 1 }), true);
+      await new Promise((r) => setTimeout(r, 10));
+      assert.ok(asked(urls, '/v/cn/a_start.mp3'), 'the operator\'s own dub');
+      a._stopVoice(); a.voiceGate.reset();
+      // o.lang wins over the injected setting (the editor's audition / 干员详情 audition)
+      assert.equal(a.voice('char_a', 'start', { unitKey: 1, lang: 'en' }), true);
+      await new Promise((r) => setTimeout(r, 10));
+      assert.ok(asked(urls, '/v/en/a_1.mp3') || asked(urls, '/v/en/a_2.mp3'), 'o.lang overrides the setting');
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
   test('选中干员 on every tap (0.2.2; official FOCUS_CHAR: priority 10, cooldown 0): the prep speaks too, an idle channel always answers, a newer tap replaces it, a higher line is never interrupted', async () => {
     // the owner's request of 2026-10-08 「添加一下干员点击上去的语气一样的语音」: the game screen lets the detail panel speak
     // in every phase — a tap on a piece in the field / hand, a shop card — not only while a battle runs
@@ -563,6 +613,42 @@ describe('operator battle voice', () => {
     }
   });
 
+  test('配音语言 (dubs): a line the chosen dub does not have HERE falls back to the default dub — never silence', async () => {
+    // The release bundle ships the default dub only (the others come as a voice pack), and upstream lacks a line for some
+    // dubs: the manifest still names the dub, so the fetch 404s. The operator must still speak (owner's rule: never
+    // silently drop a sound) — the default dub's line for the same slot plays instead.
+    const fw = fakeWindow();
+    const origFetch = globalThis.fetch;
+    const urls = [];
+    globalThis.fetch = async (u) => {
+      urls.push(String(u));
+      if (String(u).includes('/v/cn/')) return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
+      return { ok: true, arrayBuffer: async () => new ArrayBuffer(8) };
+    };
+    try {
+      const vm = { audio: {
+        voiceLang: 'jp',
+        voice: { char_a: { start: '/v/jp/a_start.mp3' } },
+        voiceLangs: { cn: { char_a: { start: '/v/cn/a_start.mp3' } } },
+        sfx: { ui: {}, battle: {}, units: {} },
+      } };
+      const a = new AudioManager({ win: fw.win, getManifest: () => vm, voiceLangOf: () => 'cn' });
+      a.voiceGate = new VoiceGate({ gapMs: 0 });
+      a.install();
+      fw.fire('pointerdown');
+      await new Promise((r) => setTimeout(r, 10));
+      assert.equal(a.voice('char_a', 'start', { unitKey: 1 }), true);
+      await new Promise((r) => setTimeout(r, 60));
+      assert.ok(asked(urls, '/v/cn/a_start.mp3'), 'the chosen dub is tried first');
+      assert.equal(a.voiceNode?.url, '/v/jp/a_start.mp3', 'the default dub plays instead of nothing');
+      // the gate is released with the fallen-back line, so the next line may start
+      a._stopVoice();
+      assert.equal(a.voice('char_a', 'start', { unitKey: 2, lang: 'cn' }), true);
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
   test('语音语言 (0.2.2): 日本語 plays audio.voiceJp — the same slots and file names — and falls back to the Chinese line per slot and per line', async () => {
     const audioM = {
       voice: { char_a: { select: ['/a/voice/cn/char_a/cn_021.mp3', '/a/voice/cn/char_a/cn_022.mp3'], place: '/a/voice/cn/char_a/cn_023.mp3', start: '/a/voice/cn/char_a/cn_019.mp3' } },
@@ -579,10 +665,13 @@ describe('operator battle voice', () => {
     assert.equal(voiceLine({ voice: {} }, 'char_a', 'select', 'jp'), null);
     assert.equal(voiceLine(null, 'char_a', 'select', 'jp'), null);
     assert.deepEqual(voiceLine({ voice: audioM.voice }, 'char_a', 'place', 'jp'), { url: '/a/voice/cn/char_a/cn_023.mp3', fallback: null }, 'a manifest without voiceJp');
-    // the real manifest: every operator with a Chinese line has its Japanese twin
+    // the real manifest: this repo's `audio.voice` IS the default dub (jp since 0.9.0) and upstream's `audio.voiceJp`
+    // carries the same JP tree beside it, so a 'jp' look-up finds the JP file and the per-line fallback is that tree's
+    // own file of the same name — upstream's 中文 fallback belongs to its two-tier manifest (owner's ruling: this repo's
+    // four-dub model is the deliberate divergence, upstream's `voiceJp` key stays readable either way)
     const real = voiceLine(manifest.audio, 'char_263_skadi', 'select', 'jp', () => 0);
     assert.match(real.url, /^\/assets\/audio\/voice\/jp\/char_263_skadi\/cn_021\.mp3$/);
-    assert.equal(real.fallback, '/assets/audio/voice/cn/char_263_skadi/cn_021.mp3');
+    assert.equal(real.fallback, real.url, 'the default tree is the JP one here, so the fallback is the same file');
 
     // the manager: the setting picks the tree; a JP file the host lacks (404) plays the Chinese one, holding the channel
     const fw = fakeWindow();
@@ -616,67 +705,41 @@ describe('operator battle voice', () => {
       assert.match(a.voiceNode?.url ?? '', /^\/a\/voice\/cn\/char_a\/cn_02[12]\.mp3$/, '中文 again');
       a._stopVoice();
       a.setVoiceLang('kr');
-      assert.equal(a.voiceLang, 'kr', '한국어 is a dub');
-      a.setVoiceLang('xx');
-      assert.equal(a.voiceLang, 'cn', 'an unknown value stays 中文');
-      // the settings store hands the choice over (installAudio and ui/settings.js)
+      assert.equal(a.voiceLang, 'cn', 'no other dub: anything but jp is 中文');
+      // the settings store hands the choice over (installAudio and ui/settings.js). The ROW is 配音语言 in this repo
+      // (four dubs, the manifest default unless the player picks one); upstream 0.2.2's two-tier UI called it 语音语言.
       const settings = readFileSync(path.join(ROOT, 'public/js/ui/settings.js'), 'utf8');
-      assert.match(settings, /audio\.setVoiceLang\(s\.voiceLang, s\.voiceOverrides\)/);
-      assert.match(settings, /t\('语音语言'\)/);
-      assert.match(settings, /audio\.setVoiceNative\(s\.voiceNative\)/);
+      assert.match(settings, /audio\.setVoiceLang\(s\.voiceLang\)/);
+      assert.match(settings, /t\('配音语言'\)/);
     } finally {
       globalThis.fetch = origFetch;
     }
   });
 
-  test('English, Korean and the own-language dub use the same fallback as 日本語; 试听 skips the gate', async () => {
-    assert.deepEqual(VOICE_TREES, { jp: 'voiceJp', en: 'voiceEn', kr: 'voiceKr', native: 'voiceNative' });
-    const id = 'char_102_texas';
-    const audioM = {
-      voice: { [id]: { select: '/a/voice/cn/char_a/cn_021.mp3', place: '/a/voice/cn/char_a/cn_023.mp3' } },
-      voiceEn: { [id]: { select: '/a/voice/en/char_a/cn_021.mp3' } },
-      voiceKr: { [id]: { place: '/a/voice/kr/char_a/cn_023.mp3' } },
-      voiceNative: { [id]: { select: '/a/voice/native/char_a_ita/cn_021.mp3' } },
-    };
-    assert.deepEqual(voiceLine(audioM, id, 'select', 'en'), { url: '/a/voice/en/char_a/cn_021.mp3', fallback: '/a/voice/cn/char_a/cn_021.mp3' });
-    assert.deepEqual(voiceLine(audioM, id, 'place', 'kr'), { url: '/a/voice/kr/char_a/cn_023.mp3', fallback: '/a/voice/cn/char_a/cn_023.mp3' });
-    assert.deepEqual(voiceLine(audioM, id, 'select', 'native'), { url: '/a/voice/native/char_a_ita/cn_021.mp3', fallback: '/a/voice/cn/char_a/cn_021.mp3' });
-    assert.deepEqual(voiceLine(audioM, id, 'place', 'en'), { url: '/a/voice/cn/char_a/cn_023.mp3', fallback: null }, 'a slot the EN tree lacks: the Chinese line');
-    assert.deepEqual(voiceLine(audioM, id, 'place', 'native'), { url: '/a/voice/cn/char_a/cn_023.mp3', fallback: null });
-
-    const fw = fakeWindow();
-    const origFetch = globalThis.fetch;
-    globalThis.fetch = async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) });
-    const tick = () => new Promise((r) => setTimeout(r, 10));
-    try {
-      const a = new AudioManager({ win: fw.win, getManifest: () => ({ audio: { sfx: { ui: {}, battle: {}, units: {} }, ...audioM } }) });
-      a.voiceGate = new VoiceGate({ gapMs: 60_000 });
-      a.install();
-      fw.fire('pointerdown');
-      await tick();
-      assert.equal(a.voice(id, 'place', { unitKey: 1 }), true);
-      await tick();
-      assert.equal(a.voice(id, 'place', { unitKey: 1 }), false, 'the battle line is on cooldown');
-      assert.equal(a.previewVoice(id, 'en'), true, '试听 takes the channel and skips the cooldown');
-      await tick();
-      assert.equal(a.voiceNode?.url, '/a/voice/en/char_a/cn_021.mp3');
-      a.setVoiceLang('cn', { [id]: 'native' });
-      a.setVoiceNative(false);
-      assert.equal(a.previewVoice(id), true, 'no lang: the operator\'s own choice');
-      await tick();
-      assert.equal(a.voiceNode?.url, '/a/voice/native/char_a_ita/cn_021.mp3');
-      a.setVoiceLang('kr', {});
-      a.setVoiceNative(true);
-      assert.equal(a.voice(id, 'select'), true, '本土语言 wins over the global KR dub');
-      await tick();
-      assert.equal(a.voiceNode?.url, '/a/voice/native/char_a_ita/cn_021.mp3');
-      a.volumes.muted = true;
-      assert.equal(a.previewVoice(id, 'en'), false, 'muted stays silent');
-    } finally {
-      globalThis.fetch = origFetch;
-    }
+  test('settings: 配音语言 per operator (voiceLangFor / sanitize / availableVoiceLangs)', async () => {
+    const { sanitizeSettings, voiceLangFor, availableVoiceLangs, sanitizeVoiceLangByChar, DEFAULT_SETTINGS } = await import('../../public/js/ui/gameLogic/settings.js');
+    assert.equal(DEFAULT_SETTINGS.voiceLang, DEFAULT_VOICE_LANG);
+    assert.deepEqual(DEFAULT_SETTINGS.voiceLangByChar, {});
+    // a chosen dub, per operator override, and the chain override > global > default
+    assert.equal(voiceLangFor({ voiceLang: 'jp', voiceLangByChar: { char_a: 'kr' } }, 'char_a'), 'kr');
+    assert.equal(voiceLangFor({ voiceLang: 'jp', voiceLangByChar: { char_a: 'kr' } }, 'char_b'), 'jp');
+    assert.equal(voiceLangFor({}, 'char_a'), DEFAULT_VOICE_LANG);
+    assert.equal(voiceLangFor({ voiceLang: 'nope', voiceLangByChar: { char_a: 'nope' } }, 'char_a'), DEFAULT_VOICE_LANG, 'a junk value never wins');
+    assert.equal(voiceLangFor({ voiceLangByChar: { char_a: 'jp' } }, null), DEFAULT_VOICE_LANG, 'no charId ⇒ the global default');
+    // persistence: the store rebuilds field by field, so both new fields must survive a round trip
+    const s = sanitizeSettings({ voice: 0.5, voiceLang: 'en', voiceLangByChar: { char_a: 'jp', bogus: 'kr', char_b: 'nope', 'not a char': 'jp' } });
+    assert.equal(s.voiceLang, 'en');
+    assert.deepEqual(s.voiceLangByChar, { char_a: 'jp' }, 'only charIds with a real dub survive');
+    assert.equal(sanitizeSettings({}).voiceLang, DEFAULT_VOICE_LANG);
+    assert.deepEqual(sanitizeSettings({ voiceLangByChar: 'nope' }).voiceLangByChar, {}, 'a non-object never survives');
+    assert.equal(Object.keys(sanitizeVoiceLangByChar(Object.fromEntries(Array.from({ length: 900 }, (_, i) => [`char_x${i}`, 'jp'])))).length, 400, 'capped');
+    // the dubs the UI may offer: the manifest's default plus the tables it really carries
+    assert.deepEqual(availableVoiceLangs({ audio: { voiceLang: DEFAULT_VOICE_LANG, voice: { char_a: {} } } }), [DEFAULT_VOICE_LANG]);
+    assert.deepEqual(availableVoiceLangs({ audio: { voiceLang: DEFAULT_VOICE_LANG, voice: {}, voiceLangs: { cn: { char_a: {} }, kr: {} } } }), ['cn', DEFAULT_VOICE_LANG],
+      'an empty dub table is not offered');
+    assert.deepEqual(availableVoiceLangs({ audio: { voiceLangs: { en: { char_a: {} } } } }), [DEFAULT_VOICE_LANG, 'en'], 'no voiceLang field ⇒ the default dub');
+    assert.deepEqual(availableVoiceLangs(null), [DEFAULT_VOICE_LANG]);
   });
-
   test('AudioManager.voice: manifest slots (a drawn array), the gate, and the battle events that drive them', async () => {
     const fw = fakeWindow();
     const origFetch = globalThis.fetch;

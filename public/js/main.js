@@ -8,6 +8,13 @@
 //   otherwise              → Lobby
 // Deep link `?room=CODE`: remembered at boot, auto-joined once the player has entered and the
 // session is online (after a short grace period in case the server restores a room on resume).
+// Deep link `?playtest=1[&difficulty=KEY]` (the Forge 一键试玩 button): the same gate, but it creates its own
+// solo room and starts the match straight away — solo rooms hold exactly one human and no AI, so room.start
+// needs nobody else ready (server/lobby.js start()). An unknown / missing difficulty falls back to the lobby
+// default. Both deep links are implemented in playtestLink.js (the parser stands beside parseRoomParam in
+// screens/lobby.js) so the sequence can be unit-tested without booting this module.
+// A consumed deep link is stripped from the URL (history.replaceState), so a reload cannot re-trigger it;
+// without any parameter the client behaves exactly as it did before.
 // Reloading a tab that already passed the title re-enters automatically (sessionStorage flag) and
 // resumes the server session with the saved token; stale room/match state is dropped if the
 // server does not re-push it within RESTORE_GRACE_MS after `welcome`. Boot waits for
@@ -28,10 +35,10 @@
 // Language (ui/lang.js, docs/I18N.md): chosen before the first render (initLang); App re-renders on a switch (useLang).
 // Server texts are translated on arrival: m.toast / m.ticker frames (msgid + params, or the text as a msgid; a
 // config.broadcasts line from its id + args), error codes (ui/toasts.js describeError) and room.closed reasons.
-// Cosmetic plugins (DESIGN §32 P1a): installContent (content.js) lays the room's visual set and the player's personal
+// Cosmetic plugins (DESIGN §34 P1a): installContent (content.js) lays the room's visual set and the player's personal
 // plugins over the art manifest every screen reads. Gameplay plugins (§32.6): installContentSet (content.js) downloads and
 // checks a room's content set and makes it the data every screen and the battle runner read.
-// Official versions (DESIGN §35.23, versions.js): welcome.versions turns the lobby's version switch on; installContentSet
+// Official versions (DESIGN §37.23, versions.js): welcome.versions turns the lobby's version switch on; installContentSet
 // also loads and checks the version the page shows (the lobby's choice, a room's version). A room whose version changes
 // while a result is on screen drops that result (the server dropped the room's replay: its chess ids are the old
 // version's), and a result that arrives after the room is gone keeps the version its frames name (m.result / m.public
@@ -42,38 +49,53 @@ import './ui/compat.js';
 import { ReleaseNotesHost } from './ui/releaseNotes.js';
 import { render } from '../vendor/preact.module.js';
 import { useErrorBoundary } from '../vendor/hooks.module.js';
-import { html, UiHosts, Button, MicroLabel, closeAllDialogs } from './ui/components.js';
+import { html, UiHosts, Button, MicroLabel, closeAllDialogs, confirmDialog } from './ui/components.js';
 import { ConnectionBanner } from './ui/connBanner.js';
 import { ToastHost, toast, toastError, describeError } from './ui/toasts.js';
 import { net, identity, NetError } from './net.js';
-import { store, useStore, emptyMatch, selectRoute, sessionResetNotice, isSpectating } from './store.js';
+import { store, useStore, emptyMatch, selectRoute, entryGateBlocked, sessionResetNotice, isSpectating } from './store.js';
+import { applyPublic } from './matchDelta.js';
 import { data } from './data.js';
+// 战斗读数（DESIGN §28.38）：注入给注册点的**只有** `battleRunner.damage` 一个函数（`ctx.battle.damage()`），
+// 面板拿不到 runner 句柄、拿不到 `Battle`、拿不到 `_entries`。非浏览器环境里这个导出是 `null`，那一格就是 `null`
+// （一行日志，不抛）—— 与 `net` / `settings` 两条注入面同一个形状。
+import { battleRunner } from './battle/runner.js';
 import { GAME_FILES } from './ui/gameComponents.js';
 import { TitleScreen, sanitizeName } from './screens/title.js';
-import { LobbyScreen, rememberRoom, parseRoomParam, joinKnown } from './screens/lobby.js';
+import { LobbyScreen, rememberRoom } from './screens/lobby.js';
+import { deepLinkSeeds, stripDeepLinkParams, runSoloPlaytest } from './playtestLink.js';
+import * as roomMods from './roomMods.js';
 import { RoomScreen, TrustedNotice } from './screens/room.js';
 import { GameScreen } from './screens/game.js';
 import { preloadBootArt } from './ui/protocolBoot.js';
 import { audio, installAudio } from './audio.js';
+import { probeDubs } from './voiceDubs.js';
+import { settingsStore, setVoiceLangByChar } from './ui/settings.js';
+import { voiceLangFor } from './ui/gameLogic/settings.js';
 import { installLobbyMedia } from './ui/lobbyMedia.js';
-import { settingsStore } from './ui/settings.js';
 import { GuideHost } from './ui/guide.js';
 import { installDeviceSupport, useFullscreen, useScreenWakeLock } from './ui/device.js';
 import { isCombatPhase } from './ui/gameLogic/phases.js';
 import { registerImportedAssetWorker } from './assetCache.js';
 import { LoadoutHost } from './screens/loadout.js';
+import { SupportHost } from './screens/support.js';
 import { StatsHost, useStatsOpen } from './screens/stats.js';
-import { CoveredVersionVote } from './ui/versionVote.js';
 import { installRehearsal } from './battle/rehearsal.js';
 import { recordResult, installStatsRecorder } from './ui/stats.js';
 import { installLoadoutSync, installOwnershipSync, installDiySync, installSkinsSync, installCardSync, installSettingsViews, loadoutStore } from './ui/loadoutSync.js';
+import { installSupportSync } from './ui/supportSync.js';
+import { CoveredVersionVote } from './ui/versionVote.js';
 import { startBuildGuard } from './ui/buildGuard.js';
 import { initLang, useLang, tickerText } from './ui/lang.js';
 import { t, N_, translateWire } from '../../shared/i18n.js';
+// W7（DESIGN §28.53）：深链自动入座撞上「本房间声明了模组」时，弹窗的标题就是这条错的文案本身
+// （`ERR_TEXT` 那一份，与 `toastError` 走的是同一个 msgid —— 一句话只有一种说法）。
+import { ERR_TEXT } from '../../shared/constants.js';
 import { recordError, installTrafficMeter } from './diag.js';
 import { installContent, installContentSet } from './content.js';
 import { cosmetics } from './cosmetics.js';
 import { sanitizeVersions, roomVersion, isDefaultVersion, matchFrameVersion, musicSeason, seasonOf, startupVersion, REGULATION_SEASON } from './versions.js';
+import { createPanelRegistry } from './ui/extensions.js';
 
 const RESTORE_GRACE_MS = 1500;
 const JOIN_DELAY_MS = 350;
@@ -82,19 +104,47 @@ const EMOTE_KEEP = 20;
 
 const SCREENS = { title: TitleScreen, lobby: LobbyScreen, room: RoomScreen, game: GameScreen };
 
+/**
+ * C 层注册点 (DESIGN §28.8, docs/WORKSHOP.md §1.9.3): one per page. A pack's panel gets the frozen surface
+ * `public/js/ui/extensions.js` builds — no store handle, no `net` object itself (only the two-method facade), no engine
+ * and no match — and the module list arrives in `welcome.modPanels` (src of truth: `pack.json.client.panels`, served
+ * from `/workshop-panels/`). A server whose packs declare no `client` never sends the field: nothing here is called, no
+ * module is imported and **no DOM is added** — the slot containers are created on demand by the registry (the four
+ * overlay ones) or rendered by the components themselves (the five host ones), never by this shell.
+ */
+// 第一个渲染的容器。组件级改写（DESIGN §28.19）在**渲染期**生效，所以链注册完成之后已经画出来的那一帧要重画一次 ——
+// 重画就是再 `render` 同一个 `<App/>`（Preact 就地 diff，状态不丢）。boot 之前它是 `null`：那时还没有东西需要重画。
+let appRoot = null;
+
+const modPanels = createPanelRegistry({
+  store,
+  net,
+  // 数据口（业主裁决 2026-10-10）：面板经 `ctx.data.get('<表>')` 读**冻结快照**。注入的是页面本来就在用的那一个
+  // 数据层（`public/js/data.js`），所以读一张表不会多一个请求 —— 它读的就是引擎已经抓过的那份内容。
+  data,
+  // 面板的**设置读数**与**唯一一个设置写口**（业主裁决 2026-10-11）：`ctx.me.voice` 读的就是引擎自己那一份设置库
+  // （`ui/settings.js` 的 `settingsStore`），`ctx.session.setVoiceLang(charId, lang)` 写的就上面那个受限函数
+  // （只改 `voiceLangByChar` 一格、过同一份 sanitize、走同一条 `savePref` 订阅）。注入的是**两样函数**，不是
+  // store 句柄 —— 面板读得到配音、改得动这一格，别的设置既读不到也写不了。
+  settings: { get: () => settingsStore.get(), setVoiceLang: setVoiceLangByChar },
+  // 战斗读数（DESIGN §28.38）：`ctx.battle.damage()` 读这一场战斗的逐单位 / 逐人累计伤害 + 时间基准。
+  // 注入的是**一个函数**，不是 runner 句柄 —— 与 settings / data 同一条边界（不传什么就是边界）。
+  battle: battleRunner,
+  notify: (text, kind) => toast(text, kind || 'warn'),
+  // 组件级改写（DESIGN §28.19）：`client.panels[].wraps` 注册完成、链表真的变了才调用一次。没有包声明 `wraps`
+  // 的服务器上它一次都不会被调用 —— 页面上不多一次渲染、不多一个新全局（与面板那条不变量逐字相同）。
+  onWrapsChanged: () => { if (appRoot) render(html`<${App} />`, appRoot); },
+});
+
 /** Copy of a server message without transport fields. */
 function payload(msg) {
   const { t, rid, ...rest } = msg; // eslint-disable-line no-unused-vars
   return rest;
 }
 
-function clearRoomParam() {
-  try {
-    const url = new URL(location.href);
-    if (!url.searchParams.has('room')) return;
-    url.searchParams.delete('room');
-    history.replaceState(history.state, '', url.pathname + (url.search || '') + url.hash);
-  } catch { /* ignore */ }
+/** Mutating wrapper of stripDeepLinkParams for the live page: a consumed deep link must never fire twice. */
+function clearDeepLinkParams() {
+  stripDeepLinkParams(location, history);
 }
 
 // ---- net → store wiring ---------------------------------------------------------------------------
@@ -108,10 +158,58 @@ let joinTimer = null;
 let joinInFlight = false;
 /** The rehearsal installer (battle/rehearsal.js): its tasks follow the match on screen (see wireNet's store hook). */
 let rehearsal = null;
+let playtestTimer = null;
+/**
+ * The materialized m.public view: the full frame the server sent plus every incremental frame merged into it
+ * (public/js/matchDelta.js, DESIGN §8.2 "incremental frame"). The store gets THIS, so nothing downstream sees a delta.
+ * Cleared whenever the match state is dropped (leaving a room, a fresh welcome), because a delta then has nothing to
+ * merge into and the server must send a full frame again — which it does for every joining / returning client.
+ * @type {Record<string, any> | null}
+ */
+let publicState = null;
+/** When the last `g.publicFull` ask was sent, so a broken stream cannot turn the self-healing ask into a flood. */
+let publicFullAskedAt = 0;
+/** The minimum gap between two `g.publicFull` asks (the server answers both the ask and the room's next full frame). */
+const PUBLIC_FULL_ASK_MS = 2000;
 
 function clearPendingJoin() {
   store.patch('ui', { pendingJoin: null });
-  clearRoomParam();
+  clearDeepLinkParams();
+}
+
+function clearPendingPlaytest() {
+  store.patch('ui', { pendingPlaytest: null });
+  clearDeepLinkParams();
+}
+
+/**
+ * Extra fields for a solo quick start (the `?playtest=` deep link): the mod digest this server declared, if any.
+ * `runSoloPlaytest` calls it only for `room.create`, and it returns `{}` on a plain install — the request stays exactly
+ * what it was (public/js/roomMods.js buildCreatePayload).
+ */
+const roomModFields = () => {
+  const { mods } = roomMods.buildCreatePayload('solo', '');
+  return mods ? { mods } : {};
+};
+
+/** One-click playtest once entered + online (idempotent): the `?playtest=` deep link, consumed here. */
+function schedulePendingPlaytest() {
+  clearTimeout(playtestTimer);
+  playtestTimer = setTimeout(() => {
+    const s = store.get();
+    if (!s.ui.pendingPlaytest || !s.session.entered || net.status !== 'online') return;
+    // 闸门未就绪时不烧掉深链（缺口 8）：否则这一条会自动发 room.create，然后被服务端准入拒一次、弹一次红条。
+    if (entryGateBlocked(s)) return;
+    // The deep link is spent either way: consumed when the match starts, abandoned when it was refused.
+    // `roomFields` is what makes a solo quick start work on a MODDED server too: without the digest the gate refuses
+    // `room.create` with BAD_MSG, and a plain install sends exactly `{ mode, difficulty }` as before (roomMods.js).
+    runSoloPlaytest(net, store, {
+      difficulty: s.ui.pendingPlaytest.difficulty,
+      roomFields: roomModFields,
+      notify: (text, kind) => toast(text, kind || 'info'),
+      notifyError: toastError,
+    }).finally(clearPendingPlaytest);
+  }, JOIN_DELAY_MS);
 }
 
 /** Auto-join the deep-linked room once entered + online (idempotent). */
@@ -121,6 +219,8 @@ function schedulePendingJoin() {
     const s = store.get();
     const code = s.ui.pendingJoin;
     if (!code || joinInFlight || !s.session.entered || net.status !== 'online') return;
+    // 同上：`?room=` 深链不能绕过闸门（缺口 8）。
+    if (entryGateBlocked(s)) return;
     if (s.room) {
       if (s.room.code !== code) toast(t('你已在其他同盟中，请先离开当前同盟'), 'warn');
       clearPendingJoin();
@@ -128,9 +228,16 @@ function schedulePendingJoin() {
     }
     joinInFlight = true;
     try {
-      await joinKnown('room.join', code);
+      await net.request('room.join', roomMods.buildJoinPayload(code));
     } catch (err) {
-      toastError(err);
+      // W7（DESIGN §28.53）：`?room=` 深链落地时房间声明了模组 ⇒ 服务端回 `MOD_CONSENT_REQUIRED`。深链是**自动**
+      // 入座，所以这里必须问一次（与大厅、房间里那两处共用 `roomMods.consentRetryPayload` 决定的重发载荷）；
+      // 不弹窗、直接重发就等于把「同意」退化成一次静默重试。
+      const retry = roomMods.consentRetryPayload(err, code);
+      if (!retry) { toastError(err); return; }
+      const ok = await confirmDialog({ title: t(ERR_TEXT.MOD_CONSENT_REQUIRED), text: String(err.detail || ''), micro: 'ROOM MODS' });
+      if (!ok) { toastError(err); return; }
+      try { await net.request('room.join', retry); } catch (again) { toastError(again); }
     } finally {
       joinInFlight = false;
       clearPendingJoin();
@@ -160,11 +267,12 @@ function backToLobby() {
   clearTimeout(restoreTimer);
   const s = store.get();
   if (s.room || s.match.public) closeAllDialogs();
+  publicState = null;                        // the next m.public must be a full frame (the server sends one)
   store.set({ room: null, match: emptyMatch(), ticker: [], emotes: [] });
   store.patch('ui', { restoring: false });
 }
 
-/** The unofficial plugins a server counts in welcome / /healthz `content.plugins` (absent: none — DESIGN §32 P1a). */
+/** The unofficial plugins a server counts in welcome / /healthz `content.plugins` (absent: none — DESIGN §34 P1a). */
 const pluginCount = (content) => (content && Number.isInteger(content.plugins) && content.plugins > 0 ? content.plugins : 0);
 
 function onWelcome(msg) {
@@ -173,10 +281,20 @@ function onWelcome(msg) {
   const prev = store.get();
   const prevId = prev.me.playerId;
   const name = typeof msg.name === 'string' && msg.name ? msg.name : prev.me.name;
+  // 工坊 mod set (W-A): what this server runs. The client must echo this digest to enter a room, and the lobby renders
+  // its pack list as the room-declaration picker. A server that changed under us (restart, another pack root) must not
+  // leave a pick from the old catalogue selected — setWelcomeMods drops it and returns false (see roomMods.js).
+  const sameMods = roomMods.setWelcomeMods(msg);
+  store.set({
+    roomMods: {
+      available: roomMods.availableMods(),
+      selected: sameMods ? prev.roomMods.selected : roomMods.getSelectedModIds(),
+    },
+  });
   identity.saveName(name);
   store.set({
     me: { playerId: msg.playerId ?? null, name, token: typeof msg.token === 'string' ? msg.token : null },
-    // the server's content identity (DESIGN §32): the diagnostics name it (diag.js contentLine)
+    // the server's content identity (DESIGN §34): the diagnostics name it (diag.js contentLine)
     content: msg.content && typeof msg.content.vanilla === 'string' ? { vanilla: msg.content.vanilla } : null,
     // how many unofficial plugins it has (P1a — absent: none; content.js fetches the catalogue only when there are some)
     installedPlugins: pluginCount(msg.content),
@@ -203,12 +321,13 @@ function onWelcome(msg) {
       const s = store.get();
       const patch = {};
       if (s.room && roomStateAt < welcomeAt) patch.room = null;
-      if (s.match.public && matchAt < welcomeAt) patch.match = emptyMatch();
+      if (s.match.public && matchAt < welcomeAt) { patch.match = emptyMatch(); publicState = null; }
       store.set(patch);
       store.patch('ui', { restoring: false });
     }, RESTORE_GRACE_MS);
   }
   schedulePendingJoin();
+  schedulePendingPlaytest();
 }
 
 function onRoomState(msg) {
@@ -219,19 +338,26 @@ function onRoomState(msg) {
   if (myId != null && seats.length && !seats.some((s) => s && s.playerId === myId) && !isSpectating(room, myId)) {
     // We are no longer seated (kicked / left elsewhere) — neither in a player seat nor a spectator seat.
     if (store.get().room) toast(t('你已不在该同盟中'), 'warn');
+    publicState = null;
     store.set({ room: null, match: emptyMatch() });
     return;
   }
   const prevRoom = store.get().room;
   // A (new) match starts: forget the previous match's state so stale results never show.
-  if (room.inMatch && !(prevRoom && prevRoom.inMatch && prevRoom.code === room.code)) store.set({ match: emptyMatch() });
-  // The room switched its version (DESIGN §35.23): a result still on screen (a settlement, a spectator's view) names the old
+    if (room.inMatch && !(prevRoom && prevRoom.inMatch && prevRoom.code === room.code)) { publicState = null; store.set({ match: emptyMatch() }); }
+  // The room switched its version (DESIGN §37.23): a result still on screen (a settlement, a spectator's view) names the old
   // version's chess ids, and the server dropped the room's replay — it closes, back to the room.
   else if (prevRoom && prevRoom.code === room.code && !room.inMatch && roomVersion(prevRoom) !== roomVersion(room) && store.get().match.public) store.set({ match: emptyMatch() });
   store.set({ room });
+  // The picks were made FOR the room we just entered (host) or joined: the next create starts from none, so a pick can
+  // never leak into a room the player did not choose it for (roomMods.js).
+  if (!prevRoom && room) {
+    roomMods.clearSelection();
+    if (store.get().roomMods.selected.length) store.set({ roomMods: { ...store.get().roomMods, selected: [] } });
+  }
   identity.rememberMatch(room.inMatch && seats.some((seat) => seat?.playerId === myId)
     ? { name: store.get().me.name, code: room.code || '' } : null);
-  if (room.mode === 'coop' && typeof room.code === 'string') rememberRoom(room.code, room.test === true);
+  if (room.mode === 'coop' && typeof room.code === 'string') rememberRoom(room.code);
   maybeFinishRestore();
 }
 
@@ -253,6 +379,43 @@ function wireNet() {
   });
   net.on('clock', (c) => store.set({ clock: { offset: c.offset, rtt: c.rtt, synced: c.synced } }));
   net.on('welcome', onWelcome);
+  // C 层注册点（DESIGN §28.8）：包声明的面板清单随 `welcome` 到达。没有包声明 `client` 时这个字段根本不出现 ——
+  // 于是这次握手、这次订阅之后的行为、以及页面上的一切都与从前逐字节相同（没有新请求、新 DOM、新全局）。
+  net.on('welcome', (msg) => {
+    // 资源声明（DESIGN §28.13.5）：包只**声明**容器与策略，SW 与整条流程是引擎的。这里刻意用 **动态 import** ——
+    // 没有声明时 `public/js/resources/host.js` 及其依赖根本不进浏览器，于是「不声明 ⇒ 无字段、无新请求、无新 DOM、
+    // 无新全局」是结构性的，而不是靠几个 `if` 拦住的。
+    if (Array.isArray(msg && msg.modAssets) && msg.modAssets.length) {
+      import('./resources/host.js')
+        // 引擎自带的 SW 由 host 在**后台**注册（`resources/worker.js`）：入口放行绝不等待它。
+        .then((host) => host.installModAssets(msg.modAssets, { log: console }))
+        // 这条 `.catch` 是 B4 §6 第 6 条补的：资源流程的模块拉不下来时（网络断在部署中间、模块 404、语法错误），
+        // 以前只有一行 `recordError` 进诊断记录，**页面上什么都不说** —— 玩家装了资源包却一直卡在入口闸门上，
+        // 而唯一的信号在一个他看不到的地方。照仓库既有的错误通道（toast + describeError）给他一句话，
+        // 诊断记录照旧留一份。
+        .catch((err) => {
+          recordError('mod-assets', err, 'resource host failed to load');
+          toast(t('加载模组资源模块失败：{error}', { error: describeError(err) }).slice(0, 160), 'error', { ttl: 8000 });
+        });
+    } else if (navigator.serviceWorker?.controller) {
+      // 自愈阀（劫持修复 ②）：这次握手服务器**没有**声明任何 assets，而本页确实被一个根作用域 SW 控制着 ⇒ 那个
+      // SW 现在只会对 `/assets|/fonts|/media` 回 412（`resources/service.js` 绝不回源），必须是它让路。业主现象：
+      // 升级后图标 / 立绘 / 3D 场景全不出来、强刷才好 —— 那是「一次注册 = 永久劫持」：服务器不再声明，页面就
+      // 不再注册，可老 SW 还控制着页面。
+      // 动态 import 是刻意的：从没装过 SW 的干净环境不会因为这一格多取一个字节（「不声明 assets ⇒ 无新请求」仍是
+      // 结构性的，而不是靠一个 `if` 拦出来的）。失败只记诊断，不打断任何东西。
+      import('./resources/release.js')
+        .then((release) => release.releaseResourceWorker())
+        .then((r) => { if (r.unregistered.length) console.info(`[mod-assets] released resource worker (${r.unregistered.join(', ')})`); })
+        .catch((err) => recordError('mod-assets', err, 'resource worker release failed'));
+    }
+    if (Array.isArray(msg && msg.modPanels) && msg.modPanels.length) modPanels.apply(msg.modPanels);
+    // 包写的主题变量（业主裁决 2026-10-10）：与 `modPanels` 同一条不变量 —— 服务端没有包声明主题就没有这个字段，
+    // 这里一次都不调，页面不多一条 CSS 自定义属性。
+    if (msg && msg.modTheme && typeof msg.modTheme === 'object') modPanels.applyTheme(msg.modTheme);
+  });
+  // 只注册一次：上游 0.2.3 这个处理器是本仓库原版的**超集**（同样 toastError，另加 SESSION_IN_USE 时作废本机令牌），
+  // 两处都留会让同一个握手错误弹两次提示。
   net.on('helloError', (err) => {
     if (err.code === 'SESSION_IN_USE') identity.rejectToken();
     toastError(err);
@@ -265,8 +428,27 @@ function wireNet() {
     const known = Object.hasOwn(CLOSE_REASON, String(msg.reason)) ? CLOSE_REASON[msg.reason] : null;
     toast(known ? t(known) : typeof msg.reason === 'string' && msg.reason.length < 60 ? t('同盟已关闭：{reason}', { reason: msg.reason }) : t('同盟已关闭'), 'warn');
   });
-  net.on('m.public', (msg) => { matchAt = Date.now(); store.patch('match', { public: payload(msg) }); maybeFinishRestore(); });
+  net.on('m.public', (msg) => {
+    // The incremental frame (DESIGN §8.2): a delta carries only what changed and is merged into the last materialized
+    // view. A frame that cannot be merged (no baseline yet, a patch naming an unknown shape) is NOT applied — the client
+    // asks for the full frame again instead, which is the self-healing path the server also drives on its own with a
+    // periodic full frame. `publicState` is what every screen reads; the wire's `delta` never reaches the store.
+    const res = applyPublic(publicState, msg);
+    if (!res.ok) {
+      if (Date.now() - publicFullAskedAt >= PUBLIC_FULL_ASK_MS) {
+        publicFullAskedAt = Date.now();
+        try { net.send('g.publicFull'); } catch { /* offline: the reconnect's full frame answers it */ }
+      }
+      return;
+    }
+    publicState = res.state;
+    matchAt = Date.now();
+    store.patch('match', { public: publicState });
+    maybeFinishRestore();
+  });
   net.on('m.private', (msg) => { matchAt = Date.now(); store.patch('match', { private: payload(msg) }); });
+  // 盟约叠层（上游 0.2.5）：备战期自己的一次层数增长。这条是 ephemeral 的 —— 重连与战果补发都不重放，
+  // 所以收到即响，不需要（也不能）从别的 state 推出来。只响本人、只在 game 路由。
   net.on('m.layer', (msg) => {
     const s = store.get();
     if (selectRoute(s) === 'game' && msg.playerId === s.me?.playerId) audio.layerGain(msg.bondId, msg.add);
@@ -279,7 +461,7 @@ function wireNet() {
     // replays dedupe by content id inside recordResult (spectator seats' copies build no record at all)
     // (`vs`: the room's cosmetic plugins, recorded — such a match still counts as the original game: ui/stats.js)
     // (`content`: the room's content set when it played gameplay plugins — such a match is unofficial: ui/stats.js)
-    // (`version`: the official version the match played, DESIGN §35.23 — the room's, or the result's own `version` when
+    // (`version`: the official version the match played, DESIGN §37.23 — the room's, or the result's own `version` when
     // it arrives after the room is gone, also to a freshly loaded page; only a non-default one is written)
     const s = store.get();
     const version = s.room ? roomVersion(s.room) : matchFrameVersion({ result: res, public: s.match.public });
@@ -307,7 +489,7 @@ function wireNet() {
 
   // Entering (title → lobby) while already online also needs the deep-link join.
   store.subscribe((s, prev) => {
-    if (s.session.entered && !prev.session.entered) schedulePendingJoin();
+    if (s.session.entered && !prev.session.entered) { schedulePendingJoin(); schedulePendingPlaytest(); }
     // in a room (co-op or solo, also a resumed one) a match is near: its data starts downloading
     if (s.room && !prev.room) warmGameData();
     // the match on screen is over (left, closed, kicked, a new session): a rehearsal task of it is dead, and the frame
@@ -327,8 +509,8 @@ function wireNet() {
 function warmGameData() {
   // a room with gameplay plugins: content.js downloads its content set's files instead (DESIGN §32.6). With the art list
   // in, the pre-game sprites (协议启动！ and the 请选择策略 band, ui/protocolBoot.js) start too: a solo player who starts
-  // at once and skips through the briefing meets the band draft's first turn with them at hand (§35.18's leftover)
-  // Another official version's room (DESIGN §35.23): its version set brings those files (content.js) — the server's
+  // at once and skips through the briefing meets the band draft's first turn with them at hand (§37.18's leftover)
+  // Another official version's room (DESIGN §37.23): its version set brings those files (content.js) — the server's
   // default ones would race it; only the art list the sprites need is fetched.
   const go = () => {
     const room = store.get().room;
@@ -373,6 +555,7 @@ function App() {
     <${GuideHost} />
     <${ReleaseNotesHost} />
     <${LoadoutHost} />
+    <${SupportHost} />
     <${StatsHost} />
     <${VoteOverOverlays} />
   </div>`;
@@ -430,20 +613,24 @@ async function boot() {
   // Pick this tab's reconnect token (asks other live tabs; ≤150 ms) while fonts load.
   const identityReady = identity.init();
 
-  const pendingJoin = parseRoomParam(location.search);
+  const { pendingJoin, pendingPlaytest } = deepLinkSeeds(location.search);
   const savedName = sanitizeName(identity.loadName());
   const entered = identity.wasEntered() && !!savedName;
   store.set((s) => ({
     me: { ...s.me, name: savedName },
-    session: { entered },
-    ui: { ...s.ui, pendingJoin },
+    // 整片替换会冲掉闸门状态位（缺口 8）：先摊开现有的 session，再强制 `entered`。不堵这里，`identity.wasEntered()`
+    // （public/js/net.js 读 localStorage / sessionStorage 的 sp.entered）每次开机都会把 `preloadRequired` 重置掉，
+    // 而 `entered` 又因此为真 —— 闸门形同虚设，玩家在素材就绪前照样进大厅。
+    session: { ...s.session, entered },
+    ui: { ...s.ui, pendingJoin, pendingPlaytest },
   }));
 
   wireNet();
   installStatsRecorder(store); // follows the match on screen, so a 放弃模拟 can be recorded (ui/stats.js)
-  // the loadout / 干员持有 / 自选 settings by operator, shown for the data on screen (DESIGN §35.23; a v1 store migrates)
+  // the loadout / 干员持有 / 自选 settings by operator, shown for the data on screen (DESIGN §37.23; a v1 store migrates)
   installSettingsViews();
   installLoadoutSync({ net });
+  installSupportSync({ net });
   installOwnershipSync({ net });
   installDiySync({ net });
   // 干员皮肤 (docs/SKINS.md): keeps the server's copy of this browser's chosen appearances current (room.skins), from
@@ -452,9 +639,10 @@ async function boot() {
   // 名片干员 (PR #643 split 6): the operator on this browser's seat card (room.card, ui/seatArt.js cardStore) — after every
   // welcome, pick and content change, with the engine's retries (the room screen only reads and sets the pick)
   installCardSync({ net });
+installSupportSync({ net });
   // the room's cosmetic plugins and the player's own over the art manifest (content.js; nothing is fetched without them)
   installContent({ toast });
-  // a room with gameplay plugins: its content set downloaded, checked and shown (content.js — DESIGN §32.6)
+  // a room with gameplay plugins: its content set downloaded, checked and shown (content.js — DESIGN §34.6)
   installContentSet({ toast });
   // A bot prep's layout rehearsal the server offers this host's browser (DESIGN §14, SP_BOT_REHEARSAL=host on the
   // server): a same-origin module Worker simulates the candidates off the main thread and answers with its pick; a
@@ -466,12 +654,22 @@ async function boot() {
   // a cosmetic plugin's sound that will not load falls back like its art (content.js, DESIGN §32 P1a)
   installAudio({ getManifest: () => data.get('assets'), subscribe: store.subscribe, getState: store.get, selectRoute, seasonOf: musicSeason, settings: settingsStore.get(),
     onFailed: (url) => cosmetics.fail(url) });
+  // 配音语言 (v0.7.1): read at every line, so switching a dub in 设置 / 干员详情 takes effect on the next line.
+  installAudio({
+    getManifest: () => data.get('assets'), subscribe: store.subscribe, getState: store.get, selectRoute,
+    settings: settingsStore.get(),
+    voiceLangOf: (charId) => voiceLangFor(settingsStore.get(), charId),
+    // a cosmetic plugin's sound that will not load falls back like its art (content.js, DESIGN §34 P1a)
+    onFailed: (url) => cosmetics.fail(url),
+  });
   // …and the music follows the art: the screen's track again when the cosmetic layers change its URLs
   cosmetics.subscribe(() => audio.refreshBgm());
   // 自定义大厅背景与音乐 (ui/lobbyMedia.js): the player's own files of this browser, the music from the title on
   installLobbyMedia();
   data.load('assets').catch(() => {});
-  // Warm the data cache in the background (missing files are tolerated).
+  // 配音语言 (v0.7.1): which dubs this install really has (a release bundle ships the default one; the others come as a
+  // voice pack from the release page). One HEAD per dub; the settings row and 干员详情 read the result.
+  data.load('assets').then(() => probeDubs(data.get('assets'))).catch(() => {});  // Warm the data cache in the background (missing files are tolerated).
   data.loadAll('config').catch(() => {});
   // Optional local-client art manifest (emotes, tutorial pages, official UI sprites; DESIGN §13).
   data.load('local').catch(() => {});
@@ -485,6 +683,7 @@ async function boot() {
   await Promise.all([waitForFonts(1200), connectWhenReady, langReady]);
   const root = document.getElementById('app');
   render(html`<${App} />`, root);
+  appRoot = root; // 组件级改写（§28.19）注册完成之后要重画的正是这一个根
 
   const splash = document.getElementById('boot');
   if (splash) {
@@ -511,6 +710,7 @@ async function boot() {
       inMatch: () => selectRoute(store.get()) === 'game',
       onStale: ({ waiting }) => { if (waiting) store.patch('ui', { buildStale: true }); },
       // the same /healthz names how many plugins the server has: the title screen shows it before any hello
+      // 同一个 /healthz 也说了服务器装了几个插件、有没有公告：标题屏在任何 hello 之前就要显示它们
       onHealth: (h) => {
         const n = pluginCount(h.content), notices = h.content?.notices === true;
         if (n !== store.get().installedPlugins || notices !== store.get().installedNotices) store.set({ installedPlugins: n, installedNotices: notices });

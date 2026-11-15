@@ -21,7 +21,7 @@ import { AiTakeoverPanel } from '../ui/aiTakeover.js';
 // legality reads the player's half of the boss field (gameLogic deployFieldOf, user playtest #5 item 7).
 // Shortcuts: R refresh, F freeze, D level-up, Space ready, Esc closes the topmost popup.
 // The UI never mutates match state locally; it re-renders from m.public / m.private / m.field pushes.
-// Official versions (DESIGN §35.23): a match of another version waits (正在载入模拟数据…) until the page shows that
+// Official versions (DESIGN §37.23): a match of another version waits (正在载入模拟数据…) until the page shows that
 // version's checked data (content.js — a spectator joining a running match, a reload or a resume would otherwise draw
 // the frames with the lobby's data, whose chess ids name other operators); the settlement screen shows the room's
 // version vote (ui/versionVote.js), so a doctor still reading the result can vote.
@@ -119,12 +119,13 @@ import { openGuide } from '../ui/guide.js';
 import { actions, onRefreshBusy } from '../ui/gameActions.js';
 import { isHealingRange, rangeStyle } from '../ui/rangeStyle.js';
 import { FacingWheel, holdPiece, setPieceDir, syncPieceDirs, showRange, useTileScreen } from '../ui/facingWheel.js';
-import { Underframe, underframeRect, TempRowNotice } from '../ui/underframe.js';
+import { Underframe, underframeRect, TempRowNotice, warmPlateMasks } from '../ui/underframe.js';
 import { StandInTags } from './game/standInTags.js';
 import { needsFacing, facingIntent, previewGrid, previewRecord, pieceDir, underframeActions, retreatSlot, itemDestroyable } from '../ui/facing.js';
 import { EquipReplaceDialog, replaceRequest, replaceIntent } from '../ui/equipReplace.js';
 import { pauseAvailable, isPaused, frozenNow } from '../ui/matchStatus.js';
 import { pieceTile } from '../render/drag.js';
+import { layoutOf, mapRectOf } from '../render/layout.js';
 import { FOLD_CAMERA_MS } from '../render/app/tune.js';
 import {
   phaseMode, phaseBanner, isCombatPhase, showDeadPill, isBossPhase, placementContext, canPlace, boardTargets, dropIntent,
@@ -285,6 +286,7 @@ function MatchScreen() {
   const pfBondOff = pfBondOn ? themePf.sprite('bg_inactive') : '';
   const pfBondRings = pfBondOn && pfBondOff ? { '--pf-bond-on': `url("${pfBondOn}")`, '--pf-bond-off': `url("${pfBondOff}")` } : null;
   // gameplay plugins (DESIGN §32.6): the HUD corner's MOD mark — re-rendered only when the room's content changes
+  // gameplay plugins (DESIGN §34.6): the HUD corner's MOD mark — re-rendered only when the room's content changes
   const modRoom = useStore((s) => (s.room?.content?.vanilla === false ? s.room : null), (a, b) => (a?.content ?? null) === (b?.content ?? null));
   // the room's spectator seats for the top bar's 观战席 capsule (ui/hud.js SpectatorPill; GitHub #120): room.state keeps coming
   // during the match, the list is replaced only when a seat changes — shallowEqual keeps an unrelated push from re-rendering
@@ -323,6 +325,9 @@ function MatchScreen() {
   const [emoteOpen, setEmoteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exitOpen, setExitOpen] = useState(false);
+  // 战斗倍速（顶栏那个 ×1/×2/×3/×4）：**纯本地播放选择** —— 同一段确定的 tick 序列只是推进得更快，
+  // 所以战果一字不变（runner.setRate 的注释 + test/match/runner.test.js 用 b.result 逐字节相同钉住）。
+  const [playRate, setPlayRate] = useState(1);
   const [drag, setDrag] = useState(null);                // { uid, kind, id } while dragging a piece
   const [facing, setFacing] = useState(null);            // direction step: { uid, piece, row, col, grid, name }
   const [sel, setSel] = useState(null);                  // tapped own piece: { uid }
@@ -445,9 +450,12 @@ function MatchScreen() {
 
   // latest values for event handlers bound once
   const live = useRef({});
+  // the map's own window / rects (shared/layout.js): official 19×21 for an official stage, the map's own bands for a
+  // big one — every rect / band / tile mapping below reads it (render/layout.js)
+  const stageLayout = layoutOf(gd.stage(pub?.stageId));
   // the field the own pieces are deployed on: the own board, or the player's half of the boss field in a boss round's
   // prep (user playtest #5 item 7: legality and the legal-tile highlights read THOSE tiles, like the server)
-  const deployField = deployFieldOf(pub, myId);
+  const deployField = deployFieldOf(pub, myId, stageLayout);
   // the own pieces' records: a DIY slot the player filled is its 自选 operator (0.2.0, m.private.diy — position, range,
   // name; gameLogic/diy.js), every other chess its data record
   const ownChess = (id) => { const c = gd.chess(id); return ownDiyRecord(c, live.current.priv, { chess: data.get('chess'), backups: data.get('backups') }) || c; };
@@ -469,7 +477,7 @@ function MatchScreen() {
   // (research 09 §1.2: the right-hand player's board mirrored; gameLogic prepCamera). The DOM fallback view keeps the
   // own board's layout there (every coordinate the UI handles is a board coordinate either way) and draws the tiles of
   // that half (ui/fallbackField.js: the legal fence tiles are floor, not the normal field's walls; user playtest #5 item 7).
-  const prepCam = prepCamera(pub, myId);
+  const prepCam = prepCamera(pub, myId, stageLayout);
   const prepCamKey = `${prepCam.kind}:${prepCam.opts.side}`;
   const prepCamSeen = useRef(prepCamKey);                // the prep camera last requested
   const camRef = useRef({ kind: 'prep', opts: { rect: { ...GEO.NORMAL_RECT }, side: 'L' } });
@@ -594,13 +602,18 @@ function MatchScreen() {
   }, [view, ownView, ownStage, baseStage]);
   // the stage behind the board ON SCREEN — the own one (机变 overrides applied) or, while watching a teammate, the plain
   // one — and how a tapped BOARD tile maps to it (GitHub issue #184: tileClick → gameLogic.terrainInfo). Everywhere but a
-  // boss-prep board the two spaces are the same: a 最终攻势 / 隐秘核心 battle renders the stage's own rows (GEO.BOSS_RECT),
+  // boss-prep board the two spaces are the same: a 最终攻势 / 隐秘核心 battle renders the stage's own rows (its layout's
+  // boss rect),
   // 联防 / normal rects are stage rows; the boss PREP draws the player's half (stage rows 2–5) as board rows 9–12
   // (render/prepfield.js toDisp), which is exactly gameLogic.fieldTile.
   live.current.terrainStage = ownView ? ownStage : baseStage;
   live.current.terrainTile = showPrep && (deployField === 'bossL' || deployField === 'bossR')
-    ? (row, col) => fieldTile(deployField, row, col)
+    ? (row, col) => fieldTile(deployField, row, col, layoutOf(ownView ? ownStage : baseStage))
     : (row, col) => [row, col];
+  // The underframe's 出售 / 销毁 plates are tinted through their official sprite as a CSS mask, and a mask image that
+  // has not loaded paints nothing (the plate would show its dark backing on the first tap). Warm the ~1 KB sprites as
+  // soon as the local-art manifest is in — gd.ready is false until then, and this effect re-runs when it flips.
+  useEffect(() => { warmPlateMasks(); }, [gd.ready]);
   // a battle on screen (not the prep board, not a scouted prep board): its crates and turrets are device UNITS, found by
   // unit; everything else answers by the stage's own device entries (gameLogic.deviceTipAt / deviceInfo, #228)
   live.current.deviceBattle = !!shownField && !shownField.prep;
@@ -634,7 +647,7 @@ function MatchScreen() {
         // the battle we just left (or whatever was stored before mount) must not be re-entered next combat;
         // an m.field that arrives during prep (the upcoming battle) is a new object and will be entered
         staleFieldRef.current = field;
-        const pc = prepCameraFor(pub, myId, shopFolded);
+        const pc = prepCameraFor(pub, myId, shopFolded, stageLayout);
         setCam(pc.kind, pc.opts);
         prepCamSeen.current = prepCamKey;
         viewModeRef.current = 'prep';
@@ -838,7 +851,7 @@ function MatchScreen() {
     if (!view || viewModeRef.current !== 'prep' || !showPrep) return;
     if (live.current.facing) cancelFacingRef.current();
     setSel(null);
-    const pc = prepCameraFor(pub, myId, shopFolded);
+    const pc = prepCameraFor(pub, myId, shopFolded, stageLayout);
     setCam(pc.kind, pc.opts);
   }, [view, prepCamKey, showPrep]);
 
@@ -1123,6 +1136,17 @@ function MatchScreen() {
   useEffect(() => () => { currentTurnCueRef.current = null; }, []);
   const startedTurnCueRef = useRef(null);
   const [turnVisual, setTurnVisual] = useState(null);
+  // your turn cue in the 机变 draft, and the official 轮到你选 disc over the cards (ui/turnPopup.js) once its art is in —
+  // a shared draft's turn, and a solo draft as it opens (the maintainer's decision of 2026-10-22, decision 7 extended: as
+  // the strategy draft's 请选择策略 band, screens/bandDraft.js). The cue comes due with the turn and plays once no phase
+  // banner or plate is on screen (the 机变阶段 banner that opens the draft hid the disc's words: §37.18's leftover); a pick
+  // (or the turn moving on) before then drops it. The wait runs per overlay (overlayKey): the round plate still up from
+  // ROUND_START holds the banner back (the server's ROUND_START is 2 s, the plate 1.98 s: a plate mounted late, or a slow
+  // phone, has the turn come under it), so the plate gets at most TURN_CUE_PLATE_WAIT_MS, then the banner as it mounts
+  // its own TURN_CUE_WAIT_MS — never timed from the turn alone. [ASSUMED] the order and the bounds
+  const spMine = !!sp && (solo || sp.turnPid === myId) && !sp.pickOf.has(myId);
+  const [turnPop, setTurnPop] = useState(0);
+  const [turnDue, setTurnDue] = useState(0);             // > 0: the cue is waiting to play (re-counted per turn)
   useEffect(() => { preloadTurnPopupArt(); }, []);
   const overlayKey = hasOffers ? '' : roundPop ? `r:${roundPop.key}` : banner ? `b:${banner.key}` : '';
   useEffect(() => {
@@ -1958,6 +1982,7 @@ function MatchScreen() {
 
   return html`<div class=${cx('screen', 'gm', `gm--${mode}`, regView && 'gm--reg', isBossPhase(phase) && 'is-boss', drag && 'is-dragging', barCollapsed && 'is-collapsed', deployPartial && 'is-deploy-partial', (sp || hasPersonalChoice || offerBlocksPrep(pub?.offers)) && 'has-sp', sp && 'has-spdraft', pen && 'is-pen', readyWhy && 'has-readywhy')}
       data-camera=${pen ? 'pen' : camKind}>
+    <div class="mod-host" data-mod-slot="screen.game.overlay"></div>
     <div class="gm__field" ref=${hostRef} onContextMenu=${(e) => e.preventDefault()}></div>
     ${viewKind === 'loading' ? html`<div class="gm__loading"><${Spinner} label="LOADING FIELD" /></div>` : null}
     <div class="gm__vignette" aria-hidden="true"></div>
@@ -1965,15 +1990,17 @@ function MatchScreen() {
       ready=${phase === PHASE.PREP && !!priv?.ready} />` : null}
     ${showPrep && view && viewKind !== 'loading' && priv && !pen ? html`<${StandInTags} view=${view} priv=${priv} getChess=${gd.chess} backups=${gd.backups} diyData=${{ chess: data.get('chess'), backups: data.get('backups') }} />` : null}
 
-    <div class=${cx('gm__hud', hudIn && `is-${hudIn}`)} ref=${hudElRef}>
+      <div class=${cx('gm__hud', hudIn && `is-${hudIn}`)} ref=${hudElRef}>
+        <div class="mod-host" data-mod-slot="screen.game.hud"></div>
       <${TopBar} pub=${pub} priv=${priv} conn=${conn} hud=${hud} total=${total} drawer=${drawer}
         onExit=${() => setExitOpen(true)} onDrawer=${(t) => setDrawer((d) => (d ? null : t))} onReady=${toggleReady}
         readyBusy=${readyBusy} readyCount=${readyCount} playerCount=${solo ? 1 : aliveCount}
         pen=${pen} penAvail=${penAvail} onPen=${togglePen} config=${gd.config} frozenAt=${frozenAt}
         pause=${canPause || paused ? { show: canPause, paused, busy: pauseBusy, onToggle: () => togglePause(!paused) } : null}
         live=${liveLpNow} spectator=${spectator}
-        spectators=${specFacts.list} myId=${myId} isHost=${specFacts.isHost} onRemoveSpectator=${removeSpectator} room=${modRoom}
-        held=${hudIn === 'wait'} />
+          speed=${playRate} onSpeed=${battleRunner ? (n) => setPlayRate(battleRunner.setRate(n)) : null}
+          spectators=${specFacts.list} myId=${myId} isHost=${specFacts.isHost} onRemoveSpectator=${removeSpectator} room=${modRoom}
+          held=${hudIn === 'wait'} />
 
       <div class=${cx('gm__bonds', pfBondRings && 'gm__bonds--pf')} style=${pfBondRings || null}>
         <button type="button" class="bonds-toggle" aria-expanded=${!bondsCollapsed} aria-controls="match-bond-strip"

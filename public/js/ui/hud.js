@@ -32,6 +32,8 @@ import { PHASE, DIFFICULTY_NAMES } from '../../../shared/constants.js';
 import { html, Button, Icon, PingPill, Countdown, Tooltip, MicroLabel, DifficultyTag, Modal, useTicker, secondsLeft } from './components.js';
 import { Sprite, LpTower, GIcon, LocalSprite } from './gameComponents.js';
 import { data, getMode, localAsset } from '../data.js';
+// 组件级改写（DESIGN §28.19）：`game.hud.topBar` 是引擎的具名组件之一（对局 HUD 的顶栏），包声明的 wraps 就长在它上面。
+import { modComponent } from './modComponents.js';
 import { uiUrl } from './assetUrls.js';
 import { reducedMotion } from './device.js';
 import { serverNow } from '../store.js';
@@ -42,6 +44,8 @@ import { usePrefabPack } from './prefab/view.js';
 import { RegHudBand, RegCountdown, RegReadyFace, packHud, cornerOffset } from './prefab/hud.js';
 import { t, tParts, N_ } from '../../../shared/i18n.js';
 import { UnofficialMark, ruleLine } from './pluginTag.js';
+// 倍速的档位表来自 runner（一份真相）：按钮只显示与循环它，实际生效由 `runner.setRate` 负责。
+import { RATE_STEPS } from '../battle/runner.js';
 import { TestMark } from './testConsole.js';
 
 /**
@@ -468,6 +472,26 @@ function PauseGlyph() {
  * Solo pause / resume control (g.pause): pressed while paused.
  * @param {{ paused: boolean, busy?: boolean, onToggle: () => void }} props
  */
+/**
+ * 战斗倍速按钮（×1 / ×2 / ×3 / ×4 循环）。
+ *
+ * **纯本地播放选择**：同一段确定的 tick 序列只是推进得更快，因此**战果一字不变** —— 这一条由
+ * `public/js/battle/runner.js` 的 `setRate` 保证（倍速只改「墙钟 → tick」的映射，`test/match/runner.test.js`
+ * 用「4× 与 1× 跑完后 `b.result` 逐字节相同」钉住它）。服务端在 `b.start` 里给的 `speed` 是**对局**节奏，
+ * 这里改的是**这台机器看得多快**，两者相乘，服务端不参与、也不需要参与。
+ *
+ * 与「暂停」的区别（原件注释同一条）：暂停是服务端往返（单人对局），倍速不是。
+ * @param {{ speed?: number|null, onSpeed: (next: number) => void }} props
+ */
+export function SpeedButton({ speed, onSpeed }) {
+  const cur = RATE_STEPS.includes(Number(speed)) ? Number(speed) : 1;
+  const next = RATE_STEPS[(RATE_STEPS.indexOf(cur) + 1) % RATE_STEPS.length];
+  return html`<${Tooltip} text=${t('战斗倍速 {cur}× · 点击切到 {next}×（只加快播放，结果不变）', { cur, next })} placement="bottom">
+    <button type="button" class="speedbtn tapx" aria-label=${t('战斗倍速 {cur}×', { cur })}
+        data-testid="speed" onClick=${() => onSpeed?.(next)}><span class="num">${cur}×</span></button>
+  <//>`;
+}
+
 export function PauseButton({ paused, busy = false, onToggle }) {
   const label = paused ? t('继续作战') : t('暂停');
   const key = hotkeyLabelOf('ready'); // the ready key pauses a solo battle (Space unless rebound: 设置 → 快捷键)
@@ -495,14 +519,15 @@ export function PauseButton({ paused, busy = false, onToggle }) {
  *   live?: { pending: number, unite: boolean, left?: number|null } | null,
  *   spectators?: any[]|null, myId?: any, isHost?: boolean, onRemoveSpectator?: ((playerId: any) => any)|null, held?: boolean }} props
  *   spectators: the room's spectator seats (room.state) — the 观战席 capsule beside the latency (SpectatorPill; the host removes)
- *   room: room.state — a match with gameplay plugins shows the small MOD mark beside the difficulty (DESIGN §32.6)
+ *   room: room.state — a match with gameplay plugins shows the small MOD mark beside the difficulty (DESIGN §34.6)
  *   frozenAt: the server time every clock shows while the solo match is paused (null = live)
  *   live: the own battle's pending LP loss (liveLp): the tower keeps the settled lp and adds a red −N tick, 联防中 during 联防;
  *     `left` (a leaker in 联防): its enemies still standing — the capsule's ×N tag
  *   held: the HUD waits hidden under 协议启动！ — a phase change's capsule scene waits for it (useCapsuleFx)
  */
-export function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, onReady, readyBusy, readyCount, playerCount, pen = false, penAvail = false, onPen = () => {},
+export const TopBar = modComponent('game.hud.topBar', function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, onReady, readyBusy, readyCount, playerCount, pen = false, penAvail = false, onPen = () => {},
   config = null, frozenAt = null, pause = null, live = null, spectator = false,
+  speed = null, onSpeed = () => {},
   spectators = null, myId = null, isHost = false, onRemoveSpectator = null, room = null, held = false }) {
   const phase = pub?.phase;
   const boss = isBossPhase(phase);
@@ -603,12 +628,13 @@ export function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, 
             : html`<${Countdown} deadline=${pub?.deadline} total=${total ?? undefined} size="md" />`}
         ${pause && (pause.show || pause.paused) ? html`<${PauseButton} paused=${!!pause.paused} busy=${pause.busy} onToggle=${pause.onToggle} />` : null}
         ${corner && pfClock && showReady ? html`<${ReadyToggle} priv=${priv} onToggle=${onReady} busy=${readyBusy} readyCount=${readyCount} total=${playerCount} pack=${pack} corner=${true} />` : null}
+        ${onSpeed ? html`<${SpeedButton} speed=${speed} onSpeed=${onSpeed} />` : null}
       </div>
       <${OvertimeWarning} ot=${ot} />
       ${showReady && !(corner && pfClock) ? html`<${ReadyToggle} priv=${priv} onToggle=${onReady} busy=${readyBusy} readyCount=${readyCount} total=${playerCount} pack=${pf.ready ? pack : null} />` : null}
     </div>
   </header>`;
-}
+});
 
 /** DP counter shown at the right edge during combat. */
 export function DpCounter({ dp }) {

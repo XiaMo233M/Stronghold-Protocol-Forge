@@ -1,5 +1,6 @@
 // §35.12. [ASSUMED] Conservative economy-cycle eligibility and scores; no hidden stock, trade execution or profit promise.
-import { finalAssaultScore } from './community-candidates.js';
+import { finalAssaultScore, survivalScore } from './community-candidates.js';
+// §37.12. [ASSUMED] Conservative economy-cycle eligibility and scores; no hidden stock, trade execution or profit promise.
 const unique = xs => [...new Set(xs)];
 const cheap = (a, b) => a.tier - b.tier || a.cost - b.cost || a.id.localeCompare(b.id);
 

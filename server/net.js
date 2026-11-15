@@ -5,9 +5,12 @@
 //     SessionRegistry that resolves reconnect tokens and expires sessions after the reconnect window (10 min; the
 //     lobby may extend it per session via `session.resumeWindowMs` — a solo run: 24 h, see server/lobby.js).
 //   * Per-connection pipeline: token-bucket rate limit (40 msg/s) → JSON decode → schema validation
-//     (shared/protocol.js) → `hello`/`ping` handling → dispatch to the lobby handler → `ok`/`error`
+//     (shared/protocol.js) → **the pack's `server.preDispatch` hook, when one is installed** (DESIGN §28.13:
+//     `opts.preDispatch` / `opts.onConnection`, assembled by server/modDispatch.js; with no such pack both are
+//     absent and this stage does not exist) → `hello`/`ping` handling → dispatch to the lobby handler → `ok`/`error`
 //     reply echoing the request id (`rid`). Intents whose answer is a large state resend (`g.watch` →
-//     m.field) also draw from a second, much smaller bucket (2/s, burst 6), so one socket cannot turn
+//     m.field, `g.publicFull` → a unicast FULL m.public plus the room's next full frame) also draw from a
+//     second, much smaller bucket (2/s, burst 6), so one socket cannot turn
 //     40 tiny requests per second into hundreds of KB/s of downstream traffic.
 //   * Client address per connection (`clientAddress`): the socket peer, or — when the peer is a local
 //     reverse proxy (loopback / private address, e.g. `cloudflared tunnel --url http://localhost:3000`) —
@@ -31,9 +34,9 @@
 //   onHello(session, { resumed, repeat })  after `welcome` was sent
 //   welcomeInfo() → object (optional)      extra fields of every `welcome` (never one of its own keys): the lobby's
 //                                          `diyKitted` (0.2.0 自选编队 — which operators a DIY slot may field) and
-//                                          `content` ({ vanilla: <cs> }, the server's content hash — DESIGN §32)
+//                                          `content` ({ vanilla: <cs> }, the server's content hash — DESIGN §34)
 //   onMessage(session, msg) → { ok: true } | { error: ERR code, detail?: string } | undefined — or a Promise of one
-//                                          (a room whose match runs in a match host worker, DESIGN §32.6: the reply
+//                                          (a room whose match runs in a match host worker, DESIGN §34.6: the reply
 //                                          goes out when it settles; a rejection is INTERNAL)
 //   routeGame(session, msg) → same (optional): client-side combat reports `b.progress` / `b.result` (DESIGN §14) go
 //                                          straight to the running match through it; without it they reach onMessage
@@ -71,16 +74,28 @@ export const NET_DEFAULTS = Object.freeze({
  * edits), room.ownership
  * (a ≤ 160-id list, the same way), room.diy (≤ 12 自选 picks checked against the data, the same way), room.spectate
  * (taking a spectator seat in a running match resends its state like a watcher's g.watch — server/lobby.js spectate) and
+ * (a ≤ 160-id list, the same way), room.diy (≤ 8 自选 picks checked against the data, the same way) and room.spectate
+ * (taking a spectator seat in a running match resends its state like a watcher's g.watch — server/lobby.js spectate).
+ * 野排匹配 room.queue (server/matchmaking.js) is here for the other reason the bucket exists: entering the queue
+ * re-announces the queue to everyone waiting, so a rapid enter/leave loop is fan-out work, not a single reply.
+ *
+ * g.publicFull (DESIGN §8.2, the self-healing ask) is the newest member and the reason is the plainest of all: one
+ * cheap request is answered with a UNICAST FULL frame — 17 kB in the 40-seat room, the size its own suite measures
+ * (test/match/public-delta-match.test.js, "[dense 40] full 17282 B") — and it also turns the ROOM's next frame full
+ * for everybody (platform.js resendPublic → markMembershipChanged), so N asks buy N full frames. On the 40 msg/s
+ * bucket the burst alone was 6 × 17 kB before any refill; the heavy bucket caps it at 2/s.
+ * Nothing a normal client loses: public/js/main.js:150 PUBLIC_FULL_ASK_MS = 2000 throttles the ask to 0.5/s, four
+ * times below the refill, so a legitimately out-of-sync player still asks as often as the client lets it.
  * room.setPlugins (a new visual set: every member downloads its art manifest — server/plugins/visualSet.js).
  * room.skins (docs/SKINS.md) is a small `{ [charId]: skinId }` map, sent on every edit of the appearance; a changed map
  * re-broadcasts room.state to a waiting room (its seat cards wear it: room.state seats[].skins). room.card (名片干员, PR
  * #643 split 6): every accepted change re-broadcasts room.state to the room. room.rerollSetup (重刷本局): with one human a
  * start completes at once and clears that seat's 30 s cooldown, and each reroll rebuilds the opening and resends m.public
- * to every connection (server/match/match/setupVote.js, DESIGN §35.47). Any seated player may start it (#860).
- * room.proposeVersion (DESIGN §35.23) stays host-proposed: an accepted proposal by a lone human switches the room's
+ * to every connection (server/match/match/setupVote.js, DESIGN §37.47). Any seated player may start it (#860).
+ * room.proposeVersion (DESIGN §37.23) stays host-proposed: an accepted proposal by a lone human switches the room's
  * version — every page then downloads that version's data.
  */
-export const HEAVY_TYPES = new Set(['g.watch', 'room.loadout', 'room.ownership', 'room.diy', 'room.spectate', 'room.setPlugins', 'room.skins', 'room.card', 'room.rerollSetup', 'room.proposeVersion', 'state.resync']);
+export const HEAVY_TYPES = new Set(['g.watch', 'g.publicFull', 'room.loadout', 'room.ownership', 'room.diy', 'room.spectate', 'room.queue', 'records.mine', 'room.setPlugins', 'room.skins', 'room.card', 'room.rerollSetup', 'room.proposeVersion', 'state.resync']);
 
 /** Close codes (see header). */
 export const CLOSE = Object.freeze({ REPLACED: 4001, HELLO_TIMEOUT: 4002, POLICY: 1008, SHUTDOWN: 1001 });
@@ -125,6 +140,8 @@ export class Session {
     this.resyncAt = -Infinity;
     /** @type {Record<string, { skill: number, module: string|null }> | null} checked operator loadout (lobby-owned, DESIGN §16) */
     this.loadout = null;
+    /** @type {string[] | null} checked 助战 selection (lobby-owned, shared/support.js) — only ids the server pool allows */
+    this.support = null;
     /** @type {Readonly<Record<string, { potential: number, cultivate: number }>> | null} checked per-operator 潜能 / 练度 (lobby-owned, 0.2.2; room.loadout `ops`) */
     this.ops = null;
     /** @type {readonly string[] | null} checked not-owned chess ids (干员持有, lobby-owned, 0.2.0 补位) */
@@ -173,10 +190,18 @@ export class SessionRegistry {
    * @param {string} name
    * @returns {Session | null}
    */
-  create(name) {
+  create(name, stablePlayerId = null) {
     if (this.byPlayerId.size >= this.maxSessions && !this.evictOne()) return null;
     let playerId;
-    do playerId = 'p_' + randomBytes(5).toString('hex'); while (this.byPlayerId.has(playerId));
+    // 账号（`SP_ACCOUNTS=1`）给的 playerId 是**稳定**的：它就是这个账号的身份，不能因为一次重连换一个。
+    // 已被占用 ⇒ 返回 null（调用方答 INTERNAL/server full），而不是悄悄另发一个 —— 那会让两个会话顶着同一个
+    // 账号名却拿着不同的 id，战绩就分叉了。
+    if (stablePlayerId) {
+      if (this.byPlayerId.has(stablePlayerId)) return null;
+      playerId = stablePlayerId;
+    } else {
+      do playerId = 'p_' + randomBytes(5).toString('hex'); while (this.byPlayerId.has(playerId));
+    }
     let token;
     do token = newToken(); while (this.byTokenMap.has(token));
     const s = new Session({ playerId, token, name, now: this.now() });
@@ -521,6 +546,12 @@ class Connection {
     this.drops = 0;
     /** true once the server initiated the close; frames still in flight are ignored */
     this.closing = false;
+    /**
+     * 这条连接上正在进行一次账号派生（`hello` + `auth`）。同一连接的第二条 `hello` 会被 RATE 拒 ——
+     * 没有它，一个 socket 可以并发堆起任意多次 scrypt（server/net.js `onHelloMsg`）。
+     * @type {boolean}
+     */
+    this.authenticating = false;
   }
 
   /** Server-initiated close (never throws). Later frames from this socket are ignored. */
@@ -539,14 +570,18 @@ export class Network {
    * @param {{
    *   registry: SessionRegistry,
    *   handler: { onHello?: Function, onMessage: Function, onDisconnect?: Function, onExpire?: Function, welcomeInfo?: Function },
+   *   accounts?: import('./accounts.js').AccountStore|null,
    *   log?: { info: Function, warn: Function, error: Function, debug?: Function },
    *   now?: () => number,
    *   options?: Partial<typeof NET_DEFAULTS>,
    * }} opts
    */
-  constructor({ registry, handler, log = noopLog, now = Date.now, options = {} }) {
+  constructor({ registry, handler, accounts = null, log = noopLog, now = Date.now, options = {} }) {
     this.registry = registry;
     this.handler = handler;
+    // 账号（`SP_ACCOUNTS=1`）：**只有**非 null 时 `hello` 才会多出认证那一段。没有它就是今天那条路径
+    // （不读账号库、不要求凭证、不发 `AUTH_REQUIRED`）—— 这是「文件存在不许悄悄改握手语义」的执行点。
+    this.accounts = accounts;
     this.log = log;
     this.now = now;
     this.opts = { ...NET_DEFAULTS, ...options };
@@ -554,6 +589,15 @@ export class Network {
     this.conns = new Map();
     /** @type {Map<string, number>} open sockets per client network key */
     this.connsPerKey = new Map();
+    /**
+     * 认证限流桶：客户端网络键 → `TokenBucket`。
+     *
+     * 为什么**必须有**：一次 scrypt 派生是几十毫秒的单核 CPU（server/accounts.js PARAMS）。没有这一步，
+     * 一个连接就可以用 `hello` 把派生堆成一堵墙 —— 那是把口令库当成 CPU 放大器。桶按**网络键**（不是按连接）
+     * 是为了让「重连换一个 socket」不能把额度重置掉。
+     * @type {Map<string, TokenBucket>}
+     */
+    this.authBuckets = new Map();
     this.closed = false;
     this.heartbeatTimer = setInterval(() => this.heartbeat(), this.opts.heartbeatMs);
     this.heartbeatTimer.unref?.();
@@ -604,6 +648,13 @@ export class Network {
     ws.on('pong', () => { conn.alive = true; if (conn.session && conn.session.ws === ws) conn.session.lastSeen = this.now(); });
     ws.on('error', (e) => { this.log.debug?.('[net] socket error', e?.code || e?.message); });
     ws.on('close', () => { try { this.onClose(conn); } catch (e) { this.log.error('[net] close handler crashed', e); } });
+    // 连接建立钩子（同一份 `server.preDispatch` 声明的另一半，DESIGN §28.13）：资源挑战必须在**连接建立时**就发出去
+    // （`_up/mod4-pack/integration/server/resourceAdmission.mjs` 的 onConnect），而不是等客户端 `hello` —— 那一刻
+    // 客户端的 `send()` 还在排队，而这正是 `resource.*` 类型必须在 ping/hello 之前被处理的原因。没有钩子时是 no-op；
+    // 钩子内部的异常由 server/modDispatch.js 兜住，这里再兜一层是因为 handleConnection 跑在 wss 的 connection 事件里。
+    if (typeof this.opts.onConnection === 'function') {
+      try { this.opts.onConnection(conn); } catch (e) { this.log.error('[net] onConnection hook crashed', e); }
+    }
   }
 
   /** @param {Connection} conn @param {object} msg */
@@ -642,13 +693,36 @@ export class Network {
     const reason = validateC2S(msg);
     if (reason) { this.reply(conn, errorMsg(ERR.BAD_MSG, rid, reason)); return; }
 
+    // 包声明的**分发前钩子**（DESIGN §28.13，docs/WORKSHOP.md §1.9；装配在 server/modDispatch.js）。落点是三条约束
+    // 的交点，缺一条就会静默失效：
+    //   * 在 :599 的 `Object.hasOwn(C2S, msg.t)` 与上面这行 `validateC2S` **之后** —— 钩子可以直接信任字段形状，
+    //     而 `resource.*` 这三个类型必须先存在于 shared/protocol.js 的 C2S，否则消息在到达钩子之前就被当非法类型拒了；
+    //   * 在下面的 `ping` / `hello` 分支**之前** —— `resource.*` 不是 `hello`，而服务端的挑战是连接建立时就发出去的，
+    //     客户端的证明因此往往在 `hello` 之前到达；
+    //   * 在 `if (!conn.session)`（下面那行 `hello required`）**之前** —— 放到它后面，hello 之前的证明会被回
+    //     `hello required`，闸门永远关不上。
+    // 返回 true = 这条消息已被钩子消费（钩子自己负责回执，回执必须带上它收到的 `rid`），不再交给大厅。
+    //
+    // 没有包声明 `server.preDispatch` 时 `this.opts.preDispatch` 是 undefined：这个 typeof 判断不进、没有任何对象
+    // 被创建、没有一行日志、也没有第二个 `socket.on('message')`（那是双重分发），onFrame 的行为与没有这段代码时
+    // 逐字节相同。
+    if (typeof this.opts.preDispatch === 'function' && this.opts.preDispatch(conn, msg)) return;
+
     if (msg.t === 'ping') {
       const pong = { t: 'pong', c: msg.c, s: now };
       if (validRid(rid)) pong.rid = rid;
       this.reply(conn, pong);
       return;
     }
-    if (msg.t === 'hello') { this.onHelloMsg(conn, msg, now); return; }
+    // `hello` 在账号开启时是**异步**的（scrypt 派生要在事件循环外跑）。它自己负责回执，所以这里的 catch
+    // 只兜「派生抛了」这一种 —— 不兜的话会变成一个没有回执的悬空请求，客户端只能等到超时。
+    if (msg.t === 'hello') {
+      this.onHelloMsg(conn, msg, now).catch((error) => {
+        this.log.error('[net] hello handler crashed', error);
+        this.reply(conn, errorMsg(ERR.INTERNAL, rid));
+      });
+      return;
+    }
     if (!conn.session) { this.reply(conn, errorMsg(ERR.BAD_MSG, rid, 'hello required')); return; }
     if (HEAVY_TYPES.has(msg.t) && !conn.heavy.take(now)) { this.reply(conn, errorMsg(ERR.RATE, rid, `${msg.t} too often`)); return; }
 
@@ -673,7 +747,7 @@ export class Network {
       res = { error: ERR.INTERNAL };
     }
     if (res && typeof res.then === 'function') {
-      // an answer that has to wait (DESIGN §32.6: a room whose match runs in a match host worker answers once the worker
+      // an answer that has to wait (DESIGN §34.6: a room whose match runs in a match host worker answers once the worker
       // has — server/lobby.js keeps each such room's messages in order): sent when it settles; a rejection is INTERNAL.
       // A vanilla room never answers this way, so its replies go out exactly as before
       Promise.resolve(res).then((r) => this.answer(conn, msg, rid, r), (e) => {
@@ -700,8 +774,12 @@ export class Network {
     } else if (validRid(rid)) this.reply(conn, { t: 'ok', rid });
   }
 
-  /** @param {Connection} conn @param {any} msg @param {number} now */
-  onHelloMsg(conn, msg, now) {
+  /**
+   * `async` 只因为账号开启时要等一次 scrypt 派生（server/accounts.js）。账号关闭时整段 `this.accounts` 分支不进，
+   * 函数在第一个 `await` 之前就跑完了 —— 对调用方与今天同一个时序。
+   * @param {Connection} conn @param {any} msg @param {number} now
+   */
+  async onHelloMsg(conn, msg, now) {
     const rid = msg.rid;
     if (msg.version != null && msg.version !== PROTOCOL_VERSION) {
       this.reply(conn, errorMsg(ERR.BAD_MSG, rid, `version mismatch: server ${PROTOCOL_VERSION}`));
@@ -710,11 +788,55 @@ export class Network {
     const name = sanitizeName(msg.name);
     if (!name) { this.reply(conn, errorMsg(ERR.BAD_MSG, rid, 'bad field name')); return; }
 
+    // ---- 账号（`SP_ACCOUNTS=1`）------------------------------------------------------------------
+    // 没有 `this.accounts` 时这一段**一个字节都不产生**：`account` 保持 null，下面的会话建立走的还是 `msg.token`
+    // 那条老路，`session.name` 还写 `name`。这正是「没有 SP_ACCOUNTS 时握手逐字节不变」的执行点。
+    /** @type {{ name: string, playerId: string } | null} */
+    let account = null;
+    if (this.accounts) {
+      // 已经在会话里的人**不必**再交一次口令：他手里那个会话就是已认证的（`hello` 可以重复发，比如客户端补发）。
+      // 但要核对三件事 —— 账号还在、playerId 没变、账号名与这次 hello 的名字一致，否则就是「顶着别人的会话
+      // 改名」。任一条不成立都按凭证错误拒，不给「你猜对了哪一半」的信息。
+      const tokenSession = msg.token ? this.registry.byToken(msg.token) : null;
+      const active = conn.session || (tokenSession && tokenSession.name === name ? tokenSession : null);
+      if (active) {
+        const bound = this.accounts.get(active.name);
+        if (!bound || bound.playerId !== active.playerId || bound.name !== name) {
+          this.reply(conn, errorMsg(ERR.BAD_CREDENTIALS, rid));
+          return;
+        }
+        account = bound;
+      } else {
+        if (msg.auth !== 'login' && msg.auth !== 'register') {
+          this.reply(conn, errorMsg(ERR.AUTH_REQUIRED, rid));
+          return;
+        }
+        // 同一连接上不并发派生：第二条 `hello` 在第一条还没回来时直接吃 RATE。
+        if (conn.authenticating) { this.reply(conn, errorMsg(ERR.RATE, rid)); return; }
+        // 按**客户端网络键**限流（不是按连接）：重连换一个 socket 不能把额度重置掉。
+        const authKey = conn.key || conn.ip || '';
+        let authBucket = this.authBuckets.get(authKey);
+        if (!authBucket) { authBucket = new TokenBucket(0.1, 8, now); this.authBuckets.set(authKey, authBucket); }
+        if (!authBucket.take(now)) { this.reply(conn, errorMsg(ERR.RATE, rid)); return; }
+        conn.authenticating = true;
+        let result;
+        try { result = await this.accounts.authenticate(name, msg.password, msg.auth); }
+        finally { conn.authenticating = false; }
+        // 派生期间这条连接可能已经关了 / 服务器已经在停：那就**不再回执**（往一个正在关闭的 socket 上写
+        // 只会打扰客户端），也**不建会话**。
+        if (conn.closing || this.closed || !this.conns.has(conn.ws)) return;
+        if (result.error) { this.reply(conn, errorMsg(ERR[result.error] || ERR.INTERNAL, rid)); return; }
+        account = result.account;
+      }
+    }
+
     let session = conn.session;
     let resumed = false;
     const repeat = !!session;
     if (!session) {
-      session = msg.token ? this.registry.byToken(msg.token) : null;
+      // 账号开启时**先**按账号的 playerId 找会话：回来的还是同一个人（同一条战绩线），而不是一个新 id。
+      if (this.accounts) session = this.registry.byId(account.playerId);
+      else if (msg.token) session = this.registry.byToken(msg.token);
       if (session) {
         if (session.connected && session.ws && session.ws !== conn.ws
           && (msg.noReplace || (Number.isFinite(msg.claimAt) && session.claimAt != null && msg.claimAt > session.claimAt))) {
@@ -735,7 +857,7 @@ export class Network {
           try { conn.ws.close(CLOSE.POLICY, 'server full'); } catch { /* ignore */ }
           return;
         }
-        session = this.registry.create(name);
+        session = this.registry.create(account ? account.name : name, account ? account.playerId : null);
         if (!session) { this.reply(conn, errorMsg(ERR.INTERNAL, rid, 'server full')); return; }
       }
       conn.session = session;
@@ -744,7 +866,8 @@ export class Network {
       session.claimAt = Number.isFinite(msg.claimAt) ? msg.claimAt : null;
       session.disconnectedAt = null;
     }
-    session.name = name;
+    // 昵称永远取**账号名**（如果这次是带账号的）：否则一个已认证会话可以发第二条 hello 把显示名改成任何东西。
+    session.name = account ? account.name : name;
     session.lastSeen = now;
     session.addr = conn.ip;
     session.limitKey = conn.key;
@@ -847,8 +970,14 @@ export class Network {
 
   /** Purge expired sessions and tell the handler. */
   sweep() {
+    const now = this.now();
+    // 认证桶也得跟着回收，否则「每个见过的网络键一个桶」自己就是一张会长的表（空闲超过一个重连窗口就丢）。
+    if (this.authBuckets.size) {
+      const idleMs = this.opts.reconnectWindowMs;
+      for (const [key, bucket] of this.authBuckets) if (now - bucket.at > idleMs) this.authBuckets.delete(key);
+    }
     let expired;
-    try { expired = this.registry.sweep(this.now()); } catch (e) { this.log.error('[net] sweep crashed', e); return; }
+    try { expired = this.registry.sweep(now); } catch (e) { this.log.error('[net] sweep crashed', e); return; }
     for (const s of expired) {
       try { this.handler.onExpire?.(s); } catch (e) { this.log.error('[net] onExpire crashed', e); }
     }

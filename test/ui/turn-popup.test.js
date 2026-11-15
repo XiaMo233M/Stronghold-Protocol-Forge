@@ -1,4 +1,8 @@
 // 机变 shared-turn cue ownership, renderer fallback, timing bounds and the generic disc's CSS contract.
+// 「轮到你选」 (ui/turnPopup.js, css/screens/game-panels.css .sptp): the official effectChoose sprites it draws, the
+// wiring in screens/game.js (the shared draft's own turn and a solo draft as it opens — the maintainer's decision of
+// 2026-10-22 —, with the 轮到你 sound, once the art is in, never with reduced motion; after the round plate and the 机变阶段
+// banner, at most TURN_CUE_PLATE_WAIT_MS / TURN_CUE_WAIT_MS after each mounts — §37.18's leftover) and the stylesheet's rules. In a browser: test/ui/turn-popup.e2e.test.js.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -45,6 +49,28 @@ test('game screen owns one live multiplayer cue; the choice overlay retains its 
   assert.doesNotMatch(choice, /RegYourTurn|audio\.sfx\(['"]yourTurn|turnPop|turnMine/);
   assert.match(banners, /SELF_CHOOSE_BANNER_TIP'\)\) return t\('轮到你选'\)/);
   assert.match(banners, /label=\$\{t\('轮到你选'\)\} testid="your-turn-banner"/);
+  // (solo: the draft is the player's from its start — the same test as the timer ticks' myPick)
+  assert.match(g, /const spMine = !!sp && \(solo \|\| sp\.turnPid === myId\) && !sp\.pickOf\.has\(myId\);/);
+  assert.match(g, /const myPick = sp && \(solo \|\| sp\.turnPid === myId\) && !sp\.pickOf\.has\(myId\);/);
+  assert.doesNotMatch(g, /!!sp && !solo/, 'no co-op-only disc');
+  const tp = read('public/js/ui/turnPopup.js');
+  assert.doesNotMatch(tp, /a shared draft only/);
+  assert.match(tp, /\[ASSUMED\] for solo/);
+  assert.match(g, /useEffect\(\(\) => \{ preloadTurnPopupArt\(\); \}, \[\]\);/);
+  // the turn makes the cue due (a pick or the turn moving on drops it); it plays — the sound, and the disc once the art is
+  // in and motion is allowed — when no phase banner / plate is up, or at the latest TURN_CUE_PLATE_WAIT_MS after the round
+  // plate and TURN_CUE_WAIT_MS after the banner it held back: the wait is keyed on the overlay on screen (the plate, then
+  // the banner, each restarts it), never timed from the turn alone (§37.18's leftover, the ROUND_START → SP_DRAFT race)
+  assert.match(g, /useEffect\(\(\) => \{ if \(spMine\) setTurnDue\(\(n\) => n \+ 1\); else setTurnDue\(0\); \}, \[spMine\]\);/);
+  assert.match(g, /const overlayKey = hasOffers \? '' : roundPop \? `r:\$\{roundPop\.key\}` : banner \? `b:\$\{banner\.key\}` : '';/);
+  assert.doesNotMatch(g, /phaseOverlay/, 'no on / off flag: a plate giving way to a banner restarts the wait');
+  assert.match(g, /const play = \(\) => \{\n\s+setTurnDue\(0\);\n\s+audio\.sfx\('yourTurn'\);\n\s+if \(turnPopupArtReady\(\) && !reducedMotion\(\)\) setTurnPop\(\(n\) => n \+ 1\);\n\s+\};/);
+  assert.match(g, /if \(!overlayKey\) \{ play\(\); return undefined; \}\n\s+const id = setTimeout\(play, overlayKey\.startsWith\('r:'\) \? TURN_CUE_PLATE_WAIT_MS : TURN_CUE_WAIT_MS\);\n\s+return \(\) => clearTimeout\(id\);\n\s+\}, \[turnDue, overlayKey\]\);/);
+  // the two overlays it waits for, as rendered: the plate holds the banner back (the banner mounts as the plate goes)
+  assert.match(g, /\$\{roundPop && !hasOffers && [^\n]*<\$\{RoundPopup\} key=\$\{roundPop\.key\}/);
+  assert.match(g, /\$\{!hasOffers && banner && !banner\.plate && !roundPop \? html`<\$\{PhaseBanner\} key=\$\{banner\.key\}/);
+  assert.doesNotMatch(g, /if \(!spMine\) return;\n\s+audio\.sfx\('yourTurn'\)/, 'no cue at the moment the turn comes, under the banner');
+  assert.match(g, /<\$\{TurnPopup\} key=\$\{turnPop\} onDone=\$\{\(\) => setTurnPop\(0\)\} \/>/);
 });
 
 test('cue delays remain bounded behind active overlays, while generic reduced motion stays hidden', () => {
