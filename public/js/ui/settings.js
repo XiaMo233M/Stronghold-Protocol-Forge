@@ -21,9 +21,13 @@
 // Only font-size declarations read `--t`, so the board, the HUD bands the prep camera keeps clear and the detail
 // card's side do not move — the field is sized from the host element's clientWidth (render/app.js).
 
+import { resolveThemeVars, themeVarsOf } from '../../../shared/plugins/theme.js';
+import { ThemeSection } from './themeSettings.js';
+import {
+  applyUiTheme, bindThemeSettings, bootUiThemes, composeLocalManifest, importedThemeGroups, onImportedThemeGroups, syncThemeVoiceVolume,
+} from '../uiTheme.js';
 import { useLayoutEffect, useEffect, useRef, useState } from '../../vendor/hooks.module.js';
 import { catalog, personalApplied, isPersonalCosmetic, cosmeticPlugins, installedCount, loadCatalog, personal, personalSet, pluginName, setPersonalPlugin } from '../content.js';
-import { resolveThemeVars, themeVarsOf } from '../../../shared/plugins/theme.js';
 import { hasAnySkinChoices } from './skins.js';
 import { describeError, toast } from './toasts.js';
 import { pluginMicro } from './pluginTag.js';
@@ -72,12 +76,20 @@ export function applyTextSize(v) {
   if (el) el.dataset.text = TEXT_SIZES.includes(v) ? v : 'sm';
 }
 
+// 界面主题（上游 0.4.0，docs/THEMES.md）：uiTheme.js 不 import 本文件，存储句柄由这里交过去
+bindThemeSettings({
+  get: () => settingsStore.get(),
+  set: (patch) => settingsStore.set(sanitizeSettings({ ...settingsStore.get(), ...patch })),
+});
+
 settingsStore.subscribe((s) => {
   savePref('settings', sanitizeSettings(s));
   audio.setVolumes(s);
   // 只传全局那一个配音：逐干员的覆盖由 main.js 注入的 voiceLangOf 在播放时读取（单一真相，见 audio.js 那一处）。
   audio.setVoiceLang(s.voiceLang);
   applyTextSize(s.textSize);
+  applyUiTheme(s.uiTheme);
+  syncThemeVoiceVolume();
   setAppearanceFirst(s.workshopSkins);
   setSourcesEnabled(s.workshopSources);
 });
@@ -85,6 +97,8 @@ audio.setVolumes(settingsStore.get());
 audio.setVoiceLang(settingsStore.get().voiceLang);
 // before the first render (main.js boot renders after its imports ran): the stored step is on screen without a flash
 applyTextSize(settingsStore.get().textSize);
+// 主题同样要在首帧之前落地，否则会闪一下默认外观
+applyUiTheme(settingsStore.get().uiTheme);
 // 同上：工坊外观的门控也要在**第一帧之前**同步好，否则首帧问的是链的默认值、下一帧才改成玩家的选择
 // —— 那是「闪一下再变」，正是这条链存在的理由要避免的那类错（见 portraitChain.js 步骤 0）。
 setAppearanceFirst(settingsStore.get().workshopSkins);
@@ -496,6 +510,11 @@ export function SettingsModal({ open, onClose }) {
       </div>
       <p class="set-hint set-textsize-note">${t('调整界面文字大小，棋盘保持原比例。')}</p>
       <${ScreenFitSection} />
+      <${ThemeSection} activeId=${s.uiTheme || ''} />
+      <${Toggle} label=${t('主题动画')} micro="THEME MOTION" value=${s.themeMotion}
+        onChange=${(v) => updateSettings({ themeMotion: v })} />
+      <p class="set-hint" data-testid="theme-motion-hint">${t('规程里乌萨斯齐心团、可露希尔主题界面的循环动画；关掉可省电')}</p>
+
       <${HotkeySection} keys=${s.keys} touchUi=${touchUi} />
       <${CosmeticSection} />
       <${DiagSection} />

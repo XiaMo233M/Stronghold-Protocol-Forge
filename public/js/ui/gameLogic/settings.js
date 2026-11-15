@@ -36,7 +36,7 @@ export const TEXT_SIZES = Object.freeze(['sm', 'md', 'lg', 'xl']);
 // 配音三件套：默认语言、本土语言开关、逐干员的覆盖（空表）。合并时这三个键从默认对象里掉了，
 // sanitizeSettings 于是拿到了 undefined —— 老档案读出来就没有 voiceLang。
 export const DEFAULT_SETTINGS = Object.freeze({ bgm: 0.6, sfx: 0.8, voice: 0.8,
-  voiceNative: false,   // 本土语言开关（上游 0.3.2）；voiceLang / voiceLangByChar 在本行后面已有
+  voiceNative: false, uiTheme: '', themeMotion: true,   // 本土语言开关（上游 0.3.2）；voiceLang / voiceLangByChar 在本行后面已有
  muted: false, damageNumbers: true, officialDamageNumbers: false, ammoEnergyCount: false, combatMetrics: false, prepDeployFold: true, otherSkins: true, bondTimers: false, fullscreenWakeLock: false, workshopSkins: true, workshopSources: true, quality: 'high', officialFx: 'auto', textSize: 'sm', keys: DEFAULT_HOTKEYS, voiceLang: DEFAULT_VOICE_LANG, voiceLangByChar: Object.freeze({}) });
 /**
  * 设置「显示弹药与能量数量」的取值（上游 0.3.1 把「弹药数量」与「秘术师能量」两个开关合并成一个）：
@@ -145,5 +145,8 @@ export function sanitizeSettings(raw) {
     // 存储键沿用本仓库既有的 voiceLangByChar（上游 0.4.0 叫 voiceOverrides：**输入两边都认**，
     // 输出只写我们那一个，免得同一份数据在存档里出现两个键）
     voiceLangByChar: voiceTable,
+    // 界面主题（上游 0.4.0，docs/THEMES.md）：空串 = 内置「卫戍协议终端」；themeMotion 是主题动画开关
+    uiTheme: typeof r.uiTheme === 'string' && r.uiTheme.length <= 64 ? r.uiTheme : DEFAULT_SETTINGS.uiTheme,
+    themeMotion: typeof r.themeMotion === 'boolean' ? r.themeMotion : DEFAULT_SETTINGS.themeMotion,
   };
 }
