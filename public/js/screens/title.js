@@ -7,7 +7,7 @@
 // sends `hello` (now, or as soon as the socket is open). The router then shows the lobby.
 //
 // A 规程 start (versions.js startupVersion: a first start, or a lobby set to 规程) wears 规程: with 规程's opening extracted
-// (ui/regulationFilm.js, §37.147) the backdrop is that film's last frame — the season ground, key art, skyline and the
+// (ui/regulationFilm.js, §39.147) the backdrop is that film's last frame — the season ground, key art, skyline and the
 // official title art, which stands in for our heading (kept for screen readers) — and the login column starts under it;
 // without it, the 规程 lobby's ground under 卫戍协议：规程 and the season emblem.
 //

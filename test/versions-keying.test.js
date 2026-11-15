@@ -738,7 +738,7 @@ test('auto_chess_change_map: Touch\'s map characters have a battle part and coun
  * The band ids code keys behaviour by on every data (bands/meta.js band_cathy / DUCK_BAND, bands/battle.js AMEDIC_BAND,
  * server/match/gamedata.js band_bldsk / band_cannot). Bond ids are keyed by id too, except the five 规程 bonds whose
  * effect id differs (regulation.js EFFECT_KEYED_BONDS: install() dispatches those by effectId, and a swapped 盟约
- * effect id still runs the 盟约 installer). DESIGN §35.22.4 relies on every other reuse keeping the same band or bond.
+ * effect id still runs the 盟约 installer). DESIGN §37.22.4 relies on every other reuse keeping the same band or bond.
  * server/match/gamedata.js band_bldsk / band_cannot). Bond ids are all keyed by id too (bonds/core.js INSTALLERS,
  * memberOf(…, 'yanShip'), addon …): DESIGN §37.22.4 relies on a version reusing them only for the same band or bond.
  */

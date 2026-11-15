@@ -271,7 +271,7 @@ export class PlayerState {
       bossDamage: 0, lpLost: 0, buys: 0, sells: 0, perfectRounds: 0, fundsGained: 0, healing: 0,
       /** defId → { dmg, kills, heal } accumulated per battle, for the settlement's MVP (Match.js, results.js mvpOf). */
       unitStats: new Map(),
-      // 完美连胜 (§37.148): the rounds in a row this player settled without an LP loss, now (0 after a loss)
+      // 完美连胜 (§39.148): the rounds in a row this player settled without an LP loss, now (0 after a loss)
       perfectStreak: 0,
     };
     this.eliminatedRound = null;

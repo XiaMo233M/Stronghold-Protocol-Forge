@@ -12,7 +12,7 @@ import { MAX_OFFER_SLOTS } from './common.js';
 import { onMerge } from '../botEmotes.js';
 
 /**
- * 精英化 keeps the sale price (the owner, 2026-11-14: 「精英化应该继承售价的」, DESIGN §37.209): the elite takes the highest
+ * 精英化 keeps the sale price (the owner, 2026-11-14: 「精英化应该继承售价的」, DESIGN §39.209): the elite takes the highest
  * effect-resolved price among the merged copies (meta.sellPrice, with that copy's sellBonus / sellFixed), when it is
  * above the elite's own table price. A 规程 海沫 that has grown to 4 is a 4 elite and grows on from there (+2, at most 8);
  * an elite whose own 获得时 特质 fixes a price (温蒂 6) still sets it in the gain that follows the merge. [ASSUMED] the

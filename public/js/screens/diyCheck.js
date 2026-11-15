@@ -23,7 +23,7 @@ const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI'];
 const bundle = () => ({ chess: data.get('chess'), backups: data.get('backups') });
 
 /**
- * Why a grey card cannot be brought: every bond of it is greyed (server gamedata bondsExclude, §37.200) — its core
+ * Why a grey card cannot be brought: every bond of it is greyed (server gamedata bondsExclude, §39.200) — its core
  * bond(s) when it has no add-on, its add-ons when it has no core, else all of them.
  */
 function greyReason(rec) {

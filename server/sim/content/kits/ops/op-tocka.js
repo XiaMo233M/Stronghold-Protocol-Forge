@@ -35,7 +35,7 @@
 //   效果的目标）" — PRTS "优先选择生命比例最低＞创建时间最晚的单位": the max_target ally operators of her range not holding
 //   her S1 effect, herself included [ASSUMED: unlike S2 "非自身" and S3 "另一名", no exclusion is written]. Effect:
 //   "受到攻击时，获得相当于冻河160%攻击力的屏障（在10秒内衰减），并使攻击者晕眩3秒" — [ASSUMED] 受到攻击时 = every damage
-//   instance its holder takes, as the engine's ON_TAKE_DAMAGE observers (an injury observer: SIM §5 / DESIGN §35.32 — a
+//   instance its holder takes, as the engine's ON_TAKE_DAMAGE observers (an injury observer: SIM §5 / DESIGN §37.32 — a
 //   dodged or barrier-absorbed hit too), whatever its source (PRTS: the stun needs a living enemy source, so sourceless /
 //   ally hits trigger it), "触发型效果不会响应元素伤害" (no 元素伤害; a 流失 or an element fill never reaches the injury step).
 //   The barrier = her ATK when it fires × shield_atk_scale ("根据触发时（而非施加时）冻河的攻击力计算"), losing initial /

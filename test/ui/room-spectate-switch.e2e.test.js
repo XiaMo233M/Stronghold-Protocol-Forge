@@ -75,7 +75,7 @@ for (const [engine, executablePath] of engines) test(`${engine}: a waiting-room 
     await waitHost(guest);
 
     // Both roles expose reachable, non-overlapping controls on a short landscape viewport: there the empty 观战席 line
-    // gives its room to the seats and 转为观战 is the eye on one's own card (§37.117; the bar's button is hidden)
+    // gives its room to the seats and 转为观战 is the eye on one's own card (§39.117; the bar's button is hidden)
     for (const client of [host, guest]) {
       await client.page.setViewport({ width: 844, height: 390 });
       await sleep(500);

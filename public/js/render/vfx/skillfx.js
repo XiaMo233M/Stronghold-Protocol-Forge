@@ -1137,7 +1137,7 @@ export class SkillFx {
    * A drifting area (FX_BINDINGS `drift`: 引星棘刺 S2's alchemy unit, re-sent every second under one `key` as it moves
    * away from her and grows): its reached effects play once, where it lands, and follow it — each re-send moves their
    * point (playOn `follow`). The growing ring stays the procedural zone, which the field view updates in place by key:
-   * false, always — our effect layer has no live scale for the official range ring (history §37.207).
+   * false, always — our effect layer has no live scale for the official range ring (history §39.207).
    */
   _drift(U, bind, keys, x, y, extra) {
     const key = extra.key;
@@ -1187,7 +1187,7 @@ export class SkillFx {
    * A landed area's tick hits (FX_BINDINGS `hits`: 旅骨's hbound_skillN_hit_01, ON_BUFF_TRIGGER of the projectile's
    * buff on each enemy in it). makeZone pulses round(duration / interval) times, the first at once (tier1.js). The
    * sim sends no per-enemy fx — one extra event per pulse would move the goldens — so one oneshot plays at the tile
-   * per pulse [ASSUMED] (history §37.202).
+   * per pulse [ASSUMED] (history §39.202).
    */
   _zoneHits(U, bind, at, holdS) {
     const keys = bind.hits.map(lc).filter((k) => k && this.w.ofx.lib.has(k));

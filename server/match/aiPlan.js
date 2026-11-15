@@ -61,7 +61,7 @@ export const planSells = (m, ps, id) => planContains(m, planOf(m, ps).sell, id);
 export const planItemWanted = (m, ps, id) => !!planOf(m, ps).items?.buy?.includes(id);
 export const planEquips = (m, ps, itemId) => !!planOf(m, ps).items?.equip?.some(e => e.id === itemId);
 
-/** §35.62: the plan's main — its highest-priority core bond the mode keeps on (null: the plan names none). */
+/** §37.62: the plan's main — its highest-priority core bond the mode keeps on (null: the plan names none). */
 export function planMain(m, ps) {
   const gd = ps?.gd || m.gd;
   return (planOf(m, ps).bonds || []).slice().sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id))

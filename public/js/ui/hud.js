@@ -551,7 +551,7 @@ export const TopBar = modComponent('game.hud.topBar', function TopBar({ pub, pri
   const fx = useCapsuleFx(phase, pub?.round, held);
   useEffect(() => { preloadCapsuleArt(); }, []);
   // 乌萨斯齐心团 / 可露希尔 installed: the pack's own top bar, countdown and ready button (ui/prefab/hud.js) — in 规程, and in
-  // 盟约 too since §37.206 (the owner: the 规程 themes in full on 盟约); prefabPackUrl gives no pack for any other theme
+  // 盟约 too since §39.206 (the owner: the 规程 themes in full on 盟约); prefabPackUrl gives no pack for any other theme
   const settings = useSettings();
   const pack = usePrefabPack(data.get('local')?.groups, settings?.uiTheme);
   const pf = packHud(pack);

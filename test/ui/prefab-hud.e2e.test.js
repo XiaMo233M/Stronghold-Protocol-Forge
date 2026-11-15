@@ -1,4 +1,4 @@
-// Browser check of the 规程 HUD drawn from the official prefabs (§37.144) through the dev mock (opt-in, needs Chrome and
+// Browser check of the 规程 HUD drawn from the official prefabs (§39.144) through the dev mock (opt-in, needs Chrome and
 // the local theme packs with prefabs.json; skipped without them, as on CI):
 //   SP_E2E=1 CHROME_PATH=… node --test test/ui/prefab-hud.e2e.test.js
 //

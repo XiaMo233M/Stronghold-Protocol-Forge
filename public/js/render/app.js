@@ -441,7 +441,7 @@ export async function createFieldView(host, options = {}) {
     ofx.setTier(board3d ? resolveOfficialFx(settings.officialFx, ofx.available) : 'off');
   }
   ofx.init().then((ok) => { if (!destroyed && ok) { syncOfficialFx(); wiring.ready(); } }, () => {});
-  // 规程 MAP09 隐匿地块 (§37.230): the client's own tile effect mapeff_079_dikuai_01 (FX_GENERIC tile.duelGrass) loops on
+  // 规程 MAP09 隐匿地块 (§39.230): the client's own tile effect mapeff_079_dikuai_01 (FX_GENERIC tile.duelGrass) loops on
   // every concealment tile, in prep and in battle, while the 3D board and the official effects are on; the 2D board and
   // 官方特效 off keep the tinted tile (tiles.js 'w', board3d duelGrass material). A clear (battle start / end) drops the
   // loops: they are spawned again on the next frame.

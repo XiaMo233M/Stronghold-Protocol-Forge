@@ -11,7 +11,7 @@
 // a room or a match: the route is watched from the card on, and a session restored into a room / a match while the card
 // waits or the film runs takes the overlay down at once, silences the cue and hands the music back to that screen.
 // main.js calls playEntryFilm once at boot. A 规程 start (versions.js startupVersion) plays 规程's own opening instead
-// (ui/regulationFilm.js: the client's season entry, DESIGN §37.147) through the same card, skip, cue and music hold.
+// (ui/regulationFilm.js: the client's season entry, DESIGN §39.147) through the same card, skip, cue and music hold.
 import { store, selectRoute } from '../store.js';
 import { audio, resolveBgm } from '../audio.js';
 import { data } from '../data.js';

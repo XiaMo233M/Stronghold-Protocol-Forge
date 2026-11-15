@@ -309,7 +309,7 @@ export function appVersionMatches(range, version = APP_VERSION) {
 /**
  * The plugin lines a build also runs, by its own minor line. 0.4 keeps the 0.3 plugin surface (plugin API 1–2; the
  * `versions` field is new and optional), so a plugin made for the 0.3 line stays compatible on 0.4.x: the minor bump
- * marks 规程, not a plugin break (§37.231, 2026-11-15). The probe is a late 0.3 patch, so ">=0.3.0 <0.4.0", "0.3.x",
+ * marks 规程, not a plugin break (§39.231, 2026-11-15). The probe is a late 0.3 patch, so ">=0.3.0 <0.4.0", "0.3.x",
  * "^0.3.1" and ">=0.3.4 <0.4.0" are in and a range that stops at an early 0.3 patch is not.
  */
 export const APP_ALSO_RUNS = Object.freeze({ '0.4': Object.freeze(['0.3.9999']) });

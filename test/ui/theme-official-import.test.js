@@ -1,4 +1,4 @@
-// §37.232: an official interface theme imported as a zip (可露希尔 is not in the packages) — every file kept, the group
+// §39.232: an official interface theme imported as a zip (可露希尔 is not in the packages) — every file kept, the group
 // laid over the local manifest, the official card that can be deleted; a third-party pack's Spine character built
 // from its bytes; and the package side: the group and its ui/outer sprites held back, its own importable pack.
 // The browser pass (import, the prefab HUD, the Spine on the funds card and in the 联防 window) was run by hand on a

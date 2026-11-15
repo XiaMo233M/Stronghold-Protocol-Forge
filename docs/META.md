@@ -499,7 +499,7 @@ and its own clone of the current meta RNG. A boss round (`m.wave` null, `bossGro
 same variants on that wave: seed `deriveSeed(0xA11CE, fa:${round}:${seat})` — not the match seed and not the live
 fight's seed — a fresh `bossPoolHp` pool per candidate, the teammate's current board, preview dispatch only, and a
 cap of the visible countdown on the combat clock (`faRehearsalTicks`: `bossLevelTime` × `combatTimeScale` game
-seconds; history §35.64). Counted leaks rank first, then `perPlayer.bossDamage`, kills and candidate order — on a
+seconds; history §37.64). Counted leaks rank first, then `perPlayer.bossDamage`, kills and candidate order — on a
 boss field leader damage × (1 − counted leaks / 150) ranks first (§37.61: a leak costs about one real second of a fight
 that lasts until the team's LP runs out), an equal value falls back to that order, and no boss candidate stops early.
 The layer-gain tie-break trial was withdrawn after the solo NORMAL guard regressed (history §37.20).
@@ -1140,7 +1140,7 @@ Any `choice:` handler whose EffectRef reuses its own key must guard like this (o
   hands handlers the player's view), placement and summon ranges, the AI 托管 evaluation (bot.js), names in toasts and
   tickers — sees the operator; a player without picks keeps the match's GameData itself. Each slotted piece that this match keeps (every legal lobby slot, or only the 选择自编 confirmation when `diyBringLimits` is set) has its own
   stock (`ps.diyStock`: `poolCopies` of the slot's tier, 8 / 5 [ASSUMED], doubled in co-op by `coopPoolMultiplier` like
-  the shared pool — 16 / 10, GitHub #650, DESIGN §32.14.31; none — `diyBanned` — when every bond of it is off this
+  the shared pool — 16 / 10, GitHub #650, DESIGN §34.14.31; none — `diyBanned` — when every bond of it is off this
   covenant match, or in regulation all its core bonds are off (all its add-ons for a piece without a core); `initDiyStock` once the bans are drawn); `poolOf(baseId)` routes its copy accounting (buy, reward
   tickers — sees the operator; a player without picks keeps the match's GameData itself. Each slotted piece has its own
   stock (`ps.diyStock`: `poolCopies` of the slot's tier, 8 / 5 [ASSUMED]; none — `diyBanned` — when every bond of it is
@@ -1375,7 +1375,7 @@ A mode-off bond with members stays the single `off` row and does not gain `effec
 eliminated (nobody can watch them; the result screen reads `m.result`'s own bonds), and per phase: `draft { order, turn, picks, skipsLeft, turnDeadline, turnSeconds, untimed }` (BAND_DRAFT),
 `sp { family, name, desc, eventId, cards:[{ idx, kind:'bounty'|'item'|'tactic', id, name, desc, tier, descRaw?, coin?,
 payout?, rounds?, enemyKey?, count?, price?, team?, tacticKind? }], order, turn, picks:{pid: idx}, taken:{idx: pid}, untimed }`
-(SP_DRAFT), `teamLp` / `bossHp {hp,max}` (Final Assault on), `leaderTop` (during a leader fight, every version since §37.149: up to 3 `{pid,uid,chess,tier,dmg}` of the operators that dealt the most to this pool), `overtimeAt` (最终攻势 / 隐秘核心: ms epoch when the
+(SP_DRAFT), `teamLp` / `bossHp {hp,max}` (Final Assault on), `leaderTop` (during a leader fight, every version since §39.149: up to 3 `{pid,uid,chess,tier,dmg}` of the operators that dealt the most to this pool), `overtimeAt` (最终攻势 / 隐秘核心: ms epoch when the
 overtime drain starts; `deadline` = the level's 120 s countdown), `unite { helpers, leakers }` (UNITE).
 `players[].status`: INFO_CHECK ready/deciding · drafts ready (picked) / deciding (their turn) / acting (waiting) ·
 PREP ready/acting · COMBAT/boss combat/done · UNITE helping/done · others done · `left` / `dead` override.

@@ -63,7 +63,7 @@ test('game.js asks through readyFundsPrompt / readyCommandPrompt before g.ready 
   assert.match(src, /toggleReady\(!L\.priv\.ready\)/, 'Space');
 });
 
-// §37.201: an unused drag command asks too (the owner, 2026-11-14), in the same box, mutable for the match
+// §39.201: an unused drag command asks too (the owner, 2026-11-14), in the same box, mutable for the match
 const cmd = (o = {}) => ({ type: 'ACTIVE', targetType: 'COMMON_CHESS', usable: true, reason: null, targets: [{ uid: 3 }], ...o });
 test('a usable drag command not used this round asks; locked, passive, cooled down, broke, click-only or targetless do not', () => {
   assert.match(readyCommandPrompt(priv({ command: cmd() })).text, /指令还可以使用/);

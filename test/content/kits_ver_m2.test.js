@@ -1,4 +1,4 @@
-// Version kits (DESIGN §35.22.9): the 19 第一期 charId kits, the 35 borrowed 自选 kits, 泥岩's version SP and
+// Version kits (DESIGN §37.22.9): the 19 第一期 charId kits, the 35 borrowed 自选 kits, 泥岩's version SP and
 // Version kits (DESIGN §37.22.9): the 19 第一期 charId kits, the 25 borrowed 自选 kits, 泥岩's version SP and
 // 异客's V2_1 module. The default data keeps the by-id kits (棋子 1_02 stays 角峰).
 import { test } from 'node:test';

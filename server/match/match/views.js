@@ -159,7 +159,7 @@ export class MatchViews {
     if ((this.phase === PHASE.FINAL_ASSAULT || this.phase === PHASE.HIDDEN_CORE) && this.overtimeAt) v.overtimeAt = this.overtimeAt;
     if (this.bossPool) {
       v.bossHp = { hp: Math.max(0, Math.round(this.bossPool.hp)), max: Math.round(this.bossPool.maxHp) };
-      // the leader ranking's top 3 while the pool runs, every version (§37.149; 规程 only from §37.124)
+      // the leader ranking's top 3 while the pool runs, every version (§39.149; 规程 only from §39.124)
       if (this.bossPool.ops) v.leaderTop = this._leaderTopView();
     }
     if (this.phase === PHASE.CUSTOM_CHECK && this.gd.diyBringLimits) {
@@ -323,7 +323,7 @@ export class MatchViews {
   }
 
   /**
-   * The avatar's status badges (§37.148), every version: `winStreak` (the rounds in a row settled without an LP loss) and
+   * The avatar's status badges (§39.148), every version: `winStreak` (the rounds in a row settled without an LP loss) and
    * `winStreakLevel` once that streak reaches the first of gd.winStreakThresholds (规程 [3, 5] → levels 1–2);
    * `bossDamageLevel` while a leader pool runs (最终攻势 / 隐秘核心) and the player's share of it reaches the first of
    * gd.bossDamageThresholds (20 / 50 / 80 % → 1–3, the BOSS_HIT tickers' steps). Alive players only; omitted below.

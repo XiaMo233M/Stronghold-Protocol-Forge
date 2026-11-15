@@ -9,7 +9,7 @@ import { countFree } from './board.js';
  * withdrawals, the temp row, 缪尔赛思 sold on arrival, the Final Assault's bench sale): an explicit `buy` target bought
  * this prep, an exact `keep` id, or a member whose removal lowers an active `bonds` tier (the real counting rules:
  * normal/elite deduplication, hand-counted bonds, morphs and count bonuses). From R9 with at most one free hand slot a
- * benched normal `keep` of tier ≤ 4 that completes no merge is no longer protected (§35.63: LLM benches filled with 3.6
+ * benched normal `keep` of tier ≤ 4 that completes no merge is no longer protected (§37.63: LLM benches filled with 3.6
  * keep-listed pieces and the shed fell through to tier 5/6 carries). The §35.14 classes of 2026-10-20 (every elite and
  * tier ≥ 4 piece of an advisor seat) are gone: legacy's own guards (pairs, fresh pieces, carriers, faKeeps, pagerKeeps)
  * hold for every seat. No plan, or a plan without these fields: nothing is protected (legacy).

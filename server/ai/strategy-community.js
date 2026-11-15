@@ -128,7 +128,7 @@ export const COMMUNITY = {
       ],
     },
   ],
-  // Round 65: the §35.63 bossCounters (叙拉古 / 卡西米尔 against 卢西恩 and 铳, +8 to a candidate's finalAssault) are gone.
+  // Round 65: the §37.63 bossCounters (叙拉古 / 卡西米尔 against 卢西恩 and 铳, +8 to a candidate's finalAssault) are gone.
   // The maintainer rejected leader-specific drafting (2026-10-28, §37.35), and the bots' own solo results put 叙拉古 near
   // the bottom (FOCUS_SHARE in strategy.js): 0 of 15 cycle-5 LLM seats with a 叙拉古 main reached the Final Assault.
   // §37.63: core bonds the 终极 community names against the two roaming Final Assault leaders (handoff/round51 RESEARCH

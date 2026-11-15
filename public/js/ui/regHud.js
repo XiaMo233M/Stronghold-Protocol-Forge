@@ -36,7 +36,7 @@ const PLATE_SPRITES = Object.freeze([
 ]);
 
 /**
- * The backdrop under a cut-out character plate (§37.235). 可露希尔's plate, closure_back_active (the white boxes of its
+ * The backdrop under a cut-out character plate (§39.235). 可露希尔's plate, closure_back_active (the white boxes of its
  * panel_shop_main state_able / btn_open), is 29 % transparent; the prefab draws bg_open (the navy CLOSURE screens behind a
  * fence) under it, and our dark green showed through instead. Rects on the 210×210 button, pivot and anchors bottom-right:
  * bg_open 272×236 at (0, 0), closure_back_active 211×178 at (0, −8). The card's box is the plate's, so the backdrop is
@@ -95,7 +95,7 @@ export function prefabTheme(groups, themeId) {
 
 /**
  * The 规程 look — its shop, top bar, banners and layout: a 规程 version, or any version with such a theme (the owner,
- * 2026-11-14: 「规程版本官方出的那几个主题全量覆盖到盟约版本」, §37.206). The rules stay with regulationFamily (the commands,
+ * 2026-11-14: 「规程版本官方出的那几个主题全量覆盖到盟约版本」, §39.206). The rules stay with regulationFamily (the commands,
  * the core groups, the briefing, the sweep's fourth tab).
  * @param {any} config @param {Record<string, any>|null|undefined} groups @param {string|null|undefined} themeId
  */
@@ -404,7 +404,7 @@ export function regShopCardFaceModel(pack, opts = {}) {
     box: viBox,
     style: boxCss({ ...viBox, left: viBox.left - badge.left, top: viBox.top - badge.top }, badge),
   } : null;
-  // the pack's own look only (§37.237): a theme that borrows ac_n_initial's card prefab keeps our dark face
+  // the pack's own look only (§39.237): a theme that borrows ac_n_initial's card prefab keeps our dark face
   const backing = opts.backing === false ? null : cardBacking(boxAt(boxes, ['root', 'panel_main', 'btn_card', 'bkg'], card), card, pack);
   const layers = [];
   const pushLayer = (suffix) => {
@@ -418,7 +418,7 @@ export function regShopCardFaceModel(pack, opts = {}) {
   } else if (framePrefab) {
     // frame_lv2_obj / frame_lv3_obj are separate layers in prefab order: bottom_grad (the colour ramp under the footer),
     // tv, tv_front and deco_txt (「CLOSURE × RHODES ISLAND」); a sweep / glow without a base texture or a particle node has
-    // no image and is skipped (no animated sweeps — §37.228).
+    // no image and is skipped (no animated sweeps — §39.228).
     for (const child of framePrefab.children || []) {
       if (child?.active === false) continue;
       pushLayer(['root', 'panel_main', 'btn_card', 'group_frame', 'frame_obj_container', framePrefab.name, child.name]);
@@ -475,11 +475,11 @@ export function regShopCardFaceModel(pack, opts = {}) {
 }
 
 /**
- * The card's `bkg` (§37.235, §37.237): an Image under the frame. 可露希尔's (155×187 on the 157×207 card, centred) has a
+ * The card's `bkg` (§39.235, §39.237): an Image under the frame. 可露希尔's (155×187 on the 157×207 card, centred) has a
  * sprite the game sets at run time (external, tinted #FFFFFF); its frame sprite's cut corner and side margins are
  * transparent, so without it they showed our dark green card fill. [ASSUMED] An external or missing sprite is drawn as its
  * colour, as a sprite-less Image is: the official preview shows a light card there. ac_n_initial's is the sprite bg_black
- * (155×187, the official dark card with fine lines), drawn as it is (§37.237: taking only its colour painted the 卫戍协议终端
+ * (155×187, the official dark card with fine lines), drawn as it is (§39.237: taking only its colour painted the 卫戍协议终端
  * cards white). Custom properties, not a layer: it lies under the frame face, which is the card's own background
  * (ui-theme.css). Null when the prefab has none (乌萨斯齐心团: our dark face stays) or its sprite file is missing.
  * @param {{ left: number, top: number, w: number, h: number, node?: any } | null | undefined} box @param {{ w: number, h: number }} card
@@ -507,7 +507,7 @@ function cardBacking(box, card, pack) {
 }
 
 /**
- * The 规程 shop's empty slot (§37.236): the card prefab's `state_empty`, the one other state of autochess_shop_card_item —
+ * The 规程 shop's empty slot (§39.236): the card prefab's `state_empty`, the one other state of autochess_shop_card_item —
  * the official card shows it instead of panel_main when its slot holds no card (ac_n_initial and 可露希尔 bg_empty,
  * 「NO INFO」; 乌萨斯齐心团 card_empty, its poster). Its box is relative to the card (btn_card), as the face's layers are, and
  * may reach past it: 乌萨斯齐心团's is 173×200 at (0, −4) on 155×187. Null when the pack has no such image (the lite package
@@ -526,20 +526,20 @@ export function regShopEmptyCardModel(pack, opts = {}) {
   const card = boxAt(boxes, ['root', 'panel_main', 'btn_card'], { left: 0, top: 0 });
   if (!card) return null;
   const layer = layerFrom(boxAt(boxes, ['root', 'state_empty'], card), card, pack, { still: !!opts.still });
-  // card: the official card's box, so a 盟约 card (narrower) can lay the empty card out at its own proportions (§37.238)
+  // card: the official card's box, so a 盟约 card (narrower) can lay the empty card out at its own proportions (§39.238)
   return layer ? { theme: pack.group?.replace(/^themes\//, '') || '', card: { w: card.w, h: card.h }, node: layer.node, style: layer.style, image: layer.image } : null;
 }
 
 /** One official prefab unit in rem: the prefab HUD's OFFICIAL_SCALE / 100 (ui/prefab/hud.js, a component module, so not imported). */
 const OFFICIAL_UNIT_REM = 1.44 / 100;
 
-/** The shop background's nodes in paint order (§37.238): 可露希尔's matte_back under the whole panel, then group_bg's
+/** The shop background's nodes in paint order (§39.238): 可露希尔's matte_back under the whole panel, then group_bg's
  * full-width shadow and the corner decorations. group_bg's character-card layers (bg, char, bg_open, closure_back_active,
  * the particles) are drawn on the character card instead. */
 const BACKDROP_NODES = Object.freeze(['matte_back', 'bg_shadow', 'deco_left', 'bg_deco']);
 
 /**
- * The official shop background (§37.238): panel_shop_main's state_unfold/group_bg — the full-width bottom shadow
+ * The official shop background (§39.238): panel_shop_main's state_unfold/group_bg — the full-width bottom shadow
  * (bg_shadow: shadow_total 237 high in ac_n_initial and 乌萨斯齐心团, bg_shadow 351 high in 可露希尔) and the corner
  * decorations (乌萨斯齐心团 deco_left back_left 863×112, 可露希尔 bg_deco 1024×125, both bottom left) — and 可露希尔's
  * matte_back (414×372 bottom right, tinted #090909). In all three packs these nodes and their parents sit on the bottom
@@ -915,7 +915,7 @@ export function regChromeStyle(urls) {
   if (style['--reg-refresh']) style['--reg-refresh-bg'] = 'transparent';
   if (style['--reg-frozen']) style['--reg-frozen-bg'] = 'transparent';
   put('--reg-char', urls.char);
-  // a cut-out plate's backdrop (§37.235): sizes as unitless fractions of the card's box (css `--fw` / `--fh` live there)
+  // a cut-out plate's backdrop (§39.235): sizes as unitless fractions of the card's box (css `--fw` / `--fh` live there)
   if (style['--reg-char'] && urls.charBack && regCssUrl(urls.charBack.url)) {
     const n = (v) => String(Number(Number(v).toFixed(5)));
     style['--reg-char-back'] = regCssUrl(urls.charBack.url);

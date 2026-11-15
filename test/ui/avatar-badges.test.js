@@ -1,4 +1,4 @@
-// 完美连胜 / 领袖伤害 on the team panel's avatars (DESIGN §37.148, ui/avatarBadges.js): the rank refs of the official
+// 完美连胜 / 领袖伤害 on the team panel's avatars (DESIGN §39.148, ui/avatarBadges.js): the rank refs of the official
 // player-avatar prefabs, the pack choice (the theme's own, else ac_n_initial's, else the CSS stand-in), the tooltips and
 // the badge vnodes; with the local extraction, the installed packs' prefabs. Server side: test/match/avatar-badges.test.js.
 import { test } from 'node:test';

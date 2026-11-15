@@ -489,7 +489,7 @@ function tickAirflowEnemy(battle, st, e) {
 }
 
 /** Apply terrain / airflow state to one unit now (deploy, spawn, every tick). Devices — the map's and a summon whose
- * official entity type is 装置 (`mem.terrainImmune`: 望's 棋子, §37.205) — stand outside it. */
+ * official entity type is 装置 (`mem.terrainImmune`: 望's 棋子, §39.205) — stand outside it. */
 function refreshUnit(battle, st, u) {
   if (!u.alive || !u.deployed || u.kind === 'device' || u.mem?.terrainImmune) return;
   if (st.hasTerrain) {

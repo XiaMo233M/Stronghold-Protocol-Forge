@@ -1,4 +1,4 @@
-// 规程's opening (ui/regulationFilm.js, DESIGN §37.147): the effect materials it needs (rings, particle sheets, masked
+// 规程's opening (ui/regulationFilm.js, DESIGN §39.147): the effect materials it needs (rings, particle sheets, masked
 // and additive layers: ui/prefab/view.js), the pose of a film second, the pictures it preloads and the frame-by-frame
 // stage (ui/prefab/stage.js) on a stand-in DOM. Synthetic prefabs only; the last block cross-checks the extracted group
 // (tools/local-extract/season_entry.py) and skips without it.

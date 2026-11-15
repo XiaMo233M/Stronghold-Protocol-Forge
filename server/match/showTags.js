@@ -1,4 +1,4 @@
-// server/match/showTags.js — the live numbers behind the official cards' {showtag_value_N} placeholders (§37.201).
+// server/match/showTags.js — the live numbers behind the official cards' {showtag_value_N} placeholders (§39.201).
 // 规程's tables write a running value into some texts — 定期存折 "装备时销毁，获得{showtag_value_1}资金（持有时每回合+1）",
 // the 特质 of 风絮 / 可露希尔 / 夕 "本回合每获得过一名干员(已获得{showtag_value_1}名)", 安洁莉娜 "(已刷新{showtag_value_1}次)",
 // 溯光星源 "(已消耗{showtag_value_1}资金)", 极光 "【谢拉格】层数+{showtag_value_1}（每次触发后升级…）", 忍冬 "获得

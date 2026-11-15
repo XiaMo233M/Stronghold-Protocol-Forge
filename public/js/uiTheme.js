@@ -196,7 +196,7 @@ export function createThemeLibrary(opts = {}) {
         anims: rawChar.anims || { idle: 'Idle' },
       };
     } else if (rawChar?.spine) {
-      // An imported pack (§37.232): the model is built from the stored bytes (themeSpine.js), every atlas page by name.
+      // An imported pack (§39.232): the model is built from the stored bytes (themeSpine.js), every atlas page by name.
       const skel = rec.files?.[rawChar.spine.skel];
       const atlas = rec.files?.[rawChar.spine.atlas];
       const textures = Array.isArray(rawChar.spine.textures) ? rawChar.spine.textures : [];
@@ -214,7 +214,7 @@ export function createThemeLibrary(opts = {}) {
         };
       }
     }
-    // An imported official pack (§37.232) lists every file as the group the installed one would have
+    // An imported official pack (§39.232) lists every file as the group the installed one would have
     // (data/local-assets.json shape: { path, w, h }), so the prefab HUD, card faces and banners find their sprites.
     let group = null;
     if (rec.officialPack && typeof rec.officialPack.group === 'string') {
@@ -390,7 +390,7 @@ export function createThemeLibrary(opts = {}) {
     catch { return fail('bad-json'); }
     let parsedId;
     try { parsedId = JSON.parse(jsonText).id; } catch { parsedId = null; }
-    // an official id is an official pack (the extracted group), with its own limits (§37.232)
+    // an official id is an official pack (the extracted group), with its own limits (§39.232)
     const officialRow = typeof parsedId === 'string' ? officialThemeById(parsedId) : null;
     if (officialRow) return importOfficialPack(officialRow, jsonText, byRel, packBytes);
 
@@ -431,7 +431,7 @@ export function createThemeLibrary(opts = {}) {
     for (const lines of Object.values(draft.voice)) for (const path of lines) want.add(path);
     const sidecars = new Set(draft.character?.spine ? [draft.character.spine.skel, draft.character.spine.atlas] : []);
     // Every listed file keeps a size entry. Only a file the first pass accepted is decoded (or, for the character's
-    // skeleton and atlas, kept as bytes: themeSpine.js builds the model from them, §37.232).
+    // skeleton and atlas, kept as bytes: themeSpine.js builds the model from them, §39.232).
     for (const file of listed) {
       const image = IMAGE_EXT.has(extOf(file.rel));
       const audio = AUDIO_EXT.has(extOf(file.rel));
@@ -512,7 +512,7 @@ export function createThemeLibrary(opts = {}) {
   }
 
   /**
-   * An official pack as a zip or folder (§37.232: 可露希尔 is not in the packages): the group the extractor writes —
+   * An official pack as a zip or folder (§39.232: 可露希尔 is not in the packages): the group the extractor writes —
    * theme.json, prefabs.json, sprites/, spine/, voice/, the card pictures. theme.json is checked as an installed pack's
    * is (only the files it names); every other file of an allowed type is kept too, because the prefabs name their
    * sprites. Refused when this server already serves that group. It does not count toward THEME_LIMITS.packs.
@@ -663,7 +663,7 @@ export function createThemeLibrary(opts = {}) {
 
   function importedCount() {
     let n = 0;
-    // an imported official pack (§37.232) has its own place, as an installed one does
+    // an imported official pack (§39.232) has its own place, as an installed one does
     for (const live of mem.values()) if (!live.official && !live.officialPack) n += 1;
     return n;
   }
@@ -787,7 +787,7 @@ export function createThemeLibrary(opts = {}) {
       official: true,
       savedAt: Date.now(),
     };
-    unregisterGroup(rec.id); // this server serves the group: it wins over an imported copy (§37.232)
+    unregisterGroup(rec.id); // this server serves the group: it wins over an imported copy (§39.232)
     revokePack(rec.id);
     const live = runtimeOf(rec);
     live.official = true;
@@ -913,7 +913,7 @@ export function themePack(id) {
  * Image slots drawn at their picture's own aspect (ui-theme.css `aspect-ratio: var(--sp-ar-<slot>)`): the top bar's two
  * 🔍 buttons keep the hand-made box's height, and a theme's picture — 可露希尔 100×68 / 88×56, 乌萨斯齐心团 and
  * ac_n_initial 73×41 (their layout.json sizes) — used to be stretched into the built-in 35:29 box (the owner,
- * 2026-11-14 「最顶上状态栏有图标有变形」, §37.201).
+ * 2026-11-14 「最顶上状态栏有图标有变形」, §39.201).
  */
 export const ASPECT_SLOTS = Object.freeze(['img_check_player', 'img_check_enemy']);
 
@@ -1035,7 +1035,7 @@ export async function bootUiThemes() {
   if (id && officialThemeById(id)) {
     const installed = installedOfficialThemes(manifest).some((row) => row.id === id);
     // A lite zip has no group. Fall back quietly: the pack was never stored here — unless this browser imported it
-    // (§37.232: an official pack as a zip needs no group on the server).
+    // (§39.232: an official pack as a zip needs no group on the server).
     if (!installed) {
       if (library.get(id)?.officialPack) {
         applyUiTheme(id);
@@ -1080,7 +1080,7 @@ export async function prepareTheme(id) {
   return library.loadOfficial(officialThemeById(id), manifest);
 }
 
-/** The official groups this browser imported (§37.232): group → entries, the same object until one changes. */
+/** The official groups this browser imported (§39.232): group → entries, the same object until one changes. */
 export function importedThemeGroups() {
   return library.importedGroups();
 }

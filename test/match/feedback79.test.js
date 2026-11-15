@@ -1,4 +1,4 @@
-// test/match/feedback79.test.js — community reports on old versions, sent by the owner on 2026-11-14 (history §37.205):
+// test/match/feedback79.test.js — community reports on old versions, sent by the owner on 2026-11-14 (history §39.205):
 // 巫恋's 售出 swap into a frozen shop keeps the swapped card frozen (an effect's card follows the shop's freeze); 伊桑's
 // 「当前人数最多盟约的干员」 is never above the shop level and never 伊桑 himself (第一期 and 规程); 第一期 greys 2 of its 6
 // core bonds per match.

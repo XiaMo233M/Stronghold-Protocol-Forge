@@ -129,7 +129,7 @@ export class MatchPlatform {
   }
 
   /**
-   * The match half of a spectator inheriting a bot seat (DESIGN §35.100). The lobby still rebinds the session,
+   * The match half of a spectator inheriting a bot seat (DESIGN §37.100). The lobby still rebinds the session,
    * the seat and the reconnect token. Same answer shape as handle.
    * @param {string} botId @param {string} name the inheriting spectator's name
    * @returns {{ ok: true } | { error: string, detail?: string }}

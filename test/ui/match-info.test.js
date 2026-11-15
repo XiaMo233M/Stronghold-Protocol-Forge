@@ -91,7 +91,7 @@ test('MatchBondRow: greyed by state (✕ when the mode never activates it, the o
   const cell = (id) => [...walk(row)].find((v) => v.props?.['data-bond'] === id);
   const disc = (id) => [...walk(cell(id))].find((v) => v.type === BondDisc);
   const tipOf = (id) => [...walk(row)].find((v) => v.type === Tooltip && v.key === id);
-  // §37.200: no count badge on a disc (it sat on the ✕); the count is in the tip
+  // §39.200: no count badge on a disc (it sat on the ✕); the count is in the tip
   assert.equal([...walk(row)].some((v) => hasClass(v, 'brief-bond__ban')), false);
   // 奥术: switched off by the mode — greyed, ✕, no corner, no tier, tip 本局禁用
   assert.ok(hasClass(cell('arcaneShip'), 'is-off') && !hasClass(cell('arcaneShip'), 'is-incomplete'));
@@ -104,7 +104,7 @@ test('MatchBondRow: greyed by state (✕ when the mode never activates it, the o
   assert.equal(disc('steadShip').props.tag?.type, BondLackTag);
   assert.equal(tipOf('steadShip').props.text, briefingBondTip('坚守', 'drawn', m.perBond.get('steadShip')));
   assert.match(tipOf('steadShip').props.text, /部分盟约所含干员阵容不完整/);
-  // 精准: enabled, but 2 of its members are banned (a payload the server no longer sends since §37.200) — lit disc,
+  // 精准: enabled, but 2 of its members are banned (a payload the server no longer sends since §39.200) — lit disc,
   // red ring (is-partial), no corner, the count in the tip
   assert.ok(!hasClass(cell('preciShip'), 'is-off') && hasClass(cell('preciShip'), 'is-partial'));
   assert.deepEqual([disc('preciShip').props.disabled, disc('preciShip').props.active, disc('preciShip').props.cross, disc('preciShip').props.tag], [false, true, false, null]);
@@ -128,7 +128,7 @@ test('MatchBondRow: greyed by state (✕ when the mode never activates it, the o
   assert.equal(tipOf('deputShip').props.aside, null);
 });
 
-test('MatchLegend: the grey; "或本模式禁用" only when the mode switches bonds off; no count badge to explain (§37.200)', () => {
+test('MatchLegend: the grey; "或本模式禁用" only when the mode switches bonds off; no count badge to explain (§39.200)', () => {
   const t = textOf(MatchLegend({ model: model() }));
   assert.match(t, /^灰色：部分盟约所含干员阵容不完整（仍可通过其他盟约的干员或装备激活），或本模式禁用$/);
   assert.doesNotMatch(t, /该盟约中无法出现的干员数/);

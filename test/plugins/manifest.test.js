@@ -56,7 +56,7 @@ test('manifest 2: a content plugin, normalised', () => {
   assert.deepEqual(Object.keys(m.parts), ['data', 'operators', 'modes', 'i18n']);
   assert.deepEqual(m.parts.i18n, { files: ['i18n/en.json'], langs: { en: 'i18n/en.json' } });
   assert.deepEqual(declaredPaths(m).map((d) => d.rel), ['data/economy.json', 'operators/rosa.json', 'modes/marathon.json', 'i18n/en.json']);
-  // made for the 0.3 line: 0.4.x runs it too (§37.231), 0.5.0 does not
+  // made for the 0.3 line: 0.4.x runs it too (§39.231), 0.5.0 does not
   assert.equal(readPluginManifest(marathon(), ctx('marathon', { app: '0.4.1' })).manifest.compatible, true);
   assert.equal(readPluginManifest(marathon(), ctx('marathon', { app: '0.5.0' })).manifest.compatible, false);
   assert.match(warningsOf({ ...marathon(), app: '0.2.x' }), /made for app 0\.2\.x; this is 0\.3\.0/);
@@ -229,7 +229,7 @@ test('the classes: lang and cosmetic load (P1a), content loads (P1b), ui loads (
   assert.deepEqual(['1.0.0', '0.2.1-beta.1', '1.0.0+build.5', '1.0', '01.0.0', 'v1.0.0'].map(isSemver), [true, true, true, false, false, false]);
 });
 
-test('0.4.x also runs plugins made for the 0.3 line; dependency ranges and other lines stay strict (§37.231)', () => {
+test('0.4.x also runs plugins made for the 0.3 line; dependency ranges and other lines stay strict (§39.231)', () => {
   assert.deepEqual(Object.keys(APP_ALSO_RUNS), ['0.4']);
   for (const r of ['>=0.3.0 <0.4.0', '0.3.x', '^0.3.1', '~0.3.2', '>=0.3.4 <0.4.0', '>=0.4.0 <0.5.0', '0.4.x', '>=0.3.0', '*']) {
     assert.equal(appCompatible(r, '0.4.0'), true, `${r} on 0.4.0`);

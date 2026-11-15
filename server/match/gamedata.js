@@ -599,13 +599,13 @@ export class GameData {
 
   get lpCapPerRound() { return posIntOr(this.config.lpCapPerRound, DEFAULTS.lpCapPerRound); }
   /**
-   * The avatar's 完美连胜 levels (§37.148): the streak lengths — rounds in a row without an LP loss — where level 1 and 2
+   * The avatar's 完美连胜 levels (§39.148): the streak lengths — rounds in a row without an LP loss — where level 1 and 2
    * start. 规程's constData playerAvatarWinStreakThresholds ([3, 5]); a version without it takes 规程's values (the owner
    * asked for the badge in every version).
    */
   get winStreakThresholds() { return thresholdsOr(this.config.constants?.playerAvatarWinStreakThresholds, AVATAR_WIN_STREAK); }
   /**
-   * The avatar's 领袖伤害 levels (§37.148): the player's share of the round's leader pool where levels 1–3 start. 规程's
+   * The avatar's 领袖伤害 levels (§39.148): the player's share of the round's leader pool where levels 1–3 start. 规程's
    * constData playerAvatarBossDamageThresholds ([0.2, 0.5, 0.8], the BOSS_HIT tickers' steps); other versions likewise.
    */
   get bossDamageThresholds() { return thresholdsOr(this.config.constants?.playerAvatarBossDamageThresholds, AVATAR_BOSS_DAMAGE); }

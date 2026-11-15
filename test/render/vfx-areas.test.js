@@ -484,7 +484,7 @@ describe('operators\' areas', () => {
   });
 });
 
-describe('旅骨\'s alchemy unit and 承曦格雷伊\'s ball (history §37.202)', () => {
+describe('旅骨\'s alchemy unit and 承曦格雷伊\'s ball (history §39.202)', () => {
   const hitCount = (spawned, key) => spawned.filter((k) => k === key).length;
 
   test('旅骨 S1: the trail flies to the tile, the range is held for the zone, and one hit plays per pulse', async () => {
@@ -593,7 +593,7 @@ describe("a bound area's place", () => {
   });
 });
 
-describe('every alchemist\'s 炼金单元 (the owner, 2026-11-14; history §37.207)', () => {
+describe('every alchemist\'s 炼金单元 (the owner, 2026-11-14; history §39.207)', () => {
   const count = (spawned, key) => spawned.filter((k) => k === key).length;
 
   test('锡人 S1: the flask\'s ring for the zone\'s time, and its tick hit once a second at the tile', async () => {

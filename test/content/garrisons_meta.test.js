@@ -724,7 +724,7 @@ test('歌蕾蒂娅 / 余: granting a chess toasts 「名字：获得X」', () =>
   assert.ok(handChess(yu.ps).some((id) => CH(id).name === yuName), yuLine);
 });
 
-test('余 37: a chess of the bond with the most members (normal: 3 in the row; 精锐: always), at most the shop level (§37.205)', () => {
+test('余 37: a chess of the bond with the most members (normal: 3 in the row; 精锐: always), at most the shop level (§39.205)', () => {
   for (const { gid, g, owners } of idsOf('SERVER_PREP_START', 'SERVER_MOST_BOND')) {
     for (const owner of owners) {
       const s = setup();

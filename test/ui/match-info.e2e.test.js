@@ -182,7 +182,7 @@ describe('GitHub #8 and #484: 本局信息 in the strategy draft (real server, h
     const mode = data.get('config')?.modes?.[pub.modeId];
     const greyed = [...new Set([...(pub.drawnDisabledBonds || []), ...(mode?.inactiveBondIds || [])])].sort();
     const chess = pub.bannedChess.map((id) => data.lookup('chess', id)).filter(Boolean);
-    // banned members per bond name (the in-game tab's badge; the briefing's discs carry none since §37.200)
+    // banned members per bond name (the in-game tab's badge; the briefing's discs carry none since §39.200)
     const per = {};
     for (const c of chess) for (const b of c.bonds || []) { const name = data.lookup('bonds', b)?.name || b; per[name] = (per[name] || 0) + 1; }
     return { greyed, off: (mode?.inactiveBondIds || []).slice().sort(), tiers: chess.map((c) => c.tier), names: chess.slice().sort((a, b) => a.tier - b.tier).map((c) => c.name), per };
@@ -236,7 +236,7 @@ describe('GitHub #8 and #484: 本局信息 in the strategy draft (real server, h
     const dlg = await readInfo(page, '.minfo-dlg');
     assert.deepEqual(dlg, brief, 'the dialog shows the same enemies, battlefield, bonds and banned operators as the briefing');
     assert.deepEqual(dlg.rows, ['核心盟约', '附加盟约']);
-    // one mark per greyed disc: the ✕ when the mode never activates it, the official 阵容不完整 corner when drawn (§37.200)
+    // one mark per greyed disc: the ✕ when the mode never activates it, the official 阵容不完整 corner when drawn (§39.200)
     assert.ok(dlg.bonds.filter((b) => b.off).every((b) => (b.incomplete ? b.tag && !b.x : b.x && !b.tag)), 'every greyed disc carries its one mark');
     assert.ok(dlg.bonds.filter((b) => !b.off).every((b) => !b.x && !b.tag), 'a lit disc carries none');
     const arcane = await centre(page, '.minfo-dlg .brief-bond[data-bond="arcaneShip"] .bond__disc');

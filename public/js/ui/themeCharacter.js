@@ -1,6 +1,6 @@
 // The official funds-card character (theme.json `character`) on `.funds__char`.
 // An image is a picture. A Spine of an installed official pack reuses the battle loader (Spine 3.8, pixi-spine); one
-// of an imported pack is built from its bytes (themeSpine.js, §37.232). Idle loops, and a theme voice line plays the
+// of an imported pack is built from its bytes (themeSpine.js, §39.232). Idle loops, and a theme voice line plays the
 // clip named in `anims.voice`. No character leaves today's box.
 
 import { ensurePixi } from '../render/app/pixi.js';
@@ -108,7 +108,7 @@ export function mountThemeCharacter(host, character, opts = {}) {
       let data;
       let P;
       if (blobs) {
-        // an imported pack (§37.232): the model is built from its bytes, no request
+        // an imported pack (§39.232): the model is built from its bytes, no request
         P = await ensurePixi();
         if (dead || !P?.spine?.Spine) return;
         const { loadSpineFromBlobs } = await import('../themeSpine.js');

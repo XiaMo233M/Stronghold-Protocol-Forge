@@ -132,7 +132,7 @@ test('the panel clears the phone HUD at 844×390 and 667×375', () => {
   }
 });
 
-test('a tall right column (可露希尔\'s TV + the overtime warning) moves the list under it at the right edge, clear of the DP box; left of it only without room (§37.201, §37.207)', () => {
+test('a tall right column (可露希尔\'s TV + the overtime warning) moves the list under it at the right edge, clear of the DP box; left of it only without room (§39.201, §39.207)', () => {
   const hud = { left: 0, top: 0, right: 1280, bottom: 720 };
   const home = { left: 1072, top: 130, right: 1219, bottom: 232 };
   const tv = { left: 1028, top: 13, right: 1260, bottom: 242 };

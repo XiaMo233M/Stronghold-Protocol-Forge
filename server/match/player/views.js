@@ -42,7 +42,7 @@ export class PlayerViews {
       tier: rec && Number.isInteger(rec.tier) ? rec.tier : null,
       items: p.kind === 'chess' ? (p.items || []).map((it) => ({ uid: it.uid, id: it.id, ...this._itemProgressView(it) })) : [],
       ...(p.kind === 'item' ? this._itemProgressView(p) : {}),
-      // the live numbers of the record's {showtag_value_N} texts (§37.201, showTags.js) — only 规程 records carry them
+      // the live numbers of the record's {showtag_value_N} texts (§39.201, showTags.js) — only 规程 records carry them
       ...(p.kind === 'chess' ? this._garrisonTagsView(p) : {}),
       count: p.kind === 'token' ? (p.count || 1) : 1,
       ownerUid: p.kind === 'token' ? p.ownerUid ?? null : null,

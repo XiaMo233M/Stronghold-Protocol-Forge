@@ -287,7 +287,7 @@ test('幻影: each 夜莺 deployment adds 2 (RIN-Y stage 3: 3) to her stock, at 
   }
 });
 
-test('幻影 without DP waits for it; the 幻影 holds 禁疗 (PRTS 幻影 备注 "持有禁疗。", §37.201): 夜莺 neither heals it nor gives it her S2 barrier, an HP regen still restores it', () => {
+test('幻影 without DP waits for it; the 幻影 holds 禁疗 (PRTS 幻影 备注 "持有禁疗。", §39.201): 夜莺 neither heals it nor gives it her S2 barrier, an HP regen still restores it', () => {
   const { h, u, bird } = field({ tier: 6, elite: true, mod: RINY, skill: 1, phantom: [12, 4], dp: 0 });
   // the drain makes it injured, inside her range — still no patient of hers
   u.skill.gainSp(999);

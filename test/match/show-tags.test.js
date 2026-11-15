@@ -1,4 +1,4 @@
-// test/match/show-tags.test.js — 规程's {showtag_value_N} texts (§37.201): the player's own piece views carry the live
+// test/match/show-tags.test.js — 规程's {showtag_value_N} texts (§39.201): the player's own piece views carry the live
 // numbers (server/match/showTags.js) — 定期存折's pay now, the round counters of 风絮 / 安洁莉娜 / 溯光星源, the next
 // grant of 极光 / 忍冬's upgrading 特质 — and records without such a text add no field (every other version's views stay
 // as they were). Client side: test/ui/show-tags.test.js.

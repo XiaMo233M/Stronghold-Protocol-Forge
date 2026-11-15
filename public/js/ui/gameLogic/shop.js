@@ -197,7 +197,7 @@ export function readyFundsPrompt(priv, { ready = true, keptBands = null, autopla
 
 /**
  * The 准备 confirmation's second reason (the owner, 2026-11-14 「当前回合能使用的拖拽类主动使用的策略没使用的话也像商店钱没
- * 花完一样加个提示，可以勾选本局之后不再提醒」, §37.201): the strategy's active command (指令, m.private.command) is usable
+ * 花完一样加个提示，可以勾选本局之后不再提醒」, §39.201): the strategy's active command (指令, m.private.command) is usable
  * this round — not locked, cooled down, uses left, funds for its cost (the server's `usable`) — is dragged onto a target
  * (not NO_TARGET) and has one. The same exclusions as the funds prompt (un-ready, already ready, out, AI 托管); the
  * caller drops it once the player ticked 「本局不再提醒」. [ASSUMED] the wording (the official has no such dialog).

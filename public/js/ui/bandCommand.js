@@ -41,7 +41,7 @@ const STYLE = { color: 0x7fffc9, fill: 0.24, line: 2, group: 'command' };
 /**
  * The target under the pointer while the command is dragged: its tile turns from the targets' mint to orange — the drop
  * lands there (the owner, 2026-11-14: an arrow from the strategy following the mouse, a mark on the tile under it, or the
- * operator's foot square turning orange — 「你来决定」: the arrow and the orange square, §37.201).
+ * operator's foot square turning orange — 「你来决定」: the arrow and the orange square, §39.201).
  */
 const HOVER = { color: 0xff9a3c, fill: 0.42, line: 3, group: 'command-hover' };
 /** CSS px between two chevrons of the aiming arrow. */

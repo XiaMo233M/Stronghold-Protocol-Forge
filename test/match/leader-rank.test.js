@@ -1,5 +1,5 @@
 // The leader ranking: per-operator damage from the reports the fields already send, clamped like the pool, top 3 on
-// m.public during the fight — every version (§37.149; 规程 only from §37.124).
+// m.public during the fight — every version (§39.149; 规程 only from §39.124).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { getVersionData } from '../../server/data.js';
@@ -138,7 +138,7 @@ test('a short clock clamps a huge report, a duplicate uid keeps the max, and a s
   } finally { m.dispose(); }
 });
 
-test('盟约 ranks too (every version, §37.149): the pool keeps the operator map, m.public its top 3', () => {
+test('盟约 ranks too (every version, §39.149): the pool keeps the operator map, m.public its top 3', () => {
   const h = makeMatch({ humans: 4, difficulty: 'HARD', clientCombat: true, fake: true, instant: false, clients: false }).start();
   h.toPrep(1);
   const m = h.m;

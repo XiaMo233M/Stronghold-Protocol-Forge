@@ -174,7 +174,7 @@
 //     the room's own queue (serial): a request waits for the previous one's answer. A vanilla room never queues — its
 //     match is in this process and answers at once, exactly as before. A loadout, 干员持有 list or 自选 roster stored while
 //     the player was in a room of another content is filtered to the room's data when its match starts (an id the set
-//     does not know is dropped, the rest kept — design study §6.9), and room.loadout / room.ownership / room.diy are
+//     does not know is dropped, the rest kept — design study §8.9), and room.loadout / room.ownership / room.diy are
 //     checked against the room's own data (and its 自选 list). When the worker stops (a crash, the watchdog), the match
 //     ends with summary.reason 'plugin-crash' | 'plugin-hang' | 'plugin-start' and the room is back in its lobby.
 //   * Spectator seats (community report #26, owner's decision 2026-10-04 — a remake feature, the official room has none):
@@ -2872,7 +2872,7 @@ export class Lobby {
   }
 
   /**
-   * A human seat's stored settings for a match of `room` (header "Gameplay plugins", the design study's §6.9): kept as
+   * A human seat's stored settings for a match of `room` (header "Gameplay plugins", the design study's §8.9): kept as
    * they are when they were checked for the room's content; filtered to its data otherwise — an id it does not know is
    * dropped, the rest kept (never the whole setting refused). A loadout or 干员持有 list checked for another data set also
    * loses every chess id whose operator (charId) differs between the two (header "Official versions": chess ids are

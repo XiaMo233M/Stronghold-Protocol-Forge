@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CHROME, hasChrome } from '../e2e/client.mjs';
-test('all bonds remain reachable by mouse drag, wheel, keyboard and native scrolling (no arrows, §37.201)', { skip: process.env.SP_E2E !== '1' || !hasChrome(), timeout: 90000 }, async () => {
+test('all bonds remain reachable by mouse drag, wheel, keyboard and native scrolling (no arrows, §39.201)', { skip: process.env.SP_E2E !== '1' || !hasChrome(), timeout: 90000 }, async () => {
   const { startServer } = await import('../../server/index.js');
   const puppeteer = (await import('puppeteer-core')).default;
   const srv = await startServer({ port: 0, host: '127.0.0.1', quiet: true });

@@ -1,6 +1,6 @@
 // Maintainer decision 2026-10-17, requested 2026-10-19: external observation → human intents as a #673 strategy.
 // [ASSUMED] Protocol/resource policy (not official gameplay): defaults and bounds documented in EXTERNAL_AI.md.
-// §35.23: timeoutMs up to 300000 so a reasoning model can answer a long prep.
+// §37.23: timeoutMs up to 300000 so a reasoning model can answer a long prep.
 // §37.72 [ASSUMED]: a plan seat's timed decision leaves the built-in bot only its reserve (externalAI.js planReserveMs, at
 // most half the window; direct-mode seats keep half). reserveMs null is the per-round table (match/prep.js
 // BOT_PREP_RESERVE_MS), an integer replaces it with one value; reserveScale multiplies either (a slower machine, a

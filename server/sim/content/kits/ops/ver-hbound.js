@@ -66,7 +66,7 @@ function throwZone(battle, unit, sbb, talent, id) {
   const heavyAt = num(sbb.value, 3);
   const slow = Math.abs(num(sbb.move_speed));
   // `skill` is payload for the client binding (FX_BINDINGS skchr_hbound_1 / _2). The sim still lands the unit
-  // at once; the drawn flight is the client's (history §37.202).
+  // at once; the drawn flight is the client's (history §39.202).
   makeZone(battle, unit, {
     x, y, radius, duration: delay, interval, skill: id,
     onPulse(b) {

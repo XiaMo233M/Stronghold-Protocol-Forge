@@ -191,7 +191,7 @@ test('chrome sprites prefer the active official pack, then ac_n_initial, and ski
 
   const closur = regChromeUrls(groups, { themeId: 'ac_s_closur' });
   assert.equal(closur.char, '/assets/local/themes/ac_s_closur/sprites/closure_back_active.webp');
-  // §37.235: the cut-out plate's backdrop from the same pack, at the prefab's size and offset (272×236 over 211×178, 8 up)
+  // §39.235: the cut-out plate's backdrop from the same pack, at the prefab's size and offset (272×236 over 211×178, 8 up)
   assert.deepEqual(closur.charBack, { url: '/assets/local/themes/ac_s_closur/sprites/bg_open.webp', w: 272 / 211, h: 236 / 178, bottom: 8 / 178 });
   assert.equal(initial.charBack, null, 'bg_close is opaque: no backdrop');
   assert.equal(iron.charBack, null);
@@ -384,7 +384,7 @@ const PREFABS = (id) => path.join(ROOT, `public/assets/local/themes/${id}/prefab
 const LOCAL_PREFABS = LOCAL_THEMES && ['ac_n_initial', 'ac_n_iron', 'ac_s_closur'].every((id) => existsSync(PREFABS(id)))
   && Object.hasOwn(JSON.parse(read('data/local-assets.json')).groups || {}, 'themes/ac_s_closur');
 
-test('the installed packs\' card backing and empty card, read from their real prefabs (§37.236, §37.237)', { skip: !LOCAL_PREFABS && 'official theme prefabs not extracted (public/assets is git-ignored)' }, () => {
+test('the installed packs\' card backing and empty card, read from their real prefabs (§39.236, §39.237)', { skip: !LOCAL_PREFABS && 'official theme prefabs not extracted (public/assets is git-ignored)' }, () => {
   const groups = JSON.parse(read('data/local-assets.json')).groups;
   const real = (id) => makePack(groups, `themes/${id}`, JSON.parse(readFileSync(PREFABS(id), 'utf8')));
   const url = (id, file) => `url("${'/assets/local/themes/'}${id}/${file}")`;
@@ -462,7 +462,7 @@ test('regulation card faces follow each theme prefab, including star angles and 
   assert.deepEqual(initial.tierBox.style, { left: '-1.2903%', top: '-0.5348%', width: '25.8065%', height: '21.3904%' });
   assert.deepEqual(initial.cost.style, { left: '49.3548%', top: '6.6845%' });
   assert.equal(initial.layers.length, 0, 'the starter theme draws its hollow frame without level-frame prefabs');
-  // §37.237: its bkg is the sprite bg_black (the official dark card), drawn as it is — not its white colour
+  // §39.237: its bkg is the sprite bg_black (the official dark card), drawn as it is — not its white colour
   assert.deepEqual(initial.backing, {
     colour: '#FFFFFF', sprite: '/assets/local/themes/ac_n_initial/sprites/bg_black.webp',
     style: { '--scard-under': 'url("/assets/local/themes/ac_n_initial/sprites/bg_black.webp")', '--scard-under-size': '100% 100%', '--scard-under-pos': '50% 50%' },
@@ -492,7 +492,7 @@ test('regulation card faces follow each theme prefab, including star angles and 
   assert.deepEqual(closure1.namebar, { left: '0.6369%', top: '73.1884%', width: '98.0892%', height: '11.5942%' });
   assert.equal(closure1.name.color, '#000000');
   assert.equal(closure1.layers.length, 2, JSON.stringify(closure1.layers));
-  // §37.235: the frame's cut corner and margins lie on the prefab's white bkg (155×187 centred on 157×207), not our dark face
+  // §39.235: the frame's cut corner and margins lie on the prefab's white bkg (155×187 centred on 157×207), not our dark face
   assert.deepEqual(closure1.backing, {
     colour: '#FFFFFF', sprite: null,
     style: { '--scard-under': 'linear-gradient(#FFFFFF, #FFFFFF)', '--scard-under-size': '98.7261% 90.3382%', '--scard-under-pos': '50% 50%' },
@@ -551,7 +551,7 @@ test('regulation card faces follow each theme prefab, including star angles and 
   assert.equal(itemNodes.some((node) => hasClass(node, 'scard__idesc')), false, 'the shop face leaves effect text to detail');
 });
 
-test('a 规程 slot without a card shows the pack\'s empty card in its prefab box (§37.236)', () => {
+test('a 规程 slot without a card shows the pack\'s empty card in its prefab box (§39.236)', () => {
   const opts = {
     ac_n_initial: { width: 155, height: 187, titleY: 25, titleColor: '#FFFFFF', rootTier: { name: 'initial' } },
     ac_n_iron: { width: 155, height: 187, titleY: 32, titleColor: '#EFEBDF', rootTier: { name: 'iron' } },
@@ -593,7 +593,7 @@ test('a 规程 slot without a card shows the pack\'s empty card in its prefab bo
   assert.equal(art.props.style, closur.style);
   assert.equal([...walk(art)].find((n) => n.type === 'i')?.props.style, closur.image);
   assert.ok(soldNodes.some((node) => hasClass(node, 'scard__soldtxt')), 'the text stays for our own look and screen readers');
-  // §37.238: a 盟约 card (narrower: 130×187 against 154×186) lays the official card's box out at its proportions
+  // §39.238: a 盟约 card (narrower: 130×187 against 154×186) lays the official card's box out at its proportions
   const covenant = SoldCard({ reg: false, face: closur });
   assert.ok(hasClass(covenant, 'scard--vacant') && hasClass(covenant, 'has-empty-art'));
   const box = artOf(covenant);
@@ -624,7 +624,7 @@ test('a 规程 slot without a card shows the pack\'s empty card in its prefab bo
   assert.match(css, /\.scard\.scard--reg\.scard--vacant\.has-empty-art > \.scard__soldtxt \{ display: none; \}/);
 });
 
-test('the official shop background: the bottom shadow and the corner decorations, behind both shops (§37.238)', () => {
+test('the official shop background: the bottom shadow and the corner decorations, behind both shops (§39.238)', () => {
   // a synthetic panel_shop_main: matte_back bottom right, group_bg's stretched shadow, a bottom-left decoration, the
   // character card's own layers (left out) and nodes this placement does not take (centre-anchored, inactive)
   const node = (name, size, pos, min, max, pivot, image, extra = {}) => ({ name, rect: { anchors: { min, max }, pivot, sizeDelta: size, anchoredPosition: pos }, image, ...extra });
@@ -684,7 +684,7 @@ test('the official shop background: the bottom shadow and the corner decorations
   assert.match(read('public/css/screens/game.css'), /\.gm__hud\.is-enter > \.shopbg \{ animation: shopbg-in var\(--t-slow\) var\(--ease-out\), gtop-fade 460ms ease-out 460ms both; \}/);
 });
 
-test('盟约 cards: the official empty card at the official proportions and the official theme\'s card face (§37.238)', () => {
+test('盟约 cards: the official empty card at the official proportions and the official theme\'s card face (§39.238)', () => {
   const css = read('public/css/screens/game-shop.css');
   assert.match(css, /\.scard\.scard--vacant\.has-empty-art:not\(\.scard--reg\) \{ background: none; border-color: transparent; overflow: visible; \}/);
   assert.match(css, /\.scard\.scard--vacant\.has-empty-art:not\(\.scard--reg\) > \.scard__soldtxt \{ display: none; \}/);
@@ -717,7 +717,7 @@ test('盟约 shop markup stays, and 规程 adds the new face without replacing t
   assert.match(bar, /cx\('shopbar', 'shopbar--reg', frozen && 'is-frozen'/);
   assert.match(bar, /funds funds--reg/);
   assert.match(bar, /scard__cost/);
-  // the 规程 layout follows the 规程 look: 规程, or 乌萨斯齐心团 / 可露希尔 in any version (regLook, §37.206)
+  // the 规程 layout follows the 规程 look: 规程, or 乌萨斯齐心团 / 可露希尔 in any version (regLook, §39.206)
   assert.match(game, /regView && 'gm--reg'/);
   for (const page of ['public/index.html', 'public/dev/game-mock.html']) {
     const html = read(page);
@@ -737,7 +737,7 @@ test('盟约 shop markup stays, and 规程 adds the new face without replacing t
   assert.doesNotMatch(themeCss, /html\[data-sp-color~="chessName"\] \.gm \.scard:not\(\.scard--reg\)/);
 });
 
-test('a card material draws its base texture in its own colours, tinted, masked and scrolled (§37.228)', () => {
+test('a card material draws its base texture in its own colours, tinted, masked and scrolled (§39.228)', () => {
   const pack = { texture: (n) => `/t/${n}.webp` };
   const box = { w: 116, h: 17 };
   // frame_lv2_obj bottom_grad: an opaque orange ramp (fx_gradcolor_4), white Image, tile 0.5 × 1, scrolling left

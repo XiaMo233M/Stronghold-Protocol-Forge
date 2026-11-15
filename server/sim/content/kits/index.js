@@ -23,7 +23,7 @@
 // KITTED_CHARS = every character a 自选 pick may field with a faithful kit; an operator outside it is not offered
 // (shared/diy.js diyPool / validateDiyPicks `kitted`).
 //
-// Version kits (第一期 shop operators with no tier file, DESIGN §35.22.9): VERSION_KIT_FILES lists `ops/ver-<codename>.js`,
+// Version kits (第一期 shop operators with no tier file, DESIGN §37.22.9): VERSION_KIT_FILES lists `ops/ver-<codename>.js`,
 // one charId each, merged into KITS after the 自选 operators and NOT added to KITTED_CHARS (they are shop chess). The 35
 // 自选 picks whose hand-written kit is a tier kit (24 in 第一期, 银灰 who is only in V2_1's pool, and 10 in 规程·序列Ⅰ)
 // live in one file, `ops/ver-diy.js` (DIY_BORROW_KIT_FILES): those charIds are in KITTED_CHARS (DIY_BORROW_CHARS, the
@@ -441,7 +441,7 @@ export const DIY_BORROW_CHARS = Object.freeze([
 
 /**
  * Operators of another official version that have no kit yet — they play the generic kit until their ver-* file lands.
- * Empty: the 19 第一期 operators became VERSION_KIT_FILES in §35.22.9, 规程·序列Ⅰ's 37 in round 67 (four batches).
+ * Empty: the 19 第一期 operators became VERSION_KIT_FILES in §37.22.9, 规程·序列Ⅰ's 37 in round 67 (four batches).
  * test/versions-keying.test.js accepts a chess without a kit only when its charId is listed here, and fails once a listed
  * operator gets a kit (it then leaves the list).
  * Operators of another official version that have no kit yet. Empty after §37.22.9 (the 19 第一期 operators are

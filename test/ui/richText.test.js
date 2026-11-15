@@ -141,7 +141,7 @@ describe('placeholders', () => {
   });
 });
 
-describe('every version\'s 「当前效果」 numbers come from its own keys (§37.208)', () => {
+describe('every version\'s 「当前效果」 numbers come from its own keys (§39.208)', () => {
   const versions = [['default', 'data'], ['act2autochess@V2_1', 'data/versions/act2autochess-v2_1'], ['act1autochess', 'data/versions/act1autochess'],
     ['act1autochess@V1_1', 'data/versions/act1autochess-v1_1'], ['act3autochess@V3_1', 'data/versions/act3autochess-v3_1']];
   const bondsOf = (dir) => { const d = JSON.parse(readFileSync(path.join(ROOT, dir, 'bonds.json'), 'utf8')); return d.bonds || d; };

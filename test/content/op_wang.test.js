@@ -440,7 +440,7 @@ test('the hand: deploying her in prep brings 7 棋子 (TRP-X "可同时部署的
   }
 });
 
-test('the 棋子 is a 装置 (PRTS 实体类型): 活性源石 does not act on it — 战场#04 (11, 6) — while an operator on its neighbour 活性源石 tile takes the effect (community report 2026-11-14 「望的棋子会被烫死」, §37.205)', () => {
+test('the 棋子 is a 装置 (PRTS 实体类型): 活性源石 does not act on it — 战场#04 (11, 6) — while an operator on its neighbour 活性源石 tile takes the effect (community report 2026-11-14 「望的棋子会被烫死」, §39.205)', () => {
   const op = { uid: 1, diy: { slot: SLOT[6], charId: WANG, skillIndex: 0, uniEquipId: null }, elite: true, row: 12, col: 2 };
   const h = makeBattle({
     stageId: 'act1autochess_m04', defs: { enemies: ENEMIES }, timeLimit: 120, autoFinish: false, seed: 5,

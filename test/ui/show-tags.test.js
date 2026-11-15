@@ -1,4 +1,4 @@
-// test/ui/show-tags.test.js — the client's {showtag_value_N} filling (public/js/ui/showTags.js, §37.201): the server's
+// test/ui/show-tags.test.js — the client's {showtag_value_N} filling (public/js/ui/showTags.js, §39.201): the server's
 // live values first, else the record's starting value (定期存折 0, an upgrading 特质's first grant, a round counter 0),
 // never the raw placeholder. Server side: test/match/show-tags.test.js.
 // Run: node --test test/ui/show-tags.test.js

@@ -1,6 +1,6 @@
 // server/sim/content/kits/ops/ver-diy.js — 自选 picks whose only hand-written kit is a tier kit
 // (第一期's 24, 银灰 / 空弦 / 卡涅利安 / 伺夜 again in 第二期上半, and 规程·序列Ⅰ's 10). Each charId borrows that tier
-// kit (shared/borrow.js, DESIGN §35.22.9). Shop chess of the same operator still resolve to the tier key. 妮芙 uses
+// kit (shared/borrow.js, DESIGN §37.22.9). Shop chess of the same operator still resolve to the tier key. 妮芙 uses
 // only the tier-5 file (chess_char_5_22): the tier-6 file is the same operator's other shop row, not a second skill
 // author. 百炼嘉维尔 lists both rows: S2 is the tier-5 spec, S3 the tier-4 `.skill`, S1 the tier-4 alt entry.
 // 规程's 10 each have one tier file, and it authors all three skills (the shop skill on `.skill`, the other two under

@@ -205,7 +205,7 @@ describe('per-season BGM', () => {
     assert.equal(resolveBgm(old, 'unite', 'act1autochess').loop, '/old-unite.mp3');
     assert.equal(resolveBgm(old, 'boss:boss_4', 'act3autochess').loop, '/b4.mp3');
     assert.equal(resolveBgm(old, 'combat:0', 'act1autochess').loop, '/shop.mp3');
-    // the committed manifest carries the seasons (fetch-assets --add-only, §37.118): their own files, the default's
+    // the committed manifest carries the seasons (fetch-assets --add-only, §39.118): their own files, the default's
     // top level unchanged
     assert.match(resolveBgm(manifest, 'lobby', 'act3autochess').loop, /\/m_sys_act3autochess_loop\.mp3$/);
     assert.equal(resolveBgm(manifest, 'lobby', DEFAULT_VERSION).loop, manifest.audio.bgm.lobby.loop);

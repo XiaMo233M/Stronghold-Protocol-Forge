@@ -25,7 +25,7 @@
 //   modesOf(id, roomMode), laddered(…)     the official modes of that room mode in sortId order, and whether they are
 //                                          more than one per difficulty (规程's solo: 规程等级 1–20 and 极速模拟) — such a
 //                                          room keeps its mode id (server/lobby.js)
-//   welcome()                              welcome.versions (DESIGN §35.23), or null when only act2autochess is enabled
+//   welcome()                              welcome.versions (DESIGN §37.23), or null when only act2autochess is enabled
 //   welcome()                              welcome.versions (DESIGN §37.23), or null when only act2autochess is enabled
 //   file(cs16, rel)                        GET /cs/<cs16>/index.json and /cs/<cs16>/bounds/official.json of a version
 //   servedDirs()                           the absolute data directories /data/versions/ may serve (static.js, buildTag)

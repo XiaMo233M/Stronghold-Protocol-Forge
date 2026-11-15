@@ -1,4 +1,4 @@
-"""规程·序列Ⅰ's opening for the title screen (public/js/ui/regulationFilm.js, DESIGN §37.147).
+"""规程·序列Ⅰ's opening for the title screen (public/js/ui/regulationFilm.js, DESIGN §39.147).
 
 When a player enters the 规程 season, the client plays its season screen's entry: the activity bundle
 activity/[uc]act3autochess.ab, prefab panel_act3autochess_on_entry, legacy clip autochess_entry_season_on (3.17 s on the

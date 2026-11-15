@@ -1,4 +1,4 @@
-// public/js/ui/showTags.js — the numbers of the official {showtag_value_N} placeholders (§37.201). 规程's 定期存折 and some
+// public/js/ui/showTags.js — the numbers of the official {showtag_value_N} placeholders (§39.201). 规程's 定期存折 and some
 // 特质 write a running value into their text; the server sends the player's own pieces' values (server/match/showTags.js:
 // piece `showTag`, operator `garrisonTags[garrisonId]`), and everything else — a shop card, the loadout screen, another
 // player's piece — shows the record's starting value: the passbook's `value` (0: it grows while held), an upgrading 特质's

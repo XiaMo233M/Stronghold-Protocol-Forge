@@ -1341,10 +1341,10 @@ export function chargeKeys(plan) {
  *   hits        oneshot prefabs of the area's tick (ON_BUFF_TRIGGER), played at the tile once per makeZone pulse for
  *               the zone's time (SkillFx._zoneHits). Not part of `keys`: those loop for the hold. The client plays
  *               them on each enemy in the area; the sim sends no per-enemy fx, so the tile stands for the pulse
- *               [ASSUMED] (history §37.202)
+ *               [ASSUMED] (history §39.202)
  *   drift       the kit re-sends the area every second under one `key` as it moves (引星棘刺 S2): its reached
  *               effects play once and follow it (SkillFx._drift); the field view keeps its procedural, growing ring
- * or, instead of a projectile (history §32.14.43):
+ * or, instead of a projectile (history §34.14.43):
  * or, instead of a projectile (history §34.14.43):
  *   attack      the node of the plan attack the fx stands for: its cast / range rows play on the owner at the fx, its hit
  *               groups and aims on the damage the fx's frame deals after it (SkillFx kit hits)
@@ -1373,7 +1373,7 @@ export const FX_BINDINGS = Object.freeze({
   // flask (projectile_chr_tinman_s1 / _s2) lands there — its reached effects are the ring (tinman_skill_0N_range_01,
   // looping), the flask on the ground (_token_01, looping) and the splash (_start_01 / _02)
   // The tick hit tinman_skill_0N_hit_01 (ON_BUFF_TRIGGER of tinman_s_1[dot] / tinman_s_2[buff], index.json) plays once a
-  // second at the tile for the area's time, as 旅骨's (`hits`, history §37.207)
+  // second at the tile for the area's time, as 旅骨's (`hits`, history §39.207)
   skchr_tinman_1: Object.freeze({ zone: binding({ owner: 'id', projectile: 'projectile_chr_tinman_s1', at: 'point', hold: 'fx', holdS: 8, during: true, cover: ['zone'], hits: ['tinman_skill_01_hit_01'] }) }),
   skchr_tinman_2: Object.freeze({ zone: binding({ owner: 'id', projectile: 'projectile_chr_tinman_s2', at: 'point', hold: 'fx', holdS: 8, during: true, cover: ['zone'], hits: ['tinman_skill_02_hit_01'] }) }),
   // 引星棘刺 S1 / S3 (chess_char_5_15-thorn2.js: a 'zone' on each chosen ally's tile, id = her, duration): the unit she
@@ -1381,7 +1381,7 @@ export const FX_BINDINGS = Object.freeze({
   // S1's ring (thorn2_skill_01_range). S2's unit drifts and grows (its zone re-sent every second under one key, 12 s):
   // `drift` — the landing (thorn2_token_start) and the unit (thorn2_skill_02_token) follow it; its growing ring stays the
   // procedural zone (the client scales thorn2_skill_02_range live; we cannot) (the owner, 2026-11-14: every alchemist's
-  // 炼金单元 has its official effect, history §37.207)
+  // 炼金单元 has its official effect, history §39.207)
   skchr_thorn2_1: Object.freeze({ zone: binding({ owner: 'id', projectile: 'projectile_chr_thorn2_s1', at: 'point', hold: 'fx', holdS: 6, during: true, cover: ['zone'] }) }),
   skchr_thorn2_2: Object.freeze({ zone: binding({ owner: 'id', projectile: 'projectile_chr_thorn2_s2', at: 'point', hold: 'fx', holdS: 12, during: true, drift: true }) }),
   skchr_thorn2_3: Object.freeze({ zone: binding({ owner: 'id', projectile: 'projectile_chr_thorn2_s3', at: 'point', hold: 'fx', holdS: 19, during: true, cover: ['zone'] }) }),
@@ -1390,14 +1390,14 @@ export const FX_BINDINGS = Object.freeze({
   // projectile_chr_hbound_s1 / _s2 (ParacurveMovement, speed 10): the trail hbound_trail_01, and on the tile the looping
   // range hbound_skill1_range_01 / hbound_skill2_range_01 (spawn GROUND) for the projectile's life. The tick hit
   // hbound_skill1_hit_01 / hbound_skill2_hit_01 is ON_BUFF_TRIGGER of hbound_s_1[dot] / hbound_s_2[buff], not an onHit
-  // (index.json). `fly` draws the trail; `hits` the tick, once per makeZone pulse, at the tile [ASSUMED] (history §37.202)
+  // (index.json). `fly` draws the trail; `hits` the tick, once per makeZone pulse, at the tile [ASSUMED] (history §39.202)
   skchr_hbound_1: Object.freeze({ zone: binding({ owner: 'id', projectile: 'projectile_chr_hbound_s1', at: 'point', hold: 'fx', holdS: 8, during: true, cover: ['zone'], fly: true, hits: ['hbound_skill1_hit_01'] }) }),
   skchr_hbound_2: Object.freeze({ zone: binding({ owner: 'id', projectile: 'projectile_chr_hbound_s2', at: 'point', hold: 'fx', holdS: 31, during: true, cover: ['zone'], fly: true, hits: ['hbound_skill2_hit_01'] }) }),
   // 承曦格雷伊 S2 (ver-greyy2.js: the ball's 'zone' on the aimed tile, re-sent every interval with the full
   // projectile_delay_time, id = her, skill = skchr_greyy2_2). projectile_chr_greyy2_s2 (AdvancedMovement, speed 8):
   // trail greyy2_skill_02_trail, onReached the looping greyy2_skill_02_range, onHit greyy2_skill_02_hit_02 once as it
   // lands. The ball does not move, so the first mark's cover swallows the later zones (unlike 引星棘刺 S2). Her cast
-  // row greyy2_skill_02_start already plays on her; it is not this area (history §37.202)
+  // row greyy2_skill_02_start already plays on her; it is not this area (history §39.202)
   skchr_greyy2_2: Object.freeze({ zone: binding({ owner: 'id', projectile: 'projectile_chr_greyy2_s2', at: 'point', hold: 'fx', holdS: 8, during: true, cover: ['zone'], fly: true }) }),
   // 波登可 S2 ('zone' of her spores, id = her, dur): projectile_chr_podego_s2's reached podego_skill_02_range
   skchr_podego_2: Object.freeze({ zone: binding({ owner: 'id', projectile: 'projectile_chr_podego_s2', at: 'point', hold: 'fx', holdS: 5, during: true, cover: ['zone'] }) }),

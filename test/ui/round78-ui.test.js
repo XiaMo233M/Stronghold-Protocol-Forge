@@ -1,4 +1,4 @@
-// test/ui/round78-ui.test.js — the owner's playtest of 2026-11-14 (history §37.201), the CSS / markup halves that have no
+// test/ui/round78-ui.test.js — the owner's playtest of 2026-11-14 (history §39.201), the CSS / markup halves that have no
 // behaviour of their own to drive: thumbnails' tier marks readable, the top bar's 🔍 buttons at their pictures' aspect,
 // 可露希尔's TVs behind the bond row, the overtime warning over the effects column, the shop's repeated-operator
 // highlight. Behaviour lives elsewhere: bond-scroll.e2e (drag), regulation-commands.e2e (aim arrow, reminder),

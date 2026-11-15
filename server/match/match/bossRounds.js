@@ -65,8 +65,8 @@ export class MatchBoss {
       },
     });
     this.bossPool = pool;
-    // the operator tally of the leader ranking lives on this pool, every version (§37.149: the owner asked for it in 盟约
-    // too; 规程 only from §37.124). A new pool (the hidden round) starts empty.
+    // the operator tally of the leader ranking lives on this pool, every version (§39.149: the owner asked for it in 盟约
+    // too; 规程 only from §39.124). A new pool (the hidden round) starts empty.
     pool.ops = new Map();
     // the round's plan (_planBossWaves: the Hidden Core's own draw, GitHub #845); a departure since keeps intact pairs
     const groups = pairPlayers(alive, createRng(deriveSeed(this.seed, bossPairSalt(this.gd, this.round))), this.bossPairs);

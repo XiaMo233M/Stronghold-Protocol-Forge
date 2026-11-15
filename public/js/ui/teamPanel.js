@@ -17,7 +17,7 @@
 // local 联防 replica's count while it is on screen (`uniteLocal`: the battle runner's state().uniteLeft, the same battle
 // the player watches, so the number moves with the kills on screen), else m.public players[].uniteLeft (the authority's
 // report, ~1 Hz).
-// 完美连胜 / 领袖伤害 (DESIGN §37.148, every version; ui/avatarBadges.js): the streak badge on the avatar's top-right corner
+// 完美连胜 / 领袖伤害 (DESIGN §39.148, every version; ui/avatarBadges.js): the streak badge on the avatar's top-right corner
 // (the own row's "you" marker moves to the bottom-left corner while it shows), the leader-damage scan over the avatar
 // during a leader fight; `badges` = { pack, still } (the theme's avatar prefabs, else ac_n_initial's; null pack: CSS).
 

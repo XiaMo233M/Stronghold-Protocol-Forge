@@ -29,7 +29,7 @@ export const THEME_LIMITS = Object.freeze({
 });
 
 /**
- * [ASSUMED] An official pack imported as a zip (§37.232: 可露希尔 is not in the packages). It keeps every file of the
+ * [ASSUMED] An official pack imported as a zip (§39.232: 可露希尔 is not in the packages). It keeps every file of the
  * extracted group, not only what theme.json names: the prefabs name their sprites. `data` caps one JSON / atlas /
  * skeleton file; images and audio keep THEME_LIMITS.image / .audio. It does not count toward THEME_LIMITS.packs.
  */
@@ -120,9 +120,9 @@ export const WIRED_IMAGE_SLOTS = Object.freeze([
   // The client also paints the same spots from the installed pack's sprites (ui/regHud.js).
   'shop_refresh', 'shop_refresh_lock', 'shop_frozen', 'shop_frozen_on', 'shop_frozen_lock',
   'shop_money', 'shop_char_card', 'shop_cost_free',
-  // Both shops' slots without a card (§37.236). The official packs' own is their card prefab's state_empty (ui/regHud.js).
+  // Both shops' slots without a card (§39.236). The official packs' own is their card prefab's state_empty (ui/regHud.js).
   'shop_card_empty',
-  // The shop background's shadow behind both shops (§37.238). The official packs' own is their panel_shop_main bg_shadow.
+  // The shop background's shadow behind both shops (§39.238). The official packs' own is their panel_shop_main bg_shadow.
   'shop_shadow',
   'bond_strip', 'detail_panel',
 ]);
@@ -149,7 +149,7 @@ const OFFICIAL_UNIT_REM = 1.44 / 100;
 
 /**
  * A 9-slice's widths at the official size, `--sp-slice-rem-<slot>`: ui-theme.css draws a sliced picture as a frame with
- * them where stretching the whole picture bent it (可露希尔's window frame over the 本局信息 drawer, history §37.204).
+ * them where stretching the whole picture bent it (可露希尔's window frame over the 本局信息 drawer, history §39.204).
  * @param {readonly number[]} slice
  */
 function sliceRem(slice) {
@@ -296,7 +296,7 @@ export function stripThemePrefix(path, prefix) {
 }
 
 /**
- * Official groups this browser imported (§37.232; public/js/uiTheme.js registers them): group → its prefabs.json
+ * Official groups this browser imported (§39.232; public/js/uiTheme.js registers them): group → its prefabs.json
  * blob URL and parsed document. Their files are `blob:` URLs, which officialAssetUrl accepts for these groups only.
  * @type {Map<string, { prefabsUrl: string | null, prefabsDoc: any }>}
  */
@@ -431,7 +431,7 @@ export function characterAnimName(character, stem) {
 /** Idle clip. [ASSUMED] `Idle`, then whatever the pack named, when the skeleton has no Idle. */
 /**
  * A theme character's identity for mounting, '' when there is none: its picture, its served skeleton, or the key an
- * imported pack's in-memory model carries (§37.232; such a character has no URL of its own).
+ * imported pack's in-memory model carries (§39.232; such a character has no URL of its own).
  * @param {{ imageUrl?: string, spine?: { skel?: string }, key?: string } | null | undefined} character
  */
 export function themeCharacterKey(character) {
@@ -647,7 +647,7 @@ export function assessTheme(input) {
 
   /**
    * A skeleton sidecar (.skel / .json skeleton, .atlas). Not an image. An installed official pack plays it from its
-   * same-origin URL; an imported pack keeps the bytes and builds the model in memory (themeSpine.js, §37.232).
+   * same-origin URL; an imported pack keeps the bytes and builds the model in memory (themeSpine.js, §39.232).
    * @param {string} path
    * @returns {{ ok: boolean, path?: string, code?: string }} `path` when ok, `code` when not
    */

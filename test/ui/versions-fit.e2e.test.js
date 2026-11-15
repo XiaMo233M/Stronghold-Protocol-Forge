@@ -188,7 +188,7 @@ describe('official versions: text fit (real server, SP_VERSIONS=all)', { skip: !
               { sel: '.seat__content.is-ready', within: '.rseat', optional: h <= 520 },
               { sel: '.seat__content:not(.is-ready)', within: '.rseat', optional: true },
               // the whole name (the part tells two halves apart), never an ellipsis; a short screen gives its line to
-              // the seats like the banner's (§37.117): the pill above names the version there
+              // the seats like the banner's (§39.117): the pill above names the version there
               { sel: '.rs-clock [data-testid="version-tag"]', wrap: true, optional: h <= 520 },
               { sel: '.rs-clock [data-testid="version-tag"] .vertag__label', wrap: true, optional: h <= 520 },
             ]);

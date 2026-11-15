@@ -1,4 +1,4 @@
-// docs/THEME-GUIDE.md and its example pack docs/examples/ui-theme-demo (§37.234): the pack imports whole (every key it
+// docs/THEME-GUIDE.md and its example pack docs/examples/ui-theme-demo (§39.234): the pack imports whole (every key it
 // writes used, nothing refused, no stray file), its Spine files belong together, and the guide names every colour key,
 // image slot, banner and voice trigger the client accepts — a new slot without a line in the guide fails here.
 

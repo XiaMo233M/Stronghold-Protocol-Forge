@@ -108,7 +108,7 @@ export function textProblems(rootSel, extraEllipsis = '') {
           const p = n.textContent[i - 1] || ' ';
           if (prevTop != null && rr.top > prevTop + rr.height / 2) {
             const at = `${n.textContent.slice(Math.max(0, i - 6), i)}|${n.textContent.slice(i, i + 6)}`;
-            // (a player's name is any string: on a phone its second line may start inside a long word — §35.51; a picker's
+            // (a player's name is any string: on a phone its second line may start inside a long word — §37.51; a picker's
             // operator name breaks inside a word only when that word alone is wider than the tile: overflow-wrap
             // break-word, English 「Thunderbringer」)
             if (!breakOk(p, c) && !el.closest('.seat__name') && !(el.closest('.cardpick__name') && wordWider(n, i, el.closest('.cardpick__name')))) {

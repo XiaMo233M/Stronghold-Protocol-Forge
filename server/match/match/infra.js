@@ -157,7 +157,7 @@ export class MatchInfra {
 
   /**
    * Whether a bot should build towards a bond: live, and in regulation not a core bond the draw greyed. A grey core keeps
-   * only the operators that also belong to another lit core bond (gamedata bondsExclude, core first — §37.211);
+   * only the operators that also belong to another lit core bond (gamedata bondsExclude, core first — §39.211);
    * bots plan as when it had none.
    */
   bondPlayable(bondId) {

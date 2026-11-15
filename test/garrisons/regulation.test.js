@@ -205,7 +205,7 @@ test('SERVER_SELF_SELL_PRICE_FIXED: acquire sets the blackboard price and clears
   assert.equal(s.m.gd.sellPrice(piece.id), 1);
 });
 
-test('精英化 keeps the sale price (§37.209): a grown 海沫 merges into a 4 elite that grows on to 8; 温蒂 still fixes 6', () => {
+test('精英化 keeps the sale price (§39.209): a grown 海沫 merges into a 4 elite that grows on to 8; 温蒂 still fixes 6', () => {
   const s = setup();
   // a tile the elite may take (the merge puts it on the deployed copy's tile only when that tile is legal for it)
   const probe = s.ps.newPiece('chess', 'chess_char_3_04_b');

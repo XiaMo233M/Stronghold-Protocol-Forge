@@ -592,7 +592,7 @@ function Replay({ rec, onBack }) {
   const res = useMemo(() => recordToResult(rec), [rec]);
   const version = recordVersion(rec);
   const inRoom = useStore((s) => !!s.room);
-  // the default data: any set but another version's; another version: its own set or the room's plugin set on it (§37.210)
+  // the default data: any set but another version's; another version: its own set or the room's plugin set on it (§39.210)
   const roomCs = useStore(roomPluginCs);
   const versionState = useStore((c) => (version === DEFAULT_VERSION ? (c.kind === 'version' ? 'loading' : 'ready') : versionContentStatus(c, version, roomCs)), Object.is, contentSet);
   const versionReady = versionState === 'ready';

@@ -135,7 +135,7 @@ test('the client renders no research texts of the data (spec / implFormula / how
   assert.deepEqual(hits.filter((h) => /\.(implFormula|howToPlay|note)\b/.test(h) && !allowed(h)), [], 'no research text is read');
 });
 
-test('versionContentStatus / roomPluginCs: a 规程 room with gameplay plugins counts its plugin set (§37.210)', () => {
+test('versionContentStatus / roomPluginCs: a 规程 room with gameplay plugins counts its plugin set (§39.210)', () => {
   const REG = 'act3autochess@V3_1';
   const room = { room: { version: REG, content: { vanilla: false, cs: CS('e'), version: REG } } };
   assert.equal(V.roomPluginCs(room), CS('e'));
@@ -157,7 +157,7 @@ test('versionContentStatus / roomPluginCs: a 规程 room with gameplay plugins c
   assert.equal(V.versionContentStatus(plugins('ready'), REG, null), 'loading', 'outside a plugin room');
 });
 
-test('the match screen and replays wait through versionContentStatus, not for a plain version set only (§37.210)', () => {
+test('the match screen and replays wait through versionContentStatus, not for a plain version set only (§39.210)', () => {
   const src = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
   for (const rel of ['public/js/screens/game.js', 'public/js/screens/stats.js']) {
     const s = src(rel);

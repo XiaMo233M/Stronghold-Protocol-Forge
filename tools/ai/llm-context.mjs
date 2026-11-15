@@ -281,7 +281,7 @@ export function continuity(d, previous, carried = null) {
       lp: { before: confirmed?.digest.lp ?? null, after: d.lp ?? null }, lastBattle: feedback?.lastBattle || null } };
 }
 
-// §35.62 [ASSUMED]: the band draft sets a direction before any member is owned (玛恩纳 → 卡西米尔 waited until R6 for a
+// §37.62 [ASSUMED]: the band draft sets a direction before any member is owned (玛恩纳 → 卡西米尔 waited until R6 for a
 // first copy). `intent` lists the mains the seat may lead with before a member is held (round 65: the bot's focus and
 // second, the band's 职业队 bond, the main-bond panels). A primary change still needs pivot:true and a reason.
 // §37.62 [ASSUMED]: the band draft sets a direction before any member is owned (玛恩纳 → 卡西米尔 waited until R6 for a

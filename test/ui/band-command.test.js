@@ -22,7 +22,7 @@ test('command HUD distinguishes locks, cooldown, stocks, recruitment and insuffi
   assert.notEqual(commandStatus({ reason: 'passive' }), commandStatus({ usesLeft: 1 }));
 });
 
-test('the aiming arrow (§37.201): chevrons every AIM_STEP px along a curve bowed up-screen, the last on the pointer', () => {
+test('the aiming arrow (§39.201): chevrons every AIM_STEP px along a curve bowed up-screen, the last on the pointer', () => {
   assert.deepEqual(aimPath(100, 100, 104, 102), [], 'a pointer still on the button draws nothing');
   const pts = aimPath(800, 600, 200, 400);
   const len = Math.hypot(600, 200);

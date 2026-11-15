@@ -161,7 +161,7 @@ export function readCatalog(raw) {
  * `installed` is the version string in plugins/<id>/, null when the folder is there but the version cannot be read,
  * and undefined when it is not installed. Incompatible wins over installed / updatable, and the installed version is
  * still reported. [ASSUMED] every class, including cosmetic, uses appCompatible (0.4.x also runs the 0.3 line,
- * §37.231). A missing `app` is compatible.
+ * §39.231). A missing `app` is compatible.
  * A present `app` that is empty, whitespace, or not a range (including one appVersionMatches would treat as a match
  * because it cannot read it) is incompatible.
  * @param {Record<string, unknown>} entry

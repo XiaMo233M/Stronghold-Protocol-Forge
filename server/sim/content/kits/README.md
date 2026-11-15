@@ -28,7 +28,7 @@ versions M0, 0.3.2, DESIGN §37.22): that version may give chess ids to other op
 is then found by charId (`content/index.js officialKitKey`, docs/SIM.md §7.2). The default data keeps the by-id lookup.
 A 自选 piece keeps `KITS[def.charId]` there too. The 35 picks whose hand-written kit is a tier kit (24 in 第一期, plus
 银灰, who is only in 第二期上半's pool, plus 规程·序列Ⅰ's 10 owned-6★ picks, each with one tier file that authors all
-three skills) borrow that kit under the charId (`ops/ver-diy.js`, DESIGN §35.22.9). They are in
+three skills) borrow that kit under the charId (`ops/ver-diy.js`, DESIGN §37.22.9). They are in
 A 自选 piece keeps `KITS[def.charId]` there too. The 25 picks whose hand-written kit is a tier kit (24 in 第一期, plus
 银灰, who is only in 第二期上半's pool) borrow that kit under the charId (`ops/ver-diy.js`, DESIGN §37.22.9). They are in
 `KITTED_CHARS` and are not keys of `OPERATOR_KITS`. `PENDING_DIY_KIT_CHARS` is empty. A shop chess of the same operator

@@ -1,4 +1,4 @@
-// public/js/themeSpine.js — a theme character's Spine model from the bytes of an imported pack (§37.232).
+// public/js/themeSpine.js — a theme character's Spine model from the bytes of an imported pack (§39.232).
 //
 // The battle loader asks PIXI.Assets for a served `.skel` URL and finds the atlas beside it. An imported pack has no
 // URL of its own: its files are Blobs in IndexedDB, and the page's connect-src ('self') does not allow fetching a

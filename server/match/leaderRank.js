@@ -1,4 +1,4 @@
-// Per-operator tally of the CURRENT leader pool, every version (§37.149; 规程 only from §37.124). A breakdown of damage
+// Per-operator tally of the CURRENT leader pool, every version (§39.149; 规程 only from §39.124). A breakdown of damage
 // the server already credited: a client's rows cannot raise the pool or a player's bossBy. Server CreditPool excess is
 // added on top and is not part of bossBy. The published share is damage / the pool's max HP: the official rows only grow
 // within a fight (solo recording BV12ZWP6pE7m, 7 % → 37 %), a share of the damage dealt so far could shrink.

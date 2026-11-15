@@ -47,7 +47,7 @@ export function traceLayers(m, rec) {
       if (typeof ps[name] !== 'function') continue;
       wrap(ps, name, (base, ...args) => {
         const slot = name === 'buy' ? ps.shop.slots[args[0]] : null;
-        // Diagnostic call-site label only: distinguishes §35.63 purchases from ordinary procurement.
+        // Diagnostic call-site label only: distinguishes §37.63 purchases from ordinary procurement.
         const trade = name === 'buy' && /\bat tradeOnce\b/.test(new Error().stack);
         const a = { seq: serial++, round: m.round, pid: ps.playerId, name, trade, id: slot?.id, kind: slot?.kind, spent: 0 };
         action.push(a);

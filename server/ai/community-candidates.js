@@ -3,7 +3,7 @@
 const unique = xs => [...new Set(xs)];
 const cheap = (a, b) => a.tier - b.tier || a.cost - b.cost || a.id.localeCompare(b.id);
 
-// §35.63 [ASSUMED]: what the main brings to the round-14 leader fight: a core bond that can field its top threshold
+// §37.63 [ASSUMED]: what the main brings to the round-14 leader fight: a core bond that can field its top threshold
 // (6 distinct members at L5), and a damage multiplier sub (灵巧 / 奥术 / 精准, RESEARCH §1.6) among its community pairs.
 // Round 65: no leader term (the maintainer rejected leader-specific drafting; strategy-community.js). The band itself is
 // ranked by the measured draft prior (draftPriors) in strategy.js, not by these direction scores.

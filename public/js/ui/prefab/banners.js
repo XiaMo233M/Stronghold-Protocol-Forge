@@ -1,4 +1,4 @@
-// 规程 banners drawn from the active official pack (乌萨斯齐心团, 可露希尔; §37.145): the round start (round_start: 回合
+// 规程 banners drawn from the active official pack (乌萨斯齐心团, 可露希尔; §39.145): the round start (round_start: 回合
 // NN rolling over, 获得 +N, the 剩余 N 回合 tag), the round result (round_result: 全员无伤！ / 作战结束 / 生命值减少 −N),
 // the 联防 plate (help_battle) and 轮到你选 (effect_choose_self_select). Each plays its own clips (ui/prefab/player.js):
 // round_start its in clip, then its out clip when it leaves; the others one clip that comes in, holds and goes. The

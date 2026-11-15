@@ -12,10 +12,10 @@ import { isVersionData, gameData } from '../../tokens.js';
 /**
  * 莱茵生命 (character_table groupId "rhine") members sold as shop chess (checked against the official table): today's five,
  * the list of before versions M0, which data without config.version (the default data and the plugin content sets on it)
- * keeps. On another version's build (support isVersionData) also 第一期's 星源 (DESIGN §35.22.4). 规程 (family
+ * keeps. On another version's build (support isVersionData) also 第一期's 星源 (DESIGN §37.22.4). 规程 (family
  * `regulation`) also 淬羽赫默, a shop chess there (`chess_char_4_20`): she stays off the covenant version list, where
  * 第一期 still leaves her out. 伊芙利特 (shop chess in 第一期, a 自选 pick today) and today's other 自选 members stay out
- * until the maintainer decides whether 自选 members count (M2, DESIGN §35.22.5).
+ * until the maintainer decides whether 自选 members count (M2, DESIGN §37.22.5).
  * keeps. On another version's build (support isVersionData) also 第一期's 星源 (DESIGN §37.22.4). 伊芙利特 and 淬羽赫默
  * (shop chess in 第一期, 自选 picks today) and today's other 自选 members are left out until the maintainer decides whether
  * 自选 members count (M2, DESIGN §37.22.5).

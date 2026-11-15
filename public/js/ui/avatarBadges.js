@@ -1,4 +1,4 @@
-// 完美连胜 / 领袖伤害 on a team-panel avatar (DESIGN §37.148), every version. The server publishes both on m.public
+// 完美连胜 / 领袖伤害 on a team-panel avatar (DESIGN §39.148), every version. The server publishes both on m.public
 // players[] (server/match/match/views.js _avatarView): winStreak / winStreakLevel — the rounds in a row settled without
 // an LP loss, shown from 3 (规程 constData playerAvatarWinStreakThresholds [3, 5]: level 1 from 3, level 2 from 5) and
 // counted on at every settlement (4, 5, 6 … a leader fight neither adds nor breaks it) — and bossDamageLevel — while a

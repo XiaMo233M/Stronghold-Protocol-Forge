@@ -404,7 +404,7 @@ export class ExternalAI {
         detail: `External decision ${job.id} ended; built-in bot fallback`, fallback: true });
       if (job.state.results.length > this.config.maxIntents) job.state.results.shift();
     }
-    // §35.62 [ASSUMED]: in plan mode legacy always continues the decision, so a slow reply (budget elapsed or the
+    // §37.62 [ASSUMED]: in plan mode legacy always continues the decision, so a slow reply (budget elapsed or the
     // §37.62 [ASSUMED]: in plan mode legacy always continues the decision, so a slow reply (budget elapsed or the
     // agent's {plan: null}) is not a broken adapter: only protocol/transport errors count toward failureLimit, and
     // the carried plan stays. Direct mode keeps §37.8's rule (every failure counts, the plan is cleared).

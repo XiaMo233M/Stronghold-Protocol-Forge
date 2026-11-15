@@ -4,7 +4,7 @@
 // never requests files the asset pipeline did not produce (no 404 noise in the console). The 特训敌人 type,
 // 评语 and medal icons also read the local client's extraction (data/local-assets.json ui/outer, the same rule:
 // listed files only) for the ones no mirror carries — 规程's critic_icon / reborn_icon, its eighteen
-// comment_icon_N_M titles and trophy_level6–8 (the owner's report of 2026-11-14, §37.201).
+// comment_icon_N_M titles and trophy_level6–8 (the owner's report of 2026-11-14, §39.201).
 
 import { localAsset } from '../data.js';
 
@@ -172,7 +172,7 @@ export function tokenAvatarUrl(m, tokenId, opts) {
   if (t?.owner) return str(obj(obj(obj(m)?.chars)?.[t.owner])?.avatar);
   // a map character or an enemy fielded as a summon (预备干员-医疗 char_605_cmedic, Touch char_613_acmedc, “炎佑”
   // enemy_9012_acloon) has no token picture: its own avatar / enemy icon, as the board draws it (assets.js
-  // unitPictureUrl) — the detail card and the thumbnails showed none (§37.201, tools/ui-asset-refs.mjs)
+  // unitPictureUrl) — the detail card and the thumbnails showed none (§39.201, tools/ui-asset-refs.mjs)
   if (tokenId.startsWith('char_')) return str(obj(obj(obj(m)?.chars)?.[tokenId])?.avatar);
   if (tokenId.startsWith('enemy_')) return str(obj(obj(obj(m)?.enemies)?.[tokenId])?.icon);
   return null;

@@ -211,7 +211,7 @@ function buildState() {
   // I am the second of the first pair → the mirrored right half (server pairPlayers: alive players by seat, in pairs)
   if (VARIANTS.has('bossR')) { players[0].seat = 1; players[1].seat = 0; }
   if (VARIANTS.has('dead')) { players[0].alive = false; players[0].status = 'dead'; players[0].lp = 0; priv.lp = 0; }
-  // 完美连胜 (DESIGN §37.148, server views.js _avatarView): ?variant=badges — you on a 6-round streak (level 2), the
+  // 完美连胜 (DESIGN §39.148, server views.js _avatarView): ?variant=badges — you on a 6-round streak (level 2), the
   // second seat on 3 (level 1); in a leader fight the leader-damage levels too (setPhase)
   if (VARIANTS.has('badges')) Object.assign(players[0], { winStreak: 6, winStreakLevel: 2 }), Object.assign(players[1], { winStreak: 3, winStreakLevel: 1 });
 

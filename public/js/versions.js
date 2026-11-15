@@ -292,7 +292,7 @@ export const isDefaultVersion = (id) => id == null || id === DEFAULT_VERSION;
 /**
  * How far the data of another official version is on this page (content.js contentSet), for the screens that wait for it
  * (the match, a replay): its own checked set (`kind: 'version'`), or the room's content set with gameplay plugins built
- * on that version (`kind: 'plugins'`, its index names the version — §37.210, from PR #949): a 规程 room with plugins
+ * on that version (`kind: 'plugins'`, its index names the version — §39.210, from PR #949): a 规程 room with plugins
  * never loads the plain 规程 set, so a match there waited on 正在载入模拟数据… for ever. 'ready' for the default data.
  * @param {any} c the contentSet state
  * @param {string | null | undefined} version the version shown

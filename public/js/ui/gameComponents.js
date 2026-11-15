@@ -120,7 +120,7 @@ export function LocalSprite({ group = 'ui/battle', name, class: cls, fallback = 
 
 /**
  * Rich text (official markup) → spans. Newlines become <br>. A {showtag_value_N} the caller did not fill (ui/showTags.js
- * itemText / garrisonText give the live or starting value) reads 0 rather than the raw placeholder (§37.201).
+ * itemText / garrisonText give the live or starting value) reads 0 rather than the raw placeholder (§39.201).
  * @param {{ text: any, class?: string, as?: string }} props
  */
 export function RichText({ text, class: cls, as = 'span' }) {

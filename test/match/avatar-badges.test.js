@@ -1,4 +1,4 @@
-// 完美连胜 / 领袖伤害 (DESIGN §37.148), every version: the streak counted at every settlement (0 after an LP loss) and
+// 完美连胜 / 领袖伤害 (DESIGN §39.148), every version: the streak counted at every settlement (0 after an LP loss) and
 // published from the first of gd.winStreakThresholds; the leader-damage level live from the pool while a leader fight
 // runs (gd.bossDamageThresholds, the player's share of the pool's max HP), gone with the pool; eliminated players carry
 // neither. Client side: test/ui/avatar-badges.test.js.
@@ -76,7 +76,7 @@ for (const [label, data] of [['盟约 (default data)', undefined], ['规程', ac
       // a leaked enemy that cost nothing (not counted: lifePointReduce 0) keeps the streak
       settleRound(m, { [a]: { ...CLEAN, leaked: [{ counted: false }], perfect: true } });
       assert.equal(streak(a), 7);
-      // a 联防 round (§37.201): a's 联防 stops b's counted leak — b loses no LP, yet its streak ends; a keeps counting
+      // a 联防 round (§39.201): a's 联防 stops b's counted leak — b loses no LP, yet its streak ends; a keeps counting
       assert.ok(streak(b) > 0);
       const lpB = m.players.get(b).lp;
       for (const ps of m.alivePlayers()) m.lastResults.set(ps.playerId, ps.playerId === b ? LEAKY : CLEAN);

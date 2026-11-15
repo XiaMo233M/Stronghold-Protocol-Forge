@@ -57,7 +57,7 @@ test('warm record indexes and art helpers follow every version, then restore the
     for (const id of Object.keys(records.tokens)) {
       assert.equal(view.token(id), records.tokens[id]);
       const t = manifest.tokens[id];
-      // a map character / an enemy fielded as a summon falls back to its own avatar / icon (§37.201)
+      // a map character / an enemy fielded as a summon falls back to its own avatar / icon (§39.201)
       const own = id.startsWith('char_') ? manifest.chars[id]?.avatar : id.startsWith('enemy_') ? manifest.enemies?.[id]?.icon : null;
       assert.equal(tokenAvatarUrl(manifest, id), t?.avatar || manifest.chars[t?.owner]?.avatar || own || null);
     }

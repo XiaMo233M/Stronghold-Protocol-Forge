@@ -52,7 +52,7 @@ test('regulation HUD: click command, refusal state, and drag onto a highlighted 
     await request(c, 'g.test', { cmd: 'chess', args: { id: chessId } });
     await cameraSettled(c.page);
     const target = (await state(c)).command.targets[0]; assert.ok(target?.uid);
-    // §37.201: 准备 with the drag command unused asks, its 「本局不再提醒」 box mutes that reason for the match
+    // §39.201: 准备 with the drag command unused asks, its 「本局不再提醒」 box mutes that reason for the match
     await c.page.$eval('.readybtn', (b) => b.click());
     await c.page.waitForSelector('.ready-ask');
     assert.match(await c.page.$eval('.ready-ask', (el) => el.textContent), /指令还可以使用/);
@@ -72,7 +72,7 @@ test('regulation HUD: click command, refusal state, and drag onto a highlighted 
     await c.page.mouse.move(start.x + start.width / 2, start.y + start.height / 2); await c.page.mouse.down();
     await c.page.waitForSelector('.band-command.is-dragging');
     await c.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 12 });
-    // the aiming arrow follows the pointer and turns orange over the target (§37.201)
+    // the aiming arrow follows the pointer and turns orange over the target (§39.201)
     await c.page.waitForFunction(() => document.querySelectorAll('.cmd-aim .cmd-aim__c').length > 1 && document.querySelector('.cmd-aim.is-on'));
     await c.page.mouse.up();
     await c.page.waitForFunction(() => !document.querySelector('.cmd-aim'));

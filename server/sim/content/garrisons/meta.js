@@ -18,7 +18,7 @@
 //     has 1 → 1, exactly the N both official texts give (user playtest #5: 至简 costs 1). The dispatcher runs it before
 //     every other onPrice modifier, so 远见's discount (to 0 at 150 layers since 0.1.3) and strategy caps act on the
 //     lowered price.
-//   * SERVER_MOST_BOND (余 / 伊桑 / 机械师) rolls at most the shop level; 伊桑 skips himself (mostBondRules, §37.205).
+//   * SERVER_MOST_BOND (余 / 伊桑 / 机械师) rolls at most the shop level; 伊桑 skips himself (mostBondRules, §39.205).
 //   * [ASSUMED] SERVER_MOST_BOND: ties between most-member bonds are shuffled; the chess is a copy-weighted pool roll;
 //     a bond without an available chess falls through to the next tied one.
 //   * [ASSUMED] 松果: the "免费特殊招募" is a free pick-one offer of `rewardOffer.count` (3) chess of the pool's tier.
@@ -344,7 +344,7 @@ H.SERVER_POOL_CHAR = {
  * 「当前人数最多盟约的干员」 (SERVER_MOST_BOND: 余, 伊桑, 机械师 — one official effect with no blackboard): never above the
  * current shop level. 规程's 伊桑 text says so (「不高于当前调度中心等级」), the owner's first-hand rule holds it for 伊桑 in
  * 第一期 too, whose text does not; a community report (GitHub #218, 2026-10-07: 「余在5本时特性可以获得6本干员」 filed as a
- * bug) points the same way for 余, and the owner settled 余 / 机械师 with 伊桑 (2026-11-14, §37.205). Only the texts that
+ * bug) points the same way for 余, and the owner settled 余 / 机械师 with 伊桑 (2026-11-14, §39.205). Only the texts that
  * name it skip the operator itself (伊桑: 「（自身除外）」 / 「无法获得自身」).
  * @param {{ desc?: string } | null | undefined} g
  */

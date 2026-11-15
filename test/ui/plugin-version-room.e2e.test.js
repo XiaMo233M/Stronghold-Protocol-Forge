@@ -1,5 +1,5 @@
 // SP_E2E=1 node --test test/ui/plugin-version-room.e2e.test.js (run this file alone).
-// A 规程 room with a gameplay plugin that declares 规程 (§37.102) gets into the match (§37.210). Before, the page waited
+// A 规程 room with a gameplay plugin that declares 规程 (§37.102) gets into the match (§39.210). Before, the page waited
 // for the plain 规程 set, which a room with gameplay plugins never loads (its content set is the plugins' set built on
 // 规程), and the match stayed on 正在载入模拟数据… for ever.
 import { test } from 'node:test';
@@ -14,7 +14,7 @@ import { startServer } from '../../server/index.js';
 const REG = 'act3autochess@V3_1';
 const enabled = process.env.SP_E2E === '1' && hasChrome();
 
-test('a 规程 co-op room with a 规程 gameplay plugin enters the match screen (§37.210)', { skip: !enabled, timeout: 240000 }, async (t) => {
+test('a 规程 co-op room with a 规程 gameplay plugin enters the match screen (§39.210)', { skip: !enabled, timeout: 240000 }, async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sp-plugin-version-'));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const pluginsDir = path.join(tmp, 'plugins');
@@ -42,7 +42,7 @@ test('a 规程 co-op room with a 规程 gameplay plugin enters the match screen 
   const set = await host.page.evaluate(() => globalThis.__SP_CONTENT__?.state?.() ?? null);
   await host.click('.room-bar__right button', '开始模拟');
   await host.waitFor((s) => !!s.phase, 'the first match frame', 60000);
-  // the match screen itself: before §37.210 the page stayed on the loading screen (.gload) with the frames already there
+  // the match screen itself: before §39.210 the page stayed on the loading screen (.gload) with the frames already there
   await host.page.waitForFunction(() => !!globalThis.__SP__.store.get().match.public && !document.querySelector('.gload'), { timeout: 60000 })
     .catch(async (e) => {
       const text = await host.page.evaluate(() => document.querySelector('.gload')?.textContent?.trim() ?? null);

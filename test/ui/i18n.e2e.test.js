@@ -91,7 +91,7 @@ describe('language switch on the title screen', { skip: !ENABLED && 'set SP_E2E=
     await seedReleaseRead(page);
     await page.goto(`${base}/`, { waitUntil: 'networkidle0' });
     await page.waitForSelector('.title-screen [data-testid="lang-toggle"]');
-    // a first start is 规程 (versions.js startupVersion): the title names it (§37.147)
+    // a first start is 规程 (versions.js startupVersion): the title names it (§39.147)
     assert.equal(await text(page, '.title-cn'), '卫戍协议：规程');
     assert.equal(await text(page, '.title-login .btn--primary'), '开始');
     assert.equal(await page.evaluate(() => document.documentElement.lang), 'zh-CN');

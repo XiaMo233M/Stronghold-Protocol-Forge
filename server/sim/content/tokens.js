@@ -104,7 +104,7 @@ import { textFinite } from '../../../shared/plugins/textNumber.js';
 import { isOfficialId, isVersionData, gameData } from './support/index.js';
 
 // Re-exported for the kits, which never import an index module (test/content/kits_layout.test.js): the group lists that
-// grow on another version's build only (DESIGN §35.22.4). `gameData` is the loaded object `isVersionData()` reads when
+// grow on another version's build only (DESIGN §37.22.4). `gameData` is the loaded object `isVersionData()` reads when
 // a kit calls it with no argument.
 export { isVersionData, gameData };
 

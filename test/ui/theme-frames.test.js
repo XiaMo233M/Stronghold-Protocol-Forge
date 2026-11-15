@@ -1,4 +1,4 @@
-// test/ui/theme-frames.test.js — theme pictures that no longer stretch whole (history §37.204): a sliced picture on the
+// test/ui/theme-frames.test.js — theme pictures that no longer stretch whole (history §39.204): a sliced picture on the
 // 本局信息 drawer, the top band and the boss bar is a 9-slice frame at the official size; 可露希尔's drawer starts under its
 // window's title bar and closes on the window's ✕; unsliced pictures on the drawer and the countdowns keep their aspect.
 // The CSS is read as text; the look was checked in a browser (three window sizes, 规程 and 盟约, the three official themes).
@@ -86,7 +86,7 @@ test('--sp-slice-rem: one prefab unit is OFFICIAL_SCALE / 100 rem (ui/prefab/hud
   assert.equal(themeDeclarations({ id: 'x', images: { help_battle: { url: 'blob:h' } } }).props['--sp-slice-rem-help_battle'], undefined);
 });
 
-test('盟约 cards under 乌萨斯齐心团 / 可露希尔: the face sprite full-bleed (not an 8 px ring cut out of it), the dark face layer hidden (§37.205)', () => {
+test('盟约 cards under 乌萨斯齐心团 / 可露希尔: the face sprite full-bleed (not an 8 px ring cut out of it), the dark face layer hidden (§39.205)', () => {
   const faces = ':is([data-sp-theme="ac_n_iron"], [data-sp-theme="ac_s_closur"])';
   const cards = [
     [`html[data-sp-slot~="chess_frame_normal"]${faces} .scard:not(.scard--reg):is(.scard--t1, .scard--t2, .scard--t3, .scard--t4)`, 'chess_frame_normal'],
@@ -104,7 +104,7 @@ test('盟约 cards under 乌萨斯齐心团 / 可露希尔: the face sprite full
   assert.match(css, /html\[data-sp-slice~="chess_frame_normal"\] \.scard\.scard--t1,/);
 });
 
-test('shop_card_empty: a theme\'s own empty card on both shops\' slots without a card, stretched or a filled 9-slice (§37.236)', () => {
+test('shop_card_empty: a theme\'s own empty card on both shops\' slots without a card, stretched or a filled 9-slice (§39.236)', () => {
   const stretch = bodyOf('html[data-sp-slot~="shop_card_empty"] .shopbar .scard.scard--vacant');
   assert.match(stretch, /background: var\(--sp-img-shop_card_empty\) center \/ 100% 100% no-repeat;/);
   assert.match(stretch, /border-style: solid; border-color: transparent;/);
@@ -129,7 +129,7 @@ test('shop_card_empty: a theme\'s own empty card on both shops\' slots without a
   assert.equal(themeDeclarations({ id: 'x', images: { shop_card_empty: { url: 'blob:e' } } }).slices.includes('shop_card_empty'), false, 'no default slice: stretched');
 });
 
-test('shop_shadow: a theme\'s own shop shadow across the bottom edge, the official one steps aside (§37.238)', () => {
+test('shop_shadow: a theme\'s own shop shadow across the bottom edge, the official one steps aside (§39.238)', () => {
   const body = bodyOf('html[data-sp-slot~="shop_shadow"] .gm__hud > .shopbg::before');
   assert.match(body, /content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: calc\(237 \* \.0144rem\); pointer-events: none;/);
   assert.match(body, /background: var\(--sp-img-shop_shadow\) center \/ 100% 100% no-repeat;/);
@@ -139,7 +139,7 @@ test('shop_shadow: a theme\'s own shop shadow across the bottom edge, the offici
   assert.ok(d.slots.includes('shop_shadow'));
 });
 
-test('the theme\'s pack loads in every version: bond rings, avatar badges and (§37.206) its banners', () => {
+test('the theme\'s pack loads in every version: bond rings, avatar badges and (§39.206) its banners', () => {
   const game = read('public/js/screens/game.js');
   assert.match(game, /const themePf = usePrefabPack\(data\.get\('local'\)\?\.groups, playerSettings\.uiTheme\);/);
   assert.match(game, /const pfPack = themePf;/);
@@ -148,7 +148,7 @@ test('the theme\'s pack loads in every version: bond rings, avatar badges and (�
   assert.match(game, /const pfBanners = packBanners\(pfPack\);/);
 });
 
-test('the 规程 look in 盟约 too (§37.206): a 规程 version, or 乌萨斯齐心团 / 可露希尔 installed — shop, top bar, banners, layout', async () => {
+test('the 规程 look in 盟约 too (§39.206): a 规程 version, or 乌萨斯齐心团 / 可露希尔 installed — shop, top bar, banners, layout', async () => {
   const { regLook, prefabTheme, regulationFamily } = await import('../../public/js/ui/regHud.js');
   const groups = {
     'themes/ac_s_closur': { 'prefabs.json': 'p1', 'theme.json': 't1' },

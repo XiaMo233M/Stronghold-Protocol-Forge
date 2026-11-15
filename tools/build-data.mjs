@@ -961,7 +961,7 @@ function enemyAsTokenStats(e) {
  * (Battle._setupUnit):
  *   healFree — 禁疗 (HEAL_FREE, PRTS 异常效果 "无法成为治疗类能力的目标，且受到的治疗量变为0"): “小自在”, “耀阳”, 斯卡蒂的海嗣,
  *              沙之碑, 流形, 狼群, 迷迭香的战术装备, 黄金盟誓, 保护目标（冻结状态） (圣聆初雪 S2's frozen target), 夜莺的幻影
- *              (PRTS 幻影 备注 "持有禁疗。"; the owner's recall of 2026-11-14, §37.201 — an HP-regen effect still reaches
+ *              (PRTS 幻影 备注 "持有禁疗。"; the owner's recall of 2026-11-14, §39.201 — an HP-regen effect still reaches
  *              it: PRTS 禁疗 "增减生命回复速度…的效果不会被识别为治疗类能力");
  *   isolated — 孤立 (ALLY_TARGET_FREE, "无法被同阵营选中": no heal and no ally selection reaches it): “炎佑” (PRTS “炎佑”
  *              天赋 "特殊机制|我方单位，孤立，可同时攻击3个目标"), 从不混淆的方向 (备注 "持有无敌、孤立…").
@@ -1340,7 +1340,7 @@ function buildBonds(ctx, chess, effects) {
     const dp = textPair(b.desc);
     // the {i:fmt} keys: 盟约's bond rows list them (descParamBaseList / descParamPerStackList); 规程's moved them to
     // effectDescParamDataDict[effectId].descParamInfos (descParamBase / descParamPerStack / descParamMax) — read only the
-    // old lists, every 规程 「当前效果」 number came out 0 (the owner, 2026-11-14, §37.208)
+    // old lists, every 规程 「当前效果」 number came out 0 (the owner, 2026-11-14, §39.208)
     const descInfos = Array.isArray(act.effectDescParamDataDict?.[b.effectId]?.descParamInfos) ? act.effectDescParamDataDict[b.effectId].descParamInfos : null;
     const baseList = b.descParamBaseList || (descInfos ? descInfos.map((x) => x?.descParamBase || null) : []);
     const perList = b.descParamPerStackList || (descInfos ? descInfos.map((x) => x?.descParamPerStack || null) : []);

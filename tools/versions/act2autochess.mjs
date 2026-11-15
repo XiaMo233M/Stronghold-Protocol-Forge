@@ -1,5 +1,5 @@
 // tools/versions/act2autochess.mjs — build profile of the default version, 第二期下半: 盟约·下半 (act2autochess) in its
-// final state V2_2 (docs/DATA.md "Official versions (M0)", DESIGN §35.22). It is today's build: the tables of
+// final state V2_2 (docs/DATA.md "Official versions (M0)", DESIGN §37.22). It is today's build: the tables of
 // Kengxxiao/ArknightsGameData at the pinned commits, the research in docs/research/, the 下半-measured tables of
 // tools/build-data.mjs, and no config.version (test/versions-default-guard.test.js).
 // Pinned since 2026-11-02 (DESIGN §37.91): master's activity_table lost the 盟约 season (CN 2.7.91, 卫戍协议·规程), so

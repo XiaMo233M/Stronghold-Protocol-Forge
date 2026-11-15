@@ -425,7 +425,7 @@ export function createDataStore(opts = {}) {
       if (!view) return v;
       if (v != null) return view(v);
       // a view marked `withMissing` also stands in for a file the server does not have (the official themes this
-      // browser imported over a host without local art, §37.232) — once it is known missing, never while it loads
+      // browser imported over a host without local art, §39.232) — once it is known missing, never while it loads
       return view.withMissing === true && entries.get(name)?.status === 'missing' ? view(null) : null;
     },
     /** The file exactly as downloaded (Chinese texts), whatever the locale. */

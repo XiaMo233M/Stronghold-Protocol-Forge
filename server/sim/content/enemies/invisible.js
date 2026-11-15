@@ -88,7 +88,7 @@ function kitJazz(ab, e) {
     // units.js) / the locked target's fall. Its cooldown restarts at the END of the channel: `fire`'s own 10 s is shorter than
     // the 10.5 s channel, so counted from the cast the next one would fire the moment this one ends and it would never walk
     // again [ASSUMED "持续施法", as 死亡之眼; PRTS 「同一技能的冷却时间于该技能结束时开始计时」].
-    // the attack's turn (RangedAttack: DESIGN §35.52) — while revealed, its trigger the targets in its radius (`own`)
+    // the attack's turn (RangedAttack: DESIGN §37.52) — while revealed, its trigger the targets in its radius (`own`)
     // priority: the blocker first), floor(10.6 / 0.5) = 21 ticks at 0.5 … 10.5 s. The channel also ends when that target
     // is gone, makes no normal attacks meanwhile and is never re-cast over itself — the 10 s cooldown (enemy_database
     // skill 'fire') runs out mid-channel, the next cast waits for its end [ASSUMED "持续施法", as 死亡之眼].

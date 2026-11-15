@@ -1,4 +1,4 @@
-// The leader-fight ranking (the right-edge list under 隐藏), every version (§37.149; 规程 only from §37.124). A pure
+// The leader-fight ranking (the right-edge list under 隐藏), every version (§39.149; 规程 only from §39.124). A pure
 // function of m.public: spectators and a replay that restores public frames see the same rows. The percentage is this
 // operator's damage over the pool's max HP: the official rows only grow within a fight (solo recording BV12ZWP6pE7m)
 // and sum well under 100, a share of the damage dealt so far could shrink.
@@ -42,9 +42,9 @@ export function saveLeaderRankHidden(hidden) {
  * Where the list goes when its home (under the top bar's right end) would cover the right column — the countdown and,
  * once the level time runs out, the red 「生命值 −1/秒」 warning under it (ui/hud.js OvertimeWarning). Only a tall
  * countdown reaches that far: 可露希尔's TV put the list over the TV and over the warning (the owner, 2026-11-14
- * 「boss关扣生命值的提示会被伤害排行窗口遮挡」, §37.201). Then the list stays at the right edge, under the column, its right
- * edge clear of the DP box beside it. Moved left of the column (§37.201) it sat in the middle of the field under the
- * 规程 themes' wide top-bar column (the owner, 2026-11-14 「伤害排行窗口太靠中间了，有点遮挡场上」, §37.207); left of the
+ * 「boss关扣生命值的提示会被伤害排行窗口遮挡」, §39.201). Then the list stays at the right edge, under the column, its right
+ * edge clear of the DP box beside it. Moved left of the column (§39.201) it sat in the middle of the field under the
+ * 规程 themes' wide top-bar column (the owner, 2026-11-14 「伤害排行窗口太靠中间了，有点遮挡场上」, §39.207); left of the
  * column, under the bond strip, stays the fallback when there is no room under it above `floor`.
  * Pure; boxes in viewport px, the result in px from the HUD's top / right edge, null = stay home.
  * @param {{ panel: Box|null, column: Box|null, hud: Box|null, bonds?: Box|null, dp?: Box|null, floor?: number|null, gap?: number }} o

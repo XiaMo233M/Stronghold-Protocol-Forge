@@ -229,7 +229,7 @@ function push(ctx, row) {
 }
 
 /** The kinds public/js/ui/assetUrls.js also resolves in the local extraction's ui/outer (factionIconUrl, titleIconUrl,
- *  medalIconUrl — 规程's critic / reborn, comment_icon_N_M and trophy_level6–8 live only there; history §37.201). */
+ *  medalIconUrl — 规程's critic / reborn, comment_icon_N_M and trophy_level6–8 live only there; history §39.201). */
 const OUTER_FALLBACK = new Set(['enemyTypeIcon', 'titleIcon', 'medalIcon']);
 const outerUrl = (ctx, group, sprite) => (OUTER_FALLBACK.has(group) ? localAssetPath(ctx.local, 'ui/outer', sprite) : null);
 

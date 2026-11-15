@@ -179,7 +179,7 @@ export function strategyCandidates(playbook, digest, previousPlan = null) {
       const communityRole = playbook.community.roles.find(r => r.band === band.id);
       const role = communityRole?.role === 'supplier' && !teammates.length ? 'carry'
         : communityRole?.role || (band.roleClasses.includes('economy') && !band.bondIds.length ? 'economy' : 'carry');
-      // §35.63 [ASSUMED]: a carry's main is a core faction bond (thresholds 3/6). A class bond (迅捷 2, 精准 2/3 …) has
+      // §37.63 [ASSUMED]: a carry's main is a core faction bond (thresholds 3/6). A class bond (迅捷 2, 精准 2/3 …) has
       // nothing past its first threshold to build toward: in cycle 2 every 迅捷 / 精准 / 坚守 main dealt 2-6 % of the
       // leader pool. A band engine tied to a class bond and the safety-net / supplier / economy roles keep theirs.
       if (role === 'carry' && main.core === false && !band.bondIds.includes(main.id)) continue;

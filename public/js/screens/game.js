@@ -198,7 +198,7 @@ export function GameScreen() {
   const autoplay = useStore((s) => !!(Array.isArray(s.match.public?.players) && s.match.public.players.find((p) => p && p.playerId === s.me.playerId)?.autoplay));
   const gd = useGameData();
   // another official version: its checked data on the page first (see the header) — its own set, or the room's set with
-  // gameplay plugins built on it (§37.210)
+  // gameplay plugins built on it (§39.210)
   const version = useStore((s) => { const v = shownVersion(s); return v !== DEFAULT_VERSION ? v : null; });
   const roomCs = useStore(roomPluginCs);
   const versionState = useStore((c) => versionContentStatus(c, version, roomCs), Object.is, contentSet);
@@ -266,9 +266,9 @@ function MatchScreen() {
   const spectator = useStore((s) => isSpectating(s.room, s.me.playerId));
   const playerSettings = useSettings();
   const metricsSetting = playerSettings.combatMetrics === true;
-  // the installed official theme's pack (乌萨斯齐心团 / 可露希尔), every version: its bond rings and avatar badges (§37.205:
+  // the installed official theme's pack (乌萨斯齐心团 / 可露希尔), every version: its bond rings and avatar badges (§39.205:
   // the discs stayed mint in 盟约, the owner 2026-11-14 「官方用不同的主题局内盟约层数的圆形图标颜色也是不一样的」), and since
-  // §37.206 its round, result and 联防 banners too (ui/prefab/banners.js) — the 规程 themes in full on 盟约
+  // §39.206 its round, result and 联防 banners too (ui/prefab/banners.js) — the 规程 themes in full on 盟约
   const themePf = usePrefabPack(data.get('local')?.groups, playerSettings.uiTheme);
   const pfPack = themePf;
   // the 规程 look (its shop, layout and bond row under the top bar): 规程, or a theme with the 规程 interface (regLook)
@@ -351,7 +351,7 @@ function MatchScreen() {
   const [camKind, setCamKind] = useState('prep');        // kind of the last camera request (data-camera)
   const [replace, setReplace] = useState(null);          // equip-replace dialog: { request, resolve }
   const [pauseBusy, setPauseBusy] = useState(false);
-  // the leader ranking (ui/leaderRank.js, every version since §37.149). Shown whenever m.public carries leaderTop —
+  // the leader ranking (ui/leaderRank.js, every version since §39.149). Shown whenever m.public carries leaderTop —
   // spectators included.
   // The 隐藏 choice is this browser's, remembered across reloads.
   const [leaderHidden, setLeaderHidden] = useState(() => loadLeaderRankHidden());
@@ -365,7 +365,7 @@ function MatchScreen() {
   const battleState = useStore((s) => s.match.battle, shallowEqual); // local battle runner (client-side combat)
 
   const phase = pub?.phase;
-  // the ranking leaves a tall right column alone (可露希尔's TV countdown, the overtime warning under it: §37.201)
+  // the ranking leaves a tall right column alone (可露希尔's TV countdown, the overtime warning under it: §39.201)
   const leaderSpot = useLeaderRankSpot(isBossPhase(phase) && Array.isArray(pub?.leaderTop));
   const mode = phaseMode(phase);
   const combat = isCombatPhase(phase);
@@ -1218,7 +1218,7 @@ function MatchScreen() {
   const removeSpectator = useCallback((playerId) => actions.removeSpectator(playerId), []);
   // 准备 with funds left asks first: the prep's end wipes them (community report #4; not 坎诺特, not at 0 funds, not
   // under AI 托管 — gameLogic.readyFundsPrompt). The button and Space both come here.
-  // A usable drag command not used this round asks too, in the same box (gameLogic.readyCommandPrompt, §37.201); its
+  // A usable drag command not used this round asks too, in the same box (gameLogic.readyCommandPrompt, §39.201); its
   // 「本局不再提醒」 box mutes that reason for the rest of this match (this screen's life: a new match mounts it anew).
   const askingReady = useRef(false);
   const commandAskMuted = useRef(false);
