@@ -447,21 +447,16 @@ const PROMOTE_KEYS = new Set(['use_equip_upgrade_char', 'equip_round_start_upgra
  */
 export function equipReplaces(ctx, uid, targetPiece) {
   const items = targetPiece?.items;
-  // 上游 0.3.1：这一页的形态档位从 ctx 读（战斗/准备两侧各带自己的），plus 档下**变形同构体不占格**，
-  // 所以它自己永远不该弹出替换对话框。
+  // 装备位容量读**这一名干员**的 equipSlotNum（规程里普通 4 / 精锐 6），缺省才是 2（官方两格）
+  const cap = equipmentCapacity(ctx?.getChess?.(targetPiece?.id), ctx?.equipPerChess);
   if (ctx?.morphMode === 'plus') {
     if (!Array.isArray(items)) return false;
     const policy = morphSlotPolicy('plus', (it) => !!ctx.getItem?.(typeof it === 'string' ? it : it?.id)?.canGiveBond);
     const incoming = ctx.getItem?.(ctx.pieces?.get(uid)?.piece?.id);
+    // 变形同构体不占格，所以它自己不弹替换对话框
     if (!policy.occupies(incoming)) return false;
-    if (policy.slotsUsed(items) < policy.slotCap(2)) return false;
-  } else {
-    if (!Array.isArray(items)) return false;
-    const rec0 = ctx.getItem(ctx.pieces.get(uid)?.piece?.id);
-    const slot = slotPolicy();
-    if (slot.isSlotless(rec0)) return false;
-    if (slot.slotsUsed(items, ctx.getItem) < slot.slotCap(2)) return false;
-  }
+    if (policy.slotsUsed(items) < policy.slotCap(cap)) return false;
+  } else if (!Array.isArray(items) || items.length < cap) return false;
   const rec = ctx.getItem(ctx.pieces.get(uid)?.piece?.id);
   if (!consumedOnEquip(rec)) return !equipMerges(ctx, uid);
   const promotes = Array.isArray(rec.buffs) && rec.buffs.some((b) => PROMOTE_KEYS.has(b?.key));

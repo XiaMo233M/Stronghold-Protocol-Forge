@@ -42,6 +42,7 @@ import { attackInterval, rangeGridBox, fmtNum, tileKey, chessLoadout, nextThresh
 import { updateSettings, settingsStore, useSettings } from './settings.js';
 import { dubsInstalled } from '../voiceDubs.js';
 import { VOICE_LANG_NAMES } from '../../../shared/constants.js';
+import { equipmentCapacity } from '../../../shared/itemRules.js';
 import { morphSlotPolicy } from '../../../shared/plugins/rules.js';
 import { skillIconUrl, skillRecordIconUrl, profIconUrl, subProfIconUrl, itemIconUrl, enemyIconUrl, tokenAvatarUrl, factionIconUrl, uiUrl, moduleTypeIconUrl } from './assetUrls.js';
 // 立绘走**统一解析链**（`portraitChain.js`）：同一个干员在详情页 / 手牌 / 商店卡 / 自选池里是同一个函数，
@@ -519,7 +520,8 @@ export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bond
   const slot = morphSlotPolicy(morphMode === 'plus' ? 'plus' : 'official', (it) => !!getItem(typeof it === 'string' ? it : it?.id)?.canGiveBond);
   const equipUsed = slot.slotsUsed(items);
   const carriedUsed = slot.slotsUsed(carried);
-  const equipCap = slot.slotCap(2);
+  // 分母读**这一名干员**的 equipSlotNum（规程里普通 4 / 精锐 6），缺省才是官方的两格
+  const equipCap = slot.slotCap(equipmentCapacity(chess, data.get('config')?.economy?.equipPerChess));
   blocks.equip = piece?.kind === 'chess' ? html`<${Section} key="equip" title=${t('装备')} micro=${`EQUIP ${equipUsed}/${equipCap}`} class="dsec--equip">
       ${items.length ? items.map((it) => html`<${ItemRow} key=${it.uid} itemId=${it.id} uid=${it.uid} carried=${items} off=${offBonds} mode=${morphMode} onUnequip=${onUnequip} />`) : html`<p class="t-dim dempty">${t('拖拽装备至该干员以配发（最多 2 件）')}</p>`}
     <//>`
