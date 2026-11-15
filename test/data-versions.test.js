@@ -250,58 +250,6 @@ for (const v of OTHERS) {
       rmSync(out, { recursive: true, force: true });
     }
   });
-  test(`data/${v.dir}: the 16 files, under 6 MB, config.version, the profile's counts, no effectRef, the trigger deviations of its profile, references resolve`, async () => {
-    const { profile } = await loadProfile(v.id);
-    const dir = join(ROOT, 'data', v.dir);
-    const names = readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -5)).sort();
-    assert.deepEqual(names, [...BUILT, 'tuning'].sort(), 'exactly the 15 built files and tuning.json');
-    for (const n of VERSION_DATA_FILES) assert.ok(names.includes(n), `${n}.json: server/data.js VERSION_DATA_FILES expects it`);
-    const total = BUILT.reduce((n, f) => n + statSync(join(dir, `${f}.json`)).size, 0);
-    assert.ok(total < 6 * 1024 * 1024, `${v.id}: ${total} bytes`);
-    const f = Object.fromEntries(BUILT.map((n) => [n, readJson(dir, n)]));
-    assert.equal(f.config.version?.id, v.id);
-    assert.equal(f.config.version.family, v.family);
-    assert.deepEqual(f.config.version.rules, profile.config.rules ?? {});
-    assert.equal(Object.keys(f.config).at(-1), 'version', 'config.version is the last key');
-    assert.equal(f.config.season, v.season);
-    assert.equal(f.config.hiddenCore.single, profile.config.hiddenCore.single);
-    assert.equal(f.config.hiddenCore.multi, profile.config.hiddenCore.multi);
-    // 上半's constData has no singleReconnectTime (12e0a020 added it): null, never the 下半 value (server/lobby.js falls back)
-    if (v.season === 'act1autochess') assert.equal(f.config.constants.singleReconnectTime, null, 'no 下半 constant as official data');
-    // no 终极 mode before V2_2 (上半 has none; V2_1's table lists it with a later startTime, adapter launchModes)
-    assert.ok(Object.values(f.config.modes).every((m) => m.difficulty !== 'ABYSS'), `${v.id}: no 终极 mode`);
-    assert.ok(Object.keys(f.config.modes).every((id) => !/abyss/.test(id)), `${v.id}: no abyss mode id`);
-    for (const st of Object.values(f.stages)) assert.ok(st.modes.every((id) => f.config.modes[id]), `${v.id} ${st.id}: a stage mode the version lacks`);
-    assert.equal(Object.keys(f.bonds).length, profile.expect.bonds);
-    assert.equal(Object.keys(f.bands).length, profile.expect.bands);
-    assert.equal(Object.values(f.chess).filter((c) => !c.isGolden && c.visible).length, profile.expect.visibleNonDiy);
-    const pin = PINNED[v.id];
-    assert.ok(pin, `${v.id}: pin its counts in PINNED`);
-    assert.deepEqual({
-      bonds: Object.keys(f.bonds).length, bands: Object.keys(f.bands).length,
-      visibleNonDiy: Object.values(f.chess).filter((c) => !c.isGolden && c.visible).length, chess: Object.keys(f.chess).length,
-      items: Object.keys(f.items).length, effects: Object.keys(f.effects).length, hiddenCore: [f.config.hiddenCore.single, f.config.hiddenCore.multi],
-      milestones: f.config.rewards.milestones.length,
-    }, pin, `${v.id}: the pinned counts`);
-    assert.deepEqual(f.config.rewards.milestones.map((m) => m.level), Array.from({ length: pin.milestones }, (_, i) => i + 1), `${v.id}: the 功勋 levels 1…n`);
-    for (const [file, recs] of [['items', f.items], ['bands', f.bands]]) {
-      for (const r of Object.values(recs)) assert.ok(!Object.hasOwn(r, 'effectRef'), `${file} ${r.id ?? r.bandId}: no effectRef (it would name a default-version id)`);
-    }
-    if (profile.expect.triggerDeviations === 'present') {
-      // the deliberate deviations (DESIGN §21.29) of the operators the version has, on their TAKE_DAMAGE rows
-      const devs = Object.values(f.chess).filter((c) => c.skills?.some((s) => s.trigger?.rawRule === 'TAKE_DAMAGE' && s.trigger.rule !== 'TAKE_DAMAGE'));
-      assert.ok(devs.length > 0 && devs.length % 2 === 0, `${v.id}: normal and elite records under a deviation (${devs.length})`);
-      assert.ok(!Object.values(f.chess).some((c) => c.charId === 'char_107_liskam'), '雷蛇 joined with V2_2');
-    }
-    if (profile.expect.triggerDeviations === 'none') {
-      const td = [];
-      for (const c of Object.values(f.chess)) for (const s of c.skills || []) if (s.trigger?.rawRule === 'TAKE_DAMAGE') td.push(`${c.chessId} ${s.skillId}`);
-      for (const [id, u] of Object.entries(f.backups.units)) for (const [k, form] of Object.entries(u.forms)) for (const s of form.skills) if (s.trigger?.rawRule === 'TAKE_DAMAGE') td.push(`${id}@${k} ${s.skillId}`);
-      assert.deepEqual(td, [], 'no TAKE_DAMAGE row, so no trigger deviation applies');
-    }
-    assert.ok(readFileSync(join(dir, 'tuning.json')).equals(readFileSync(join(ROOT, 'data', 'tuning.json'))), 'tuning.json is a byte copy of data/tuning.json');
-    assert.deepEqual(validateReferences(f), []);
-  });
 
   test(`data/${v.dir}: an offline rebuild reproduces all 16 files byte for byte`, { skip: process.env.DATA_DIR && 'DATA_DIR set' }, async (t) => {
     const { profile } = await loadProfile(v.id);

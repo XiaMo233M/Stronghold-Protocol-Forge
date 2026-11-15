@@ -13,7 +13,7 @@
 //
 // 为什么不让两套各存一份：那会出现「设置里选了 A、实际播的是 B」——同一个开关两个真相。
 import { VOICE_LANGS, DEFAULT_VOICE_LANG } from '../../shared/constants.js';
-import { sanitizeVoiceLangByChar, voiceLangFor as voiceLangForSettings } from './ui/gameLogic/settings.js';
+import { voiceLangFor as voiceLangForSettings } from './ui/gameLogic/settings.js';
 
 export { VOICE_LANGS, DEFAULT_VOICE_LANG };
 
@@ -40,7 +40,21 @@ function hasTree(audio, charId, lang) {
  * @param {any} raw
  * @returns {Record<string, string>}
  */
-export const sanitizeVoiceOverrides = sanitizeVoiceLangByChar;
+const VOICE_OVERRIDE_MAX = 400;
+const CHAR_ID = /^char_[A-Za-z0-9_]{1,64}$/;
+
+export function sanitizeVoiceOverrides(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out = {};
+  let n = 0;
+  for (const [k, v] of Object.entries(raw)) {
+    if (n >= VOICE_OVERRIDE_MAX) break;
+    if (typeof k !== 'string' || !CHAR_ID.test(k) || !VOICE_LANGS.includes(v)) continue;
+    out[k] = v;
+    n++;
+  }
+  return out;
+}
 
 /**
  * 上游 0.2.3 的形状，**叠上上游 0.3.0 的扩展**：某个干员播哪种配音。

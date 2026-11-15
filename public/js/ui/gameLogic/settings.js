@@ -46,7 +46,7 @@ export const TEXT_SIZES = Object.freeze(['sm', 'md', 'lg', 'xl']);
  *  uiTheme: 设置「界面主题」 (docs/THEMES.md). Empty is the built-in 卫戍协议终端. A stored id is this browser's
  *  pack only — never sent, and it does not change a match.
  */
-export const DEFAULT_SETTINGS = Object.freeze({ bgm: 0.6, sfx: 0.8, voice: 0.8, voiceLang: 'cn', voiceNative: false, voiceOverrides: Object.freeze({}), muted: false, damageNumbers: true, officialDamageNumbers: false, ammoEnergyCount: false, fullscreenWakeLock: false, bondTimers: false, combatMetrics: false, prepDeployFold: true, quality: 'high', officialFx: 'auto', otherSkins: true, textSize: 'sm', uiTheme: '', themeMotion: true, keys: DEFAULT_HOTKEYS });
+export const DEFAULT_SETTINGS = Object.freeze({ bgm: 0.6, sfx: 0.8, voice: 0.8, voiceLang: 'cn', voiceNative: false, voiceOverrides: Object.freeze({}), voiceLangByChar: Object.freeze({}), muted: false, damageNumbers: true, officialDamageNumbers: false, ammoEnergyCount: false, fullscreenWakeLock: false, bondTimers: false, combatMetrics: false, prepDeployFold: true, quality: 'high', officialFx: 'auto', otherSkins: true, textSize: 'sm', uiTheme: '', themeMotion: true, keys: DEFAULT_HOTKEYS });
 const QUALITIES = ['high', 'medium', 'low'];
 /** The values of 设置「官方特效」 (render/vfx/tier.js OFFICIAL_FX). Display order in the dialog is low / medium / high. */
 export const OFFICIAL_FX_MODES = Object.freeze(['auto', 'off', 'lite', 'full']);
@@ -76,16 +76,35 @@ function uiThemeOf(raw) {
   return typeof raw === 'string' && THEME_ID.test(raw) ? raw : '';
 }
 
+/**
+ * 逐干员配音覆盖的**本仓库形状**：上游 0.4.0 把同一件事放在 `voiceOverrides`（sanitizeVoiceOverrides），
+ * 本仓库的界面与存档层一直用 `voiceLangByChar`。这里把两个名字都认下来，写回时用上游那一个 ——
+ * 免得「设置里选了 A、实际播的是 B」的两份真相。
+ * @param {any} s the settings store's value (or a snapshot of it)
+ * @param {string} charId
+ * @returns {string} 'cn' | 'jp' | 'en' | 'kr'
+ */
+export function voiceLangFor(s, charId) {
+  const per = typeof charId === 'string'
+    ? (s?.voiceOverrides?.[charId] ?? s?.voiceLangByChar?.[charId]) : null;
+  if (VOICE_LANGS.includes(per)) return per;
+  return VOICE_LANGS.includes(s?.voiceLang) ? s.voiceLang : DEFAULT_SETTINGS.voiceLang;
+}
+
 export function sanitizeSettings(raw) {
   const r = isObj(raw) ? raw : {};
   const vol = (v, d) => (Number.isFinite(v) ? clamp(Math.round(v * 100) / 100, 0, 1) : d);
+  const voiceTable = sanitizeVoiceOverrides(r.voiceOverrides ?? r.voiceLangByChar);
   return {
     bgm: vol(r.bgm, DEFAULT_SETTINGS.bgm),
     sfx: vol(r.sfx, DEFAULT_SETTINGS.sfx),
     voice: vol(r.voice, DEFAULT_SETTINGS.voice),
     voiceLang: VOICE_LANGS.includes(r.voiceLang) ? r.voiceLang : DEFAULT_SETTINGS.voiceLang,
     voiceNative: r.voiceNative === true,
-    voiceOverrides: sanitizeVoiceOverrides(r.voiceOverrides),
+    // 逐干员配音覆盖：上游 0.4.0 的键是 voiceOverrides，本仓库既有的是 voiceLangByChar。
+    // **同一个对象挂在两个名字下** —— 两个键、一份数据，改了一边另一边也变，不会出现两份真相。
+    voiceOverrides: voiceTable,
+    voiceLangByChar: voiceTable,
     muted: typeof r.muted === 'boolean' ? r.muted : DEFAULT_SETTINGS.muted,
     damageNumbers: typeof r.damageNumbers === 'boolean' ? r.damageNumbers : DEFAULT_SETTINGS.damageNumbers,
     officialDamageNumbers: typeof r.officialDamageNumbers === 'boolean' ? r.officialDamageNumbers : false,
@@ -104,3 +123,6 @@ export function sanitizeSettings(raw) {
     keys: sanitizeHotkeys(r.keys),
   };
 }
+
+/** 兼容名：本仓库原先的校验器（public/js/voicePrefs.js 的 sanitizeVoiceOverrides 就是它）。 */
+export const sanitizeVoiceLangByChar = sanitizeVoiceOverrides;
