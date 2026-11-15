@@ -449,13 +449,16 @@ export function equipReplaces(ctx, uid, targetPiece) {
   const items = targetPiece?.items;
   // 装备位容量读**这一名干员**的 equipSlotNum（规程里普通 4 / 精锐 6），缺省才是 2（官方两格）
   const cap = equipmentCapacity(ctx?.getChess?.(targetPiece?.id), ctx?.equipPerChess);
-  if (ctx?.morphMode === 'plus') {
+  // 档位从这一页来（ctx.morphMode 是显式给的；没给就读页面策略 —— roomMods.js 已经把它合成好了）
+  const plus = ctx?.morphMode ? ctx.morphMode === 'plus' : slotPolicy().active === true;
+  if (plus) {
     if (!Array.isArray(items)) return false;
     const policy = morphSlotPolicy('plus', (it) => !!ctx.getItem?.(typeof it === 'string' ? it : it?.id)?.canGiveBond);
     const incoming = ctx.getItem?.(ctx.pieces?.get(uid)?.piece?.id);
     // 变形同构体不占格，所以它自己不弹替换对话框
     if (!policy.occupies(incoming)) return false;
-    if (policy.slotsUsed(items) < policy.slotCap(cap)) return false;
+    // slotsUsed 要带解析器：items 里是 `{ uid, id }`，不带它分辨不出「不占格的那件」
+    if (policy.slotsUsed(items, ctx.getItem) < policy.slotCap(cap)) return false;
   } else if (!Array.isArray(items) || items.length < cap) return false;
   const rec = ctx.getItem(ctx.pieces.get(uid)?.piece?.id);
   if (!consumedOnEquip(rec)) return !equipMerges(ctx, uid);
