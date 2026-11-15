@@ -499,7 +499,7 @@ test('user playtest #6 (DESIGN §20): summons, skill triggers, blocking, push fo
   assert.match(sec(17), /\*\*revised by §20\.6\*\*/);
   assert.ok(!/the own battle's count stays on show as an upper bound tagged 联防中/.test(DESIGN), '§17.5: the frozen 联防 count is gone');
   assert.match(sec(8), /uniteLeft\? \/\* 联防: the leaker's enemies still standing/);
-  assert.match(sec(14), /`b\.progress \{ battleId, gt, killed, total, resolved\?, leaks\?, left\?, bossDmg\?, by\?, leaksBy\?, done\? \}`/);
+  assert.match(sec(14), /`b\.progress \{ battleId, gt, killed, total, resolved\?, leaks\?, left\?, bossDmg\?, by\?, leaksBy\?, ops\?, done\? \}`/);
   assert.match(doc('shared/protocol.js'), /leaksBy: \(v\) => isMap\(v, RESULT_LIMITS\.players, isId, \(x\) => isNum\(x, 0, 1e6\)\)/);
   assert.match(sec(6), /3 \*\*different\*\* free chess of tier `min\(level\+1, 6\)`/);
   assert.match(S20, /105 cards: 56 next-battle incl\. 源石虫·特训, 42 two-battle, 7 multi-round/);
@@ -910,8 +910,11 @@ test('干员战斗语音 (DESIGN §21.30): the manifest data, the official prior
     else if (Array.isArray(x)) x.forEach(walk);
     else if (x && typeof x === 'object') Object.values(x).forEach(walk);
   };
+  // a line no source has: ArknightsAssets2 lacks 锡兰's CN_028 (作战中 4) in all four languages (checked 2026-11-03, DESIGN §37.93)
+  // 拜松 likewise has no CN_028 in the updated Windows client's voice packs or charword entries.
+  const SOURCE_GAPS = { char_348_ceylon: ['skill4'], char_325_bison: ['skill4'] };
   for (const id of charIds) {
-    for (const s of slots) assert.ok(voice[id][s], `${id}.${s}`);
+    for (const s of slots) if (!SOURCE_GAPS[id]?.includes(s)) assert.ok(voice[id][s], `${id}.${s}`);
     for (const s of prepOnly) assert.equal(voice[id][s], undefined, `${id}.${s} is not planned by default`);
     walk(voice[id]);
   }
