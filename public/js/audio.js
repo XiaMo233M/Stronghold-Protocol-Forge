@@ -1779,6 +1779,17 @@ export function installAudio(deps) {
       };
       sync(deps.getState());
       return deps.subscribe((s, prev) => {
+        // 每个房间成员（含发起者与观战席）都听到同一声「准备好了」：一次被接受的 false → true 才响
+        // [ASSUMED] 共享等待室反馈来自玩家 2026-10-25 的报告；不接受冷却，快照 / 取消 / AI 加入都不响。
+        const room = s.room, prevRoom = prev?.room;
+        if (room !== prevRoom && room?.mode === 'coop' && prevRoom?.mode === 'coop' && room.code === prevRoom.code
+          && !room.inMatch && !prevRoom.inMatch && s.connection?.status === 'online' && prev?.connection?.status === 'online'
+          && !s.ui?.restoring && !prev?.ui?.restoring) {
+          const before = new Map((Array.isArray(prevRoom.seats) ? prevRoom.seats : [])
+            .filter((p) => p && !p.isBot).map((p) => [p.playerId, !!p.ready]));
+          if ((Array.isArray(room.seats) ? room.seats : []).some((p) => p && !p.isBot && p.ready
+            && before.has(p.playerId) && !before.get(p.playerId))) audio.sfx('ready');
+        }
         if (s.match?.public?.phase !== prev?.match?.public?.phase || s.room !== prev?.room || s.session !== prev?.session
           || s.match?.public?.bossId !== prev?.match?.public?.bossId) sync(s);
       });

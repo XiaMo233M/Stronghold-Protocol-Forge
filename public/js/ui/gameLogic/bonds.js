@@ -391,7 +391,9 @@ export function disabledBondSets(pub, staticInactive = []) {
  * @param {'off'|'drawn'|null} state from disabledBondSets
  * @param {number} bannedN banned operators of the bond
  */
-export function briefingBondTip(name, state, bannedN = 0) {
+export function briefingBondTip(name, state, bannedN = 0, regulationCore = false) {
+  // 规程：一条置灰的**核心**盟约，只有「同属另一条亮着的核心盟约」的干员才留得下来（附加盟约不算）
+  if (state && regulationCore) return t('{name}：该核心盟约的干员无法出现，同属其他亮着的核心盟约的除外', { name });
   if (state === 'off') return t('{name}：本局禁用（该盟约不会激活）', { name });
   if (state === 'drawn' || bannedN > 0) return bannedN ? t('{name}：部分盟约所含干员阵容不完整（{bannedN} 名干员无法出现）', { name, bannedN }) : t('{name}：部分盟约所含干员阵容不完整', { name });
   return name;
