@@ -95,6 +95,7 @@ import { rewriteManifest } from '../server/http/assetViews.js';
 import { mergeLocalManifests, planFromManifests } from '../public/js/assetPack.js';
 import { writePackIndex } from './packs.mjs';
 import { compareVersions, diffBases, manifestText, readBase, updateText } from './package-update.mjs';
+import { smokePackage } from './package-smoke.mjs';
 import {
   APPLIED_FILE, MANIFEST_FILE, UPDATE_FILE, affectsRuntime, digestFile, inManifest, isSetupArt, listedArtFiles,
   parseManifest, parseUpdate, pathProblem, removalProblem,
@@ -1270,7 +1271,7 @@ export function parseArgs(argv) {
   return o;
 }
 
-function main(argv) {
+async function main(argv) {
   let o;
   try { o = parseArgs(argv); } catch (e) { console.error(`package: ${e.message}`); return 2; }
   if (o.help) { console.log(USAGE); return 0; }
@@ -1299,11 +1300,17 @@ function main(argv) {
   try {
     if (o.update) {
       const r = buildUpdate(o.root, p, bases, opts);
+      // 上游 0.4.0：update 包对**每一个**基线各跑一次冒烟（解包、起服务、握手），日志并排放在 zip 旁
+      for (let i = 0; i < bases.length; i++) {
+        await smokePackage(r.zipPath, { base: bases[i].source, version: p.version, logPath: `${r.zipPath}.base-${i + 1}.smoke.log` });
+      }
       process.stdout.write(formatUpdate(r, p.version));
       console.log(`zip: ${r.zipPath} (${MB(r.zipBytes)}, ${r.files} files)${r.stage ? ` · stages kept: ${r.stage}, ${r.full}` : ''}`);
       return 0;
     }
     const r = build(o.root, p, opts);
+    // 打好的包先跑一遍冒烟（解包 → 起服务 → 握手），日志与 zip 并排
+    await smokePackage(r.zipPath, { version: p.version });
     console.log(`zip: ${r.zipPath} (${MB(r.zipBytes)}, ${r.files} files)${r.stage ? ` · stage kept: ${r.stage}` : ''}`);
     return 0;
   } catch (e) {
@@ -1338,4 +1345,4 @@ function mainAssets(o) {
 }
 
 const invoked = (() => { try { return pathToFileURL(fs.realpathSync(process.argv[1] || '')).href; } catch { return null; } })();
-if (invoked === import.meta.url) process.exitCode = main(process.argv.slice(2));
+if (invoked === import.meta.url) main(process.argv.slice(2)).then((c) => { process.exitCode = c; }, (e) => { console.error(`package: ${e?.message ?? e}`); process.exitCode = 1; });
