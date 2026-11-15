@@ -118,5 +118,5 @@ export function withVoiceLang(overrides, charId, lang) {
   const next = { ...(overrides || {}) };
   if (lang) next[charId] = lang;
   else delete next[charId];
-  return sanitizeVoiceLangByChar(next);
+  return sanitizeVoiceOverrides(next);
 }

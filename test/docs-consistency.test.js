@@ -965,8 +965,10 @@ test('干员战斗语音 (DESIGN §21.30): the manifest data, the official prior
   assert.match(doc('docs/ASSETS.md'), /\| 干员战斗语音 \|/);
   assert.match(doc('docs/ASSETS.md'), /voiceChars/);
   // 0.2.2: the Japanese dub beside the Chinese one (audio.voiceJp, settings 语音语言, the full zip's switch)
-  assert.equal(Object.keys(manifest.audio?.voiceJp ?? {}).length, charIds.length, 'every voiced operator has its JP tree');
-  assert.equal(manifest.stats.voiceJpChars, charIds.length);
+  // 本仓库的清单把「默认配音」放在 audio.voice（jp），不再单列 audio.voiceJp（上游那棵只是输入兼容的别名）
+  const jpTree = manifest.audio?.voiceLang === 'jp' ? manifest.audio?.voice : manifest.audio?.voiceJp;
+  assert.equal(Object.keys(jpTree ?? {}).length, charIds.length, 'every voiced operator has its JP tree');
+  assert.equal(manifest.stats.voiceChars, charIds.length);
   assert.match(doc('docs/ASSETS.md'), /voiceJp: \{ \[charId\]: \{ …the slots of `voice` \} \}/);
   assert.match(doc('docs/DEPLOY.md'), /`FULL_ZIP_JP_VOICE` 改成 `false` 时/);
   // this repo's voice-language row is 配音语言 with four dubs (the manifest's default one unless the player picks);

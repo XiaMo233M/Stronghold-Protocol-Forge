@@ -12,6 +12,8 @@ import { VOICE_LANGS, DEFAULT_VOICE_LANG } from '../../../../shared/constants.js
  * sizes (`--t: 1rem`), the others lift the phone's 40 px root by a floor and grow the desktop gently. Text only: the
  * layout root `1rem` (and with it the field camera, the detail card's side and the DOM fallback board) never moves.
  */
+import { sanitizeVoiceOverrides } from '../../voicePrefs.js';
+
 export const TEXT_SIZES = Object.freeze(['sm', 'md', 'lg', 'xl']);
 
 /**
@@ -84,21 +86,11 @@ export function availableVoiceLangs(manifest) {
 }
 
 /**
- * Sanitize the per-operator 配音 overrides: charId → one of VOICE_LANGS, capped, everything else dropped (a hand-edited
- * localStorage must never make the game request a dub that does not exist).
+ * 逐干员配音覆盖的校验器。**与 public/js/voicePrefs.js 的 `sanitizeVoiceOverrides` 是同一个函数**
+ * （上游 0.4.0 把这个校验器放在 voicePrefs，本仓库历史上的名字是 sanitizeVoiceLangByChar）——
+ * 两个名字指向同一个实现，不会给出不同结论。
  */
-export function sanitizeVoiceLangByChar(raw) {
-  if (!isObj(raw)) return {};
-  const out = {};
-  let n = 0;
-  for (const [k, v] of Object.entries(raw)) {
-    if (n >= VOICE_OVERRIDE_MAX) break;
-    if (typeof k !== 'string' || !CHAR_ID.test(k) || !VOICE_LANGS.includes(v)) continue;
-    out[k] = v;
-    n++;
-  }
-  return out;
-}
+export const sanitizeVoiceLangByChar = sanitizeVoiceOverrides;
 
 /**
  * The dub `charId` speaks: its own override, else the global one, else the default. Pure — the client and the tests
@@ -126,6 +118,7 @@ export function voiceLangFor(s, charId) {
 export function sanitizeSettings(raw) {
   const r = isObj(raw) ? raw : {};
   const vol = (v, d) => (Number.isFinite(v) ? clamp(Math.round(v * 100) / 100, 0, 1) : d);
+  const voiceTable = sanitizeVoiceOverrides(r.voiceOverrides ?? r.voiceLangByChar);
   return {
     bgm: vol(r.bgm, DEFAULT_SETTINGS.bgm),
     sfx: vol(r.sfx, DEFAULT_SETTINGS.sfx),
@@ -149,6 +142,8 @@ export function sanitizeSettings(raw) {
     // 上游 0.3.2 的 本土语言 开关。逐干员的语言（上游叫 voiceOverrides）本仓库一直叫 voiceLangByChar，
     // 存储键沿用我们的，不并存两套。
     voiceNative: r.voiceNative === true,
-    voiceLangByChar: sanitizeVoiceLangByChar(r.voiceLangByChar),
+    // 存储键沿用本仓库既有的 voiceLangByChar（上游 0.4.0 叫 voiceOverrides：**输入两边都认**，
+    // 输出只写我们那一个，免得同一份数据在存档里出现两个键）
+    voiceLangByChar: voiceTable,
   };
 }
