@@ -2,7 +2,7 @@
 
 A **plugin** is a folder a server owner puts into `plugins/`: a manifest, `plugins/<id>/plugin.json`, next to the files
 it names. The interface calls them 「插件」, never 「模组」 (that word is the operators' modules). The design and its
-phases are DESIGN §34 (`docs/history/0.3.0.md`); this file is the reference.
+phases are DESIGN §32 (`docs/history/0.3.0.md`); this file is the reference.
 
 **Status — 0.3.3: content sets, scripts, sandbox execution and the Forge-pack additions (§34).** The server finds, checks and lists plugins and names its content
 with a hash (P0); a room's host switches the server's cosmetic plugins on for the whole room, a player switches them on
@@ -77,8 +77,11 @@ zip, can be imported as the plugins it can become (§16). Install local zips or 
 ## 2. For server owners
 
 Put the folder into `plugins/` (the id is the folder name). `node tools/plugin.mjs list` shows what the registry found,
-by class, with what this version does with each, what was skipped and why; `node tools/plugin.mjs check` checks the
-folders in depth. The server prints the same at start (`[plugins] …`) and notices a new or changed plugin on the next
+by class, with what this version does with each, what was skipped and why. It reads `SP_PLUGIN_SCRIPTS` the way the
+server does: `sandbox` with a valid lock lists a script plugin as loaded; unset, or `trusted` with no pin, leaves it
+disabled. `node tools/plugin.mjs check` checks the
+folders in depth and, across those folders, duplicate ids, a second language overlay and two ui plugins that ask for
+the same slot (§8, §14). The server prints the same at start (`[plugins] …`) and notices a new or changed plugin on the next
 page load — no restart. A server's own plugins are git-ignored (the folder's readme and templates are tracked and ship in the
 release zips), never packed into a release and never touched by an update. One unreadable
 folder is skipped with its reason; it never stops the server.
@@ -113,7 +116,7 @@ classes and the content sets running at once — §11 and `docs/DEPLOY.md`.
   "id": "marathon",
   "name": { "zh": "马拉松模式", "en": "Marathon" },
   "version": "0.1.0",
-  "app": ">=0.3.0 <0.4.0",
+  "app": ">=0.4.0 <0.5.0",
   "api": 1,
   "class": "content",
   "scope": ["room"],
@@ -134,8 +137,9 @@ classes and the content sets running at once — §11 and `docs/DEPLOY.md`.
 | `id` | the folder name decides: `^[a-z0-9][a-z0-9-]{1,31}$` (it becomes part of record ids; lower case only); a different `id` in the file is a warning; script/trusted execution requires an explicit matching id in the verified manifest bytes |
 | `name`, `description` | a text in `sourceLang` or `{ "<lang>": "…" }`; `englishName` a text |
 | `version` | semver, required |
-| `app` | the game versions it is made for — `>=0.3.0 <0.4.0`, `0.3.x`, `^0.3.0` … (a pre-release counts as its release); required but for `lang`. Outside it: `compatible: false` and a warning (P1 refuses a gameplay plugin by default) |
-| `api` | the plugin API level, within `shared/constants.js` `PLUGIN_API` (`{ current: 1, min: 1 }`); required but for `lang` |
+| `versions` | optional, non-empty array of unique official ids from `shared/versions.js`; gameplay plugins default to `["act2autochess"]` when absent; cosmetic plugins still apply to every version |
+| `app` | the game versions it is made for — `>=0.4.0 <0.5.0`, `0.4.x`, `^0.4.0` … (a pre-release counts as its release); required but for `lang`. Outside it: `compatible: false` and a warning (P1 refuses a gameplay plugin by default). 0.4.x also runs plugins made for the 0.3 line (`>=0.3.0 <0.4.0`, `0.3.x`, `^0.3.1` …): 0.4 kept the 0.3 plugin surface and only added `versions` (§37.231) |
+| `api` | the plugin API level, within `shared/constants.js` `PLUGIN_API` (`{ current: 2, min: 1 }`); required but for `lang`. A manifest that uses a part of level 2 (today `offers`, §10b) states `"api": 2` |
 | `class` | §2; every part the manifest names must belong to it |
 | `scope` | `room` (the host's choice for the whole room), `personal` (the player's own setting), `server` (trusted code only), as the class allows — `cosmetic`: room and/or personal; `content`, `script`: room; `ui`, `lang`: personal; `trusted`: server or room |
 | `authors`, `credits`, `license`, `homepage` (http/https), `sourceLang` (default `zh`) | free text |
@@ -143,7 +147,7 @@ classes and the content sets running at once — §11 and `docs/DEPLOY.md`.
 | `loadAfter`, `loadBefore`, `priority` | ordering hints (lists of ids; an integer within ±1000, default 0) |
 | `settings` | ≤ 32 settings: `boolean`, `integer` / `number` (`min` and `max` required, `step`), `enum` (`options`) — no free text; `default` (else `false`, `min`, the first option), `label` |
 | `permissions` | what the plugin does (§4); every part needs one, every permission must fit the class |
-| parts | `assets`, `theme` (cosmetic+) · `data`, `operators`, `enemies`, `modes`, `stages`, `dsl` (content+) — a path, a list of paths or (`assets`, `theme`) the object inline · `i18n` `{ "<lang>": path }` (content+) |
+| parts | `assets`, `theme` (cosmetic+) · `data`, `operators`, `enemies`, `modes`, `stages`, `dsl`, `offers` (content+) — a path, a list of paths or (`assets`, `theme`) the object inline · `i18n` `{ "<lang>": path }` (content+) |
 | `entry` | `{ "sim", "meta" }` (script, `.js`) · `{ "client" }` (ui, `.html`) · `{ "server" }` (trusted, `.js`) |
 | `lang`, `files` … | the `lang` class only: manifest 1's language fields and `files: { ui, data }` (§7) |
 
@@ -159,6 +163,7 @@ patches, compact operator records, modes — are specified in §10.
 | `theme` | cosmetic, trusted | `theme` |
 | `data.patch`, `data.add` | content, script, trusted | `data` (either); `operators`, `enemies`, `modes`, `stages` (`data.add`) |
 | `dsl` | content, script, trusted | `dsl` |
+| `offers` | content, script, trusted | `offers` (§10b; the part is data, so no code permission is needed) |
 | `sim.code`, `meta.code`, `mode.code` | script, trusted | `entry.sim`, `entry.meta` |
 | `ui.frame` | ui | `entry.client` of a ui plugin |
 | `trusted.page`, `trusted.server` | trusted | `entry.client`, `entry.server` of a trusted plugin |
@@ -177,15 +182,17 @@ deep and 50 000 entries (`server/plugins/registry.js WALK_LIMITS`): a folder pas
 also when it is a link to a large tree.
 
 Limits [ASSUMED, all of them]: 8 MB per JSON file, nesting ≤ 64 levels, numbers finite within ±1e9; 200 MB and 5000
-files per plugin. The registry checks the manifest, the files and the paths whenever it scans; `tools/plugin.mjs check`
-also parses every JSON file against the limits.
+files per plugin, except that a cosmetic pack may hold 512 MB (`PLUGIN_CLASSES.cosmetic.bytes`,
+`pluginByteLimit`): its art and Spine models are what the client extracted, and a single operator's model is already
+hundreds of kilobytes. The registry checks the manifest, the files and the paths whenever it scans; `tools/plugin.mjs
+check` also parses every JSON file against the limits.
 
 ## 6. Content identity (`cs`)
 
 Every server names the content its rooms play with a hash, **`cs`** (`shared/plugins/identity.js`):
 
 ```
-cs = sha256(canonical({ v: 1, app, sim, data, plugins, settings, i18n? }))
+cs = sha256(canonical({ v: 1, app, sim, data, plugins, settings, i18n?, rules? }))
   sim       sha256(canonical([[path, sha256], …])) of every served /sim/**.js (not nodeData.js), /shared/**.js and /data.js
   data      { <name>: sha256 } of every data/<name>.json the match or the sim reads (not assets, local-assets, emotes, i18n/)
   plugins   [{ id, version, files }] in load order — [] for the vanilla content
@@ -209,12 +216,12 @@ with cosmetic plugins; a room with gameplay plugins will read `MODDED cs=… plu
 file's URL (`/data/<file>?v=<8 hex>`), hash and size — cached for good; any other `cs` is 404. `GET /plugins/index.json`
 (never cached) is the catalogue: `{ version, app, api, content: { vanilla }, plugins: [entry …] }`, every plugin and
 pack found by class and id, with its `status` (`loaded` / `disabled` / `planned` / `unsupported`), `unofficial`, its manifest's
-public fields, size and file count — never a path on the server; a loaded cosmetic plugin adds `vs` (the visual set of
-it alone, §9) and `artBytes` (the art it serves). A loaded interface plugin adds `slots`, `entry` (a path inside the
-plugin), `vs`, `frameBytes` and `frameFiles` (`{ path: sha256 }`, §14) — not `artBytes`.
+public fields, size and file count — never a path on the server; a loaded cosmetic plugin that writes art adds `vs` (the visual set of
+it alone, §9) and `artBytes` (the art it serves). [ASSUMED] A theme- or notices-bearing cosmetic with an empty overlay omits both, so the page does not fetch an empty document; pre-existing entries keep their shape. A loaded interface plugin adds `slots`, `entry` (a path inside the
+plugin), `vs`, `frameBytes` and `frameFiles` (`{ path: sha256 }`, §14) — not `artBytes`. A plugin that declares theme variables adds `theme.vars`; a plugin that declares announcements adds `notices`. Both are omitted when absent, so a catalogue entry without them keeps its old shape. Notices are not a content-hash input (§9.2).
 
 Cosmetic plugins and interface plugins never change `cs`: neither changes a battle, so a room whose plugins are only
-of those classes plays the vanilla `cs`. Installing a ui plugin, or editing its page, does not change `cs`. Editing a
+of those classes plays the vanilla `cs`. Installing a ui plugin, or editing its page, does not change `cs`. Adding, editing or removing notices or personal theme values does not change `cs`, `vs` or room-facing plugin hashes. The manifest contribution is always canonical JSON with `notices` and `theme` removed, including when those keys are absent. Script descriptors always use that stripped source and identify the gameplay file snapshot instead of the notice-sensitive raw lock; owner admission still verifies the complete original bytes and lock [ASSUMED]. Visual sets use the same canonical manifest; a cosmetic lock contributes only its checked Spine metadata, since the actual shaping files are hashed separately [ASSUMED]. This normalization migrates old raw-manifest contributions even for plugins without either field; it does not preserve their pre-fix hashes. Editing a
 served `/shared/**.js` does, because `cs` hashes every one of them — including `shared/plugins/ui.js`. The art a
 cosmetic plugin draws, and the frame an interface plugin draws, are named by the visual hash `vs` (§9, §14).
 
@@ -240,7 +247,7 @@ node tools/plugin.mjs check [<dir|id> …] [--strict] the folders of plugins/ (o
 node tools/plugin.mjs pack <dir|id> … [--zip]      write plugin.lock.json (every file's SHA-256 and size, each Spine model's
           [--out <file|dir>]                       clip data), then check the folder; --zip writes the folder as a zip
                                                    (default plugins/_dist/<id>-<version>.zip)
-node tools/plugin.mjs new <template> <id>          a new plugin folder from a template (art, spine, voice, audio, numbers, operator, dsl, meta, mode, ui, script)
+node tools/plugin.mjs new <template> <id>          a new plugin folder from a template (art, spine, voice, audio, numbers, operator, dsl, meta, mode, ui, script, theme, notices, fx, skins)
           [--target <名字|id>] [--name …] [--dir …] optional target found by its official name; --options <json-file> for wizard options
 node tools/plugin.mjs errors [--markdown] [--write] the error catalogue; --write keeps the symptom tables of the documents
 node tools/plugin.mjs import-forge <dir|zip>       a Forge workshop pack → the plugins it can become (§16);
@@ -256,6 +263,17 @@ node tools/plugin.mjs install <zip|https URL>       install a zip; HTTPS require
 node tools/plugin.mjs catalog <file|https URL>     inspect a community catalogue (--json available)
 node tools/plugin.mjs surface [--write]            the frozen API table; --write regenerates docs/PLUGIN-API.md
 ```
+
+`check` of every folder in `plugins/`, or of more than one named folder, also applies the registry's cross-plugin rules:
+a duplicate id, a second overlay of one language (the message names the plugin folder that won; the first in sorted
+order), and two ui plugins that ask for the same slot (`PLUGIN_UI_SLOT_SHARED`, a warning — the match shows tabs).
+Named folders are sorted by folder name before those rules, the same order `readDirSorted` uses when the registry
+reads `plugins/`. A folder that order keeps stays kept: a later scan does not add a second duplicate that names it
+as the loser. Checking one named folder does not scan the others. A losing overlay's own folder line says
+`(skipped)` and names the winner; JSON marks it `status: skipped`, `loadable: false` and supplies the reason in
+`skipped`, without counting the cross-plugin problem twice. `list` and `check` call the same trust gate as the
+server (`SP_PLUGIN_SCRIPTS`): sandbox with a valid lock says `(loaded)`; disabled execution or an invalid lock
+says `(disabled)`.
 
 `--root <dir>` points it at another checkout or an unpacked release. Full and lite releases ship this CLI, its
 runtime dependencies, schemas, templates, author documentation and `test/helpers/battleHarness.js`. The harness
@@ -288,9 +306,9 @@ is a number of `data/enemies.json`), so a room's `cs` is the vanilla one whateve
 
 | Container | A record |
 |---|---|
-| `chars[charId]` | `avatar`, `avatarE2`, `portrait`, `portraitE2` (image), `spine.front`, `spine.back` (Spine) |
+| `chars[charId]` | `avatar`, `avatarE2`, `portrait`, `portraitE2`, `illust` (image), `spine.front`, `spine.back` (Spine), `skins` (one key per skin, below) |
 | `enemies[key]` | `icon` (image), `spine` (Spine) |
-| `tokens[id]` | `avatar` (image), `spine` (Spine) |
+| `tokens[id]` | `avatar` (image), `spine` (Spine), `skins` (one key per owner skin, below) |
 | `bonds`, `items`, `bands`, `skills`, `modules`, `ui`, `prof.icon` / `large` / `battlecard` / `sub` `[key]` | an image |
 | `audio.bgm[lobby \| prep \| combat \| unite \| boss]`, `audio.bossBgm[bossId]` | a track `{ loop, intro? }` (audio), written whole — not `audio.bgm.combatAlts` (see below) |
 | `audio.voice[charId]`, `audio.voiceJp[charId]`, `audio.voiceEn[charId]`, `audio.voiceKr[charId]`, `audio.voiceNative[charId]` (the operator's own-language dub) | `<slot>`: an audio file or a list of 1–16 |
@@ -316,13 +334,15 @@ also takes away that entry's local-client model (`spineLocal`, which the client 
 that model: a model write the browser leaves out, or whose file fails to load, leaves the local model too. The split
 battle music `audio.bgm.combatAlts` (the mode's own 开战 tracks, 骑士之日 / 无畏者, fixed per round) is not something a
 plugin changes: the client plays it instead of `combat` in the rounds it covers, so a plugin's `combat` is heard only
-where no such track plays. A player's own lobby music (大厅背景与音乐, `ui/lobbyMedia.js`) outranks a plugin's
+where no such track plays. A track a plugin writes replaces that music in every version: the seasons' own tables
+(`audio.seasons`, docs/ASSETS.md "BGM" — 规程's lobby and leaders, 第一期's 开战) give that key up while the plugin is on
+(shared/plugins/visual.js layVisualOps). A player's own lobby music (大厅背景与音乐, `ui/lobbyMedia.js`) outranks a plugin's
 `audio.bgm.lobby` in that player's browser while it is switched on. Writing an
 entry the installation has needs the permission `assets.override`, a new entry `assets.add` — the decision the permission
 is: a write to a path whose entry the installation's manifest already has is an override, whatever it writes there, so an
-operator the manifest has counts as one even when the write only adds a skin under `chars[<charId>].skins` or a field the
-record did not have (`illust`); a new operator is an `assets.add`. `theme` is the allowlisted variables of §9.1, applied
-on this player's page only.
+operator the manifest has counts as one even when the write only adds a skin under `chars[<charId>].skins` or
+`tokens[<tokenId>].skins`, or a field the record did not have (`illust`); a new operator or token is an `assets.add`.
+`theme` is the allowlisted variables of §9.1, applied on this player's page only.
 
 **立绘 and the skins of one operator.** `illust` is the full illustration (立绘), the picture a detail view shows. The
 committed `data/assets.json` of this version carries no `illust` and no `skins` yet, so a plugin that writes one adds that field to the
@@ -368,6 +388,13 @@ As the opening of this section says, the committed `data/assets.json` has no `sk
 path the installation's manifest does not carry yet and is `PLUGIN_REF` — it means something only once the installation's
 manifest has `skins` of its own; in this version only the fields of an operator's own record can be referenced.
 
+**A summon's own appearances.** A token record may also carry `skins`, keyed by the id of the OWNER outfit that brings
+each appearance (not the token's own): official `skin_table.json` `charSkins[*].tokenSkinMap` is the source (e.g.
+`char_250_phatom@sale#4` → `token_10007_phatom_twin_sale#4`). A summon skin is the same record an operator skin is
+(pictures and Front/Back model), at most 64 per summon, under the same key rules. A summon has no picker and no
+`room.skins` entry: it wears what its owner wears (docs/SKINS.md), so the client draws
+`tokens[<tokenId>].skins[<owner skin id>]` and falls back to the summon's own model.
+
 **Wearing a skin — docs/SKINS.md.** The overlay above is what a *server's owner* installs and what a player switches on
 for themself (`scope: ["personal"]`, 设置 → 外观插件); **no room and no host is involved**, and this version has no
 server-side install route at all (upstream #652 closed the one that let any client make the server download files and
@@ -388,7 +415,7 @@ fall back independently to that operator's normal / elite art. #686's per-seat c
 stand-ins and DIY bodies stay in force; model outfits retain their model and image fallback behavior.
 [ASSUMED] The existing `avatarE2`, `portraitE2` and `illust` fields count too; metadata alone is not wearable.
 Official `skin_table.charSkins` separates operator identity, avatar, portrait, illustration and battle skin; the
-missing-plugin policy is the maintainer's choice. See [SKINS.md](SKINS.md#picture-only-outfits-032-b6) and §37.4.
+missing-plugin policy is the maintainer's choice. See [SKINS.md](SKINS.md#picture-only-outfits-032-b6) and §35.4.
 
 **Spine models and `plugin.lock.json`.** A model's clip roles, durations, events, hit times and bounds come from the
 skeleton itself: `node tools/plugin.mjs pack <dir>` parses it the way `tools/fetch-assets.mjs` parses the game's
@@ -406,15 +433,14 @@ manifest at most 2 MB [ASSUMED] — and permissions, the lock — a problem keep
 files that shape it (SHA-256, kept by path while a file keeps its size, mtime, inode and ctime: a rescan reads only what
 changed, and a file rewritten with its old size and mtime put back — `rsync -t`, `touch -r` — is read again, its ctime
 gives it away; the folders' own check looks at the same four, so such a rewrite is noticed without a request for it)
-[ASSUMED: at scan, a 200 MB plugin costs about a second once].
+[ASSUMED: at scan, a 200 MB plugin costs about a second once; a 512 MB cosmetic pack, its class ceiling, about 2.5 s].
 
 **The visual hash.** A set of cosmetic plugins in load order is named by
 `vs = sha256(canonical({ v: 2, assets: <SHA-256 of data/assets.json>, overlays: [{ id, version, files, writes }] }))`,
 `files` mapping every file that shapes a plugin's overlay — `plugin.json`, `plugin.lock.json`, the `assets` file, every
-file the overlay serves [ASSUMED] — to its SHA-256, and `writes` the SHA-256 of the canonical JSON of the plugin's writes
+file the overlay serves [ASSUMED] — to its identity SHA-256: canonical manifest JSON without notices/theme, canonical checked `{ spine }` for a cosmetic lock, and raw bytes for the assets document and served files. Raw manifest and lock hashes remain separate for verification (§6). `writes` is the SHA-256 of the canonical JSON of the plugin's writes
 as the server serves them (`writesHashOf`: the slots, the files of the plugin they name, its references, a Spine model's
-clip data — never a URL): the same files and writes give the same `vs`, one changed byte or one file moved to another
-slot another.
+clip data — never a URL): the same identity inputs and writes give the same `vs`; a changed shaping byte or a file moved to another slot gives another. Notices and personal theme values do not enter these inputs.
 
 **Served:**
 
@@ -509,11 +535,124 @@ record names the room's visual set (`vs`, null without cosmetic plugins — a pl
 plugins=id@version(hash),… personal=id,…`. BattleSpecs may carry the room's `vs` for diagnostics (§11); the sim
 never reads it. A standalone replay does not restore those cosmetic files automatically.
 
-**Limits** [ASSUMED]: 300 MB of art per set, 20 000 writes per plugin, 16 files per voice slot, 32 override warnings per
-set, 2 MB copied by references per plugin and 4 MB per set, the lock's limits above; the plugin limits of §5 apply too.
+**Limits** [ASSUMED]: 300 MB of art per set, 20 000 writes per plugin, 16 files per voice slot, 64 skins per operator's
+record, 64 characters for a skin key (an entry key takes 128, §9), 1–64 characters for a skin's `name` (0–64 for its
+`group`), 32 override warnings per set, 2 MB copied by references per plugin and 4 MB per set, the lock's limits above; the
+plugin limits of §5 apply too.
 
-**Start from** `plugins/_template/cosmetic/` — references to the installation's own art only, no file. Never put files
+**Start from** `plugins/_template/cosmetic/` — two original CC0 files (a checkerboard PNG and a short synthesized OGG) plus installed-art references. Never put files
 of the official game in a plugin.
+
+### Operator effects (0.3.1)
+
+An operator record can borrow official effects independently of its model:
+`"fx": { "unit": "char_112_siege", "skills": { "0": "skchr_siege_3" } }`.
+`unit` must be an exact extracted index unit key (no suffix stripping); `skills` maps our zero-based slot or exact skill id to an official skill id.
+The slot wins [ASSUMED]. Explicit unit/skill mappings precede the existing fallback chain. Attacks, projectiles,
+hits and skill start/loop/end use the existing official renderer (3D); no gameplay is inherited.
+[ASSUMED] Borrowed talent visuals select only the borrower’s equipped talent indices, plus the trait; module
+visuals still require that active module. A missing exact unit disables its entire skills map, including skills
+present in the global table, and keeps the old resolution chain. Missing skills also fall through. A missing unit
+produces one console note per view. Studio/check warn about locally absent units; malformed declarations refuse the plugin.
+
+`setup --local` now also extracts used effects. Startup/update setup discovers official character references in
+installed plugins' declared JSON (`fx.unit`, `origin.charId`, `art.ref`, `art.assets`, official-format charIds and asset
+references), including characters absent from our roster. The Python extractor calls the same repository-owned JSON
+reader: no plugin module is loaded. A new reference missing from `public/assets/local/fx/index.json` asks for a
+re-extract, default **no**; typed yes, `--local` or `--yes` authorizes it. `--check`/`--no-local` never extract.
+A declined reference set is remembered; a different set can ask again [ASSUMED]. Missing client bundles remain
+unavailable; extracted files stay ignored. Discovery caps [ASSUMED]: 256 folders, 64 declared JSON files per plugin,
+8 MiB per file, 24 levels and 100,000 values per document.
+
+Since §34.28, that same discovery also drives optional **operator art** for official ids outside the shipped roster.
+`setup --local` extracts base/E2 avatars and portraits and default Front/Back battle Spine models from the local game,
+with no network. Startup/update asks again for missing operator art with the same opt-in rules above. Extracted art
+is indexed in `data/local-assets.json` and merged into the served asset manifest before cosmetic layers: shop cards,
+details, 自选 and the board can draw the imported official operator. A plugin's own art still wins. Without extraction
+or matching local bundles, the plugin's own art works; otherwise missing pictures/generic board markers remain.
+[ASSUMED] Existing installation slots win over extracted slots, partial extraction keeps earlier successes, and the
+gap check requires base pictures/both directions plus E2 pictures when the cached official table declares E2.
+Discovery requires membership in the cached official character table; a missing/unreadable table yields no ids.
+[ASSUMED] Discovery and the Python planner cap each run at 256 distinct operators, sorted after deduplication and
+roster exclusion. The default-yes vanilla extraction prompt does not grant art consent: setup resolves the art gate
+before full extraction, and direct full `extract.py` runs require `--plugin-art` (or explicit `--only plugin-art`).
+Registry checks and packing keep `assets.add`/`assets.override` classification against the original `data/assets.json`;
+references use the merged manifest. One broken sprite is logged without skipping later sprites in its bundle.
+This adds no plugin fields and changes no gameplay/content hashes. See [ASSETS.md](ASSETS.md#official-operator-art-referenced-by-plugins-031)
+for paths, scratch-only extraction and limits (no extra skins, illustrations or voices).
+
+A cosmetic plugin, or a content plugin's own assets, can put this inside its `assets` object/file:
+
+```json
+{"fx": {
+  "flipbooks": {"flash": {"image":"fx/sheet.png", "frames":8, "cols":4, "fps":16,
+    "anchor":[0.5,0.5], "scale":1, "blend":"add", "loop":false}},
+  "bind": {"char_x_my_pack_guard": {"0": {"skillStart":"flash", "hit":"flash"}}}
+}}
+```
+
+Bindings select unit → zero-based skill slot or exact id → `skillStart`, `skillLoop`, `skillEnd`, `attack`, `hit`,
+`projectile`. Referenced effect IDs must exist in the bundle. Units must belong to this plugin or a declared
+dependency [ASSUMED]; official units cannot be overwritten. Every runtime unit/skill/prefab/texture key is namespaced as
+`plugin:<plugin-id>:<local-id>`. Files and declarations are pinned by the existing visual `files`/`writes` hashes.
+The browser rechecks unit ownership and prefab bodies before preparation and merge; invalid bundles contribute
+nothing. The loader pins the provider/dependency owner list with the payload; binding keys cannot grant ownership.
+
+Flipbooks use Pixi sprites on **both boards**, obey 官方特效 (off hides them), and advance in battle seconds
+[ASSUMED]. Frames read left-to-right, top-to-bottom, skipping unused cells; image dimensions must divide the grid.
+Defaults [ASSUMED]: anchor `[0.5,0.5]`, scale `1` (one tile wide), blend `normal`, loop `false`. Skill loops stop on
+skill end/death. Other looping books stop after one cycle unless a duration is supplied. Projectile bindings use
+generic projectile speed and play hit on arrival [ASSUMED: events carry no authoritative arrival time]. Without a
+custom projectile, ranged hit bindings use the same estimated arrival time. Melee hit bindings use the damage event.
+[ASSUMED] Ranged damage has no source id, so an estimated arrival never suppresses a damage-event spark.
+Only an identified source whose hit effect draws replaces that event’s spark; other attackers and husk hit-count
+events retain their normal handling. Owner/target death cancels pending arrival hits, with or without a custom projectile.
+
+Compiled effects add `"index":"fx/index.json"`. This version-3 `fx-index` fragment contains `units`, `skills`,
+`prefabs` and `textures: {"sheet":{"file":"fx/sheet.png"}}`. Prefabs are version-1 `fx-prefab` JSON under `fx/`,
+following [the extracted format](design/vfx-format.md), with this validated subset:
+
+- Units: `kind:"char"`, skills, modes, optional startEffect/deadEffect. Skill copies match index.skills.
+- Skills: uses (`keys`, role, from, optional ability/oneshot), optional mode/rootClass. Roles: start/loop/end/hit/cast.
+  Mode attacks have cast/hit rows (`effects`, optional oneshot/startEvent/endEvent).
+- Parent-first nodes, transforms, built-in Quad meshes or particle systems, renderer material indices, and optional
+  ParticleEffect behaviour (`_isLoop`, `_maxLifetime`, `_spawnLocation`, `_delayToPlay`, `_delayToFinish`, `_rotateType`).
+- Scalar InitialModule lifetime/speed/size/color/capacity and EmissionModule rate/bursts. Built-in additive/alpha
+  particle materials only. No prewarm, scripts, shader source, URLs, custom meshes, clips, subemitters or effect chains.
+
+Unsupported components fail validation. Compiled effects remain 3D-only. All author limits are **[ASSUMED]**:
+256 files/32 MiB per bundle; 1 MiB per JSON/4 MiB JSON total; 64 units; 128 effects/textures; 64 nodes, 16 systems,
+1,024 particles and 32 emitters per prefab; 256 particles/system, 16 bursts/system, rate ≤256/s, lifetime ≤30s,
+speed/size/simulation-speed ≤8, delays ≤30s, burst repeats 1–16 with interval 0.01–30s, numeric values within ±10,000. Textures: 8-bit RGB/RGBA PNG, dimensions ≤2,048 (no SVG/JPEG/WebP).
+Flipbooks: 1–256 frames, 0.1–60 fps, anchor 0–1, scale 0.01–8, normal/add blend; 128 live custom instances,
+600-second held loops. Existing renderer tier/particle caps still apply. Removing/replacing a visual set clears its effects and destroys cached flipbook base textures; destroying the player does the same.
+
+DSL: `{"fx":{"kind":"plugin","id":"flash","at":"self","dur":0.4}}` draws an effect in the same plugin's
+assets. The loader compiles this into the existing plain fx event, kind `plugin`, effect address in `extra.skill`,
+anchor unit id in `extra.id`. Absent effects are visual no-ops. Cross-plugin addresses are not accepted [ASSUMED];
+use cosmetic bindings. Loader/client extensions live outside the hashed shared/sim source, preserving vanilla and
+old plugin content hashes. Only sets using new fields gain new data/visual hashes.
+
+Forge `fx.silentPhases` imports to `assets.fx.silentPhases`: union with built-in silent kinds, suppressing only the
+procedural phase flash; model form changes remain. Empty lists produce nothing; unknown fields remain named skips.
+At most 128 identifier-like names [ASSUMED].
+
+Review saved files in `/studio/`: **试一场 → 单干员对木桩 → 优先使用插件的新干员 → 开始对照**. Effect replays carry
+actual plugin render records and hashed preview assets. **画面** switches 3d/2d; **官方特效** switches off/lite/full
+(switching restarts playback). Check skill start/loop/end, attacks, moving projectiles/hits, pause/replay and removal.
+Official mappings need local extraction. `/studio/console.html` stays vanilla-only: use the borrowed official
+operator there as a reference. API names are in [PLUGIN-API.md](PLUGIN-API.md).
+### 9.1 Theme variables
+
+A cosmetic plugin (and a trusted one) may set `theme.vars`, a map of custom properties to values. A flat map whose every key starts with `--` is the same declaration [ASSUMED]. A single relative JSON file may hold either shape, checked by the same validator when scanned. The permission is `theme`. The names are only the colour, time and easing tokens this installation defines on `:root` (`shared/plugins/theme.js`, from `public/css/theme.css`). A colour is `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, or `rgb()` / `rgba()` / `hsl()` / `hsla()` with numbers and percentages. A time is `0–2000ms` or `0–2s`. An easing is `linear`, `ease`, `ease-in`, `ease-out`, `ease-in-out`, `step-start`, `step-end`, or `cubic-bezier()` with x in 0–1. `url(`, `var(`, `calc(`, quotes, backslashes and `; { } < >` are refused. [ASSUMED] At most 64 variables; each raw value is at most 400 characters (UTF-16 code units), checked before trimming or parsing on both server and client. The schema declares the same value bound. One bad name or value refuses the whole theme on our manifests (`PLUGIN_THEME_NAME`, `PLUGIN_THEME_VALUE`, `PLUGIN_THEME_LIMIT`, `PLUGIN_THEME_SHAPE`, `PLUGIN_THEME_URL`). `check --strict`, the registry and the studio call the same function.
+
+The page writes the variables of the player's switched-on personal cosmetic plugins with `documentElement.style.setProperty`, in plugin-id order. [ASSUMED] The later id wins a shared token, and the 外观插件 panel names that plugin. Switching one off removes the properties at once. A room's visual set does not apply them, and they are never sent. No stylesheet is injected. [ASSUMED] Fonts, z-index, `--t`, `--bk-l`, `--bk-w`, `--sa-*`, `--tap-min` and properties that are not on `:root` are not tokens. Functions/keywords are lowercase; numbers are decimal without exponents or an explicit plus, with CSS ASCII whitespace. Cubic-bezier y values may be any finite number.
+
+### 9.2 Announcements (公告)
+
+Any plugin may declare `notices`: a list of `{ id, title, body, date?, i18n? }`. `id` is `/^[a-z0-9][a-z0-9-]{0,31}$/` and unique in that plugin. `date`, when present, is a valid calendar date in `YYYY-MM-DD` [ASSUMED]. `i18n` maps a valid BCP 47 language code to `{ title, body }`. This is data, not a part and not a permission. [ASSUMED] Plain text: the page renders the strings as text, so `<` and `>` stay characters and a link is not an anchor. Newlines in the body are kept. A title has no newline. Empty text is refused. [ASSUMED] Caps: 20 notices, a title of 80 characters, a body of 2000 (`PLUGIN_NOTICE_SHAPE`, `PLUGIN_NOTICE_TEXT`, `PLUGIN_NOTICE_LIMIT`, `PLUGIN_NOTICE_LANG`). One problem refuses the whole list.
+
+[ASSUMED] Every loaded plugin's notices are shown, whether or not a room selects that plugin. They ride on `GET /plugins/index.json` (no separate route). `content.notices: true` in `/healthz` and `welcome` tells the page to fetch the catalogue even for a language-only installation; the hint is absent when there are none and never enters room content. The catalogue keeps at most 100 notices and 48 KiB of serialized notice arrays (UTF-8, including escaping, ids, dates and translations), newest first, skipping any entry that would not fit and continuing to smaller entries from other plugins. A single otherwise valid notice larger than the byte budget is omitted without suppressing other plugins. The client independently applies the same count and byte caps. The title screen and the lobby show 公告 only when there is at least one. The popup lists them newest first (a dated notice before an undated one, then plugin id, then notice id) with the plugin's name, in the player's language when that notice has a translation. A dot marks unseen ids. Seen ids are `sp.pref.notices-seen` in this browser; every access is in try/catch. [ASSUMED] Opening the popup marks every notice then on screen as seen, and the list keeps at most 400 ids. Notices never enter a content hash, a room's composition or a match. Adding the first notice and removing the last one follow the same rule. Notice-only personal cosmetics stay available for dependency resolution even though they have no visible switch and no overlay to fetch.
 
 ## 10. Data plugins (P1b)
 
@@ -522,181 +661,13 @@ plugins in dependency order and validates the **whole merged data**. No third-pa
 Room selection, worker isolation and HTTP/client switching are §11 (P1c). Start with `plugins/_template/content/`, copied
 to `plugins/data-demo/`. Rename its record namespaces too when renaming that folder.
 
-**Patches** (`shared/plugins/patch.js`): a manifest `data` file is `{ "patch": 1, "ops": [...] }`.
-Each operation names `file` (without `.json`), optional record `id`, and `path` (array of keys/indexes):
-
-| op | meaning |
-|---|---|
-| `set` | replace an existing field with `value` of the same type. `null` is its own type: it may be written only onto a field that is already `null`. Washing a number through `null` into an object is `PLUGIN_PATCH_TYPE` and returns the original data |
-| `merge` | recursively merge an object into an existing object; arrays replace whole arrays |
-| `add` | add a new namespaced record with `id` and object `value`; `config` uses `path: ["modes"]` |
-| `append` | append the elements of array `value` to an existing array |
-| `remove` | remove array values equal to `match`; it never deletes a record or an object field |
-
-Unknown operations, absent paths, wrong types, unsafe keys (`__proto__`, `constructor`, `prototype`), missing settings,
-record deletion and invalid new ids produce structured `{ code: 'PLUGIN_*', path, message }` problems. A failing patch
-returns the original input, never a partial application. `applyPatches(data, ops, { pluginId?, settings? })` is pure.
-`{ "$setting": "name" }` in patch values resolves against normalized manifest settings. Out-of-range settings use the
-default; only declared settings enter `cs`. Repeated writes in different plugins are reported as warnings; later writes
-win. To change another plugin's records, declare its id in `requires` (a load-order hint alone is insufficient).
-
-Records sometimes keep a convenience copy of a blackboard: `bonds[id].bb` is used by presentation, while battle
-handlers may read `bonds[id].buffs[n].bb`. Change both when changing that number; the template demonstrates it. Likewise,
-changing a default skill requires keeping `skill` equal to its `skills[]` entry. Validation catches inconsistent skills.
-
-**Compact operators** (`operators` manifest files; `schemas/records.schema.json`): one object or an array, with `op: 1`,
-`charId`, `name`, `profession`, `subProfessionId`, `position`, `rarity`, `as`, `forms.normal`, `forms.elite` and `skills`.
-Each form supplies `stats` and `rangeGrid`; optional form `skills`, `trait` and `talents` override the shared ones.
-`skills` has exactly one `default: true`, and each skill supplies `skillId`; the expander fills index, SP, trigger,
-blackboards and display fields. `as: "chess"` needs `chess: { tier, bonds, price?, garrisonIds?, sellPrice?, identifier?,
-shopSortId? }`: normal/elite ids, prices, sell values and merge counts come from that tier's economy, and statuses
-from `economy.chessStatus`. `price` and `garrisonIds` are one value for both pieces or `{ normal, golden }` (an official
-pair's garrisons are `garrison_N_a` / `garrison_N_b`); `sellPrice` is one value. `as: "diy"` creates
-`backups.units`, every existing DIY slot status, `diy.ownedPool` and `diy.operators`; `"both"` does both. The expander
-adds shop chess to their bonds' member lists. An existing record must be changed with patches.
-
-Behavior is `kit: "generic"`, `{ "ref": "<official kit key or file stem>" }`,
-`{ "spec": <JSON SkillSpec or JSON file path> }`, or `{ "dsl": <DSL spec> }`. Files are JSON, including transitive spec files. `art: { ref: charId }`
-references asset ids already installed; it carries no art file. `talentMods` supplies permanent numeric mods with a
-JSON SkillSpec. Per-skill `skillSpec` overrides the operator's spec for that selection.
-
-`kitOf` resolves extensions → `raw.dsl` → `raw.skillSpec` → `raw.kitRef` → official kit → generic. When the record
-carries `dsl`, `kitOf` calls `compileDsl`. The builder stamps `pluginId` on that record; the author's spec is not
-rewritten, and a written `pluginId` must match the host (`PLUGIN_DSL_PLUGIN_ID`). Using DSL needs the `dsl`
-permission. A bad spec refuses the whole content set. Explicit test kits still take precedence. `talentMods` go with
-a JSON SkillSpec or with `kit.dsl`. A record that carries both
-`kit.ref` / `kitRef` and `talentMods` is `PLUGIN_SKILL_SPEC` at expansion and again in `validateData`; the schema file
-still allows the pair, and the runtime rejects it. File stems resolve only against the official registry, never an
-import path. A referenced kit's numbers come from the new record. Keep official skill ids to use its named alternate
-skills; a one-skill DIY clone can reuse a chess kit's default skill [ASSUMED]. A one-skill DSL kit uses the same
-`bindDefaultSkill` helper, so a 自选 piece and a 补位 stand-in take that default spec as `skills[id]`
-(`skillSource: 'skills'`). A shop chess keeps `kit.skill`. Multi-skill clones are not auto-bound. `extensions.js` stays empty for vanilla; P3a registers
-scripts through it (§13); `dsl/compile.js` is P2's compiler (§12) and data plugins use it (§12, PLUGIN-DSL.md §9). A plugin operator whose id
-starts with `char_x_` and whose chess and backup records have neither `potDown` nor a talent `potBelow` accepts only
-the default potential 6. Official operators, including `char_616_pithst`, are unchanged. 调配 and 自选 omit its potential control; 练度 remains available. Sync drops a stored non-default potential
-and the server rejects a raw client message.
-
-The JSON SkillSpec allowlist is SIM §7.3 without callbacks: kind, deployment activation, duration/ammo/SP/charges,
-trigger, heal, mods, flags, targeting and attack (including chain/heal/onHitStatus). Unknown fields, functions, wrong
-types and unknown mod/flag names fail. Work bounds [ASSUMED]: attack/chain/target/ammo/charge counts ≤ 100, a range at
-most 1024 integer offsets within ±64. No JavaScript string is executable.
-
-**Other records**: a manifest `data` file may instead be `{ "records": 1, "entries": [...] }`. Each entry is
-`{ file, id, base?, set? }` or `{ file, id, value }`; `base` clones an existing record before applying `set`.
-Supported files: enemies, waves, stages, modes, items, bands, garrisons, effects, tokens and choices. The dedicated
-`enemies`, `stages` and `modes` files use the same shape with `file` supplied by their manifest part.
-
-- Enemies can use `special: "<official enemy key>"` to reuse that enemy's data and kit. It is a specific enemy, not an
-  entire faction category: those categories contain many different behaviors. Changes still use the concrete record's
-  stats/blackboards. Waves supply routes and spawns; the expander fills empty branches, overrides and device lists.
-- Items and bands require an official `base` or `value.effectRef`; the result retains `effectRef` and the concrete
-  record's copied/overridden buffs. Battle item identity checks and prep dispatch recognize it. A compact item is a
-  single non-merging record [ASSUMED]; paired equipment can be added as complete records with patches.
-- Garrisons reuse an existing `effectKey`; effects reuse existing buff handlers. Choices use
-  `{ file: "choices", id: "effect_x_data_demo_card", kind: "tactic" | "bounty", base: <card effectId>, set?, effect? }`:
-  the new card and its cloned effect are added together. New bond behavior requires a script plugin (§13).
-- A mode requires an official `base`; nested objects inherit field by field and arrays replace whole arrays.
-  The base's choice schedule is copied. Changes to that schedule can then be patched explicitly. `GameData` overlays
-  mode-level economy, DP, timers and other global configuration keys; omitted values retain the official defaults.
-  Explicit mode chess purchase/sale prices override record prices. A room picks a mode with `room.setMode` (§11).
-- New or changed stages get ground paths from the same `Grid` helper as build-data (`server/sim/groundPaths.js`), with and
-  without active devices; deployment lists are derived too. The board stays 19×21. A base stage is the easiest start.
-  A plugin that changes only a wave's `routes` or `extraRoutes` recomputes `groundPaths` for stages listed on modes
-  whose round `template` or `bossTemplates` name those waves, from every current route, and keeps that stage's
-  `deployTiles`. [ASSUMED] bots then read the new paths; deployment lists stay the stage's own.
-
-New record ids are ≤64 ASCII letters/digits/`_`/`-`. The plugin id replaces `-` with `_` inside records. Prefixes:
-`chess_x_<plugin>_<name>_a/_b`, `char_x_…`, `skx_…`, `enemy_x_…`, `mode_x_…`, `stage_x_…`, `wave_x_…`,
-`item_x_…`, `band_x_…`, `garrison_x_…`, `effect_x_…`, `token_x_…` [ASSUMED prefix choices]. Two selected plugins whose
-namespaces collide are refused at composition with `PLUGIN_RECORD_ID`: `data` cannot sit beside `data-demo` (both
-prefix `data_`), and `ab-cd` collides with `ab_cd`. `ab` does not collide with `abc`. A plugin folder scanned alone is
-not refused. Whole-map writes cannot bypass record namespaces or remove existing records. The shared validator checks
-shapes, finite numbers, references, paired forms, the default skill, official kit/effect refs, wave routes and mode
-references. One wave, and each phase of a branch, may have at most 64 spawn rows, each an integer count from 1 to 600,
-summing to at most 600. Enemy `times` keys (and keys ending in `times`, including wave overrides) stay at or below 100.
-`bb.count` of 列装 (`global_special_choice_gain_equip`) and bond-chess (`single_special_choice_gain_bond_chess`) stays
-at or below 32. With the official tables as `vanilla`, every numeric blackboard value, and the loop fields enemy
-`sp.maxSp` / `sp.initSp` / `sp.increment` and skill `spCost` / `initSp` / `maxChargeTime` / `increment`, must also
-satisfy `|v| ≤ max(10 × official absolute maximum of that key, 64)` (`PLUGIN_DATA_BOUND`). A key official data never
-has uses 64. Blackboard `ammo` and `charge` use that blackboard rule. The battle clamps the same spawn, enemy-times
-and card-grant loops, and the loops fed by the systematic cap (operator `times` / `attack@times`, band and 维多利亚
-`count`, 黑云 ammo, 狱警 pierce). [ASSUMED] the factor 10 and the floor 64 sit above the measured official maxima
-(`times` 12, `attack@times` 5, `count` 20, enemy `sp.maxSp` 55) and far below ±1e9. Durations are not given an engine
-loop cap; a blackboard `duration` is still subject to `PLUGIN_DATA_BOUND`. Some `count` reads are one addition
-(`addLayers`, a single coin multiply) and bond layers still stop at 999; band grants and 维多利亚 hammers do iterate
-`count` and use the systematic cap, not 32. `jsonProblems` still allows a number whose absolute value is 1e9.
-Official counts, official trigger deviations and source-specific rules stay in
-build-data; its original data is unchanged. `node tools/records-schema.mjs` rewrites `schemas/records.schema.json`
-from the runtime schema (an optional output path overrides that file).
-
-Counts read from skill, talent or trait text go through `textCount` (`shared/plugins/textNumber.js`). The result is
-finite and at most `max(10 × the official maximum of that phrase, 64)`, or 64 when vanilla text never matches it.
-A matched run that is not finite clamps to the cap. Official phrases do not change: every scanned maximum is at most
-15, so the cold floor of 64 does not move them either. Percents and durations use `textFinite` and are not forced
-down to a count cap (`持续120秒` stays 120). `parseN` and `textNum` are `textFinite`. The phrase table is DESIGN §34.5.
-
-A subtract loop whose interval, period or per-step cost comes from plugin data uses `stepOf`. A positive value at or
-above the official minimum of that key is unchanged, including official `interval` 0.03 and `atk_interval` 0.025,
-both shorter than one tick. [ASSUMED] Raising those to one tick would change vanilla combat. `battle.every` already
-clamps its scheduler to one tick. A smaller positive step is raised to `max(one tick, official minimum / 10)`.
-Without the table, only a step below a tenth of a tick is raised. The same loop also stops after 8 iterations in
-one call. A burst that is not one tick of time uses `burstLimit` (the systematic cap of the official iteration
-count), not 8. 娜斯提's skill-end catch-up stops at 80 even when `duration` is 1e9. `duration` is not a skill field
-cap. Validation rejects a positive step key below the official minimum / 10 with `PLUGIN_DATA_BOUND` (`低于最小步长`).
-[ASSUMED] The step keys are names ending in `interval` or `period`, names ending in `cost`, and `coin_cnt`.
-
-Every content set carries `bounds` (`v: 1`) computed from the vanilla tables. A selection with plugins also serves
-`bounds/official.json`. That file is not part of `cs`. The page loads it with the set's data files, checked by its
-bytes, and the battle runner installs it; the room's match host installs the same object — so a modded battle runs with
-the same caps in the page and on the server. A set without the snapshot runs on the floor of 64 and never scans its own
-data. [ASSUMED] Direct `new Battle` still skips validation. The numbers of `factions` the wave generator reads
-(`generation`, each type's `count` and `weight`, each entry's `weight`) follow the same rule; the replaced-enemy counts
-also stay within 50, the generator's own clamp. The round-type schedule stops at 256. The full loop list, the floors
-that were left as they were, and the other residuals are DESIGN §34.5.
-
-Author-facing `PLUGIN_DATA_BOUND` text stays Chinese and is not a player string. `officialBounds.js` is marked
-`i18n-ignore-file`. The `联防` diagnostic in `validate.js` keeps its line ignore. The shared error catalogue
-(`shared/plugins/errors.js`, §15) explains these codes and supplies fixes to the CLI and studio.
-
-**Languages.** Manifest `sourceLang` describes the record texts (default `zh`). `i18n: { "en": "i18n/en.json" }` uses
-the existing `{ version: 1, lang, files: { table: { id: overlay } } }` format. String leaves must target existing strings.
-The builder computes `_h` against the final source text and retains valid unrelated base translations. Output lives in
-`i18n/<code>.json` in the composition, separate from simulation data. A content selection's `cs` includes the sha256 of
-each served `i18n/<lang>.json` body. Vanilla and cosmetic-only selections omit that field, so the P0 hash still
-excludes `data/i18n/`. Declared plugin-file hashes alone do not name the served translation snapshot. `index.json` is
-not a hash input. [ASSUMED] it cannot diverge while the hashed i18n bytes, data hashes, plugins and settings stay the
-same.
-
-**C1 for integrators** (`server/plugins/contentSet.js`):
-
-```js
-const set = buildContentSet({ registry, ids: ['data-demo'] }); // or [{id, settings}]
-// success: {cs, vanilla, plugins:[{id,version,hash}], data, files:{rel:{sha256,bytes}}, modes, problems:[],
-//           index, settings, warnings, kitted}
-// refusal: {problems} only — no cs and no partial data
-const files = contentSetFiles(set); // Map<rel, {body:Buffer, sha256, bytes}>, defensive copies
-```
-
-`data/<table>.json`, `i18n/<code>.json` and `index.json` are the route-relative keys. `index` uses the P0 composition
-shape (`plugins` there carry file hashes). Unchanged gameplay files retain their disk bytes and `/data/…?v=` URLs;
-changed files are the exact `JSON.stringify` bytes served from memory. The empty set's index and `cs` exactly equal P0
-computed from the same checkout. Any served sim/shared-code change naturally changes that checkout's vanilla hash.
-Cosmetic selections and dependencies can join the ordering pass; only content plugins enter this result’s gameplay plugin list and hash. Cache: by `cs`, 32 recent sets per registry [ASSUMED]; held set objects and their bytes remain valid after eviction or
-plugin removal. Room lifetimes and worker limits are §11's. A content plugin's optional asset part also has a validated
-`visual` snapshot; the room's visual set includes it (§11).
-
-Before importing Match/creating its meta registry in a content host, inject the merged singleton data; initialize sim
-data and reset `content/support`'s cached data too. The browser uses its `data.js` shim and `loadBrowserSim` to do the
-same. Passing only `opts.data` to a Battle does not change content/support's singleton. P1b tests both the Node setup
-and the actual browser loader with a patched bond; the match host's worker entry does the same (§11).
-
 ### Rule switches
 
 Since 0.3.1, a content plugin can carry only `rules`, with no data files or permissions:
 
 ```json
 { "manifest": 2, "id": "prep-rules", "name": "Prep rules", "version": "1.0.0",
-  "app": ">=0.3.1 <0.4.0", "api": 1, "class": "content", "scope": ["room"],
+  "app": ">=0.4.0 <0.5.0", "api": 1, "class": "content", "scope": ["room"],
   "rules": { "prepLoadout": "prep", "unequip": "allow" } }
 ```
 
@@ -770,629 +741,7 @@ adds shop chess to their bonds' member lists. An existing record must be changed
 
 Behavior is `kit: "generic"`, `{ "ref": "<official kit key or file stem>" }`,
 `{ "spec": <JSON SkillSpec or JSON file path> }`, or `{ "dsl": <DSL spec> }`. Files are JSON, including transitive spec files. `art: { ref: charId }`
-references an installed character id (`^[A-Za-z0-9_-]+# PLUGINS.md — plugins (插件)
-
-A **plugin** is a folder a server owner puts into `plugins/`: a manifest, `plugins/<id>/plugin.json`, next to the files
-it names. The interface calls them 「插件」, never 「模组」 (that word is the operators' modules). The design and its
-phases are DESIGN §34 (`docs/history/0.3.0.md`); this file is the reference.
-
-**Status — 0.3.0: content sets, scripts and sandbox execution.** The server finds, checks and lists plugins and names its content
-with a hash (P0); a room's host switches the server's cosmetic plugins on for the whole room, a player switches them on
-for themself (§9) — art, models and audio only: the battles stay the original ones and a room's `cs` stays the vanilla
-one. Language packs (`docs/PACKS.md`) are the plugin class `lang` and work as before. Data plugins (§10) build
-validated content sets, and a room's host switches them on for the room (§11, P1c): the room plays a content set of its
-own, named by its own `cs`, which every member's page downloads and checks and whose matches run in a match host of
-their own — unofficial matches. P4 adds interface plugins (§14): a page in a sandboxed frame, switched on in this
-browser, read-only, never a match intent, and not an input of `cs`. Script plugins (§13) share one SDK: sandbox
-execution needs valid locked files, while native trusted execution also needs owner pins and individual consent.
-Both modes are off by default; all gameplay plugin simulations run in browser Workers.
-Authors make, preview, trial and pack cosmetic, data, DSL, script and interface plugins in the browser at `/studio/` — the plugin studio 插件工作台 — or with
-`node tools/plugin.mjs new / check / pack`; findings come in plain words (the error catalogue), and the JSON Schemas
-`schemas/plugin.schema.json` and `schemas/overlay.schema.json` help editors and AI agents (§15; a beginner's guide in
-Chinese: [PLUGIN-GUIDE.md](PLUGIN-GUIDE.md), an AI agent's: `plugins/AGENTS.md`). A Forge workshop pack, a folder or a
-zip, can be imported as the plugins it can become (§16). Install local zips or hash-pinned HTTPS downloads, including entries in a community catalogue (§17); the frozen API table is [PLUGIN-API.md](PLUGIN-API.md).
-
-| File | Role |
-|---|---|
-| `shared/plugins/manifest.js` | the format: manifest 2 (`plugin.json`), manifest 1 (`pack.json` / `_meta`), the classes, permissions, file rules, limits, the catalogue entries |
-| `shared/plugins/identity.js` | the content hash `cs`: canonical JSON and its composition |
-| `shared/plugins/visual.js` | a cosmetic plugin's asset overlay (§9): reading and checking it, references, resolution to served URLs, the merge with its override warnings, the visual hash `vs`, the browser's check of a visual set |
-| `shared/plugins/order.js` | which plugins a set holds and in what order: requirements, conflicts, load-order hints, priority, id |
-| `shared/plugins/ui.js` | the interface-plugin bridge (§14): the postMessage shapes, the rate and storage limits, the public and private subsets, the frame URL |
-| `public/js/ui/uiPlugins.js` | this browser's interface-plugin switches and the host's recommendations (localStorage) |
-| `public/js/ui/pluginFrame.js` | the sandboxed iframes, the slots, the read-only feed |
-| `plugins/_template/ui/` | the interface-plugin template: a damage tally |
-| `schemas/ui.schema.json` | the plugin→host messages (C7) |
-| `shared/plugins/errors.js` | the error catalogue (§15): every `PLUGIN_*` code with its plain words in Chinese and English, what to do, its document; the coded `issues` every check returns beside its text; the symptom table |
-| `shared/sha256.js` | SHA-256 in plain JavaScript (the same digest in Node and every browser, no `crypto.subtle`) |
-| `server/plugins/registry.js` | the registry: the language folders, `packs/` and `plugins/` — discovery, validation (a cosmetic plugin's overlay too, its files hashed), `/packs/index.json`, `/plugins/index.json`, what may be served |
-| `server/plugins/identity.js` | this server's vanilla content and its `cs`, the manifest at `/cs/<cs16>/index.json` |
-| `shared/plugins/patch.js`, `records.js`, `validate.js` | pure patches, compact records and merged-data validation (§10) |
-| `server/plugins/contentSet.js` | C1 content compositions, immutable byte files, modes and the gameplay hash (§10) |
-| `server/plugins/visualSet.js` | the visual sets: a room's (or a player's) cosmetic plugins as one set named by `vs`, served at `/vs/<vs16>/overlay.json` (the composition and each plugin's writes, composed by the browser) |
-| `server/plugins/pack.js`, `server/plugins/zip.js` | checking and packing a plugin folder: the folder's check, `plugin.lock.json` (Spine clip data parsed from the skeleton), a deterministic zip — for `tools/plugin.mjs` and the studio |
-| `server/plugins/forgeImport.js` | Forge workshop packs (§16): read a folder or a zip and write the plugins it can become. It never runs a script from the pack |
-| `server/plugins/forgeKits.js` | a Forge pack's `kits/<id>.js` → the one self-contained sim entry of its script plugin: parsed with acorn, imports rewritten to `sp:sdk@1`, the registry's script check; nothing is run (§16) |
-| `server/studio/` | the plugin studio (§15): `index.js` the page and its API at `/studio/` (this machine and the local network only: `gate.js`), `files.js` (only inside `plugins/<id>/`), `templates/` (one module per template), `targets.js` (by official name), `edit.js` (fields, slots, one-click fixes), `preview.js` (the temporary composition), `watch.js` (hot reload) |
-| `server/packs.js`, `shared/packs.js` | the content-pack API of 0.2.0, kept (compatibility export; the language-pack index) |
-| `public/js/content.js` | the browser: the room's visual set and the player's personal plugins, fetched, checked and laid over the art manifest |
-| `public/js/cosmetics.js` | the cosmetic layers every screen draws through (small: the title page carries it; `shared/plugins/visual.js` loads with the first set) |
-| `public/js/ui/pluginTag.js` | the room's 插件 tag and the small facts the screens show (the panel loads when the tag is tapped) |
-| `public/js/ui/pluginPanel.js` | the room's 插件 panel and the title screen's list of the server's plugins — loaded when one opens |
-| `public/studio/` | the studio's page (§15): `index.html`, `studio.css`, `js/` (the shell, `editors/` one module per template, `preview/` — the game's own renderer and components) |
-| `schemas/plugin.schema.json`, `schemas/overlay.schema.json` | JSON Schema (2020-12) of `plugin.json` and of the asset overlay, for editors and AI agents (§15) |
-| `tools/plugin.mjs` | `list`, `check` (in plain words, `--json`), `pack` (`--zip`), `new`, `test`, `errors`, `surface`, `import-forge`, `install`, `catalog` |
-| `server/plugins/roomSets.js`, `contentSets.js`, `policy.js`, `server/match/host/` | a room's content set, the match host of a content set and the server owner's `plugins/config.json` (§11) |
-| `plugins/README.md`, `plugins/AGENTS.md`, `plugins/_template/` | the folder's readme, the guide for AI agents, the templates (`cosmetic/`, `content/`, `script/`, `ui/`) — the only tracked files of the folder |
-
-## 1. Principles (the maintainer's decisions of 2026-10-12)
-
-- **The original game is always the default.** A room plays the vanilla content unless its host chooses plugins (P1c);
-  the golden results, DESIGN and the fidelity checks cover the original content only.
-- **Plugins are marked unofficial** wherever they are shown — the catalogue (`unofficial: true` on every class but
-  `lang`), the title screen (「本服务器安装了 N 个插件」), the room (「原版」 / 「插件 ×N」, the panel's 非官方 marks),
-  the diagnostics (`content: … cosmetic vs=… plugins=…`, `MODDED …` for gameplay plugins), and with gameplay plugins
-  the briefing, the HUD corner, the result and the statistics (such matches stay out of the overview by default; a match
-  with cosmetic plugins only is still the original game — §9, §11).
-- **No third-party code in a battle unless the server owner switches it on.** Art and data plugins carry no code, and
-  the declarative DSL (§12) is data, not code. An interface plugin (P4, §14) runs only inside a sandboxed iframe: it sees
-  a read-only feed and cannot send a match intent. Code plugins (`script`, `trusted`, §13) are off by default: trusted
-  execution needs the owner's switch, a pinned lock and every player's consent (P3a); sandbox mode
-  (`SP_PLUGIN_SCRIPTS=sandbox`) runs script code in SES compartments — a Worker in the page, a restricted child process
-  on the server (P3b). Trusted-class code never enters the sandbox.
-- **No plugin overrides arbitrary project files**; a plugin changes only what its class allows, through its manifest.
-- **Gameplay plugins are installed on the server** (every player of a room plays the same content and the server can
-  still check a battle). Players never install gameplay content of their own.
-- **Never put official game files in a plugin**; a plugin refers to the art the installation already has.
-- **Bug reports from a plugin room** go to the plugin's author first; please reproduce on the original content.
-
-## 2. For server owners
-
-Put the folder into `plugins/` (the id is the folder name). `node tools/plugin.mjs list` shows what the registry found,
-by class, with what this version does with each, what was skipped and why; `node tools/plugin.mjs check` checks the
-folders in depth. The server prints the same at start (`[plugins] …`) and notices a new or changed plugin on the next
-page load — no restart. A server's own plugins are git-ignored (the folder's readme and templates are tracked and ship in the
-release zips), never packed into a release and never touched by an update. One unreadable
-folder is skipped with its reason; it never stops the server.
-
-What this version does with each class:
-
-| Class | Carries | This version |
-|---|---|---|
-| `lang` | a language: UI strings, optionally game texts | **loaded** — listed in `/packs/index.json`, files served at `/packs/<id>/<file>` |
-| `cosmetic` | art, models (Spine 3.8), audio (fonts and theme colours later) | **loaded** (P1a, §9) — a room's host switches it on for the room, a player for themself; the files its overlay names served at `/p/<id>/<hash8>/<path>` |
-| `content` | data patches and new records: numbers, economy, modes, waves, operators, enemies | **loaded** (P1b, §10; P1c, §11) — a room's host switches it on for the room: a content set of its own, unofficial matches; the set's files served at `/cs/<cs16>/…` |
-| `script` | code the battle or the match runs | **off by default** — valid lock in sandbox mode; owner pin and player consent in trusted modes (§13) |
-| `ui` | an interface widget: an html page in a sandboxed frame | **loaded** (P4, §14) — a player switches it on for this browser; its frame files served at `/p/<id>/<hash8>/<path>` with a frame CSP |
-| `trusted` | page or server code with full trust | **off by default** — trusted/trusted-force only; pinning, address gates and room consent (§13) |
-
-Nothing of a plugin folder is served except the files a `lang` manifest names, the files a loaded `cosmetic`
-plugin's overlay names, and the frame files of a loaded `ui` plugin (`.html`, `.js`, `.css`, `.png` under its
-`entry.client`, §14) — never `plugin.json`, the lock file, a document or any other file of the folder. A ui plugin's
-`/p/` responses carry a frame Content-Security-Policy; cosmetic art does not. Content-set snapshots are separate:
-`/cs/<cs16>/` serves checked data/descriptors and, for native trusted sets, only the retained sim/meta/client script
-entry bytes (§13). It never serves arbitrary files from plugin folders.
-
-What rooms may use is the server owner's choice: `plugins/config.json` (optional, git-ignored) lets every room's host
-choose (the default), fixes one set for every room, or keeps rooms on the original game, and limits the plugins, the
-classes and the content sets running at once — §11 and `docs/DEPLOY.md`.
-
-## 3. The manifest (manifest 2)
-
-```json
-{
-  "manifest": 2,
-  "id": "marathon",
-  "name": { "zh": "马拉松模式", "en": "Marathon" },
-  "version": "0.1.0",
-  "app": ">=0.3.0 <0.4.0",
-  "api": 1,
-  "class": "content",
-  "scope": ["room"],
-  "authors": ["…"],
-  "license": "CC-BY-4.0",
-  "settings": { "refresh": { "type": "integer", "min": 0, "max": 3, "default": 1, "label": { "zh": "刷新价格" } } },
-  "permissions": ["data.patch", "data.add"],
-  "data": ["data/economy.json"],
-  "modes": ["modes/marathon.json"],
-  "operators": ["operators/rosa.json"],
-  "i18n": { "en": "i18n/en.json" }
-}
-```
-
-| Field | Meaning |
-|---|---|
-| `manifest` | `2`, required (a `pack.json` without it is manifest 1, §7) |
-| `id` | the folder name decides: `^[a-z0-9][a-z0-9-]{1,31}$` (it becomes part of record ids; lower case only); a different `id` in the file is a warning; script/trusted execution requires an explicit matching id in the verified manifest bytes |
-| `name`, `description` | a text in `sourceLang` or `{ "<lang>": "…" }`; `englishName` a text |
-| `version` | semver, required |
-| `app` | the game versions it is made for — `>=0.3.0 <0.4.0`, `0.3.x`, `^0.3.0` … (a pre-release counts as its release); required but for `lang`. Outside it: `compatible: false` and a warning (P1 refuses a gameplay plugin by default) |
-| `api` | the plugin API level, within `shared/constants.js` `PLUGIN_API` (`{ current: 1, min: 1 }`); required but for `lang` |
-| `class` | §2; every part the manifest names must belong to it |
-| `scope` | `room` (the host's choice for the whole room), `personal` (the player's own setting), `server` (trusted code only), as the class allows — `cosmetic`: room and/or personal; `content`, `script`: room; `ui`, `lang`: personal; `trusted`: server or room |
-| `authors`, `credits`, `license`, `homepage` (http/https), `sourceLang` (default `zh`) | free text |
-| `requires`, `optional`, `conflicts` | `{ "<plugin id>": "<version range>" }`; a missing or out-of-range requirement is a warning of the registry now, a refusal when rooms choose plugins |
-| `loadAfter`, `loadBefore`, `priority` | ordering hints (lists of ids; an integer within ±1000, default 0) |
-| `settings` | ≤ 32 settings: `boolean`, `integer` / `number` (`min` and `max` required, `step`), `enum` (`options`) — no free text; `default` (else `false`, `min`, the first option), `label` |
-| `permissions` | what the plugin does (§4); every part needs one, every permission must fit the class |
-| parts | `assets`, `theme` (cosmetic+) · `data`, `operators`, `enemies`, `modes`, `stages`, `dsl` (content+) — a path, a list of paths or (`assets`, `theme`) the object inline · `i18n` `{ "<lang>": path }` (content+) |
-| `entry` | `{ "sim", "meta" }` (script, `.js`) · `{ "client" }` (ui, `.html`) · `{ "server" }` (trusted, `.js`) |
-| `lang`, `files` … | the `lang` class only: manifest 1's language fields and `files: { ui, data }` (§7) |
-
-A **problem** keeps a plugin out (unlisted; the start log and `tools/plugin.mjs` say why); a **warning** does not.
-Unknown fields are warnings. The asset overlay of a cosmetic plugin is §9; the inner formats of the data parts — data
-patches, compact operator records, modes — are specified in §10.
-
-## 4. Permissions
-
-| Permission | Classes | Needed by |
-|---|---|---|
-| `assets.override`, `assets.add` | cosmetic, content, script, trusted | `assets` (either) |
-| `theme` | cosmetic, trusted | `theme` |
-| `data.patch`, `data.add` | content, script, trusted | `data` (either); `operators`, `enemies`, `modes`, `stages` (`data.add`) |
-| `dsl` | content, script, trusted | `dsl` |
-| `sim.code`, `meta.code`, `mode.code` | script, trusted | `entry.sim`, `entry.meta` |
-| `ui.frame` | ui | `entry.client` of a ui plugin |
-| `trusted.page`, `trusted.server` | trusted | `entry.client`, `entry.server` of a trusted plugin |
-
-A permission nothing in the manifest uses is a warning.
-
-## 5. Files and limits
-
-By class: images `.png .jpg .webp` (no SVG), Spine `.skel .atlas`, audio `.mp3 .ogg`, fonts `.woff2`, data `.json`;
-code `.js` only in `script` / `trusted`; frames `.html .js .css .png` only in `ui`, under its client's folder; `lang`
-carries `.json` only. Documents (`.md`, `.txt`, `README`, `LICENSE`, `NOTICE` …) may sit beside them and are never
-served. Nothing else; no symbolic link inside the folder (a plugin folder that is itself a link is loaded — the owner's
-choice — but the studio never opens it, §15); file names are plain (letters, digits, `. _ -`, spaces; no hidden or `..`
-part). Every path the manifest names must exist inside the folder. A folder is read for at most 2000 folders, 12 levels
-deep and 50 000 entries (`server/plugins/registry.js WALK_LIMITS`): a folder past them is refused (`PLUGIN_FILE_SIZE`),
-also when it is a link to a large tree.
-
-Limits [ASSUMED, all of them]: 8 MB per JSON file, nesting ≤ 64 levels, numbers finite within ±1e9; 200 MB and 5000
-files per plugin. The registry checks the manifest, the files and the paths whenever it scans; `tools/plugin.mjs check`
-also parses every JSON file against the limits.
-
-## 6. Content identity (`cs`)
-
-Every server names the content its rooms play with a hash, **`cs`** (`shared/plugins/identity.js`):
-
-```
-cs = sha256(canonical({ v: 1, app, sim, data, plugins, settings, i18n? }))
-  sim       sha256(canonical([[path, sha256], …])) of every served /sim/**.js (not nodeData.js), /shared/**.js and /data.js
-  data      { <name>: sha256 } of every data/<name>.json the match or the sim reads (not assets, local-assets, emotes, i18n/)
-  plugins   [{ id, version, files }] in load order — [] for the vanilla content
-  settings  { <id>: { <key>: value } } — {} for the vanilla content
-  i18n      omitted for vanilla and cosmetic-only selections, so this P0 formula stays bit-identical. A content
-            selection (§10) passes { <lang>: sha256 of the served i18n/<lang>.json }. index.json is not an input.
-```
-
-`canonical` is JSON with sorted keys and no white space; the bytes are the bytes served, so a browser hashes exactly
-what it received (with `shared/sha256.js`, which also works where `crypto.subtle` does not — a LAN address is not a
-secure context). Two machines with the same `cs` run the same battles bit for bit; any code or data change gives a new
-one. The server computes it once at start (`[content] vanilla <16 hex>` in the log).
-
-Where it shows (DESIGN §8.4): `welcome.content` `{ vanilla }`, `room.state.content` `{ cs, vanilla: true, plugins: [] }`
-(the vanilla set — a room's cosmetic plugins add `vs`, `plugins`, `warnings` and `bytes` beside the same `cs`, §9),
-`/healthz` `content: { vanilla, sets: 0 }`, every BattleSpec's `cs` (the sim never reads it), an optional `b.result.cs`,
-and the second line of a diagnostic report (`content: vanilla cs=<64 hex>`, with ` cosmetic vs=… plugins=…` in a room
-with cosmetic plugins; a room with gameplay plugins will read `MODDED cs=… plugins=id@version(hash)…`).
-
-`GET /cs/<first 16 hex digits>/index.json` answers the content set's manifest — every code file's hash, every data
-file's URL (`/data/<file>?v=<8 hex>`), hash and size — cached for good; any other `cs` is 404. `GET /plugins/index.json`
-(never cached) is the catalogue: `{ version, app, api, content: { vanilla }, plugins: [entry …] }`, every plugin and
-pack found by class and id, with its `status` (`loaded` / `disabled` / `planned` / `unsupported`), `unofficial`, its manifest's
-public fields, size and file count — never a path on the server; a loaded cosmetic plugin adds `vs` (the visual set of
-it alone, §9) and `artBytes` (the art it serves). A loaded interface plugin adds `slots`, `entry` (a path inside the
-plugin), `vs`, `frameBytes` and `frameFiles` (`{ path: sha256 }`, §14) — not `artBytes`.
-
-Cosmetic plugins and interface plugins never change `cs`: neither changes a battle, so a room whose plugins are only
-of those classes plays the vanilla `cs`. Installing a ui plugin, or editing its page, does not change `cs`. Editing a
-served `/shared/**.js` does, because `cs` hashes every one of them — including `shared/plugins/ui.js`. The art a
-cosmetic plugin draws, and the frame an interface plugin draws, are named by the visual hash `vs` (§9, §14).
-
-## 7. Language packs
-
-A language pack is the `lang` class: `public/i18n/<code>.json` (its `_meta`), `packs/<id>/pack.json` (manifest 1) or
-`plugins/<id>/plugin.json` with `"manifest": 2, "class": "lang"` and the same language fields and `files`. All three
-are listed in the live server's `/packs/index.json` exactly as before (docs/PACKS.md, docs/I18N.md). `tools/plugin.mjs`
-lists a lang plugin with the rest; `tools/packs.mjs` (also its static `index`, whose host could not serve a plugin's
-files at `/packs/<id>/`) and `tools/i18n.mjs` keep reading the language folders and `packs/` only, as in 0.2.0. A
-manifest 1 of the old planned types `assets` / `data` is still reported as not loaded: its successor is a `cosmetic` /
-`content` plugin.
-
-## 8. Tools
-
-```
-node tools/plugin.mjs list [--json]                every plugin and language pack, by class, the skipped ones and why, the vanilla cs
-node tools/plugin.mjs check [<dir|id> …] [--strict] the folders of plugins/ (or the ones named; a folder anywhere): manifest,
-          [--json] [--lang zh|en]                  files, paths, JSON, a cosmetic plugin's overlay (its references against
-                                                   this checkout's data/assets.json) — each finding with its plain words
-                                                   (§15); --json for editors and agents — exit 1 on a problem, with
-                                                   --strict on a warning too
-node tools/plugin.mjs pack <dir|id> … [--zip]      write plugin.lock.json (every file's SHA-256 and size, each Spine model's
-          [--out <file|dir>]                       clip data), then check the folder; --zip writes the folder as a zip
-                                                   (default plugins/_dist/<id>-<version>.zip)
-node tools/plugin.mjs new <template> <id>          a new plugin folder from a template (art, spine, voice, audio, numbers, operator, dsl, meta, mode, ui, script)
-          [--target <名字|id>] [--name …] [--dir …] optional target found by its official name; --options <json-file> for wizard options
-node tools/plugin.mjs errors [--markdown] [--write] the error catalogue; --write keeps the symptom tables of the documents
-node tools/plugin.mjs import-forge <dir|zip>       a Forge workshop pack → the plugins it can become (§16);
-          [--out <dir>] [--id <id>] [--dry-run]     --dry-run writes nothing; --json prints the report only;
-          [--json] [--no-scripts]                   --no-scripts writes no script plugin for its kits/
-```
-
-Additional commands:
-
-```
-node tools/plugin.mjs test <id>                     run the installed plugin's author tests (§13; executes local code)
-node tools/plugin.mjs install <zip|https URL>       install a zip; HTTPS requires --sha256 <hex>; --force backs up an existing id
-node tools/plugin.mjs catalog <file|https URL>     inspect a community catalogue (--json available)
-node tools/plugin.mjs surface [--write]            the frozen API table; --write regenerates docs/PLUGIN-API.md
-```
-
-`--root <dir>` points it at another checkout or an unpacked release. Full and lite releases ship this CLI, its
-runtime dependencies, schemas, templates, author documentation and `test/helpers/battleHarness.js`. The harness
-imports only shipped server/shared modules. SES and Acorn are production dependencies; packaging runs
-`npm ci --omit=dev`, whose postinstall writes `public/vendor/ses.umd.js` and `public/vendor/acorn.mjs` before zipping.
-Plugin-specific `golden` / `simcheck` commands and `--plugins` for the balance tools are not implemented.
-
-## 9. Cosmetic plugins (P1a)
-
-A cosmetic plugin changes what the game shows and plays — avatars, portraits, Spine models, icons, interface pictures,
-voices, sound effects, music — and nothing a battle does: the simulation reads data, never art (an enemy's attack timing
-is a number of `data/enemies.json`), so a room's `cs` is the vanilla one whatever its art.
-
-**The overlay** — the manifest's `assets` part, inline in `plugin.json` or a `.json` file of the plugin
-(`shared/plugins/visual.js`), written in the shape of `data/assets.json` (ASSETS.md "Manifest schema"):
-
-```json
-"assets": {
-  "chars": {
-    "char_102_texas": {
-      "avatar": "art/avatar.png",
-      "spine": { "front": { "skel": "spine/front/texas.skel", "atlas": "spine/front/texas.atlas", "textures": ["spine/front/texas.png"] } }
-    },
-    "char_112_siege": { "portrait": { "ref": "char_102_texas" } }
-  },
-  "ui": { "hudPanel/icon_hp": "art/hp.png" },
-  "audio": { "voice": { "char_102_texas": { "skill1": "voice/s1.mp3", "select": ["voice/a.mp3", "voice/b.mp3"] } } }
-}
-```
-
-| Container | A record |
-|---|---|
-| `chars[charId]` | `avatar`, `avatarE2`, `portrait`, `portraitE2` (image), `spine.front`, `spine.back` (Spine) |
-| `enemies[key]` | `icon` (image), `spine` (Spine) |
-| `tokens[id]` | `avatar` (image), `spine` (Spine) |
-| `bonds`, `items`, `bands`, `skills`, `modules`, `ui`, `prof.icon` / `large` / `battlecard` / `sub` `[key]` | an image |
-| `audio.bgm[lobby \| prep \| combat \| unite \| boss]`, `audio.bossBgm[bossId]` | a track `{ loop, intro? }` (audio), written whole — not `audio.bgm.combatAlts` (see below) |
-| `audio.voice[charId]`, `audio.voiceJp[charId]`, `audio.voiceEn[charId]`, `audio.voiceKr[charId]`, `audio.voiceNative[charId]` (the operator's own-language dub) | `<slot>`: an audio file or a list of 1–16 |
-| `audio.sfx.ui[key]`, `audio.sfx.battle[key]` | audio |
-| `audio.sfx.units[id]` | `attack`, `hit`, `skill`, `die`, `born` (audio), `skills` / `attacks` / `hits` `{ <index>: audio }` |
-
-A value is a **path** inside the plugin folder — an image `.png .jpg .webp`, audio `.mp3 .ogg` —, a **Spine model**
-`{ skel, atlas, textures, pma }` (the `.skel` and the `.atlas` side by side with one name — pixi-spine looks for the atlas
-there —, the pages inside the atlas's folder; `atlas` and `textures` default to `<name>.atlas` and `<name>.png`), or a
-**reference** `{ "ref": "<key>" }` to an entry of the same container in the installation's own manifest:
-
-- a whole record — `"char_102_texas": { "ref": "char_112_siege" }` — replaces the record as a whole; other keys beside
-  the `ref` then change fields of it (`{ "ref": "char_112_siege", "avatar": "art/a.png" }`);
-- one field — `"avatar": { "ref": "char_112_siege" }` — is that field of `char_112_siege`.
-
-A reference always names the installation's entry, never another plugin's [ASSUMED], so the plugins' order never changes
-what it means; one the installation's `data/assets.json` lacks is a problem. Anything else — another section (`fonts`,
-`skillsById` …), a field a record has not — is a warning and left out; numbers, booleans and free text are never written
-into the manifest; never an absolute URL (no other path of the server, no other host). A field a plugin does not write
-keeps the installation's value (an `avatar` alone leaves `avatarE2`), but a track is written whole (a `loop` alone plays
-without the installation's intro), and a model written for an enemy or a token — its `spine`, a model or a reference —
-also takes away that entry's local-client model (`spineLocal`, which the client would draw first) [ASSUMED] — only with
-that model: a model write the browser leaves out, or whose file fails to load, leaves the local model too. The split
-battle music `audio.bgm.combatAlts` (the mode's own 开战 tracks, 骑士之日 / 无畏者, fixed per round) is not something a
-plugin changes: the client plays it instead of `combat` in the rounds it covers, so a plugin's `combat` is heard only
-where no such track plays. Writing an
-entry the installation has needs the permission `assets.override`, a new entry `assets.add`. `theme` is not applied yet
-(a warning).
-
-**Spine models and `plugin.lock.json`.** A model's clip roles, durations, events, hit times and bounds come from the
-skeleton itself: `node tools/plugin.mjs pack <dir>` parses it the way `tools/fetch-assets.mjs` parses the game's
-(`tools/assets/skel.mjs`, `anim-roles.mjs`: an operator's three skill slots, an enemy's numbered skills), checks the atlas
-pages against `textures`, and writes them into `plugin.lock.json` with every file's SHA-256 and size (a problem of the
-overlay — a reference the manifest lacks — leaves the lock unwritten). `"anims": "auto"` or nothing — never by hand; a
-lock made from another skeleton (its SHA-256) is a problem until it is packed again. The server never parses a skeleton
-[ASSUMED]: it rebuilds the lock's clip data in the shape the tool writes — the known roles, every clip they play an
-animation of the skeleton, at most 256 animations and 64 events, names of at most 64 characters, durations and hit
-times within 600 s, the four numbers of the bounds — so nothing a hand-made lock adds reaches a browser [ASSUMED limits].
-
-**Checked when scanned.** The registry reads a cosmetic plugin's overlay when it scans the folders (at start, when they
-change, and when `data/assets.json` changes): its shape, files, references — what they copy out of the installation's
-manifest at most 2 MB [ASSUMED] — and permissions, the lock — a problem keeps it out like any other — and hashes the
-files that shape it (SHA-256, kept by path while a file keeps its size, mtime, inode and ctime: a rescan reads only what
-changed, and a file rewritten with its old size and mtime put back — `rsync -t`, `touch -r` — is read again, its ctime
-gives it away; the folders' own check looks at the same four, so such a rewrite is noticed without a request for it)
-[ASSUMED: at scan, a 200 MB plugin costs about a second once].
-
-**The visual hash.** A set of cosmetic plugins in load order is named by
-`vs = sha256(canonical({ v: 2, assets: <SHA-256 of data/assets.json>, overlays: [{ id, version, files, writes }] }))`,
-`files` mapping every file that shapes a plugin's overlay — `plugin.json`, `plugin.lock.json`, the `assets` file, every
-file the overlay serves [ASSUMED] — to its SHA-256, and `writes` the SHA-256 of the canonical JSON of the plugin's writes
-as the server serves them (`writesHashOf`: the slots, the files of the plugin they name, its references, a Spine model's
-clip data — never a URL): the same files and writes give the same `vs`, one changed byte or one file moved to another
-slot another.
-
-**Served:**
-
-- `GET /p/<id>/<hash8>/<path>` — a file a loaded cosmetic plugin's overlay names, and nothing else of its folder: no
-  `plugin.json`, lock, document or other file, no dot file, no `..`, and only the very file the scan hashed: a symbolic
-  link is never served — one in the folder when it is scanned is no file of it, and one put in place of a served file
-  later, or in place of a folder on its way, is refused (404) wherever it leads, another file of the folder included
-  (the request `lstat`s the path and wants the real path the scan recorded — both read with the native realpath, so a
-  plugins folder spelled in another case than on disk still works on macOS and Windows). `<hash8>` is the first 8 hex digits of the
-  file's SHA-256 — for every file of a Spine model, of the SHA-256 of its files' SHA-256s, so the skeleton, its atlas and
-  pages share one folder. At the hash of the file's bytes, while the file keeps the size, mtime, inode and ctime it was
-  hashed with, the answer is `immutable` for a year; at any other hash, or for a file changed since the scan, the current
-  file with `no-cache` (as for `/assets/~<hash>/…`, ASSETS.md; a changed file's ETag is its stat identity, never the
-  old content hash, and the compressed-body cache keys on the inode and ctime too), and a changed file has the registry
-  read the folders again. An audio file is also served **without its extension** — `/p/<id>/<hash8>/voice/s1` for `voice/s1.mp3` —, which
-  is how the page fetches it (`public/js/media.js` mediaUrl: download managers such as IDM or 迅雷 pop up a dialog for
-  every fetch that ends in `.mp3`, the reason 0.2.6's `/media/` route exists; with a `.mp3` and a `.ogg` of one name the
-  one whose hash the URL names; a host without the route still works: the page falls back to the URL with the
-  extension).
-- `GET /vs/<vs16>/overlay.json` — a set: `{ visual: { v, vs, assets, overlays: [{ id, version, files, writes }] },
-  writes: [{ id, ops }] }`, its composition (what `vs` hashes) and each plugin's writes in its own terms — paths of its
-  folder, references, a Spine model's clip data from the lock —, never a URL and never a copy of the art manifest (a few
-  KB). A browser refuses a document whose composition does not hash to the room's `vs` or whose writes do not hash to
-  their part of it (`checkVisualDoc`: the room keeps the installation's art, one toast).
-  `no-cache` with the body's hash as ETag [ASSUMED: a 304 costs next to nothing]; 404 for a set the server does not know
-  (a set is known once a room resolved it, or the catalogue named a plugin's own; a room holds its set while it uses it,
-  of the others the last 256 are kept [ASSUMED]; a document is built once however many ask).
-
-**A room's plugins.** The room's top bar shows 「原版」 or 「插件 ×N」; it opens the 插件 panel (`public/js/ui/pluginPanel.js`):
-the server's cosmetic plugins of scope `room`, with the host's switches (read-only for the other players and the
-spectators, and during a match), versions, authors, sizes, 非官方 marks, 「自动」 on one switched on because another needs
-it, a note for one made for other game versions (a cosmetic plugin is still usable) and the override warnings. A switch
-sends `room.setPlugins { plugins: [{ id }] }` (host, before the match; like a difficulty change it un-readies the others —
-not when only the 「自动」 marks change; the heavy rate-limit bucket): the server closes the set over the plugins'
-`requires`, refuses conflicts, a cycle, a plugin of another class or scope, and a set over 300 MB of art or whose
-references copy over 4 MB of the art manifest [ASSUMED] (`PLUGIN_UNKNOWN`, `PLUGIN_BLOCKED`, `PLUGIN_DEPENDENCY`,
-`PLUGIN_CONFLICT`, `PLUGIN_LIMIT`), sorts it (`shared/plugins/order.js`: requires / optional / loadAfter / loadBefore, then priority, then
-id) and the room's content becomes `{ cs, vanilla: true, vs, plugins: [{ id, version, class, hash, auto? }], warnings,
-bytes }` — `cs` the vanilla one. Every member's page fetches `/vs/<vs16>/overlay.json`, checks that its composition
-hashes to the room's `vs` (`checkVisualDoc`) and composes the art itself on the manifest it loaded (`/data/assets.json`,
-its `/assets/~<hash>/…` URLs; `shared/plugins/visual.js` prepareVisualDoc / layVisualOps): every plugin URL is built
-from the composition's file table — `/p/<id>/<the first 8 hex digits of the file's SHA-256, or of its model's>/<path>` —,
-every reference copied out of the page's own manifest, the plugins in the composition's load order, so what it draws is
-exactly what `vs` names; a write that does not fit (a file the table lacks, of another kind than its field, a path
-outside the containers, a model out of its folder or of the lock's shape, a reference the page's manifest lacks) is left
-out and its entry keeps the installation's art. Leaving the room takes the art away again. A document that fails the
-check or will not download (an attempt is given up after 30 s [ASSUMED], two retries), or a write left out, leaves the
-original art there (one toast per page). Whenever the art changes under a page — the room's set arriving after its
-board was drawn (a reconnect, a spectator joining a match), a personal plugin switched during a match, a set taken away —
-what is already on the board follows: a piece or unit whose picture or model the manifest no longer names loads the new
-one, which replaces the old in place (`render/units.js` retryAssets) — and one whose picture or model came from a plugin
-alone (the installation's slot is empty: a summon, an enemy without a web model) loses it with its layer, a load still in
-flight dropped —, and the backdrop mountains and the shadow sprite
-follow their `ui` entries, and the music plays the screen's track again when its URLs changed. A plugin file that will
-not load — an image of the interface, a picture, a Spine model (any of its files, or one the renderer cannot build; not
-while the tab is hidden) or the shadow sprite of the board, a sound — makes its entry fall back to the art
-beneath it, the installation's (or the room's, under a personal plugin), for the rest of the page's life [ASSUMED]; a
-sound plays the installation's entry instead at once (the BGM track, the voice line of the same slot, the same sound,
-the bond cue).
-When a plugin of a room's set changes on the server while the room uses it (the registry read the folders again — a
-served file found changed, or the folders' own signature), the host is told once (a toast; during a match, once the
-room is back in its lobby) to apply the plugins again:
-the panel's 「重新应用」 sends the same choice, which makes the set of the files as they are now; until then the room
-keeps its set — its changed files go out under the old URLs with `no-cache`, and what will not load falls back. A plugin the
-server no longer offers stays in the panel by its id, and its switch only turns it off. With no plugin the room's
-content is exactly the vanilla `{ cs, vanilla: true, plugins: [] }`. A server says how many unofficial plugins it has
-in `/healthz` (which every page reads at once: the build guard) and in `welcome`, as `content.plugins` — only when there
-are some; the title screen's 「本服务器安装了 N 个插件」 is that count, and the catalogue is fetched only then, when
-something needs it (the title's list, the 插件 panel, 设置's 外观插件, a switched-on personal plugin). So a page of a server
-without plugins makes no request more than 0.2.6's but for three small modules at start (`public/js/content.js`,
-`public/js/cosmetics.js` — the layers —, `public/js/ui/pluginTag.js` — the room's tag); the panel
-(`public/js/ui/pluginPanel.js`) loads when it opens, what checks and composes a set (`shared/plugins/visual.js`) with
-the first set, the load-order function (`shared/plugins/order.js`) with the catalogue, and the asset store
-(`public/js/assets.js`) with the first match, as in 0.2.6.
-
-**A player's plugins.** 设置 → 外观插件 lists the server's cosmetic plugins of scope `personal`, each with a switch, kept in
-this browser only (`localStorage` `sp.pref.cosmetics`), never sent, never part of a battle and seen by nobody else. The
-switched-on ones form a set exactly like a room's (`shared/plugins/order.js`, over what the catalogue lists of each:
-`requires`, `optional`, `conflicts`, `loadAfter`, `loadBefore`, `priority` — `public/js/content.js` personalSet): a plugin
-another one needs is switched on too (「自动」, its switch locked), a switch that would make a conflict or needs a plugin
-the server lacks is refused with the room's message, and a choice that went bad since (the server's plugins changed)
-keeps what still fits, by id, the rest marked as not in effect [ASSUMED]. Each plugin of the set is fetched as
-`/vs/<vs16>/overlay.json` of its catalogue `vs`, checked and composed the same way, and laid over whatever the page draws
-(the room's art too), in the set's load order (fetched side by side); one the server no longer has is skipped and stays
-switched on for when it is back.
-
-**Statistics.** A match with cosmetic plugins only plays the vanilla content (`cs`), so it counts as the original game in
-the statistics overview — the owner's decision of 2026-10-13: its gameplay and numbers are unchanged, and a player's
-personal cosmetics never matter; matches with plugins that change gameplay are left out by default (§11). Every stats
-record names the room's visual set (`vs`, null without cosmetic plugins — a player's personal plugins are not recorded:
-`public/js/ui/stats.js`). The diagnostics name the art: `content: vanilla cs=… cosmetic vs=…
-plugins=id@version(hash),… personal=id,…`. BattleSpecs may carry the room's `vs` for diagnostics (§11); the sim
-never reads it. A standalone replay does not restore those cosmetic files automatically.
-
-**Limits** [ASSUMED]: 300 MB of art per set, 20 000 writes per plugin, 16 files per voice slot, 32 override warnings per
-set, 2 MB copied by references per plugin and 4 MB per set, the lock's limits above; the plugin limits of §5 apply too.
-
-**Start from** `plugins/_template/cosmetic/` — references to the installation's own art only, no file. Never put files
-of the official game in a plugin.
-
-## 10. Data plugins (P1b)
-
-A `content` plugin is now `loaded`: the registry snapshots its declared JSON; `buildContentSet` applies the selected
-plugins in dependency order and validates the **whole merged data**. No third-party code is imported or evaluated.
-Room selection, worker isolation and HTTP/client switching are §11 (P1c). Start with `plugins/_template/content/`, copied
-to `plugins/data-demo/`. Rename its record namespaces too when renaming that folder.
-
-**Patches** (`shared/plugins/patch.js`): a manifest `data` file is `{ "patch": 1, "ops": [...] }`.
-Each operation names `file` (without `.json`), optional record `id`, and `path` (array of keys/indexes):
-
-| op | meaning |
-|---|---|
-| `set` | replace an existing field with `value` of the same type. `null` is its own type: it may be written only onto a field that is already `null`. Washing a number through `null` into an object is `PLUGIN_PATCH_TYPE` and returns the original data |
-| `merge` | recursively merge an object into an existing object; arrays replace whole arrays |
-| `add` | add a new namespaced record with `id` and object `value`; `config` uses `path: ["modes"]` |
-| `append` | append the elements of array `value` to an existing array |
-| `remove` | remove array values equal to `match`; it never deletes a record or an object field |
-
-Unknown operations, absent paths, wrong types, unsafe keys (`__proto__`, `constructor`, `prototype`), missing settings,
-record deletion and invalid new ids produce structured `{ code: 'PLUGIN_*', path, message }` problems. A failing patch
-returns the original input, never a partial application. `applyPatches(data, ops, { pluginId?, settings? })` is pure.
-`{ "$setting": "name" }` in patch values resolves against normalized manifest settings. Out-of-range settings use the
-default; only declared settings enter `cs`. Repeated writes in different plugins are reported as warnings; later writes
-win. To change another plugin's records, declare its id in `requires` (a load-order hint alone is insufficient).
-
-Records sometimes keep a convenience copy of a blackboard: `bonds[id].bb` is used by presentation, while battle
-handlers may read `bonds[id].buffs[n].bb`. Change both when changing that number; the template demonstrates it. Likewise,
-changing a default skill requires keeping `skill` equal to its `skills[]` entry. Validation catches inconsistent skills.
-
-**Compact operators** (`operators` manifest files; `schemas/records.schema.json`): one object or an array, with `op: 1`,
-`charId`, `name`, `profession`, `subProfessionId`, `position`, `rarity`, `as`, `forms.normal`, `forms.elite` and `skills`.
-Each form supplies `stats` and `rangeGrid`; optional form `skills`, `trait` and `talents` override the shared ones.
-`skills` has exactly one `default: true`, and each skill supplies `skillId`; the expander fills index, SP, trigger,
-blackboards and display fields. `as: "chess"` needs `chess: { tier, bonds, price?, garrisonIds?, sellPrice?, identifier?,
-shopSortId? }`: normal/elite ids, prices, sell values and merge counts come from that tier's economy, and statuses
-from `economy.chessStatus`. `price` and `garrisonIds` are one value for both pieces or `{ normal, golden }` (an official
-pair's garrisons are `garrison_N_a` / `garrison_N_b`); `sellPrice` is one value. `as: "diy"` creates
-`backups.units`, every existing DIY slot status, `diy.ownedPool` and `diy.operators`; `"both"` does both. The expander
-adds shop chess to their bonds' member lists. An existing record must be changed with patches.
-
-Behavior is `kit: "generic"`, `{ "ref": "<official kit key or file stem>" }`,
-`{ "spec": <JSON SkillSpec or JSON file path> }`, or `{ "dsl": <DSL spec> }`. Files are JSON, including transitive spec files. `art: { ref: charId }`
-references asset ids already installed; it carries no art file. `talentMods` supplies permanent numeric mods with a
-JSON SkillSpec. Per-skill `skillSpec` overrides the operator's spec for that selection.
-
-`kitOf` resolves extensions → `raw.dsl` → `raw.skillSpec` → `raw.kitRef` → official kit → generic. When the record
-carries `dsl`, `kitOf` calls `compileDsl`. The builder stamps `pluginId` on that record; the author's spec is not
-rewritten, and a written `pluginId` must match the host (`PLUGIN_DSL_PLUGIN_ID`). Using DSL needs the `dsl`
-permission. A bad spec refuses the whole content set. Explicit test kits still take precedence. `talentMods` go with
-a JSON SkillSpec or with `kit.dsl`. A record that carries both
-`kit.ref` / `kitRef` and `talentMods` is `PLUGIN_SKILL_SPEC` at expansion and again in `validateData`; the schema file
-still allows the pair, and the runtime rejects it. File stems resolve only against the official registry, never an
-import path. A referenced kit's numbers come from the new record. Keep official skill ids to use its named alternate
-skills; a one-skill DIY clone can reuse a chess kit's default skill [ASSUMED]. A one-skill DSL kit uses the same
-`bindDefaultSkill` helper, so a 自选 piece and a 补位 stand-in take that default spec as `skills[id]`
-(`skillSource: 'skills'`). A shop chess keeps `kit.skill`. Multi-skill clones are not auto-bound. `extensions.js` stays empty for vanilla; P3a registers
-scripts through it (§13); `dsl/compile.js` is P2's compiler (§12) and data plugins use it (§12, PLUGIN-DSL.md §9). A plugin operator whose id
-starts with `char_x_` and whose chess and backup records have neither `potDown` nor a talent `potBelow` accepts only
-the default potential 6. Official operators, including `char_616_pithst`, are unchanged. 调配 and 自选 omit its potential control; 练度 remains available. Sync drops a stored non-default potential
-and the server rejects a raw client message.
-
-The JSON SkillSpec allowlist is SIM §7.3 without callbacks: kind, deployment activation, duration/ammo/SP/charges,
-trigger, heal, mods, flags, targeting and attack (including chain/heal/onHitStatus). Unknown fields, functions, wrong
-types and unknown mod/flag names fail. Work bounds [ASSUMED]: attack/chain/target/ammo/charge counts ≤ 100, a range at
-most 1024 integer offsets within ±64. No JavaScript string is executable.
-
-**Other records**: a manifest `data` file may instead be `{ "records": 1, "entries": [...] }`. Each entry is
-`{ file, id, base?, set? }` or `{ file, id, value }`; `base` clones an existing record before applying `set`.
-Supported files: enemies, waves, stages, modes, items, bands, garrisons, effects, tokens and choices. The dedicated
-`enemies`, `stages` and `modes` files use the same shape with `file` supplied by their manifest part.
-
-- Enemies can use `special: "<official enemy key>"` to reuse that enemy's data and kit. It is a specific enemy, not an
-  entire faction category: those categories contain many different behaviors. Changes still use the concrete record's
-  stats/blackboards. Waves supply routes and spawns; the expander fills empty branches, overrides and device lists.
-- Items and bands require an official `base` or `value.effectRef`; the result retains `effectRef` and the concrete
-  record's copied/overridden buffs. Battle item identity checks and prep dispatch recognize it. A compact item is a
-  single non-merging record [ASSUMED]; paired equipment can be added as complete records with patches.
-- Garrisons reuse an existing `effectKey`; effects reuse existing buff handlers. Choices use
-  `{ file: "choices", id: "effect_x_data_demo_card", kind: "tactic" | "bounty", base: <card effectId>, set?, effect? }`:
-  the new card and its cloned effect are added together. New bond behavior requires a script plugin (§13).
-- A mode requires an official `base`; nested objects inherit field by field and arrays replace whole arrays.
-  The base's choice schedule is copied. Changes to that schedule can then be patched explicitly. `GameData` overlays
-  mode-level economy, DP, timers and other global configuration keys; omitted values retain the official defaults.
-  Explicit mode chess purchase/sale prices override record prices. A room picks a mode with `room.setMode` (§11).
-- New or changed stages get ground paths from the same `Grid` helper as build-data (`server/sim/groundPaths.js`), with and
-  without active devices; deployment lists are derived too. The board stays 19×21. A base stage is the easiest start.
-  A plugin that changes only a wave's `routes` or `extraRoutes` recomputes `groundPaths` for stages listed on modes
-  whose round `template` or `bossTemplates` name those waves, from every current route, and keeps that stage's
-  `deployTiles`. [ASSUMED] bots then read the new paths; deployment lists stay the stage's own.
-
-New record ids are ≤64 ASCII letters/digits/`_`/`-`. The plugin id replaces `-` with `_` inside records. Prefixes:
-`chess_x_<plugin>_<name>_a/_b`, `char_x_…`, `skx_…`, `enemy_x_…`, `mode_x_…`, `stage_x_…`, `wave_x_…`,
-`item_x_…`, `band_x_…`, `garrison_x_…`, `effect_x_…`, `token_x_…` [ASSUMED prefix choices]. Two selected plugins whose
-namespaces collide are refused at composition with `PLUGIN_RECORD_ID`: `data` cannot sit beside `data-demo` (both
-prefix `data_`), and `ab-cd` collides with `ab_cd`. `ab` does not collide with `abc`. A plugin folder scanned alone is
-not refused. Whole-map writes cannot bypass record namespaces or remove existing records. The shared validator checks
-shapes, finite numbers, references, paired forms, the default skill, official kit/effect refs, wave routes and mode
-references. One wave, and each phase of a branch, may have at most 64 spawn rows, each an integer count from 1 to 600,
-summing to at most 600. Enemy `times` keys (and keys ending in `times`, including wave overrides) stay at or below 100.
-`bb.count` of 列装 (`global_special_choice_gain_equip`) and bond-chess (`single_special_choice_gain_bond_chess`) stays
-at or below 32. With the official tables as `vanilla`, every numeric blackboard value, and the loop fields enemy
-`sp.maxSp` / `sp.initSp` / `sp.increment` and skill `spCost` / `initSp` / `maxChargeTime` / `increment`, must also
-satisfy `|v| ≤ max(10 × official absolute maximum of that key, 64)` (`PLUGIN_DATA_BOUND`). A key official data never
-has uses 64. Blackboard `ammo` and `charge` use that blackboard rule. The battle clamps the same spawn, enemy-times
-and card-grant loops, and the loops fed by the systematic cap (operator `times` / `attack@times`, band and 维多利亚
-`count`, 黑云 ammo, 狱警 pierce). [ASSUMED] the factor 10 and the floor 64 sit above the measured official maxima
-(`times` 12, `attack@times` 5, `count` 20, enemy `sp.maxSp` 55) and far below ±1e9. Durations are not given an engine
-loop cap; a blackboard `duration` is still subject to `PLUGIN_DATA_BOUND`. Some `count` reads are one addition
-(`addLayers`, a single coin multiply) and bond layers still stop at 999; band grants and 维多利亚 hammers do iterate
-`count` and use the systematic cap, not 32. `jsonProblems` still allows a number whose absolute value is 1e9.
-Official counts, official trigger deviations and source-specific rules stay in
-build-data; its original data is unchanged. `node tools/records-schema.mjs` rewrites `schemas/records.schema.json`
-from the runtime schema (an optional output path overrides that file).
-
-Counts read from skill, talent or trait text go through `textCount` (`shared/plugins/textNumber.js`). The result is
-finite and at most `max(10 × the official maximum of that phrase, 64)`, or 64 when vanilla text never matches it.
-A matched run that is not finite clamps to the cap. Official phrases do not change: every scanned maximum is at most
-15, so the cold floor of 64 does not move them either. Percents and durations use `textFinite` and are not forced
-down to a count cap (`持续120秒` stays 120). `parseN` and `textNum` are `textFinite`. The phrase table is DESIGN §34.5.
-
-A subtract loop whose interval, period or per-step cost comes from plugin data uses `stepOf`. A positive value at or
-above the official minimum of that key is unchanged, including official `interval` 0.03 and `atk_interval` 0.025,
-both shorter than one tick. [ASSUMED] Raising those to one tick would change vanilla combat. `battle.every` already
-clamps its scheduler to one tick. A smaller positive step is raised to `max(one tick, official minimum / 10)`.
-Without the table, only a step below a tenth of a tick is raised. The same loop also stops after 8 iterations in
-one call. A burst that is not one tick of time uses `burstLimit` (the systematic cap of the official iteration
-count), not 8. 娜斯提's skill-end catch-up stops at 80 even when `duration` is 1e9. `duration` is not a skill field
-cap. Validation rejects a positive step key below the official minimum / 10 with `PLUGIN_DATA_BOUND` (`低于最小步长`).
-[ASSUMED] The step keys are names ending in `interval` or `period`, names ending in `cost`, and `coin_cnt`.
-
-Every content set carries `bounds` (`v: 1`) computed from the vanilla tables. A selection with plugins also serves
-`bounds/official.json`. That file is not part of `cs`. The page loads it with the set's data files, checked by its
-bytes, and the battle runner installs it; the room's match host installs the same object — so a modded battle runs with
-the same caps in the page and on the server. A set without the snapshot runs on the floor of 64 and never scans its own
-data. [ASSUMED] Direct `new Battle` still skips validation. The numbers of `factions` the wave generator reads
-(`generation`, each type's `count` and `weight`, each entry's `weight`) follow the same rule; the replaced-enemy counts
-also stay within 50, the generator's own clamp. The round-type schedule stops at 256. The full loop list, the floors
-that were left as they were, and the other residuals are DESIGN §34.5.
-
-Author-facing `PLUGIN_DATA_BOUND` text stays Chinese and is not a player string. `officialBounds.js` is marked
-`i18n-ignore-file`. The `联防` diagnostic in `validate.js` keeps its line ignore. The shared error catalogue
-(`shared/plugins/errors.js`, §15) explains these codes and supplies fixes to the CLI and studio.
-
-**Languages.** Manifest `sourceLang` describes the record texts (default `zh`). `i18n: { "en": "i18n/en.json" }` uses
-the existing `{ version: 1, lang, files: { table: { id: overlay } } }` format. String leaves must target existing strings.
-The builder computes `_h` against the final source text and retains valid unrelated base translations. Output lives in
-`i18n/<code>.json` in the composition, separate from simulation data. A content selection's `cs` includes the sha256 of
-each served `i18n/<lang>.json` body. Vanilla and cosmetic-only selections omit that field, so the P0 hash still
-excludes `data/i18n/`. Declared plugin-file hashes alone do not name the served translation snapshot. `index.json` is
-not a hash input. [ASSUMED] it cannot diverge while the hashed i18n bytes, data hashes, plugins and settings stay the
-same.
-
-**C1 for integrators** (`server/plugins/contentSet.js`):
-
-```js
-const set = buildContentSet({ registry, ids: ['data-demo'] }); // or [{id, settings}]
-// success: {cs, vanilla, plugins:[{id,version,hash}], data, files:{rel:{sha256,bytes}}, modes, problems:[],
-//           index, settings, warnings, kitted}
-// refusal: {problems} only — no cs and no partial data
-const files = contentSetFiles(set); // Map<rel, {body:Buffer, sha256, bytes}>, defensive copies
-```
-
-`data/<table>.json`, `i18n/<code>.json` and `index.json` are the route-relative keys. `index` uses the P0 composition
-shape (`plugins` there carry file hashes). Unchanged gameplay files retain their disk bytes and `/data/…?v=` URLs;
-changed files are the exact `JSON.stringify` bytes served from memory. The empty set's index and `cs` exactly equal P0
-computed from the same checkout. Any served sim/shared-code change naturally changes that checkout's vanilla hash.
-Cosmetic selections and dependencies can join the ordering pass; only content plugins enter this result’s gameplay plugin list and hash. Cache: by `cs`, 32 recent sets per registry [ASSUMED]; held set objects and their bytes remain valid after eviction or
-plugin removal. Room lifetimes and worker limits are §11's. A content plugin's optional asset part also has a validated
-`visual` snapshot; the room's visual set includes it (§11).
-
-Before importing Match/creating its meta registry in a content host, inject the merged singleton data; initialize sim
-data and reset `content/support`'s cached data too. The browser uses its `data.js` shim and `loadBrowserSim` to do the
-same. Passing only `opts.data` to a Battle does not change content/support's singleton. P1b tests both the Node setup
-and the actual browser loader with a patched bond; the match host's worker entry does the same (§11).
-
-, the same pattern as `art.assets`); a path or URL is
+references an installed character id (`^[A-Za-z0-9_-]+$`, the same pattern as `art.assets`); a path or URL is
 `PLUGIN_RECORD_ART`. It carries no art file. `talentMods` supplies permanent numeric mods with a
 JSON SkillSpec. Per-skill `skillSpec` overrides the operator's spec for that selection.
 
@@ -1568,12 +917,31 @@ the briefing, the result and the HUD, and left out of the statistics overview un
 cosmetic plugins only still plays the vanilla `cs` and counts as the original game (§9). DESIGN §32.6 keeps the
 decisions, the measurements and the open points.
 
-Gameplay plugins (content, script and trusted) work only in rooms of 第二期下半, the default version. On a server that
-enables the official versions (`SP_VERSIONS`, DESIGN §37.23), a room of another version refuses them: room.setPlugins
-and a version proposal answer VERSION_UNSUPPORTED (`roomSets.resolve({ gameplay: false })`); room.create of such a room
-leaves the server's default gameplay plugins off (warned once in the log), or answers VERSION_UNSUPPORTED when
-`plugins/config.json` fixes every room's plugins (`rooms: "fixed"`); the 插件 panel disables their switches. Cosmetic plugins carry over to every version; a proposal whose cosmetic plugins do not
-resolve on the target version is refused as well.
+Gameplay plugins (content, script and trusted) work in an official version only when their manifest's `versions`
+includes its id. Absent means `["act2autochess"]`, independently of the lobby default: existing plugins, templates and
+Forge imports stay 第二期下半-only. Every gameplay dependency must support the target too. `room.setPlugins` and
+`room.proposeVersion` return `VERSION_UNSUPPORTED` with the unsupported plugin and target version in the detail.
+`VERSION_UNSUPPORTED` means the mode/data is unavailable or a gameplay plugin does not declare the target;
+`PLUGIN_VERSIONS` rejects a malformed manifest declaration (see the error table).
+The 插件 panel enables matching plugins and explains a disabled switch; version proposals remain available in modded rooms.
+On `room.create`, compatible defaults apply and unsupported defaults (including incompatible requirements) are skipped
+with one log warning per selection/version. `rooms: "fixed"` keeps the entire fixed list and refuses an unsupported target.
+Cosmetic plugins carry over to every version. Other validation, permission, dependency and consent checks still apply.
+
+Composition starts from that official version's data and bounds. Unchanged files use `/data/versions/<slug>/`;
+changed files and bounds use the composition's own `/cs/<cs16>/`. A non-default gameplay composition includes `version`
+in its hash input and manifest; the plugin manifest bytes already cover `versions`. Default compositions keep their
+existing hash formula. The browser verifies the composed set and retains its version for data, art and loadout lookups.
+These unofficial matches use the **plugin host pool**, so every composition counts against `limits.maxSets` and the
+plugin host limit; official unmodded versions keep their separate pool (§35.23). This preserves the plugin watchdog,
+script isolation and owner gates without letting a new version bypass the plugin limits. Switching version recomposes
+the same plugins/settings; if gameplay no longer resolves when a vote completes, the original room remains intact.
+
+Studio's 信息 form offers official-version checkboxes for content, script and trusted manifests; 清单 also accepts the
+field. Folder/import checks and Studio's declarative checks validate against the declared versions. Templates and Forge
+conversion still omit it; authors must explicitly opt in. The existing template wizards and trial scenario pickers
+continue to use 第二期下半; this change adds no version-specific authoring wizard.
+
 
 | File | Role |
 |---|---|
@@ -1754,100 +1122,6 @@ both declaration and source bytes are hashed. Plugins without offers gain no new
 offer plugin never changes the vanilla composition. Shared engine/protocol code edits still change the build-wide
 vanilla code identity, as required by §9's hash contract.
 
-## 11. Room content sets (房间内容组合, P1c)
-
-A room's host switches the server's `content` plugins on for the room in its 插件 panel, beside the cosmetic ones (§9).
-The room then plays a **content set** of its own: the vanilla data with those plugins applied by §10's builder, named by
-its own `cs`. Every member's page downloads that set and checks it byte by byte, and the room's matches run in a match
-host of that set, a child process (or, when the server owner asks for it, a worker thread) of its own. Such a match is **unofficial**: marked in the room,
-the briefing, the result and the HUD, and left out of the statistics overview unless a player counts it. A room with
-cosmetic plugins only still plays the vanilla `cs` and counts as the original game (§9). DESIGN §34.6 keeps the
-decisions, the measurements and the open points.
-
-| File | Role |
-|---|---|
-| `server/plugins/roomSets.js` | what a room's plugin list makes: closed over requirements, ordered, split into the visual set and the content set, the policy's refusals |
-| `server/plugins/contentSets.js` | the content sets rooms hold: built through C1 (§10), kept by `cs`, the concurrent limit, the files `/cs/<cs16>/…` serves, the bytes a match host checks |
-| `server/plugins/policy.js` | the server owner's `plugins/config.json` |
-| `server/match/host/` | the match hosts: `index.js` (one worker or child process per `cs`, the watchdog, the limits), `entry.js` (inside the worker: the bytes checked against `cs`, the data installed before the match code is imported), `proxy.js` (the lobby's room.match for a hosted match: Promise answers) |
-| `public/js/content.js` | the page's copy of the room's content set: downloaded, checked, handed to `data.js` and the battle runner, `room.contentReady` |
-
-**Switching** (`room.setPlugins { plugins: [{ id, settings? }] }`). The host chooses plugins by id. The server adds what
-they require (shown as 「自动」), orders them (`shared/plugins/order.js`) and splits them by class: the cosmetic ones, and
-a content plugin's own `assets`, form the room's visual set `vs`; the content ones form its content set. `settings` are
-normalised by the manifest's declared settings (§3) and are part of `cs`. Refused, with the room unchanged:
-
-| Code | When |
-|---|---|
-| `NOT_HOST` / `ROOM_STARTED` | another player asks, or a match is running |
-| `PLUGIN_UNKNOWN` | the plugin is not installed |
-| `PLUGIN_BLOCKED` | a class or scope rooms cannot take, the server owner's policy (rooms off or fixed, not in `allow`, the class off), or a set whose merged data does not validate (the builder's first problems are the detail) |
-| `PLUGIN_DEPENDENCY` / `PLUGIN_CONFLICT` | a requirement is missing, or two plugins conflict |
-| `PLUGIN_INCOMPATIBLE` | a gameplay plugin made for other game versions or another plugin API (a cosmetic one is only a warning, §9) |
-| `PLUGIN_BUSY` | one content set more than the server runs at once (`limits.maxSets`, default 4 [ASSUMED]) |
-
-A change of the content set (or of the mode) un-readies the other players, like a difficulty change. Switching
-everything off brings back the vanilla shape of `room.state.content` exactly.
-
-**The room's state.** With gameplay plugins `room.state.content` is `{ cs, vanilla: false, plugins: [{ id, version,
-class, hash, auto? }], warnings, bytes, dataBytes, vs?, modes?, modeId?, kittedExtra? }`: `dataBytes` is what a member
-downloads beyond the vanilla files, `modes` the modes its plugins add (`{ id, name, roomMode, difficulty }`), `modeId`
-the one the host chose, `kittedExtra` the operators the set adds to a 自选 slot's list (`welcome.diyKitted` has the
-server's own). Each human seat and spectator carries `content: 'loading' | 'ready' | 'failed'`, only in such a room. The
-protocol increments are listed in `docs/design/network.md` §8.
-
-**Download and check** (`public/js/content.js`). `/cs/<cs16>/index.json` is the set's manifest (§10): enough to
-recompute `cs`. The page fetches it and every file it lists: an unchanged one at its plain `/data/<file>?v=<8 hex>` URL
-(cached for good), a patched one at `/cs/<cs16>/data/<table>.json`, the set's translations at their URLs. Every body is
-read as bytes and checked before it is decoded: its size and SHA-256 against its manifest entry (a BOM is part of the
-bytes). The manifest's composition (the data and translation hashes, the plugins and their settings) must hash to the
-room's `cs`, and the manifest may name no address but this server's `/data/` and the set's own `/cs/<cs16>/`. Then
-`data.js` shows the set (every screen reads its operators, modes and texts), the battle runner simulates on it, and the
-page tells the room `room.contentReady { cs }`. A failed check is told too (`{ cs, ok: false }`), and a toast asks the
-player to reload. `room.ready` waits for the player's own page and `room.start` for every player's (`CONTENT_NOT_READY`).
-Leaving the room, or the room going back to the original content, gives `data.js` the server's files again without a
-download. The panel shows the download's progress and the check's result.
-
-**Modes** (`room.setMode { modeId }`). With gameplay plugins the panel shows the room's mode, chosen by the host before
-the match and read-only for everyone else. An official mode of the room's type (solo or co-op) sets the difficulty; a
-mode a plugin adds (`content.modes`, of the room's type) becomes `content.modeId`, the match's mode, until the host picks
-a difficulty or the set no longer has that mode.
-
-**The match host** (`server/match/host/`). A vanilla room's match runs in the server process exactly as before, and so
-does a room with cosmetic plugins only. A content set's matches run in one match host per `cs` — a child process —,
-shared by every room that plays that set. The host receives the set's data bytes and its hash input, checks them
-against `cs`, installs the data (`server/data.js` `setData`) and only then imports the match code, so a plugin's data
-never reaches another room. The lobby talks to it through a proxy whose answers are Promises; each such room handles
-its messages one at a time on a queue of its own, and a vanilla room never queues. A host that stops answering (no heartbeat for 10 s), crashes or runs
-out of memory ends that set's matches only: each room goes back to its lobby and its members read why. Each host has a
-768 MB heap; at most `maxWorkers` (4) run at once, and an idle one stops after 10 minutes [ASSUMED, all three].
-`SP_MATCH_HOST=worker` runs a worker thread instead of a child process — not on a public server: one large allocation
-in a worker thread aborts the whole server process (measured, DESIGN §34.6; `docs/DEPLOY.md`).
-
-**The battle's authority.** A page simulates its battle on the set it checked, and its `b.result` names that `cs`. A page
-that holds another content set, or none, for a battle of the room's set is never the authority: it sends no result and
-the server takes the field over at the deadline. The server refuses a result that names another `cs` and simulates that
-battle itself. A BattleSpec may carry the room's `vs` as well (for the diagnostics; the sim never reads it).
-
-**Unofficial marks.** The room's 插件 tag reads 非官方 with gameplay plugins; the briefing and the result say 非官方 with
-the number of gameplay plugins; the HUD shows a small corner mark. Statistics records carry `content: { cs, plugins }`
-(null for the original game) and the overview leaves such matches out by default (「含插件对局」 counts them). The
-diagnostics line reads `MODDED cs=… plugins=…` and the bug template asks whether plugins were on.
-
-**Server owner's policy** (`plugins/config.json`, git-ignored like the plugins): whether a room's host chooses its
-plugins (`rooms: "host"`, the default), every room plays a fixed set (`"fixed"`) or rooms play the original game
-(`"off"`); the plugins a new room starts with (`default`); the plugins rooms may use (`allow`); the classes rooms may
-use (`classes`: overrides individual defaults — cosmetic/content on, script also on in sandbox/trusted modes, trusted also on in trusted modes; other classes denied); the concurrent content sets (`limits.maxSets`); whether gameplay plugins made for other versions may be
-used (`allowIncompatible`). `SP_PLUGINS=off|host|fixed` overrides `rooms`. The file is read again when it changes;
-a bad field keeps its default and is reported in the log. `docs/DEPLOY.md` has an example.
-
-**HTTP.** `/cs/<cs16>/index.json`, `/cs/<cs16>/data/<table>.json` and `/cs/<cs16>/i18n/<lang>.json` of a gameplay set
-are served from memory with `Cache-Control: immutable` while a room holds the set, and for the last 8 sets nobody holds
-[ASSUMED]; the vanilla `/cs/<vanilla cs16>/index.json` is unchanged. `/healthz` counts the content sets in use
-(`content.sets`).
-
-**Remaining limitation**: `allowIncompatible` cannot override the builder's incompatible-plugin refusal (DESIGN §34.6). Settings controls and changed-file notices are implemented (§15); DSL in data plugins is §12.
-
 ## 12. DSL
 
 A plugin describes a skill, a talent or a small prep effect in JSON (P2). No plugin code runs. The vocabulary, the
@@ -1867,7 +1141,7 @@ cannot write `dsl` or `pluginId`. The runtime validator rejects unknown fields t
 (`content:dsl` in `battle.errors`, `result.errors > 0`). It does not continue with an empty kit or the generic kit.
 The player sees the ordinary 战斗结束 box. A hashed set that skipped the builder still fails host boot (`boot-error`,
 room `plugin-start`, `PLUGIN_DSL_META`). The host supplies the plugin id (an author id cannot take another plugin's
-budget; omitting the author's id is allowed). Prep keys are `effect:<that id>:<local>`. DESIGN §34.7. A vanilla
+budget; omitting the author's id is allowed). Prep keys are `effect:<that id>:<local>`. DESIGN §32.7. A vanilla
 battle does not load the compiler. Direct literals use the official-bounds cap (`max(10 × official max, 64)`); an expression
 result is clamped to that cap. `duration`, action amounts and `rangeExtend` are not in that table [ASSUMED].
 
@@ -1878,7 +1152,7 @@ result is clamped to that cap. `duration`, action amounts and `rangeExtend` are 
 P3a is **trusted execution**, disabled by default; P3b sandbox mode is described below. The static `sandboxable: true` label says that a script uses the
 portable API; it does not make that script safe. Native imports can fully control the page or execute server code.
 Only enable code the server owner and every player trust. The adopted sources are the owner's 0.3.0 plan C2/C3 and
-the plugin design §3.4, §3.6, §5 and §7.6; DESIGN §34.10 records the implementation choices.
+the plugin design §3.4, §3.6, §5 and §7.6; DESIGN §32.10 records the implementation choices.
 
 A `script` manifest has `entry.sim` and/or `entry.meta` (one self-contained `.js` module each), their `sim.code` and
 `meta.code` permissions, and optionally the same data and art parts as a content plugin. A shared entry runs once.
@@ -1926,6 +1200,8 @@ empty. Only plugin `char_x_…` ids add a shop charId lookup; official dispatch 
 | `sp.kit` / imported `kit` | `num`, `talentBb`, `talentGrid`, `moduleBb`, `traitBb`, `moduleOn`, `up`, `cheb`, `isMainHit`, `byEnemyAttack`, `skillBusy`, `giveSp`, `onHitBy`, `onHitOn`, `onDamagedOn`, `enemiesInGrid`, `alliesInGridOf`, `enemyInRange`, `statBuff`, `toggleBuff`, `instantKind`, `skillRec`, `skillBbOf`, `batMod` — tier1 signatures |
 | `sp.math` / imported `math` | The exports of `server/sim/detmath.js` |
 | `sp.constants` / imported `constants` | Frozen simulation constants |
+| `sp.dir` / imported `dir` | Frozen `dirVec(direction)`, `offsetTile(row, col, dr, dc, direction)`; frozen returned arrays |
+| `sp.targeting` / imported `targeting` | Frozen `absoluteRangeKeys(grid, row, col, direction, extend = 0)`; frozen tile keys; at most 1024 input cells [ASSUMED] |
 | `sp.settings` | A frozen copy of the manifest's normalized settings, included in cs |
 | `sp.log(...values)` | At most 20 lines per setup, each value truncated to 500 characters [ASSUMED] |
 
@@ -1940,7 +1216,7 @@ are unrestricted and never labelled sandboxable; their sim/meta entries still us
 Geometry helpers read no battle state and incur no engine-action charge; their caller still uses the callback budget.
 `sortEnemyTargets` remains unavailable: it mutates its candidate array, uses live Unit references and calls Battle.remainingDistance.
 
-**SDK hit and damage helpers (0.3.2 settlement, DESIGN §37.32).** `kit.onHitBy(battle, unit, fn)` (damage `unit` deals to
+**SDK hit and damage helpers (0.3.2 settlement, DESIGN §35.32).** `kit.onHitBy(battle, unit, fn)` (damage `unit` deals to
 an enemy) and `kit.onHitOn(battle, unit, fn)` (damage dealt to `unit`) listen on `hit`: once per HP-damage instance, before
 the calculation, output and injury stages — `ctx.dmg.amount` is the instance's input, no DEF / RES, barrier, shield or
 dodge has acted yet, and a handler may still set `ctx.dmg.cancel`. A 流失 (`dealHPLose`) and a gauge fill (`'element'`)
@@ -1979,7 +1255,7 @@ Startup logs list accepted and refused plugins with plain-language reasons. The 
 set; stop a running match/server to revoke already executing code.
 
 **Consent and bytes (native trusted execution).** A trusted room adds `content.trusted = { plugins: [{ id, version, hash, permissions, authors }],
-consent: { <seat>: boolean } }`. `hash` is the full lock SHA-256. `room.consent { cs, accept }` affects only the sender's
+consent: { <seat>: boolean } }`. `hash` identifies the canonical gameplay file snapshot (§6), excluding notices and personal themes; server-owner pins still use the full raw lock SHA-256. `room.consent { cs, accept }` affects only the sender's
 seat; every active human must accept before `room.start` (`PLUGIN_CONSENT`). Bots need no page consent. Disconnects
 keep the seat's consent, a new cs clears it. The browser remembers its own decision in `sp.plugin.consent.<cs>`;
 server state alone never authorizes page execution. The risk dialog names authors, hashes and permissions and says
@@ -2003,7 +1279,7 @@ entries run at startup in one separate child, never the HTTP process. `api.http.
 exact path whose handler receives a frozen `{ method, path, url }` and returns a JSON value. No live request/socket is
 passed. `api.lobby.on(name, fn)` receives frozen copies for `roomCreated`, `playerJoined`, `playerLeft`, `matchStarted`,
 `roomClosed`; their `room` is the room.state the members get, so on a server that enables official versions it carries
-`version` and, while a version vote is open, `versionVote` (DESIGN §37.23; absent in 第二期下半 rooms). `api.health.extend(value)` replaces that plugin's JSON under `/healthz.plugins[id]`. Routes never leave
+`version` and, while a version vote is open, `versionVote` (DESIGN §35.23; absent in 第二期下半 rooms). `api.health.extend(value)` replaces that plugin's JSON under `/healthz.plugins[id]`. Routes never leave
 `/x/<id>/`: both the child API and parent IPC receiver check the loaded plugin id, reject `..`, `%2e` in any
 letter case and backslashes, and dispatch by the same raw path used by the HTTP handler (query excluded). A nonmatch
 continues to the original health/static handler. `health.extend` accepts at most 16 KiB of serialized UTF-8 JSON per
@@ -2023,6 +1299,8 @@ its composition preloaded, SDK registrations installed and the official bounds s
 gates remain unchanged. This command is explicit authorization to execute local code: it does not require
 `SP_PLUGIN_SCRIPTS` or a matching `plugins/config.json` trusted pin (a missing/stale pin does not stop it). Review the
 files being tested; this is not validation that they are the production-pinned version. Test execution has a 120 s CLI timeout [ASSUMED].
+The report is Node's spec reporter on every supported Node version, also when the output is not a terminal (an IDE
+console, a redirect, CI), where Node 22 would otherwise print TAP.
 
 ### P3b sandbox execution
 
@@ -2060,7 +1338,7 @@ a Worker escape. Node 22 permissions do not restrict network and are not a malic
 escape can probe the server's network or read its allowed install tree and targets of links inside it.
 Do not put links pointing outside inside the installation root; use a network namespace/container to restrict network. Prefer a low-privilege account/container
 with outbound-network and OS resource limits. Chrome regression coverage includes CSP and sandbox behavior;
-Firefox and Safari have not had dedicated sandbox verification. See [DESIGN §34.11](history/0.3.0.md#3411-p3b--worker-simulation-ses-and-csp)
+Firefox and Safari have not had dedicated sandbox verification. See [DESIGN §32.11](history/0.3.0.md#3211-p3b--worker-simulation-ses-and-csp)
 and [deployment](DEPLOY.md).
 
 
@@ -2077,7 +1355,10 @@ Start from `plugins/_template/ui/` (a damage tally). A folder whose name starts 
 never loads it.
 
 **The frame.** The page runs in `<iframe sandbox="allow-scripts">` — no `allow-same-origin`, so its origin is the
-opaque string `"null"` and it cannot read this site's storage or credentials. The iframe points straight at that plugin's own
+opaque string `"null"` and it cannot read this site's storage or credentials. The host iframe uses `color-scheme: dark`
+and a transparent background. [ASSUMED] That clears the opaque white canvas; a background the plugin's own page paints
+still shows. The generated Forge skeleton and `plugins/_template/ui/` set `color-scheme: dark` on `html` for the same
+reason. The iframe points straight at that plugin's own
 `/p/<id>/<hash8>/<entry>`. Its first load is the entry, and any later load destroys the frame: the host then clears
 `ready` and posts nothing more. `postMessage` to `"null"` cannot tell those documents
 apart. Files at `/p/` for a ui plugin, and not cosmetic art, are sent with
@@ -2091,18 +1372,30 @@ is not the fix. The rest of the site uses the separate P3b policy (§13).
 
 **The feed** is postMessage API v1 (`shared/plugins/ui.js`, `schemas/ui.schema.json`). The host sends the player's
 visible `m.public` (a subset), the player's own `m.private` (a subset), throttled events and snapshots of the battle
-on screen, and unit stats when the plugin asks. The plugin may ask for a slot, a height, a short notice, and a few
-namespaced storage keys (`sp.plugin.<id>.`, proxied by the host page). It cannot send a match intent: a message whose
-type is `hello`, `ping`, `room.*`, `g.*` or `b.*`, or that carries one, is rejected. The host never turns a plugin
-message into a client→server message.
+on screen, and unit stats when the plugin asks. It also sends, still read-only: `result` (settle stats already on the
+result screen; no lineup, diy or seed), `net` (connection status; latency is the field `rtt`, because the key `ping`
+is a client intent) on change and then at most once a second, and `state.room` (seats, including empty holes, and the
+room's plugin ids, never the join code). `welcome` may add `version` (`PROTOCOL_VERSION`), `lang`, `plugins` and the
+scalar prefs already stored for that plugin. A plugin that only reads `t === 'welcome'` keeps working. The plugin may
+ask for a slot, a height, a short notice, and a few namespaced storage keys (`sp.plugin.<id>.`, proxied by the host
+page). It cannot send a match intent: a message whose type is `hello`, `ping`, `room.*`, `g.*` or `b.*`, or that
+carries one, is rejected. The host never turns a plugin message into a client→server message. Nothing in these feeds
+lets the frame reach the parent page.
 
 **Limits [ASSUMED]:** 20 messages a second per plugin, burst 40; battle pushes at 4 Hz, ≤ 40 events a batch; a
 snapshot whose JSON is over 48 KB is dropped with `truncated`, and `truncated` is also set when a string, array, object
 or nesting depth was cut (the partial snapshot is kept when it still fits); a plugin message over 8 KB refused;
 storage keys of 1–64 characters from `A–Z a–z 0–9 . _ -`, not `__proto__`, `prototype`, `constructor` or `..`, a JSON
 value ≤ 4096 UTF-8 bytes, ≤ 32 keys and ≤ 32 KB UTF-8 per plugin; height 48–480 px; a notice ≤ 80 characters, and a
-distinct notice at most once per 2 seconds (the same text is still delivered so toasts can merge); one slot per
-plugin, one plugin per slot, at most 8 mounted. Engine `dmg` / `heal` tuples expose the HP at `amount` (the unit id
+distinct notice at most once per 2 seconds (the same text is still delivered so toasts can merge); connection pushes
+after the first at most once a second (`netHz`) [ASSUMED]; one slot per
+plugin. The protocol table grants one plugin per slot at a time. When several ui plugins ask for the same slot, the
+match shows the first by name and the player switches with tabs in the slot (`PLUGIN_UI_SLOT_SHARED` is a warning, not
+a refusal). [ASSUMED] That name order is the initial tab, and a later sync does not override a tab the player already
+chose. At most 8 mounted. `hud.right` (`.gm__ui-slot`) sits above the hand, inset from the effects column, and its
+height stops under the ready button, so it does not cover the shop, the hand, the ready button or funds at 1280×720
+or 1920×1080. [ASSUMED] Both viewports are 19.2×10.8rem; the hand's top is the dock clearance 4.76rem; the slot's
+bottom is 4.88rem and its right inset is 0.92rem. Engine `dmg` / `heal` tuples expose the HP at `amount` (the unit id
 is `unitId`). The private subset drops loadout, ops, diy, effects, nextEnemies, personalChoice, rewardOffer and
 tokens. The exact allowlists are `subsetPublic` and `subsetPrivate`. Storing a snapshot does not trip
 `PLUGIN_INTENT` just because the host had labelled it `b.snap`.
@@ -2118,7 +1411,7 @@ message. The host may toggle it during a match because it changes no match.
 ## 15. The studio and the tools
 
 Someone who does not write code makes, previews and packs cosmetic and gameplay plugins in the browser; someone who does gets a
-schema, findings in plain words and hot reload. The design is DESIGN §34.9; the beginner's guide (Chinese) is
+schema, findings in plain words and hot reload. The design is DESIGN §32.9; the beginner's guide (Chinese) is
 [PLUGIN-GUIDE.md](PLUGIN-GUIDE.md), the guide for AI agents `plugins/AGENTS.md`.
 
 **The studio 插件工作台** — `http://<server>/studio/` of a running server (`server/studio/`, its page `public/studio/`):
@@ -2153,11 +1446,67 @@ schema, findings in plain words and hot reload. The design is DESIGN §34.9; the
   Japanese dub), 换音乐 / 音效 (`audio`: a music track with its intro, a leader's music, an interface or battle sound, a
   unit's own sounds) —, what it changes found by its **official name** (`server/studio/targets.js`: operators, summons,
   enemies, items, bonds, strategies, interface pictures, music, sounds, each with its picture), a name; the id is made
-  from it (a legal one nobody has, editable). The folder gets `plugin.json` and a README — no file of the game, no
-  picture: an empty entry is a valid plugin that changes nothing yet. More templates and targets join a plugin with
+  from it (a legal one nobody has, editable). The folder gets `plugin.json` and a README. Art/audio targets start with an original CC0 sample in the first slot; other cosmetic templates remain empty until filled. No game file is copied. More templates and targets join a plugin with
   「添加替换内容」 (an operator's avatar, model and voice in one plugin); the page keeps what it shows in the dot file
   `.studio.json` of the folder (never listed, served, checked or packed; a plugin made by hand gets its sections read
   off its overlay).
+- **0.3.1 presentation templates**: `theme` (personal cosmetic, `theme` permission) edits every allowlisted
+  colour/time/easing token with its default, a per-token reset, and reversible live styling of the studio root.
+  `notices` (personal cosmetic) edits up to 20 announcements, title ≤80 and body ≤2000 Unicode characters, optional
+  calendar date and complete translations; preview uses the popup's plain-text localization/fallback reader.
+  `skins` (cosmetic, assets.add + assets.override) edits an operator's outfit list and existing image/Spine slots;
+  `isSkinKey`, 64 outfits, 64-character name/group limits and picker fallbacks remain §9 / SKINS.md's rules.
+  [ASSUMED] Skin metadata is saved before slot changes; the full UTF-8 hex skin key separates upload directories.
+  Reused keys allocate a fresh numeric-suffix directory when another skin references the destination, including
+  partial Spine uploads. Retired files are retained. FX images are staged with the form, then saved together.
+  Slot uploads/clears hydrate the next form draft, so a subsequent save/rename retains present media and never
+  resurrects a cleared asset. Other manifest metadata and unrelated art remain untouched.
+  `fx` (content) creates an immediately playable carrier borrowing an official kit and an original CC0 sheet
+  [ASSUMED], then edits official unit/skill mappings or flipbooks and phase bindings (§9 Operator effects).
+  The existing target picker searches only units in the local effects index for the former; a missing index
+  is explained. [ASSUMED] The local index reader caps its JSON at 16 MiB. Borrowed effects remain 3D-only;
+  flipbooks play in both board modes through the existing trial replay, including unsaved form parameters.
+  The controls use the runtime bounds (frames 1–256, cols 1–frames, fps 0.1–60, anchor 0–1, scale .01–8,
+  normal/add, boolean loop); the loader also checks PNG dimensions and cell divisibility. [ASSUMED] At most
+  128 books and 60 unique slot/phase rows (10 × 6); dangling effects are refused. Compiled particle files
+  remain supported by the existing file interface. No new runtime plugin field, permission or studio route.
+  All four templates use one editor module and the same theme/notices/overlay/effect validators as the checker;
+  invalid values are not silently clamped. See the Chinese guide's four subsections for the complete workflow.
+  Review save contract: all presentation forms hydrate current manifest/record declarations. Saves use the shared
+  three-way delta merge, retaining extra declarations, hidden FX settings and unchanged JSON token bytes. FX/skin forms refuse
+  string `assets` declarations with 409 (edit the referenced document directly). The complete merged folder, dependencies
+  and staged media must pass the strict checker before a form save; invalid retained content and empty notice-only
+  plugins are refused with contextual errors. Skin slot uploads and the files PUT route instead require **no new problems** (the 0.3.0 art, model, voice
+  and audio slots, and a bond's icon, still write directly and show the check afterwards):
+  candidate strict findings must already exist in the live folder, compared as a multiset of exact code,
+  location (where/file) and finding text/reason. Each existing finding excuses at most one identical candidate finding.
+  [ASSUMED] Changed numbers within a reason (for example a measured folder total) count as a new finding and refuse
+  the upload. Content JSON is composed with `checkDataOnly` independently of asset problems; malformed documents
+  produce findings without executing author code. This permits repairing several missing images one at a time;
+  PNG/Spine bytes on these validated upload paths must independently validate each time.
+  Cosmetic validation does not load gameplay tables. [ASSUMED] Candidates use dot-prefixed `.sp-studio-*` directories
+  inside the real plugins directory (same volume); the registry excludes dot names. A complete initial walk refuses
+  all links, including hidden ones, before staging any files. Unchanged regular files are hardlinked, with
+  `COPYFILE_FICLONE` copy fallback; the three-way merge reads only JSON/HTML documents. [ASSUMED] Revision
+  checks hash document bytes and use size/mtime/inode for other files, avoiding main-process media reads. Only requested writes face
+  studio per-file limits, so an installed file over 64 MiB remains editable when untouched. Candidate totals retain
+  the 200 MiB / 5000 file limits. Changed media precedes plugin.json in the rollback-protected atomic commit;
+  all success/error/timeout paths remove the candidate. HTTP staging and complete checks run in disposable children
+  [ASSUMED: at most two jobs, 20 seconds each, 512 MiB V8 heap]; cleanup is asynchronous.
+  Skin-slot and files-PUT Spine uploads use the packer's skeleton/atlas readers and rebuild clip metadata.
+  PNGs uploaded through skin slots, files PUT or staged FX forms check signature, raw ASCII-letter chunk types,
+  legal IHDR colour/depth/interlace fields, chunk CRCs, palette and end ordering, and inflate zlib with an exact
+  scanline-size bound (including Adam7 passes), then checks scanline filters. [ASSUMED] Decoded scanlines are capped
+  at 256 MiB. Only declared effect sheets use non-interlaced 8-bit RGB/RGBA ≤2048 per side; inline and file-backed
+  overlays both identify them. Upload decoding recognizes `.PNG` too; FX paths retain lowercase `.png` / `.json`.
+  The 0.3.0 art/model/voice/audio slots and a bond's icon keep their direct writes, without this media validation gate.
+  Other validated PNG art accepts all legal depth/colour combinations and Adam7. Pending FX FileReader completions merge into the latest draft; save stays disabled until
+  all reads finish. Trials accept the same 160 MiB request body as authoring. [ASSUMED] Newly staged replay images
+  are embedded as PNG data URLs, at most 8 MiB compressed image bytes total within the existing 16 MiB result cap;
+  they remain available for the replay's lifetime after temporary files are removed. Saved images retain ordinary
+  preview URLs. FX carriers retain supported damage/attack fields and bind their equipped default
+  skill; sources requiring owner-specific summons or differing per-form top-level attack metadata are explicitly refused [ASSUMED: compact-format limitation].
+
 - **Slots**: every place a template fills, the installation's art beside the plugin's. Files dropped on a slot (or
   picked) go into the plugin folder under the slot's name — `art/<key>/avatar.png`, `spine/<key>/front/<key>.skel` and
   `.atlas` under one name with the atlas's pages by their own names and `textures` read from the atlas,
@@ -2225,7 +1574,51 @@ Wizard state lives in `.studio.json` under `authoring`, independent of cosmetic 
 still refuse executable sources. A UI preview loads the registry's sandboxed `/p/` route.
 `GET /studio/api/authoring?template=&target=` returns official numeric fields/reference records/modes;
 `GET …/dsl-example?name=&id=` returns a starting point; `POST …/validate-dsl {spec}` returns the real validator's result.
-Generated DSL is checked again before new/save writes (including `kit.dsl` and prep host keys); rejected specs leave the saved files unchanged. The form reports failed validation requests, and save revalidates its current spec and checks `ok` before writing. All templates pass strict check/pack and data templates compose through C1; the DSL caster is tested in battle, and generated prep effects in a real match-host round. A single-battle trial does not dispatch prep events.
+Generated DSL is checked again before new/save writes (including `kit.dsl` and prep host keys); rejected specs leave the saved files unchanged. The form reports failed validation requests, and save revalidates its current spec and checks `ok` before writing. All templates pass strict check/pack and data templates compose through C1; the DSL caster is tested in battle, and generated prep effects in a real match-host round. The original single-battle presets do not dispatch prep events; the five templates below add an explicit isolated exercise.
+
+**0.3.1 gameplay forms (§34.29).** Each has a server template and a page editor, with official-name search,
+bounded numeric inputs, selects and editable lists. No hand-written JSON or new HTTP route is required:
+
+| Template | Fields and generated content |
+|---|---|
+| `bond` | Name, description, 1–16 ascending thresholds (1–100), count mode, core/extra, 1–64 distinct operator members, effect tier, prep DSL and member talents. Generates a bond record, membership patches, prep spec and additive operator traits, preserving official kits. Original CC0 icon in the existing art slot; save the form before uploading/borrowing an icon. |
+| `item` | Official normal item, optional elite pair, name, description, prices (0–1e9), tiers (1–6), shop visibility/exclusion/order, and existing buffs' numeric blackboards with official caps. Generates complete records preserving supported handler/effect identity and normal/elite links. No new buff handler can be introduced. |
+| `trait` | Official operator, explicit replacement checkbox, Chinese text and optional en/ja/ko/zh-TW texts, battle talents and all eight operator prep hooks. `elementBurst` exposes element/targetOnField/selfOnField; layer caps 1–1000000 and gainItem count 1–64 follow the trait validator. The common spec applies to both forms. |
+| `offers` | Hook list, any/list/every/range rounds, 1–6 slots, 0–2 refreshes, window seconds, quorum, timeout, prep deferral, and 1–128 local cards with labels/icons and closed grants. The template owns `offers/cards.json`; cards supply their individual grants. |
+| `rules` | Four selects from `RULE_SWITCHES`, with descriptions. Inherit omits a declaration; other choices explicitly declare it, including official defaults. |
+
+`POST validate-dsl {draft:{id,template,target,options}}` checks a temporary plugin with the folder checker
+and data-only composer. Existing drafts reopen current document fields and merge only form changes; extra fields,
+records, declarations, needed permissions and assets survive. Unchanged JSON text retains its original bytes.
+Validation, save and unsaved trial share the complete merged folder, including retained files and required
+dependencies; errors occur before any installed file is written. Bond samples read binary SP_PLUGIN_RESOURCES
+resources when configured. Item params are rebuilt from final buffs with the data builder’s first-key-wins semantics
+(strings override numbers within one buff); inherited MAGIC and buff-less morph items are supported, with pairing
+disabled when the base has no elite form.
+`POST trial` accepts an optional `exercise:{round,at,hook,elite,actions}` for these templates. The existing child
+bench returns `exercise` alongside the replay: before/after funds, pending funds, refreshes, layers, inventory,
+rules, open windows and action outcomes. It executes actual Match offer grants, seeded refreshes, quorum and
+virtual-clock timeout; the page's choose/refresh/timeout buttons replay at most 32 actions from the same seed.
+No room or listening socket is created. Saved and unsaved forms both work.
+
+[ASSUMED] Defaults are editable examples, not official balance: one active bond member, +25% ATK, one fund at
+roundStart; the first official hammer pair; a +25% ATK trait; three small fund cards and a 30-second window;
+four explicitly declared default rules. One effect tier guards every bond rule; a bond's layer action can select
+the new bond directly. Empty prep/talent lists omit their part. Membership authoring is capped at 64; a rules-only
+template needs at least one declaration [ASSUMED]. Trials inject the selected bond tier, equip the
+selected item form on the first holder when it is equipment, and dispatch one selected prep hook with that
+holder. Bond hooks include income/refresh; trait hooks include gain/deploy instead. Auto selects the first authored
+prep hook, falling back to roundStart; income starts at zero and credits setIncome after dispatch [ASSUMED].
+Rules trials compare real Match actions against vanilla: twelve free level-one refreshes with enough Victoria
+members, disabling the first holder’s skill during prep, two bond items followed by a morph, and unequipping a
+elite hammer on a separate holder [ASSUMED]. Replay uses actual equipment/loadout and the applicable morphPairing option.
+They do not prove population counting for authored bonds, full economic flow or consumable targeting.
+Item/chess grants remain visible in inventory. These exercises apply to dummy/wave/duel presets, not golden
+scenarios; the independent vanilla console remains unchanged. Full match checks use the existing test room.
+Item templates add `effectRef` to their own complete records in a second generated patch, after pair expansion;
+this preserves official prep handlers and combination identity without compact inheritance flattening the pair.
+[ASSUMED] Standalone bond/trait forms require members with playable official chess records in this installation;
+backup-only operators need an operator plugin first, because a trait declaration does not create a chess pair.
 
 **Try a battle.** `GET /studio/api/trial-options` lists official operators/waves and, in source checkouts, golden battle
 scenarios (not whole-match cases). `POST /studio/api/trial` takes `{id, scenario, operator?, opponent?, wave?, seconds?,
@@ -2245,6 +1638,63 @@ comparison table. Replays carry BattleSpec, field metadata, actual snapshots/eve
 results, event counts and per-unit damage/healing/taken stats. The studio feeds these to `render/app.js`, with pause,
 replay and speed controls. It does not simulate in the page. The bench is a single battle; prep/mode economy still needs
 an actual room or author harness test. See the three step-by-step sections in PLUGIN-GUIDE.md.
+
+<a id="test-console"></a>
+
+**Test console (0.3.1).** `/studio/console.html`, linked from the studio header, is an independent vanilla battle
+sandbox. Both `POST /studio/api/console/options` and `POST /studio/api/console/build` require the existing studio key,
+LAN/Host/origin gate; an unkeyed request is 404. Options supplies the initial scene and battle-supported tactic cards.
+Build takes the scene below, validates shape, references, loadouts, placement and bounded work against official data,
+and returns `{scenario, spec, cap, maps, tokens, scale}`. It never runs the battle on the server, changes a room,
+installs a plugin, changes the sim singleton or records statistics. The page loads the real browser sim and field view.
+
+The versioned JSON is `shared/studio/scenario.js`; unknown fields and unsafe object keys are rejected. Required fields:
+
+| Field | Value |
+|---|---|
+| `v`, `name` | `1`, a title of at most 120 characters |
+| `stageId`, `modeId`, `kind` | official IDs; `normal`, `boss`, `hidden` or `unite` |
+| `round`, `seed`, `seconds` | 1–15; integer 1–4294967295; cap 1–1200 game seconds |
+| `waveId`, `bossId` | official ID or `null` for automatic selection; incompatible field/template combinations are errors |
+| `enemyMode`, `enemies` | `official` and an empty list, or `custom` with `{enemyKey,count,routeIndex,time,interval}` groups |
+| `bounties` | effect IDs from the options' bounty cards, at most 16 |
+| `players` | one owner (normal) or one/two owners (other fields), each as below |
+| `flags` | optional `dpInit`, `dpPerSec`, `dpMax`, `layerGainsEnabled`, `startOpCooldown` inside an object |
+
+Each player has `units`, `bonds`, `bandId` (or `null`), `choices` (battle-capable tactic effect IDs),
+`deviceOverrides` (official aliases → booleans), `handUnits` (0–15). A chess unit is
+`{uid,kind:'chess',chessId,row,col,dir,items}`; a token is `{uid,kind:'token',tokenId,ownerUid,row,col,dir}`.
+UIDs are unique across both owners; coordinates are the owner's board rows 9–12, columns 2–10; directions are
+`UP|RIGHT|DOWN|LEFT`. Boss R is mirrored by the spec; unite's second board is offset eight columns. Summons require a
+deployed owner, its selected skill and the match's summon stock / owner-range rules. Equipment slots are at most two;
+consumed-on-equip and acquisition/prep effects are not replayed. Population limits are deliberately absent in the sandbox.
+Chess may add `skillIndex`, `moduleId` (`none` removes it), `potential` (1–6), `cultivate` (0–3), `diy`
+(`{charId,skillIndex,uniEquipId}`), or `standIn:true` (without own skill/module/potential/cultivate).
+Prototype DIY selections retain their locked skill/module and reject potential/cultivation; other-mode modules are refused.
+`carryState:{hpPct,sp,down}` is optional (tokens only accept `sp`). Bonds are explicit `{tier,layers}` by bond ID;
+they are not inferred from the roster. `facts` optionally carries `shopLevel`, `funds`, `handChess`, `roundStats`
+(`refreshes,buys,sells,spent,gainedChess,arts`) and `extraBands` for conditions read by combat content; it does not run
+prep events. Normal round wave selection/scaling, leader templates and pool HP, bounty scaling, terrain and devices
+reuse the match builders. No arbitrary effect references or executable content can be imported.
+
+[ASSUMED] Authoring limits: 512 KiB JSON; 36 units per owner; 100 custom groups / 500 enemies (before bounties);
+1–100 enemies per group, spawn 0–1200 s and interval 0–120 s; 32 choices per owner. Any official template can be
+exercised at another round's scaling. The default unite exercise treats the entire selected normal wave as leaked
+enemies of owner one; use custom groups for the actual leaks. Bounties also belong to owner one. Leader pool HP uses
+the number of boards in this isolated field. Other fields, team LP, real-time overtime, acquisition effects, economy,
+cross-round state, arbitrary stat edits, movable devices, Arts items and plugin content sets are outside this console.
+The UI names its unsupported parts and prep-only tactics. A full match is not this page: the host test room
+(DESIGN §34.8, `SP_TEST_MODE` / `--test-mode`) is a separate lobby room. This sandbox does not create one.
+
+The run starts paused. Editing recompiles and resets; one tick / one second means 1 / 30 fixed sim ticks, up to the
+cap or the normal battle end. Empty custom waves stay open until the cap. Speed 0.25×–8× affects tick scheduling only;
+an optional renderer `playbackTime` also holds animations while paused. A background tab pauses. Inspector and
+damage/heal logs read the live battle; `official:<key>` records an actually loaded official instance, while
+`procedural:*` records this view's procedural calls (particle entries require an accepted pool object). Totals survive
+the 300-entry log cap. Effects depend on assets, renderer tier and load timing; they are diagnostics, not a sim digest.
+3D / 2D and official FX off / lite / full use the normal renderer and report its actual state.
+Download/import never include the studio key. The last validated scene is kept in browser localStorage
+`sp.studio.console.v1`; malformed imports keep the current scene. JSON is a reproducible setup, not a mid-battle save.
 
 **Room panel completion.** Declared settings now show boolean, integer, number and typed-enum controls with min/max/step.
 The host applies the form via the existing `room.setPlugins`; values are normalized before composition and the resolved
@@ -2286,9 +1736,10 @@ GET without the body):
 | `POST …/pack` · `GET …/zip` · `GET …/preview` | the lock and the check; the zip (a download, packs nothing); the temporary composition |
 | `GET …/f/<hash8>/<path>`, `…/files/<path>` · `PUT` / `DELETE …/files/<path>` | a file of the folder (a draft's too) — of the types the studio writes only, sandboxed (`Content-Security-Policy: default-src 'none'; sandbox`); write or remove one |
 | `GET /studio/api/trial-options` · `POST /studio/api/trial` | scenarios; a checked child-process battle comparison (key required) |
+| `POST /studio/api/console/options` · `POST /studio/api/console/build` | test console defaults / combat choice support; validate a scene and build its browser BattleSpec (both keyed; 512 KiB body limit) |
 | `POST …/authoring` · `POST /studio/api/validate-dsl` | wizard save with revision; structural DSL validation |
 | `POST /studio/api/authors` · `GET /studio/api/events` | name the page's game sessions; the change events |
-| `POST /studio/api/forge/preview` · `POST /studio/api/forge/import` | a Forge pack as `{ zip?: base64, files?: [{ name, data: base64 }], id?, noScripts? }` — never a path on the server. Preview is a dry run; `noScripts` leaves the script plugin of `kits/` out. §16 |
+| `POST /studio/api/forge/preview` · `POST /studio/api/forge/import` | a Forge pack as `{ zip?: base64, files?: [{ name, data: base64 }], id?, noScripts?, offline? }` — never a path on the server. Preview is a dry run; `noScripts` leaves the script plugin of `kits/` out. §16 |
 
 **The files** (`server/studio/files.js`): everything the studio touches is inside `plugins/<id>/` — the id a plugin id
 (never a `_` template or a dot folder), a path a plain relative path (no `..`, no `.` part, no hidden part, ≤ 200
@@ -2305,8 +1756,8 @@ a link either (`server/plugins/pack.js plainPath`); every walk of a folder is bo
 folder past the limits, and `plugins/` is watched as a tree only while it holds at most 100 000 entries); a write goes to a
 dot-named temporary file renamed over the target; a body over the limit is refused before it is read and its connection
 closed; a file system error answers with its code only (its message, with the absolute path, stays in the log); a file at most
-64 MB, plugin.json at most 1 MB, a request at most 160 MB (a model's files in one go, base64), a plugin at most 200 MB
-and 5000 files [ASSUMED: the studio's limits].
+64 MB, plugin.json at most 1 MB, a request at most 160 MB (a model's files in one go, base64), a plugin at most its class ceiling
+(512 MB for cosmetic packs, 200 MB otherwise) and 5000 files [ASSUMED: the studio's limits].
 
 **The error catalogue** (`shared/plugins/errors.js`, the 0.3.0 plan's interface C6): every `PLUGIN_*` code — the
 manifest and file rules, a cosmetic plugin's overlay and lock, the registry's scan, the packer, a room's refusals (the
@@ -2367,7 +1818,8 @@ lacks). The table below is generated from it (`node tools/plugin.mjs errors --wr
 | The plugin works, with a note in the check | `PLUGIN_TEXT` | “{where}” should be a text or { "<lang>": "text" }; it is ignored | Write "Name" or { "zh": "名字", "en": "Name" }. |
 | The plugin is not listed (skipped); the start log and check say why | `PLUGIN_LANG_CODE` | “{where}” is not a language code | Use a language code such as zh, en, ja, ko or zh-TW. |
 | The plugin is not listed (skipped); the start log and check say why | `PLUGIN_VERSION` | The plugin's "version" is missing or not a version number | Write three numbers such as "1.0.0"; raise it whenever the plugin changes (1.0.1, 1.1.0 …). (the studio fixes it in one click) |
-| The plugin is not listed (skipped); the start log and check say why | `PLUGIN_APP` | The game versions the plugin is made for, "app", are missing or not a range | Write a range such as ">=0.3.0 <0.4.0" (this game is {app}). (the studio fixes it in one click) |
+| The plugin is not listed (skipped); the start log and check say why | `PLUGIN_VERSIONS` | The supported official versions "versions" are invalid | Use a non-empty array of distinct official version ids; omission limits gameplay plugins to act2autochess. |
+| The plugin is not listed (skipped); the start log and check say why | `PLUGIN_APP` | The game versions the plugin is made for, "app", are missing or not a range | Write a range such as ">=0.4.0 <0.5.0" (this game is {app}). (the studio fixes it in one click) |
 | The plugin works, with a note in the check | `PLUGIN_APP_MISMATCH` | The plugin is made for the game {range}; this server is {app} | A cosmetic plugin still works (a reminder only). Once it is checked with this version, widen "app" to include {app}. (the studio fixes it in one click) |
 | The plugin is not listed (skipped); the start log and check say why | `PLUGIN_API` | The plugin API level "api" is missing, not an integer, or not supported | Write "api": {current} (this game supports {min}–{current}). (the studio fixes it in one click) |
 | The plugin is not listed (skipped); the start log and check say why | `PLUGIN_SCOPE` | "scope" is not one this class allows | A cosmetic plugin has ["room", "personal"]: room — the host switches it on for the whole room; personal — a player for themself in 设置. (the studio fixes it in one click) |
@@ -2399,7 +1851,7 @@ lacks). The table below is generated from it (`node tools/plugin.mjs errors --wr
 | The plugin is not listed (skipped); the start log and check say why | `PLUGIN_FILE_NAME` | The file name “{where}” cannot be used | Names of files and folders use letters, digits, . _ - and spaces; none starts with . or is "..". |
 | The plugin is not listed (skipped); the start log and check say why | `PLUGIN_FILE_TYPE` | {where}: a {class} plugin may not carry this kind of file | Pictures are .png .jpg .webp (no SVG), sounds .mp3 .ogg, models .skel .atlas; documents (.md, .txt, README, LICENSE) may sit beside them. Move the file out of the plugin folder (the one-click fix moves it to plugins/_moved/, never deletes it) or convert it. (the studio fixes it in one click) |
 | The plugin is not listed (skipped); the start log and check say why | `PLUGIN_FILE_FRAME` | {where} is a frame file outside the folder of entry.client | Put a ui plugin's .html .js .css into the folder of entry.client. |
-| The plugin is not listed (skipped); the start log and check say why | `PLUGIN_FILE_SIZE` | The plugin is too large: {where} | A plugin holds at most 200 MB in 5000 files (2000 folders, 12 levels deep), a JSON file at most 8 MB. Compress pictures and sounds, remove unused files, or split it. |
+| The plugin is not listed (skipped); the start log and check say why | `PLUGIN_FILE_SIZE` | The plugin is too large: {where} | A cosmetic pack holds at most 512 MB, every other class 200 MB, in 5000 files (2000 folders, 12 levels deep), a JSON file at most 8 MB. Compress pictures and sounds, remove unused files, or split it. |
 | The plugin is not listed (skipped); the start log and check say why | `PLUGIN_FILE_MISSING` | The manifest names {file}, which the plugin folder does not hold | Put the file there (folders and case must match) or correct the path in the manifest. Dropping the file on its slot in the studio puts it in the right place. |
 | The plugin is not listed (skipped); the start log and check say why | `PLUGIN_FILE_OUTSIDE` | {where} leads out of the plugin folder or cannot be read inside it | A plugin uses plain files of its own folder only: copy the file in (no link) and check that it opens. |
 | The plugin is not listed (skipped); the start log and check say why | `PLUGIN_LANG` | A language pack's language is not right: {where} | "lang" is a language code (en, ja, zh-TW …); zh is the source language and never a pack; machineTranslated is true or false. |
@@ -2491,11 +1943,11 @@ lacks). The table below is generated from it (`node tools/plugin.mjs errors --wr
 | The plugin is not listed (skipped); the start log and check say why | `PLUGIN_CATALOG_HASH` | A catalogue entry has no sha256, or it is not 64 lowercase hex digits: {detail} | Each plugin names the SHA-256 of its zip (64 lowercase hex digits). |
 | The plugin is not listed (skipped); the start log and check say why | `PLUGIN_CATALOG_ID` | A plugin id is not valid, or it is repeated: {detail} | An id is 2 to 32 lowercase letters, digits and hyphens, and it appears once in the catalogue. |
 | The plugin is not listed (skipped); the start log and check say why | `PLUGIN_CATALOG_FIELD` | A catalogue field is not valid: {detail} | Follow docs/plugin-catalog.example.json: version is semver, class is a known class, and long text is shortened. |
-| The studio refuses the action and says why | `PLUGIN_CATALOG_SIZE` | The catalogue file is too large: {detail} | The catalogue document itself is at most 1 MB. A plugin zip has its own 200 MB cap. |
+| The studio refuses the action and says why | `PLUGIN_CATALOG_SIZE` | The catalogue file is too large: {detail} | The catalogue document itself is at most 1 MB. A plugin zip has a 512 MB outer cap; the extracted folder is limited to 512 MB for cosmetic packs, 200 MB otherwise. |
 | The studio refuses the action and says why | `PLUGIN_CATALOG_FETCH` | The catalogue could not be fetched: {detail} | Check that the address is public https on port 443, that the server can reach it, and that it is not redirected to a non-public address or off https. The one deadline covers the body, not each redirect on its own. A local catalogue file works too. |
 | The studio refuses the action and says why | `PLUGIN_INSTALL_URL` | The install address is not a public https address: {detail} | Install a public https zip on port 443 only. A private or loopback address is refused unless the operator allowlist names it. A file on this machine can be given as a path, including a Windows drive or a UNC path. |
 | The studio refuses the action and says why | `PLUGIN_INSTALL_HASH` | The zip SHA-256 does not match, or none was given: {detail} | An https install needs --sha256 (or the sha256 of a catalogue entry). Do not install when the hash differs. |
-| The studio refuses the action and says why | `PLUGIN_INSTALL_SIZE` | The zip is over the size cap, or it is not the byte length the catalogue names: {detail} | A plugin is at most 200 MB. When the catalogue gives bytes, it has to be the zip size. |
+| The studio refuses the action and says why | `PLUGIN_INSTALL_SIZE` | The zip is over the size cap, or it is not the byte length the catalogue names: {detail} | A zip has a 512 MB outer cap; the extracted folder is limited to 512 MB for cosmetic packs, 200 MB otherwise. When the catalogue gives bytes, it has to be the zip size. |
 | The studio refuses the action and says why | `PLUGIN_INSTALL_TIMEOUT` | The download timed out: {detail} | Check the network and try again. A zip waits up to 60 seconds, a catalogue up to 20. That one deadline covers the connection, the redirects and the body. |
 | The studio refuses the action and says why | `PLUGIN_INSTALL_FETCH` | The download failed: {detail} | Check that the address opens and answers with the zip (HTTP 200). |
 | The studio refuses the action and says why | `PLUGIN_INSTALL_REDIRECT` | The download was redirected to a non-public address, off port 443, or too many times: {detail} | Only a public https redirect on port 443 is followed, at most 5. Use a direct https address. |
@@ -2503,7 +1955,7 @@ lacks). The table below is generated from it (`node tools/plugin.mjs errors --wr
 | The studio refuses the action and says why | `PLUGIN_INSTALL_CHECK` | The plugin failed its check and was not placed in plugins/: {detail} | Fix the plugin as node tools/plugin.mjs check says, then install again. A failed check deletes only the temporary files. |
 | The studio refuses the action and says why | `PLUGIN_INSTALL_EXISTS` | plugins/ already has this id: {detail} | Without --force nothing is overwritten. --force moves the old folder to plugins/_replaced/ and does not delete it. |
 | The plugin is not listed (skipped); the start log and check say why | `PLUGIN_FORGE_INPUT` | This is not a Forge pack that can be read: {detail} | Choose a workshop folder that contains pack.json, or a zip of that folder. |
-| The plugin is not listed (skipped); the start log and check say why | `PLUGIN_FORGE_ZIP` | This pack's files are not safe to unpack: {detail} | Paths must stay inside the pack, with no symbolic links, at most 5000 files and 200 MB. Import another pack. |
+| The plugin is not listed (skipped); the start log and check say why | `PLUGIN_FORGE_ZIP` | This pack's files are not safe to unpack: {detail} | Paths must stay inside the pack, with no symbolic links, at most 5000 files and 512 MB (the largest class ceiling; the plugin's own class check follows). Import another pack. |
 | The plugin is not listed (skipped); the start log and check say why | `PLUGIN_FORGE_JSON` | JSON in the pack cannot be read: {detail} | JSON must parse, stay within 8 MB and 64 levels. A Forge pack may contain finite numbers within ±1e9 and safe integers; non-finite numbers and values past the safe-integer range are still refused. A number written into a plugin or into game data must still stay within ±1e9. |
 | The plugin is not listed (skipped); the start log and check say why | `PLUGIN_FORGE_ID` | This pack's id cannot become a plugin id: {detail} | Pass --id with a plugin id: 2–32 lower-case letters, digits and -, for example rose-skin. |
 | The plugin is not listed (skipped); the start log and check say why | `PLUGIN_FORGE_EXISTS` | The destination folder already exists, so nothing was written: {detail} | Choose another --out or --id, or move the existing plugin folder aside and import again. |
@@ -2533,32 +1985,59 @@ A Forge workshop pack — a folder or a zip with `pack.json` at its root, one wr
 into one or more of our plugins. The importer (`server/plugins/forgeImport.js`) is original code. It does not copy
 Forge's source, and it does not screen for official art, the same rule as the packer: what a plugin carries is its
 author's responsibility. A pack is untrusted. The importer reads bytes only. It never `import()`s, `eval()`s or
-`require()`s a file from the pack. The one place a pack's code is written is the sandboxed script plugin of its
-`kits/<id>.js` files (below, `server/plugins/forgeKits.js`): parsed with acorn and rewritten there, never run during
-the import, and run afterwards only where the server owner set `SP_PLUGIN_SCRIPTS` and a room selects that plugin.
+`require()`s a file from the pack. Compatible read-only panels become sandboxed ui plugins (below);
+`kits/<id>.js` files become sandboxed script plugins (`server/plugins/forgeKits.js`): parsed with acorn and rewritten,
+never run during the import. Kits run afterwards only where the server owner set `SP_PLUGIN_SCRIPTS` and a room
+selects that plugin; panels run only in the player's iframe.
 
 ```
-node tools/plugin.mjs import-forge <dir or zip> [--out plugins/<id>] [--id <id>] [--dry-run] [--json] [--no-scripts]
+node tools/plugin.mjs import-forge <dir or zip> [--out plugins/<id>] [--id <id>] [--dry-run] [--json] [--no-scripts] [--offline] [--asset-source=direct|mirror] [--refresh-index]
 ```
 
 `--out` names the primary product's folder; its basename becomes that product's id. `--id` overrides the pack id
-before the suffixes below. `--dry-run` writes nothing, including `IMPORT-REPORT.md`. `--json` prints the report
+before the suffixes below. `--dry-run` writes no plugin or `IMPORT-REPORT.md`; needed official tables may be cached
+(use `--offline` to forbid downloads). `--json` prints the report
 object only, keys sorted. Exit 0 when the pack was read, including when nothing could be imported; exit 1 when the
 pack could not be read or a product failed `check`, `pack`, the visual set or the content set; exit 2 on a bad
 command. A product that fails is not left in `plugins/`. `--no-scripts` writes no script plugin: each kit file is
 named in the report with that reason, and its record keeps its own kit in the content plugin.
 
+**On-demand official tables (0.3.1, §34.33).** The maintainer decided on 2026-10-17 that an explicit import needing
+official operators outside the shipped chess/backups roster fetches the missing `character_table.json`,
+`skill_table.json`, `range_table.json`, `uniequip_table.json`, `battle_equip_table.json` and `activity_table.json`.
+Setup/startup/update gap preparation does the same when W5/P10's bounded installed-plugin JSON scan finds such
+references (including disabled plugins). Without the character table, syntax outside the roster is the discovery
+trigger [ASSUMED]; once that table rules out every candidate, no further tables are fetched. Art extraction still
+requires an own official-table entry and its existing consent.
+The source is the same official-data mirror as the voice tables: `RAW.gamedata` (Kengxxiao/ArknightsGameData,
+zh_CN), via `cachedJson`, raw GitHub → jsDelivr and the shared `MirrorPolicy`. `--asset-source=direct|mirror`,
+`SP_ASSET_SOURCE`, `SP_GITHUB_PROXY` and HTTP(S)_PROXY follow the asset downloader. CLI/setup restart once to enable
+Node's env proxy when needed; start a studio server with `NODE_USE_ENV_PROXY=1` when using an HTTP(S) proxy on
+supported Node versions. The guard refuses to bypass a configured proxy.
+
+Console/report lines name the missing tables, approximate MB and reason (about 50 MB uncompressed for all six).
+Cached tables are reused; only `--refresh-index` replaces existing files. `--offline` (alias `--no-network`) always
+forbids downloads, including refresh; setup also honors `--check` / `--no-assets` and offers offline/no-network as
+read-only checks. Invalid existing files stay untouched until refresh [ASSUMED]. Failed/refused downloads retain
+the existing skip/fallback and name the reason. JSON parsing and table-specific shapes are checked before atomic
+rename: record maps with phases/levels/grids, module equipDict/charEquip maps, and activity autoChessData.
+[ASSUMED] Decoded caps are respectively 32/32/2/16/16/32 MiB; estimates are rounded from the local tables inspected
+on 2026-10-17. Concurrent imports share a per-install queue. No table download happens in matches, lobbies or game
+client paths, and no plugin field, API surface or derived-record semantics change.
+
 The studio does the same thing. On `/studio/` the button 「从 Forge 包导入」 takes a zip or a folder. The browser
 sends the bytes. While that read is in progress the preview and confirm buttons stay disabled, and the previous
 report is cleared so a late read cannot confirm the pack that was on screen before. The server is never given a
 path on its disk. `POST /studio/api/forge/preview` and
-`POST /studio/api/forge/import` take `{ zip?: base64, files?: [{ name, data: base64 }], id?, noScripts? }` and use the
+`POST /studio/api/forge/import` take `{ zip?: base64, files?: [{ name, data: base64 }], id?, noScripts?, offline? }` and use the
 same gate as every other change (`X-SP-Studio`, this machine or the local network). A pack that is unsafe to unpack
 is 400 with a `PLUGIN_FORGE_*` code. A pack that was read answers 200 `{ report, plugins: [{ id, class }] }`.
 `report.ok` is false when a product failed the checks, and nothing was written. Preview is a dry run. Confirming
 writes `plugins/<id>/` and rescans. The dialog's box 「不生成脚本插件」 sends `noScripts: true` (the CLI's
 `--no-scripts`); toggling it clears the report, so confirm always writes what the last preview showed. When the
-report has a script plugin the dialog says when it runs (below).
+report has a script plugin the dialog says when it runs (below). The 「离线导入（不下载官方数据表）」 box sends
+`offline: true` for both preview and confirm, and clears the old report when toggled. Online preview may populate
+the official cache; confirming reuses it.
 
 Each product is checked with `checkPluginFolder` and `packPlugin`. A cosmetic product is then resolved with
 `createVisualSets({ registry }).resolve` (there is no `buildVisualSet`). A content product is built with
@@ -2580,11 +2059,17 @@ into a folder that already exists is `PLUGIN_FORGE_EXISTS` and writes nothing.
 and does not call `unzipFiles`. It rejects `..`, an absolute path, a backslash, NUL, a symbolic link (unix mode
 `0120000`), ZIP64 (the EOCD sentinel, a ZIP64 extra field, or a ZIP64 locator in the 20 bytes immediately before a
 real EOCD — not a `PK\\x06\\x06` that happens to sit inside an entry), encryption, a data descriptor, more than
-`PLUGIN_LIMITS.files` entries (5000), and a declared or inflated size over `PLUGIN_LIMITS.pluginBytes` (200 MB). A
-raw zip larger than that unpacked cap plus 64 KiB is refused before it is read [ASSUMED: the 64 KiB is header
-room, so a zip only slightly over 200 MB is refused too]. JSON follows `checkJsonLimits` (8 MB, depth 64, numbers
-within ±1e9) and refuses `__proto__`, `constructor` and `prototype` before mapping. Asset trees use a
-null-prototype object. A directory read uses `lstat`, does not follow a link, refuses a regular file with
+`PLUGIN_LIMITS.files` entries (5000), and a declared or inflated size over the largest class ceiling
+(`PLUGIN_MAX_BYTES`: 200 MB for most classes, 512 MB for a cosmetic pack — the class itself is checked when the folder
+loads). A raw zip larger than that unpacked cap plus 64 KiB is refused before it is read [ASSUMED: the 64 KiB is header
+room, so a zip only slightly over the cap is refused too]. JSON follows `checkJsonLimits` (8 MB, depth 64) and refuses
+`__proto__`, `constructor` and `prototype` before mapping. A Forge file may contain a finite number within ±1e9 and a
+safe integer past that window (a Unix timestamp on a field that is not imported). A non-finite number, and any magnitude
+past `Number.MAX_SAFE_INTEGER`, still rejects that file (`PLUGIN_FORGE_JSON`). A number written into a plugin, or copied
+into game data, stays within ±1e9 [ASSUMED]: skill `duration`, `spCost`, `initSp`, `maxChargeTime`, `increment`,
+blackboard numbers, stats, `price`, `sellPrice`, and patch leaves. A larger one is named in the report and not written.
+An array patch leaf (a `rangeGrid`, for example) that contains a finite number outside ±1e9 is omitted and named the same way, so the other fields of that record still import.
+Written plugin JSON stays within ±1e9. Asset trees use a null-prototype object. A directory read uses `lstat`, does not follow a link, refuses a regular file with
 `nlink > 1`, and reads through `O_NOFOLLOW` only after `fstat` matches. Empty directories count toward the 5000
 cap. A dry run stages under the temporary directory and removes the stage. A real write stages in a dot directory
 beside `plugins/` — the registry skips dot directories — and commits by rename. `EXDEV` fails the import; it is
@@ -2592,42 +2077,183 @@ not copied [ASSUMED]. A failed commit removes only the destinations that attempt
 content set see plugins already installed, through a temporary symlink view. The source pack is not part of that
 view. Two i18n entries that canonicalise to the same language are `PLUGIN_FORGE_INPUT` and write nothing.
 
+### Compact metadata (0.3.1)
+
+Optional operator fields preserve old plugins unchanged:
+
+- `chess.hidden: true`: retain both records for grants; exclude shop/shared pools, handbook/loadout lists,
+  bond visible members and DIY owned selection. [ASSUMED] For `as: "both"`, hiding also excludes the DIY pick.
+- `chess.ids: { normal, elite }`: distinct `chess_x_<plugin_namespace>_…` IDs; do not also set legacy `chess.id`.
+  Pair references and `upgradeChessId` use these IDs directly; suffixes are not required.
+- `art.ref`: default installed character art and voice bank. The id matches `^[A-Za-z0-9_-]+$`, the same
+  pattern as each `art.assets` id; a path or a URL is `PLUGIN_RECORD_ART`. `art.assets` overrides exact manifest IDs:
+  `avatar`, `portrait`, `spine`, `voice`, `skillIcon`, `subProfIcon`, each optionally suffixed `Golden`.
+  These are IDs, never file paths or URLs. Golden model/voice/icon defaults to the normal value
+  (character entries have no E2 model or voice field). Avatar/portrait keep the `art.ref` id unless a Golden
+  value is supplied; when that id is a character-manifest key, a golden piece uses `avatarE2` / `portraitE2`
+  if the entry has one, and otherwise that entry's own URL.
+  [ASSUMED] A borrowed voice bank shares that bank's browser voice preference.
+- A hidden operator is appended to the bond's `members` only. The bond popup uses `visibleMembers` whenever
+  that array is present, including when it is empty, so a bond with no visible members draws no catalogue row.
+- `origin: { charId?, chessId? }`: installed official provenance; at least one is required, both must agree.
+  [ASSUMED] This is metadata only: it never inherits stats, art or a kit. Art and kit selection are explicit.
+
+Strict checks use `PLUGIN_RECORD_HIDDEN`, `PLUGIN_RECORD_PAIR`, `PLUGIN_RECORD_ART`, `PLUGIN_RECORD_ORIGIN`.
+Forge `isHidden` / non-DIY `visible: false` maps to `chess.hidden` [ASSUMED: either hides both forms]; `baseId` is the
+pair's normal ID, while an explicit official `base` or official `charId` supplies provenance. A matched skill kit
+never supplies provenance. `assets` preserves each form's IDs; pack asset keys are rewritten with their records.
+Modules (`statsBase`, `traitBase`, `talentsBase`), new garrisons and bonds remain outside this mapping.
+
 ### Mapping
+
+Forge `behaviour: [{ switch, option? }]` maps to the four [rule switches](#rule-switches). Omitting `option`
+declares that switch's default (WORKSHOP §1.22–§1.23); the declaration is retained in the content hash and conflicts
+with a different option. Explicit null, non-string or unknown options remain invalid. A valid declaration
+implies gameplay (`combat: true` is not required on input) and produces a content plugin even with no other data.
+Unknown switches/options are skipped individually with a bilingual reason. [ASSUMED] repeated different options
+keep the first and report the later one. This conversion does not import notices.
 
 | Forge piece | Becomes | When it does not |
 |---|---|---|
-| `art.chars` avatar, avatarE2, portrait, portraitE2 | cosmetic `assets.chars` | any other portrait field has no overlay key |
-| Spine on a character (`front` / `back`), an enemy or a token | the overlay's spine. The atlas sits next to the skel, same name; pages in that folder. `anims` is not copied: the lock reads clips from the skeleton [ASSUMED] | skel or atlas missing, or a page outside that folder |
+| `art.chars` avatar, avatarE2, portrait, portraitE2, illust | cosmetic `assets.chars` | any other portrait field has no overlay key |
+| Spine on a character (`front` / `back`), an enemy or a token | the overlay's spine. The atlas sits next to the skel, same name; pages in that folder. `anims` is not copied. The import calls `skeletonClipData` — the same read as `node tools/plugin.mjs pack` — on the staged folder, for a dry run and for a write, and pack writes that clip data into `plugin.lock.json` before the strict check [ASSUMED] | skel or atlas missing, or a page outside that folder. Bone, slot, skin and vertex counts above the cap (4096; float arrays 8192; triangle indexes 16384) are rejected before the parser allocates [ASSUMED: above the measured maxima of 581 bones, 360 slots, 3 skins and 186 vertices, and below 2^24]. A skeleton that cannot be parsed is named and only that model is dropped |
 | `art` of bonds, items, bands, skills, modules, ui, prof.sub; enemy `icon`; token `avatar` | the matching overlay container | `art.tokens.*.owner` is not an asset |
 | `bondIcons`, `itemIcons` | `assets.bonds`, `assets.items` | a bond already named by `art.bonds` is not imported again from `bondIcons` |
 | `voices` | `audio.voiceJp` [ASSUMED: Forge documents that table as the Japanese dub] | a slot outside `^[A-Za-z][A-Za-z0-9]{0,31}$`, or a file that is not `.mp3` / `.ogg` |
 | `voiceLangs.cn` (and `zh`), `voiceLangs.ja` / `jp`, `voiceLangs.en`, `voiceLangs.ko` / `kr` | `audio.voice`, `audio.voiceJp`, `audio.voiceEn`, `audio.voiceKr` | any other dub: no table of that language (an own-language dub is per operator, `audio.voiceNative`, which Forge has no table for) |
-| `skins[]` | collapsed onto that operator's one overlay [ASSUMED: no wardrobe] | a skin without `charId` |
+| `skins[]` | that operator's own `skins` variants (§9): `assets.chars[charId].skins[<the outfit's id>]`, its pictures, its model and `name`. Once the cosmetic plugin is composed onto the manifest, `public/js/ui/skins.js availableSkins(charId)` lists that id (docs/SKINS.md); the player wears it with `room.skins` `{ [charId]: skinId }` from 干员调配 or the 自选 detail. An outfit added to an operator this installation already has is a change to that entry, so the cosmetic plugin's `permissions` carries `assets.override` (§9) | a skin without `charId`; an outfit whose `id` is not a skin key (or no `id`) — its art is folded onto that operator's one overlay and is not a picker row |
 | `art.audio.bgm` of lobby, prep, combat, unite, boss; an unreferenced file whose basename is one of those | `audio.bgm` `{ loop }` | any other music key. `art.audio` is not a documented Forge table [ASSUMED] |
 | `art.audio.bossBgm` | `audio.bossBgm` `{ loop, intro? }` | an id that is not an asset key, or a file that is not audio |
 | `art.audio.sfx.ui`, `sfx.battle` | one audio file each | |
 | `art.audio.sfx.units` | attack, hit, skill, die, born, and skills / attacks / hits by an index 0–99 | any other field or bucket (`ui`, `battle`, `units` only) |
-| `overrides` of `"file:id"` plus a partial of an existing record | a content `data` patch. An array whose type already matches is one `set` of the whole array. `talents` and `talentsBase` are not replaced: Forge merges those by index, and this version says so | not listed in `overrides` (a silent replace is refused); a field whose type or path does not match |
+| `overrides` of `"file:id"` plus a partial of an existing record | a content `data` patch. An array whose type already matches is one `set` of the whole array. `talents` and `talentsBase` are not replaced: Forge merges those by index, and this version says so. A chess override's `skill` and the `isDefault` entry of `skills[]` are one object (Forge DATA.md): when `skills[]` is present both are written from that entry; when it is absent the `skill` object is merged onto the official skill (plain objects merge, arrays replace) and written as `skill` and as the default `skills[]` entry [ASSUMED] | not listed in `overrides` (a silent replace is refused); a field whose type or path does not match. A chess record whose `skill` differs from that default entry is not imported; the rest of the pack is. A bond, garrison or bond-member id this installation does not have is named and left out of that list; a list that is then empty is not written. When the written chess `bonds` list drops an official bond, that chess id is removed from the bond's `members` and `visibleMembers`, and the report names those official ids; a bond that joins is added the same way. A garrison `bbStr.bond` or `bbStr.bond_id` token that is not a bond id is named and that field is not written (the list is not shortened); a string of known bond ids is still written. `backup`, `chessType` and `status` stay on the official record [ASSUMED] |
 | `units.json`, a new operator | a compact record `char_x_<namespace>_…`, namespace taken from the content plugin id (`--out`'s basename when that product is primary). Skills come from the selected form when that form has a list, otherwise from the record. One default skill (`default` or `isDefault`). Each form's named talents and trait are copied (text, numbers, range) | no name, profession, branch, forms or skill; rarity outside 1–6; no bond that exists here. A 6★ declared in `operators` is `as: "diy"` (no shop piece; `chess.tier` is still the rarity, because the compact schema requires it). Below 6★ in that list, and a unit that is not declared there, is chess, unless a `chess.json` pair of the pack is its shop piece (then that pair is the record) [ASSUMED] |
-| `chess.json`, a new `_a` / `_b` pair (`baseId`, `goldenId`, `isGolden`) | one compact record `char_x_<namespace>_<stem>` (the stem is the base id without `chess_` and `_a`): a shop piece, or `as: "diy"` when `isDiy` and 6★. The normal form is the `_a` record, the elite the `_b` record (stats, range, skills, trait, talents each). `tier`, `bonds`, `price` (normal/golden), `sellPrice` (when both are equal), `garrisonIds` (normal/golden, the `{ normal, golden }` form of §10), `identifier`, `shopSortId`, the identity and attack fields are kept. The unit is the `charId` when it is an official operator (`art.ref`) or a unit of the pack; with `charId` null, an official operator its `assets` name gives the art only [ASSUMED]. A pair with no bond at all gets the fallback bond 协防干员 (`economy.fallbackBondId`), as the studio's operator template does [ASSUMED] | no name, profession, branch, tier, skill or stats; a `chessId` that is not its key; two normal or two elite records; a `charId` that is neither official nor a unit of the pack (and no official art in `assets`); bonds that all do not exist here. `status`, the merge count, the chess type (always `PRESET`, its own stand-in), hidden / invisible flags come from our economy, and a different value is named. Modules, potentials (`potDown`, `potMin` / `potBelow`), `statsBase` / `traitBase` / `talentsBase`, immunities, summons, `rangeId` and module talents are named and dropped. One record alone is copied into both forms [ASSUMED] |
+| `chess.json`, a new `_a` / `_b` pair (`baseId`, `goldenId`, `isGolden`) | one compact record `char_x_<namespace>_<stem>` (the stem is the base id without `chess_` and `_a`): a shop piece, or `as: "diy"` when `isDiy` and 6★. The normal form is the `_a` record, the elite the `_b` record (stats, range, skills, trait, talents each). `tier`, `bonds`, `price` (normal/golden), `sellPrice` (when both are equal), `garrisonIds` (normal/golden, the `{ normal, golden }` form of §10), `identifier`, `shopSortId`, the identity and attack fields are kept. The unit is the `charId` when it is an official operator (`art.ref`) or a unit of the pack; with `charId` null, explicit `assets` IDs supply art without inferring a character. A pair with no bond at all gets the fallback bond 协防干员 (`economy.fallbackBondId`), as the studio's operator template does [ASSUMED] | no name, profession, branch, tier, skill or stats; a `chessId` that is not its key; two normal or two elite records; an unknown non-null `charId`, or no character and no explicit asset IDs; bonds that all do not exist here. `status`, the merge count, the chess type (always `PRESET`, its own stand-in), come from our economy, and a different value is named. Modules, potentials (`potDown`, `potMin` / `potBelow`), `statsBase` / `traitBase` / `talentsBase`, immunities, `rangeId` and module talents are named and dropped. Tags and existing/imported token references are retained; missing tokens are named. One record alone is copied into both forms [ASSUMED] |
 | skill ids that are official skills of one operator (`data/chess.json` and `data/backups.json` skills → that operator) | the record keeps those ids and names the operator's kit, `kit: { ref }` (§10): its chess kit (`chess_char_…_a`) for a shop piece when the default skill is the same (the same tier first when there are two), its 自选 kit (`char_…`, `ops/op-*.js`, which authors every skill) for a 自选 record or when no chess kit fits. Talents and trait are copied, so the kit reads the record's numbers | a skill id that is not official (a partial match), skills of several operators or of one shared by several (`skcom_*`), a different default for a chess kit, or an operator with no kit of its own: the kit stays `"generic"`, and the report says which skills and why. 补位 stand-in kits are not bound [ASSUMED] |
 | `enemies.json` with an official `base` or `special` that exists here | `enemy_x_<namespace>_…`, stats over that base | no such base: a kit is not invented |
-| `kits/<id>.js` (top level, not `_…`), or the `.js` file a record's `kit` field names | one script plugin `kits-<id>` for the pack (`server/plugins/forgeKits.js`): its sim entry `sim/index.js` carries each kit and every `./` file of the pack it imports, one function scope per Forge file in dependency order, and calls `sp.kits.register(<the record's new charId>, <that kit>)` once per kit. Imports are rewritten by the table below. It requires the content plugin at its exact version. A kit for an official id the pack declares in `overrides` (`chess:<id>`, `units:<charId>`) registers that id, and the manifest lists it in `overrides` (§13). The record itself keeps `"generic"` (or its official kit) in the content plugin: without the script plugin it plays with that kit | the id is not an imported chess or operator record of this pack, nor a declared official override (a summon `tokens` kit has no record here); a second kit for the same record; `--no-scripts`. A file whose imports do not map, that fails `shared/plugins/scriptCheck.js` (the registry's own scan), that uses syntax the sandbox refuses (dynamic `import()`, `import.meta`, `async`, generators, `**`, `export *`, a `let` / `var` / destructuring export), that does not parse, whose default export is not a function, or whose graph is cyclic, over 64 files or over 1 MiB, is named with its reason and not written; so is every kit that imports it. `PLUGIN_FORGE_SCRIPT` |
+| `kits/<id>.js` (top level, not `_…`), or the `.js` file a record's `kit` field names | one script plugin `kits-<id>` for the pack (`server/plugins/forgeKits.js`): its sim entry `sim/index.js` carries each kit and every `./` file of the pack it imports, one function scope per Forge file in dependency order, and calls `sp.kits.register(<the record's new charId>, <that kit>)` once per kit. Imports are rewritten by the table below. It requires the content plugin at its exact version. A kit for an official id the pack declares in `overrides` (`chess:<id>`, `units:<charId>`) registers that id, and the manifest lists it in `overrides` (§13). The record itself keeps `"generic"` (or its official kit) in the content plugin: without the script plugin it plays with that kit | the id is not an imported chess or operator record of this pack, nor a declared official override (token kits need a separate registration adapter even when their data imports); a second kit for the same record; `--no-scripts`. A file whose imports do not map, that fails `shared/plugins/scriptCheck.js` (the registry's own scan), that uses syntax the sandbox refuses (dynamic `import()`, `import.meta`, `async`, generators, `**`, `export *`, a `let` / `var` / destructuring export), that does not parse, whose default export is not a function, or whose graph is cyclic, over 64 files or over 1 MiB, is named with its reason and not written; so is every kit that imports it. `PLUGIN_FORGE_SCRIPT` |
 | a skill script referenced any other way | kit `"generic"`. The file is named in the report and is not run | a JSON object that passes `validateSkillSpec` is kept as `kit.spec`. The importer does not translate scripts to DSL; authors can add DSL afterwards (§12) |
-| new items, stages, waves, tokens, bosses, modes | — | no safe compact mapping. `variants` and `behaviour` are engine switches, not modes |
+| new items, bonds, tokens, garrisons / traits, bands and effects | namespaced records described under “Forge gameplay records and local official operators” below | only supported behavior is mapped; all custom behavior gaps are named |
+| new stages, waves, bosses, modes | — | no safe compact mapping. `variants` and `behaviour` are engine switches, not modes |
 | a flat `{ msgid: string }` translation | a `lang` plugin, `files.ui` | `zh` is the source language and is not a language pack |
 | `{ version: 1, lang, files }` | content i18n, only when every leaf replaces an existing string | a missing leaf would refuse the whole content set, so the file is skipped |
-| notices, credits, description | `description` (at most 500 characters) and `credits` on every product that is not a language pack | unreadable |
+| notices (`announcement` or `announcements`, and `credits`) | `notices` on the primary product: the announcement's title is version, date and summary (80 characters) and its body is each section's name and items as lines (2000 characters); credits are their own notice, a url written as text [ASSUMED]. Text is kept out of hashed description/credits metadata. A pack whose only usable part is notices is one personal-scope cosmetic | unreadable or missing files. Both keys at once: only `announcement` is used. Extra notice keys are named and skipped |
 | `license`, `authors` | copied when they are short strings | |
 | `dependencies`, `conflicts` | `requires`, `conflicts` when the id is a plugin id. An omitted range is `*` [ASSUMED] | an id that cannot become a plugin id. A product does not require itself |
+| `client.panels` `screen.game.hud` and `screen.game.aside` | a ui plugin, slot `hud.right`. A supported panel is the shim page; anything else is one HTML stub | a second stub for the same slot. A second supported panel is another ui plugin on that slot (the match already tabs them) |
+| `client.theme.vars` | a cosmetic plugin's `theme.vars`. Allowlisted names are kept; every other name is listed as dropped (`PLUGIN_THEME_NAME`, `PLUGIN_THEME_VALUE`, `PLUGIN_THEME_URL`, past 64 `PLUGIN_THEME_LIMIT`). A pack whose only usable part is its theme is one personal-scope cosmetic. No stylesheet is injected | a name or a value the grammar refuses |
 | `client.panels` `screen.game.hud` and `screen.game.aside` | a ui plugin, slot `hud.right`, one HTML stub | a second panel for the same slot |
 | `client.panels` `screen.result.footer` | a ui plugin, slot `result.tab` | |
-| any other panel mount | — | not `hud.right`, `result.tab`, `stats.tab` or `room.panel`. Those last two have no Forge mount yet |
+| a supported panel on `root.guide` that listens for `room.state` | a ui plugin, slot `room.panel` [ASSUMED: our room screen, not Forge's guide] | |
+| any other supported panel whose suggested slot is one of the four | a ui plugin on that suggested slot [ASSUMED: not Forge's position] | |
+| any other panel mount | manual adaptation report | `PLUGIN_FORGE_MOUNT`; panel name, Forge mount and suggested rewrite slot |
 | a panel with `wraps`, or `readonly` / `readOnly: false` | — | it rewrites a component, so it is not read-only |
-| the panel's script | not copied. The stub answers welcome with ready, then slot and resize, and says the author must rewrite it to postMessage API v1 | `PLUGIN_FORGE_SCRIPT` |
-| `server`, `routes`, `assets` (`.spresources`), `forms`, `fx`, `variants`, `behaviour`, `playtest`, `support`, `combat: true`, `layer` | — | engine replacement, protocol, server logic, or a switch this manifest has no field for. One reason each, in Chinese and in English |
+| the panel's script, when the static scan finds a mount and only the read-only surfaces the shim feeds, and the pack-relative `.js` / `.css` / `.json` closure stays within 256 KB a file, 1 MB and 64 files [ASSUMED] | copied. The entry page inlines the shim and a classic bundle. The original files sit in `ui/mod/` and are not loaded a second time. Import does not run the script | a bare or remote specifier, `fetch`, `net.send`, `pack.messages`, a host stylesheet with no panel surface, `documentElement` on the parent, an appearance provider. The stub stays, and the skip lists those surfaces (`PLUGIN_FORGE_PANEL_SCRIPT`) |
+| `fx.silentPhases` | `assets.fx.silentPhases`: union with built-in phase names; only the generic phase flash is suppressed | invalid names or more than 128 entries; other `fx` fields are reported as skipped |
+| `server`, `routes`, `assets` (`.spresources`), `forms`, other `fx`, `variants`, `behaviour`, `playtest`, `support`, `combat: true`, `layer` | — | engine replacement, protocol, server logic, or a switch this manifest has no field for. One reason each, in Chinese and in English |
+| the panel's script | not copied. The stub answers welcome with ready, then slot and resize, and says the author must rewrite it to postMessage API v1 | `PLUGIN_FORGE_PANEL_SCRIPT` |
+| `server`, `routes`, `assets` (`.spresources`), `forms`, `fx`, `variants`, `playtest`, `support`, standalone `combat: true`, `layer` | — | engine replacement, protocol, server logic, or a switch this manifest has no field for. One reason each, in Chinese and in English |
 | any other `.js` `.mjs` `.cjs` `.ts` `.jsx` `.tsx` | not imported and not executed | `PLUGIN_FORGE_SCRIPT` |
 | a file `pack.json` does not reference | — | named in the report, except a loose music file whose basename is a bgm track |
+
+### Built-in language overlays
+
+[ASSUMED] A manifest-2 `lang` plugin may overlay one shipped `public/i18n/<lang>.json`. Exactly one overlay is
+accepted per built-in language, in sorted plugin-folder order. A later plugin overlay is `PLUGIN_DUPLICATE` and the
+message names the plugin that won, not the built-in file. A collision with a pack folder, or with the built-in file
+when no plugin overlay has won, still names that provider. Duplicate plugin ids keep their old refusal. `zh` remains the source language.
+The index exposes one language choice with the built-in name/fallback metadata and an additional `files.uiOverlay`
+URL. Supplied strings override; missing/empty strings and broken source placeholders retain built-in translations.
+Optional game text uses `files.dataOverlay` and the existing per-record source checks over the built-in data.
+Missing downloads fall back to built-in text [ASSUMED]; reload after installation changes, as before.
+
+Scope is unchanged: `lang` plugins are installed globally, scope `personal`, and each browser chooses a language.
+There is no room selection, gameplay hash input or simulation change. Forge flat UI i18n becomes this same lang plugin.
+A language-only pack for an installed language no longer fails as a duplicate.
+
+### Forge panel mounts and report codes
+
+The three existing mappings remain. Suggested rewrites are [ASSUMED] author guidance, not automatic positional equivalence.
+
+| Forge mount | Automatic slot | Suggested manual rewrite |
+| --- | --- | --- |
+| `root.overlays` | — | `hud.right` (in-game information; global overlay behavior must be redesigned) |
+| `root.guide` | — | `stats.tab` (reference information) |
+| `screen.game.aside` | `hud.right` | — |
+| `screen.game.hud` | `hud.right` | — |
+| `screen.game.overlay` | — | `hud.right` (move overlay information into the HUD) |
+| `screen.game.shopCard` | — | `hud.right` (separate shop summary; no card wrapping) |
+| `screen.game.bondStrip` | — | `hud.right` (separate bond summary) |
+| `screen.result.footer` | `result.tab` | — |
+| `screen.loadout.detail` | — | `room.panel` (separate pre-match information) |
+
+`PLUGIN_FORGE_MOUNT` identifies unsupported mount adaptation. `PLUGIN_FORGE_PANEL_SCRIPT` independently identifies
+an uncopied panel script, including when its mount failed, and may add `surfaces` (the names the scan found). A copied
+panel does not raise that code. `PLUGIN_FORGE_SCRIPT` continues to describe other unmapped scripts/kits. No panel
+script runs at import: a copied panel runs later, in the player's sandboxed iframe, where `connect-src` is `'none'`.
+The shim (`shared/plugins/forgePanel.js`) answers `net.send`, `session.send`, `setPreload` and resource messages with
+`{ available: false, reason: 'not available in this game' }`. It does not invent a content digest, a chess table or
+an econ payload. `data.get` returns a clone only for `chess` or `assets` when the panel declared that table and the
+page passed the data in; otherwise null. UI-only unsupported packs report **需要人工适配 / needs manual
+adaptation**, with `needsManualAdaptation` and `manualPanels` in JSON, instead of “nothing importable.”
+
+The receiver accepts a feed only when `event.source === parent`, before queuing or applying it. Opaque origins
+still permit cross-window messaging ([HTML CrossOriginProperties](https://html.spec.whatwg.org/multipage/nav-history-apis.html#crossoriginproperties-(-o-)));
+the static scan is a compatibility check, not the sender boundary. Repeated `ready` messages do nothing. Each entry
+document gets one initial `net`; subsequent changed snapshots are deduplicated and throttled per frame at 1 Hz
+[ASSUMED]. Initializing another frame cannot consume a pending update. Moving a frame starts a new document.
+
+`welcome.cs` and `state.room.cs` carry only the real room `content.cs` (64 lower-case hex digits). The shim exposes
+its first eight digits as `net.welcome().mods.digest` [ASSUMED], replacing or clearing it when the room changes;
+unknown identity stays absent. Static `/shared/i18n.js` imports bind `t` (aliases and namespaces supported), as do
+literal dynamic imports. Other static exports are rejected by name. Every unique JS, CSS and JSON file counts
+toward the 64-file closure limit before traversal, including assets reached only through `styles`; `styles` must
+name `.css` files. Duplicate paths count once [ASSUMED].
+
+Missing activation inputs stay manual [ASSUMED conservative scan]: host URL access (`host-location`), desktop /
+Android bridges (`desktop`), and controllers assigned on a frame global for the host to call (`host-controller`).
+Thus demo `guest-strip`, `lan-panel` and `match-overlay` are not compatible copies. Expanded-room fields
+`playerCapacity` / `seatCap` are `room.capacity`: this server has four fixed seats and no capacity setting.
+`capacity-panel` therefore stays manual; its 8/12/16/20 choices and room-setting claim are not presented to players.
+
+The iframe's own document gets `screen` and `result` on the document element and on `body` only for a `result.tab`
+panel while a result payload is present, and `room-screen` only for a `room.panel` panel while seats are known.
+It never gets `st`. [ASSUMED] Those classes are how a Forge panel decides it is on screen; they are not the game page.
+
+When whole gameplay records are not written, the report is still `ok` if nothing else failed, and it says so up front.
+The markdown heading `## 没有导入的玩法` comes before `## 导入了什么`. JSON adds `partial: true` and `dropped` counts for
+operators (chess and units), bonds, bands, items, tokens, traits (a garrison table and a traits table), kits and panels,
+and only when a count is above zero. A skeleton counts once as a dropped panel; a copied panel never counts.
+Dropped server modules, host stylesheets, messages and other client declarations also set `partial: true` and
+`needsManualAdaptation: true`, with bilingual `manualReasons` (`path`, `zh`, `en`, optional `surfaces`) in JSON.
+Markdown starts with **部分导入 / Partial import** and **需要人工适配 / Needs manual adaptation**, with those reasons
+before products. `ok` still means validation succeeded, including when a skeleton validates [ASSUMED].
+A field-level note, a unit already covered by its chess pair and `--no-scripts` do not set `partial` on their own.
+[ASSUMED] Effects are not a counted kind. A cosmetic
+whose asked art, bond or item targets were all dropped says, in Chinese and in English, that it has nothing to apply to
+(`cosmeticBare`); the files are still copied. Targets use the art namespace: dropped chess records map to `charId`,
+items to their trap/icon keys, bonds to their own ids. A retained record sharing the art key keeps that target usable
+[ASSUMED]. Dropped kits and panel titles are never art targets, so a panel named like a kept portrait leaves the
+imported art list in place. A product that keeps a target, or that only carries audio, does not say that.
+
+### Import and display polish (0.3.1, §34.27)
+
+An unsupported `pack.json.assets` engine resource container (`.spresources`) sets both `partial` and
+`needsManualAdaptation`, with a bilingual `manualReasons` entry, including when no plugin is produced. `ok` still
+means the import/check completed successfully; it does not mean the engine container was converted.
+
+[ASSUMED] When one import produces content and a cosmetic companion, the content manifest records the cosmetic id
+and exact version in the existing `optional` map. This is a hint and load-order metadata; it never enables a personal
+cosmetic. The room's plugin panel names installed, version-matching personal cosmetic companions of active gameplay
+plugins while they are off in both the room and this player's personal selection (including automatic dependencies):
+「外观在『…』（设置 → 外观插件）」. Missing or incompatible companion versions produce no hint.
+
+Folder/CLI checks and the registry count embedded record `kit.dsl` as a `dsl` permission use, alongside operator
+trait DSL and its official-record `data.patch` use (§34.26). Studio refuses a stale autofix that would remove one
+of these consumed permissions. Manifest-only diagnostics are reconciled after the declared record JSON is read.
+Rule-conflict toasts name both plugins and the rule switch in the player's language, falling back to plugin ids.
+[ASSUMED] Imported `result.tab` pages scroll horizontally inside their frame when content is wider than the slot;
+narrow panels retain their existing width. No slot or message API is added.
 
 **Kit imports.** Production script plugins allow only self-contained entries (§13), so a Forge kit's imports are
 rewritten to `sp:sdk@1` where the SDK exports the same helpers, and every other one refuses the file:
@@ -2638,7 +2264,10 @@ rewritten to `sp:sdk@1` where the SDK exports the same helpers, and every other 
 | `@sim/constants.js` `{ name }` | `constants.<name>` |
 | `@sim/detmath.js` `{ name }` | `math.<name>` |
 | `./x.js`, a file of the pack (`.js`, no `..`, `%`, query or `\`, resolved from the importing file) | that file's scope in the same entry; its exports are read once, after it ran (initialization-time bindings, as in the sandbox) |
-| `@kit/tier1.js` names outside that list, `@kit/tier2.js` … `tier6.js`, `@kit/summoner.js`, `@sim/dir.js`, `@sim/targeting.js`, `@ops/…`, a bare name, an absolute path, `..`, a default or namespace import of an SDK module | refused: the file is named, and nothing of it is written |
+| `@sim/dir.js`: `dirVec`, `offsetTile` | `dir` SDK geometry helpers; frozen arrays |
+| `@sim/targeting.js`: `absoluteRangeKeys` | `targeting` SDK geometry helper; bounded grid, frozen keys |
+| `@sim/targeting.js`: `sortEnemyTargets` | refused by name: mutates candidates and reads live battle/units; no pure SDK equivalent |
+| `@kit/tier1.js` names outside that list, `@kit/tier2.js` … `tier6.js`, `@kit/summoner.js`, `@ops/…`, a bare name, an absolute path, `..`, a default or namespace import of an SDK module | refused: the file is named, and nothing of it is written |
 
 **When the script plugin runs.** Only where the server owner set `SP_PLUGIN_SCRIPTS=sandbox` (SES compartments, §13
 P3b), or a trusted mode with the lock pinned in `plugins/config.json` and every player's consent, and a room selects
@@ -2662,11 +2291,11 @@ new char id and skill id. An imported file always gains one `files/` prefix, so 
 collapse. A case-only name clash, or a file path that is a directory prefix of another, is `PLUGIN_FORGE_ZIP`.
 
 **Errors** (`PLUGIN_FORGE_*`, this section's anchor): `PLUGIN_FORGE_INPUT` (not a pack), `PLUGIN_FORGE_ZIP` (unsafe
-to unpack), `PLUGIN_FORGE_JSON` (parse, size, depth, numbers), `PLUGIN_FORGE_ID` (the id cannot become a plugin id),
+to unpack), `PLUGIN_FORGE_JSON` (parse, size, depth, a non-finite number or a number past the safe-integer range), `PLUGIN_FORGE_ID` (the id cannot become a plugin id),
 `PLUGIN_FORGE_EXISTS` (the destination exists), `PLUGIN_FORGE_SCRIPT` (a script was not imported and was not run).
 
 The version written into a product is the pack's version when it is a restricted semver with no build metadata,
-otherwise `0.1.0` [ASSUMED]. `app` is `>=0.3.0 <0.4.0` and `api` is 1. A language-pack manifest omits `$schema`,
+otherwise `0.1.0` [ASSUMED]. `app` is `>=0.4.0 <0.5.0` and `api` is 1. A language-pack manifest omits `$schema`,
 `app`, `api` and `permissions`.
 
 ## 17. The catalogue and installing by address (目录与安装)
@@ -2679,8 +2308,9 @@ example whose addresses do not exist.
 
 `node tools/plugin.mjs install <zip path | https URL> [--sha256 <hex>] [--force]` installs into `plugins/<id>/`. A file
 on this machine installs as it is, including a Windows drive (`C:/…`, `C:\…`) and a UNC path (`\\server\…`, `//server/…`).
-An https address is accepted only with `--sha256`. The hash is checked on the bytes. The download stops at 200 MB
-(`PLUGIN_LIMITS.pluginBytes`). One deadline covers the connection, every redirect and the body. A redirect is followed
+An https address is accepted only with `--sha256`. The hash is checked on the bytes. The download stops at 512 MB
+(`PLUGIN_MAX_BYTES`, the largest class ceiling; the folder's class check decides afterwards). One deadline covers the
+connection, every redirect and the body. A redirect is followed
 only when the next address is still public https on port 443. A literal private, loopback, link-local or `.local`
 address is refused before the request, and so is an address that resolves to one of those. The zip is extracted with
 the same protections as any plugin zip (no path traversal, no symbolic link, no file-count or size bomb, no two paths
@@ -2719,9 +2349,11 @@ it is not executed. `uniqueItemProperties` is a keyword of this repository's val
 Implemented features are documented in §9–§17: cosmetics, data, room content sets, DSL, scripts, interface widgets,
 the studio and trial bench, Forge import, and catalogue/address installs. The following remain unavailable:
 
-- Cosmetic theme colours and plugin fonts are not applied; `theme` produces a warning (§9).
+- Plugin fonts are not applied. Theme variables of the allowlist are applied on this player's page only (§9.1).
 - `allowIncompatible` does not bypass the content builder (§11).
 - Additional mode-code hooks and plugin-specific `golden` / `simcheck` / balance-tool switches have not been added.
+  A plugin declares interaction windows at the host's existing moments instead (`offers`, §10b); a window with a phase
+  of its own, and a window whose pick carries plugin code, are not part of that part.
 - Personal plugins refresh on the next catalogue fetch; file changes are not pushed to every player's preferences.
   UI recommendations are local to the host's browser until a shared room recommendation protocol exists (§14).
 - The trial bench simulates a single battle, not prep economy or a complete PvP mode (§15). Forge import carries
@@ -2792,3 +2424,85 @@ which needs a real `node_modules` inside the checkout, as every sandbox test), `
 a server path refused, preview writes nothing, import writes, a kit pack's script plugin and `noScripts`, a file list,
 a path-escape name) and the browser test `test/ui/forge-import.e2e.test.js` (`SP_E2E=1`, including a read that starts
 while a report is on screen and the no-scripts box; a sandbox that cannot open a browser leaves that file unrun).
+
+### Forge gameplay records and local official operators (0.3.1)
+
+New bonds, supported items, garrisons, effects and complete tokens become namespaced records. `traits.json` accepts
+only a garrison-compatible record with an existing `effectKey`; the bounded custom acquire/sell-item actions map
+to `SERVER_GAIN_EQUIP` while retaining `eventType`; custom trait keys are named and skipped. Bands still
+need an official `base`/`effectRef`. Missing item effect records are built from the item's supported buffs [ASSUMED].
+Exact data references, comma-separated blackboard ids, and exact string literals in carried kits follow the new ids.
+The importer parses scripts only. The pure `@kit/tier2.js` `onDefaultSkill` predicate is inlined using our existing
+loadout contract [ASSUMED]; other unsupported imports remain explicit refusals. Custom bond blackboards are metadata,
+not executable behavior; the report names every unmapped key. For new operators' skill blackboards, a key absent
+from the official tables that is not an interval, period or cost step retains any finite value within
+`±PLUGIN_LIMITS.number` (±1e9) [ASSUMED], including `heal: 65` / `80`. Official keys, including keys whose official
+maximum is zero, retain the 10×/64 cap; steps retain their caps and positive minimum. Trait/talent blackboards keep
+the existing bounds. Out-of-bound values are omitted and named [ASSUMED], never silently clamped. Server composition
+applies the same skill exception; shared validators and vanilla code bytes remain unchanged.
+
+An official `char_<number>_<name>` absent from this installation's chess/backups requires local
+`.cache/gamedata/excel/{character,skill,range}_table.json`. The importer calls `server/plugins/officialUnitBuilder.js`
+`deriveOfficialUnit`, which shares the builder's interpolation, full-potential, skill, talent, range and combat
+classification functions. It uses the economy's normal/elite training statuses; a pack's explicit overrides win
+[ASSUMED]. No selected module is invented. Optional local activity/module tables provide trigger/subprofession data;
+without them the builder's ordinary fallback applies [ASSUMED]. The report identifies the local source by a SHA-256
+fingerprint of every table read. The explicit import first fetches missing tables as described in §16 above;
+the synchronous planner/loader stays local-only. Still-missing tables or missing character/stats/range/skills skip that
+operator with a reason. Derived fields are saved in the plugin; the receiving installation needs no official cache.
+Scripts can then bind to the newly imported chess. Without an accepted kit, generic behavior is reported [ASSUMED].
+
+Compatibility limits are per field, not an assurance that imported descriptions are implemented: Kazdel/Rhodes and
+Ave Mujica's custom bond engines and unknown garrison keys require author-supplied DSL or sandbox adapters; Makoto's
+pack does not contain its original battle kit; Duel's read-only rule documents do not define a playable mode here.
+
+
+### Declarative operator traits (0.3.1, #671)
+
+Content operator records may supply `trait: { desc, dsl, translations? }`, where `desc` is Chinese text and `dsl`
+is an inline DSL object or a plugin-local JSON path. `text: { zh }` is also accepted. Translations map en/ja/ko/zh-TW
+to text and use the existing checked garrison overlays. Normal/elite forms may override `trait` independently.
+Alternatively `kit.dsl.trait: { desc, on, meta? }` separates mode traits from skill talents and global prep effects.
+See [PLUGIN-DSL §10](PLUGIN-DSL.md#10-干员特质031671) for both #671 examples and exact bounds.
+
+An existing official operator accepts a minimal `{ op: 1, charId, trait, forms?, overrides? }` record with
+`data.add`, `data.patch`, `dsl` permissions. [ASSUMED] Traits add by default; record-level
+`overrides: ["trait:<charId>"]` disables its official mode garrisons only. Other plugins' traits, combat talents,
+class/module traits and skills remain. Removing the plugin rebuilds the original data and behavior.
+`elementBurst` uses the existing sim event; element names are only neural (SANITY/1), erosion (WATER/2), burn
+(FIRE/3), apoptosis (DARK/4), necrosis (legacy sim vocabulary). [ASSUMED] Boolean targetOnField/selfOnField
+conditions require alive, visible, unremoved targets and deployed allies; these three conditions belong to elementBurst.
+Omitting them imposes no field filter. `layers.bond` is required; `selfActive` means the holder's active own bonds, including equipment-granted bonds.
+[ASSUMED] `maxPerBattle` and capped/selfActive amounts are literal integers 1–1000000; caps are per holder/action/bond,
+survive redeploy and reset each battle. They are battle-only and do not extend other actions.
+[ASSUMED] Fields with participating layer-granting traits and enabled gains run authoritatively on the server, even
+with `SP_VERIFY=off`; client results cannot settle them. Normal/unite fields use sliced headless simulation; bosses
+use the existing shared-pool server path. Cost: one full server simulation per affected field, alongside browser
+playback. Fields without these traits or with gains disabled retain their existing path. Caps never prove earned layers
+and no longer increase client allowances. Trait layers carry garrison provenance and their holder as source, enabling
+the official front-tile amplification. [ASSUMED] Node caps bound base grants; amplification is extra, with the final
+999-layer clamp unchanged. Burst cooldowns use the existing `1e-9` trigger tolerance. Stand-in battle traits follow the fighting body's charId [ASSUMED].
+
+Operator prep events: gain, deploy, roundStart, buy, sell, merge, levelUp, battleResult. [ASSUMED] Gain runs once
+for the acquired copy (including the normal copy completing a merge), never for the merge output or promotion;
+DIY selection alone acquires nothing. Deploy is a successful hand/temp-to-board placement. Other hooks run once
+per owned character, elite preferred; bench/temp count, and levelUp is shop level. [ASSUMED] Self-sale runs once
+from the removed piece in its sold form, including its final copy; remaining copies of that character do not run again. Only that player's state is affected. `gainItem.count` defaults to 1, integer 1–64, with ordinary pool/storage/merge rules.
+Acquisition still runs custom gain once [ASSUMED]. Separately, SERVER_GAIN discovery and forced dispatch expose
+custom gain to Suzuran, her band and copied traits, with the existing forced-dispatch investor multiplier and no new
+acquisition accounting. There is no author registry key or JavaScript.
+Strict checking recognizes trait-consumed dsl/data.patch permissions; a stale unused-permission autofix cannot remove
+them. Checking validates item and bond references (including conditions) against composed data. [ASSUMED] Required
+dependencies resolve from sibling folders; missing dependencies fail checking. This data-only check never runs scripts
+or their preflight.
+Compiled trait metadata is host-owned: ordinary data patches cannot rewrite or erase it, even with a dependency.
+
+Admission and runtime are app-owned extensions outside the vanilla hashed sim/shared tree; only participating data
+sets pin the runtime bytes. Match hosts, bot rehearsals, studio trials and the browser loader install the same adapter.
+Workers still cannot fetch: the page verifies the runtime bytes before sending content. The standalone battle console
+does not replay preparation; use room test grants for gain effects. Forge's existing custom JavaScript handlers are
+not inferred from effect names or prose: this API does not automatically translate those handlers.
+
+Studio aggregate writes and staged candidates read `plugin.json` before applying the class ceiling. Replacing the manifest
+uses the incoming class; invalid JSON or an unknown class receives the 200 MB default, and a missing manifest retains the
+512 MB outer ceiling until its class is known. These are [ASSUMED] authoring limits, not game rules (§37.17).

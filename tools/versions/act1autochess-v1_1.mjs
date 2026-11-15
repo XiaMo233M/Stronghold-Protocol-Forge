@@ -1,6 +1,6 @@
 // tools/versions/act1autochess-v1_1.mjs — build profile of 第一期上半: 盟约·上半 (act1autochess) in its first
 // sub-version V1_1 (2025-11-14 16:00 → 2025-11-25 16:00), with the 11-18 hotfix (docs/DATA.md "Official versions (M0)";
-// the maintainer's decisions of 2026-10-22, DESIGN §37.22). Pinned to Kengxxiao/ArknightsGameData:
+// the maintainer's decisions of 2026-10-22, DESIGN §35.22). Pinned to Kengxxiao/ArknightsGameData:
 //   default   8303c922 (the launch, data version 25-11-12-14-06-12): the range table, the enemy tables (enemy_database
 //             changed again at 23c99d5d, so there is no separate enemy pin: V1_2's ee2cabff would leak V1_2 enemies) and
 //             the 43 level files (the hotfix changed none; V1_2's 23c99d5d changed the three solo hidden-core levels
@@ -34,6 +34,15 @@ export default Object.freeze({
   pools: Object.freeze({ pool_chess_glady: Object.freeze(['char_263_skadi', 'char_143_ghost', 'char_218_cuttle']) }),
   config: Object.freeze({
     hiddenCore: Object.freeze({ single: 300, multi: 1000 }),
+    // Round53 authorizes full-bench swaps in every version; first-period client fidelity is unmeasured [ASSUMED], §36.2.
+    // Bonds greyed per match: 2 of the 6 core bonds — a guide written in the season (2025-12-09) says 「核心盟约ban2留4」
+    // (community report via the owner, 2026-11-14, §37.205; 第二期's 3 of 8 had been assumed here); add-ons 4 of 9 as in
+    // 第二期 [ASSUMED]; 标准 0 + 1 (research 01 A2: 上半's intro greys only 坚守).
+    bans: Object.freeze({
+      FUNNY: { core: 0, addon: 1 },
+      NORMAL: { core: 2, addon: 4 }, HARD: { core: 2, addon: 4 }, ABYSS: { core: 2, addon: 4 },
+      TRAINING: { core: 0, addon: 0 },
+    }),
     rules: Object.freeze({ deployOrder: 'rowBottomUp', soloTimed: true, benchEquip: false, bossMirrorShare: false }),
   }),
   expect: Object.freeze({ bonds: 18, bands: 20, visibleNonDiy: 95, triggerDeviations: 'none' }),

@@ -12,24 +12,21 @@
 // that still carries them is ignored).
 
 import { getConfig, getMode } from '../data.js';
-import { MAX_SEATS } from '../../shared/constants.js';
-// 变体 / 口径层（DESIGN §28.39）：`opts.variants` → 这一局的 `config` 覆盖。值与轴表都在 `shared/variants.js`，
-// 这里只消费它的判决（`null` = 什么都不用改，缺省路径逐字节不变）。
-import { variantDataPatch, variantValue } from '../../shared/variants.js';
-import { morphPairingOf, morphSlotPolicy } from '../../shared/morph.js';
-import { formView, isEliteForm } from '../../shared/formProjection.js';
 import { isShopItem } from '../sim/simdata.js';
 import { mergeData } from '../../shared/plugins/dataUtils.js';
 import { standInRecord } from '../../shared/standIn.js';
 import { MAX_OFFER_SLOTS } from './player/common.js';
-import {
-  normalizeSupportConfig, supportSlotsFor, supportCapacity, supportPicker, isSupportChess, supportTierOf, supportPriceOf,
-  checkSupport as checkSupportSelection,
-} from '../../shared/support.js';
+import { diyBringLimitsOf } from '../../shared/diyBring.js';
+import { equipmentCapacity } from '../../shared/itemRules.js';
 
 const own = (map, id) => (map && typeof map === 'object' && typeof id === 'string' && Object.hasOwn(map, id) && map[id] && typeof map[id] === 'object' ? map[id] : null);
 const numOr = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 const posIntOr = (v, d) => (Number.isInteger(v) && v > 0 ? v : d);
+/** 规程's avatar thresholds (activity_table autoChessData.constData), for data without them. */
+export const AVATAR_WIN_STREAK = Object.freeze([3, 5]);
+export const AVATAR_BOSS_DAMAGE = Object.freeze([0.2, 0.5, 0.8]);
+/** An ascending list of positive numbers, else the fallback. @param {any} v @param {readonly number[]} d */
+const thresholdsOr = (v, d) => (Array.isArray(v) && v.length && v.every((x, i) => typeof x === 'number' && x > 0 && (i === 0 || x > v[i - 1])) ? v : d);
 
 export const DEFAULTS = Object.freeze({
   income: [0, 4, 5, 6, 7, 8, 9, 10, 11, 12, 12, 12, 12, 12, 12, 12],
@@ -76,31 +73,19 @@ export const COMBAT_TIME_SCALE = 2;
  *          at most `aliveFull` (4); a count left out means a full team;
  *          `perPlayer` false: the fixed pool of 0.1.x (「保持固定血量」, restorable with `solo` 0.25): `coop` whatever the
  *          count, × min(alive, aliveFull) / aliveFull with `aliveScaling`.
- *
- * `aliveFull` is a CEILING on the per-player multiplier, and it is calibrated for the official 4-seat room. A bigger
- * room (百卫补丁 v0.3, docs/PS100-MIGRATION.md §2.4) must not be silently clamped to it — `Math.min(32, 4)` made a
- * 32-seat pool exactly as large as a 4-seat one — so the effective ceiling is `max(aliveFull, seatCap)`.
- *
- * This reads the room's CAPACITY (`seatCap`), deliberately: it is a calibration floor, not the variant gate (that one
- * is `Match.variant` = 参与人数 > 4, 业主裁令 2026-10-12). With the 缺省上限 of 20 a room that fields fewer people is
- * therefore scaled as if it could hold 20 — a no-op for today's data (`data/config.json`'s only `bossHpScale` has
- * `perPlayer: true`, so the share is `coop × alive` and `full` never enters), but a mode switching to `perPlayer: false`
- * would see the 20-seat ceiling instead of the 4-seat one.
  * @param {object|null|undefined} modeScale config.modes[modeId].bossHpScale
  * @param {object|null|undefined} cfgScale config.bossHpScale
  * @param {boolean} isSolo
  * @param {number} [aliveCount] alive players at the Final Assault / Hidden Core start (co-op)
- * @param {number} [seatCap] seat slots of the room (default MAX_SEATS): the floor of the `aliveFull` ceiling
  * @returns {number}
  */
-export function bossPoolShareOf(modeScale, cfgScale, isSolo, aliveCount, seatCap = MAX_SEATS) {
+export function bossPoolShareOf(modeScale, cfgScale, isSolo, aliveCount) {
   const ms = modeScale && typeof modeScale === 'object' ? modeScale : {};
   const cs = cfgScale && typeof cfgScale === 'object' ? cfgScale : {};
   const pick = (k, d) => (Number.isFinite(ms[k]) && ms[k] > 0 ? ms[k] : Number.isFinite(cs[k]) && cs[k] > 0 ? cs[k] : d);
   const flag = (k, d) => (typeof ms[k] === 'boolean' ? ms[k] : typeof cs[k] === 'boolean' ? cs[k] : d);
   if (isSolo) return pick('solo', 1);
-  const cap = Number.isFinite(seatCap) && seatCap >= 1 ? Math.floor(seatCap) : MAX_SEATS;
-  const full = Math.max(1, Math.floor(pick('aliveFull', 4)), cap);
+  const full = Math.max(1, Math.floor(pick('aliveFull', 4)));
   const n = Number(aliveCount);
   const alive = Number.isFinite(n) && n >= 1 ? Math.min(full, Math.floor(n)) : full;
   if (flag('perPlayer', true)) return pick('coop', 1) * alive;
@@ -114,15 +99,8 @@ export class GameData {
   /**
    * @param {Readonly<Record<string, any>>} data server/data.js getData() (may be partial)
    * @param {string} modeId e.g. 'mode_multi_hard'
-   * @param {{ seatCap?: number, variants?: Array<{ axis: string, default: string }>|null, forms?: object|null }} [opts] seatCap = seat slots of the room (default MAX_SEATS): the floor of the
-   *        bossHpScale `aliveFull` ceiling, so a bigger room is not clamped to the 4-seat calibration
-   *        (bossPoolShareOf; 百卫补丁 v0.3, docs/PS100-MIGRATION.md §2.4).
-   *        variants = the 口径 this match runs under (DESIGN §28.39, `pack.json.variants`); absent ⇒ the engine
-   *        defaults, i.e. exactly today's behaviour.
-   *        forms = 形态投影视图（`shared/formProjection.js` 的 `formView`，DESIGN §28.41）：`Match` 把它那一份传进来，
-   *        与这一局的 `DataSource` **共用同一份**（两边分叉就是 bug）。不给 ⇒ 由 `variants` 自己建一份（等价）。
    */
-  constructor(data, modeId, opts = {}) {
+  constructor(data, modeId) {
     this.raw = data && typeof data === 'object' ? data : {};
     this.config = getConfig(this.raw) || {};
     this.modeId = modeId;
@@ -130,58 +108,9 @@ export class GameData {
     // Mode-level globals inherit field by field; the vanilla mode never changes its config object.
     const overrides = Object.fromEntries(Object.keys(this.config).filter(k => k !== 'modes' && Object.hasOwn(this.mode, k)).map(k => [k, this.mode[k]]));
     if (Object.keys(overrides).length) this.config = mergeData(this.config, overrides);
-    /**
-     * 变体 / 口径层（DESIGN §28.39）给出的 `config` 覆盖 —— **一个轴一个值，值来自引擎常量，不是包**。
-     * `opts.variants` 是本局声明的口径（`Array<{ axis, default }>`，`shared/variants.js` 归一化过的那一份）；
-     * 没声明（`undefined` / 空数组）时它逐字是 `null`，于是下面每一个读点都走今天那条缺省路径。
-     *
-     * 为什么在**这里**读、而不是把 `config.economy.deployCap` 写进 `data`：`data/*.json` 是 generated 且
-     * 逐字节被 `test/data.test.js` 钉住的（那张离线重建表要能逐字节复现 data/），口径改的是**这一局**的规则，
-     * 不是那份基线。这条与工坊 overlay 的既有分工一致：overlay 加的是**内容**，口径加的是**规则的一个选项**。
-     * @type {{ economy?: { deployCap?: number } } | null}
-     */
-    this.variantPatch = variantDataPatch(opts?.variants ?? null);
-    /**
-     * 行为开关 `morphPairing` 的档位（DESIGN §28.43.1）：`GameData` 是**这一局**的读取视图（prep 侧的
-     * `pieceBonds` 从它读），所以档位也挂在这里、由 `Match` 建它时传进来 —— 与 `variants` 那条口径同一条分工
-     * （改的是这一局的读取，不是 `data/*.json` 那份基线）。没声明 ⇒ `'official'`，也就是引擎今天的行为。
-     * @type {'official'|'plus'}
-     */
-    this.morphPairing = morphPairingOf(opts?.behaviour ?? null);
-    /**
-     * 装备位语义的策略（第 7 段，与上面那一行是**同一格开关的另外半条**）：`plus` 档下变形同构体不占装备位、
-     * 每名干员最多一件、第三件顶掉真正占格的那两件；缺省档 ⇒ `OFFICIAL_SLOT_POLICY`（**共享的冻结单例**，每一个
-     * 方法都逐字是引擎今天那条算术）。
-     *
-     * 挂在 `GameData` 上的理由与 `morphPairing` 逐字相同：`GameData` 是**这一局**的读取视图，而槽位判定的调用方
-     * （`server/match/player/items.js` / `acquire.js` / `bot.js` / `invariants.js`）手上有的就是它。**它不参与
-     * `equipPerChess` 的取值** —— 那两格装备位是官方的；策略只回答「这一行占了几格、能不能再放一件、顶替挑哪一件」。
-     * @type {import('../../shared/morph.js').MorphSlotPolicy}
-     */
-    this.morphSlots = morphSlotPolicy(opts?.behaviour ?? null);
-    /** 口径给出的部署位；没有口径 ⇒ `null`（`deployCap` 落到数据 / DEFAULTS 那两级）。 */
-    const cap = this.variantPatch?.economy?.deployCap;
-    this._deployCap = Number.isInteger(cap) && cap > 0 ? cap : null;
-    /**
-     * Seat slots of the room this game data belongs to (MAX_SEATS when the caller has no seat list). Only the
-     * boss-pool ceiling reads it — see bossPoolShareOf.
-     */
-    this.seatCap = Number.isFinite(opts?.seatCap) && opts.seatCap >= 1 ? Math.floor(opts.seatCap) : MAX_SEATS;
     this.economy = this.config.economy && typeof this.config.economy === 'object' ? this.config.economy : {};
     const chess = this.raw.chess && typeof this.raw.chess === 'object' ? this.raw.chess : {};
     this._chess = chess;
-    /**
-     * 形态投影（口径轴 `form`，DESIGN §28.41）：`form: "elite"` 时普通（`_a`）棋子按精锐（`_b`）的战斗职能出战。
-     * 这一份是**读取期**的视图（`shared/formProjection.js`）：缺省（没声明这个轴）时它的 `chess(id)` 返回**原对象
-     * 本身**，所以缺省路径逐字节不变、对象身份也不变（`sim/simdata.js` 的 DataSource 缓存与 golden 摘要都靠它）。
-     * 与 `deploy` 那条口径的分工一样：口径改的是**这一局的读取**，`data/*.json` 那份基线一个字节都不动。
-     */
-    this.eliteForm = isEliteForm(variantValue(opts?.variants ?? null, 'form'));
-    // 调用方（`Match`）可以把它那一份直接传进来：**同一份视图**才能在面板与战斗之间保证不分叉。
-    this.formView = opts && opts.forms && typeof opts.forms.chess === 'function' && typeof opts.forms.token === 'function'
-      ? opts.forms
-      : formView(chess, this.eliteForm, { tokens: this.raw.tokens });
-    this._tokensView = this.formView.token;
     this._items = this.raw.items && typeof this.raw.items === 'object' ? this.raw.items : {};
     // Fixed operator gifts are unlimited outputs, but every produced normal/advanced item still occupies 1/2 copies
     // (card-pool experiment BV1eLXXBqEgF, maintainer-confirmed 2026-10-11). Random subset gifts are not exempt.
@@ -214,12 +143,6 @@ export class GameData {
     this.tuning = this.raw.tuning && typeof this.raw.tuning === 'object' ? this.raw.tuning : {};
     /** standIn memo: chess id → composed 补位 record | null */
     this._standIns = new Map();
-    /**
-     * 助战 (support operators, shared/support.js): the server-controlled pool declared by data/support.json. Disabled —
-     * and then refusing every non-empty selection — when the file is missing, malformed or has no usable tier, so a
-     * server without support.json behaves exactly as it did before this feature.
-     */
-    this.support = normalizeSupportConfig(this.raw.support);
   }
 
   /**
@@ -245,7 +168,9 @@ export class GameData {
   bossPoolHp(bossId, aliveCount) {
     const boss = this.boss(bossId);
     const diff = this.difficulty;
-    let base = boss && boss.bloodPoint && Number.isFinite(boss.bloodPoint[diff]) ? boss.bloodPoint[diff] : null;
+    // 规程 lists the pool per mode (bloodByMode: 规程等级 1–20 share a difficulty, not a pool); 盟约 per difficulty
+    let base = Number.isFinite(boss?.bloodByMode?.[this.modeId]) ? boss.bloodByMode[this.modeId] : null;
+    if (base == null && boss && boss.bloodPoint && Number.isFinite(boss.bloodPoint[diff])) base = boss.bloodPoint[diff];
     if (base == null && boss && boss.bloodPoint) base = Object.values(boss.bloodPoint).find((v) => Number.isFinite(v)) ?? null;
     if (base == null) base = 500000;
     return Math.max(1, Math.round(base * this.bossPoolShare(aliveCount)));
@@ -256,7 +181,7 @@ export class GameData {
    * @param {number} [aliveCount]
    */
   bossPoolShare(aliveCount) {
-    return bossPoolShareOf(this.mode.bossHpScale, this.config.bossHpScale, this.isSolo, aliveCount, this.seatCap);
+    return bossPoolShareOf(this.mode.bossHpScale, this.config.bossHpScale, this.isSolo, aliveCount);
   }
 
   /** config.titles with the tuning overrides (stat / rule per title id) merged in. */
@@ -275,12 +200,7 @@ export class GameData {
 
   // ---- ids ------------------------------------------------------------------------------------------
 
-  /**
-   * A chess record. 口径 `form: "elite"`（DESIGN §28.41）下**普通（`_a`）棋子**返回按它精锐兄弟烘出来的那一份
-   * （`shared/formProjection.js`：职能取 `_b`，棋子 id / 阶级 / 价格 / 盟约 / 特质 / 合成数仍取 `_a`）；没声明这个
-   * 轴时逐字返回 `data/chess.json` 里**那个对象本身**（`===`，对象身份不变）。
-   */
-  chess(id) { return this.formView.chess(id) ?? own(this._chess, id); }
+  chess(id) { return own(this._chess, id); }
   item(id) { return own(this._items, id); }
   bond(id) { return own(this._bonds, id); }
   band(id) { return own(this.raw.bands, id); }
@@ -293,33 +213,6 @@ export class GameData {
   token(id) { return own(this.raw.tokens, id); }
   get choices() { return this.raw.choices && typeof this.raw.choices === 'object' ? this.raw.choices : {}; }
   get factions() { return this.raw.factions && typeof this.raw.factions === 'object' ? this.raw.factions : {}; }
-
-  // ---- 助战 (support operators; the server-controlled pool of data/support.json) -----------------------
-
-  /** Whether this server offers 助战 at all (a usable slot + pool pair exists). */
-  supportEnabled() { return this.support.enabled; }
-  /** How many tier-`tier` supports one player may bring (0 = the tier is off). */
-  supportSlots(tier) { return supportSlotsFor(this.support, tier); }
-  /** Total supports one player may bring. */
-  supportCapacity() { return supportCapacity(this.support); }
-  /** `{ tier, slots, ids }[]` — what a client may show in the picker (the only source of that list; never the client's). */
-  supportPicker() { return supportPicker(this.support); }
-  /** Whether the pool allows this operator as a support (fails closed; see shared/support.js isSupportChess). */
-  isSupportChess(id) { return isSupportChess(this.support, id, (x) => this.chess(x)); }
-  /** The tier this operator counts against, or null when the pool does not allow it. */
-  supportTierOf(id) { return supportTierOf(this.support, id, (x) => this.chess(x)); }
-  /**
-   * 助战干员在**带上它的那名玩家**商店里的标价（`data/support.json` 的 `prices`），没配就是 null。
-   * 没配时用它的阶级价（`chessPrice`）—— 助战是普通棋子，价格规则不另开一套。
-   * @param {string} id base chess id
-   */
-  supportPrice(id) { return supportPriceOf(this.support, id); }
-  /**
-   * Semantic check of a `room.support` selection against the pool (shared/support.js checkSupport — the same call the
-   * client makes before sending, so the picker and the match agree).
-   * @param {unknown} entries
-   */
-  checkSupport(entries) { return checkSupportSelection(entries, this.support, (x) => this.chess(x)); }
 
   /**
    * The 补位 record of chess `id` (normal or elite; DATA.md §18): shared/standIn.js standInRecord over data/backups.json
@@ -403,19 +296,15 @@ export class GameData {
   get refreshPrice() { return Math.max(0, numOr(this.economy.refreshPrice, DEFAULTS.refreshPrice)); }
   get benchSize() { return posIntOr(this.economy.benchSize, DEFAULTS.benchSize); }
   get tempSize() { return posIntOr(this.economy.tempSize, DEFAULTS.tempSize); }
-  /**
-   * 部署位（一名玩家同时站在场上的干员数）。三条来源，**优先级就是这个顺序**：
-   *   1. 本局的**口径**（`pack.json.variants` 的 `deploy: "max"`，DESIGN §28.39）—— 见构造函数里的 `_deployCap`；
-   *   2. 数据里的 `config.economy.deployCap`（官方 `maxBattleChessCnt` = 8）；
-   *   3. `DEFAULTS.deployCap`（一份被裁过的 data 也还能开局）。
-   * 没有口径、也没有数据时逐字回到今天那条：`posIntOr(economy.deployCap, DEFAULTS.deployCap)`。
-   */
-  get deployCap() { return this._deployCap ?? posIntOr(this.economy.deployCap, DEFAULTS.deployCap); }
+  get deployCap() { return posIntOr(this.economy.deployCap, DEFAULTS.deployCap); }
   get equipPerChess() { return posIntOr(this.economy.equipPerChess, DEFAULTS.equipPerChess); }
+  equipSlots(id) { return equipmentCapacity(this.chess(id), this.equipPerChess); }
   get maxArtsPerRound() { return posIntOr(this.economy.maxArtsPerRound, DEFAULTS.maxArtsPerRound); }
   get goldenCopies() { return posIntOr(this.economy.goldenCopies, DEFAULTS.goldenCopies); }
   get itemMergeCount() { return posIntOr(this.economy.itemMergeCount, DEFAULTS.itemMergeCount); }
   get leftoverKeptBands() {
+    if (this.raw.config?.version) return Object.values(this.raw.bands || {})
+      .filter(b => b.buffs?.some(buff => buff.key === 'coin_carry_over')).map(b => b.bandId);
     const ids = Array.isArray(this.economy.leftoverFundsKeptByBands) ? this.economy.leftoverFundsKeptByBands : DEFAULTS.leftoverFundsKeptByBands;
     const extra = Object.values(this.raw.bands || {}).filter(b => b.effectRef && ids.includes(b.effectRef)).map(b => b.bandId);
     return extra.length ? [...ids, ...extra] : ids;
@@ -558,7 +447,8 @@ export class GameData {
   }
 
   /**
-   * Official enemy multipliers of round r (config enemyScale: the PRTS table + 终极 speed ×1.15 from R3). `supplyHpMul`
+   * Official enemy multipliers of round r (config enemyScale: the PRTS stack table × the season's effect values, 终极 急行军
+   * from R3 — ×1.15 on 下半, ×1.30 on 规程; tools/build-data.mjs enemyStepsOf). `supplyHpMul`
    * (only when ≠ 1: co-op 终极 R5–R15) = the share of hpMul from 补给线 / 补给线II (config `supplyHp`), effects whose
    * `enemy_exclude` leaves out the 14 器物 hit-count keys — they take hpMul / supplyHpMul (archetypes.js `times`).
    */
@@ -585,6 +475,17 @@ export class GameData {
   }
 
   get lpCapPerRound() { return posIntOr(this.config.lpCapPerRound, DEFAULTS.lpCapPerRound); }
+  /**
+   * The avatar's 完美连胜 levels (§37.148): the streak lengths — rounds in a row without an LP loss — where level 1 and 2
+   * start. 规程's constData playerAvatarWinStreakThresholds ([3, 5]); a version without it takes 规程's values (the owner
+   * asked for the badge in every version).
+   */
+  get winStreakThresholds() { return thresholdsOr(this.config.constants?.playerAvatarWinStreakThresholds, AVATAR_WIN_STREAK); }
+  /**
+   * The avatar's 领袖伤害 levels (§37.148): the player's share of the round's leader pool where levels 1–3 start. 规程's
+   * constData playerAvatarBossDamageThresholds ([0.2, 0.5, 0.8], the BOSS_HIT tickers' steps); other versions likewise.
+   */
+  get bossDamageThresholds() { return thresholdsOr(this.config.constants?.playerAvatarBossDamageThresholds, AVATAR_BOSS_DAMAGE); }
   /**
    * Boss overtime (`bossTurnHpReduceTime` 150 / 1 LP per second): a server turn timer of turnInfoDataDict like
    * prepPhaseTime, so REAL seconds on the same clock as the boss level's 120 s maxPlayTime (combat limits are real
@@ -627,6 +528,32 @@ export class GameData {
       difficulties: Array.isArray(h.difficulties) ? h.difficulties : DEFAULTS.hiddenCore.difficulties,
     };
   }
+  get regulationBondDraw() { return this.config.version?.rules?.bondDraw === 'regulation'; }
+
+  /** Per-tier 选择自编 caps, or null when this data has no CUSTOM_CHECK step and limit map. */
+  get diyBringLimits() { return diyBringLimitsOf(this.config); }
+
+  /** Official seconds of 选择自编 (enterSteps CUSTOM_CHECK `time`; 30 on 规程). */
+  customCheckSeconds() {
+    const steps = this.config?.timers?.enterSteps;
+    const step = Array.isArray(steps) ? steps.find((s) => s && s.step === 'CUSTOM_CHECK') : null;
+    const t = step && Number(step.time);
+    return Number.isFinite(t) && t > 0 ? t : 30;
+  }
+
+  /**
+   * Regulation: core bonds decide when present; otherwise all add-ons must be grey to exclude the operator.
+   * Official multiplayer recording BV1hmWL6fEmQ (00:13 / 01:20): 初雪 is banned with 谢拉格 grey and 协防 lit.
+   * Multiple cores retain the operator while any core is lit. Covenant keeps its original joint every-bond rule.
+   */
+  bondsExclude(rec, off) {
+    const bonds = Array.isArray(rec?.bonds) ? rec.bonds : [];
+    if (!this.regulationBondDraw) return bonds.length > 0 && bonds.every(b => off.has(b));
+    const core = bonds.filter(b => this.bond(b)?.isCore);
+    const relevant = core.length ? core : bonds;
+    return relevant.length > 0 && relevant.every(b => off.has(b));
+  }
+
   bans(difficulty) {
     const b = this.config.bans && this.config.bans[difficulty];
     const d = DEFAULTS.bans[difficulty] || { core: 0, addon: 0 };
@@ -651,6 +578,8 @@ export class GameData {
   bandAllowed(bandId) {
     const b = this.band(bandId);
     if (!b) return false;
+    // 规程 turns a band off per mode (bands.json inactiveModeIds: 30 strategies are not offered in 极速模拟)
+    if (Array.isArray(b.inactiveModeIds) && b.inactiveModeIds.includes(this.modeId)) return false;
     const list = Array.isArray(b.modeTypeList) ? b.modeTypeList : null;
     if (!list) return true;
     return list.includes(this.isSolo ? 'SINGLE' : 'MULTI');

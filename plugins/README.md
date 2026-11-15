@@ -5,7 +5,6 @@ The server lists what it finds at `/plugins/index.json` and notices a new or cha
 `node tools/plugin.mjs list` shows what was found, what was skipped and why; `node tools/plugin.mjs check` checks the
 folders (manifest, file types, sizes, paths, JSON).
 
-**This version (0.3.1; the 0.3.1 additions — theme variables, notices, rule switches, gameplay records, interaction windows, operator traits, panels, effects and skins — are in docs/PLUGINS.md and history §36):**
 **This version (0.3.3; the 0.3.1 additions — theme variables, notices, rule switches, gameplay records, interaction windows, operator traits, panels, effects and skins — are in docs/PLUGINS.md and history §34):**
 
 - the original game is always the default; a plugin is marked unofficial wherever it is shown;
@@ -33,7 +32,7 @@ the original in the game's own preview, try gameplay changes with the battle com
 On the command line: `node tools/plugin.mjs new art my-skin --target 德克萨斯` makes a folder from a template, `check` explains
 every finding in plain words, `pack <dir> --zip` writes the `plugin.lock.json` a plugin with Spine models needs and the zip.
 `_template/cosmetic/` is an example made of references to the installation's own art, no files.
-`_template/ui/` is an interface plugin: a damage tally in a sandboxed frame (DESIGN §34.8).
+`_template/ui/` is an interface plugin: a damage tally in a sandboxed frame (DESIGN §32.8).
 
 For data, copy `_template/content/` to `data-demo/` (PLUGINS.md §10: a bond patch and a kitRef operator); a server owner
 may limit what rooms take in `config.json` here (PLUGINS.md §11, DEPLOY.md). The same file's `allowDownloadHosts`
@@ -45,8 +44,8 @@ is the operator's https download allowlist (PLUGINS.md §17); it is not a room-p
   "id": "marathon",
   "name": { "zh": "马拉松模式", "en": "Marathon" },
   "version": "0.1.0",
-  "app": ">=0.3.0 <0.4.0",
-  "api": 2,
+  "app": ">=0.4.0 <0.5.0",
+  "api": 1,
   "class": "content",
   "scope": ["room"],
   "authors": ["your name"],

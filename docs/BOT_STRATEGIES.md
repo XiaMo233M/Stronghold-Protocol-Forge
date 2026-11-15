@@ -5,7 +5,7 @@ The strategy interface selects trusted server-side AI code per match. It keeps t
 legacy's weights, RNG consumption, economy, placement or rehearsal. The framework is PR #673 by
 @HankDUMPLINGZhong. The optional `external` adapter is documented in [External AI API](EXTERNAL_AI.md)
 and the [Chinese server-owner guide](EXTERNAL_AI_ZH.md). Until LLM-played seats clear 终极, that adapter is
-development-only and is not in a release package (maintainer 2026-10-23, §37.66). A packaged server keeps
+development-only and is not in a release package (maintainer 2026-10-23, §35.66). A packaged server keeps
 `legacy` and ignores `SP_BOT_STRATEGY=external`.
 The opt-in `ioleta`, `adaptive` and `ioleta-adaptive` strategies (PR #742) are described below.
 
@@ -105,11 +105,36 @@ One match's selection does not change another match. The same strategy also hand
 Strategy selection does not grant an AI seat priority in the band draft: the existing seat order and the room's
 existing AI-last option still apply. `legacy` is always registered. On a development checkout, operator-enabled
 `external` is registered too; it inherits all legacy hooks for fallback and requires transport configuration before
-startup. A release package does not register it (§37.66).
-The three opt-in local strategies are also registered. External fallback remains legacy; advisor plans apply only while external owns the match.
+startup. A release package does not register it (§35.66).
+The three opt-in local strategies are also registered. External fallback remains legacy; advisor plans apply only to seats that external plays.
+
+### Per-seat selection
+
+`SP_BOT_STRATEGY_SEATS` overrides the strategy of individual seats (#816 P1); `SP_BOT_STRATEGY` stays the
+match-wide default and accepts a single ID. The value is a comma-separated list of `seat:id` entries: room seats
+0–3, the numbering of `SP_EXTERNAL_AI_SEATS`, and registered IDs, e.g. `SP_BOT_STRATEGY_SEATS=1:ioleta,3:adaptive`.
+Spaces around entries are ignored. A seat that is not listed plays `SP_BOT_STRATEGY` (or `legacy`); unset or
+empty means no overrides. A seat outside 0–3, a seat listed twice, an entry without `:` or without an ID, more than
+four entries and an unknown ID all prevent startup: `startServer()` validates the variable next to
+`SP_BOT_STRATEGY`, and the error names `SP_BOT_STRATEGY_SEATS`, the rejected entry and the available IDs.
+Programmatic matches pass `opts.botStrategySeats` (`{ [seat]: id | definition }` or the same text), which takes
+precedence over the environment like `opts.botStrategy`.
+
+An override belongs to the seat number, not to who sits there: an AI teammate and a human under AI takeover on that
+seat both play it, as both play `SP_BOT_STRATEGY` on a seat without one. Every hook of a seat (band and card
+picks, private bounty choices, both prep stages, plugin offers and the bounty estimate shown to an advisor) comes
+from the same strategy. Without overrides, every seat uses the one match strategy object, as before.
+
+When the default or any seat selects `external`, the match creates one external host with the one `SP_EXTERNAL_AI_*`
+configuration, shared by every external seat. Only seats whose strategy is `external` ask it, and
+`SP_EXTERNAL_AI_SEATS`, when set, still narrows them: an external seat outside that list plays the legacy hooks
+`external` inherits. Startup validates the external configuration when any seat selects it. A release package maps
+`external` back to `legacy` for each seat and logs the one ignore line (§35.66).
 
 Test input journals record the resolved strategy ID as `init.options.botStrategy`, rather than serializing hooks.
 Replay uses that ID, or `legacy` for older journals without it, regardless of the replay host's environment.
+A match with seat overrides also records `init.options.botStrategySeats` (`{ "1": "ioleta" }`, resolved IDs); a
+journal without the field, including every older one, replays without overrides.
 An unavailable recorded ID fails explicitly. A custom definition must be registered under the same ID and run
 with the same code to be replayed. Prep generators and rehearsal jobs retain the journal's slice step counts.
 External journals additionally record replies / failure outcomes and non-secret adapter limits; replay disables
@@ -117,6 +142,7 @@ transport IO and feeds the recorded intents through the same validation path.
 
 ```powershell
 $env:SP_BOT_STRATEGY = 'my-bot'
+$env:SP_BOT_STRATEGY_SEATS = '1:ioleta'   # optional: seat 1 plays ioleta, the other seats my-bot
 npm start
 node tools/matchrun.mjs --bot my-bot --mode coop --players 4 --seed 7 --check
 node tools/botbench.mjs --bot legacy --configs solo:HARD --seed 7 --seeds 10 --json .cache/legacy.json
@@ -125,6 +151,7 @@ node tools/botbench.mjs --compare .cache/legacy.json .cache/my-bot.json
 ```
 
 Create `.cache/` first. The tools explicitly default to `legacy`; their `--bot` option chooses a registered ID.
+They read neither `SP_BOT_STRATEGY` nor `SP_BOT_STRATEGY_SEATS` and have no per-seat option.
 Botbench records the implementation ID and uses its bounty estimator. Its solo `--band ID` option overrides only
 the opening `pickBand` hook; it leaves `gd.bandIds()` and `gd.bandBondIds()` unchanged, including the bands available
 to later game effects. Previously, `--band` replaced `gd.bandIds()` with `[ID]` and `gd.bandBondIds()` with `[]`,
@@ -134,14 +161,14 @@ skips the original picker's RNG draw). Regenerate both comparison runs with this
 Keep seeds, difficulty and rehearsal counts
 identical in comparisons; use `--jobs 1` for timing, since parallel load inflates the timings.
 
-终极 (ABYSS) is the hard target for both kinds of seat (history §37.62): compare with
+终极 (ABYSS) is the hard target for both kinds of seat (history §35.62): compare with
 `node tools/botbench.mjs --configs solo:ABYSS,coop4:ABYSS --seeds 20 --seed 1 --json …`, and keep FUNNY / NORMAL /
 HARD from getting worse (`--configs solo:FUNNY,solo:NORMAL,solo:HARD,coop4:FUNNY,coop4:NORMAL,coop4:HARD --seeds 10`).
 A win is clearing the round-14 Final Assault (`victory`); round 15 is the optional Hidden Core. An `external` seat in
-plan mode runs the legacy executor with the plan's weights, so a legacy change moves plan seats too: since §37.62 the
+plan mode runs the legacy executor with the plan's weights, so a legacy change moves plan seats too: since §35.62 the
 plan's primary core bond is legacy's focus, and legacy lineups can field a 6-member core bond.
-Since §37.63 legacy also levels to L5 at R9 and L6 at R11, trades 获得时 layer units (`tradeOnce`), commits to a
-6-member core (`coreGap`), values a healer from R5 and spends expiring funds on refreshes (`spendDown`). Since §37.64
+Since §35.63 legacy also levels to L5 at R9 and L6 at R11, trades 获得时 layer units (`tradeOnce`), commits to a
+6-member core (`coreGap`), values a healer from R5 and spends expiring funds on refreshes (`spendDown`). Since §35.64
 a boss round rehearses the same layout variants against the already-planned wave, on `deriveSeed(0xA11CE, fa:round:seat)`,
 for the visible countdown (`faRehearsalTicks`); counted leaks still rank first. 终极 needs 100
 seeds per mode to separate such rules from noise (seeds 1–40 to develop, the rest to check), and a per-match "share of
@@ -259,5 +286,5 @@ through a gameplay-plugin room, whose rehearsal stays on the server. Measured st
 configuration, seeds, version and commands to reproduce them, are in the
 [strategy summary](research/bot-strategies-summary.md).
 
-Legacy and adaptive prep retain §37.63 `spendDown` between advisor spending and freezing, without another yield.
+Legacy and adaptive prep retain §35.63 `spendDown` between advisor spending and freezing, without another yield.
 [ASSUMED] Ioleta procurement owns its refresh budget and omits that legacy sweep. Framework by @HankDUMPLINGZhong; strategies by @Lidong1793.

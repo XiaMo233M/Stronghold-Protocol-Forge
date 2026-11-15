@@ -46,7 +46,7 @@
 
 import { Battle } from '../../server/sim/Battle.js';
 import { DataSource, getDefaultSource, spawnsFromTemplate } from '../../server/sim/simdata.js';
-import { TICK, COLS } from '../../server/sim/constants.js';
+import { TICK } from '../../server/sim/constants.js';
 import { standInRecord, composeUnitRecord, unitForm } from '../../shared/standIn.js';
 
 export const ALL_HOOKS = Object.freeze([
@@ -181,7 +181,7 @@ export function standInRec(chessId, sel = {}, data = getDefaultSource()) {
 
 function buildData(defs) {
   if (!defs) return getDefaultSource();
-  return new DataSource({ chess: defs.chess ?? {}, enemies: defs.enemies ?? {}, tokens: defs.tokens ?? {}, stages: defs.stages ?? {}, waves: defs.waves ?? {} }, getDefaultSource());
+  return new DataSource({ chess: defs.chess ?? {}, enemies: defs.enemies ?? {}, tokens: defs.tokens ?? {}, stages: defs.stages ?? {}, waves: defs.waves ?? {}, ...(defs.effects ? { effects: defs.effects } : {}) }, getDefaultSource());
 }
 
 /**
@@ -257,11 +257,6 @@ export function makeBattle(opts = {}) {
     content: opts.content ?? 'full', recordEvents: opts.recordEvents !== false, logger: opts.logger ?? quietLogger(opts.verbose),
     quiet: opts.verbose ? false : true, devices: opts.devices,
     autoFinish: opts.autoFinish ?? spawns.length > 0, kits: opts.kits, extraContent: opts.extraContent,
-    // kit 的**归属**与**预算**（DESIGN §28.52 的 kit 那一半）：测试可以直接把装载器产出的那两张表递给战场，
-    // 于是「逐单位回调归到哪本账上」可以在不建整局比赛的情况下被钉住。
-    kitOwners: opts.kitOwners, tokenKitOwners: opts.tokenKitOwners, kitBudgets: opts.kitBudgets,
-    // 包声明的战斗逻辑（`server.battle`, DESIGN §28.17）：测试可以把装载器交出来的 installer 直接递给战场。
-    battleInstallers: opts.battleInstallers,
     setup: (b) => {
       for (const name of hookNames) {
         captured[name] = [];
@@ -353,8 +348,14 @@ export function checkInvariants(b) {
         if (sk.active && sk.kind === 'duration' && !Number.isFinite(sk.timeLeft)) bad(`skill timeLeft ${sk.timeLeft}`, u);
         if (sk.active && sk.kind === 'ammo' && !Number.isFinite(sk.ammoLeft)) bad(`skill ammoLeft ${sk.ammoLeft}`, u);
       }
-      // occupancy map consistency: a living deployed ally is what its tile says it is
-      if (u.side === 'ally' && u.deployed && b._occ[u.tileR * COLS + u.tileC] !== u) bad(`occupancy map out of sync at ${u.tileR},${u.tileC}`, u);
+      // Ordinary allies own their tile slot. Continuous Leithania pursuers deliberately share coordinates and must
+      // never claim or overwrite that slot.
+      if (u.side === 'ally' && u.deployed) {
+        if (u.mem?.lethaniaPursuit) {
+          if (b._occ.includes(u)) bad('mobile pursuer occupies a deployment slot', u);
+          if (Math.round(u.x) !== u.tileC || Math.round(u.y) !== u.tileR) bad('mobile pursuer tile does not match its position', u);
+        } else if (b._occ[u.tileR * 21 + u.tileC] !== u) bad(`occupancy map out of sync at ${u.tileR},${u.tileC}`, u);
+      }
     } else if (u.removeReason === 'killed' && u.hp !== 0 && !u.bossPool) bad(`killed with hp ${u.hp}`, u);
     else if (u.hp < 0) bad(`negative hp ${u.hp}`, u);
     if (u.side === 'enemy' && u.blockedBy && !u.blockedBy.blocking.includes(u)) bad('block link broken', u);

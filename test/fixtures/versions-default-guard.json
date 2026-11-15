@@ -1,5 +1,5 @@
 {
-  "_": "Default-version guard (test/versions-default-guard.test.js); an intended change of the default version must regenerate test/fixtures/versions-default-guard.json with SP_UPDATE_GUARD=1 node --test test/versions-default-guard.test.js and give the reason in the commit.",
+  "_": "Default-version guard (test/versions-default-guard.test.js); an intended change of the default version, or of the versions a server offers when nothing is set, must regenerate test/fixtures/versions-default-guard.json with SP_UPDATE_GUARD=1 node --test test/versions-default-guard.test.js and give the reason in the commit. welcomeVersions pins the welcome list with each cs normalised.",
   "kat": {
     "cs": "7d6565abd4c1ec7ceaf979a2d82f90a04f5fe3a11a03d822c6775b2a6c632309",
     "sim": "f03a3610c2c41607ef1c8fe00e88ed771c6cfdab0b0a164dbbc4d7d2deeb304f",
@@ -12,49 +12,6 @@
     "mode": "coop",
     "difficulty": "NORMAL",
     "aiPicksLast": false,
-    "chatMode": "open",
-    "seatCap": 20,
-    "support": {
-      "enabled": true,
-      "label": "助战",
-      "tiers": [
-        {
-          "tier": 5,
-          "slots": 2,
-          "ids": [
-            "chess_char_5_01_a",
-            "chess_char_5_02_a",
-            "chess_char_5_03_a",
-            "chess_char_5_05_a",
-            "chess_char_5_06_a",
-            "chess_char_5_07_a",
-            "chess_char_5_08_a",
-            "chess_char_5_10_a"
-          ],
-          "prices": {}
-        },
-        {
-          "tier": 6,
-          "slots": 1,
-          "ids": [
-            "chess_char_6_01_a",
-            "chess_char_6_02_a",
-            "chess_char_6_03_a",
-            "chess_char_6_04_a",
-            "chess_char_6_05_a",
-            "chess_char_6_06_a",
-            "chess_char_6_07_a",
-            "chess_char_6_08_a"
-          ],
-          "prices": {}
-        }
-      ],
-      "capacity": 3,
-      "slots": {
-        "5": 2,
-        "6": 1
-      }
-    },
     "inMatch": false,
     "seats": [
       {
@@ -65,22 +22,6 @@
         "ready": false,
         "connected": true
       },
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
       null,
       null,
       null
@@ -98,41 +39,36 @@
       "cs": "<vanilla cs>",
       "family": "covenant",
       "label": "第二期下半",
-      "roomModes": [
-        "solo",
-        "coop"
-      ],
-      "default": true
+      "roomModes": ["solo", "coop"]
     },
     {
       "id": "act2autochess@V2_1",
       "cs": "<cs:act2autochess@V2_1>",
       "family": "covenant",
       "label": "第二期上半",
-      "roomModes": [
-        "solo",
-        "coop"
-      ]
+      "roomModes": ["solo", "coop"]
     },
     {
       "id": "act1autochess",
       "cs": "<cs:act1autochess>",
       "family": "covenant",
       "label": "第一期下半",
-      "roomModes": [
-        "solo",
-        "coop"
-      ]
+      "roomModes": ["solo", "coop"]
     },
     {
       "id": "act1autochess@V1_1",
       "cs": "<cs:act1autochess@V1_1>",
       "family": "covenant",
       "label": "第一期上半",
-      "roomModes": [
-        "solo",
-        "coop"
-      ]
+      "roomModes": ["solo", "coop"]
+    },
+    {
+      "id": "act3autochess@V3_1",
+      "cs": "<cs:act3autochess@V3_1>",
+      "family": "regulation",
+      "label": "规程·序列Ⅰ",
+      "roomModes": ["solo", "coop"],
+      "default": true
     }
   ]
 }

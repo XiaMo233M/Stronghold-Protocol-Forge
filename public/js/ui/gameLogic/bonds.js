@@ -2,50 +2,8 @@
 
 import { int, isObj } from './shared.js';
 import { diyPicks } from './diy.js';
-import { t } from '../../../../shared/i18n.js';
-// 行为开关 `morphPairing`（DESIGN §28.43.1）：判据本体在 `shared/morph.js`，客户端与服务端/战斗调的是同一个函数。
-// 第 7 段把**同一格开关的另外半条**（装备位语义）也收在那里：`morphSlotPolicy` 给出这一页的策略对象。
-// §28.49（`trait.grantsBonds`）：成员资格的**合并**也收在那边（`memberBonds`），所以客户端与服务端/战斗调的
-// 还是同一个函数 —— 只是它现在多了一条腿（特质）。客户端不必再知道「有几种成员资格来源」。
-import { grantedBondsByMorph, memberBonds, morphSlotPolicy, OFFICIAL_SLOT_POLICY } from '../../../../shared/morph.js';
-
-/**
- * 这一页的 `morphPairing` 档位（房间的包声明里派生的**有效档位**）。`setMorphPairing()` 由
- * `public/js/roomMods.js` 在 `welcome.mods` 变化时写一次；没写过（干净安装 / 没声明这一格）⇒ `null`，
- * `morphPairingOf(null)` 给出缺省档 `official`，也就是引擎今天的行为。
- * @type {string|null}
- */
-let morphPairing = null;
-/**
- * 记下这一页的有效档位（由 `roomMods.js` 从 `welcome.mods.packs[].behaviour` 合成后调用）。
- * @param {string|null|undefined} option
- */
-export function setMorphPairing(option) {
-  morphPairing = typeof option === 'string' && option ? option : null;
-}
-/** 当前档位（null = 没声明 ⇒ 缺省档）。 */
-export function morphOption() { return morphPairing; }
-
-/**
- * 这一页的**装备位策略**（第 7 段，`shared/morph.js` 的 `morphSlotPolicy`）：与 `morphPairing` 同一格开关的另外
- * 半条。`setMorphSlotPolicy()` 由 `roomMods.js` 在 `welcome.mods` 变化时写一次（与 `setMorphPairing` 同一个投影
- * 点）；没写过 ⇒ `OFFICIAL_SLOT_POLICY`（共享的冻结单例，`slotsUsed` 就是 `items.length`）。
- *
- * 客户端两处读它：详情卡的 `EQUIP n/2` 与「不占装备格」标签（`ui/detailPanel.js`）、拖放替换对话框的判据
- * （`ui/gameLogic/placement.js` 的 `equipReplaces`）。**缺省档下这两处逐字与从前相同** —— 那一档的策略就是
- * 引擎今天那条算术。
- * @type {import('../../../../shared/morph.js').MorphSlotPolicy}
- */
-let morphSlots = OFFICIAL_SLOT_POLICY;
-/**
- * 记下这一页的有效装备位策略（由 `roomMods.js` 从 `welcome.mods.packs[].behaviour` 合成后调用）。
- * @param {string|Array<{ switch?: string, option?: string }>|null|undefined} option 档位名或归一化声明
- */
-export function setMorphSlotPolicy(option) {
-  morphSlots = morphSlotPolicy(option);
-}
-/** 当前装备位策略（冻结对象，读它、别改它）。 */
-export function slotPolicy() { return morphSlots; }
+import { t, N_ } from '../../../../shared/i18n.js';
+import { grantedBondsByMorph } from '../../../../shared/plugins/rules.js';
 
 
 // ---- bonds -------------------------------------------------------------------------------------------
@@ -96,56 +54,32 @@ export function nextThreshold(count, thresholds) {
 /**
  * Bonds granted by 变形同构体: an item with `canGiveBond` worn together with an item that has a `giveBondId` makes the
  * wearer a member of that other item's bond (band 变形者集群 "与特定装备一同装备时装备者将视为特定盟约成员"; the item's
- * talent, character_table trap_1073_acarm073, lists the 14 pairings). **The rule itself is one shared pure function**
- * (`shared/morph.js` `grantedBondsByMorph`，行为开关 `morphPairing`，DESIGN §28.43.1）—— 服务端的
- * `server/match/bondsMeta.js pieceBonds` 与战斗里的 `server/sim/content/support unitBonds` 调的是**同一个函数**；
- * 三处各写一份循环正是这条规则历史上最容易分叉的地方（一份改了、另两份没改，卡片与服务端计数就打架）。
- *
- * 档位从 `morphOption()` 读（这一页的有效档位；没有声明 ⇒ `'official'` = 引擎今天的行为）。
+ * talent, character_table trap_1073_acarm073, lists the 14 pairings). The same rule as the server's count
+ * (server/match/bondsMeta.js pieceBonds) and the battle's (server/sim/content/support unitBonds).
+ * `mode` 'plus' is the room's morphPairing rule (shared/plugins/rules.js): one item is enough and only the leftmost
+ * giveBondId grants. Omitted, the official rule (two items, every other giveBondId).
  * @param {Array<string|{id:string}>|null|undefined} items the carried items (ids or { id } pieces)
  * @param {(id:string)=>any} [getItem] items.json lookup
+ * @param {'official'|'plus'} [mode]
  * @returns {string[]}
  */
-export function grantedBonds(items, getItem = () => null) {
-  const list = Array.isArray(items) ? items : [];
-  const recs = list.map((it) => getItem(typeof it === 'string' ? it : it?.id)).filter(isObj);
-  return grantedBondsByMorph(recs, { morphed: morphOption() });
+export function grantedBonds(items, getItem = () => null, mode = 'official') {
+  return grantedBondsByMorph(items, (id) => {
+    const rec = getItem(id);
+    return isObj(rec) ? rec : null;
+  }, { mode });
 }
 
 /**
- * 一名干员的**成员资格**：自己的盟约 ∪ 装备授予 ∪ **特质授予**（`trait.grantsBonds`，DESIGN §28.49）。
- *
- * 判据与**合并**都在 `shared/morph.js` 的 `memberBonds` —— 服务端的 `bondsMeta.pieceBonds` 与战斗里的
- * `support/index.js unitBonds` 调的是**同一个函数**，所以「卡片上显示什么」与「服务端数了谁」不可能分叉。
- *
- * `hasBond` 可选：这一页有盟约表时传 `(id) => !!data.lookup('bonds', id)`，把数据里不存在的 id 挡掉（与那两处
- * 同一条约定）。`own` 传 `[]` 就是「只要授予来的那些」—— 盟约弹窗问的正是这个。
- * @param {string[]} own 记录自己的 `bonds`
- * @param {any} trait 记录上的 `trait` 对象（**不是** `def.trait` 那个文本字段）
- * @param {Array<string|{id:string}>|null|undefined} items the carried items
- * @param {(id:string)=>any} getItem items.json lookup
- * @param {((id:string)=>boolean)|null} hasBond bonds.json lookup（拿不到权威名单时给 null）
- * @returns {string[]}
- */
-const grantedBondsOf = (own, trait, items, getItem, hasBond, mode = null) => {
-  const list = Array.isArray(items) ? items : [];
-  const recs = list.map((it) => getItem(typeof it === 'string' ? it : it?.id)).filter(isObj);
-  return memberBonds(own, { trait, recs, morphed: mode ?? morphOption(), hasBond });
-};
-
-/**
- * A chess piece's bonds: its record's + those its 变形同构体 pairing grants (grantedBonds) + those its **特质** grants
- * (`trait.grantsBonds`, DESIGN §28.49) — the detail card's chips.
+ * A chess piece's bonds: its record's + those its 变形同构体 pairing grants (grantedBonds) — the detail card's chips.
  * @param {any} chess chess.json record @param {Array<string|{id:string}>|null|undefined} items @param {(id:string)=>any} [getItem]
- * @param {((id:string)=>boolean)|null} [hasBond] bonds.json lookup（挡掉数据里不存在的盟约 id）
+ * @param {'official'|'plus'} [mode] morphPairing (default official)
  * @returns {string[]}
  */
-export function pieceBondIds(chess, items, getItem = () => null, modeOrHasBond = 'official', hasBond = null) {
-  const own = (Array.isArray(chess?.bonds) ? chess.bonds : []).filter((b) => typeof b === 'string');
-  // 第 4 参两种形态都收：**字符串 = 这一局的形态档位**（上游 0.3.1 的签名），**函数 = bonds.json 名单**（我们更早的调用方）
-  const mode = typeof modeOrHasBond === 'string' ? modeOrHasBond : null;
-  const filter = typeof modeOrHasBond === 'function' ? modeOrHasBond : hasBond;
-  return grantedBondsOf(own, chess?.trait, items, getItem, filter, mode);
+export function pieceBondIds(chess, items, getItem = () => null, mode = 'official') {
+  const out = (Array.isArray(chess?.bonds) ? chess.bonds : []).filter((b) => typeof b === 'string');
+  for (const b of grantedBonds(items, getItem, mode)) if (!out.includes(b)) out.push(b);
+  return out;
 }
 
 /**
@@ -158,14 +92,14 @@ export function pieceBondIds(chess, items, getItem = () => null, modeOrHasBond =
  * one of the bond's items — the pairing in effect on that operator (that item `worn` too).
  * @param {Iterable<any>} itemRecs items.json records (data.list('items'))
  * @param {Iterable<any>} bondRecs bonds.json records in data order (data.list('bonds'))
- * @param {{ off?: Set<string>|null, carried?: Array<string|{id:string}>|null }} [opts]
+ * @param {{ off?: Set<string>|null, carried?: Array<string|{id:string}>|null, mode?: 'official'|'plus' }} [opts]
  * @returns {Array<{ bondId: string, name: string, off: boolean, worn: boolean, items: Array<{ id: string, name: string, worn: boolean }> }>}
  */
-export function morphPairings(itemRecs, bondRecs, { off = null, carried = null } = {}) {
+export function morphPairings(itemRecs, bondRecs, { off = null, carried = null, mode = 'official' } = {}) {
   const recs = [...(itemRecs || [])].filter(isObj);
   const byId = new Map(recs.map((r) => [r.id, r]));
   const getItem = (id) => byId.get(id) || null;
-  const worn = new Set(grantedBonds(carried, getItem));
+  const worn = new Set(grantedBonds(carried, getItem, mode));
   const carriedIds = new Set((Array.isArray(carried) ? carried : []).map((it) => (typeof it === 'string' ? it : it?.id)).filter((x) => typeof x === 'string'));
   const famOf = (r) => (typeof r.baseId === 'string' && r.baseId ? r.baseId : r.id);
   /** bondId → family id → { id, name, tier, order, ids } */
@@ -244,12 +178,13 @@ export function harmonyMembers(priv, getChess = () => null) {
  * @param {(id:string)=>any} [getChess]
  * @param {(id:string)=>any} [getItem] items.json lookup (the 变形同构体 pairings)
  * @param {((p: any) => any)|null} [pieceRecord] the record of one of the pieces (default: getChess(p.id))
- * @param {((id:string)=>boolean)|null} [hasBond] bonds.json lookup（授予来的盟约里，数据里不存在的那些不画）
+ * @param {'official'|'plus'} [mode] morphPairing (default official)
  */
-export function bondMembers(bond, priv, banned = [], getChess = () => null, getItem = () => null, pieceRecord = null, hasBond = null) {
+export function bondMembers(bond, priv, banned = [], getChess = () => null, getItem = () => null, pieceRecord = null, mode = 'official') {
   const bannedSet = banned instanceof Set ? banned : new Set(Array.isArray(banned) ? banned : []);
-  // visibleMembers 只要是数组就用它 —— **包括空数组**（一个盟约的目录成员全是隐藏的时候，
-  // 它一行都不该画）。members 仍然给「授予」那条路留下那些隐藏 id。缺 visibleMembers（老载荷）才退回 members。
+  // visibleMembers is the drawn list whenever it is an array, including [] (a bond whose only
+  // catalogue members are hidden). members still names those hidden ids for grants. Missing
+  // visibleMembers (older payloads) falls back to members.
   const members = Array.isArray(bond?.visibleMembers) ? bond.visibleMembers : (Array.isArray(bond?.members) ? bond.members : []);
   const baseOf = (id) => getChess(id)?.baseId || (typeof id === 'string' ? id.replace(/_b$/, '_a') : id);
   const onBoard = new Set();
@@ -258,9 +193,7 @@ export function bondMembers(bond, priv, banned = [], getChess = () => null, getI
   const memberSet = new Set(members);
   /** base id → { on: on the board?, hand: in the hand?, items: the wearer's item ids } — operators of the player that join this bond through 变形同构体 */
   const granted = new Map();
-  // 授予来的盟约 = 装备（变形同构体）+ **特质**（DESIGN §28.49）。`own` 传 `[]`：这一行只问「他是**授予**来的
-  // 成员吗」—— 他自己的盟约由上面的 `memberSet` 与自选那两条管，混进来会把一个隐藏成员多画成一行「授予」。
-  const grants = (p) => typeof bond?.bondId === 'string' && grantedBondsOf([], recOf(p)?.trait, p.items, getItem, hasBond).includes(bond.bondId);
+  const grants = (p) => typeof bond?.bondId === 'string' && grantedBonds(p.items, getItem, mode).includes(bond.bondId);
   const recOf = (p) => (pieceRecord ? pieceRecord(p) : getChess(p.id));
   /** a composed 自选 record whose operator carries this bond */
   const diyOfBond = (rec) => isObj(rec) && typeof rec.diyFor === 'string' && Array.isArray(rec.bonds) && rec.bonds.includes(bond?.bondId);
@@ -385,13 +318,23 @@ export function disabledBondSets(pub, staticInactive = []) {
   return { drawn, off };
 }
 
+// the official briefing's line under 核心盟约 (2026-11 规程 recordings: 规程等级1, 极速模拟, 规程等级20)
+export const BOND_GROUP_HINT = N_('请选择一组在本次模拟中激活的盟约，未被选择的盟约将不会出现在本次模拟中');
+// Core-priority eligibility (gamedata.bondsExclude); official counterexample BV1hmWL6fEmQ 00:13 / 01:20.
+export const REGULATION_BOND_LEGEND = N_('有核心盟约的干员，仅当其核心盟约全部置灰时无法出现；仅有附加盟约的干员，仅当其附加盟约全部置灰时无法出现');
+// the chip on a 规程 briefing header (2026-11 recordings). The longer sentence stays the chip's title.
+export const REGULATION_LEGEND_CHIP = N_('部分盟约所含干员阵容不完整');
+
 /**
  * Briefing tooltip of a bond disc.
  * @param {string} name
  * @param {'off'|'drawn'|null} state from disabledBondSets
  * @param {number} bannedN banned operators of the bond
+ * @param {boolean} regulationCore whether this is a regulation core bond
  */
-export function briefingBondTip(name, state, bannedN = 0) {
+export function briefingBondTip(name, state, bannedN = 0, regulationCore = false) {
+  // 规程: only another lit core can retain a member of this grey core; a lit add-on cannot.
+  if (state && regulationCore) return t(N_('{name}：该核心盟约的干员无法出现，同属其他亮着的核心盟约的除外'), { name });
   if (state === 'off') return t('{name}：本局禁用（该盟约不会激活）', { name });
   if (state === 'drawn' || bannedN > 0) return bannedN ? t('{name}：部分盟约所含干员阵容不完整（{bannedN} 名干员无法出现）', { name, bannedN }) : t('{name}：部分盟约所含干员阵容不完整', { name });
   return name;

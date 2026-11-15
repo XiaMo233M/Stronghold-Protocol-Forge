@@ -6,9 +6,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bgmKeyFor, resolveBgm, SfxLimiter, AudioManager, normalAttackSfx, installAudio, audio, combatTrackFor, COMBAT_TRACK_SWITCH_ROUND, VoiceGate, resultSpeaker, resultVoiceSlot, VOICE_PRIORITY, VOICE_COOLDOWN_MS, voiceLinesFor, voiceLine } from '../../public/js/audio.js';
+import { bgmKeyFor, resolveBgm, playbackBgmKey, SfxLimiter, AudioManager, normalAttackSfx, installAudio, audio, combatTrackFor, COMBAT_TRACK_SWITCH_ROUND, VoiceGate, resultSpeaker, resultVoiceSlot, VOICE_PRIORITY, VOICE_COOLDOWN_MS, voiceLine, VOICE_TREES, LOCAL_BGM } from '../../public/js/audio.js';
+import { musicSeason } from '../../public/js/versions.js';
+import { selectRoute } from '../../public/js/store.js';
 import { mediaUrl } from '../../public/js/media.js';
-import { PHASE, DEFAULT_VOICE_LANG } from '../../shared/constants.js';
+import { PHASE } from '../../shared/constants.js';
+import { DEFAULT_VERSION } from '../../shared/versions.js';
 import { makeBattle, chessRec } from '../helpers/battleHarness.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -138,6 +141,255 @@ describe('bgm selection', () => {
   });
 });
 
+/** A manifest with a per-season table. The committed data/assets.json has none yet (regenerated later). */
+function seasonManifest() {
+  return {
+    audio: {
+      bgm: {
+        lobby: { loop: '/act2/lobby.mp3', intro: '/act2/lobby-intro.mp3' },
+        prep: { loop: '/shop.mp3' },
+        combat: { loop: '/shop.mp3' },
+        combatAlts: [{ loop: '/act2/late.mp3' }, { loop: '/act2/early.mp3' }],
+        unite: { loop: '/corrosion.mp3' },
+        boss: { loop: '/generic-boss.mp3' },
+      },
+      bossBgm: { boss_4: { loop: '/act2/boss4.mp3' } },
+      seasons: {
+        act1autochess: {
+          bgm: {
+            lobby: { intro: '/act1/lobby-intro.mp3', loop: '/act1/lobby.mp3' },
+            combatAlts: [{ loop: '/act1/late.mp3' }, { intro: '/act1/early-intro.mp3', loop: '/act1/early.mp3' }],
+            unite: null,
+          },
+          bossBgm: { boss_1: { loop: '/ancestor.mp3' } },
+        },
+        act3autochess: {
+          bgm: {
+            lobby: { loop: '/act3/lobby.mp3' },
+            combatAlts: [{ intro: '/act3/late-intro.mp3', loop: '/act3/late.mp3' }, { loop: '/act3/early.mp3' }],
+            unite: { loop: '/act3/corrosion.mp3' },
+          },
+          bossBgm: { boss_11: { loop: '/act3/boss.mp3' }, boss_14: { loop: '/act3/hide.mp3' } },
+        },
+        same: { bgm: { lobby: { loop: '/act1/lobby.mp3' } }, bossBgm: {} },
+      },
+    },
+  };
+}
+
+describe('per-season BGM', () => {
+  const seasonal = seasonManifest();
+  const versions = [{ id: 'act2autochess' }, { id: 'act1autochess' }, { id: 'act1autochess@V1_1' }, { id: 'act3autochess@V3_1' }];
+
+  test('resolveBgm prefers the season, then the old chain; an old manifest has no seasons', () => {
+    assert.equal(resolveBgm(seasonal, 'lobby', 'act1autochess').loop, '/act1/lobby.mp3');
+    assert.equal(resolveBgm(seasonal, 'lobby', 'act1autochess').intro, '/act1/lobby-intro.mp3');
+    assert.equal(resolveBgm(seasonal, 'lobby', 'act3autochess').loop, '/act3/lobby.mp3');
+    assert.equal(resolveBgm(seasonal, 'lobby', 'act3autochess').intro, null);
+    assert.equal(resolveBgm(seasonal, 'combat:0', 'act1autochess').loop, '/act1/late.mp3');
+    assert.equal(resolveBgm(seasonal, 'combat:1', 'act1autochess').loop, '/act1/early.mp3');
+    assert.equal(resolveBgm(seasonal, 'combat:1', 'act1autochess').intro, '/act1/early-intro.mp3');
+    assert.equal(resolveBgm(seasonal, 'combat:9', 'act1autochess').loop, '/shop.mp3', 'an index the season lacks uses the top-level combat track');
+    assert.equal(resolveBgm(seasonal, 'prep', 'act1autochess').loop, '/shop.mp3', 'seasons do not carry prep');
+    assert.equal(resolveBgm(seasonal, 'unite', 'act1autochess'), null, 'explicit unite: null does not fall through to corrosion');
+    assert.equal(resolveBgm(seasonal, 'unite', 'act3autochess').loop, '/act3/corrosion.mp3');
+    assert.equal(resolveBgm(seasonal, 'boss:boss_1', 'act1autochess').loop, '/ancestor.mp3');
+    assert.equal(resolveBgm(seasonal, 'boss:boss_4', 'act1autochess').loop, '/act2/boss4.mp3', 'an id the season lacks uses the top-level boss track');
+    assert.equal(resolveBgm(seasonal, 'boss:nope', 'act3autochess').loop, '/generic-boss.mp3');
+    assert.equal(resolveBgm(seasonal, 'boss:boss_11', 'act3autochess').loop, '/act3/boss.mp3');
+    assert.equal(resolveBgm(seasonal, 'boss:boss_14', 'act3autochess').loop, '/act3/hide.mp3');
+    assert.equal(resolveBgm(seasonal, 'lobby').loop, '/act2/lobby.mp3', 'no season is the top-level track');
+    assert.equal(resolveBgm(seasonal, 'lobby', DEFAULT_VERSION).loop, '/act2/lobby.mp3', 'the default season has no table');
+    assert.equal(resolveBgm(seasonal, 'unite', 'act9missing').loop, '/corrosion.mp3');
+    const old = { audio: { bgm: { combat: { loop: '/shop.mp3' }, unite: { loop: '/old-unite.mp3' }, boss: { loop: '/boss.mp3' } }, bossBgm: { boss_4: { loop: '/b4.mp3' } } } };
+    assert.equal(resolveBgm(old, 'unite', 'act1autochess').loop, '/old-unite.mp3');
+    assert.equal(resolveBgm(old, 'boss:boss_4', 'act3autochess').loop, '/b4.mp3');
+    assert.equal(resolveBgm(old, 'combat:0', 'act1autochess').loop, '/shop.mp3');
+    // the committed manifest carries the seasons (fetch-assets --add-only, §37.118): their own files, the default's
+    // top level unchanged
+    assert.match(resolveBgm(manifest, 'lobby', 'act3autochess').loop, /\/m_sys_act3autochess_loop\.mp3$/);
+    assert.equal(resolveBgm(manifest, 'lobby', DEFAULT_VERSION).loop, manifest.audio.bgm.lobby.loop);
+    assert.match(resolveBgm(manifest, 'combat:1', 'act3autochess').loop, /\/m_bat_chernobog_loop\.mp3$/);
+    assert.match(resolveBgm(manifest, 'combat:0', 'act3autochess').loop, /\/m_bat2_act16main_loop\.mp3$/);
+    assert.match(resolveBgm(manifest, 'combat:1', 'act1autochess').loop, /\/m_bat1_act35side_loop\.mp3$/);
+    assert.match(resolveBgm(manifest, 'boss:boss_11', 'act3autochess').loop, /\/m_boss1_act3autochess_loop\.mp3$/);
+    assert.match(resolveBgm(manifest, 'boss:boss_14', 'act3autochess').loop, /\/m_boss2_act3autochess_loop\.mp3$/);
+    assert.equal(resolveBgm(manifest, 'unite', 'act1autochess'), null, '第一期\'s 联防 names no music');
+    assert.equal(resolveBgm(manifest, 'combat:1').loop, manifest.audio.bgm.combatAlts[1].loop, 'the default keeps its tracks');
+  });
+
+  test('unite: null plays the round\'s 开战 key; a named unite stays unite', () => {
+    const pub = (round) => ({ phase: PHASE.UNITE, round });
+    assert.equal(playbackBgmKey('game', pub(3), combatTrackFor(3), seasonal, 'act1autochess'), 'combat:1');
+    assert.equal(playbackBgmKey('game', pub(9), combatTrackFor(9), seasonal, 'act1autochess'), 'combat:0');
+    assert.equal(playbackBgmKey('game', { phase: PHASE.UNITE }, null, seasonal, 'act1autochess'), 'combat');
+    assert.equal(playbackBgmKey('game', pub(3), 1, seasonal, 'act3autochess'), 'unite');
+    assert.equal(playbackBgmKey('game', pub(3), 1, manifest, 'act1autochess'), 'combat:1', 'the committed manifest: 第一期 names no 联防 music');
+    assert.equal(playbackBgmKey('game', pub(3), 1, manifest, 'act3autochess'), 'unite');
+    assert.equal(bgmKeyFor('game', pub(3), 1), 'unite', 'the screen key does not change');
+  });
+
+  test('musicSeason: the title follows the start-up version; lobby, room, spectators, replays follow the screen', () => {
+    const base = { versions, lobbyVersion: 'act3autochess@V3_1' };
+    // the owner, 2026-11-13: a first start opens on 规程, a later one on the version the lobby was left on
+    assert.equal(musicSeason({ ...base, session: {} }), 'act3autochess', 'the title of a 规程 lobby is 规程\'s');
+    assert.equal(musicSeason({ versions, lobbyVersion: null, session: {} }), 'act3autochess', 'a first start: 规程');
+    assert.equal(musicSeason({ versions, lobbyVersion: 'act2autochess', session: {} }), DEFAULT_VERSION, 'a 盟约 lobby: 盟约\'s title (and film)');
+    assert.equal(musicSeason({ versions, lobbyVersion: 'gone@X', session: {} }), 'act3autochess', 'an unknown stored id: 规程');
+    assert.equal(musicSeason({ ...base, session: { entered: true } }), 'act3autochess');
+    assert.equal(musicSeason({ ...base, session: { entered: true }, lobbyVersion: 'act2autochess' }), DEFAULT_VERSION);
+    const room = { version: 'act1autochess@V1_1', spectators: [{ playerId: 'sp' }] };
+    assert.equal(musicSeason({ ...base, session: { entered: true }, room }), 'act1autochess', 'a room of another version than the lobby, spectators included');
+    assert.equal(musicSeason({
+      ...base, session: { entered: true }, room: { version: 'act1autochess', inMatch: true },
+      match: { public: { phase: PHASE.COMBAT, version: 'act3autochess@V3_1' } },
+    }), 'act1autochess', 'the seated match uses the room, not the frames');
+    assert.equal(musicSeason({
+      ...base, session: { entered: true }, lobbyVersion: 'act2autochess',
+      match: { public: { phase: PHASE.RESULT, version: 'act3autochess@V3_1' } },
+    }), 'act3autochess', 'settlement after the room is gone');
+    assert.equal(musicSeason({ ...base, session: { entered: true }, lobbyVersion: 'act2autochess', replayVersion: 'act1autochess@V1_1' }), 'act1autochess');
+    assert.equal(musicSeason({ ...base, session: { entered: true }, replayVersion: 'act1autochess', room: { version: 'act3autochess@V3_1' } }), 'act3autochess');
+  });
+
+  test('installAudio follows the season, the title on the start-up version', () => {
+    const calls = [];
+    const origPlay = audio.playBgm;
+    const prev = { season: audio.season, combatTrack: audio.combatTrack, lastBgmKey: audio.lastBgmKey };
+    audio.playBgm = (k) => { calls.push(k); };
+    try {
+      let state = { session: {}, versions, lobbyVersion: 'act3autochess@V3_1' };
+      let fire = null;
+      installAudio({
+        getManifest: () => seasonal, getState: () => state, selectRoute, seasonOf: musicSeason,
+        subscribe: (fn) => { fire = fn; return () => {}; },
+      });
+      assert.equal(audio.season, 'act3autochess', 'the title of a 规程 lobby plays 规程\'s season');
+      assert.equal(calls.at(-1), 'lobby');
+      const entered = { ...state, session: { entered: true } };
+      fire(entered, state);
+      state = entered;
+      assert.equal(audio.season, 'act3autochess');
+      assert.equal(calls.at(-1), 'lobby', 'same screen key, the season changed');
+      const seated = { ...state, room: { version: 'act1autochess', spectators: [{ playerId: 'sp' }] } };
+      fire(seated, state);
+      state = seated;
+      assert.equal(audio.season, 'act1autochess');
+      const n = calls.length;
+      fire({ ...state, ui: { x: 1 } }, state);
+      assert.equal(calls.length, n, 'an unrelated store tick does not re-sync');
+      const settled = { session: { entered: true }, versions, lobbyVersion: 'act2autochess', match: { public: { phase: PHASE.RESULT, version: 'act3autochess@V3_1' } } };
+      fire(settled, state);
+      assert.equal(audio.season, 'act3autochess');
+      assert.equal(calls.at(-1), 'lobby');
+    } finally {
+      audio.playBgm = origPlay;
+      audio.season = prev.season;
+      audio.combatTrack = prev.combatTrack;
+      audio.lastBgmKey = prev.lastBgmKey;
+    }
+  });
+
+  test('a season change switches the file, the same loop does not, and a late manifest remaps 联防', async () => {
+    const fw = fakeWindow();
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) });
+    const tick = () => new Promise((r) => setTimeout(r, 20));
+    try {
+      const m = seasonManifest();
+      const a = new AudioManager({ win: fw.win, getManifest: () => m });
+      a.install();
+      fw.fire('pointerdown');
+      a.playBgm('lobby');
+      await tick();
+      assert.equal(a.bgm.loopUrl, '/act2/lobby.mp3');
+      const started = fw.made.started;
+      a.setSeason(DEFAULT_VERSION);
+      await tick();
+      assert.equal(fw.made.started, started, 'the default season has no table: the same lobby keeps playing');
+      a.setSeason('act1autochess');
+      await tick();
+      assert.equal(a.bgm.loopUrl, '/act1/lobby.mp3');
+      assert.ok(fw.made.started > started);
+      const mid = fw.made.started;
+      a.setSeason('act1autochess');
+      a.setSeason('same');
+      await tick();
+      assert.equal(fw.made.started, mid, 'the same loop URL does not restart');
+      a.setSeason('act3autochess');
+      await tick();
+      assert.equal(a.bgm.loopUrl, '/act3/lobby.mp3');
+      a.setLobbyTrack({ id: 'mine', read: async () => new ArrayBuffer(8) });
+      await tick();
+      assert.equal(a.bgm.loopUrl, LOCAL_BGM + 'mine');
+      const held = fw.made.started;
+      a.setSeason('act1autochess');
+      await tick();
+      assert.equal(a.bgm.loopUrl, LOCAL_BGM + 'mine', 'the player\'s lobby file replaces every season');
+      assert.equal(fw.made.started, held);
+      a.setLobbyTrack(null);
+      a.combatTrack = 1;
+      a.playBgm('unite');
+      await tick();
+      assert.equal(a.lastBgmKey, 'unite');
+      assert.equal(a.bgm.loopUrl, '/act1/early.mp3', 'unite: null continues the round\'s 开战 track');
+      assert.equal(a.bgm.key, 'combat:1');
+    } finally { globalThis.fetch = origFetch; }
+  });
+
+  test('a manifest that arrives during 联防 remaps the remembered unite key', async () => {
+    const fw = fakeWindow();
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) });
+    const tick = () => new Promise((r) => setTimeout(r, 20));
+    let current = null;
+    try {
+      const a = new AudioManager({ win: fw.win, getManifest: () => current });
+      a.install();
+      fw.fire('pointerdown');
+      a.combatTrack = 1;
+      a.setSeason('act1autochess');
+      a.playBgm('unite');
+      await tick();
+      assert.equal(a.bgm, null);
+      assert.equal(a.lastBgmKey, 'unite');
+      current = seasonManifest();
+      a.refreshBgm();
+      await tick();
+      assert.equal(a.lastBgmKey, 'unite');
+      assert.equal(a.bgm.loopUrl, '/act1/early.mp3');
+    } finally { globalThis.fetch = origFetch; }
+  });
+
+  test('muted and zero BGM volume do not fetch a season\'s track', async () => {
+    const fw = fakeWindow();
+    const origFetch = globalThis.fetch;
+    const urls = [];
+    globalThis.fetch = async (u) => { urls.push(String(u)); return { ok: true, arrayBuffer: async () => new ArrayBuffer(8) }; };
+    const tick = () => new Promise((r) => setTimeout(r, 20));
+    try {
+      const a = new AudioManager({ win: fw.win, getManifest: () => seasonManifest() });
+      a.install();
+      fw.fire('pointerdown');
+      await tick();
+      a.setVolumes({ muted: true });
+      a.setSeason('act3autochess');
+      a.playBgm('lobby');
+      a.combatTrack = 0;
+      a.playBgm('boss:boss_11');
+      await tick();
+      assert.equal(urls.length, 0, 'muted');
+      assert.equal(a.wantBgm, 'boss:boss_11');
+      a.setVolumes({ muted: false, bgm: 0 });
+      await tick();
+      assert.equal(urls.length, 0, 'volume 0');
+      a.setVolumes({ bgm: 0.6 });
+      await tick();
+      assert.equal(a.bgm.loopUrl, '/act3/boss.mp3');
+    } finally { globalThis.fetch = origFetch; }
+  });
+});
+
 describe('SfxLimiter', () => {
   test('caps concurrent voices', () => {
     const l = new SfxLimiter({ maxVoices: 3, unitCooldownMs: 0, urlGapMs: 0 });
@@ -252,56 +504,6 @@ describe('operator battle voice', () => {
     assert.equal(g2.request('skill1', 'u1', 10001), 'play', 'a new battle inherits no cooldown');
   });
 
-  test('配音语言 (dubs): the chosen dub wins, a missing one falls back to the manifest default, never silent', async () => {
-    // v0.7.1, owner's request 「不同干员可以切换不同的配音语言」: audio.voice is the manifest's default dub, the other dubs sit
-    // in audio.voiceLangs[lang] with the same file names under their own folder (tools/assets/plan.mjs).
-    const vm = { audio: {
-      voiceLang: 'jp',
-      voice: { char_a: { start: '/v/jp/a_start.mp3', place: ['/v/jp/a_p1.mp3', '/v/jp/a_p2.mp3'] }, char_c: { start: '/v/jp/c_start.mp3' } },
-      voiceLangs: {
-        cn: { char_a: { start: '/v/cn/a_start.mp3', place: '/v/cn/a_p1.mp3' } },
-        en: { char_a: { start: ['/v/en/a_1.mp3', '/v/en/a_2.mp3'] } },
-      },
-      sfx: { ui: {}, battle: {}, units: {} },
-    } };
-    // pure: which lines a dub offers
-    assert.equal(voiceLinesFor(vm, 'char_a', 'start', 'cn'), '/v/cn/a_start.mp3');
-    assert.deepEqual(voiceLinesFor(vm, 'char_a', 'start', 'en'), ['/v/en/a_1.mp3', '/v/en/a_2.mp3']);
-    assert.equal(voiceLinesFor(vm, 'char_a', 'start', null), '/v/jp/a_start.mp3', 'no dub chosen ⇒ the manifest default');
-    assert.equal(voiceLinesFor(vm, 'char_a', 'start', 'kr'), '/v/jp/a_start.mp3', 'a dub the build lacks ⇒ the default, never silent');
-    assert.equal(voiceLinesFor(vm, 'char_a', 'faceEnemy', 'cn'), null, 'a slot neither table has ⇒ null (the caller stays silent)');
-    assert.equal(voiceLinesFor(vm, 'char_c', 'start', 'cn'), '/v/jp/c_start.mp3', 'an operator the dub lacks ⇒ the default');
-    assert.equal(voiceLinesFor(vm, 'char_zz', 'start', 'cn'), null);
-    // the manager reads the injected setting (main.js voiceLangFor) at play time
-    const fw = fakeWindow();
-    const origFetch = globalThis.fetch;
-    const urls = [];
-    globalThis.fetch = async (u) => { urls.push(u); return { ok: true, arrayBuffer: async () => new ArrayBuffer(8) }; };
-    try {
-      let lang = null;
-      const a = new AudioManager({ win: fw.win, getManifest: () => vm, voiceLangOf: (charId) => (charId === 'char_a' ? lang : null) });
-      a.voiceGate = new VoiceGate({ gapMs: 0 });
-      a.install();
-      fw.fire('pointerdown');
-      await new Promise((r) => setTimeout(r, 10));
-      assert.equal(a.voice('char_a', 'start', { unitKey: 1 }), true);
-      await new Promise((r) => setTimeout(r, 10));
-      assert.ok(asked(urls, '/v/jp/a_start.mp3'), 'no dub chosen yet: the default');
-      a._stopVoice(); a.voiceGate.reset();
-      lang = 'cn';
-      assert.equal(a.voice('char_a', 'start', { unitKey: 1 }), true);
-      await new Promise((r) => setTimeout(r, 10));
-      assert.ok(asked(urls, '/v/cn/a_start.mp3'), 'the operator\'s own dub');
-      a._stopVoice(); a.voiceGate.reset();
-      // o.lang wins over the injected setting (the editor's audition / 干员详情 audition)
-      assert.equal(a.voice('char_a', 'start', { unitKey: 1, lang: 'en' }), true);
-      await new Promise((r) => setTimeout(r, 10));
-      assert.ok(asked(urls, '/v/en/a_1.mp3') || asked(urls, '/v/en/a_2.mp3'), 'o.lang overrides the setting');
-    } finally {
-      globalThis.fetch = origFetch;
-    }
-  });
-
   test('选中干员 on every tap (0.2.2; official FOCUS_CHAR: priority 10, cooldown 0): the prep speaks too, an idle channel always answers, a newer tap replaces it, a higher line is never interrupted', async () => {
     // the owner's request of 2026-10-08 「添加一下干员点击上去的语气一样的语音」: the game screen lets the detail panel speak
     // in every phase — a tap on a piece in the field / hand, a shop card — not only while a battle runs
@@ -361,42 +563,6 @@ describe('operator battle voice', () => {
     }
   });
 
-  test('配音语言 (dubs): a line the chosen dub does not have HERE falls back to the default dub — never silence', async () => {
-    // The release bundle ships the default dub only (the others come as a voice pack), and upstream lacks a line for some
-    // dubs: the manifest still names the dub, so the fetch 404s. The operator must still speak (owner's rule: never
-    // silently drop a sound) — the default dub's line for the same slot plays instead.
-    const fw = fakeWindow();
-    const origFetch = globalThis.fetch;
-    const urls = [];
-    globalThis.fetch = async (u) => {
-      urls.push(String(u));
-      if (String(u).includes('/v/cn/')) return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
-      return { ok: true, arrayBuffer: async () => new ArrayBuffer(8) };
-    };
-    try {
-      const vm = { audio: {
-        voiceLang: 'jp',
-        voice: { char_a: { start: '/v/jp/a_start.mp3' } },
-        voiceLangs: { cn: { char_a: { start: '/v/cn/a_start.mp3' } } },
-        sfx: { ui: {}, battle: {}, units: {} },
-      } };
-      const a = new AudioManager({ win: fw.win, getManifest: () => vm, voiceLangOf: () => 'cn' });
-      a.voiceGate = new VoiceGate({ gapMs: 0 });
-      a.install();
-      fw.fire('pointerdown');
-      await new Promise((r) => setTimeout(r, 10));
-      assert.equal(a.voice('char_a', 'start', { unitKey: 1 }), true);
-      await new Promise((r) => setTimeout(r, 60));
-      assert.ok(asked(urls, '/v/cn/a_start.mp3'), 'the chosen dub is tried first');
-      assert.equal(a.voiceNode?.url, '/v/jp/a_start.mp3', 'the default dub plays instead of nothing');
-      // the gate is released with the fallen-back line, so the next line may start
-      a._stopVoice();
-      assert.equal(a.voice('char_a', 'start', { unitKey: 2, lang: 'cn' }), true);
-    } finally {
-      globalThis.fetch = origFetch;
-    }
-  });
-
   test('语音语言 (0.2.2): 日本語 plays audio.voiceJp — the same slots and file names — and falls back to the Chinese line per slot and per line', async () => {
     const audioM = {
       voice: { char_a: { select: ['/a/voice/cn/char_a/cn_021.mp3', '/a/voice/cn/char_a/cn_022.mp3'], place: '/a/voice/cn/char_a/cn_023.mp3', start: '/a/voice/cn/char_a/cn_019.mp3' } },
@@ -413,13 +579,10 @@ describe('operator battle voice', () => {
     assert.equal(voiceLine({ voice: {} }, 'char_a', 'select', 'jp'), null);
     assert.equal(voiceLine(null, 'char_a', 'select', 'jp'), null);
     assert.deepEqual(voiceLine({ voice: audioM.voice }, 'char_a', 'place', 'jp'), { url: '/a/voice/cn/char_a/cn_023.mp3', fallback: null }, 'a manifest without voiceJp');
-    // the real manifest: this repo's `audio.voice` IS the default dub (jp since 0.9.0) and upstream's `audio.voiceJp`
-    // carries the same JP tree beside it, so a 'jp' look-up finds the JP file and the per-line fallback is that tree's
-    // own file of the same name — upstream's 中文 fallback belongs to its two-tier manifest (owner's ruling: this repo's
-    // four-dub model is the deliberate divergence, upstream's `voiceJp` key stays readable either way)
+    // the real manifest: every operator with a Chinese line has its Japanese twin
     const real = voiceLine(manifest.audio, 'char_263_skadi', 'select', 'jp', () => 0);
     assert.match(real.url, /^\/assets\/audio\/voice\/jp\/char_263_skadi\/cn_021\.mp3$/);
-    assert.equal(real.fallback, real.url, 'the default tree is the JP one here, so the fallback is the same file');
+    assert.equal(real.fallback, '/assets/audio/voice/cn/char_263_skadi/cn_021.mp3');
 
     // the manager: the setting picks the tree; a JP file the host lacks (404) plays the Chinese one, holding the channel
     const fw = fakeWindow();
@@ -453,41 +616,67 @@ describe('operator battle voice', () => {
       assert.match(a.voiceNode?.url ?? '', /^\/a\/voice\/cn\/char_a\/cn_02[12]\.mp3$/, '中文 again');
       a._stopVoice();
       a.setVoiceLang('kr');
-      assert.equal(a.voiceLang, 'cn', 'no other dub: anything but jp is 中文');
-      // the settings store hands the choice over (installAudio and ui/settings.js). The ROW is 配音语言 in this repo
-      // (four dubs, the manifest default unless the player picks one); upstream 0.2.2's two-tier UI called it 语音语言.
+      assert.equal(a.voiceLang, 'kr', '한국어 is a dub');
+      a.setVoiceLang('xx');
+      assert.equal(a.voiceLang, 'cn', 'an unknown value stays 中文');
+      // the settings store hands the choice over (installAudio and ui/settings.js)
       const settings = readFileSync(path.join(ROOT, 'public/js/ui/settings.js'), 'utf8');
-      assert.match(settings, /audio\.setVoiceLang\(s\.voiceLang\)/);
-      assert.match(settings, /t\('配音语言'\)/);
+      assert.match(settings, /audio\.setVoiceLang\(s\.voiceLang, s\.voiceOverrides\)/);
+      assert.match(settings, /t\('语音语言'\)/);
+      assert.match(settings, /audio\.setVoiceNative\(s\.voiceNative\)/);
     } finally {
       globalThis.fetch = origFetch;
     }
   });
 
-  test('settings: 配音语言 per operator (voiceLangFor / sanitize / availableVoiceLangs)', async () => {
-    const { sanitizeSettings, voiceLangFor, availableVoiceLangs, sanitizeVoiceLangByChar, DEFAULT_SETTINGS } = await import('../../public/js/ui/gameLogic/settings.js');
-    assert.equal(DEFAULT_SETTINGS.voiceLang, DEFAULT_VOICE_LANG);
-    assert.deepEqual(DEFAULT_SETTINGS.voiceLangByChar, {});
-    // a chosen dub, per operator override, and the chain override > global > default
-    assert.equal(voiceLangFor({ voiceLang: 'jp', voiceLangByChar: { char_a: 'kr' } }, 'char_a'), 'kr');
-    assert.equal(voiceLangFor({ voiceLang: 'jp', voiceLangByChar: { char_a: 'kr' } }, 'char_b'), 'jp');
-    assert.equal(voiceLangFor({}, 'char_a'), DEFAULT_VOICE_LANG);
-    assert.equal(voiceLangFor({ voiceLang: 'nope', voiceLangByChar: { char_a: 'nope' } }, 'char_a'), DEFAULT_VOICE_LANG, 'a junk value never wins');
-    assert.equal(voiceLangFor({ voiceLangByChar: { char_a: 'jp' } }, null), DEFAULT_VOICE_LANG, 'no charId ⇒ the global default');
-    // persistence: the store rebuilds field by field, so both new fields must survive a round trip
-    const s = sanitizeSettings({ voice: 0.5, voiceLang: 'en', voiceLangByChar: { char_a: 'jp', bogus: 'kr', char_b: 'nope', 'not a char': 'jp' } });
-    assert.equal(s.voiceLang, 'en');
-    assert.deepEqual(s.voiceLangByChar, { char_a: 'jp' }, 'only charIds with a real dub survive');
-    assert.equal(sanitizeSettings({}).voiceLang, DEFAULT_VOICE_LANG);
-    assert.deepEqual(sanitizeSettings({ voiceLangByChar: 'nope' }).voiceLangByChar, {}, 'a non-object never survives');
-    assert.equal(Object.keys(sanitizeVoiceLangByChar(Object.fromEntries(Array.from({ length: 900 }, (_, i) => [`char_x${i}`, 'jp'])))).length, 400, 'capped');
-    // the dubs the UI may offer: the manifest's default plus the tables it really carries
-    assert.deepEqual(availableVoiceLangs({ audio: { voiceLang: DEFAULT_VOICE_LANG, voice: { char_a: {} } } }), [DEFAULT_VOICE_LANG]);
-    assert.deepEqual(availableVoiceLangs({ audio: { voiceLang: DEFAULT_VOICE_LANG, voice: {}, voiceLangs: { cn: { char_a: {} }, kr: {} } } }), ['cn', DEFAULT_VOICE_LANG],
-      'an empty dub table is not offered');
-    assert.deepEqual(availableVoiceLangs({ audio: { voiceLangs: { en: { char_a: {} } } } }), [DEFAULT_VOICE_LANG, 'en'], 'no voiceLang field ⇒ the default dub');
-    assert.deepEqual(availableVoiceLangs(null), [DEFAULT_VOICE_LANG]);
+  test('English, Korean and the own-language dub use the same fallback as 日本語; 试听 skips the gate', async () => {
+    assert.deepEqual(VOICE_TREES, { jp: 'voiceJp', en: 'voiceEn', kr: 'voiceKr', native: 'voiceNative' });
+    const id = 'char_102_texas';
+    const audioM = {
+      voice: { [id]: { select: '/a/voice/cn/char_a/cn_021.mp3', place: '/a/voice/cn/char_a/cn_023.mp3' } },
+      voiceEn: { [id]: { select: '/a/voice/en/char_a/cn_021.mp3' } },
+      voiceKr: { [id]: { place: '/a/voice/kr/char_a/cn_023.mp3' } },
+      voiceNative: { [id]: { select: '/a/voice/native/char_a_ita/cn_021.mp3' } },
+    };
+    assert.deepEqual(voiceLine(audioM, id, 'select', 'en'), { url: '/a/voice/en/char_a/cn_021.mp3', fallback: '/a/voice/cn/char_a/cn_021.mp3' });
+    assert.deepEqual(voiceLine(audioM, id, 'place', 'kr'), { url: '/a/voice/kr/char_a/cn_023.mp3', fallback: '/a/voice/cn/char_a/cn_023.mp3' });
+    assert.deepEqual(voiceLine(audioM, id, 'select', 'native'), { url: '/a/voice/native/char_a_ita/cn_021.mp3', fallback: '/a/voice/cn/char_a/cn_021.mp3' });
+    assert.deepEqual(voiceLine(audioM, id, 'place', 'en'), { url: '/a/voice/cn/char_a/cn_023.mp3', fallback: null }, 'a slot the EN tree lacks: the Chinese line');
+    assert.deepEqual(voiceLine(audioM, id, 'place', 'native'), { url: '/a/voice/cn/char_a/cn_023.mp3', fallback: null });
+
+    const fw = fakeWindow();
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) });
+    const tick = () => new Promise((r) => setTimeout(r, 10));
+    try {
+      const a = new AudioManager({ win: fw.win, getManifest: () => ({ audio: { sfx: { ui: {}, battle: {}, units: {} }, ...audioM } }) });
+      a.voiceGate = new VoiceGate({ gapMs: 60_000 });
+      a.install();
+      fw.fire('pointerdown');
+      await tick();
+      assert.equal(a.voice(id, 'place', { unitKey: 1 }), true);
+      await tick();
+      assert.equal(a.voice(id, 'place', { unitKey: 1 }), false, 'the battle line is on cooldown');
+      assert.equal(a.previewVoice(id, 'en'), true, '试听 takes the channel and skips the cooldown');
+      await tick();
+      assert.equal(a.voiceNode?.url, '/a/voice/en/char_a/cn_021.mp3');
+      a.setVoiceLang('cn', { [id]: 'native' });
+      a.setVoiceNative(false);
+      assert.equal(a.previewVoice(id), true, 'no lang: the operator\'s own choice');
+      await tick();
+      assert.equal(a.voiceNode?.url, '/a/voice/native/char_a_ita/cn_021.mp3');
+      a.setVoiceLang('kr', {});
+      a.setVoiceNative(true);
+      assert.equal(a.voice(id, 'select'), true, '本土语言 wins over the global KR dub');
+      await tick();
+      assert.equal(a.voiceNode?.url, '/a/voice/native/char_a_ita/cn_021.mp3');
+      a.volumes.muted = true;
+      assert.equal(a.previewVoice(id, 'en'), false, 'muted stays silent');
+    } finally {
+      globalThis.fetch = origFetch;
+    }
   });
+
   test('AudioManager.voice: manifest slots (a drawn array), the gate, and the battle events that drive them', async () => {
     const fw = fakeWindow();
     const origFetch = globalThis.fetch;
@@ -651,6 +840,32 @@ describe('AudioManager', () => {
     a.setVolumes({ bgm: 5, sfx: -1, muted: true });
     assert.deepEqual(a.volumes, { bgm: 1, sfx: 0, voice: 0.8, muted: true });
     assert.equal(a.unlocked, false);
+  });
+  test('a one-shot owner guard cancels a cue whose audio finishes decoding after its turn ended', async () => {
+    const fw = fakeWindow();
+    const origFetch = globalThis.fetch;
+    let finishRequest;
+    let markRequested;
+    const requested = new Promise((resolve) => { markRequested = resolve; });
+    globalThis.fetch = () => {
+      markRequested();
+      return new Promise((resolve) => { finishRequest = resolve; });
+    };
+    try {
+      const a = new AudioManager({ win: fw.win, getManifest: () => manifest });
+      a.install();
+      fw.fire('pointerdown');
+      let current = true;
+      a.sfx('yourTurn', { isCurrent: () => current });
+      await requested;
+      current = false;
+      finishRequest({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.equal(fw.made.started, 0, 'stale decoded audio never starts');
+      assert.equal(a.uiVoices, 0, 'the canceled cue releases its reserved voice');
+    } finally {
+      globalThis.fetch = origFetch;
+    }
   });
   test('unlocks on the first gesture, then plays BGM and SFX from the manifest', async () => {
     const fw = fakeWindow();

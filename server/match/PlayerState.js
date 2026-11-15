@@ -15,6 +15,8 @@
 //     SETTLE (battle-result grants, merges, returned equipment) or at the next round start / 机变 stays visible and
 //     usable (move to a free hand slot, place, equip, destroy, sell) through the NEXT prep — nothing is destroyed before
 //     the player saw it in a prep ("处于临时整备区的调度资源，在进入下一回合后会自动销毁").
+//     With config.version.rules.equipHand (规程), hand holds characters/summons only and temp[0..4] is permanent
+//     equipment storage. Hidden temp[5..] alone blocks Ready and expires; see pieces.js and docs/META.md.
 //   * Board: own region rows 9–12 × cols 2–10, legality from the stage legend (board.js); deploy cap 8 (+effects);
 //     tokens (placeable summons) don't use deploy slots. Board↔hand swaps are always allowed. In a boss round the
 //     legality reads the player's half of the boss field (Match.deployFieldOf → board.js field 'bossL' / 'bossR',
@@ -27,7 +29,7 @@
 //   * Merge: 3 normal copies (风丸 2) on board/hand/temp → 1 elite; equipment returns to the hand; a
 //     reward offer of 3 different free chess of tier min(level+1, 6) is queued (never one operator twice — user
 //     playtest #6 item 19; a short tier tops up from the tier below; the player's stocked 自选 of that tier joins,
-//     §32.23; pick 1, expires at prep end; an offer earned
+//     §30.23; pick 1, expires at prep end; an offer earned
 //     after the prep — SETTLE / Final Assault effects — is kept for the next prep). Where the elite goes (PRTS
 //     卫戍协议/帮助 "发送1名【精锐】状态的该干员至手牌区（若消耗已部署至作战区的干员，则发送至作战区对应位置）", user
 //     playtest #6 follow-up): when a consumed copy stood on the board, onto that copy's tile with its facing (of several,
@@ -91,7 +93,8 @@
 //     and what shows it shows the stand-in (the owner's recall of the official mode, 2026-10-06): the scouting views
 //     (board and bench), the m.result lineup (`standInFor`), the elite / gift tickers' names. m.private exposes `standIns`.
 //   * 自选编队 (0.2.0 DIY, the owner's decisions of 2026-10-05; player/diy.js): the human's `seat.diy` picks are re-checked
-//     against this match's data and kits and fixed for the match (`diy`; bots none [ASSUMED]). With picks, `this.gd` is the
+//     against this match's data and kits and fixed for the match (`diy`; bots field no lobby roster [ASSUMED];
+//     规程 gives an empty bot a capped roster at 选择自编). With picks, `this.gd` is the
 //     player's data view: the slotted slots' ids (normal and elite) are the composed 自选 records, so the player's piece
 //     of a slot is the operator for every rule (name, class, position, bonds from its factions, no 特质, the pick's skill
 //     and module; tier, price, sell price and the 3 → elite merge are the slot's). Each slotted piece has its own stock
@@ -120,10 +123,6 @@
 //   diy.js        自选编队: the picks (setDiy), the player's data view, the DIY stock (initDiyStock, poolOf), the shop's
 //                 DIY draws (diyRollEntries) and the reward / grant draws (diyStockEntries), the pick of a piece (diyPickOf)
 //   common.js     HAND_SIZE, TEMP_SIZE, MAX_OFFER_SLOTS, OK, fail
-//   rules.js      the 100-seat variant (design-level item A of 百卫补丁 v0.3, docs/PS100-MIGRATION.md §10-A): the
-//                 player's own pool (pool), the draw source (mainPool) and the UNIQUE copy dispatch point (poolOf) —
-//                 plus squad membership. Installed LAST, exactly as the patch does; with the switch off (`seatCap <=
-//                 MAX_SEATS`) both accessors hand back the very same `m.pool` object the code used before.
 
 import { FIELD } from './board.js';
 import { computeBonds } from './bondsMeta.js';
@@ -138,8 +137,7 @@ import { PlayerPrep } from './player/prep.js';
 import { PlayerRound } from './player/round.js';
 import { PlayerViews } from './player/views.js';
 import { PlayerDiy, DiyStock } from './player/diy.js';
-import { PlayerSupport } from './player/support.js';
-import { PlayerRules } from './player/rules.js';
+import { PlayerCommands } from './player/commands.js';
 
 export class PlayerState {
   /**
@@ -159,6 +157,10 @@ export class PlayerState {
     this.alive = true;
     this.lp = 0;
     this.bandId = null;
+    this.command = null;
+    this.commandMarks = [];
+    this.commandDrafts = [];
+    this.commandDiscounts = [];
     this.funds = 0;
     this.pendingFunds = 0;
     this.ready = false;
@@ -169,11 +171,6 @@ export class PlayerState {
     // 0.2.2: the per-operator 潜能 / 练度 ({} = every operator 潜能 6, 精英2 Lv.60 — bots always)
     this.ops = Object.freeze({});
     if (!this.isBot && (seat.loadout || seat.ops)) this.setLoadout(seat.loadout ?? null, seat.ops ?? null);
-    /** 助战 (shared/support.js): frozen base chess ids the SERVER pool allowed; [] = none. Granted at the first round. */
-    this.support = Object.freeze([]);
-    /** what prepareSupports() really granted this match (privateView echoes both) */
-    this.supportGranted = Object.freeze([]);
-    if (!this.isBot && seat.support) this.setSupport(seat.support);
     /**
      * 补位 (0.2.0): the base chess ids this player fields as their stand-ins — the seat's not-owned list when the match
      * started, re-checked against this match's data; frozen, sorted; [] = every operator owned (bots always)
@@ -184,25 +181,25 @@ export class PlayerState {
     if (!this.isBot && seat.notOwned) this.setNotOwned(seat.notOwned);
     /**
      * 自选编队 (0.2.0): the slotted picks { [slotBaseId]: { charId, skillIndex, uniEquipId } } — the seat's when the match
-     * started, re-checked; frozen; {} = none (bots always). setDiy makes `this.gd` the player's data view.
+     * started, re-checked; frozen; {} = none (bots have no lobby roster). setDiy makes `this.gd` the player's data view.
      */
     this.diy = Object.freeze({});
     /** @type {Map<string, object>} slot id (normal / elite) → composed 自选 record (setDiy) */
     this._diyRecords = new Map();
     /** the copies of the slotted pieces (initDiyStock, once the match's bans are drawn) */
     this.diyStock = new DiyStock();
-    /**
-     * The 100-seat variant's per-player pool (design-level A, docs/PS100-MIGRATION.md §10-A), built lazily by
-     * PlayerRules.pool() the first time this player's copies are routed. `null` = not built; a ≤ MAX_SEATS match never
-     * builds one (poolOf hands back `m.pool`).
-     * @type {import('./pool.js').SharedPool|null}
-     */
-    this._ownPool = null;
     /** slotted slots without stock: every bond of the operator is switched off this match */
     this.diyBanned = Object.freeze([]);
+    /**
+     * 选择自编 confirmation: null until the player confirms; an array afterwards (possibly empty = 禁用自选).
+     * A season without the step leaves it null and stocks every legal lobby slot.
+     * @type {string[]|null}
+     */
+    this.diyBring = null;
     // A modded room's content list (Match.diyKitted) is what the lobby already accepted. Without it setDiy
     // keeps the vanilla kit list and drops a plugin operator with no error (checkDiyPicks is lenient).
-    // Bots never slot 自选; they read the human's composed records once this succeeds (bot.js chessRec).
+    // Bots have no lobby roster; 规程 synthesizes one at 选择自编. They read a human's composed records once setDiy
+    // succeeds (bot.js chessRec).
     if (!this.isBot && seat.diy) this.setDiy(seat.diy, this.m.diyKitted ? { kitted: this.m.diyKitted } : undefined);
     /** 皮肤 (docs/SKINS.md): frozen `{ [charId]: skinId }`, {} = every operator on its default model. Unlike the
      * loadout these are PUBLIC (a teammate sees your skin), so they travel in Match.publicView().players[]. */
@@ -254,8 +251,8 @@ export class PlayerState {
     this.stats = {
       dmgDealt: 0, kills: 0, leaks: 0, gold: 0, refreshes: 0, merges: 0, itemMerges: 0, itemsEquipped: 0,
       bossDamage: 0, lpLost: 0, buys: 0, sells: 0, perfectRounds: 0, fundsGained: 0, healing: 0,
-      /** defId → { dmg, kills, heal } accumulated per battle, for the settlement's MVP (Match.js, results.js mvpOf). */
-      unitStats: new Map(),
+      // 完美连胜 (§37.148): the rounds in a row this player settled without an LP loss, now (0 after a loss)
+      perfectStreak: 0,
     };
     this.eliminatedRound = null;
     this.creditedKills = 0;
@@ -274,7 +271,7 @@ export class PlayerState {
 }
 
 // the method modules, in this order (a name defined twice is an error, never a silent override)
-for (const part of [PlayerBasics, PlayerPieces, PlayerAcquire, PlayerEconomy, PlayerPlacement, PlayerItems, PlayerPrep, PlayerRound, PlayerViews, PlayerDiy, PlayerSupport, PlayerRules]) {
+for (const part of [PlayerBasics, PlayerPieces, PlayerAcquire, PlayerEconomy, PlayerPlacement, PlayerItems, PlayerPrep, PlayerRound, PlayerViews, PlayerDiy, PlayerCommands]) {
   for (const key of Reflect.ownKeys(part.prototype)) {
     if (key === 'constructor') continue;
     if (Object.prototype.hasOwnProperty.call(PlayerState.prototype, key)) throw new Error(`PlayerState.${String(key)} is defined twice`);

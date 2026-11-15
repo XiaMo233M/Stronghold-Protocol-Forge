@@ -25,22 +25,22 @@
 // re-exported below, so existing imports keep working.
 
 export { clamp, tileKey } from './gameLogic/shared.js';
-export { phaseMode, isCombatPhase, showDeadPill, isBossPhase } from './gameLogic/phases.js';
+export { phaseMode, isCombatPhase, showDeadPill, isBossPhase, pregameStepCount, pregameStepIndex } from './gameLogic/phases.js';
 export { prepCamera, prepCameraFor, foldCamera, deployFoldsShop, deployZoomStep, deployZoomRemember, prepDeployCamera, deployFieldOf, fieldTile, boardTileOf, ownerBandId, teamFrameIds } from './gameLogic/camera.js';
-export { phaseBanner, prepCapsuleLabel, countdownState, phaseTotalSeconds, deployOrder, roundStartReplay } from './gameLogic/phases.js';
+export { phaseBanner, spTurnCueKey, prepCapsuleLabel, countdownState, phaseTotalSeconds, deployOrder, roundStartReplay } from './gameLogic/phases.js';
 export { RESULT_BOX_MS, ownRoundLoss, battleOverSfx, roundResultBox, uniteResultBox, battleResultBox } from './gameLogic/phases.js';
 export { STATUS_META } from './gameLogic/format.js';
 export { sortedPlayers } from './gameLogic/shared.js';
 export { ownFieldId, homeFieldId, cycleField, watchTarget, switcherLabel, fieldLabel, activeBubbles } from './gameLogic/watch.js';
-export { sortBonds, bondTier, nextThreshold, grantedBonds, pieceBondIds, morphPairings, setMorphPairing, morphOption, setMorphSlotPolicy, slotPolicy, HARMONY_BOND, harmonyMembers, bondMembers, memberHeadCount, bannedPerBond, disabledBondSets, briefingBondTip, modeOffBonds, bandOffBonds, bandOffLine } from './gameLogic/bonds.js';
-export { priceTone, mergeProgress, mergeTarget, handFull, completesMerge, offerHeader, shopBlockReason, readyFundsPrompt, readyShopFold } from './gameLogic/shop.js';
+export { sortBonds, bondTier, nextThreshold, grantedBonds, pieceBondIds, morphPairings, HARMONY_BOND, harmonyMembers, bondMembers, memberHeadCount, bannedPerBond, disabledBondSets, briefingBondTip, modeOffBonds, bandOffBonds, bandOffLine } from './gameLogic/bonds.js';
+export { priceTone, mergeProgress, mergeTarget, handFull, completesMerge, offerHeader, shopBlockReason, readyFundsPrompt, readyCommandPrompt, readyPrompt, readyShopFold } from './gameLogic/shop.js';
 export { deploySets, stageOverrides, deployMap, effectiveStage, indexPieces, placementContext, piecePosition, tileAllows, summonRange, summonExcluded, canPlace, equipReplaces, equipMerges, boardTargets, dropIntent, dropFailureReason } from './gameLogic/placement.js';
 export { terrainInfo, deviceInfo, deviceTipAt, noteDeviceUnits, deviceUnitsForEntry } from './gameLogic/terrain.js';
 export { normalizeDraft, normalizeSp, normalizePersonalChoice, heldDraftPub } from './gameLogic/draft.js';
 export { groupEnemies, PEN, penZoneTiles, penPlacement, previewEnemyKey, factionTypes } from './gameLogic/enemies.js';
 export { snapHud, bossFrac, bossPctText, hasFlag, UF, attackInterval, fmtNum, rangeGridBox } from './gameLogic/format.js';
 export { shortcutFor, closesOnFieldPress, shortcutBlocked, prepShortcutsSuspended, HOTKEY_ACTIONS, DEFAULT_HOTKEYS, isBindableCode, hotkeyLabel, sanitizeHotkeys, rebindHotkey, isDefaultHotkeys, hotkeyOf, actionForKey, captureHotkey, facingSwallows, facingEnter } from './gameLogic/shortcuts.js';
-export { DEFAULT_SETTINGS, VOICE_LANGS, TEXT_SIZES, sanitizeSettings, availableVoiceLangs, sanitizeVoiceLangByChar, voiceLangFor } from './gameLogic/settings.js';
+export { DEFAULT_SETTINGS, VOICE_LANGS, TEXT_SIZES, sanitizeSettings } from './gameLogic/settings.js';
 export { normalizeResult } from './gameLogic/result.js';
 export { chessLoadout, unitLoadout, unitCultivation } from './gameLogic/loadout.js';
 export { standInIds, fieldsStandIn, standInOf, ownStandIn, cardStandIn, memberStandIn, standInGetter, standInLoadout, deployedRecord, deployedModuleId, standInLabel, standInForText, standInTip } from './gameLogic/standIn.js';

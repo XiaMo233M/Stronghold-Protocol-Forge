@@ -10,23 +10,8 @@ import { audio } from '../audio.js';
 const SUCCESS_SFX = {
   'g.buy': 'buy', 'g.sell': 'sell', 'g.refresh': 'refresh', 'g.freeze': 'freeze', 'g.levelUp': 'levelup',
   'g.move': 'drop', 'g.equip': 'equip', 'g.art': 'artPlace', 'g.reward': 'pick', 'g.choice': 'pick',
-  'g.band': 'confirm', 'g.bandSkip': 'back', 'g.infoReady': 'ready', 'g.emote': 'emote', 'g.destroy': 'back',
-  'g.unequip': 'back',
+  'g.band': 'confirm', 'g.diyBring': 'confirm', 'g.bandSkip': 'back', 'g.infoReady': 'ready', 'g.emote': 'emote', 'g.destroy': 'back', 'g.unequip': 'back',
 };
-
-/**
- * 这一局的声明允不允许卸下已装备的装备（行为开关 `unequip`，DESIGN §28.43.1）。
- *
- * 客户端要知道这一格才能决定**画不画那个「卸下」按钮** —— 缺省档（`official`）下不画，于是**缺省界面逐字节不变**。
- * 写入点是 `public/js/roomMods.js`（`welcome.mods` 变化时用**那一份既有的** `mergeBehaviourDecls` + `behaviourValue`
- * 合成后调 `setUnequipAllowed`，与 `morphPairing` 走同一条路：客户端不自己实现一遍合并规则）。放在这里而不是
- * `detailPanel.js`，是因为这里同时是**发送点**（`unequip`），读数与发数不分家；也避免 UI 模块之间多一条 import。
- */
-let unequipOn = false;
-/** 记下这一页的有效档位（由 `roomMods.js` 从 `welcome.mods.packs[].behaviour` 合成后调用）。 */
-export function setUnequipAllowed(on) { unequipOn = on === true; }
-/** 当前档位（缺省 / 没声明 ⇒ `false` = 官方：装上的装备不画「卸下」）。 */
-export function unequipAllowed() { return unequipOn; }
 
 let inflight = 0;
 const busyListeners = new Set();
@@ -79,12 +64,16 @@ export async function act(t, fields = {}, opts = {}) {
 }
 
 export const actions = {
+  bondGroup: (idx, setupRevision) => act('g.bondGroup', { idx, setupRevision }),
   infoReady: (setupRevision = 0) => act('g.infoReady', { setupRevision }),
   rerollSetup: (setupRevision) => act('room.rerollSetup', { setupRevision }, { sfx: 'confirm' }),
   rerollVote: (voteId, agree) => act('g.rerollVote', { voteId, agree }, { sfx: agree ? 'confirm' : 'back' }),
   cancelReroll: (voteId) => act('room.cancelReroll', { voteId }, { sfx: 'back' }),
   band: (bandId) => act('g.band', { bandId }),
+  diyBring: (slots) => act('g.diyBring', { slots }),
   bandSkip: () => act('g.bandSkip'),
+  command: (effectId, target) => act('g.command', { effectId, target }, { sfx: 'confirm' }),
+  commandChoice: (choiceId, idx) => act('g.commandChoice', { choiceId, idx }, { sfx: 'pick' }),
   buy: (slot) => act('g.buy', { slot }),
   // a tap while the previous g.refresh is still on the wire is dropped (GitHub #501) — see onRefreshBusy above
   refresh: () => {
@@ -103,8 +92,6 @@ export const actions = {
   equip: (itemUid, targetUid, replaceUid) => act('g.equip', Number.isInteger(replaceUid) ? { itemUid, targetUid, replaceUid } : { itemUid, targetUid }),
   art: (itemUid, row, col, dir) => act('g.art', dir ? { itemUid, row, col, dir } : { itemUid, row, col }),
   destroy: (uid) => act('g.destroy', { uid }),
-  // 装备拆卸（行为开关 `unequip: "allow"`）：把一件已装备的装备退回手牌 / 临时整备区。缺省档下服务端回
-  // `'equipped items are locked'`，而界面**根本不画**这个按钮（`unequipAllowed()`），所以它正常只在 `allow` 档出现。
   unequip: (itemUid) => act('g.unequip', { itemUid }),
   reward: (idx) => act('g.reward', { idx }),
   offer: (offer, idx, refresh = false, cardId) => act(refresh ? 'g.offerRefresh' : 'g.offer', { offerId: offer.id, pluginId: offer.pluginId, seq: offer.seq, idx, cardId }),

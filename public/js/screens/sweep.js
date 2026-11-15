@@ -1,40 +1,48 @@
-// S.W.E.E.P.报告 (2026-10-13, the owner's request: the event's report screen, laid out after the video 2:17–3:03; every
-// drawing here is original, the art is the game's own icons): a full-screen overlay opened from the lobby's plate, three tabs —
+// S.W.E.E.P.报告: the event's report screen (laid out after the event video 2:17 – 3:03; the backdrop is drawn in CSS,
+// every picture is the game's own icon or art), opened from the lobby's top bar. Read-only: it shows the season's data
+// and changes nothing. Three tabs on 盟约, and a fourth on 规程 (config.version.family === 'regulation'; the official
+// report's 装备报告, capture BV11NW869ELq) —
 //   盟约报告 — 核心盟约 / 附加盟约 tiles (bonds.json isCore); the left panel: the glyph, the name, 激活所需人数 and the
-//              thresholds, the description, 对应干员 (visibleMembers by tier; 替补 on an operator marked 未持有 in 干员持有;
-//              a tap opens 干员调配 at the operator, over this screen);
+//              thresholds, the description, 对应干员 (visibleMembers by tier; 替补 on an operator marked 未持有 in 干员持有);
 //   策略报告 — the strategies (bands.json) as tiles; the left: icon, name, 初始生命值, the effect, the modes it is offered
 //              in and its bonds;
 //   敌方资料 — 领袖 (bosses.json, the hidden variants left out) and 战术特训敌人 (factions.json types) tiles; the left: art,
 //              name, text and the leader with its escorts / the type's enemies; 查看 opens the enemy codex (全部 / 普通 /
 //              精英 / 领袖, a search; per stat the official handbook's letter grade — factions.json handbookLevels, from
-//              enemy_handbook_table levelInfoList: E … SS — with the enemy's own number beside it).
+//              enemy_handbook_table levelInfoList: E … SS — with the enemy's own number beside it);
+//   装备报告 — 规程 only. Base (non-golden) EQUIP of that version's items.json, tiers 1–6, shopSortId within a tier
+//              (the same order as the official tier-4 row). The left: the icon with its tier chip, the name, 基础效果
+//              (descRaw), 进阶效果 (the goldenId record's descRaw — no block when that record is absent), then flavor.
+//              The right: one section per tier, `[ N阶 ]` under the tier chip, then the item icons.
 // ⓘ opens 玩法说明 at its 进阶图鉴 chapter. The report and the codex are full-screen Modals (focus trap; Esc closes the
 // codex first, then the report; the focus returns to the lobby's button). The tab is remembered (sp.pref).
-// 本 fork 额外：进出场仍走 ui/transitions.js 的那条过渡（`is-leaving`），所以 Modal 的 class 由 cx 拼。
 // Styles: css/screens/sweep.css (sw-*).
-import { useEffect, useMemo, useRef, useState } from '../../vendor/hooks.module.js';
-import { html, Button, Icon, Modal, roman } from '../ui/components.js';
+
+import { useMemo, useState } from '../../vendor/hooks.module.js';
+import { html, Button, Icon, Modal, TierChip, roman } from '../ui/components.js';
 import { Img, RichText, GIcon } from '../ui/gameComponents.js';
-import { bondIconUrl, bandIconUrl, enemyIconUrl, factionIconUrl, chessAvatarUrl } from '../ui/assetUrls.js';
+import { bondIconUrl, bandIconUrl, enemyIconUrl, factionIconUrl, chessAvatarUrl, itemIconUrl } from '../ui/assetUrls.js';
 import { attackInterval, fmtNum } from '../ui/gameLogic.js';
 import { abilityRows } from '../ui/abilityLines.js';
 import { data, useData } from '../data.js';
 import { contentSet, pageVersion, retryContentSet } from '../content.js';
-import { DEFAULT_VERSION, shownVersion } from '../versions.js';
+import { DEFAULT_VERSION, shownVersion, versionById } from '../versions.js';
 import { useStore, loadPref, savePref } from '../store.js';
-import { loadoutStore, openLoadout } from '../ui/loadoutSync.js';
-import { openGuide, guidePages, guideStore } from '../ui/guide.js';
-import { useLeave } from '../ui/transitions.js';
+import { loadoutStore } from '../ui/loadoutSync.js';
+import { openGuide, guidePages } from '../ui/guide.js';
 import { t, N_ } from '../../../shared/i18n.js';
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
 const TAB_PREF = 'sweep.tab';
-const TABS = [
+const REPORT_TABS = [
   { id: 'bonds', name: N_('盟约报告'), icon: () => html`<${Icon} name="link" />` },
   { id: 'bands', name: N_('策略报告'), icon: () => html`<${Icon} name="rook" />` },
   { id: 'enemies', name: N_('敌方资料'), icon: () => html`<${GIcon} name="target" />` },
 ];
+// [ASSUMED] the official tab's equipment glyph is not in this icon set; shield is the glyph equipment offers already use.
+const EQUIP_TAB = { id: 'equip', name: N_('装备报告'), icon: () => html`<${Icon} name="shield" />` };
+const TAB_IDS = new Set([...REPORT_TABS.map((x) => x.id), EQUIP_TAB.id]);
+const EQUIP_TIERS = [1, 2, 3, 4, 5, 6];
 const MODE_NAME = { SINGLE: N_('独立模拟'), MULTI: N_('同盟模拟') };
 const RANK = { NORMAL: N_('普通'), ELITE: N_('精英'), BOSS: N_('领袖') };
 const APPLY = { MELEE: N_('近战'), RANGED: N_('远程'), ALL: N_('近战 / 远程'), NONE: N_('不攻击') };
@@ -42,33 +50,25 @@ const DMG = { phys: N_('物理'), arts: N_('法术'), heal: N_('治疗') };
 
 // ---- enemy grades ------------------------------------------------------------------------------------------------------
 
-const GRADES = ['E', 'D', 'C', 'B', 'B+', 'A', 'A+', 'S'];
 /**
- * Cut points per stat (a value at or past cut i earns GRADES[i + 1]), read off the spread of enemies.json — the codex's
- * letters say where an enemy stands among this game's enemies; the number beside each is the real one. `low`: smaller is
- * better (the attack interval).
+ * Letter grade of one stat by the official enemy handbook (factions.json `handbookLevels`, generated from
+ * enemy_handbook_table `levelInfoList`: ten grades E … SS, each a [min, max) band per stat; `interval` — the attack
+ * interval in seconds — grades the other way round). '—' when the enemy has no such value (no attack, no movement) or the
+ * value is in no band. [ASSUMED] the bands share their edges: a value on an edge takes the band that starts there.
+ * @param {string} key enemies.json stat (maxHp, atk, def, res, moveSpeed, interval, elementRes, elementDmgRes)
+ * @param {number|null|undefined} v @param {any[]} [levels] handbookLevels (default: the loaded factions.json)
+ * @returns {string}
  */
-const CUTS = {
-  maxHp: [2000, 5000, 10000, 20000, 40000, 80000, 200000],
-  atk: [200, 300, 450, 650, 850, 1100, 1600],
-  def: [50, 150, 300, 500, 800, 1100, 1600],
-  res: [10, 20, 35, 50, 60, 70, 85],
-  moveSpeed: [0.5, 0.7, 0.9, 1.1, 1.3, 1.6, 2],
-  interval: { low: true, cuts: [5, 3.5, 2.5, 2, 1.6, 1.2, 0.8] },
-  elementRes: [1, 3, 5, 8, 10, 15, 20],
-  elementDmgRes: [1, 5, 10, 20, 30, 40, 50],
-};
-
-/** Letter grade of one stat ('—' when the enemy has none: no attack, no movement). @param {string} key @param {any} v */
-export function enemyGrade(key, v) {
-  const spec = CUTS[key];
+export function enemyGrade(key, v, levels = data.get('factions')?.handbookLevels) {
   const n = Number(v);
-  if (!spec || v == null || !Number.isFinite(n)) return '—';
-  const low = !Array.isArray(spec) && spec.low;
-  const cuts = Array.isArray(spec) ? spec : spec.cuts;
-  let g = 0;
-  for (let i = 0; i < cuts.length; i++) if (low ? n <= cuts[i] : n >= cuts[i]) g = i + 1;
-  return GRADES[g];
+  if (v == null || !Number.isFinite(n) || !Array.isArray(levels)) return '—';
+  for (const l of levels) {
+    const band = l?.[key];
+    if (!Array.isArray(band)) continue;
+    const [lo, hi] = band;
+    if (n >= lo && (hi == null || n < hi)) return l.level;
+  }
+  return '—';
 }
 
 /**
@@ -97,30 +97,72 @@ export function bossEnemyKeys(boss) {
   return [...new Set(keys.filter((k) => typeof k === 'string' && k))];
 }
 
+/**
+ * 装备报告 is 规程's fourth tab. A covenant build, and data with no `config.version`, keep the three tabs.
+ * The gate is the family, not a chess / band / bond id (seasons reuse ids).
+ * @param {any} config config.json
+ * @returns {boolean}
+ */
+export function equipReportOn(config) {
+  return config?.version?.family === 'regulation';
+}
+
+/**
+ * The 装备报告's rows: base (non-golden) EQUIP of one items.json, tiers 1–6 in order, `shopSortId` within a tier
+ * (then id). Shop-excluded pieces stay — the official tier-4 row includes 灼燃维式重锤, which the shop never sells.
+ * `golden` is the `goldenId` record when it exists and is not the item itself; null means no 进阶效果 block.
+ * @param {Record<string, any> | any[] | null | undefined} items
+ * @returns {{ tier: number, items: { item: any, golden: any | null }[] }[]}
+ */
+export function equipReportGroups(items) {
+  const list = (Array.isArray(items) ? items : (items && typeof items === 'object' ? Object.values(items) : []))
+    .filter((it) => it && typeof it === 'object');
+  const byId = new Map();
+  for (const it of list) if (typeof it.id === 'string' && it.id) byId.set(it.id, it);
+  const sortId = (it) => (Number.isFinite(it.shopSortId) ? it.shopSortId : 1e9);
+  const base = list.filter((it) => it.itemType === 'EQUIP' && it.isGolden !== true
+    && typeof it.id === 'string' && it.id && EQUIP_TIERS.includes(it.tier));
+  base.sort((a, b) => a.tier - b.tier || sortId(a) - sortId(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const groups = [];
+  for (const tier of EQUIP_TIERS) {
+    const rows = [];
+    for (const item of base) {
+      if (item.tier !== tier) continue;
+      const gid = item.goldenId;
+      const golden = typeof gid === 'string' && gid && gid !== item.id ? byId.get(gid) || null : null;
+      rows.push({ item, golden });
+    }
+    if (rows.length) groups.push({ tier, items: rows });
+  }
+  return groups;
+}
+
 // ---- small pieces ------------------------------------------------------------------------------------------------------
 
 /** The big square at the top of the left panel (bracket corners, a ring behind a glyph or the art). */
-function Hero({ src, glyph = false, art = false, name, sub = null, fallback }) {
-  return html`<div class="sw-hero">
-    <span class=${cx('sw-hero__box', glyph && 'is-glyph', art && 'is-art')}>
+function Hero({ src, glyph = false, art = false, item = false, name, sub = null, fallback, badge = null }) {
+  return html`<div class=${cx('sw-hero', item && 'sw-hero--item')}>
+    <span class=${cx('sw-hero__box', glyph && 'is-glyph', art && 'is-art', item && 'is-item')}>
       <i class="sw-hero__c sw-hero__c--tl"></i><i class="sw-hero__c sw-hero__c--br"></i>
       <span class="sw-hero__img"><${Img} src=${src} fallback=${fallback} /></span>
+      ${badge}
     </span>
     <h3 class="sw-hero__name">${name}</h3>
     ${sub ? html`<span class="sw-hero__sub">${sub}</span>` : null}
   </div>`;
 }
 
-/** One tile of the right grid. */
-function Tile({ on, onClick, title, kind, children, badge = null }) {
-  return html`<button type="button" class=${cx('sw-tile', `sw-tile--${kind}`, on && 'is-on')} onClick=${onClick} title=${title} aria-pressed=${on ? 'true' : 'false'}>
+/** One tile of the right grid. `label` is the accessible name when the tile is only an icon. */
+function Tile({ on, onClick, title, kind, children, badge = null, label = null }) {
+  return html`<button type="button" class=${cx('sw-tile', `sw-tile--${kind}`, on && 'is-on')} onClick=${onClick} title=${title}
+      aria-label=${label || undefined} aria-pressed=${on ? 'true' : 'false'}>
     <span class="sw-tile__in">${children}</span>${badge}
   </button>`;
 }
 
-/** A section of the right grid: a glyph above `[ name ]`, then its tiles. */
-function Section({ name, glyph, children, count = null }) {
-  return html`<section class="sw-sec">
+/** A section of the right grid: a glyph above `[ name ]`, then its tiles. `tier` is the 装备报告's tier chip. */
+function Section({ name, glyph, children, count = null, tier = null }) {
+  return html`<section class=${cx('sw-sec', tier != null && 'sw-sec--tier', tier != null && `sw-sec--t${tier}`)}>
     <header class="sw-sec__head">
       <span class="sw-sec__glyph">${glyph}</span>
       <span class="sw-sec__name"><i>[</i>${name}${count != null ? html`<small class="num">${count}</small>` : null}<i>]</i></span>
@@ -160,14 +202,14 @@ function BondPanel({ bond, m, notOwned }) {
     ${members.length ? html`<div class="sw-box">
       <div class="sw-box__head">
         <span class="sw-box__k"><${Icon} name="user" />${t('对应干员')}<small class="num">${members.length}</small></span>
-        <span class="sw-box__note">${anyOff ? html`<span class="sw-box__swap" aria-hidden="true">⇄</span>${t('未持有的干员由替补干员上场')}` : t('点击干员前往干员调配')}</span>
+        ${anyOff ? html`<span class="sw-box__note"><span class="sw-box__swap" aria-hidden="true">⇄</span>${t('未持有的干员由替补干员上场')}</span>` : null}
       </div>
-      <div class="sw-ops">${members.map((c) => html`<button key=${c.chessId} type="button" class=${cx('sw-op', `sw-op--t${c.tier}`, off.has(c.chessId) && 'is-standin')}
-          onClick=${() => openLoadout('sweep', c.chessId, 'loadout')} title=${t('{name} · 前往干员调配', { name: c.name })}>
+      <div class="sw-ops">${members.map((c) => html`<span key=${c.chessId} class=${cx('sw-op', `sw-op--t${c.tier}`, off.has(c.chessId) && 'is-standin')}
+          title=${c.name}>
         <${Img} src=${chessAvatarUrl(m, c)} fallback=${html`<span class="sw-op__txt">${[...(c.name || '?')][0]}</span>`} />
         <span class="sw-op__tier">${roman(c.tier)}</span>
         ${off.has(c.chessId) ? html`<span class="sw-op__sub">${t('替补')}</span>` : null}
-      </button>`)}</div>
+      </span>`)}</div>
     </div>` : null}
   </div>`;
 }
@@ -293,9 +335,9 @@ function EnemiesTab({ m, sel, onSel, onCodex }) {
 
 const STAT_ROWS = [
   ['maxHp', N_('生命值'), 'plus'], ['moveSpeed', N_('移动速度'), 'chevrons'],
-  ['atk', N_('攻击力'), 'sword'], ['interval', N_('攻击速度'), 'hourglass'],
+  ['atk', N_('攻击力'), 'sword'], ['interval', N_('攻击间隔'), 'hourglass'],
   ['def', N_('防御力'), 'shield'], ['elementRes', N_('元素抗性'), 'snow'],
-  ['res', N_('法术抗性'), 'info'], ['elementDmgRes', N_('损伤抵抗'), 'box'],
+  ['res', N_('法术抗性'), 'bolt'], ['elementDmgRes', N_('损伤抵抗'), 'warn'],
 ];
 
 function statValue(e, key) {
@@ -332,12 +374,12 @@ function CodexDetail({ e, m }) {
     <div class="sw-cd__main">
       <div class="sw-cd__art">
         <span class="sw-cd__img"><${Img} src=${enemyIconUrl(m, e.key)} fallback=${html`<${GIcon} name="skull" />`} /></span>
-        <span class="sw-cd__mass" title=${t('重量等级：越重越难被推动或拉动')}><${Icon} name="box" />${t('重量')}<b class="num">${s.massLevel ?? 0}</b></span>
+        <span class="sw-cd__mass" title=${t('重量等级：越重越难被推动或拉动')}>${t('重量')}<b class="num">${s.massLevel ?? 0}</b></span>
       </div>
       <div class="sw-cd__stats">${STAT_ROWS.map(([k, label, icon]) => {
         const v = statValue(e, k);
         return html`<span key=${k} class="sw-stat">
-          <span class="sw-stat__k"><${Icon} name=${icon} />${t(label)}</span>
+          <span class="sw-stat__k"><${GIcon} name=${icon} />${t(label)}</span>
           <small class="sw-stat__v num">${statText(k, v)}</small>
           <b class=${cx('sw-stat__g', `g-${enemyGrade(k, v).replace('+', 'p').replace('—', 'none')}`)}>${enemyGrade(k, v)}</b>
         </span>`;
@@ -389,7 +431,37 @@ function EnemyCodex({ open, m, onClose }) {
         ${cur ? html`<${CodexDetail} e=${cur} m=${m} />` : null}
       </div>
     </div>
+  <//>`;
+}
+
+// ---- 装备报告 (规程) ---------------------------------------------------------------------------------------------------
+
+function EquipPanel({ row, m }) {
+  const { item, golden } = row;
+  // [ASSUMED] flavor is shown as stored: the lines that are quotations already carry their quotation marks.
+  const flavor = typeof item.flavor === 'string' ? item.flavor.trim() : '';
+  return html`<div class="sw-detail">
+    <${Hero} item=${true} src=${itemIconUrl(m, item)} name=${item.name}
+      badge=${html`<${TierChip} tier=${item.tier} size="md" class="sw-hero__tier" />`}
+      fallback=${html`<span class="sw-hero__txt">${[...(item.name || '?')][0]}</span>`} />
+    <div class="sw-text">
+      <h4 class="sw-fx__k">${t('基础效果')}</h4>
+      <${RichText} as="p" text=${item.descRaw || item.desc || ''} />
+      ${golden ? html`<h4 class="sw-fx__k sw-fx__k--gold">${t('进阶效果')}</h4>
+        <${RichText} as="p" text=${golden.descRaw || golden.desc || ''} />` : null}
+      ${flavor ? html`<${RichText} as="p" class="sw-flavor" text=${flavor} />` : null}
+    </div>
   </div>`;
+}
+
+function EquipTab({ m, groups, sel, onSel }) {
+  return groups.map((g) => html`<${Section} key=${g.tier} tier=${g.tier} name=${t('{tier}阶', { tier: g.tier })}
+      glyph=${html`<${TierChip} tier=${g.tier} size="sm" />`}>
+    ${g.items.map(({ item }) => html`<${Tile} key=${item.id} kind="item" on=${sel === item.id} onClick=${() => onSel(item.id)}
+        title=${item.name} label=${item.name}>
+      <span class="sw-item"><${Img} src=${itemIconUrl(m, item)} fallback=${html`<span class="sw-item__txt">${[...(item.name || '?')][0]}</span>`} /></span>
+    <//>`)}
+  <//>`);
 }
 
 // ---- the screen --------------------------------------------------------------------------------------------------------
@@ -415,13 +487,20 @@ export function SweepReport({ onClose }) {
     && (version === DEFAULT_VERSION || (content.version === version && content.status === 'ready'));
   const m = data.get('assets');
   const notOwned = useStore((s) => s.notOwned, Object.is, loadoutStore);
-  const [tab, setTabState] = useState(() => { const v = loadPref(TAB_PREF, 'bonds'); return TABS.some((x) => x.id === v) ? v : 'bonds'; });
+  // 规程's fourth tab. While its data is still loading, the registry is enough to show the tab; once the set is on
+  // the page, config.version.family has to agree. A remembered 装备 stays remembered on a covenant version (the bar
+  // falls back to 盟约报告) and comes back when 规程 is shown again.
+  const askedRegulation = versionById(version)?.family === 'regulation';
+  const equipOn = askedRegulation && (!ready || equipReportOn(data.get('config')));
+  const tabs = equipOn ? [...REPORT_TABS, EQUIP_TAB] : REPORT_TABS;
+  const [tab, setTabState] = useState(() => { const v = loadPref(TAB_PREF, 'bonds'); return TAB_IDS.has(v) ? v : 'bonds'; });
   const setTab = (v) => { setTabState(v); savePref(TAB_PREF, v); };
+  const tabOn = tabs.some((x) => x.id === tab) ? tab : 'bonds';
   const [bondSel, setBondSel] = useState(null);
   const [bandSel, setBandSel] = useState(null);
   const [enemySel, setEnemySel] = useState(null);
+  const [itemSel, setItemSel] = useState(null);
   const [codex, setCodex] = useState(null);
-  const [leaving, leave] = useLeave(onClose);
 
   // defaults once the data is there: the first tile of each tab
   const bonds = ready ? (data.list('bonds') || []).filter((b) => b && b.bondId).sort((a, b) => (a.identifier ?? 99) - (b.identifier ?? 99)) : [];
@@ -430,25 +509,11 @@ export function SweepReport({ onClose }) {
   const band = data.lookup('bands', bandSel) || bands[0] || null;
   const firstBoss = ready ? bossList()[0] : null;
   const eSel = enemySel || (firstBoss ? { kind: 'boss', id: firstBoss.bossId } : null);
-
-  useEffect(() => {
-    document.body.classList.add('sw-open');
-    return () => document.body.classList.remove('sw-open');
-  }, []);
-  // registered once, so it runs before the handlers of what opens above (干员调配 from a member, 玩法说明, a dialog),
-  // which keep their own Esc
-  const esc = useRef(null);
-  esc.current = () => (codex ? setCodex(null) : leave());
-  useEffect(() => {
-    const onKey = (ev) => {
-      if (ev.key !== 'Escape' || ev.defaultPrevented) return;
-      if (loadoutStore.get().open || guideStore.get().open || document.querySelector('.modal, .guide')) return;
-      ev.preventDefault();
-      esc.current();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  // Items arrive with the version set (the same apply as bonds). Not loaded on a covenant report: a load() here
+  // would fetch 第二期下半's items.json while 规程's set is still checking.
+  const groups = ready && tabOn === 'equip' ? equipReportGroups(data.list('items')) : [];
+  const rows = groups.flatMap((g) => g.items);
+  const row = rows.find((r) => r.item.id === itemSel) || rows[0] || null;
 
   let left = null;
   let right;
@@ -457,12 +522,15 @@ export function SweepReport({ onClose }) {
       <${Button} onClick=${retryContentSet}>${t('重试')}<//></div>`;
   } else if (!ready) {
     right = html`<p class="sw-loading">${t('正在读取报告…')}</p>`;
-  } else if (tab === 'bonds') {
+  } else if (tabOn === 'bonds') {
     left = bond ? html`<${BondPanel} key=${bond.bondId} bond=${bond} m=${m} notOwned=${notOwned} />` : null;
     right = html`<${BondsTab} m=${m} sel=${bond?.bondId} onSel=${setBondSel} />`;
-  } else if (tab === 'bands') {
+  } else if (tabOn === 'bands') {
     left = band ? html`<${BandPanel} key=${band.bandId} band=${band} m=${m} />` : null;
     right = html`<${BandsTab} m=${m} sel=${band?.bandId} onSel=${setBandSel} />`;
+  } else if (tabOn === 'equip') {
+    left = row ? html`<${EquipPanel} key=${row.item.id} row=${row} m=${m} />` : null;
+    right = html`<${EquipTab} m=${m} groups=${groups} sel=${row?.item.id} onSel=${setItemSel} />`;
   } else {
     left = eSel ? html`<${EnemyPanel} key=${`${eSel.kind}:${eSel.id}`} sel=${eSel} m=${m} onCodex=${setCodex} />` : null;
     right = html`<${EnemiesTab} m=${m} sel=${eSel || {}} onSel=${setEnemySel} onCodex=${setCodex} />`;
@@ -470,25 +538,24 @@ export function SweepReport({ onClose }) {
 
   // the codex is the report's sibling, not its child: the report's body lifts its children over the backdrop
   // (position: relative), which would pull a nested Modal out of its fixed layer
-  return html`<${Modal} open=${true} onClose=${onClose} class=${cx('sw', leaving && 'is-leaving')}
-    veilClass="sw-veil" closeOnBackdrop=${false} data-tab=${tab}>
+  return html`<${Modal} open=${true} onClose=${onClose} class="sw" veilClass="sw-veil" closeOnBackdrop=${false}>
     <div class="sw__bg" aria-hidden="true"><i class="sw__mist"></i><i class="sw__lines"></i></div>
     <header class="sw-top">
       <div class="sw-top__left">
-        <button type="button" class="sw-back" onClick=${leave} aria-label=${t('返回')} title=${t('返回 (Esc)')}>
+        <button type="button" class="sw-back" onClick=${onClose} aria-label=${t('返回')} title=${t('返回 (Esc)')}>
           <${Icon} name="chevronLeft" /><span class="sw-back__mark">S.W.E.E.P.</span>
         </button>
         <button type="button" class="sw-info" onClick=${() => openGuide(handbookPage())} aria-label=${t('进阶图鉴')} title=${t('进阶图鉴：敌人类型、盟约、策略与轮选')}><${Icon} name="info" /></button>
       </div>
-      <nav class="sw-tabs" role="tablist" aria-label=${t('S.W.E.E.P.报告')}>
-        ${TABS.map((x) => html`<button key=${x.id} type="button" role="tab" aria-selected=${tab === x.id ? 'true' : 'false'} class=${cx('sw-tab', tab === x.id && 'is-on')}
+      <nav class=${cx('sw-tabs', tabs.length > 3 && 'sw-tabs--4')} role="tablist" aria-label=${t('S.W.E.E.P.报告')}>
+        ${tabs.map((x) => html`<button key=${x.id} type="button" role="tab" aria-selected=${tabOn === x.id ? 'true' : 'false'} class=${cx('sw-tab', tabOn === x.id && 'is-on')}
           onClick=${() => setTab(x.id)}><span class="sw-tab__icon">${x.icon()}</span><span>${t(x.name)}</span></button>`)}
       </nav>
     </header>
-    <main class="sw-body">
+    <main class="sw-body" data-tab=${tabOn}>
       <aside class="sw-left">${left}</aside>
       <div class="sw-right">${right}</div>
     </main>
-    ${codex ? html`<${EnemyCodex} key=${`${codex.title}|${codex.key}`} open=${codex} m=${m} onClose=${() => setCodex(null)} />` : null}
-  </div>`;
+  <//>
+  ${codex ? html`<${EnemyCodex} key=${`${codex.title}|${codex.key}`} open=${codex} m=${m} onClose=${() => setCodex(null)} />` : null}`;
 }

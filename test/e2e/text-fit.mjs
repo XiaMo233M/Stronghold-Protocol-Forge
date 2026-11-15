@@ -1,4 +1,4 @@
-// The browser side of the text-fit checks (test/ui/room-fit.e2e.test.js, test/ui/lobby-hub.e2e.test.js — §37.18 review):
+// The browser side of the text-fit checks (test/ui/room-fit.e2e.test.js, test/ui/lobby-hub.e2e.test.js — §35.18 review):
 // a function passed to page.evaluate. Not a test file itself.
 
 /**
@@ -13,7 +13,7 @@
  * before a small kana and ー); an ellipsis (one line's, or a line clamp's) anywhere but a player's name (.seat__name, .specbar__who) or a
  * plugin mode's own name (.room-mode, cut by design like a name), or a selector explicitly allowed by the caller;
  * the page scrolling. `extraEllipsis` scopes an existing compact-label policy to the suite that checks its full
- * accessible name and control bounds (the room's version pill, §37.23.11).
+ * accessible name and control bounds (the room's version pill, §35.23.11).
  */
 export function textProblems(rootSel, extraEllipsis = '') {
   const TOL = 2;
@@ -30,9 +30,20 @@ export function textProblems(rootSel, extraEllipsis = '') {
   const noStart = /[ぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶㇰ-ㇿーゝゞヽヾ々、。，．・：；！？）」』】〉》〕］｝〗〙]/;
   // may a line break between p and c? a space / hyphen / slash / dot before it; between CJK or kana; at Hangul only where
   // one side is not a letter or digit (punctuation such as ：)
-  // (a hyphen before a digit is part of a code such as AC-2, not a place to break: §37.18 review of the text-fit fixes)
+  // (a hyphen before a digit is part of a code such as AC-2, not a place to break: §35.18 review of the text-fit fixes)
   const breakOk = (p, c) => (/[\s\-\u2010\u2013\u2014/\u00b7\u30fb]/.test(p) && !(/[-\u2010]/.test(p) && /\d/.test(c)))
     || (hangul.test(p) || hangul.test(c) ? !(letter.test(p) && letter.test(c)) : cjk.test(p) || cjk.test(c));
+  // the word of text node `n` around index `i` is wider than `el`'s content box (measured on one line in its font)
+  const wordWider = (n, i, el) => {
+    const t = n.textContent;
+    let a = i, b = i;
+    while (a > 0 && !/\s/.test(t[a - 1])) a--;
+    while (b < t.length && !/\s/.test(t[b])) b++;
+    const cs = getComputedStyle(el), g = document.createElement('canvas').getContext('2d');
+    g.font = cs.font;
+    const box = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    return g.measureText(t.slice(a, b)).width > box + 0.5;
+  };
   for (const root of document.querySelectorAll(rootSel)) {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
@@ -47,7 +58,7 @@ export function textProblems(rootSel, extraEllipsis = '') {
       const lh = cs.lineHeight === 'normal' ? parseFloat(cs.fontSize) * 1.2 : parseFloat(cs.lineHeight);
       const label = `${name(el)} "${txt.slice(0, 30)}"`;
       let boxes = rects.map((r) => { const m = (r.top + r.bottom) / 2, hh = Math.min(r.height, lh) / 2; return { l: r.left, r: r.right, t: m - hh, b: m + hh }; });
-      // An ellipsis — on one line, or the last of a line clamp (a long name's two lines on a phone, §37.51): only the
+      // An ellipsis — on one line, or the last of a line clamp (a long name's two lines on a phone, §35.51): only the
       // known name exceptions and a caller's scoped exception; what shows is the box (a clamp's later lines are hidden).
       const clamped = (a) => { const v = getComputedStyle(a).webkitLineClamp; return !!v && v !== 'none' && a.scrollHeight > a.clientHeight + 1; };
       const cut = [el, el.parentElement].find((a) => a && ((getComputedStyle(a).textOverflow === 'ellipsis' && a.scrollWidth > a.clientWidth + 1) || clamped(a)));
@@ -97,8 +108,12 @@ export function textProblems(rootSel, extraEllipsis = '') {
           const p = n.textContent[i - 1] || ' ';
           if (prevTop != null && rr.top > prevTop + rr.height / 2) {
             const at = `${n.textContent.slice(Math.max(0, i - 6), i)}|${n.textContent.slice(i, i + 6)}`;
-            // (a player's name is any string: on a phone its second line may start inside a long word — §37.51)
-            if (!breakOk(p, c) && !el.closest('.seat__name')) { out.push(`broken inside a word (${at}): ${label}`); break; }
+            // (a player's name is any string: on a phone its second line may start inside a long word — §35.51; a picker's
+            // operator name breaks inside a word only when that word alone is wider than the tile: overflow-wrap
+            // break-word, English 「Thunderbringer」)
+            if (!breakOk(p, c) && !el.closest('.seat__name') && !(el.closest('.cardpick__name') && wordWider(n, i, el.closest('.cardpick__name')))) {
+              out.push(`broken inside a word (${at}): ${label}`); break;
+            }
             if (noStart.test(c)) { out.push(`a line starts with ${c} (${at}): ${label}`); break; }
           }
           prevTop = rr.top;

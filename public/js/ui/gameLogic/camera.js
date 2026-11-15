@@ -1,7 +1,7 @@
 // ui/gameLogic/camera.js — prep camera, boss-field tile mapping, owner band. Re-exported from ../gameLogic.js.
 
-import { PHASE } from '../../../../shared/constants.js';
-import { fieldTile as layoutFieldTile, boardTile as layoutBoardTile, mapRectOf } from '../../render/layout.js';
+import { GEO, PHASE } from '../../../../shared/constants.js';
+import { BOSS_ROW_SHIFT, MAX_COL } from '../../render/prepfield.js';
 import { int, isObj } from './shared.js';
 
 /** Server-owned random pairs. Seat inference is only for an older server without the field. */
@@ -26,17 +26,8 @@ function prepPair(pub, myId) {
  * @param {string|null} myId
  * @returns {{ kind: 'prep'|'bossPrep', opts: { rect?: { r0: number, r1: number, c0: number, c1: number }, side: 'L'|'R' } }}
  */
-/**
- * The camera request of a map's own prep board: the map's `prep` rect (shared/layout.js `battle.prep` — the board plus
- * the bench row above it), or the whole boss field in a boss round's prep (`bossPrep`, framed on the player's half).
- * Official records give the historical `{ r0: 7, r1: 12, c0: 0, c1: 10 }`; a big map gives its own band.
- * @param {any} pub m.public
- * @param {string|null} myId
- * @param {any} [layout] the map's own layout (`layoutOf(stage)`); omitted → the official one
- * @returns {{ kind: 'prep'|'bossPrep', opts: { rect?: object, side: 'L'|'R' } }}
- */
-export function prepCamera(pub, myId, layout = null) {
-  const normal = { kind: 'prep', opts: { rect: mapRectOf(layout, 'prep'), side: 'L' } };
+export function prepCamera(pub, myId) {
+  const normal = { kind: 'prep', opts: { rect: { ...GEO.NORMAL_RECT }, side: 'L' } };
   const r = pub?.round;
   if (!Number.isInteger(r) || r <= 0 || !(r === pub.bossRound || r === pub.hiddenRound)) return normal;
   const idx = prepPair(pub, myId).indexOf(myId);
@@ -81,8 +72,8 @@ export function teamFrameIds(pub, myId) {
  * and folded (an eliminated player's board, which shows no bar, keeps the shop camera).
  * @returns {{ kind: 'prep'|'bossPrep', opts: { rect?: object, side: 'L'|'R', shop: boolean } }}
  */
-export function prepCameraFor(pub, myId, folded = false, layout = null) {
-  const c = prepCamera(pub, myId, layout);
+export function prepCameraFor(pub, myId, folded = false) {
+  const c = prepCamera(pub, myId);
   return { kind: c.kind, opts: { ...c.opts, shop: !folded } };
 }
 
@@ -93,14 +84,14 @@ export function prepCameraFor(pub, myId, folded = false, layout = null) {
  * (`busy`: the drop target and the wheel sit on tiles of the camera in use — the caller asks again once that ends), and
  * nothing when the current request (`current` { kind, opts }) already has that shop state.
  * @param {{ pub: any, myId: string|null, ownPrep: boolean, folded: boolean, pen?: boolean, busy?: boolean,
- *   current?: { kind: string, opts?: { shop?: boolean } }|null, layout?: any }} s
+ *   current?: { kind: string, opts?: { shop?: boolean|'partial' } }|null }} s
  * @returns {{ kind: 'prep'|'bossPrep', opts: object }|null}
  */
 export function foldCamera(s) {
   if (!s || !s.ownPrep || s.pen || s.busy) return null;
-  const want = prepCameraFor(s.pub, s.myId, !!s.folded, s.layout || null);
+  const want = prepCameraFor(s.pub, s.myId, !!s.folded);
   const cur = s.current;
-  if (cur && cur.kind === want.kind && (cur.opts?.shop !== false) === want.opts.shop) return null;
+  if (cur && cur.kind === want.kind && (cur.opts?.shop ?? true) === want.opts.shop) return null;
   return want;
 }
 
@@ -158,17 +149,19 @@ export function deployZoomRemember(step, frame) {
  * (`foldCamera`). `releaseDeploy` skips the busy deferral for the one frame a deploy zoom is given back, so turning
  * the setting off mid-drag cannot leave the camera zoomed. A hand-made fold while the setting is off and no deploy
  * zoom is in effect still defers (`busy`).
- * @param {{ pub: any, myId: string|null, deployFold?: boolean, releaseDeploy?: boolean, folded: boolean,
+ * @param {{ pub: any, myId: string|null, deployFold?: boolean, partial?: boolean, releaseDeploy?: boolean, folded: boolean,
  *   ownPrep: boolean, pen?: boolean, busy?: boolean,
- *   current?: { kind: string, opts?: { shop?: boolean } }|null }|null|undefined} s
+ *   current?: { kind: string, opts?: { shop?: boolean|'partial' } }|null }|null|undefined} s
  * @returns {{ kind: 'prep'|'bossPrep', opts: object }|null}
  */
 export function prepDeployCamera(s) {
   if (!s) return null;
   if (s.deployFold) {
-    const want = prepCameraFor(s.pub, s.myId, true);
+    const full = prepCameraFor(s.pub, s.myId, true);
+    // [ASSUMED] #692: a middle deploy level keeps a reduced shop, only when it was open before the drag.
+    const want = { ...full, opts: { ...full.opts, shop: s.partial ? 'partial' : false } };
     const cur = s.current;
-    if (cur && cur.kind === want.kind && cur.opts?.shop === false) return null;
+    if (cur && cur.kind === want.kind && cur.opts?.shop === want.opts.shop) return null;
     return want;
   }
   return foldCamera({
@@ -183,26 +176,24 @@ export function prepDeployCamera(s) {
  * with `field`) reads that field's tiles.
  * @returns {'normal'|'bossL'|'bossR'}
  */
-export function deployFieldOf(pub, myId, layout = null) {
-  const cam = prepCamera(pub, myId, layout);
+export function deployFieldOf(pub, myId) {
+  const cam = prepCamera(pub, myId);
   return cam.kind === 'bossPrep' ? (cam.opts.side === 'R' ? 'bossR' : 'bossL') : 'normal';
 }
 
 /**
- * The map tile [row, col] of board tile (r, c) on deploy field `field` (server/match/board.js fieldTile): the boss
- * prep's display transform (render/prepfield.js bossPrepField: the row shift the map's own boss rect gives, the right
- * half mirrored about its mirror column). `layout` omitted keeps meaning "the official 19×21 map" — the historical
- * `r − 7` / `20 − c` — because test/match/playtest5-deploy.test.js compares this against the server's own default.
+ * The stage tile [row, col] of board tile (r, c) on deploy field `field` (server/match/board.js fieldTile): the boss
+ * prep's display transform (render/prepfield.js bossPrepField: row − 7, the right half mirrored col c → 20 − c).
  */
-export function fieldTile(field, r, c, layout = null) {
+export function fieldTile(field, r, c) {
   if (field !== 'bossL' && field !== 'bossR') return [r, c];
-  return layoutFieldTile(field, r, c, layout || undefined);
+  return [r + BOSS_ROW_SHIFT, field === 'bossR' ? MAX_COL - c : c];
 }
 
-/** The board tile of map tile (r, c) on deploy field `field` (server/match/board.js boardTileOf). */
-export function boardTileOf(field, r, c, layout = null) {
+/** The board tile of stage tile (r, c) on deploy field `field` (server/match/board.js boardTileOf). */
+export function boardTileOf(field, r, c) {
   if (field !== 'bossL' && field !== 'bossR') return [r, c];
-  return layoutBoardTile(field, r, c, layout || undefined);
+  return [r - BOSS_ROW_SHIFT, field === 'bossR' ? MAX_COL - c : c];
 }
 
 /** The band (策略) a player picked, from m.public.players[].bandId (Match.js marksPublic) — the detail card shows it

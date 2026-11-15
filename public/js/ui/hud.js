@@ -27,24 +27,32 @@
 // 准备就绪 is refused while the temp overflow row (临时整备区) holds pieces: the reason shows under the button
 // (user playtest #3 item 3; the row's own label is ui/underframe.js TempRowNotice).
 
-import { useEffect, useRef, useState } from '../../vendor/hooks.module.js';
-import { PHASE } from '../../../shared/constants.js';
-import { html, Button, Icon, PingPill, Countdown, Tooltip, MicroLabel, DifficultyTag, Modal, useTicker } from './components.js';
+import { useEffect, useMemo, useRef, useState } from '../../vendor/hooks.module.js';
+import { PHASE, DIFFICULTY_NAMES } from '../../../shared/constants.js';
+import { html, Button, Icon, PingPill, Countdown, Tooltip, MicroLabel, DifficultyTag, Modal, useTicker, secondsLeft } from './components.js';
 import { Sprite, LpTower, GIcon, LocalSprite } from './gameComponents.js';
-// 组件级改写（DESIGN §28.19）：`game.hud.topBar` 是引擎的具名组件之一（对局 HUD 的顶栏），包声明的 wraps 就长在它上面。
-import { modComponent } from './modComponents.js';
-import { localAsset, data } from '../data.js';
+import { data, getMode, localAsset } from '../data.js';
 import { uiUrl } from './assetUrls.js';
 import { reducedMotion } from './device.js';
 import { serverNow } from '../store.js';
 import { isCombatPhase, isBossPhase, prepCapsuleLabel, bossFrac, bossPctText, fmtNum, shopBlockReason } from './gameLogic.js';
 import { overtimeState, overtimeDrainPerSec, remainAt } from './matchStatus.js';
-import { hotkeyLabelOf } from './settings.js';
-import { UnofficialMark, ruleLine } from './pluginTag.js';
-// 倍速的档位表来自 runner（一份真相）：按钮只显示与循环它，实际生效由 `runner.setRate` 负责。
-import { RATE_STEPS } from '../battle/runner.js';
+import { hotkeyLabelOf, useSettings, settingsStore } from './settings.js';
+import { usePrefabPack } from './prefab/view.js';
+import { RegHudBand, RegCountdown, RegReadyFace, packHud, cornerOffset } from './prefab/hud.js';
 import { t, tParts, N_ } from '../../../shared/i18n.js';
+import { UnofficialMark, ruleLine } from './pluginTag.js';
 import { TestMark } from './testConsole.js';
+
+/**
+ * The match's own mode name when it is not its difficulty's (规程's 规程等级 n / 极速模拟: config.modes[modeId].name), else
+ * null — every 盟约 mode and 规程's co-op ones are named after their difficulty.
+ * @param {{ modeId?: string, difficulty?: string } | null | undefined} pub
+ */
+export function ladderName(pub) {
+  const name = pub?.modeId ? getMode(pub.modeId)?.name : null;
+  return typeof name === 'string' && name && name !== (DIFFICULTY_NAMES[pub.difficulty] ? t(DIFFICULTY_NAMES[pub.difficulty]) : null) ? name : null;
+}
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
 
@@ -98,7 +106,7 @@ export function PhaseCapsule({ pub, hud, miss = null }) {
     // server's b.pool, or the server's 20 Hz stream); m.public.bossHp refreshes at ~1 Hz and lags the leader's death
     const boss = hud?.boss || pub.bossHp || null;
     const frac = bossFrac(boss);
-    return html`<div class="capsule capsule--boss" role="status">
+    return html`<div class="capsule capsule--boss" role="status" data-banner="bossDamage">
       <${Sprite} k="hudPanel/icon_boss" class="capsule__icon" fallback=${html`<${GIcon} name="skull" class="capsule__icon" />`} />
       ${hud?.total != null ? html`<span class="capsule__kills num"><b>${hud.resolved ?? hud.killed ?? 0}</b>/${hud.total}</span>` : null}
       <div class="bossbar" title=${boss ? `${fmtNum(boss.hp)} / ${fmtNum(boss.max)}` : t('敌方领袖')}>
@@ -339,7 +347,8 @@ export function pendingTip(lp, pending, { unite = false, cap = 10, left = null }
  * @param {any} priv m.private
  * @returns {{ count: number, items: number }}
  */
-export function tempInfo(priv) {
+export function tempInfo(priv, config = data.get('config')) {
+  if (config?.version?.rules?.equipHand === true) return { count: priv?.stashCount || 0, items: 0 };
   const list = (Array.isArray(priv?.temp) ? priv.temp : []).filter((p) => p && typeof p === 'object');
   return { count: list.length, items: list.filter((p) => p.kind === 'item').length };
 }
@@ -348,8 +357,9 @@ export function tempInfo(priv) {
 export const TEMP_RULE = N_('放入整备区或战场、配发或使用后才能准备就绪；休整期结束时仍留在临时整备区的单位将被销毁');
 
 /** Why 准备就绪 is refused while the temp row holds pieces (null when it is empty). */
-export function tempReadyReason(priv) {
-  const info = tempInfo(priv);
+export function tempReadyReason(priv, config = data.get('config')) {
+  const info = tempInfo(priv, config);
+  if (config?.version?.rules?.equipHand === true) return info.count ? t('暂存 {count} 个单位：{rule}', { count: info.count, rule: t('有空位时自动移入；休整期结束时仍在暂存的单位将被销毁') }) : null;
   return info.count ? t('临时整备区还有 {count} 个单位：{rule}', { count: info.count, rule: t(TEMP_RULE) }) : null;
 }
 
@@ -358,25 +368,33 @@ export function tempReadyReason(priv) {
  * under it (not only on hover): "临时整备区 N 个单位待处理" (user playtest #3 item 3), "请先完成教鞭选择".
  * @param {{ priv:any, onToggle:(ready:boolean)=>void, busy?:boolean, readyCount?:number, total?:number }} props
  */
-export function ReadyToggle({ priv, onToggle, busy, readyCount, total }) {
+export function ReadyToggle({ priv, onToggle, busy, readyCount, total, pack = null, corner = false }) {
   const ready = !!priv?.ready;
   const temp = tempInfo(priv);
-  const choice = !!priv?.personalChoice;
-  const reason = !ready ? (choice ? shopBlockReason('ready', { priv, editable: true }) : tempReadyReason(priv) || shopBlockReason('ready', { priv, editable: true })) : null;
+  const choice = !!(priv?.personalChoice || priv?.commandDraft);
+  const reason = !ready ? (choice ? shopBlockReason('ready', { config: data.get('config'), priv, editable: true }) : tempReadyReason(priv) || shopBlockReason('ready', { config: data.get('config'), priv, editable: true })) : null;
   const why = !ready && (choice || temp.count > 0);
-  const btn = html`<button type="button" class=${cx('readybtn', 'tapx', ready && 'is-on', busy && 'is-busy')} disabled=${!!reason || busy}
+  // 规程 with an official pack: its panel_prep_ready face (ui/prefab/hud.js); the words stay for screen readers
+  const face = pack && packHud(pack).ready;
+  const btn = html`<button type="button" class=${cx('readybtn', 'tapx', ready && 'is-on', busy && 'is-busy', face && 'readybtn--pf')} disabled=${!!reason || busy}
       aria-pressed=${ready ? 'true' : 'false'} aria-describedby=${why ? 'readywrap-why' : undefined} onClick=${() => onToggle(!ready)}>
-    <span class="readybtn__box">${ready ? html`<${Icon} name="check" />` : null}</span>
+    ${face ? html`<${RegReadyFace} pack=${pack} ready=${ready} still=${settingsStill()} />` : html`<span class="readybtn__box">${ready ? html`<${Icon} name="check" />` : null}</span>`}
     <span class="readybtn__label">${ready ? t('取消准备') : t('准备就绪')}</span>
     <kbd class="readybtn__key">${hotkeyLabelOf('ready')}</kbd>
   </button>`;
-  return html`<div class="readywrap">
+  return html`<div class=${cx('readywrap', corner && 'readywrap--pf')}>
     ${reason ? html`<${Tooltip} text=${reason} placement="bottom">${btn}<//>` : btn}
     ${why ? html`<span class="readywrap__why" id="readywrap-why" role="status" data-testid="ready-why">
       <${Icon} name="warn" />${choice ? html`<span>${reason}</span>`
+        : data.get('config')?.version?.rules?.equipHand === true ? html`<span>${reason}</span>`
         : html`<span>${tParts('临时整备区 {n} 个单位待处理', { n: html`<b class="num">${temp.count}</b>`, count: temp.count })}</span>`}</span>` : null}
     ${Number.isFinite(total) && total > 1 ? html`<span class="readywrap__count">${t('已就绪')} <b class="num">${readyCount}</b>/<span class="num">${total}</span></span>` : null}
   </div>`;
+}
+
+/** 设置「主题动画」off: the official pack pieces are drawn still (read at render, like hotkeyLabelOf). */
+function settingsStill() {
+  return settingsStore.get()?.themeMotion === false;
 }
 
 /**
@@ -450,26 +468,6 @@ function PauseGlyph() {
  * Solo pause / resume control (g.pause): pressed while paused.
  * @param {{ paused: boolean, busy?: boolean, onToggle: () => void }} props
  */
-/**
- * 战斗倍速按钮（×1 / ×2 / ×3 / ×4 循环）。
- *
- * **纯本地播放选择**：同一段确定的 tick 序列只是推进得更快，因此**战果一字不变** —— 这一条由
- * `public/js/battle/runner.js` 的 `setRate` 保证（倍速只改「墙钟 → tick」的映射，`test/match/runner.test.js`
- * 用「4× 与 1× 跑完后 `b.result` 逐字节相同」钉住它）。服务端在 `b.start` 里给的 `speed` 是**对局**节奏，
- * 这里改的是**这台机器看得多快**，两者相乘，服务端不参与、也不需要参与。
- *
- * 与「暂停」的区别（原件注释同一条）：暂停是服务端往返（单人对局），倍速不是。
- * @param {{ speed?: number|null, onSpeed: (next: number) => void }} props
- */
-export function SpeedButton({ speed, onSpeed }) {
-  const cur = RATE_STEPS.includes(Number(speed)) ? Number(speed) : 1;
-  const next = RATE_STEPS[(RATE_STEPS.indexOf(cur) + 1) % RATE_STEPS.length];
-  return html`<${Tooltip} text=${t('战斗倍速 {cur}× · 点击切到 {next}×（只加快播放，结果不变）', { cur, next })} placement="bottom">
-    <button type="button" class="speedbtn tapx" aria-label=${t('战斗倍速 {cur}×', { cur })}
-        data-testid="speed" onClick=${() => onSpeed?.(next)}><span class="num">${cur}×</span></button>
-  <//>`;
-}
-
 export function PauseButton({ paused, busy = false, onToggle }) {
   const label = paused ? t('继续作战') : t('暂停');
   const key = hotkeyLabelOf('ready'); // the ready key pauses a solo battle (Space unless rebound: 设置 → 快捷键)
@@ -497,15 +495,14 @@ export function PauseButton({ paused, busy = false, onToggle }) {
  *   live?: { pending: number, unite: boolean, left?: number|null } | null,
  *   spectators?: any[]|null, myId?: any, isHost?: boolean, onRemoveSpectator?: ((playerId: any) => any)|null, held?: boolean }} props
  *   spectators: the room's spectator seats (room.state) — the 观战席 capsule beside the latency (SpectatorPill; the host removes)
- *   room: room.state — a match with gameplay plugins shows the small MOD mark beside the difficulty (DESIGN §34.6)
+ *   room: room.state — a match with gameplay plugins shows the small MOD mark beside the difficulty (DESIGN §32.6)
  *   frozenAt: the server time every clock shows while the solo match is paused (null = live)
  *   live: the own battle's pending LP loss (liveLp): the tower keeps the settled lp and adds a red −N tick, 联防中 during 联防;
  *     `left` (a leaker in 联防): its enemies still standing — the capsule's ×N tag
  *   held: the HUD waits hidden under 协议启动！ — a phase change's capsule scene waits for it (useCapsuleFx)
  */
-export const TopBar = modComponent('game.hud.topBar', function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, onReady, readyBusy, readyCount, playerCount, pen = false, penAvail = false, onPen = () => {},
+export function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, onReady, readyBusy, readyCount, playerCount, pen = false, penAvail = false, onPen = () => {},
   config = null, frozenAt = null, pause = null, live = null, spectator = false,
-  speed = null, onSpeed = () => {},
   spectators = null, myId = null, isHost = false, onRemoveSpectator = null, room = null, held = false }) {
   const phase = pub?.phase;
   const boss = isBossPhase(phase);
@@ -528,9 +525,20 @@ export const TopBar = modComponent('game.hud.topBar', function TopBar({ pub, pri
   const btn = checkButtons({ pen, penAvail, infoOpen: !!drawer });
   const fx = useCapsuleFx(phase, pub?.round, held);
   useEffect(() => { preloadCapsuleArt(); }, []);
+  // 乌萨斯齐心团 / 可露希尔 installed: the pack's own top bar, countdown and ready button (ui/prefab/hud.js) — in 规程, and in
+  // 盟约 too since §37.206 (the owner: the 规程 themes in full on 盟约); prefabPackUrl gives no pack for any other theme
+  const settings = useSettings();
+  const pack = usePrefabPack(data.get('local')?.groups, settings?.uiTheme);
+  const pf = packHud(pack);
+  const pfRemain = pf.countdown ? (frozenSecs != null ? frozenSecs : secondsLeft(pub?.deadline)) : null;
+  // untimed: the solo rest shows the pack's single-player picture (content_single_plain); elsewhere nothing, like the
+  // hand-made countdown (user playtest #4 item 3)
+  const pfClock = pf.countdown && (pfRemain != null || (phase === PHASE.PREP && (playerCount ?? 1) <= 1));
+  const corner = useMemo(() => (pf.countdown && pf.ready ? cornerOffset(pack) : null), [pack, pf.countdown, pf.ready]);
+  useTicker(pf.countdown && frozenSecs == null && pfRemain != null ? 1000 : 0);
   const onLeft = () => (pen ? onPen(false) : onDrawer('info'));
   const onRight = () => (pen ? onPen(false) : penAvail ? onPen(true) : null);
-  return html`<header class=${cx('gtop', pen && 'is-pen')}>
+  return html`<header class=${cx('gtop', pen && 'is-pen', pf.band && 'gtop--pf')}>
     <div class="gtop__left">
       <${Button} variant="danger" size="lg" square=${true} icon="exit" onClick=${onExit} aria-label=${t('离开')} title=${t('离开 / 暂离')} class="gtop__exit tapx" />
       <div class="gtop__meta">
@@ -538,7 +546,7 @@ export const TopBar = modComponent('game.hud.topBar', function TopBar({ pub, pri
           <${PingPill} ms=${conn?.ping} online=${conn?.status === 'online'} />
           <${SpectatorPill} spectators=${spectators} myId=${myId} isHost=${isHost} onRemove=${onRemoveSpectator} />
         </div>
-        ${pub?.difficulty ? html`<${DifficultyTag} difficulty=${pub.difficulty} size="sm" />` : null}
+        ${pub?.difficulty ? html`<${DifficultyTag} difficulty=${pub.difficulty} size="sm" name=${ladderName(pub)} />` : null}
         ${pub?.test ? html`<${TestMark} class="gtop__test" />` : null}
         <${UnofficialMark} room=${room} compact=${true} class="gtop__mod" />
         ${ruleLine(room?.content?.rules) ? html`<span class="gtop__rules" data-testid="plugin-rules">${ruleLine(room?.content?.rules)}</span>` : null}
@@ -553,7 +561,10 @@ export const TopBar = modComponent('game.hud.topBar', function TopBar({ pub, pri
         <//>
       </span>
       <i class="gtop__plus gtop__plus--l" aria-hidden="true"></i>
-      <div class="gtop__band">
+      ${pf.band ? html`<div class="gtop__band gtop__band--pf" role="status" aria-label=${t('第 {round} 回合，生命值 {lp}', { round: roundText, lp: Number.isFinite(lp) ? lp : '--' })}>
+        <${RegHudBand} pack=${pack} phase=${phase} round=${roundText} lp=${Number.isFinite(lp) ? lp : null} pending=${pending} hud=${hud}
+          miss=${phase === PHASE.UNITE && !boss && Number.isFinite(live?.left) ? live.left : null} boss=${hud?.boss || pub?.bossHp || null} still=${!settings?.themeMotion} />
+      </div>` : html`<div class="gtop__band">
         <${DecoType} k="txt1" text="RHODES ISLAND TERMINAL SERVICE" side="l" />
         <${DecoType} k="txt2" text="STRONGHOLD PROTOCOL" side="c" />
         <${DecoType} k="txt3" text="RHODES ISLAND TERMINAL SERVICE" side="r" />
@@ -571,7 +582,7 @@ export const TopBar = modComponent('game.hud.topBar', function TopBar({ pub, pri
           <${LpTower} value=${lp} size="lg" tone=${lowLp ? 'danger' : boss ? 'team' : null} pending=${pending}
             note=${pending > 0 && live?.unite ? t('联防中') : null} tip=${pendingTip(lp, pending, { unite: !!live?.unite, cap, left: live?.left ?? null })} />
         </div>
-      </div>
+      </div>`}
       <i class="gtop__plus gtop__plus--r" aria-hidden="true"></i>
       <span class="gtop__frame gtop__frame--r">
         <${Tooltip} text=${btn.right.tip} placement="bottom">
@@ -582,18 +593,22 @@ export const TopBar = modComponent('game.hud.topBar', function TopBar({ pub, pri
     </div>
 
     <div class="gtop__right">
-      <div class="gtop__clock">
-        ${frozenSecs != null
-          ? html`<${Countdown} seconds=${frozenSecs} total=${total ?? undefined} size="md" label="PAUSED" />`
-          : html`<${Countdown} deadline=${pub?.deadline} total=${total ?? undefined} size="md" />`}
+      <div class=${cx('gtop__clock', pf.countdown && 'gtop__clock--pf')} style=${corner ? { '--pf-rx': corner.x, '--pf-ry': corner.y } : null}>
+        ${pf.countdown
+          ? (pfClock ? html`<div class="pfclock" role="timer" aria-label=${pfRemain == null ? t('无倒计时') : t('剩余{remain}秒', { remain: pfRemain })}>
+              <${RegCountdown} pack=${pack} remain=${pfRemain} total=${total ?? null} ready=${showReady && !!priv?.ready} still=${!settings?.themeMotion} />
+            </div>` : null)
+          : frozenSecs != null
+            ? html`<${Countdown} seconds=${frozenSecs} total=${total ?? undefined} size="md" label="PAUSED" />`
+            : html`<${Countdown} deadline=${pub?.deadline} total=${total ?? undefined} size="md" />`}
         ${pause && (pause.show || pause.paused) ? html`<${PauseButton} paused=${!!pause.paused} busy=${pause.busy} onToggle=${pause.onToggle} />` : null}
-        ${onSpeed ? html`<${SpeedButton} speed=${speed} onSpeed=${onSpeed} />` : null}
+        ${corner && pfClock && showReady ? html`<${ReadyToggle} priv=${priv} onToggle=${onReady} busy=${readyBusy} readyCount=${readyCount} total=${playerCount} pack=${pack} corner=${true} />` : null}
       </div>
       <${OvertimeWarning} ot=${ot} />
-      ${showReady ? html`<${ReadyToggle} priv=${priv} onToggle=${onReady} busy=${readyBusy} readyCount=${readyCount} total=${playerCount} />` : null}
+      ${showReady && !(corner && pfClock) ? html`<${ReadyToggle} priv=${priv} onToggle=${onReady} busy=${readyBusy} readyCount=${readyCount} total=${playerCount} pack=${pf.ready ? pack : null} />` : null}
     </div>
   </header>`;
-});
+}
 
 /** DP counter shown at the right edge during combat. */
 export function DpCounter({ dp }) {
