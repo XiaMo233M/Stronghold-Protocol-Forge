@@ -247,28 +247,6 @@ export class PlayerEconomy {
     return true;
   }
 
-  /**
-   * Reroll the shop. keepFrozen → frozen unsold slots survive (round start); otherwise everything is rerolled
-   * (manual refresh). Slot counts follow the current level.
-   */
-  rollShop({ keepFrozen = false } = {}) {
-    // 测试房间排队的商店（g.test shop）替换这一次摇号，且不抽 rng；升级在它被消费前一直被挡
-    if (this._consumeTestShop()) return;
-    const { chess: nChess, item: nItem } = this.gd.shopSlots(this.shop.level);
-    const old = this.shop.slots;
-    const layout = this.shop.layout || { chess: old.length, item: 0 };
-    const oldChess = old.slice(0, layout.chess);
-    const oldItems = old.slice(layout.chess);
-    const keep = (s, kind) => (keepFrozen && s && s.kind === kind && !s.sold && s.frozen ? { ...s } : null);
-    // frozen slots keep their position; sold / empty / unfrozen positions are rerolled
-    const slots = [];
-    for (let i = 0; i < nChess; i++) slots.push(keep(oldChess[i], 'chess') ?? this._rollChessSlot());
-    for (let i = 0; i < nItem; i++) slots.push(keep(oldItems[i], 'item') ?? this._rollItemSlot());
-    this.shop.slots = slots;
-    this.shop.layout = { chess: nChess, item: nItem };
-    for (const s of slots) if (s) s.frozen = this.shop.frozen;
-    this.dirty();
-  }
 
   /**
    * The 调度中心's upgrade opens the new level's extra slots — as EMPTY slots.
