@@ -12,7 +12,7 @@
 // after a reload whose manifest was slow or failed, every operator stayed the image-less placeholder for good) — and
 // whenever the manifest changes under a view that is already drawn (a room's cosmetic plugins arriving after the board
 // was built — a reconnect, a spectator joining a match —, a personal plugin switched during a match, a plugin file that
-// failed and fell back: DESIGN §32 P1a): a picture or model other than the one the manifest names now is loaded again
+// failed and fell back: DESIGN §34 P1a): a picture or model other than the one the manifest names now is loaded again
 // (the new model replaces the old in place, like a Front ⇄ Back swap); a load begun while the tab was hidden and still
 // in flight SPINE_STUCK_MS after it is shown again is started again (assets.js spine.restart: GitHub #68, such a load
 // may never settle — its view stayed the placeholder). Every bar is a tinted Texture.WHITE sprite, so HUDs batch into
@@ -81,9 +81,12 @@
 // screen rect for tooltips and overlays (view.pieceScreenRect). A dragged (lifted) item plate is drawn centred on its
 // ground point, i.e. on the pointer (render/app.js).
 
-import { progressLabel } from '../itemProgress.js';
 import { MoteRing } from './motes.js';
 import { UF, ANIM } from '../../../shared/constants.js';
+// 形态通道的统一入口（DESIGN §28.29）：`FORMS`（下面那张冻结的第一方表）仍然住在**本文件**、一个字节不改，
+// 包带来的增量由 `shared/packForms.js` 持有，`formsFor(FORMS, spine)` 两边合并、第一方优先。
+// 本文件里的三处查找（`_formSpec` / `setForm` 的准入与 `next`）全部走它 —— 不再直接索引 `FORMS`。
+import { formsFor } from '../../../shared/packForms.js';
 import { SpineActor } from './spine.js';
 import { skillAttackMode } from './skillAttack.js';
 import { MANIFOLD, isManifold, manifoldCopyForm, manifoldAttackForm } from './manifold.js';
@@ -899,7 +902,7 @@ export class UnitView {
   }
 
   /**
-   * Re-resolve what this view draws (public issue #8 item 5; DESIGN §32 P1a): the picture when it has none (no avatar URL —
+   * Re-resolve what this view draws (public issue #8 item 5; DESIGN §34 P1a): the picture when it has none (no avatar URL —
    * the asset manifest arrived after the view was built — or the image failed) or when the manifest names another one now,
    * and, at once, the Spine model when none is shown and none is loading (no manifest entry then, or a load that failed /
    * timed out) or when the manifest names another model than the one shown or loading — a room's cosmetic plugins that
@@ -959,7 +962,8 @@ export class UnitView {
         actor.setSkillIndex(this.skillIndex ?? undefined);
         // Query at attack time: late index loads, skill slots and facing changes need no new model or request.
         actor.skillAttackMode = () => {
-          // §34.31 / §35.20 verify operator mappings only; enemy abilities and token controllers keep their roles.
+          // [ASSUMED] §36.31's cast heuristic is for operators; enemy abilities and token controllers keep their roles.
+          // §36.31 / §37.20 verify operator mappings only; enemy abilities and token controllers keep their roles.
           if (this.info.kind !== 'op') return { preserve: true };
           const mode = skillAttackMode(this.ctx.skillAttackIndex?.(), {
             info: this.info, rec: this.ctx.lookupDef?.(this.info), skillIndex: this.skillIndex,
@@ -1031,8 +1035,10 @@ export class UnitView {
   }
 
   _formSpec() {
-    const form = this.form || (isManifold(this.info) ? 'Default' : null);
-    const f = form ? FORMS[this.info.spine || this.info.defId]?.[form] || null : null;
+    // 上游 0.3.1 的**流形战斗**那一支：attack 循环换成 combat clip，技能循环也换成它。
+    // 形态本身仍只看 `this.form` —— 上游另有一条 `isManifold ⇒ 'Default'` 的回落，我们这边由
+    // `copyFrom` / `setForm` 显式给形态，不走那条；包带来的增量由 `formsFor` 并进 FORMS。
+    const f = this.form ? formsFor(FORMS, this.info.spine || this.info.defId)?.[this.form] || null : null;
     if (f?.combat && this._manifoldCombat) return { ...f, roles: { ...f.roles, attack: loop(f.combat), skill: { ...f.roles.skill, loop: f.combat } } };
     return f;
   }
@@ -1065,14 +1071,14 @@ export class UnitView {
   setForm(kind, fx = null) {
     const k = typeof kind === 'string' ? kind : null;
     if (k === this.form) return;
-    if (k && !FORMS[this.info.spine || this.info.defId]?.[k]) return;
+    if (k && !formsFor(FORMS, this.info.spine || this.info.defId)?.[k]) return;
     const prev = this._formSpec();
     this.form = k;
     this.info.form = k;
     const f = this._formSpec();
     if (!this.actor) return;
     const dur = fx && Number(fx.dur);
-    let next = f && f.next ? FORMS[this.info.spine || this.info.defId]?.[f.next]?.roles || null : null;
+    let next = f && f.next ? formsFor(FORMS, this.info.spine || this.info.defId)?.[f.next]?.roles || null : null;
     if (next && typeof f.roles.die === 'string') next = { ...next, die: f.roles.die };
     // an fx handed out late (render/app.js: a stall, a hidden tab) skips a change clip that would already have ended
     const late = fx && Number(fx.late) > 0 ? Number(fx.late) : 0;
@@ -1122,25 +1128,6 @@ export class UnitView {
     this.countText = null;
     this.ammoText = null;          // 设置「弹药数量」: the magazine's count under the ammo bar (_updateAmmoCount)
     this.itemPips = [];
-    this._itemPipRows = 0;
-    this.itemProgressText = null;
-    this.setItemProgress(this.info.itemProgress);
-  }
-
-  /** Equipment's prep-side progress, below the carrier's feet in prep and combat. */
-  setItemProgress(rows) {
-    const label = (rows || []).map(progressLabel).filter(Boolean).join('\n');
-    if (!label) {
-      if (this.itemProgressText) { this.itemProgressText.text = ''; this.itemProgressText.visible = false; }
-      return;
-    }
-    if (!this.itemProgressText) {
-      this.itemProgressText = new this.P.Text('', { fontFamily: 'Bender, Oxanium, sans-serif', fontSize: 16, fontWeight: '700', fill: '#4ed8af', stroke: '#0b0f0e', strokeThickness: 4, align: 'center' });
-      this.itemProgressText.anchor.set(0.5, 0);
-      this.hud.addChild(this.itemProgressText);
-    }
-    if (this.itemProgressText.text !== label) this.itemProgressText.text = label;
-    this.itemProgressText.visible = true;
   }
 
   /** Show a stack count (token stacks in the hand) — BitmapText-free: a tiny canvas-less chip via Text. */
@@ -1159,20 +1146,12 @@ export class UnitView {
   /** Equipped item pips (prep): list of item icon URLs. */
   setItems(urls) {
     const P = this.P;
-    // Display every carried item, including zero-slot equipment. Balance at most three icons per row:
-    // 4 → 2+2, 5 → 3+2, 6 → 3+3; larger valid inventories use more rows instead of truncating.
-    const list = Array.isArray(urls) ? urls : [];
-    const rows = Math.ceil(list.length / 3);
-    this._itemPipRows = rows;
-    const shortRow = rows ? Math.floor(list.length / rows) : 0, longRows = rows ? list.length % rows : 0;
-    let row = 0, col = 0;
-    while (this.itemPips.length > list.length) this.itemPips.pop().destroy(); // loop-cap: the previous carried-item count
+    // morphPairing plus can carry two ordinary items and one zero-slot morph (DESIGN §36.15).
+    const list = Array.isArray(urls) ? urls.slice(0, 3) : [];
+    while (this.itemPips.length > list.length) this.itemPips.pop().destroy(); // loop-cap: at most three item pips
     list.forEach((u, i) => {
       let s = this.itemPips[i];
       if (!s) { s = new P.Sprite(P.Texture.EMPTY); s.anchor.set(0.5); this.hud.addChild(s); this.itemPips[i] = s; }
-      const columns = shortRow + (row < longRows ? 1 : 0);
-      s._itemRow = row; s._itemCol = col; s._itemColumns = columns;
-      if (++col === columns) { row++; col = 0; }
       if (s._url === u) return;
       s._url = u;
       const a = this.ctx.assets;
@@ -1510,8 +1489,12 @@ export class UnitView {
       }
       this.lastAtk = now;
     }
-    // operators keep their deploy direction (research 09 §1.2); an enemy turns toward the target
-    this._faceAttack(target);
+    if (target && !this.isEnemy && this.info.kind !== 'device') {
+      // operators keep their deploy direction (research 09 §1.2); enemies may turn towards their target
+    } else if (target && this.isEnemy) {
+      const dx = target.x - this.x;
+      if (Math.abs(dx) > 0.1) this.visFacing = dx < 0 ? -1 : 1;
+    }
     if (target) {
       const dx = target.x - this.x, dy = target.y - this.y, len = Math.hypot(dx, dy) || 1;
       this.lungeDir.x = dx / len; this.lungeDir.y = dy / len;
@@ -1557,30 +1540,16 @@ export class UnitView {
   }
 
   /**
-   * Face this attack's target. An enemy turns when the target is not straight ahead (|dx| > 0.1); an operator keeps
-   * its deploy direction (research 09 §1.2). The wind-up uses the same rule the moment its clip starts (GitHub #869):
-   * the strike used to be the first time the model turned, so a blocker redeployed behind a walking enemy was swung
-   * at while the model still faced the old walk.
-   */
-  _faceAttack(target) {
-    if (!target || !this.isEnemy) return;
-    const dx = target.x - this.x;
-    if (Math.abs(dx) > 0.1) this.visFacing = dx < 0 ? -1 : 1;
-  }
-
-  /**
    * An attack by this unit is `lead` game seconds ahead in the snapshot buffer: start the Spine attack wind-up now
    * so the strike frame lines up with the attack. True once started (then stop calling for that attack). `kind` = the
-   * 'atk' projKind (a one-off cast winds up at the clip's own speed). `target` = that attack's view: the model faces
-   * it as the clip starts, by the same rule as onAttack.
+   * 'atk' projKind (a one-off cast winds up at the clip's own speed).
    */
-  windUp(lead, kind, castSlot = null, interval = this.atkInterval, target = null) {
+  windUp(lead, kind, castSlot = null, interval = this.atkInterval) {
     if (!this.alive || !this.actor || !this.spineReady) return false;
     this._attackForm(kind);
     this.actor.castStrike?.(this._strikeClip(castSlot));
     const ok = this.actor.windUp(clampAtkInterval(interval), lead, !!PROJ[kind]?.once);
     if (!ok) this.actor.castStrike?.(null);
-    else this._faceAttack(target);
     if (ok && this.imp) this.imp.dirty = true;
     return ok;
   }
@@ -1624,8 +1593,8 @@ export class UnitView {
   /**
    * The clip of an attack-class skill cast in the attack's turn (the sim's ['cast', id, slot, dur, clip]; enemies.js
    * attackTurnSkill — no 'atk' comes with it): the slot's clip (`anims.skills[slot]`, else the primary `anims.skill`) when
-   * its official ability names one (`clip` > 0: the §35.29 / §35.52 tables, 昆图斯's), else null — the attack clip
-   * [ASSUMED: an attack-class ability with an empty `_animKey` shows the unit's attack; DESIGN §35.57].
+   * its official ability names one (`clip` > 0: the §37.29 / §37.52 tables, 昆图斯's), else null — the attack clip
+   * [ASSUMED: an attack-class ability with an empty `_animKey` shows the unit's attack; DESIGN §37.57].
    */
   _turnClip(index, clip) {
     if (!(clip > 0) || !this.actor) return null;
@@ -1637,7 +1606,7 @@ export class UnitView {
   /**
    * An attack-turn cast is rendered now (onCast): its clip plays once at its own speed in place of the attack — from
    * its strike frame unless the look-ahead wound it up (windUpCast) —, or the attack clip in the attack's rhythm when
-   * the ability names none (DESIGN §35.57). Until then the swing it replaced showed nothing (the model stood idle).
+   * the ability names none (DESIGN §37.57). Until then the swing it replaced showed nothing (the model stood idle).
    */
   _turnCast(index, clip) {
     if (!this.alive || !this.actor) return;
@@ -2136,21 +2105,12 @@ export class UnitView {
       this.countText.scale.set(clamp(s / 90, 0.5, 1.2));
       this.countText.position.set(x + s * 0.32, this.screen.y - s * 0.12);
     }
-    const pipSize = clamp(s * 0.26, 12, 30);
     for (let i = 0; i < this.itemPips.length; i++) {
       const pip = this.itemPips[i];
-      pip.width = pip.height = pipSize;
-      pip.position.set(
-        this.screen.x + (pip._itemCol - (pip._itemColumns - 1) / 2) * (pipSize + 1),
-        this.screen.y - s * 0.05 - (this._itemPipRows - 1 - pip._itemRow) * (pipSize + 2),
-      );
+      const ps = clamp(s * 0.26, 12, 30);
+      pip.width = pip.height = ps;
+      pip.position.set(this.screen.x - s * 0.36 + i * (ps + 1), this.screen.y - s * 0.05);
       pip.visible = this.alive;
-    }
-    if (this.itemProgressText) {
-      this.itemProgressText.visible = this.alive && !!this.itemProgressText.text;
-      this.itemProgressText.scale.set(clamp(s * 0.2, 10, 16) / 16);
-      const progressTop = this.itemPips.length ? Math.max(s * 0.14, -s * 0.05 + pipSize / 2 + 2) : s * 0.14;
-      this.itemProgressText.position.set(this.screen.x, this.screen.y + progressTop);
     }
   }
 
@@ -2729,7 +2689,7 @@ export class ItemView {
   setIcon(url) {
     if (this.destroyed || url === this.info.icon) return;
     this.info.icon = url;
-    // Item ids are reused across official versions. Cache the resolved art, like equipped-item pips do.
+    // 上游 0.3.3：道具 id 在官方版本之间会复用，所以缓存按**解析出来的图 URL** 存（和装备小标那套一致）
     this.plate.texture = itemTexture(url || 'none', null, this.info.color || 0x9aa5a0);
     if (!url) return;
     const a = this.ctx.assets;

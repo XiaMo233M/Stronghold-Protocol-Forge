@@ -1322,10 +1322,9 @@ describe('websocket lobby', () => {
     assert.ok(h.rooms >= 1);
     assert.ok(h.sockets >= 1);
     assert.ok(h.sessions >= 1);
-    assert.deepEqual(h.versions.enabled, VERSIONS.map((v) => v.id), 'nothing set enables every version (DESIGN §35.23.11)');
-    assert.equal(h.versions.default, LOBBY_DEFAULT_VERSION, 'nothing set preselects 规程·序列Ⅰ');
     assert.deepEqual(h.versions.enabled, VERSIONS.map((v) => v.id), 'nothing set enables every version (DESIGN §37.23.11)');
-    assert.equal(h.versions.default, DEFAULT_VERSION);
+    // 上游 0.4.0 把大厅默认版本改成规程·序列Ⅰ（LOBBY_DEFAULT_VERSION），不再是第二期下半
+    assert.equal(h.versions.default, LOBBY_DEFAULT_VERSION, 'nothing set preselects 规程·序列Ⅰ');
     assert.equal(h.versions.hosts.workers, 0, 'an idle server has forked no version match host');
     assert.equal(h.versions.hosts.matches, 0);
     assert.equal(srv.versionHosts.stats().workers, 0);

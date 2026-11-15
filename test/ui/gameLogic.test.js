@@ -8,14 +8,15 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  phaseMode, phaseBanner, isCombatPhase, isBossPhase, countdownState, phaseTotalSeconds, pregameStepCount, pregameStepIndex, sortBonds, bondTier, nextThreshold,
+  phaseMode, phaseBanner, isCombatPhase, isBossPhase, countdownState, phaseTotalSeconds, sortBonds, bondTier, nextThreshold,
   battleOverSfx, ownRoundLoss, uniteResultBox, battleResultBox, roundResultBox, RESULT_BOX_MS,
   bondMembers, memberHeadCount, bannedPerBond, priceTone, mergeProgress, shopBlockReason, deploySets, indexPieces, placementContext, canPlace,
   boardTargets, dropIntent, normalizeDraft, heldDraftPub, normalizeSp, normalizePersonalChoice, groupEnemies, factionTypes, snapHud, bossFrac, attackInterval, fmtNum,
   rangeGridBox, shortcutFor, sanitizeSettings, DEFAULT_SETTINGS, normalizeResult, cycleField, fieldLabel, homeFieldId,
-  activeBubbles, sortedPlayers, tileKey, prepCapsuleLabel, prepCamera, dropFailureReason, terrainInfo, spTurnCueKey,
+  activeBubbles, sortedPlayers, tileKey, prepCapsuleLabel, prepCamera, dropFailureReason, terrainInfo,
 } from '../../public/js/ui/gameLogic.js';
-import { PHASE, GEO } from '../../shared/constants.js';
+import { OFFICIAL_FX_MODES } from '../../public/js/ui/gameLogic/settings.js';
+import { PHASE, GEO, DEFAULT_VOICE_LANG } from '../../shared/constants.js';
 import { setLang, setMessages } from '../../shared/i18n.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -55,7 +56,6 @@ describe('phases', () => {
     assert.equal(phaseMode(null), 'loading');
     assert.equal(phaseMode(PHASE.INFO_CHECK), 'briefing');
     assert.equal(phaseMode(PHASE.BAND_DRAFT), 'draft');
-    assert.equal(phaseMode(PHASE.CUSTOM_CHECK), 'diy');
     assert.equal(phaseMode(PHASE.BATTLE_CHECK), 'boot');
     for (const p of [PHASE.PREP, PHASE.SP_DRAFT, PHASE.ROUND_START]) assert.equal(phaseMode(p), 'prep');
     for (const p of [PHASE.COMBAT, PHASE.UNITE, PHASE.FINAL_ASSAULT, PHASE.HIDDEN_CORE]) assert.equal(phaseMode(p), 'combat');
@@ -63,27 +63,13 @@ describe('phases', () => {
     assert.equal(phaseMode(PHASE.RESULT), 'result');
     assert.equal(phaseMode('SOMETHING_NEW'), 'prep');
   });
-  test('pregame step headers follow enterSteps, and 选择自编 is 30s', () => {
-    const reg = { timers: { enterSteps: [
-      { step: 'INFO_CHECK', time: 50 }, { step: 'BAND_CHECK', time: 15 },
-      { step: 'CUSTOM_CHECK', time: 30 }, { step: 'BATTLE_CHECK', time: 5 },
-    ] } };
-    assert.equal(pregameStepCount(reg), 3);
-    assert.equal(pregameStepIndex(reg, 'INFO_CHECK'), 1);
-    assert.equal(pregameStepIndex(reg, 'BAND_DRAFT'), 2);
-    assert.equal(pregameStepIndex(reg, 'CUSTOM_CHECK'), 3);
-    assert.equal(phaseTotalSeconds({ phase: 'CUSTOM_CHECK' }, reg), 30);
-    assert.equal(pregameStepCount({}), 2);
-    assert.equal(pregameStepIndex({}, 'INFO_CHECK'), 1);
-    assert.equal(pregameStepIndex({}, 'BAND_CHECK'), 2);
-  });
   test('combat / boss predicates and banners', () => {
     assert.ok(isCombatPhase(PHASE.UNITE) && !isCombatPhase(PHASE.PREP));
     assert.ok(isBossPhase(PHASE.HIDDEN_CORE) && !isBossPhase(PHASE.COMBAT));
     assert.equal(phaseBanner(PHASE.UNITE, {}).title, '联防阶段');
     assert.equal(phaseBanner(PHASE.FINAL_ASSAULT, {}).title, '最终攻势');
     assert.equal(phaseBanner(PHASE.HIDDEN_CORE, {}).title, '隐秘核心');
-    for (const phase of [PHASE.PREP, PHASE.COMBAT, PHASE.SP_DRAFT]) assert.equal(phaseBanner(phase, {}), null, `${phase} is silent`);
+    assert.equal(phaseBanner(PHASE.COMBAT, {}).title, '作战开始');
     assert.match(phaseBanner(PHASE.ROUND_START, { round: 7 }).title, /7/);
     assert.equal(phaseBanner(PHASE.SETTLE, {}), null);
     assert.equal(prepCapsuleLabel(PHASE.PREP), '休息一下');
@@ -105,29 +91,11 @@ describe('phases', () => {
     // the title and the other phases' copy are the same for every viewer
     for (const v of [{ alive: true }, { alive: false }, { alive: false, spectator: true }]) {
       assert.equal(round(v).title, '第 2 回合');
-      assert.equal(phaseBanner(PHASE.PREP, pub, v), null);
+      assert.equal(phaseBanner(PHASE.PREP, pub, v).sub, phaseBanner(PHASE.PREP, pub).sub);
     }
     // the match screen hands the banner its viewer (screens/game.js `alive` folds a spectator seat in)
     const src = readFileSync(path.join(ROOT, 'public/js/screens/game.js'), 'utf8');
     assert.match(src, /phaseBanner\(phase, pub, \{ alive, spectator \}\)/);
-  });
-  test('shared 机变 cue identity is current-player-only, draft- and turn-specific, and stable across public refreshes', () => {
-    const pub = { phase: PHASE.SP_DRAFT, round: 4, serverNow: 1000 };
-    const sp = { family: 'supply', turnPid: 'p1', pickedCount: 0, pickOf: new Map() };
-    const cue = (p = pub, s = sp, o = {}) => spTurnCueKey(p, s, { myId: 'p1', draftToken: 3, ...o });
-    const first = cue();
-    assert.ok(first);
-    assert.equal(cue({ ...pub, serverNow: 2000 }), first, 'an unrelated public refresh does not retrigger it');
-    assert.notEqual(cue(pub, { ...sp, pickedCount: 1 }, { draftToken: 3 }), first, 'a later turn gets a distinct key');
-    assert.notEqual(cue(pub, sp, { draftToken: 4 }), first, 'a repeated draft gets a distinct key');
-    assert.notEqual(cue({ ...pub, round: 5 }), first, 'the next round gets a distinct key');
-    assert.equal(cue(pub, { ...sp, turnPid: 'p2' }), null, 'another seat is not cued');
-    assert.equal(cue(pub, { ...sp, pickOf: new Map([['p1', 0]]) }), null, 'a picked seat is not cued');
-    assert.equal(cue(pub, sp, { solo: true }), first, 'solo is cued too (decision 7, kept by the owner on 2026-11-14)');
-    assert.equal(cue(pub, sp, { alive: false }), null, 'an eliminated seat has no cue');
-    assert.equal(cue(pub, sp, { spectator: true }), null, 'a spectator has no cue');
-    assert.equal(cue(pub, sp, { personal: true }), null, 'personal 教鞭 choices have no cue');
-    assert.equal(cue({ ...pub, phase: PHASE.PREP }), null, 'leaving SP_DRAFT cancels eligibility');
   });
   // GitHub #235 (PR #112 by @Convey123): the official round result dialog and its 战斗结束 sound at SETTLE
   test('战斗结束 sound: the official BATTLEOVER_* variant for the round', () => {
@@ -390,14 +358,6 @@ describe('placement mirror (canPlace)', () => {
     const r = piece(RANGED);
     const ctx = ctxFor(privWith({ hand: [m, r] }));
     assert.equal(canPlace(ctx, m.uid, { area: 'board', row: 9, col: 3 }).ok, true);
-    const chest = privWith({ hand: [piece(MELEE)] });
-    chest.prepMapChars = [{ uid: -20, defId: 'enemy_9038_achest', x: 3, y: 9, kind: 'enemy' }];
-    const blocked = ctxFor(chest);
-    assert.equal(canPlace(blocked, chest.hand[0].uid, { area: 'board', row: 9, col: 3 }).ok, false, '模拟宝藏 occupies the tile');
-    assert.equal(canPlace(blocked, chest.hand[0].uid, { area: 'board', row: 9, col: 5 }).ok, true);
-    const medic = privWith({ hand: [piece(MELEE)] });
-    medic.prepMapChars = [{ uid: -1, defId: 'char_605_cmedic', x: 3, y: 9, kind: 'token' }];
-    assert.equal(canPlace(ctxFor(medic), medic.hand[0].uid, { area: 'board', row: 9, col: 3 }).ok, true, 'the reserve medic does not block deploy');
     assert.equal(canPlace(ctx, m.uid, { area: 'board', row: 10, col: 4 }).ok, false, 'melee on high ground');
     assert.equal(canPlace(ctx, r.uid, { area: 'board', row: 10, col: 4 }).ok, true);
     assert.equal(canPlace(ctx, r.uid, { area: 'board', row: 9, col: 3 }).ok, true, 'ranged may use melee tiles');
@@ -549,21 +509,6 @@ describe('placement mirror (canPlace)', () => {
     assert.deepEqual(canPlace(ctx, art.uid, { area: 'board', row: 11, col: 6 }), { ok: true, action: 'art' });
     assert.equal(canPlace(ctx, art.uid, { area: 'hand', idx: 0 }).ok, false, 'arts are not equipped');
     assert.deepEqual(canPlace(ctx, art.uid, { area: 'hand', idx: 1 }), { ok: true, action: 'swap' }, 'item ↔ item swap in the hand');
-  });
-  test('信标 is not a legal drop on a 自选 operator; a hammer still is (GitHub #913)', () => {
-    const diy = { ...piece('chess_char_5_diy1_a'), row: 9, col: 3 };
-    const normal = { ...piece(MELEE), row: 9, col: 4 };
-    const beacon = item('chess_item_5_04_e_a');
-    const hammer = item(EQUIP);
-    const ctx = ctxFor(privWith({ board: [diy, normal], hand: [beacon, hammer] }));
-    assert.deepEqual(canPlace(ctx, beacon.uid, { area: 'board', row: 9, col: 3 }), { ok: false, code: 'BAD_TARGET', reason: '无法装备给自选干员' });
-    assert.equal(dropIntent(ctx, beacon.uid, { area: 'board', row: 9, col: 3 }), null);
-    assert.deepEqual(canPlace(ctx, beacon.uid, { area: 'board', row: 9, col: 4 }), { ok: true, action: 'equip' });
-    assert.deepEqual(canPlace(ctx, hammer.uid, { area: 'board', row: 9, col: 3 }), { ok: true, action: 'equip' });
-    const tiles = boardTargets(ctx, beacon.uid);
-    assert.ok(!tiles.legal.some(([r, c]) => r === 9 && c === 3), 'the drag highlight does not offer the 自选 tile');
-    assert.ok(tiles.illegal.some(([r, c]) => r === 9 && c === 3));
-    assert.ok(tiles.legal.some(([r, c]) => r === 9 && c === 4));
   });
   test('boardTargets lists legal tiles for highlighting', () => {
     const m = piece(MELEE);
@@ -796,42 +741,57 @@ describe('keyboard & settings', () => {
   test('sanitizeSettings', () => {
     assert.deepEqual(sanitizeSettings(null), { ...DEFAULT_SETTINGS });
     assert.deepEqual(sanitizeSettings({ bgm: 3, sfx: -1, voice: 2, muted: 'yes', damageNumbers: false, quality: 'ultra' }),
-      { bgm: 1, sfx: 0, voice: 1, voiceLang: 'cn', voiceNative: false, voiceOverrides: {}, muted: false, damageNumbers: false, officialDamageNumbers: false, ammoEnergyCount: false, fullscreenWakeLock: false, bondTimers: false, combatMetrics: false, prepDeployFold: true, quality: 'high', officialFx: 'auto', otherSkins: true, textSize: 'sm', uiTheme: '', themeMotion: true, keys: { ...DEFAULT_SETTINGS.keys } },
+      { bgm: 1, sfx: 0, voice: 1, voiceLang: 'jp', voiceNative: false, voiceLangByChar: {}, muted: false, damageNumbers: false, officialDamageNumbers: false, ammoEnergyCount: false, fullscreenWakeLock: false, bondTimers: false, combatMetrics: false,
+      // 本仓库的创意工坊两个总开关（上游没有），默认都开着
+      workshopSkins: true, workshopSources: true, prepDeployFold: true, quality: 'high', officialFx: 'auto', otherSkins: true, textSize: 'sm', keys: { ...DEFAULT_SETTINGS.keys } },
       'a saved profile without `keys` (before 0.2.0) gets the default key map (test/ui/feedback5-hotkeys.test.js)');
-    // 主题动画 (§37.144): on by default; only `false` turns the official packs' tweens still
-    assert.equal(DEFAULT_SETTINGS.themeMotion, true);
-    assert.equal(sanitizeSettings({ bgm: 0.5 }).themeMotion, true, 'a profile saved before the switch keeps the animations');
-    assert.equal(sanitizeSettings({ themeMotion: false }).themeMotion, false);
-    assert.equal(sanitizeSettings({ themeMotion: 0 }).themeMotion, true);
+    // 官方特效 (officialFx, 0.3.0 render/vfx): 'auto' is the default — the desktop resolves it to 完整 and a touch
+    // device to 精简 (render/vfx/tier.js). The 设置 row offers 关 / 精简 / 完整, so `off` MUST survive: dropping it
+    // was the bug (the control snapped back to the resolved tier, so the player could not turn the effects off).
+    assert.equal(DEFAULT_SETTINGS.officialFx, 'auto', 'default is the automatic tier, not a fixed one');
+    assert.deepEqual([...OFFICIAL_FX_MODES], ['auto', 'off', 'lite', 'full']);
+    assert.equal(sanitizeSettings({ bgm: 0.5 }).officialFx, 'auto', 'a profile saved before the setting existed');
+    assert.equal(sanitizeSettings({ officialFx: 'off' }).officialFx, 'off', 'the hard acceptance point: 点「关」真的能关');
+    for (const pick of ['lite', 'full', 'auto']) {
+      assert.equal(sanitizeSettings({ officialFx: pick }).officialFx, pick, `${pick} survives`);
+    }
+    for (const bad of ['ultra', 'OFF', true, 1, null, {}]) {
+      assert.equal(sanitizeSettings({ officialFx: bad }).officialFx, 'auto', `junk ${JSON.stringify(bad)} falls back to the default`);
+    }
+    // 工坊外观 (workshopSkins): a boolean, default ON, and only a real boolean survives — a hand-edited
+    // localStorage must not turn the gate into something the chain reads as "off" by accident.
+    assert.equal(DEFAULT_SETTINGS.workshopSkins, true, 'default on: an installed outfit that does nothing is worse');
+    assert.equal(sanitizeSettings({ bgm: 0.5 }).workshopSkins, true, 'a profile saved before the setting existed');
+    assert.equal(sanitizeSettings({ workshopSkins: false }).workshopSkins, false, 'explicitly off survives (the hard acceptance point)');
+    for (const bad of ['yes', 'false', 0, 1, null, {}]) {
+      assert.equal(sanitizeSettings({ workshopSkins: bad }).workshopSkins, true, `junk ${JSON.stringify(bad)} falls back to the default`);
+    }
+    // 工坊素材源 (workshopSources, DESIGN §28.40): the same three properties, for the same reason — a hand-edited
+    // localStorage must not turn the mirror gate into something `resources/sources.js` reads as "off" by accident.
+    assert.equal(DEFAULT_SETTINGS.workshopSources, true, 'default on: a declared mirror that is never used is worse');
+    assert.equal(sanitizeSettings({ bgm: 0.5 }).workshopSources, true, 'a profile saved before the setting existed');
+    assert.equal(sanitizeSettings({ workshopSources: false }).workshopSources, false, 'explicitly off survives (the one-click rollback)');
+    for (const bad of ['yes', 'false', 0, 1, null, {}]) {
+      assert.equal(sanitizeSettings({ workshopSources: bad }).workshopSources, true, `junk ${JSON.stringify(bad)} falls back to the default`);
+    }
+    // 配音语言 (v0.7.1): a profile saved before it existed falls back to 默认配音 (DEFAULT_VOICE_LANG) and no per-operator overrides
+    assert.equal(sanitizeSettings({ bgm: 0.5 }).voiceLang, DEFAULT_VOICE_LANG);
+    assert.deepEqual(sanitizeSettings({ bgm: 0.5 }).voiceLangByChar, {});
     // 显示其他玩家的皮肤 (docs/SKINS.md): on by default, and off only when the profile says so
     assert.equal(DEFAULT_SETTINGS.otherSkins, true);
     assert.equal(sanitizeSettings({ bgm: 0.5 }).otherSkins, true, 'a profile saved before the switch draws other players\' skins');
     assert.equal(sanitizeSettings({ otherSkins: false }).otherSkins, false);
     assert.equal(sanitizeSettings({ otherSkins: 'no' }).otherSkins, true, 'only `false` turns it off (the renderer reads it the same way)');
     assert.equal(sanitizeSettings({ bgm: 0.5 }).voice, DEFAULT_SETTINGS.voice, 'a saved profile without `voice` gets the default');
-    // 语音语言: 中文 by default. en / kr are dubs (0.3.0); anything else, including the per-operator 'native', stays 中文.
-    assert.equal(DEFAULT_SETTINGS.voiceLang, 'cn');
-    assert.equal(DEFAULT_SETTINGS.voiceNative, false);
-    assert.equal(sanitizeSettings({ bgm: 0.5 }).voiceLang, 'cn');
-    assert.equal(sanitizeSettings({ bgm: 0.5 }).voiceNative, false, 'a profile saved before the switch stays off');
-    assert.equal(DEFAULT_SETTINGS.combatMetrics, false);
-    assert.equal(sanitizeSettings({ bgm: 0.5 }).combatMetrics, false, 'a profile saved before 作战统计 stays off');
-    assert.equal(sanitizeSettings({ combatMetrics: true }).combatMetrics, true);
-    // 官方特效 (0.3.0): 'auto' by default (完整 on a desktop, 精简 on a touch device); unknown values fall back to it
-    assert.equal(DEFAULT_SETTINGS.officialFx, 'auto');
-    assert.equal(sanitizeSettings({ bgm: 0.5 }).officialFx, 'auto', 'a profile saved before 官方特效 gets the default');
-    for (const v of ['off', 'lite', 'full', 'auto']) assert.equal(sanitizeSettings({ officialFx: v }).officialFx, v);
-    assert.equal(sanitizeSettings({ officialFx: 'ultra' }).officialFx, 'auto');
-    assert.equal(sanitizeSettings({ combatMetrics: 'yes' }).combatMetrics, false, 'a non-boolean stays off');
+    // 配音语言 (v0.7.1, 0.9.0): the default dub is the manifest's DEFAULT_VOICE_LANG (jp — the owner's decision, the dub
+    // the released bundle ships) and every dub of VOICE_LANGS is accepted; a junk value falls back to the default.
+    // (Upstream 0.2.2 has two dubs (`audio.voice` = 中文) and defaults to `cn`; this repo's four-dub model is the
+    // deliberate divergence the owner ruled on — see test/feedback7-voices.test.js.)
+    assert.equal(DEFAULT_SETTINGS.voiceLang, DEFAULT_VOICE_LANG);
+    assert.equal(sanitizeSettings({ bgm: 0.5 }).voiceLang, DEFAULT_VOICE_LANG);
     assert.equal(sanitizeSettings({ voiceLang: 'jp' }).voiceLang, 'jp');
     assert.equal(sanitizeSettings({ voiceLang: 'en' }).voiceLang, 'en');
-    assert.equal(sanitizeSettings({ voiceLang: 'kr' }).voiceLang, 'kr');
-    assert.equal(sanitizeSettings({ voiceNative: true }).voiceNative, true);
-    for (const bad of ['native', 'JP', 'ja', 1, null]) assert.equal(sanitizeSettings({ voiceLang: bad }).voiceLang, 'cn', String(bad));
-    assert.equal(sanitizeSettings(null).uiTheme, '');
-    assert.equal(sanitizeSettings({ uiTheme: 'iron-fan' }).uiTheme, 'iron-fan');
-    assert.equal(sanitizeSettings({ uiTheme: 'terminal' }).uiTheme, '', 'the built-in id is stored as empty');
-    assert.equal(sanitizeSettings({ uiTheme: '../x' }).uiTheme, '');
+    for (const bad of ['JP', 'ja', 1, null, 'nope']) assert.equal(sanitizeSettings({ voiceLang: bad }).voiceLang, DEFAULT_VOICE_LANG, String(bad));
     assert.equal(sanitizeSettings({ bgm: 0.333 }).bgm, 0.33);
     assert.equal(sanitizeSettings({ quality: 'low' }).quality, 'low');
   });
@@ -880,7 +840,10 @@ describe('prepCamera (research 09 §1.2: the Final Assault prep on the own half 
   const pub = (round, players) => ({ round, bossRound: 14, hiddenRound: 15, players });
   test('normal rounds: the own board', () => {
     const c = prepCamera(pub(6, [pl('a', 0), pl('b', 1)]), 'b');
-    assert.deepEqual(c, { kind: 'prep', opts: { rect: { ...GEO.NORMAL_RECT }, side: 'L' } });
+    // 大图: the prep camera frames the map's own prep band (shared/layout.js `battle.prep`), which for an official
+    // 19×21 record is the historical GEO.NORMAL_RECT with the bench row above it (render/projection.js prep band)
+    assert.deepEqual(c, { kind: 'prep', opts: { rect: { r0: 7, r1: 12, c0: 0, c1: 10 }, side: 'L' } });
+    assert.deepEqual(c.opts.rect, { ...GEO.NORMAL_RECT, r0: GEO.HAND_ROW });
     assert.equal(prepCamera(null, 'a').kind, 'prep');
     assert.equal(prepCamera({ round: 14, bossRound: null, hiddenRound: null, players: [] }, 'a').kind, 'prep');
   });

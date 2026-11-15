@@ -34,47 +34,36 @@
 // The stats block (chessStatsBlock), the 特性 text (traitText) and the talent list (chessTalents) are exported: the 干员调配
 // screen's 局内数值 section draws the same ones for the chosen skill / module, without a live entry (GitHub issue #64).
 
-import { progressLabel } from '../itemProgress.js';
-import { itemText, garrisonText } from './showTags.js';
 import { BondTimers } from './bondTimers.js';
-import { useEffect, useMemo } from '../../vendor/hooks.module.js';
+import { useEffect } from '../../vendor/hooks.module.js';
 import { html, Icon, TierChip, MicroLabel, Button, confirmDialog, useTicker } from './components.js';
-import { OperatorImage, Img, RichText, UnitThumb, BondGlyph, GIcon, diyToken, TokenAvatar } from './gameComponents.js';
-import { attackInterval, rangeGridBox, fmtNum, tileKey, chessLoadout, nextThreshold, bondTier, briefingBondTip, pieceBondIds, grantedBonds, morphPairings, ownStandIn, standInOf, standInLoadout, standInLabel, standInTip, standInForText, ownDiyRecord, ownDiyPick, diyRecordFor, pickGetter, unitPick, unitCultivation } from './gameLogic.js';
+import { Img, RichText, UnitThumb, OperatorImage, BondGlyph, GIcon, diyToken } from './gameComponents.js';
+import { attackInterval, rangeGridBox, fmtNum, tileKey, chessLoadout, nextThreshold, bondTier, briefingBondTip, pieceBondIds, grantedBonds, morphPairings, slotPolicy, ownStandIn, standInOf, standInLoadout, standInLabel, standInTip, standInForText, ownDiyRecord, ownDiyPick, diyRecordFor, pickGetter, availableVoiceLangs, unitPick, unitCultivation } from './gameLogic.js';
+import { updateSettings, settingsStore, useSettings } from './settings.js';
+import { dubsInstalled } from '../voiceDubs.js';
+import { VOICE_LANG_NAMES } from '../../../shared/constants.js';
+import { morphSlotPolicy } from '../../../shared/plugins/rules.js';
 import { skillIconUrl, skillRecordIconUrl, profIconUrl, subProfIconUrl, itemIconUrl, enemyIconUrl, tokenAvatarUrl, factionIconUrl, uiUrl, moduleTypeIconUrl } from './assetUrls.js';
+// 立绘走**统一解析链**（`portraitChain.js`）：同一个干员在详情页 / 手牌 / 商店卡 / 自选池里是同一个函数，
+// 所以不会再出现「卡面是那套外观、详情页是原版」。没有外观提供者时它与 `chessPortraitUrl` 逐字相同。
+import { portraitUrlOf, currentAppearanceLookup } from './portraitChain.js';
+// 逐干员配音的客户端接口层（../voicePrefs.js）：干的这两件事（读自己的覆盖、写一份新覆盖表）都走它，
+// 于是「干员详情」与「干员调配」两处界面不可能给出不同结论。
+import { voiceLangOverrideOf, withVoiceLang } from '../voicePrefs.js';
 import { abilityRows } from './abilityLines.js';
 import { data } from '../data.js';
-import { equipmentCapacity } from '../../../shared/itemRules.js';
 import { attackRangeGrid } from '../../../shared/loadoutRecord.js';
 import { SKILL_SUMMON_START_DEPLOY } from '../../../shared/constants.js';
 import { moduleBadge, fullTraitText } from './loadoutModel.js';
 import { t, tc, N_ } from '../../../shared/i18n.js';
-import { morphSlotPolicy } from '../../../shared/plugins/rules.js';
 import { audio } from '../audio.js';
 import { tokenVariantFor } from './gameLogic/loadout.js';
-import { useSettings } from './settings.js';
-import { usePrefabPack } from './prefab/view.js';
-import { prefabCssRotation, regChromeTheme, regShopCardFaceModel, regTierViImageStyle } from './regHud.js';
+// 行为开关 `unequip` 的读数（画不画「卸下」按钮）：与发送点同一处（ui/gameActions.js），避免 UI 模块之间多一条 import。
+import { unequipAllowed } from './gameActions.js';
+// 组件级改写（DESIGN §28.19）：`loadout.detail` 是引擎的具名组件之一（干员详情面板本身），包声明的 wraps 就长在它上面。
+import { modComponent } from './modComponents.js';
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
-
-/** The tier-VI stencil belongs on the full detail card as well as the shop card, not on small field chips. */
-function DetailTierChip({ tier, golden = false }) {
-  const settings = useSettings();
-  const groups = data.get('local')?.groups;
-  const theme = regChromeTheme(groups, settings?.uiTheme);
-  const pack = usePrefabPack(groups, theme || null, { includeDefault: true });
-  const still = settings?.themeMotion === false;
-  const face = useMemo(() => pack ? regShopCardFaceModel(pack, { tier: 6, kind: 'chess', still }) : null, [pack, still]);
-  const vi = Number(tier) === 6 && face?.theme === 'ac_s_closur' ? face.vi : null;
-  const overlay = vi ? html`<i class="tier__prefab-vi" aria-hidden="true" style=${{
-    ...vi.style,
-    ...regTierViImageStyle(face, pack, { unitRemX: 0.44 / 64, unitRemY: 0.44 / 64, still }),
-    transform: `rotate(${prefabCssRotation(vi.node.rot)}deg)`,
-    transformOrigin: `${(vi.box.pivot?.[0] ?? 0.5) * 100}% ${(1 - (vi.box.pivot?.[1] ?? 0.5)) * 100}%`,
-  }} />` : null;
-  return html`<${TierChip} tier=${tier} golden=${golden} size="lg" class=${vi ? 'tier--prefab-vi' : ''} overlay=${overlay} />`;
-}
 
 const PROF_NAME = { PIONEER: N_('先锋'), WARRIOR: N_('近卫'), TANK: N_('重装'), SNIPER: N_('狙击'), CASTER: N_('术师'), MEDIC: N_('医疗'), SUPPORT: N_('辅助'), SPECIAL: N_('特种'), TOKEN: N_('召唤物') };
 const SP_TYPE = { INCREASE_WITH_TIME: N_('自动回复'), INCREASE_WHEN_ATTACK: N_('攻击回复'), INCREASE_WHEN_TAKEN_DAMAGE: N_('受击回复'), ON_DEPLOY: N_('被动') };
@@ -199,10 +188,7 @@ function hpOf(live, snapHp) {
 
 function Section({ title, micro, children, class: cls }) {
   return html`<section class=${cx('dsec', cls)}>
-    <h4 class="dsec__title sw-sec__head">
-      <span class="sw-sec__name"><i>[</i> ${title} <i>]</i></span>
-      ${micro ? html`<${MicroLabel}>${micro}</${MicroLabel}>` : null}
-    </h4>
+    <h4 class="dsec__title">${title}${micro ? html`<${MicroLabel}>${micro}</${MicroLabel}>` : null}</h4>
     ${children}
   </section>`;
 }
@@ -214,10 +200,10 @@ const isOffIn = (off, bondId) => !!(off && typeof off.has === 'function' && off.
  * and the items that pair with it; a bond the mode never activates (`off`, gameLogic modeOffBonds) struck through with
  * 本局禁用. `carried` (the wearer's items — the card shows the item on an operator): the pairing it wears is highlighted
  * (生效中; 已搭配 when that bond is off), and a wearer without one reads 暂未生效.
- * @param {{ off?: Set<string>|null, carried?: Array<string|{id:string}>|null, mode?: 'official'|'plus' }} props
+ * @param {{ off?: Set<string>|null, carried?: Array<string|{id:string}>|null }} props
  */
-export function MorphPairings({ off = null, carried = null, mode = 'official' }) {
-  const rows = morphPairings(data.list('items'), data.list('bonds'), { off, carried, mode });
+export function MorphPairings({ off = null, carried = null }) {
+  const rows = morphPairings(data.list('items'), data.list('bonds'), { off, carried });
   if (!rows.length) return null;
   const wearer = Array.isArray(carried);
   return html`<div class=${cx('dmorph', wearer && 'is-wearer')}>
@@ -237,31 +223,36 @@ export function MorphPairings({ off = null, carried = null, mode = 'official' })
 /**
  * A bond item's own line (items.json `giveBondId`): "与变形同构体一同装备时，携带者视为【X】成员" — 本局禁用 when the mode never
  * activates X; on a wearer that also carries a 变形同构体 (`carried`) it is in effect (生效中).
- * @param {{ item: any, off?: Set<string>|null, carried?: Array<string|{id:string}>|null, mode?: 'official'|'plus' }} props
+ * @param {{ item: any, off?: Set<string>|null, carried?: Array<string|{id:string}>|null }} props
  */
-export function MorphGrantLine({ item, off = null, carried = null, mode = 'official' }) {
+export function MorphGrantLine({ item, off = null, carried = null }) {
   const bond = item && !item.canGiveBond && typeof item.giveBondId === 'string' ? data.lookup('bonds', item.giveBondId) : null;
   if (!bond) return null;
   const morph = data.list('items').find((r) => r && r.canGiveBond);
   if (!morph) return null;
   const isOff = isOffIn(off, item.giveBondId);
-  const worn = grantedBonds(carried, (id) => data.lookup('items', id), mode).includes(item.giveBondId);
+  const worn = grantedBonds(carried, (id) => data.lookup('items', id)).includes(item.giveBondId);
   return html`<p class=${cx('dhint', 'dhint--morph', worn && 'is-worn', isOff && 'is-off')} data-bond=${item.giveBondId}>
     <${Icon} name="info" /><span>${t('与{morph}一同装备时，携带者视为【{bond}】成员', { morph: morph.name, bond: bond.name })}${isOff ? html`<span class="dmorph__tag is-off">${t('本局禁用')}</span>` : null}${worn
       ? html`<span class="dmorph__tag is-on">${isOff ? t('已搭配') : t('生效中')}</span>` : null}</span>
   </p>`;
 }
 
-/** An equipped item of the card: icon, name, effect — and for 变形同构体 / a bond item its pairing (`carried`: the wearer's items). */
-function ItemRow({ itemId, progress = null, showTag = null, carried = null, off = null, mode = 'official', onUnequip = null, uid = null }) {
+/** An equipped item of the card: icon, name, effect — and for 变形同构体 / a bond item its pairing (`carried`: the wearer's items).
+ * 第 7 段：`plus` 档下变形同构体**不占装备位**，所以它的行上多一个「不占装备格」标签（缺省档不画 ⇒ 界面逐字不变）。 */
+function ItemRow({ itemId, uid = null, carried = null, off = null, onUnequip = null }) {
   const it = data.lookup('items', itemId);
-  const free = mode === 'plus' && !!it?.canGiveBond;
+  // 装备拆卸（行为开关 `unequip: "allow"`，DESIGN §28.43.1）：`onUnequip` 只在**可编辑的自己人**身上传进来，而
+  // `unequipAllowed()` 是这一页从 `welcome.mods` 派生的有效档位 ⇒ **缺省档一个按钮都不画**（缺省界面逐字节不变）。
+  // 上游 0.3.1 的判定：**只看调用方给没给 `onUnequip`** —— 画不画按钮由调用方（game.js / 详情面板）
+  // 按 `unequipAllow` 决定，这里不再自己再问一遍模块状态（两处判据会分叉）。
+  const canDetach = typeof onUnequip === 'function' && Number.isInteger(uid);
+  const slotless = slotPolicy().isSlotless(it);
   return html`<div class="ditem">
     <${UnitThumb} kind="item" id=${itemId} size="sm" />
-    <div class="ditem__text"><b>${it?.name || itemId}</b>${free ? html`<span class="dtag" data-testid="morph-free">${t('不占装备格')}</span>` : null}<${RichText} text=${itemText(it, { showTag })} class="ditem__desc" />
-      <${ItemProgress} progress=${progress} />
-      ${it?.canGiveBond ? html`<${MorphPairings} off=${off} carried=${carried || []} mode=${mode} />` : it?.giveBondId ? html`<${MorphGrantLine} item=${it} off=${off} carried=${carried} mode=${mode} />` : null}
-      ${onUnequip && Number.isInteger(uid) ? html`<${Button} variant="secondary" size="sm" data-testid="unequip" onClick=${() => onUnequip(uid)}>${t('卸下')}<//>` : null}</div>
+    <div class="ditem__text"><b>${it?.name || itemId}</b>${slotless ? html`<span class="dtag dtag-slotless">${t('不占装备格')}</span>` : null}<${RichText} text=${it?.descRaw || it?.desc || ''} class="ditem__desc" />
+      ${it?.canGiveBond ? html`<${MorphPairings} off=${off} carried=${carried || []} />` : it?.giveBondId ? html`<${MorphGrantLine} item=${it} off=${off} carried=${carried} />` : null}</div>
+    ${canDetach ? html`<${Button} variant="ghost" size="sm" class="ditem__detach" data-testid="unequip" title=${t('卸下')} aria-label=${t('卸下')} onClick=${() => onUnequip(uid)}>${t('卸下')}<//>` : null}
   </div>`;
 }
 
@@ -332,7 +323,18 @@ export function traitText(c, golden, lo) {
  * such as 休整期结束时 and what it does) right under the header, visible without scrolling; the class trait (特性) and
  * the stats next; then the skill, the elite's module, the equipped items (the player's own build) and the talents.
  */
-export const CHESS_SECTIONS = Object.freeze(['head', 'garrison', 'trait', 'stats', 'skill', 'module', 'equip', 'talents', 'actions']);
+export const CHESS_SECTIONS = Object.freeze(['head', 'garrison', 'trait', 'stats', 'skill', 'module', 'equip', 'talents', 'voice', 'actions']);
+
+/**
+ * Set (or clear, with `lang` null) one operator's 配音语言 override. The global setting stays untouched — this is the
+ * per-operator half of 「不同干员可以切换不同的配音语言」 (shared/constants.js VOICE_LANGS).
+ * @param {string} charId
+ * @param {'cn'|'jp'|'en'|'kr'|null} lang
+ */
+export function setVoiceLang(charId, lang) {
+  if (typeof charId !== 'string' || !charId) return;
+  updateSettings({ voiceLangByChar: withVoiceLang(settingsStore.get().voiceLangByChar, charId, lang) });
+}
 
 /**
  * Sprite key (ui `garrisonTypeIcon/…`, small variant) of a 特质's type chip: the garrison's own official
@@ -348,7 +350,7 @@ export function garrisonTypeIconKey(garrison) {
 }
 
 /** The operator's own effect (特质, garrisons.json): trigger chip + description, compact. */
-export function GarrisonBlock({ garrison, m, piece = null }) {
+export function GarrisonBlock({ garrison, m }) {
   return html`<section class="dgarrison" aria-label=${t('特质')} data-garrison=${garrison.garrisonId || ''}>
     <div class="dgarrison__head">
       <span class="dgarrison__k">${t('特质')}</span>
@@ -357,7 +359,7 @@ export function GarrisonBlock({ garrison, m, piece = null }) {
         ${garrison.eventTypeDesc || ''}
       </span>
     </div>
-    <${RichText} as="p" text=${garrisonText(garrison, piece)} class="dgarrison__text" />
+    <${RichText} as="p" text=${garrison.descRaw || garrison.desc} class="dgarrison__text" />
   </section>`;
 }
 
@@ -416,12 +418,9 @@ function skillTextNote(sk) {
   return note ? html`<p class="dhint dhint--rule" data-skill-note=${sk.skillId}><${Icon} name="info" />${t(note)}</p>` : null;
 }
 
-function ItemProgress({ progress }) {
-  const label = progressLabel(progress);
-  return label ? html`<p class="ditem__progress">${t('出售干员')} <strong>${label}</strong></p>` : null;
-}
-
-export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bonds, offBonds = null, loadout, onBond, live = null, hint = null, unitItems = null, unitItemProgress = null, standIn = null, diy = null, cultOpts = null, morphMode = 'official', onUnequip = null, ownerId, skin = null }) {
+// `ownerId` / `skin` 来自 resolveDetail（形参表末尾那两项）：详情页的大图也要按**这一颗棋子属于哪个座位**的
+// 皮肤画，否则同一个人在手牌、详情、结算三处会是三张不同的图。
+export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bonds, offBonds = null, loadout, onBond, live = null, hint = null, unitItems = null, standIn = null, diy = null, voiceSettings = null, cultOpts = null, morphMode = 'official', onUnequip = null, ownerId = null, skin = null }) {
   const m = data.get('assets');
   const hp = hpOf(live, snapHp);
   // 0.2.0 自选编队: `chess` is then the composed 自选 record (the operator, the slot's tier / price); its skill and module are
@@ -437,7 +436,6 @@ export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bond
   // (`cultOpts.cultivation`); a stand-in has neither
   const lo = si ? standInLoadout(si, getChess, data.get('backups')) : chessLoadout(chess, loadout, getChess, { ...(cultOpts || {}), effects: data.get('effects') });
   const c = chess;
-  const equipCap = equipmentCapacity(c, data.get('config')?.economy?.equipPerChess);
   // stats / talents the unit fights with: the chosen module's (or none — statsBase) for an elite (DESIGN §16)
   const fr = lo?.record || body;
   const golden = !!(c.isGolden || piece?.golden);
@@ -445,6 +443,8 @@ export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bond
   // a chosen skill the manifest has no icon for (only the default skills' icons are fetched): its slot letter
   const skIcon = sk && lo && !lo.defaultSkill ? skillRecordIconUrl(m, sk, { empty: false }) : skillIconUrl(m, body);
   const skSlot = sk && Number.isInteger(sk.index) ? `S${sk.index + 1}` : null;
+  // 特质那一格画**几条**（上游 0.3.1 §36.16 的自定义特质）：官方那条（不带 `operatorTrait`）在前，
+  // 这个干员这一精英段位上声明过的自定义特质跟在后面 —— 全是官方数据的干员就只有一条，逐字等于从前。
   const nativeTrait = (c.garrisonIds ?? []).map(id => data.lookup('garrisons', id)).find(g => g && !g.operatorTrait);
   const customTraits = Object.values(data.get('garrisons') ?? {}).filter(g => g.operatorTrait?.charId === body.charId && g.operatorTrait.elite === golden);
   const garrisons = [...(nativeTrait ? [nativeTrait] : []), ...customTraits];
@@ -453,19 +453,20 @@ export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bond
   // teammate's unit's UnitInfo items, a bond popup 同构 row's wearer's)
   const carried = piece ? items : (Array.isArray(unitItems) ? unitItems : []);
   const getItem = (id) => data.lookup('items', id);
+  // `hasBond`：数据里不存在的盟约 id 一个都不画（与 prep / 战斗同一条约定，`shared/morph.js` 的
+  // `grantedBondsByTrait` 的 `hasBond`）—— 一张卡片上出现一条不存在的盟约，与计数对不上是同一类谎话。
   const bondIds = pieceBondIds(c, carried, getItem, morphMode);
-  const slotPolicy = morphSlotPolicy(morphMode === 'plus' ? 'plus' : 'official', (it) => !!getItem(typeof it === 'string' ? it : it?.id)?.canGiveBond);
   const grantedIds = bondIds.filter((b) => !(Array.isArray(c.bonds) && c.bonds.includes(b)));
-  const sell = Number.isFinite(piece?.sellPrice) ? piece.sellPrice : (c.sellPrice ?? 1);
+  const sell = c.sellPrice ?? 1;
   const blocks = {};
   blocks.head = html`
     <div key="head" class="dhead">
       <div class=${cx('dhead__art', golden && 'is-golden', `dhead__art--t${c.tier}`)}>
-        <${OperatorImage} m=${m} chess=${body} portrait ownerId=${ownerId} skin=${skin} fallback=${html`<${UnitThumb} kind="chess" id=${c.chessId} size="lg" rec=${body} ownerId=${ownerId} skin=${skin} />`} />
+        <${OperatorImage} m=${m} chess=${body} ownerId=${ownerId} skin=${skin} portrait avatarFallback fallback=${html`<${UnitThumb} kind="chess" id=${c.chessId} size="lg" rec=${si} ownerId=${ownerId} skin=${skin} />`} />
       </div>
       <div class="dhead__info">
         <div class="dhead__chips">
-          <${DetailTierChip} tier=${c.tier} golden=${golden} />
+          <${TierChip} tier=${c.tier} golden=${golden} size="lg" />
           ${golden ? html`<span class="dtag-elite">${t('精锐')}</span>` : null}
           ${piece?.kind === 'token' ? html`<span class="dtag-token">${t('召唤物')}</span>` : null}
           ${si ? html`<span class="dtag-standin" data-standin=${si.charId} title=${standInTip(si, c.name)}>${standInLabel(si)}</span>` : null}
@@ -486,8 +487,8 @@ export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bond
       </div>
     </div>`;
   blocks.garrison = garrisons.length > 1
-    ? garrisons.map(garrison => html`<${GarrisonBlock} key=${garrison.garrisonId} garrison=${garrison} m=${m} piece=${piece} />`)
-    : garrisons[0] ? html`<${GarrisonBlock} key="garrison" garrison=${garrisons[0]} m=${m} piece=${piece} />` : null;
+    ? garrisons.map(garrison => html`<${GarrisonBlock} key=${garrison.garrisonId} garrison=${garrison} m=${m} />`)
+    : garrisons[0] ? html`<${GarrisonBlock} key="garrison" garrison=${garrisons[0]} m=${m} />` : null;
   blocks.trait = body.trait?.desc ? html`<p key="trait" class="dtrait"><${Icon} name="info" /><${RichText} text=${traitText(body, golden, lo)} /></p>` : null;
   // (`fr` is the body the unit fights with — a stand-in's record for a 补位 chess; `chess` is only the range's fallback)
   blocks.stats = chessStatsBlock({ rec: fr, chess: c, live });
@@ -512,12 +513,19 @@ export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bond
       </div>
     <//>` : null;
   // (a 变形同构体 / bond item row shows its pairing against what this operator carries: ItemRow `carried`)
-  blocks.equip = piece?.kind === 'chess' ? html`<${Section} key="equip" title=${t('装备')} micro=${`EQUIP ${slotPolicy.slotsUsed(items)}/${slotPolicy.slotCap(equipCap)}`} class="dsec--equip">
-      ${items.length ? items.map((it) => html`<${ItemRow} key=${it.uid} itemId=${it.id} progress=${it.progress} showTag=${it.showTag} carried=${items} off=${offBonds} mode=${morphMode} uid=${it.uid} onUnequip=${onUnequip} />`) : html`<p class="t-dim dempty">${t('拖拽装备至该干员以配发（最多 {max} 件）', { max: equipCap })}</p>`}
+  // 第 7 段：`EQUIP n/2` 的**分子**与分母都走这一页的装备位策略（`shared/morph.js`）。缺省档的策略就是引擎今天那条
+  // 算术（分子 = `items.length`、分母 = 2）⇒ 缺省界面逐字不变；`plus` 档下变形同构体不计数、分母写它的上限。
+  // 档位从这一页的 `morphMode` 来（上游 0.3.1）：plus 档下变形同构体不计数，分母写它的上限。
+  const slot = morphSlotPolicy(morphMode === 'plus' ? 'plus' : 'official', (it) => !!getItem(typeof it === 'string' ? it : it?.id)?.canGiveBond);
+  const equipUsed = slot.slotsUsed(items);
+  const carriedUsed = slot.slotsUsed(carried);
+  const equipCap = slot.slotCap(2);
+  blocks.equip = piece?.kind === 'chess' ? html`<${Section} key="equip" title=${t('装备')} micro=${`EQUIP ${equipUsed}/${equipCap}`} class="dsec--equip">
+      ${items.length ? items.map((it) => html`<${ItemRow} key=${it.uid} itemId=${it.id} uid=${it.uid} carried=${items} off=${offBonds} mode=${morphMode} onUnequip=${onUnequip} />`) : html`<p class="t-dim dempty">${t('拖拽装备至该干员以配发（最多 2 件）')}</p>`}
     <//>`
     // no own piece (a teammate's unit, a bond popup's 变形同构体 row): what it carries, read-only
-    : !piece && carried.length ? html`<${Section} key="equip" title=${t('装备')} micro=${`EQUIP ${slotPolicy.slotsUsed(carried)}/${slotPolicy.slotCap(equipCap)}`} class="dsec--equip">
-      ${carried.map((id, i) => html`<${ItemRow} key=${`${i}:${id}`} itemId=${id} progress=${unitItemProgress?.filter(p => p.id === id)[carried.slice(0, i).filter(x => x === id).length]} carried=${carried} off=${offBonds} mode=${morphMode} />`)}
+    : !piece && carried.length ? html`<${Section} key="equip" title=${t('装备')} micro=${`EQUIP ${carriedUsed}/${equipCap}`} class="dsec--equip">
+      ${carried.map((id, i) => html`<${ItemRow} key=${`${i}:${id}`} itemId=${id} carried=${carried} off=${offBonds} />`)}
     <//>` : null;
   const talents = chessTalents(fr);
   blocks.talents = talents.length ? html`<${Section} key="talents" title=${t('天赋')} micro="TALENT" class="dsec--talent">
@@ -526,6 +534,23 @@ export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bond
   blocks.actions = piece && editable && piece.kind !== 'item' ? html`<div key="actions" class="dactions">
       <${Button} variant="amber" icon="close" class="dpanel__sell" onClick=${() => onSell(piece, si || c)}>${t('出售')}<span class="dsell num">+${sell}</span><//>
     </div>` : null;
+  // 配音语言 (v0.7.1): this operator's own dub, overriding 设置 → 配音语言. Only when the build downloaded more than one
+  // dub (a lone button that cannot change what you hear is worse than no button) and only for a real operator — a
+  // summon / device has no voice bank of its own. Picking one auditions it at once (选中干员 line), so the choice is
+  // heard where it is made. `voiceSettings` is passed by DetailPanel (which subscribes to the settings store): this
+  // function is also called directly as a plain function by many tests, so it must not read a hook itself.
+  const voiceChar = body?.charId || c.charId || null;
+  const voiceLangs = dubsInstalled(availableVoiceLangs(m));
+  const ownVoice = voiceLangOverrideOf(voiceSettings, voiceChar) || null;
+  blocks.voice = voiceChar && voiceLangs.length > 1 ? html`<${Section} key="voice" title=${t('配音')} micro="VOICE" class="dsec--voice">
+      <div class="dvoice set-seg" role="radiogroup" aria-label=${t('配音语言')}>
+        <button type="button" role="radio" aria-checked=${ownVoice ? 'false' : 'true'} class=${ownVoice ? '' : 'is-on'}
+          onClick=${() => setVoiceLang(voiceChar, null)}>${t('跟随默认')}</button>
+        ${voiceLangs.map((l) => html`<button key=${l} type="button" role="radio" aria-checked=${ownVoice === l ? 'true' : 'false'}
+          class=${ownVoice === l ? 'is-on' : ''}
+          onClick=${() => { setVoiceLang(voiceChar, l); audio.voice(voiceChar, 'select', { lang: l }); }}>${VOICE_LANG_NAMES[l] || l}</button>`)}
+      </div>
+    <//>` : null;
   const out = CHESS_SECTIONS.map((k) => blocks[k]).filter(Boolean);
   // a merge-completing shop / reward card: where the elite goes (shopBar mergeHint), right under the header
   if (hint) out.splice(1, 0, html`<p key="merge" class="dhint dhint--merge"><${Icon} name="info" />${t('可晋升：{hint}', { hint })}</p>`);
@@ -539,26 +564,29 @@ export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bond
  * 变形同构体 lists its pairings (its 天赋栏: MorphPairings, `offBonds` marks 本局禁用); a bond item says which bond it gives
  * a 变形同构体 wearer (MorphGrantLine). (An equipped item is shown on its wearer's card: ChessDetail's 装备 rows.)
  */
-export function ItemDetail({ item, piece, progress = piece?.progress, editable, onDestroy, offBonds = null, morphMode = 'official', unequipAllowed = false }) {
+export function ItemDetail({ item, piece, editable, onDestroy, offBonds = null }) {
   const m = data.get('assets');
   return html`
     <div class="dhead dhead--item">
       <div class=${cx('dhead__icon', item.isGolden && 'is-golden')}><${Img} src=${itemIconUrl(m, item)} fallback=${html`<${GIcon} name="bolt" />`} /></div>
       <div class="dhead__info">
-        <div class="dhead__chips"><${DetailTierChip} tier=${item.tier} golden=${item.isGolden} />${item.isGolden ? html`<span class="dtag-elite">${t('进阶')}</span>` : null}
+        <div class="dhead__chips"><${TierChip} tier=${item.tier} golden=${item.isGolden} size="lg" />${item.isGolden ? html`<span class="dtag-elite">${t('进阶')}</span>` : null}
           <span class="dtag-kind">${item.itemType === 'MAGIC' ? t('奇术') : t('装备')}</span></div>
         <h3 class="dhead__name">${item.name}</h3>
         ${item.flavor ? html`<span class="dhead__flavor">${item.flavor}</span>` : null}
       </div>
     </div>
-    <${Section} title=${t('效果')} micro="EFFECT"><${RichText} as="p" text=${itemText(item, piece)} class="dtext" /><${ItemProgress} progress=${progress} /><//>
-    ${item.canGiveBond ? html`<${Section} title=${t('天赋')} micro="TALENT" class="dsec--morph"><${MorphPairings} off=${offBonds} mode=${morphMode} /><//>` : null}
-    ${item.canGiveBond && morphMode === 'plus' ? html`<p class="dhint" data-testid="morph-free"><${Icon} name="info" />${t('不占装备格')}</p>` : null}
-    ${!item.canGiveBond && item.giveBondId ? html`<${MorphGrantLine} item=${item} off=${offBonds} mode=${morphMode} />` : null}
+    <${Section} title=${t('效果')} micro="EFFECT"><${RichText} as="p" text=${item.descRaw || item.desc} class="dtext" /><//>
+    ${item.canGiveBond ? html`<${Section} title=${t('天赋')} micro="TALENT" class="dsec--morph"><${MorphPairings} off=${offBonds} /><//>` : null}
+    ${!item.canGiveBond && item.giveBondId ? html`<${MorphGrantLine} item=${item} off=${offBonds} />` : null}
     ${item.note ? html`<p class="dhint dhint--rule"><${Icon} name="info" />${item.note}</p>` : null}
     ${item.itemType === 'MAGIC'
       ? html`<p class="dhint"><${Icon} name="info" />${t('将其拖拽至战场上的格子使用')}</p>`
-      : html`<p class="dhint"><${Icon} name="info" />${unequipAllowed ? t('拖拽至干员身上进行配发（装备容量依干员而定）') : t('拖拽至干员身上进行配发（装备容量依干员而定，配发后无法取下）')}${item.mergeable ? t('；2 件相同装备自动合成进阶装备') : ''}</p>`}
+      // 装备拆卸（行为开关 `unequip: "allow"`）：**只有 `allow` 档**才去掉「配发后无法取下」那句 —— 官方档下那句话
+      // 是对的（`g.destroy` / `g.unequip` 都回 `'equipped items are locked'`），所以缺省档逐字不变。
+      : html`<p class="dhint"><${Icon} name="info" />${unequipAllowed()
+      ? t('拖拽至干员身上进行配发（每名干员最多 2 件）')
+      : t('拖拽至干员身上进行配发（每名干员最多 2 件，配发后无法取下）')}${item.mergeable ? t('；2 件相同装备自动合成进阶装备') : ''}</p>`}
     ${item.shopExcluded ? html`<p class="dhint dhint--source"><${Icon} name="info" />${t('调度中心不出售 · 获取途径：{source}', { source: item.shopExcludedBy || t('效果获得') })}</p>` : null}
     ${piece && editable ? html`<div class="dactions"><${Button} variant="danger" onClick=${() => onDestroy(piece, item)}>${t('销毁道具')}<//></div>` : null}`;
 }
@@ -685,7 +713,7 @@ function MapCharDetail({ token, snapHp, live, m }) {
     <//>` : null}`;
 }
 
-export function TokenDetail({ token, piece, ownerId = null, skin = null, snapHp = null, live = null }) {
+export function TokenDetail({ token, piece, ownerId = null, snapHp = null, live = null }) {
   const m = data.get('assets');
   // a band map character (外勤医疗's Touch / 预备干员-医疗, tokens.json kind 'mapChar') is an operator of the mode, not a
   // summon: no owner variants — its stats, skill, talents and 特性 are on the record (GitHub #260, PR #278)
@@ -704,7 +732,7 @@ export function TokenDetail({ token, piece, ownerId = null, skin = null, snapHp 
   const hint = piece ? summonDeployHint(token) : null;
   return html`
     <div class="dhead dhead--item">
-      <div class="dhead__icon"><${TokenAvatar} m=${m} tokenId=${token.tokenId} ownerId=${ownerId} skin=${skin} fallback=${html`<${GIcon} name="target" />`} /></div>
+      <div class="dhead__icon"><${Img} src=${tokenAvatarUrl(m, token.tokenId)} fallback=${html`<${GIcon} name="target" />`} /></div>
       <div class="dhead__info">
         <div class="dhead__chips"><span class="dtag-token">${t('召唤物')}</span>${piece?.count > 1 ? html`<span class="dtag-kind num">×${piece.count}</span>` : null}</div>
         <h3 class="dhead__name">${token.name}</h3>
@@ -805,7 +833,7 @@ export function resolveDetail(target, pieces, { priv = null, backups = data.get(
     if (!e) return null;
     const p = e.piece;
     if (p.kind === 'item') { const it = data.lookup('items', p.id); return it ? { type: 'item', item: it, piece: p } : null; }
-    if (p.kind === 'token') { const t = data.lookup('tokens', p.id) || diyToken(p.id); return t ? { type: 'token', token: t, piece: p, ownerId: tokenOwnerId(p, pieces), skin: p.skin || null } : null; }
+    if (p.kind === 'token') { const t = data.lookup('tokens', p.id) || diyToken(p.id); return t ? { type: 'token', token: t, piece: p, ownerId: tokenOwnerId(p, pieces) } : null; }
     const c = data.lookup('chess', p.id);
     const d = ownDiy(c);
     if (d) return { type: 'chess', ...appearance, chess: d.chess, piece: p, standIn: null, diy: d.diy };
@@ -839,7 +867,7 @@ export function resolveDetail(target, pieces, { priv = null, backups = data.get(
     const own = Number.isInteger(u.uid) ? pieces?.get(u.uid) : null;
     if (u.side === 'enemy') { const en = data.lookup('enemies', u.defId); return en ? { type: 'enemy', enemy: en, unitId: u.id } : null; }
     // a hand item on a scouted prep board (m.field units, kind 'item'): the item's own card
-    if (u.kind === 'item') { const it = data.lookup('items', u.defId); return it ? { type: 'item', item: it, progress: u.progress } : null; }
+    if (u.kind === 'item') { const it = data.lookup('items', u.defId); return it ? { type: 'item', item: it } : null; }
     const c = data.lookup('chess', u.defId);
     // a unit says itself whether it is a stand-in (UnitInfo standInFor: the sim's, prep scouting's); an own piece's unit
     // follows m.private.standIns like the piece
@@ -852,11 +880,11 @@ export function resolveDetail(target, pieces, { priv = null, backups = data.get(
     const dr = pick ? diyRecordFor(c, pick, dd) : null;
     // 0.2.2: another player's unit says its 潜能 / 练度 itself (UnitInfo potential / cultivate); an own piece's unit follows
     // m.private.ops (the panel's `cultOpts`)
-    const cv = { ...(own?.piece ? {} : { cultOpts: { cultivation: unitCultivation(u) } }), unitItemProgress: u.itemProgress };
+    const cv = own?.piece ? null : { cultOpts: { cultivation: unitCultivation(u) } };
     if (dr) return { type: 'chess', ...appearance, chess: dr, piece: own?.piece || null, unitId: u.id, unitItems: Array.isArray(u.items) ? u.items : null, standIn: null, diy: pick, ...cv };
     if (c) return { type: 'chess', ...appearance, chess: c, piece: own?.piece || null, unitId: u.id, unitItems: Array.isArray(u.items) ? u.items : null, standIn: si, ...cv };
     const t = data.lookup('tokens', u.defId) || diyToken(u.defId);
-    if (t) return { type: 'token', token: t, unitId: u.id, ownerId: u.ownerId ?? tokenOwnerId(own?.piece, pieces), skin: u.skin || null };
+    if (t) return { type: 'token', token: t, unitId: u.id, ownerId: tokenOwnerId(own?.piece, pieces) };
     const en = data.lookup('enemies', u.defId);
     return en ? { type: 'enemy', enemy: en, unitId: u.id } : null;
   }
@@ -892,9 +920,12 @@ export function selectVoiceKey(detail) {
  *   (the owner's request of 2026-10-08 「添加一下干员点击上去的语气一样的语音」 lifted 2026-10-03's 「整备阶段不需要干员语音」
  *   for this line only; [ASSUMED] the official prep tap says 选中干员 like the battle's FOCUS_CHAR)
  */
-export function DetailPanel({ detail, editable, snapHp, onClose, onSell, onDestroy, bonds = [], offBonds = null, loadout = null, ops = null, onBond = null, side = 'left', shopOpen = false, live = null, bondTimers = null, voice = false, morphMode = 'official', onUnequip = null, unequipAllowed = false }) {
+export const DetailPanel = modComponent('loadout.detail', function DetailPanel({ detail, editable, snapHp, onClose, onSell, onDestroy, onUnequip = null, bonds = [], offBonds = null, loadout = null, ops = null, onBond = null, side = 'left', shopOpen = false, live = null, bondTimers = null, voice = false, morphMode = 'official', unequipAllowed = false }) {
   const getter = typeof live === 'function' ? live : null;
   useTicker(detail && (getter || bondTimers) ? 250 : 0);
+  // 配音语言 (v0.7.1): the panel is the component that subscribes to the settings store, so picking a dub in the card
+  // re-renders it at once (ChessDetail itself is also called directly by tests and must stay hook-free).
+  const voiceSettings = useSettings();
   // 选中干员 voice (audio.voice 'select'): once per opened operator — the panel stays mounted while the target changes,
   // so the key carries what identifies it (its chess record, its piece / battle unit id, the card tap: selectVoiceKey)
   const selectKey = voice && detail?.type === 'chess' ? selectVoiceKey(detail) : null;
@@ -910,8 +941,7 @@ export function DetailPanel({ detail, editable, snapHp, onClose, onSell, onDestr
   const sellIt = async (piece, chess) => {
     const golden = piece.golden || chess?.isGolden;
     if (golden) {
-      const price = Number.isFinite(piece?.sellPrice) ? piece.sellPrice : (chess?.sellPrice ?? 1);
-      const ok = await confirmDialog({ title: t('出售精锐干员'), text: t('确定要出售精锐干员「{name}」吗？出售后获得 {price} 资金。', { name: chess?.name || '', price }), okText: t('出售'), danger: true });
+      const ok = await confirmDialog({ title: t('出售精锐干员'), text: t('确定要出售精锐干员「{name}」吗？出售后获得 {price} 资金。', { name: chess?.name || '', price: chess?.sellPrice ?? 1 }), okText: t('出售'), danger: true });
       if (!ok) return;
     }
     onSell(piece);
@@ -922,18 +952,20 @@ export function DetailPanel({ detail, editable, snapHp, onClose, onSell, onDestr
   };
   return html`<aside class=${cx('dpanel', 'brackets', `dpanel--${detail.type}`, side === 'right' && 'dpanel--right', side === 'right' && shopOpen && 'is-shop')} role="dialog" aria-label=${t('详情')}
       data-side=${side === 'right' ? 'right' : 'left'}>
+    <div class="mod-host" data-mod-slot="screen.loadout.detail"
+      data-mod-slot-key=${detail?.type === 'chess' ? (detail.chess?.chessId || detail.standIn?.charId || detail.chess?.charId || null) : null}></div>
     <button type="button" class="dpanel__close" aria-label=${t('关闭')} onClick=${onClose}><${Icon} name="close" /></button>
     <div class="dpanel__scroll">
       ${bondTimers ? html`<${BondTimers} rows=${bondTimers()} />` : null}
       ${detail.type === 'chess' ? html`<${ChessDetail} chess=${detail.chess} ownerId=${detail.ownerId} skin=${detail.skin} piece=${detail.piece} snapHp=${snapHp} editable=${editable} onSell=${sellIt}
-        bonds=${bonds} offBonds=${offBonds} loadout=${loadout} onBond=${onBond} live=${liveNow} hint=${detail.hint || null} unitItems=${detail.unitItems || null} unitItemProgress=${detail.unitItemProgress || null}
-        standIn=${detail.standIn || null} diy=${detail.diy || null} cultOpts=${detail.cultOpts || { ops }} morphMode=${morphMode} onUnequip=${onUnequip} />` : null}
-      ${detail.type === 'item' ? html`<${ItemDetail} item=${detail.item} progress=${detail.progress || detail.piece?.progress} piece=${detail.piece} editable=${editable} onDestroy=${destroyIt} offBonds=${offBonds} morphMode=${morphMode} unequipAllowed=${unequipAllowed} />` : null}
+        bonds=${bonds} offBonds=${offBonds} loadout=${loadout} onBond=${onBond} live=${liveNow} hint=${detail.hint || null} unitItems=${detail.unitItems || null}
+        standIn=${detail.standIn || null} diy=${detail.diy || null} voiceSettings=${voiceSettings} cultOpts=${detail.cultOpts || { ops }} onUnequip=${onUnequip} />` : null}
+      ${detail.type === 'item' ? html`<${ItemDetail} item=${detail.item} piece=${detail.piece} editable=${editable} onDestroy=${destroyIt} offBonds=${offBonds} />` : null}
       ${detail.type === 'enemy' ? html`<${EnemyDetail} enemy=${detail.enemy} snapHp=${snapHp} count=${detail.count} live=${liveNow} />` : null}
-      ${detail.type === 'token' ? html`<${TokenDetail} token=${detail.token} piece=${detail.piece} ownerId=${detail.ownerId ?? null} skin=${detail.skin ?? null} snapHp=${snapHp} live=${liveNow} />` : null}
+      ${detail.type === 'token' ? html`<${TokenDetail} token=${detail.token} piece=${detail.piece} ownerId=${detail.ownerId ?? null} snapHp=${snapHp} live=${liveNow} />` : null}
       ${detail.type === 'terrain' ? html`<${TerrainDetail} terrain=${detail.terrain} />` : null}
       ${detail.type === 'device' ? html`<${DeviceDetail} device=${detail.device} snapHp=${snapHp} live=${liveNow} />` : null}
     </div>
   </aside>`;
-}
+});
 

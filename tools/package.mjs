@@ -7,38 +7,29 @@
 //   node tools/package.mjs --update --from <base>[,<base>…]
 //                          → Stronghold-Protocol-v<version>-update.zip  only the files that differ from the earlier full
 //                            zips given as bases, to extract over an install of one of them (server/update.js)
-//   node tools/package.mjs --assets
-//                          → Stronghold-Protocol-v<version>-assets.zip  the example asset pack for the title screen's
-//                            导入素材包: only the art that import accepts from a host of this version, and a README.txt.
-//                            Not a release asset (the maintainer offers it for download elsewhere) — see below
-//   node tools/package.mjs --theme-packs
-//                          → Stronghold-Protocol-v<version>-theme-<id>.zip  each official theme the packages hold back
-//                            (HELD_THEME_GROUPS: 可露希尔, §37.232) as a pack for 设置 → 界面主题 → 导入主题包. Not a
-//                            release asset either
-//   node tools/package.mjs [--lite | --update --from <bases> | --assets | --theme-packs] [--dry-run [--list]] [--out <dir>] [--force]
-//                          [--keep-stage] [--no-install] [--allow-dirty] [--allow-dev] [--root <dir>]
+//   node tools/package.mjs [--lite | --update --from <bases>] [--dry-run [--list]] [--out <dir>] [--force] [--keep-stage]
+//                          [--no-install] [--allow-dirty] [--allow-dev] [--root <dir>]
 //
 // The zips hold one folder, Stronghold-Protocol/, with only what a player runs — an allowlist over `git ls-files`, so
 // untracked work, caches, logs and per-machine config never get in: server/, shared/, data/, public/ (not public/dev/),
 // packs/ (the content packs that ship with the repository, docs/PACKS.md; a pack installed on this machine and not
-// committed stays out), plugins/ (only its readme, author guide and templates — docs/PLUGINS.md; a server's own plugins are git-ignored and
-// never ship), schemas/, the plugin author harness,
-// the start scripts, the tools a player runs (setup, vendor = the postinstall, fetch-assets + tools/assets, doctor, plugin, and
+// committed stays out),
+// the start scripts, the tools a player runs (setup, vendor = the postinstall, fetch-assets + tools/assets, doctor, and
 // what setup starts: tools/local-extract, crop-board-atlas), the research tables the Node server (server/sim/
 // nodeData.js fallback) and fetch-assets read, package.json / package-lock.json, LICENSE / NOTICE.md /
-// THIRD-PARTY-NOTICES.md, README.md, CHANGELOG.md, the player, plugin and theme author docs. `npm ci --omit=dev` in the
+// THIRD-PARTY-NOTICES.md, README.md, CHANGELOG.md, docs/PLAYING.md, docs/DEPLOY.md and docs/NET-TUNING.md (the
+// owner's 增量帧可调参数说明书, shipped with the player package). `npm ci --omit=dev` in the
 // stage adds the production node_modules and (postinstall) public/vendor. The full zip adds the git-ignored art: the
 // files data/assets.json lists, public/fonts, and the local-client extraction (public/assets/local/,
-// data/local-assets.json) when present, including the battlefield scenes under public/assets/local/scene/
+// data/local-assets.json) when present, including the 0.2.5 battlefield scenes under public/assets/local/scene/
 // when this machine extracted them. Missing scenes are not an error: the board keeps the metal tiles, and the
 // summary says so. Nothing else on disk ships, so art the data no longer lists (焰狐龙梓兰, left out of
 // 自选 in 0.2.0, or files of an old mapping) never ships even when this machine still has it. FULL_ZIP_JP_VOICE (below)
-// decides whether the full zip carries the Japanese voice dub too (default: yes), FULL_ZIP_OPTIONAL_VOICE the English,
-// Korean and own-language dubs (default: yes, so the 0.3.0 full zip ships them; about +180 MB, measured after download).
-// Left out: test/ except test/helpers/battleHarness.js, the maintainer tools (build-data, golden, botbench, i18n, check-imports, this file …),
+// decides whether the full zip carries the Japanese voice dub too (default: yes).
+// Left out: test/, the maintainer tools (build-data, golden, botbench, i18n, check-imports, this file …),
 // scripts/make-windows-bundle.mjs, the other docs (DESIGN, SIM, the research notes, docs/img …), public/dev/, handoff/,
 // .github/, types/, lint / editor / Docker files (Docker builds from a git clone).
-// Also left out, by the maintainer's decision of 2026-10-23 (§35.66): the external-AI / LLM integration. The explicit
+// Also left out, by the maintainer's decision of 2026-10-23 (§37.66): the external-AI / LLM integration. The explicit
 // list is LLM_RELEASE_EXCLUDE in server/match/llmRelease.js (re-exported below). A release tree gets
 // server/release-without-llm and the server then ignores external-AI settings. The #673 framework and the built-in
 // bots stay, including server/match/aiPlan.js and server/match/aiEconomy.js (no host ships with them).
@@ -80,7 +71,7 @@
 // personal-info scan; it must hold exactly that) before it is zipped. --dry-run reads and checks the bases; the
 // comparison needs the built stage.
 //
-// --assets (docs/history/0.3.0.md §32.14.39) writes one folder, Stronghold-Protocol-v<version>-assets/, holding public/assets/…
+// --assets (docs/history/0.3.0.md §34.14.39) writes one folder, Stronghold-Protocol-v<version>-assets/, holding public/assets/…
 // and public/fonts/… and README.txt (what the pack is, the version whose manifests it matches, how to import it). The
 // art is what public/js/assetPack.js accepts from a host that has every listed file: its own plan of the three served
 // manifests (data/assets.json, data/local-assets.json, data/local-fx.json; importableArt), with the full zip's voice and
@@ -96,7 +87,6 @@
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import { smokePackage } from './package-smoke.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -104,13 +94,12 @@ import { findSpecifiers } from './check-imports.mjs';
 import { rewriteManifest } from '../server/http/assetViews.js';
 import { mergeLocalManifests, planFromManifests } from '../public/js/assetPack.js';
 import { writePackIndex } from './packs.mjs';
-import { OFFICIAL_PACK_EXT, OFFICIAL_PACK_LIMITS, THEME_LIMITS, officialThemeById } from '../shared/uiTheme.js';
 import { compareVersions, diffBases, manifestText, readBase, updateText } from './package-update.mjs';
 import {
   APPLIED_FILE, MANIFEST_FILE, UPDATE_FILE, affectsRuntime, digestFile, inManifest, isSetupArt, listedArtFiles,
   parseManifest, parseUpdate, pathProblem, removalProblem,
 } from '../server/update.js';
-// The one list of LLM paths a release must not contain, and the marker a release tree carries (§35.66).
+// The one list of LLM paths a release must not contain, and the marker a release tree carries (§37.66).
 import {
   LLM_RELEASE_EXCLUDE, LLM_RELEASE_MARKER, LLM_RELEASE_MARKER_TEXT, isLlmReleasePath, omitLlmFromRelease,
 } from '../server/match/llmRelease.js';
@@ -122,28 +111,62 @@ export const FOLDER = 'Stronghold-Protocol';
 
 /** Root files a player gets. */
 export const ROOT_FILES = ['package.json', 'package-lock.json', 'LICENSE', 'NOTICE.md', 'THIRD-PARTY-NOTICES.md', 'README.md', 'CHANGELOG.md'];
-/** The player docs. */
-export const PLAYER_DOCS = ['docs/PLAYING.md', 'docs/DEPLOY.md', 'docs/PLUGINS.md', 'docs/PLUGIN-GUIDE.md',
-  'docs/PLUGIN-DSL.md', 'docs/PLUGIN-API.md', 'docs/SKINS.md', 'docs/plugin-catalog.example.json',
-  'docs/THEMES.md', 'docs/THEME-GUIDE.md', 'docs/examples/ui-theme/theme.json'];
-/** Player doc folders that ship whole: the theme guide's example pack, importable from the install (§37.234). */
-export const PLAYER_DOC_DIRS = ['docs/examples/ui-theme-demo/'];
-/** The author harness has no test-only dependencies; the rest of test/ stays out. */
-export const AUTHOR_TEST_FILES = ['test/helpers/battleHarness.js'];
-/** Only these repository-owned plugin resources ship, even if an owner's plugin was accidentally tracked. */
-export const isPluginResource = (rel) => rel === 'plugins/README.md' || rel === 'plugins/AGENTS.md' || rel.startsWith('plugins/_template/');
+/** The player docs. `NET-TUNING.md` is the owner's "增量帧可调参数说明书": it ships with the player package. */
+export const PLAYER_DOCS = ['docs/PLAYING.md', 'docs/DEPLOY.md', 'docs/NET-TUNING.md'];
+/**
+ * 创意工坊的**入门层**：owner 2026-10-13「四个包里要包含创意工坊说明」。这五份是**给做包的人**的唯一入口，
+ * 正文都在 `docs/` 顶层（`docs/START-HERE.md` 是四步主文，其余是错误码白话表与两篇单任务）。
+ * 与 Mods 仓同源、两边同步（`docs/START-HERE.md` 顶部写着这条纪律）；`docs/WORKSHOP.md` 早就在 `PLAYER_DOCS`
+ * 之外的 `docs/` 顶层里 —— 见下面 `PLAYER_DOC_DIRS`，入门层只是那条链的第一段。
+ */
+export const PLAYER_WORKSHOP_DOCS = ['docs/START-HERE.md', 'docs/errors.md',
+  'docs/task-01-换个立绘.md', 'docs/task-02-加个干员.md'];
+/**
+ * 整目录随包发出的 `docs/` 子树。
+ *
+ * 为什么需要它：入门层的第 1 步是「**复制这个文件夹**」—— 一个可复制的起点是入门层成立的前提
+ * （`docs/START-HERE.md` 第 1 步、附录 E）。所以 `docs/my-first-pack/`（模板包本体：`pack.json` +
+ * `assets/portrait.png`，一共 438 字节）整棵子树进包。
+ *
+ * ⚠ **模板包不能放进 `docs/examples/`**：那三个目录（clementia / demo-workshop / kit-demo）是**冻结基线** ——
+ * `test/packAssets.test.js`、`test/packRelativeImports.test.js`、`test/workshopAssets.test.js` 都钉着
+ * 「`docs/examples` 里恰好这三份、内容哈希逐字节不变」。多放一份会改动那些基线值，而基线值正是
+ * 「身份哈希没被顺手改坏」的判据。模板包因此有自己的目录（`docs/my-first-pack/`），一个字节都不动那三份。
+ *
+ * `docs/examples/` 仍然进包，但只带那两份 **spec 示例**（`operator-spec.json` / `stage-spec.json` ——
+ * `docs/task-02-加个干员.md` 第 2 步让作者「整份复制过来」，包内断链等于那一步做不到）；
+ * 那三份**示例包**目录（`EXAMPLE_PACK_DIRS`）是给校验器用的冻结夹具，**不随包发出**。
+ */
+export const PLAYER_DOC_DIRS = ['docs/my-first-pack/', 'docs/examples/'];
+/** `docs/examples/` 下**不随包发出**的三份冻结夹具包（见上面 PLAYER_DOC_DIRS 的说明）。 */
+export const EXAMPLE_PACK_DIRS = ['docs/examples/clementia/', 'docs/examples/demo-workshop/', 'docs/examples/kit-demo/'];
+/**
+ * 工坊三份大文档始终随包发出（它们本来就在 `docs/` 顶层，但**不在**按名字列的名单里）。
+ *
+ * 为什么必须显式列：`isPlayerFile` 是按名字/目录白名单收的，`docs/` 顶层默认全在包外。
+ * 入门层指向它们（`docs/START-HERE.md` 附录 C），包内断链等于入门层把读者引到 404。
+ */
+export const PLAYER_WORKSHOP_REFS = ['docs/WORKSHOP.md', 'docs/STANDARD-PACK.md', 'docs/MOD-SURFACE.md', 'docs/EDITOR.md',
+  // 插件作者的参考面：与 tools/plugin.mjs、schemas/ 一起构成「写包 → check → pack」的闭环（docs/PLUGINS.md 是它的指南）。
+  'docs/PLUGINS.md', 'docs/PLUGIN-GUIDE.md', 'docs/PLUGIN-DSL.md', 'docs/PLUGIN-API.md', 'docs/plugin-catalog.example.json'];
 /** Research tables read at run time: server/sim/nodeData.js (the Node sim's fallback) and tools/fetch-assets.mjs. */
 export const RUNTIME_RESEARCH = ['docs/research/03-operators.json', 'docs/research/05-enemies.json', 'docs/research/05-maps.json', 'docs/research/07-assets.json'];
 /** The start scripts (scripts/make-windows-bundle.mjs is the maintainer's Windows pack, docs/WINDOWS.md). */
 export const PLAYER_SCRIPTS = ['scripts/install-service-windows.ps1', 'scripts/launch.mjs', 'scripts/open-browser.mjs',
-  'scripts/run-server.cmd', 'scripts/start-windows-sandbox.bat', 'scripts/start-windows.bat', 'scripts/start-windows.ps1', 'scripts/start.sh'];
+  'scripts/run-server.cmd', 'scripts/start-windows.bat', 'scripts/start-windows.ps1', 'scripts/start.sh'];
 /** The tools a player runs (npm run setup / doctor / assets, the postinstall) and the ones setup starts. */
-export const PLAYER_TOOLS = ['tools/crop-board-atlas.mjs', 'tools/doctor.mjs', 'tools/fetch-assets.mjs', 'tools/fetch-stats-assets.mjs', 'tools/setup.mjs', 'tools/vendor.mjs', 'tools/plugin.mjs',
-  'tools/theme-template.mjs'];
+export const PLAYER_TOOLS = ['tools/crop-board-atlas.mjs', 'tools/doctor.mjs', 'tools/fetch-assets.mjs', 'tools/setup.mjs', 'tools/vendor.mjs',
+  'tools/plugin.mjs'];  // 插件 CLI：作者的 check / pack 入口（docs/PLUGINS.md 的「schema → check → pack」）
 /** Whole tool directories: fetch-assets' modules, the local-client extraction setup runs. */
 export const PLAYER_TOOL_DIRS = ['tools/assets/', 'tools/local-extract/'];
-/** Whole runtime directories (their tracked files). */
+/** Whole runtime directories (their tracked files). `schemas/` 是插件 CLI 的 schema（上游 0.3.2 新增，随包发）。 */
 export const RUNTIME_DIRS = ['server/', 'shared/', 'data/', 'public/', 'packs/', 'schemas/'];
+/**
+ * `workshop/` 本身**不随包发**（那是玩家自己放包的地方，包里它是空的）—— 但它的 `README.md` **要发**：
+ * 那是入门层的一个入口（「第一次做包的人请先看 ../docs/START-HERE.md」），而 `docs/START-HERE.md` 又指向它。
+ * 两份都进 `PLAYER_MARKDOWN`，相对链接在 stage 阶段按同一套规则重写。
+ */
+export const PLAYER_WORKSHOP_README = 'workshop/README.md';
 /** Written into the stage, never taken from the checkout: the pack index of the shipped packs, and the release marker. */
 export const GENERATED_PACK_INDEX = 'packs/index.json';
 /** Whether shipped files include a content pack (then the stage gets GENERATED_PACK_INDEX). @param {string[]} files */
@@ -153,7 +176,7 @@ const NOT_TRACKED_SHIP = ['public/dev/', 'public/assets/', 'public/fonts/', 'pub
 /** The npm scripts a player runs: each `node <file>` of them must ship. */
 export const PLAYER_NPM_SCRIPTS = ['start', 'setup', 'doctor', 'launch', 'postinstall', 'vendor', 'assets'];
 /** Markdown copied into the zip. Relative links to anything else are rewritten at stage time. */
-export const PLAYER_MARKDOWN = [...ROOT_FILES, ...PLAYER_DOCS, 'plugins/README.md', 'plugins/AGENTS.md'].filter((f) => f.endsWith('.md'));
+export const PLAYER_MARKDOWN = [...ROOT_FILES, ...PLAYER_DOCS, ...PLAYER_WORKSHOP_DOCS, ...PLAYER_WORKSHOP_REFS, PLAYER_WORKSHOP_README].filter((f) => f.endsWith('.md'));
 /** Where a packaged doc link points when the file itself is not in the zip. */
 export const GITHUB_REPO = 'https://github.com/sganggs/Stronghold-Protocol';
 
@@ -180,10 +203,10 @@ export const JP_VOICE_DIR = 'public/assets/audio/voice/jp/';
 export const FULL_ZIP_OPTIONAL_VOICE = true;
 /** Where those dubs lie (plan.mjs voiceAlt / nativeVoiceAlt). */
 export const OPTIONAL_VOICE_DIRS = Object.freeze(['public/assets/audio/voice/en/', 'public/assets/audio/voice/kr/', 'public/assets/audio/voice/native/']);
-/** Extracted official battlefield scenes (public/assets/local/scene/). Already ignored with public/assets/. */
+/** Extracted official battlefield scenes (0.2.5 asset pack). Already ignored with public/assets/. */
 const SCENE_ART_PREFIX = 'public/assets/local/scene/';
 /**
- * The official battle effects (tools/local-extract/fx.py, DESIGN §33: public/assets/local/fx/ and their file list
+ * The official battle effects (tools/local-extract/fx.py, DESIGN §35: public/assets/local/fx/ and their file list
  * data/local-fx.json; the `used` set is ~12,000 files, ~190 MB on disk, ~53 MB in a zip). true (the maintainer's decision
  * of 2026-10-15): the full zip — and an update zip built from it — ships the folder and data/local-fx.json when this
  * machine extracted them, so a host of the full package has the 设置「官方特效」 without its own client. false: they
@@ -192,71 +215,6 @@ const SCENE_ART_PREFIX = 'public/assets/local/scene/';
 export const FULL_ZIP_FX = true;
 /** Where the extracted effects lie. */
 export const FX_ART_PREFIX = 'public/assets/local/fx/';
-
-/**
- * Official theme groups the packages hold back (§37.232; the maintainer, 2026-11-15: 「可露希尔主题可以支持单独导入吗，
- * 不想直接内置」). The full, update and asset zips leave out the group's folder and its entry in the shipped
- * data/local-assets.json; `--theme-packs` writes each one as an importable pack (设置 → 界面主题 → 导入主题包) that
- * the maintainer offers for download beside the asset pack — not a release asset.
- */
-export const HELD_THEME_GROUPS = Object.freeze(['themes/ac_s_closur']);
-/**
- * Sprites of the held themes that other extracted groups carry: in ui/outer (the official outer interface atlas) the
- * skin preview, its background, the card thumbnail and nine small stickers of 可露希尔. The client draws none of them;
- * they are held back with their theme.
- */
-export const HELD_THEME_ENTRIES = Object.freeze({
-  'ui/outer': Object.freeze(['background_pre_closur', 'skin_pre_closur', 'thumbnail_ac_s_closur',
-    ...Array.from({ length: 9 }, (_, i) => `closur_${i + 1}`)]),
-});
-/** The folder of an extracted theme group. @param {string} group */
-const themeGroupDir = (group) => `public/assets/local/${group}/`;
-
-/**
- * data/local-assets.json without the held theme groups and sprites (`count`, the number of entries, lowered by theirs).
- * The same object when it has none of them.
- * @param {any} local
- * @param {readonly string[]} [held]
- * @param {Readonly<Record<string, readonly string[]>>} [heldEntries]
- */
-export function withoutHeldThemes(local, held = HELD_THEME_GROUPS, heldEntries = HELD_THEME_ENTRIES) {
-  const groups = local && typeof local === 'object' && local.groups && typeof local.groups === 'object' ? local.groups : null;
-  if (!groups) return local;
-  const drop = held.filter((g) => Object.hasOwn(groups, g));
-  const trim = Object.entries(heldEntries).filter(([g, names]) => groups[g] && typeof groups[g] === 'object' && names.some((n) => Object.hasOwn(groups[g], n)));
-  if (!drop.length && !trim.length) return local;
-  const next = { ...groups };
-  let removed = 0;
-  for (const g of drop) {
-    removed += Object.keys(next[g] || {}).length;
-    delete next[g];
-  }
-  for (const [g, names] of trim) {
-    const kept = { ...next[g] };
-    for (const n of names) if (Object.hasOwn(kept, n)) { delete kept[n]; removed += 1; }
-    next[g] = kept;
-  }
-  const out = { ...local, groups: next };
-  if (Number.isFinite(local.count)) out.count = Math.max(0, local.count - removed);
-  return out;
-}
-
-/**
- * The public/… files of the held sprites (HELD_THEME_ENTRIES) a manifest lists. The held groups go by their folder.
- * @param {any} local @param {Readonly<Record<string, readonly string[]>>} [heldEntries]
- */
-function heldEntryFiles(local, heldEntries = HELD_THEME_ENTRIES) {
-  const out = new Set();
-  const groups = local?.groups;
-  if (!groups || typeof groups !== 'object') return out;
-  for (const [g, names] of Object.entries(heldEntries)) {
-    for (const n of names) {
-      const p = groups[g]?.[n]?.path;
-      if (typeof p === 'string' && p.startsWith('/assets/')) out.add(`public${p}`);
-    }
-  }
-  return out;
-}
 
 /**
  * Refused in a plan and in a stage: 0.1.x's list (owner-only notes, the promo project, caches, per-machine config) and
@@ -269,8 +227,27 @@ export const REFUSE = ['pv', '3，9，11回合情况', 'review', 'docs/research/
 /** Home-directory paths: macOS / Linux (case as the OS writes them) and Windows (any case; / or \, JSON-escaped too). */
 const HOME_POSIX = /\/Users\/[A-Za-z]|\/home\/[A-Za-z]/;
 const HOME_WIN = /[A-Za-z]:[\\/]{1,2}Users[\\/]{1,2}[A-Za-z]/i;
-/** OS account names too generic to refuse (CI runners, containers). */
-const GENERIC_USERS = new Set(['root', 'user', 'admin', 'node', 'runner', 'ubuntu', 'ci', 'guest', 'app', 'build']);
+/**
+ * OS account names too generic to refuse (CI runners, containers) **and Windows' built-in principal names**.
+ *
+ * 为什么内建主体名要在这里：`scanNames` 拿 `os.userInfo().username` 去扫每一个出货文件的字节，撞上就算「泄露账号名」。
+ * 但 Windows 有一套**内建**主体名，它们出现在**引擎自己的源码里**是正常的事 —— 典型那一处是
+ * `scripts/install-service-windows.ps1` 的 `[Security.Principal.WindowsBuiltInRole]::Administrator`
+ * （PowerShell 的角色常量，不是任何人的账号名）。以管理员身份构建的机器，账号名恰好就是 `Administrator`，
+ * 于是这条闸门**每次都拒**，拒掉的却是一个内建常量 —— 误报，而且是构建机上过不去的那种。
+ *
+ * 修法是把这些**内建**名字列进「太笼统、单独不足以判定为泄露」的那一份，而**不是**关掉账号名扫描：
+ * 扫描照跑、家目录路径（`HOME_POSIX` / `HOME_WIN`）照拒，只是这些内建名字不再单独构成拒绝理由。
+ * 真把账号名写进产物的写法（`C:\Users\Administrator\…` 这类路径）仍会被家目录规则**先**拦下。
+ *
+ * 全部小写：`scanNames` 用 `user.toLowerCase()` 比。
+ */
+const GENERIC_USERS = new Set([
+  'root', 'user', 'admin', 'node', 'runner', 'ubuntu', 'ci', 'guest', 'app', 'build',
+  // Windows 内建主体名（本机以管理员身份构建时，账号名就是第一个）。
+  'administrator', 'system', 'localsystem', 'networkservice', 'localservice',
+  'defaultaccount', 'wdagutilityaccount',
+]);
 
 export const posixRel = (rel) => String(rel).split('\\').join('/');
 
@@ -286,6 +263,26 @@ export function isRefused(rel) {
   return REFUSE.some((r) => p === r || p.startsWith(`${r}/`));
 }
 
+/** The plugin tree's own files (the readme, the agent notes, the templates): refused/shipped as plugin resources. */
+export const isPluginResource = (rel) => rel === 'plugins/README.md' || rel === 'plugins/AGENTS.md' || rel.startsWith('plugins/_template/');
+/** The author-facing test harness that ships with the player package (the only test file a release carries). */
+export const AUTHOR_TEST_FILES = ['test/helpers/battleHarness.js'];
+/**
+ * The plugin authoring surface's non-document files: the pack schemas `tools/plugin.mjs` validates against,
+ * and the plugin tree's own files (readme, agent notes, the tracked `_template/` — the same set
+ * `isPluginResource` lets past the `plugins/` refusal) plus the author harness above.
+ *
+ * 为什么显式列而不是把整个 `schemas/` 收进来：那是**按名字**的白名单，整目录收会让日后新增的
+ * 任意 schema 自动进玩家包。`plugins/` 下的私人物品（`plugins/mine/`、`plugins/config.json`、
+ * `plugins/_dist/` …）仍由 `isRefused` 拦掉 —— 这里只收 `isPluginResource` 放行的那几个。
+ */
+export const PLAYER_SCHEMAS = ['schemas/plugin.schema.json', 'schemas/overlay.schema.json', 'schemas/records.schema.json',
+  'schemas/dsl.schema.json', 'schemas/ui.schema.json', 'schemas/catalog.schema.json'];
+/** 与 `isPluginResource` 同一口径：整份 `plugins/_template/` 要收（模板是「能跑起来的完整示例」——
+ *  `tools/plugin.mjs` 会读 `_template/script/guard.json`，只收其中两个文件的话 stage 里就缺文件）。 */
+export const PLAYER_PLUGIN_DIRS = ['plugins/_template/'];
+export const PLAYER_PLUGIN_RESOURCES = [...AUTHOR_TEST_FILES, 'plugins/README.md', 'plugins/AGENTS.md'];
+
 /** OS / editor / Python clutter that never ships (the old rsync excludes). */
 export function isJunk(rel) {
   const parts = posixRel(rel).split('/');
@@ -298,14 +295,18 @@ export function isJunk(rel) {
 /** Whether a tracked file belongs in the player package. */
 export function isPlayerFile(rel) {
   const p = posixRel(rel);
-  if (!p || isRefused(p) || isJunk(p) || p === 'data/local-assets.json' || p === 'data/local-fx.json' || p === GENERATED_PACK_INDEX) return false;
+  if (!p || isRefused(p) || isJunk(p) || p === 'data/local-assets.json' || p === 'data/local-fx.json'
+    || p === GENERATED_PACK_INDEX) return false;
   // The marker is generated into the stage. The LLM paths stay on dev even if a later allowlist would have taken them.
   if (p === LLM_RELEASE_MARKER || isLlmReleasePath(p)) return false;
   if (NOT_TRACKED_SHIP.some((d) => p.startsWith(d))) return false;
-  if (isPluginResource(p) || AUTHOR_TEST_FILES.includes(p)) return true;
   if (RUNTIME_DIRS.some((d) => p.startsWith(d)) || PLAYER_TOOL_DIRS.some((d) => p.startsWith(d))) return true;
-  if (PLAYER_DOC_DIRS.some((d) => p.startsWith(d))) return true;
-  return ROOT_FILES.includes(p) || PLAYER_DOCS.includes(p) || RUNTIME_RESEARCH.includes(p) || PLAYER_SCRIPTS.includes(p) || PLAYER_TOOLS.includes(p);
+  if (PLAYER_DOC_DIRS.some((d) => p.startsWith(d)) && !EXAMPLE_PACK_DIRS.some((d) => p.startsWith(d))) return true;
+  return ROOT_FILES.includes(p) || PLAYER_DOCS.includes(p) || PLAYER_WORKSHOP_DOCS.includes(p)
+    || PLAYER_WORKSHOP_REFS.includes(p) || p === PLAYER_WORKSHOP_README
+    || RUNTIME_RESEARCH.includes(p) || PLAYER_SCRIPTS.includes(p) || PLAYER_TOOLS.includes(p)
+    || PLAYER_SCHEMAS.includes(p) || PLAYER_PLUGIN_RESOURCES.includes(p)
+    || PLAYER_PLUGIN_DIRS.some((d) => p.startsWith(d));
 }
 
 /**
@@ -380,23 +381,18 @@ export const manifestFiles = listedArtFiles;
  * that nothing lists (left out); `held`: listed files the zip holds back on purpose — the JP voice dub when `jpVoice`
  * (FULL_ZIP_JP_VOICE) is off, the English / Korean / own-language dubs when `optionalVoice` (FULL_ZIP_OPTIONAL_VOICE)
  * is off: neither shipped nor missing, and never deleted by an update.
- * `scenes`: the files under public/assets/local/scene/ (one folder per battlefield, plus the shared scene/tex). They are also in `files`.
+ * `scenes`: the files under public/assets/local/scene/ (the 0.2.5 battlefield scenes). They are also in `files`.
  * A lite plan and a machine that has not extracted them return `scenes: []`; packaging still succeeds.
  */
-export function artPlan(root, { lite = false, jpVoice = FULL_ZIP_JP_VOICE, optionalVoice = FULL_ZIP_OPTIONAL_VOICE, fx = FULL_ZIP_FX, heldThemes = HELD_THEME_GROUPS } = {}) {
-  if (lite) return { files: [], missing: [], orphans: [], held: [], fxHeld: [], themeHeld: [], local: false, scenes: [] };
+export function artPlan(root, { lite = false, jpVoice = FULL_ZIP_JP_VOICE, optionalVoice = FULL_ZIP_OPTIONAL_VOICE, fx = FULL_ZIP_FX } = {}) {
+  if (lite) return { files: [], missing: [], orphans: [], held: [], fxHeld: [], local: false, scenes: [] };
   const listed = manifestFiles(readJson(path.join(root, 'data', 'assets.json')) ?? {});
   const local = isFile(path.join(root, 'data', 'local-assets.json'));
-  const rawLocal = local ? readJson(path.join(root, 'data', 'local-assets.json')) : null;
-  // the held theme groups and sprites (§37.232) are not listed in the shipped manifest: neither shipped nor missing
-  if (local) for (const f of manifestFiles(withoutHeldThemes(rawLocal ?? {}, heldThemes) ?? {})) listed.add(f);
-  const heldFiles = heldThemes.length ? heldEntryFiles(rawLocal) : new Set();
+  if (local) for (const f of manifestFiles(readJson(path.join(root, 'data', 'local-assets.json')) ?? {})) listed.add(f);
   const files = new Set();
   const missing = [];
   const held = [];
   const fxHeld = [];
-  const themeHeld = [];
-  const heldDirs = heldThemes.map(themeGroupDir);
   for (const f of listed) {
     if (!jpVoice && f.startsWith(JP_VOICE_DIR)) held.push(f);
     else if (!optionalVoice && OPTIONAL_VOICE_DIRS.some((d) => f.startsWith(d))) held.push(f);
@@ -406,17 +402,16 @@ export function artPlan(root, { lite = false, jpVoice = FULL_ZIP_JP_VOICE, optio
   for (const f of listTree(root, 'public/fonts')) files.add(f);
   const fxList = isFile(path.join(root, 'data', 'local-fx.json'));
   for (const f of listTree(root, 'public/assets/local')) {
-    if (heldDirs.some((d) => f.startsWith(d)) || heldFiles.has(f)) themeHeld.push(f);
-    else if (!f.startsWith(FX_ART_PREFIX)) { if (local) files.add(f); } else if (fx && fxList) files.add(f); else fxHeld.push(f);
+    if (!f.startsWith(FX_ART_PREFIX)) { if (local) files.add(f); } else if (fx && fxList) files.add(f); else fxHeld.push(f);
   }
   if (local) files.add('data/local-assets.json');
   if (fx && fxList) files.add('data/local-fx.json');
   // without case: on Windows / macOS a file whose name differs only in case is the listed one (fetch-assets orphanFiles)
-  const lower = new Set([...files, ...held, ...fxHeld, ...themeHeld].map((f) => f.toLowerCase()));
+  const lower = new Set([...files, ...held, ...fxHeld].map((f) => f.toLowerCase()));
   const orphans = listTree(root, 'public/assets').filter((f) => !lower.has(f.toLowerCase()));
   const sorted = [...files].sort();
   return {
-    files: sorted, missing: missing.sort(), orphans, held: held.sort(), fxHeld: fxHeld.sort(), themeHeld: themeHeld.sort(), local,
+    files: sorted, missing: missing.sort(), orphans, held: held.sort(), fxHeld: fxHeld.sort(), local,
     scenes: sorted.filter((f) => f.startsWith(SCENE_ART_PREFIX)),
   };
 }
@@ -567,8 +562,32 @@ export function playerDocHref(href, fromFile, shipped, version) {
   return `${GITHUB_REPO}/${kind}/${releaseTag(version)}/${norm}${hash}`;
 }
 
+// A link nested straight inside another link's text (`[![alt](a)](b)`, a clickable picture) is the case a plain
+// regex cannot do: the outer `](b)` sits behind the inner `](a)`, so a global replace rewrites `a` and leaves
+// `b` as a relative link to a file the zip does not ship. Collect every target span in one scan (a stack of
+// open brackets says which `]` closes which `[`) and apply them right to left, so the indexes stay valid.
 function rewriteDocLine(line, fromFile, shipped, version) {
-  return line.replace(/(!?\[[^\]]*\]\()([^)\s]+)\)/g, (_all, pre, href) => `${pre}${playerDocHref(href, fromFile, shipped, version)})`);
+  const spans = [];
+  const open = [];
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '\\') { i++; continue; }
+    if (ch === '[') open.push(i);
+    else if (ch === ']' && open.length && line[i + 1] === '(') {
+      open.pop();
+      const close = line.indexOf(')', i + 2);
+      if (close < 0) continue;
+      const href = line.slice(i + 2, close);
+      if (href && !/\s/.test(href)) spans.push([i + 2, close, href]);
+      i = close - 1;
+    }
+  }
+  let out = line;
+  for (let k = spans.length - 1; k >= 0; k--) {
+    const [from, to, href] = spans[k];
+    out = out.slice(0, from) + playerDocHref(href, fromFile, shipped, version) + out.slice(to);
+  }
+  return out;
 }
 
 /** Rewrite inline links in a shipped markdown file. Fenced code blocks are left as written. */
@@ -691,7 +710,7 @@ export function plan(root, opts = {}) {
   const dropBytes = Object.values(dropped).reduce((n, g) => n + g.bytes, 0);
   return {
     version: pkg.version || '0.0.0', lite, tracked: keep, art: art.files, generated, files, dropped, orphans: art.orphans,
-    held: art.held, fxHeld: art.fxHeld, themeHeld: art.themeHeld || [], localArt: art.local, problems, names: names.length, scanned,
+    held: art.held, fxHeld: art.fxHeld, localArt: art.local, problems, names: names.length, scanned,
     scenes: { files: art.scenes || [], bytes: sumBytes(root, art.scenes || []) },
     bytes: {
       tracked: trackedBytes, art: artBytes, modules: modulesBytes, vendor: vendorBytes,
@@ -713,7 +732,7 @@ export function formatSummary(p) {
     lines.push(`art: ${p.art.length} files, ${MB(p.bytes.art)} (data/assets.json, public/fonts${p.localArt ? ', public/assets/local + data/local-assets.json' : '; no local-client art here'})`);
     const sceneFiles = p.scenes?.files;
     if (sceneFiles?.length) {
-      lines.push(`battlefield scenes: ${sceneFiles.length} files, ${MB(p.scenes.bytes || 0)} (public/assets/local/scene; the metal board is the fallback when a stage has none)`);
+      lines.push(`battlefield scenes: ${sceneFiles.length} files, ${MB(p.scenes.bytes || 0)} (0.2.5 asset pack, public/assets/local/scene; the metal board is the fallback when a stage has none)`);
     } else if (p.scenes) {
       lines.push('battlefield scenes: none on this machine (the full bundle ships the metal board; fetch_scenes.py then extract.py --only scene before packaging to include the 11 official scenes)');
     }
@@ -731,7 +750,6 @@ export function formatSummary(p) {
   if (!p.lite && p.orphans.length) lines.push(`left out art: ${p.orphans.length} files under public/assets that nothing lists (${MB(p.bytes.orphans)})`);
   if (!p.lite && p.held?.length) lines.push(`held back: ${p.held.length} voice files (FULL_ZIP_JP_VOICE / FULL_ZIP_OPTIONAL_VOICE off: setup downloads them on the first start)`);
   if (!p.lite && p.fxHeld?.length) lines.push(`held back: ${p.fxHeld.length} official effect files (public/assets/local/fx with data/local-fx.json, FULL_ZIP_FX off: extracted on this machine, not shipped)`);
-  if (!p.lite && p.themeHeld?.length) lines.push(`held back: ${p.themeHeld.length} files of ${HELD_THEME_GROUPS.join(', ')} (its group and its ui/outer sprites, with their data/local-assets.json entries: HELD_THEME_GROUPS / HELD_THEME_ENTRIES, an importable pack, --theme-packs)`);
   lines.push(`personal-info scan: ${p.scanned} files, ${p.names ? `home paths + ${p.names} account name(s)` : 'home paths only (no account name to refuse)'}`);
   lines.push(p.problems.length ? `PROBLEMS (${p.problems.length}):\n${p.problems.map((x) => `  ${x}`).join('\n')}` : 'checks: ok');
   return lines.join('\n') + '\n';
@@ -853,22 +871,6 @@ function freshTargets(targets, force) {
 }
 
 /**
- * The staged data/local-assets.json without the held theme groups and sprites (§37.232): the client then offers no card
- * for them. Returns whether the file changed.
- * @param {string} stage @param {(m: string) => void} [log]
- */
-export function holdBackStagedThemes(stage, log = () => {}) {
-  const file = path.join(stage, 'data', 'local-assets.json');
-  if (!isFile(file)) return false;
-  const doc = readJson(file);
-  const next = withoutHeldThemes(doc);
-  if (!doc || next === doc) return false;
-  fs.writeFileSync(file, JSON.stringify(next));
-  log(`data/local-assets.json: without ${HELD_THEME_GROUPS.join(', ')} (an importable pack, --theme-packs)`);
-  return true;
-}
-
-/**
  * Copy the plan into `stage`, write the pack index, npm ci (node_modules, public/vendor), write MANIFEST.json, check the
  * stage: what `build` zips and `buildUpdate` compares. Throws on a problem. Returns the staged files.
  */
@@ -877,7 +879,6 @@ function makeStage(root, p, stage, { install, env, log }) {
   log(`copying ${p.files.length - generated.size} files → ${stage}`);
   for (const rel of p.files) if (!generated.has(rel)) copyInto(root, stage, rel);
   rewritePlayerStage(stage, p);
-  holdBackStagedThemes(stage, log);
   if (generated.has(GENERATED_PACK_INDEX)) {
     const index = writePackIndex(stage, path.join(stage, GENERATED_PACK_INDEX));
     log(`${GENERATED_PACK_INDEX}: ${index.packs.map((x) => `${x.type} ${x.id}`).join(', ') || 'no pack'}`);
@@ -973,8 +974,7 @@ export function assetPackPlan(root, opts = {}) {
   const pkg = readJson(path.join(root, 'package.json')) || {};
   const version = pkg.version || '0.0.0';
   const assets = readJson(path.join(root, 'data', 'assets.json'));
-  // as the full zip: the held theme groups are offered as importable packs, not as importable art (§37.232)
-  const local = withoutHeldThemes(readJson(path.join(root, 'data', 'local-assets.json')));
+  const local = readJson(path.join(root, 'data', 'local-assets.json'));
   const fxDoc = fx ? readJson(path.join(root, 'data', 'local-fx.json')) : null;
   const files = [];
   const missing = [];
@@ -1117,156 +1117,6 @@ export function buildAssetPack(root, p, { out, force = false, keepStage = false,
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// The importable official theme packs (§37.232)
-
-/** The zip and folder name of a held theme group's importable pack. @param {string} version @param {string} group */
-export const themePackName = (version, group) => `${FOLDER}-v${version}-theme-${String(group).split('/').pop()}`;
-export const THEME_PACK_README = 'README.txt';
-/** Files of an extracted group the client never reads (layout.json: the extractor's layout dump, for the maintainer). */
-const THEME_PACK_SKIP = new Set(['layout.json']);
-const PACK_IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'webp']);
-const PACK_AUDIO_EXT = new Set(['ogg', 'mp3']);
-
-/**
- * The importable pack of each held theme group (HELD_THEME_GROUPS): the group's files as data/local-assets.json lists
- * them — every type the importer keeps (OFFICIAL_PACK_EXT), layout.json left out — under one folder, with README.txt.
- * Checks: the group extracted here, theme.json among its files, every listed file on disk, the importer's limits
- * (OFFICIAL_PACK_LIMITS, THEME_LIMITS.image / .audio), no case clash, the personal-info scan (`scan: false` skips it).
- * @param {string} root
- * @param {{ groups?: readonly string[], env?: object, scan?: boolean }} [opts]
- */
-export function themePackPlans(root, opts = {}) {
-  const pkg = readJson(path.join(root, 'package.json')) || {};
-  const version = pkg.version || '0.0.0';
-  const local = readJson(path.join(root, 'data', 'local-assets.json'));
-  const names = scanNames(opts.env || process.env);
-  return (opts.groups || HELD_THEME_GROUPS).map((group) => {
-    const dir = themeGroupDir(group);
-    const entries = local?.groups?.[group];
-    /** @type {string[]} pack-relative */
-    const files = [];
-    const problems = [];
-    let bytes = 0;
-    if (!entries || typeof entries !== 'object') problems.push(`${group}: not extracted here (data/local-assets.json has no such group)`);
-    else {
-      for (const rel of Object.keys(entries).sort()) {
-        if (THEME_PACK_SKIP.has(rel)) continue;
-        const ext = rel.slice(rel.lastIndexOf('.') + 1).toLowerCase();
-        if (!OFFICIAL_PACK_EXT.includes(ext)) continue;
-        const file = path.join(root, dir, rel);
-        if (!isFile(file)) { problems.push(`missing: ${dir}${rel} (data/local-assets.json lists it)`); continue; }
-        const size = fileBytes(file);
-        const cap = PACK_IMAGE_EXT.has(ext) ? THEME_LIMITS.image : PACK_AUDIO_EXT.has(ext) ? THEME_LIMITS.audio : OFFICIAL_PACK_LIMITS.data;
-        if (size > cap) problems.push(`${dir}${rel}: ${MB(size)}, over the importer's ${MB(cap)} for one file`);
-        files.push(rel);
-        bytes += size;
-      }
-      if (!files.includes('theme.json')) problems.push(`${group}: no theme.json`);
-      if (files.length + 1 > OFFICIAL_PACK_LIMITS.files) problems.push(`${files.length} files: over the importer's ${OFFICIAL_PACK_LIMITS.files}`);
-      if (bytes > OFFICIAL_PACK_LIMITS.pack) problems.push(`${MB(bytes)}: over the importer's ${MB(OFFICIAL_PACK_LIMITS.pack)}`);
-      const byCase = new Map();
-      for (const f of files) {
-        const k = f.toLowerCase();
-        if (byCase.has(k)) problems.push(`paths differ only in case (one file on Windows / macOS): ${byCase.get(k)} / ${f}`);
-        else byCase.set(k, f);
-      }
-      if (opts.scan !== false) for (const h of scanFiles(root, files.map((f) => `${dir}${f}`), { home: true, names })) problems.push(`personal info: ${h}`);
-    }
-    return { group, id: group.split('/').pop(), version, name: themePackName(version, group), dir, files, bytes, problems };
-  });
-}
-
-/** The summary of one theme pack plan. @param {ReturnType<typeof themePackPlans>[number]} p */
-export function formatThemePackSummary(p) {
-  const lines = [`theme pack ${p.name}.zip (${p.group}): ${p.files.length} files, ${MB(p.bytes)} from ${p.dir} (+ ${THEME_PACK_README})`];
-  lines.push(p.problems.length ? `PROBLEMS (${p.problems.length}):\n${p.problems.map((x) => `  ${x}`).join('\n')}` : 'checks: ok');
-  return lines.join('\n') + '\n';
-}
-
-/**
- * README.txt of a theme pack (Chinese, then English; UTF-8 with a BOM).
- * @param {{ version: string, id: string, files: string[], bytes: number }} p
- */
-export function themePackReadme(p) {
-  const v = `v${p.version}`;
-  const title = officialThemeById(p.id)?.name || p.id;
-  const notice = `${GITHUB_REPO}/blob/${releaseTag(p.version)}/NOTICE.md`;
-  const line = `${String(p.version).split('.').slice(0, 2).join('.')}.x`;
-  const zh = [
-    `卫戍协议：盟约 ${v} 界面主题包「${title}」`,
-    `Stronghold Protocol: Alliance ${v} interface theme pack "${p.id}"`,
-    '',
-    '【这是什么】',
-    `官方界面主题「${title}」的贴图、界面预制体、Spine 角色和主题语音，共 ${p.files.length} 个文件（${MB(p.bytes)}）。`,
-    '游戏的完整包、更新包和素材包都不带这个主题，需要的玩家自己导入。',
-    '',
-    '【怎么导入】',
-    '1. 打开游戏，在标题画面、大厅或对局里点「设置」，找到「界面主题」。',
-    '2. 点「导入主题包」，选这个 zip；解压以后也可以点「导入文件夹」，选解压出来的文件夹。',
-    `3. 列表里出现「${title}」并自动选用；以后可以在同一页切换或「删除」。`,
-    '主题只保存在这个浏览器里，不会上传，其他玩家看不到，也不改变对局。它按网址分开保存：换了地址或端口要重新导入。',
-    '服务器本身带有这个主题时（例如从自己的客户端提取过），不用导入，直接在列表里选用。',
-    '',
-    '【对应的版本】',
-    `和 ${v} 一起制作，用于 ${line} 版本。`,
-    '',
-    '【版权】',
-    '素材的版权归上海鹰角网络科技有限公司及其授权方（Yostar 等）所有，不适用本项目的 GPL-3.0 许可证。',
-    '仅限非商业用途，不得出售或付费分发。完整声明见 NOTICE.md：',
-    notice,
-  ];
-  const en = [
-    '[What this is]',
-    `The official interface theme "${p.id}": its pictures, interface prefabs, Spine character and theme voice lines,`,
-    `${p.files.length} files (${MB(p.bytes)}). The full, update and asset packages do not include it; players who want it import it.`,
-    '',
-    '[How to import]',
-    '1. In the game press Settings (on the title screen, in the lobby or in a match) and open "Interface theme".',
-    '2. Press "Import theme pack" and pick this zip; after unzipping, "Import folder" takes the unzipped folder too.',
-    '3. The theme appears in the list and is selected; switch or delete it on the same page later.',
-    'The theme stays in this browser only: nothing is uploaded, other players do not see it, matches do not change. It is',
-    'kept per address: a new address or port needs a new import. When the server has the theme itself (extracted from',
-    'its own client), pick it in the list without importing.',
-    '',
-    '[Version]',
-    `Made with ${v}, for the ${line} versions.`,
-    '',
-    '[Copyright]',
-    'The assets are (c) Hypergryph and its licensors (Yostar and others) and are not covered by this project\'s GPL-3.0',
-    'licence. Non-commercial use only: do not sell or charge for them. The full notice is NOTICE.md:',
-    notice,
-  ];
-  return `\ufeff${[...zh, '', '----------------------------------------------------------------', '', ...en].join('\n')}\n`;
-}
-
-/**
- * Copy one theme pack's files into <out>/<name>/<name>, write README.txt, check the stage (exactly the plan and the
- * README, the refusal list, the personal-info scan) and zip it as <out>/<name>.zip.
- */
-export function buildThemePack(root, p, { out, force = false, keepStage = false, env = process.env, log = console.log } = {}) {
-  if (p.problems.length) throw new Error(`refusing to build ${p.name}: the plan has problems (see the summary)`);
-  const dest = path.resolve(out);
-  if (packageOutIsUnsafe(dest, root)) throw new Error(`refusing to write into the repository or a parent of it: ${dest}`);
-  const work = path.join(dest, p.name);
-  const stage = path.join(work, p.name);
-  const zipPath = path.join(dest, `${p.name}.zip`);
-  freshTargets([work, zipPath], force);
-  log(`copying ${p.files.length} files → ${stage}`);
-  for (const rel of p.files) {
-    const dst = path.join(stage, rel);
-    fs.mkdirSync(path.dirname(dst), { recursive: true });
-    fs.copyFileSync(path.join(root, p.dir, rel), dst, fs.constants.COPYFILE_FICLONE);
-  }
-  fs.writeFileSync(path.join(stage, THEME_PACK_README), themePackReadme(p));
-  const { staged, problems } = stageProblems(stage, new Set([...p.files, THEME_PACK_README]), { env });
-  if (problems.length) throw new Error(`refusing to zip ${stage}:\n${problems.map((x) => `  ${x}`).join('\n')}`);
-  log(`zipping ${staged.length} files (${MB(sumBytes(stage, staged))}) → ${zipPath}`);
-  zipFolder(work, zipPath, p.name);
-  if (!keepStage) fs.rmSync(work, { recursive: true, force: true });
-  return { zipPath, zipBytes: fileBytes(zipPath), files: staged.length, stage: keepStage ? stage : null };
-}
-
-// ---------------------------------------------------------------------------------------------------------------------
 // The update zip
 
 /** OS clutter a folder can gather (a release zip has none; the extension rules of isJunk would hit node_modules files). */
@@ -1381,19 +1231,18 @@ export function formatUpdate(r, version) {
   return lines.join('\n') + '\n';
 }
 
-const USAGE = 'usage: node tools/package.mjs [--lite | --update --from <base zip or folder>[,<…>] | --assets | --theme-packs] [--dry-run [--list]] [--out <dir>] [--force] [--keep-stage] [--no-install] [--allow-dirty] [--allow-dev] [--root <dir>]';
+const USAGE = 'usage: node tools/package.mjs [--lite | --update --from <base zip or folder>[,<…>] | --assets] [--dry-run [--list]] [--out <dir>] [--force] [--keep-stage] [--no-install] [--allow-dirty] [--allow-dev] [--root <dir>]';
 
 /** Whether `version` is a development (pre-release) version, e.g. 0.2.0-dev. */
 export const isDevVersion = (version) => /-/.test(String(version || ''));
 
 export function parseArgs(argv) {
-  const o = { lite: false, update: false, assets: false, themePacks: false, from: [], dryRun: false, list: false, out: '', force: false, keepStage: false, install: true, allowDirty: false, allowDev: false, root: REPO, help: false };
+  const o = { lite: false, update: false, assets: false, from: [], dryRun: false, list: false, out: '', force: false, keepStage: false, install: true, allowDirty: false, allowDev: false, root: REPO, help: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--lite') o.lite = true;
     else if (a === '--update') o.update = true;
     else if (a === '--assets') o.assets = true;
-    else if (a === '--theme-packs') o.themePacks = true;
     else if (a === '--dry-run') o.dryRun = true;
     else if (a === '--list') o.list = true;
     else if (a === '--force') o.force = true;
@@ -1417,17 +1266,15 @@ export function parseArgs(argv) {
     if (o.update && !o.from.length) throw new Error(`--update needs --from <earlier full zip or folder>[,<…>]\n${USAGE}`);
     if (o.update && o.lite) throw new Error(`--update is compared from the full stage: no --lite\n${USAGE}`);
     if (o.assets && (o.lite || o.update)) throw new Error(`--assets builds the asset pack alone: no --lite or --update\n${USAGE}`);
-    if (o.themePacks && (o.lite || o.update || o.assets)) throw new Error(`--theme-packs builds the theme packs alone: no --lite, --update or --assets\n${USAGE}`);
   }
   return o;
 }
 
-async function main(argv) {
+function main(argv) {
   let o;
   try { o = parseArgs(argv); } catch (e) { console.error(`package: ${e.message}`); return 2; }
   if (o.help) { console.log(USAGE); return 0; }
   if (o.assets) return mainAssets(o);
-  if (o.themePacks) return mainThemePacks(o);
   let p;
   try { p = plan(o.root, { lite: o.lite, allowDirty: o.allowDirty }); } catch (e) { console.error(`package: ${e.message}`); return 1; }
   process.stdout.write(formatSummary(p));
@@ -1452,15 +1299,11 @@ async function main(argv) {
   try {
     if (o.update) {
       const r = buildUpdate(o.root, p, bases, opts);
-      for (let i = 0; i < bases.length; i++) {
-        await smokePackage(r.zipPath, { base: bases[i].source, version: p.version, logPath: `${r.zipPath}.base-${i + 1}.smoke.log` });
-      }
       process.stdout.write(formatUpdate(r, p.version));
       console.log(`zip: ${r.zipPath} (${MB(r.zipBytes)}, ${r.files} files)${r.stage ? ` · stages kept: ${r.stage}, ${r.full}` : ''}`);
       return 0;
     }
     const r = build(o.root, p, opts);
-    await smokePackage(r.zipPath, { version: p.version });
     console.log(`zip: ${r.zipPath} (${MB(r.zipBytes)}, ${r.files} files)${r.stage ? ` · stage kept: ${r.stage}` : ''}`);
     return 0;
   } catch (e) {
@@ -1494,36 +1337,5 @@ function mainAssets(o) {
   }
 }
 
-/** --theme-packs: each held theme group's importable pack (§37.232), its summary, and (without --dry-run) the zip. */
-function mainThemePacks(o) {
-  let plans;
-  try { plans = themePackPlans(o.root); } catch (e) { console.error(`package: ${e.message}`); return 1; }
-  for (const p of plans) process.stdout.write(formatThemePackSummary(p));
-  const bad = plans.some((p) => p.problems.length);
-  if (o.dryRun) {
-    if (o.list) for (const p of plans) for (const f of [...p.files, THEME_PACK_README]) process.stdout.write(`file ${p.name}/${f}\n`);
-    return bad ? 1 : 0;
-  }
-  if (bad) return 1;
-  const version = plans[0]?.version || '0.0.0';
-  if (isDevVersion(version) && !o.allowDev) {
-    console.error(`package: v${version} is a development version — a theme pack names the version it was made with; --allow-dev builds a test pack named after it`);
-    return 1;
-  }
-  try {
-    for (const p of plans) {
-      const r = buildThemePack(o.root, p, { out: o.out || path.join(os.tmpdir(), 'stronghold-protocol-release'), force: o.force, keepStage: o.keepStage });
-      console.log(`zip: ${r.zipPath} (${MB(r.zipBytes)}, ${r.files} files)${r.stage ? ` · stage kept: ${r.stage}` : ''}`);
-    }
-    console.log('not a release asset: offer it for download beside the asset pack (docs/DEPLOY.md §7)');
-    return 0;
-  } catch (e) {
-    console.error(`package: ${e.message}`);
-    return 1;
-  }
-}
-
 const invoked = (() => { try { return pathToFileURL(fs.realpathSync(process.argv[1] || '')).href; } catch { return null; } })();
-if (invoked === import.meta.url) main(process.argv.slice(2)).then((code) => { process.exitCode = code; }, (error) => {
-  console.error(`package: ${error.message}`); process.exitCode = 1;
-});
+if (invoked === import.meta.url) process.exitCode = main(process.argv.slice(2));

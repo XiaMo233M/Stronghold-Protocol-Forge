@@ -163,25 +163,41 @@ test('the whole client, shared and the server messages: no Chinese literal left 
   assert.deepEqual(missing, []);
 });
 
-// GitHub #849 (docs: PR #850): a computed msgid — t(flag ? '甲' : '乙'), t(table[k] || '默认'), t(`第 ${x} 回合`) — is
-// invisible to extract and check. The 0.3.2 call sites put the ternary around literal t() calls instead (DESIGN §35.49);
-// until they do, extract lists the Chinese literals inside the computed argument as unwrapped, so the whole-repo scan
-// below fails rather than letting the strings go untranslated silently.
-test('tools/i18n.mjs: a computed msgid is not extracted; its Chinese literals are listed as unwrapped', async () => {
-  const unwrapped = async (src) => (await scanSource(src, 'x.js')).literals.filter((l) => !l.reason).map((l) => l.msgid);
+test('服务端不许用 t() 翻文案：服务端从不 setLang，t() 在那里恒等于中文原文', () => {
+  // 为什么值得一条测试：`t()` 在没人调用 setLang 的进程里直接返回 msgid（shared/i18n.js），而 server/ 里
+  // setLang/addMessages 零调用 —— 于是一条 `this.m.toast(ps, 'warn', t('…'))` 在英文客户端上照样显示中文。
+  // 更隐蔽的是：tools/i18n.mjs 的扫描器**刻意不看** server/ 下的 t()（那里的 t 常是黑板查询之类的同名助手，
+  // 见 tools/i18n.mjs 的 "server code never translates"），所以这条错谁都不会报。玩家可见的文案必须走
+  // msg()（客户端 translateWire 按 msgid 查表），数据名走 dn()。
+  const files = [];
+  const visit = (rel) => {
+    for (const name of readdirSync(path.join(ROOT, rel)).sort()) {
+      if (name.startsWith('.')) continue;
+      const r = `${rel}/${name}`;
+      if (statSync(path.join(ROOT, r)).isDirectory()) visit(r);
+      else if (/\.m?js$/.test(name)) files.push(r);
+    }
+  };
+  visit('server');
+  assert.ok(files.length > 150, `${files.length} server files`);
+  const offenders = [];
+  for (const f of files) {
+    const src = readFileSync(path.join(ROOT, f), 'utf8');
+    const named = src.match(/import\s*\{([^}]*)\}\s*from\s*['"][^'"]*shared\/i18n\.js['"]/);
+    // `t` / `tc` / `tParts`（`tName`、`dn`、`msg`、`wireMessage`… 都是服务端该用的）
+    if (named && /(^|[\s,{])(t|tc|tParts)([\s,}]|$)/.test(named[1])) offenders.push(`${f}: ${named[1].trim().replace(/\s+/g, ' ')}`);
+    if (/import\s*\*\s*as\s+(\w+)\s*from\s*['"][^'"]*shared\/i18n\.js['"]/.test(src)) {
+      const ns = src.match(/import\s*\*\s*as\s+(\w+)\s*from\s*['"][^'"]*shared\/i18n\.js['"]/)[1];
+      if (new RegExp(`\\b${ns}\\.(t|tc|tParts)\\(`).test(src)) offenders.push(`${f}: ${ns}.t()`);
+    }
+  }
+  assert.deepEqual(offenders, [], 'server code must send msg()/dn(), never translate with t()');
+});
+// GitHub #849 (docs: PR #850): a computed msgid — t(flag ? '甲' : '乙'), t(table[k] || '默认') — is invisible to extract and
+// check, so its strings could go untranslated silently. The ternary goes around the calls instead (DESIGN §37.49).
+test('tools/i18n.mjs: a ternary inside t() is not extracted; the 0.3.2 call sites put it around literal t() calls', async () => {
   const inside = await scanSource("export const f = (x) => t(x ? '参数甲' : '参数乙');", 'x.js');
   assert.deepEqual(inside.msgids.map((m) => m.msgid), [], 'the rule docs/I18N.md §1 states: neither string is seen');
-  assert.deepEqual(inside.literals.filter((l) => !l.reason).map((l) => l.msgid), ['参数甲', '参数乙'], 'extract --list shows both: the guard is not silent');
-  const logical = await scanSource("export const f = (x) => t(TABLE[x] || '默认');", 'x.js');
-  assert.deepEqual(logical.msgids.map((m) => m.msgid), []);
-  assert.deepEqual(logical.literals.filter((l) => !l.reason).map((l) => l.msgid), ['默认']);
-  const tpl = await scanSource("export const f = (x) => t(`第 ${x} 回合`);", 'x.js');
-  assert.deepEqual(tpl.msgids.map((m) => m.msgid), []);
-  assert.deepEqual(tpl.literals.filter((l) => !l.reason).map((l) => l.msgid), ['第 {x} 回合']);
-  // a params value, an empty fallback and a string-method argument are data, not msgids
-  assert.deepEqual(await unwrapped("export const f = (x) => t('模式：{m}', { m: '单人' });"), []);
-  assert.deepEqual(await unwrapped("export const f = (x) => t(TABLE[x] || '');"), []);
-  assert.deepEqual(await unwrapped("export const f = (x) => t(DIFF[x].replace('模拟', ''));"), []);
   const around = await scanSource("export const f = (x) => (x ? t('参数甲') : t('参数乙'));", 'x.js');
   assert.deepEqual(around.msgids.map((m) => m.msgid), ['参数甲', '参数乙']);
   // the msgids found on the line of a call site (located by a marker on that line)

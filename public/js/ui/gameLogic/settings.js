@@ -1,22 +1,11 @@
 // ui/gameLogic/settings.js — settings defaults and sanitising. Re-exported from ../gameLogic.js.
 
-import { VOICE_LANGS, sanitizeVoiceOverrides } from '../../voicePrefs.js';
-export { VOICE_LANGS } from '../../voicePrefs.js';
-
-import { BUILTIN_ID } from '../../../../shared/uiTheme.js';
 import { clamp, isObj } from './shared.js';
 import { DEFAULT_HOTKEYS, sanitizeHotkeys } from './shortcuts.js';
+import { VOICE_LANGS, DEFAULT_VOICE_LANG } from '../../../../shared/constants.js';
 
 
 // ---- settings ------------------------------------------------------------------------------------------------------
-
-/**
- * The operator voice dubs (settings 语音语言): 'cn' 中文 (`audio.voice`, the default), 'jp' 日本語 (`audio.voiceJp`),
- * 'en' English (`audio.voiceEn`) and 'kr' 한국어 (`audio.voiceKr`), each falling back to the Chinese line it lacks
- * (public/js/audio.js voiceLine). Not tied to the interface language. `voiceNative` is the 本土语言 switch: an
- * operator who has `audio.voiceNative` speaks that dub unless their own override says otherwise.
- */
-
 
 /**
  * The steps of 设置 →「文字大小」 (textSize): the interface text root `--t` of css/theme.css — 'sm' is the design's own
@@ -25,36 +14,31 @@ import { DEFAULT_HOTKEYS, sanitizeHotkeys } from './shortcuts.js';
  */
 export const TEXT_SIZES = Object.freeze(['sm', 'md', 'lg', 'xl']);
 
-/** keys: the in-match shortcuts' key map (ui/gameLogic/shortcuts.js; settings → 快捷键). voiceLang: VOICE_LANGS.
- *  voiceNative: the 本土语言 switch (default off). textSize: TEXT_SIZES (css/theme.css `--t`, applied by ui/settings.js
- *  applyTextSize). ammoEnergyCount: 设置「显示弹药与能量数量」 — the rounds left / the magazine under an ammo skill's
- *  bar and a 秘术师's stored attack energies as stored/cap (render/units.js). One switch for the old 「弹药数量」
- *  (`ammoCount`, PR #552) and 「秘术师能量」 (`mysticEnergy`, PR #636); off by default: the official HUD has neither
- *  number. A profile that still has either old key `true` migrates to on; those keys are not written back.
- *  [ASSUMED] a stored boolean `ammoEnergyCount` wins over the old keys, so turning the merged switch off stays off.
- *  bondTimers: selected-unit timed bond readouts (#746), off by default. [ASSUMED] Convenience HUD absent from
- *  the official game; maintainer approved 2026-10-18. Stored with the other preferences in sp.pref.settings.
- *  combatMetrics: 设置「作战统计」 (PR #618), off by default: the official HUD has no such panel.
- *  prepDeployFold: 设置「部署时收起商店」 — picking up a piece on the own prep board folds the shop and zooms
- *  (GitHub #602, PR #646). Default on (the 0.3.0 behaviour). Off: the pickup changes neither the shop's fold nor the
- *  camera. #692 adds 'partial': keep the shop at 70%, with halfway camera offsets. [ASSUMED] this middle level.
- *  [ASSUMED] the label; only an explicit false turns it off (a missing or junk value stays on).
- *  officialFx: 设置「官方特效」 (0.3.0, render/vfx): 'auto' (完整 on a desktop, 精简 on a touch device — render/vfx/tier.js),
- *  'off', 'lite' (精简), 'full' (完整); only shown when effects were extracted from the local client.
- *  otherSkins: 设置「显示其他玩家的皮肤」 (docs/SKINS.md), ON by default — draw the appearance another player chose instead
- *  of the operator's own model. A pure client preference (never sent): off, only this player's own pieces wear a skin.
- *  uiTheme: 设置「界面主题」 (docs/THEMES.md). Empty is the built-in 卫戍协议终端. A stored id is this browser's
- *  pack only — never sent, and it does not change a match.
- */
-export const DEFAULT_SETTINGS = Object.freeze({ bgm: 0.6, sfx: 0.8, voice: 0.8, voiceLang: 'cn', voiceNative: false, voiceOverrides: Object.freeze({}), voiceLangByChar: Object.freeze({}), muted: false, damageNumbers: true, officialDamageNumbers: false, ammoEnergyCount: false, fullscreenWakeLock: false, bondTimers: false, combatMetrics: false, prepDeployFold: true, quality: 'high', officialFx: 'auto', otherSkins: true, textSize: 'sm', uiTheme: '', themeMotion: true, keys: DEFAULT_HOTKEYS });
-const QUALITIES = ['high', 'medium', 'low'];
-/** The values of 设置「官方特效」 (render/vfx/tier.js OFFICIAL_FX). Display order in the dialog is low / medium / high. */
-export const OFFICIAL_FX_MODES = Object.freeze(['auto', 'off', 'lite', 'full']);
-
 /**
- * The merged 显示弹药与能量数量 switch. A stored boolean wins. Otherwise on when either retired key was the boolean
- * true (`ammoCount` PR #552, `mysticEnergy` PR #636). Junk and a missing key stay off.
- * [ASSUMED] the new boolean wins, so a leftover old key cannot turn the switch back on.
+ * keys: the in-match shortcuts' key map (ui/gameLogic/shortcuts.js; settings → 快捷键).
+ * voiceLang: the 配音语言 every operator speaks unless it has its own (VOICE_LANGS).
+ * voiceLangByChar: charId → dub, the per-operator override of 干员详情 / 干员调配 → 配音 (absent = follow voiceLang).
+ * ammoCount: 设置「弹药数量」 — the rounds left / the magazine under an ammo skill's bar (render/units.js; PR #552),
+ *   off by default: the official HUD has no such number (the maintainer's decision of 2026-10-13).
+ * textSize: TEXT_SIZES (css/theme.css `--t`, applied by ui/settings.js applyTextSize).
+ * officialFx: 设置「官方特效」 (0.3.0, render/vfx) —— OFFICIAL_FX_MODES：`auto` 按设备取档，其余三档由玩家点选
+ *   (ui/settings.js 的「官方特效」分段控件；render/app.js 交给 render/vfx/tier.js resolveOfficialFx)。
+ * workshopSkins: 工坊时装（`pack.json.skins` + 一个注册了的外观提供者）要不要生效 —— 见
+ *   `public/js/ui/portraitChain.js` 的步骤 0。默认 **true**：装了一套时装却什么都不发生，比「能关掉」
+ *   更让人困惑。关掉时解析链与「这一版之前」逐字相同（那条不变量由 `test/ui/portraitChain.test.js` 钉住）。
+ * workshopSources: 工坊素材加载源（`pack.json.assets.mirrors[]` + 一个注册了的 `sources(ctx)` 提供者）要不要生效
+ *   —— 见 `public/js/resources/sources.js`。默认 **true**：作者声明了镜像却一条都不用，比「能关掉」更让人困惑。
+ *   关掉时导入路径与「没有这一格」逐字相同（走包内那条 `/workshop-resources/…` URL），也就是这一格的**一键回退**：
+ *   一个包把加载源改坏了，玩家关掉这一格就回到原样（不变量由 `test/modAssetsMirrors.test.js` 钉住）。
+ */
+// 配音三件套：默认语言、本土语言开关、逐干员的覆盖（空表）。合并时这三个键从默认对象里掉了，
+// sanitizeSettings 于是拿到了 undefined —— 老档案读出来就没有 voiceLang。
+export const DEFAULT_SETTINGS = Object.freeze({ bgm: 0.6, sfx: 0.8, voice: 0.8,
+  voiceNative: false,   // 本土语言开关（上游 0.3.2）；voiceLang / voiceLangByChar 在本行后面已有
+ muted: false, damageNumbers: true, officialDamageNumbers: false, ammoEnergyCount: false, combatMetrics: false, prepDeployFold: true, otherSkins: true, bondTimers: false, fullscreenWakeLock: false, workshopSkins: true, workshopSources: true, quality: 'high', officialFx: 'auto', textSize: 'sm', keys: DEFAULT_HOTKEYS, voiceLang: DEFAULT_VOICE_LANG, voiceLangByChar: Object.freeze({}) });
+/**
+ * 设置「显示弹药与能量数量」的取值（上游 0.3.1 把「弹药数量」与「秘术师能量」两个开关合并成一个）：
+ * 新键是布尔就用它；否则读旧键 —— 任一为 true 即为 true。旧键只在这里被读，**永不写回**。
  * @param {Record<string, any>} r
  */
 function ammoEnergyCountOf(r) {
@@ -62,67 +46,109 @@ function ammoEnergyCountOf(r) {
   return r.ammoCount === true || r.mysticEnergy === true;
 }
 
-/**
- * Sanitize persisted settings. Retired keys `ammoCount` and `mysticEnergy` are read here and never returned.
- * @param {any} raw
- * @returns {{ bgm: number, sfx: number, voice: number, voiceLang: 'cn'|'jp'|'en'|'kr', voiceNative: boolean, voiceOverrides: Record<string, string>, muted: boolean, damageNumbers: boolean, officialDamageNumbers: boolean, ammoEnergyCount: boolean, fullscreenWakeLock: boolean, bondTimers: boolean, combatMetrics: boolean, prepDeployFold: boolean, quality: 'high'|'medium'|'low', officialFx: 'auto'|'off'|'lite'|'full', otherSkins: boolean,
- *   textSize: 'sm'|'md'|'lg'|'xl', uiTheme: string, themeMotion: boolean, keys: Record<'buy'|'refresh'|'freeze'|'levelUp'|'retreat'|'sell'|'ready', string> }}
- */
-const THEME_ID = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 
-/** Empty, the built-in id, or a pack id. Anything else is the built-in look. */
-function uiThemeOf(raw) {
-  if (raw == null || raw === '' || raw === BUILTIN_ID) return '';
-  return typeof raw === 'string' && THEME_ID.test(raw) ? raw : '';
+/**
+ * The 配音语言 vocabulary (settings 语音语言) under upstream 0.2.2's name: the canonical list is shared/constants.js
+ * (cn / jp / en / kr, imported above), which the workshop validator, the editor's voice page and the CLI all read.
+ * Upstream's own export was its two dubs ('cn' 中文 / 'jp' 日本語 through `audio.voiceJp`); `availableVoiceLangs`
+ * below still narrows the choice to the dubs the loaded manifest really ships.
+ *
+ * 上游 0.2.3 在 public/js/voicePrefs.js 里另开了一套逐干员语音（`voiceOverrides` + 只有 cn / jp 的词表）。
+ * 不并存两套：那套的词表现在也指向 shared/constants.js 这一份，存储键仍是下面的 `voiceLangByChar`。
+ */
+export { VOICE_LANGS };
+const QUALITIES = ['high', 'medium', 'low'];
+/**
+ * 设置「官方特效」(0.3.0, render/vfx) 的取值。`auto` 是自动档：桌面取 `full`、触屏取 `lite`
+ * (render/vfx/tier.js resolveOfficialFx)，所以界面只有 关 / 精简 / 完整 三个按钮，没有 `auto` 那一格。
+ * sanitizeSettings 必须收下 `off` —— 否则玩家点「关」会被丢掉、控件立刻弹回（与 lastBgmKey 同型）。
+ */
+export const OFFICIAL_FX_MODES = Object.freeze(['auto', 'off', 'lite', 'full']);
+/** A charId an override may name (the same shape the workshop validator accepts for a voice line). */
+const CHAR_ID = /^char_[A-Za-z0-9_]{1,64}$/;
+/** Overrides kept at most: a full roster is ~200 operators — a file that grew past this was not written by this UI. */
+const VOICE_OVERRIDE_MAX = 400;
+
+/**
+ * The dubs a player may choose from: the ones this manifest actually carries. `audio.voice` is the manifest's default
+ * dub and `audio.voiceLangs` the others (`tools/assets/plan.mjs`), so a checkout that downloaded only Chinese does not
+ * offer a button that could never make a sound.
+ * @param {any} manifest data/assets.json
+ * @returns {string[]} e.g. ['cn'] or ['cn','jp','en','kr']
+ */
+export function availableVoiceLangs(manifest) {
+  const a = manifest?.audio;
+  const def = VOICE_LANGS.includes(a?.voiceLang) ? a.voiceLang : DEFAULT_VOICE_LANG;
+  const out = Object.keys(a?.voiceLangs || {}).filter((l) => VOICE_LANGS.includes(l) && a.voiceLangs[l] && Object.keys(a.voiceLangs[l]).length);
+  return [...new Set([def, ...out])].sort((x, y) => VOICE_LANGS.indexOf(x) - VOICE_LANGS.indexOf(y));
 }
 
 /**
- * 逐干员配音覆盖的**本仓库形状**：上游 0.4.0 把同一件事放在 `voiceOverrides`（sanitizeVoiceOverrides），
- * 本仓库的界面与存档层一直用 `voiceLangByChar`。这里把两个名字都认下来，写回时用上游那一个 ——
- * 免得「设置里选了 A、实际播的是 B」的两份真相。
+ * Sanitize the per-operator 配音 overrides: charId → one of VOICE_LANGS, capped, everything else dropped (a hand-edited
+ * localStorage must never make the game request a dub that does not exist).
+ */
+export function sanitizeVoiceLangByChar(raw) {
+  if (!isObj(raw)) return {};
+  const out = {};
+  let n = 0;
+  for (const [k, v] of Object.entries(raw)) {
+    if (n >= VOICE_OVERRIDE_MAX) break;
+    if (typeof k !== 'string' || !CHAR_ID.test(k) || !VOICE_LANGS.includes(v)) continue;
+    out[k] = v;
+    n++;
+  }
+  return out;
+}
+
+/**
+ * The dub `charId` speaks: its own override, else the global one, else the default. Pure — the client and the tests
+ * read it through this one function, so the detail panel and the audio manager can never disagree.
  * @param {any} s the settings store's value (or a snapshot of it)
  * @param {string} charId
- * @returns {string} 'cn' | 'jp' | 'en' | 'kr'
+ * @returns {'cn'|'jp'|'en'|'kr'}
  */
 export function voiceLangFor(s, charId) {
-  const per = typeof charId === 'string'
-    ? (s?.voiceOverrides?.[charId] ?? s?.voiceLangByChar?.[charId]) : null;
+  const per = typeof charId === 'string' ? s?.voiceLangByChar?.[charId] : null;
   if (VOICE_LANGS.includes(per)) return per;
-  return VOICE_LANGS.includes(s?.voiceLang) ? s.voiceLang : DEFAULT_SETTINGS.voiceLang;
+  return VOICE_LANGS.includes(s?.voiceLang) ? s.voiceLang : DEFAULT_VOICE_LANG;
 }
 
+/**
+ * Sanitize persisted settings.
+ * @param {any} raw
+ * @returns {{ bgm: number, sfx: number, voice: number, muted: boolean, damageNumbers: boolean, officialDamageNumbers: boolean,
+ *   workshopSkins: boolean, workshopSources: boolean, ammoEnergyCount: boolean, combatMetrics: boolean, prepDeployFold: boolean,
+ *   otherSkins: boolean, bondTimers: boolean, fullscreenWakeLock: boolean,
+ *   quality: 'high'|'medium'|'low',
+ *   textSize: 'sm'|'md'|'lg'|'xl', keys: Record<'buy'|'refresh'|'freeze'|'levelUp'|'retreat'|'sell'|'ready', string>,
+ *   voiceLang: 'cn'|'jp'|'en'|'kr', voiceLangByChar: Record<string, 'cn'|'jp'|'en'|'kr'> }}
+ */
 export function sanitizeSettings(raw) {
   const r = isObj(raw) ? raw : {};
   const vol = (v, d) => (Number.isFinite(v) ? clamp(Math.round(v * 100) / 100, 0, 1) : d);
-  const voiceTable = sanitizeVoiceOverrides(r.voiceOverrides ?? r.voiceLangByChar);
   return {
     bgm: vol(r.bgm, DEFAULT_SETTINGS.bgm),
     sfx: vol(r.sfx, DEFAULT_SETTINGS.sfx),
     voice: vol(r.voice, DEFAULT_SETTINGS.voice),
-    voiceLang: VOICE_LANGS.includes(r.voiceLang) ? r.voiceLang : DEFAULT_SETTINGS.voiceLang,
-    voiceNative: r.voiceNative === true,
-    // 逐干员配音覆盖：上游 0.4.0 的键是 voiceOverrides，本仓库既有的是 voiceLangByChar。
-    // **同一个对象挂在两个名字下** —— 两个键、一份数据，改了一边另一边也变，不会出现两份真相。
-    voiceOverrides: voiceTable,
-    voiceLangByChar: voiceTable,
     muted: typeof r.muted === 'boolean' ? r.muted : DEFAULT_SETTINGS.muted,
     damageNumbers: typeof r.damageNumbers === 'boolean' ? r.damageNumbers : DEFAULT_SETTINGS.damageNumbers,
     officialDamageNumbers: typeof r.officialDamageNumbers === 'boolean' ? r.officialDamageNumbers : false,
     ammoEnergyCount: ammoEnergyCountOf(r),
-    bondTimers: r.bondTimers === true,
+    prepDeployFold: typeof r.prepDeployFold === 'boolean' ? r.prepDeployFold : DEFAULT_SETTINGS.prepDeployFold,
+    otherSkins: typeof r.otherSkins === 'boolean' ? r.otherSkins : DEFAULT_SETTINGS.otherSkins,
     combatMetrics: typeof r.combatMetrics === 'boolean' ? r.combatMetrics : DEFAULT_SETTINGS.combatMetrics,
-    prepDeployFold: r.prepDeployFold === 'partial' ? 'partial' : typeof r.prepDeployFold === 'boolean' ? r.prepDeployFold : true,
-    fullscreenWakeLock: typeof r.fullscreenWakeLock === 'boolean' ? r.fullscreenWakeLock : DEFAULT_SETTINGS.fullscreenWakeLock,
+    workshopSkins: typeof r.workshopSkins === 'boolean' ? r.workshopSkins : DEFAULT_SETTINGS.workshopSkins,
+    workshopSources: typeof r.workshopSources === 'boolean' ? r.workshopSources : DEFAULT_SETTINGS.workshopSources,
+      bondTimers: r.bondTimers === true,
+      fullscreenWakeLock: typeof r.fullscreenWakeLock === 'boolean' ? r.fullscreenWakeLock : DEFAULT_SETTINGS.fullscreenWakeLock,
     quality: QUALITIES.includes(r.quality) ? r.quality : DEFAULT_SETTINGS.quality,
     officialFx: OFFICIAL_FX_MODES.includes(r.officialFx) ? r.officialFx : DEFAULT_SETTINGS.officialFx,
-    otherSkins: r.otherSkins !== false,
     textSize: TEXT_SIZES.includes(r.textSize) ? r.textSize : DEFAULT_SETTINGS.textSize,
-    uiTheme: uiThemeOf(r.uiTheme),
-    // 主题动画: the official packs' looping tweens and clips (ui/prefab); off draws them still
-    themeMotion: r.themeMotion !== false,
     keys: sanitizeHotkeys(r.keys),
+    voiceLang: VOICE_LANGS.includes(r.voiceLang) ? r.voiceLang : DEFAULT_SETTINGS.voiceLang,
+    // 上游 0.3.2 的 本土语言 开关。逐干员的语言（上游叫 voiceOverrides）本仓库一直叫 voiceLangByChar，
+    // 存储键沿用我们的，不并存两套。
+    voiceNative: r.voiceNative === true,
+    voiceLangByChar: sanitizeVoiceLangByChar(r.voiceLangByChar),
   };
 }
-
-/** 兼容名：本仓库原先的校验器（public/js/voicePrefs.js 的 sanitizeVoiceOverrides 就是它）。 */
-export const sanitizeVoiceLangByChar = sanitizeVoiceOverrides;

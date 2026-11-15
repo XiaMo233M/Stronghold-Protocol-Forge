@@ -62,7 +62,7 @@ import {
 } from './http/workshop.js';
 import { ROOT, listenAddress, bindCandidates, serveDirs, makeLogger, parseTrustProxy, assetIndexOptionsFrom, versionsFrom, parseRoomCode } from './http/config.js';
 import { WS_MAX_PAYLOAD, createSessionStack, attachWebSocket, transportPolicy } from './http/websocket.js';
-import { getBotStrategy, getBotStrategySeats } from './match/botStrategies.js';
+import { getBotStrategy } from './match/botStrategies.js';
 import { noteLlmIgnored, releaseIgnoresExternalAi, validateExternalConfig } from './match/llmGate.js';
 import { siteCsp } from './http/csp.js';
 import { DATA_SHIM_JS, createStaticHandler } from './http/static.js';
@@ -169,12 +169,6 @@ export async function startServer(opts = {}) {
     if (strategy.id === 'external') validateExternalConfig();
   } catch (cause) {
     throw new Error(`Invalid SP_BOT_STRATEGY: ${cause.message}. Unset SP_BOT_STRATEGY to use the original bot (legacy).`, { cause });
-  }
-  try {
-    const seats = getBotStrategySeats(process.env.SP_BOT_STRATEGY_SEATS);
-    if (Object.values(seats).some((s) => s.id === 'external')) validateExternalConfig();
-  } catch (cause) {
-    throw new Error(`Invalid SP_BOT_STRATEGY_SEATS: ${cause.message}. Unset SP_BOT_STRATEGY_SEATS to use SP_BOT_STRATEGY for every seat.`, { cause });
   }
   const { port, host } = listenAddress(opts);
   const { publicDir, dataDir, sharedDir, packsDir, pluginsDir } = serveDirs(opts);
@@ -366,17 +360,15 @@ export async function startServer(opts = {}) {
   // （服务在 /cs/<cs16>/…）· 房间级那一层把前两者合起来 · 以及「有玩法插件的房间真的跑在哪个宿主里」。
   // 视觉集（DESIGN §34 P1a）与它同源：一套 cosmetic 插件合成的那个集合，服务在 /vs/ 与 /p/。
   const visual = createVisualSets({ registry: packs, log });
-  // the server owner's policy (plugins/config.json), the content sets of the gameplay plugins (served at /cs/<cs16>/…),
-  // what a room's plugins make of both, and the match hosts a room with gameplay plugins plays in (DESIGN §32.6)
-  const versionCfg = versionsFrom(opts, log);
-  const versions = createVersionSets({ enabled: versionCfg.enabled, defaultId: versionCfg.default, dataDir, vanilla: content, defaultData: data, log });
   const policy = createPluginPolicy({ pluginsDir, log });
-  const contents = createContentSets({ registry: packs, vanillaData: data, versions, log, maxSets: () => policy.get().maxSets });
+  const contents = createContentSets({ registry: packs, vanillaData: data, log, maxSets: () => policy.get().maxSets });
   const roomSets = createRoomSets({ registry: packs, visual, contents, policy });
   // 一个内容集一个子进程；SP_MATCH_HOST=worker 改成 worker 线程（match/host/index.js 的文件头说明了取舍：
   // worker 线程里一次 out-of-memory 会带走整个服务器，所以缺省是子进程）。
   const matchHostTransport = String(process.env.SP_MATCH_HOST || '').trim().toLowerCase() === 'worker' ? 'worker' : 'process';
   const hosts = createMatchHosts({ contents, log, options: { transport: matchHostTransport, maxWorkers: Math.max(1, policy.get().maxSets), ...(opts.matchHost || {}) } });
+  const versionCfg = versionsFrom(opts, log);
+  const versions = createVersionSets({ enabled: versionCfg.enabled, defaultId: versionCfg.default, dataDir, vanilla: content, defaultData: data, log });
   // (the test options of matchHost apply to both pools, but never the version pool's kind or its own SP_MAX_VERSION_HOSTS)
   const versionHosts = versions.nonDefault.length
     ? createMatchHosts({ contents: versions, log, options: { transport: matchHostTransport, ...(opts.matchHost || {}), kind: 'version', maxWorkers: Math.max(1, versionCfg.maxHosts) } })
