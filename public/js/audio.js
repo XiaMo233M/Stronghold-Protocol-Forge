@@ -1154,7 +1154,10 @@ export class AudioManager {
     else if (this.uiVoices >= 12) return;
     else this.uiVoices += 1;
     const release = () => { if (limited) this.limiter.release(url); else this.uiVoices = Math.max(0, this.uiVoices - 1); };
+    // 战斗音（limited）与音池共享**战场寿命**：解码回来时战场已经换过 / 结束了，就只还名额、绝不发声
+    const fieldToken = this.poolFieldToken;
     this._buffer(url).then((buf) => {
+      if (limited && fieldToken !== this.poolFieldToken) { release(); return; }
       if (!buf && again && this.fellBack.has(url)) {
         release();
         const next = again();
@@ -1471,8 +1474,18 @@ export class AudioManager {
   // ---- battle events ------------------------------------------------------------------------------------------
 
   /** Reset the unit map for a new field (m.field.units = UnitInfo[]). */
-  setFieldUnits(units) {
+  /**
+   * 一场战斗结束 / 离开战场：把活着的声音全撤掉（上游 0.4.0 的入口，`screens/game.js` 在战斗退出与
+   * 组件卸载时都调它）。迁移补丁把这一层整个漏掉了，于是 audio-pools 那 29 条一起红。
+   */
+  stopFieldSounds() {
     this.stopPoolSounds();
+    this._stopVoice();
+    for (const voice of [...this.landVoices]) this._stopLanding(voice);
+  }
+
+  setFieldUnits(units) {
+    this.stopFieldSounds();
     this.stopBondCue();
     this.units.clear();
     // unit ids belong to one battle: a cast still held for a unit of the field left must not sound for a unit of the new
@@ -1482,7 +1495,7 @@ export class AudioManager {
     this.consumed.clear();
     // a new field is a new battle: the first operator deployed says 行动出发 again and no cooldown carries over
     this.startVoiceDone = false;
-    try { this.voiceGate.reset(); this._stopVoice(); } catch { /* ignore */ }
+    this.voiceGate.reset();
     for (const u of Array.isArray(units) ? units : []) this._track(u);
   }
 
@@ -1576,9 +1589,12 @@ export class AudioManager {
   }
 
   /** A landing sound gives its voice to a newer one: the voice is free at once, the sound fades out over LAND_STEAL_S. */
-  _stealLanding(v) {
+  /**
+   * 让一个落地声把**声音名额**交出来（淡出 + 停源）。上游 0.4.0 把它抽成 `_stopLanding`，被 `_stealLanding`
+   * （顶替，记一次 stolen）与 `stopFieldSounds`（战斗结束整场撤掉，不记 stolen）共用。
+   */
+  _stopLanding(v) {
     v.release();
-    this.landStats.stolen += 1;
     if (!v.src || !v.gain || !this.ctx) return;
     try {
       const t = this.ctx.currentTime;
@@ -1589,6 +1605,13 @@ export class AudioManager {
       v.src.stop(t + LAND_STEAL_S + 0.005);
     } catch { /* ignore */ }
   }
+
+  _stealLanding(v) {
+    this.landStats.stolen += 1;
+    this._stopLanding(v);
+  }
+
+
 
   /**
    * Fetch the generic landing sounds ahead (b_char_set / b_char_tokenset, ~30 KB together), so the round start's first
