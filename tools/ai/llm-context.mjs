@@ -1,4 +1,4 @@
-// §37.11. [ASSUMED] Advisor summaries/feasibility estimates, never authoritative gameplay or live stock.
+// §35.11. [ASSUMED] Advisor summaries/feasibility estimates, never authoritative gameplay or live stock.
 // Counts/thresholds/costs come from the seat digest and knowledge generated from activity_table.json.
 import { draftPriors, packMode, LEVEL_CAP } from '../../server/ai/strategy.js';
 import { shortText } from './llm-plan.mjs';
@@ -21,7 +21,7 @@ export function compactChoices(d) {
   });
 }
 
-// §37.63 [ASSUMED]: the seat's own copy counts and the shop arithmetic, computed here so the model does not have to
+// §35.63 [ASSUMED]: the seat's own copy counts and the shop arithmetic, computed here so the model does not have to
 // (cycle 2: plans skipped third copies, and holds were justified by miscounted prices).
 const baseOf = p => p.baseId || String(p.id).replace(/_b$/, '_a');
 export function levelOptions(economy, mergeCosts) {
@@ -281,14 +281,11 @@ export function continuity(d, previous, carried = null) {
       lp: { before: confirmed?.digest.lp ?? null, after: d.lp ?? null }, lastBattle: feedback?.lastBattle || null } };
 }
 
-// §37.62 [ASSUMED]: the band draft sets a direction before any member is owned (玛恩纳 → 卡西米尔 waited until R6 for a
+// §35.62 [ASSUMED]: the band draft sets a direction before any member is owned (玛恩纳 → 卡西米尔 waited until R6 for a
 // first copy). `intent` lists the mains the seat may lead with before a member is held (round 65: the bot's focus and
 // second, the band's 职业队 bond, the main-bond panels). A primary change still needs pivot:true and a reason.
-// §37.62 [ASSUMED]: the band draft sets a direction before any member is owned (玛恩纳 → 卡西米尔 waited until R6 for a
-// first copy). `intent` lists the mains of the current strategy candidates: those bonds may lead the plan without a
-// held member. A primary change still needs pivot:true and a reason.
 export function focusPlan(plan, meta, digest, previousPlan, repairs, intent = []) {
-  // §37.9's explicit empty-plan delegation remains unweighted, even when an earlier plan had targets.
+  // §35.9's explicit empty-plan delegation remains unweighted, even when an earlier plan had targets.
   if (!Object.keys(plan).length) return { pivot: false, pivotReason: '' };
   // §37.75: no bonds array leaves this prep's main to the bot (aiPlan advisorPlan); continuity binds a bonds array the model sent
   if (plan.bonds === undefined) return { pivot: false, pivotReason: '' };
