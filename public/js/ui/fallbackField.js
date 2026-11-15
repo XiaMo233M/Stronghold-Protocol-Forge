@@ -26,6 +26,7 @@ import { itemIconUrl, tokenAvatarUrl, enemyIconUrl } from './assetUrls.js';
 import { ownerSkin } from './skins.js';
 import { avatarUrlOf, currentAppearanceLookup } from './portraitChain.js';
 import { layoutOf, mapRectOf } from '../render/layout.js';
+import { resourceFloat } from '../render/resourceNumbers.js';
 import { penRect } from '../render/pen.js';
 import { tileKey, hasFlag, UF, penPlacement, fieldTile, ownStandIn, ownDiyRecord } from './gameLogic.js';
 import { t } from '../../../shared/i18n.js';
@@ -69,6 +70,8 @@ export function fallbackTileClass(stage, row, col) {
   if (t.height === 'HIGH') return t.buildable === 'NONE' ? 'void' : 'high';
   if (t.special === 'mire' || glyph === 'm') return 'mire';
   if (glyph === 'g') return 'smog';
+  // 规程的对决草地（tile_duel_grassland）：2D/3D/降级三种棋盘必须识别同一块 L 形地块
+  if (t.tileKey === 'tile_duel_grassland') return 'duel-grass';
   if (glyph === 'd') return 'deep';
   if (glyph === 'i') return 'infect';
   if (t.buildable === 'NONE') return 'lane';
@@ -85,6 +88,8 @@ export function fallbackTileClass(stage, row, col) {
  */
 export function fallbackFloat(e, settings) {
   if (!settings?.damageNumbers || !Array.isArray(e)) return null;
+  // 资源回执（COST / SP）与 3D 那一侧共用同一个判据，别两处各写一遍
+  if (e[0] === 'resource') return resourceFloat(e, settings);
   if (settings.officialDamageNumbers === true) {
     if (e[0] === 'fx' && e[1] === 'dodge' && e[4] && e[4].num === 'm') return { id: e[4].id, text: 'MISS', type: 'miss' };
     if (e[0] !== 'dmg' || e[4] !== 'r') return null;
