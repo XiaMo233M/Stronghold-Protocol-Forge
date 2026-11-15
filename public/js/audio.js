@@ -80,7 +80,7 @@ import { mediaUrl } from './media.js';
 import { voiceDownloadStore, downloadVoiceLanguages } from './voiceDownloads.js';
 import { unhashedUrl } from '../../shared/assetPaths.js';
 // The manifest tree of each non-Chinese dub (`voiceLine`): the table itself lives in voicePrefs.js / shared/constants.js.
-import { VOICE_TREES } from './voicePrefs.js';
+import { VOICE_TREES, VOICE_PICKS } from './voicePrefs.js';
 export { VOICE_TREES } from './voicePrefs.js';
 
 const MAX_VOICES = 8;
@@ -1410,6 +1410,30 @@ export class AudioManager {
    * 选一条配音：语言由调用方给，中文那棵树只有在「玩家勾了中文下载 / 这一条本来就是中文」时才算兜底
    * （上游 0.4.0 的 voiceDownloads 偏好；没勾中文时，缺的配音宁可静音也不用中文顶替）。
    */
+  /**
+   * 试听（逐干员下拉的那一格）：在战斗之外播一句 `charId` 的 `lang` 台词，跳过 VoiceGate 的冷却、
+   * 直接接管语音通道。`lang` 省略或不是词表里的值 ⇒ 用这一名干员的设置（跟随全局）。
+   */
+  previewVoice(charId, lang) {
+    try {
+      if (!this.ctx || !this.voiceGain || this.volumes.muted || this.volumes.voice <= 0) return false;
+      if (typeof charId !== 'string') return false;
+      const slots = this.getManifest()?.audio?.voice?.[charId];
+      if (!slots || typeof slots !== 'object') return false;
+      const slot = ['select', 'place', 'start'].find((s) => slots[s]) || Object.keys(slots)[0];
+      if (!slot) return false;
+      const viaSetting = typeof this.voiceLangOf === 'function' ? this.voiceLangOf(charId) : null;
+      const resolved = VOICE_PICKS.includes(lang) ? lang : (viaSetting || this.voiceLang || null);
+      const line = this._selectedVoiceLine(charId, slot, resolved);
+      if (!line) return false;
+      this._stopVoice();
+      this.voiceGate.start(slot, null, typeof performance !== 'undefined' ? performance.now() : Date.now());
+      const token = ++this.voiceToken;
+      this._playVoice(line.url, token, 1, line.fallback);
+      return true;
+    } catch (err) { this._warn?.('voice-preview', err); return false; }
+  }
+
   _selectedVoiceLine(charId, slot, lang) {
     const audio = this.getManifest()?.audio;
     const allowChinese = lang === 'cn' || downloadVoiceLanguages(voiceDownloadStore.get(), charId, audio).includes('cn');

@@ -65,7 +65,6 @@ export function makeMatch(o = {}) {
   }
   h.m = new Match({
     roomCode: 'TEST', mode, difficulty, modeId: o.modeId, seats, spectators: o.spectators, seed: o.seed ?? 1, matchNo: o.matchNo, data: o.data ?? DATA, log,
-    roomCode: 'TEST', mode, difficulty, seats, spectators: o.spectators, seed: o.seed ?? 1, matchNo: o.matchNo, data: o.data ?? DATA, log,
     // The room's CAPACITY, when the caller wants it to differ from the seat list (a 20-seat room with 4 players in it:
     // the variant gate reads the PARTICIPANTS, so capacity stays a separate fact). Absent ⇒ Match derives it from
     // `seats.length`, exactly as before.
