@@ -296,7 +296,7 @@ export function isVersionRange(range) {
  * @param {unknown} range
  * @param {unknown} [version] default: this build's PLUGIN_APP_VERSION（上游那一半，见 shared/constants.js）
  */
-export function appVersionMatches(range, version = APP_VERSION) {
+export function appVersionMatches(range, version = PLUGIN_APP_VERSION) {
   const v = versionCore(version);
   const r = String(range ?? '').trim();
   if (!v || !r || !isVersionRange(r)) return true;
@@ -319,7 +319,7 @@ export const APP_ALSO_RUNS = Object.freeze({ '0.4': Object.freeze(['0.3.9999']) 
  * line the version's minor line also runs (APP_ALSO_RUNS). The `app` check of manifests and catalogue entries;
  * dependency and conflict ranges stay appVersionMatches.
  * @param {unknown} range
- * @param {unknown} [version] default: this build's APP_VERSION
+ * @param {unknown} [version] default: this build's PLUGIN_APP_VERSION（上游那一半）
  */
 export function appCompatible(range, version = PLUGIN_APP_VERSION) {
   if (appVersionMatches(range, version)) return true;

@@ -10,12 +10,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { APP_VERSION, PLUGIN_APP_VERSION, UPSTREAM_VERSION } from '../../shared/constants.js';
-import { appVersionMatches, readPluginManifest } from '../../shared/plugins/manifest.js';
+import { appVersionMatches, readPluginManifest, appCompatible} from '../../shared/plugins/manifest.js';
 import { entryStatus } from '../../shared/plugins/catalog.js';
 import { appRangeNow } from '../../server/studio/templates/index.js';
 
 /** The `app` range every plugin template in this repo — and every upstream 0.3.0 manifest — declares. */
-const GAME_RANGE = '>=0.3.0 <0.4.0';
+const GAME_RANGE = '>=0.4.0 <0.5.0';
+/** 0.3.x 那批插件声明的范围：上游 0.4.0 用 APP_ALSO_RUNS 保证它照常可用（下面的断言钉这件事）。 */
+const OLD_RANGE = '>=0.3.0 <0.4.0';
 /** Where this repo's plugin scaffolds live (the studio copies these). */
 const TEMPLATES = new URL('../../plugins/_template/', import.meta.url);
 
@@ -32,6 +34,11 @@ test("the plugin app version is the upstream half — not this fork's release nu
 
 test('appVersionMatches defaults to the upstream half', () => {
   assert.equal(appVersionMatches(GAME_RANGE), true, 'the range every upstream plugin declares must match');
+  // appVersionMatches 是**依赖/冲突**范围的判据，仍然逐字比较：0.3.x 的范围不再匹配 0.4.0
+  assert.equal(appVersionMatches(OLD_RANGE), false, 'dependency ranges stay literal');
+  // app 闸（appCompatible）多一条 APP_ALSO_RUNS：0.3.x 的插件在 0.4.0 照常可用
+  assert.equal(appCompatible(OLD_RANGE), true, 'the 0.3.x range still runs on 0.4.0 (APP_ALSO_RUNS)');
+  assert.equal(appCompatible(GAME_RANGE), true);
   assert.equal(appVersionMatches(`>=${APP_VERSION}`), false, "a plugin written for this fork's release number is not a game version");
   assert.equal(appVersionMatches('>=0.2.0'), true, "the range this fork's own language packs declare still matches");
 });
@@ -47,7 +54,7 @@ test('the catalogue status is judged against the upstream half', () => {
 });
 
 test('the studio scaffolds the app range for the game, not for this fork', () => {
-  assert.match(appRangeNow(), /^>=0\.3\.0\b/);
+  assert.ok(appRangeNow().startsWith('>=0.4.0'), 'studio scaffolds the 0.4.x game range');
 });
 
 test('every plugin template in this repo is compatible through the real manifest reader', () => {
