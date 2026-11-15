@@ -941,7 +941,8 @@ test('干员战斗语音 (DESIGN §21.30): the manifest data, the official prior
     };
     for (const id of Object.keys(table)) {
       assert.match(id, /^char_[A-Za-z0-9_]+$/, id);
-      for (const s of slots) assert.ok(table[id][s], `${lang}: ${id}.${s}`);
+      // 同上：锡兰 / 拜松的 CN_028（作战中 4）四个语种都没有源（SOURCE_GAPS 那条注释），别处配音表也同样豁免
+      for (const s of slots) if (!SOURCE_GAPS[id]?.includes(s)) assert.ok(table[id][s], `${lang}: ${id}.${s}`);
       for (const s of prepOnly) assert.equal(table[id][s], undefined, `${lang}: ${id}.${s} is not planned by default`);
       collect(table[id]);
     }
