@@ -109,7 +109,7 @@ export function ChatPanel() {
 
   return html`
     <${Panel} title=${t('房内聊天')} class="chatp"
-      micro=${t(mode === 'open' ? '允许打字与快捷短语' : mode === 'quick' ? '只允许快捷短语' : '关闭聊天')}>
+      micro=${mode === 'open' ? t('允许打字与快捷短语') : mode === 'quick' ? t('只允许快捷短语') : t('关闭聊天')}>
       <div class="chatp__list" ref=${listRef}>
         ${lines.length === 0
           ? html`<div class="chatp__empty">${t('说点什么…')}</div>`
