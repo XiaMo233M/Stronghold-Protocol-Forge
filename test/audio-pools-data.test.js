@@ -59,9 +59,9 @@ test('every generated attack/hit reference resolves to a valid pool and its sele
   // The four-version art union adds nine references to installed sounds and 46 official pool records; the online
   // regeneration of 2026-11-03 (DESIGN §37.93) adds the attack / hit files of 16 第一期 operators and 2 enemies (+37).
   // 规程's local AudioClips and pinned new bank names extend the five-version union.
-  // 上游 0.4.0 的五个版本并集后天再变（规程的本地 AudioClips 与新 bank 名又进来一批）⇒ 数字按实测钉住
-  assert.equal(refs, 1267);
-  assert.equal(Object.keys(pools).length, 1254);
+  // 0.4.0 移植：素材按上游完整包补齐（多出 2959 个文件、其中 8 条是被引用到的音效）后，两个数按实测重新钉住
+  assert.equal(refs, 1275);
+  assert.equal(Object.keys(pools).length, 1262);
   const p = pools[units.char_4064_mlynar.attackPools[2]];
   assert.equal(p.sounds['player/p_imp/p_imp_loyalsword_h.mp3'].delay, 0.1);
 });

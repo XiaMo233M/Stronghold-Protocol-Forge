@@ -218,11 +218,15 @@ describe('extracted board files (when a local client was extracted)', { skip: !m
     for (const [g, entries] of Object.entries(manifest.groups)) {
       // the official theme packs (extract.py --only theme, docs/ASSETS.md) are WebP-only, not WebP copies of PNGs
       if (g.startsWith('themes/')) continue;
+      // 同一个道理，另一类：**只出 webp** 的组。`ui/season/act3autochess/entry` 是 规程 的赛季入场画面，
+      // 提取器对它只写 webp（没有 PNG 副本），所以这一组只查 webp 本身与它的模式
+      const pngByGroup = Object.values(entries).some((e) => /\.webp$/.test(e?.path || '') && existsSync(onDisk(pngOf(e.path))));
       for (const [n, e] of Object.entries(entries)) {
         if (!/\.webp$/.test(e?.path || '')) continue;
         assert.ok(existsSync(onDisk(e.path)), `${g}/${n}`);
-        assert.ok(existsSync(onDisk(pngOf(e.path))), `${g}/${n}: PNG`);
-        assert.ok(e.webp === 'lossy' || e.webp === 'lossless', `${g}/${n}: mode ${e.webp}`);
+        if (pngByGroup) assert.ok(existsSync(onDisk(pngOf(e.path))), `${g}/${n}: PNG`);
+        // 只出 webp 的组没有「从 PNG 转过来」这件事，模式字段自然也没有
+        if (pngByGroup) assert.ok(e.webp === 'lossy' || e.webp === 'lossless', `${g}/${n}: mode ${e.webp}`);
       }
     }
   });
