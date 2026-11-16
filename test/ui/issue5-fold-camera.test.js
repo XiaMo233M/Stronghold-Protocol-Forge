@@ -219,9 +219,8 @@ describe('wiring', () => {
     assert.match(game, /\}, \[[^\]]*\bshopFolded\b[^\]]*\]\);/);
     // entering prep and the boss-prep re-frame take the fold state; a fold / unfold re-frames through prepDeployCamera
     // (which calls foldCamera, still deferred while busy unless a deploy zoom is being given back — issue #602)
-    assert.equal((game.match(/const pc = prepCameraFor\(pub, myId, shopFolded\);/g) || []).length, 2);
+    // 本仓库这一版 prepCameraFor 带 stageLayout（大图: 地图自己的窗口跟着走），下面那条就是实际形状
     assert.match(game, /const next = prepDeployCamera\(\{\n\s+pub, myId, deployFold, partial: deployPartial, releaseDeploy: step\.release, folded: shopFolded,\n\s+ownPrep: !!view && viewModeRef\.current === 'prep' && showPrep,\n\s+pen, busy: !!drag \|\| !!facing, current: camRef\.current,\n\s+\}\);\n\s+\/\/ a null release because the pen is open stays owed; a null only because the camera already\n\s+\/\/ matches the player's fold spends it\. \[ASSUMED\]\n\s+deployZoomedRef\.current = deployZoomRemember\(step, \{ next, pen \}\);\n\s+\/\/ the fold zoom and the restore fly with the short FOLD_CAMERA_MS, not a generic camera flight\n\s+if \(next\) setCam\(next\.kind, \{ \.\.\.next\.opts, ms: FOLD_CAMERA_MS \}\);/);
     assert.equal((game.match(/const pc = prepCameraFor\(pub, myId, shopFolded, stageLayout\);/g) || []).length, 2);
-    assert.match(game, /const next = prepDeployCamera\(\{\n\s+pub, myId, deployFold, releaseDeploy: step\.release, folded: shopFolded,\n\s+ownPrep: !!view && viewModeRef\.current === 'prep' && showPrep,\n\s+pen, busy: !!drag \|\| !!facing, current: camRef\.current,\n\s+\}\);\n\s+\/\/ a null release because the pen is open stays owed; a null only because the camera already\n\s+\/\/ matches the player's fold spends it\. \[ASSUMED\]\n\s+deployZoomedRef\.current = deployZoomRemember\(step, \{ next, pen \}\);\n\s+\/\/ the fold zoom and the restore fly with the short FOLD_CAMERA_MS, not a generic camera flight\n\s+if \(next\) setCam\(next\.kind, \{ \.\.\.next\.opts, ms: FOLD_CAMERA_MS \}\);/);
   });
 });
