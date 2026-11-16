@@ -40,7 +40,17 @@ export function unitArt(m, info, opts = {}) {
   const id = info?.avatar || info?.defId;
   if (!m || !id) return null;
   if (info.side === 'enemy' || String(id).startsWith('enemy_')) return enemyIconUrl(m, id);
-  if (String(id).startsWith('token_')) return tokenAvatarUrl(m, id);
+  // 召唤物 / 地图角色的皮肤挂在**它自己那条记录**上（`tokens[<id>].skins[<皮肤>]`），所以先解析皮肤再看回退：
+  // 早退会把皮肤整个吞掉（「别人的皮肤我看不看」这条开关对召唤物也得同样生效）
+  if (String(id).startsWith('token_')) {
+    // 召唤物皮肤（docs/SKINS.md）：与干员同一个开关；知道它属于哪位干员（UnitInfo.ownerCharId, #876）时
+    // 跟随那位干员**当前**的装扮（出生时记下的 info.skin 会在对局中换装后过期 —— 第 54 轮审计）
+    const mine = info.ownerId == null || info.ownerId === opts.myId;
+    const tokenSkin = info.ownerCharId && info.ownerId != null
+      ? ownerSkin(info.ownerCharId, { ...opts, ownerId: info.ownerId, skin: info.skin })
+      : (mine || opts.otherSkins !== false ? info.skin : null);
+    return tokenAvatarUrl(m, id, { skin: tokenSkin });
+  }
   // 皮肤看**这一颗棋子属于哪个座位**（`info.ownerId`），不是"我"的：补位 / 自选编队画出来的那一张
   // 应当是座位上那位博士选的外观；`otherSkins: false`（设置里关掉别人的外观）时 ownerSkin 返回 null，
   // 于是回落到原画 —— 这就是「别人的皮肤我看不看」那条开关的落点。
