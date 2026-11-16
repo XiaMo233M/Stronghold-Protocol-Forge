@@ -101,8 +101,7 @@
       "roomModes": [
         "solo",
         "coop"
-      ],
-      "default": true
+      ]
     },
     {
       "id": "act2autochess@V2_1",
@@ -133,6 +132,17 @@
         "solo",
         "coop"
       ]
+    },
+    {
+      "id": "act3autochess@V3_1",
+      "cs": "<cs:act3autochess@V3_1>",
+      "family": "regulation",
+      "label": "规程·序列Ⅰ",
+      "roomModes": [
+        "solo",
+        "coop"
+      ],
+      "default": true
     }
   ]
 }

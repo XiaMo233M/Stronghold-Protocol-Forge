@@ -41,7 +41,7 @@
 | `perMessageDeflate` | **开**（0.2.6 起引擎缺省 `WS_DEFLATE`：`threshold:1024` / `serverNoContextTakeover:true` / `serverMaxWindowBits:11` / memLevel 7；可被 `pack.json.server.transport` 声明改） | `server/http/websocket.js:45-50`（`WS_DEFLATE`）、`:93-144`（`transportPolicy`） | 上游 `v0.2.4` 是 `false`，且没有这条声明通道 |
 | 每连接令牌桶 `ratePerSec` / `rateBurst` | `40` / `40` | `server/net.js:50-51` | 同值 |
 | 重负载意图桶 `heavyPerSec` / `heavyBurst` | `2` / `6` | `server/net.js:61-62` | 同值 |
-| `HEAVY_TYPES`（额外吃重负载桶的意图） | `g.watch, g.publicFull, room.loadout, room.ownership, room.diy, room.spectate, room.queue` | `server/net.js:83`（集合；闸门在 `:652`） | 上游 `v0.2.4:server/net.js:70` 的 `HEAVY_TYPES` **少两个**：`room.queue`（野排匹配是我们加的，非本次优化）与 `g.publicFull`（**上游无此意图**，见 §2.1 `PUBLIC_FULL_ASK_MS`） |
+| `HEAVY_TYPES`（额外吃重负载桶的意图） | `g.watch, g.publicFull, room.loadout, room.ownership, room.diy, room.spectate, room.queue` | `server/net.js:83`（集合；闸门在 `:652`） | 上游 `v0.2.4:server/net.js:66` 的 `HEAVY_TYPES` **少两个**：`room.queue`（野排匹配是我们加的，非本次优化）与 `g.publicFull`（**上游无此意图**，见 §2.1 `PUBLIC_FULL_ASK_MS`） |
 | `snapDropBytes`（发送缓冲超过则丢 `b.snap`） | `1 << 20` | `server/net.js:56`（用在 `:298`） | 同值 |
 | `hardBufferBytes`（发送队列超过则断开） | `16 << 20` | `server/net.js:57`（用在 `:297`） | 同值 |
 | `isDroppable` | 只有 `b.snap` 可丢；`m.public` **永不**因背压被丢 | `server/net.js:307`（用在 `:318`） | 同值 |
@@ -83,7 +83,7 @@ set "SP_MAX_SEATS=40" && npm start
 * **`MAX_SEATS = 4` 一个字不动**：它是「官方房间 1–4 人」的声明，也是超容变体的参照 —— 见下一条。
 * **`SP_MAX_SEATS=4` 回到官方那一档**：那时 `room.state` 与协议帧与从前的 4 座部署**逐字节相同**
   （`welcome.maxSeats` 仍会发、值为 4；`room.state.seatCap` 只在容量 ≠ 4 时才出现）。
-* **抬席位常要同时抬连接上限**：`maxConnectionsPerAddr` 是 `startServer` 的**选项**（`server/http/config.js:20`），
+* **抬席位常要同时抬连接上限**：`maxConnectionsPerAddr` 是 `startServer` 的**选项**（`server/http/config.js:34`），
   **不是环境变量**；注释里出现过的 `SP_MAX_CONNS_PER_ADDR` **代码里并不存在**（见 §7），别照它去设。同批还要看
   lobby 的 `maxRoomsPerAddr` / `maxMatchesPerAddr`（§2.2 的表）。
 * **超容变体的闸门读的是「在场参与者数」，不是房间容量**：一场**超过 4 人**的对局才走「每人独立池 / 分小队联防」
@@ -195,7 +195,7 @@ W_worst     = max(W_keepalive, W_ask) + RTT ≈ 3.2 s + RTT
 | 单人/测试环境想更快看到效果 | `opts.timerScale`（`server/match/Match.js:298`） | 调小 | 它**不会**改变 `PUBLIC_THROTTLE`（该值不经 `scaled()`），只会让阶段推进更快 |
 | 想限定某个连接的调用频率 | `ratePerSec`/`rateBurst`、`heavyPerSec`/`heavyBurst`（`server/net.js:50-51`、`:61-62`） | 按需 | 通用网络层，与增量帧本身无关；但 `g.publicFull` **走重负载桶**（在 `HEAVY_TYPES` 里，`server/net.js:83`），不再走普通桶 |
 | 想换上行前的反代行为 | `TRUST_PROXY` / `trustProxy`（`server/http/config.js:75`、`net.js:63`） | — | 通用网络层 |
-| 100 人版需要更多连接 | `maxConnectionsPerAddr`（`startServer` 选项，`server/http/config.js:20`）与 `SP_MAX_SEATS` | 按需 | 注释里写的 `SP_MAX_CONNS_PER_ADDR` **代码里并不存在**（全仓只有注释提到它，未证实为可用环境变量） |
+| 100 人版需要更多连接 | `maxConnectionsPerAddr`（`startServer` 选项，`server/http/config.js:34`）与 `SP_MAX_SEATS` | 按需 | 注释里写的 `SP_MAX_CONNS_PER_ADDR` **代码里并不存在**（全仓只有注释提到它，未证实为可用环境变量） |
 | 一台服务器默认允许多少座 | `SP_MAX_SEATS`（环境变量） | 缺省 **20**；`SP_MAX_SEATS=4` 回到官方那一档 | 抬席位**不会**自动抬连接上限：同抬 `startServer({ maxConnectionsPerAddr })`、lobby 的 `maxRoomsPerAddr` / `maxMatchesPerAddr`。快速匹配的队列门槛**不跟随**它（见 §2 末） |
 
 ## 7. 未证实 / 我们没法确认的

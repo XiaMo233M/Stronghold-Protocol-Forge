@@ -13,17 +13,17 @@ import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { DEFAULT_VERSION, VERSIONS, versionById, versionSlug, versionOfData } from '../shared/versions.js';
+import { DEFAULT_VERSION, LOBBY_DEFAULT_VERSION, VERSIONS, versionById, versionSlug, versionOfData } from '../shared/versions.js';
 import { loadProfile, pinGroupOf, pinnedShaOf } from '../tools/versions/profiles.mjs';
 import { bondActiveType, selfBackupPreset, launchModes, launchMilestones, applyAdapters } from '../tools/versions/adapters.mjs';
 import { validateReferences } from '../shared/plugins/validate.js';
 import { DATA_DIR, VERSION_DATA_FILES, getData, getVersionData, loadData, resetVersionData, versionDataDir } from '../server/data.js';
 import { createStaticHandler, startServer } from '../server/index.js';
+import { hasDefaultGamedata } from './helpers/defaultGamedata.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BUILD = join(ROOT, 'tools', 'build-data.mjs');
-const CACHE = join(ROOT, '.cache', 'gamedata');
-const EN = JSON.parse(readFileSync(join(ROOT, 'public', 'i18n', 'en.json'), 'utf8'));
+const EN =JSON.parse(readFileSync(join(ROOT, 'public', 'i18n', 'en.json'), 'utf8'));
 /** The 15 files tools/build-data.mjs builds, plus the copy of data/tuning.json. */
 const BUILT = ['backups', 'bands', 'bonds', 'bosses', 'chess', 'choices', 'config', 'effects', 'enemies', 'factions', 'garrisons',
   'items', 'stages', 'tokens', 'waves'];
@@ -34,12 +34,15 @@ const REBUILD_ALL = `rebuild every version: ${VERSIONS.map((v) => `node tools/bu
  * The expected counts of each non-default build, written out (DESIGN §37.22.3), independent of the
  * profile's `expect` / `config` that the build and validateAll read: a typo in a profile fails here. V2_1: 36 strategies,
  * 120 chess (119 visible with the 4 DIY slots), no 终极 mode (it opened with V2_2): activity_table @1457587e. The 功勋
- * levels: 35 at a launch (levels 36–60 open with the second sub-version, adapter launchMilestones), 60 in V1_2.
+ * levels: 35 at a launch (levels 36–60 open with the second sub-version, adapter launchMilestones), 60 in V1_2. 规程·序列Ⅰ:
+ * 61 strategies, 310 chess (141 visible), 116 items, 465 effects, no 功勋 levels (its milestoneList is empty; 卫戍认证 go
+ * to the 功勋兑换处 instead): Kengxxiao @6f63c14e, CN data 79.2.0.
  */
 const PINNED = Object.freeze({
   'act2autochess@V2_1': { bonds: 23, bands: 36, visibleNonDiy: 115, chess: 240, items: 115, effects: 361, hiddenCore: [350, 1200], milestones: 35 },
   act1autochess: { bonds: 18, bands: 30, visibleNonDiy: 95, chess: 200, items: 89, effects: 281, hiddenCore: [300, 1000], milestones: 60 },
   'act1autochess@V1_1': { bonds: 18, bands: 20, visibleNonDiy: 95, chess: 200, items: 89, effects: 281, hiddenCore: [300, 1000], milestones: 35 },
+  'act3autochess@V3_1': { bonds: 26, bands: 61, visibleNonDiy: 141, chess: 310, items: 116, effects: 465, hiddenCore: [350, 1200], milestones: 0 },
 });
 
 const readJson = (dir, name) => JSON.parse(readFileSync(join(dir, `${name}.json`), 'utf8'));
@@ -71,10 +74,13 @@ test('registry: unique ids, one default with dir \'\', OS-safe unique dirs, msgi
   assert.equal(versionSlug(versionById(DEFAULT_VERSION)), DEFAULT_VERSION);
   assert.equal(versionSlug(versionById('act1autochess@V1_1')), 'act1autochess-v1_1');
   assert.equal(versionSlug(versionById('act2autochess@V2_1')), 'act2autochess-v2_1');
-  // the maintainer's names by period (2026-10-22): 第一期 = act1autochess, 第二期 = act2autochess, 上半 / 下半 = V*_1 / V*_2
+  // the maintainer's names by period (2026-10-22): 第一期 = act1autochess, 第二期 = act2autochess, 上半 / 下半 = V*_1 / V*_2;
+  // 规程·序列Ⅰ is the official name of act3autochess V3_1
   assert.deepEqual(Object.fromEntries(VERSIONS.map((v) => [v.id, v.label])), {
     act2autochess: '第二期下半', 'act2autochess@V2_1': '第二期上半', act1autochess: '第一期下半', 'act1autochess@V1_1': '第一期上半',
+    'act3autochess@V3_1': '规程·序列Ⅰ',
   });
+  assert.equal(versionSlug(versionById('act3autochess@V3_1')), 'act3autochess-v3_1');
   assert.equal(versionById('nope'), null);
   assert.equal(versionOfData({ config: { version: { id: 'act1autochess' } } }), 'act1autochess');
   assert.equal(versionOfData({ config: {} }), DEFAULT_VERSION);
@@ -84,13 +90,16 @@ test('registry: unique ids, one default with dir \'\', OS-safe unique dirs, msgi
 
 test('profiles: the default is today\'s build; pins pick a commit per file group', async () => {
   const { profile: def } = await loadProfile(DEFAULT_VERSION);
-  assert.equal(def.pins, null);
+  // pinned since master's activity_table lost the 盟约 season (CN 2.7.91, DESIGN §37.91)
+  assert.deepEqual(Object.keys(def.pins), ['default', 'character']);
+  assert.equal(pinnedShaOf(def, 'excel/character_table.json'), '08ba2aea0e8dba88eff0ec0d2c87e24b4db626f8');
+  assert.equal(pinnedShaOf(def, 'levels/activities/act2autochess/level_act2autochess_01.json'), '17759cc8cdf37388414145d16262a3a06f3ab25e');
   assert.deepEqual(def.adapters, []);
   assert.equal(def.tables, 'default');
   assert.deepEqual(def.config.hiddenCore, { single: 350, multi: 1200 });
   assert.equal(def.config.rules, undefined, 'no rules: the default build emits no config.version');
   assert.deepEqual(def.expect, { bonds: 23, bands: 40, visibleNonDiy: 112, triggerDeviations: 'default' });
-  assert.equal(pinnedShaOf(def, 'excel/activity_table.json'), null);
+  assert.equal(pinnedShaOf(def, 'excel/activity_table.json'), '17759cc8cdf37388414145d16262a3a06f3ab25e');
 
   const { profile: v12 } = await loadProfile('act1autochess');
   assert.equal(pinnedShaOf(v12, 'excel/activity_table.json'), '21b1f240817dafe486653adda7a5085ff8a1ba17');
@@ -137,20 +146,28 @@ for (const v of OTHERS) {
     const source = join(ROOT, '.cache', `gamedata@${sha}`, 'excel', 'activity_table.json');
     if (!existsSync(source)) { t.skip(`no ${source}`); return; }
     const raw = JSON.parse(readFileSync(source, 'utf8'));
-    const act = raw.activity.AUTOCHESS_SEASON[profile.season];
+    // the season's tables where the build reads them: the profile's `section` (规程), else AUTOCHESS_SEASON[season]
+    const act = profile.section ? profile.section.reduce((o, k) => o?.[k], raw.activity) : raw.activity.AUTOCHESS_SEASON[profile.season];
     const config = readJson(join(ROOT, 'data', v.dir), 'config');
     for (const [id, mode] of Object.entries(config.modes)) {
       const official = act.modeDataDict[id];
       for (const [field, input] of Object.entries({ name: 'name', code: 'code', sortId: 'sortId', type: 'modeType',
         difficulty: 'modeDifficulty', desc: 'desc', effectDescList: 'effectDescList', specialPhaseTime: 'specialPhaseTime',
         activeBondIds: 'activeBondIdList', inactiveBondIds: 'inactiveBondIdList', inactiveEnemyKeys: 'inactiveEnemyKey' })) {
-        assert.deepEqual(mode[field], official[input], `${id}.${field}`);
+        // the build's documented defaults: no effectDescList on 规程's modes, active bonds the season does not load left out
+        const want = field === 'effectDescList' ? official[input] ?? []
+          : field === 'activeBondIds' ? official[input].filter((b) => act.bondInfoDict[b]) : official[input];
+        assert.deepEqual(mode[field], want, `${id}.${field}`);
       }
-      const levels = Object.values(act.shopLevelDataDict[id]);
-      assert.deepEqual(mode.shopSlots, Object.fromEntries(levels.map(l => [l.shopLevel, { chess: l.charChessCount, item: l.itemCount }])), id);
-      assert.deepEqual(mode.upgradePrices, levels.slice(0, -1).map(l => l.initialUpgradePrice), id);
-      assert.deepEqual(mode.levelTagColors, Object.fromEntries(levels.map(l => [l.shopLevel, l.levelTagBgColor])), id);
-      assert.equal(mode.maxShopLevel, Math.max(...levels.map(l => l.shopLevel)), id);
+      // 规程's 入门协议 (mode_training_2) has no shop table: the build writes an empty shop
+      if (!act.shopLevelDataDict[id]) assert.deepEqual([mode.shopSlots, mode.upgradePrices], [{}, []], id);
+      else {
+        const levels = Object.values(act.shopLevelDataDict[id]);
+        assert.deepEqual(mode.shopSlots, Object.fromEntries(levels.map(l => [l.shopLevel, { chess: l.charChessCount, item: l.itemCount }])), id);
+        assert.deepEqual(mode.upgradePrices, levels.slice(0, -1).map(l => l.initialUpgradePrice), id);
+        assert.deepEqual(mode.levelTagColors, Object.fromEntries(levels.map(l => [l.shopLevel, l.levelTagBgColor])), id);
+        assert.equal(mode.maxShopLevel, Math.max(...levels.map(l => l.shopLevel)), id);
+      }
       for (const [round, built] of Object.entries(mode.rounds)) {
         const turn = raw.autoChessData.turnInfoDataDict[id][round];
         assert.equal(built.prepTimeData, turn.normalPhaseTime, `${id} R${round}`);
@@ -167,7 +184,7 @@ for (const v of OTHERS) {
     assert.deepEqual(names, [...BUILT, 'tuning'].sort(), 'exactly the 15 built files and tuning.json');
     for (const n of VERSION_DATA_FILES) assert.ok(names.includes(n), `${n}.json: server/data.js VERSION_DATA_FILES expects it`);
     const total = BUILT.reduce((n, f) => n + statSync(join(dir, `${f}.json`)).size, 0);
-    assert.ok(total < 6 * 1024 * 1024, `${v.id}: ${total} bytes`);
+    assert.ok(total < (profile.expect.maxMB ?? 6) * 1024 * 1024, `${v.id}: ${total} bytes`);
     const f = Object.fromEntries(BUILT.map((n) => [n, readJson(dir, n)]));
     assert.equal(f.config.version?.id, v.id);
     assert.equal(f.config.version.family, v.family);
@@ -178,9 +195,10 @@ for (const v of OTHERS) {
     assert.equal(f.config.hiddenCore.multi, profile.config.hiddenCore.multi);
     // 上半's constData has no singleReconnectTime (12e0a020 added it): null, never the 下半 value (server/lobby.js falls back)
     if (v.season === 'act1autochess') assert.equal(f.config.constants.singleReconnectTime, null, 'no 下半 constant as official data');
-    // no 终极 mode before V2_2 (上半 has none; V2_1's table lists it with a later startTime, adapter launchModes)
-    assert.ok(Object.values(f.config.modes).every((m) => m.difficulty !== 'ABYSS'), `${v.id}: no 终极 mode`);
-    assert.ok(Object.keys(f.config.modes).every((id) => !/abyss/.test(id)), `${v.id}: no abyss mode id`);
+    // no 终极 mode before V2_2 (上半 has none; V2_1's table lists it with a later startTime, adapter launchModes); 规程
+    // opened with its 终极 modes (mode_multi_abyss, 规程等级 15–20)
+    if (v.family === 'covenant') assert.ok(Object.values(f.config.modes).every((m) => m.difficulty !== 'ABYSS'), `${v.id}: no 终极 mode`);
+    if (v.family === 'covenant') assert.ok(Object.keys(f.config.modes).every((id) => !/abyss/.test(id)), `${v.id}: no abyss mode id`);
     for (const st of Object.values(f.stages)) assert.ok(st.modes.every((id) => f.config.modes[id]), `${v.id} ${st.id}: a stage mode the version lacks`);
     assert.equal(Object.keys(f.bonds).length, profile.expect.bonds);
     assert.equal(Object.keys(f.bands).length, profile.expect.bands);
@@ -231,58 +249,6 @@ for (const v of OTHERS) {
     } finally {
       rmSync(out, { recursive: true, force: true });
     }
-  });
-  test(`data/${v.dir}: the 16 files, under 6 MB, config.version, the profile's counts, no effectRef, the trigger deviations of its profile, references resolve`, async () => {
-    const { profile } = await loadProfile(v.id);
-    const dir = join(ROOT, 'data', v.dir);
-    const names = readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -5)).sort();
-    assert.deepEqual(names, [...BUILT, 'tuning'].sort(), 'exactly the 15 built files and tuning.json');
-    for (const n of VERSION_DATA_FILES) assert.ok(names.includes(n), `${n}.json: server/data.js VERSION_DATA_FILES expects it`);
-    const total = BUILT.reduce((n, f) => n + statSync(join(dir, `${f}.json`)).size, 0);
-    assert.ok(total < 6 * 1024 * 1024, `${v.id}: ${total} bytes`);
-    const f = Object.fromEntries(BUILT.map((n) => [n, readJson(dir, n)]));
-    assert.equal(f.config.version?.id, v.id);
-    assert.equal(f.config.version.family, v.family);
-    assert.deepEqual(f.config.version.rules, profile.config.rules ?? {});
-    assert.equal(Object.keys(f.config).at(-1), 'version', 'config.version is the last key');
-    assert.equal(f.config.season, v.season);
-    assert.equal(f.config.hiddenCore.single, profile.config.hiddenCore.single);
-    assert.equal(f.config.hiddenCore.multi, profile.config.hiddenCore.multi);
-    // 上半's constData has no singleReconnectTime (12e0a020 added it): null, never the 下半 value (server/lobby.js falls back)
-    if (v.season === 'act1autochess') assert.equal(f.config.constants.singleReconnectTime, null, 'no 下半 constant as official data');
-    // no 终极 mode before V2_2 (上半 has none; V2_1's table lists it with a later startTime, adapter launchModes)
-    assert.ok(Object.values(f.config.modes).every((m) => m.difficulty !== 'ABYSS'), `${v.id}: no 终极 mode`);
-    assert.ok(Object.keys(f.config.modes).every((id) => !/abyss/.test(id)), `${v.id}: no abyss mode id`);
-    for (const st of Object.values(f.stages)) assert.ok(st.modes.every((id) => f.config.modes[id]), `${v.id} ${st.id}: a stage mode the version lacks`);
-    assert.equal(Object.keys(f.bonds).length, profile.expect.bonds);
-    assert.equal(Object.keys(f.bands).length, profile.expect.bands);
-    assert.equal(Object.values(f.chess).filter((c) => !c.isGolden && c.visible).length, profile.expect.visibleNonDiy);
-    const pin = PINNED[v.id];
-    assert.ok(pin, `${v.id}: pin its counts in PINNED`);
-    assert.deepEqual({
-      bonds: Object.keys(f.bonds).length, bands: Object.keys(f.bands).length,
-      visibleNonDiy: Object.values(f.chess).filter((c) => !c.isGolden && c.visible).length, chess: Object.keys(f.chess).length,
-      items: Object.keys(f.items).length, effects: Object.keys(f.effects).length, hiddenCore: [f.config.hiddenCore.single, f.config.hiddenCore.multi],
-      milestones: f.config.rewards.milestones.length,
-    }, pin, `${v.id}: the pinned counts`);
-    assert.deepEqual(f.config.rewards.milestones.map((m) => m.level), Array.from({ length: pin.milestones }, (_, i) => i + 1), `${v.id}: the 功勋 levels 1…n`);
-    for (const [file, recs] of [['items', f.items], ['bands', f.bands]]) {
-      for (const r of Object.values(recs)) assert.ok(!Object.hasOwn(r, 'effectRef'), `${file} ${r.id ?? r.bandId}: no effectRef (it would name a default-version id)`);
-    }
-    if (profile.expect.triggerDeviations === 'present') {
-      // the deliberate deviations (DESIGN §21.29) of the operators the version has, on their TAKE_DAMAGE rows
-      const devs = Object.values(f.chess).filter((c) => c.skills?.some((s) => s.trigger?.rawRule === 'TAKE_DAMAGE' && s.trigger.rule !== 'TAKE_DAMAGE'));
-      assert.ok(devs.length > 0 && devs.length % 2 === 0, `${v.id}: normal and elite records under a deviation (${devs.length})`);
-      assert.ok(!Object.values(f.chess).some((c) => c.charId === 'char_107_liskam'), '雷蛇 joined with V2_2');
-    }
-    if (profile.expect.triggerDeviations === 'none') {
-      const td = [];
-      for (const c of Object.values(f.chess)) for (const s of c.skills || []) if (s.trigger?.rawRule === 'TAKE_DAMAGE') td.push(`${c.chessId} ${s.skillId}`);
-      for (const [id, u] of Object.entries(f.backups.units)) for (const [k, form] of Object.entries(u.forms)) for (const s of form.skills) if (s.trigger?.rawRule === 'TAKE_DAMAGE') td.push(`${id}@${k} ${s.skillId}`);
-      assert.deepEqual(td, [], 'no TAKE_DAMAGE row, so no trigger deviation applies');
-    }
-    assert.ok(readFileSync(join(dir, 'tuning.json')).equals(readFileSync(join(ROOT, 'data', 'tuning.json'))), 'tuning.json is a byte copy of data/tuning.json');
-    assert.deepEqual(validateReferences(f), []);
   });
 
   test(`data/${v.dir}: an offline rebuild reproduces all 16 files byte for byte`, { skip: process.env.DATA_DIR && 'DATA_DIR set' }, async (t) => {
@@ -334,15 +300,17 @@ test('data/versions/act2autochess-v2_1: the same-id records that differ from tod
     'enemy_10144_xdelk_2', 'enemy_2008_flking', 'enemy_2085_skzjxd', 'enemy_2085_skzjxd_2', 'enemy_9011_acrefr']);
   // h07_05's patrol loop (04-14)
   assert.deepEqual(changed('waves', (w) => [w.routes, w.extraRoutes]), ['act2autochess_h07_05', 'act2autochess_h07_05_s']);
-  // the modules added after 03-14: 13 elite records offer one fewer, and two summons lose their byModule entry
+  // the modules added after 03-14: 17 elite records offer one fewer (4 of them the CN 2.7.91 modules of 号角, 凛御银灰, 缪尔赛思
+  // and 溯光星源, DESIGN §37.91), and their summons lose their byModule entry
   assert.deepEqual(changed('chess', (c) => (c.modules || []).map((m) => m.uniEquipId)), ['chess_char_3_18_b', 'chess_char_4_01_b', 'chess_char_4_16_b',
-    'chess_char_5_03_b', 'chess_char_5_05_b', 'chess_char_5_07_b', 'chess_char_5_13_b', 'chess_char_5_18_b', 'chess_char_6_04_b', 'chess_char_6_08_b',
-    'chess_char_6_10_b', 'chess_char_6_15_b', 'chess_char_6_19_b']);
-  // whole modules: the 13 above plus 异客's RA-A module uniequip_004_pasngr, whose 1457587e battle_equip has only the rank-0
+    'chess_char_5_03_b', 'chess_char_5_05_b', 'chess_char_5_07_b', 'chess_char_5_08_b', 'chess_char_5_13_b', 'chess_char_5_14_b', 'chess_char_5_18_b',
+    'chess_char_6_04_b', 'chess_char_6_08_b', 'chess_char_6_10_b', 'chess_char_6_11_b', 'chess_char_6_15_b', 'chess_char_6_16_b', 'chess_char_6_19_b']);
+  // whole modules: the 17 above plus 异客's RA-A module uniequip_004_pasngr, whose 1457587e battle_equip has only the rank-0
   // 机理分析 (×1.2 at every potential; today ×1.25 from 潜能 5)
   assert.deepEqual(changed('chess', (c) => c.modules || []), ['chess_char_3_18_b', 'chess_char_4_01_b', 'chess_char_4_16_b',
-    'chess_char_5_03_b', 'chess_char_5_05_b', 'chess_char_5_07_b', 'chess_char_5_13_b', 'chess_char_5_18_b', 'chess_char_6_04_b', 'chess_char_6_05_b',
-    'chess_char_6_08_b', 'chess_char_6_10_b', 'chess_char_6_15_b', 'chess_char_6_19_b']);
+    'chess_char_5_03_b', 'chess_char_5_05_b', 'chess_char_5_07_b', 'chess_char_5_08_b', 'chess_char_5_13_b', 'chess_char_5_14_b', 'chess_char_5_18_b',
+    'chess_char_6_04_b', 'chess_char_6_05_b', 'chess_char_6_08_b', 'chess_char_6_10_b', 'chess_char_6_11_b', 'chess_char_6_15_b', 'chess_char_6_16_b',
+    'chess_char_6_19_b']);
   const v21chess = read('versions/act2autochess-v2_1', 'chess');
   const pasngr = v21chess.chess_char_6_05_b.modules.find((m) => m.uniEquipId === 'uniequip_004_pasngr');
   assert.equal(pasngr.talentChanges[1].bb['pasngr_t_1[enhance].damage_scale'], 1.2);
@@ -350,7 +318,8 @@ test('data/versions/act2autochess-v2_1: the same-id records that differ from tod
   assert.deepEqual(changed('chess', (c) => [c.skill, c.skills, c.talents, c.talentsBase]), ['chess_char_3_06_a', 'chess_char_3_06_b',
     'chess_char_3_18_a', 'chess_char_3_18_b', 'chess_char_4_10_a', 'chess_char_4_10_b', 'chess_char_5_05_a', 'chess_char_5_05_b',
     'chess_char_6_02_a', 'chess_char_6_02_b', 'chess_char_6_08_a', 'chess_char_6_08_b']);
-  assert.deepEqual(changed('tokens'), ['token_10017_skadi2_dedant', 'token_10039_ulpia_block']);
+  assert.deepEqual(changed('tokens'), ['token_10017_skadi2_dedant', 'token_10030_mlyss_wtrman', 'token_10039_ulpia_block',
+    'token_10057_svash2_eagle1', 'token_10057_svash2_eagle2', 'token_10057_svash2_eagle3']);
   // backups.json: the 自选 operators' powers and bonds from the 03-14 character_table (鸿雪 and 真言 emptyShip, not
   // sargonShip; seven with one power fewer), and the 自选 forms without a module added after 03-14
   const today = read('', 'backups');
@@ -363,11 +332,12 @@ test('data/versions/act2autochess-v2_1: the same-id records that differ from tod
     'char_4055_bgsnow', 'char_4132_ascln', 'char_4133_logos', 'char_4195_radian', 'char_4204_mantra']);
   assert.deepEqual(changedIn((b) => b.units, (u) => Object.values(u.forms || {}).map((f) => (f.modules || []).map((m) => m.uniEquipId))),
     ['char_2012_typhon', 'char_2025_shu', 'char_300_phenxi', 'char_4138_narant']);
-  // the 自选 pools: the 9 operators released after 03-14 are absent (怒潮凛冬 among them); 银灰, 空弦, 卡涅利安 and 伺夜 are
-  // V2_1-only 自选 picks (pending: the kitted gate drops them); 焰狐龙梓兰 and 结城理 are not excluded yet
+  // the 自选 pools: the 12 operators released after 03-14 are absent (怒潮凛冬 among them; 冻河, 国度 and 塔露拉 from CN 2.7.91);
+  // 银灰, 空弦, 卡涅利安 and 伺夜 are V2_1-only 自选 picks (pending: the kitted gate drops them); 焰狐龙梓兰 and 结城理 are not
+  // excluded yet
   const minus = (a, b) => a.filter((c) => !b.includes(c)).sort();
   const later = ['char_1015_aglna2', 'char_1051_headb2', 'char_1052_kalts2', 'char_4226_veen', 'char_4228_closur', 'char_4229_aphris',
-    'char_4230_mcnist', 'char_4231_clemnt', 'char_4235_thumpy'];
+    'char_4230_mcnist', 'char_4231_clemnt', 'char_4235_thumpy', 'char_4244_tocka', 'char_4246_dminon', 'char_4247_oxi'];
   const own = ['char_172_svrash', 'char_332_archet', 'char_426_billro', 'char_427_vigil'];
   assert.deepEqual([minus(Object.keys(today.diy.operators), Object.keys(v21b.diy.operators)), minus(Object.keys(v21b.diy.operators), Object.keys(today.diy.operators))], [later, own]);
   assert.deepEqual([minus(today.diy.ownedPool, v21b.diy.ownedPool), minus(v21b.diy.ownedPool, today.diy.ownedPool), v21b.diy.ownedPool.length], [later, own, 67]);
@@ -376,7 +346,7 @@ test('data/versions/act2autochess-v2_1: the same-id records that differ from tod
   assert.deepEqual([v21.enemy_2085_skzjxd.rank, v21.enemy_10040_cnvbln.notCountInTotal], ['NORMAL', true]);
 });
 
-test('--version act2autochess --offline reproduces data/*.json (the default profile is today\'s build)', { skip: (!existsSync(join(CACHE, 'excel', 'activity_table.json')) && 'no .cache/gamedata') || (process.env.DATA_DIR && 'DATA_DIR set') }, (t) => {
+test('--version act2autochess --offline reproduces data/*.json (the default profile is today\'s build)', { skip: (!hasDefaultGamedata('excel/activity_table.json') && 'no cached official data') || (process.env.DATA_DIR && 'DATA_DIR set') }, (t) => {
   const out = mkdtempSync(join(tmpdir(), 'sp-version-'));
   try {
     const r = runBuild(['--version', DEFAULT_VERSION, '--offline', '--quiet', '--out', out, '--report', join(out, 'r.json')]);
@@ -480,12 +450,12 @@ test('HTTP: nothing set enables every version, serves their data, and forks no v
   try {
     const get = (p) => fetch(srv.url + p, { redirect: 'manual' });
     assert.deepEqual(srv.versions.ids, VERSIONS.map((v) => v.id));
-    assert.equal(srv.versions.defaultId, DEFAULT_VERSION);
+    assert.equal(srv.versions.defaultId, LOBBY_DEFAULT_VERSION);
     assert.equal(srv.versionHosts.stats().workers, 0, 'the pool exists; no child until the first match of a version');
     assert.equal(srv.versionHosts.stats().matches, 0);
     const health = await (await get('/healthz')).json();
     assert.deepEqual(health.versions, {
-      enabled: VERSIONS.map((v) => v.id), default: DEFAULT_VERSION,
+      enabled: VERSIONS.map((v) => v.id), default: LOBBY_DEFAULT_VERSION,
       hosts: { workers: 0, matches: 0, transport: 'process' },
     });
     assert.equal((await get('/data/chess.json')).status, 200);

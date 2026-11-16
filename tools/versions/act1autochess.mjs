@@ -32,6 +32,17 @@ export default Object.freeze({
   config: Object.freeze({
     hiddenCore: Object.freeze({ single: 300, multi: 1000 }), // PRTS 卫戍协议：盟约: >300 / >1000 layers
     // Deploy order row by row from the bottom (PRTS 卫戍协议/帮助,
+    // changed on 2026-03-14), a timed solo prep (300 s), no bench equipment, no boss shared by both
+    // sides (news 5114). Full-bench swaps now follow the maintainer's round53 compatibility instruction in all
+    // versions; exact first-period client fidelity is not independently re-measured [ASSUMED] (DESIGN §36.2).
+    // Bonds greyed per match: 2 of the 6 core bonds — a guide written in the season (2025-12-09) says 「核心盟约ban2留4」
+    // (community report via the owner, 2026-11-14, §39.205; 第二期's 3 of 8 had been assumed here); add-ons 4 of 9 as in
+    // 第二期 [ASSUMED]; 标准 0 + 1 (research 01 A2: 上半's intro greys only 坚守).
+    bans: Object.freeze({
+      FUNNY: { core: 0, addon: 1 },
+      NORMAL: { core: 2, addon: 4 }, HARD: { core: 2, addon: 4 }, ABYSS: { core: 2, addon: 4 },
+      TRAINING: { core: 0, addon: 0 },
+    }),
     // changed on 2026-03-14), a timed solo prep (300 s), no bench equipment, no full-bench swap, no boss shared by both
     // sides (news 5114 lists the last three as 下半 additions)
     rules: Object.freeze({ deployOrder: 'rowBottomUp', soloTimed: true, benchEquip: false, bossMirrorShare: false }),

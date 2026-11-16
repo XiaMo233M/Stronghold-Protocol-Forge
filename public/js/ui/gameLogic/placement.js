@@ -5,6 +5,7 @@ import { morphSlotPolicy } from '../../../../shared/plugins/rules.js';
 import { attackRangeGrid } from '../../../../shared/loadoutRecord.js';
 import { meleeOnHighGround } from '../../../../shared/highGround.js';
 import { summonPlacementGrid } from '../../../../shared/summonPlacement.js';
+import { chessIsDiy, itemForbidsDiy, equipmentCapacity } from '../../../../shared/itemRules.js';
 import { pieceDir, rangeTiles } from '../facing.js';
 import { isObj, tileKey } from './shared.js';
 import { boardTileOf, fieldTile } from './camera.js';
@@ -203,7 +204,7 @@ export function indexPieces(priv) {
  * @param {{ priv:any, stage:any, editable:boolean, field?:'normal'|'bossL'|'bossR', getChess?:(id:string)=>any,
  *   getToken?:(id:string)=>any, getItem?:(id:string)=>any, getEffect?:(id:string)=>any }} o
  */
-export function placementContext({ priv, stage, editable, field = 'normal', getChess = () => null, getToken = () => null, getItem = () => null, getEffect = () => null, backups = null, layout = null }) {
+export function placementContext({ priv, stage, editable, field = 'normal', getChess = () => null, getToken = () => null, getItem = () => null, getEffect = () => null, backups = null, morphMode = 'official', config = null }) {
   const pieces = indexPieces(priv);
   const boardAt = new Map();
   for (const e of pieces.values()) if (e.area === 'board') boardAt.set(tileKey(e.row, e.col), e);
@@ -216,15 +217,21 @@ export function placementContext({ priv, stage, editable, field = 'normal', getC
   const ov = stageOverrides(priv, getEffect);
   // the own normal board keeps the data's deploy tiles (with the terrain overrides folded in); the boss field of a
   // boss round's prep is read from the legend + its devices under the same overrides (server deploy map, field)
-  const L = layout || layoutOf(stage);
   const deploy = field === 'bossL' || field === 'bossR'
     ? deploySets(stage, field, ov)
-    : deploySets(effectiveStage(stage, ov, L));
-  return { priv, pieces, boardAt, handAt, deploy, cap, count, field, editable: !!editable, getChess, getToken, getItem, backups, layout: L };
+    : deploySets(effectiveStage(stage, ov));
+  // “模拟宝藏” (enemy_9038_achest) occupies its tile: prepMapChars is the read-only preview, and that tile is not a deploy.
+  const chestTiles = new Set();
+  if (Array.isArray(priv?.prepMapChars)) {
+    for (const u of priv.prepMapChars) {
+      if (u && u.defId === 'enemy_9038_achest' && Number.isInteger(u.y) && Number.isInteger(u.x)) chestTiles.add(tileKey(u.y, u.x));
+    }
+  }
+  return { priv, pieces, boardAt, handAt, deploy, cap, count, field, editable: !!editable, getChess, getToken, getItem, backups, chestTiles, equipPerChess: config?.economy?.equipPerChess, equipHand: config?.version?.rules?.equipHand === true, morphMode: morphMode === 'plus' ? 'plus' : 'official' };
 }
 
 /**
- * Deploy position ('MELEE'|'RANGED'|'ALL') of a chess/token piece, or null for items. A MELEE chess whose trait reads
+ * Deploy position ('MELEE'|'RANGED'|'ALL') of a chess/token piece, or null for items. A MELEE chess whose Chinese
  * 「可以放置于远程位」 (shared/highGround.js: 歌蕾蒂娅, 崖心, 见行者, normal and elite, any module) is 'ALL': any deployable
  * tile, the 高台 included (server/match/board.js positionClass; the owner's decision of 2026-10-05). Every other MELEE
  * chess is ground-only.
@@ -332,11 +339,19 @@ export function canPlace(ctx, uid, target) {
   const piece = src.piece;
   const isMagic = piece.kind === 'item' && ctx.getItem(piece.id)?.itemType === 'MAGIC';
 
+  if (target.area === 'temp' && ctx.equipHand) {
+    if (piece.kind !== 'item') return no('BAD_TILE', t('装备区只能放入装备'));
+    if (!Number.isInteger(target.idx) || target.idx < 0 || target.idx >= GEO.TEMP_SIZE) return no('BAD_TILE', t('无法放置在该位置'));
+    if (src.area === 'temp' && src.idx === target.idx) return no('ALREADY', t('位置未变化'));
+    return { ok: true, action: ctx.priv.temp?.[target.idx] ? 'swap' : 'move' };
+  }
+
   if (target.area === 'hand') {
     const idx = target.idx;
     if (!Number.isInteger(idx) || idx < 0 || idx >= GEO.HAND_SIZE) return no('BAD_TILE', t('无法放置在该位置'));
     if (src.area === 'hand' && src.idx === idx) return no('ALREADY', t('位置未变化'));
     const occ = ctx.handAt.get(idx);
+    if (ctx.equipHand && piece.kind === 'item' && occ?.piece.kind !== 'chess') return no('BAD_TILE', t('装备只能放入装备区'));
     if (!occ) return { ok: true, action: 'move' };
     if (piece.kind === 'item') {
       if (occ.piece.kind === 'chess') return isMagic ? no('BAD_TARGET', t('该道具需要放置在战场上使用')) : equipCheck(ctx, piece, occ.piece);
@@ -406,6 +421,8 @@ function equipCheck(ctx, itemPiece, targetPiece) {
   const item = ctx.getItem(itemPiece.id);
   if (item?.itemType === 'MAGIC') return { ok: false, code: 'BAD_TARGET', reason: t('该道具需要放置在战场上使用') };
   if (!isObj(targetPiece) || targetPiece.kind !== 'chess') return { ok: false, code: 'BAD_TARGET', reason: t('装备只能配发给干员') };
+  // 信标 (and any item the official text forbids): a 自选 slot is not a legal drop, so the drag highlight omits it.
+  if (itemForbidsDiy(item) && chessIsDiy(ctx.getChess(targetPiece.id))) return { ok: false, code: 'BAD_TARGET', reason: t('无法装备给自选干员') };
   return { ok: true, action: 'equip' };
 }
 
@@ -430,21 +447,19 @@ const PROMOTE_KEYS = new Set(['use_equip_upgrade_char', 'equip_round_start_upgra
  */
 export function equipReplaces(ctx, uid, targetPiece) {
   const items = targetPiece?.items;
-  // 上游 0.3.1：这一页的形态档位从 ctx 读（战斗/准备两侧各带自己的），plus 档下**变形同构体不占格**，
-  // 所以它自己永远不该弹出替换对话框。
-  if (ctx?.morphMode === 'plus') {
+  // 装备位容量读**这一名干员**的 equipSlotNum（规程里普通 4 / 精锐 6），缺省才是 2（官方两格）
+  const cap = equipmentCapacity(ctx?.getChess?.(targetPiece?.id), ctx?.equipPerChess);
+  // 档位从这一页来（ctx.morphMode 是显式给的；没给就读页面策略 —— roomMods.js 已经把它合成好了）
+  const plus = ctx?.morphMode ? ctx.morphMode === 'plus' : slotPolicy().active === true;
+  if (plus) {
     if (!Array.isArray(items)) return false;
     const policy = morphSlotPolicy('plus', (it) => !!ctx.getItem?.(typeof it === 'string' ? it : it?.id)?.canGiveBond);
     const incoming = ctx.getItem?.(ctx.pieces?.get(uid)?.piece?.id);
+    // 变形同构体不占格，所以它自己不弹替换对话框
     if (!policy.occupies(incoming)) return false;
-    if (policy.slotsUsed(items) < policy.slotCap(2)) return false;
-  } else {
-    if (!Array.isArray(items)) return false;
-    const rec0 = ctx.getItem(ctx.pieces.get(uid)?.piece?.id);
-    const slot = slotPolicy();
-    if (slot.isSlotless(rec0)) return false;
-    if (slot.slotsUsed(items, ctx.getItem) < slot.slotCap(2)) return false;
-  }
+    // slotsUsed 要带解析器：items 里是 `{ uid, id }`，不带它分辨不出「不占格的那件」
+    if (policy.slotsUsed(items, ctx.getItem) < policy.slotCap(cap)) return false;
+  } else if (!Array.isArray(items) || items.length < cap) return false;
   const rec = ctx.getItem(ctx.pieces.get(uid)?.piece?.id);
   if (!consumedOnEquip(rec)) return !equipMerges(ctx, uid);
   const promotes = Array.isArray(rec.buffs) && rec.buffs.some((b) => PROMOTE_KEYS.has(b?.key));
@@ -511,7 +526,7 @@ export function dropIntent(ctx, uid, target) {
     // both slots used: the replace dialog picks the equipped item to destroy (g.equip replaceUid) — see equipReplaces
     return { t: 'g.equip', fields: { itemUid: uid, targetUid: occ.piece.uid }, confirmReplace: equipReplaces(ctx, uid, occ.piece) };
   }
-  const to = target.area === 'hand' ? { area: 'hand', idx: target.idx } : { area: 'board', row: target.row, col: target.col };
+  const to = target.area === 'hand' || target.area === 'temp' ? { area: target.area, idx: target.idx } : { area: 'board', row: target.row, col: target.col };
   return { t: 'g.move', fields: { uid, to } };
 }
 
@@ -529,7 +544,10 @@ export function dropFailureReason(ctx, uid, tile) {
   let target = null;
   if (tile.area === 'board') target = { area: 'board', row: tile.row, col: tile.col };
   else if (tile.area === 'hand') target = { area: 'hand', idx: Number.isInteger(tile.idx) ? tile.idx : tile.col };
-  else if (tile.area === 'temp') return ctx.pieces.get(uid).area === 'temp' ? null : t('临时整备区无法放入单位');
+  else if (tile.area === 'temp') {
+    if (!ctx.equipHand) return ctx.pieces.get(uid).area === 'temp' ? null : t('临时整备区无法放入单位');
+    target = { area: 'temp', idx: Number.isInteger(tile.idx) ? tile.idx : tile.col - GEO.TEMP_C0 };
+  }
   else if (Number.isInteger(tile.row) && tile.row >= GEO.FIELD.r0 && tile.row <= GEO.FIELD.r1) return t('无法部署在该位置');
   else return null;
   const res = canPlace(ctx, uid, target);

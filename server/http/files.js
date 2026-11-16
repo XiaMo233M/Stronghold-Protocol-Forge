@@ -290,7 +290,7 @@ export async function serveFile(req, res, absPath, stat, mountName, segments, qu
   const ext = path.extname(absPath).toLowerCase();
   const type = MIME[ext] || 'application/octet-stream';
   const compressible = COMPRESSIBLE.has(ext);
-  // RFC 9110 §14.2: Range is defined only for GET; other methods ignore it, including for encoding selection.
+  // RFC 9110 §17.2: Range is defined only for GET; other methods ignore it, including for encoding selection.
   const rangeHeader = req.method === 'GET' ? req.headers.range : undefined;
   const encoding = compressible && stat.size >= GZIP_MIN_BYTES && !rangeHeader ? pickEncoding(req.headers['accept-encoding']) : null;
   const baseTag = opts.contentHash || `${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}`;

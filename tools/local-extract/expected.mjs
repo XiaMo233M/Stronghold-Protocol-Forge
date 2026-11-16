@@ -91,6 +91,8 @@ export const EXPECTED_LOCAL_GROUPS = Object.freeze([
   "ui/battle",
   "ui/common",
   "ui/outer",
+  "ui/season/act3autochess",
+  "ui/season/act3autochess/entry",
 ]);
 
 // Manifest `scene` record version (kind Scene on each scene/<stageId> group). scene.json's mesh version stays 1.

@@ -101,6 +101,24 @@ solo-PREP deadline, a co-op PREP deadline for the waiting human, and BATTLE_CHEC
 最终攻势 / 隐秘核心: the boss level's `levelMaxPlayTime` countdown, 120 real s — the battle goes on past it — with
 `m.public.overtimeAt` = when the overtime drain starts: 120 real s for all-human teams, 150 real s with an AI teammate at fight start; both on the field clock).
 
+### Regulation equipment row and overflow
+
+`config.version.rules.equipHand === true` (规程·序列Ⅰ) splits the regular inventory: `hand` has 10 character /
+summon slots; `temp[0..4]` has 5 permanent item slots. The equipment row does not block Ready or expire.
+`PlayerState.handSlot(kind)` checks the correct row; `stow` handles every grant, merge and returned item;
+`itemCards()` enumerates unequipped items for bots. `tempPieces()` and `tempEmpty` mean hidden overflow in this mode.
+`_fillHandFromTemp` refills each row in arrival order when recompute frees space, clearing the deadline on arrival.
+
+[ASSUMED] Owner decision 2026-11-09: equipment fills right-to-left; normal buys/reward picks and voluntary unequip
+require a free slot in their own row. Forced overflow goes to `temp[5..]`, blocks Ready and uses the existing temp
+prep deadline. Expiry returns stock/pool copies and dispatches item `onDestroy` (`reason: 'temp'`). Each stash entry
+sends its owner a private notice. `m.private.temp` contains only the five equipment slots and `stashCount` reveals
+only the hidden count. The client labels the row 装备区 and shows the stash count/rule separately from its slots.
+`g.move` accepts `{ area: 'temp', idx: 0..4 }` for items only with this switch. Boss benches retain the row −7 mapping.
+Covenant inventory, views, deadlines and readiness keep their existing behavior.
+
+Sources: season `constData.maxDeckChessCnt = 10`, `maxDeckEquipmentChessCnt = 5`, `tile_acbag` level tiles, and the
+2026-11-08 client `autochessmapareamanagerhotfixer.lua` (`CHAR_HAND_0..3`, `EQUIP_HAND_0..3`).
 **修订 playtest #4 item 3（2026-10-11，百卫补丁 v0.3 移植）**：那条决定原本把「独狼同盟房（1 真人 + N AI）在
 准备阶段**永远等下去**」当成正确行为 —— 那是**缺陷**，不是意图：`maybeEndPrep` 要求每个存活座位 ready，而
 `soloUntimed` 又把这个房间的准备时限压掉了，于是那个真人**不按 Ready 就永远不会进对局**。现在：
@@ -115,10 +133,36 @@ Co-op: random order (all seats, bots included), one pick per turn, ONE countdown
 published as `m.public.deadline` (= `draft.turnDeadline`; `draft.turnSeconds` its length) — no step cap; AI seats pick
 at once. A turn that runs out takes the strategy the player highlights in the draft screen (`g.bandFocus {bandId?}`,
 `Match.timeoutBand`) while it is allowed and no teammate holds it, else `bandDraft.timeoutBandId` 华法琳, else the first
+free strategy by sortId (`defaultBand`; a departing seat keeps its place, the AI drafts for it, §37.65). One skip per player (`g.bandSkip`: the
+player moves to the end of the order; refused when nobody is left to pass to). The draft screen disables skip when
+no other unpicked player remains; finished players stay in the published order but are not skip targets. A strategy a teammate already took is
 free strategy by sortId (`defaultBand`; a departing seat gets `defaultBand` too). One skip per player (`g.bandSkip`: the
 player moves to the end of the order; refused when nobody is left to pass to); a strategy a teammate already took is
 refused (队友已选); band must list the mode type in `modeTypeList`. A single human (co-op with AI teammates only):
-untimed. Solo: free pick, no timer, no skip. Starting LP = `bands[id].totalHp`.
+untimed. Solo: free pick, no timer, no skip. Starting LP = `bands[id].totalHp` (a seat gone before its pick keeps 0, §37.65).
+
+### 1.1a Regulation commands
+
+`server/match/bandCommands.js` owns the command chain of a band with `skills` (currently 61 regulation strategies,
+74 skill rows). Covenant data has no command state. Unlocks advance monotonically by round, shop level, cumulative
+spending or bond member count. Each effect keeps its cost, round uses, total uses and ready round across command swaps.
+`ROUND_RESET` refills at prep start; `ALL_LIMIT` persists for the match; `DEFAULT` has no numeric stock. A cooldown N
+used in R is ready at R+N. These timing/stock choices are `[ASSUMED]` where the official tables specify no swap rule.
+
+The private snapshot's `command` contains `effectId`, `bandId`, type, cost, cooldown, uses left, refusal reason, rich
+text, unlock parameters and exact valid targets. `g.command {effectId,target}` accepts `{}`, `{uid}`, `{slot}` or
+`{row,col}` according to the skill. The server checks phase, ownership, funds, stock, special recruit and target before
+payment. Random draws use `rngMeta`; intents participate in the existing test journal/replay. `[ASSUMED]` a queued
+recruit/reward offer is the special-recruit state. Marks apply to this round's normal battle, a boss / pair / hidden
+field that includes that player's board, and a 联防 helper's half. A leaker's board is not on the unite field, so an
+untouched chest there is not at risk. Treasure marks (`enemy_9038_achest`) persist until a validated battle receipt
+says an enemy touched them. While one stands, its board tile refuses operators and the prep view shows the chest.
+
+ITEMS integration: import `openSkillChangeDraft(player, choiceId, ctx?)` from `server/match/bandCommands.js`, or call
+`ctx.openSkillChangeDraft(choiceId)` in a meta handler. `skill_change_1` queues three cards; `skill_change_2` queues two.
+It returns false for unknown choices or commandless data. `[ASSUMED]` the missing official pool is all other ACTIVE
+rows, including upgraded rows. `commandDraft` exposes the first queued draft; `g.commandChoice {choiceId,idx}` takes a
+card. Ready waits for these choices, while bots and the prep deadline resolve them deterministically.
 
 ### 1.2 机变 (SP draft)
 Family = weighted pick from `choices.schedule[modeId].rounds[r].families`; cards: co-op 6 shared (each player takes 1,
@@ -207,7 +251,7 @@ A `choice:<effectId>` registry handler overrides the default application (§2.4)
   Assault pairing (re-planned when it quits before the boss fight) and the boss pool (bloodPoint per player alive when
   the fight starts — a departed seat no longer counts, DESIGN §25.13.4); its
   running normal battle is force-ended; a pending band pick
-  becomes the default band, a 机变 turn passes on and an open 教鞭 choice goes with the seat (`eliminate`). Status `left`, LP 0, rounds passed = the rounds it had survived.
+  is the AI's at the seat's turn (Touch while nobody else holds it, never 歌利亚, §37.65), a 机变 turn passes on and an open 教鞭 choice goes with the seat (`eliminate`). Status `left`, LP 0 (kept when the AI drafts its strategy, §37.65), rounds passed = the rounds it had survived.
   When no human is left at all the match ends immediately (`reason: 'abandoned'`); when only eliminated spectators are
   left it ends as `'eliminated'`.
 
@@ -218,6 +262,24 @@ always. While paused (`m.public.paused`) the field clocks, the authority deadlin
 (overtime drain, silence watchdog) and the server pacers stand still; `_resume()` shifts `deadline`, `overtimeAt`, the
 fields' `startAt` / `lastProgressAt` and the boss start by the paused time and re-arms the timers. A disconnect or
 `onLeave` resumes; the battle phase ending clears it (`pausedMs` totals the paused time).
+
+### Regulation bond groups
+
+`drawDisabledBonds` retains the covenant result `{ drawn, staticOff, banned }`. With
+`config.version.rules.bondDraw === 'regulation'`, SINGLE also returns `choice: { groups: [ids, ids], picked: null }`;
+MULTI greys half the available cores immediately. `Match.bondChoice` is settled by `pickBondGroup` during INFO_CHECK.
+`g.bondGroup { idx, setupRevision }` refuses stale revisions, non-integer/out-of-range indices, repeated choices,
+spectators, co-op, reroll votes and other phases. It responds with the ordinary intent acknowledgement.
+The choice rebuilds the provisional shared pool and every player's 自选 stock; no shop or chess acquisition runs
+while the choice is pending. `enterBandDraft` resolves an unchosen group to index 0 [ASSUMED]. Bots prefer their
+plan's/strategy's core, otherwise index 0. `completeSetupReroll` draws new groups and clears the choice.
+`m.public` adds `bondDraw: 'regulation'` and, for SINGLE, `bondChoice`; neither key is sent for covenant data.
+Reconnect uses the same snapshot, and test-input replay records the choice as an ordinary `handle` call.
+`GameData.bondsExclude` implements the regulation rule (all of an operator's core bonds grey; all its add-ons only
+without a core bond — a lit core never loses a member) for both preset and 自选 operators;
+`Match.chessExcluded` also gates named grants/rewards and transformations. Bots use the resulting pool availability.
+Counts, evidence and assumptions are in [design/match.md §6.5](design/match.md#65-waves-wavesjs).
+The [official 初雪 counterexample](research/regulation-core-ban-video-20261114.md) confirms that a lit add-on cannot retain an operator whose core is grey.
 
 ### 1.4 Watching fields
 Client-side combat (the default, DESIGN §14 Spectating; `Match._watchClient`): `g.watch` answers with the field's
@@ -234,6 +296,8 @@ player) sends no `g.watch` (it would be refused with `BAD_TARGET 'no such field'
 teammate's battle after the own one gets the watched field again (`_resendBattle`, `b.start watch: true`); the fresh
 screen adopts it as the watched field once per battle (`battle/observe.js resumedWatch`: a living player's teammate
 normal battle in COMBAT, first seen while watching nothing), so the observing pill, 返回战场 and the own row work again.
+Before a co-op match, a seated human can switch to a free spectator seat without leaving the room (#76). Another connected human must remain seated; a disconnected seat does not count, and the switch is refused (`NOT_READY`, detail `at least one player must remain seated`) rather than handing the host to that seat. Bots do not keep a room alive. A host hands over by the existing connected-human-first rule when someone online remains. The spectator record keeps that seat's `content` and `contentGen`, so a loadout sent while watching a room that needs its content stays stamped with the room's cs. Returning to a free player seat retains session preferences but requires readiness and any content consent again (the new seat's content report starts over); an active version vote is cancelled by either change of player membership. Running matches do not allow this role change. A full spectator strip answers `ROOM_FULL` with detail `no free spectator seat`; a solo room stays `ROOM_FULL` with detail `solo room`.
+
 Spectator seats (a remake feature, community report #26; server/lobby.js): `opts.spectators` / `addSpectator(id)` register
 a spectator — no PlayerState, a stand-in with `alive: false` — that every watch path treats like an eliminated human
 (`_viewers()`: the first field of each battle, the 联防 spec, the first boss field, `g.watch` anything; `addSpectator`
@@ -256,6 +320,9 @@ placement and cleanup sequencing. Overrides are synchronous functions or synchro
 operation they replace. Each iterator yields only between complete actions. Per-seat state belongs to the player
 or match, never the shared action definition. The default adapter retains the original action references, refresh
 limit, yield boundaries, delegated job and Ready path. Purchase scoring remains inside the bound economy actions.
+Prep begin runs a plan's own spending fields (`planSpendSteps`: `items.buy`, explicit `buy` targets, `freezeSearch`)
+after the spare level-up and before the bot's `spendDown`; without those fields the step does nothing. Nothing spends
+or re-arranges after the rehearsed layout (§35.13–35.14, §37.71).
 With an advisor plan (`economyPlan`), prep begin spends expiring funds after the spare level-up and prep end rechecks
 them before Ready (§37.13–35.14); without one these steps do nothing.
 
@@ -270,17 +337,42 @@ still uses the legacy prep adapter; a trusted strategy must explicitly select th
 
 
 **Strategy** (`botPickBand`): weighted by starting LP among the offered bands (alone, 老鲤's withheld first-round funds
-× 0.02); a band whose mechanic rides on a bond the mode switches off weighs 0 — `GameData.bandBondIds` (bands.json
+× 0.02), on 终极 also by the bots' measured strength with each band (`bandStrength`:
+80 forced games per band, shrunk toward the mean, to the 6th power; §37.46); a band whose mechanic rides on a bond the mode switches off weighs 0 — `GameData.bandBondIds` (bands.json
 `bondIds`, built by shared/bandBonds.js: the bond names in <…> of its text, the bond ids / bond pools of its blackboards)
 ∩ `modeInactiveBonds`: 标准's 潘格尼尼, 克莱门莎, 玛恩纳 — and with every offered band excluded it takes the default band;
 one rng draw per pick (DESIGN §21.26). The strategy draft marks the same bands 本局禁用 for humans (still selectable).
+In a co-op 终极 draft a seat the AI drafts for takes Touch (外勤医疗: a reserve medic on every player's field, kept after
+its holder falls, §30.14) × 1000 once another player holds 歌利亚 and nobody else holds Touch (§37.63; a plugin strategy
+built on either counts by its effectRef). A co-op seat gone before its pick (a human who left during INFO_CHECK or
+during the draft: eliminated, it keeps its place in the order and the AI drafts for it at its turn) has no field, so
+the LP, strength and other own-seat weights do not apply: it takes Touch while nobody else holds it, else any offered
+band alike (a switched-off bond's band still never), never 歌利亚, on every difficulty, whatever strategy plays the AI
+seats (`SP_BOT_STRATEGY`: scheduleBandBot drafts it with the built-in bot); while it is still to pick, no other seat
+boosts Touch (§37.65).
+In a solo 终极 draft the AI's own seat (not AI 托管) takes 杰西卡 whenever the shared pool can still supply 谢拉格's top
+threshold — 6 distinct members of tier ≤ 5; a drawn 本局禁用 谢拉格 removes the single-bond ones — with the one rng draw
+of a weighted pick (§37.69, the owner's strategy for 谢拉格), and builds 谢拉格 from R1 as its main bond (`bandMain`, like
+a 职业队 bond): each 寻呼模块 is equipped at the prep start on the member whose offer most likely shows a missing member
+(`pagerCarrier`: 1 − (1 − q)³, q the missing members' copies over every chess sharing a bond with it as equipped) and the offer takes
+a missing member; a missing member the shop shows is bought first, that purchase keeping the funds of the round's
+planned level-ups (`pagerBuy`: every step levelUp takes toward LEVEL_TARGET; its other purchases are as before, and its
+room never comes from a piece carrying equipment); one it could not buy is not refreshed away and freezes the shop;
+before the level-up it refreshes up to 4 more times while one refresh shows a missing member with a chance of 15 % or
+more; its sell steps keep the last copy of a member (a temp one goes before a copy of a pair only when nothing else
+can; the Final Assault's bench sale, §37.67, still sells an unfielded one).
 Buys toward a full board first (the cap is 8 from R1; leftover funds are lost), completes the merges it can afford,
 then levels on a curve (L2 ≈ R3, L3 ≈ R5, L4 ≈ R7, L5 ≈ R10, L6 ≈ R12 — the competent curve of docs/BALANCE.md; free
 levels always), then spends the rest (a band that keeps its leftover funds — 坎诺特 利滚利 — holds its interest capital
 of 5 back from refreshes, full-board buys that complete nothing, items and spare level-ups). It builds around a
-**focus core bond** (owned members × 10 + members the shop can still bring at its level + banked layers + 6 for last
-round's focus, − 6 when it is a teammate's main core bond on that teammate's bond strip — humans included: the pool is
-shared) and a **second bond** (most owned members, next threshold within reach); its keepers are the deployed
+**focus core bond** (owned members × 10 + reachable members capped at 4 + banked layers / 10 capped at 6; last
+focus adds 16 with at least 3 owned members, otherwise 6). [ASSUMED] A living teammate's public main core or opening
+strategy bond subtracts 30, except bonds required by the bot's own opening strategy; human and AI teammates count
+equally. Public claims participate in the per-prep cache and end on elimination (§37.15). A bot's own seat (not
+a human's under AI 托管) fixes its focus for the round at the start of every prep and plays it as its plan's main at
+priority 5 (aiPlan advisorPlan; §37.75): members +30 to buy and +7.5 in the lineup, a member whose removal lowers the
+focus's active tier is not sold. An external plan's own bonds replace it. The bot also picks a
+**second bond** (most owned members, next threshold within reach); its keepers are the deployed
 operators, the focus / second members and chess of tier ≥ shop level − 1. With a full board a purchase must be merge
 progress or a lineup upgrade **and** be worth more than the refreshes its price would pay for: a refresh is worth
 Σ over the held pairs of P(the refresh shows the third copy) × the value of an elite (the shop's copy-weighted odds
@@ -297,7 +389,7 @@ probes reserve the bought operator's slot first. [ASSUMED] Scores within `1e-9` 
 pre-emptive hand shedding requires more owned operators than the deploy cap (#315). Items by what they do: equipment on the strongest deployed
 damage dealers (survival items on blockers first, bond signature items on a member), 信标 on a bench single (never the
 lineup when a bench single exists), 拟态物质 on a pair (never on 2 copies whose pool is out), 博士投影 (both qualities — neither takes an elite) on the strongest
-normal operator, 突变细胞 on the least valuable normal operator below 6阶 (deployed or benched — never an elite, never one
+normal operator, 突变细胞 on the highest-tier normal operator below 6阶, a member of the focus bond last, then the least valuable (§37.45; deployed or benched — never an elite, never one
 of a merge pair, never one already carrying a cell; it comes back after every transformation, and a cell left in temp
 gets a hand slot made for it, `makeHandRoom` — on a bot's own seat by destroying the cheapest other hand item if no
 chess can be sold, never a human's item under AI 托管 — on such a seat any item left in temp with a full hand gets a
@@ -308,7 +400,18 @@ never sells a piece gained since the bot's last prep ended, `rememberOwned`), �
 member; 画卷 copies the most
 valuable deployed operator; 教鞭 / “神秘顾客” are used after a perfect battle and otherwise kept in the hand — a bot drops
 a kept one only when it needs the hand slot (“神秘顾客” then pays its fund), a human's seat under AI 托管 never; 教鞭's three
-cards are scored like a 机变 bounty draft (§2.5). 机变: a
+cards are scored like a 机变 bounty draft (§2.5). At the Final Assault prep (§37.67) a damage item — equipment whose
+blackboards raise its carrier's hits (`faItemMods`, by the bbStr keys the battle reads: the stat buff's ATK % and ASPD,
+有限加速器's ASPD per attack up to its stacks, averaged over the boss rehearsal's length from the carrier's own interval,
+激光发射器's RES ignored, 双模机械臂's 弱点伤害; never 源石溶剂, whose drain kills a back-line carrier) — waits for the
+rehearsed layout, and the boss rehearsal counts each own operator's leader damage (piece uid). After the layout the
+bench is sold (kept: a member of a bond that counts the hand, a piece with items, a recurring 特质) and the funds refresh
+the shop; a damage item is bought when a deployed dealer with a free slot gains and goes, like the held ones, to the
+one with the most rehearsed leader damage × its relative DPS gain against the boss field's armour (its own items
+counted; without counts the most DPS gained; 维多利亚 / lending members first as above). 坎诺特 keeps its interest
+capital (`fundsReserve`); a full hand neither buys nor refreshes. The rest of that prep sells none of the bench the
+hunt keeps (`sellWeakestHand` skips `faKeeps`; a full hand drops the temp piece instead, §37.68). Not a seat under AI
+托管; on a plan seat the hunt keeps the plan's protected pieces and `items.keep` (§37.71). 机变: a
 bounty card is scored by its expected payout minus its expected leaks × the value of an LP (2 + 20 / LP), the kill
 chance from the exposure model below for that one enemy against the own board as it stands (its HP × the round's
 multiplier, DEF / RES, speed, route kind) — an expected-value comparison: it prefers the card with the best payout
@@ -328,6 +431,66 @@ report #9 after 0.1.0), and a tile the server's `g.move` refuses is skipped for 
 `board.js legalTiles` on the deploy map; `g.move` is the judge). Boss
 rounds: the player's boss-field template (`Match.bossWaves`) is mapped onto the own board (rows −7, the right player
 of a pair mirrored, only the routes that end on its half) and the leader counts as 10 tough enemies with a 30 s dwell
+on its first tiles, so the damage dealers reach stationary leaders. A walking leader that patrols checkpoints (卢西恩,
+铳) has its route joined by the sim's own ground path between them (`bossGroundPath`, sim grid.js `findPath` with the
+stage's crates / platforms / mounds — not straight lines, which crossed fences and walls; §37.74). Against a leader with
+a blink skill (卢西恩, who blinks 1.5 tiles past his blocker every 15 s and turns back at the dead end of his loop) the
+default lineup and each damage lineup get two hold plans after every other candidate: the blockers (highest block count
+first) on the melee path tiles nearest the dead end — packed or every other tile — facing the way he comes, the other
+units planned with the body term (0.005 × DPS) on those tiles and the path tiles beside them, without the road penalty.
+A self-bound leader (content/bosses.js
+`SELF_BOUND`: 胄, 管, 昆图斯, 阿利斯泰尔, “萨米的意志” — they stand on their spawn tile all fight and are hit anywhere on
+their 5 × 3 body, sim body.js) also gets one candidate on the **body model** (`fieldModel(m, ps, true)`, §37.61): the
+leader is the tiles of its body, its route is dropped, and every damage dealer whose range touches the body adds
+0.005 × its DPS to the layout value (linear — the default model's 10 × 40 000 HP leader saturates, and most dealers
+went to the escorts' road). The candidate goes in right after the default plan; the default candidates stay.
+The Final Assault's lineup is also re-chosen for damage (§37.62, `faDamageLineups`): `chooseLineup` once per
+`FA_DAMAGE_WEIGHTS` weight W (1, 3) with every unit valued + W × its DPS against the boss field's armour / 100 and
+without the blocker and solo healer composition terms (that fight seldom leaks; it is lost to the overtime drain with the
+pool unfinished). Each lineup that differs from the default one is planned with the default parameters plus the body plan
+(a self-bound leader) or the leader chain (a walking one), after the usual candidates, whose places do not change; that
+prep's candidate ceiling grows by as many. The rehearsed winner's incoming pieces take the tiles of the pieces they replace
+(`plan.swaps`, also §37.37's single swaps); a swap the replaced piece's tile refuses (a melee piece in for one on a 高台)
+first moves the replaced piece onto the incoming piece's planned tile, or into the hand.
+Against a plus-shaped area strike (§37.64, content/bosses.js `PLUS_STRIKE`: 阿利斯泰尔's 【王权号令】, a random operator
+within its rangeRadius and the four tiles beside it) the body model also marks the own tiles where the strike may pick
+its target (`lead.strike`), and the default lineup and each damage lineup get one more body plan spaced against it: two
+units side by side, at least one of them there, cost 1 × 0.005 × their mean DPS (each at least 150), a non-blocker there
+0.5 × 0.005 × its DPS (also at least 150). These plans go after every other candidate.
+In co-op normal rounds R5–R13 the rehearsal also tries lineup alternatives (§37.63, `coopAltLineups`; a perfect seat
+cleans its teammates' leaks through 联防, so a lineup that leaks less is worth more than in solo): `chooseLineup` once
+per `COOP_ALT_WEIGHTS` weight W (1, 3) with + W × the DPS against the round's armour / 100 (the composition terms kept),
+and the two best single bench swaps by lineup score (`benchSwaps`, never a bench copy with the same items for its deployed twin). Each
+lineup that differs by chess and items gets one default plan after the usual candidates.
+With an active 阿戈尔, a normal round's battle-start devour is scored by the bot's model of the sim's (§37.70,
+`devourModel` / `devourMarks`): the members mark in the sim's order, each the piece in front of it (a 海沟实验体 holder: its
+four neighbours) and, through marked members, theirs, never one that marked it; a mark is one `damage_value` 物理流失 less
+the piece's DEF against its HP (the record × its 练度, a member × (1 + base_max_hp + max_hp_per_stack · L)), and members
+knocked out revive in the sim's scan order while the 5-member tier's revives last. The positional plan (§37.37) counts a
+devoured piece's tier for the plan and a piece that stays down (a non-member, or a member past the revives) against it.
+Every candidate the rehearsal takes that feeds a piece that stays down also gets a devour-safe twin — the positional
+plan's moves for the devour alone, within `POSITION_TOLERANCE` of that candidate's own layout value, its lineup and swaps
+kept — after every other candidate, the ceiling growing by as many: the rehearsal takes the twin when it leaks less,
+else the original, whose knocked-out pieces' tiers count among the layers the battle gained. A boss field (the Final
+Assault, the hidden core) gains no layers and its positional plan scores no devour: there it moves the victims' base ATK
+and block onto the members, and the devour-safe candidates dealt less leader damage.
+The Final Assault goes for it (§37.77, `devourFeedSteps`): `feedDps` rates a plan's damage per second on the leader — each
+dealer's hits against the field's armour at (its ATK × airflow + the base ATK of all it marks) × 练度, × its share of the
+fight with the leader in range (`leaderShareOf`: a self-bound leader's body, whole on any touch; a walking leader, its
+route's time on the covered tiles), less the redeploy time of a piece that stays down; 浊心斯卡蒂's S3 (`TIDE_SKILL`) counts
+from the skill's numbers for the part of the fight it runs, its 鼓舞 on the dealers in its range and its true damage on the
+leader. The `FA_FEED_PLANS` (2) candidates rated highest are rearranged by the positional plan's moves for `feedDps` alone,
+with no layout floor, their lineup and swaps kept, after every other candidate, the ceiling growing by as many; the boss
+rehearsal judges them by leader damage. Block is not in the rating (it made the plans worse): the rehearsal sees what it does.
+A prep rehearses at most
+`REHEARSAL_MAX_CANDIDATES` (16) candidates, which also bounds a delegated rehearsal's answer (`b.rehearsalResult`).
+After placing the whole formation, the planner checks isolated self-range guards as specified in DESIGN §6.6.
+[ASSUMED] A blocking medic prefers an off-road tile, then a supported road tile, then a legal fallback (#577/#315).
+`supportedContact` is shared with the guard repair: each incoming ground route needs one damage
+dealer covering both the tile and the preceding contact, with different allies allowed per route. Within each group,
+the exposure model ranks positions. Boss rounds place wider healing ranges first; on equal exposure scores, medics
+prefer allied estimated DPS not already covered by another placed medic, then tile noise (#315).
+**Rehearsal:** with `opts.botRehearsal = N` (default 6, §37.47; 3 before) the bot simulates the N best
 on its first tiles, so the damage dealers reach stationary leaders.
 **Rehearsal:** with `opts.botRehearsal = N` (default 3) the bot simulates the N best
 distinct layout variants once each with the real `Battle` and `Match._normalOpts`, including `onBattleStart`, enemy
@@ -336,6 +499,10 @@ and its own clone of the current meta RNG. A boss round (`m.wave` null, `bossGro
 same variants on that wave: seed `deriveSeed(0xA11CE, fa:${round}:${seat})` — not the match seed and not the live
 fight's seed — a fresh `bossPoolHp` pool per candidate, the teammate's current board, preview dispatch only, and a
 cap of the visible countdown on the combat clock (`faRehearsalTicks`: `bossLevelTime` × `combatTimeScale` game
+seconds; history §37.64). Counted leaks rank first, then `perPlayer.bossDamage`, kills and candidate order — on a
+boss field leader damage × (1 − counted leaks / 150) ranks first (§37.61: a leak costs about one real second of a fight
+that lasts until the team's LP runs out), an equal value falls back to that order, and no boss candidate stops early.
+The layer-gain tie-break trial was withdrawn after the solo NORMAL guard regressed (history §37.20).
 seconds; history §37.64). Counted leaks still rank first; `perPlayer.bossDamage` breaks a leak tie.
 `previewPlayer` builds a detached candidate board/hand/bonds view without
 calling live `recompute`; the original pieces, directions, hand/temp and dirty flags never change, even at a yield.
@@ -635,11 +802,16 @@ registries; it rejects duplicate IDs and malformed hooks instead of altering oth
 An unset or empty `SP_BOT_STRATEGY` uses the original bot when no explicit option is supplied. `startServer()` validates the environment
 selection before data loading or listening; an invalid ID prevents startup with a diagnostic naming the variable,
 rejected value, available IDs and how to unset it to restore the default.
-The test input journal stores the resolved `botStrategy` ID. Replay uses the recorded ID (older records: `legacy`),
+`SP_BOT_STRATEGY_SEATS` / `opts.botStrategySeats` (`seat:id,…`, seats 0–3, registered IDs) override single seats;
+`Match.botFor(ps)` returns the seat's override, else the match's strategy, for an AI seat and a human under AI
+takeover alike. `startServer()` validates the variable the same way. An external default or seat creates one
+external host; only external seats ask it, still narrowed by `SP_EXTERNAL_AI_SEATS` (#816 P1).
+The test input journal stores the resolved `botStrategy` ID and, with overrides, `botStrategySeats` (seat → ID).
+Replay uses the recorded IDs (older records: `legacy`, no overrides),
 never the replay host's environment, and preserves `testSlice` counts for prep generators and rehearsal jobs.
 Band draft order is unchanged; selecting an AI implementation grants no seat priority.
 
-Band/common-card/private-bounty picks and both sliced prep stages use the selected object. Prep retains its existing
+Band/common-card/private-bounty picks and both sliced prep stages use the seat's selected object. Prep retains its existing
 iterator, rehearsal/delegation and deadline protocol. A custom hook failing before it creates an iterator still
 enters cleanup. `tools/matchrun.mjs --bot ID` and `tools/botbench.mjs --bot ID` select registered implementations
 explicitly; botbench records the ID and calls its bounty estimator. Its solo band override leaves the real band
@@ -650,7 +822,8 @@ the optional `decide` handoff sends the existing seat wire views to HTTP(S) or a
 its human intents via `validateC2S` and the shared `Match._handleSeatIntent` path. Band/card turns, prep and
 plugin offers keep their phase timers. Legacy finishes incomplete/failed decisions, including sliced rehearsal.
 [ASSUMED] Defaults: 1000 ms, 64 intents, 64 KiB reply, three consecutive failures to match-long legacy,
-1000 ms restart backoff; at most half the remaining phase time is spent on external decisions. Journals record
+1000 ms restart backoff; a direct-mode decision spends at most half the remaining phase time, a plan-mode one the
+window minus the built-in bot's per-round reserve (§37.72). Journals record
 replies and failures, replay without transport IO, and omit endpoint/command/credentials. See
 [External AI API](EXTERNAL_AI.md) and the [Chinese server-owner guide](EXTERNAL_AI_ZH.md).
 A release package omits this host (maintainer 2026-10-23, §37.66): the zip, the update package and the Docker image
@@ -666,6 +839,11 @@ economy or placement rule. [ASSUMED] Schema, scores, cache policy, shortcuts and
 [External AI API](EXTERNAL_AI.md). `tools/ai/run-match.mjs` waits for bounded external IO in both benchmark tools;
 `tools/ai/llm-agent.mjs` is an environment-configured, mock-tested compatible chat adapter with no default provider.
 
+Advisor execution (§35.14, §37.71): each plan field changes only what it names, and an absent or empty field leaves
+the legacy rule as it is (`aiPlan.planOf`; a plan of empty fields plays exactly like none). Merge completion precedes
+an affordable level floor (`economy.level`, at most the bots' L5 cap), which precedes filling. Exact keep/sell forms,
+merge-aware buy/bond weights, explicit-target freezing, `items.buy`, bounded `freezeSearch` and field-based protection
+(`aiEconomy.planProtected`) are specified in [EXTERNAL_AI](EXTERNAL_AI.md#advisor-mode-and-readable-observations-359). Cleanup compares
 Advisor execution (§37.14, maintainer 2026-10-20) applies only when `aiEconomy.economyPlan` is non-null:
 merge completion precedes an affordable level floor, which precedes filling. Exact keep/sell forms, merge-aware
 buy/bond weights, explicit-target freezing, `items.buy`, bounded `freezeSearch` and shared cleanup protection
@@ -734,7 +912,7 @@ Every handler method is `(ctx, ev)`; `ev` is shared by all handlers of one dispa
 | `onMerge` | chess or item merge | `{ kind, piece, baseId|itemId, consumed:[uid], area? }` — a chess merge's `area` is where its elite went: 'board' (a consumed copy's tile) \| 'hand' \| 'temp' |
 | `onLevelUp` | shop level up | `{ level, price }` |
 | `onSpend` | a payment's action is complete (buy / refresh / levelUp / reward / effect) | `{ amount, reason, total }` (`total` = funds spent this match) |
-| `onBattleStart` | a battle input is built (normal / unite / boss / hidden); also for the stats preview (`g.unitStats`, DESIGN §18.5) and bot rehearsals | `{ input: PlayerBattleInput, kind, round, spawns?, waveSpawns?, routes?, side?, preview? }` — mutate/replace `ev.input`; `ev.spawns` (the field's spawn list, shared by a boss field's players) may be edited in place; `ev.waveSpawns` (normal / boss / hidden) is a copy of the round's own wave before the player's bounty units, for a draw every player shares (鸭爵, GitHub #839). Boss / hidden fields also carry the wave's `routes` and the player's `side` ('L' / 'R' on a pair field — its half is the routes ending left / right of the middle column — null on a one-player field), so a handler can edit only the player's own enemies (鸭爵's swap). With `ev.preview` true the dispatcher isolates the event and context: copied reads, no-op state writers (also on teammates/player), an independent RNG and script budget, no match error logging. Handlers may edit the detached input and spawns; stats previews omit spawns. Normal starts retain their live context and RNG |
+| `onBattleStart` | a battle input is built (normal / unite / boss / hidden); also for the stats preview (`g.unitStats`, DESIGN §18.5) and bot rehearsals | `{ input: PlayerBattleInput, kind, round, spawns?, waveSpawns?, routes?, side?, preview? }` — mutate/replace `ev.input`; `ev.spawns` (the field's spawn list, shared by a boss field's players) may be edited in place; `ev.waveSpawns` (normal / boss / hidden) is a copy of the round's own wave before the player's bounty units, for a draw every player shares (鸭爵, GitHub #839). Normal, boss and hidden fields carry the wave's `routes` (鸭爵's lower-lane rule); boss / hidden fields also carry the player's `side` ('L' / 'R' on a pair field — its half is the routes ending left / right of the middle column — null on a one-player field), so a handler can edit only the player's own enemies (鸭爵's swap). With `ev.preview` true the dispatcher isolates the event and context: copied reads, no-op state writers (also on teammates/player), an independent RNG and script budget, no match error logging. Handlers may edit the detached input and spawns; stats previews omit spawns. Normal starts retain their live context and RNG |
 | `onBattleResult` | SETTLE (normal rounds) and after boss fields | `{ result, lpLoss, perfect, unite?|boss? }` |
 | `onChoicePick` | a 机变 card was applied (the card's own `choice:` handler runs first, then every source observes) | `{ card, family, picker, forTeammate }` |
 | `onEquip` | `g.equip` (item handler only) | `{ item, target, golden, consumed, keep, error }` — see §2.5 |
@@ -838,6 +1016,21 @@ item in the hand. Every path that hands an item to the player (buy, reward, 机�
 a promotion or `ctx.destroyPiece` returns) ends with the auto-merge (`acquireItem` / `checkItemMerges`: "已拥有2件同一初始
 装备时…自动合并"), so a player never holds two identical mergeable normal items (`test/match/feedback1b-items.test.js`), except an item gained while 休整期结束 is dispatching (`onPrepEnd`, including a grant nested under it): it is stowed (hand, else temp) and merges at the next prep's start, and nothing already equipped is taken off for the fight. A full visible bench queues it beyond the five visible temp slots, retaining it until the next prep. [ASSUMED] every such grant, not only 维多利亚's hammer (owner's decision 2026-10-04). A buy, an onPrepStart grant and a grant at any other time still merge at once (`test/match/feedback3-prep-end-item.test.js`).
 
+Fusion (`canFuse` / `fuseWith` / `fuseResult`, 规程): `acquireItem` consumes the newly gained component and an owned
+partner anywhere in the player's inventory (equipment row, hand, hidden overflow or equipped on any owned operator),
+then stows the result unequipped in the equipment row, overflowing under the existing stash policy. No carrier slot
+or equip action is required; an unrelated item on a full carrier survives. Both components release their shared stock
+and repay any displayed-card debt before callbacks. The result emits one `onMerge {kind:'item'}` and the acquisition's
+single `onGain`; it emits no `onEquip`. This lets Mechanist's 精巧设计 share its existing per-round promotion allowance
+between fusions and same-name upgrades. Source: official playtests reported 2026-11-14, including the Mechanist trigger.
+A prep-end grant and a scroll copy (`skill_copy_char_with_equip`, `deferMerge`) do not combine in that call: the component
+is stowed (and the scroll may equip it) and an equipped partner stays on its carrier through the fight. The next prep's
+`checkItemMerges` releases the mark and combines then, the same moment as a deferred same-name upgrade. The component's
+`onGain` fires at the grant; the result's `onMerge` (and therefore 精巧设计) waits for that later combination, with no
+second `onGain`. `[ASSUMED]` Multiple partners use the existing temp / hand / equipped preference; invalid recipes or
+unavailable result stock leave the components separate; a missing item pool skips combination instead of throwing.
+A full equipment row still blocks voluntary purchases/picks under the existing rule.
+
 Built-ins (builtinMeta.js, overridable): 盟约之币 / 骑士储蓄罐 (random funds), 随身身份牌 (layers of the target's bonds),
 紧急调度券 (take shop chess), 精打细算玩偶 (+funds each round), 简易通讯机 (same-bond chess), 拟态物质 (with 2 copies
 owned the 3rd — nothing when the pool has none left, GitHub #207 —, else a same-bond chess), 见钱眼开玩偶
@@ -852,6 +1045,10 @@ is not consumed: PRTS 下半 记录 备注 "生效时，原干员销毁，获得
 装备无法手动卸除，在失去该干员（干员出售、销毁、合并等）…时自动卸除", players re-inject it every round; player feedback after
 0.1.0), 画卷 (copy the operator in range with its
 items — the copied items arrive unequipped in the hand, PRTS 画卷 备注 "获得的装备为未装备状态"), 教鞭 (a personal choice of three 战术特训 cards), “神秘顾客” (a random bounty is added).
+
+**人事部记录特殊刷新与商店卡片类型。** 人事部记录的特殊刷新包含干员和装备（维护者核对官方录屏，2026-11-11）。干员栏保留第一盟约优先，装备栏重新抽取当前等级内普通装备并遵守库存；空、已购买和冻结栏同样刷新。保留特殊刷新不支付主动刷新费用、不增加主动刷新计数的行为。装备抽样复用已有指令换装池；录屏仅确认刷新范围，没有新增概率权重证据。
+
+**伊桑出售奖励的候选盟约、等级与自身限制。** SERVER_MOST_BOND uses the triggering garrison event to distinguish its sale variant from the prep-start variant. Sale rewards exclude BOARD_ALL_CHESS counting-only bonds (绝技 has no member operators) before comparing member counts; official captures with 3 绝技 and 2 助力 show Ethan granting 罗比菈塔. Rewards are capped at the current shop level and cannot return the source operator in either form, including copies just returned by the sale. Prep-start grants retain the upstream bond selection, row conditions and shop-level cap. Tied maxima and stock handling are unchanged; an out-of-stock member bond does not fall back to a smaller bond.
 
 **教鞭 offers a personal choice of three 战术特训 cards (0.2.2); “神秘顾客” stays a random bounty.** The official Arts open a
 personal 悬赏 choice ("选择一项（特殊）悬赏任务进行挑战", `choice_event hunter_band_1`, choiceType `PERSONAL_CHOOSE`). 教鞭
@@ -936,11 +1133,15 @@ Any `choice:` handler whose EffectRef reuses its own key must guard like this (o
 * **Pool**: copies 12/14/18/16/8/5 (缪尔赛思 4); a normal piece holds 1 copy, an elite 3; displays never reserve copies;
   selling, temp resolution and elimination return exactly what a piece holds (`left + held = cap` always).
 * **自选编队 (0.2.0, `player/diy.js`; research 0.2.0 §2, the owner's decisions of 2026-10-05)**: a human's `seat.diy`
-  picks (room.diy, checked again against the match's data and kits) are fixed for the match; bots field none [ASSUMED].
+  picks (room.diy, checked again against the match's data and kits) are fixed for the match; bots field no lobby roster [ASSUMED] (规程 gives an empty bot a deterministic capped roster at 选择自编).
   The player's `ps.gd` is then a view of the match's GameData whose `chess(id)` of a slotted slot (normal and elite) is
   the composed 自选 record (shared/diy.js `diyRecord`): every rule that reads a record through `ps.gd` — bonds
   (bondsMeta: BOARD / BOARD_AND_DECK distinct pieces, 煌's 炎 + 维多利亚, 绝技 elites), 特质 / meta effects (`makeCtx`
   hands handlers the player's view), placement and summon ranges, the AI 托管 evaluation (bot.js), names in toasts and
+  tickers — sees the operator; a player without picks keeps the match's GameData itself. Each slotted piece that this match keeps (every legal lobby slot, or only the 选择自编 confirmation when `diyBringLimits` is set) has its own
+  stock (`ps.diyStock`: `poolCopies` of the slot's tier, 8 / 5 [ASSUMED], doubled in co-op by `coopPoolMultiplier` like
+  the shared pool — 16 / 10, GitHub #650, DESIGN §34.14.31; none — `diyBanned` — when every bond of it is off this
+  covenant match, or in regulation all its core bonds are off (all its add-ons for a piece without a core); `initDiyStock` once the bans are drawn); `poolOf(baseId)` routes its copy accounting (buy, reward
   tickers — sees the operator; a player without picks keeps the match's GameData itself. Each slotted piece has its own
   stock (`ps.diyStock`: `poolCopies` of the slot's tier, 8 / 5 [ASSUMED]; none — `diyBanned` — when every bond of it is
   off this match; `initDiyStock` once the bans are drawn); `poolOf(baseId)` routes its copy accounting (buy, reward
@@ -1135,7 +1336,8 @@ switched off; summon pieces `{ sp }`, "召唤物仅修改技力"); an operator k
 combat carries `{ down: true }` (PRTS 卫戍协议/帮助: "部署完成后…上一阶段为退场状态的干员强制退场"): deployed, then forced out
 at once, it lies on its tile with the redeploy ring and redeploys like after any knock-out (docs/SIM.md §1.1; user
 playtest #5 item 2 — it used to stay out and vanish); its timer is its full redeploy time (the official setup carries
-only hp / tech per operator; confirmed by the user), with the redeploy-time effects that start with the battle (机变 征召); summons are
+only hp / tech per operator; confirmed by the user), with the redeploy-time effects that start with the battle (机变 征召).
+A reached 阿戈尔 revive tier instead spends one slot to revive that member on the battle-start scan (BV1auHq67Eoi; 规程 `bondeffect_egir_2` does not); summons are
 fielded as the board has them (their SP carried); `flags.layerGainsEnabled = false`; time limit = the round's combat limit.
 Every enemy still alive at the end (leaked again, or never spawned before the limit) costs its **source** player 1 LP.
 A client-run 联防 result may bill a survivor only to a leaker who sent that enemy in — a split / summon only to a leaker
@@ -1161,16 +1363,19 @@ leaker's own capsule / row (`ui/hud.js uniteRemaining`) and the leakers' team ro
 `combatMode` (`'client'` | `'server'`), `fields[].progress { killed, total, done }` (teammates' progress UI), `paused`
 (solo pause, §1.3a),
 `players[].autoplay`, `players[].uniteLeft` (UNITE, leakers only: their enemies still standing, uncapped — §4),
-`players[].bonds` = `ps.alive ? bondList(gd, ps.bondsView(), { off: offBondCounts(gd, ps) }) : []` — every bond with members, layers or an active tier
+`players[].bonds` = `ps.alive ? bondList(gd, ps.bondsView(), { off: offBondCounts(gd, ps), effectOverrides: commandBondOverrides(ps) }) : []` — every bond with members, layers or an active tier
 (and, last, every bond the mode never activates that the player has members of: `{ bondId, count, active: false, tier: 0, layers, off: true }`,
 the strip's grey 本局禁用 disc — bondsMeta.offBondCounts, never in the battle input), the same list
 and order as the player's own `m.private bonds` minus `thresholds` / `countsHand` (the client reads those from
 bonds.json; an entry whose count holds 调和's +1 carries `harmony: 1` in both lists — the bond popup's 调和 row, DESIGN
-§21.26): a teammate watching the player shows it in the bond strip (DESIGN §20.15); `[]` once the player is
+§21.26). On 规程, a bond whose effect `commandBondOverrides` replaces also carries `effectId` (the effect the battle uses).
+A mapped bond with no members is a zero row (`count: 0`, not `off`) so the popup can open it; the strip does not draw it.
+A mode-off bond with members stays the single `off` row and does not gain `effectId`. Seasons without a replacement omit
+`effectId` and those zero rows, so the default public bond entries stay the same keys. A teammate watching the player shows the list in the bond strip (DESIGN §20.15); `[]` once the player is
 eliminated (nobody can watch them; the result screen reads `m.result`'s own bonds), and per phase: `draft { order, turn, picks, skipsLeft, turnDeadline, turnSeconds, untimed }` (BAND_DRAFT),
 `sp { family, name, desc, eventId, cards:[{ idx, kind:'bounty'|'item'|'tactic', id, name, desc, tier, descRaw?, coin?,
 payout?, rounds?, enemyKey?, count?, price?, team?, tacticKind? }], order, turn, picks:{pid: idx}, taken:{idx: pid}, untimed }`
-(SP_DRAFT), `teamLp` / `bossHp {hp,max}` (Final Assault on), `overtimeAt` (最终攻势 / 隐秘核心: ms epoch when the
+(SP_DRAFT), `teamLp` / `bossHp {hp,max}` (Final Assault on), `leaderTop` (during a leader fight, every version since §39.149: up to 3 `{pid,uid,chess,tier,dmg}` of the operators that dealt the most to this pool), `overtimeAt` (最终攻势 / 隐秘核心: ms epoch when the
 overtime drain starts; `deadline` = the level's 120 s countdown), `unite { helpers, leakers }` (UNITE).
 `players[].status`: INFO_CHECK ready/deciding · drafts ready (picked) / deciding (their turn) / acting (waiting) ·
 PREP ready/acting · COMBAT/boss combat/done · UNITE helping/done · others done · `left` / `dead` override.
@@ -1254,9 +1459,14 @@ round was over. The official 1 s `broadcastBeginDelay` is not modelled.
 
 ---
 
+### Read-only strategy progress (#794)
+
+Strategy effect entries may carry `progress: {current,total}` and `roundProgress: {current,total}`. Chiave derives these from existing refresh and lazy round counters; views never advance or reset them. `battleInput.bandProgress` captures the preparation values for a watched battlefield.
+
 ## 6. Testing & tools
 
-`opts.botStrategy` / `SP_BOT_STRATEGY` select the registered AI per match, default `legacy`.
+`opts.botStrategy` / `SP_BOT_STRATEGY` select the registered AI per match, default `legacy`;
+`opts.botStrategySeats` / `SP_BOT_STRATEGY_SEATS` override single seats.
 `ioleta` supplies Russell procurement through the shared prep pipeline; its state is
 `player.botStrategyState.ioleta.plan`. The HTTP server rejects unknown environment IDs at startup.
 Journal replay persists the registered ID and reconstructs the plan through deterministic prep inputs.
@@ -1290,6 +1500,12 @@ See [BOT_STRATEGIES](BOT_STRATEGIES.md) for composition and lifecycle details.
   outcomes (wins, rounds passed, LP left, leaks per round, bounties taken / leaked and the kill-chance calibration,
   merges, board value, bond tiers, layers, elites) and its decision time per prep (wall clock and CPU, p50 / p95, the
   layout rehearsal apart); `--compare old.json new.json` prints the A/B tables (the same seeds on two builds).
+  `--layers` adds `layerTrace` to each JSON match: clamped per-bond gains with nested trait/band/item/card sources,
+  acquisition/merge identity, purchase/refresh/level spending, sales, selected cards, and per-seat prep/settlement
+  snapshots. `beforeEndPrep` is before `PlayerState.endPrep`, **after** the match's `onPrepEnd` effects; both prep
+  snapshots therefore include those gains. Combat gains are recorded only when banked at settlement, never from
+  rehearsal. The legacy trade label inspects the Node call site (`tradeOnce`) for diagnostics only. Timings with
+  tracing include its overhead. See history §37.24 for the 40-seed layer audit and withdrawn procurement trials.
 * `node tools/balance.mjs --mode multi --difficulty NORMAL` — the competent-board difficulty model (docs/BALANCE.md):
   per round leaks / LP after 联防 / clear time of representative boards against the real waves, boss damage by 150 s
   and kill time; `--tuning off` (research numbers), `--legacy-time`, `--profile weak|strong`, `--bots N`, `--json`.
@@ -1329,7 +1545,9 @@ See [BOT_STRATEGIES](BOT_STRATEGIES.md) for composition and lifecycle details.
 * A 联防 helper's operator knocked out at the end of its own combat is deployed and forced out at once (PRTS 强制退场,
   §4) with HP 0, and redeploys after its full redeploy time: no timer carry (the official setup carries only hp / tech
   per operator), forced out before `battleStart` (its timer re-read after it, so 征召's −50 % applies; 征召's row check
-  does not count it), no knock-out hooks (`kill`, 'killed' deaths) a second time.
+  does not count it), no knock-out hooks (`kill`, 'killed' deaths) a second time. A reached 阿戈尔 revive tier then
+  revives that member on the same scan as the devour's knock-outs, spending one slot of this battle; 规程
+  `bondeffect_egir_2` does not.
 * A merge completed after the prep (SETTLE effects) keeps its reward offer for the next prep; its elite goes where a prep
   merge's would — onto the tile of a consumed deployed copy (PRTS 卫戍协议/帮助 "若消耗已部署至作战区的干员，则发送至作战区
   对应位置"), else to the hand, overflowing into temp (temp pieces that arrive after the prep wait through the next prep).
@@ -1447,4 +1665,22 @@ and replay records keep full frames.
 
 ### Optional spectator AI handover (§37.100, PR #691)
 
-The host’s pre-match `room.setAiTakeover {on}` opts a co-op room in; default off. Only default-version vanilla PREP supports requests. Online, non-autoplay humans throughout the room vote by strict majority; if none qualify, the online host decides. The 30-second request is bound to match/round/electorate and is cancelled on membership/eligibility/phase changes. A successful handover preserves the AI seat’s resources and rebinds the spectator token, cancels that seat’s old rehearsal, and resynchronizes its unchanged delta capability. Inherited records retain `aiTakeoverRound` and previous AI metrics but grant no personal aggregates, titles, trophies or reward. These are maintainer-approved remake-only rules [ASSUMED]; see [network](design/network.md) and [handover revision](history/0.3.2/ai-handover.md).
+The host’s pre-match `room.setAiTakeover {on}` opts a co-op room in; default off. Original-content PREP supports requests, including a non-default official version (the version match host answers eligibility and the seat mutation; the lobby keeps the vote). Gameplay-plugin matches stay unsupported. Online, non-autoplay humans throughout the room vote by strict majority; if none qualify, the online host decides. The 30-second request is bound to match/round/electorate and is cancelled on membership/eligibility/phase changes. A successful handover preserves the AI seat’s resources and rebinds the spectator token, cancels that seat’s old rehearsal, and resynchronizes its unchanged delta capability. Inherited records retain `aiTakeoverRound` and previous AI metrics but grant no personal aggregates, titles, trophies or reward. These are maintainer-approved remake-only rules [ASSUMED]; see [network](design/network.md) and [handover revision](history/0.3.2/ai-handover.md).
+
+
+### Read-only progress display (#794)
+
+Piece items may carry `progress: {current,total}`. Scouted units and battle inputs may carry `itemProgress: [{uid,id,current,total}]` for equipped items. Commercial Packaging reads the existing `pack:<uid>` counter and the concrete item threshold; display metadata does not enter simulation snapshot tuples or alter rewards.
+
+Commercial Packaging includes both `sell_char_count_gain_equip_owner_bond` (second period) and
+`sell_char_count_gain_equip_owner_original` (first period), using the same `pack:<uid>` counter and each record's
+`params.count`. The watched field's effects feed both the sidebar and 本局信息 during prep and combat; fields with
+multiple owners carry no inferred strategy progress. See [0.4.0 §37.13](history/0.4.0.md).
+
+### Forced equipment return by an effect
+
+`ctx.unequipDirect(itemUid)` detaches an owned equipped item and stows the same instance with overflow allowed;
+it returns false for another location or a failed stow (reattaching on failure), and recomputes after success.
+The Stainless `SERVER_UPGRADE_SELF_EQUIP` handler walks a snapshot of carried items, upgrades valid normal items,
+returns each one and restores its old id if the return fails. UID, metadata and stock provenance remain attached to
+the original item. See [the match rule and footage](design/match.md#stainless-upgraded-equipment-return).

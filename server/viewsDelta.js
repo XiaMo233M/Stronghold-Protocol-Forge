@@ -57,6 +57,9 @@ const SCALAR_KEYS = [
   'rerollVote', 'factions', 'disabledBonds', 'drawnDisabledBonds', 'bannedChess',
   'bossId', 'hiddenBossId', 'bossRound', 'hiddenRound', 'spRound', 'combatMode', 'paused',
   'teamLp', 'overtimeAt', 'bossHp', 'draft', 'sp', 'unite', 'uniteResult',
+  // 上游 0.4.0 给公开视图新加的几个顶层键（初帧必须有、后续帧按自己的规则走；这里不让它们被当成「形状变了」）：
+  // diyCheck = 开局「选择自编」那一屏的数据（CUSTOM_CHECK），progress / offers / leaderTop / dir / facing 同理。
+  'diyCheck', 'progress', 'offers', 'leaderTop', 'dir', 'facing',
 ];
 
 /**

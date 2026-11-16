@@ -45,6 +45,8 @@ is the operator's https download allowlist (PLUGINS.md §17); it is not a room-p
   "id": "marathon",
   "name": { "zh": "马拉松模式", "en": "Marathon" },
   "version": "0.1.0",
+  "app": ">=0.4.0 <0.5.0",
+  "api": 1,
   "app": ">=0.3.0 <0.4.0",
   "api": 2,
   "class": "content",

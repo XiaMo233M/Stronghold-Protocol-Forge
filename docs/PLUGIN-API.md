@@ -67,6 +67,7 @@ This project does not host plugins and does not run a market. A catalogue (`sche
 | `manifest.field.stages` | stable | 0.3.0 | `shared/plugins/manifest.js#MANIFEST_FIELDS` |
 | `manifest.field.theme` | stable | 0.3.0 | `shared/plugins/manifest.js#MANIFEST_FIELDS` |
 | `manifest.field.version` | stable | 0.3.0 | `shared/plugins/manifest.js#MANIFEST_FIELDS` |
+| `manifest.field.versions` | stable | 0.4.0 | `shared/plugins/manifest.js#MANIFEST_FIELDS` |
 | `rule.shopBias` | stable | 0.3.1 | `shared/plugins/rules.js#RULE_SWITCHES` |
 | `rule.prepLoadout` | stable | 0.3.1 | `shared/plugins/rules.js#RULE_SWITCHES` |
 | `rule.morphPairing` | stable | 0.3.1 | `shared/plugins/rules.js#RULE_SWITCHES` |
@@ -141,6 +142,7 @@ This project does not host plugins and does not run a market. A catalogue (`sche
 | `overlay.enemies.spine` | stable | 0.3.0 | `shared/plugins/visual.js#ASSET_CONTAINERS` |
 | `overlay.tokens.avatar` | stable | 0.3.0 | `shared/plugins/visual.js#ASSET_CONTAINERS` |
 | `overlay.tokens.spine` | stable | 0.3.0 | `shared/plugins/visual.js#ASSET_CONTAINERS` |
+| `overlay.tokens.skins.*` | stable | 0.3.0 | `shared/plugins/visual.js#ASSET_CONTAINERS` |
 | `overlay.bonds.*` | stable | 0.3.0 | `shared/plugins/visual.js#ASSET_CONTAINERS` |
 | `overlay.items.*` | stable | 0.3.0 | `shared/plugins/visual.js#ASSET_CONTAINERS` |
 | `overlay.bands.*` | stable | 0.3.0 | `shared/plugins/visual.js#ASSET_CONTAINERS` |
@@ -345,6 +347,7 @@ This project does not host plugins and does not run a market. A catalogue (`sche
 | `error.PLUGIN_TEXT` | stable | 0.3.0 | `shared/plugins/errors.js#PLUGIN_ERRORS` |
 | `error.PLUGIN_LANG_CODE` | stable | 0.3.0 | `shared/plugins/errors.js#PLUGIN_ERRORS` |
 | `error.PLUGIN_VERSION` | stable | 0.3.0 | `shared/plugins/errors.js#PLUGIN_ERRORS` |
+| `error.PLUGIN_VERSIONS` | stable | 0.4.0 | `shared/plugins/errors.js#PLUGIN_ERRORS` |
 | `error.PLUGIN_APP` | stable | 0.3.0 | `shared/plugins/errors.js#PLUGIN_ERRORS` |
 | `error.PLUGIN_APP_MISMATCH` | stable | 0.3.0 | `shared/plugins/errors.js#PLUGIN_ERRORS` |
 | `error.PLUGIN_API` | stable | 0.3.0 | `shared/plugins/errors.js#PLUGIN_ERRORS` |

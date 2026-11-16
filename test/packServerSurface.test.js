@@ -113,7 +113,8 @@ describe('§28.14 boot(config)：冻结的只读配置快照', () => {
     //    ⚠️ **不要"好心"把它们加进上面的白名单** —— 尤其 `SP_PLUGIN_SCRIPTS` 是沙箱开关。
     //    另有本仓库自己的 `SP_BOT_STRATEGY`（机器人策略选择，server/index.js 与 Match 都读）：同样属于
     //    部署面 —— 包没有任何正当用途去知道这台机器用哪套机器人，装进来的包也不该能改它。
-    const ENGINE_PRIVATE_SP = ['SP_CSP', 'SP_MATCH_HOST', 'SP_PLUGIN_SCRIPTS', 'SP_BOT_STRATEGY'];
+    //    `SP_BOT_STRATEGY_SEATS`（上游 0.4.0 的逐座位策略，server/index.js 与 Match 都读）同理：部署面。
+    const ENGINE_PRIVATE_SP = ['SP_CSP', 'SP_MATCH_HOST', 'SP_PLUGIN_SCRIPTS', 'SP_BOT_STRATEGY', 'SP_BOT_STRATEGY_SEATS'];
     // 反射源码：引擎里读过的 `process.env.SP_*` 必须两份都归类（新读一个而没归类就红）。
     const src = [path.join(ROOT, 'server/index.js'), path.join(ROOT, 'server/modModules.js'),
       path.join(ROOT, 'server/match/Match.js'), path.join(ROOT, 'server/match/botEmotes.js')]

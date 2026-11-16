@@ -32,6 +32,7 @@
 
 import { cloneElement } from '../../vendor/preact.module.js';
 import { useEffect, useRef, useState } from '../../vendor/hooks.module.js';
+import { bondEffectRecord } from './bondEffect.js';
 import { html, BondDisc, Icon, MicroLabel, Tooltip } from './components.js';
 // 组件级改写（DESIGN §28.19）：`game.bondStrip` 是引擎的具名组件之一，包声明的 wraps 就长在它上面。
 import { modComponent } from './modComponents.js';
@@ -91,7 +92,9 @@ function BondScroller({ count, children }) {
  *   owner?: string|null }} props — owner: the watched teammate's name (null = your own bonds)
  */
 export const BondStrip = modComponent('game.bondStrip', function BondStrip({ bonds, layersDisabled = false, onOpen, openId = null, max = 14, owner = null }) {
-  const sorted = sortBonds(bonds, (id) => data.lookup('bonds', id));
+  // 零态的映射行只是为了弹窗能解析到它，**不是**条带上的一个图标
+  const sorted = sortBonds(bonds, (id) => data.lookup('bonds', id))
+    .filter((b) => (b.off ? b.count > 0 : b.active || b.count > 0 || b.layers > 0));
   if (!sorted.length) {
     return html`<div class=${cx('bstrip', 'bstrip--empty', owner && 'is-other')} data-owner=${owner || null}>
       ${owner ? html`<${OwnerTag} owner=${owner} />` : html`<${MicroLabel}>BONDS</${MicroLabel}>`}<span>${owner ? t('{owner} 尚未激活盟约', { owner }) : t('部署干员以激活盟约')}</span><span class="mod-host" data-mod-slot="screen.game.bondStrip"></span></div>`;
@@ -145,13 +148,17 @@ export const BondStrip = modComponent('game.bondStrip', function BondStrip({ bon
  *   note, no 在场 count and no 当前效果 block (its numbers would promise an effect the mode never gives; the bond text stays).
  *   `entry.harmony` (the server's bond views: the +1 调和 added to `count`): 在场 n（含调和 +1） and the 调和 row
  */
-export function BondPopup({ bondId, entry, priv, banned = [], onClose, onMember, place = null, over = false, beside = null, owner = null, off = false, ownerId = null }) {
-  const b = data.lookup('bonds', bondId);
+export function BondPopup({ bondId, entry, priv, banned = [], onClose, onMember, place = null, over = false, beside = null, owner = null, off = false, coreAbsent = false, ownerId = null }) {
+  const base = data.lookup('bonds', bondId);
+  // 「当前效果」用的是本条盟约**这一局生效的那条效果记录**（entry.effectId 指向 effects 表；
+  // 没有映射时退回盟约自己的 effectId）。上游 0.4.0 的 bondEffectRecord 就干这件事。
+  const b = bondEffectRecord(base, data.lookup('effects', entry?.effectId || base?.effectId), entry?.layers ?? 0);
   if (!b) return null;
+  const modeOffAtTop = !!off && !coreAbsent;
   const count = entry?.count ?? 0;
   const layers = entry?.layers ?? 0;
-  const th = Array.isArray(entry?.thresholds) && entry.thresholds.length ? entry.thresholds : b.thresholds || [];
-  const tier = off ? 0 : entry?.tier ?? bondTier(count, th, b.maxCount);
+  const th = entry?.effectId ? b.thresholds || [] : Array.isArray(entry?.thresholds) && entry.thresholds.length ? entry.thresholds : b.thresholds || [];
+  const tier = off ? 0 : entry?.effectId ? bondTier(count, th, b.maxCount) : entry?.tier ?? bondTier(count, th, b.maxCount);
   const active = !off && (entry ? !!entry.active : tier > 0);
   // (自选 pieces are their operators: the own ones by m.private.diy, a watched teammate's by the pick its unit carries)
   const dd = { chess: data.get('chess'), backups: data.get('backups') };
@@ -164,7 +171,9 @@ export function BondPopup({ bondId, entry, priv, banned = [], onClose, onMember,
   const siOf = (mb) => (mb.diy || mb.rec ? null : memberStandIn(priv, rawChess(mb.id), data.get('backups'), rawChess));
   const countsHand = entry?.countsHand ?? b.countsHand;
   const next = nextThreshold(count, th);
-  const hasNow = !off && !!(b.effectDescRaw || b.effectDesc);
+  // 「本局禁用」与「规程里被置灰的核心盟约」是两回事：后者仍要显示当前效果（只是成员进不来）
+  const modeOff = !!off && !coreAbsent;
+  const hasNow = !modeOff && !!(b.effectDescRaw || b.effectDesc);
   const at = place || (beside === 'left' ? 'beside' : 'left');
   // 调和's +1 in this count (the server's word), and the 调和 operators on that board who give it
   const harmony = !off && Number.isInteger(entry?.harmony) && entry.harmony > 0 ? entry.harmony : 0;
@@ -191,7 +200,9 @@ export function BondPopup({ bondId, entry, priv, banned = [], onClose, onMember,
         </div>
       </div>
     </header>
-    ${off ? html`<p class="bpop__off" role="note">${t('本模式下该盟约不会激活（其干员仍可能因所属的其他盟约出现）')}</p>` : null}
+    ${coreAbsent
+      ? html`<p class="bpop__off" role="note">${briefingBondTip(b.name, 'off', 0, true)}</p>`
+      : modeOff ? html`<p class="bpop__off" role="note">${t('本模式下该盟约不会激活（其干员仍可能因所属的其他盟约出现）')}</p>` : null}
     <div class="bpop__tiers">
       ${th.map((n, i) => html`<span key=${i} class=${cx('bpop__tier', i < tier && 'is-on')}><b class="num">${n}</b><small>${b.maxCount != null ? t('名及以下') : tc('bond-threshold', '名')}</small></span>`)}
     </div>

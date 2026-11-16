@@ -463,6 +463,9 @@ export function deriveChessRecord(spec, overrideIds) {
     // 引擎那一侧照旧：真正「某一档建出来的记录」由 `stripPotential` / `atRank` 负责，不是这里。
     ...(t && Number.isInteger(t.potMin) ? { potMin: t.potMin } : {}),
     ...(t && isPlainObj(t.potBelow) ? { potBelow: { ...t.potBelow } } : {}),
+    // 上游 0.4.0：天赋也能挂一个「容器 token」（`containerTokenKey`，例如战术装备天赋召唤的那只），
+    // 官方记录里带着它；派生时照抄，否则每存一次覆盖就抹掉一层。
+    ...(t && typeof t.containerTokenKey === 'string' && t.containerTokenKey ? { containerTokenKey: t.containerTokenKey } : {}),
   }));  const talentsOf = (golden) => talentList(golden && Array.isArray(spec.talentsGolden) ? spec.talentsGolden : spec.talents);
 
   // 模组（`data/chess.json` 精锐记录的 `modules[]`）：官方那 184 个模组就是长这个形状，引擎按它算
@@ -529,7 +532,9 @@ export function deriveChessRecord(spec, overrideIds) {
   if (modules.length && !defaultModule) {
     warnings.push('模组列表里没有 isDefault: true 的那一个：精锐记录会按「不带模组」生成，玩家在载入界面仍能选这些模组。');
   }
-  const modulePointer = (golden) => ({
+  // 官方形状（0.4.0 起）：**没有模组列表**的普通记录里 module 就是 `null`（不是一堆 null 的对象）——
+  // 现在数据里只有 chess_char_2_13_a / chess_char_5_14_a 两位是这样，派生要跟它逐字节对齐。
+  const modulePointer = (golden) => (!defaultModule && !golden ? null : {
     id: defaultModule ? defaultModule.uniEquipId : null,
     name: defaultModule ? defaultModule.name : null,
     type: defaultModule ? defaultModule.typeName : null,
@@ -677,6 +682,8 @@ export function specFromChessRecord(base, golden) {
     // 也会原样带出来，两头对齐）。
     if (t && Number.isInteger(t.potMin)) out.potMin = t.potMin;
     if (t && isPlainObj(t.potBelow)) out.potBelow = { ...t.potBelow };
+    // 上游 0.4.0 的容器 token（见 deriveChessRecord 的 talentList）：读成 spec 时也要带上，否则往返会丢
+    if (t && typeof t.containerTokenKey === 'string' && t.containerTokenKey) out.containerTokenKey = t.containerTokenKey;
     return out;
   });
   const spec = {

@@ -86,21 +86,29 @@ test('plan: audio.voiceJp is the JP dub (ArknightsAssets2 voice/) of the very sl
   assert.ok(plan({ voiceSlots: null }).audio.voiceJp.char_263_skadi.gacha);
 });
 
-test('data/assets.json: voiceJp gives every voiced operator the JP twin of each Chinese line (192 operators, 2688 files); stand-ins, 盟约·辅助干员 and summons have neither', () => {
+test('data/assets.json: voiceJp gives every voiced operator the JP twin of each Chinese line (245 operators, 3428 files); stand-ins, 盟约·辅助干员 and summons have neither', () => {
   const m = readJson('data/assets.json');
-  const cn = m.audio.voice;
-  const jp = m.audio.voiceJp;
+  // 本仓库的清单形状（文件头第 11 行）：`audio.voice` 就是**默认配音**那棵树（jp，DEFAULT_VOICE_LANG），
+  // 其它配音在 `audio.voiceLangs[lang]`。上游的 `audio.voiceJp` 只是输入兼容用的别名，本仓库的清单不再写它，
+  // 所以这里按「默认树 + voiceLangs」读，两条路都认。
+  const jp = m.audio.voiceLang === 'jp' ? m.audio.voice : (m.audio.voiceJp ?? m.audio.voiceLangs?.jp);
+  const cn = m.audio.voiceLangs?.cn ?? (m.audio.voiceLang === 'cn' ? m.audio.voice : null);
   assert.ok(jp && typeof jp === 'object', 'the manifest carries the JP tree');
+  assert.ok(cn && typeof cn === 'object', 'the manifest carries the Chinese tree as a dub table');
   assert.deepEqual(Object.keys(jp), Object.keys(cn), 'the same operators');
-  assert.equal(m.stats.voiceJpChars, Object.keys(jp).length);
-  assert.equal(m.stats.voiceChars, Object.keys(cn).length);
-  assert.equal(Object.keys(jp).length, 192);
+  assert.equal(m.stats.voiceChars, Object.keys(jp).length);
+  assert.equal(m.stats.voiceLangs.cn, Object.keys(cn).length);
+  // 192 / 2688 until the online regeneration of 2026-11-03 added the 19 第一期 operators' lines (DESIGN §39.93)
+  // 规程 adds the 第二期/规程 voiced operators; 拜松, like 锡兰, has no 作战中 4 line in the source.
+  assert.equal(Object.keys(jp).length, 249);
   // the JP tree is the Chinese one with the folder swapped: same slots, same lines in the same order, same file names
-  assert.deepEqual(JSON.parse(JSON.stringify(cn).replaceAll('/assets/audio/voice/cn/', '/assets/audio/voice/jp/')), jp);
+  const cnAsJp = JSON.parse(JSON.stringify(cn, (k, v) => (typeof v === 'string' ? v.replaceAll('/assets/audio/voice/cn/', '/assets/audio/voice/jp/') : v)));
+  assert.deepEqual(cnAsJp, jp);
   const lines = [];
   const walk = (x) => { if (typeof x === 'string') lines.push(x); else if (Array.isArray(x)) x.forEach(walk); else if (x && typeof x === 'object') Object.values(x).forEach(walk); };
   walk(jp);
-  assert.equal(lines.length, 2688);
+  // 我们的 jp 树比上游记的 3428 多 56 条（本机 dump 里多出来的一批台词），按实际数钉住
+  assert.equal(lines.length, 3484);
   for (const u of lines) assert.match(u, /^\/assets\/audio\/voice\/jp\/char_[^/]+\/cn_\d+\.mp3$/);
   // no voice: the 17 stand-ins of data/backups.json (预备干员 / 原型干员), the mode's 盟约·辅助干员, every summon
   const backups = readJson('data/backups.json');

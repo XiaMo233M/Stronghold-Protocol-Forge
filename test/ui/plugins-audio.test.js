@@ -97,21 +97,14 @@ test('a plugin sound is fetched without its extension; one that will not load fa
     for (let i = 0; i < 3; i++) await tick();
     assert.ok(failed.includes(url('b/buy.mp3')));
     assert.ok(urls.includes(mediaUrl(BASE.audio.sfx.ui.buy)), 'then the installation\'s sound');
-    // A voice line of the same slot. ⚠️ 这里**不能**期望它回落到安装版 —— 语音本来就没有那条路：
-    //   · bgm / sfx：URL 由插件层替换，但 `_buffer`（public/js/audio.js:800-805）先试无扩展名、失败再试原 URL，
-    //     而 `onFailed` → `layers.fail(url)` 让插件的那条写入被丢弃 ⇒ 下次 `layers.apply(BASE)` 给回安装版 URL，
-    //     于是能回落到安装版。
-    //   · voice：`_playVoice` 的第 4 参 `fallback` 的语义是「**所选配音语言**缺这句 ⇒ 用**默认配音同名的文件**」
-    //     （public/js/audio.js:1145-1148；上游 0.3.0 的 voiceLine :351-363 逐字同义 —— cn.find(file === file(dub))），
-    //     **它不覆盖"插件素材坏了"**。url 已被插件整体替换成 /p/tunes/…/b/sel.ogg，mediaUrl 只去掉扩展名（同一个文件），
-    //     fallback 又为空 ⇒ **两条路都到不了安装版** ⇒ 这一槽就是没声音。
-    //   上游 0.3.0 亦同（它的 voice() 传的 fallback 同样是配音语言的回落）。
-    // ⚠️ 所以这里验的是：**失败被报告**（`onFailed` 收到它 ⇒ 界面上看得见，不是静默），且没有音频在播。
-    //    「插件语音坏了就听不到」这个缺口已记档（0.19.1 候选：作为独立特性评估，含"回落会掩盖作者错误"的副作用）。
+    // A voice line of the same slot. 上游 0.4.0 把这条缺口补上了（audio.js 的 `fellBack` + `_playVoice` 的第 5 参
+    // `again`）：插件的那条文件坏了 ⇒ `onFailed` 记下它 ⇒ 这一槽**重新选一次**（`again()` = pick），此时
+    // `layers.fail(url)` 已经把插件的那条写入丢掉，于是选出来的是安装版 —— 声音有，且失败被报告。
+    // bgm / sfx 走的是另一条路（`_buffer` 先试无扩展名、失败再试原 URL，再经 `onFailed` 丢层）。
     assert.equal(a.voice('char_a', 'select'), true);
-    for (let i = 0; i < 3; i++) await tick();
+    for (let i = 0; i < 4; i++) await tick();
     assert.ok(failed.includes(url('b/sel.ogg')), 'the broken plugin line is reported, not silently swallowed');
-    assert.equal(a.voiceNode?.url, undefined, 'no fallback to the installation\'s line — see the note above');
+    assert.equal(a.voiceNode?.url, BASE.audio.voice.char_a.select, "the installation's own line plays instead");
     // the bond cue (its own channel: _playBondCue)
     a.sfx('bondUp');
     for (let i = 0; i < 3; i++) await tick();

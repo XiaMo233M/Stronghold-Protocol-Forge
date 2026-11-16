@@ -204,7 +204,7 @@ describe('the folded board grows and every bench / temp tile stays clear of the 
 describe('wiring', () => {
   test('the view passes the request\'s shop state to the HUD bands; the game asks for the camera of the fold state', () => {
     const app = read('public/js/render/app.js');
-    assert.match(app, /hud: hudBands\(vk, sz, \{ shop: o\.shop !== false \}\),/);
+    assert.match(app, /hud: hudBands\(vk, sz, \{ shop: o\.shop \?\? true \}\),/);
     assert.match(app, /return opts\.hud\(kind, sz, o\) \|\| null;/);
     const game = read('public/js/screens/game.js');
     // 商店是否折叠 = 玩家自己的收起态 **或** 部署期间临时折叠（0.3.0 引入 `deployFold`，上游 game.js 逐字同形：
@@ -219,7 +219,8 @@ describe('wiring', () => {
     assert.match(game, /\}, \[[^\]]*\bshopFolded\b[^\]]*\]\);/);
     // entering prep and the boss-prep re-frame take the fold state; a fold / unfold re-frames through prepDeployCamera
     // (which calls foldCamera, still deferred while busy unless a deploy zoom is being given back — issue #602)
+    // 本仓库这一版 prepCameraFor 带 stageLayout（大图: 地图自己的窗口跟着走），下面那条就是实际形状
+    assert.match(game, /const next = prepDeployCamera\(\{\n\s+pub, myId, deployFold, partial: deployPartial, releaseDeploy: step\.release, folded: shopFolded,\n\s+ownPrep: !!view && viewModeRef\.current === 'prep' && showPrep,\n\s+pen, busy: !!drag \|\| !!facing, current: camRef\.current,\n\s+\}\);\n\s+\/\/ a null release because the pen is open stays owed; a null only because the camera already\n\s+\/\/ matches the player's fold spends it\. \[ASSUMED\]\n\s+deployZoomedRef\.current = deployZoomRemember\(step, \{ next, pen \}\);\n\s+\/\/ the fold zoom and the restore fly with the short FOLD_CAMERA_MS, not a generic camera flight\n\s+if \(next\) setCam\(next\.kind, \{ \.\.\.next\.opts, ms: FOLD_CAMERA_MS \}\);/);
     assert.equal((game.match(/const pc = prepCameraFor\(pub, myId, shopFolded, stageLayout\);/g) || []).length, 2);
-    assert.match(game, /const next = prepDeployCamera\(\{\n\s+pub, myId, deployFold, releaseDeploy: step\.release, folded: shopFolded,\n\s+ownPrep: !!view && viewModeRef\.current === 'prep' && showPrep,\n\s+pen, busy: !!drag \|\| !!facing, current: camRef\.current,\n\s+\}\);\n\s+\/\/ a null release because the pen is open stays owed; a null only because the camera already\n\s+\/\/ matches the player's fold spends it\. \[ASSUMED\]\n\s+deployZoomedRef\.current = deployZoomRemember\(step, \{ next, pen \}\);\n\s+\/\/ the fold zoom and the restore fly with the short FOLD_CAMERA_MS, not a generic camera flight\n\s+if \(next\) setCam\(next\.kind, \{ \.\.\.next\.opts, ms: FOLD_CAMERA_MS \}\);/);
   });
 });

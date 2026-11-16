@@ -62,7 +62,7 @@ import {
 } from './http/workshop.js';
 import { ROOT, listenAddress, bindCandidates, serveDirs, makeLogger, parseTrustProxy, assetIndexOptionsFrom, versionsFrom, parseRoomCode } from './http/config.js';
 import { WS_MAX_PAYLOAD, createSessionStack, attachWebSocket, transportPolicy } from './http/websocket.js';
-import { getBotStrategy } from './match/botStrategies.js';
+import { getBotStrategy, getBotStrategySeats } from './match/botStrategies.js';
 import { noteLlmIgnored, releaseIgnoresExternalAi, validateExternalConfig } from './match/llmGate.js';
 import { siteCsp } from './http/csp.js';
 import { DATA_SHIM_JS, createStaticHandler } from './http/static.js';
@@ -169,6 +169,13 @@ export async function startServer(opts = {}) {
     if (strategy.id === 'external') validateExternalConfig();
   } catch (cause) {
     throw new Error(`Invalid SP_BOT_STRATEGY: ${cause.message}. Unset SP_BOT_STRATEGY to use the original bot (legacy).`, { cause });
+  }
+  // 逐座位的策略（上游 0.4.0 #816 P1）：解析失败同样在读数、开端口**之前**抛
+  try {
+    const seats = getBotStrategySeats(process.env.SP_BOT_STRATEGY_SEATS);
+    if (Object.values(seats).some((s) => s.id === 'external')) validateExternalConfig();
+  } catch (cause) {
+    throw new Error(`Invalid SP_BOT_STRATEGY_SEATS: ${cause.message}. Unset SP_BOT_STRATEGY_SEATS to use SP_BOT_STRATEGY for every seat.`, { cause });
   }
   const { port, host } = listenAddress(opts);
   const { publicDir, dataDir, sharedDir, packsDir, pluginsDir } = serveDirs(opts);

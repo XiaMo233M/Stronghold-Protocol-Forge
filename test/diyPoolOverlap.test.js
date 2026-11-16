@@ -39,9 +39,9 @@ const DATA_DIR = join(ROOT, 'data');
 const SW = 'diyPoolOverlap';
 const quiet = { info() {}, warn() {}, error() {}, debug() {} };
 
-/** 今天那份官方自选池（生成器产物）。`72` 是它的规模 —— 下面每一条都拿它当基准。 */
+/** 今天那份官方自选池（生成器产物）—— 下面每一条都拿它当基准，规模从数据里读，不写死（规程加了 3 名后是 75）。 */
 const OFFICIAL_POOL = Object.freeze([...loadData(DATA_DIR, { log: quiet, workshopDir: null }).backups.diy.ownedPool]);
-const OFFICIAL_POOL_SIZE = 72;
+const OFFICIAL_POOL_SIZE = OFFICIAL_POOL.length;
 /** 拿池里前 4 名当「被这个包做成棋子的官方干员」—— 不写死具体 id，所以数据换了这一条也不脆。 */
 const FOUR = Object.freeze(OFFICIAL_POOL.slice(0, 4));
 

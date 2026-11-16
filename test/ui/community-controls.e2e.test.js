@@ -1,6 +1,8 @@
+import { seedReleaseRead } from '../helpers/releaseNotes.js';
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync } from 'node:fs';
+import { DEFAULT_VERSION } from '../../shared/versions.js';
 import { fileURLToPath } from 'node:url';
 
 // 截图的落盘路径用 `fileURLToPath`，不用 `new URL(...).pathname`：后者在 Windows 上给出 `/E:/…`，
@@ -12,7 +14,8 @@ describe('community UI: lobby header and shared DIY details', { skip: !enabled }
   let srv, browser;
   before(async () => {
     const { startServer } = await import('../../server/index.js');
-    srv = await startServer({ port: 0, host: '127.0.0.1', quiet: true });
+    // written on 盟约 (第二期下半): a stock server's lobby starts on 规程 since 2026-11-09
+    srv = await startServer({ port: 0, host: '127.0.0.1', quiet: true, versions: { default: DEFAULT_VERSION } });
     const P = (await import('puppeteer-core')).default;
     browser = await P.launch({ executablePath: CHROME, headless: true, args: ['--no-sandbox'] });
     mkdirSync(new URL('../e2e/out/', import.meta.url), { recursive: true });
@@ -54,6 +57,7 @@ describe('community UI: lobby header and shared DIY details', { skip: !enabled }
       localStorage.setItem('sp.pref.settings', JSON.stringify({ textSize: 'xl' }));
       localStorage.setItem('sp.pref.lang', JSON.stringify(l));
     }, lang);
+    await seedReleaseRead(page);
     await page.goto(`http://127.0.0.1:${srv.port}/`, { waitUntil: 'networkidle0' });
     await page.waitForSelector('.lobby-screen');
     return { context, page };
