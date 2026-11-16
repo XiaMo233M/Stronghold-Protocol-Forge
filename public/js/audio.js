@@ -448,25 +448,21 @@ export const VOICE_TAP_SLOTS = Object.freeze(['select']);
 export function voiceLine(audio, charId, slot, lang = 'cn', random = Math.random, allowChinese = true) {
   const lines = (line) => (Array.isArray(line) ? line : [line]).filter((u) => typeof u === 'string' && u);
   const draw = (list) => (list.length ? list[Math.min(list.length - 1, Math.floor(random() * list.length))] : null);
-  // 本仓库的清单形状：`audio.voice` 是**默认配音**那棵树（jp，DEFAULT_VOICE_LANG），中文在 `audio.voiceLangs.cn`；
-  // 清单没有 voiceLangs 时（上游那两棵形状）`audio.voice` 才是中文。
+  const pick = (line) => { const l = lines(line ?? null); return l.length ? draw(l) : null; };
+  // `audio.voice` 是清单的**默认配音**那棵树（本仓库自 0.9.0 起是 jp），其余配音在 `audio.voiceLangs[lang]`；
+  // 上游的 `voiceJp` / `voiceEn` / `voiceKr` 是同一批文件的别名树，两张形状都读得懂
   const defaultTree = lines(audio?.voice?.[charId]?.[slot]);
-  const cn = audio?.voiceLangs?.cn
-    ? lines(audio.voiceLangs.cn[charId]?.[slot])
-    : (audio?.voiceLang === 'jp' ? [] : defaultTree);
-  // 没指定配音（跟随全局 / 这一档服务器没有）⇒ 默认那棵树；与「有没有勾中文下载」无关
-  if (!lang) {
-    const u = draw(defaultTree);
-    return u ? { url: u, fallback: null } : null;
+  const lane = (code) => audio?.voiceLangs?.[code]?.[charId]?.[slot];
+  // 没指定配音（跟随全局）⇒ 默认那棵树；明确选了某一档 ⇒ 那一档的表，缺了再回落默认那棵树
+  const chosen = !lang ? null : lang === 'cn' ? pick(lane('cn')) : pick(lane(lang) ?? audio?.[VOICE_TREES[lang]]?.[charId]?.[slot]);
+  const dub = chosen ?? (!lang ? pick(defaultTree) : null);
+  if (dub) {
+    // 兜底是**同名的**那一句（默认树里的同名文件；本仓库的默认树就是 jp，上游那种两棵形状里它就是中文）
+    const file = (u) => u.slice(u.lastIndexOf('/') + 1);
+    return { url: dub, fallback: allowChinese ? defaultTree.find((u) => file(u) === file(dub)) ?? draw(defaultTree) : null };
   }
-  const pickCn = () => { const u = allowChinese ? draw(cn) : null; return u ? { url: u, fallback: null } : null; };
-  const tree = VOICE_TREES[lang];
-  if (!tree) return pickCn();
-  const dub = draw(lines(audio?.[tree]?.[charId]?.[slot]));
-  if (!dub) return pickCn();
-  const file = (u) => u.slice(u.lastIndexOf('/') + 1);
-  // 玩家没有勾选中文下载时，中文那一条只是**兜底**：既不当缺配音的替补，也不当缺槽位的替补
-  return { url: dub, fallback: allowChinese ? cn.find((u) => file(u) === file(dub)) ?? draw(cn) : null };
+  const url = allowChinese ? pick(lane('cn')) ?? pick(defaultTree) : null;
+  return url ? { url, fallback: null } : null;
 }
 
 /**
@@ -683,6 +679,8 @@ export class AudioManager {
   constructor(opts = {}) {
     this.getManifest = typeof opts.getManifest === 'function' ? opts.getManifest : () => null;
     this.onFailed = typeof opts.onFailed === 'function' ? opts.onFailed : null;
+    // 宿主注入的逐干员解析器（`main.js` 的 voiceLangFor 包了一层设置表）；installAudio 也会设一次
+    if (typeof opts.voiceLangOf === 'function') this.voiceLangOf = opts.voiceLangOf;
     /** sounds whose failure made the manifest fall back (a cosmetic plugin's file): a caller picks its entry again */
     this.fellBack = new Set();
     this.random = typeof opts.random === 'function' ? opts.random : Math.random;   // a unit sound's chance (mix.p)
@@ -713,8 +711,9 @@ export class AudioManager {
     this.bondCueNode = null;
     this.bondCueToken = 0;
     this.bondCueScope = null;
-    this.voiceOverrides = {};
-    this.voiceLang = 'cn';    // settings 语音语言: cn | jp | en | kr (VOICE_TREES; a missing line falls back to audio.voice)
+    this._overrides = {};
+    this.voiceLang = 'cn';
+    this.voiceLangSet = false;   // setVoiceLang 被真正调用过没有（没调过 ⇒ 跟随清单默认）    // settings 语音语言: cn | jp | en | kr (VOICE_TREES; a missing line falls back to audio.voice)
     this.voiceNative = false; // settings 本土语言: an operator with an own-language dub speaks it unless their own pick wins
     this.startVoiceDone = false; // 行动出发 of this field (the first operator deployed says it)
     this.uiVoices = 0;
@@ -880,10 +879,14 @@ export class AudioManager {
    * @param {string} lang
    * @param {Record<string, string>} [overrides]
    */
-  setVoiceLang(lang, overrides = this.voiceOverrides) {
+  setVoiceLang(lang, overrides = this._overrides) {
     this.voiceLangSet = true;
-    this.voiceLang = VOICE_LANGS.includes(lang) ? lang : 'cn';
-    this.voiceOverrides = sanitizeVoiceOverrides(overrides);
+    // 清单里没有的那一档不算数：`voiceLangs[code]` 或上游的别名树 `voiceJp/voiceEn/voiceKr` 有其一才算有
+    const audio = this.getManifest()?.audio;
+    // 还没有清单时无从判断，照单全收（装机后 manifest 到了再看）
+    const has = (code) => code === 'cn' || !audio || !!(audio.voiceLangs?.[code] || audio[VOICE_TREES[code]]);
+    this.voiceLang = VOICE_LANGS.includes(lang) && has(lang) ? lang : 'cn';
+    this._overrides = sanitizeVoiceOverrides(overrides);
   }
 
   /**
@@ -910,7 +913,7 @@ export class AudioManager {
     }
     // 宿主没说话、这一页也**没设过**配音 ⇒ null（跟随清单的默认那棵树），不要凭空说成 'cn'
     if (!this.voiceLangSet) return null;
-    return voiceLangFor(charId, this.voiceLang, this.voiceOverrides, { native: this.voiceNative, audio: this.getManifest()?.audio });
+    return voiceLangFor(charId, this.voiceLang, this._overrides, { native: this.voiceNative, audio: this.getManifest()?.audio });
   }
 
   _applyVolumes() {
@@ -1522,7 +1525,9 @@ export class AudioManager {
       if (!this.ctx || !this.voiceGain || this.volumes.muted || this.volumes.voice <= 0) return false;
       if (typeof charId !== 'string' || typeof slot !== 'string') return false;
       // the chosen dub's line (settings 语音语言), with the Chinese file of the same name as its fallback (voiceLine)
-      const pick = () => this._selectedVoiceLine(charId, slot, this._voiceLangOf(charId));
+      // `o.lang` = 这一句临时指定配音（试听 / 编辑器内嵌），否则按逐干员的设置解析
+      const dub = VOICE_PICKS.includes(o.lang) ? o.lang : this._voiceLangOf(charId);
+      const pick = () => this._selectedVoiceLine(charId, slot, dub);
       const line = pick();
       if (!line) return false;
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
