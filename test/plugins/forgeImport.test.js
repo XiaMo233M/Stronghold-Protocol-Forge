@@ -131,7 +131,7 @@ test('skin pack: cosmetic overlay, check --strict, pack, visual set with no prob
     assert.equal(got.code, 0, got.out);
     const dir = path.join(got.parent, 'rose-skin');
     assert.ok(fs.existsSync(path.join(dir, 'IMPORT-REPORT.md')));
-    assert.match(fs.readFileSync(path.join(dir, 'IMPORT-REPORT.md'), 'utf8'), /audio\.voiceJp/);
+    assert.match(fs.readFileSync(path.join(dir, 'IMPORT-REPORT.md'), 'utf8'), /audio\.(voiceJp|voice)/);
     const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'plugin.json'), 'utf8'));
     assert.equal(manifest.class, 'cosmetic');
     assert.deepEqual(manifest.permissions, ['assets.override']);
@@ -777,8 +777,10 @@ test('voices and skill icons follow the new char and skill ids', async () => {
     assert.equal(op.skills[0].skillId, skillId);
     assert.ok(assets.skills[skillId], JSON.stringify(Object.keys(assets.skills)));
     assert.equal(assets.skills.original_skill, undefined);
-    assert.ok(assets.audio.voiceJp[op.charId], JSON.stringify(Object.keys(assets.audio.voiceJp)));
-    assert.equal(assets.audio.voiceJp.rose_guard, undefined);
+    // 本仓库的清单把默认配音（jp）放在 audio.voice，没有 audio.voiceJp 那棵别名树
+    const jp = assets.audio.voiceJp ?? assets.audio.voice;
+    assert.ok(jp[op.charId], JSON.stringify(Object.keys(jp)));
+    assert.equal(jp.rose_guard, undefined);
     assert.equal(fs.existsSync(path.join(parent, 'rose-voice-look')), true);
   } finally { fs.rmSync(parent, { recursive: true, force: true }); }
 });
@@ -1932,7 +1934,7 @@ test('a pack that drops whole gameplay records says so, and a cosmetic aimed onl
     assert.equal(voice.report.cosmeticBare, undefined);
     const voiceLook = voice.report.products.find((p) => p.class === 'cosmetic');
     assert.equal(/没有可应用的目标|nothing to apply to/.test(voiceLook.imported.join('\n')), false);
-    assert.match(voiceLook.imported.join('\n'), /voiceJp/);
+    assert.match(voiceLook.imported.join('\n'), /voice(Jp)?/);
 
     const mounted = await importForge(panel, { ...forgeOpts(parent), out: path.join(parent, 'gap-panel') });
     assert.equal(mounted.ok, true, mounted.markdown);

@@ -1322,16 +1322,20 @@ export function planForgeImport(files, { id: idOverride, contentId, dataDir, van
       }
     }
   };
+  // 本仓库的清单形状：默认配音（jp）就在 audio.voice，其余配音在 audio.voiceLangs；上游的 audio.voiceJp 只是
+  // 输入兼容用的别名，清单里没有它。所以「默认配音」写进清单实际有的那一棵树（没有清单时按上游写 voiceJp）。
+  const audioOf = manifestArt && typeof manifestArt === 'object' ? manifestArt.audio : null;
+  const jpTree = audioOf && typeof audioOf === 'object' && !('voiceJp' in audioOf) && 'voice' in audioOf ? 'voice' : 'voiceJp';
   if (pack.voices != null) {
-    assume('voices-jp', 'Forge 的 voices 是默认配音，文档写的是日文，所以写入 audio.voiceJp。', 'Forge voices are the default dub, documented as Japanese, so they were written to audio.voiceJp.');
-    putVoices('voices', ['audio', 'voiceJp'], pack.voices);
-    rewrittenAssets.push('voices → audio.voiceJp');
+    assume('voices-jp', `Forge 的 voices 是默认配音，文档写的是日文，所以写入 audio.${jpTree}。`, `Forge voices are the default dub, documented as Japanese, so they are written to audio.${jpTree}.`);
+    putVoices('voices', ['audio', jpTree], pack.voices);
+    rewrittenAssets.push(`voices → audio.${jpTree}`);
   }
   if (isObj(pack.voiceLangs)) {
     for (const [lang, block] of Object.entries(pack.voiceLangs)) {
       const code = canonicalLang(lang);
       // the dubs with a table here (round 40, DESIGN §34.14.11): 中文 audio.voice, 日本語 voiceJp, English voiceEn, 한국어 voiceKr
-      const tree = code === 'zh' || code === 'cn' ? 'voice' : code === 'ja' || code === 'jp' ? 'voiceJp' : code === 'en' ? 'voiceEn'
+      const tree = code === 'zh' || code === 'cn' ? 'voice' : code === 'ja' || code === 'jp' ? jpTree : code === 'en' ? 'voiceEn'
         : code === 'ko' || code === 'kr' ? 'voiceKr' : null;
       if (tree === 'voice') {
         assume('voice-cn', 'voiceLangs.cn 写入 audio.voice（中文配音）。', 'voiceLangs.cn was written to audio.voice (the Chinese dub).');
