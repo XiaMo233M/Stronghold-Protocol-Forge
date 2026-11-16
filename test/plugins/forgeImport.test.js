@@ -24,7 +24,7 @@ import { createStudio } from '../../server/studio/index.js';
 import { createPluginRegistry, readVanillaAssets } from '../../server/plugins/registry.js';
 import { createVisualSets } from '../../server/plugins/visualSet.js';
 import { buildContentSet, contentSetFiles } from '../../server/plugins/contentSet.js';
-import { PLUGIN_LIMITS } from '../../shared/plugins/manifest.js';
+import { PLUGIN_LIMITS, PLUGIN_MAX_BYTES } from '../../shared/plugins/manifest.js';
 import { skel, atlas, png } from '../helpers/pluginFixtures.js';
 import { canonicalJson } from '../../shared/plugins/identity.js';
 import { bundleForgeKits, FORGE_IMPORT_MAP, KIT_BUNDLE_BYTES, KIT_MODULES_MAX, SDK_KIT_NAMES } from '../../server/plugins/forgeKits.js';
@@ -131,7 +131,7 @@ test('skin pack: cosmetic overlay, check --strict, pack, visual set with no prob
     assert.equal(got.code, 0, got.out);
     const dir = path.join(got.parent, 'rose-skin');
     assert.ok(fs.existsSync(path.join(dir, 'IMPORT-REPORT.md')));
-    assert.match(fs.readFileSync(path.join(dir, 'IMPORT-REPORT.md'), 'utf8'), /audio\.voiceJp/);
+    assert.match(fs.readFileSync(path.join(dir, 'IMPORT-REPORT.md'), 'utf8'), /audio\.(voiceJp|voice)/);
     const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'plugin.json'), 'utf8'));
     assert.equal(manifest.class, 'cosmetic');
     assert.deepEqual(manifest.permissions, ['assets.override']);
@@ -382,7 +382,7 @@ test('malicious zip and directory input is refused and a script in the pack is n
     assert.equal(link.issues[0].code, 'PLUGIN_FORGE_ZIP');
     assert.match(link.issues[0].detail, /symbolic link/);
 
-    const huge = await importForge({ zip: zipOf([{ name: 'pack.json', data: Buffer.from('{"id":"rose-huge","name":"x","version":"1.0.0"}'), rawSize: PLUGIN_LIMITS.pluginBytes + 1 }]) }, opts);
+    const huge = await importForge({ zip: zipOf([{ name: 'pack.json', data: Buffer.from('{"id":"rose-huge","name":"x","version":"1.0.0"}'), rawSize: PLUGIN_MAX_BYTES + 1 }]) }, opts);
     assert.equal(huge.issues[0].code, 'PLUGIN_FORGE_ZIP');
     assert.match(huge.issues[0].detail, /larger than/);
 
@@ -777,8 +777,10 @@ test('voices and skill icons follow the new char and skill ids', async () => {
     assert.equal(op.skills[0].skillId, skillId);
     assert.ok(assets.skills[skillId], JSON.stringify(Object.keys(assets.skills)));
     assert.equal(assets.skills.original_skill, undefined);
-    assert.ok(assets.audio.voiceJp[op.charId], JSON.stringify(Object.keys(assets.audio.voiceJp)));
-    assert.equal(assets.audio.voiceJp.rose_guard, undefined);
+    // 本仓库的清单把默认配音（jp）放在 audio.voice，没有 audio.voiceJp 那棵别名树
+    const jp = assets.audio.voiceJp ?? assets.audio.voice;
+    assert.ok(jp[op.charId], JSON.stringify(Object.keys(jp)));
+    assert.equal(jp.rose_guard, undefined);
     assert.equal(fs.existsSync(path.join(parent, 'rose-voice-look')), true);
   } finally { fs.rmSync(parent, { recursive: true, force: true }); }
 });
@@ -885,7 +887,7 @@ test('a sparse zip over the raw cap is refused before it is read', async () => {
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'sp-forge-sparse-'));
   const zipPath = path.join(parent, 'big.zip');
   const fd = fs.openSync(zipPath, 'w');
-  fs.ftruncateSync(fd, 201 * 1024 * 1024);
+  fs.ftruncateSync(fd, PLUGIN_MAX_BYTES + 1024 * 1024);
   fs.closeSync(fd);
   const real = fs.readFileSync;
   let reads = 0;
@@ -1282,6 +1284,7 @@ test('the imported script plugin runs in our own sandbox: the kit\'s talent rais
   const { loadContentSet } = await import('../../public/js/content.js');
   const { WorkerSimHost } = await import('../../public/js/battle/simHost.js');
   const { Worker } = await import('node:worker_threads');
+  const { WORKER_LOAD_MS } = await import('../helpers/simHostFixture.js');
   const served = contentSetFiles(built);
   const fetch = async (url) => {
     const body = url.startsWith('/cs/') ? served.get(url.split('/').slice(3).join('/'))?.body : fs.readFileSync(path.join(ROOT, url.split('?')[0]));
@@ -1289,7 +1292,7 @@ test('the imported script plugin runs in our own sandbox: the kit\'s talent rais
   };
   const loaded = await loadContentSet(built.cs, { fetch, retryDelays: [] });
   assert.equal(loaded.canSim, true);
-  const host = new WorkerSimHost({ workerFactory: () => {
+  const host = new WorkerSimHost({ loadTimeoutMs: WORKER_LOAD_MS, workerFactory: () => {
     const worker = new Worker(new URL('../helpers/simWorkerNode.mjs', import.meta.url));
     const port = { postMessage: (m) => worker.postMessage(m), terminate: () => worker.terminate() };
     worker.on('message', (data) => port.onmessage?.({ data }));
@@ -1931,7 +1934,7 @@ test('a pack that drops whole gameplay records says so, and a cosmetic aimed onl
     assert.equal(voice.report.cosmeticBare, undefined);
     const voiceLook = voice.report.products.find((p) => p.class === 'cosmetic');
     assert.equal(/没有可应用的目标|nothing to apply to/.test(voiceLook.imported.join('\n')), false);
-    assert.match(voiceLook.imported.join('\n'), /voiceJp/);
+    assert.match(voiceLook.imported.join('\n'), /voice(Jp)?/);
 
     const mounted = await importForge(panel, { ...forgeOpts(parent), out: path.join(parent, 'gap-panel') });
     assert.equal(mounted.ok, true, mounted.markdown);

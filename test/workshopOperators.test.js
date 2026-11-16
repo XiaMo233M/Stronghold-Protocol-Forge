@@ -52,7 +52,7 @@ const OFFICIAL_UNITS = load('backups').units;
 /** 官方两份数据只读一次：形态档位（`requiredUnitForms`）与盟约合法性都从它们派生。 */
 const OFFICIAL_BACKUPS = load('backups');
 const OFFICIAL_CHESS = load('chess');
-/** `data/backups.json` 的官方自选池长度（生成物契约里的那个 72 —— 这里读它、不改它）。 */
+/** `data/backups.json` 的官方自选池长度（生成物契约里的那个规模 —— 这里读它、不改它；规程加干员后是 75）。 */
 const OFFICIAL_POOL = OFFICIAL_BACKUPS.diy.ownedPool.length;
 /** 一条官方干员记录，作为「包自带一条干员记录」的模板（字段照抄，只换身份）。 */
 const TEMPLATE = OFFICIAL_UNITS[Object.keys(OFFICIAL_UNITS)[0]];
@@ -517,7 +517,7 @@ describe('干员包: 磁盘未被改写（生成器仍是唯一来源）', () =>
       assert.equal(after[i], before[i], `data/${f}.json 被改写了 —— 生成物不该被动`);
     }
     // 生成器契约（对**文件**的断言）因此完全不受影响
-    assert.equal(load('backups').diy.ownedPool.length, 72, '磁盘上的 ownedPool 仍是 72（test/backups.test.js 钉着它）');
+    assert.equal(load('backups').diy.ownedPool.length, OFFICIAL_POOL, '磁盘上的 ownedPool 规模不变（test/backups.test.js 钉着它）');
     assert.equal(load('backups').units[HER], undefined, '磁盘上没有她');
   });
 
@@ -528,7 +528,7 @@ describe('干员包: 磁盘未被改写（生成器仍是唯一来源）', () =>
     assert.deepEqual([...files.keys()].sort(), ['assets', 'backups'], '夹具触及 backups（干员记录 + 自选池）与 assets（图标 + 语音 + 外观）');
     const served = JSON.parse(files.get('backups').toString('utf8'));
     assert.ok(served.units[HER], '发出去的那份里有她');
-    assert.equal(served.diy.ownedPool.length, 73);
+    assert.equal(served.diy.ownedPool.length, OFFICIAL_POOL + 1);
   });
 });
 
@@ -564,7 +564,7 @@ describe('干员包: 端到端（社区 mod「克莱门莎」当夹具）', () =
     assert.deepEqual(Object.keys(rec.forms), requiredUnitForms({ chess: load('chess'), backups: load('backups') }), '夹具的形态集合与自选槽要求的一致');
   });
 
-  test('applyWorkshop 之后：干员记录 / 自选池 72→73 / 图标 / 双语语音全部就位', () => {
+  test('applyWorkshop 之后：干员记录 / 自选池 75→76 / 图标 / 双语语音全部就位', () => {
     const loaded = loadWorkshop(ws, { log: quiet });
     const base = loadData(DATA_DIR, { log: quiet, workshopDir: null });
     const { data, report } = applyWorkshop(base, loaded.packs);
@@ -574,10 +574,10 @@ describe('干员包: 端到端（社区 mod「克莱门莎」当夹具）', () =
     assert.ok(data.backups.units[HER], 'data.backups.units[char_ws_clemnt] 在');
     assert.equal(data.backups.units[HER].name, '克莱门莎');
     assert.equal(data.backups.units[HER].rarity, 6);
-    // ② 自选池 72 → 73
-    assert.equal(base.backups.diy.ownedPool.length, 72);
-    assert.equal(data.backups.diy.ownedPool.length, 73, 'ownedPool 72 → 73');
-    assert.equal(data.backups.diy.ownedPool[72], HER, '追加在末尾（入池顺序只由包 id 排序决定）');
+    // ② 自选池 +1
+    assert.equal(base.backups.diy.ownedPool.length, OFFICIAL_POOL);
+    assert.equal(data.backups.diy.ownedPool.length, OFFICIAL_POOL + 1, 'ownedPool +1');
+    assert.equal(data.backups.diy.ownedPool[OFFICIAL_POOL], HER, '追加在末尾（入池顺序只由包 id 排序决定）');
     // ③ diy.operators
     assert.deepEqual(data.backups.diy.operators[HER], {
       name: '克莱门莎', rarity: 6, profession: 'WARRIOR', subProfessionId: 'primguard',
@@ -618,11 +618,11 @@ describe('干员包: 端到端（社区 mod「克莱门莎」当夹具）', () =
   test('浏览器拿到的那份 /data/backups.json 是合并后的（磁盘上那份没变）', async () => {
     const remote = await fetch(`${srv.url}/data/backups.json`).then((r) => r.json());
     assert.ok(remote.units[HER], '合并后的 backups.json 里有她');
-    assert.equal(remote.diy.ownedPool.length, 73);
+    assert.equal(remote.diy.ownedPool.length, OFFICIAL_POOL + 1);
     assert.equal(remote.diy.operators[HER].bonds[0], 'egirShip');
     const onDisk = JSON.parse(fs.readFileSync(join(DATA_DIR, 'backups.json'), 'utf8'));
     assert.equal(onDisk.units[HER], undefined, 'data/backups.json 本身永不被改写');
-    assert.equal(onDisk.diy.ownedPool.length, 72);
+    assert.equal(onDisk.diy.ownedPool.length, OFFICIAL_POOL);
     // 图标与语音走的是同一份合并后的 assets.json
     const assets = await fetch(`${srv.url}/data/assets.json`).then((r) => r.json());
     assert.equal(assets.prof.sub.primguard, '/workshop-assets/clementia/prof/sub/primguard.png');
@@ -661,7 +661,7 @@ describe('干员包: 临时工坊根的端到端（自造包，不依赖例子�
     assert.deepEqual(report.errors, []);
     assert.equal(data.backups.units.char_ws_tmp.name, '临时干员');
     assert.equal(data.backups.diy.operators.char_ws_tmp.name, '临时干员');
-    assert.equal(data.backups.diy.ownedPool.length, 73);
+    assert.equal(data.backups.diy.ownedPool.length, OFFICIAL_POOL + 1);
   });
 });
 

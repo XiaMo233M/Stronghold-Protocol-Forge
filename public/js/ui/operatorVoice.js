@@ -4,9 +4,12 @@
 // 上游 0.2.3 这个文件原本只列 cn / jp 并把语言名写死在文件里 —— 本仓库随语音包一起发 en / kr，
 // 所以词表与语言名走共用那一份，否则同一个设置在两处界面里能选的语言不一样。
 import { html } from './components.js';
+import { ComboBox } from './comboBox.js';
 import { useSettings, updateSettings } from './settings.js';
 import { t, N_ } from '../../../shared/i18n.js';
 import { VOICE_LANGS, VOICE_LANG_NAMES } from '../../../shared/constants.js';
+import { audio } from '../audio.js';
+import { data } from '../data.js';
 import { voiceLangOverrideOf, withVoiceLang, VOICE_PICKS, VOICE_TREES } from '../voicePrefs.js';
 
 /**
@@ -71,12 +74,19 @@ export function OperatorVoice({ charId }) {
   const settings = useSettings();
   if (!charId) return null;
   const value = voiceLangOverrideOf(settings, charId);
+  const options = operatorVoiceOptions(data.get('assets')?.audio, charId, value);
   const change = (lang) => updateSettings({ voiceLangByChar: withVoiceLang(settings.voiceLangByChar, charId, lang) });
+  const preview = () => {
+    const chosen = options.find((o) => o.value === value);
+    if (chosen && chosen.value && !chosen.unavailable) audio.previewVoice(charId, chosen.value);
+    else audio.previewVoice(charId);
+  };
   return html`<label class="lo-voice" data-voice-char=${charId}>
     <span>${t('此干员语音')}</span>
-    <span class="lo-select"><select aria-label=${t('此干员语音')} value=${value} onChange=${(e) => change(e.currentTarget.value)}>
-      <option value="">${t('跟随全局')}</option>${VOICE_LANGS.map((l) => html`<option value=${l}>${VOICE_LANG_NAMES[l]}</option>`)}
-    </select></span>
-    <small>${t('仅保存在此浏览器，缺失的日语语音会回退到中文。')}</small>
+    <span class="lo-select"><${ComboBox} label=${t('此干员语音')} value=${value}
+      options=${options.map((o) => ({ value: o.value, label: o.label }))}
+      onChange=${(e) => change(e.currentTarget.value)} /></span>
+    <button type="button" class="lo-voice__preview" onClick=${preview}>${t('试听')}</button>
+    <small>${t('仅保存在此浏览器。未把中文列入下载时，缺句不再请求中文。')}</small>
   </label>`;
 }

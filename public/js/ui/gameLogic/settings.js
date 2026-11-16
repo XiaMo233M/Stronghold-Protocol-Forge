@@ -12,6 +12,8 @@ import { VOICE_LANGS, DEFAULT_VOICE_LANG } from '../../../../shared/constants.js
  * sizes (`--t: 1rem`), the others lift the phone's 40 px root by a floor and grow the desktop gently. Text only: the
  * layout root `1rem` (and with it the field camera, the detail card's side and the DOM fallback board) never moves.
  */
+import { sanitizeVoiceOverrides } from '../../voicePrefs.js';
+
 export const TEXT_SIZES = Object.freeze(['sm', 'md', 'lg', 'xl']);
 
 /**
@@ -34,7 +36,7 @@ export const TEXT_SIZES = Object.freeze(['sm', 'md', 'lg', 'xl']);
 // 配音三件套：默认语言、本土语言开关、逐干员的覆盖（空表）。合并时这三个键从默认对象里掉了，
 // sanitizeSettings 于是拿到了 undefined —— 老档案读出来就没有 voiceLang。
 export const DEFAULT_SETTINGS = Object.freeze({ bgm: 0.6, sfx: 0.8, voice: 0.8,
-  voiceNative: false,   // 本土语言开关（上游 0.3.2）；voiceLang / voiceLangByChar 在本行后面已有
+  voiceNative: false, uiTheme: '', themeMotion: true,   // 本土语言开关（上游 0.3.2）；voiceLang / voiceLangByChar 在本行后面已有
  muted: false, damageNumbers: true, officialDamageNumbers: false, ammoEnergyCount: false, combatMetrics: false, prepDeployFold: true, otherSkins: true, bondTimers: false, fullscreenWakeLock: false, workshopSkins: true, workshopSources: true, quality: 'high', officialFx: 'auto', textSize: 'sm', keys: DEFAULT_HOTKEYS, voiceLang: DEFAULT_VOICE_LANG, voiceLangByChar: Object.freeze({}) });
 /**
  * 设置「显示弹药与能量数量」的取值（上游 0.3.1 把「弹药数量」与「秘术师能量」两个开关合并成一个）：
@@ -84,21 +86,11 @@ export function availableVoiceLangs(manifest) {
 }
 
 /**
- * Sanitize the per-operator 配音 overrides: charId → one of VOICE_LANGS, capped, everything else dropped (a hand-edited
- * localStorage must never make the game request a dub that does not exist).
+ * 逐干员配音覆盖的校验器。**与 public/js/voicePrefs.js 的 `sanitizeVoiceOverrides` 是同一个函数**
+ * （上游 0.4.0 把这个校验器放在 voicePrefs，本仓库历史上的名字是 sanitizeVoiceLangByChar）——
+ * 两个名字指向同一个实现，不会给出不同结论。
  */
-export function sanitizeVoiceLangByChar(raw) {
-  if (!isObj(raw)) return {};
-  const out = {};
-  let n = 0;
-  for (const [k, v] of Object.entries(raw)) {
-    if (n >= VOICE_OVERRIDE_MAX) break;
-    if (typeof k !== 'string' || !CHAR_ID.test(k) || !VOICE_LANGS.includes(v)) continue;
-    out[k] = v;
-    n++;
-  }
-  return out;
-}
+export const sanitizeVoiceLangByChar = sanitizeVoiceOverrides;
 
 /**
  * The dub `charId` speaks: its own override, else the global one, else the default. Pure — the client and the tests
@@ -126,6 +118,7 @@ export function voiceLangFor(s, charId) {
 export function sanitizeSettings(raw) {
   const r = isObj(raw) ? raw : {};
   const vol = (v, d) => (Number.isFinite(v) ? clamp(Math.round(v * 100) / 100, 0, 1) : d);
+  const voiceTable = sanitizeVoiceOverrides(r.voiceOverrides ?? r.voiceLangByChar);
   return {
     bgm: vol(r.bgm, DEFAULT_SETTINGS.bgm),
     sfx: vol(r.sfx, DEFAULT_SETTINGS.sfx),
@@ -134,7 +127,8 @@ export function sanitizeSettings(raw) {
     damageNumbers: typeof r.damageNumbers === 'boolean' ? r.damageNumbers : DEFAULT_SETTINGS.damageNumbers,
     officialDamageNumbers: typeof r.officialDamageNumbers === 'boolean' ? r.officialDamageNumbers : false,
     ammoEnergyCount: ammoEnergyCountOf(r),
-    prepDeployFold: typeof r.prepDeployFold === 'boolean' ? r.prepDeployFold : DEFAULT_SETTINGS.prepDeployFold,
+    // 上游 0.4.0：这一格是三态（false / true / 'partial' —— 中置收起），旧布尔值照旧认
+    prepDeployFold: r.prepDeployFold === 'partial' ? 'partial' : typeof r.prepDeployFold === 'boolean' ? r.prepDeployFold : DEFAULT_SETTINGS.prepDeployFold,
     otherSkins: typeof r.otherSkins === 'boolean' ? r.otherSkins : DEFAULT_SETTINGS.otherSkins,
     combatMetrics: typeof r.combatMetrics === 'boolean' ? r.combatMetrics : DEFAULT_SETTINGS.combatMetrics,
     workshopSkins: typeof r.workshopSkins === 'boolean' ? r.workshopSkins : DEFAULT_SETTINGS.workshopSkins,
@@ -149,6 +143,11 @@ export function sanitizeSettings(raw) {
     // 上游 0.3.2 的 本土语言 开关。逐干员的语言（上游叫 voiceOverrides）本仓库一直叫 voiceLangByChar，
     // 存储键沿用我们的，不并存两套。
     voiceNative: r.voiceNative === true,
-    voiceLangByChar: sanitizeVoiceLangByChar(r.voiceLangByChar),
+    // 存储键沿用本仓库既有的 voiceLangByChar（上游 0.4.0 叫 voiceOverrides：**输入两边都认**，
+    // 输出只写我们那一个，免得同一份数据在存档里出现两个键）
+    voiceLangByChar: voiceTable,
+    // 界面主题（上游 0.4.0，docs/THEMES.md）：空串 = 内置「卫戍协议终端」；themeMotion 是主题动画开关
+    uiTheme: typeof r.uiTheme === 'string' && r.uiTheme.length <= 64 ? r.uiTheme : DEFAULT_SETTINGS.uiTheme,
+    themeMotion: typeof r.themeMotion === 'boolean' ? r.themeMotion : DEFAULT_SETTINGS.themeMotion,
   };
 }

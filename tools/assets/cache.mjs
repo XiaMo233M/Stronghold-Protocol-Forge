@@ -5,12 +5,23 @@
 // Downloaded once when missing (or with --refresh-index), then reused — forever, unless --index-ttl names an age.
 // See docs/ASSETS.md ("Index cache freshness").
 
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile, stat, rm } from 'node:fs/promises';
+import { existsSync, readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { RAW, withAssetBase } from './sources.mjs';
 import { MirrorPolicy } from './network.mjs';
 import { guardDefaultFetch } from './env-proxy.mjs';
+
+/** The served local manifest can select an immutable index when shared assets must remain add-only. */
+export function localFxIndexPath(root) {
+  const manifest = join(root, 'data/local-fx.json');
+  if (existsSync(manifest)) {
+    const url = JSON.parse(readFileSync(manifest, 'utf8')).groups?.fx?.index?.path;
+    if (typeof url === 'string' && /^\/assets\/local\/fx\/[a-zA-Z0-9_-]+\.json$/.test(url)) return join(root, 'public', url);
+  }
+  return join(root, 'public/assets/local/fx/index.json');
+}
 
 /**
  * Index cache files older than `ttlHours` are re-downloaded. `0` (the default) means never, so a run without

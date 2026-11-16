@@ -23,11 +23,11 @@ import { writePlugin } from './helpers/pluginFixtures.js';
 import { computeVanillaContent } from '../server/plugins/identity.js';
 import { DATA_SHIM_JS } from '../server/http/static.js';
 import { DIFFICULTIES, ERR, modeIdFor } from '../shared/constants.js';
-import { checkNotOwned, validateC2S } from '../shared/protocol.js';
+import { checkNotOwned, loadoutOptions, validateC2S } from '../shared/protocol.js';
 import { DEFAULT_VERSION, VERSIONS, versionById } from '../shared/versions.js';
 
 const VANILLA = 'a0'.repeat(32);
-const CS = { 'act2autochess@V2_1': 'b1'.repeat(32), act1autochess: 'c1'.repeat(32), 'act1autochess@V1_1': 'd1'.repeat(32) };
+const CS = { 'act2autochess@V2_1': 'b1'.repeat(32), act1autochess: 'c1'.repeat(32), 'act1autochess@V1_1': 'd1'.repeat(32), 'act3autochess@V3_1': 'e1'.repeat(32) };
 const ALL = VERSIONS.map((v) => v.id);
 const quiet = { info() {}, warn() {}, error() {}, debug() {} };
 
@@ -37,6 +37,12 @@ function versionStub({ enabled = ALL, defaultId = DEFAULT_VERSION, roomModes = {
   const csOf = (id) => (!ids.includes(id) ? null : id === DEFAULT_VERSION ? VANILLA : CS[id]);
   const data = (id) => (!ids.includes(id) ? null : id === DEFAULT_VERSION ? getData() : getVersionData(id));
   const modesOf = (id) => roomModes[id] || versionById(id).roomModes;
+  // server/versions.js modesOf / laddered over the same data
+  const official = (id, mode) => (!ids.includes(id) || !modesOf(id).includes(mode) ? [] : Object.entries(data(id).config.modes)
+    .filter(([, m]) => m.type === (mode === 'solo' ? 'SINGLE' : 'MULTI'))
+    .map(([mid, m]) => ({ id: mid, type: m.type, difficulty: m.difficulty, name: m.name, code: m.code ?? '', sortId: m.sortId ?? 0 }))
+    .sort((a, b) => a.sortId - b.sortId || (a.id < b.id ? -1 : 1)));
+  const laddered = (id, mode) => official(id, mode).some((m) => m.id !== modeIdFor(mode, m.difficulty));
   return {
     ids, defaultId, nonDefault: ids.filter((id) => id !== DEFAULT_VERSION),
     isEnabled: (id) => ids.includes(id),
@@ -49,8 +55,11 @@ function versionStub({ enabled = ALL, defaultId = DEFAULT_VERSION, roomModes = {
     offered: (id, mode) => {
       if (!ids.includes(id) || !modesOf(id).includes(mode)) return [];
       const modes = data(id).config.modes;
+      if (laddered(id, mode)) return DIFFICULTIES.filter((d) => official(id, mode).some((m) => m.difficulty === d));
       return DIFFICULTIES.filter((d) => Object.hasOwn(modes, modeIdFor(mode, d)));
     },
+    modesOf: (id, mode) => official(id, mode),
+    laddered: (id, mode) => laddered(id, mode),
     welcome: () => (ids.length === 1 && ids[0] === DEFAULT_VERSION ? null : ids.map((id) => ({ id, cs: csOf(id) }))),
   };
 }
@@ -464,9 +473,9 @@ test('gameplay plugins: refused in a version room and for a proposal while on; c
   const resolved = [];
   const plugins = {
     resolve(ids, opts) {
-      resolved.push([ids, opts.gameplay]);
+      resolved.push([ids, opts.version]);
       if (ids.includes('rules')) {
-        if (opts.gameplay === false) return { error: ERR.VERSION_UNSUPPORTED, detail: 'rules changes the gameplay' };
+        if (opts.version !== DEFAULT_VERSION) return { error: ERR.VERSION_UNSUPPORTED, detail: 'rules changes the gameplay' };
         return { ok: true, set: { cs: 'ee'.repeat(32), plugins: [{ id: 'rules', version: '1.0.0', class: 'content', hash: 'ab' }], warnings: [], bytes: 0, dataBytes: 10, modes: [] } };
       }
       return { ok: true, set: { vs: 'ff'.repeat(32), plugins: ids.map((id) => ({ id, version: '1.0.0', class: 'cosmetic', hash: 'cd' })), warnings: [], bytes: 5 } };
@@ -481,20 +490,21 @@ test('gameplay plugins: refused in a version room and for a proposal while on; c
   assert.equal(room.modded, true);
   refused(h.lobby.proposeVersion(p, { version: 'act1autochess' }), ERR.VERSION_UNSUPPORTED);
   ok(h.lobby.setPlugins(p, { plugins: [{ id: 'skin' }] }));
+  h.clock.t += 1000;
   ok(h.lobby.proposeVersion(p, { version: 'act1autochess' }));
   const st = h.last(p);
   assert.equal(st.content.vs, 'ff'.repeat(32), 'the cosmetic set comes along');
   assert.equal(st.content.cs, CS.act1autochess);
   assert.equal(st.content.version, 'act1autochess');
   assert.deepEqual(st.content.plugins.map((x) => x.id), ['skin']);
-  assert.equal(resolved.at(-1)[1], false, 'resolved without gameplay plugins');
+  assert.equal(resolved.at(-1)[1], 'act1autochess', 'resolved for the target official version');
   refused(h.lobby.setPlugins(p, { plugins: [{ id: 'rules' }] }), ERR.VERSION_UNSUPPORTED);
   // cosmetic plugins that do not resolve on the target (the owner's policy, a refused plugin): the proposal is refused
   h.clock.t += 1000;
   ok(h.lobby.proposeVersion(p, { version: DEFAULT_VERSION }));
   ok(h.lobby.setPlugins(p, { plugins: [{ id: 'old-skin' }] }));
   const resolve = plugins.resolve;
-  plugins.resolve = (ids, opts) => (ids.includes('old-skin') && opts.gameplay === false ? { error: ERR.PLUGIN_BLOCKED, detail: 'not here' } : resolve(ids, opts));
+  plugins.resolve = (ids, opts) => (ids.includes('old-skin') && opts.version !== DEFAULT_VERSION ? { error: ERR.PLUGIN_BLOCKED, detail: 'not here' } : resolve(ids, opts));
   h.clock.t += 1000;
   refused(h.lobby.proposeVersion(p, { version: 'act1autochess' }), ERR.VERSION_UNSUPPORTED);
   assert.equal(room.version, DEFAULT_VERSION);
@@ -505,17 +515,11 @@ test('gameplay plugins: refused in a version room and for a proposal while on; c
   room.mode = 'coop'; // (a second human for a vote)
   ok(h.lobby.join(g, { code: room.code }));
   ok(h.lobby.proposeVersion(p, { version: 'act1autochess' }));
-  plugins.resolve = (ids, opts) => (opts.gameplay === false ? { error: ERR.PLUGIN_BLOCKED } : resolve(ids, opts));
+  plugins.resolve = (ids, opts) => (opts.version !== DEFAULT_VERSION ? { error: ERR.PLUGIN_BLOCKED } : resolve(ids, opts));
   ok(h.lobby.versionVote(g, { voteId: room.versionVote.id, agree: true }));
   assert.equal(room.version, 'act1autochess');
   assert.deepEqual(room.content, { cs: CS.act1autochess, vanilla: true, version: 'act1autochess', plugins: [] });
   plugins.resolve = resolve;
-  // a room-sets object that ignores the option still cannot slip a gameplay set into a version room
-  const lax = harness({ plugins: { ...plugins, resolve: (ids) => plugins.resolve(ids, { gameplay: true }) } });
-  const q = lax.player('B');
-  ok(lax.lobby.create(q, { mode: 'solo', version: 'act1autochess' }));
-  refused(lax.lobby.setPlugins(q, { plugins: [{ id: 'rules' }] }), ERR.VERSION_UNSUPPORTED);
-  lax.lobby.shutdown();
   h.lobby.shutdown();
 });
 
@@ -695,10 +699,10 @@ test('the real version service: a room of 第一期上半 names its real cs and 
   lobby.shutdown();
 });
 
-test('server/plugins/roomSets.js resolve({ gameplay: false }): a content / script / trusted plugin in the closed list → VERSION_UNSUPPORTED, nothing built', () => {
+test('server/plugins/roomSets.js resolving act1autochess: a content / script / trusted plugin in the closed list → VERSION_UNSUPPORTED, nothing built', () => {
   const built = [];
   const plugin = (id, cls, extra = {}) => ({ id, class: cls, status: 'loaded', content: cls !== 'cosmetic' ? {} : undefined, visual: cls === 'cosmetic' ? {} : undefined,
-    manifest: { version: '1.0.0', scope: ['room'], ...extra } });
+    manifest: { class: cls, version: '1.0.0', scope: ['room'], ...extra } });
   const list = { skin: plugin('skin', 'cosmetic'), rules: plugin('rules', 'content'), needs: plugin('needs', 'cosmetic', { requires: { rules: '*' } }) };
   const sets = createRoomSets({
     registry: { plugin: (id) => list[id] || null },
@@ -707,10 +711,144 @@ test('server/plugins/roomSets.js resolve({ gameplay: false }): a content / scrip
     policy: null,
   });
   for (const ids of [['rules'], ['needs'], ['skin', 'rules']]) {
-    const r = sets.resolve(ids, { gameplay: false });
+    const r = sets.resolve(ids, { version: 'act1autochess' });
     assert.equal(r.error, ERR.VERSION_UNSUPPORTED, `${ids}: ${JSON.stringify(r)}`);
   }
   assert.deepEqual(built, [], 'refused before any set is built');
-  assert.equal(sets.resolve(['skin'], { gameplay: false }).ok, true);
+  assert.equal(sets.resolve(['skin'], { version: 'act1autochess' }).ok, true);
   assert.equal(sets.resolve(['rules']).ok, true, 'the default keeps gameplay plugins');
+});
+
+test('规程·序列Ⅰ solo: a laddered room keeps its official mode — 规程等级 by difficulty at create, any of its 21 by room.setMode, the match plays it', () => {
+  const h = harness();
+  const p = h.player('Solo');
+  ok(h.lobby.create(p, { mode: 'solo', difficulty: 'NORMAL', version: 'act3autochess@V3_1' }));
+  assert.deepEqual([h.last(p).modeId, h.last(p).difficulty], ['mode_single_5', 'NORMAL']);
+  ok(h.lobby.setMode(p, { modeId: 'mode_single_12' }));
+  assert.deepEqual([h.last(p).modeId, h.last(p).difficulty], ['mode_single_12', 'HARD']);
+  // 极速模拟 (FAST) counts as 标准 for the room's difficulty-keyed parts
+  ok(h.lobby.setMode(p, { modeId: 'mode_single_funny' }));
+  assert.deepEqual([h.last(p).modeId, h.last(p).difficulty], ['mode_single_funny', 'FUNNY']);
+  ok(h.lobby.setDifficulty(p, { difficulty: 'ABYSS' }));
+  assert.deepEqual([h.last(p).modeId, h.last(p).difficulty], ['mode_single_15', 'ABYSS']);
+  refused(h.lobby.setMode(p, { modeId: 'mode_multi_hard' }), ERR.BAD_TARGET);
+  refused(h.lobby.setMode(p, { modeId: 'mode_single_normal' }), ERR.BAD_TARGET);
+  ok(h.lobby.setMode(p, { modeId: 'mode_single_20' }));
+  ok(h.lobby.contentReady(p, { cs: CS['act3autochess@V3_1'] }));
+  Rec.last = null;
+  ok(h.lobby.start(p));
+  assert.equal(Rec.last?.modeId, 'mode_single_20');
+  assert.equal(Rec.last?.difficulty, 'ABYSS');
+  h.lobby.shutdown();
+});
+
+test('规程·序列Ⅰ: its co-op rooms and every default room carry no modeId; a switch puts a solo room on the ladder and takes it off', () => {
+  const h = harness();
+  const { people: [a], room } = coop(h, 1);
+  ok(h.lobby.proposeVersion(a, { version: 'act3autochess@V3_1' }));
+  assert.equal(room.version, 'act3autochess@V3_1');
+  assert.equal(Object.hasOwn(h.last(a), 'modeId'), false, 'co-op: one mode per difficulty');
+  const s = h.player('Solo');
+  ok(h.lobby.create(s, { mode: 'solo', difficulty: 'HARD' }));
+  assert.equal(Object.hasOwn(h.last(s), 'modeId'), false, 'a default room');
+  ok(h.lobby.proposeVersion(s, { version: 'act3autochess@V3_1' }));
+  assert.deepEqual([h.last(s).modeId, h.last(s).difficulty], ['mode_single_9', 'HARD']);
+  ok(h.lobby.setMode(s, { modeId: 'mode_single_11' }));
+  h.clock.t += 10_000;
+  ok(h.lobby.proposeVersion(s, { version: DEFAULT_VERSION }));
+  assert.equal(Object.hasOwn(h.last(s), 'modeId'), false);
+  assert.equal(h.last(s).difficulty, 'HARD');
+  h.lobby.shutdown();
+});
+
+test('规程·序列Ⅰ solo: room.create takes the official mode (the room\'s difficulty follows it); a default room ignores it', () => {
+  assert.equal(validateC2S({ t: 'room.create', mode: 'solo', version: 'act3autochess@V3_1', modeId: 'mode_single_7' }), null);
+  const h = harness();
+  const p = h.player('Solo');
+  ok(h.lobby.create(p, { mode: 'solo', difficulty: 'FUNNY', version: 'act3autochess@V3_1', modeId: 'mode_single_7' }));
+  assert.deepEqual([h.last(p).modeId, h.last(p).difficulty], ['mode_single_7', 'NORMAL']);
+  const q = h.player('Other');
+  ok(h.lobby.create(q, { mode: 'solo', difficulty: 'HARD', version: 'act3autochess@V3_1', modeId: 'mode_multi_hard' }));
+  assert.deepEqual([h.last(q).modeId, h.last(q).difficulty], ['mode_single_9', 'HARD'], 'not one of its modes: the first of the difficulty');
+  const r = h.player('Default');
+  ok(h.lobby.create(r, { mode: 'solo', difficulty: 'HARD', modeId: 'mode_single_7' }));
+  assert.equal(Object.hasOwn(h.last(r), 'modeId'), false);
+  h.lobby.shutdown();
+});
+
+test('switching from player to spectator cancels a version vote in every official version', (t) => {
+  for (const version of ALL) for (const changingHost of [false, true]) {
+    const h = harness();
+    t.after(() => h.lobby.shutdown());
+    const host = h.player('Host');
+    const guest = h.player('Guest');
+    ok(h.lobby.create(host, { mode: 'coop', version }));
+    const room = h.lobby.roomOf(host);
+    ok(h.lobby.join(guest, { code: room.code }));
+    const target = ALL.find((id) => id !== version);
+    ok(h.lobby.proposeVersion(host, { version: target }));
+    assert.ok(room.versionVote);
+    const changing = changingHost ? host : guest;
+    ok(h.lobby.spectate(changing, { code: room.code }));
+    assert.equal(room.versionVote, null);
+    assert.equal(room.version, version);
+    assert.equal(room.hostId, changingHost ? guest.playerId : host.playerId);
+    assert.equal(room.seatOf(changing.playerId), null);
+    assert.equal(h.last(changing).spectators[0].playerId, changing.playerId);
+    assert.ok(h.toasts(changing).some((m) => m.msgid === '同盟成员有变动，切换版本投票已取消'));
+    ok(h.lobby.join(changing, { code: room.code }));
+    assert.equal(room.seatOf(changing.playerId).ready, false);
+    if (version !== DEFAULT_VERSION) assert.notEqual(room.seatOf(changing.playerId).content, 'ready');
+  }
+});
+
+/** A visible non-golden chess with a skill that is not its default, so room.loadout actually stores an entry. */
+function storedLoadout(version) {
+  const chess = getVersionData(version).chess || {};
+  for (const c of Object.values(chess)) {
+    if (!c || c.isGolden || c.visible === false || c.isHidden || c.isDiy) continue;
+    if (c.baseId && c.baseId !== c.chessId) continue;
+    const opt = loadoutOptions(c, c.goldenId ? chess[c.goldenId] : null);
+    const skill = opt.skills.find((i) => i !== opt.defaultSkill);
+    if (skill != null) return { id: c.chessId, skill };
+  }
+  return null;
+}
+
+test('规程 room: a verified loadout sent while spectating keeps the room cs; ready and consent reset on the new seat', () => {
+  const version = 'act3autochess@V3_1';
+  const cs = CS[version];
+  const picked = storedLoadout(version);
+  assert.ok(picked, '规程 data has a chess with two skills');
+  const h = harness();
+  const { people: [host, guest], room } = coop(h, 2, { version });
+  ok(h.lobby.contentReady(guest, { cs }));
+  ok(h.lobby.ready(guest, { ready: true }));
+  const seated = room.seatOf(guest.playerId);
+  seated.contentGen = 4;
+  seated.consentCs = cs;
+  ok(h.lobby.spectate(guest, { code: room.code }));
+  const spec = room.spectatorOf(guest.playerId);
+  assert.equal(spec.content, 'ready');
+  assert.equal(spec.contentGen, 4);
+  assert.equal(spec.consentCs, undefined);
+  assert.equal(h.last(host).spectators.find((s) => s.playerId === guest.playerId).content, 'ready');
+  assert.equal(room.hostId, host.playerId);
+  ok(h.lobby.loadout(guest, { entries: { [picked.id]: { skill: picked.skill } } }));
+  assert.equal(guest.loadoutCs, cs, 'watching does not un-verify a page that already reported the content');
+  assert.equal(guest.loadout[picked.id].skill, picked.skill);
+  ok(h.lobby.join(guest, { code: room.code }));
+  const seat = room.seatOf(guest.playerId);
+  assert.equal(seat.ready, false);
+  assert.equal(seat.consentCs ?? null, null);
+  assert.notEqual(seat.content, 'ready');
+  assert.equal(seat.loadoutCs, cs);
+  ok(h.lobby.contentReady(host, { cs }));
+  ok(h.lobby.contentReady(guest, { cs }));
+  ok(h.lobby.ready(guest, { ready: true }));
+  Rec.last = null;
+  ok(h.lobby.start(host));
+  const played = Rec.last.seats.find((s) => s.playerId === guest.playerId);
+  assert.equal(played.loadout[picked.id].skill, picked.skill);
+  h.lobby.shutdown();
 });

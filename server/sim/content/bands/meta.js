@@ -41,7 +41,7 @@
 // The operators' 「<进入休整期时>」 traits (SERVER_PREP_START garrisons) run on onPrepStart too (effectsMeta.js GARRISON_HOOK,
 // DESIGN §37.53), after the strategy's grants of that dispatch (global → band → bonds → garrisons).
 
-import { GEO } from '../../../../shared/constants.js';
+import { GEO, gateOf } from '../../../../shared/constants.js';
 import { bbCap } from '../../../../shared/plugins/officialBounds.js';
 import { burstLimit } from '../../../../shared/plugins/steps.js';
 import { createRng } from '../../rng.js';
@@ -117,7 +117,7 @@ K.prep_finish_char_bond_add_layer = (ps) => ({
     }
     for (const t of [...byTier.keys()].sort((a, b) => a - b)) {
       const p = ctx.rng.pick(byTier.get(t));
-      for (const b of metaBonds(ctx, p)) ctx.addLayers(b, n, { requireActive: false, reason: 'band' });
+      for (const b of metaBonds(ctx, p)) ctx.addLayers(b, n, { requireActive: ctx.data?.config?.version?.family === 'regulation', reason: 'band' });
     }
   },
 });
@@ -241,7 +241,7 @@ K.gain_bond_char_per_round = (ps) => ({
     const r0 = int(p.round, 1), every = Math.max(1, int(p.preround, 1));
     if (ctx.round < r0 || (ctx.round - r0) % every !== 0) return;
     for (let k = 0; k < timesOf(p.count, 1); k++) {
-      const id = rollBond(ctx, p.bond, { anyTier: true });
+      const id = rollBond(ctx, p.bond, { anyTier: ctx.data?.config?.version?.family !== 'regulation' });
       if (id) ctx.grantChess(id, { source: 'band' });
     }
   },
@@ -379,7 +379,9 @@ K.refresh_shop_count_gain_coin_bond_char_chess = (ps) => ({
     const p = ps[0];
     const every = int(p.refresh_count, 0);
     if (every <= 0) return;
-    if (ctx.incCounter('band:chiave:refreshes', 1) % every !== 0) return;
+    const refreshes = ctx.data?.config?.version?.family === 'regulation'
+      ? ctx.roundStats().refreshes : ctx.incCounter('band:chiave:refreshes', 1);
+    if (refreshes % every !== 0) return;
     if (roundCounter(ctx, 'band:chiave') >= int(p.max_count, Infinity)) return;
     const id = rollBond(ctx, p.bond);
     if (id && ctx.grantChess(id, { source: 'band' })) bumpRound(ctx, 'band:chiave');
@@ -397,6 +399,10 @@ K.preparation_start_add_special_goods_every_n_round = (ps) => ({
   },
 });
 
+K.shop_up_bond_refresh_once = K.up_shop_next_refresh_must_present_bond_char;
+K.buy_bond_char_gain_coin = K.round_start_gain_coin_by_bond_char_chess_buy;
+K.round_buy_bond_char_price = K.first_buy_in_round_char_price_change;
+
 // ---------------------------------------------------------------------------------------------------------------
 // 鸭爵 “神秘顾客”: "从第5回合起，你和队友遭遇的部分敌人可能会替换为<鸭爵><高普尼克><流泪小子><圆仔>，击倒这些敌人者获得1资金奖励
 // （包括联防阶段）". A global handler rewrites the battle spawn list of every alive player while the band is held by that
@@ -407,11 +413,14 @@ K.preparation_start_add_special_goods_every_n_round = (ps) => ({
 // (`ev.waveSpawns`: before the player's bounty units, which differ per player) from the `minweight`–`maxweight` share of
 // that wave's units in time order, the leader and its parts left out of the share [ASSUMED reading of the two weights] —
 // any wave enemy but the leader, its parts and uncounted units —, with a stream of its own from the match seed
-// (`ctx.seedFor('duck:<round>')`: no player's meta stream, the same in the previews), so every player has the same count,
-// the same units and the same enemies [ASSUMED: the same enemy for every player — the report says the same enemy is
-// swapped]; each player's list swaps the k-th own unit of the picked action at its own (bounty-re-timed) time and route.
-// The draw keeps the time share: no lane rule (the report's 「总在下路」 is not settled by its recording; [ASSUMED] until a
-// recording or the maintainer's recall shows the upper lane is never used). Elites are eligible
+// (`ctx.seedFor('duck:<round>')`: no player's meta stream, the same in the previews), so every player has the same count
+// and the same units [ASSUMED: the same units]; each player's list swaps the k-th own unit of the picked action at its own
+// (bounty-re-timed) time and route. Only units of the lower lane are drawn: a route starting at the lower gate
+// (shared/constants.js gateOf — normal fields (9,10), not (12,10)). The swapped-in kind is drawn per player, one per round
+// (a stream of its own, `duck:<round>:<playerId>`), so a player's two swaps are the same kind while players can differ.
+// All three from the reporter's recordings of the official game (GitHub #839, 2026-10-23: four players 2鼠 / 2狗 / 2鼠 /
+// 2鸭 in one wave, all on the lower lane; a 联防 of 6熊 = three teammates' 2熊 each; the maintainer's decision of
+// 2026-11-01). Elites are eligible
 // too [ASSUMED: the text names no rank; one rule for every battle; about two thirds of the leader rounds' escorts in that
 // share are elites, so a NORMAL-only rule would leave most Final Assault halves without a candidate — ≈ 80 % instead of
 // ≈ 36 % of the R14 pair-field halves over 40 seeds]. Flyers are never swapped [ASSUMED: the four are ground units and a
@@ -436,8 +445,9 @@ const DUCK_KINDS = new Set(['normal', 'boss', 'hidden']);
 /** Boss-field column between the left ('L') and the right ('R') player's half (the goals are at cols 2–3 / 17). */
 const BOSS_MID_COL = (GEO.BOSS_RECT.c0 + GEO.BOSS_RECT.c1) / 2;
 
-function duckParams(bandId = DUCK_BAND) {
-  for (const b of buffsOf(bandRecord(bandId))) if (b.key === 'round_start_all_player_change_enemy_2') return b.p;
+function duckParams(bandId = DUCK_BAND, commandEffectId = null) {
+  const record = commandEffectId ? gameData().effects?.[commandEffectId] : bandRecord(bandId);
+  for (const b of buffsOf(record)) if (b.key === 'round_start_all_player_change_enemy_2') return b.p;
   return null;
 }
 
@@ -449,10 +459,12 @@ const notOwn = (s) => !s || s.tag === 'bounty' || s.tag === 'duck';
 /**
  * The round's swaps (exported for tests): `{ action, k, enemyKey }` — the k-th unit of a wave action becomes enemyKey.
  * Drawn from `base`, the round's own wave (no bounty units: they differ per player), so every player who uses the same
- * `rng` stream on the same wave gets the same count, the same units and the same 鸭爵 enemies (GitHub #839). `side`
- * ('L' | 'R', a pair boss field) limits the draw to the units whose route (`routes[routeIndex]`) ends on that half.
+ * `rng` stream on the same wave gets the same count and the same units (GitHub #839); only units whose route
+ * (`routes[routeIndex]`) starts at the lower gate (gateOf; `leader`: a boss / hidden field's rows). The 鸭爵 enemy is one
+ * per call, drawn with `typeRng` (the player's own stream; default `rng`). `side` ('L' | 'R', a pair boss field) limits
+ * the draw to the units whose route ends on that half.
  */
-export function duckPicks(gd, rng, base, p, { routes = null, side = null } = {}) {
+export function duckPicks(gd, rng, base, p, { routes = null, side = null, leader = false, typeRng = rng } = {}) {
   const ducks = list(p.enemylist).filter((k) => gd.enemy(k));
   if (!ducks.length || !Array.isArray(base)) return [];
   const lo = Math.max(0, int(p.min, 0)), hi = Math.max(lo, int(p.max, lo));
@@ -490,10 +502,14 @@ export function duckPicks(gd, rng, base, p, { routes = null, side = null } = {})
     const s = base[f.i];
     const e = gd.enemy(s.enemyKey);
     const frac = n > 1 ? j / (n - 1) : 0;
+    const route = Array.isArray(routes) ? routes[s.routeIndex] : null;
     return !s.tag && s.countInTotal !== false && e && e.rank !== 'BOSS' && !e.notCountInTotal && e.stats?.motion !== 'FLY'
-      && frac >= w0 - 1e-9 && frac <= w1 + 1e-9;
+      && frac >= w0 - 1e-9 && frac <= w1 + 1e-9 && gateOf(route?.start, leader) === 'lower';
   });
-  return rng.shuffle(ok).slice(0, want).map((f) => ({ action: f.action, k: f.k, enemyKey: rng.pick(ducks) }));
+  const picked = rng.shuffle(ok).slice(0, want);
+  if (!picked.length) return [];
+  const enemyKey = typeRng.pick(ducks);
+  return picked.map((f) => ({ action: f.action, k: f.k, enemyKey }));
 }
 
 /**
@@ -536,23 +552,26 @@ export function applyDuckPicks(spawns, picks, ownerPlayerId) {
  * Rewrite `spawns` in place (exported for tests): draw the swaps from `base` (default: `spawns` without its bounty
  * units) with `rng` (default ctx.rng) and apply them. Returns the replaced spawn specs.
  */
-export function duckReplace(ctx, spawns, p, ownerPlayerId, { routes = null, side = null, base = null, rng = ctx.rng } = {}) {
+export function duckReplace(ctx, spawns, p, ownerPlayerId, { routes = null, side = null, leader = false, base = null, rng = ctx.rng, typeRng = rng } = {}) {
   if (!Array.isArray(spawns)) return [];
-  const picks = duckPicks(ctx.gd, rng, Array.isArray(base) ? base : spawns.filter((s) => !notOwn(s)), p, { routes, side });
+  const picks = duckPicks(ctx.gd, rng, Array.isArray(base) ? base : spawns.filter((s) => !notOwn(s)), p, { routes, side, leader, typeRng });
   return applyDuckPicks(spawns, picks, ownerPlayerId);
 }
 
 const duckGlobal = {
   onBattleStart(ctx, ev) {
     if (!ev || !DUCK_KINDS.has(ev.kind) || !Array.isArray(ev.spawns)) return;
-    const holder = [ctx, ...ctx.teammates()].find(t => (t.gd.band(t.bandId())?.effectRef ?? t.bandId()) === DUCK_BAND);
+    const holder = [ctx, ...ctx.teammates()].find(t => duckParams(t.bandId(), t.commandEffectId));
     if (!holder) return;
-    const p = duckParams(holder.bandId());
+    const p = duckParams(holder.bandId(), holder.commandEffectId);
     if (!p || ctx.round < int(p.round, 1)) return;
     // one draw per round for every player (GitHub #839): its own stream from the match seed — no player's meta stream,
-    // the same in the stats preview and the bot rehearsals — on the wave before the player's bounties (ev.waveSpawns)
-    const rng = typeof ctx.seedFor === 'function' ? createRng(ctx.seedFor(`duck:${ctx.round}`)) : ctx.rng;
-    duckReplace(ctx, ev.spawns, p, ctx.playerId, { routes: ev.routes, side: ev.side, base: ev.waveSpawns, rng });
+    // the same in the stats preview and the bot rehearsals — on the wave before the player's bounties (ev.waveSpawns);
+    // the kind from the player's own stream
+    const seeded = typeof ctx.seedFor === 'function';
+    const rng = seeded ? createRng(ctx.seedFor(`duck:${ctx.round}`)) : ctx.rng;
+    const typeRng = seeded ? createRng(ctx.seedFor(`duck:${ctx.round}:${ctx.playerId}`)) : rng;
+    duckReplace(ctx, ev.spawns, p, ctx.playerId, { routes: ev.routes, side: ev.side, leader: ev.kind !== 'normal', base: ev.waveSpawns, rng, typeRng });
   },
 };
 
@@ -572,9 +591,9 @@ function merge(parts) {
 }
 
 /** Hooks of one band (null when it has no prep effect). */
-export function bandMetaHandler(bandId) {
+export function bandMetaHandler(bandId, record = bandRecord(bandId)) {
   const groups = new Map();
-  for (const b of buffsOf(bandRecord(bandId))) {
+  for (const b of buffsOf(record)) {
     if (!b.key || !K[b.key]) continue;
     if (!groups.has(b.key)) groups.set(b.key, []);
     groups.get(b.key).push(b.p);

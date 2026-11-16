@@ -18,7 +18,8 @@
 //   阿戈尔 egirShip      members max HP +(base_max_hp + max_hp_per_stack·L) (直接乘算); battle start devour (see devour():
 //                        the marker's gained base ATK is a 最终加算, `atkFinal`, not scaled by its ATK +%);
 //                        5: max_free_respawn_cnt free redeploys, one per member on its first knock-out — the devour's
-//                        knock-outs by board position once every devour is over (egirReviveScan), later ones at once
+//                        knock-outs, and 联防 members who entered already down, by board position once every devour
+//                        is over (egirReviveScan), later ones at once
 //   叙拉古 siracusaShip  every member deployment: ASPD +(base + per·L) for (base_duration + per·L) s; 6: 隐匿 for the same
 //                        time, and while hidden / end_duration s after, every 普通伤害 hit (siracusaRolls) procs (PRD,
 //                        nominal `prob`) base_damage + damage_per_stack·L true damage + fear `fear` s
@@ -46,6 +47,7 @@ import { damageAttackType, isHpLoss } from '../../attack.js';
 import { msg } from '../../../../shared/i18n.js';
 import { bbCap } from '../../../../shared/plugins/officialBounds.js';
 import { textFinite } from '../../../../shared/plugins/textNumber.js';
+import * as reg from './regulation.js';
 
 const num = S.num;
 
@@ -220,7 +222,10 @@ function installYan(battle, pid, bb, members) {
 function installSargon(battle, pid, bb, members) {
   const memberSet = new Set(members);
   const ps = S.player(battle, pid);
-  const share = S.buffParams(S.bondRecord('sargonShip'), SARGON_SHARE_KEY);
+  let share = S.buffParams(S.bondRecord('sargonShip'), SARGON_SHARE_KEY);
+  // A band can swap the effect back to bondeffect_sargon. The share blackboard lives on that effect record when the
+  // bond record was copied from another effect. Default data already has the key on the bond, so this stays unread.
+  if (!share && S.isVersionData()) share = S.buffParams(S.effectRecord(S.bondRecord('sargonShip')?.effectId), SARGON_SHARE_KEY);
   const band = ps?.bandId ?? null;
   const narant = !!(share && band && share.valid_in_band === band);
   const main = narant ? share : bb;
@@ -367,7 +372,8 @@ function egirStart(battle) {
 
 /**
  * 联防: an operator forced out at the deployment (carry.down, Battle.start, before battleStart) still stands on its
- * deploy position for the devour (PRTS 盟约记录 最先部署). The forced exit is not a knock-out, so it takes no 5-tier slot.
+ * deploy position for the devour (PRTS 盟约记录 最先部署). The forced exit is not a 'killed' knock-out. When the 5-tier
+ * revive is reached, installEgir's scan treats this carried-down state as the member's first knock-out of this battle.
  */
 function egirDownAtStart(battle, u) {
   return S.isOp(u) && !u.alive && u.removeReason === FORCED_EXIT && !!u.carry && u.carry.down === true
@@ -397,7 +403,8 @@ function egirDownAtStart(battle, u) {
  * Not modelled: the 流失's own source (PRTS: the target itself) — the hooks see the marker as the source, as for the
  * credit (an open question, DESIGN §24.7).
  * 联防: the operators down since the end of their own combat (forced out by Battle.start) mark, are marked and resolve
- * their marks like standing ones, but nothing resolves on them (below; per players' reports, owner's decision 2026-10-04).
+ * their marks like standing ones, but the devour resolves nothing on them (below; per players' reports, owner's
+ * decision 2026-10-04). A reached 5-tier revive may still bring a down member back after every pass (installEgir).
  * Whose operator stands in front does not matter (PRTS "依次吞噬身前一格干员", no own-side limit; the owner's decision of
  * 2026-10-05 after GitHub #140 comment 4): on a shared field (联防, boss) a teammate's operator — standing, or entering
  * 联防 down — is marked like an own one, gives the same base ATK / block count, and the chain goes on through it when it
@@ -407,11 +414,12 @@ function egirDownAtStart(battle, u) {
  */
 function devour(battle, pid, bb, members) {
   // 联防: an operator down at the end of its own combat (carryState.down — Battle.start forced it out right before
-  // battleStart, FORCED_EXIT) takes part in the devour as if it stood on its tile, then stays out: it marks in its turn,
-  // it is "the unit in front" of another (the chain goes on through it when it is a member), its base ATK / block count
-  // for its marker and its own marks resolve (their 物理流失 lands, credited to it as usual); only the marks ON it resolve
-  // nothing — it is forced out, so it is never knocked out again, revived or devoured. Per players' reports (community
-  // report #3, GitHub #33 item 3), owner's decision 2026-10-04; until 0.1.2 the forced exit came first and the chain broke.
+  // battleStart, FORCED_EXIT) takes part in the devour as if it stood on its tile: it marks in its turn, it is "the unit
+  // in front" of another (the chain goes on through it when it is a member), its base ATK / block count for its marker
+  // and its own marks resolve (their 物理流失 lands, credited to it as usual); only the marks ON it resolve nothing — the
+  // forced exit is not a knock-out, so the devour itself never revives it. Per players' reports (community report #3,
+  // GitHub #33 item 3), owner's decision 2026-10-04; until 0.1.2 the forced exit came first and the chain broke.
+  // The 5-tier scan after the last pass (installEgir) is separate: a down member spends this battle's first knock-out there.
   const downAtStart = (u) => egirDownAtStart(battle, u);
   // Historical text says bottom then left; [ASSUMED] season one's unspecified order follows its deployment.
   const order = members.filter((u) => S.onField(u) || downAtStart(u)).sort(S.isVersionData()
@@ -485,7 +493,7 @@ function devour(battle, pid, bb, members) {
   }
 }
 
-function installEgir(battle, pid, bb, members) {
+function installEgir(battle, pid, bb, members, opts = {}) {
   // HP (every tier): a match-long buff put on the members when the battle is built, so each one is deployed with it
   // (Battle._deploy: full HP of the raised max HP) and the battle-start devour finds it — the community report's step 1,
   // 「第一步给所有鱼加盟约的血量」 (DESIGN §25.22.5: an elite 深巡, 2904 HP and DEF 655, loses 5000 − 655 = 4345 to a mark and
@@ -515,8 +523,11 @@ function installEgir(battle, pid, bb, members) {
   // redeploy since 0.2.0) answers the knock-out before this hook and marks it `revivedBy`: that knock-out is not the
   // member's first either — the slot waits for its first unanswered knock-out (the owner's decision of 2026-10-05: an
   // operator's own revive uses no slot; [ASSUMED] for 埃芒加德, a band, as for M3茧甲, the item revive the owner named).
-  // An operator entering 联防 down (FORCED_EXIT) is not knocked out either; a 调和 member counts like any other. Each
-  // battle (normal, 联防, boss) counts its own. PRTS: the knocked-out unit's next deployment has 0 redeploy time and 0
+  // An operator entering 联防 down (FORCED_EXIT) is not a 'killed' knock-out, so 不屈 and kit death hooks stay quiet.
+  // When this tier is reached, the flush below counts that carried-down state as the member's first knock-out of THIS
+  // battle and revives it on the same scan as the devour's knock-outs (BV1auHq67Eoi 21:25–21:40). A 调和 member counts
+  // like any other. Each battle (normal, 联防, boss) counts its own — the text does not carry the count across battles.
+  // PRTS: the knocked-out unit's next deployment has 0 redeploy time and 0
   // cost, i.e. it IS knocked out (被击倒 triggers fire) and redeploys where it lies (the engine's rest tile,
   // Battle._layBody: the tile it was knocked out on — a raid-relocated member comes back where it fell —, or its own home
   // when it fell on another board piece's home; PRTS 卫戍协议/帮助 §作战阶段 单位部署) with full HP, SP reset and `deploy`
@@ -524,7 +535,9 @@ function installEgir(battle, pid, bb, members) {
   // knock-out in the fight the slot is always the one used. Until 0.1.3 the slots were fixed at battle start for the
   // first 3 members by position (§23.20); until 0.1.2 the first 3 knocked out took them but a revived member's pending
   // marks could knock it out again (GitHub #33, fixed in devour since).
-  const max = reached(battle, pid, 'egirShip', bb.power_bond_char_cnt) ? Math.max(0, Math.floor(num(bb.max_free_respawn_cnt, 0))) : 0;
+  // egir_2 keeps the HP buff and the devour, and replaces the free redeploy with a bench switch (opts.respawn false).
+  const max = opts.respawn === false ? 0
+    : (reached(battle, pid, 'egirShip', bb.power_bond_char_cnt) ? Math.max(0, Math.floor(num(bb.max_free_respawn_cnt, 0))) : 0);
   const start = egirStart(battle);
   start.passes++;
   battle.on('battleStart', () => {
@@ -547,6 +560,15 @@ function installEgir(battle, pid, bb, members) {
     S.fxOn(battle, 'revive', u, 'bond:egirShip', 'respawn', { n: revives });
   };
   start.flush.push(() => {
+    // 协防 start: a member already down (carry.down, forced out before battleStart) joins the same positional scan
+    // as the devour's knock-outs. Marking it knocked-out first spends its one slot even when none is left for it.
+    // [ASSUMED] the carried-down state is this battle's first knock-out (the footage's already-down members revive).
+    // redeploy leaves removeReason as the exit that put them down (the same as a 'killed' revive).
+    for (const u of members) {
+      if (!memberOps.has(u) || knockedOut.has(u) || !egirDownAtStart(battle, u)) continue;
+      knockedOut.add(u);
+      batch.push(u);
+    }
     for (const u of batch.splice(0).filter((x) => !x.alive && !x.removed).sort(egirReviveScan)) {
       if (revives >= max) break;
       revive(u);
@@ -690,18 +712,42 @@ const INSTALLERS = Object.freeze({
 
 export function install(battle) {
   if (!battle || !Array.isArray(battle.players)) return;
+  const version = S.isVersionData();
   for (const p of battle.players) {
     const pid = p.playerId;
     if (!p.bonds || typeof p.bonds !== 'object') continue;
     for (const [bondId, fn] of Object.entries(INSTALLERS)) {
       if (!S.bondActive(battle, pid, bondId)) continue;
-      const bb = bondBb(bondId);
-      if (!bb) continue;
       const members = S.bondMembers(battle, pid, bondId);
       if (!members.length) continue;
+      if (version) {
+        // the player's record: a 规程 strategy's 指令 may replace the effect (auto_chess_effect_replace →
+        // input.bondEffectOverrides, bandCommands.js; support playerBondRecord swaps effectId and buffs)
+        const bondRec = S.playerBondRecord(battle, pid, bondId);
+        const effectId = bondRec?.effectId ?? null;
+        if (reg.installEffect(battle, pid, bondId, effectId, members)) continue;
+        // The bond record wins when it still carries the 盟约 key (上半 炎 has no ex_bond_char_cnt). A band
+        // swap only changes effectId, so the copied season buffs lack that key and the effect record is used.
+        const legacyKey = BUFF_KEYS[bondId];
+        const effectRec = S.effectRecord(effectId);
+        const onBond = legacyKey ? S.buffParams(bondRec, legacyKey) : null;
+        let swapped = onBond || (legacyKey ? S.buffParams(effectRec, legacyKey) : null);
+        if (swapped) {
+          // bondeffect_yan keeps 炎佑's counts on a second buff. The main buff is only the ATK ratio.
+          if (bondId === 'yanShip' && !(num(swapped.power_bond_char_cnt) > 0)) {
+            const spawn = S.buffParams(onBond ? bondRec : effectRec, 'act1autochess_bond_eff_yan[spawn]');
+            if (spawn) swapped = { ...swapped, ...spawn };
+          }
+          fn(battle, pid, swapped, members);
+          continue;
+        }
+      }
+      const bb = p.input?.bondEffectOverrides ? S.buffParams(S.playerBondRecord(battle, pid, bondId), BUFF_KEYS[bondId]) : bondBb(bondId);
+      if (!bb) continue;
       fn(battle, pid, bb, members);
     }
   }
+  if (version) reg.installExtra(battle);
 }
 
 /**
@@ -757,4 +803,27 @@ export function registerMeta(registry) {
     };
   }
   registry.bond('victoriaShip', handler);
+  // 谢拉格不融冰 uses the same reward buff, only on the effect that carries it (kjerag_2). payKjeragIce no-ops without
+  // that key, so a 盟约 谢拉格 and a swap back to bondeffect_kjerag pay nothing.
+  const prevIce = typeof registry.get === 'function' ? registry.get('bond:kjeragShip') : null;
+  const ice = { ...(prevIce || {}) };
+  for (const hook of HAMMER_HOOKS) {
+    const before = prevIce && typeof prevIce[hook] === 'function' ? prevIce[hook] : null;
+    ice[hook] = function kjeragIce(ctx, ev) {
+      if (before) before.call(this, ctx, ev);
+      if (hook === 'onLayers' && !(ev && ev.bondId === 'kjeragShip')) return;
+      reg.payKjeragIce(ctx);
+    };
+  }
+  registry.bond('kjeragShip', ice);
 }
+
+reg.bindLegacy({
+  yan: installYan,
+  sargon: installSargon,
+  kjerag: installKjerag,
+  siracusa: installSiracusa,
+  kazimierz: installKazimierz,
+  egir: installEgir,
+  victoria: installVictoria,
+});

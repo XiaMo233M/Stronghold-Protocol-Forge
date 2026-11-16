@@ -35,9 +35,9 @@ input, textarea, select { -webkit-user-select: text; user-select: text; }
 /* ---- 2. safe areas ------------------------------------------------------------------------------------------------ */
 /* the in-match HUD layer sits inside the safe area; the field (canvas) below it stays full-bleed */
 .gm__hud { top: var(--sa-t); right: var(--sa-r); bottom: var(--sa-b); left: var(--sa-l); }
-/* the selected unit's underframe (ui/underframe.js) is placed at the tile's CLIENT px (view.tileScreen) inside the HUD
-   layer: step back over the HUD's safe-area offset so it stays on its unit on a notched phone */
-.gm__hud > .uframe { margin-left: calc(-1 * var(--sa-l)); margin-top: calc(-1 * var(--sa-t)); }
+/* the selected unit's underframe (ui/underframe.js) is position: fixed at the tile's viewport px (view.tileScreen, #889),
+   so the HUD's safe-area inset no longer applies to it and it needs no step back (the old margin pulled it off its unit
+   on a notched phone once #889 made it fixed — round-54 audit) */
 /* the shop bar keeps its place at the bottom edge (it may reach into the home-indicator strip): raised by the bottom
    inset it covered ~3/4 of the bench pads 2–9 on a notched phone (user playtest #4 item 1), and a bench piece is
    pressed / dropped on by its tile. The prep camera keeps the bench clear of the bar (ui/fieldHost.js hudBands →
@@ -58,12 +58,12 @@ html:not(.sp-in-match) .toast-host { margin-top: var(--sa-t); }
    control, no layout change. Only controls that do not use ::before themselves are listed. */
 :where(.sp-coarse) :where(.tapx, .gtop__exit, .gtop__iconbtn, .enemybtn, .readybtn, .gm__gear, .fsbtn, .ewheel__btn, .ewheel__nav,
   .toolbtn, .funds__collapse, .team__btn, .effect, .bslot .bond, .vswitch__arrow, .edrawer__close, .dpanel__close, .bpop__close,
-  .modal__close, .uf__btn, .chud__back, .tabs__tab, .btn, .pill-btn, .title-guide, .stephead__guide, .set-toggle, .set-seg button, .set-fit__step) {
+  .modal__close, .uf__btn, .chud__back, .tabs__tab, .btn, .pill-btn, .title-guide, .stephead__guide, .set-toggle, .set-seg button, .set-fit__step, .combo__btn) {
   position: relative;
 }
 .sp-coarse :is(.tapx, .gtop__exit, .gtop__iconbtn, .enemybtn, .readybtn, .gm__gear, .fsbtn, .ewheel__btn, .ewheel__nav,
   .toolbtn, .funds__collapse, .team__btn, .effect, .bslot .bond, .vswitch__arrow, .edrawer__close, .dpanel__close, .bpop__close,
-  .modal__close, .uf__btn, .chud__back, .tabs__tab, .btn, .pill-btn, .title-guide, .stephead__guide, .set-toggle, .set-seg button, .set-fit__step)::before {
+  .modal__close, .uf__btn, .chud__back, .tabs__tab, .btn, .pill-btn, .title-guide, .stephead__guide, .set-toggle, .set-seg button, .set-fit__step, .combo__btn)::before {
   content: '';
   position: absolute; left: 50%; top: 50%; z-index: 0;
   width: max(100%, var(--tap-min)); height: max(100%, var(--tap-min));

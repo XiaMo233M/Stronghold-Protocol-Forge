@@ -951,7 +951,6 @@ export function RoomScreen() {
   const showVersion = Array.isArray(versions) || curVersion !== DEFAULT_VERSION;
   const versionWhy = !online ? t('连接中断，请稍候重试')
     : vote ? t('切换版本投票进行中，请等投票结束')
-    : facts.modded ? t('请先关闭改变玩法的插件')
     : !Array.isArray(versions) || versions.length < 2 ? t('本服务器只启用了这一个版本') : null;
   const versionEditable = facts.isHost && !facts.spectating && !room.inMatch;
   // the room's version is not this browser's lobby choice: the banner says leaving restores it (on a short screen, where
@@ -1122,4 +1121,12 @@ export function TrustedNotice() {
         <p class="trusted-hash">SHA-256: ${p.hash}</p><p>${t('权限：{permissions}',{permissions:p.permissions.join(', ')})}</p></li>`)}</ul>
     <//>
   </aside>`;
+}
+
+// —— 上游 0.4.0 的同名导出（迁移时被补丁漏掉，这里原样补回）——
+export function spectateSwitchReason(room, facts, myId) {
+  if (room?.inMatch) return t('模拟已开始');
+  if ((facts?.spectators?.length || 0) >= MAX_SPECTATORS) return t('观战席已满');
+  if (!facts?.humans?.some((s) => s.playerId !== myId && s.connected)) return t('至少保留一名参赛博士');
+  return '';
 }

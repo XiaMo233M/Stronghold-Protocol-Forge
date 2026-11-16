@@ -2,7 +2,7 @@
 
 import { int, isObj } from './shared.js';
 import { diyPicks } from './diy.js';
-import { t } from '../../../../shared/i18n.js';
+import { t, N_ } from '../../../../shared/i18n.js';
 // 行为开关 `morphPairing`（DESIGN §28.43.1）：判据本体在 `shared/morph.js`，客户端与服务端/战斗调的是同一个函数。
 // 第 7 段把**同一格开关的另外半条**（装备位语义）也收在那里：`morphSlotPolicy` 给出这一页的策略对象。
 // §28.49（`trait.grantsBonds`）：成员资格的**合并**也收在那边（`memberBonds`），所以客户端与服务端/战斗调的
@@ -391,7 +391,9 @@ export function disabledBondSets(pub, staticInactive = []) {
  * @param {'off'|'drawn'|null} state from disabledBondSets
  * @param {number} bannedN banned operators of the bond
  */
-export function briefingBondTip(name, state, bannedN = 0) {
+export function briefingBondTip(name, state, bannedN = 0, regulationCore = false) {
+  // 规程：一条置灰的**核心**盟约，只有「同属另一条亮着的核心盟约」的干员才留得下来（附加盟约不算）
+  if (state && regulationCore) return t('{name}：该核心盟约的干员无法出现，同属其他亮着的核心盟约的除外', { name });
   if (state === 'off') return t('{name}：本局禁用（该盟约不会激活）', { name });
   if (state === 'drawn' || bannedN > 0) return bannedN ? t('{name}：部分盟约所含干员阵容不完整（{bannedN} 名干员无法出现）', { name, bannedN }) : t('{name}：部分盟约所含干员阵容不完整', { name });
   return name;
@@ -433,3 +435,10 @@ export function bandOffLine(names) {
   const list = (Array.isArray(names) ? names : []).filter((n) => typeof n === 'string' && n);
   return list.length ? t('本局禁用{names}盟约，此策略效果可能无法发挥', { names: list.map((n) => t('【{name}】', { name: n })).join('') }) : '';
 }
+
+/** 上游 0.4.0：盟约分组提示（N_ 走 i18n）。 */
+export const BOND_GROUP_HINT = N_('请选择一组在本次模拟中激活的盟约，未被选择的盟约将不会出现在本次模拟中');
+
+/** 上游 0.4.0 的规程图例（N_ 走 i18n）。 */
+export const REGULATION_BOND_LEGEND = N_('有核心盟约的干员，仅当其核心盟约全部置灰时无法出现；仅有附加盟约的干员，仅当其附加盟约全部置灰时无法出现');
+export const REGULATION_LEGEND_CHIP = N_('部分盟约所含干员阵容不完整');

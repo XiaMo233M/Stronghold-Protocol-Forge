@@ -36,10 +36,10 @@
         "pct": 99.3
       },
       "config": {
-        "texts": 110,
-        "translated": 103,
-        "official": 103,
-        "pct": 93.6
+        "texts": 111,
+        "translated": 104,
+        "official": 104,
+        "pct": 93.7
       },
       "effects": {
         "texts": 1083,
@@ -78,22 +78,22 @@
         "pct": 93.5
       },
       "modules": {
-        "texts": 2498,
-        "translated": 2329,
-        "official": 2329,
-        "pct": 93.2
+        "texts": 2530,
+        "translated": 2347,
+        "official": 2347,
+        "pct": 92.8
       },
       "operators": {
-        "texts": 876,
-        "translated": 590,
-        "official": 590,
-        "pct": 67.4
+        "texts": 885,
+        "translated": 600,
+        "official": 592,
+        "pct": 67.8
       },
       "skills": {
-        "texts": 5673,
+        "texts": 5754,
         "translated": 5131,
         "official": 5131,
-        "pct": 90.4
+        "pct": 89.2
       },
       "stages": {
         "texts": 1124,
@@ -102,29 +102,29 @@
         "pct": 80.2
       },
       "talents": {
-        "texts": 5996,
-        "translated": 5410,
-        "official": 5410,
-        "pct": 90.2
+        "texts": 6091,
+        "translated": 5411,
+        "official": 5411,
+        "pct": 88.8
       },
       "tokens": {
-        "texts": 458,
-        "translated": 435,
-        "official": 435,
-        "pct": 95
+        "texts": 477,
+        "translated": 454,
+        "official": 454,
+        "pct": 95.2
       },
       "traits": {
-        "texts": 1876,
-        "translated": 1860,
-        "official": 1860,
-        "pct": 99.1
+        "texts": 1894,
+        "translated": 1872,
+        "official": 1872,
+        "pct": 98.8
       }
     },
     "totals": {
-      "texts": 23881,
-      "translated": 21838,
-      "official": 21819,
-      "pct": 91.4
+      "texts": 24136,
+      "translated": 21899,
+      "official": 21872,
+      "pct": 90.7
     }
   },
   "names": {
@@ -491,6 +491,7 @@
     "玛恩纳的盟誓": "瑪恩納的盟誓",
     "琳琅诗怀雅": "琳瑯詩懷雅",
     "瑰盐": "瑰鹽",
+    "甄选干员": "甄選幹員",
     "电弧": "電弧",
     "画卷": "畫卷",
     "疯狂的逐腐兽": "瘋狂的逐腐獸",
@@ -11356,9 +11357,15 @@
               "descRaw": "不阻擋敵人時，優先對<@ba.kw>遠程群體</>進行物理攻擊，且攻擊速度<@ba.vup>+10</>",
               "desc": "不阻擋敵人時，優先對遠程群體進行物理攻擊，且攻擊速度+10"
             }
+          },
+          {
+            "traitOverride": {
+              "descRaw": "不阻擋敵人時優先<@ba.kw>遠程群體</>物理攻擊",
+              "desc": "不阻擋敵人時優先遠程群體物理攻擊"
+            }
           }
         ],
-        "_h": "vw7trri1vu7az1lzzybs3iw9w9jgatwgj9j9fqny2vxgr430sz7az1lz7ti1zybs3iw9w9jgatwgj9j9fq7trri1vuwqn3sg"
+        "_h": "vw7trri1vu7az1lzzybs3iw9w9jgatwgj9j9fqny2vxgr430sz7az1lz7ti1zybs3iw9w9jgatwgj9j9fq7trri1vuwqn3sg7ti1"
       },
       "chess_char_5_09_a": {
         "subProfessionName": "吟遊者",
@@ -12153,7 +12160,15 @@
             }
           }
         ],
-        "_h": "3j3v3vqv5b37ix5oixj4idpex24omar0mlqv5b37u6jl563v3vix5oixj4idpex24o"
+        "modules": [
+          {
+            "traitOverride": {
+              "descRaw": "能夠阻擋兩個敵人，可以支援待部署區的我方單位",
+              "desc": "能夠阻擋兩個敵人，可以支援待部署區的我方單位"
+            }
+          }
+        ],
+        "_h": "3j3v3vqv5b37ix5oixj4idpex24omar0mlqv5b37u6jl563v3vix5oixj4idpex24o3v3v"
       },
       "chess_char_5_15_a": {
         "subProfessionName": "煉金師",
@@ -13288,6 +13303,22 @@
           }
         ],
         "_h": "pq7q76by76dw97eiq9myxbwo6h6h25lz0dg897eiq97676myxbwo6h6h2576by76dw"
+      },
+      "chess_char_5_diy1_a": {
+        "name": "甄選幹員",
+        "_h": "mc"
+      },
+      "chess_char_5_diy1_b": {
+        "name": "甄選幹員",
+        "_h": "mc"
+      },
+      "chess_char_5_diy2_a": {
+        "name": "甄選幹員",
+        "_h": "mc"
+      },
+      "chess_char_5_diy2_b": {
+        "name": "甄選幹員",
+        "_h": "mc"
       },
       "chess_char_6_01_a": {
         "name": "蕾繆安",
@@ -15027,9 +15058,22 @@
                 }
               }
             ]
+          },
+          {
+            "traitOverride": {
+              "descRaw": "可以在攻擊範圍內選擇一次<@ba.kw>戰術點</>來召喚援軍，自身攻擊援軍阻擋的敵人時攻擊力提升至150%",
+              "desc": "可以在攻擊範圍內選擇一次戰術點來召喚援軍，自身攻擊援軍阻擋的敵人時攻擊力提升至150%"
+            },
+            "talentChanges": [
+              null,
+              null,
+              {
+                "name": "淨水即生命"
+              }
+            ]
           }
         ],
-        "_h": "rr8asrxpflldhcv62qv64w840klalakvkys9btnvffhzflldhcuajgjd2qjd4w840klalakvsrxpv62qv634m2toxm84v2x0x0"
+        "_h": "rr8asrxpflldhcv62qv64w840klalakvkys9btnvffhzflldhcuajgjd2qjd4w840klalakvsrxpv62qv634m2toxm84v2x0x0uajg2q"
       },
       "chess_char_6_12_a": {
         "subProfessionName": "投擲手",
@@ -15769,9 +15813,17 @@
                 "name": "資料建模"
               }
             ]
+          },
+          {
+            "traitOverride": {
+              "descRaw": "攻擊造成<@ba.kw>法術傷害</>，並對敵人造成短暫的<$ba.sluggish>停頓</>",
+              "moduleDescRaw": "攻擊範圍內存在敵人時技力自然恢復速度+0.2/秒",
+              "desc": "攻擊造成法術傷害，並對敵人造成短暫的停頓",
+              "moduleDesc": "攻擊範圍內存在敵人時技力自然恢復速度+0.2/秒"
+            }
           }
         ],
-        "_h": "f2uw08tygp2jvybiymd5lpmzbnbinbq5u9l68htygp2jpn839fbiojd5lpmzbnuw08vybiymbi"
+        "_h": "f2uw08tygp2jvybiymd5lpmzbnbinbq5u9l68htygp2jpn839fbiojd5lpmzbnuw08vybiymbipn0i830i"
       },
       "chess_char_6_17_a": {
         "name": "耀騎士臨光",
@@ -16400,6 +16452,22 @@
           }
         ],
         "_h": "fhvkf7fdvluo0koaeb4yahsci7dnsjty4n9k1f4o8b0evluo0ky6pioaeb4y84scckrj2vtyf7fdahsci7dnsjy6ldpirke7ebdz"
+      },
+      "chess_char_6_diy1_a": {
+        "name": "甄選幹員",
+        "_h": "mc"
+      },
+      "chess_char_6_diy1_b": {
+        "name": "甄選幹員",
+        "_h": "mc"
+      },
+      "chess_char_6_diy2_a": {
+        "name": "甄選幹員",
+        "_h": "mc"
+      },
+      "chess_char_6_diy2_b": {
+        "name": "甄選幹員",
+        "_h": "mc"
       }
     },
     "backups": {
@@ -30357,7 +30425,73 @@
             }
           }
         },
-        "_h": "68tltlrqgeybu36xwg053k0e36re36tltlrqgeybu36xwg053k0e36re363ldr3h3higjpsdyje270igyjmh36re363h3h1ijpd71ie2d775yjae36re36cj11t8t829eeos3qcxodktmwi0uagpuat8t8gfeeragfcxra9kmwu3uagpua3tcwcwigjpsdyje270igyjmh36re36cwcw1ijpd71ie2d775yjae36re36t2wpce5yc39tn8c3ban88vzb2cy2y2ce5yqp9tbm8vba2ctwzbvdy2y2wr7q7676igkksdigwjsdtd0ixe36re3676761ikkd71iwjd7dg0ipd36re369bf2pn83c39tn8c3ban88vzb2cy2y2pn83qp9tbm8vba2ctwzbvdy2y2bj8vhagmawu0wo129jdaj4meuk36re36hagmx0u0dw9v9jt9nkmerw36re36dmsjsjtltl11grcleb6exqy1bky55vy57u7utltlrngrhzsaxb2ky1hqy55vy57u7usj5c5ctltlrngrhzsaxb2ky1hqy55vy57u7usj5c5cd25vd2drueue3h3h2yi32h5slr39qcv3syexsyd5d53h3h6zco4k5s9gcyqc9msyexsyd5d5ue3hf03har3h3h6zco4k5s9gcyqc9msyexsyd5d5ue3hf03harcxexcx11owowt8t8qq2zzqqzx4hht4w091fyfy5juv5jt8t8522zs6bsx4yk14w025fyfy5juv5jowt8lrt8ntt8t8522zs6bsx4yk14w025fyfy5juv5jowt8lrt8ntwzwzvyvycwcwfr8r2drwr53nsgkjsgjs9mjscwcwexrl2drwlasusgkjsgjs9mjsvycw9scwlscwcwexrl2drwlasusgkjsgjs9mjsvycw9scwls0rkj0rkivrvrn1hbv3hzipypkf25srwtz75bnx5bgigin1hb98hz60i9kf6pp9wt8p5bnx5bgigivrn1d0hb5kn1hb98hz60i9kf6pp9wt8p5bnx5bgigivrn1d0hb5kk7k77qhtht76763h9xo9opeso8scy1p9pkpkzcirzc7676y39xu32fesc20ly1p2pkpkzcirzcht76by76dw7676y39xu32fesc20ly1p2pkpkzcirzcht76by76dwexirexf2pqpqpn83vey9jhjv85hpuyy861mw61ksm3kspn83bxy93oldzhjnuyja61mw61ksm3kspqpn0i830ipn83bxy93oldzhjnuyja61mw61ksm3kspqpn0i830iejmwej8vububhagmsf652fbdodb1labkzt2k2kv1stv1hagm76658wj9odfxy3bkzg2k2kv1stv1ubhazsgms8hagm76658wj9odfxy3bkzg2k2kv1stv1ubhazsgms88b8bn55ylclc69jzx3ztfo833f83ne62ne69jz9fztp8833f83ne62nelc698gjzsn69jz9fztp8833f83ne62nelc698gjzsndp3fdpom7qy7fhl27676bdexyhawwi4xs7lvzo3r3rjmqa5a6qe87676igexaq4kwi793klvih3r3rjmqa5a6qe876by76dwfh768y76col276fy763m7676igexaq4kwi793klvih3r3rjmqa5a6qe876by76dw38qa422vonfh768y76colalal276fy763mvnodxjyqbaqih09mmcpmlgc4p7p0nilc3xwlwln2t28e4z4z9mmcs1lg79xgollflc4wwlwln2t28e4z4zqi9mbtmcp2h09mv2mcgt9mmcs1lg79xgollflc4wwlwln2t28e4z4zqi9mbtmcp28y8yh09mv2mcgt9tt2xt0101grcae9l0aayefeiyj5gihkcp0rmnxlyt49zpb9b9s9r5bkeveqaaye5oiy7jdbhk76kumn6myt49zpb9b9s9r5bkeveqe9shhvl0aaxwye82aaye5oiy7jdbhk76kumn6myt49zpb9b9s9r5bkeveqe9shhvhgr5cbha15l0aaxwye82ph49td4747gyezovtltl053k0e07hghzq985ykdvi7uxnhnh7878tltl053k0e7zhgmfal85j8dvi7uxnhnh78785c5covtljytljytltl053k0e7zhgmfal85j8dvi7uxnhnh78785c5c52i7o43c3covtljytljy6h6hy7glp470jspoaj1eeu3s9axgql0wpm0wwgi688te70jsrxajmz6l3sx9tbzq0wpm0wwgi688tegl70gajsvup470w8jsrv70jsrxajmz6l3sx9tbzq0wpm0wwgi688tegl70gajsvu0w5ma7m9p470w8jsrvskpmskebwb0xq48uh48op2pnc6c9droraxwwwwfdy8ot7474q48ujx8o6t5as5l8x2oraxwwwwfdy8ot7474dove0xq4y18ukzq48ujx8o6t5as5l8x2oraxwwwwfdy8ot7474dove4uy8pm0d0d0xq4y18ukzee2fs72cs87q0hhb7676kw1372f7fmsxyzk2hvkailzugygyl20al2l27676lz13uji4fm6cx5k2rxkailzugygyl20al2l2hb768y76co76by76dw7676lz13uji4fm6cx5k2rxkailzugygyl20al2l2hb768y76co4jilwfljlj76by76dw53dve9e937mz3mopb40x0xtd0ixekw1rvpt2gntigc7tru5o5oyw1vyw0x0xdg0ipdx61rj362gnxugc7tru5o5oyw1vywop0xd00x5kb4nvon0x0xdg0ipdx61rj362gnxugc7tru5o5oyw1vywop0xd00x5kec7tzmicicb4nvonrf1vrfwpov1nbbce5ydiv6g2zylxdn7gd6z331okokzg5hu2npnpce5yquv682vglxrxtberz331okokzg5hu2npnp1nces85ykebbceef5yjfce5yquv682vglxrxtberz331okokzg5hu2npnp1nces85yke1kwqmtmtbbceef5yjfir5hclrwrwqmpb9beqmqe4vtssoqrepo17ji0b8ewlohafg1g1eqmq0atreb0v0dpo6iji0b8ewlohafg1g1pbeqnjmqii9beqedmq6xeqmq0atreb0v0dpo6iji0b8ewlohafg1g1pbeqnjmqiifb0bmz9beqedmq6xx5ohcjwlwlx7p7raraigyjmhl4h8x6cbdhhkhuhu9myic82w2wrara75yjaelfh8xfcbdhhkhuhu9myic82w2wp7racurag6raj0ra04rara75yjaelfh8xfcbdhhkhuhu9myic82w2wp7racurag65r5rraj0ra04sxyitreaeatjpzpkspogogqppqbmbgq1jdw6myfmldyjlfqx5ot9pspsogogc7pq7kaxq1b2xomyacldyjlfqx5ot9pspspkogr2ogr2spogigogugogogc7pq7kaxq1b2xomyacldyjlfqx5ot9pspspkogr2ogr2xbyjyxspogigogugb95ol1wjwjpxa7k4chovooqauhzel6kzqrcnxuwy4455a055daa15fl6ltooqavcze3t3sqreqipwymh55a055daa15fl6ltchoox9qai3ovoohuqaviooqavcze3t3sqreqipwymh55a055daa15fl6ltchoox9qai3zra1hymnj4ovoohuqaviava0av8v9fpiyi9mhagm2atwdbprdz6hw4eu3agr3a2v5o2vhagmmye0klprp9x8w45b3agr3a2v5o2vpiha2ogmd2yihazsgms89mhagrgmxlhagmmye0klprp9x8w45b3agr3a2v5o2vpiha2ogmd24x5o4xyihazsgms8xlgrxl9mhagrgmxlcagrh65yp2ybak69jzigyjmh31xckryzz4r4mva2qznene6wwbdsqwqw69jz75yjaeovxck5bbz4a0mva2qznene6wwbdsqwqwyb698gjzsnak698tjzzi69jz75yjaeovxck5bbz4a0mva2qznene6wwbdsqwqwyb698gjzsnwqa21m0l0lak698tjzzi3ia2h9ss3jxwhp9j3s70jsq3ffk9u1bkr1b7x09q51txhoe5zkpxvgvg70jskaffty4fbkjzcsx0kb51txhoe5zkpxvgvg9j70w8jsrv3s70rrjsvu70js70jskaffty4fbkjzcsx0kb51txhoe5zkpxvgvg9j70w8jsrvrxzknhhxhx3s70rrjsvu77txye70jstxk87ljtn3s1j3u1bbpb9wvvulr3k6lzc08cpo7474dj94ufs1j3lxbbnjervvtc2dk6dlc08cpo7474dj94ufjtbobwn3s15ij35is1j3lxbbnjervvtc2dk6dlc08cpo7474dj94ufjtbobwzx94nln3s15ij35iwy8c9uw6w66tk3qxqx91ikkbdr4y9f05edkl66gq66m3g11h1hqxqxvlikx3k64yd8bbedwb66gq66m3g11h1hk3qxigqxugqxziqxcmqxqxvlikx3k64yd8bbedwb66gq66m3g11h1hk3qxigqxugacviptptqxziqxcmrcgqrccrmn7etltl053k0ekedbss0nqgnnwkyd3816hhhhtltl053k0eihdbzto1dynnwkyd3816hhhhmntljytljy7e5c5ctltl053k0eihdbzto1dynnwkyd3816hhhhmntljytljypzqt0h0h7e5c5cs8wk5eiz93hmp5sik7j16l1taucu64qb123f9yju159amtmtkbzybrn5n5k7j1gy1twfm464itec3fl4ju159amtmtkbzybrn5n5p5507esilg7ik7j1gy1twfm464itec3fl4ju159amtmtkbzybrn5n5p5507esc15t89z9zsilg7ilpzyv1l1l1uastjfobdynecm87brk1y0tbj13y3y0vlx0vdyne4387ts96hheklq3y3y0vlx0vobw5opkk6odyne4387ts96hheklq3y3y0vlx0vobw5opgslxgskk6oatat5df4qw3qm92323l6i4smop1qc0vqeysozf32xae9ccl8x4l82323sqi4wera1qo3wtey4tzf32xae9ccl8x4l8qwgbgb3qfzfzm923zp236l2323sqi4wera1qo3wtey4tzf32xae9ccl8x4l8qwgbgbbix4bi3qfzfzgz32aqxsy1m923zp236l11x43fr035tjvbm1k2xd43rj9w207djzptjzjad4b0b0vbm10gxdlxvy9zi7swjzptjzjad4b0b0tj7mc4vbm10gxdlxvy9zi7swjzptjzjad4b0b0tj7mc4osptosqwwpztyeyejlgknqbn8pbmoe6sq05hvtgxgxchchyeyejlgknqjr8p2mg96se15hvtgxgxchch5g50ztw96eyeyejlgknqjr8p2mg96se15hvtgxgxchch5g50d7e3ururztw96e5q5qvp7w9l8ivin9e1emwjdtag4dsxkudfrxz0g210r4r48ivikfe1bw1xdthqh3zdkudfrxz0g210r4r47wcz2x9l8iogviog8ivikfe1bw1xdthqh3zdkudfrxz0g210r4r47wcz2x0jdf5m9l8iogviogyqg2c6oeoeap40qyp4ms6gxbh7cwun5ihpgcdl75lfln5a5afx3zfxms6gjsh71podtoqhgc2975lfln5a5afx3zfxqypn49p4msjy6gzams6gjsh71podtoqhgc2975lfln5a5afx3zfxqypn49aalfn0hhhhp4msjy6gzaz93zz9360m360m360mk9jco52ahic0yje270shagfe4uzemy6kdnisy66ifq7171hic01ie2d729agrihhzen36kdnisy66ifq7171o5clpj2apwdmhic01ie2d729agrihhzen36kdnisy66ifq7171o5clpjqt6i414m4m2apwdma36itic2rjochf5xjdtwtw6rf7uou73m5jdeoklo7bxx0zroroa90a6dx2x2twtwsjf7kcc83mrqilokd77bxx0zroroa90a6dx2x2twp6twhbjdtwaqtwaqtwtwsjf7kcc83mrqilokd77bxx0zroroa90a6dx2x2twp6twhbhdxx5dlalajdtwaqtwaq5l0ajl4y4ysp8qvc5q0dt7n3fo8qhwb4r9xgg7wstou26hjfmu2lit0dt7q0folr8hb4v2wx04wstou26hjfmu2lit5qack80dt7q0folr8hb4v2wx04wstou26hjfmu2lit5qack84qtof0fbn5uoi24ye0q8uc424cequmh8318ta1el5lihgq4i2e26vki24yywq8tuu34cutrwh8wv8ta1el5lihgq4i2e26vki25g4yj6i24yywq8tuu34cutrwh8wv8ta1el5lihgq4i2e26vki25g4yj66p4iq3htthoxxcun9tfdqnz7wtp789c43ssbxwtx1l5hwrtdb8t3lsun9t54qnvg9lp7rh5nlfsbxwtx1l5hwrtdb8t3lsunve9tyoun9t54qnvg9lp7rh5nlfsbxwtx1l5hwrtdb8t3lsunve9tyoflxw2frmuu1re3hqaq6o6o1fybs47r8ect3od6ds7536sx4j4jtlmv9x6o6onkybq1l98e9d9md6g67536sx4j4jtlmv9xaqkiki6o6onkybq1l98e9d9md6g67536sx4j4jtlmv9xaqkikizcmvp0jac5hb0vce5yqxaam239xyxvwiwdasxeinkvgeobw3w3ce5y421vft3949guepwdasxeinkvgeobw3w30vcetd5ynzce5y421vft3949guepwdasxeinkvgeobw3w30vcetd5ynznlgewhzrzrh2zj6hzvn7k3t3vnqb0im5efp6z0hblbbjy052injxadvmvmzvn7jmt3v0pq0idipgp6prhblbbjy052injxadvmvm6hzviun74ezvn7jmt3v0pq0idipgp6prhblbbjy052injxadvmvm6hzviun74elllbslf2x8sp3dsp3dsp3dw08vzdo22nhagmetarkhlb80r25d249c25k625llka9f6h6hhagm7harhxak80dzlp24a425k625llka9f6h6ho2ha2ogmd22nhazsgms8hagm7harhxak80dzlp24a425k625llka9f6h6ho2ha2ogmd2ock6oc2nhazsgms8wjkallriribx1orara8ydm2g0e92p8255jgexxgeintrgasqraravddmw9y6vmvi25irgexxgeintrgasqracurag6raj0ra04rarararavddmw9y6vmvi25irgexxgeintrgasqracurag69qxx9qraj0ra04jjtrwqrerarawp1qvlce5yeiswkt1rpkyqchr496ndggqnqnofwzofce5yh1s3p81rcftlchrl96ndggqnqnofwzofvlces85ykeceef5yjfce5yh1s3p81rcftlchrl96ndggqnqnofwzofvlces85ykew3nd2zr7r7ceef5yjfurwzur11pederrt8t83gvk4ro2v5yua6nrp8q3476x4v4vh3ka6ct8t8ihvkmcu0v5j4esnrheq3476x4v4vh3ka6cdet8lrt8ntrrbibit8t8ihvkmcu0v5j4esnrheq3476x4v4vh3ka6cdet8lrt8nthkkakprrbibiii47oktvtva79ulaooqazrwx28udt2j5gmqyph832h83lkvdp4p2p2ooqal7wxw01wt2xqqcqyjv832h83lkvdp4p2p2laoohuqaviooqal7wxw01wt2xqqcqyjv832h83lkvdp4p2p2laoohuqavik92hk9lzqo3h3hydnr0oe9wnsqxznojcf8paxhxhdkd5dk3h3hvtnrl0d1wnsou6nojff8paxhxhdkd5dko4wy19jq3h3hvtnrl0d1wnsou6nojff8paxhxhdkd5dko4wy24d52419jq6nup4u4uxw8x7bayayq94a2p2r5lhq5xct3ef38p5jtez74mz7ayayi2mngb2rr3ym5x753ef38p5jtez74mz77baybyaydwayiaay2wayayi2mngb2rr3ym5x753ef38p5jtez74mz77baybyaydwg5f3q6no7xayiaay2w4m87qbljctupyhgyafe9u2t624beqogl1o9z9zcaey702m2mctup1wgyakhzu2holksyqogl1o9z9zcaey702m2mljebidctup1wgyakhzu2holksyqogl1o9z9zcaey702m2mljebidaweykywrwrbyyql3zes5a69mmcc8iw65nc53ar0w4l0zxi0z50erqgnvnv9mmc9iiwexk32y0f0w7x0zxi0z50erqgnvnvze9mv2mcgts59mbtmcp2a69mt4mcsg9mmc9iiwexk32y0f0w7x0zxi0z50erqgnvnvze9mv2mcgtnwerps7979s59mbtmcp2wkxiwka69mt4mcsgekximut1drnoafxq3h3hfeiyj53arvq5esa4esz9esdhuflneses3h3h5oiy7j8brvba5nuhesz9esdhuflnesesaf3hf03harxq3h023hul3h3h5oiy7j8brvba5nuhesz9esdhuflnesesaf3hf03harukufv2qbqbxq3h023hultfz9tfw4wpzxry8i50ce5ykvah3e5vtv4ltnn2m7fnsrj2j2lq1bce5yowahavvsy4pftn7km7fnsrj2j2lq1bryces85yke8iceef5yjf50ce7s5ymmce5yowahavvsy4pftn7km7fnsrj2j2lq1bryces85ykeilfnqxj6j68iceef5yjf0tp150ce7s5ymmuwfnq8xa1i6slzzhpp3h3hr354beziaugiehgdjsw65g5g2jsd2j3h3hqz54m235auy9g8zwjsw65g5g2jsd2jpp19jq3h3hqz54m235auy9g8zwjsw65g5g2jsd2jpp19jqx351ndndwmxccv3ra1xcy8q0hamkbfvxc6asob5zpq8vz78vfyrolflfy8q0remkhnb7c672ea5zzx8vz78vfyrolflf3rwxyxa1y8ecq0ecxcy82nq0hmy8q0remkhnb7c672ea5zzx8vz78vfyrolflf3rwxyx4yz74ya1y8ecq0ecibj1titixcy82nq0hmnlal20q6e587f0ebbmctupj171by64ifmoa2kgmwfyoefzfzhrigxxw3w3ctupz77130y3ifaf8ge4mwfyoefzfzhrigxxw3w3ebcth4uph4bmebidmdfygn1i1ictupz77130y3ifaf8ge4mwfyoefzfzhrigxxw3w3ebcth4uph4y1ig3vr1r1bmebido5fy2braraocnp37wrqxqxz4roe3pk2caopuopp6tle1tletggyt4k4kqxqxierol9g82ce4rdoptztle1tletggyt4k4k37qxziqxcmwrqxigqxugqxqxierol9g82ce4rdoptztle1tletggyt4k4k37qxziqxcmbye1bywrqxigqxug2lgg3ty4y48742lw4x1tpwd2oz2s6mqboojh0jy78ryb4ar2u9lplw5wq74x1tlqd2bh526mu5rbjhi2y78ryb4ar2u9lplw5wq7424xtj1tdflw4xym1t8k4x1tlqd2bh526mu5rbjhi2y78ryb4ar2u9lplw5wq7424xtj1tdf1b8rzj92wqlw4xym1t8kmylpuj9o5ze3tmyyj5lqlqun3aqahev7ctkikdiwzwmzzwx1khkvxsxslqlqek3a0791v7ws34kdhazwmzzwx1khkvxsxsyylqpelqm4j5lq7wlqrglqlqek3a0791v7ws34kdhazwmzzwx1khkvxsxsyylqpelqm475khkjbbbbj5lq7wlqrgunmzuna0drjh063fl56r248d54vrtplz8qpi51jimrvf0z4mcffgfg3fl56z24yvdgvrghapowpi51jimrvf0z4mcffgfgjh69ub063fuhl5233fl56z24yvdgvrghapowpi51jimrvf0z4mcffgfgjh69ublu4m3m8g8g063fuhl523t3512xukjmaohl3iaaye8wc8xym1i044s1g74uyzzxzvae3p3ffiv3aaye7bc84fy6i083ahg7f4yzzxzvae3p3ffiv3aas8yekm3iaap1yeiraaye7bc84fy6i083ahg7f4yzzxzvae3p3ffiv3aas8yekmas3pdxyg493iaap1yeir92zxagc5f36c8kce5yunemdpo6f73vi9rl5dsock50l2l2m1sk2s6dmuce5yguemse3sf79bhgrl4msock50l2l2m1sk2s6dmu6ccede5yjf8kceux5yh6ce5yguemse3sf79bhgrl4msock50l2l2m1sk2s6dmu6ccede5yjfa1ck5ylfoc8kceux5yh6rbskkk94e7g2haqj6byq34kehhp3ts0ixdevxjd9masxmaudvhh0h0yq340ehhif1m0ie7s3xjttmasxmaudvhh0h0yqcu34cu6b5a10yq340ehhif1m0ie7s3xjttmasxmaudvhh0h0yqcu34cu3psx3p6b5a10fouwawaw8bi2dhuseqmqw1z8ae4fti04w3a6wllpp52u6q2424eqmq8kz8np7nti24a0p5wllpp52u6q2424dheqnjmqiiuseqedmq6xeqmq8kz8np7nti24a0p5wllpp52u6q2424dheqnjmqiiyulpp2useqedmq6x8icey8y8b4sn8prjo27ghiwga7t7uvrg9de0acirtpamtpj41e8a3l3l7ghigza7d6smrgz22baczitpamtpj41e8a3l3lrj7grshilgo20gem7ghigza7d6smrgz22baczitpamtpj41e8a3l3lrj7grshilg3wam3wo20gem6gam6g1bwp72fyo1ce5ynsxz6l7g0n5jjr4gqvk7d386rgzq72tasqsqce5y13xzqwsco3ocjryhqvk7d386rgzq72tasqsqfyce2n5yhmo1ceef5yjfce5y13xzqwsco3ocjryhqvk7d386rgzq72tasqsqfyce2n5yhmkuk7dwbfr3o1ceef5yjfthk781512tqmb707937vrhrr05jxoq9y510yn8m23ll861e2rs22f7f77vrhn127k2oq5n95van8m23ll861e2rs22f7f7937v67rhrp7vrh7vrhn127k2oq5n95van8m23ll861e2rs22f7f7937v67rhrpllm2jgktqs7vrhrs6x85by7rf7wr2b25u7kjv4jxpdffpmvdvmaaaaj60rcs0e0e7rf7fi2ba243kj3oh6pdl2pmvdvmaaaaj60rcs0e0ebynmv27rf7fi2ba243kj3oh6pdl2pmvdvmaaaaj60rcs0e0ebynmv2eivdu28u8utha7c4qhsjooqaioijeba4buesifaqif831e83t7f32uvmooqabmij6d5dbu2y1oaqgg831e83t7f32uvmqhoo7rqathsjoovjqavjooqabmij6d5dbu2y1oaqgg831e83t7f32uvmqhoo7rqathyx1eyxsjoovjqavjf41ef4bkk915ouhic09wsxxju93oaeoxe1og5v9uvyia3333hic0l4n5cgu9xlg9oxp6og5v9uvyia3333oupwdmhic0l4n5cgu9xlg9oxp6og5v9uvyia3333oupwdmehvybtxuxucmb7kq8odocwrtkfs7td0rt20exnq618zhbot5o6tb8odo7qrtydaitdq0210e7yq618zhbot5o6tbkq8owrdowr8odo7qrtydaitdq0210e7yq618zhbot5o6tbkq8owrdowrd118a68pegy5ollqlq3aw64ukmwv4pihwrhrzwzwtfy5t75plqlqf4w6bg0twvzcvnwrl1zwzwtfy5t75pollqpelqm4lqlqf4w6bg0twvzcvnwrl1zwzwtfy5t75pollqpelqm4rerexcy8q0twvdy8q0wmofy8ecq0ecy8q0wmofy8ecq0ec8auajguajgsrxpuajgsrxpebq48uq48uq4jy8uzaq48uq4jy8uzahftwtwj6twtwj6twtwtwtwj6twtwj63zj5fz7dfz7dfz7d3l0g0g0g0g0gdy0gss0g0g0gdy0gss"
+        "char_4246_dminon": {
+          "subProfessionName": "伏擊客",
+          "forms": {
+            "2/1/4/0": {
+              "trait": {
+                "descRaw": "對攻擊範圍內<@ba.kw>所有敵人</>造成傷害\n擁有50%的物理和法術閃避且不容易成為敵人的<@ba.kw>攻擊目標</>",
+                "desc": "對攻擊範圍內所有敵人造成傷害\n擁有50%的物理和法術閃避且不容易成為敵人的攻擊目標"
+              }
+            },
+            "2/60/7/1": {
+              "trait": {
+                "descRaw": "對攻擊範圍內<@ba.kw>所有敵人</>造成傷害\n擁有50%的物理和法術閃避且不容易成為敵人的<@ba.kw>攻擊目標</>",
+                "desc": "對攻擊範圍內所有敵人造成傷害\n擁有50%的物理和法術閃避且不容易成為敵人的攻擊目標"
+              },
+              "modules": [
+                {
+                  "traitOverride": {
+                    "descRaw": "對攻擊範圍內<@ba.kw>所有敵人</>造成傷害\n擁有50%的物理和法術閃避且不容易成為敵人的<@ba.kw>攻擊目標</>",
+                    "moduleDescRaw": "攻擊範圍內所有敵人移動速度<@ba.kw>-20%</>",
+                    "desc": "對攻擊範圍內所有敵人造成傷害\n擁有50%的物理和法術閃避且不容易成為敵人的攻擊目標",
+                    "moduleDesc": "攻擊範圍內所有敵人移動速度-20%"
+                  }
+                }
+              ]
+            },
+            "2/60/7/3": {
+              "trait": {
+                "descRaw": "對攻擊範圍內<@ba.kw>所有敵人</>造成傷害\n擁有50%的物理和法術閃避且不容易成為敵人的<@ba.kw>攻擊目標</>",
+                "desc": "對攻擊範圍內所有敵人造成傷害\n擁有50%的物理和法術閃避且不容易成為敵人的攻擊目標"
+              },
+              "modules": [
+                {
+                  "traitOverride": {
+                    "descRaw": "對攻擊範圍內<@ba.kw>所有敵人</>造成傷害\n擁有50%的物理和法術閃避且不容易成為敵人的<@ba.kw>攻擊目標</>",
+                    "moduleDescRaw": "攻擊範圍內所有敵人移動速度<@ba.kw>-20%</>",
+                    "desc": "對攻擊範圍內所有敵人造成傷害\n擁有50%的物理和法術閃避且不容易成為敵人的攻擊目標",
+                    "moduleDesc": "攻擊範圍內所有敵人移動速度-20%"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "char_4247_oxi": {
+          "subProfessionName": "本源近衛",
+          "forms": {
+            "2/1/4/0": {
+              "trait": {
+                "descRaw": "能夠阻擋兩個敵人，可以造成<@ba.kw>元素傷害</>",
+                "desc": "能夠阻擋兩個敵人，可以造成元素傷害"
+              }
+            },
+            "2/60/7/1": {
+              "trait": {
+                "descRaw": "能夠阻擋兩個敵人，可以造成<@ba.kw>元素傷害</>",
+                "desc": "能夠阻擋兩個敵人，可以造成元素傷害"
+              }
+            },
+            "2/60/7/3": {
+              "trait": {
+                "descRaw": "能夠阻擋兩個敵人，可以造成<@ba.kw>元素傷害</>",
+                "desc": "能夠阻擋兩個敵人，可以造成元素傷害"
+              }
+            }
+          }
+        },
+        "_h": "68tltlrqgeybu36xwg053k0e36re36tltlrqgeybu36xwg053k0e36re363ldr3h3higjpsdyje270igyjmh36re363h3h1ijpd71ie2d775yjae36re36cj11t8t829eeos3qcxodktmwi0uagpuat8t8gfeeragfcxra9kmwu3uagpua3tcwcwigjpsdyje270igyjmh36re36cwcw1ijpd71ie2d775yjae36re36t2wpce5yc39tn8c3ban88vzb2cy2y2ce5yqp9tbm8vba2ctwzbvdy2y2wr7q7676igkksdigwjsdtd0ixe36re3676761ikkd71iwjd7dg0ipd36re369bf2pn83c39tn8c3ban88vzb2cy2y2pn83qp9tbm8vba2ctwzbvdy2y2bj8vhagmawu0wo129jdaj4meuk36re36hagmx0u0dw9v9jt9nkmerw36re36dmsjsjtltl11grcleb6exqy1bky55vy57u7utltlrngrhzsaxb2ky1hqy55vy57u7usj5c5ctltlrngrhzsaxb2ky1hqy55vy57u7usj5c5cd25vd2drueue3h3h2yi32h5slr39qcv3syexsyd5d53h3h6zco4k5s9gcyqc9msyexsyd5d5ue3hf03har3h3h6zco4k5s9gcyqc9msyexsyd5d5ue3hf03harcxexcx11owowt8t8qq2zzqqzx4hht4w091fyfy5juv5jt8t8522zs6bsx4yk14w025fyfy5juv5jowt8lrt8ntt8t8522zs6bsx4yk14w025fyfy5juv5jowt8lrt8ntwzwzvyvycwcwfr8r2drwr53nsgkjsgjs9mjscwcwexrl2drwlasusgkjsgjs9mjsvycw9scwlscwcwexrl2drwlasusgkjsgjs9mjsvycw9scwls0rkj0rkivrvrn1hbv3hzipypkf25srwtz75bnx5bgigin1hb98hz60i9kf6pp9wt8p5bnx5bgigivrn1d0hb5kn1hb98hz60i9kf6pp9wt8p5bnx5bgigivrn1d0hb5kk7k77qhtht76763h9xo9opeso8scy1p9pkpkzcirzc7676y39xu32fesc20ly1p2pkpkzcirzcht76by76dw7676y39xu32fesc20ly1p2pkpkzcirzcht76by76dwexirexf2pqpqpn83vey9jhjv85hpuyy861mw61ksm3kspn83bxy93oldzhjnuyja61mw61ksm3kspqpn0i830ipn83bxy93oldzhjnuyja61mw61ksm3kspqpn0i830iejmwej8vububhagmsf652fbdodb1labkzt2k2kv1stv1hagm76658wj9odfxy3bkzg2k2kv1stv1ubhazsgms8hagm76658wj9odfxy3bkzg2k2kv1stv1ubhazsgms88b8bn55ylclc69jzx3ztfo833f83ne62ne69jz9fztp8833f83ne62nelc698gjzsn69jz9fztp8833f83ne62nelc698gjzsndp3fdpom7qy7fhl27676bdexyhawwi4xs7lvzo3r3rjmqa5a6qe87676igexaq4kwi793klvih3r3rjmqa5a6qe876by76dwfh768y76col276fy763m7676igexaq4kwi793klvih3r3rjmqa5a6qe876by76dw38qa422vonfh768y76colalal276fy763mvnodxjyqbaqih09mmcpmlgc4p7p0nilc3xwlwln2t28e4z4z9mmcs1lg79xgollflc4wwlwln2t28e4z4zqi9mbtmcp2h09mv2mcgt9mmcs1lg79xgollflc4wwlwln2t28e4z4zqi9mbtmcp28y8yh09mv2mcgt9tt2xt0101grcae9l0aayefeiyj5gihkcp0rmnxlyt49zpb9b9s9r5bkeveqaaye5oiy7jdbhk76kumn6myt49zpb9b9s9r5bkeveqe9shhvl0aaxwye82aaye5oiy7jdbhk76kumn6myt49zpb9b9s9r5bkeveqe9shhvhgr5cbha15l0aaxwye82ph49td4747gyezovtltl053k0e07hghzq985ykdvi7uxnhnh7878tltl053k0e7zhgmfal85j8dvi7uxnhnh78785c5covtljytljytltl053k0e7zhgmfal85j8dvi7uxnhnh78785c5c52i7o43c3covtljytljy6h6hy7glp470jspoaj1eeu3s9axgql0wpm0wwgi688te70jsrxajmz6l3sx9tbzq0wpm0wwgi688tegl70gajsvup470w8jsrv70jsrxajmz6l3sx9tbzq0wpm0wwgi688tegl70gajsvu0w5ma7m9p470w8jsrvskpmskebwb0xq48uh48op2pnc6c9droraxwwwwfdy8ot7474q48ujx8o6t5as5l8x2oraxwwwwfdy8ot7474dove0xq4y18ukzq48ujx8o6t5as5l8x2oraxwwwwfdy8ot7474dove4uy8pm0d0d0xq4y18ukzee2fs72cs87q0hhb7676kw1372f7fmsxyzk2hvkailzugygyl20al2l27676lz13uji4fm6cx5k2rxkailzugygyl20al2l2hb768y76co76by76dw7676lz13uji4fm6cx5k2rxkailzugygyl20al2l2hb768y76co4jilwfljlj76by76dw53dve9e937mz3mopb40x0xtd0ixekw1rvpt2gntigc7tru5o5oyw1vyw0x0xdg0ipdx61rj362gnxugc7tru5o5oyw1vywop0xd00x5kb4nvon0x0xdg0ipdx61rj362gnxugc7tru5o5oyw1vywop0xd00x5kec7tzmicicb4nvonrf1vrfwpov1nbbce5ydiv6g2zylxdn7gd6z331okokzg5hu2npnpce5yquv682vglxrxtberz331okokzg5hu2npnp1nces85ykebbceef5yjfce5yquv682vglxrxtberz331okokzg5hu2npnp1nces85yke1kwqmtmtbbceef5yjfir5hclrwrwqmpb9beqmqe4vtssoqrepo17ji0b8ewlohafg1g1eqmq0atreb0v0dpo6iji0b8ewlohafg1g1pbeqnjmqii9beqedmq6xeqmq0atreb0v0dpo6iji0b8ewlohafg1g1pbeqnjmqiifb0bmz9beqedmq6xx5ohcjwlwlx7p7raraigyjmhl4h8x6cbdhhkhuhu9myic82w2wrara75yjaelfh8xfcbdhhkhuhu9myic82w2wp7racurag6raj0ra04rara75yjaelfh8xfcbdhhkhuhu9myic82w2wp7racurag65r5rraj0ra04sxyitreaeatjpzpkspogogqppqbmbgq1jdw6myfmldyjlfqx5ot9pspsogogc7pq7kaxq1b2xomyacldyjlfqx5ot9pspspkogr2ogr2spogigogugogogc7pq7kaxq1b2xomyacldyjlfqx5ot9pspspkogr2ogr2xbyjyxspogigogugb95ol1wjwjpxa7k4chovooqauhzel6kzqrcnxuwy4455a055daa15fl6ltooqavcze3t3sqreqipwymh55a055daa15fl6ltchoox9qai3ovoohuqaviooqavcze3t3sqreqipwymh55a055daa15fl6ltchoox9qai3zra1hymnj4ovoohuqaviava0av8v9fpiyi9mhagm2atwdbprdz6hw4eu3agr3a2v5o2vhagmmye0klprp9x8w45b3agr3a2v5o2vpiha2ogmd2yihazsgms89mhagrgmxlhagmmye0klprp9x8w45b3agr3a2v5o2vpiha2ogmd24x5o4xyihazsgms8xlgrxl9mhagrgmxlcagrh65yp2ybak69jzigyjmh31xckryzz4r4mva2qznene6wwbdsqwqw69jz75yjaeovxck5bbz4a0mva2qznene6wwbdsqwqwyb698gjzsnak698tjzzi69jz75yjaeovxck5bbz4a0mva2qznene6wwbdsqwqwyb698gjzsnwqa21m0l0lak698tjzzi3ia2h9ss3jxwhp9j3s70jsq3ffk9u1bkr1b7x09q51txhoe5zkpxvgvg70jskaffty4fbkjzcsx0kb51txhoe5zkpxvgvg9j70w8jsrv3s70rrjsvu70js70jskaffty4fbkjzcsx0kb51txhoe5zkpxvgvg9j70w8jsrvrxzknhhxhx3s70rrjsvu77txye70jstxk87ljtn3s1j3u1bbpb9wvvulr3k6lzc08cpo7474dj94ufs1j3lxbbnjervvtc2dk6dlc08cpo7474dj94ufjtbobwn3s15ij35is1j3lxbbnjervvtc2dk6dlc08cpo7474dj94ufjtbobwzx94nln3s15ij35iwy8c9uw6w66tk3qxqx91ikkbdr4y9f05edkl66gq66m3g11h1hqxqxvlikx3k64yd8bbedwb66gq66m3g11h1hk3qxigqxugqxziqxcmqxqxvlikx3k64yd8bbedwb66gq66m3g11h1hk3qxigqxugacviptptqxziqxcmrcgqrccrmn7etltl053k0ekedbss0nqgnnwkyd3816hhhhtltl053k0eihdbzto1dynnwkyd3816hhhhmntljytljy7e5c5ctltl053k0eihdbzto1dynnwkyd3816hhhhmntljytljypzqt0h0h7e5c5cs8wk5eiz93hmp5sik7j16l1taucu64qb123f9yju159amtmtkbzybrn5n5k7j1gy1twfm464itec3fl4ju159amtmtkbzybrn5n5p5507esilg7ik7j1gy1twfm464itec3fl4ju159amtmtkbzybrn5n5p5507esc15t89z9zsilg7ilpzyv1l1l1uastjfobdynecm87brk1y0tbj13y3y0vlx0vdyne4387ts96hheklq3y3y0vlx0vobw5opkk6odyne4387ts96hheklq3y3y0vlx0vobw5opgslxgskk6oatat5df4qw3qm92323l6i4smop1qc0vqeysozf32xae9ccl8x4l82323sqi4wera1qo3wtey4tzf32xae9ccl8x4l8qwgbgb3qfzfzm923zp236l2323sqi4wera1qo3wtey4tzf32xae9ccl8x4l8qwgbgbbix4bi3qfzfzgz32aqxsy1m923zp236l11x43fr035tjvbm1k2xd43rj9w207djzptjzjad4b0b0vbm10gxdlxvy9zi7swjzptjzjad4b0b0tj7mc4vbm10gxdlxvy9zi7swjzptjzjad4b0b0tj7mc4osptosqwwpztyeyejlgknqbn8pbmoe6sq05hvtgxgxchchyeyejlgknqjr8p2mg96se15hvtgxgxchch5g50ztw96eyeyejlgknqjr8p2mg96se15hvtgxgxchch5g50d7e3ururztw96e5q5qvp7w9l8ivin9e1emwjdtag4dsxkudfrxz0g210r4r48ivikfe1bw1xdthqh3zdkudfrxz0g210r4r47wcz2x9l8iogviog8ivikfe1bw1xdthqh3zdkudfrxz0g210r4r47wcz2x0jdf5m9l8iogviogyqg2c6oeoeap40qyp4ms6gxbh7cwun5ihpgcdl75lfln5a5afx3zfxms6gjsh71podtoqhgc2975lfln5a5afx3zfxqypn49p4msjy6gzams6gjsh71podtoqhgc2975lfln5a5afx3zfxqypn49aalfn0hhhhp4msjy6gzaz93zz9360m360m360mk9jco52ahic0yje270shagfe4uzemy6kdnisy66ifq7171hic01ie2d729agrihhzen36kdnisy66ifq7171o5clpj2apwdmhic01ie2d729agrihhzen36kdnisy66ifq7171o5clpjqt6i414m4m2apwdma36itic2rjochf5xjdtwtw6rf7uou73m5jdeoklo7bxx0zroroa90a6dx2x2twtwsjf7kcc83mrqilokd77bxx0zroroa90a6dx2x2twp6twhbjdtwaqtwaqtwtwsjf7kcc83mrqilokd77bxx0zroroa90a6dx2x2twp6twhbhdxx5dlalajdtwaqtwaq5l0ajl4y4ysp8qvc5q0dt7n3fo8qhwb4r9xgg7wstou26hjfmu2lit0dt7q0folr8hb4v2wx04wstou26hjfmu2lit5qack80dt7q0folr8hb4v2wx04wstou26hjfmu2lit5qack84qtof0fbn5uoi24ye0q8uc424cequmh8318ta1el5lihgq4i2e26vki24yywq8tuu34cutrwh8wv8ta1el5lihgq4i2e26vki25g4yj6i24yywq8tuu34cutrwh8wv8ta1el5lihgq4i2e26vki25g4yj66p4iq3htthoxxcun9tfdqnz7wtp789c43ssbxwtx1l5hwrtdb8t3lsun9t54qnvg9lp7rh5nlfsbxwtx1l5hwrtdb8t3lsunve9tyoun9t54qnvg9lp7rh5nlfsbxwtx1l5hwrtdb8t3lsunve9tyoflxw2frmuu1re3hqaq6o6o1fybs47r8ect3od6ds7536sx4j4jtlmv9x6o6onkybq1l98e9d9md6g67536sx4j4jtlmv9xaqkiki6o6onkybq1l98e9d9md6g67536sx4j4jtlmv9xaqkikizcmvp0jac5hb0vce5yqxaam239xyxvwiwdasxeinkvgeobw3w3ce5y421vft3949guepwdasxeinkvgeobw3w30vcetd5ynzce5y421vft3949guepwdasxeinkvgeobw3w30vcetd5ynznlgewhzrzrh2zj6hzvn7k3t3vnqb0im5efp6z0hblbbjy052injxadvmvmzvn7jmt3v0pq0idipgp6prhblbbjy052injxadvmvm6hzviun74ezvn7jmt3v0pq0idipgp6prhblbbjy052injxadvmvm6hzviun74elllbslf2x8sp3dsp3dsp3dw08vzdo22nhagmetarkhlb80r25d249c25k625llka9f6h6hhagm7harhxak80dzlp24a425k625llka9f6h6ho2ha2ogmd22nhazsgms8hagm7harhxak80dzlp24a425k625llka9f6h6ho2ha2ogmd2ock6oc2nhazsgms8wjkallriribx1orara8ydm2g0e92p8255jgexxgeintrgasqraravddmw9y6vmvi25irgexxgeintrgasqracurag6raj0ra04rarararavddmw9y6vmvi25irgexxgeintrgasqracurag69qxx9qraj0ra04jjtrwqrerarawp1qvlce5yeiswkt1rpkyqchr496ndggqnqnofwzofce5yh1s3p81rcftlchrl96ndggqnqnofwzofvlces85ykeceef5yjfce5yh1s3p81rcftlchrl96ndggqnqnofwzofvlces85ykew3nd2zr7r7ceef5yjfurwzur11pederrt8t83gvk4ro2v5yua6nrp8q3476x4v4vh3ka6ct8t8ihvkmcu0v5j4esnrheq3476x4v4vh3ka6cdet8lrt8ntrrbibit8t8ihvkmcu0v5j4esnrheq3476x4v4vh3ka6cdet8lrt8nthkkakprrbibiii47oktvtva79ulaooqazrwx28udt2j5gmqyph832h83lkvdp4p2p2ooqal7wxw01wt2xqqcqyjv832h83lkvdp4p2p2laoohuqaviooqal7wxw01wt2xqqcqyjv832h83lkvdp4p2p2laoohuqavik92hk9lzqo3h3hydnr0oe9wnsqxznojcf8paxhxhdkd5dk3h3hvtnrl0d1wnsou6nojff8paxhxhdkd5dko4wy19jq3h3hvtnrl0d1wnsou6nojff8paxhxhdkd5dko4wy24d52419jq6nup4u4uxw8x7bayayq94a2p2r5lhq5xct3ef38p5jtez74mz7ayayi2mngb2rr3ym5x753ef38p5jtez74mz77baybyaydwayiaay2wayayi2mngb2rr3ym5x753ef38p5jtez74mz77baybyaydwg5f3q6no7xayiaay2w4m87qbljctupyhgyafe9u2t624beqogl1o9z9zcaey702m2mctup1wgyakhzu2holksyqogl1o9z9zcaey702m2mljebidctup1wgyakhzu2holksyqogl1o9z9zcaey702m2mljebidaweykywrwrbyyql3zes5a69mmcc8iw65nc53ar0w4l0zxi0z50erqgnvnv9mmc9iiwexk32y0f0w7x0zxi0z50erqgnvnvze9mv2mcgts59mbtmcp2a69mt4mcsg9mmc9iiwexk32y0f0w7x0zxi0z50erqgnvnvze9mv2mcgtnwerps7979s59mbtmcp2wkxiwka69mt4mcsgekximut1drnoafxq3h3hfeiyj53arvq5esa4esz9esdhuflneses3h3h5oiy7j8brvba5nuhesz9esdhuflnesesaf3hf03harxq3h023hul3h3h5oiy7j8brvba5nuhesz9esdhuflnesesaf3hf03harukufv2qbqbxq3h023hultfz9tfw4wpzxry8i50ce5ykvah3e5vtv4ltnn2m7fnsrj2j2lq1bce5yowahavvsy4pftn7km7fnsrj2j2lq1bryces85yke8iceef5yjf50ce7s5ymmce5yowahavvsy4pftn7km7fnsrj2j2lq1bryces85ykeilfnqxj6j68iceef5yjf0tp150ce7s5ymmuwfnq8xa1i6slzzhpp3h3hr354beziaugiehgdjsw65g5g2jsd2j3h3hqz54m235auy9g8zwjsw65g5g2jsd2jpp19jq3h3hqz54m235auy9g8zwjsw65g5g2jsd2jpp19jqx351ndndwmxccv3ra1xcy8q0hamkbfvxc6asob5zpq8vz78vfyrolflfy8q0remkhnb7c672ea5zzx8vz78vfyrolflf3rwxyxa1y8ecq0ecxcy82nq0hmy8q0remkhnb7c672ea5zzx8vz78vfyrolflf3rwxyx4yz74ya1y8ecq0ecibj1titixcy82nq0hmnlal20q6e587f0ebbmctupj171by64ifmoa2kgmwfyoefzfzhrigxxw3w3ctupz77130y3ifaf8ge4mwfyoefzfzhrigxxw3w3ebcth4uph4bmebidmdfygn1i1ictupz77130y3ifaf8ge4mwfyoefzfzhrigxxw3w3ebcth4uph4y1ig3vr1r1bmebido5fy2braraocnp37wrqxqxz4roe3pk2caopuopp6tle1tletggyt4k4kqxqxierol9g82ce4rdoptztle1tletggyt4k4k37qxziqxcmwrqxigqxugqxqxierol9g82ce4rdoptztle1tletggyt4k4k37qxziqxcmbye1bywrqxigqxug2lgg3ty4y48742lw4x1tpwd2oz2s6mqboojh0jy78ryb4ar2u9lplw5wq74x1tlqd2bh526mu5rbjhi2y78ryb4ar2u9lplw5wq7424xtj1tdflw4xym1t8k4x1tlqd2bh526mu5rbjhi2y78ryb4ar2u9lplw5wq7424xtj1tdf1b8rzj92wqlw4xym1t8kmylpuj9o5ze3tmyyj5lqlqun3aqahev7ctkikdiwzwmzzwx1khkvxsxslqlqek3a0791v7ws34kdhazwmzzwx1khkvxsxsyylqpelqm4j5lq7wlqrglqlqek3a0791v7ws34kdhazwmzzwx1khkvxsxsyylqpelqm475khkjbbbbj5lq7wlqrgunmzuna0drjh063fl56r248d54vrtplz8qpi51jimrvf0z4mcffgfg3fl56z24yvdgvrghapowpi51jimrvf0z4mcffgfgjh69ub063fuhl5233fl56z24yvdgvrghapowpi51jimrvf0z4mcffgfgjh69ublu4m3m8g8g063fuhl523t3512xukjmaohl3iaaye8wc8xym1i044s1g74uyzzxzvae3p3ffiv3aaye7bc84fy6i083ahg7f4yzzxzvae3p3ffiv3aas8yekm3iaap1yeiraaye7bc84fy6i083ahg7f4yzzxzvae3p3ffiv3aas8yekmas3pdxyg493iaap1yeir92zxagc5f36c8kce5yunemdpo6f73vi9rl5dsock50l2l2m1sk2s6dmuce5yguemse3sf79bhgrl4msock50l2l2m1sk2s6dmu6ccede5yjf8kceux5yh6ce5yguemse3sf79bhgrl4msock50l2l2m1sk2s6dmu6ccede5yjfa1ck5ylfoc8kceux5yh6rbskkk94e7g2haqj6byq34kehhp3ts0ixdevxjd9masxmaudvhh0h0yq340ehhif1m0ie7s3xjttmasxmaudvhh0h0yqcu34cu6b5a10yq340ehhif1m0ie7s3xjttmasxmaudvhh0h0yqcu34cu3psx3p6b5a10fouwawaw8bi2dhuseqmqw1z8ae4fti04w3a6wllpp52u6q2424eqmq8kz8np7nti24a0p5wllpp52u6q2424dheqnjmqiiuseqedmq6xeqmq8kz8np7nti24a0p5wllpp52u6q2424dheqnjmqiiyulpp2useqedmq6x8icey8y8b4sn8prjo27ghiwga7t7uvrg9de0acirtpamtpj41e8a3l3l7ghigza7d6smrgz22baczitpamtpj41e8a3l3lrj7grshilgo20gem7ghigza7d6smrgz22baczitpamtpj41e8a3l3lrj7grshilg3wam3wo20gem6gam6g1bwp72fyo1ce5ynsxz6l7g0n5jjr4gqvk7d386rgzq72tasqsqce5y13xzqwsco3ocjryhqvk7d386rgzq72tasqsqfyce2n5yhmo1ceef5yjfce5y13xzqwsco3ocjryhqvk7d386rgzq72tasqsqfyce2n5yhmkuk7dwbfr3o1ceef5yjfthk781512tqmb707937vrhrr05jxoq9y510yn8m23ll861e2rs22f7f77vrhn127k2oq5n95van8m23ll861e2rs22f7f7937v67rhrp7vrh7vrhn127k2oq5n95van8m23ll861e2rs22f7f7937v67rhrpllm2jgktqs7vrhrs6x85by7rf7wr2b25u7kjv4jxpdffpmvdvmaaaaj60rcs0e0e7rf7fi2ba243kj3oh6pdl2pmvdvmaaaaj60rcs0e0ebynmv27rf7fi2ba243kj3oh6pdl2pmvdvmaaaaj60rcs0e0ebynmv2eivdu28u8utha7c4qhsjooqaioijeba4buesifaqif831e83t7f32uvmooqabmij6d5dbu2y1oaqgg831e83t7f32uvmqhoo7rqathsjoovjqavjooqabmij6d5dbu2y1oaqgg831e83t7f32uvmqhoo7rqathyx1eyxsjoovjqavjf41ef4bkk915ouhic09wsxxju93oaeoxe1og5v9uvyia3333hic0l4n5cgu9xlg9oxp6og5v9uvyia3333oupwdmhic0l4n5cgu9xlg9oxp6og5v9uvyia3333oupwdmehvybtxuxucmb7kq8odocwrtkfs7td0rt20exnq618zhbot5o6tb8odo7qrtydaitdq0210e7yq618zhbot5o6tbkq8owrdowr8odo7qrtydaitdq0210e7yq618zhbot5o6tbkq8owrdowrd118a68pegy5ollqlq3aw64ukmwv4pihwrhrzwzwtfy5t75plqlqf4w6bg0twvzcvnwrl1zwzwtfy5t75pollqpelqm4lqlqf4w6bg0twvzcvnwrl1zwzwtfy5t75pollqpelqm4rerexcy8q0twvdy8q0wmofy8ecq0ecy8q0wmofy8ecq0ec8auajguajgsrxpuajgsrxpebq48uq48uq4jy8uzaq48uq4jy8uzahftwtwj6twtwj6twtwtwtwj6twtwj63zj5fz7dfz7dfz7d3l0g0g0g0g0gdy0gss0g0g0gdy0gsssn7ghi7ghi7grshilg7ghi7grshilgj5fz7dfz7dfz7d"
       },
       "tokens": {
         "token_10002_kalts_mon3tr": {
@@ -35708,6 +35842,18 @@
                   }
                 ]
               },
+              "uniequip_004_mlyss": {
+                "trait": {
+                  "descRaw": "初始攻擊造成<@ba.kw>法術傷害</>，只能部署在召喚者攻擊範圍內",
+                  "desc": "初始攻擊造成法術傷害，只能部署在召喚者攻擊範圍內"
+                },
+                "talents": [
+                  {
+                    "descRaw": "技能開啟時複製目標100%的生命值、攻擊力、防禦力、法抗，以及阻擋數、攻擊間隔、攻擊範圍、初始傷害類型（不攻擊、治療類型則不繼承）",
+                    "desc": "技能開啟時複製目標100%的生命值、攻擊力、防禦力、法抗，以及阻擋數、攻擊間隔、攻擊範圍、初始傷害類型（不攻擊、治療類型則不繼承）"
+                  }
+                ]
+              },
               "none": {
                 "trait": {
                   "descRaw": "初始攻擊造成<@ba.kw>法術傷害</>，只能部署在召喚者攻擊範圍內",
@@ -35723,7 +35869,7 @@
             }
           }
         },
-        "_h": "ve6ave6awuwtvavawuwtwuwtve6awuwt4i4iwuwtwuwtve6avavave6avava"
+        "_h": "ve6ave6awuwtvavawuwtwuwtve6awuwt4i4iwuwtwuwtve6avavave6a4i4ive6avava"
       },
       "token_10031_swire2_gdtrap": {
         "name": "香檳炸彈",
@@ -36047,10 +36193,25 @@
                   "desc": "“變革已至”技能期間首個幹員部署時，“風雪之眼”會部署至該幹員所在位置，並與凜御銀灰同時進行範圍直線攻擊。技能期間可以再次部署“風雪之眼”改變位置，且返還部署費用"
                 }
               }
+            },
+            "byModule": {
+              "uniequip_002_svash2": {
+                "trait": {
+                  "descRaw": "凜御銀灰在場時添加至待部署區。部署費用隨凜御銀灰的技能而變化",
+                  "desc": "凜御銀灰在場時添加至待部署區。部署費用隨凜御銀灰的技能而變化"
+                },
+                "talents": [
+                  {
+                    "descRaw": "使左側的幹員初始技力增加，再部署時間減少",
+                    "name": "開放性開局",
+                    "desc": "使左側的幹員初始技力增加，再部署時間減少"
+                  }
+                ]
+              }
             }
           }
         },
-        "_h": "b1eeb1b1b15ool5ool5olfjlr7b1b15ool5ool5olfjlr7"
+        "_h": "b1eeb1b1b15ool5ool5olfjlr7b1b15ool5ool5olfjlr7b1b1ol5ool"
       },
       "token_10057_svash2_eagle2": {
         "descRaw": "凜御銀灰在場時添加至待部署區。部署費用隨凜御銀灰的技能而變化",
@@ -36115,10 +36276,25 @@
                   "desc": "“變革已至”技能期間首個幹員部署時，“風雪之眼”會部署至該幹員所在位置，並與凜御銀灰同時進行範圍直線攻擊。技能期間可以再次部署“風雪之眼”改變位置，且返還部署費用"
                 }
               }
+            },
+            "byModule": {
+              "uniequip_002_svash2": {
+                "trait": {
+                  "descRaw": "凜御銀灰在場時添加至待部署區。部署費用隨凜御銀灰的技能而變化",
+                  "desc": "凜御銀灰在場時添加至待部署區。部署費用隨凜御銀灰的技能而變化"
+                },
+                "talents": [
+                  {
+                    "descRaw": "使左側的幹員初始技力增加，再部署時間減少",
+                    "name": "開放性開局",
+                    "desc": "使左側的幹員初始技力增加，再部署時間減少"
+                  }
+                ]
+              }
             }
           }
         },
-        "_h": "b1eeb1b1b15ool5ool5olfjlr7b1b15ool5ool5olfjlr7"
+        "_h": "b1eeb1b1b15ool5ool5olfjlr7b1b15ool5ool5olfjlr7b1b1ol5ool"
       },
       "token_10057_svash2_eagle3": {
         "descRaw": "凜御銀灰在場時添加至待部署區。部署費用隨凜御銀灰的技能而變化",
@@ -36183,10 +36359,25 @@
                   "desc": "“變革已至”技能期間首個幹員部署時，“風雪之眼”會部署至該幹員所在位置，並與凜御銀灰同時進行範圍直線攻擊。技能期間可以再次部署“風雪之眼”改變位置，且返還部署費用"
                 }
               }
+            },
+            "byModule": {
+              "uniequip_002_svash2": {
+                "trait": {
+                  "descRaw": "凜御銀灰在場時添加至待部署區。部署費用隨凜御銀灰的技能而變化",
+                  "desc": "凜御銀灰在場時添加至待部署區。部署費用隨凜御銀灰的技能而變化"
+                },
+                "talents": [
+                  {
+                    "descRaw": "使左側的幹員初始技力增加，再部署時間減少",
+                    "name": "開放性開局",
+                    "desc": "使左側的幹員初始技力增加，再部署時間減少"
+                  }
+                ]
+              }
             }
           }
         },
-        "_h": "b1eeb1b1b15ool5ool5olfjlr7b1b15ool5ool5olfjlr7"
+        "_h": "b1eeb1b1b15ool5ool5olfjlr7b1b15ool5ool5olfjlr7b1b1ol5ool"
       },
       "token_10058_sbell2_icetgt": {
         "descRaw": "能夠阻擋三個敵人",
@@ -48801,6 +48992,12 @@
           "text": "{0}博士贈送了{1}給你"
         },
         "_h": "6y3v19rg90zpear9ear9ear9lz8ulz8ulz8ulz8ulz8uvbvbt8x3n0yd"
+      },
+      "rewards": {
+        "daily": {
+          "name": "每日防衛目標"
+        },
+        "_h": "bh"
       }
     },
     "emotes": {

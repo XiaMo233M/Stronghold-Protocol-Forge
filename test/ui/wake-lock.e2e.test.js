@@ -1,6 +1,7 @@
 // Real App integration (not the GameScreen-only mock mount). Only the Wake Lock API is stubbed;
 // phase snapshots come from the existing mock server, and fullscreen uses Chrome's native API.
 // SP_E2E=1 CHROME_PATH=… node --test test/ui/wake-lock.e2e.test.js
+import { seedReleaseRead } from '../helpers/releaseNotes.js';
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -29,6 +30,7 @@ describe('App screen wake lock', { skip: !ENABLED && 'set SP_E2E=1 (and have Chr
     browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ['--no-sandbox', '--force-device-scale-factor=1'] });
     const page = await browser.newPage();
     try {
+      await seedReleaseRead(page);
       await page.goto(`${base}/dev/game-mock.html?shot=1&render=fallback&phase=PREP`, { waitUntil: 'networkidle0' });
       await page.waitForFunction(() => !!globalThis.__MOCK__);
       fixtures = await page.evaluate(() => {
@@ -64,6 +66,7 @@ describe('App screen wake lock', { skip: !ENABLED && 'set SP_E2E=1 (and have Chr
         return { async release() { calls.releases++; } };
       } } });
     }, preference);
+    await seedReleaseRead(page);
     await page.goto(`${base}/?render=fallback`, { waitUntil: 'networkidle0', timeout: 60000 });
     await page.waitForFunction(() => !!globalThis.__SP__ && !!document.querySelector('.title-screen'));
     await page.evaluate(async () => {
@@ -122,7 +125,12 @@ describe('App screen wake lock', { skip: !ENABLED && 'set SP_E2E=1 (and have Chr
     await page.waitForSelector(`.fsbtn[aria-pressed="${on}"]`);
   }
   async function explanation(page, lang, ios = false) {
-    await page.select('.modal [data-testid="lang-toggle"] select', lang);
+    const radio = await page.$(`.modal [data-testid="lang-toggle"] button[data-lang="${lang}"]`);
+    if (radio) await radio.click();
+    else {
+      await page.click('.modal [data-testid="lang-toggle"] [role="combobox"]');
+      await page.click(`.modal [data-testid="lang-toggle"] [role="option"][data-lang="${lang}"]`);
+    }
     const pack = lang === 'zh' ? null : JSON.parse(readFileSync(path.join(ROOT, `public/i18n/${lang}.json`), 'utf8'));
     const tr = (key) => pack?.[key] || key;
     const hint = tr(ios ? IOS_HINT : HINT).replace('{support}', tr(SUPPORT));
