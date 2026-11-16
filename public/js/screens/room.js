@@ -951,7 +951,6 @@ export function RoomScreen() {
   const showVersion = Array.isArray(versions) || curVersion !== DEFAULT_VERSION;
   const versionWhy = !online ? t('连接中断，请稍候重试')
     : vote ? t('切换版本投票进行中，请等投票结束')
-    : facts.modded ? t('请先关闭改变玩法的插件')
     : !Array.isArray(versions) || versions.length < 2 ? t('本服务器只启用了这一个版本') : null;
   const versionEditable = facts.isHost && !facts.spectating && !room.inMatch;
   // the room's version is not this browser's lobby choice: the banner says leaving restores it (on a short screen, where

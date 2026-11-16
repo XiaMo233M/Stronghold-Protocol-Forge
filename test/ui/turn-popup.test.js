@@ -61,16 +61,16 @@ test('game screen owns one live multiplayer cue; the choice overlay retains its 
   // in and motion is allowed — when no phase banner / plate is up, or at the latest TURN_CUE_PLATE_WAIT_MS after the round
   // plate and TURN_CUE_WAIT_MS after the banner it held back: the wait is keyed on the overlay on screen (the plate, then
   // the banner, each restarts it), never timed from the turn alone (§37.18's leftover, the ROUND_START → SP_DRAFT race)
-  assert.match(g, /useEffect\(\(\) => \{ if \(spMine\) setTurnDue\(\(n\) => n \+ 1\); else setTurnDue\(0\); \}, \[spMine\]\);/);
+  assert.match(g, /const spMine = !!sp && \(solo \|\| sp\.turnPid === myId\) && !sp\.pickOf\.has\(myId\);/);
   assert.match(g, /const overlayKey = hasOffers \? '' : roundPop \? `r:\$\{roundPop\.key\}` : banner \? `b:\$\{banner\.key\}` : '';/);
   assert.doesNotMatch(g, /phaseOverlay/, 'no on / off flag: a plate giving way to a banner restarts the wait');
-  assert.match(g, /const play = \(\) => \{\n\s+setTurnDue\(0\);\n\s+audio\.sfx\('yourTurn'\);\n\s+if \(turnPopupArtReady\(\) && !reducedMotion\(\)\) setTurnPop\(\(n\) => n \+ 1\);\n\s+\};/);
-  assert.match(g, /if \(!overlayKey\) \{ play\(\); return undefined; \}\n\s+const id = setTimeout\(play, overlayKey\.startsWith\('r:'\) \? TURN_CUE_PLATE_WAIT_MS : TURN_CUE_WAIT_MS\);\n\s+return \(\) => clearTimeout\(id\);\n\s+\}, \[turnDue, overlayKey\]\);/);
+  assert.match(g, /const play = \(\) => \{\n\s+if \(currentTurnCueRef\.current !== turnCue\.key \|\| startedTurnCueRef\.current === turnCue\.key\) return;/);
+  assert.match(g, /if \(!overlayKey\) \{ play\(\); return undefined; \}\n\s+const id = setTimeout\(play, overlayKey\.startsWith\('r:'\) \? TURN_CUE_PLATE_WAIT_MS : TURN_CUE_WAIT_MS\);\n\s+return \(\) => clearTimeout\(id\);\n\s+\}, \[turnCue\?\.key, overlayKey\]\);/);
   // the two overlays it waits for, as rendered: the plate holds the banner back (the banner mounts as the plate goes)
   assert.match(g, /\$\{roundPop && !hasOffers && [^\n]*<\$\{RoundPopup\} key=\$\{roundPop\.key\}/);
   assert.match(g, /\$\{!hasOffers && banner && !banner\.plate && !roundPop \? html`<\$\{PhaseBanner\} key=\$\{banner\.key\}/);
   assert.doesNotMatch(g, /if \(!spMine\) return;\n\s+audio\.sfx\('yourTurn'\)/, 'no cue at the moment the turn comes, under the banner');
-  assert.match(g, /<\$\{TurnPopup\} key=\$\{turnPop\} onDone=\$\{\(\) => setTurnPop\(0\)\} \/>/);
+  assert.match(g, /<\$\{TurnPopup\} key=\$\{turnVisual\.key\} onDone=\$\{\(\) => setTurnVisual/);
 });
 
 test('cue delays remain bounded behind active overlays, while generic reduced motion stays hidden', () => {

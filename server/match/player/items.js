@@ -244,7 +244,9 @@ export class PlayerItems {
     const g = this._gate(); if (g) return g;
     if (!unequipAllowed(this.m?.rules, this.m?.behaviour)) return fail(ERR.BAD_TARGET, 'equipped items are locked');
     const loc = this.find(itemUid);
-    if (!loc || loc.piece.kind !== 'item' || loc.area !== 'equipped') return fail(ERR.BAD_TARGET);
+    if (!loc || loc.piece.kind !== 'item') return fail(ERR.BAD_TARGET);
+    // 「不是已装备的」这一句在两条分支下都成立（手牌装备这条分支也一样）：先判，别让它在分支里丢掉细节
+    if (loc.area !== 'equipped') return fail(ERR.BAD_TARGET, 'not equipped on an operator');
     if (this.equipHand) {
       if (this.handSlot('item') < 0) return fail(ERR.HAND_FULL);
       this._detach(loc);
@@ -252,8 +254,6 @@ export class PlayerItems {
       this.recompute();
       return OK;
     }
-    if (!loc || loc.piece.kind !== 'item') return fail(ERR.BAD_TARGET);
-    if (loc.area !== 'equipped') return fail(ERR.BAD_TARGET, 'not equipped on an operator');
     // 归宿只有两种：手牌有空位就回手牌；否则进临时整备区。**两处都满就 HAND_FULL**（上游 0.3.1 的口径：
     // 临时整备区有 5 个显示格的上限，不是无界队列）。
     const handAt = freeSlot(this.hand);

@@ -7,13 +7,16 @@ export function releaseSections(markdown, version) {
   let fenced = false;
   for (const line of markdown.split(/\r?\n/)) {
     if (/^```/.test(line)) fenced = !fenced;
-    const heading = !fenced && line.match(/^## (\d+\.\d+\.\d+)(?:-dev)? — (.+)$/);
+    // 版本号两种都收：上游的 `x.y.z`，以及本仓库的「我们的版本-上游版本」（0.22.0-0.4.0）
+    const heading = !fenced && line.match(/^## (\d+\.\d+\.\d+(?:-\d+\.\d+\.\d+)?)(?:-dev)? — (.+)$/);
     if (heading) {
       current = { version: heading[1], title: line.slice(3), body: '' };
       sections.push(current);
     } else if (current) current.body += `${line}\n`;
   }
-  const index = sections.findIndex((s) => s.version === version.replace(/-dev$/, ''));
+  const running = version.replace(/-dev$/, '');
+  // 本仓库的 CHANGELOG 条目写「0.22.0-0.4.0」而 APP_VERSION 是 0.22.0：前缀算同一节
+  const index = sections.findIndex((s) => s.version === running || s.version.startsWith(`${running}-`));
   return index < 0 ? [] : sections.slice(index);
 }
 

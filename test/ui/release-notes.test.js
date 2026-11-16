@@ -10,7 +10,8 @@ test('release sections start at the running version, excluding future notes and 
   assert.deepEqual(sections.map((s) => s.version), ['0.3.3', '0.3.2']);
   assert.match(sections[0].body, /## 1.0.0/);
   assert.deepEqual(releaseSections(log, '9.0.0'), []);
-  assert.equal(releaseSections(readFileSync('CHANGELOG.md', 'utf8'), APP_VERSION)[0].version, APP_VERSION);
+  // 本仓库的条目写「我们的版本-上游版本」（0.22.0-0.4.0），APP_VERSION 是 0.22.0 ⇒ 前缀算同一节
+  assert.ok(releaseSections(readFileSync('CHANGELOG.md', 'utf8'), APP_VERSION)[0].version.startsWith(APP_VERSION));
 });
 
 test('release links reject active content and resolve repository docs', () => {
